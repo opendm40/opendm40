@@ -9,6 +9,7 @@ mod fonts;
 mod gen;
 mod gesture;
 mod msc;
+mod spiflash;
 mod hy3131;
 mod hy3131_tables;
 mod lcd;
@@ -129,10 +130,11 @@ fn main() -> ! {
         &mut *core::ptr::addr_of_mut!(EP_MEMORY)
     });
     // USBTMC (interface 0, SCPI incl. the DBG: debug commands) and USB mass
-    // storage (interface 1). Two IN endpoints + EP0 of the four of USBFS.
+    // storage (interface 1) on the SPI flash. Two IN endpoints + EP0 of the
+    // four of USBFS.
     let mut tmc = usbtmc::Usbtmc::new(&bus);
     let mut msc = msc::Msc::new(&bus, unsafe { &mut *core::ptr::addr_of_mut!(MSC_IO) });
-    let mut disk = msc::NoMedia;
+    let mut disk = spiflash::SpiFlash::new();
     let mut dev = UsbDeviceBuilder::new(&bus, USB_VID_PID)
         .strings(&[StringDescriptors::default()
             .manufacturer("dm40-fw")
@@ -186,7 +188,9 @@ fn main() -> ! {
             sec[k] = sec[k].max(t.wrapping_sub(*ts) / 200);
             *ts = t;
         };
-        if feeding && now < deadline {
+        let fed = feeding && now < deadline;
+        wdt::set_feeding(fed);
+        if fed {
             wdt::kick();
         }
         if reset_at.map(|t| now >= t).unwrap_or(false) {
@@ -309,6 +313,20 @@ fn main() -> ! {
                         let n = d.len();
                         scpi.put_bytes(&[b'0' + (n / 100) as u8, b'0' + (n / 10 % 10) as u8, b'0' + (n % 10) as u8]);
                         scpi.put_bytes(&d);
+                        true
+                    }
+                    scpi::Dbg::Flash => {
+                        scpi.len = 0;
+                        let mut t = [0u8; 16];
+                        for i in 0..6 {
+                            t[i] = b"0123456789ABCDEF"[(disk.id >> (20 - 4 * i) & 0xF) as usize];
+                        }
+                        scpi.put_bytes(&t[..6]);
+                        for v in [msc::BlockDevice::block_count(&disk), disk.failed() as u32] {
+                            scpi.put_bytes(b",");
+                            let s = dmm::format(&mut t, v as f32, 0);
+                            scpi.put_bytes(s.as_bytes());
+                        }
                         true
                     }
                     scpi::Dbg::Release => {
