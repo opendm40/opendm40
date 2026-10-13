@@ -698,6 +698,40 @@ fn main() {
         }
         ck.check(&format!("genbar/{on}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 36))]);
     }
+    // 6a. Full generator page (FR-28 / UF-14 / UF-15): four value boxes with
+    //     the actual frequency in full digits, the clamp note, "auto"
+    //     offset, the PWM path's "logic level", duty; the frequency keypad
+    //     typing into box 0. TEXT22 box names: glyph rule off (stock font).
+    let gen_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 36))];
+    let gcases: [(gen::Wave, u32, f32, Option<f32>, u16, bool); 9] = [
+        (gen::Wave::Square, 2_000_000, 3.0, None, 5000, true),
+        (gen::Wave::Square, 10_000_000, 3.0, Some(1.5), 3333, false),
+        (gen::Wave::Sine, 75_000, 2.5, Some(1.5), 5000, true),
+        (gen::Wave::Sine, 32_768, 3.0, None, 5000, false),
+        (gen::Wave::Triangle, 999, 0.0, Some(3.0), 5000, true),
+        (gen::Wave::Square, 1_000, 1.25, None, 3333, true),
+        (gen::Wave::Ramp, 10_000_000, 3.0, Some(0.0), 0, false),
+        (gen::Wave::Square, 50_001, 3.0, Some(2.25), 10000, true),
+        (gen::Wave::Sine, 1, 0.5, None, 5000, true),
+    ];
+    for (k, (wave, f, amp, offs, duty, on)) in gcases.iter().enumerate() {
+        let g = gen::Settings { on: *on, wave: *wave, freq_hz: *f, amp_v: *amp, duty: *duty, offset_v: *offs };
+        w.gen.apply(g);
+        host::reset(0);
+        ui::gen_static(&w.gen);
+        ck.check_opts(&format!("gen/{k}/{}/{f}", wave.name()), &gen_regions, false);
+        if k == 2 {
+            save(&out, "g02-gen-clamped");
+        }
+        // The frequency keypad types into box 0 (7 digits); the keys
+        // themselves are the stock keypad geometry (not checked here: its
+        // 40 px keys sit 1 px apart and 3 px from the screen edge).
+        if k == 0 {
+            ui::keypad_input(true, "1234567", "KHz");
+            ck.check_opts("gen/keypad-freq-input", &gen_regions, false);
+        }
+    }
+    w.gen.apply(gen::Settings::DEFAULT);
     for title in ["Hold & Limits: Temperature", "Settings", "Hold & Limits: Capacitance"] {
         host::reset(0);
         ui::list_page(title, &ui::LIMIT_ROWS, &["ON"; 8]);

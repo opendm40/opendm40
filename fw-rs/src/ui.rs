@@ -1452,13 +1452,7 @@ impl ScopeView {
         let mut b = [0u8; 24];
         let mut t = [0u8; 24];
         let txt = if g.s.on {
-            let hz = g.out_hz();
-            let k = if hz == 0 {
-                b[..2].copy_from_slice(b"--");
-                2
-            } else {
-                eng(&mut b, hz as f32, "Hz")
-            };
+            let k = eng(&mut b, g.actual_hz(), "Hz");
             join(&mut t, &["G ", core::str::from_utf8(&b[..k]).unwrap_or("")])
         } else {
             ""
@@ -1824,13 +1818,45 @@ const G_BAR: Color = 0x2146;
 const G_BOX: Color = 0x3A08;
 const G_TRACE: Color = 0x04A9;
 
+const G_DIM: Color = 0x7BEF;
+/// Generator value boxes (right column x 246..475, 66 px each): Frequency,
+/// Vpp, Offset (FR-28), Duty. A tap opens the box's keypad (`gen_box_hit`).
+/// Each box: the name (TEXT22) and a note (F14, right) on the top row, the
+/// value (LETTERS, right-aligned to 411) and its unit (from 421) below.
+pub const GEN_BOX_Y: [i16; 4] = [40, 110, 180, 250];
+const GEN_BOX_H: i16 = 66;
+const GEN_NAMES: [&str; 4] = ["Frequency", "Vpp", "Offset", "Duty"];
+
+/// Generator box (0..3) under a tap.
+pub fn gen_box_hit(x: u16, y: u16) -> Option<usize> {
+    let y = y as i16;
+    if x < 246 {
+        return None;
+    }
+    GEN_BOX_Y.iter().position(|&b| y >= b && y < b + GEN_BOX_H)
+}
+
+/// Value / unit row of generator box `k` (the frequency keypad types into
+/// box 0's). `letters`: the value in LETTERS (digits), else TEXT22 ("auto").
+fn gen_box_value(k: usize, v: &str, letters: bool, unit: &str, fg: Color) {
+    let y = GEN_BOX_Y[k];
+    sf::label(if letters { sf::LETTERS } else { sf::TEXT22 }, rect(262, y + 33, 150, 30), v, fg, G_BOX, 4, 0);
+    sf::label(sf::TEXT22, rect(421, y + 36, 50, 26), unit, fg, G_BOX, 1, 0);
+}
+
+/// Note at the right of box `k`'s name row ("" clears it).
+fn gen_box_note(k: usize, note: &str, fg: Color) {
+    sf::label(sf::F14, rect(360, GEN_BOX_Y[k] + 3, 112, 26), note, fg, G_BOX, 4, 1);
+}
+
 pub fn gen_static(g: &gen::Gen) {
     lcd::fill_rect(0, 0, lcd::W, 36, G_BAR);
     lcd::fill_rect(0, 36, lcd::W, lcd::H - 36, G_BG);
     sf::logo(4, 8, G_BAR);
-    for (y, name) in [(40i16, "Frequency"), (133, "Vpp"), (226, "Duty")] {
-        sf::rbox(rect(246, y, 230, 90), 3, G_BOX, G_BG);
-        sf::glyphs(sf::TEXT22, rect(257, y + if y == 226 { 0 } else { 8 }, 140, 26), name, STATUS_FG, G_BOX, 1, 0);
+    for (k, name) in GEN_NAMES.iter().enumerate() {
+        let y = GEN_BOX_Y[k];
+        sf::rbox(rect(246, y, 230, GEN_BOX_H), 3, G_BOX, G_BG);
+        sf::glyphs(sf::TEXT22, rect(257, y + 2, 100, 26), name, STATUS_FG, G_BOX, 1, 0);
     }
     gen_values(g);
 }
@@ -1890,6 +1916,7 @@ fn libsin(x: f32) -> f32 {
 
 pub fn gen_values(g: &gen::Gen) {
     let s = &g.s;
+    let out = &g.out;
     // Top bar: RUN/STOP (output state).
     sf::label(sf::F21, rect(BAR_X, 0, 80, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 8, 0);
     // Wave drop-down.
@@ -1897,27 +1924,34 @@ pub fn gen_values(g: &gen::Gen) {
     sf::glyphs(sf::TEXT22, rect(14, 40, 180, 42), s.wave.name(), STATUS_FG, G_BOX, 1, 0);
     sf::glyphs(sf::Font(0x0805_9428), rect(197, 40, 42, 42), " ", STATUS_FG, G_BOX, 8, 0);
     gen_preview(s.wave);
-    // Values. The frequency shown is the one output; when this wave is silent
-    // at the set frequency (non-square above 50 kHz) the set value is shown
-    // greyed, as it is kept for a wave that can play it.
-    let out = g.out_hz();
-    let f = if out == 0 { s.freq_hz } else { out } as f32;
-    let ffg = if out == 0 { 0x7BEF } else { STATUS_FG };
-    let (fv, fu) = if f >= 1e6 { (f / 1e6, "MHz") } else if f >= 1e3 { (f / 1e3, "KHz") } else { (f, "Hz") };
     let mut t = [0u8; 16];
-    let fs = crate::dmm::format(&mut t, fv, if fv >= 100.0 { 0 } else if fv >= 10.0 { 1 } else { 2 });
-    sf::label(sf::LETTERS, rect(262, 83, 150, 30), fs, ffg, G_BOX, 4, 0);
-    sf::label(sf::TEXT22, rect(421, 90, 50, 26), fu, ffg, G_BOX, 1, 0);
-    let mut t = [0u8; 16];
-    let a = crate::dmm::format(&mut t, s.amp_v, 1);
-    sf::label(sf::LETTERS, rect(262, 173, 150, 30), a, STATUS_FG, G_BOX, 4, 0);
-    sf::label(sf::TEXT22, rect(421, 176, 50, 26), "V", STATUS_FG, G_BOX, 1, 0);
-    let mut t = [0u8; 16];
-    let d = crate::dmm::format(&mut t, s.duty as f32 / 100.0, 1);
-    let duty_ok = s.wave == gen::Wave::Square && out <= 50_000;
-    let fg = if duty_ok { STATUS_FG } else { 0x7BEF };
-    sf::label(sf::LETTERS, rect(262, 266, 150, 30), d, fg, G_BOX, 4, 0);
-    sf::label(sf::TEXT22, rect(421, 269, 50, 26), "%", fg, G_BOX, 1, 0);
+    // Frequency: the actual (quantised) output in full digits, "32768.08",
+    // 3 decimals below 1 kHz (UF-15). Above the wave's limit (UF-14): the
+    // set value grey and the limit ("max 50 kHz") as the note.
+    let clamped = g.freq_clamped();
+    let f = if clamped { s.freq_hz as f32 } else { g.actual_hz_f64() as f32 };
+    let dec = if f < 1e3 { 3 } else if f < 1e5 { 2 } else if f < 1e6 { 1 } else { 0 };
+    gen_box_value(0, crate::dmm::format(&mut t, f, dec), true, "Hz", if clamped { G_DIM } else { STATUS_FG });
+    let note = s.wave.max_note();
+    gen_box_note(0, if clamped { note.split(": ").nth(1).unwrap_or(note) } else { "" }, VALUE);
+    // Vpp / Offset: the set values; "auto" = the stock 0..Vpp (centre
+    // Vpp/2). On the PWM path (square above 50 kHz) both are fixed by the
+    // logic output: grey, note "logic level".
+    let fixed = out.fixed_level();
+    let lv = if fixed { G_DIM } else { STATUS_FG };
+    gen_box_value(1, crate::dmm::format(&mut t, s.amp_v, 2), true, "V", lv);
+    match s.offset_v {
+        Some(o) => gen_box_value(2, crate::dmm::format(&mut t, o, 2), true, "V", lv),
+        None => gen_box_value(2, "auto", false, "", lv),
+    }
+    for k in [1, 2] {
+        gen_box_note(k, if fixed { "logic level" } else { "" }, G_DIM);
+    }
+    // Duty: square only (DAC table or PWM counter, any frequency); the
+    // effective, quantised value.
+    let sq = s.wave == gen::Wave::Square;
+    let d = if sq { out.duty_pct() } else { s.duty as f32 / 100.0 };
+    gen_box_value(3, crate::dmm::format(&mut t, d, 1), true, "%", if sq { STATUS_FG } else { G_DIM });
 }
 
 // --------------------------------------------------------------- keypads
@@ -1992,8 +2026,8 @@ pub fn keypad(kind: u8, title: &str, input: &str, unit: &str) {
 /// The typed text: in the page's frequency field, or the popup's value box.
 pub fn keypad_input(freq: bool, input: &str, unit: &str) {
     if freq {
-        sf::label(sf::LETTERS, rect(262, 83, 150, 30), input, 0x04FC, 0x3A08, 4, 0);
-        sf::label(sf::TEXT22, rect(421, 90, 50, 26), unit, 0x04FC, 0x3A08, 1, 0);
+        gen_box_value(0, input, true, unit, 0x04FC);
+        gen_box_note(0, "", G_DIM);
     } else {
         // 300..439: room for "-12.345" (112 px); titles end before 300.
         sf::label(sf::LETTERS, rect(300, 104, 139, 34), input, 0x0000, K_PANEL, 4, 0);

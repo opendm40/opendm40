@@ -103,7 +103,8 @@ pub struct App {
     /// Drawn trace segments per scope column (see ScopeView::frame).
     scope_prev: [(u16, u16); 401],
     persist_next: u64,
-    /// Keypad target (0 frequency, 1 Vpp, 2 duty) and the typed text.
+    /// Keypad target (0 frequency, 1 Vpp, 2 duty, 3 / 4 upper / lower DMM
+    /// limit, 5 generator offset) and the typed text.
     kp_target: u8,
     kp_buf: [u8; 8],
     kp_n: usize,
@@ -414,7 +415,7 @@ impl App {
             View::Dmm => (true, false),
             View::DmmScope => (true, true),
             // The limits keypad is a DMM page: keep the rails as they are.
-            View::Keypad if self.kp_target >= 3 => (self.scope.dmm_rail(), self.scope.powered()),
+            View::Keypad if matches!(self.kp_target, 3 | 4) => (self.scope.dmm_rail(), self.scope.powered()),
             View::Scope | View::Gen | View::ScopeMenu | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
@@ -466,7 +467,7 @@ impl App {
             }
             View::Gen => ui::gen_static(&self.gen),
             View::Keypad => {
-                if self.kp_target >= 3 {
+                if matches!(self.kp_target, 3 | 4) {
                     self.limits_page();
                 } else {
                     ui::gen_static(&self.gen);
@@ -821,7 +822,7 @@ impl App {
     fn kp_kind(&self) -> u8 {
         match self.kp_target {
             0 => ui::KP_FREQ,
-            1 | 2 => ui::KP_NUM,
+            1 | 2 | 5 => ui::KP_NUM,
             _ => ui::KP_SIGNED,
         }
     }
@@ -1098,6 +1099,7 @@ impl App {
             }),
             1 => ("Vpp", "V"),
             2 => ("Duty", "%"),
+            5 => ("Offset", "V"),
             3 => ("Upper", kp_unit_text(self.kp_unit)),
             _ => ("Lower", kp_unit_text(self.kp_unit)),
         }
@@ -1105,8 +1107,14 @@ impl App {
 
     fn kp_apply(&mut self) {
         let n = self.kp_n;
+        if self.kp_target == 5 && n == 0 {
+            // Offset: OK on an empty field = auto (stock 0..Vpp).
+            let st = self.gen.s.with_offset(None);
+            self.gen.apply(st);
+            return;
+        }
         let Some(v) = crate::scpi::parse_num(&self.kp_buf[..n]) else { return };
-        if self.kp_target >= 3 {
+        if matches!(self.kp_target, 3 | 4) {
             // DMM limit, typed in the unit shown on the keypad; stored SI.
             // Setting a limit turns the check on.
             let si = v * crate::meter::unit_scale(self.kp_unit);
@@ -1128,10 +1136,12 @@ impl App {
                     b'K' => 1e3,
                     _ => 1.0,
                 };
-                // Keep the typed value; the output snaps it (gen::Gen::out_hz).
-                st.freq_hz = gen::clamp_freq((v * m).max(1.0) as u32);
+                // Keep the typed value; the output clamps it to the wave's
+                // limit (gen::Gen::freq_clamped) and quantises it.
+                st.freq_hz = gen::clamp_freq((v * m + 0.5).max(1.0) as u32);
             }
-            1 => st.amp_v = v.clamp(0.5, 3.0),
+            1 => st = st.with_amp(v),
+            5 => st = st.with_offset(Some(v)),
             _ => st.duty = (v.clamp(0.0, 100.0) * 100.0) as u16,
         }
         self.gen.apply(st);
@@ -1153,6 +1163,9 @@ impl App {
         p[3] = Wave::ALL.iter().position(|&w| w == g.wave).unwrap_or(0) as u32 | (g.duty as u32) << 8;
         p[4] = g.freq_hz;
         p[5] = g.amp_v.to_bits();
+        // FR-28 generator offset: 0 = auto (None), else |offset| with the
+        // sign bit set (so 0.0 V is not 0).
+        p[crate::persist::W_GEN_OFFS] = g.offset_v.map_or(0, |o| (-o.abs()).to_bits() | 0x8000_0000);
         p[6] = sc.tb as u32 | (sc.range as u32) << 8 | (sc.ac as u32) << 16 | (sc.rising as u32) << 17;
         p[7] = (sc.trig_row as u32 & 0xFFFF) | (sc.pos as u32) << 16;
         p[8] = sc.probe.to_bits();
@@ -1176,7 +1189,8 @@ impl App {
         // limit fail beep OFF, bits 8..16 limits checked per slot
         // (meter::lim_slot); p[19] bits 0..8 lower limit set, bits 16..24
         // upper limit set; p[20 + 2 i] / p[21 + 2 i] lower / upper limit of
-        // slot i (f32 bits, SI). p[38] persist::W_DMM_EXT, p[39] spare.
+        // slot i (f32 bits, SI). p[38] persist::W_DMM_EXT, p[39]
+        // persist::W_GEN_OFFS.
         // p[6] bits 18..27: scope trigger position + 1 (0 = centre, older
         // records); p[11] bits 16..31: scope drag hold-to-grab ms (0 = direct).
         let m = &self.meter;
@@ -1244,8 +1258,10 @@ impl App {
         g.duty = ((p[3] >> 8) & 0xFFFF).min(10000) as u16;
         g.freq_hz = gen::clamp_freq(p[4]);
         let a = f32::from_bits(p[5]);
-        g.amp_v = if a.is_finite() { a.clamp(0.5, 3.0) } else { 3.0 };
-        self.gen.s = g;
+        g.amp_v = if a.is_finite() { a.clamp(gen::AMP_MIN, gen::AMP_MAX) } else { 3.0 };
+        let o = p[crate::persist::W_GEN_OFFS];
+        g.offset_v = if o == 0 { None } else { Some(f32::from_bits(o & 0x7FFF_FFFF)) };
+        self.gen.s = g.normalised();
         let mut sc = self.scope.s;
         sc.tb = (p[6] & 0xFF) as usize;
         sc.range = (p[6] >> 8 & 0xFF) as usize;
@@ -1767,7 +1783,7 @@ impl App {
                         View::Settings
                     }
                     View::Settings => View::Menu,
-                    View::Keypad if self.kp_target >= 3 => View::Limits,
+                    View::Keypad if matches!(self.kp_target, 3 | 4) => View::Limits,
                     View::Menu | View::Range | View::ScopeMenu | View::Keypad | View::Limits => self.back_view,
                     _ => View::Menu,
                 };
@@ -1858,7 +1874,7 @@ impl App {
             }
             View::Keypad => {
                 let freq = self.kp_target == 0;
-                let back = if self.kp_target >= 3 { View::Limits } else { View::Gen };
+                let back = if matches!(self.kp_target, 3 | 4) { View::Limits } else { View::Gen };
                 match ui::keypad_hit(self.kp_kind(), x, y) {
                     Some(b'=') => {
                         self.kp_apply();
@@ -1882,8 +1898,8 @@ impl App {
                         // Limits: up to 5 digits plus sign and point.
                         let digits = self.kp_buf[..self.kp_n].iter().filter(|d| d.is_ascii_digit()).count();
                         let ok = match self.kp_target {
-                            0 => self.kp_n < 3,
-                            1 | 2 => self.kp_n < 5,
+                            0 => self.kp_n < 7,
+                            1 | 2 | 5 => self.kp_n < 5,
                             _ => c == b'.' || digits < 5,
                         };
                         if ok && self.kp_n < self.kp_buf.len() - 1 && !(c == b'.' && self.kp_buf[..self.kp_n].contains(&b'.')) {
@@ -2060,23 +2076,22 @@ impl App {
                 if x < 243 && (40..82).contains(&y) {
                     let k = Wave::ALL.iter().position(|&w| w == st.wave).unwrap_or(0);
                     st.wave = Wave::ALL[(k + 1) % 4];
-                } else if x >= 246 && (40..130).contains(&y) {
-                    self.kp_open(0, clk);
-                    return;
-                } else if x >= 246 && (133..223).contains(&y) {
-                    self.kp_open(1, clk);
-                    return;
-                } else if x >= 246 && (226..316).contains(&y) {
-                    if st.wave == Wave::Square && self.gen.out_hz() <= 50_000 {
-                        self.kp_open(2, clk);
+                } else if let Some(b) = ui::gen_box_hit(x, y) {
+                    // Frequency, Vpp, Offset, Duty (square only, any f).
+                    match b {
+                        0 => self.kp_open(0, clk),
+                        1 => self.kp_open(1, clk),
+                        2 => self.kp_open(5, clk),
+                        _ if st.wave == Wave::Square => self.kp_open(2, clk),
+                        _ => {}
                     }
                     return;
                 } else {
                     return;
                 }
                 // Wave change: the set frequency is kept as is (a wave that
-                // cannot play it is silent, gen::Gen::out_hz), so cycling back
-                // to Square restores it.
+                // cannot play it runs at its limit, gen::Gen::freq_clamped),
+                // so cycling back to Square restores it.
                 self.gen_set(st);
             }
             View::Menu => match ui::main_menu_hit(x, y) {
@@ -2540,7 +2555,7 @@ impl App {
         let mut g = self.gen.s;
         let mut sc = self.scope.s;
         let scope_cmd =
-            !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenDuty(_) | C::GenOut(_) | C::DiagDac | C::DiagPwm);
+            !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenOffs(_) | C::GenDuty(_) | C::GenOut(_) | C::DiagDac | C::DiagPwm);
         if scope_cmd && !self.scope.powered() {
             self.host_scope = true;
             self.update_rails(clk);
@@ -2565,14 +2580,23 @@ impl App {
                 None
             }
             C::GenFreq(None) => {
-                // The frequency actually output (stock snapping), 0 when this
-                // wave is silent at the set frequency.
-                out.put_f32(gen::snap_freq(g.wave, g.freq_hz) as f32);
+                // The frequency actually output: the set value clamped to
+                // the wave's limit and quantised (UF-14 / UF-15).
+                out.put_f32(self.gen.actual_hz());
                 Some(())
             }
             C::GenVolt(Some(v)) => {
-                g.amp_v = v.clamp(0.5, 3.0);
+                g = g.with_amp(v);
                 None
+            }
+            // FR-28: NaN = AUTO (stock 0..Vpp).
+            C::GenOffs(Some(o)) => {
+                g = g.with_offset(Some(o));
+                None
+            }
+            C::GenOffs(None) => {
+                out.put_f32(g.offset_v.unwrap_or(g.amp_v / 2.0));
+                Some(())
             }
             C::GenVolt(None) => {
                 out.put_f32(g.amp_v);
@@ -2583,7 +2607,8 @@ impl App {
                 None
             }
             C::GenDuty(None) => {
-                out.put_f32(g.duty as f32 / 100.0);
+                // Effective (quantised) duty, as the generator page shows.
+                out.put_f32(self.gen.out.duty_pct());
                 Some(())
             }
             C::GenOut(Some(on)) => {

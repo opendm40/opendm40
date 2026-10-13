@@ -46,13 +46,6 @@ const DMA_HIFCR: u32 = DMA0 + 0x0C;
 #[link_section = ".dmabuf"]
 static mut WAVE: [u16; N_MAX] = [0; N_MAX];
 
-/// The frequency the output aims at for `wave` at the set `f`: `f` clamped
-/// to the wave's limit (never 0 any more). Kept under the old name for
-/// callers; the quantised value is `Gen::actual_hz`.
-pub fn snap_freq(wave: Wave, f: u32) -> u32 {
-    target_hz(wave, f)
-}
-
 pub struct Gen {
     pub s: Settings,
     /// What the output does for `s` (actual frequency, effective levels and
@@ -77,21 +70,11 @@ fn stop_outputs() {
     }
 }
 
-// actual_hz / freq_clamped / limits / set_offset / set_amp are the API for
-// ui.rs, app.rs and the SCPI handler (UF-14/15, FR-28); unused until wired.
-#[allow(dead_code)]
 impl Gen {
     pub fn new() -> Self {
         unsafe { modify32(RCU_APB1EN, 0, (1 << 29) | (1 << 4) | (1 << 6)) }; // DAC, TIM6, TIM12
         stop_outputs();
         Gen { s: Settings::DEFAULT, out: compute(&Settings::DEFAULT), real_hz: 0.0 }
-    }
-
-    /// Target output frequency for the current wave and set frequency, Hz:
-    /// the set value clamped to the wave's limit (never 0). Independent of
-    /// `on`. The quantised frequency is `actual_hz`.
-    pub fn out_hz(&self) -> u32 {
-        self.out.target_hz
     }
 
     /// Actual (quantised) output frequency, Hz, also while off (UF-15).
@@ -108,11 +91,6 @@ impl Gen {
     /// (show `self.s.wave.max_note()`, UF-14).
     pub fn freq_clamped(&self) -> bool {
         self.out.freq_clamped
-    }
-
-    /// Limits of the current wave.
-    pub fn limits(&self) -> Limits {
-        limits(self.s.wave)
     }
 
     /// Apply new settings (FUN_080166a4). `s` is normalised
@@ -136,18 +114,6 @@ impl Gen {
             Path::Dac => self.dac(&s, &t),
         }
         self.real_hz = t.hz() as f32;
-    }
-
-    /// Change only the offset (None = stock 0..Vpp); see `Settings::with_offset`.
-    pub fn set_offset(&mut self, o: Option<f32>) {
-        let s = self.s.with_offset(o);
-        self.apply(s);
-    }
-
-    /// Change only Vpp, limited by an explicit offset; see `Settings::with_amp`.
-    pub fn set_amp(&mut self, v: f32) {
-        let s = self.s.with_amp(v);
-        self.apply(s);
     }
 
     fn pwm(&mut self, t: &Timing) {
