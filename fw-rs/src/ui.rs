@@ -152,6 +152,15 @@ const CELLS_C: [[u8; 7]; 5] = [
     [20, 22, 22, 22, 24, 24, 18],
 ];
 
+/// AC+DC aux rows: aux1 = AC part, aux2 = DC part (AUX_TAG 0x05 AC / 0x04 DC).
+const AUX_TAGS: [&str; 2] = ["\u{5}", "\u{4}"];
+/// Full view: left edge of each aux row's tag slot and of its value box
+/// (value right-aligned in AUX_VX..AUX_VX + 138; aux1's unit box ends at 231).
+const AUX_TAG_X: [i16; 2] = [8, 232];
+const AUX_VX: [i16; 2] = [38, 260];
+/// Compact view: AC / DC part lines right of the limit badge (302..351).
+const AUX_C_X: u16 = 354;
+
 /// Mode glyph above the unit: 0x04 DC, 0x05 AC, 0x07 continuity, 0x08 diode.
 fn mode_glyph(mode: u8, acdc: bool) -> &'static str {
     match mode {
@@ -318,7 +327,35 @@ impl DmmView {
                 self.last_unit = r.main.unit;
                 self.last_mode = mkey;
                 sf::label(sf::UNIT, rect(198, 24, 64, 31), unit, VALUE_RED, BG, 1, 0);
-                sf::label(sf::MODE, rect(266, 23, 32, 32), mode_glyph(r.mode, r.acdc), VALUE_RED, BG, 1, 0);
+                // 36 px wide: the AC glyph is 35 px, AC+DC 33 (a 32 px box
+                // clipped their right columns); ends before the badge at 302.
+                sf::label(sf::MODE, rect(266, 23, 36, 32), mode_glyph(r.mode, r.acdc), VALUE_RED, BG, 1, 0);
+                if !r.acdc {
+                    lcd::fill_rect(AUX_C_X, 22, lcd::W - AUX_C_X, 33, BG);
+                }
+            }
+            // AC+DC: the AC and DC parts as two small lines right of the
+            // limit badge, each with its tag right before the value.
+            if r.acdc {
+                for (i, a) in [r.aux1, r.aux2].iter().enumerate() {
+                    let y = 23 + 16 * i as i16;
+                    let mut t = [0u8; 16];
+                    let mut u = [0u8; 16];
+                    let mut b = [0u8; 32];
+                    let txt = match a {
+                        Some(v) => {
+                            let vt = meter::text(&mut t, v);
+                            let ut = sf::unit_text(v.unit, &mut u);
+                            let n = (vt.len() + ut.len()).min(b.len());
+                            b[..vt.len()].copy_from_slice(vt.as_bytes());
+                            b[vt.len()..n].copy_from_slice(&ut.as_bytes()[..n - vt.len()]);
+                            core::str::from_utf8(&b[..n]).unwrap_or("")
+                        }
+                        None => "",
+                    };
+                    sf::label(sf::AUX_TAG, rect(AUX_C_X as i16, y, 26, 16), AUX_TAGS[i], VALUE_RED, BG, 1, 0);
+                    sf::label(sf::F14, rect(AUX_C_X as i16 + 26, y, (lcd::W - AUX_C_X) as i16 - 26, 16), txt, VALUE_RED, BG, 1, 1);
+                }
             }
         } else {
             // Extra digit: the main cells narrow to CELLS_X (40..375) and the
@@ -344,28 +381,39 @@ impl DmmView {
                 self.last_unit = r.main.unit;
                 self.last_mode = mkey;
                 sf::label(sf::UNIT, rect(401, 114, 79, 32), unit, VALUE_RED, BG, 4, -1);
-                sf::label(sf::MODE, rect(437, 76, 32, 32), mode_glyph(r.mode, r.acdc), VALUE_RED, BG, 7, 0);
-                // AC+DC: small stock tags (AUX_TAG 0x05 AC / 0x04 DC) left of
-                // the AC part (aux1) and the DC part (aux2).
-                for (x, g) in [(8i16, "\u{5}"), (234, "\u{4}")] {
-                    if r.acdc {
-                        sf::label(sf::AUX_TAG, rect(x, 41, 24, 21), g, VALUE_RED, BG, 8, 0);
-                    } else {
-                        lcd::fill_rect(x as u16, 41, 24, 21, BG);
+                // Stock box (437,76,32,32) align 7, widened 1 px left (the
+                // limit badge ends at 435) and 2 px right so the 35 px AC
+                // glyph is not clipped; DC / AC+DC land on the stock pixels.
+                sf::label(sf::MODE, rect(436, 76, 35, 32), mode_glyph(r.mode, r.acdc), VALUE_RED, BG, 7, 0);
+                if !r.acdc {
+                    // Leaving AC+DC: the tag slots left of the aux values.
+                    for i in 0..2 {
+                        lcd::fill_rect(AUX_TAG_X[i] as u16, 36, (AUX_VX[i] - AUX_TAG_X[i]) as u16, 30, BG);
                     }
                 }
             }
             // Aux readouts (stock: value right-aligned cells at y 40, unit after).
             for (i, a) in [r.aux1, r.aux2].iter().enumerate() {
-                let (vx, ux) = if i == 0 { (68, 178) } else { (290, 400) };
+                let (vx, ux) = (AUX_VX[i] + 30, if i == 0 { 178 } else { 400 });
                 match a {
                     Some(v) => {
                         let mut t = [0u8; 16];
                         let txt = meter::text(&mut t, v);
                         let mut u = [0u8; 16];
-                        sf::label(sf::LETTERS, rect(vx - 30, 36, 138, 30), txt, VALUE_RED, BG, 4, 0);
-                        // AC+DC: the aux1 unit box (V..uA, <= 48 px) ends at 232,
-                        // (234, 41) holds the DC tag; else full width (kHz 57 px).
+                        if r.acdc {
+                            // AC+DC: the part's tag (AC for aux1, DC for aux2)
+                            // right before its value, which stays right-aligned
+                            // in its box: tag box from AUX_TAG_X to 4 px left
+                            // of the text (both labels repaint their bg).
+                            let end = vx - 30 + 138;
+                            let te = (end - sf::text_width(sf::LETTERS, txt, 0) - 4).max(AUX_TAG_X[i] + 24);
+                            sf::label(sf::AUX_TAG, rect(AUX_TAG_X[i], 36, te - AUX_TAG_X[i], 30), AUX_TAGS[i], VALUE_RED, BG, 4, 0);
+                            sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, VALUE_RED, BG, 4, 0);
+                        } else {
+                            sf::label(sf::LETTERS, rect(vx - 30, 36, 138, 30), txt, VALUE_RED, BG, 4, 0);
+                        }
+                        // AC+DC: the aux1 unit box (V..uA, <= 48 px) ends at 231,
+                        // the aux2 tag slot starts at 232; else full width (kHz 57 px).
                         let uw = if i == 0 && r.acdc { 54 } else { 80 };
                         sf::label(sf::LETTERS, rect(ux, 36, uw, 30), sf::unit_text(v.unit, &mut u), VALUE_RED, BG, 1, 0);
                         self.last_aux[i] = true;
@@ -385,10 +433,14 @@ impl DmmView {
             let s = if !r.auto { "MANU" } else if r.auto_plus { "AUTO+" } else { "AUTO" };
             if let Some(l) = self.label {
                 // Temperature sensor name (F21 has no C / N / T: F14).
+                // F14 glyphs are as wide as their advance (no side bearing),
+                // so spacing 0 ran "PT100" / "NTC10k B3950" into one smear:
+                // 2 px as the other F14 labels (the longest, "NTC100k
+                // B3950", is 97 px of 105), 1 px in the 92 px compact slot.
                 if compact {
-                    sf::label(sf::F14, rect(4, 0, 92, BAR_H_C as i16), l, STATUS_FG, BAR, 1, 0);
+                    sf::label(sf::F14, rect(4, 0, 92, BAR_H_C as i16), l, STATUS_FG, BAR, 1, 1);
                 } else {
-                    sf::label(sf::F14, rect(4, 1, 105, 32), l, STATUS_FG, BAR, 1, 0);
+                    sf::label(sf::F14, rect(4, 1, 105, 32), l, STATUS_FG, BAR, 1, 2);
                 }
             } else if compact {
                 // Range and HOLD/RUN in the short combined-view bar.

@@ -448,6 +448,21 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
     }
 }
 
+/// Width in pixels of `text` as `label` lays it out (pen advance plus the
+/// last glyph's width), e.g. to place a tag right before right-aligned text.
+pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
+    let (mut pen, mut last) = (0i32, 0i32);
+    for ch in text.chars() {
+        let (adv, w) = match font.glyph(ch as u32) {
+            Some(g) => (g.adv as i32, g.w as i32),
+            None => (font.line_h() as i32, font.line_h() as i32),
+        };
+        last = pen + w;
+        pen += adv + spacing as i32;
+    }
+    last as i16
+}
+
 /// Map our unit text to the stock font's code points (no 'k' / 'µ' glyphs:
 /// the stock writes "K" and "u").
 pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
