@@ -110,6 +110,26 @@ before the first sample and an unset `CALC:LIM:LOW|UPP?` answer `+9.9E37`
 session (statistics restarted, no idle power-off). Temperature, `SYST:RAIL`,
 `LOG:` and `DBG:` commands: see the header of `src/scpi.rs`.
 
+Reply timing of `READ?` / `MEAS:<f>?` / `FETC?`:
+
+- **A reading of the current function is already flowing** (`READ?`, or
+  `MEAS:<f>?` naming the current function): the next fresh reading
+  (0.1-0.4 s in DC V), or the latest one if none comes within 0.85 s. This
+  keeps every reply inside libsigrok's hard 1000 ms USBTMC Bulk-IN timeout,
+  also in slow capacitance / temperature ranges.
+- **Just switched** (`MEAS:<f>?` changing the function, or `CONF:<f>` then
+  `READ?`): the first reading after the converter's settle (0.45 s for DC V,
+  2.5 s for resistance, then the autorange); `MEAS:<f>?` prefers a
+  full-resolution average but waits for it at most 1.5 s after the command.
+  The reply can take
+  about 3 s for resistance, so give the host a timeout of 5 s or more
+  (PyVISA defaults to 2 s; libsigrok's DM40 profile waits 3 s after switching
+  to RES / CAP / TEMP / FREQ / CONT / DIOD).
+- `+9.9E37` with "Data stale" in `SYST:ERR?` only when the current function
+  has no reading at all within 1.9 s after the settle. A query the host gave
+  up on (USBTMC abort / clear, or a new command: "Query INTERRUPTED") gets no
+  late reply.
+
 ## Milestones
 
 Goal and remaining work: see [TODO.md](TODO.md).

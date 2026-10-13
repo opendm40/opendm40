@@ -32,6 +32,9 @@ const GRSTCTL: u32 = USBFS + 0x10;
 const GRSTCTL_AHBIDL: u32 = 1 << 31;
 const GCCFG_PWRON: u32 = 1 << 16;
 const GCCFG_VBUSIG: u32 = 1 << 21;
+const DXEPCTL_EPENA: u32 = 1 << 31;
+const DXEPCTL_EPDIS: u32 = 1 << 30;
+const DXEPCTL_SD0PID: u32 = 1 << 28;
 
 pub struct UsbFs;
 
@@ -118,11 +121,25 @@ pub fn force_power_no_vbus() {
 /// reset recovery) the device kept its old toggle and silently dropped the
 /// host's next packet as a duplicate (or the host dropped ours). `addr` =
 /// wIndex of the request (bit 7 = IN).
+///
+/// EPENA / EPDIS (bits 31 / 30) are written as 0: should the core clear
+/// EPENA between the read and the write, writing it back as 1 would re-arm
+/// the endpoint (on IN, a spurious ZLP). Writing 0 to either has no effect.
 pub fn reset_toggle(addr: u8) {
     let n = (addr & 0x0F) as u32;
     if n == 0 || n >= 4 {
         return;
     }
     let ctl = if addr & 0x80 != 0 { USBFS + 0x900 } else { USBFS + 0xB00 } + 0x20 * n;
-    unsafe { modify32(ctl, 0, 1 << 28) };
+    unsafe { modify32(ctl, DXEPCTL_EPENA | DXEPCTL_EPDIS, DXEPCTL_SD0PID) };
+}
+
+/// True while a Bulk-IN packet written to non-control endpoint `addr` has
+/// not been taken by the host yet (DIEPCTLn EPENA: set by the driver's
+/// write, cleared by the core when the transfer completes). USBTMC
+/// CHECK_*_STATUS use it: the driver reports that completion (XFRC) to the
+/// class only after EP0 in the same poll.
+pub fn in_busy(addr: u8) -> bool {
+    let n = (addr & 0x0F) as u32;
+    n != 0 && n < 4 && unsafe { r32(USBFS + 0x900 + 0x20 * n) } & DXEPCTL_EPENA != 0
 }
