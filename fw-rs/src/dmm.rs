@@ -607,7 +607,18 @@ const ACDC_RELAY_PULSE: bool = true;
 const ACDC_FREQ_RESTART: bool = false;
 
 /// EXPERIMENT: plain AC V cycles the RMS source (R34) for the diagnostic.
-const DIAG_R34_CYCLE: bool = true;
+const DIAG_R34_CYCLE: bool = false;
+/// EXPERIMENT: plain AC V re-enables AD2 / AD3 every 4 diagnostic entries
+/// with a swept skew between the ENAD2 (R26) and ENAD3 (R34) writes: step
+/// 0..15 = R26 first, then R34 after step us; 16..31 = R34 first, then R26
+/// after (step - 16) us. The step is reported as late_ms of the entry.
+const DIAG_EN_SWEEP: bool = true;
+
+/// Busy-wait `n` core cycles (DWT CYCCNT).
+fn delay_cycles(n: u32) {
+    let t0 = unsafe { crate::mmio::r32(0xE000_1004) };
+    while unsafe { crate::mmio::r32(0xE000_1004) }.wrapping_sub(t0) < n {}
+}
 /// AC+DC diagnostic ring: AC phases kept (`acdc_diag`).
 const ACDC_DIAG_N: usize = 4;
 
@@ -1862,6 +1873,24 @@ impl Dmm {
                     let v = [0x88u8, 0x80, 0x8C][(self.diag_k / 4 % 3) as usize];
                     hy::write(0x34, &[v]);
                     r34 = 0x8000 | v as u16;
+                }
+                if DIAG_EN_SWEEP && m == 0 && self.diag_k % 4 == 0 {
+                    let step = (self.diag_k / 4 % 32) as u8;
+                    let cfg = &CFG_F0[(self.range.max(0) as usize).min(3)];
+                    let (r26, r34v) = (cfg[6], cfg[20]);
+                    let d = (step as u32 % 16) * 200; // 1 us steps at 200 MHz
+                    hy::write(0x26, &[0]);
+                    hy::write(0x34, &[0]);
+                    if step < 16 {
+                        hy::write(0x26, &[r26]);
+                        delay_cycles(d);
+                        hy::write(0x34, &[r34v]);
+                    } else {
+                        hy::write(0x34, &[r34v]);
+                        delay_cycles(d);
+                        hy::write(0x26, &[r26]);
+                    }
+                    r34 = 0x8000 | step as u16;
                 }
             }
             let e = &mut self.diag[self.diag_k as usize % ACDC_DIAG_N];
