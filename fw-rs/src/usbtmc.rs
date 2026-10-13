@@ -37,7 +37,7 @@ const STATUS_TRANSFER_NOT_IN_PROGRESS: u8 = 0x81;
 
 const MPS: usize = 64;
 pub const CMD_MAX: usize = 256;
-pub const RSP_MAX: usize = 512;
+pub const RSP_MAX: usize = 6144;
 
 const CAPABILITIES: [u8; 24] = [
     STATUS_SUCCESS, 0,
@@ -71,6 +71,9 @@ pub struct Usbtmc<'a, B: UsbBus> {
     req_max: u32,
     rsp: [u8; RSP_MAX],
     rsp_len: usize,
+    /// Bytes of `rsp` already sent (a response longer than the host's
+    /// TransferSize goes out in several REQUEST_DEV_DEP_MSG_IN rounds).
+    rsp_off: usize,
     rsp_ready: bool,
     tx: [u8; RSP_MAX + 16],
     tx_len: usize,
@@ -101,6 +104,7 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
             req_max: 0,
             rsp: [0; RSP_MAX],
             rsp_len: 0,
+            rsp_off: 0,
             rsp_ready: false,
             tx: [0; RSP_MAX + 16],
             tx_len: 0,
@@ -129,11 +133,25 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         self.rsp_ready
     }
 
+    /// Response buffer to fill in place (then `respond_len`).
+    pub fn rsp_buf(&mut self) -> &mut [u8; RSP_MAX] {
+        &mut self.rsp
+    }
+
+    /// Queue the first `n` bytes of `rsp_buf()` as the response.
+    pub fn respond_len(&mut self, n: usize) {
+        self.rsp_len = n.min(RSP_MAX);
+        self.rsp_off = 0;
+        self.rsp_ready = true;
+        self.try_start_in();
+    }
+
     /// Queue response text; sent when the host requests it.
     pub fn respond(&mut self, data: &[u8]) {
         let n = data.len().min(RSP_MAX);
         self.rsp[..n].copy_from_slice(&data[..n]);
         self.rsp_len = n;
+        self.rsp_off = 0;
         self.rsp_ready = true;
         self.try_start_in();
     }
@@ -211,16 +229,18 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
             return;
         }
         let Some(tag) = self.req_tag.take() else { return };
-        let n = self.rsp_len.min(self.req_max as usize);
+        let rem = self.rsp_len - self.rsp_off;
+        let n = rem.min(self.req_max as usize);
         let t = &mut self.tx;
         t[0] = DEV_DEP_MSG_IN;
         t[1] = tag;
         t[2] = !tag;
         t[3] = 0;
         t[4..8].copy_from_slice(&(n as u32).to_le_bytes());
-        t[8] = 1; // EOM
+        t[8] = (n == rem) as u8; // EOM
         t[9..12].fill(0);
-        t[12..12 + n].copy_from_slice(&self.rsp[..n]);
+        t[12..12 + n].copy_from_slice(&self.rsp[self.rsp_off..self.rsp_off + n]);
+        self.rsp_off += n;
         let mut len = 12 + n;
         while len % 4 != 0 {
             t[len] = 0;
@@ -230,7 +250,7 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         self.tx_off = 0;
         self.tx_zlp = len % MPS == 0;
         self.last_tag_in = tag;
-        self.rsp_ready = false;
+        self.rsp_ready = self.rsp_off < self.rsp_len;
         self.pump_in();
     }
 

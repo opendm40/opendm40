@@ -8,7 +8,7 @@ mod dmm;
 mod fonts;
 mod gen;
 mod gesture;
-mod host;
+mod msc;
 mod hy3131;
 mod hy3131_tables;
 mod lcd;
@@ -34,7 +34,6 @@ use core::panic::PanicInfo;
 use cortex_m as _;
 
 use usb_device::prelude::*;
-use usbd_serial::SerialPort;
 
 use clock::Clock;
 
@@ -55,6 +54,10 @@ const KEEPALIVE_MAX_MS: u64 = 600_000;
 const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
 
 static mut EP_MEMORY: [u32; 320] = [0; 320];
+static mut MSC_IO: [u8; 512] = [0; 512];
+
+/// DIAG block size (DBG:DIAG?).
+const DIAG_LEN: usize = 212;
 
 extern "C" {
     static mut __bss_start: u32;
@@ -125,29 +128,28 @@ fn main() -> ! {
     let bus = synopsys_usb_otg::UsbBus::new(usb::UsbFs, unsafe {
         &mut *core::ptr::addr_of_mut!(EP_MEMORY)
     });
-    // USBTMC first (interface 0), then the CDC debug port (interfaces 1, 2):
-    // with USBTMC behind CDC its capabilities request got lost at probe time.
+    // USBTMC (interface 0, SCPI incl. the DBG: debug commands) and USB mass
+    // storage (interface 1). Two IN endpoints + EP0 of the four of USBFS.
     let mut tmc = usbtmc::Usbtmc::new(&bus);
-    let mut port = SerialPort::new(&bus);
+    let mut msc = msc::Msc::new(&bus, unsafe { &mut *core::ptr::addr_of_mut!(MSC_IO) });
+    let mut disk = msc::NoMedia;
     let mut dev = UsbDeviceBuilder::new(&bus, USB_VID_PID)
         .strings(&[StringDescriptors::default()
             .manufacturer("dm40-fw")
             .product("DM40 multimeter (dm40-fw)")
             .serial_number("0001")])
         .unwrap()
-        .composite_with_iads()
         .build();
     // build() enabled the core; now force the GD32 power/VBUS bits.
     usb::force_power_no_vbus();
 
-    let mut host = host::Host::new();
     let mut deadline = clk.now_ms() + INITIAL_HOLD_MS;
     let mut feeding = true;
+    let mut reset_at: Option<u64> = None;
 
     let mut scpi = scpi::Scpi::new();
     // SCPI READ?/MEASure?: reply with the first reading whose seq is >= this.
-    let mut scpi_wait: Option<(u32, bool)> = None;
-    let mut scpi_line_ready = false;
+    let mut scpi_wait: Option<u32> = None;
     let mut bt = bt::Bt::new();
     let mut gestures = gesture::Tracker::new();
     let mut touch_events = 0u32;
@@ -161,7 +163,7 @@ fn main() -> ! {
     let mut loop_max_shown = 0u32;
     let mut loop_win = 0u64;
     // Section profile (debug): max us per section in the last second:
-    // 0 usb+scpi+host, 1 tick, 2 touch, 3 scope, 4 bt, 5 dmm poll+draw.
+    // 0 usb+scpi, 1 tick, 2 touch, 3 scope, 4 bt, 5 dmm poll+draw.
     let mut sec = [0u32; 6];
     let mut sec_shown = [0u32; 6];
     let cyc = || unsafe { mmio::r32(0xE000_1004) };
@@ -187,19 +189,19 @@ fn main() -> ! {
         if feeding && now < deadline {
             wdt::kick();
         }
+        if reset_at.map(|t| now >= t).unwrap_or(false) {
+            unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
+        }
 
-        dev.poll(&mut [&mut tmc, &mut port]);
-        // SCPI from USBTMC or from a text line on the serial port.
+        dev.poll(&mut [&mut tmc, &mut msc]);
+        msc.poll(&mut disk);
         let mut msg = [0u8; 256];
         let mut msg_n = 0usize;
-        let mut from_tmc = false;
         if let Some(cmd) = tmc.take_command() {
             msg_n = cmd.len().min(256);
             msg[..msg_n].copy_from_slice(&cmd[..msg_n]);
-            from_tmc = true;
-        } else if scpi_line_ready {
-            scpi_line_ready = false;
-            msg_n = host.take_line(&mut msg);
+            // Any host traffic keeps the debug-build watchdog fed.
+            deadline = deadline.max(now + KEEPALIVE_MS);
         }
         if msg_n > 0 {
             let reply = match scpi.handle(&msg[..msg_n], app.dmm.mode()) {
@@ -221,7 +223,7 @@ fn main() -> ! {
                         app.meter.reset();
                         app.last_raw = None;
                     }
-                    scpi_wait = Some((app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0), from_tmc));
+                    scpi_wait = Some(app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0));
                     false
                 }
                 scpi::Out::Instr(c) => {
@@ -235,72 +237,105 @@ fn main() -> ! {
                         true
                     }
                     None => {
-                        scpi_wait = Some((0, from_tmc));
+                        scpi_wait = Some(0);
+                        false
+                    }
+                },
+                scpi::Out::Dbg(d) => match d {
+                    scpi::Dbg::Ping(ms) => {
+                        if ms > 0 {
+                            deadline = deadline.max(now + (ms as u64).min(KEEPALIVE_MAX_MS));
+                        }
+                        let flags = hw.pllsai_locked as u32 | (hw.core_idle as u32) << 1;
+                        let left = if feeding { deadline.saturating_sub(now) as u32 } else { 0 };
+                        scpi.len = 0;
+                        for (i, v) in [now as u32, flags, left].iter().enumerate() {
+                            if i > 0 {
+                                scpi.put_bytes(b",");
+                            }
+                            let mut t = [0u8; 10];
+                            let mut i = t.len();
+                            let mut v = *v;
+                            loop {
+                                i -= 1;
+                                t[i] = b'0' + (v % 10) as u8;
+                                v /= 10;
+                                if v == 0 {
+                                    break;
+                                }
+                            }
+                            scpi.put_bytes(&t[i..]);
+                        }
+                        true
+                    }
+                    scpi::Dbg::Input(kind, x, y) => {
+                        let p = touch::Point { x, y };
+                        let g = match kind {
+                            0 => Some(gesture::Gesture::Tap(p)),
+                            1 => Some(gesture::Gesture::SwipeLeft),
+                            2 => Some(gesture::Gesture::SwipeRight),
+                            3 => Some(gesture::Gesture::KeyDown(x as u8)),
+                            _ => None,
+                        };
+                        if let Some(g) = g {
+                            app.gesture(&mut clk, g);
+                        }
+                        false
+                    }
+                    scpi::Dbg::Lcd(x, y, w, h, n) => {
+                        // Raw GRAM words after RAMRD (dummy first) as #4 block.
+                        let n = (n as usize).min((usbtmc::RSP_MAX - 8) / 2);
+                        let mut hdr = [b'#', b'4', 0, 0, 0, 0];
+                        let bytes = n * 2;
+                        for (i, d) in [1000, 100, 10, 1].iter().enumerate() {
+                            hdr[2 + i] = b'0' + ((bytes / d) % 10) as u8;
+                        }
+                        let buf = tmc.rsp_buf();
+                        buf[..6].copy_from_slice(&hdr);
+                        lcd::set_window_cmd(x, y, x + w - 1, y + h - 1, lcd::CMD_RAMRD);
+                        for i in 0..n {
+                            let v = lcd::read_data().to_le_bytes();
+                            buf[6 + 2 * i] = v[0];
+                            buf[7 + 2 * i] = v[1];
+                        }
+                        tmc.respond_len(6 + bytes);
+                        draw_hold_until = now + 300;
+                        false
+                    }
+                    scpi::Dbg::Diag => {
+                        let d = touch_diag(&tp, touch_events, tmc.dbg_ctl, loop_max_shown, app.prof, sec_shown);
+                        scpi.len = 0;
+                        scpi.put_bytes(b"#3");
+                        let n = d.len();
+                        scpi.put_bytes(&[b'0' + (n / 100) as u8, b'0' + (n / 10 % 10) as u8, b'0' + (n % 10) as u8]);
+                        scpi.put_bytes(&d);
+                        true
+                    }
+                    scpi::Dbg::Release => {
+                        feeding = false;
+                        false
+                    }
+                    scpi::Dbg::Reset => {
+                        reset_at = Some(now + 50);
                         false
                     }
                 },
             };
             if reply {
-                if from_tmc {
-                    tmc.respond(&scpi.buf[..scpi.len]);
-                } else {
-                    host.reply_text(&scpi.buf[..scpi.len]);
-                }
+                tmc.respond(&scpi.buf[..scpi.len]);
             }
-        }
-        let action = host.poll(&mut port, || host::Info {
-            uptime_ms: now as u32,
-            flags: hw.pllsai_locked as u32 | (hw.core_idle as u32) << 1,
-            keepalive_left_ms: if feeding { deadline.saturating_sub(now) as u32 } else { 0 },
-            diag: touch_diag(&tp, touch_events, tmc.dbg_ctl, loop_max_shown, app.prof, sec_shown),
-        });
-        match action {
-            host::Action::None => {}
-            host::Action::Keepalive(ms) => {
-                let ms = if ms == 0 { KEEPALIVE_MS } else { (ms as u64).min(KEEPALIVE_MAX_MS) };
-                deadline = deadline.max(now + ms);
-            }
-            host::Action::StopFeeding => feeding = false,
-            host::Action::Scpi => scpi_line_ready = true,
-            host::Action::Input(kind, arg) => {
-                deadline = deadline.max(now + KEEPALIVE_MS);
-                let p = touch::Point { x: arg as u16, y: (arg >> 16) as u16 };
-                let g = match kind {
-                    0 => Some(gesture::Gesture::Tap(p)),
-                    1 => Some(gesture::Gesture::SwipeLeft),
-                    2 => Some(gesture::Gesture::SwipeRight),
-                    3 => Some(gesture::Gesture::KeyDown(arg as u8)),
-                    _ => None,
-                };
-                if let Some(g) = g {
-                    app.gesture(&mut clk, g);
-                }
-            }
-        }
-        if host.reset_due() {
-            // Give the host a moment to collect the reply, then reset to stock.
-            let t = clk.now_ms() + 20;
-            while clk.now_ms() < t {
-                dev.poll(&mut [&mut tmc, &mut port]);
-            }
-            unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
         }
 
-        // Draw only when no reply is streaming (a GRAM read-back may be in
-        // progress on the LCD bus) and not for a while after one, so a
-        // multi-request screenshot does not tear.
-        if host.take_lcd_read() {
-            draw_hold_until = now + 300;
-        }
         // No drawing until USB has enumerated (or 3 s passed): a long first
-        // draw must not starve the enumeration.
+        // draw must not starve the enumeration; nor right after a GRAM
+        // read-back, so a multi-request screenshot does not tear.
         let usb_up = dev.state() == UsbDeviceState::Configured || now > 3000;
-        let can_draw = usb_up && !host.busy() && now >= draw_hold_until;
+        let can_draw = usb_up && now >= draw_hold_until;
         mark(0, &mut ts);
         app.tick(&mut clk, can_draw);
         mark(1, &mut ts);
 
-        if now >= next_touch && !host.busy() {
+        if now >= next_touch {
             next_touch = now + 10;
             let g = match tp.as_mut().and_then(|t| t.poll(now)) {
                 Some(ev) => {
@@ -314,11 +349,9 @@ fn main() -> ! {
             }
         }
         mark(2, &mut ts);
-        if !host.busy() {
-            app.scope_poll(now, can_draw);
-        }
+        app.scope_poll(now, can_draw);
         mark(3, &mut ts);
-        if now >= next_poll && !host.busy() {
+        if now >= next_poll {
             next_poll = now + 5;
             if let Some(f) = bt.poll() {
                 if app.bt_on {
@@ -329,16 +362,12 @@ fn main() -> ! {
             mark(4, &mut ts);
             if let Some(raw) = app.dmm.poll(&mut clk) {
                 if let Some(r) = app.reading(raw, can_draw) {
-                    if let Some((min, to_tmc)) = scpi_wait {
+                    if let Some(min) = scpi_wait {
                         if r.seq.wrapping_sub(min) < 0x8000_0000 {
                             scpi_wait = None;
                             scpi.len = 0;
                             scpi.put_reading(&r);
-                            if to_tmc {
-                                tmc.respond(&scpi.buf[..scpi.len]);
-                            } else {
-                                host.reply_text(&scpi.buf[..scpi.len]);
-                            }
+                            tmc.respond(&scpi.buf[..scpi.len]);
                         }
                     }
                 }
@@ -355,8 +384,8 @@ fn touch_diag(
     loop_us: u32,
     prof: [u32; 3],
     sec: [u32; 6],
-) -> [u8; host::DIAG_LEN] {
-    let mut d = [0u8; host::DIAG_LEN];
+) -> [u8; DIAG_LEN] {
+    let mut d = [0u8; DIAG_LEN];
     for (i, v) in sec.iter().enumerate() {
         d[128 + 4 * i..132 + 4 * i].copy_from_slice(&v.to_le_bytes());
     }

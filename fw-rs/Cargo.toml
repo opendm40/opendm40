@@ -28,4 +28,4 @@ keep-screen = []
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
 synopsys-usb-otg = { version = "0.5.0", features = ["fs"] }
 usb-device = "0.3.2"
-usbd-serial = "0.2.2"
+usbd-storage = { version = "3.0.0", features = ["bbb", "scsi"] }
