@@ -36,6 +36,9 @@ Additional requirements:
   - [x] Scope: slow timebases to 50 s/div (TB_MAX 29, roll from 200 ms/div, YT ceiling 1 s/div);
         stop-and-zoom re-renders the stored 26 K record at the selected timebase. Not done: horizontal
         pan (lives in app.rs/ui.rs), full 65 K record (DMARAM budget). Untested on hardware.
+  - [x] Scope hardware (comparator) trigger, src/hwtrig.rs: wired into scope.rs (H0..H8 of
+        docs/hwtrig-integration.md), DBG:HWTRIG[?|:ENABLE|:CAL?|:STAT?|:STAT:RESET]. Off by default
+        (hwtrig::DEFAULT_ENABLED = false).  (code done; verify on device, then flip the default)
   - [ ] Confirm simultaneous DMM+scope accuracy (both-rails crosstalk). [scope.rs]
   - [x] Device/About page: Menu->Settings->Device (Vendor/Web/Model/Bootloader/Software/Hardware);
         HW+bootloader ver read from the stock boot-data block 0x080A4000 (survives app updates).

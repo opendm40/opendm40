@@ -162,6 +162,17 @@ pub enum Log {
 ///                           tracker (axis lock, capture): down at x0,y0, held
 ///                           still hold ms, moved to x1,y1 in ms ms (0 = 300),
 ///                           released; runs synchronously
+///   DBG:HWTRIG?             comparator trigger (hwtrig.rs): TIM2 SR,CNT,CCR1,
+///                           PA15<<16|DOR2,enabled,available,map rising lo,hi,
+///                           map falling lo,hi,post_ticks
+///   DBG:HWTRIG:ENABLE 0|1   use the comparator trigger (default off,
+///                           hwtrig::DEFAULT_ENABLED; 1 resets the miss count)
+///   DBG:HWTRIG:CAL?         wire-free calibration (scope rail on, MCX open):
+///                           flip00,flip01,flip10,flip11,map0lo,map0hi,map1lo,
+///                           map1hi,hyst,slope,code0,code1 or the error name
+///   DBG:HWTRIG:STAT?        hits,misses,delta_last,delta_min,delta_max,mean
+///                           (samples, refined crossing - hardware estimate)
+///   DBG:HWTRIG:STAT:RESET   clear the statistics
 ///   DBG:GENUINE?            device check (src/genuine.rs, docs/genuine-check.md):
 ///                           uid_hex,stored_hex,expected_hex,GENUINE|MISMATCH (12 bytes
 ///                           each, memory order); read-only
@@ -267,6 +278,8 @@ pub enum Cmd {
     DbgGrab(Option<u16>),
     /// DBG:GEST?: log of the last scope drags.
     DbgGest,
+    /// DBG:HWTRIG...: 0 query, 1 ENABLE (bool), 2 CAL?, 3 STAT?, 4 STAT:RESET.
+    DbgHwTrig(u8, bool),
 }
 
 /// ON | 1 -> true, OFF | 0 -> false.
@@ -607,6 +620,20 @@ impl Scpi {
                     out = Out::Instr(Cmd::DbgGrab(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 5000.0) as u16) }))
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {
+                    let c = match (parts.get(2).copied(), parts.get(3).copied(), query) {
+                        (None, _, true) => Some(Cmd::DbgHwTrig(0, false)),
+                        (Some(b"ENABLE"), None, false) => on_off(trim(arg)).map(|on| Cmd::DbgHwTrig(1, on)),
+                        (Some(b"CAL"), None, true) => Some(Cmd::DbgHwTrig(2, false)),
+                        (Some(b"STAT"), None, true) => Some(Cmd::DbgHwTrig(3, false)),
+                        (Some(b"STAT"), Some(b"RESET"), false) => Some(Cmd::DbgHwTrig(4, false)),
+                        _ => None,
+                    };
+                    match c {
+                        Some(c) => out = Out::Instr(c),
+                        None => self.err = Some("Undefined header"),
+                    }
+                }
                 _ if p0 == b"DBG" => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     let a = trim(arg);

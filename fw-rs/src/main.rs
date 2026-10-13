@@ -19,6 +19,7 @@ mod mmio;
 mod persist;
 mod power;
 mod scope;
+mod hwtrig;
 mod scope_meas;
 mod scpi;
 mod startup;

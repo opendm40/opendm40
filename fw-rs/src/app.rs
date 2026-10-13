@@ -2845,6 +2845,81 @@ impl App {
                 out.put_bytes(if pb12 { b",PB12=1" } else { b",PB12=0" });
                 Some(())
             }
+            // Comparator trigger (hwtrig.rs, docs/hwtrig-integration.md H8);
+            // a scope command: the scope rail is on for it (calibration).
+            C::DbgHwTrig(op, on) => {
+                let hw = &mut self.scope.hw;
+                let put_i = |out: &mut crate::scpi::Scpi, v: i64| {
+                    if v < 0 {
+                        out.put_bytes(b"-");
+                    }
+                    crate::put_u32(out, v.unsigned_abs().min(u32::MAX as u64) as u32);
+                };
+                match op {
+                    0 => {
+                        let d = hw.debug();
+                        let (mr, mf) = (hw.map(true), hw.map(false));
+                        for (i, v) in d.iter().chain([hw.enabled() as u32, hw.available() as u32].iter()).enumerate() {
+                            if i > 0 {
+                                out.put_bytes(b",");
+                            }
+                            crate::put_u32(out, *v);
+                        }
+                        for v in [mr.0, mr.1, mf.0, mf.1] {
+                            out.put_bytes(b",");
+                            out.put_f32(v);
+                        }
+                        out.put_bytes(b",");
+                        crate::put_u32(out, hw.post_ticks());
+                        Some(())
+                    }
+                    1 => {
+                        hw.set_enabled(on);
+                        None
+                    }
+                    2 => {
+                        match self.scope.hw_calibrate(now, clk) {
+                            Ok(r) => {
+                                let f = r.flip;
+                                for (i, v) in [f[0][0], f[0][1], f[1][0], f[1][1]].iter().enumerate() {
+                                    if i > 0 {
+                                        out.put_bytes(b",");
+                                    }
+                                    crate::put_u32(out, *v as u32);
+                                }
+                                for v in [r.map[0].0, r.map[0].1, r.map[1].0, r.map[1].1, r.hyst, r.slope, r.codes[0], r.codes[1]] {
+                                    out.put_bytes(b",");
+                                    out.put_f32(v);
+                                }
+                            }
+                            Err(e) => out.put_bytes(match e {
+                                crate::hwtrig::CalError::NoComparator => b"NoComparator",
+                                crate::hwtrig::CalError::NoFlip => b"NoFlip",
+                                crate::hwtrig::CalError::OffsetNoEffect => b"OffsetNoEffect",
+                                crate::hwtrig::CalError::Slope => b"Slope",
+                            }),
+                        }
+                        Some(())
+                    }
+                    3 => {
+                        let st = hw.stats;
+                        crate::put_u32(out, st.hits);
+                        out.put_bytes(b",");
+                        crate::put_u32(out, st.misses);
+                        for v in [st.delta_last, st.delta_min, st.delta_max] {
+                            out.put_bytes(b",");
+                            put_i(out, v as i64);
+                        }
+                        out.put_bytes(b",");
+                        out.put_f32(if st.hits > 0 { st.delta_sum as f32 / st.hits as f32 } else { 0.0 });
+                        Some(())
+                    }
+                    _ => {
+                        hw.reset_stats();
+                        None
+                    }
+                }
+            }
             C::WavPre => {
                 // points, x increment (s), y: volts = (byte*4 - zero) * k.
                 out.put_bytes(b"400,");
@@ -2860,7 +2935,7 @@ impl App {
         if matches!(cmd, C::DiagDac | C::DiagPwm) {
         } else if !scope_cmd {
             self.gen_set(g);
-        } else if !matches!(cmd, C::Meas(_) | C::WavData | C::WavPre) && reply.is_none() {
+        } else if !matches!(cmd, C::Meas(_) | C::WavData | C::WavPre | C::DbgHwTrig(..)) && reply.is_none() {
             self.scope_set(sc, now);
         }
         reply.is_some()
