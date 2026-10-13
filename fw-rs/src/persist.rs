@@ -18,6 +18,9 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 const VERSION: u32 = 4;
 pub const WORDS: usize = 40;
 const V3_WORDS: usize = 24;
+/// The record (magic, version, WORDS, CRC) must end below the boot shim's
+/// words at 0x40024FF0 (boot.rs BKP_CRASH..BKP_LAST).
+const _: () = assert!(BKP + 4 * (WORDS as u32 + 3) <= 0x4002_4FF0, "persist record overlaps the boot words");
 const V2_WORDS: usize = 16;
 
 fn crc(words: &[u32]) -> u32 {

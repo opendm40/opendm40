@@ -29,6 +29,22 @@
 //!   SYSTem:TEMPerature?   MCU (GD32) internal sensor, C (typical constants)
 //!   SYSTem:RAIL AUTO|BOTH / ?   analog rail policy (default AUTO, persisted)
 //!   SYSTem:RAIL:STATe?   dmm_rail,scope_rail (1/0)
+//!
+//! Statistics / limits of the CURRENT DMM function (FR-01 / 02 / 06; values
+//! in SI units of the function, as READ?):
+//!   CALCulate:AHOLd ON|OFF / ?            AutoHold (as RUN held 1 s)
+//!   CALCulate:AVERage[:AVERage]?  CALCulate:AVERage:MINimum? / MAXimum?
+//!     no sample yet: +9.9E37 and "Data stale" in SYST:ERR?
+//!   CALCulate:AVERage:COUNt?              samples in the statistics
+//!   CALCulate:AVERage:CLEar               restart the statistics
+//!   CALCulate:AVERage:STATe ON|OFF / ?    recording session (no idle
+//!     power-off; ON restarts the statistics)
+//!   CALCulate:LIMit:LOWer|UPPer <v> / ?   set a limit (turns the check on);
+//!     query: +9.9E37 when not set
+//!   CALCulate:LIMit:STATe ON|OFF / ?      limit check on / off
+//!   CALCulate:LIMit:CLEar                 clear both limits (fw-rs; not the
+//!     Keysight meaning "clear the fail indicator")
+//!   CALCulate:LIMit:FAIL?                 1 = the value is outside the limits
 
 use crate::dmm::Reading;
 
@@ -77,7 +93,11 @@ pub enum Log {
 
 /// Debug commands over USBTMC (development aids, not SCPI standard):
 ///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive)
-///   DBG:TAP x,y  DBG:KEY n  DBG:SWIPE L|R    inject touch / side key
+///   DBG:TAP x,y  DBG:SWIPE L|R  inject a touch tap / view swipe
+///   DBG:KEY n[,ms]          side key n (0 MENU, 1 RUN, 2 AUTO, 3 MF): a full
+///                           click (key-down, key-up); with ms > 0 the key-up
+///                           follows ms later (long press: RUN >= 1000 ms in a
+///                           DMM view = AutoHold on/off); max 60000
 ///   DBG:SWIPE D,n           synthetic n-finger swipe down (3 = screenshot, 2 = power off)
 ///   DBG:GENUINE?            device check (src/genuine.rs, docs/genuine-check.md):
 ///                           uid_hex,stored_hex,expected_hex,GENUINE|MISMATCH (12 bytes
@@ -154,6 +174,26 @@ pub enum Cmd {
     SysTemp,
     SysRail(Option<bool>),
     SysRailState,
+    /// CALCulate (FR-01 / 02 / 06; App::set_ahold etc.).
+    CalcAhold(Option<bool>),
+    /// 0 MIN, 1 MAX, 2 AVER, 3 COUNt.
+    CalcAver(u8),
+    CalcAverClear,
+    CalcAverState(Option<bool>),
+    /// 0 LOWer, 1 UPPer; None = query.
+    CalcLim(u8, Option<f32>),
+    CalcLimClear,
+    CalcLimState(Option<bool>),
+    CalcLimFail,
+}
+
+/// ON | 1 -> true, OFF | 0 -> false.
+fn on_off(a: &[u8]) -> Option<bool> {
+    match a {
+        b"ON" | b"1" => Some(true),
+        b"OFF" | b"0" => Some(false),
+        _ => None,
+    }
 }
 
 /// Parse a number like "1.5", "-2e-3", "10k" / "5m" (suffixes k, M, m, u, n).
@@ -489,7 +529,7 @@ impl Scpi {
                             }
                             _ => Dbg::Input(1, 0, 0),
                         },
-                        b"KEY" => Dbg::Input(3, nums::<1>(a)[0] as u16, 0),
+                        b"KEY" => { let v = nums::<2>(a); Dbg::Input(3, v[0] as u16, v[1].min(60_000) as u16) } // n[,hold_ms]
                         b"LCD" => {
                             let v = nums::<5>(a);
                             Dbg::Lcd(v[0] as u16, v[1] as u16, v[2].max(1) as u16, v[3].max(1) as u16, v[4])
@@ -615,6 +655,45 @@ impl Scpi {
                         }
                     } else {
                         self.err = Some("Undefined header");
+                    }
+                }
+                _ if kw(p0, "CALCulate") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let leaf = parts.get(2).copied();
+                    let a = trim(arg);
+                    // ON|OFF set or the query: Some(None) = query.
+                    let state = if query { Some(None) } else { on_off(a).map(Some) };
+                    let c = if kw(sub, "AHOLd") && leaf.is_none() {
+                        state.map(Cmd::CalcAhold)
+                    } else if kw(sub, "AVERage") {
+                        match leaf {
+                            None if query => Some(Cmd::CalcAver(2)),
+                            Some(l) if query && kw(l, "MINimum") => Some(Cmd::CalcAver(0)),
+                            Some(l) if query && kw(l, "MAXimum") => Some(Cmd::CalcAver(1)),
+                            Some(l) if query && kw(l, "AVERage") => Some(Cmd::CalcAver(2)),
+                            Some(l) if query && kw(l, "COUNt") => Some(Cmd::CalcAver(3)),
+                            Some(l) if !query && kw(l, "CLEar") => Some(Cmd::CalcAverClear),
+                            Some(l) if kw(l, "STATe") => state.map(Cmd::CalcAverState),
+                            _ => None,
+                        }
+                    } else if kw(sub, "LIMit") {
+                        match leaf {
+                            Some(l) if kw(l, "LOWer") || kw(l, "UPPer") => {
+                                let k = kw(l, "UPPer") as u8;
+                                if query { Some(Cmd::CalcLim(k, None)) } else { parse_num(a).map(|v| Cmd::CalcLim(k, Some(v))) }
+                            }
+                            Some(l) if kw(l, "STATe") => state.map(Cmd::CalcLimState),
+                            Some(l) if !query && kw(l, "CLEar") => Some(Cmd::CalcLimClear),
+                            Some(l) if query && kw(l, "FAIL") => Some(Cmd::CalcLimFail),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+                    match c {
+                        Some(c) => out = Out::Instr(c),
+                        None if !query && !a.is_empty() => self.err = Some("Illegal parameter value"),
+                        None => self.err = Some("Undefined header"),
                     }
                 }
                 _ => self.err = Some("Undefined header"),

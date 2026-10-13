@@ -183,9 +183,13 @@ pub struct Result {
     /// `boot()` duration in ms (DWT cycles at 200 MHz; 12.5x too low when
     /// the core runs at 16 MHz). 0 = not measured.
     pub ms: u32,
+    /// The run with the firmware file `_DM40PRV.BIN` was `NoSpace`; this is
+    /// the result of the retry without it (review 2026-10-13 M1). DBG:BOOT?
+    /// shows the status with a `_NOFW` suffix.
+    pub fw_skipped: bool,
 }
 
-static mut RESULT: Result = Result { status: Status::NotRun, written: 0, conflict: 0, freed: 0, ms: 0 };
+static mut RESULT: Result = Result { status: Status::NotRun, written: 0, conflict: 0, freed: 0, ms: 0, fw_skipped: false };
 
 /// Work buffers of run_inner (buf, tmp, fat) and free_number, 3 x 4 KiB, kept
 /// off the TCM stack: a screenshot calls the writer from deep in the main
@@ -384,8 +388,28 @@ const DWT_CYCCNT: u32 = 0xE000_1004;
 /// directory entry still has its size, our write stamp and a well-formed
 /// chain is not read at all (`quick_trust`). Every other file is compared in
 /// full and (re)written if different. Records and returns the result.
-#[inline(never)]
+///
+/// A run is all-or-nothing on space (`NoSpace`: nothing written), and the
+/// firmware file (~63 new clusters, copy-on-write) is by far the largest
+/// job: on a nearly full disk it would block every later CALIB / LOADER
+/// backup. So a `NoSpace` with `fw` is retried once without it (BACKUP.TXT
+/// then has no firmware line; an existing `_DM40PRV.BIN` is left as it is)
+/// and the result says `fw_skipped` (review 2026-10-13 M1).
 pub fn run(dev: &mut dyn BlockDevice, srcs: &[Src], fw: Option<&dyn Source>) -> Result {
+    let mut r = run_once(dev, srcs, fw);
+    if r.status == Status::NoSpace && fw.is_some() {
+        r = run_once(dev, srcs, None);
+        r.fw_skipped = true;
+    }
+    r.ms = unsafe { RESULT.ms }; // previous value; boot() stores this run's after
+    unsafe { RESULT = r };
+    r
+}
+
+/// One pass of `run` (never inlined: the BACKUP.TXT buffer is on the stack
+/// once, not once per pass).
+#[inline(never)]
+fn run_once(dev: &mut dyn BlockDevice, srcs: &[Src], fw: Option<&dyn Source>) -> Result {
     let mut text = [0u8; TXT_MAX];
     let mut lines = [(0u16, 0u16); N];
     let k = srcs.len().min(TXT_BIT);
@@ -404,10 +428,7 @@ pub fn run(dev: &mut dyn BlockDevice, srcs: &[Src], fw: Option<&dyn Source>) -> 
         cnt += 1;
     }
     let q = Quick { text: txt, lines: &lines, txt: k };
-    let mut r = run_inner(dev, &fs[..cnt], Some(&q));
-    r.ms = unsafe { RESULT.ms }; // previous value; boot() stores this run's after
-    unsafe { RESULT = r };
-    r
+    run_inner(dev, &fs[..cnt], Some(&q))
 }
 
 /// Write one file `name` (8.3, upper case) from `src` through the same
@@ -764,7 +785,7 @@ fn quick_trust(dev: &mut dyn BlockDevice, v: &Vol, files: &[F], found: &[Option<
 }
 
 fn run_inner(dev: &mut dyn BlockDevice, files: &[F], quick: Option<&Quick>) -> Result {
-    let mut res = Result { status: Status::Error, written: 0, conflict: 0, freed: 0, ms: 0 };
+    let mut res = Result { status: Status::Error, written: 0, conflict: 0, freed: 0, ms: 0, fw_skipped: false };
     if !dev.present() || dev.block_size() as usize != BLK {
         res.status = Status::NoMedium;
         return res;

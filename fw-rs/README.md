@@ -98,7 +98,17 @@ SOUR:FUNC:SQU:DCYC <%>  OUTP ON|OFF
 TIM:SCAL <s/div>  CHAN1:SCAL <V/div>  CHAN1:COUP AC|DC
 TRIG:LEV <V>  TRIG:SLOP POS|NEG  TRIG:SWE AUTO|NORM|SING  RUN STOP SING
 SCOP:MEAS:VPP|VAVG|VRMS|FREQ?  WAV:PRE?  WAV:DATA? (#3400 + 400 bytes)
+CALC:AHOL ON|OFF|?                      AutoHold
+CALC:AVER?  CALC:AVER:MIN?|MAX?|AVER?|COUN?  CALC:AVER:CLE  CALC:AVER:STAT ON|OFF|?
+CALC:LIM:LOW|UPP <v>|?  CALC:LIM:STAT ON|OFF|?  CALC:LIM:CLE  CALC:LIM:FAIL?
 ```
+
+`CALC:` acts on the current DMM function, values in its SI unit. `CALC:AVER...?`
+before the first sample and an unset `CALC:LIM:LOW|UPP?` answer `+9.9E37`
+(the former also queues "Data stale"); setting a limit turns the check on;
+`CALC:LIM:CLE` clears both limits; `CALC:AVER:STAT ON` starts a recording
+session (statistics restarted, no idle power-off). Temperature, `SYST:RAIL`,
+`LOG:` and `DBG:` commands: see the header of `src/scpi.rs`.
 
 ## Milestones
 

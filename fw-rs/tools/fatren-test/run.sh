@@ -40,7 +40,11 @@
 #   byte-identical, dm40fw.py info + body CRC ok; unchanged = 4 reads; firmware
 #   change rewrites it + BACKUP.TXT; a host re-copy is only re-stamped (root
 #   block); an in-place data change is missed (documented) until BACKUP.TXT is
-#   deleted; fatren renaming the installed file over it -> re-stamp only.
+#   deleted; fatren renaming the installed file over it -> re-stamp only;
+#   review M1: a nearly full disk (20 free clusters) with a changed firmware
+#   and calibration -> NoSpace retried without the firmware file: CALIB.BIN +
+#   BACKUP.TXT written (fw_skipped), old _DM40PRV.BIN untouched, then
+#   UNCHANGED while full; after freeing space the firmware file is written.
 # screenshot (src/screenshot.rs through calbackup::write_file, synthetic screen):
 #   12. S000.BMP taken -> S001.BMP, then S002.BMP; after deleting S000.BMP the
 #      next one is S000.BMP again; fsck clean; 307266 bytes, header equal to
@@ -332,6 +336,43 @@ grep -q "backup=Written written=0x100 conflict=0x000 freed=0" $W/f9 && echo "ok:
 "$W/t" $IMG8 live $MT | grep -q "status=Clean" && echo "ok: fatren then clean" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG8
 fwok $IMG8 $W/t.bin
+
+echo "--- M1: nearly full disk, no room for _DM40PRV.BIN -> backup retried without it"
+IMG9=$W/disk9.img
+mkimg $IMG9
+"$W/t" $IMG9 backup $W/src $W/flash_stock | grep -q "backup=Written written=0x1ff conflict=0x000 freed=0 fw_skipped=false" && echo "ok: all 9 files written" || { echo "FAIL at line $LINENO"; exit 1; }
+# Fill the volume up to 20 free clusters (80 KiB < the ~260 KiB new firmware file).
+FREE=$(python3 -I - $IMG9 <<'PY'
+import struct, sys
+d = open(sys.argv[1], 'rb').read()
+bps, spc, rsvd, nf, rootn, tot16, fsz, tot32 = (struct.unpack_from('<H', d, 0x0B)[0], d[0x0D],
+    struct.unpack_from('<H', d, 0x0E)[0], d[0x10], struct.unpack_from('<H', d, 0x11)[0],
+    struct.unpack_from('<H', d, 0x13)[0], struct.unpack_from('<H', d, 0x16)[0], struct.unpack_from('<I', d, 0x20)[0])
+data = rsvd + nf * fsz + rootn * 32 // bps
+clusters = ((tot16 or tot32) - data) // spc
+print(sum(1 for c in range(2, clusters + 2) if struct.unpack_from('<H', d, rsvd * bps + 2 * c)[0] == 0))
+PY
+)
+head -c $(( (FREE - 20) * 4096 )) /dev/zero > $W/fill
+mcopy -i $IMG9 $W/fill ::FILL.DAT
+echo "free clusters before the fill: $FREE, after: 20"
+printf '\x17' | dd of=$W/src/CALIB.BIN bs=1 seek=500 conv=notrunc status=none
+"$W/t" $IMG9 backup $W/src $W/flash_native | tee $W/m1
+grep -q "backup=Written written=0x081 conflict=0x000 freed=2 fw_skipped=true" $W/m1 && echo "ok: firmware + calibration changed, disk nearly full: CALIB.BIN + BACKUP.TXT written, _DM40PRV.BIN skipped" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG9
+same $IMG9
+fwok $IMG9 $STOCK
+mtype -i $IMG9 ::BACKUP.TXT | grep -q "_DM40PRV" && { echo "FAIL at line $LINENO: BACKUP.TXT still lists _DM40PRV.BIN"; exit 1; }
+echo "ok: old _DM40PRV.BIN left as it was, BACKUP.TXT without the firmware lines"
+"$W/t" $IMG9 backup $W/src $W/flash_native | tee $W/m2
+grep -q "backup=Unchanged written=0x000 conflict=0x000 freed=0 fw_skipped=true" $W/m2 && grep -q "changed blocks: \[\]" $W/m2 && echo "ok: still full: UNCHANGED (fw skipped), nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
+mdel -i $IMG9 ::FILL.DAT
+"$W/t" $IMG9 backup $W/src $W/flash_native | tee $W/m3
+grep -q "backup=Written written=0x180 conflict=0x000 freed=$(( (495128 + 12 + 4095) / 4096 + 1 )) fw_skipped=false" $W/m3 && echo "ok: space freed: _DM40PRV.BIN + BACKUP.TXT written, old chains freed" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG9
+same $IMG9
+fwok $IMG9 $NATIVE
+"$W/t" $IMG9 backup $W/src $W/flash_native | grep -q "backup=Unchanged written=0x000 conflict=0x000 freed=0 fw_skipped=false" && echo "ok: then unchanged" || { echo "FAIL at line $LINENO"; exit 1; }
 
 echo "=== screenshot"
 # bmpok <img> <name>: size, header (vs the stock dump), pixels vs lcd::pattern.

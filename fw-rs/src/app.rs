@@ -736,8 +736,7 @@ impl App {
             if self.locked && matches!(self.view, View::Dmm | View::DmmScope) {
                 let b = self.dmm.button();
                 self.dmm.press(clk, b);
-                self.meter.reset();
-                self.redraw = true;
+                self.func_changed();
                 self.beep(now, 150);
             }
         }
@@ -1657,7 +1656,7 @@ impl App {
                     Some(i @ 0..=6) => {
                         if i != k {
                             self.dmm.set_t_sensor(clk, i);
-                            self.meter.reset();
+                            self.func_changed();
                             self.last_raw = None;
                         }
                     }
@@ -1689,7 +1688,7 @@ impl App {
                         let sub = if k == 3 { 2 } else { k };
                         if sub != self.dmm.sub() {
                             self.dmm.set_sub(clk, sub);
-                            self.meter.reset();
+                            self.func_changed();
                         }
                         self.redraw = true;
                     }
@@ -1707,8 +1706,7 @@ impl App {
                     self.chart_dirty = true;
                 } else if let Some(i) = ui::button_hit(6, x, y) {
                     self.dmm.press(clk, Button::ALL[i]);
-                    self.meter.reset();
-                    self.redraw = true;
+                    self.func_changed();
                 }
             }
             View::Scope => {
@@ -1853,9 +1851,41 @@ impl App {
     }
 }
 
+impl App {
+    /// After a DMM function / sub-mode change (function bar touch, locked
+    /// PD6 click, SCPI CONF / MEAS / FUNC): HOLD, REL, statistics and the
+    /// AutoHold window restart (meter.reset), the trend chart starts over
+    /// for the new function, and the static DMM view (function bar, labels,
+    /// chart axes) is redrawn. One path, so touch and SCPI give the same
+    /// screen.
+    /// `m` (as for select_func) is the current function (incl. the sensor).
+    pub fn is_func(&self, m: u8) -> bool {
+        let f = self.dmm.func();
+        m == f || (m >= 32 && f == 15 && self.dmm.t_sensor() == m - 32)
+    }
+
+    fn func_changed(&mut self) {
+        self.meter.reset();
+        self.chart_n = 0;
+        self.chart_dirty = true;
+        self.redraw = true;
+    }
+
+    /// SCPI CONFigure / MEASure / FUNCtion: select stock mode `m` (dmm.rs
+    /// Dmm::select: 16 / 17 AC+DC, 32 + k temperature sensor k) as a touch
+    /// on the function bar would.
+    pub fn select_func(&mut self, clk: &mut Clock, m: u8) {
+        if self.is_func(m) {
+            return;
+        }
+        self.dmm.select(clk, m);
+        self.func_changed();
+        self.last_raw = None;
+    }
+}
+
 /// FR-01 / FR-02 / FR-06 host interface for SCPI CALC:... (the command
-/// parsing lives in scpi.rs; allowed unused until it is wired there).
-#[allow(dead_code)]
+/// parsing lives in scpi.rs, the dispatch in scpi_dmm).
 impl App {
     /// CALC:AHOLD ON|OFF / CALC:AHOLD?
     pub fn set_ahold(&mut self, on: bool) {
@@ -1934,18 +1964,21 @@ impl App {
 
 impl App {
 
-    /// SCPI temperature / system commands (scpi.rs Cmd::Temp* / Sys*); None
-    /// for the scope / generator commands.
+    /// SCPI temperature / system / statistics-limits commands (scpi.rs
+    /// Cmd::Temp* / Sys* / Calc*); None for the scope / generator commands
+    /// (every DMM-side variant needs an arm here: the scope path would power
+    /// the scope rail for it).
     fn scpi_dmm(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> Option<bool> {
         use crate::scpi::Cmd as C;
         let k = self.dmm.t_sensor();
         let now = clk.now_ms();
         let r = match cmd {
             C::TempSensor(Some(k)) => {
-                self.dmm.set_t_sensor(clk, k);
-                self.meter.reset();
-                self.last_raw = None;
-                self.redraw = true;
+                if k != self.dmm.t_sensor() {
+                    self.dmm.set_t_sensor(clk, k);
+                    self.func_changed();
+                    self.last_raw = None;
+                }
                 false
             }
             C::TempSensor(None) => {
@@ -2021,6 +2054,66 @@ impl App {
             C::SysRailState => {
                 out.put_bytes(if self.scope.dmm_rail() { b"1," } else { b"0," });
                 out.put_bytes(if self.scope.powered() { b"1" } else { b"0" });
+                true
+            }
+            C::CalcAhold(Some(on)) => {
+                self.set_ahold(on);
+                false
+            }
+            C::CalcAhold(None) => {
+                out.put_bytes(if self.ahold() { b"1" } else { b"0" });
+                true
+            }
+            C::CalcAver(k) => {
+                let (v, n) = self.stats();
+                match (k, v) {
+                    (3, _) => crate::put_u32(out, n),
+                    (_, Some((min, max, avg))) => out.put_f32([min, max, avg][k.min(2) as usize]),
+                    (_, None) => {
+                        out.set_err("Data stale");
+                        out.put_bytes(b"+9.90000000E+37");
+                    }
+                }
+                true
+            }
+            C::CalcAverClear => {
+                self.stats_clear();
+                false
+            }
+            C::CalcAverState(Some(on)) => {
+                self.set_stats_rec(on);
+                false
+            }
+            C::CalcAverState(None) => {
+                out.put_bytes(if self.stats_rec() { b"1" } else { b"0" });
+                true
+            }
+            C::CalcLim(k, Some(v)) => {
+                self.set_limit(k == 1, Some(v));
+                false
+            }
+            C::CalcLim(k, None) => {
+                match self.limit(k == 1) {
+                    Some(v) => out.put_f32(v),
+                    None => out.put_bytes(b"+9.90000000E+37"),
+                }
+                true
+            }
+            C::CalcLimClear => {
+                self.set_limit(false, None);
+                self.set_limit(true, None);
+                false
+            }
+            C::CalcLimState(Some(on)) => {
+                self.set_limit_state(on);
+                false
+            }
+            C::CalcLimState(None) => {
+                out.put_bytes(if self.limit_state() { b"1" } else { b"0" });
+                true
+            }
+            C::CalcLimFail => {
+                out.put_bytes(if self.limit_fail() { b"1" } else { b"0" });
                 true
             }
             _ => return None,

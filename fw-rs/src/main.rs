@@ -51,6 +51,12 @@ const SCB_AIRCR: u32 = 0xE000_ED0C;
 const INITIAL_HOLD_MS: u64 = if cfg!(feature = "native") { u64::MAX / 4 } else { 60_000 }; // native: feed while the loop runs
 const KEEPALIVE_MS: u64 = 15_000;
 const KEEPALIVE_MAX_MS: u64 = 600_000;
+/// MEASure:<f>? after a function change waits for a full averaging window at
+/// most this long (then any fresh reading answers), ms.
+const SCPI_SETTLE_MS: u64 = 1500;
+/// READ? / MEASure? / FETCh? without any reading this long: +9.9E37 and
+/// "Data stale" (below the 2 s PyVISA default timeout), ms.
+const SCPI_WAIT_MS: u64 = 1900;
 
 /// pid.codes test VID/PID, for the debug build only.
 const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
@@ -157,10 +163,15 @@ fn main() -> ! {
     let mut reset_at: Option<u64> = None;
 
     let mut scpi = scpi::Scpi::new();
-    // SCPI READ?/MEASure?/FETCh?: reply with a reading whose seq is >= .0;
-    // .1 (READ?/MEASure?): also wait until the DMM averaging window is full;
-    // .2 = readings accepted so far (a count: .0 is 0 after a mode change).
-    let mut scpi_wait: Option<(u32, bool, u8)> = None;
+    // SCPI READ?/MEASure?/FETCh? waiting for a DMM reading: (min seq, settle,
+    // start ms). The reply is the first reading with seq >= min, at whatever
+    // averaging it has (READ?: the next conversion, ~0.1-0.4 s). settle
+    // (MEASure:<f>? that changed the function): also wait for a full
+    // averaging window, but at most SCPI_SETTLE_MS. No reading within
+    // SCPI_WAIT_MS: +9.9E37 and "Data stale" - every reply stays inside the
+    // usual host timeouts (PyVISA 2 s, Linux usbtmc 5 s); a late reply would
+    // shift every later one.
+    let mut scpi_wait: Option<(u32, bool, u64)> = None;
     // Data logger (FR-38): owns the HY3131 AD1 fast stream while active.
     let logger = unsafe { &mut *core::ptr::addr_of_mut!(LOGGER) };
     logger.set_osr(logger::DEFAULT_OSR);
@@ -171,6 +182,8 @@ fn main() -> ! {
     let mut next_touch = 0u64;
     let mut next_poll = 0u64;
     let mut draw_hold_until = 0u64;
+    // DBG:KEY n,ms: the deferred key-up (code, due time).
+    let mut dbg_key_up: Option<(u8, u64)> = None;
 
     // Loop timing (debug): longest iteration in the last second, us.
     let mut loop_t0 = unsafe { mmio::r32(0xE000_1004) };
@@ -219,6 +232,10 @@ fn main() -> ! {
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
         logger.poll();
+        if tmc.take_cleared() {
+            // USBTMC INITIATE_CLEAR / bus reset: no reply to a pending query.
+            scpi_wait = None;
+        }
         let mut msg = [0u8; 256];
         let mut msg_n = 0usize;
         if let Some(cmd) = tmc.take_command() {
@@ -226,6 +243,11 @@ fn main() -> ! {
             app.note_host_activity(now);
             msg_n = cmd.len().min(256);
             msg[..msg_n].copy_from_slice(&cmd[..msg_n]);
+            // A new message while a READ?/MEAS? is still waiting: the host
+            // gave up on it (IEEE 488.2 query interrupted); no late reply.
+            if scpi_wait.take().is_some() {
+                scpi.set_err("Query INTERRUPTED");
+            }
             // Any host traffic keeps the debug-build watchdog fed.
             deadline = deadline.max(now + KEEPALIVE_MS);
         }
@@ -236,11 +258,7 @@ fn main() -> ! {
                 scpi::Out::None => false,
                 scpi::Out::Text => true,
                 scpi::Out::Configure(m) => {
-                    if m != app.dmm.func() {
-                        app.dmm.select(&mut clk, m);
-                        app.meter.reset();
-                        app.last_raw = None;
-                    }
+                    app.select_func(&mut clk, m); // no-op when already selected
                     false
                 }
                 scpi::Out::Measure(m) => {
@@ -253,12 +271,11 @@ fn main() -> ! {
                     } else {
                         // The multimeter needs its analog side powered.
                         app.dmm_power(&mut clk);
-                        if let Some(m) = m.filter(|&m| m != app.dmm.func()) {
-                            app.dmm.select(&mut clk, m);
-                            app.meter.reset();
-                            app.last_raw = None;
+                        let changed = m.is_some_and(|m| !app.is_func(m));
+                        if let Some(m) = m.filter(|_| changed) {
+                            app.select_func(&mut clk, m);
                         }
-                        scpi_wait = Some((app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0), true, 0));
+                        scpi_wait = Some((app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0), changed, now));
                         false
                     }
                 }
@@ -278,7 +295,7 @@ fn main() -> ! {
                             scpi.put_bytes(b"+9.90000000E+37");
                             true
                         } else {
-                            scpi_wait = Some((0, false, 0));
+                            scpi_wait = Some((0, false, now));
                             false
                         }
                     }
@@ -316,7 +333,20 @@ fn main() -> ! {
                             0 => Some(gesture::Gesture::Tap(p)),
                             1 => Some(gesture::Gesture::SwipeLeft),
                             2 => Some(gesture::Gesture::SwipeRight),
-                            3 => Some(gesture::Gesture::KeyDown(x as u8)),
+                            // DBG:KEY n[,ms]: a full click; y = hold ms
+                            // (0: release now, else the key-up is deferred).
+                            3 => {
+                                if let Some((c, _)) = dbg_key_up.take() {
+                                    app.gesture(&mut clk, gesture::Gesture::KeyUp(c)); // still held: release first
+                                }
+                                app.gesture(&mut clk, gesture::Gesture::KeyDown(x as u8));
+                                if y == 0 {
+                                    Some(gesture::Gesture::KeyUp(x as u8))
+                                } else {
+                                    dbg_key_up = Some((x as u8, now + y as u64));
+                                    None
+                                }
+                            }
                             4 => gestures.synth_swipe_down(x as u8, now), // DBG:SWIPE D,n
                             _ => None,
                         };
@@ -492,6 +522,20 @@ fn main() -> ! {
         mark(0, &mut ts);
         app.tick(&mut clk, can_draw);
         mark(1, &mut ts);
+        if scpi_wait.is_some_and(|w| now >= w.2 + SCPI_WAIT_MS) {
+            // No DMM reading in time (stalled / suspended converter, a slow
+            // capacitance range): answer now rather than after the host's
+            // timeout.
+            scpi_wait = None;
+            scpi.len = 0;
+            scpi.put_bytes(b"+9.90000000E+37");
+            scpi.set_err("Data stale");
+            tmc.respond(&scpi.buf[..scpi.len]);
+        }
+        if let Some((c, _)) = dbg_key_up.filter(|k| now >= k.1) {
+            dbg_key_up = None;
+            app.gesture(&mut clk, gesture::Gesture::KeyUp(c));
+        }
 
         // Suspend touch while logging: there is no logger UI (the screen is
         // frozen), the power key lives in app.tick, and the bit-banged I2C read
@@ -535,14 +579,17 @@ fn main() -> ! {
             if !logging {
                 if let Some(raw) = app.dmm.poll(&mut clk) {
                     if let Some(r) = app.reading(raw, can_draw) {
-                        if let Some((min, full, seen)) = scpi_wait.filter(|w| r.seq.wrapping_sub(w.0) < 0x8000_0000) {
-                            // READ?/MEASure?: a value at the full (+1 digit)
-                            // resolution, i.e. once the moving average holds
-                            // AVG_FULL conversions (avg_n 0 = not an averaged
-                            // range; overload never averages; at most 20 readings).
-                            let n = seen.saturating_add(1);
-                            let ready = !full || r.avg_n == 0 || r.avg_n >= dmm::AVG_FULL || r.main.ol || n >= 20;
-                            scpi_wait = Some((min, full, n));
+                        if let Some((_, settle, t0)) = scpi_wait.filter(|w| r.seq.wrapping_sub(w.0) < 0x8000_0000) {
+                            // MEASure:<f>? after a function change: prefer a
+                            // value at the full (+1 digit) resolution (the
+                            // moving average holds AVG_FULL conversions; avg_n
+                            // 0 = not an averaged range; overload never
+                            // averages), but not past SCPI_SETTLE_MS.
+                            let ready = !settle
+                                || r.avg_n == 0
+                                || r.avg_n >= dmm::AVG_FULL
+                                || r.main.ol
+                                || now >= t0 + SCPI_SETTLE_MS;
                             if ready {
                                 scpi_wait = None;
                                 scpi.len = 0;
