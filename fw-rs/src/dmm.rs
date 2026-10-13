@@ -550,13 +550,14 @@ pub struct Dmm {
     avg_skip: bool,
     /// Conversions in the mean of the reading being produced (Reading::avg_n).
     avg_n: u8,
-    /// AC+DC: drop the next conversion (the first one after a phase / range
-    /// switch, see `write_config`).
-    skip: bool,
-    /// AC+DC AC phase: the last 3 raw AC values (ring) and how many were
-    /// taken since the config write (see `ac_settled`).
-    ac_win: [f32; 3],
-    ac_k: u8,
+    /// AC+DC DC phase: the stock's AD1-OSR once-flag (DAT_080141fc and the
+    /// mV / A ones): set when R22 = 0x17 was written, cleared by an AD1 step.
+    acdc_osr_once: bool,
+    /// AC+DC diagnostic: the last ACDC_DIAG_N AC phases (ring), the number
+    /// of AC phases seen, and whether the current AC phase is being logged.
+    diag: [AcPhaseDiag; ACDC_DIAG_N],
+    diag_k: u32,
+    diag_on: bool,
     /// FR-05 conversion rate (persisted).
     rate: Rate,
     /// SLOW: conversions since the last config write (one reading per
@@ -583,12 +584,49 @@ fn ema_ms(acc: &mut f32, last: &mut Option<u64>, now: u64) {
     *last = Some(now);
 }
 
-/// AC+DC AC phase: the phase value is the mean of the last 3 raw AC results
-/// once their spread is within max(AC_TOL_REL * mean, AC_TOL_LIM * limit),
-/// or whatever the last 3 give AC_MAX_MS after the settle deadline.
-const AC_TOL_REL: f32 = 0.004;
-const AC_TOL_LIM: f32 = 0.0003;
-const AC_MAX_MS: u64 = 3000;
+// AC+DC: what reaches the HY3131 and the board, as the stock does it
+// (docs/acdc-stock-vs-fwrs.md sections 7 and 8.1), one switch per difference
+// so they can be bisected on the device (false = the fw-rs 9421fd5 way).
+//
+/// DC phase at the config row's OSR 8192 (R22 = 0x15). The stock's 0x17
+/// write is gated by a once-flag that stays set in AC+DC (it is only cleared
+/// by an AD1 step), so its DC phase stays at 8192. false: R22 = 0x17 right
+/// after every DC-phase row.
+const ACDC_STOCK_OSR: bool = true;
+/// FUN_08012c30 pulses the PA latching relay (10 ms) on every call, i.e. on
+/// every phase switch, between the R26/R34/R36 zeroing and the 22-byte row.
+/// false: only when the PA state changes (never inside V AC+DC).
+const ACDC_RELAY_PULSE: bool = true;
+/// FUN_08013734 runs the frequency counter (FUN_08013450, restart every
+/// 350 ms: R20 = 0xf0, CTA, R20 = 0xf2) in AC+DC too: on every poll, also
+/// during the settle, in the ACV / DCV / DCmV / DCA phases, and after every
+/// result in the ACA phase (never in the ACmV phase).
+const ACDC_FREQ_RESTART: bool = true;
+
+/// AC+DC diagnostic ring: AC phases kept (`acdc_diag`).
+const ACDC_DIAG_N: usize = 4;
+
+/// AC+DC diagnostic: the RMS results of one AC phase (up to 4, the stock V
+/// phase length), and when the first one came after the settle deadline.
+#[derive(Clone, Copy)]
+pub struct AcPhaseDiag {
+    /// ms between the settle deadline and the first result.
+    pub late_ms: u16,
+    /// Results recorded (1..=4).
+    pub n: u8,
+    /// sqrt(RMS) raw counts (the stock S+0x50).
+    pub sq: [u32; 4],
+    /// LPF raw (19-bit signed, the stock S+0x4c).
+    pub lpf: [i32; 4],
+    /// LPF scaled = the DC seen by the AC path (V / mV / A unit of the
+    /// phase), the stock S+0x54. Stock, 40 Hz 0..9.63 V PWM at r1: 0.07..0.10
+    /// V at the first result; 0.3..0.8 V = the coupling node still settling.
+    pub dcp: [f32; 4],
+}
+
+impl AcPhaseDiag {
+    const EMPTY: AcPhaseDiag = AcPhaseDiag { late_ms: 0, n: 0, sq: [0; 4], lpf: [0; 4], dcp: [0.0; 4] };
+}
 
 impl Dmm {
     pub fn new() -> Self {
@@ -656,9 +694,10 @@ impl Dmm {
             avg: Avg::new(),
             avg_skip: false,
             avg_n: 0,
-            skip: false,
-            ac_win: [0.0; 3],
-            ac_k: 0,
+            acdc_osr_once: true,
+            diag: [AcPhaseDiag::EMPTY; ACDC_DIAG_N],
+            diag_k: 0,
+            diag_on: false,
             rate: Rate::Medium,
             dec_k: 0,
             t_poll: 0,
@@ -812,7 +851,10 @@ impl Dmm {
         self.t_conv = None;
         hy::quiesce();
         let pa = if matches!(m, 0 | 1 | 4..=9) { 0 } else { 1 };
-        if self.pa_now != Some(pa) {
+        // AC+DC: the stock pulses the relay on every FUN_08012c30 call, so
+        // every phase switch has this 10 ms pause (AD1 / AD2 off) between the
+        // quiesce and the new row (ACDC_RELAY_PULSE).
+        if self.pa_now != Some(pa) || (ACDC_RELAY_PULSE && self.acdc) {
             relay_pa(clk, pa);
             self.pa_now = Some(pa);
         }
@@ -830,55 +872,92 @@ impl Dmm {
             hy::write(0x22, &[0x17]);
             self.r22 = 0x17;
         }
-        // AC+DC: every phase switch reconfigures the HY3131 (AD1 / AD2 + RMS
-        // off and on again, other input path), and the poll does not touch
-        // the chip during the settle deadline (as the stock in AC+DC), so the
-        // first result read after it may be the conversion that ran across
-        // the switch (partial sinc / RMS start-up value). It is dropped. On
-        // the device (first native boot, 500 mV DC input, AC+DC mV) the
-        // combined value dipped to ~194 mV once per cycle and the AC part
-        // read 40 mV; a partial first conversion of a phase fits both.
-        // The DC phase also runs at the steady OSR 32768 from its start (the
-        // stock starts at 8192 and switches to 32768 after the first reading),
-        // so no OSR switch and its partial conversion lands inside a phase.
-        self.skip = self.acdc;
-        self.ac_k = 0;
-        if self.acdc && matches!(m, 1 | 3 | 7..=9) {
+        // AC+DC DC phase: the stock stays at the row's OSR 8192 (see
+        // ACDC_STOCK_OSR and `acdc_osr`); every result after the settle
+        // deadline is used, none dropped (docs/acdc-stock-vs-fwrs.md 8.2).
+        if !ACDC_STOCK_OSR && self.acdc && matches!(m, 1 | 3 | 7..=9) {
             hy::write(0x22, &[0x17]);
             self.r22 = 0x17;
         }
+        // AC+DC diagnostic: log the RMS results of an AC phase.
+        self.diag_on = self.acdc && matches!(m, 0 | 2 | 4..=6);
+        if self.diag_on {
+            self.diag_k = self.diag_k.wrapping_add(1);
+            self.diag[self.diag_k as usize % ACDC_DIAG_N] = AcPhaseDiag::EMPTY;
+        }
     }
 
-    /// AC+DC: consume the drop flag (true = discard this conversion).
-    fn drop_first(&mut self) -> bool {
-        core::mem::take(&mut self.skip)
+    /// AC+DC DC phase, ACDC_STOCK_OSR: the stock's OSR rule with its
+    /// once-flag (FUN_08013734 cases 1, 3, 7..9): |AD1 - previous| <= `thr`
+    /// -> R22 = 0x17 only if the flag is clear (then set); else R22 = 0x15 and
+    /// the flag cleared. FUN_08012c30 does not touch the flag, so in steady
+    /// AC+DC no 0x17 is written and every DC phase runs at the row's 0x15.
+    fn acdc_osr(&mut self, ad1: i32, thr: i32) {
+        if (ad1 - self.prev_ad1).abs() <= thr {
+            if !self.acdc_osr_once {
+                self.acdc_osr_once = true;
+                hy::write(0x22, &[OSR_SLOW]);
+                self.r22 = OSR_SLOW;
+            }
+        } else {
+            self.acdc_osr_once = false;
+            hy::write(0x22, &[OSR_FAST]);
+            self.r22 = OSR_FAST;
+        }
+        self.prev_ad1 = ad1;
     }
 
-    /// AC+DC AC phase: feed one raw AC result; Some(phase value) once the
-    /// RMS has settled after the phase switch.
-    ///
-    /// Every phase switch restarts AD2 / RMS / LPF (the DC rows write R26 =
-    /// R29 = 0, as the stock). Until the DC removal in front of the RMS has
-    /// settled, a residual offset d gives a 50 % square (x - DC)^2 = A^2 +/-
-    /// 2*A*d, and the window's high / low imbalance makes the result scatter
-    /// with either sign (device, 40 Hz 0..9.63 V: 4.2..5.6 V for 4.81 V,
-    /// phase to phase; plain AC, never restarted, is stable to 0.1 %). The
-    /// stock takes the 4th result after 800 ms, which is not settled yet.
-    fn ac_settled(&mut self, ac: f32, lim: f32, now: u64) -> Option<f32> {
-        self.ac_win[self.ac_k as usize % 3] = ac;
-        self.ac_k = self.ac_k.saturating_add(1);
-        if self.ac_k < 3 {
-            return None;
+    /// AC+DC diagnostic: the last AC phases (oldest first) and the number of
+    /// AC phases started so far. The entry for the running phase may hold
+    /// fewer than its 4 (V) / 3 (mV, A) results.
+    pub fn acdc_diag(&self) -> (u32, [AcPhaseDiag; ACDC_DIAG_N]) {
+        let mut d = [AcPhaseDiag::EMPTY; ACDC_DIAG_N];
+        let n = (self.diag_k as usize).min(ACDC_DIAG_N);
+        for (i, e) in d.iter_mut().take(n).enumerate() {
+            *e = self.diag[(self.diag_k as usize + 1 + i + ACDC_DIAG_N - n) % ACDC_DIAG_N];
         }
-        let (mut lo, mut hi, mut s) = (f32::MAX, f32::MIN, 0.0);
-        for &v in &self.ac_win {
-            lo = lo.min(v);
-            hi = hi.max(v);
-            s += v;
+        (self.diag_k, d)
+    }
+
+    /// `acdc_diag` as text for a debug query: `phases;late:sq/lpf/dcp,...;...`
+    /// (oldest phase first, dcp with 4 decimals in the phase's unit), e.g.
+    /// `41;2:9926/183/0.0891,9926/150/0.0727,...`. Returns the length used;
+    /// a phase that does not fit in `buf` is left out. ~4 x 90 bytes.
+    #[allow(dead_code)] // SCPI hook (DBG:ACDC?) is the integrator's
+    pub fn acdc_diag_text(&self, buf: &mut [u8]) -> usize {
+        fn put(buf: &mut [u8], at: &mut usize, b: &[u8]) -> bool {
+            let ok = *at + b.len() <= buf.len();
+            if ok {
+                buf[*at..*at + b.len()].copy_from_slice(b);
+                *at += b.len();
+            }
+            ok
         }
-        let mean = s / 3.0;
-        let tol = (AC_TOL_REL * mean).max(AC_TOL_LIM * lim);
-        (hi - lo <= tol || now >= self.deadline + AC_MAX_MS).then_some(mean)
+        fn num(buf: &mut [u8], at: &mut usize, v: f32, dec: u8) -> bool {
+            let mut t = [0u8; 16];
+            put(buf, at, format(&mut t, v, dec).as_bytes())
+        }
+        let (k, d) = self.acdc_diag();
+        let mut at = 0;
+        num(buf, &mut at, k as f32, 0);
+        for e in d.iter().filter(|e| e.n > 0) {
+            let mark = at;
+            let mut ok = put(buf, &mut at, b";") && num(buf, &mut at, e.late_ms as f32, 0) && put(buf, &mut at, b":");
+            for j in 0..e.n as usize {
+                ok = ok
+                    && (j == 0 || put(buf, &mut at, b","))
+                    && num(buf, &mut at, e.sq[j] as f32, 0)
+                    && put(buf, &mut at, b"/")
+                    && num(buf, &mut at, e.lpf[j] as f32, 0)
+                    && put(buf, &mut at, b"/")
+                    && num(buf, &mut at, e.dcp[j], 4);
+            }
+            if !ok {
+                at = mark;
+                break;
+            }
+        }
+        at
     }
 
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
@@ -956,6 +1035,9 @@ impl Dmm {
         self.manual = false;
         self.acdc = sub == 2;
         self.phase_n = 0;
+        // The stock enters AC+DC from a steady DC reading with its OSR flag
+        // set (doc section 1), so its DC phase never writes 0x17.
+        self.acdc_osr_once = true;
         self.reset_values();
         self.set(clk, if sub == 1 { ac } else { dc }, r, t);
     }
@@ -1397,6 +1479,12 @@ impl Dmm {
             return None;
         }
         self.diode_beep(now);
+        // AC+DC: the stock runs the frequency counter at the top of the ACV /
+        // DCV / DCmV / DCA cases, before its settle check (ACDC_FREQ_RESTART;
+        // the ACA phase does it after each result, see poll_ac).
+        if ACDC_FREQ_RESTART && self.acdc && matches!(self.mode, 0 | 1 | 3 | 7..=9) {
+            self.freq_secondary(now, 0xF0);
+        }
         if now < self.deadline {
             return None;
         }
@@ -1515,9 +1603,6 @@ impl Dmm {
 
     fn poll_dcv(&mut self, clk: &mut Clock) -> Option<Reading> {
         let ad1 = self.ad1()?;
-        if self.drop_first() {
-            return None;
-        }
         // This conversion ran at the steady OSR of the rate (and not the first
         // one after the switch, which `osr` flags for the next reading).
         let slow = self.r22 == self.steady_osr() && !self.avg_skip;
@@ -1526,11 +1611,14 @@ impl Dmm {
         let (f, ov) = (self.factor(), self.over());
         let m = self.mode;
         let before = (m, self.range);
-        // AC+DC: OSR fixed at 32768 for the whole DC phase (write_config).
+        // AC+DC: the stock's once-flag OSR rule (ACDC_STOCK_OSR), else the
+        // OSR stays as write_config left it.
         let acdc = self.acdc;
         let (x, lim, dec, unit, si_k, ext) = if m == 1 {
             if !acdc {
                 self.osr(ad1, 0x206, 0x15, true);
+            } else if ACDC_STOCK_OSR {
+                self.acdc_osr(ad1, 0x206);
             }
             let (code, ext) = self.avg_code(ad1, slow);
             let mut v = code * K_ACV[r] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * r as u32, 1.0)
@@ -1545,6 +1633,8 @@ impl Dmm {
         } else {
             if !acdc {
                 self.osr(ad1, 0xE22 - 0x960 * r as i32, 0x15, true);
+            } else if ACDC_STOCK_OSR {
+                self.acdc_osr(ad1, 0xE22 - 0x960 * r as i32);
             }
             let (code, ext) = self.avg_code(ad1, slow);
             let mv = code * (1.25 / 0.9) / MV_DIV[r] / (AD1_DIV / 1000.0) * cal(0x24 + 4 * r as u32, 1.0)
@@ -1579,7 +1669,8 @@ impl Dmm {
     /// End of a DC reading (modes 1, 3, 7..9): plain DC, or the DC phase of
     /// AC+DC (FUN_08013734 cases 1, 3, 7..9): shown = hypot(AC filtered, DC),
     /// aux1/aux2 = AC/DC parts; after S+10 + 1 readings back to the AC mode
-    /// (DCV / DCmV 800 ms, DCA 900 ms settle). A range / unit
+    /// (DCV / DCmV 800 ms, DCA 900 ms settle) with S+10 = 3 (ACV: 4 results)
+    /// or 2 (ACmV, ACA: 3 results). A range / unit
     /// change in AC+DC gives no value this time (stock: OL, m+0xd8 = 0).
     /// `ext`: the value is averaged and shows the extra digit (not in AC+DC).
     #[allow(clippy::too_many_arguments)]
@@ -1611,16 +1702,14 @@ impl Dmm {
         rd.aux1 = Some(part(self.f_ac, lim, dec, unit));
         rd.aux2 = Some(part(x, lim, dec, unit));
         if self.phase_n == 0 {
-            // The AC phase ends when its RMS has settled (`ac_settled`), not
-            // after the stock S+10 = 3 / 2 results.
-            let (to, settle) = match self.mode {
-                1 => (0, 800),
-                3 => (2, 800),
-                dm => (dm - 3, 900),
+            let (to, settle, n) = match self.mode {
+                1 => (0, 800, 3),
+                3 => (2, 800, 2),
+                dm => (dm - 3, 900, 2),
             };
             let r = self.range;
             self.switch_phase(clk, to, r, settle);
-            self.phase_n = 0;
+            self.phase_n = n;
         } else {
             self.phase_n -= 1;
         }
@@ -1629,14 +1718,13 @@ impl Dmm {
 
     fn poll_dca(&mut self, clk: &mut Clock) -> Option<Reading> {
         let ad1 = self.ad1()?;
-        if self.drop_first() {
-            return None;
-        }
         // As in poll_dcv: a conversion at the steady OSR may join the window.
         let slow = self.r22 == self.steady_osr() && !self.avg_skip;
         self.avg_skip = false;
         if !self.acdc {
             self.osr(ad1, 0x168, 0x15, true);
+        } else if ACDC_STOCK_OSR {
+            self.acdc_osr(ad1, 0x168);
         }
         // FR-05 SLOW only (MEDIUM: no window in A, as the stock).
         let (code, _) = self.avg_code(ad1, slow);
@@ -1708,9 +1796,6 @@ impl Dmm {
         }
         let mut b = [0u8; 20];
         hy::read(hy::R_AD1, &mut b);
-        if self.drop_first() {
-            return None;
-        }
         let rms = (b[9] as u64) | (b[10] as u64) << 8 | (b[11] as u64) << 16 | (b[12] as u64) << 24
             | ((b[13] & 0x1F) as u64) << 32;
         let sq = sqrt(rms as f32);
@@ -1731,6 +1816,19 @@ impl Dmm {
         let ci = ci as u32;
         let mut ac = sq * s * cal(g_rms + 4 * ci, 1.0) - cal(o_rms + 4 * ci, 0.0);
         let dcp = lpf * s * cal(g_lpf + 4 * ci, 1.0) - cal(o_lpf + 4 * ci, 0.0);
+        if self.diag_on {
+            let e = &mut self.diag[self.diag_k as usize % ACDC_DIAG_N];
+            let j = e.n as usize;
+            if j == 0 {
+                e.late_ms = now.saturating_sub(self.deadline).min(u16::MAX as u64) as u16;
+            }
+            if j < 4 {
+                e.sq[j] = sq as u32;
+                e.lpf[j] = lpf as i32;
+                e.dcp[j] = dcp;
+                e.n += 1;
+            }
+        }
         if ac < 0.0 {
             ac = 0.0;
         }
@@ -1753,16 +1851,9 @@ impl Dmm {
             _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
         let acdc = self.acdc;
-        if acdc {
-            // AC phase of AC+DC: only the settled phase value reaches the
-            // filter, the autorange and the phase switch. Until then the
-            // reading repeats the held AC part (the chart and a SCPI READ?
-            // keep getting values while the RMS settles).
-            match self.ac_settled(ac, lim, now) {
-                Some(v) => ac = v,
-                None => return self.acdc_ac_reading(lim, dec, unit, si_k),
-            }
-        }
+        // AC+DC: every result after the settle deadline goes through the EMA
+        // (thr = the plain-AC window, a 0.25 V / 0.35 mV / 0.15 A), as the
+        // stock; nothing dropped or gated (docs/acdc-stock-vs-fwrs.md 8.2).
         self.ac_raw = ac;
         ema(thr, a_rms, ac, &mut self.f_ac);
 
@@ -1786,7 +1877,7 @@ impl Dmm {
                         let to = if up { r as i8 + 1 } else { r as i8 - 1 };
                         if acdc {
                             self.switch_phase(clk, 1, to, 600);
-                            self.phase_n = 1;
+                            self.phase_n = 2;
                         } else {
                             self.set(clk, 0, to, 450);
                         }
@@ -1798,7 +1889,7 @@ impl Dmm {
                     if up && r == 0 {
                         if acdc {
                             self.switch_phase(clk, 3, 1, 600);
-                            self.phase_n = 1;
+                            self.phase_n = 2;
                         } else {
                             self.set(clk, 2, 1, 450);
                         }
@@ -1821,25 +1912,32 @@ impl Dmm {
         }
         if acdc {
             // AC phase of AC+DC (FUN_08013734 cases 0, 2, 4..6): shown =
-            // hypot(AC filtered, DC part). The settled phase value ends the
-            // phase: to the DC mode (ACV 600 ms + R32 = 0x38, ACmV 500 ms,
-            // ACA 700 ms) for S+10 + 1 = 2 readings (the stock takes 3; the
-            // DC part is not averaged in AC+DC, the last one is shown).
+            // hypot(AC filtered, DC part) on every result. After S+10 + 1
+            // results (ACV 4, ACmV / ACA 3) to the DC mode (ACV 600 ms + R32 =
+            // 0x38, ACmV 500 ms, ACA 700 ms) for 3 results (S+10 = 2; the DC
+            // part is not averaged in AC+DC, the last one is shown).
             if (self.mode, self.range) != before {
                 return None;
             }
             self.acdc_seen |= 1;
             let rd = self.acdc_ac_reading(lim, dec, unit, si_k);
-            let r = self.range;
-            self.switch_phase(clk, if m <= 2 { m + 1 } else { m + 3 }, r, match m {
-                0 => 600,
-                2 => 500,
-                _ => 700,
-            });
-            if m == 0 {
-                hy::write(0x32, &[0x38]);
+            if ACDC_FREQ_RESTART && m >= 4 {
+                self.freq_secondary(now, 0xF0);
             }
-            self.phase_n = 1;
+            if self.phase_n == 0 {
+                let r = self.range;
+                self.switch_phase(clk, if m <= 2 { m + 1 } else { m + 3 }, r, match m {
+                    0 => 600,
+                    2 => 500,
+                    _ => 700,
+                });
+                if m == 0 {
+                    hy::write(0x32, &[0x38]);
+                }
+                self.phase_n = 2;
+            } else {
+                self.phase_n -= 1;
+            }
             return rd;
         }
         let ol = self.f_ac / lim > ov;
