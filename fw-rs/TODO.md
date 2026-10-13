@@ -241,3 +241,32 @@ Additional requirements:
       combined view FREQ reads 13.3 Hz instead of 40 Hz [AC agent].
 - [ ] sigrok: scpi-dmm has no option to force a model (scan options are only conn/serialcomm), so
       either the libsigrok profile [agent] or an optional *IDN? compatibility mode in fw-rs.
+
+## Device run 2026-10-13 19:10, native e07c11a (+docs) installed OK
+- Verified: READ? ~0.5 s, MEAS:VOLT:AC? 0.5 s, MEAS:FREQ? 1.0 s; USBTMC survives a libusb timeout
+  (sigrok) and answers afterwards; SCPI mode change highlights the right function button and clears
+  the chart; AC+DC sub-reading signs next to their values; PT100/NTC labels legible; mOhm resolution
+  (10.117 Ohm); MIN/AVG/MAX + session time on the chart.
+- Calibrator (MR9270S+, resistance mode func 3 mode 1, i32 = 0.1 Ohm, accepted up to 4000 = 400 Ohm):
+  with the DM40's test current the simulated resistance saturates at ~101 Ohm. In range: 10.03 @ 10,
+  50.28 @ 50, 100.98 @ 100 Ohm (+1 % near the top = simulator compression); 0 Ohm reads 1.59 (sim
+  floor). PT100 -100 C -> -99.76; -50 C -> -48.77; NTC10k3950 200 C -> 198.94; PT1000/NTC100k only
+  below the simulator's ceiling -> OL (correct, out of table). Re-check with real resistors (PT1000,
+  NTCs at room temperature need 1-100 kOhm).
+- [ ] H1: MEAS:RES? (and CONF:RES + READ?) answers 9.9E37 "Data stale": the ohm settle is 2.5 s, the
+      wait expires at 1.9 s. Start the wait at max(t0, dmm.deadline()); for sigrok (libusb timeout is a
+      hard 1 s) cap a single READ? at ~900 ms and give libsigrok a longer delay after a RES/CAP/TEMP
+      function change (profile in ../libsigrok-dm40).
+- [ ] Review M1 (CHECK_CLEAR_STATUS pending after the last packet left), L1 (ABORT_BULK_IN should set
+      cleared), L2 (don't read Bulk-OUT while a command is pending), L3 (mask EPENA/EPDIS in the
+      toggle-reset RMW) from docs/native-review-2026-10-13.md "Pre-flash review e07c11a".
+- [ ] AC agent (no fw bug proven; same path as stock): decide on device -
+      (a) 40 Hz PWM: plain AC V on manual 60 V vs auto vs AC+DC (5 % low AC part = r1 range or RMS
+          settling after each phase switch);
+      (b) 1 V 50 Hz sine: AC+DC AC part must equal plain AC V;
+      (c) A input open/shorted: plain CURR:AC uA vs AC+DC (150 uA);
+      (d) FREQ in the combined view with/without the scope probe on the node (13.3 Hz = 40/3).
+- [ ] libsigrok scpi-dmm DM40 profile (../libsigrok-dm40, branch alientek-dm40, 8c292c31): DC V works
+      on the device via usbtmc/1209.0001; RES times out (H1). Then send upstream; consider an
+      Agilent-style CONF? reply so the profile gets range/resolution.
+- [ ] firmware/dm40fw.py is untracked but build.sh needs it (packs the native image): commit it.
