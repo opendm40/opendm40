@@ -591,6 +591,11 @@ impl ScopeView {
     /// Background templates of a column: [plain, dotted (i % 8 == 0), vertical
     /// grid line (i % 40 == 0), frame edge].
     fn templates(&self, t: &mut [[u16; 288]; 4]) {
+        self.templates_c(t, None);
+    }
+
+    /// Templates with horizontal cursor rows (280-row model) drawn dotted.
+    fn templates_c(&self, t: &mut [[u16; 288]; 4], ycur: Option<[i32; 2]>) {
         let h = self.h as usize;
         for y in 0..h {
             let r = (y as u32 * 278 / (self.h as u32 - 3).max(1)) as usize;
@@ -600,6 +605,16 @@ impl ScopeView {
             t[1][y] = if edge { S_FRAME } else if hline { S_GRID } else { S_FILL };
             t[2][y] = if edge { S_FRAME } else if y % 5 == 0 || hline { S_GRID } else { S_FILL };
             t[3][y] = S_FRAME;
+        }
+        if let Some(yc) = ycur {
+            for r in yc {
+                let y = (self.row_px(r) - self.y0) as usize;
+                if y > 0 && y < h - 1 {
+                    for k in 0..3 {
+                        t[k][y] = S_FRAME;
+                    }
+                }
+            }
         }
     }
 
@@ -638,11 +653,18 @@ impl ScopeView {
     /// the previous column, as the stock trace.
     /// `prev` caches the drawn segment per column (pixel rows); only changed
     /// columns are redrawn. Fill it with (u16::MAX, 0) to force a full redraw.
-    pub fn frame(&self, f: &scope::Frame, sc: &scope::Scope, prev: &mut [(u16, u16); 401]) {
+    pub fn frame(&self, f: &scope::Frame, sc: &scope::Scope, prev: &mut [(u16, u16); 401], cur: &Cursors) {
         let n = f.data.len();
         let trig_row = Some(sc.s.trig_row);
         let mut tpl = [[0u16; 288]; 4];
-        self.templates(&mut tpl);
+        self.templates_c(&mut tpl, if cur.y_on { Some(cur.y) } else { None });
+        // Vertical cursor columns use a dotted template.
+        let mut vt = tpl;
+        for k in 0..3 {
+            for y in (0..self.h as usize).step_by(3) {
+                vt[k][y] = S_FRAME;
+            }
+        }
         // Code -> row is linear: precompute both ends once.
         let r0 = sc.row_of_code(0.0);
         let slope = (sc.row_of_code(1000.0) - r0) / 1000.0;
@@ -690,12 +712,23 @@ impl ScopeView {
             pb = hi;
             let (a, b) = (lo.min(hi), lo.max(hi));
             let px = (self.row_px(a), self.row_px(b));
-            if prev[i] != px {
-                prev[i] = px;
-                self.column_t(i as u16, &tpl, Some((a, b)), trig_row);
+            let is_cur = cur.x_on && (cur.x[0] as usize == i || cur.x[1] as usize == i);
+            if prev[i] != px || is_cur {
+                prev[i] = if is_cur { (u16::MAX, 0) } else { px };
+                self.column_t(i as u16, if is_cur { &vt } else { &tpl }, Some((a, b)), trig_row);
             }
         }
     }
+}
+
+/// Scope cursors: two vertical (columns 1..399) and two horizontal (rows of
+/// the 280-row model), as the stock X2-1 / Xf / Y2-1 items.
+#[derive(Clone, Copy)]
+pub struct Cursors {
+    pub x_on: bool,
+    pub y_on: bool,
+    pub x: [u16; 2],
+    pub y: [i32; 2],
 }
 
 /// Measurements of a frame: Vpp, mean, RMS (V) and frequency (Hz).
@@ -1046,17 +1079,18 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
 }
 
 /// System settings (subset of the stock sections that this firmware has).
-pub const SETTINGS: [&str; 7] = ["Dim screen", "Shutdown", "Backlight", "Volume", "Bluetooth", "Start page", "Back"];
+pub const SETTINGS: [&str; 8] =
+    ["Dim screen", "Shutdown", "Backlight", "Volume", "Bluetooth", "Start page", "Analog power", "Back"];
 
-pub fn settings(vals: &[&str; 7]) {
+pub fn settings(vals: &[&str; 8]) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, M_BG);
     sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Settings", STATUS_FG, 0x2966, 8, 0);
     for (i, name) in SETTINGS.iter().enumerate() {
-        let y = 44 + i as i16 * 39;
-        sf::rbox(rect(8, y, 464, 36), 6, M_TILE, M_BG);
-        sf::glyphs(sf::TEXT22, rect(20, y, 220, 36), name, STATUS_FG, M_TILE, 1, 0);
-        sf::glyphs(sf::TEXT22, rect(240, y, 220, 36), vals[i], M_ACCENT, M_TILE, 4, 0);
+        let y = 44 + i as i16 * 34;
+        sf::rbox(rect(8, y, 464, 31), 6, M_TILE, M_BG);
+        sf::glyphs(sf::TEXT22, rect(20, y, 220, 31), name, STATUS_FG, M_TILE, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(240, y, 220, 31), vals[i], M_ACCENT, M_TILE, 4, 0);
     }
     let mut t = [0u8; 8];
     let _ = &mut t;
@@ -1066,7 +1100,7 @@ pub fn settings_hit(y: u16) -> Option<usize> {
     if y < 44 {
         return None;
     }
-    let i = ((y - 44) / 39) as usize;
+    let i = ((y - 44) / 34) as usize;
     if i < SETTINGS.len() { Some(i) } else { None }
 }
 

@@ -6,7 +6,7 @@
 
 use crate::scope::Scope;
 
-pub const ITEMS: [(u8, &str, Unit); 17] = [
+pub const ITEMS: [(u8, &str, Unit); 20] = [
     (0, "Freq", Unit::Hz),
     (9, "Cycl", Unit::S),
     (10, "Vpp", Unit::V),
@@ -24,6 +24,9 @@ pub const ITEMS: [(u8, &str, Unit); 17] = [
     (4, "-Wid", Unit::S),
     (5, "+Pul", Unit::N),
     (6, "-Pul", Unit::N),
+    (7, "X2-1", Unit::S),
+    (8, "Xf", Unit::Hz),
+    (17, "Y2-1", Unit::V),
 ];
 
 /// Default selection (stock 0x0804c6ac): Freq, Vpp, Cycl, Vrms.
@@ -207,6 +210,8 @@ pub fn format<'a>(buf: &'a mut [u8; 24], id: u8, v: f32) -> &'a str {
         put(buf, b" --");
         return core::str::from_utf8(&buf[..n]).unwrap_or("");
     }
+    // Scale on a value nudged up by 1e-6 so 0.999999e-3 s shows as 1.00 ms.
+    let v = v * 1.000_001;
     let (scaled, pre): (f32, &str) = match unit {
         Unit::V => {
             let a = v.abs();

@@ -209,6 +209,8 @@ pub struct Scope {
     pub s: Settings,
     /// Roll display enabled (used from TB_ROLL up).
     pub roll: bool,
+    /// Both analog rails on (see power_both).
+    both: bool,
     rolling: bool,
     roll_written: u64,
     roll_last_wr: usize,
@@ -260,6 +262,7 @@ impl Scope {
             screen: 0,
             rec: 0,
             roll: true,
+            both: false,
             rolling: false,
             roll_written: 0,
             roll_last_wr: 0,
@@ -273,6 +276,11 @@ impl Scope {
     /// 10 ms, PE2 = 0) or DMM side (PE2 = 1, 10 ms, PC4 = 0). The new rail always
     /// comes up before the old one goes down.
     pub fn power(&mut self, scope_side: bool, clk: &mut crate::clock::Clock) {
+        if self.both {
+            // Leaving "both": fall back to one side.
+            self.both = false;
+            self.powered = !scope_side;
+        }
         if scope_side == self.powered {
             return;
         }
@@ -292,6 +300,20 @@ impl Scope {
             pin(GPIOC, 4, false);
             out(GPIOC, 4);
         }
+    }
+
+    /// Both analog rails on (DMM and scope at the same time; the stock
+    /// firmware never does this, so it is an opt-in setting).
+    pub fn power_both(&mut self, clk: &mut crate::clock::Clock) {
+        pin(GPIOC, 4, true);
+        out(GPIOC, 4);
+        pin(GPIOE, 2, true);
+        out(GPIOE, 2);
+        if !self.powered {
+            self.powered = true;
+            self.relay_until = clk.now_ms() + 200;
+        }
+        self.both = true;
     }
 
     pub fn powered(&self) -> bool {

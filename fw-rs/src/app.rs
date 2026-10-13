@@ -62,6 +62,11 @@ pub struct App {
     kp_buf: [u8; 8],
     kp_n: usize,
     kp_mult: u8,
+    cur: ui::Cursors,
+    /// Cursor being dragged (0/1 vertical, 2/3 horizontal).
+    cur_drag: Option<u8>,
+    /// Opt-in: keep both analog rails on so all instruments measure at once.
+    analog_both: bool,
     meas_sel: [u8; 4],
     meas_n: usize,
     pub meas_res: crate::scope_meas::Results,
@@ -162,6 +167,9 @@ impl App {
             kp_buf: [0; 8],
             kp_n: 0,
             kp_mult: b'H',
+            cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
+            cur_drag: None,
+            analog_both: false,
             meas_sel: crate::scope_meas::DEFAULT_SEL,
             meas_n: 4,
             meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
@@ -217,11 +225,16 @@ impl App {
             self.back_view = self.view;
         }
         // Analog power as the stock pages: scope / generator side or DMM side
-        // (scope.rs power()). The menu keeps whatever is on.
+        // (scope.rs power()), or both when enabled in the settings. The menu
+        // keeps whatever is on.
+        if self.analog_both {
+            self.scope.power_both(clk);
+        } else {
         match v {
             View::Scope | View::Gen | View::ScopeMenu | View::Keypad => self.scope.power(true, clk),
             View::Dmm | View::DmmScope => self.scope.power(false, clk),
             View::Menu | View::Settings | View::Range => {}
+        }
         }
         self.view = v;
         self.redraw = true;
@@ -274,13 +287,14 @@ impl App {
                 let [b0, b1] = &mut b;
                 let n0 = pct(b0, self.backlight);
                 let n1 = pct(b1, self.volume);
-                let vals: [&str; 7] = [
+                let vals: [&str; 8] = [
                     DIM_TXT[self.dim_idx],
                     OFF_TXT[self.off_idx],
                     core::str::from_utf8(&b0[..n0]).unwrap_or(""),
                     core::str::from_utf8(&b1[..n1]).unwrap_or(""),
                     if self.bt_on { "ON" } else { "OFF" },
                     ui::view_name(START[self.start_page]),
+                    if self.analog_both { "Both (exp.)" } else { "Per page" },
                     "",
                 ];
                 ui::settings(&vals);
@@ -391,6 +405,31 @@ impl App {
         }
     }
 
+    /// Make sure the DMM side is powered (SCPI / BT measurement requests).
+    pub fn dmm_power(&mut self, clk: &mut Clock) {
+        if !self.analog_both {
+            self.scope.power(false, clk);
+        }
+    }
+
+    /// X2-1 (s), Xf (Hz), Y2-1 (V) from the cursor positions (stock formulas).
+    fn cursor_values(&mut self) {
+        let sc = &self.scope.s;
+        let t_px = scope::SDIV[sc.tb] / 40.0;
+        let dx = (self.cur.x[1] as f32 - self.cur.x[0] as f32) * t_px;
+        self.meas_res.v[7] = if self.cur.x_on { dx.abs() } else { f32::NAN };
+        self.meas_res.v[8] = if self.cur.x_on && dx.abs() > 0.0 { 1.0 / dx.abs() } else { f32::NAN };
+        let dy = -(self.cur.y[1] - self.cur.y[0]) as f32 * 4.0 * scope::VDIV[sc.range] * sc.probe / 141.0;
+        self.meas_res.v[17] = if self.cur.y_on { dy } else { f32::NAN };
+    }
+
+    fn cursors_from_selection(&mut self) {
+        let sel = &self.meas_sel[..self.meas_n];
+        self.cur.x_on = sel.contains(&7) || sel.contains(&8);
+        self.cur.y_on = sel.contains(&17);
+        self.scope_prev = [(u16::MAX, 0); 401];
+    }
+
     fn kp_open(&mut self, target: u8, clk: &mut Clock) {
         self.kp_target = target;
         self.kp_n = 0;
@@ -434,7 +473,11 @@ impl App {
         let g = &self.gen.s;
         let sc = &self.scope.s;
         let mut p = [0u32; crate::persist::WORDS];
-        p[0] = self.dim_idx as u32 | (self.off_idx as u32) << 4 | (self.start_page as u32) << 8 | (self.bt_on as u32) << 12;
+        p[0] = self.dim_idx as u32
+            | (self.off_idx as u32) << 4
+            | (self.start_page as u32) << 8
+            | (self.bt_on as u32) << 12
+            | (self.analog_both as u32) << 13;
         p[1] = self.backlight as u32 | (self.volume as u32) << 8 | (self.roll as u32) << 16;
         p[2] = self.dmm.mode() as u32 | (self.dmm.v_auto() as u32) << 8 | (self.dmm.a_auto() as u32) << 16 | (self.dmm.ohm_var() as u32) << 24;
         p[3] = Wave::ALL.iter().position(|&w| w == g.wave).unwrap_or(0) as u32 | (g.duty as u32) << 8;
@@ -455,6 +498,7 @@ impl App {
         self.off_idx = (p[0] >> 4 & 3) as usize;
         self.start_page = (p[0] >> 8 & 3) as usize;
         self.bt_on = p[0] >> 12 & 1 != 0;
+        self.analog_both = p[0] >> 13 & 1 != 0;
         self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
         self.roll = p[1] >> 16 & 1 != 0;
@@ -485,6 +529,7 @@ impl App {
             self.meas_sel[i] = (p[9] >> (8 * i)) as u8;
         }
         self.meas_n = n;
+        self.cursors_from_selection();
     }
 
     /// Save the settings now and then (cheap: 18 words of backup SRAM).
@@ -649,6 +694,7 @@ impl App {
                 self.meas_next = now + 300;
                 let t1 = cyc();
                 self.meas_res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
+                self.cursor_values();
                 self.prof[1] = self.prof[1].max(cyc().wrapping_sub(t1) / 200);
                 let r = &self.meas_res.v;
                 self.meas = [r[10], r[19], r[11], r[0]];
@@ -659,13 +705,13 @@ impl App {
             match self.view {
                 View::Scope => {
                     let t2 = cyc();
-                    ui::SCOPE_FULL.frame(&f, &self.scope, &mut self.scope_prev);
+                    ui::SCOPE_FULL.frame(&f, &self.scope, &mut self.scope_prev, &self.cur);
                     self.prof[2] = self.prof[2].max(cyc().wrapping_sub(t2) / 200);
                     if fresh {
                         ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
                     }
                 }
-                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope, &mut self.scope_prev),
+                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope, &mut self.scope_prev, &self.cur),
                 _ => {}
             }
         }
@@ -718,10 +764,37 @@ impl App {
                 self.beep(now, 300);
                 ui::history(&self.hist, 0, 0);
             }
+            Gesture::Down(p) if self.view == View::Scope => {
+                // Grab a cursor within 8 px.
+                let (cx, cy) = (p.x as i32 - 13, p.y as i32 - 20);
+                self.cur_drag = None;
+                for k in 0..2 {
+                    if self.cur.x_on && (cx - self.cur.x[k] as i32).abs() <= 8 {
+                        self.cur_drag = Some(k as u8);
+                    }
+                    if self.cur.y_on && (cy - self.cur.y[k]).abs() <= 8 {
+                        self.cur_drag = Some(2 + k as u8);
+                    }
+                }
+            }
             Gesture::Drag(p0, p) if self.view == View::Scope && p0.x >= 13 && p0.x < 414 && p0.y >= 20 && p0.y < 301 => {
-                let mut st = self.scope.s;
-                st.trig_row = p.y as i32 - 20;
-                self.scope_set(st, now);
+                match self.cur_drag {
+                    Some(k) if k < 2 => {
+                        self.cur.x[k as usize] = (p.x.saturating_sub(13)).clamp(1, 399);
+                        self.scope_prev = [(u16::MAX, 0); 401];
+                        self.cursor_values();
+                    }
+                    Some(k) => {
+                        self.cur.y[k as usize - 2] = (p.y as i32 - 20).clamp(1, 279);
+                        self.scope_prev = [(u16::MAX, 0); 401];
+                        self.cursor_values();
+                    }
+                    None => {
+                        let mut st = self.scope.s;
+                        st.trig_row = p.y as i32 - 20;
+                        self.scope_set(st, now);
+                    }
+                }
             }
             _ => {}
         }
@@ -848,6 +921,7 @@ impl App {
                             self.meas_sel[self.meas_n] = id;
                             self.meas_n += 1;
                         }
+                        self.cursors_from_selection();
                     }
                     Some((1, _)) => {
                         self.roll = !self.roll;
@@ -917,6 +991,7 @@ impl App {
                             self.meas_sel[self.meas_n] = id;
                             self.meas_n += 1;
                         }
+                        self.cursors_from_selection();
                     }
                     Some((1, _)) => {
                         self.roll = !self.roll;
@@ -1057,6 +1132,15 @@ impl App {
                     Some(3) => self.volume = if self.volume >= 100 { 0 } else { self.volume + 10 },
                     Some(4) => self.bt_on = !self.bt_on,
                     Some(5) => self.start_page = (self.start_page + 1) % 4,
+                    Some(6) => {
+                        self.analog_both = !self.analog_both;
+                        if self.analog_both {
+                            self.scope.power_both(clk);
+                        } else {
+                            let scope_side = matches!(self.back_view, View::Scope | View::Gen);
+                            self.scope.power(scope_side, clk);
+                        }
+                    }
                     Some(_) => {
                         self.show(View::Menu, clk);
                         return;
@@ -1077,7 +1161,7 @@ impl App {
         let mut g = self.gen.s;
         let mut sc = self.scope.s;
         let scope_cmd = !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenDuty(_) | C::GenOut(_));
-        if scope_cmd && !self.scope.powered() {
+        if scope_cmd && !self.scope.powered() && !self.analog_both {
             self.scope.power(true, clk);
         }
         let reply = match cmd {
