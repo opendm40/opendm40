@@ -1,20 +1,18 @@
-# Alientek Device Protocol Documentation
+# Alientek DM40 / EL15 Bluetooth protocol
 
-This repository contains Bluetooth protocol documentation and Python clients
-for two Alientek devices:
-- **EL15 Electronic Load** (`el15.py`)
-- **DM40 Multimeter** (`dm40.py`)
+Bluetooth protocol of two Alientek devices, as used by the stock firmware, with
+Python clients in [tools/](../tools/):
 
-Both devices communicate via Bluetooth RFCOMM protocol.
+- **DM40 multimeter** (`tools/dm40.py`)
+- **EL15 electronic load** (`tools/el15.py`)
 
-It also holds DM40 firmware work:
-- [fw-rs/](fw-rs/README.md): replacement firmware for the DM40 written in Rust
-  (multimeter, scope and generator at the same time, Bluetooth, USBTMC/SCPI),
-  installed like a stock update file
-- [firmware/dm40fw.py](firmware/dm40fw.py): decode, encode and pack DM40
-  firmware update files (`dm40_v_X_Y.bin`)
-- [firmware/re/analysis/](firmware/re/analysis/): notes on the stock firmware
-  V2.6 that fw-rs is based on
+Both devices communicate via Bluetooth RFCOMM. The replacement firmware
+[fw-rs](../fw-rs/README.md) keeps the DM40 commands below and adds its own
+(see `fw-rs/README.md`).
+
+Usage: `/usr/bin/python3 tools/dm40.py <MAC>`, `/usr/bin/python3 tools/el15.py <MAC>`
+(the MAC can also come from `DM40_MAC` / `EL15_MAC`). A Python build without
+Bluetooth sockets (e.g. linuxbrew) cannot run them.
 
 ## Connection Setup
 
@@ -38,36 +36,141 @@ The CRC is calculated as: `256 - sum(all_data_bytes) % 256`
 ## DM40 Multimeter Protocol
 
 ### Connection
-- **MAC Address**: `XX:XX:XX:XX:XX:XX` or `XX:XX:XX:XX:XX:XX`
+- **MAC Address**: the meter's classic Bluetooth address, `XX:XX:XX:XX:XX:XX`
 - **Channel**: 1
 
-### Command Format
+### Packet Format
+
+Reverse engineered from firmware V2.6 (packet parser at `0x0800d2fa`).
+
 ```
-AF 05 03 09 01 [CRC]
+Request:   AF 05 03 [CMD] [LEN] [DATA...] [CRC]
+Response:  DF 05 03 [CMD] [LEN] [DATA...] [CRC]
 ```
 
-### Response Format (17 bytes)
+- `05 03` is the DM40 device id; a request may also use `FF FF`
+- `LEN` is the number of data bytes (max 0xC2)
+- CRC covers everything before it
+- A request with a wrong header, id, length or CRC gets no response
+
+### Commands
+
+| CMD | Request data | Response data | Description |
+|-----|--------------|---------------|-------------|
+| 00  | -            | 3 bytes       | Discovery: `05 03` + model letter `'A'`/`'B'`/`'C'`. Response id is `FF FF` |
+| 01  | -            | 1 byte        | No-op, returns status only |
+| 02  | -            | 3 bytes       | Versions, each byte is `major * 10 + minor`. The middle byte is the firmware version (26 = V2.6); the other two come from bootloader data (hardware / bootloader version) |
+| 03  | 1 byte (ignored) | 1 byte    | Reset: clears REL and HOLD |
+| 04  | 1 byte       | 1 byte        | HOLD: non-zero = on, 0 = off |
+| 05  | 1 byte       | 1 byte        | REL: non-zero = on, 0 = off (ignored while HOLD is active) |
+| 06  | 1 byte       | 1 byte        | Select measurement mode, see mode byte below |
+| 07  | 20 bytes     | 1 byte        | Set Bluetooth name (null padded). The meter sends `AT+SBN<name>` to the BT module |
+| 08  | -            | 20 bytes      | Get Bluetooth name (null padded) |
+| 09  | -            | 11 bytes      | Read measurement |
+
+The 1-byte response of commands 01, 03-07 is a status: 0 = OK, 1 = wrong
+request length (for 07 also: BT module did not answer `OK`).
+
+Commands 03-06 are executed by the multimeter page, so they only take effect
+while the meter shows the multimeter screen.
+
+Examples:
+```
+AF 05 03 09 00 40       read measurement
+AF 05 03 04 01 01 43    HOLD on
+AF 05 03 04 01 00 44    HOLD off
+AF 05 03 00 00 49       discovery
+```
+
+Note: `AF 05 03 09 01 3F` (used by earlier versions of `tools/dm40.py`) also works,
+but only by accident: `3F` is taken as a data byte and the checksum then
+happens to match a zero byte from the cleared receive buffer.
+
+### Mode Byte
+
+Used as the data byte of command 06 and as the first byte of the measurement.
+
+```
+Bits 0-2   Function group: 0 = voltage, 1 = current, 2 = resistance, 3-5 = other functions
+Bits 3-5   Range (high values select auto range and mV / uA)
+Bits 6-7   Sub-mode (e.g. DC / AC / AC+DC)
+```
+
+The exact meaning of groups 3-5 (continuity, diode, capacitance, frequency)
+and of the range values was not verified on a device.
+
+### Measurement Response (17 bytes)
 ```
 Byte    Description
-0-8     Header/Status
-9       Exponent byte (unit and decimal places)
-10-11   Raw value 1 (little-endian)
-12-13   Raw value 2 (little-endian)
-14-15   Mantissa (little-endian)
+0-4     Header: DF 05 03 09 0B
+5       Mode byte
+6       Flags: bit 7 = HOLD, bit 5 = REL, low bits = other state
+7       Format byte of value 2
+8       Format byte of value 3
+9       Format byte of main value
+10-11   Value 2 (little-endian)
+12-13   Value 3 (little-endian)
+14-15   Main value (little-endian)
 16      CRC
 ```
 
+A value of `FF FF` means "no value".
+
+### Format Byte
+```
+Bit 0      Sign: 1 = negative
+Bits 1-3   Number of decimal places
+Bits 4-5   Unit prefix step (x1000 each)
+Bit 7      Set by the firmware in one mode when the main value exceeds 0xFFF0
+           (the value is then sent minus 0xFFF0)
+```
+
 ### Value Decoding Algorithm
-1. Extract exponent byte (byte 9)
-2. Calculate unit: `exponent_byte >> 4`
-3. Calculate exponent: `-(exponent_byte & 0x0F) // 2 + unit * 3`
-4. Extract mantissa from bytes 14-15 (little-endian)
-5. Final value: `mantissa * 10^exponent`
+1. Take the format byte and the 16-bit value
+2. Decimal places: `(format >> 1) & 7`
+3. Prefix: `(format >> 4) & 3`
+4. Exponent: `prefix * 3 - decimals`
+5. Final value: `value * 10^exponent`, negated if bit 0 of the format byte is set
+
+## DM40 Firmware Image
+
+Firmware update files (`dm40_v_X_Y.bin`) are obfuscated. [firmware/dm40fw.py](../firmware/dm40fw.py)
+decodes and re-encodes them, see [firmware/README.md](../firmware/README.md) for
+building modified images:
+
+```
+python3 firmware/dm40fw.py decode dm40_v_2_6.bin dm40_v_2_6.dec.bin
+```
+
+### Obfuscation
+
+The file is processed in 128-byte blocks. Two plaintext bytes of each block
+are stored as is and act as keys for the rest of the block:
+
+- byte at offset `0x1F`: additive key `a`
+- byte at offset `a` (or `a >> 1` if `a >= 0x80`): XOR key `k`
+- every other byte: `plain = ((cipher ^ k) - a) & 0xFF`
+
+### Decoded Layout
+
+```
+Offset  Description
+0-3     Header check: (~X << 16) | X, X = CRC-16 of bytes 4-11
+4-7     Length of the image body (file size - 12)
+8-11    0x00010000 | CRC-16 of the body without its 12 bytes at offset 0x4000
+12-     Image body, loaded at 0x08004000 (Cortex-M vector table first)
+```
+
+CRC-16: polynomial 0x8005, init 0xFFFF, MSB first, no reflection, no final
+XOR. The 12 bytes skipped by the body CRC (flash `0x08008000`) are a marker
+that the bootloader manages. `dm40fw.py` computes both words.
+
+The bootloader below `0x08004000` is not part of the update file.
 
 ## EL15 Electronic Load Protocol
 
 ### Connection
-- **MAC Address**: `XX:XX:XX:XX:XX:XX`
+- **MAC Address**: the load's Bluetooth address, `XX:XX:XX:XX:XX:XX`
 - **Channel**: 1
 
 ### Command Format
@@ -147,7 +250,7 @@ Byte    Description
 ### DM40 - Read Measurement
 ```
 PSEUDOCODE:
-1. Send measurement request: AF 05 03 09 01 + CRC
+1. Send measurement request: AF 05 03 09 00 + CRC
 2. Receive 17-byte response
 3. Decode using DM40 algorithm
 4. Display measured value
