@@ -102,25 +102,104 @@ fn val_line<'a>(buf: &'a mut [u8; 40], v: &crate::dmm::Val) -> &'a str {
 }
 
 // ------------------------------------------------------------------ DMM
+// Stock layout (gui_v2_6.h section 4), drawn with the stock fonts from flash.
+
+use crate::stockfont::{self as sf, rect};
+
+const STATUS_FG: Color = 0xF7BE;
+/// Main-readout cell widths per format (%7.4f .. %7.1f, "   0L  ").
+const CELLS: [[u8; 7]; 5] = [
+    [40, 60, 20, 60, 60, 60, 60],
+    [40, 60, 60, 20, 60, 60, 60],
+    [40, 60, 60, 60, 20, 60, 60],
+    [40, 60, 60, 60, 60, 20, 60],
+    [40, 52, 52, 52, 60, 60, 40],
+];
+
+/// Mode glyph above the unit: 0x04 DC, 0x05 AC, 0x07 continuity, 0x08 diode.
+fn mode_glyph(mode: u8) -> &'static str {
+    match mode {
+        0 | 2 | 4..=6 => "\u{5}",
+        1 | 3 | 7..=9 => "\u{4}",
+        11 => "\u{7}",
+        12 => "\u{8}",
+        _ => "",
+    }
+}
+
+/// "%7.<dec>f" (right aligned in 7 characters), or the stock "   0L  ".
+fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val) -> (&'a str, usize) {
+    if v.ol {
+        buf[..7].copy_from_slice(b"   0L  ");
+        return (core::str::from_utf8(&buf[..7]).unwrap_or(""), 4);
+    }
+    let mut t = [0u8; 16];
+    let s = crate::dmm::format(&mut t, v.v, v.dec);
+    let n = s.len().min(7);
+    let pad = 7 - n;
+    buf[..pad].fill(b' ');
+    buf[pad..7].copy_from_slice(&s.as_bytes()[s.len() - n..]);
+    let f = match v.dec {
+        4.. => 0,
+        3 => 1,
+        2 => 2,
+        _ => 3,
+    };
+    (core::str::from_utf8(&buf[..7]).unwrap_or(""), f)
+}
 
 pub struct DmmView {
     last_unit: &'static str,
     last_mode: u8,
-    last_top: Option<(bool, bool, bool, bool)>,
+    last_top: Option<(bool, bool, bool)>,
+    last_aux: [bool; 2],
+}
+
+/// Bottom button `i` (0..5) with its stock glyphs.
+fn dmm_button(i: usize, selected: bool, mode: u8) {
+    let x = 2 + 80 * i as i16;
+    let c = if selected { SEL } else { BTN };
+    sf::rbox(rect(x, BTN_Y as i16, 76, 40), 8, c, BG);
+    let ac = matches!(mode, 0 | 2 | 4..=6);
+    let sub = if ac { "\u{5}" } else { "\u{4}" };
+    let r = |dx: i16, dy: i16, w: i16| rect(x + dx, BTN_Y as i16 + dy, w, 40);
+    match i {
+        0 => {
+            sf::glyphs(sf::LETTERS, r(0, 0, 36), "V", STATUS_FG, c, 4, 0);
+            sf::glyphs(sf::BTN_GLYPH, r(40, 0, 30), if mode <= 3 { sub } else { "\u{4}" }, STATUS_FG, c, 1, 0);
+        }
+        1 => {
+            sf::glyphs(sf::LETTERS, r(0, 0, 36), "A", STATUS_FG, c, 4, 0);
+            sf::glyphs(sf::BTN_GLYPH, r(40, 0, 30), if (4..=9).contains(&mode) { sub } else { "\u{4}" }, STATUS_FG, c, 1, 0);
+        }
+        2 => sf::glyphs(sf::BTN_GLYPH, r(0, -1, 76), "\u{3a9}", STATUS_FG, c, 8, 0),
+        3 => sf::glyphs(sf::BTN_GLYPH, r(0, 0, 76), "\u{11}", STATUS_FG, c, 8, 0),
+        4 => {
+            sf::glyphs(sf::BTN_GLYPH, r(4, -1, 33), "\u{8}", STATUS_FG, c, 8, 0);
+            sf::glyphs(sf::BTN_GLYPH, r(42, 0, 33), "\u{7}", STATUS_FG, c, 1, 0);
+        }
+        _ => {
+            sf::glyphs(sf::BTN_GLYPH, r(3, -2, 36), "\u{10}", STATUS_FG, c, 8, 0);
+            sf::glyphs(sf::BTN_GLYPH, r(40, 0, 30), "\u{2103}", STATUS_FG, c, 8, 0);
+        }
+    }
 }
 
 impl DmmView {
     pub const fn new() -> Self {
-        DmmView { last_unit: "", last_mode: 255, last_top: None }
+        DmmView { last_unit: "", last_mode: 255, last_top: None, last_aux: [false; 2] }
     }
 
-    pub fn draw_static(&mut self, button: Button) {
+    pub fn draw_static(&mut self, button: Button, mode: u8) {
         lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
         lcd::fill_rect(0, 0, lcd::W, BAR_H, BAR);
-        for i in 0..5u16 {
-            lcd::fill_rect(8 + i * 94, 153, 88, 19, BTN);
+        for i in 0..5i16 {
+            sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
         }
-        button_row(&DMM_BUTTONS, Some(button_index(button)));
+        let sel = button_index(button);
+        for i in 0..6 {
+            dmm_button(i, i == sel, mode);
+        }
         self.invalidate();
     }
 
@@ -132,53 +211,161 @@ impl DmmView {
 
     pub fn reading(&mut self, r: &Reading, hold: bool, rel: bool, compact: bool) {
         let mut buf = [0u8; 16];
-        let s = meter::text(&mut buf, &r.main);
+        let (s, f) = fmt7(&mut buf, &r.main);
+        let mut ub = [0u8; 16];
+        let unit = sf::unit_text(r.main.unit, &mut ub);
         if compact {
-            // One line under the status bar (DMM + scope view).
-            let mut l = [0u8; 40];
-            let line = val_line(&mut l, &r.main);
-            text::draw_right(&UNIT, 0, 400, 84, line, VALUE_RED, BG);
-            if self.last_mode != r.mode {
-                self.last_mode = r.mode;
-                let e = text::draw(&LABEL, 408, 80, sub_label(r.mode), FG, BG);
-                lcd::fill_rect(e, 80 - LABEL.ascent, lcd::W - e, LABEL.height(), BG);
-            }
+            sf::cells(sf::F78, rect(40, 40, 360, 54), s, &CELLS[f], VALUE_RED, BG);
+            sf::label(sf::UNIT, rect(401, 56, 78, 32), unit, VALUE_RED, BG, 4, -1);
         } else {
-            text::draw_right(&VALUE, 0, VALUE_X1, VALUE_BASE, s, VALUE_RED, BG);
+            sf::cells(sf::F78, rect(40, 68, 360, 80), s, &CELLS[f], VALUE_RED, BG);
             if self.last_unit != r.main.unit || self.last_mode != r.mode {
                 self.last_unit = r.main.unit;
                 self.last_mode = r.mode;
-                let end = text::draw(&UNIT, UNIT_X, UNIT_BASE, r.main.unit, VALUE_RED, BG);
-                if end < lcd::W {
-                    lcd::fill_rect(end, UNIT_BASE - UNIT.ascent, lcd::W - end, UNIT.height(), BG);
-                }
-                let e = text::draw(&LABEL, 404, 96, sub_label(r.mode), FG, BG);
-                lcd::fill_rect(e, 96 - LABEL.ascent, lcd::W - e, LABEL.height(), BG);
+                sf::label(sf::UNIT, rect(401, 114, 79, 32), unit, VALUE_RED, BG, 4, -1);
+                sf::label(sf::MODE, rect(437, 76, 32, 32), mode_glyph(r.mode), VALUE_RED, BG, 7, 0);
             }
-            // Secondary readouts in the first two boxes.
+            // Aux readouts (stock: value right-aligned cells at y 40, unit after).
             for (i, a) in [r.aux1, r.aux2].iter().enumerate() {
-                let x0 = 8 + i as u16 * 94;
-                let mut l = [0u8; 40];
-                let line = match a {
-                    Some(v) => val_line(&mut l, v),
-                    None => "",
-                };
-                lcd::fill_rect(x0, 153, 88, 19, BTN);
-                text::draw_right(&SMALL, x0, x0 + 86, 168, line, FG, BTN);
+                let (vx, ux) = if i == 0 { (68, 178) } else { (290, 400) };
+                match a {
+                    Some(v) => {
+                        let mut t = [0u8; 16];
+                        let txt = meter::text(&mut t, v);
+                        let mut u = [0u8; 16];
+                        sf::label(sf::LETTERS, rect(vx - 30, 36, 138, 30), txt, VALUE_RED, BG, 4, 0);
+                        sf::label(sf::LETTERS, rect(ux, 36, 80, 30), sf::unit_text(v.unit, &mut u), VALUE_RED, BG, 1, 0);
+                        self.last_aux[i] = true;
+                    }
+                    None if self.last_aux[i] => {
+                        lcd::fill_rect((vx - 30) as u16, 36, (ux + 80 - vx + 30) as u16, 30, BG);
+                        self.last_aux[i] = false;
+                    }
+                    None => {}
+                }
             }
         }
-        let top = (r.auto, r.auto_plus, hold, rel);
+        let top = (r.auto && !r.auto_plus, hold, r.auto_plus);
         if self.last_top != Some(top) {
             self.last_top = Some(top);
-            lcd::fill_rect(0, 0, 300, BAR_H, BAR);
             let s = if !r.auto { "MANU" } else if r.auto_plus { "AUTO+" } else { "AUTO" };
-            text::draw(&LABEL, 4, 27, s, FG, BAR);
-            text::draw(&LABEL, 120, 27, if hold { "HOLD" } else { "RUN" }, FG, BAR);
-            if rel {
-                text::draw(&LABEL, 210, 27, "REL", FG, BAR);
-            }
+            sf::label(sf::F21, rect(4, 1, 105, 32), s, STATUS_FG, BAR, 1, -1);
+            sf::label(sf::F21, rect(115, 1, 71, 32), if hold { "HOLD" } else { "RUN" }, STATUS_FG, BAR, 8, 0);
+            let _ = rel;
         }
     }
+}
+
+/// Right part of the status bar: uptime, lock, BT link, battery.
+pub fn status_right(uptime_s: u32, bt: bool, bars: u8, charging: bool) {
+    let mut t = [0u8; 8];
+    let (h, m, sec) = (uptime_s / 3600 % 100, uptime_s / 60 % 60, uptime_s % 60);
+    for (i, v) in [h, m, sec].iter().enumerate() {
+        t[i * 3] = b'0' + (v / 10) as u8;
+        t[i * 3 + 1] = b'0' + (v % 10) as u8;
+        if i < 2 {
+            t[i * 3 + 2] = b':';
+        }
+    }
+    sf::label(sf::F21, rect(205, 5, 112, 24), core::str::from_utf8(&t).unwrap_or(""), STATUS_FG, BAR, 1, -1);
+    sf::label(sf::LOCK, rect(335, 7, 24, 20), "\u{21}", STATUS_FG, BAR, 8, 0);
+    sf::label(sf::SAVE_BT, rect(390, 0, 15, 32), if bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
+    let g = char::from_u32(0x22 + bars.min(5) as u32).unwrap_or('"');
+    let mut b = [0u8; 4];
+    sf::label(sf::BATTERY, rect(435, 9, 40, 16), g.encode_utf8(&mut b), if charging { 0x04A9 } else { STATUS_FG }, BAR, 8, 0);
+}
+
+/// Strip chart (stock frame (80,176,321,97)) with labels, rate button and
+/// MAX / REL / MIN. `pts` are display values, oldest first.
+pub const CHART_X: u16 = 80;
+pub const CHART_W: u16 = 321;
+const CHART_Y: u16 = 176;
+const CHART_H: u16 = 97;
+
+fn num_unit<'a>(b: &'a mut [u8; 32], v: f32, dec: u8, unit: &str) -> &'a str {
+    let mut t = [0u8; 16];
+    let s = crate::dmm::format(&mut t, v, dec);
+    let mut u = [0u8; 16];
+    let u = sf::unit_text(unit, &mut u);
+    let n = s.len().min(16);
+    b[..n].copy_from_slice(&s.as_bytes()[..n]);
+    let k = u.len().min(32 - n);
+    b[n..n + k].copy_from_slice(&u.as_bytes()[..k]);
+    core::str::from_utf8(&b[..n + k]).unwrap_or("")
+}
+
+pub fn chart(pts: &[f32], dec: u8, rate: u8, max: Option<f32>, min: Option<f32>, rel: Option<f32>, unit: &str) {
+    let mut step = 1.0f32;
+    for _ in 0..dec {
+        step /= 10.0;
+    }
+    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+    for &p in pts {
+        lo = lo.min(p);
+        hi = hi.max(p);
+    }
+    if pts.is_empty() {
+        lo = 0.0;
+        hi = 0.0;
+    }
+    lo -= 50.0 * step;
+    hi += 50.0 * step;
+    let span = (hi - lo).max(1e-12);
+    let mut b = [0u8; 32];
+    sf::label(sf::F14, rect(0, 173, 78, 18), num_unit(&mut b, hi, dec, unit), STATUS_FG, BG, 4, 2);
+    sf::label(sf::F14, rect(0, 218, 78, 18), num_unit(&mut b, (hi + lo) / 2.0, dec, unit), STATUS_FG, BG, 4, 2);
+    sf::label(sf::F14, rect(0, 259, 78, 18), num_unit(&mut b, lo, dec, unit), STATUS_FG, BG, 4, 2);
+    let row = |v: f32| -> u16 {
+        (((hi - v) / span) * (CHART_H - 3) as f32 + 1.0).clamp(1.0, (CHART_H - 2) as f32) as u16
+    };
+    let n = pts.len();
+    let first = CHART_W as usize - n.min(CHART_W as usize);
+    let mut prev: Option<u16> = None;
+    for x in 0..CHART_W {
+        let seg = if (x as usize) >= first {
+            let y = row(pts[x as usize - first]);
+            let s = match prev {
+                Some(p) if p < y => (p, y),
+                Some(p) => (y, p),
+                None => (y, y),
+            };
+            prev = Some(y);
+            Some(s)
+        } else {
+            None
+        };
+        lcd::set_window(CHART_X + x, CHART_Y, CHART_X + x, CHART_Y + CHART_H - 1);
+        for y in 0..CHART_H {
+            let edge = x == 0 || x == CHART_W - 1 || y == 0 || y == CHART_H - 1;
+            let grid = (x % 16 == 0 && y % 4 == 0) || (y % 16 == 0 && x % 4 == 0);
+            let mut c = if edge || grid { DIM } else { BG };
+            if let Some((a, b2)) = seg {
+                if y >= a && y <= b2 {
+                    c = 0xFC40;
+                }
+            }
+            lcd::data(c);
+        }
+    }
+    // Rate button.
+    let mut t = [0u8; 16];
+    let s = crate::dmm::format(&mut t, rate as f32 * 160.0, 0);
+    let mut l = [0u8; 16];
+    let k = s.len();
+    l[..k].copy_from_slice(s.as_bytes());
+    l[k..k + 6].copy_from_slice(b"mS/div");
+    sf::rbox(rect(2, 188, 76, 32), 8, BTN, BG);
+    sf::glyphs(sf::F14, rect(2, 188, 76, 32), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 2);
+    // MAX / REL / MIN.
+    sf::label(sf::F14, rect(403, 175, 72, 12), "MAX:", STATUS_FG, BG, 1, 2);
+    sf::label(sf::F14, rect(407, 187, 72, 12), max.map(|v| num_unit(&mut b, v, dec, unit)).unwrap_or(""), STATUS_FG, BG, 1, 2);
+    sf::rbox(rect(402, 205, 76, 38), 8, BTN, BG);
+    sf::glyphs(sf::F14, rect(405, 207, 76, 19), "REL:", STATUS_FG, BTN, 1, 2);
+    let mut b2 = [0u8; 32];
+    let rv = num_unit(&mut b2, rel.unwrap_or(0.0), dec, unit);
+    sf::glyphs(sf::F14, rect(405, 222, 76, 19), rv, STATUS_FG, BTN, 1, 2);
+    sf::label(sf::F14, rect(403, 249, 72, 12), "MIN:", STATUS_FG, BG, 1, 2);
+    sf::label(sf::F14, rect(407, 261, 72, 12), min.map(|v| num_unit(&mut b, v, dec, unit)).unwrap_or(""), STATUS_FG, BG, 1, 2);
 }
 
 // ---------------------------------------------------------------- scope

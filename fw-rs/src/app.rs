@@ -13,6 +13,7 @@ use crate::gesture::Gesture;
 use crate::lcd;
 use crate::meter::Meter;
 use crate::mmio::{modify32, w32};
+use crate::power::Power;
 use crate::scope::{self, Scope};
 use crate::ui::{self, View};
 
@@ -35,6 +36,16 @@ pub struct App {
     pub last_raw: Option<Reading>,
     redraw: bool,
     meas_next: u64,
+    pub power: Power,
+    status_next: u64,
+    /// Strip chart: one point per `chart_rate` x 10 ms (1/2/4 = 160/320/640 ms/div).
+    chart: [f32; ui::CHART_W as usize],
+    chart_n: usize,
+    chart_rate: u8,
+    chart_next: u64,
+    chart_unit: &'static str,
+    chart_dec: u8,
+    chart_dirty: bool,
 }
 
 fn backlight(pct: u8) {
@@ -83,6 +94,15 @@ impl App {
             last_raw: None,
             redraw: true,
             meas_next: 0,
+            power: Power::new(),
+            status_next: 0,
+            chart: [0.0; ui::CHART_W as usize],
+            chart_n: 0,
+            chart_rate: 2,
+            chart_next: 0,
+            chart_unit: "",
+            chart_dec: 0,
+            chart_dirty: false,
         };
         backlight(a.backlight);
         a.gen.apply(gen::Settings::DEFAULT);
@@ -106,9 +126,9 @@ impl App {
 
     fn draw_static(&mut self) {
         match self.view {
-            View::Dmm => self.dmm_view.draw_static(self.dmm.button()),
+            View::Dmm => self.dmm_view.draw_static(self.dmm.button(), self.dmm.mode()),
             View::DmmScope => {
-                self.dmm_view.draw_static(self.dmm.button());
+                self.dmm_view.draw_static(self.dmm.button(), self.dmm.mode());
                 lcd::fill_rect(0, ui::BAR_H, lcd::W, ui::BTN_Y - ui::BAR_H, ui::BG);
                 ui::SCOPE_COMPACT.draw_static(&self.scope.s, false);
             }
@@ -137,6 +157,49 @@ impl App {
         if self.redraw {
             self.redraw = false;
             self.draw_static();
+            self.status_next = 0;
+            self.chart_dirty = true;
+        }
+        self.power.poll(now);
+        if now >= self.status_next && self.view != View::Menu {
+            self.status_next = now + 1000;
+            ui::status_right((now / 1000) as u32, self.power.bt_connected(), self.power.bars, self.power.charging());
+        }
+        // Strip chart point.
+        if now >= self.chart_next {
+            self.chart_next = now + self.chart_rate as u64 * 10;
+            if let Some(r) = self.meter.shown().copied() {
+                if !self.meter.hold && !r.main.ol {
+                    if r.main.unit != self.chart_unit {
+                        self.chart_unit = r.main.unit;
+                        self.chart_n = 0;
+                    }
+                    self.chart_dec = r.main.dec;
+                    let n = self.chart.len();
+                    if self.chart_n == n {
+                        self.chart.copy_within(1.., 0);
+                        self.chart[n - 1] = r.main.v;
+                    } else {
+                        self.chart[self.chart_n] = r.main.v;
+                        self.chart_n += 1;
+                    }
+                    self.chart_dirty = true;
+                }
+            }
+        }
+        // Redraw the chart at most every 100 ms (it is ~30k pixels).
+        if self.chart_dirty && self.view == View::Dmm && now >= self.meas_next {
+            self.meas_next = now + 100;
+            self.chart_dirty = false;
+            ui::chart(
+                &self.chart[..self.chart_n],
+                self.chart_dec,
+                self.chart_rate,
+                self.meter.max,
+                self.meter.min,
+                self.meter.rel_value(),
+                self.chart_unit,
+            );
         }
     }
 
@@ -256,7 +319,15 @@ impl App {
         let now = clk.now_ms();
         match self.view {
             View::Dmm | View::DmmScope => {
-                if let Some(i) = ui::button_hit(6, x, y) {
+                if self.view == View::Dmm && x < ui::CHART_X && (176..280).contains(&y) {
+                    self.chart_rate = match self.chart_rate {
+                        1 => 2,
+                        2 => 4,
+                        _ => 1,
+                    };
+                    self.chart_n = 0;
+                    self.chart_dirty = true;
+                } else if let Some(i) = ui::button_hit(6, x, y) {
                     self.dmm.press(clk, Button::ALL[i]);
                     self.meter.reset();
                     self.redraw = true;
