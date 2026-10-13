@@ -18,6 +18,8 @@ Events (--tap/--key/--shot/--vin/--script) are scheduled in virtual time.
 import argparse
 import glob
 import os
+import re
+import signal
 import shutil
 import struct
 import subprocess
@@ -384,17 +386,68 @@ def main():
     if not a.interactive:
         cmd.insert(1, '--hide-log')
         cmd += ['-e', 'quit']  # also quit when the script aborts on an error
-        # stdin stays an open (silent) pipe: on EOF Renode's console reader spins
-        # and eventually dies with a semaphore error in long runs.
-        r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.PIPE)
-        import re as _re
-        for l in r.stdout.splitlines():
-            l = _re.sub(r'\x1b\[[0-9;]*m', '', l)
+    return run_renode(cmd, quiet=not a.interactive, log=log)
+
+
+def kill_group(p, grace=2.0):
+    """Terminate Renode's whole process group (Renode + its .NET children)."""
+    if p.poll() is not None:
+        return
+    try:
+        os.killpg(p.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        p.wait(grace)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.wait()
+
+
+def run_renode(cmd, quiet=True, log=None):
+    """Run Renode in its own process group; Ctrl-C / SIGTERM stop it (and every
+    child) and exit non-zero. In quiet mode stdin stays an open pipe for the
+    whole run: on EOF Renode's console reader spins and kills long runs
+    ("semaphore ... maximum count")."""
+    if quiet:
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    else:
+        # Interactive: Renode owns the terminal, but in its own session so that
+        # Ctrl-C reaches us (and we stop the group) rather than the monitor.
+        p = subprocess.Popen(cmd, start_new_session=True)
+
+    def on_signal(signum, _frame):
+        raise KeyboardInterrupt
+    old = signal.signal(signal.SIGTERM, on_signal)
+    old_int = signal.signal(signal.SIGINT, on_signal)  # also when started with SIGINT ignored
+    try:
+        out = p.stdout.read() if quiet else ''
+        rc = p.wait()
+    except KeyboardInterrupt:
+        print('\ninterrupted: stopping Renode', file=sys.stderr)
+        kill_group(p)
+        return 130
+    finally:
+        signal.signal(signal.SIGTERM, old)
+        signal.signal(signal.SIGINT, old_int)
+        if quiet and p.stdin:
+            try:
+                p.stdin.close()
+            except OSError:
+                pass
+        kill_group(p, 0.5)  # nothing may outlive us
+    if quiet:
+        for l in out.splitlines():
+            l = re.sub(r'\x1b\[[0-9;]*m', '', l)
             if l.startswith('0x') or 'error' in l.lower() or 'screenshot' in l.lower():
                 print(l)
-        print('log:        ', rel(log))
-        return r.returncode
-    return subprocess.call(cmd)
+        if log:
+            print('log:        ', rel(log))
+    return rc
 
 
 if __name__ == '__main__':
