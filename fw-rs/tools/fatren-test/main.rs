@@ -14,15 +14,18 @@
 //!                                       write_step, cut after k slices (or stopped
 //!                                       there by screenshot::abort_on); see shotcut().
 //!   main <image> shotmounted            start() with a host-mounted disk (refused).
-//!   main <image> csv rec <rows> [cut <k> [half]] [shot <row>]... [host <row> <rows>]
+//!   main <image> csv rec <rows> [cut <k> [half]] [shot <row>]... [host <row> <rows>] [mount|mountwin <row> <rows>]
 //!                                       csvlog recording of <rows> synthetic rows
 //!                                       (row(i) below), polled pass by pass;
 //!                                       cut = power cut before the k-th changing
 //!                                       block write (half: a program-only write is
 //!                                       cut half way, 8 of 16 pages); shot = start
 //!                                       a screenshot at that row (interleaved);
-//!                                       host = HOST_WRITING set for that many rows.
-//!   main <image> csv list | del <NAME> | busydel
+//!                                       host = HOST_WRITING set for that many rows;
+//!                                       mount = msc::host_mounted() for that many rows
+//!                                       (mountwin: the same window, not mounted);
+//!                                       mount_writes = block writes in that window.
+//!   main <image> csv list | del <NAME> [mounted] | busydel
 //!                                       gallery list / delete; busydel = delete the
 //!                                       file being recorded (must be refused).
 //! Live runs rewrite the image.
@@ -435,7 +438,11 @@ fn csv(a: &[String], img: &mut Img) {
         "list" | "del" => {
             if a[3] == "del" {
                 let n = csvlog::parse_name(a[4].as_bytes()).expect("name");
+                // del <NAME> mounted: a PC has the disk mounted (refused).
+                let m = a.get(5).is_some_and(|x| x == "mounted");
+                msc::HOST_MOUNTED.store(m, Relaxed);
                 println!("del={:?}", csvlog::delete_on(img, &n));
+                msc::HOST_MOUNTED.store(false, Relaxed);
             }
             let mut out = [csvlog::FileInfo { name: [0; 11], size: 0, kind: csvlog::Kind::Csv }; 64];
             let c = csvlog::list_on(img, &mut out).expect("list");
@@ -469,6 +476,12 @@ fn csv(a: &[String], img: &mut Img) {
     let n: u32 = a[4].parse().unwrap();
     let mut shots: Vec<u32> = vec![];
     let mut host: Option<(u32, u32)> = None;
+    // mount <row> <rows>: a PC has the disk mounted (msc::host_mounted) for
+    // that many rows: no commit meanwhile (review 3443cea H1).
+    // mountwin <row> <rows>: the same window, not mounted (the baseline: the
+    // writes a commit makes there).
+    let mut mount: Option<(u32, u32)> = None;
+    let mut mounted = true;
     // shotw <row>: from that row on, start a screenshot the moment a commit
     // is in flight (the shot must wait before its FAT scan).
     let mut shotw: Option<u32> = None;
@@ -502,6 +515,11 @@ fn csv(a: &[String], img: &mut Img) {
                 host = Some((a[k + 1].parse().unwrap(), a[k + 2].parse().unwrap()));
                 k += 3;
             }
+            "mount" | "mountwin" => {
+                mount = Some((a[k + 1].parse().unwrap(), a[k + 2].parse().unwrap()));
+                mounted = a[k] == "mount";
+                k += 3;
+            }
             x => panic!("{x}"),
         }
     }
@@ -510,6 +528,7 @@ fn csv(a: &[String], img: &mut Img) {
     assert!(!csvlog::start("DC V", "V", "AUTO", T0), "second start must be refused");
     let mut shot_res = vec![];
     let mut host_writes = 0usize;
+    let mut mount_writes = 0usize;
     let mut lock_ok = true;
     let mut i = 0u32;
     let mut extra = 0u32;
@@ -521,6 +540,8 @@ fn csv(a: &[String], img: &mut Img) {
             }
             let h = host.is_some_and(|(s, l)| i >= s && i < s + l);
             msc::HOST_WRITING.store(h, Relaxed);
+            let m = mount.is_some_and(|(s, l)| i >= s && i < s + l);
+            msc::HOST_MOUNTED.store(m && mounted, Relaxed);
             if let Some((r, name)) = del {
                 if i >= r {
                     let res = csvlog::delete_on(img, &name);
@@ -555,9 +576,13 @@ fn csv(a: &[String], img: &mut Img) {
             if h {
                 host_writes += img.writes.len() - w0;
             }
+            if m {
+                mount_writes += img.writes.len() - w0;
+            }
             i += 1;
             if i == n {
                 msc::HOST_WRITING.store(false, Relaxed);
+                msc::HOST_MOUNTED.store(false, Relaxed);
                 csvlog::stop();
                 assert!(csvlog::active() || img.dead || csvlog::status().state == csvlog::State::Full);
             }
@@ -592,10 +617,11 @@ fn csv(a: &[String], img: &mut Img) {
         res.is_some()
     );
     println!(
-        "  shots={:?} shot_waits={} host_writes={} lock_ok={} session_flag={}",
+        "  shots={:?} shot_waits={} host_writes={} mount_writes={} lock_ok={} session_flag={}",
         shot_res,
         shot_waits,
         host_writes,
+        mount_writes,
         lock_ok,
         msc::LOG_SESSION.load(Relaxed)
     );

@@ -417,7 +417,9 @@ def print_boot(text, expect=None, raw=False):
 def cmd_update(ln, wait, expect):
     """DBG:UPDATE; True once the device dropped off USB (= marker zeroed, reset)."""
     ln.write('DBG:UPDATE')
-    t_end = time.time() + 5
+    # The reset waits for pending disk writes first (a CSV recording's last
+    # commit, a screenshot: app::finish_disk_writes, up to ~14 s).
+    t_end = time.time() + 20
     while time.time() < t_end:
         if not usb_present(VID, PID):
             break

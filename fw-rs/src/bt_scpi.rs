@@ -293,6 +293,11 @@ impl TxRing {
         self.cap - self.used
     }
 
+    /// Bytes queued.
+    pub fn used(&self) -> usize {
+        self.used
+    }
+
     pub fn is_empty(&self) -> bool {
         self.used == 0
     }
