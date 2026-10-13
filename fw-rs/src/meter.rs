@@ -387,6 +387,22 @@ pub fn ext_settings(w: u32) -> ExtSettings {
 // Thresholds are in counts of the current range (1 count = 10^-dec display
 // units, 60000 counts = full scale), so they follow the range; temperature
 // uses absolute deg C (its counts are not range-related).
+//
+// Idle floor in SI (`level_si`, DC V / A): on the smallest ranges 300 counts
+// is too little to tell open leads from a signal. DC mV r0 (60.000 mV, dec
+// 3) made it 0.3 mV, while the stock measured an open-lead / disabled-source
+// residual of 0.487 mV with sd 4.2 uV (p-p 22 uV over 20 s; docs/
+// acdc-stock-vs-fwrs.md section 6c): steady, so it was captured. DC V / mV
+// is therefore idle below max(300 counts, 5 mV) (10x that residual; from
+// the 6 V range up the 300 counts, >= 30 mV, already exceed it). DC A is
+// idle below max(300 counts, 1 uA): the open A input reads -0.007..+0.018
+// uA (section 6b; one -2.7 uA single-reading glitch cannot fill a window),
+// and the lowest DC A range (600.00 uA) already gives 3 uA, so the floor is
+// a guard that keeps uA-level currents (sleep currents) capturable rather
+// than a change. The test is on the raw reading before REL, so a REL zero
+// cannot hide open leads. AC / AC+DC keep their 2 % FS level (unchanged).
+// Not changed either: on a manual high range 300 counts is large (30 V on
+// the 1000 V range), so small voltages there never capture.
 
 #[derive(Clone, Copy)]
 struct AhCfg {
@@ -399,6 +415,9 @@ struct AhCfg {
     spread_rel: f32,
     /// Below this |value| (counts) the input counts as idle (0 = OL only).
     level_cnt: f32,
+    /// ... or below this |value| in SI units (V, A; 0 = none): the floor
+    /// for the smallest ranges (see above).
+    level_si: f32,
     /// A change bigger than this (counts) re-captures without going idle.
     change_cnt: f32,
     /// Temperature: the *_cnt fields are deg C.
@@ -413,6 +432,7 @@ fn ah_cfg(r: &Reading) -> AhCfg {
         spread_cnt,
         spread_rel,
         level_cnt,
+        level_si: 0.0,
         change_cnt,
         abs: false,
     };
@@ -422,8 +442,10 @@ fn ah_cfg(r: &Reading) -> AhCfg {
         _ if r.acdc => c(1000, 4, 100.0, 0.003, FS2, FS2),
         0 | 2 | 4..=6 => c(1000, 4, 100.0, 0.003, FS2, FS2),
         // DC V / A: idle below 0.5 % FS (3 mV on the 600 mV range, 3 uA on
-        // 600 uA): open leads / no current.
-        1 | 3 | 7..=9 => c(1000, 4, 40.0, 0.001, 300.0, FS2),
+        // 600 uA) and below the SI floor (5 mV, 1 uA): open leads / no
+        // current.
+        1 | 3 => AhCfg { level_si: 5e-3, ..c(1000, 4, 40.0, 0.001, 300.0, FS2) },
+        7..=9 => AhCfg { level_si: 1e-6, ..c(1000, 4, 40.0, 0.001, 300.0, FS2) },
         // Ohm / continuity / diode: open = OL (idle); a short is a valid
         // reading and may be captured.
         10 | 11 => c(1000, 3, 40.0, 0.002, 0.0, FS2),
@@ -435,7 +457,7 @@ fn ah_cfg(r: &Reading) -> AhCfg {
         // Frequency: no signal reads 0.
         14 => c(1000, 3, 20.0, 0.001, 1.0, FS2),
         // Temperature: 0.3 C peak-to-peak over 1.5 s, re-capture on 2 C.
-        _ => AhCfg { t_ms: 1500, n_min: 2, spread_cnt: 0.3, spread_rel: 0.0, level_cnt: 0.0, change_cnt: 2.0, abs: true },
+        _ => AhCfg { t_ms: 1500, n_min: 2, spread_cnt: 0.3, spread_rel: 0.0, level_cnt: 0.0, level_si: 0.0, change_cnt: 2.0, abs: true },
     }
 }
 
@@ -689,7 +711,8 @@ impl Meter {
         let c = ah_cfg(r);
         let cnt = if c.abs { 1.0 } else { p10(r.main.dec) };
         let v = &r.main;
-        if v.ol || (c.level_cnt > 0.0 && v.v.abs() * cnt < c.level_cnt) {
+        let idle_si = c.level_si > 0.0 && v.v.abs() * unit_scale(v.unit) < c.level_si;
+        if v.ol || (c.level_cnt > 0.0 && v.v.abs() * cnt < c.level_cnt) || idle_si {
             self.ah_rearm = true;
             self.win = Win::EMPTY;
             return None;
@@ -992,6 +1015,46 @@ mod tests {
         // (The mean of an odd number of +-1-count samples: within 0.2 count.)
         let c = cap.expect("AutoHold captured");
         assert!((c - 1.2).abs() < 2e-5, "{c}");
+    }
+
+    /// AutoHold on `r` held steady for 3 s (readings 110 ms apart): captured?
+    fn ah_captures(r: Reading) -> bool {
+        let mut m = Meter::new();
+        m.set_ahold(true);
+        let mut t = 0;
+        (0..28).any(|_| {
+            t += 110;
+            m.update(&r, t).captured
+        })
+    }
+
+    #[test]
+    fn autohold_idle_floor_dc_v_and_a() {
+        // DC mV r0 (60.000 mV, dec 3): the stock open-lead residual 0.487 mV
+        // was above 300 counts (0.3 mV) and got captured; now idle (< 5 mV).
+        assert!(!ah_captures(rd(3, 0.487, 3, "mV", 1e-3)));
+        assert!(!ah_captures(rd(3, 4.9, 3, "mV", 1e-3)));
+        assert!(ah_captures(rd(3, 5.1, 3, "mV", 1e-3)));
+        assert!(ah_captures(rd(3, 50.0, 3, "mV", 1e-3)));
+        // 600.00 mV (dec 2): 300 counts = 3 mV, the floor still rules.
+        assert!(!ah_captures(rd(3, 4.0, 2, "mV", 1e-3)));
+        // 6 V range: 300 counts (30 mV) above the floor, as before.
+        assert!(!ah_captures(dcv(0.0250)));
+        assert!(ah_captures(dcv(0.0350)));
+        assert!(ah_captures(dcv(1.2)));
+        // Negative values: magnitude.
+        assert!(!ah_captures(rd(3, -0.487, 3, "mV", 1e-3)));
+        assert!(ah_captures(rd(3, -50.0, 3, "mV", 1e-3)));
+        // DC uA 600.00 uA range: 300 counts = 3 uA rules (open input ~0.02 uA).
+        assert!(!ah_captures(rd(9, 0.02, 2, "\u{b5}A", 1e-6)));
+        assert!(!ah_captures(rd(9, 2.5, 2, "\u{b5}A", 1e-6)));
+        assert!(ah_captures(rd(9, 3.5, 2, "\u{b5}A", 1e-6)));
+        // The 1 uA floor where 300 counts would be less (a finer format).
+        assert!(!ah_captures(rd(9, 0.5, 3, "\u{b5}A", 1e-6)));
+        assert!(ah_captures(rd(9, 1.5, 3, "\u{b5}A", 1e-6)));
+        // mA 60.000 mA: 300 counts = 0.3 mA.
+        assert!(!ah_captures(rd(8, 0.2, 3, "mA", 1e-3)));
+        assert!(ah_captures(rd(8, 4.0, 3, "mA", 1e-3)));
     }
 
     #[test]

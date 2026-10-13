@@ -225,6 +225,10 @@ Additional requirements:
       using slow OSR + averaging + REL (lead-zero) — measure noise first; consider a dedicated low-Ω mode
       (higher test current if the HY3131 range tables allow).
 
+- [x] AutoHold idle threshold absolute on small ranges (meter.rs ah_cfg): DC V/mV idle below max(300 counts,  (code done; verify on device)
+      5 mV) (60 mV range: 300 counts = 0.3 mV < the 0.487 mV open-lead residual, docs/acdc-stock-vs-fwrs.md 6c),
+      DC A below max(300 counts, 1 uA). Device: open leads on DC mV manual 60 mV / uA never capture.
+
 ## Backlog (user ideas)
 - [ ] SCPI over Bluetooth serial (classic SPP / BLE UART): the same parser as USBTMC, so standard
       software (sigrok/PyVISA over a serial port, Keysight-style loggers) works wirelessly. Keep the
