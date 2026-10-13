@@ -225,6 +225,9 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   TRIGger:LEVel <V>   TRIGger:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
 ///   RUN  STOP  SINGle   SCOPe:MEASure:VPP|VAVG|VRMS|FREQ?
 ///   WAVeform:DATA? (#3400 + 400 bytes, 0..255)   WAVeform:PREamble?
+///   Volts (CHAN1:SCAL, TRIG:LEV, measurements, WAV:PRE) are at the probe
+///   tip: the probe factor of the scope settings window (x0.1..x1000) is
+///   applied; there is no SCPI probe command.
 #[derive(Clone, Copy)]
 pub enum Cmd {
     GenFunc(Option<u8>),

@@ -1878,7 +1878,8 @@ pub fn scope_menu_hit(tab: usize, x: u16, y: u16) -> Option<(usize, usize)> {
             // Screen rows: DC / AC 68..101, probes 108..141 and 146..179.
             let sy = y + (MENU_Y as i16 - 20);
             if sy < 105 {
-                return Some((3, ((x - 16) / 124).clamp(0, 1) as usize));
+                let col = (x - 16) / 124;
+                return if (0..2).contains(&col) { Some((3, col as usize)) } else { None };
             }
             let row = if sy < 144 { 0 } else { 1 };
             let k = row * 7 + ((x - 16) / 56).clamp(0, 6) as usize;
