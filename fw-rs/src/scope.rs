@@ -169,12 +169,16 @@ pub struct Settings {
     pub mode: TrigMode,
     /// Probe factor (x1, x10, x100): scales readouts and V/div labels only.
     pub probe: f32,
+    /// Trigger position: screen column (0..=400) of the trigger point, 200 =
+    /// centre (stock: always the centre). Sets the pre-trigger part of each
+    /// record; ignored in roll mode.
+    pub hpos: i32,
 }
 
 impl Settings {
     /// Stock defaults: 200 us/div, 1 V/div, DC, rising, Auto, level row 105.
     pub const DEFAULT: Settings =
-        Settings { run: true, tb: 13, range: 6, ac: false, trig_row: 105, pos: 0, rising: true, mode: TrigMode::Auto, probe: 1.0 };
+        Settings { run: true, tb: 13, range: 6, ac: false, trig_row: 105, pos: 0, rising: true, mode: TrigMode::Auto, probe: 1.0, hpos: 200 };
 }
 
 /// A finished frame: the visible window of the record, or (roll mode, empty
@@ -418,6 +422,7 @@ impl Scope {
         s.range = s.range.min(9);
         s.trig_row = s.trig_row.clamp(-10, 290);
         s.pos = s.pos.clamp(-392, 392);
+        s.hpos = s.hpos.clamp(0, COLS as i32);
         self.s = s;
         let g = GPIO_ROW[s.range];
         if g[0] != self.last_pc13 {
@@ -516,12 +521,15 @@ impl Scope {
     /// since its samples have replaced the frame that was shown before.
     fn finish(&mut self, now: u64) -> Option<(usize, Option<usize>)> {
         let n = self.rec;
-        let half = self.screen / 2;
+        // Pre-trigger samples: the trigger point lands on column hpos. The
+        // search window starts there, so start = trig - pre >= 0 and
+        // start + screen <= pre + win + screen <= n.
+        let pre = self.screen * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
         let win = WIN.min(n - self.screen);
         // Mask once here (snapshot_mark), then search in the masked record.
         self.snapshot_mark(n, 0, None, false);
         let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
-        let trig = self.find_trigger(&data[half..half + win]).map(|i| i + half);
+        let trig = self.find_trigger(&data[pre..pre + win]).map(|i| i + pre);
         let show = match (trig, self.s.mode) {
             (Some(_), _) => true,
             (None, TrigMode::Auto) => now >= self.deadline,
@@ -531,7 +539,7 @@ impl Scope {
             self.stored_valid = false;
             return None;
         }
-        let start = trig.map(|t| t - half).unwrap_or(win / 2);
+        let start = trig.map(|t| t - pre).unwrap_or(win / 2);
         if self.stored_valid {
             self.stored_trig = trig;
             self.stored_anchor = (start + self.screen / 2).min(self.stored_len - 1);
@@ -618,6 +626,35 @@ impl Scope {
     /// Display points per sample (> 1 below 1 us/div).
     pub fn ppp(&self) -> u32 {
         TB[self.s.tb].3
+    }
+
+    /// Zoom anchor of the stored record (sample index at the screen centre),
+    /// None while running or without a stored record. Taken at touch-down so
+    /// a pan is relative to it (`pan_from`).
+    pub fn anchor(&self) -> Option<usize> {
+        if self.s.run || !self.stored_valid || self.stored_len < 2 {
+            return None;
+        }
+        Some(if self.stored_roll {
+            // Roll record: newest sample at the right edge.
+            (self.stored_len as u64).saturating_sub(self.zoom_screen(self.s.tb) / 2) as usize
+        } else {
+            self.stored_anchor
+        })
+    }
+
+    /// Stopped: show the stored record panned by `cols` screen columns from
+    /// anchor `a0` (positive = the trace follows the finger to the right, so
+    /// earlier samples come into view); re-rendered on the next poll.
+    pub fn pan_from(&mut self, a0: usize, cols: i32) {
+        if self.anchor().is_none() {
+            return;
+        }
+        let per = self.zoom_screen(self.s.tb) as i64;
+        let a = a0 as i64 - cols as i64 * per / COLS as i64;
+        self.stored_anchor = a.clamp(0, self.stored_len as i64 - 1) as usize;
+        self.stored_roll = false;
+        self.zoom_pending = true;
     }
 
     /// Ask for one re-render of the stored record while stopped (a scope view

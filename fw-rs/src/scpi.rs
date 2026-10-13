@@ -119,6 +119,11 @@ pub enum Log {
 ///                           follows ms later (long press: RUN >= 1000 ms in a
 ///                           DMM view = AutoHold on/off); max 60000
 ///   DBG:SWIPE D,n           synthetic n-finger swipe down (3 = screenshot, 2 = power off)
+///   DBG:GRAB <ms> | ?       scope drag hold-to-grab time (0 = direct drag, default)
+///   DBG:GEST?               last scope drags, oldest first: n then per drag
+///                           ";target,axis,delta_px,ms" (target 1 level, 2 trigger
+///                           position / pan, 3 offset, 4/5 X/Y cursor a, 14/15 b;
+///                           axis H|V)
 ///   DBG:DRAG x0,y0,x1,y1,ms[,hold]
 ///                           synthetic one-finger drag through the gesture
 ///                           tracker (axis lock, capture): down at x0,y0, held
@@ -212,6 +217,10 @@ pub enum Cmd {
     CalcLimClear,
     CalcLimState(Option<bool>),
     CalcLimFail,
+    /// DBG:GRAB <ms> / ?: hold-to-grab time of scope drags (0 = direct).
+    DbgGrab(Option<u16>),
+    /// DBG:GEST?: log of the last scope drags.
+    DbgGest,
 }
 
 /// ON | 1 -> true, OFF | 0 -> false.
@@ -538,6 +547,12 @@ impl Scpi {
                     };
                     out = Out::Instr(Cmd::Meas(k));
                 }
+                // Scope drag A/B aids (App::scpi): DBG:GRAB <ms> (0 = direct
+                // drag) / DBG:GRAB?, DBG:GEST? (last drags).
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GRAB"[..]) => {
+                    out = Out::Instr(Cmd::DbgGrab(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 5000.0) as u16) }))
+                }
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
                 _ if p0 == b"DBG" => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     let a = trim(arg);

@@ -312,7 +312,7 @@ fn layout(font: Font, r: Rect, text: &str, align: u8, spacing: i8, out: &mut [Op
 }
 
 /// 16-step colour ramp bg..fg for one label (avoids per-pixel arithmetic).
-fn ramp(fg: Color, bg: Color) -> [Color; 16] {
+pub fn ramp(fg: Color, bg: Color) -> [Color; 16] {
     let mut t = [0; 16];
     for (a, v) in t.iter_mut().enumerate() {
         *v = blend(fg, bg, a as u8);
@@ -358,10 +358,14 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
         }
     }
     let lut = ramp(fg, bg);
+    #[cfg(test)]
+    crate::probe::begin(crate::probe::TEXT, bg);
     lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
     for y in y0..=y1 {
         for x in x0..=x1 {
             let gi = cover[x as usize];
+            #[cfg(test)]
+            crate::probe::sub(gi);
             let mut c = bg;
             if gi != u8::MAX {
                 if let Some(p) = &pl[gi as usize] {
@@ -374,6 +378,8 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
             lcd::data(c);
         }
     }
+    #[cfg(test)]
+    crate::probe::end();
 }
 
 /// Glyph `c` of `font` at half size, each pixel the mean coverage of a 2x2
@@ -399,6 +405,8 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
     let y1 = (r.y + r.h - 1).min(lcd::H as i16 - 1);
     let (x0, y0) = (r.x.max(0), r.y.max(0));
     let lut = ramp(fg, bg);
+    #[cfg(test)]
+    crate::probe::begin(crate::probe::TEXT, bg);
     lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
     for y in y0..=y1 {
         let gy = 2 * (y as i32 - base as i32) - top;
@@ -421,11 +429,134 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
             lcd::data(c);
         }
     }
+    #[cfg(test)]
+    crate::probe::end();
+}
+
+/// Mean coverage (0..15) of the 2x2 block of full-size glyph pixels behind
+/// half-size pixel (hx, hy) of `g`; pixels outside the glyph count as 0.
+fn alpha_half(g: &Glyph, hx: i32, hy: i32) -> u8 {
+    let (w, h) = (g.w as i32, g.h as i32);
+    let mut s = 0u32;
+    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+        let (px, py) = (2 * hx + dx, hy + dy);
+        if px >= 0 && px < w && py >= 0 && py < h {
+            s += g.alpha(px as u32, py as u32) as u32;
+        }
+    }
+    ((s + 2) / 4) as u8
+}
+
+const MAXH: usize = 12;
+
+/// Half-size glyphs of `text` and their x offsets from the text start:
+/// proportional spacing, each glyph advances by its half-size width plus
+/// `gap` (the stock digit advances are tabular, which at half size left a
+/// visible hole after a narrow '1'). Returns the count and the total width.
+fn half_layout(font: Font, text: &str, gap: i16, gs: &mut [Option<Glyph>; MAXH], xs: &mut [i16; MAXH]) -> (usize, i16) {
+    let (mut n, mut pen, mut end) = (0usize, 0i16, 0i16);
+    for ch in text.chars().take(MAXH) {
+        let g = font.glyph(ch as u32);
+        xs[n] = pen;
+        gs[n] = g;
+        let w = g.map_or(font.line_h() as i16 / 4, |g| (g.w as i16 + 1) / 2);
+        if g.is_some() {
+            end = pen + w;
+        }
+        pen += w + gap;
+        n += 1;
+    }
+    (n, end)
+}
+
+
+/// `text` in `font` at half size (each pixel the mean of a 2x2 block of the
+/// full-size glyph, as `label_half`), proportionally spaced (`half_layout`),
+/// sitting on `base` (exclusive bottom y of the full-size baseline, halved)
+/// and aligned in `r` (align 3..5 right, 6..8 centred, else left). Paints all
+/// of `r`, so one call replaces the previous text without flicker. Used for
+/// the meter-strip reading of the combined view (F78 at half size = "F39").
+pub fn half_text(font: Font, r: Rect, text: &str, base: i16, gap: i16, align: u8, fg: Color, bg: Color) {
+    if r.w <= 0 || r.h <= 0 {
+        return;
+    }
+    let mut gs = [None; MAXH];
+    let mut xs = [0i16; MAXH];
+    let (n, tw) = half_layout(font, text, gap, &mut gs, &mut xs);
+    let ox = r.x
+        + match align {
+            3..=5 => r.w - tw,
+            6..=8 => (r.w - tw) / 2,
+            _ => 0,
+        };
+    let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);
+    let y1 = (r.y + r.h - 1).min(lcd::H as i16 - 1);
+    let (x0, y0) = (r.x.max(0), r.y.max(0));
+    // Glyph per column, as in `label`.
+    let mut cover = [u8::MAX; 480];
+    for i in 0..n {
+        if let Some(g) = &gs[i] {
+            for gx in 0..(g.w as i16 + 1) / 2 {
+                let x = ox + xs[i] + gx;
+                if x >= x0 && x <= x1 {
+                    cover[x as usize] = i as u8;
+                }
+            }
+        }
+    }
+    let lut = ramp(fg, bg);
+    #[cfg(test)]
+    crate::probe::begin(crate::probe::TEXT, bg);
+    lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let gi = cover[x as usize];
+            #[cfg(test)]
+            crate::probe::sub(gi);
+            let mut c = bg;
+            if let Some(Some(g)) = gs.get(gi as usize) {
+                // Full-size glyph row of half-size row y (see label_half).
+                let gy = 2 * (y as i32 - base as i32) + g.h as i32 + g.yoff as i32;
+                if gy > -2 && gy < g.h as i32 {
+                    c = lut[alpha_half(g, (x - ox - xs[gi as usize]) as i32, gy) as usize];
+                }
+            }
+            lcd::data(c);
+        }
+    }
+    #[cfg(test)]
+    crate::probe::end();
+}
+
+mod logo_data {
+    include!("stockfont_logo.rs");
+}
+
+/// Side of the round Wiren Board logo (tools/mklogo.py), pixels.
+pub const LOGO: i16 = logo_data::LOGO_N as i16;
+
+/// The round Wiren Board logo at (x, y), anti-aliased against `bg` (the
+/// identity mark of this firmware at the left of every status bar).
+pub fn logo(x: i16, y: i16, bg: Color) {
+    use logo_data::{LOGO_C, LOGO_M, LOGO_N};
+    let green = ramp(0x5DA0, bg); // #5cb400
+    #[cfg(test)]
+    crate::probe::begin(crate::probe::ICON, bg);
+    lcd::set_window(x as u16, y as u16, (x + LOGO - 1) as u16, (y + LOGO - 1) as u16);
+    for p in 0..LOGO_N * LOGO_N {
+        let nib = |t: &[u8]| if p & 1 == 0 { t[p / 2] >> 4 } else { t[p / 2] & 0xF };
+        let c = green[nib(&LOGO_C) as usize];
+        lcd::data(blend(0xFFFF, c, nib(&LOGO_M)));
+    }
+    #[cfg(test)]
+    crate::probe::end();
 }
 
 /// Fixed-cell label, redrawing only the cells whose character differs from
 /// `prev` (same cell layout assumed; pass an empty `prev` for a full draw).
 pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg: Color, bg: Color) {
+    #[cfg(test)]
+    crate::probe::group(true);
     let mut x = r.x;
     let mut it = text.chars();
     let mut ip = prev.chars();
@@ -443,6 +574,8 @@ pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg
     if full && x < end {
         lcd::fill_rect(x as u16, r.y as u16, (end - x) as u16, r.h as u16, bg);
     }
+    #[cfg(test)]
+    crate::probe::group(false);
 }
 
 /// Fixed-cell label: character i centred (align 8) in cell i, cells from r.x.
@@ -464,6 +597,8 @@ pub fn cells(font: Font, r: Rect, text: &str, widths: &[u8], fg: Color, bg: Colo
 /// Rounded box (corners cut at `radius`, no anti-aliasing).
 pub fn rbox(r: Rect, radius: i16, color: Color, outside: Color) {
     let (x0, y0) = (r.x.max(0), r.y.max(0));
+    #[cfg(test)]
+    crate::probe::begin(crate::probe::SHAPE, outside);
     lcd::set_window(x0 as u16, y0 as u16, (r.x + r.w - 1) as u16, (r.y + r.h - 1) as u16);
     for y in 0..r.h {
         for x in 0..r.w {
@@ -473,6 +608,8 @@ pub fn rbox(r: Rect, radius: i16, color: Color, outside: Color) {
             lcd::data(if inside { color } else { outside });
         }
     }
+    #[cfg(test)]
+    crate::probe::end();
 }
 
 /// Draw only the glyph boxes of `text` placed in `r` (pixels outside the
@@ -480,10 +617,15 @@ pub fn rbox(r: Rect, radius: i16, color: Color, outside: Color) {
 pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, spacing: i8) {
     let mut pl: [Option<Placed>; MAXG] = [const { None }; MAXG];
     let n = layout(font, r, text, align, spacing, &mut pl);
-    for p in pl[..n].iter().flatten() {
+    #[cfg(test)]
+    crate::probe::begin(crate::probe::TEXT, bg);
+    for (_i, p) in pl[..n].iter().enumerate() {
+        let Some(p) = p else { continue };
         if p.g.w == 0 || p.g.h == 0 || p.x < 0 || p.y < 0 {
             continue;
         }
+        #[cfg(test)]
+        crate::probe::sub(_i as u8);
         let (x, y) = (p.x as u16, p.y as u16);
         let lut = ramp(fg, bg);
         lcd::set_window(x, y, x + p.g.w as u16 - 1, y + p.g.h as u16 - 1);
@@ -493,6 +635,24 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
             }
         }
     }
+    #[cfg(test)]
+    crate::probe::end();
+}
+
+/// Rows of `text`'s glyph boxes relative to its line top: (first, last),
+/// None for no glyphs (to fit text whose glyphs reach above the caps ('i',
+/// '%') or below the baseline ('y', 'q') into a tight bar).
+pub fn glyph_rows(font: Font, text: &str) -> Option<(i16, i16)> {
+    let base = font.line_h() as i16 - font.descent();
+    let (mut t, mut b) = (i16::MAX, i16::MIN);
+    for ch in text.chars() {
+        if let Some(g) = font.glyph(ch as u32) {
+            let top = base - g.h as i16 - g.yoff as i16;
+            t = t.min(top);
+            b = b.max(top + g.h as i16 - 1);
+        }
+    }
+    if t > b { None } else { Some((t, b)) }
 }
 
 /// Width in pixels of `text` as `label` lays it out (pen advance plus the
