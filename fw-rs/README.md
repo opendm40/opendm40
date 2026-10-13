@@ -64,6 +64,58 @@ Hardware findings (measured on the device, not from the stock code):
   RGB666 as 3 bytes per pixel packed big-endian into the 16-bit words.
   ID (0xD3) = 00 94 88.
 
+## Features (state)
+
+All instruments run continuously; only the view changes (swipe left/right:
+Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
+
+- **Multimeter**: all 16 HY3131 modes ported from the stock behaviour
+  (V/mV DC+AC, A/mA/uA DC+AC with A->mA->uA autorange, ohm, continuity,
+  diode with beeper patterns, capacitance RC + ramp, frequency/duty,
+  K thermocouple), stock filters / settle times / autorange / formats.
+  Page drawn with the stock fonts and layout read in place from the stock app
+  in flash (pixel-identical except the red main value). HOLD (RUN), REL
+  (touch button), MIN/MAX, 5 history slots, strip chart 160/320/640 ms/div,
+  MF range page (manual ranges, AUTO, AUTO+, DC/AC), HV lightning >= 100 V.
+- **Scope**: stock timebases (100 ns .. 500 ms/div, roll from 200 ms/div),
+  10 mV .. 10 V/div with the stock gain/offset calibration, probe x1/x10/x100,
+  DC/AC, Auto/Normal/Single with software trigger, AUTO-set, 20 stock
+  measurement items (4 shown), X/Y cursors, persistence, settings window (MF).
+- **Generator**: sine / square / triangle / ramp via DAC + DMA, square up to
+  10 MHz via PWM, stock page with keypads; RUN toggles the output. Keeps
+  running on every page (state shown on the scope bar).
+- **Bluetooth**: stock phone-app protocol (commands 00..09) on UART4.
+- **USB**: USBTMC/USB488 interface + SCPI; the same SCPI as text lines on the
+  CDC serial port. Debug protocol on the serial port (tools/dm40dbg.py).
+- **Touch**: CST2xx controller, gestures (tap, long press, swipes, drag),
+  side keys MENU / RUN / AUTO / MF. Power key: hold 1.5 s = off, double
+  press = key/touch lock.
+- **Settings** (stock main menu tiles + settings page): dim / shutdown,
+  backlight, volume, Bluetooth, start page, analog power; kept in backup SRAM.
+- **Analog power**: the stock powers the scope side (PC4) and the DMM side
+  (PE2) alternately per page; "Analog power: Both (exp.)" keeps both on so the
+  DMM and the scope measure at the same time (never done by the stock, off by
+  default).
+
+Not implemented: USB mass storage, screenshots / CSV to the SPI disk,
+config.bin (settings are in backup SRAM instead), AC+DC (DM40B/C only).
+
+## SCPI
+
+USBTMC (`/dev/usbtmc*`, needs a udev rule for non-root) or text lines on the
+serial port (`/dev/ttyACM*`):
+
+```
+*IDN? *RST *CLS *OPC? SYST:ERR?
+MEAS:<f>?  CONF:<f>  READ?  FETC?  FUNC?   <f> = VOLT[:DC] VOLT:AC CURR[:DC]
+           CURR:AC RES CONT DIOD CAP FREQ TEMP
+SOUR:FUNC SIN|SQU|TRI|RAMP  SOUR:FREQ <Hz>  SOUR:VOLT <Vpp>
+SOUR:FUNC:SQU:DCYC <%>  OUTP ON|OFF
+TIM:SCAL <s/div>  CHAN1:SCAL <V/div>  CHAN1:COUP AC|DC
+TRIG:LEV <V>  TRIG:SLOP POS|NEG  TRIG:SWE AUTO|NORM|SING  RUN STOP SING
+SCOP:MEAS:VPP|VAVG|VRMS|FREQ?  WAV:PRE?  WAV:DATA? (#3400 + 400 bytes)
+```
+
 ## Milestones
 
 1. **(done)** Prove load + run + display.
