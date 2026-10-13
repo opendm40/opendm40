@@ -1,0 +1,487 @@
+//! Host test of the touch input path (tools/touch-test/run.sh):
+//!   1. touch.rs `Debounce` with synthetic controller frames (jittering
+//!      touch-down, quick taps, a one-frame blip, release bounce, release
+//!      latency, side keys);
+//!   2. gesture.rs `Tracker` tap / swipe / long-press / capture decisions;
+//!   3. the DBG:TOUCH? log text;
+//!   4. hit map vs. drawing: every page is drawn by the real src/ui.rs into
+//!      the LCD emulator of tools/ui-render/host.rs (draw-call probes on);
+//!      every drawn button box (an `sf::rbox` shape) whose centre hits
+//!      something must hit the SAME target on every one of its pixels, two
+//!      buttons must not share a target, and every target must be drawn.
+//!      Reported per page (not failures): how far each hit area reaches past
+//!      its drawn box, and the dead pixels next to buttons (a tap there does
+//!      nothing).
+//!   main [-v]     prints "cases N, failures M", exit 1 if M > 0
+#![allow(dead_code, unused, static_mut_refs)]
+
+#[path = "../ui-render/host.rs"]
+mod host;
+pub use host::mmio;
+
+#[path = "../../src/clock.rs"]
+mod clock;
+#[path = "../../src/dialog.rs"]
+mod dialog;
+#[path = "../../src/dmm.rs"]
+mod dmm;
+#[path = "../../src/fonts.rs"]
+mod fonts;
+#[path = "../../src/gen.rs"]
+mod gen;
+#[path = "../../src/gesture.rs"]
+mod gesture;
+#[path = "../../src/hwtrig.rs"]
+mod hwtrig;
+#[path = "../../src/hy3131.rs"]
+mod hy3131;
+#[path = "../../src/hy3131_tables.rs"]
+mod hy3131_tables;
+#[path = "../../src/lcd.rs"]
+mod lcd;
+#[path = "../../src/meter.rs"]
+mod meter;
+#[path = "../../src/scope.rs"]
+mod scope;
+#[path = "../../src/scope_meas.rs"]
+mod scope_meas;
+#[path = "../../src/stockfont.rs"]
+mod stockfont;
+#[path = "../../src/text.rs"]
+mod text;
+#[path = "../../src/touch.rs"]
+mod touch;
+#[path = "../../src/ui.rs"]
+mod ui;
+
+/// Probe hooks called by the drawing code under cfg(test).
+pub mod probe {
+    pub const TEXT: u8 = 0;
+    pub const SHAPE: u8 = 1;
+    pub const ICON: u8 = 2;
+    pub fn begin(kind: u8, bg: u16) {
+        crate::host::begin(kind, bg)
+    }
+    pub fn sub(g: u8) {
+        crate::host::sub(g)
+    }
+    pub fn end() {
+        crate::host::end()
+    }
+    pub fn group(on: bool) {
+        crate::host::group(on)
+    }
+}
+
+use gesture::{Gesture as G, Tracker};
+use host::{emu, H, W};
+use touch::{Debounce, Event, Frame, Point};
+
+struct Ck {
+    cases: usize,
+    fails: usize,
+    verbose: bool,
+}
+
+impl Ck {
+    fn t(&mut self, name: &str, ok: bool) {
+        self.cases += 1;
+        if !ok {
+            self.fails += 1;
+            println!("FAIL {name}");
+        } else if self.verbose {
+            println!("ok   {name}");
+        }
+    }
+}
+
+// ------------------------------------------------------------ 1. debounce
+
+fn pressed(x: u16, y: u16) -> Frame {
+    let mut f = Frame { pressed: true, n: 1, ..Frame::default() };
+    f.pts[0] = Point { x, y };
+    f
+}
+
+fn released() -> Frame {
+    Frame::default()
+}
+
+fn key(code: u8) -> Frame {
+    Frame { pressed: true, key: true, code, ..Frame::default() }
+}
+
+/// Run frames (time, Some(frame) or None = a poll without a frame) through a
+/// fresh debounce; returns (time, event) for every emitted event.
+fn deb(seq: &[(u64, Option<Frame>)]) -> Vec<(u64, Event)> {
+    let mut d = Debounce::new();
+    let mut out = vec![];
+    for (t, f) in seq {
+        let e = match f {
+            Some(f) => d.frame(f, *t),
+            None => d.idle(*t),
+        };
+        if let Some(e) = e {
+            out.push((*t, e));
+        }
+    }
+    out
+}
+
+/// Polls without a frame every 10 ms in [a, b).
+fn idle(a: u64, b: u64) -> Vec<(u64, Option<Frame>)> {
+    (a..b).step_by(10).map(|t| (t, None)).collect()
+}
+
+fn debounce_tests(ck: &mut Ck) {
+    // A finger landing with 1 px of jitter per report (10 ms period), held
+    // 100 ms. The old byte-identical rule never confirmed it.
+    let mut s: Vec<(u64, Option<Frame>)> = (0..10).map(|i| (i * 10, Some(pressed(200 + (i % 2) as u16, 150 + i as u16)))).collect();
+    s.push((100, Some(released())));
+    s.extend(idle(110, 200));
+    let ev = deb(&s);
+    ck.t("jitter: down at the 2nd frame", ev.first().map(|e| (e.0, e.1.points)) == Some((10, 1)));
+    ck.t("jitter: down point = 2nd frame", ev.first().map(|e| e.1.p) == Some(Point { x: 201, y: 151 }));
+    let up = ev.iter().find(|e| e.1.points == 0).map(|e| e.0);
+    ck.t("jitter: release within 25..35 ms of the release frame", up.is_some_and(|t| (125..=135).contains(&t)));
+    // Quick tap: 3 reports (all different), release.
+    let mut s: Vec<(u64, Option<Frame>)> = vec![(0, Some(pressed(100, 100))), (12, Some(pressed(102, 99))), (24, Some(pressed(103, 101))), (36, Some(released()))];
+    s.extend(idle(46, 120));
+    let ev = deb(&s);
+    ck.t("quick tap: down + up", ev.len() >= 2 && ev[0].1.points == 1 && ev.last().unwrap().1.points == 0);
+    // A one-frame blip (noise): nothing.
+    let mut s = vec![(0, Some(pressed(300, 50))), (10, Some(released()))];
+    s.extend(idle(20, 100));
+    ck.t("one-frame blip: no event", deb(&s).is_empty());
+    // Controller that only reports on change: one pressed frame, silence.
+    let mut s = vec![(0, Some(pressed(300, 50)))];
+    s.extend(idle(10, 60));
+    let ev = deb(&s);
+    ck.t("single frame + silence: down after 40 ms", ev.len() == 1 && ev[0].0 == 40);
+    // Release bounce inside a touch: release frame, pressed again 15 ms later.
+    let mut s: Vec<(u64, Option<Frame>)> = (0..5).map(|i| (i * 10, Some(pressed(250, 200)))).collect();
+    s.push((50, Some(released())));
+    s.push((60, None));
+    s.push((65, Some(pressed(251, 200))));
+    s.extend((75..150).step_by(10).map(|t| (t, Some(pressed(251, 201)))));
+    s.push((150, Some(released())));
+    s.extend(idle(160, 250));
+    let ev = deb(&s);
+    let downs = ev.iter().filter(|e| e.1.points > 0).count();
+    let ups = ev.iter().filter(|e| e.1.points == 0).count();
+    let first_down = ev.iter().position(|e| e.1.points > 0);
+    ck.t("release bounce: one touch (one up)", ups == 1 && first_down == Some(0));
+    ck.t("release bounce: moves only after the down", downs >= 1);
+    // Two release frames: release at once.
+    let s = vec![(0, Some(pressed(10, 10))), (10, Some(pressed(10, 10))), (20, Some(released())), (30, Some(released()))];
+    ck.t("two release frames: up at the 2nd", deb(&s).last().map(|e| (e.0, e.1.points)) == Some((30, 0)));
+    // Side key: down after two frames, up after the release; a key report
+    // during a touch is dropped.
+    let mut s = vec![(1000, Some(key(2))), (1010, Some(key(2))), (1020, Some(released()))];
+    s.extend(idle(1030, 1100));
+    let ev = deb(&s);
+    ck.t("side key: down + up", ev.len() == 2 && ev[0].1.keys == 4 && ev[1].1.keys == 0);
+    let s = vec![(0, Some(pressed(10, 10))), (10, Some(pressed(10, 10))), (20, Some(key(1))), (30, Some(key(1)))];
+    ck.t("key report during a touch: dropped", deb(&s).iter().all(|e| e.1.keys == 0));
+    // Points are clamped to the panel.
+    let s = vec![(0, Some(pressed(600, 400))), (10, Some(pressed(600, 400)))];
+    ck.t("clamp to 479,319", deb(&s).first().map(|e| e.1.p) == Some(Point { x: 479, y: 319 }));
+}
+
+// ------------------------------------------------------------- 2. gestures
+
+/// One-finger touch along `path` (a point every 10 ms from t = 1000), then
+/// released; `cap` = the app captures on Down. Returns the gestures.
+fn touch(path: &[(u16, u16)], cap: bool, hold_ms: u64) -> Vec<G> {
+    let mut tr = Tracker::new();
+    let mut v = vec![];
+    let mut t = 1000;
+    let mut push = |tr: &mut Tracker, g: Option<G>, v: &mut Vec<G>| {
+        if let Some(g) = g {
+            if cap && matches!(g, G::Down(_)) {
+                tr.capture();
+            }
+            v.push(g);
+        }
+    };
+    for (i, &(x, y)) in path.iter().enumerate() {
+        let mut e = Event { points: 1, p: Point { x, y }, ..Event::default() };
+        e.pts[0] = e.p;
+        let g = tr.event(&e, t);
+        push(&mut tr, g, &mut v);
+        if i == 0 && hold_ms > 0 {
+            for k in (10..=hold_ms).step_by(10) {
+                let g = tr.tick(t + k);
+                push(&mut tr, g, &mut v);
+            }
+            t += hold_ms;
+        }
+        t += 10;
+    }
+    let g = tr.event(&Event::default(), t + 30);
+    push(&mut tr, g, &mut v);
+    v
+}
+
+fn line(a: (u16, u16), b: (u16, u16), n: usize) -> Vec<(u16, u16)> {
+    (0..=n).map(|i| ((a.0 as i32 + (b.0 as i32 - a.0 as i32) * i as i32 / n as i32) as u16, (a.1 as i32 + (b.1 as i32 - a.1 as i32) * i as i32 / n as i32) as u16)).collect()
+}
+
+fn gesture_tests(ck: &mut Ck) {
+    let tap = |v: &[G]| v.iter().any(|g| matches!(g, G::Tap(_)));
+    ck.t("still tap", tap(&touch(&[(100, 100), (100, 101), (101, 100)], false, 0)));
+    ck.t("tap point = down point", touch(&[(100, 100), (110, 104)], false, 0).last() == Some(&G::Tap(Point { x: 100, y: 100 })));
+    ck.t("roll 25 px: still a tap (uncaptured)", tap(&touch(&line((100, 100), (100, 125), 5), false, 0)));
+    ck.t("moved 45 px: no tap", !tap(&touch(&line((100, 100), (100, 145), 5), false, 0)));
+    ck.t("swipe 80 px left", touch(&line((300, 100), (220, 104), 8), false, 0).last() == Some(&G::SwipeLeft));
+    ck.t("captured: Up, no tap", { let v = touch(&[(100, 100), (101, 100)], true, 0); !tap(&v) && matches!(v.last(), Some(G::Up(_))) });
+    let v = touch(&[(100, 100), (100, 100)], false, 800);
+    ck.t("held 800 ms: LongPress", v.iter().any(|g| matches!(g, G::LongPress(_))));
+    ck.t("held 800 ms: no tap (TAP_AFTER_LONG off)", !tap(&v));
+    ck.t("held 600 ms: tap", tap(&touch(&[(100, 100), (100, 100)], false, 600)));
+    let v = touch(&[(100, 100), (100, 100)], false, 0);
+    ck.t("one Down, one Tap per touch", v.iter().filter(|g| matches!(g, G::Down(_))).count() == 1 && v.iter().filter(|g| matches!(g, G::Tap(_))).count() == 1);
+}
+
+// ------------------------------------------------------------------ 3. log
+
+fn log_tests(ck: &mut Ck) {
+    touch::log_clear();
+    let _ = touch(&[(100, 100), (100, 101)], false, 0);
+    touch::log(b'F', 5, b'e', 1, 0x06, Point { x: 7, y: 8 });
+    let mut b = vec![0u8; 6144];
+    let n = touch::log_text(&mut b, 1234);
+    let s = std::str::from_utf8(&b[..n]).unwrap();
+    if ck.verbose {
+        print!("{s}");
+    }
+    ck.t("log: header", s.starts_with("TOUCH,1234,3,3\n"));
+    ck.t("log: down / tap lines", s.contains(",G,D,0,100,100\n") && s.contains(",G,T,0,100,100\n"));
+    ck.t("log: frame line", s.contains("5,F,e,1,7,8,06\n"));
+    for i in 0..1000u32 {
+        touch::log(b'E', i as u64, 1, 0, 0, Point { x: 479, y: 319 });
+    }
+    let n = touch::log_text(&mut b, 4_000_000_000);
+    ck.t("log: full ring fits 6 KB", n < 6144 && std::str::from_utf8(&b[..n]).unwrap().lines().count() == touch::LOG_N + 1);
+    let n = touch::log_text(&mut b[..100], 0);
+    ck.t("log: truncated at a line end", b[n - 1] == b'\n' && n <= 100);
+    touch::log_clear();
+}
+
+// ------------------------------------------------------- 4. hit vs. drawn
+
+#[derive(Clone, Copy, Debug)]
+struct Bx {
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+}
+
+/// Ink boxes of the shapes (sf::rbox) on the emulator screen.
+fn shapes() -> Vec<Bx> {
+    let e = emu();
+    let mut m: std::collections::BTreeMap<u32, Bx> = Default::default();
+    for y in 0..H {
+        for x in 0..W {
+            let o = e.owner[y * W + x];
+            if o == 0 || e.kinds[(o >> 8) as usize - 1] != probe::SHAPE {
+                continue;
+            }
+            let b = m.entry(o >> 8).or_insert(Bx { x0: x as i32, y0: y as i32, x1: x as i32, y1: y as i32 });
+            b.x0 = b.x0.min(x as i32);
+            b.y0 = b.y0.min(y as i32);
+            b.x1 = b.x1.max(x as i32);
+            b.y1 = b.y1.max(y as i32);
+        }
+    }
+    m.into_values().collect()
+}
+
+/// Check the page now on the emulator against its hit function. `only`:
+/// shapes to consider (e.g. one screen region); `want`: targets that must
+/// be drawn.
+fn page(ck: &mut Ck, name: &str, hit: &dyn Fn(u16, u16) -> Option<u32>, only: &dyn Fn(&Bx) -> bool, want: &[u32]) {
+    let sh: Vec<Bx> = shapes().into_iter().filter(|b| only(b)).collect();
+    let mut seen: Vec<(u32, Bx)> = vec![];
+    let mut report = String::new();
+    for b in &sh {
+        let (cx, cy) = ((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+        let Some(id) = hit(cx as u16, cy as u16) else { continue };
+        // Nested shapes (a box inside a button) share the button's target.
+        if seen.iter().any(|(i, o)| *i == id && o.x0 <= b.x0 && o.y0 <= b.y0 && o.x1 >= b.x1 && o.y1 >= b.y1) {
+            continue;
+        }
+        let mut bad = 0;
+        let mut first = None;
+        for y in b.y0..=b.y1 {
+            for x in b.x0..=b.x1 {
+                let h = hit(x as u16, y as u16);
+                if h != Some(id) {
+                    bad += 1;
+                    first.get_or_insert((x, y, h));
+                }
+            }
+        }
+        ck.t(&format!("{name}: target {id} hit on all of its box {b:?} ({bad} px off, first {first:?})"), bad == 0);
+        let dup = seen.iter().find(|(i, _)| *i == id).map(|x| x.1);
+        ck.t(&format!("{name}: target {id} drawn once ({b:?} and {dup:?})"), dup.is_none());
+        // Reach of the hit area past the drawn box (left, top, right, bottom).
+        let (mut hx0, mut hy0, mut hx1, mut hy1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+        for y in 0..H as i32 {
+            for x in 0..W as i32 {
+                if hit(x as u16, y as u16) == Some(id) {
+                    hx0 = hx0.min(x);
+                    hy0 = hy0.min(y);
+                    hx1 = hx1.max(x);
+                    hy1 = hy1.max(y);
+                }
+            }
+        }
+        report += &format!("    {id:>4} drawn {:>3},{:>3}..{:>3},{:>3}  hit reach L{:+} T{:+} R{:+} B{:+}\n", b.x0, b.y0, b.x1, b.y1, b.x0 - hx0, b.y0 - hy0, hx1 - b.x1, hy1 - b.y1);
+        seen.push((id, *b));
+    }
+    for w in want {
+        ck.t(&format!("{name}: target {w} is drawn"), seen.iter().any(|(i, _)| i == w));
+    }
+    // Dead pixels (a tap there does nothing): `gap` = within 6 px of two
+    // buttons (between neighbours), `rim` = within 3 px of one button's
+    // outside edge (a near miss).
+    let (mut gap, mut rim) = (0, 0);
+    for y in 0..H as i32 {
+        for x in 0..W as i32 {
+            if hit(x as u16, y as u16).is_some() {
+                continue;
+            }
+            let near = |d: i32| seen.iter().filter(|(_, b)| x >= b.x0 - d && x <= b.x1 + d && y >= b.y0 - d && y <= b.y1 + d).count();
+            if near(6) >= 2 {
+                gap += 1;
+            } else if near(3) >= 1 {
+                rim += 1;
+            }
+        }
+    }
+    println!("  {name}: {} buttons; dead px: {gap} between buttons, {rim} on the 3 px rim", seen.len());
+    if ck.verbose {
+        print!("{report}");
+    }
+}
+
+fn all(_: &Bx) -> bool {
+    true
+}
+
+fn hit_tests(ck: &mut Ck) {
+    host::map_flash();
+    let o = |v: Option<usize>| v.map(|i| i as u32);
+    // Main menu.
+    host::reset(0);
+    ui::main_menu("DMM + Scope");
+    page(ck, "menu", &|x, y| o(ui::main_menu_hit(x, y)), &all, &[0, 1, 2, 3, 4, 5]);
+    // Settings 1/2 and 2/2, Hold & Limits (list pages).
+    let vals = ["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto", "Hold 300 ms", "", "", ""];
+    for p in 0..2u8 {
+        host::reset(0);
+        ui::settings(p, &vals);
+        let n = if p == 0 { ui::SETTINGS.len() } else { ui::SETTINGS2.len() };
+        let want: Vec<u32> = (0..n as u32).collect();
+        page(ck, &format!("settings {}", p + 1), &|_, y| o(ui::settings_hit(p, y)), &|b| b.y0 >= 40, &want);
+    }
+    host::reset(0);
+    ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &["ON"; 8]);
+    page(ck, "limits", &|_, y| o(ui::list_hit(y, ui::LIMIT_ROWS.len())), &|b| b.y0 >= 40, &(0..8).collect::<Vec<u32>>());
+    // Range pages and the temperature page.
+    for b in [dmm::Button::Volt, dmm::Button::Amp, dmm::Button::Ohm, dmm::Button::Cap] {
+        host::reset(0);
+        let n = ui::range_items(b).len();
+        ui::range_page(b, Some(0), 0, None);
+        let hit = move |x, y| {
+            ui::range_hit(b, x, y).map(|r| match r {
+                Ok(i) => i as u32,
+                Err(k) => 100 + k as u32,
+            })
+        };
+        let mut want: Vec<u32> = (0..n as u32).collect();
+        want.extend([102, 104]);
+        if matches!(b, dmm::Button::Volt | dmm::Button::Amp) {
+            want.extend([100, 101, 103]);
+        }
+        page(ck, &format!("range {n} items"), &hit, &|b| b.y0 >= 40, &want);
+    }
+    host::reset(0);
+    ui::temp_page(0, 0.0, "info");
+    page(ck, "temperature", &|x, y| ui::temp_hit(x, y).map(|v| v as u32), &|b| b.y0 >= 40, &[0, 254, 255]);
+    // Keypads.
+    for kind in [ui::KP_FREQ, ui::KP_NUM, ui::KP_SIGNED] {
+        host::reset(0);
+        ui::keypad(kind, "Vpp", "1.5", "V");
+        page(ck, &format!("keypad {kind}"), &|x, y| ui::keypad_hit(kind, x, y).map(|c| c as u32), &|b| b.x0 >= 224, &[b'0' as u32, b'9' as u32, b'=' as u32, b'<' as u32]);
+    }
+    // DMM page: function row (ui::button_hit) and the app.rs View::Dmm tap
+    // order for the rest (copied from App::tap: REL box, MIN/MAX column,
+    // history row, rate chip, chart axis column, function row).
+    host::reset(0);
+    let mut dv = ui::DmmView::new();
+    dv.draw_static(dmm::Button::Volt, 1, false);
+    ui::history(&[(1.0, 3, "V"); 5], 5, 4);
+    let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), rel: Some(1.0), secs: Some(5), rec: false };
+    let pts: Vec<f32> = (0..321).map(|i| i as f32).collect();
+    ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, &side, "V", ui::RateChip { rate: 1, period_ms: 100, applies: true });
+    let dmm_hit = |x: u16, y: u16| -> Option<u32> {
+        if x >= 402 && (205..243).contains(&y) {
+            Some(100) // REL
+        } else if x >= 402 && (175..279).contains(&y) {
+            Some(101) // MIN/MAX column
+        } else if (153..172).contains(&y) {
+            Some(102) // history row (one target for all five boxes)
+        } else if ui::rate_chip_hit(x, y) {
+            Some(103)
+        } else if x < ui::CHART_X && (176..280).contains(&y) {
+            Some(104) // chart rate
+        } else {
+            o(ui::button_hit(6, x, y))
+        }
+    };
+    page(ck, "dmm function row", &dmm_hit, &|b| b.y0 >= ui::BTN_Y as i32 - 4, &[0, 1, 2, 3, 4, 5]);
+    page(ck, "dmm REL + rate chip", &dmm_hit, &|b| b.y0 >= 175 && b.y1 < 279, &[100, 103]);
+    // Combined view: function band, panel, chips.
+    let sc = scope::Scope::new();
+    host::reset(0);
+    ui::SCOPE_COMBINED.draw_static(&sc);
+    ui::func_band(dmm::Button::Volt, 1, false);
+    page(ck, "function band", &|x, y| o(ui::func_band_hit(x, y)), &|b| b.y0 >= ui::FUNC_Y as i32, &[0, 1, 2, 3, 4, 5]);
+    let pidx = |full: bool| move |x: u16, y: u16| ui::panel_hit(full, x, y).map(|p| p as u32);
+    host::reset(0);
+    ui::SCOPE_COMBINED.draw_static(&sc);
+    page(ck, "combined panel", &pidx(false), &|b| b.x0 >= 414, &[]);
+    page(ck, "combined chips", &|x, y| o(ui::chip_hit(x, y)), &|b| b.y1 < ui::SBAR_H as i32, &[0, 1, 2, 3]);
+    host::reset(0);
+    ui::SCOPE_FULL.draw_static(&sc);
+    page(ck, "scope panel", &pidx(true), &|b| b.x0 >= 414, &[]);
+    page(ck, "scope chips", &|x, y| o(ui::chip_hit(x, y)), &|b| b.y1 < ui::SBAR_H as i32, &[0, 1, 2, 3]);
+    // Scope settings window, every tab.
+    for tab in 0..4usize {
+        host::reset(0);
+        ui::scope_menu(tab, &sc, &[0, 10], false, false);
+        let hit = move |x, y| ui::scope_menu_hit(tab, x, y).map(|(t, k)| if k == 255 { 1000 + t as u32 } else { k as u32 });
+        page(ck, &format!("scope menu tab {tab}"), &hit, &all, &[1000, 1001, 1002, 1003]);
+    }
+    // Generator page: value boxes (ui::gen_box_hit) + the wave box (app.rs
+    // View::Gen: x < 243, y 40..82).
+    host::reset(0);
+    let g = gen::Gen::new();
+    ui::gen_static(&g);
+    let gen_hit = |x: u16, y: u16| if x < 243 && (40..82).contains(&y) { Some(100) } else { o(ui::gen_box_hit(x, y)) };
+    page(ck, "generator", &gen_hit, &|b| b.y0 >= 36, &[0, 1, 2, 3, 100]);
+}
+
+fn main() {
+    let verbose = std::env::args().any(|a| a == "-v");
+    let mut ck = Ck { cases: 0, fails: 0, verbose };
+    debounce_tests(&mut ck);
+    gesture_tests(&mut ck);
+    log_tests(&mut ck);
+    hit_tests(&mut ck);
+    println!("cases {}, failures {}", ck.cases, ck.fails);
+    std::process::exit(if ck.fails == 0 { 0 } else { 1 });
+}

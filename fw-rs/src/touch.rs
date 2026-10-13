@@ -794,14 +794,15 @@ pub struct Event {
 }
 
 /// One decoded controller frame, identical for both chips.
-struct Frame {
-    pressed: bool,
-    key: bool,
+#[derive(Clone, Copy, Default)]
+pub struct Frame {
+    pub pressed: bool,
+    pub key: bool,
     /// Pressed screen points (pts[..n]).
-    n: u8,
-    pts: [Point; MAX_POINTS],
+    pub n: u8,
+    pub pts: [Point; MAX_POINTS],
     /// Side-key code 0..3 (valid when `key`).
-    code: u8,
+    pub code: u8,
 }
 
 pub struct Touch {
@@ -813,15 +814,8 @@ pub struct Touch {
     /// Debug ring of the last 8 frames (7 bytes each) and its next index.
     pub ring: [[u8; 7]; 8],
     pub ring_i: u8,
-    last: Event,
-    /// Debounce: a new state is accepted after two identical frames, or when
-    /// it has held for DEBOUNCE_MS without further frames (a single release
-    /// frame followed by silence).
-    pending: Option<(Event, u64)>,
-    /// Last time a screen point was reported: key reports during a touch
-    /// or right after it are the controller's own long-press gesture, not a
-    /// side key, and are dropped.
-    last_point: u64,
+    /// Frame -> state debounce (pure, see `Debounce`).
+    deb: Debounce,
     /// Goodix only: last time the buffer-ready flag was force-polled (see
     /// GT_POLL_MS). Unused on the Hynitron path.
     last_gt_poll: u64,
@@ -831,7 +825,273 @@ pub struct Touch {
     bus: Bus,
 }
 
+/// A new state (touch-down, a side key, a key release) that is followed by
+/// silence is accepted after this, ms.
 const DEBOUNCE_MS: u64 = 40;
+/// A screen release (last frame had points, this one none) followed by
+/// silence is accepted after this, ms. Longer than the controller's report
+/// period while touched (stock guess 10..17 ms; DBG:TOUCH? shows it), so one
+/// stray release frame inside a touch is still absorbed by the next report.
+const RELEASE_MS: u64 = 25;
+/// Touch -> screen offset added to every screen point, px (then clamped to
+/// the panel). The stock uses the controller's coordinates unchanged
+/// (touch_v2_6.h COORDINATES), so this stays 0 unless the DBG:TOUCH? target
+/// test shows a systematic offset on this panel.
+const OFFSET: (i16, i16) = (0, 0);
+
+/// Frame -> state debounce, pure (no I/O; host-tested by tools/touch-test).
+///
+/// * Moving finger: any change of the points while the screen stays touched
+///   is reported at once.
+/// * Touch-down: two consecutive pressed frames, whatever their coordinates
+///   (the newer point is reported), or one pressed frame followed by
+///   DEBOUNCE_MS of silence. An earlier version demanded two byte-identical
+///   frames: a finger whose position jitters by 1 px from report to report
+///   (rolling onto the glass) was then not accepted until it happened to
+///   repeat a point, and a tap whose frames never repeated was lost entirely
+///   (its release compared equal to the never-updated idle state).
+/// * Release: two release frames, or one followed by RELEASE_MS of silence;
+///   a pressed frame in between continues the touch (no split, no second
+///   touch-down from a bouncing contact).
+/// * Side keys: as touch-down / release, with DEBOUNCE_MS; key reports during
+///   a touch or within 300 ms after one are the controller's own long-press
+///   gesture and are dropped.
+pub struct Debounce {
+    last: Event,
+    pending: Option<(Event, u64)>,
+    /// Last time a screen point was reported (the key filter above).
+    last_point: u64,
+}
+
+impl Debounce {
+    pub const fn new() -> Self {
+        Debounce {
+            last: Event { points: 0, p: Point { x: 0, y: 0 }, pts: [Point { x: 0, y: 0 }; MAX_POINTS], keys: 0 },
+            pending: None,
+            last_point: 0,
+        }
+    }
+
+    /// The current (accepted) state.
+    #[allow(dead_code)] // host tests
+    pub fn state(&self) -> &Event {
+        &self.last
+    }
+
+    /// A decoded frame arrived: the new state on a change.
+    pub fn frame(&mut self, f: &Frame, now: u64) -> Option<Event> {
+        let mut ev = Event::default();
+        if f.pressed && !f.key {
+            self.last_point = now;
+        }
+        if f.pressed && f.key && (self.last.points > 0 || now.saturating_sub(self.last_point) < 300) {
+            // Long press on the screen reported as a key: ignore.
+            return None;
+        }
+        if f.pressed {
+            if f.key {
+                ev.keys = 1 << f.code;
+            } else {
+                ev.points = f.n.clamp(1, MAX_POINTS as u8);
+                for i in 0..ev.points as usize {
+                    ev.pts[i] = screen(f.pts[i]);
+                }
+                ev.p = ev.pts[0];
+            }
+        }
+        // Moving finger: accept position updates of the same contact at once.
+        if ev.points > 0 && self.last.points > 0 && ev.keys == self.last.keys {
+            self.pending = None;
+            if ev != self.last {
+                self.last = ev;
+                return Some(ev);
+            }
+            return None;
+        }
+        if ev == self.last {
+            self.pending = None;
+            return None;
+        }
+        match self.pending {
+            // Second frame of the same kind (pressed / released / same key):
+            // accept, with this frame's points.
+            Some((q, _)) if (q.points > 0) == (ev.points > 0) && q.keys == ev.keys => {
+                self.pending = None;
+                self.last = ev;
+                Some(ev)
+            }
+            _ => {
+                self.pending = Some((ev, now));
+                None
+            }
+        }
+    }
+
+    /// No frame this call: flush a pending state after its silence time.
+    pub fn idle(&mut self, now: u64) -> Option<Event> {
+        let (ev, t) = self.pending?;
+        let release = ev.points == 0 && ev.keys == 0 && self.last.points > 0;
+        if now.saturating_sub(t) < if release { RELEASE_MS } else { DEBOUNCE_MS } {
+            return None;
+        }
+        self.pending = None;
+        if ev == self.last {
+            return None;
+        }
+        self.last = ev;
+        Some(ev)
+    }
+}
+
+/// A controller point on the 480 x 320 panel (OFFSET, clamped).
+fn screen(p: Point) -> Point {
+    let c = |v: u16, d: i16, max: i32| (v as i32 + d as i32).clamp(0, max) as u16;
+    Point { x: c(p.x, OFFSET.0, 479), y: c(p.y, OFFSET.1, 319) }
+}
+
+// ---------------------------------------------------------------------------
+// DBG:TOUCH? log: one timeline of the frames read, the debounced events and
+// the gesture decisions (gesture.rs logs into it), for checking real-finger
+// taps on the device. Single-threaded (fw-rs has no ISRs).
+
+/// Entries kept (12 bytes each); ~6 taps with all their frames.
+pub const LOG_N: usize = 160;
+
+#[derive(Clone, Copy)]
+struct LogEntry {
+    /// ms since boot (low 32 bits).
+    t: u32,
+    /// b'F' frame, b'E' debounced event, b'G' gesture.
+    kind: u8,
+    /// F: source b'e' edge / b'l' level / b't' timer, | 0x80 = bad frame.
+    /// E: points. G: gesture code (see gesture.rs `log_code`).
+    a: u8,
+    /// F: points in the frame (| 0x80 = key report). E: keys. G: argument.
+    b: u8,
+    /// F: raw status byte (Hynitron byte 0).
+    c: u8,
+    x: u16,
+    y: u16,
+}
+
+struct Log {
+    e: [LogEntry; LOG_N],
+    /// Entries written since the last clear (the ring holds the last LOG_N).
+    n: u32,
+}
+
+static mut LOG: Log = Log { e: [LogEntry { t: 0, kind: 0, a: 0, b: 0, c: 0, x: 0, y: 0 }; LOG_N], n: 0 };
+
+fn log_ref() -> &'static mut Log {
+    // SAFETY: single-threaded, no ISR touches the log, and no reference to it
+    // is held across calls.
+    unsafe { &mut *core::ptr::addr_of_mut!(LOG) }
+}
+
+/// Append to the DBG:TOUCH? log (see `LogEntry` for the fields).
+pub fn log(kind: u8, now: u64, a: u8, b: u8, c: u8, p: Point) {
+    let l = log_ref();
+    l.e[l.n as usize % LOG_N] = LogEntry { t: now as u32, kind, a, b, c, x: p.x, y: p.y };
+    l.n = l.n.wrapping_add(1);
+}
+
+#[allow(dead_code)] // the DBG:TOUCH hook (main.rs)
+pub fn log_clear() {
+    log_ref().n = 0;
+}
+
+#[allow(dead_code)] // the DBG:TOUCH? hook (main.rs)
+/// The log as text, oldest first, into `out`; returns the length. First line
+/// `TOUCH,<now ms>,<entries since clear>,<entries shown>`, then one line per
+/// entry:
+///   `<t>,F,<src e|l|t>,<points>,<x>,<y>,<status hex>`  frame read (src `x`:
+///       bad frame, dropped); points `k<code>` = side-key report
+///   `<t>,E,<points>,<keys>,<x>,<y>`                    debounced state change
+///   `<t>,G,<code>,<arg>,<x>,<y>`                       gesture decision
+/// Lines that do not fit are left out (6 KB holds the whole ring).
+pub fn log_text(out: &mut [u8], now: u64) -> usize {
+    let l = log_ref();
+    let shown = (l.n as usize).min(LOG_N);
+    let mut w = W { out, n: 0, full: false };
+    w.s(b"TOUCH,");
+    w.num(now as u32);
+    w.s(b",");
+    w.num(l.n);
+    w.s(b",");
+    w.num(shown as u32);
+    w.s(b"\n");
+    let first = l.n as usize - shown;
+    for k in first..first + shown {
+        let e = l.e[k % LOG_N];
+        let mark = w.n;
+        w.num(e.t);
+        w.s(b",");
+        w.s(&[e.kind, b',']);
+        match e.kind {
+            b'F' => {
+                w.s(&[if e.a & 0x80 != 0 { b'x' } else { e.a }, b',']);
+                if e.b & 0x80 != 0 {
+                    w.s(b"k");
+                }
+                w.num((e.b & 0x7F) as u32);
+            }
+            b'E' => {
+                w.num(e.a as u32);
+                w.s(b",");
+                w.num(e.b as u32);
+            }
+            _ => {
+                w.s(&[e.a, b',']);
+                w.num(e.b as u32);
+            }
+        }
+        w.s(b",");
+        w.num(e.x as u32);
+        w.s(b",");
+        w.num(e.y as u32);
+        if e.kind == b'F' {
+            let h = b"0123456789abcdef";
+            w.s(&[b',', h[(e.c >> 4) as usize], h[(e.c & 15) as usize]]);
+        }
+        w.s(b"\n");
+        if w.full {
+            w.n = mark;
+            break;
+        }
+    }
+    w.n
+}
+
+/// Bounded text writer for `log_text` (`full` once something did not fit).
+struct W<'a> {
+    out: &'a mut [u8],
+    n: usize,
+    full: bool,
+}
+
+impl W<'_> {
+    fn s(&mut self, b: &[u8]) {
+        if self.n + b.len() <= self.out.len() {
+            self.out[self.n..self.n + b.len()].copy_from_slice(b);
+            self.n += b.len();
+        } else {
+            self.full = true;
+        }
+    }
+    fn num(&mut self, mut v: u32) {
+        let mut t = [0u8; 10];
+        let mut i = t.len();
+        loop {
+            i -= 1;
+            t[i] = b'0' + (v % 10) as u8;
+            v /= 10;
+            if v == 0 {
+                break;
+            }
+        }
+        self.s(&t[i..]);
+    }
+}
 
 fn int_low() -> bool {
     (unsafe { r32(GPIOE + 0x10) } & (1 << INT)) == 0
@@ -898,9 +1158,7 @@ impl Touch {
             raw: [0; 7],
             ring: [[0; 7]; 8],
             ring_i: 0,
-            last: Event::default(),
-            pending: None,
-            last_point: 0,
+            deb: Debounce::new(),
             last_gt_poll: 0,
             last_read: 0,
             bus,
@@ -985,6 +1243,19 @@ impl Touch {
             st.last_us = (cyc().wrapping_sub(t0) / CYC_PER_US).min(u16::MAX as u32) as u16;
             st.max_us = st.max_us.max(st.last_us);
             st.last_n = f.as_ref().map_or(0, |f| f.n);
+            let src = if edge { b'e' } else if level { b'l' } else { b't' };
+            match &f {
+                Some(fr) => {
+                    // Raw record-0 coordinates (also those of a release or
+                    // key report), before OFFSET / clamping.
+                    let pts = if fr.key { 0x80 | fr.code } else { fr.n };
+                    let p = if self.ctrl == Ctrl::Hynitron { decode(&self.raw).2 } else { fr.pts[0] };
+                    log(b'F', now, src, pts, self.raw[0], p);
+                }
+                // 0x5A: bad / absent frame; Goodix: buffer not ready (not logged).
+                None if self.ctrl == Ctrl::Hynitron => log(b'F', now, src | 0x80, 0, 0, Point::default()),
+                None => {}
+            }
             if f.is_none() && self.ctrl == Ctrl::Hynitron {
                 return None;
             }
@@ -992,66 +1263,13 @@ impl Touch {
         } else {
             None
         };
-
-        let Frame { pressed, key, n, pts, code } = match frame {
-            Some(f) => f,
-            None => {
-                // No new frame this call: flush a pending debounced state after
-                // DEBOUNCE_MS of silence (same logic as the old !int_low path).
-                if let Some((ev, t)) = self.pending {
-                    if now.saturating_sub(t) >= DEBOUNCE_MS {
-                        self.pending = None;
-                        if ev != self.last {
-                            self.last = ev;
-                            return Some(ev);
-                        }
-                    }
-                }
-                return None;
-            }
-        };
-
-        let mut ev = Event::default();
-        if pressed && !key {
-            self.last_point = now;
-        }
-        if pressed && key && (self.last.points > 0 || now.saturating_sub(self.last_point) < 300) {
-            // Long press on the screen reported as a key: ignore.
-            return None;
-        }
-        if pressed {
-            if key {
-                ev.keys = 1 << code;
-            } else {
-                ev.points = n.clamp(1, MAX_POINTS as u8);
-                ev.pts = pts;
-                ev.p = pts[0];
-            }
-        }
-        // Moving finger: accept position updates of the same contact at once.
-        if ev.points > 0 && self.last.points > 0 && ev.keys == self.last.keys {
-            self.pending = None;
-            if ev != self.last {
-                self.last = ev;
-                return Some(ev);
-            }
-            return None;
-        }
-        if ev == self.last {
-            self.pending = None;
-            return None;
-        }
-        match self.pending {
-            Some((q, _)) if q == ev => {
-                self.pending = None;
-                self.last = ev;
-                Some(ev)
-            }
-            _ => {
-                self.pending = Some((ev, now));
-                None
-            }
-        }
+        // No new frame this call: flush a pending state after its silence.
+        let ev = match frame {
+            Some(f) => self.deb.frame(&f, now),
+            None => self.deb.idle(now),
+        }?;
+        log(b'E', now, ev.points, ev.keys, 0, ev.p);
+        Some(ev)
     }
 
     /// Hynitron 0x5A frame read — byte-identical bus traffic to the original
