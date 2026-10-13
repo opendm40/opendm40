@@ -1,57 +1,40 @@
-# DM40 replacement firmware (Rust, RAM-loaded PoC)
+# DM40 replacement firmware (Rust)
 
-Replacement firmware for the Alientek DM40 (GD32F427, Cortex-M4F @ 200 MHz).
-Scope of this PoC: multimeter only, GUI matching the stock firmware but with the
-main colour changed from orange/yellow to red. No settings screens, no
-Bluetooth. Calibration and configuration are read from their existing locations;
-nothing is written. USB host-side access uses USBTMC (added in a later step).
+Replacement firmware for the Alientek DM40 (GD32F427, Cortex-M4F @ 200 MHz):
+multimeter, scope and generator running at the same time, stock-like GUI with
+the main colour red, menus, touch, Bluetooth app protocol, USBTMC/SCPI.
+Calibration and the vendor boot data are read from their stock locations, never
+rewritten (a backup copy goes to the SPI disk).
 
-The image runs from SRAM, taking over from the stock firmware and
-re-initialising the peripherals it needs. How the image is placed in RAM and
-started is the loader's job (provided separately); this crate only produces the
-image and defines the contract below.
-
-## Load contract
-
-- **Format:** bare binary, position-dependent, loaded at `0x20008000`.
-- **Layout:** Cortex-M vector table at the start — word[0] = initial MSP
-  (`0x10010000`), word[1] = reset entry (thumb bit set). A loader copies the
-  image to `0x20008000` and branches to word[1].
-- **Region:** the image occupies `0x20008000`..`0x2001C000` (80 KiB) of the
-  SRAM0 the stock firmware leaves free in multimeter mode (free from
-  `0x20005024`); the low 32 KiB of SRAM0 (stock scope buffer) is not touched.
-  `.bss` and the stack are in TCM SRAM (`0x10000000`, 64 KiB), which the loader
-  never writes; word[0] (initial MSP) is `0x10010000`.
-- **On entry:** reset sets MSP from word[0], masks interrupts (`cpsid i`), points
-  `VTOR` at the in-SRAM table, zeroes `.bss` and calls `main`. The loader does
-  not need to keep its interrupt handlers alive after the branch.
+fw-rs is installed like a stock update: `dm40-fw-native.bin` is a vendor-format
+update file that the vendor FS-loader flashes to `0x08004000`; a small shim in
+front of it handles the power key, the watchdog and recovery
+(docs/native-boot.md). The older RAM/sector-8 image loaded over Bluetooth is
+kept only for the T1/T2 test images (see "Legacy RAM loader").
 
 ## USB debug link
 
-The image enumerates as a composite USBTMC + mass storage device (`1209:0001`)
-on USBFS. Debug commands are SCPI `DBG:...` over USBTMC (`src/scpi.rs`); the
-host tool `tools/dm40dbg.py` (PIL for screenshots) needs read/write access to
-`/dev/usbtmc*` (udev rule). The disk is the stock SPI flash volume.
+fw-rs enumerates as a composite USBTMC + mass storage device (`1209:0001`) on
+USBFS. Debug commands are SCPI `DBG:...` over USBTMC (`src/scpi.rs`); the host
+tool `tools/dm40dbg.py` (PIL for screenshots) needs read/write access to
+`/dev/usbtmc*` (udev rule). The disk is the stock SPI flash FAT volume.
 
 ```
-tools/reload.sh                       # build, reset to stock, BT load, wait for USB (~30 s)
-/usr/bin/python3 tools/dm40dbg.py ping
-/usr/bin/python3 tools/dm40dbg.py shot out.png     # full screen in ~0.8 s
-/usr/bin/python3 tools/dm40dbg.py scpi 'DBG:FLASH?'  # SPI disk: EF4018,4096,0
-/usr/bin/python3 tools/dm40dbg.py release|reset    # back to stock (~20 s | now)
+python3 tools/dm40dbg.py ping
+python3 tools/dm40dbg.py shot out.png        # full screen in ~0.8 s
+python3 tools/dm40dbg.py boot                # DBG:BOOT? decoded: reset cause, marker, crash counter...
+python3 tools/dm40dbg.py scpi 'DBG:FLASH?'   # SPI disk: EF4018,4096,0 (last = write error)
+python3 tools/dm40dbg.py reset               # reboot fw-rs
+python3 tools/dm40dbg.py image FILE          # offline: is FILE a valid dm40*.bin update file?
 ```
 
-Use `/usr/bin/python3`: the linuxbrew `python3` first on PATH has no Bluetooth
-sockets, which `dm40_loader.py` needs.
-
-Watchdog: fed for 60 s after start, then only while the host keeps talking (each
-request extends by 15 s; `PING` with `a` = ms extends up to 10 min). After
-`release`, a timeout or a panic it is not fed and the device returns to stock
-in ~20 s (FWDGT PSC=/256, RLD=2500, measured 19 s).
+Watchdog (native): fed while the main loop runs. A hang, a panic (magenta bar
+at the bottom) or `DBG:RELEASE` resets it after ~20 s and fw-rs reboots once;
+a second one within 60 s enters recovery (the loader update screen, below).
 
 Bring-up status squares (top left): white = running, then PLLSAI locked, USB
 core answering, USB configured, host request seen (green = ok, red = failed,
-grey = not yet, yellow = watchdog released). Magenta bar at the bottom = panic.
+grey = not yet, yellow = watchdog released).
 
 Hardware findings (measured on the device, not from the stock code):
 - USB 48 MHz: the stock clock tree gives PLLQ = 400/9 = 44.4 MHz with IRC48M and
@@ -133,19 +116,60 @@ Goal and remaining work: see [TODO.md](TODO.md).
 5. **(done)** USBTMC + SCPI over USBFS, composite with a mass-storage disk on
    the SPI flash.
 
-## Build
-
-```
-./build.sh                 # -> dm40-fw.bin (RAM image, sector 8)
-./build.sh native          # -> dm40-fw-native.bin (update file for the loader, 0x08004000)
-./build.sh test-initcore   # -> dm40-fw.bin (T1 RAM test of the native init)
-./build.sh test-recovery   # -> dm40-fw.bin (T2 RAM test of native recovery)
-tools/fatren-test/run.sh   # host test of the FAT rename / recovery trigger
-```
-
-Native image, shim, recovery and test plan: docs/native-boot.md "Implementation".
+## Build and install
 
 Needs the pinned toolchain in `../toolchain` (rustup + stable +
-`thumbv7em-none-eabihf`). `build.sh` sources `../toolchain/env.sh`. Crates:
-`usb-device`, `synopsys-usb-otg` (fs), `usbd-serial`, `cortex-m`
-(critical-section only); fetched from crates.io into `../toolchain/cargo`.
+`thumbv7em-none-eabihf`); crates come from crates.io into `../toolchain/cargo`.
+
+```
+./build.sh native [cargo args]   # -> dm40-fw-native.bin (vendor update file, 0x08004000)
+tools/fatren-test/run.sh         # host tests (also tools/genuine-test/run.sh)
+```
+
+**Reload while fw-rs runs** (the normal developer loop):
+
+```
+tools/reload.sh [cargo args]     # e.g. --features keep-screen
+```
+
+builds, stages the image as `dm40_fwrs.bin` on fw-rs's own USB disk (other
+`dm40*.bin` there are removed), syncs, verifies, ejects, sends `DBG:UPDATE`
+(zero the loader marker + reset; the vendor loader installs the file and
+deletes it), waits for fw-rs to come back (the first boot after an install is
+dark for several seconds: do not power-cycle) and checks `DBG:BOOT?`: the
+loader marker must equal the header of the new file ("installed OK", ~1 min).
+`--no-build`, `--image FILE`, `--wait S`: see `tools/reload.sh --help`.
+
+**First install** (the meter runs stock): either reach the vendor loader's
+update screen (its USB disk is `28e9:028f`; the proven way from stock is the
+LEGACY `tools/reload.sh test-recovery`, which zeroes the marker), copy
+`dm40-fw-native.bin` onto that disk as `dm40_fwrs.bin` (the only `dm40*.bin`),
+eject and press "update"; or, on the stock "USB Connect" disk,
+`tools/reload.sh --from-stock` stages the file and tells you to press
+"update" / power-cycle, then waits for fw-rs.
+
+**Recovery** (fw-rs hangs or does not start): the loader update screen and its
+USB disk appear by themselves after two watchdog resets in a row. By hand:
+from off, hold the power key ~4 s until the beep, keep holding 0.5 s more (let
+go within 0.5 s to abort: normal boot); or `python3 tools/dm40dbg.py update` while
+fw-rs still answers. Then copy an image (e.g. `dm40-fw-native.bin` or the
+`_DM40PRV.BIN` backup of the previous one, renamed `dm40_fwrs.bin`) onto the
+loader's disk and press "update".
+
+**Back to stock:** `tools/reload.sh --stock ../firmware/patch/build/dm40_patched.bin`
+(patched stock with Bluetooth memrw) or `--stock ../dm40_v_2_6.bin` (official).
+From the loader screen: copy the stock file onto its disk, press "update".
+Back to fw-rs from stock: `tools/reload.sh --from-stock`.
+
+Native image, shim, recovery and boot info fields: docs/native-boot.md.
+
+### Legacy RAM loader
+
+`./build.sh` (RAM image `dm40-fw.bin`, flash sector 8, run from SRAM at
+`0x20008000`), `./build.sh test-initcore` (T1) and `./build.sh test-recovery`
+(T2) are loaded over Bluetooth by the RAM stub (`stub/`) and `tools/flash.py`:
+`tools/reload.sh --ram | test-initcore | test-recovery [cargo args]`. This
+needs STOCK firmware on the meter (go back to stock first), and
+`/usr/bin/python3` (the linuxbrew `python3` has no Bluetooth sockets). In the
+RAM build the watchdog is fed for 60 s, then only while the host talks
+(`dm40dbg.py hold`); `release`/`reset` return to stock.
