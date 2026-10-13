@@ -924,7 +924,8 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
         let r = range_rect(i);
-        if x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
+        // 2 px (x) / 3 px (y) of slop: the 5 / 6 px gaps split between buttons.
+        if x >= r.x - 2 && x < r.x + r.w + 2 && y >= r.y - 3 && y < r.y + r.h + 3 {
             return Some(Ok(i));
         }
     }
@@ -2300,9 +2301,13 @@ pub fn keypad_input(freq: bool, input: &str, unit: &str) {
 
 pub fn keypad_hit(kind: u8, x: u16, y: u16) -> Option<u8> {
     let (x, y) = (x as i16, y as i16);
-    for &(r, _, c) in keypad_keys(kind) {
-        if c != 0 && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
-            return Some(c);
+    // A key's own box first, then 2 px of slop around it (the 1..5 px gaps
+    // between keys go to a neighbour instead of nowhere).
+    for s in [0, 2] {
+        for &(r, _, c) in keypad_keys(kind) {
+            if c != 0 && x >= r.x - s && x < r.x + r.w + s && y >= r.y - s && y < r.y + r.h + s {
+                return Some(c);
+            }
         }
     }
     None
@@ -2349,14 +2354,15 @@ pub fn main_menu(combo: &str) {
 pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
     let (x, y) = (x as i16, y as i16);
     for (i, (tx, ty, _, _)) in TILES.iter().enumerate() {
-        if x >= *tx && x < tx + 190 && y >= *ty && y < ty + 106 {
+        // 4 px of slop: the 8 px gaps between tiles split between them.
+        if x >= *tx - 4 && x < tx + 194 && y >= *ty - 4 && y < ty + 110 {
             return Some(i);
         }
     }
-    if (46..434).contains(&x) && (280..314).contains(&y) {
+    if (42..438).contains(&x) && (276..318).contains(&y) {
         return Some(4);
     }
-    if (46..434).contains(&x) && (10..44).contains(&y) {
+    if (42..438).contains(&x) && (6..48).contains(&y) {
         return Some(5);
     }
     None
@@ -2433,14 +2439,14 @@ pub fn settings_hit(page: u8, y: u16) -> Option<usize> {
 
 /// Row of a `list_page` with `n` rows under a touch at `y`.
 pub fn list_hit(y: u16, n: usize) -> Option<usize> {
-    let y = y as i16;
-    if y < SET_Y0 {
+    // Each row owns the gap rows around it (half above, half below): a
+    // fingertip that lands between two rows still picks the nearer one.
+    let y = y as i16 - (SET_Y0 - (SET_PITCH - SET_ROW_H) / 2);
+    if y < 0 {
         return None;
     }
-    let i = ((y - SET_Y0) / SET_PITCH) as usize;
-    // Reject taps that land in the gap between rows (pitch > row height).
-    let within = (y - SET_Y0) % SET_PITCH < SET_ROW_H;
-    if i < n.min(SET_ROWS) && within { Some(i) } else { None }
+    let i = (y / SET_PITCH) as usize;
+    if i < n.min(SET_ROWS) { Some(i) } else { None }
 }
 
 /// Rows of the DMM Hold & Limits page (View::Limits).

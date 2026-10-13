@@ -237,7 +237,10 @@ fn gesture_tests(ck: &mut Ck) {
     ck.t("captured: Up, no tap", { let v = touch(&[(100, 100), (101, 100)], true, 0); !tap(&v) && matches!(v.last(), Some(G::Up(_))) });
     let v = touch(&[(100, 100), (100, 100)], false, 800);
     ck.t("held 800 ms: LongPress", v.iter().any(|g| matches!(g, G::LongPress(_))));
-    ck.t("held 800 ms: no tap (TAP_AFTER_LONG off)", !tap(&v));
+    // TAP_AFTER_LONG on: an uncaptured long press still taps on release.
+    ck.t("held 800 ms: tap after LongPress (uncaptured)", tap(&v));
+    let v = touch(&[(100, 100), (100, 100)], true, 800);
+    ck.t("held 800 ms captured: no tap", !tap(&v));
     ck.t("held 600 ms: tap", tap(&touch(&[(100, 100), (100, 100)], false, 600)));
     let v = touch(&[(100, 100), (100, 100)], false, 0);
     ck.t("one Down, one Tap per touch", v.iter().filter(|g| matches!(g, G::Down(_))).count() == 1 && v.iter().filter(|g| matches!(g, G::Tap(_))).count() == 1);
