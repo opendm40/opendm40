@@ -1454,6 +1454,7 @@ impl App {
         // restart while the finger moves the shown frame (scope_page.rs);
         // only the page diff repaint.
         let page = self.sp_on() && can_draw && !self.redraw && self.overlay.is_none();
+        let covered = self.sp.covered();
         if self.sp.frozen_or_pinch() {
             if page {
                 self.sp_tick(now);
@@ -1498,6 +1499,12 @@ impl App {
                 self.meas = [r[10], r[19], r[11], r[0]];
             }
             if !can_draw || self.redraw {
+                return;
+            }
+            if page && covered {
+                // A popup covers the page: keep the frame for later, no drawing.
+                self.sp_frame(&f, now);
+                self.sp_tick(now);
                 return;
             }
             if page {

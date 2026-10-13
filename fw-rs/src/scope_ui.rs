@@ -1190,3 +1190,451 @@ pub fn cells(m: &Model, texts: &[&str]) {
         s.cells_n[i] = n as u8;
     }
 }
+
+// ------------------------------------------------------------------ popups
+// Stock popups (sec. 7): MF settings popup (Measure / Display / Trigger /
+// Settings), CH1 popup (Coupling / Probe / Color), Math popup (inert: no
+// math engine). Drawn by composition like the page; AA off.
+
+pub const MEAS_NAMES: [&str; 20] =
+    ["Freq", "+Duty", "-Duty", "+Wid", "-Wid", "+Pul", "-Pul", "X2-1", "Xf", "Cycl", "Vp-p", "Vrms", "Vmax", "Vmin", "Vtop", "Vbas", "Vamp", "Y2-1", "Vcrm", "Vavg"];
+pub const PROBE_NAMES: [&str; 13] = ["0.1X", "0.2X", "0.5X", "1X", "2X", "5X", "10X", "20X", "50X", "100X", "200X", "500X", "1000X"];
+const WINDOWS: [&str; 5] = ["Rectangular", "Blackman", "Hanning", "Hanming", "Triangular"];
+pub const MF_TABS: [&str; 4] = ["Measure", "Display", "Trigger", "Settings"];
+
+/// Values the popups show.
+#[derive(Clone, Copy)]
+pub struct PopVals {
+    pub meas: [u8; 4],
+    pub meas_n: u8,
+    pub roll: bool,
+    /// 0 OFF 1 MIN 2 1S 3 INF.
+    pub persist: u8,
+    pub bright: u8,
+    pub grid: u8,
+    pub rising: bool,
+    /// 0 Auto 1 Normal 2 Single.
+    pub mode: u8,
+    pub ac: bool,
+    pub probe: u8,
+    pub colour: u8,
+    pub math_colour: u8,
+    /// Measure grid cell under the finger (0x7bef while pressed).
+    pub pressed_cell: Option<u8>,
+}
+
+/// Which popup is open (tab).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Popup {
+    None,
+    Mf(u8),
+    Ch1(u8),
+    Math(u8),
+}
+
+/// Intersection of two rects (w / h 0 when disjoint).
+fn isect(a: Rect, b: Rect) -> Rect {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = (a.x + a.w).min(b.x + b.w);
+    let y1 = (a.y + a.h).min(b.y + b.h);
+    rect(x0, y0, (x1 - x0).max(0), (y1 - y0).max(0))
+}
+
+fn fill_c(r: Rect, clip: Rect, c: Color) {
+    let r = isect(r, clip);
+    if r.w > 0 && r.h > 0 {
+        lcd::fill_rect(r.x as u16, r.y as u16, r.w as u16, r.h as u16, c);
+    }
+}
+
+/// A plain fill `r` (clipped) with a text on top.
+fn fill_text(r: Rect, clip: Rect, bg: Color, font: Font, tr: Rect, text: &str, fg: Color, align: u8, sp: i8) {
+    let t = Ink::new(font, tr, text, align, sp);
+    paint(isect(r, clip), &[(K_TEXT, bg)], |x, y| match t.at(x, y) {
+        Some(g) => (fg, tag(1, g)),
+        None => (bg, 0),
+    });
+}
+
+/// A rounded box (on `outside`) with a centred text.
+fn rbox_text(r: Rect, clip: Rect, radius: i16, fill: Color, outside: Color, font: Font, text: &str, fg: Color) {
+    let t = Ink::new(font, r, text, 8, 0);
+    paint(isect(r, clip), &[(K_SHAPE, outside), (K_TEXT, fill)], |x, y| {
+        if let Some(g) = t.at(x, y) {
+            return (fg, tag(2, g));
+        }
+        if in_rbox(r, radius, 0x0f, x, y) { (fill, tag(1, 0)) } else { (outside, 0) }
+    });
+}
+
+/// Option list FUN_08026cc8: frame fill, items 1 px inset at x = 1 + i *
+/// item_w, the last item fills the rest; selected 0x059e / white text.
+fn option_list(r: Rect, clip: Rect, items: &[&str], item_w: i16, sel: usize) {
+    fill_c(r, clip, C_BAR);
+    for (i, t) in items.iter().enumerate() {
+        let x = 1 + i as i16 * item_w;
+        let w = if i + 1 == items.len() { r.w - x - 1 } else { item_w };
+        let ir = rect(r.x + x, r.y + 1, w, r.h - 2);
+        let (bg, fg) = if i == sel { (C_SEL, C_WHITE) } else { (C_POP_BG, C_BAR) };
+        fill_text(ir, clip, bg, sf::SC_F16, ir, t, fg, 8, 0);
+    }
+}
+
+/// Item of an option list under x (with the items' x layout), if inside.
+fn option_hit(r: Rect, n: usize, item_w: i16, x: i16, y: i16) -> Option<u8> {
+    if !rect(r.x - 2, r.y - 3, r.w + 4, r.h + 6).has(x, y) {
+        return None;
+    }
+    Some(((x - r.x - 1).max(0) / item_w).min(n as i16 - 1) as u8)
+}
+
+/// Spinner FUN_080274b2: 5 rows of 30 px, the current item in the band;
+/// `colours`: names drawn in their palette colour (text box 56 x 13).
+fn spinner(r: Rect, clip: Rect, items: &[&str], cur: usize, colours: bool) {
+    let rows = r.h / 30;
+    let band = rect(r.x, r.y + (r.h - 30) / 2, r.w, 30);
+    let mut ink = [Ink::none(); 5];
+    let mut col = [0u16; 5];
+    for k in 0..rows.min(5) {
+        let idx = cur as i16 - rows / 2 + k;
+        if idx < 0 || idx >= items.len() as i16 {
+            continue;
+        }
+        let y = r.y + k * 30;
+        let in_band = y == band.y;
+        col[k as usize] = if colours { PALETTE[idx as usize % 9] } else if in_band { C_WHITE } else { C_POP_BG };
+        let tr = if colours { rect(r.x + (r.w - 56) / 2, y + (30 - 13) / 2, 56, 13) } else { rect(r.x, y, r.w, 30) };
+        ink[k as usize] = Ink::new(sf::SC_F16, tr, items[idx as usize], 8, 0);
+    }
+    paint(isect(r, clip), &[(K_SHAPE, C_POP_BG), (K_TEXT, C_BAR)], |x, y| {
+        for k in 0..5 {
+            if let Some(g) = ink[k].at(x, y) {
+                return (col[k], tag(2, g));
+            }
+        }
+        if band.has(x, y) {
+            (C_SEL, tag(1, 0))
+        } else if in_rbox(r, 8, 0x0f, x, y) {
+            (C_BAR, tag(1, 0))
+        } else {
+            (C_POP_BG, 0)
+        }
+    });
+}
+
+/// Spinner row under (x, y): the item index it shows.
+fn spinner_hit(r: Rect, n: usize, cur: usize, x: i16, y: i16) -> Option<u8> {
+    if !r.has(x, y) {
+        return None;
+    }
+    let idx = cur as i16 - (r.h / 30) / 2 + (y - r.y) / 30;
+    if idx < 0 || idx >= n as i16 { None } else { Some(idx as u8) }
+}
+
+/// Slider FUN_0802639a: track r5 0x2124 border, filled 0x059e left of the
+/// knob / 0xd679 right, knob 10 x 24 with a white 8 x 22 inner; pos =
+/// int(130 * value).
+fn slider(r: Rect, clip: Rect, pos: i16) {
+    let track = rect(r.x, r.y + (r.h - 10) / 2, r.w, 10);
+    let inner = track.inset(1);
+    let split = r.x + pos + 5;
+    let knob = rect(r.x + pos, r.y + (r.h - 24) / 2, 10, 24);
+    let ki = knob.inset(1);
+    paint(isect(r, clip), &[(K_SHAPE, C_POP_BG)], |x, y| {
+        let c = if ki.has(x, y) {
+            C_WHITE
+        } else if knob.has(x, y) {
+            C_FILL
+        } else if in_rbox(inner, 5, 0x0f, x, y) {
+            if x < split { C_SEL } else { C_POP_BG }
+        } else if in_rbox(track, 5, 0x0f, x, y) {
+            C_FILL
+        } else {
+            return (C_POP_BG, 0);
+        };
+        (c, tag(1, 0))
+    });
+}
+
+/// Slider value (0..1) of a touch at x.
+pub fn slider_value(x: i16) -> f32 {
+    ((x - 214 - 5) as f32 / 130.0).clamp(0.0, 1.0)
+}
+
+/// MF popup page height per tab (box h = 40 + page).
+const MF_PAGE_H: [i16; 4] = [150, 100, 55, 55];
+
+/// MF settings popup (FUN_08037574), tab 0..3.
+pub fn draw_mf(tab: u8, v: &PopVals) {
+    let tab = tab.min(3);
+    let page_h = MF_PAGE_H[tab as usize];
+    let hh = 40 + page_h;
+    let screen = rect(0, 0, 480, 320);
+    fill_c(rect(13, 20, 401, hh), screen, C_FRAME);
+    let tclip = rect(14, 21, 399, hh - 1);
+    for i in 0..4i16 {
+        let x = 14 + 101 * i;
+        let r = rect(x, 21, 100, 40);
+        let sel = i == tab as i16;
+        let ul = rect(x, 59, 100, 2);
+        let t = Ink::new(sf::SC_F22, r, MF_TABS[i as usize], 8, 0);
+        let (bg, fg) = if sel { (C_POP_BG, C_FILL) } else { (C_POP_TAB, C_WHITE) };
+        paint(isect(r, tclip), &[(K_TEXT, bg)], |x, y| {
+            if let Some(g) = t.at(x, y) {
+                return (fg, tag(1, g));
+            }
+            if sel && ul.has(x, y) { (C_POP_TAB, 0) } else { (bg, 0) }
+        });
+    }
+    let pc = rect(14, 61, 399, page_h - 1);
+    match tab {
+        0 => {
+            fill_c(rect(15, 61, 398, 110), pc, C_POP_BG);
+            for i in 0..20i16 {
+                let r = rect(16 + 57 * (i % 7), 66 + 35 * (i / 7), 55, 30);
+                let c = if v.pressed_cell == Some(i as u8) { C_DIS } else { C_BAR };
+                rbox_text(r, pc, 8, c, C_POP_BG, sf::SC_F16, MEAS_NAMES[i as usize], C_WHITE);
+            }
+            fill_c(rect(15, 171, 398, 40), pc, C_POP_BG);
+            for k in 0..v.meas_n.min(4) as usize {
+                let r = rect(16 + 57 * k as i16, 176, 55, 30);
+                rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[v.meas[k] as usize % 20], C_YELLOW);
+            }
+            rbox_text(rect(281, 176, 60, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, "Clear", C_WHITE);
+            rbox_text(rect(348, 176, 60, 30), pc, 8, C_PURPLE, C_POP_BG, sf::SC_F16, "Default", C_WHITE);
+        }
+        1 => {
+            fill_c(rect(14, 61, 399, 100), pc, C_POP_BG);
+            for (r, t) in [(rect(24, 61, 189, 20), "Roll:"), (rect(24, 105, 189, 20), "Persist:"), (rect(214, 61, 189, 20), "Brightness:"), (rect(214, 105, 189, 20), "Grid intensity:")] {
+                fill_text(r, pc, C_POP_BG, sf::SC_F16, r, t, C_FILL, 1, 0);
+            }
+            option_list(rect(24, 81, 88, 24), pc, &["On", "Off"], 44, if v.roll { 0 } else { 1 });
+            option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF"], 44, v.persist as usize);
+            mf_display_values(v);
+        }
+        2 => {
+            fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
+            fill_text(rect(24, 61, 189, 20), pc, C_POP_BG, sf::SC_F16, rect(24, 61, 189, 20), "Edge:", C_FILL, 1, 0);
+            fill_text(rect(214, 61, 189, 20), pc, C_POP_BG, sf::SC_F16, rect(214, 61, 189, 20), "Mode:", C_FILL, 1, 0);
+            option_list(rect(24, 81, 120, 24), pc, &["Rising", "Falling"], 60, if v.rising { 0 } else { 1 });
+            option_list(rect(214, 81, 180, 24), pc, &["Auto", "Normal", "Single"], 60, v.mode as usize);
+        }
+        _ => {
+            fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
+            rbox_text(rect(24, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "PriScr", C_WHITE);
+            rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Save CSV", C_WHITE);
+        }
+    }
+}
+
+/// Display tab: the two sliders and their values (repainted while dragged).
+pub fn mf_display_values(v: &PopVals) {
+    let pc = rect(14, 61, 399, MF_PAGE_H[1] - 1);
+    for (y, val) in [(81i16, v.bright), (125, v.grid)] {
+        slider(rect(214, y, 140, 24), pc, (130 * val.min(100) as i16) / 100);
+        let mut b = Buf::new();
+        let mut t = [0u8; 16];
+        b.push(crate::dmm::format(&mut t, val as f32, 0)).push("%");
+        let r = rect(364, y, 49, 24);
+        fill_text(r, pc, C_POP_BG, sf::SC_F16, r, b.as_str(), C_FILL, 1, 0);
+    }
+}
+
+/// What a touch on the MF popup hits.
+#[derive(Clone, Copy, PartialEq)]
+pub enum MfHit {
+    Tab(u8),
+    Cell(u8),
+    SelCell(u8),
+    Clear,
+    Default,
+    Roll(bool),
+    Persist(u8),
+    Bright,
+    Grid,
+    Rising(bool),
+    Mode(u8),
+    PriScr,
+    SaveCsv,
+    /// Inside the box, nothing there.
+    Inside,
+    /// Below the box: closes (stock: x >= 10).
+    Close,
+    /// Elsewhere outside (ignored, modal).
+    Outside,
+}
+
+pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
+    let tab = tab.min(3);
+    let hh = 40 + MF_PAGE_H[tab as usize];
+    if !rect(13, 20, 401, hh).has(x, y) {
+        return if y >= 20 + hh && x >= 10 { MfHit::Close } else { MfHit::Outside };
+    }
+    if y < 61 {
+        return MfHit::Tab(((x - 14) / 101).clamp(0, 3) as u8);
+    }
+    let near = |r: Rect| rect(r.x - 1, r.y - 2, r.w + 2, r.h + 4).has(x, y);
+    match tab {
+        0 => {
+            for i in 0..20i16 {
+                if near(rect(16 + 57 * (i % 7), 66 + 35 * (i / 7), 55, 30)) {
+                    return MfHit::Cell(i as u8);
+                }
+            }
+            for k in 0..v.meas_n.min(4) as i16 {
+                if near(rect(16 + 57 * k, 176, 55, 30)) {
+                    return MfHit::SelCell(k as u8);
+                }
+            }
+            if near(rect(281, 176, 60, 30)) {
+                MfHit::Clear
+            } else if near(rect(348, 176, 60, 30)) {
+                MfHit::Default
+            } else {
+                MfHit::Inside
+            }
+        }
+        1 => {
+            if let Some(i) = option_hit(rect(24, 81, 88, 24), 2, 44, x, y) {
+                MfHit::Roll(i == 0)
+            } else if let Some(i) = option_hit(rect(24, 125, 176, 24), 4, 44, x, y) {
+                MfHit::Persist(i)
+            } else if rect(204, 75, 210, 36).has(x, y) {
+                MfHit::Bright
+            } else if rect(204, 119, 210, 36).has(x, y) {
+                MfHit::Grid
+            } else {
+                MfHit::Inside
+            }
+        }
+        2 => {
+            if let Some(i) = option_hit(rect(24, 81, 120, 24), 2, 60, x, y) {
+                MfHit::Rising(i == 0)
+            } else if let Some(i) = option_hit(rect(214, 81, 180, 24), 3, 60, x, y) {
+                MfHit::Mode(i)
+            } else {
+                MfHit::Inside
+            }
+        }
+        _ => {
+            if near(rect(24, 78, 80, 30)) {
+                MfHit::PriScr
+            } else if near(rect(114, 78, 80, 30)) {
+                MfHit::SaveCsv
+            } else {
+                MfHit::Inside
+            }
+        }
+    }
+}
+
+/// CH1 / Math popup frame: box, header, vertical tabs, page area.
+fn side_popup(title: &str, tabs: &[&str], tab: u8) {
+    let screen = rect(0, 0, 480, 320);
+    fill_c(rect(214, 20, 200, 281), screen, C_FRAME);
+    let h = rect(215, 21, 198, 29);
+    fill_text(h, screen, C_POP_TAB, sf::SC_F16, h, title, C_YELLOW, 8, 0);
+    fill_c(rect(215, 50, 198, 250), screen, C_FRAME);
+    for (i, t) in tabs.iter().enumerate() {
+        let y = 50 + 41 * i as i16;
+        let r = rect(215, y, 78, 40);
+        let sel = i == tab as usize;
+        let ink = Ink::new(sf::SC_F16, r, t, 8, 1);
+        let (bg, fg) = if sel { (C_POP_BG, C_BAR) } else { (C_BAR, C_WHITE) };
+        let ind = rect(291, y, 2, 40);
+        paint(r, &[(K_TEXT, bg)], |x, y| {
+            if let Some(g) = ink.at(x, y) {
+                return (fg, tag(1, g));
+            }
+            if sel && ind.has(x, y) { (C_BAR, 0) } else { (bg, 0) }
+        });
+    }
+    fill_c(rect(293, 50, 120, 250), screen, C_POP_BG);
+}
+
+pub fn draw_ch1(tab: u8, v: &PopVals) {
+    let tab = tab.min(2);
+    side_popup("CHA", &["Coupling", "Probe", "Color"], tab);
+    let pc = rect(293, 50, 120, 250);
+    match tab {
+        0 => option_list(rect(308, 71, 90, 24), pc, &["DC", "AC"], 44, v.ac as usize),
+        1 => {
+            let r = rect(293, 50, 120, 20);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Scale", C_BAR, 8, 0);
+            spinner(rect(298, 70, 110, 150), pc, &PROBE_NAMES, v.probe as usize, false);
+            let r = rect(293, 224, 120, 24);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Type", C_BAR, 8, 0);
+            option_list(rect(308, 250, 90, 24), pc, &["Vol", "Cur"], 44, 0);
+        }
+        _ => spinner(rect(298, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
+    }
+}
+
+/// Math popup: drawn as the stock, but inert (no math engine): the Mode list
+/// shows nothing selected.
+pub fn draw_math(tab: u8, v: &PopVals) {
+    let tab = tab.min(3);
+    side_popup("MATH", &["Mode", "Color", "Hz/Div", "Other"], tab);
+    let pc = rect(293, 50, 120, 250);
+    match tab {
+        0 => option_list(rect(308, 71, 90, 24), pc, &["FFT", "ABS"], 44, usize::MAX),
+        1 => spinner(rect(298, 70, 110, 150), pc, &COLOUR_NAMES, v.math_colour as usize, true),
+        2 => spinner(rect(298, 70, 110, 150), pc, &["250Hz", "500Hz", "1.25kHz", "2.50kHz"], 2, false),
+        _ => {
+            let r = rect(293, 50, 120, 20);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Window", C_BAR, 8, 0);
+            spinner(rect(298, 70, 110, 150), pc, &WINDOWS, 0, false);
+            let r = rect(293, 224, 120, 24);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "FFT Unit", C_BAR, 8, 0);
+            option_list(rect(308, 250, 90, 24), pc, &["dB", "Vrms"], 44, 0);
+        }
+    }
+}
+
+/// What a touch on the CH1 / Math popup hits.
+#[derive(Clone, Copy, PartialEq)]
+pub enum SideHit {
+    Tab(u8),
+    /// CH1: coupling 0 DC 1 AC.
+    Coupling(u8),
+    Probe(u8),
+    Colour(u8),
+    Inside,
+    /// Outside the box: closes.
+    Close,
+}
+
+pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
+    if !rect(214, 20, 200, 281).has(x, y) {
+        return SideHit::Close;
+    }
+    let ntabs = if math { 4 } else { 3 };
+    if x < 293 && y >= 50 {
+        let i = (y - 50) / 41;
+        return if i < ntabs { SideHit::Tab(i as u8) } else { SideHit::Inside };
+    }
+    if math {
+        return SideHit::Inside;
+    }
+    match tab {
+        0 => option_hit(rect(308, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),
+        1 => spinner_hit(rect(298, 70, 110, 150), 13, v.probe as usize, x, y).map_or(SideHit::Inside, SideHit::Probe),
+        _ => spinner_hit(rect(298, 70, 110, 150), 9, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
+    }
+}
+
+/// Draw the open popup.
+pub fn draw_popup(p: Popup, v: &PopVals) {
+    match p {
+        Popup::None => {}
+        Popup::Mf(t) => draw_mf(t, v),
+        Popup::Ch1(t) => draw_ch1(t, v),
+        Popup::Math(t) => draw_math(t, v),
+    }
+}
+
+/// The "Sampling" box (RUN refused during AUTO-set).
+pub fn sampling() {
+    rbox_text(rect(190, 150, 100, 20), rect(0, 0, 480, 320), 8, C_PURPLE, C_FILL, sf::SC_F16, "Sampling", C_WHITE);
+}

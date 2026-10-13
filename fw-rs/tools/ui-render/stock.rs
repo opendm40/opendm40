@@ -71,6 +71,7 @@ impl Trace {
 pub struct Scene {
     pub name: &'static str,
     pub m: Model,
+    pub popup: su::Popup,
     pub trace: Option<Trace>,
     pub persist: Option<Trace>,
     pub cols: usize,
@@ -93,7 +94,7 @@ pub fn scenes() -> Vec<Scene> {
     let mut add = |name: &'static str, m: Model, trace: Option<Trace>, persist: Option<Trace>, cols: usize, c: Vec<&'static str>| {
         let mut m = m;
         m.trig_v = trig_v(&m);
-        v.push(Scene { name, m, trace, persist, cols, cells: c });
+        v.push(Scene { name, m, popup: su::Popup::None, trace, persist, cols, cells: c });
     };
     let sine = || Some(Trace::sine(1.5, 2.0, 0.0));
     add("st01-default-td", d, sine(), None, 399, cells.clone());
@@ -146,7 +147,47 @@ pub fn scenes() -> Vec<Scene> {
     m.battery = 1;
     m.charging = true;
     add("st13-ac-x10-green-falling", m, sine(), None, 399, cells.clone());
+    // Popups over the default page (st2x MF tabs, st3x CH1, st4x math).
+    let mut pops: Vec<(&'static str, Model, su::Popup)> = vec![];
+    for (t, n) in ["st20-settings-measure", "st21-settings-display", "st22-settings-trigger", "st23-settings-settings"].iter().enumerate() {
+        pops.push((n, d, su::Popup::Mf(t as u8)));
+    }
+    for (t, n) in ["st30-ch1-coupling", "st31-ch1-probe", "st32-ch1-color"].iter().enumerate() {
+        let mut m = d;
+        m.ch1_open = true;
+        pops.push((n, m, su::Popup::Ch1(t as u8)));
+    }
+    for (t, n) in ["st40-math-mode", "st41-math-color", "st42-math-hzdiv", "st43-math-other"].iter().enumerate() {
+        let mut m = d;
+        m.math_open = true;
+        pops.push((n, m, su::Popup::Math(t as u8)));
+    }
+    drop(add);
+    for (n, m, p) in pops {
+        let mut m = m;
+        m.trig_v = trig_v(&m);
+        v.push(Scene { name: n, m, popup: p, trace: sine(), persist: None, cols: 399, cells: cells.clone() });
+    }
     v
+}
+
+/// Popup values of the reference scenes (tools/stock-ui Scene::default).
+pub fn popvals(m: &Model) -> su::PopVals {
+    su::PopVals {
+        meas: [0, 10, 9, 11],
+        meas_n: 4,
+        roll: false,
+        persist: 0,
+        bright: 100,
+        grid: 50,
+        rising: m.rising,
+        mode: 0,
+        ac: m.ac,
+        probe: m.probe,
+        colour: m.colour,
+        math_colour: 1,
+        pressed_cell: Some(11),
+    }
 }
 
 /// Load a scene's traces into the graph (frame rows).
@@ -173,4 +214,5 @@ pub fn draw(sc: &Scene) {
     load(sc);
     su::update(&sc.m);
     su::cells(&sc.m, &sc.cells);
+    su::draw_popup(sc.popup, &popvals(&sc.m));
 }

@@ -159,6 +159,13 @@ pub(super) struct Sp {
     pub autoset: Option<Autoset>,
     /// Drag in progress with the acquisition held (no polling).
     frozen: bool,
+    /// Open stock popup (modal; the page under it is not repainted), the
+    /// Measure cell under the finger, a slider being dragged (0 brightness,
+    /// 1 grid), the "Sampling" box shown.
+    pub popup: su::Popup,
+    pressed_cell: Option<u8>,
+    slider: Option<u8>,
+    sampling: bool,
     /// Pinch bubble shown / to be (re)drawn.
     bubble: bool,
     bubble_dirty: bool,
@@ -168,6 +175,11 @@ impl Sp {
     /// A drag or pinch holds the acquisition (no polling).
     pub fn frozen_or_pinch(&self) -> bool {
         self.frozen || self.pinch.is_some()
+    }
+
+    /// The page is covered by a popup / box (no page drawing).
+    pub fn covered(&self) -> bool {
+        self.popup != su::Popup::None || self.sampling
     }
 
     pub const fn new() -> Sp {
@@ -189,6 +201,10 @@ impl Sp {
             persist: 0,
             autoset: None,
             frozen: false,
+            popup: su::Popup::None,
+            pressed_cell: None,
+            slider: None,
+            sampling: false,
             bubble: false,
             bubble_dirty: false,
         }
@@ -281,8 +297,8 @@ impl App {
             roll: self.scope.rolling(),
             record,
             gen_hz: if self.gen.s.on { self.gen.actual_hz() } else { 0.0 },
-            ch1_open: false,
-            math_open: false,
+            ch1_open: matches!(sp.popup, su::Popup::Ch1(_)),
+            math_open: matches!(sp.popup, su::Popup::Math(_)),
             pressed: if now < sp.pressed_until { sp.pressed } else { 0 },
             combined: self.view == View::DmmScope,
         }
@@ -300,6 +316,12 @@ impl App {
         self.sp_render();
         self.sp_update(self.now);
         self.sp_cells();
+        if self.sp.popup != su::Popup::None {
+            self.sp_popup_draw();
+        }
+        if self.sp.sampling {
+            su::sampling();
+        }
     }
 
     /// Repaint whatever changed (model diff, graph rows).
@@ -483,6 +505,14 @@ impl App {
                 self.scope_set(a.saved, now);
             }
         }
+        if self.sp.sampling && self.sp.autoset.is_none() {
+            self.sp.sampling = false;
+            self.redraw = true;
+            return;
+        }
+        if self.sp.covered() {
+            return;
+        }
         self.sp_update(now);
     }
 
@@ -519,9 +549,21 @@ impl App {
         if self.sp.autoset.is_some() {
             return match g {
                 Gesture::KeyDown(0) => None,
+                Gesture::KeyDown(1) => {
+                    // RUN refused: the stock "Sampling" box until it is done.
+                    self.beep(now, 50);
+                    if !self.sp.sampling && !self.redraw {
+                        self.sp.sampling = true;
+                        su::sampling();
+                    }
+                    Some(false)
+                }
                 Gesture::KeyDown(_) | Gesture::Down(_) | Gesture::Tap(_) => Some(false),
                 _ => None,
             };
+        }
+        if self.sp.popup != su::Popup::None {
+            return self.sp_popup_gesture(clk, g);
         }
         match g {
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
@@ -617,8 +659,7 @@ impl App {
                     self.sp_key(clk, 1);
                 } else if y < 20 && (352..414).contains(&x) {
                     self.beep(now, 30);
-                    self.scope_tab = 2;
-                    self.show(View::ScopeMenu, clk);
+                    self.sp_popup_open(su::Popup::Mf(2));
                 }
                 Some(false)
             }
@@ -891,22 +932,24 @@ impl App {
 
     // ------------------------------------------------------------ panel, keys
 
-    fn sp_panel(&mut self, clk: &mut Clock, k: usize, now: u64) {
+    fn sp_panel(&mut self, _clk: &mut Clock, k: usize, now: u64) {
         let mut st = self.scope.s;
         match k {
             0 => st.range = (st.range + 1).min(9),
             2 => st.range = st.range.saturating_sub(1),
             1 => {
-                // CH1 popup (S6); until then the settings window.
-                self.show(View::ScopeMenu, clk);
+                self.sp_popup_open(su::Popup::Ch1(0));
+                return;
+            }
+            4 => {
+                self.sp_popup_open(su::Popup::Math(0));
                 return;
             }
             6 => {
-                self.scope_tab = 2;
-                self.show(View::ScopeMenu, clk);
+                self.sp_popup_open(su::Popup::Mf(2));
                 return;
             }
-            _ => return, // math: no engine
+            _ => return, // math scale: no engine
         }
         self.scope_set(st, now);
     }
@@ -921,11 +964,236 @@ impl App {
                 self.scope_set(s, now);
             }
             2 => self.autoset_start(now),
+            _ => self.sp_popup_open(su::Popup::Mf(0)),
+        }
+    }
+
+    // ------------------------------------------------------------ popups
+
+    fn sp_popvals(&self) -> su::PopVals {
+        let s = &self.scope.s;
+        su::PopVals {
+            meas: self.meas_sel,
+            meas_n: self.meas_n as u8,
+            roll: self.roll,
+            persist: self.sp.persist,
+            bright: self.sp.bright,
+            grid: self.sp.grid,
+            rising: s.rising,
+            mode: match s.mode {
+                scope::TrigMode::Auto => 0,
+                scope::TrigMode::Normal => 1,
+                scope::TrigMode::Single => 2,
+            },
+            ac: s.ac,
+            probe: probe_idx(s.probe) as u8,
+            colour: self.sp.colour,
+            math_colour: 1,
+            pressed_cell: self.sp.pressed_cell,
+        }
+    }
+
+    fn sp_popup_draw(&mut self) {
+        let v = self.sp_popvals();
+        su::draw_popup(self.sp.popup, &v);
+    }
+
+    /// Open (or switch) the popup; the CH1 / math label turns grey.
+    fn sp_popup_open(&mut self, p: su::Popup) {
+        self.sp.touch = None;
+        self.sp.popup = p;
+        if !self.redraw {
+            // The CH1 / math pill label shows the open popup (0x7bef).
+            let m = self.sp_model(self.now);
+            su::panel_button(&m, 1);
+            su::panel_button(&m, 4);
+            self.sp_popup_draw();
+        }
+    }
+
+    fn sp_popup_close(&mut self) {
+        self.sp.popup = su::Popup::None;
+        self.sp.pressed_cell = None;
+        self.sp.slider = None;
+        self.redraw = true;
+    }
+
+    /// Every gesture while a popup is open (modal).
+    fn sp_popup_gesture(&mut self, clk: &mut Clock, g: Gesture) -> Option<bool> {
+        let now = clk.now_ms();
+        let v = self.sp_popvals();
+        match g {
+            Gesture::KeyDown(0) => {
+                self.beep(now, 50);
+                self.sp_popup_close();
+                self.show(View::Menu, clk);
+            }
+            Gesture::KeyDown(3) => {
+                self.beep(now, 50);
+                self.sp_popup_close();
+            }
+            Gesture::KeyDown(_) => self.beep(now, 50), // RUN / AUTO swallowed
+            Gesture::Down(p) => {
+                let (x, y) = (p.x as i16, p.y as i16);
+                if let su::Popup::Mf(t) = self.sp.popup {
+                    match su::mf_hit(t, &v, x, y) {
+                        su::MfHit::Cell(i) => {
+                            self.sp.pressed_cell = Some(i);
+                            self.sp_popup_draw();
+                        }
+                        h @ (su::MfHit::Bright | su::MfHit::Grid) => {
+                            self.sp.slider = Some((h == su::MfHit::Grid) as u8);
+                            self.sp_slider(x);
+                            gesture::raw_next(true);
+                            return Some(true);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Gesture::Move(_, p) | Gesture::Drag(_, p, _) if self.sp.slider.is_some() => {
+                self.sp_slider(p.x as i16);
+                return Some(true);
+            }
+            Gesture::Up(_) => self.sp.slider = None,
+            Gesture::Tap(p) => {
+                self.beep(now, 30);
+                let (x, y) = (p.x as i16, p.y as i16);
+                let had_press = self.sp.pressed_cell.take().is_some();
+                match self.sp.popup {
+                    su::Popup::Mf(t) => self.sp_mf_tap(clk, t, su::mf_hit(t, &v, x, y), now),
+                    su::Popup::Ch1(t) => self.sp_side_tap(false, t, su::side_hit(false, t, &v, x, y), now),
+                    su::Popup::Math(t) => self.sp_side_tap(true, t, su::side_hit(true, t, &v, x, y), now),
+                    su::Popup::None => {}
+                }
+                if had_press && self.sp.popup != su::Popup::None && !self.redraw {
+                    self.sp_popup_draw();
+                }
+            }
+            Gesture::MultiSwipeDown(_) => return None, // screenshot / power-off
             _ => {
-                self.scope_tab = 0;
-                self.show(View::ScopeMenu, clk);
+                // A touch that ended as no tap releases a pressed cell.
+                if self.sp.pressed_cell.take().is_some() && !self.redraw {
+                    self.sp_popup_draw();
+                }
             }
         }
+        Some(false)
+    }
+
+    fn sp_slider(&mut self, x: i16) {
+        let val = (su::slider_value(x) * 100.0 + 0.5) as u8;
+        match self.sp.slider {
+            Some(0) => self.sp.bright = val,
+            Some(_) => self.sp.grid = val,
+            None => return,
+        }
+        let v = self.sp_popvals();
+        su::mf_display_values(&v);
+    }
+
+    fn sp_mf_tap(&mut self, clk: &mut Clock, tab: u8, h: su::MfHit, now: u64) {
+        let mut st = self.scope.s;
+        match h {
+            su::MfHit::Close => {
+                self.sp_popup_close();
+                return;
+            }
+            su::MfHit::Outside | su::MfHit::Inside | su::MfHit::Bright | su::MfHit::Grid => return,
+            su::MfHit::Tab(t) => {
+                if t != tab {
+                    // A shorter page: the page under the old box comes back.
+                    self.sp.popup = su::Popup::Mf(t);
+                    self.redraw = true;
+                }
+                return;
+            }
+            su::MfHit::Cell(i) => {
+                // Refuse a duplicate or a 5th item silently (stock).
+                if self.meas_n < 4 && !self.meas_sel[..self.meas_n].contains(&i) {
+                    self.meas_sel[self.meas_n] = i;
+                    self.meas_n += 1;
+                    self.cursors_from_selection();
+                }
+            }
+            su::MfHit::SelCell(k) => {
+                let k = k as usize;
+                if k < self.meas_n {
+                    self.meas_sel.copy_within(k + 1..self.meas_n, k);
+                    self.meas_n -= 1;
+                    self.cursors_from_selection();
+                }
+            }
+            su::MfHit::Clear => {
+                self.meas_n = 0;
+                self.cursors_from_selection();
+            }
+            su::MfHit::Default => {
+                self.meas_sel = crate::scope_meas::DEFAULT_SEL;
+                self.meas_n = 4;
+                self.cursors_from_selection();
+            }
+            su::MfHit::Roll(on) => {
+                self.roll = on;
+                self.scope.roll = on;
+                // Stock: roll on with a slower index enters roll at 22.
+                self.scope_set(st, now);
+            }
+            su::MfHit::Persist(i) => {
+                self.sp.persist = i.min(3);
+                self.persist_trace = i == 3;
+                self.sp_settings_changed();
+            }
+            su::MfHit::Rising(r) => {
+                st.rising = r;
+                self.scope_set(st, now);
+            }
+            su::MfHit::Mode(m) => {
+                st.mode = [scope::TrigMode::Auto, scope::TrigMode::Normal, scope::TrigMode::Single][m.min(2) as usize];
+                st.run = true;
+                self.scope_set(st, now);
+            }
+            su::MfHit::PriScr => {
+                // Close first: the screenshot shows the page (fw-rs).
+                self.sp_popup_close();
+                self.shot_req = true;
+                return;
+            }
+            su::MfHit::SaveCsv => {
+                self.sp_popup_close();
+                self.toast(now, "Scope CSV: use SCPI WAV:DATA?", false);
+                return;
+            }
+        }
+        let _ = clk;
+        self.sp_popup_draw();
+    }
+
+    fn sp_side_tap(&mut self, math: bool, tab: u8, h: su::SideHit, now: u64) {
+        let mut st = self.scope.s;
+        match h {
+            su::SideHit::Close => {
+                self.sp_popup_close();
+                return;
+            }
+            su::SideHit::Inside => return,
+            su::SideHit::Tab(t) => {
+                if t == tab {
+                    return;
+                }
+                self.sp.popup = if math { su::Popup::Math(t) } else { su::Popup::Ch1(t) };
+            }
+            su::SideHit::Coupling(c) => {
+                st.ac = c == 1;
+                self.scope_set(st, now);
+            }
+            su::SideHit::Probe(i) => {
+                st.probe = scope::PROBES[(i as usize).min(12)];
+                self.scope_set(st, now);
+            }
+            su::SideHit::Colour(i) => self.sp.colour = i.min(8),
+        }
+        self.sp_popup_draw();
     }
 
     // ------------------------------------------------------------ AUTO-set

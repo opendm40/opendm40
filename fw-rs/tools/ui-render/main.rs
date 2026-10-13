@@ -506,9 +506,16 @@ fn main() {
             fresh.push(emu().fb.clone());
         }
         save(&out, "s00-replica-st01");
+        for (k, s) in sc.iter().enumerate() {
+            if s.name.starts_with("st20") || s.name.starts_with("st31") {
+                emu().fb.copy_from_slice(&fresh[k]);
+                save(&out, &format!("s00-replica-{}", s.name));
+            }
+        }
         for (i, a) in sc.iter().enumerate() {
             for (j, b) in sc.iter().enumerate() {
-                if i == j {
+                // Popups close with a full redraw (the app): page states only.
+                if i == j || a.popup != scope_ui::Popup::None || b.popup != scope_ui::Popup::None {
                     continue;
                 }
                 stock::draw(a);
@@ -525,7 +532,7 @@ fn main() {
             m.pos = *d;
             m.guide = k % 2 == 0;
             m.sel_v = (k % 2) as u8;
-            let s2 = stock::Scene { name: "drag", m, trace: base.trace.as_ref().map(|t| t.shifted(*d as i32)), persist: None, cols: 399, cells: base.cells.clone() };
+            let s2 = stock::Scene { name: "drag", m, popup: scope_ui::Popup::None, trace: base.trace.as_ref().map(|t| t.shifted(*d as i32)), persist: None, cols: 399, cells: base.cells.clone() };
             stock::load(&s2);
             scope_ui::update(&m);
             let inc = emu().fb.clone();
@@ -542,10 +549,10 @@ fn main() {
         // event of each kind, from the default page with the guide shown.
         let mut m0 = base.m;
         m0.guide = true;
-        let s0 = stock::Scene { name: "budget", m: m0, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+        let s0 = stock::Scene { name: "budget", m: m0, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
         let mut cost = |what: &str, m: scope_ui::Model, shift: i32| {
             stock::draw(&s0);
-            let s1 = stock::Scene { name: "budget", m, trace: base.trace.as_ref().map(|t| t.shifted(shift)), persist: None, cols: 399, cells: base.cells.clone() };
+            let s1 = stock::Scene { name: "budget", m, popup: scope_ui::Popup::None, trace: base.trace.as_ref().map(|t| t.shifted(shift)), persist: None, cols: 399, cells: base.cells.clone() };
             stock::load(&s1);
             emu().writes = 0;
             scope_ui::update(&m);
@@ -570,8 +577,8 @@ fn main() {
         let mut m1 = m;
         m1.trig_row = 99;
         m1.trig_v = 1.2;
-        stock::draw(&stock::Scene { name: "b", m, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() });
-        stock::load(&stock::Scene { name: "b", m: m1, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() });
+        stock::draw(&stock::Scene { name: "b", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() });
+        stock::load(&stock::Scene { name: "b", m: m1, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() });
         emu().writes = 0;
         scope_ui::update(&m1);
         println!("drag budget: trigger level -6 rows (selected): {} px", emu().writes);
