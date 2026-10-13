@@ -14,9 +14,11 @@ mod hy3131_tables;
 mod lcd;
 mod meter;
 mod mmio;
+mod power;
 mod scope;
 mod scpi;
 mod startup;
+mod stockfont;
 mod text;
 mod touch;
 mod ui;
@@ -106,6 +108,13 @@ fn main() -> ! {
         lcd::fill_rect(0, 0, lcd::W, lcd::H, ui::BG);
     }
 
+    // Slow init (relays, touch reset ~220 ms) first: once USB is attached the
+    // host expects answers within milliseconds, and a long pause here made it
+    // give up on enumeration.
+    let mut app = app::App::new(&mut clk);
+    let mut tp = touch::Touch::new(&mut clk);
+    wdt::kick();
+
     let hw = usb::init_hw(&mut clk);
     wdt::kick();
     fail(ST_PLLSAI, !hw.pllsai_locked);
@@ -133,12 +142,10 @@ fn main() -> ! {
     let mut deadline = clk.now_ms() + INITIAL_HOLD_MS;
     let mut feeding = true;
 
-    let mut app = app::App::new(&mut clk);
     let mut scpi = scpi::Scpi::new();
     // SCPI READ?/MEASure?: reply with the first reading whose seq is >= this.
     let mut scpi_wait: Option<u32> = None;
     let mut bt = bt::Bt::new();
-    let mut tp = touch::Touch::new(&mut clk);
     let mut gestures = gesture::Tracker::new();
     let mut touch_events = 0u32;
     let mut next_touch = 0u64;
@@ -241,7 +248,10 @@ fn main() -> ! {
         if host.take_lcd_read() {
             draw_hold_until = now + 300;
         }
-        let can_draw = !host.busy() && now >= draw_hold_until;
+        // No drawing until USB has enumerated (or 3 s passed): a long first
+        // draw must not starve the enumeration.
+        let usb_up = dev.state() == UsbDeviceState::Configured || now > 3000;
+        let can_draw = usb_up && !host.busy() && now >= draw_hold_until;
         app.tick(&mut clk, can_draw);
 
         if now >= next_touch && !host.busy() {
