@@ -52,6 +52,17 @@ const SLOP: i32 = 15;
 /// A drag whose start is diagonal (neither component 1.5x the other) locks
 /// to its larger component once it is this far from the touch-down, pixels.
 const LOCK_MAX: i32 = 2 * SLOP;
+/// A touch the app did not capture is still a tap when it never got farther
+/// than this from the touch-down, pixels. Only captured touches (the scope
+/// graph, sliders) use what a drag past SLOP does; for a button the drag
+/// events go nowhere, and a fingertip that rolls or jitters by 16..30 px
+/// (pressing harder, lifting off) used to lose the tap altogether.
+const TAP_SLOP: i32 = LOCK_MAX;
+/// A long press the app did not capture (it returned false for the
+/// `LongPress`) still taps on release, so a slow press on a button that has
+/// no long-press action is not lost. Needs app.rs to capture the long presses
+/// it acts on (else those would also tap): off until then.
+const TAP_AFTER_LONG: bool = false;
 /// Press-and-hold-then-drag (owner A/B experiment, docs/combined-view-design.md
 /// §6.2): hold time before a drag is accepted, ms; 0 = direct drag (default).
 static GRAB_MS: AtomicU16 = AtomicU16::new(0);
@@ -132,11 +143,15 @@ pub struct Tracker {
     down: Option<(Point, u64)>,
     last: Point,
     moved: bool,
+    /// Farthest distance from the touch-down so far (dist), pixels.
+    far: i32,
     long_sent: bool,
     /// Drag axis, decided once past SLOP.
     axis: Option<Axis>,
     /// Hold-to-grab: held still long enough, drags are allowed.
     grabbed: bool,
+    /// Captured with `capture_direct`: no hold-to-grab for this touch.
+    direct: bool,
     /// Hold-to-grab: moved past GRAB_SLOP before the grab (never drags).
     early: bool,
     /// The app owns this touch (no swipe / tap on release).
@@ -153,9 +168,11 @@ impl Tracker {
             down: None,
             last: Point { x: 0, y: 0 },
             moved: false,
+            far: 0,
             long_sent: false,
             axis: None,
             grabbed: false,
+            direct: false,
             early: false,
             captured: false,
             multi: None,
@@ -166,13 +183,33 @@ impl Tracker {
     /// The app took the current touch (its `Down` or `Drag`): on release it
     /// is not classified as a swipe or a tap. No effect without a touch.
     pub fn capture(&mut self) {
+        if self.active && !self.captured {
+            self.captured = true;
+            crate::touch::log(b'G', 0, b'c', 0, 0, self.last);
+        }
+    }
+
+    /// As `capture`, and this touch drags at once even with hold-to-grab on
+    /// (a slider, not the scope: the grab setting is the scope's).
+    pub fn capture_direct(&mut self) {
         if self.active {
             self.captured = true;
+            self.direct = true;
         }
     }
 
     /// Feed a touch state change. At most one gesture per call (keys first).
     pub fn event(&mut self, ev: &Event, now: u64) -> Option<Gesture> {
+        let first_drag = self.axis.is_none();
+        let g = self.step(ev, now);
+        // DBG:TOUCH?: every decision, but only the first Drag of a touch.
+        if !matches!(g, Some(Gesture::Drag(..))) || first_drag {
+            log_gesture(g, now);
+        }
+        g
+    }
+
+    fn step(&mut self, ev: &Event, now: u64) -> Option<Gesture> {
         if ev.keys != self.keys {
             let changed = ev.keys ^ self.keys;
             let code = changed.trailing_zeros() as u8;
@@ -221,19 +258,22 @@ impl Tracker {
                 self.down = Some((p, now));
                 self.last = p;
                 self.moved = false;
+                self.far = 0;
                 self.long_sent = false;
                 self.axis = None;
                 self.grabbed = false;
+                self.direct = false;
                 self.early = false;
                 self.captured = false;
                 Some(Gesture::Down(p))
             }
             Some((p0, _)) => {
                 self.last = p;
+                self.far = self.far.max(dist(p0, p));
                 if dist(p0, p) > SLOP {
                     self.moved = true;
                 }
-                let hold = grab_ms();
+                let hold = if self.direct { 0 } else { grab_ms() };
                 if hold != 0 && !self.grabbed && dist(p0, p) > GRAB_SLOP {
                     self.early = true;
                 }
@@ -255,32 +295,45 @@ impl Tracker {
     }
 
     /// One-finger release: swipe (not captured, dominant axis), tap or nothing.
+    /// "Nothing" is logged for DBG:TOUCH? as `N` with the reason: 1 moved
+    /// farther than TAP_SLOP (argument: the farthest px, max 255), 2 after a
+    /// long press, 3 diagonal swipe.
     fn release(&mut self, p0: Point, t0: u64, now: u64) -> Option<Gesture> {
         let p1 = self.last;
         let dx = p1.x as i32 - p0.x as i32;
         let dy = p1.y as i32 - p0.y as i32;
         let dt = now.saturating_sub(t0);
+        let none = |why: u8, arg: i32| {
+            crate::touch::log(b'G', now, b'N', why * 100 + arg.clamp(0, 99) as u8, 0, p1);
+            None
+        };
         if self.captured {
             Some(Gesture::Up(p1))
         } else if self.long_sent {
-            None
+            if TAP_AFTER_LONG && self.far <= TAP_SLOP { Some(Gesture::Tap(p0)) } else { none(2, 0) }
         } else if dt <= SWIPE_MAX_MS && (dx.abs() >= SWIPE_MIN || dy.abs() >= SWIPE_MIN) {
             if dx.abs() > 2 * dy.abs() {
                 Some(if dx > 0 { Gesture::SwipeRight } else { Gesture::SwipeLeft })
             } else if dy.abs() > 2 * dx.abs() {
                 Some(if dy > 0 { Gesture::SwipeDown } else { Gesture::SwipeUp })
             } else {
-                None // diagonal: no swipe
+                none(3, 0) // diagonal: no swipe
             }
-        } else if !self.moved {
+        } else if self.far <= TAP_SLOP {
             Some(Gesture::Tap(p0))
         } else {
-            None
+            none(1, self.far)
         }
     }
 
     /// Call periodically: reports a long press while the finger is still down.
     pub fn tick(&mut self, now: u64) -> Option<Gesture> {
+        let g = self.tick_step(now);
+        log_gesture(g, now);
+        g
+    }
+
+    fn tick_step(&mut self, now: u64) -> Option<Gesture> {
         let (p0, t0) = self.down?;
         if let Some(g) = self.grab(now) {
             return Some(g);
@@ -297,7 +350,7 @@ impl Tracker {
     /// grab time.
     fn grab(&mut self, now: u64) -> Option<Gesture> {
         let (p0, t0) = self.down?;
-        let hold = grab_ms() as u64;
+        let hold = if self.direct { 0 } else { grab_ms() as u64 };
         if hold != 0 && !self.early && !self.grabbed && now.saturating_sub(t0) >= hold {
             self.grabbed = true;
             return Some(Gesture::Grab(p0));
@@ -363,6 +416,34 @@ impl Tracker {
         let g = self.event(&Event { keys, ..Event::default() }, t1 + ms as u64 + 10);
         feed(self, g);
     }
+}
+
+/// DBG:TOUCH? gesture line: code, argument, point. Codes: D down, T tap,
+/// L long press, M first drag of a touch (argument 0 H / 1 V; x,y = the
+/// current point), G grab, U up (captured release), < > ^ v swipes left /
+/// right / up / down, C cancel, W n-finger swipe down (argument n), K / k side
+/// key down / up (argument code), c the app captured the touch (logged by
+/// `capture`, time 0), N release that is nothing (see `release`).
+fn log_gesture(g: Option<Gesture>, now: u64) {
+    let z = Point { x: 0, y: 0 };
+    let (c, a, p) = match g {
+        None => return,
+        Some(Gesture::Down(p)) => (b'D', 0, p),
+        Some(Gesture::Tap(p)) => (b'T', 0, p),
+        Some(Gesture::LongPress(p)) => (b'L', 0, p),
+        Some(Gesture::Drag(_, p, ax)) => (b'M', (ax == Axis::V) as u8, p),
+        Some(Gesture::Grab(p)) => (b'G', 0, p),
+        Some(Gesture::Up(p)) => (b'U', 0, p),
+        Some(Gesture::SwipeLeft) => (b'<', 0, z),
+        Some(Gesture::SwipeRight) => (b'>', 0, z),
+        Some(Gesture::SwipeUp) => (b'^', 0, z),
+        Some(Gesture::SwipeDown) => (b'v', 0, z),
+        Some(Gesture::Cancel) => (b'C', 0, z),
+        Some(Gesture::MultiSwipeDown(n)) => (b'W', n, z),
+        Some(Gesture::KeyDown(k)) => (b'K', k, z),
+        Some(Gesture::KeyUp(k)) => (b'k', k, z),
+    };
+    crate::touch::log(b'G', now, c, a, 0, p);
 }
 
 /// Axis of a drag that moved (dx, dy) past SLOP, None while undecided.

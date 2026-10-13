@@ -237,6 +237,11 @@ Additional requirements:
 - [x] Temperature sensor type shown large (owner): TEXT22 chip with the full sensor name in the DMM page's aux2  (code done; verify on device)
       slot (its deg F value moved to the status-bar slot, F14) and as the meter strip's second sub row (no deg F there).
 
+- [x] Temperature offset slider (owner: +/- buttons "absolutely unintuitive"): ui::Slider (track + thumb, value  (code done; verify on device)
+      large above it), -20..+20 C in 0.1 steps, drag / touch-down sets, -/+ end buttons step 0.1, "Offset 0" resets.
+      gesture.rs: only Tracker::capture_direct (slider touches drag at once even with the scope's hold-to-grab).
+      No other numeric setting used +/- buttons.
+
 ## Backlog (user ideas)
 - [ ] SCPI over Bluetooth serial (classic SPP / BLE UART): the same parser as USBTMC, so standard
       software (sigrok/PyVISA over a serial port, Keysight-style loggers) works wirelessly. Keep the

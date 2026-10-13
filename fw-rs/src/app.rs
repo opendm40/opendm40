@@ -94,6 +94,8 @@ pub struct App {
     start_page: usize,
     combo: View,
     last_input: u64,
+    /// A slider (temperature offset) owns the current touch.
+    slider_drag: bool,
     /// Help page shown (UF-29, ui::HELP index).
     help_page: usize,
     /// Idle power-off warnings given since the last input (UF-28).
@@ -368,6 +370,7 @@ impl App {
             beep_until: 0,
             off_warned: 0,
             help_page: 0,
+            slider_drag: false,
             last_raw: None,
             redraw: true,
             meas_next: 0,
@@ -523,22 +526,18 @@ impl App {
                     n += m;
                 };
                 let mut t = [0u8; 16];
-                let o = self.dmm.t_offs(k);
-                put(b"Offset ");
-                put(if o >= 0.0 { b"+" } else { b"" });
-                put(dmm::format(&mut t, o, 1).as_bytes());
-                put(b" C");
+                // (The offset is the slider's value.)
                 if let Some((_, _, i, _)) = self.dmm.t_excitation() {
                     // Estimated sensor current (dmm.rs T_VSRC, unverified).
-                    put(b"   I ~");
+                    put(b"Sensor current ~");
                     put(dmm::format(&mut t, i * 1e3, 3).as_bytes());
                     put(b" mA");
                 } else if let Some((cj, _)) = self.dmm.t_cj(u64::MAX) {
-                    put(b"   CJ ");
+                    put(b"Cold junction ");
                     put(dmm::format(&mut t, cj, 1).as_bytes());
                     put(b" C");
                 }
-                ui::temp_page(k, core::str::from_utf8(&b[..n]).unwrap_or(""));
+                ui::temp_page(k, self.dmm.t_offs(k), core::str::from_utf8(&b[..n]).unwrap_or(""));
             }
             View::Range => {
                 let b = self.dmm.button();
@@ -1662,6 +1661,7 @@ impl App {
         if let Gesture::Down(_) = g {
             self.touch_snap = None;
             self.drag = None;
+            self.slider_drag = false;
         }
         match g {
             // Global gestures (UF-17 / UF-18), any view.
@@ -1677,6 +1677,7 @@ impl App {
                 self.beep(now, 50);
             }
             Gesture::Cancel => {
+                self.slider_drag = false;
                 // A second finger landed: undo the first finger's drag.
                 if let Some(a) = self.drag.take().and_then(|d| d.anchor) {
                     self.scope.pan_from(a, 0);
@@ -1727,6 +1728,19 @@ impl App {
                 self.beep(now, 60);
                 self.show(View::Dmm, clk);
             }
+            // Temperature offset slider: the touch belongs to it; the value
+            // follows the finger (down sets it at once).
+            Gesture::Down(p) if self.view == View::Range && self.dmm.hy_mode() == 15 && ui::T_OFFS.hit(p.x, p.y) => {
+                captured = true;
+                self.slider_drag = true;
+                self.set_t_offs(ui::T_OFFS.value_at(p.x));
+            }
+            Gesture::Drag(_, p, _) if self.slider_drag => {
+                captured = true;
+                if self.view == View::Range && self.dmm.hy_mode() == 15 {
+                    self.set_t_offs(ui::T_OFFS.value_at(p.x));
+                }
+            }
             // A touch that starts in a scope graph belongs to the scope
             // (docs/scope-ui-plan.md §2.6): never a swipe or a tap.
             // (Not the open function band: it owns the graph's bottom rows.)
@@ -1744,6 +1758,7 @@ impl App {
                 self.scope_drag(p0, p, axis, now);
             }
             Gesture::Up(_) => {
+                self.slider_drag = false;
                 if let Some(d) = self.drag.take() {
                     if let Some((t, axis)) = d.target {
                         let i = if self.gest_n < GEST_N {
@@ -2195,12 +2210,16 @@ impl App {
                             self.last_raw = None;
                         }
                     }
-                    Some(7) => self.dmm.set_t_offs(k, 0.0),
-                    Some(i) => {
-                        let d = [-1.0, -0.1, 0.1, 1.0][(i as usize - 8) % 4];
-                        self.dmm.set_t_offs(k, self.dmm.t_offs(k) + d);
+                    Some(7) => {
+                        self.set_t_offs(0.0);
+                        return;
                     }
-                    None => return,
+                    Some(i @ 8..=9) => {
+                        let d = if i == 8 { -ui::T_OFFS.step } else { ui::T_OFFS.step };
+                        self.set_t_offs(self.dmm.t_offs(k) + d);
+                        return;
+                    }
+                    Some(_) | None => return,
                 }
                 self.redraw = true;
             }
@@ -2450,6 +2469,22 @@ impl App {
         self.chart_n = 0;
         self.chart_dirty = true;
         self.redraw = true;
+    }
+
+    /// A slider owns the current touch (main.rs: capture it with
+    /// gesture::Tracker::capture_direct, no hold-to-grab).
+    pub fn slider_active(&self) -> bool {
+        self.slider_drag
+    }
+
+    /// Temperature page: the current sensor's offset, redrawing only the
+    /// value and the slider (also on every drag step).
+    fn set_t_offs(&mut self, c: f32) {
+        let k = self.dmm.t_sensor();
+        self.dmm.set_t_offs(k, c);
+        if self.view == View::Range && self.dmm.hy_mode() == 15 {
+            ui::temp_offset(self.dmm.t_offs(k));
+        }
     }
 
     /// The DMM function was changed from outside the app (Bluetooth phone

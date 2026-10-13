@@ -793,6 +793,51 @@ fn main() {
         }
     }
 
+    // 6g. Temperature settings page: sensor buttons, offset slider (value
+    //     extremes and both sides of 0), info lines; slider mapping / hits.
+    for (k, offs, info) in [
+        (0u8, -20.0f32, "Cold junction -44.4 C"),
+        (3, 20.0, "Sensor current ~0.850 mA"),
+        (6, 0.0, ""),
+        (1, -0.1, "Sensor current ~0.850 mA"),
+        (2, 0.1, ""),
+        (5, 7.3, "Sensor current ~0.008 mA"),
+        (4, -13.7, ""),
+    ] {
+        host::reset(0);
+        ui::temp_page(k, offs, info);
+        ck.check_opts(&format!("temp/{k}/{offs}"), &page_regions, false);
+        // A drag step redraws value + slider alone: same pixels.
+        let before: Vec<u16> = emu().fb.clone();
+        ui::temp_offset(-offs);
+        ui::temp_offset(offs);
+        ck.cases += 1;
+        if emu().fb != before {
+            ck.fail(&format!("temp/{k}/{offs}"), "slider redraw differs from a full draw".into());
+        }
+        if k == 5 {
+            save(&out, "m06-temp-offset");
+        }
+    }
+    {
+        let s = &ui::T_OFFS;
+        let mut t = |name: &str, ok: bool| {
+            ck.cases += 1;
+            if !ok {
+                ck.fail(&format!("slider/{name}"), "unexpected".into());
+            }
+        };
+        t("left end", s.value_at(0) == -20.0 && s.value_at(s.x0 as u16) == -20.0);
+        t("right end", s.value_at(479) == 20.0);
+        t("centre", s.value_at((s.x0 + s.w / 2) as u16).abs() < 1e-4);
+        t("0.1 steps", (s.value_at((s.x0 + s.w / 2 + 17) as u16) * 10.0).fract().abs() < 1e-3);
+        let (m, p) = s.buttons();
+        t("minus button", ui::temp_hit((m.x + 5) as u16, (m.y + 5) as u16) == Some(8));
+        t("plus button", ui::temp_hit((p.x + 5) as u16, (p.y + 5) as u16) == Some(9));
+        t("track hit", s.hit(240, s.y as u16) && !s.hit(240, 140) && !s.hit(240, 250));
+        t("buttons outside the track", !s.hit((m.x + 5) as u16, s.y as u16) && !s.hit((p.x + 30) as u16, s.y as u16));
+    }
+
     // 6f. Help pages (UF-29): whole page; every text fits its column.
     for page in 0..ui::HELP.len() {
         host::reset(0);
