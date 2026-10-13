@@ -805,6 +805,7 @@ fn main() {
         ("No reading to log", false),
         ("Recording CSV", true),
         ("Screenshot failed", false),
+        (dialog::AUTO_DC, true),
     ]
     .iter()
     .enumerate()

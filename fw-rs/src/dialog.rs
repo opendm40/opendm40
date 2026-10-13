@@ -35,6 +35,8 @@ pub const TOAST: (u16, u16, u16, u16) = (40, 132, 400, 56);
 pub const CONFIRM_MS: u64 = 3000;
 /// Toast duration, ms.
 pub const TOAST_MS: u64 = 1500;
+/// Scope AUTO-set fell back from AC to DC coupling (UF-04, app.rs autoset).
+pub const AUTO_DC: &str = "AUTO: DC (no AC signal)";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Overlay {
