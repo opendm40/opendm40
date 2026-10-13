@@ -5,7 +5,8 @@
 *.apk
 *.zip
 
-# Build outputs
+# Build outputs (dist/: memrw kit built by firmware/patch/kit/mkkit.sh)
+dist/
 firmware/patch/build*/
 __pycache__/
 fw-rs/target/
@@ -16,15 +17,9 @@ toolchain/
 # S00x.BMP, SHA256SUMS and manifests next to them)
 firmware/re/dumps/
 firmware/re/history/
-firmware/spi-disk-backup/
-dist/*/tools/quick.img/
-dist/*/tools/full/
 # Everything personal that is not under firmware/re/dumps/: SPI disk backups,
-# memrw kit test output (UID, calibration, OTP), scratch runs
+# memrw kit test output (UID, calibration, OTP), checksum brute-force scratch
 private/
 
 # Ghidra project database (contains the vendor image; rebuilt by Setup.java)
 firmware/re/ghidra/gproj/
-
-# Scratch output of the checksum brute-force runs
-l2bittest/
