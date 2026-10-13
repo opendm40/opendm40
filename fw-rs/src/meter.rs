@@ -2,7 +2,7 @@
 //! MIN/MAX/AVG and the Hi/Lo limits. Behaviour of HOLD / REL / MIN/MAX from
 //! dmm_v2_6.h section 8 and bt_meas_v2_6.h (BT commands 03..05); AutoHold
 //! (FR-01), AVG (FR-02) and limits (FR-06) are fw-rs additions
-//! (../DM40C_feature_request.md).
+//! (../docs/dm40-feature-request.md).
 //!
 //! `hold` is the manual HOLD only (RUN key, BT command 04, BT status bit 7):
 //! everything freezes, the statistics included. AutoHold is a separate mode:
