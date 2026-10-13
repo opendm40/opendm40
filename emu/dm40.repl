@@ -1,0 +1,278 @@
+// Alientek DM40 (GD32F427VGT6 ~ STM32F427, Cortex-M4F @ 200 MHz) for Renode.
+// Written from scratch (not `using stm32f4.repl`): the DM40 needs the FSMC bank
+// mapped to the LCD model, 200 MHz timers, the GD32 memory map and only PE5
+// on EXTI line 5. Peripheral models: Renode built-ins where they fit, DM40
+// specific ones from peripherals/*.cs (included by the .resc).
+//
+// Memory (ANALYSIS.md section 1/4, native-boot.md):
+//   0x08000000  1 MiB flash (ROM boot 16K, app, FS-loader @0xA0000, UID data
+//               @0xA4000, calibration @0xC0000, flag @0xFF000)
+//   0x10000000  TCM SRAM 64K       0x20000000 SRAM 192K (SRAM0/1 + ADDSRAM)
+//   0x40024000  backup SRAM 4K     0x1FFF7800 OTP, UID @0x1FFF7A10
+//   0x60000000  FSMC bank 1 -> ILI9488 (A16 = RS)   0xA0000000 FSMC registers
+
+cpu: CPU.CortexM @ sysbus
+    cpuType: "cortex-m4f"
+    nvic: nvic
+    PerformanceInMips: 200
+
+nvic: IRQControllers.NVIC @ sysbus 0xE000E000
+    priorityMask: 0xF0
+    systickFrequency: 200000000
+    IRQ -> cpu@0
+
+dwt: Miscellaneous.DM40_DWT @ sysbus 0xE0001000
+    frequency: 200000000
+
+flash: Memory.MappedMemory @ sysbus 0x08000000
+    size: 0x100000
+
+tcm: Memory.MappedMemory @ sysbus 0x10000000
+    size: 0x10000
+
+sram: Memory.MappedMemory @ sysbus 0x20000000
+    size: 0x30000
+
+bkpsram: Memory.MappedMemory @ sysbus 0x40024000
+    size: 0x1000
+
+// System memory: OTP 0x1FFF7800 (512 B + 16 lock), UID 0x1FFF7A10, flash size 0x1FFF7A22
+sysmem: Memory.MappedMemory @ sysbus 0x1FFF0000
+    size: 0xC000
+
+flash_controller: MTD.STM32F4_FlashController @ {
+        sysbus 0x40023C00;
+        sysbus new Bus.BusMultiRegistration { address: 0x1FFFC000; size: 0x100; region: "optionBytes" }
+    }
+    flash: flash
+
+// FSMC register block (BCR/BTR/BWTR): plain storage is enough, the LCD model
+// does not depend on the timing fields.
+fsmc_regs: Memory.MappedMemory @ sysbus 0xA0000000
+    size: 0x1000
+
+// FSMC bank 1 (NE1..NE4, 4 x 64 MiB): the ILI9488 on NE1, RS = A16.
+lcd: Video.ILI9488 @ sysbus 0x60000000
+
+syscfg: Memory.MappedMemory @ sysbus 0x40013800
+    size: 0x400
+
+rcc: Miscellaneous.STM32F4_RCC @ sysbus 0x40023800
+    rtcPeripheral: rtc
+
+pwr: Miscellaneous.STM32_PWR @ sysbus 0x40007000
+
+crc: CRC.STM32_CRC @ sysbus 0x40023000
+    series: STM32Series.F4
+
+rtc: Timers.STM32F4_RTC @ sysbus 0x40002800
+    AlarmIRQ -> nvic@41
+
+iwdg: Timers.STM32_IndependentWatchdog @ sysbus 0x40003000
+    frequency: 32000
+    windowOption: false
+    defaultPrescaler: 0x4
+
+exti: IRQControllers.STM32F4_EXTI @ sysbus 0x40013C00
+    numberOfOutputLines: 24
+    [0-4] -> nvic@[6-10]
+    [5-9] -> nvicInput23@[0-4]
+    [10-15] -> nvicInput40@[0-5]
+    [16, 17, 18, 22] -> nvic@[1, 41, 42, 3]
+
+nvicInput23: Miscellaneous.CombinedInput @ none
+    numberOfInputs: 5
+    -> nvic@23
+
+nvicInput40: Miscellaneous.CombinedInput @ none
+    numberOfInputs: 6
+    -> nvic@40
+
+// GPIO. Only the lines the DM40 uses as EXTI sources are routed: PE5 (touch INT).
+gpioPortA: GPIOPort.STM32_GPIOPort @ sysbus <0x40020000, +0x400>
+    modeResetValue: 0xA8000000
+    outputSpeedResetValue: 0x0C000000
+    pullUpPullDownResetValue: 0x64000000
+    numberOfAFs: 16
+
+gpioPortB: GPIOPort.STM32_GPIOPort @ sysbus <0x40020400, +0x400>
+    modeResetValue: 0x00000280
+    outputSpeedResetValue: 0x000000C0
+    pullUpPullDownResetValue: 0x00000100
+    numberOfAFs: 16
+
+gpioPortC: GPIOPort.STM32_GPIOPort @ sysbus <0x40020800, +0x400>
+    numberOfAFs: 16
+
+gpioPortD: GPIOPort.STM32_GPIOPort @ sysbus <0x40020C00, +0x400>
+    numberOfAFs: 16
+
+gpioPortE: GPIOPort.STM32_GPIOPort @ sysbus <0x40021000, +0x400>
+    numberOfAFs: 16
+    5 -> exti@5
+
+gpioPortF: GPIOPort.STM32_GPIOPort @ sysbus <0x40021400, +0x400>
+    numberOfAFs: 16
+
+gpioPortG: GPIOPort.STM32_GPIOPort @ sysbus <0x40021800, +0x400>
+    numberOfAFs: 16
+
+gpioPortH: GPIOPort.STM32_GPIOPort @ sysbus <0x40021C00, +0x400>
+    numberOfAFs: 16
+
+gpioPortI: GPIOPort.STM32_GPIOPort @ sysbus <0x40022000, +0x400>
+    numberOfAFs: 16
+
+bitbandPeripherals: Miscellaneous.BitBanding @ sysbus <0x42000000, +0x2000000>
+    peripheralBase: 0x40000000
+
+bitbandSram: Miscellaneous.BitBanding @ sysbus <0x22000000, +0x200000>
+    peripheralBase: 0x20000000
+
+// DMA0/DMA1 (GD32 names) = DMA1/DMA2 (STM32 names, used here).
+dma1: DMA.STM32DMA @ sysbus 0x40026000
+    [0-7] -> nvic@[11-17,47]
+
+dma2: DMA.STM32DMA @ sysbus 0x40026400
+    [0-7] -> nvic@[56-60,68-70]
+
+// Timers: TIMPRE=1 -> every timer clock is 200 MHz on the DM40.
+timer1: Timers.STM32_Timer @ sysbus 0x40010000
+    BreakInterrupt -> nvic@24
+    UpdateInterrupt -> nvic@25
+    [TriggerInterrupt, CommutationInterrupt] -> nvic@[26, 26]
+    CaptureCompareInterrupt -> nvic@27
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer2: Timers.STM32_Timer @ sysbus 0x40000000
+    -> nvic@28
+    frequency: 200000000
+    initialLimit: 0xFFFFFFFF
+
+timer3: Timers.STM32_Timer @ sysbus 0x40000400
+    -> nvic@29
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer4: Timers.STM32_Timer @ sysbus 0x40000800
+    -> nvic@30
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer5: Timers.STM32_Timer @ sysbus 0x40000C00
+    -> nvic@50
+    frequency: 200000000
+    initialLimit: 0xFFFFFFFF
+
+timer6: Timers.STM32_Timer @ sysbus 0x40001000
+    -> nvic@54
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer7: Timers.STM32_Timer @ sysbus 0x40001400
+    -> nvic@55
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer8: Timers.STM32_Timer @ sysbus 0x40010400
+    BreakInterrupt -> nvic@43
+    UpdateInterrupt -> nvic@44
+    [TriggerInterrupt, CommutationInterrupt] -> nvic@[45, 45]
+    CaptureCompareInterrupt -> nvic@46
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer9: Timers.STM32_Timer @ sysbus 0x40014000
+    -> nvic@24
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer10: Timers.STM32_Timer @ sysbus 0x40014400
+    -> nvic@25
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer11: Timers.STM32_Timer @ sysbus 0x40014800
+    -> nvic@26
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer12: Timers.STM32_Timer @ sysbus 0x40001800
+    -> nvic@43
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer13: Timers.STM32_Timer @ sysbus 0x40001C00
+    -> nvic@44
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+timer14: Timers.STM32_Timer @ sysbus 0x40002000
+    -> nvic@45
+    frequency: 200000000
+    initialLimit: 0xFFFF
+
+// UARTs. UART4 = Bluetooth module (PA0/PA1), DMA0 ch2 RX / ch4 TX.
+usart1: UART.STM32_UART @ sysbus <0x40011000, +0x100>
+    -> nvic@37
+
+usart2: UART.STM32_UART @ sysbus <0x40004400, +0x100>
+    -> nvic@38
+
+usart3: UART.STM32_UART @ sysbus <0x40004800, +0x100>
+    -> nvic@39
+
+uart4: UART.STM32_UART @ sysbus <0x40004C00, +0x100>
+    -> nvic@52
+    DMARequest -> dma1@2
+
+uart5: UART.STM32_UART @ sysbus <0x40005000, +0x100>
+    -> nvic@53
+
+// SPI. GD32 SPI1 @0x40003800 (STM32 "SPI2") = the W25Q128 FAT disk, CS = PE4.
+spi1: SPI.STM32SPI @ sysbus 0x40013000
+    series: STM32Series.F4
+    IRQ -> nvic@35
+
+spi2: SPI.STM32SPI @ sysbus 0x40003800
+    series: STM32Series.F4
+    IRQ -> nvic@36
+
+spi3: SPI.STM32SPI @ sysbus 0x40003C00
+    series: STM32Series.F4
+    IRQ -> nvic@51
+
+spiflash: SPI.W25Q128 @ spi2
+    csPort: gpioPortE
+    csPin: 4
+
+// I2C. GD32 I2C2 @0x40005C00 (STM32 "I2C3") = Hynitron touch controller (PA8/PC9).
+i2c1: I2C.STM32F1_I2C @ sysbus 0x40005400
+    EventInterrupt -> nvic@31
+    ErrorInterrupt -> nvic@32
+
+i2c2: I2C.STM32F1_I2C @ sysbus 0x40005800
+    EventInterrupt -> nvic@33
+    ErrorInterrupt -> nvic@34
+
+i2c3: I2C.STM32F1_I2C @ sysbus 0x40005C00
+    EventInterrupt -> nvic@72
+    ErrorInterrupt -> nvic@73
+
+// ADC0 (battery PC5 = channel 15, internal temperature channel 16)
+adc1: Analog.SimpleADC @ sysbus 0x40012000
+
+// DAC (generator channel 1 PA4, scope trigger level channel 2 PA5): storage.
+dac: Memory.MappedMemory @ sysbus 0x40007400
+    size: 0x400
+
+rng: Miscellaneous.STM32_RNG @ sysbus 0x50060800
+    series: STM32Series.F4
+    -> nvic@80
+
+memtool: Miscellaneous.MemTool @ sysbus 0x7FFF0000
+
+sysbus:
+    init:
+        Tag <0x50000000, 0x5003FFFF> "USBFS" 0x0

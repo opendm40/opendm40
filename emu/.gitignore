@@ -1,0 +1,9 @@
+# portable Renode (fetched by get-renode.sh)
+.renode/
+# generated flash/disk images, screenshots, logs, build worktrees
+out/
+*.png
+*.bin
+*.img
+*.log
+__pycache__/
