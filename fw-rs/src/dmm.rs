@@ -949,7 +949,7 @@ impl Dmm {
                     && put(buf, &mut at, b"/")
                     && num(buf, &mut at, e.lpf[j] as f32, 0)
                     && put(buf, &mut at, b"/")
-                    && num(buf, &mut at, e.dcp[j], 4);
+                    && num(buf, &mut at, e.dcp[j].clamp(-1e9, 1e9), 4);
             }
             if !ok {
                 at = mark;
@@ -1445,6 +1445,9 @@ impl Dmm {
     /// BT command 06 sub-mode 2 = AC+DC (page+9 = s; AC+DC uses the DC HY
     /// mode, which the caller then selects for s != 1).
     fn bt_acdc(&mut self, s: u8) {
+        if s != 2 {
+            self.diag_on = false;
+        }
         if (s == 2) != self.acdc {
             self.acdc = s == 2;
             self.phase_n = 0;
