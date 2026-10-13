@@ -137,24 +137,20 @@ dma1: DMA.GD32_DMA @ sysbus 0x40026000
 dma2: DMA.GD32_DMA @ sysbus 0x40026400
     [0-7] -> nvic@[56-60,68-70]
 
-// Timers: TIMPRE=1 -> every timer clock is 200 MHz on the DM40.
-timer1: Timers.STM32_Timer @ sysbus 0x40010000
-    BreakInterrupt -> nvic@24
-    UpdateInterrupt -> nvic@25
-    [TriggerInterrupt, CommutationInterrupt] -> nvic@[26, 26]
-    CaptureCompareInterrupt -> nvic@27
-    frequency: 200000000
-    initialLimit: 0xFFFF
+// Timers: TIMPRE=1 -> every timer clock is 200 MHz on the DM40. Timers whose
+// interrupts the firmware uses (TIM2 scope trigger, TIM4, TIM5 scope window,
+// TIM7 1 kHz tick, TIM9..11) are Renode's STM32_Timer; the output-only ones
+// (TIM1/8 sample clocks, TIM3/12/13/14 PWM, TIM6 DAC trigger) are the
+// event-free PwmTimer (Renode's model handles each overflow as an event, and
+// TIM8 runs at 50 MHz).
+timer1: Timers.PwmTimer @ sysbus 0x40010000
 
 timer2: Timers.STM32_Timer @ sysbus 0x40000000
     -> nvic@28
     frequency: 200000000
     initialLimit: 0xFFFFFFFF
 
-timer3: Timers.STM32_Timer @ sysbus 0x40000400
-    -> nvic@29
-    frequency: 200000000
-    initialLimit: 0xFFFF
+timer3: Timers.PwmTimer @ sysbus 0x40000400
 
 timer4: Timers.STM32_Timer @ sysbus 0x40000800
     -> nvic@30
@@ -166,23 +162,14 @@ timer5: Timers.STM32_Timer @ sysbus 0x40000C00
     frequency: 200000000
     initialLimit: 0xFFFFFFFF
 
-timer6: Timers.STM32_Timer @ sysbus 0x40001000
-    -> nvic@54
-    frequency: 200000000
-    initialLimit: 0xFFFF
+timer6: Timers.PwmTimer @ sysbus 0x40001000
 
 timer7: Timers.STM32_Timer @ sysbus 0x40001400
     -> nvic@55
     frequency: 200000000
     initialLimit: 0xFFFF
 
-timer8: Timers.STM32_Timer @ sysbus 0x40010400
-    BreakInterrupt -> nvic@43
-    UpdateInterrupt -> nvic@44
-    [TriggerInterrupt, CommutationInterrupt] -> nvic@[45, 45]
-    CaptureCompareInterrupt -> nvic@46
-    frequency: 200000000
-    initialLimit: 0xFFFF
+timer8: Timers.PwmTimer @ sysbus 0x40010400
 
 timer9: Timers.STM32_Timer @ sysbus 0x40014000
     -> nvic@24
@@ -199,20 +186,11 @@ timer11: Timers.STM32_Timer @ sysbus 0x40014800
     frequency: 200000000
     initialLimit: 0xFFFF
 
-timer12: Timers.STM32_Timer @ sysbus 0x40001800
-    -> nvic@43
-    frequency: 200000000
-    initialLimit: 0xFFFF
+timer12: Timers.PwmTimer @ sysbus 0x40001800
 
-timer13: Timers.STM32_Timer @ sysbus 0x40001C00
-    -> nvic@44
-    frequency: 200000000
-    initialLimit: 0xFFFF
+timer13: Timers.PwmTimer @ sysbus 0x40001C00
 
-timer14: Timers.STM32_Timer @ sysbus 0x40002000
-    -> nvic@45
-    frequency: 200000000
-    initialLimit: 0xFFFF
+timer14: Timers.PwmTimer @ sysbus 0x40002000
 
 // UARTs. UART4 = Bluetooth module (PA0/PA1), DMA0 ch2 RX / ch4 TX.
 usart1: UART.STM32_UART @ sysbus <0x40011000, +0x100>

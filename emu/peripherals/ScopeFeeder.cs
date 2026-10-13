@@ -136,26 +136,36 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var level = TriggerCode(bus);
             var dt = 1.0 / Fs;
             var t = t0 + fed * dt;
+            if(block.Length < n) block = new ushort[n];
+            var start = 0;
             for(var i = 0; i < n; i++)
             {
-                if(!dma.Enabled(stream)) break;
-                fed++;
                 var v = Volts(t + i * dt);
                 var code = (int)Math.Round(512.0 + v * countsPerVolt);
                 if(code < 0) code = 0;
                 if(code > 1023) code = 1023;
-                LastCode = code;
-                dma.Feed(stream, (uint)code);
-                Samples++;
+                block[i] = (ushort)code;
                 if(Comparator)
                 {
                     var pa15 = code > level;
                     if(pa15 != lastPa15)
                     {
+                        // Deliver the samples up to the edge first, so the DMA position
+                        // seen by the trigger logic matches the edge.
+                        var took = dma.FeedBlock(stream, block, start, i + 1 - start);
+                        fed += took; Samples += (ulong)took;
+                        start = i + 1;
                         lastPa15 = pa15;
                         portA.OnGPIO(15, pa15);
+                        if(!dma.Enabled(stream)) { LastCode = code; return; }
                     }
                 }
+                LastCode = code;
+            }
+            if(start < n)
+            {
+                var took = dma.FeedBlock(stream, block, start, n - start);
+                fed += took; Samples += (ulong)took;
             }
         }
 
@@ -227,6 +237,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private string shape;
         private double hz, vpp, offset, phase, countsPerVolt = 108;
         private bool lastPa15;
+        private ushort[] block = new ushort[4096];
         private ulong lastGen;
         private double lastFs, t0;
         private long fed;
