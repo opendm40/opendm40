@@ -1306,7 +1306,7 @@ impl App {
         sc.trig_row = (p[7] & 0xFFFF) as u16 as i16 as i32;
         sc.pos = (p[7] >> 16) as u16 as i16 as i32;
         let pr = f32::from_bits(p[8]);
-        sc.probe = if pr == 1.0 || pr == 10.0 || pr == 100.0 { pr } else { 1.0 };
+        sc.probe = if scope::PROBES.contains(&pr) { pr } else { 1.0 };
         let h = (p[6] >> 18 & 0x3FF) as i32;
         sc.hpos = if h == 0 { 200 } else { h - 1 };
         self.scope.apply(sc, 0);
@@ -2108,7 +2108,7 @@ impl App {
                     Some((_, k)) => match k {
                         0 => st.ac = false,
                         1 => st.ac = true,
-                        3..=5 => st.probe = [1.0, 10.0, 100.0][k - 3],
+                        3..=15 => st.probe = scope::PROBES[k - 3],
                         _ => {}
                     },
                 }
@@ -2808,7 +2808,8 @@ impl App {
                 Some(())
             }
             C::TrigLevel(Some(v)) => {
-                let r = scope::VDIV[sc.range];
+                // Volts at the probe tip, as TRIG:LEV? answers (probe applied).
+                let r = scope::VDIV[sc.range] * sc.probe;
                 sc.trig_row = (140.0 + sc.pos as f32 - v * 141.0 / (4.0 * r)) as i32;
                 None
             }

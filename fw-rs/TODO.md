@@ -185,7 +185,9 @@ Additional requirements:
 - [x] UF-37 (P1) Native shim keeps the short-press power-on (stock V2.1 behaviour). §8  (code done; verify on device)
 - [x] UF-16 (P2) Generator ramp direction: gen.rs falls, preview rises; verify on scope and align. §7  (code done: ramp rises; verify on device)
 - [ ] UF-11 (P2) Scope FFT with labelled axes + automatic peak (f, dBV) readout. §6.2
-- [ ] UF-12 (P2) Full probe attenuation list x0.1..x1000 (stock scope_probe[13]). §6.2
+- [x] UF-12 (P2) Full probe attenuation list x0.1..x1000 (stock scope_probe[13]). §6.2  (code done; verify on device)
+      Scope MF -> Settings tab, 13 buttons; persisted. No SCPI probe command exists (none added); TRIG:LEV <V>
+      now takes probe-tip volts like TRIG:LEV? answers.
 - [ ] UF-07/08/10 (P2) Scope: corner-tap timebase + list picker, one-tap cursors, V/div +/- shown as zoom. §6.1
 - [ ] UF-13 (P2) Save scope record as CSV to disk; software pulse-width/runt trigger. §6.2
 - [x] UF-23 (P2) PT100/PT1000/NTC temperature via the ohm path. §3  (code done; verify on device)

@@ -58,7 +58,7 @@ Stock: `scope_gen_v2_6.h`, `scope_gen_ui_v2_6.h`. fw-rs: `scope.rs`, `scope_meas
 | Timebase hardware (TIM1/8 psc/arr, DMA) | MATCH | `HW` table `scope.rs:49` = stock `scope_timebase[31]`. |
 | User timebase range | PARTIAL (slow end) | fw-rs `TB_MIN=3`..`TB_MAX=23` = 100 ns/div..500 ms/div (`scope.rs:125`); stock user range is 3..29 = **100 ns..50 s/div** (`SCOPE_TB_USER_MAX 29`). fw-rs stops at 500 ms because it uses one record per frame instead of the stock 65520-sample ping-pong/zoom scheme. 1 s..50 s/div MISSING. |
 | V/div 10 mV..10 V, front-end GPIO rows | MATCH | `VDIV`/`GPIO_ROW` `scope.rs:130` = `scope_range_gpio`; PC13 relay 200 ms wait kept. |
-| Probe x1/x10/x100 | PARTIAL | `probe` scales readouts/labels only (`scope.rs` Settings.probe), matching stock semantics, but the stock probe index spans x0.1..x1000 (`scope_probe[13]`). fw-rs exposes x1/x10/x100 only. Minor. |
+| Probe x0.1..x1000 | MATCH | `probe` scales readouts/labels only (`scope.rs` Settings.probe), matching stock semantics; the full stock list `scope_probe[13]` (`scope::PROBES`) in the scope settings window, Settings tab (UF-12). |
 | Gain/offset calibration from record | MATCH | `cal_pair` `scope.rs:184` reads +0x08 (gain) / +0xA8 (offset) with defaults; CCR3 offset PWM formula matches `FUN_080302d6`. |
 | DC/AC coupling (PE3) | MATCH | `apply()` `scope.rs:372`. |
 | Trigger: level→code→DAC, hysteresis ±2, edge | MATCH | `trig_code`/`find_trigger` `scope.rs:349`,`547`; software refinement with arm band ±2 as `FUN_080123ce`. |
