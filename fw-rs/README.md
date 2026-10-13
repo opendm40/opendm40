@@ -119,14 +119,19 @@ SCOP:MEAS:VPP|VAVG|VRMS|FREQ?  WAV:PRE?  WAV:DATA? (#3400 + 400 bytes)
 
 ## Milestones
 
+Goal and remaining work: see [TODO.md](TODO.md).
+
 1. **(done)** Prove load + run + display.
-1b. **(done)** USB CDC debug link: keepalive-gated watchdog, screenshots,
-   LCD register access, reset/release to stock.
-2. Re-init clocks, FSMC and the ILI9488 from scratch; text/number rendering.
-3. HY3131 driver (bit-banged SPI) + measurement loop, calibration read from the
+1b. **(done)** Debug link: keepalive-gated watchdog, screenshots, LCD register
+   access, reset/release to stock (first USB CDC, now `DBG:` SCPI over USBTMC).
+2. **(done)** Re-init clocks, FSMC and the ILI9488 from scratch; text/number
+   rendering with the stock fonts.
+3. **(done)** HY3131 driver and measurement loop, calibration read from the
    stock settings record at 0x080C0000.
-4. Multimeter GUI matching `firmware/re/analysis/` notes, main value in red.
-5. USBTMC + SCPI over USBFS (next to, or instead of, the debug port).
+4. **(done)** Multimeter GUI matching `firmware/re/analysis/` notes, main value
+   in red; scope and generator pages, menus, touch.
+5. **(done)** USBTMC + SCPI over USBFS, composite with a mass-storage disk on
+   the SPI flash.
 
 ## Build
 
