@@ -222,8 +222,12 @@ Additional requirements:
 - [x] Temperature sensor label in the status bar: glyphs overlap for PT100/PT1000/NTC names. [ui agent]  (code done; verify on device)
 - [ ] AC+DC current reads ~150 uA AC with nothing connected; AC V of a 0.5 V DC source reads
       23-56 mV and decays slowly (compare with stock before calling it a bug).
-- [ ] 3-finger screenshot blocks the main loop ~8 s (BMP write to SPI flash); USB and DMM stall.
-- [ ] Data logger (LOG:STAT ON) has no on-screen indicator; the DMM reading freezes silently.
+- [x] 3-finger screenshot blocks the main loop ~8 s (BMP write to SPI flash); USB and DMM stall.  (code done; verify on device)
+      Now incremental (screenshot.rs state machine, <= ~3 ms per main-loop pass; frame captured
+      run-length coded into 96 KiB SRAM, screen frozen only while captured); SPI1 /16 -> /4 (12.5 MHz).
+      Verify: loop max in DBG:DIAG? during a shot, SCPI READ? keeps answering, S00x.BMP correct.
+- [x] Data logger (LOG:STAT ON) has no on-screen indicator; the DMM reading freezes silently.  (code done; verify on device)
+      "DATA LOGGING" panel (dialog::log_panel, rate + sample count, 1 s refresh), view repainted on stop.
 - [ ] sigrok/SmuView: libsigrok scpi-dmm opens the device over USBTMC (*OPC?, *IDN? answered) but
       drops it because "Alientek,DM40A" is not in its model table. Add a DM40 profile to libsigrok
       src/hardware/scpi-dmm (command set like the 34401A: CONF:<f>, READ?, FUNC?), test with
@@ -266,7 +270,9 @@ Additional requirements:
       (b) 1 V 50 Hz sine: AC+DC AC part must equal plain AC V;
       (c) A input open/shorted: plain CURR:AC uA vs AC+DC (150 uA);
       (d) FREQ in the combined view with/without the scope probe on the node (13.3 Hz = 40/3).
+      e07c11a run: DC 4.8162 V and AC 4.8137 V steady, but the AC+DC AC part wanders 4.5..5.3 V phase
+      to phase (total 6.4..7.4 V, expected 6.81) -> RMS not settled after the phase switch [agent].
 - [ ] libsigrok scpi-dmm DM40 profile (../libsigrok-dm40, branch alientek-dm40, 8c292c31): DC V works
       on the device via usbtmc/1209.0001; RES times out (H1). Then send upstream; consider an
       Agilent-style CONF? reply so the profile gets range/resolution.
-- [ ] firmware/dm40fw.py is untracked but build.sh needs it (packs the native image): commit it.
+- [x] firmware/dm40fw.py is untracked but build.sh needs it (packs the native image): commit it. (165b37a)
