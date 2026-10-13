@@ -11,7 +11,7 @@ const PMU_CTL: u32 = 0x4000_7000;
 const PMU_CS: u32 = 0x4000_7004;
 const BKP: u32 = 0x4002_4000;
 const MAGIC: u32 = 0x4446_5753; // "SWFD"
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 pub const WORDS: usize = 16;
 
 fn crc(words: &[u32]) -> u32 {
