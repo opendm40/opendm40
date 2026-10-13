@@ -191,7 +191,12 @@ Additional requirements:
 - [ ] UF-07/08/10 (P2) Scope: corner-tap timebase + list picker, one-tap cursors, V/div +/- shown as zoom. §6.1
 - [ ] UF-13 (P2) Save scope record as CSV to disk; software pulse-width/runt trigger. §6.2
 - [x] UF-23 (P2) PT100/PT1000/NTC temperature via the ohm path. §3  (code done; verify on device)
-- [ ] UF-25/26/27/28/35 (P2) DMM small fixes: extra-digit option, 4-20mA% label, store-while-HOLD, volume semantics, MIN/MAX reset. §4-§5
+- [x] UF-25/26/27/28/35 (P2) DMM small fixes: extra-digit option, 4-20mA% label, store-while-HOLD, volume semantics, MIN/MAX reset. §4-§5  (code done; verify on device)
+      UF-25: no option (owner: the extra digit is always on). UF-26: DC mA loop % captioned "4-20mA", hidden
+      outside -25..125 % (OL). UF-27: a history tap stores the held value while HOLD / AutoHold. UF-28: row
+      renamed "Key/alert volume"; idle power-off announced 30/20/10 s before (toast + beep at >= 50 % even at
+      volume 0). The continuity / diode beeper is the HY3131 CMPO pin (not TIM14): volume does not apply (check).
+      UF-35: long-press on the MIN/MAX/AVG column = statistics reset, distinct from the history-row clear (existed).
 - [ ] UF-29 (P2) On-device Help page (gestures, resets, input limits). §9
 - [ ] UF-24/30/31/36/38/41 (P2) Tempco comp, fast bargraph, stylus sensitivity, BT on all views at 50 ms, SCPI host script, sinc interp. §3-§10
 - Community-confirmed existing items (priority signal only): native boot/recovery; FR-26 temperature offset (raise to P1);

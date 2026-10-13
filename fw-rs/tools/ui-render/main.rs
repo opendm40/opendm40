@@ -306,6 +306,8 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("dca", rd(9, val(-9.9999, 4, "A"), None, None, false), None),
         ("dcma_420", rd(8, val(24.444, 3, "mA"), None, Some(val(125.0, 1, "%")), false), None),
         ("dcma_420ol", rd(8, val(44.444, 3, "mA"), None, Some(ol(1, "%")), false), None),
+        ("dcma_420lo", rd(8, val(0.0, 3, "mA"), None, Some(val(-25.0, 1, "%")), false), None),
+        ("dcma_420mid", rd(8, val(12.0, 3, "mA"), None, Some(val(50.0, 1, "%")), false), None),
         ("aca", rd(6, val(4.4444, 4, "A"), Some(val(99.999, 3, "kHz")), Some(val(100.0, 1, "%")), false), None),
         ("ohm_mohm", rd(10, val(44.444, 3, "M\u{3a9}"), None, None, false), None),
         ("ohm_ol", rd(10, ol(3, "M\u{3a9}"), None, None, false), None),
@@ -810,6 +812,7 @@ fn main() {
         ("Recording CSV", true),
         ("Screenshot failed", false),
         (dialog::AUTO_DC, true),
+        ("Auto power-off in 30 s", false),
     ]
     .iter()
     .enumerate()
@@ -931,7 +934,7 @@ fn main() {
         ("c07-temp-ntc", "temp_ntc", 0, 0, true, false),
         ("c08-ohm-ol", "ohm_ol", 0, 0, false, false),
         ("c09-cap-nf", "cap_nf", 0, 0, false, false),
-        ("c10-band", "dcma_420", 0, 0, false, false),
+        ("c10-band", "dcma_420mid", 0, 0, false, false),
     ];
     for (file, case, hold, lim, rel, alt) in scenes {
         let (r, l) = find(case);
@@ -979,6 +982,13 @@ fn main() {
         let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
         ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, &side, "mV", ui::RateChip { rate: 0, period_ms: 430, applies: false });
         save(&out, "d02-dmm-acdc");
+        host::reset(0);
+        let (r, _) = find("dcma_420mid");
+        dv.label = None;
+        dv.draw_static(Button::Amp, r.mode, false);
+        dv.reading(&r, 0, 0);
+        ui::status_right(&status(0));
+        save(&out, "d03-dmm-420ma");
         host::reset(0);
         ui::gen_static(&w.gen);
         save(&out, "g01-gen");

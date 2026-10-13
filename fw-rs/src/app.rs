@@ -27,6 +27,12 @@ const OFF_MS: [u64; 4] = [600_000, 1_800_000, 3_600_000, 0];
 const DIM_TXT: [&str; 4] = ["5 min", "10 min", "30 min", "Never"];
 const OFF_TXT: [&str; 4] = ["10 min", "30 min", "1 hour", "Never"];
 const START: [View; 4] = [View::Dmm, View::Scope, View::Gen, View::Menu];
+/// UF-28: the idle power-off is announced OFF_WARN_MS before (then every
+/// OFF_WARN_STEP_MS): a toast and a beep at no less than ALERT_VOL %, so it
+/// is heard also with the key & alert volume at 0 %.
+const OFF_WARN_MS: u64 = 30_000;
+const OFF_WARN_STEP_MS: u64 = 10_000;
+const ALERT_VOL: u8 = 50;
 const TIM14: u32 = 0x4000_2000;
 const BUZZER_ARR: u32 = 11200;
 /// RUN held this long in a DMM view toggles AutoHold (the short press keeps
@@ -88,6 +94,8 @@ pub struct App {
     start_page: usize,
     combo: View,
     last_input: u64,
+    /// Idle power-off warnings given since the last input (UF-28).
+    off_warned: u64,
     dimmed: bool,
     pd6_since: Option<u64>,
     /// PD6 events are taken only after the key was seen released once (the
@@ -356,6 +364,7 @@ impl App {
             pd6_off: false,
             pd6_raw: (false, 0, false),
             beep_until: 0,
+            off_warned: 0,
             last_raw: None,
             redraw: true,
             meas_next: 0,
@@ -913,6 +922,7 @@ impl App {
         if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] && !self.meter.stats.rec {
             power_off();
         }
+        self.off_warn(now, idle);
         // RUN held in a DMM view: AutoHold on/off. The key-down already
         // toggled HOLD; set_ahold releases it again.
         if self.run_down.is_some_and(|t| now.saturating_sub(t) >= RUN_LONG_MS) {
@@ -1833,6 +1843,35 @@ impl App {
         }
     }
 
+    /// UF-28: before the idle power-off, "Auto power-off in 30 s" (20, 10)
+    /// with a beep that ignores a 0 % volume. Not an input: the countdown
+    /// goes on unless the user touches the screen or a key.
+    fn off_warn(&mut self, now: u64, idle: u64) {
+        let off = OFF_MS[self.off_idx];
+        if off == 0 || self.meter.stats.rec || idle + OFF_WARN_MS <= off {
+            self.off_warned = 0;
+            return;
+        }
+        let k = (idle + OFF_WARN_MS - off) / OFF_WARN_STEP_MS;
+        if k < self.off_warned || k >= OFF_WARN_MS / OFF_WARN_STEP_MS {
+            return;
+        }
+        self.off_warned = k + 1;
+        buzzer(true, self.volume.max(ALERT_VOL));
+        self.beep_until = now + 200;
+        let mut b = [0u8; 32];
+        let mut t = [0u8; 16];
+        let secs = crate::dmm::format(&mut t, ((OFF_WARN_MS - k * OFF_WARN_STEP_MS) / 1000) as f32, 0);
+        let mut n = 0;
+        for part in ["Auto power-off in ", secs, " s"] {
+            b[n..n + part.len()].copy_from_slice(part.as_bytes());
+            n += part.len();
+        }
+        self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::TOAST_MS });
+        self.redraw = true;
+        crate::dialog::toast(core::str::from_utf8(&b[..n]).unwrap_or(""), false);
+    }
+
     /// A toast over the view (dialog.rs); the view is redrawn when it goes.
     fn toast(&mut self, now: u64, txt: &str, ok: bool) {
         self.last_input = now;
@@ -2005,9 +2044,11 @@ impl App {
                 self.chart_dirty = true;
             }
             View::Dmm if (153..172).contains(&y) => {
-                // History row: record the shown value (not HOLD, not OL).
+                // History row: record the shown value (not OL). While HOLD
+                // (or an AutoHold capture) that is the frozen value (UF-27:
+                // owners hold a reading, then store it).
                 if let Some(r) = self.meter.shown().copied() {
-                    if !self.meter.hold && !r.main.ol {
+                    if !r.main.ol {
                         let i = if self.hist_n < 5 { self.hist_n } else { (self.hist_new + 1) % 5 };
                         self.hist[i] = (r.main.v, r.main.dec, r.main.unit);
                         self.hist_n = (self.hist_n + 1).min(5);
