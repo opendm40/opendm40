@@ -18,6 +18,7 @@ mod meter;
 mod mmio;
 mod persist;
 mod power;
+mod prof;
 mod scope;
 mod hwtrig;
 mod scope_meas;
@@ -221,6 +222,8 @@ fn main() -> ! {
 
     loop {
         let now = clk.now_ms();
+        // Profiler (DBG:PROF?, src/prof.rs): loop period + the `lap` chain.
+        prof::pass(now);
         #[cfg(feature = "native")]
         boot::mark_healthy(now);
         let t = unsafe { mmio::r32(0xE000_1004) };
@@ -258,6 +261,7 @@ fn main() -> ! {
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
         logger.poll();
         bt.pump(); // BT TX DMA: next segment of a long reply
+        prof::lap(prof::USB);
         if tmc.take_cleared() {
             // USBTMC INITIATE_CLEAR / bus reset: no reply to a pending query.
             scpi_wait[USB] = None;
@@ -384,6 +388,7 @@ fn main() -> ! {
                         true
                     }
                     scpi::Dbg::Input(kind, x, y) => {
+                        prof::touch(prof::cyc());
                         let p = touch::Point { x, y };
                         let g = match kind {
                             0 => Some(gesture::Gesture::Tap(p)),
@@ -414,6 +419,9 @@ fn main() -> ! {
                     scpi::Dbg::Drag(v) => {
                         let (p0, p1) = (touch::Point { x: v[0], y: v[1] }, touch::Point { x: v[2], y: v[3] });
                         gestures.synth_drag(p0, p1, v[4], v[5], now, |g| app.gesture(&mut clk, g));
+                        // All events ran in this pass: time from the release
+                        // to the first frame drawn (acquisition restart cost).
+                        prof::touch(prof::cyc());
                         false
                     }
                     scpi::Dbg::Lcd(x, y, w, h, n) => {
@@ -467,6 +475,15 @@ fn main() -> ! {
                             scpi.put_bytes(s.as_bytes());
                         }
                         true
+                    }
+                    scpi::Dbg::Prof(reset) => {
+                        if reset {
+                            prof::reset();
+                        } else {
+                            let n = prof::report(port.rsp_buf());
+                            port.respond_len(n);
+                        }
+                        false
                     }
                     scpi::Dbg::Release => {
                         feeding = false;
@@ -608,6 +625,7 @@ fn main() -> ! {
             if reply {
                 port.respond(&scpi.buf[..scpi.len]);
             }
+            prof::lap(prof::SCPI);
         }
 
         // Any path that reconfigures the DMM (a host CONFigure, a touch/key
@@ -648,8 +666,11 @@ fn main() -> ! {
         }
         mark(0, &mut ts);
         // CSV recording: one bounded slice of a commit (csvlog.rs).
+        prof::lap_skip();
         csvlog::poll(now);
+        prof::lap(prof::CSV);
         app.tick(&mut clk, can_draw);
+        prof::lap(prof::TICK);
         mark(1, &mut ts);
         for src in [USB, BT] {
             if !scpi_wait[src].is_some_and(|w| now >= w.3) {
@@ -685,26 +706,39 @@ fn main() -> ! {
         let touch_irq = tp.as_ref().map_or(false, |t| t.irq_pending());
         if (now >= next_touch || touch_irq) && !logging {
             next_touch = now + 10;
+            let t_rd = prof::cyc();
+            prof::enter(prof::TOUCH);
+            let mut reported = false;
             let g = match tp.as_mut().and_then(|t| t.poll(now)) {
                 Some(ev) => {
                     touch_events = touch_events.wrapping_add(1);
+                    reported = true;
                     gestures.event(&ev, now)
                 }
                 None => gestures.tick(now),
             };
+            prof::exit(prof::TOUCH);
             if let Some(g) = g {
+                if reported {
+                    prof::touch(t_rd); // latency from the report read
+                }
+                prof::enter(prof::GEST);
                 if app.gesture(&mut clk, g) {
                     if app.slider_active() { gestures.capture_direct() } else { gestures.capture() }
                 }
+                prof::exit(prof::GEST);
             }
         }
         mark(2, &mut ts);
         if !logging {
+            prof::enter(prof::SCOPE);
             app.scope_poll(now, can_draw);
+            prof::exit(prof::SCOPE);
         }
         mark(3, &mut ts);
         if now >= next_poll {
             next_poll = now + 5;
+            prof::enter(prof::BT);
             // The BT module AT init blocks; not while the logger samples.
             if app.bt_on && !logging {
                 bt.init_module(&mut clk, app.dmm.model());
@@ -724,7 +758,9 @@ fn main() -> ! {
                     }
                 }
             }
+            prof::exit(prof::BT);
             mark(4, &mut ts);
+            prof::enter(prof::DMM);
             if !logging {
                 if let Some(raw) = app.dmm.poll(&mut clk) {
                     if let Some(r) = app.reading(raw, can_draw) {
@@ -753,6 +789,7 @@ fn main() -> ! {
                     }
                 }
             }
+            prof::exit(prof::DMM);
             mark(5, &mut ts);
         }
     }
