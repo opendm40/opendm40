@@ -52,6 +52,13 @@ pub struct App {
     pd6_idle: bool,
     /// Last scope frame for SCPI: 400 columns (ADC code / 4) and measurements.
     pub wave: [u8; 400],
+    locked: bool,
+    pd6_presses: u8,
+    pd6_last_release: u64,
+    hist: [(f32, u8, &'static str); 5],
+    hist_n: usize,
+    hist_new: usize,
+    hv_shown: bool,
     pub meas: [f32; 4],
     beep_until: u64,
     pub last_raw: Option<Reading>,
@@ -131,6 +138,13 @@ impl App {
             dimmed: false,
             pd6_since: None,
             wave: [0; 400],
+            locked: false,
+            pd6_presses: 0,
+            pd6_last_release: 0,
+            hist: [(0.0, 0, ""); 5],
+            hist_n: 0,
+            hist_new: 0,
+            hv_shown: false,
             meas: [0.0; 4],
             pd6_idle: unsafe { core::ptr::read_volatile(0x4002_0C10 as *const u32) } & (1 << 6) != 0,
             beep_until: 0,
@@ -160,7 +174,7 @@ impl App {
     }
 
     fn show(&mut self, v: View, clk: &mut Clock) {
-        if matches!(v, View::Menu | View::Settings) && !matches!(self.view, View::Menu | View::Settings) {
+        if matches!(v, View::Menu | View::Settings | View::Range) && !matches!(self.view, View::Menu | View::Settings | View::Range) {
             self.back_view = self.view;
         }
         // Analog power as the stock pages: scope / generator side or DMM side
@@ -168,7 +182,7 @@ impl App {
         match v {
             View::Scope | View::Gen => self.scope.power(true, clk),
             View::Dmm | View::DmmScope => self.scope.power(false, clk),
-            View::Menu | View::Settings => {}
+            View::Menu | View::Settings | View::Range => {}
         }
         self.view = v;
         self.redraw = true;
@@ -176,7 +190,11 @@ impl App {
 
     fn draw_static(&mut self) {
         match self.view {
-            View::Dmm => self.dmm_view.draw_static(self.dmm.button(), self.dmm.mode()),
+            View::Dmm => {
+                self.dmm_view.draw_static(self.dmm.button(), self.dmm.mode());
+                ui::history(&self.hist, self.hist_n, self.hist_new);
+                self.hv_shown = false;
+            }
             View::DmmScope => {
                 self.dmm_view.draw_static(self.dmm.button(), self.dmm.mode());
                 lcd::fill_rect(0, ui::BAR_H, lcd::W, ui::BTN_Y - ui::BAR_H, ui::BG);
@@ -185,6 +203,12 @@ impl App {
             View::Scope => ui::SCOPE_FULL.draw_static(&self.scope, true),
             View::Gen => ui::gen_static(&self.gen),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
+            View::Range => {
+                let b = self.dmm.button();
+                let ac = matches!(self.dmm.mode(), 0 | 2 | 4..=6);
+                let sel = self.range_sel();
+                ui::range_page(b, sel, ac);
+            }
             View::Settings => {
                 let mut b = [[0u8; 8]; 2];
                 let pct = |b: &mut [u8; 8], v: u8| -> usize {
@@ -245,7 +269,19 @@ impl App {
         match (pd6, self.pd6_since) {
             (true, None) => self.pd6_since = Some(now),
             (true, Some(t)) if now - t > 1500 => power_off(),
-            (false, Some(_)) => self.pd6_since = None,
+            (false, Some(_)) => {
+                // Release: two releases within 1 s toggle the key / touch lock.
+                self.pd6_since = None;
+                if now - self.pd6_last_release < 1000 && self.pd6_presses >= 1 {
+                    self.locked = !self.locked;
+                    self.pd6_presses = 0;
+                    self.status_next = 0;
+                    self.beep(now, 150);
+                } else {
+                    self.pd6_presses = 1;
+                }
+                self.pd6_last_release = now;
+            }
             _ => {}
         }
         if now >= self.status_next {
@@ -256,6 +292,7 @@ impl App {
                     self.power.bt_connected(),
                     self.power.bars,
                     self.power.charging(),
+                    self.locked,
                 ),
                 View::Scope => ui::scope_battery(self.power.bars, self.power.charging()),
                 _ => {}
@@ -299,12 +336,39 @@ impl App {
         }
     }
 
+    /// Index of the current range in the MF page list.
+    fn range_sel(&self) -> Option<usize> {
+        let b = self.dmm.button();
+        let items = ui::range_items(b);
+        let want: Option<u8> = if self.dmm.is_auto() {
+            match b {
+                Button::Volt if self.dmm.v_auto() == 1 => Some(255),
+                Button::Amp if self.dmm.a_auto() == 1 => Some(255),
+                _ => None,
+            }
+        } else {
+            let (m, r) = (self.dmm.mode(), self.dmm.range() as u8);
+            Some(match m {
+                2 | 3 => 0,
+                0 | 1 => r + 1,
+                4..=9 => (2 - (m - 4) % 3) * 2 + r,
+                _ => r,
+            })
+        };
+        items.iter().position(|it| it.1 == want)
+    }
+
     /// New DMM reading (always measured, whatever the view).
     pub fn reading(&mut self, raw: Reading, can_draw: bool) -> Option<Reading> {
         self.last_raw = Some(raw);
         let r = self.meter.update(&raw)?;
         if can_draw && !self.redraw && matches!(self.view, View::Dmm | View::DmmScope) {
             self.dmm_view.reading(&r, self.meter.hold, self.meter.rel_active(), self.view == View::DmmScope);
+            let hv = self.view == View::Dmm && r.mode <= 1 && !r.main.ol && r.si.abs() >= 100.0;
+            if hv != self.hv_shown {
+                self.hv_shown = hv;
+                ui::hv_warning(hv);
+            }
         }
         Some(r)
     }
@@ -358,6 +422,9 @@ impl App {
     pub fn gesture(&mut self, clk: &mut Clock, g: Gesture) {
         let now = clk.now_ms();
         self.last_input = now;
+        if self.locked {
+            return;
+        }
         if self.dimmed {
             self.dimmed = false;
             backlight(self.backlight);
@@ -367,7 +434,7 @@ impl App {
                 self.beep(now, 50);
                 self.key(clk, c);
             }
-            Gesture::SwipeLeft | Gesture::SwipeRight if !matches!(self.view, View::Menu | View::Settings) => {
+            Gesture::SwipeLeft | Gesture::SwipeRight if !matches!(self.view, View::Menu | View::Settings | View::Range) => {
                 let i = View::CYCLE.iter().position(|&v| v == self.view).unwrap_or(0);
                 let n = View::CYCLE.len();
                 let j = if g == Gesture::SwipeLeft { (i + 1) % n } else { (i + n - 1) % n };
@@ -376,6 +443,11 @@ impl App {
             Gesture::Tap(p) => {
                 self.beep(now, 30);
                 self.tap(clk, p.x, p.y);
+            }
+            Gesture::LongPress(p) if self.view == View::Dmm && (153..172).contains(&p.y) => {
+                self.hist_n = 0;
+                self.beep(now, 300);
+                ui::history(&self.hist, 0, 0);
             }
             Gesture::Drag(p0, p) if self.view == View::Scope && p0.x >= 13 && p0.x < 414 && p0.y >= 20 && p0.y < 301 => {
                 let mut st = self.scope.s;
@@ -390,7 +462,7 @@ impl App {
         let now = clk.now_ms();
         match code {
             0 => {
-                let v = if matches!(self.view, View::Menu | View::Settings) { self.back_view } else { View::Menu };
+                let v = if matches!(self.view, View::Menu | View::Settings | View::Range) { self.back_view } else { View::Menu };
                 self.show(v, clk);
             }
             1 => match self.view {
@@ -423,21 +495,70 @@ impl App {
                     self.dmm_view.invalidate();
                 }
             },
-            _ => {
-                if self.meter.rel_active() {
-                    self.meter.rel_off();
-                    self.dmm.hold_range(false);
-                } else if self.meter.rel_on(self.last_raw.as_ref()) {
-                    self.dmm.hold_range(true);
+            _ => match self.view {
+                View::Dmm | View::DmmScope if matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap) => {
+                    self.show(View::Range, clk)
                 }
-                self.dmm_view.invalidate();
-            }
+                View::Range => {
+                    let v = self.back_view;
+                    self.show(v, clk)
+                }
+                _ => {}
+            },
         }
     }
 
     fn tap(&mut self, clk: &mut Clock, x: u16, y: u16) {
         let now = clk.now_ms();
         match self.view {
+            View::Dmm | View::DmmScope if self.view == View::Dmm && x >= 402 && (205..243).contains(&y) => {
+                // REL button (stock (402,205,76,38)).
+                if self.meter.rel_active() {
+                    self.meter.rel_off();
+                    self.dmm.hold_range(false);
+                    self.beep(now, 300);
+                } else if self.meter.rel_on(self.last_raw.as_ref()) {
+                    self.dmm.hold_range(self.dmm.mode() <= 10 || self.dmm.mode() == 14);
+                }
+                self.dmm_view.invalidate();
+                self.chart_dirty = true;
+            }
+            View::Dmm if (153..172).contains(&y) => {
+                // History row: record the shown value (not HOLD, not OL).
+                if let Some(r) = self.meter.shown().copied() {
+                    if !self.meter.hold && !r.main.ol {
+                        let i = if self.hist_n < 5 { self.hist_n } else { (self.hist_new + 1) % 5 };
+                        self.hist[i] = (r.main.v, r.main.dec, r.main.unit);
+                        self.hist_n = (self.hist_n + 1).min(5);
+                        self.hist_new = i;
+                        ui::history(&self.hist, self.hist_n, self.hist_new);
+                    }
+                }
+            }
+            View::Range => {
+                let b = self.dmm.button();
+                match ui::range_hit(b, x, y) {
+                    Some(Ok(i)) => {
+                        let item = ui::range_items(b)[i].1;
+                        self.dmm.set_range(clk, item);
+                        self.meter.rel_off();
+                        self.redraw = true;
+                    }
+                    Some(Err(2)) => {
+                        let v = self.back_view;
+                        self.show(v, clk);
+                    }
+                    Some(Err(k)) => {
+                        let ac = matches!(self.dmm.mode(), 0 | 2 | 4..=6);
+                        if (k == 1) != ac {
+                            self.dmm.press(clk, b);
+                            self.meter.reset();
+                        }
+                        self.redraw = true;
+                    }
+                    None => {}
+                }
+            }
             View::Dmm | View::DmmScope => {
                 if self.view == View::Dmm && x < ui::CHART_X && (176..280).contains(&y) {
                     self.chart_rate = match self.chart_rate {
