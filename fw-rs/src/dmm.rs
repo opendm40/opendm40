@@ -471,6 +471,38 @@ struct Freq {
     range: u8,
 }
 
+/// HY3131 counter registers (CTC R15..17, CTB R18..1A, CTA R1B..1D) ->
+/// (frequency kHz, duty %). n = CTA + 0x40000 ticks of the 4.9152 MHz time
+/// base (CTA restarts at 0xfc0000), CTB input periods, CTC high ticks.
+pub(crate) fn counter_vals(ctc: u32, ctb: u32, cta: u32) -> (f32, f32) {
+    let n = cta as f32 + 262_144.0;
+    (ctb as f32 / n * 4915.28, ctc as f32 / n * 100.0)
+}
+
+/// Frequency auto range for `f` kHz; x = factor * over (6.18 kHz at 60000
+/// counts): range r spans up to x * 10^(r-2). Above 10000 x: `prev`.
+pub(crate) fn freq_range_for(f: f32, x: f32, prev: u8) -> u8 {
+    FREQ_DEC.iter().position(|&d| f < x * d).map_or(prev, |r| r as u8)
+}
+
+/// Frequency readout for `f` kHz in range `ri`. The stock notes give
+/// printf format indices (fmt k = "%7.(4-k)f": Hz fmt ri+1, kHz fmt ri-2,
+/// MHz fmt ri-5; aux one digit less), so the decimals are 4 - fmt, as in the
+/// other functions: 60.000 Hz, 600.00 Hz, 6.0000 / 60.000 / 600.00 kHz,
+/// 6.0000 / 60.000 MHz. (Using fmt as the decimals showed 0.7 kHz as "1".)
+pub(crate) fn freq_val(f: f32, ri: u8, aux: bool) -> Val {
+    let ri = ri as i32;
+    let a = aux as i32;
+    let (v, dec, unit) = if ri < 2 {
+        (f * 1000.0, 3 - ri - a, "Hz")
+    } else if ri < 5 {
+        (f, 6 - ri - a, "kHz")
+    } else {
+        (f * 1e-3, 9 - ri - a, "MHz")
+    };
+    Val::new(v, dec.clamp(0, 4) as u8, unit)
+}
+
 /// Capacitance ramp state (r5..r7).
 struct CapRamp {
     discharging: bool,
@@ -2170,38 +2202,15 @@ impl Dmm {
     fn read_counters(&mut self, src: u8) -> (f32, f32) {
         let mut b = [0u8; 9];
         hy::read(0x15, &mut b);
-        let ctc = u24(&b[0..3]) as f32;
-        let ctb = u24(&b[3..6]) as f32;
-        let cta = u24(&b[6..9]) as f32;
-        let n = cta + 262_144.0;
         self.diag_ctr = self.diag_ctr.saturating_add(1);
         hy::write(0x20, &[src]);
         hy::write(0x1B, &[0x00, 0x00, 0xFC]);
         hy::write(0x20, &[src | 2]);
-        (ctb / n * 4915.28, ctc / n * 100.0)
+        counter_vals(u24(&b[0..3]), u24(&b[3..6]), u24(&b[6..9]))
     }
 
     fn freq_range(&mut self) {
-        let x = self.factor() * self.over();
-        let f = self.freq.f_khz;
-        let r = if f < x * 0.01 {
-            0
-        } else if f < x * 0.1 {
-            1
-        } else if f < x {
-            2
-        } else if f < 10.0 * x {
-            3
-        } else if f < 100.0 * x {
-            4
-        } else if f < 1000.0 * x {
-            5
-        } else if f < 10000.0 * x {
-            6
-        } else {
-            self.freq.range
-        };
-        self.freq.range = r;
+        self.freq.range = freq_range_for(self.freq.f_khz, self.factor() * self.over(), self.freq.range);
     }
 
     /// FUN_08013450 as the secondary readout in V/A modes, every 350 ms.
@@ -2218,16 +2227,7 @@ impl Dmm {
 
     /// Frequency / duty readouts. `aux`: the secondary format of V/A modes.
     fn freq_vals(&self, aux: bool) -> (Val, Val) {
-        let ri = self.freq.range as i32;
-        let f = self.freq.f_khz;
-        let fv = if ri < 2 {
-            Val::new(f * 1000.0, (ri + if aux { 2 } else { 1 }).clamp(0, 4) as u8, "Hz")
-        } else if ri < 5 {
-            Val::new(f, (ri - if aux { 1 } else { 2 }).clamp(0, 4) as u8, "kHz")
-        } else {
-            Val::new(f * 1e-3, (ri - if aux { 4 } else { 5 }).clamp(0, 4) as u8, "MHz")
-        };
-        (fv, Val::new(self.freq.duty, 1, "%"))
+        (freq_val(self.freq.f_khz, self.freq.range, aux), Val::new(self.freq.duty, 1, "%"))
     }
 
     fn poll_freq_mode(&mut self, now: u64) -> Option<Reading> {
