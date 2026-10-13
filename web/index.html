@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101516"><title>DM40 · Wireless multimeter</title><link rel="stylesheet" href="style.css"></head>
+<body>
+  <header class="page-header"><a class="brand" href="./">ALIENTEK<span>DM40 / WEB</span></a><span class="local">LOCAL INSTRUMENT</span></header>
+  <main>
+    <div class="heading"><div><p class="eyebrow">WIRELESS MULTIMETER</p><h1>Ваш DM40. В браузере.</h1></div><button id="demo">Деморежим</button></div>
+    <section class="connection" aria-label="Подключение"><div class="connection-status"><i id="led"></i><div><strong id="status" role="status">Не подключён</strong><small id="device-name">Прямое подключение к прибору</small></div></div><div class="connect-actions"><label class="sr-only" for="transport">Способ подключения</label><select id="transport"><option value="ble">Bluetooth LE</option><option value="serial">Web Serial / RFCOMM</option></select><button class="primary" id="connect">Подключить</button></div></section>
+    <p id="message" role="alert" hidden></p>
+    <section class="meter" aria-label="Дисплей мультиметра DM40">
+      <div class="meter-top"><button id="range" class="screen-button" title="Выбрать диапазон" disabled>AUTO+</button><button id="hold" class="screen-button" disabled>RUN</button><span id="demo-badge" hidden>DEMO</span><div class="meter-icons"><span id="lock" title="Блокировка экрана прибора"></span><span id="link-icon" title="Соединение">⌁</span><span id="battery" title="Батарея прибора">▱ —</span><button id="settings" class="icon-button" aria-label="Настройки">⚙</button></div></div>
+      <div id="aux" class="aux"><span>—</span><span>—</span></div>
+      <div class="readout"><button id="reading" title="Сохранить показание" aria-label="Сохранить текущее показание" disabled>— — — —</button><div class="unit-box"><span id="kind">DC</span><strong id="unit">V</strong></div></div>
+      <div class="reading-meta"><span id="mode-name">V DC</span><span id="relative"></span><span id="freshness">Ожидание данных</span></div>
+      <div class="slots" id="slots" aria-label="Сохранённые показания"></div>
+      <div class="plot-row"><div class="plot"><canvas id="chart" role="img" aria-label="График последних 180 измерений"></canvas><div class="plot-empty" id="plot-empty">ГРАФИК ИЗМЕРЕНИЙ <span>Данные появятся после подключения</span></div></div><aside class="plot-stats"><span>MAX</span><strong id="max">—</strong><button id="rel" disabled>REL</button><span>MIN</span><strong id="min">—</strong></aside></div>
+      <nav class="modes" aria-label="Режим измерения"><button data-group="0" disabled><b>V ⎓</b><small>НАПРЯЖЕНИЕ</small></button><button data-group="1" disabled><b>A ⎓</b><small>ТОК</small></button><button data-group="2" disabled><b>Ω</b><small>СОПРОТИВЛЕНИЕ</small></button><button data-group="3" disabled><b>┤├</b><small>ЁМКОСТЬ</small></button><button data-group="4" disabled><b>→| · )))</b><small>ДИОД / ПРОЗВОНКА</small></button><button data-group="5" disabled><b>Hz</b><small>ЧАСТОТА / °C</small></button></nav>
+    </section>
+    <div class="below"><span>Нажмите на показание, чтобы сохранить · Нажмите режим повторно для переключения</span><div><button id="clear">Очистить</button><button id="export" disabled>Экспорт CSV ↗</button></div></div>
+    <details class="help"><summary>Как подключить мультиметр</summary>
+      <p>Включите Bluetooth на DM40 и откройте экран мультиметра. Выберите Bluetooth LE, нажмите «Подключить» и выберите прибор в системном окне браузера. Закройте другие приложения, уже подключённые к DM40.</p>
+      <p>Автономный dm40.html можно открыть напрямую в Chrome/Edge. В Chrome на Linux откройте chrome://flags/#enable-experimental-web-platform-features, выберите Enabled и нажмите Relaunch. Это необходимо, если Web Bluetooth отсутствует. Firefox и Safari не поддерживают этот способ подключения. Если браузер ограничивает доступ из локального файла, используйте localhost или HTTPS.</p>
+      <p>Для Web Serial сначала выполните сопряжение Bluetooth Classic-интерфейса DM40 в настройках Bluetooth ОС. Затем выберите Web Serial / RFCOMM → Подключить → устройство DM40 (оно может называться C-1-ATK-DM40-CALI, тогда как BLE-интерфейс называется DM40A). Chrome 117+ умеет работать с сопряжённым Serial Port Profile напрямую: создавать /dev/rfcomm не требуется. Этот способ проверен в Chrome 144 на Linux без экспериментальных флагов.</p>
+      <p>HOLD, REL и выбор режима отправляются на прибор. Изменения отображаются по ответным измерениям. Деморежим использует искусственные данные и не подключается к оборудованию.</p>
+    </details>
+    <details class="diagnostics"><summary>Журнал обмена <span id="packet-count">0 пакетов</span></summary><pre id="log">Пакеты TX / RX появятся здесь.</pre></details>
+  </main>
+  <footer><span>DM40 A / B / C · Неофициальный клиент</span><a href="https://github.com/Urobotos/DM40-Wireless" target="_blank" rel="noreferrer">На основе DM40 Wireless ↗</a></footer>
+  <dialog id="settings-dialog"><form method="dialog"><div class="dialog-title"><h2>Настройки подключения</h2><button aria-label="Закрыть">✕</button></div><label>Модель прибора<select id="model"><option>DM40A</option><option>DM40B</option><option selected>DM40C</option></select></label><p>Модель уточняется при подключении. Вручную задаёт подписи диапазонов, если автоопределение недоступно.</p><label>Период опроса<select id="interval"><option value="200">200 мс</option><option value="500" selected>500 мс</option><option value="1000">1 с</option><option value="2000">2 с</option></select></label><label>Скорость Serial<select id="baud"><option>9600</option><option selected>115200</option></select></label><p>Скорость применяется при следующем подключении. Для эмулируемых Bluetooth-портов обычно игнорируется.</p><button class="primary">Готово</button></form></dialog>
+  <dialog id="range-dialog"><div class="dialog-title"><h2>Диапазон измерения</h2><button id="close-range" aria-label="Закрыть">✕</button></div><div id="range-options"></div></dialog>
+  <script type="module" src="app.js"></script>
+</body></html>
