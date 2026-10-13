@@ -56,6 +56,8 @@ pub enum Cmd {
     WavPre,
     /// Debug: sample the DAC output pin PA4 with the MCU ADC.
     DiagDac,
+    /// Debug: count PB14 (PWM output) rising edges for 2 ms.
+    DiagPwm,
 }
 
 /// Parse a number like "1.5", "-2e-3", "10k" / "5m" (suffixes k, M, m, u, n).
@@ -330,7 +332,10 @@ impl Scpi {
                     };
                     out = Out::Instr(Cmd::Meas(k));
                 }
-                _ if kw(p0, "DIAG") && query => out = Out::Instr(Cmd::DiagDac),
+                _ if kw(p0, "DIAG") && query => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    out = Out::Instr(if kw(sub, "PWM") { Cmd::DiagPwm } else { Cmd::DiagDac });
+                }
                 _ if kw(p0, "WAVeform") && query => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     out = Out::Instr(if kw(sub, "PREamble") { Cmd::WavPre } else { Cmd::WavData });

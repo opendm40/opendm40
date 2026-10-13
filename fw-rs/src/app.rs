@@ -1186,7 +1186,7 @@ impl App {
         let mut g = self.gen.s;
         let mut sc = self.scope.s;
         let scope_cmd =
-            !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenDuty(_) | C::GenOut(_) | C::DiagDac);
+            !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenDuty(_) | C::GenOut(_) | C::DiagDac | C::DiagPwm);
         if scope_cmd && !self.scope.powered() && !self.analog_both {
             self.scope.power(true, clk);
         }
@@ -1328,6 +1328,26 @@ impl App {
                 out.put_f32(cyc as f32 / 200e6);
                 Some(())
             }
+            C::DiagPwm => {
+                // PB14 rising edges over 2 ms (tight loop on GPIOB->IDR), and
+                // the PB12 output-path select level.
+                let idr = 0x4002_0410 as *const u32;
+                let cyc = || unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) };
+                let t0 = cyc();
+                let mut last = false;
+                let mut edges = 0u32;
+                while cyc().wrapping_sub(t0) < 400_000 {
+                    let v = unsafe { core::ptr::read_volatile(idr) } & (1 << 14) != 0;
+                    if v && !last {
+                        edges += 1;
+                    }
+                    last = v;
+                }
+                let pb12 = unsafe { core::ptr::read_volatile(idr) } & (1 << 12) != 0;
+                out.put_f32(edges as f32 / 0.002);
+                out.put_bytes(if pb12 { b",PB12=1" } else { b",PB12=0" });
+                Some(())
+            }
             C::WavPre => {
                 // points, x increment (s), y: volts = (byte*4 - zero) * k.
                 out.put_bytes(b"400,");
@@ -1339,7 +1359,7 @@ impl App {
                 Some(())
             }
         };
-        if matches!(cmd, C::DiagDac) {
+        if matches!(cmd, C::DiagDac | C::DiagPwm) {
         } else if !scope_cmd {
             self.gen_set(g);
         } else if !matches!(cmd, C::Meas(_) | C::WavData | C::WavPre) && reply.is_none() {

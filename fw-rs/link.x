@@ -1,22 +1,22 @@
 /*
- * DM40 replacement firmware: runs from internal flash sector 8.
+ * DM40 replacement firmware, stored in internal flash sector 8 (0x08080000,
+ * 128 KiB, unused by the stock firmware), executed from SRAM.
  *
- * Sector 8 (0x08080000, 128 KiB) is unused by the stock firmware (all 0xFF in
- * the full dump); the stock app ends below 0x0807D000, sector 9 holds the
- * bootloader data, sector 10 the settings/calibration record. The image is
- * written there by the RAM stub (stub/), which also starts it: the vector
- * table is at the start of the image, word[0] = initial MSP, word[1] = reset.
+ * GD32F4 flash is zero-wait only in its first 512 KiB; sector 8 lies above,
+ * so code fetched from there runs several times slower. The reset code (in
+ * .boot, runs from flash) therefore copies .text + .rodata into SRAM0 and the
+ * firmware runs from there. Vectors stay in flash (exceptions are not used).
  *
  * RAM after the takeover is all ours:
- *   TCM   0x10000000 64 KiB  .data (copied from flash), .bss, stack (CPU only)
- *   SRAM0 0x20000000 112 KiB .sram: large CPU buffers (not zeroed)
- *   SRAM1+2 0x2001C000 80 KiB .dmabuf: DMA-reachable buffers (not zeroed)
+ *   SRAM0   0x20000000 112 KiB  code + constants (copied at reset)
+ *   TCM     0x10000000  64 KiB  .data (copied), .bss, stack (CPU only)
+ *   SRAM1+2 0x2001C000  80 KiB  .dmabuf: DMA buffers incl. the scope record
  */
 MEMORY
 {
     FLASH (rx)  : ORIGIN = 0x08080000, LENGTH = 128K
+    CODE (rwx)  : ORIGIN = 0x20000000, LENGTH = 112K
     TCM (rw)    : ORIGIN = 0x10000000, LENGTH = 64K
-    SRAM (rw)   : ORIGIN = 0x20000000, LENGTH = 112K
     DMARAM (rw) : ORIGIN = 0x2001C000, LENGTH = 80K
 }
 
@@ -31,14 +31,19 @@ SECTIONS
     {
         __image_start = .;
         KEEP(*(.vectors));
+        KEEP(*(.boot));
+        . = ALIGN(4);
     } > FLASH
 
     .text :
     {
+        __stext = .;
         *(.text .text.*);
         *(.rodata .rodata.*);
         . = ALIGN(4);
-    } > FLASH
+        __etext = .;
+    } > CODE AT > FLASH
+    __stext_lma = LOADADDR(.text);
 
     .data :
     {
@@ -59,16 +64,11 @@ SECTIONS
         __bss_end = .;
     } > TCM
 
-    .sram (NOLOAD) :
-    {
-        . = ALIGN(4);
-        *(.sram .sram.*);
-    } > SRAM
-
     .dmabuf (NOLOAD) :
     {
         . = ALIGN(4);
         *(.dmabuf .dmabuf.*);
+        *(.sram .sram.*);
     } > DMARAM
 
     __image_end = LOADADDR(.data) + SIZEOF(.data);

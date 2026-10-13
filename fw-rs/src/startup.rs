@@ -29,7 +29,7 @@ __VECTORS:
     .word default_handler      /* PendSV */
     .word default_handler      /* SysTick */
 
-    .section .text.reset, "ax", %progbits
+    .section .boot, "ax", %progbits
     .thumb_func
     .global reset
 reset:
@@ -47,9 +47,22 @@ reset:
     dsb
     isb
     ldr   sp, =_stack_top
-    bl    rust_start
+    /* Copy .text + .rodata from flash (slow, above 512 KiB) into SRAM0. */
+    ldr   r0, =__stext_lma
+    ldr   r1, =__stext
+    ldr   r2, =__etext
+1:  cmp   r1, r2
+    bhs   2f
+    ldr   r3, [r0], #4
+    str   r3, [r1], #4
+    b     1b
+2:  dsb
+    isb
+    ldr   r0, =rust_start
+    blx   r0
     b     .
 
+    .section .boot, "ax", %progbits
     .thumb_func
     .global default_handler
 default_handler:
