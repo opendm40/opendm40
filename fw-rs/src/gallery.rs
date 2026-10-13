@@ -1292,11 +1292,48 @@ fn title_bar() {
     sf::glyphs(sf::TEXT22, rect(BACK_X, 0, 110, BAR_H), "< Back", FG, BAR, 1, 0);
 }
 
+/// Word space of F14 text, px from the last glyph box of a word to the next
+/// word. The stock F14 space glyph is 1 px wide (advance 1), which left
+/// "40rows"-like gaps of 2 px; words are therefore placed one by one.
+const F14_SPACE: i16 = 5;
+
+/// Width of `t` as `small` draws it.
+fn small_width(t: &str) -> i16 {
+    let mut w = 0;
+    for (i, word) in t.split(' ').filter(|w| !w.is_empty()).enumerate() {
+        w += sf::text_width(sf::F14, word, 1) + if i > 0 { F14_SPACE } else { 0 };
+    }
+    w
+}
+
+/// F14 text (spacing 1) in `r` with real word spaces; `align` as stockfont
+/// (0..2 left, 3..5 right, 6..8 centred; top / vcenter / bottom). Draws only
+/// the glyph boxes (as sf::glyphs).
+fn small(r: Rect, t: &str, fg: Color, bg: Color, align: u8) {
+    let tw = small_width(t);
+    let mut x = r.x
+        + match align {
+            3..=5 => r.w - tw,
+            6..=8 => (r.w - tw) / 2,
+            _ => 0,
+        };
+    let v = match align {
+        0 | 3 | 6 => 0,
+        2 | 5 | 7 => 2,
+        _ => 1,
+    };
+    for word in t.split(' ').filter(|w| !w.is_empty()) {
+        let w = sf::text_width(sf::F14, word, 1);
+        sf::glyphs(sf::F14, rect(x, r.y, w + 1, r.h), word, fg, bg, v, 1);
+        x += w + F14_SPACE;
+    }
+}
+
 /// Primary message (TEXT22) and a detail line (F14) centred in the body.
 fn message(bg: Color, main: &str, detail: &str) {
     sf::glyphs(sf::TEXT22, rect(0, 136, 480, 30), main, FG, bg, 8, 0);
     if !detail.is_empty() {
-        sf::glyphs(sf::F14, rect(0, 172, 480, 16), detail, DIM, bg, 8, 1);
+        small(rect(0, 172, 480, 16), detail, DIM, bg, 8);
     }
 }
 
@@ -2002,9 +2039,9 @@ impl Gallery {
                 let p = rect(x + 4, y + 4, TH_W as i16, TH_H as i16);
                 sf::rbox(p, 4, PANEL, M_TILE);
                 let (a, b) = if m == "Unsupported format" { ("Unsupported", "format") } else { (m, "") };
-                sf::glyphs(sf::F14, rect(p.x, p.y + 30, p.w, 14), a, FG, PANEL, 8, 1);
+                small(rect(p.x, p.y + 30, p.w, 14), a, FG, PANEL, 8);
                 if !b.is_empty() {
-                    sf::glyphs(sf::F14, rect(p.x, p.y + 50, p.w, 14), b, FG, PANEL, 8, 1);
+                    small(rect(p.x, p.y + 50, p.w, 14), b, FG, PANEL, 8);
                 }
             }
             JK::View | JK::Chart => {
@@ -2152,14 +2189,14 @@ impl Gallery {
                 let (x, y) = tile_xy(i as usize);
                 let (px, py) = (x + 4, y + 4);
                 sf::rbox(rect(px, py, TH_W as i16, TH_H as i16), 4, PANEL, M_TILE);
-                sf::glyphs(sf::F14, rect(px + 4, py + 3, 132, 14), func.str(), FG, PANEL, 1, 1);
-                sf::glyphs(sf::F14, rect(px + 4, py + 3, 132, 14), dur.str(), FG, PANEL, 4, 1);
+                small(rect(px + 4, py + 3, 132, 14), func.str(), FG, PANEL, 1);
+                small(rect(px + 4, py + 3, 132, 14), dur.str(), FG, PANEL, 4);
                 if c.vals == 0 {
-                    sf::glyphs(sf::F14, rect(px, py + 38, TH_W as i16, 14), "No data", DIM, PANEL, 8, 1);
-                    sf::glyphs(sf::F14, rect(px + 4, py + 70, 132, 14), rows.str(), DIM, PANEL, 1, 1);
+                    small(rect(px, py + 38, TH_W as i16, 14), "No data", DIM, PANEL, 8);
+                    small(rect(px + 4, py + 70, 132, 14), rows.str(), DIM, PANEL, 1);
                     return self.finish();
                 }
-                sf::glyphs(sf::F14, rect(px + 4, py + 70, 132, 14), rows.str(), DIM, PANEL, 1, 1);
+                small(rect(px + 4, py + 70, 132, 14), rows.str(), DIM, PANEL, 1);
                 let key = (((py + 20) as u32) << 16) | (px + 4) as u32;
                 j.csv.begin_plot((px + 4, py + 20, 132, 46), key);
             }
@@ -2172,7 +2209,7 @@ impl Gallery {
                     t.s(", range ");
                     t.bytes(&c.range[..c.rl as usize]);
                 }
-                sf::glyphs(sf::F14, rect(8, 44, 464, 16), t.str(), FG, M_BG, 1, 1);
+                small(rect(8, 44, 464, 16), t.str(), FG, M_BG, 1);
                 let mut r = Tb::new();
                 r.bytes(rows.str().as_bytes());
                 if c.rows > 0 {
@@ -2182,12 +2219,12 @@ impl Gallery {
                 if c.sampled {
                     r.s(" (sampled)");
                 }
-                sf::glyphs(sf::F14, rect(8, 44, 464, 16), r.str(), FG, M_BG, 4, 1);
+                small(rect(8, 44, 464, 16), r.str(), FG, M_BG, 4);
                 for (k, (lab, v)) in [("Min ", c.min), ("Avg ", c.avg()), ("Max ", c.max)].iter().enumerate() {
                     let mut s = Tb::new();
                     s.s(lab);
                     val_txt(&mut s, *v, unit, true);
-                    sf::glyphs(sf::F14, rect(8, 62, 464, 16), s.str(), ACCENT, M_BG, [1, 6, 3][k], 1);
+                    small(rect(8, 62, 464, 16), s.str(), ACCENT, M_BG, [1, 6, 3][k]);
                 }
                 sf::rbox(rect(CHART.0, CHART.1, CHART.2, CHART.3), 6, PANEL, M_BG);
                 let (px, py, pw, ph) = PLOT;
@@ -2201,10 +2238,10 @@ impl Gallery {
                     let v = c.max - (c.max - c.min) * k as f32 / 2.0;
                     let mut s = Tb::new();
                     val_txt(&mut s, v, unit, false);
-                    sf::glyphs(sf::F14, rect(14, gy - 7, 64, 14), s.str(), DIM, PANEL, 4, 1);
+                    small(rect(14, gy - 7, 64, 14), s.str(), DIM, PANEL, 4);
                 }
-                sf::glyphs(sf::F14, rect(px, py + ph + 6, 120, 14), "0 s", DIM, PANEL, 0, 1);
-                sf::glyphs(sf::F14, rect(px + pw - 120, py + ph + 6, 120, 14), dur.str(), DIM, PANEL, 3, 1);
+                small(rect(px, py + ph + 6, 120, 14), "0 s", DIM, PANEL, 0);
+                small(rect(px + pw - 120, py + ph + 6, 120, 14), dur.str(), DIM, PANEL, 3);
                 j.csv.begin_plot(PLOT, ((py as u32) << 16) | px as u32);
             }
         }
@@ -2355,8 +2392,8 @@ impl Gallery {
         let mut b = Tb::new();
         size_txt(&mut b, self.free);
         b.s(" free");
-        sf::glyphs(sf::F14, rect(352, 5, 120, 15), a.str(), FG, BAR, 4, 1);
-        sf::glyphs(sf::F14, rect(352, 20, 120, 15), b.str(), DIM, BAR, 4, 1);
+        small(rect(352, 5, 120, 15), a.str(), FG, BAR, 4);
+        small(rect(352, 20, 120, 15), b.str(), DIM, BAR, 4);
     }
 
     fn nav(&self) {
@@ -2376,7 +2413,7 @@ impl Gallery {
                 t.u(pages);
             }
         }
-        sf::glyphs(sf::F14, rect(PREV_X + NAV_W + 6, NAV_Y, NEXT_X - PREV_X - NAV_W - 12, NAV_H), t.str(), FG, M_BG, 8, 1);
+        small(rect(PREV_X + NAV_W + 6, NAV_Y, NEXT_X - PREV_X - NAV_W - 12, NAV_H), t.str(), FG, M_BG, 8);
     }
 
     /// Static part of tile `i` (frame, placeholder, name and size); its
@@ -2395,11 +2432,11 @@ impl Gallery {
         let name = name_txt(&e.name);
         let mut sz = Tb::new();
         size_txt(&mut sz, e.size);
-        let (wn, ws) = (sf::text_width(sf::F14, name.str(), 1), sf::text_width(sf::F14, sz.str(), 1));
+        let (wn, ws) = (small_width(name.str()), small_width(sz.str()));
         let r = rect(x + 5, y + 99, 138, 14);
-        sf::glyphs(sf::F14, r, name.str(), FG, M_TILE, 1, 1);
+        small(r, name.str(), FG, M_TILE, 1);
         if wn + 6 + ws <= r.w {
-            sf::glyphs(sf::F14, r, sz.str(), DIM, M_TILE, 4, 1);
+            small(r, sz.str(), DIM, M_TILE, 4);
         }
         self.todo |= 1 << i;
         if self.job.kind == JK::Tile(i as u8) {
@@ -2469,7 +2506,7 @@ fn title_bar_view(rank: u32, total: u32, e: &Ent) {
     let avail = NAME_X1 - NAME_X0;
     let mut font = sf::ASCII26;
     let mut wn = sf::text_width(font, name.str(), 1);
-    let wi = sf::text_width(sf::F14, idx.str(), 1);
+    let wi = small_width(idx.str());
     if wn > avail {
         font = sf::F14;
         wn = sf::text_width(font, name.str(), 1);
@@ -2479,7 +2516,7 @@ fn title_bar_view(rank: u32, total: u32, e: &Ent) {
     let gx = NAME_X0 + (avail - gw) / 2;
     sf::glyphs(font, rect(gx, 0, wn + 2, BAR_H), name.str(), FG, BAR, 1, 1);
     if show_idx {
-        sf::glyphs(sf::F14, rect(gx + wn + 10, 0, wi + 2, BAR_H), idx.str(), DIM, BAR, 1, 1);
+        small(rect(gx + wn + 10, 0, wi + 2, BAR_H), idx.str(), DIM, BAR, 1);
     }
     sf::rbox(rect(DEL.0, DEL.1, DEL.2, DEL.3), 6, D_RED, BAR);
     sf::glyphs(sf::TEXT22, rect(DEL.0, DEL.1, DEL.2, DEL.3), "Delete", FG, D_RED, 8, 0);

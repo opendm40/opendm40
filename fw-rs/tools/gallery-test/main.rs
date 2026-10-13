@@ -396,10 +396,19 @@ impl Checker {
             if ia.kind == probe::TEXT && ia.glyphs.len() > 1 {
                 let mut g = ia.glyphs.clone();
                 g.sort_by_key(|(k, _)| *k);
+                // Widest gap between letters of one word.
+                let letter = g.windows(2).filter(|w| w[1].0 == w[0].0 + 1).map(|w| w[1].1.x0 - w[0].1.x1 - 1).max().unwrap_or(1);
                 for w in g.windows(2) {
                     let (a, b) = (w[0].1, w[1].1);
                     if a.gap(&b) < 1 {
                         self.fail(scene, format!("{}: glyphs {} / {} touch ({:?} {:?})", desc(ia), w[0].0, w[1].0, a, b));
+                    }
+                    // An ink-less glyph between them (a space): a word gap
+                    // clearly wider than the letter gaps (coordinator: the
+                    // 3 px F14 spaces read as "Nodata", "40rows").
+                    let need = 4.max(letter + 2);
+                    if w[1].0 > w[0].0 + 1 && b.x0 - a.x1 - 1 < need {
+                        self.fail(scene, format!("{}: word gap after glyph {} only {} px (letters up to {})", desc(ia), w[0].0, b.x0 - a.x1 - 1, letter));
                     }
                 }
             }
@@ -420,6 +429,11 @@ impl Checker {
                     continue;
                 }
                 let g = ia.b.gap(&ib.b);
+                // Two texts side by side on one line read as one: a word gap.
+                let same_line = ia.kind == probe::TEXT && ib.kind == probe::TEXT && ia.b.y0 <= ib.b.y1 && ib.b.y0 <= ia.b.y1;
+                if same_line && (3..4).contains(&g) {
+                    self.fail(scene, format!("{} and {} on one line only {} px apart", desc(ia), desc(ib), g));
+                }
                 if g < 3 {
                     self.fail(scene, format!("{} and {} {} by {} px", desc(ia), desc(ib), if g < 0 { "overlap" } else { "too close" }, g));
                 }
