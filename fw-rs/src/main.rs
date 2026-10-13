@@ -684,7 +684,9 @@ fn main() -> ! {
                 None => gestures.tick(now),
             };
             if let Some(g) = g {
-                if app.gesture(&mut clk, g) { gestures.capture(); }
+                if app.gesture(&mut clk, g) {
+                    if app.slider_active() { gestures.capture_direct() } else { gestures.capture() }
+                }
             }
         }
         mark(2, &mut ts);

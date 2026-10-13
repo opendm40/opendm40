@@ -942,14 +942,95 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
 
 /// Temperature sensor names on screen (dmm.rs T_NAMES order).
 pub const T_LABELS: [&str; 7] = ["TC K", "PT100", "PT1000", "NTC10k B3950", "NTC10k B3435", "NTC100k B3950", "NTC user"];
-const T_KEYS: [&str; 12] = [
-    "TC K", "PT100", "PT1000", "10k B3950", "10k B3435", "100k B3950", "NTC user", "Offs 0", "-1.0", "-0.1", "+0.1",
-    "+1.0",
-];
+const T_KEYS: [&str; 8] = ["TC K", "PT100", "PT1000", "10k 3950", "10k 3435", "100k 3950", "NTC user", "Offset 0"];
 
-/// MF page of the temperature function: sensor (items 0..6), offset of that
-/// sensor (7 zero, 8..11 -1 / -0.1 / +0.1 / +1 C), an info line, OK.
-pub fn temp_page(sensor: u8, info: &str) {
+/// A horizontal value slider (owner: the +/- offset buttons were "absolutely
+/// unintuitive"): a track with a thumb, drawn as one item, plus a fine-step
+/// button at each end. The value maps linearly to the track: `min` at x0,
+/// `max` at x0 + w. Touch: down / drag anywhere in `touch` sets the value
+/// under the finger (app.rs captures the touch); the end buttons step by
+/// `step`.
+pub struct Slider {
+    /// Track ends (screen x of `min` / `max`).
+    pub x0: i16,
+    pub w: i16,
+    /// Centre row of the track.
+    pub y: i16,
+    pub min: f32,
+    pub max: f32,
+    pub step: f32,
+}
+
+/// Slider drawing geometry: the thumb is 2 * THUMB_HW + 1 px wide and
+/// 32 px tall, the item spans the track +- THUMB_HW + 3.
+const THUMB_HW: i16 = 7;
+
+impl Slider {
+    /// The drawn item's rectangle (track, centre tick, thumb).
+    fn area(&self) -> sf::Rect {
+        rect(self.x0 - THUMB_HW - 3, self.y - 18, self.w + 2 * THUMB_HW + 7, 37)
+    }
+
+    /// Fine-step buttons: (minus, plus), 44 x 40 just outside the area.
+    pub fn buttons(&self) -> (sf::Rect, sf::Rect) {
+        let a = self.area();
+        (rect(a.x - 52, self.y - 20, 44, 40), rect(a.x + a.w + 8, self.y - 20, 44, 40))
+    }
+
+    /// Value under screen column x (clamped, snapped to `step`).
+    pub fn value_at(&self, x: u16) -> f32 {
+        let f = ((x as i16 - self.x0) as f32 / self.w as f32).clamp(0.0, 1.0);
+        let v = self.min + f * (self.max - self.min);
+        ((v / self.step) + if v < 0.0 { -0.5 } else { 0.5 }) as i32 as f32 * self.step
+    }
+
+    /// Touch on the track area (a drag may start here).
+    pub fn hit(&self, x: u16, y: u16) -> bool {
+        let a = self.area();
+        let (x, y) = (x as i16, y as i16);
+        x >= a.x - 4 && x < a.x + a.w + 4 && y >= a.y - 6 && y < a.y + a.h + 6
+    }
+
+    /// Draw track + thumb for value `v` (one pass over the area: no flicker
+    /// on a drag). The part from 0 (or `min`) to the value is accented.
+    pub fn draw(&self, v: f32) {
+        let a = self.area();
+        let span = self.max - self.min;
+        let pos = |v: f32| self.x0 + ((v.clamp(self.min, self.max) - self.min) / span * self.w as f32 + 0.5) as i16;
+        let (tx, zx) = (pos(v), pos(0.0f32.clamp(self.min, self.max)));
+        let (lo, hi) = (tx.min(zx), tx.max(zx));
+        #[cfg(test)]
+        crate::probe::begin(crate::probe::ICON, BG);
+        lcd::set_window(a.x as u16, a.y as u16, (a.x + a.w - 1) as u16, (a.y + a.h - 1) as u16);
+        for py in a.y..a.y + a.h {
+            let dy = py - self.y;
+            for px in a.x..a.x + a.w {
+                let dx = px - tx;
+                let c = if dx.abs() <= THUMB_HW && dy.abs() <= 15 && !(dx.abs() == THUMB_HW && dy.abs() == 15) {
+                    VALUE
+                } else if px == zx && dy.abs() <= 10 {
+                    STATUS_FG
+                } else if dy.abs() <= 2 && px >= self.x0 && px <= self.x0 + self.w {
+                    if px >= lo && px <= hi { SEL } else { 0x4208 }
+                } else {
+                    BG
+                };
+                lcd::data(c);
+            }
+        }
+        #[cfg(test)]
+        crate::probe::end();
+    }
+}
+
+/// Temperature offset slider (C): -20..+20 in 0.1 steps (dmm.rs set_t_offs
+/// range), 340 px track: about 0.12 C per pixel; the end buttons step 0.1.
+pub const T_OFFS: Slider = Slider { x0: 70, w: 340, y: 204, min: -20.0, max: 20.0, step: 0.1 };
+
+/// MF page of the temperature function: sensor (items 0..6), offset reset
+/// (7), the offset slider (T_OFFS, temp_offset) with its -/+ 0.1 buttons
+/// (8 / 9), an info line, OK.
+pub fn temp_page(sensor: u8, offs: f32, info: &str) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
     sf::logo(4, 10, 0x2966);
@@ -959,20 +1040,44 @@ pub fn temp_page(sensor: u8, info: &str) {
         sf::rbox(range_rect(i), 6, c, BG);
         sf::glyphs(sf::TEXT22, range_rect(i), name, STATUS_FG, c, 8, 0);
     }
-    sf::glyphs(sf::TEXT22, rect(8, 188, 464, 40), info, STATUS_FG, BG, 1, 0);
+    sf::glyphs(sf::TEXT22, rect(8, 142, 120, 32), "Offset", STATUS_FG, BG, 1, 0);
+    let (m, p) = T_OFFS.buttons();
+    for (r, t) in [(m, "-"), (p, "+")] {
+        sf::rbox(r, 6, 0x2966, BG);
+        sf::glyphs(sf::TEXT22, r, t, STATUS_FG, 0x2966, 8, 0);
+    }
+    temp_offset(offs);
+    sf::glyphs(sf::TEXT22, rect(8, 282, 464, 34), info, STATUS_FG, BG, 1, 0);
     ok_and_limits_buttons();
 }
 
-/// Temperature page touch: item 0..11, 255 = OK, 254 = Hold/Limits.
+/// The offset value (large, over the slider) and the slider; redrawn alone
+/// while it is dragged.
+pub fn temp_offset(offs: f32) {
+    let mut t = [0u8; 16];
+    let mut b = [0u8; 24];
+    let v = crate::dmm::format(&mut t, offs, 1);
+    let txt = join(&mut b, &[if offs > 0.0 { "+" } else { "" }, v, "\u{2103}"]);
+    sf::label(sf::LETTERS, rect(140, 140, 200, 34), txt, VALUE, BG, 8, 0);
+    T_OFFS.draw(offs);
+}
+
+/// Temperature page touch: item 0..7, 8 / 9 offset -/+ step, 255 = OK, 254 =
+/// Hold/Limits. (The slider track itself is a drag: `T_OFFS.hit`.)
 pub fn temp_hit(x: u16, y: u16) -> Option<u8> {
     let (x, y) = (x as i16, y as i16);
+    let inside = |r: sf::Rect| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
     for i in 0..T_KEYS.len() {
-        let r = range_rect(i);
-        if x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
+        if inside(range_rect(i)) {
             return Some(i as u8);
         }
     }
-    if (240..278).contains(&y) && x >= 319 {
+    let (m, p) = T_OFFS.buttons();
+    if inside(m) {
+        Some(8)
+    } else if inside(p) {
+        Some(9)
+    } else if (240..278).contains(&y) && x >= 319 {
         Some(255)
     } else if (240..278).contains(&y) && (8..158).contains(&x) {
         Some(254)
