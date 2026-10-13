@@ -1185,7 +1185,8 @@ impl App {
         let now = clk.now_ms();
         let mut g = self.gen.s;
         let mut sc = self.scope.s;
-        let scope_cmd = !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenDuty(_) | C::GenOut(_));
+        let scope_cmd =
+            !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenDuty(_) | C::GenOut(_) | C::DiagDac);
         if scope_cmd && !self.scope.powered() && !self.analog_both {
             self.scope.power(true, clk);
         }
@@ -1315,6 +1316,18 @@ impl App {
                 out.put_bytes(&w);
                 Some(())
             }
+            C::DiagDac => {
+                // min,max (V, 3.0 V reference), mid crossings, window (s)
+                let (lo, hi, cross, cyc) = self.power.sample(4, 512);
+                out.put_f32(lo as f32 * 3.0 / 4096.0);
+                out.put_bytes(b",");
+                out.put_f32(hi as f32 * 3.0 / 4096.0);
+                out.put_bytes(b",");
+                out.put_f32(cross as f32);
+                out.put_bytes(b",");
+                out.put_f32(cyc as f32 / 200e6);
+                Some(())
+            }
             C::WavPre => {
                 // points, x increment (s), y: volts = (byte*4 - zero) * k.
                 out.put_bytes(b"400,");
@@ -1326,7 +1339,8 @@ impl App {
                 Some(())
             }
         };
-        if !scope_cmd {
+        if matches!(cmd, C::DiagDac) {
+        } else if !scope_cmd {
             self.gen_set(g);
         } else if !matches!(cmd, C::Meas(_) | C::WavData | C::WavPre) && reply.is_none() {
             self.scope_set(sc, now);
