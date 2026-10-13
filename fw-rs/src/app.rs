@@ -20,6 +20,10 @@ use crate::power::Power;
 use crate::scope::{self, Scope};
 use crate::ui::{self, View};
 
+/// The stock-replica scope page (interaction, drag path, AUTO-set).
+#[path = "scope_page.rs"]
+mod scope_page;
+
 const TIM13_CCR1: u32 = 0x4000_1C34;
 /// Offered stock options: dim 5/10/30 min/never, shutdown 10/30/60 min/never.
 const DIM_MS: [u64; 4] = [300_000, 600_000, 1_800_000, 0];
@@ -141,10 +145,8 @@ pub struct App {
     pub meas_res: crate::scope_meas::Results,
     scope_tab: usize,
     roll: bool,
-    /// AUTO-set: (phase 1/2, candidate index, round, settings to restore).
-    /// Rounds 0 / 1 search at 5 us/div / 20 ms/div in the user's coupling;
-    /// 2 / 3 repeat them in DC when an AC search found nothing (UF-04).
-    autoset: Option<(u8, usize, u8, scope::Settings)>,
+    /// Stock-replica scope page state (scope_page.rs), incl. AUTO-set.
+    sp: scope_page::Sp,
     pub locked: bool,
     /// PD6 click timer (stock DMM key widget timer +0x48, 500 ms one-shot):
     /// a second release before it expires toggles the lock; on expiry the
@@ -351,7 +353,7 @@ impl App {
             meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
             scope_tab: 0,
             roll: true,
-            autoset: None,
+            sp: scope_page::Sp::new(),
             locked: false,
             pd6_click: None,
             hist: [(0.0, 0, ""); 5],
@@ -491,10 +493,7 @@ impl App {
                 }
                 self.hv_shown = false;
             }
-            View::Scope => {
-                ui::SCOPE_FULL.draw_static(&self.scope);
-                ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
-            }
+            View::Scope => self.sp_draw_static(),
             // (Stopped scope: the trace comes back via scope_invalidate ->
             // Scope::refresh in tick()'s redraw path.)
             View::ScopeMenu => {
@@ -564,6 +563,8 @@ impl App {
                 let vals = [
                     core::str::from_utf8(&vb[..n]).unwrap_or(""),
                     crate::meter::SMOOTH_NAMES[self.meter.smoothing() as usize],
+                    if self.sp.swipes { "Top bar" } else { "Off (stock)" },
+                    if self.sp.press_fx { "ON" } else { "OFF (stock)" },
                     "", // Device row: opens the About page, no inline value
                     "", // Help row: opens the help pages (UF-29)
                 ];
@@ -584,7 +585,7 @@ impl App {
                 let grab = gesture::grab_ms();
                 let mut gb = [0u8; 16];
                 let grab_txt = if grab == 0 {
-                    "Direct"
+                    scope_page::DRAG_NAMES[self.sp.drag_mode.min(1) as usize]
                 } else {
                     let mut t = [0u8; 16];
                     let s = crate::dmm::format(&mut t, grab as f32, 0);
@@ -698,7 +699,6 @@ impl App {
     /// The scope graph of the shown view, if it has one.
     fn scope_view(&self) -> Option<&'static ui::ScopeView> {
         match self.view {
-            View::Scope => Some(&ui::SCOPE_FULL),
             View::DmmScope => Some(&ui::SCOPE_COMBINED),
             _ => None,
         }
@@ -900,7 +900,9 @@ impl App {
         self.power.poll(now);
         self.persist(now);
         self.update_rails(clk);
-        if can_draw && self.anti_drop && now >= self.relay_next {
+        // Only with the DMM rail on (the relay is on the DMM side; a 10 ms
+        // blocking call every 30 s on the scope page otherwise).
+        if can_draw && self.anti_drop && self.scope.dmm_rail() && now >= self.relay_next {
             self.relay_next = now + 30_000;
             if self.relay_next > 30_000 {
                 self.dmm.reassert_relay(clk);
@@ -1050,7 +1052,7 @@ impl App {
             let st = self.status(now);
             match self.view {
                 View::Dmm => ui::status_right(&st),
-                View::DmmScope | View::Scope | View::ScopeMenu => {
+                View::DmmScope | View::ScopeMenu => {
                     ui::scope_status(&st);
                     ui::ScopeView::gen_chip(&self.gen);
                     // REL and a limit verdict share a strip badge: alternate.
@@ -1252,6 +1254,13 @@ impl App {
             p[21 + 2 * i] = l.hi.unwrap_or(0.0).to_bits();
         }
         p[6] |= (sc.hpos as u32 + 1) << 18;
+        // Scope page: colour, brightness (p[1] bits 17..27), drag mode, swipes,
+        // persistence, pressed feedback, grid intensity (p[11] bits 1..6,
+        // 12..15); 0 = default everywhere.
+        let (mut p1, mut p11) = (p[1], p[11]);
+        self.sp_persist(&mut p1, &mut p11);
+        p[1] = p1;
+        p[11] = p11;
         // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
         p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing());
         p
@@ -1272,6 +1281,7 @@ impl App {
         self.roll = p[1] >> 16 & 1 != 0;
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
+        self.sp_restore(p[1], p[11]);
         gesture::set_grab_ms((p[11] >> 16) as u16);
         let mut o = [0i16; 7];
         for (i, v) in o.iter_mut().enumerate() {
@@ -1338,112 +1348,6 @@ impl App {
             self.persist_next = now + 2000;
             let w = self.persist_words();
             crate::persist::save(&w);
-        }
-    }
-
-    /// AUTO-set (stock mode 4), phase 1: 5 us/div, V/div candidates 10 V,
-    /// 1 V, 100 mV, 10 mV until a signal with > 19 codes swing is seen.
-    /// UF-04: the stock forces DC coupling here (owners: "AUTO jumps back to
-    /// DC"); fw-rs searches in the user's coupling and the probe and slope
-    /// stay as set. Only when an AC search finds nothing (a flat AC trace: a
-    /// pure DC level) it retries in DC and, if that finds a signal, keeps DC
-    /// with the toast "AUTO: DC (no AC signal)".
-    fn autoset_start(&mut self, now: u64) {
-        let saved = self.scope.s;
-        let mut st = saved;
-        st.tb = 8;
-        st.range = 9;
-        st.pos = 0;
-        st.mode = scope::TrigMode::Auto;
-        st.run = true;
-        self.autoset = Some((1, 0, 0, saved));
-        self.scope.apply(st, now);
-    }
-
-    fn autoset_step(&mut self, f: &scope::Frame, now: u64) {
-        const CAND: [usize; 4] = [9, 6, 3, 0];
-        let Some((phase, idx, round, saved)) = self.autoset else { return };
-        let mut st = self.scope.s;
-        let (mut lo, mut hi) = (1023u16, 0u16);
-        for &v in f.data {
-            lo = lo.min(v);
-            hi = hi.max(v);
-        }
-        let pp = (hi - lo) as f32;
-        // Period from rising crossings of the 30 % / 70 % levels.
-        let (l30, l70) = (lo as f32 + 0.3 * pp, lo as f32 + 0.7 * pp);
-        let (mut armed, mut first, mut last, mut n) = (false, 0usize, 0usize, 0u32);
-        for (i, &v) in f.data.iter().enumerate() {
-            let v = v as f32;
-            if v < l30 {
-                armed = true;
-            } else if armed && v > l70 {
-                armed = false;
-                if n == 0 {
-                    first = i;
-                }
-                last = i;
-                n += 1;
-            }
-        }
-        let period = if n >= 2 { (last - first) as f32 / (n - 1) as f32 / f.fs as f32 } else { 0.0 };
-        let tb_for = |p: f32| -> usize {
-            scope::SDIV.iter().position(|&d| p / 4.0 < d).unwrap_or(scope::TB_MAX).clamp(scope::TB_MIN, scope::TB_MAX)
-        };
-        if phase == 1 {
-            if l70 - l30 > 19.0 * 0.4 && pp > 19.0 {
-                if period > 0.0 {
-                    st.tb = tb_for(period);
-                }
-                if lo == 0 || hi > 1022 {
-                    st.range = (st.range + 3).min(9);
-                }
-                st.trig_row = 140;
-                self.autoset = Some((2, idx, round, saved));
-            } else if idx + 1 < CAND.len() {
-                st.range = CAND[idx + 1];
-                self.autoset = Some((1, idx + 1, round, saved));
-            } else if round == 0 || round == 2 {
-                st.tb = 19;
-                st.range = CAND[0];
-                self.autoset = Some((1, 0, round + 1, saved));
-            } else if round == 1 && st.ac {
-                // Nothing in AC: the same search in DC (UF-04).
-                st.ac = false;
-                st.tb = 8;
-                st.range = CAND[0];
-                self.autoset = Some((1, 0, 2, saved));
-            } else {
-                self.autoset = None;
-                self.scope_set(saved, now);
-                return;
-            }
-            self.scope.apply(st, now);
-            return;
-        }
-        // Phase 2: V/div so that the signal fits +-4 div within 6.4 div, centred.
-        let (vmax, vmin) = (self.scope.volts(hi as f32), self.scope.volts(lo as f32));
-        let probe = st.probe;
-        let mut r = 9;
-        for (i, &d) in scope::VDIV.iter().enumerate() {
-            let d = d * probe;
-            if vmin >= -4.0 * d && vmax <= 4.0 * d && (vmax - vmin) <= 6.4 * d {
-                r = i;
-                break;
-            }
-        }
-        st.range = r;
-        let mid = (vmax + vmin) / 2.0;
-        st.pos = (141.0 * mid / (4.0 * scope::VDIV[r] * probe)) as i32;
-        st.trig_row = 140;
-        if period > 0.0 {
-            st.tb = tb_for(period);
-        }
-        self.autoset = None;
-        self.scope_set(st, now);
-        self.redraw = true;
-        if saved.ac && !st.ac {
-            self.toast(now, crate::dialog::AUTO_DC, true);
         }
     }
 
@@ -1546,8 +1450,20 @@ impl App {
     /// Poll the scope; draws the frame in scope views.
     pub fn scope_poll(&mut self, now: u64, can_draw: bool) {
         let cyc = || unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) };
+        // Drag / pinch on the scope page: no new frames and no acquisition
+        // restart while the finger moves the shown frame (scope_page.rs);
+        // only the page diff repaint.
+        let page = self.sp_on() && can_draw && !self.redraw && self.overlay.is_none();
+        if self.sp.frozen_or_pinch() {
+            if page {
+                self.sp_tick(now);
+            }
+            return;
+        }
         let t0 = cyc();
+        crate::prof::enter(crate::prof::ACQ);
         let polled = self.scope.poll(now);
+        crate::prof::exit(crate::prof::ACQ);
         self.prof[0] = self.prof[0].max(cyc().wrapping_sub(t0) / 200);
         // Run-state chip follows the acquisition (WAIT / AUTO / T'D / RUN).
         if can_draw && !self.redraw && self.scope.take_status() {
@@ -1563,7 +1479,7 @@ impl App {
                 let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
                 *w = ((sum / (b - a) as u32) >> 2) as u8;
             }
-            if self.autoset.is_some() {
+            if self.sp.autoset.is_some() {
                 self.autoset_step(&f, now);
                 return;
             }
@@ -1573,13 +1489,30 @@ impl App {
             if fresh {
                 self.meas_next = now + 300;
                 let t1 = cyc();
+                crate::prof::enter(crate::prof::MEAS);
                 self.meas_res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
                 self.cursor_values();
+                crate::prof::exit(crate::prof::MEAS);
                 self.prof[1] = self.prof[1].max(cyc().wrapping_sub(t1) / 200);
                 let r = &self.meas_res.v;
                 self.meas = [r[10], r[19], r[11], r[0]];
             }
             if !can_draw || self.redraw {
+                return;
+            }
+            if page {
+                let t2 = cyc();
+                crate::prof::enter(crate::prof::FRAME);
+                self.sp_frame(&f, now);
+                self.sp_tick(now);
+                crate::prof::exit(crate::prof::FRAME);
+                crate::prof::drawn();
+                self.prof[2] = self.prof[2].max(cyc().wrapping_sub(t2) / 200);
+                if fresh {
+                    crate::prof::enter(crate::prof::MTXT);
+                    self.sp_cells();
+                    crate::prof::exit(crate::prof::MTXT);
+                }
                 return;
             }
             if let Some(v) = self.scope_view() {
@@ -1592,6 +1525,8 @@ impl App {
                     ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
                 }
             }
+        } else if page {
+            self.sp_tick(now);
         }
     }
 
@@ -1607,6 +1542,7 @@ impl App {
         let old = self.scope.s;
         self.scope.apply(s, now);
         self.scope_invalidate();
+        self.sp_settings_changed();
         if let Some(v) = self.scope_view() {
             v.labels(&self.scope);
             // The full page's panel shows coupling, trigger mode and slope.
@@ -1661,6 +1597,12 @@ impl App {
                 _ => {}
             }
             return false;
+        }
+        // The stock-replica scope page owns its touches and keys.
+        if self.sp_on() {
+            if let Some(c) = self.sp_gesture(clk, g) {
+                return c;
+            }
         }
         let sv = self.scope_view();
         let mut captured = false;
@@ -2409,11 +2351,13 @@ impl App {
                         let s = Smooth::from_u8((self.meter.smoothing() as u8 + 1) % 3).unwrap_or(Smooth::Off);
                         self.meter.set_smoothing(s);
                     }
-                    Some(2) => {
+                    Some(2) => self.sp.swipes = !self.sp.swipes,
+                    Some(3) => self.sp.press_fx = !self.sp.press_fx,
+                    Some(4) => {
                         self.show(View::Device, clk);
                         return;
                     }
-                    Some(3) => {
+                    Some(5) => {
                         self.help_page = 0;
                         self.show(View::Help, clk);
                         return;
@@ -2443,9 +2387,17 @@ impl App {
                         self.set_rails_both(b, clk);
                     }
                     Some(7) => {
-                        // Scope drag: direct <-> hold-to-grab (A/B, doc §6.2).
-                        let g = if gesture::grab_ms() == 0 { gesture::GRAB_DEFAULT_MS } else { 0 };
-                        gesture::set_grab_ms(g);
+                        // Scope drag: Stock (per-event) -> Axis lock -> Hold
+                        // 300 ms (hold-to-grab, doc §6.2) -> Stock.
+                        if gesture::grab_ms() != 0 {
+                            gesture::set_grab_ms(0);
+                            self.sp.drag_mode = scope_page::DRAG_STOCK;
+                        } else if self.sp.drag_mode == scope_page::DRAG_STOCK {
+                            self.sp.drag_mode = scope_page::DRAG_AXIS;
+                        } else {
+                            self.sp.drag_mode = scope_page::DRAG_STOCK;
+                            gesture::set_grab_ms(gesture::GRAB_DEFAULT_MS);
+                        }
                     }
                     Some(8) => {
                         // Last row: page 2 (DMM rate, smoothing, Device).

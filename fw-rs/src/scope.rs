@@ -942,6 +942,35 @@ impl Scope {
         self.zoom_pending = true;
     }
 
+    /// Drag preview: take the position settings (CH1 position, trigger level
+    /// row, trigger position) into `s` without touching the hardware or the
+    /// acquisition in flight (same clamps as `apply`); the caller applies them
+    /// once when the drag ends (docs/scope-lag-fixes.md fix A). Labels and
+    /// markers that read `s` follow at once.
+    pub fn preview(&mut self, s: Settings) {
+        self.s.trig_row = s.trig_row.clamp(-10, 290);
+        self.s.pos = s.pos.clamp(-392, 392);
+        self.s.hpos = s.hpos.clamp(0, COLS as i32);
+    }
+
+    /// Roll display active (running, timebase in the roll range).
+    pub fn rolling(&self) -> bool {
+        self.s.run && self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single
+    }
+
+    /// Record bar (stock 2.3) while stopped: the shown window as fractions
+    /// (start, end) of the stored record; (0, 1) without one.
+    pub fn record_frac(&self) -> (f32, f32) {
+        if self.s.run || !self.stored_valid || self.stored_len < 2 {
+            return (0.0, 1.0);
+        }
+        let len = self.stored_len as f32;
+        let want = self.zoom_screen(self.s.tb) as f32;
+        let start = if self.stored_roll { len - want } else { self.stored_anchor as f32 - (want / 2.0) as u32 as f32 };
+        let start = if want <= len { start.clamp(0.0, len - want) } else { start };
+        (start / len, (start + want) / len)
+    }
+
     /// Ask for one re-render of the stored record while stopped (a scope view
     /// was (re)drawn, or its trace cache was invalidated). No-op while running.
     pub fn refresh(&mut self) {
