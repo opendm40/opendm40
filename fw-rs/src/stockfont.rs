@@ -217,17 +217,33 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
     let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);
     let y1 = (r.y + r.h - 1).min(lcd::H as i16 - 1);
     let (x0, y0) = (r.x.max(0), r.y.max(0));
+    // Per column: the glyph covering it (last one wins on 1-2 px overlaps of
+    // negative spacing), so each pixel needs one lookup instead of a scan.
+    let mut cover = [u8::MAX; 480];
+    for (gi, p) in pl[..n].iter().enumerate() {
+        if let Some(p) = p {
+            for gx in 0..p.g.w as i16 {
+                let x = p.x + gx;
+                if x >= x0 && x <= x1 {
+                    cover[x as usize] = gi as u8;
+                }
+            }
+        }
+    }
     lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
     for y in y0..=y1 {
         for x in x0..=x1 {
-            let mut a = 0u8;
-            for p in pl[..n].iter().flatten() {
-                let (gx, gy) = (x - p.x, y - p.y);
-                if gx >= 0 && gy >= 0 && gx < p.g.w as i16 && gy < p.g.h as i16 {
-                    a = a.max(p.g.alpha(gx as u32, gy as u32));
+            let gi = cover[x as usize];
+            let mut c = bg;
+            if gi != u8::MAX {
+                if let Some(p) = &pl[gi as usize] {
+                    let gy = y - p.y;
+                    if gy >= 0 && gy < p.g.h as i16 {
+                        c = blend(fg, bg, p.g.alpha((x - p.x) as u32, gy as u32));
+                    }
                 }
             }
-            lcd::data(blend(fg, bg, a));
+            lcd::data(c);
         }
     }
 }
