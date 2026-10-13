@@ -93,3 +93,34 @@ if rest.first().map(|p| kw(p, "RATE")).unwrap_or(false) {
 UI: Settings rows "Rate SLOW/MED/FAST" (grey when !rate_applies(), show readings/s) and "Smoothing
 OFF/LOW/HIGH"; Range page: show dmm::MV_AUTO_WARN when dmm.mv_auto_warn(), mark AUTO+ recommended.
 Note: hooks 2+4 are what makes existing units boot in AUTO+.
+
+## Generator (gen.rs/genplan.rs committed)
+NOTE: persist word 38 is taken by W_DMM_EXT (FR-05) — store the generator offset in p[39]
+(add `pub const W_GEN_OFFS: usize = 39;` to persist.rs).
+scpi.rs: `GenOffs(Option<f32>)` after `GenVolt(Option<f32>),`; doc `SOURce:VOLTage:OFFSet <V>|AUTO`;
+before `} else if kw(sub, "VOLTage") {` insert
+```rust
+} else if kw(sub, "VOLTage") && parts.len() >= 3 && kw(parts[2], "OFFSet") {
+    Some(Cmd::GenOffs(if query { None } else if kw(a, "AUTO") { Some(f32::NAN) } else { parse_num(a) }))
+```
+app.rs SCPI: add `| C::GenOffs(_)` to the scope_cmd matches!; `C::GenFreq(None)` -> `out.put_f32(self.gen.actual_hz()); Some(())`;
+`C::GenVolt(Some(v)) => { g = g.with_amp(v); None }`;
+`C::GenOffs(Some(o)) => { g = g.with_offset(Some(o)); None }`;
+`C::GenOffs(None) => { out.put_f32(g.offset_v.unwrap_or(g.amp_v / 2.0)); Some(()) }`;
+optional `C::GenDuty(None) => out.put_f32(self.gen.out.duty_pct())`. VOLT?/OFFS? return the SET values.
+app.rs persist: `p[W_GEN_OFFS] = g.offset_v.map_or(0, |o| (-o.abs()).to_bits() | 0x8000_0000);`
+restore: `g.offset_v = if p[W_GEN_OFFS] == 0 { None } else { Some(f32::from_bits(p[W_GEN_OFFS] & 0x7FFF_FFFF)) };`
+and `a.clamp(0.5, 3.0)` -> `a.clamp(gen::AMP_MIN, gen::AMP_MAX)`.
+app.rs keypad: `1 => st = st.with_amp(v),`, `5 => st = st.with_offset(Some(v)),`,
+freq `st.freq_hz = gen::clamp_freq((v * m + 0.5).max(1.0) as u32);`, freq digit limit `self.kp_n < 7`;
+offset target 5: `self.kp_target >= 3` -> `matches!(self.kp_target, 3 | 4)` everywhere; kp_labels `5 => ("Offset", "V")`;
+kp_kind `1 | 2 | 5 => ui::KP_NUM`; accept `1 | 2 | 5 => self.kp_n < 5`.
+Gen view: duty gate `if st.wave == Wave::Square { self.kp_open(2, clk); }` (drop out_hz() <= 50_000);
+four boxes 66 px at y 40/110/180/250 (Frequency, Vpp, Offset, Duty) -> keypad targets 0,1,5,2.
+ui.rs gen_values: show actual_hz() in full digits ("32768.08 Hz", 3 decimals < 1 kHz); while freq_clamped()
+show the set value grey + wave.max_note(); Vpp/Offset ("auto" when None), grey + "logic level" when
+out.fixed_level(); duty enabled for Square at any f, show out.duty_pct(); drop the out == 0 branch.
+gen_state: eng(.., g.actual_hz(), "Hz").
+Device: frequency list (1, 7, 1k, 4k [old bug], 32768 sine/square, 44100, 50k, 50000/50001, 75k, 2M, 7M, 10M)
+vs SOUR:FREQ?; K>1 table visual check; clamp round trip; ramp rising; offset/DC with the DMM; PWM level;
+measure apply() time (expect tens of ms).
