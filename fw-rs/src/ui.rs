@@ -1710,14 +1710,13 @@ impl ScopeView {
         let s = &sc.s;
         let mut b = [0u8; 24];
         let mut t = [0u8; 24];
+        // Stock status strings from the acquisition, not the mode: WAIT (no
+        // frame yet / Normal without a trigger), AUTO (untriggered Auto
+        // frame), T'D (triggered), RUN (roll). Mode is on the panel button.
         let (status, sc_col) = if !s.run {
             ("STOP", S_ORANGE)
         } else {
-            match s.mode {
-                scope::TrigMode::Auto => ("AUTO", S_PURPLE),
-                scope::TrigMode::Normal => ("WAIT", S_PURPLE),
-                scope::TrigMode::Single => ("T'D", S_PURPLE),
-            }
+            (["WAIT", "AUTO", "T'D", "RUN"][sc.status.min(3) as usize], S_PURPLE)
         };
         chip(0, status, sc_col);
         let n = eng(&mut b, scope::SDIV[s.tb], "s");
