@@ -201,3 +201,10 @@ Additional requirements:
 - [x] Milliohm resolution on the lowest resistance range (units of mΩ): finer format on the 600 Ω range,  (code done; verify on device)
       using slow OSR + averaging + REL (lead-zero) — measure noise first; consider a dedicated low-Ω mode
       (higher test current if the HY3131 range tables allow).
+
+## Backlog (user ideas)
+- [ ] SCPI over Bluetooth serial (classic SPP / BLE UART): the same parser as USBTMC, so standard
+      software (sigrok/PyVISA over a serial port, Keysight-style loggers) works wirelessly. Keep the
+      stock BT protocol (cmd 0x09 etc.) working alongside: dispatch on the first byte (ASCII
+      letter/'*' = SCPI line ending in \n, else the stock binary frame). Check the BT module's
+      throughput for READ? polling and WAV:DATA?.
