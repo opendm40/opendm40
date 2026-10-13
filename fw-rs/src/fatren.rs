@@ -20,6 +20,12 @@
 //! When: native normal boot, before USB exists (the host cannot have the
 //! volume mounted). Never in recovery (the user is about to copy a file).
 //!
+//! Observed on the device (T3): the FS-loader itself deletes the installed
+//! file, so normally there is nothing to rename. calbackup (runs after this)
+//! regenerates `_DM40PRV.BIN` from flash instead. Kept as is: it only ever
+//! replaces `_DM40PRV.BIN` with the installed image (= the same firmware), so
+//! the two never fight (calbackup only re-stamps that entry once).
+//!
 //! What, in this order (an interruption between steps leaves at worst lost
 //! clusters, never two live entries with the same name or a live entry on
 //! freed clusters):
@@ -471,6 +477,52 @@ pub(crate) fn header_of(b: &[u8]) -> [u8; 12] {
         *o = if i == kp { k } else { (b[i] ^ k).wrapping_sub(a) };
     }
     h
+}
+
+/// CRC-16/0x8005, init 0xFFFF, MSB first, no final XOR (dm40fw.py crc16).
+pub(crate) fn crc16(data: &[u8]) -> u16 {
+    let mut c = 0xFFFFu16;
+    for &b in data {
+        c ^= (b as u16) << 8;
+        for _ in 0..8 {
+            c = if c & 0x8000 != 0 { (c << 1) ^ 0x8005 } else { c << 1 };
+        }
+    }
+    c
+}
+
+/// A decoded 12-byte update header (= the loader marker at 0x08008000 after
+/// an install) passes the ROM / FS-loader header test: word2 type 0x0001
+/// (bytes 10/11 = 01 00), word0 low half == ~high half == CRC-16 of word1 ||
+/// word2 (dm40fw.py header_word0). The body CRC is not checked here.
+pub fn header_valid(h: &[u8; 12]) -> bool {
+    let w0 = le32(h, 0);
+    let w2 = le32(h, 8);
+    (w2 >> 16) == 1 && (w0 & 0xFFFF) == (!w0 >> 16) & 0xFFFF && crc16(&h[4..12]) as u32 == w0 & 0xFFFF
+}
+
+/// Encode one plain block of an update file in place (dm40fw.py
+/// encode_block; the inverse of the decode in `header_of`): blocks of 128
+/// bytes from file offset 0 (header included); a = p[0x1F], kp = a if a < 128
+/// else a >> 1, k = p[kp]; c -> (c + a) ^ k except at 0x1F and kp. A block of
+/// at most 0x1F bytes, or with kp outside it (the last, partial one), is
+/// stored as is.
+pub(crate) fn encode_block(p: &mut [u8]) {
+    const ADD_POS: usize = 0x1F;
+    if p.len() <= ADD_POS {
+        return;
+    }
+    let a = p[ADD_POS];
+    let kp = if a < 128 { a } else { a >> 1 } as usize;
+    if kp >= p.len() {
+        return;
+    }
+    let k = p[kp];
+    for c in p.iter_mut() {
+        *c = c.wrapping_add(a) ^ k;
+    }
+    p[ADD_POS] = a;
+    p[kp] = k;
 }
 
 /// Is `h` the installed image: header equal to `marker`? Needs at least one

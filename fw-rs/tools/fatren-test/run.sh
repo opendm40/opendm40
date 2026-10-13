@@ -20,7 +20,7 @@
 #   (A long name matching while its 8.3 name does not is handled by
 #   lfn_matches() but not exercised here: mtools derives the 8.3 name from it.)
 # calbackup:
-#   6. first run writes all eight files (incl. ROMBOOT.BIN 16 KiB and the
+#   6. first run writes all eight files (no flash image given: no _DM40PRV.BIN) (incl. ROMBOOT.BIN 16 KiB and the
 #      32-cluster LOADER.BIN, real data from the 1 MiB dump); fsck clean;
 #      contents equal the sources; BACKUP.TXT CRCs match;
 #   7. second run: UNCHANGED, no block written;
@@ -32,6 +32,15 @@
 #   11. one changed byte deep in LOADER.BIN: LOADER.BIN + BACKUP.TXT rewritten
 #      (multi-block 32-cluster chain, copy-on-write), 33 old clusters freed,
 #      fsck clean, contents equal; then unchanged again.
+#   CRC-first: an unchanged run reads 4 blocks (boot, root, FAT 1, BACKUP.TXT).
+# firmware file _DM40PRV.BIN (calbackup::FwFile from a flash image = decoded
+# body with the decoded header at +0x4000):
+#   stock dm40_v_2_6.bin (empty disk: all 9 files), dm40-fw-native.bin and a
+#   random 480010-byte body (22-byte stored-as-is tail) regenerated
+#   byte-identical, dm40fw.py info + body CRC ok; unchanged = 4 reads; firmware
+#   change rewrites it + BACKUP.TXT; a host re-copy is only re-stamped (root
+#   block); an in-place data change is missed (documented) until BACKUP.TXT is
+#   deleted; fatren renaming the installed file over it -> re-stamp only.
 # screenshot (src/screenshot.rs through calbackup::write_file, synthetic screen):
 #   12. S000.BMP taken -> S001.BMP, then S002.BMP; after deleting S000.BMP the
 #      next one is S000.BMP again; fsck clean; 307266 bytes, header equal to
@@ -152,7 +161,7 @@ import sys, zlib
 src, txt = sys.argv[1], open(sys.argv[2], 'rb').read().decode()
 lines = txt.splitlines()[3:]
 rows = {l.split()[0]: l.split() for l in lines[:lines.index('')]}
-assert len(rows) == 7, rows
+assert len(rows) in (7, 8), rows
 for f in ['CALIB.BIN', 'BOOTDATA.BIN', 'UID.BIN', 'OPTBYTES.BIN', 'OTP.BIN', 'ROMBOOT.BIN', 'LOADER.BIN']:
     d = open(src + '/' + f, 'rb').read()
     r = rows[f]
@@ -176,16 +185,18 @@ mcopy -i $IMG5 $W/keep.bin ::CONFIG.BIN
 mcopy -i $IMG5 $W/keep.bin ::DEL.TXT
 mdel -i $IMG5 ::DEL.TXT
 "$W/t" $IMG5 backup $W/src | tee $W/b1
-grep -q "backup=Written written=0xff conflict=0x00 freed=0" $W/b1 && echo "ok: first run writes all eight files" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "backup=Written written=0x0ff conflict=0x000 freed=0" $W/b1 && echo "ok: first run writes all eight files" || { echo "FAIL at line $LINENO"; exit 1; }
 mdir -i $IMG5 ::
 fsckok $IMG5
 same $IMG5
 mtype -i $IMG5 ::BACKUP.TXT
 "$W/t" $IMG5 backup $W/src | tee $W/b2
 grep -q "backup=Unchanged" $W/b2 && grep -q "changed blocks: \[\]" $W/b2 && echo "ok: second run writes nothing" || { echo "FAIL at line $LINENO"; exit 1; }
+# CRC-first: an unchanged run reads boot sector, root, FAT 1 and BACKUP.TXT only.
+grep -qE "reads=4 data_reads=\[[0-9]+\]$" $W/b2 && echo "ok: unchanged run: 4 block reads, the only data block is BACKUP.TXT" || { echo "FAIL at line $LINENO"; exit 1; }
 printf '\x42' | dd of=$W/src/CALIB.BIN bs=1 seek=400 conv=notrunc status=none
 "$W/t" $IMG5 backup $W/src | tee $W/b3
-grep -q "backup=Written written=0x81 conflict=0x00 freed=2" $W/b3 && echo "ok: changed calibration: CALIB.BIN + BACKUP.TXT rewritten, old clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "backup=Written written=0x081 conflict=0x000 freed=2" $W/b3 && echo "ok: changed calibration: CALIB.BIN + BACKUP.TXT rewritten, old clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG5
 same $IMG5
 "$W/t" $IMG5 backup $W/src | grep -q "backup=Unchanged" && echo "ok: unchanged after the rewrite" || { echo "FAIL at line $LINENO"; exit 1; }
@@ -193,7 +204,7 @@ same $IMG5
 head -c 100000 /dev/urandom > $W/junk
 mcopy -o -i $IMG5 $W/junk ::UID.BIN
 "$W/t" $IMG5 backup $W/src | tee $W/b4
-grep -q "backup=Written written=0x04 conflict=0x00 freed=25" $W/b4 && echo "ok: foreign UID.BIN (100000 B) replaced, its 25 clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "backup=Written written=0x004 conflict=0x000 freed=25" $W/b4 && echo "ok: foreign UID.BIN (100000 B) replaced, its 25 clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG5
 same $IMG5
 IMG6=$W/disk6.img
@@ -203,18 +214,124 @@ mcopy -i $IMG6 $W/a.bin ::dm40_v_2_6.bin
 mcopy -i $IMG6 $W/old.bin ::_DM40PRV.BIN
 "$W/t" $IMG6 live $MA | grep -q "status=Renamed" && echo "ok: fatren on the backup volume" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMG6 backup $W/src | tee $W/b5
-grep -q "backup=Written written=0xef conflict=0x10" $W/b5 && echo "ok: directory OTP.BIN = conflict, the rest written" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "backup=Written written=0x0ef conflict=0x010" $W/b5 && echo "ok: directory OTP.BIN = conflict, the rest written" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG6
 "$W/t" $IMG6 backup $W/src | grep -q "backup=Unchanged" && echo "ok: then unchanged" || { echo "FAIL at line $LINENO"; exit 1; }
 mdir -i $IMG6 ::
 echo "--- changed loader sector"
 printf '\x5a' | dd of=$W/src/LOADER.BIN bs=1 seek=$((0x1F000)) conv=notrunc status=none
 "$W/t" $IMG5 backup $W/src | tee $W/b6
-grep -q "backup=Written written=0xc0 conflict=0x00 freed=33" $W/b6 && echo "ok: changed LOADER.BIN: LOADER.BIN + BACKUP.TXT rewritten, 33 old clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "backup=Written written=0x0c0 conflict=0x000 freed=33" $W/b6 && echo "ok: changed LOADER.BIN: LOADER.BIN + BACKUP.TXT rewritten, 33 old clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG5
 same $IMG5
 "$W/t" $IMG5 backup $W/src | grep -q "backup=Unchanged" && echo "ok: unchanged after the loader rewrite" || { echo "FAIL at line $LINENO"; exit 1; }
 mtype -i $IMG5 ::BACKUP.TXT
+
+echo "=== running firmware's update file (_DM40PRV.BIN) + CRC-first"
+# mkflash <fw.bin> <flash.out>: what the installed image looks like in flash
+# from 0x08004000: the decoded body, the loader's 12-byte marker (= the file's
+# decoded header) at +0x4000.
+mkflash() {
+    python3 -I - $FW $1 $2 <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location('dm40fw', sys.argv[1]); f = importlib.util.module_from_spec(spec); spec.loader.exec_module(f)
+dec = f.decode(open(sys.argv[2], 'rb').read())
+w0, length, w2, body = f.split(dec)
+body = bytearray(body)
+body[f.MARKER_OFFSET:f.MARKER_OFFSET + 12] = dec[:12]
+open(sys.argv[3], 'wb').write(body)
+PY
+}
+# fwok <img> <orig.bin>: _DM40PRV.BIN on <img> is byte-identical to <orig.bin>,
+# and dm40fw.py reads it as a valid update file (header words, body CRC).
+fwok() {
+    mcopy -n -i $1 ::_DM40PRV.BIN $W/prv.bin
+    cmp $W/prv.bin $2 || { echo "FAIL: _DM40PRV.BIN != $2"; exit 1; }
+    python3 -I $FW info $W/prv.bin
+    python3 -I - $FW $W/prv.bin <<'PY' || { echo "FAIL: dm40fw.py check"; exit 1; }
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location('dm40fw', sys.argv[1]); f = importlib.util.module_from_spec(spec); spec.loader.exec_module(f)
+w0, length, w2, body = f.split(f.decode(open(sys.argv[2], 'rb').read()))
+assert w0 == f.header_word0(length, w2), 'word0'
+assert w2 >> 16 == 1 and w2 & 0xffff == f.body_checksum(body), 'word2 / body CRC'
+print('header words and body CRC ok')
+PY
+    echo "ok: _DM40PRV.BIN byte-identical to $(basename $2), valid update file"
+}
+STOCK=../../../dm40_v_2_6.bin
+NATIVE=../../dm40-fw-native.bin
+head -c 480010 /dev/urandom > $W/t.body       # (12 + 480010) % 128 = 22: store-as-is tail
+# The 12 marker-gap bytes (body 0x4000..0x400B) are 0xFF in every real build
+# (build.sh --gap-fill, the vendor's dm40_v_2_6.bin); the regenerated file
+# always has 0xFF there (a file with other bytes differs only there and is
+# still valid: the loader's body CRC excludes them).
+printf '\377\377\377\377\377\377\377\377\377\377\377\377' | dd of=$W/t.body bs=1 seek=$((0x4000)) conv=notrunc status=none
+python3 -I $FW pack $W/t.body $W/t.bin >/dev/null
+for f in $STOCK $NATIVE; do [ -f $f ] || { echo "FAIL: $f missing"; exit 1; }; done
+mkflash $STOCK $W/flash_stock
+mkflash $NATIVE $W/flash_native
+mkflash $W/t.bin $W/flash_t
+IMG8=$W/disk8.img
+mkimg $IMG8
+"$W/t" $IMG8 backup $W/src $W/flash_stock | tee $W/f1
+grep -q "backup=Written written=0x1ff conflict=0x000 freed=0" $W/f1 && echo "ok: empty disk: 8 backup files + stock firmware file (121 clusters) written" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG8
+same $IMG8
+fwok $IMG8 $STOCK
+mtype -i $IMG8 ::BACKUP.TXT | grep -q "_DM40PRV.BIN 08004000" && echo "ok: BACKUP.TXT lists _DM40PRV.BIN" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMG8 backup $W/src $W/flash_stock | tee $W/f2
+grep -q "backup=Unchanged" $W/f2 && grep -q "changed blocks: \[\]" $W/f2 && grep -qE "reads=4 data_reads=\[[0-9]+\]$" $W/f2 && echo "ok: unchanged with the firmware file: 4 reads, no file data read" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMG8 backup $W/src $W/flash_native | tee $W/f3
+grep -q "backup=Written written=0x180 conflict=0x000 freed=$(( (495128 + 12 + 4095) / 4096 + 1 ))" $W/f3 && echo "ok: firmware changed (native): _DM40PRV.BIN + BACKUP.TXT rewritten, old chains freed" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -qE "data_reads=\[[0-9]+, [0-9]+" $W/f3 || { echo "FAIL at line $LINENO: expected the full compare of the changed file"; exit 1; }
+fsckok $IMG8
+same $IMG8
+fwok $IMG8 $NATIVE
+"$W/t" $IMG8 backup $W/src $W/flash_native | grep -q "backup=Unchanged" && echo "ok: then unchanged" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMG8 backup $W/src $W/flash_t | tee $W/f4
+grep -q "backup=Written written=0x180" $W/f4 && echo "ok: 480010-byte body (22-byte stored-as-is tail)" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG8
+fwok $IMG8 $W/t.bin
+echo "--- host stamp on an equal file -> re-stamped once (root block only)"
+mcopy -n -i $IMG8 ::_DM40PRV.BIN $W/o && mcopy -o -i $IMG8 $W/o ::_DM40PRV.BIN
+"$W/t" $IMG8 backup $W/src $W/flash_t | tee $W/f5
+grep -q "backup=Written written=0x100 conflict=0x000 freed=0" $W/f5 && echo "ok: equal file with a foreign stamp: written=0x100 (stamp only)" || { echo "FAIL at line $LINENO"; exit 1; }
+[ "$(grep -o 'changed blocks: .*' $W/f5)" = "changed blocks: [5]" ] && echo "ok: only root block 5 written" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMG8 backup $W/src $W/flash_t | tee $W/f6
+grep -q "backup=Unchanged" $W/f6 && grep -qE "reads=4 data_reads=\[[0-9]+\]$" $W/f6 && echo "ok: then trusted again without data reads" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG8
+fwok $IMG8 $W/t.bin
+echo "--- in-place corruption keeping size / chain / stamp: not detected (documented); deleting BACKUP.TXT forces the full compare"
+L=$(python3 -I - $IMG8 <<'PY'
+import struct, sys
+d = open(sys.argv[1], 'rb').read()
+rsvd, nf, fsz, rootn = struct.unpack_from('<H', d, 0x0E)[0], d[0x10], struct.unpack_from('<H', d, 0x16)[0], struct.unpack_from('<H', d, 0x11)[0]
+root = rsvd + nf * fsz; data = root + rootn * 32 // 4096
+for i in range(rootn):
+    e = d[root * 4096 + 32 * i: root * 4096 + 32 * i + 32]
+    if e[:11] == b'LOADER  BIN':
+        print(data + struct.unpack_from('<H', e, 0x1A)[0] - 2 + 3); break
+PY
+)
+printf '\xa5' | dd of=$IMG8 bs=1 seek=$(( L * 4096 + 100 )) conv=notrunc status=none
+"$W/t" $IMG8 backup $W/src $W/flash_t | grep -q "backup=Unchanged" && echo "ok: (expected) in-place change of a LOADER.BIN data block not seen by the quick check" || { echo "FAIL at line $LINENO"; exit 1; }
+mdel -i $IMG8 ::BACKUP.TXT
+"$W/t" $IMG8 backup $W/src $W/flash_t | tee $W/f7
+grep -q "backup=Written written=0x0c0" $W/f7 && echo "ok: without BACKUP.TXT every file is compared: LOADER.BIN + BACKUP.TXT rewritten" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG8
+same $IMG8
+fwok $IMG8 $W/t.bin
+echo "--- fatren renames the installed file over _DM40PRV.BIN: no fight"
+MT=$(od -An -tx1 -N12 <(python3 -I $FW decode $W/t.bin /dev/stdout) | tr -d ' \n')
+mcopy -i $IMG8 $W/t.bin ::dm40_fwrs.bin
+"$W/t" $IMG8 live $MT | tee $W/f8
+grep -q "status=Renamed" $W/f8 && grep -q "old_deleted=true" $W/f8 && echo "ok: fatren replaced _DM40PRV.BIN by the installed (identical) file" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMG8 backup $W/src $W/flash_t | tee $W/f9
+grep -q "backup=Written written=0x100 conflict=0x000 freed=0" $W/f9 && echo "ok: calbackup only re-stamps it" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMG8 backup $W/src $W/flash_t | grep -q "backup=Unchanged" && echo "ok: then unchanged" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMG8 live $MT | grep -q "status=Clean" && echo "ok: fatren then clean" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG8
+fwok $IMG8 $W/t.bin
 
 echo "=== screenshot"
 # bmpok <img> <name>: size, header (vs the stock dump), pixels vs lcd::pattern.

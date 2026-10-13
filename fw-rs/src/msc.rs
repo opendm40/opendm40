@@ -41,6 +41,9 @@ const SENSE_LBA_RANGE: Sense = Sense(0x05, 0x21, 0x00);
 const SENSE_MEDIUM_ERROR: Sense = Sense(0x03, 0x11, 0x00);
 /// NOT READY, LOGICAL UNIT IS IN PROCESS OF BECOMING READY (writes inhibited).
 const SENSE_BECOMING_READY: Sense = Sense(0x02, 0x04, 0x00);
+/// UNIT ATTENTION, NOT READY TO READY CHANGE, MEDIUM MAY HAVE CHANGED: the
+/// firmware itself wrote the disk (screenshot.rs), the host must re-read it.
+const SENSE_MEDIUM_CHANGED: Sense = Sense(0x06, 0x28, 0x00);
 
 pub struct Msc<'a, B: UsbBus> {
     pub scsi: Scsi<BulkOnly<'a, B, &'static mut [u8]>>,
@@ -87,6 +90,19 @@ fn handle<B: UsbBus>(
 ) -> Res {
     let kind = cmd.kind;
     let bs = dev.block_size();
+    // One-shot UNIT ATTENTION after an on-device file write (screenshot.rs
+    // sets MEDIUM_CHANGED): the next command fails with 06/28/00, so the host
+    // drops its cached FAT / directory and re-reads the volume. Only at the
+    // start of a command (a multi-block transfer in progress is never cut),
+    // and never for INQUIRY / REQUEST SENSE (SPC: they do not report it).
+    if *xfer == Xfer::None
+        && !matches!(kind, ScsiCommand::Inquiry { .. } | ScsiCommand::RequestSense { .. })
+        && crate::screenshot::MEDIUM_CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed)
+    {
+        *sense = SENSE_MEDIUM_CHANGED;
+        cmd.fail(0);
+        return Ok(());
+    }
     match kind {
         ScsiCommand::Inquiry { .. } => {
             let mut d = [0u8; 36];
