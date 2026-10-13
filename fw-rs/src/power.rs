@@ -63,6 +63,50 @@ impl Power {
         changed
     }
 
+    /// Debug: sample ADC0 channel `ch` n times back to back (raw 12-bit),
+    /// then restore the battery channel. Returns (min, max, mid crossings,
+    /// elapsed cycles).
+    pub fn sample(&mut self, ch: u32, n: usize) -> (u16, u16, u32, u32) {
+        let (mut lo, mut hi) = (u16::MAX, 0u16);
+        let mut buf = [0u16; 512];
+        let n = n.min(512);
+        let t0 = unsafe { r32(0xE000_1004) };
+        unsafe {
+            w32(ADC0 + 0x10, 0); // SMPR2: shortest sample time on ch0..9
+            w32(ADC0 + 0x34, ch);
+            for v in buf[..n].iter_mut() {
+                w32(ADC0 + 0x00, 0);
+                modify32(ADC0 + 0x08, 0, 1 << 30);
+                let mut k = 0;
+                while r32(ADC0 + 0x00) & 2 == 0 && k < 10000 {
+                    k += 1;
+                }
+                *v = (r32(ADC0 + 0x4C) & 0xFFF) as u16;
+                crate::clock::delay_us(40); // ~20 ms window for 512 samples
+            }
+            w32(ADC0 + 0x34, 15);
+        }
+        let dt = unsafe { r32(0xE000_1004) }.wrapping_sub(t0);
+        for &v in &buf[..n] {
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        let mid = (lo as u32 + hi as u32) / 2;
+        let hy = ((hi - lo) as u32 / 8).max(4);
+        let (mut below, mut cross) = (buf[0] as u32 <= mid, 0u32);
+        for &v in &buf[..n] {
+            let v = v as u32;
+            if below && v > mid + hy {
+                below = false;
+                cross += 1;
+            } else if !below && v + hy < mid {
+                below = true;
+            }
+        }
+        self.next = 0;
+        (lo, hi, cross, dt)
+    }
+
     pub fn charging(&self) -> bool {
         let b = unsafe { r32(GPIOB + 0x10) };
         b & (1 << 10) != 0 && b & (1 << 11) != 0
