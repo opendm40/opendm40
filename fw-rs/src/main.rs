@@ -202,7 +202,7 @@ fn main() -> ! {
                 }
                 scpi::Out::Measure(m) => {
                     // The multimeter needs its analog side powered.
-                    app.scope.power(false, &mut clk);
+                    app.dmm_power(&mut clk);
                     if let Some(m) = m.filter(|&m| m != app.dmm.mode()) {
                         app.dmm.select(&mut clk, m);
                         app.meter.reset();
