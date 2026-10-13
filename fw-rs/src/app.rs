@@ -57,6 +57,11 @@ pub struct App {
     /// Drawn trace segments per scope column (see ScopeView::frame).
     scope_prev: [(u16, u16); 401],
     persist_next: u64,
+    /// Keypad target (0 frequency, 1 Vpp, 2 duty) and the typed text.
+    kp_target: u8,
+    kp_buf: [u8; 8],
+    kp_n: usize,
+    kp_mult: u8,
     meas_sel: [u8; 4],
     meas_n: usize,
     pub meas_res: crate::scope_meas::Results,
@@ -153,6 +158,10 @@ impl App {
             prof: [0; 3],
             scope_prev: [(u16::MAX, 0); 401],
             persist_next: 0,
+            kp_target: 0,
+            kp_buf: [0; 8],
+            kp_n: 0,
+            kp_mult: b'H',
             meas_sel: crate::scope_meas::DEFAULT_SEL,
             meas_n: 4,
             meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
@@ -204,13 +213,13 @@ impl App {
     }
 
     fn show(&mut self, v: View, clk: &mut Clock) {
-        if matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu) && !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu) {
+        if matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad) && !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad) {
             self.back_view = self.view;
         }
         // Analog power as the stock pages: scope / generator side or DMM side
         // (scope.rs power()). The menu keeps whatever is on.
         match v {
-            View::Scope | View::Gen | View::ScopeMenu => self.scope.power(true, clk),
+            View::Scope | View::Gen | View::ScopeMenu | View::Keypad => self.scope.power(true, clk),
             View::Dmm | View::DmmScope => self.scope.power(false, clk),
             View::Menu | View::Settings | View::Range => {}
         }
@@ -239,6 +248,13 @@ impl App {
                 ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll);
             }
             View::Gen => ui::gen_static(&self.gen),
+            View::Keypad => {
+                ui::gen_static(&self.gen);
+                let (title, unit) = self.kp_labels();
+                let n = self.kp_n;
+                let t = core::str::from_utf8(&self.kp_buf[..n]).unwrap_or("");
+                ui::keypad(self.kp_target == 0, title, t, unit);
+            }
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range => {
                 let b = self.dmm.button();
@@ -373,6 +389,44 @@ impl App {
                 self.chart_unit,
             );
         }
+    }
+
+    fn kp_open(&mut self, target: u8, clk: &mut Clock) {
+        self.kp_target = target;
+        self.kp_n = 0;
+        self.kp_mult = b'K';
+        self.show(View::Keypad, clk);
+    }
+
+    fn kp_labels(&self) -> (&'static str, &'static str) {
+        match self.kp_target {
+            0 => ("Frequency", match self.kp_mult {
+                b'M' => "MHz",
+                b'K' => "KHz",
+                _ => "Hz",
+            }),
+            1 => ("Vpp", "V"),
+            _ => ("Duty", "%"),
+        }
+    }
+
+    fn kp_apply(&mut self) {
+        let n = self.kp_n;
+        let Some(v) = crate::scpi::parse_num(&self.kp_buf[..n]) else { return };
+        let mut st = self.gen.s;
+        match self.kp_target {
+            0 => {
+                let m = match self.kp_mult {
+                    b'M' => 1e6,
+                    b'K' => 1e3,
+                    _ => 1.0,
+                };
+                st.freq_hz = gen::snap_freq(st.wave, (v * m).max(1.0) as u32);
+            }
+            1 => st.amp_v = v.clamp(0.5, 3.0),
+            _ => st.duty = (v.clamp(0.0, 100.0) * 100.0) as u16,
+        }
+        self.gen.apply(st);
     }
 
     /// Settings -> backup SRAM words.
@@ -649,7 +703,7 @@ impl App {
                 self.beep(now, 50);
                 self.key(clk, c);
             }
-            Gesture::SwipeLeft | Gesture::SwipeRight if !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu) => {
+            Gesture::SwipeLeft | Gesture::SwipeRight if !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad) => {
                 let i = View::CYCLE.iter().position(|&v| v == self.view).unwrap_or(0);
                 let n = View::CYCLE.len();
                 let j = if g == Gesture::SwipeLeft { (i + 1) % n } else { (i + n - 1) % n };
@@ -677,7 +731,7 @@ impl App {
         let now = clk.now_ms();
         match code {
             0 => {
-                let v = if matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu) { self.back_view } else { View::Menu };
+                let v = if matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad) { self.back_view } else { View::Menu };
                 self.show(v, clk);
             }
             1 => match self.view {
@@ -748,6 +802,35 @@ impl App {
                     }
                 }
             }
+            View::Keypad => {
+                let freq = self.kp_target == 0;
+                match ui::keypad_hit(freq, x, y) {
+                    Some(b'=') => {
+                        self.kp_apply();
+                        self.show(View::Gen, clk);
+                    }
+                    Some(b'<') => self.kp_n = self.kp_n.saturating_sub(1),
+                    Some(c @ (b'H' | b'K' | b'M')) => self.kp_mult = c,
+                    Some(c) => {
+                        let max = if freq { 3 } else { 5 };
+                        if self.kp_n < max && !(c == b'.' && self.kp_buf[..self.kp_n].contains(&b'.')) {
+                            self.kp_buf[self.kp_n] = c;
+                            self.kp_n += 1;
+                        }
+                    }
+                    None => {
+                        // Outside the keypad: cancel.
+                        if !(x >= 224 && y >= if freq { 142 } else { 100 }) {
+                            self.show(View::Gen, clk);
+                        }
+                        return;
+                    }
+                }
+                let (_, unit) = self.kp_labels();
+                let n = self.kp_n;
+                let t = core::str::from_utf8(&self.kp_buf[..n]).unwrap_or("");
+                ui::keypad_input(freq, t, unit);
+            }
             View::ScopeMenu => {
                 let mut st = self.scope.s;
                 match ui::scope_menu_hit(self.scope_tab, x, y) {
@@ -787,6 +870,35 @@ impl App {
                 }
                 self.scope.apply(st, now);
                 ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll);
+            }
+            View::Keypad => {
+                let freq = self.kp_target == 0;
+                match ui::keypad_hit(freq, x, y) {
+                    Some(b'=') => {
+                        self.kp_apply();
+                        self.show(View::Gen, clk);
+                    }
+                    Some(b'<') => self.kp_n = self.kp_n.saturating_sub(1),
+                    Some(c @ (b'H' | b'K' | b'M')) => self.kp_mult = c,
+                    Some(c) => {
+                        let max = if freq { 3 } else { 5 };
+                        if self.kp_n < max && !(c == b'.' && self.kp_buf[..self.kp_n].contains(&b'.')) {
+                            self.kp_buf[self.kp_n] = c;
+                            self.kp_n += 1;
+                        }
+                    }
+                    None => {
+                        // Outside the keypad: cancel.
+                        if !(x >= 224 && y >= if freq { 142 } else { 100 }) {
+                            self.show(View::Gen, clk);
+                        }
+                        return;
+                    }
+                }
+                let (_, unit) = self.kp_labels();
+                let n = self.kp_n;
+                let t = core::str::from_utf8(&self.kp_buf[..n]).unwrap_or("");
+                ui::keypad_input(freq, t, unit);
             }
             View::ScopeMenu => {
                 let mut st = self.scope.s;
@@ -907,15 +1019,16 @@ impl App {
                     let k = Wave::ALL.iter().position(|&w| w == st.wave).unwrap_or(0);
                     st.wave = Wave::ALL[(k + 1) % 4];
                 } else if x >= 246 && (40..130).contains(&y) {
-                    st.freq_hz = if plus {
-                        *steps.iter().find(|&&f| f > st.freq_hz).unwrap_or(&st.freq_hz)
-                    } else {
-                        *steps.iter().rev().find(|&&f| f < st.freq_hz).unwrap_or(&1)
-                    };
+                    self.kp_open(0, clk);
+                    return;
                 } else if x >= 246 && (133..223).contains(&y) {
-                    st.amp_v = if plus { (st.amp_v + 0.1).min(3.0) } else { (st.amp_v - 0.1).max(0.5) };
+                    self.kp_open(1, clk);
+                    return;
                 } else if x >= 246 && (226..316).contains(&y) {
-                    st.duty = if plus { (st.duty + 500).min(10000) } else { st.duty.saturating_sub(500) };
+                    if st.wave == Wave::Square && st.freq_hz <= 50_000 {
+                        self.kp_open(2, clk);
+                    }
+                    return;
                 } else {
                     return;
                 }
