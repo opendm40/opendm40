@@ -239,8 +239,10 @@ Additional requirements:
       trigger level drawn as a dashed line + marker; gesture map without clashes with view swipes.
       Rendering approach (own strip compositor vs embedded-graphics / Slint / LVGL) evaluated in
       docs/combined-view-design.md [design agent], then implement with the scope redesign.
-- [ ] Combined DMM+scope view: DMM readout built into the scope UI, one font hierarchy (user: current
-      view has mixed font sizes and overlaps) -> docs/combined-view-design.md [design agent].
+- [x] Combined DMM+scope view design: meter strip inside the scope page, 3-size type hierarchy, gesture
+      map, renderer choice (own layered compositor, no GUI library) -> docs/combined-view-design.md (8714bdd).
+- [ ] Implement combined view C1-C5 + runtime drag/grab switch G1 [agent]; then G2 markers/bubbles,
+      G3 pinch (measure 2-finger tracking first), G4 A/B on device, R1 redraw timing + compositor, U1-U3.
 - [ ] AC+DC: the AC part reads ~5% low vs plain AC V on a 40 Hz 0..9.6 V square (4.578 vs 4.812 V);
       combined view FREQ reads 13.3 Hz instead of 40 Hz [AC agent].
 - [ ] sigrok: scpi-dmm has no option to force a model (scan options are only conn/serialcomm), so
