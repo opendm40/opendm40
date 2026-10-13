@@ -606,6 +606,8 @@ const ACDC_RELAY_PULSE: bool = true;
 /// result in the ACA phase (never in the ACmV phase).
 const ACDC_FREQ_RESTART: bool = false;
 
+/// EXPERIMENT: plain AC V cycles the RMS source (R34) for the diagnostic.
+const DIAG_R34_CYCLE: bool = true;
 /// AC+DC diagnostic ring: AC phases kept (`acdc_diag`).
 const ACDC_DIAG_N: usize = 4;
 
@@ -1848,14 +1850,27 @@ impl Dmm {
         let mut ac = sq * s * cal(g_rms + 4 * ci, 1.0) - cal(o_rms + 4 * ci, 0.0);
         let dcp = lpf * s * cal(g_lpf + 4 * ci, 1.0) - cal(o_lpf + 4 * ci, 0.0);
         if self.diag_on {
+            let mut r34 = 0u16;
             if !self.acdc && self.diag[self.diag_k as usize % ACDC_DIAG_N].n >= 4 {
                 self.diag_k = self.diag_k.wrapping_add(1);
                 self.diag[self.diag_k as usize % ACDC_DIAG_N] = AcPhaseDiag::EMPTY;
+                // EXPERIMENT (read-path investigation): plain AC V cycles the
+                // RMS converter source every 4 entries: R34 0x88 = SVXI (sum
+                // X*Y, the row value), 0x80 = sum X^2 (AD2), 0x8C = sum Y^2
+                // (AD3; SDO23 also routes AD3 to the AD2/LPF registers).
+                if DIAG_R34_CYCLE && m == 0 {
+                    let v = [0x88u8, 0x80, 0x8C][(self.diag_k / 4 % 3) as usize];
+                    hy::write(0x34, &[v]);
+                    r34 = 0x8000 | v as u16;
+                }
             }
             let e = &mut self.diag[self.diag_k as usize % ACDC_DIAG_N];
             let j = e.n as usize;
             if j == 0 {
                 e.late_ms = now.saturating_sub(self.deadline).min(u16::MAX as u64) as u16;
+                if r34 != 0 {
+                    e.late_ms = r34 & 0xFF;
+                }
             }
             if j < 4 {
                 let t0 = self.diag_t;
