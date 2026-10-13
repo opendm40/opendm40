@@ -197,7 +197,9 @@ Additional requirements:
       renamed "Key/alert volume"; idle power-off announced 30/20/10 s before (toast + beep at >= 50 % even at
       volume 0). The continuity / diode beeper is the HY3131 CMPO pin (not TIM14): volume does not apply (check).
       UF-35: long-press on the MIN/MAX/AVG column = statistics reset, distinct from the history-row clear (existed).
-- [ ] UF-29 (P2) On-device Help page (gestures, resets, input limits). §9
+- [x] UF-29 (P2) On-device Help page (gestures, resets, input limits). §9  (code done; verify on device)
+      Settings 2/2 -> Help: 4 list pages (gestures, side keys, multimeter taps, limits; ui::HELP); tap = next page,
+      title bar / MENU = back. No input voltage ratings (none sourced in the repo).
 - [ ] UF-24/30/31/36/38/41 (P2) Tempco comp, fast bargraph, stylus sensitivity, BT on all views at 50 ms, SCPI host script, sinc interp. §3-§10
 - Community-confirmed existing items (priority signal only): native boot/recovery; FR-26 temperature offset (raise to P1);
   FR-36 user calibration; FR-13 sub-mode memory; FR-01/FR-02 (AVG on chart); FR-04/CSV record + FR-38 logger; FR-05;

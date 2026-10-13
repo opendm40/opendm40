@@ -768,9 +768,9 @@ fn main() {
     let page_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
     for (page, vals) in [
         (0u8, vec!["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto (per view)", "Hold 5000 ms", ""]),
-        (1, vec!["SLOW (n/a here)", "HIGH", ""]),
-        (1, vec!["FAST  37/s", "LOW", ""]),
-        (1, vec!["MED  --/s", "OFF", ""]),
+        (1, vec!["SLOW (n/a here)", "HIGH", "", ""]),
+        (1, vec!["FAST  37/s", "LOW", "", ""]),
+        (1, vec!["MED  --/s", "OFF", "", ""]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -791,6 +791,21 @@ fn main() {
                 }
             }
         }
+    }
+
+    // 6f. Help pages (UF-29): whole page; every text fits its column.
+    for page in 0..ui::HELP.len() {
+        host::reset(0);
+        ui::help_page(page);
+        ck.check_opts(&format!("help/{page}"), &page_regions, false);
+        for (a, b) in ui::HELP[page].1.iter() {
+            ck.cases += 1;
+            let (wa, wb) = (stockfont::text_width(stockfont::TEXT22, a, 0), stockfont::text_width(stockfont::TEXT22, b, 0));
+            if wa > ui::HELP_COL - 4 || wb > 464 - 15 - ui::HELP_COL {
+                ck.fail(&format!("help/{page}"), format!("too wide: {a:?} {wa} / {b:?} {wb}"));
+            }
+        }
+        save(&out, &format!("m05-help{page}"));
     }
 
     // 6d. Main menu (gallery row on top, four tiles, combined-view row).
@@ -996,7 +1011,7 @@ fn main() {
         ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]);
         save(&out, "m01-settings");
         host::reset(0);
-        ui::settings(1, &["SLOW (n/a here)", "HIGH", ""]);
+        ui::settings(1, &["SLOW (n/a here)", "HIGH", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));
