@@ -18,6 +18,12 @@ use crate::scope::{self, Scope};
 use crate::ui::{self, View};
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
+/// Offered stock options: dim 5/10/30 min/never, shutdown 10/30/60 min/never.
+const DIM_MS: [u64; 4] = [300_000, 600_000, 1_800_000, 0];
+const OFF_MS: [u64; 4] = [600_000, 1_800_000, 3_600_000, 0];
+const DIM_TXT: [&str; 4] = ["5 min", "10 min", "30 min", "Never"];
+const OFF_TXT: [&str; 4] = ["10 min", "30 min", "1 hour", "Never"];
+const START: [View; 4] = [View::Dmm, View::Scope, View::Gen, View::Menu];
 const TIM14: u32 = 0x4000_2000;
 const BUZZER_ARR: u32 = 11200;
 
@@ -32,6 +38,18 @@ pub struct App {
     pub bt_on: bool,
     backlight: u8,
     beep_on: bool,
+    /// Stock settings (gui_v2_6.h section 2): dim / shutdown index into
+    /// IDLE_MS, volume 0..100 %, start page, combined view for the menu row.
+    dim_idx: usize,
+    off_idx: usize,
+    volume: u8,
+    start_page: usize,
+    combo: View,
+    last_input: u64,
+    dimmed: bool,
+    pd6_since: Option<u64>,
+    /// PD6 level at boot = released (polarity not known for sure).
+    pd6_idle: bool,
     beep_until: u64,
     pub last_raw: Option<Reading>,
     redraw: bool,
@@ -68,10 +86,21 @@ fn buzzer_init() {
     }
 }
 
-fn buzzer(on: bool) {
-    // Default volume 0.1 -> duty 0.1/3*0.5 of the period (stock formula).
-    let duty = if on { BUZZER_ARR / 60 } else { 0 };
+/// Buzzer on/off at `vol` 0..100 % (stock: duty = min(v/3, 0.99) * 0.5).
+fn buzzer(on: bool, vol: u8) {
+    let v = vol as f32 / 100.0;
+    let k = if v < 0.9 { v / 3.0 } else { v.min(0.99) } * 0.5;
+    let duty = if on { (BUZZER_ARR as f32 * k) as u32 } else { 0 };
     unsafe { w32(TIM14 + 0x34, duty) };
+}
+
+/// Power off as the stock: both analog rails / power hold low.
+fn power_off() -> ! {
+    unsafe {
+        w32(0x4002_1000 + 0x18, 1 << (2 + 16)); // PE2 = 0
+        w32(0x4002_0800 + 0x18, 1 << (4 + 16)); // PC4 = 0
+    }
+    loop {}
 }
 
 impl App {
@@ -90,6 +119,15 @@ impl App {
             bt_on: true,
             backlight: 55,
             beep_on: true,
+            dim_idx: 0,
+            off_idx: 1,
+            volume: 50,
+            start_page: 0,
+            combo: View::DmmScope,
+            last_input: 0,
+            dimmed: false,
+            pd6_since: None,
+            pd6_idle: unsafe { core::ptr::read_volatile(0x4002_0C10 as *const u32) } & (1 << 6) != 0,
             beep_until: 0,
             last_raw: None,
             redraw: true,
@@ -111,13 +149,13 @@ impl App {
 
     fn beep(&mut self, now: u64, ms: u64) {
         if self.beep_on {
-            buzzer(true);
+            buzzer(true, self.volume);
             self.beep_until = now + ms;
         }
     }
 
     fn show(&mut self, v: View, clk: &mut Clock) {
-        if v == View::Menu && self.view != View::Menu {
+        if matches!(v, View::Menu | View::Settings) && !matches!(self.view, View::Menu | View::Settings) {
             self.back_view = self.view;
         }
         // Analog power as the stock pages: scope / generator side or DMM side
@@ -125,7 +163,7 @@ impl App {
         match v {
             View::Scope | View::Gen => self.scope.power(true, clk),
             View::Dmm | View::DmmScope => self.scope.power(false, clk),
-            View::Menu => {}
+            View::Menu | View::Settings => {}
         }
         self.view = v;
         self.redraw = true;
@@ -141,7 +179,30 @@ impl App {
             }
             View::Scope => ui::SCOPE_FULL.draw_static(&self.scope, true),
             View::Gen => ui::gen_static(&self.gen),
-            View::Menu => ui::menu(ui::view_name(self.back_view), self.bt_on, self.backlight, self.beep_on),
+            View::Menu => ui::main_menu(ui::view_name(self.combo)),
+            View::Settings => {
+                let mut b = [[0u8; 8]; 2];
+                let pct = |b: &mut [u8; 8], v: u8| -> usize {
+                    let mut t = [0u8; 16];
+                    let s = crate::dmm::format(&mut t, v as f32, 0);
+                    b[..s.len()].copy_from_slice(s.as_bytes());
+                    b[s.len()] = b'%';
+                    s.len() + 1
+                };
+                let [b0, b1] = &mut b;
+                let n0 = pct(b0, self.backlight);
+                let n1 = pct(b1, self.volume);
+                let vals: [&str; 7] = [
+                    DIM_TXT[self.dim_idx],
+                    OFF_TXT[self.off_idx],
+                    core::str::from_utf8(&b0[..n0]).unwrap_or(""),
+                    core::str::from_utf8(&b1[..n1]).unwrap_or(""),
+                    if self.bt_on { "ON" } else { "OFF" },
+                    ui::view_name(START[self.start_page]),
+                    "",
+                ];
+                ui::settings(&vals);
+            }
         }
         if let (Some(r), true) = (self.meter.shown().copied(), matches!(self.view, View::Dmm | View::DmmScope)) {
             self.dmm_view.reading(&r, self.meter.hold, self.meter.rel_active(), self.view == View::DmmScope);
@@ -152,7 +213,7 @@ impl App {
     pub fn tick(&mut self, clk: &mut Clock, can_draw: bool) {
         let now = clk.now_ms();
         if self.beep_until != 0 && now >= self.beep_until {
-            buzzer(false);
+            buzzer(false, self.volume);
             self.beep_until = 0;
         }
         if !can_draw {
@@ -165,6 +226,23 @@ impl App {
             self.chart_dirty = true;
         }
         self.power.poll(now);
+        // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
+        // key PD6 (hold 1.5 s -> off).
+        let idle = now.saturating_sub(self.last_input);
+        if DIM_MS[self.dim_idx] != 0 && idle > DIM_MS[self.dim_idx] && !self.dimmed {
+            self.dimmed = true;
+            backlight(5);
+        }
+        if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] {
+            power_off();
+        }
+        let pd6 = (unsafe { core::ptr::read_volatile(0x4002_0C10 as *const u32) } & (1 << 6) != 0) != self.pd6_idle;
+        match (pd6, self.pd6_since) {
+            (true, None) => self.pd6_since = Some(now),
+            (true, Some(t)) if now - t > 1500 => power_off(),
+            (false, Some(_)) => self.pd6_since = None,
+            _ => {}
+        }
         if now >= self.status_next {
             self.status_next = now + 1000;
             match self.view {
@@ -265,12 +343,17 @@ impl App {
 
     pub fn gesture(&mut self, clk: &mut Clock, g: Gesture) {
         let now = clk.now_ms();
+        self.last_input = now;
+        if self.dimmed {
+            self.dimmed = false;
+            backlight(self.backlight);
+        }
         match g {
             Gesture::KeyDown(c) => {
                 self.beep(now, 50);
                 self.key(clk, c);
             }
-            Gesture::SwipeLeft | Gesture::SwipeRight if self.view != View::Menu => {
+            Gesture::SwipeLeft | Gesture::SwipeRight if !matches!(self.view, View::Menu | View::Settings) => {
                 let i = View::CYCLE.iter().position(|&v| v == self.view).unwrap_or(0);
                 let n = View::CYCLE.len();
                 let j = if g == Gesture::SwipeLeft { (i + 1) % n } else { (i + n - 1) % n };
@@ -293,7 +376,7 @@ impl App {
         let now = clk.now_ms();
         match code {
             0 => {
-                let v = if self.view == View::Menu { self.back_view } else { View::Menu };
+                let v = if matches!(self.view, View::Menu | View::Settings) { self.back_view } else { View::Menu };
                 self.show(v, clk);
             }
             1 => match self.view {
@@ -411,31 +494,36 @@ impl App {
                 st.freq_hz = gen::snap_freq(st.wave, st.freq_hz);
                 self.gen_set(st);
             }
-            View::Menu => match ui::menu_hit(y) {
-                Some(0) => {
-                    let i = View::CYCLE.iter().position(|&v| v == self.back_view).unwrap_or(0);
-                    self.back_view = View::CYCLE[(i + 1) % View::CYCLE.len()];
-                    self.redraw = true;
+            View::Menu => match ui::main_menu_hit(x, y) {
+                Some(0) => self.show(View::Dmm, clk),
+                Some(1) => self.show(View::Scope, clk),
+                Some(2) => self.show(View::Gen, clk),
+                Some(3) => self.show(View::Settings, clk),
+                Some(_) => {
+                    let c = self.combo;
+                    self.show(c, clk);
                 }
-                Some(1) => {
-                    self.bt_on = !self.bt_on;
-                    self.redraw = true;
-                }
-                Some(2) => {
-                    self.backlight = if self.backlight >= 100 { 10 } else { self.backlight + 15 }.min(100);
-                    backlight(self.backlight);
-                    self.redraw = true;
-                }
-                Some(3) => {
-                    self.beep_on = !self.beep_on;
-                    self.redraw = true;
-                }
-                Some(5) => {
-                    let v = self.back_view;
-                    self.show(v, clk);
-                }
-                _ => {}
+                None => {}
             },
+            View::Settings => {
+                match ui::settings_hit(y) {
+                    Some(0) => self.dim_idx = (self.dim_idx + 1) % 4,
+                    Some(1) => self.off_idx = (self.off_idx + 1) % 4,
+                    Some(2) => {
+                        self.backlight = if self.backlight >= 100 { 10 } else { (self.backlight + 10).min(100) };
+                        backlight(self.backlight);
+                    }
+                    Some(3) => self.volume = if self.volume >= 100 { 0 } else { self.volume + 10 },
+                    Some(4) => self.bt_on = !self.bt_on,
+                    Some(5) => self.start_page = (self.start_page + 1) % 4,
+                    Some(_) => {
+                        self.show(View::Menu, clk);
+                        return;
+                    }
+                    None => return,
+                }
+                self.redraw = true;
+            }
         }
         let _ = dmm::button_of;
     }
