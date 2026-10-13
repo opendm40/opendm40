@@ -52,6 +52,32 @@
 #      to the stub screen with bottom-up rows; the other files untouched.
 #      (The stub screen mixes run rows and noise rows, so the RLE capture fills up part way and
 #      the rest is read from the "GRAM" while writing: both paths.)
+#   12b. power cut / screenshot::abort_on after every slice of a shot on a NOR
+#      model of write_step: no FAT / root page ever erased, fsck at worst the
+#      shot's lost clusters / FAT 1 ahead; a host-mounted disk refuses the shot.
+# Untracked inputs (device dumps, dm40_v_2_6.bin, a native build) are used when
+# present, else synthetic stand-ins of the same sizes (noted in the log).
+# csvlog (src/csvlog.rs non-blocking CSV recorder, driven pass by pass; rows
+# from main.rs row(i): 100 ms apart, values 1e-9..1e4, OL/REL/HOLD/HI/LO):
+#   13. long recording, 3000 rows = 76 KB over 19 clusters: LOG000.CSV, fsck
+#      clean, every row checked by Python's csv module; NOR model: every data
+#      block erased once (appends are program-only), one root erase per commit;
+#   14. interleaved with three screenshots (one started while a commit runs):
+#      both BMPs pixel-exact, the CSV complete, no commit started during a shot;
+#   15. host write in progress (HOST_WRITING) for 120 rows: no block written
+#      meanwhile, nothing dropped; for 600 rows: FIFO overflow -> rows dropped,
+#      the next row flagged GAP, file consistent;
+#   16. power cut before every block write of a 1500-row recording (and a
+#      program-only write cut half way): fsck finds at most a lost cluster, a
+#      LOG chain longer than its size (truncated) or FAT 1 ahead of FAT 2;
+#      the committed CSV is always a clean prefix; CONFIG.BIN untouched;
+#      Also with the chain crossing the FAT 1 block boundary (2047 -> 2048:
+#      the new entry in block 1 first, the link in block 0 last);
+#   17. nearly full disk (5 free clusters): recording ends Full, file valid;
+#   18. gallery: list (names, sizes vs mdir, free bytes), MMEM:CAT? text,
+#      delete LOG / BMP / a long-named LOG_WI~1.CSV (LFN entries removed),
+#      fsck clean; a delete between two commits of a recording; deleting the
+#      file being recorded is refused.
 set -e
 cd "$(dirname "$0")"
 RUSTUP_HOME="$(cd ../../../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../../../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
@@ -176,15 +202,36 @@ PY
     echo "ok: all backup files equal their sources, BACKUP.TXT CRCs match"
 }
 mkdir $W/src
-cp ../../../firmware/re/dumps/dump_settings.bin $W/s32 && head -c 4096 $W/s32 > $W/src/CALIB.BIN
-DUMP=../../../firmware/re/dumps/full-20261013/flash_08000000_1MB.bin
-dd if=$DUMP of=$W/src/ROMBOOT.BIN bs=4096 skip=0 count=4 status=none
-dd if=$DUMP of=$W/src/LOADER.BIN bs=4096 skip=$((0xA0000 / 4096)) count=32 status=none
-dd if=$DUMP of=$W/src/BOOTDATA.BIN bs=4096 skip=$((0xA4000 / 4096)) count=4 status=none
+# Sources: slices of the (untracked) device dumps when present, else
+# synthetic stand-ins of the same sizes (review 258c833 L5: the suite must
+# run in a clean checkout). Synthetic data is seeded random; the bytes the
+# tests below change (CALIB 400 / 500, LOADER 0x1F000) are forced to 0 so
+# every change is one.
+DUMPS=../../../firmware/re/dumps
+DUMP=$DUMPS/full-20261013/flash_08000000_1MB.bin
+python3 -I - $W/src <<'PY'
+import random, sys
+r = random.Random(258)
+for name, n in [('CALIB.BIN', 4096), ('BOOTDATA.BIN', 16384), ('OPTBYTES.BIN', 16), ('OTP.BIN', 528),
+                ('ROMBOOT.BIN', 16384), ('LOADER.BIN', 131072)]:
+    d = bytearray(r.randbytes(n))
+    for o in {'CALIB.BIN': [400, 500], 'LOADER.BIN': [0x1F000]}.get(name, []):
+        d[o] = 0
+    open(sys.argv[1] + '/' + name, 'wb').write(d)
+PY
+if [ -f $DUMPS/dump_settings.bin ]; then head -c 4096 $DUMPS/dump_settings.bin > $W/src/CALIB.BIN; else echo "note: no $DUMPS/dump_settings.bin, synthetic CALIB.BIN"; fi
+if [ -f $DUMP ]; then
+    dd if=$DUMP of=$W/src/ROMBOOT.BIN bs=4096 skip=0 count=4 status=none
+    dd if=$DUMP of=$W/src/LOADER.BIN bs=4096 skip=$((0xA0000 / 4096)) count=32 status=none
+    dd if=$DUMP of=$W/src/BOOTDATA.BIN bs=4096 skip=$((0xA4000 / 4096)) count=4 status=none
+else
+    echo "note: no $DUMP, synthetic ROMBOOT.BIN / LOADER.BIN / BOOTDATA.BIN"
+fi
 [ $(stat -c %s $W/src/ROMBOOT.BIN) = 16384 ] && [ $(stat -c %s $W/src/LOADER.BIN) = 131072 ] || { echo "FAIL: dump slices"; exit 1; }
 head -c 12 /dev/urandom > $W/src/UID.BIN
-cp ../../../firmware/re/dumps/full-20261013/option_bytes_1FFFC000.bin $W/src/OPTBYTES.BIN
-cp ../../../firmware/re/dumps/full-20261013/otp_1FFF7800.bin $W/src/OTP.BIN
+for f in option_bytes_1FFFC000.bin:OPTBYTES.BIN otp_1FFF7800.bin:OTP.BIN; do
+    if [ -f $DUMPS/full-20261013/${f%%:*} ]; then cp $DUMPS/full-20261013/${f%%:*} $W/src/${f##*:}; else echo "note: no ${f%%:*}, synthetic ${f##*:}"; fi
+done
 IMG5=$W/disk5.img
 mkimg $IMG5
 mcopy -i $IMG5 $W/keep.bin ::CONFIG.BIN
@@ -266,6 +313,22 @@ PY
 }
 STOCK=../../../dm40_v_2_6.bin
 NATIVE=../../dm40-fw-native.bin
+# Untracked inputs (L5): stand-ins when absent. The stock file's body is
+# 495128 bytes (the freed= counts below depend on it); the native one only
+# has to be larger than the 80 KiB left free in the M1 case.
+# mkbody <len> <out>: random body with the 12 marker-gap bytes at 0x4000 0xFF.
+mkbody() {
+    head -c $1 /dev/urandom > $2
+    printf '\377\377\377\377\377\377\377\377\377\377\377\377' | dd of=$2 bs=1 seek=$((0x4000)) conv=notrunc status=none
+}
+if [ ! -f $STOCK ]; then
+    echo "note: no $STOCK, synthetic stand-in (body 495128 bytes)"
+    mkbody 495128 $W/stock.body && python3 -I $FW pack $W/stock.body $W/stock.bin >/dev/null && STOCK=$W/stock.bin
+fi
+if [ ! -f $NATIVE ]; then
+    echo "note: no $NATIVE (./build.sh native), synthetic stand-in"
+    mkbody 289000 $W/native.body && python3 -I $FW pack $W/native.body $W/native.bin >/dev/null && NATIVE=$W/native.bin
+fi
 head -c 480010 /dev/urandom > $W/t.body       # (12 + 480010) % 128 = 22: store-as-is tail
 # The 12 marker-gap bytes (body 0x4000..0x400B) are 0xFF in every real build
 # (build.sh --gap-fill, the vendor's dm40_v_2_6.bin); the regenerated file
@@ -419,4 +482,263 @@ fsckok $IMG7
 bmpok $IMG7 S000.BMP
 mcopy -n -i $IMG7 ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.BIN untouched" || { echo "FAIL at line $LINENO"; exit 1; }
 mdir -i $IMG7 ::
+
+echo "--- screenshot: power cut / abort between every two slices (NOR model of write_step)"
+# Review 258c833 H1 / L4: the shot driven slice by slice (screenshot::poll_on)
+# on a NOR model (write_step: erase in the first call, 4 pages programmed per
+# call), cut after every slice k: the image as it is then (incl. a half
+# programmed data block), and the same k stopped by screenshot::abort_on
+# (power_off / DBG:RESET path). Required for every k: no FAT / root page left
+# all 0xFF (erased / half programmed metadata), and fsck finds at most the
+# shot's 76 lost clusters and FAT 1 ahead of FAT 2. Then the shot completes
+# from a clean start (fsck clean). Finally a host-mounted disk refuses the shot.
+cp $IMG7 $W/cutbase.img
+NS=$("$W/t" $W/cutbase.img shotcut | tee $W/sc0 | grep -oE "slices=[0-9]+" | cut -d= -f2)
+cp $IMG7 $W/cutbase.img
+cat $W/sc0
+grep -q "result=Some(Saved(" $W/sc0 && grep -q "erased_meta_pages=\[\]" $W/sc0 || { echo "FAIL at line $LINENO"; exit 1; }
+[ "$(grep -o 'metadata writes.*' $W/sc0 | grep -o '"' | wc -l)" = 6 ] && echo "ok: uncut shot: $NS slices, 3 metadata block writes (FAT 1, FAT 2, root), each in one slice" || { echo "FAIL at line $LINENO"; exit 1; }
+# shotcutok <img> <k>: the only fsck findings a cut / abort may leave.
+shotcutok() {
+    local rc=0
+    fsck.fat -n $1 > $W/fsck.out 2>&1 || rc=$?
+    [ $rc -le 1 ] || { cat $W/fsck.out; echo "FAIL: fsck rc=$rc ($2)"; exit 1; }
+    if grep -vE "^fsck.fat|files, .*clusters|^$|Leaving filesystem unchanged|FATs differ but appear to be intact|Using first FAT|Reclaimed 76 unused clusters \(311296 bytes\)" $W/fsck.out | grep -q .; then
+        cat $W/fsck.out; echo "FAIL: unexpected fsck finding ($2)"; exit 1
+    fi
+}
+nlost=0
+for k in $(seq 0 $NS); do
+    for mode in cut abort; do
+        cp $W/cutbase.img $W/cut.img
+        "$W/t" $W/cut.img shotcut $k $mode > $W/sc
+        grep -q "erased_meta_pages=\[\]" $W/sc || { cat $W/sc; echo "FAIL: $mode after slice $k: erased FAT / root page"; exit 1; }
+        [ $mode = abort ] && { grep -qE "busy=false" $W/sc || { cat $W/sc; echo "FAIL: abort $k left the shot busy"; exit 1; }; }
+        shotcutok $W/cut.img "$mode $k"
+        grep -q "Reclaimed 76" $W/fsck.out && nlost=$((nlost + 1))
+    done
+done
+echo "ok: $((NS + 1)) cut points x (cut, abort): no FAT / root page ever erased, fsck at worst 76 lost clusters / FAT 1 ahead ($nlost cases)"
+cp $W/cutbase.img $W/cut.img
+"$W/t" $W/cut.img shotcut $((NS - 1)) abort > /dev/null
+"$W/t" $W/cut.img shot | grep -q "shot=Saved(" && echo "ok: the next shot after an abort succeeds" || { echo "FAIL at line $LINENO"; exit 1; }
+cp $W/cutbase.img $W/cut.img
+"$W/t" $W/cut.img shotmounted | tee $W/sm
+grep -q "start=false busy=false changed blocks: \[\]" $W/sm && echo "ok: host has the disk mounted: shot refused, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
+
+echo "=== csvlog"
+# csvok <img> <name> <rows> <full|prefix|gap>: header, columns, every row
+# recomputed (row(i) in main.rs) through Python's csv module.
+csvok() {
+    mcopy -n -i $1 ::$2 $W/log.csv || { echo "FAIL: no $2"; exit 1; }
+    python3 -I - $W/log.csv $3 $4 <<'PY' || { echo "FAIL: $2 content"; exit 1; }
+import csv, re, sys
+path, n, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+raw = open(path, 'rb').read()
+assert raw.isascii() and raw.endswith(b'\r\n'), 'ASCII, CRLF, ends with a whole row'
+lines = raw.decode().split('\r\n')
+assert lines[0].startswith('# Alientek DM40A, fw-rs ') and ', function DC V, range AUTO 6 V, started uptime 5.000 s' in lines[0], lines[0]
+assert lines[1].startswith('# time_s = seconds since the start'), lines[1]
+rd = csv.reader(open(path, newline=''))
+rows = [r for r in rd if r and not r[0].startswith('#')]
+assert rows[0] == ['time_s', 'value', 'unit', 'flags'], rows[0]
+P = [1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3]
+num = re.compile(r'^-?(\d+(\.\d+)?|\d\.\d{5}E[+-]\d\d)$')
+prev, skipped = -1, 0
+for r in rows[1:]:
+    assert len(r) == 4, r
+    t, v, u, fl = r
+    assert re.fullmatch(r'\d+\.\d{3}', t), t
+    i = round(float(t) * 10) - 1
+    gap = i != prev + 1
+    if mode != 'gap':
+        assert not gap, (prev, r)
+    assert i > prev, (prev, r)
+    skipped += i - prev - 1
+    prev = i
+    m = (i * 7919) % 20001 - 10000
+    want = m * P[i % 13]
+    f = fl.split()
+    exp = [x for x, c in [('OL', i % 97 == 3), ('REL', i % 5 == 0), ('HOLD', i % 7 == 0), ('HI', i % 11 == 0), ('LO', i % 13 == 1)] if c]
+    if gap:
+        exp.append('GAP')
+    assert f == exp, (r, exp)
+    assert u == 'Ohm', u
+    if 'OL' in f:
+        assert v == '', r
+    else:
+        assert num.match(v), v
+        assert abs(float(v) - want) <= 2e-5 * abs(want) + 1e-30, (r, want)
+got = prev + 1
+if mode == 'full':
+    assert got == n and len(rows) - 1 == n, (got, n)
+else:
+    assert got <= n
+print('csv ok: %d rows (last index %d, %d skipped)' % (len(rows) - 1, prev, skipped))
+PY
+}
+# cutok <img>: fsck may only report what a cut between the FAT and the
+# directory leaves (FAT 1 ahead, a lost cluster, a LOG chain longer than its size).
+cutok() {
+    local rc=0
+    fsck.fat -n $1 > $W/fsck.out 2>&1 || rc=$?
+    [ $rc -le 1 ] || { cat $W/fsck.out; echo "FAIL: fsck rc=$rc"; exit 1; }   # 1 = findings, checked below
+    if grep -vE "^fsck.fat|files, .*clusters|^$|Leaving filesystem unchanged|FATs differ but appear to be intact|Using first FAT|Reclaimed [0-9]+ unused clusters?|^/LOG[0-9]{3}\.CSV$|File size is [0-9]+ bytes, cluster chain length is > [0-9]+ bytes|Truncating file to [0-9]+ bytes" $W/fsck.out | grep -q .; then
+        cat $W/fsck.out; echo "FAIL: unexpected fsck finding ${CUTK:-}"; exit 1
+    fi
+}
+IMGC=$W/diskc.img
+mkimg $IMGC
+mcopy -i $IMGC $W/keep.bin ::CONFIG.BIN
+cp $IMGC $W/csvbase.img
+"$W/t" $IMGC csv rec 3000 | tee $W/c1
+grep -q "csv=Done file=Some(0) rows=3000 bytes=76028 committed=76028 dropped=0 medium_changed=true result=true" $W/c1 && echo "ok: 3000 rows recorded and committed as LOG000.CSV" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "LOG:CSV? -> 3,0,3000,76028,76028,0" $W/c1 && echo "ok: LOG:CSV? reply" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "session_flag=false" $W/c1 && grep -q "data_max_per_block=1 " $W/c1 && echo "ok: host writes allowed again; no data block erased twice (tail rewrites program-only)" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "erases: fat=38 root=20 data=19" $W/c1 && echo "ok: 20 commits = 20 root erases, 19 clusters = 2 x 19 FAT erases" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGC
+csvok $IMGC LOG000.CSV 3000 full
+[ "$(mdir -i $IMGC :: | grep LOG000 | awk '{print $3}')" = 76028 ] && echo "ok: directory size 76028" || { echo "FAIL at line $LINENO"; exit 1; }
+mcopy -n -i $IMGC ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.BIN untouched" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGC csv rec 50 | grep -q "csv=Done file=Some(1) rows=50" && echo "ok: next recording is LOG001.CSV" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGC
+csvok $IMGC LOG001.CSV 50 full
+csvok $IMGC LOG000.CSV 3000 full
+
+echo "--- interleaved with screenshots"
+IMGS=$W/disks.img
+cp $W/csvbase.img $IMGS
+"$W/t" $IMGS csv rec 3000 shot 10 shotw 1000 shot 2400 | tee $W/c2
+grep -q "csv=Done file=Some(0) rows=3000 bytes=76028 committed=76028 dropped=0" $W/c2 && grep -q "shots=\[Saved(0), Saved(1), Saved(2)\]" $W/c2 && grep -q "lock_ok=true" $W/c2 && echo "ok: three screenshots during the recording, no commit started during a shot" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "during a commit: true" $W/c2 && grep -qE "shot_waits=[1-9]" $W/c2 && echo "ok: a shot started during a commit waited for it before its FAT scan" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGS
+csvok $IMGS LOG000.CSV 3000 full
+bmpok $IMGS S000.BMP
+bmpok $IMGS S001.BMP
+bmpok $IMGS S002.BMP
+
+echo "--- host write in progress"
+IMGH=$W/diskh.img
+cp $W/csvbase.img $IMGH
+"$W/t" $IMGH csv rec 2000 host 300 120 | tee $W/c3
+grep -q "csv=Done file=Some(0) rows=2000 .* dropped=0" $W/c3 && grep -q "host_writes=0 " $W/c3 && echo "ok: 12 s host write: no block written meanwhile, nothing dropped" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGH
+csvok $IMGH LOG000.CSV 2000 full
+cp $W/csvbase.img $IMGH
+"$W/t" $IMGH csv rec 2000 host 300 600 | tee $W/c4
+grep -q "csv=Done file=Some(0) .* dropped=[1-9]" $W/c4 && grep -q "host_writes=0 " $W/c4 && echo "ok: 60 s host write: FIFO overflow, rows dropped and counted, nothing written meanwhile" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGH
+csvok $IMGH LOG000.CSV 2000 gap | tee $W/c4p
+grep -qE "[1-9][0-9]* skipped" $W/c4p && echo "ok: the row after the gap carries GAP" || { echo "FAIL at line $LINENO"; exit 1; }
+
+echo "--- chain across the FAT 1 block boundary (clusters 2045..2048: link in block 0 written last)"
+IMGB=$W/diskb.img
+cp $W/csvbase.img $IMGB
+head -c $(( 2040 * 4096 )) /dev/zero > $W/fill
+mcopy -i $IMGB $W/fill ::FILL.DAT
+cp $IMGB $W/fatbase.img
+"$W/t" $IMGB csv rec 500 | tee $W/c6
+grep -q "csv=Done file=Some(0) rows=500 " $W/c6 && echo "ok: recorded across the FAT block boundary" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGB
+csvok $IMGB LOG000.CSV 500 full
+python3 -I - $IMGB <<'PY' || { echo "FAIL at line $LINENO: chain"; exit 1; }
+import struct, sys
+d = open(sys.argv[1], 'rb').read()
+rsvd, nf, fsz, rootn = struct.unpack_from('<H', d, 0x0E)[0], d[0x10], struct.unpack_from('<H', d, 0x16)[0], struct.unpack_from('<H', d, 0x11)[0]
+root = (rsvd + nf * fsz) * 4096
+for i in range(rootn):
+    e = d[root + 32 * i: root + 32 * i + 32]
+    if e[:11] == b'LOG000  CSV':
+        c, chain = struct.unpack_from('<H', e, 0x1A)[0], []
+        while c < 0xFFF8:
+            chain.append(c); c = struct.unpack_from('<H', d, rsvd * 4096 + 2 * c)[0]
+        print('chain', chain)
+        assert chain[0] < 2048 <= chain[-1], chain
+        break
+else:
+    sys.exit(1)
+PY
+
+# cutsweep <base> <rows>: power cut before every block write (and a
+# program-only write cut half way) of a recording on a copy of <base>.
+cutsweep() {
+    cp $1 $W/cut0.img
+    NW=$("$W/t" $W/cut0.img csv rec $2 | grep -oE "^  writes=[0-9]+" | cut -d= -f2)
+    echo "uncut: $NW block writes"
+    prevc=0
+    for k in $(seq 0 $NW); do
+        CUTK="(cut $k)"
+        cp $1 $W/cut.img
+        "$W/t" $W/cut.img csv rec $2 cut $k > $W/cr
+        cutok $W/cut.img
+        if mdir -i $W/cut.img :: | grep -q LOG000; then
+            csvok $W/cut.img LOG000.CSV $2 prefix > $W/cp || { cat $W/cp; echo "FAIL: cut $k"; exit 1; }
+            c=$(mdir -i $W/cut.img :: | grep LOG000 | awk '{print $3}')
+        else
+            c=0
+        fi
+        [ $c -ge $prevc ] || { echo "FAIL: cut $k: committed size went down"; exit 1; }
+        prevc=$c
+        mcopy -n -i $W/cut.img ::CONFIG.BIN $W/o && cmp -s $W/o $W/keep.bin || { echo "FAIL: cut $k: CONFIG.BIN"; exit 1; }
+        cp $1 $W/cut.img
+        "$W/t" $W/cut.img csv rec $2 cut $k half > $W/cr
+        cutok $W/cut.img
+        if mdir -i $W/cut.img :: | grep -q LOG000; then
+            csvok $W/cut.img LOG000.CSV $2 prefix > $W/cp || { cat $W/cp; echo "FAIL: cut $k half"; exit 1; }
+        fi
+    done
+    CUTK=
+    echo "ok: $((NW + 1)) cut points x 2: fsck only lost / excess clusters or FAT 1 ahead, committed CSV always a clean prefix, never shrinking"
+}
+echo "--- power cut before every block write"
+cutsweep $W/csvbase.img 1500
+echo "--- power cut before every block write, chain across the FAT block boundary"
+cutsweep $W/fatbase.img 500
+
+echo "--- nearly full disk"
+IMGF=$W/diskf.img
+cp $W/csvbase.img $IMGF
+FREE=$(fsck.fat -n $IMGF | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}')
+head -c $(( (FREE - 5) * 4096 )) /dev/zero > $W/fill
+mcopy -i $IMGF $W/fill ::FILL.DAT
+"$W/t" $IMGF csv rec 3000 | tee $W/c5
+grep -q "csv=Full file=Some(0)" $W/c5 && echo "ok: disk full ends the recording (Full)" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGF
+csvok $IMGF LOG000.CSV 3000 prefix
+SZ=$(mdir -i $IMGF :: | grep LOG000 | awk '{print $3}')
+[ $SZ -gt $((20480 - 96)) ] && [ $SZ -le 20480 ] && echo "ok: the 5 free clusters filled, size cut back to the last whole row ($SZ bytes)" || { echo "FAIL at line $LINENO"; exit 1; }
+
+echo "--- gallery"
+mcopy -i $IMGS $W/keep.bin "::Log_with_a_long_name.csv"
+mdir -i $IMGS ::
+"$W/t" $IMGS csv list | tee $W/g1
+grep -q "list n=5 total=5" $W/g1 && grep -q "  LOG000.CSV 76028 Csv" $W/g1 && grep -q "  S001.BMP 307266 Bmp" $W/g1 && grep -q "  LOG_WI~1.CSV 9000 Csv" $W/g1 && grep -q "changed blocks: \[\]" $W/g1 && echo "ok: list: 3 BMP + 2 CSV with sizes, CONFIG.BIN not listed, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
+F0=$(grep -o "free=[0-9]*" $W/g1 | cut -d= -f2)
+"$W/t" $IMGS csv cat | tee $W/g0
+grep -qx "cat=$((16740352 - F0)),$F0,\"LOG000.CSV,ASC,76028\",\"S000.BMP,BIN,307266\",\"S001.BMP,BIN,307266\",\"S002.BMP,BIN,307266\",\"LOG_WI~1.CSV,ASC,9000\"" $W/g0 && echo "ok: MMEM:CAT? text" || { echo "FAIL at line $LINENO"; exit 1; }
+[ $F0 = $(( $(fsck.fat -n $IMGS | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}') * 4096 )) ] && echo "ok: free bytes = fsck free clusters" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGS csv del LOG000.CSV | tee $W/g2
+grep -q "del=Ok(())" $W/g2 && grep -q "free=$((F0 + 19 * 4096)) " $W/g2 && echo "ok: LOG000.CSV deleted, its 19 clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGS
+"$W/t" $IMGS csv del log_wi~1.csv | grep -q "del=Ok(())" && echo "ok: long-named file deleted" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGS
+mdir -i $IMGS :: | grep -qi "long_name" && { echo "FAIL at line $LINENO: long name left"; exit 1; }
+"$W/t" $IMGS csv del S001.BMP | grep -q "del=Ok(())" && echo "ok: S001.BMP deleted" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGS csv del S001.BMP | grep -q "del=Err(NotFound)" && echo "ok: second delete = NotFound" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGS csv del CONFIG.BIN | grep -q "del=Err(NotFound)" && echo "ok: CONFIG.BIN is not a gallery file" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGS
+bmpok $IMGS S000.BMP
+bmpok $IMGS S002.BMP
+mcopy -n -i $IMGS ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.BIN untouched" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGS csv rec 1200 del 300 S002.BMP | tee $W/g4
+grep -q "gallery delete at row 3[0-9][0-9]: Ok(())" $W/g4 && grep -q "csv=Done file=Some(0) rows=1200 " $W/g4 && echo "ok: S002.BMP deleted from the gallery between two commits of a recording" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGS
+csvok $IMGS LOG000.CSV 1200 full
+mdir -i $IMGS :: | grep -q "^S002" && { echo "FAIL at line $LINENO"; exit 1; }
+bmpok $IMGS S000.BMP
+mdel -i $IMGS ::LOG000.CSV
+"$W/t" $IMGS csv busydel | tee $W/g3
+grep -q "busydel LOG000.CSV -> Err(Busy)" $W/g3 && grep -q "then del -> Ok(())" $W/g3 && echo "ok: the file being recorded cannot be deleted; after stop it can" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGS
+mdir -i $IMGS ::
 echo PASS

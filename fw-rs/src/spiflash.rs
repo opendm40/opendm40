@@ -75,10 +75,16 @@ const CMD_JEDEC_ID: u8 = 0x9F;
 
 const SECTOR: usize = 4096;
 const PAGE: usize = 256;
-/// RDSR polls before giving up (stock: 1e6 at 3.125 MHz; here ~0.7 us per
-/// poll at 12.5 MHz, ~2.8 s, or ~11 s if the self-check kept /16; tSE max
-/// 400 ms).
+/// Longest BUSY wait of `wait_ready` (cycles, 1 s at 200 MHz; tSE max
+/// 400 ms), whatever the SPI clock (review 258c833 L2: a poll count meant
+/// ~11 s of stall on a dead chip at the /16 fallback).
+const BUSY_CYC: u32 = crate::clock::HCLK_HZ;
+/// Backstop in RDSR polls in case the DWT cycle counter is not running
+/// (~2.8 s at /4, ~11 s at /16).
 const BUSY_POLLS: u32 = 4_000_000;
+/// `new`: longest wait for an erase / program left running by a reset
+/// (cycles, 500 ms; tSE max 400 ms) before the JEDEC ID is read.
+const BOOT_BUSY_CYC: u32 = crate::clock::HCLK_HZ / 2;
 /// `write_step`: CPU time per call (cycles, 2 ms at 200 MHz) and the longest
 /// wait for one erase / page program before the chip counts as failed (1 s;
 /// tSE max 400 ms, tPP max 3 ms).
@@ -271,6 +277,23 @@ impl SpiFlash {
         // /16 for the ID (and the self-check); /4 only once checked.
         spi_config(CTL0_SLOW);
 
+        // A reset (DBG:RESET, the watchdog) can land while the chip runs a
+        // 4 KiB erase (up to 400 ms; it does not stop on a CPU reset), and a
+        // busy chip ignores 9Fh: the ID would read as no chip and the disk
+        // stay absent for the whole session (review 258c833 L1). So wait for
+        // WIP to clear first, at most 500 ms, unless an earlier instance
+        // already found no chip.
+        if CLOCK.load(core::sync::atomic::Ordering::Relaxed) != ClockCheck::NoChip as u8 {
+            let t0 = cyc();
+            let mut n = 0u32;
+            while Self::busy() && cyc().wrapping_sub(t0) < BOOT_BUSY_CYC && n < BUSY_POLLS {
+                n += 1;
+                if n & 0x3FF == 0 {
+                    wdt::kick_if_feeding();
+                }
+            }
+        }
+
         cs(true);
         xfer(CMD_JEDEC_ID);
         let id = (xfer(0xFF) as u32) << 16 | (xfer(0xFF) as u32) << 8 | xfer(0xFF) as u32;
@@ -306,13 +329,14 @@ impl SpiFlash {
         }
         cs(true);
         xfer(CMD_RDSR1);
+        let t0 = cyc();
         let mut n = 0;
         while xfer(0xFF) & 1 != 0 {
             n += 1;
             if n & 0x3FF == 0 {
                 wdt::kick_if_feeding();
             }
-            if n >= BUSY_POLLS {
+            if n >= BUSY_POLLS || cyc().wrapping_sub(t0) > BUSY_CYC {
                 self.failed = true;
                 break;
             }
