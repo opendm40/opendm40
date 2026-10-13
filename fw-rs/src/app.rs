@@ -3,8 +3,10 @@
 //! menu, the bottom row holds the per-view buttons.
 //!
 //! Side keys (touch controller key codes 0..3, stock events 0x10 << code):
-//!   0 MENU: menu.  1 RUN: DMM HOLD / scope run-stop.
-//!   2 AUTO: DMM auto range / scope single re-arm.  3 MF: DMM REL toggle.
+//!   0 MENU: menu.  1 RUN: DMM HOLD / scope run-stop; in the DMM views held
+//!   for RUN_LONG_MS = AutoHold on/off (FR-01).
+//!   2 AUTO: DMM auto range / scope auto-set.  3 MF: DMM range page (Hold &
+//!   Limits page where the function has no range page).
 //! Power key PD6: double click = touch / key lock, click while locked = DMM
 //! sub-mode cycle, hold 1.5 s = power off (see tick()).
 
@@ -27,6 +29,25 @@ const OFF_TXT: [&str; 4] = ["10 min", "30 min", "1 hour", "Never"];
 const START: [View; 4] = [View::Dmm, View::Scope, View::Gen, View::Menu];
 const TIM14: u32 = 0x4000_2000;
 const BUZZER_ARR: u32 = 11200;
+/// RUN held this long in a DMM view toggles AutoHold (the short press keeps
+/// toggling HOLD at key-down, so HOLD has no added latency; the long press
+/// then undoes that HOLD).
+const RUN_LONG_MS: u64 = 1000;
+
+/// Menu-like pages (not instrument views): no view swipe, MENU steps back.
+fn is_page(v: View) -> bool {
+    matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device | View::Limits)
+}
+
+/// Unit text the keypad's TEXT22 font can show (no deg / micro glyphs).
+fn kp_unit_text(u: &'static str) -> &'static str {
+    match u {
+        "\u{b0}C" => "C",
+        "\u{b5}A" => "uA",
+        "\u{b5}F" => "uF",
+        u => u,
+    }
+}
 
 pub struct App {
     pub dmm: Dmm,
@@ -100,11 +121,21 @@ pub struct App {
     hist_n: usize,
     hist_new: usize,
     hv_shown: bool,
-    /// HOLD state as last painted to the DMM status label; a mismatch with
-    /// `meter.hold` means the label (and the frozen value) need a repaint.
-    /// Compared in tick() so a toggle from the side key OR a BT command both
-    /// repaint, without a full static redraw (there is no framebuffer).
-    hold_shown: bool,
+    /// HOLD state (Meter::hold_state) | limit verdict << 8 as last painted
+    /// to the DMM status label / limit badge; a mismatch means the label (and
+    /// the frozen value) need a repaint. Compared in tick() so a toggle from
+    /// the side key, a BT command or a limit change from SCPI repaint without
+    /// a full static redraw (no framebuffer).
+    hold_shown: u16,
+    /// Time of the last tick (ms), for the reading path (AutoHold windows).
+    now: u64,
+    /// RUN key went down at this time in a DMM view, not released yet
+    /// (long press = AutoHold toggle, see RUN_LONG_MS).
+    run_down: Option<u64>,
+    /// Limits keypad: the display unit the typed value is in.
+    kp_unit: &'static str,
+    /// Last limit-fail beep (rate limit for a reading that hovers at a limit).
+    fail_beep_at: u64,
     pub meas: [f32; 4],
     beep_until: u64,
     pub last_raw: Option<Reading>,
@@ -262,7 +293,11 @@ impl App {
             hist_n: 0,
             hist_new: 0,
             hv_shown: false,
-            hold_shown: false,
+            hold_shown: 0,
+            now: 0,
+            run_down: None,
+            kp_unit: "",
+            fail_beep_at: 0,
             meas: [0.0; 4],
             pd6_armed: false,
             pd6_off: false,
@@ -307,7 +342,7 @@ impl App {
     }
 
     fn show(&mut self, v: View, clk: &mut Clock) {
-        if matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device) && !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device) {
+        if is_page(v) && !is_page(self.view) {
             self.back_view = self.view;
         }
         if matches!(v, View::Dmm | View::DmmScope | View::Scope | View::Gen) {
@@ -333,6 +368,8 @@ impl App {
         let (mut d, mut s) = match self.view {
             View::Dmm => (true, false),
             View::DmmScope => (true, true),
+            // The limits keypad is a DMM page: keep the rails as they are.
+            View::Keypad if self.kp_target >= 3 => (self.scope.dmm_rail(), self.scope.powered()),
             View::Scope | View::Gen | View::ScopeMenu | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
@@ -381,12 +418,17 @@ impl App {
             }
             View::Gen => ui::gen_static(&self.gen),
             View::Keypad => {
-                ui::gen_static(&self.gen);
+                if self.kp_target >= 3 {
+                    self.limits_page();
+                } else {
+                    ui::gen_static(&self.gen);
+                }
                 let (title, unit) = self.kp_labels();
                 let n = self.kp_n;
                 let t = core::str::from_utf8(&self.kp_buf[..n]).unwrap_or("");
-                ui::keypad(self.kp_target == 0, title, t, unit);
+                ui::keypad(self.kp_kind(), title, t, unit);
             }
+            View::Limits => self.limits_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => {
                 // Temperature: sensor, its offset, an info line.
@@ -504,7 +546,81 @@ impl App {
             }
         }
         if let (Some(r), true) = (self.meter.shown().copied(), matches!(self.view, View::Dmm | View::DmmScope)) {
-            self.dmm_view.reading(&r, self.meter.hold, self.meter.rel_active(), self.view == View::DmmScope);
+            self.dmm_view.reading(&r, self.meter.hold_state(), self.meter.verdict(), self.view == View::DmmScope);
+        }
+    }
+
+    /// The display unit for limits of the current function: the live
+    /// reading's (if it is this function), else the base unit.
+    fn lim_unit(&self) -> &'static str {
+        let f = self.dmm.func();
+        match self.last_raw {
+            Some(r) if crate::meter::func_of(&r) == f => r.main.unit,
+            _ => match crate::meter::lim_slot(f) {
+                0 | 1 | 5 => "V",
+                2 | 3 => "A",
+                4 => "\u{3a9}",
+                6 => "nF",
+                7 => "Hz",
+                _ => "\u{b0}C",
+            },
+        }
+    }
+
+    /// View::Limits: AutoHold and the limits of the current function.
+    fn limits_page(&self) {
+        let slot = crate::meter::lim_slot(self.dmm.func());
+        let l = self.meter.lim[slot];
+        let unit = self.lim_unit();
+        let dec = match self.last_raw {
+            Some(r) if r.main.unit == unit => r.main.dec,
+            _ => 3,
+        };
+        let fmt = |b: &mut [u8; 32], v: Option<f32>| -> usize {
+            let Some(v) = v else {
+                b[..2].copy_from_slice(b"--");
+                return 2;
+            };
+            let mut t = [0u8; 16];
+            let s = dmm::format(&mut t, v / crate::meter::unit_scale(unit), dec);
+            let u = kp_unit_text(unit);
+            let mut n = 0;
+            for part in [s.as_bytes(), b" ", u.as_bytes()] {
+                let k = part.len().min(32 - n);
+                b[n..n + k].copy_from_slice(&part[..k]);
+                n += k;
+            }
+            n
+        };
+        let (mut hb, mut lb) = ([0u8; 32], [0u8; 32]);
+        let hn = fmt(&mut hb, l.hi);
+        let ln = fmt(&mut lb, l.lo);
+        let onoff = |b: bool| if b { "ON" } else { "OFF" };
+        let vals: [&str; 8] = [
+            onoff(self.meter.ahold),
+            onoff(l.on),
+            core::str::from_utf8(&hb[..hn]).unwrap_or(""),
+            core::str::from_utf8(&lb[..ln]).unwrap_or(""),
+            "",
+            "",
+            "",
+            onoff(self.meter.lim_beep),
+        ];
+        let mut t = [0u8; 32];
+        let pre = b"Hold & Limits: ";
+        t[..pre.len()].copy_from_slice(pre);
+        let name = crate::meter::LIM_NAMES[slot].as_bytes();
+        t[pre.len()..pre.len() + name.len()].copy_from_slice(name);
+        let title = core::str::from_utf8(&t[..pre.len() + name.len()]).unwrap_or("");
+        ui::list_page(title, &ui::LIMIT_ROWS, &vals);
+    }
+
+    /// Keypad kind for the current target (ui::KP_*).
+    fn kp_kind(&self) -> u8 {
+        match self.kp_target {
+            0 => ui::KP_FREQ,
+            1 | 2 => ui::KP_NUM,
+            _ => ui::KP_SIGNED,
         }
     }
 
@@ -526,6 +642,7 @@ impl App {
     /// stops, with unread records in the ring.
     pub fn tick(&mut self, clk: &mut Clock, can_draw: bool) {
         let now = clk.now_ms();
+        self.now = now;
         if self.beep_until != 0 && now >= self.beep_until {
             buzzer(false, self.volume);
             self.beep_until = 0;
@@ -549,8 +666,20 @@ impl App {
             self.dimmed = true;
             backlight(5);
         }
-        if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] {
+        // No idle shutdown during a MIN/MAX/AVG recording session (FR-02;
+        // started explicitly, see Stats::rec). Dimming still applies.
+        if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] && !self.meter.stats.rec {
             power_off();
+        }
+        // RUN held in a DMM view: AutoHold on/off. The key-down already
+        // toggled HOLD; set_ahold releases it again.
+        if self.run_down.is_some_and(|t| now.saturating_sub(t) >= RUN_LONG_MS) {
+            self.run_down = None;
+            let on = !self.meter.ahold;
+            self.meter.set_ahold(on);
+            self.dmm_view.invalidate();
+            self.beep(now, if on { 200 } else { 60 });
+            self.redraw |= self.view == View::Limits;
         }
         // Power key PD6, as the stock (pressed = 1, pull-down; boot.rs
         // PD6_PRESSED_HIGH): press = activity (backlight back, FUN_08020248);
@@ -628,8 +757,8 @@ impl App {
             self.status_next = 0;
             self.chart_dirty = true;
             // draw_static() repaints the DMM reading (shown value + HOLD/RUN
-            // label) from meter.hold, so the label now matches.
-            self.hold_shown = self.meter.hold;
+            // label) from the meter, so the label now matches.
+            self.hold_shown = self.shown_state();
         }
         if self.shot_req {
             self.shot_req = false;
@@ -640,11 +769,11 @@ impl App {
         // not drive here)? The reading loop skips drawing while held
         // (meter.update returns None), so repaint the frozen value and the
         // HOLD/RUN label now instead of waiting for a reading that never comes.
-        if self.hold_shown != self.meter.hold {
-            self.hold_shown = self.meter.hold;
+        if self.hold_shown != self.shown_state() {
+            self.hold_shown = self.shown_state();
             if matches!(self.view, View::Dmm | View::DmmScope) {
                 if let Some(r) = self.meter.shown().copied() {
-                    self.dmm_view.reading(&r, self.meter.hold, self.meter.rel_active(), self.view == View::DmmScope);
+                    self.dmm_view.reading(&r, self.meter.hold_state(), self.meter.verdict(), self.view == View::DmmScope);
                 }
             }
         }
@@ -667,11 +796,12 @@ impl App {
             }
         }
         // Strip chart point. Gated with the drawing: while logging the DMM
-        // poll is suspended, so meter.shown() is stale and would fill the
-        // chart with a flat line.
+        // poll is suspended, so the reading is stale and would fill the
+        // chart with a flat line. The live value: the chart keeps running
+        // while AutoHold freezes the readout (not in a manual HOLD).
         if now >= self.chart_next {
             self.chart_next = now + self.chart_rate as u64 * 10;
-            if let Some(r) = self.meter.shown().copied() {
+            if let Some(r) = self.meter.live().copied() {
                 if !self.meter.hold && !r.main.ol {
                     if r.main.unit != self.chart_unit {
                         self.chart_unit = r.main.unit;
@@ -693,17 +823,22 @@ impl App {
         // Redraw the chart for every new point (stock: 10/20/40 ms per point).
         if self.chart_dirty && self.view == View::Dmm {
             self.chart_dirty = false;
-            ui::chart(
-                &mut self.chart_cache,
-                &self.chart[..self.chart_n],
-                self.chart_dec,
-                self.chart_rate,
-                self.meter.max,
-                self.meter.min,
-                self.meter.rel_value(),
-                self.chart_unit,
-            );
+            let st = self.meter.stats_disp();
+            let side = ui::Side {
+                max: st.map(|s| s.1),
+                avg: st.map(|s| s.2),
+                min: st.map(|s| s.0),
+                rel: self.meter.rel_value(),
+                secs: self.meter.stats.secs(now),
+                rec: self.meter.stats.rec,
+            };
+            ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, &side, self.chart_unit);
         }
+    }
+
+    /// What the DMM status label and limit badge show (see `hold_shown`).
+    fn shown_state(&self) -> u16 {
+        self.meter.hold_state() as u16 | (self.meter.verdict() as u16) << 8
     }
 
     /// Make sure the DMM side is powered (SCPI / BT measurement requests).
@@ -745,13 +880,29 @@ impl App {
                 _ => "Hz",
             }),
             1 => ("Vpp", "V"),
-            _ => ("Duty", "%"),
+            2 => ("Duty", "%"),
+            3 => ("Upper", kp_unit_text(self.kp_unit)),
+            _ => ("Lower", kp_unit_text(self.kp_unit)),
         }
     }
 
     fn kp_apply(&mut self) {
         let n = self.kp_n;
         let Some(v) = crate::scpi::parse_num(&self.kp_buf[..n]) else { return };
+        if self.kp_target >= 3 {
+            // DMM limit, typed in the unit shown on the keypad; stored SI.
+            // Setting a limit turns the check on.
+            let si = v * crate::meter::unit_scale(self.kp_unit);
+            let l = &mut self.meter.lim[crate::meter::lim_slot(self.dmm.func())];
+            if self.kp_target == 3 {
+                l.hi = Some(si);
+            } else {
+                l.lo = Some(si);
+            }
+            l.on = true;
+            self.meter.recheck();
+            return;
+        }
         let mut st = self.gen.s;
         match self.kp_target {
             0 => {
@@ -804,6 +955,19 @@ impl App {
         let (r25, b) = self.dmm.ntc_user();
         p[16] = r25.to_bits();
         p[17] = b.to_bits();
+        // v4 words (0 = default everywhere): p[18] bit 0 AutoHold on, bit 1
+        // limit fail beep OFF, bits 8..16 limits checked per slot
+        // (meter::lim_slot); p[19] bits 0..8 lower limit set, bits 16..24
+        // upper limit set; p[20 + 2 i] / p[21 + 2 i] lower / upper limit of
+        // slot i (f32 bits, SI). p[38..39] spare.
+        let m = &self.meter;
+        p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1;
+        for (i, l) in m.lim.iter().enumerate() {
+            p[18] |= (l.on as u32) << (8 + i);
+            p[19] |= (l.lo.is_some() as u32) << i | (l.hi.is_some() as u32) << (16 + i);
+            p[20 + 2 * i] = l.lo.unwrap_or(0.0).to_bits();
+            p[21 + 2 * i] = l.hi.unwrap_or(0.0).to_bits();
+        }
         p
     }
 
@@ -829,6 +993,16 @@ impl App {
         self.dmm.set_t_offs_raw(o);
         if p[16] != 0 {
             self.dmm.set_ntc_user(f32::from_bits(p[16]), f32::from_bits(p[17]));
+        }
+        // v4: AutoHold, limits (all zero in older records = off / unset).
+        let m = &mut self.meter;
+        m.ahold = p[18] & 1 != 0;
+        m.lim_beep = p[18] & 2 == 0;
+        for (i, l) in m.lim.iter_mut().enumerate() {
+            let f = |w: u32, set: bool| Some(f32::from_bits(w)).filter(|v| set && v.is_finite());
+            l.on = p[18] >> (8 + i) & 1 != 0;
+            l.lo = f(p[20 + 2 * i], p[19] >> i & 1 != 0);
+            l.hi = f(p[21 + 2 * i], p[19] >> (16 + i) & 1 != 0);
         }
         // Sensor and autorange flags before the mode, so a restored mode
         // enters with them.
@@ -861,7 +1035,7 @@ impl App {
         self.cursors_from_selection();
     }
 
-    /// Save the settings now and then (cheap: 18 words of backup SRAM).
+    /// Save the settings now and then (cheap: 40 words of backup SRAM).
     pub fn persist(&mut self, now: u64) {
         if now >= self.persist_next {
             self.persist_next = now + 2000;
@@ -990,20 +1164,40 @@ impl App {
         if self.dmm.hy_mode() == 15 { Some(ui::T_LABELS[self.dmm.t_sensor() as usize]) } else { None }
     }
 
-    /// New DMM reading (always measured, whatever the view).
+    /// New DMM reading (always measured, whatever the view). Returns the
+    /// live reading (REL applied) for SCPI READ? / MEAS?, also while HOLD or
+    /// AutoHold freeze the readout (before, a HOLD made READ? wait forever).
     pub fn reading(&mut self, raw: Reading, can_draw: bool) -> Option<Reading> {
         self.last_raw = Some(raw);
         self.dmm_view.label = self.t_label();
-        let r = self.meter.update(&raw)?;
-        if can_draw && !self.redraw && matches!(self.view, View::Dmm | View::DmmScope) {
-            self.dmm_view.reading(&r, self.meter.hold, self.meter.rel_active(), self.view == View::DmmScope);
-            let hv = self.view == View::Dmm && r.mode <= 1 && !r.main.ol && r.si.abs() >= 100.0;
+        let now = self.now;
+        let u = self.meter.update(&raw, now);
+        let dmm_view = can_draw && !self.redraw && matches!(self.view, View::Dmm | View::DmmScope);
+        if let (Some(r), true) = (u.show, dmm_view) {
+            self.dmm_view.reading(&r, self.meter.hold_state(), self.meter.verdict(), self.view == View::DmmScope);
+            self.hold_shown = self.shown_state();
+        }
+        if dmm_view {
+            // HV warning on the live value: it must not be frozen by AutoHold.
+            let l = &u.live;
+            let hv = self.view == View::Dmm && l.mode <= 1 && !l.main.ol && l.si.abs() >= 100.0;
             if hv != self.hv_shown {
                 self.hv_shown = hv;
                 ui::hv_warning(hv);
             }
         }
-        Some(r)
+        // AutoHold capture: short beep; a capture that fails the limits (with
+        // the fail beep on) gets the long fail beep instead. A live value
+        // crossing out of the limits: long beep, at most once a second.
+        let fail = matches!(self.meter.verdict(), crate::meter::V_HI | crate::meter::V_LO);
+        let fail_beep = fail && self.meter.lim_beep;
+        if u.captured {
+            self.beep(now, if fail_beep { 400 } else { 80 });
+        } else if u.fail_edge && fail_beep && now >= self.fail_beep_at + 1000 {
+            self.fail_beep_at = now;
+            self.beep(now, 400);
+        }
+        Some(u.live)
     }
 
     /// Poll the scope; draws the frame in scope views.
@@ -1141,7 +1335,8 @@ impl App {
                 self.beep(now, 50);
                 self.key(clk, c);
             }
-            Gesture::SwipeLeft | Gesture::SwipeRight if !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device) => {
+            Gesture::KeyUp(1) => self.run_down = None,
+            Gesture::SwipeLeft | Gesture::SwipeRight if !is_page(self.view) => {
                 let i = View::CYCLE.iter().position(|&v| v == self.view).unwrap_or(0);
                 let n = View::CYCLE.len();
                 let j = if g == Gesture::SwipeLeft { (i + 1) % n } else { (i + n - 1) % n };
@@ -1155,6 +1350,13 @@ impl App {
                 self.hist_n = 0;
                 self.beep(now, 300);
                 ui::history(&self.hist, 0, 0);
+            }
+            Gesture::LongPress(p) if self.view == View::Dmm && p.x >= 402 && (175..279).contains(&p.y) => {
+                // MIN/MAX/AVG column (REL box included): reset the statistics
+                // (UF-35; distinct from the history-row clear above).
+                self.meter.stats.clear();
+                self.beep(now, 300);
+                self.chart_dirty = true;
             }
             Gesture::Down(p) if self.view == View::Scope => {
                 self.touch_snap = Some((self.scope.s, self.cur));
@@ -1248,7 +1450,8 @@ impl App {
                 let v = match self.view {
                     View::Device => View::Settings,
                     View::Settings => View::Menu,
-                    View::Menu | View::Range | View::ScopeMenu | View::Keypad => self.back_view,
+                    View::Keypad if self.kp_target >= 3 => View::Limits,
+                    View::Menu | View::Range | View::ScopeMenu | View::Keypad | View::Limits => self.back_view,
                     _ => View::Menu,
                 };
                 self.show(v, clk);
@@ -1268,6 +1471,9 @@ impl App {
                     let h = !self.meter.hold;
                     self.meter.set_hold(h);
                     self.dmm_view.invalidate();
+                    if matches!(self.view, View::Dmm | View::DmmScope) {
+                        self.run_down = Some(now);
+                    }
                 }
             },
             2 => match self.view {
@@ -1286,7 +1492,10 @@ impl App {
                 {
                     self.show(View::Range, clk)
                 }
-                View::Range => {
+                // No range page (continuity / diode, frequency): the Hold &
+                // Limits page.
+                View::Dmm | View::DmmScope => self.show(View::Limits, clk),
+                View::Range | View::Limits => {
                     let v = self.back_view;
                     self.show(v, clk)
                 }
@@ -1312,6 +1521,17 @@ impl App {
                 self.dmm_view.invalidate();
                 self.chart_dirty = true;
             }
+            View::Dmm if x >= 402 && (175..279).contains(&y) => {
+                // MIN/MAX/AVG column outside the REL box: start / stop a
+                // recording session. Starting clears the statistics; while it
+                // runs the idle shutdown is off (FR-02). Long press = reset.
+                let on = !self.meter.stats.rec;
+                if on {
+                    self.meter.stats.clear();
+                }
+                self.meter.stats.rec = on;
+                self.chart_dirty = true;
+            }
             View::Dmm if (153..172).contains(&y) => {
                 // History row: record the shown value (not HOLD, not OL).
                 if let Some(r) = self.meter.shown().copied() {
@@ -1331,16 +1551,35 @@ impl App {
             }
             View::Keypad => {
                 let freq = self.kp_target == 0;
-                match ui::keypad_hit(freq, x, y) {
+                let back = if self.kp_target >= 3 { View::Limits } else { View::Gen };
+                match ui::keypad_hit(self.kp_kind(), x, y) {
                     Some(b'=') => {
                         self.kp_apply();
-                        self.show(View::Gen, clk);
+                        self.show(back, clk);
                     }
                     Some(b'<') => self.kp_n = self.kp_n.saturating_sub(1),
                     Some(c @ (b'H' | b'K' | b'M')) => self.kp_mult = c,
+                    Some(b'-') => {
+                        // Sign toggle at the front.
+                        let n = self.kp_n;
+                        if self.kp_buf[..n].first() == Some(&b'-') {
+                            self.kp_buf.copy_within(1..n, 0);
+                            self.kp_n -= 1;
+                        } else if n < self.kp_buf.len() - 1 {
+                            self.kp_buf.copy_within(0..n, 1);
+                            self.kp_buf[0] = b'-';
+                            self.kp_n += 1;
+                        }
+                    }
                     Some(c) => {
-                        let max = if freq { 3 } else { 5 };
-                        if self.kp_n < max && !(c == b'.' && self.kp_buf[..self.kp_n].contains(&b'.')) {
+                        // Limits: up to 5 digits plus sign and point.
+                        let digits = self.kp_buf[..self.kp_n].iter().filter(|d| d.is_ascii_digit()).count();
+                        let ok = match self.kp_target {
+                            0 => self.kp_n < 3,
+                            1 | 2 => self.kp_n < 5,
+                            _ => c == b'.' || digits < 5,
+                        };
+                        if ok && self.kp_n < self.kp_buf.len() - 1 && !(c == b'.' && self.kp_buf[..self.kp_n].contains(&b'.')) {
                             self.kp_buf[self.kp_n] = c;
                             self.kp_n += 1;
                         }
@@ -1348,7 +1587,7 @@ impl App {
                     None => {
                         // Outside the keypad: cancel.
                         if !(x >= 224 && y >= if freq { 142 } else { 100 }) {
-                            self.show(View::Gen, clk);
+                            self.show(back, clk);
                         }
                         return;
                     }
@@ -1411,6 +1650,10 @@ impl App {
                         self.show(v, clk);
                         return;
                     }
+                    Some(254) => {
+                        self.show(View::Limits, clk);
+                        return;
+                    }
                     Some(i @ 0..=6) => {
                         if i != k {
                             self.dmm.set_t_sensor(clk, i);
@@ -1440,6 +1683,7 @@ impl App {
                         let v = self.back_view;
                         self.show(v, clk);
                     }
+                    Some(Err(4)) => self.show(View::Limits, clk),
                     Some(Err(k)) => {
                         // DC / AC / AC+DC buttons (Err 0 / 1 / 3) -> sub-mode 0 / 1 / 2.
                         let sub = if k == 3 { 2 } else { k };
@@ -1531,6 +1775,49 @@ impl App {
                 }
                 None => {}
             },
+            View::Limits => {
+                if ui::title_back_hit(y) {
+                    let v = self.back_view;
+                    self.show(v, clk);
+                    return;
+                }
+                let slot = crate::meter::lim_slot(self.dmm.func());
+                let live = self.meter.live().copied().filter(|r| !r.main.ol && crate::meter::func_of(r) == self.dmm.func());
+                let l = &mut self.meter.lim[slot];
+                match ui::list_hit(y, ui::LIMIT_ROWS.len()) {
+                    Some(0) => {
+                        let on = !self.meter.ahold;
+                        self.meter.set_ahold(on);
+                    }
+                    Some(1) => l.on = !l.on,
+                    Some(k @ (2 | 3)) => {
+                        self.kp_unit = self.lim_unit();
+                        self.kp_open(if k == 2 { 3 } else { 4 }, clk);
+                        return;
+                    }
+                    // Limit = the live (REL-applied) reading; also turns the
+                    // check on.
+                    Some(k @ (4 | 5)) => match live {
+                        Some(r) => {
+                            if k == 4 {
+                                l.hi = Some(r.si);
+                            } else {
+                                l.lo = Some(r.si);
+                            }
+                            l.on = true;
+                        }
+                        None => return,
+                    },
+                    Some(6) => {
+                        l.hi = None;
+                        l.lo = None;
+                    }
+                    Some(7) => self.meter.lim_beep = !self.meter.lim_beep,
+                    _ => return,
+                }
+                self.meter.recheck();
+                self.redraw = true;
+            }
             View::Settings => {
                 if ui::title_back_hit(y) {
                     // Tapping the title bar ("< Back") returns to the menu.
@@ -1564,6 +1851,88 @@ impl App {
         }
         let _ = dmm::button_of;
     }
+}
+
+/// FR-01 / FR-02 / FR-06 host interface for SCPI CALC:... (the command
+/// parsing lives in scpi.rs; allowed unused until it is wired there).
+#[allow(dead_code)]
+impl App {
+    /// CALC:AHOLD ON|OFF / CALC:AHOLD?
+    pub fn set_ahold(&mut self, on: bool) {
+        self.meter.set_ahold(on);
+        self.redraw |= self.view == View::Limits;
+    }
+
+    pub fn ahold(&self) -> bool {
+        self.meter.ahold
+    }
+
+    /// CALC:AVER:MIN? / MAX? / AVER? / COUNt?: (min, max, avg) in SI of
+    /// the current function and the sample count; None before a sample.
+    pub fn stats(&self) -> (Option<(f32, f32, f32)>, u32) {
+        (self.meter.stats.si(), self.meter.stats.n)
+    }
+
+    /// CALC:AVER:CLEar (keeps a running recording session).
+    pub fn stats_clear(&mut self) {
+        self.meter.stats.clear();
+        self.chart_dirty = true;
+    }
+
+    /// CALC:AVER:STATe ON|OFF: recording session (no idle shutdown); ON
+    /// restarts the statistics as the touch control does.
+    pub fn set_stats_rec(&mut self, on: bool) {
+        if on && !self.meter.stats.rec {
+            self.meter.stats.clear();
+        }
+        self.meter.stats.rec = on;
+        self.chart_dirty = true;
+    }
+
+    pub fn stats_rec(&self) -> bool {
+        self.meter.stats.rec
+    }
+
+    /// CALC:LIM:UPP / LOW <v> (SI) for the current function; None clears
+    /// it. Setting a limit turns the check on (as on the touch page).
+    pub fn set_limit(&mut self, upper: bool, v: Option<f32>) {
+        let l = &mut self.meter.lim[crate::meter::lim_slot(self.dmm.func())];
+        let v = v.filter(|x| x.is_finite());
+        if upper {
+            l.hi = v;
+        } else {
+            l.lo = v;
+        }
+        l.on |= v.is_some();
+        self.meter.recheck();
+        self.redraw |= self.view == View::Limits;
+    }
+
+    /// CALC:LIM:UPP? / LOW? (None: not set).
+    pub fn limit(&self, upper: bool) -> Option<f32> {
+        let l = &self.meter.lim[crate::meter::lim_slot(self.dmm.func())];
+        if upper { l.hi } else { l.lo }
+    }
+
+    /// CALC:LIM:STATe ON|OFF / ?
+    pub fn set_limit_state(&mut self, on: bool) {
+        self.meter.lim[crate::meter::lim_slot(self.dmm.func())].on = on;
+        self.meter.recheck();
+        self.redraw |= self.view == View::Limits;
+    }
+
+    pub fn limit_state(&self) -> bool {
+        self.meter.lim[crate::meter::lim_slot(self.dmm.func())].on
+    }
+
+    /// CALC:LIM:FAIL?: 1 = the displayed value is outside the limits, 0
+    /// otherwise (also when no limit applies).
+    pub fn limit_fail(&self) -> bool {
+        matches!(self.meter.verdict(), crate::meter::V_HI | crate::meter::V_LO)
+    }
+}
+
+impl App {
 
     /// SCPI temperature / system commands (scpi.rs Cmd::Temp* / Sys*); None
     /// for the scope / generator commands.
