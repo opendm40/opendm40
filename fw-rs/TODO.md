@@ -334,18 +334,22 @@ Additional requirements:
       to fix the real rate/noise table (OSR 256 ~1 kHz by the formula, unverified).
 
 ## Owner hands-on feedback 2026-10-13 night (build a9d200f / experiment e0272ef)
-- [ ] Scope drag lags: while a drag is in progress freeze acquisition/redraw of new frames and only
+- [x] Scope drag lags: while a drag is in progress freeze acquisition/redraw of new frames and only
       re-render the shift of the frame already shown (column diff); resume on release. (Better than the
       stock, which restarts acquisition per drag event and blanks the trace at slow timebases.)
-- [ ] Scope trigger mode Auto works "strangely and badly" even on a square wave [analysis agent, no
+      (code done in the stock scope port, 419fd96; verify on device with DBG:PROF?)
+- [x] Scope trigger mode Auto works "strangely and badly" even on a square wave [analysis agent, no
       edits yet]; scope AUTO (autoset) also "very strange" — compare with the stock autoset.
+      (code done: position counted twice + blind 800-sample window, ff0e568; stock AUTO-set, 419fd96;
+      verify on device; hwtrig still DEFAULT_ENABLED=false)
 - [x] Temperature PT100/PT1000/NTC: show the sensor type much larger [small-items agent].  (code done; verify on device; 875d958)
 - [x] Thermocouple/temperature offset setting: slider instead of +/- buttons [small-items agent].  (code done; verify on device; 5ba89b3)
 - [ ] Buttons feel imprecise to press [touch-feel agent: press vs release, slop, hit rects, mapping,
       DBG:TOUCH? log; device test with the owner's finger].
 - [ ] DMM frequency: ~700 Hz shown as "1 kHz"? — ON HOLD until the owner confirms the actual input
       frequency (calibrator setting).
-- [ ] Pinch-to-zoom on the scope is NOT implemented yet (owner noticed): two-finger tracking with finger
+- [x] Pinch-to-zoom on the scope (code done: c470be7 tracker, 419fd96 scope page; verify on device,
+      two-finger report rate first): two-finger tracking with finger
       identity, horizontal pinch = timebase, vertical = V/div, 1-2-5 snap, value bubble; tell a pinch
       (spread changes) from the 2-finger swipe-down power-off (pair moves down). Measure two-finger
       report rate/stability first (DBG:TOUCH?). Part of the stock scope port.
