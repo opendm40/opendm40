@@ -9,6 +9,7 @@ firmware addresses).
 |-------|-------|--------------|---------------------------|
 | `build-memrw/dm40_patched.bin` | `make BUILD=build-memrw SRCS="src/startup.c src/memrw.c"` | BT cmd 0x0B sub 0/1/2 (mem read/write/call) | none (one `bl` hook) |
 | `build-dbg/dm40_dbg.bin` | `make dbg` | memrw **plus** LCD screenshot read-back (sub 3/4) | none (same one `bl` hook) |
+| `build-dbg/dm40_dbgscope.bin` | `make dbg-scope` | dm40_dbg **plus** a scope-page hook: screenshots + touch/key injection on the scope page (armed over BT) | one scope-page hook, **flag-guarded and bit-identical to stock when disarmed** |
 
 The plain memrw image is the proven-safe fallback and is kept **byte-identical**
 (sha256 `2e8bab1395dd16dfc85bfad2b0766ce315e3ac27a19c7a60761707f161606290`). The
@@ -74,7 +75,22 @@ Decoded-body diff (`firmware/dm40fw.py`), flash addresses:
 (`0x0807d034 …`); the two hook sites are byte-identical, so the two images
 share the exact same modifications to the stock code.
 
-## Recovery (both images)
+## Installing a debug image from the current state
+
+The meter currently runs the plain memrw stock app. To install
+`dm40_dbg.bin` or `dm40_dbgscope.bin`:
+
+1. On the meter: Settings → Other Settings → **USB Connect** (it appears as a
+   USB disk).
+2. Copy **exactly one** `dm40*.bin` (the chosen debug image) to that disk; make
+   sure no other `dm40*.bin` is present.
+3. **Exit USB Connect** on the meter. The stock app zeroes the loader marker at
+   `0x08008000` and resets; the FS-loader then installs the staged file
+   (`update ok`) and the app deletes it. (A cold power-cycle also works.)
+
+Keep a calibration backup first: `dm40_memrw.py dump --full`.
+
+## Recovery (all images)
 
 Neither image touches the primary bootloader (`0x08000000`) or the FS-loader
 (`0x080a0000`), so a bad main-app flash is recoverable the normal way:
@@ -125,6 +141,18 @@ to the 480×320 landscape view. If the orientation is wrong on your unit, pass
 `--driver` to see the raw driver image and `--rot/--flipx/--flipy` to correct
 it once.
 
+On `dm40_dbgscope.bin`, scope-page commands:
+
+```
+python3 -I kit/tools/dm40_stockdbg.py enable-scope     # on the DMM page
+# switch the meter to the scope page, then:
+python3 -I kit/tools/dm40_stockdbg.py shot scope.png   # ~1-2 min (poll-limited)
+python3 -I kit/tools/dm40_stockdbg.py tap 240 160
+python3 -I kit/tools/dm40_stockdbg.py drag 100 160 380 160
+python3 -I kit/tools/dm40_stockdbg.py key 1            # RUN
+python3 -I kit/tools/dm40_stockdbg.py disable-scope
+```
+
 Tests (fake device, no hardware):
 `python3 -I kit/tools/tests/test_dm40_stockdbg.py`.
 
@@ -136,39 +164,78 @@ Tests (fake device, no hardware):
   Unicorn with the stock parser/UART/LCD-read entry points stubbed, and checks
   sub 3/sub 4 framing, checksum, raw pixels, RLE round-trip and the
   `consumed`-count tiling over flat, patterned and noisy rows.
+- `tools/emu/emu_scopedbg.py` runs the **compiled** scope hook and checks the
+  disarmed bit-identity, armed injection, parser-pump and boot disarm (above).
 
-## Scope-page touch/key injection — design, NOT shipped
+## Scope-page remote debug — `dm40_dbgscope.bin` (`make dbg-scope`)
 
-The owner wants remote touch/key injection confined to the oscilloscope page.
-This is **analysed and designed but deliberately not compiled into any shipped
-image**, because it cannot be validated without the device (which is in use)
-and the no-brick requirement is paramount. Summary of the design:
+The BT parser is pumped only from the DMM page, so on the scope page no BT
+command is serviced and no injection happens. This image adds ONE hook in the
+scope page's own code path so screenshots, memory reads and touch/key injection
+work while the scope page is shown.
 
-- **Why a hook is needed**: the BT parser is pumped only from the DMM page, so
-  on the scope page no BT command (and no injection) is serviced. A scope-page
-  hook must (a) pump the parser and (b) apply injection.
-- **Hook site**: the scope poll thunk `0x080282a0` (dispatches the scope state
-  object's vtable slot 21), fired by the scope page's 100 ms timer. The scope
-  page is built by `0x080282ae`, called only from two menu-navigation sites
-  (`0x08024148`, `0x080242e6`); it is **not** reached from boot (`0x0800bbe0`)
-  or the main loop (`0x0801914e`) — verified statically — so the hook can only
-  run while the scope page is open. Boot, main menu and Settings (incl. the
-  "USB Connect" recovery path) stay 100 % stock.
-- **No-brick guard**: a one-word flag in patch RAM, zeroed by `patch_startup`
-  at the same boot point as the memrw init, so it is 0 after every reset. The
-  hook's flag==0 path executes exactly the original instruction and returns
-  (to be emulator-proven bit-identical). The parser pump and injection run only
-  when a BT command (from the DMM page, before switching to scope) sets the
-  flag; a reset clears it, so any bug in the injection path costs at most a
-  reboot.
-- **Injection mechanics**: push synthetic entries into the stock touch queue
-  (ring at `0x2002561c`, 22-byte entries; see `firmware/re/analysis/touch_v2_6.h`)
-  with tap = down then up, drag = a timed sequence, side keys via the key-report
-  bit. The host commands (`tap/drag/key/swipe` in `dm40_stockdbg.py`) already
-  emit the sub-5 request; on `dm40_dbg.bin` it is a harmless no-op.
+**Hook site** — the scope 100 ms timer dispatch thunk `0x080282a0`
+(`ldr r0,[pc,#0x354]; ldr r0,[r0]`, bytes `d5 48 00 68`), replaced by
+`b.w patch_scopepoll` (`src/scopetramp.S`). The scope page is built by
+`0x080282ae`, called only from two menu-navigation sites (`0x08024148`,
+`0x080242e6`); it is **not** reached from boot (`0x0800bbe0`) or the main loop
+(`0x0801914e`) — re-verified statically — so the hook runs only while the scope
+page is open. Boot, main menu and Settings (incl. the "USB Connect" recovery
+path) run 100 % stock.
 
-Enabling it is the recommended next step **after** on-device validation of the
-flag==0 identity (emulator) and the injection behaviour (device).
+**No-brick guard** — a MAGIC arm word (`0x5C09EDB6`) in verified-mapped SRAM0+1
+(`0x2000f100`), cleared to 0 by `patch_init()` at boot (same boot point as the
+memrw init; writes only to SRAM0+1, which is mapped and free that early). So
+after **every reset** the hook is disarmed and is a bit-identical passthrough of
+the stock thunk. The parser pump and injection run only when armed by a BT
+command (`enable-scope`, sent on the DMM page where the parser runs). A bug in
+the armed path costs at most a reboot.
+
+- **When disarmed** the trampoline reproduces the two overwritten instructions
+  (`r0 = *(*0x080285f8)`) and continues at `0x080282a4`; emulator-proven
+  bit-identical to the stock thunk (same r0..r3/sp/lr, same scope poll method,
+  **no memory writes**).
+- **When armed**, each 100 ms poll: (1) if a BT frame is ready
+  (`0x0800d5f6`, the same gate the DMM page uses) parse it into a dedicated
+  scratch frame and run the 0x0B handler — so `read`/`shot` work on the scope
+  page; (2) play one queued touch entry into the stock touch queue
+  (`0x2002561c`, 22-byte entries, see `firmware/re/analysis/touch_v2_6.h`):
+  tap = press then release, drag = a short path, key = key-report bit + code.
+- The parser runs cooperatively (the DMM-page caller cannot run while the scope
+  page is shown — single superloop), so there is no concurrent parser.
+
+**Emulator verification** (`tools/emu/emu_scopedbg.py`, runs the compiled
+image): (A) disarmed == stock thunk, bit-identical, no writes; (B) armed tap
+lands the correct two 22-byte queue entries and the real poll still runs;
+(C) the parser-pump serves a sub-3 screenshot reply on the scope page;
+(D) `patch_init` disarms at boot.
+
+**Modified ranges vs stock** — `0x080041b4` (startup, memrw-identical),
+`0x0803cec0` (DMM parser hook, memrw-identical), **`0x080282a0`** (the new
+scope hook, 4 B), and the appended blob `0x0807ce18…0x0807d3b7`. Boot path
+(vectors, reset/early init, loader marker) UNTOUCHED. vs memrw: the only new
+pre-existing-code change is the scope hook `0x080282a0`.
+
+**Workflow**: on the DMM page `enable-scope`; switch to the scope page; then
+`shot`, `read`, `tap/drag/key/swipe` operate on the scope page; a power-cycle
+disarms it.
+
+**Two residual items that need a one-time on-device check** (neither is a brick
+risk — boot path untouched, disarmed after reset, reset recovers):
+1. The arm word / injection state sits at `0x2000f100` in SRAM0+1. That address
+   is verified mapped (memrw used it) but its *freeness while the scope
+   acquisition buffers are allocated* was not verifiable statically. The MAGIC
+   arm word makes a spurious arm essentially impossible even if the region were
+   reused, but confirm on-device by reading `0x2000f100` while scoping. If it
+   is reused, relocate the struct (one `#define`).
+2. Whether the stock scope GUI accepts the synthetic touch-queue entries as a
+   tap/drag/key is unverified (the queue byte layout is emulator-checked;
+   efficacy is not). Validate with a visible action (e.g. `key 1` = RUN).
+
+**Screenshot rate on the scope page** is poll-limited (~10 commands/s, one per
+100 ms tick), so a full scope frame takes ~1–2 min; grab regions
+(`shot --rect`) for quick checks. The DMM page (via `dm40_dbg.bin`) is not
+poll-limited.
 
 ## USB as a transport — evaluation
 

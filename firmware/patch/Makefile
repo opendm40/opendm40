@@ -40,6 +40,14 @@ dbg:
 	cp build-dbg/dm40_patched.bin build-dbg/dm40_dbg.bin
 	@echo "built build-dbg/dm40_dbg.bin"
 
+# EXPERIMENTAL: memrw + screenshots + scope-page hook (parser pump + touch
+# injection, armed via BT, disarmed on reset). Separate image.
+dbg-scope:
+	$(MAKE) BUILD=build-dbgscope SRCS="src/startup.c src/scopedbg.c src/scopetramp.S"
+	mkdir -p build-dbg
+	cp build-dbgscope/dm40_patched.bin build-dbg/dm40_dbgscope.bin
+	@echo "built build-dbg/dm40_dbgscope.bin"
+
 $(BUILD)/%.o: src/%.c hooks.h fw_v2_6.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -60,6 +68,6 @@ $(BUILD):
 	mkdir -p $@
 
 clean:
-	rm -rf build build-demo build-dbg
+	rm -rf build build-demo build-dbg build-dbgscope
 
-.PHONY: all clean demo usb dbg
+.PHONY: all clean demo usb dbg dbg-scope

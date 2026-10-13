@@ -49,7 +49,8 @@ _spec.loader.exec_module(rw)
 # Debug sub-commands (requests use the same AF 05 03 0B framing as memrw).
 SUB_LCD_RAW = 3
 SUB_LCD_RLE = 4
-SUB_INJECT = 5          # scope-page build only; harmless no-op on dm40_dbg
+SUB_INJECT = 5          # scope-page build: program a touch-injection sequence
+SUB_ARM = 6             # scope-page build: arm/disarm the scope hook
 
 # Panel driver geometry (ILI9488 as the stock configures it: portrait).
 DRV_W = 320
@@ -261,34 +262,78 @@ def do_peek(dev, args):
         print('  model = %s' % {0: 'A', 1: 'B', 2: 'C'}.get(data[0], '?'))
 
 
-def _inject(dev, payload):
-    """Send a sub-5 injection request. No-op/ignored on dm40_dbg (only the
-    scope-page build acts on it); we just send and do not wait for a reply."""
+# Touch-queue entry flags (firmware/re/analysis/touch_v2_6.h):
+#   bit0..2 n_pressed, bit3..4 key code, bit5 key report, bit6 any pressed,
+#   bit7..9 n_reported. A screen point down = n_pressed 1, bit6, n_reported 1.
+PRESS_FLAGS = 0x01 | 0x40 | 0x80            # 0xC1
+RELEASE_FLAGS = 0x0000
+INJ_MAX = 20                                # keep the request <= 0x97 bytes
+
+
+def _program(dev, entries):
+    """Program a touch-injection sequence (cmd 0x0B sub 5): the scope hook
+    plays one entry per ~100 ms poll while armed. entries = [(flags,x,y)]."""
+    entries = entries[:INJ_MAX]
+    payload = bytes([len(entries)])
+    for fl, x, y in entries:
+        payload += struct.pack('<Hhh', fl & 0xFFFF, int(x), int(y))
     dev.s.send(rw.pkt(SUB_INJECT, 0, len(payload), payload))
+    return dev._resp_var()                  # reply: 1 byte = accepted count
+
+
+def _arm(dev, on):
+    dev.s.send(rw.pkt(SUB_ARM, 0, 1, bytes([1 if on else 0])))
+    return dev._resp_var()[0]               # 1 = armed, 0 = disarmed
+
+
+def do_enable_scope(dev, args):
+    st = _arm(dev, True)
+    print('scope debug %s (send this on the DMM page)'
+          % ('ARMED' if st else 'FAILED (plain image ignores it)'))
+
+
+def do_disable_scope(dev, args):
+    _arm(dev, False)
+    print('scope debug disarmed')
 
 
 def do_tap(dev, args):
-    _inject(dev, struct.pack('<BHHH', 0, args.x, args.y, args.ms))
-    print('tap (%d,%d) sent (effective only on the scope-page build)'
-          % (args.x, args.y))
+    n = _program(dev, [(PRESS_FLAGS, args.x, args.y),
+                       (RELEASE_FLAGS, args.x, args.y)])
+    print('tap (%d,%d) programmed (%d entries; plays while scope page is open)'
+          % (args.x, args.y, n[0] if n else 0))
 
 
 def do_drag(dev, args):
-    _inject(dev, struct.pack('<BHHHHHH', 1, args.x0, args.y0, args.x1,
-                             args.y1, args.ms, args.hold))
-    print('drag (%d,%d)->(%d,%d) sent (scope-page build only)'
-          % (args.x0, args.y0, args.x1, args.y1))
+    steps = max(1, args.steps)
+    pts = [(PRESS_FLAGS, args.x0, args.y0)]
+    for k in range(1, steps):
+        t = k / float(steps)
+        pts.append((PRESS_FLAGS, round(args.x0 + (args.x1 - args.x0) * t),
+                    round(args.y0 + (args.y1 - args.y0) * t)))
+    pts.append((PRESS_FLAGS, args.x1, args.y1))
+    pts.append((RELEASE_FLAGS, args.x1, args.y1))
+    n = _program(dev, pts)
+    print('drag (%d,%d)->(%d,%d) programmed (%d entries)'
+          % (args.x0, args.y0, args.x1, args.y1, n[0] if n else 0))
 
 
 def do_key(dev, args):
-    _inject(dev, struct.pack('<BBH', 2, args.code, args.hold))
-    print('key %d sent (scope-page build only)' % args.code)
+    # side key as a key report: bit5 + code in bits3..4; down then up.
+    down = 0x20 | ((args.code & 3) << 3)
+    holds = max(1, (args.hold + 99) // 100)          # ~100 ms per played entry
+    pts = [(down, 0, 0)] * holds + [(RELEASE_FLAGS, 0, 0)]
+    n = _program(dev, pts)
+    print('key %d programmed (%d entries)' % (args.code, n[0] if n else 0))
 
 
 def do_swipe(dev, args):
-    d = {'left': 0, 'right': 1, 'down': 2}[args.dir]
-    _inject(dev, struct.pack('<BBB', 3, d, args.fingers))
-    print('swipe %s x%d sent (scope-page build only)' % (args.dir, args.fingers))
+    # a single-finger drag across the 480x320 landscape screen
+    routes = {'left': (380, 160, 100, 160), 'right': (100, 160, 380, 160),
+              'down': (240, 60, 240, 260)}
+    x0, y0, x1, y1 = routes[args.dir]
+    args.x0, args.y0, args.x1, args.y1, args.steps = x0, y0, x1, y1, 8
+    do_drag(dev, args)
 
 
 def build_parser():
@@ -328,15 +373,20 @@ def build_parser():
     s.add_argument('name', help='symbol name, or "names" to list them')
     s.set_defaults(func=do_peek)
 
-    s = sub.add_parser('tap'); s.add_argument('x', type=int)
-    s.add_argument('y', type=int); s.add_argument('--ms', type=int, default=60)
+    sub.add_parser('enable-scope',
+                   help='arm the scope-page hook (send on the DMM page)'
+                   ).set_defaults(func=do_enable_scope)
+    sub.add_parser('disable-scope', help='disarm the scope-page hook'
+                   ).set_defaults(func=do_disable_scope)
+
+    s = sub.add_parser('tap', help='tap at landscape (x,y); scope page, armed')
+    s.add_argument('x', type=int); s.add_argument('y', type=int)
     s.set_defaults(func=do_tap)
 
-    s = sub.add_parser('drag')
+    s = sub.add_parser('drag', help='drag (x0,y0)->(x1,y1); scope page, armed')
     for k in 'x0 y0 x1 y1'.split():
         s.add_argument(k, type=int)
-    s.add_argument('--ms', type=int, default=300)
-    s.add_argument('--hold', type=int, default=0)
+    s.add_argument('--steps', type=int, default=6, help='intermediate points')
     s.set_defaults(func=do_drag)
 
     s = sub.add_parser('key'); s.add_argument('code', type=int,

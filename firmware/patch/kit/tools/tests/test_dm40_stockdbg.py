@@ -95,8 +95,16 @@ class FakeSock:
         elif sub == sd.SUB_LCD_RLE:
             dx, dy = addr & 0xFFFF, addr >> 16
             self._rx += self._frame(_device_rle(dx, dy, n))
-        elif sub == sd.SUB_INJECT:
-            pass                             # dm40_dbg ignores it, no reply
+        elif sub == sd.SUB_INJECT:           # program touch injection
+            count = body[6]
+            self.last_inject = []
+            for k in range(count):
+                fl, x, y = struct.unpack_from('<Hhh', body, 7 + k * 6)
+                self.last_inject.append((fl, x, y))
+            self._rx += self._frame(bytes([count]))
+        elif sub == sd.SUB_ARM:              # arm / disarm
+            self.armed = bool(body[6])
+            self._rx += self._frame(bytes([1 if self.armed else 0]))
         else:
             raise AssertionError('unexpected sub %d' % sub)
 
@@ -211,6 +219,38 @@ def test_memory_read_and_peek():
     assert sd.SYMBOLS['meas'][0] == 0x20027C74
     assert '20027c74' in sd.hexdump(data, 0x20027C74)
     print('ok  memory read + peek-struct symbol + hexdump')
+
+
+def test_arm_and_inject_encoding():
+    dev = fake_dev()
+
+    class Ns:
+        pass
+    # enable-scope -> sub 6 with on=1, device reports armed
+    sd.do_enable_scope(dev, Ns())
+    assert dev.s.armed is True
+    # tap -> 2 entries: press 0xC1 then release 0x0000, same coords
+    a = Ns(); a.x, a.y = 240, 160
+    sd.do_tap(dev, a)
+    assert dev.s.last_inject == [(sd.PRESS_FLAGS, 240, 160),
+                                 (sd.RELEASE_FLAGS, 240, 160)], dev.s.last_inject
+    # drag -> starts pressed at (x0,y0), ends with a release at (x1,y1)
+    a = Ns(); a.x0, a.y0, a.x1, a.y1, a.steps = 100, 160, 300, 160, 4
+    sd.do_drag(dev, a)
+    seq = dev.s.last_inject
+    assert seq[0] == (sd.PRESS_FLAGS, 100, 160)
+    assert seq[-1] == (sd.RELEASE_FLAGS, 300, 160)
+    assert all(f == sd.PRESS_FLAGS for f, _, _ in seq[:-1])
+    assert len(seq) <= sd.INJ_MAX
+    # key 1 (RUN) -> down with bit5 + code, then release
+    a = Ns(); a.code, a.hold = 1, 0
+    sd.do_key(dev, a)
+    assert dev.s.last_inject[0] == (0x20 | (1 << 3), 0, 0)
+    assert dev.s.last_inject[-1] == (sd.RELEASE_FLAGS, 0, 0)
+    # disable-scope
+    sd.do_disable_scope(dev, Ns())
+    assert dev.s.armed is False
+    print('ok  arm + tap/drag/key injection encoding')
 
 
 def main():
