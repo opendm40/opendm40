@@ -754,7 +754,10 @@ fn range_rect(i: usize) -> sf::Rect {
     rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
 }
 
-pub fn range_page(b: Button, sel: Option<usize>, sub: u8) {
+/// `note`: a line under the range buttons (UF-21: the V page says AUTO+ is
+/// the recommended auto range, or warns in orange while the mV-first AUTO
+/// is in use), true = warning.
+pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bool)>) {
     let title = match b {
         Button::Volt => "Voltage Settings",
         Button::Amp => "Current Settings",
@@ -770,6 +773,9 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8) {
         sf::rbox(range_rect(i), 6, c, BG);
         sf::glyphs(sf::TEXT22, range_rect(i), name, STATUS_FG, c, 8, 0);
     }
+    if let Some((t, warn)) = note {
+        range_note(t, warn);
+    }
     if matches!(b, Button::Volt | Button::Amp) {
         // Stock: DC (8,182), AC (162,182), AC+DC (319,182), 150x38 each.
         for (i, name) in ["DC", "AC", "AC+DC"].iter().enumerate() {
@@ -780,6 +786,13 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8) {
         }
     }
     ok_and_limits_buttons();
+}
+
+/// Range page note line (`range_page`): rows 142..177, under the second
+/// button row (ends 136), above the DC / AC buttons (182); spacing 1 (TEXT22
+/// glyphs touch at spacing 0).
+pub fn range_note(t: &str, warn: bool) {
+    sf::glyphs(sf::TEXT22, rect(8, 142, 464, 36), t, if warn { VALUE } else { DIM }, BG, 8, 1);
 }
 
 /// The "Hold/Limits" (opens View::Limits) and OK buttons at the bottom of
@@ -998,6 +1011,49 @@ pub struct ChartCache {
     rows: [i64; 4],
     time: Option<(u32, bool)>,
     rate: u8,
+    rchip: Option<RateChip>,
+}
+
+/// DMM reading-rate chip under the chart's timebase chip (owner request):
+/// the FR-05 rate setting (`rate` = dmm::Rate as u8) and the measured
+/// readings/s (`period_ms` = Dmm::reading_period_ms, 0 = not measured yet).
+/// `applies` = Dmm::rate_applies: otherwise grey "n/a" + the measured rate.
+/// Tap (`rate_chip_hit`) = next rate.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct RateChip {
+    pub rate: u8,
+    pub period_ms: u32,
+    pub applies: bool,
+}
+
+/// Rate chip rows (between the middle and the bottom axis labels, x 4..76
+/// as the timebase chip).
+const RATE_CHIP_Y: i16 = 236;
+const RATE_CHIP_H: i16 = 17;
+
+/// A tap on the DMM page's rate chip (3 px of slop above and below).
+pub fn rate_chip_hit(x: u16, y: u16) -> bool {
+    let y = y as i16;
+    x < CHART_X && y >= RATE_CHIP_Y - 3 && y < RATE_CHIP_Y + RATE_CHIP_H + 3
+}
+
+/// Readings per second from a reading period: "9.4/s", "37/s", "--/s"
+/// (period 0 = not measured yet).
+pub fn rps_text(buf: &mut [u8; 16], period_ms: u32) -> &str {
+    if period_ms == 0 {
+        return "--/s";
+    }
+    let r10 = (10_000 + period_ms / 2) / period_ms;
+    let mut t = [0u8; 16];
+    let s = if r10 >= 100 {
+        crate::dmm::format(&mut t, ((r10 + 5) / 10) as f32, 0)
+    } else {
+        crate::dmm::format(&mut t, r10 as f32 / 10.0, 1)
+    };
+    let n = s.len().min(13);
+    buf[..n].copy_from_slice(&s.as_bytes()[..n]);
+    buf[n..n + 2].copy_from_slice(b"/s");
+    core::str::from_utf8(&buf[..n + 2]).unwrap_or("")
 }
 
 /// Right column of the DMM chart (FR-02): MAX / AVG above the REL box, MIN
@@ -1023,14 +1079,14 @@ const AXIS_Y: [i16; 3] = [176, 219, 262];
 
 impl ChartCache {
     pub const fn new() -> Self {
-        ChartCache { scale: None, side: None, rows: [i64::MIN; 4], time: None, rate: 0 }
+        ChartCache { scale: None, side: None, rows: [i64::MIN; 4], time: None, rate: 0, rchip: None }
     }
     pub fn invalidate(&mut self) {
         *self = ChartCache::new();
     }
 }
 
-pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: &Side, unit: &'static str) {
+pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: &Side, unit: &'static str, rc: RateChip) {
     let mut step = 1.0f32;
     for _ in 0..dec {
         step /= 10.0;
@@ -1105,6 +1161,18 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: &Side, un
         let r = rect(4, 192, 73, 17);
         sf::rbox(r, 4, BTN, BG);
         sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 1);
+    }
+    if c.rchip != Some(rc) {
+        c.rchip = Some(rc);
+        // "MED 9.4/s" (<= 62 px of F14: "SLOW 2.3/s"); grey "n/a 2.5/s"
+        // where the rate setting changes nothing (AC, Hz, cap, temperature..).
+        let mut rb = [0u8; 16];
+        let mut b = [0u8; 24];
+        let name = if rc.applies { crate::dmm::RATE_NAMES[rc.rate as usize % 3] } else { "n/a" };
+        let txt = join(&mut b, &[name, " ", rps_text(&mut rb, rc.period_ms)]);
+        let r = rect(4, RATE_CHIP_Y, 73, RATE_CHIP_H);
+        sf::rbox(r, 4, BTN, BG);
+        sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, if rc.applies { STATUS_FG } else { DIM }, BTN, 8, 1);
     }
     // Right column (x 405..475, the stock REL box rows 205..242 kept as the
     // tap target): MAX and AVG above the REL box, MIN and the session time
@@ -1991,14 +2059,18 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
     None
 }
 
-/// System settings (subset of the stock sections that this firmware has).
-/// "Device" (index 7) opens the stock §6 Device/About page. "Back" is the
-/// tappable title bar (stock settings have a title-bar back, not a list row),
-/// handled by `title_back_hit`, so the list itself is only the settings.
+/// System settings (subset of the stock sections that this firmware has),
+/// two pages of at most SET_ROWS rows. Page 1: the last row "More" opens
+/// page 2 (SETTINGS2): the DMM rate / smoothing (FR-05) and "Device", the
+/// stock §6 Device/About page. "Back" is the tappable title bar (stock
+/// settings have a title-bar back, not a list row), handled by
+/// `title_back_hit` (page 2 -> page 1 -> menu), so the lists hold only
+/// settings.
 pub const SETTINGS: [&str; 9] = [
     "Dim screen", "Shutdown", "Backlight", "Volume", "Bluetooth", "Start page", "Analog power",
-    "Scope drag", "Device",
+    "Scope drag", "More",
 ];
+pub const SETTINGS2: [&str; 3] = ["DMM rate", "Smoothing", "Device"];
 
 /// Settings/menu-page title bar: 40 px, bg 0x2966 (stock gui_v2_6.h:101).
 pub const PAGE_BAR_H: i16 = 40;
@@ -2028,8 +2100,13 @@ pub fn title_back_hit(y: u16) -> bool {
     (y as i16) < PAGE_BAR_H
 }
 
-pub fn settings(vals: &[&str; 9]) {
-    list_page("Settings", &SETTINGS, vals);
+/// Settings page `page` (0 / 1) with its row values.
+pub fn settings(page: u8, vals: &[&str]) {
+    if page == 0 {
+        list_page("Settings", &SETTINGS, vals);
+    } else {
+        list_page("Settings 2/2", &SETTINGS2, vals);
+    }
 }
 
 /// A settings-style page: title bar with "< Back", up to SET_ROWS rows of
@@ -2047,8 +2124,8 @@ pub fn list_page(title: &str, names: &[&str], vals: &[&str]) {
     }
 }
 
-pub fn settings_hit(y: u16) -> Option<usize> {
-    list_hit(y, SETTINGS.len())
+pub fn settings_hit(page: u8, y: u16) -> Option<usize> {
+    list_hit(y, if page == 0 { SETTINGS.len() } else { SETTINGS2.len() })
 }
 
 /// Row of a `list_page` with `n` rows under a touch at `y`.

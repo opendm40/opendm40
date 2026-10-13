@@ -16,7 +16,7 @@
 //!     the REL reference is taken from the smoothed value (a quiet zero);
 //!   - unsmoothed (the Dmm reading, REL applied): MIN / MAX / AVG, the
 //!     AutoHold detector and its captured value, and `Update::raw` (the HV
-//!     warning must not lag).
+//!     warning must not lag; the CSV log, csvlog.rs).
 //! Why the statistics and AutoHold stay unsmoothed: smoothing is a display
 //! preference and must not change what MIN / MAX mean (a moving average
 //! clips the peaks, and AVG is the same either way); AutoHold has its own

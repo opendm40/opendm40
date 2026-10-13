@@ -15,6 +15,11 @@
 //! plain decimal for 1e-3 <= |v| < 1e6, else d.dddddE+xx; empty for overload
 //! (flag OL) or a non-finite value. `flags`: space-separated OL REL HOLD HI LO,
 //! plus GAP on the first row after rows were dropped (buffer full).
+//! Which value (app.rs `reading`): the UNSMOOTHED reading with REL applied
+//! (`meter::Update::raw`), one row per Dmm reading. The FR-05 display
+//! smoothing is a display preference, like for MIN / MAX / AVG (meter.rs
+//! header): a log of a moving average would hide the spread and lag steps,
+//! and the time column would no longer be the time of the value.
 //!
 //! Non-blocking, like screenshot.rs: `start` / `push` / `stop` only touch RAM;
 //! `poll` (every main-loop pass) does one bounded slice of a flush (one block

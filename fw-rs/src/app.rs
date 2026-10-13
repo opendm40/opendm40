@@ -14,7 +14,7 @@ use crate::clock::Clock;
 use crate::dmm::{self, Button, Dmm, Reading};
 use crate::gen::{self, Gen, Wave};
 use crate::gesture::{self, Axis, Gesture, Target};
-use crate::meter::Meter;
+use crate::meter::{Meter, Smooth};
 use crate::mmio::{modify32, w32};
 use crate::power::Power;
 use crate::scope::{self, Scope};
@@ -192,6 +192,8 @@ pub struct App {
     drag: Option<Drag>,
     gest_log: [(u8, u8, i16, u16); GEST_N],
     gest_n: usize,
+    /// Settings page shown (0 / 1, ui::SETTINGS / SETTINGS2).
+    set_page: u8,
 }
 
 fn backlight(pct: u8) {
@@ -263,13 +265,12 @@ fn power_off() -> ! {
 /// Stored DMM function code -> the function to start in (1 = DC V for
 /// anything unknown). v2 stored the HY3131 mode (0..15, no AC+DC then); v3
 /// stores `Dmm::func()`: 0..15, 16 / 17 = V / A AC+DC. Both number 0..15 the
-/// same way. The mV modes (2, 3) are what the V autorange had stepped down to:
-/// they restart as AC / DC V, which steps down again by itself when V -> mV is
-/// allowed (`v_auto` bit 1), instead of in the manual-only 60 mV row.
-fn restore_func(version: u32, code: u8, v_auto: u8) -> u8 {
+/// same way. The mV modes (2, 3) restart as AC / DC V: AUTO steps down to mV
+/// again by itself, AUTO+ stays on V (UF-21).
+fn restore_func(version: u32, code: u8) -> u8 {
     let max = if version >= 3 { 17 } else { 15 };
     match code {
-        2 | 3 if v_auto & 2 != 0 => code - 2,
+        2 | 3 => code - 2,
         c if c <= max => c,
         _ => 1,
     }
@@ -359,6 +360,7 @@ impl App {
             drag: None,
             gest_log: [(0, 0, 0, 0); GEST_N],
             gest_n: 0,
+            set_page: 0,
         };
         crate::persist::init();
         if let Some(rec) = crate::persist::load() {
@@ -507,7 +509,31 @@ impl App {
             View::Range => {
                 let b = self.dmm.button();
                 let sel = self.range_sel();
-                ui::range_page(b, sel, self.dmm.sub());
+                // UF-21: AUTO+ (never steps down to mV) is the recommended V
+                // autorange; warn while the mV-first AUTO is in use.
+                let note = (b == Button::Volt).then(|| {
+                    if self.dmm.mv_auto_warn() { (dmm::MV_AUTO_WARN, true) } else { ("AUTO+ recommended: it never steps to mV", false) }
+                });
+                ui::range_page(b, sel, self.dmm.sub(), note);
+            }
+            View::Settings if self.set_page == 1 => {
+                // FR-05: rate setting and the measured readings/s.
+                let mut rb = [0u8; 16];
+                let rps = ui::rps_text(&mut rb, self.dmm.reading_period_ms());
+                let mut vb = [0u8; 32];
+                let mut n = 0;
+                let applies = self.dmm.rate_applies();
+                for part in [dmm::RATE_NAMES[self.dmm.rate() as usize], if applies { "  " } else { " (n/a here)" }, if applies { rps } else { "" }] {
+                    let k = part.len().min(32 - n);
+                    vb[n..n + k].copy_from_slice(&part.as_bytes()[..k]);
+                    n += k;
+                }
+                let vals = [
+                    core::str::from_utf8(&vb[..n]).unwrap_or(""),
+                    crate::meter::SMOOTH_NAMES[self.meter.smoothing() as usize],
+                    "", // Device row: opens the About page, no inline value
+                ];
+                ui::settings(1, &vals);
             }
             View::Settings => {
                 let mut b = [[0u8; 8]; 2];
@@ -542,9 +568,9 @@ impl App {
                     ui::view_name(START[self.start_page]),
                     if self.rails_both { "Both always" } else { "Auto (per view)" },
                     grab_txt,
-                    "", // Device row: opens the About page, no inline value
+                    "", // More row: opens page 2, no inline value
                 ];
-                ui::settings(&vals);
+                ui::settings(0, &vals);
             }
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
@@ -675,6 +701,19 @@ impl App {
         self.dmm_view.invalidate();
         self.chart_dirty = true;
         self.draw_reading();
+    }
+
+    /// DMM page rate chip tap: next FR-05 conversion rate (SLOW -> MED ->
+    /// FAST). Where the rate changes nothing (AC, Hz, capacitance, ...) a
+    /// low beep and no change: the chip shows "n/a" there.
+    fn rate_cycle(&mut self, now: u64) {
+        if !self.dmm.rate_applies() {
+            self.beep(now, 300);
+            return;
+        }
+        let r = dmm::Rate::from_u8((self.dmm.rate() as u8 + 1) % 3).unwrap_or(crate::meter::RATE_DEFAULT);
+        self.dmm.set_rate(r);
+        self.chart_dirty = true;
     }
 
     /// DMM function button `i` (DMM page row, combined-view band): as the
@@ -1009,7 +1048,8 @@ impl App {
                 secs: self.meter.stats.secs(now),
                 rec: self.meter.stats.rec,
             };
-            ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, &side, self.chart_unit);
+            let rc = ui::RateChip { rate: self.dmm.rate() as u8, period_ms: self.dmm.reading_period_ms(), applies: self.dmm.rate_applies() };
+            ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, &side, self.chart_unit, rc);
         }
     }
 
@@ -1148,6 +1188,8 @@ impl App {
             p[21 + 2 * i] = l.hi.unwrap_or(0.0).to_bits();
         }
         p[6] |= (sc.hpos as u32 + 1) << 18;
+        // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
+        p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing());
         p
     }
 
@@ -1188,8 +1230,14 @@ impl App {
         // Sensor and autorange flags before the mode, so a restored mode
         // enters with them.
         self.dmm.set_t_sensor(clk, (p[11] >> 8 & 0xF) as u8);
-        self.dmm.set_auto_flags((p[2] >> 8) as u8, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
-        let mode = if same_session { restore_func(rec.version, p[2] as u8, self.dmm.v_auto()) } else { 1 };
+        // FR-05 rate / smoothing; UF-21: a V autorange stored before the
+        // AUTO+ default (no "trusted" bit in W_DMM_EXT) restores as AUTO+.
+        let ext = crate::meter::ext_settings(p[crate::persist::W_DMM_EXT]);
+        self.dmm.set_rate(ext.rate);
+        self.meter.set_smoothing(ext.smooth);
+        let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
+        self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
+        let mode = if same_session { restore_func(rec.version, p[2] as u8) } else { 1 };
         self.dmm.select(clk, mode);
         let mut g = self.gen.s;
         g.wave = Wave::ALL[(p[3] & 3) as usize];
@@ -1359,7 +1407,8 @@ impl App {
         // HV warning on the live value: it must not be frozen by AutoHold.
         // Strip: badge from 30 V (the stock red-value threshold), red band
         // from 100 V (the stock lightning threshold); V functions only.
-        let l = &u.live;
+        // Unsmoothed (FR-05): the warning must not lag.
+        let l = &u.raw;
         let v = if l.mode <= 3 && !l.main.ol { l.si.abs() } else { 0.0 };
         let hv_level = if v >= 100.0 { 2 } else if v >= 30.0 { 1 } else { 0 };
         let hv_changed = hv_level != self.hv_level;
@@ -1713,6 +1762,10 @@ impl App {
                 // they were opened from.
                 let v = match self.view {
                     View::Device => View::Settings,
+                    View::Settings if self.set_page == 1 => {
+                        self.set_page = 0;
+                        View::Settings
+                    }
                     View::Settings => View::Menu,
                     View::Keypad if self.kp_target >= 3 => View::Limits,
                     View::Menu | View::Range | View::ScopeMenu | View::Keypad | View::Limits => self.back_view,
@@ -1951,7 +2004,9 @@ impl App {
                 }
             }
             View::Dmm => {
-                if x < ui::CHART_X && (176..280).contains(&y) {
+                if ui::rate_chip_hit(x, y) {
+                    self.rate_cycle(now);
+                } else if x < ui::CHART_X && (176..280).contains(&y) {
                     self.chart_rate = match self.chart_rate {
                         1 => 2,
                         2 => 4,
@@ -2028,7 +2083,10 @@ impl App {
                 Some(0) => self.show(View::Dmm, clk),
                 Some(1) => self.show(View::Scope, clk),
                 Some(2) => self.show(View::Gen, clk),
-                Some(3) => self.show(View::Settings, clk),
+                Some(3) => {
+                    self.set_page = 0;
+                    self.show(View::Settings, clk)
+                }
                 Some(_) => {
                     let c = self.combo;
                     self.show(c, clk);
@@ -2078,13 +2136,36 @@ impl App {
                 self.meter.recheck();
                 self.redraw = true;
             }
+            View::Settings if self.set_page == 1 => {
+                if ui::title_back_hit(y) {
+                    self.set_page = 0;
+                    self.redraw = true;
+                    return;
+                }
+                match ui::settings_hit(1, y) {
+                    Some(0) => {
+                        let r = dmm::Rate::from_u8((self.dmm.rate() as u8 + 1) % 3).unwrap_or(crate::meter::RATE_DEFAULT);
+                        self.dmm.set_rate(r);
+                    }
+                    Some(1) => {
+                        let s = Smooth::from_u8((self.meter.smoothing() as u8 + 1) % 3).unwrap_or(Smooth::Off);
+                        self.meter.set_smoothing(s);
+                    }
+                    Some(2) => {
+                        self.show(View::Device, clk);
+                        return;
+                    }
+                    Some(_) | None => return,
+                }
+                self.redraw = true;
+            }
             View::Settings => {
                 if ui::title_back_hit(y) {
                     // Tapping the title bar ("< Back") returns to the menu.
                     self.show(View::Menu, clk);
                     return;
                 }
-                match ui::settings_hit(y) {
+                match ui::settings_hit(0, y) {
                     Some(0) => self.dim_idx = (self.dim_idx + 1) % 4,
                     Some(1) => self.off_idx = (self.off_idx + 1) % 4,
                     Some(2) => {
@@ -2104,10 +2185,8 @@ impl App {
                         gesture::set_grab_ms(g);
                     }
                     Some(8) => {
-                        // Last row: the Device / About page. Back is the title
-                        // bar now, not a list row.
-                        self.show(View::Device, clk);
-                        return;
+                        // Last row: page 2 (DMM rate, smoothing, Device).
+                        self.set_page = 1;
                     }
                     Some(_) | None => return,
                 }
@@ -2381,6 +2460,43 @@ impl App {
             }
             C::CalcLimFail => {
                 out.put_bytes(if self.limit_fail() { b"1" } else { b"0" });
+                true
+            }
+            // FR-05 conversion rate / display smoothing.
+            C::SensRate(Some(i)) => {
+                if let Some(r) = dmm::Rate::from_u8(i) {
+                    self.dmm.set_rate(r);
+                }
+                self.redraw |= self.view == View::Settings;
+                self.chart_dirty = true;
+                false
+            }
+            C::SensRate(None) => {
+                out.put_bytes(dmm::RATE_NAMES[self.dmm.rate() as usize].as_bytes());
+                true
+            }
+            C::SensRatePer => {
+                out.put_f32(self.dmm.reading_period_ms() as f32 / 1000.0);
+                true
+            }
+            C::CalcSmoState(Some(on)) => {
+                if on != (self.meter.smoothing() != Smooth::Off) {
+                    self.meter.set_smoothing(if on { Smooth::Low } else { Smooth::Off });
+                }
+                self.redraw |= self.view == View::Settings;
+                false
+            }
+            C::CalcSmoState(None) => {
+                out.put_bytes(if self.meter.smoothing() != Smooth::Off { b"1" } else { b"0" });
+                true
+            }
+            C::CalcSmoResp(Some(l)) => {
+                self.meter.set_smoothing(Smooth::from_u8(l).unwrap_or(Smooth::Low));
+                self.redraw |= self.view == View::Settings;
+                false
+            }
+            C::CalcSmoResp(None) => {
+                out.put_bytes(if self.meter.smoothing() == Smooth::High { b"SLOW" } else { b"FAST" });
                 true
             }
             C::DbgGrab(Some(ms)) => {
