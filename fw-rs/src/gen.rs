@@ -1,10 +1,33 @@
 //! Signal generator (firmware/re/analysis/scope_gen_v2_6.h, GENERATOR).
 //!
-//! DAC path: DAC channel 1 on PA4, triggered by TIM6 TRGO at 10 MHz / (PSC+1),
-//! fed by DMA0 stream 5 (request 7) circularly from a wave table of n samples.
-//! PWM path (square above 50 kHz): TIM12 CH1 on PB14 (AF9), fixed frequencies.
-//! PB12 selects the output path (1 = PWM, 0 = DAC). Everything runs from DMA /
-//! timers, so the generator keeps going while the CPU does other things.
+//! DAC path: DAC channel 1 on PA4, triggered by TIM6 TRGO at 200 MHz /
+//! ((PSC+1)(ARR+1)) <= 10 MS/s, fed by DMA0 stream 5 (request 7) circularly
+//! from a wave table of L samples holding K periods. PWM path (square above
+//! 50 kHz): TIM12 CH1 on PB14 (AF9), 200 MHz / (ARR+1), any divisor 20..4000
+//! with adjustable duty (the stock had 7 fixed 50 % steps). PB12 selects the
+//! output path (1 = PWM, 0 = DAC). Everything runs from DMA / timers, so the
+//! generator keeps going while the CPU does other things.
+//!
+//! The arithmetic (frequency search, per-wave limits, levels/offset, table
+//! contents) is in genplan.rs, which the host test tools/gen-test also
+//! builds. Differences from the stock (user feedback UF-14/15/16, FR-28):
+//! - the set frequency is clamped to the wave's limit (`Wave::max_hz`, with
+//!   `Out::freq_clamped` for a UI note), never silenced to 0 Hz, and not
+//!   rounded to 1 kHz steps between 1 and 50 kHz;
+//! - the timer divisor, table length and periods per table are searched for
+//!   the smallest frequency error; `Gen::actual_hz` is the quantised result;
+//! - the ramp rises (the stock's fell, against its own preview icon);
+//! - an optional DC offset (`Settings::offset_v`) inside the 0..3 V window,
+//!   and Vpp down to 0 V (a DC source).
+
+#[path = "genplan.rs"]
+mod plan;
+
+#[allow(unused_imports)]
+pub use plan::{
+    clamp_freq, compute, limits, target_hz, Limits, Out, Path, Settings, Timing, Wave, AMP_MAX, AMP_MIN, F_MAX,
+    F_MIN, N_MAX, SQUARE_DAC_MAX, V_FS,
+};
 
 use crate::mmio::{modify32, r32, w32};
 
@@ -20,109 +43,22 @@ const DMA0: u32 = 0x4002_6000;
 const S5: u32 = DMA0 + 0x10 + 0x18 * 5;
 const DMA_HIFCR: u32 = DMA0 + 0x0C;
 
-pub const N_MAX: usize = 2000;
-
 #[link_section = ".dmabuf"]
 static mut WAVE: [u16; N_MAX] = [0; N_MAX];
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Wave {
-    Sine,
-    Square,
-    Triangle,
-    Ramp,
-}
-
-impl Wave {
-    pub const ALL: [Wave; 4] = [Wave::Sine, Wave::Square, Wave::Triangle, Wave::Ramp];
-    pub fn name(self) -> &'static str {
-        match self {
-            Wave::Sine => "Sine",
-            Wave::Square => "Square",
-            Wave::Triangle => "Triangle",
-            Wave::Ramp => "Ramp",
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct Settings {
-    pub on: bool,
-    pub wave: Wave,
-    /// The user's set frequency, Hz (1 .. 10 MHz). Kept as set across wave
-    /// changes; what is actually output is `snap_freq(wave, freq_hz)`
-    /// (`Gen::out_hz`), which may be lower (stock snapping) or 0 (silent).
-    pub freq_hz: u32,
-    /// Peak amplitude, V (0.5 .. 3.0). The output is unipolar 0..amp.
-    pub amp_v: f32,
-    /// Square duty, 0..10000 = 0..100.00 %.
-    pub duty: u16,
-}
-
-impl Settings {
-    // Stock power-on defaults (scope_gen_ui_v2_6.h:318-320, 556-559; the ui header
-    // corrects the gen header's "wave default 0" to wave 1 = Square at 2 MHz).
-    pub const DEFAULT: Settings = Settings { on: false, wave: Wave::Square, freq_hz: 2_000_000, amp_v: 3.0, duty: 5000 };
-}
-
-/// Highest settable frequency (the top PWM step).
-pub const F_MAX: u32 = 10_000_000;
-
-/// Normalise a user-set frequency for `Settings::freq_hz`: 1 Hz .. 10 MHz.
-pub fn clamp_freq(f: u32) -> u32 {
-    f.clamp(1, F_MAX)
-}
-
-/// PWM path frequencies above 50 kHz (TIM12 PSC / period at 200 MHz).
-const PWM_HZ: [u32; 7] = [100_000, 200_000, 500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000];
-const PWM_PSC: [u32; 7] = [4, 4, 4, 4, 0, 0, 0];
-const PWM_PER: [u32; 7] = [400, 200, 80, 40, 100, 40, 20];
-
-/// Frequency as the stock UI snaps it (FUN_08021cc8; scope_gen_v2_6.h:123-125,
-/// scope_gen_ui_v2_6.h:293-295): f < 1 kHz any integer, 1..50 kHz rounded down to
-/// 1 kHz steps. Above 50 kHz only a square wave has an output: the PWM steps begin
-/// at 100 kHz, so a square in 50k..100k snaps DOWN to 50 kHz, and above 10 MHz caps
-/// at 10 MHz. A non-square above 50 kHz goes silent (0 Hz; the `on` flag is kept).
-/// Idempotent, 0 included (0 = silent stays silent). This is the OUTPUT
-/// frequency: callers keep the user's value in `Settings::freq_hz` and never
-/// store the snapped one, so a wave change cannot destroy the setting.
+/// The frequency the output aims at for `wave` at the set `f`: `f` clamped
+/// to the wave's limit (never 0 any more). Kept under the old name for
+/// callers; the quantised value is `Gen::actual_hz`.
 pub fn snap_freq(wave: Wave, f: u32) -> u32 {
-    if f < 1000 {
-        f
-    } else if f <= 50_000 {
-        f / 1000 * 1000
-    } else if wave == Wave::Square {
-        if f < 100_000 {
-            50_000
-        } else {
-            *PWM_HZ.iter().rev().find(|&&p| p <= f).unwrap_or(&PWM_HZ[0])
-        }
-    } else {
-        0
-    }
-}
-
-/// sin(x) for x in [0, 2pi): range reduction + odd polynomial (|err| < 2e-6).
-fn sin(x: f32) -> f32 {
-    const PI: f32 = core::f32::consts::PI;
-    let mut x = x;
-    while x > PI {
-        x -= 2.0 * PI;
-    }
-    let (x, s) = if x > PI / 2.0 {
-        (PI - x, 1.0)
-    } else if x < -PI / 2.0 {
-        (-PI - x, 1.0)
-    } else {
-        (x, 1.0)
-    };
-    let x2 = x * x;
-    s * x * (1.0 - x2 / 6.0 * (1.0 - x2 / 20.0 * (1.0 - x2 / 42.0 * (1.0 - x2 / 72.0))))
+    target_hz(wave, f)
 }
 
 pub struct Gen {
     pub s: Settings,
-    /// Actual output frequency (after table length rounding), Hz.
+    /// What the output does for `s` (actual frequency, effective levels and
+    /// duty, clamp flag), computed also while the output is off.
+    pub out: Out,
+    /// Actual output frequency while on, Hz (0 when off).
     pub real_hz: f32,
 }
 
@@ -141,46 +77,81 @@ fn stop_outputs() {
     }
 }
 
+// actual_hz / freq_clamped / limits / set_offset / set_amp are the API for
+// ui.rs, app.rs and the SCPI handler (UF-14/15, FR-28); unused until wired.
+#[allow(dead_code)]
 impl Gen {
     pub fn new() -> Self {
         unsafe { modify32(RCU_APB1EN, 0, (1 << 29) | (1 << 4) | (1 << 6)) }; // DAC, TIM6, TIM12
         stop_outputs();
-        Gen { s: Settings::DEFAULT, real_hz: 0.0 }
+        Gen { s: Settings::DEFAULT, out: compute(&Settings::DEFAULT), real_hz: 0.0 }
     }
 
-    /// Frequency actually output for the current wave and set frequency, Hz
-    /// (stock snapping; 0 = silent: non-square above 50 kHz). Independent of
-    /// `on`.
+    /// Target output frequency for the current wave and set frequency, Hz:
+    /// the set value clamped to the wave's limit (never 0). Independent of
+    /// `on`. The quantised frequency is `actual_hz`.
     pub fn out_hz(&self) -> u32 {
-        snap_freq(self.s.wave, self.s.freq_hz)
+        self.out.target_hz
     }
 
-    /// Apply new settings (FUN_080166a4). `s.freq_hz` is kept as set (only
-    /// clamped to 1 Hz .. 10 MHz); the output runs at `out_hz()`.
+    /// Actual (quantised) output frequency, Hz, also while off (UF-15).
+    pub fn actual_hz(&self) -> f32 {
+        self.out.hz() as f32
+    }
+
+    /// Actual output frequency in full precision, Hz.
+    pub fn actual_hz_f64(&self) -> f64 {
+        self.out.hz()
+    }
+
+    /// The set frequency is above the current wave's limit and is clamped
+    /// (show `self.s.wave.max_note()`, UF-14).
+    pub fn freq_clamped(&self) -> bool {
+        self.out.freq_clamped
+    }
+
+    /// Limits of the current wave.
+    pub fn limits(&self) -> Limits {
+        limits(self.s.wave)
+    }
+
+    /// Apply new settings (FUN_080166a4). `s` is normalised
+    /// (`Settings::normalised`: frequency kept as set within 1 Hz .. 10 MHz,
+    /// Vpp 0..3 V, offset clamped around Vpp); the output runs at
+    /// `out.timing`.
     pub fn apply(&mut self, s: Settings) {
-        let mut s = s;
-        s.amp_v = s.amp_v.clamp(0.5, 3.0);
-        s.duty = s.duty.min(10000);
-        s.freq_hz = clamp_freq(s.freq_hz);
+        // compute() sees the raw set frequency, so a value above 10 MHz
+        // still flags `freq_clamped`; the stored settings are normalised.
+        self.out = compute(&s);
+        let s = s.normalised();
         self.s = s;
         stop_outputs();
-        let f = self.out_hz();
-        // Off, or a frequency the stock snaps to 0 (non-square above 50 kHz):
-        // leave every output de-energised (stop_outputs parked DAC/DMA/TIM6/TIM12
-        // and the pins) rather than program a bogus timer or divide by zero in dac().
-        if !s.on || f == 0 {
+        if !s.on {
             self.real_hz = 0.0;
             return;
         }
-        if s.wave == Wave::Square && f > 50_000 {
-            self.pwm(f);
-        } else {
-            self.dac(&s, f);
+        let t = self.out.timing;
+        match t.path {
+            Path::Pwm => self.pwm(&t),
+            Path::Dac => self.dac(&s, &t),
         }
+        self.real_hz = t.hz() as f32;
     }
 
-    fn pwm(&mut self, f: u32) {
-        let i = PWM_HZ.iter().position(|&p| p == f).unwrap_or(0);
+    /// Change only the offset (None = stock 0..Vpp); see `Settings::with_offset`.
+    pub fn set_offset(&mut self, o: Option<f32>) {
+        let s = self.s.with_offset(o);
+        self.apply(s);
+    }
+
+    /// Change only Vpp, limited by an explicit offset; see `Settings::with_amp`.
+    pub fn set_amp(&mut self, v: f32) {
+        let s = self.s.with_amp(v);
+        self.apply(s);
+    }
+
+    fn pwm(&mut self, t: &Timing) {
+        let ccr = plan::pwm_ccr(t, self.s.duty);
         unsafe {
             // PB14 AF9 (TIM12_CH1), PB12 = 1 (PWM path).
             modify32(GPIOB + 0x24, 0xF << 24, 9 << 24);
@@ -189,54 +160,29 @@ impl Gen {
             w32(GPIOB + 0x18, 1 << 12);
             modify32(GPIOB, 3 << 24, 1 << 24);
 
-            w32(TIM12 + 0x28, PWM_PSC[i]);
-            w32(TIM12 + 0x2C, PWM_PER[i] - 1);
-            w32(TIM12 + 0x34, PWM_PER[i] / 2);
+            w32(TIM12 + 0x28, t.psc as u32);
+            w32(TIM12 + 0x2C, t.arr as u32);
+            w32(TIM12 + 0x34, ccr);
             w32(TIM12 + 0x18, (6 << 4) | (1 << 3)); // CH1 PWM1, preload
             w32(TIM12 + 0x20, 1); // CC1E
             w32(TIM12 + 0x14, 1); // UG
             w32(TIM12, 1 | (1 << 7));
         }
-        self.real_hz = 200e6 / ((PWM_PSC[i] + 1) * PWM_PER[i]) as f32;
     }
 
-    fn dac(&mut self, s: &Settings, f: u32) {
-        let (psc, n) = if f > 5000 {
-            (0, (10_000_000 / f) as usize)
-        } else {
-            let k = ((5000 + f / 2) / f).max(1);
-            (k - 1, ((10_000_000 + f * k / 2) / (f * k)) as usize)
-        };
-        let n = n.clamp(2, N_MAX);
-        let a = s.amp_v / 3.0;
+    fn dac(&mut self, s: &Settings, t: &Timing) {
         let wave = unsafe { &mut *core::ptr::addr_of_mut!(WAVE) };
-        let nf = n as f32;
-        for (i, w) in wave[..n].iter_mut().enumerate() {
-            let fi = i as f32;
-            let v = match s.wave {
-                Wave::Sine => {
-                    let (c, wd) = if a > 0.5 { (50.0, 4045.0) } else { (200.0, 4095.0) };
-                    a * (c + wd / 2.0 + wd / 2.0 * sin(2.0 * core::f32::consts::PI * fi / nf))
-                }
-                Wave::Square => {
-                    if (i as u32) < (n as u32 * s.duty as u32 / 10000) { a * 4095.0 } else { 0.0 }
-                }
-                Wave::Triangle => {
-                    if i < n / 2 { 8190.0 / nf * fi * a } else { (8190.0 - 8190.0 / nf * fi) * a }
-                }
-                Wave::Ramp => (4095.0 - 4095.0 / nf * fi) * a,
-            };
-            *w = (v.clamp(0.0, 4095.0)) as u16;
-        }
+        plan::fill(wave, s, t);
+        let n = (t.len as usize).min(N_MAX);
         unsafe {
             // PA4 analog, PB12 = 0 (DAC path).
             modify32(GPIOA, 3 << 8, 3 << 8);
             w32(GPIOB + 0x18, 1 << (12 + 16));
             modify32(GPIOB, 3 << 24, 1 << 24);
 
-            // TIM6: TRGO on update, 10 MHz / (PSC+1).
-            w32(TIM6 + 0x28, psc);
-            w32(TIM6 + 0x2C, 19);
+            // TIM6: TRGO on update, 200 MHz / ((PSC+1)(ARR+1)).
+            w32(TIM6 + 0x28, t.psc as u32);
+            w32(TIM6 + 0x2C, t.arr as u32);
             w32(TIM6 + 0x04, 0x20);
             w32(TIM6 + 0x14, 1);
 
@@ -252,6 +198,5 @@ impl Gen {
             w32(DAC_CR, (r32(DAC_CR) & !0xFFFF) | (1 << 12) | (1 << 2) | boff | 1);
             w32(TIM6, 1);
         }
-        self.real_hz = 10e6 / ((psc + 1) as f32 * n as f32);
     }
 }
