@@ -558,6 +558,9 @@ pub struct Dmm {
     diag: [AcPhaseDiag; ACDC_DIAG_N],
     diag_k: u32,
     diag_on: bool,
+    /// Diagnostic: time of the previous logged result, counter restarts since.
+    diag_t: u64,
+    diag_ctr: u8,
     /// FR-05 conversion rate (persisted).
     rate: Rate,
     /// SLOW: conversions since the last config write (one reading per
@@ -622,10 +625,16 @@ pub struct AcPhaseDiag {
     /// phase), the stock S+0x54. Stock, 40 Hz 0..9.63 V PWM at r1: 0.07..0.10
     /// V at the first result; 0.3..0.8 V = the coupling node still settling.
     pub dcp: [f32; 4],
+    /// ms since the previous result (first of an AC+DC phase: since the
+    /// phase switch, i.e. settle + late_ms).
+    pub dt: [u16; 4],
+    /// INTF as read before the result, bit 8 set when the frequency counter
+    /// was restarted (R20 / CTA writes) since the previous result.
+    pub fl: [u16; 4],
 }
 
 impl AcPhaseDiag {
-    const EMPTY: AcPhaseDiag = AcPhaseDiag { late_ms: 0, n: 0, sq: [0; 4], lpf: [0; 4], dcp: [0.0; 4] };
+    const EMPTY: AcPhaseDiag = AcPhaseDiag { late_ms: 0, n: 0, sq: [0; 4], lpf: [0; 4], dcp: [0.0; 4], dt: [0; 4], fl: [0; 4] };
 }
 
 impl Dmm {
@@ -698,6 +707,8 @@ impl Dmm {
             diag: [AcPhaseDiag::EMPTY; ACDC_DIAG_N],
             diag_k: 0,
             diag_on: false,
+            diag_t: 0,
+            diag_ctr: 0,
             rate: Rate::Medium,
             dec_k: 0,
             t_poll: 0,
@@ -879,11 +890,14 @@ impl Dmm {
             hy::write(0x22, &[0x17]);
             self.r22 = 0x17;
         }
-        // AC+DC diagnostic: log the RMS results of an AC phase.
-        self.diag_on = self.acdc && matches!(m, 0 | 2 | 4..=6);
+        // AC+DC diagnostic: log the RMS results of an AC phase (plain AC V:
+        // every 4 results as one entry, for comparison).
+        self.diag_on = matches!(m, 0 | 2 | 4..=6) && (self.acdc || m == 0);
         if self.diag_on {
             self.diag_k = self.diag_k.wrapping_add(1);
             self.diag[self.diag_k as usize % ACDC_DIAG_N] = AcPhaseDiag::EMPTY;
+            self.diag_t = clk.now_ms();
+            self.diag_ctr = 0;
         }
     }
 
@@ -919,10 +933,13 @@ impl Dmm {
         (self.diag_k, d)
     }
 
-    /// `acdc_diag` as text for a debug query: `phases;late:sq/lpf/dcp,...;...`
-    /// (oldest phase first, dcp with 4 decimals in the phase's unit), e.g.
-    /// `41;2:9926/183/0.0891,9926/150/0.0727,...`. Returns the length used;
-    /// a phase that does not fit in `buf` is left out. ~4 x 90 bytes.
+    /// `acdc_diag` as text for a debug query:
+    /// `phases;late:sq/lpf/dcp/dt/intf,...;...` (oldest phase first, dcp with
+    /// 4 decimals in the phase's unit, dt ms since the previous result, intf
+    /// hex with a `*` when the frequency counter was restarted since the
+    /// previous result), e.g. `41;2:9926/183/0.0891/802/1a,...`. Plain AC V
+    /// logs every 4 results as one entry. Returns the length used; the
+    /// oldest phases are left out when `buf` is too small.
     pub fn acdc_diag_text(&self, buf: &mut [u8]) -> usize {
         fn put(buf: &mut [u8], at: &mut usize, b: &[u8]) -> bool {
             let ok = *at + b.len() <= buf.len();
@@ -936,27 +953,37 @@ impl Dmm {
             let mut t = [0u8; 16];
             put(buf, at, format(&mut t, v, dec).as_bytes())
         }
+        fn hex(buf: &mut [u8], at: &mut usize, v: u16) -> bool {
+            const H: &[u8; 16] = b"0123456789abcdef";
+            let b = (v & 0xFF) as usize;
+            put(buf, at, &[H[b >> 4], H[b & 15]]) && (v & 0x100 == 0 || put(buf, at, b"*"))
+        }
         let (k, d) = self.acdc_diag();
-        let mut at = 0;
-        num(buf, &mut at, k as f32, 0);
-        for e in d.iter().filter(|e| e.n > 0) {
-            let mark = at;
-            let mut ok = put(buf, &mut at, b";") && num(buf, &mut at, e.late_ms as f32, 0) && put(buf, &mut at, b":");
-            for j in 0..e.n as usize {
-                ok = ok
-                    && (j == 0 || put(buf, &mut at, b","))
-                    && num(buf, &mut at, e.sq[j] as f32, 0)
-                    && put(buf, &mut at, b"/")
-                    && num(buf, &mut at, e.lpf[j] as f32, 0)
-                    && put(buf, &mut at, b"/")
-                    && num(buf, &mut at, e.dcp[j].clamp(-1e9, 1e9), 4);
+        let n = d.iter().filter(|e| e.n > 0).count();
+        for skip in 0..=n {
+            let mut at = 0;
+            let mut ok = num(buf, &mut at, k as f32, 0);
+            for e in d.iter().filter(|e| e.n > 0).skip(skip) {
+                ok = ok && put(buf, &mut at, b";") && num(buf, &mut at, e.late_ms as f32, 0) && put(buf, &mut at, b":");
+                for j in 0..e.n as usize {
+                    ok = ok
+                        && (j == 0 || put(buf, &mut at, b","))
+                        && num(buf, &mut at, e.sq[j] as f32, 0)
+                        && put(buf, &mut at, b"/")
+                        && num(buf, &mut at, e.lpf[j] as f32, 0)
+                        && put(buf, &mut at, b"/")
+                        && num(buf, &mut at, e.dcp[j].clamp(-1e9, 1e9), 4)
+                        && put(buf, &mut at, b"/")
+                        && num(buf, &mut at, e.dt[j] as f32, 0)
+                        && put(buf, &mut at, b"/")
+                        && hex(buf, &mut at, e.fl[j]);
+                }
             }
-            if !ok {
-                at = mark;
-                break;
+            if ok {
+                return at;
             }
         }
-        at
+        0
     }
 
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
@@ -1794,7 +1821,8 @@ impl Dmm {
     fn poll_ac(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
         let m = self.mode;
         let need = if m <= 2 { hy::INTF_RMS | hy::INTF_LPF } else { hy::INTF_RMS };
-        if hy::read1(hy::R_INTF) & need != need {
+        let intf = hy::read1(hy::R_INTF);
+        if intf & need != need {
             return None;
         }
         let mut b = [0u8; 20];
@@ -1820,17 +1848,26 @@ impl Dmm {
         let mut ac = sq * s * cal(g_rms + 4 * ci, 1.0) - cal(o_rms + 4 * ci, 0.0);
         let dcp = lpf * s * cal(g_lpf + 4 * ci, 1.0) - cal(o_lpf + 4 * ci, 0.0);
         if self.diag_on {
+            if !self.acdc && self.diag[self.diag_k as usize % ACDC_DIAG_N].n >= 4 {
+                self.diag_k = self.diag_k.wrapping_add(1);
+                self.diag[self.diag_k as usize % ACDC_DIAG_N] = AcPhaseDiag::EMPTY;
+            }
             let e = &mut self.diag[self.diag_k as usize % ACDC_DIAG_N];
             let j = e.n as usize;
             if j == 0 {
                 e.late_ms = now.saturating_sub(self.deadline).min(u16::MAX as u64) as u16;
             }
             if j < 4 {
+                let t0 = self.diag_t;
                 e.sq[j] = sq as u32;
                 e.lpf[j] = lpf as i32;
                 e.dcp[j] = dcp;
+                e.dt[j] = now.saturating_sub(t0).min(u16::MAX as u64) as u16;
+                e.fl[j] = intf as u16 | if self.diag_ctr > 0 { 0x100 } else { 0 };
                 e.n += 1;
             }
+            self.diag_t = now;
+            self.diag_ctr = 0;
         }
         if ac < 0.0 {
             ac = 0.0;
@@ -2093,6 +2130,7 @@ impl Dmm {
         let ctb = u24(&b[3..6]) as f32;
         let cta = u24(&b[6..9]) as f32;
         let n = cta + 262_144.0;
+        self.diag_ctr = self.diag_ctr.saturating_add(1);
         hy::write(0x20, &[src]);
         hy::write(0x1B, &[0x00, 0x00, 0xFC]);
         hy::write(0x20, &[src | 2]);
