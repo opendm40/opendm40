@@ -24,10 +24,108 @@ pub enum Out {
     Measure(Option<u8>),
     /// Reply with the last reading.
     Fetch,
+    /// Scope / generator command; `None` argument = query.
+    Instr(Cmd),
+}
+
+/// Scope / generator commands (handled by the main loop with the app):
+///   SOURce:FUNCtion SIN|SQU|TRI|RAMP   SOURce:FREQuency <Hz>
+///   SOURce:VOLTage <Vpp>   SOURce:FUNCtion:SQUare:DCYCle <%>   OUTPut ON|OFF
+///   TIMebase:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
+///   TRIGger:LEVel <V>   TRIGger:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
+///   RUN  STOP  SINGle   SCOPe:MEASure:VPP|VAVG|VRMS|FREQ?
+///   WAVeform:DATA? (#3400 + 400 bytes, 0..255)   WAVeform:PREamble?
+#[derive(Clone, Copy)]
+pub enum Cmd {
+    GenFunc(Option<u8>),
+    GenFreq(Option<f32>),
+    GenVolt(Option<f32>),
+    GenDuty(Option<f32>),
+    GenOut(Option<bool>),
+    TimScale(Option<f32>),
+    ChScale(Option<f32>),
+    ChCoup(Option<bool>),
+    TrigLevel(Option<f32>),
+    TrigSlope(Option<bool>),
+    TrigSweep(Option<u8>),
+    Run,
+    Stop,
+    Single,
+    Meas(u8),
+    WavData,
+    WavPre,
+}
+
+/// Parse a number like "1.5", "-2e-3", "10k" / "5m" (suffixes k, M, m, u, n).
+pub fn parse_num(a: &[u8]) -> Option<f32> {
+    let a = trim(a);
+    if a.is_empty() {
+        return None;
+    }
+    let mut end = a.len();
+    let mut mult = 1.0f32;
+    let last = a[end - 1];
+    let suffix = match last {
+        b'K' | b'k' => Some(1e3),
+        b'M' => Some(1e6),
+        b'm' => Some(1e-3),
+        b'U' | b'u' => Some(1e-6),
+        b'N' | b'n' => Some(1e-9),
+        _ => None,
+    };
+    if let Some(m) = suffix {
+        mult = m;
+        end -= 1;
+    }
+    let t = &a[..end];
+    let mut i = 0;
+    let neg = t.first() == Some(&b'-');
+    if neg || t.first() == Some(&b'+') {
+        i += 1;
+    }
+    let mut v = 0.0f32;
+    let mut any = false;
+    while i < t.len() && t[i].is_ascii_digit() {
+        v = v * 10.0 + (t[i] - b'0') as f32;
+        i += 1;
+        any = true;
+    }
+    if i < t.len() && t[i] == b'.' {
+        i += 1;
+        let mut k = 0.1f32;
+        while i < t.len() && t[i].is_ascii_digit() {
+            v += (t[i] - b'0') as f32 * k;
+            k *= 0.1;
+            i += 1;
+            any = true;
+        }
+    }
+    if !any {
+        return None;
+    }
+    if i < t.len() && (t[i] == b'e' || t[i] == b'E') {
+        i += 1;
+        let eneg = t.get(i) == Some(&b'-');
+        if eneg || t.get(i) == Some(&b'+') {
+            i += 1;
+        }
+        let mut e = 0i32;
+        while i < t.len() && t[i].is_ascii_digit() {
+            e = e * 10 + (t[i] - b'0') as i32;
+            i += 1;
+        }
+        for _ in 0..e {
+            v = if eneg { v / 10.0 } else { v * 10.0 };
+        }
+    }
+    if i != t.len() {
+        return None;
+    }
+    Some(if neg { -v } else { v } * mult)
 }
 
 pub struct Scpi {
-    pub buf: [u8; 128],
+    pub buf: [u8; 512],
     pub len: usize,
     err: Option<&'static str>,
 }
@@ -84,7 +182,7 @@ fn func_name(mode: u8) -> &'static str {
 
 impl Scpi {
     pub const fn new() -> Self {
-        Scpi { buf: [0; 128], len: 0, err: None }
+        Scpi { buf: [0; 512], len: 0, err: None }
     }
 
     fn put(&mut self, s: &[u8]) {
@@ -153,6 +251,87 @@ impl Scpi {
                     None => self.err = Some("Command error"),
                 },
                 (b"READ", true) => out = Out::Measure(None),
+                _ if kw(p0, "SOURce") || kw(p0, "OUTPut") => {
+                    let a = trim(arg);
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let cmd = if kw(p0, "OUTPut") {
+                        Some(Cmd::GenOut(if query { None } else { Some(a == b"ON" || a == b"1") }))
+                    } else if kw(sub, "FUNCtion") && parts.len() >= 4 {
+                        Some(Cmd::GenDuty(if query { None } else { parse_num(a) }))
+                    } else if kw(sub, "FUNCtion") {
+                        let w = if kw(a, "SINusoid") {
+                            Some(0)
+                        } else if kw(a, "SQUare") {
+                            Some(1)
+                        } else if kw(a, "TRIangle") {
+                            Some(2)
+                        } else if kw(a, "RAMP") {
+                            Some(3)
+                        } else {
+                            None
+                        };
+                        Some(Cmd::GenFunc(if query { None } else { w }))
+                    } else if kw(sub, "FREQuency") {
+                        Some(Cmd::GenFreq(if query { None } else { parse_num(a) }))
+                    } else if kw(sub, "VOLTage") {
+                        Some(Cmd::GenVolt(if query { None } else { parse_num(a) }))
+                    } else {
+                        None
+                    };
+                    match cmd {
+                        Some(c) => out = Out::Instr(c),
+                        None => self.err = Some("Undefined header"),
+                    }
+                }
+                _ if kw(p0, "TIMebase") => out = Out::Instr(Cmd::TimScale(if query { None } else { parse_num(arg) })),
+                _ if kw(p0.strip_suffix(b"1").unwrap_or(p0), "CHANnel") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let a = trim(arg);
+                    out = Out::Instr(if kw(sub, "COUPling") {
+                        Cmd::ChCoup(if query { None } else { Some(a == b"AC") })
+                    } else {
+                        Cmd::ChScale(if query { None } else { parse_num(a) })
+                    });
+                }
+                _ if kw(p0, "TRIGger") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let a = trim(arg);
+                    out = Out::Instr(if kw(sub, "SLOPe") {
+                        Cmd::TrigSlope(if query { None } else { Some(!kw(a, "NEGative")) })
+                    } else if kw(sub, "SWEep") {
+                        Cmd::TrigSweep(if query {
+                            None
+                        } else if kw(a, "NORMal") {
+                            Some(1)
+                        } else if kw(a, "SINGle") {
+                            Some(2)
+                        } else {
+                            Some(0)
+                        })
+                    } else {
+                        Cmd::TrigLevel(if query { None } else { parse_num(a) })
+                    });
+                }
+                (b"RUN", false) => out = Out::Instr(Cmd::Run),
+                (b"STOP", false) => out = Out::Instr(Cmd::Stop),
+                _ if kw(p0, "SINGle") && !query => out = Out::Instr(Cmd::Single),
+                _ if kw(p0, "SCOPe") && query => {
+                    let m = parts.last().copied().unwrap_or(&[]);
+                    let k = if kw(m, "VPP") {
+                        0
+                    } else if kw(m, "VAVG") {
+                        1
+                    } else if kw(m, "VRMS") {
+                        2
+                    } else {
+                        3
+                    };
+                    out = Out::Instr(Cmd::Meas(k));
+                }
+                _ if kw(p0, "WAVeform") && query => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    out = Out::Instr(if kw(sub, "PREamble") { Cmd::WavPre } else { Cmd::WavData });
+                }
                 _ if kw(p0, "FETCh") && query => out = Out::Fetch,
                 _ if kw(p0, "SENSe") || kw(p0, "FUNCtion") => {
                     let rest = if kw(p0, "SENSe") { &parts[1..] } else { parts };
@@ -187,6 +366,18 @@ impl Scpi {
             Out::None if self.len > 0 => Out::Text,
             o => o,
         }
+    }
+
+    /// Append raw bytes to the reply.
+    pub fn put_bytes(&mut self, b: &[u8]) {
+        self.put(b);
+    }
+
+    /// Append a number in NR3.
+    pub fn put_f32(&mut self, v: f32) {
+        let mut b = [0u8; 20];
+        let n = nr3(&mut b, v);
+        self.put(&b[..n]);
     }
 
     /// Format a reading as SCPI NR3 (+1.234567E+00), or the overload value.

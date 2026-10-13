@@ -50,6 +50,9 @@ pub struct App {
     pd6_since: Option<u64>,
     /// PD6 level at boot = released (polarity not known for sure).
     pd6_idle: bool,
+    /// Last scope frame for SCPI: 400 columns (ADC code / 4) and measurements.
+    pub wave: [u8; 400],
+    pub meas: [f32; 4],
     beep_until: u64,
     pub last_raw: Option<Reading>,
     redraw: bool,
@@ -127,6 +130,8 @@ impl App {
             last_input: 0,
             dimmed: false,
             pd6_since: None,
+            wave: [0; 400],
+            meas: [0.0; 4],
             pd6_idle: unsafe { core::ptr::read_volatile(0x4002_0C10 as *const u32) } & (1 << 6) != 0,
             beep_until: 0,
             last_raw: None,
@@ -307,6 +312,15 @@ impl App {
     /// Poll the scope; draws the frame in scope views.
     pub fn scope_poll(&mut self, now: u64, can_draw: bool) {
         if let Some(f) = self.scope.poll(now) {
+            let n = f.data.len();
+            for (i, w) in self.wave.iter_mut().enumerate() {
+                let a = i * n / 400;
+                let b = ((i + 1) * n / 400).max(a + 1).min(n);
+                let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
+                *w = ((sum / (b - a) as u32) >> 2) as u8;
+            }
+            let (vpp, mean, rms, freq) = ui::measure(&f, &self.scope);
+            self.meas = [vpp, mean, rms, freq];
             if !can_draw || self.redraw {
                 return;
             }
@@ -315,7 +329,7 @@ impl App {
                     ui::SCOPE_FULL.frame(&f, &self.scope);
                     if now >= self.meas_next {
                         self.meas_next = now + 300;
-                        let (vpp, mean, rms, freq) = ui::measure(&f, &self.scope);
+                        let [vpp, mean, rms, freq] = self.meas;
                         ui::scope_measurements(vpp, mean, rms, freq);
                     }
                 }
@@ -526,5 +540,161 @@ impl App {
             }
         }
         let _ = dmm::button_of;
+    }
+
+    /// SCPI scope / generator command. Writes the reply (if any) to `out` and
+    /// returns true when there is one.
+    pub fn scpi(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
+        use crate::scpi::Cmd as C;
+        let now = clk.now_ms();
+        let mut g = self.gen.s;
+        let mut sc = self.scope.s;
+        let scope_cmd = !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenDuty(_) | C::GenOut(_));
+        if scope_cmd && !self.scope.powered() {
+            self.scope.power(true, clk);
+        }
+        let reply = match cmd {
+            C::GenFunc(Some(w)) => {
+                g.wave = Wave::ALL[w as usize % 4];
+                None
+            }
+            C::GenFunc(None) => {
+                out.put_bytes(match g.wave {
+                    Wave::Sine => b"SIN",
+                    Wave::Square => b"SQU",
+                    Wave::Triangle => b"TRI",
+                    Wave::Ramp => b"RAMP",
+                });
+                Some(())
+            }
+            C::GenFreq(Some(f)) => {
+                g.freq_hz = gen::snap_freq(g.wave, f.max(1.0) as u32);
+                None
+            }
+            C::GenFreq(None) => {
+                out.put_f32(g.freq_hz as f32);
+                Some(())
+            }
+            C::GenVolt(Some(v)) => {
+                g.amp_v = v.clamp(0.5, 3.0);
+                None
+            }
+            C::GenVolt(None) => {
+                out.put_f32(g.amp_v);
+                Some(())
+            }
+            C::GenDuty(Some(d)) => {
+                g.duty = (d.clamp(0.0, 100.0) * 100.0) as u16;
+                None
+            }
+            C::GenDuty(None) => {
+                out.put_f32(g.duty as f32 / 100.0);
+                Some(())
+            }
+            C::GenOut(Some(on)) => {
+                g.on = on;
+                None
+            }
+            C::GenOut(None) => {
+                out.put_bytes(if g.on { b"1" } else { b"0" });
+                Some(())
+            }
+            C::TimScale(Some(t)) => {
+                sc.tb = scope::SDIV
+                    .iter()
+                    .position(|&d| d >= t * 0.999)
+                    .unwrap_or(scope::TB_MAX)
+                    .clamp(scope::TB_MIN, scope::TB_MAX);
+                None
+            }
+            C::TimScale(None) => {
+                out.put_f32(scope::SDIV[sc.tb]);
+                Some(())
+            }
+            C::ChScale(Some(v)) => {
+                sc.range = scope::VDIV.iter().position(|&d| d >= v * 0.999).unwrap_or(9);
+                None
+            }
+            C::ChScale(None) => {
+                out.put_f32(scope::VDIV[sc.range]);
+                Some(())
+            }
+            C::ChCoup(Some(ac)) => {
+                sc.ac = ac;
+                None
+            }
+            C::ChCoup(None) => {
+                out.put_bytes(if sc.ac { b"AC" } else { b"DC" });
+                Some(())
+            }
+            C::TrigLevel(Some(v)) => {
+                let r = scope::VDIV[sc.range];
+                sc.trig_row = (140.0 + sc.pos as f32 - v * 141.0 / (4.0 * r)) as i32;
+                None
+            }
+            C::TrigLevel(None) => {
+                out.put_f32(self.scope.trig_volts());
+                Some(())
+            }
+            C::TrigSlope(Some(r)) => {
+                sc.rising = r;
+                None
+            }
+            C::TrigSlope(None) => {
+                out.put_bytes(if sc.rising { b"POS" } else { b"NEG" });
+                Some(())
+            }
+            C::TrigSweep(Some(m)) => {
+                sc.mode = [scope::TrigMode::Auto, scope::TrigMode::Normal, scope::TrigMode::Single][m as usize % 3];
+                None
+            }
+            C::TrigSweep(None) => {
+                out.put_bytes(match sc.mode {
+                    scope::TrigMode::Auto => b"AUTO",
+                    scope::TrigMode::Normal => b"NORM",
+                    scope::TrigMode::Single => b"SING",
+                });
+                Some(())
+            }
+            C::Run => {
+                sc.run = true;
+                None
+            }
+            C::Stop => {
+                sc.run = false;
+                None
+            }
+            C::Single => {
+                sc.mode = scope::TrigMode::Single;
+                sc.run = true;
+                None
+            }
+            C::Meas(k) => {
+                out.put_f32(self.meas[k as usize % 4]);
+                Some(())
+            }
+            C::WavData => {
+                out.put_bytes(b"#3400");
+                let w = self.wave;
+                out.put_bytes(&w);
+                Some(())
+            }
+            C::WavPre => {
+                // points, x increment (s), y: volts = (byte*4 - zero) * k.
+                out.put_bytes(b"400,");
+                out.put_f32(scope::SDIV[sc.tb] * 10.0 / 400.0);
+                out.put_bytes(b",");
+                out.put_f32(self.scope.volts(4.0) - self.scope.volts(0.0));
+                out.put_bytes(b",");
+                out.put_f32(self.scope.volts(0.0));
+                Some(())
+            }
+        };
+        if !scope_cmd {
+            self.gen_set(g);
+        } else if !matches!(cmd, C::Meas(_) | C::WavData | C::WavPre) && reply.is_none() {
+            self.scope_set(sc, now);
+        }
+        reply.is_some()
     }
 }
