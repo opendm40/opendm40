@@ -513,6 +513,129 @@ impl Dmm {
         }
     }
 
+    /// BT mode byte (bt_meas_v2_6.h section 2, forward FUN_0803c842):
+    /// bits 0-2 group, 3-5 range field, 6-7 sub-mode.
+    pub fn mode_byte(&self) -> u8 {
+        let m = self.mode;
+        match m {
+            0..=3 => {
+                let sub = matches!(m, 0 | 2) as u8;
+                let r = if self.manual {
+                    if m >= 2 { 0 } else { self.range as u8 + 1 }
+                } else if self.v_auto == 1 {
+                    6
+                } else {
+                    5
+                };
+                sub << 6 | r << 3
+            }
+            4..=9 => {
+                let sub = (m <= 6) as u8;
+                let unit = (m - 4) % 3; // 0 A, 1 mA, 2 uA
+                let r = if self.manual {
+                    [4, 2, 0][unit as usize] + self.range as u8
+                } else if self.a_auto == 1 {
+                    7
+                } else {
+                    6
+                };
+                sub << 6 | r << 3 | 1
+            }
+            10 => {
+                let r = if self.manual { self.range as u8 - 1 } else { 6 };
+                self.ohm_var << 6 | r << 3 | 2
+            }
+            11 => 0x44,
+            12 => 0x04,
+            13 => 0x03,
+            14 => 0x05,
+            _ => 0x45,
+        }
+    }
+
+    /// BT command 06 (reverse, FUN_0803c6a8 + FUN_0803c3b4). Returns true if
+    /// the function or sub-mode changed (the caller then clears HOLD/REL).
+    pub fn apply_mode_byte(&mut self, clk: &mut Clock, b: u8) -> bool {
+        let (g, r, s) = (b & 7, (b >> 3) & 7, b >> 6);
+        let before = (self.button(), self.mode_byte() & 0xC0);
+        match g {
+            0 => {
+                if self.button() != Button::Volt {
+                    self.select(clk, 1);
+                }
+                let ac = s == 1;
+                if r <= 4 {
+                    self.manual = true;
+                    if r == 0 {
+                        self.set(clk, if ac { 2 } else { 3 }, 1, 450);
+                    } else {
+                        self.set(clk, if ac { 0 } else { 1 }, r as i8 - 1, 450);
+                    }
+                } else {
+                    self.manual = false;
+                    if r == 5 {
+                        self.v_auto = 3;
+                    } else if r == 6 {
+                        self.v_auto = 1;
+                    }
+                    let mv = self.mode >= 2;
+                    let (m, rr) = if r == 6 && mv { (0, 0) } else { ((mv as u8) * 2, self.range) };
+                    let m = m + (!ac) as u8;
+                    if m != self.mode {
+                        self.set(clk, m, rr, 450);
+                    }
+                }
+            }
+            1 => {
+                if self.button() != Button::Amp {
+                    self.select(clk, 8);
+                }
+                let ac = s == 1;
+                if r <= 5 {
+                    self.manual = true;
+                    let m = if ac { 6 } else { 9 } - r / 2;
+                    self.set(clk, m, (r % 2) as i8, 650);
+                } else {
+                    self.manual = false;
+                    if r == 6 {
+                        self.a_auto = 3;
+                    } else {
+                        self.a_auto = 1;
+                    }
+                    let mut unit = (self.mode - 4) % 3;
+                    let mut rr = self.range;
+                    if r == 7 && unit == 2 {
+                        unit = 1;
+                        rr = 0;
+                    }
+                    let m = if ac { 4 } else { 7 } + unit;
+                    if m != self.mode || rr != self.range {
+                        self.set(clk, m, rr, 650);
+                    }
+                }
+            }
+            2 => {
+                if self.mode != 10 {
+                    self.select(clk, 10);
+                }
+                self.ohm_var = s & 1;
+                if r == 6 {
+                    self.manual = false;
+                    let rr = self.range;
+                    self.set(clk, 10, rr, 300);
+                } else {
+                    self.manual = true;
+                    self.set(clk, 10, (r as i8 + 1).min(6), 150);
+                }
+            }
+            3 => self.select(clk, 13),
+            4 => self.select(clk, if s == 1 { 11 } else { 12 }),
+            5 => self.select(clk, if s == 1 { 15 } else { 14 }),
+            _ => {}
+        }
+        before != (self.button(), self.mode_byte() & 0xC0)
+    }
+
     /// (Re)start measuring in the current mode.
     pub fn start(&mut self, clk: &mut Clock) {
         let (m, r) = (self.mode, self.range);

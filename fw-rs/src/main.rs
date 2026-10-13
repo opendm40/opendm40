@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod bt;
 mod clock;
 mod dmm;
 mod fonts;
@@ -9,6 +10,7 @@ mod host;
 mod hy3131;
 mod hy3131_tables;
 mod lcd;
+mod meter;
 mod mmio;
 mod scpi;
 mod startup;
@@ -96,8 +98,9 @@ fn main() -> ! {
     let bus = synopsys_usb_otg::UsbBus::new(usb::UsbFs, unsafe {
         &mut *core::ptr::addr_of_mut!(EP_MEMORY)
     });
-    let mut port = SerialPort::new(&bus);
+    // USBTMC first (interface 0), then the CDC debug port (interfaces 1, 2).
     let mut tmc = usbtmc::Usbtmc::new(&bus);
+    let mut port = SerialPort::new(&bus);
     let mut dev = UsbDeviceBuilder::new(&bus, USB_VID_PID)
         .strings(&[StringDescriptors::default()
             .manufacturer("dm40-fw")
@@ -120,6 +123,8 @@ fn main() -> ! {
     // SCPI READ?/MEASure?: reply with the first reading whose seq is >= this.
     let mut scpi_wait: Option<u32> = None;
     let mut screen = ui::Screen::new();
+    let mut meter = meter::Meter::new();
+    let mut bt = bt::Bt::new();
     let mut tp = touch::Touch::new(&mut clk);
     let mut gestures = gesture::Tracker::new();
     let mut touch_events = 0u32;
@@ -225,8 +230,12 @@ fn main() -> ! {
         }
         if now >= next_poll && !host.busy() {
             next_poll = now + 5;
-            if let Some(r) = dmm.poll(&mut clk) {
-                last_reading = Some(r);
+            if let Some(f) = bt.poll() {
+                bt.serve(&f, &mut clk, &mut dmm, &mut meter, last_reading.as_ref());
+            }
+            if let Some(raw) = dmm.poll(&mut clk) {
+                last_reading = Some(raw);
+                let Some(r) = meter.update(&raw) else { continue };
                 if let Some(min) = scpi_wait {
                     if r.seq.wrapping_sub(min) < 0x8000_0000 {
                         scpi_wait = None;
