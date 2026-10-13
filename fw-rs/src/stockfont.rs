@@ -1,5 +1,11 @@
-//! Text with the stock firmware's own bitmap fonts, read in place from the
-//! internal flash (the stock app stays installed, we only read it).
+//! Text with the stock firmware's bitmap fonts. Two data sources, chosen by the
+//! `embedded-fonts` Cargo feature; the drawing code below is shared.
+//!   default (feature off): read the stock app's fonts in place from the
+//!     internal flash (the stock app stays installed, we only read it) — small
+//!     enough for the RAM-loaded sector-8 image.
+//!   `embedded-fonts`: use our own copy of the glyph tables + bitmaps, embedded
+//!     from stockfont_data.rs (extracted by tools/mkstockfont.py), so no stock
+//!     app in flash is needed — for the future native-flash layout.
 //! Format and placement rules: firmware/re/analysis/gui_v2_6.h section 5.
 //!
 //! Font object F = { D*, vtable*, u16 line_h, i16 descent }.
@@ -12,44 +18,207 @@
 
 use crate::lcd::{self, Color};
 
-const VT_A: u32 = 0x0802_3509;
-const VT_B: u32 = 0x0802_36F5;
-
-fn r32(a: u32) -> u32 {
-    unsafe { core::ptr::read_volatile(a as *const u32) }
-}
-fn r8(a: u32) -> u8 {
-    unsafe { core::ptr::read_volatile(a as *const u8) }
-}
-
+/// A font, keyed by its original stock font-object address.
 #[derive(Clone, Copy)]
 pub struct Font(pub u32);
 
-#[derive(Clone, Copy)]
-pub struct Glyph {
-    bits: u32,
-    four: bool,
-    pub w: u8,
-    pub h: u8,
-    pub adv: u8,
-    pub yoff: i8,
-}
+// The glyph struct and the per-font data-access layer (Font::valid/line_h/
+// descent/glyph and Glyph::alpha) are the only parts that differ between the
+// two sources, so only they are cfg-gated; one `mod data` survives, and its
+// `Glyph` is re-exported below. Everything from `Rect` on down is shared.
+pub use data::Glyph;
 
-impl Glyph {
-    /// Coverage 0..15 of pixel (x, y) inside the glyph box.
-    fn alpha(&self, x: u32, y: u32) -> u8 {
-        let p = x * self.h as u32 + y;
-        if self.four {
-            let b = r8(self.bits + p / 2);
-            if p & 1 == 0 { b >> 4 } else { b & 0xF }
-        } else {
-            let b = r8(self.bits + p / 8);
-            if b & (0x80 >> (p & 7)) != 0 { 15 } else { 0 }
+// ---- Default: read the stock fonts in place from internal flash ----
+#[cfg(not(feature = "embedded-fonts"))]
+mod data {
+    use super::Font;
+
+    const VT_A: u32 = 0x0802_3509;
+    const VT_B: u32 = 0x0802_36F5;
+
+    fn r32(a: u32) -> u32 {
+        unsafe { core::ptr::read_volatile(a as *const u32) }
+    }
+    fn r8(a: u32) -> u8 {
+        unsafe { core::ptr::read_volatile(a as *const u8) }
+    }
+
+    #[derive(Clone, Copy)]
+    pub struct Glyph {
+        bits: u32,
+        four: bool,
+        pub w: u8,
+        pub h: u8,
+        pub adv: u8,
+        pub yoff: i8,
+    }
+
+    impl Glyph {
+        /// Coverage 0..15 of pixel (x, y) inside the glyph box.
+        pub(super) fn alpha(&self, x: u32, y: u32) -> u8 {
+            let p = x * self.h as u32 + y;
+            if self.four {
+                let b = r8(self.bits + p / 2);
+                if p & 1 == 0 { b >> 4 } else { b & 0xF }
+            } else {
+                let b = r8(self.bits + p / 8);
+                if b & (0x80 >> (p & 7)) != 0 { 15 } else { 0 }
+            }
+        }
+    }
+
+    impl Font {
+        /// The stock app is present and this looks like a font object.
+        pub fn valid(&self) -> bool {
+            let vt = r32(self.0 + 4);
+            (0x0800_4000..0x0808_0000).contains(&vt) && matches!(r32(vt), VT_A | VT_B)
+        }
+
+        pub fn line_h(&self) -> u16 {
+            (r32(self.0 + 8) & 0xFFFF) as u16
+        }
+
+        pub fn descent(&self) -> i16 {
+            (r32(self.0 + 8) >> 16) as i16
+        }
+
+        pub fn glyph(&self, code: u32) -> Option<Glyph> {
+            let d = r32(self.0);
+            let class_a = r32(r32(self.0 + 4)) == VT_A;
+            let (bits, tab, n, fmt) = (r32(d), r32(d + 4), r32(d + 8), r8(d + 12));
+            let es = if class_a { 12 } else { 8 };
+            let (mut lo, mut hi) = (0u32, n);
+            while lo < hi {
+                let mid = (lo + hi) / 2;
+                let e = tab + mid * es;
+                let c = r32(e);
+                if c == code {
+                    let four = fmt == 4;
+                    return Some(if class_a {
+                        Glyph {
+                            bits: bits + r32(e + 4),
+                            four,
+                            yoff: r8(e + 8) as i8,
+                            w: r8(e + 9),
+                            h: r8(e + 10),
+                            adv: r8(e + 11),
+                        }
+                    } else {
+                        let v = r32(e + 4);
+                        let w = (v & 0xFF) as u8;
+                        Glyph { bits: bits + (v >> 8), four, yoff: 0, w, h: self.line_h() as u8, adv: w }
+                    });
+                } else if c < code {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            None
         }
     }
 }
 
-// Fonts used by the multimeter page (addresses from gui_v2_6.h).
+// ---- Feature: use our embedded copy of the stock fonts ----
+#[cfg(feature = "embedded-fonts")]
+mod data {
+    use super::Font;
+
+    #[derive(Clone, Copy)]
+    pub struct Entry {
+        pub code: u32,
+        pub off: u32,
+        pub w: u8,
+        pub h: u8,
+        pub adv: u8,
+        pub yoff: i8,
+    }
+
+    #[derive(Clone, Copy)]
+    pub struct FontData {
+        pub line_h: u16,
+        pub descent: i16,
+        pub four: bool,
+        pub entries: &'static [Entry],
+        pub blob: &'static [u8],
+    }
+
+    // Embedded glyph tables + bitmap blobs (generated by tools/mkstockfont.py
+    // from the stock DM40 V2.6 app; our own copy, so no stock app in flash is
+    // needed). Pulled in with include! so stockfont stays a single module; the
+    // path resolves relative to stockfont.rs even inside this inline module.
+    include!("stockfont_data.rs");
+
+    #[derive(Clone, Copy)]
+    pub struct Glyph {
+        blob: &'static [u8],
+        off: u32,
+        four: bool,
+        pub w: u8,
+        pub h: u8,
+        pub adv: u8,
+        pub yoff: i8,
+    }
+
+    impl Glyph {
+        /// Coverage 0..15 of pixel (x, y) inside the glyph box. Column-major,
+        /// MSB-first; 4 bpp packs two pixels per byte (high nibble first).
+        pub(super) fn alpha(&self, x: u32, y: u32) -> u8 {
+            let p = x * self.h as u32 + y;
+            if self.four {
+                let b = self.blob[(self.off + p / 2) as usize];
+                if p & 1 == 0 { b >> 4 } else { b & 0xF }
+            } else {
+                let b = self.blob[(self.off + p / 8) as usize];
+                if b & (0x80 >> (p & 7)) != 0 { 15 } else { 0 }
+            }
+        }
+    }
+
+    impl Font {
+        /// True if this address has embedded font data.
+        pub fn valid(&self) -> bool {
+            font_data(self.0).is_some()
+        }
+
+        pub fn line_h(&self) -> u16 {
+            font_data(self.0).map_or(0, |f| f.line_h)
+        }
+
+        pub fn descent(&self) -> i16 {
+            font_data(self.0).map_or(0, |f| f.descent)
+        }
+
+        pub fn glyph(&self, code: u32) -> Option<Glyph> {
+            let fd = font_data(self.0)?;
+            let e = fd.entries;
+            let (mut lo, mut hi) = (0usize, e.len());
+            while lo < hi {
+                let mid = (lo + hi) / 2;
+                let c = e[mid].code;
+                if c == code {
+                    let g = &e[mid];
+                    return Some(Glyph {
+                        blob: fd.blob,
+                        off: g.off,
+                        four: fd.four,
+                        w: g.w,
+                        h: g.h,
+                        adv: g.adv,
+                        yoff: g.yoff,
+                    });
+                } else if c < code {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            None
+        }
+    }
+}
+
+// Fonts used by the multimeter page (stock font-object addresses).
 pub const F78: Font = Font(0x0806_5070); // main readout
 pub const UNIT: Font = Font(0x0805_ECB8); // main unit
 pub const LETTERS: Font = Font(0x0805_DAB4); // button letters V/A, digits/units
@@ -66,57 +235,6 @@ pub const SAVE_BT: Font = Font(0x0805_B2E8); // 0x21 Bluetooth
 pub const ON_TAG: Font = Font(0x0806_C724);
 pub const LIGHTNING: Font = Font(0x0805_A0E0);
 pub const TEXT22: Font = Font(0x0806_B13C); // menu text, class B, 1 bpp
-
-impl Font {
-    /// The stock app is present and this looks like a font object.
-    pub fn valid(&self) -> bool {
-        let vt = r32(self.0 + 4);
-        (0x0800_4000..0x0808_0000).contains(&vt) && matches!(r32(vt), VT_A | VT_B)
-    }
-
-    pub fn line_h(&self) -> u16 {
-        (r32(self.0 + 8) & 0xFFFF) as u16
-    }
-
-    pub fn descent(&self) -> i16 {
-        (r32(self.0 + 8) >> 16) as i16
-    }
-
-    pub fn glyph(&self, code: u32) -> Option<Glyph> {
-        let d = r32(self.0);
-        let class_a = r32(r32(self.0 + 4)) == VT_A;
-        let (bits, tab, n, fmt) = (r32(d), r32(d + 4), r32(d + 8), r8(d + 12));
-        let es = if class_a { 12 } else { 8 };
-        let (mut lo, mut hi) = (0u32, n);
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            let e = tab + mid * es;
-            let c = r32(e);
-            if c == code {
-                let four = fmt == 4;
-                return Some(if class_a {
-                    Glyph {
-                        bits: bits + r32(e + 4),
-                        four,
-                        yoff: r8(e + 8) as i8,
-                        w: r8(e + 9),
-                        h: r8(e + 10),
-                        adv: r8(e + 11),
-                    }
-                } else {
-                    let v = r32(e + 4);
-                    let w = (v & 0xFF) as u8;
-                    Glyph { bits: bits + (v >> 8), four, yoff: 0, w, h: self.line_h() as u8, adv: w }
-                });
-            } else if c < code {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        None
-    }
-}
 
 /// Stock alignment 0..8: 0 left/top, 1 left/vcenter, 2 left/bottom, 3 right/top,
 /// 4 right/vcenter, 5 right/bottom, 6 hcenter/top, 7 hcenter/bottom, 8 center.

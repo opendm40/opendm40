@@ -24,6 +24,9 @@ pub const TRACE: Color = 0xFFE0;
 pub const TRIG: Color = 0xFC40;
 
 pub const BAR_H: u16 = 34;
+/// Shorter status bar for the combined DMM+scope view, so the scope gets more
+/// room (standalone DMM keeps the full `BAR_H`).
+pub const BAR_H_C: u16 = 22;
 const VALUE_X1: u16 = 396; // right edge of the last digit
 const VALUE_BASE: u16 = 146;
 const UNIT_X: u16 = 404;
@@ -46,6 +49,8 @@ pub enum View {
     ScopeMenu,
     /// Generator value entry (frequency / Vpp / duty).
     Keypad,
+    /// Device / About page (stock gui_v2_6.h section 6 "6.产品信息").
+    Device,
 }
 
 impl View {
@@ -122,10 +127,21 @@ const CELLS: [[u8; 7]; 5] = [
     [40, 60, 60, 60, 60, 20, 60],
     [40, 52, 52, 52, 60, 60, 40],
 ];
+/// Compact main-readout cells for View::DmmScope: the LETTERS font (30 px,
+/// digit advance 18) instead of F78 (78 px), roughly half height, so each cell
+/// is sized to its glyph. Every row totals 152 px (the 152 px value rect) vs 360.
+const CELLS_C: [[u8; 7]; 5] = [
+    [20, 24, 12, 24, 24, 24, 24],
+    [20, 24, 24, 12, 24, 24, 24],
+    [20, 24, 24, 24, 12, 24, 24],
+    [20, 24, 24, 24, 24, 12, 24],
+    [20, 22, 22, 22, 24, 24, 18],
+];
 
 /// Mode glyph above the unit: 0x04 DC, 0x05 AC, 0x07 continuity, 0x08 diode.
-fn mode_glyph(mode: u8) -> &'static str {
+fn mode_glyph(mode: u8, acdc: bool) -> &'static str {
     match mode {
+        0..=9 if acdc => "\u{6}",
         0 | 2 | 4..=6 => "\u{5}",
         1 | 3 | 7..=9 => "\u{4}",
         11 => "\u{7}",
@@ -165,15 +181,19 @@ pub struct DmmView {
     last_mode: u8,
     last_top: Option<(bool, bool, bool)>,
     last_aux: [bool; 2],
+    /// Temperature sensor name shown instead of AUTO / MANU (set by the app,
+    /// `None` outside the temperature function).
+    pub label: Option<&'static str>,
+    last_label: Option<&'static str>,
 }
 
 /// Bottom button `i` (0..5) with its stock glyphs.
-fn dmm_button(i: usize, selected: bool, mode: u8) {
+fn dmm_button(i: usize, selected: bool, mode: u8, acdc: bool) {
     let x = 2 + 80 * i as i16;
     let c = if selected { SEL } else { BTN };
     sf::rbox(rect(x, BTN_Y as i16, 76, 40), 8, c, BG);
     let ac = matches!(mode, 0 | 2 | 4..=6);
-    let sub = if ac { "\u{5}" } else { "\u{4}" };
+    let sub = if acdc { "\u{6}" } else if ac { "\u{5}" } else { "\u{4}" };
     let r = |dx: i16, dy: i16, w: i16| rect(x + dx, BTN_Y as i16 + dy, w, 40);
     match i {
         0 => {
@@ -207,23 +227,31 @@ impl DmmView {
             last_mode: 255,
             last_top: None,
             last_aux: [false; 2],
+            label: None,
+            last_label: None,
         }
     }
 
-    pub fn draw_static(&mut self, button: Button, mode: u8) {
-        lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
-        lcd::fill_rect(0, 0, lcd::W, BAR_H, BAR);
-        for i in 0..5i16 {
-            sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
+    pub fn draw_static(&mut self, button: Button, mode: u8, acdc: bool, compact: bool) {
+        let bar_h = if compact { BAR_H_C } else { BAR_H };
+        lcd::fill_rect(0, bar_h, lcd::W, lcd::H - bar_h, BG);
+        lcd::fill_rect(0, 0, lcd::W, bar_h, BAR);
+        // History boxes only on the standalone DMM page (no history row in the
+        // combined view).
+        if !compact {
+            for i in 0..5i16 {
+                sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
+            }
         }
         let sel = button_index(button);
         for i in 0..6 {
-            dmm_button(i, i == sel, mode);
+            dmm_button(i, i == sel, mode, acdc);
         }
         self.invalidate();
     }
 
     pub fn invalidate(&mut self) {
+        self.last_label = Some("");
         self.last_fmt = 255;
         self.last_unit = "";
         self.last_mode = 255;
@@ -243,20 +271,34 @@ impl DmmView {
         self.last_txt[..n].copy_from_slice(&s.as_bytes()[..n]);
         self.last_fmt = f;
         self.last_compact = compact;
+        let mkey = r.mode | (r.acdc as u8) << 7;
         if compact {
-            sf::cells_diff(sf::F78, rect(40, 36, 360, 78), s, prev, &CELLS[f], VALUE_RED, BG);
-            sf::label(sf::UNIT, rect(401, 80, 78, 32), unit, VALUE_RED, BG, 4, -1);
-            if self.last_mode != r.mode {
-                self.last_mode = r.mode;
-                sf::label(sf::MODE, rect(437, 42, 32, 32), mode_glyph(r.mode), VALUE_RED, BG, 7, 0);
+            // Combined view: half-height value (LETTERS, 30 px) on one line,
+            // right under the short bar, with the unit and mode glyph beside it,
+            // leaving the rest of the panel to the scope.
+            sf::cells_diff(sf::LETTERS, rect(40, 24, 152, 30), s, prev, &CELLS_C[f], VALUE_RED, BG);
+            if self.last_unit != r.main.unit || self.last_mode != mkey {
+                self.last_unit = r.main.unit;
+                self.last_mode = mkey;
+                sf::label(sf::UNIT, rect(198, 24, 64, 31), unit, VALUE_RED, BG, 1, 0);
+                sf::label(sf::MODE, rect(266, 23, 32, 32), mode_glyph(r.mode, r.acdc), VALUE_RED, BG, 1, 0);
             }
         } else {
             sf::cells_diff(sf::F78, rect(40, 68, 360, 80), s, prev, &CELLS[f], VALUE_RED, BG);
-            if self.last_unit != r.main.unit || self.last_mode != r.mode {
+            if self.last_unit != r.main.unit || self.last_mode != mkey {
                 self.last_unit = r.main.unit;
-                self.last_mode = r.mode;
+                self.last_mode = mkey;
                 sf::label(sf::UNIT, rect(401, 114, 79, 32), unit, VALUE_RED, BG, 4, -1);
-                sf::label(sf::MODE, rect(437, 76, 32, 32), mode_glyph(r.mode), VALUE_RED, BG, 7, 0);
+                sf::label(sf::MODE, rect(437, 76, 32, 32), mode_glyph(r.mode, r.acdc), VALUE_RED, BG, 7, 0);
+                // AC+DC: small stock tags (AUX_TAG 0x05 AC / 0x04 DC) left of
+                // the AC part (aux1) and the DC part (aux2).
+                for (x, g) in [(8i16, "\u{5}"), (234, "\u{4}")] {
+                    if r.acdc {
+                        sf::label(sf::AUX_TAG, rect(x, 41, 24, 21), g, VALUE_RED, BG, 8, 0);
+                    } else {
+                        lcd::fill_rect(x as u16, 41, 24, 21, BG);
+                    }
+                }
             }
             // Aux readouts (stock: value right-aligned cells at y 40, unit after).
             for (i, a) in [r.aux1, r.aux2].iter().enumerate() {
@@ -267,7 +309,10 @@ impl DmmView {
                         let txt = meter::text(&mut t, v);
                         let mut u = [0u8; 16];
                         sf::label(sf::LETTERS, rect(vx - 30, 36, 138, 30), txt, VALUE_RED, BG, 4, 0);
-                        sf::label(sf::LETTERS, rect(ux, 36, 80, 30), sf::unit_text(v.unit, &mut u), VALUE_RED, BG, 1, 0);
+                        // AC+DC: the aux1 unit box (V..uA, <= 48 px) ends at 232,
+                        // (234, 41) holds the DC tag; else full width (kHz 57 px).
+                        let uw = if i == 0 && r.acdc { 54 } else { 80 };
+                        sf::label(sf::LETTERS, rect(ux, 36, uw, 30), sf::unit_text(v.unit, &mut u), VALUE_RED, BG, 1, 0);
                         self.last_aux[i] = true;
                     }
                     None if self.last_aux[i] => {
@@ -279,11 +324,28 @@ impl DmmView {
             }
         }
         let top = (r.auto && !r.auto_plus, hold, r.auto_plus);
-        if self.last_top != Some(top) {
+        if self.last_top != Some(top) || self.last_label != self.label {
             self.last_top = Some(top);
+            self.last_label = self.label;
             let s = if !r.auto { "MANU" } else if r.auto_plus { "AUTO+" } else { "AUTO" };
-            sf::label(sf::F21, rect(4, 1, 105, 32), s, STATUS_FG, BAR, 1, -1);
-            sf::label(sf::F21, rect(115, 1, 71, 32), if hold { "HOLD" } else { "RUN" }, STATUS_FG, BAR, 8, 0);
+            let hs = if hold { "HOLD" } else { "RUN" };
+            if let Some(l) = self.label {
+                // Temperature sensor name (F21 has no C / N / T: F14).
+                if compact {
+                    sf::label(sf::F14, rect(4, 0, 92, BAR_H_C as i16), l, STATUS_FG, BAR, 1, 0);
+                    sf::label(sf::F21, rect(98, 0, 60, BAR_H_C as i16), hs, STATUS_FG, BAR, 8, 0);
+                } else {
+                    sf::label(sf::F14, rect(4, 1, 105, 32), l, STATUS_FG, BAR, 1, 0);
+                    sf::label(sf::F21, rect(115, 1, 71, 32), hs, STATUS_FG, BAR, 8, 0);
+                }
+            } else if compact {
+                // Range and HOLD/RUN in the short combined-view bar.
+                sf::label(sf::F21, rect(4, 0, 90, BAR_H_C as i16), s, STATUS_FG, BAR, 1, 0);
+                sf::label(sf::F21, rect(98, 0, 60, BAR_H_C as i16), hs, STATUS_FG, BAR, 8, 0);
+            } else {
+                sf::label(sf::F21, rect(4, 1, 105, 32), s, STATUS_FG, BAR, 1, -1);
+                sf::label(sf::F21, rect(115, 1, 71, 32), hs, STATUS_FG, BAR, 8, 0);
+            }
             let _ = rel;
         }
     }
@@ -291,19 +353,22 @@ impl DmmView {
 
 /// MF range page (stock "Voltage / Current / Resistor Settings"): title bar,
 /// range buttons, DC / AC buttons. Items: (label, set_range argument).
+/// Labels: the stock DM40C set (60000 counts, flash strings 0x08078704..
+/// 0x0807889c hold the 4/5/6 sets per model); fw-rs always uses the DM40C
+/// limits (dmm.rs COUNTS_MODEL).
 pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
     match b {
         Button::Volt => &[
-            ("400mV", Some(0)), ("4V", Some(1)), ("40V", Some(2)), ("400V", Some(3)),
+            ("600mV", Some(0)), ("6V", Some(1)), ("60V", Some(2)), ("600V", Some(3)),
             ("1000V", Some(4)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
         Button::Amp => &[
-            ("400uA", Some(0)), ("4000uA", Some(1)), ("40mA", Some(2)), ("400mA", Some(3)),
-            ("4A", Some(4)), ("10A", Some(5)), ("AUTO+", Some(255)), ("AUTO", None),
+            ("600uA", Some(0)), ("6000uA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
+            ("6A", Some(4)), ("10A", Some(5)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
         Button::Ohm => &[
-            ("400\u{3a9}", Some(1)), ("4K\u{3a9}", Some(2)), ("40K\u{3a9}", Some(3)), ("400K\u{3a9}", Some(4)),
-            ("4M\u{3a9}", Some(5)), ("40M\u{3a9}", Some(6)), ("AUTO", None),
+            ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)), ("600K\u{3a9}", Some(4)),
+            ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
         ],
         _ => &[("AUTO", None)],
     }
@@ -313,7 +378,7 @@ fn range_rect(i: usize) -> sf::Rect {
     rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
 }
 
-pub fn range_page(b: Button, sel: Option<usize>, ac: bool) {
+pub fn range_page(b: Button, sel: Option<usize>, sub: u8) {
     let title = match b {
         Button::Volt => "Voltage Settings",
         Button::Amp => "Current Settings",
@@ -329,9 +394,10 @@ pub fn range_page(b: Button, sel: Option<usize>, ac: bool) {
         sf::glyphs(sf::TEXT22, range_rect(i), name, STATUS_FG, c, 8, 0);
     }
     if matches!(b, Button::Volt | Button::Amp) {
-        for (i, name) in ["DC", "AC"].iter().enumerate() {
-            let c = if (i == 1) == ac { SEL } else { 0x2966 };
-            let r = rect(8 + i as i16 * 154, 182, 150, 38);
+        // Stock: DC (8,182), AC (162,182), AC+DC (319,182), 150x38 each.
+        for (i, name) in ["DC", "AC", "AC+DC"].iter().enumerate() {
+            let c = if i as u8 == sub { SEL } else { 0x2966 };
+            let r = rect([8, 162, 319][i], 182, 150, 38);
             sf::rbox(r, 6, c, BG);
             sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
         }
@@ -341,7 +407,7 @@ pub fn range_page(b: Button, sel: Option<usize>, ac: bool) {
     sf::glyphs(sf::TEXT22, r, "OK", STATUS_FG, 0x2966, 8, 0);
 }
 
-/// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 2 OK).
+/// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK).
 pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
@@ -350,13 +416,49 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
             return Some(Ok(i));
         }
     }
-    if (182..220).contains(&y) && x < 312 {
-        return Some(Err(if x < 158 { 0 } else { 1 }));
+    if (182..220).contains(&y) && matches!(b, Button::Volt | Button::Amp) {
+        return Some(Err(if x < 158 { 0 } else if x < 316 { 1 } else { 3 }));
     }
     if (240..278).contains(&y) && x >= 319 {
         return Some(Err(2));
     }
     None
+}
+
+/// Temperature sensor names on screen (dmm.rs T_NAMES order).
+pub const T_LABELS: [&str; 7] = ["TC K", "PT100", "PT1000", "NTC10k B3950", "NTC10k B3435", "NTC100k B3950", "NTC user"];
+const T_KEYS: [&str; 12] = [
+    "TC K", "PT100", "PT1000", "10k B3950", "10k B3435", "100k B3950", "NTC user", "Offs 0", "-1.0", "-0.1", "+0.1",
+    "+1.0",
+];
+
+/// MF page of the temperature function: sensor (items 0..6), offset of that
+/// sensor (7 zero, 8..11 -1 / -0.1 / +0.1 / +1 C), an info line, OK.
+pub fn temp_page(sensor: u8, info: &str) {
+    lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
+    lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
+    sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Temperature Settings", STATUS_FG, 0x2966, 8, 0);
+    for (i, name) in T_KEYS.iter().enumerate() {
+        let c = if i == sensor as usize { SEL } else { 0x2966 };
+        sf::rbox(range_rect(i), 6, c, BG);
+        sf::glyphs(sf::TEXT22, range_rect(i), name, STATUS_FG, c, 8, 0);
+    }
+    sf::glyphs(sf::TEXT22, rect(8, 188, 464, 40), info, STATUS_FG, BG, 1, 0);
+    let r = rect(319, 240, 150, 38);
+    sf::rbox(r, 6, 0x2966, BG);
+    sf::glyphs(sf::TEXT22, r, "OK", STATUS_FG, 0x2966, 8, 0);
+}
+
+/// Temperature page touch: item 0..11, 255 = OK.
+pub fn temp_hit(x: u16, y: u16) -> Option<u8> {
+    let (x, y) = (x as i16, y as i16);
+    for i in 0..T_KEYS.len() {
+        let r = range_rect(i);
+        if x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
+            return Some(i as u8);
+        }
+    }
+    if (240..278).contains(&y) && x >= 319 { Some(255) } else { None }
 }
 
 /// History boxes (stock (5+95i,153,88,19)): values with units, newest orange.
@@ -378,8 +480,10 @@ pub fn hv_warning(on: bool) {
     sf::label(sf::LIGHTNING, rect(0, 80, 40, 64), if on { " " } else { "" }, 0xC9A0, BG, 8, 0);
 }
 
-/// Right part of the status bar: uptime, lock, BT link, battery.
-pub fn status_right(uptime_s: u32, bt: bool, bars: u8, charging: bool, locked: bool) {
+/// Right part of the status bar: uptime, lock, BT link, battery. `compact`
+/// packs it into the shorter combined-view bar; standalone DMM passes false and
+/// is pixel-identical to the stock layout.
+pub fn status_right(uptime_s: u32, bt: bool, bars: u8, charging: bool, locked: bool, compact: bool) {
     let mut t = [0u8; 8];
     let (h, m, sec) = (uptime_s / 3600 % 100, uptime_s / 60 % 60, uptime_s % 60);
     for (i, v) in [h, m, sec].iter().enumerate() {
@@ -389,12 +493,20 @@ pub fn status_right(uptime_s: u32, bt: bool, bars: u8, charging: bool, locked: b
             t[i * 3 + 2] = b':';
         }
     }
-    sf::label(sf::F21, rect(205, 5, 112, 24), core::str::from_utf8(&t).unwrap_or(""), STATUS_FG, BAR, 1, -1);
-    sf::label(sf::LOCK, rect(335, 7, 24, 20), if locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
-    sf::label(sf::SAVE_BT, rect(390, 0, 15, 32), if bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
     let g = char::from_u32(0x22 + bars.min(5) as u32).unwrap_or('"');
     let mut b = [0u8; 4];
-    sf::label(sf::BATTERY, rect(435, 9, 40, 16), g.encode_utf8(&mut b), if charging { 0x04A9 } else { STATUS_FG }, BAR, 8, 0);
+    let bc = if charging { 0x04A9 } else { STATUS_FG };
+    if compact {
+        sf::label(sf::F21, rect(205, 0, 112, 22), core::str::from_utf8(&t).unwrap_or(""), STATUS_FG, BAR, 1, 0);
+        sf::label(sf::LOCK, rect(335, 1, 24, 20), if locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
+        sf::label(sf::SAVE_BT, rect(390, 0, 15, BAR_H_C as i16), if bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
+        sf::label(sf::BATTERY, rect(435, 3, 40, 16), g.encode_utf8(&mut b), bc, BAR, 8, 0);
+    } else {
+        sf::label(sf::F21, rect(205, 5, 112, 24), core::str::from_utf8(&t).unwrap_or(""), STATUS_FG, BAR, 1, -1);
+        sf::label(sf::LOCK, rect(335, 7, 24, 20), if locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
+        sf::label(sf::SAVE_BT, rect(390, 0, 15, 32), if bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
+        sf::label(sf::BATTERY, rect(435, 9, 40, 16), g.encode_utf8(&mut b), bc, BAR, 8, 0);
+    }
 }
 
 /// Battery on the scope page top bar (stock (435,1,40,16)).
@@ -555,11 +667,17 @@ pub struct ScopeView {
 }
 
 pub const SCOPE_FULL: ScopeView = ScopeView { x0: 13, y0: 20, h: 281 };
-pub const SCOPE_COMPACT: ScopeView = ScopeView { x0: 13, y0: 134, h: 143 };
+/// Combined DMM+scope view: the scope now fills everything below the half-size
+/// DMM readout down to the DMM button row (bottom stays at y 277, as before).
+pub const SCOPE_COMPACT: ScopeView = ScopeView { x0: 13, y0: 78, h: 199 };
 
-/// "1.25us" style engineering text.
+/// "1.25us" / "2MHz" style engineering text.
 fn eng(buf: &mut [u8; 24], v: f32, unit: &str) -> usize {
-    let (k, p) = if v.abs() >= 1.0 || v == 0.0 {
+    let (k, p) = if v.abs() >= 1e6 {
+        (1e-6, "M")
+    } else if v.abs() >= 1e3 {
+        (1e-3, "k")
+    } else if v.abs() >= 1.0 || v == 0.0 {
         (1.0, "")
     } else if v.abs() >= 1e-3 {
         (1e3, "m")
@@ -615,13 +733,21 @@ impl ScopeView {
         }
     }
 
-    /// Generator state in the scope top bar (the generator keeps running).
+    /// Generator state in the scope top bar (the generator keeps running):
+    /// the frequency actually output, "--" when the wave is silent at the set
+    /// frequency (non-square above 50 kHz).
     pub fn gen_state(&self, g: &gen::Gen) {
         let mut t = [0u8; 32];
         let mut n = 0;
         if g.s.on {
             let mut b = [0u8; 24];
-            let k = eng(&mut b, g.s.freq_hz as f32, "Hz");
+            let hz = g.out_hz();
+            let k = if hz == 0 {
+                b[..2].copy_from_slice(b"--");
+                2
+            } else {
+                eng(&mut b, hz as f32, "Hz")
+            };
             let name = g.s.wave.name().as_bytes();
             let pre = b"GEN ";
             for part in [&pre[..], &name[..3.min(name.len())], b" ", &b[..k]] {
@@ -753,12 +879,16 @@ impl ScopeView {
         let r0 = sc.row_of_code(0.0);
         let slope = (sc.row_of_code(1000.0) - r0) / 1000.0;
         let row = |code: u16| -> i32 { (r0 + slope * code as f32) as i32 };
-        let (mut pa, mut pb) = (0i32, 0i32);
+        // Previous column's segment, for joining; None at the left edge and
+        // after an empty column (roll start, or a stopped record narrower than
+        // the screen), so the first column after a gap is not stretched to row 0.
+        let mut pseg: Option<(i32, i32)> = None;
         for i in 0..scope::COLS {
             let (mut lo, mut hi);
             if let Some(cols) = f.cols {
                 let (a, b) = cols[i];
                 if a == u16::MAX {
+                    pseg = None;
                     if prev[i] != (u16::MAX - 1, 0) {
                         prev[i] = (u16::MAX - 1, 0);
                         self.column_t(i as u16, &tpl, None, trig_row);
@@ -788,12 +918,11 @@ impl ScopeView {
                 lo = r;
                 hi = r;
             }
-            if i > 0 {
+            if let Some((pa, pb)) = pseg {
                 lo = lo.min(pb);
                 hi = hi.max(pa);
             }
-            pa = lo;
-            pb = hi;
+            pseg = Some((lo, hi));
             let (a, b) = (lo.min(hi), lo.max(hi));
             let (a, b) = if persist && prev[i].0 != u16::MAX && prev[i].0 != u16::MAX - 1 {
                 // Infinite persistence: keep the union of all segments drawn.
@@ -1035,20 +1164,24 @@ pub fn gen_values(g: &gen::Gen) {
     sf::glyphs(sf::TEXT22, rect(14, 40, 180, 42), s.wave.name(), STATUS_FG, G_BOX, 1, 0);
     sf::glyphs(sf::Font(0x0805_9428), rect(197, 40, 42, 42), " ", STATUS_FG, G_BOX, 8, 0);
     gen_preview(s.wave);
-    // Values.
-    let f = s.freq_hz as f32;
+    // Values. The frequency shown is the one output; when this wave is silent
+    // at the set frequency (non-square above 50 kHz) the set value is shown
+    // greyed, as it is kept for a wave that can play it.
+    let out = g.out_hz();
+    let f = if out == 0 { s.freq_hz } else { out } as f32;
+    let ffg = if out == 0 { 0x7BEF } else { STATUS_FG };
     let (fv, fu) = if f >= 1e6 { (f / 1e6, "MHz") } else if f >= 1e3 { (f / 1e3, "KHz") } else { (f, "Hz") };
     let mut t = [0u8; 16];
     let fs = crate::dmm::format(&mut t, fv, if fv >= 100.0 { 0 } else if fv >= 10.0 { 1 } else { 2 });
-    sf::label(sf::LETTERS, rect(262, 83, 150, 30), fs, STATUS_FG, G_BOX, 4, 0);
-    sf::label(sf::TEXT22, rect(421, 90, 50, 26), fu, STATUS_FG, G_BOX, 1, 0);
+    sf::label(sf::LETTERS, rect(262, 83, 150, 30), fs, ffg, G_BOX, 4, 0);
+    sf::label(sf::TEXT22, rect(421, 90, 50, 26), fu, ffg, G_BOX, 1, 0);
     let mut t = [0u8; 16];
     let a = crate::dmm::format(&mut t, s.amp_v, 1);
     sf::label(sf::LETTERS, rect(262, 173, 150, 30), a, STATUS_FG, G_BOX, 4, 0);
     sf::label(sf::TEXT22, rect(421, 176, 50, 26), "V", STATUS_FG, G_BOX, 1, 0);
     let mut t = [0u8; 16];
     let d = crate::dmm::format(&mut t, s.duty as f32 / 100.0, 1);
-    let duty_ok = s.wave == gen::Wave::Square && s.freq_hz <= 50_000;
+    let duty_ok = s.wave == gen::Wave::Square && out <= 50_000;
     let fg = if duty_ok { STATUS_FG } else { 0x7BEF };
     sf::label(sf::LETTERS, rect(262, 266, 150, 30), d, fg, G_BOX, 4, 0);
     sf::label(sf::TEXT22, rect(421, 269, 50, 26), "%", fg, G_BOX, 1, 0);
@@ -1061,27 +1194,29 @@ const K_KEY: Color = 0x6B4D;
 const K_PANEL: Color = 0xE73C;
 const K_FONT: sf::Font = sf::Font(0x0805_C5DC);
 
+type Key = (sf::Rect, &'static str, u8);
+
 /// Keys: (rect, label, code). Codes: digits, '.', 'H'/'K'/'M', '<' backspace,
-/// '=' OK.
-pub fn keypad_keys(freq: bool) -> [(sf::Rect, &'static str, u8); 15] {
-    let r = |x: i16, y: i16, w: i16, h: i16| rect(x, y, w, h);
-    if freq {
-        [
+/// '=' OK. Constant tables (cheaper in the RAM image than building them).
+pub fn keypad_keys(freq: bool) -> &'static [Key; 15] {
+    const fn r(x: i16, y: i16, w: i16, h: i16) -> sf::Rect {
+        rect(x, y, w, h)
+    }
+    const FREQ: [Key; 15] = [
             (r(228, 146, 60, 40), "1", b'1'), (r(292, 146, 60, 40), "2", b'2'), (r(356, 146, 60, 40), "3", b'3'),
             (r(420, 146, 56, 40), "H", b'H'), (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'),
             (r(356, 190, 60, 40), "6", b'6'), (r(420, 190, 56, 40), "K", b'K'), (r(228, 234, 60, 40), "7", b'7'),
             (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'), (r(420, 234, 56, 40), "M", b'M'),
             (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), "<", b'<'), (r(417, 277, 59, 40), "OK", b'='),
-        ]
-    } else {
-        [
+        ];
+    const NUM: [Key; 15] = [
             (r(228, 146, 60, 40), "1", b'1'), (r(292, 146, 60, 40), "2", b'2'), (r(356, 146, 60, 40), "3", b'3'),
             (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'), (r(356, 190, 60, 40), "6", b'6'),
             (r(228, 234, 60, 40), "7", b'7'), (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'),
             (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), ".", b'.'), (r(417, 146, 59, 84), "<", b'<'),
             (r(417, 234, 59, 83), "OK", b'='), (r(0, 0, 0, 0), "", 0), (r(0, 0, 0, 0), "", 0),
-        ]
-    }
+        ];
+    if freq { &FREQ } else { &NUM }
 }
 
 pub fn keypad(freq: bool, title: &str, input: &str, unit: &str) {
@@ -1092,7 +1227,7 @@ pub fn keypad(freq: bool, title: &str, input: &str, unit: &str) {
         sf::label(sf::TEXT22, rect(228, 108, 100, 26), title, 0x0000, K_PANEL, 1, 0);
     }
     keypad_input(freq, input, unit);
-    for (r, l, c) in keypad_keys(freq) {
+    for &(r, l, c) in keypad_keys(freq) {
         if c == 0 {
             continue;
         }
@@ -1114,7 +1249,7 @@ pub fn keypad_input(freq: bool, input: &str, unit: &str) {
 
 pub fn keypad_hit(freq: bool, x: u16, y: u16) -> Option<u8> {
     let (x, y) = (x as i16, y as i16);
-    for (r, _, c) in keypad_keys(freq) {
+    for &(r, _, c) in keypad_keys(freq) {
         if c != 0 && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
             return Some(c);
         }
@@ -1171,29 +1306,62 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
 }
 
 /// System settings (subset of the stock sections that this firmware has).
-pub const SETTINGS: [&str; 8] =
-    ["Dim screen", "Shutdown", "Backlight", "Volume", "Bluetooth", "Start page", "Analog power", "Back"];
+/// "Device" (index 7) opens the stock §6 Device/About page. "Back" is the
+/// tappable title bar (stock settings have a title-bar back, not a list row),
+/// handled by `title_back_hit`, so the list itself is only the settings.
+pub const SETTINGS: [&str; 8] = [
+    "Dim screen", "Shutdown", "Backlight", "Volume", "Bluetooth", "Start page", "Analog power",
+    "Device",
+];
+
+/// Settings/menu-page title bar: 40 px, bg 0x2966 (stock gui_v2_6.h:101).
+pub const PAGE_BAR_H: i16 = 40;
+/// Settings list geometry. Taller rows than the cramped 9-row version (vendor
+/// rows are ~37 px, gui_v2_6.h:109); 8 rows at pitch 34 fit the 320 px panel.
+const SET_Y0: i16 = 44;
+const SET_PITCH: i16 = 34;
+const SET_ROW_H: i16 = 31;
+/// Row `i` outer box. Shared by `settings()` and `settings_hit()` so the render
+/// and the touch map cannot drift.
+fn set_row(i: usize) -> sf::Rect {
+    rect(8, SET_Y0 + i as i16 * SET_PITCH, 464, SET_ROW_H)
+}
+
+/// Draw the shared menu-page title bar with a left "< Back" affordance; the
+/// whole bar is the back target (`title_back_hit`).
+fn page_title(title: &str) {
+    lcd::fill_rect(0, 0, lcd::W, PAGE_BAR_H as u16, 0x2966);
+    sf::glyphs(sf::TEXT22, rect(0, 0, 480, PAGE_BAR_H), title, STATUS_FG, 0x2966, 8, 0);
+    sf::glyphs(sf::TEXT22, rect(12, 0, 110, PAGE_BAR_H), "< Back", STATUS_FG, 0x2966, 1, 0);
+}
+
+/// A tap on the title bar is "go back".
+pub fn title_back_hit(y: u16) -> bool {
+    (y as i16) < PAGE_BAR_H
+}
 
 pub fn settings(vals: &[&str; 8]) {
-    lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
-    lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, M_BG);
-    sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Settings", STATUS_FG, 0x2966, 8, 0);
+    page_title("Settings");
+    lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
     for (i, name) in SETTINGS.iter().enumerate() {
-        let y = 44 + i as i16 * 34;
-        sf::rbox(rect(8, y, 464, 31), 6, M_TILE, M_BG);
-        sf::glyphs(sf::TEXT22, rect(20, y, 220, 31), name, STATUS_FG, M_TILE, 1, 0);
-        sf::glyphs(sf::TEXT22, rect(240, y, 220, 31), vals[i], M_ACCENT, M_TILE, 4, 0);
+        let r = set_row(i);
+        sf::rbox(r, 6, M_TILE, M_BG);
+        // Label then value kept close together (value left-aligned just past a
+        // 190 px label column) instead of flung to the far right edge.
+        sf::glyphs(sf::TEXT22, rect(r.x + 12, r.y, 190, r.h), name, STATUS_FG, M_TILE, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(r.x + 202, r.y, 250, r.h), vals[i], M_ACCENT, M_TILE, 1, 0);
     }
-    let mut t = [0u8; 8];
-    let _ = &mut t;
 }
 
 pub fn settings_hit(y: u16) -> Option<usize> {
-    if y < 44 {
+    let y = y as i16;
+    if y < SET_Y0 {
         return None;
     }
-    let i = ((y - 44) / 34) as usize;
-    if i < SETTINGS.len() { Some(i) } else { None }
+    let i = ((y - SET_Y0) / SET_PITCH) as usize;
+    // Reject taps that land in the gap between rows (pitch > row height).
+    let within = (y - SET_Y0) % SET_PITCH < SET_ROW_H;
+    if i < SETTINGS.len() && within { Some(i) } else { None }
 }
 
 pub fn view_name(v: View) -> &'static str {
@@ -1207,5 +1375,25 @@ pub fn view_name(v: View) -> &'static str {
         View::Range => "Range",
         View::ScopeMenu => "Scope settings",
         View::Keypad => "Keypad",
+        View::Device => "Device",
+    }
+}
+
+/// fw-rs firmware version, from Cargo.toml at compile time. This is the
+/// replacement firmware's own version, NOT the stock "Software V2.6".
+pub const FW_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Device / About page (stock gui_v2_6.h section 6: Vendor / Web / Model /
+/// versions, panel 0x08074a10 as left-aligned "label:value" lines). Rendered
+/// in the fw-rs settings style (title bar + rows) so it matches the other
+/// menu pages. `lines` are (label, value) pairs built by the caller.
+pub fn device_page(lines: &[(&str, &str)]) {
+    page_title("Device");
+    lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
+    for (i, (label, value)) in lines.iter().enumerate() {
+        let y = 48 + i as i16 * 36;
+        sf::rbox(rect(8, y, 464, 33), 6, M_TILE, M_BG);
+        sf::glyphs(sf::TEXT22, rect(20, y, 180, 33), label, STATUS_FG, M_TILE, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(200, y, 260, 33), value, M_ACCENT, M_TILE, 1, 0);
     }
 }

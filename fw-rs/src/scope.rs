@@ -8,7 +8,8 @@
 //! One record per frame; the trigger is found in software in the record
 //! (screen/2 samples of pre-trigger, then a search window, then screen/2).
 //! The analog front end is powered by PC4 (the stock raises it on the scope /
-//! generator pages and lowers PE2, the DMM side; see power()).
+//! generator pages and lowers PE2, the DMM side; see rails()). While PC4 is
+//! off poll() returns nothing (the scope is paused, the last frame stays).
 
 use crate::mmio::{modify32, r32, w32};
 
@@ -120,10 +121,15 @@ const TB: [(u32, u32, u32, u32); 30] = [
     (125, 125, 2, 1),
     (50, 125, 2, 1),
 ];
-/// User timebase range (stock: 100 ns/div .., YT up to 1 s/div; here up to
-/// 500 ms/div with one record per frame).
+/// User timebase range. Stock `SCOPE_TB_USER_MIN`/`MAX` = 3..29 (100 ns/div ..
+/// 50 s/div, `scope_gen_ui_v2_6.h:522`/`523`; label list `scope_sdiv[30]`
+/// `:494`). fw-rs now matches the full range: 3..29. In YT (non-roll) mode the
+/// stock caps the index at 24 (1 s/div, `SCOPE_TB_YT_MAX`, `:524`); 22..29
+/// (200 ms .. 50 s/div) run in roll mode when Roll is on.
 pub const TB_MIN: usize = 3;
-pub const TB_MAX: usize = 23;
+pub const TB_MAX: usize = 29;
+/// Highest index usable in YT (non-roll) mode: 1 s/div (stock `SCOPE_TB_YT_MAX`).
+pub const TB_YT_MAX: usize = 24;
 
 /// V/div of hardware range r (x1 probe), front-end GPIO row {PC13, PB15, PD12,
 /// PD13}, calibration voltage X_r and default gain point.
@@ -211,8 +217,8 @@ pub struct Scope {
     pub s: Settings,
     /// Roll display enabled (used from TB_ROLL up).
     pub roll: bool,
-    /// Both analog rails on (see power_both).
-    both: bool,
+    /// DMM rail (PE2) on; `powered` is the scope rail (PC4).
+    dmm_on: bool,
     rolling: bool,
     roll_written: u64,
     roll_last_wr: usize,
@@ -225,6 +231,21 @@ pub struct Scope {
     powered: bool,
     screen: usize,
     rec: usize,
+    // Stop-and-zoom: the last captured record, kept in BUF while stopped so a
+    // timebase change re-renders it at the new s/div (stock §3 "Zoom", state 6).
+    stored_valid: bool,
+    stored_len: usize,
+    stored_trig: Option<usize>,
+    stored_anchor: usize,
+    stored_fs: u32,
+    /// Hardware range the stored codes were captured with (the code -> volts
+    /// gain); the current range only sets the display scale while stopped.
+    stored_range: usize,
+    /// Stored record came from roll mode: newest sample at the right edge.
+    stored_roll: bool,
+    /// Emit one re-render of the stored record on the next poll (set on any
+    /// settings change while stopped and by `refresh`); no periodic re-render.
+    zoom_pending: bool,
 }
 
 impl Scope {
@@ -260,62 +281,68 @@ impl Scope {
             seq: 0,
             relay_until: 0,
             last_pc13: 2,
-            powered: false,
+            // Unknown levels after the stock / boot: claim "scope on, DMM off"
+            // so the first rails() call drives both pins to a known state.
+            powered: true,
             screen: 0,
             rec: 0,
             roll: true,
-            both: false,
+            dmm_on: false,
             rolling: false,
             roll_written: 0,
             roll_last_wr: 0,
             roll_next: 0,
+            stored_valid: false,
+            stored_len: 0,
+            stored_trig: None,
+            stored_anchor: 0,
+            stored_fs: 0,
+            stored_range: 0,
+            stored_roll: false,
+            zoom_pending: false,
         };
         sc.apply(Settings::DEFAULT, 0);
         sc
     }
 
-    /// Analog power as the stock pages do it: scope/generator side (PC4 = 1,
-    /// 10 ms, PE2 = 0) or DMM side (PE2 = 1, 10 ms, PC4 = 0). The new rail always
-    /// comes up before the old one goes down.
-    pub fn power(&mut self, scope_side: bool, clk: &mut crate::clock::Clock) {
-        if self.both {
-            // Leaving "both": fall back to one side.
-            self.both = false;
-            self.powered = !scope_side;
-        }
-        if scope_side == self.powered {
+    /// Analog rails: DMM side PE2, scope / generator side PC4 (the stock
+    /// raises PC4 on its scope / generator pages and PE2 on the DMM page, never
+    /// both). A rail that comes up does so 10 ms before one goes down, as the
+    /// stock page switch; at least one rail stays on. Cheap when nothing
+    /// changes (called every tick by App::update_rails).
+    pub fn rails(&mut self, dmm: bool, scope: bool, clk: &mut crate::clock::Clock) {
+        let dmm = dmm || !scope;
+        if dmm == self.dmm_on && scope == self.powered {
             return;
         }
-        self.powered = scope_side;
-        if scope_side {
+        if scope && !self.powered {
             pin(GPIOC, 4, true);
             out(GPIOC, 4);
-            clk.delay_ms(10);
-            pin(GPIOE, 2, false);
-            out(GPIOE, 2);
             self.relay_until = clk.now_ms() + 200;
-        } else {
-            self.stop();
+        }
+        if dmm && !self.dmm_on {
             pin(GPIOE, 2, true);
             out(GPIOE, 2);
+        }
+        if (!scope && self.powered) || (!dmm && self.dmm_on) {
             clk.delay_ms(10);
+        }
+        if !scope && self.powered {
+            self.halt();
             pin(GPIOC, 4, false);
             out(GPIOC, 4);
         }
+        if !dmm && self.dmm_on {
+            pin(GPIOE, 2, false);
+            out(GPIOE, 2);
+        }
+        self.powered = scope;
+        self.dmm_on = dmm;
     }
 
-    /// Both analog rails on (DMM and scope at the same time; the stock
-    /// firmware never does this, so it is an opt-in setting).
-    pub fn power_both(&mut self, clk: &mut crate::clock::Clock) {
-        pin(GPIOC, 4, true);
-        out(GPIOC, 4);
-        pin(GPIOE, 2, true);
-        out(GPIOE, 2);
-        if !self.powered {
-            self.powered = true;
-            self.relay_until = clk.now_ms() + 200;
-        }
-        self.both = true;
+    /// DMM rail (PE2) on.
+    pub fn dmm_rail(&self) -> bool {
+        self.dmm_on
     }
 
     pub fn powered(&self) -> bool {
@@ -326,9 +353,22 @@ impl Scope {
         cal_pair(0x08, r, (G_DEFAULT[r], 512.0))
     }
 
-    /// ADC code -> volts (FUN_080301a0, without the position).
+    /// Hardware range of the codes currently being served: the capture range
+    /// of the stored record while stopped, else the live range. A V/div change
+    /// while stopped then rescales the old codes with the gain they were taken
+    /// at (a digital vertical zoom) instead of re-mapping them with the new
+    /// range's gain. Right after STOP the two are equal, so the re-render maps
+    /// every code to the same row as the live frame did.
+    fn code_range(&self) -> usize {
+        if !self.s.run && self.stored_valid { self.stored_range } else { self.s.range }
+    }
+
+    /// ADC code -> volts (FUN_080301a0, without the position). The probe is the
+    /// current one: it only relabels (stock: "P scales the sample map and the
+    /// displayed V/div only"), so a probe change while stopped relabels the
+    /// stored trace without moving it.
     pub fn volts(&self, code: f32) -> f32 {
-        let r = self.s.range;
+        let r = self.code_range();
         let (g0, g1) = self.gain(r);
         (code - g1) * XR[r] / (g0 - g1) * self.s.probe
     }
@@ -353,9 +393,28 @@ impl Scope {
     }
 
     pub fn apply(&mut self, s: Settings, now: u64) {
-        self.stop();
+        // A user STOP (run -> stop) freezes what is on screen; any other change
+        // just aborts the acquisition in flight (it restarts in poll()).
+        if self.s.run && !s.run {
+            self.freeze(now);
+        } else {
+            self.halt();
+        }
         let mut s = s;
-        s.tb = s.tb.clamp(TB_MIN, TB_MAX);
+        // Roll on: full 3..29 (22.. rolls). Roll off: YT only, capped at 24
+        // (1 s/div). Single never rolls (one linear record), so it is capped at
+        // the YT maximum too: at 2..50 s/div a full linear record would take
+        // 21..532 s with nothing drawn until it completes.
+        let top = if self.roll && s.mode != TrigMode::Single { TB_MAX } else { TB_YT_MAX };
+        s.tb = s.tb.clamp(TB_MIN, top);
+        // Stop-and-zoom: while stopped any change re-renders the stored record
+        // at the new settings. The timebase is never clamped to the captured
+        // extent: zooming out past it shows the record at the true scale with
+        // empty columns around it (zoom_frame), so neither the STOP press nor a
+        // later change silently picks a different s/div.
+        if !s.run && self.stored_valid {
+            self.zoom_pending = true;
+        }
         s.range = s.range.min(9);
         s.trig_row = s.trig_row.clamp(-10, 290);
         s.pos = s.pos.clamp(-392, 392);
@@ -380,11 +439,16 @@ impl Scope {
         unsafe { w32(TIM3 + 0x3C, ccr) };
         let (_, num, den, ppp) = TB[s.tb];
         self.screen = ((num * COLS as u32 / den / ppp) as usize).max(2);
-        self.rec = (self.screen + WIN).min(CAP);
+        // Single captures the full record (stock Single = 65520 samples) so the
+        // stored-record zoom can pan/zoom out; Auto/Normal keep one screen + the
+        // trigger window per frame.
+        self.rec = if s.mode == TrigMode::Single { CAP } else { (self.screen + WIN).min(CAP) };
         self.deadline = 0;
     }
 
-    fn stop(&mut self) {
+    /// Stop the acquisition hardware (timers + DMA). Leaves BUF and the stored
+    /// record state alone.
+    fn halt(&mut self) {
         unsafe {
             modify32(TIM1, 1, 0);
             modify32(TIM8, 1, 0);
@@ -393,6 +457,104 @@ impl Scope {
             while r32(S4) & 1 != 0 || r32(S3) & 1 != 0 {}
         }
         self.busy = false;
+        self.rolling = false;
+    }
+
+    /// User STOP: keep the frame the user is looking at.
+    ///  * Roll: the roll display is the newest data in BUF, so linearise it.
+    ///  * Nothing in flight: the stored record is the last frame poll() showed
+    ///    (or nothing, if poll() discarded the last record).
+    ///  * A linear acquisition in flight has already overwritten (part of) the
+    ///    displayed frame. If it is complete, treat it exactly as poll() would:
+    ///    trigger search and the Auto/Normal/Single show rule; a frame poll()
+    ///    would have shown becomes the stored record and is drawn. Otherwise
+    ///    (partial, or a record poll() would have discarded) there is no record
+    ///    to zoom: the screen stays frozen as drawn, as the stock STOP does.
+    fn freeze(&mut self, now: u64) {
+        let was_busy = self.busy;
+        let was_rolling = self.rolling;
+        let ndtr = unsafe { r32(S4 + 0x04) };
+        self.halt();
+        if !was_busy {
+            return;
+        }
+        self.stored_valid = false;
+        if was_rolling {
+            self.snapshot_roll();
+        } else if ndtr == 0 {
+            if self.finish(now).is_some() {
+                self.zoom_pending = true;
+            }
+        }
+    }
+
+    /// Mask BUF[0..len] to 10 bits and mark it as the stored record, captured
+    /// with the current settings (fs, range).
+    fn snapshot_mark(&mut self, len: usize, anchor: usize, trig: Option<usize>, roll: bool) {
+        if len < 2 {
+            self.stored_valid = false;
+            return;
+        }
+        let buf = unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..len] };
+        for v in buf.iter_mut() {
+            *v &= 0x3FF;
+        }
+        self.stored_len = len;
+        self.stored_fs = self.sample_rate();
+        self.stored_range = self.s.range;
+        self.stored_roll = roll;
+        self.stored_anchor = anchor.min(len - 1);
+        self.stored_trig = trig;
+        self.stored_valid = true;
+    }
+
+    /// A complete linear record (NDTR = 0, hardware halted): trigger search and
+    /// the stock show rule. Returns the start of the visible window and the
+    /// trigger when the frame is to be shown, and makes it the stored record
+    /// (anchored on the on-screen centre); a discarded record (Normal / Single
+    /// without trigger, Auto before its timeout) invalidates the stored record,
+    /// since its samples have replaced the frame that was shown before.
+    fn finish(&mut self, now: u64) -> Option<(usize, Option<usize>)> {
+        let n = self.rec;
+        let half = self.screen / 2;
+        let win = WIN.min(n - self.screen);
+        // Mask once here (snapshot_mark), then search in the masked record.
+        self.snapshot_mark(n, 0, None, false);
+        let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
+        let trig = self.find_trigger(&data[half..half + win]).map(|i| i + half);
+        let show = match (trig, self.s.mode) {
+            (Some(_), _) => true,
+            (None, TrigMode::Auto) => now >= self.deadline,
+            (None, _) => false,
+        };
+        if !show {
+            self.stored_valid = false;
+            return None;
+        }
+        let start = trig.map(|t| t - half).unwrap_or(win / 2);
+        if self.stored_valid {
+            self.stored_trig = trig;
+            self.stored_anchor = (start + self.screen / 2).min(self.stored_len - 1);
+        }
+        Some((start, trig))
+    }
+
+    /// Roll record: linearise the circular buffer so the stored record runs
+    /// oldest -> newest, anchored at the newest sample (the right edge the user
+    /// was watching). Matches the stock 65520-sample roll record (§3), capped at
+    /// the fw-rs 26 K capacity.
+    fn snapshot_roll(&mut self) {
+        let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
+        let d = (wr + CAP - self.roll_last_wr) % CAP;
+        self.roll_written += d as u64;
+        self.roll_last_wr = wr;
+        let len = if self.roll_written >= CAP as u64 {
+            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(wr) };
+            CAP
+        } else {
+            wr.min(CAP)
+        };
+        self.snapshot_mark(len, len.saturating_sub(1), None, true);
     }
 
     fn start(&mut self) {
@@ -432,7 +594,12 @@ impl Scope {
             };
             w32(S4 + 0x08, src);
             w32(S4 + 0x0C, buf);
-            self.rolling = self.roll && self.s.tb >= TB_ROLL;
+            // Roll from 200 ms/div (TB_ROLL) when Roll is on, except in Single,
+            // which captures a full linear record like the stock Single mode.
+            self.rolling = self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single;
+            // BUF is about to be overwritten: the previous stored record is gone
+            // until this acquisition completes (or is snapshotted in stop()).
+            self.stored_valid = false;
             let (len, circ) = if self.rolling { (CAP as u32, 1 << 8) } else { (self.rec as u32, 0) };
             self.roll_written = 0;
             self.roll_last_wr = 0;
@@ -453,9 +620,28 @@ impl Scope {
         TB[self.s.tb].3
     }
 
+    /// Ask for one re-render of the stored record while stopped (a scope view
+    /// was (re)drawn, or its trace cache was invalidated). No-op while running.
+    pub fn refresh(&mut self) {
+        if !self.s.run && self.stored_valid {
+            self.zoom_pending = true;
+        }
+    }
+
     /// Poll: start / finish frames. Returns the visible window when ready.
     pub fn poll(&mut self, now: u64) -> Option<Frame<'static>> {
-        if !self.s.run || !self.powered || now < self.relay_until {
+        if !self.s.run {
+            // Stopped: re-render the stored record (stock STOP "keeps redrawing
+            // the stored record", §4) once per change (zoom_pending: a settings
+            // change, or `refresh` from a view redraw). Nothing is recomputed
+            // while nothing changes, whatever view is shown.
+            if self.stored_valid && self.zoom_pending {
+                self.zoom_pending = false;
+                return self.zoom_frame();
+            }
+            return None;
+        }
+        if !self.powered || now < self.relay_until {
             return None;
         }
         if !self.busy {
@@ -479,31 +665,15 @@ impl Scope {
         if unsafe { r32(S4 + 0x04) } != 0 {
             return None;
         }
-        self.stop();
-        let n = self.rec;
-        {
-            let raw = unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..n] };
-            for v in raw.iter_mut() {
-                *v &= 0x3FF;
-            }
-        }
-        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
-        let half = self.screen / 2;
-        let win = WIN.min(n - self.screen);
-        let trig = self.find_trigger(&data[half..half + win]).map(|i| i + half);
-        let show = match (trig, self.s.mode) {
-            (Some(_), _) => true,
-            (None, TrigMode::Auto) => now >= self.deadline,
-            (None, _) => false,
-        };
-        if !show {
-            return None;
-        }
+        self.halt();
+        // The shown frame becomes the stored record (trigger + on-screen centre
+        // remembered so a later zoom stays on this feature).
+        let (start, trig) = self.finish(now)?;
         self.deadline = 0;
         if trig.is_some() && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
-        let start = trig.map(|t| t - half).unwrap_or(win / 2);
+        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..self.rec] };
         self.seq = self.seq.wrapping_add(1);
         Some(Frame { data: &data[start..start + self.screen], cols: None, trig, fs: self.sample_rate(), seq: self.seq })
     }
@@ -540,6 +710,68 @@ impl Scope {
         }
         self.seq = self.seq.wrapping_add(1);
         Some(Frame { data: &[], cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs: self.sample_rate(), seq: self.seq })
+    }
+
+    /// Samples of the stored record that fill the 400 px screen at timebase
+    /// `tb`, using the sample rate the record was captured at. Equivalent to the
+    /// stock stored-record re-render (§3): the s/div changes while fs is fixed,
+    /// so the window = screen(tb) * stored_fs / fs(tb) (integer, no f32).
+    /// Saturates at u32::MAX samples (zooming a 50 MS/s record out to 50 s/div
+    /// asks for ~2.5e10); zoom_frame works in u64 with any value.
+    fn zoom_screen(&self, tb: usize) -> u64 {
+        let (fs_tb, num, den, ppp) = TB[tb];
+        let screen = (num * COLS as u32 / den / ppp).max(2) as u64;
+        (screen * self.stored_fs as u64 / fs_tb.max(1) as u64).clamp(2, u32::MAX as u64)
+    }
+
+    /// Re-render a window of the stored record at the current timebase, anchored
+    /// on the feature that was on screen when acquisition stopped (a roll record
+    /// on its newest sample at the right edge, as it was displayed).
+    fn zoom_frame(&mut self) -> Option<Frame<'static>> {
+        if !self.stored_valid || self.stored_len < 2 || self.stored_fs == 0 {
+            return None;
+        }
+        let len = self.stored_len;
+        let want = self.zoom_screen(self.s.tb);
+        self.seq = self.seq.wrapping_add(1);
+        if want <= len as u64 {
+            let want = want as usize;
+            let start = if self.stored_roll {
+                len - want
+            } else {
+                self.stored_anchor.saturating_sub(want / 2).min(len - want)
+            };
+            let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + want] };
+            let trig = self.stored_trig.and_then(|t| t.checked_sub(start).filter(|_| t < start + want));
+            return Some(Frame { data, cols: None, trig, fs: self.stored_fs, seq: self.seq });
+        }
+        // The screen spans more time than was captured: draw the record at its
+        // true scale as per-column min/max (the roll-frame format) with empty
+        // columns where there is no data, instead of stretching it to 400 px.
+        // f32 column edges: exact up to 2^24 samples, and beyond that a column
+        // spans >= 40 K samples (> the whole record), so rounding is invisible.
+        let step = want as f32 / COLS as f32;
+        let w0 = if self.stored_roll { len as f32 - want as f32 } else { self.stored_anchor as f32 - (want / 2) as f32 };
+        let buf = unsafe { &*core::ptr::addr_of!(BUF) };
+        let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
+        for (i, c) in cols.iter_mut().enumerate() {
+            let af = w0 + i as f32 * step;
+            let bf = af + step;
+            *c = (u16::MAX, u16::MAX);
+            if bf <= 0.0 || af >= len as f32 {
+                continue; // no data in this column
+            }
+            // A negative left edge saturates to 0 in the cast.
+            let a = af as usize;
+            let b = (bf as usize).max(a + 1).min(len);
+            let (mut lo, mut hi) = (u16::MAX, 0u16);
+            for &v in &buf[a..b] {
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+            *c = (lo, hi);
+        }
+        Some(Frame { data: &[], cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs: self.stored_fs, seq: self.seq })
     }
 
     /// Stock software trigger: beyond the hysteresis band (code -+ 2) on the

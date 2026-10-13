@@ -1,10 +1,18 @@
-//! Capacitive touch panel: Hynitron CST2xx-type controller at 7-bit 0x5A on
-//! the I2C3 pins (SCL = PA8, SDA = PC9), reset = PE6, INT = PE5 (falling edge,
-//! pull-up). Protocol from firmware/re/analysis/touch_v2_6.h (the stock also
-//! probes a Goodix GT1158 at 0x14 first; this unit has the 0x5A chip).
+//! Capacitive touch panel on the I2C3 pins (SCL = PA8, SDA = PC9), reset = PE6,
+//! INT = PE5 (falling edge, pull-up). Two controllers are supported, selected at
+//! init by probing in the stock order (firmware/re/analysis/touch_v2_6.h):
+//!   1. Goodix GT1158 at 7-bit 0x14 (8-bit 0x28) — probed first (header §Goodix,
+//!      lines 8/110-118/140). Absent on this unit; the probe NAKs and we fall
+//!      back to 0x5A, so the 0x5A bus traffic below is byte-identical to before.
+//!   2. Hynitron CST2xx-type at 7-bit 0x5A (8-bit 0xB4) — the chip on this unit.
+//! The detected controller is stored in `Ctrl`; `poll()` dispatches on it so the
+//! coordinate + side-key output to the rest of the firmware is identical either
+//! way (gesture.rs / app.rs see the same `Event`).
 //!
-//! Register addresses are 16-bit big-endian and always sent as their own write
-//! followed by STOP, then a separate read (no repeated start).
+//! Register addresses are 16-bit big-endian on both chips and always sent as
+//! their own write followed by STOP, then a separate read (no repeated start).
+//!
+//! Hynitron 0x5A (header §INIT/§FRAME, lines 41-68):
 //!   init:  write D1 01; write D2 04 + read 4 (byte 2 = chip type, 0xA8);
 //!          write D1 09
 //!   frame: write D0 00 + read 7; byte 6 must be 0xAB; n = byte5 & 7 points;
@@ -15,6 +23,23 @@
 //!   keys:  b0 bit 7 = key report; b0 = 0x83 while held, 0x80 on release
 //!          (measured). Code from X (measured 372/628/884/1140): < 500 -> 0,
 //!          < 750 -> 1, < 1000 -> 2, else 3.
+//!
+//! Goodix GT1158 (header §Goodix, lines 98/110-118; correct-by-construction,
+//! not testable on this unit which has the 0x5A chip):
+//!   id:    read 0x8140 (4 bytes) == ASCII "1158"
+//!   init:  write 0x8040 = 0x02; wait 10 ms; write 0x8040 = 0x00 (normal report)
+//!   frame: read 0x814E (1 byte status): bit7 = buffer ready, bit4 = HaveKey,
+//!          bits 3..0 = point count. Only act when bit7 set; then clear the
+//!          buffer with a write 0x814E = 0x00 (stock order: status, clear, then
+//!          point/key reads — header line 112). Point i coords are 4 bytes at
+//!          0x8150 + 8*i = X lo, X hi, Y lo, Y hi. The GT1158 reports native
+//!          portrait (320x480); the stock swaps into the landscape GUI frame with
+//!          NO scale/mirror (header 115-116): GUI x = Goodix Y, GUI y = Goodix X.
+//!   keys:  key byte (value 1/2/4/8 -> code 0..3) at 0x814F + 8*n (header 98/113).
+//!   Because this is a polled driver (no EXTI) and the GT1158 INT behaviour is
+//!   unknown, the Goodix path also force-polls the buffer-ready flag every
+//!   ~10 ms so a short INT pulse missed during a long loop iteration cannot leave
+//!   touch stuck; the 0x5A path stays purely INT-level driven (unchanged).
 //!
 //! Bit-banged I2C with open-drain GPIO, polled from the main loop when INT is
 //! low (to be moved to the I2C3 peripheral).
@@ -31,7 +56,29 @@ const RST: u32 = 6; // PE6
 const INT: u32 = 5; // PE5
 
 const T: u32 = 4; // half bit, us (~100 kHz)
-const ADDR: u8 = 0x5A;
+const ADDR: u8 = 0x5A; // Hynitron, this unit
+const ADDR_GOODIX: u8 = 0x14; // GT1158 (8-bit 0x28), header line 140
+
+// Goodix GT1158 16-bit big-endian registers (header §Goodix, lines 110-118).
+const GT_REG_PRODUCT_ID: u16 = 0x8140; // read 4 == "1158"
+const GT_REG_COMMAND: u16 = 0x8040; // init: 0x02 then 0x00
+const GT_REG_STATUS: u16 = 0x814E; // bit7 ready, bit4 HaveKey, bits3..0 count
+const GT_REG_POINT0: u16 = 0x8150; // point i coords (4 bytes) at +8*i
+const GT_REG_KEY0: u16 = 0x814F; // key byte at +8*n (point stride 8)
+const GT_ID: [u8; 4] = *b"1158";
+/// Force a Goodix buffer-ready read at least this often even without an INT
+/// edge (the GT1158 INT behaviour is unknown and the loop can stall on a flash
+/// write; the 0x5A path does NOT use this).
+const GT_POLL_MS: u64 = 10;
+
+/// Which touch controller was detected at init.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ctrl {
+    /// Hynitron CST2xx-type at 0x5A (this unit).
+    Hynitron,
+    /// Goodix GT1158 at 0x14 (fallback for panels without the 0x5A chip).
+    Goodix,
+}
 
 fn od_pin(port: u32, pin: u32) {
     unsafe {
@@ -128,9 +175,9 @@ fn rx(ack: bool) -> u8 {
     b
 }
 
-fn write(data: &[u8]) -> bool {
+fn write_at(addr: u8, data: &[u8]) -> bool {
     start();
-    let mut ok = tx(ADDR << 1);
+    let mut ok = tx(addr << 1);
     for &b in data {
         ok = ok && tx(b);
     }
@@ -138,9 +185,9 @@ fn write(data: &[u8]) -> bool {
     ok
 }
 
-fn read(buf: &mut [u8]) -> bool {
+fn read_at(addr: u8, buf: &mut [u8]) -> bool {
     start();
-    if !tx((ADDR << 1) | 1) {
+    if !tx((addr << 1) | 1) {
         stop();
         return false;
     }
@@ -152,8 +199,21 @@ fn read(buf: &mut [u8]) -> bool {
     true
 }
 
+fn read_reg_at(addr: u8, reg: u16, buf: &mut [u8]) -> bool {
+    write_at(addr, &reg.to_be_bytes()) && read_at(addr, buf)
+}
+
+// 0x5A (Hynitron) wrappers — unchanged behaviour (addr fixed to ADDR = 0x5A).
+fn write(data: &[u8]) -> bool {
+    write_at(ADDR, data)
+}
+
+fn read(buf: &mut [u8]) -> bool {
+    read_at(ADDR, buf)
+}
+
 fn read_reg(reg: u16, buf: &mut [u8]) -> bool {
-    write(&reg.to_be_bytes()) && read(buf)
+    read_reg_at(ADDR, reg, buf)
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -172,6 +232,8 @@ pub struct Event {
 }
 
 pub struct Touch {
+    /// Detected controller; `poll()` dispatches on it.
+    ctrl: Ctrl,
     pub chip: [u8; 4],
     /// Raw first 7 bytes of the last frame (for debugging).
     pub raw: [u8; 7],
@@ -187,6 +249,9 @@ pub struct Touch {
     /// or right after it are the controller's own long-press gesture, not a
     /// side key, and are dropped.
     last_point: u64,
+    /// Goodix only: last time the buffer-ready flag was force-polled (see
+    /// GT_POLL_MS). Unused on the Hynitron path.
+    last_gt_poll: u64,
 }
 
 const DEBOUNCE_MS: u64 = 40;
@@ -232,45 +297,90 @@ impl Touch {
         unsafe { w32(GPIOE + 0x18, 1 << RST) };
         clk.delay_ms(200);
 
+        // Probe the Goodix GT1158 first (stock order, header lines 8/110-118).
+        // On this unit it NAKs at 0x14, so read_reg_at returns false and we fall
+        // through to the 0x5A chip; the 0x5A traffic below is unchanged.
+        let mut id = [0u8; 4];
+        if read_reg_at(ADDR_GOODIX, GT_REG_PRODUCT_ID, &mut id) && id == GT_ID {
+            // GT1158 config: command 0x02, settle, then 0x00 = normal reporting
+            // (header line 111). Clear any stale buffer so the first INT is fresh.
+            // The PE5 pull-up is left enabled (electrically safe); the stock drops
+            // it after a Goodix probe (header 34-35) but that is not required here.
+            write_at(ADDR_GOODIX, &[(GT_REG_COMMAND >> 8) as u8, GT_REG_COMMAND as u8, 0x02]);
+            clk.delay_ms(10);
+            write_at(ADDR_GOODIX, &[(GT_REG_COMMAND >> 8) as u8, GT_REG_COMMAND as u8, 0x00]);
+            write_at(ADDR_GOODIX, &[(GT_REG_STATUS >> 8) as u8, GT_REG_STATUS as u8, 0x00]);
+            return Some(Touch {
+                ctrl: Ctrl::Goodix,
+                chip: id, // "1158"
+                raw: [0; 7],
+                ring: [[0; 7]; 8],
+                ring_i: 0,
+                last: Event::default(),
+                pending: None,
+                last_point: 0,
+                last_gt_poll: 0,
+            });
+        }
+
+        // Hynitron 0x5A (this unit): unchanged init. ACK-only identify.
         let mut chip = [0u8; 4];
         let ok = write(&[0xD1, 0x01]) && read_reg(0xD204, &mut chip) && write(&[0xD1, 0x09]);
         if !ok {
             return None;
         }
-        Some(Touch { chip, raw: [0; 7], ring: [[0; 7]; 8], ring_i: 0, last: Event::default(), pending: None, last_point: 0 })
+        Some(Touch { ctrl: Ctrl::Hynitron, chip, raw: [0; 7], ring: [[0; 7]; 8], ring_i: 0, last: Event::default(), pending: None, last_point: 0, last_gt_poll: 0 })
     }
 
-    /// Poll: reads a frame when INT is low. Returns the new (debounced) state
-    /// on a change.
+    /// Poll: reads a frame when due, dispatches to the detected controller, and
+    /// returns the new (debounced) state on a change. The decoded tuple is
+    /// `(pressed, key, point, n_points, key_code)`, identical for both chips, so
+    /// the debounce tail below and the rest of the firmware never see the panel.
     pub fn poll(&mut self, now: u64) -> Option<Event> {
-        if !int_low() {
-            if let Some((ev, t)) = self.pending {
-                if now.saturating_sub(t) >= DEBOUNCE_MS {
-                    self.pending = None;
-                    if ev != self.last {
-                        self.last = ev;
-                        return Some(ev);
-                    }
+        // Hynitron is driven purely by INT level, exactly as before. Goodix is
+        // additionally force-polled on a timer: its INT behaviour is unknown and
+        // the main loop can stall (flash writes), so a short INT pulse must not
+        // be able to leave touch stuck. The `ctrl == Goodix` guard short-circuits
+        // on this 0x5A unit, so the 0x5A timing is unchanged.
+        let due = int_low()
+            || (self.ctrl == Ctrl::Goodix && now.saturating_sub(self.last_gt_poll) >= GT_POLL_MS);
+
+        let frame = if due {
+            match self.ctrl {
+                // A bad/absent 0x5A frame returns without touching pending, as
+                // the original inline path did.
+                Ctrl::Hynitron => match self.read_hyn() {
+                    Some(f) => Some(f),
+                    None => return None,
+                },
+                // A "no new data" Goodix read (buffer-ready clear) returns None
+                // and falls through to the debounce flush below.
+                Ctrl::Goodix => {
+                    self.last_gt_poll = now;
+                    self.read_goodix()
                 }
             }
-            return None;
-        }
-        let mut b = [0u8; 7];
-        if !read_reg(0xD000, &mut b) || b[6] != 0xAB {
-            return None;
-        }
-        self.raw = b;
-        self.ring[(self.ring_i & 7) as usize] = b;
-        self.ring_i = self.ring_i.wrapping_add(1);
-        let n = b[5] & 7;
-        let (pressed, key, p) = decode(&b);
-        // Extra points are read (and dropped) so the controller sees the
-        // complete transaction, as the stock driver does.
-        for i in 1..n.min(5) {
-            let mut e = [0u8; 5];
-            read_reg(0xD000 + 7 + 5 * (i as u16 - 1), &mut e);
-        }
-        write(&[0xD0, 0x00, 0xAB]);
+        } else {
+            None
+        };
+
+        let (pressed, key, p, n, code) = match frame {
+            Some(f) => f,
+            None => {
+                // No new frame this call: flush a pending debounced state after
+                // DEBOUNCE_MS of silence (same logic as the old !int_low path).
+                if let Some((ev, t)) = self.pending {
+                    if now.saturating_sub(t) >= DEBOUNCE_MS {
+                        self.pending = None;
+                        if ev != self.last {
+                            self.last = ev;
+                            return Some(ev);
+                        }
+                    }
+                }
+                return None;
+            }
+        };
 
         let mut ev = Event::default();
         if pressed && !key {
@@ -282,12 +392,6 @@ impl Touch {
         }
         if pressed {
             if key {
-                let code = match p.x {
-                    0..=499 => 0,
-                    500..=749 => 1,
-                    750..=999 => 2,
-                    _ => 3,
-                };
                 ev.keys = 1 << code;
             } else {
                 ev.points = n.max(1);
@@ -308,7 +412,7 @@ impl Touch {
             return None;
         }
         match self.pending {
-            Some((p, _)) if p == ev => {
+            Some((q, _)) if q == ev => {
                 self.pending = None;
                 self.last = ev;
                 Some(ev)
@@ -318,5 +422,115 @@ impl Touch {
                 None
             }
         }
+    }
+
+    /// Hynitron 0x5A frame read — byte-identical bus traffic to the original
+    /// inline path (D0 00 read 7, 0xAB check, extra points D0 07/0C/11/16, then
+    /// the D0 00 AB ack). Returns the common decode tuple; `code` is the side-key
+    /// code derived from the X of the key report (unused when `key` is false).
+    /// None (bad/absent frame) means "no frame" and is handled without touching
+    /// pending, as before.
+    fn read_hyn(&mut self) -> Option<(bool, bool, Point, u8, u8)> {
+        let mut b = [0u8; 7];
+        if !read_reg(0xD000, &mut b) || b[6] != 0xAB {
+            return None;
+        }
+        self.raw = b;
+        self.ring[(self.ring_i & 7) as usize] = b;
+        self.ring_i = self.ring_i.wrapping_add(1);
+        let n = b[5] & 7;
+        let (pressed, key, p) = decode(&b);
+        // Extra points are read (and dropped) so the controller sees the
+        // complete transaction, as the stock driver does.
+        for i in 1..n.min(5) {
+            let mut e = [0u8; 5];
+            read_reg(0xD000 + 7 + 5 * (i as u16 - 1), &mut e);
+        }
+        write(&[0xD0, 0x00, 0xAB]);
+        let code = match p.x {
+            0..=499 => 0,
+            500..=749 => 1,
+            750..=999 => 2,
+            _ => 3,
+        };
+        Some((pressed, key, p, n, code))
+    }
+
+    /// Goodix GT1158 frame read (header §Goodix, lines 98/110-118). Correct-by-
+    /// construction from the stock reverse-engineering; it cannot be exercised on
+    /// this 0x5A unit. Normalises Goodix coordinates and keys into the same tuple
+    /// the shared debounce path (and therefore gesture.rs / app.rs) expect, so no
+    /// other file changes. None = no new data (buffer-ready bit clear); the buffer
+    /// is NOT acked in that case (header 112 clears only a ready buffer) and the
+    /// force-poll timer re-checks, so there is no hang.
+    fn read_goodix(&mut self) -> Option<(bool, bool, Point, u8, u8)> {
+        let mut st = [0u8; 1];
+        if !read_reg_at(ADDR_GOODIX, GT_REG_STATUS, &mut st) {
+            return None;
+        }
+        let status = st[0];
+        if status & 0x80 == 0 {
+            return None; // buffer not ready: nothing new, nothing to clear
+        }
+        let n = status & 0x0F; // bits 3..0 = point count
+        let have_key = status & 0x10 != 0; // bit 4 = HaveKey
+
+        // Stock order (header line 112): read status, clear the buffer, then read
+        // the point/key records.
+        write_at(ADDR_GOODIX, &[(GT_REG_STATUS >> 8) as u8, GT_REG_STATUS as u8, 0x00]);
+
+        let mut pressed = false;
+        let mut p = Point::default();
+        if n > 0 {
+            let mut pt = [0u8; 4]; // X lo, X hi, Y lo, Y hi (header line 113)
+            if read_reg_at(ADDR_GOODIX, GT_REG_POINT0, &mut pt) {
+                let gx = (pt[1] as u16) << 8 | pt[0] as u16; // Goodix native X
+                let gy = (pt[3] as u16) << 8 | pt[2] as u16; // Goodix native Y
+                // Native portrait (320x480) -> landscape GUI, no scale/mirror
+                // (header 115-116): GUI x = Goodix Y, GUI y = Goodix X.
+                p = Point { x: gy, y: gx };
+                pressed = true;
+            }
+            // Read and drop the extra points so the controller sees the whole
+            // transaction (parity with the 0x5A path and the stock driver).
+            for i in 1..n.min(5) {
+                let mut e = [0u8; 4];
+                read_reg_at(ADDR_GOODIX, GT_REG_POINT0 + 8 * i as u16, &mut e);
+            }
+        }
+
+        let mut key = false;
+        let mut code = 0u8;
+        if have_key {
+            // Key byte at 0x814F + 8*n (header 98/113): one-hot 1/2/4/8 -> code
+            // 0..3. Mask to the 4 valid bits so a spurious value cannot shift the
+            // event bit past bit 3.
+            let mut kb = [0u8; 1];
+            if read_reg_at(ADDR_GOODIX, GT_REG_KEY0 + 8 * n as u16, &mut kb) {
+                let kv = kb[0] & 0x0F;
+                if kv != 0 {
+                    code = kv.trailing_zeros() as u8;
+                    key = true;
+                    pressed = true;
+                }
+            }
+        }
+
+        // Debug mirror for DBG:DIAG: [status, GUIx lo, GUIx hi, GUIy lo, GUIy hi,
+        // key|0x80, 0] — the Goodix format has no 7-byte frame of its own.
+        let rawf = [
+            status,
+            (p.x & 0xFF) as u8,
+            (p.x >> 8) as u8,
+            (p.y & 0xFF) as u8,
+            (p.y >> 8) as u8,
+            if key { code | 0x80 } else { 0 },
+            0,
+        ];
+        self.raw = rawf;
+        self.ring[(self.ring_i & 7) as usize] = rawf;
+        self.ring_i = self.ring_i.wrapping_add(1);
+
+        Some((pressed, key, p, n, code))
     }
 }

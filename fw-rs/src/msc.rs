@@ -39,12 +39,17 @@ const SENSE_NO_MEDIUM: Sense = Sense(0x02, 0x3A, 0x00);
 const SENSE_INVALID: Sense = Sense(0x05, 0x20, 0x00);
 const SENSE_LBA_RANGE: Sense = Sense(0x05, 0x21, 0x00);
 const SENSE_MEDIUM_ERROR: Sense = Sense(0x03, 0x11, 0x00);
+/// NOT READY, LOGICAL UNIT IS IN PROCESS OF BECOMING READY (writes inhibited).
+const SENSE_BECOMING_READY: Sense = Sense(0x02, 0x04, 0x00);
 
 pub struct Msc<'a, B: UsbBus> {
     pub scsi: Scsi<BulkOnly<'a, B, &'static mut [u8]>>,
     xfer: Xfer,
     sense: Sense,
     blk: [u8; MAX_BLOCK],
+    /// Refuse host writes (NOT READY, becoming ready) while set (M4: the
+    /// logger's constant sample interval cannot survive a 50..400 ms erase).
+    write_inhibit: bool,
 }
 
 type Res = Result<(), TransportError<BulkOnlyError>>;
@@ -52,7 +57,7 @@ type Res = Result<(), TransportError<BulkOnlyError>>;
 impl<'a, B: UsbBus> Msc<'a, B> {
     pub fn new(alloc: &'a UsbBusAllocator<B>, io: &'static mut [u8]) -> Self {
         let scsi = Scsi::new(alloc, 64, 0, io).unwrap_or_else(|_| panic!("msc"));
-        Msc { scsi, xfer: Xfer::None, sense: SENSE_OK, blk: [0; MAX_BLOCK] }
+        Msc { scsi, xfer: Xfer::None, sense: SENSE_OK, blk: [0; MAX_BLOCK], write_inhibit: false }
     }
 
     /// Serve pending SCSI commands from the main loop.
@@ -60,7 +65,13 @@ impl<'a, B: UsbBus> Msc<'a, B> {
         let xfer = &mut self.xfer;
         let sense = &mut self.sense;
         let blk = &mut self.blk;
-        let _ = self.scsi.poll_command(|cmd| -> Res { handle(cmd, dev, xfer, sense, blk) });
+        let inhibit = self.write_inhibit;
+        let _ = self.scsi.poll_command(|cmd| -> Res { handle(cmd, dev, xfer, sense, blk, inhibit) });
+    }
+
+    /// Block (true) or allow host writes; a write already in progress finishes.
+    pub fn set_write_inhibit(&mut self, on: bool) {
+        self.write_inhibit = on;
     }
 }
 
@@ -72,6 +83,7 @@ fn handle<B: UsbBus>(
     xfer: &mut Xfer,
     sense: &mut Sense,
     blk: &mut [u8; MAX_BLOCK],
+    write_inhibit: bool,
 ) -> Res {
     let kind = cmd.kind;
     let bs = dev.block_size();
@@ -182,6 +194,11 @@ fn handle<B: UsbBus>(
                 return Ok(());
             }
             if *xfer == Xfer::None {
+                if write_inhibit {
+                    *sense = SENSE_BECOMING_READY;
+                    cmd.fail(0);
+                    return Ok(());
+                }
                 if lba + len as u32 > dev.block_count() {
                     *sense = SENSE_LBA_RANGE;
                     cmd.fail(0);
@@ -211,10 +228,10 @@ fn handle<B: UsbBus>(
                 }
             }
         }
-        _ => {
-            *sense = SENSE_INVALID;
-            cmd.fail(0);
-        }
+        // START STOP UNIT (eject / power-off by the host): noted for recovery.
+        #[cfg(any(feature = "native", feature = "test-recovery"))]
+        ScsiCommand::Unknown { cmd: 0x1B } => { STOP_UNIT.store(true, core::sync::atomic::Ordering::Relaxed); cmd.pass(0) }
+        _ => { *sense = SENSE_INVALID; cmd.fail(0); }
     }
     Ok(())
 }
@@ -243,3 +260,9 @@ impl<B: UsbBus> UsbClass<B> for Msc<'_, B> {
         self.scsi.poll()
     }
 }
+
+/// Set when the host sent SCSI START STOP UNIT (opcode 0x1B: eject, or a
+/// stop / power-off request). usbd-storage hides the CDB bytes (LoEj/Start),
+/// so any 0x1B counts; the native recovery mode powers off on it.
+#[cfg(any(feature = "native", feature = "test-recovery"))]
+pub static STOP_UNIT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);

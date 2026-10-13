@@ -145,3 +145,51 @@ pub fn configure(cfg: &[u8; CFG_LEN]) {
     write(R_CFG, cfg);
     write(R_INTE, &[0]);
 }
+
+// -------------------------------------------------------- data-logger fast AD1
+//
+// Fast-stream support for the data logger (FR-38, src/logger.rs). The HY3131
+// conversion rate for the main (AD1) converter is set by R22 AD1OSR:
+//   R22 = AD1OS[7:5] AD1CHOP[4:3] AD1OSR[2:0]   (hy3131_v2_6.h, datasheet p.17)
+//   OSR = 256 << (AD1OSR)        sample/conversion interval ~= OSR / SYSCLK
+// Every DC-mode config row (f1 DCV, f3 DCmV, f7/f8_9 DCA) writes R22 = 0x15, i.e.
+// AD1OS=000, AD1CHOP=10, AD1OSR=101 (OSR 8192); stock only ever rewrites the low
+// three bits at run time (0x13=OSR2048 its fastest, 0x15=OSR8192, 0x17=OSR32768).
+// So the logger keeps the same 0x10 base and varies only AD1OSR:
+//   code 0 -> OSR 256 (~52 us)   ... code 3 -> 0x13 OSR 2048 (~417 us, stock's
+//   fastest) ... code 7 -> 0x17 OSR 32768. SYSCLK = 4.9152 MHz.
+// Practical floor is the bit-banged SPI link, not the ADC: with HALF ~1 us a
+// read1(INTF) is ~45 us and a 3-byte AD1 read ~77 us, so ~122 us/sample before
+// any loop work. OSR 256/512 convert faster than the link can read them; OSR
+// 2048 (0x13) is the realistic default and is already proven by the stock fw.
+
+/// AD1OSR run-time code (0..7); OSR = 256 << code. Default logger value is 3.
+pub const AD1OSR_STREAM: u8 = 3; // R22 = 0x13, OSR 2048, ~417 us/conv
+
+/// Set only the AD1OSR field of R22, keeping the stock DC base (AD1OS=000,
+/// AD1CHOP=10). `code` is clamped to 0..7. Lower = faster, fewer effective bits.
+pub fn set_ad1_osr(code: u8) {
+    write(0x22, &[0x10 | (code & 7)]);
+}
+
+/// Nominal conversion interval in microseconds for an AD1OSR code, from the
+/// datasheet-inferred `OSR / SYSCLK` (SYSCLK = 4.9152 MHz). This is the ADC
+/// pacing only; the real sample interval is max(this, SPI+loop time).
+pub fn osr_period_us(code: u8) -> u32 {
+    let osr = 256u32 << (code & 7);
+    ((osr as u64 * 1_000_000) / 4_915_200) as u32
+}
+
+/// True when AD1 has a fresh conversion (INTF AD1F). Reading the AD1 data
+/// registers afterwards clears the flag, so this paces the logger at the
+/// conversion rate without an external timer.
+pub fn ad1_ready() -> bool {
+    read1(R_INTF) & INTF_AD1 != 0
+}
+
+/// Read the current signed 24-bit AD1 conversion (R00..R02). Clears AD1F.
+pub fn read_ad1() -> i32 {
+    let mut b = [0u8; 3];
+    read(R_AD1, &mut b);
+    s24(&b)
+}

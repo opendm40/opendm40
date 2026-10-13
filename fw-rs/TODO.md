@@ -22,8 +22,173 @@ Additional requirements:
   - Disk is backed by the W25Q128 SPI flash (1f2bf30); README records `DBG:FLASH?` -> EF4018, but a full test (mount, write/read) is not logged.
 - [ ] Faster redraw of the main DMM value and trend chart (target ~6 ms like stock: render to RAM, single window flush, chart column ring).
   - 4d2dc40 sped up digits and chart, but the ~6 ms target is not confirmed.
-- [ ] Item-by-item parity check vs stock: DMM functions/ranges, scope, generator, Bluetooth phone-app protocol, menus, combined views.
-  - DMM, scope and generator running simultaneously (fbfced3, 7c63aac); a systematic comparison is not done.
-- [ ] Install fw-rs via the stock update file format instead of the Bluetooth RAM loader (user request; not designed yet).
-- [ ] Data-logger mode (FR-38).
+- [x] Item-by-item parity check vs stock -> `docs/parity.md`. DMM/scope/gen/BT/GUI/touch/USB
+  tabulated; punch-list extracted. Deliberate deviations recorded (red value, no logo,
+  English-only, temp F 1.8 not the stock 1.82 bug, combined views, USBTMC, gestures).
+  Remaining parity gaps (from the punch-list):
+  - [x] BT cmd-09 flags byte: real battery (power.bars) / charging / key-lock; bits per bt_meas_v2_6.h.
+  - [x] BT module startup AT init (AT+SBNDM40<model> -> if OK: AT+SLED0 -> AT+RESET), once per power-on.
+  - [x] Generator defaults Square/2 MHz; snap square 50k-100k DOWN to 50k; non-square >50k = 0 Hz silent.
+        (note: app.rs:533 reclamps a persisted 0 Hz to 1 Hz on config load - left as-is, minor.)
+  - [x] Touch: Goodix GT1158 fallback (addr 0x14, probe ID "1158" first, coords GUIx=GoodixY;
+        side keys normalised to the same 1<<code). 0x5A path byte-identical. Untestable on this
+        0x5A unit. Still TODO: move bit-banged I2C to I2C2/I2C3 peripheral + EXTI (after boot refactor).
+  - [x] Scope: slow timebases to 50 s/div (TB_MAX 29, roll from 200 ms/div, YT ceiling 1 s/div);
+        stop-and-zoom re-renders the stored 26 K record at the selected timebase. Not done: horizontal
+        pan (lives in app.rs/ui.rs), full 65 K record (DMARAM budget). Untested on hardware.
+  - [ ] Confirm simultaneous DMM+scope accuracy (both-rails crosstalk). [scope.rs]
+  - [x] Device/About page: Menu->Settings->Device (Vendor/Web/Model/Bootloader/Software/Hardware);
+        HW+bootloader ver read from the stock boot-data block 0x080A4000 (survives app updates).
+        SN + BT name omitted (not sourceable without inventing a value / a blocking AT round-trip).
+- [ ] **Native-format firmware (top priority, user 2026-10-13).** Drop the RAM/sector-8 relocation
+  scheme: build a full firmware in the stock update-file format, flashed like the stock one at
+  0x08004000. Our image starts with a tiny shim "bootloader": power key held ~2 s at start
+  (optionally with USB cable) or a watchdog-reset cause -> start the native updater (the one
+  that brings up mass storage); otherwise run fw-rs. Shim as small and simple as possible.
+  Must be unbrickable and allow easy stock <-> fw-rs toggling.
+  HARD CONSTRAINT (user): recovery must NOT depend on fw-rs running or on fw-rs's MSC. With the
+  app dead there is otherwise no way to put a file on the SPI FAT. The shim itself must give the
+  host a way to place a stock dm40*.bin: jump into the FS-loader's own host-facing disk mode if
+  it has one, else carry a minimal self-contained USB-MSC + SPI/FatFs in the shim.
+  - [x] Architecture doc `docs/native-boot.md`. Key finding: a permanent FS-loader at
+        0x080a0000 (own USB MSC + FatFs) reflashes any dm40*.bin from the SPI FAT on boot
+        and is never overwritten by an app update -> unbrickable recovery already exists.
+        Shim stays tiny (RCU_RSTSCK FWDGTRSTF, PD6 power key, SRAM magic + boot counter).
+        dm40fw.py `pack` already computes both header words. fw-rs must move to XIP from
+        0x08004000 (clock.rs to set PLL+FMC waitstates+cache; link.x reserve 0x08008000 hole;
+        drop the SRAM copy in startup.rs).
+  - [x] Opus review (`docs/native-boot-review.md`). Verdict: Stage 0 SAFE; Stage 1 NOT until
+        dead-app recovery is closed. App reachable ONLY via FS-loader (runs every boot); it
+        installs ANY dm40*.bin on EVERY boot (must delete after good install). MANDATORY before
+        Stage 1: shim carries its OWN USB-MSC (Option B; fw-rs MSC is dead when recovery needed);
+        PD6 release-then-hold gesture; clock.rs own PLL+FMC-WS+cache + VTOR=0x08004000; boot magic
+        in backup SRAM; 12-byte 0x08008000 hole truly 0xFF.
+  - [x] Stage 0 PROVEN on device (2026-10-13): staged dm40_v_2_6.bin on the FAT via fw-rs MSC,
+        then COLD power-on -> the loader installed it to 0x08004000 and deleted the file (confirmed
+        gone). App-independent recovery works. KEY FINDING: a WARM reset (SYSRESETREQ / DBG:RECOVER)
+        does NOT trigger the loader install; only a COLD power-on does. So the shim's recovery =
+        host stages a valid dm40*.bin via the shim's own MSC (Option B) + power-cycle. See the
+        FS-loader-trigger investigation (docs/fsloader-install-trigger.md) for whether a marker can
+        make install happen on a warm reset.
+  - [x] Own fonts (prereq for independence): tools/mkstockfont.py extracts the 19 used fonts
+        (714 glyphs, ~83 KB) from the stock image into src/stockfont_data.rs; stockfont.rs reads
+        embedded data. Public API unchanged, pixel-identical. Feature-gated `embedded-fonts`
+        (default build keeps reading stock flash so the RAM loader still links; native build turns
+        it on). The native image has room for the 83 KB; sector-8 RAM layout does not.
+  - [x] clock.rs: own PLL bring-up (`init_core`, measured stock RCU_PLL 0x29406419, no FLASH_ACR
+        write, bounded waits, IRC16M fallback). Built, not yet run (test plan T1/T2).
+  - [x] Native build (`./build.sh native` -> dm40-fw-native.bin): shim (FWDGT, power hold, reset
+        flags, PD6 hold 2.5 s, WDT only after our own normal boot), recovery = zero the loader
+        marker + reset, board init audit, fatren (rename installed dm40*.bin to _DM40PRV.BIN,
+        cold boot + valid marker only). See docs/native-boot.md "Implementation". Hardware tests T1/T2/T3 pending.
+  - [x] VENDOR UPDATE MODE found and proven on device (user's idea, 2026-10-13). Any dm40*.bin on the
+        FAT (even 0 bytes / bad header) makes the loader zero the 0x08008000 marker, print
+        "update error" and expose a WORKING USB disk on every boot until a valid image is installed
+        via its "update" button. Header is checked before any erase (app sectors untouched).
+        Boot gate is PA2, not the reset cause: ROM polls PA2 x1000; high -> ROM verifies the marker +
+        body CRC and launches the app itself; low or invalid app -> loader install state. That is why
+        "cold installed / warm didn't". Full analysis: docs/fsloader-install-trigger.md.
+  - [x] Recovery = program 12 zero bytes over the 0x08008000 marker + SYSRESETREQ (works on warm reset,
+        no FAT/SPI/USB/LCD in the shim); DBG:UPDATE / DBG:RECOVER do the same (dev flow: copy a
+        dm40*.bin onto fw-rs's disk, DBG:UPDATE). Built (recovery ~490 B, test-recovery image
+        1712 B); DM40RCVR.BIN / own-USB variants kept behind recovery-file / recovery-usb.
+        Not yet run on hardware.
+  - [x] Test: power-on holding the power key ~5 s with no dm40*.bin -> stock booted. No vendor
+        button entry; PA2 is not the power key (probably a power-on-delayed signal: low for a while
+        after a cold power-on, high on warm resets). So our marker-zero recovery is required; per code
+        an invalid marker sends the ROM to the loader regardless of PA2 (to be confirmed by T2).
+  - [x] Full verified flash dump (1 MiB, OB, OTP) taken before Stage 1: firmware/re/dumps/full-20261013/.
+        RDP is level 1 (SWD/DFU only via mass erase), so the software recovery path matters.
+  - [x] Review of the native image + shim (docs/native-review-2026-10-13.md): T1/T2 GO, T3 NO-GO until
+        B1 (native stack overflow: fatren buffers live during main) and B2 (shim reads PD6 without
+        pull-down; stock = input + pull-down, pressed = 1) are fixed; H1 fatren renames only the file whose
+        header == marker; H2 key-hold trap (light backlight at once, cue before zeroing); H3 stale flags;
+        crash counter so one panic doesn't force a reinstall. [fixes in progress]
+  - [x] T1 on device (test-initcore over stock): init_core HXTAL OK, LCD/USB/disk/DMM/BT OK, FSMC live
+        BCR1 0x5091 BTR1 0x0F04 BWTR1 0x0FF00201 (board.rs aligned), panel 0x9488, marker VALID.
+  - [x] T2 on device (test-recovery): marker zeroed + WARM reset -> loader 'open file error' + working
+        USB disk. Restored dm40_patched.bin through it.
+  - [ ] Hardware tests per docs/native-boot.md: T1 test-initcore (RAM), T2 test-recovery (RAM,
+        destructive-but-recoverable), T3 flash native via the loader, toggle stock <-> fw-rs.
+  - [ ] Stage 1: shim + fw-rs as a packed update file; XIP from 0x08004000 (no SRAM copy);
+        toggle stock <-> fw-rs several times.
+  - [ ] Stage 2: retire stub/, flash.py, BT loader path; update README/tools.
+- [x] Data-logger mode (FR-38) implemented: src/logger.rs, main-loop polled constant interval,
+      timestamps + sequence numbers + drop counter, HY3131 fast mode, LOG:* SCPI. Not tested on device.
+- [x] Code review 2026-10-13 (docs/review-2026-10-13.md): H2/M1/M2/M3/M5 + lows fixed; H1/M4 call sites
+      in main.rs/msc.rs being applied by the native agent.
+- [x] UI: HOLD repaint fixed (label only drawn inside reading(), skipped while held), Settings back
+      navigation (parent chain), Settings rows like vendor (8 rows, value next to label, "< Back"
+      title bar), compact DMM+scope view (22 px bar, 30 px value, scope +56 px). Not verified on device.
+- [ ] UI/UX review punch-list (docs/ui-review.md): drag-misread-as-swipe bug (gesture.rs:77), unified
+      top bar with lock/BT/battery on all views, swallow the wake tap after dim, scope right-panel
+      button labels, page dots, scope trigger handle, generator keypad prefill.
+- [ ] CSV-to-disk recording on the DMM screen, swipe-triggered (user). Needs a FAT writer in fw-rs
+      (msc.rs/spiflash.rs only expose a block device today), the sampling path from FR-38, and a
+      DMM-screen record indicator + swipe gesture. Relates to FR-04 / FR-35. Queued after logger + UI.
+
+## Feature requests to add (from ../DM40C_feature_request.md; user: add autohold + useful ones)
+- [ ] **FR-01 AutoHold (P0, critical).** Auto-freeze the reading when it stabilises, re-arm on a new
+      signal, beep on capture (Fluke/Keysight style). Algorithm sketch in Appendix B of the FR doc.
+      Touches meter.rs/app.rs/ui.rs. Queue after the UI agent (HOLD/layout) to avoid conflict; builds
+      on fixing the plain HOLD first.
+- [ ] FR-02 MIN/MAX/AVG (P0): MIN/MAX exist; add AVG (running average, no auto-off while active).
+- [ ] FR-05 smoothing + selectable sample rate (P1): slow/fast conversion + display smoothing.
+- [ ] FR-06 Hi/Lo limits (P1): pass/fail thresholds with a beep.
+- [ ] FR-16 screenshot + log gallery (P1): save screenshots/CSV to the SPI disk and browse them.
+- [ ] FR-28 generator DC offset (P1): adjustable offset (note: real bipolar offset is HW-4).
+- [ ] FR-35 CSV export from DMM (P1): = the CSV-to-disk item above, with timestamps.
+- Likely already done (verify, then tick): FR-09 REL, FR-10 idle auto-off, FR-12 screen dim,
+  FR-18 touch lock, FR-27 generator keeps running in DMM. FR-33 is USBTMC+MSC (we chose DBG over CDC).
 - [ ] Repo tidy-up (user request; not done yet).
+
+## From user community feedback (docs/user-feedback.md)
+- [ ] UF-01 (P0) Verify continuity CMPO beeper + diode beep classes on device, latency <10 ms (most-praised stock feature). §5.2
+- [ ] UF-04 (P1) Scope AUTO keeps the user's AC/DC coupling (app.rs autoset_start forces DC = stock bug, 4 users). §6.1
+- [ ] UF-14 (P1) Generator: clamp to the wave's limit + visible note instead of a silent 0 Hz (revert the parity snap; owners call it a bug). §7
+- [ ] UF-15 (P1) Generator: show the actual quantised output frequency (and in SOUR:FREQ?); later a DDS for finer steps. §7
+- [ ] UF-03 (P1) AC+DC sub-mode on DM40A (owners proved the A hardware does it when the app commands it). §10
+- [ ] UF-02 (P1) Cold-junction self-heating with both rails/concurrent instruments: measure vs stock, correct or power down. §3
+- [ ] UF-19 (P1) Measure fw-rs battery draw vs stock (10-15 h baseline); decide on a scope-on-demand power policy. §8
+- [ ] UF-17 (P1) 3-finger swipe-down screenshot to the USB disk (stock gesture, missing in fw-rs; shares the FAT writer). §2, §10
+- [ ] UF-18 (P1) 2-finger swipe-down power-off (stock gesture; touch point count is available). §8
+- [ ] UF-20 (P1) On first boot write CALBAK.BIN (cal record + boot data + UID, CRC) to the USB disk, written when missing or changed (compare-first). §4
+- [ ] UF-21 (P1) Make AUTO+ (V-first, already ported: v_auto=1) the default V autorange; warn when mV-first AUTO is chosen. §5.1
+- [ ] UF-05 (P1) Scope drag axis lock (dominant axis after ~12 px). §6.1
+- [ ] UF-09 (P1) Scope horizontal trigger position (pre-trigger %) + double-tap to centre. §6.1
+- [ ] UF-32 (P1) CSV files: '.' decimals, ISO-8601 timestamps, header (model/fw/function/range). §10
+- [ ] UF-37 (P1) Native shim keeps the short-press power-on (stock V2.1 behaviour). §8
+- [ ] UF-16 (P2) Generator ramp direction: gen.rs falls, preview rises; verify on scope and align. §7
+- [ ] UF-11 (P2) Scope FFT with labelled axes + automatic peak (f, dBV) readout. §6.2
+- [ ] UF-12 (P2) Full probe attenuation list x0.1..x1000 (stock scope_probe[13]). §6.2
+- [ ] UF-07/08/10 (P2) Scope: corner-tap timebase + list picker, one-tap cursors, V/div +/- shown as zoom. §6.1
+- [ ] UF-13 (P2) Save scope record as CSV to disk; software pulse-width/runt trigger. §6.2
+- [ ] UF-23 (P2) PT100/PT1000/NTC temperature via the ohm path. §3
+- [ ] UF-25/26/27/28/35 (P2) DMM small fixes: extra-digit option, 4-20mA% label, store-while-HOLD, volume semantics, MIN/MAX reset. §4-§5
+- [ ] UF-29 (P2) On-device Help page (gestures, resets, input limits). §9
+- [ ] UF-24/30/31/36/38/41 (P2) Tempco comp, fast bargraph, stylus sensitivity, BT on all views at 50 ms, SCPI host script, sinc interp. §3-§10
+- Community-confirmed existing items (priority signal only): native boot/recovery; FR-26 temperature offset (raise to P1);
+  FR-36 user calibration; FR-13 sub-mode memory; FR-01/FR-02 (AVG on chart); FR-04/CSV record + FR-38 logger; FR-05;
+  FR-09/FR-24 stray-C REL; FR-10; FR-14/FR-17; FR-19; FR-21; FR-28/29/32; FR-34; USBTMC; ui-review #1, #4, #5, #8, #10, #11.
+
+## User decisions 2026-10-13 (on community feedback)
+- [ ] Temperature: user offset (cold-junction / reading), plus sensors PT100, PT1000 and common NTCs
+      (10k B3950, 10k B3435, 100k, ...). [queued after the button/60000 agent: dmm.rs/hy3131.rs]
+- [ ] Gestures: 3-finger swipe = screenshot to the SPI disk, 2-finger swipe = power off (as stock).
+      [queued: gesture.rs/touch.rs/app.rs]
+- [ ] AC+DC on ALL models (DM40A hardware supports it). [in progress with the 60000-count agent]
+- [ ] Always 60000 counts (DM40C behaviour) regardless of the model byte; IDN/Device keep real model.
+      [in progress] + physical power-key short/long/double press as in stock; PD6 pressed level.
+- [ ] Scope UI redesign: research + plan in docs/scope-ui-plan.md [agent], then step-by-step impl.
+- [ ] Calibration (0x080C0000) + boot data (0x080A4000) + UID copied to the SPI disk at every boot
+      (only when missing/changed) so they're reachable over USB. [agent]
+- [ ] Analog rails: default OFF (stock-like alternation per page); both on automatically in the
+      DMM+Scope combined view; SCPI command to force both on (e.g. SYST:RAIL BOTH|AUTO). Measure
+      consumption/heating vs stock with the BT power meter. [queued: app.rs/power.rs/scpi.rs]
+- [ ] +1 display digit (at least DC voltage): show one more digit than the 60000-count format where the
+      HY3131 resolution/noise allows (slow OSR mode, averaging). Always on, not a setting: draw the extra
+      digit in a smaller font after the main digits (user). Check AD1 code-per-count headroom per range
+      (dmm.rs, hy3131.rs) first.
+- [ ] Milliohm resolution on the lowest resistance range (units of mΩ): finer format on the 600 Ω range,
+      using slow OSR + averaging + REL (lead-zero) — measure noise first; consider a dedicated low-Ω mode
+      (higher test current if the HY3131 range tables allow).
