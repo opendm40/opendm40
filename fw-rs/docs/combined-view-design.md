@@ -793,7 +793,7 @@ it must report 0 violations. Geometry changed from §2.3 to satisfy them:
 
 | Item | §2.3 | Implemented |
 |---|---|---|
-| Top bar | 20 px | 27 px (combined; 28 on the Scope page): the 20 px lock / BT icons need 4 px to the screen edge and 3 px to the bar edge. Round Wiren Board logo (20 px, `tools/mklogo.py`) at x 4 on every bar. Chips 17 px pills at x 27 / 67 / 112 / 183; REC 249; dots 301..332; uptime ..385; lock ..412; BT 416; battery 436..475 |
+| Top bar | 20 px | 27 px (combined; 28 on the Scope page): the 20 px lock / BT icons need 4 px to the screen edge and 3 px to the bar edge. Round Wiren Board logo (20 px, `tools/mklogo.py`) at x 4 on every bar. Chips 17 px pills at x 27 / 67 / 112 (70 wide since the F14 space fix) / 185; REC 251; dots 301..332; uptime ..385; lock ..412; BT 416; battery 436..475 |
 | Meter strip | y 20..75 (56) | y 27..83 (57): three 15 px badges need 51 px plus margins |
 | Combined graph | 401x225, pitch 28 | 401x217 at y 84, pitch 27 |
 | Full Scope graph | 401x281 1:1 | 401x273 at y 28, pitch 34 (rows scale by (h - 3) / 278) |

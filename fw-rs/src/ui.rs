@@ -947,14 +947,15 @@ pub fn status_right(st: &Status) {
 // >= 3 px to the bar's bottom edge (the stock 20 px bar could not hold them
 // with any margin):
 //   logo 4..23 | chips (17 px pills, rows 5..21): run state 27..63, timebase
-//   67..108, V/div + coupling 112..171, trigger 175..236 | REC 240..263 |
+//   67..108, V/div + coupling 112..181 ("100mV AC" with a real space),
+//   trigger 185..246 | REC 251..271 |
 //   page dots 301..332 | uptime ..385 | lock ..412 | BT 416..431 |
 //   battery 436..475. Ink rows of the icons 4..23.
 
 /// Scope-family bar height (rows 0..26; the full Scope page paints row 27
 /// too, its graph starts at 28).
 pub const SBAR_H: u16 = 27;
-const CHIPS: [(i16, i16); 4] = [(27, 37), (67, 42), (112, 68), (183, 62)];
+const CHIPS: [(i16, i16); 4] = [(27, 37), (67, 42), (112, 70), (185, 62)];
 const CHIP_Y: i16 = 5;
 const CHIP_H: i16 = 17;
 
@@ -980,10 +981,10 @@ pub fn chip_hit(x: u16, y: u16) -> Option<usize> {
 pub fn scope_status(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
-    lcd::fill_rect(249, 5, 28, 17, S_BAR);
+    lcd::fill_rect(250, 5, 28, 17, S_BAR);
     // REC: red = CSV recording (csvlog.rs), orange = the MIN/MAX session only.
     if st.csv || st.rec {
-        sf::label(sf::F14, rect(249, 6, 28, 16), "REC", if st.csv { REC_CSV } else { VALUE }, S_BAR, 1, 1);
+        sf::label(sf::F14, rect(251, 6, 27, 16), "REC", if st.csv { REC_CSV } else { VALUE }, S_BAR, 1, 1);
     }
     for k in 0..4i16 {
         let c = if k as u8 == st.page { FG } else { 0x6B4D };

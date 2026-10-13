@@ -219,13 +219,22 @@ impl Checker {
                 }
             }
             // Glyphs of one text must not touch (left to right).
-            if glyph_rule && ia.kind == probe::TEXT && ia.glyphs.len() > 1 {
+            if ia.kind == probe::TEXT && ia.glyphs.len() > 1 {
                 let mut g = ia.glyphs.clone();
                 g.sort_by_key(|(k, _)| *k);
+                // Widest gap between letters of one word.
+                let letter = g.windows(2).filter(|w| w[1].0 == w[0].0 + 1).map(|w| w[1].1.x0 - w[0].1.x1 - 1).max().unwrap_or(1);
                 for w in g.windows(2) {
                     let (a, b) = (w[0].1, w[1].1);
-                    if a.gap(&b) < 1 {
+                    if glyph_rule && a.gap(&b) < 1 {
                         self.fail(scene, format!("{}: glyphs {} / {} touch ({:?} {:?})", desc(ia), w[0].0, w[1].0, a, b));
+                    }
+                    // Word gap (as tools/gallery-test): an ink-less glyph (a
+                    // space) between two glyphs must leave >= 4 px and >= the
+                    // widest letter gap + 2 ("40rows" with the 1 px F14 space).
+                    let need = 4.max(letter + 2);
+                    if w[1].0 > w[0].0 + 1 && b.x0 - a.x1 - 1 < need {
+                        self.fail(scene, format!("{}: word gap after glyph {} only {} px (letters up to {})", desc(ia), w[0].0, b.x0 - a.x1 - 1, letter));
                     }
                 }
             }

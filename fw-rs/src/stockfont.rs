@@ -276,7 +276,9 @@ fn layout(font: Font, r: Rect, text: &str, align: u8, spacing: i8, out: &mut [Op
         gs[n] = g;
         match g {
             Some(g) => {
-                pen += g.adv as i32 + spacing as i32;
+                // A space advances at least a third of the line height: the
+                // stock F14 space glyph advances 1 px ("40rows").
+                pen += (if ch == ' ' { (g.adv as i32).max(lh / 3) } else { g.adv as i32 }) + spacing as i32;
                 last_w = g.w as i32;
             }
             None => {
@@ -659,8 +661,11 @@ pub fn glyph_rows(font: Font, text: &str) -> Option<(i16, i16)> {
 /// last glyph's width), e.g. to place a tag right before right-aligned text.
 pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
     let (mut pen, mut last) = (0i32, 0i32);
+    let lh = font.line_h() as i32;
     for ch in text.chars() {
         let (adv, w) = match font.glyph(ch as u32) {
+            // As `layout`: a space advances at least lh / 3.
+            Some(g) if ch == ' ' => ((g.adv as i32).max(lh / 3), g.w as i32),
             Some(g) => (g.adv as i32, g.w as i32),
             None => (font.line_h() as i32, font.line_h() as i32),
         };
