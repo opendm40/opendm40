@@ -9,7 +9,7 @@
 //! 12 masks), positive height = bottom-up rows of 960 bytes (no padding),
 //! pixels little-endian, 72 dpi fields 0: 307266 bytes = 76 clusters of 4 KiB.
 //! (Not 24-bit: that would be 460854 bytes. The 17 KB S00x.BMP in
-//! spi-disk-backup/ are older 4-bpp RLE factory files.)
+//! private/spi-disk-backup/ are older 4-bpp RLE factory files.)
 //!
 //! Incremental: `start` only takes the request; `poll` (every main-loop pass,
 //! from App::tick) does one bounded slice of the job, so USB (SCPI and the
