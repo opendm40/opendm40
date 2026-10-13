@@ -156,6 +156,11 @@ fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val) -> (&'a str, usize) {
 }
 
 pub struct DmmView {
+    /// Main readout as last drawn (text, cell format, compact) for redrawing
+    /// only the digits that changed.
+    last_txt: [u8; 8],
+    last_fmt: usize,
+    last_compact: bool,
     last_unit: &'static str,
     last_mode: u8,
     last_top: Option<(bool, bool, bool)>,
@@ -194,7 +199,15 @@ fn dmm_button(i: usize, selected: bool, mode: u8) {
 
 impl DmmView {
     pub const fn new() -> Self {
-        DmmView { last_unit: "", last_mode: 255, last_top: None, last_aux: [false; 2] }
+        DmmView {
+            last_txt: [0; 8],
+            last_fmt: 255,
+            last_compact: false,
+            last_unit: "",
+            last_mode: 255,
+            last_top: None,
+            last_aux: [false; 2],
+        }
     }
 
     pub fn draw_static(&mut self, button: Button, mode: u8) {
@@ -211,6 +224,7 @@ impl DmmView {
     }
 
     pub fn invalidate(&mut self) {
+        self.last_fmt = 255;
         self.last_unit = "";
         self.last_mode = 255;
         self.last_top = None;
@@ -221,15 +235,23 @@ impl DmmView {
         let (s, f) = fmt7(&mut buf, &r.main);
         let mut ub = [0u8; 16];
         let unit = sf::unit_text(r.main.unit, &mut ub);
+        // Only the changed digits are redrawn (cell layout unchanged).
+        let same_layout = self.last_fmt == f && self.last_compact == compact;
+        let prev_txt = self.last_txt;
+        let prev = if same_layout { core::str::from_utf8(&prev_txt[..7]).unwrap_or("") } else { "" };
+        let n = s.len().min(7);
+        self.last_txt[..n].copy_from_slice(&s.as_bytes()[..n]);
+        self.last_fmt = f;
+        self.last_compact = compact;
         if compact {
-            sf::cells(sf::F78, rect(40, 36, 360, 78), s, &CELLS[f], VALUE_RED, BG);
+            sf::cells_diff(sf::F78, rect(40, 36, 360, 78), s, prev, &CELLS[f], VALUE_RED, BG);
             sf::label(sf::UNIT, rect(401, 80, 78, 32), unit, VALUE_RED, BG, 4, -1);
             if self.last_mode != r.mode {
                 self.last_mode = r.mode;
                 sf::label(sf::MODE, rect(437, 42, 32, 32), mode_glyph(r.mode), VALUE_RED, BG, 7, 0);
             }
         } else {
-            sf::cells(sf::F78, rect(40, 68, 360, 80), s, &CELLS[f], VALUE_RED, BG);
+            sf::cells_diff(sf::F78, rect(40, 68, 360, 80), s, prev, &CELLS[f], VALUE_RED, BG);
             if self.last_unit != r.main.unit || self.last_mode != r.mode {
                 self.last_unit = r.main.unit;
                 self.last_mode = r.mode;
@@ -401,7 +423,32 @@ fn num_unit<'a>(b: &'a mut [u8; 32], v: f32, dec: u8, unit: &str) -> &'a str {
     core::str::from_utf8(&b[..n + k]).unwrap_or("")
 }
 
-pub fn chart(pts: &[f32], dec: u8, rate: u8, max: Option<f32>, min: Option<f32>, rel: Option<f32>, unit: &str) {
+/// What the chart last drew besides the trace, to skip unchanged labels.
+pub struct ChartCache {
+    scale: Option<(u32, u32, u8, &'static str)>,
+    side: Option<(u32, u32, u32, u8, &'static str)>,
+    rate: u8,
+}
+
+impl ChartCache {
+    pub const fn new() -> Self {
+        ChartCache { scale: None, side: None, rate: 0 }
+    }
+    pub fn invalidate(&mut self) {
+        *self = ChartCache::new();
+    }
+}
+
+pub fn chart(
+    c: &mut ChartCache,
+    pts: &[f32],
+    dec: u8,
+    rate: u8,
+    max: Option<f32>,
+    min: Option<f32>,
+    rel: Option<f32>,
+    unit: &'static str,
+) {
     let mut step = 1.0f32;
     for _ in 0..dec {
         step /= 10.0;
@@ -419,9 +466,23 @@ pub fn chart(pts: &[f32], dec: u8, rate: u8, max: Option<f32>, min: Option<f32>,
     hi += 50.0 * step;
     let span = (hi - lo).max(1e-12);
     let mut b = [0u8; 32];
-    sf::label(sf::F14, rect(0, 173, 78, 18), num_unit(&mut b, hi, dec, unit), STATUS_FG, BG, 4, 2);
-    sf::label(sf::F14, rect(0, 218, 78, 18), num_unit(&mut b, (hi + lo) / 2.0, dec, unit), STATUS_FG, BG, 4, 2);
-    sf::label(sf::F14, rect(0, 259, 78, 18), num_unit(&mut b, lo, dec, unit), STATUS_FG, BG, 4, 2);
+    let key = (hi.to_bits(), lo.to_bits(), dec, unit);
+    if c.scale != Some(key) {
+        c.scale = Some(key);
+        sf::label(sf::F14, rect(0, 173, 78, 18), num_unit(&mut b, hi, dec, unit), STATUS_FG, BG, 4, 2);
+        sf::label(sf::F14, rect(0, 218, 78, 18), num_unit(&mut b, (hi + lo) / 2.0, dec, unit), STATUS_FG, BG, 4, 2);
+        sf::label(sf::F14, rect(0, 259, 78, 18), num_unit(&mut b, lo, dec, unit), STATUS_FG, BG, 4, 2);
+    }
+    // Column templates: plain / dotted column / vertical grid line / frame.
+    let mut tpl = [[0u16; CHART_H as usize]; 4];
+    for y in 0..CHART_H as usize {
+        let edge = y == 0 || y == CHART_H as usize - 1;
+        let hline = y % 16 == 0;
+        tpl[0][y] = if edge { DIM } else { BG };
+        tpl[1][y] = if edge || hline { DIM } else { BG };
+        tpl[2][y] = if edge || hline || y % 4 == 0 { DIM } else { BG };
+        tpl[3][y] = DIM;
+    }
     let row = |v: f32| -> u16 {
         (((hi - v) / span) * (CHART_H - 3) as f32 + 1.0).clamp(1.0, (CHART_H - 2) as f32) as u16
     };
@@ -429,7 +490,7 @@ pub fn chart(pts: &[f32], dec: u8, rate: u8, max: Option<f32>, min: Option<f32>,
     let first = CHART_W as usize - n.min(CHART_W as usize);
     let mut prev: Option<u16> = None;
     for x in 0..CHART_W {
-        let seg = if (x as usize) >= first {
+        let (a, b2) = if (x as usize) >= first {
             let y = row(pts[x as usize - first]);
             let s = match prev {
                 Some(p) if p < y => (p, y),
@@ -437,42 +498,42 @@ pub fn chart(pts: &[f32], dec: u8, rate: u8, max: Option<f32>, min: Option<f32>,
                 None => (y, y),
             };
             prev = Some(y);
-            Some(s)
+            s
         } else {
-            None
+            (u16::MAX, 0)
         };
+        let k = if x == 0 || x == CHART_W - 1 { 3 } else if x % 16 == 0 { 2 } else if x % 4 == 0 { 1 } else { 0 };
+        let t = &tpl[k];
         lcd::set_window(CHART_X + x, CHART_Y, CHART_X + x, CHART_Y + CHART_H - 1);
         for y in 0..CHART_H {
-            let edge = x == 0 || x == CHART_W - 1 || y == 0 || y == CHART_H - 1;
-            let grid = (x % 16 == 0 && y % 4 == 0) || (y % 16 == 0 && x % 4 == 0);
-            let mut c = if edge || grid { DIM } else { BG };
-            if let Some((a, b2)) = seg {
-                if y >= a && y <= b2 {
-                    c = 0xFC40;
-                }
-            }
-            lcd::data(c);
+            lcd::data(if y >= a && y <= b2 { 0xFC40 } else { t[y as usize] });
         }
     }
-    // Rate button.
-    let mut t = [0u8; 16];
-    let s = crate::dmm::format(&mut t, rate as f32 * 160.0, 0);
-    let mut l = [0u8; 16];
-    let k = s.len();
-    l[..k].copy_from_slice(s.as_bytes());
-    l[k..k + 6].copy_from_slice(b"mS/div");
-    sf::rbox(rect(2, 188, 76, 32), 8, BTN, BG);
-    sf::glyphs(sf::F14, rect(2, 188, 76, 32), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 2);
-    // MAX / REL / MIN.
-    sf::label(sf::F14, rect(403, 175, 72, 12), "MAX:", STATUS_FG, BG, 1, 2);
-    sf::label(sf::F14, rect(407, 187, 72, 12), max.map(|v| num_unit(&mut b, v, dec, unit)).unwrap_or(""), STATUS_FG, BG, 1, 2);
-    sf::rbox(rect(402, 205, 76, 38), 8, BTN, BG);
-    sf::glyphs(sf::F14, rect(405, 207, 76, 19), "REL:", STATUS_FG, BTN, 1, 2);
-    let mut b2 = [0u8; 32];
-    let rv = num_unit(&mut b2, rel.unwrap_or(0.0), dec, unit);
-    sf::glyphs(sf::F14, rect(405, 222, 76, 19), rv, STATUS_FG, BTN, 1, 2);
-    sf::label(sf::F14, rect(403, 249, 72, 12), "MIN:", STATUS_FG, BG, 1, 2);
-    sf::label(sf::F14, rect(407, 261, 72, 12), min.map(|v| num_unit(&mut b, v, dec, unit)).unwrap_or(""), STATUS_FG, BG, 1, 2);
+    if c.rate != rate {
+        c.rate = rate;
+        let mut t = [0u8; 16];
+        let s = crate::dmm::format(&mut t, rate as f32 * 160.0, 0);
+        let mut l = [0u8; 16];
+        let k = s.len();
+        l[..k].copy_from_slice(s.as_bytes());
+        l[k..k + 6].copy_from_slice(b"mS/div");
+        sf::rbox(rect(2, 188, 76, 32), 8, BTN, BG);
+        sf::glyphs(sf::F14, rect(2, 188, 76, 32), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 2);
+    }
+    let bits = |v: Option<f32>| v.map(|x| x.to_bits()).unwrap_or(u32::MAX);
+    let side = (bits(max), bits(min), bits(rel), dec, unit);
+    if c.side != Some(side) {
+        c.side = Some(side);
+        sf::label(sf::F14, rect(403, 175, 72, 12), "MAX:", STATUS_FG, BG, 1, 2);
+        sf::label(sf::F14, rect(407, 187, 72, 12), max.map(|v| num_unit(&mut b, v, dec, unit)).unwrap_or(""), STATUS_FG, BG, 1, 2);
+        sf::rbox(rect(402, 205, 76, 38), 8, BTN, BG);
+        sf::glyphs(sf::F14, rect(405, 207, 76, 19), "REL:", STATUS_FG, BTN, 1, 2);
+        let mut b2 = [0u8; 32];
+        let rv = num_unit(&mut b2, rel.unwrap_or(0.0), dec, unit);
+        sf::glyphs(sf::F14, rect(405, 222, 76, 19), rv, STATUS_FG, BTN, 1, 2);
+        sf::label(sf::F14, rect(403, 249, 72, 12), "MIN:", STATUS_FG, BG, 1, 2);
+        sf::label(sf::F14, rect(407, 261, 72, 12), min.map(|v| num_unit(&mut b, v, dec, unit)).unwrap_or(""), STATUS_FG, BG, 1, 2);
+    }
 }
 
 // ---------------------------------------------------------------- scope
@@ -1069,7 +1130,6 @@ const M_BG: Color = 0x10A3;
 const M_TILE: Color = 0x2146;
 const M_ACCENT: Color = 0x04FC;
 const ICONS: sf::Font = sf::Font(0x0805_592C);
-const LOGO: sf::Font = sf::Font(0x0805_6070);
 
 pub const TILES: [(i16, i16, &str, u32); 4] = [
     (46, 52, "Multimeter", 0x20),
@@ -1080,7 +1140,6 @@ pub const TILES: [(i16, i16, &str, u32); 4] = [
 
 pub fn main_menu(combo: &str) {
     lcd::fill_rect(0, 0, lcd::W, lcd::H, M_BG);
-    sf::glyphs(LOGO, rect(11, 11, 117, 31), " ", STATUS_FG, M_BG, 8, 0);
     for (x, y, name, icon) in TILES {
         sf::rbox(rect(x, y, 190, 106), 8, M_TILE, M_BG);
         let g = char::from_u32(icon).unwrap_or(' ');

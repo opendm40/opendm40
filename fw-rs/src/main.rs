@@ -302,7 +302,7 @@ fn main() -> ! {
 
         if now >= next_touch && !host.busy() {
             next_touch = now + 10;
-            let g = match tp.as_mut().and_then(|t| t.poll()) {
+            let g = match tp.as_mut().and_then(|t| t.poll(now)) {
                 Some(ev) => {
                     touch_events = touch_events.wrapping_add(1);
                     gestures.event(&ev, now)
@@ -371,6 +371,10 @@ fn touch_diag(
     d[80] = ctl.0;
     d[81..97].copy_from_slice(&ctl.1);
     if let Some(t) = tp {
+        d[152] = t.ring_i;
+        for (i, f) in t.ring.iter().enumerate() {
+            d[153 + 7 * i..160 + 7 * i].copy_from_slice(f);
+        }
         d[0..4].copy_from_slice(&t.chip);
         d[4] = 1;
         d[8..12].copy_from_slice(&events.to_le_bytes());

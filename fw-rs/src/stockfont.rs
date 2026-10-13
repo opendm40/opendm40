@@ -193,6 +193,15 @@ fn layout(font: Font, r: Rect, text: &str, align: u8, spacing: i8, out: &mut [Op
     n
 }
 
+/// 16-step colour ramp bg..fg for one label (avoids per-pixel arithmetic).
+fn ramp(fg: Color, bg: Color) -> [Color; 16] {
+    let mut t = [0; 16];
+    for (a, v) in t.iter_mut().enumerate() {
+        *v = blend(fg, bg, a as u8);
+    }
+    t
+}
+
 fn blend(fg: Color, bg: Color, a: u8) -> Color {
     if a == 0 {
         return bg;
@@ -230,6 +239,7 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
             }
         }
     }
+    let lut = ramp(fg, bg);
     lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
     for y in y0..=y1 {
         for x in x0..=x1 {
@@ -239,12 +249,34 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
                 if let Some(p) = &pl[gi as usize] {
                     let gy = y - p.y;
                     if gy >= 0 && gy < p.g.h as i16 {
-                        c = blend(fg, bg, p.g.alpha((x - p.x) as u32, gy as u32));
+                        c = lut[p.g.alpha((x - p.x) as u32, gy as u32) as usize];
                     }
                 }
             }
             lcd::data(c);
         }
+    }
+}
+
+/// Fixed-cell label, redrawing only the cells whose character differs from
+/// `prev` (same cell layout assumed; pass an empty `prev` for a full draw).
+pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg: Color, bg: Color) {
+    let mut x = r.x;
+    let mut it = text.chars();
+    let mut ip = prev.chars();
+    let full = prev.is_empty();
+    for &w in widths {
+        let c = it.next().unwrap_or(' ');
+        let pc = ip.next();
+        if full || pc != Some(c) {
+            let mut b = [0u8; 4];
+            label(font, rect(x, r.y, w as i16, r.h), c.encode_utf8(&mut b), fg, bg, 8, 0);
+        }
+        x += w as i16;
+    }
+    let end = r.x + r.w;
+    if full && x < end {
+        lcd::fill_rect(x as u16, r.y as u16, (end - x) as u16, r.h as u16, bg);
     }
 }
 
@@ -288,10 +320,11 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
             continue;
         }
         let (x, y) = (p.x as u16, p.y as u16);
+        let lut = ramp(fg, bg);
         lcd::set_window(x, y, x + p.g.w as u16 - 1, y + p.g.h as u16 - 1);
         for gy in 0..p.g.h as u32 {
             for gx in 0..p.g.w as u32 {
-                lcd::data(blend(fg, bg, p.g.alpha(gx, gy)));
+                lcd::data(lut[p.g.alpha(gx, gy) as usize]);
             }
         }
     }
