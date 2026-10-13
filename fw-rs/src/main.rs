@@ -54,9 +54,16 @@ const KEEPALIVE_MAX_MS: u64 = 600_000;
 /// MEASure:<f>? after a function change waits for a full averaging window at
 /// most this long (then any fresh reading answers), ms.
 const SCPI_SETTLE_MS: u64 = 1500;
-/// READ? / MEASure? / FETCh? without any reading this long: +9.9E37 and
-/// "Data stale" (below the 2 s PyVISA default timeout), ms.
+/// READ? / MEASure? / FETCh? with no reading of the current function yet
+/// (after a function change): give up this long after the converter's settle
+/// deadline (`Dmm::deadline`, 2.5 s for ohms), not after the command, ms.
 const SCPI_WAIT_MS: u64 = 1900;
+/// READ? / MEASure:<f>? with a reading of the current function already
+/// flowing: the next fresh reading if it comes within this, else the latest
+/// one, ms. libsigrok's USBTMC transport reads Bulk-IN with a hard 1000 ms
+/// timeout; the expiry is checked once per main-loop iteration, hence the
+/// margin.
+const SCPI_QUICK_MS: u64 = 850;
 
 /// pid.codes test VID/PID, for the debug build only.
 const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
@@ -164,14 +171,18 @@ fn main() -> ! {
 
     let mut scpi = scpi::Scpi::new();
     // SCPI READ?/MEASure?/FETCh? waiting for a DMM reading: (min seq, settle,
-    // start ms). The reply is the first reading with seq >= min, at whatever
-    // averaging it has (READ?: the next conversion, ~0.1-0.4 s). settle
-    // (MEASure:<f>? that changed the function): also wait for a full
-    // averaging window, but at most SCPI_SETTLE_MS. No reading within
-    // SCPI_WAIT_MS: +9.9E37 and "Data stale" - every reply stays inside the
-    // usual host timeouts (PyVISA 2 s, Linux usbtmc 5 s); a late reply would
-    // shift every later one.
-    let mut scpi_wait: Option<(u32, bool, u64)> = None;
+    // start ms, expiry ms). The reply is the first reading with seq >= min,
+    // at whatever averaging it has (READ?: the next conversion, ~0.1-0.4 s).
+    // settle (MEASure:<f>? that changed the function): also wait for a full
+    // averaging window, but at most SCPI_SETTLE_MS after the command.
+    // Expiry: with a reading of the current function already there (READ? /
+    // MEAS? without a function change) SCPI_QUICK_MS after the command, then
+    // that latest reading answers (sigrok's 1 s USBTMC timeout). Without one
+    // (just switched: MEAS:<f>?, CONF then READ?) SCPI_WAIT_MS after the
+    // settle deadline, then +9.9E37 and "Data stale". A reply is never sent
+    // after its query was given up (abort / clear / a new command): a late
+    // reply would shift every later one.
+    let mut scpi_wait: Option<(u32, bool, u64, u64)> = None;
     // Data logger (FR-38): owns the HY3131 AD1 fast stream while active.
     let logger = unsafe { &mut *core::ptr::addr_of_mut!(LOGGER) };
     logger.set_osr(logger::DEFAULT_OSR);
@@ -275,7 +286,14 @@ fn main() -> ! {
                         if let Some(m) = m.filter(|_| changed) {
                             app.select_func(&mut clk, m);
                         }
-                        scpi_wait = Some((app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0), changed, now));
+                        // meter.live() is reset on every function change.
+                        let expire = if app.meter.live().is_some() {
+                            now + SCPI_QUICK_MS
+                        } else {
+                            now.max(app.dmm.deadline()) + SCPI_WAIT_MS
+                        };
+                        let min_seq = app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0);
+                        scpi_wait = Some((min_seq, changed, now, expire));
                         false
                     }
                 }
@@ -295,7 +313,7 @@ fn main() -> ! {
                             scpi.put_bytes(b"+9.90000000E+37");
                             true
                         } else {
-                            scpi_wait = Some((0, false, now));
+                            scpi_wait = Some((0, false, now, now.max(app.dmm.deadline()) + SCPI_WAIT_MS));
                             false
                         }
                     }
@@ -535,14 +553,20 @@ fn main() -> ! {
         mark(0, &mut ts);
         app.tick(&mut clk, can_draw);
         mark(1, &mut ts);
-        if scpi_wait.is_some_and(|w| now >= w.2 + SCPI_WAIT_MS) {
-            // No DMM reading in time (stalled / suspended converter, a slow
-            // capacitance range): answer now rather than after the host's
-            // timeout.
+        if scpi_wait.is_some_and(|w| now >= w.3) {
+            // No fresh DMM reading in time (a slow capacitance / temperature
+            // range, a range hunt, a stalled converter): answer now rather
+            // than after the host's timeout, with the latest reading of the
+            // current function if there is one.
             scpi_wait = None;
             scpi.len = 0;
-            scpi.put_bytes(b"+9.90000000E+37");
-            scpi.set_err("Data stale");
+            match app.meter.live().copied() {
+                Some(r) => scpi.put_reading(&r),
+                None => {
+                    scpi.put_bytes(b"+9.90000000E+37");
+                    scpi.set_err("Data stale");
+                }
+            }
             tmc.respond(&scpi.buf[..scpi.len]);
         }
         if let Some((c, _)) = dbg_key_up.filter(|k| now >= k.1) {
@@ -592,7 +616,7 @@ fn main() -> ! {
             if !logging {
                 if let Some(raw) = app.dmm.poll(&mut clk) {
                     if let Some(r) = app.reading(raw, can_draw) {
-                        if let Some((_, settle, t0)) = scpi_wait.filter(|w| r.seq.wrapping_sub(w.0) < 0x8000_0000) {
+                        if let Some((_, settle, t0, _)) = scpi_wait.filter(|w| r.seq.wrapping_sub(w.0) < 0x8000_0000) {
                             // MEASure:<f>? after a function change: prefer a
                             // value at the full (+1 digit) resolution (the
                             // moving average holds AVG_FULL conversions; avg_n

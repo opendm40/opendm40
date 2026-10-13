@@ -85,8 +85,8 @@ pub struct Usbtmc<'a, B: UsbBus> {
     tx_zlp: bool,
     last_tag_in: u8,
     pub status_byte: u8,
-    /// Set by INITIATE_CLEAR and a bus reset; the application drops any
-    /// response it is still preparing (`take_cleared`).
+    /// Set by INITIATE_CLEAR, INITIATE_ABORT_BULK_IN and a bus reset; the
+    /// application drops any response it is still preparing (`take_cleared`).
     cleared: bool,
     /// Debug: count of control requests seen and the last four
     /// (bmRequestType, bRequest, wIndex lo, wLength lo each).
@@ -124,10 +124,15 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         }
     }
 
-    /// A complete command (up to the EOM message), if one arrived.
+    /// A complete command (up to the EOM message), if one arrived. A
+    /// response still queued but not handed to the IN endpoint is dropped
+    /// here: nobody asked for it since (normally the new DEV_DEP_MSG_OUT
+    /// already dropped it; this also covers a late reply queued between a
+    /// multi-packet command's header and its last packet).
     pub fn take_command(&mut self) -> Option<&[u8]> {
         if self.cmd_ready {
             self.cmd_ready = false;
+            self.rsp_ready = false;
             let n = self.cmd_len;
             self.cmd_len = 0;
             Some(&self.cmd[..n])
@@ -136,7 +141,8 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         }
     }
 
-    /// True once after INITIATE_CLEAR / a bus reset: forget a pending query.
+    /// True once after INITIATE_CLEAR / INITIATE_ABORT_BULK_IN / a bus
+    /// reset: forget a pending query (no late reply).
     pub fn take_cleared(&mut self) -> bool {
         core::mem::take(&mut self.cleared)
     }
@@ -201,8 +207,8 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
     /// FIFO (those cannot be taken back): no further data, and a zero-length
     /// packet if the last one written was full-size, so the host's read ends
     /// on a short packet (USBTMC 4.2.1.4 / 4.2.1.6). tx_len stays non-zero
-    /// until that last packet has gone out (endpoint_in_complete -> pump_in),
-    /// which CHECK_*_STATUS report as pending.
+    /// until that last packet has gone out (endpoint_in_complete -> pump_in);
+    /// CHECK_*_STATUS look at `in_flight` instead.
     fn stop_in(&mut self) {
         if self.tx_len == 0 {
             return;
@@ -214,6 +220,18 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         }
         self.tx_zlp = self.tx_off % MPS == 0 && self.tx_off < self.tx_len || self.tx_zlp && self.tx_off == self.tx_len;
         self.tx_len = self.tx_off;
+    }
+
+    /// A Bulk-IN transfer still has something for the host: data not yet
+    /// written, a packet in the endpoint the host has not read (EPENA), or
+    /// the closing ZLP. `tx_len != 0` alone is not enough: usb-device handles
+    /// EP0 before the IN completion collected in the same poll, so a
+    /// CHECK_*_STATUS sent right after the host read the last packet still
+    /// sees `tx_len != 0`; answering PENDING then makes Linux usbtmc wait 5 s
+    /// for a packet that never comes and fail the clear ioctl.
+    fn in_flight(&self) -> bool {
+        self.tx_len != 0
+            && (self.tx_off < self.tx_len || self.tx_zlp || crate::usb::in_busy(u8::from(self.ep_in.address())))
     }
 
     fn on_out_bytes(&mut self, mut d: &[u8]) {
@@ -368,7 +386,12 @@ impl<B: UsbBus> UsbClass<B> for Usbtmc<'_, B> {
     }
 
     fn endpoint_out(&mut self, addr: EndpointAddress) {
-        if addr != self.ep_out.address() {
+        // The previous command not taken by the application yet: leave this
+        // packet in the driver's buffer (the endpoint NAKs further packets
+        // meanwhile) so the two commands are not concatenated. It is
+        // re-reported on the next poll. With take_command called right after
+        // dev.poll in every main-loop iteration this is a safety net.
+        if addr != self.ep_out.address() || self.cmd_ready {
             return;
         }
         let mut buf = [0u8; MPS];
@@ -414,7 +437,7 @@ impl<B: UsbBus> UsbClass<B> for Usbtmc<'_, B> {
             // Pending (bmClear D0 = 1: read Bulk-IN up to a short packet)
             // while the cut-short transfer is still leaving the FIFO.
             CHECK_CLEAR_STATUS => {
-                if self.tx_len != 0 {
+                if self.in_flight() {
                     xfer.accept_with(&[STATUS_PENDING, 1])
                 } else {
                     xfer.accept_with(&[STATUS_SUCCESS, 0])
@@ -438,9 +461,11 @@ impl<B: UsbBus> UsbClass<B> for Usbtmc<'_, B> {
             CHECK_ABORT_BULK_OUT_STATUS => xfer.accept_with(&[STATUS_SUCCESS, 0, 0, 0, 0, 0, 0, 0]),
             INITIATE_ABORT_BULK_IN => {
                 // The host gives up on its read: forget the REQUEST and any
-                // unsent rest of the response either way.
+                // unsent rest of the response either way, and tell the
+                // application (no late reply to a READ? still waiting).
                 self.rsp_ready = false;
                 self.req_tag = None;
+                self.cleared = true;
                 let st = if self.tx_len == 0 {
                     STATUS_FAILED
                 } else if self.last_tag_in != tag {
@@ -454,7 +479,7 @@ impl<B: UsbBus> UsbClass<B> for Usbtmc<'_, B> {
             CHECK_ABORT_BULK_IN_STATUS => {
                 // bmAbortBulkIn D0 = 1: the host must read until a short packet.
                 let n = (self.tx_off.saturating_sub(12) as u32).to_le_bytes();
-                if self.tx_len != 0 {
+                if self.in_flight() {
                     xfer.accept_with(&[STATUS_PENDING, 1, 0, 0, n[0], n[1], n[2], n[3]])
                 } else {
                     xfer.accept_with(&[STATUS_SUCCESS, 0, 0, 0, n[0], n[1], n[2], n[3]])

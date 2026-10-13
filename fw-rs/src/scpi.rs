@@ -11,6 +11,26 @@
 //! 16 / 17 = V / A AC+DC (true RMS of AC+DC = sqrt(AC^2 + DC^2), the stock
 //! DM40B/C sub-mode; FUNCtion? answers "VOLT:ACDC" / "CURR:ACDC").
 //!
+//! Reply timing of READ? / MEASure:<f>? / FETCh? (main.rs, scpi_wait):
+//!   - a reading of the current function already flowing (READ?, MEAS:<f>?
+//!     naming the current function): the next fresh reading, or the latest
+//!     one if none comes within SCPI_QUICK_MS (0.85 s). libsigrok's USBTMC
+//!     transport has a hard 1000 ms Bulk-IN timeout, so this must hold also
+//!     in a slow capacitance / temperature range or during a range hunt.
+//!   - just switched (MEAS:<f>? changing the function, CONF:<f> then READ?,
+//!     FETCh? before any reading): the first reading after the converter's
+//!     settle deadline (Dmm::deadline: 2.5 s for resistance, then the
+//!     autorange, about 3 s in all), MEAS:<f>? preferring a full-resolution
+//!     average for at most SCPI_SETTLE_MS after the command. Meant for hosts
+//!     with a timeout of 5 s or more (pyvisa, a human); the 2 s PyVISA
+//!     default is too short for resistance, and libsigrok waits after a
+//!     function change itself.
+//!   - +9.9E37 and "Data stale" in SYST:ERR? only if the current function
+//!     has no reading at all SCPI_WAIT_MS (1.9 s) after that deadline.
+//!   - no late reply to a query the host gave up on: USBTMC
+//!     INITIATE_ABORT_BULK_IN / INITIATE_CLEAR, or a new command ("Query
+//!     INTERRUPTED").
+//!
 //! Temperature / system (fw-rs extensions):
 //!   CONFigure:TEMPerature [<sensor>]   MEASure:TEMPerature? [<sensor>]
 //!     <sensor> = TCK | PT100 | PT1000 | NTC10K3950 | NTC10K3435 | NTC100K3950

@@ -2148,6 +2148,12 @@ impl Dmm {
         }
         Some(self.cap_val(cc, ol))
     }
+
+    /// Time (ms) before which `poll` gives no reading: the settle after a
+    /// function / range change (SCPI starts its reply timeout from here).
+    pub fn deadline(&self) -> u64 {
+        self.deadline
+    }
 }
 
 /// Format `v` with `dec` decimals into `buf`; returns the text.
