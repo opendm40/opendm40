@@ -146,7 +146,7 @@ Stock: `touch_v2_6.h`. fw-rs: `touch.rs`, `gesture.rs`.
 | Debounce / long-press filtering | MATCH (fw-rs adds more) | `DEBOUNCE_MS` + two-identical-frames; long-press-as-key suppression `touch.rs:279`. Stock relies on controller filtering only. |
 | Gestures (tap/long-press/swipe/drag) | NEW | `gesture.rs`; stock has no gestures. Used for view switching. |
 | Power key PD6 (hold 1.5 s off, double lock) | MATCH | `app.rs:354`-`362`. |
-| **I2C transport** | PARTIAL | fw-rs bit-bangs I2C in the main loop (`touch.rs:131`); stock uses the I2C2 peripheral + DMA + EXTI interrupt. TODO in the header to move to the peripheral. Works but blocks the loop during reads. |
+| **I2C transport** | MATCH (no DMA) | Hardware I2C2 (400/100 kHz by rise time, bit-bang fallback) + EXTI5 pending-bit gating; no DMA (`touch.rs` header). Stock uses the I2C2 peripheral + DMA + EXTI interrupt. Raw bus/IRQ counters in DBG:DIAG? bytes 20..59. |
 | **Goodix GT1158 fallback (0x14)** | MISSING | Stock probes GT1158 first, falls back to 0x5A. fw-rs supports 0x5A only, so a unit with the Goodix panel would have no touch. UNKNOWN which panels ship. |
 | Multi-touch (up to 5 points) | PARTIAL | fw-rs reports point 0 + count only; stock stores up to 5. Single-finger UI, so fine. |
 

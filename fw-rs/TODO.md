@@ -32,7 +32,7 @@ Additional requirements:
         (note: app.rs:533 reclamps a persisted 0 Hz to 1 Hz on config load - left as-is, minor.)
   - [x] Touch: Goodix GT1158 fallback (addr 0x14, probe ID "1158" first, coords GUIx=GoodixY;
         side keys normalised to the same 1<<code). 0x5A path byte-identical. Untestable on this
-        0x5A unit. Still TODO: move bit-banged I2C to I2C2/I2C3 peripheral + EXTI (after boot refactor).
+        0x5A unit.
   - [x] Scope: slow timebases to 50 s/div (TB_MAX 29, roll from 200 ms/div, YT ceiling 1 s/div);
         stop-and-zoom re-renders the stored 26 K record at the selected timebase. Not done: horizontal
         pan (lives in app.rs/ui.rs), full 65 K record (DMARAM budget). Untested on hardware.

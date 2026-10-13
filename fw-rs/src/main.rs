@@ -581,9 +581,12 @@ fn main() -> ! {
         }
 
         // Suspend touch while logging: there is no logger UI (the screen is
-        // frozen), the power key lives in app.tick, and the bit-banged I2C read
+        // frozen), the power key lives in app.tick, and the touch I2C read
         // every 10 ms is the largest periodic jitter source for the sampler.
-        if now >= next_touch && !logging {
+        // EXTI-latched INT edge (touch.rs): read the fresh report now, not on
+        // the tick.
+        let touch_irq = tp.as_ref().map_or(false, |t| t.irq_pending());
+        if (now >= next_touch || touch_irq) && !logging {
             next_touch = now + 10;
             let g = match tp.as_mut().and_then(|t| t.poll(now)) {
                 Some(ev) => {
@@ -694,6 +697,7 @@ fn touch_diag(
         d[4] = 1;
         d[8..12].copy_from_slice(&events.to_le_bytes());
         d[12..19].copy_from_slice(&t.raw);
+        d[20..60].copy_from_slice(&t.diag()); // touch bus / IRQ counters
     }
     d
 }

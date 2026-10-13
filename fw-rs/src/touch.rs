@@ -909,7 +909,6 @@ impl Touch {
 
     /// An INT edge is latched: a fresh report is waiting, so the main loop can
     /// call `poll` now instead of on its 10 ms tick.
-    #[allow(dead_code)] // main.rs hook (see report); poll() works without it
     pub fn irq_pending(&self) -> bool {
         exti_pending()
     }
@@ -920,7 +919,6 @@ impl Touch {
     ///  us u16, 8 max frame us u16, 10 last frame points, 11 probe mode,
     ///  12 edge reads, 16 level-fallback reads, 20 Goodix timer reads,
     ///  24 frames ok, 28 frames bad (0xAB), 32 NAKs, 36 HW faults (u32 each).
-    #[allow(dead_code)] // main.rs touch_diag hook (see report)
     pub fn diag(&self) -> [u8; 40] {
         let s = &self.bus.stats;
         let mut d = [0u8; 40];
