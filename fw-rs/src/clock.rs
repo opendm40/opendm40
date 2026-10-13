@@ -44,3 +44,10 @@ impl Clock {
         while self.now_ms() < end {}
     }
 }
+
+/// Busy-wait `us` microseconds on the cycle counter (needs `Clock::new` first).
+pub fn delay_us(us: u32) {
+    let start = unsafe { r32(DWT_CYCCNT) };
+    let n = us * (HCLK_HZ / 1_000_000);
+    while unsafe { r32(DWT_CYCCNT) }.wrapping_sub(start) < n {}
+}

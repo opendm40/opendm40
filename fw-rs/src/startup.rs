@@ -39,7 +39,13 @@ reset:
     ldr   r1, [r0]
     orr   r1, r1, #0x100000
     str   r1, [r0]
+    /* FPU: CPACR CP10/CP11 full access (the stock firmware enables it too). */
+    ldr   r0, =0xE000ED88
+    ldr   r1, [r0]
+    orr   r1, r1, #0xF00000
+    str   r1, [r0]
     dsb
+    isb
     ldr   sp, =_stack_top
     bl    rust_start
     b     .

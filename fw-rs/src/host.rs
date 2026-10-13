@@ -5,13 +5,16 @@
 //!
 //!   0 PING      a = keepalive ms (0 = default). Data: uptime_ms, flags (bit0
 //!               PLLSAI locked, bit1 USB core idle), keepalive ms left (before
-//!               this request), reserved.
+//!               this request), USBFS CID register.
 //!   1 FILL      a = x | y<<16, b = w | h<<16, c = RGB565 colour.
 //!   2 LCD_READ  a = x | y<<16, b = w | h<<16, c = number of u16 words to read
 //!               after 0x2E (dummy word included); streams the raw words.
 //!   3 LCD_REG   a = command, b = number of u16 words to read back (<= 32).
 //!   4 RELEASE   a = 0: stop feeding the watchdog (reset to stock in ~20 s),
 //!               a = 1: system reset right after the reply.
+//!   5 DIAG      a = block id; returns a diagnostic block from the main loop
+//!               (0 = touch: id[4], found, events u32, last raw frame,
+//!               USBTMC control request log at 80..97).
 //!
 //! Any valid request extends the watchdog keepalive.
 
@@ -29,6 +32,8 @@ pub const CMD_FILL: u8 = 1;
 pub const CMD_LCD_READ: u8 = 2;
 pub const CMD_LCD_REG: u8 = 3;
 pub const CMD_RELEASE: u8 = 4;
+pub const CMD_DIAG: u8 = 5;
+pub const DIAG_LEN: usize = 100;
 
 const ST_OK: u8 = 0;
 const ST_BAD_CMD: u8 = 1;
@@ -45,6 +50,8 @@ pub struct Info {
     pub uptime_ms: u32,
     pub flags: u32,
     pub keepalive_left_ms: u32,
+    /// DIAG block 0 (touch).
+    pub diag: [u8; DIAG_LEN],
 }
 
 enum Source {
@@ -145,7 +152,7 @@ impl Host {
             CMD_PING => {
                 let i = info();
                 self.header(cmd, ST_OK, 16);
-                for v in [i.uptime_ms, i.flags, i.keepalive_left_ms, 0] {
+                for v in [i.uptime_ms, i.flags, i.keepalive_left_ms, unsafe { crate::mmio::r32(crate::usb::USBFS + 0x3C) }] {
                     self.push(&v.to_le_bytes());
                 }
                 Action::Keepalive(a)
@@ -181,6 +188,17 @@ impl Host {
                     }
                 }
                 Action::Keepalive(0)
+            }
+            CMD_DIAG => {
+                let i = info();
+                if a == 0 {
+                    self.header(cmd, ST_OK, DIAG_LEN as u32);
+                    self.push(&i.diag);
+                    Action::Keepalive(0)
+                } else {
+                    self.header(cmd, ST_BAD_ARG, 0);
+                    Action::Keepalive(0)
+                }
             }
             CMD_RELEASE => {
                 self.header(cmd, ST_OK, 0);

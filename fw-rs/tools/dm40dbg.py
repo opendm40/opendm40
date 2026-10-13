@@ -52,9 +52,9 @@ class Link:
         return data
 
     def ping(self, keepalive_ms=0):
-        up, flags, left, _ = struct.unpack('<4I', self.req(PING, keepalive_ms))
+        up, flags, left, cid = struct.unpack('<4I', self.req(PING, keepalive_ms))
         return dict(uptime_ms=up, pllsai=bool(flags & 1), usb_core=bool(flags & 2),
-                    keepalive_left_ms=left)
+                    keepalive_left_ms=left, usb_cid='0x%08x' % cid)
 
     def lcdread(self, x, y, w, h, nwords):
         d = self.req(LCD_READ, x | y << 16, w | h << 16, nwords)
