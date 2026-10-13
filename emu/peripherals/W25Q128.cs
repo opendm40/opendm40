@@ -11,14 +11,13 @@ using System;
 using System.IO;
 using Antmicro.Renode.Core;
 using Antmicro.Renode.Logging;
-using Antmicro.Renode.Peripherals.GPIOPort;
 using Antmicro.Renode.Peripherals.SPI;
 
 namespace Antmicro.Renode.Peripherals.SPI
 {
     public class W25Q128 : ISPIPeripheral, IGPIOReceiver
     {
-        public W25Q128(IMachine machine, STM32_GPIOPort csPort = null, int csPin = 0)
+        public W25Q128(IMachine machine, INumberedGPIOOutput csPort = null, int csPin = 0)
         {
             mem = new byte[Size];
             for(var i = 0; i < mem.Length; i++) mem[i] = 0xFF;

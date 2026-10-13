@@ -16,13 +16,12 @@ using Antmicro.Renode.Core;
 using Antmicro.Renode.Logging;
 using Antmicro.Renode.Peripherals;
 using Antmicro.Renode.Peripherals.Bus;
-using Antmicro.Renode.Peripherals.GPIOPort;
 
 namespace Antmicro.Renode.Peripherals.Miscellaneous
 {
     public class HY3131 : IDoubleWordPeripheral, IKnownSize, IGPIOReceiver
     {
-        public HY3131(IMachine machine, STM32_GPIOPort portC, STM32_GPIOPort portD,
+        public HY3131(IMachine machine, INumberedGPIOOutput portC, INumberedGPIOOutput portD,
                       int sck = 10, int miso = 11, int mosi = 12, int cs = 2)
         {
             this.machine = machine;
@@ -136,7 +135,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var byteIdx = bit / 8;
                 var bitIdx = 7 - (bit % 8);
                 var v = ReadReg((reg + byteIdx) & 0x3F);
-                portC.OnGPIO(misoPin, ((v >> bitIdx) & 1) != 0);
+                var b = ((v >> bitIdx) & 1) != 0;
+                this.Log(LogLevel.Noisy, "  miso bit {0} of R{1:X2}=0x{2:X2} -> {3}", bitIdx, (reg + byteIdx) & 0x3F, v, b);
+                ((IGPIOReceiver)portC).OnGPIO(misoPin, b);
             }
         }
 
@@ -194,7 +195,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private static readonly double[] AcvK = { 10.0, 100.0, 1000.0, 10000.0 };
 
         private readonly IMachine machine;
-        private readonly STM32_GPIOPort portC;
+        private readonly INumberedGPIOOutput portC;
         private readonly int misoPin;
         private readonly byte[] regs = new byte[64];
         private bool selected, sck, mosi, cmdDone, rd, vinSet;

@@ -55,6 +55,13 @@ namespace Antmicro.Renode.Peripherals.DMA
             streams[stream].Request();
         }
 
+        /// Feeder API: one peripheral-to-memory unit with `value` as the
+        /// peripheral data (the ADC sample) instead of reading PAR.
+        public void Feed(int stream, uint value)
+        {
+            streams[stream].Request(value, true);
+        }
+
         public uint Remaining(int stream) => streams[stream].remaining;
         public bool Enabled(int stream) => streams[stream].enabled;
 
@@ -188,6 +195,11 @@ namespace Antmicro.Renode.Peripherals.DMA
 
             public void Request()
             {
+                Request(0, false);
+            }
+
+            public void Request(uint fed, bool useFed)
+            {
                 if(!enabled || remaining == 0)
                 {
                     return;
@@ -207,7 +219,7 @@ namespace Antmicro.Renode.Peripherals.DMA
                 }
                 else // peripheral (or memory for M2M) -> memory
                 {
-                    v = ReadUnit(bus, per, psize);
+                    v = useFed ? fed : ReadUnit(bus, per, psize);
                     WriteUnit(bus, mem, msize, v);
                 }
                 if(minc) memOff += (uint)msize;
