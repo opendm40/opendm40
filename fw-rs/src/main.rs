@@ -160,6 +160,11 @@ fn main() -> ! {
     let mut loop_max = 0u32;
     let mut loop_max_shown = 0u32;
     let mut loop_win = 0u64;
+    // Section profile (debug): max us per section in the last second:
+    // 0 usb+scpi+host, 1 tick, 2 touch, 3 scope, 4 bt, 5 dmm poll+draw.
+    let mut sec = [0u32; 6];
+    let mut sec_shown = [0u32; 6];
+    let cyc = || unsafe { mmio::r32(0xE000_1004) };
 
     loop {
         let now = clk.now_ms();
@@ -170,7 +175,15 @@ fn main() -> ! {
             loop_win = now + 1000;
             loop_max_shown = loop_max;
             loop_max = 0;
+            sec_shown = sec;
+            sec = [0; 6];
         }
+        let mut ts = cyc();
+        let mut mark = |k: usize, ts: &mut u32| {
+            let t = cyc();
+            sec[k] = sec[k].max(t.wrapping_sub(*ts) / 200);
+            *ts = t;
+        };
         if feeding && now < deadline {
             wdt::kick();
         }
@@ -239,7 +252,7 @@ fn main() -> ! {
             uptime_ms: now as u32,
             flags: hw.pllsai_locked as u32 | (hw.core_idle as u32) << 1,
             keepalive_left_ms: if feeding { deadline.saturating_sub(now) as u32 } else { 0 },
-            diag: touch_diag(&tp, touch_events, tmc.dbg_ctl, loop_max_shown, app.prof),
+            diag: touch_diag(&tp, touch_events, tmc.dbg_ctl, loop_max_shown, app.prof, sec_shown),
         });
         match action {
             host::Action::None => {}
@@ -283,7 +296,9 @@ fn main() -> ! {
         // draw must not starve the enumeration.
         let usb_up = dev.state() == UsbDeviceState::Configured || now > 3000;
         let can_draw = usb_up && !host.busy() && now >= draw_hold_until;
+        mark(0, &mut ts);
         app.tick(&mut clk, can_draw);
+        mark(1, &mut ts);
 
         if now >= next_touch && !host.busy() {
             next_touch = now + 10;
@@ -298,9 +313,11 @@ fn main() -> ! {
                 app.gesture(&mut clk, g);
             }
         }
+        mark(2, &mut ts);
         if !host.busy() {
             app.scope_poll(now, can_draw);
         }
+        mark(3, &mut ts);
         if now >= next_poll && !host.busy() {
             next_poll = now + 5;
             if let Some(f) = bt.poll() {
@@ -309,6 +326,7 @@ fn main() -> ! {
                     bt.serve(&f, &mut clk, &mut app.dmm, &mut app.meter, raw.as_ref());
                 }
             }
+            mark(4, &mut ts);
             if let Some(raw) = app.dmm.poll(&mut clk) {
                 if let Some(r) = app.reading(raw, can_draw) {
                     if let Some((min, to_tmc)) = scpi_wait {
@@ -325,12 +343,23 @@ fn main() -> ! {
                     }
                 }
             }
+            mark(5, &mut ts);
         }
     }
 }
 
-fn touch_diag(tp: &Option<touch::Touch>, events: u32, ctl: (u8, [u8; 16]), loop_us: u32, prof: [u32; 3]) -> [u8; host::DIAG_LEN] {
+fn touch_diag(
+    tp: &Option<touch::Touch>,
+    events: u32,
+    ctl: (u8, [u8; 16]),
+    loop_us: u32,
+    prof: [u32; 3],
+    sec: [u32; 6],
+) -> [u8; host::DIAG_LEN] {
     let mut d = [0u8; host::DIAG_LEN];
+    for (i, v) in sec.iter().enumerate() {
+        d[128 + 4 * i..132 + 4 * i].copy_from_slice(&v.to_le_bytes());
+    }
     for (i, v) in prof.iter().enumerate() {
         d[116 + 4 * i..120 + 4 * i].copy_from_slice(&v.to_le_bytes());
     }
