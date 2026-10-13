@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Install dm40-fw into internal flash sector 8 and start it, over Bluetooth.
+"""LEGACY: install a RAM/sector-8 dm40-fw image into internal flash sector 8
+and start it, over Bluetooth (stub in fw-rs/stub + dm40_loader.py).
+
+Only for the T1/T2 RAM test images (./build.sh test-initcore | test-recovery)
+and the old RAM build. Needs the STOCK firmware (or the patched stock) running
+on the meter, not native fw-rs. The normal developer flow is the native image:
+fw-rs/tools/reload.sh (see fw-rs/README.md).
 
     /usr/bin/python3 fw-rs/tools/flash.py [--mac MAC] [--image fw-rs/dm40-fw.bin]
 
@@ -53,10 +59,12 @@ def bt_load(mac, path):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--mac', default=os.environ.get('DM40_MAC', 'XX:XX:XX:XX:XX:XX'))
-    ap.add_argument('--image', default=os.path.join(FW, 'dm40-fw.bin'))
-    ap.add_argument('--stub', default=os.path.join(FW, 'stub', 'dm40-stub.bin'))
+    ap.add_argument('--image', default=os.path.join(FW, 'dm40-fw.bin'),
+                    help='RAM/sector-8 image (NOT dm40-fw-native.bin)')
+    ap.add_argument('--stub', default=os.path.join(FW, 'stub', 'dm40-stub.bin'),
+                    help='LEGACY RAM stub (fw-rs/stub/build.sh)')
     a = ap.parse_args()
 
     img = open(a.image, 'rb').read()
