@@ -17,6 +17,8 @@ MEMORY
 {
     IMAGE (rwx) : ORIGIN = 0x20008000, LENGTH = 80K
     TCM (rw)    : ORIGIN = 0x10000000, LENGTH = 64K
+    /* SRAM1: DMA-reachable buffers (TCM is CPU only). Not loaded, not zeroed. */
+    DMARAM (rw) : ORIGIN = 0x2001C000, LENGTH = 16K
 }
 
 ENTRY(reset);
@@ -55,7 +57,13 @@ SECTIONS
         __bss_end = .;
     } > TCM
 
-    __image_end = .;
+    .dmabuf (NOLOAD) :
+    {
+        . = ALIGN(4);
+        *(.dmabuf .dmabuf.*);
+    } > DMARAM
+
+    __image_end = ADDR(.bss);
 
     /DISCARD/ :
     {
