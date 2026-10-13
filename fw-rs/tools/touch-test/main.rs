@@ -79,7 +79,7 @@ pub mod probe {
     }
 }
 
-use gesture::{Gesture as G, Tracker};
+use gesture::{Axis, Gesture as G, Tracker};
 use host::{emu, H, W};
 use touch::{Debounce, Event, Frame, Point};
 
@@ -233,7 +233,82 @@ fn line(a: (u16, u16), b: (u16, u16), n: usize) -> Vec<(u16, u16)> {
     (0..=n).map(|i| ((a.0 as i32 + (b.0 as i32 - a.0 as i32) * i as i32 / n as i32) as u16, (a.1 as i32 + (b.1 as i32 - a.1 as i32) * i as i32 / n as i32) as u16)).collect()
 }
 
+/// Two-finger touch: frames of (finger a, finger b) points, a frame every
+/// 10 ms, then released. `swap`: report the points in alternating slot
+/// order (the controller's order is not stable).
+fn touch2(frames: &[((u16, u16), (u16, u16))], swap: bool) -> Vec<G> {
+    let mut tr = Tracker::new();
+    let mut v = vec![];
+    let mut t = 1000;
+    for (i, &(a, b)) in frames.iter().enumerate() {
+        let (p, q) = if swap && i % 2 == 1 { (b, a) } else { (a, b) };
+        let mut e = Event { points: 2, p: Point { x: p.0, y: p.1 }, ..Event::default() };
+        e.pts[0] = Point { x: p.0, y: p.1 };
+        e.pts[1] = Point { x: q.0, y: q.1 };
+        if let Some(g) = tr.event(&e, t) {
+            v.push(g);
+        }
+        t += 10;
+    }
+    if let Some(g) = tr.event(&Event::default(), t + 30) {
+        v.push(g);
+    }
+    v
+}
+
+fn pinch_tests(ck: &mut Ck) {
+    // Horizontal spread 100 -> 200 px, slot order swapping every frame.
+    let f: Vec<_> = (0..=10u16).map(|i| ((150 - 5 * i, 160), (250 + 5 * i, 162))).collect();
+    let v = touch2(&f, true);
+    let last = v.iter().rev().find_map(|g| if let G::Pinch(ax, s0, s) = g { Some((*ax, *s0, *s)) } else { None });
+    ck.t("pinch: horizontal, span 100 -> 200 (swapped slots)", last == Some((Axis::H, 100, 200)));
+    ck.t("pinch: ends with PinchEnd(true)", v.last() == Some(&G::PinchEnd(true)));
+    ck.t("pinch: no power-off swipe", !v.iter().any(|g| matches!(g, G::MultiSwipeDown(_))));
+    // Vertical squeeze 160 -> 80.
+    let f: Vec<_> = (0..=8u16).map(|i| ((200, 80 + 5 * i), (202, 240 - 5 * i))).collect();
+    let v = touch2(&f, false);
+    let last = v.iter().rev().find_map(|g| if let G::Pinch(ax, s0, s) = g { Some((*ax, *s0, *s)) } else { None });
+    ck.t("pinch: vertical, span 160 -> 80", last == Some((Axis::V, 160, 80)));
+    // Two fingers moving down together (power-off swipe): no pinch.
+    let f: Vec<_> = (0..=10u16).map(|i| ((150, 60 + 10 * i), (260, 62 + 10 * i))).collect();
+    let v = touch2(&f, true);
+    ck.t("2-finger swipe down: no pinch", !v.iter().any(|g| matches!(g, G::Pinch(..) | G::PinchEnd(_))));
+    ck.t("2-finger swipe down: MultiSwipeDown(2)", v.last() == Some(&G::MultiSwipeDown(2)));
+}
+
+fn raw_tests(ck: &mut Ck) {
+    // Raw-move capture: every moved report is a Move from the previous point,
+    // from the first pixel (no slop), and the release is Up.
+    let mut tr = Tracker::new();
+    let mut v = vec![];
+    let pts = [(100u16, 100u16), (101, 100), (101, 100), (103, 98), (120, 98)];
+    for (i, &(x, y)) in pts.iter().enumerate() {
+        let mut e = Event { points: 1, p: Point { x, y }, ..Event::default() };
+        e.pts[0] = e.p;
+        if let Some(g) = tr.event(&e, 1000 + 10 * i as u64) {
+            if matches!(g, G::Down(_)) {
+                gesture::raw_next(true);
+                tr.capture();
+            }
+            v.push(g);
+        }
+    }
+    if let Some(g) = tr.event(&Event::default(), 1100) {
+        v.push(g);
+    }
+    let p = |x, y| Point { x, y };
+    ck.t(
+        "raw moves: Down, Move x3 (none for a still report), Up",
+        v == vec![G::Down(p(100, 100)), G::Move(p(100, 100), p(101, 100)), G::Move(p(101, 100), p(103, 98)), G::Move(p(103, 98), p(120, 98)), G::Up(p(120, 98))],
+    );
+    // A plain capture after a raw one has no moves.
+    let v = touch(&line((100, 100), (100, 160), 6), true, 0);
+    ck.t("plain capture: Drag, no Move", v.iter().any(|g| matches!(g, G::Drag(..))) && !v.iter().any(|g| matches!(g, G::Move(..))));
+}
+
 fn gesture_tests(ck: &mut Ck) {
+    pinch_tests(ck);
+    raw_tests(ck);
     let tap = |v: &[G]| v.iter().any(|g| matches!(g, G::Tap(_)));
     ck.t("still tap", tap(&touch(&[(100, 100), (100, 101), (101, 100)], false, 0)));
     ck.t("tap point = down point", touch(&[(100, 100), (110, 104)], false, 0).last() == Some(&G::Tap(Point { x: 100, y: 100 })));

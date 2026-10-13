@@ -34,10 +34,22 @@
 //!   (the stock threshold, gui_v2_6.h "Screenshot") = `MultiSwipeDown(3)`
 //!   (screenshot). 4-5 points (a palm) are ignored.
 //!
+//! * Raw moves (the stock scope drag model, docs/stock-scope-ui.md sec. 10.2):
+//!   when the app captures a touch-down after `raw_next(true)`, every later
+//!   one-finger report that moved is sent as `Move(prev, p)` (no slop, no
+//!   axis lock) instead of `Drag`; the app attributes each event itself.
+//! * Pinch (two fingers, finger identity by nearest match between frames, the
+//!   controller's slot order is not stable): once the separation along the
+//!   fingers' dominant axis changed by PINCH_MIN px before the centroid moved
+//!   PINCH_SWIPE px down, the touch is a pinch: `Pinch(axis, span0, span)`
+//!   per two-finger frame (H = fingers side by side), `PinchEnd(true)` on
+//!   release (`PinchEnd(false)` when a third finger lands); a pinch never
+//!   ends as `MultiSwipeDown(2)`.
+//!
 //! The controller only reports points; the stock firmware has no one-finger
 //! gestures.
 
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
 use crate::touch::{Event, Point, MAX_POINTS};
 
@@ -82,6 +94,22 @@ pub fn grab_ms() -> u16 {
 pub fn set_grab_ms(ms: u16) {
     GRAB_MS.store(ms.min(5000), Ordering::Relaxed);
 }
+/// The next `capture` makes the touch a raw-move touch (`raw_next`).
+static RAW_NEXT: AtomicBool = AtomicBool::new(false);
+
+/// Ask for raw `Move` events on the touch the app is about to capture (call
+/// it from the `Down` handler before returning true; any later `capture`
+/// clears it).
+pub fn raw_next(on: bool) {
+    RAW_NEXT.store(on, Ordering::Relaxed);
+}
+
+/// Pinch: change of the finger separation that makes a two-finger touch a
+/// pinch, pixels, and the downward centroid travel that makes it a swipe
+/// instead (whichever comes first).
+const PINCH_MIN: i32 = 20;
+const PINCH_SWIPE: i32 = 30;
+
 /// Minimum downward centroid travel of an n-finger swipe, pixels (index = n;
 /// 0 = not a gesture).
 const MULTI_MIN: [i32; MAX_POINTS + 1] = [0, 0, 60, 30, 0, 0];
@@ -123,6 +151,27 @@ pub enum Gesture {
     /// Side key went down / up: code 0..3.
     KeyDown(u8),
     KeyUp(u8),
+    /// Raw-move touch (`raw_next`): the finger moved from the previous
+    /// report's point to this one.
+    Move(Point, Point),
+    /// Two-finger pinch: axis of the finger pair (H = side by side), the
+    /// separation along it at the start and now, pixels.
+    Pinch(Axis, u16, u16),
+    /// Pinch over: released (true) or abandoned for a third finger (false).
+    PinchEnd(bool),
+}
+
+/// Two-finger tracking for the pinch: the fingers (in identity order), the
+/// start separation and centroid, the classification.
+#[derive(Clone, Copy)]
+struct Pair {
+    a: Point,
+    b: Point,
+    axis: Axis,
+    span0: i32,
+    c0: (i32, i32),
+    /// 0 undecided, 1 pinch, 2 not a pinch (swipe / third finger).
+    state: u8,
 }
 
 #[derive(Clone, Copy)]
@@ -159,6 +208,10 @@ pub struct Tracker {
     captured: bool,
     /// Set once the touch had two or more fingers.
     multi: Option<Multi>,
+    /// Two-finger pinch tracking.
+    pair: Option<Pair>,
+    /// Raw-move touch (`raw_next` at the capture).
+    raw: bool,
     keys: u8,
 }
 
@@ -177,6 +230,8 @@ impl Tracker {
             early: false,
             captured: false,
             multi: None,
+            pair: None,
+            raw: false,
             keys: 0,
         }
     }
@@ -184,15 +239,18 @@ impl Tracker {
     /// The app took the current touch (its `Down` or `Drag`): on release it
     /// is not classified as a swipe or a tap. No effect without a touch.
     pub fn capture(&mut self) {
+        let raw = RAW_NEXT.swap(false, Ordering::Relaxed);
         if self.active && !self.captured {
             self.captured = true;
-            crate::touch::log(b'G', 0, b'c', 0, 0, self.last);
+            self.raw = raw;
+            crate::touch::log(b'G', 0, b'c', raw as u8, 0, self.last);
         }
     }
 
     /// As `capture`, and this touch drags at once even with hold-to-grab on
     /// (a slider, not the scope: the grab setting is the scope's).
     pub fn capture_direct(&mut self) {
+        RAW_NEXT.store(false, Ordering::Relaxed);
         if self.active {
             self.captured = true;
             self.direct = true;
@@ -203,7 +261,11 @@ impl Tracker {
     pub fn event(&mut self, ev: &Event, now: u64) -> Option<Gesture> {
         let first_drag = self.axis.is_none();
         let g = self.step(ev, now);
-        // DBG:TOUCH?: every decision, but only the first Drag of a touch.
+        // DBG:TOUCH?: every decision, but only the first Drag of a touch (no
+        // Move / Pinch events: one per report).
+        if matches!(g, Some(Gesture::Move(..) | Gesture::Pinch(..))) {
+            return g;
+        }
         if !matches!(g, Some(Gesture::Drag(..))) || first_drag {
             log_gesture(g, now);
         }
@@ -225,7 +287,11 @@ impl Tracker {
             }
             self.active = false;
             let single = self.down.take();
+            let pinch = self.pair.take().is_some_and(|p| p.state == 1);
             if let Some(m) = self.multi.take() {
+                if pinch {
+                    return Some(Gesture::PinchEnd(true));
+                }
                 return multi_gesture(&m);
             }
             let (p0, t0) = single?;
@@ -234,6 +300,27 @@ impl Tracker {
         if n >= 2 {
             let c = centroid(&ev.pts[..n as usize]);
             let had_single = self.active && self.down.is_some();
+            // Pinch tracking (two fingers only).
+            if n == 2 && !had_single {
+                if let Some(g) = self.pinch_step(ev.pts[0], ev.pts[1], c) {
+                    self.active = true;
+                    return Some(g);
+                }
+            } else if n > 2 {
+                if let Some(p) = self.pair.as_mut() {
+                    let was = p.state;
+                    p.state = 2;
+                    if was == 1 {
+                        self.active = true;
+                        self.down = None;
+                        let m = self.multi.get_or_insert(Multi { n, c0: c, t0: now, c1: c, t1: now });
+                        if n > m.n {
+                            *m = Multi { n, c0: c, t0: now, c1: c, t1: now };
+                        }
+                        return Some(Gesture::PinchEnd(false));
+                    }
+                }
+            }
             match self.multi.as_mut() {
                 // More fingers than before: the gesture (re)starts here.
                 Some(m) if n <= m.n => {
@@ -246,6 +333,12 @@ impl Tracker {
             }
             self.active = true;
             self.down = None;
+            if had_single && n == 2 {
+                // The first finger's touch becomes a two-finger one: start the
+                // pair tracking on this frame.
+                self.pair = None;
+                let _ = self.pinch_step(ev.pts[0], ev.pts[1], c);
+            }
             return if had_single { Some(Gesture::Cancel) } else { None };
         }
         // One finger.
@@ -266,9 +359,12 @@ impl Tracker {
                 self.direct = false;
                 self.early = false;
                 self.captured = false;
+                self.raw = false;
+                self.pair = None;
                 Some(Gesture::Down(p))
             }
             Some((p0, _)) => {
+                let prev = self.last;
                 self.last = p;
                 self.far = self.far.max(dist(p0, p));
                 if dist(p0, p) > SLOP {
@@ -283,6 +379,10 @@ impl Tracker {
                 if let Some(g) = self.grab(now) {
                     return Some(g);
                 }
+                // Raw-move touch: every report that moved, from the first.
+                if self.raw {
+                    return if p != prev { Some(Gesture::Move(prev, p)) } else { None };
+                }
                 // Hold-to-grab: moving before the grab never drags.
                 if !self.moved || (hold != 0 && !self.grabbed) {
                     return None;
@@ -292,6 +392,38 @@ impl Tracker {
                 }
                 self.axis.map(|a| Gesture::Drag(p0, p, a))
             }
+        }
+    }
+
+    /// Two-finger frame: keep the finger identity (nearest match to the last
+    /// frame), classify pinch vs swipe, report the pinch.
+    fn pinch_step(&mut self, p: Point, q: Point, c: (i32, i32)) -> Option<Gesture> {
+        let pr = match self.pair.as_mut() {
+            None => {
+                let (dx, dy) = (q.x as i32 - p.x as i32, q.y as i32 - p.y as i32);
+                let axis = if dx.abs() >= dy.abs() { Axis::H } else { Axis::V };
+                let span0 = if axis == Axis::H { dx.abs() } else { dy.abs() };
+                self.pair = Some(Pair { a: p, b: q, axis, span0, c0: c, state: 0 });
+                return None;
+            }
+            Some(pr) => pr,
+        };
+        // Identity: the assignment with the smaller total travel.
+        let (a, b) = if dist2(pr.a, p) + dist2(pr.b, q) <= dist2(pr.a, q) + dist2(pr.b, p) { (p, q) } else { (q, p) };
+        pr.a = a;
+        pr.b = b;
+        let span = if pr.axis == Axis::H { (b.x as i32 - a.x as i32).abs() } else { (b.y as i32 - a.y as i32).abs() };
+        if pr.state == 0 {
+            if (span - pr.span0).abs() >= PINCH_MIN {
+                pr.state = 1;
+            } else if c.1 - pr.c0.1 >= PINCH_SWIPE {
+                pr.state = 2;
+            }
+        }
+        if pr.state == 1 {
+            Some(Gesture::Pinch(pr.axis, pr.span0.clamp(1, 999) as u16, span.clamp(1, 999) as u16))
+        } else {
+            None
         }
     }
 
@@ -443,6 +575,9 @@ fn log_gesture(g: Option<Gesture>, now: u64) {
         Some(Gesture::MultiSwipeDown(n)) => (b'W', n, z),
         Some(Gesture::KeyDown(k)) => (b'K', k, z),
         Some(Gesture::KeyUp(k)) => (b'k', k, z),
+        Some(Gesture::Move(_, p)) => (b'm', 0, p),
+        Some(Gesture::Pinch(ax, _, s)) => (b'P', (ax == Axis::V) as u8, Point { x: s, y: 0 }),
+        Some(Gesture::PinchEnd(ok)) => (b'E', ok as u8, z),
     };
     crate::touch::log(b'G', now, c, a, 0, p);
 }
@@ -477,6 +612,11 @@ fn centroid(pts: &[Point]) -> (i32, i32) {
     let n = pts.len().max(1) as i32;
     let (sx, sy) = pts.iter().fold((0i32, 0i32), |(sx, sy), p| (sx + p.x as i32, sy + p.y as i32));
     (sx / n, sy / n)
+}
+
+fn dist2(a: Point, b: Point) -> i32 {
+    let (dx, dy) = (a.x as i32 - b.x as i32, a.y as i32 - b.y as i32);
+    dx * dx + dy * dy
 }
 
 fn dist(a: Point, b: Point) -> i32 {
