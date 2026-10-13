@@ -12,12 +12,12 @@ Additional requirements:
 - Both analog rails on by default.
 - USB composite = USBTMC + mass-storage disk, always present (like the stock disk mode).
 - Debug commands live in USBTMC as `DBG:*` SCPI commands (no CDC).
-- Data-logger mode (see FR-38 in `../DM40C_feature_request.md`).
+- Data-logger mode (see FR-38 in `../docs/dm40-feature-request.md`).
 
 ## Remaining work
 
 - [x] `tools/dm40dbg.py` ported from CDC/pyserial to `/dev/usbtmc` + `DBG:` commands (a3427d4).
-  - Still verify that `tools/reload.sh` and `tools/flash.py` work with it (no serial/ttyACM references remain).
+  - Still verify that `tools/reload.sh` and `tools/legacy/flash.py` work with it (no serial/ttyACM references remain).
 - [x] On-device test of USBTMC (`*IDN?`, `DBG:PING?`/`DIAG?`/`LCD?` screenshot, `DBG:TAP`/`SWIPE`) and the mass-storage disk.  (code done; verify on device)
   - Disk is backed by the W25Q128 SPI flash (1f2bf30); README records `DBG:FLASH?` -> EF4018, but a full test (mount, write/read) is not logged.
 - [ ] Faster redraw of the main DMM value and trend chart (target ~6 ms like stock: render to RAM, single window flush, chart column ring).
@@ -136,7 +136,7 @@ Additional requirements:
       (msc.rs/spiflash.rs only expose a block device today), the sampling path from FR-38, and a
       DMM-screen record indicator + swipe gesture. Relates to FR-04 / FR-35. Queued after logger + UI.
 
-## Feature requests to add (from ../DM40C_feature_request.md; user: add autohold + useful ones)
+## Feature requests to add (from ../docs/dm40-feature-request.md; user: add autohold + useful ones)
 - [x] **FR-01 AutoHold (P0, critical).** Auto-freeze the reading when it stabilises, re-arm on a new  (code done; verify on device)
       signal, beep on capture (Fluke/Keysight style). Algorithm sketch in Appendix B of the FR doc.
       Touches meter.rs/app.rs/ui.rs. Queue after the UI agent (HOLD/layout) to avoid conflict; builds
@@ -151,7 +151,7 @@ Additional requirements:
   FR-18 touch lock, FR-27 generator keeps running in DMM. FR-33 is USBTMC+MSC (we chose DBG over CDC).
 - [ ] Repo tidy-up (user request): plan in ../TIDY-PLAN.md (46f9352); .gitignore for dumps/backups and README
       fixes done (3aedb6f, efb7e50). Moves/deletes wait for the user's decisions: vendor-derived material
-      (app_decompile.c is tracked) and BT MACs in README/dm40.py while origin is a public GitHub repo.
+      (app_decompile.c is tracked) and BT MACs in docs/bt-protocol.md / tools/dm40.py while origin is a public GitHub repo.
 
 ## From user community feedback (docs/user-feedback.md)
 - [ ] UF-01 (P0) Verify continuity CMPO beeper + diode beep classes on device, latency <10 ms (most-praised stock feature). §5.2

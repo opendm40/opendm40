@@ -124,3 +124,8 @@ gen_state: eng(.., g.actual_hz(), "Hz").
 Device: frequency list (1, 7, 1k, 4k [old bug], 32768 sine/square, 44100, 50k, 50000/50001, 75k, 2M, 7M, 10M)
 vs SOUR:FREQ?; K>1 table visual check; clamp round trip; ramp rising; offset/DC with the DMM; PWM level;
 measure apply() time (expect tens of ms).
+
+## Path fixes after the tidy-up (prose only)
+- src/meter.rs:5 -> `../docs/dm40-feature-request.md`
+- src/genuine.rs:111 -> `private/memrw-kit-test/full/uid_1FFF7A10.bin`
+- src/screenshot.rs:12 `spi-disk-backup/` -> `private/spi-disk-backup/`
