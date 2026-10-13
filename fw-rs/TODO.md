@@ -340,3 +340,7 @@ Additional requirements:
       DBG:TOUCH? log; device test with the owner's finger].
 - [ ] DMM frequency: ~700 Hz shown as "1 kHz"? — ON HOLD until the owner confirms the actual input
       frequency (calibrator setting).
+- [ ] Pinch-to-zoom on the scope is NOT implemented yet (owner noticed): two-finger tracking with finger
+      identity, horizontal pinch = timebase, vertical = V/div, 1-2-5 snap, value bubble; tell a pinch
+      (spread changes) from the 2-finger swipe-down power-off (pair moves down). Measure two-finger
+      report rate/stability first (DBG:TOUCH?). Part of the stock scope port.
