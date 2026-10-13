@@ -196,3 +196,6 @@ redesign decides where).
 SRAM: csvlog adds 12 KiB .dmabuf — together with BT (+14.5 KiB) the budget is tight; see the NO-GO-fix agent's figure.
 Caveats: root block erased per commit (~1.5-6k erases/day of continuous logging); a cut between FAT link and dir leaves the
 chain one cluster longer than the size (fsck truncates). TODO items FR-35/FR-16/UF-32/CSV: code done, needs hooks + device.
+
+## DMM sample rate on screen (owner request)
+Show the actual DMM reading rate on the DMM screen (e.g. "9.4/s" from dmm.reading_period_ms(), small font in the chart header next to the timebase, or the status bar) and let the user change it by tapping it: cycle SLOW / MED / FAST (dmm.set_rate; grey/"n/a" when !dmm.rate_applies()), persisted via the FR-05 persist hook. Also show it in the combined-view meter strip badges if space allows (no-overlap rules).
