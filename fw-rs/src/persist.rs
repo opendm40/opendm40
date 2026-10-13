@@ -15,8 +15,13 @@ const BKP: u32 = 0x4002_4000;
 const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// v4: 40 words (v3 had 24, v2 16; an older record is loaded zero-extended,
 /// every new field reads 0 = its default). Layout: app.rs persist_words().
+/// p[38] was spare in v4 and is now W_DMM_EXT; p[39] is still spare. A v4
+/// record from before reads p[38] = 0 = defaults, so no version change.
 const VERSION: u32 = 4;
 pub const WORDS: usize = 40;
+/// FR-05 conversion rate + display smoothing, UF-21 V-autorange migration
+/// flag: meter::ext_word() / meter::ext_settings() pack and decode it.
+pub const W_DMM_EXT: usize = 38;
 const V3_WORDS: usize = 24;
 /// The record (magic, version, WORDS, CRC) must end below the boot shim's
 /// words at 0x40024FF0 (boot.rs BKP_CRASH..BKP_LAST).

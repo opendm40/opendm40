@@ -8,8 +8,25 @@
 //! everything freezes, the statistics included. AutoHold is a separate mode:
 //! the statistics, the chart and the HV warning keep running on the live
 //! value, only the main readout is frozen on the last captured value.
+//!
+//! FR-05 display smoothing (`Smooth`, below) sits between the Dmm readings
+//! and everything the user reads. Which value feeds what:
+//!   - smoothed (REL applied): the readout (`shown`), the limit verdict,
+//!     `live` (SCPI READ? / MEAS?, the trend chart), FETCh?, BT (shown);
+//!     the REL reference is taken from the smoothed value (a quiet zero);
+//!   - unsmoothed (the Dmm reading, REL applied): MIN / MAX / AVG, the
+//!     AutoHold detector and its captured value, and `Update::raw` (the HV
+//!     warning must not lag).
+//! Why the statistics and AutoHold stay unsmoothed: smoothing is a display
+//! preference and must not change what MIN / MAX mean (a moving average
+//! clips the peaks, and AVG is the same either way); AutoHold has its own
+//! stability window whose spread limits are tuned for the unsmoothed noise,
+//! and feeding it a moving average would let a still-moving signal look
+//! stable and capture a lagging mean. Both always saw the Dmm reading (with
+//! the Dmm's own converter window, `dmm::Rate`), so this keeps their
+//! behaviour independent of the new setting.
 
-use crate::dmm::{Reading, Val};
+use crate::dmm::{Rate, Reading, Val};
 
 /// SI multiplier of a display unit's prefix ("mV" -> 1e-3, "k\u{3a9}" ->
 /// 1e3). One-character units and "\u{b0}C" have no prefix.
@@ -180,9 +197,180 @@ impl Stats {
     }
 }
 
+// ----------------------------------------------------------- smoothing
+//
+// FR-05: a moving average over the last N READINGS (the converter window
+// over AD1 conversions is dmm.rs `Rate`), restarted
+//   - by a step: a reading further than max(cnt counts, rel x |mean|) from
+//     the window mean (the same step-reset idea as the Dmm code window, so a
+//     real change shows at once: P3, no slow last-digit crawl),
+//   - by OL, by any function / unit / resolution change (autorange), by a
+//     setting change and by `Meter::reset` (function change, SCPI CONF).
+// Counts are of the 60000-count format (1 count = 10^-dec display units);
+// temperature uses absolute deg C. Off by default (P3 in
+// docs/user-feedback.md; the +1 digit does not need it: it comes from the
+// Dmm code window). Per function (spans at the MEDIUM rate):
+//   function                   reading every  Low (span)     High (span)    restart on
+//   DC V / mV / A, ohm, diode  ~0.11 s        4 (~0.4 s)     16 (~1.7 s)    3 counts or 0.05 % (ohm 0.1 %)
+//   AC V / A, AC+DC            RMS update     4              16             30 counts or 0.3 %
+//   capacitance                0.42 s or more 2 (~0.8 s)     4 (~1.7 s)     5 counts or 1 %
+//   frequency                  0.35 s         2 (0.7 s)      4 (1.4 s)      3 counts or 0.2 %
+//   temperature, thermocouple  ~2.2 s         2 (~4.4 s)     4 (~9 s)       0.3 C
+//   temperature, PT / NTC      ~0.11 s        4              16             0.3 C
+//   continuity                 never (the readout must follow the beeper)
+// SLOW rate: readings every ~0.43 s, so the DC spans are 4x longer.
+// The +1 digit is decided by the Dmm (`Val::ext`: only with a full converter
+// window, dmm.rs FR-05 table); smoothing never adds it.
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Smooth {
+    Off = 0,
+    Low = 1,
+    High = 2,
+}
+
+/// SCPI / settings names, indexed by `Smooth as usize`.
+pub const SMOOTH_NAMES: [&str; 3] = ["OFF", "LOW", "HIGH"];
+
+impl Smooth {
+    pub const ALL: [Smooth; 3] = [Smooth::Off, Smooth::Low, Smooth::High];
+
+    pub fn from_u8(v: u8) -> Option<Smooth> {
+        Smooth::ALL.get(v as usize).copied()
+    }
+}
+
+/// Longest smoothing window (readings).
+const SM_MAX: usize = 16;
+
+/// (window length, restart threshold in display units of `r`) for the
+/// setting; length 1 = not smoothed.
+fn sm_cfg(r: &Reading, s: Smooth) -> (usize, f32) {
+    if s == Smooth::Off || r.mode == 11 {
+        return (1, 0.0);
+    }
+    let hi = s == Smooth::High;
+    let cnt = 1.0 / p10(r.main.dec);
+    let v = r.main.v.abs();
+    let (lo_n, hi_n, thr) = match r.mode {
+        _ if r.acdc => (4, 16, (30.0 * cnt).max(0.003 * v)),
+        0 | 2 | 4..=6 => (4, 16, (30.0 * cnt).max(0.003 * v)),
+        10 => (4, 16, (3.0 * cnt).max(0.001 * v)),
+        1 | 3 | 7..=9 | 12 => (4, 16, (3.0 * cnt).max(0.0005 * v)),
+        13 => (2, 4, (5.0 * cnt).max(0.01 * v)),
+        14 => (2, 4, (3.0 * cnt).max(0.002 * v)),
+        // Temperature: the thermocouple shows 1 decimal (one reading per
+        // ~2.2 s), the resistive sensors 2 (one per conversion).
+        _ if r.main.dec <= 1 => (2, 4, 0.3),
+        _ => (4, 16, 0.3),
+    };
+    (if hi { hi_n } else { lo_n }, thr)
+}
+
+/// Moving average of displayed values of one function / unit / resolution.
+/// Values are kept as offsets from the first one of the window, so a 32-bit
+/// float sum stays exact to well below the +1 digit (6.00000 V).
+#[derive(Clone, Copy)]
+struct Smoother {
+    d: [f32; SM_MAX],
+    n: u8,
+    i: u8,
+    len: u8,
+    base: f32,
+    func: u8,
+    unit: &'static str,
+    dec: u8,
+}
+
+impl Smoother {
+    const fn new() -> Self {
+        Smoother { d: [0.0; SM_MAX], n: 0, i: 0, len: 0, base: 0.0, func: 255, unit: "", dec: 0 }
+    }
+
+    fn reset(&mut self) {
+        self.n = 0;
+        self.i = 0;
+    }
+
+    fn mean(&self) -> f32 {
+        let n = self.n as usize;
+        self.base + self.d[..n].iter().sum::<f32>() / n as f32
+    }
+
+    /// The window mean when it holds values of this unit / resolution.
+    fn current(&self, unit: &str, dec: u8) -> Option<f32> {
+        (self.n > 0 && self.unit == unit && self.dec == dec).then(|| self.mean())
+    }
+
+    /// Feed one value; returns the smoothed value.
+    fn push(&mut self, v: f32, len: usize, thr: f32, func: u8, unit: &'static str, dec: u8) -> f32 {
+        let len = len.min(SM_MAX);
+        if len <= 1 {
+            self.reset();
+            return v;
+        }
+        if self.n == 0
+            || len != self.len as usize
+            || func != self.func
+            || unit != self.unit
+            || dec != self.dec
+            || (v - self.mean()).abs() > thr
+        {
+            *self = Smoother { len: len as u8, base: v, func, unit, dec, ..Smoother::new() };
+        }
+        self.d[self.i as usize] = v - self.base;
+        if (self.n as usize) < len {
+            self.n += 1;
+        }
+        self.i = ((self.i as usize + 1) % len) as u8;
+        self.mean()
+    }
+}
+
+/// The readout is drawn at most this often (ms): FAST and the stock
+/// moving-OSR bursts give up to ~37 readings/s, more than the panel needs.
+/// Continuity, a unit / resolution / OL change and an AutoHold capture are
+/// drawn at once.
+const SHOW_MIN_MS: u64 = 80;
+
+// ------------------------------------------------------ persisted (p[38])
+//
+// Backup-SRAM word p[38] (persist.rs W_DMM_EXT, a spare word of record v4;
+// every record written before reads 0 = all defaults):
+//   bits 0..1  dmm::Rate + 1   (0 = default MEDIUM)
+//   bits 2..3  Smooth + 1      (0 = default OFF)
+//   bit 8      UF-21: the V autorange stored in p[2] is a choice made under
+//              an AUTO+-default build. Without it the stored value is the old
+//              AUTO default, and restores as AUTO+.
+
+/// Settings decoded from p[38].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ExtSettings {
+    pub rate: Rate,
+    pub smooth: Smooth,
+    /// p[2]'s V autorange flag is to be trusted (UF-21 migration).
+    pub v_auto_valid: bool,
+}
+
+pub const RATE_DEFAULT: Rate = Rate::Medium;
+pub const SMOOTH_DEFAULT: Smooth = Smooth::Off;
+
+pub fn ext_word(rate: Rate, smooth: Smooth) -> u32 {
+    (rate as u32 + 1) | (smooth as u32 + 1) << 2 | 1 << 8
+}
+
+pub fn ext_settings(w: u32) -> ExtSettings {
+    let f = |b: u32| (b as u8).checked_sub(1);
+    ExtSettings {
+        rate: f(w & 3).and_then(Rate::from_u8).unwrap_or(RATE_DEFAULT),
+        smooth: f(w >> 2 & 3).and_then(Smooth::from_u8).unwrap_or(SMOOTH_DEFAULT),
+        v_auto_valid: w >> 8 & 1 != 0,
+    }
+}
+
 // ------------------------------------------------------------ AutoHold
 //
-// FR-01 / Appendix B, on the raw (pre-REL) value: a window of readings that
+// FR-01 / Appendix B, on the raw (pre-REL, unsmoothed) value: a window of readings that
 // stay within `spread` of each other for `t_ms` (and at least `n_min`
 // readings) is "stable"; its mean is captured (beep, readout frozen) when
 //   - nothing was captured yet, or
@@ -273,8 +461,12 @@ impl Win {
 
 /// What `Meter::update` produced.
 pub struct Update {
-    /// The live reading (REL applied): SCPI READ? / MEAS?, chart, HV warning.
+    /// The live reading (REL and smoothing applied): SCPI READ? / MEAS?,
+    /// chart.
     pub live: Reading,
+    /// The live reading without the display smoothing (REL applied): the HV
+    /// warning (must not lag); what the statistics recorded.
+    pub raw: Reading,
     /// New readout to draw (None: unchanged / frozen).
     pub show: Option<Reading>,
     /// AutoHold captured a new value now (beep).
@@ -303,6 +495,11 @@ pub struct Meter {
     pub lim: [Limit; LIM_SLOTS],
     pub lim_beep: bool,
     verdict: u8,
+    /// FR-05 display smoothing (persisted; change it with `set_smoothing`).
+    smooth: Smooth,
+    sm: Smoother,
+    /// When the readout was last handed out to be drawn (SHOW_MIN_MS).
+    show_t: u64,
 }
 
 impl Meter {
@@ -321,7 +518,43 @@ impl Meter {
             lim: [Limit::OFF; LIM_SLOTS],
             lim_beep: true,
             verdict: V_NONE,
+            smooth: SMOOTH_DEFAULT,
+            sm: Smoother::new(),
+            show_t: 0,
         }
+    }
+
+    pub fn smoothing(&self) -> Smooth {
+        self.smooth
+    }
+
+    /// Change the display smoothing: the window restarts; the statistics
+    /// (unsmoothed) are kept.
+    pub fn set_smoothing(&mut self, s: Smooth) {
+        self.smooth = s;
+        self.sm.reset();
+    }
+
+    /// Readings in the current smoothing window (0 = not smoothed).
+    pub fn smooth_n(&self) -> u8 {
+        self.sm.n
+    }
+
+    /// The Dmm reading with the display smoothing applied (pre-REL).
+    fn smoothed(&mut self, r: &Reading) -> Reading {
+        let mut f = *r;
+        if r.main.ol {
+            self.sm.reset();
+            return f;
+        }
+        let (len, thr) = sm_cfg(r, self.smooth);
+        let v = self.sm.push(r.main.v, len, thr, func_of(r), r.main.unit, r.main.dec);
+        if v != r.main.v {
+            let k = if r.main.v != 0.0 { r.si / r.main.v } else { unit_scale(r.main.unit) };
+            f.main.v = v;
+            f.si = v * k;
+        }
+        f
     }
 
     pub fn rel_active(&self) -> bool {
@@ -394,26 +627,35 @@ impl Meter {
                 self.rel = None;
             }
         }
-        let mut d = *r;
         let k = if r.main.v != 0.0 { r.si / r.main.v } else { unit_scale(r.main.unit) };
-        if let (Some((ref_v, _)), false) = (self.rel, d.main.ol) {
-            d.main.v -= ref_v;
-            d.si = d.main.v * k;
-        }
+        let rel = self.rel;
+        let apply_rel = |x: &Reading| {
+            let mut d = *x;
+            if let (Some((ref_v, _)), false) = (rel, d.main.ol) {
+                d.main.v -= ref_v;
+                d.si = d.main.v * k;
+            }
+            d
+        };
+        // Unsmoothed (statistics, AutoHold, HV) and smoothed (everything
+        // else), both with REL; see the module notes.
+        let raw = apply_rel(r);
+        let f = self.smoothed(r);
+        let d = apply_rel(&f);
         self.live = Some(d);
-        let mut u = Update { live: d, show: None, captured: false, fail_edge: false };
+        let mut u = Update { live: d, raw, show: None, captured: false, fail_edge: false };
         if self.hold {
             return u;
         }
-        if !d.main.ol {
-            self.stats.add(d.main.v * unit_scale(d.main.unit), now);
+        if !raw.main.ol {
+            self.stats.add(raw.main.v * unit_scale(raw.main.unit), now);
         }
         let show = if !self.ahold {
             Some(d)
         } else if let Some(mean) = self.ah_step(r, now) {
             // Freeze the window mean (REL applied as for the live value).
-            let mut h = d;
-            h.main.v = mean - (r.main.v - d.main.v);
+            let mut h = raw;
+            h.main.v = mean - (r.main.v - raw.main.v);
             h.si = h.main.v * k;
             self.ah_held = Some((h, mean * unit_scale(r.main.unit)));
             u.captured = true;
@@ -423,7 +665,15 @@ impl Meter {
         } else {
             Some(d)
         };
+        // Draw-rate limit (SHOW_MIN_MS); `shown` stays the value drawn.
+        let show = show.filter(|s| {
+            let same = self.shown.is_some_and(|p| {
+                p.main.unit == s.main.unit && p.main.dec == s.main.dec && p.main.ol == s.main.ol && p.main.ext == s.main.ext
+            });
+            u.captured || s.mode == 11 || !same || now >= self.show_t + SHOW_MIN_MS
+        });
         if let Some(s) = show {
+            self.show_t = now;
             self.shown = Some(s);
             let v = self.lim[lim_slot(func_of(&s))].check(&s);
             u.fail_edge = matches!(v, V_HI | V_LO) && !matches!(self.verdict, V_HI | V_LO);
@@ -499,12 +749,14 @@ impl Meter {
         self.hold = on;
     }
 
-    /// REL on: reference = the current reading (not while HOLD or OL).
-    /// Returns false if refused.
+    /// REL on: reference = the current reading (not while HOLD or OL); with
+    /// smoothing on, the smoothed value of the same unit / resolution (the
+    /// zero is then as quiet as the readout). Returns false if refused.
     pub fn rel_on(&mut self, raw: Option<&Reading>) -> bool {
         match raw {
             Some(r) if !self.hold && !r.main.ol => {
-                self.rel = Some((r.main.v, r.main.unit));
+                let v = self.sm.current(r.main.unit, r.main.dec).unwrap_or(r.main.v);
+                self.rel = Some((v, r.main.unit));
                 self.stats.clear();
                 self.ah_held = None;
                 true
@@ -533,10 +785,267 @@ impl Meter {
         self.ah_rearm = false;
         self.win = Win::EMPTY;
         self.verdict = V_NONE;
+        self.sm.reset();
     }
 }
 
 /// Display text for a value ("0L" when over range).
 pub fn text<'a>(buf: &'a mut [u8; 16], v: &Val) -> &'a str {
     if v.ol { "0L" } else { crate::dmm::format(buf, v.v, v.dec) }
+}
+
+// Host tests: tools/meter-test/run.sh (rustc --test with dmm.rs and its
+// register-level dependencies compiled for the host; nothing touches them).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A DC V reading on the 6 V range (dec 4, 60000 counts = 6 V).
+    fn dcv(v: f32) -> Reading {
+        rd(1, v, 4, "V", 1.0)
+    }
+
+    fn rd(mode: u8, v: f32, dec: u8, unit: &'static str, k: f32) -> Reading {
+        Reading {
+            mode,
+            range: 0,
+            main: Val { v, dec, unit, ol: false, ext: false },
+            aux1: None,
+            aux2: None,
+            si: v * k,
+            auto: true,
+            auto_plus: true,
+            acdc: false,
+            seq: 0,
+            avg_n: 0,
+        }
+    }
+
+    /// Feed `vals` 110 ms apart (MEDIUM rate); the live values.
+    fn feed(m: &mut Meter, t: &mut u64, vals: &[f32]) -> [f32; 64] {
+        let mut out = [0.0; 64];
+        for (i, &v) in vals.iter().enumerate() {
+            *t += 110;
+            out[i] = m.update(&dcv(v), *t).live.main.v;
+        }
+        out
+    }
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 2e-6
+    }
+
+    #[test]
+    fn off_passes_through() {
+        let mut m = Meter::new();
+        assert_eq!(m.smoothing(), Smooth::Off);
+        let mut t = 0;
+        let v = [0.50003, 0.49998, 0.50001, 0.50004];
+        let o = feed(&mut m, &mut t, &v);
+        for i in 0..4 {
+            assert_eq!(o[i], v[i]);
+        }
+        assert_eq!(m.smooth_n(), 0);
+    }
+
+    #[test]
+    fn low_and_high_converge_to_the_window_mean() {
+        // +-1 count (0.1 mV) noise around 0.5 V: within the restart threshold.
+        let noise = |i: usize| if i % 2 == 0 { 0.5001 } else { 0.4999 };
+        for (s, n) in [(Smooth::Low, 4usize), (Smooth::High, 16)] {
+            let mut m = Meter::new();
+            m.set_smoothing(s);
+            let mut t = 0;
+            let mut last = 0.0;
+            for i in 0..40 {
+                t += 110;
+                last = m.update(&dcv(noise(i)), t).live.main.v;
+                if i + 1 >= n {
+                    // Full window of an even length: exactly the mean.
+                    assert!(close(last, 0.5), "{s:?} i={i} {last}");
+                }
+            }
+            assert!(close(last, 0.5));
+            assert_eq!(m.smooth_n() as usize, n);
+        }
+    }
+
+    #[test]
+    fn small_change_settles_in_one_window() {
+        // A 2-count change (below the 3-count threshold) is averaged in.
+        let mut m = Meter::new();
+        m.set_smoothing(Smooth::Low);
+        let mut t = 0;
+        feed(&mut m, &mut t, &[0.5; 8]);
+        let o = feed(&mut m, &mut t, &[0.5002; 4]);
+        assert!(close(o[0], 0.50005) && close(o[1], 0.5001) && close(o[2], 0.50015));
+        assert!(close(o[3], 0.5002));
+    }
+
+    #[test]
+    fn step_restarts_the_window_at_once() {
+        for s in [Smooth::Low, Smooth::High] {
+            let mut m = Meter::new();
+            m.set_smoothing(s);
+            let mut t = 0;
+            feed(&mut m, &mut t, &[0.5; 20]);
+            // 0.5 V -> 0.6 V: the first reading after the step is shown as is.
+            let o = feed(&mut m, &mut t, &[0.6, 0.6001, 0.5999]);
+            assert_eq!(o[0], 0.6, "{s:?}");
+            assert_eq!(m.smooth_n(), 3);
+            assert!(close(o[2], 0.6));
+            // Also downwards and by a relative step on a large value (0.05 %
+            // of 5 V = 2.5 mV > 3 counts = 0.3 mV).
+            let o = feed(&mut m, &mut t, &[5.0, 5.0, 5.002, 5.004]);
+            assert_eq!(o[0], 5.0);
+            assert!(close(o[2], 5.0 + 0.002 / 3.0));
+            assert_eq!(o[3], 5.004, "{s:?}: 4 mV > 0.05 % restarts");
+        }
+    }
+
+    #[test]
+    fn unit_resolution_ol_and_function_restart() {
+        let mut m = Meter::new();
+        m.set_smoothing(Smooth::High);
+        let mut t = 0;
+        feed(&mut m, &mut t, &[0.5; 10]);
+        // Autorange 6 V -> 60 V (dec 4 -> 3): restart.
+        t += 110;
+        let mut r = dcv(0.5);
+        r.main.dec = 3;
+        m.update(&r, t);
+        assert_eq!(m.smooth_n(), 1);
+        // OL passes through and empties the window.
+        t += 110;
+        let mut o = dcv(0.0);
+        o.main.ol = true;
+        assert!(m.update(&o, t).live.main.ol);
+        assert_eq!(m.smooth_n(), 0);
+        // Continuity is never smoothed.
+        let mut m = Meter::new();
+        m.set_smoothing(Smooth::High);
+        for i in 0..5 {
+            let v = 10.0 + i as f32;
+            assert_eq!(m.update(&rd(11, v, 2, "\u{3a9}", 1.0), 1000 * i).live.main.v, v);
+        }
+        // A setting change and reset() restart the window.
+        let mut m = Meter::new();
+        m.set_smoothing(Smooth::Low);
+        let mut t = 0;
+        feed(&mut m, &mut t, &[0.5; 6]);
+        m.set_smoothing(Smooth::High);
+        assert_eq!(m.smooth_n(), 0);
+        feed(&mut m, &mut t, &[0.5; 3]);
+        m.reset();
+        assert_eq!(m.smooth_n(), 0);
+    }
+
+    #[test]
+    fn per_function_windows() {
+        let n = |r: Reading, s| sm_cfg(&r, s).0;
+        let dc = dcv(1.0);
+        assert_eq!((n(dc, Smooth::Off), n(dc, Smooth::Low), n(dc, Smooth::High)), (1, 4, 16));
+        assert_eq!(n(rd(0, 1.0, 4, "V", 1.0), Smooth::High), 16);
+        assert_eq!(n(rd(13, 1.0, 3, "nF", 1e-9), Smooth::Low), 2);
+        assert_eq!(n(rd(14, 1.0, 3, "kHz", 1e3), Smooth::High), 4);
+        assert_eq!(n(rd(15, 25.0, 1, "\u{b0}C", 1.0), Smooth::High), 4);
+        assert_eq!(n(rd(15, 25.0, 2, "\u{b0}C", 1.0), Smooth::High), 16);
+        assert_eq!(n(rd(11, 1.0, 2, "\u{3a9}", 1.0), Smooth::High), 1);
+        // Thresholds: 3 counts on DC (6 V range: 0.3 mV), 30 counts on AC.
+        assert!(close(sm_cfg(&dcv(0.1), Smooth::Low).1, 0.0003));
+        assert!(close(sm_cfg(&rd(0, 0.1, 4, "V", 1.0), Smooth::Low).1, 0.003));
+        assert!(close(sm_cfg(&rd(15, 25.0, 2, "\u{b0}C", 1.0), Smooth::Low).1, 0.3));
+    }
+
+    #[test]
+    fn statistics_and_autohold_see_unsmoothed_values() {
+        let mut m = Meter::new();
+        m.set_smoothing(Smooth::High);
+        m.stats.clear();
+        let mut t = 0;
+        let v = [0.5, 0.5002, 0.4998, 0.5, 0.5002, 0.4998];
+        let mut raw_seen = [0.0; 6];
+        for (i, &x) in v.iter().enumerate() {
+            t += 110;
+            let u = m.update(&dcv(x), t);
+            raw_seen[i] = u.raw.main.v;
+        }
+        assert_eq!(raw_seen, v);
+        let (mn, mx, avg) = m.stats.si().unwrap();
+        assert!(close(mn, 0.4998) && close(mx, 0.5002) && close(avg, 0.5));
+        // AutoHold: stable within its spread for 1 s -> captures the mean of
+        // the unsmoothed window; the smoothed live value keeps running.
+        let mut m = Meter::new();
+        m.set_smoothing(Smooth::High);
+        m.set_ahold(true);
+        let mut t = 0;
+        let mut cap = None;
+        for i in 0..12 {
+            t += 110;
+            let x = if i % 2 == 0 { 1.2001 } else { 1.1999 };
+            let u = m.update(&dcv(x), t);
+            if u.captured {
+                cap = u.show.map(|s| s.main.v);
+                break;
+            }
+        }
+        // (The mean of an odd number of +-1-count samples: within 0.2 count.)
+        let c = cap.expect("AutoHold captured");
+        assert!((c - 1.2).abs() < 2e-5, "{c}");
+    }
+
+    #[test]
+    fn rel_uses_the_smoothed_value() {
+        let mut m = Meter::new();
+        m.set_smoothing(Smooth::Low);
+        let mut t = 0;
+        feed(&mut m, &mut t, &[0.5001, 0.4999, 0.5001, 0.4999]);
+        assert!(m.rel_on(Some(&dcv(0.4999))));
+        assert!(close(m.rel_value().unwrap(), 0.5));
+        // Off: the reading itself.
+        let mut m = Meter::new();
+        let mut t = 0;
+        feed(&mut m, &mut t, &[0.5001, 0.4999]);
+        assert!(m.rel_on(Some(&dcv(0.4999))));
+        assert_eq!(m.rel_value(), Some(0.4999));
+    }
+
+    #[test]
+    fn draw_rate_is_limited() {
+        // 27 ms readings (FAST): drawn at most every SHOW_MIN_MS; 110 ms
+        // readings: every one.
+        let mut m = Meter::new();
+        let mut drawn = 0;
+        for i in 1..=37u64 {
+            if m.update(&dcv(0.5 + i as f32 * 1e-4), i * 27).show.is_some() {
+                drawn += 1;
+            }
+        }
+        assert!((10..=13).contains(&drawn), "{drawn}");
+        let mut m = Meter::new();
+        let mut t = 0;
+        for i in 0..10 {
+            t += 110;
+            assert!(m.update(&dcv(0.5 + i as f32 * 1e-4), t).show.is_some());
+        }
+        // A resolution change is drawn at once.
+        let mut r = dcv(0.5);
+        r.main.dec = 3;
+        assert!(m.update(&r, t + 1).show.is_some());
+    }
+
+    #[test]
+    fn persisted_word() {
+        // Records written before FR-05: 0 = defaults, V autorange not valid.
+        let d = ext_settings(0);
+        assert_eq!(d, ExtSettings { rate: Rate::Medium, smooth: Smooth::Off, v_auto_valid: false });
+        for r in Rate::ALL {
+            for s in Smooth::ALL {
+                let e = ext_settings(ext_word(r, s));
+                assert_eq!(e, ExtSettings { rate: r, smooth: s, v_auto_valid: true });
+            }
+        }
+        // Bits outside the fields are ignored.
+        assert_eq!(ext_settings(ext_word(Rate::Slow, Smooth::Low) | 0xFFFF_0000).rate, Rate::Slow);
+    }
 }
