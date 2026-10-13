@@ -897,6 +897,8 @@ pub struct Status {
     pub locked: bool,
     /// MIN/MAX recording session on (the DMM statistics, FR-02).
     pub rec: bool,
+    /// CSV recording to the disk running (csvlog.rs).
+    pub csv: bool,
     /// Index of the shown view in View::CYCLE (page dots), 255 = none.
     pub page: u8,
 }
@@ -917,13 +919,21 @@ fn battery_glyph(b: &mut [u8; 4], bars: u8) -> &str {
     char::from_u32(0x22 + bars.min(5) as u32).unwrap_or('"').encode_utf8(b)
 }
 
+/// CSV recording badge colour (status blocks): red. The MIN/MAX session
+/// alone shows REC in the value orange (as "REC hh:mm:ss" in the DMM chart
+/// column).
+const REC_CSV: Color = 0xF800;
+
 /// Right part of the DMM page status bar (34 px, stock positions): uptime,
-/// lock, BT link, battery.
+/// REC (CSV recording; the MIN/MAX session has its own line in the chart
+/// column), lock, BT link, battery.
 pub fn status_right(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
     let bc = if st.charging { 0x04A9 } else { STATUS_FG };
     sf::label(sf::F21, rect(205, 5, 112, 24), hms(&mut t, st.uptime_s), STATUS_FG, BAR, 1, -1);
+    // Between the lock (ink ..357) and the BT icon (390..).
+    sf::label(sf::F14, rect(361, 10, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, BAR, 8, 1);
     sf::label(sf::LOCK, rect(335, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
     sf::label(sf::SAVE_BT, rect(390, 0, 15, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 9, 40, 16), battery_glyph(&mut b, st.bars), bc, BAR, 8, 0);
@@ -969,8 +979,9 @@ pub fn scope_status(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
     lcd::fill_rect(249, 5, 28, 17, S_BAR);
-    if st.rec {
-        sf::label(sf::F14, rect(249, 6, 28, 16), "REC", 0xF800, S_BAR, 1, 1);
+    // REC: red = CSV recording (csvlog.rs), orange = the MIN/MAX session only.
+    if st.csv || st.rec {
+        sf::label(sf::F14, rect(249, 6, 28, 16), "REC", if st.csv { REC_CSV } else { VALUE }, S_BAR, 1, 1);
     }
     for k in 0..4i16 {
         let c = if k as u8 == st.page { FG } else { 0x6B4D };

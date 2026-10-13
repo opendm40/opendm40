@@ -65,10 +65,12 @@ handles cmd 00..09 only; the 0x0B memory command exists only in the patched
 stock firmware of the memrw kit).
 
 No other SCPI root is dangerous today (the roots are `*`-commands, MEAS/CONF/
-READ/FETC/FUNC/SENS, the DMM function names, CALC, SYST, SOUR/OUTP, TIM/CHAN/
-TRIG/RUN/STOP/SING/SCOP/WAV, LOG, DIAG). A new command that can write flash or
-reset the meter must go under `DBG:` or be added to
-`bt_scpi::UNTRUSTED_DENY`.
+READ/FETC/FUNC/SENS/RATE, the DMM function names, CALC, SYST, SOUR/OUTP, TIM/
+CHAN/TRIG/RUN/STOP/SING/SCOP/WAV, LOG, DIAG, MMEM). `MMEM:DELete` (deletes a
+screenshot / CSV file on the USB disk) is executed by main.rs, which refuses
+it from an untrusted port (`Command protected`); `MMEM:CAT?` and `LOG:CSV`
+work over Bluetooth. A new command that can write flash or reset the meter
+must go under `DBG:` or be added to `bt_scpi::UNTRUSTED_DENY`.
 
 ## Throughput
 
