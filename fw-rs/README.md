@@ -188,8 +188,9 @@ fw-rs still answers. Then copy an image (e.g. `dm40-fw-native.bin` or the
 `_DM40PRV.BIN` backup of the previous one, renamed `dm40_fwrs.bin`) onto the
 loader's disk and press "update".
 
-**Back to stock:** `tools/reload.sh --stock ../firmware/patch/build/dm40_patched.bin`
-(patched stock with Bluetooth memrw) or `--stock ../dm40_v_2_6.bin` (official).
+**Back to stock:** `tools/reload.sh --stock ../firmware/patch/build-memrw/dm40_patched.bin`
+(patched stock with Bluetooth memrw, built by `../firmware/patch/kit/mkkit.sh`)
+or `--stock ../dm40_v_2_6.bin` (official, not in git: see the top-level README).
 From the loader screen: copy the stock file onto its disk, press "update".
 Back to fw-rs from stock: `tools/reload.sh --from-stock`.
 
@@ -199,7 +200,8 @@ Native image, shim, recovery and boot info fields: docs/native-boot.md.
 
 `./build.sh` (RAM image `dm40-fw.bin`, flash sector 8, run from SRAM at
 `0x20008000`), `./build.sh test-initcore` (T1) and `./build.sh test-recovery`
-(T2) are loaded over Bluetooth by the RAM stub (`stub/`) and `tools/flash.py`:
+(T2) are loaded over Bluetooth by the RAM stub (`stub/`) and
+`tools/legacy/flash.py` (with `tools/legacy/dm40_loader.py`):
 `tools/reload.sh --ram | test-initcore | test-recovery [cargo args]`. This
 needs STOCK firmware on the meter (go back to stock first), and
 `/usr/bin/python3` (the linuxbrew `python3` has no Bluetooth sockets). In the
