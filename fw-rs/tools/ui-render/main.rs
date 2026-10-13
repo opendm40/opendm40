@@ -24,6 +24,8 @@ pub use host::mmio;
 
 #[path = "../../src/clock.rs"]
 mod clock;
+#[path = "../../src/dialog.rs"]
+mod dialog;
 #[path = "../../src/dmm.rs"]
 mod dmm;
 #[path = "../../src/fonts.rs"]
@@ -338,7 +340,7 @@ struct World {
 }
 
 fn status(page: u8) -> ui::Status {
-    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, bars: 5, charging: false, locked: false, rec: true, page }
+    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, bars: 5, charging: false, locked: false, rec: true, csv: true, page }
 }
 
 fn frame(w: &World, v: &ui::ScopeView, clip: u16) {
@@ -522,7 +524,7 @@ fn main() {
     wide.probe = 100.0;
     wide.run = false;
     w.sc.apply(wide, 0);
-    for bits in 0..64u32 {
+    for bits in 0..128u32 {
         for page in [0u8, 1, 2, 3, 255] {
             let s = ui::Status {
                 uptime_s: if bits & 1 != 0 { 0 } else { 99 * 3600 + 59 * 60 + 59 },
@@ -531,6 +533,7 @@ fn main() {
                 charging: bits & 8 != 0,
                 locked: bits & 16 != 0,
                 rec: bits & 32 != 0,
+                csv: bits & 64 != 0,
                 page,
             };
             host::reset(0);
@@ -579,7 +582,7 @@ fn main() {
     for l in &labels {
         for hold in 0..4u8 {
             for (auto, plus) in [(true, false), (true, true), (false, false)] {
-                for locked in [false, true] {
+                for (locked, csv) in [(false, false), (true, true), (false, true), (true, false)] {
                     host::reset(0);
                     let mut r = cases[0].1;
                     r.auto = auto;
@@ -589,13 +592,14 @@ fn main() {
                     dv.reading(&r, hold, 0);
                     let mut s = status(0);
                     s.locked = locked;
+                    s.csv = csv;
                     ui::status_right(&s);
                     // Only the bar is checked (the stock page body is unchanged).
                     let keep = ui::BAR_H as usize * W;
                     for p in emu().owner[keep..].iter_mut() {
                         *p = 0;
                     }
-                    ck.check(&format!("dmmbar/{l:?}/h{hold}/a{auto}{plus}/l{locked}"), &dmm_regions);
+                    ck.check(&format!("dmmbar/{l:?}/h{hold}/a{auto}{plus}/l{locked}/c{csv}"), &dmm_regions);
                 }
             }
         }
@@ -769,6 +773,27 @@ fn main() {
                     ck.check(&format!("range-note/{t}"), &page_regions);
                 }
             }
+        }
+    }
+
+    // 6c. Toasts (dialog.rs) over the DMM page: the longest texts.
+    for (k, (t, ok)) in [
+        ("Disk in use by PC - eject first", false),
+        ("Saved LOG000.CSV", true),
+        ("Disk full: log ended", false),
+        ("No reading to log", false),
+        ("Recording CSV", true),
+        ("Screenshot failed", false),
+    ]
+    .iter()
+    .enumerate()
+    {
+        host::reset(0);
+        dialog::toast(t, *ok);
+        let (x, y, w2, h2) = dialog::TOAST;
+        ck.check(&format!("toast/{t}"), &[("screen", Bx::new(0, 0, 480, 320)), ("toast", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))]);
+        if k == 0 {
+            save(&out, "t01-toast-disk-in-use");
         }
     }
 

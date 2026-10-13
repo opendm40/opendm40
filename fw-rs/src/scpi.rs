@@ -99,6 +99,19 @@ pub enum Out {
     Dbg(Dbg),
     /// Data-logger command (LOG:...), handled by the main loop with the logger.
     Log(Log),
+    /// USB-disk file command (MMEMory:...), handled by the main loop (csvlog.rs).
+    Mmem(Mmem),
+}
+
+/// File commands on the USB disk's root (csvlog.rs gallery backend):
+///   MMEMory:CATalog?        <used>,<free>{,"<name>,<type>,<size>"} (bytes; type
+///                           BIN = S*.BMP, ASC = LOG*.CSV; csvlog::catalog_scpi_on)
+///   MMEMory:DELete "<name>" delete one S*.BMP / LOG*.CSV (USB only: refused
+///                           over Bluetooth; refused for the file being recorded)
+#[derive(Clone, Copy)]
+pub enum Mmem {
+    Cat,
+    Del([u8; 11]),
 }
 
 /// Data-logger commands (FR-38), executed by the main loop against `Logger`:
@@ -113,6 +126,13 @@ pub enum Out {
 ///                           calibration gain/offset NOT applied)
 ///   LOG:DATA?               definite-length #4nnnn block of 12-byte LE records
 ///                           {u32 seq, u32 ts_us, i32 raw_ad1}, oldest first
+///   LOG:CSV ON|OFF          CSV recording of the DMM readings to the USB disk
+///                           (csvlog.rs; as the DMM page swipe down). ON fails
+///                           ("Settings conflict") without a reading or while a
+///                           PC has the disk mounted
+///   LOG:CSV?                state,file,rows,bytes,committed,dropped (state 0 idle,
+///                           1 recording, 2 stopping, 3 done, 4 full, 5 no disk,
+///                           6 error; file -1 until the first commit)
 #[derive(Clone, Copy)]
 pub enum Log {
     State(Option<bool>),
@@ -121,6 +141,7 @@ pub enum Log {
     Count,
     Preamble,
     Data,
+    Csv(Option<bool>),
 }
 
 /// Debug commands over USBTMC (development aids, not SCPI standard):
@@ -672,6 +693,25 @@ impl Scpi {
                         Out::Log(Log::Preamble)
                     } else if kw(sub, "DATA") && query {
                         Out::Log(Log::Data)
+                    } else if kw(sub, "CSV") {
+                        Out::Log(Log::Csv(if query { None } else { Some(a == b"ON" || a == b"1") }))
+                    } else {
+                        self.err = Some("Undefined header");
+                        continue;
+                    };
+                }
+                _ if kw(p0, "MMEMory") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    out = if kw(sub, "CATalog") && query {
+                        Out::Mmem(Mmem::Cat)
+                    } else if kw(sub, "DELete") && !query {
+                        match crate::csvlog::parse_name(trim(arg)) {
+                            Some(n) => Out::Mmem(Mmem::Del(n)),
+                            None => {
+                                self.err = Some("Illegal parameter value");
+                                continue;
+                            }
+                        }
                     } else {
                         self.err = Some("Undefined header");
                         continue;

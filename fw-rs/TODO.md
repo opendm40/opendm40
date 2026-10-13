@@ -132,9 +132,13 @@ Additional requirements:
 - [ ] UI/UX review punch-list (docs/ui-review.md): drag-misread-as-swipe bug (gesture.rs:77), unified
       top bar with lock/BT/battery on all views, swallow the wake tap after dim, scope right-panel
       button labels, page dots, scope trigger handle, generator keypad prefill.
-- [ ] CSV-to-disk recording on the DMM screen, swipe-triggered (user). Needs a FAT writer in fw-rs
+- [x] CSV-to-disk recording on the DMM screen, swipe-triggered (user). Needs a FAT writer in fw-rs
       (msc.rs/spiflash.rs only expose a block device today), the sampling path from FR-38, and a
       DMM-screen record indicator + swipe gesture. Relates to FR-04 / FR-35. Queued after logger + UI.
+      (code done; verify on device) src/csvlog.rs: one-finger swipe down on the DMM page = start / stop,
+      toasts, red REC in the status blocks, LOG:CSV ON|OFF / LOG:CSV?, power-off / reset commit the tail.
+      Host writes are refused while recording; start refused ("Disk in use by PC - eject first") while
+      a PC has the disk mounted.
 
 ## Feature requests to add (from ../docs/dm40-feature-request.md; user: add autohold + useful ones)
 - [x] **FR-01 AutoHold (P0, critical).** Auto-freeze the reading when it stabilises, re-arm on a new  (code done; verify on device)
@@ -148,9 +152,11 @@ Additional requirements:
       persisted in p[38]. CSV log and MIN/MAX/AVG stay unsmoothed.
 - [x] FR-06 Hi/Lo limits (P1): pass/fail thresholds with a beep.  (code done; verify on device)
 - [ ] FR-16 screenshot + log gallery (P1): save screenshots/CSV to the SPI disk and browse them.
+      Backend + SCPI done (csvlog list/delete, MMEM:CAT? / MMEM:DEL, USB only for DEL); the on-screen
+      gallery is src/gallery.rs (separate work, not wired yet).
 - [x] FR-28 generator DC offset (P1): adjustable offset (note: real bipolar offset is HW-4).  (code done; verify on device)
       Offset box on the generator page (keypad; OK on an empty field = auto), SOUR:VOLT:OFFS <V>|AUTO, persisted p[39].
-- [ ] FR-35 CSV export from DMM (P1): = the CSV-to-disk item above, with timestamps.
+- [x] FR-35 CSV export from DMM (P1): = the CSV-to-disk item above, with timestamps.  (code done; verify on device)
 - Likely already done (verify, then tick): FR-09 REL, FR-10 idle auto-off, FR-12 screen dim,
   FR-18 touch lock, FR-27 generator keeps running in DMM. FR-33 is USBTMC+MSC (we chose DBG over CDC).
 - [ ] Repo tidy-up (user request): plan in ../TIDY-PLAN.md (46f9352); .gitignore for dumps/backups and README
@@ -171,7 +177,7 @@ Additional requirements:
 - [x] UF-21 (P1) Make AUTO+ (V-first, already ported: v_auto=1) the default V autorange; warn when mV-first AUTO is chosen. §5.1  (code done; verify on device: an upgraded unit boots in AUTO+; Range page warning)
 - [ ] UF-05 (P1) Scope drag axis lock (dominant axis after ~12 px). §6.1
 - [ ] UF-09 (P1) Scope horizontal trigger position (pre-trigger %) + double-tap to centre. §6.1
-- [ ] UF-32 (P1) CSV files: '.' decimals, ISO-8601 timestamps, header (model/fw/function/range). §10
+- [x] UF-32 (P1) CSV files: '.' decimals, ISO-8601 timestamps, header (model/fw/function/range). §10  (code done; verify on device. No RTC: time_s since the start + the start uptime, no ISO dates)
 - [x] UF-37 (P1) Native shim keeps the short-press power-on (stock V2.1 behaviour). §8  (code done; verify on device)
 - [x] UF-16 (P2) Generator ramp direction: gen.rs falls, preview rises; verify on scope and align. §7  (code done: ramp rises; verify on device)
 - [ ] UF-11 (P2) Scope FFT with labelled axes + automatic peak (f, dBV) readout. §6.2

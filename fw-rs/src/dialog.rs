@@ -1,6 +1,6 @@
 //! Modal overlays drawn over any view: the power-off confirm (2-finger swipe
 //! down, docs/user-feedback.md UF-18, scope-ui-plan.md §2.6: never an instant
-//! off) and short toasts (screenshot result). There is no frame buffer: while
+//! off) and short toasts (screenshot / CSV recording results). There is no frame buffer: while
 //! an overlay is up the app keeps its full redraw pending and draws nothing
 //! else, and when it goes the view is redrawn from scratch.
 //!
@@ -9,7 +9,9 @@
 //!   box    (94, 80) 292 x 160
 //!   No     (106, 180) 128 x 48   -> cancel
 //!   Yes    (246, 180) 128 x 48   -> power off
-//! Toast: (90, 132) 300 x 56, centred text.
+//! Toast: (40, 132) 400 x 56, centred text at glyph spacing 2 (ASCII26
+//! "f" touches its neighbour below 2; "Disk in use by PC - eject first" is
+//! 388 px).
 
 use crate::lcd::{self, Color};
 use crate::stockfont::{self as sf, rect};
@@ -27,7 +29,7 @@ const ERR_BG: Color = 0x9800;
 pub const BOX: (u16, u16, u16, u16) = (94, 80, 292, 160);
 pub const NO: (u16, u16, u16, u16) = (106, 180, 128, 48);
 pub const YES: (u16, u16, u16, u16) = (246, 180, 128, 48);
-const TOAST: (u16, u16, u16, u16) = (90, 132, 300, 56);
+pub const TOAST: (u16, u16, u16, u16) = (40, 132, 400, 56);
 
 /// Auto-cancel of the power-off confirm, ms.
 pub const CONFIRM_MS: u64 = 3000;
@@ -63,7 +65,11 @@ fn frame(r: (u16, u16, u16, u16), c: Color) {
 
 /// `s` centred in `r` (the stock 26 px ASCII font; fills `r` with `bg`).
 fn centred(r: (u16, u16, u16, u16), s: &str, fg: Color, bg: Color) {
-    sf::label(sf::ASCII26, rect(r.0 as i16, r.1 as i16, r.2 as i16, r.3 as i16), s, fg, bg, 8, 0);
+    centred_sp(r, s, fg, bg, 0);
+}
+
+fn centred_sp(r: (u16, u16, u16, u16), s: &str, fg: Color, bg: Color, spacing: i8) {
+    sf::label(sf::ASCII26, rect(r.0 as i16, r.1 as i16, r.2 as i16, r.3 as i16), s, fg, bg, 8, spacing);
 }
 
 fn button(r: (u16, u16, u16, u16), label: &str, bg: Color) {
@@ -98,7 +104,7 @@ pub fn power_off_hit(x: u16, y: u16) -> Option<bool> {
 pub fn toast(s: &str, ok: bool) {
     let r = TOAST;
     let bg = if ok { OK_BG } else { ERR_BG };
-    centred(r, s, FG, bg);
+    centred_sp(r, s, FG, bg, 2);
     frame(r, FRAME);
 }
 

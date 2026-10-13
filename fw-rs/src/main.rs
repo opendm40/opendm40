@@ -244,7 +244,7 @@ fn main() -> ! {
             wdt::kick();
         }
         if reset_at.map(|t| now >= t).unwrap_or(false) {
-            screenshot::finish_blocking(8000); // never cut its FAT / dir writes
+            app::finish_disk_writes(now); // never cut a FAT / dir write
             unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
         }
 
@@ -467,7 +467,45 @@ fn main() -> ! {
                         false
                     }
                 },
+                scpi::Out::Mmem(scpi::Mmem::Cat) => match csvlog::catalog_scpi(port.rsp_buf()) {
+                    Ok(n) => {
+                        port.respond_len(n);
+                        false
+                    }
+                    Err(e) => {
+                        scpi.set_err(if e == csvlog::GErr::Busy { "Mass storage busy" } else { "Mass storage error" });
+                        false
+                    }
+                },
+                // Deleting files over an open radio link: USB only.
+                scpi::Out::Mmem(scpi::Mmem::Del(_)) if !port.trusted() => {
+                    scpi.set_err(bt::proto::REFUSED);
+                    false
+                }
+                scpi::Out::Mmem(scpi::Mmem::Del(name)) => {
+                    match csvlog::delete(&name) {
+                        Ok(()) => {}
+                        Err(csvlog::GErr::NotFound) => scpi.set_err("File name not found"),
+                        Err(csvlog::GErr::Busy) => scpi.set_err("Mass storage busy"),
+                        Err(_) => scpi.set_err("Mass storage error"),
+                    }
+                    false
+                }
                 scpi::Out::Log(l) => match l {
+                    scpi::Log::Csv(Some(on)) => {
+                        if on {
+                            if !app.rec_start(now) {
+                                scpi.set_err(if msc::host_mounted() { "Mass storage busy" } else { "Settings conflict" });
+                            }
+                        } else {
+                            csvlog::stop();
+                        }
+                        false
+                    }
+                    scpi::Log::Csv(None) => {
+                        scpi.len = csvlog::status_scpi(&mut scpi.buf);
+                        true
+                    }
                     scpi::Log::State(Some(on)) => {
                         if on {
                             // Fast stream needs an AD1 (DC) mode: 1 DCV, 3 DCmV,
@@ -590,6 +628,8 @@ fn main() -> ! {
             dialog::log_panel(now, logger.measured_hz(), logger.captured(), logger.nominal_us());
         }
         mark(0, &mut ts);
+        // CSV recording: one bounded slice of a commit (csvlog.rs).
+        csvlog::poll(now);
         app.tick(&mut clk, can_draw);
         mark(1, &mut ts);
         for src in [USB, BT] {
@@ -791,6 +831,7 @@ mod fatren;
 mod calbackup;
 mod dialog;
 mod screenshot;
+mod csvlog;
 #[cfg(any(feature = "native", feature = "test-initcore", feature = "test-recovery"))]
 mod native;
 // Stock device-authenticity check, informational only: DBG:GENUINE? reports

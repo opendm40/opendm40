@@ -39,6 +39,8 @@ const TRIG_LINE_MS: u64 = 1000;
 const BAND_MS: u64 = 4000;
 /// Scope drags kept for DBG:GEST?.
 const GEST_N: usize = 32;
+/// Toast when a PC has the USB disk mounted (screenshot / CSV start, M2).
+const DISK_IN_USE: &str = "Disk in use by PC - eject first";
 
 /// A one-finger touch that started in a scope graph (see `App::gesture`).
 #[derive(Clone, Copy)]
@@ -195,6 +197,10 @@ pub struct App {
     gest_n: usize,
     /// Settings page shown (0 / 1, ui::SETTINGS / SETTINGS2).
     set_page: u8,
+    /// CSV recording (csvlog.rs): the function it records (a function
+    /// change ends it), and whether REC is drawn in the status block.
+    rec_func: u8,
+    rec_shown: bool,
 }
 
 fn backlight(pct: u8) {
@@ -251,11 +257,21 @@ fn buzzer(on: bool, vol: u8) {
     unsafe { w32(TIM14 + 0x34, duty) };
 }
 
+/// Finish the on-device disk writers before the power goes (power-off, the
+/// reset path in main.rs): the CSV recording is stopped and committed, a
+/// screenshot finished (or stopped between two slices). Never cut their FAT
+/// / directory writes. A csvlog commit does not start while a screenshot
+/// runs, and a screenshot waits for a commit in flight: commit what can be
+/// committed, finish the screenshot, then the last commit.
+pub fn finish_disk_writes(now: u64) {
+    crate::csvlog::finish_blocking(now);
+    crate::screenshot::finish_blocking(8000);
+    crate::csvlog::finish_blocking(now);
+}
+
 /// Power off as the stock: both analog rails / power hold low.
 fn power_off() -> ! {
-    // A screenshot in flight is finished (or stopped between two slices)
-    // before the rails drop: never cut its FAT / directory writes.
-    crate::screenshot::finish_blocking(8000);
+    finish_disk_writes(0);
     unsafe {
         w32(0x4002_1000 + 0x18, 1 << (2 + 16)); // PE2 = 0
         w32(0x4002_0800 + 0x18, 1 << (4 + 16)); // PC4 = 0
@@ -362,6 +378,8 @@ impl App {
             gest_log: [(0, 0, 0, 0); GEST_N],
             gest_n: 0,
             set_page: 0,
+            rec_func: 255,
+            rec_shown: false,
         };
         crate::persist::init();
         if let Some(rec) = crate::persist::load() {
@@ -655,6 +673,7 @@ impl App {
             charging: self.power.charging(),
             locked: self.locked,
             rec: self.meter.stats.rec,
+            csv: crate::csvlog::active(),
             page: View::CYCLE.iter().position(|&v| v == self.view).map_or(255, |i| i as u8),
         }
     }
@@ -986,6 +1005,14 @@ impl App {
         if let Some(shot) = crate::screenshot::take_result() {
             self.shot_toast(now, shot);
             return;
+        }
+        if let Some(st) = crate::csvlog::take_result() {
+            self.rec_toast(now, st);
+            return;
+        }
+        if crate::csvlog::active() != self.rec_shown {
+            self.rec_shown = !self.rec_shown;
+            self.status_next = 0;
         }
         // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
         // not drive here)? The reading loop skips drawing while held
@@ -1419,6 +1446,32 @@ impl App {
         self.dmm_view.label = self.t_label();
         let now = self.now;
         let u = self.meter.update(&raw, now);
+        // CSV recording: the unsmoothed reading (REL applied; csvlog.rs
+        // header), one row per reading; a function change ends it.
+        if crate::csvlog::active() {
+            let l = &u.raw;
+            if crate::meter::func_of(l) != self.rec_func {
+                crate::csvlog::stop();
+            } else {
+                use crate::csvlog::{F_HI, F_HOLD, F_LO, F_OL, F_REL};
+                let mut f = 0u8;
+                if l.main.ol {
+                    f |= F_OL;
+                }
+                if self.meter.rel_active() {
+                    f |= F_REL;
+                }
+                if self.meter.hold_state() != 0 {
+                    f |= F_HOLD;
+                }
+                match self.meter.verdict() {
+                    crate::meter::V_HI => f |= F_HI,
+                    crate::meter::V_LO => f |= F_LO,
+                    _ => {}
+                }
+                crate::csvlog::push(now, l.si, f);
+            }
+        }
         let dmm_view = can_draw && !self.redraw && matches!(self.view, View::Dmm | View::DmmScope);
         // HV warning on the live value: it must not be frozen by AutoHold.
         // Strip: badge from 30 V (the stock red-value threshold), red band
@@ -1578,6 +1631,8 @@ impl App {
             Gesture::MultiSwipeDown(3) => {
                 self.shot_req = true;
             }
+            // One finger down the DMM page: start / stop the CSV recording.
+            Gesture::SwipeDown if self.view == View::Dmm => self.rec_toggle(now),
             Gesture::MultiSwipeDown(2) => {
                 self.overlay = Some(crate::dialog::Overlay::PowerOff { until: now + crate::dialog::CONFIRM_MS });
                 self.redraw = true;
@@ -1742,6 +1797,67 @@ impl App {
     fn screenshot(&mut self, now: u64) {
         let ok = crate::screenshot::start();
         self.beep(now, if ok { 60 } else { 300 });
+        if !ok && crate::msc::host_mounted() {
+            // M2: a PC has the disk mounted; its cached FAT would go stale.
+            self.toast(now, DISK_IN_USE, false);
+        }
+    }
+
+    /// A toast over the view (dialog.rs); the view is redrawn when it goes.
+    fn toast(&mut self, now: u64, txt: &str, ok: bool) {
+        self.last_input = now;
+        self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::TOAST_MS });
+        self.redraw = true;
+        crate::dialog::toast(txt, ok);
+    }
+
+    /// Start a CSV recording of the current DMM function (DMM page swipe
+    /// down, SCPI LOG:CSV ON). False: no reading of the function yet, a
+    /// recording is already running, or a PC has the disk mounted.
+    pub fn rec_start(&mut self, now: u64) -> bool {
+        let Some(r) = self.meter.live().copied() else { return false };
+        let func = crate::meter::func_of(&r);
+        let range = if r.auto { "AUTO" } else { "MANUAL" };
+        if !crate::csvlog::start(crate::csvlog::func_label(func), crate::meter::base_unit(r.main.unit), range, now) {
+            return false;
+        }
+        self.rec_func = func;
+        true
+    }
+
+    /// DMM page swipe down: stop a running recording (its result toast
+    /// follows when the last rows are on the disk), or start one.
+    fn rec_toggle(&mut self, now: u64) {
+        if crate::csvlog::active() {
+            crate::csvlog::stop();
+            self.beep(now, 60);
+        } else if self.rec_start(now) {
+            self.beep(now, 60);
+            self.toast(now, "Recording CSV", true);
+        } else {
+            self.beep(now, 300);
+            let why = if crate::msc::host_mounted() { DISK_IN_USE } else { "No reading to log" };
+            self.toast(now, why, false);
+        }
+    }
+
+    /// The outcome of a finished CSV recording.
+    fn rec_toast(&mut self, now: u64, st: crate::csvlog::Status) {
+        use crate::csvlog::State;
+        let mut t = *b"Saved LOG000.CSV";
+        let (txt, ok) = match (st.state, st.file) {
+            (State::Done, Some(n)) => {
+                t[9] = b'0' + (n / 100 % 10) as u8;
+                t[10] = b'0' + (n / 10 % 10) as u8;
+                t[11] = b'0' + (n % 10) as u8;
+                (core::str::from_utf8(&t).unwrap_or("Saved"), true)
+            }
+            (State::Full, _) => ("Disk full: log ended", false),
+            (State::NoDisk, _) => ("No disk", false),
+            _ => ("Log failed", false),
+        };
+        self.toast(now, txt, ok);
+        self.beep(now, if ok { 100 } else { 500 });
     }
 
     fn shot_toast(&mut self, now: u64, shot: crate::screenshot::Shot) {
@@ -1759,9 +1875,7 @@ impl App {
             Shot::Full => ("Disk full", false),
             Shot::Error => ("Screenshot failed", false),
         };
-        self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::TOAST_MS });
-        self.redraw = true;
-        crate::dialog::toast(txt, ok);
+        self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
     }
 

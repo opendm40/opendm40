@@ -1013,7 +1013,6 @@ fn ascii(s: &str, out: &mut [u8]) -> usize {
 }
 
 /// Header name of a function code (meter::func_of / Dmm::func codes).
-#[allow(dead_code)]
 pub fn func_label(code: u8) -> &'static str {
     match code {
         0 | 2 => "AC V",
@@ -1200,7 +1199,6 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
     Ok(hn + body)
 }
 
-#[allow(dead_code)]
 pub fn catalog_scpi(out: &mut [u8]) -> Result<usize, GErr> {
     catalog_scpi_on(disk(), out)
 }
@@ -1208,7 +1206,6 @@ pub fn catalog_scpi(out: &mut [u8]) -> Result<usize, GErr> {
 /// `status()` as the SCPI LOG:CSV? reply: `<state>,<file>,<rows>,<bytes>,<committed>,<dropped>`
 /// (state 0 idle, 1 recording, 2 stopping, 3 done, 4 full, 5 no disk,
 /// 6 error; file -1 = none yet). Returns the length.
-#[allow(dead_code)]
 pub fn status_scpi(out: &mut [u8]) -> usize {
     let st = status();
     let mut w = W { b: out, n: 0 };
@@ -1326,14 +1323,12 @@ pub fn delete_on(disk: &mut dyn BlockDevice, name: &[u8; 11]) -> Result<(), GErr
 pub fn list(out: &mut [FileInfo]) -> Result<Catalog, GErr> {
     list_on(disk(), out)
 }
-#[allow(dead_code)]
 pub fn delete(name: &[u8; 11]) -> Result<(), GErr> {
     delete_on(disk(), name)
 }
 
 /// "log1.csv" / "LOG001.CSV" -> "LOG1    CSV" (8.3, upper case). None: not
 /// an 8.3 name.
-#[allow(dead_code)]
 pub fn parse_name(s: &[u8]) -> Option<[u8; 11]> {
     let s = match s {
         [b'"', m @ .., b'"'] => m,
