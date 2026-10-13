@@ -2,6 +2,8 @@
 //! with the backup domain powered, power-off. (The stock firmware keeps its
 //! user settings in config.bin on the SPI disk.) Layout: magic, version,
 //! payload, CRC32; anything that does not check out falls back to defaults.
+//! The boot shim's words at the end of the 4 KiB (boot.rs, 0x40024FF0..) are
+//! outside the record (0x40024000..0x4002406B).
 
 use crate::mmio::{modify32, r32, w32};
 
@@ -39,21 +41,56 @@ pub fn init() {
     }
 }
 
-pub fn load() -> Option<[u32; WORDS]> {
+/// A record that passed the checks: its format version (2 or 3) and the
+/// payload (a v2 record zero-extended to `WORDS`).
+pub struct Record {
+    pub version: u32,
+    pub words: [u32; WORDS],
+}
+
+/// The stored record, or None when the magic, the version or the CRC does not
+/// check out (never written, written by other firmware, a layout this build
+/// does not know, a torn write): the caller then keeps its defaults.
+pub fn load() -> Option<Record> {
     let rd = |i: usize| unsafe { r32(BKP + 4 * i as u32) };
-    let n = match rd(1) {
+    if rd(0) != MAGIC {
+        return None;
+    }
+    let version = rd(1);
+    let n = match version {
         VERSION => WORDS,
         2 => V2_WORDS,
         _ => return None,
     };
-    if rd(0) != MAGIC {
-        return None;
-    }
     let mut p = [0u32; WORDS];
     for (i, w) in p[..n].iter_mut().enumerate() {
         *w = rd(2 + i);
     }
-    if crc(&p[..n]) != rd(2 + n) { None } else { Some(p) }
+    if crc(&p[..n]) != rd(2 + n) { None } else { Some(Record { version, words: p }) }
+}
+
+/// Whether the DMM function in the record belongs to the session the user
+/// just left. The record is only rewritten while fw-rs runs; the stock
+/// firmware (own settings in config.bin, power-on default DC V) and the
+/// vendor loader never touch it. So after a round trip through other
+/// firmware it holds whatever fw-rs measured last, possibly days and another
+/// firmware ago (seen: the first native boot came up in AC+DC from an old RAM
+/// session although the user had been measuring DC V on the stock firmware).
+/// Native: the boot shim records every normal fw-rs boot in BKP_LAST
+/// (boot.rs; DBG:UPDATE / DBG:RECOVER clear it, a recovery leaves "RCVR"), so
+/// only a previous boot that was a normal fw-rs one continues the mode. RAM
+/// builds (loaded by the stock) cannot tell: they keep restoring it.
+pub fn same_session() -> bool {
+    #[cfg(feature = "native")]
+    {
+        // boot.rs LAST_NORMAL ("NRML"), as the shim found BKP_LAST.
+        const LAST_NORMAL: u32 = 0x4C4D_524E;
+        crate::boot::info().is_some_and(|i| i.last == LAST_NORMAL)
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        true
+    }
 }
 
 pub fn save(p: &[u32; WORDS]) {

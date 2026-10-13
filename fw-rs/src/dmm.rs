@@ -461,6 +461,9 @@ pub struct Dmm {
     avg_skip: bool,
     /// Conversions in the mean of the reading being produced (Reading::avg_n).
     avg_n: u8,
+    /// AC+DC: drop the next conversion (the first one after a phase / range
+    /// switch, see `write_config`).
+    skip: bool,
 }
 
 impl Dmm {
@@ -527,6 +530,7 @@ impl Dmm {
             avg: Avg::new(),
             avg_skip: false,
             avg_n: 0,
+            skip: false,
         }
     }
 
@@ -560,6 +564,20 @@ impl Dmm {
     }
     pub fn ohm_var(&self) -> u8 {
         self.ohm_var
+    }
+    /// Restore m+6 / m+7 / m+8 (settings): only the values the UI / BT can
+    /// set (V, A: 1 = AUTO+, 3 = AUTO; ohm variant 0 / 1); anything else
+    /// keeps the default. Takes effect with the next `select`.
+    pub fn set_auto_flags(&mut self, v: u8, a: u8, ohm: u8) {
+        if matches!(v, 1 | 3) {
+            self.v_auto = v;
+        }
+        if matches!(a, 1 | 3) {
+            self.a_auto = a;
+        }
+        if ohm <= 1 {
+            self.ohm_var = ohm;
+        }
     }
     fn factor(&self) -> f32 {
         FACTOR[COUNTS_MODEL as usize]
@@ -617,6 +635,27 @@ impl Dmm {
             hy::write(0x22, &[0x17]);
             self.r22 = 0x17;
         }
+        // AC+DC: every phase switch reconfigures the HY3131 (AD1 / AD2 + RMS
+        // off and on again, other input path), and the poll does not touch
+        // the chip during the settle deadline (as the stock in AC+DC), so the
+        // first result read after it may be the conversion that ran across
+        // the switch (partial sinc / RMS start-up value). It is dropped. On
+        // the device (first native boot, 500 mV DC input, AC+DC mV) the
+        // combined value dipped to ~194 mV once per cycle and the AC part
+        // read 40 mV; a partial first conversion of a phase fits both.
+        // The DC phase also runs at the steady OSR 32768 from its start (the
+        // stock starts at 8192 and switches to 32768 after the first reading),
+        // so no OSR switch and its partial conversion lands inside a phase.
+        self.skip = self.acdc;
+        if self.acdc && matches!(m, 1 | 3 | 7..=9) {
+            hy::write(0x22, &[0x17]);
+            self.r22 = 0x17;
+        }
+    }
+
+    /// AC+DC: consume the drop flag (true = discard this conversion).
+    fn drop_first(&mut self) -> bool {
+        core::mem::take(&mut self.skip)
     }
 
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
@@ -1237,6 +1276,9 @@ impl Dmm {
 
     fn poll_dcv(&mut self, clk: &mut Clock) -> Option<Reading> {
         let ad1 = self.ad1()?;
+        if self.drop_first() {
+            return None;
+        }
         // This conversion ran at OSR 32768 (and not the first one after the
         // switch, which `osr` flags for the next reading).
         let slow = self.r22 == 0x17 && !self.avg_skip;
@@ -1245,8 +1287,12 @@ impl Dmm {
         let (f, ov) = (self.factor(), self.over());
         let m = self.mode;
         let before = (m, self.range);
+        // AC+DC: OSR fixed at 32768 for the whole DC phase (write_config).
+        let acdc = self.acdc;
         let (x, lim, dec, unit, si_k, ext) = if m == 1 {
-            self.osr(ad1, 0x206, 0x15);
+            if !acdc {
+                self.osr(ad1, 0x206, 0x15);
+            }
             let (code, ext) = self.avg_code(ad1, slow);
             let mut v = code * K_ACV[r] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * r as u32, 1.0)
                 - cal(0x14 + 4 * r as u32, 0.0);
@@ -1258,7 +1304,9 @@ impl Dmm {
             }
             (v, (f * DEC4[r]).min(1000.0), 4 - r as u8, "V", 1.0, ext)
         } else {
-            self.osr(ad1, 0xE22 - 0x960 * r as i32, 0x15);
+            if !acdc {
+                self.osr(ad1, 0xE22 - 0x960 * r as i32, 0x15);
+            }
             let (code, ext) = self.avg_code(ad1, slow);
             let mv = code * (1.25 / 0.9) / MV_DIV[r] / (AD1_DIV / 1000.0) * cal(0x24 + 4 * r as u32, 1.0)
                 - cal(0x2C + 4 * r as u32, 0.0);
@@ -1340,7 +1388,12 @@ impl Dmm {
 
     fn poll_dca(&mut self, clk: &mut Clock) -> Option<Reading> {
         let ad1 = self.ad1()?;
-        self.osr(ad1, 0x168, 0x15);
+        if self.drop_first() {
+            return None;
+        }
+        if !self.acdc {
+            self.osr(ad1, 0x168, 0x15);
+        }
         let (m, r) = (self.mode, self.range as usize);
         let before = (m, self.range);
         let u = (m - 7) as usize; // 0 A, 1 mA, 2 uA
@@ -1392,6 +1445,9 @@ impl Dmm {
         }
         let mut b = [0u8; 20];
         hy::read(hy::R_AD1, &mut b);
+        if self.drop_first() {
+            return None;
+        }
         let rms = (b[9] as u64) | (b[10] as u64) << 8 | (b[11] as u64) << 16 | (b[12] as u64) << 24
             | ((b[13] & 0x1F) as u64) << 32;
         let sq = sqrt(rms as f32);
