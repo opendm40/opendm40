@@ -6,8 +6,11 @@ without a cable. The same parser as USBTMC handles the commands
 (`src/scpi.rs`, `Scpi::handle`); only the transport is different.
 
 Code: `src/bt_scpi.rs` (dispatcher, command filter, TX ring; no hardware),
-`src/bt.rs` (UART4 + DMA, `ScpiPort`), main.rs integration in
-`tools/bt-scpi-test/main-hooks.patch`. Host test: `tools/bt-scpi-test/run.sh`.
+`src/bt.rs` (UART4 + DMA, `ScpiPort`), `src/main.rs` (one `Scpi` session and
+one READ?/MEAS? wait per transport, `bt.pump()` every loop, replies through
+`ScpiPort`, `Out::Dbg` refused when `!port.trusted()`). DBG:DIAG? bytes 60
+(TX DMA path working, 0 = blocking fallback) and 64..67 (u32 bytes dropped on
+a full TX ring). Host test: `tools/bt-scpi-test/run.sh`.
 Client: `tools/dm40bt_scpi.py`.
 
 ## Wire format

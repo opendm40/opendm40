@@ -6,8 +6,8 @@
 #   2. a thumbv7em-none-eabihf lib build of src/bt_scpi.rs, so the file that
 #      passed on the host is known to compile for the target too.
 # Does not touch hardware and does not modify any fw-rs source.
-# main-hooks.patch (next to this script) is the main.rs integration; check it
-# still applies with: git apply --check fw-rs/tools/bt-scpi-test/main-hooks.patch
+# The main.rs integration (two SCPI sessions, bt.pump, ScpiPort routing, DBG
+# refusal) is in src/main.rs; the former main-hooks.patch was applied there.
 set -e
 cd "$(dirname "$0")"
 RUSTUP_HOME="$(cd ../../../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../../../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
