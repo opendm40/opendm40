@@ -44,6 +44,8 @@ pub enum View {
     Range,
     /// MF settings window of the scope.
     ScopeMenu,
+    /// Generator value entry (frequency / Vpp / duty).
+    Keypad,
 }
 
 impl View {
@@ -925,6 +927,74 @@ pub fn gen_values(g: &gen::Gen) {
     sf::label(sf::TEXT22, rect(421, 269, 50, 26), "%", fg, G_BOX, 1, 0);
 }
 
+// --------------------------------------------------------------- keypads
+// Stock generator keypads: key bg 0x6b4d, panel 0xe73c, keys 60x40.
+
+const K_KEY: Color = 0x6B4D;
+const K_PANEL: Color = 0xE73C;
+const K_FONT: sf::Font = sf::Font(0x0805_C5DC);
+
+/// Keys: (rect, label, code). Codes: digits, '.', 'H'/'K'/'M', '<' backspace,
+/// '=' OK.
+pub fn keypad_keys(freq: bool) -> [(sf::Rect, &'static str, u8); 15] {
+    let r = |x: i16, y: i16, w: i16, h: i16| rect(x, y, w, h);
+    if freq {
+        [
+            (r(228, 146, 60, 40), "1", b'1'), (r(292, 146, 60, 40), "2", b'2'), (r(356, 146, 60, 40), "3", b'3'),
+            (r(420, 146, 56, 40), "H", b'H'), (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'),
+            (r(356, 190, 60, 40), "6", b'6'), (r(420, 190, 56, 40), "K", b'K'), (r(228, 234, 60, 40), "7", b'7'),
+            (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'), (r(420, 234, 56, 40), "M", b'M'),
+            (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), "<", b'<'), (r(417, 277, 59, 40), "OK", b'='),
+        ]
+    } else {
+        [
+            (r(228, 146, 60, 40), "1", b'1'), (r(292, 146, 60, 40), "2", b'2'), (r(356, 146, 60, 40), "3", b'3'),
+            (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'), (r(356, 190, 60, 40), "6", b'6'),
+            (r(228, 234, 60, 40), "7", b'7'), (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'),
+            (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), ".", b'.'), (r(417, 146, 59, 84), "<", b'<'),
+            (r(417, 234, 59, 83), "OK", b'='), (r(0, 0, 0, 0), "", 0), (r(0, 0, 0, 0), "", 0),
+        ]
+    }
+}
+
+pub fn keypad(freq: bool, title: &str, input: &str, unit: &str) {
+    if freq {
+        lcd::fill_rect(224, 142, 256, 178, K_PANEL);
+    } else {
+        lcd::fill_rect(224, 100, 256, 220, K_PANEL);
+        sf::label(sf::TEXT22, rect(228, 108, 100, 26), title, 0x0000, K_PANEL, 1, 0);
+    }
+    keypad_input(freq, input, unit);
+    for (r, l, c) in keypad_keys(freq) {
+        if c == 0 {
+            continue;
+        }
+        sf::rbox(r, 4, K_KEY, K_PANEL);
+        sf::glyphs(if l.len() > 1 || c == b'<' { sf::TEXT22 } else { K_FONT }, r, l, STATUS_FG, K_KEY, 8, 0);
+    }
+}
+
+/// The typed text: in the page's frequency field, or the popup's value box.
+pub fn keypad_input(freq: bool, input: &str, unit: &str) {
+    if freq {
+        sf::label(sf::LETTERS, rect(262, 83, 150, 30), input, 0x04FC, 0x3A08, 4, 0);
+        sf::label(sf::TEXT22, rect(421, 90, 50, 26), unit, 0x04FC, 0x3A08, 1, 0);
+    } else {
+        sf::label(sf::LETTERS, rect(329, 104, 110, 34), input, 0x0000, K_PANEL, 4, 0);
+        sf::label(sf::TEXT22, rect(446, 110, 30, 22), unit, 0x0000, K_PANEL, 1, 0);
+    }
+}
+
+pub fn keypad_hit(freq: bool, x: u16, y: u16) -> Option<u8> {
+    let (x, y) = (x as i16, y as i16);
+    for (r, _, c) in keypad_keys(freq) {
+        if c != 0 && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
+            return Some(c);
+        }
+    }
+    None
+}
+
 // ----------------------------------------------------------------- menu
 // Stock main menu (gui_v2_6.h section 2): logo, four tiles 190x106 with the
 // stock icons; plus a fifth row for the combined views of this firmware.
@@ -1010,5 +1080,6 @@ pub fn view_name(v: View) -> &'static str {
         View::Settings => "Settings",
         View::Range => "Range",
         View::ScopeMenu => "Scope settings",
+        View::Keypad => "Keypad",
     }
 }
