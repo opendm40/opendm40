@@ -1004,6 +1004,16 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d03-dmm-420ma");
+        for (case, file) in [("temp_ntc", "d04-dmm-temp-ntc"), ("temp_tc", "d05-dmm-temp-tc")] {
+            host::reset(0);
+            let (r, l) = find(case);
+            dv.label = l;
+            dv.draw_static(Button::HzTemp, r.mode, false);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            save(&out, file);
+        }
+        dv.label = None;
         host::reset(0);
         ui::gen_static(&w.gen);
         save(&out, "g01-gen");
