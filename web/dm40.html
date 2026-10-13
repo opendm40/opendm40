@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101516"><title>DM40 · Wireless multimeter</title><style>
+:root{color-scheme:dark;--bg:#101516;--panel:#1a2224;--muted:#8d9b9e;--orange:#ff9010;--blue:#008dca;--line:#2b3639;font-family:Arial,Helvetica,sans-serif;color:#eaf0f0;background:var(--bg)}*{box-sizing:border-box}body{margin:0}button,select{font:inherit}button,select,summary{cursor:pointer}button,select{border:1px solid var(--line);border-radius:6px;background:#232d30;color:inherit;padding:11px 16px}button:hover:not(:disabled){filter:brightness(1.2)}button:disabled{cursor:default;opacity:.42}button:focus-visible,select:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid #5cd1ff;outline-offset:4px}button.active{background:var(--blue);color:white}a{color:inherit;text-decoration:none}.page-header,footer{max-width:1100px;margin:auto;display:flex;align-items:center;justify-content:space-between;padding:28px 24px}.page-header{border-bottom:1px solid var(--line)}.brand{font-size:22px;font-weight:800;letter-spacing:-1px}.brand span{font-size:11px;letter-spacing:2px;color:var(--muted);margin-left:20px;font-weight:400}.local,.eyebrow{font-size:10px;letter-spacing:2px;color:var(--muted)}main{max-width:1000px;margin:48px auto;padding:0 24px}.heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px}.eyebrow{color:var(--orange);margin:0 0 12px}h1{font-size:30px;letter-spacing:-.7px;margin:0;font-weight:500}.heading button{background:transparent}.connection{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;background:#192123;border:1px solid var(--line);border-radius:10px;margin-bottom:20px;gap:16px}.connection-status{display:flex;align-items:center;gap:14px}.connection-status strong{font-size:14px;font-weight:500}.connection-status small{display:block;margin-top:5px;font-size:11px;color:var(--muted)}#led{height:8px;width:8px;border-radius:50%;background:#647075;flex-shrink:0}#led.on{background:#5edbb4;box-shadow:0 0 10px #5edbb433}#led.demo{background:var(--orange)}.connect-actions{display:flex;gap:10px}.connect-actions select{font-size:12px}.primary{background:#e9eeee;color:#101516;border-color:#e9eeee;font-weight:600}.meter{background:#080f14;border:1px solid #3d484b;border-radius:12px;padding:8px;box-shadow:0 18px 60px #0004;overflow:hidden}.meter-top{background:#192224;display:flex;align-items:center;padding:4px 7px;min-height:49px;gap:14px;border-radius:4px}.screen-button{border:0;background:transparent;font-size:23px;padding:5px 0;border-radius:0}#hold{min-width:65px;text-align:left}#hold.active{color:var(--orange);background:transparent}.meter-icons{margin-left:auto;display:flex;align-items:center;gap:18px;color:#c3cecf;font-size:23px}.icon-button{padding:2px 6px;background:none;border:none;font-size:23px}#battery{font-size:15px}#demo-badge{font-size:10px;font-weight:bold;letter-spacing:1px;color:var(--orange);border:1px solid #ff901060;padding:4px 6px;border-radius:3px}.aux{height:45px;display:flex;align-items:center;justify-content:space-between;padding:10px 18px;color:#adbec4;font-family:monospace;font-size:20px}.aux small{font:10px Arial;color:#6d838d;margin-right:12px}.readout{display:flex;align-items:center;padding:0 24px 4px;gap:12px;min-height:156px;color:var(--orange)}#reading{flex:1;min-width:0;text-align:right;padding:0;border:0;background:none;color:var(--orange);font-family:'DejaVu Sans Mono','Courier New',monospace;font-size:clamp(50px,9.7vw,108px);font-weight:700;letter-spacing:-5px;font-variant-numeric:tabular-nums;line-height:1.2;white-space:nowrap}#reading:disabled{opacity:.6}.unit-box{align-self:center;min-width:75px;text-align:center}.unit-box span{display:block;font-size:18px;font-weight:700}.unit-box strong{font-size:48px;line-height:1.2}.reading-meta{display:flex;justify-content:space-between;font-size:10px;letter-spacing:1px;color:#7f919a;padding:4px 20px 16px}#relative{color:var(--orange)}.slots{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin:0 1px 6px}.slot{background:#192325;min-height:35px;border-radius:3px;padding:7px 8px;color:#abb8bd;font-size:12px;font-family:monospace;white-space:nowrap;overflow:hidden}.slot.empty{color:#455459}.plot-row{display:flex;background:#182123;border-radius:4px;padding:8px;gap:10px;height:192px}.plot{position:relative;flex:1;min-width:0}canvas{width:100%;height:100%;display:block}.plot-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;letter-spacing:2px;font-size:10px;color:#728286}.plot-empty[hidden]{display:none}.plot-empty span{font-size:11px;letter-spacing:0;margin-top:10px;color:#526368}.plot-stats{width:100px;display:flex;flex-direction:column;align-items:center;justify-content:space-around}.plot-stats span{font-size:9px;letter-spacing:1px;color:#859599}.plot-stats strong{font-family:monospace;font-size:13px;font-weight:400}.plot-stats button{font-size:20px;font-weight:bold;padding:8px 20px;border:0}.modes{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-top:7px}.modes button{border:0;border-radius:3px;padding:12px 2px 10px;min-width:0}.modes b{display:block;font-size:25px}.modes small{display:block;font-size:7px;letter-spacing:.5px;color:#b3c1c5;margin-top:8px}.modes button.active small{color:#c9f3ff}.below{display:flex;justify-content:space-between;align-items:center;gap:20px;margin:16px 0 32px;font-size:10px;color:var(--muted)}.below>span{max-width:420px;line-height:1.6}.below>div{display:flex;gap:6px;flex-shrink:0}.below button{background:transparent;padding:8px 10px;font-size:11px}.help,.diagnostics{border-top:1px solid var(--line);padding:17px 0;font-size:12px;color:#aab8bb;line-height:1.7}summary{color:#d0d9da;user-select:none}summary span{float:right;color:var(--muted);font-size:10px}.help p{max-width:780px}.diagnostics pre{font-size:11px;max-height:210px;overflow:auto;background:#0a1013;padding:16px;border-radius:6px;white-space:pre-wrap;word-break:break-all}footer{font-size:10px;color:var(--muted);padding-bottom:32px}#message{padding:14px 18px;border:1px solid #8f5b28;background:#30271c;color:#ffd4a1;border-radius:8px;font-size:13px;line-height:1.5}dialog{width:min(440px,calc(100% - 32px));border:1px solid #415155;border-radius:12px;background:#192224;color:#ecf2f2;padding:24px}dialog::backdrop{background:#000a;backdrop-filter:blur(4px)}.dialog-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:20px}.dialog-title h2{font-size:19px;margin:0}.dialog-title button{padding:7px 11px;background:none}dialog label{display:flex;justify-content:space-between;align-items:center;margin:18px 0;font-size:13px}dialog p{font-size:12px;color:var(--muted);line-height:1.6}dialog .primary{width:100%;margin-top:16px}#range-options{display:grid;grid-template-columns:1fr 1fr;gap:8px}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}@media(max-width:640px){main{margin:28px auto;padding:0 12px}.page-header,footer{padding:20px 14px}.local{display:none}.brand{font-size:18px}.brand span{font-size:9px}.heading{gap:12px}.heading h1{font-size:21px}.heading button{font-size:11px;padding:10px}.connection{padding:14px;flex-wrap:wrap}.connect-actions{width:100%}.connect-actions select{flex:1;min-width:0}.connect-actions button{font-size:12px}.meter-top{gap:12px}.screen-button{font-size:18px}.meter-icons{gap:9px}.aux{font-size:15px;padding:10px;height:38px}.readout{min-height:104px;padding:0 9px}#reading{font-size:clamp(38px,11vw,70px);letter-spacing:-3px}.unit-box{min-width:44px}.unit-box strong{font-size:30px}.unit-box span{font-size:11px}.reading-meta{font-size:8px;padding:8px 8px 12px}.plot-row{height:157px}.plot-stats{width:77px}.plot-stats strong{font-size:11px}.modes{gap:3px}.modes b{font-size:18px}.modes small{display:none}.slots{grid-template-columns:repeat(3,1fr)}.slot{min-height:26px;font-size:10px}.below{flex-direction:column;align-items:flex-start;gap:12px;margin-bottom:24px}footer{gap:15px;line-height:1.6;font-size:9px}.plot-empty{font-size:8px;letter-spacing:1px}.plot-empty span{font-size:9px}#demo-badge{font-size:8px}#battery{font-size:12px}}
+:root #reading{font-family:'Liberation Mono','Courier New',monospace}
+@media(max-width:400px){.meter-top{gap:7px;padding:4px}.screen-button{font-size:16px}#hold{min-width:44px}.meter-icons{gap:5px}#demo-badge{padding:3px;font-size:7px;letter-spacing:0}#battery{white-space:nowrap;font-size:10px}.icon-button{font-size:19px;padding:2px}.modes b{white-space:nowrap;font-size:16px}.modes [data-group="4"] b{font-size:12px}}
+
+</style></head>
+<body>
+  <header class="page-header"><a class="brand" href="./">ALIENTEK<span>DM40 / WEB</span></a><span class="local">LOCAL INSTRUMENT</span></header>
+  <main>
+    <div class="heading"><div><p class="eyebrow">WIRELESS MULTIMETER</p><h1>Ваш DM40. В браузере.</h1></div><button id="demo">Деморежим</button></div>
+    <section class="connection" aria-label="Подключение"><div class="connection-status"><i id="led"></i><div><strong id="status" role="status">Не подключён</strong><small id="device-name">Прямое подключение к прибору</small></div></div><div class="connect-actions"><label class="sr-only" for="transport">Способ подключения</label><select id="transport"><option value="ble">Bluetooth LE</option><option value="serial">Web Serial / RFCOMM</option></select><button class="primary" id="connect">Подключить</button></div></section>
+    <p id="message" role="alert" hidden></p>
+    <section class="meter" aria-label="Дисплей мультиметра DM40">
+      <div class="meter-top"><button id="range" class="screen-button" title="Выбрать диапазон" disabled>AUTO+</button><button id="hold" class="screen-button" disabled>RUN</button><span id="demo-badge" hidden>DEMO</span><div class="meter-icons"><span id="lock" title="Блокировка экрана прибора"></span><span id="link-icon" title="Соединение">⌁</span><span id="battery" title="Батарея прибора">▱ —</span><button id="settings" class="icon-button" aria-label="Настройки">⚙</button></div></div>
+      <div id="aux" class="aux"><span>—</span><span>—</span></div>
+      <div class="readout"><button id="reading" title="Сохранить показание" aria-label="Сохранить текущее показание" disabled>— — — —</button><div class="unit-box"><span id="kind">DC</span><strong id="unit">V</strong></div></div>
+      <div class="reading-meta"><span id="mode-name">V DC</span><span id="relative"></span><span id="freshness">Ожидание данных</span></div>
+      <div class="slots" id="slots" aria-label="Сохранённые показания"></div>
+      <div class="plot-row"><div class="plot"><canvas id="chart" role="img" aria-label="График последних 180 измерений"></canvas><div class="plot-empty" id="plot-empty">ГРАФИК ИЗМЕРЕНИЙ <span>Данные появятся после подключения</span></div></div><aside class="plot-stats"><span>MAX</span><strong id="max">—</strong><button id="rel" disabled>REL</button><span>MIN</span><strong id="min">—</strong></aside></div>
+      <nav class="modes" aria-label="Режим измерения"><button data-group="0" disabled><b>V ⎓</b><small>НАПРЯЖЕНИЕ</small></button><button data-group="1" disabled><b>A ⎓</b><small>ТОК</small></button><button data-group="2" disabled><b>Ω</b><small>СОПРОТИВЛЕНИЕ</small></button><button data-group="3" disabled><b>┤├</b><small>ЁМКОСТЬ</small></button><button data-group="4" disabled><b>→| · )))</b><small>ДИОД / ПРОЗВОНКА</small></button><button data-group="5" disabled><b>Hz</b><small>ЧАСТОТА / °C</small></button></nav>
+    </section>
+    <div class="below"><span>Нажмите на показание, чтобы сохранить · Нажмите режим повторно для переключения</span><div><button id="clear">Очистить</button><button id="export" disabled>Экспорт CSV ↗</button></div></div>
+    <details class="help"><summary>Как подключить мультиметр</summary>
+      <p>Включите Bluetooth на DM40 и откройте экран мультиметра. Выберите Bluetooth LE, нажмите «Подключить» и выберите прибор в системном окне браузера. Закройте другие приложения, уже подключённые к DM40.</p>
+      <p>Автономный dm40.html можно открыть напрямую в Chrome/Edge. В Chrome на Linux откройте chrome://flags/#enable-experimental-web-platform-features, выберите Enabled и нажмите Relaunch. Это необходимо, если Web Bluetooth отсутствует. Firefox и Safari не поддерживают этот способ подключения. Если браузер ограничивает доступ из локального файла, используйте localhost или HTTPS.</p>
+      <p>Для Web Serial сначала выполните сопряжение Bluetooth Classic-интерфейса DM40 в настройках Bluetooth ОС. Затем выберите Web Serial / RFCOMM → Подключить → устройство DM40 (оно может называться C-1-ATK-DM40-CALI, тогда как BLE-интерфейс называется DM40A). Chrome 117+ умеет работать с сопряжённым Serial Port Profile напрямую: создавать /dev/rfcomm не требуется. Этот способ проверен в Chrome 144 на Linux без экспериментальных флагов.</p>
+      <p>HOLD, REL и выбор режима отправляются на прибор. Изменения отображаются по ответным измерениям. Деморежим использует искусственные данные и не подключается к оборудованию.</p>
+    </details>
+    <details class="diagnostics"><summary>Журнал обмена <span id="packet-count">0 пакетов</span></summary><pre id="log">Пакеты TX / RX появятся здесь.</pre></details>
+  </main>
+  <footer><span>DM40 A / B / C · Неофициальный клиент</span><a href="https://github.com/Urobotos/DM40-Wireless" target="_blank" rel="noreferrer">На основе DM40 Wireless ↗</a></footer>
+  <dialog id="settings-dialog"><form method="dialog"><div class="dialog-title"><h2>Настройки подключения</h2><button aria-label="Закрыть">✕</button></div><label>Модель прибора<select id="model"><option>DM40A</option><option>DM40B</option><option selected>DM40C</option></select></label><p>Модель уточняется при подключении. Вручную задаёт подписи диапазонов, если автоопределение недоступно.</p><label>Период опроса<select id="interval"><option value="200">200 мс</option><option value="500" selected>500 мс</option><option value="1000">1 с</option><option value="2000">2 с</option></select></label><label>Скорость Serial<select id="baud"><option>9600</option><option selected>115200</option></select></label><p>Скорость применяется при следующем подключении. Для эмулируемых Bluetooth-портов обычно игнорируется.</p><button class="primary">Готово</button></form></dialog>
+  <dialog id="range-dialog"><div class="dialog-title"><h2>Диапазон измерения</h2><button id="close-range" aria-label="Закрыть">✕</button></div><div id="range-options"></div></dialog>
+  <script>
+/*
+# DM40-Wireless
+
+Protocol mode/range mappings and display interpretation adapted from
+https://github.com/Urobotos/DM40-Wireless, commit
+b6dd1edef882bc283086a638b03d7e9872306b30. UI layout inspired by its meter screen.
+No upstream image assets or logos are bundled.
+
+MIT License
+
+Copyright (c) 2026 Urobotos
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+*/
+(() => {
+"use strict";
+// protocol.js
+// Mode/range and display mappings cross-checked against Urobotos/DM40-Wireless.
+// See THIRD_PARTY_NOTICES.md. Framing follows the parent repository's README.
+const hex = bytes => Array.from(bytes, x => x.toString(16).padStart(2, '0')).join(' ').toUpperCase();
+function packet(command, data = [], discovery = false) {
+  const bytes = [0xaf, discovery ? 255 : 5, discovery ? 255 : 3, command, data.length, ...data];
+  return Uint8Array.from([...bytes, (-bytes.reduce((a, b) => a + b, 0)) & 255]);
+}
+function validFrame(bytes) {
+  return bytes.length >= 6 && bytes[0] === 0xdf &&
+    ((bytes[1] === 5 && bytes[2] === 3) || (bytes[1] === 255 && bytes[2] === 255)) &&
+    bytes[4] <= 194 && bytes.length === bytes[4] + 6 && (bytes.reduce((a, b) => a + b, 0) & 255) === 0;
+}
+class FrameDecoder {
+  buffer = [];
+  push(chunk) {
+    this.buffer.push(...chunk);
+    const frames = [];
+    while (this.buffer.length) {
+      if (this.buffer[0] !== 0xdf) { this.buffer.shift(); continue; }
+      if (this.buffer.length < 5) break;
+      if (!((this.buffer[1] === 5 && this.buffer[2] === 3) || (this.buffer[1] === 255 && this.buffer[2] === 255)) || this.buffer[4] > 194) {
+        this.buffer.shift(); continue;
+      }
+      const length = this.buffer[4] + 6;
+      if (this.buffer.length < length) break;
+      const frame = Uint8Array.from(this.buffer.slice(0, length));
+      if (!validFrame(frame)) { this.buffer.shift(); continue; }
+      this.buffer.splice(0, length); frames.push(frame);
+    }
+    return frames;
+  }
+}
+const GROUPS = [
+  [{ name: 'V DC', mode: 0x30 }, { name: 'V AC', mode: 0x70 }, { name: 'V AC+DC', mode: 0xb0 }],
+  [{ name: 'A DC', mode: 0x39 }, { name: 'A AC', mode: 0x79 }, { name: 'A AC+DC', mode: 0xb9 }],
+  [{ name: 'Ω', mode: 0x32 }, { name: 'Ω ONLINE', mode: 0x72 }],
+  [{ name: 'CAP', mode: 3 }], [{ name: 'DIODE', mode: 4 }, { name: 'CONT', mode: 0x44 }],
+  [{ name: 'Hz', mode: 5 }, { name: '°C', mode: 0x45 }],
+];
+function modeInfo(mode) {
+  const group = mode & 7, sub = mode >> 6;
+  return { group, sub, range: (mode >> 3) & 7, name: GROUPS[group]?.[sub]?.name ?? `MODE 0x${mode.toString(16).toUpperCase()}` };
+}
+function ranges(mode, model = 'DM40C') {
+  const { group, sub } = modeInfo(mode), n = ({ DM40A: 4, DM40B: 5, DM40C: 6 })[model] ?? 6;
+  const labels = [
+    [`${n}00 mV`, `${n} V`, `${n}0 V`, `${n}00 V`, '1000 V', 'AUTO', 'AUTO+'],
+    [`${n}00 µA`, `${n} mA`, `${n}0 mA`, `${n}00 mA`, `${n} A`, '10 A', 'AUTO', 'AUTO+'],
+    [`${n}00 Ω`, `${n} kΩ`, `${n}0 kΩ`, `${n}00 kΩ`, `${n} MΩ`, `${n}0 MΩ`, 'AUTO'],
+  ][group];
+  return labels?.map((label, i) => ({ label, mode: group | (i << 3) | (sub << 6) })) ?? [];
+}
+function value(format, raw, type) {
+  const decimals = (format >> 1) & 7, prefix = (format >> 4) & 3;
+  const units = { voltage: ['mV', 'V', 'kV', 'MV'], current: ['µA', 'mA', 'A', 'kA'], resistance: ['Ω', 'kΩ', 'MΩ', 'GΩ'], capacitance: ['nF', 'µF', 'mF', 'F'], frequency: ['Hz', 'kHz', 'MHz', 'GHz'] };
+  const offset = { voltage: -3, current: -6, resistance: 0, capacitance: -9, frequency: 0 }[type];
+  let places = decimals, unit = units[type]?.[prefix] ?? '', exponent = prefix * 3 + (offset ?? 0);
+  if (type === 'temperature' || type === 'fahrenheit' || type === 'internal') { places = 1; exponent = 0; unit = type === 'fahrenheit' ? '°F' : '°C'; }
+  if (type === 'duty') { places = 1; exponent = 0; unit = '%'; }
+  if (type === 'voltage' && (format & 0xfe) === 0x08) { unit = 'V'; exponent = 0; }
+  const display = raw / 10 ** places * (format & 1 ? -1 : 1);
+  return { raw, format, unit, text: raw === 65535 ? 'OL' : `${raw === 0 && (format & 1) ? '-' : ''}${display.toFixed(places)}`, value: raw === 65535 ? null : display * 10 ** exponent,
+    baseUnit: { voltage: 'V', current: 'A', resistance: 'Ω', capacitance: 'F', frequency: 'Hz' }[type] ?? unit,
+    special: !!(format & 0x80) };
+}
+function measurement(frame) {
+  if (!validFrame(frame) || frame[3] !== 9 || frame[4] !== 11 || frame[1] !== 5) throw new Error('Неверный пакет измерения');
+  const info = modeInfo(frame[5]);
+  const type = ['voltage', 'current', 'resistance', 'capacitance', info.sub === 1 ? 'resistance' : 'voltage', info.sub === 1 ? 'temperature' : 'frequency'][info.group];
+  const slot = (fmt, pos, kind) => value(frame[fmt], frame[pos] | frame[pos + 1] << 8, kind);
+  let aux = [];
+  if (info.group <= 1 && info.sub === 1) aux = [{ ...slot(7, 10, 'frequency'), label: 'FREQ' }, { ...slot(8, 12, 'duty'), label: 'DUTY' }];
+  if (info.group <= 1 && info.sub === 2) aux = [{ ...slot(7, 10, type), label: 'AC' }, { ...slot(8, 12, type), label: 'DC' }];
+  if (info.group === 4 && info.sub === 0) aux = [{ ...slot(8, 12, 'resistance'), label: 'RES' }];
+  if (info.group === 5) aux = info.sub === 1 ? [{ ...slot(7, 10, 'internal'), label: 'INT' }, { ...slot(8, 12, 'fahrenheit'), label: 'TEMP' }] : [{ ...slot(8, 12, 'duty'), label: 'DUTY' }];
+  const main = slot(9, 14, type);
+  if (!type || !GROUPS[info.group]?.[info.sub]) { main.text = '—'; main.value = null; main.unit = ''; }
+  return { ...info, mode: frame[5], flags: frame[6], hold: !!(frame[6] & 128), rel: !!(frame[6] & 32), locked: !!(frame[6] & 64), battery: frame[6] & 7, charging: !!(frame[6] & 8), main, aux, raw: hex(frame) };
+}
+
+// transport.js
+const uuid = short => `0000${short}-0000-1000-8000-00805f9b34fb`;
+const PROFILES = [
+  { service: uuid('fff0'), tx: uuid('fff3'), rx: uuid('fff1') },
+  { service: uuid('fff0'), tx: uuid('fff1'), rx: uuid('fff2') },
+  { service: uuid('ffff'), tx: uuid('ff01'), rx: uuid('ff02') },
+];
+function bluetoothSupportError() {
+  if (!globalThis.isSecureContext) return 'Откройте автономный dm40.html в Chrome/Edge либо используйте localhost или HTTPS.';
+  if (navigator.bluetooth) return '';
+  if (/Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent)) {
+    return 'Web Bluetooth выключен или не поддерживается этим браузером. В Chrome/Chromium на Linux откройте chrome://flags/#enable-experimental-web-platform-features, выберите Enabled и нажмите Relaunch. Затем снова откройте dm40.html. Web Serial доступен отдельно, если DM40 представлен последовательным портом.';
+  }
+  return 'Web Bluetooth недоступен. Откройте файл в Chrome/Edge с поддержкой BLE. Для Bluetooth Classic используйте Web Serial, если ОС предоставляет порт DM40.';
+}
+class Connection {
+  constructor({ onFrame = () => {}, onLog = () => {}, onDisconnect = () => {}, timeout = 1800 } = {}) {
+    Object.assign(this, { onFrame, onLog, onDisconnect, timeout });
+    this.decoder = new FrameDecoder(); this.queue = Promise.resolve(); this.closed = false;
+  }
+  receive(chunk) {
+    this.onLog('RX', chunk);
+    for (const frame of this.decoder.push(chunk)) {
+      if (this.pending?.command === frame[3]) {
+        const p = this.pending; this.pending = null; clearTimeout(p.timer); p.resolve(frame);
+      }
+      this.onFrame(frame);
+    }
+  }
+  request(command, data = [], discovery = false) {
+    const task = this.queue.then(async () => {
+      if (this.closed) throw new Error('Соединение закрыто');
+      const bytes = packet(command, data, discovery);
+      const response = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.pending = null;
+          const error = new Error('DM40 не ответил. Проверьте Bluetooth и откройте экран мультиметра.');
+          reject(error); void this.close(error.message);
+        }, this.timeout);
+        this.pending = { command, resolve, reject, timer };
+      });
+      // Install rejection handler before an asynchronous write can time out.
+      response.catch(() => {});
+      try { this.onLog('TX', bytes); await this.write(bytes); }
+      catch (error) { await this.close(error.message); throw error; }
+      const frame = await response;
+      if ([1, 3, 4, 5, 6, 7].includes(command) && (frame[4] !== 1 || frame[5] !== 0)) throw new Error('Прибор отклонил команду');
+      return frame;
+    });
+    this.queue = task.catch(() => {}); return task;
+  }
+  async bluetooth() {
+    const unsupported = bluetoothSupportError();
+    if (unsupported) throw new Error(unsupported);
+    this.device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [...new Set(PROFILES.map(p => p.service))] });
+    this.disconnected = () => void this.close('Bluetooth-соединение потеряно');
+    this.device.addEventListener('gattserverdisconnected', this.disconnected);
+    const server = await this.device.gatt.connect();
+    for (const profile of PROFILES) {
+      try {
+        const service = await server.getPrimaryService(profile.service);
+        const tx = await service.getCharacteristic(profile.tx), rx = await service.getCharacteristic(profile.rx);
+        if (!(tx.properties.write || tx.properties.writeWithoutResponse) || !(rx.properties.notify || rx.properties.indicate)) continue;
+        this.tx = tx; this.rx = rx;
+        this.notification = event => {
+          const v = event.target.value; this.receive(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+        };
+        rx.addEventListener('characteristicvaluechanged', this.notification);
+        try { await rx.startNotifications(); }
+        catch (error) { rx.removeEventListener('characteristicvaluechanged', this.notification); throw error; }
+        this.write = bytes => tx.properties.write ? tx.writeValueWithResponse(bytes) : tx.writeValueWithoutResponse(bytes);
+        return this.device.name || 'DM40';
+      } catch { /* Try the next documented profile. */ }
+    }
+    throw new Error('Совместимый BLE-профиль не найден. Для Bluetooth Classic выберите Web Serial.');
+  }
+  async serial(baudRate = 115200) {
+    if (!navigator.serial) throw new Error('Web Serial недоступен в этом браузере. Используйте настольный Chrome/Edge.');
+    this.port = await navigator.serial.requestPort();
+    await this.port.open({ baudRate });
+    this.reader = this.port.readable.getReader(); this.writer = this.port.writable.getWriter();
+    this.write = bytes => this.writer.write(bytes);
+    this.readTask = (async () => {
+      try {
+        while (!this.closed) { const { value, done } = await this.reader.read(); if (done) break; this.receive(value); }
+      } catch (error) { this.readError = error.message; }
+      finally { this.reader.releaseLock(); }
+    })();
+    this.readTask.then(() => { if (!this.closed) void this.close(this.readError || 'Последовательный порт отключён'); });
+    return 'DM40 · Serial';
+  }
+  async close(reason = '') {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.pending) { clearTimeout(this.pending.timer); this.pending.reject(new Error(reason || 'Соединение закрыто')); this.pending = null; }
+    this.device?.removeEventListener('gattserverdisconnected', this.disconnected);
+    this.rx?.removeEventListener('characteristicvaluechanged', this.notification);
+    this.device?.gatt?.disconnect();
+    try { await this.reader?.cancel(); } catch { /* Device may already be gone. */ }
+    await this.readTask;
+    try { this.writer?.releaseLock(); await this.port?.close(); } catch { /* Already disconnected. */ }
+    this.onDisconnect(reason);
+  }
+}
+
+// app.js
+const $ = id => document.getElementById(id);
+let connection = null, demo = false, connecting = false, current = null, timer, lastUpdate = 0, busy = false;
+let history = [], saved = [], logs = [], packets = 0, seriesKey = '', demoMode = 0x30, demoHold = false, demoRel = false, demoZero = 0;
+const groupButtons = [...document.querySelectorAll('[data-group]')];
+function message(text = '') { $('message').textContent = text; $('message').hidden = !text; }
+function active() { return demo || (!!connection && !connection.closed && !connecting); }
+function controls() {
+  const enabled = active() && !!current && !busy;
+  groupButtons.forEach(button => button.disabled = !enabled);
+  for (const id of ['hold', 'rel', 'reading']) $(id).disabled = !enabled;
+  $('range').disabled = !enabled || !ranges(current?.mode ?? 0).length;
+  $('rel').disabled ||= !!current?.hold;
+  $('connect').disabled = connecting || demo;
+  $('connect').textContent = connection && !connection.closed && !connecting ? 'Отключить' : 'Подключить';
+  $('transport').disabled = connecting || !!connection || demo;
+  $('demo').disabled = connecting || !!connection;
+  $('demo').textContent = demo ? 'Завершить демо' : 'Деморежим';
+  $('demo-badge').hidden = !demo;
+  $('export').disabled = !history.length;
+}
+function log(direction, bytes) {
+  packets++; logs.push(`${new Date().toLocaleTimeString('ru-RU')}  ${direction}  ${hex(bytes)}`);
+  if (logs.length > 150) logs.shift();
+  $('log').textContent = logs.join('\n'); $('packet-count').textContent = `${packets} пакетов`;
+}
+function slots() {
+  $('slots').replaceChildren(...Array.from({ length: 6 }, (_, index) => {
+    const div = document.createElement('div'); div.className = `slot${saved[index] ? '' : ' empty'}`;
+    div.textContent = saved[index] ? `${saved[index].text} ${saved[index].unit}` : `${String(index + 1).padStart(2, '0')}  —`;
+    if (saved[index]) div.title = `${saved[index].mode} · ${saved[index].time} · ${saved[index].demo ? 'DEMO' : 'DM40'}`;
+    return div;
+  }));
+}
+function render(m) {
+  current = m; lastUpdate = Date.now();
+  const key = `${m.mode}:${m.rel}:${m.main.baseUnit}`;
+  if (seriesKey !== key) { history = []; seriesKey = key; }
+  $('reading').textContent = m.main.text; $('unit').textContent = m.main.unit;
+  $('kind').textContent = m.group <= 1 ? ['DC', 'AC', 'AC+DC'][m.sub] ?? '' : m.group === 4 ? (m.sub === 1 ? ')))' : '→|') : '';
+  $('mode-name').textContent = m.name;
+  $('hold').textContent = m.hold ? 'HOLD' : 'RUN'; $('hold').classList.toggle('active', m.hold);
+  $('rel').classList.toggle('active', m.rel); $('relative').textContent = m.rel ? 'REL Δ' : '';
+  $('range').textContent = ranges(m.mode, $('model').value).find(r => r.mode === m.mode)?.label ?? 'AUTO';
+  $('battery').textContent = `${m.charging ? 'ϟ ' : ''}▱ ${m.battery}`;
+  $('battery').title = `Уровень батареи по данным прибора: ${m.battery}`;
+  $('lock').textContent = m.locked ? '▣' : '';
+  $('aux').replaceChildren(...(m.aux.length ? m.aux : [{ label: '', text: '—', unit: '' }, { label: '', text: '—', unit: '' }]).map(a => {
+    const span = document.createElement('span'), label = document.createElement('small'); label.textContent = a.label;
+    span.append(label, `${a.text} ${a.unit}`); return span;
+  }));
+  const baseLabels = ['V ⎓', 'A ⎓', 'Ω', '┤├', '→| · )))', 'Hz'];
+  groupButtons.forEach((button, i) => {
+    button.classList.toggle('active', i === m.group);
+    button.querySelector('b').textContent = i === m.group ? (i <= 1 ? `${i === 0 ? 'V' : 'A'} ${['⎓', '~', '≂'][m.sub] ?? '?'}` : i === 2 ? (m.sub ? 'Ω ON' : 'Ω') : i === 4 ? (m.sub ? ')))' : '→|') : i === 5 ? (m.sub ? '°C' : 'Hz') : '┤├') : baseLabels[i];
+  });
+  if (!m.hold && m.main.value !== null) {
+    history.push({ time: new Date().toISOString(), ...m.main, mode: m.name, demo, rel: m.rel, raw: m.raw });
+    if (history.length > 10000) history.shift();
+  }
+  $('freshness').textContent = demo ? 'ИСКУССТВЕННЫЕ ДАННЫЕ' : 'ДАННЫЕ ПРИБОРА';
+  draw(); controls();
+}
+function draw() {
+  const canvas = $('chart'), rect = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(rect.width * dpr); canvas.height = Math.round(rect.height * dpr);
+  const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height, points = history.slice(-180), left = 64, right = w - 6, top = 16, bottom = h - 20;
+  ctx.strokeStyle = '#2a3639'; ctx.lineWidth = 1;
+  for (let i = 0; i < 4; i++) { const y = top + (bottom - top) * i / 3; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+  $('plot-empty').hidden = points.length > 0;
+  if (!points.length) { $('max').textContent = '—'; $('min').textContent = '—'; return; }
+  const all = history.map(p => p.value), min = Math.min(...all), max = Math.max(...all), unit = points[0].baseUnit;
+  const compact = n => `${Number(n.toPrecision(5))} ${unit}`;
+  $('max').textContent = compact(max); $('min').textContent = compact(min);
+  let lo = Math.min(...points.map(p => p.value)), hi = Math.max(...points.map(p => p.value));
+  const pad = Math.max((hi - lo) * .15, Math.abs(hi) * .0005, 1e-12); lo -= pad; hi += pad;
+  ctx.font = '10px monospace'; ctx.fillStyle = '#819399';
+  for (let i = 0; i < 4; i++) ctx.fillText(Number((hi - (hi - lo) * i / 3).toPrecision(6)).toString(), 1, top + (bottom - top) * i / 3 - 4);
+  ctx.fillText(unit, 1, h - 3); ctx.fillText(`${points.length} / 180`, Math.max(65, w - 65), h - 3);
+  ctx.strokeStyle = '#ff9010'; ctx.lineWidth = 1.5; ctx.beginPath();
+  points.forEach((p, i) => { const x = left + (right - left) * i / Math.max(1, points.length - 1), y = bottom - (p.value - lo) / (hi - lo) * (bottom - top); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.stroke();
+}
+function stopView(reason = '') {
+  clearTimeout(timer); $('status').textContent = 'Не подключён'; $('device-name').textContent = 'Прямое подключение к прибору'; $('led').className = '';
+  $('freshness').textContent = current ? 'СОЕДИНЕНИЕ ЗАКРЫТО · ПОСЛЕДНИЕ ДАННЫЕ' : 'Ожидание данных';
+  if (reason) message(reason); controls();
+}
+function newSession() { history = []; saved = []; seriesKey = ''; current = null; slots(); draw(); message(); }
+async function poll(link) {
+  if (connection !== link || link.closed) return;
+  try { await link.request(9); }
+  catch (error) { message(error.message); await link.close(); return; }
+  if (connection === link && !link.closed) timer = setTimeout(() => poll(link), Number($('interval').value));
+}
+$('connect').onclick = async () => {
+  if (connection) { const old = connection; connection = null; await old.close(); stopView(); return; }
+  if (demo) return;
+  connecting = true; message(); controls(); $('status').textContent = 'Подключение…';
+  const link = new Connection({ onLog: log, onFrame: frame => {
+    if (connection !== link) return;
+    if (frame[3] === 9 && frame[4] === 11) render(measurement(frame));
+  }, onDisconnect: reason => { if (connection === link) { connection = null; connecting = false; stopView(reason); } } });
+  connection = link;
+  try {
+    // The chooser is invoked directly from the click, before any unrelated await.
+    const name = await ($('transport').value === 'ble' ? link.bluetooth() : link.serial(Number($('baud').value)));
+    newSession();
+    const discovery = await link.request(0, [], true);
+    if (discovery[4] !== 3 || discovery[5] !== 5 || discovery[6] !== 3) throw new Error('Выбранное устройство не является DM40');
+    const model = String.fromCharCode(discovery[7]); if ('ABC'.includes(model)) $('model').value = `DM40${model}`;
+    connecting = false; $('status').textContent = 'Подключён'; $('device-name').textContent = `${name} · ${$('model').value}`; $('led').className = 'on';
+    controls(); void poll(link);
+  } catch (error) {
+    await link.close(); connection = null; connecting = false; stopView();
+    message(error.name === 'NotFoundError' ? 'Выбор устройства отменён или подходящее устройство не найдено.' : error.message);
+  }
+};
+async function command(code, data) {
+  if (!active() || busy) return;
+  busy = true; controls(); message();
+  try {
+    if (demo) {
+      if (code === 6) { demoMode = data[0]; demoHold = false; demoRel = false; demoZero = 0; }
+      if (code === 4) demoHold = !!data[0];
+      if (code === 5) { demoRel = !!data[0]; demoZero = demoRel ? demoRaw() : 0; }
+      demoTick();
+    } else {
+      const link = connection; await link.request(code, data); const frame = await link.request(9);
+      const m = measurement(frame);
+      if ((code === 6 && m.mode !== data[0]) || (code === 4 && m.hold !== !!data[0]) || (code === 5 && m.rel !== !!data[0])) message('Прибор подтвердил команду, но состояние не изменилось. Откройте экран мультиметра на DM40.');
+    }
+  } catch (error) { message(error.message); }
+  finally { busy = false; controls(); }
+}
+$('hold').onclick = () => command(4, [current.hold ? 0 : 1]);
+$('rel').onclick = () => command(5, [current.rel ? 0 : 1]);
+groupButtons.forEach((button, group) => button.onclick = () => {
+  const options = GROUPS[group]; const next = current.group === group ? (current.sub + 1) % options.length : 0;
+  void command(6, [options[next].mode]);
+});
+$('range').onclick = () => {
+  $('range-options').replaceChildren(...ranges(current.mode, $('model').value).map(range => {
+    const button = document.createElement('button'); button.textContent = range.label; button.classList.toggle('active', range.mode === current.mode);
+    button.onclick = () => { $('range-dialog').close(); void command(6, [range.mode]); }; return button;
+  })); $('range-dialog').showModal();
+};
+$('close-range').onclick = () => $('range-dialog').close();
+$('settings').onclick = () => $('settings-dialog').showModal();
+$('model').onchange = () => { if (current) $('range').textContent = ranges(current.mode, $('model').value).find(r => r.mode === current.mode)?.label ?? 'AUTO'; };
+$('reading').onclick = () => {
+  if (!current) return;
+  saved.push({ text: current.main.text, unit: current.main.unit, mode: current.name, time: new Date().toLocaleTimeString('ru-RU'), demo });
+  if (saved.length > 6) saved.shift(); slots();
+};
+$('clear').onclick = () => { history = []; saved = []; slots(); draw(); controls(); };
+$('export').onclick = () => {
+  const quote = value => `"${String(value ?? '').replaceAll('"', '""')}"`;
+  const rows = [['time', 'mode', 'value_si', 'unit_si', 'display', 'display_unit', 'relative', 'source', 'raw'], ...history.map(p => [p.time, p.mode, p.value, p.baseUnit, p.text, p.unit, p.rel, p.demo ? 'DEMO' : 'DM40', p.raw])];
+  const blob = new Blob(['\ufeff', rows.map(row => row.map(quote).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = `dm40-${demo ? 'demo-' : ''}${new Date().toISOString().replaceAll(':', '-')}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+function demoRaw() { return 12345 + Math.round(Math.sin(Date.now() / 2800) * 38 + Math.sin(Date.now() / 480) * 9); }
+function demoTick() {
+  if (!demo) return;
+  clearTimeout(timer);
+  if (!demoHold || !current || current.mode !== demoMode) {
+    const { group, sub } = modeInfo(demoMode);
+    let raw = demoRaw() - demoZero, format = [0x16, 0x16, 0x16, 0x14, sub ? 0x04 : 0x18, sub ? 0x02 : 0x04][group];
+    if (raw < 0) { format |= 1; raw = -raw; }
+    const frame = [0xdf, 5, 3, 9, 11, demoMode, 4 | (demoRel ? 32 : 0) | (demoHold ? 128 : 0), 4, 2, format, 0x88, 0x13, 0xf4, 1, raw & 255, raw >> 8];
+    frame.push((-frame.reduce((a, b) => a + b, 0)) & 255); render(measurement(Uint8Array.from(frame)));
+  } else render({ ...current, hold: true, rel: demoRel });
+  timer = setTimeout(demoTick, Number($('interval').value));
+}
+$('demo').onclick = () => {
+  demo = !demo;
+  if (demo) { newSession(); demoMode = 0x30; demoHold = false; demoRel = false; demoZero = 0; $('status').textContent = 'Деморежим'; $('device-name').textContent = 'Симуляция · без подключения к прибору'; $('led').className = 'demo'; demoTick(); }
+  else stopView();
+  controls();
+};
+setInterval(() => { if (!demo && active() && lastUpdate && Date.now() - lastUpdate > 3000) $('freshness').textContent = 'НЕТ СВЕЖИХ ДАННЫХ'; }, 1000);
+new ResizeObserver(draw).observe($('chart'));
+slots(); controls();
+function checkSupport() {
+  if ($('transport').value === 'ble') message(bluetoothSupportError());
+  else if (!navigator.serial) message('Web Serial недоступен в этом браузере. Используйте настольный Chrome/Edge.');
+  else message();
+}
+$('transport').onchange = checkSupport;
+checkSupport();
+
+})();
+</script>
+</body></html>
