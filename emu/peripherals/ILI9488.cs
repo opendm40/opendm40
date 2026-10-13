@@ -129,7 +129,7 @@ namespace Antmicro.Renode.Peripherals.Video
             if(everyFrames > 0) Directory.CreateDirectory(dir);
         }
 
-        public int Rotation { get; set; } = 1;
+        public int Rotation { get; set; } = 3;
         public ulong PixelsWritten { get; private set; }
         public ulong Frames { get; private set; }
         public ulong Commands { get; private set; }

@@ -16,6 +16,7 @@ Images are composed in emu/out/ and never written back to the dumps.
 Events (--tap/--key/--shot/--vin/--script) are scheduled in virtual time.
 """
 import argparse
+import glob
 import os
 import shutil
 import struct
@@ -34,8 +35,6 @@ UID = os.path.join(ROOT, 'private/memrw-kit-test/full/uid_1FFF7A10.bin')
 STOCK_DEC = os.path.join(ROOT, 'dm40_v_2_6.dec.bin')
 DISK_SRC = os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin')
 RENODE = os.path.join(HERE, '.renode/current/renode')
-PERIPHERALS = ['ILI9488', 'W25Q128', 'SimpleADC', 'DWT', 'MemTool', 'GD32_I2C', 'CST_Touch', 'HY3131',
-               'ScopeFeeder', 'BtModule', 'USBFS_Stub']
 
 APP_BASE = 0x08004000
 LOADER_BASE = 0x080A0000
@@ -173,9 +172,12 @@ def main():
     ap.add_argument('--interactive', action='store_true', help='leave the Renode monitor open')
     ap.add_argument('--pause', action='store_true', help='do not start the CPU (use with --gdb)')
     ap.add_argument('--bt-port', type=int, default=0, help='TCP port for the Bluetooth UART')
-    ap.add_argument('--log', help='Renode log file (default emu/out/<mode>.log)')
+    ap.add_argument('--log', help='Renode log file (default emu/out/<name>.log)')
+    ap.add_argument('--name', help='base name of the generated .resc/.log (default: the mode)')
     ap.add_argument('--pa2', type=float, default=None, metavar='T',
                     help='chain: raise PA2 at T seconds (ROM launches the app directly)')
+    ap.add_argument('--debug', default='', metavar='P1,P2',
+                    help='peripherals to log at debug level, e.g. sysbus.i2c3,sysbus.i2c3.touch')
     ap.add_argument('--pc-samples', type=int, default=0, metavar='N',
                     help='debug: print N PC samples (13 ms apart) at the end')
     ap.add_argument('--dry', action='store_true', help='only write the .resc')
@@ -207,12 +209,11 @@ def main():
     print('disk image: ', rel(disk))
 
     s = Script()
-    log = a.log or os.path.join(OUT, '%s.log' % a.mode)
+    name = a.name or a.mode
+    log = a.log or os.path.join(OUT, '%s.log' % name)
     s.add('logFile %s' % q(log))
-    for p in PERIPHERALS:
-        cs = os.path.join(HERE, 'peripherals', p + '.cs')
-        if os.path.exists(cs):
-            s.add('include %s' % q(cs))
+    for cs in sorted(glob.glob(os.path.join(HERE, 'peripherals', '*.cs'))):
+        s.add('include %s' % q(cs))
     s.add('mach create "dm40"')
     s.add('machine LoadPlatformDescription %s' % q(os.path.join(HERE, 'dm40.repl')))
     s.add('sysbus LoadBinary %s 0x08000000' % q(flash))
@@ -224,9 +225,10 @@ def main():
         print('warning: no UID file (%s): the stock genuine check fails -> 16 MHz' % a.uid)
     s.add('sysbus WriteWord 0x1FFF7A22 0x0400')
     s.add('sysbus.spi2.spiflash Load %s' % q(disk))
-    s.add('sysbus.gpioPortE OnGPIO 5 true')  # touch INT idle high (pull-up)
     s.add('sysbus.gpioPortD OnGPIO 6 false')  # power key released
     s.add('cpu VectorTableOffset 0x%08X' % (0x08000000 if a.mode == 'chain' else APP_BASE))
+    for p in [x for x in a.debug.split(',') if x]:
+        s.add('logLevel -1 %s' % p)
     if a.autoshot:
         s.add('sysbus.lcd AutoShot %s %d' % (q(os.path.join(OUT, 'frames')), a.autoshot))
     if a.bt_port:
@@ -333,7 +335,7 @@ def main():
     if a.save_flash:
         s.at(end, 'sysbus.memtool Save %s 0x08000000 0x100000' % q(a.save_flash))
 
-    resc = os.path.join(OUT, '%s.resc' % a.mode)
+    resc = os.path.join(OUT, '%s.resc' % name)
     with open(resc, 'w') as f:
         f.write(s.render(end, not a.interactive))
     print('script:     ', rel(resc))
@@ -342,7 +344,8 @@ def main():
     cmd = [RENODE, '--console', '--disable-xwt', '-e', 'i @' + os.path.abspath(resc)]
     if not a.interactive:
         cmd.insert(1, '--hide-log')
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        cmd += ['-e', 'quit']  # also quit when the script aborts on an error
+        r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         import re as _re
         for l in r.stdout.splitlines():
             l = _re.sub(r'\x1b\[[0-9;]*m', '', l)

@@ -130,10 +130,10 @@ bitbandSram: Miscellaneous.BitBanding @ sysbus <0x22000000, +0x200000>
     peripheralBase: 0x20000000
 
 // DMA0/DMA1 (GD32 names) = DMA1/DMA2 (STM32 names, used here).
-dma1: DMA.STM32DMA @ sysbus 0x40026000
+dma1: DMA.GD32_DMA @ sysbus 0x40026000
     [0-7] -> nvic@[11-17,47]
 
-dma2: DMA.STM32DMA @ sysbus 0x40026400
+dma2: DMA.GD32_DMA @ sysbus 0x40026400
     [0-7] -> nvic@[56-60,68-70]
 
 // Timers: TIMPRE=1 -> every timer clock is 200 MHz on the DM40.
@@ -256,9 +256,20 @@ i2c2: I2C.STM32F1_I2C @ sysbus 0x40005800
     EventInterrupt -> nvic@33
     ErrorInterrupt -> nvic@34
 
-i2c3: I2C.STM32F1_I2C @ sysbus 0x40005C00
+i2c3: I2C.GD32_I2C @ sysbus 0x40005C00
+    dmaRxCountAddress: 0x40026044
     EventInterrupt -> nvic@72
     ErrorInterrupt -> nvic@73
+    RxDMARequest -> dma1@2
+    TxDMARequest -> dma1@4
+
+touch: I2C.CST_Touch @ i2c3 0x5A
+    IRQ -> gpioPortE@5
+
+// HY3131 DMM ADC on bit-banged SPI (PC10 SCK, PC11 MISO, PC12 MOSI, PD2 CS)
+hy3131: Miscellaneous.HY3131 @ sysbus 0x7FFF1000
+    portC: gpioPortC
+    portD: gpioPortD
 
 // ADC0 (battery PC5 = channel 15, internal temperature channel 16)
 adc1: Analog.SimpleADC @ sysbus 0x40012000
@@ -273,6 +284,5 @@ rng: Miscellaneous.STM32_RNG @ sysbus 0x50060800
 
 memtool: Miscellaneous.MemTool @ sysbus 0x7FFF0000
 
-sysbus:
-    init:
-        Tag <0x50000000, 0x5003FFFF> "USBFS" 0x0
+// USB OTG FS: register stub, never enumerates.
+usbfs: USB.USBFS_Stub @ sysbus 0x50000000
