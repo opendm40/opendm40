@@ -500,7 +500,7 @@ fn main() {
     let bar_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, ui::SBAR_H as i32))];
     for tb in scope::TB_MIN..=scope::TB_MAX {
         for range in 0..10 {
-            for probe in [1.0f32, 10.0, 100.0] {
+            for probe in scope::PROBES {
                 for (k, trig_row) in [-10, 140, 290].iter().enumerate() {
                     let s = scope::Settings {
                         run: k != 1,
@@ -521,6 +521,10 @@ fn main() {
                     ui::SCOPE_COMBINED.labels(&w.sc);
                     ui::scope_status(&st);
                     ck.check(&format!("bar/tb{tb}/r{range}/p{probe}/t{trig_row}"), &bar_regions);
+                    // Probe extremes: "1mV" (10 mV x0.1), "10kV" (10 V x1000).
+                    if tb == 13 && k == 1 && ((range, probe) == (0, 0.1) || (range, probe) == (9, 1000.0)) {
+                        save(&out, &format!("s03-bar-r{range}-p{probe}"));
+                    }
                 }
             }
         }
@@ -817,6 +821,43 @@ fn main() {
         if k == 0 {
             save(&out, "t01-toast-disk-in-use");
         }
+    }
+
+    // 6e. Scope settings window (MF on the scope page), every tab; the
+    //     Settings tab with each probe factor (UF-12) and both couplings.
+    //     The hit map must land every probe button on its own item.
+    {
+        let menu_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("menu", Bx::new(13, 28, 401, 192))];
+        let (sel, _) = meas_worst();
+        for tab in 0..4usize {
+            let probes: Vec<usize> = if tab == 3 { (0..scope::PROBES.len()).collect() } else { vec![3] };
+            for k in probes {
+                let mut s = scope::Settings::DEFAULT;
+                s.probe = scope::PROBES[k];
+                s.ac = k % 2 == 0;
+                w.sc.apply(s, 0);
+                host::reset(0);
+                ui::scope_menu(tab, &w.sc, &sel, k % 2 == 0, k % 3 == 0);
+                ck.check_opts(&format!("scope-menu/{tab}/{}", scope::PROBE_NAMES[k]), &menu_regions, false);
+                if tab == 3 && k == 12 {
+                    save(&out, "s02-scope-menu-probe");
+                }
+            }
+        }
+        for k in 0..scope::PROBES.len() {
+            let (x, y) = (16 + (k % 7) as u16 * 56 + 26, 28 + 80 + (k / 7) as u16 * 38 + 17);
+            ck.cases += 1;
+            if ui::scope_menu_hit(3, x, y) != Some((3, 3 + k)) {
+                ck.fail("scope-menu/hit", format!("probe {} at ({x},{y})", scope::PROBE_NAMES[k]));
+            }
+        }
+        for (x, want) in [(76u16, 0usize), (200, 1)] {
+            ck.cases += 1;
+            if ui::scope_menu_hit(3, x, 85) != Some((3, want)) {
+                ck.fail("scope-menu/hit", format!("coupling {want}"));
+            }
+        }
+        w.sc.apply(scope::Settings::DEFAULT, 0);
     }
 
     // 7. Gestures: zone table, axis lock, hold-to-grab, Up on captured

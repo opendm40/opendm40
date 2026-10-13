@@ -147,6 +147,12 @@ const GPIO_ROW: [[u8; 4]; 10] = [
     [0, 0, 0, 1],
     [0, 0, 1, 0],
 ];
+/// Probe factors (stock `scope_probe[13]`, probe index -3..9): x0.1 .. x1000.
+/// Like the stock, the factor relabels only (readouts, V/div, trigger
+/// level); the hardware range stays the same.
+pub const PROBES: [f32; 13] = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0];
+/// Probe button labels (scope settings window, Settings tab).
+pub const PROBE_NAMES: [&str; 13] = ["x0.1", "x0.2", "x0.5", "x1", "x2", "x5", "x10", "x20", "x50", "x100", "x200", "x500", "x1000"];
 const XR: [f32; 10] = [0.04, 0.04, 0.04, 0.4, 0.4, 0.4, 4.0, 4.0, 4.0, 4.0];
 const G_DEFAULT: [f32; 10] = [944.0, 727.0, 598.0, 944.0, 727.0, 598.0, 944.0, 727.0, 598.0, 556.0];
 
@@ -168,7 +174,8 @@ pub struct Settings {
     pub pos: i32,
     pub rising: bool,
     pub mode: TrigMode,
-    /// Probe factor (x1, x10, x100): scales readouts and V/div labels only.
+    /// Probe factor (one of PROBES, x0.1 .. x1000): scales readouts and V/div
+    /// labels only.
     pub probe: f32,
     /// Trigger position: screen column (0..=400) of the trigger point, 200 =
     /// centre (stock: always the centre). Sets the pre-trigger part of each

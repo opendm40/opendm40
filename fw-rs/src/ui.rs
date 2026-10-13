@@ -1292,23 +1292,27 @@ pub const SCOPE_COMBINED: ScopeView = ScopeView { x0: 13, y0: (STRIP_Y + STRIP_H
 /// Measurement bar rows (both scope views).
 const MEAS_Y: u16 = 301;
 
-/// "1.25us" / "2MHz" style engineering text.
+/// "1.25us" / "2MHz" style engineering text. A product like 10 mV x 0.1
+/// (probe) lands a hair under 1e-3 in f32: the decade tests allow for that
+/// (else "1000uV"), and a near-integer mantissa prints without decimals.
 fn eng(buf: &mut [u8; 24], v: f32, unit: &str) -> usize {
-    let (k, p) = if v.abs() >= 1e6 {
+    let a = v.abs() * 1.000_01;
+    let (k, p) = if a >= 1e6 {
         (1e-6, "M")
-    } else if v.abs() >= 1e3 {
+    } else if a >= 1e3 {
         (1e-3, "k")
-    } else if v.abs() >= 1.0 || v == 0.0 {
+    } else if a >= 1.0 || v == 0.0 {
         (1.0, "")
-    } else if v.abs() >= 1e-3 {
+    } else if a >= 1e-3 {
         (1e3, "m")
-    } else if v.abs() >= 1e-6 {
+    } else if a >= 1e-6 {
         (1e6, "u")
     } else {
         (1e9, "n")
     };
     let x = v * k;
-    let dec = if x.abs() >= 100.0 || (x - (x as i32) as f32).abs() < 1e-3 {
+    let xi = (x + if x < 0.0 { -0.5 } else { 0.5 }) as i32;
+    let dec = if x.abs() >= 100.0 || (x - xi as f32).abs() < 1e-3 {
         0
     } else if x.abs() >= 10.0 {
         1
@@ -1800,15 +1804,23 @@ pub fn scope_menu(tab: usize, sc: &scope::Scope, sel: &[u8], roll: bool, persist
         _ => {
             tab_btn(rect(16, MENU_Y as i16 + 40, 120, 34), "DC", !s.ac);
             tab_btn(rect(140, MENU_Y as i16 + 40, 120, 34), "AC", s.ac);
-            for (k, p) in ["x1", "x10", "x100"].iter().enumerate() {
-                let f = [1.0f32, 10.0, 100.0][k];
-                tab_btn(rect(16 + k as i16 * 124, MENU_Y as i16 + 80, 120, 34), p, s.probe == f);
+            // Probe x0.1 .. x1000 (stock list, UF-12): 7 + 6 buttons.
+            for (k, p) in scope::PROBE_NAMES.iter().enumerate() {
+                tab_btn(probe_btn(k), p, s.probe == scope::PROBES[k]);
             }
         }
     }
 }
 
+/// Probe button `k` (0..12) of the Settings tab: two rows of 7 / 6, 52 px
+/// wide at a 56 px pitch, under the DC / AC row (`scope_menu_hit` mirrors it).
+fn probe_btn(k: usize) -> sf::Rect {
+    let (row, col) = ((k / 7) as i16, (k % 7) as i16);
+    rect(16 + col * 56, MENU_Y as i16 + 80 + row * 38, 52, 34)
+}
+
 /// Scope settings window touch: Some((tab, item)) with item 255 = tab header.
+/// Settings tab items: 0 DC, 1 AC, 3 + k probe k (PROBES).
 pub fn scope_menu_hit(tab: usize, x: u16, y: u16) -> Option<(usize, usize)> {
     let (x, y) = (x as i16, y as i16);
     if !(13..414).contains(&x) || !(MENU_Y as i16..MENU_Y as i16 + 192).contains(&y) {
@@ -1826,6 +1838,16 @@ pub fn scope_menu_hit(tab: usize, x: u16, y: u16) -> Option<(usize, usize)> {
             if k < crate::scope_meas::ITEMS.len() { Some((0, k)) } else { None }
         }
         1 => Some((1, if x < 208 { 0 } else { 1 })),
+        3 => {
+            // Screen rows: DC / AC 68..101, probes 108..141 and 146..179.
+            let sy = y + (MENU_Y as i16 - 20);
+            if sy < 105 {
+                return Some((3, ((x - 16) / 124).clamp(0, 1) as usize));
+            }
+            let row = if sy < 144 { 0 } else { 1 };
+            let k = row * 7 + ((x - 16) / 56).clamp(0, 6) as usize;
+            if k < scope::PROBES.len() { Some((3, 3 + k)) } else { None }
+        }
         _ => {
             let row = if y < 96 { 0 } else { 1 };
             let col = ((x - 16) / 124).clamp(0, 2) as usize;
