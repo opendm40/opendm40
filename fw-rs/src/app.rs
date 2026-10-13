@@ -101,6 +101,7 @@ pub struct App {
     chart_unit: &'static str,
     chart_dec: u8,
     chart_dirty: bool,
+    chart_cache: ui::ChartCache,
 }
 
 fn backlight(pct: u8) {
@@ -206,6 +207,7 @@ impl App {
             chart_unit: "",
             chart_dec: 0,
             chart_dirty: false,
+            chart_cache: ui::ChartCache::new(),
         };
         crate::persist::init();
         if let Some(p) = crate::persist::load() {
@@ -326,6 +328,7 @@ impl App {
         if self.redraw {
             self.redraw = false;
             self.scope_prev = [(u16::MAX, 0); 401];
+            self.chart_cache.invalidate();
             self.draw_static();
             self.status_next = 0;
             self.chart_dirty = true;
@@ -406,11 +409,11 @@ impl App {
                 }
             }
         }
-        // Redraw the chart at most every 100 ms (it is ~30k pixels).
-        if self.chart_dirty && self.view == View::Dmm && now >= self.meas_next {
-            self.meas_next = now + 100;
+        // Redraw the chart for every new point (stock: 10/20/40 ms per point).
+        if self.chart_dirty && self.view == View::Dmm {
             self.chart_dirty = false;
             ui::chart(
+                &mut self.chart_cache,
                 &self.chart[..self.chart_n],
                 self.chart_dec,
                 self.chart_rate,

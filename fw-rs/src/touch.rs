@@ -175,8 +175,21 @@ pub struct Touch {
     pub chip: [u8; 4],
     /// Raw first 7 bytes of the last frame (for debugging).
     pub raw: [u8; 7],
+    /// Debug ring of the last 8 frames (7 bytes each) and its next index.
+    pub ring: [[u8; 7]; 8],
+    pub ring_i: u8,
     last: Event,
+    /// Debounce: a new state is accepted after two identical frames, or when
+    /// it has held for DEBOUNCE_MS without further frames (a single release
+    /// frame followed by silence).
+    pending: Option<(Event, u64)>,
+    /// Last time a screen point was reported: key reports during a touch
+    /// or right after it are the controller's own long-press gesture, not a
+    /// side key, and are dropped.
+    last_point: u64,
 }
+
+const DEBOUNCE_MS: u64 = 40;
 
 fn int_low() -> bool {
     (unsafe { r32(GPIOE + 0x10) } & (1 << INT)) == 0
@@ -224,12 +237,22 @@ impl Touch {
         if !ok {
             return None;
         }
-        Some(Touch { chip, raw: [0; 7], last: Event::default() })
+        Some(Touch { chip, raw: [0; 7], ring: [[0; 7]; 8], ring_i: 0, last: Event::default(), pending: None, last_point: 0 })
     }
 
-    /// Poll: reads a frame when INT is low. Returns the new state on a change.
-    pub fn poll(&mut self) -> Option<Event> {
+    /// Poll: reads a frame when INT is low. Returns the new (debounced) state
+    /// on a change.
+    pub fn poll(&mut self, now: u64) -> Option<Event> {
         if !int_low() {
+            if let Some((ev, t)) = self.pending {
+                if now.saturating_sub(t) >= DEBOUNCE_MS {
+                    self.pending = None;
+                    if ev != self.last {
+                        self.last = ev;
+                        return Some(ev);
+                    }
+                }
+            }
             return None;
         }
         let mut b = [0u8; 7];
@@ -237,6 +260,8 @@ impl Touch {
             return None;
         }
         self.raw = b;
+        self.ring[(self.ring_i & 7) as usize] = b;
+        self.ring_i = self.ring_i.wrapping_add(1);
         let n = b[5] & 7;
         let (pressed, key, p) = decode(&b);
         // Extra points are read (and dropped) so the controller sees the
@@ -248,6 +273,13 @@ impl Touch {
         write(&[0xD0, 0x00, 0xAB]);
 
         let mut ev = Event::default();
+        if pressed && !key {
+            self.last_point = now;
+        }
+        if pressed && key && (self.last.points > 0 || now.saturating_sub(self.last_point) < 300) {
+            // Long press on the screen reported as a key: ignore.
+            return None;
+        }
         if pressed {
             if key {
                 let code = match p.x {
@@ -262,11 +294,29 @@ impl Touch {
                 ev.p = p;
             }
         }
-        if ev != self.last {
-            self.last = ev;
-            Some(ev)
-        } else {
-            None
+        // Moving finger: accept position updates of the same contact at once.
+        if ev.points > 0 && self.last.points > 0 && ev.keys == self.last.keys {
+            self.pending = None;
+            if ev != self.last {
+                self.last = ev;
+                return Some(ev);
+            }
+            return None;
+        }
+        if ev == self.last {
+            self.pending = None;
+            return None;
+        }
+        match self.pending {
+            Some((p, _)) if p == ev => {
+                self.pending = None;
+                self.last = ev;
+                Some(ev)
+            }
+            _ => {
+                self.pending = Some((ev, now));
+                None
+            }
         }
     }
 }
