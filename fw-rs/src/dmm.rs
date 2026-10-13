@@ -66,6 +66,88 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
     0xa8, 0x00, 0x54,
 ];
 
+// ------------------------------------------------------- +1 digit, mohm
+//
+// AD1 (hy3131_v2_6.h): signed 24 bit, full scale 1.25 V / 0.9 = 1.3889 V at
+// 8388607 codes (0.166 uV/code); ohm is ratiometric, code = R / Rref * 0.9 *
+// 2^23. Every DC front end maps its 60000-count full scale to ~0.6 V at AD1, so
+// the codes per displayed count are nearly the same everywhere:
+//   function  range                        codes/count  per +1 digit  +1 digit
+//   DC V      r0..r2  6 / 60 / 600 V           60.4         6.0         yes
+//   DC V      r3      1000 V (10000 counts)    60.4         6.0         no (HV divider self-heating)
+//   DC mV     r1      600 mV                   60.4         6.0         yes
+//   DC mV     r0      60 mV (OP1 x10)          60.4         6.0         no (0.1 uV step: amp noise, EMF)
+//   DC A      r0, r1  6 A / 10 A (10 mohm)     60.4         6.0         no (0.1 uV across the shunt)
+//   DC mA     r0, r1  60 / 600 mA (0.5 ohm)    30.2         3.0         no
+//   DC uA     r0, r1  600 / 6000 uA (47.5 ohm) 28.7         2.9         no
+//   ohm       r0      60 ohm (Rref 0.1k)       75.5 (1 mohm) 7.5        no (already mohm)
+//   ohm       r1..r3  600 ohm .. 60 kohm       75.5         7.5         yes (r1: 600.000 ohm = mohm)
+//   ohm       r4, r5  600 kohm, 6 Mohm         75.5         7.5         no (hum / leakage)
+//   ohm       r6      60 Mohm (Rref 63 M)     119.8        12.0         no (hum / leakage)
+//   continuity 75.5, diode 60.4, AC (AD2/RMS), cap, Hz, temp: no.
+// A single conversion has only 6..7.5 codes per extra-digit step, so the
+// extra digit comes from a moving average of the raw codes at the slow OSR
+// (R22 = 0x17, OSR 32768, the stock's steady-state setting and already the
+// slowest AD1OSR code): the mean of N codes has 1/N code granularity (N = 8:
+// 48 levels per step, N = 16: 120) and the noise drops by sqrt(N). The window
+// slides, so the reading rate stays the stock one (~9.4/s at OSR 32768,
+// inferred from the users' ~10 readings/s; modulator ~SYSCLK/16); it restarts
+// on a step of more than ~2 counts of the 60000-count format, on any OSR / range
+// / mode change, and is not used in AC+DC. Noise floor: not measured yet.
+// Ohm r0 is the stock 60 ohm row (f10 row 0: OPS1 = 1, the OP1 x10 gain also
+// used by DC mV / A r0; the stock Rref constant 0.1 kohm = the 1 kohm r1
+// reference / 10) that the stock never selects: manual only here, always with
+// the default ohm variant (SFUVR = 2, the ~0.85 mA one; the "ON" variant gives
+// ~0.27 mA - community measurements on r1). Calibration slot 0x124[0] is the
+// factory default 1.005 on the dumped unit (r1..r6 are calibrated), and the
+// single offset 0x144 is the r1..r6 one: use REL, check the gain on hardware.
+
+/// Moving average of raw AD1 codes (|AD1| in ohm).
+struct Avg {
+    buf: [i32; AVG_MAX],
+    n: usize,
+    i: usize,
+    sum: i32,
+}
+
+const AVG_MAX: usize = 16;
+/// Readings with at least this many conversions averaged have the full +1
+/// digit resolution (the shortest window, see `avg_cfg`).
+pub const AVG_FULL: u8 = 8;
+
+impl Avg {
+    const fn new() -> Self {
+        Avg { buf: [0; AVG_MAX], n: 0, i: 0, sum: 0 }
+    }
+
+    fn reset(&mut self) {
+        self.n = 0;
+        self.i = 0;
+        self.sum = 0;
+    }
+
+    /// Add `x` to a window of `len` codes, restarting when `x` is more than
+    /// `thr` codes from the mean. Returns the mean (sum <= 16 * 2^23 fits i32;
+    /// the fraction is added separately to keep it exact in f32).
+    #[inline(never)]
+    fn push(&mut self, x: i32, len: usize, thr: i32) -> f32 {
+        let len = len.clamp(1, AVG_MAX);
+        if self.n > len || (self.n > 0 && (x - self.sum / self.n as i32).abs() > thr) {
+            self.reset();
+        }
+        if self.n == len {
+            self.sum -= self.buf[self.i];
+        } else {
+            self.n += 1;
+        }
+        self.buf[self.i] = x;
+        self.sum += x;
+        self.i = (self.i + 1) % len;
+        let n = self.n as i32;
+        (self.sum / n) as f32 + (self.sum % n) as f32 / n as f32
+    }
+}
+
 // ------------------------------------------------------------ temperature
 //
 // Sensors of the temperature function (mode 15). 0 = the stock type-K
@@ -153,17 +235,25 @@ impl Button {
 #[derive(Clone, Copy)]
 pub struct Val {
     pub v: f32,
+    /// Decimals of the 60000-count format (history, chart, BT, aux use this).
     pub dec: u8,
     pub unit: &'static str,
     pub ol: bool,
+    /// `v` resolves one more digit (averaged reading, see `avg_cfg`): the
+    /// main readout shows `dec + 1` decimals, the last one in a small font.
+    pub ext: bool,
 }
 
 impl Val {
     const fn new(v: f32, dec: u8, unit: &'static str) -> Self {
-        Val { v, dec, unit, ol: false }
+        Val { v, dec, unit, ol: false, ext: false }
     }
     const fn ol(dec: u8, unit: &'static str) -> Self {
-        Val { v: 0.0, dec, unit, ol: true }
+        Val { v: 0.0, dec, unit, ol: true, ext: false }
+    }
+    /// The readout with the extra digit (not for OL).
+    const fn with_ext(self, ext: bool) -> Self {
+        Val { ext: ext && !self.ol, ..self }
     }
 }
 
@@ -183,6 +273,9 @@ pub struct Reading {
     /// part; `mode` is then always the DC mode (1, 3, 7..9).
     pub acdc: bool,
     pub seq: u32,
+    /// Conversions in the moving average behind `main` / `si` (0 = not an
+    /// averaged range); `AVG_FULL` or more = full +1-digit resolution.
+    pub avg_n: u8,
 }
 
 impl Reading {
@@ -240,7 +333,7 @@ fn hypot(a: f32, b: f32) -> f32 {
 /// AC+DC part readout: "0L" when |part / full scale| > 1.04 (dmm_v2_6.h:231).
 fn part(x: f32, lim: f32, dec: u8, unit: &'static str) -> Val {
     // The value is kept with the OL flag: BT still sends it (bt_meas_v2_6.h:170).
-    Val { v: x, dec, unit, ol: x.abs() / lim > 1.04 }
+    Val { v: x, dec, unit, ol: x.abs() / lim > 1.04, ext: false }
 }
 
 fn u24(b: &[u8]) -> u32 {
@@ -362,6 +455,12 @@ pub struct Dmm {
     t_f: f32,
     t_res: f32,
     t_votes: u8,
+    /// +1 digit: moving average of the raw codes (`avg_cfg`); `avg_skip`
+    /// drops the first conversion after the OSR was switched to 0x17.
+    avg: Avg,
+    avg_skip: bool,
+    /// Conversions in the mean of the reading being produced (Reading::avg_n).
+    avg_n: u8,
 }
 
 impl Dmm {
@@ -425,6 +524,9 @@ impl Dmm {
             t_f: 0.0,
             t_res: 0.0,
             t_votes: 0,
+            avg: Avg::new(),
+            avg_skip: false,
+            avg_n: 0,
         }
     }
 
@@ -481,8 +583,9 @@ impl Dmm {
             5 | 6 => &CFG_F5_6[r.min(1)],
             7 => &CFG_F7[r.min(1)],
             8 | 9 => &CFG_F8_9[r.min(1)],
+            // r0 (60 ohm) always with the higher-current default variant.
             10 => {
-                if self.ohm_var == 1 { &CFG_F10_P8SET[r.min(6)] } else { &CFG_F10_P8CLR[r.min(7)] }
+                if self.ohm_var == 1 && r != 0 { &CFG_F10_P8SET[r.min(6)] } else { &CFG_F10_P8CLR[r.min(6)] }
             }
             11 => &CFG_F11[0],
             12 => &CFG_F12[0],
@@ -493,6 +596,7 @@ impl Dmm {
             _ if self.t_sensor != 0 => &CFG_F10_P8CLR[r.clamp(1, 6)],
             _ => &CFG_F15[0],
         };
+        self.avg.reset();
         hy::quiesce();
         let pa = if matches!(m, 0 | 1 | 4..=9) { 0 } else { 1 };
         if self.pa_now != Some(pa) {
@@ -760,7 +864,7 @@ impl Dmm {
             Button::Ohm => {
                 if same {
                     self.ohm_var ^= 1;
-                    let r = self.range.clamp(1, 6);
+                    let r = self.range.clamp(0, 6);
                     self.set(clk, 10, r, 300);
                 } else {
                     self.manual = false;
@@ -798,6 +902,8 @@ impl Dmm {
         }
         match self.mode {
             2 | 3 if self.v_auto == 1 => self.set(clk, self.mode - 2, 0, 350),
+            // The 60 ohm range is manual only: AUTO continues from 600 ohm.
+            10 if self.range == 0 => self.set(clk, 10, 1, 150),
             // Stock: m+5 == 1 (AC) -> 5, else (DC, AC+DC) -> 8.
             4..=9 if self.a_auto == 1 => {
                 if self.sub() == 1 {
@@ -817,7 +923,7 @@ impl Dmm {
 
     /// Manual range from the MF popup: V items 600 mV, 6, 60, 600, 1000 V;
     /// A items 600 uA, 6000 uA, 60 mA, 600 mA, 6 A, 10 A; ohm 1..6
-    /// (DM40C labels, COUNTS_MODEL).
+    /// (DM40C labels, COUNTS_MODEL), ohm 0 = the manual-only 60 ohm range.
     /// `None` = AUTO, `Some(255)` = AUTO+ (V/A only).
     pub fn set_range(&mut self, clk: &mut Clock, item: Option<u8>) {
         match (self.button(), item) {
@@ -853,8 +959,13 @@ impl Dmm {
                 self.manual = true;
                 self.set(clk, m, (i % 2) as i8, 650);
             }
-            (Button::Ohm, None) => self.manual = false,
-            (Button::Ohm, Some(i)) if (1..=6).contains(&i) => {
+            (Button::Ohm, None) => {
+                self.manual = false;
+                if self.mode == 10 && self.range == 0 {
+                    self.set(clk, 10, 1, 150);
+                }
+            }
+            (Button::Ohm, Some(i)) if i <= 6 => {
                 self.manual = true;
                 self.set(clk, 10, i as i8, 150);
             }
@@ -891,7 +1002,8 @@ impl Dmm {
                 sub << 6 | r << 3 | 1
             }
             10 => {
-                let r = if self.manual { self.range as u8 - 1 } else { 6 };
+                // BT has no 60 ohm range: report it as 600 ohm.
+                let r = if self.manual { self.range.max(1) as u8 - 1 } else { 6 };
                 self.ohm_var << 6 | r << 3 | 2
             }
             11 => 0x44,
@@ -1026,6 +1138,7 @@ impl Dmm {
         if now < self.deadline {
             return None;
         }
+        self.avg_n = 0;
         let r = match self.mode {
             0 | 2 | 4..=6 => self.poll_ac(clk, now),
             1 | 3 => self.poll_dcv(clk),
@@ -1045,12 +1158,25 @@ impl Dmm {
             r.auto_plus = (self.button() == Button::Volt && self.v_auto == 1)
                 || (self.button() == Button::Amp && self.a_auto == 1);
             r.acdc = self.acdc;
+            r.avg_n = self.avg_n;
             r
         })
     }
 
     fn reading(&self, main: Val, si: f32) -> Reading {
-        Reading { mode: self.mode, range: self.range, main, aux1: None, aux2: None, si, auto: true, auto_plus: false, acdc: false, seq: 0 }
+        Reading {
+            mode: self.mode,
+            range: self.range,
+            main,
+            aux1: None,
+            aux2: None,
+            si,
+            auto: true,
+            auto_plus: false,
+            acdc: false,
+            seq: 0,
+            avg_n: 0,
+        }
     }
 
     fn ad1(&mut self) -> Option<i32> {
@@ -1068,6 +1194,7 @@ impl Dmm {
             if self.r22 != 0x17 {
                 hy::write(0x22, &[0x17]);
                 self.r22 = 0x17;
+                self.avg_skip = true;
             }
         } else {
             hy::write(0x22, &[fast]);
@@ -1076,15 +1203,52 @@ impl Dmm {
         self.prev_ad1 = ad1;
     }
 
+    /// Averaged ranges (see the +1 digit table): (window, restart threshold
+    /// in codes = ~2 counts, extra digit shown).
+    fn avg_cfg(&self) -> Option<(usize, i32, bool)> {
+        if self.acdc {
+            return None;
+        }
+        match (self.mode, self.range) {
+            (1, 0..=2) | (3, 1) => Some((8, 120, true)),
+            (10, 0) => Some((16, 150, false)),
+            (10, 1..=3) => Some((16, 150, true)),
+            _ => None,
+        }
+    }
+
+    /// Code for the value formula: the moving average in averaged ranges
+    /// (restarted by a fast-OSR conversion), else the raw code. Also returns
+    /// whether the extra digit is shown.
+    #[inline(never)]
+    fn avg_code(&mut self, code: i32, slow: bool) -> (f32, bool) {
+        match self.avg_cfg() {
+            Some((n, thr, ext)) => {
+                if !slow {
+                    self.avg.reset();
+                }
+                let mean = self.avg.push(code, n, thr);
+                self.avg_n = self.avg.n as u8;
+                (mean, ext)
+            }
+            None => (code as f32, false),
+        }
+    }
+
     fn poll_dcv(&mut self, clk: &mut Clock) -> Option<Reading> {
         let ad1 = self.ad1()?;
+        // This conversion ran at OSR 32768 (and not the first one after the
+        // switch, which `osr` flags for the next reading).
+        let slow = self.r22 == 0x17 && !self.avg_skip;
+        self.avg_skip = false;
         let r = self.range as usize;
         let (f, ov) = (self.factor(), self.over());
         let m = self.mode;
         let before = (m, self.range);
-        let (x, lim, dec, unit, si_k) = if m == 1 {
+        let (x, lim, dec, unit, si_k, ext) = if m == 1 {
             self.osr(ad1, 0x206, 0x15);
-            let mut v = ad1 as f32 * K_ACV[r] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * r as u32, 1.0)
+            let (code, ext) = self.avg_code(ad1, slow);
+            let mut v = code * K_ACV[r] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * r as u32, 1.0)
                 - cal(0x14 + 4 * r as u32, 0.0);
             if v < 0.0 {
                 v *= DCV_NEGK[r];
@@ -1092,12 +1256,13 @@ impl Dmm {
             if r == 0 && v.abs() / 20000.0 > 3e-5 {
                 v += 1e-4 - v.abs() / 20000.0;
             }
-            (v, (f * DEC4[r]).min(1000.0), 4 - r as u8, "V", 1.0)
+            (v, (f * DEC4[r]).min(1000.0), 4 - r as u8, "V", 1.0, ext)
         } else {
             self.osr(ad1, 0xE22 - 0x960 * r as i32, 0x15);
-            let mv = ad1 as f32 * (1.25 / 0.9) / MV_DIV[r] / (AD1_DIV / 1000.0) * cal(0x24 + 4 * r as u32, 1.0)
+            let (code, ext) = self.avg_code(ad1, slow);
+            let mv = code * (1.25 / 0.9) / MV_DIV[r] / (AD1_DIV / 1000.0) * cal(0x24 + 4 * r as u32, 1.0)
                 - cal(0x2C + 4 * r as u32, 0.0);
-            (mv, f * [10.0, 100.0][r], 3 - r as u8, "mV", 1e-3)
+            (mv, f * [10.0, 100.0][r], 3 - r as u8, "mV", 1e-3, ext)
         };
         // Autorange magnitude S+0x60: |DC|, AC+DC: hypot(AC raw, DC).
         let mag = if self.acdc { hypot(self.ac_raw, x) } else { x.abs() };
@@ -1121,7 +1286,7 @@ impl Dmm {
                 }
             }
         }
-        self.dc_out(clk, x, lim, dec, unit, si_k, before)
+        self.dc_out(clk, x, lim, dec, unit, si_k, before, ext)
     }
 
     /// End of a DC reading (modes 1, 3, 7..9): plain DC, or the DC phase of
@@ -1129,11 +1294,24 @@ impl Dmm {
     /// aux1/aux2 = AC/DC parts; after S+10 readings back to the AC mode
     /// (DCV 800 ms S+10 = 3, DCmV 800 ms 2, DCA 900 ms 2). A range / unit
     /// change in AC+DC gives no value this time (stock: OL, m+0xd8 = 0).
-    fn dc_out(&mut self, clk: &mut Clock, x: f32, lim: f32, dec: u8, unit: &'static str, si_k: f32, before: (u8, i8)) -> Option<Reading> {
+    /// `ext`: the value is averaged and shows the extra digit (not in AC+DC).
+    #[allow(clippy::too_many_arguments)]
+    fn dc_out(
+        &mut self,
+        clk: &mut Clock,
+        x: f32,
+        lim: f32,
+        dec: u8,
+        unit: &'static str,
+        si_k: f32,
+        before: (u8, i8),
+        ext: bool,
+    ) -> Option<Reading> {
         let ov = self.over();
         if !self.acdc {
             let ol = x.abs() / lim > ov;
-            return Some(self.reading(if ol { Val::ol(dec, unit) } else { Val::new(x, dec, unit) }, x * si_k));
+            let v = if ol { Val::ol(dec, unit) } else { Val::new(x, dec, unit).with_ext(ext) };
+            return Some(self.reading(v, x * si_k));
         }
         if (self.mode, self.range) != before {
             return None;
@@ -1197,7 +1375,7 @@ impl Dmm {
             1 => ("mA", 3 - r as u8, 1e-3),
             _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
-        let mut rd = self.dc_out(clk, a, lim, dec, unit, si_k, before)?;
+        let mut rd = self.dc_out(clk, a, lim, dec, unit, si_k, before, false)?;
         if m == 8 && !self.acdc {
             // 4-20 mA loop percentage.
             let p = (a.abs() - 4.0) * 6.25;
@@ -1355,16 +1533,19 @@ impl Dmm {
 
     fn poll_ohm(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
         let ad1 = self.ad1()?;
-        let r = self.range.clamp(1, 6) as usize;
-        let mut kohm = (ad1.unsigned_abs() as f32) * cal(0x124 + 4 * r as u32, 1.0) * OHM_RREF[r] / 0.9 / AD1_DIV
-            - cal(0x144, 0.0);
+        // r0 (60 ohm) only by a manual choice (set_range); autorange r1..r6.
+        let r = self.range.clamp(0, 6) as usize;
+        let r22 = hy::read1(0x22);
+        let slow = r22 == 0x17 && !self.avg_skip;
+        self.avg_skip = false;
+        let (code, ext) = self.avg_code(ad1.unsigned_abs() as i32, slow);
+        let mut kohm = code * cal(0x124 + 4 * r as u32, 1.0) * OHM_RREF[r] / 0.9 / AD1_DIV - cal(0x144, 0.0);
         if kohm < 0.0 {
             kohm = 0.0;
         }
         let lim = self.factor() * OHM_DEC[r];
         let ov = self.over();
         let ol = kohm / lim > ov;
-        let r22 = hy::read1(0x22);
         if ol {
             if r22 != 0x13 {
                 hy::write(0x22, &[0x13]);
@@ -1372,6 +1553,7 @@ impl Dmm {
         } else if r22 != 0x17 {
             hy::write(0x22, &[0x17]);
             self.deadline = now + 150;
+            self.avg_skip = true;
         }
         if !self.manual {
             let q = ov * lim / (kohm + 1e-5);
@@ -1408,12 +1590,14 @@ impl Dmm {
                 return None;
             }
         }
+        // Stock formats (r < 2: x1000 ohm, fmt r + 1): r0 60.000 ohm.
         let (v, dec, unit) = match r {
-            1 => (kohm * 1000.0, 2, "\u{3a9}"),
+            0 | 1 => (kohm * 1000.0, 3 - r as u8, "\u{3a9}"),
             2..=4 => (kohm, 6 - r as u8, "k\u{3a9}"),
             _ => (kohm * 1e-3, 9 - r as u8, "M\u{3a9}"),
         };
-        Some(self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, kohm * 1e3))
+        let val = if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit).with_ext(ext) };
+        Some(self.reading(val, kohm * 1e3))
     }
 
     fn poll_cont(&mut self) -> Option<Reading> {

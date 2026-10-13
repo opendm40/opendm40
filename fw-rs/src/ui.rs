@@ -28,6 +28,9 @@ pub const BAR_H: u16 = 34;
 /// room (standalone DMM keeps the full `BAR_H`).
 pub const BAR_H_C: u16 = 22;
 const VALUE_X1: u16 = 396; // right edge of the last digit
+/// Extra-digit cell of the main readout (x, width); see DmmView::reading.
+const XT_X: u16 = 375;
+const XT_W: u16 = 25;
 const VALUE_BASE: u16 = 146;
 const UNIT_X: u16 = 404;
 const UNIT_BASE: u16 = 144;
@@ -127,6 +130,15 @@ const CELLS: [[u8; 7]; 5] = [
     [40, 60, 60, 60, 60, 20, 60],
     [40, 52, 52, 52, 60, 60, 40],
 ];
+/// Main-readout cells with the extra digit (formats 0..3 only, never OL):
+/// sign 32, point 18, digits 57 (F78 digits are <= 56 px wide) = 335 px,
+/// leaving 375..400 for the small digit.
+const CELLS_X: [[u8; 7]; 4] = [
+    [32, 57, 18, 57, 57, 57, 57],
+    [32, 57, 57, 18, 57, 57, 57],
+    [32, 57, 57, 57, 18, 57, 57],
+    [32, 57, 57, 57, 57, 18, 57],
+];
 /// Compact main-readout cells for View::DmmScope: the LETTERS font (30 px,
 /// digit advance 18) instead of F78 (78 px), roughly half height, so each cell
 /// is sized to its glyph. Every row totals 152 px (the 152 px value rect) vs 360.
@@ -151,13 +163,23 @@ fn mode_glyph(mode: u8, acdc: bool) -> &'static str {
 }
 
 /// "%7.<dec>f" (right aligned in 7 characters), or the stock "   0L  ".
-fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val) -> (&'a str, usize) {
+/// With `ext` (Val::ext, not OL): the value is formatted with dec + 1
+/// decimals and split: the 7-character main part plus the last digit, which
+/// is drawn small after it (so the main digits are never rounded up past it).
+fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val, ext: bool) -> (&'a str, usize, Option<u8>) {
     if v.ol {
         buf[..7].copy_from_slice(b"   0L  ");
-        return (core::str::from_utf8(&buf[..7]).unwrap_or(""), 4);
+        return (core::str::from_utf8(&buf[..7]).unwrap_or(""), 4, None);
     }
+    let ext = ext && v.ext && v.dec >= 1;
     let mut t = [0u8; 16];
-    let s = crate::dmm::format(&mut t, v.v, v.dec);
+    let full = crate::dmm::format(&mut t, v.v, v.dec + ext as u8);
+    let (s, x) = if ext {
+        let l = full.len();
+        (&full[..l - 1], Some(full.as_bytes()[l - 1]))
+    } else {
+        (full, None)
+    };
     let n = s.len().min(7);
     let pad = 7 - n;
     buf[..pad].fill(b' ');
@@ -168,7 +190,7 @@ fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val) -> (&'a str, usize) {
         2 => 2,
         _ => 3,
     };
-    (core::str::from_utf8(&buf[..7]).unwrap_or(""), f)
+    (core::str::from_utf8(&buf[..7]).unwrap_or(""), f, x)
 }
 
 pub struct DmmView {
@@ -177,6 +199,8 @@ pub struct DmmView {
     last_txt: [u8; 8],
     last_fmt: usize,
     last_compact: bool,
+    /// Extra (small) digit as last drawn, 0 = none.
+    last_ext: u8,
     last_unit: &'static str,
     last_mode: u8,
     last_top: Option<(bool, bool, bool)>,
@@ -223,6 +247,7 @@ impl DmmView {
             last_txt: [0; 8],
             last_fmt: 255,
             last_compact: false,
+            last_ext: 0,
             last_unit: "",
             last_mode: 255,
             last_top: None,
@@ -260,17 +285,21 @@ impl DmmView {
 
     pub fn reading(&mut self, r: &Reading, hold: bool, rel: bool, compact: bool) {
         let mut buf = [0u8; 16];
-        let (s, f) = fmt7(&mut buf, &r.main);
+        // The compact view has no room for the extra digit.
+        let (s, f, ext) = fmt7(&mut buf, &r.main, !compact);
         let mut ub = [0u8; 16];
         let unit = sf::unit_text(r.main.unit, &mut ub);
         // Only the changed digits are redrawn (cell layout unchanged).
-        let same_layout = self.last_fmt == f && self.last_compact == compact;
+        let same_layout =
+            self.last_fmt == f && self.last_compact == compact && (self.last_ext != 0) == ext.is_some();
         let prev_txt = self.last_txt;
         let prev = if same_layout { core::str::from_utf8(&prev_txt[..7]).unwrap_or("") } else { "" };
         let n = s.len().min(7);
         self.last_txt[..n].copy_from_slice(&s.as_bytes()[..n]);
         self.last_fmt = f;
         self.last_compact = compact;
+        let last_ext = self.last_ext;
+        self.last_ext = ext.unwrap_or(0);
         let mkey = r.mode | (r.acdc as u8) << 7;
         if compact {
             // Combined view: half-height value (LETTERS, 30 px) on one line,
@@ -284,7 +313,25 @@ impl DmmView {
                 sf::label(sf::MODE, rect(266, 23, 32, 32), mode_glyph(r.mode, r.acdc), VALUE_RED, BG, 1, 0);
             }
         } else {
-            sf::cells_diff(sf::F78, rect(40, 68, 360, 80), s, prev, &CELLS[f], VALUE_RED, BG);
+            // Extra digit: the main cells narrow to CELLS_X (40..375) and the
+            // digit goes in LETTERS (22 px) at 375..400, bottom-aligned with
+            // the F78 digits (rows 124..145 vs 69..146), left of the unit box
+            // (x >= 401). x < 40 stays free for the HV warning glyph.
+            let (w, cells) = match ext {
+                Some(_) => (XT_X - 40, &CELLS_X[f & 3]),
+                None => (360, &CELLS[f]),
+            };
+            if ext.is_some() && !same_layout {
+                lcd::fill_rect(XT_X, 68, XT_W, 50, BG);
+            }
+            sf::cells_diff(sf::F78, rect(40, 68, w as i16, 80), s, prev, cells, VALUE_RED, BG);
+            if let Some(e) = ext {
+                if !same_layout || last_ext != e {
+                    let mut b = [0u8; 4];
+                    let d = (e as char).encode_utf8(&mut b);
+                    sf::label(sf::LETTERS, rect(XT_X as i16, 118, XT_W as i16, 34), d, VALUE_RED, BG, 7, 0);
+                }
+            }
             if self.last_unit != r.main.unit || self.last_mode != mkey {
                 self.last_unit = r.main.unit;
                 self.last_mode = mkey;
@@ -366,9 +413,11 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
             ("600uA", Some(0)), ("6000uA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
             ("6A", Some(4)), ("10A", Some(5)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
+        // 60 ohm: the stock-table r0 row (OP1 x10, mohm resolution), manual
+        // only (dmm.rs +1 digit notes).
         Button::Ohm => &[
-            ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)), ("600K\u{3a9}", Some(4)),
-            ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
+            ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)),
+            ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
         ],
         _ => &[("AUTO", None)],
     }
