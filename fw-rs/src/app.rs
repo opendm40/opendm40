@@ -62,7 +62,7 @@ struct Drag {
 
 /// Menu-like pages (not instrument views): no view swipe, MENU steps back.
 fn is_page(v: View) -> bool {
-    matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device | View::Limits | View::Gallery)
+    matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device | View::Limits | View::Gallery | View::Help)
 }
 
 /// Unit text the keypad's TEXT22 font can show (no deg / micro glyphs).
@@ -94,6 +94,8 @@ pub struct App {
     start_page: usize,
     combo: View,
     last_input: u64,
+    /// Help page shown (UF-29, ui::HELP index).
+    help_page: usize,
     /// Idle power-off warnings given since the last input (UF-28).
     off_warned: u64,
     dimmed: bool,
@@ -365,6 +367,7 @@ impl App {
             pd6_raw: (false, 0, false),
             beep_until: 0,
             off_warned: 0,
+            help_page: 0,
             last_raw: None,
             redraw: true,
             meas_next: 0,
@@ -563,6 +566,7 @@ impl App {
                     core::str::from_utf8(&vb[..n]).unwrap_or(""),
                     crate::meter::SMOOTH_NAMES[self.meter.smoothing() as usize],
                     "", // Device row: opens the About page, no inline value
+                    "", // Help row: opens the help pages (UF-29)
                 ];
                 ui::settings(1, &vals);
             }
@@ -604,6 +608,7 @@ impl App {
                 ui::settings(0, &vals);
             }
             View::Gallery => crate::gallery::get().draw(),
+            View::Help => ui::help_page(self.help_page),
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
                 // / version lines. Only the fields fw-rs can actually source are
@@ -1970,7 +1975,7 @@ impl App {
                 // was added). Range / ScopeMenu / Keypad still pop to the view
                 // they were opened from.
                 let v = match self.view {
-                    View::Device => View::Settings,
+                    View::Device | View::Help => View::Settings,
                     View::Settings if self.set_page == 1 => {
                         self.set_page = 0;
                         View::Settings
@@ -2067,6 +2072,16 @@ impl App {
                 // Any tap dismisses back to Settings (its parent), the same
                 // step the MENU key takes from Device (see key()).
                 self.show(View::Settings, clk);
+            }
+            View::Help => {
+                // Title bar: back to Settings 2/2 (as MENU); elsewhere: the
+                // next help page (wraps).
+                if ui::title_back_hit(y) {
+                    self.show(View::Settings, clk);
+                } else {
+                    self.help_page = (self.help_page + 1) % ui::HELP.len();
+                    self.redraw = true;
+                }
             }
             View::Keypad => {
                 let freq = self.kp_target == 0;
@@ -2368,6 +2383,11 @@ impl App {
                     }
                     Some(2) => {
                         self.show(View::Device, clk);
+                        return;
+                    }
+                    Some(3) => {
+                        self.help_page = 0;
+                        self.show(View::Help, clk);
                         return;
                     }
                     Some(_) | None => return,

@@ -62,6 +62,8 @@ pub enum View {
     Limits,
     /// Screenshot + log gallery (FR-16, gallery.rs).
     Gallery,
+    /// On-device help (UF-29), Settings 2/2 -> Help: HELP pages.
+    Help,
 }
 
 impl View {
@@ -2193,7 +2195,7 @@ pub const SETTINGS: [&str; 9] = [
     "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
     "Scope drag", "More",
 ];
-pub const SETTINGS2: [&str; 3] = ["DMM rate", "Smoothing", "Device"];
+pub const SETTINGS2: [&str; 4] = ["DMM rate", "Smoothing", "Device", "Help"];
 
 /// Settings/menu-page title bar: 40 px, bg 0x2966 (stock gui_v2_6.h:101).
 pub const PAGE_BAR_H: i16 = 40;
@@ -2283,6 +2285,107 @@ pub fn view_name(v: View) -> &'static str {
         View::Device => "Device",
         View::Limits => "Hold & Limits",
         View::Gallery => "Gallery",
+        View::Help => "Help",
+    }
+}
+
+/// On-device help (UF-29: owners have no manual; gestures, resets and limits
+/// were undiscoverable). Pages of (topic, what it does) rows in the settings
+/// list style; a tap below the title bar turns the page, the title bar or
+/// MENU goes back. Only behaviour of this firmware (app.rs, gesture.rs) and
+/// limits the repo documents (genplan.rs, docs/user-feedback.md section
+/// 6.3 / 7 / 3) - no input ratings that are not sourced.
+pub const HELP: [(&str, [(&str, &str); 8]); 4] = [
+    (
+        "Gestures",
+        [
+            ("Swipe left / right", "Next / previous view"),
+            ("Swipe down (DMM)", "CSV record on / off"),
+            ("3 fingers down", "Screenshot to disk"),
+            ("2 fingers down", "Power off (confirm)"),
+            ("Scope: drag up/down", "Move the trace"),
+            ("Scope: right edge", "Drag trigger level"),
+            ("Scope: drag sideways", "Trigger position"),
+            ("Scope drag setting", "Direct or hold first"),
+        ],
+    ),
+    (
+        "Side keys",
+        [
+            ("MENU", "Main menu / back"),
+            ("RUN", "HOLD; scope run/stop"),
+            ("RUN held 1 s (DMM)", "AutoHold on / off"),
+            ("AUTO", "Autorange / auto-set"),
+            ("MF", "Range / scope menu"),
+            ("Power key held 1.5 s", "Power off"),
+            ("Power key twice", "Touch lock on / off"),
+            ("Power key, locked", "Next DMM sub-mode"),
+        ],
+    ),
+    (
+        "Multimeter",
+        [
+            ("Tap history row", "Store the reading"),
+            ("Hold history row", "Clear the history"),
+            ("Tap MIN/MAX column", "Session on / off"),
+            ("Hold MIN/MAX column", "Reset MIN/MAX/AVG"),
+            ("Tap REL", "Zero on / off"),
+            ("Tap rate chip", "SLOW / MED / FAST"),
+            ("Tap a function again", "Next sub-mode"),
+            ("Hold meter strip", "Full DMM page"),
+        ],
+    ),
+    (
+        "Limits",
+        [
+            ("AUTO on volts", "Starts on mV: AUTO+"),
+            ("Scope bandwidth", "Flat to about 3 MHz"),
+            ("Gen sine/tri/ramp", "Up to 50 kHz"),
+            ("Gen square", "Up to 10 MHz"),
+            ("Gen amplitude", "0 to 3 Vpp"),
+            ("Gen output", "Never apply voltage"),
+            ("Supplied TC probe", "Rated to 300 C"),
+            ("Key/alert volume", "Keys and alerts"),
+        ],
+    ),
+];
+
+/// Help page `page` (0..HELP.len()): title "Help n/N: topic", the rows as
+/// the settings list (wider topic column: HELP_COL), the last row says
+/// what a tap does.
+pub const HELP_COL: i16 = 228;
+pub fn help_page(page: usize) {
+    let (topic, rows) = &HELP[page % HELP.len()];
+    let mut t = [0u8; 40];
+    let mut n = 0;
+    let mut nb = [0u8; 4];
+    let mut put = |p: &str| {
+        let k = p.len().min(40 - n);
+        t[n..n + k].copy_from_slice(&p.as_bytes()[..k]);
+        n += k;
+    };
+    let digit = |b: &mut [u8; 4], d: usize| -> usize {
+        b[0] = b'0' + d as u8;
+        1
+    };
+    put("Help ");
+    let k = digit(&mut nb, page % HELP.len() + 1);
+    put(core::str::from_utf8(&nb[..k]).unwrap_or(""));
+    put("/");
+    let k = digit(&mut nb, HELP.len());
+    put(core::str::from_utf8(&nb[..k]).unwrap_or(""));
+    put(": ");
+    put(topic);
+    page_title(core::str::from_utf8(&t[..n]).unwrap_or("Help"));
+    lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
+    let next = HELP[(page + 1) % HELP.len()].0;
+    let last = ("Tap: next page", next);
+    for (i, (name, val)) in rows.iter().chain(core::iter::once(&last)).enumerate().take(SET_ROWS) {
+        let r = set_row(i);
+        sf::rbox(r, 6, M_TILE, M_BG);
+        let fg = if i + 1 == SET_ROWS { M_ACCENT } else { STATUS_FG };
+        sf::glyphs(sf::TEXT22, rect(r.x + 12, r.y, HELP_COL, r.h), name, fg, M_TILE, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(r.x + 12 + HELP_COL, r.y, r.w - 15 - HELP_COL, r.h), val, M_ACCENT, M_TILE, 1, 0);
     }
 }
 
