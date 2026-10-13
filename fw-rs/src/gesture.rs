@@ -9,9 +9,13 @@
 //!   vertical if |dy| >= 1.5 |dx|; a diagonal start waits until LOCK_MAX and
 //!   then takes the larger component. The axis is kept until release; no
 //!   `Drag` is sent before it is known. Consumers move only along it.
-//! * HOLD_TO_DRAG (off by default, flip the const below to try it): a drag
-//!   must first be held still for HOLD_MS (`Grab` is sent then, the app
-//!   beeps); a finger that moves earlier never drags (it can still swipe).
+//! * Hold-to-grab (runtime: `set_grab_ms`, Settings "Scope drag", DBG:GRAB;
+//!   0 = direct drag, the default): a drag must first be held within
+//!   GRAB_SLOP for the grab time (`Grab` is sent then, the app beeps); a
+//!   finger that moves earlier never drags (it can still swipe). The long
+//!   press then needs LONG_HOLD_MS.
+//! * A captured touch ends with `Up` (its release is never a tap / swipe),
+//!   so the app can close a drag (gesture log, DBG:GEST?).
 //!   A swipe needs >= SWIPE_MIN px within SWIPE_MAX_MS and a dominant axis
 //!   (the travel along it more than twice the travel across). A touch the app
 //!   captured (`capture()`, called when it took the `Down`/`Drag`, e.g. a drag
@@ -33,6 +37,8 @@
 //! The controller only reports points; the stock firmware has no one-finger
 //! gestures.
 
+use core::sync::atomic::{AtomicU16, Ordering};
+
 use crate::touch::{Event, Point, MAX_POINTS};
 
 /// Minimum travel for a swipe, pixels.
@@ -46,11 +52,24 @@ const SLOP: i32 = 15;
 /// A drag whose start is diagonal (neither component 1.5x the other) locks
 /// to its larger component once it is this far from the touch-down, pixels.
 const LOCK_MAX: i32 = 2 * SLOP;
-/// Press-and-hold-then-drag mode (owner experiment): `false` = drag at once
-/// (default), `true` = hold still HOLD_MS first. One-line toggle.
-pub const HOLD_TO_DRAG: bool = false;
-/// Hold time that grabs in HOLD_TO_DRAG mode, ms.
-const HOLD_MS: u64 = 300;
+/// Press-and-hold-then-drag (owner A/B experiment, docs/combined-view-design.md
+/// §6.2): hold time before a drag is accepted, ms; 0 = direct drag (default).
+static GRAB_MS: AtomicU16 = AtomicU16::new(0);
+/// Grab time the Settings toggle switches to.
+pub const GRAB_DEFAULT_MS: u16 = 300;
+/// Hold-to-grab: the finger must stay within this many px until the grab.
+const GRAB_SLOP: i32 = 8;
+/// Long press while hold-to-grab is on (after any grab), ms.
+const LONG_HOLD_MS: u64 = 1200;
+
+/// Hold-to-grab time in ms, 0 = direct drag.
+pub fn grab_ms() -> u16 {
+    GRAB_MS.load(Ordering::Relaxed)
+}
+
+pub fn set_grab_ms(ms: u16) {
+    GRAB_MS.store(ms.min(5000), Ordering::Relaxed);
+}
 /// Minimum downward centroid travel of an n-finger swipe, pixels (index = n;
 /// 0 = not a gesture).
 const MULTI_MIN: [i32; MAX_POINTS + 1] = [0, 0, 60, 30, 0, 0];
@@ -75,8 +94,11 @@ pub enum Gesture {
     /// Finger moved while down (start, current, locked axis). Move only
     /// along the axis.
     Drag(Point, Point, Axis),
-    /// HOLD_TO_DRAG only: the finger was held still HOLD_MS, a drag may follow.
+    /// Hold-to-grab only: the finger was held still for the grab time, a drag
+    /// may follow.
     Grab(Point),
+    /// Release of a captured touch (the app owned it: no tap / swipe).
+    Up(Point),
     SwipeLeft,
     SwipeRight,
     SwipeUp,
@@ -113,8 +135,10 @@ pub struct Tracker {
     long_sent: bool,
     /// Drag axis, decided once past SLOP.
     axis: Option<Axis>,
-    /// HOLD_TO_DRAG: held still long enough, drags are allowed.
+    /// Hold-to-grab: held still long enough, drags are allowed.
     grabbed: bool,
+    /// Hold-to-grab: moved past GRAB_SLOP before the grab (never drags).
+    early: bool,
     /// The app owns this touch (no swipe / tap on release).
     captured: bool,
     /// Set once the touch had two or more fingers.
@@ -132,6 +156,7 @@ impl Tracker {
             long_sent: false,
             axis: None,
             grabbed: false,
+            early: false,
             captured: false,
             multi: None,
             keys: 0,
@@ -199,23 +224,26 @@ impl Tracker {
                 self.long_sent = false;
                 self.axis = None;
                 self.grabbed = false;
+                self.early = false;
                 self.captured = false;
                 Some(Gesture::Down(p))
             }
-            Some((p0, t0)) => {
+            Some((p0, _)) => {
                 self.last = p;
-                let was_moved = self.moved;
                 if dist(p0, p) > SLOP {
                     self.moved = true;
                 }
+                let hold = grab_ms();
+                if hold != 0 && !self.grabbed && dist(p0, p) > GRAB_SLOP {
+                    self.early = true;
+                }
                 // The controller reports jitter as moves, so tick() may not run
                 // while the finger rests: check the hold here too.
-                if HOLD_TO_DRAG && !was_moved && !self.grabbed && now.saturating_sub(t0) >= HOLD_MS {
-                    self.grabbed = true;
-                    return Some(Gesture::Grab(p0));
+                if let Some(g) = self.grab(now) {
+                    return Some(g);
                 }
-                // HOLD_TO_DRAG: moving before the grab never drags.
-                if !self.moved || (HOLD_TO_DRAG && !self.grabbed) {
+                // Hold-to-grab: moving before the grab never drags.
+                if !self.moved || (hold != 0 && !self.grabbed) {
                     return None;
                 }
                 if self.axis.is_none() {
@@ -232,7 +260,9 @@ impl Tracker {
         let dx = p1.x as i32 - p0.x as i32;
         let dy = p1.y as i32 - p0.y as i32;
         let dt = now.saturating_sub(t0);
-        if self.long_sent || self.captured {
+        if self.captured {
+            Some(Gesture::Up(p1))
+        } else if self.long_sent {
             None
         } else if dt <= SWIPE_MAX_MS && (dx.abs() >= SWIPE_MIN || dy.abs() >= SWIPE_MIN) {
             if dx.abs() > 2 * dy.abs() {
@@ -252,13 +282,25 @@ impl Tracker {
     /// Call periodically: reports a long press while the finger is still down.
     pub fn tick(&mut self, now: u64) -> Option<Gesture> {
         let (p0, t0) = self.down?;
-        if HOLD_TO_DRAG && !self.moved && !self.grabbed && now.saturating_sub(t0) >= HOLD_MS {
-            self.grabbed = true;
-            return Some(Gesture::Grab(p0));
+        if let Some(g) = self.grab(now) {
+            return Some(g);
         }
-        if !self.moved && !self.long_sent && now.saturating_sub(t0) >= LONG_MS {
+        let long = if grab_ms() != 0 { LONG_HOLD_MS } else { LONG_MS };
+        if !self.moved && !self.long_sent && now.saturating_sub(t0) >= long {
             self.long_sent = true;
             return Some(Gesture::LongPress(p0));
+        }
+        None
+    }
+
+    /// Hold-to-grab: `Grab` once the finger stayed within GRAB_SLOP for the
+    /// grab time.
+    fn grab(&mut self, now: u64) -> Option<Gesture> {
+        let (p0, t0) = self.down?;
+        let hold = grab_ms() as u64;
+        if hold != 0 && !self.early && !self.grabbed && now.saturating_sub(t0) >= hold {
+            self.grabbed = true;
+            return Some(Gesture::Grab(p0));
         }
         None
     }
@@ -357,4 +399,65 @@ fn centroid(pts: &[Point]) -> (i32, i32) {
 
 fn dist(a: Point, b: Point) -> i32 {
     (a.x as i32 - b.x as i32).abs().max((a.y as i32 - b.y as i32).abs())
+}
+
+/// What a one-finger drag in the scope graph moves (docs/combined-view-design.md
+/// §6.1 zone table), decided once the drag's axis is locked.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// Trigger level (vertical drag in the right band / near the level line).
+    Level,
+    /// Trigger position, or the stored record's pan while stopped.
+    TrigPos,
+    /// Vertical position of the trace (the trigger row follows it).
+    Offset,
+    /// Vertical cursor line k (horizontal drag near it).
+    CurX(u8),
+    /// Horizontal cursor line k (vertical drag near it).
+    CurY(u8),
+}
+
+impl Target {
+    /// Code for the gesture log (DBG:GEST?): 1 level, 2 trigger position,
+    /// 3 offset, 4 / 5 X / Y cursor (+ 10 for line b).
+    pub fn code(self) -> u8 {
+        match self {
+            Target::Level => 1,
+            Target::TrigPos => 2,
+            Target::Offset => 3,
+            Target::CurX(k) => 4 + 10 * k,
+            Target::CurY(k) => 5 + 10 * k,
+        }
+    }
+}
+
+/// Columns of the right trigger band (direct mode): the last 40 graph columns.
+pub const TRIG_BAND: i32 = 40;
+
+/// The zone table. (gx, gy): touch-down relative to the graph's top-left
+/// frame pixel (gx 0..400); `hold`: hold-to-grab mode, which grabs by
+/// proximity (the level line anywhere along it, cursors within 24 px)
+/// instead of the right band; `level_y`: pixel row of the trigger level;
+/// `cx` / `cy`: cursor columns / pixel rows when those cursors are on.
+/// Direct mode: right band vertical = level, a vertical drag within 20 px of
+/// a horizontal cursor moves it, a horizontal drag within 20 px of a vertical
+/// cursor moves it, otherwise vertical = offset, horizontal = trigger
+/// position.
+pub fn target(gx: i32, gy: i32, axis: Axis, hold: bool, level_y: i32, cx: Option<[i32; 2]>, cy: Option<[i32; 2]>) -> Target {
+    let reach = if hold { 24 } else { 20 };
+    let near = |c: Option<[i32; 2]>, v: i32| -> Option<u8> {
+        let c = c?;
+        let (d0, d1) = ((c[0] - v).abs(), (c[1] - v).abs());
+        if d0.min(d1) > reach {
+            None
+        } else {
+            Some((d1 < d0) as u8)
+        }
+    };
+    let band = if hold { (gy - level_y).abs() <= reach } else { gx >= 400 - TRIG_BAND };
+    match axis {
+        Axis::V if band => Target::Level,
+        Axis::V => near(cy, gy).map_or(Target::Offset, Target::CurY),
+        Axis::H => near(cx, gx).map_or(Target::TrigPos, Target::CurX),
+    }
 }

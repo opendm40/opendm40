@@ -13,7 +13,7 @@
 use crate::clock::Clock;
 use crate::dmm::{self, Button, Dmm, Reading};
 use crate::gen::{self, Gen, Wave};
-use crate::gesture::{Axis, Gesture};
+use crate::gesture::{self, Axis, Gesture, Target};
 use crate::meter::Meter;
 use crate::mmio::{modify32, w32};
 use crate::power::Power;
@@ -35,6 +35,22 @@ const BUZZER_ARR: u32 = 11200;
 const RUN_LONG_MS: u64 = 1000;
 /// The dashed trigger-level line stays this long after the last level drag.
 const TRIG_LINE_MS: u64 = 1000;
+/// The combined view's function band closes this long after the last tap.
+const BAND_MS: u64 = 4000;
+/// Scope drags kept for DBG:GEST?.
+const GEST_N: usize = 32;
+
+/// A one-finger touch that started in a scope graph (see `App::gesture`).
+#[derive(Clone, Copy)]
+struct Drag {
+    t0: u64,
+    /// What it moves, decided at the first axis-locked `Drag`.
+    target: Option<(Target, Axis)>,
+    /// Travel along the locked axis, px.
+    delta: i32,
+    /// Stopped scope: stored-record anchor at touch-down (pan base).
+    anchor: Option<usize>,
+}
 
 /// Menu-like pages (not instrument views): no view swipe, MENU steps back.
 fn is_page(v: View) -> bool {
@@ -93,9 +109,6 @@ pub struct App {
     kp_n: usize,
     kp_mult: u8,
     cur: ui::Cursors,
-    /// Cursors grabbed at touch-down: [vertical line (X) 0/1, horizontal
-    /// line (Y) 0/1]; the drag's locked axis picks one of them.
-    cur_drag: [Option<u8>; 2],
     /// Analog rail policy: false = Auto (default, stock-like: the rails the
     /// shown view needs, see update_rails), true = both rails always on.
     rails_both: bool,
@@ -167,6 +180,18 @@ pub struct App {
     /// Dashed trigger-level line across the graph while the level is dragged,
     /// until this time (0 = off; tick() erases it).
     trig_line_until: u64,
+    /// Combined view: the DMM function band is open until this time (0 =
+    /// closed).
+    band_until: u64,
+    /// Meter strip: 0 / 1 (>= 30 V, HV badge) / 2 (>= 100 V) from the live
+    /// value, and the REL / verdict badge alternation phase.
+    hv_level: u8,
+    strip_alt: bool,
+    /// Scope touch in progress, and the last drags (target code, axis 0 H /
+    /// 1 V, travel px, ms) for DBG:GEST?, oldest first once full.
+    drag: Option<Drag>,
+    gest_log: [(u8, u8, i16, u16); GEST_N],
+    gest_n: usize,
 }
 
 fn backlight(pct: u8) {
@@ -225,6 +250,9 @@ fn buzzer(on: bool, vol: u8) {
 
 /// Power off as the stock: both analog rails / power hold low.
 fn power_off() -> ! {
+    // A screenshot in flight is finished (or stopped between two slices)
+    // before the rails drop: never cut its FAT / directory writes.
+    crate::screenshot::finish_blocking(8000);
     unsafe {
         w32(0x4002_1000 + 0x18, 1 << (2 + 16)); // PE2 = 0
         w32(0x4002_0800 + 0x18, 1 << (4 + 16)); // PC4 = 0
@@ -280,7 +308,6 @@ impl App {
             kp_n: 0,
             kp_mult: b'H',
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
-            cur_drag: [None; 2],
             rails_both: false,
             host_dmm: false,
             host_scope: false,
@@ -326,6 +353,12 @@ impl App {
             shot_req: false,
             touch_snap: None,
             trig_line_until: 0,
+            band_until: 0,
+            hv_level: 0,
+            strip_alt: false,
+            drag: None,
+            gest_log: [(0, 0, 0, 0); GEST_N],
+            gest_n: 0,
         };
         crate::persist::init();
         if let Some(rec) = crate::persist::load() {
@@ -349,6 +382,9 @@ impl App {
     }
 
     fn show(&mut self, v: View, clk: &mut Clock) {
+        if v != self.view {
+            self.band_until = 0;
+        }
         if is_page(v) && !is_page(self.view) {
             self.back_view = self.view;
         }
@@ -400,27 +436,30 @@ impl App {
         self.dmm_view.label = self.t_label();
         match self.view {
             View::Dmm => {
-                self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, false);
+                self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2);
                 ui::history(&self.hist, self.hist_n, self.hist_new);
                 self.hv_shown = false;
             }
             View::DmmScope => {
-                // DmmView::draw_static(.., true) already cleared the panel.
-                self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, true);
-                // No HV lightning in the compact view (its (0,80,40,64) rect is
-                // inside the scope graph): forget it so the first reading does
-                // not "erase" it by punching a hole into the graph.
+                // Scope chrome + graph and an empty meter strip; the strip
+                // content follows with the shown reading (draw_reading).
+                self.dmm_view.invalidate();
+                self.dmm_view.strip_static();
+                ui::SCOPE_COMBINED.draw_static(&self.scope);
+                ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
+                if self.band_until != 0 {
+                    ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2);
+                }
                 self.hv_shown = false;
-                ui::SCOPE_COMPACT.draw_static(&self.scope, false);
             }
             View::Scope => {
-                ui::SCOPE_FULL.draw_static(&self.scope, true);
+                ui::SCOPE_FULL.draw_static(&self.scope);
                 ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
             }
             // (Stopped scope: the trace comes back via scope_invalidate ->
             // Scope::refresh in tick()'s redraw path.)
             View::ScopeMenu => {
-                ui::SCOPE_FULL.draw_static(&self.scope, true);
+                ui::SCOPE_FULL.draw_static(&self.scope);
                 ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll, self.persist_trace);
             }
             View::Gen => ui::gen_static(&self.gen),
@@ -482,7 +521,19 @@ impl App {
                 let [b0, b1] = &mut b;
                 let n0 = pct(b0, self.backlight);
                 let n1 = pct(b1, self.volume);
-                let vals: [&str; 8] = [
+                let grab = gesture::grab_ms();
+                let mut gb = [0u8; 16];
+                let grab_txt = if grab == 0 {
+                    "Direct"
+                } else {
+                    let mut t = [0u8; 16];
+                    let s = crate::dmm::format(&mut t, grab as f32, 0);
+                    gb[..5].copy_from_slice(b"Hold ");
+                    gb[5..5 + s.len()].copy_from_slice(s.as_bytes());
+                    gb[5 + s.len()..8 + s.len()].copy_from_slice(b" ms");
+                    core::str::from_utf8(&gb[..8 + s.len()]).unwrap_or("Hold")
+                };
+                let vals: [&str; 9] = [
                     DIM_TXT[self.dim_idx],
                     OFF_TXT[self.off_idx],
                     core::str::from_utf8(&b0[..n0]).unwrap_or(""),
@@ -490,6 +541,7 @@ impl App {
                     if self.bt_on { "ON" } else { "OFF" },
                     ui::view_name(START[self.start_page]),
                     if self.rails_both { "Both always" } else { "Auto (per view)" },
+                    grab_txt,
                     "", // Device row: opens the About page, no inline value
                 ];
                 ui::settings(&vals);
@@ -552,9 +604,113 @@ impl App {
                 ui::device_page(&lines);
             }
         }
-        if let (Some(r), true) = (self.meter.shown().copied(), matches!(self.view, View::Dmm | View::DmmScope)) {
-            self.dmm_view.reading(&r, self.meter.hold_state(), self.meter.verdict(), self.view == View::DmmScope);
+        self.draw_reading();
+    }
+
+    /// Repaint the shown DMM reading in the DMM page / the combined view's
+    /// meter strip (only what changed is drawn).
+    fn draw_reading(&mut self) {
+        let Some(r) = self.meter.shown().copied() else { return };
+        let (hold, lim) = (self.meter.hold_state(), self.meter.verdict());
+        match self.view {
+            View::Dmm => self.dmm_view.reading(&r, hold, lim),
+            View::DmmScope => self.dmm_view.strip(&r, hold, lim, self.meter.rel_active(), self.hv_level, self.strip_alt),
+            _ => {}
         }
+    }
+
+    /// Status block contents (all bars).
+    fn status(&self, now: u64) -> ui::Status {
+        ui::Status {
+            uptime_s: (now / 1000) as u32,
+            bt: self.power.bt_connected(),
+            bars: self.power.bars,
+            charging: self.power.charging(),
+            locked: self.locked,
+            rec: self.meter.stats.rec,
+            page: View::CYCLE.iter().position(|&v| v == self.view).map_or(255, |i| i as u8),
+        }
+    }
+
+    /// The scope graph of the shown view, if it has one.
+    fn scope_view(&self) -> Option<&'static ui::ScopeView> {
+        match self.view {
+            View::Scope => Some(&ui::SCOPE_FULL),
+            View::DmmScope => Some(&ui::SCOPE_COMBINED),
+            _ => None,
+        }
+    }
+
+    /// Combined view: open (or keep open) the DMM function band.
+    fn band_open(&mut self, now: u64) {
+        if self.band_until == 0 {
+            ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2);
+        }
+        self.band_until = now + BAND_MS;
+    }
+
+    /// Close the function band: repaint the panel and the graph under it.
+    fn band_close(&mut self) {
+        if self.band_until == 0 {
+            return;
+        }
+        self.band_until = 0;
+        if self.view == View::DmmScope {
+            ui::band_clear();
+            ui::scope_panel(&self.scope, false);
+            self.scope_invalidate();
+        }
+    }
+
+    /// REL on/off (DMM page REL box, combined-view badge column), with the
+    /// range hold while it is on.
+    fn rel_toggle(&mut self, now: u64) {
+        if self.meter.rel_active() {
+            self.meter.rel_off();
+            self.dmm.hold_range(false);
+            self.beep(now, 300);
+        } else if self.meter.rel_on(self.last_raw.as_ref()) {
+            self.dmm.hold_range(self.dmm.hy_mode() <= 10 || self.dmm.hy_mode() == 14);
+        }
+        self.dmm_view.invalidate();
+        self.chart_dirty = true;
+        self.draw_reading();
+    }
+
+    /// DMM function button `i` (DMM page row, combined-view band): as the
+    /// stock function bar, a second tap on the current button cycles its
+    /// sub-mode; then the common function-change path (`func_changed`, as
+    /// `select_func`).
+    fn press_func(&mut self, clk: &mut Clock, i: usize) {
+        self.dmm.press(clk, Button::ALL[i]);
+        self.func_changed();
+        self.last_raw = None;
+    }
+
+    /// Right-panel button of a scope view.
+    fn panel_press(&mut self, b: ui::Pb, now: u64) {
+        let mut st = self.scope.s;
+        match b {
+            ui::Pb::VIn => st.range = st.range.saturating_sub(1),
+            ui::Pb::VOut => st.range = (st.range + 1).min(9),
+            ui::Pb::TIn => st.tb = st.tb.saturating_sub(1),
+            ui::Pb::TOut => st.tb = (st.tb + 1).min(scope::TB_MAX),
+            ui::Pb::Autoset => {
+                self.autoset_start(now);
+                return;
+            }
+            ui::Pb::Coupling => st.ac = !st.ac,
+            ui::Pb::Mode => {
+                st.mode = match st.mode {
+                    scope::TrigMode::Auto => scope::TrigMode::Normal,
+                    scope::TrigMode::Normal => scope::TrigMode::Single,
+                    scope::TrigMode::Single => scope::TrigMode::Auto,
+                };
+                st.run = true;
+            }
+            ui::Pb::Slope => st.rising = !st.rising,
+        }
+        self.scope_set(st, now);
     }
 
     /// The display unit for limits of the current function: the live
@@ -675,9 +831,12 @@ impl App {
             }
         }
         // Trigger-level drag over: the full graph redraw erases the line.
-        if self.trig_line_until != 0 && now >= self.trig_line_until {
+        if self.trig_line_until != 0 && now >= self.trig_line_until && self.drag.is_none() {
             self.trig_line_until = 0;
             self.scope_invalidate();
+        }
+        if self.band_until != 0 && now >= self.band_until && can_draw && self.overlay.is_none() {
+            self.band_close();
         }
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
         // key PD6 (hold 1.5 s -> off).
@@ -794,26 +953,21 @@ impl App {
         // HOLD/RUN label now instead of waiting for a reading that never comes.
         if self.hold_shown != self.shown_state() {
             self.hold_shown = self.shown_state();
-            if matches!(self.view, View::Dmm | View::DmmScope) {
-                if let Some(r) = self.meter.shown().copied() {
-                    self.dmm_view.reading(&r, self.meter.hold_state(), self.meter.verdict(), self.view == View::DmmScope);
-                }
-            }
+            self.draw_reading();
         }
         if now >= self.status_next {
             self.status_next = now + 1000;
+            let st = self.status(now);
             match self.view {
-                View::Dmm | View::DmmScope => ui::status_right(
-                    (now / 1000) as u32,
-                    self.power.bt_connected(),
-                    self.power.bars,
-                    self.power.charging(),
-                    self.locked,
-                    self.view == View::DmmScope,
-                ),
-                View::Scope => {
-                    ui::scope_battery(self.power.bars, self.power.charging());
-                    ui::SCOPE_FULL.gen_state(&self.gen);
+                View::Dmm => ui::status_right(&st),
+                View::DmmScope | View::Scope | View::ScopeMenu => {
+                    ui::scope_status(&st);
+                    ui::ScopeView::gen_chip(&self.gen);
+                    // REL and a limit verdict share a strip badge: alternate.
+                    self.strip_alt = !self.strip_alt;
+                    if self.view == View::DmmScope {
+                        self.draw_reading();
+                    }
                 }
                 _ => {}
             }
@@ -970,7 +1124,7 @@ impl App {
         // bits 8..11 temperature sensor; p[12..15] per-sensor temperature
         // offsets (i16, 0.1 C, two per word); p[16]/p[17] user NTC R25 (ohm) /
         // Beta as f32 bits.
-        p[11] = self.rails_both as u32 | (self.dmm.t_sensor() as u32) << 8;
+        p[11] = self.rails_both as u32 | (self.dmm.t_sensor() as u32) << 8 | (gesture::grab_ms() as u32) << 16;
         let o = self.dmm.t_offs_raw();
         for (i, v) in o.iter().enumerate() {
             p[12 + i / 2] |= (*v as u16 as u32) << (16 * (i % 2));
@@ -982,7 +1136,9 @@ impl App {
         // limit fail beep OFF, bits 8..16 limits checked per slot
         // (meter::lim_slot); p[19] bits 0..8 lower limit set, bits 16..24
         // upper limit set; p[20 + 2 i] / p[21 + 2 i] lower / upper limit of
-        // slot i (f32 bits, SI). p[38..39] spare.
+        // slot i (f32 bits, SI). p[38] persist::W_DMM_EXT, p[39] spare.
+        // p[6] bits 18..27: scope trigger position + 1 (0 = centre, older
+        // records); p[11] bits 16..31: scope drag hold-to-grab ms (0 = direct).
         let m = &self.meter;
         p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1;
         for (i, l) in m.lim.iter().enumerate() {
@@ -991,6 +1147,7 @@ impl App {
             p[20 + 2 * i] = l.lo.unwrap_or(0.0).to_bits();
             p[21 + 2 * i] = l.hi.unwrap_or(0.0).to_bits();
         }
+        p[6] |= (sc.hpos as u32 + 1) << 18;
         p
     }
 
@@ -1009,6 +1166,7 @@ impl App {
         self.roll = p[1] >> 16 & 1 != 0;
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
+        gesture::set_grab_ms((p[11] >> 16) as u16);
         let mut o = [0i16; 7];
         for (i, v) in o.iter_mut().enumerate() {
             *v = (p[12 + i / 2] >> (16 * (i % 2))) as u16 as i16;
@@ -1049,6 +1207,8 @@ impl App {
         sc.pos = (p[7] >> 16) as u16 as i16 as i32;
         let pr = f32::from_bits(p[8]);
         sc.probe = if pr == 1.0 || pr == 10.0 || pr == 100.0 { pr } else { 1.0 };
+        let h = (p[6] >> 18 & 0x3FF) as i32;
+        sc.hpos = if h == 0 { 200 } else { h - 1 };
         self.scope.apply(sc, 0);
         let n = (p[10] as usize).min(4);
         for i in 0..n {
@@ -1196,13 +1356,19 @@ impl App {
         let now = self.now;
         let u = self.meter.update(&raw, now);
         let dmm_view = can_draw && !self.redraw && matches!(self.view, View::Dmm | View::DmmScope);
-        if let (Some(r), true) = (u.show, dmm_view) {
-            self.dmm_view.reading(&r, self.meter.hold_state(), self.meter.verdict(), self.view == View::DmmScope);
+        // HV warning on the live value: it must not be frozen by AutoHold.
+        // Strip: badge from 30 V (the stock red-value threshold), red band
+        // from 100 V (the stock lightning threshold); V functions only.
+        let l = &u.live;
+        let v = if l.mode <= 3 && !l.main.ol { l.si.abs() } else { 0.0 };
+        let hv_level = if v >= 100.0 { 2 } else if v >= 30.0 { 1 } else { 0 };
+        let hv_changed = hv_level != self.hv_level;
+        self.hv_level = hv_level;
+        if dmm_view && (u.show.is_some() || (hv_changed && self.view == View::DmmScope)) {
+            self.draw_reading();
             self.hold_shown = self.shown_state();
         }
         if dmm_view {
-            // HV warning on the live value: it must not be frozen by AutoHold.
-            let l = &u.live;
             let hv = self.view == View::Dmm && l.mode <= 1 && !l.main.ol && l.si.abs() >= 100.0;
             if hv != self.hv_shown {
                 self.hv_shown = hv;
@@ -1256,17 +1422,15 @@ impl App {
             if !can_draw || self.redraw {
                 return;
             }
-            match self.view {
-                View::Scope => {
-                    let t2 = cyc();
-                    ui::SCOPE_FULL.frame(&f, &self.scope, &mut self.scope_prev, &self.cur, self.persist_trace, self.trig_line_until != 0);
-                    self.prof[2] = self.prof[2].max(cyc().wrapping_sub(t2) / 200);
-                    if fresh {
-                        ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
-                    }
+            if let Some(v) = self.scope_view() {
+                // The open function band covers the graph from FUNC_Y down.
+                let clip = if self.band_until != 0 { ui::FUNC_Y } else { u16::MAX };
+                let t2 = cyc();
+                v.frame(&f, &self.scope, &mut self.scope_prev, &self.cur, self.persist_trace, self.trig_line_until != 0, clip);
+                self.prof[2] = self.prof[2].max(cyc().wrapping_sub(t2) / 200);
+                if fresh {
+                    ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
                 }
-                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope, &mut self.scope_prev, &self.cur, self.persist_trace, false),
-                _ => {}
             }
         }
     }
@@ -1280,12 +1444,16 @@ impl App {
     }
 
     fn scope_set(&mut self, s: scope::Settings, now: u64) {
+        let old = self.scope.s;
         self.scope.apply(s, now);
         self.scope_invalidate();
-        match self.view {
-            View::Scope => ui::SCOPE_FULL.labels(&self.scope, true),
-            View::DmmScope => ui::SCOPE_COMPACT.labels(&self.scope, false),
-            _ => {}
+        if let Some(v) = self.scope_view() {
+            v.labels(&self.scope);
+            // The full page's panel shows coupling, trigger mode and slope.
+            let n = &self.scope.s;
+            if self.view == View::Scope && (old.ac != n.ac || old.mode != n.mode || old.rising != n.rising) {
+                ui::scope_panel(&self.scope, true);
+            }
         }
     }
 
@@ -1334,10 +1502,11 @@ impl App {
             }
             return false;
         }
-        let in_graph = |p: crate::touch::Point| p.x >= 13 && p.x < 414 && p.y >= 20 && p.y < 301;
+        let sv = self.scope_view();
         let mut captured = false;
         if let Gesture::Down(_) = g {
             self.touch_snap = None;
+            self.drag = None;
         }
         match g {
             // Global gestures (UF-17 / UF-18), any view.
@@ -1352,7 +1521,9 @@ impl App {
             }
             Gesture::Cancel => {
                 // A second finger landed: undo the first finger's drag.
-                self.cur_drag = [None; 2];
+                if let Some(a) = self.drag.take().and_then(|d| d.anchor) {
+                    self.scope.pan_from(a, 0);
+                }
                 if let Some((s, c)) = self.touch_snap.take() {
                     self.cur = c;
                     self.cursor_values();
@@ -1386,62 +1557,111 @@ impl App {
                 self.beep(now, 300);
                 self.chart_dirty = true;
             }
-            Gesture::Down(p) if self.view == View::Scope => {
-                self.touch_snap = Some((self.scope.s, self.cur));
-                // A touch that starts in the graph belongs to the scope.
-                captured = in_graph(p);
-                // Grab cursors within 8 px: an X and a Y one may both be near,
-                // the drag's axis decides which moves.
-                let (cx, cy) = (p.x as i32 - 13, p.y as i32 - 20);
-                self.cur_drag = [None; 2];
-                for k in 0..2 {
-                    if self.cur.x_on && (cx - self.cur.x[k] as i32).abs() <= 8 {
-                        self.cur_drag[0] = Some(k as u8);
-                    }
-                    if self.cur.y_on && (cy - self.cur.y[k]).abs() <= 8 {
-                        self.cur_drag[1] = Some(k as u8);
-                    }
-                }
+            Gesture::LongPress(p) if self.view == View::DmmScope && ui::strip_hit(p.y) => {
+                // Meter strip: the full DMM view.
+                self.beep(now, 60);
+                self.show(View::Dmm, clk);
             }
-            Gesture::Grab(p) if self.view == View::Scope && in_graph(p) => self.beep(now, 20), // HOLD_TO_DRAG
-            Gesture::Drag(p0, p, axis) if self.view == View::Scope && in_graph(p0) => {
-                // One thing per drag: the tracker locked the axis; only what
-                // moves along it follows, relative to its value at touch-down.
+            // A touch that starts in a scope graph belongs to the scope
+            // (docs/scope-ui-plan.md §2.6): never a swipe or a tap.
+            // (Not the open function band: it owns the graph's bottom rows.)
+            Gesture::Down(p) if sv.is_some_and(|v| v.contains(p.x, p.y)) && !(self.band_until != 0 && p.y >= ui::FUNC_Y) => {
                 captured = true;
-                let Some((s0, c0)) = self.touch_snap else { return captured };
-                let (dx, dy) = (p.x as i32 - p0.x as i32, p.y as i32 - p0.y as i32);
-                match (axis, self.cur_drag) {
-                    (Axis::H, [Some(k), _]) => {
-                        self.cur.x[k as usize] = (c0.x[k as usize] as i32 + dx).clamp(1, 399) as u16;
-                        self.scope_invalidate();
-                        self.cursor_values();
+                self.touch_snap = Some((self.scope.s, self.cur));
+                self.drag = Some(Drag { t0: now, target: None, delta: 0, anchor: self.scope.anchor() });
+            }
+            Gesture::Grab(_) if self.drag.is_some() => {
+                captured = true;
+                self.beep(now, 20);
+            }
+            Gesture::Drag(p0, p, axis) if self.drag.is_some() => {
+                captured = true;
+                self.scope_drag(p0, p, axis, now);
+            }
+            Gesture::Up(_) => {
+                if let Some(d) = self.drag.take() {
+                    if let Some((t, axis)) = d.target {
+                        let i = if self.gest_n < GEST_N {
+                            self.gest_n += 1;
+                            self.gest_n - 1
+                        } else {
+                            self.gest_log.copy_within(1.., 0);
+                            GEST_N - 1
+                        };
+                        // Clamped so 32 entries fit the 512-byte reply.
+                        let ms = now.saturating_sub(d.t0).min(9999) as u16;
+                        self.gest_log[i] = (t.code(), (axis == Axis::V) as u8, d.delta.clamp(-999, 999) as i16, ms);
                     }
-                    (Axis::V, [_, Some(k)]) => {
-                        self.cur.y[k as usize] = (c0.y[k as usize] + dy).clamp(1, 279);
-                        self.scope_invalidate();
-                        self.cursor_values();
-                    }
-                    (Axis::V, _) => {
-                        // Trigger level, shown as a dashed line while dragged.
-                        let row = (s0.trig_row + dy).clamp(0, 278);
-                        let line_was = self.trig_line_until != 0;
-                        self.trig_line_until = now + TRIG_LINE_MS;
-                        if row != self.scope.s.trig_row {
-                            let mut st = self.scope.s;
-                            st.trig_row = row;
-                            self.scope_set(st, now);
-                        } else if !line_was {
-                            self.scope_invalidate();
-                        }
-                    }
-                    // No horizontal position setting yet (scope.rs has only
-                    // the vertical `pos`): a horizontal drag does nothing.
-                    (Axis::H, _) => {}
                 }
             }
             _ => {}
         }
         captured
+    }
+
+    /// One axis-locked drag step in a scope graph: what moves is decided
+    /// once, from where the touch went down (gesture::target, the zone table
+    /// of docs/combined-view-design.md §6.1), and follows the travel along the
+    /// locked axis relative to its value at touch-down.
+    fn scope_drag(&mut self, p0: crate::touch::Point, p: crate::touch::Point, axis: Axis, now: u64) {
+        let (Some(v), Some((s0, c0)), Some(mut d)) = (self.scope_view(), self.touch_snap, self.drag) else { return };
+        let (gx, gy) = (p0.x as i32 - v.x0 as i32, p0.y as i32 - v.y0 as i32);
+        let (t, _) = *d.target.get_or_insert_with(|| {
+            let cx = self.cur.x_on.then(|| [self.cur.x[0] as i32, self.cur.x[1] as i32]);
+            let cy = self.cur.y_on.then(|| [v.row_y(self.cur.y[0]), v.row_y(self.cur.y[1])]);
+            (gesture::target(gx, gy, axis, gesture::grab_ms() != 0, v.row_y(s0.trig_row), cx, cy), axis)
+        });
+        let (dx, dy) = (p.x as i32 - p0.x as i32, p.y as i32 - p0.y as i32);
+        d.delta = if axis == Axis::H { dx } else { dy };
+        self.drag = Some(d);
+        // Pixels -> rows of the 280-row model (the graph may be shorter).
+        let rows = dy * 278 / (v.h as i32 - 3);
+        let mut st = self.scope.s;
+        match t {
+            Target::CurX(k) => {
+                self.cur.x[k as usize] = (c0.x[k as usize] as i32 + dx).clamp(1, 399) as u16;
+                self.scope_invalidate();
+                self.cursor_values();
+                return;
+            }
+            Target::CurY(k) => {
+                self.cur.y[k as usize] = (c0.y[k as usize] + rows).clamp(1, 279);
+                self.scope_invalidate();
+                self.cursor_values();
+                return;
+            }
+            Target::Level => {
+                // Shown as a dashed line while dragged.
+                let line_was = self.trig_line_until != 0;
+                self.trig_line_until = now + TRIG_LINE_MS;
+                st.trig_row = (s0.trig_row + rows).clamp(0, 278);
+                if st.trig_row == self.scope.s.trig_row {
+                    if !line_was {
+                        self.scope_invalidate();
+                    }
+                    return;
+                }
+            }
+            Target::Offset => {
+                // The trigger row moves with the trace: same trigger voltage.
+                st.pos = s0.pos + rows;
+                st.trig_row = s0.trig_row + rows;
+            }
+            Target::TrigPos => match d.anchor {
+                // Stopped: pan the stored record under the finger.
+                Some(a) => {
+                    self.scope.pan_from(a, dx);
+                    self.scope_invalidate();
+                    return;
+                }
+                // Roll mode has no trigger position: nothing to restart.
+                None if self.scope.roll && st.tb >= scope::TB_ROLL => return,
+                None => st.hpos = s0.hpos + dx,
+            },
+        }
+        if st.trig_row != self.scope.s.trig_row || st.pos != self.scope.s.pos || st.hpos != self.scope.s.hpos {
+            self.scope_set(st, now);
+        }
     }
 
     /// Close the overlay; the view is redrawn on the next tick.
@@ -1483,6 +1703,7 @@ impl App {
     fn key(&mut self, clk: &mut Clock, code: u8) {
         let now = clk.now_ms();
         match code {
+            0 if self.band_until != 0 => self.band_close(),
             0 => {
                 // Walk one step up the page tree, not straight to the
                 // instrument: Device -> Settings -> Menu -> instrument. The old
@@ -1552,18 +1773,8 @@ impl App {
     fn tap(&mut self, clk: &mut Clock, x: u16, y: u16) {
         let now = clk.now_ms();
         match self.view {
-            View::Dmm | View::DmmScope if self.view == View::Dmm && x >= 402 && (205..243).contains(&y) => {
-                // REL button (stock (402,205,76,38)).
-                if self.meter.rel_active() {
-                    self.meter.rel_off();
-                    self.dmm.hold_range(false);
-                    self.beep(now, 300);
-                } else if self.meter.rel_on(self.last_raw.as_ref()) {
-                    self.dmm.hold_range(self.dmm.hy_mode() <= 10 || self.dmm.hy_mode() == 14);
-                }
-                self.dmm_view.invalidate();
-                self.chart_dirty = true;
-            }
+            // REL button (stock (402,205,76,38)).
+            View::Dmm if x >= 402 && (205..243).contains(&y) => self.rel_toggle(now),
             View::Dmm if x >= 402 && (175..279).contains(&y) => {
                 // MIN/MAX/AVG column outside the REL box: start / stop a
                 // recording session. Starting clears the statistics; while it
@@ -1739,8 +1950,8 @@ impl App {
                     None => {}
                 }
             }
-            View::Dmm | View::DmmScope => {
-                if self.view == View::Dmm && x < ui::CHART_X && (176..280).contains(&y) {
+            View::Dmm => {
+                if x < ui::CHART_X && (176..280).contains(&y) {
                     self.chart_rate = match self.chart_rate {
                         1 => 2,
                         2 => 4,
@@ -1749,38 +1960,45 @@ impl App {
                     self.chart_n = 0;
                     self.chart_dirty = true;
                 } else if let Some(i) = ui::button_hit(6, x, y) {
-                    self.dmm.press(clk, Button::ALL[i]);
-                    self.func_changed();
+                    self.press_func(clk, i);
                 }
             }
-            View::Scope => {
-                let mut st = self.scope.s;
-                if x >= 414 {
-                    // Right panel: V/div + / label / -, time + / label / -, TRIG.
-                    match y {
-                        20..=60 => st.range = st.range.saturating_sub(1),
-                        61..=101 => st.ac = !st.ac,
-                        102..=146 => st.range = (st.range + 1).min(9),
-                        150..=190 => st.tb = st.tb.saturating_sub(1),
-                        191..=231 => {
-                            st.mode = match st.mode {
-                                scope::TrigMode::Auto => scope::TrigMode::Normal,
-                                scope::TrigMode::Normal => scope::TrigMode::Single,
-                                scope::TrigMode::Single => scope::TrigMode::Auto,
-                            };
-                            st.run = true;
-                        }
-                        232..=272 => st.tb = (st.tb + 1).min(scope::TB_MAX),
-                        _ => st.rising = !st.rising,
+            View::DmmScope => {
+                // Open function band: its buttons (kept open 4 s from the
+                // last tap); a tap anywhere else closes it first.
+                if self.band_until != 0 {
+                    if let Some(i) = ui::func_band_hit(x, y) {
+                        self.band_until = now + BAND_MS;
+                        self.press_func(clk, i);
+                        return;
                     }
-                } else if y < 20 && x < 75 {
-                    st.run = !st.run;
-                } else if x < 13 {
-                    st.pos = 140 - (y as i32 - 20);
-                } else if y >= 20 && y < 301 {
-                    st.trig_row = y as i32 - 20;
+                    self.band_close();
+                    return;
                 }
-                self.scope_set(st, now);
+                if ui::strip_hit(y) {
+                    if x < ui::STRIP_BADGE_X1 {
+                        self.rel_toggle(now);
+                    } else {
+                        self.band_open(now);
+                    }
+                } else if let Some(b) = ui::panel_hit(false, x, y) {
+                    self.panel_press(b, now);
+                } else if ui::chip_hit(x, y) == Some(0) {
+                    let mut st = self.scope.s;
+                    st.run = !st.run;
+                    self.scope_set(st, now);
+                }
+            }
+            // Panel buttons and the run-state chip; taps in the graph never
+            // change a setting (they are captured as drags).
+            View::Scope => {
+                if let Some(b) = ui::panel_hit(true, x, y) {
+                    self.panel_press(b, now);
+                } else if ui::chip_hit(x, y) == Some(0) {
+                    let mut st = self.scope.s;
+                    st.run = !st.run;
+                    self.scope_set(st, now);
+                }
             }
             View::Gen => {
                 let mut st = self.gen.s;
@@ -1881,6 +2099,11 @@ impl App {
                         self.set_rails_both(b, clk);
                     }
                     Some(7) => {
+                        // Scope drag: direct <-> hold-to-grab (A/B, doc §6.2).
+                        let g = if gesture::grab_ms() == 0 { gesture::GRAB_DEFAULT_MS } else { 0 };
+                        gesture::set_grab_ms(g);
+                    }
+                    Some(8) => {
                         // Last row: the Device / About page. Back is the title
                         // bar now, not a list row.
                         self.show(View::Device, clk);
@@ -2158,6 +2381,31 @@ impl App {
             }
             C::CalcLimFail => {
                 out.put_bytes(if self.limit_fail() { b"1" } else { b"0" });
+                true
+            }
+            C::DbgGrab(Some(ms)) => {
+                gesture::set_grab_ms(ms);
+                self.redraw |= self.view == View::Settings;
+                false
+            }
+            C::DbgGrab(None) => {
+                crate::put_u32(out, gesture::grab_ms() as u32);
+                true
+            }
+            C::DbgGest => {
+                // n;target,axis,delta,ms;... oldest first.
+                crate::put_u32(out, self.gest_n as u32);
+                for &(t, a, d, ms) in &self.gest_log[..self.gest_n] {
+                    out.put_bytes(b";");
+                    crate::put_u32(out, t as u32);
+                    out.put_bytes(if a == 1 { b",V," } else { b",H," });
+                    if d < 0 {
+                        out.put_bytes(b"-");
+                    }
+                    crate::put_u32(out, d.unsigned_abs() as u32);
+                    out.put_bytes(b",");
+                    crate::put_u32(out, ms as u32);
+                }
                 true
             }
             _ => return None,

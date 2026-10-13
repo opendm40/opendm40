@@ -778,3 +778,43 @@ R1 comes before G2's overlays. U1..U3 any time.
 | `a8-pinch-timebase.png` | horizontal pinch → timebase bubble, chip highlighted |
 | `b1-floating-tile.png` | Option B |
 | `fonts-hierarchy.png` | the four type tiers |
+
+## 11. As implemented (C1..C5, G1; 2026-10-13)
+
+The owner's layout rules came after the mockups: every text / icon / shape
+ink box >= 3 px from any other and >= 3 px inside its container, >= 4 px from
+the screen edges, no touching glyphs. `tools/ui-render/run.sh` builds the
+real `ui.rs` / `stockfont.rs` drawing code for the host (LCD emulator, draw
+calls probed under `cfg(test)`) and checks these rules over a worst-case
+matrix (every function x AC/DC/AC+DC x OL x HOLD/A-HOLD x REL/PASS/FAIL x HV,
+sensors, every timebase x V/div x probe x run state x trigger level, status
+block combinations, the full Scope page, the DMM / generator / menu bars);
+it must report 0 violations. Geometry changed from §2.3 to satisfy them:
+
+| Item | §2.3 | Implemented |
+|---|---|---|
+| Top bar | 20 px | 27 px (combined; 28 on the Scope page): the 20 px lock / BT icons need 4 px to the screen edge and 3 px to the bar edge. Round Wiren Board logo (20 px, `tools/mklogo.py`) at x 4 on every bar. Chips 17 px pills at x 27 / 67 / 112 / 183; REC 249; dots 301..332; uptime ..385; lock ..412; BT 416; battery 436..475 |
+| Meter strip | y 20..75 (56) | y 27..83 (57): three 15 px badges need 51 px plus margins |
+| Combined graph | 401x225, pitch 28 | 401x217 at y 84, pitch 27 |
+| Full Scope graph | 401x281 1:1 | 401x273 at y 28, pitch 34 (rows scale by (h - 3) / 278) |
+| Panel | 5 x 41 px | combined 5 x 39 px, Scope page 7 x 35 px (V+, DC/AC, V-, T+, mode, T-, slope, labelled with their state) |
+| F39 | baked 6 KB font | F78 at half size at draw time (`stockfont::half_text`, 2x2 box filter as `label_half`), proportional: each glyph advances by its half-size width + 3 px |
+| Units | LETTERS | LETTERS, F21 where LETTERS lacks the glyph ("nF", "uF") |
+| AC+DC parts | "~ 53.63mV" | "~ 53.63": the parts are in the main unit, shown next to them |
+| >= 100 V | 2 px red ring | dark red strip background (a ring cannot keep 3 px to the badges) |
+| Measurement bar | one label per cell | name and value on one baseline, 1 px glyph spacing; the frame line at y 302 is gone |
+| Function band | (0,274,480,46) over the bar | y 258..300 (under the T- button, above the measurement bar), buttons 76x36 |
+
+Colours: DMM readings use the stock value colour 0xFC40 (`gui_v2_6.h`
+GUI_C_VALUE) instead of red.
+
+Touch (C5 / G1): strip tap = function band (4 s from the last tap, MENU or a
+tap elsewhere closes it), badge column (x < 54) tap = REL, strip long-press =
+DMM page, panel / run chip taps; touches in the graph are captured. Zone
+table in `gesture::target` (right 40 columns vertical = level, else vertical
+= offset with the trigger row following, horizontal = trigger position
+`Settings::hpos` running / pan of the stored record stopped, +-20 px of a
+cursor = that cursor; hold mode grabs by proximity, 24 px). Hold-to-grab is
+runtime: Settings "Scope drag" (Direct / Hold 300 ms), `DBG:GRAB <ms>` /
+`DBG:GRAB?`; `DBG:GEST?` returns the last 32 drags (target, axis, travel,
+ms). Not done here: markers / bubbles (G2), pinch (G3), record bar (S5).
