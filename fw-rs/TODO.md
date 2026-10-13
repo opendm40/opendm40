@@ -228,3 +228,13 @@ Additional requirements:
       drops it because "Alientek,DM40A" is not in its model table. Add a DM40 profile to libsigrok
       src/hardware/scpi-dmm (command set like the 34401A: CONF:<f>, READ?, FUNC?), test with
       sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<addr> and SmuView, then send upstream.
+- [ ] Scope touch: pinch = scale (timebase / V/div, 1-2-5 snap), one-finger drag = offset, draggable
+      trigger level drawn as a dashed line + marker; gesture map without clashes with view swipes.
+      Rendering approach (own strip compositor vs embedded-graphics / Slint / LVGL) evaluated in
+      docs/combined-view-design.md [design agent], then implement with the scope redesign.
+- [ ] Combined DMM+scope view: DMM readout built into the scope UI, one font hierarchy (user: current
+      view has mixed font sizes and overlaps) -> docs/combined-view-design.md [design agent].
+- [ ] AC+DC: the AC part reads ~5% low vs plain AC V on a 40 Hz 0..9.6 V square (4.578 vs 4.812 V);
+      combined view FREQ reads 13.3 Hz instead of 40 Hz [AC agent].
+- [ ] sigrok: scpi-dmm has no option to force a model (scan options are only conn/serialcomm), so
+      either the libsigrok profile [agent] or an optional *IDN? compatibility mode in fw-rs.
