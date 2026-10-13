@@ -56,6 +56,12 @@ mod ui;
 
 /// Probe hooks called by the drawing code under cfg(test).
 pub mod probe {
+    pub fn open(kind: u8, bg: u16) -> u32 {
+        crate::host::open(kind, bg)
+    }
+    pub fn set(id: u32, bg: u16, g: u8) {
+        crate::host::set(id, bg, g)
+    }
     pub const TEXT: u8 = 0;
     pub const SHAPE: u8 = 1;
     pub const ICON: u8 = 2;
