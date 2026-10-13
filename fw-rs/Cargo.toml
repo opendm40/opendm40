@@ -1,0 +1,20 @@
+[package]
+name = "dm40-fw"
+version = "0.0.1"
+edition = "2021"
+description = "Replacement firmware for the Alientek DM40 (GD32F427), RAM-loaded PoC"
+
+[[bin]]
+name = "dm40-fw"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+debug = true
+panic = "abort"
+
+[profile.dev]
+opt-level = "z"
+panic = "abort"

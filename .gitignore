@@ -1,0 +1,9 @@
+# Vendor files
+*.bin
+*.apk
+*.zip
+
+firmware/patch/build*/
+__pycache__/
+fw-rs/target/
+toolchain/
