@@ -1,16 +1,35 @@
-//! Bluetooth: transparent SPP module on UART4 (PA0 TX / PA1 RX, AF8, 115200
-//! 8N1; read back from the stock setup). Reception by circular DMA (DMA0
-//! channel 2, request 4) so nothing is lost while the main loop is busy.
+//! Bluetooth: transparent SPP / BLE module on UART4 (PA0 TX / PA1 RX, AF8,
+//! 115200 8N1; read back from the stock setup). Reception by circular DMA
+//! (DMA0 channel 2, request 4) so nothing is lost while the main loop is busy;
+//! transmission from a ring by DMA (DMA0 channel 4, request 4 = UART4_TX, the
+//! STM32F4-compatible request map that also gives channel 2 = UART4_RX), so a
+//! long SCPI reply never blocks the main loop.
 //!
-//! Frames (README.md "DM40 Multimeter Protocol"):
-//!   request  AF <id 05 03 | FF FF> <cmd> <len> <data..> <crc>
-//!   response DF 05 03 <cmd> <len> <data..> <crc>   (discovery: DF FF FF ..)
-//!   crc makes the byte sum 0 mod 256.
+//! The RX stream carries two protocols (bt_scpi.rs, docs/bt-scpi.md):
+//!   - stock frames (README.md "DM40 Multimeter Protocol"):
+//!       request  AF <id 05 03 | FF FF> <cmd> <len> <data..> <crc>
+//!       response DF 05 03 <cmd> <len> <data..> <crc>   (discovery: DF FF FF ..)
+//!       crc makes the byte sum 0 mod 256. `poll` returns them.
+//!   - SCPI lines (letter / '*' / ':' .. '\n'), the same parser as USBTMC.
+//!     `take_line` returns them; the transport is UNTRUSTED (an open radio
+//!     link): DBG:* is refused before the parser sees it (ScpiPort::trusted).
+//!     Replies go out with a '\n' terminator (also after a #-block).
+//!
+//! Throughput: 115200 8N1 = 11.5 kB/s, 87 us/byte. READ? reply (15 B) 1.3 ms;
+//! WAV:DATA? (#3400 + 400 + LF = 406 B) 35 ms; LOG:DATA? (<= 6144 B) 0.53 s.
+//! No RTS/CTS on this module wiring: over BLE (20-byte notifications) the
+//! module may not keep up with a long burst; unverified.
 
-use crate::clock::Clock;
+#[path = "bt_scpi.rs"]
+pub mod proto;
+
+use crate::clock::{Clock, HCLK_HZ};
 use crate::dmm::{Dmm, Val};
 use crate::meter::Meter;
 use crate::mmio::{modify32, r32, w32};
+use core::sync::atomic::{compiler_fence, Ordering};
+pub use proto::Frame;
+use proto::{Event, TxRing, LINE_MAX};
 
 const GPIOA: u32 = 0x4002_0000;
 /// GPIOC input data register: PC14 = BT link up (the same read as
@@ -24,34 +43,129 @@ const DATA: u32 = UART4 + 0x04;
 const BAUD: u32 = UART4 + 0x08;
 const CTL0: u32 = UART4 + 0x0C;
 const CTL2: u32 = UART4 + 0x14;
+const DWT_CYCCNT: u32 = 0xE000_1004;
 
 const DMA0: u32 = 0x4002_6000;
-const CH: u32 = 2;
-const CH_CTL: u32 = DMA0 + 0x10 + 0x18 * CH;
-const CH_CNT: u32 = DMA0 + 0x14 + 0x18 * CH;
-const CH_PADDR: u32 = DMA0 + 0x18 + 0x18 * CH;
-const CH_M0ADDR: u32 = DMA0 + 0x1C + 0x18 * CH;
+const fn ch_reg(ch: u32, off: u32) -> u32 {
+    DMA0 + off + 0x18 * ch
+}
+/// RX: channel 2 (flags in INTF0/INTC0 at bit 16).
+const RX_CTL: u32 = ch_reg(2, 0x10);
+const RX_CNT: u32 = ch_reg(2, 0x14);
+const RX_PADDR: u32 = ch_reg(2, 0x18);
+const RX_M0ADDR: u32 = ch_reg(2, 0x1C);
 const DMA_INTC0: u32 = DMA0 + 0x08;
+/// TX: channel 4 (flags in INTF1/INTC1 at bit 0). gen.rs uses channel 5, the
+/// scope DMA1; nothing else in fw-rs uses DMA0.
+const TX_CTL: u32 = ch_reg(4, 0x10);
+const TX_CNT: u32 = ch_reg(4, 0x14);
+const TX_PADDR: u32 = ch_reg(4, 0x18);
+const TX_M0ADDR: u32 = ch_reg(4, 0x1C);
+const DMA_INTC1: u32 = DMA0 + 0x0C;
 
-const RX_LEN: usize = 512;
+/// 89 ms at 115200: covers a long main-loop iteration (a full redraw).
+const RX_LEN: usize = 1024;
+/// Holds the largest reply (RSP_MAX block + LF) plus stock frames.
+const TX_LEN: usize = 8192;
+const BLK_LEN: usize = crate::usbtmc::RSP_MAX;
+/// Lines that arrive this soon after an AT exchange are the module's late
+/// answer ("OK", "CBN+..."), not a host command.
+const AT_QUIET_MS: u64 = 500;
 
 #[link_section = ".dmabuf"]
 static mut RX: [u8; RX_LEN] = [0; RX_LEN];
+#[link_section = ".dmabuf"]
+static mut TX: [u8; TX_LEN] = [0; TX_LEN];
+/// In-place reply buffer (ScpiPort::rsp_buf: DBG:LCD?, LOG:DATA?).
+#[link_section = ".dmabuf"]
+static mut BLK: [u8; BLK_LEN] = [0; BLK_LEN];
 
-pub const MAX_DATA: usize = 0xC2;
+/// Where an SCPI reply goes: USBTMC (trusted: a cable to the user's own
+/// computer) or Bluetooth (untrusted). main.rs routes `scpi::Out` results
+/// through this so both transports share one code path.
+pub trait ScpiPort {
+    /// Queue a complete reply (the transport adds its terminator).
+    fn respond(&mut self, data: &[u8]);
+    /// Buffer to build a large reply in place, then `respond_len`.
+    fn rsp_buf(&mut self) -> &mut [u8];
+    fn respond_len(&mut self, n: usize);
+    /// False: DBG:* (reflash / reset / watchdog release / input injection /
+    /// debug reads) must never run from this transport. Bt::take_line
+    /// already refuses such lines; main.rs checks this again before acting
+    /// on `scpi::Out::Dbg` (defence in depth).
+    fn trusted(&self) -> bool;
+}
 
-pub struct Frame {
-    pub cmd: u8,
-    pub len: usize,
-    pub data: [u8; MAX_DATA],
-    /// Request used the broadcast id FF FF.
-    pub broadcast: bool,
+impl<'a, B: usb_device::bus::UsbBus> ScpiPort for crate::usbtmc::Usbtmc<'a, B> {
+    fn respond(&mut self, data: &[u8]) {
+        crate::usbtmc::Usbtmc::respond(self, data)
+    }
+    fn rsp_buf(&mut self) -> &mut [u8] {
+        &mut crate::usbtmc::Usbtmc::rsp_buf(self)[..]
+    }
+    fn respond_len(&mut self, n: usize) {
+        crate::usbtmc::Usbtmc::respond_len(self, n)
+    }
+    fn trusted(&self) -> bool {
+        true
+    }
+}
+
+impl ScpiPort for Bt {
+    fn respond(&mut self, data: &[u8]) {
+        self.send(&[data, b"\n"]);
+    }
+    fn rsp_buf(&mut self) -> &mut [u8] {
+        unsafe { &mut *core::ptr::addr_of_mut!(BLK) }
+    }
+    fn respond_len(&mut self, n: usize) {
+        let blk = unsafe { &*core::ptr::addr_of!(BLK) };
+        self.send(&[&blk[..n.min(BLK_LEN)], b"\n"]);
+    }
+    fn trusted(&self) -> bool {
+        false
+    }
+}
+
+fn rx_byte(rd: &mut usize) -> Option<u8> {
+    let wr = RX_LEN - unsafe { r32(RX_CNT) } as usize;
+    if *rd == wr % RX_LEN {
+        return None;
+    }
+    let b = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(RX[*rd])) };
+    *rd = (*rd + 1) % RX_LEN;
+    Some(b)
 }
 
 pub struct Bt {
     rd: usize,
-    buf: [u8; 5 + MAX_DATA + 1],
-    n: usize,
+    rx: proto::Rx,
+    tx: TxRing,
+    /// Bytes of the DMA transfer in progress (consumed when it is done).
+    in_flight: usize,
+    /// Start time and deadline of that transfer.
+    tx_due: u64,
+    /// TX DMA works. Cleared if a transfer never finishes (wrong request
+    /// mapping on this chip): then TX falls back to blocking writes, as
+    /// before the DMA path, so the stock protocol keeps working.
+    pub tx_dma_ok: bool,
+    /// An SCPI line waiting for `take_line` (input is held meanwhile).
+    line: [u8; LINE_MAX],
+    line_n: usize,
+    line_ready: bool,
+    /// main.rs takes lines (set by the first `take_line`). Until then lines
+    /// are dropped so they cannot hold up the stock frames.
+    lines_on: bool,
+    /// Error for the BT SCPI session (input overrun, output overflow).
+    err: Option<&'static str>,
+    link: bool,
+    quiet_until: u64,
+    /// Own millisecond count from DWT_CYCCNT (Clock is not passed to poll).
+    t_last: u32,
+    t_acc: u32,
+    t_ms: u64,
+    /// Bytes dropped because the TX ring was full (diagnostics).
+    pub tx_dropped: u32,
     /// One-shot module AT init done this power-on (bt_meas_v2_6.h, FUN_0800d848).
     inited: bool,
 }
@@ -67,103 +181,218 @@ impl Bt {
 
             w32(CTL0, 0);
             w32(BAUD, 434); // 50 MHz / 434 = 115200
-            w32(CTL2, 1 << 6); // DENR: DMA receive
+            w32(CTL2, (1 << 7) | (1 << 6)); // DENT, DENR: DMA transmit + receive
 
             // DMA0 channel 2, request 4 = UART4 RX, P->M, byte, MINC, circular.
-            w32(CH_CTL, 0);
-            while r32(CH_CTL) & 1 != 0 {}
+            w32(RX_CTL, 0);
+            while r32(RX_CTL) & 1 != 0 {}
             w32(DMA_INTC0, 0x3D << 16); // clear channel 2 flags
-            w32(CH_PADDR, DATA);
-            w32(CH_M0ADDR, core::ptr::addr_of!(RX) as u32);
-            w32(CH_CNT, RX_LEN as u32);
-            w32(CH_CTL, (4 << 25) | (1 << 10) | (1 << 8) | 1);
+            w32(RX_PADDR, DATA);
+            w32(RX_M0ADDR, core::ptr::addr_of!(RX) as u32);
+            w32(RX_CNT, RX_LEN as u32);
+            w32(RX_CTL, (4 << 25) | (1 << 10) | (1 << 8) | 1);
+
+            // DMA0 channel 4 (TX): idle until `pump` starts a segment.
+            w32(TX_CTL, 0);
+            while r32(TX_CTL) & 1 != 0 {}
+            w32(DMA_INTC1, 0x3D); // clear channel 4 flags
+            w32(TX_PADDR, DATA);
 
             // UEN, TEN, REN (no interrupts: we run with IRQs masked).
             w32(CTL0, (1 << 13) | (1 << 3) | (1 << 2));
         }
-        Bt { rd: 0, buf: [0; 5 + MAX_DATA + 1], n: 0, inited: false }
+        Bt {
+            rd: 0,
+            rx: proto::Rx::new(),
+            tx: TxRing::new(TX_LEN),
+            in_flight: 0,
+            tx_due: 0,
+            tx_dma_ok: true,
+            line: [0; LINE_MAX],
+            line_n: 0,
+            line_ready: false,
+            lines_on: false,
+            err: None,
+            link: false,
+            quiet_until: 0,
+            t_last: unsafe { r32(DWT_CYCCNT) },
+            t_acc: 0,
+            t_ms: 0,
+            tx_dropped: 0,
+            inited: false,
+        }
     }
 
-    fn rx_byte(&mut self) -> Option<u8> {
-        let wr = RX_LEN - unsafe { r32(CH_CNT) } as usize;
-        if self.rd == wr % RX_LEN {
+    fn ms(&mut self) -> u64 {
+        const CYC_PER_MS: u32 = HCLK_HZ / 1000;
+        let c = unsafe { r32(DWT_CYCCNT) };
+        self.t_acc += c.wrapping_sub(self.t_last);
+        self.t_last = c;
+        self.t_ms += (self.t_acc / CYC_PER_MS) as u64;
+        self.t_acc %= CYC_PER_MS;
+        self.t_ms
+    }
+
+    /// Service the TX DMA: retire a finished transfer, start the next
+    /// contiguous segment. Cheap; called by poll / every send, and may be
+    /// called every main-loop iteration.
+    pub fn pump(&mut self) {
+        if !self.tx_dma_ok {
+            return self.pump_blocking();
+        }
+        unsafe {
+            if r32(TX_CTL) & 1 != 0 {
+                // Running (CHEN clears itself at the end). Twice the wire
+                // time + 50 ms without finishing: the DMA request never comes.
+                if self.ms() > self.tx_due {
+                    w32(TX_CTL, 0);
+                    while r32(TX_CTL) & 1 != 0 {}
+                    let sent = self.in_flight - (r32(TX_CNT) as usize).min(self.in_flight);
+                    self.tx.consume(sent);
+                    self.in_flight = 0;
+                    self.tx_dma_ok = false;
+                    self.pump_blocking();
+                }
+                return;
+            }
+            compiler_fence(Ordering::SeqCst);
+            if self.in_flight > 0 {
+                self.tx.consume(self.in_flight);
+                self.in_flight = 0;
+            }
+            let (s, n) = self.tx.segment();
+            if n == 0 {
+                return;
+            }
+            let n = n.min(0xFFFF);
+            w32(DMA_INTC1, 0x3D);
+            w32(TX_M0ADDR, core::ptr::addr_of!(TX) as u32 + s as u32);
+            w32(TX_CNT, n as u32);
+            compiler_fence(Ordering::SeqCst);
+            // Request 4, M->P (TM = 01), byte, MINC, enable.
+            w32(TX_CTL, (4 << 25) | (1 << 10) | (1 << 6) | 1);
+            self.in_flight = n;
+            self.tx_due = self.ms() + (n as u64) / 5 + 50;
+        }
+    }
+
+    /// Fallback TX: write the whole queue out, byte by byte (blocks).
+    fn pump_blocking(&mut self) {
+        let buf = unsafe { &*core::ptr::addr_of!(TX) };
+        loop {
+            let (s, n) = self.tx.segment();
+            if n == 0 {
+                return;
+            }
+            for &b in &buf[s..s + n] {
+                unsafe {
+                    while r32(STAT) & (1 << 7) == 0 {} // TBE
+                    w32(DATA, b as u32);
+                }
+            }
+            self.tx.consume(n);
+        }
+    }
+
+    /// Queue `parts` as one unit (all or nothing) and start sending.
+    fn send(&mut self, parts: &[&[u8]]) -> bool {
+        let buf = unsafe { &mut *core::ptr::addr_of_mut!(TX) };
+        let ok = self.tx.push(buf, parts);
+        if !ok {
+            self.tx_dropped = self.tx_dropped.wrapping_add(parts.iter().map(|p| p.len() as u32).sum());
+            self.err = Some("Queue overflow");
+        }
+        self.pump();
+        ok
+    }
+
+    /// Wait (bounded) until everything queued is on the wire.
+    fn flush(&mut self) {
+        let end = self.ms() + 1000;
+        loop {
+            self.pump();
+            if self.tx.is_empty() && self.in_flight == 0 {
+                break;
+            }
+            if self.ms() > end {
+                break;
+            }
+        }
+    }
+
+    /// Next complete, valid request frame, if any. SCPI lines met on the way
+    /// are kept for `take_line` (input then waits until the line is taken).
+    pub fn poll(&mut self) -> Option<Frame> {
+        self.pump();
+        let now = self.ms();
+        let up = unsafe { r32(GPIOC_IDR) } & (1 << 14) != 0;
+        if up != self.link {
+            // New connection or a drop: no partial request survives it.
+            self.link = up;
+            self.rx.reset();
+            self.line_ready = false;
+        }
+        loop {
+            if self.line_ready {
+                return None;
+            }
+            let rd = &mut self.rd;
+            let mut src = || rx_byte(rd);
+            match self.rx.next(now, &mut src)? {
+                Event::Frame(f) => return Some(f),
+                Event::Line(l) => {
+                    if self.lines_on && now >= self.quiet_until {
+                        self.line[..l.len()].copy_from_slice(l);
+                        self.line_n = l.len();
+                        self.line_ready = true;
+                    }
+                }
+                Event::Overrun => {
+                    if self.lines_on {
+                        self.err = Some("Input buffer overrun");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The next SCPI message from the BT link: Ok(line without terminator),
+    /// or Err(error for SYST:ERR?): a refused line (DBG:* over an untrusted
+    /// link: nothing of it runs), an input overrun or an output overflow.
+    /// Call it only when the previous BT query has been answered: lines are
+    /// then handled in order like on a serial instrument (no interrupted
+    /// queries). Lines arrive through `poll`, so call that too.
+    pub fn take_line(&mut self) -> Option<Result<&[u8], &'static str>> {
+        self.lines_on = true;
+        if let Some(e) = self.err.take() {
+            return Some(Err(e));
+        }
+        if !self.line_ready {
             return None;
         }
-        let b = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(RX[self.rd])) };
-        self.rd = (self.rd + 1) % RX_LEN;
-        Some(b)
-    }
-
-    /// Next complete, valid request frame, if any.
-    pub fn poll(&mut self) -> Option<Frame> {
-        while let Some(b) = self.rx_byte() {
-            if self.n == 0 && b != 0xAF {
-                continue;
-            }
-            self.buf[self.n] = b;
-            self.n += 1;
-            if self.n == 3 {
-                let id = (self.buf[1], self.buf[2]);
-                if id != (0x05, 0x03) && id != (0xFF, 0xFF) {
-                    self.resync();
-                    continue;
-                }
-            }
-            if self.n == 5 && self.buf[4] as usize > MAX_DATA {
-                self.resync();
-                continue;
-            }
-            if self.n >= 5 && self.n == 5 + self.buf[4] as usize + 1 {
-                let n = self.n;
-                self.n = 0;
-                let sum = self.buf[..n].iter().fold(0u8, |a, &x| a.wrapping_add(x));
-                if sum != 0 {
-                    continue;
-                }
-                let len = self.buf[4] as usize;
-                let mut f = Frame { cmd: self.buf[3], len, data: [0; MAX_DATA], broadcast: self.buf[1] == 0xFF };
-                f.data[..len].copy_from_slice(&self.buf[5..5 + len]);
-                return Some(f);
-            }
+        self.line_ready = false;
+        let l = &self.line[..self.line_n];
+        if let Some(e) = proto::untrusted_refusal(l) {
+            return Some(Err(e));
         }
-        None
+        Some(Ok(l))
     }
 
-    fn resync(&mut self) {
-        // Restart at the next 0xAF inside what we buffered.
-        let start = self.buf[1..self.n].iter().position(|&x| x == 0xAF).map(|i| i + 1);
-        match start {
-            Some(s) => {
-                self.buf.copy_within(s..self.n, 0);
-                self.n -= s;
-            }
-            None => self.n = 0,
-        }
-    }
-
-    fn tx(&self, b: u8) {
-        unsafe {
-            while r32(STAT) & (1 << 7) == 0 {} // TBE
-            w32(DATA, b as u32);
-        }
-    }
-
-    /// Send a response frame (blocking, a few hundred us at 115200).
-    pub fn reply(&self, cmd: u8, data: &[u8], broadcast: bool) {
+    /// Send a response frame (queued; ~(6 + len) * 87 us on the wire).
+    pub fn reply(&mut self, cmd: u8, data: &[u8], broadcast: bool) {
         let hdr = if broadcast { [0xDF, 0xFF, 0xFF] } else { [0xDF, 0x05, 0x03] };
         let mut sum = 0u8;
         for &b in hdr.iter().chain(&[cmd, data.len() as u8]).chain(data) {
             sum = sum.wrapping_add(b);
-            self.tx(b);
         }
-        self.tx(0u8.wrapping_sub(sum));
+        self.send(&[&hdr, &[cmd, data.len() as u8], data, &[0u8.wrapping_sub(sum)]]);
     }
 
-    /// Send a raw AT command to the module (name changes etc.).
-    pub fn at(&self, cmd: &[u8]) {
-        for &b in cmd {
-            self.tx(b);
-        }
+    /// Send a raw AT command to the module (name changes etc.); returns when
+    /// it is on the wire, so an answer window can start.
+    pub fn at(&mut self, cmd: &[u8]) {
+        self.send(&[cmd]);
+        self.flush();
     }
 }
 
@@ -214,13 +443,16 @@ impl Bt {
         let end = clk.now_ms() + ms as u64;
         let mut n = 0;
         while clk.now_ms() < end {
-            if let Some(b) = self.rx_byte() {
+            self.pump();
+            if let Some(b) = rx_byte(&mut self.rd) {
                 if n < out.len() {
                     out[n] = b;
                     n += 1;
                 }
             }
         }
+        // A late part of the answer must not reach the SCPI parser.
+        self.quiet_until = self.ms() + AT_QUIET_MS;
         n
     }
 
@@ -264,6 +496,8 @@ impl Bt {
             let mut _b = [0u8; 64];
             self.at_answer(clk, 100, &mut _b);
             self.at(b"AT+RESET\r\n");
+            // The module restarts; whatever it prints meanwhile is not SCPI.
+            self.quiet_until = self.ms() + 2000;
         }
     }
 
