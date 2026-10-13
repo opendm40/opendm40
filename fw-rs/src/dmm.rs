@@ -636,21 +636,8 @@ const ACDC_RELAY_PULSE: bool = true;
 /// 350 ms: R20 = 0xf0, CTA, R20 = 0xf2) in AC+DC too: on every poll, also
 /// during the settle, in the ACV / DCV / DCmV / DCA phases, and after every
 /// result in the ACA phase (never in the ACmV phase).
-const ACDC_FREQ_RESTART: bool = false;
+const ACDC_FREQ_RESTART: bool = true;
 
-/// EXPERIMENT: plain AC V cycles the RMS source (R34) for the diagnostic.
-const DIAG_R34_CYCLE: bool = false;
-/// EXPERIMENT: plain AC V re-enables AD2 / AD3 every 4 diagnostic entries
-/// with a swept skew between the ENAD2 (R26) and ENAD3 (R34) writes: step
-/// 0..15 = R26 first, then R34 after step us; 16..31 = R34 first, then R26
-/// after (step - 16) us. The step is reported as late_ms of the entry.
-const DIAG_EN_SWEEP: bool = true;
-
-/// Busy-wait `n` core cycles (DWT CYCCNT).
-fn delay_cycles(n: u32) {
-    let t0 = unsafe { crate::mmio::r32(0xE000_1004) };
-    while unsafe { crate::mmio::r32(0xE000_1004) }.wrapping_sub(t0) < n {}
-}
 /// AC+DC diagnostic ring: AC phases kept (`acdc_diag`).
 const ACDC_DIAG_N: usize = 4;
 
@@ -1893,45 +1880,14 @@ impl Dmm {
         let mut ac = sq * s * cal(g_rms + 4 * ci, 1.0) - cal(o_rms + 4 * ci, 0.0);
         let dcp = lpf * s * cal(g_lpf + 4 * ci, 1.0) - cal(o_lpf + 4 * ci, 0.0);
         if self.diag_on {
-            let mut r34 = 0u16;
             if !self.acdc && self.diag[self.diag_k as usize % ACDC_DIAG_N].n >= 4 {
                 self.diag_k = self.diag_k.wrapping_add(1);
                 self.diag[self.diag_k as usize % ACDC_DIAG_N] = AcPhaseDiag::EMPTY;
-                // EXPERIMENT (read-path investigation): plain AC V cycles the
-                // RMS converter source every 4 entries: R34 0x88 = SVXI (sum
-                // X*Y, the row value), 0x80 = sum X^2 (AD2), 0x8C = sum Y^2
-                // (AD3; SDO23 also routes AD3 to the AD2/LPF registers).
-                if DIAG_R34_CYCLE && m == 0 {
-                    let v = [0x88u8, 0x80, 0x8C][(self.diag_k / 4 % 3) as usize];
-                    hy::write(0x34, &[v]);
-                    r34 = 0x8000 | v as u16;
-                }
-                if DIAG_EN_SWEEP && m == 0 && self.diag_k % 4 == 0 {
-                    let step = (self.diag_k / 4 % 32) as u8;
-                    let cfg = &CFG_F0[(self.range.max(0) as usize).min(3)];
-                    let (r26, r34v) = (cfg[6], cfg[20]);
-                    let d = (step as u32 % 16) * 200; // 1 us steps at 200 MHz
-                    hy::write(0x26, &[0]);
-                    hy::write(0x34, &[0]);
-                    if step < 16 {
-                        hy::write(0x26, &[r26]);
-                        delay_cycles(d);
-                        hy::write(0x34, &[r34v]);
-                    } else {
-                        hy::write(0x34, &[r34v]);
-                        delay_cycles(d);
-                        hy::write(0x26, &[r26]);
-                    }
-                    r34 = 0x8000 | step as u16;
-                }
             }
             let e = &mut self.diag[self.diag_k as usize % ACDC_DIAG_N];
             let j = e.n as usize;
             if j == 0 {
                 e.late_ms = now.saturating_sub(self.deadline).min(u16::MAX as u64) as u16;
-                if r34 != 0 {
-                    e.late_ms = r34 & 0xFF;
-                }
             }
             if j < 4 {
                 let t0 = self.diag_t;

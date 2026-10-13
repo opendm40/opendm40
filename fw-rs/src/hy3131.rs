@@ -37,6 +37,10 @@ pub const INTF_LPF: u8 = 1 << 3;
 pub const INTF_RMS: u8 = 1 << 4;
 pub const INTF_CT: u8 = 1 << 0;
 
+/// R26 bit 7 / R34 bit 7: enable AD2 / AD3.
+const ENAD2: u8 = 0x80;
+const ENAD3: u8 = 0x80;
+
 #[inline(always)]
 fn set(port: u32, pin: u32, high: bool) {
     let bit = if high { 1 << pin } else { 1 << (pin + 16) };
@@ -142,8 +146,29 @@ pub fn quiesce() {
 }
 
 pub fn configure(cfg: &[u8; CFG_LEN]) {
-    write(R_CFG, cfg);
-    write(R_INTE, &[0]);
+    let (r26, r34) = (cfg[6], cfg[20]);
+    if r26 & ENAD2 != 0 && r34 & ENAD3 != 0 {
+        // Every AC row (f0, f2, f4, f5_6) runs the RMS converter on
+        // sum(AD2 * AD3) / N (R34 SVXI). With the row written as is, ENAD2
+        // (R26) is set some 14 bytes before ENAD3 (R34), and when AD3 then
+        // starts in a bad phase of the shared AD2/AD3 decimation (period
+        // OSR2 / FAD2CLK = 13 us) sqrt(RMS) beats against the signal for as
+        // long as the row stays: +-11 % on the 40 Hz PWM at AC V r1, both in
+        // plain AC and in AC+DC (docs/acdc-stock-vs-fwrs.md, "Read-path
+        // investigation"). Enabling AD3 first and AD2 last was clean for
+        // every skew tried (0..15 us), so the row goes out with both off
+        // and they are switched on in that order.
+        let mut c = *cfg;
+        c[6] = r26 & !ENAD2;
+        c[20] = r34 & !ENAD3;
+        write(R_CFG, &c);
+        write(R_INTE, &[0]);
+        write(0x34, &[r34]);
+        write(0x26, &[r26]);
+    } else {
+        write(R_CFG, cfg);
+        write(R_INTE, &[0]);
+    }
 }
 
 // -------------------------------------------------------- data-logger fast AD1
