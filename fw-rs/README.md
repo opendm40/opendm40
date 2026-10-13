@@ -82,8 +82,10 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   DMM and the scope measure at the same time (never done by the stock, off by
   default).
 
-Not implemented: screenshots / CSV to the SPI disk,
-config.bin (settings are in backup SRAM instead), AC+DC (DM40B/C only).
+Not implemented: CSV recording to the SPI disk, config.bin (settings are in
+backup SRAM instead). Screenshots to the SPI disk (3-finger swipe, stock
+`S%03u.BMP` files) and AC+DC on all models (stock: DM40B/C only) are
+implemented; their open items are in TODO.md.
 
 ## SCPI
 

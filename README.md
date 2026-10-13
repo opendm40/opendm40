@@ -1,10 +1,20 @@
 # Alientek Device Protocol Documentation
 
-This repository contains protocol documentation and implementation for two Alientek devices:
-- **EL15 Electronic Load**
-- **DM40 Multimeter**
+This repository contains Bluetooth protocol documentation and Python clients
+for two Alientek devices:
+- **EL15 Electronic Load** (`el15.py`)
+- **DM40 Multimeter** (`dm40.py`)
 
 Both devices communicate via Bluetooth RFCOMM protocol.
+
+It also holds DM40 firmware work:
+- [fw-rs/](fw-rs/README.md): replacement firmware for the DM40 written in Rust
+  (multimeter, scope and generator at the same time, Bluetooth, USBTMC/SCPI),
+  installed like a stock update file
+- [firmware/dm40fw.py](firmware/dm40fw.py): decode, encode and pack DM40
+  firmware update files (`dm40_v_X_Y.bin`)
+- [firmware/re/analysis/](firmware/re/analysis/): notes on the stock firmware
+  V2.6 that fw-rs is based on
 
 ## Connection Setup
 
