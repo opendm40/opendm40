@@ -296,7 +296,8 @@ impl App {
             charging: self.power.charging(),
             roll: self.scope.rolling(),
             record,
-            gen_hz: if self.gen.s.on { self.gen.actual_hz() } else { 0.0 },
+            // Combined view: the strip's GEN badge shows it instead.
+            gen_hz: if self.gen.s.on && self.view == View::Scope { self.gen.actual_hz() } else { 0.0 },
             ch1_open: matches!(sp.popup, su::Popup::Ch1(_)),
             math_open: matches!(sp.popup, su::Popup::Math(_)),
             pressed: if now < sp.pressed_until { sp.pressed } else { 0 },
@@ -304,9 +305,35 @@ impl App {
         }
     }
 
-    /// The scope page is shown (the stock replica).
+    /// A stock-replica scope page is shown (the Scope page, or the combined
+    /// view: the same page with the meter strip).
     pub(super) fn sp_on(&self) -> bool {
-        self.view == View::Scope
+        matches!(self.view, View::Scope | View::DmmScope)
+    }
+
+    /// The page is covered (popup, "Sampling" box, the combined view's
+    /// function band): no page drawing.
+    pub(super) fn sp_covered(&self) -> bool {
+        self.sp.covered() || (self.view == View::DmmScope && self.band_until != 0)
+    }
+
+    /// Combined view: the meter strip from the shown reading.
+    pub(super) fn sp_strip(&mut self) {
+        if self.sp.covered() {
+            return;
+        }
+        let Some(r) = self.meter.shown().copied() else {
+            su::meter_strip(&su::StripData::EMPTY);
+            return;
+        };
+        let (hold, lim) = (self.meter.hold_state(), self.meter.verdict());
+        let mut d = ui::strip_data(&r, hold, lim, self.meter.rel_active(), self.hv_level, self.strip_alt, self.dmm_view.label, crate::csvlog::active());
+        if self.gen.s.on {
+            let mut b = su::Buf::new();
+            su::fmt_hz(&mut b, self.gen.actual_hz());
+            d.gen = su::Txt::new(b.as_str());
+        }
+        su::meter_strip(&d);
     }
 
     /// Full page draw (after `redraw`).
@@ -316,6 +343,13 @@ impl App {
         self.sp_render();
         self.sp_update(self.now);
         self.sp_cells();
+        if self.view == View::DmmScope {
+            su::strip_invalidate();
+            self.sp_strip();
+            if self.band_until != 0 {
+                ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2);
+            }
+        }
         if self.sp.popup != su::Popup::None {
             self.sp_popup_draw();
         }
@@ -510,7 +544,7 @@ impl App {
             self.redraw = true;
             return;
         }
-        if self.sp.covered() {
+        if self.sp_covered() {
             return;
         }
         self.sp_update(now);
@@ -565,6 +599,37 @@ impl App {
         if self.sp.popup != su::Popup::None {
             return self.sp_popup_gesture(clk, g);
         }
+        if self.view == View::DmmScope {
+            // Combined view: DMM keys; the strip and the function band keep
+            // their own handling (app.rs); the strip is not a drag area (a
+            // swipe from it changes the view).
+            match g {
+                Gesture::KeyDown(_) | Gesture::KeyUp(_) => return None,
+                Gesture::Down(_) | Gesture::Tap(_) if self.band_until != 0 => return None,
+                Gesture::Down(p) if su::strip_hit(p.x, p.y).is_some() => return Some(false),
+                Gesture::Tap(p) => {
+                    if let Some(badges) = su::strip_hit(p.x, p.y) {
+                        self.beep(now, 30);
+                        if badges {
+                            self.rel_toggle(now);
+                        } else {
+                            self.band_open(now);
+                        }
+                        return Some(false);
+                    }
+                }
+                Gesture::LongPress(p) => {
+                    if su::strip_hit(p.x, p.y).is_some() {
+                        self.beep(now, 60);
+                        self.show(View::Dmm, clk);
+                        return Some(true);
+                    }
+                    return Some(false);
+                }
+                Gesture::SwipeLeft | Gesture::SwipeRight => return None,
+                _ => {}
+            }
+        }
         match g {
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
                 let hit = self.sp_select(p);
@@ -593,7 +658,7 @@ impl App {
             }
             Gesture::Down(p) => {
                 // Right panel: pressed feedback (stock: none; ours, switchable).
-                if let Some(k) = panel_hit(p) {
+                if let Some(k) = su::panel_hit(p.x, p.y) {
                     if self.sp.press_fx {
                         self.sp.pressed = k as u8 + 1;
                         self.sp.pressed_until = now + PRESS_MS;
@@ -646,7 +711,7 @@ impl App {
                 Some(false)
             }
             Gesture::Tap(p) => {
-                if let Some(k) = panel_hit(p) {
+                if let Some(k) = su::panel_hit(p.x, p.y) {
                     self.beep(now, 30);
                     self.sp_panel(clk, k, now);
                     return Some(false);
@@ -1343,24 +1408,6 @@ const AS_CAND: [usize; 4] = [9, 6, 3, 0];
 /// First timebase whose s/div exceeds a quarter period (FUN_08033388).
 fn tb_for(period: f32) -> usize {
     scope::SDIV.iter().position(|&d| period / 4.0 < d).unwrap_or(scope::TB_MAX).clamp(scope::TB_MIN, scope::TB_YT_MAX)
-}
-
-/// Right-panel button under a touch: the stock rects, x from the panel edge
-/// and 4 px of slop up / down (the 1 / 8 px gaps between the pills go to the
-/// nearer button instead of nowhere).
-fn panel_hit(p: Point) -> Option<usize> {
-    if p.x < 414 {
-        return None;
-    }
-    let y = p.y as i16;
-    let mut best: Option<(i16, usize)> = None;
-    for (k, r) in su::B_RECT.iter().enumerate() {
-        let d = if y < r.y { r.y - y } else if y >= r.y + r.h { y - (r.y + r.h - 1) } else { 0 };
-        if d <= 4 && best.map_or(true, |b| d < b.0) {
-            best = Some((d, k));
-        }
-    }
-    best.map(|b| b.1)
 }
 
 /// The pinch value bubble: centred in the graph.

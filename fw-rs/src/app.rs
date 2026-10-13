@@ -482,15 +482,9 @@ impl App {
                 self.hv_shown = false;
             }
             View::DmmScope => {
-                // Scope chrome + graph and an empty meter strip; the strip
-                // content follows with the shown reading (draw_reading).
+                // The stock scope page with the meter strip (scope_page.rs).
                 self.dmm_view.invalidate();
-                self.dmm_view.strip_static();
-                ui::SCOPE_COMBINED.draw_static(&self.scope);
-                ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
-                if self.band_until != 0 {
-                    ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2);
-                }
+                self.sp_draw_static();
                 self.hv_shown = false;
             }
             View::Scope => self.sp_draw_static(),
@@ -677,7 +671,10 @@ impl App {
         let (hold, lim) = (self.meter.hold_state(), self.meter.verdict());
         match self.view {
             View::Dmm => self.dmm_view.reading(&r, hold, lim),
-            View::DmmScope => self.dmm_view.strip(&r, hold, lim, self.meter.rel_active(), self.hv_level, self.strip_alt),
+            View::DmmScope => {
+                let _ = (hold, lim);
+                self.sp_strip();
+            }
             _ => {}
         }
     }
@@ -698,10 +695,8 @@ impl App {
 
     /// The scope graph of the shown view, if it has one.
     fn scope_view(&self) -> Option<&'static ui::ScopeView> {
-        match self.view {
-            View::DmmScope => Some(&ui::SCOPE_COMBINED),
-            _ => None,
-        }
+        // Both scope views are the stock replica now (scope_page.rs).
+        None
     }
 
     /// Combined view: open (or keep open) the DMM function band.
@@ -719,9 +714,7 @@ impl App {
         }
         self.band_until = 0;
         if self.view == View::DmmScope {
-            ui::band_clear();
-            ui::scope_panel(&self.scope, false);
-            self.scope_invalidate();
+            self.redraw = true;
         }
     }
 
@@ -1052,9 +1045,11 @@ impl App {
             let st = self.status(now);
             match self.view {
                 View::Dmm => ui::status_right(&st),
-                View::DmmScope | View::ScopeMenu => {
+                View::ScopeMenu => {
                     ui::scope_status(&st);
                     ui::ScopeView::gen_chip(&self.gen);
+                }
+                View::DmmScope => {
                     // REL and a limit verdict share a strip badge: alternate.
                     self.strip_alt = !self.strip_alt;
                     if self.view == View::DmmScope {

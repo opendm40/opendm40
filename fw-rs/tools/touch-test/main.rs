@@ -45,6 +45,8 @@ mod meter;
 mod scope;
 #[path = "../../src/scope_meas.rs"]
 mod scope_meas;
+#[path = "../../src/scope_ui.rs"]
+mod scope_ui;
 #[path = "../../src/stockfont.rs"]
 mod stockfont;
 #[path = "../../src/text.rs"]
@@ -543,6 +545,44 @@ fn hit_tests(ck: &mut Ck) {
     ui::SCOPE_FULL.draw_static(&sc);
     page(ck, "scope panel", &pidx(true), &|b| b.x0 >= 414, &[]);
     page(ck, "scope chips", &|x, y| o(ui::chip_hit(x, y)), &|b| b.y1 < ui::SBAR_H as i32, &[0, 1, 2, 3]);
+    // Stock-replica scope page: right panel (4 px vertical slop), MF popup
+    // tabs, CH1 popup.
+    host::reset(0);
+    scope_ui::invalidate();
+    scope_ui::update(&scope_ui::Model::DEFAULT);
+    page(ck, "replica panel", &|x, y| scope_ui::panel_hit(x, y).map(|k| k as u32), &|b| b.x0 >= 414, &[0, 1, 2, 3, 4, 5, 6]);
+    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None };
+    for tab in 0..4u8 {
+        host::reset(0);
+        scope_ui::draw_mf(tab, &pv);
+        let hit = move |x: u16, y: u16| match scope_ui::mf_hit(tab, &pv, x as i16, y as i16) {
+            scope_ui::MfHit::Tab(t) => Some(1000 + t as u32),
+            scope_ui::MfHit::Cell(i) => Some(i as u32),
+            scope_ui::MfHit::SelCell(i) => Some(100 + i as u32),
+            scope_ui::MfHit::Clear => Some(200),
+            scope_ui::MfHit::Default => Some(201),
+            scope_ui::MfHit::Roll(on) => Some(300 + on as u32),
+            scope_ui::MfHit::Persist(i) => Some(310 + i as u32),
+            scope_ui::MfHit::Bright => Some(320),
+            scope_ui::MfHit::Grid => Some(321),
+            scope_ui::MfHit::Rising(r) => Some(330 + r as u32),
+            scope_ui::MfHit::Mode(m) => Some(340 + m as u32),
+            scope_ui::MfHit::PriScr => Some(350),
+            scope_ui::MfHit::SaveCsv => Some(351),
+            _ => None,
+        };
+        page(ck, &format!("replica MF tab {tab}"), &hit, &|b| b.y0 >= 21, &[]);
+    }
+    for tab in 0..3u8 {
+        host::reset(0);
+        scope_ui::draw_ch1(tab, &pv);
+        let hit = move |x: u16, y: u16| match scope_ui::side_hit(false, tab, &pv, x as i16, y as i16) {
+            scope_ui::SideHit::Tab(t) => Some(1000 + t as u32),
+            scope_ui::SideHit::Coupling(c) => Some(c as u32),
+            _ => None,
+        };
+        page(ck, &format!("replica CH1 tab {tab}"), &hit, &|b| b.x0 >= 215 && b.y0 >= 50, &[1000, 1001, 1002]);
+    }
     // Scope settings window, every tab.
     for tab in 0..4usize {
         host::reset(0);

@@ -800,6 +800,94 @@ impl DmmView {
     }
 }
 
+/// ASCII form of a unit for the 12 px stock font (no ohm / micro / degree
+/// glyphs): ohm -> "Ohm", micro -> "u", "deg C" -> "C".
+fn ascii_unit(u: &str, out: &mut crate::scope_ui::Txt) {
+    for c in u.chars() {
+        match c {
+            '\u{3a9}' => out.push("Ohm"),
+            '\u{b5}' => out.push("u"),
+            '\u{b0}' => {}
+            c => {
+                let mut b = [0u8; 4];
+                out.push(c.encode_utf8(&mut b));
+            }
+        }
+    }
+}
+
+/// Meter strip contents of the stock-style combined view (scope_ui::
+/// meter_strip): the reading as on the old strip (value without the extra
+/// digit, OL = "0L"), sub readings (AC+DC parts tagged "AC" / "DC", Hz and
+/// duty, the 4-20 mA percentage, the temperature sensor name), one state
+/// badge by priority HOLD / A-HOLD > HV (>= 30 V) > REC > REL / limit
+/// verdict (alternating with `alt`) > range (AUTO / AUTO+ / MANU).
+pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, label: Option<&'static str>, rec: bool) -> crate::scope_ui::StripData {
+    use crate::scope_ui::{StripData, Txt};
+    let mut d = StripData::EMPTY;
+    d.func = match crate::meter::func_of(r) {
+        0 | 2 => "AC V",
+        1 | 3 => "DC V",
+        4..=6 => "AC A",
+        7..=9 => "DC A",
+        10 => "OHM",
+        11 => "CONT",
+        12 => "DIODE",
+        13 => "CAP",
+        14 => "FREQ",
+        16 | 17 => "AC+DC",
+        _ => "TEMP",
+    };
+    let mut buf = [0u8; 16];
+    let (v, _, _) = fmt7(&mut buf, &r.main, false);
+    d.value = Txt::new(v.trim());
+    let mut ub = [0u8; 16];
+    let unit = sf::unit_text(r.main.unit, &mut ub);
+    d.unit = Txt::new(unit);
+    d.unit_letters = !unit.chars().all(|c| sf::SC_DIGITS.glyph(c as u32).is_some());
+    let (aux, lp) = aux_shown(r);
+    let temp = r.mode == 15 && label.is_some();
+    for (i, a) in aux.iter().enumerate() {
+        let mut t = Txt::EMPTY;
+        if temp && i == 1 {
+            t.push(label.unwrap_or(""));
+        } else if let Some(v) = a {
+            if r.acdc {
+                t.push(["AC ", "DC "][i]);
+            } else if lp && i == 1 {
+                t.push("4-20mA ");
+            }
+            let mut b = [0u8; 16];
+            t.push(meter::text(&mut b, v));
+            ascii_unit(v.unit, &mut t);
+        }
+        d.sub[i] = t;
+    }
+    let verdict = match lim {
+        meter::V_PASS => Some(("PASS", 0x0400)),
+        meter::V_HI => Some(("HI", 0xf800)),
+        meter::V_LO => Some(("LO", 0xf800)),
+        _ => None,
+    };
+    let (b, c) = match hold {
+        1 => ("HOLD", 0xfaa0),
+        2 => ("A-HOLD", 0x5acb),
+        3 => ("A-HOLD", 0xfaa0),
+        _ if hv >= 1 => ("HV", 0xc9a0),
+        _ if rec => ("REC", 0xf800),
+        _ if rel && (verdict.is_none() || alt) => ("REL", 0xb833),
+        _ if verdict.is_some() => verdict.unwrap_or(("", 0)),
+        _ if temp => ("", 0x5acb),
+        _ if !r.auto => ("MANU", 0x5acb),
+        _ if r.auto_plus => ("AUTO+", 0x5acb),
+        _ => ("AUTO", 0x5acb),
+    };
+    d.badge = b;
+    d.badge_col = c;
+    d.hv = hv >= 2;
+    d
+}
+
 /// HOLD / RUN slot of the DMM status bar. Manual HOLD keeps the stock F21
 /// "HOLD"; AutoHold is a different face so the two cannot be confused:
 /// "A-HOLD" in TEXT22 (66 px, F21 would need 103), accent blue while it waits
