@@ -6,6 +6,7 @@
 //! (firmware/re/analysis/spiflash_v2_6.h).
 
 use usb_device::class_prelude::*;
+use usb_device::prelude::UsbDeviceState;
 use usbd_storage::subclass::scsi::{Scsi, ScsiCommand};
 use usbd_storage::subclass::Command;
 use usbd_storage::transport::bbb::{BulkOnly, BulkOnlyError};
@@ -89,15 +90,18 @@ const SENSE_MEDIUM_CHANGED: Sense = Sense(0x06, 0x28, 0x00);
 /// the disk mounted keeps its own FAT / directory cache, so the device must
 /// not write the volume meanwhile (screenshot.rs refuses) and must not send
 /// it UNIT ATTENTION (Linux fails I/O on a mounted removable disk until the
-/// next media poll). Cleared on a bus reset and while the device is not
-/// configured (unplugged / suspended: `set_configured`).
+/// next media poll). Cleared by an Allow, a bus reset (`Msc::reset`) and an
+/// unconfigure (`set_usb_state`: Default / Addressed), NOT by a USB suspend:
+/// Linux runtime autosuspend of an idle mounted disk keeps the mount (and
+/// sends no PREVENT again on resume), review 3443cea M2. VBUS sensing is off
+/// (usb.rs), so an unplug without eject also looks like a suspend: the lock
+/// then stays set ("Disk in use") until the replug's bus reset or a reboot,
+/// the safe side.
 static HOST_LOCKED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-static CONFIGURED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// A PC has the USB disk mounted (see HOST_LOCKED).
 pub fn host_mounted() -> bool {
-    use core::sync::atomic::Ordering::Relaxed;
-    HOST_LOCKED.load(Relaxed) && CONFIGURED.load(Relaxed)
+    HOST_LOCKED.load(core::sync::atomic::Ordering::Relaxed)
 }
 
 /// The I/O buffer handed to usbd-storage, shared through a raw pointer so
@@ -166,11 +170,11 @@ impl<'a, B: UsbBus> Msc<'a, B> {
         Msc { scsi, io: IoBuf { p, n }, xfer: Xfer::None, sense: SENSE_OK, blk: [0; MAX_BLOCK], write_inhibit: false }
     }
 
-    /// The device is configured by a host (main loop, every pass): while not
-    /// (unplugged, suspended), no host can have the disk mounted.
-    pub fn set_configured(&mut self, on: bool) {
-        CONFIGURED.store(on, core::sync::atomic::Ordering::Relaxed);
-        if !on {
+    /// The USB device state (main loop, every pass). Default / Addressed
+    /// (bus reset, SET_CONFIGURATION 0): no host can have the disk mounted,
+    /// the lock is cleared. Suspend keeps it (see HOST_LOCKED).
+    pub fn set_usb_state(&mut self, st: UsbDeviceState) {
+        if matches!(st, UsbDeviceState::Default | UsbDeviceState::Addressed) {
             HOST_LOCKED.store(false, core::sync::atomic::Ordering::Relaxed);
         }
     }

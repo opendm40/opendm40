@@ -252,7 +252,7 @@ fn main() -> ! {
         dev.poll(&mut [&mut tmc, &mut msc]);
         // M4: no host disk writes while the logger needs a constant interval.
         msc.set_write_inhibit(logger.disk_writes_blocked());
-        msc.set_configured(dev.state() == UsbDeviceState::Configured);
+        msc.set_usb_state(dev.state());
         msc.poll(&mut disk);
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
@@ -490,6 +490,13 @@ fn main() -> ! {
                         Err(csvlog::GErr::Busy) => scpi.set_err("Mass storage busy"),
                         Err(_) => scpi.set_err("Mass storage error"),
                     }
+                    false
+                }
+                // Starting a CSV recording over an open radio link: USB only
+                // (it blocks host writes, e.g. staging an update, until
+                // stopped; review 3443cea L5). LOG:CSV OFF / LOG:CSV? stay.
+                scpi::Out::Log(scpi::Log::Csv(Some(true))) if !port.trusted() => {
+                    scpi.set_err(bt::proto::REFUSED);
                     false
                 }
                 scpi::Out::Log(l) => match l {

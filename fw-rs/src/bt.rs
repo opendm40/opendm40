@@ -12,7 +12,8 @@
 //!       crc makes the byte sum 0 mod 256. `poll` returns them.
 //!   - SCPI lines (letter / '*' / ':' .. '\n'), the same parser as USBTMC.
 //!     `take_line` returns them; the transport is UNTRUSTED (an open radio
-//!     link): DBG:* is refused before the parser sees it (ScpiPort::trusted).
+//!     link): DBG:* is refused before the parser sees it (ScpiPort::trusted);
+//!     main.rs also refuses MMEM:DEL and LOG:CSV ON from it.
 //!     Replies go out with a '\n' terminator (also after a #-block).
 //!
 //! Throughput: 115200 8N1 = 11.5 kB/s, 87 us/byte. READ? reply (15 B) 1.3 ms;
@@ -92,7 +93,8 @@ pub trait ScpiPort {
     /// False: DBG:* (reflash / reset / watchdog release / input injection /
     /// debug reads) must never run from this transport. Bt::take_line
     /// already refuses such lines; main.rs checks this again before acting
-    /// on `scpi::Out::Dbg` (defence in depth).
+    /// on `scpi::Out::Dbg` (defence in depth), and refuses MMEM:DEL and
+    /// LOG:CSV ON (disk changes) from it.
     fn trusted(&self) -> bool;
 }
 
@@ -170,6 +172,21 @@ pub struct Bt {
     inited: bool,
 }
 
+const CYC_PER_MS: u32 = HCLK_HZ / 1000;
+
+/// Spin until `done()` or `ms` milliseconds (DWT cycles), feeding the
+/// watchdog (when the main loop feeds it). False: timed out.
+fn wait_until(ms: u32, mut done: impl FnMut() -> bool) -> bool {
+    let t0 = unsafe { r32(DWT_CYCCNT) };
+    while !done() {
+        if unsafe { r32(DWT_CYCCNT) }.wrapping_sub(t0) > ms * CYC_PER_MS {
+            return false;
+        }
+        crate::wdt::kick_if_feeding();
+    }
+    true
+}
+
 impl Bt {
     pub fn new() -> Self {
         unsafe {
@@ -185,7 +202,7 @@ impl Bt {
 
             // DMA0 channel 2, request 4 = UART4 RX, P->M, byte, MINC, circular.
             w32(RX_CTL, 0);
-            while r32(RX_CTL) & 1 != 0 {}
+            let _ = wait_until(10, || r32(RX_CTL) & 1 == 0);
             w32(DMA_INTC0, 0x3D << 16); // clear channel 2 flags
             w32(RX_PADDR, DATA);
             w32(RX_M0ADDR, core::ptr::addr_of!(RX) as u32);
@@ -194,7 +211,7 @@ impl Bt {
 
             // DMA0 channel 4 (TX): idle until `pump` starts a segment.
             w32(TX_CTL, 0);
-            while r32(TX_CTL) & 1 != 0 {}
+            let _ = wait_until(10, || r32(TX_CTL) & 1 == 0);
             w32(DMA_INTC1, 0x3D); // clear channel 4 flags
             w32(TX_PADDR, DATA);
 
@@ -224,7 +241,6 @@ impl Bt {
     }
 
     fn ms(&mut self) -> u64 {
-        const CYC_PER_MS: u32 = HCLK_HZ / 1000;
         let c = unsafe { r32(DWT_CYCCNT) };
         self.t_acc += c.wrapping_sub(self.t_last);
         self.t_last = c;
@@ -246,7 +262,7 @@ impl Bt {
                 // time + 50 ms without finishing: the DMA request never comes.
                 if self.ms() > self.tx_due {
                     w32(TX_CTL, 0);
-                    while r32(TX_CTL) & 1 != 0 {}
+                    let _ = wait_until(10, || r32(TX_CTL) & 1 == 0);
                     let sent = self.in_flight - (r32(TX_CNT) as usize).min(self.in_flight);
                     self.tx.consume(sent);
                     self.in_flight = 0;
@@ -276,19 +292,30 @@ impl Bt {
         }
     }
 
-    /// Fallback TX: write the whole queue out, byte by byte (blocks).
+    /// Fallback TX: write the whole queue out, byte by byte (blocks; a full
+    /// 8 KiB ring is ~0.7 s at 115200, the watchdog fed meanwhile). Bounded
+    /// (review 3443cea L2): a TBE that does not come within 10 ms (one byte
+    /// is 87 us) or 2 s in all drops the rest of the queue (counted in
+    /// `tx_dropped`).
     fn pump_blocking(&mut self) {
         let buf = unsafe { &*core::ptr::addr_of!(TX) };
+        let t0 = unsafe { r32(DWT_CYCCNT) };
         loop {
             let (s, n) = self.tx.segment();
             if n == 0 {
                 return;
             }
-            for &b in &buf[s..s + n] {
-                unsafe {
-                    while r32(STAT) & (1 << 7) == 0 {} // TBE
-                    w32(DATA, b as u32);
+            for (k, &b) in buf[s..s + n].iter().enumerate() {
+                let over = unsafe { r32(DWT_CYCCNT) }.wrapping_sub(t0) > 2000 * CYC_PER_MS;
+                // TBE
+                if over || !wait_until(10, || unsafe { r32(STAT) } & (1 << 7) != 0) {
+                    self.tx.consume(k);
+                    let left = self.tx.used();
+                    self.tx_dropped = self.tx_dropped.wrapping_add(left as u32);
+                    self.tx.consume(left);
+                    return;
                 }
+                unsafe { w32(DATA, b as u32) };
             }
             self.tx.consume(n);
         }

@@ -481,7 +481,18 @@ pub fn poll_on(disk: &mut dyn BlockDevice, now_ms: u64) {
             }
             return;
         }
-        if !due || crate::screenshot::busy() || crate::msc::HOST_WRITING.load(Ordering::Relaxed) {
+        // Deferred while a PC has the disk mounted (review 3443cea H1): its
+        // cached FAT / root would go stale under the commit, and a later host
+        // copy could reuse the CSV's clusters. Rows queue in the FIFO meanwhile;
+        // an overflow drops them and flags the next row GAP (as HOST_WRITING).
+        // A stop while mounted finishes after the eject; finish_blocking
+        // (power-off / reset) gives up after its bound with these rows
+        // uncommitted (the file stays a clean prefix).
+        if !due
+            || crate::screenshot::busy()
+            || crate::msc::HOST_WRITING.load(Ordering::Relaxed)
+            || crate::msc::host_mounted()
+        {
             return;
         }
         if !disk.present() || disk.block_size() as usize != BLK {
@@ -1236,6 +1247,11 @@ fn sfn_checksum(e: &[u8]) -> u8 {
 pub fn delete_on(disk: &mut dyn BlockDevice, name: &[u8; 11]) -> Result<(), GErr> {
     if kind_of_name(name).is_none() {
         return Err(GErr::NotFound);
+    }
+    // A PC with the disk mounted keeps its own FAT / root cache (review
+    // 3443cea M1; the gallery checks this itself too).
+    if crate::msc::host_mounted() {
+        return Err(GErr::Busy);
     }
     let j = job();
     if active() && j.has_file && *name == calbackup::numbered_name(b"LOG", j.n, b"CSV") {

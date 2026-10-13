@@ -67,6 +67,10 @@
 #   15. host write in progress (HOST_WRITING) for 120 rows: no block written
 #      meanwhile, nothing dropped; for 600 rows: FIFO overflow -> rows dropped,
 #      the next row flagged GAP, file consistent;
+#   15b. a PC mounts the disk mid-recording (msc::host_mounted, review 3443cea
+#      H1): no block written while mounted although the same window unmounted
+#      holds commits; 15 s: nothing dropped; 60 s: rows dropped, GAP, file
+#      consistent;
 #   16. power cut before every block write of a 1500-row recording (and a
 #      program-only write cut half way): fsck finds at most a lost cluster, a
 #      LOG chain longer than its size (truncated) or FAT 1 ahead of FAT 2;
@@ -77,7 +81,8 @@
 #   18. gallery: list (names, sizes vs mdir, free bytes), MMEM:CAT? text,
 #      delete LOG / BMP / a long-named LOG_WI~1.CSV (LFN entries removed),
 #      fsck clean; a delete between two commits of a recording; deleting the
-#      file being recorded is refused.
+#      file being recorded is refused; a delete while a PC has the disk
+#      mounted is refused (Busy, nothing written; review 3443cea M1).
 set -e
 cd "$(dirname "$0")"
 RUSTUP_HOME="$(cd ../../../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../../../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
@@ -631,6 +636,22 @@ fsckok $IMGH
 csvok $IMGH LOG000.CSV 2000 gap | tee $W/c4p
 grep -qE "[1-9][0-9]* skipped" $W/c4p && echo "ok: the row after the gap carries GAP" || { echo "FAIL at line $LINENO"; exit 1; }
 
+echo "--- PC mounts the disk mid-recording (commits deferred)"
+cp $W/csvbase.img $IMGH
+"$W/t" $IMGH csv rec 2000 mountwin 300 150 | tee $W/c7
+grep -qE "mount_writes=[1-9]" $W/c7 && echo "ok: baseline: the window holds commits when not mounted" || { echo "FAIL at line $LINENO"; exit 1; }
+cp $W/csvbase.img $IMGH
+"$W/t" $IMGH csv rec 2000 mount 300 150 | tee $W/c8
+grep -q "csv=Done file=Some(0) rows=2000 .* dropped=0" $W/c8 && grep -q "mount_writes=0 " $W/c8 && echo "ok: mounted for 15 s: no block written meanwhile, nothing dropped" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGH
+csvok $IMGH LOG000.CSV 2000 full
+cp $W/csvbase.img $IMGH
+"$W/t" $IMGH csv rec 2000 mount 300 600 | tee $W/c9
+grep -q "csv=Done file=Some(0) .* dropped=[1-9]" $W/c9 && grep -q "mount_writes=0 " $W/c9 && echo "ok: mounted for 60 s: FIFO overflow, rows dropped and counted, nothing written meanwhile" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGH
+csvok $IMGH LOG000.CSV 2000 gap | tee $W/c9p
+grep -qE "[1-9][0-9]* skipped" $W/c9p && echo "ok: the row after the gap carries GAP" || { echo "FAIL at line $LINENO"; exit 1; }
+
 echo "--- chain across the FAT 1 block boundary (clusters 2045..2048: link in block 0 written last)"
 IMGB=$W/diskb.img
 cp $W/csvbase.img $IMGB
@@ -720,6 +741,8 @@ grep -qx "cat=$((16740352 - F0)),$F0,\"LOG000.CSV,ASC,76028\",\"S000.BMP,BIN,307
 "$W/t" $IMGS csv del LOG000.CSV | tee $W/g2
 grep -q "del=Ok(())" $W/g2 && grep -q "free=$((F0 + 19 * 4096)) " $W/g2 && echo "ok: LOG000.CSV deleted, its 19 clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
+"$W/t" $IMGS csv del log_wi~1.csv mounted | tee $W/g2m
+grep -q "del=Err(Busy)" $W/g2m && grep -q "changed blocks: \[\]" $W/g2m && echo "ok: delete refused while a PC has the disk mounted, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMGS csv del log_wi~1.csv | grep -q "del=Ok(())" && echo "ok: long-named file deleted" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
 mdir -i $IMGS :: | grep -qi "long_name" && { echo "FAIL at line $LINENO: long name left"; exit 1; }
