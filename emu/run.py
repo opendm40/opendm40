@@ -81,7 +81,7 @@ def elf_body(path):
     return read(tmp)
 
 
-def compose_flash(mode, app, out_path, base=DUMP):
+def compose_flash(mode, app, out_path, base=DUMP, zero_marker=False):
     flash = bytearray(read(base))
     assert len(flash) == 0x100000, 'flash dump must be 1 MiB'
     if app == 'dump':
@@ -95,6 +95,8 @@ def compose_flash(mode, app, out_path, base=DUMP):
         # The 12-byte marker the ROM/loader manage = the update header (type 1,
         # length, body CRC); the ROM launches the app only if it matches.
         flash[MARKER - 0x08000000:MARKER - 0x08000000 + 12] = struct.pack('<3I', w0, ln, w2)
+    if zero_marker:
+        flash[MARKER - 0x08000000:MARKER - 0x08000000 + 12] = b'\0' * 12
     with open(out_path, 'wb') as f:
         f.write(flash)
     return out_path
@@ -152,6 +154,10 @@ def main():
     ap.add_argument('--base', default=DUMP, help='1 MiB flash dump to compose from')
     ap.add_argument('--app', help='application: .dec.bin / packed dm40*.bin / body / ELF, or "dump"')
     ap.add_argument('--disk', help='16 MiB SPI-flash image (default: working copy of the MSC dump in emu/out/)')
+    ap.add_argument('--disk-add', action='append', default=[], metavar='FILE[::NAME]',
+                    help='copy FILE into the working disk image (mtools), e.g. dm40-fw-native.bin::DM40_FW.BIN')
+    ap.add_argument('--zero-marker', action='store_true',
+                    help='zero the 12-byte loader marker at 0x08008000 (chain: the FS-loader then installs dm40*.bin)')
     ap.add_argument('--save-disk', help='write the SPI-flash image here at the end')
     ap.add_argument('--save-flash', help='write the internal flash here at the end')
     ap.add_argument('--uid', default=UID, help='12-byte chip UID file (0x1FFF7A10)')
@@ -175,7 +181,7 @@ def main():
     ap.add_argument('--log', help='Renode log file (default emu/out/<name>.log)')
     ap.add_argument('--name', help='base name of the generated .resc/.log (default: the mode)')
     ap.add_argument('--pa2', type=float, default=None, metavar='T',
-                    help='chain: release PA2 (power key) at T seconds; default 0.5 = ROM -> FS-loader -> app; '
+                    help='chain: release PA2 (power key) at T seconds; default 0.55 = ROM -> FS-loader -> app; '
                          '0 = ROM -> app directly; never (-1) = FS-loader install screen')
     ap.add_argument('--debug', default='', metavar='P1,P2',
                     help='peripherals to log at debug level, e.g. sysbus.i2c3,sysbus.i2c3.touch')
@@ -202,13 +208,23 @@ def main():
             app = app_from_file(build_fwrs())
         else:
             app = app_from_file(STOCK_DEC)
-        flash = compose_flash(a.mode, app, os.path.join(OUT, 'flash-%s.bin' % a.mode), a.base)
+        flash = compose_flash(a.mode, app, os.path.join(OUT, 'flash-%s.bin' % (a.name or a.mode)), a.base, a.zero_marker)
     print('flash image:', rel(flash))
 
     # ---- SPI disk ----
     disk = a.disk or os.path.join(OUT, 'disk.bin')
     if not a.disk and not os.path.exists(disk):
         shutil.copy(DISK_SRC, disk)
+    if a.disk_add:
+        # Work on a private copy so the shared working image is not changed.
+        priv = os.path.join(OUT, 'disk-%s.bin' % (a.name or a.mode))
+        shutil.copy(disk, priv)
+        disk = priv
+        for spec in a.disk_add:
+            src, _, name = spec.partition('::')
+            name = name or os.path.basename(src).upper()
+            subprocess.check_call(['mcopy', '-o', '-i', disk, src, '::' + name], env=dict(os.environ, MTOOLS_SKIP_CHECK='1'))
+            print('disk: added %s as %s' % (rel(src), name))
     print('disk image: ', rel(disk))
 
     s = Script()
@@ -233,15 +249,24 @@ def main():
         # PA2 low while the power key is held at power-on: the ROM then runs the
         # FS-loader, which re-tests PA2 and launches the app once it is released.
         s.add('sysbus.gpioPortA OnGPIO 2 false')
-    s.add('cpu VectorTableOffset 0x%08X' % (0x08000000 if a.mode == 'chain' else APP_BASE))
+    vtor = 0x08000000 if a.mode == 'chain' else APP_BASE
+    s.add('cpu VectorTableOffset 0x%08X' % vtor)
+    # SYSRESETREQ (the FS-loader after an install, fw-rs recovery): Renode runs
+    # the machine's `reset` macro; the flash keeps its (possibly updated)
+    # content, only the vector table base is restored.
+    s.add('macro reset\n"""\n    cpu VectorTableOffset 0x%08X\n"""' % vtor)
+    s.add('runMacro $reset')
     for p in [x for x in a.debug.split(',') if x]:
         s.add('logLevel -1 %s' % p)
     if a.trace_boot:
-        img = read(flash)
-        for stage, base in (('ROM', 0x08000000), ('app', APP_BASE), ('FS-loader', LOADER_BASE)):
-            vec = struct.unpack_from('<I', img, base - 0x08000000 + 4)[0] & ~1
-            if 0x08000000 <= vec < 0x08100000:
-                s.add('sysbus.cpu AddHook 0x%08X "self.Log(LogLevel.Info, \'boot: %s reset vector at %%s\' %% machine.ElapsedVirtualTime.TimeElapsed)"' % (vec, stage))
+        # Log every transition between the ROM, app and FS-loader flash regions
+        # (block granularity; the hook slows the run down a little).
+        hook = ("global _boot_region\n"
+                "r = 'ROM' if pc < 0x08004000 else ('app' if pc < 0x080A0000 else ('FS-loader' if pc < 0x080C0000 else 'other'))\n"
+                "if pc >= 0x08000000 and pc < 0x08100000 and r != globals().get('_boot_region'):\n"
+                "    _boot_region = r\n"
+                "    self.Log(LogLevel.Info, 'boot: entered %s at 0x%08x, t=%s' % (r, pc, machine.ElapsedVirtualTime.TimeElapsed))\n")
+        s.add('sysbus.cpu SetHookAtBlockBegin """\n%s"""' % hook)
     if a.autoshot:
         s.add('sysbus.lcd AutoShot %s %d' % (q(os.path.join(OUT, 'frames')), a.autoshot))
     if a.bt_port:
@@ -309,7 +334,7 @@ def main():
         v, t = parse_at(spec, 0.0)
         scope(t, v)
     if a.mode == 'chain':
-        pa2 = 0.5 if a.pa2 is None else a.pa2
+        pa2 = 0.55 if a.pa2 is None else a.pa2
         if pa2 >= 0:
             key(pa2, 'pa2')
     if a.script:
@@ -359,7 +384,9 @@ def main():
     if not a.interactive:
         cmd.insert(1, '--hide-log')
         cmd += ['-e', 'quit']  # also quit when the script aborts on an error
-        r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        # stdin stays an open (silent) pipe: on EOF Renode's console reader spins
+        # and eventually dies with a semaphore error in long runs.
+        r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.PIPE)
         import re as _re
         for l in r.stdout.splitlines():
             l = _re.sub(r'\x1b\[[0-9;]*m', '', l)

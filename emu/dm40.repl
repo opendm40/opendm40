@@ -94,6 +94,7 @@ gpioPortA: GPIOPort.GD32_GPIO @ sysbus <0x40020000, +0x400>
     outputSpeedResetValue: 0x0C000000
     pullUpPullDownResetValue: 0x64000000
     numberOfAFs: 16
+    15 -> timer2@0
 
 gpioPortB: GPIOPort.GD32_GPIO @ sysbus <0x40020400, +0x400>
     modeResetValue: 0x00000280
