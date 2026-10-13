@@ -154,9 +154,9 @@ Additional requirements:
       rate does not apply), Settings 2/2 "DMM rate" / "Smoothing", SENS:RATE[:PER?], CALC:SMO[:STAT|:RESP],
       persisted in p[38]. CSV log and MIN/MAX/AVG stay unsmoothed.
 - [x] FR-06 Hi/Lo limits (P1): pass/fail thresholds with a beep.  (code done; verify on device)
-- [ ] FR-16 screenshot + log gallery (P1): save screenshots/CSV to the SPI disk and browse them.
-      Backend + SCPI done (csvlog list/delete, MMEM:CAT? / MMEM:DEL, USB only for DEL); the on-screen
-      gallery is src/gallery.rs (separate work, not wired yet).
+- [x] FR-16 screenshot + log gallery (P1): save screenshots/CSV to the SPI disk and browse them.  (code done; verify on device)
+      Backend + SCPI (csvlog list/delete, MMEM:CAT? / MMEM:DEL, USB only for DEL); on-screen gallery
+      src/gallery.rs, opened from the main menu's top row "Gallery: screenshots and logs".
 - [x] FR-28 generator DC offset (P1): adjustable offset (note: real bipolar offset is HW-4).  (code done; verify on device)
       Offset box on the generator page (keypad; OK on an empty field = auto), SOUR:VOLT:OFFS <V>|AUTO, persisted p[39].
 - [x] FR-35 CSV export from DMM (P1): = the CSV-to-disk item above, with timestamps.  (code done; verify on device)

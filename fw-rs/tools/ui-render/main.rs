@@ -778,6 +778,16 @@ fn main() {
         }
     }
 
+    // 6d. Main menu (gallery row on top, four tiles, combined-view row).
+    for combo in [ui::View::DmmScope, ui::View::Dmm] {
+        host::reset(0);
+        ui::main_menu(ui::view_name(combo));
+        ck.check_opts(&format!("menu/{}", ui::view_name(combo)), &[("screen", Bx::new(0, 0, 480, 320))], false);
+    }
+    host::reset(0);
+    ui::main_menu(ui::view_name(ui::View::DmmScope));
+    save(&out, "m04-main-menu");
+
     // 6c. Toasts (dialog.rs) over the DMM page: the longest texts.
     for (k, (t, ok)) in [
         ("Disk in use by PC - eject first", false),

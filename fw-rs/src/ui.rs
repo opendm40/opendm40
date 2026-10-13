@@ -60,6 +60,8 @@ pub enum View {
     Device,
     /// DMM AutoHold and Hi/Lo limits of the current function (MF).
     Limits,
+    /// Screenshot + log gallery (FR-16, gallery.rs).
+    Gallery,
 }
 
 impl View {
@@ -2081,6 +2083,9 @@ pub fn main_menu(combo: &str) {
         sf::glyphs(ICONS, rect(x + 79, y + 25, 30, 30), g.encode_utf8(&mut b), STATUS_FG, M_TILE, 8, 0);
         sf::glyphs(sf::TEXT22, rect(x, y + 58, 190, 27), name, STATUS_FG, M_TILE, 8, 0);
     }
+    // Gallery row above the tiles (FR-16).
+    sf::rbox(rect(46, 10, 388, 34), 8, M_TILE, M_BG);
+    sf::glyphs(sf::TEXT22, rect(46, 10, 388, 34), "Gallery: screenshots and logs", STATUS_FG, M_TILE, 8, 0);
     sf::rbox(rect(46, 280, 388, 34), 8, M_TILE, M_BG);
     let mut t = [0u8; 48];
     let pre = b"Combined view: ";
@@ -2100,6 +2105,9 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
     }
     if (46..434).contains(&x) && (280..314).contains(&y) {
         return Some(4);
+    }
+    if (46..434).contains(&x) && (10..44).contains(&y) {
+        return Some(5);
     }
     None
 }
@@ -2204,6 +2212,7 @@ pub fn view_name(v: View) -> &'static str {
         View::Keypad => "Keypad",
         View::Device => "Device",
         View::Limits => "Hold & Limits",
+        View::Gallery => "Gallery",
     }
 }
 

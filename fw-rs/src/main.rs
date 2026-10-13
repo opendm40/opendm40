@@ -833,6 +833,7 @@ mod calbackup;
 mod dialog;
 mod screenshot;
 mod csvlog;
+mod gallery;
 #[cfg(any(feature = "native", feature = "test-initcore", feature = "test-recovery"))]
 mod native;
 // Stock device-authenticity check, informational only: DBG:GENUINE? reports

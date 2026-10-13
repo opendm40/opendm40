@@ -56,7 +56,7 @@ struct Drag {
 
 /// Menu-like pages (not instrument views): no view swipe, MENU steps back.
 fn is_page(v: View) -> bool {
-    matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device | View::Limits)
+    matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device | View::Limits | View::Gallery)
 }
 
 /// Unit text the keypad's TEXT22 font can show (no deg / micro glyphs).
@@ -591,6 +591,7 @@ impl App {
                 ];
                 ui::settings(0, &vals);
             }
+            View::Gallery => crate::gallery::get().draw(),
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
                 // / version lines. Only the fields fw-rs can actually source are
@@ -1013,6 +1014,11 @@ impl App {
         if crate::csvlog::active() != self.rec_shown {
             self.rec_shown = !self.rec_shown;
             self.status_next = 0;
+        }
+        // Gallery (FR-16): one bounded disk / drawing slice per pass.
+        if self.view == View::Gallery {
+            crate::gallery::get().poll();
+            return;
         }
         // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
         // not drive here)? The reading loop skips drawing while held
@@ -1655,6 +1661,14 @@ impl App {
                 self.key(clk, c);
             }
             Gesture::KeyUp(1) => self.run_down = None,
+            Gesture::Tap(_) | Gesture::SwipeLeft | Gesture::SwipeRight if self.view == View::Gallery => {
+                if matches!(g, Gesture::Tap(_)) {
+                    self.beep(now, 30);
+                }
+                if crate::gallery::get().touch(g) == crate::gallery::Out::Exit {
+                    self.show(View::Menu, clk);
+                }
+            }
             Gesture::SwipeLeft | Gesture::SwipeRight if !is_page(self.view) => {
                 let i = View::CYCLE.iter().position(|&v| v == self.view).unwrap_or(0);
                 let n = View::CYCLE.len();
@@ -1883,6 +1897,11 @@ impl App {
         let now = clk.now_ms();
         match code {
             0 if self.band_until != 0 => self.band_close(),
+            0 if self.view == View::Gallery => {
+                if crate::gallery::get().back() == crate::gallery::Out::Exit {
+                    self.show(View::Menu, clk);
+                }
+            }
             0 => {
                 // Walk one step up the page tree, not straight to the
                 // instrument: Device -> Settings -> Menu -> instrument. The old
@@ -1981,6 +2000,7 @@ impl App {
                     }
                 }
             }
+            View::Gallery => {} // gestures go to gallery::touch (App::gesture)
             View::Device => {
                 // Any tap dismisses back to Settings (its parent), the same
                 // step the MENU key takes from Device (see key()).
@@ -2215,6 +2235,10 @@ impl App {
                 Some(3) => {
                     self.set_page = 0;
                     self.show(View::Settings, clk)
+                }
+                Some(5) => {
+                    crate::gallery::get().open();
+                    self.show(View::Gallery, clk);
                 }
                 Some(_) => {
                     let c = self.combo;
