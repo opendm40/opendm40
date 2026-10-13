@@ -175,9 +175,12 @@ def main():
     ap.add_argument('--log', help='Renode log file (default emu/out/<name>.log)')
     ap.add_argument('--name', help='base name of the generated .resc/.log (default: the mode)')
     ap.add_argument('--pa2', type=float, default=None, metavar='T',
-                    help='chain: raise PA2 at T seconds (ROM launches the app directly)')
+                    help='chain: release PA2 (power key) at T seconds; default 0.5 = ROM -> FS-loader -> app; '
+                         '0 = ROM -> app directly; never (-1) = FS-loader install screen')
     ap.add_argument('--debug', default='', metavar='P1,P2',
                     help='peripherals to log at debug level, e.g. sysbus.i2c3,sysbus.i2c3.touch')
+    ap.add_argument('--trace-boot', action='store_true',
+                    help='log when the ROM, FS-loader and app reset vectors are entered')
     ap.add_argument('--pc-samples', type=int, default=0, metavar='N',
                     help='debug: print N PC samples (13 ms apart) at the end')
     ap.add_argument('--dry', action='store_true', help='only write the .resc')
@@ -226,14 +229,23 @@ def main():
     s.add('sysbus WriteWord 0x1FFF7A22 0x0400')
     s.add('sysbus.spi2.spiflash Load %s' % q(disk))
     s.add('sysbus.gpioPortD OnGPIO 6 false')  # power key released
+    if a.mode == 'chain':
+        # PA2 low while the power key is held at power-on: the ROM then runs the
+        # FS-loader, which re-tests PA2 and launches the app once it is released.
+        s.add('sysbus.gpioPortA OnGPIO 2 false')
     s.add('cpu VectorTableOffset 0x%08X' % (0x08000000 if a.mode == 'chain' else APP_BASE))
     for p in [x for x in a.debug.split(',') if x]:
         s.add('logLevel -1 %s' % p)
+    if a.trace_boot:
+        img = read(flash)
+        for stage, base in (('ROM', 0x08000000), ('app', APP_BASE), ('FS-loader', LOADER_BASE)):
+            vec = struct.unpack_from('<I', img, base - 0x08000000 + 4)[0] & ~1
+            if 0x08000000 <= vec < 0x08100000:
+                s.add('sysbus.cpu AddHook 0x%08X "self.Log(LogLevel.Info, \'boot: %s reset vector at %%s\' %% machine.ElapsedVirtualTime.TimeElapsed)"' % (vec, stage))
     if a.autoshot:
         s.add('sysbus.lcd AutoShot %s %d' % (q(os.path.join(OUT, 'frames')), a.autoshot))
     if a.bt_port:
-        s.add('emulation CreateServerSocketTerminal %d "btsock" false' % a.bt_port)
-        s.add('connector Connect sysbus.uart4 btsock')
+        s.add('sysbus.btmodule Listen %d' % a.bt_port)
     if a.gdb:
         s.add('machine StartGdbServer %d' % a.gdb)
     # RunFor starts the emulation itself (it is refused after `start`); an
@@ -263,7 +275,7 @@ def main():
             s.at(t, 'sysbus.gpioPortD OnGPIO 6 true')
             s.at(t + 2.0, 'sysbus.gpioPortD OnGPIO 6 false')
         elif name == 'pa2':
-            s.at(t, 'sysbus.gpioPortA OnGPIO 2 true')
+            s.at(t, 'sysbus.gpioPortA Release 2')  # floats high (pull-up)
         else:
             sys.exit('unknown key ' + name)
 
@@ -296,8 +308,10 @@ def main():
     for spec in a.scope:
         v, t = parse_at(spec, 0.0)
         scope(t, v)
-    if a.pa2 is not None:
-        key(a.pa2, 'pa2')
+    if a.mode == 'chain':
+        pa2 = 0.5 if a.pa2 is None else a.pa2
+        if pa2 >= 0:
+            key(pa2, 'pa2')
     if a.script:
         with open(a.script) as f:
             for line in f:
