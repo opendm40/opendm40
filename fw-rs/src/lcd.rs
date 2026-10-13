@@ -81,6 +81,38 @@ pub fn set_window_cmd(x0: u16, y0: u16, x1: u16, y1: u16, mem_cmd: u16) {
     cmd(mem_cmd);
 }
 
+/// Read `n` pixels of GRAM row `y` starting at column `x` and pass them to
+/// `out` as RGB565, left to right (screenshots). With COLMOD 16 bpp the
+/// ILI9488 still returns RGB666 on a read: one dummy word after RAMRD, then 3
+/// bytes per pixel (R, G, B, 6 significant bits each) packed big-endian into
+/// the 16-bit words (README, tools/dm40dbg.py decode()), so 2 pixels = 3 words.
+/// Leaves the controller in RAMRD; the next drawing call sets its own window.
+pub fn read_span(x: u16, y: u16, n: u16, mut out: impl FnMut(Color)) {
+    if n == 0 {
+        return;
+    }
+    set_window_cmd(x, y, x + n - 1, y, CMD_RAMRD);
+    let _ = read_data(); // dummy
+    let mut left = n;
+    while left > 0 {
+        let w0 = read_data();
+        let w1 = read_data();
+        out(rgb666_to_565(w0 >> 8, w0 & 0xFF, w1 >> 8));
+        left -= 1;
+        if left == 0 {
+            break;
+        }
+        let w2 = read_data();
+        out(rgb666_to_565(w1 & 0xFF, w2 >> 8, w2 & 0xFF));
+        left -= 1;
+    }
+}
+
+#[inline(always)]
+fn rgb666_to_565(r: u16, g: u16, b: u16) -> Color {
+    (r & 0xF8) << 8 | (g & 0xFC) << 3 | b >> 3
+}
+
 pub fn fill_rect(x: u16, y: u16, w: u16, h: u16, color: Color) {
     if w == 0 || h == 0 {
         return;

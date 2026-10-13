@@ -32,6 +32,11 @@
 #   11. one changed byte deep in LOADER.BIN: LOADER.BIN + BACKUP.TXT rewritten
 #      (multi-block 32-cluster chain, copy-on-write), 33 old clusters freed,
 #      fsck clean, contents equal; then unchanged again.
+# screenshot (src/screenshot.rs through calbackup::write_file, synthetic screen):
+#   12. S000.BMP taken -> S001.BMP, then S002.BMP; after deleting S000.BMP the
+#      next one is S000.BMP again; fsck clean; 307266 bytes, header equal to
+#      the stock S000.BMP in the disk dump (when present), every pixel equal
+#      to the stub screen with bottom-up rows; the other files untouched.
 set -e
 cd "$(dirname "$0")"
 RUSTUP_HOME="$(cd ../../../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../../../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
@@ -210,4 +215,47 @@ fsckok $IMG5
 same $IMG5
 "$W/t" $IMG5 backup $W/src | grep -q "backup=Unchanged" && echo "ok: unchanged after the loader rewrite" || { echo "FAIL at line $LINENO"; exit 1; }
 mtype -i $IMG5 ::BACKUP.TXT
+
+echo "=== screenshot"
+# bmpok <img> <name>: size, header (vs the stock dump), pixels vs lcd::pattern.
+bmpok() {
+    mcopy -n -i $1 ::$2 $W/shot.bmp
+    python3 -I - $W/shot.bmp ../../../firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin <<'PY' || { echo "FAIL: $2"; exit 1; }
+import os, struct, sys
+d = open(sys.argv[1], 'rb').read()
+assert len(d) == 307266, len(d)
+if os.path.exists(sys.argv[2]):
+    stock = open(sys.argv[2], 'rb').read()[0xD000:0xD000 + 66]
+    assert stock[:2] == b'BM' and d[:66] == stock, 'header differs from the stock S000.BMP'
+    print('header == stock S000.BMP header')
+off, w, h, bpp, comp = struct.unpack_from('<I', d, 10)[0], *struct.unpack_from('<iiHHI', d, 18)[:2], *struct.unpack_from('<HI', d, 28)
+assert (off, w, h, bpp, comp) == (66, 480, 320, 16, 3), (off, w, h, bpp, comp)
+for r in range(320):
+    y = 319 - r                          # bottom-up
+    row = struct.unpack_from('<480H', d, 66 + 960 * r)
+    for x in range(480):
+        want = ((x * 0x9E37 + y * 0x79B9) ^ (y << 11)) & 0xFFFF
+        assert row[x] == want, (x, y, row[x], want)
+print('pixels == stub screen, bottom-up')
+PY
+}
+IMG7=$W/disk7.img
+mkimg $IMG7
+mcopy -i $IMG7 $W/keep.bin ::CONFIG.BIN
+mcopy -i $IMG7 $W/keep.bin ::DEL.TXT
+mdel -i $IMG7 ::DEL.TXT
+mcopy -i $IMG7 $W/old.bin ::S000.BMP
+"$W/t" $IMG7 shot | tee $W/s1
+grep -q "shot=Saved(1) medium_changed=true" $W/s1 && echo "ok: S000.BMP taken -> S001.BMP" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG7
+bmpok $IMG7 S001.BMP
+"$W/t" $IMG7 shot | grep -q "shot=Saved(2)" && echo "ok: then S002.BMP" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG7
+bmpok $IMG7 S002.BMP
+mdel -i $IMG7 ::S000.BMP
+"$W/t" $IMG7 shot | grep -q "shot=Saved(0)" && echo "ok: first free number reused: S000.BMP" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG7
+bmpok $IMG7 S000.BMP
+mcopy -n -i $IMG7 ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.BIN untouched" || { echo "FAIL at line $LINENO"; exit 1; }
+mdir -i $IMG7 ::
 echo PASS

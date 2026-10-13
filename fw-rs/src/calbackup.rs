@@ -80,6 +80,10 @@
 //! LOADER.BIN rewrite). The FWDGT is fed between blocks
 //! (wdt::kick_if_feeding; spiflash feeds during erases).
 //!
+//! The same writer (compare, allocate, data, link, entry, free, re-read)
+//! also stores screenshots (screenshot.rs): `write_file` with a streaming
+//! `Source` instead of a byte slice, and `free_number` for the next S%03u.BMP.
+//!
 //! Host test: tools/fatren-test/run.sh.
 
 #![allow(dead_code)]
@@ -88,8 +92,9 @@ use crate::fatren::{free_chain, le16, le32, parse_bpb, sfn_is, verify, Vol};
 use crate::msc::BlockDevice;
 
 const BLK: usize = 4096;
-/// Most clusters one run allocates (45 with the device geometry: all files).
-const MAX_NEW: usize = 64;
+/// Most clusters one run allocates (45 with the device geometry: all backup
+/// files; a 480x320 screenshot is 307266 bytes = 76 clusters).
+const MAX_NEW: usize = 80;
 /// Root slots per 4 KiB block.
 const PER: u32 = (BLK / 32) as u32;
 /// Write date 2026-10-13 (FAT: (year - 1980) << 9 | month << 5 | day), time 0.
@@ -142,6 +147,20 @@ pub struct Result {
 
 static mut RESULT: Result = Result { status: Status::NotRun, written: 0, conflict: 0, freed: 0 };
 
+/// Work buffers of run_inner (buf, tmp, fat) and free_number, 3 x 4 KiB, kept
+/// off the TCM stack: a screenshot calls the writer from deep in the main
+/// loop, whose frames (main ~26 KiB) leave too little of the ~38 KiB stack
+/// for three more blocks. NOLOAD SRAM (.dmabuf, as the scope record): the
+/// contents are undefined at reset and always written before they are read.
+/// One user at a time (the boot backup before main(), a screenshot from the
+/// main loop; both synchronous, no interrupts).
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+static mut SCRATCH: [[u8; BLK]; 3] = [[0; BLK]; 3];
+
+fn scratch() -> &'static mut [[u8; BLK]; 3] {
+    unsafe { &mut *core::ptr::addr_of_mut!(SCRATCH) }
+}
+
 pub fn result() -> Result {
     unsafe { RESULT }
 }
@@ -152,6 +171,34 @@ pub struct Src<'a> {
     pub name: [u8; 11],
     pub addr: u32,
     pub data: &'a [u8],
+}
+
+/// File contents for the writer: a byte slice, or bytes generated on demand
+/// (screenshot.rs streams the LCD GRAM; nothing holds the whole file).
+pub trait Source {
+    /// File size, bytes.
+    fn size(&self) -> u32;
+    /// Copy bytes `off .. off + buf.len()` (never past `size`) into `buf`.
+    /// Must return the same bytes every time (the writer reads them twice:
+    /// to write and to verify).
+    fn fill(&self, off: u32, buf: &mut [u8]);
+}
+
+impl Source for &[u8] {
+    fn size(&self) -> u32 {
+        self.len() as u32
+    }
+    fn fill(&self, off: u32, buf: &mut [u8]) {
+        let o = off as usize;
+        buf.copy_from_slice(&self[o..o + buf.len()]);
+    }
+}
+
+/// A file for run_inner: 8.3 name + contents.
+#[derive(Clone, Copy)]
+struct F<'a> {
+    name: [u8; 11],
+    src: &'a dyn Source,
 }
 
 /// Boot entry: back up the internal sources (the RAM build and native).
@@ -180,9 +227,78 @@ pub fn run(dev: &mut dyn BlockDevice, srcs: &[Src]) -> Result {
     let k = srcs.len().min(N - 1);
     all[..k].copy_from_slice(&srcs[..k]);
     all[k] = Src { name: TXT, addr: 0, data: &text[..n] };
-    let r = run_inner(dev, &all[..k + 1]);
+    static EMPTY: &[u8] = &[];
+    let mut fs = [F { name: TXT, src: &EMPTY }; N];
+    for (f, s) in fs.iter_mut().zip(all[..k + 1].iter()) {
+        *f = F { name: s.name, src: &s.data };
+    }
+    let r = run_inner(dev, &fs[..k + 1]);
     unsafe { RESULT = r };
     r
+}
+
+/// Write one file `name` (8.3, upper case) from `src` through the same
+/// ordered copy-on-write path as the backup: unchanged = nothing written; new
+/// or different = new clusters, data, FAT links, directory entry, old chain
+/// freed, re-read and compared with `src`. Does not touch `result()`.
+pub fn write_file(dev: &mut dyn BlockDevice, name: [u8; 11], src: &dyn Source) -> Result {
+    run_inner(dev, &[F { name, src }])
+}
+
+/// 8.3 name `<prefix>NNN.<ext>` (prefix 1..5 upper-case chars, NNN = `n` with
+/// three digits), e.g. ("S", 7, "BMP") -> "S007    BMP" = S007.BMP.
+pub fn numbered_name(prefix: &[u8], n: u16, ext: &[u8; 3]) -> [u8; 11] {
+    let mut name = [b' '; 11];
+    let k = prefix.len().min(5);
+    name[..k].copy_from_slice(&prefix[..k]);
+    name[k] = b'0' + (n / 100 % 10) as u8;
+    name[k + 1] = b'0' + (n / 10 % 10) as u8;
+    name[k + 2] = b'0' + (n % 10) as u8;
+    name[8..].copy_from_slice(ext);
+    name
+}
+
+/// Lowest n in 0..=999 with no root entry `numbered_name(prefix, n, ext)`
+/// (any entry of that name counts, also a directory; deleted and LFN slots do
+/// not) - the stock screenshot naming "s%.3d.bmp", first free number. None:
+/// no medium, not the expected FAT16 volume, a read error, or all 1000 taken.
+pub fn free_number(dev: &mut dyn BlockDevice, prefix: &[u8], ext: &[u8; 3]) -> Option<u16> {
+    if !dev.present() || dev.block_size() as usize != BLK {
+        return None;
+    }
+    let buf = &mut scratch()[0];
+    if !dev.read_block(0, buf) {
+        return None;
+    }
+    let v = parse_bpb(buf, dev.block_count())?;
+    let k = prefix.len().min(5);
+    let mut used = [0u32; 32]; // bit n = number n taken (0..=999)
+    'scan: for blk in 0..v.root_blocks {
+        if !dev.read_block(v.root_start + blk, buf) {
+            return None;
+        }
+        for i in 0..PER {
+            if blk * PER + i >= v.root_entries {
+                break 'scan;
+            }
+            let e = &buf[(i * 32) as usize..(i * 32 + 32) as usize];
+            if e[0] == 0x00 {
+                break 'scan; // end of directory
+            }
+            if e[0] == 0xE5 || e[11] & 0x3F == 0x0F {
+                continue;
+            }
+            let d = &e[k..k + 3];
+            if !d.iter().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let n = (d[0] - b'0') as u16 * 100 + (d[1] - b'0') as u16 * 10 + (d[2] - b'0') as u16;
+            if sfn_is(e, &numbered_name(prefix, n, ext)) {
+                used[(n / 32) as usize] |= 1 << (n % 32);
+            }
+        }
+    }
+    (0..1000u16).find(|&n| used[(n / 32) as usize] & (1 << (n % 32)) == 0)
 }
 
 // --- BACKUP.TXT ----------------------------------------------------------------
@@ -312,17 +428,19 @@ fn fat_get(dev: &mut dyn BlockDevice, v: &Vol, c: u32, fat: &mut [u8; BLK], cur:
 /// Follow the chain of a file (`start`, `size` from its entry) through FAT 1.
 /// Returns (well_formed, equal): well formed = exactly the clusters `size`
 /// needs, every link valid, EOC at the end; equal = also well formed,
-/// size == data.len() and the contents equal `data`. None = read error.
-fn walk(dev: &mut dyn BlockDevice, v: &Vol, start: u32, size: u32, data: &[u8], fat: &mut [u8; BLK], buf: &mut [u8; BLK]) -> Option<(bool, bool)> {
+/// size == data.size() and the contents equal `data`. None = read error.
+#[allow(clippy::too_many_arguments)]
+fn walk(dev: &mut dyn BlockDevice, v: &Vol, start: u32, size: u32, data: &dyn Source, fat: &mut [u8; BLK], buf: &mut [u8; BLK], tmp: &mut [u8; BLK]) -> Option<(bool, bool)> {
     let n = nclusters(v, size);
     let max = v.clusters + 1;
+    let len = data.size() as usize;
     if n == 0 {
-        return Some((start == 0, start == 0 && data.is_empty()));
+        return Some((start == 0, start == 0 && len == 0));
     }
     if n > v.clusters {
         return Some((false, false));
     }
-    let mut equal = size as usize == data.len();
+    let mut equal = size as usize == len;
     let mut cur = u32::MAX;
     let mut c = start;
     for i in 0..n {
@@ -332,14 +450,15 @@ fn walk(dev: &mut dyn BlockDevice, v: &Vol, start: u32, size: u32, data: &[u8], 
         if equal {
             for b in 0..v.spc {
                 let off = i as usize * cbytes(v) + b as usize * BLK;
-                if off >= data.len() {
+                if off >= len {
                     break;
                 }
                 if !dev.read_block(lba_of(v, c) + b, buf) {
                     return None;
                 }
-                let end = (off + BLK).min(data.len());
-                if buf[..end - off] != data[off..end] {
+                let end = (off + BLK).min(len);
+                data.fill(off as u32, &mut tmp[..end - off]);
+                if buf[..end - off] != tmp[..end - off] {
                     equal = false;
                     break;
                 }
@@ -371,19 +490,17 @@ struct Job {
 
 const NO_JOB: Job = Job { file: 0, slot: 0, new: false, old: 0, first: 0, n: 0 };
 
-fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
+fn run_inner(dev: &mut dyn BlockDevice, files: &[F]) -> Result {
     let mut res = Result { status: Status::Error, written: 0, conflict: 0, freed: 0 };
     if !dev.present() || dev.block_size() as usize != BLK {
         res.status = Status::NoMedium;
         return res;
     }
-    let mut buf = [0u8; BLK];
-    let mut tmp = [0u8; BLK];
-    let mut fat = [0u8; BLK];
-    if !dev.read_block(0, &mut buf) {
+    let [buf, tmp, fat] = scratch();
+    if !dev.read_block(0, buf) {
         return res;
     }
-    let Some(v) = parse_bpb(&buf, dev.block_count()) else {
+    let Some(v) = parse_bpb(&buf[..], dev.block_count()) else {
         res.status = Status::BadBpb;
         return res;
     };
@@ -393,7 +510,7 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
     let mut free = [0u32; N];
     let mut nfree = 0usize;
     'scan: for blk in 0..v.root_blocks {
-        if !dev.read_block(v.root_start + blk, &mut buf) {
+        if !dev.read_block(v.root_start + blk, buf) {
             return res;
         }
         for k in 0..PER {
@@ -444,10 +561,10 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
         if res.conflict & (1 << i) != 0 {
             continue;
         }
-        let mut j = Job { file: i, first: need, n: nclusters(&v, f.data.len() as u32) as usize, ..NO_JOB };
+        let mut j = Job { file: i, first: need, n: nclusters(&v, f.src.size()) as usize, ..NO_JOB };
         match found[i] {
             Some((slot, start, size)) => {
-                let Some((wf, eq)) = walk(dev, &v, start, size, f.data, &mut fat, &mut buf) else {
+                let Some((wf, eq)) = walk(dev, &v, start, size, f.src, fat, buf, tmp) else {
                     return res;
                 };
                 if eq {
@@ -485,7 +602,7 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
     let mut cur = u32::MAX;
     let mut c = 2u32;
     while got < need && c <= v.clusters + 1 {
-        match fat_get(dev, &v, c, &mut fat, &mut cur) {
+        match fat_get(dev, &v, c, fat, &mut cur) {
             None => return res,
             Some(0) => {
                 cl[got] = c;
@@ -502,20 +619,22 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
 
     // 2. Data blocks (the bytes past the end keep what the block held).
     for j in &jobs[..nj] {
-        let d = files[j.file].data;
+        let d = files[j.file].src;
+        let len = d.size() as usize;
         for (i, &c) in cl[j.first..j.first + j.n].iter().enumerate() {
             for b in 0..v.spc {
                 let off = i * cbytes(&v) + b as usize * BLK;
-                if off >= d.len() {
+                if off >= len {
                     break;
                 }
                 let lba = lba_of(&v, c) + b;
-                if !dev.read_block(lba, &mut buf) {
+                let end = (off + BLK).min(len);
+                // A partial last block keeps what it held past the end.
+                if end - off < BLK && !dev.read_block(lba, buf) {
                     return res;
                 }
-                let end = (off + BLK).min(d.len());
-                buf[..end - off].copy_from_slice(&d[off..end]);
-                if !(dev.write_block(lba, &buf) && verify(dev, lba, &buf, &mut tmp)) {
+                d.fill(off as u32, &mut buf[..end - off]);
+                if !(dev.write_block(lba, &buf[..]) && verify(dev, lba, buf, tmp)) {
                     return res;
                 }
                 crate::wdt::kick_if_feeding();
@@ -533,7 +652,7 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
                 continue;
             }
             let lba = v.fat_start + k * v.fat_blocks + fb;
-            if !dev.read_block(lba, &mut buf) {
+            if !dev.read_block(lba, buf) {
                 return res;
             }
             for j in &jobs[..nj] {
@@ -546,7 +665,7 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
                     }
                 }
             }
-            if !(dev.write_block(lba, &buf) && verify(dev, lba, &buf, &mut tmp)) {
+            if !(dev.write_block(lba, &buf[..]) && verify(dev, lba, buf, tmp)) {
                 return res;
             }
             if fb < 32 {
@@ -563,7 +682,7 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
             continue;
         }
         let lba = v.root_start + blk;
-        if !dev.read_block(lba, &mut buf) {
+        if !dev.read_block(lba, buf) {
             return res;
         }
         for j in jobs[..nj].iter().filter(|j| j.slot >= lo && j.slot < hi) {
@@ -581,9 +700,9 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
             e[0x18..0x1A].copy_from_slice(&DATE.to_le_bytes()); // write date
             let start = if j.n == 0 { 0 } else { cl[j.first] as u16 };
             e[0x1A..0x1C].copy_from_slice(&start.to_le_bytes());
-            e[0x1C..0x20].copy_from_slice(&(files[j.file].data.len() as u32).to_le_bytes());
+            e[0x1C..0x20].copy_from_slice(&files[j.file].src.size().to_le_bytes());
         }
-        if !(dev.write_block(lba, &buf) && verify(dev, lba, &buf, &mut tmp)) {
+        if !(dev.write_block(lba, &buf[..]) && verify(dev, lba, buf, tmp)) {
             return res;
         }
         crate::wdt::kick_if_feeding();
@@ -595,7 +714,7 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
     // 5. Old chains (well-formed ones only).
     for j in &jobs[..nj] {
         if j.old != 0 {
-            let (ok, freed) = free_chain(dev, &v, j.old, &mut fat, &mut buf, &mut tmp);
+            let (ok, freed) = free_chain(dev, &v, j.old, fat, buf, tmp);
             res.freed += freed;
             if !ok {
                 return res;
@@ -605,9 +724,9 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[Src]) -> Result {
 
     // 6. Read every written file back through its new chain.
     for j in &jobs[..nj] {
-        let d = files[j.file].data;
+        let d = files[j.file].src;
         let start = if j.n == 0 { 0 } else { cl[j.first] };
-        match walk(dev, &v, start, d.len() as u32, d, &mut fat, &mut buf) {
+        match walk(dev, &v, start, d.size(), d, fat, buf, tmp) {
             Some((true, true)) => {}
             _ => return res,
         }
