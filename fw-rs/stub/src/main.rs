@@ -2,7 +2,7 @@
 //! flash sector 8 (0x08080000, unused by the stock firmware) and, once the
 //! whole image is in place, starts it.
 //!
-//! Payload at 0x2000C000 (appended by tools/flash.py):
+//! Payload at 0x2000C000 (appended by tools/legacy/flash.py):
 //!   u32 magic 'DM4F', u32 offset, u32 len, u32 crc32(chunk),
 //!   u32 total image length, u32 crc32(image), then `len` bytes.
 //! Flow: if flash already holds the image (crc) -> start it. A probe payload

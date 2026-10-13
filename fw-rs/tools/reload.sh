@@ -13,7 +13,8 @@
 #   --no-build      do not build, use the existing image
 #   --image FILE    install FILE instead of dm40-fw-native.bin (implies --no-build)
 #   --stock FILE    install a stock / patched stock update file the same way
-#                   (e.g. ../firmware/patch/build/dm40_patched.bin); does not
+#                   (e.g. ../firmware/patch/build-memrw/dm40_patched.bin, built
+#                   by firmware/patch/kit/mkkit.sh); does not
 #                   wait for fw-rs afterwards
 #   --from-stock    the meter runs stock or shows the loader update screen
 #                   (USB disk 28e9:028f): stage the image there, then you press
@@ -21,7 +22,7 @@
 #   --wait S        seconds to wait for fw-rs after the update (default 90)
 #   --ram, test-initcore, test-recovery
 #                   LEGACY: build the RAM/sector-8 image (T1/T2 test images)
-#                   and load it over Bluetooth (tools/flash.py + stub/); needs
+#                   and load it over Bluetooth (tools/legacy/flash.py + stub/); needs
 #                   STOCK firmware on the meter. DM40_MAC = Bluetooth address.
 #   -h, --help      this text
 #
@@ -191,10 +192,11 @@ if [ -n "$RAM" ]; then
         if usb_present "$FWRS_ID"; then
             die "fw-rs came back after DBG:RESET: native fw-rs is installed. Install stock
 first (the Bluetooth RAM loader needs it), e.g.:
-  tools/reload.sh --stock $ROOT/firmware/patch/build/dm40_patched.bin"
+  tools/reload.sh --stock $ROOT/firmware/patch/build-memrw/dm40_patched.bin
+(build it with $ROOT/firmware/patch/kit/mkkit.sh)"
         fi
     fi
-    exec "$PY" "$FW/tools/flash.py"
+    exec "$PY" "$FW/tools/legacy/flash.py"
 fi
 
 # ---- native ----------------------------------------------------------------------
@@ -285,7 +287,8 @@ The loader installs $(basename "$STOCK") and starts it; the stock firmware does
 not enumerate $FWRS_ID, so there is nothing to wait for here. Verify:
   - the meter shows the stock splash, then the stock UI (version in its
     settings/about page);
-  - patched stock: $ROOT/firmware/patch/dm40_memrw.py <mac> read 0x08008000 12
+  - patched stock: $PY -I $ROOT/firmware/patch/kit/tools/dm40_memrw.py \
+      --mac <mac> read 0x08008000 12
     must show the loader marker = the update header (little-endian words):
 EOF
     "${DBG[@]}" image "$STOCK" | sed -n 's/^  header.*: /      /p'

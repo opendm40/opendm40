@@ -68,7 +68,7 @@ computes both.
 
 | Unknown | Impact | How to verify |
 |---|---|---|
-| Exact trigger that makes the FS-loader enter **its own** USB-disk mode at boot (not isolated — `ANALYSIS.md` §3). | Would let the shim bring up stock MSC with ~zero code (Option A below). Not required for safety. | Disassemble FS-loader around its USB init; or set candidate flags via the BT `memrw` patch (`firmware/patch/dm40_memrw.py`) and reboot, watch for USB disk enumerating. |
+| Exact trigger that makes the FS-loader enter **its own** USB-disk mode at boot (not isolated — `ANALYSIS.md` §3). | Would let the shim bring up stock MSC with ~zero code (Option A below). Not required for safety. | Disassemble FS-loader around its USB init; or set candidate flags via the BT `memrw` patch (`firmware/patch/kit/tools/dm40_memrw.py`) and reboot, watch for USB disk enumerating. |
 | Purpose of the `0x080ff000` "one-word boot flag" (`ANALYSIS.md` §1). A whole-image word scan found the value `0x080ff000` only inside an `ldm/stm` data-copy in the app (`0x08044844`), i.e. a false positive — **no confirmed pointer use**. | None if unused. If it is the FS-loader's disk-mode trigger, it enables Option A. | Read it over `memrw`; correlate with entering "USB Connect". |
 | Whether the FS-loader leaves HCLK at 200 MHz / correct FMC wait states when it jumps to the app. | fw-rs currently **assumes** 200 MHz (`src/clock.rs:3`); XIP from flash needs correct wait states. | Read `RCU_CFG0`/`FMC_WS` in the shim over `DBG:` once Stage 1 runs; or disassemble the FS-loader clock init (`0x080a0ac1`, confirmed to set CPACR+VTOR+RCU). |
 | Which flash sectors the FS-loader erases for an app update. | Confirms our hole/layout assumptions. | Disassemble the FS-loader erase path; or observe before/after dumps. |
@@ -273,7 +273,7 @@ still RAM-loaded; a battery pull returns to stock). **Do not proceed past Stage
   `DBG:RECOVER`, and crash-loop counter.
 
 **Stage 2 — retire the RAM scheme.**
-Remove `stub/`, `tools/flash.py`, the BT RAM loader path and the sector-8
+Remove `stub/`, `tools/legacy/flash.py`, the BT RAM loader path and the sector-8
 `link.x`; update `README.md`, `custom-fw-handover.txt`, `TODO.md`.
 
 ---
@@ -293,7 +293,7 @@ Remove `stub/`, `tools/flash.py`, the BT RAM loader path and the sector-8
   `dm40*.bin` only at flash time (per the stock app's deletion caveat in
   `custom-fw-handover.txt`: the stock app scans for `dm40*.bin` on USB unplug;
   that is the intended path for installing us, but keep only one present).
-- **`tools/reload.sh` / `tools/flash.py`** — the BT RAM loader becomes obsolete
+- **`tools/reload.sh` / `tools/legacy/flash.py`** — the BT RAM loader becomes obsolete
   after Stage 2. The new "load fw-rs" flow is: copy the update file to the FAT
   (host file copy over whichever MSC is up) + reboot.
 - **`tools/dm40dbg.py reset`** — now a normal `SYSRESETREQ` reboot of fw-rs; add
@@ -1374,5 +1374,5 @@ Options: `--no-build`, `--image FILE`, `--wait S`, `--stock FILE` (stock or
 patched stock, same flow, no wait: stock does not enumerate `1209:0001`),
 `--from-stock` (stage onto the `28e9:028f` disk, the user presses "update" or
 power-cycles, waits up to 300 s for fw-rs). `--ram`, `test-initcore`,
-`test-recovery` keep the LEGACY Bluetooth RAM path (`tools/flash.py` +
+`test-recovery` keep the LEGACY Bluetooth RAM path (`tools/legacy/flash.py` +
 `stub/`, needs stock running) for the T1/T2 images.

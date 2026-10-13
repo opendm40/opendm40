@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """LEGACY: install a RAM/sector-8 dm40-fw image into internal flash sector 8
-and start it, over Bluetooth (stub in fw-rs/stub + dm40_loader.py).
+and start it, over Bluetooth (stub in fw-rs/stub + legacy/dm40_loader.py).
 
 Only for the T1/T2 RAM test images (./build.sh test-initcore | test-recovery)
 and the old RAM build. Needs the STOCK firmware (or the patched stock) running
 on the meter, not native fw-rs. The normal developer flow is the native image:
 fw-rs/tools/reload.sh (see fw-rs/README.md).
 
-    /usr/bin/python3 fw-rs/tools/flash.py [--mac MAC] [--image fw-rs/dm40-fw.bin]
+    /usr/bin/python3 fw-rs/tools/legacy/flash.py [--mac MAC] [--image fw-rs/dm40-fw.bin]
+
+(MAC: --mac or $DM40_MAC, the meter's classic Bluetooth address.)
 
 Each pass loads the RAM stub (fw-rs/stub) with one chunk of the image appended
 through dm40_loader.py. The stub checks the flash first: if the whole image is
@@ -24,11 +26,10 @@ import sys
 import time
 import zlib
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-FW = os.path.dirname(HERE)
-ROOT = os.path.dirname(FW)
-sys.path.insert(0, HERE)
-sys.path.insert(0, ROOT)
+HERE = os.path.dirname(os.path.abspath(__file__))     # fw-rs/tools/legacy
+TOOLS = os.path.dirname(HERE)                         # fw-rs/tools (dm40dbg.py)
+FW = os.path.dirname(TOOLS)                           # fw-rs
+sys.path.insert(0, TOOLS)
 
 STUB_SPAN = 0x4000          # stub code area; payload at 0x2000C000
 PAYLOAD_MAX = 0x10000       # up to 0x2001C000
@@ -49,7 +50,7 @@ def app_up(timeout):
 
 def bt_load(mac, path):
     for attempt in range(6):
-        r = subprocess.run([sys.executable, os.path.join(ROOT, 'dm40_loader.py'), mac, path],
+        r = subprocess.run([sys.executable, os.path.join(HERE, 'dm40_loader.py'), mac, path],
                            capture_output=True, text=True, timeout=120)
         if r.returncode == 0:
             return True
@@ -60,12 +61,15 @@ def bt_load(mac, path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--mac', default=os.environ.get('DM40_MAC', 'XX:XX:XX:XX:XX:XX'))
+    ap.add_argument('--mac', default=os.environ.get('DM40_MAC'),
+                    help='classic BT address XX:XX:XX:XX:XX:XX (default: $DM40_MAC)')
     ap.add_argument('--image', default=os.path.join(FW, 'dm40-fw.bin'),
                     help='RAM/sector-8 image (NOT dm40-fw-native.bin)')
     ap.add_argument('--stub', default=os.path.join(FW, 'stub', 'dm40-stub.bin'),
                     help='LEGACY RAM stub (fw-rs/stub/build.sh)')
     a = ap.parse_args()
+    if not a.mac:
+        ap.error('--mac or DM40_MAC is required')
 
     img = open(a.image, 'rb').read()
     img += b'\xff' * (-len(img) % 4)
