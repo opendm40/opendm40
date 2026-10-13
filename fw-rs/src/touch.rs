@@ -1,4 +1,4 @@
-//! Capacitive touch panel on the I2C3 pins (SCL = PA8, SDA = PC9), reset = PE6,
+//! Capacitive touch panel on I2C2 (STM32 "I2C3"; SCL = PA8, SDA = PC9, AF4), reset = PE6,
 //! INT = PE5 (falling edge, pull-up). Two controllers are supported, selected at
 //! init by probing in the stock order (firmware/re/analysis/touch_v2_6.h):
 //!   1. Goodix GT1158 at 7-bit 0x14 (8-bit 0x28) — probed first (header §Goodix,
@@ -36,15 +36,37 @@
 //!          portrait (320x480); the stock swaps into the landscape GUI frame with
 //!          NO scale/mirror (header 115-116): GUI x = Goodix Y, GUI y = Goodix X.
 //!   keys:  key byte (value 1/2/4/8 -> code 0..3) at 0x814F + 8*n (header 98/113).
-//!   Because this is a polled driver (no EXTI) and the GT1158 INT behaviour is
-//!   unknown, the Goodix path also force-polls the buffer-ready flag every
-//!   ~10 ms so a short INT pulse missed during a long loop iteration cannot leave
-//!   touch stuck; the 0x5A path stays purely INT-level driven (unchanged).
+//!   Because the GT1158 INT behaviour is unknown, the Goodix path also
+//!   force-polls the buffer-ready flag every ~10 ms so a missed INT edge (or a
+//!   long loop iteration) cannot leave touch stuck.
 //!
-//! Bit-banged I2C with open-drain GPIO, polled from the main loop when INT is
-//! low (to be moved to the I2C3 peripheral).
+//! Transport (both controllers go through `Bus::write_at` / `Bus::read_at`, so
+//! the byte sequence on the wire is the same whichever transport carries it):
+//!   * Hardware I2C2 (GD32 I2C v1 = STM32F4 style, base 0x4000_5C00, PA8/PC9
+//!     AF4 open drain + pull-up, stock FUN_0800cb86), blocking, register-polled
+//!     with a DWT timeout on every flag wait (no IRQ, no DMA: fw-rs runs with
+//!     PRIMASK set and DMA0 ch2, the stock I2C2 RX channel, now belongs to
+//!     bt.rs). 400 kHz when the measured SCL/SDA rise time allows it (the pull-
+//!     up strength is unknown; measured at init, see `rise_ns`), else the stock
+//!     100 kHz. A NAK is a normal result (the Goodix probe at 0x14 NAKs on this
+//!     unit; it now fails in ~30 us instead of the stock's 500 ms timeout, same
+//!     bytes). A timeout / bus error / lost arbitration resets the peripheral,
+//!     clocks the bus free (9 SCL + STOP on GPIO) and re-inits; FAULT_STREAK
+//!     consecutive faults step 400 kHz -> 100 kHz -> bit-bang for good, and
+//!     BAD_STREAK consecutive edge-triggered 0x5A frames failing the 0xAB
+//!     check at 400 kHz drop to 100 kHz. If no controller answers on the peripheral at init the
+//!     probe is repeated at 100 kHz and then on the bit-bang.
+//!   * Bit-banged I2C on the same pins (GPIO open drain), T = 4 us half bit:
+//!     the fallback, byte-identical to the previous driver.
+//! INT = PE5 is latched by EXTI line 5 (falling edge, pending bit polled; the
+//! line's NVIC IRQ 23 is kept disabled, fw-rs has no ISRs). `poll()` reads a
+//! frame when the edge latched, or when INT is still low 10 ms after the last
+//! read (= the old level-polled behaviour as the worst case, so a controller
+//! that holds INT low, or an edge lost to a dropped frame, cannot stall touch).
+//! `irq_pending()` lets the main loop read a fresh report at once instead of on
+//! its 10 ms tick. `diag()` = 40 bytes of bus/IRQ counters for DBG:DIAG?.
 
-use crate::clock::{delay_us, Clock};
+use crate::clock::{delay_us, Clock, HCLK_HZ};
 use crate::mmio::{modify32, r32, w32};
 
 const GPIOA: u32 = 0x4002_0000;
@@ -70,6 +92,72 @@ const GT_ID: [u8; 4] = *b"1158";
 /// edge (the GT1158 INT behaviour is unknown and the loop can stall on a flash
 /// write; the 0x5A path does NOT use this).
 const GT_POLL_MS: u64 = 10;
+/// Re-read while INT is still low this long after the last read (the old
+/// level-polled cadence, kept as the fallback behind the EXTI edge).
+const LEVEL_MS: u64 = 10;
+
+// --- RCU / SYSCFG / EXTI / NVIC (GD32F4xx; same layout as STM32F4) ---
+const RCU_CFG0: u32 = 0x4002_3808;
+const RCU_APB1RST: u32 = 0x4002_3820;
+const RCU_APB1EN: u32 = 0x4002_3840;
+const RCU_APB2EN: u32 = 0x4002_3844;
+const RCU_I2C2: u32 = 1 << 23; // APB1EN / APB1RST bit 23 (stock FUN_0800cb86)
+const RCU_SYSCFG: u32 = 1 << 14; // APB2EN bit 14
+const SYSCFG_EXTISS1: u32 = 0x4001_380C; // EXTI4..7 source, line 5 = bits 7..4
+const EXTI: u32 = 0x4001_3C00;
+const EXTI_INTEN: u32 = EXTI + 0x00;
+const EXTI_RTEN: u32 = EXTI + 0x08;
+const EXTI_FTEN: u32 = EXTI + 0x0C;
+const EXTI_PD: u32 = EXTI + 0x14; // write 1 to clear
+const NVIC_ICER0: u32 = 0xE000_E180;
+const NVIC_ICER2: u32 = 0xE000_E188;
+const NVIC_ICPR0: u32 = 0xE000_E280;
+const IRQ_EXTI5_9: u32 = 23;
+const DWT_CYCCNT: u32 = 0xE000_1004;
+const CYC_PER_US: u32 = HCLK_HZ / 1_000_000;
+
+// --- I2C2 registers ---
+const I2C2: u32 = 0x4000_5C00;
+const I2C_CTL0: u32 = I2C2 + 0x00;
+const I2C_CTL1: u32 = I2C2 + 0x04;
+const I2C_DATA: u32 = I2C2 + 0x10;
+const I2C_STAT0: u32 = I2C2 + 0x14;
+const I2C_STAT1: u32 = I2C2 + 0x18;
+const I2C_CKCFG: u32 = I2C2 + 0x1C;
+const I2C_RT: u32 = I2C2 + 0x20;
+// CTL0
+const I2CEN: u32 = 1 << 0;
+const START: u32 = 1 << 8;
+const STOP: u32 = 1 << 9;
+const ACKEN: u32 = 1 << 10;
+const POAP: u32 = 1 << 11;
+// STAT0
+const SBSEND: u32 = 1 << 0;
+const ADDSEND: u32 = 1 << 1;
+const BTC: u32 = 1 << 2;
+const RBNE: u32 = 1 << 6;
+const TBE: u32 = 1 << 7;
+const BERR: u32 = 1 << 8;
+const LOSTARB: u32 = 1 << 9;
+const AERR: u32 = 1 << 10;
+// STAT1
+const I2CBSY: u32 = 1 << 1;
+// CKCFG
+const FAST: u32 = 1 << 15;
+
+/// Every flag wait gives up after this (10 ms): a byte is 90 us at 100 kHz,
+/// so this only trips on a stuck bus or a controller stretching SCL forever.
+const HW_TIMEOUT_CYC: u32 = 10_000 * CYC_PER_US;
+/// SCL and SDA must both rise (released -> reads high) within this for
+/// 400 kHz: the low phase is 1.7 us, the I2C fast-mode limit is tr <= 300 ns
+/// (30 -> 70 %); 400 ns to the input threshold is that with margin to spare.
+const FAST_RISE_NS: u16 = 400;
+/// Consecutive hardware faults (timeout, bus error, lost arbitration) before
+/// stepping down one bus mode.
+const FAULT_STREAK: u8 = 3;
+/// Consecutive 0x5A frames failing the 0xAB check at 400 kHz before dropping
+/// to 100 kHz (a marginal edge shows up as corrupt data, not as a fault).
+const BAD_STREAK: u8 = 5;
 
 /// Which touch controller was detected at init.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -80,13 +168,69 @@ enum Ctrl {
     Goodix,
 }
 
+/// Transport carrying the touch I2C traffic (DIAG byte 0 = this value).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    BitBang = 0,
+    Hw100 = 1,
+    Hw400 = 2,
+}
+
+/// Bus and IRQ counters, exported through `Touch::diag()` (DBG:DIAG?).
+#[derive(Clone, Copy, Default)]
+pub struct Stats {
+    /// SCL / SDA rise time measured at init (ns from release to reading high).
+    pub rise_scl_ns: u16,
+    pub rise_sda_ns: u16,
+    /// Duration of the last frame read (us) and its pressed point count.
+    pub last_us: u16,
+    pub last_n: u8,
+    /// Longest frame read since boot (us).
+    pub max_us: u16,
+    /// Mode the controller was found in at init (Mode as u8).
+    pub probe_mode: u8,
+    /// Reads started by an INT falling edge (EXTI pending bit).
+    pub edge_reads: u32,
+    /// Reads started by the INT-still-low fallback (no edge latched).
+    pub level_reads: u32,
+    /// Goodix only: reads started by the GT_POLL_MS timer.
+    pub timer_reads: u32,
+    /// Frames accepted (0x5A: 0xAB check passed; Goodix: buffer ready).
+    pub frames_ok: u32,
+    /// 0x5A frames dropped by the 0xAB check (or whose first read failed).
+    pub frames_bad: u32,
+    /// Transactions NAKed (address or data).
+    pub naks: u32,
+    /// Hardware faults, each followed by a peripheral reset + 9-clock recovery.
+    pub faults: u32,
+}
+
 fn od_pin(port: u32, pin: u32) {
     unsafe {
         w32(port + 0x18, 1 << pin); // released (high)
         modify32(port + 0x04, 0, 1 << pin); // open drain
+        modify32(port + 0x08, 3 << (2 * pin), 2 << (2 * pin)); // 50 MHz (stock)
         modify32(port + 0x0C, 3 << (2 * pin), 1 << (2 * pin)); // pull-up
         modify32(port + 0x00, 3 << (2 * pin), 1 << (2 * pin)); // output
     }
+}
+
+/// SCL / SDA pin function: AF4 = I2C2 (true) or GPIO open-drain output (false,
+/// bit-bang and bus recovery). Only MODER changes; AFRH is set once in `new`.
+fn pins_af(af: bool) {
+    let m = if af { 2 } else { 1 };
+    unsafe {
+        // Leave the GPIO output released so the switch cannot glitch low.
+        w32(GPIOA + 0x18, 1 << SCL);
+        w32(GPIOC + 0x18, 1 << SDA);
+        modify32(GPIOA + 0x00, 3 << (2 * SCL), m << (2 * SCL));
+        modify32(GPIOC + 0x00, 3 << (2 * SDA), m << (2 * SDA));
+    }
+}
+
+#[inline(always)]
+fn cyc() -> u32 {
+    unsafe { r32(DWT_CYCCNT) }
 }
 
 #[inline(always)]
@@ -107,6 +251,25 @@ fn sda_in() -> bool {
 #[inline(always)]
 fn scl_in() -> bool {
     (unsafe { r32(GPIOA + 0x10) } & (1 << SCL)) != 0
+}
+
+/// Rise time of an idle bus line (GPIO mode, bus idle): drive it low, release
+/// it and count until the input reads high. 20 us cap (= no pull-up).
+fn rise_ns(port: u32, pin: u32) -> u16 {
+    unsafe {
+        w32(port + 0x18, 1 << (pin + 16));
+        delay_us(5);
+        let t0 = cyc();
+        w32(port + 0x18, 1 << pin);
+        let mut c;
+        loop {
+            c = cyc().wrapping_sub(t0);
+            if r32(port + 0x10) & (1 << pin) != 0 || c > 20 * CYC_PER_US {
+                break;
+            }
+        }
+        (c * 1000 / CYC_PER_US).min(u16::MAX as u32) as u16
+    }
 }
 
 fn scl_release() {
@@ -135,6 +298,21 @@ fn stop() {
     delay_us(T);
     sda(true);
     delay_us(T);
+}
+
+/// Free a bus a slave holds (SDA low mid-byte): up to 9 SCL clocks until SDA
+/// is released, then a STOP. GPIO mode only.
+fn bus_clear() {
+    for _ in 0..9 {
+        if sda_in() {
+            break;
+        }
+        scl(false);
+        delay_us(T);
+        scl_release();
+        delay_us(T);
+    }
+    stop();
 }
 
 fn tx(b: u8) -> bool {
@@ -175,7 +353,7 @@ fn rx(ack: bool) -> u8 {
     b
 }
 
-fn write_at(addr: u8, data: &[u8]) -> bool {
+fn bb_write_at(addr: u8, data: &[u8]) -> bool {
     start();
     let mut ok = tx(addr << 1);
     for &b in data {
@@ -185,7 +363,7 @@ fn write_at(addr: u8, data: &[u8]) -> bool {
     ok
 }
 
-fn read_at(addr: u8, buf: &mut [u8]) -> bool {
+fn bb_read_at(addr: u8, buf: &mut [u8]) -> bool {
     start();
     if !tx((addr << 1) | 1) {
         stop();
@@ -199,21 +377,398 @@ fn read_at(addr: u8, buf: &mut [u8]) -> bool {
     true
 }
 
-fn read_reg_at(addr: u8, reg: u16, buf: &mut [u8]) -> bool {
-    write_at(addr, &reg.to_be_bytes()) && read_at(addr, buf)
+// ---------------------------------------------------------------------------
+// Hardware I2C2, blocking. GD32 I2C v1 receive sequences as the STM32F4 RM
+// (method 2, BTC-based, so a late poll can never ACK the last byte).
+
+/// One hardware transaction's outcome.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Hw {
+    Ok,
+    /// Address or data byte not acknowledged; STOP sent, bus idle.
+    Nak,
+    /// Timeout, bus error or lost arbitration: the peripheral needs a reset.
+    Fault,
 }
 
-// 0x5A (Hynitron) wrappers — unchanged behaviour (addr fixed to ADDR = 0x5A).
-fn write(data: &[u8]) -> bool {
-    write_at(ADDR, data)
+/// APB1 clock = HCLK (clock.rs: 200 MHz) / APB1PSC (RCU_CFG0 bits 12..10;
+/// 0b101 = /4 -> 50 MHz in practice, CFG0 0x940A).
+fn apb1_hz() -> u32 {
+    let apb = (unsafe { r32(RCU_CFG0) } >> 10) & 7;
+    HCLK_HZ >> if apb < 4 { 0 } else { apb - 3 }
 }
 
-fn read(buf: &mut [u8]) -> bool {
-    read_at(ADDR, buf)
+/// Reset I2C2 and program it for `mode` (Hw100 / Hw400). Pins untouched.
+fn hw_init(mode: Mode) {
+    let pclk = apb1_hz();
+    let mhz = (pclk / 1_000_000).clamp(2, 60);
+    unsafe {
+        modify32(RCU_APB1EN, 0, RCU_I2C2);
+        modify32(RCU_APB1RST, 0, RCU_I2C2);
+        modify32(RCU_APB1RST, RCU_I2C2, 0);
+        w32(I2C_CTL1, mhz); // I2CCLK; no IRQ / DMA enables
+        if mode == Mode::Hw400 {
+            // Fast mode, DTCY = 0 (Tlow:Thigh = 2:1): f = pclk / (3 * CLKC),
+            // rounded up so it never exceeds 400 kHz (50 MHz -> 42 -> 397 kHz).
+            let clkc = ((pclk + 3 * 400_000 - 1) / (3 * 400_000)).max(1);
+            w32(I2C_CKCFG, FAST | clkc);
+            w32(I2C_RT, mhz * 300 / 1000 + 1);
+        } else {
+            // Standard mode, as the stock (i2c_clock_config(I2C2, 100000)).
+            let clkc = ((pclk + 2 * 100_000 - 1) / (2 * 100_000)).max(4);
+            w32(I2C_CKCFG, clkc);
+            w32(I2C_RT, mhz + 1);
+        }
+        w32(I2C_CTL0, I2CEN | ACKEN);
+    }
 }
 
-fn read_reg(reg: u16, buf: &mut [u8]) -> bool {
-    read_reg_at(ADDR, reg, buf)
+/// Wait for any of `mask` in STAT0, or an error. Ok(stat0) when a mask bit
+/// rose; Err(Nak) on AERR (cleared here, STOP not yet sent); Err(Fault) on a
+/// bus error / lost arbitration / timeout.
+fn hw_wait(mask: u32) -> Result<u32, Hw> {
+    let t0 = cyc();
+    loop {
+        let s = unsafe { r32(I2C_STAT0) };
+        if s & (BERR | LOSTARB) != 0 {
+            return Err(Hw::Fault);
+        }
+        if s & AERR != 0 {
+            unsafe { w32(I2C_STAT0, !AERR & 0xFFFF) }; // rc_w0
+            return Err(Hw::Nak);
+        }
+        if s & mask != 0 {
+            return Ok(s);
+        }
+        if cyc().wrapping_sub(t0) > HW_TIMEOUT_CYC {
+            return Err(Hw::Fault);
+        }
+    }
+}
+
+/// Request STOP and wait until the peripheral has sent it.
+fn hw_stop() -> Hw {
+    unsafe { modify32(I2C_CTL0, 0, STOP) };
+    hw_stop_wait()
+}
+
+fn hw_stop_wait() -> Hw {
+    let t0 = cyc();
+    while unsafe { r32(I2C_CTL0) } & STOP != 0 {
+        if cyc().wrapping_sub(t0) > HW_TIMEOUT_CYC {
+            return Hw::Fault;
+        }
+    }
+    Hw::Ok
+}
+
+/// A NAK ends the transaction with STOP, like the bit-bang path.
+fn hw_nak() -> Hw {
+    match hw_stop() {
+        Hw::Ok => Hw::Nak,
+        f => f,
+    }
+}
+
+/// START + address byte. On Ok, ADDSEND is set and NOT yet cleared (the
+/// receive sequences must set ACKEN / POAP first).
+fn hw_start(addr_byte: u8) -> Hw {
+    let t0 = cyc();
+    while unsafe { r32(I2C_STAT1) } & I2CBSY != 0 {
+        if cyc().wrapping_sub(t0) > HW_TIMEOUT_CYC {
+            return Hw::Fault;
+        }
+    }
+    unsafe { modify32(I2C_CTL0, 0, START) };
+    if let Err(e) = hw_wait(SBSEND) {
+        return e;
+    }
+    // STAT0 read (in hw_wait) + DATA write clears SBSEND.
+    unsafe { w32(I2C_DATA, addr_byte as u32) };
+    match hw_wait(ADDSEND) {
+        Ok(_) => Hw::Ok,
+        Err(Hw::Nak) => hw_nak(),
+        Err(e) => e,
+    }
+}
+
+#[inline(always)]
+fn hw_clear_addsend() {
+    unsafe {
+        r32(I2C_STAT0);
+        r32(I2C_STAT1);
+    }
+}
+
+#[inline(always)]
+fn hw_rd() -> u8 {
+    unsafe { r32(I2C_DATA) as u8 }
+}
+
+/// START, addr|W, data..., STOP.
+fn hw_write(addr: u8, data: &[u8]) -> Hw {
+    match hw_start(addr << 1) {
+        Hw::Ok => {}
+        e => return e,
+    }
+    hw_clear_addsend();
+    if data.is_empty() {
+        return hw_stop();
+    }
+    for &b in data {
+        match hw_wait(TBE) {
+            Ok(_) => unsafe { w32(I2C_DATA, b as u32) },
+            Err(Hw::Nak) => return hw_nak(),
+            Err(e) => return e,
+        }
+    }
+    match hw_wait(BTC) {
+        Ok(_) => hw_stop(),
+        Err(Hw::Nak) => hw_nak(),
+        Err(e) => e,
+    }
+}
+
+/// START, addr|R, buf.len() bytes (NACK on the last), STOP.
+fn hw_read(addr: u8, buf: &mut [u8]) -> Hw {
+    let n = buf.len();
+    unsafe {
+        let c = r32(I2C_CTL0) & !(ACKEN | POAP | START | STOP);
+        let ack = if n >= 2 { ACKEN } else { 0 };
+        let poap = if n == 2 { POAP } else { 0 };
+        w32(I2C_CTL0, c | ack | poap);
+    }
+    let r = hw_start((addr << 1) | 1);
+    if r != Hw::Ok {
+        unsafe { modify32(I2C_CTL0, POAP, 0) };
+        return r;
+    }
+    let w = |m: u32| hw_wait(m).map_err(|_| Hw::Fault); // no AERR while receiving
+    let res: Result<(), Hw> = (|| {
+        match n {
+            0 => {
+                hw_clear_addsend();
+                unsafe { modify32(I2C_CTL0, 0, STOP) };
+            }
+            1 => {
+                // ACK off before ADDSEND clears, STOP right after.
+                hw_clear_addsend();
+                unsafe { modify32(I2C_CTL0, 0, STOP) };
+                w(RBNE)?;
+                buf[0] = hw_rd();
+            }
+            2 => {
+                // POAP: the ACK bit applies to the next byte (byte 2).
+                hw_clear_addsend();
+                unsafe { modify32(I2C_CTL0, ACKEN, 0) };
+                w(BTC)?; // byte 1 in DATA, byte 2 in the shift register
+                unsafe { modify32(I2C_CTL0, 0, STOP) };
+                buf[0] = hw_rd();
+                buf[1] = hw_rd();
+            }
+            _ => {
+                hw_clear_addsend();
+                for b in buf[..n - 3].iter_mut() {
+                    w(RBNE)?;
+                    *b = hw_rd();
+                }
+                w(BTC)?; // n-3 in DATA, n-2 in shift, SCL stretched
+                unsafe { modify32(I2C_CTL0, ACKEN, 0) }; // NACK the last byte
+                buf[n - 3] = hw_rd();
+                w(BTC)?; // n-2 in DATA, n-1 in shift
+                unsafe { modify32(I2C_CTL0, 0, STOP) };
+                buf[n - 2] = hw_rd();
+                w(RBNE)?;
+                buf[n - 1] = hw_rd();
+            }
+        }
+        Ok(())
+    })();
+    let r = match res {
+        Ok(()) => hw_stop_wait(),
+        Err(e) => e,
+    };
+    // Only once STOP has gone out: a read-modify-write of CTL0 racing the
+    // hardware clearing STOP would re-request it. (A fault resets I2C2.)
+    if r == Hw::Ok {
+        unsafe { modify32(I2C_CTL0, POAP, 0) };
+    }
+    r
+}
+
+/// The touch I2C transport (hardware I2C2 or bit-bang) plus its counters.
+struct Bus {
+    mode: Mode,
+    /// Consecutive hardware faults / bad 0xAB frames (escalation, see header).
+    fault_streak: u8,
+    bad_streak: u8,
+    /// The current read was started by an INT edge: only such frames count
+    /// toward BAD_STREAK (a level-fallback re-read may find no fresh frame).
+    edge_read: bool,
+    stats: Stats,
+}
+
+impl Bus {
+    /// Put the pins and the peripheral into `mode` after clocking the bus free.
+    fn enter(&mut self, mode: Mode) {
+        self.mode = mode;
+        self.fault_streak = 0;
+        self.bad_streak = 0;
+        pins_af(false);
+        bus_clear();
+        if mode == Mode::BitBang {
+            // Peripheral off (and held in reset) so it cannot touch the pins.
+            unsafe {
+                modify32(RCU_APB1RST, 0, RCU_I2C2);
+                modify32(RCU_APB1RST, RCU_I2C2, 0);
+                modify32(RCU_APB1EN, RCU_I2C2, 0);
+            }
+        } else {
+            // AF before I2CEN, so the peripheral never sees the pins detached.
+            pins_af(true);
+            hw_init(mode);
+        }
+    }
+
+    /// Account one hardware transaction; on a fault reset + recover, and step
+    /// down a mode after FAULT_STREAK in a row.
+    fn account(&mut self, r: Hw) -> bool {
+        match r {
+            Hw::Ok => {
+                self.fault_streak = 0;
+                true
+            }
+            Hw::Nak => {
+                self.fault_streak = 0;
+                self.stats.naks = self.stats.naks.wrapping_add(1);
+                false
+            }
+            Hw::Fault => {
+                self.stats.faults = self.stats.faults.wrapping_add(1);
+                let streak = self.fault_streak + 1;
+                if streak >= FAULT_STREAK {
+                    let next = if self.mode == Mode::Hw400 { Mode::Hw100 } else { Mode::BitBang };
+                    self.enter(next); // resets the streak
+                } else {
+                    self.enter(self.mode);
+                    self.fault_streak = streak;
+                }
+                false
+            }
+        }
+    }
+
+    /// A 0x5A frame passed (true) or failed (false) the 0xAB check.
+    fn frame_check(&mut self, good: bool) {
+        if good {
+            self.bad_streak = 0;
+            self.stats.frames_ok = self.stats.frames_ok.wrapping_add(1);
+            return;
+        }
+        self.stats.frames_bad = self.stats.frames_bad.wrapping_add(1);
+        if self.edge_read {
+            self.bad_streak = self.bad_streak.saturating_add(1);
+        }
+        if self.mode == Mode::Hw400 && self.bad_streak >= BAD_STREAK {
+            self.enter(Mode::Hw100);
+        }
+    }
+
+    fn write_at(&mut self, addr: u8, data: &[u8]) -> bool {
+        if self.mode == Mode::BitBang {
+            let ok = bb_write_at(addr, data);
+            if !ok {
+                self.stats.naks = self.stats.naks.wrapping_add(1);
+            }
+            return ok;
+        }
+        let r = hw_write(addr, data);
+        self.account(r)
+    }
+
+    fn read_at(&mut self, addr: u8, buf: &mut [u8]) -> bool {
+        if self.mode == Mode::BitBang {
+            let ok = bb_read_at(addr, buf);
+            if !ok {
+                self.stats.naks = self.stats.naks.wrapping_add(1);
+            }
+            return ok;
+        }
+        let r = hw_read(addr, buf);
+        self.account(r)
+    }
+
+    fn read_reg_at(&mut self, addr: u8, reg: u16, buf: &mut [u8]) -> bool {
+        self.write_at(addr, &reg.to_be_bytes()) && self.read_at(addr, buf)
+    }
+
+    // 0x5A (Hynitron) wrappers — unchanged behaviour (addr fixed to ADDR = 0x5A).
+    fn write(&mut self, data: &[u8]) -> bool {
+        self.write_at(ADDR, data)
+    }
+
+    fn read_reg(&mut self, reg: u16, buf: &mut [u8]) -> bool {
+        self.read_reg_at(ADDR, reg, buf)
+    }
+
+    /// Probe in the stock order (Goodix 0x14 "1158" first, then the 0x5A
+    /// chip) and initialise what answers. Bus traffic unchanged from the
+    /// bit-bang-only driver.
+    fn probe(&mut self, clk: &mut Clock) -> Option<(Ctrl, [u8; 4])> {
+        // Probe the Goodix GT1158 first (stock order, header lines 8/110-118).
+        // On this unit it NAKs at 0x14, so read_reg_at returns false and we fall
+        // through to the 0x5A chip; the 0x5A traffic below is unchanged.
+        let mut id = [0u8; 4];
+        if self.read_reg_at(ADDR_GOODIX, GT_REG_PRODUCT_ID, &mut id) && id == GT_ID {
+            // GT1158 config: command 0x02, settle, then 0x00 = normal reporting
+            // (header line 111). Clear any stale buffer so the first INT is fresh.
+            // The PE5 pull-up is left enabled (electrically safe); the stock drops
+            // it after a Goodix probe (header 34-35) but that is not required here.
+            self.write_at(ADDR_GOODIX, &[(GT_REG_COMMAND >> 8) as u8, GT_REG_COMMAND as u8, 0x02]);
+            clk.delay_ms(10);
+            self.write_at(ADDR_GOODIX, &[(GT_REG_COMMAND >> 8) as u8, GT_REG_COMMAND as u8, 0x00]);
+            self.write_at(ADDR_GOODIX, &[(GT_REG_STATUS >> 8) as u8, GT_REG_STATUS as u8, 0x00]);
+            return Some((Ctrl::Goodix, id)); // "1158"
+        }
+
+        // Hynitron 0x5A (this unit): unchanged init. ACK-only identify.
+        let mut chip = [0u8; 4];
+        let ok = self.write(&[0xD1, 0x01]) && self.read_reg(0xD204, &mut chip) && self.write(&[0xD1, 0x09]);
+        if ok { Some((Ctrl::Hynitron, chip)) } else { None }
+    }
+}
+
+/// EXTI line 5 <- PE5, falling edge, pending bit latched (INTEN set so PD
+/// latches; the NVIC line stays disabled and PRIMASK is set anyway).
+fn exti_init() {
+    unsafe {
+        w32(NVIC_ICER0, 1 << IRQ_EXTI5_9);
+        // I2C2 EV/ER (IRQ 72/73): never vector into fw-rs's table.
+        w32(NVIC_ICER2, 3 << (72 - 64));
+        modify32(RCU_APB2EN, 0, RCU_SYSCFG);
+        modify32(SYSCFG_EXTISS1, 0xF << 4, 4 << 4); // line 5 = port E
+        modify32(EXTI_RTEN, 1 << INT, 0);
+        modify32(EXTI_FTEN, 0, 1 << INT);
+        modify32(EXTI_INTEN, 0, 1 << INT);
+        w32(EXTI_PD, 1 << INT);
+        w32(NVIC_ICPR0, 1 << IRQ_EXTI5_9);
+    }
+}
+
+#[inline(always)]
+fn exti_pending() -> bool {
+    unsafe { r32(EXTI_PD) & (1 << INT) != 0 }
+}
+
+/// Test-and-clear the INT edge latch (cleared before the read, so an edge
+/// during the read latches again).
+fn exti_take() -> bool {
+    if exti_pending() {
+        unsafe { w32(EXTI_PD, 1 << INT) };
+        true
+    } else {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -270,6 +825,10 @@ pub struct Touch {
     /// Goodix only: last time the buffer-ready flag was force-polled (see
     /// GT_POLL_MS). Unused on the Hynitron path.
     last_gt_poll: u64,
+    /// Last time a frame read was started (LEVEL_MS fallback).
+    last_read: u64,
+    /// I2C transport (hardware I2C2 or bit-bang) and the DIAG counters.
+    bus: Bus,
 }
 
 const DEBOUNCE_MS: u64 = 40;
@@ -299,55 +858,85 @@ impl Touch {
             w32(GPIOE + 0x18, 1 << (RST + 16));
             modify32(GPIOE + 0x00, 3 << (2 * RST), 1 << (2 * RST));
         }
-        // Free a possibly stuck bus.
-        for _ in 0..9 {
-            if sda_in() {
-                break;
-            }
-            scl(false);
-            delay_us(T);
-            scl_release();
-            delay_us(T);
+        unsafe {
+            // SCL / SDA alternate function 4 = I2C2 (used once MODER = AF).
+            modify32(GPIOA + 0x24, 0xF << (4 * (SCL - 8)), 4 << (4 * (SCL - 8)));
+            modify32(GPIOC + 0x24, 0xF << (4 * (SDA - 8)), 4 << (4 * (SDA - 8)));
         }
-        stop();
+        // Free a possibly stuck bus, then measure the pull-up edges while the
+        // controller is held in reset (its pins are released then).
+        bus_clear();
+        let rise_scl_ns = rise_ns(GPIOA, SCL);
+        let rise_sda_ns = rise_ns(GPIOC, SDA);
 
         clk.delay_ms(20);
         unsafe { w32(GPIOE + 0x18, 1 << RST) };
         clk.delay_ms(200);
 
-        // Probe the Goodix GT1158 first (stock order, header lines 8/110-118).
-        // On this unit it NAKs at 0x14, so read_reg_at returns false and we fall
-        // through to the 0x5A chip; the 0x5A traffic below is unchanged.
-        let mut id = [0u8; 4];
-        if read_reg_at(ADDR_GOODIX, GT_REG_PRODUCT_ID, &mut id) && id == GT_ID {
-            // GT1158 config: command 0x02, settle, then 0x00 = normal reporting
-            // (header line 111). Clear any stale buffer so the first INT is fresh.
-            // The PE5 pull-up is left enabled (electrically safe); the stock drops
-            // it after a Goodix probe (header 34-35) but that is not required here.
-            write_at(ADDR_GOODIX, &[(GT_REG_COMMAND >> 8) as u8, GT_REG_COMMAND as u8, 0x02]);
-            clk.delay_ms(10);
-            write_at(ADDR_GOODIX, &[(GT_REG_COMMAND >> 8) as u8, GT_REG_COMMAND as u8, 0x00]);
-            write_at(ADDR_GOODIX, &[(GT_REG_STATUS >> 8) as u8, GT_REG_STATUS as u8, 0x00]);
-            return Some(Touch {
-                ctrl: Ctrl::Goodix,
-                chip: id, // "1158"
-                raw: [0; 7],
-                ring: [[0; 7]; 8],
-                ring_i: 0,
-                last: Event::default(),
-                pending: None,
-                last_point: 0,
-                last_gt_poll: 0,
-            });
+        // Peripheral first, 400 kHz only when both edges are fast enough; if
+        // nothing answers, retry slower and finally on the bit-bang.
+        let first = if rise_scl_ns <= FAST_RISE_NS && rise_sda_ns <= FAST_RISE_NS { Mode::Hw400 } else { Mode::Hw100 };
+        let mut bus = Bus { mode: Mode::BitBang, fault_streak: 0, bad_streak: 0, edge_read: false, stats: Stats::default() };
+        bus.stats.rise_scl_ns = rise_scl_ns;
+        bus.stats.rise_sda_ns = rise_sda_ns;
+        let order: &[Mode] =
+            if first == Mode::Hw400 { &[Mode::Hw400, Mode::Hw100, Mode::BitBang] } else { &[Mode::Hw100, Mode::BitBang] };
+        let mut found = None;
+        for &mode in order {
+            bus.enter(mode);
+            bus.stats.probe_mode = mode as u8;
+            found = bus.probe(clk);
+            if found.is_some() {
+                break;
+            }
         }
+        let (ctrl, chip) = found?;
+        exti_init();
+        Some(Touch {
+            ctrl,
+            chip,
+            raw: [0; 7],
+            ring: [[0; 7]; 8],
+            ring_i: 0,
+            last: Event::default(),
+            pending: None,
+            last_point: 0,
+            last_gt_poll: 0,
+            last_read: 0,
+            bus,
+        })
+    }
 
-        // Hynitron 0x5A (this unit): unchanged init. ACK-only identify.
-        let mut chip = [0u8; 4];
-        let ok = write(&[0xD1, 0x01]) && read_reg(0xD204, &mut chip) && write(&[0xD1, 0x09]);
-        if !ok {
-            return None;
+    /// An INT edge is latched: a fresh report is waiting, so the main loop can
+    /// call `poll` now instead of on its 10 ms tick.
+    #[allow(dead_code)] // main.rs hook (see report); poll() works without it
+    pub fn irq_pending(&self) -> bool {
+        exti_pending()
+    }
+
+    /// DBG:DIAG? block (40 bytes, little endian):
+    ///  0 bus mode (0 bit-bang, 1 HW 100 kHz, 2 HW 400 kHz), 1 controller
+    ///  (0 0x5A, 1 GT1158), 2 SCL rise ns u16, 4 SDA rise ns u16, 6 last frame
+    ///  us u16, 8 max frame us u16, 10 last frame points, 11 probe mode,
+    ///  12 edge reads, 16 level-fallback reads, 20 Goodix timer reads,
+    ///  24 frames ok, 28 frames bad (0xAB), 32 NAKs, 36 HW faults (u32 each).
+    #[allow(dead_code)] // main.rs touch_diag hook (see report)
+    pub fn diag(&self) -> [u8; 40] {
+        let s = &self.bus.stats;
+        let mut d = [0u8; 40];
+        d[0] = self.bus.mode as u8;
+        d[1] = (self.ctrl == Ctrl::Goodix) as u8;
+        d[2..4].copy_from_slice(&s.rise_scl_ns.to_le_bytes());
+        d[4..6].copy_from_slice(&s.rise_sda_ns.to_le_bytes());
+        d[6..8].copy_from_slice(&s.last_us.to_le_bytes());
+        d[8..10].copy_from_slice(&s.max_us.to_le_bytes());
+        d[10] = s.last_n;
+        d[11] = s.probe_mode;
+        let c = [s.edge_reads, s.level_reads, s.timer_reads, s.frames_ok, s.frames_bad, s.naks, s.faults];
+        for (i, v) in c.iter().enumerate() {
+            d[12 + 4 * i..16 + 4 * i].copy_from_slice(&v.to_le_bytes());
         }
-        Some(Touch { ctrl: Ctrl::Hynitron, chip, raw: [0; 7], ring: [[0; 7]; 8], ring_i: 0, last: Event::default(), pending: None, last_point: 0, last_gt_poll: 0 })
+        d
     }
 
     /// Poll: reads a frame when due, dispatches to the detected controller, and
@@ -357,29 +946,51 @@ impl Touch {
     /// panel. A change of the point count or of any point while the screen
     /// stays touched is reported at once (no debounce), like a moving finger.
     pub fn poll(&mut self, now: u64) -> Option<Event> {
-        // Hynitron is driven purely by INT level, exactly as before. Goodix is
+        // A frame is read on an INT falling edge (EXTI line 5 pending bit,
+        // cleared before the read), or when INT is still low LEVEL_MS after the
+        // last read (the old level-polled cadence, so a controller holding INT
+        // low or an edge whose frame was dropped cannot stall touch). Goodix is
         // additionally force-polled on a timer: its INT behaviour is unknown and
-        // the main loop can stall (flash writes), so a short INT pulse must not
-        // be able to leave touch stuck. The `ctrl == Goodix` guard short-circuits
-        // on this 0x5A unit, so the 0x5A timing is unchanged.
-        let due = int_low()
-            || (self.ctrl == Ctrl::Goodix && now.saturating_sub(self.last_gt_poll) >= GT_POLL_MS);
+        // the main loop can stall (flash writes). The `ctrl == Goodix` guard
+        // short-circuits on this 0x5A unit.
+        let edge = exti_take();
+        let level = !edge && int_low() && now.saturating_sub(self.last_read) >= LEVEL_MS;
+        let timer = !edge
+            && !level
+            && self.ctrl == Ctrl::Goodix
+            && now.saturating_sub(self.last_gt_poll) >= GT_POLL_MS;
+        let st = &mut self.bus.stats;
+        if edge {
+            st.edge_reads = st.edge_reads.wrapping_add(1);
+        } else if level {
+            st.level_reads = st.level_reads.wrapping_add(1);
+        } else if timer {
+            st.timer_reads = st.timer_reads.wrapping_add(1);
+        }
 
-        let frame = if due {
-            match self.ctrl {
+        let frame = if edge || level || timer {
+            self.last_read = now;
+            self.bus.edge_read = edge;
+            let t0 = cyc();
+            let f = match self.ctrl {
                 // A bad/absent 0x5A frame returns without touching pending, as
                 // the original inline path did.
-                Ctrl::Hynitron => match self.read_hyn() {
-                    Some(f) => Some(f),
-                    None => return None,
-                },
+                Ctrl::Hynitron => self.read_hyn(),
                 // A "no new data" Goodix read (buffer-ready clear) returns None
                 // and falls through to the debounce flush below.
                 Ctrl::Goodix => {
                     self.last_gt_poll = now;
                     self.read_goodix()
                 }
+            };
+            let st = &mut self.bus.stats;
+            st.last_us = (cyc().wrapping_sub(t0) / CYC_PER_US).min(u16::MAX as u32) as u16;
+            st.max_us = st.max_us.max(st.last_us);
+            st.last_n = f.as_ref().map_or(0, |f| f.n);
+            if f.is_none() && self.ctrl == Ctrl::Hynitron {
+                return None;
             }
+            f
         } else {
             None
         };
@@ -457,7 +1068,9 @@ impl Touch {
     /// and is handled without touching pending, as before.
     fn read_hyn(&mut self) -> Option<Frame> {
         let mut b = [0u8; 7];
-        if !read_reg(0xD000, &mut b) || b[6] != 0xAB {
+        let good = self.bus.read_reg(0xD000, &mut b) && b[6] == 0xAB;
+        self.bus.frame_check(good);
+        if !good {
             return None;
         }
         self.raw = b;
@@ -474,7 +1087,7 @@ impl Touch {
         // transaction, as the stock driver does.
         for i in 1..n.min(MAX_POINTS as u8) {
             let mut e = [0u8; 5];
-            if read_reg(0xD000 + 7 + 5 * (i as u16 - 1), &mut e) && !key {
+            if self.bus.read_reg(0xD000 + 7 + 5 * (i as u16 - 1), &mut e) && !key {
                 let (pr, k, q) = decode(&e);
                 if pr && !k && (f.n as usize) < MAX_POINTS {
                     f.pts[f.n as usize] = q;
@@ -482,7 +1095,7 @@ impl Touch {
                 }
             }
         }
-        write(&[0xD0, 0x00, 0xAB]);
+        self.bus.write(&[0xD0, 0x00, 0xAB]);
         if !key {
             f.pressed = f.n > 0;
         }
@@ -504,19 +1117,20 @@ impl Touch {
     /// force-poll timer re-checks, so there is no hang.
     fn read_goodix(&mut self) -> Option<Frame> {
         let mut st = [0u8; 1];
-        if !read_reg_at(ADDR_GOODIX, GT_REG_STATUS, &mut st) {
+        if !self.bus.read_reg_at(ADDR_GOODIX, GT_REG_STATUS, &mut st) {
             return None;
         }
         let status = st[0];
         if status & 0x80 == 0 {
             return None; // buffer not ready: nothing new, nothing to clear
         }
+        self.bus.stats.frames_ok = self.bus.stats.frames_ok.wrapping_add(1);
         let n = status & 0x0F; // bits 3..0 = point count
         let have_key = status & 0x10 != 0; // bit 4 = HaveKey
 
         // Stock order (header line 112): read status, clear the buffer, then read
         // the point/key records.
-        write_at(ADDR_GOODIX, &[(GT_REG_STATUS >> 8) as u8, GT_REG_STATUS as u8, 0x00]);
+        self.bus.write_at(ADDR_GOODIX, &[(GT_REG_STATUS >> 8) as u8, GT_REG_STATUS as u8, 0x00]);
 
         let mut pressed = false;
         let mut pts = [Point::default(); MAX_POINTS];
@@ -525,7 +1139,7 @@ impl Touch {
         // Y hi (header line 113; the stock reads them all, table 0x0804976c).
         for i in 0..n.min(MAX_POINTS as u8) {
             let mut pt = [0u8; 4];
-            if read_reg_at(ADDR_GOODIX, GT_REG_POINT0 + 8 * i as u16, &mut pt) {
+            if self.bus.read_reg_at(ADDR_GOODIX, GT_REG_POINT0 + 8 * i as u16, &mut pt) {
                 let gx = (pt[1] as u16) << 8 | pt[0] as u16; // Goodix native X
                 let gy = (pt[3] as u16) << 8 | pt[2] as u16; // Goodix native Y
                 // Native portrait (320x480) -> landscape GUI, no scale/mirror
@@ -544,7 +1158,7 @@ impl Touch {
             // 0..3. Mask to the 4 valid bits so a spurious value cannot shift the
             // event bit past bit 3.
             let mut kb = [0u8; 1];
-            if read_reg_at(ADDR_GOODIX, GT_REG_KEY0 + 8 * n as u16, &mut kb) {
+            if self.bus.read_reg_at(ADDR_GOODIX, GT_REG_KEY0 + 8 * n as u16, &mut kb) {
                 let kv = kb[0] & 0x0F;
                 if kv != 0 {
                     code = kv.trailing_zeros() as u8;
