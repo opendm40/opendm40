@@ -101,6 +101,19 @@ pub fn end() {
     emu().call = None;
 }
 
+/// Register one probed element (kind, background) of a composite window
+/// (stockfont::paint) and return its call id; `set` then selects, per
+/// pixel, which element the next write belongs to (id 0 = none).
+pub fn open(kind: u8, bg: u16) -> u32 {
+    let e = emu();
+    e.kinds.push(kind);
+    e.kinds.len() as u32
+}
+
+pub fn set(id: u32, bg: u16, g: u8) {
+    emu().call = if id == 0 { None } else { Some((id, bg, g)) };
+}
+
 fn lcd_w16(addr: u32, v: u16) {
     let e = emu();
     if addr == 0x6001_FFFE {

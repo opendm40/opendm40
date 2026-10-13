@@ -81,23 +81,18 @@ def main():
     out.append('// The stock bitmap fonts, embedded so stockfont.rs needs no stock app in flash.')
     out.append('')
 
-    total_blob = 0
-    total_glyphs = 0
-    summary = []
-    for name, a in FONTS:
+    def load(a):
+        """Glyphs of the font object at `a`: (line_h, descent, four, [(code, w, h, adv, yoff, bytes)])."""
         D, vt = w32(a), w32(a + 4)
         f0 = w32(vt)
         if f0 not in (VT_A, VT_B, VT_BPLUS):
-            raise SystemExit('%s @%08x: unexpected vtable %08x (composite/unknown not supported)'
-                             % (name, a, f0))
+            raise SystemExit('@%08x: unexpected vtable %08x (composite/unknown not supported)' % (a, f0))
         class_a = (f0 == VT_A)
         bits, tab, n, fmt = w32(D), w32(D + 4), w32(D + 8), u8(D + 12)
         line_h, descent = u16(a + 8), i16(a + 10)
         four = (fmt == 4)
         bpp = 4 if four else 1
-
-        blob = bytearray()
-        entries = []
+        gl = []
         prev_code = None
         for i in range(n):
             if class_a:
@@ -116,20 +111,70 @@ def main():
                 adv = gw
                 yoff = 0
             if prev_code is not None and code <= prev_code:
-                raise SystemExit('%s: glyph table not strictly ascending at code %x' % (name, code))
+                raise SystemExit('@%08x: glyph table not strictly ascending at code %x' % (a, code))
             prev_code = code
             span = (gw * gh * bpp + 7) // 8
             abs_bits = bits + off
             data = img[abs_bits - BASE: abs_bits - BASE + span]
             if len(data) != span:
-                raise SystemExit('%s code %x: bitmap out of image' % (name, code))
-            new_off = len(blob)
+                raise SystemExit('@%08x code %x: bitmap out of image' % (a, code))
+            gl.append((code, gw, gh, adv, yoff, bytes(data)))
+        return line_h, descent, four, gl, ('A' if class_a else 'B')
+
+    def load_class_c():
+        """Class C font 0x08054828 (vtable 0x08054820, FUN_0802362c/FUN_080235bc):
+        fixed 1 bpp bitmaps, ' (4x16) at 0x08054728, R U N S T O P W A I D H
+        (10x16, 20 bytes each) from 0x08054730; line_h 16, descent 0."""
+        gl = []
+        for i, ch in enumerate("'RUNSTOPWAIDH"):
+            if i == 0:
+                a, w = 0x08054728, 4
+            else:
+                a, w = 0x08054730 + 20 * (i - 1), 10
+            gl.append((ord(ch), w, 16, w, 0, img[a - BASE: a - BASE + (w * 16 + 7) // 8]))
+        gl.sort()
+        return 16, 0, False, gl, 'C'
+
+    def load_merged(first, second):
+        """B+ font: every code of `first` (0x0805471c) and, for the codes it
+        lacks, the font's own table (`second`), as FUN_08023425 looks them up.
+        Only codes < 0x80 of the own table (the CJK part is not used)."""
+        lh, de, four, g1, _ = load(first)
+        lh2, de2, four2, g2, _ = load(second)
+        assert (lh, four) == (lh2, four2)
+        have = set(g[0] for g in g1)
+        gl = sorted(g1 + [g for g in g2 if g[0] < 0x80 and g[0] not in have])
+        return lh, de, four, gl, 'B+'
+
+    total_blob = 0
+    total_glyphs = 0
+    summary = []
+    fonts = [(name, a, (lambda a=a: load(a))) for name, a in FONTS]
+    fonts += [(name, key, src) for name, key, src in [
+        # Stock scope page fonts (docs/stock-scope-ui.md sec. 0.1), keyed by
+        # the font-object address the stock page uses.
+        ('SC_C', 0x08054828, load_class_c),                                  # status letters, "H"
+        ('SC_F12', 0x0804F24C, lambda: load_merged(0x0805471C, 0x0804F24C)),  # 12 px texts
+        ('SC_F20', 0x08054148, lambda: load(0x08054148)),                     # panel buttons
+        ('SC_PROBE', 0x08054FC0, lambda: load(0x08054FC0)),                   # coupling / probe glyph
+        ('SC_EDGE', 0x08055014, lambda: load(0x08055014)),                    # trigger edge
+        ('SC_MARK', 0x08065558, lambda: load(0x08065558)),                    # 12x12 markers
+        ('SC_BATT', 0x0806BD44, lambda: load(0x0806BD44)),                    # battery
+        ('SC_F16', 0x0804F260, lambda: load(0x080534C4)),                     # 16 px popup ASCII (wrapper)
+    ]]
+    for name, a, src in fonts:
+        line_h, descent, four, gl, cls = src()
+        bpp = 4 if four else 1
+        blob = bytearray()
+        entries = []
+        for (code, gw, gh, adv, yoff, data) in gl:
+            entries.append((code, len(blob), gw, gh, adv, yoff))
             blob += data
-            entries.append((code, new_off, gw, gh, adv, yoff))
+        n = len(entries)
 
         total_blob += len(blob)
         total_glyphs += n
-        summary.append((name, 'A' if class_a else 'B', bpp, line_h, descent, n, len(blob)))
+        summary.append((name, cls, bpp, line_h, descent, n, len(blob)))
 
         # Emit the glyph entry table.
         out.append('pub static %s_E: [Entry; %d] = [' % (name, n))
@@ -163,7 +208,7 @@ def main():
     out.append('/// Resolve a stock font-object address to its embedded data.')
     out.append('pub fn font_data(addr: u32) -> Option<&\'static FontData> {')
     out.append('    match addr {')
-    for name, a in FONTS:
+    for name, a, _ in fonts:
         out.append('        0x%08X => Some(&%s_FD),' % (a, name))
     out.append('        _ => None,')
     out.append('    }')
@@ -173,9 +218,9 @@ def main():
     open(os.path.join(FW, 'src', 'stockfont_data.rs'), 'w').write('\n'.join(out) + '\n')
 
     # Self-check report.
-    print('fonts: %d  glyphs: %d  blob bytes: %d' % (len(FONTS), total_glyphs, total_blob))
+    print('fonts: %d  glyphs: %d  blob bytes: %d' % (len(fonts), total_glyphs, total_blob))
     for (name, cls, bpp, lh, desc, n, nb) in summary:
-        print('  %-9s class %-1s %dbpp line_h=%-3d descent=%-2d glyphs=%-4d blob=%d'
+        print('  %-9s class %-2s %dbpp line_h=%-3d descent=%-2d glyphs=%-4d blob=%d'
               % (name, cls, bpp, lh, desc, n, nb))
 
 

@@ -35,6 +35,12 @@ mod data {
 
     const VT_A: u32 = 0x0802_3509;
     const VT_B: u32 = 0x0802_36F5;
+    const VT_BPLUS: u32 = 0x0802_3425;
+    const FONT_C: u32 = 0x0805_4828;
+    const FONT12: u32 = 0x0804_F24C;
+    const ASCII12: u32 = 0x0805_471C;
+    const FONT16: u32 = 0x0804_F260;
+    const ASCII16: u32 = 0x0805_34C4;
 
     fn r32(a: u32) -> u32 {
         unsafe { core::ptr::read_volatile(a as *const u32) }
@@ -54,8 +60,10 @@ mod data {
     }
 
     impl Glyph {
+        pub const EMPTY: Glyph = Glyph { bits: 0, four: false, w: 0, h: 0, adv: 0, yoff: 0 };
+
         /// Coverage 0..15 of pixel (x, y) inside the glyph box.
-        pub(super) fn alpha(&self, x: u32, y: u32) -> u8 {
+        pub fn alpha(&self, x: u32, y: u32) -> u8 {
             let p = x * self.h as u32 + y;
             if self.four {
                 let b = r8(self.bits + p / 2);
@@ -70,19 +78,52 @@ mod data {
     impl Font {
         /// The stock app is present and this looks like a font object.
         pub fn valid(&self) -> bool {
+            if self.0 == FONT_C || self.0 == FONT16 {
+                return Font(ASCII16).valid();
+            }
             let vt = r32(self.0 + 4);
-            (0x0800_4000..0x0808_0000).contains(&vt) && matches!(r32(vt), VT_A | VT_B)
+            (0x0800_4000..0x0808_0000).contains(&vt) && matches!(r32(vt), VT_A | VT_B | VT_BPLUS)
         }
 
         pub fn line_h(&self) -> u16 {
-            (r32(self.0 + 8) & 0xFFFF) as u16
+            match self.0 {
+                FONT_C => 16,
+                FONT16 => Font(ASCII16).line_h(),
+                _ => (r32(self.0 + 8) & 0xFFFF) as u16,
+            }
         }
 
         pub fn descent(&self) -> i16 {
-            (r32(self.0 + 8) >> 16) as i16
+            match self.0 {
+                FONT_C => 0,
+                FONT16 => Font(ASCII16).descent(),
+                _ => (r32(self.0 + 8) >> 16) as i16,
+            }
         }
 
+        /// Glyph lookup with the stock chains of the scope page fonts: class C
+        /// (fixed bitmaps, FUN_0802362c), the 12 px B+ font (0x0805471c first,
+        /// then its own table, FUN_08023425) and the 16 px wrapper (its ASCII
+        /// part 0x080534c4; the CJK part is not used).
         pub fn glyph(&self, code: u32) -> Option<Glyph> {
+            match self.0 {
+                FONT_C => {
+                    let i = b"'RUNSTOPWAIDH".iter().position(|&c| c as u32 == code)? as u32;
+                    let (bits, w) = if i == 0 { (0x0805_4728, 4) } else { (0x0805_4730 + 20 * (i - 1), 10) };
+                    return Some(Glyph { bits, four: false, w, h: 16, adv: w, yoff: 0 });
+                }
+                FONT16 => return Font(ASCII16).glyph(code),
+                FONT12 => {
+                    if let Some(g) = Font(ASCII12).glyph_own(code) {
+                        return Some(g);
+                    }
+                }
+                _ => {}
+            }
+            self.glyph_own(code)
+        }
+
+        fn glyph_own(&self, code: u32) -> Option<Glyph> {
             let d = r32(self.0);
             let class_a = r32(r32(self.0 + 4)) == VT_A;
             let (bits, tab, n, fmt) = (r32(d), r32(d + 4), r32(d + 8), r8(d + 12));
@@ -161,9 +202,11 @@ mod data {
     }
 
     impl Glyph {
+        pub const EMPTY: Glyph = Glyph { blob: &[], off: 0, four: false, w: 0, h: 0, adv: 0, yoff: 0 };
+
         /// Coverage 0..15 of pixel (x, y) inside the glyph box. Column-major,
         /// MSB-first; 4 bpp packs two pixels per byte (high nibble first).
-        pub(super) fn alpha(&self, x: u32, y: u32) -> u8 {
+        pub fn alpha(&self, x: u32, y: u32) -> u8 {
             let p = x * self.h as u32 + y;
             if self.four {
                 let b = self.blob[(self.off + p / 2) as usize];
@@ -697,4 +740,272 @@ pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
         n += s.len();
     }
     core::str::from_utf8(&buf[..n]).unwrap_or("")
+}
+
+// ---------------------------------------------------------------------------
+// Stock-exact drawing for the replica scope page (docs/stock-scope-ui.md sec. 0,
+// the port of tools/stock-ui/gfx.rs): anti-aliasing OFF (a glyph pixel is ink
+// iff its coverage >= 8 of 15), the stock text placement without our
+// "space >= line_h / 3" rule, rounded boxes and 1 px rings with the stock
+// corner tables. Drawing is by composition: a widget is one LCD window whose
+// every pixel is computed from its layers (`paint`), so nothing flickers and
+// a repaint of any sub-rectangle is exact.
+
+/// Fonts of the stock scope page (stock font-object addresses; embedded by
+/// tools/mkstockfont.py, or read in place on the RAM image).
+pub const SC_C: Font = Font(0x0805_4828); // 10x16 status letters ' R U N S T O P W A I D H
+pub const SC_F12: Font = Font(0x0804_F24C); // 12 px texts (ASCII of 0x0805471c + own table)
+pub const SC_F16: Font = Font(0x0804_F260); // 16 px popup texts (ASCII 0x080534c4)
+pub const SC_F20: Font = Font(0x0805_4148); // 20 px panel buttons
+pub const SC_F22: Font = TEXT22; // 22 px tab labels, toasts
+pub const SC_PROBE: Font = Font(0x0805_4FC0); // coupling / probe glyph 0x2c..0x45
+pub const SC_EDGE: Font = Font(0x0805_5014); // trigger edge 0x20 rising / 0x21 falling
+pub const SC_MARK: Font = Font(0x0806_5558); // 12x12 marker glyphs 0x20..0x4b
+pub const SC_BATT: Font = Font(0x0806_BD44); // battery 0x22 outline, 0x23.. level
+pub const SC_DIGITS: Font = Font(0x0805_C5DC); // 20 px digits (generator / keypad)
+
+/// Row j (0 = outermost) of a rounded corner of radius r starts INSET[r][j]
+/// px in (FUN_0801d754 / FUN_0801d0e4 thresholded a > 0x7f; port
+/// tools/stock-ui/notes/tools/rounded_mask.py, radius 1..10).
+const INSET: [[u8; 10]; 11] = [
+    [0; 10],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [2, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+    [3, 2, 1, 0, 0, 0, 0, 0, 0, 0],
+    [4, 2, 1, 1, 0, 0, 0, 0, 0, 0],
+    [5, 3, 2, 1, 0, 0, 0, 0, 0, 0],
+    [5, 3, 2, 1, 1, 0, 0, 0, 0, 0],
+    [6, 4, 3, 2, 1, 1, 0, 0, 0, 0],
+    [7, 5, 3, 2, 2, 1, 1, 0, 0, 0],
+];
+
+/// Painted corner pixels (k, j) of a 1 px rounded border (FUN_0801e194 width
+/// 1), per radius, inside the (r+1) x (r+1) corner square; same source.
+const RING: [&[(u8, u8)]; 11] = [
+    &[],
+    &[(0, 0)],
+    &[(1, 0), (2, 0), (0, 1), (0, 2)],
+    &[(2, 0), (3, 0), (0, 1), (1, 1), (0, 2), (0, 3)],
+    &[(2, 0), (3, 0), (4, 0), (1, 1), (0, 2), (0, 3), (0, 4)],
+    &[(3, 0), (4, 0), (5, 0), (2, 1), (1, 2), (0, 3), (0, 4), (0, 5)],
+    &[(4, 0), (5, 0), (6, 0), (2, 1), (3, 1), (1, 2), (1, 3), (0, 4), (0, 5), (0, 6)],
+    &[(5, 0), (6, 0), (7, 0), (3, 1), (4, 1), (2, 2), (1, 3), (0, 4), (1, 4), (0, 5), (0, 6), (0, 7)],
+    &[(5, 0), (6, 0), (7, 0), (8, 0), (3, 1), (4, 1), (2, 2), (3, 2), (1, 3), (2, 3), (1, 4), (0, 5), (0, 6), (0, 7), (0, 8)],
+    &[(6, 0), (7, 0), (8, 0), (9, 0), (4, 1), (5, 1), (3, 2), (2, 3), (1, 4), (1, 5), (0, 6), (0, 7), (0, 8), (0, 9)],
+    &[(7, 0), (8, 0), (9, 0), (10, 0), (5, 1), (6, 1), (3, 2), (4, 2), (2, 3), (3, 3), (2, 4), (1, 5), (1, 6), (0, 7), (0, 8), (0, 9), (0, 10)],
+];
+
+fn clamp_radius(r: Rect, radius: i16) -> i16 {
+    radius.min(r.w.min(r.h) >> 1).max(0).min(10)
+}
+
+fn corner_inside(r: i16, k: i16, j: i16) -> bool {
+    r <= 0 || k >= r || j >= r || k >= INSET[r as usize][j as usize] as i16
+}
+
+impl Rect {
+    pub const fn has(&self, x: i16, y: i16) -> bool {
+        x >= self.x && y >= self.y && x < self.x + self.w && y < self.y + self.h
+    }
+    pub const fn inset(&self, d: i16) -> Rect {
+        rect(self.x + d, self.y + d, self.w - 2 * d, self.h - 2 * d)
+    }
+}
+
+/// (x, y) inside the stock rounded box `r` (FUN_0801b272: corner mask bit0
+/// TL, bit1 TR, bit2 BL, bit3 BR; radius clamped to min(w, h) / 2).
+pub fn in_rbox(r: Rect, radius: i16, mask: u8, x: i16, y: i16) -> bool {
+    if !r.has(x, y) {
+        return false;
+    }
+    let rad = clamp_radius(r, radius);
+    let (kx, ky) = (x - r.x, y - r.y);
+    let (rx, ry) = (r.w - 1 - kx, r.h - 1 - ky);
+    (mask & 1 == 0 || corner_inside(rad, kx, ky))
+        && (mask & 2 == 0 || corner_inside(rad, rx, ky))
+        && (mask & 4 == 0 || corner_inside(rad, kx, ry))
+        && (mask & 8 == 0 || corner_inside(rad, rx, ry))
+}
+
+/// (x, y) on the 1 px stock rounded border of `r` (FUN_0801e194).
+pub fn on_ring(r: Rect, radius: i16, mask: u8, x: i16, y: i16) -> bool {
+    if !r.has(x, y) {
+        return false;
+    }
+    let rad = clamp_radius(r, radius);
+    let ring = RING[rad as usize];
+    let corner = |k: i16, j: i16| ring.iter().any(|&(a, b)| a as i16 == k && b as i16 == j);
+    let (kx, ky) = (x - r.x, y - r.y);
+    let (rx, ry) = (r.w - 1 - kx, r.h - 1 - ky);
+    if kx <= rad && ky <= rad && mask & 1 != 0 {
+        corner(kx, ky)
+    } else if rx <= rad && ky <= rad && mask & 2 != 0 {
+        corner(rx, ky)
+    } else if kx <= rad && ry <= rad && mask & 4 != 0 {
+        corner(kx, ry)
+    } else if rx <= rad && ry <= rad && mask & 8 != 0 {
+        corner(rx, ry)
+    } else {
+        kx == 0 || ky == 0 || rx == 0 || ry == 0
+    }
+}
+
+/// Most glyphs of one `Ink` text.
+const INK_N: usize = 24;
+
+/// A text laid out as the stock label does (FUN_0801ae50), for threshold
+/// compositing: `at(x, y)` is Some(glyph index) where a glyph has ink.
+#[derive(Clone, Copy)]
+pub struct Ink {
+    g: [(Glyph, i16, i16); INK_N],
+    n: u8,
+    /// Ink bounds (glyph boxes), for a quick reject.
+    pub bx: Rect,
+}
+
+impl Ink {
+    pub const fn none() -> Ink {
+        // A zero-size glyph box never has ink.
+        Ink { g: [(Glyph::EMPTY, 0, 0); INK_N], n: 0, bx: rect(0, 0, 0, 0) }
+    }
+
+    /// Lay `text` out in `r` with the stock rules: text_w = sum(adv) of all
+    /// but the last glyph + w(last) + (n-1) * spacing; an unknown code
+    /// advances line_h; align 0..8 as `label`; glyph top = line top + line_h
+    /// - descent - h - yoff.
+    pub fn new(font: Font, r: Rect, text: &str, align: u8, spacing: i8) -> Ink {
+        let mut k = Ink::none();
+        let lh = font.line_h() as i32;
+        let mut xs = [0i32; INK_N];
+        let mut gs: [Option<Glyph>; INK_N] = [None; INK_N];
+        let (mut pen, mut last_w, mut n) = (0i32, 0i32, 0usize);
+        for ch in text.chars() {
+            if n == INK_N {
+                break;
+            }
+            let g = font.glyph(ch as u32);
+            xs[n] = pen;
+            gs[n] = g;
+            match g {
+                Some(g) => {
+                    pen += g.adv as i32 + spacing as i32;
+                    last_w = g.w as i32;
+                }
+                None => {
+                    pen += lh + spacing as i32;
+                    last_w = lh;
+                }
+            }
+            n += 1;
+        }
+        let tw = if n > 0 { xs[n - 1] + last_w } else { 0 };
+        let ox = match align {
+            0..=2 => 0,
+            3..=5 => r.w as i32 - tw,
+            _ => (r.w as i32 - tw) >> 1,
+        };
+        let oy = match align {
+            0 | 3 | 6 => 0,
+            2 | 5 | 7 => r.h as i32 - lh,
+            _ => (r.h as i32 - lh) >> 1,
+        };
+        let desc = font.descent() as i32;
+        let (mut x0, mut y0, mut x1, mut y1) = (i16::MAX, i16::MAX, i16::MIN, i16::MIN);
+        for i in 0..n {
+            if let Some(g) = gs[i] {
+                if g.w == 0 || g.h == 0 {
+                    continue;
+                }
+                let x = (r.x as i32 + ox + xs[i]) as i16;
+                let y = (r.y as i32 + oy + lh - desc - g.h as i32 - g.yoff as i32) as i16;
+                k.g[k.n as usize] = (g, x, y);
+                k.n += 1;
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x + g.w as i16);
+                y1 = y1.max(y + g.h as i16);
+            }
+        }
+        if k.n > 0 {
+            k.bx = rect(x0, y0, x1 - x0, y1 - y0);
+        }
+        k
+    }
+
+    /// One glyph placed like a 1-character label (icons, markers).
+    pub fn icon(font: Font, r: Rect, code: u32, align: u8) -> Ink {
+        let mut b = [0u8; 4];
+        match char::from_u32(code) {
+            Some(c) => Ink::new(font, r, c.encode_utf8(&mut b), align, 0),
+            None => Ink::none(),
+        }
+    }
+
+    /// Glyph index with ink (coverage >= 8 of 15, the AA-off threshold) at
+    /// (x, y), or None.
+    #[inline]
+    pub fn at(&self, x: i16, y: i16) -> Option<u8> {
+        if !self.bx.has(x, y) {
+            return None;
+        }
+        for i in 0..self.n as usize {
+            let (g, gx, gy) = &self.g[i];
+            let (dx, dy) = (x - gx, y - gy);
+            if dx >= 0 && dy >= 0 && dx < g.w as i16 && dy < g.h as i16 && g.alpha(dx as u32, dy as u32) >= 8 {
+                return Some(i as u8);
+            }
+        }
+        None
+    }
+
+    /// Ink width as laid out (glyph boxes), 0 for none.
+    pub fn width(&self) -> i16 {
+        self.bx.w
+    }
+}
+
+/// Stream the window `r` (clipped to the screen) computing every pixel with
+/// `f(x, y) -> (colour, tag)`. The tag only matters to the host layout check
+/// (cfg(test)): 0 = background, else `layer << 8 | glyph`, layer 1.. indexing
+/// `layers` = (probe kind, background colour) of each drawn element, so one
+/// composite window still reports its shapes, texts and icons separately.
+#[inline(never)]
+pub fn paint(r: Rect, layers: &[(u8, Color)], mut f: impl FnMut(i16, i16) -> (Color, u16)) {
+    let x0 = r.x.max(0);
+    let y0 = r.y.max(0);
+    let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);
+    let y1 = (r.y + r.h - 1).min(lcd::H as i16 - 1);
+    if x1 < x0 || y1 < y0 {
+        return;
+    }
+    #[cfg(test)]
+    let ids: [u32; 8] = {
+        let mut ids = [0u32; 8];
+        for (i, l) in layers.iter().take(8).enumerate() {
+            ids[i] = crate::probe::open(l.0, l.1);
+        }
+        ids
+    };
+    #[cfg(not(test))]
+    let _ = layers;
+    lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let (c, _tag) = f(x, y);
+            #[cfg(test)]
+            {
+                let l = (_tag >> 8) as usize;
+                if l == 0 || l > layers.len().min(8) {
+                    crate::probe::set(0, 0, 0);
+                } else {
+                    crate::probe::set(ids[l - 1], layers[l - 1].1, _tag as u8);
+                }
+            }
+            lcd::data(c);
+        }
+    }
+    #[cfg(test)]
+    crate::probe::end();
 }
