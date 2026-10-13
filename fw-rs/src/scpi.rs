@@ -157,6 +157,9 @@ pub enum Log {
 ///                           ";target,axis,delta_px,ms" (target 1 level, 2 trigger
 ///                           position / pan, 3 offset, 4/5 X/Y cursor a, 14/15 b;
 ///                           axis H|V)
+///   DBG:ACDC?               AC+DC phase diagnostic (Dmm::acdc_diag_text): phases
+///                           started, then per recent AC phase (oldest first)
+///                           ";late_ms:sq/lpf/dcp,..."; read-only
 ///   DBG:DRAG x0,y0,x1,y1,ms[,hold]
 ///                           synthetic one-finger drag through the gesture
 ///                           tracker (axis lock, capture): down at x0,y0, held
@@ -278,6 +281,8 @@ pub enum Cmd {
     DbgGrab(Option<u16>),
     /// DBG:GEST?: log of the last scope drags.
     DbgGest,
+    /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
+    DbgAcdc,
     /// DBG:HWTRIG...: 0 query, 1 ENABLE (bool), 2 CAL?, 3 STAT?, 4 STAT:RESET.
     DbgHwTrig(u8, bool),
 }
@@ -620,6 +625,7 @@ impl Scpi {
                     out = Out::Instr(Cmd::DbgGrab(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 5000.0) as u16) }))
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"ACDC"[..]) => out = Out::Instr(Cmd::DbgAcdc),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {
                     let c = match (parts.get(2).copied(), parts.get(3).copied(), query) {
                         (None, _, true) => Some(Cmd::DbgHwTrig(0, false)),

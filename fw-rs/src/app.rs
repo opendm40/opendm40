@@ -2678,6 +2678,12 @@ impl App {
                 }
                 true
             }
+            C::DbgAcdc => {
+                let mut b = [0u8; 400];
+                let n = self.dmm.acdc_diag_text(&mut b);
+                out.put_bytes(&b[..n]);
+                true
+            }
             _ => return None,
         };
         Some(r)

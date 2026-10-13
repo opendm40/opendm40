@@ -923,7 +923,6 @@ impl Dmm {
     /// (oldest phase first, dcp with 4 decimals in the phase's unit), e.g.
     /// `41;2:9926/183/0.0891,9926/150/0.0727,...`. Returns the length used;
     /// a phase that does not fit in `buf` is left out. ~4 x 90 bytes.
-    #[allow(dead_code)] // SCPI hook (DBG:ACDC?) is the integrator's
     pub fn acdc_diag_text(&self, buf: &mut [u8]) -> usize {
         fn put(buf: &mut [u8], at: &mut usize, b: &[u8]) -> bool {
             let ok = *at + b.len() <= buf.len();
