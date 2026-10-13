@@ -149,7 +149,9 @@ Additional requirements:
 - [ ] FR-35 CSV export from DMM (P1): = the CSV-to-disk item above, with timestamps.
 - Likely already done (verify, then tick): FR-09 REL, FR-10 idle auto-off, FR-12 screen dim,
   FR-18 touch lock, FR-27 generator keeps running in DMM. FR-33 is USBTMC+MSC (we chose DBG over CDC).
-- [ ] Repo tidy-up (user request; not done yet).
+- [ ] Repo tidy-up (user request): plan in ../TIDY-PLAN.md (46f9352); .gitignore for dumps/backups and README
+      fixes done (3aedb6f, efb7e50). Moves/deletes wait for the user's decisions: vendor-derived material
+      (app_decompile.c is tracked) and BT MACs in README/dm40.py while origin is a public GitHub repo.
 
 ## From user community feedback (docs/user-feedback.md)
 - [ ] UF-01 (P0) Verify continuity CMPO beeper + diode beep classes on device, latency <10 ms (most-praised stock feature). §5.2
