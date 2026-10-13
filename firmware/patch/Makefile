@@ -32,6 +32,14 @@ demo:
 usb:
 	$(MAKE) BUILD=build-usb SRCS="src/usb_hooks.c src/usb_stream.S"
 
+# Remote-debug variant: memrw + LCD screenshot read-back (BT cmd 0x0B sub 3/4).
+# Separate image so the plain memrw build stays byte-identical. All new code
+# runs only from the BT command handler; no new always-executed code.
+dbg:
+	$(MAKE) BUILD=build-dbg SRCS="src/startup.c src/stockdbg.c"
+	cp build-dbg/dm40_patched.bin build-dbg/dm40_dbg.bin
+	@echo "built build-dbg/dm40_dbg.bin"
+
 $(BUILD)/%.o: src/%.c hooks.h fw_v2_6.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -52,6 +60,6 @@ $(BUILD):
 	mkdir -p $@
 
 clean:
-	rm -rf build build-demo
+	rm -rf build build-demo build-dbg
 
-.PHONY: all clean demo
+.PHONY: all clean demo usb dbg
