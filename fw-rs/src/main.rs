@@ -14,6 +14,7 @@ mod hy3131_tables;
 mod lcd;
 mod meter;
 mod mmio;
+mod persist;
 mod power;
 mod scope;
 mod scope_meas;
