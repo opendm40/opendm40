@@ -302,3 +302,5 @@ Additional requirements:
 - [ ] Data logger runs at 38 Hz at OSR 2048 although AD1 allows up to ~2400 Hz by the formula: the SPI
       read loop limits it — profile (bit-banged SPI on PC10-12?) and speed up (hardware SPI / DMA / read
       only the AD1 data bytes).
+      Device test: LOG:OSR 0..7 sweep with LOG:RATE? and the noise (counts) per code on a steady 0.5 V,
+      to fix the real rate/noise table (OSR 256 ~1 kHz by the formula, unverified).
