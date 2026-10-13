@@ -654,6 +654,89 @@ pub fn graph_marks(m: &Model, out: &mut [Mark; 3]) {
     }
 }
 
+/// A touch zone of a marker (sec. 10.2): the 12x12 glyph rect grown by 10
+/// px on every side; `level`: level group (CH1 0, trigger level 1, Y
+/// cursors 3 / 4), else time group (trigger position 0, X cursors 2 / 3).
+#[derive(Clone, Copy, PartialEq)]
+pub struct Zone {
+    pub level: bool,
+    pub id: u8,
+    pub r: Rect,
+}
+
+impl Zone {
+    pub const NONE: Zone = Zone { level: false, id: 0, r: rect(0, 0, 0, 0) };
+}
+
+/// The marker zones of the page in creation order (level group first).
+pub fn zones(m: &Model, out: &mut [Zone; 7]) -> usize {
+    let grow = |r: Rect| rect(r.x - 10, r.y - 10, r.w + 20, r.h + 20);
+    let mut n = 0;
+    let mut mm = *m;
+    mm.sel_v = 255; // creation order
+    let mut marks = [Mark::NONE; 5];
+    strip_marks(&mm, &mut marks);
+    let ids: [u8; 4] = [0, 1, 3, 4];
+    for (k, mk) in marks.iter().enumerate().take(4) {
+        if mk.some() {
+            out[n] = Zone { level: true, id: ids[k], r: grow(mk.rect()) };
+            n += 1;
+        }
+    }
+    let mut g = [Mark::NONE; 3];
+    graph_marks(m, &mut g);
+    let hids: [u8; 3] = [0, 2, 3];
+    for (k, mk) in g.iter().enumerate() {
+        if mk.some() {
+            out[n] = Zone { level: false, id: hids[k], r: grow(mk.rect()) };
+            n += 1;
+        }
+    }
+    n
+}
+
+/// The stock zone search for a press at (x, y): the group other than the
+/// last selected one (`last_h`: time group), zones after its current item;
+/// else the same group cycling from its current item + 1 (wrapping, so
+/// repeated presses on overlapping zones cycle through them); else the
+/// other group from its first zone. Index into `z`.
+pub fn pick_zone(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<usize> {
+    let same_level = !last_h;
+    let of = |level: bool| -> ([usize; 7], usize) {
+        let mut l = [0usize; 7];
+        let mut k = 0;
+        for (i, q) in z.iter().enumerate() {
+            if q.level == level && k < 7 {
+                l[k] = i;
+                k += 1;
+            }
+        }
+        (l, k)
+    };
+    let cur = |level: bool, l: &[usize]| {
+        let id = if level { sel_v } else { sel_h };
+        l.iter().position(|&i| z[i].id == id)
+    };
+    let hit = |i: usize| z[i].r.has(x, y);
+    let (ol, on) = of(!same_level);
+    if let Some(c) = cur(!same_level, &ol[..on]) {
+        if let Some(&i) = ol[c + 1..on].iter().find(|&&i| hit(i)) {
+            return Some(i);
+        }
+    }
+    let (sl, sn) = of(same_level);
+    if sn > 0 {
+        let c = cur(same_level, &sl[..sn]).unwrap_or(sn - 1);
+        for d in 1..=sn {
+            let i = sl[(c + d) % sn];
+            if hit(i) {
+                return Some(i);
+            }
+        }
+    }
+    ol[..on].iter().copied().find(|&i| hit(i))
+}
+
 /// Repaint strip rows y0..=y1 (x 1..12) with the markers `marks` (draw order).
 fn strip_rows(marks: &[Mark], y0: i16, y1: i16) {
     let mut ink: [MarkInk; 5] = [MarkInk::NONE; 5];
@@ -769,6 +852,10 @@ pub struct Graph {
     deco: Deco,
     d_deco: Deco,
     valid: bool,
+    /// A screen rect the graph leaves alone (an overlay drawn on top, e.g.
+    /// the pinch bubble), and the one of the last flush.
+    hole: Option<Rect>,
+    d_hole: Option<Rect>,
     /// Pixels written by the last flush (host budget check / DBG).
     pub px: u32,
 }
@@ -781,6 +868,8 @@ static mut GRAPH: Graph = Graph {
     deco: Deco::NONE,
     d_deco: Deco::NONE,
     valid: false,
+    hole: None,
+    d_hole: None,
     px: 0,
 };
 
@@ -848,6 +937,11 @@ impl Graph {
         self.valid = false;
     }
 
+    /// Leave `r` (screen) alone from now on (None: paint it again).
+    pub fn set_hole(&mut self, r: Option<Rect>) {
+        self.hole = r;
+    }
+
     /// Clear the trace and persistence (an empty graph).
     pub fn clear(&mut self) {
         self.tr = [EMPTY; 399];
@@ -904,6 +998,12 @@ impl Graph {
                 for &r in &hrows[..nh] {
                     sp.add((r, r));
                 }
+                // A hole that went away / moved: its rows come back.
+                if let Some(o) = self.d_hole.filter(|_| self.hole != self.d_hole) {
+                    if 13 + fx >= o.x && 13 + fx < o.x + o.w {
+                        sp.add((o.y - d.top, o.y + o.h - 1 - d.top));
+                    }
+                }
             }
             if sp.n == 0 {
                 continue;
@@ -911,8 +1011,29 @@ impl Graph {
             let (tr, ps) = (self.tr[i], self.ps[i]);
             let vcol = vl(&d, fx);
             let sx = 13 + fx;
-            let spans = sp.merged(1, h - 2);
-            for &(a, b) in spans {
+            // Rows of this column under the hole (not painted).
+            let hole = self.hole.filter(|r| sx >= r.x && sx < r.x + r.w).map(|r| (r.y - d.top, r.y + r.h - 1 - d.top));
+            let mut cut = [(0i16, 0i16); 24];
+            let mut nc = 0;
+            for &(a, b) in sp.merged(1, h - 2) {
+                match hole {
+                    Some((ha, hb)) if a <= hb && b >= ha => {
+                        if a < ha {
+                            cut[nc] = (a, ha - 1);
+                            nc += 1;
+                        }
+                        if b > hb {
+                            cut[nc] = (hb + 1, b);
+                            nc += 1;
+                        }
+                    }
+                    _ => {
+                        cut[nc] = (a, b);
+                        nc += 1;
+                    }
+                }
+            }
+            for &(a, b) in &cut[..nc] {
                 self.px += (b - a + 1) as u32;
                 lcd::set_window(sx as u16, (d.top + a) as u16, sx as u16, (d.top + b) as u16);
                 for fy in a..=b {
@@ -950,6 +1071,7 @@ impl Graph {
         self.d_tr = self.tr;
         self.d_ps = self.ps;
         self.d_deco = d;
+        self.d_hole = self.hole;
         self.valid = true;
     }
 }

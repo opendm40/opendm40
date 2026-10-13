@@ -2378,7 +2378,7 @@ pub const SETTINGS: [&str; 9] = [
     "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
     "Scope drag", "More",
 ];
-pub const SETTINGS2: [&str; 4] = ["DMM rate", "Smoothing", "Device", "Help"];
+pub const SETTINGS2: [&str; 6] = ["DMM rate", "Smoothing", "Scope swipe", "Scope press", "Device", "Help"];
 
 /// Settings/menu-page title bar: 40 px, bg 0x2966 (stock gui_v2_6.h:101).
 pub const PAGE_BAR_H: i16 = 40;

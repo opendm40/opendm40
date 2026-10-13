@@ -537,6 +537,80 @@ fn main() {
             stock::load(&s2);
             scope_ui::update(&m);
         }
+        // Redraw budget of one drag event (port plan sec. 6: <= 4 ms; the
+        // panel takes ~36 Mpx/s): pixels written by the update after one
+        // event of each kind, from the default page with the guide shown.
+        let mut m0 = base.m;
+        m0.guide = true;
+        let s0 = stock::Scene { name: "budget", m: m0, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+        let mut cost = |what: &str, m: scope_ui::Model, shift: i32| {
+            stock::draw(&s0);
+            let s1 = stock::Scene { name: "budget", m, trace: base.trace.as_ref().map(|t| t.shifted(shift)), persist: None, cols: 399, cells: base.cells.clone() };
+            stock::load(&s1);
+            emu().writes = 0;
+            scope_ui::update(&m);
+            let px = emu().writes;
+            println!("drag budget: {what}: {px} px ({:.2} ms at 36 Mpx/s)", px as f64 / 36e3);
+            ck.cases += 1;
+            if px > 36_000 * 4 {
+                ck.fail("replica/budget", format!("{what}: {px} px per drag event"));
+            }
+        };
+        let mut m = m0;
+        m.pos = 3;
+        m.trig_row += 3;
+        cost("CH1 position +3 rows", m, 3);
+        let mut m = m0;
+        m.sel_v = 1;
+        m.trig_row = 102;
+        m.trig_v = 1.1;
+        cost("trigger level -3 rows (select + move)", m, 0);
+        let mut m = m0;
+        m.sel_v = 1;
+        let mut m1 = m;
+        m1.trig_row = 99;
+        m1.trig_v = 1.2;
+        stock::draw(&stock::Scene { name: "b", m, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() });
+        stock::load(&stock::Scene { name: "b", m: m1, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() });
+        emu().writes = 0;
+        scope_ui::update(&m1);
+        println!("drag budget: trigger level -6 rows (selected): {} px", emu().writes);
+        let mut m = m0;
+        m.trig_px = 203;
+        cost("trigger position +3 px", m, 0);
+        stock::draw(&s0);
+        emu().writes = 0;
+        scope_ui::update(&m0);
+        println!("drag budget: no change: {} px", emu().writes);
+        // Stock zone selection (sec. 10.2): 32x32 zones, search order,
+        // cycling on repeated presses over overlapping zones.
+        let pick = |m: &scope_ui::Model, sv: u8, sh: u8, lh: bool, x: i16, y: i16| -> Option<(bool, u8)> {
+            let mut z = [scope_ui::Zone::NONE; 7];
+            let n = scope_ui::zones(m, &mut z);
+            scope_ui::pick_zone(&z[..n], sv, sh, lh, x, y).map(|k| (z[k].level, z[k].id))
+        };
+        let d = scope_ui::Model::DEFAULT;
+        let mut t = |name: &str, ok: bool| {
+            ck.cases += 1;
+            if !ok {
+                ck.fail("replica/zones", name.to_string());
+            }
+        };
+        t("CH1 marker zone (x 20, 10 px into the graph)", pick(&d, 0, 0, false, 20, 160) == Some((true, 0)));
+        t("trigger level marker zone", pick(&d, 0, 0, false, 6, 125) == Some((true, 1)));
+        t("T marker zone (incl. 10 px of the top bar)", pick(&d, 0, 0, false, 214, 12) == Some((false, 0)));
+        t("graph middle: no zone (timebase tap)", pick(&d, 0, 0, false, 120, 220).is_none());
+        let mut m = d;
+        m.trig_row = 140;
+        let a = pick(&m, 0, 0, false, 6, 160);
+        let b = pick(&m, 1, 0, false, 6, 160);
+        t("overlapping zones cycle: CH1 -> level -> CH1", a == Some((true, 1)) && b == Some((true, 0)));
+        let mut m = d;
+        m.xcur = Some([200, 205]);
+        let a = pick(&m, 0, 0, true, 214, 25);
+        let b = pick(&m, 0, 2, true, 214, 25);
+        let c = pick(&m, 0, 3, true, 214, 25);
+        t("T + 2 X cursors at one spot cycle", a == Some((false, 2)) && b == Some((false, 3)) && c == Some((false, 0)));
     }
 
     // 1. Combined view: every strip case x hold x verdict x REL x alt.
@@ -867,9 +941,9 @@ fn main() {
     let page_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
     for (page, vals) in [
         (0u8, vec!["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto (per view)", "Hold 5000 ms", ""]),
-        (1, vec!["SLOW (n/a here)", "HIGH", "", ""]),
-        (1, vec!["FAST  37/s", "LOW", "", ""]),
-        (1, vec!["MED  --/s", "OFF", "", ""]),
+        (1, vec!["SLOW (n/a here)", "HIGH", "Top bar", "OFF (stock)", "", ""]),
+        (1, vec!["FAST  37/s", "LOW", "Off (stock)", "ON", "", ""]),
+        (1, vec!["MED  --/s", "OFF", "Off (stock)", "ON", "", ""]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -1165,7 +1239,7 @@ fn main() {
         ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]);
         save(&out, "m01-settings");
         host::reset(0);
-        ui::settings(1, &["SLOW (n/a here)", "HIGH", "", ""]);
+        ui::settings(1, &["SLOW (n/a here)", "HIGH", "Top bar", "OFF (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));

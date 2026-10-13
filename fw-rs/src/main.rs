@@ -22,6 +22,7 @@ mod prof;
 mod scope;
 mod hwtrig;
 mod scope_meas;
+mod scope_ui;
 mod scpi;
 mod startup;
 mod stockfont;

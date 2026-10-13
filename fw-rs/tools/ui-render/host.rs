@@ -26,6 +26,8 @@ pub struct Emu {
     /// Calls grouped as one text (fixed cells of one number): (id, cell).
     pub group: Option<(u32, u8)>,
     pub grouping: bool,
+    /// Pixels written (RAMWR data words), for the redraw budget checks.
+    pub writes: u64,
 }
 
 pub static mut EMU: Option<Emu> = None;
@@ -45,6 +47,7 @@ pub fn emu() -> &'static mut Emu {
                 kinds: Vec::new(),
                 group: None,
                 grouping: false,
+                writes: 0,
             });
         }
         EMU.as_mut().unwrap()
@@ -129,6 +132,7 @@ fn lcd_w16(addr: u32, v: u16) {
         return;
     }
     if e.writing {
+        e.writes += 1;
         let (x, y) = e.cur;
         if x < W && y < H {
             e.fb[y * W + x] = v;

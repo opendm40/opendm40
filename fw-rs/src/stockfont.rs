@@ -281,7 +281,7 @@ pub const TEXT22: Font = Font(0x0806_B13C); // menu text, class B, 1 bpp
 
 /// Stock alignment 0..8: 0 left/top, 1 left/vcenter, 2 left/bottom, 3 right/top,
 /// 4 right/vcenter, 5 right/bottom, 6 hcenter/top, 7 hcenter/bottom, 8 center.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Rect {
     pub x: i16,
     pub y: i16,
