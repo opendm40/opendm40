@@ -212,7 +212,7 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
     if r.w <= 0 || r.h <= 0 {
         return;
     }
-    let mut pl: [Option<Placed>; MAXG] = Default::default();
+    let mut pl: [Option<Placed>; MAXG] = [const { None }; MAXG];
     let n = layout(font, r, text, align, spacing, &mut pl);
     let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);
     let y1 = (r.y + r.h - 1).min(lcd::H as i16 - 1);
@@ -265,7 +265,7 @@ pub fn rbox(r: Rect, radius: i16, color: Color, outside: Color) {
 /// Draw only the glyph boxes of `text` placed in `r` (pixels outside the
 /// glyphs are left alone): for text over shapes such as rounded buttons.
 pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, spacing: i8) {
-    let mut pl: [Option<Placed>; MAXG] = Default::default();
+    let mut pl: [Option<Placed>; MAXG] = [const { None }; MAXG];
     let n = layout(font, r, text, align, spacing, &mut pl);
     for p in pl[..n].iter().flatten() {
         if p.g.w == 0 || p.g.h == 0 || p.x < 0 || p.y < 0 {
