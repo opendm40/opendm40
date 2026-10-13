@@ -13,7 +13,7 @@
 use crate::clock::Clock;
 use crate::dmm::{self, Button, Dmm, Reading};
 use crate::gen::{self, Gen, Wave};
-use crate::gesture::Gesture;
+use crate::gesture::{Axis, Gesture};
 use crate::meter::Meter;
 use crate::mmio::{modify32, w32};
 use crate::power::Power;
@@ -33,6 +33,8 @@ const BUZZER_ARR: u32 = 11200;
 /// toggling HOLD at key-down, so HOLD has no added latency; the long press
 /// then undoes that HOLD).
 const RUN_LONG_MS: u64 = 1000;
+/// The dashed trigger-level line stays this long after the last level drag.
+const TRIG_LINE_MS: u64 = 1000;
 
 /// Menu-like pages (not instrument views): no view swipe, MENU steps back.
 fn is_page(v: View) -> bool {
@@ -91,8 +93,9 @@ pub struct App {
     kp_n: usize,
     kp_mult: u8,
     cur: ui::Cursors,
-    /// Cursor being dragged (0/1 vertical, 2/3 horizontal).
-    cur_drag: Option<u8>,
+    /// Cursors grabbed at touch-down: [vertical line (X) 0/1, horizontal
+    /// line (Y) 0/1]; the drag's locked axis picks one of them.
+    cur_drag: [Option<u8>; 2],
     /// Analog rail policy: false = Auto (default, stock-like: the rails the
     /// shown view needs, see update_rails), true = both rails always on.
     rails_both: bool,
@@ -161,6 +164,9 @@ pub struct App {
     /// Scope state at a touch-down in the scope view, restored when a second
     /// finger cancels the touch (Gesture::Cancel).
     touch_snap: Option<(scope::Settings, ui::Cursors)>,
+    /// Dashed trigger-level line across the graph while the level is dragged,
+    /// until this time (0 = off; tick() erases it).
+    trig_line_until: u64,
 }
 
 fn backlight(pct: u8) {
@@ -274,7 +280,7 @@ impl App {
             kp_n: 0,
             kp_mult: b'H',
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
-            cur_drag: None,
+            cur_drag: [None; 2],
             rails_both: false,
             host_dmm: false,
             host_scope: false,
@@ -319,6 +325,7 @@ impl App {
             overlay: None,
             shot_req: false,
             touch_snap: None,
+            trig_line_until: 0,
         };
         crate::persist::init();
         if let Some(rec) = crate::persist::load() {
@@ -632,6 +639,12 @@ impl App {
         self.last_input = self.last_input.max(now);
     }
 
+    /// Repaint the whole view on the next drawing tick (main.rs: after the
+    /// data-logger panel, dialog::log_panel).
+    pub fn invalidate(&mut self) {
+        self.redraw = true;
+    }
+
     /// Periodic work. `can_draw` is false before USB enumerated, while a
     /// screenshot is being read and for the whole of a data-logger session.
     /// Only drawing (and the 10 ms blocking relay re-assert) is skipped then:
@@ -643,6 +656,8 @@ impl App {
     pub fn tick(&mut self, clk: &mut Clock, can_draw: bool) {
         let now = clk.now_ms();
         self.now = now;
+        // UF-17: one bounded slice of a screenshot in flight (screenshot.rs).
+        crate::screenshot::poll();
         if self.beep_until != 0 && now >= self.beep_until {
             buzzer(false, self.volume);
             self.beep_until = 0;
@@ -658,6 +673,11 @@ impl App {
             if self.relay_next > 30_000 {
                 self.dmm.reassert_relay(clk);
             }
+        }
+        // Trigger-level drag over: the full graph redraw erases the line.
+        if self.trig_line_until != 0 && now >= self.trig_line_until {
+            self.trig_line_until = 0;
+            self.scope_invalidate();
         }
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
         // key PD6 (hold 1.5 s -> off).
@@ -761,7 +781,11 @@ impl App {
         }
         if self.shot_req {
             self.shot_req = false;
-            self.screenshot(clk);
+            self.screenshot(now);
+            return;
+        }
+        if let Some(shot) = crate::screenshot::take_result() {
+            self.shot_toast(now, shot);
             return;
         }
         // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
@@ -1235,13 +1259,13 @@ impl App {
             match self.view {
                 View::Scope => {
                     let t2 = cyc();
-                    ui::SCOPE_FULL.frame(&f, &self.scope, &mut self.scope_prev, &self.cur, self.persist_trace);
+                    ui::SCOPE_FULL.frame(&f, &self.scope, &mut self.scope_prev, &self.cur, self.persist_trace, self.trig_line_until != 0);
                     self.prof[2] = self.prof[2].max(cyc().wrapping_sub(t2) / 200);
                     if fresh {
                         ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
                     }
                 }
-                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope, &mut self.scope_prev, &self.cur, self.persist_trace),
+                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope, &mut self.scope_prev, &self.cur, self.persist_trace, false),
                 _ => {}
             }
         }
@@ -1279,6 +1303,11 @@ impl App {
     pub fn gesture(&mut self, clk: &mut Clock, g: Gesture) -> bool {
         let now = clk.now_ms();
         self.last_input = now;
+        // A screenshot is reading the panel: nothing may draw (a key release
+        // only clears key state).
+        if crate::screenshot::frozen() && !matches!(g, Gesture::KeyUp(_)) {
+            return false;
+        }
         if self.locked {
             return false;
         }
@@ -1323,7 +1352,7 @@ impl App {
             }
             Gesture::Cancel => {
                 // A second finger landed: undo the first finger's drag.
-                self.cur_drag = None;
+                self.cur_drag = [None; 2];
                 if let Some((s, c)) = self.touch_snap.take() {
                     self.cur = c;
                     self.cursor_values();
@@ -1361,36 +1390,53 @@ impl App {
                 self.touch_snap = Some((self.scope.s, self.cur));
                 // A touch that starts in the graph belongs to the scope.
                 captured = in_graph(p);
-                // Grab a cursor within 8 px.
+                // Grab cursors within 8 px: an X and a Y one may both be near,
+                // the drag's axis decides which moves.
                 let (cx, cy) = (p.x as i32 - 13, p.y as i32 - 20);
-                self.cur_drag = None;
+                self.cur_drag = [None; 2];
                 for k in 0..2 {
                     if self.cur.x_on && (cx - self.cur.x[k] as i32).abs() <= 8 {
-                        self.cur_drag = Some(k as u8);
+                        self.cur_drag[0] = Some(k as u8);
                     }
                     if self.cur.y_on && (cy - self.cur.y[k]).abs() <= 8 {
-                        self.cur_drag = Some(2 + k as u8);
+                        self.cur_drag[1] = Some(k as u8);
                     }
                 }
             }
-            Gesture::Drag(p0, p) if self.view == View::Scope && in_graph(p0) => {
+            Gesture::Grab(p) if self.view == View::Scope && in_graph(p) => self.beep(now, 20), // HOLD_TO_DRAG
+            Gesture::Drag(p0, p, axis) if self.view == View::Scope && in_graph(p0) => {
+                // One thing per drag: the tracker locked the axis; only what
+                // moves along it follows, relative to its value at touch-down.
                 captured = true;
-                match self.cur_drag {
-                    Some(k) if k < 2 => {
-                        self.cur.x[k as usize] = (p.x.saturating_sub(13)).clamp(1, 399);
+                let Some((s0, c0)) = self.touch_snap else { return captured };
+                let (dx, dy) = (p.x as i32 - p0.x as i32, p.y as i32 - p0.y as i32);
+                match (axis, self.cur_drag) {
+                    (Axis::H, [Some(k), _]) => {
+                        self.cur.x[k as usize] = (c0.x[k as usize] as i32 + dx).clamp(1, 399) as u16;
                         self.scope_invalidate();
                         self.cursor_values();
                     }
-                    Some(k) => {
-                        self.cur.y[k as usize - 2] = (p.y as i32 - 20).clamp(1, 279);
+                    (Axis::V, [_, Some(k)]) => {
+                        self.cur.y[k as usize] = (c0.y[k as usize] + dy).clamp(1, 279);
                         self.scope_invalidate();
                         self.cursor_values();
                     }
-                    None => {
-                        let mut st = self.scope.s;
-                        st.trig_row = p.y as i32 - 20;
-                        self.scope_set(st, now);
+                    (Axis::V, _) => {
+                        // Trigger level, shown as a dashed line while dragged.
+                        let row = (s0.trig_row + dy).clamp(0, 278);
+                        let line_was = self.trig_line_until != 0;
+                        self.trig_line_until = now + TRIG_LINE_MS;
+                        if row != self.scope.s.trig_row {
+                            let mut st = self.scope.s;
+                            st.trig_row = row;
+                            self.scope_set(st, now);
+                        } else if !line_was {
+                            self.scope_invalidate();
+                        }
                     }
+                    // No horizontal position setting yet (scope.rs has only
+                    // the vertical `pos`): a horizontal drag does nothing.
+                    (Axis::H, _) => {}
                 }
             }
             _ => {}
@@ -1404,19 +1450,17 @@ impl App {
         self.redraw = true;
     }
 
-    /// UF-17: write the screen to the disk (screenshot.rs, synchronous, about
-    /// 6-9 s), then a toast + beep. Only a blocking 60 ms chirp before the
-    /// write: a `beep()` is stopped by tick(), which does not run during it.
-    fn screenshot(&mut self, clk: &mut Clock) {
+    /// UF-17: start writing the screen to the disk (screenshot.rs, in slices
+    /// from tick(), ~5 s; the screen is frozen only while it is captured):
+    /// a chirp now, a toast + beep when done (`shot_toast`). A swipe while one
+    /// is in flight is ignored with a low beep.
+    fn screenshot(&mut self, now: u64) {
+        let ok = crate::screenshot::start();
+        self.beep(now, if ok { 60 } else { 300 });
+    }
+
+    fn shot_toast(&mut self, now: u64, shot: crate::screenshot::Shot) {
         use crate::screenshot::Shot;
-        // A short chirp now (the GRAM is not touched), the result beep after.
-        if self.beep_on {
-            buzzer(true, self.volume);
-            clk.delay_ms(60);
-            buzzer(false, self.volume);
-        }
-        let shot = crate::screenshot::take();
-        let now = clk.now_ms();
         self.last_input = now;
         let mut t = *b"Saved S000.BMP";
         let (txt, ok) = match shot {

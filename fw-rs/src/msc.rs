@@ -21,7 +21,33 @@ pub trait BlockDevice {
     fn block_count(&self) -> u32;
     fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool;
     fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool;
+    /// `write_block` spread over several calls, for a caller that must not
+    /// stall the main loop (screenshot.rs). Call again with the same `lba`,
+    /// `buf` and `st` (starting from `Step::default()`) until it returns
+    /// Some(ok). Default: the whole write at once.
+    fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
+        let _ = st;
+        Some(self.write_block(lba, buf))
+    }
 }
+
+/// Progress of one `BlockDevice::write_step` block write (spiflash.rs).
+#[derive(Clone, Copy, Default)]
+pub struct Step {
+    pub started: bool,
+    /// 0 compare, 1 erase, 2 program, 3 read back.
+    pub phase: u8,
+    pub page: u8,
+    /// Pages to program (bit = page).
+    pub dirty: u16,
+    pub erase: bool,
+    /// Start of the current wait (DWT cycles), for the timeout.
+    pub t0: u32,
+}
+
+/// A host WRITE(10) is in progress (between its first and last block), so an
+/// on-device writer (screenshot.rs) waits before reading the FAT.
+pub static HOST_WRITING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Xfer {
@@ -68,8 +94,11 @@ impl<'a, B: UsbBus> Msc<'a, B> {
         let xfer = &mut self.xfer;
         let sense = &mut self.sense;
         let blk = &mut self.blk;
-        let inhibit = self.write_inhibit;
+        // Also no host writes while a screenshot is being written: its FAT /
+        // directory update spans many main-loop passes.
+        let inhibit = self.write_inhibit || crate::screenshot::busy();
         let _ = self.scsi.poll_command(|cmd| -> Res { handle(cmd, dev, xfer, sense, blk, inhibit) });
+        HOST_WRITING.store(matches!(self.xfer, Xfer::Write { .. }), core::sync::atomic::Ordering::Relaxed);
     }
 
     /// Block (true) or allow host writes; a write already in progress finishes.
@@ -258,6 +287,7 @@ impl<B: UsbBus> UsbClass<B> for Msc<'_, B> {
     }
     fn reset(&mut self) {
         self.xfer = Xfer::None;
+        HOST_WRITING.store(false, core::sync::atomic::Ordering::Relaxed);
         // A bus reset starts a fresh session: a pending one-shot UNIT
         // ATTENTION from a screenshot taken while unplugged is moot (review
         // 2026-10-13 L3).

@@ -93,8 +93,9 @@
 //! have the same window); the steps above keep that to at most 2 x FAT blocks
 //! (both copies, one after the other) + 1 root block per changed boot.
 //!
-//! Time: unchanged = 4 block reads (~13 ms each at the 3.125 MHz polled SPI
-//! clock) + CRC-32 over ~165 KiB of sources and the ~250 KiB firmware file
+//! Time (measured with the old 3.125 MHz SPI clock; spiflash.rs now runs
+//! 12.5 MHz, block reads ~4x faster): unchanged = 4 block reads (~13 ms each
+//! at 3.125 MHz polled SPI clock) + CRC-32 over ~165 KiB of sources and the ~250 KiB firmware file
 //! (nibble table) ~= 0.1 s (DBG:BOOT? CALMS; was ~0.65 s reading 45 data
 //! blocks). Writes: empty disk ~107 blocks (~10 s), each firmware update
 //! _DM40PRV.BIN + BACKUP.TXT (~62 blocks, ~6 s), a loader update ~3 s. The
@@ -196,12 +197,13 @@ static mut RESULT: Result = Result { status: Status::NotRun, written: 0, conflic
 /// loop, whose frames (main ~26 KiB) leave too little of the ~38 KiB stack
 /// for three more blocks. NOLOAD SRAM (.dmabuf, as the scope record): the
 /// contents are undefined at reset and always written before they are read.
-/// One user at a time (the boot backup before main(), a screenshot from the
-/// main loop; both synchronous, no interrupts).
+/// One user at a time: the boot backup before main(), then the screenshot
+/// writer (screenshot.rs), which keeps blocks in it across main-loop passes
+/// while a shot is in flight (no interrupts; nothing else uses it then).
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut SCRATCH: [[u8; BLK]; 3] = [[0; BLK]; 3];
 
-fn scratch() -> &'static mut [[u8; BLK]; 3] {
+pub(crate) fn scratch() -> &'static mut [[u8; BLK]; 3] {
     unsafe { &mut *core::ptr::addr_of_mut!(SCRATCH) }
 }
 
@@ -505,7 +507,7 @@ pub fn crc32(d: &[u8]) -> u32 {
 }
 
 /// CRC-32 register update (no pre / post inversion).
-fn crc32_upd(mut c: u32, d: &[u8]) -> u32 {
+pub(crate) fn crc32_upd(mut c: u32, d: &[u8]) -> u32 {
     const T: [u32; 16] = {
         let mut t = [0u32; 16];
         let mut i = 0;

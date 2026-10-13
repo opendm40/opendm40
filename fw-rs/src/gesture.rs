@@ -1,8 +1,17 @@
 //! Touch gestures from the point track: tap, long press, swipes and drag, plus
 //! the finger-count-aware global gestures (docs/scope-ui-plan.md §2.6):
 //!
-//! * One finger: `Down` at touch-down, `Drag` once it moved more than SLOP,
-//!   `LongPress` held still, and on release `Tap` (did not move) or a swipe.
+//! * One finger: `Down` at touch-down, `Drag` once it moved more than SLOP
+//!   and its axis is locked, `LongPress` held still, and on release `Tap`
+//!   (did not move) or a swipe.
+//! * Axis lock (owner feedback: a horizontal drag must not also nudge the
+//!   vertical): once past SLOP the drag is horizontal if |dx| >= 1.5 |dy|,
+//!   vertical if |dy| >= 1.5 |dx|; a diagonal start waits until LOCK_MAX and
+//!   then takes the larger component. The axis is kept until release; no
+//!   `Drag` is sent before it is known. Consumers move only along it.
+//! * HOLD_TO_DRAG (off by default, flip the const below to try it): a drag
+//!   must first be held still for HOLD_MS (`Grab` is sent then, the app
+//!   beeps); a finger that moves earlier never drags (it can still swipe).
 //!   A swipe needs >= SWIPE_MIN px within SWIPE_MAX_MS and a dominant axis
 //!   (the travel along it more than twice the travel across). A touch the app
 //!   captured (`capture()`, called when it took the `Down`/`Drag`, e.g. a drag
@@ -34,11 +43,28 @@ const SWIPE_MAX_MS: u64 = 800;
 const LONG_MS: u64 = 700;
 /// Movement tolerated for a tap / long press, pixels.
 const SLOP: i32 = 15;
+/// A drag whose start is diagonal (neither component 1.5x the other) locks
+/// to its larger component once it is this far from the touch-down, pixels.
+const LOCK_MAX: i32 = 2 * SLOP;
+/// Press-and-hold-then-drag mode (owner experiment): `false` = drag at once
+/// (default), `true` = hold still HOLD_MS first. One-line toggle.
+pub const HOLD_TO_DRAG: bool = false;
+/// Hold time that grabs in HOLD_TO_DRAG mode, ms.
+const HOLD_MS: u64 = 300;
 /// Minimum downward centroid travel of an n-finger swipe, pixels (index = n;
 /// 0 = not a gesture).
 const MULTI_MIN: [i32; MAX_POINTS + 1] = [0, 0, 60, 30, 0, 0];
 /// An n-finger swipe must be done within this time of the n-th finger landing.
 const MULTI_MAX_MS: u64 = 2000;
+
+/// The locked axis of a one-finger drag.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Axis {
+    /// Horizontal (x).
+    H,
+    /// Vertical (y).
+    V,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Gesture {
@@ -46,8 +72,11 @@ pub enum Gesture {
     Down(Point),
     Tap(Point),
     LongPress(Point),
-    /// Finger moved while down (start, current).
-    Drag(Point, Point),
+    /// Finger moved while down (start, current, locked axis). Move only
+    /// along the axis.
+    Drag(Point, Point, Axis),
+    /// HOLD_TO_DRAG only: the finger was held still HOLD_MS, a drag may follow.
+    Grab(Point),
     SwipeLeft,
     SwipeRight,
     SwipeUp,
@@ -82,6 +111,10 @@ pub struct Tracker {
     last: Point,
     moved: bool,
     long_sent: bool,
+    /// Drag axis, decided once past SLOP.
+    axis: Option<Axis>,
+    /// HOLD_TO_DRAG: held still long enough, drags are allowed.
+    grabbed: bool,
     /// The app owns this touch (no swipe / tap on release).
     captured: bool,
     /// Set once the touch had two or more fingers.
@@ -97,6 +130,8 @@ impl Tracker {
             last: Point { x: 0, y: 0 },
             moved: false,
             long_sent: false,
+            axis: None,
+            grabbed: false,
             captured: false,
             multi: None,
             keys: 0,
@@ -162,15 +197,31 @@ impl Tracker {
                 self.last = p;
                 self.moved = false;
                 self.long_sent = false;
+                self.axis = None;
+                self.grabbed = false;
                 self.captured = false;
                 Some(Gesture::Down(p))
             }
-            Some((p0, _)) => {
+            Some((p0, t0)) => {
                 self.last = p;
+                let was_moved = self.moved;
                 if dist(p0, p) > SLOP {
                     self.moved = true;
                 }
-                if self.moved { Some(Gesture::Drag(p0, p)) } else { None }
+                // The controller reports jitter as moves, so tick() may not run
+                // while the finger rests: check the hold here too.
+                if HOLD_TO_DRAG && !was_moved && !self.grabbed && now.saturating_sub(t0) >= HOLD_MS {
+                    self.grabbed = true;
+                    return Some(Gesture::Grab(p0));
+                }
+                // HOLD_TO_DRAG: moving before the grab never drags.
+                if !self.moved || (HOLD_TO_DRAG && !self.grabbed) {
+                    return None;
+                }
+                if self.axis.is_none() {
+                    self.axis = lock_axis(p.x as i32 - p0.x as i32, p.y as i32 - p0.y as i32);
+                }
+                self.axis.map(|a| Gesture::Drag(p0, p, a))
             }
         }
     }
@@ -201,6 +252,10 @@ impl Tracker {
     /// Call periodically: reports a long press while the finger is still down.
     pub fn tick(&mut self, now: u64) -> Option<Gesture> {
         let (p0, t0) = self.down?;
+        if HOLD_TO_DRAG && !self.moved && !self.grabbed && now.saturating_sub(t0) >= HOLD_MS {
+            self.grabbed = true;
+            return Some(Gesture::Grab(p0));
+        }
         if !self.moved && !self.long_sent && now.saturating_sub(t0) >= LONG_MS {
             self.long_sent = true;
             return Some(Gesture::LongPress(p0));
@@ -228,6 +283,57 @@ impl Tracker {
             self.event(&ev, now + step as u64 * 25);
         }
         self.event(&Event { keys, ..Event::default() }, now + 225)
+    }
+
+    /// Test hook (DBG:DRAG x0,y0,x1,y1,ms[,hold]): run a synthetic one-finger
+    /// touch through the tracker: down at p0, held still `hold` ms, moved to
+    /// p1 in `ms` ms (a point every 20 ms), released. Every gesture goes to
+    /// `app` at once (timestamps are synthetic, from `now`); when it returns
+    /// true the touch is captured, as in the main loop. Anything in progress
+    /// is dropped first.
+    pub fn synth_drag(&mut self, p0: Point, p1: Point, ms: u16, hold: u16, now: u64, mut app: impl FnMut(Gesture) -> bool) {
+        let keys = self.keys;
+        *self = Tracker::new();
+        self.keys = keys;
+        let mut feed = |tr: &mut Tracker, g: Option<Gesture>| {
+            if let Some(g) = g {
+                if app(g) {
+                    tr.capture();
+                }
+            }
+        };
+        let ev = |p: Point| {
+            let mut ev = Event { keys, points: 1, p, ..Event::default() };
+            ev.pts[0] = p;
+            ev
+        };
+        let g = self.event(&ev(p0), now);
+        feed(self, g);
+        let t1 = now + hold as u64;
+        let g = self.tick(t1);
+        feed(self, g);
+        let n = (ms / 20).max(1) as i32;
+        for i in 1..=n {
+            let lerp = |a: u16, b: u16| (a as i32 + (b as i32 - a as i32) * i / n) as u16;
+            let g = self.event(&ev(Point { x: lerp(p0.x, p1.x), y: lerp(p0.y, p1.y) }), t1 + (ms as i32 * i / n) as u64);
+            feed(self, g);
+        }
+        let g = self.event(&Event { keys, ..Event::default() }, t1 + ms as u64 + 10);
+        feed(self, g);
+    }
+}
+
+/// Axis of a drag that moved (dx, dy) past SLOP, None while undecided.
+fn lock_axis(dx: i32, dy: i32) -> Option<Axis> {
+    let (ax, ay) = (dx.abs(), dy.abs());
+    if 2 * ax >= 3 * ay {
+        Some(Axis::H)
+    } else if 2 * ay >= 3 * ax {
+        Some(Axis::V)
+    } else if ax.max(ay) > LOCK_MAX {
+        Some(if ax >= ay { Axis::H } else { Axis::V })
+    } else {
+        None
     }
 }
 

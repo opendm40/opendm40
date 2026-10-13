@@ -9,10 +9,23 @@
 //!
 //! A write first compares against the old contents: unchanged blocks are not
 //! touched, and blocks that only need 1 -> 0 bits are programmed without the
-//! erase (45..400 ms, the main loop stalls meanwhile).
+//! erase (45..400 ms, the main loop stalls meanwhile in `write_block`).
+//! `write_step` does the same write in slices of at most ~2 ms per call, with
+//! the erase / page programs running in the chip between calls (screenshot.rs:
+//! the main loop keeps serving USB and the DMM). Every block read or write
+//! first waits for BUSY to clear, so a `SpiFlash` instance never talks to the
+//! chip while another one (the MSC disk vs the screenshot writer) has left an
+//! erase or program running.
+//!
+//! Clock: SPI1 PSC /4 = 12.5 MHz (stock /16 = 3.125 MHz). The W25Q128JV is
+//! rated 50 MHz for READ 03h and 133 MHz for every other command used here
+//! (datasheet fR / FR), and PCLK1 / 2 = 25 MHz is the GD32 SPI limit; /4 keeps
+//! a 4x margin on the slowest command while making a 4 KiB block read ~2.7 ms
+//! instead of ~10.5 ms. Every write is read back and compared, so a marginal
+//! clock would show as a failed write, not as silent corruption.
 
 use crate::mmio::{modify32, r32, w16, w32};
-use crate::msc::BlockDevice;
+use crate::msc::{BlockDevice, Step};
 use crate::wdt;
 
 const RCU_AHB1EN: u32 = 0x4002_3830;
@@ -34,8 +47,9 @@ const DATA: u32 = SPI + 0x0C;
 const I2SCTL: u32 = SPI + 0x1C;
 const STAT_RBNE: u32 = 1 << 0;
 const STAT_TBE: u32 = 1 << 1;
-/// Mode 3, master, software NSS, 8 bit, PSC /16 = 3.125 MHz (stock value).
-const CTL0_CFG: u32 = 0x031F;
+/// Mode 3, master, software NSS, 8 bit, PSC /4 = 12.5 MHz (PSC bits 5:3 =
+/// 001; the stock value is 0x031F, /16 = 3.125 MHz; see the module notes).
+const CTL0_CFG: u32 = 0x030F;
 const CTL0_SPIEN: u32 = 1 << 6;
 
 const CS: u32 = 4; // PE4
@@ -49,8 +63,19 @@ const CMD_JEDEC_ID: u8 = 0x9F;
 
 const SECTOR: usize = 4096;
 const PAGE: usize = 256;
-/// RDSR polls before giving up (stock: 1e6, ~6 s at 3.125 MHz; tSE max 400 ms).
-const BUSY_POLLS: u32 = 1_000_000;
+/// RDSR polls before giving up (stock: 1e6 at 3.125 MHz; here ~0.7 us per
+/// poll at 12.5 MHz, ~2.8 s; tSE max 400 ms).
+const BUSY_POLLS: u32 = 4_000_000;
+/// `write_step`: CPU time per call (cycles, 2 ms at 200 MHz) and the longest
+/// wait for one erase / page program before the chip counts as failed (1 s;
+/// tSE max 400 ms, tPP max 3 ms).
+const STEP_CYC: u32 = crate::clock::HCLK_HZ / 500;
+const OP_TIMEOUT_CYC: u32 = crate::clock::HCLK_HZ;
+const DWT_CYCCNT: u32 = 0xE000_1004;
+
+fn cyc() -> u32 {
+    unsafe { r32(DWT_CYCCNT) }
+}
 
 pub struct SpiFlash {
     /// JEDEC ID (mfr << 16 | type << 8 | capacity), as read at init.
@@ -170,21 +195,31 @@ impl SpiFlash {
         !self.failed
     }
 
+    /// One RDSR: an erase / program is still running (no waiting).
+    fn busy() -> bool {
+        cs(true);
+        xfer(CMD_RDSR1);
+        let b = xfer(0xFF) & 1 != 0;
+        cs(false);
+        b
+    }
+
     fn write_enable() {
         cs(true);
         xfer(CMD_WREN);
         cs(false);
     }
 
-    fn erase(&mut self, addr: u32) -> bool {
+    /// Start a 4 KiB sector erase (returns at once; BUSY while it runs).
+    fn start_erase(addr: u32) {
         Self::write_enable();
         cs(true);
         cmd_addr(CMD_SE4K, addr);
         cs(false);
-        self.wait_ready()
     }
 
-    fn program(&mut self, addr: u32, data: &[u8]) -> bool {
+    /// Start a page program (returns once the data is clocked out).
+    fn start_program(addr: u32, data: &[u8]) {
         Self::write_enable();
         cs(true);
         cmd_addr(CMD_PP, addr);
@@ -192,6 +227,15 @@ impl SpiFlash {
             xfer(b);
         }
         cs(false);
+    }
+
+    fn erase(&mut self, addr: u32) -> bool {
+        Self::start_erase(addr);
+        self.wait_ready()
+    }
+
+    fn program(&mut self, addr: u32, data: &[u8]) -> bool {
+        Self::start_program(addr, data);
         self.wait_ready()
     }
 }
@@ -208,7 +252,9 @@ impl BlockDevice for SpiFlash {
     }
 
     fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool {
-        if lba >= self.blocks || buf.len() < SECTOR {
+        // (A chip that already timed out once is read without waiting, as
+        // before the wait existed; writes stay disabled.)
+        if lba >= self.blocks || buf.len() < SECTOR || (!self.failed && !self.wait_ready()) {
             return false;
         }
         read(lba * SECTOR as u32, &mut buf[..SECTOR]);
@@ -216,7 +262,7 @@ impl BlockDevice for SpiFlash {
     }
 
     fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool {
-        if lba >= self.blocks || buf.len() < SECTOR || self.failed {
+        if lba >= self.blocks || buf.len() < SECTOR || !self.wait_ready() {
             return false;
         }
         let base = lba * SECTOR as u32;
@@ -261,5 +307,97 @@ impl BlockDevice for SpiFlash {
             }
         }
         true
+    }
+
+    /// `write_block` in slices: compare (phase 0), erase if any bit must go
+    /// 0 -> 1 (1), program the pages that differ / are not blank (2), read
+    /// back (3). Returns None after ~2 ms of CPU time or while the chip is
+    /// busy; the erase (45..400 ms) and each page program (0.4..3 ms) run
+    /// between calls. Page reads at 12.5 MHz take ~0.17 ms.
+    fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
+        if lba >= self.blocks || buf.len() < SECTOR || self.failed {
+            return Some(false);
+        }
+        let t_in = cyc();
+        if !st.started {
+            st.started = true;
+            st.t0 = t_in;
+        }
+        let base = lba * SECTOR as u32;
+        let page = |p: u8| &buf[p as usize * PAGE..(p as usize + 1) * PAGE];
+        let mut old = [0u8; PAGE];
+        loop {
+            // Our erase / page program, or another instance's, still running.
+            if Self::busy() {
+                if cyc().wrapping_sub(st.t0) > OP_TIMEOUT_CYC {
+                    self.failed = true;
+                    return Some(false);
+                }
+                if cyc().wrapping_sub(t_in) >= STEP_CYC {
+                    return None;
+                }
+                continue;
+            }
+            match st.phase {
+                0 => {
+                    let new = page(st.page);
+                    read(base + st.page as u32 * PAGE as u32, &mut old);
+                    if old[..] != new[..] {
+                        st.dirty |= 1 << st.page;
+                        st.erase |= old.iter().zip(new).any(|(&o, &n)| o & n != n);
+                    }
+                    st.page += 1;
+                    if st.page as usize == SECTOR / PAGE {
+                        st.page = 0;
+                        if st.dirty == 0 {
+                            return Some(true);
+                        }
+                        if st.erase {
+                            Self::start_erase(base);
+                            st.t0 = cyc();
+                            st.phase = 1;
+                        } else {
+                            st.phase = 2;
+                        }
+                    }
+                }
+                1 => {
+                    // Erased: every page that is not all 0xFF must be programmed.
+                    st.dirty = 0;
+                    for p in 0..(SECTOR / PAGE) as u8 {
+                        if page(p).iter().any(|&b| b != 0xFF) {
+                            st.dirty |= 1 << p;
+                        }
+                    }
+                    st.phase = 2;
+                }
+                2 => {
+                    while (st.page as usize) < SECTOR / PAGE && st.dirty & (1 << st.page) == 0 {
+                        st.page += 1;
+                    }
+                    if st.page as usize == SECTOR / PAGE {
+                        st.page = 0;
+                        st.phase = 3;
+                    } else {
+                        Self::start_program(base + st.page as u32 * PAGE as u32, page(st.page));
+                        st.t0 = cyc();
+                        st.page += 1;
+                    }
+                }
+                _ => {
+                    read(base + st.page as u32 * PAGE as u32, &mut old);
+                    if old[..] != page(st.page)[..] {
+                        return Some(false);
+                    }
+                    st.page += 1;
+                    if st.page as usize == SECTOR / PAGE {
+                        return Some(true);
+                    }
+                }
+            }
+            if cyc().wrapping_sub(t_in) >= STEP_CYC {
+                return None;
+            }
+        }
     }
 }

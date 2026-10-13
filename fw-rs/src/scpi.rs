@@ -99,6 +99,11 @@ pub enum Log {
 ///                           follows ms later (long press: RUN >= 1000 ms in a
 ///                           DMM view = AutoHold on/off); max 60000
 ///   DBG:SWIPE D,n           synthetic n-finger swipe down (3 = screenshot, 2 = power off)
+///   DBG:DRAG x0,y0,x1,y1,ms[,hold]
+///                           synthetic one-finger drag through the gesture
+///                           tracker (axis lock, capture): down at x0,y0, held
+///                           still hold ms, moved to x1,y1 in ms ms (0 = 300),
+///                           released; runs synchronously
 ///   DBG:GENUINE?            device check (src/genuine.rs, docs/genuine-check.md):
 ///                           uid_hex,stored_hex,expected_hex,GENUINE|MISMATCH (12 bytes
 ///                           each, memory order); read-only
@@ -120,6 +125,8 @@ pub enum Log {
 pub enum Dbg {
     Ping(u32),
     Input(u8, u16, u16),
+    /// x0, y0, x1, y1, ms, hold ms.
+    Drag([u16; 6]),
     Lcd(u16, u16, u16, u16, u32),
     Diag,
     Flash,
@@ -529,6 +536,11 @@ impl Scpi {
                             }
                             _ => Dbg::Input(1, 0, 0),
                         },
+                        b"DRAG" => {
+                            let v = nums::<6>(a);
+                            let ms = if v[4] == 0 { 300 } else { v[4].min(10_000) };
+                            Dbg::Drag([v[0].min(479) as u16, v[1].min(319) as u16, v[2].min(479) as u16, v[3].min(319) as u16, ms as u16, v[5].min(10_000) as u16])
+                        }
                         b"KEY" => { let v = nums::<2>(a); Dbg::Input(3, v[0] as u16, v[1].min(60_000) as u16) } // n[,hold_ms]
                         b"LCD" => {
                             let v = nums::<5>(a);

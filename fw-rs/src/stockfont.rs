@@ -376,6 +376,53 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
     }
 }
 
+/// Glyph `c` of `font` at half size, each pixel the mean coverage of a 2x2
+/// block of the full-size glyph (same face, no extra font data). The glyph is
+/// centred horizontally in `r`, which is painted entirely (`bg` outside the
+/// glyph, so a redraw leaves nothing behind), and sits on `base` (exclusive
+/// bottom y) exactly as the full-size glyph sits on its baseline: full-size
+/// rows 2k, 2k + 1 below/above the baseline become half-size row k, so odd
+/// glyph heights do not shift it. Used for the small +1 digit after the F78
+/// readout.
+pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color) {
+    if r.w <= 0 || r.h <= 0 {
+        return;
+    }
+    let g = font.glyph(c as u32);
+    // Full-size row of glyph row 0, relative to the baseline; left x of the
+    // half-size glyph.
+    let (top, ox) = match &g {
+        Some(g) => (-(g.h as i32 + g.yoff as i32), r.x as i32 + ((r.w as i32 - (g.w as i32 + 1) / 2) >> 1)),
+        None => (0, 0),
+    };
+    let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);
+    let y1 = (r.y + r.h - 1).min(lcd::H as i16 - 1);
+    let (x0, y0) = (r.x.max(0), r.y.max(0));
+    let lut = ramp(fg, bg);
+    lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
+    for y in y0..=y1 {
+        let gy = 2 * (y as i32 - base as i32) - top;
+        for x in x0..=x1 {
+            let mut c = bg;
+            if let Some(g) = &g {
+                let gx = 2 * (x as i32 - ox);
+                let (w, h) = (g.w as i32, g.h as i32);
+                if gx >= 0 && gx < w && gy > -2 && gy < h {
+                    let mut s = 0u32;
+                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                        let (px, py) = (gx + dx, gy + dy);
+                        if px < w && py >= 0 && py < h {
+                            s += g.alpha(px as u32, py as u32) as u32;
+                        }
+                    }
+                    c = lut[((s + 2) / 4) as usize];
+                }
+            }
+            lcd::data(c);
+        }
+    }
+}
+
 /// Fixed-cell label, redrawing only the cells whose character differs from
 /// `prev` (same cell layout assumed; pass an empty `prev` for a full draw).
 pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg: Color, bg: Color) {

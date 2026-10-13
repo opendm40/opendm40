@@ -8,6 +8,10 @@
     dm40dbg.py shot out.png [--format rgb565|rgb666]
     dm40dbg.py diag                      diagnostic block (hex)
     dm40dbg.py tap x y | left | right    inject a touch tap / view swipe
+    dm40dbg.py drag x0 y0 x1 y1 [--ms N] [--hold MS]
+                                         one-finger drag through the gesture
+                                         tracker (DBG:DRAG): hold MS still at
+                                         x0,y0, move to x1,y1 in N ms (300)
     dm40dbg.py key 0..3 [--hold MS]      side key click (0 MENU, 1 RUN, 2 AUTO,
                                          3 MF); --hold: release after MS ms
                                          (long press; RUN >= 1000 ms in a DMM
@@ -482,6 +486,11 @@ def main():
     p.add_argument('--format', choices=['rgb565', 'rgb666'], default='rgb666')
     sub.add_parser('diag')
     p = sub.add_parser('tap'); p.add_argument('x', type=int); p.add_argument('y', type=int)
+    p = sub.add_parser('drag', help='one-finger drag (DBG:DRAG x0,y0,x1,y1,ms,hold)')
+    for k in 'x0 y0 x1 y1'.split():
+        p.add_argument(k, type=int)
+    p.add_argument('--ms', type=int, default=300, help='move time, ms (default 300)')
+    p.add_argument('--hold', type=int, default=0, metavar='MS', help='hold still at x0,y0 first, ms')
     sub.add_parser('left')
     sub.add_parser('right')
     p = sub.add_parser('key', help='side key click (DBG:KEY n[,ms]); --hold MS = long press')
@@ -551,6 +560,8 @@ def main():
         print(ln.block('DBG:DIAG?').hex(' '))
     elif a.cmd == 'tap':
         ln.write('DBG:TAP %d,%d' % (a.x, a.y))
+    elif a.cmd == 'drag':
+        ln.write('DBG:DRAG %d,%d,%d,%d,%d,%d' % (a.x0, a.y0, a.x1, a.y1, a.ms, a.hold))
     elif a.cmd == 'left':
         ln.write('DBG:SWIPE L')
     elif a.cmd == 'right':

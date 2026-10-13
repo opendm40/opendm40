@@ -13,15 +13,31 @@
 //! Live runs rewrite the image.
 use std::{env, fs};
 
+#[allow(dead_code)]
 mod msc {
-    /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 5 methods).
+    /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 6 methods,
+    /// write_step with its default = the whole write at once).
     pub trait BlockDevice {
         fn present(&self) -> bool;
         fn block_size(&self) -> u32;
         fn block_count(&self) -> u32;
         fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool;
         fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool;
+        fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
+            let _ = st;
+            Some(self.write_block(lba, buf))
+        }
     }
+    #[derive(Clone, Copy, Default)]
+    pub struct Step {
+        pub started: bool,
+        pub phase: u8,
+        pub page: u8,
+        pub dirty: u16,
+        pub erase: bool,
+        pub t0: u32,
+    }
+    pub static HOST_WRITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 }
 
 /// Stubs of the fw-rs modules calbackup.rs refers to.
@@ -72,8 +88,16 @@ mod lcd {
     pub const W: u16 = 480;
     pub const H: u16 = 320;
     pub type Color = u16;
+    /// Rows y % 4 = 0..2: runs of 13, 3 and 2 equal pixels (run / literal
+    /// coding of screenshot.rs CAP), else noise (CAP overflows part way, so
+    /// the later rows come from the GRAM while writing).
     pub fn pattern(x: u32, y: u32) -> Color {
-        ((x * 0x9E37 + y * 0x79B9) ^ (y << 11)) as u16
+        match y % 4 {
+            0 => ((x / 13) * 0x1234 + y) as u16,
+            1 => ((x / 3) * 0x0F0F + y) as u16,
+            2 => ((x / 2) * 0x3333 + y) as u16,
+            _ => ((x * 0x9E37 + y * 0x79B9) ^ (y << 11)) as u16,
+        }
     }
     pub fn read_span(x: u16, y: u16, n: u16, mut out: impl FnMut(Color)) {
         assert!(x as u32 + n as u32 <= W as u32 && y < H, "span outside the screen");
