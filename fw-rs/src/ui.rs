@@ -157,6 +157,19 @@ const AUX_TAGS: [&str; 2] = ["\u{5}", "\u{4}"];
 const AUX_TAG_X: [i16; 2] = [8, 232];
 const AUX_VX: [i16; 2] = [38, 260];
 
+/// UF-26: caption of the 4-20 mA loop percentage (DC mA, aux2 "%").
+const LOOP_CAP: &str = "4-20mA";
+
+/// The aux readouts as shown. UF-26: the DC mA loop percentage (aux2 "%",
+/// dmm.rs: (|mA| - 4) x 6.25, OL above 125 %) is hidden outside -25..125 %
+/// (a current that is not a 4-20 mA loop signal); the bool says it is that
+/// percentage (drawn with the LOOP_CAP caption).
+fn aux_shown(r: &Reading) -> ([Option<crate::dmm::Val>; 2], bool) {
+    let lp = r.mode == 8 && !r.acdc && r.aux2.is_some_and(|v| v.unit == "%");
+    let a2 = r.aux2.filter(|v| !lp || (!v.ol && (-25.0..=125.0).contains(&v.v)));
+    ([r.aux1, a2], lp && a2.is_some())
+}
+
 /// Mode glyph above the unit: 0x04 DC, 0x05 AC, 0x07 continuity, 0x08 diode.
 fn mode_glyph(mode: u8, acdc: bool) -> &'static str {
     match mode {
@@ -499,15 +512,25 @@ impl DmmView {
             }
         }
         // Aux readouts (stock: value right-aligned cells at y 40, unit after).
-        for (i, a) in [r.aux1, r.aux2].iter().enumerate() {
+        let (aux, lp) = aux_shown(r);
+        for (i, a) in aux.iter().enumerate() {
             // Value boxes end 4 px before the unit (separate items: >= 3 px).
-        let (vx, ux) = (AUX_VX[i] + 30, if i == 0 { 178 } else { 400 });
+            let (vx, ux) = (AUX_VX[i] + 30, if i == 0 { 178 } else { 400 });
             match a {
                 Some(v) => {
                     let mut t = [0u8; 16];
                     let txt = meter::text(&mut t, v);
                     let mut u = [0u8; 16];
-                    if r.acdc {
+                    if i == 1 && lp {
+                        // UF-26: "-25.0".."125.0" (<= 78 px: ink from 319)
+                        // right-aligned in 316..396, the F14 caption
+                        // right-aligned in 256..315 (ink from ~272: clear of
+                        // aux1's unit box, which ends at 254; the None
+                        // branch below clears it). The two boxes tile
+                        // 256..396, so an older text leaves nothing behind.
+                        sf::label(sf::LETTERS, rect(316, 36, 81, 30), txt, VALUE, BG, 4, 0);
+                        sf::label(sf::F14, rect(256, 36, 60, 30), LOOP_CAP, VALUE, BG, 4, 1);
+                    } else if r.acdc {
                         // AC+DC: the part's tag (AC for aux1, DC for aux2)
                         // right before its value, which stays right-aligned
                         // in its box: tag box from AUX_TAG_X to 4 px left
@@ -594,7 +617,20 @@ impl DmmView {
         let mut tb = [[0u8; 24]; 2];
         let mut left = [SS_R; 2];
         let mut tw = [0i16; 2];
-        for (i, a) in [r.aux1, r.aux2].iter().enumerate() {
+        // A caption left of a sub row: the AC / DC tag of an AC+DC part, or
+        // "4-20mA" before the loop percentage (UF-26); its width.
+        let (aux, lp) = aux_shown(r);
+        let cap = |i: usize| -> Option<(sf::Font, &'static str, i8)> {
+            if r.acdc {
+                Some((sf::AUX_TAG, AUX_TAGS[i], 0))
+            } else if lp && i == 1 {
+                Some((sf::F14, LOOP_CAP, 1))
+            } else {
+                None
+            }
+        };
+        let cap_w = |i: usize| cap(i).map_or(0, |(f, t, sp)| if r.acdc { 24 } else { sf::text_width(f, t, sp) });
+        for (i, a) in aux.iter().enumerate() {
             let mut t = [0u8; 16];
             let mut u = [0u8; 16];
             let mut b = [0u8; 24];
@@ -607,9 +643,9 @@ impl DmmView {
             };
             let k = txt.len().min(23);
             tb[i][..k].copy_from_slice(&txt.as_bytes()[..k]);
-            tb[i][23] = r.acdc as u8;
+            tb[i][23] = r.acdc as u8 | (lp as u8) << 1;
             tw[i] = if k == 0 { 0 } else { sf::text_width(sf::LETTERS, txt, 0) };
-            left[i] = SS_R - tw[i] - if r.acdc && k > 0 { 4 + 24 } else { 0 };
+            left[i] = SS_R - tw[i] - if cap(i).is_some() && k > 0 { 4 + cap_w(i) } else { 0 };
         }
         // Sign above the unit (none for continuity / diode / non-V/A). The
         // pair repaints its column up to the new sub rows (an old wider unit
@@ -645,8 +681,8 @@ impl DmmView {
             let tx = SS_R - tw[i];
             let x0 = left[i].min(st.sub_x[i]).max(uend[i]);
             let (y, h) = (SS_Y[i], 25);
-            if r.acdc && k > 0 {
-                sf::label(sf::AUX_TAG, rect(x0, y, tx - 4 - x0, h), AUX_TAGS[i], VALUE, bg, 4, 0);
+            if let (Some((f, t, sp)), true) = (cap(i), k > 0) {
+                sf::label(f, rect(x0, y, tx - 4 - x0, h), t, VALUE, bg, 4, sp);
                 lcd::fill_rect((tx - 4) as u16, y as u16, 4, h as u16, bg);
             } else if tx > x0 {
                 lcd::fill_rect(x0 as u16, y as u16, (tx - x0) as u16, h as u16, bg);
@@ -2153,7 +2189,7 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
 /// `title_back_hit` (page 2 -> page 1 -> menu), so the lists hold only
 /// settings.
 pub const SETTINGS: [&str; 9] = [
-    "Dim screen", "Shutdown", "Backlight", "Volume", "Bluetooth", "Start page", "Analog power",
+    "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
     "Scope drag", "More",
 ];
 pub const SETTINGS2: [&str; 3] = ["DMM rate", "Smoothing", "Device"];
