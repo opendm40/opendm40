@@ -48,6 +48,9 @@ mod meter;
 mod scope;
 #[path = "../../src/scope_meas.rs"]
 mod scope_meas;
+#[path = "../../src/scope_ui.rs"]
+mod scope_ui;
+mod stock;
 #[path = "../../src/stockfont.rs"]
 mod stockfont;
 #[path = "../../src/text.rs"]
@@ -274,6 +277,39 @@ impl Checker {
     }
 }
 
+impl Checker {
+    /// Stock-replica scope page (src/scope_ui.rs): the spacing / margin rules
+    /// are exempt (the stock geometry has 1-2 px gaps by design, port plan
+    /// sec. 8); texts must still not collide (two text ink boxes overlapping
+    /// without one containing the other).
+    fn check_replica(&mut self, scene: &str) {
+        self.cases += 1;
+        let its = items();
+        let texts: Vec<&Item> = its.iter().filter(|i| i.kind == probe::TEXT).collect();
+        for a in 0..texts.len() {
+            for b in a + 1..texts.len() {
+                let (ia, ib) = (texts[a], texts[b]);
+                if ia.b.contains(&ib.b) || ib.b.contains(&ia.b) {
+                    continue;
+                }
+                if ia.b.gap(&ib.b) < 0 {
+                    self.fail(scene, format!("texts #{} {:?} and #{} {:?} collide", ia.id, ia.b, ib.id, ib.b));
+                }
+            }
+        }
+    }
+
+    /// The screen equals `want` (an incremental update left no stale pixel).
+    fn same_as(&mut self, scene: &str, want: &[u16]) {
+        self.cases += 1;
+        let fb = &emu().fb;
+        let bad: Vec<usize> = (0..fb.len()).filter(|&i| fb[i] != want[i]).collect();
+        if let Some(&i) = bad.first() {
+            self.fail(scene, format!("{} stale pixels after an update (first at {},{})", bad.len(), i % W, i / W));
+        }
+    }
+}
+
 // ------------------------------------------------------------------ scenes
 
 fn val(v: f32, dec: u8, unit: &'static str) -> Val {
@@ -436,6 +472,17 @@ fn save(out: &str, name: &str) {
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| ".".into());
     host::map_flash();
+    // `main <out> --stock <dir>`: only the replica scope scenes, 1x, for the
+    // pixel diff against tools/stock-ui (stock-diff.sh).
+    if std::env::args().nth(2).as_deref() == Some("--stock") {
+        let dir = std::env::args().nth(3).unwrap_or_else(|| out.clone());
+        std::fs::create_dir_all(&dir).unwrap();
+        for sc in stock::scenes() {
+            stock::draw(&sc);
+            host::save_ppm(&format!("{dir}/{}.ppm", sc.name), 1);
+        }
+        return;
+    }
     let mut w = World {
         sc: scope::Scope::new(),
         gen: gen::Gen::new(),
@@ -445,6 +492,52 @@ fn main() {
     let mut dv = ui::DmmView::new();
     let cases = strip_cases();
     let st = status(1);
+
+    // 0. Stock-replica scope page: every reference scene (text collisions),
+    // and every scene drawn as an update over every other one equals its
+    // fresh draw (no stale pixels from the per-widget / per-row diffs), plus
+    // a trace dragged up and down by 1..40 rows in steps.
+    {
+        let sc = stock::scenes();
+        let mut fresh = vec![];
+        for s in &sc {
+            stock::draw(s);
+            ck.check_replica(&format!("replica/{}", s.name));
+            fresh.push(emu().fb.clone());
+        }
+        save(&out, "s00-replica-st01");
+        for (i, a) in sc.iter().enumerate() {
+            for (j, b) in sc.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                stock::draw(a);
+                stock::load(b);
+                scope_ui::update(&b.m);
+                scope_ui::cells(&b.m, &b.cells);
+                ck.same_as(&format!("replica/{}->{}", a.name, b.name), &fresh[j]);
+            }
+        }
+        let base = &sc[0];
+        stock::draw(base);
+        let mut m = base.m;
+        for (k, d) in [1, 3, -7, 12, 40, -40, -1, 0].iter().enumerate() {
+            m.pos = *d;
+            m.guide = k % 2 == 0;
+            m.sel_v = (k % 2) as u8;
+            let s2 = stock::Scene { name: "drag", m, trace: base.trace.as_ref().map(|t| t.shifted(*d as i32)), persist: None, cols: 399, cells: base.cells.clone() };
+            stock::load(&s2);
+            scope_ui::update(&m);
+            let inc = emu().fb.clone();
+            stock::draw(&s2);
+            let want = emu().fb.clone();
+            emu().fb.copy_from_slice(&inc);
+            ck.same_as(&format!("replica/drag{d}"), &want);
+            stock::draw(base);
+            stock::load(&s2);
+            scope_ui::update(&m);
+        }
+    }
 
     // 1. Combined view: every strip case x hold x verdict x REL x alt.
     for (name, r, label) in &cases {
