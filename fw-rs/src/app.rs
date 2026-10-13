@@ -195,6 +195,21 @@ fn power_off() -> ! {
     crate::wdt::powered_off()
 }
 
+/// Stored DMM function code -> the function to start in (1 = DC V for
+/// anything unknown). v2 stored the HY3131 mode (0..15, no AC+DC then); v3
+/// stores `Dmm::func()`: 0..15, 16 / 17 = V / A AC+DC. Both number 0..15 the
+/// same way. The mV modes (2, 3) are what the V autorange had stepped down to:
+/// they restart as AC / DC V, which steps down again by itself when V -> mV is
+/// allowed (`v_auto` bit 1), instead of in the manual-only 60 mV row.
+fn restore_func(version: u32, code: u8, v_auto: u8) -> u8 {
+    let max = if version >= 3 { 17 } else { 15 };
+    match code {
+        2 | 3 if v_auto & 2 != 0 => code - 2,
+        c if c <= max => c,
+        _ => 1,
+    }
+}
+
 impl App {
     pub fn new(clk: &mut Clock) -> Self {
         let mut dmm = Dmm::new();
@@ -271,8 +286,8 @@ impl App {
             touch_snap: None,
         };
         crate::persist::init();
-        if let Some(p) = crate::persist::load() {
-            a.restore(&p, clk);
+        if let Some(rec) = crate::persist::load() {
+            a.restore(&rec, crate::persist::same_session(), clk);
         }
         backlight(a.backlight);
         let g = a.gen.s;
@@ -792,7 +807,12 @@ impl App {
         p
     }
 
-    fn restore(&mut self, p: &[u32; crate::persist::WORDS], clk: &mut Clock) {
+    /// Backup SRAM words -> settings. `same_session`: the DMM function is
+    /// continued only after a normal fw-rs boot (persist::same_session);
+    /// otherwise, and for any code this build does not know, DC V as the
+    /// stock's power-on default.
+    fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {
+        let p = &rec.words;
         self.dim_idx = (p[0] & 3) as usize;
         self.off_idx = (p[0] >> 4 & 3) as usize;
         self.start_page = (p[0] >> 8 & 3) as usize;
@@ -810,12 +830,12 @@ impl App {
         if p[16] != 0 {
             self.dmm.set_ntc_user(f32::from_bits(p[16]), f32::from_bits(p[17]));
         }
-        // Sensor before the mode, so a restored mode 15 enters with it.
+        // Sensor and autorange flags before the mode, so a restored mode
+        // enters with them.
         self.dmm.set_t_sensor(clk, (p[11] >> 8 & 0xF) as u8);
-        let mode = (p[2] & 0xFF) as u8;
-        if mode <= 17 {
-            self.dmm.select(clk, mode);
-        }
+        self.dmm.set_auto_flags((p[2] >> 8) as u8, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
+        let mode = if same_session { restore_func(rec.version, p[2] as u8, self.dmm.v_auto()) } else { 1 };
+        self.dmm.select(clk, mode);
         let mut g = self.gen.s;
         g.wave = Wave::ALL[(p[3] & 3) as usize];
         g.duty = ((p[3] >> 8) & 0xFFFF).min(10000) as u16;
