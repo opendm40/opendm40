@@ -5,8 +5,10 @@
 //! fs >= 50 MS/s: DMA1 stream 4 ch 6 (TIM1_CH4) GPIOB->IDR -> record;
 //! fs <  50 MS/s: stream 3 ch 7 (TIM8_CH2) latches IDR at 50 MHz, stream 4 copies
 //! the latch into the record at fs (as the stock firmware).
-//! One record per frame; the trigger is found in software in the record
-//! (screen/2 samples of pre-trigger, then a search window, then screen/2).
+//! Software trigger: fs > STREAM_FS: one linear record per frame (CAP
+//! samples), the crossing searched over every position that leaves a full
+//! screen around it; fs <= STREAM_FS: a circular record searched continuously
+//! across polls (stream_poll), stopped once the post-trigger part is in.
 //! The analog front end is powered by PC4 (the stock raises it on the scope /
 //! generator pages and lowers PE2, the DMM side; see rails()). While PC4 is
 //! off poll() returns nothing (the scope is paused, the last frame stays).
@@ -37,8 +39,15 @@ const REC: u32 = 0x080C_0000;
 /// Screen = 400 columns, 10 divisions; graph height 280 rows (8 x 35).
 pub const COLS: usize = 400;
 pub const ROWS: i32 = 280;
-/// Trigger search window (samples), as the stock software refinement.
+/// Trigger search window (samples), as the stock software refinement
+/// around the comparator estimate (hwtrig path only).
 const WIN: usize = 800;
+/// Highest sample rate searched continuously in software (stream_poll): the
+/// ring (CAP samples = 21 ms at 1.25 MS/s) must outlast the main-loop gap
+/// between two polls with the pre-trigger part still in it.
+const STREAM_FS: u32 = 1_250_000;
+/// Longest busy-wait inside a poll for the post-trigger samples (us).
+const STREAM_SPIN_US: u64 = 1000;
 /// Record buffer (samples) in SRAM0.
 pub const CAP: usize = 26 * 1024;
 
@@ -264,6 +273,25 @@ pub struct Scope {
     pub hw: HwTrig,
     hw_mode: bool,
     hw_t0: u64,
+    /// Position (rows) the stored record was captured with: the offset PWM
+    /// had moved its codes by that much (volts(), see v_centre).
+    stored_pos: i32,
+    /// Continuous software trigger in flight (fs <= STREAM_FS): circular
+    /// record over CAP; absolute sample count in roll_written / roll_last_wr.
+    stream: bool,
+    /// Next absolute sample to examine, its ring index, the hysteresis state
+    /// (find_trigger's `armed`) carried across polls, the crossing found.
+    st_scan: u64,
+    st_idx: usize,
+    st_armed: bool,
+    st_found: Option<u64>,
+    st_poll: u64,
+    /// Run-state chip (stock status strings): 0 WAIT, 1 AUTO (untriggered
+    /// frame), 2 T'D (triggered frame), 3 RUN (roll). `status_new`: changed
+    /// since the app last drew it (take_status).
+    pub status: u8,
+    status_new: bool,
+    last_frame: u64,
 }
 
 impl Scope {
@@ -321,6 +349,16 @@ impl Scope {
             hw: HwTrig::new(),
             hw_mode: false,
             hw_t0: 0,
+            stored_pos: 0,
+            stream: false,
+            st_scan: 0,
+            st_idx: 0,
+            st_armed: false,
+            st_found: None,
+            st_poll: 0,
+            status: 0,
+            status_new: true,
+            last_frame: 0,
         };
         sc.hw.init();
         sc.apply(Settings::DEFAULT, 0);
@@ -385,14 +423,25 @@ impl Scope {
         if !self.s.run && self.stored_valid { self.stored_range } else { self.s.range }
     }
 
-    /// ADC code -> volts (FUN_080301a0, without the position). The probe is the
-    /// current one: it only relabels (stock: "P scales the sample map and the
-    /// displayed V/div only"), so a probe change while stopped relabels the
-    /// stored trace without moving it.
+    /// Voltage of ADC code g1 (stock v_c = pos * X / 141, FUN_080301a0): the
+    /// offset PWM (apply) puts 0 V at code g1 - pos*..., so code g1 sits on
+    /// the centre row whatever the position, and the position is already in
+    /// the codes. Uses the capture position / range of the stored record
+    /// while stopped (a position drag then moves the stored trace, as the
+    /// stock STOP re-render).
+    fn v_centre(&self) -> f32 {
+        let (r, pos) = if !self.s.run && self.stored_valid { (self.stored_range, self.stored_pos) } else { (self.s.range, self.s.pos) };
+        pos as f32 * 4.0 * VDIV[r] * self.s.probe / 141.0
+    }
+
+    /// ADC code -> volts (FUN_080301a0: v_c + (code - g1) X_r P / (g0 - g1)).
+    /// The probe is the current one: it only relabels (stock: "P scales the
+    /// sample map and the displayed V/div only"), so a probe change while
+    /// stopped relabels the stored trace without moving it.
     pub fn volts(&self, code: f32) -> f32 {
         let r = self.code_range();
         let (g0, g1) = self.gain(r);
-        (code - g1) * XR[r] / (g0 - g1) * self.s.probe
+        self.v_centre() + (code - g1) * XR[r] / (g0 - g1) * self.s.probe
     }
 
     /// Volts -> screen row (FUN_08030146): 140 + pos - 141 v / (4 V/div).
@@ -408,13 +457,47 @@ impl Scope {
         (140.0 + self.s.pos as f32 - self.s.trig_row as f32) * 4.0 * VDIV[self.s.range] * self.s.probe / 141.0
     }
 
+    /// Trigger level in ADC codes of the live range: relative to the centre
+    /// row (code g1), since the offset PWM already shifted the codes by the
+    /// position (stock FUN_08020e2a: code = v/k - c with the position in v
+    /// and in c). Was g1 + trig_volts * k, which counted the position twice:
+    /// after AUTOSET on a 0..9.6 V square (5 V/div, pos 33) the level sat at
+    /// 9.36 V for a badge of 4.68 V.
     fn trig_code(&self) -> i32 {
         let r = self.s.range;
         let (g0, g1) = self.gain(r);
-        (g1 + self.trig_volts() / self.s.probe * (g0 - g1) / XR[r]) as i32
+        let dv = (140.0 - self.s.trig_row as f32) * 4.0 * VDIV[r] / 141.0;
+        (g1 + dv * (g0 - g1) / XR[r]) as i32
+    }
+
+    /// Stock auto timeout (ms) of the current timebase (scope_auto_timeout_ms).
+    fn auto_timeout(&self) -> u64 {
+        match self.s.tb {
+            0..=15 => 100,
+            16 => 200,
+            17 => 500,
+            18 => 1000,
+            _ => 2000,
+        }
+    }
+
+    /// The run-state chip changed since the last call (the app redraws it).
+    pub fn take_status(&mut self) -> bool {
+        core::mem::replace(&mut self.status_new, false)
+    }
+
+    fn set_status(&mut self, st: u8) {
+        if st != self.status {
+            self.status = st;
+            self.status_new = true;
+        }
     }
 
     pub fn apply(&mut self, s: Settings, now: u64) {
+        // A new trigger mode or a RUN press waits for its first frame (WAIT).
+        if s.mode != self.s.mode || (s.run && !self.s.run) {
+            self.set_status(0);
+        }
         // A user STOP (run -> stop) freezes what is on screen; any other change
         // just aborts the acquisition in flight (it restarts in poll()).
         if self.s.run && !s.run {
@@ -462,10 +545,11 @@ impl Scope {
         unsafe { w32(TIM3 + 0x3C, ccr) };
         let (_, num, den, ppp) = TB[s.tb];
         self.screen = ((num * COLS as u32 / den / ppp) as usize).max(2);
-        // Single captures the full record (stock Single = 65520 samples) so the
-        // stored-record zoom can pan/zoom out; Auto/Normal keep one screen + the
-        // trigger window per frame.
-        self.rec = if s.mode == TrigMode::Single { CAP } else { (self.screen + WIN).min(CAP) };
+        // Every linear record is the full CAP: the trigger is searched over all
+        // positions that keep a full screen around it (finish), CAP - screen
+        // of them instead of the 800-sample refinement window, and Single keeps
+        // the full record for the stored-record zoom (stock Single = 65520).
+        self.rec = CAP;
         self.deadline = 0;
     }
 
@@ -481,6 +565,7 @@ impl Scope {
         }
         self.hw.disarm();
         self.hw_mode = false;
+        self.stream = false;
         self.busy = false;
         self.rolling = false;
     }
@@ -498,7 +583,7 @@ impl Scope {
     fn freeze(&mut self, now: u64) {
         let was_busy = self.busy;
         let was_rolling = self.rolling;
-        let was_hw = self.hw_mode;
+        let was_hw = self.hw_mode || self.stream;
         let ndtr = unsafe { r32(S4 + 0x04) };
         self.halt();
         if !was_busy {
@@ -508,9 +593,10 @@ impl Scope {
         if was_rolling {
             self.snapshot_roll();
         } else if was_hw {
-            // Circular hardware-trigger record: only a frozen (Done) one is
-            // a complete frame; poll() would have shown it on the next tick,
-            // so leave the screen as drawn (as a partial linear record).
+            // Circular record (hardware trigger or software stream): only a
+            // stopped one is a complete frame; poll() would have shown it on
+            // the next tick, so leave the screen as drawn (as a partial
+            // linear record).
         } else if ndtr == 0 {
             if self.finish(now).is_some() {
                 self.zoom_pending = true;
@@ -532,6 +618,7 @@ impl Scope {
         self.stored_len = len;
         self.stored_fs = self.sample_rate();
         self.stored_range = self.s.range;
+        self.stored_pos = self.s.pos;
         self.stored_roll = roll;
         self.stored_anchor = anchor.min(len - 1);
         self.stored_trig = trig;
@@ -546,11 +633,13 @@ impl Scope {
     /// since its samples have replaced the frame that was shown before.
     fn finish(&mut self, now: u64) -> Option<(usize, Option<usize>)> {
         let n = self.rec;
-        // Pre-trigger samples: the trigger point lands on column hpos. The
-        // search window starts there, so start = trig - pre >= 0 and
-        // start + screen <= pre + win + screen <= n.
+        // Pre-trigger samples: the trigger point lands on column hpos. Every
+        // trigger position with a full screen around it is searched (the
+        // stock 800-sample window is the refinement around its comparator
+        // estimate, not a search range): start = trig - pre >= 0 and
+        // start + screen <= pre + win + screen = n.
         let pre = self.screen * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
-        let win = WIN.min(n - self.screen);
+        let win = n - self.screen;
         // Mask once here (snapshot_mark), then search in the masked record.
         self.snapshot_mark(n, 0, None, false);
         let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
@@ -636,9 +725,17 @@ impl Scope {
             // Comparator trigger: circular record over CAP, frozen in hardware
             // `post` samples after the edge (hwtrig.rs). Roll never triggers.
             let hw = self.hw.available() && !self.rolling;
-            let (len, circ) = if self.rolling || hw { (CAP as u32, 1 << 8) } else { (self.rec as u32, 0) };
+            // Software trigger at low rates: circular record searched while
+            // it is written (stream_poll).
+            let stream = !self.rolling && !hw && fs <= STREAM_FS;
+            let (len, circ) = if self.rolling || hw || stream { (CAP as u32, 1 << 8) } else { (self.rec as u32, 0) };
             self.roll_written = 0;
             self.roll_last_wr = 0;
+            self.stream = stream;
+            self.st_scan = 0;
+            self.st_idx = 0;
+            self.st_armed = false;
+            self.st_found = None;
             w32(S4 + 0x04, len);
             w32(S4, (6 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | circ | 1);
             if hw {
@@ -854,7 +951,32 @@ impl Scope {
     }
 
     /// Poll: start / finish frames. Returns the visible window when ready.
+    /// Tracks the run-state chip: a live frame sets T'D / AUTO (RUN in
+    /// roll); Normal / Single fall back to WAIT when nothing triggered for a
+    /// timeout plus a screen (stock Normal expiry: status WAIT).
     pub fn poll(&mut self, now: u64) -> Option<Frame<'static>> {
+        let live = self.s.run;
+        let f = self.poll_frame(now);
+        if live {
+            match &f {
+                Some(fr) => {
+                    self.last_frame = now;
+                    self.set_status(if fr.cols.is_some() { 3 } else if fr.trig.is_some() { 2 } else { 1 });
+                }
+                None => {
+                    if self.status == 2 && self.s.mode != TrigMode::Auto {
+                        let screen_ms = self.screen as u64 * 1000 / self.sample_rate().max(1) as u64;
+                        if now >= self.last_frame + self.auto_timeout() + screen_ms {
+                            self.set_status(0);
+                        }
+                    }
+                }
+            }
+        }
+        f
+    }
+
+    fn poll_frame(&mut self, now: u64) -> Option<Frame<'static>> {
         if !self.s.run {
             // Stopped: re-render the stored record (stock STOP "keeps redrawing
             // the stored record", §4) once per change (zoom_pending: a settings
@@ -872,16 +994,10 @@ impl Scope {
         if !self.busy {
             self.start();
             self.hw_t0 = now;
+            self.st_poll = now;
             if self.deadline == 0 {
                 // Auto: untriggered frame after the stock timeout.
-                let t = match self.s.tb {
-                    0..=15 => 100,
-                    16 => 200,
-                    17 => 500,
-                    18 => 1000,
-                    _ => 2000,
-                };
-                self.deadline = now + t;
+                self.deadline = now + self.auto_timeout();
             }
             return None;
         }
@@ -890,6 +1006,9 @@ impl Scope {
         }
         if self.hw_mode {
             return self.hw_poll(now);
+        }
+        if self.stream {
+            return self.stream_poll(now);
         }
         if unsafe { r32(S4 + 0x04) } != 0 {
             return None;
@@ -905,6 +1024,139 @@ impl Scope {
         let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..self.rec] };
         self.seq = self.seq.wrapping_add(1);
         Some(Frame { data: &data[start..start + self.screen], cols: None, trig, fs: self.sample_rate(), seq: self.seq })
+    }
+
+    /// Absolute number of samples written since start() into the circular
+    /// record (as roll_poll: the ring position advanced since the last call).
+    fn stream_wr(&mut self) -> u64 {
+        let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
+        let d = (wr + CAP - self.roll_last_wr) % CAP;
+        self.roll_written += d as u64;
+        self.roll_last_wr = wr;
+        self.roll_written
+    }
+
+    /// Continuous software trigger (fs <= STREAM_FS; the stock's comparator
+    /// waits for the edge, this scans every sample as it arrives): the
+    /// find_trigger rule with its hysteresis state carried across polls, over
+    /// the samples whose pre-trigger part is still in the ring; once a
+    /// crossing is found, wait (spin at most STREAM_SPIN_US) until the
+    /// post-trigger part is written, stop, linearise. Auto: the newest
+    /// screen, untriggered, after the timeout.
+    fn stream_poll(&mut self, now: u64) -> Option<Frame<'static>> {
+        let fs = self.sample_rate() as u64;
+        // A gap between two polls longer than the ring: the modulo count in
+        // stream_wr cannot see it, and the samples are gone anyway. Restart
+        // the search at the write position.
+        let lost = now.saturating_sub(self.st_poll) * fs / 1000 + 64 >= CAP as u64;
+        self.st_poll = now;
+        let wr = self.stream_wr();
+        if lost {
+            self.st_found = None;
+            self.st_armed = false;
+            self.st_scan = wr;
+            self.st_idx = (wr % CAP as u64) as usize;
+        }
+        let (pre, post) = self.hw_split();
+        if self.st_found.is_none() {
+            // Oldest crossing whose pre-trigger part survives until the stop
+            // (64 samples of margin for the stop itself).
+            let floor = (wr + pre as u64 + 64).saturating_sub(CAP as u64).max(pre as u64);
+            if self.st_scan < floor {
+                self.st_scan = floor;
+                self.st_idx = (floor % CAP as u64) as usize;
+                self.st_armed = false;
+            }
+            let l = self.trig_code();
+            let rising = self.s.rising;
+            let buf = unsafe { &*core::ptr::addr_of!(BUF) };
+            let (mut i, mut armed, mut n) = (self.st_idx, self.st_armed, self.st_scan);
+            while n < wr {
+                let v = (buf[i] & 0x3FF) as i32;
+                let hit = if rising {
+                    if v < l - 2 {
+                        armed = true;
+                        false
+                    } else {
+                        armed && v > l
+                    }
+                } else if v > l + 2 {
+                    armed = true;
+                    false
+                } else {
+                    armed && v < l
+                };
+                if hit {
+                    self.st_found = Some(n);
+                }
+                n += 1;
+                i += 1;
+                if i == CAP {
+                    i = 0;
+                }
+                if hit {
+                    break;
+                }
+            }
+            (self.st_idx, self.st_armed, self.st_scan) = (i, armed, n);
+        }
+        let Some(t) = self.st_found else {
+            if self.s.mode == TrigMode::Auto && now >= self.deadline && wr >= self.screen as u64 {
+                return self.stream_emit(None);
+            }
+            return None;
+        };
+        let need = t + post as u64;
+        if wr < need {
+            if (need - wr) * 1_000_000 / fs > STREAM_SPIN_US {
+                return None;
+            }
+            // Bounded (a stalled DMA must not hang the loop): ~10 cycles per
+            // pass, 200 MHz -> far beyond STREAM_SPIN_US.
+            let mut k = 0u32;
+            while self.stream_wr() < need {
+                k += 1;
+                if k > 400_000 {
+                    return None;
+                }
+            }
+        }
+        self.stream_emit(Some(t))
+    }
+
+    /// Stop the stream, linearise the ring (oldest sample first) and emit the
+    /// screen around absolute crossing `t` (None: the newest screen).
+    fn stream_emit(&mut self, t: Option<u64>) -> Option<Frame<'static>> {
+        self.halt();
+        let wr = self.stream_wr();
+        let len = wr.min(CAP as u64) as usize;
+        if len < self.screen {
+            self.stored_valid = false;
+            return None;
+        }
+        if wr > CAP as u64 {
+            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left((wr % CAP as u64) as usize) };
+        }
+        let base = wr - len as u64;
+        let (pre, post) = self.hw_split();
+        let start = match t {
+            Some(t) if t >= base + pre as u64 && t + post as u64 <= wr => (t - base) as usize - pre,
+            // Pre-trigger part overwritten (the stop came too late): restart.
+            Some(_) => {
+                self.stored_valid = false;
+                return None;
+            }
+            None => len - self.screen,
+        };
+        let trig = t.map(|_| start + pre);
+        self.snapshot_mark(len, start + self.screen / 2, trig, false);
+        self.deadline = 0;
+        if trig.is_some() && self.s.mode == TrigMode::Single {
+            self.s.run = false;
+        }
+        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
+        self.seq = self.seq.wrapping_add(1);
+        Some(Frame { data, cols: None, trig, fs: self.sample_rate(), seq: self.seq })
     }
 
     /// Roll: every 100 ms, min/max of 400 columns over the latest screen.

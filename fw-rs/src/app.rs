@@ -1549,6 +1549,12 @@ impl App {
         let t0 = cyc();
         let polled = self.scope.poll(now);
         self.prof[0] = self.prof[0].max(cyc().wrapping_sub(t0) / 200);
+        // Run-state chip follows the acquisition (WAIT / AUTO / T'D / RUN).
+        if can_draw && !self.redraw && self.scope.take_status() {
+            if let Some(v) = self.scope_view() {
+                v.labels(&self.scope);
+            }
+        }
         if let Some(f) = polled {
             let n = f.data.len();
             for (i, w) in self.wave.iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
