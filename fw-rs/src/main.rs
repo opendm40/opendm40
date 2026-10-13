@@ -436,6 +436,15 @@ fn main() -> ! {
                         draw_hold_until = now + 300;
                         false
                     }
+                    scpi::Dbg::Touch(clear) => {
+                        if clear {
+                            touch::log_clear();
+                        } else {
+                            let n = touch::log_text(port.rsp_buf(), now);
+                            port.respond_len(n);
+                        }
+                        false
+                    }
                     scpi::Dbg::Diag => {
                         let d = touch_diag(&tp, touch_events, dbg_ctl, loop_max_shown, app.prof, sec_shown, bt_tx);
                         scpi.len = 0;

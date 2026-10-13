@@ -61,8 +61,9 @@ const TAP_SLOP: i32 = LOCK_MAX;
 /// A long press the app did not capture (it returned false for the
 /// `LongPress`) still taps on release, so a slow press on a button that has
 /// no long-press action is not lost. Needs app.rs to capture the long presses
-/// it acts on (else those would also tap): off until then.
-const TAP_AFTER_LONG: bool = false;
+/// it acts on (else those would also tap): it does (history clear, statistics
+/// reset, strip -> DMM).
+const TAP_AFTER_LONG: bool = true;
 /// Press-and-hold-then-drag (owner A/B experiment, docs/combined-view-design.md
 /// §6.2): hold time before a drag is accepted, ms; 0 = direct drag (default).
 static GRAB_MS: AtomicU16 = AtomicU16::new(0);

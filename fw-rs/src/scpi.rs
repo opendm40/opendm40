@@ -183,6 +183,7 @@ pub enum Log {
 ///                           each, memory order); read-only
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
 ///   DBG:DIAG?               diagnostic block (#3)
+///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
 ///   DBG:RELEASE             stop feeding the watchdog. RAM: back to stock in ~20 s.
 ///                           Native: the WDT reset counts as a crash (1st: fw-rs
@@ -203,6 +204,8 @@ pub enum Dbg {
     Drag([u16; 6]),
     Lcd(u16, u16, u16, u16, u32),
     Diag,
+    /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log.
+    Touch(bool),
     Flash,
     Release,
     Reset,
@@ -673,7 +676,7 @@ impl Scpi {
                             let v = nums::<5>(a);
                             Dbg::Lcd(v[0] as u16, v[1] as u16, v[2].max(1) as u16, v[3].max(1) as u16, v[4])
                         }
-                        b"DIAG" => Dbg::Diag,
+                        b"DIAG" => Dbg::Diag, b"TOUCH" => Dbg::Touch(!query),
                         b"FLASH" => Dbg::Flash,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,

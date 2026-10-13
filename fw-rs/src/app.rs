@@ -1712,11 +1712,13 @@ impl App {
                 self.tap(clk, p.x, p.y);
             }
             Gesture::LongPress(p) if self.view == View::Dmm && (153..172).contains(&p.y) => {
+                captured = true;
                 self.hist_n = 0;
                 self.beep(now, 300);
                 ui::history(&self.hist, 0, 0);
             }
             Gesture::LongPress(p) if self.view == View::Dmm && p.x >= 402 && (175..279).contains(&p.y) => {
+                captured = true;
                 // MIN/MAX/AVG column (REL box included): reset the statistics
                 // (UF-35; distinct from the history-row clear above).
                 self.meter.stats.clear();
@@ -1724,6 +1726,7 @@ impl App {
                 self.chart_dirty = true;
             }
             Gesture::LongPress(p) if self.view == View::DmmScope && ui::strip_hit(p.y) => {
+                captured = true;
                 // Meter strip: the full DMM view.
                 self.beep(now, 60);
                 self.show(View::Dmm, clk);
