@@ -19,6 +19,9 @@ firmware/re/history/
 firmware/spi-disk-backup/
 dist/*/tools/quick.img/
 dist/*/tools/full/
+# Everything personal that is not under firmware/re/dumps/: SPI disk backups,
+# memrw kit test output (UID, calibration, OTP), scratch runs
+private/
 
 # Ghidra project database (contains the vendor image; rebuilt by Setup.java)
 firmware/re/ghidra/gproj/
