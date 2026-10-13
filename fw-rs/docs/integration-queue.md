@@ -129,3 +129,6 @@ measure apply() time (expect tens of ms).
 - src/meter.rs:5 -> `../docs/dm40-feature-request.md`
 - src/genuine.rs:111 -> `private/memrw-kit-test/full/uid_1FFF7A10.bin`
 - src/screenshot.rs:12 `spi-disk-backup/` -> `private/spi-disk-backup/`
+
+## hwtrig (comparator trigger)
+See docs/hwtrig-integration.md (H0..H8); mechanical: `python3 -I tools/hwtrig-check/patch_scope.py src/scope.rs src/scope.rs`. Keep DEFAULT_ENABLED = false until the device test.
