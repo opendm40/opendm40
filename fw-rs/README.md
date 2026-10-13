@@ -15,12 +15,13 @@ image and defines the contract below.
 
 - **Format:** bare binary, position-dependent, loaded at `0x20008000`.
 - **Layout:** Cortex-M vector table at the start — word[0] = initial MSP
-  (`0x20018000`), word[1] = reset entry (thumb bit set). A loader copies the
+  (`0x10010000`), word[1] = reset entry (thumb bit set). A loader copies the
   image to `0x20008000` and branches to word[1].
-- **Region:** `0x20008000`..`0x20018000` (64 KiB) inside the ~100 KiB of SRAM0
-  the stock firmware leaves free in multimeter mode (free from `0x20005024`).
-  The low 32 KiB of SRAM0 (stock scope capture buffer) is left untouched until
-  the peripherals are re-initialised.
+- **Region:** the image occupies `0x20008000`..`0x2001C000` (80 KiB) of the
+  SRAM0 the stock firmware leaves free in multimeter mode (free from
+  `0x20005024`); the low 32 KiB of SRAM0 (stock scope buffer) is not touched.
+  `.bss` and the stack are in TCM SRAM (`0x10000000`, 64 KiB), which the loader
+  never writes; word[0] (initial MSP) is `0x10010000`.
 - **On entry:** reset sets MSP from word[0], masks interrupts (`cpsid i`), points
   `VTOR` at the in-SRAM table, zeroes `.bss` and calls `main`. The loader does
   not need to keep its interrupt handlers alive after the branch.

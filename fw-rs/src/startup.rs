@@ -34,6 +34,12 @@ __VECTORS:
     .global reset
 reset:
     cpsid i
+    /* TCM SRAM (stack, .bss) clock: RCU_AHB1EN.TCMSRAMEN (bit 20). */
+    ldr   r0, =0x40023830
+    ldr   r1, [r0]
+    orr   r1, r1, #0x100000
+    str   r1, [r0]
+    dsb
     ldr   sp, =_stack_top
     bl    rust_start
     b     .
