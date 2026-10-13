@@ -34,7 +34,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             this.tickUs = tickUs;
             SetWave("sine", 1000, 1.0, 0.0);
             Reset();
-            machine.ClockSource.AddClockEntry(new ClockEntry(tickUs, 1000000, Tick, this, "scopefeed", true, Direction.Ascending, WorkMode.Periodic));
+            // Self-rescheduling action on the emulation thread (a ClockEntry handler
+            // tripped a time-framework semaphore when a tick fed many samples).
+            machine.ScheduleAction(TimeInterval.FromMicroseconds(tickUs), _ => Tick());
         }
 
         public void Reset()
@@ -65,6 +67,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public int Range { get; private set; }
 
         private void Tick()
+        {
+            try
+            {
+                Step();
+            }
+            catch(Exception e)
+            {
+                this.Log(LogLevel.Error, "feeder: {0}", e.Message);
+            }
+            machine.ScheduleAction(TimeInterval.FromMicroseconds(tickUs), _ => Tick());
+        }
+
+        private void Step()
         {
             // TIM1 running and stream enabled?
             var bus = machine.SystemBus;
@@ -107,6 +122,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var gen = dma.EnableCount(stream);
             if(gen != lastGen || Fs != lastFs)
             {
+                if(Fs != lastFs)
+                {
+                    this.Log(LogLevel.Info, "acquisition at {0} S/s, range {1}", Fs, Range);
+                }
                 lastGen = gen; lastFs = Fs;
                 t0 = now; fed = 0;
             }
