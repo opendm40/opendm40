@@ -495,6 +495,8 @@ fn main() -> ! {
                 scpi::Out::Log(l) => match l {
                     scpi::Log::Csv(Some(on)) => {
                         if on {
+                            // The DMM needs its analog side (as MEAS?).
+                            app.dmm_power(&mut clk);
                             if !app.rec_start(now) {
                                 scpi.set_err(if msc::host_mounted() { "Mass storage busy" } else { "Settings conflict" });
                             }

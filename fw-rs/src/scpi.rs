@@ -127,9 +127,9 @@ pub enum Mmem {
 ///   LOG:DATA?               definite-length #4nnnn block of 12-byte LE records
 ///                           {u32 seq, u32 ts_us, i32 raw_ad1}, oldest first
 ///   LOG:CSV ON|OFF          CSV recording of the DMM readings to the USB disk
-///                           (csvlog.rs; as the DMM page swipe down). ON fails
-///                           ("Settings conflict") without a reading or while a
-///                           PC has the disk mounted
+///                           (csvlog.rs; as the DMM page swipe down). ON fails:
+///                           "Mass storage busy" while a PC has the disk mounted,
+///                           else "Settings conflict" (no reading yet, already on)
 ///   LOG:CSV?                state,file,rows,bytes,committed,dropped (state 0 idle,
 ///                           1 recording, 2 stopping, 3 done, 4 full, 5 no disk,
 ///                           6 error; file -1 until the first commit)
