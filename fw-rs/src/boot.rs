@@ -3,7 +3,9 @@
 //!
 //! Runs before .data/.bss exist: no statics are touched until `native::start`
 //! has initialised RAM (only `set_info`/`info` below use one, afterwards).
-//! Every wait is bounded and feeds the FWDGT.
+//! Every wait is bounded and feeds the FWDGT. Every cap fails toward a
+//! normal boot: a key-gesture pass cap counts as a RELEASE, never as a held
+//! key (review N1), so a stopped cycle counter cannot reach recovery.
 //!
 //! Recovery zeroes the loader marker (src/recovery.rs): a one-way door into
 //! the vendor updater. So every trigger is deliberate or repeated.
@@ -189,12 +191,18 @@ fn cue(cyc_per_ms: u32) {
         modify32(GPIOA, 3 << 14, 1 << 14);
     }
     let half = cyc_per_ms * 10 / 54; // ~185 us
+    // Pass cap per half period (review N1): a pass is >= 4 cycles (two DWT
+    // reads, compare, count; ~8 in the native build), so with a running
+    // counter the time ends it first; with a stopped counter the whole cue
+    // still ends after 1620 x half/2 passes (~1 s), not tens of seconds. Only
+    // the tone is affected: the cue decides nothing.
+    let cap = half / 2;
     let mut level = false;
     for _ in 0..1620 {
         // 1620 half periods = ~0.3 s
         let t = cyccnt();
         let mut n = 0u32;
-        while cyccnt().wrapping_sub(t) < half && n < 1_000_000 {
+        while cyccnt().wrapping_sub(t) < half && n < cap {
             n += 1;
         }
         level = !level;
@@ -363,12 +371,17 @@ pub fn fmc_last() -> u32 {
 }
 
 /// DBG:UPDATE / DBG:RECOVER (native): forget the previous-mode word (so a
-/// later stale watchdog flag cannot count as our crash, review H3), then zero
-/// the marker. The caller resets (deferred SYSRESETREQ) into the loader's
-/// update screen. Returns the read-back result.
+/// later stale watchdog flag cannot count as our crash, review H3) and reset
+/// the crash counter (so a count left from this session cannot survive the
+/// stock interlude and turn the first hang after the reinstall into recovery,
+/// review N2), then zero the marker. The caller resets (deferred SYSRESETREQ)
+/// into the loader's update screen. Returns the read-back result.
 pub fn enter_loader_update() -> bool {
     bkp_enable();
-    unsafe { w32(BKP_LAST, 0) };
+    unsafe {
+        w32(BKP_LAST, 0);
+        w32(BKP_CRASH, CRASH_TAG);
+    }
     zero_marker()
 }
 
@@ -402,17 +415,30 @@ fn cyccnt() -> u32 {
 
 /// Wait while PD6 stays pressed for up to `limit_ms` from `t0`. Returns the
 /// time of a release (that lasted RELEASE_DEBOUNCE_MS), or None if the key was
-/// held throughout. Also bounded by an iteration cap (each pass is >= 8 cycles)
-/// in case the cycle counter does not run.
+/// held throughout.
+///
+/// Fail-safe cap (review N1): the loop is also bounded by a pass count (each
+/// pass is >= 8 cycles: an FWDGT write, a GPIO read, a DWT read, so with a
+/// running counter the time limit always comes first). Reaching the cap means
+/// the cycle counter is not advancing, so neither "held for limit_ms" nor a
+/// debounced release can be measured; it returns `Some(limit_ms)`, i.e. it is
+/// treated as a RELEASE: never as "held", so a stopped counter can never
+/// confirm the gesture (recovery = zeroed marker). The cap is checked before
+/// the time limit. Effect in `key_gesture`: first window -> (HOLD_MS, false)
+/// -> KEY_HOLD_ABORTED, normal boot, no cue; confirm window -> abort, normal.
 fn held_for(t0: u32, limit_ms: u32, cyc_per_ms: u32) -> Option<u32> {
+    // (4000 + 100) x 25_000 = 1.03e8 at 200 MHz: no u32 overflow.
     let cap = (limit_ms + 100) * (cyc_per_ms / 8);
     let mut released_at: Option<u32> = None;
     let mut n = 0u32;
     loop {
         feed();
         n += 1;
+        if n >= cap {
+            return Some(limit_ms); // counter stuck: release / abort
+        }
         let now = cyccnt();
-        if now.wrapping_sub(t0) / cyc_per_ms >= limit_ms || n >= cap {
+        if now.wrapping_sub(t0) / cyc_per_ms >= limit_ms {
             return None;
         }
         if pd6_pressed() {
@@ -597,7 +623,9 @@ fn dec(s: &mut crate::scpi::Scpi, mut v: u32) {
 /// freed_clusters,others,rcvr_deleted,last_trigger` (others > 0: more
 /// dm40*.bin left untouched = warning; rcvr_deleted: a leftover DM40RCVR.BIN
 /// was removed; last_trigger: see below), marker_w0,w1,w2,VALID|INVALID,
-/// crash_word (0x435200nn), HEALTHY|-, fmc_last (0 = clean), then
+/// crash_word (0x435200nn), HEALTHY|-, fmc_last (0 = clean),
+/// PD6,moder,pupd,idr (power key pin read live: MODER[13:12] 0 = input,
+/// PUPD[13:12] 2 = pull-down, IDR bit 6 1 = pressed), then
 /// native::put_extra: STAGED,n,CALBK,status,written,conflict,freed,STACK,used,size.
 #[cfg(any(feature = "native", feature = "test-initcore"))]
 pub fn put_info(s: &mut crate::scpi::Scpi) {
@@ -666,5 +694,14 @@ pub fn put_info(s: &mut crate::scpi::Scpi) {
     hex(s, unsafe { r32(BKP_CRASH) });
     s.put_bytes(if unsafe { HEALTHY } { b",HEALTHY," } else { b",-," });
     hex(s, fmc_last());
+    // PD6 (power key) pin config read live: MODER[13:12] (0 = input),
+    // PUPD[13:12] (2 = pull-down, review B2), IDR bit 6 (1 = pressed).
+    let (moder, pupd, idr) = unsafe { (r32(GPIOD), r32(GPIOD + 0x0C), r32(GPIOD + 0x10)) };
+    s.put_bytes(b",PD6,");
+    dec(s, moder >> 12 & 3);
+    s.put_bytes(b",");
+    dec(s, pupd >> 12 & 3);
+    s.put_bytes(b",");
+    dec(s, idr >> 6 & 1);
     crate::native::put_extra(s);
 }

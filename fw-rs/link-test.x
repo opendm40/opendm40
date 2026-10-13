@@ -1,23 +1,33 @@
 /*
- * DM40 replacement firmware, stored in internal flash sector 8 (0x08080000,
- * 128 KiB, unused by the stock firmware), executed from SRAM.
+ * DM40 replacement firmware, RAM TEST images (features test-initcore and
+ * test-recovery, selected by build.sh; the default RAM image uses link.x).
+ * Stored in internal flash sector 8 (0x08080000, 128 KiB, unused by the stock
+ * firmware), executed from SRAM.
  *
  * GD32F4 flash is zero-wait only in its first 512 KiB; sector 8 lies above,
  * so code fetched from there runs several times slower. The reset code (in
- * .boot, runs from flash) therefore copies .text + .rodata into SRAM0 and the
+ * .boot, runs from flash) therefore copies .text + .rodata into SRAM and the
  * firmware runs from there. Vectors stay in flash (exceptions are not used).
  *
- * RAM after the takeover is all ours:
- *   SRAM0   0x20000000 112 KiB  code + constants (copied at reset)
+ * Differs from link.x only in the SRAM split: the test images carry the native
+ * boot code (init_core, board init, fatren, DBG:BOOT?) on top of the normal
+ * image, which no longer fits link.x's 120 KiB CODE region. CODE gets all of
+ * SRAM0+SRAM1 (128 KiB: no larger than the 128 KiB flash sector the same
+ * bytes are loaded from, so the flash sector, not CODE, is the real ceiling),
+ * and the DMA region is the 64 KiB SRAM2 above it (.dmabuf ~58 KiB).
+ *
+ * RAM after the takeover is all ours (SRAM ends at 0x20030000,
+ * firmware/re/ANALYSIS.md section 4):
+ *   SRAM0+1 0x20000000 128 KiB  code + constants (copied at reset)
  *   TCM     0x10000000  64 KiB  .data (copied), .bss, stack (CPU only)
- *   SRAM1+2 0x2001C000  80 KiB  .dmabuf: DMA buffers incl. the scope record
+ *   SRAM2   0x20020000  64 KiB  .dmabuf: DMA buffers incl. the scope record
  */
 MEMORY
 {
     FLASH (rx)  : ORIGIN = 0x08080000, LENGTH = 128K
-    CODE (rwx)  : ORIGIN = 0x20000000, LENGTH = 120K
+    CODE (rwx)  : ORIGIN = 0x20000000, LENGTH = 128K
     TCM (rw)    : ORIGIN = 0x10000000, LENGTH = 64K
-    DMARAM (rw) : ORIGIN = 0x2001E000, LENGTH = 72K
+    DMARAM (rw) : ORIGIN = 0x20020000, LENGTH = 64K
 }
 
 ENTRY(reset);
