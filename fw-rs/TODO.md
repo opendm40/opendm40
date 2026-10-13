@@ -142,7 +142,10 @@ Additional requirements:
       Touches meter.rs/app.rs/ui.rs. Queue after the UI agent (HOLD/layout) to avoid conflict; builds
       on fixing the plain HOLD first.
 - [x] FR-02 MIN/MAX/AVG (P0): MIN/MAX exist; add AVG (running average, no auto-off while active).  (code done; verify on device)
-- [ ] FR-05 smoothing + selectable sample rate (P1): slow/fast conversion + display smoothing.
+- [x] FR-05 smoothing + selectable sample rate (P1): slow/fast conversion + display smoothing.  (code done; verify on device)
+      Rate chip "MED 9.4/s" under the DMM chart timebase (tap = SLOW/MED/FAST, grey "n/a" where the
+      rate does not apply), Settings 2/2 "DMM rate" / "Smoothing", SENS:RATE[:PER?], CALC:SMO[:STAT|:RESP],
+      persisted in p[38]. CSV log and MIN/MAX/AVG stay unsmoothed.
 - [x] FR-06 Hi/Lo limits (P1): pass/fail thresholds with a beep.  (code done; verify on device)
 - [ ] FR-16 screenshot + log gallery (P1): save screenshots/CSV to the SPI disk and browse them.
 - [ ] FR-28 generator DC offset (P1): adjustable offset (note: real bipolar offset is HW-4).
@@ -164,7 +167,7 @@ Additional requirements:
 - [x] UF-17 (P1) 3-finger swipe-down screenshot to the USB disk (stock gesture, missing in fw-rs; shares the FAT writer). §2, §10  (code done; verify on device)
 - [x] UF-18 (P1) 2-finger swipe-down power-off (stock gesture; touch point count is available). §8  (code done; verify on device)
 - [x] UF-20 (P1) On first boot write CALBAK.BIN (cal record + boot data + UID, CRC) to the USB disk, written when missing or changed (compare-first). §4  (code done; verify on device)
-- [ ] UF-21 (P1) Make AUTO+ (V-first, already ported: v_auto=1) the default V autorange; warn when mV-first AUTO is chosen. §5.1
+- [x] UF-21 (P1) Make AUTO+ (V-first, already ported: v_auto=1) the default V autorange; warn when mV-first AUTO is chosen. §5.1  (code done; verify on device: an upgraded unit boots in AUTO+; Range page warning)
 - [ ] UF-05 (P1) Scope drag axis lock (dominant axis after ~12 px). §6.1
 - [ ] UF-09 (P1) Scope horizontal trigger position (pre-trigger %) + double-tap to centre. §6.1
 - [ ] UF-32 (P1) CSV files: '.' decimals, ISO-8601 timestamps, header (model/fw/function/range). §10

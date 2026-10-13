@@ -168,6 +168,13 @@ impl Checker {
     /// Check the emulator screen. `regions`: (name, box) screen areas that
     /// contain items (the screen itself is always one, margin 4).
     fn check(&mut self, scene: &str, regions: &[(&str, Bx)]) {
+        self.check_opts(scene, regions, true)
+    }
+
+    /// `glyph_rule` false: skip "glyphs of one text do not touch" (the menu
+    /// pages' stock TEXT22 rows are drawn at spacing 0, where that font's
+    /// glyphs touch by design; gaps and margins are still checked).
+    fn check_opts(&mut self, scene: &str, regions: &[(&str, Bx)], glyph_rule: bool) {
         self.cases += 1;
         let its = items();
         let screen = Bx::new(0, 0, W as i32, H as i32);
@@ -208,7 +215,7 @@ impl Checker {
                 }
             }
             // Glyphs of one text must not touch (left to right).
-            if ia.kind == probe::TEXT && ia.glyphs.len() > 1 {
+            if glyph_rule && ia.kind == probe::TEXT && ia.glyphs.len() > 1 {
                 let mut g = ia.glyphs.clone();
                 g.sort_by_key(|(k, _)| *k);
                 for w in g.windows(2) {
@@ -609,7 +616,17 @@ fn main() {
     for (name, r, label) in &cases {
         for ext in [false, true] {
             for (hold, lim) in [(0u8, meter::V_NONE), (1, meter::V_PASS), (2, meter::V_HI), (3, meter::V_LO)] {
-                for (rate, rec) in [(1u8, false), (4, true)] {
+                // Timebase x rate chip (FR-05: worst widths SLOW 2.3/s,
+                // FAST 37/s, MED --/s, grey n/a) x REC.
+                let chips = [
+                    ui::RateChip { rate: 0, period_ms: 430, applies: true },
+                    ui::RateChip { rate: 2, period_ms: 27, applies: true },
+                    ui::RateChip { rate: 1, period_ms: 0, applies: true },
+                    ui::RateChip { rate: 1, period_ms: 400, applies: false },
+                    ui::RateChip { rate: 0, period_ms: 2200, applies: true },
+                ];
+                for (k, (rate, rec)) in [(1u8, false), (4, true), (2, false), (1, true), (4, false)].into_iter().enumerate() {
+                    let rc = chips[k];
                     let mut r = *r;
                     r.main.ext = ext && !r.main.ol;
                     host::reset(0);
@@ -628,8 +645,8 @@ fn main() {
                     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
                     let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
-                    ui::chart(&mut cc, &pts, dec, rate, &side, r.main.unit);
-                    ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}", ext as u8), &dmm_page_regions);
+                    ui::chart(&mut cc, &pts, dec, rate, &side, r.main.unit, rc);
+                    ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}", ext as u8), &dmm_page_regions);
                 }
             }
         }
@@ -689,6 +706,36 @@ fn main() {
             *p = 0;
         }
         ck.check(&format!("title/{title}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))]);
+    }
+
+    // 6b. Settings pages 1 / 2 (worst values), Range pages with the UF-21
+    //     note: whole page.
+    let page_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
+    for (page, vals) in [
+        (0u8, vec!["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto (per view)", "Hold 5000 ms", ""]),
+        (1, vec!["SLOW (n/a here)", "HIGH", ""]),
+        (1, vec!["FAST  37/s", "LOW", ""]),
+        (1, vec!["MED  --/s", "OFF", ""]),
+    ] {
+        host::reset(0);
+        ui::settings(page, &vals);
+        ck.check_opts(&format!("settings/{page}/{}", vals[0]), &page_regions, false);
+    }
+    for b in [Button::Volt, Button::Amp, Button::Ohm] {
+        for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: it never steps to mV", false))] {
+            for sub in 0..3u8 {
+                host::reset(0);
+                let n = ui::range_items(b).len();
+                ui::range_page(b, Some(n - 1), sub, note);
+                ck.check_opts(&format!("range/{}/{}/{sub}", n, note.map_or("-", |x| x.0)), &page_regions, false);
+                // The note itself (spacing 1) keeps the glyph rule: only it.
+                if let Some((t, warn)) = note {
+                    host::reset(0);
+                    ui::range_note(t, warn);
+                    ck.check(&format!("range-note/{t}"), &page_regions);
+                }
+            }
+        }
     }
 
     // 7. Gestures: zone table, axis lock, hold-to-grab, Up on captured
@@ -797,7 +844,7 @@ fn main() {
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| 4.8170 + ((i / 40) % 3) as f32 * 1e-4).collect();
         let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), rel: None, secs: Some(5), rec: false };
-        ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, &side, "V");
+        ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, &side, "V", ui::RateChip { rate: 1, period_ms: 106, applies: true });
         save(&out, "d01-dmm");
         host::reset(0);
         let (r, l) = find("acdc_600mv");
@@ -808,14 +855,20 @@ fn main() {
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| -600.0 + (i % 64) as f32 * 0.5).collect();
         let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
-        ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, &side, "mV");
+        ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, &side, "mV", ui::RateChip { rate: 0, period_ms: 430, applies: false });
         save(&out, "d02-dmm-acdc");
         host::reset(0);
         ui::gen_static(&w.gen);
         save(&out, "g01-gen");
         host::reset(0);
-        ui::settings(&["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]);
+        ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]);
         save(&out, "m01-settings");
+        host::reset(0);
+        ui::settings(1, &["SLOW (n/a here)", "HIGH", ""]);
+        save(&out, "m02-settings2");
+        host::reset(0);
+        ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));
+        save(&out, "m03-range-v-warn");
     }
 
     for (msg, (n, scene)) in &ck.seen {

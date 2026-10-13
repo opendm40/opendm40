@@ -65,6 +65,18 @@
 //!   CALCulate:LIMit:CLEar                 clear both limits (fw-rs; not the
 //!     Keysight meaning "clear the fail indicator")
 //!   CALCulate:LIMit:FAIL?                 1 = the value is outside the limits
+//!
+//! Conversion rate / display smoothing (FR-05; persisted):
+//!   [SENSe:]RATE SLOW|MEDium|FAST / ?     AD1 conversion rate of DC V / mV /
+//!     A and ohm (dmm.rs FR-05 table; other functions keep the stock timing);
+//!     query: SLOW / MED / FAST
+//!   [SENSe:]RATE:PERiod?                  measured interval between readings,
+//!     s (0 until two readings were seen)
+//!   CALCulate:SMOothing[:STATe] ON|OFF / ?   display smoothing on (LOW) / off
+//!   CALCulate:SMOothing:RESPonse SLOW|MEDium|FAST / ?   SLOW = HIGH (long
+//!     window), MEDium / FAST = LOW; query SLOW / FAST. The smoothing feeds
+//!     the readout, READ? / MEAS? / FETCh?; MIN/MAX/AVG and the CSV log stay
+//!     unsmoothed (meter.rs header)
 
 use crate::dmm::Reading;
 
@@ -217,6 +229,13 @@ pub enum Cmd {
     CalcLimClear,
     CalcLimState(Option<bool>),
     CalcLimFail,
+    /// FR-05: [SENSe:]RATE (0 SLOW, 1 MED, 2 FAST; None = query),
+    /// RATE:PERiod?, CALC:SMOothing[:STATe], CALC:SMOothing:RESPonse
+    /// (1 LOW = FAST / MED, 2 HIGH = SLOW).
+    SensRate(Option<u8>),
+    SensRatePer,
+    CalcSmoState(Option<bool>),
+    CalcSmoResp(Option<u8>),
     /// DBG:GRAB <ms> / ?: hold-to-grab time of scope drags (0 = direct).
     DbgGrab(Option<u16>),
     /// DBG:GEST?: log of the last scope drags.
@@ -649,8 +668,24 @@ impl Scpi {
                     out = Out::Instr(if kw(sub, "PREamble") { Cmd::WavPre } else { Cmd::WavData });
                 }
                 _ if kw(p0, "FETCh") && query => out = Out::Fetch,
-                _ if kw(p0, "SENSe") || kw(p0, "FUNCtion") || kw(p0, "TEMPerature") => {
+                _ if kw(p0, "SENSe") || kw(p0, "FUNCtion") || kw(p0, "TEMPerature") || kw(p0, "RATE") => {
                     let rest = if kw(p0, "SENSe") { &parts[1..] } else { parts };
+                    if rest.first().map(|p| kw(p, "RATE")).unwrap_or(false) {
+                        let a = trim(arg);
+                        let c = match rest.get(1) {
+                            Some(l) if kw(l, "PERiod") && query => Some(Cmd::SensRatePer),
+                            None if query => Some(Cmd::SensRate(None)),
+                            None if kw(a, "SLOW") => Some(Cmd::SensRate(Some(0))),
+                            None if kw(a, "MEDium") => Some(Cmd::SensRate(Some(1))),
+                            None if kw(a, "FAST") => Some(Cmd::SensRate(Some(2))),
+                            _ => None,
+                        };
+                        match c {
+                            Some(c) => out = Out::Instr(c),
+                            None => self.err = Some("Illegal parameter value"),
+                        }
+                        continue;
+                    }
                     if rest.first().map(|p| kw(p, "TEMPerature")).unwrap_or(false) {
                         let sub = rest.get(1).copied().unwrap_or(&[]);
                         let a = trim(arg);
@@ -721,6 +756,23 @@ impl Scpi {
                             Some(l) if query && kw(l, "COUNt") => Some(Cmd::CalcAver(3)),
                             Some(l) if !query && kw(l, "CLEar") => Some(Cmd::CalcAverClear),
                             Some(l) if kw(l, "STATe") => state.map(Cmd::CalcAverState),
+                            _ => None,
+                        }
+                    } else if kw(sub, "SMOothing") {
+                        match leaf {
+                            Some(l) if kw(l, "RESPonse") => {
+                                if query {
+                                    Some(Cmd::CalcSmoResp(None))
+                                } else if kw(a, "SLOW") {
+                                    Some(Cmd::CalcSmoResp(Some(2)))
+                                } else if kw(a, "MEDium") || kw(a, "FAST") {
+                                    Some(Cmd::CalcSmoResp(Some(1)))
+                                } else {
+                                    None
+                                }
+                            }
+                            Some(l) if kw(l, "STATe") => state.map(Cmd::CalcSmoState),
+                            None => state.map(Cmd::CalcSmoState),
                             _ => None,
                         }
                     } else if kw(sub, "LIMit") {
