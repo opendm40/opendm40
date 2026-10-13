@@ -7,7 +7,11 @@
     dm40dbg.py lcdread x y w h nwords    raw GRAM read-back (dummy word first)
     dm40dbg.py shot out.png [--format rgb565|rgb666]
     dm40dbg.py diag                      diagnostic block (hex)
-    dm40dbg.py tap x y | left | right | key 0..3   inject touch / side key
+    dm40dbg.py tap x y | left | right    inject a touch tap / view swipe
+    dm40dbg.py key 0..3 [--hold MS]      side key click (0 MENU, 1 RUN, 2 AUTO,
+                                         3 MF); --hold: release after MS ms
+                                         (long press; RUN >= 1000 ms in a DMM
+                                         view = AutoHold on/off)
     dm40dbg.py boot [--expect FILE] [--raw]
                                          DBG:BOOT? decoded (native); --expect
                                          compares the loader marker with FILE's
@@ -250,9 +254,12 @@ BOOT_POS = ['rstsck', 'rstsck_after', 'mode', 'reason', 'clock', 'last', 'hold_m
             'marker_w0', 'marker_w1', 'marker_w2', 'marker',
             'crash_word', 'healthy', 'fmc_last']
 BOOT_LABELS = {'PD6': ['moder', 'pupd', 'idr'], 'STAGED': ['n'],
-               'CALBK': ['status', 'written', 'conflict', 'freed'], 'STACK': ['used', 'size']}
+               'CALBK': ['status', 'written', 'conflict', 'freed'], 'STACK': ['used', 'size'],
+               'CALMS': ['ms']}
 RST_FLAGS = [(31, 'LP'), (30, 'WWDGT'), (29, 'FWDGT'), (28, 'SW'), (27, 'POR'), (26, 'EP'), (25, 'BOR')]
-CALBK_FILES = ['CALIB', 'BOOTDATA', 'UID', 'OPTBYTES', 'OTP', 'ROMBOOT', 'LOADER', 'BACKUP.TXT']
+# calbackup written / conflict bits (native.rs put_extra).
+CALBK_FILES = ['CALIB', 'BOOTDATA', 'UID', 'OPTBYTES', 'OTP', 'ROMBOOT', 'LOADER', 'BACKUP.TXT',
+               '_DM40PRV.BIN']
 TRIGGERS = {0x54520010: 'marker zeroed by recovery/update', 0x54520011: 'marker zeroing FAILED',
             0x54520000: 'rcvr file created', 0x54520001: 'rcvr file already there',
             0x54520002: 'rcvr: no medium', 0x54520003: 'rcvr: bad BPB',
@@ -311,6 +318,10 @@ def _note(name, v):
         return TRIGGERS.get(x, 'none' if x == 0 else '?')
     if name in ('CALBK.written', 'CALBK.conflict') and x is not None:
         return '+'.join(n for i, n in enumerate(CALBK_FILES) if x >> i & 1) or '-'
+    if name == 'CALBK.status' and v.endswith('_NOFW'):
+        return 'no space for _DM40PRV.BIN: backed up without the firmware file'
+    if name == 'CALMS.ms':
+        return 'boot backup time (DWT at 200 MHz; 12.5x low on IRC16M)'
     if name == 'PD6.moder':
         return 'input' if v == '0' else 'NOT input'
     if name == 'PD6.pupd':
@@ -336,7 +347,7 @@ BOOT_GROUPS = [
     ('loader marker', ['marker_w0', 'marker_w1', 'marker_w2', 'marker']),
     ('fatren', ['fatren', 'found', 'renamed', 'old_backup', 'old_deleted', 'freed_clusters',
                 'others', 'rcvr_deleted', 'STAGED.n']),
-    ('calbackup', ['CALBK.status', 'CALBK.written', 'CALBK.conflict', 'CALBK.freed']),
+    ('calbackup', ['CALBK.status', 'CALBK.written', 'CALBK.conflict', 'CALBK.freed', 'CALMS.ms']),
     ('stack', ['STACK.used', 'STACK.size']),
     ('power key PD6', ['PD6.moder', 'PD6.pupd', 'PD6.idr']),
     ('FSMC/LCD seen', ['bcr1', 'btr1', 'bwtr1', 'lcd_id']),
@@ -473,7 +484,11 @@ def main():
     p = sub.add_parser('tap'); p.add_argument('x', type=int); p.add_argument('y', type=int)
     sub.add_parser('left')
     sub.add_parser('right')
-    p = sub.add_parser('key'); p.add_argument('code', type=int, help='0 MENU, 1 RUN, 2 AUTO, 3 MF')
+    p = sub.add_parser('key', help='side key click (DBG:KEY n[,ms]); --hold MS = long press')
+    p.add_argument('code', type=int, help='0 MENU, 1 RUN, 2 AUTO, 3 MF')
+    p.add_argument('--hold', type=int, default=0, metavar='MS',
+                   help='release MS ms after the press (default 0 = click; max 60000); '
+                        'RUN held >= 1000 ms in a DMM view toggles AutoHold')
     p = sub.add_parser('boot', help='DBG:BOOT? decoded (native builds)')
     p.add_argument('--expect', metavar='FILE', help='update file whose header the loader marker must match')
     p.add_argument('--raw', action='store_true', help='also print the raw reply')
@@ -541,7 +556,8 @@ def main():
     elif a.cmd == 'right':
         ln.write('DBG:SWIPE R')
     elif a.cmd == 'key':
-        ln.write('DBG:KEY %d' % a.code)
+        # Older firmware reads only n and sends key-down alone.
+        ln.write('DBG:KEY %d,%d' % (a.code, a.hold))
     elif a.cmd == 'boot':
         r, err = ln.try_query('DBG:BOOT?')
         if r is None:

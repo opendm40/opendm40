@@ -86,8 +86,10 @@ pub const HEALTHY_MS: u64 = 60_000;
 /// A release shorter than this is contact bounce, not a release.
 const RELEASE_DEBOUNCE_MS: u32 = 30;
 
-/// Backup SRAM (0x40024000, 4 KiB). persist.rs uses words 0..18
-/// (0x40024000..0x4002404C); these are the last words of the 4 KiB.
+/// Backup SRAM (0x40024000, 4 KiB). persist.rs uses the start: record v4 =
+/// magic, version, 40 words, CRC = 43 words, 0x40024000..0x400240AB; these
+/// boot words are the last four of the 4 KiB, 0x40024FF0..0x40024FFF (no
+/// overlap; checked at compile time in persist.rs).
 /// Crash counter (`CRASH_TAG | n`).
 pub const BKP_CRASH: u32 = 0x4002_4FF0;
 const CRASH_TAG: u32 = 0x4352_0000; // "CR"

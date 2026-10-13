@@ -1080,7 +1080,10 @@ between blocks (and by spiflash during erases). Speed-up left on the table:
 
 **Status** (`calbackup::result()`), appended to `DBG:BOOT?` by
 `native::put_extra` (see below): `CALBK,<status>,<written>,<conflict>,<freed>`
-with status `NOTRUN|NOMEDIUM|BADBPB|UNCHANGED|WRITTEN|NOSPACE|ERROR`, written
+with status `NOTRUN|NOMEDIUM|BADBPB|UNCHANGED|WRITTEN|NOSPACE|ERROR` (suffix
+`_NOFW`, e.g. `WRITTEN_NOFW`: the run with `_DM40PRV.BIN` was `NOSPACE`, so it
+was retried without the firmware file and BACKUP.TXT has no firmware line; the
+other backups still get written on a nearly full disk, review M1), written
 / conflict decimal bit masks (u16: bit 0 CALIB, 1 BOOTDATA, 2 UID, 3 OPTBYTES,
 4 OTP, 5 ROMBOOT, 6 LOADER, 7 BACKUP.TXT, 8 `_DM40PRV.BIN`; new files are
 appended so old bits keep their meaning; `written` includes a one-time

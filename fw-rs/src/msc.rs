@@ -258,6 +258,10 @@ impl<B: UsbBus> UsbClass<B> for Msc<'_, B> {
     }
     fn reset(&mut self) {
         self.xfer = Xfer::None;
+        // A bus reset starts a fresh session: a pending one-shot UNIT
+        // ATTENTION from a screenshot taken while unplugged is moot (review
+        // 2026-10-13 L3).
+        crate::screenshot::MEDIUM_CHANGED.store(false, core::sync::atomic::Ordering::Relaxed);
         self.scsi.reset()
     }
     fn control_in(&mut self, xfer: ControlIn<B>) {

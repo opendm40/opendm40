@@ -110,3 +110,19 @@ pub fn init_hw(clk: &mut Clock) -> HwStatus {
 pub fn force_power_no_vbus() {
     unsafe { modify32(GCCFG, 0, GCCFG_PWRON | GCCFG_VBUSIG) };
 }
+
+/// Reset the data toggle of a non-control endpoint to DATA0 (DIEPCTLn /
+/// DOEPCTLn SD0PID, bit 28). USB 2.0 9.4.5: CLEAR_FEATURE(ENDPOINT_HALT)
+/// always does this, halted or not; synopsys-usb-otg 0.5 only clears STALL, so
+/// after a host-side clear-halt (USBTMC clear / abort, libusb clear_halt, MSC
+/// reset recovery) the device kept its old toggle and silently dropped the
+/// host's next packet as a duplicate (or the host dropped ours). `addr` =
+/// wIndex of the request (bit 7 = IN).
+pub fn reset_toggle(addr: u8) {
+    let n = (addr & 0x0F) as u32;
+    if n == 0 || n >= 4 {
+        return;
+    }
+    let ctl = if addr & 0x80 != 0 { USBFS + 0x900 } else { USBFS + 0xB00 } + 0x20 * n;
+    unsafe { modify32(ctl, 0, 1 << 28) };
+}

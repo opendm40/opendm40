@@ -161,8 +161,8 @@ fn main() {
         let fw = flash.as_ref().map(|f| calbackup::FwFile::from_flash(f).expect("flash: no valid marker"));
         let r = calbackup::run(&mut img, &srcs, fw.as_ref().map(|f| f as &dyn calbackup::Source));
         println!(
-            "backup={:?} written=0x{:03x} conflict=0x{:03x} freed={}",
-            r.status, r.written, r.conflict, r.freed
+            "backup={:?} written=0x{:03x} conflict=0x{:03x} freed={} fw_skipped={}",
+            r.status, r.written, r.conflict, r.freed, r.fw_skipped
         );
         // Geometry from the boot sector: blocks >= data_start are file data.
         let b = &img.d;

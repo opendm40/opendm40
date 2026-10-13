@@ -67,7 +67,9 @@ pub fn stack_use() -> (u32, u32) {
 /// Extra DBG:BOOT? fields, appended by boot::put_info (one call at its end):
 /// `,STAGED,<n>,CALBK,<status>,<written>,<conflict>,<freed>,STACK,<used>,<size>,CALMS,<ms>`.
 /// STAGED: fatren's dm40*.bin left because their header is not the marker.
-/// status: NOTRUN NOMEDIUM BADBPB UNCHANGED WRITTEN NOSPACE ERROR; written /
+/// status: NOTRUN NOMEDIUM BADBPB UNCHANGED WRITTEN NOSPACE ERROR, with a
+/// `_NOFW` suffix when the firmware file did not fit and the backup was
+/// retried without it (calbackup::run, review M1; e.g. WRITTEN_NOFW); written /
 /// conflict: decimal bit masks, bit i = file i of calbackup::FILES (0 CALIB,
 /// 1 BOOTDATA, 2 UID, 3 OPTBYTES, 4 OTP, 5 ROMBOOT, 6 LOADER), bit 7 =
 /// BACKUP.TXT, bit 8 = _DM40PRV.BIN (running firmware's update file); written
@@ -93,6 +95,10 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
                 C::NoSpace => b"CALBK,NOSPACE",
                 C::Error => b"CALBK,ERROR",
             });
+            if r.fw_skipped {
+                // NoSpace for _DM40PRV.BIN: the status of the retry without it.
+                s.put_bytes(b"_NOFW");
+            }
         } else if i == 5 {
             s.put_bytes(b"STACK");
         } else if i == 8 {
