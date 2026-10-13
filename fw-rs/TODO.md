@@ -110,8 +110,17 @@ Additional requirements:
         USB disk. Restored dm40_patched.bin through it.
   - [ ] Hardware tests per docs/native-boot.md: T1 test-initcore (RAM), T2 test-recovery (RAM,
         destructive-but-recoverable), T3 flash native via the loader, toggle stock <-> fw-rs.
-  - [ ] Stage 1: shim + fw-rs as a packed update file; XIP from 0x08004000 (no SRAM copy);
-        toggle stock <-> fw-rs several times.
+  - [x] T3 / Stage 1 on device (2026-10-13 17:28): native dm40_fwrs.bin (commit 70bf333) installed via
+        the loader screen; DBG:BOOT? NORMAL/HXTAL/VALID marker, CALBK WRITTEN (8 backup files on the disk),
+        STACK 30760/39000, PD6 pull-down, DMM reading OK. Way back proven: dm40_patched.bin on the fw-rs
+        disk + DBG:UPDATE -> loader installed patched stock (marker = its header, memrw answers).
+        The loader (not the stock app) appears to delete the installed dm40*.bin: fatren found nothing to
+        rename (code check in progress) -> instead regenerate the running firmware's update file from
+        flash (header = marker, body = 0x08004000..) as a backup file on the disk.
+  - [ ] T3 remaining: recovery triggers on native (power-key 4 s hold + beep + 0.5 s confirm; DBG:RELEASE
+        twice within 60 s -> recovery); scope view stack high-water; first-boot timing.
+  - [ ] Native bugs seen: boots into AC+DC mV (persisted-mode mapping after the persist v3 change?);
+        trend chart plots the separate AC/DC phases; AC part 40 mV on a DC calibrator input (AC zero?).
   - [ ] Stage 2: retire stub/, flash.py, BT loader path; update README/tools.
 - [x] Data-logger mode (FR-38) implemented: src/logger.rs, main-loop polled constant interval,
       timestamps + sequence numbers + drop counter, HY3131 fast mode, LOG:* SCPI. Not tested on device.
