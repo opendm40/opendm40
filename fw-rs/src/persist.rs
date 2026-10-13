@@ -3,7 +3,7 @@
 //! user settings in config.bin on the SPI disk.) Layout: magic, version,
 //! payload, CRC32; anything that does not check out falls back to defaults.
 //! The boot shim's words at the end of the 4 KiB (boot.rs, 0x40024FF0..) are
-//! outside the record (0x40024000..0x4002406B).
+//! outside the record (v4: 0x40024000..0x400240AB).
 
 use crate::mmio::{modify32, r32, w32};
 
@@ -13,10 +13,11 @@ const PMU_CTL: u32 = 0x4000_7000;
 const PMU_CS: u32 = 0x4000_7004;
 const BKP: u32 = 0x4002_4000;
 const MAGIC: u32 = 0x4446_5753; // "SWFD"
-/// v3: 24 words (v2 had 16; a v2 record is loaded zero-extended, every new
-/// field reads 0 = its default). Layout: app.rs persist_words().
-const VERSION: u32 = 3;
-pub const WORDS: usize = 24;
+/// v4: 40 words (v3 had 24, v2 16; an older record is loaded zero-extended,
+/// every new field reads 0 = its default). Layout: app.rs persist_words().
+const VERSION: u32 = 4;
+pub const WORDS: usize = 40;
+const V3_WORDS: usize = 24;
 const V2_WORDS: usize = 16;
 
 fn crc(words: &[u32]) -> u32 {
@@ -41,7 +42,7 @@ pub fn init() {
     }
 }
 
-/// A record that passed the checks: its format version (2 or 3) and the
+/// A record that passed the checks: its format version (2..4) and the
 /// payload (a v2 record zero-extended to `WORDS`).
 pub struct Record {
     pub version: u32,
@@ -59,6 +60,7 @@ pub fn load() -> Option<Record> {
     let version = rd(1);
     let n = match version {
         VERSION => WORDS,
+        3 => V3_WORDS,
         2 => V2_WORDS,
         _ => return None,
     };

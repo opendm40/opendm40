@@ -54,6 +54,8 @@ pub enum View {
     Keypad,
     /// Device / About page (stock gui_v2_6.h section 6 "6.产品信息").
     Device,
+    /// DMM AutoHold and Hi/Lo limits of the current function (MF).
+    Limits,
 }
 
 impl View {
@@ -203,12 +205,14 @@ pub struct DmmView {
     last_ext: u8,
     last_unit: &'static str,
     last_mode: u8,
-    last_top: Option<(bool, bool, bool)>,
+    last_top: Option<(bool, u8, bool)>,
     last_aux: [bool; 2],
     /// Temperature sensor name shown instead of AUTO / MANU (set by the app,
     /// `None` outside the temperature function).
     pub label: Option<&'static str>,
     last_label: Option<&'static str>,
+    /// Limit badge as last drawn (meter::V_*), 255 = not drawn.
+    last_lim: u8,
 }
 
 /// Bottom button `i` (0..5) with its stock glyphs.
@@ -254,6 +258,7 @@ impl DmmView {
             last_aux: [false; 2],
             label: None,
             last_label: None,
+            last_lim: 255,
         }
     }
 
@@ -281,9 +286,12 @@ impl DmmView {
         self.last_unit = "";
         self.last_mode = 255;
         self.last_top = None;
+        self.last_lim = 255;
     }
 
-    pub fn reading(&mut self, r: &Reading, hold: bool, rel: bool, compact: bool) {
+    /// Draw a reading. `hold`: Meter::hold_state (0 RUN, 1 HOLD, 2 AutoHold
+    /// tracking, 3 AutoHold captured); `lim`: Meter::verdict.
+    pub fn reading(&mut self, r: &Reading, hold: u8, lim: u8, compact: bool) {
         let mut buf = [0u8; 16];
         // The compact view has no room for the extra digit.
         let (s, f, ext) = fmt7(&mut buf, &r.main, !compact);
@@ -375,26 +383,73 @@ impl DmmView {
             self.last_top = Some(top);
             self.last_label = self.label;
             let s = if !r.auto { "MANU" } else if r.auto_plus { "AUTO+" } else { "AUTO" };
-            let hs = if hold { "HOLD" } else { "RUN" };
             if let Some(l) = self.label {
                 // Temperature sensor name (F21 has no C / N / T: F14).
                 if compact {
                     sf::label(sf::F14, rect(4, 0, 92, BAR_H_C as i16), l, STATUS_FG, BAR, 1, 0);
-                    sf::label(sf::F21, rect(98, 0, 60, BAR_H_C as i16), hs, STATUS_FG, BAR, 8, 0);
                 } else {
                     sf::label(sf::F14, rect(4, 1, 105, 32), l, STATUS_FG, BAR, 1, 0);
-                    sf::label(sf::F21, rect(115, 1, 71, 32), hs, STATUS_FG, BAR, 8, 0);
                 }
             } else if compact {
                 // Range and HOLD/RUN in the short combined-view bar.
                 sf::label(sf::F21, rect(4, 0, 90, BAR_H_C as i16), s, STATUS_FG, BAR, 1, 0);
-                sf::label(sf::F21, rect(98, 0, 60, BAR_H_C as i16), hs, STATUS_FG, BAR, 8, 0);
             } else {
                 sf::label(sf::F21, rect(4, 1, 105, 32), s, STATUS_FG, BAR, 1, -1);
-                sf::label(sf::F21, rect(115, 1, 71, 32), hs, STATUS_FG, BAR, 8, 0);
             }
-            let _ = rel;
+            hold_label(hold, compact);
         }
+        if self.last_lim != lim {
+            self.last_lim = lim;
+            lim_badge(lim, compact);
+        }
+    }
+}
+
+/// HOLD / RUN slot of the DMM status bar. Manual HOLD keeps the stock F21
+/// "HOLD"; AutoHold is a different face so the two cannot be confused:
+/// "A-HOLD" in TEXT22 (66 px, F21 would need 103), accent blue while it waits
+/// for a stable value, inverted (dark on orange) while it shows a captured
+/// one. The compact slot is 72 px (98..170; the uptime starts at 205).
+fn hold_label(hold: u8, compact: bool) {
+    let r = if compact { rect(98, 0, 72, BAR_H_C as i16) } else { rect(115, 1, 71, 32) };
+    match hold {
+        2 | 3 => {
+            let (fg, bg) = if hold == 3 { (BG, 0xFC40) } else { (0x04FC, BAR) };
+            if compact {
+                sf::label(sf::TEXT22, r, "A-HOLD", fg, bg, 8, 0);
+            } else {
+                lcd::fill_rect(115, 1, 71, 4, BAR);
+                lcd::fill_rect(115, 29, 71, 4, BAR);
+                sf::label(sf::TEXT22, rect(115, 5, 71, 24), "A-HOLD", fg, bg, 8, 0);
+            }
+        }
+        _ => sf::label(sf::F21, r, if hold == 1 { "HOLD" } else { "RUN" }, STATUS_FG, BAR, 8, 0),
+    }
+}
+
+/// FR-06 verdict badge (meter::V_*): green PASS, red FAIL HI / LO, nothing
+/// when no limit applies. The main digits stay red. Full view: the free
+/// 35 x 42 cell right of the digits, left of the mode glyph (above the unit);
+/// compact: right of the mode glyph.
+fn lim_badge(v: u8, compact: bool) {
+    const PASS_BG: Color = 0x04A9;
+    const FAIL_BG: Color = 0xF800;
+    let (l1, l2, bg) = match v {
+        crate::meter::V_PASS => ("PASS", "", PASS_BG),
+        crate::meter::V_HI => ("FAIL", "HI", FAIL_BG),
+        crate::meter::V_LO => ("FAIL", "LO", FAIL_BG),
+        _ => ("", "", BG),
+    };
+    if compact {
+        let t = match v {
+            crate::meter::V_HI => "FAIL HI",
+            crate::meter::V_LO => "FAIL LO",
+            _ => l1,
+        };
+        sf::label(sf::F14, rect(302, 28, 50, 22), t, 0xFFFF, bg, 8, 0);
+    } else {
+        sf::label(sf::F14, rect(401, 70, 35, 21), l1, 0xFFFF, bg, 8, 0);
+        sf::label(sf::F14, rect(401, 91, 35, 21), l2, 0xFFFF, bg, 8, 0);
     }
 }
 
@@ -451,12 +506,21 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8) {
             sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
         }
     }
-    let r = rect(319, 240, 150, 38);
-    sf::rbox(r, 6, 0x2966, BG);
-    sf::glyphs(sf::TEXT22, r, "OK", STATUS_FG, 0x2966, 8, 0);
+    ok_and_limits_buttons();
 }
 
-/// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK).
+/// The "Hold/Limits" (opens View::Limits) and OK buttons at the bottom of
+/// the MF range / temperature pages.
+fn ok_and_limits_buttons() {
+    for (x, t) in [(8i16, "Hold/Limits"), (319, "OK")] {
+        let r = rect(x, 240, 150, 38);
+        sf::rbox(r, 6, 0x2966, BG);
+        sf::glyphs(sf::TEXT22, r, t, STATUS_FG, 0x2966, 8, 0);
+    }
+}
+
+/// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK,
+/// 4 Hold/Limits).
 pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
@@ -470,6 +534,9 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     }
     if (240..278).contains(&y) && x >= 319 {
         return Some(Err(2));
+    }
+    if (240..278).contains(&y) && (8..158).contains(&x) {
+        return Some(Err(4));
     }
     None
 }
@@ -493,12 +560,10 @@ pub fn temp_page(sensor: u8, info: &str) {
         sf::glyphs(sf::TEXT22, range_rect(i), name, STATUS_FG, c, 8, 0);
     }
     sf::glyphs(sf::TEXT22, rect(8, 188, 464, 40), info, STATUS_FG, BG, 1, 0);
-    let r = rect(319, 240, 150, 38);
-    sf::rbox(r, 6, 0x2966, BG);
-    sf::glyphs(sf::TEXT22, r, "OK", STATUS_FG, 0x2966, 8, 0);
+    ok_and_limits_buttons();
 }
 
-/// Temperature page touch: item 0..11, 255 = OK.
+/// Temperature page touch: item 0..11, 255 = OK, 254 = Hold/Limits.
 pub fn temp_hit(x: u16, y: u16) -> Option<u8> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..T_KEYS.len() {
@@ -507,7 +572,13 @@ pub fn temp_hit(x: u16, y: u16) -> Option<u8> {
             return Some(i as u8);
         }
     }
-    if (240..278).contains(&y) && x >= 319 { Some(255) } else { None }
+    if (240..278).contains(&y) && x >= 319 {
+        Some(255)
+    } else if (240..278).contains(&y) && (8..158).contains(&x) {
+        Some(254)
+    } else {
+        None
+    }
 }
 
 /// History boxes (stock (5+95i,153,88,19)): values with units, newest orange.
@@ -585,31 +656,42 @@ fn num_unit<'a>(b: &'a mut [u8; 32], v: f32, dec: u8, unit: &str) -> &'a str {
 }
 
 /// What the chart last drew besides the trace, to skip unchanged labels.
+/// The side rows are keyed by their value rounded to the shown digits, so a
+/// running AVG repaints only when a shown digit changes.
 pub struct ChartCache {
     scale: Option<(u32, u32, u8, &'static str)>,
-    side: Option<(u32, u32, u32, u8, &'static str)>,
+    side: Option<(u8, &'static str)>,
+    rows: [i64; 4],
+    time: Option<(u32, bool)>,
     rate: u8,
 }
 
+/// Right column of the DMM chart (FR-02): MAX / AVG above the REL box, MIN
+/// and the time since the statistics started below it (display units).
+/// `rec`: a recording session is on (no idle shutdown): "REC" in orange.
+#[derive(Clone, Copy)]
+pub struct Side {
+    pub max: Option<f32>,
+    pub avg: Option<f32>,
+    pub min: Option<f32>,
+    pub rel: Option<f32>,
+    pub secs: Option<u32>,
+    pub rec: bool,
+}
+
+/// Rows of the right column: MAX, AVG, MIN, time (y); REL box in between.
+const SIDE_Y: [i16; 4] = [175, 189, 249, 263];
+
 impl ChartCache {
     pub const fn new() -> Self {
-        ChartCache { scale: None, side: None, rate: 0 }
+        ChartCache { scale: None, side: None, rows: [i64::MIN; 4], time: None, rate: 0 }
     }
     pub fn invalidate(&mut self) {
         *self = ChartCache::new();
     }
 }
 
-pub fn chart(
-    c: &mut ChartCache,
-    pts: &[f32],
-    dec: u8,
-    rate: u8,
-    max: Option<f32>,
-    min: Option<f32>,
-    rel: Option<f32>,
-    unit: &'static str,
-) {
+pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: &Side, unit: &'static str) {
     let mut step = 1.0f32;
     for _ in 0..dec {
         step /= 10.0;
@@ -681,19 +763,73 @@ pub fn chart(
         sf::rbox(rect(2, 188, 76, 32), 8, BTN, BG);
         sf::glyphs(sf::F14, rect(2, 188, 76, 32), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 2);
     }
-    let bits = |v: Option<f32>| v.map(|x| x.to_bits()).unwrap_or(u32::MAX);
-    let side = (bits(max), bits(min), bits(rel), dec, unit);
-    if c.side != Some(side) {
-        c.side = Some(side);
-        sf::label(sf::F14, rect(403, 175, 72, 12), "MAX:", STATUS_FG, BG, 1, 2);
-        sf::label(sf::F14, rect(407, 187, 72, 12), max.map(|v| num_unit(&mut b, v, dec, unit)).unwrap_or(""), STATUS_FG, BG, 1, 2);
+    // Right column. Stock: "MAX:" / value, REL box, "MIN:" / value, two
+    // rows each; now one row each ("MAX" tag, value right-aligned) to make
+    // room for AVG and the elapsed time (F14 at spacing 0: the widest value,
+    // "-600.00mV" / "9.9999MHz", is 52 px of the 54 px value cell).
+    if c.side != Some((dec, unit)) {
+        c.side = Some((dec, unit));
+        c.rows = [i64::MIN; 4];
+        c.time = None;
+        lcd::fill_rect(402, 175, 78, 30, BG);
+        lcd::fill_rect(402, 243, 78, 36, BG);
+        for (i, t) in ["MAX", "AVG", "MIN"].iter().enumerate() {
+            sf::label(sf::F14, rect(403, SIDE_Y[i], 21, 14), t, DIM, BG, 1, 0);
+        }
+    }
+    let q = |v: Option<f32>| -> i64 {
+        match v {
+            Some(x) if x.is_finite() => {
+                let mut s = 1.0f32;
+                for _ in 0..dec {
+                    s *= 10.0;
+                }
+                let k = x * s;
+                (if k < 0.0 { k - 0.5 } else { k + 0.5 }) as i64
+            }
+            _ => i64::MIN,
+        }
+    };
+    for (i, v) in [side.max, side.avg, side.min].iter().enumerate() {
+        let k = q(*v);
+        if c.rows[i] != k {
+            c.rows[i] = k;
+            let t = v.map(|v| num_unit(&mut b, v, dec, unit)).unwrap_or("");
+            sf::label(sf::F14, rect(424, SIDE_Y[i], 54, 14), t, STATUS_FG, BG, 4, 0);
+        }
+    }
+    let k = q(side.rel.or(Some(0.0)));
+    if c.rows[3] != k {
+        c.rows[3] = k;
         sf::rbox(rect(402, 205, 76, 38), 8, BTN, BG);
         sf::glyphs(sf::F14, rect(405, 207, 76, 19), "REL:", STATUS_FG, BTN, 1, 2);
         let mut b2 = [0u8; 32];
-        let rv = num_unit(&mut b2, rel.unwrap_or(0.0), dec, unit);
+        let rv = num_unit(&mut b2, side.rel.unwrap_or(0.0), dec, unit);
         sf::glyphs(sf::F14, rect(405, 222, 76, 19), rv, STATUS_FG, BTN, 1, 2);
-        sf::label(sf::F14, rect(403, 249, 72, 12), "MIN:", STATUS_FG, BG, 1, 2);
-        sf::label(sf::F14, rect(407, 261, 72, 12), min.map(|v| num_unit(&mut b, v, dec, unit)).unwrap_or(""), STATUS_FG, BG, 1, 2);
+    }
+    let tk = side.secs.map(|t| (t, side.rec));
+    if c.time != tk {
+        c.time = tk;
+        // "REC 01:02:03" (recording session) / "T 01:02:03" since the start.
+        let mut t = [0u8; 16];
+        let mut n = 0;
+        if let Some(sec) = side.secs {
+            let pre: &[u8] = if side.rec { b"REC " } else { b"T " };
+            t[..pre.len()].copy_from_slice(pre);
+            n = pre.len();
+            let (h, m, s2) = (sec / 3600 % 100, sec / 60 % 60, sec % 60);
+            for (i, v) in [h, m, s2].iter().enumerate() {
+                t[n] = b'0' + (v / 10) as u8;
+                t[n + 1] = b'0' + (v % 10) as u8;
+                n += 2;
+                if i < 2 {
+                    t[n] = b':';
+                    n += 1;
+                }
+            }
+        }
+        let fg = if side.rec { 0xFC40 } else { DIM };
+        sf::label(sf::F14, rect(403, SIDE_Y[3], 75, 14), core::str::from_utf8(&t[..n]).unwrap_or(""), fg, BG, 4, 0);
     }
 }
 
@@ -1245,9 +1381,16 @@ const K_FONT: sf::Font = sf::Font(0x0805_C5DC);
 
 type Key = (sf::Rect, &'static str, u8);
 
+/// Keypad kinds: the generator frequency field, the generator Vpp / duty
+/// popup, and the same popup with a "+/-" key (DMM limits).
+pub const KP_FREQ: u8 = 0;
+pub const KP_NUM: u8 = 1;
+pub const KP_SIGNED: u8 = 2;
+
 /// Keys: (rect, label, code). Codes: digits, '.', 'H'/'K'/'M', '<' backspace,
-/// '=' OK. Constant tables (cheaper in the RAM image than building them).
-pub fn keypad_keys(freq: bool) -> &'static [Key; 15] {
+/// '-' sign toggle, '=' OK. Constant tables (cheaper in the RAM image than
+/// building them).
+pub fn keypad_keys(kind: u8) -> &'static [Key; 15] {
     const fn r(x: i16, y: i16, w: i16, h: i16) -> sf::Rect {
         rect(x, y, w, h)
     }
@@ -1265,10 +1408,23 @@ pub fn keypad_keys(freq: bool) -> &'static [Key; 15] {
             (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), ".", b'.'), (r(417, 146, 59, 84), "<", b'<'),
             (r(417, 234, 59, 83), "OK", b'='), (r(0, 0, 0, 0), "", 0), (r(0, 0, 0, 0), "", 0),
         ];
-    if freq { &FREQ } else { &NUM }
+    // NUM with the wide '.' split into '.' and "+/-".
+    const SIGNED: [Key; 15] = [
+            (r(228, 146, 60, 40), "1", b'1'), (r(292, 146, 60, 40), "2", b'2'), (r(356, 146, 60, 40), "3", b'3'),
+            (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'), (r(356, 190, 60, 40), "6", b'6'),
+            (r(228, 234, 60, 40), "7", b'7'), (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'),
+            (r(228, 277, 60, 40), "0", b'0'), (r(292, 277, 60, 40), ".", b'.'), (r(417, 146, 59, 84), "<", b'<'),
+            (r(417, 234, 59, 83), "OK", b'='), (r(356, 277, 58, 40), "+/-", b'-'), (r(0, 0, 0, 0), "", 0),
+        ];
+    match kind {
+        KP_FREQ => &FREQ,
+        KP_NUM => &NUM,
+        _ => &SIGNED,
+    }
 }
 
-pub fn keypad(freq: bool, title: &str, input: &str, unit: &str) {
+pub fn keypad(kind: u8, title: &str, input: &str, unit: &str) {
+    let freq = kind == KP_FREQ;
     if freq {
         lcd::fill_rect(224, 142, 256, 178, K_PANEL);
     } else {
@@ -1276,7 +1432,7 @@ pub fn keypad(freq: bool, title: &str, input: &str, unit: &str) {
         sf::label(sf::TEXT22, rect(228, 108, 100, 26), title, 0x0000, K_PANEL, 1, 0);
     }
     keypad_input(freq, input, unit);
-    for &(r, l, c) in keypad_keys(freq) {
+    for &(r, l, c) in keypad_keys(kind) {
         if c == 0 {
             continue;
         }
@@ -1291,14 +1447,15 @@ pub fn keypad_input(freq: bool, input: &str, unit: &str) {
         sf::label(sf::LETTERS, rect(262, 83, 150, 30), input, 0x04FC, 0x3A08, 4, 0);
         sf::label(sf::TEXT22, rect(421, 90, 50, 26), unit, 0x04FC, 0x3A08, 1, 0);
     } else {
-        sf::label(sf::LETTERS, rect(329, 104, 110, 34), input, 0x0000, K_PANEL, 4, 0);
+        // 300..439: room for "-12.345" (112 px); titles end before 300.
+        sf::label(sf::LETTERS, rect(300, 104, 139, 34), input, 0x0000, K_PANEL, 4, 0);
         sf::label(sf::TEXT22, rect(446, 110, 30, 22), unit, 0x0000, K_PANEL, 1, 0);
     }
 }
 
-pub fn keypad_hit(freq: bool, x: u16, y: u16) -> Option<u8> {
+pub fn keypad_hit(kind: u8, x: u16, y: u16) -> Option<u8> {
     let (x, y) = (x as i16, y as i16);
-    for &(r, _, c) in keypad_keys(freq) {
+    for &(r, _, c) in keypad_keys(kind) {
         if c != 0 && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
             return Some(c);
         }
@@ -1390,9 +1547,15 @@ pub fn title_back_hit(y: u16) -> bool {
 }
 
 pub fn settings(vals: &[&str; 8]) {
-    page_title("Settings");
+    list_page("Settings", &SETTINGS, vals);
+}
+
+/// A settings-style page: title bar with "< Back", up to 8 rows of
+/// label + value (SET_* geometry; `settings_hit` / `list_hit` map touches).
+pub fn list_page(title: &str, names: &[&str], vals: &[&str]) {
+    page_title(title);
     lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
-    for (i, name) in SETTINGS.iter().enumerate() {
+    for (i, name) in names.iter().enumerate().take(8) {
         let r = set_row(i);
         sf::rbox(r, 6, M_TILE, M_BG);
         // Label then value kept close together (value left-aligned just past a
@@ -1403,6 +1566,11 @@ pub fn settings(vals: &[&str; 8]) {
 }
 
 pub fn settings_hit(y: u16) -> Option<usize> {
+    list_hit(y, SETTINGS.len())
+}
+
+/// Row of a `list_page` with `n` rows under a touch at `y`.
+pub fn list_hit(y: u16, n: usize) -> Option<usize> {
     let y = y as i16;
     if y < SET_Y0 {
         return None;
@@ -1410,8 +1578,14 @@ pub fn settings_hit(y: u16) -> Option<usize> {
     let i = ((y - SET_Y0) / SET_PITCH) as usize;
     // Reject taps that land in the gap between rows (pitch > row height).
     let within = (y - SET_Y0) % SET_PITCH < SET_ROW_H;
-    if i < SETTINGS.len() && within { Some(i) } else { None }
+    if i < n.min(8) && within { Some(i) } else { None }
 }
+
+/// Rows of the DMM Hold & Limits page (View::Limits).
+pub const LIMIT_ROWS: [&str; 8] = [
+    "Auto Hold", "Limits", "Upper limit", "Lower limit", "Upper = reading", "Lower = reading", "Clear limits",
+    "Fail beep",
+];
 
 pub fn view_name(v: View) -> &'static str {
     match v {
@@ -1425,6 +1599,7 @@ pub fn view_name(v: View) -> &'static str {
         View::ScopeMenu => "Scope settings",
         View::Keypad => "Keypad",
         View::Device => "Device",
+        View::Limits => "Hold & Limits",
     }
 }
 
