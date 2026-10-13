@@ -5,12 +5,13 @@
 //! Side keys (touch controller key codes 0..3, stock events 0x10 << code):
 //!   0 MENU: menu.  1 RUN: DMM HOLD / scope run-stop.
 //!   2 AUTO: DMM auto range / scope single re-arm.  3 MF: DMM REL toggle.
+//! Power key PD6: double click = touch / key lock, click while locked = DMM
+//! sub-mode cycle, hold 1.5 s = power off (see tick()).
 
 use crate::clock::Clock;
 use crate::dmm::{self, Button, Dmm, Reading};
 use crate::gen::{self, Gen, Wave};
 use crate::gesture::Gesture;
-use crate::lcd;
 use crate::meter::Meter;
 use crate::mmio::{modify32, w32};
 use crate::power::Power;
@@ -48,8 +49,14 @@ pub struct App {
     last_input: u64,
     dimmed: bool,
     pd6_since: Option<u64>,
-    /// PD6 level at boot = released (polarity not known for sure).
-    pd6_idle: bool,
+    /// PD6 events are taken only after the key was seen released once (the
+    /// stock key state starts at 4 = wait for release, FUN_0800b7e0/b87c), so
+    /// the press that powered the unit on is not a click.
+    pd6_armed: bool,
+    /// Held >= 1.5 s: backlight off, beep, power off on release (FUN_080207e6).
+    pd6_off: bool,
+    /// Debounce: raw level, time it last changed, accepted level.
+    pd6_raw: (bool, u64, bool),
     /// Last scope frame for SCPI: 400 columns (ADC code / 4) and measurements.
     pub wave: [u8; 400],
     /// Debug: max duration (us) of scope poll / measurements / draw.
@@ -65,8 +72,13 @@ pub struct App {
     cur: ui::Cursors,
     /// Cursor being dragged (0/1 vertical, 2/3 horizontal).
     cur_drag: Option<u8>,
-    /// Opt-in: keep both analog rails on so all instruments measure at once.
-    analog_both: bool,
+    /// Analog rail policy: false = Auto (default, stock-like: the rails the
+    /// shown view needs, see update_rails), true = both rails always on.
+    rails_both: bool,
+    /// Host requests (SCPI / logger) that need a rail, kept until the next
+    /// instrument view is shown.
+    host_dmm: bool,
+    host_scope: bool,
     persist_trace: bool,
     /// Anti-drop: re-assert the latching V/A relay periodically (stock
     /// setting; the relay can flip on a mechanical shock).
@@ -79,13 +91,20 @@ pub struct App {
     roll: bool,
     /// AUTO-set: (phase 1/2, candidate index, round, settings to restore).
     autoset: Option<(u8, usize, u8, scope::Settings)>,
-    locked: bool,
-    pd6_presses: u8,
-    pd6_last_release: u64,
+    pub locked: bool,
+    /// PD6 click timer (stock DMM key widget timer +0x48, 500 ms one-shot):
+    /// a second release before it expires toggles the lock; on expiry the
+    /// click cycles the DMM sub-mode while locked.
+    pd6_click: Option<u64>,
     hist: [(f32, u8, &'static str); 5],
     hist_n: usize,
     hist_new: usize,
     hv_shown: bool,
+    /// HOLD state as last painted to the DMM status label; a mismatch with
+    /// `meter.hold` means the label (and the frozen value) need a repaint.
+    /// Compared in tick() so a toggle from the side key OR a BT command both
+    /// repaint, without a full static redraw (there is no framebuffer).
+    hold_shown: bool,
     pub meas: [f32; 4],
     beep_until: u64,
     pub last_raw: Option<Reading>,
@@ -106,6 +125,32 @@ pub struct App {
 
 fn backlight(pct: u8) {
     unsafe { w32(TIM13_CCR1, pct.min(100) as u32) };
+}
+
+/// "V<maj>.<min>" ("V<maj>" without a minor) into `buf`, or "--" when the
+/// boot-data byte is erased flash (0xFF) so the Device page never shows a bogus
+/// V255.x.
+fn fmt_ver(buf: &mut [u8; 16], maj: u8, min: Option<u8>) -> &str {
+    if maj == 0xFF {
+        return "--";
+    }
+    // Decimal u8, no leading zeros (at most 3 digits each, "V255.255" fits).
+    fn dec(buf: &mut [u8; 16], mut n: usize, v: u8) -> usize {
+        for d in [100u8, 10, 1] {
+            if v >= d || d == 1 {
+                buf[n] = b'0' + v / d % 10;
+                n += 1;
+            }
+        }
+        n
+    }
+    buf[0] = b'V';
+    let mut n = dec(buf, 1, maj);
+    if let Some(min) = min {
+        buf[n] = b'.';
+        n = dec(buf, n + 1, min);
+    }
+    core::str::from_utf8(&buf[..n]).unwrap_or("")
 }
 
 fn buzzer_init() {
@@ -138,7 +183,7 @@ fn power_off() -> ! {
         w32(0x4002_1000 + 0x18, 1 << (2 + 16)); // PE2 = 0
         w32(0x4002_0800 + 0x18, 1 << (4 + 16)); // PC4 = 0
     }
-    loop {}
+    crate::wdt::powered_off()
 }
 
 impl App {
@@ -175,7 +220,9 @@ impl App {
             kp_mult: b'H',
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             cur_drag: None,
-            analog_both: true,
+            rails_both: false,
+            host_dmm: false,
+            host_scope: false,
             persist_trace: false,
             anti_drop: true,
             relay_next: 0,
@@ -186,14 +233,16 @@ impl App {
             roll: true,
             autoset: None,
             locked: false,
-            pd6_presses: 0,
-            pd6_last_release: 0,
+            pd6_click: None,
             hist: [(0.0, 0, ""); 5],
             hist_n: 0,
             hist_new: 0,
             hv_shown: false,
+            hold_shown: false,
             meas: [0.0; 4],
-            pd6_idle: unsafe { core::ptr::read_volatile(0x4002_0C10 as *const u32) } & (1 << 6) != 0,
+            pd6_armed: false,
+            pd6_off: false,
+            pd6_raw: (false, 0, false),
             beep_until: 0,
             last_raw: None,
             redraw: true,
@@ -231,41 +280,74 @@ impl App {
     }
 
     fn show(&mut self, v: View, clk: &mut Clock) {
-        if matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad) && !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad) {
+        if matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device) && !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device) {
             self.back_view = self.view;
         }
-        // Analog power as the stock pages: scope / generator side or DMM side
-        // (scope.rs power()), or both when enabled in the settings. The menu
-        // keeps whatever is on.
-        if self.analog_both {
-            self.scope.power_both(clk);
-        } else {
-        match v {
-            View::Scope | View::Gen | View::ScopeMenu | View::Keypad => self.scope.power(true, clk),
-            View::Dmm | View::DmmScope => self.scope.power(false, clk),
-            View::Menu | View::Settings | View::Range => {}
-        }
+        if matches!(v, View::Dmm | View::DmmScope | View::Scope | View::Gen) {
+            self.host_dmm = false;
+            self.host_scope = false;
         }
         self.view = v;
+        self.update_rails(clk);
         self.redraw = true;
     }
 
+    /// Analog rails (scope.rs rails(): DMM side PE2, scope / generator side
+    /// PC4). Auto policy, stock-like per view: DMM view -> DMM rail, scope /
+    /// generator views -> scope rail, DMM+Scope -> both; menu pages keep what
+    /// is on. Also on while needed elsewhere: DMM rail while a BT phone is
+    /// linked (it polls DMM readings) or a host DMM request (SCPI MEAS / READ,
+    /// LOG:STATe ON) is pending; scope rail while the generator output is on
+    /// or after a host scope / generator command. "Both always" keeps both on.
+    /// With its rail off the scope is paused (Scope::poll returns nothing) and
+    /// the DMM is suspended (Dmm::poll returns nothing): the screen, FETCh?
+    /// and BT keep the last reading taken while the rail was on.
+    fn update_rails(&mut self, clk: &mut Clock) {
+        let (mut d, mut s) = match self.view {
+            View::Dmm => (true, false),
+            View::DmmScope => (true, true),
+            View::Scope | View::Gen | View::ScopeMenu | View::Keypad => (false, true),
+            _ => (self.scope.dmm_rail(), self.scope.powered()),
+        };
+        d |= self.host_dmm || (self.bt_on && self.power.bt_connected());
+        s |= self.host_scope || self.gen.s.on;
+        if self.rails_both {
+            (d, s) = (true, true);
+        }
+        self.scope.rails(d, s, clk);
+        let off = !self.scope.dmm_rail();
+        self.dmm.set_suspended(clk, off);
+    }
+
+    /// SYST:RAIL: true = both always, false = Auto.
+    pub fn set_rails_both(&mut self, both: bool, clk: &mut Clock) {
+        self.rails_both = both;
+        self.update_rails(clk);
+    }
+
     fn draw_static(&mut self) {
+        self.dmm_view.label = self.t_label();
         match self.view {
             View::Dmm => {
-                self.dmm_view.draw_static(self.dmm.button(), self.dmm.mode());
+                self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, false);
                 ui::history(&self.hist, self.hist_n, self.hist_new);
                 self.hv_shown = false;
             }
             View::DmmScope => {
-                self.dmm_view.draw_static(self.dmm.button(), self.dmm.mode());
-                lcd::fill_rect(0, ui::BAR_H, lcd::W, ui::BTN_Y - ui::BAR_H, ui::BG);
+                // DmmView::draw_static(.., true) already cleared the panel.
+                self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, true);
+                // No HV lightning in the compact view (its (0,80,40,64) rect is
+                // inside the scope graph): forget it so the first reading does
+                // not "erase" it by punching a hole into the graph.
+                self.hv_shown = false;
                 ui::SCOPE_COMPACT.draw_static(&self.scope, false);
             }
             View::Scope => {
                 ui::SCOPE_FULL.draw_static(&self.scope, true);
                 ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
             }
+            // (Stopped scope: the trace comes back via scope_invalidate ->
+            // Scope::refresh in tick()'s redraw path.)
             View::ScopeMenu => {
                 ui::SCOPE_FULL.draw_static(&self.scope, true);
                 ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll, self.persist_trace);
@@ -279,11 +361,38 @@ impl App {
                 ui::keypad(self.kp_target == 0, title, t, unit);
             }
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
+            View::Range if self.dmm.hy_mode() == 15 => {
+                // Temperature: sensor, its offset, an info line.
+                let k = self.dmm.t_sensor();
+                let mut b = [0u8; 64];
+                let mut n = 0;
+                let mut put = |t: &[u8]| {
+                    let m = t.len().min(64 - n);
+                    b[n..n + m].copy_from_slice(&t[..m]);
+                    n += m;
+                };
+                let mut t = [0u8; 16];
+                let o = self.dmm.t_offs(k);
+                put(b"Offset ");
+                put(if o >= 0.0 { b"+" } else { b"" });
+                put(dmm::format(&mut t, o, 1).as_bytes());
+                put(b" C");
+                if let Some((_, _, i, _)) = self.dmm.t_excitation() {
+                    // Estimated sensor current (dmm.rs T_VSRC, unverified).
+                    put(b"   I ~");
+                    put(dmm::format(&mut t, i * 1e3, 3).as_bytes());
+                    put(b" mA");
+                } else if let Some((cj, _)) = self.dmm.t_cj(u64::MAX) {
+                    put(b"   CJ ");
+                    put(dmm::format(&mut t, cj, 1).as_bytes());
+                    put(b" C");
+                }
+                ui::temp_page(k, core::str::from_utf8(&b[..n]).unwrap_or(""));
+            }
             View::Range => {
                 let b = self.dmm.button();
-                let ac = matches!(self.dmm.mode(), 0 | 2 | 4..=6);
                 let sel = self.range_sel();
-                ui::range_page(b, sel, ac);
+                ui::range_page(b, sel, self.dmm.sub());
             }
             View::Settings => {
                 let mut b = [[0u8; 8]; 2];
@@ -304,10 +413,67 @@ impl App {
                     core::str::from_utf8(&b1[..n1]).unwrap_or(""),
                     if self.bt_on { "ON" } else { "OFF" },
                     ui::view_name(START[self.start_page]),
-                    if self.analog_both { "Both (exp.)" } else { "Per page" },
-                    "",
+                    if self.rails_both { "Both always" } else { "Auto (per view)" },
+                    "", // Device row: opens the About page, no inline value
                 ];
                 ui::settings(&vals);
+            }
+            View::Device => {
+                // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
+                // / version lines. Only the fields fw-rs can actually source are
+                // shown; stock's SN ("%s:%.8X") and "Bluetooth Name:%s" are
+                // omitted (no traced derivation / no public getter).
+                let model_name = match self.dmm.model() {
+                    0 => "DM40A",
+                    1 => "DM40B",
+                    2 => "DM40C",
+                    _ => "DM40?",
+                };
+                // Hardware / bootloader versions from the stock boot-data block
+                // in internal flash (same source as the BT cmd-02 version reply,
+                // bt.rs): +0x10 HW major, +0x11/+0x12 bootloader major/minor.
+                // The byte->field mapping is inferred from bt.rs + README, not a
+                // traced read of the stock Device page.
+                const BOOT_DATA: u32 = 0x080A_4000;
+                let bd = |o: u32| unsafe { core::ptr::read_volatile((BOOT_DATA + o) as *const u8) };
+                let mut hwb = [0u8; 16];
+                // The boot data has only a HW major: no invented ".0" minor.
+                let hw = fmt_ver(&mut hwb, bd(0x10), None);
+                let mut blb = [0u8; 16];
+                let bl = fmt_ver(&mut blb, bd(0x11), Some(bd(0x12)));
+                // fw-rs firmware version (NOT the stock "Software V2.6").
+                let mut fwb = [0u8; 32];
+                let pre = b"fw-rs ";
+                fwb[..pre.len()].copy_from_slice(pre);
+                let v = ui::FW_VERSION.as_bytes();
+                let k = v.len().min(32 - pre.len());
+                fwb[pre.len()..pre.len() + k].copy_from_slice(&v[..k]);
+                let fw = core::str::from_utf8(&fwb[..pre.len() + k]).unwrap_or("fw-rs");
+                // Order and labels follow the stock §6 line order
+                // (gui_v2_6.h:99: Bootloader / Software / Hardware); "Software"
+                // carries the fw-rs version instead of the stock "V2.6".
+                // MCU die temperature (power.rs, typical constants).
+                let mut tb = [0u8; 24];
+                let mut tn = 0;
+                if self.power.mcu_t.is_finite() {
+                    let mut t = [0u8; 16];
+                    let s = dmm::format(&mut t, self.power.mcu_t, 1);
+                    tb[..s.len()].copy_from_slice(s.as_bytes());
+                    tn = s.len();
+                    tb[tn..tn + 8].copy_from_slice(b" C (MCU)");
+                    tn += 8;
+                }
+                let mcu = if tn > 0 { core::str::from_utf8(&tb[..tn]).unwrap_or("--") } else { "--" };
+                let lines = [
+                    ("Vendor", "Alientek"),
+                    ("Web", "www.alientek.com"),
+                    ("Model", model_name),
+                    ("Bootloader", bl),
+                    ("Software", fw),
+                    ("Hardware", hw),
+                    ("Board temp", mcu),
+                ];
+                ui::device_page(&lines);
             }
         }
         if let (Some(r), true) = (self.meter.shown().copied(), matches!(self.view, View::Dmm | View::DmmScope)) {
@@ -315,7 +481,22 @@ impl App {
         }
     }
 
-    /// Periodic work. `can_draw` is false while a screenshot is being read.
+    /// The host is talking to us (USBTMC command, BT request): counts as user
+    /// activity for the idle shutdown, so a host-driven session (SCPI polling,
+    /// a log being read out) never powers the unit off under the host. Does not
+    /// undim the backlight (nobody is necessarily looking at the screen).
+    pub fn note_host_activity(&mut self, now: u64) {
+        self.last_input = self.last_input.max(now);
+    }
+
+    /// Periodic work. `can_draw` is false before USB enumerated, while a
+    /// screenshot is being read and for the whole of a data-logger session.
+    /// Only drawing (and the 10 ms blocking relay re-assert) is skipped then:
+    /// battery poll, settings save, the PD6 power key and the idle timers keep
+    /// running. A no-draw period is host activity (a screenshot or a log
+    /// session), so it holds off the idle dim / shutdown: a log that runs
+    /// longer than the shutdown time cannot power the unit off the moment it
+    /// stops, with unread records in the ring.
     pub fn tick(&mut self, clk: &mut Clock, can_draw: bool) {
         let now = clk.now_ms();
         if self.beep_until != 0 && now >= self.beep_until {
@@ -323,19 +504,12 @@ impl App {
             self.beep_until = 0;
         }
         if !can_draw {
-            return;
-        }
-        if self.redraw {
-            self.redraw = false;
-            self.scope_prev = [(u16::MAX, 0); 401];
-            self.chart_cache.invalidate();
-            self.draw_static();
-            self.status_next = 0;
-            self.chart_dirty = true;
+            self.note_host_activity(now);
         }
         self.power.poll(now);
         self.persist(now);
-        if self.anti_drop && now >= self.relay_next {
+        self.update_rails(clk);
+        if can_draw && self.anti_drop && now >= self.relay_next {
             self.relay_next = now + 30_000;
             if self.relay_next > 30_000 {
                 self.dmm.reassert_relay(clk);
@@ -351,24 +525,92 @@ impl App {
         if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] {
             power_off();
         }
-        let pd6 = (unsafe { core::ptr::read_volatile(0x4002_0C10 as *const u32) } & (1 << 6) != 0) != self.pd6_idle;
-        match (pd6, self.pd6_since) {
-            (true, None) => self.pd6_since = Some(now),
-            (true, Some(t)) if now - t > 1500 => power_off(),
+        // Power key PD6, as the stock (pressed = 1, pull-down; boot.rs
+        // PD6_PRESSED_HIGH): press = activity (backlight back, FUN_08020248);
+        // hold 1.5 s = backlight off + beep, power off on release
+        // (FUN_080208c4 timer 0x5dc -> FUN_080207e6); release = click
+        // (FUN_0803e53a): a second release within 500 ms toggles the touch /
+        // key lock, a single click (500 ms timer expired, FUN_0803e000) cycles
+        // the DMM sub-mode only while locked (touch is off then). The stock
+        // handles the click only on the DMM screen; fw-rs toggles the lock in
+        // every view and cycles the DMM sub-mode only in Dmm / DmmScope.
+        // Debounce: a level counts after 20 ms stable (stock: 2 consecutive
+        // 1 ms samples in the TIM7 ISR).
+        let raw = unsafe { core::ptr::read_volatile(0x4002_0C10 as *const u32) } & (1 << 6) != 0;
+        if raw != self.pd6_raw.0 {
+            self.pd6_raw = (raw, now, self.pd6_raw.2);
+        } else if now - self.pd6_raw.1 >= 20 {
+            self.pd6_raw.2 = raw;
+        }
+        let pd6 = self.pd6_raw.2;
+        if !pd6 {
+            self.pd6_armed = true;
+        }
+        match (pd6 && self.pd6_armed, self.pd6_since) {
+            (true, None) => {
+                self.pd6_since = Some(now);
+                self.last_input = now;
+                if self.dimmed {
+                    self.dimmed = false;
+                    backlight(self.backlight);
+                }
+            }
+            (true, Some(t)) if now - t > 1500 && !self.pd6_off => {
+                self.pd6_off = true;
+                backlight(0);
+                self.beep(now, 100);
+            }
             (false, Some(_)) => {
-                // Release: two releases within 1 s toggle the key / touch lock.
                 self.pd6_since = None;
-                if now - self.pd6_last_release < 1000 && self.pd6_presses >= 1 {
+                if self.pd6_off {
+                    power_off();
+                }
+                if self.pd6_click.take().is_some() {
                     self.locked = !self.locked;
-                    self.pd6_presses = 0;
                     self.status_next = 0;
                     self.beep(now, 150);
                 } else {
-                    self.pd6_presses = 1;
+                    self.pd6_click = Some(now + 500);
                 }
-                self.pd6_last_release = now;
             }
             _ => {}
+        }
+        if self.pd6_click.is_some_and(|t| now >= t) {
+            self.pd6_click = None;
+            if self.locked && matches!(self.view, View::Dmm | View::DmmScope) {
+                let b = self.dmm.button();
+                self.dmm.press(clk, b);
+                self.meter.reset();
+                self.redraw = true;
+                self.beep(now, 150);
+            }
+        }
+        if !can_draw {
+            return;
+        }
+        // ---- drawing only below this point.
+        if self.redraw {
+            self.redraw = false;
+            self.scope_invalidate();
+            self.chart_cache.invalidate();
+            self.draw_static();
+            self.status_next = 0;
+            self.chart_dirty = true;
+            // draw_static() repaints the DMM reading (shown value + HOLD/RUN
+            // label) from meter.hold, so the label now matches.
+            self.hold_shown = self.meter.hold;
+        }
+        // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
+        // not drive here)? The reading loop skips drawing while held
+        // (meter.update returns None), so repaint the frozen value and the
+        // HOLD/RUN label now instead of waiting for a reading that never comes.
+        if self.hold_shown != self.meter.hold {
+            self.hold_shown = self.meter.hold;
+            if matches!(self.view, View::Dmm | View::DmmScope) {
+                if let Some(r) = self.meter.shown().copied() {
+                    self.dmm_view.reading(&r, self.meter.hold, self.meter.rel_active(), self.view == View::DmmScope);
+                }
+            }
         }
         if now >= self.status_next {
             self.status_next = now + 1000;
@@ -379,6 +621,7 @@ impl App {
                     self.power.bars,
                     self.power.charging(),
                     self.locked,
+                    self.view == View::DmmScope,
                 ),
                 View::Scope => {
                     ui::scope_battery(self.power.bars, self.power.charging());
@@ -387,7 +630,9 @@ impl App {
                 _ => {}
             }
         }
-        // Strip chart point.
+        // Strip chart point. Gated with the drawing: while logging the DMM
+        // poll is suspended, so meter.shown() is stale and would fill the
+        // chart with a flat line.
         if now >= self.chart_next {
             self.chart_next = now + self.chart_rate as u64 * 10;
             if let Some(r) = self.meter.shown().copied() {
@@ -427,9 +672,8 @@ impl App {
 
     /// Make sure the DMM side is powered (SCPI / BT measurement requests).
     pub fn dmm_power(&mut self, clk: &mut Clock) {
-        if !self.analog_both {
-            self.scope.power(false, clk);
-        }
+        self.host_dmm = true;
+        self.update_rails(clk);
     }
 
     /// X2-1 (s), Xf (Hz), Y2-1 (V) from the cursor positions (stock formulas).
@@ -447,7 +691,7 @@ impl App {
         let sel = &self.meas_sel[..self.meas_n];
         self.cur.x_on = sel.contains(&7) || sel.contains(&8);
         self.cur.y_on = sel.contains(&17);
-        self.scope_prev = [(u16::MAX, 0); 401];
+        self.scope_invalidate();
     }
 
     fn kp_open(&mut self, target: u8, clk: &mut Clock) {
@@ -480,7 +724,8 @@ impl App {
                     b'K' => 1e3,
                     _ => 1.0,
                 };
-                st.freq_hz = gen::snap_freq(st.wave, (v * m).max(1.0) as u32);
+                // Keep the typed value; the output snaps it (gen::Gen::out_hz).
+                st.freq_hz = gen::clamp_freq((v * m).max(1.0) as u32);
             }
             1 => st.amp_v = v.clamp(0.5, 3.0),
             _ => st.duty = (v.clamp(0.0, 100.0) * 100.0) as u16,
@@ -496,10 +741,11 @@ impl App {
         p[0] = self.dim_idx as u32
             | (self.off_idx as u32) << 4
             | (self.start_page as u32) << 8
-            | (self.bt_on as u32) << 12
-            | (self.analog_both as u32) << 13;
+            | (self.bt_on as u32) << 12;
+        // (p[0] bit 13 was the old "both rails" flag, default 1: retired so
+        // units upgraded from it start in the new Auto default.)
         p[1] = self.backlight as u32 | (self.volume as u32) << 8 | (self.roll as u32) << 16;
-        p[2] = self.dmm.mode() as u32 | (self.dmm.v_auto() as u32) << 8 | (self.dmm.a_auto() as u32) << 16 | (self.dmm.ohm_var() as u32) << 24;
+        p[2] = self.dmm.func() as u32 | (self.dmm.v_auto() as u32) << 8 | (self.dmm.a_auto() as u32) << 16 | (self.dmm.ohm_var() as u32) << 24;
         p[3] = Wave::ALL.iter().position(|&w| w == g.wave).unwrap_or(0) as u32 | (g.duty as u32) << 8;
         p[4] = g.freq_hz;
         p[5] = g.amp_v.to_bits();
@@ -510,6 +756,18 @@ impl App {
             p[9] |= (self.meas_sel[i] as u32) << (8 * i);
         }
         p[10] = self.meas_n as u32;
+        // v3 words (0 = default everywhere): p[11] bit 0 rails "Both always",
+        // bits 8..11 temperature sensor; p[12..15] per-sensor temperature
+        // offsets (i16, 0.1 C, two per word); p[16]/p[17] user NTC R25 (ohm) /
+        // Beta as f32 bits.
+        p[11] = self.rails_both as u32 | (self.dmm.t_sensor() as u32) << 8;
+        let o = self.dmm.t_offs_raw();
+        for (i, v) in o.iter().enumerate() {
+            p[12 + i / 2] |= (*v as u16 as u32) << (16 * (i % 2));
+        }
+        let (r25, b) = self.dmm.ntc_user();
+        p[16] = r25.to_bits();
+        p[17] = b.to_bits();
         p
     }
 
@@ -518,19 +776,29 @@ impl App {
         self.off_idx = (p[0] >> 4 & 3) as usize;
         self.start_page = (p[0] >> 8 & 3) as usize;
         self.bt_on = p[0] >> 12 & 1 != 0;
-        self.analog_both = p[0] >> 13 & 1 != 0;
         self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
         self.roll = p[1] >> 16 & 1 != 0;
         self.scope.roll = self.roll;
+        self.rails_both = p[11] & 1 != 0;
+        let mut o = [0i16; 7];
+        for (i, v) in o.iter_mut().enumerate() {
+            *v = (p[12 + i / 2] >> (16 * (i % 2))) as u16 as i16;
+        }
+        self.dmm.set_t_offs_raw(o);
+        if p[16] != 0 {
+            self.dmm.set_ntc_user(f32::from_bits(p[16]), f32::from_bits(p[17]));
+        }
+        // Sensor before the mode, so a restored mode 15 enters with it.
+        self.dmm.set_t_sensor(clk, (p[11] >> 8 & 0xF) as u8);
         let mode = (p[2] & 0xFF) as u8;
-        if mode <= 15 {
+        if mode <= 17 {
             self.dmm.select(clk, mode);
         }
         let mut g = self.gen.s;
         g.wave = Wave::ALL[(p[3] & 3) as usize];
         g.duty = ((p[3] >> 8) & 0xFFFF).min(10000) as u16;
-        g.freq_hz = p[4].clamp(1, 10_000_000);
+        g.freq_hz = gen::clamp_freq(p[4]);
         let a = f32::from_bits(p[5]);
         g.amp_v = if a.is_finite() { a.clamp(0.5, 3.0) } else { 3.0 };
         self.gen.s = g;
@@ -665,7 +933,7 @@ impl App {
                 _ => None,
             }
         } else {
-            let (m, r) = (self.dmm.mode(), self.dmm.range() as u8);
+            let (m, r) = (self.dmm.hy_mode(), self.dmm.range() as u8);
             Some(match m {
                 2 | 3 => 0,
                 0 | 1 => r + 1,
@@ -676,9 +944,15 @@ impl App {
         items.iter().position(|it| it.1 == want)
     }
 
+    /// Temperature sensor name for the DMM status bar (temperature only).
+    fn t_label(&self) -> Option<&'static str> {
+        if self.dmm.hy_mode() == 15 { Some(ui::T_LABELS[self.dmm.t_sensor() as usize]) } else { None }
+    }
+
     /// New DMM reading (always measured, whatever the view).
     pub fn reading(&mut self, raw: Reading, can_draw: bool) -> Option<Reading> {
         self.last_raw = Some(raw);
+        self.dmm_view.label = self.t_label();
         let r = self.meter.update(&raw)?;
         if can_draw && !self.redraw && matches!(self.view, View::Dmm | View::DmmScope) {
             self.dmm_view.reading(&r, self.meter.hold, self.meter.rel_active(), self.view == View::DmmScope);
@@ -709,7 +983,9 @@ impl App {
                 self.autoset_step(&f, now);
                 return;
             }
-            let fresh = now >= self.meas_next && !f.data.is_empty();
+            // A stopped scope only emits a frame on a change (a zoom, a V/div
+            // rescale): always measure those, they do not repeat.
+            let fresh = (now >= self.meas_next || !self.scope.s.run) && !f.data.is_empty();
             if fresh {
                 self.meas_next = now + 300;
                 let t1 = cyc();
@@ -737,9 +1013,17 @@ impl App {
         }
     }
 
+    /// Forget the drawn trace (full redraw of the graph on the next frame).
+    /// A stopped scope emits no frames on its own, so ask it for one re-render
+    /// of the stored record (cursor moves, persistence toggle, view redraw).
+    fn scope_invalidate(&mut self) {
+        self.scope_prev = [(u16::MAX, 0); 401];
+        self.scope.refresh();
+    }
+
     fn scope_set(&mut self, s: scope::Settings, now: u64) {
         self.scope.apply(s, now);
-        self.scope_prev = [(u16::MAX, 0); 401];
+        self.scope_invalidate();
         match self.view {
             View::Scope => ui::SCOPE_FULL.labels(&self.scope, true),
             View::DmmScope => ui::SCOPE_COMPACT.labels(&self.scope, false),
@@ -769,7 +1053,7 @@ impl App {
                 self.beep(now, 50);
                 self.key(clk, c);
             }
-            Gesture::SwipeLeft | Gesture::SwipeRight if !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad) => {
+            Gesture::SwipeLeft | Gesture::SwipeRight if !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad | View::Device) => {
                 let i = View::CYCLE.iter().position(|&v| v == self.view).unwrap_or(0);
                 let n = View::CYCLE.len();
                 let j = if g == Gesture::SwipeLeft { (i + 1) % n } else { (i + n - 1) % n };
@@ -801,12 +1085,12 @@ impl App {
                 match self.cur_drag {
                     Some(k) if k < 2 => {
                         self.cur.x[k as usize] = (p.x.saturating_sub(13)).clamp(1, 399);
-                        self.scope_prev = [(u16::MAX, 0); 401];
+                        self.scope_invalidate();
                         self.cursor_values();
                     }
                     Some(k) => {
                         self.cur.y[k as usize - 2] = (p.y as i32 - 20).clamp(1, 279);
-                        self.scope_prev = [(u16::MAX, 0); 401];
+                        self.scope_invalidate();
                         self.cursor_values();
                     }
                     None => {
@@ -824,7 +1108,18 @@ impl App {
         let now = clk.now_ms();
         match code {
             0 => {
-                let v = if matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu | View::Keypad) { self.back_view } else { View::Menu };
+                // Walk one step up the page tree, not straight to the
+                // instrument: Device -> Settings -> Menu -> instrument. The old
+                // code sent every menu page to back_view, so the back key in
+                // Settings/Device skipped their parent (regressed when Device
+                // was added). Range / ScopeMenu / Keypad still pop to the view
+                // they were opened from.
+                let v = match self.view {
+                    View::Device => View::Settings,
+                    View::Settings => View::Menu,
+                    View::Menu | View::Range | View::ScopeMenu | View::Keypad => self.back_view,
+                    _ => View::Menu,
+                };
                 self.show(v, clk);
             }
             1 => match self.view {
@@ -854,7 +1149,10 @@ impl App {
                 }
             },
             _ => match self.view {
-                View::Dmm | View::DmmScope if matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap) => {
+                View::Dmm | View::DmmScope
+                    if matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap)
+                        || self.dmm.hy_mode() == 15 =>
+                {
                     self.show(View::Range, clk)
                 }
                 View::Range => {
@@ -878,7 +1176,7 @@ impl App {
                     self.dmm.hold_range(false);
                     self.beep(now, 300);
                 } else if self.meter.rel_on(self.last_raw.as_ref()) {
-                    self.dmm.hold_range(self.dmm.mode() <= 10 || self.dmm.mode() == 14);
+                    self.dmm.hold_range(self.dmm.hy_mode() <= 10 || self.dmm.hy_mode() == 14);
                 }
                 self.dmm_view.invalidate();
                 self.chart_dirty = true;
@@ -895,79 +1193,10 @@ impl App {
                     }
                 }
             }
-            View::Keypad => {
-                let freq = self.kp_target == 0;
-                match ui::keypad_hit(freq, x, y) {
-                    Some(b'=') => {
-                        self.kp_apply();
-                        self.show(View::Gen, clk);
-                    }
-                    Some(b'<') => self.kp_n = self.kp_n.saturating_sub(1),
-                    Some(c @ (b'H' | b'K' | b'M')) => self.kp_mult = c,
-                    Some(c) => {
-                        let max = if freq { 3 } else { 5 };
-                        if self.kp_n < max && !(c == b'.' && self.kp_buf[..self.kp_n].contains(&b'.')) {
-                            self.kp_buf[self.kp_n] = c;
-                            self.kp_n += 1;
-                        }
-                    }
-                    None => {
-                        // Outside the keypad: cancel.
-                        if !(x >= 224 && y >= if freq { 142 } else { 100 }) {
-                            self.show(View::Gen, clk);
-                        }
-                        return;
-                    }
-                }
-                let (_, unit) = self.kp_labels();
-                let n = self.kp_n;
-                let t = core::str::from_utf8(&self.kp_buf[..n]).unwrap_or("");
-                ui::keypad_input(freq, t, unit);
-            }
-            View::ScopeMenu => {
-                let mut st = self.scope.s;
-                match ui::scope_menu_hit(self.scope_tab, x, y) {
-                    None => {
-                        self.show(View::Scope, clk);
-                        return;
-                    }
-                    Some((t, 255)) => self.scope_tab = t,
-                    Some((0, k)) => {
-                        let id = crate::scope_meas::ITEMS[k].0;
-                        if let Some(p) = self.meas_sel[..self.meas_n].iter().position(|&i| i == id) {
-                            self.meas_sel.copy_within(p + 1..self.meas_n, p);
-                            self.meas_n -= 1;
-                        } else if self.meas_n < 4 {
-                            self.meas_sel[self.meas_n] = id;
-                            self.meas_n += 1;
-                        }
-                        self.cursors_from_selection();
-                    }
-                    Some((1, 0)) => {
-                        self.roll = !self.roll;
-                        self.scope.roll = self.roll;
-                    }
-                    Some((1, _)) => {
-                        self.persist_trace = !self.persist_trace;
-                        self.scope_prev = [(u16::MAX, 0); 401];
-                    }
-                    Some((2, k)) => match k {
-                        0 => st.rising = true,
-                        1 => st.rising = false,
-                        3 => st.mode = scope::TrigMode::Auto,
-                        4 => st.mode = scope::TrigMode::Normal,
-                        5 => st.mode = scope::TrigMode::Single,
-                        _ => {}
-                    },
-                    Some((_, k)) => match k {
-                        0 => st.ac = false,
-                        1 => st.ac = true,
-                        3..=5 => st.probe = [1.0, 10.0, 100.0][k - 3],
-                        _ => {}
-                    },
-                }
-                self.scope.apply(st, now);
-                ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll, self.persist_trace);
+            View::Device => {
+                // Any tap dismisses back to Settings (its parent), the same
+                // step the MENU key takes from Device (see key()).
+                self.show(View::Settings, clk);
             }
             View::Keypad => {
                 let freq = self.kp_target == 0;
@@ -1023,7 +1252,7 @@ impl App {
                     }
                     Some((1, _)) => {
                         self.persist_trace = !self.persist_trace;
-                        self.scope_prev = [(u16::MAX, 0); 401];
+                        self.scope_invalidate();
                     }
                     Some((2, k)) => match k {
                         0 => st.rising = true,
@@ -1042,6 +1271,30 @@ impl App {
                 }
                 self.scope.apply(st, now);
                 ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll, self.persist_trace);
+            }
+            View::Range if self.dmm.hy_mode() == 15 => {
+                let k = self.dmm.t_sensor();
+                match ui::temp_hit(x, y) {
+                    Some(255) => {
+                        let v = self.back_view;
+                        self.show(v, clk);
+                        return;
+                    }
+                    Some(i @ 0..=6) => {
+                        if i != k {
+                            self.dmm.set_t_sensor(clk, i);
+                            self.meter.reset();
+                            self.last_raw = None;
+                        }
+                    }
+                    Some(7) => self.dmm.set_t_offs(k, 0.0),
+                    Some(i) => {
+                        let d = [-1.0, -0.1, 0.1, 1.0][(i as usize - 8) % 4];
+                        self.dmm.set_t_offs(k, self.dmm.t_offs(k) + d);
+                    }
+                    None => return,
+                }
+                self.redraw = true;
             }
             View::Range => {
                 let b = self.dmm.button();
@@ -1057,9 +1310,10 @@ impl App {
                         self.show(v, clk);
                     }
                     Some(Err(k)) => {
-                        let ac = matches!(self.dmm.mode(), 0 | 2 | 4..=6);
-                        if (k == 1) != ac {
-                            self.dmm.press(clk, b);
+                        // DC / AC / AC+DC buttons (Err 0 / 1 / 3) -> sub-mode 0 / 1 / 2.
+                        let sub = if k == 3 { 2 } else { k };
+                        if sub != self.dmm.sub() {
+                            self.dmm.set_sub(clk, sub);
                             self.meter.reset();
                         }
                         self.redraw = true;
@@ -1113,11 +1367,6 @@ impl App {
             }
             View::Gen => {
                 let mut st = self.gen.s;
-                let steps: [u32; 22] = [
-                    1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10_000, 20_000, 50_000, 100_000, 200_000,
-                    500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000,
-                ];
-                let plus = x >= 361;
                 if x < 243 && (40..82).contains(&y) {
                     let k = Wave::ALL.iter().position(|&w| w == st.wave).unwrap_or(0);
                     st.wave = Wave::ALL[(k + 1) % 4];
@@ -1128,14 +1377,16 @@ impl App {
                     self.kp_open(1, clk);
                     return;
                 } else if x >= 246 && (226..316).contains(&y) {
-                    if st.wave == Wave::Square && st.freq_hz <= 50_000 {
+                    if st.wave == Wave::Square && self.gen.out_hz() <= 50_000 {
                         self.kp_open(2, clk);
                     }
                     return;
                 } else {
                     return;
                 }
-                st.freq_hz = gen::snap_freq(st.wave, st.freq_hz);
+                // Wave change: the set frequency is kept as is (a wave that
+                // cannot play it is silent, gen::Gen::out_hz), so cycling back
+                // to Square restores it.
                 self.gen_set(st);
             }
             View::Menu => match ui::main_menu_hit(x, y) {
@@ -1150,6 +1401,11 @@ impl App {
                 None => {}
             },
             View::Settings => {
+                if ui::title_back_hit(y) {
+                    // Tapping the title bar ("< Back") returns to the menu.
+                    self.show(View::Menu, clk);
+                    return;
+                }
                 match ui::settings_hit(y) {
                     Some(0) => self.dim_idx = (self.dim_idx + 1) % 4,
                     Some(1) => self.off_idx = (self.off_idx + 1) % 4,
@@ -1161,19 +1417,16 @@ impl App {
                     Some(4) => self.bt_on = !self.bt_on,
                     Some(5) => self.start_page = (self.start_page + 1) % 4,
                     Some(6) => {
-                        self.analog_both = !self.analog_both;
-                        if self.analog_both {
-                            self.scope.power_both(clk);
-                        } else {
-                            let scope_side = matches!(self.back_view, View::Scope | View::Gen);
-                            self.scope.power(scope_side, clk);
-                        }
+                        let b = !self.rails_both;
+                        self.set_rails_both(b, clk);
                     }
-                    Some(_) => {
-                        self.show(View::Menu, clk);
+                    Some(7) => {
+                        // Last row: the Device / About page. Back is the title
+                        // bar now, not a list row.
+                        self.show(View::Device, clk);
                         return;
                     }
-                    None => return,
+                    Some(_) | None => return,
                 }
                 self.redraw = true;
             }
@@ -1181,17 +1434,115 @@ impl App {
         let _ = dmm::button_of;
     }
 
+    /// SCPI temperature / system commands (scpi.rs Cmd::Temp* / Sys*); None
+    /// for the scope / generator commands.
+    fn scpi_dmm(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> Option<bool> {
+        use crate::scpi::Cmd as C;
+        let k = self.dmm.t_sensor();
+        let now = clk.now_ms();
+        let r = match cmd {
+            C::TempSensor(Some(k)) => {
+                self.dmm.set_t_sensor(clk, k);
+                self.meter.reset();
+                self.last_raw = None;
+                self.redraw = true;
+                false
+            }
+            C::TempSensor(None) => {
+                out.put_bytes(dmm::T_NAMES[k as usize].as_bytes());
+                true
+            }
+            C::TempOffs(Some(v)) => {
+                self.dmm.set_t_offs(k, v);
+                false
+            }
+            C::TempOffs(None) => {
+                out.put_f32(self.dmm.t_offs(k));
+                true
+            }
+            C::TempNtc(Some((r25, b))) => {
+                self.dmm.set_ntc_user(r25, b);
+                false
+            }
+            C::TempNtc(None) => {
+                let (r25, b) = self.dmm.ntc_user();
+                out.put_f32(r25);
+                out.put_bytes(b",");
+                out.put_f32(b);
+                true
+            }
+            C::TempExc => match self.dmm.t_excitation() {
+                Some((r, ohm, i, p)) => {
+                    for (j, v) in [r as f32, ohm, i, p].iter().enumerate() {
+                        if j > 0 {
+                            out.put_bytes(b",");
+                        }
+                        out.put_f32(*v);
+                    }
+                    true
+                }
+                None => {
+                    out.set_err("Settings conflict");
+                    false
+                }
+            },
+            C::TempCj => {
+                match self.dmm.t_cj(now) {
+                    Some((t, age)) => {
+                        // Fresh only while the thermocouple mode cycles (one
+                        // CJ phase every ~2.2 s).
+                        if !(self.dmm.mode() == 15 && k == 0 && !self.dmm.suspended()) {
+                            out.set_err("Data stale");
+                        }
+                        out.put_f32(t);
+                        out.put_bytes(b",");
+                        out.put_f32(age as f32 / 1000.0);
+                    }
+                    None => {
+                        out.set_err("Data stale");
+                        out.put_bytes(b"+9.90000000E+37");
+                    }
+                }
+                true
+            }
+            C::SysTemp => {
+                out.put_f32(self.power.mcu_t);
+                true
+            }
+            C::SysRail(Some(b)) => {
+                self.set_rails_both(b, clk);
+                self.redraw |= self.view == View::Settings;
+                false
+            }
+            C::SysRail(None) => {
+                out.put_bytes(if self.rails_both { b"BOTH" } else { b"AUTO" });
+                true
+            }
+            C::SysRailState => {
+                out.put_bytes(if self.scope.dmm_rail() { b"1," } else { b"0," });
+                out.put_bytes(if self.scope.powered() { b"1" } else { b"0" });
+                true
+            }
+            _ => return None,
+        };
+        Some(r)
+    }
+
     /// SCPI scope / generator command. Writes the reply (if any) to `out` and
     /// returns true when there is one.
     pub fn scpi(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
+        if let Some(r) = self.scpi_dmm(clk, cmd, out) {
+            return r;
+        }
         let now = clk.now_ms();
         let mut g = self.gen.s;
         let mut sc = self.scope.s;
         let scope_cmd =
             !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenDuty(_) | C::GenOut(_) | C::DiagDac | C::DiagPwm);
-        if scope_cmd && !self.scope.powered() && !self.analog_both {
-            self.scope.power(true, clk);
+        if scope_cmd && !self.scope.powered() {
+            self.host_scope = true;
+            self.update_rails(clk);
         }
         let reply = match cmd {
             C::GenFunc(Some(w)) => {
@@ -1208,11 +1559,14 @@ impl App {
                 Some(())
             }
             C::GenFreq(Some(f)) => {
-                g.freq_hz = gen::snap_freq(g.wave, f.max(1.0) as u32);
+                // Stored as set (clamped 1 Hz .. 10 MHz); the output snaps it.
+                g.freq_hz = gen::clamp_freq(f.max(1.0).min(gen::F_MAX as f32) as u32);
                 None
             }
             C::GenFreq(None) => {
-                out.put_f32(g.freq_hz as f32);
+                // The frequency actually output (stock snapping), 0 when this
+                // wave is silent at the set frequency.
+                out.put_f32(gen::snap_freq(g.wave, g.freq_hz) as f32);
                 Some(())
             }
             C::GenVolt(Some(v)) => {
@@ -1361,6 +1715,7 @@ impl App {
                 out.put_f32(self.scope.volts(0.0));
                 Some(())
             }
+            _ => None, // DMM / system commands: scpi_dmm
         };
         if matches!(cmd, C::DiagDac | C::DiagPwm) {
         } else if !scope_cmd {

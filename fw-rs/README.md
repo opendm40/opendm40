@@ -136,8 +136,14 @@ Goal and remaining work: see [TODO.md](TODO.md).
 ## Build
 
 ```
-./build.sh      # -> dm40-fw.bin
+./build.sh                 # -> dm40-fw.bin (RAM image, sector 8)
+./build.sh native          # -> dm40-fw-native.bin (update file for the loader, 0x08004000)
+./build.sh test-initcore   # -> dm40-fw.bin (T1 RAM test of the native init)
+./build.sh test-recovery   # -> dm40-fw.bin (T2 RAM test of native recovery)
+tools/fatren-test/run.sh   # host test of the FAT rename / recovery trigger
 ```
+
+Native image, shim, recovery and test plan: docs/native-boot.md "Implementation".
 
 Needs the pinned toolchain in `../toolchain` (rustup + stable +
 `thumbv7em-none-eabihf`). `build.sh` sources `../toolchain/env.sh`. Crates:

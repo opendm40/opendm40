@@ -11,8 +11,11 @@ const PMU_CTL: u32 = 0x4000_7000;
 const PMU_CS: u32 = 0x4000_7004;
 const BKP: u32 = 0x4002_4000;
 const MAGIC: u32 = 0x4446_5753; // "SWFD"
-const VERSION: u32 = 2;
-pub const WORDS: usize = 16;
+/// v3: 24 words (v2 had 16; a v2 record is loaded zero-extended, every new
+/// field reads 0 = its default). Layout: app.rs persist_words().
+const VERSION: u32 = 3;
+pub const WORDS: usize = 24;
+const V2_WORDS: usize = 16;
 
 fn crc(words: &[u32]) -> u32 {
     let mut c = 0xFFFF_FFFFu32;
@@ -38,14 +41,19 @@ pub fn init() {
 
 pub fn load() -> Option<[u32; WORDS]> {
     let rd = |i: usize| unsafe { r32(BKP + 4 * i as u32) };
-    if rd(0) != MAGIC || rd(1) != VERSION {
+    let n = match rd(1) {
+        VERSION => WORDS,
+        2 => V2_WORDS,
+        _ => return None,
+    };
+    if rd(0) != MAGIC {
         return None;
     }
     let mut p = [0u32; WORDS];
-    for (i, w) in p.iter_mut().enumerate() {
+    for (i, w) in p[..n].iter_mut().enumerate() {
         *w = rd(2 + i);
     }
-    if crc(&p) != rd(2 + WORDS) { None } else { Some(p) }
+    if crc(&p[..n]) != rd(2 + n) { None } else { Some(p) }
 }
 
 pub fn save(p: &[u32; WORDS]) {

@@ -1,12 +1,19 @@
-//! Reset vector and startup for the RAM-loaded image.
+//! Reset vector and startup for the RAM-loaded image (not the native image:
+//! that one starts in src/shim.rs).
 //!
 //! The `.vectors` section holds the Cortex-M table: word[0] = initial MSP,
-//! word[1] = `reset`. `reset` sets MSP, disables interrupts, points VTOR at our
-//! table, zeroes .bss and jumps to `rust_start` (in main.rs).
+//! word[1] = `reset`. `reset` sets MSP, disables interrupts, copies the code
+//! into SRAM0 and jumps to `rust_start` (in main.rs), which copies .data,
+//! zeroes .bss and points VTOR at our table. The T1/T2 test builds enter
+//! `test_initcore_start` / `test_recovery_start` (src/native.rs) instead.
 
+#[cfg(not(feature = "native"))]
 use core::arch::global_asm;
 
-global_asm!(
+#[cfg(not(feature = "native"))]
+macro_rules! ram_startup {
+    ($entry:literal) => {
+global_asm!(concat!(
     r#"
     .section .vectors, "a", %progbits
     .global __VECTORS
@@ -58,7 +65,7 @@ reset:
     b     1b
 2:  dsb
     isb
-    ldr   r0, =rust_start
+    ldr   r0, ="#, $entry, r#"
     blx   r0
     b     .
 
@@ -68,4 +75,13 @@ reset:
 default_handler:
     b     .
 "#
-);
+));
+    };
+}
+
+#[cfg(not(any(feature = "native", feature = "test-initcore", feature = "test-recovery")))]
+ram_startup!("rust_start");
+#[cfg(feature = "test-initcore")]
+ram_startup!("test_initcore_start");
+#[cfg(feature = "test-recovery")]
+ram_startup!("test_recovery_start");

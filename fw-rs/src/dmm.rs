@@ -5,7 +5,13 @@
 //!
 //! Modes (HY3131 config tables): 0 ACV, 1 DCV, 2 ACmV, 3 DCmV, 4..6 AC A/mA/uA,
 //! 7..9 DC A/mA/uA, 10 ohm, 11 continuity, 12 diode, 13 capacitance,
-//! 14 frequency, 15 temperature. AC+DC is not offered (DM40A has none).
+//! 14 frequency, 15 temperature. AC+DC (stock sub-mode m+5 == 2, offered by
+//! the stock only for model byte != 0, here on every model) alternates the
+//! HY3131 between the AC and the DC mode of the same quantity (`acdc`).
+//!
+//! Counts: always the DM40C (60000-count) limits, whatever the model byte says
+//! (COUNTS_MODEL). The model byte itself (`model()`) still identifies the
+//! instrument (About page, BT name / cmd 00).
 
 use core::ptr::read_volatile;
 
@@ -23,6 +29,12 @@ const GPIOE: u32 = 0x4002_1000;
 const SETTINGS: u32 = 0x080C_0000;
 const CAL: u32 = SETTINGS + 0x168;
 
+/// Model index used for the counts-dependent limits: 0 = DM40A (40000 counts),
+/// 1 = DM40B (50000), 2 = DM40C (60000). The stock picks FACTOR/OVER by the
+/// calibration model byte (dmm_v2_6.h:297-299, hy3131_v2_6.h:147-155); the HY3131
+/// setup is identical for all three, so fw-rs always uses the DM40C values.
+/// Set to `self.model` in factor()/over() to restore the stock behaviour.
+const COUNTS_MODEL: u8 = 2;
 const FACTOR: [f32; 3] = [4.0, 5.0, 6.0];
 const OVER: [f32; 3] = [1.05, 1.04, 1.03];
 const AD1_DIV: f32 = 8_388_606.0;
@@ -53,6 +65,74 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
     0x52, 0xdd, 0x13, 0x83, 0x43, 0x40, 0x00, 0x5d, 0x31, 0x00, 0x00, 0x00, 0x88, 0x88, 0x00, 0x8e, 0x80, 0xc2, 0xcc,
     0xa8, 0x00, 0x54,
 ];
+
+// ------------------------------------------------------------ temperature
+//
+// Sensors of the temperature function (mode 15). 0 = the stock type-K
+// thermocouple path (cfg f15, three phases, cold junction = the HY3131 internal
+// sensor). 1..6 are 2-wire resistive sensors read through the ohm path (cfg
+// f10_p8clr, the stock default ohm variant m+8 == 0, ratiometric:
+// R = |AD1| * Rref[r] / 0.9 / 2^23, gain cal 0x124 + 4r, offset cal 0x144):
+//   PT100  fixed r1 (600 ohm, Rref 1 k), PT1000 fixed r2 (6 k, Rref 10 k):
+//     Callendar-Van Dusen (IEC 60751), -200..850 C.
+//   NTC (Beta model, 1/T = 1/T25 + ln(R/R25)/B), -55..300 C: r2..r6 with
+//     hysteresis, starting at the lowest range that holds R25.
+// Excitation: the ohm source looks like a ~0.85 V open-circuit source behind
+// Rref (community: 0.85 mA short-circuit current on the 600 ohm range in the
+// default variant, 0.27 mA in the "ON" variant; NOT from a datasheet - verify
+// on hardware). I = VSRC / (Rref + R), P = I^2 R; see `t_excitation`.
+// Lead resistance is not modelled separately: a 2-wire lead pair adds
+// 0.39 C per 0.1 ohm on a PT100 (0.039 C on a PT1000, negligible for NTCs);
+// trim it with the per-sensor offset (or REL).
+
+/// Short sensor names (SCPI CONF:TEMP <name>, SENS:TEMP:TRAN?).
+pub const T_NAMES: [&str; 7] = ["TCK", "PT100", "PT1000", "NTC10K3950", "NTC10K3435", "NTC100K3950", "NTCUSER"];
+/// Inferred open-circuit voltage of the ohm source (see above).
+pub const T_VSRC: f32 = 0.85;
+
+/// Natural log (no libm): exponent * ln2 + atanh series of the mantissa.
+fn ln(x: f32) -> f32 {
+    let b = x.to_bits();
+    let mut e = ((b >> 23) & 0xFF) as i32 - 127;
+    let mut m = f32::from_bits((b & 0x007F_FFFF) | 0x3F80_0000);
+    if m > 1.414_213_6 {
+        m *= 0.5;
+        e += 1;
+    }
+    let s = (m - 1.0) / (m + 1.0);
+    let s2 = s * s;
+    e as f32 * core::f32::consts::LN_2 + 2.0 * s * (1.0 + s2 * (1.0 / 3.0 + s2 * (0.2 + s2 * (1.0 / 7.0))))
+}
+
+/// Platinum RTD, IEC 60751 Callendar-Van Dusen: R/R0 -> C (None outside
+/// -200..850 C). T >= 0 closed form (written without the cancellation of the
+/// textbook quadratic), T < 0 Newton on the full equation.
+fn pt_temp(x: f32) -> Option<f32> {
+    const A: f32 = 3.9083e-3;
+    const B: f32 = -5.775e-7;
+    const C: f32 = -4.183e-12;
+    if !(0.18..=3.95).contains(&x) {
+        return None;
+    }
+    let mut t = 2.0 * (x - 1.0) / (A + sqrt(A * A + 4.0 * B * (x - 1.0)));
+    if x < 1.0 {
+        for _ in 0..4 {
+            let f = 1.0 + t * (A + t * B) + C * (t - 100.0) * t * t * t - x;
+            let d = A + 2.0 * B * t + C * t * t * (4.0 * t - 300.0);
+            t -= f / d;
+        }
+    }
+    if (-200.0..=850.0).contains(&t) { Some(t) } else { None }
+}
+
+/// NTC, Beta model: R (ohm) -> C (None outside -55..300 C).
+fn ntc_temp(r: f32, r25: f32, beta: f32) -> Option<f32> {
+    if r <= 0.0 {
+        return None;
+    }
+    let t = 1.0 / (1.0 / 298.15 + ln(r / r25) / beta) - 273.15;
+    if (-55.0..=300.0).contains(&t) { Some(t) } else { None }
+}
 
 /// The six bottom buttons of the stock screen.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -99,6 +179,9 @@ pub struct Reading {
     pub auto: bool,
     /// Range label in auto: "AUTO+" instead of "AUTO".
     pub auto_plus: bool,
+    /// AC+DC sub-mode: main = sqrt(AC^2 + DC^2), aux1 = AC part, aux2 = DC
+    /// part; `mode` is then always the DC mode (1, 3, 7..9).
+    pub acdc: bool,
     pub seq: u32,
 }
 
@@ -148,6 +231,16 @@ fn sqrt(x: f32) -> f32 {
         y = 0.5 * (y + x / y);
     }
     y
+}
+
+fn hypot(a: f32, b: f32) -> f32 {
+    sqrt(a * a + b * b)
+}
+
+/// AC+DC part readout: "0L" when |part / full scale| > 1.04 (dmm_v2_6.h:231).
+fn part(x: f32, lim: f32, dec: u8, unit: &'static str) -> Val {
+    // The value is kept with the OL flag: BT still sends it (bt_meas_v2_6.h:170).
+    Val { v: x, dec, unit, ol: x.abs() / lim > 1.04 }
 }
 
 fn u24(b: &[u8]) -> u32 {
@@ -213,6 +306,16 @@ struct CapRamp {
 pub struct Dmm {
     model: u8,
     mode: u8,
+    /// m+5 == 2: AC+DC. `phase_n` = S+10 (readings left in this phase),
+    /// `dc_val` = S+0x20 / m+0xcc (last DC part), `ac_raw` = S+0x1c.
+    acdc: bool,
+    phase_n: u8,
+    dc_val: f32,
+    ac_raw: f32,
+    /// AC+DC parts measured since the last reset (bit 0 AC, bit 1 DC): no
+    /// reading until both are, so the first value (and a SCPI MEAS) is never
+    /// |DC| or |AC| alone (the stock shows hypot(0, DC) at first).
+    acdc_seen: u8,
     range: i8,
     manual: bool,
     /// m+6: V autorange (bit0 mV->V, bit1 V->mV); m+7: A (1 mA..A, 3 uA..A).
@@ -246,6 +349,19 @@ pub struct Dmm {
     freq: Freq,
     seq: u32,
     pa_now: Option<u8>,
+    /// Analog DMM rail (PE2) off: no polling (App::update_rails).
+    suspended: bool,
+    /// Temperature sensor (T_NAMES index), per-sensor offsets (0.1 C; the
+    /// TC one is applied to the cold junction), user NTC R25 (ohm) / Beta.
+    t_sensor: u8,
+    t_offs: [i16; 7],
+    ntc_user: (f32, f32),
+    /// ms of the last cold-junction measurement (0 = never).
+    t_cj_at: u64,
+    /// Resistive sensors: filtered C, last R (ohm), range-change votes.
+    t_f: f32,
+    t_res: f32,
+    t_votes: u8,
 }
 
 impl Dmm {
@@ -255,6 +371,11 @@ impl Dmm {
         Dmm {
             model,
             mode: 1,
+            acdc: false,
+            phase_n: 0,
+            dc_val: 0.0,
+            ac_raw: 0.0,
+            acdc_seen: 0,
             range: 0,
             manual: false,
             v_auto: 3,
@@ -296,13 +417,28 @@ impl Dmm {
             freq: Freq { next: 0, src_alt: false, last: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0 },
             seq: 0,
             pa_now: None,
+            suspended: false,
+            t_sensor: 0,
+            t_offs: [0; 7],
+            ntc_user: (10_000.0, 3950.0),
+            t_cj_at: 0,
+            t_f: 0.0,
+            t_res: 0.0,
+            t_votes: 0,
         }
     }
 
     pub fn model(&self) -> u8 {
         self.model
     }
+    /// Function code as seen from outside (= `func()`): the stock mode, or
+    /// 16 / 17 in AC+DC. main.rs gates the data logger on this, so LOG:STATe ON
+    /// is refused in AC+DC (its HY3131 mode alternates).
     pub fn mode(&self) -> u8 {
+        self.func()
+    }
+    /// The HY3131 mode currently configured (AC+DC: the current phase).
+    pub fn hy_mode(&self) -> u8 {
         self.mode
     }
     pub fn range(&self) -> i8 {
@@ -324,10 +460,10 @@ impl Dmm {
         self.ohm_var
     }
     fn factor(&self) -> f32 {
-        FACTOR[self.model as usize]
+        FACTOR[COUNTS_MODEL as usize]
     }
     fn over(&self) -> f32 {
-        OVER[self.model as usize]
+        OVER[COUNTS_MODEL as usize]
     }
 
     // ---------------------------------------------------------------- setup
@@ -354,6 +490,7 @@ impl Dmm {
                 if r == 7 { &CFG_F13_R7 } else { &CFG_F13[r.min(6)] }
             }
             14 => &CFG_F14[0],
+            _ if self.t_sensor != 0 => &CFG_F10_P8CLR[r.clamp(1, 6)],
             _ => &CFG_F15[0],
         };
         hy::quiesce();
@@ -370,6 +507,12 @@ impl Dmm {
         pc7(m == 14);
         hy::configure(cfg);
         self.r22 = cfg[2];
+        if m == 15 && self.t_sensor != 0 {
+            // Resistive sensor: the stock in-range ohm OSR (32768) for a quiet
+            // reading; the range is fixed, so no fast open-circuit switching.
+            hy::write(0x22, &[0x17]);
+            self.r22 = 0x17;
+        }
     }
 
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
@@ -386,6 +529,9 @@ impl Dmm {
     }
 
     fn reset_values(&mut self) {
+        self.acdc_seen = 0;
+        self.dc_val = 0.0;
+        self.ac_raw = 0.0;
         self.f_ac = 0.0;
         self.f_lpf = 0.0;
         self.f_dc = 0.0;
@@ -395,14 +541,75 @@ impl Dmm {
         self.ohm_settled = false;
         self.beep_class = 4;
         self.t_phase = 0;
+        self.t_votes = 0;
         self.freq.f_khz = 0.0;
         self.freq.duty = 0.0;
         self.freq.range = 0;
         self.ramp.first = true;
     }
 
+    /// AC+DC phase switch: the other HY3131 mode of the same quantity, values
+    /// kept (stock FUN_08012c30 without the m+5 change).
+    fn switch_phase(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
+        self.mode = mode;
+        self.range = range;
+        self.write_config(clk);
+        self.deadline = clk.now_ms() + settle;
+    }
+
+    /// SCPI function code: the stock mode, or 16 = V AC+DC, 17 = A AC+DC.
+    pub fn func(&self) -> u8 {
+        match (self.acdc, self.mode) {
+            (true, 0..=3) => 16,
+            (true, _) => 17,
+            (false, m) => m,
+        }
+    }
+
+    /// V / A sub-mode (stock m+5): 0 DC, 1 AC, 2 AC+DC.
+    pub fn sub(&self) -> u8 {
+        if self.acdc {
+            2
+        } else {
+            matches!(self.mode, 0 | 2 | 4..=6) as u8
+        }
+    }
+
+    /// Set the V / A sub-mode (FUN_08013262 / FUN_08013134 cycle step, range
+    /// page DC / AC / AC+DC buttons, BT command 06): auto range, V keeps the
+    /// range (mV: r1), A keeps range % 2, values cleared (FUN_0803aad6).
+    /// AC+DC starts in the DC phase, as the stock.
+    pub fn set_sub(&mut self, clk: &mut Clock, sub: u8) {
+        let m = self.mode;
+        let (dc, r, t) = match m {
+            0..=3 => (m | 1, if m >= 2 { 1 } else { self.range }, 450),
+            4..=9 => (if m >= 7 { m } else { m + 3 }, self.range.max(0) % 2, 650),
+            _ => return,
+        };
+        let ac = if dc <= 3 { dc - 1 } else { dc - 3 };
+        self.manual = false;
+        self.acdc = sub == 2;
+        self.phase_n = 0;
+        self.reset_values();
+        self.set(clk, if sub == 1 { ac } else { dc }, r, t);
+    }
+
     /// Enter a stock mode directly (SCPI, BT command 06). Auto range.
+    /// 16 / 17 = V / A AC+DC (see `func`).
     pub fn select(&mut self, clk: &mut Clock, mode: u8) {
+        if (32..32 + T_NAMES.len() as u8).contains(&mode) {
+            // 32 + k: temperature with sensor k (SCPI CONF/MEAS:TEMP <type>).
+            self.t_sensor = mode - 32;
+            self.mode = 255;
+            self.select(clk, 15);
+            return;
+        }
+        if mode >= 16 {
+            self.select(clk, if mode == 16 { 1 } else { 8 });
+            self.set_sub(clk, 2);
+            return;
+        }
+        self.acdc = false;
         self.manual = false;
         let (r, settle) = match mode {
             10 => (6, 2500),
@@ -410,25 +617,145 @@ impl Dmm {
             12 => (0, 100),
             13 => (0, 200),
             14 => (0, 1000),
-            15 => (0, 500),
+            15 => (self.t_range0(), 500),
             _ => (0, 450),
         };
         self.set(clk, mode.min(15), r, settle);
     }
 
-    /// Bottom button press (FUN_0803e108..e1a8): enter the function, or cycle
-    /// its sub-modes when it is already active.
+    // ------------------------------------------------------ temperature API
+
+    pub fn t_sensor(&self) -> u8 {
+        self.t_sensor
+    }
+
+    /// Change the temperature sensor; re-enters mode 15 when it is active.
+    pub fn set_t_sensor(&mut self, clk: &mut Clock, k: u8) {
+        self.t_sensor = k.min(T_NAMES.len() as u8 - 1);
+        if self.mode == 15 {
+            self.mode = 255;
+            self.select(clk, 15);
+        }
+    }
+
+    /// Offset of sensor `k` in C (TC: applied to the cold junction).
+    pub fn t_offs(&self, k: u8) -> f32 {
+        self.t_offs[k as usize % 7] as f32 * 0.1
+    }
+
+    pub fn set_t_offs(&mut self, k: u8, c: f32) {
+        self.t_offs[k as usize % 7] = (c.clamp(-20.0, 20.0) * 10.0 + if c < 0.0 { -0.5 } else { 0.5 }) as i16;
+    }
+
+    /// Persisted form: 7 offsets (0.1 C, i16) packed 2 per word.
+    pub fn t_offs_raw(&self) -> [i16; 7] {
+        self.t_offs
+    }
+
+    pub fn set_t_offs_raw(&mut self, o: [i16; 7]) {
+        self.t_offs = o.map(|v| v.clamp(-200, 200));
+    }
+
+    pub fn ntc_user(&self) -> (f32, f32) {
+        self.ntc_user
+    }
+
+    pub fn set_ntc_user(&mut self, r25: f32, beta: f32) {
+        if r25.is_finite() && beta.is_finite() {
+            self.ntc_user = (r25.clamp(100.0, 10.0e6), beta.clamp(1000.0, 10_000.0));
+        }
+    }
+
+    /// Cold junction (HY3131 internal sensor, C incl. the TC offset) and its
+    /// age in ms; None before the first thermocouple-mode measurement.
+    pub fn t_cj(&self, now: u64) -> Option<(f32, u64)> {
+        if self.t_cj_at == 0 { None } else { Some((self.t_cj, now - self.t_cj_at)) }
+    }
+
+    /// R25 / Beta of a resistive sensor, R0 for an RTD (sensor 1..6).
+    fn t_params(&self) -> (f32, f32) {
+        match self.t_sensor {
+            1 => (100.0, 0.0),
+            2 => (1000.0, 0.0),
+            3 => (10_000.0, 3950.0),
+            4 => (10_000.0, 3435.0),
+            5 => (100_000.0, 3950.0),
+            _ => self.ntc_user,
+        }
+    }
+
+    /// Entry range of mode 15: TC r0; PT100 r1; PT1000 r2; NTC the lowest of
+    /// r2..r6 whose full scale holds R25 (room temperature).
+    fn t_range0(&self) -> i8 {
+        match self.t_sensor {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            _ => {
+                let r25 = self.t_params().0;
+                (2..6).find(|&r| r25 < 0.95e3 * self.factor() * OHM_DEC[r]).unwrap_or(6) as i8
+            }
+        }
+    }
+
+    /// Resistive sensor excitation estimate: (range, R ohm, I A, P W), with
+    /// the inferred source T_VSRC behind Rref. None for the thermocouple.
+    pub fn t_excitation(&self) -> Option<(i8, f32, f32, f32)> {
+        if self.t_sensor == 0 {
+            return None;
+        }
+        let r = self.range.clamp(1, 6);
+        let i = T_VSRC / (OHM_RREF[r as usize] * 1e3 + self.t_res.max(0.0));
+        Some((r, self.t_res, i, i * i * self.t_res.max(0.0)))
+    }
+
+    /// DMM analog rail off (true) / back on (false: the HY3131 configuration
+    /// is rewritten, it may have lost power).
+    pub fn set_suspended(&mut self, clk: &mut Clock, off: bool) {
+        if off != self.suspended {
+            self.suspended = off;
+            if !off {
+                self.start(clk);
+            }
+        }
+    }
+
+    pub fn suspended(&self) -> bool {
+        self.suspended
+    }
+
+    /// Bottom button press (FUN_0803e108..e1a8 -> m+0xf..0x14, consumed by
+    /// FUN_08013262, app_decompile.c:14575): enter the function, or cycle its
+    /// sub-mode when it is already active. The in-function cycle is also what
+    /// the stock does on a PD6 click while the touch lock is on (FUN_08013134).
+    ///   V: DC -> AC -> AC+DC -> DC (`set_sub`), the range is kept, in mV it
+    ///      becomes r1; from elsewhere DC V r0.
+    ///   A: the same cycle in the same unit, range % 2; from elsewhere DC mA
+    ///      (mode 8) with the old range % 2.
+    ///   ohm: again toggles m+8 (range and manual kept); from elsewhere r6 auto.
+    ///   cap: from elsewhere r0 auto; again does nothing.
+    ///   cont/diode: diode first, then 11 <-> 12. Hz/temp: 14 first, 14 <-> 15.
     pub fn press(&mut self, clk: &mut Clock, b: Button) {
         let same = self.button() == b;
-        self.manual = false;
+        let m = self.mode;
+        if same && matches!(b, Button::Volt | Button::Amp) {
+            // DC -> AC -> AC+DC -> DC (the stock skips AC+DC for model 0).
+            let next = (self.sub() + 1) % 3;
+            self.set_sub(clk, next);
+            return;
+        }
+        if !same {
+            self.acdc = false;
+        }
         match b {
             Button::Volt => {
-                let m = if same && matches!(self.mode, 1 | 3) { 0 } else { 1 };
-                self.set(clk, m, 0, 450);
+                self.manual = false;
+                self.set(clk, 1, 0, 450);
             }
             Button::Amp => {
-                let m = if same && matches!(self.mode, 7..=9) { 5 } else { 8 };
-                self.set(clk, m, 0, 650);
+                self.manual = false;
+                let r = self.range.max(0) % 2;
+                self.set(clk, 8, r, 650);
             }
             Button::Ohm => {
                 if same {
@@ -436,28 +763,49 @@ impl Dmm {
                     let r = self.range.clamp(1, 6);
                     self.set(clk, 10, r, 300);
                 } else {
+                    self.manual = false;
                     self.set(clk, 10, 6, 2500);
                 }
             }
-            Button::Cap => self.set(clk, 13, 0, 200),
+            Button::Cap => {
+                if !same {
+                    self.manual = false;
+                    self.set(clk, 13, 0, 200);
+                }
+            }
             Button::ContDiode => {
-                let m = if same && self.mode == 12 { 11 } else { 12 };
-                self.set(clk, m, 0, if m == 11 { 200 } else { 100 });
+                self.manual = false;
+                let to = if same && m == 12 { 11 } else { 12 };
+                self.set(clk, to, 0, if to == 11 { 200 } else { 100 });
             }
             Button::HzTemp => {
-                let m = if same && self.mode == 14 { 15 } else { 14 };
-                self.set(clk, m, 0, if m == 14 { 1000 } else { 500 });
+                self.manual = false;
+                let to = if same && m == 14 { 15 } else { 14 };
+                let r = if to == 15 { self.t_range0() } else { 0 };
+                self.set(clk, to, r, if to == 14 { 1000 } else { 500 });
             }
         }
     }
 
-    /// AUTO key (FUN_0803ddf4).
+    /// AUTO key (FUN_0803ddf4, app_decompile.c:59745-59777): back to auto
+    /// range; only when the range was fixed (manual or REL, m+3 != 0): V in mV
+    /// with AUTO (m+6 == 1) -> V r0, A with AUTO (m+7 == 1) -> mA r0.
     pub fn auto_key(&mut self, clk: &mut Clock) {
+        let was_manual = self.manual;
         self.manual = false;
+        if !was_manual {
+            return;
+        }
         match self.mode {
             2 | 3 if self.v_auto == 1 => self.set(clk, self.mode - 2, 0, 350),
-            9 => self.set(clk, 8, 0, 350),
-            6 => self.set(clk, 5, 0, 650),
+            // Stock: m+5 == 1 (AC) -> 5, else (DC, AC+DC) -> 8.
+            4..=9 if self.a_auto == 1 => {
+                if self.sub() == 1 {
+                    self.set(clk, 5, 0, 650)
+                } else {
+                    self.set(clk, 8, 0, 350)
+                }
+            }
             _ => {}
         }
     }
@@ -467,8 +815,9 @@ impl Dmm {
         self.manual = manual;
     }
 
-    /// Manual range from the MF popup: V items 400 mV, 4, 40, 400, 1000 V;
-    /// A items 400 uA, 4000 uA, 40 mA, 400 mA, 4 A, 10 A; ohm 1..6.
+    /// Manual range from the MF popup: V items 600 mV, 6, 60, 600, 1000 V;
+    /// A items 600 uA, 6000 uA, 60 mA, 600 mA, 6 A, 10 A; ohm 1..6
+    /// (DM40C labels, COUNTS_MODEL).
     /// `None` = AUTO, `Some(255)` = AUTO+ (V/A only).
     pub fn set_range(&mut self, clk: &mut Clock, item: Option<u8>) {
         match (self.button(), item) {
@@ -489,7 +838,7 @@ impl Dmm {
                 self.a_auto = 1;
             }
             (Button::Volt, Some(i)) if i <= 4 => {
-                let ac = matches!(self.mode, 0 | 2);
+                let ac = self.sub() == 1;
                 self.manual = true;
                 if i == 0 {
                     self.set(clk, if ac { 2 } else { 3 }, 1, 450);
@@ -498,7 +847,7 @@ impl Dmm {
                 }
             }
             (Button::Amp, Some(i)) if i <= 5 => {
-                let ac = matches!(self.mode, 4..=6);
+                let ac = self.sub() == 1;
                 let unit = 2 - (i / 2); // 0 A, 1 mA, 2 uA
                 let m = if ac { 4 } else { 7 } + unit;
                 self.manual = true;
@@ -519,7 +868,7 @@ impl Dmm {
         let m = self.mode;
         match m {
             0..=3 => {
-                let sub = matches!(m, 0 | 2) as u8;
+                let sub = self.sub();
                 let r = if self.manual {
                     if m >= 2 { 0 } else { self.range as u8 + 1 }
                 } else if self.v_auto == 1 {
@@ -530,7 +879,7 @@ impl Dmm {
                 sub << 6 | r << 3
             }
             4..=9 => {
-                let sub = (m <= 6) as u8;
+                let sub = self.sub();
                 let unit = (m - 4) % 3; // 0 A, 1 mA, 2 uA
                 let r = if self.manual {
                     [4, 2, 0][unit as usize] + self.range as u8
@@ -563,6 +912,7 @@ impl Dmm {
                 if self.button() != Button::Volt {
                     self.select(clk, 1);
                 }
+                self.bt_acdc(s);
                 let ac = s == 1;
                 if r <= 4 {
                     self.manual = true;
@@ -590,6 +940,7 @@ impl Dmm {
                 if self.button() != Button::Amp {
                     self.select(clk, 8);
                 }
+                self.bt_acdc(s);
                 let ac = s == 1;
                 if r <= 5 {
                     self.manual = true;
@@ -636,8 +987,21 @@ impl Dmm {
         before != (self.button(), self.mode_byte() & 0xC0)
     }
 
+    /// BT command 06 sub-mode 2 = AC+DC (page+9 = s; AC+DC uses the DC HY
+    /// mode, which the caller then selects for s != 1).
+    fn bt_acdc(&mut self, s: u8) {
+        if (s == 2) != self.acdc {
+            self.acdc = s == 2;
+            self.phase_n = 0;
+            self.reset_values();
+        }
+    }
+
     /// Anti-drop: pulse the latching V/A relay again into its current state.
     pub fn reassert_relay(&mut self, clk: &mut Clock) {
+        if self.suspended {
+            return;
+        }
         if let Some(pa) = self.pa_now {
             relay_pa(clk, pa);
         }
@@ -655,6 +1019,9 @@ impl Dmm {
     /// Poll the converter (every ~10 ms). Returns a reading when one is ready.
     pub fn poll(&mut self, clk: &mut Clock) -> Option<Reading> {
         let now = clk.now_ms();
+        if self.suspended {
+            return None;
+        }
         self.diode_beep(now);
         if now < self.deadline {
             return None;
@@ -668,6 +1035,7 @@ impl Dmm {
             12 => self.poll_diode(now),
             13 => self.poll_cap(clk, now),
             14 => self.poll_freq_mode(now),
+            _ if self.t_sensor != 0 => self.poll_rtd(clk, now),
             _ => self.poll_temp(now),
         };
         r.map(|mut r| {
@@ -676,12 +1044,13 @@ impl Dmm {
             r.auto = !self.manual;
             r.auto_plus = (self.button() == Button::Volt && self.v_auto == 1)
                 || (self.button() == Button::Amp && self.a_auto == 1);
+            r.acdc = self.acdc;
             r
         })
     }
 
     fn reading(&self, main: Val, si: f32) -> Reading {
-        Reading { mode: self.mode, range: self.range, main, aux1: None, aux2: None, si, auto: true, auto_plus: false, seq: 0 }
+        Reading { mode: self.mode, range: self.range, main, aux1: None, aux2: None, si, auto: true, auto_plus: false, acdc: false, seq: 0 }
     }
 
     fn ad1(&mut self) -> Option<i32> {
@@ -711,7 +1080,9 @@ impl Dmm {
         let ad1 = self.ad1()?;
         let r = self.range as usize;
         let (f, ov) = (self.factor(), self.over());
-        if self.mode == 1 {
+        let m = self.mode;
+        let before = (m, self.range);
+        let (x, lim, dec, unit, si_k) = if m == 1 {
             self.osr(ad1, 0x206, 0x15);
             let mut v = ad1 as f32 * K_ACV[r] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * r as u32, 1.0)
                 - cal(0x14 + 4 * r as u32, 0.0);
@@ -721,62 +1092,99 @@ impl Dmm {
             if r == 0 && v.abs() / 20000.0 > 3e-5 {
                 v += 1e-4 - v.abs() / 20000.0;
             }
-            let lim = (f * DEC4[r]).min(1000.0);
-            let ol = v.abs() / lim > ov;
-            if !self.manual {
-                if ol && r < 3 {
+            (v, (f * DEC4[r]).min(1000.0), 4 - r as u8, "V", 1.0)
+        } else {
+            self.osr(ad1, 0xE22 - 0x960 * r as i32, 0x15);
+            let mv = ad1 as f32 * (1.25 / 0.9) / MV_DIV[r] / (AD1_DIV / 1000.0) * cal(0x24 + 4 * r as u32, 1.0)
+                - cal(0x2C + 4 * r as u32, 0.0);
+            (mv, f * [10.0, 100.0][r], 3 - r as u8, "mV", 1e-3)
+        };
+        // Autorange magnitude S+0x60: |DC|, AC+DC: hypot(AC raw, DC).
+        let mag = if self.acdc { hypot(self.ac_raw, x) } else { x.abs() };
+        if !self.manual {
+            let up = mag > ov * lim;
+            if m == 1 {
+                if up && r < 3 {
                     self.set(clk, 1, r as i8 + 1, 250);
-                } else if v.abs() < 0.1 * lim / ov {
+                } else if mag < 0.1 * lim / ov {
                     if r > 0 {
                         self.set(clk, 1, r as i8 - 1, 250);
                     } else if self.v_auto & 2 != 0 {
                         self.set(clk, 3, 1, 450);
                     }
                 }
-            }
-            let main = if ol { Val::ol(4 - r as u8, "V") } else { Val::new(v, 4 - r as u8, "V") };
-            Some(self.reading(main, v))
-        } else {
-            self.osr(ad1, 0xE22 - 0x960 * r as i32, 0x15);
-            let mv = ad1 as f32 * (1.25 / 0.9) / MV_DIV[r] / (AD1_DIV / 1000.0) * cal(0x24 + 4 * r as u32, 1.0)
-                - cal(0x2C + 4 * r as u32, 0.0);
-            let lim = f * [10.0, 100.0][r];
-            let ol = mv.abs() / lim > ov;
-            if !self.manual && ol {
+            } else if up {
                 if r == 0 {
                     self.set(clk, 3, 1, 250);
                 } else if self.v_auto & 1 != 0 {
                     self.set(clk, 1, 0, 350);
                 }
             }
-            let main = if ol { Val::ol(3 - r as u8, "mV") } else { Val::new(mv, 3 - r as u8, "mV") };
-            Some(self.reading(main, mv * 1e-3))
         }
+        self.dc_out(clk, x, lim, dec, unit, si_k, before)
+    }
+
+    /// End of a DC reading (modes 1, 3, 7..9): plain DC, or the DC phase of
+    /// AC+DC (FUN_08013734 cases 1, 3, 7..9): shown = hypot(AC filtered, DC),
+    /// aux1/aux2 = AC/DC parts; after S+10 readings back to the AC mode
+    /// (DCV 800 ms S+10 = 3, DCmV 800 ms 2, DCA 900 ms 2). A range / unit
+    /// change in AC+DC gives no value this time (stock: OL, m+0xd8 = 0).
+    fn dc_out(&mut self, clk: &mut Clock, x: f32, lim: f32, dec: u8, unit: &'static str, si_k: f32, before: (u8, i8)) -> Option<Reading> {
+        let ov = self.over();
+        if !self.acdc {
+            let ol = x.abs() / lim > ov;
+            return Some(self.reading(if ol { Val::ol(dec, unit) } else { Val::new(x, dec, unit) }, x * si_k));
+        }
+        if (self.mode, self.range) != before {
+            return None;
+        }
+        self.dc_val = x;
+        self.acdc_seen |= 2;
+        let t = hypot(self.f_ac, x);
+        let ol = t / lim > ov;
+        let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(t, dec, unit) }, t * si_k);
+        rd.aux1 = Some(part(self.f_ac, lim, dec, unit));
+        rd.aux2 = Some(part(x, lim, dec, unit));
+        if self.phase_n == 0 {
+            let (to, settle, n) = match self.mode {
+                1 => (0, 800, 3),
+                3 => (2, 800, 2),
+                dm => (dm - 3, 900, 2),
+            };
+            let r = self.range;
+            self.switch_phase(clk, to, r, settle);
+            self.phase_n = n;
+        } else {
+            self.phase_n -= 1;
+        }
+        (self.acdc_seen == 3).then_some(rd)
     }
 
     fn poll_dca(&mut self, clk: &mut Clock) -> Option<Reading> {
         let ad1 = self.ad1()?;
         self.osr(ad1, 0x168, 0x15);
         let (m, r) = (self.mode, self.range as usize);
+        let before = (m, self.range);
         let u = (m - 7) as usize; // 0 A, 1 mA, 2 uA
         let i = u * 2 + r;
-        let mut a = ad1 as f32 * 1.25 / (SHUNT[u] * MV_DIV[r] * 0.9) / AD1_DIV * cal(0x94 + 4 * i as u32, 1.0)
+        let raw = ad1 as f32 * 1.25 / (SHUNT[u] * MV_DIV[r] * 0.9) / AD1_DIV * cal(0x94 + 4 * i as u32, 1.0)
             - cal(0xAC + 4 * i as u32, 0.0);
+        let mut a = raw;
         if m == 7 && r == 1 {
             ema(0.0007, 0.15, a, &mut self.f_dc);
             a = self.f_dc;
         }
         let lim = (self.factor() * DEC4[u + r]).min(if m == 7 { 10.0 } else { f32::MAX });
         let ov = self.over();
-        let ol = a.abs() / lim > ov;
+        let mag = if self.acdc { hypot(self.ac_raw, raw) } else { a.abs() };
         if !self.manual {
-            if ol {
+            if mag > ov * lim {
                 if r == 0 {
                     self.set(clk, m, 1, 250);
                 } else if m > 7 && self.a_auto & 1 != 0 {
                     self.set(clk, m - 1, 1, 250);
                 }
-            } else if a.abs() < 0.1 * lim / ov {
+            } else if mag < 0.1 * lim / ov {
                 if r == 1 {
                     self.set(clk, m, 0, 250);
                 } else if m < if self.a_auto == 3 { 9 } else { 8 } {
@@ -784,13 +1192,13 @@ impl Dmm {
                 }
             }
         }
-        let (unit, dec, si) = match u {
-            0 => ("A", 4 - r as u8, a),
-            1 => ("mA", 3 - r as u8, a * 1e-3),
-            _ => ("\u{b5}A", 2 - r as u8, a * 1e-6),
+        let (unit, dec, si_k) = match u {
+            0 => ("A", 4 - r as u8, 1.0),
+            1 => ("mA", 3 - r as u8, 1e-3),
+            _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
-        let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(a, dec, unit) }, si);
-        if m == 8 {
+        let mut rd = self.dc_out(clk, a, lim, dec, unit, si_k, before)?;
+        if m == 8 && !self.acdc {
             // 4-20 mA loop percentage.
             let p = (a.abs() - 4.0) * 6.25;
             rd.aux2 = Some(if p > 125.0 { Val::ol(1, "%") } else { Val::new(p, 1, "%") });
@@ -829,6 +1237,7 @@ impl Dmm {
         if ac < 0.0 {
             ac = 0.0;
         }
+        self.ac_raw = ac;
         let (thr, a_rms, a_lpf) = match m {
             0 => (ACV_WIN[r], 0.25, 0.25),
             2 => (ACMV_WIN[r], 0.35, 0.35),
@@ -837,31 +1246,50 @@ impl Dmm {
         ema(thr, a_rms, ac, &mut self.f_ac);
         ema(thr, a_lpf, dcp, &mut self.f_lpf);
 
-        let mag = if m <= 2 { ac } else { sqrt(ac * ac + 0.25 * dcp * dcp) };
+        // AC+DC: hypot(AC raw, last DC part) for every quantity.
+        let mag = if self.acdc {
+            hypot(ac, self.dc_val)
+        } else if m <= 2 {
+            ac
+        } else {
+            sqrt(ac * ac + 0.25 * dcp * dcp)
+        };
+        let before = (m, self.range);
+        let acdc = self.acdc;
         let lim = match m {
             0 => (f * DEC4[r]).min(1000.0),
             2 => f * [10.0, 100.0][r],
             _ => (f * DEC4[(m - 4) as usize + r]).min(if m == 4 { 10.0 } else { f32::MAX }),
         };
-        let ol = self.f_ac / lim > ov;
         if !self.manual {
             let up = mag > ov * lim;
             let down = mag < 0.1 * lim / ov;
             match m {
+                // AC+DC: a V / mV range change is applied through the DC
+                // phase (600 ms, S+10 = 2); unit changes go to the DC mode.
                 0 => {
-                    if up && r < 3 {
-                        self.set(clk, 0, r as i8 + 1, 450);
-                    } else if down && r > 0 {
-                        self.set(clk, 0, r as i8 - 1, 450);
+                    if (up && r < 3) || (down && r > 0) {
+                        let to = if up { r as i8 + 1 } else { r as i8 - 1 };
+                        if acdc {
+                            self.switch_phase(clk, 1, to, 600);
+                            self.phase_n = 2;
+                        } else {
+                            self.set(clk, 0, to, 450);
+                        }
                     } else if down && self.v_auto & 2 != 0 {
-                        self.set(clk, 2, 1, 600);
+                        self.set(clk, if acdc { 3 } else { 2 }, 1, 600);
                     }
                 }
                 2 => {
                     if up && r == 0 {
-                        self.set(clk, 2, 1, 450);
+                        if acdc {
+                            self.switch_phase(clk, 3, 1, 600);
+                            self.phase_n = 2;
+                        } else {
+                            self.set(clk, 2, 1, 450);
+                        }
                     } else if up && self.v_auto & 1 != 0 {
-                        self.set(clk, 0, 0, 350);
+                        self.set(clk, acdc as u8, 0, 350);
                     }
                 }
                 _ => {
@@ -884,6 +1312,38 @@ impl Dmm {
             5 => ("mA", 3 - r as u8, 1e-3),
             _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
+        if acdc {
+            // AC phase of AC+DC (FUN_08013734 cases 0, 2, 4..6): shown =
+            // hypot(AC filtered, DC part); after S+10 readings to the DC mode
+            // (ACV 600 ms + R32 = 0x38, ACmV 500 ms, ACA 700 ms; S+10 = 2).
+            if (self.mode, self.range) != before {
+                return None;
+            }
+            let dm = if m <= 2 { m + 1 } else { m + 3 };
+            self.acdc_seen |= 1;
+            let t = hypot(self.f_ac, self.dc_val);
+            let ol = t / lim > ov;
+            let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(t, dec, unit) }, t * si_k);
+            rd.mode = dm;
+            rd.aux1 = Some(part(self.f_ac, lim, dec, unit));
+            rd.aux2 = Some(part(self.dc_val, lim, dec, unit));
+            if self.phase_n == 0 {
+                let r = self.range;
+                self.switch_phase(clk, dm, r, match m {
+                    0 => 600,
+                    2 => 500,
+                    _ => 700,
+                });
+                if m == 0 {
+                    hy::write(0x32, &[0x38]);
+                }
+                self.phase_n = 2;
+            } else {
+                self.phase_n -= 1;
+            }
+            return (self.acdc_seen == 3).then_some(rd);
+        }
+        let ol = self.f_ac / lim > ov;
         let v = self.f_ac;
         let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, v * si_k);
         self.freq_secondary(now, 0xF0);
@@ -922,7 +1382,10 @@ impl Dmm {
                     self.set(clk, 10, to, 150);
                     return None;
                 }
-            } else if q > 10.0 && r > 1 {
+            } else if q > 10.0 * ov * ov && r > 1 {
+                // Down below 0.1 * lim / over, as V / A. The stock tests
+                // q > 10 (R < over * lim / 10), which is exactly the next lower
+                // range's up threshold: no hysteresis band at all.
                 let step = if now < self.entry + 2500 {
                     1
                 } else if q > 1e5 {
@@ -1121,7 +1584,12 @@ impl Dmm {
                 None
             }
             1 => {
-                self.t_cj = (self.t_code_a - ad1) as f32 / 640_000.0 * 314.15 - 289.15 + cal(0x194, 0.0);
+                // User offset of the thermocouple sensor on the cold junction:
+                // T = Tcj - 26 + T_tc(Vtc), so it shifts T by the same amount
+                // and also corrects the CJ readout (community: the internal
+                // sensor itself reads 3.6..6 C low on early units).
+                self.t_cj = (self.t_code_a - ad1) as f32 / 640_000.0 * 314.15 - 289.15 + cal(0x194, 0.0) + self.t_offs(0);
+                self.t_cj_at = now.max(1);
                 hy::write(0x33, &[0xAC]);
                 self.t_phase = 2;
                 self.deadline = now + 800;
@@ -1145,6 +1613,75 @@ impl Dmm {
                 Some(rd)
             }
         }
+    }
+
+    /// Resistive temperature sensor on the ohm path (see the T_NAMES notes).
+    fn poll_rtd(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
+        let ad1 = self.ad1()?;
+        let r = self.range.clamp(1, 6) as usize;
+        let ohm = ((ad1.unsigned_abs() as f32) * cal(0x124 + 4 * r as u32, 1.0) * OHM_RREF[r] / 0.9 / AD1_DIV
+            - cal(0x144, 0.0))
+            * 1e3;
+        self.t_res = ohm;
+        let lim = self.factor() * OHM_DEC[r] * 1e3;
+        let (r0, beta) = self.t_params();
+        if self.t_sensor >= 3 {
+            // NTC range policy: up at 95 % of full scale (before OL at 103 %),
+            // down below 8.5 % (= 85 % of the lower range), two readings in a
+            // row; r2..r6. Every candidate range keeps the sensor power far
+            // below 0.1 mW, so the choice is about resolution (t_excitation).
+            let to = if ohm > 0.95 * lim && r < 6 {
+                r + 1
+            } else if ohm < 0.085 * lim && r > 2 {
+                r - 1
+            } else {
+                r
+            };
+            if to != r {
+                self.t_votes += 1;
+                if self.t_votes >= 2 {
+                    self.t_votes = 0;
+                    self.range = to as i8;
+                    self.write_config(clk);
+                    self.deadline = now + 300;
+                    return None;
+                }
+            } else {
+                self.t_votes = 0;
+            }
+        }
+        let t = if ohm > self.over() * lim {
+            None
+        } else if self.t_sensor <= 2 {
+            pt_temp(ohm / r0)
+        } else {
+            ntc_temp(ohm, r0, beta)
+        };
+        let t = t.map(|t| t + self.t_offs(self.t_sensor));
+        if let Some(t) = t {
+            if self.t_phase == 0 {
+                self.t_phase = 1;
+                self.t_f = t;
+            } else {
+                ema(0.5, 0.3, t, &mut self.t_f);
+            }
+        } else {
+            self.t_phase = 0;
+        }
+        let tv = self.t_f;
+        let c = "\u{b0}C";
+        let mut rd = self.reading(if t.is_some() { Val::new(tv, 2, c) } else { Val::ol(2, c) }, tv);
+        rd.aux1 = Some(if ohm > self.over() * lim {
+            Val::ol(2, "\u{3a9}")
+        } else if ohm < 1e3 {
+            Val::new(ohm, 2, "\u{3a9}")
+        } else if ohm < 1e6 {
+            Val::new(ohm * 1e-3, 3, "k\u{3a9}")
+        } else {
+            Val::new(ohm * 1e-6, 3, "M\u{3a9}")
+        });
+        rd.aux2 = Some(if t.is_some() { Val::new(32.0 + tv * 1.8, 2, "\u{b0}F") } else { Val::ol(2, "\u{b0}F") });
+        Some(rd)
     }
 
     fn cap_val(&self, c_uf: f32, ol: bool) -> Reading {
@@ -1255,6 +1792,8 @@ impl Dmm {
         if class != self.ramp.class {
             self.ramp.class = class;
             self.ramp.med_i = 0;
+            // Comparator threshold by the REAL model byte (dmm_v2_6.h:164,326):
+            // an HY3131 analog setting, not a counts limit, so not COUNTS_MODEL.
             let v = CAP_R21[class as usize - 1] - if self.model == 2 { 0 } else { 1 };
             hy::write(0x21, &[v]);
             self.deadline = now + 255;

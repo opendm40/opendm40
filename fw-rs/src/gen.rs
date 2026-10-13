@@ -49,6 +49,9 @@ impl Wave {
 pub struct Settings {
     pub on: bool,
     pub wave: Wave,
+    /// The user's set frequency, Hz (1 .. 10 MHz). Kept as set across wave
+    /// changes; what is actually output is `snap_freq(wave, freq_hz)`
+    /// (`Gen::out_hz`), which may be lower (stock snapping) or 0 (silent).
     pub freq_hz: u32,
     /// Peak amplitude, V (0.5 .. 3.0). The output is unipolar 0..amp.
     pub amp_v: f32,
@@ -57,7 +60,17 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub const DEFAULT: Settings = Settings { on: false, wave: Wave::Sine, freq_hz: 1000, amp_v: 3.0, duty: 5000 };
+    // Stock power-on defaults (scope_gen_ui_v2_6.h:318-320, 556-559; the ui header
+    // corrects the gen header's "wave default 0" to wave 1 = Square at 2 MHz).
+    pub const DEFAULT: Settings = Settings { on: false, wave: Wave::Square, freq_hz: 2_000_000, amp_v: 3.0, duty: 5000 };
+}
+
+/// Highest settable frequency (the top PWM step).
+pub const F_MAX: u32 = 10_000_000;
+
+/// Normalise a user-set frequency for `Settings::freq_hz`: 1 Hz .. 10 MHz.
+pub fn clamp_freq(f: u32) -> u32 {
+    f.clamp(1, F_MAX)
 }
 
 /// PWM path frequencies above 50 kHz (TIM12 PSC / period at 200 MHz).
@@ -65,17 +78,27 @@ const PWM_HZ: [u32; 7] = [100_000, 200_000, 500_000, 1_000_000, 2_000_000, 5_000
 const PWM_PSC: [u32; 7] = [4, 4, 4, 4, 0, 0, 0];
 const PWM_PER: [u32; 7] = [400, 200, 80, 40, 100, 40, 20];
 
-/// Frequency as the stock UI snaps it (FUN_08021cc8): < 1 kHz any integer,
-/// 1..50 kHz to 1 kHz steps, above 50 kHz square only at the PWM steps.
+/// Frequency as the stock UI snaps it (FUN_08021cc8; scope_gen_v2_6.h:123-125,
+/// scope_gen_ui_v2_6.h:293-295): f < 1 kHz any integer, 1..50 kHz rounded down to
+/// 1 kHz steps. Above 50 kHz only a square wave has an output: the PWM steps begin
+/// at 100 kHz, so a square in 50k..100k snaps DOWN to 50 kHz, and above 10 MHz caps
+/// at 10 MHz. A non-square above 50 kHz goes silent (0 Hz; the `on` flag is kept).
+/// Idempotent, 0 included (0 = silent stays silent). This is the OUTPUT
+/// frequency: callers keep the user's value in `Settings::freq_hz` and never
+/// store the snapped one, so a wave change cannot destroy the setting.
 pub fn snap_freq(wave: Wave, f: u32) -> u32 {
     if f < 1000 {
-        f.max(1)
+        f
     } else if f <= 50_000 {
         f / 1000 * 1000
     } else if wave == Wave::Square {
-        *PWM_HZ.iter().rev().find(|&&p| p <= f).unwrap_or(&PWM_HZ[0])
+        if f < 100_000 {
+            50_000
+        } else {
+            *PWM_HZ.iter().rev().find(|&&p| p <= f).unwrap_or(&PWM_HZ[0])
+        }
     } else {
-        50_000
+        0
     }
 }
 
@@ -125,22 +148,34 @@ impl Gen {
         Gen { s: Settings::DEFAULT, real_hz: 0.0 }
     }
 
-    /// Apply new settings (FUN_080166a4).
+    /// Frequency actually output for the current wave and set frequency, Hz
+    /// (stock snapping; 0 = silent: non-square above 50 kHz). Independent of
+    /// `on`.
+    pub fn out_hz(&self) -> u32 {
+        snap_freq(self.s.wave, self.s.freq_hz)
+    }
+
+    /// Apply new settings (FUN_080166a4). `s.freq_hz` is kept as set (only
+    /// clamped to 1 Hz .. 10 MHz); the output runs at `out_hz()`.
     pub fn apply(&mut self, s: Settings) {
         let mut s = s;
         s.amp_v = s.amp_v.clamp(0.5, 3.0);
         s.duty = s.duty.min(10000);
-        s.freq_hz = snap_freq(s.wave, s.freq_hz);
+        s.freq_hz = clamp_freq(s.freq_hz);
         self.s = s;
         stop_outputs();
-        if !s.on {
+        let f = self.out_hz();
+        // Off, or a frequency the stock snaps to 0 (non-square above 50 kHz):
+        // leave every output de-energised (stop_outputs parked DAC/DMA/TIM6/TIM12
+        // and the pins) rather than program a bogus timer or divide by zero in dac().
+        if !s.on || f == 0 {
             self.real_hz = 0.0;
             return;
         }
-        if s.wave == Wave::Square && s.freq_hz > 50_000 {
-            self.pwm(s.freq_hz);
+        if s.wave == Wave::Square && f > 50_000 {
+            self.pwm(f);
         } else {
-            self.dac(&s);
+            self.dac(&s, f);
         }
     }
 
@@ -165,8 +200,7 @@ impl Gen {
         self.real_hz = 200e6 / ((PWM_PSC[i] + 1) * PWM_PER[i]) as f32;
     }
 
-    fn dac(&mut self, s: &Settings) {
-        let f = s.freq_hz;
+    fn dac(&mut self, s: &Settings, f: u32) {
         let (psc, n) = if f > 5000 {
             (0, (10_000_000 / f) as usize)
         } else {

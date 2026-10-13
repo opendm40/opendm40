@@ -20,9 +20,55 @@ opt-level = "z"
 panic = "abort"
 
 [features]
+# Back up the calibration record (0x080C0000), the UID-bound boot data
+# (0x080A4000), UID, option bytes, OTP, the primary bootloader (0x08000000) and
+# the loader sector (0x080A0000) to the SPI-flash USB disk at boot
+# (src/calbackup.rs: CALIB.BIN, BOOTDATA.BIN, UID.BIN, OPTBYTES.BIN, OTP.BIN,
+# ROMBOOT.BIN, LOADER.BIN, BACKUP.TXT; written only when missing or
+# different). Implied by native.
+# Off in the RAM images: it costs ~6.5 KB of CODE. The default image has only
+# ~250 bytes of its 120 KiB CODE left (2026-10-13, after the UI/DMM work), so
+# `./build.sh --features calbackup` no longer fits (overflows by ~6.3 KB);
+# test-initcore no longer links either, even without calbackup (CODE overflow
+# ~6.4 KB, of which ~400 B is the DBG:BOOT? put_extra call).
+calbackup = []
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the stock firmware last drew.
 keep-screen = []
+# Embed the stock bitmap fonts (stockfont_data.rs, ~83 KB) into our image for
+# the future native-flash layout. Off by default: the RAM-loaded sector-8 image
+# reads the stock fonts in place from internal flash instead (fits in 128 KB).
+embedded-fonts = []
+# Native-flash (XIP) image at 0x08004000: fw-rs runs with no stock firmware
+# having configured the clock first, so the native shim calls clock::init_core()
+# to bring up the 200 MHz tree itself. Off by default: the RAM-loaded sector-8
+# image inherits the clock the stock firmware already set, so init_core stays
+# defined-but-uncalled there (silenced with #[allow(dead_code)]).
+native = ["embedded-fonts", "calbackup"]
+# Hardware tests of the native boot code from the RAM-loaded sector-8 image
+# (docs/native-boot.md "Implementation", test plan T1/T2). They link with
+# link-test.x (SRAM0 code region 8 KiB larger; build.sh selects the script).
+#   test-initcore: clock::init_core() from the stock 200 MHz state + the native
+#     board init (GPIO/DMA clocks, rails, FSMC + ILI9488, backlight) + fatren
+#     (dry run unless fatren-live), then the normal fw-rs main.
+#   test-recovery: the shim sequence (decision recorded, recovery forced) then
+#     the native recovery mode: ZERO the stock app's 12-byte marker at
+#     0x08008000 + reset. DESTRUCTIVE but recoverable: the meter then stays in
+#     the vendor update screen until dm40_patched.bin is reinstalled through it.
+test-initcore = []
+test-recovery = []
+# fatren (src/fatren.rs: after a native boot, rename the installed dm40*.bin
+# on the SPI FAT to _DM40PRV.BIN; its exact condition is owned by fatren.rs): fatren-dry-run only reports what
+# it would do. test-initcore is always a dry run unless fatren-live is given.
+fatren-dry-run = []
+fatren-live = []
+# Recovery alternatives for tests (default recovery = zero the 12-byte loader
+# marker at 0x08008000 + reset -> vendor loader update screen + USB disk):
+#   recovery-file: 0-byte DM40RCVR.BIN on the SPI FAT + power off (needs a cold
+#     boot with the key held long enough to reach the loader);
+#   recovery-usb: our own minimal USB mass-storage disk (no LCD).
+recovery-file = []
+recovery-usb = []
 
 [dependencies]
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }

@@ -5,9 +5,30 @@
 //!   *IDN?  *RST  *CLS  *OPC?  *ESR?  *STB?  SYSTem:ERRor?
 //!   CONFigure:<f>  MEASure:<f>?  READ?  FETCh?  [SENSe:]FUNCtion?
 //!   [SENSe:]FUNCtion "<f>"
-//! where <f> = VOLTage[:DC] | VOLTage:AC | CURRent[:DC] | CURRent:AC |
-//! RESistance | CONTinuity | DIODe | CAPacitance | FREQuency | TEMPerature.
-//! Functions are stock DMM mode numbers (see dmm.rs).
+//! where <f> = VOLTage[:DC] | VOLTage:AC | VOLTage:ACDC | CURRent[:DC] |
+//! CURRent:AC | CURRent:ACDC | RESistance | CONTinuity | DIODe | CAPacitance |
+//! FREQuency | TEMPerature. Functions are stock DMM mode numbers (see dmm.rs),
+//! 16 / 17 = V / A AC+DC (true RMS of AC+DC = sqrt(AC^2 + DC^2), the stock
+//! DM40B/C sub-mode; FUNCtion? answers "VOLT:ACDC" / "CURR:ACDC").
+//!
+//! Temperature / system (fw-rs extensions):
+//!   CONFigure:TEMPerature [<sensor>]   MEASure:TEMPerature? [<sensor>]
+//!     <sensor> = TCK | PT100 | PT1000 | NTC10K3950 | NTC10K3435 | NTC100K3950
+//!     | NTCUSER (dmm.rs T_NAMES; also TC / K for TCK); without it the current
+//!     sensor is kept. Reading in C (OL = +9.9E37).
+//!   [SENSe:]TEMPerature:TRANsducer <sensor> / ?   select / query the sensor
+//!   [SENSe:]TEMPerature:OFFSet <C> / ?   offset of the CURRENT sensor, -20..20
+//!     in 0.1 C steps (thermocouple: applied to the cold junction)
+//!   [SENSe:]TEMPerature:NTC <R25_ohm>,<Beta> / ?   the NTCUSER parameters
+//!   [SENSe:]TEMPerature:EXCitation?   range,R_ohm,I_A,P_W of a resistive sensor
+//!     (I, P estimated with the inferred 0.85 V ohm source; TC: error)
+//!   MEASure:TEMPerature:CJ?   cold junction (HY3131 internal sensor, C, incl.
+//!     the TC offset),age_s. Measured only in thermocouple mode; outside it the
+//!     last value with its age (and "Data stale" in SYST:ERR?); never measured:
+//!     +9.9E37 and an error.
+//!   SYSTem:TEMPerature?   MCU (GD32) internal sensor, C (typical constants)
+//!   SYSTem:RAIL AUTO|BOTH / ?   analog rail policy (default AUTO, persisted)
+//!   SYSTem:RAIL:STATe?   dmm_rail,scope_rail (1/0)
 
 use crate::dmm::Reading;
 
@@ -28,6 +49,30 @@ pub enum Out {
     Instr(Cmd),
     /// Debug command (DBG:...), handled by the main loop.
     Dbg(Dbg),
+    /// Data-logger command (LOG:...), handled by the main loop with the logger.
+    Log(Log),
+}
+
+/// Data-logger commands (FR-38), executed by the main loop against `Logger`:
+///   LOG:STATe ON|OFF        start / stop the fast stream
+///   LOG:STATe?              1 / 0
+///   LOG:OSR <0..7>          AD1OSR code (OSR = 256 << n); takes effect at START
+///   LOG:OSR?                current code
+///   LOG:RATE?               measured mean sample rate, Hz (0 until 2 samples)
+///   LOG:COUNt?              buffered,captured,overwritten,missed
+///   LOG:PREamble?           mode,range,osr,nominal_us,measured_hz (scaling: raw
+///                           AD1 counts, 1.389 V / 8388607 cts * range decade;
+///                           calibration gain/offset NOT applied)
+///   LOG:DATA?               definite-length #4nnnn block of 12-byte LE records
+///                           {u32 seq, u32 ts_us, i32 raw_ad1}, oldest first
+#[derive(Clone, Copy)]
+pub enum Log {
+    State(Option<bool>),
+    Osr(Option<u8>),
+    Rate,
+    Count,
+    Preamble,
+    Data,
 }
 
 /// Debug commands over USBTMC (development aids, not SCPI standard):
@@ -36,8 +81,17 @@ pub enum Out {
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
 ///   DBG:DIAG?               diagnostic block (#3)
 ///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
-///   DBG:RELEASE             stop feeding the watchdog (back to stock ~20 s)
-///   DBG:RESET               reset to the stock firmware now
+///   DBG:RELEASE             stop feeding the watchdog. RAM: back to stock in ~20 s.
+///                           Native: the WDT reset counts as a crash (1st: fw-rs
+///                           reboots; 2nd without 60 s healthy: recovery = marker
+///                           zeroed, DESTRUCTIVE)
+///   DBG:RESET               RAM: reset to stock now. Native: reboot fw-rs (SW reset)
+///   DBG:RECOVER, DBG:UPDATE RAM: RECOVER = plain reset (Stage 0). Native, DESTRUCTIVE:
+///                           clear the previous-mode word, zero the 12-byte loader
+///                           marker, reset -> vendor update screen + its USB disk until
+///                           a dm40*.bin is installed. "Flash error" = marker did not
+///                           read back as zero (no reset). Sync + eject a copied file first.
+///   DBG:BOOT?               native boot info (src/boot.rs put_info)
 #[derive(Clone, Copy)]
 pub enum Dbg {
     Ping(u32),
@@ -87,6 +141,15 @@ pub enum Cmd {
     DiagDac,
     /// Debug: count PB14 (PWM output) rising edges for 2 ms.
     DiagPwm,
+    /// DMM / system commands (not scope commands, see App::scpi).
+    TempSensor(Option<u8>),
+    TempOffs(Option<f32>),
+    TempNtc(Option<(f32, f32)>),
+    TempExc,
+    TempCj,
+    SysTemp,
+    SysRail(Option<bool>),
+    SysRailState,
 }
 
 /// Parse a number like "1.5", "-2e-3", "10k" / "5m" (suffixes k, M, m, u, n).
@@ -176,11 +239,12 @@ fn kw(tok: &[u8], mnem: &str) -> bool {
 fn parse_func(parts: &[&[u8]]) -> Option<u8> {
     let p0 = *parts.first()?;
     let ac = parts.get(1).map(|p| kw(p, "AC")).unwrap_or(false);
+    let acdc = parts.get(1).map(|p| kw(p, "ACDC")).unwrap_or(false);
     let dc_or_none = parts.get(1).map(|p| kw(p, "DC")).unwrap_or(true);
     if kw(p0, "VOLTage") {
-        if ac { Some(0) } else if dc_or_none { Some(1) } else { None }
+        if ac { Some(0) } else if acdc { Some(16) } else if dc_or_none { Some(1) } else { None }
     } else if kw(p0, "CURRent") {
-        if ac { Some(5) } else if dc_or_none { Some(8) } else { None }
+        if ac { Some(5) } else if acdc { Some(17) } else if dc_or_none { Some(8) } else { None }
     } else if kw(p0, "RESistance") || kw(p0, "FRESistance") {
         Some(10)
     } else if kw(p0, "CONTinuity") {
@@ -198,12 +262,33 @@ fn parse_func(parts: &[&[u8]]) -> Option<u8> {
     }
 }
 
+/// Temperature sensor by name (dmm.rs T_NAMES; TC / K = TCK).
+fn parse_sensor(a: &[u8]) -> Option<u8> {
+    let a = trim(a);
+    if a == b"TC" || a == b"K" {
+        return Some(0);
+    }
+    crate::dmm::T_NAMES.iter().position(|n| n.as_bytes() == a).map(|k| k as u8)
+}
+
+/// Function with an optional temperature sensor argument: TEMP <sensor> ->
+/// 32 + sensor (Dmm::select).
+fn parse_func_arg(parts: &[&[u8]], arg: &[u8]) -> Option<u8> {
+    let f = parse_func(parts)?;
+    if f == 15 && !trim(arg).is_empty() {
+        return parse_sensor(arg).map(|k| 32 + k);
+    }
+    Some(f)
+}
+
 fn func_name(mode: u8) -> &'static str {
     match mode {
         0 | 2 => "\"VOLT:AC\"",
         1 | 3 => "\"VOLT\"",
         4..=6 => "\"CURR:AC\"",
         7..=9 => "\"CURR\"",
+        16 => "\"VOLT:ACDC\"",
+        17 => "\"CURR:ACDC\"",
         10 => "\"RES\"",
         11 => "\"CONT\"",
         12 => "\"DIOD\"",
@@ -265,6 +350,27 @@ impl Scpi {
                 (b"*RST", false) | (b"*CLS", false) => self.err = None,
                 (b"*OPC", true) => self.put(b"1"),
                 (b"*ESR", true) | (b"*STB", true) => self.put(b"0"),
+                _ if kw(p0, "SYSTem") && parts.len() > 1 && kw(parts[1], "TEMPerature") && query => {
+                    out = Out::Instr(Cmd::SysTemp)
+                }
+                _ if kw(p0, "SYSTem") && parts.len() > 1 && kw(parts[1], "RAIL") => {
+                    let a = trim(arg);
+                    out = Out::Instr(if parts.len() > 2 && query {
+                        Cmd::SysRailState
+                    } else if query {
+                        Cmd::SysRail(None)
+                    } else if kw(a, "BOTH") {
+                        Cmd::SysRail(Some(true))
+                    } else if kw(a, "AUTO") {
+                        Cmd::SysRail(Some(false))
+                    } else {
+                        self.err = Some("Illegal parameter value");
+                        continue;
+                    });
+                }
+                _ if kw(p0, "MEASure") && query && parts.len() > 2 && kw(parts[1], "TEMPerature") && kw(parts[2], "CJ") => {
+                    out = Out::Instr(Cmd::TempCj)
+                }
                 _ if kw(p0, "SYSTem") && parts.len() > 1 && kw(parts[1], "ERRor") && query => {
                     match self.err.take() {
                         Some(e) => {
@@ -275,11 +381,11 @@ impl Scpi {
                         None => self.put(b"0,\"No error\""),
                     }
                 }
-                _ if kw(p0, "MEASure") && query => match parse_func(&parts[1..]) {
+                _ if kw(p0, "MEASure") && query => match parse_func_arg(&parts[1..], arg) {
                     Some(f) => out = Out::Measure(Some(f)),
                     None => self.err = Some("Command error"),
                 },
-                _ if kw(p0, "CONFigure") && !query => match parse_func(&parts[1..]) {
+                _ if kw(p0, "CONFigure") && !query => match parse_func_arg(&parts[1..], arg) {
                     Some(f) => out = Out::Configure(f),
                     None => self.err = Some("Command error"),
                 },
@@ -380,6 +486,20 @@ impl Scpi {
                         b"FLASH" => Dbg::Flash,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
+                        // DBG:UPDATE = DBG:RECOVER (native): zero the 12-byte loader
+                        // marker at 0x08008000, then the deferred SYSRESETREQ ->
+                        // vendor update screen + its USB disk (docs/native-boot.md).
+                        // RAM build: RECOVER = plain reset. DBG:BOOT? = boot info.
+                        #[cfg(any(feature = "native", feature = "test-initcore"))]
+                        b"BOOT" => {
+                            crate::boot::put_info(self);
+                            continue;
+                        }
+                        #[cfg(feature = "native")]
+                        b"RECOVER" | b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err = Some("Flash error"); continue; } Dbg::Reset }
+                        #[cfg(not(feature = "native"))]
+                        b"RECOVER" => Dbg::Reset,
+                        // (block kept at its original line count: panic locations)
                         _ => {
                             self.err = Some("Undefined header");
                             continue;
@@ -390,13 +510,62 @@ impl Scpi {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     out = Out::Instr(if kw(sub, "PWM") { Cmd::DiagPwm } else { Cmd::DiagDac });
                 }
+                _ if kw(p0, "LOG") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let a = trim(arg);
+                    out = if kw(sub, "STATe") {
+                        Out::Log(Log::State(if query { None } else { Some(a == b"ON" || a == b"1") }))
+                    } else if kw(sub, "OSR") {
+                        Out::Log(Log::Osr(if query { None } else { Some(parse_num(a).unwrap_or(0.0) as u8) }))
+                    } else if kw(sub, "RATE") && query {
+                        Out::Log(Log::Rate)
+                    } else if kw(sub, "COUNt") && query {
+                        Out::Log(Log::Count)
+                    } else if kw(sub, "PREamble") && query {
+                        Out::Log(Log::Preamble)
+                    } else if kw(sub, "DATA") && query {
+                        Out::Log(Log::Data)
+                    } else {
+                        self.err = Some("Undefined header");
+                        continue;
+                    };
+                }
                 _ if kw(p0, "WAVeform") && query => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     out = Out::Instr(if kw(sub, "PREamble") { Cmd::WavPre } else { Cmd::WavData });
                 }
                 _ if kw(p0, "FETCh") && query => out = Out::Fetch,
-                _ if kw(p0, "SENSe") || kw(p0, "FUNCtion") => {
+                _ if kw(p0, "SENSe") || kw(p0, "FUNCtion") || kw(p0, "TEMPerature") => {
                     let rest = if kw(p0, "SENSe") { &parts[1..] } else { parts };
+                    if rest.first().map(|p| kw(p, "TEMPerature")).unwrap_or(false) {
+                        let sub = rest.get(1).copied().unwrap_or(&[]);
+                        let a = trim(arg);
+                        let c = if kw(sub, "TRANsducer") {
+                            match (query, parse_sensor(a)) {
+                                (true, _) => Some(Cmd::TempSensor(None)),
+                                (false, Some(k)) => Some(Cmd::TempSensor(Some(k))),
+                                _ => None,
+                            }
+                        } else if kw(sub, "OFFSet") {
+                            if query { Some(Cmd::TempOffs(None)) } else { parse_num(a).map(|v| Cmd::TempOffs(Some(v))) }
+                        } else if kw(sub, "NTC") {
+                            let mut it = a.split(|&b| b == b',');
+                            match (query, it.next().and_then(parse_num), it.next().and_then(parse_num)) {
+                                (true, _, _) => Some(Cmd::TempNtc(None)),
+                                (false, Some(r), Some(b)) => Some(Cmd::TempNtc(Some((r, b)))),
+                                _ => None,
+                            }
+                        } else if kw(sub, "EXCitation") && query {
+                            Some(Cmd::TempExc)
+                        } else {
+                            None
+                        };
+                        match c {
+                            Some(c) => out = Out::Instr(c),
+                            None => self.err = Some("Illegal parameter value"),
+                        }
+                        continue;
+                    }
                     if rest.first().map(|p| kw(p, "FUNCtion")).unwrap_or(false) {
                         if query {
                             self.put(func_name(cur).as_bytes());
@@ -433,6 +602,11 @@ impl Scpi {
     /// Append raw bytes to the reply.
     pub fn put_bytes(&mut self, b: &[u8]) {
         self.put(b);
+    }
+
+    /// Record an error for the next SYSTem:ERRor? query.
+    pub fn set_err(&mut self, e: &'static str) {
+        self.err = Some(e);
     }
 
     /// Append a number in NR3.

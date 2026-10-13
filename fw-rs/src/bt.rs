@@ -13,6 +13,10 @@ use crate::meter::Meter;
 use crate::mmio::{modify32, r32, w32};
 
 const GPIOA: u32 = 0x4002_0000;
+/// GPIOC input data register: PC14 = BT link up (the same read as
+/// `power::Power::bt_connected`, repeated here because main.rs does not pass
+/// `Power` to `init_module`).
+const GPIOC_IDR: u32 = 0x4002_0800 + 0x10;
 const RCU_APB1EN: u32 = 0x4002_3840;
 const UART4: u32 = 0x4000_4C00;
 const STAT: u32 = UART4 + 0x00;
@@ -48,6 +52,8 @@ pub struct Bt {
     rd: usize,
     buf: [u8; 5 + MAX_DATA + 1],
     n: usize,
+    /// One-shot module AT init done this power-on (bt_meas_v2_6.h, FUN_0800d848).
+    inited: bool,
 }
 
 impl Bt {
@@ -75,7 +81,7 @@ impl Bt {
             // UEN, TEN, REN (no interrupts: we run with IRQs masked).
             w32(CTL0, (1 << 13) | (1 << 3) | (1 << 2));
         }
-        Bt { rd: 0, buf: [0; 5 + MAX_DATA + 1], n: 0 }
+        Bt { rd: 0, buf: [0; 5 + MAX_DATA + 1], n: 0, inited: false }
     }
 
     fn rx_byte(&mut self) -> Option<u8> {
@@ -218,8 +224,51 @@ impl Bt {
         n
     }
 
+    /// One-shot module setup, issued the first time BT is on (bt_meas_v2_6.h
+    /// lines 87-92, FUN_0800d848 / FUN_0800ceaa): name the module
+    /// "DM40A"/"B"/"C" by model, and on an "OK" answer set the LED mode and
+    /// reset the module. The stock persists a "done" flag (settings 0x115 bit 7)
+    /// so it runs once ever; we have no such store, so `inited` runs it once per
+    /// power-on. The small startup delay keeps the first tick from consuming the
+    /// attempt before the module is ready to take AT (judgment call, not from
+    /// the header).
+    ///
+    /// Not while a phone is connected (PC14 high): the module is then in
+    /// transparent mode, so the AT text would reach the phone app as data,
+    /// at_answer would swallow 50 ms of request frames and AT+RESET would drop
+    /// the link. The attempt is kept for after the phone disconnects. The
+    /// caller must also not call this during a data-logger session (it blocks
+    /// the main loop for ~150 ms).
+    pub fn init_module(&mut self, clk: &mut Clock, model: u8) {
+        if self.inited || clk.now_ms() < 1000 {
+            return;
+        }
+        if unsafe { r32(GPIOC_IDR) } & (1 << 14) != 0 {
+            return;
+        }
+        self.inited = true;
+        self.at(b"AT+SBNDM40");
+        self.at(&[b'A' + model]);
+        self.at(b"\r\n");
+        let mut a = [0u8; 64];
+        let n = self.at_answer(clk, 50, &mut a);
+        let ans = {
+            let mut e = n;
+            while e > 0 && (a[e - 1] == b'\r' || a[e - 1] == b'\n') {
+                e -= 1;
+            }
+            &a[..e]
+        };
+        if ans == b"OK" {
+            self.at(b"AT+SLED0\r\n");
+            let mut _b = [0u8; 64];
+            self.at_answer(clk, 100, &mut _b);
+            self.at(b"AT+RESET\r\n");
+        }
+    }
+
     /// Serve one request frame (stock command set 00..09).
-    pub fn serve(&mut self, f: &Frame, clk: &mut Clock, dmm: &mut Dmm, meter: &mut Meter, raw: Option<&crate::dmm::Reading>) {
+    pub fn serve(&mut self, f: &Frame, clk: &mut Clock, dmm: &mut Dmm, meter: &mut Meter, raw: Option<&crate::dmm::Reading>, power: &crate::power::Power, locked: bool) {
         const LENS: [usize; 10] = [0, 0, 0, 1, 1, 1, 1, 20, 0, 0];
         if f.cmd > 9 {
             return;
@@ -245,7 +294,7 @@ impl Bt {
                         if d == 0 {
                             meter.rel_off();
                             dmm.hold_range(false);
-                        } else if meter.rel_on(raw) && dmm.mode() <= 10 || dmm.mode() == 14 {
+                        } else if meter.rel_on(raw) && dmm.hy_mode() <= 10 || dmm.hy_mode() == 14 {
                             dmm.hold_range(true);
                         }
                     }
@@ -280,16 +329,34 @@ impl Bt {
             }
             _ => {
                 let mut d = [0u8; 11];
-                let mode = dmm.mode();
+                let mode = dmm.hy_mode();
                 d[0] = dmm.mode_byte();
-                d[1] = (meter.hold as u8) << 7 | (meter.rel_active() as u8) << 5 | 5;
+                // Flags byte (bt_meas_v2_6.h section 3, lines 139-148): bit7 HOLD,
+                // bit6 key lock (name guess), bit5 REL, bit4 always 0, bit3 charging
+                // (meaning guess), bits0-2 battery level 0..5.
+                // TODO: bits 6 and 3 are guesses from the header (before they were
+                // added the byte was hold|rel|5). Check against the stock phone app
+                // (lock / charge icon shown at the right time) before relying on
+                // them; drop them if the app misreads them.
+                d[1] = (meter.hold as u8) << 7
+                    | (locked as u8) << 6
+                    | (meter.rel_active() as u8) << 5
+                    | (power.charging() as u8) << 3
+                    | (power.bars & 0x07);
                 let shown = meter.shown();
                 let main = shown.map(|r| r.main);
                 let (fm, vm) = encode(mode, main.as_ref(), None);
-                let a1 = shown.and_then(|r| r.aux1);
-                let a2 = shown.and_then(|r| r.aux2);
+                // AC+DC (sub 2): value 2 = AC part, value 3 = DC part, sent
+                // even when over range (only the LCD shows "0L" for them).
+                let acdc = shown.map(|r| r.acdc).unwrap_or(false);
+                let unol = |v: crate::dmm::Val| crate::dmm::Val { ol: v.ol && !acdc, ..v };
+                // Temperature: value 2 is the cold junction (C) for the stock
+                // app; a resistive sensor puts its resistance in aux1 instead,
+                // which is not sent (0xFFFF) so the app does not show ohms as C.
+                let a1 = shown.and_then(|r| r.aux1).map(unol).filter(|v| mode != 15 || v.unit == "\u{b0}C");
+                let a2 = shown.and_then(|r| r.aux2).map(unol);
                 let d3 = match mode {
-                    8 => Some(2),
+                    8 if !acdc => Some(2),
                     12 => Some(1),
                     _ => None,
                 };

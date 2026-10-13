@@ -8,8 +8,17 @@
     dm40dbg.py shot out.png [--format rgb565|rgb666]
     dm40dbg.py diag                      diagnostic block (hex)
     dm40dbg.py tap x y | left | right | key 0..3   inject touch / side key
-    dm40dbg.py release                   stop feeding -> stock fw in ~20 s
-    dm40dbg.py reset                     reset to stock now
+    dm40dbg.py release                   stop feeding the watchdog. RAM build:
+                                         back to stock in ~20 s. NATIVE: a WDT
+                                         reset = crash (2nd in a row -> recovery,
+                                         which ZEROES the app marker)
+    dm40dbg.py reset                     RAM: reset to stock. NATIVE: reboot fw-rs
+    dm40dbg.py recover                   RAM: plain reset (Stage 0). NATIVE:
+                                         DESTRUCTIVE, = DBG:UPDATE: zero the
+                                         app marker + reset -> vendor update
+                                         screen (see `recover -h`)
+    (native developer flow: copy a dm40*.bin onto the disk, sync + eject,
+     then  dm40dbg.py scpi 'DBG:UPDATE'  -> the loader installs it)
 
 Debug commands are SCPI DBG:... (see fw-rs/src/scpi.rs); needs read/write
 access to /dev/usbtmcN (udev rule).
@@ -23,6 +32,52 @@ import time
 
 VID, PID = 0x1209, 0x0001
 W, H = 480, 320
+
+RECOVER_HELP = """\
+NATIVE image (fw-rs flashed at 0x08004000, docs/native-boot.md): DBG:RECOVER is
+an alias of DBG:UPDATE and is DESTRUCTIVE (a one-way door into the vendor
+updater). It programs the 12-byte app marker at 0x08008000 to zero and resets.
+The ROM and the FS-loader then refuse to launch the app on every boot and show
+the loader's update screen with its own USB disk (28e9:028f) until a valid
+dm40*.bin is installed through it: copy one (e.g. dm40_fwrs.bin or
+dm40_v_2_6.bin) onto that disk, press "update" (or power-cycle). If a
+dm40*.bin was already on the disk (copied, synced and ejected before the
+command), the loader installs it straight away. "Flash error" = the marker did
+not read back as zero; no reset was done.
+
+RAM build (sector 8, BT-loaded) -- the text below: a plain reset (Stage 0).
+
+Prove the native-boot recovery path (Stage 0) -- see fw-rs/docs/stage0-test.md.
+
+`recover` sends DBG:RECOVER, which does a plain SYSRESETREQ (same mechanism as
+`reset`). On reset the stock ROM bootloader always runs the FS-loader at
+0x080a0000, which scans the SPI-flash FAT for dm40*.bin and, if one is present,
+CRC-checks it and re-installs its body to the app region at 0x08004000 before
+launching the app. fw-rs cannot write the FAT itself (it only exposes the flash
+as a USB disk; the host OS owns the filesystem), so YOU stage the file first.
+
+Stage 0 test (reflashes STOCK over the intact stock app -- non-destructive and
+reversible; current fw-rs is only RAM-loaded):
+
+  1. With fw-rs running, it enumerates a USB mass-storage disk. Mount it.
+  2. Copy the official stock update file onto that disk's root:
+         cp dm40_v_2_6.bin  /run/media/<you>/<DM40 disk>/
+     The filename already matches the FS-loader's dm40*.bin pattern -- do NOT
+     rename it. Keep EXACTLY ONE dm40*.bin on the disk (two give an
+     order-dependent install). Use the obfuscated official file, not *.dec.bin.
+  3. Confirm it is really there (ls the mounted disk) and flush/unmount so the
+     write reaches the flash.
+  4. Run:  dm40dbg.py recover
+  5. The device reboots. Expect the stock splash/UI to come up (the FS-loader
+     reflashed stock). "update ok" vs "update error" is decided by CRC inside
+     the FS-loader; a bad file is rejected and the old app is kept.
+  6. The stock app DELETES dm40_v_2_6.bin from the FAT after its first good
+     boot (the FS-loader itself does not delete it). Re-mount and verify it is
+     gone; if it somehow remains, delete it so the next boot does not reinstall
+     in a loop.
+  7. Back to fw-rs: run  fw-rs/tools/reload.sh  (RAM-loads fw-rs over Bluetooth;
+     it does not touch the FAT).
+"""
 
 
 def find_dev():
@@ -107,6 +162,10 @@ def main():
     p = sub.add_parser('key'); p.add_argument('code', type=int, help='0 MENU, 1 RUN, 2 AUTO, 3 MF')
     sub.add_parser('release')
     sub.add_parser('reset')
+    sub.add_parser('recover', description=RECOVER_HELP,
+                   formatter_class=argparse.RawDescriptionHelpFormatter,
+                   help='RAM: plain reset. NATIVE: zero the app marker + reset '
+                        '-> vendor update screen (DESTRUCTIVE)')
     a = ap.parse_args()
 
     ln = Link(a.dev)
@@ -152,6 +211,13 @@ def main():
         ln.write('DBG:RELEASE')
     elif a.cmd == 'reset':
         ln.write('DBG:RESET')
+    elif a.cmd == 'recover':
+        ln.write('DBG:RECOVER')
+        print('DBG:RECOVER sent. RAM build: plain reset (nothing is reflashed\n'
+              'unless the loader runs and finds a dm40*.bin). NATIVE: the app\n'
+              'marker was zeroed; the device comes up in the vendor update screen\n'
+              'with its USB disk -- copy a dm40*.bin there and press "update".\n'
+              'See `dm40dbg.py recover -h`.')
 
 
 if __name__ == '__main__':
