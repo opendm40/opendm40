@@ -550,6 +550,24 @@ impl ScopeView {
         }
     }
 
+    /// Generator state in the scope top bar (the generator keeps running).
+    pub fn gen_state(&self, g: &gen::Gen) {
+        let mut t = [0u8; 32];
+        let mut n = 0;
+        if g.s.on {
+            let mut b = [0u8; 24];
+            let k = eng(&mut b, g.s.freq_hz as f32, "Hz");
+            let name = g.s.wave.name().as_bytes();
+            let pre = b"GEN ";
+            for part in [&pre[..], &name[..3.min(name.len())], b" ", &b[..k]] {
+                let m = part.len().min(32 - n);
+                t[n..n + m].copy_from_slice(&part[..m]);
+                n += m;
+            }
+        }
+        sf::label(sf::F14, rect(296, 1, 136, 17), core::str::from_utf8(&t[..n]).unwrap_or(""), 0x04A9, S_BAR, 1, 1);
+    }
+
     /// Top bar / right panel labels.
     pub fn labels(&self, sc: &scope::Scope, full: bool) {
         let s = &sc.s;
@@ -571,6 +589,7 @@ impl ScopeView {
         sf::label(sf::F14, rect(146, y, 62, 17), core::str::from_utf8(&b[..n]).unwrap_or(""), 0xFFE0, bg, 1, 1);
         let n = eng(&mut b, sc.trig_volts(), "V");
         let mut t = [0u8; 28];
+        let _ = full;
         t[0] = if s.rising { b'/' } else { b'\\' };
         t[1..1 + n].copy_from_slice(&b[..n]);
         sf::label(sf::F14, rect(212, y, 80, 17), core::str::from_utf8(&t[..1 + n]).unwrap_or(""), FG, bg, 1, 1);
@@ -653,7 +672,7 @@ impl ScopeView {
     /// the previous column, as the stock trace.
     /// `prev` caches the drawn segment per column (pixel rows); only changed
     /// columns are redrawn. Fill it with (u16::MAX, 0) to force a full redraw.
-    pub fn frame(&self, f: &scope::Frame, sc: &scope::Scope, prev: &mut [(u16, u16); 401], cur: &Cursors) {
+    pub fn frame(&self, f: &scope::Frame, sc: &scope::Scope, prev: &mut [(u16, u16); 401], cur: &Cursors, persist: bool) {
         let n = f.data.len();
         let trig_row = Some(sc.s.trig_row);
         let mut tpl = [[0u16; 288]; 4];
@@ -711,6 +730,15 @@ impl ScopeView {
             pa = lo;
             pb = hi;
             let (a, b) = (lo.min(hi), lo.max(hi));
+            let (a, b) = if persist && prev[i].0 != u16::MAX && prev[i].0 != u16::MAX - 1 {
+                // Infinite persistence: keep the union of all segments drawn.
+                let (pa, pb) = prev[i];
+                let ra = ((pa - self.y0 - 1) as i32 * 278 / (self.h as i32 - 3).max(1)).min(a);
+                let rb = ((pb - self.y0 - 1) as i32 * 278 / (self.h as i32 - 3).max(1)).max(b);
+                (ra, rb)
+            } else {
+                (a, b)
+            };
             let px = (self.row_px(a), self.row_px(b));
             let is_cur = cur.x_on && (cur.x[0] as usize == i || cur.x[1] as usize == i);
             if prev[i] != px || is_cur {
@@ -802,7 +830,7 @@ fn tab_btn(r: sf::Rect, text: &str, on: bool) {
     sf::glyphs(sf::F14, r, text, STATUS_FG, c, 8, 1);
 }
 
-pub fn scope_menu(tab: usize, sc: &scope::Scope, sel: &[u8], roll: bool) {
+pub fn scope_menu(tab: usize, sc: &scope::Scope, sel: &[u8], roll: bool, persist: bool) {
     lcd::fill_rect(13, 20, 401, 192, 0x10A3);
     for (i, t) in SCOPE_TABS.iter().enumerate() {
         tab_btn(rect(16 + i as i16 * 99, 23, 95, 28), t, i == tab);
@@ -817,6 +845,7 @@ pub fn scope_menu(tab: usize, sc: &scope::Scope, sel: &[u8], roll: bool) {
         }
         1 => {
             tab_btn(rect(16, 60, 190, 34), if roll { "Roll: ON" } else { "Roll: OFF" }, roll);
+            tab_btn(rect(210, 60, 190, 34), if persist { "Persist: INF" } else { "Persist: OFF" }, persist);
         }
         2 => {
             tab_btn(rect(16, 60, 120, 34), "Rising", s.rising);
@@ -852,7 +881,7 @@ pub fn scope_menu_hit(tab: usize, x: u16, y: u16) -> Option<(usize, usize)> {
             let k = row * 5 + col.min(4);
             if k < crate::scope_meas::ITEMS.len() { Some((0, k)) } else { None }
         }
-        1 => Some((1, 0)),
+        1 => Some((1, if x < 208 { 0 } else { 1 })),
         _ => {
             let row = if y < 96 { 0 } else { 1 };
             let col = ((x - 16) / 124).clamp(0, 2) as usize;

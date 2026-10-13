@@ -67,6 +67,11 @@ pub struct App {
     cur_drag: Option<u8>,
     /// Opt-in: keep both analog rails on so all instruments measure at once.
     analog_both: bool,
+    persist_trace: bool,
+    /// Anti-drop: re-assert the latching V/A relay periodically (stock
+    /// setting; the relay can flip on a mechanical shock).
+    anti_drop: bool,
+    relay_next: u64,
     meas_sel: [u8; 4],
     meas_n: usize,
     pub meas_res: crate::scope_meas::Results,
@@ -170,6 +175,9 @@ impl App {
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             cur_drag: None,
             analog_both: false,
+            persist_trace: false,
+            anti_drop: true,
+            relay_next: 0,
             meas_sel: crate::scope_meas::DEFAULT_SEL,
             meas_n: 4,
             meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
@@ -258,7 +266,7 @@ impl App {
             }
             View::ScopeMenu => {
                 ui::SCOPE_FULL.draw_static(&self.scope, true);
-                ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll);
+                ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll, self.persist_trace);
             }
             View::Gen => ui::gen_static(&self.gen),
             View::Keypad => {
@@ -324,6 +332,12 @@ impl App {
         }
         self.power.poll(now);
         self.persist(now);
+        if self.anti_drop && now >= self.relay_next {
+            self.relay_next = now + 30_000;
+            if self.relay_next > 30_000 {
+                self.dmm.reassert_relay(clk);
+            }
+        }
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
         // key PD6 (hold 1.5 s -> off).
         let idle = now.saturating_sub(self.last_input);
@@ -363,7 +377,10 @@ impl App {
                     self.power.charging(),
                     self.locked,
                 ),
-                View::Scope => ui::scope_battery(self.power.bars, self.power.charging()),
+                View::Scope => {
+                    ui::scope_battery(self.power.bars, self.power.charging());
+                    ui::SCOPE_FULL.gen_state(&self.gen);
+                }
                 _ => {}
             }
         }
@@ -705,13 +722,13 @@ impl App {
             match self.view {
                 View::Scope => {
                     let t2 = cyc();
-                    ui::SCOPE_FULL.frame(&f, &self.scope, &mut self.scope_prev, &self.cur);
+                    ui::SCOPE_FULL.frame(&f, &self.scope, &mut self.scope_prev, &self.cur, self.persist_trace);
                     self.prof[2] = self.prof[2].max(cyc().wrapping_sub(t2) / 200);
                     if fresh {
                         ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
                     }
                 }
-                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope, &mut self.scope_prev, &self.cur),
+                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope, &mut self.scope_prev, &self.cur, self.persist_trace),
                 _ => {}
             }
         }
@@ -923,9 +940,13 @@ impl App {
                         }
                         self.cursors_from_selection();
                     }
-                    Some((1, _)) => {
+                    Some((1, 0)) => {
                         self.roll = !self.roll;
                         self.scope.roll = self.roll;
+                    }
+                    Some((1, _)) => {
+                        self.persist_trace = !self.persist_trace;
+                        self.scope_prev = [(u16::MAX, 0); 401];
                     }
                     Some((2, k)) => match k {
                         0 => st.rising = true,
@@ -943,7 +964,7 @@ impl App {
                     },
                 }
                 self.scope.apply(st, now);
-                ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll);
+                ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll, self.persist_trace);
             }
             View::Keypad => {
                 let freq = self.kp_target == 0;
@@ -993,9 +1014,13 @@ impl App {
                         }
                         self.cursors_from_selection();
                     }
-                    Some((1, _)) => {
+                    Some((1, 0)) => {
                         self.roll = !self.roll;
                         self.scope.roll = self.roll;
+                    }
+                    Some((1, _)) => {
+                        self.persist_trace = !self.persist_trace;
+                        self.scope_prev = [(u16::MAX, 0); 401];
                     }
                     Some((2, k)) => match k {
                         0 => st.rising = true,
@@ -1013,7 +1038,7 @@ impl App {
                     },
                 }
                 self.scope.apply(st, now);
-                ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll);
+                ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll, self.persist_trace);
             }
             View::Range => {
                 let b = self.dmm.button();
