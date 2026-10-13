@@ -22,7 +22,16 @@
 //! (datasheet fR / FR), and PCLK1 / 2 = 25 MHz is the GD32 SPI limit; /4 keeps
 //! a 4x margin on the slowest command while making a 4 KiB block read ~2.7 ms
 //! instead of ~10.5 ms. Every write is read back and compared, so a marginal
-//! clock would show as a failed write, not as silent corruption.
+//! clock would show as a failed write; a marginal READ, though, would let a
+//! read-modify-write (fatren / calbackup root and FAT blocks at boot, host
+//! reads) carry a bad bit back to the disk "verified". Hence the boot
+//! self-check (`clock_check`, once, in the first `new()`, i.e. before fatren /
+//! calbackup / the USB disk touch the volume): block 0 and the first FAT
+//! block are read at /16 (CRC-32 of each, boot sector 0x55AA), then twice at
+//! /4; any difference, a missing 0x55AA or no known chip -> /16 for this boot.
+//! `clock()` reports the divider and why (DBG:BOOT? `SPICLK,<div>,<why>`).
+//! FORCE_SLOW = true keeps the stock /16 without the check (stock and the
+//! FS-loader only ever use /16; /4 is in spec but new on this board).
 
 use crate::mmio::{modify32, r32, w16, w32};
 use crate::msc::{BlockDevice, Step};
@@ -47,9 +56,12 @@ const DATA: u32 = SPI + 0x0C;
 const I2SCTL: u32 = SPI + 0x1C;
 const STAT_RBNE: u32 = 1 << 0;
 const STAT_TBE: u32 = 1 << 1;
-/// Mode 3, master, software NSS, 8 bit, PSC /4 = 12.5 MHz (PSC bits 5:3 =
-/// 001; the stock value is 0x031F, /16 = 3.125 MHz; see the module notes).
-const CTL0_CFG: u32 = 0x030F;
+/// Mode 3, master, software NSS, 8 bit. PSC bits 5:3: 011 = /16 = 3.125 MHz
+/// (the stock value 0x031F), 001 = /4 = 12.5 MHz (see the module notes).
+const CTL0_SLOW: u32 = 0x031F;
+const CTL0_FAST: u32 = 0x030F;
+/// Never leave the stock /16 clock (skips the self-check).
+pub const FORCE_SLOW: bool = false;
 const CTL0_SPIEN: u32 = 1 << 6;
 
 const CS: u32 = 4; // PE4
@@ -64,7 +76,8 @@ const CMD_JEDEC_ID: u8 = 0x9F;
 const SECTOR: usize = 4096;
 const PAGE: usize = 256;
 /// RDSR polls before giving up (stock: 1e6 at 3.125 MHz; here ~0.7 us per
-/// poll at 12.5 MHz, ~2.8 s; tSE max 400 ms).
+/// poll at 12.5 MHz, ~2.8 s, or ~11 s if the self-check kept /16; tSE max
+/// 400 ms).
 const BUSY_POLLS: u32 = 4_000_000;
 /// `write_step`: CPU time per call (cycles, 2 ms at 200 MHz) and the longest
 /// wait for one erase / page program before the chip counts as failed (1 s;
@@ -75,6 +88,117 @@ const DWT_CYCCNT: u32 = 0xE000_1004;
 
 fn cyc() -> u32 {
     unsafe { r32(DWT_CYCCNT) }
+}
+
+/// Outcome of the boot clock self-check (`clock()`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum ClockCheck {
+    /// No `SpiFlash` created yet.
+    NotRun = 0,
+    /// /4 checked equal to /16: running /4.
+    Ok = 1,
+    /// FORCE_SLOW: /16.
+    Forced = 2,
+    /// No known chip (JEDEC ID): /16, nothing to compare.
+    NoChip = 3,
+    /// No 0x55AA in block 0 at /16 (blank / foreign disk): nothing known to
+    /// compare against, /16.
+    NoSig = 4,
+    /// The 1st / 2nd /4 read differed from the /16 one: /16.
+    Diff1 = 5,
+    Diff2 = 6,
+}
+
+impl ClockCheck {
+    /// DBG:BOOT? text (native.rs; unused in the RAM images).
+    #[allow(dead_code)]
+    pub fn name(self) -> &'static [u8] {
+        match self {
+            ClockCheck::NotRun => b"NOTRUN",
+            ClockCheck::Ok => b"OK",
+            ClockCheck::Forced => b"FORCED",
+            ClockCheck::NoChip => b"NOCHIP",
+            ClockCheck::NoSig => b"NOSIG",
+            ClockCheck::Diff1 => b"DIFF1",
+            ClockCheck::Diff2 => b"DIFF2",
+        }
+    }
+}
+
+static CLOCK: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+/// SPI clock divider in use (4 or 16) and why.
+pub fn clock() -> (u32, ClockCheck) {
+    let c = match CLOCK.load(core::sync::atomic::Ordering::Relaxed) {
+        1 => ClockCheck::Ok,
+        2 => ClockCheck::Forced,
+        3 => ClockCheck::NoChip,
+        4 => ClockCheck::NoSig,
+        5 => ClockCheck::Diff1,
+        6 => ClockCheck::Diff2,
+        _ => ClockCheck::NotRun,
+    };
+    (if c == ClockCheck::Ok { 4 } else { 16 }, c)
+}
+
+/// (Re)configure and enable SPI1 with `cfg` (idle bus only).
+fn spi_config(cfg: u32) {
+    unsafe {
+        w32(CTL0, 0);
+        modify32(I2SCTL, 1 << 11, 0);
+        w32(CTL0, cfg);
+        w32(CTL0, cfg | CTL0_SPIEN);
+        // Drop a byte left in the receive buffer.
+        let _ = r32(DATA);
+    }
+}
+
+/// CRC-32 of flash block `lba` read at the current clock; also bytes
+/// 0x0E..0x10 (BPB reserved sectors) and 0x1FE..0x200 (signature).
+fn block_crc(lba: u32) -> (u32, u16, u16) {
+    let mut b = [0u8; PAGE];
+    let mut c = !0u32;
+    let (mut rsvd, mut sig) = (0u16, 0u16);
+    for p in 0..SECTOR / PAGE {
+        read(lba * SECTOR as u32 + (p * PAGE) as u32, &mut b);
+        if p == 0 {
+            rsvd = u16::from_le_bytes([b[0x0E], b[0x0F]]);
+        }
+        if p == 1 {
+            sig = u16::from_be_bytes([b[0xFE], b[0xFF]]);
+        }
+        c = crate::calbackup::crc32_upd(c, &b);
+    }
+    (!c, rsvd, sig)
+}
+
+/// The boot clock self-check (see the module notes). Called with SPI1 at
+/// /16 and an idle chip of `blocks` blocks; leaves SPI1 at the chosen clock.
+fn clock_check(blocks: u32) -> ClockCheck {
+    if FORCE_SLOW {
+        return ClockCheck::Forced;
+    }
+    if blocks == 0 {
+        return ClockCheck::NoChip;
+    }
+    let (b0, rsvd, sig) = block_crc(0);
+    if sig != 0x55AA {
+        return ClockCheck::NoSig;
+    }
+    // First FAT block = the reserved sectors (1 on this disk).
+    let fat = if rsvd >= 1 && (rsvd as u32) < blocks { rsvd as u32 } else { 1 };
+    let (f0, _, _) = block_crc(fat);
+    spi_config(CTL0_FAST);
+    for pass in 0..2 {
+        let (b, _, s) = block_crc(0);
+        let (f, _, _) = block_crc(fat);
+        if b != b0 || f != f0 || s != 0x55AA {
+            spi_config(CTL0_SLOW);
+            return if pass == 0 { ClockCheck::Diff1 } else { ClockCheck::Diff2 };
+        }
+    }
+    ClockCheck::Ok
 }
 
 pub struct SpiFlash {
@@ -144,14 +268,8 @@ impl SpiFlash {
         af_pin(GPIOD, 3);
         af_pin(GPIOC, 2);
         af_pin(GPIOC, 3);
-        unsafe {
-            w32(CTL0, 0);
-            modify32(I2SCTL, 1 << 11, 0);
-            w32(CTL0, CTL0_CFG);
-            w32(CTL0, CTL0_CFG | CTL0_SPIEN);
-            // Drop a byte the stock may have left in the receive buffer.
-            let _ = r32(DATA);
-        }
+        // /16 for the ID (and the self-check); /4 only once checked.
+        spi_config(CTL0_SLOW);
 
         cs(true);
         xfer(CMD_JEDEC_ID);
@@ -164,6 +282,14 @@ impl SpiFlash {
         } else {
             0
         };
+        // The clock self-check, once per boot (the first instance; nothing
+        // else can have the chip busy then).
+        use core::sync::atomic::Ordering::Relaxed;
+        if CLOCK.load(Relaxed) == ClockCheck::NotRun as u8 {
+            CLOCK.store(clock_check(blocks) as u8, Relaxed);
+        } else if clock().0 == 4 {
+            spi_config(CTL0_FAST);
+        }
         SpiFlash { id, blocks, failed: false }
     }
 
