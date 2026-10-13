@@ -61,6 +61,7 @@ pub struct Host {
     stage_off: usize,
     src: Source,
     pending_reset: bool,
+    lcd_read: bool,
 }
 
 fn u32_at(b: &[u8], i: usize) -> u32 {
@@ -77,6 +78,7 @@ impl Host {
             stage_off: 0,
             src: Source::Idle,
             pending_reset: false,
+            lcd_read: false,
         }
     }
 
@@ -84,6 +86,12 @@ impl Host {
     /// LCD meanwhile: a GRAM read-back may be in progress.
     pub fn busy(&self) -> bool {
         self.stage_off < self.stage_len || !matches!(self.src, Source::Idle)
+    }
+
+    /// True once after a GRAM read-back request. A screenshot is a series of
+    /// them; the caller pauses drawing meanwhile so the image does not tear.
+    pub fn take_lcd_read(&mut self) -> bool {
+        core::mem::take(&mut self.lcd_read)
     }
 
     /// Reset requested and the reply fully handed to the USB stack.
@@ -158,6 +166,7 @@ impl Host {
                     lcd::set_window_cmd(x, y, x + w - 1, y + h - 1, lcd::CMD_RAMRD);
                     self.header(cmd, ST_OK, c * 2);
                     self.src = Source::Lcd(c);
+                    self.lcd_read = true;
                 }
                 Action::Keepalive(0)
             }

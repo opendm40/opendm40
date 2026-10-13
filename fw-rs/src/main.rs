@@ -111,6 +111,7 @@ fn main() -> ! {
     dmm.set_mode(&mut clk, dmm::Mode::DcV);
     let mut screen = ui::Screen::new();
     let mut next_poll = 0u64;
+    let mut draw_hold_until = 0u64;
 
     loop {
         let now = clk.now_ms();
@@ -141,12 +142,18 @@ fn main() -> ! {
             unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
         }
 
-        // Measure and draw, but never while a reply is streaming: a GRAM
-        // read-back (screenshot) may be in progress on the LCD bus.
+        // Measure and draw, but never while a reply is streaming (a GRAM
+        // read-back may be in progress on the LCD bus), and not for a while
+        // after one, so a multi-request screenshot does not tear.
+        if host.take_lcd_read() {
+            draw_hold_until = now + 300;
+        }
         if now >= next_poll && !host.busy() {
             next_poll = now + 5;
             if let Some(r) = dmm.poll() {
-                screen.reading(&r);
+                if now >= draw_hold_until {
+                    screen.reading(&r);
+                }
             }
         }
     }
