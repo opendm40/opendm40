@@ -297,3 +297,8 @@ Additional requirements:
   LVGL via lv_binding_rust (C, MIT, experimental bindings), egui (needs std + framebuffer/GPU-style
   rasteriser: does not fit 125 KB SRAM). Revisit with a one-screen Slint/LVGL prototype if the
   hand-made widgets stay clumsy. Meanwhile: layout rules + automated overlap check for every screen.
+- [ ] Measure the real DMM conversion period per rate (SENS:RATE:PER?, after the integration build): code
+      assumes ~9.4/s at OSR 32768 (stock-like), the datasheet formula OSR/SYSCLK gives ~150/s — settle it.
+- [ ] Data logger runs at 38 Hz at OSR 2048 although AD1 allows up to ~2400 Hz by the formula: the SPI
+      read loop limits it — profile (bit-banged SPI on PC10-12?) and speed up (hardware SPI / DMA / read
+      only the AD1 data bytes).
