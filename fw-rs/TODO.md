@@ -339,8 +339,8 @@ Additional requirements:
       stock, which restarts acquisition per drag event and blanks the trace at slow timebases.)
 - [ ] Scope trigger mode Auto works "strangely and badly" even on a square wave [analysis agent, no
       edits yet]; scope AUTO (autoset) also "very strange" — compare with the stock autoset.
-- [ ] Temperature PT100/PT1000/NTC: show the sensor type much larger [small-items agent].
-- [ ] Thermocouple/temperature offset setting: slider instead of +/- buttons [small-items agent].
+- [x] Temperature PT100/PT1000/NTC: show the sensor type much larger [small-items agent].  (code done; verify on device; 875d958)
+- [x] Thermocouple/temperature offset setting: slider instead of +/- buttons [small-items agent].  (code done; verify on device; 5ba89b3)
 - [ ] Buttons feel imprecise to press [touch-feel agent: press vs release, slop, hit rects, mapping,
       DBG:TOUCH? log; device test with the owner's finger].
 - [ ] DMM frequency: ~700 Hz shown as "1 kHz"? — ON HOLD until the owner confirms the actual input
