@@ -222,7 +222,7 @@ the native scheme the meaning changes:
 
 fw-rs's app FWDGT policy: feed from the main loop once running; the shim feeds
 only during its key-hold wait. The "never feed unconditionally" rule
-(`custom-fw-handover.txt`) still holds in spirit — the deliberate exits are now
+(`docs/history/custom-fw-handover.txt`) still holds in spirit — the deliberate exits are now
 (a) the panic/hang -> recovery path and (b) the explicit `recover` command.
 
 ---
@@ -274,7 +274,7 @@ still RAM-loaded; a battery pull returns to stock). **Do not proceed past Stage
 
 **Stage 2 — retire the RAM scheme.**
 Remove `stub/`, `tools/legacy/flash.py`, the BT RAM loader path and the sector-8
-`link.x`; update `README.md`, `custom-fw-handover.txt`, `TODO.md`.
+`link.x`; update `README.md`, `docs/history/custom-fw-handover.txt`, `TODO.md`.
 
 ---
 
@@ -291,7 +291,7 @@ Remove `stub/`, `tools/legacy/flash.py`, the BT RAM loader path and the sector-8
 - **`fw-rs/build.sh`** — in addition to `dm40-fw.bin` (now the raw body), emit
   `dm40-fw.update.bin` = `dm40fw.py pack dm40-fw.bin`. Name the *on-disk* copy
   `dm40*.bin` only at flash time (per the stock app's deletion caveat in
-  `custom-fw-handover.txt`: the stock app scans for `dm40*.bin` on USB unplug;
+  `docs/history/custom-fw-handover.txt`: the stock app scans for `dm40*.bin` on USB unplug;
   that is the intended path for installing us, but keep only one present).
 - **`tools/reload.sh` / `tools/legacy/flash.py`** — the BT RAM loader becomes obsolete
   after Stage 2. The new "load fw-rs" flow is: copy the update file to the FAT
