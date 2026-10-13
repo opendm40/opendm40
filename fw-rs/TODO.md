@@ -278,3 +278,10 @@ Additional requirements:
       on the device via usbtmc/1209.0001; RES times out (H1). Then send upstream; consider an
       Agilent-style CONF? reply so the profile gets range/resolution.
 - [x] firmware/dm40fw.py is untracked but build.sh needs it (packs the native image): commit it. (165b37a)
+
+## UI toolkit decision (user, 2026-10-13)
+- Keep our own renderer + layer compositor (docs/combined-view-design.md §7) for now. Considered:
+  Slint (native Rust, MCU line renderer, real widgets/swipes; GPLv3 or commercial for embedded),
+  LVGL via lv_binding_rust (C, MIT, experimental bindings), egui (needs std + framebuffer/GPU-style
+  rasteriser: does not fit 125 KB SRAM). Revisit with a one-screen Slint/LVGL prototype if the
+  hand-made widgets stay clumsy. Meanwhile: layout rules + automated overlap check for every screen.
