@@ -229,6 +229,9 @@ Additional requirements:
       5 mV) (60 mV range: 300 counts = 0.3 mV < the 0.487 mV open-lead residual, docs/acdc-stock-vs-fwrs.md 6c),
       DC A below max(300 counts, 1 uA). Device: open leads on DC mV manual 60 mV / uA never capture.
 
+- [x] BT phone-app function change (cmd 06) goes through the app's function-change path (App::host_func_changed  (code done; verify on device)
+      = func_changed: meter reset, chart restart, function bar / static view redrawn), like touch and SCPI.
+
 ## Backlog (user ideas)
 - [ ] SCPI over Bluetooth serial (classic SPP / BLE UART): the same parser as USBTMC, so standard
       software (sigrok/PyVISA over a serial port, Keysight-style loggers) works wirelessly. Keep the

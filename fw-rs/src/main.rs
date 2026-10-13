@@ -706,7 +706,11 @@ fn main() -> ! {
                 // the logger owns it; the auto-stop guard above is the backstop.
                 if app.bt_on && !logging {
                     let raw = app.last_raw;
-                    bt.serve(&f, &mut clk, &mut app.dmm, &mut app.meter, raw.as_ref(), &app.power, app.locked);
+                    if bt.serve(&f, &mut clk, &mut app.dmm, &mut app.meter, raw.as_ref(), &app.power, app.locked) {
+                        // Phone app changed the function (cmd 06): the same
+                        // path as a touch / SCPI change.
+                        app.host_func_changed();
+                    }
                 }
             }
             mark(4, &mut ts);

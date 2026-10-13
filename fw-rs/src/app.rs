@@ -2414,7 +2414,7 @@ impl App {
 
 impl App {
     /// After a DMM function / sub-mode change (function bar touch, locked
-    /// PD6 click, SCPI CONF / MEAS / FUNC): HOLD, REL, statistics and the
+    /// PD6 click, SCPI CONF / MEAS / FUNC, BT command 06): HOLD, REL, statistics and the
     /// AutoHold window restart (meter.reset), the trend chart starts over
     /// for the new function, and the static DMM view (function bar, labels,
     /// chart axes) is redrawn. One path, so touch and SCPI give the same
@@ -2430,6 +2430,14 @@ impl App {
         self.chart_n = 0;
         self.chart_dirty = true;
         self.redraw = true;
+    }
+
+    /// The DMM function was changed from outside the app (Bluetooth phone
+    /// app, command 06 / Dmm::apply_mode_byte): the common path, as
+    /// `press_func` / `select_func` after their Dmm call.
+    pub fn host_func_changed(&mut self) {
+        self.func_changed();
+        self.last_raw = None;
     }
 
     /// SCPI CONFigure / MEASure / FUNCtion: select stock mode `m` (dmm.rs

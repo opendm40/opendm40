@@ -528,12 +528,17 @@ impl Bt {
         }
     }
 
-    /// Serve one request frame (stock command set 00..09).
-    pub fn serve(&mut self, f: &Frame, clk: &mut Clock, dmm: &mut Dmm, meter: &mut Meter, raw: Option<&crate::dmm::Reading>, power: &crate::power::Power, locked: bool) {
+    /// Serve one request frame (stock command set 00..09). Returns true when
+    /// command 06 changed the DMM function or sub-mode: the caller then runs
+    /// the app's common function-change path (App::host_func_changed: meter
+    /// reset, chart restart, function bar redrawn), as for a touch or SCPI.
+    /// A manual range change within the function returns false.
+    pub fn serve(&mut self, f: &Frame, clk: &mut Clock, dmm: &mut Dmm, meter: &mut Meter, raw: Option<&crate::dmm::Reading>, power: &crate::power::Power, locked: bool) -> bool {
         const LENS: [usize; 10] = [0, 0, 0, 1, 1, 1, 1, 20, 0, 0];
         if f.cmd > 9 {
-            return;
+            return false;
         }
+        let mut func_changed = false;
         let st = (f.len != LENS[f.cmd as usize]) as u8;
         match f.cmd {
             0x00 => self.reply(0, &[0x05, 0x03, b'A' + dmm.model()], true),
@@ -559,11 +564,7 @@ impl Bt {
                             dmm.hold_range(true);
                         }
                     }
-                    _ => {
-                        if dmm.apply_mode_byte(clk, d) {
-                            meter.reset();
-                        }
-                    }
+                    _ => func_changed = dmm.apply_mode_byte(clk, d),
                 }
             }
             0x07 => {
@@ -632,5 +633,6 @@ impl Bt {
                 self.reply(9, &d, false);
             }
         }
+        func_changed
     }
 }
