@@ -137,13 +137,13 @@ Additional requirements:
       DMM-screen record indicator + swipe gesture. Relates to FR-04 / FR-35. Queued after logger + UI.
 
 ## Feature requests to add (from ../DM40C_feature_request.md; user: add autohold + useful ones)
-- [ ] **FR-01 AutoHold (P0, critical).** Auto-freeze the reading when it stabilises, re-arm on a new
+- [x] **FR-01 AutoHold (P0, critical).** Auto-freeze the reading when it stabilises, re-arm on a new  (code done; verify on device)
       signal, beep on capture (Fluke/Keysight style). Algorithm sketch in Appendix B of the FR doc.
       Touches meter.rs/app.rs/ui.rs. Queue after the UI agent (HOLD/layout) to avoid conflict; builds
       on fixing the plain HOLD first.
-- [ ] FR-02 MIN/MAX/AVG (P0): MIN/MAX exist; add AVG (running average, no auto-off while active).
+- [x] FR-02 MIN/MAX/AVG (P0): MIN/MAX exist; add AVG (running average, no auto-off while active).  (code done; verify on device)
 - [ ] FR-05 smoothing + selectable sample rate (P1): slow/fast conversion + display smoothing.
-- [ ] FR-06 Hi/Lo limits (P1): pass/fail thresholds with a beep.
+- [x] FR-06 Hi/Lo limits (P1): pass/fail thresholds with a beep.  (code done; verify on device)
 - [ ] FR-16 screenshot + log gallery (P1): save screenshots/CSV to the SPI disk and browse them.
 - [ ] FR-28 generator DC offset (P1): adjustable offset (note: real bipolar offset is HW-4).
 - [ ] FR-35 CSV export from DMM (P1): = the CSV-to-disk item above, with timestamps.
@@ -210,17 +210,21 @@ Additional requirements:
       throughput for READ? polling and WAV:DATA?.
 
 ## Found in the screenshot session 2026-10-13 (native db679a3)
-- [ ] READ?/MEAS? take ~8 s (wait for a full averaging window that never fills -> 20 conversions);
+- [x] READ?/MEAS? take ~8 s (wait for a full averaging window that never fills -> 20 conversions);  (code done; verify on device)
       PyVISA/kernel usbtmc time out and later replies arrive shifted. [wiring agent]
-- [ ] USBTMC wedges: after a timed-out query (or SmuView/sigrok) every reply is empty for minutes;
+- [x] USBTMC wedges: after a timed-out query (or SmuView/sigrok) every reply is empty for minutes;  (code done; verify on device)
       INITIATE_CLEAR does not help, only a USB bus reset. Pending waits must expire, new commands
       must cancel them, class CLEAR/ABORT requests must resync. [wiring agent]
-- [ ] SCPI function change (CONF/MEAS) does not redraw like a touch: function bar keeps the old
+- [x] SCPI function change (CONF/MEAS) does not redraw like a touch: function bar keeps the old  (code done; verify on device)
       button/sign, chart keeps the previous function's data and axis. [wiring agent]
-- [ ] AC+DC sub-readings line: AC tilde detached at the far left, DC sign drawn after the AC value
+- [x] AC+DC sub-readings line: AC tilde detached at the far left, DC sign drawn after the AC value  (code done; verify on device)
       (user: "значки разъехались"). [ui agent]
-- [ ] Temperature sensor label in the status bar: glyphs overlap for PT100/PT1000/NTC names. [ui agent]
+- [x] Temperature sensor label in the status bar: glyphs overlap for PT100/PT1000/NTC names. [ui agent]  (code done; verify on device)
 - [ ] AC+DC current reads ~150 uA AC with nothing connected; AC V of a 0.5 V DC source reads
       23-56 mV and decays slowly (compare with stock before calling it a bug).
 - [ ] 3-finger screenshot blocks the main loop ~8 s (BMP write to SPI flash); USB and DMM stall.
 - [ ] Data logger (LOG:STAT ON) has no on-screen indicator; the DMM reading freezes silently.
+- [ ] sigrok/SmuView: libsigrok scpi-dmm opens the device over USBTMC (*OPC?, *IDN? answered) but
+      drops it because "Alientek,DM40A" is not in its model table. Add a DM40 profile to libsigrok
+      src/hardware/scpi-dmm (command set like the 34401A: CONF:<f>, READ?, FUNC?), test with
+      sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<addr> and SmuView, then send upstream.
