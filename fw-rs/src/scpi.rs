@@ -181,7 +181,11 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 
 /// Scope / generator commands (handled by the main loop with the app):
 ///   SOURce:FUNCtion SIN|SQU|TRI|RAMP   SOURce:FREQuency <Hz>
-///   SOURce:VOLTage <Vpp>   SOURce:FUNCtion:SQUare:DCYCle <%>   OUTPut ON|OFF
+///   SOURce:VOLTage <Vpp>   SOURce:VOLTage:OFFSet <V>|AUTO (FR-28: centre level;
+///   AUTO = stock 0..Vpp; kept in [Vpp/2, 3 - Vpp/2])
+///   SOURce:FUNCtion:SQUare:DCYCle <%>   OUTPut ON|OFF
+///   Queries: FREQ? = the actual (clamped + quantised) frequency, DCYC? the
+///   effective duty, VOLT? / OFFS? the set values (OFFS? with AUTO: Vpp/2)
 ///   TIMebase:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
 ///   TRIGger:LEVel <V>   TRIGger:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
 ///   RUN  STOP  SINGle   SCOPe:MEASure:VPP|VAVG|VRMS|FREQ?
@@ -191,6 +195,8 @@ pub enum Cmd {
     GenFunc(Option<u8>),
     GenFreq(Option<f32>),
     GenVolt(Option<f32>),
+    /// SOUR:VOLT:OFFS: Some(NaN) = AUTO.
+    GenOffs(Option<f32>),
     GenDuty(Option<f32>),
     GenOut(Option<bool>),
     TimScale(Option<f32>),
@@ -511,6 +517,14 @@ impl Scpi {
                         Some(Cmd::GenFunc(if query { None } else { w }))
                     } else if kw(sub, "FREQuency") {
                         Some(Cmd::GenFreq(if query { None } else { parse_num(a) }))
+                    } else if kw(sub, "VOLTage") && parts.len() >= 3 && kw(parts[2], "OFFSet") {
+                        if query {
+                            Some(Cmd::GenOffs(None))
+                        } else if kw(a, "AUTO") {
+                            Some(Cmd::GenOffs(Some(f32::NAN)))
+                        } else {
+                            parse_num(a).map(|v| Cmd::GenOffs(Some(v)))
+                        }
                     } else if kw(sub, "VOLTage") {
                         Some(Cmd::GenVolt(if query { None } else { parse_num(a) }))
                     } else {

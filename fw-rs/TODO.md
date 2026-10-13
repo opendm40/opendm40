@@ -148,7 +148,8 @@ Additional requirements:
       persisted in p[38]. CSV log and MIN/MAX/AVG stay unsmoothed.
 - [x] FR-06 Hi/Lo limits (P1): pass/fail thresholds with a beep.  (code done; verify on device)
 - [ ] FR-16 screenshot + log gallery (P1): save screenshots/CSV to the SPI disk and browse them.
-- [ ] FR-28 generator DC offset (P1): adjustable offset (note: real bipolar offset is HW-4).
+- [x] FR-28 generator DC offset (P1): adjustable offset (note: real bipolar offset is HW-4).  (code done; verify on device)
+      Offset box on the generator page (keypad; OK on an empty field = auto), SOUR:VOLT:OFFS <V>|AUTO, persisted p[39].
 - [ ] FR-35 CSV export from DMM (P1): = the CSV-to-disk item above, with timestamps.
 - Likely already done (verify, then tick): FR-09 REL, FR-10 idle auto-off, FR-12 screen dim,
   FR-18 touch lock, FR-27 generator keeps running in DMM. FR-33 is USBTMC+MSC (we chose DBG over CDC).
@@ -159,8 +160,8 @@ Additional requirements:
 ## From user community feedback (docs/user-feedback.md)
 - [ ] UF-01 (P0) Verify continuity CMPO beeper + diode beep classes on device, latency <10 ms (most-praised stock feature). §5.2
 - [ ] UF-04 (P1) Scope AUTO keeps the user's AC/DC coupling (app.rs autoset_start forces DC = stock bug, 4 users). §6.1
-- [ ] UF-14 (P1) Generator: clamp to the wave's limit + visible note instead of a silent 0 Hz (revert the parity snap; owners call it a bug). §7
-- [ ] UF-15 (P1) Generator: show the actual quantised output frequency (and in SOUR:FREQ?); later a DDS for finer steps. §7
+- [x] UF-14 (P1) Generator: clamp to the wave's limit + visible note instead of a silent 0 Hz (revert the parity snap; owners call it a bug). §7  (code done; verify on device)
+- [x] UF-15 (P1) Generator: show the actual quantised output frequency (and in SOUR:FREQ?); later a DDS for finer steps. §7  (code done; verify on device)
 - [x] UF-03 (P1) AC+DC sub-mode on DM40A (owners proved the A hardware does it when the app commands it). §10  (code done; verify on device)
 - [ ] UF-02 (P1) Cold-junction self-heating with both rails/concurrent instruments: measure vs stock, correct or power down. §3
 - [ ] UF-19 (P1) Measure fw-rs battery draw vs stock (10-15 h baseline); decide on a scope-on-demand power policy. §8
@@ -172,7 +173,7 @@ Additional requirements:
 - [ ] UF-09 (P1) Scope horizontal trigger position (pre-trigger %) + double-tap to centre. §6.1
 - [ ] UF-32 (P1) CSV files: '.' decimals, ISO-8601 timestamps, header (model/fw/function/range). §10
 - [x] UF-37 (P1) Native shim keeps the short-press power-on (stock V2.1 behaviour). §8  (code done; verify on device)
-- [ ] UF-16 (P2) Generator ramp direction: gen.rs falls, preview rises; verify on scope and align. §7
+- [x] UF-16 (P2) Generator ramp direction: gen.rs falls, preview rises; verify on scope and align. §7  (code done: ramp rises; verify on device)
 - [ ] UF-11 (P2) Scope FFT with labelled axes + automatic peak (f, dBV) readout. §6.2
 - [ ] UF-12 (P2) Full probe attenuation list x0.1..x1000 (stock scope_probe[13]). §6.2
 - [ ] UF-07/08/10 (P2) Scope: corner-tap timebase + list picker, one-tap cursors, V/div +/- shown as zoom. §6.1
