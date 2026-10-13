@@ -232,6 +232,10 @@ pub struct DmmView {
     last_label: Option<&'static str>,
     /// Limit badge as last drawn (meter::V_*), 255 = not drawn.
     last_lim: u8,
+    /// Temperature sensor chip as last drawn (aux2 slot), None = not drawn.
+    last_chip: Option<&'static str>,
+    /// Temperature deg F text in the status-bar slot as last drawn.
+    last_f: [u8; 12],
     /// Meter strip of the combined view, as last drawn.
     st: Strip,
 }
@@ -333,9 +337,12 @@ const SU_W: i16 = 62;
 const SS_R: i16 = 476;
 const SS_Y: [i16; 2] = [29, 55];
 
-/// Short temperature-sensor names for the strip badge (F14 <= 41 px; the
-/// B-value is on the sensor page; dmm.rs T_NAMES order).
-pub const T_SHORT: [&str; 7] = ["TC-K", "PT100", "PT1000", "NTC10k", "NTC10k", "N100k", "NTC-U"];
+/// Temperature sensor chip (owner 2026-10-13: the sensor type must be
+/// legible at a glance): the full T_LABELS name in TEXT22 on a CHIP pill,
+/// on the DMM page in the aux2 slot (its deg F value moves to the status
+/// bar slot, F14), in the meter strip as the second sub row (deg F not
+/// shown there). Pill: text + 2 x CHIP_PAD wide.
+const CHIP_PAD: i16 = 8;
 
 /// Strip badge contents (codes, so the cache is a byte compare).
 const B_NONE: u8 = 0;
@@ -349,8 +356,6 @@ const B_AHOLD_HELD: u8 = 7;
 const B_REL: u8 = 8;
 const B_PASS: u8 = 9;
 const B_FAIL: u8 = 10;
-/// Temperature sensor k: B_SENSOR + k.
-const B_SENSOR: u8 = 16;
 
 fn badge(slot: usize, code: u8, bg: Color) {
     let r = rect(BADGE_X, BADGE_Y[slot], BADGE_W, BADGE_H);
@@ -365,7 +370,6 @@ fn badge(slot: usize, code: u8, bg: Color) {
         B_REL => ("REL", FG, SEL),
         B_PASS => ("PASS", 0xFFFF, 0x04A9),
         B_FAIL => ("FAIL", 0xFFFF, 0xF800),
-        c if c >= B_SENSOR => (T_SHORT[((c - B_SENSOR) as usize).min(6)], FG, CHIP),
         _ => {
             lcd::fill_rect(r.x as u16, r.y as u16, r.w as u16, r.h as u16, bg);
             return;
@@ -394,6 +398,17 @@ impl Strip {
     const fn new() -> Self {
         Strip { drawn: false, hv: 0, value: [0; 8], unit: ("", ""), sub: [[0; 24]; 2], sub_x: [SS_R; 2], badge: [255; 3] }
     }
+}
+
+/// `join` into a 16-byte buffer.
+fn join16<'a>(buf: &'a mut [u8; 16], parts: &[&str]) -> &'a str {
+    let mut n = 0;
+    for p in parts {
+        let k = p.len().min(16 - n);
+        buf[n..n + k].copy_from_slice(&p.as_bytes()[..k]);
+        n += k;
+    }
+    core::str::from_utf8(&buf[..n]).unwrap_or("")
 }
 
 /// Copy `parts` into `buf` (truncated), returning the text.
@@ -427,6 +442,8 @@ impl DmmView {
             label: None,
             last_label: None,
             last_lim: 255,
+            last_chip: None,
+            last_f: [0; 12],
             st: Strip::new(),
         }
     }
@@ -454,6 +471,8 @@ impl DmmView {
         self.last_mode = 255;
         self.last_top = None;
         self.last_lim = 255;
+        self.last_chip = None;
+        self.last_f = [0xFF; 12];
         self.st.drawn = false;
     }
 
@@ -515,9 +534,33 @@ impl DmmView {
         }
         // Aux readouts (stock: value right-aligned cells at y 40, unit after).
         let (aux, lp) = aux_shown(r);
+        let temp = r.mode == 15 && self.label.is_some();
         for (i, a) in aux.iter().enumerate() {
             // Value boxes end 4 px before the unit (separate items: >= 3 px).
             let (vx, ux) = (AUX_VX[i] + 30, if i == 0 { 178 } else { 400 });
+            if i == 1 && temp {
+                // Sensor chip (CHIP_PAD note), right-aligned in the aux2
+                // slot (260..476); redrawn only on a change.
+                let l = self.label.unwrap_or("");
+                if self.last_chip != self.label || !self.last_aux[1] {
+                    let w = sf::text_width(sf::TEXT22, l, 0) + 2 * CHIP_PAD;
+                    let c = rect(472 - w, 38, w, 26);
+                    lcd::fill_rect(260, 36, (c.x - 260) as u16, 30, BG);
+                    lcd::fill_rect(c.x as u16, 36, (476 - c.x) as u16, 2, BG);
+                    lcd::fill_rect(c.x as u16, 64, (476 - c.x) as u16, 2, BG);
+                    lcd::fill_rect(472, 38, 4, 26, BG);
+                    sf::rbox(c, 6, CHIP, BG);
+                    sf::glyphs(sf::TEXT22, c, l, FG, CHIP, 8, 0);
+                    self.last_chip = self.label;
+                }
+                self.last_aux[1] = true;
+                continue;
+            }
+            if i == 1 && self.last_chip.take().is_some() {
+                // Leaving temperature: the chip spans columns the value /
+                // unit boxes below do not repaint (397..398).
+                lcd::fill_rect(260, 36, 216, 30, BG);
+            }
             match a {
                 Some(v) => {
                     let mut t = [0u8; 16];
@@ -559,13 +602,26 @@ impl DmmView {
             }
         }
         let top = (r.auto && !r.auto_plus, hold, r.auto_plus);
-        if self.last_top != Some(top) || self.last_label != self.label {
+        // Temperature: the deg F value (aux2) in the status-bar slot (F14,
+        // 1 px spacing; "-328.00" + U+2109 is 57 px of 90), its sensor name
+        // being the chip above.
+        let mut fb = [0u8; 16];
+        let mut ft = [0u8; 12];
+        if temp {
+            let mut t = [0u8; 16];
+            let txt = r.aux2.map_or("", |v| join16(&mut fb, &[meter::text(&mut t, &v), "\u{2109}"]));
+            let n = txt.len().min(12);
+            ft[..n].copy_from_slice(&txt.as_bytes()[..n]);
+        }
+        if self.last_top != Some(top) || self.last_label != self.label || self.last_f != ft {
             self.last_top = Some(top);
             self.last_label = self.label;
+            self.last_f = ft;
             let s = if !r.auto { "MANU" } else if r.auto_plus { "AUTO+" } else { "AUTO" };
-            if let Some(l) = self.label {
-                // Temperature sensor name (F21 has no C / N / T: F14, 1 px
-                // spacing: "NTC100k B3950" is 87 px of the 90 px slot).
+            if temp {
+                let n = ft.iter().position(|&c| c == 0).unwrap_or(12);
+                sf::label(sf::F14, rect(BAR_X, 1, 90, 32), core::str::from_utf8(&ft[..n]).unwrap_or(""), STATUS_FG, BAR, 1, 1);
+            } else if let Some(l) = self.label {
                 sf::label(sf::F14, rect(BAR_X, 1, 90, 32), l, STATUS_FG, BAR, 1, 1);
             } else {
                 sf::label(sf::F21, rect(BAR_X, 1, 90, 32), s, STATUS_FG, BAR, 1, 0);
@@ -622,6 +678,8 @@ impl DmmView {
         // A caption left of a sub row: the AC / DC tag of an AC+DC part, or
         // "4-20mA" before the loop percentage (UF-26); its width.
         let (aux, lp) = aux_shown(r);
+        // Temperature: row 1 is the sensor chip (CHIP_PAD note).
+        let temp = r.mode == 15 && self.label.is_some();
         let cap = |i: usize| -> Option<(sf::Font, &'static str, i8)> {
             if r.acdc {
                 Some((sf::AUX_TAG, AUX_TAGS[i], 0))
@@ -638,15 +696,23 @@ impl DmmView {
             let mut b = [0u8; 24];
             // AC+DC parts are in the main unit, shown right next to them:
             // no unit repeated (keeps a wide gap after the sign / unit).
+            let chip = temp && i == 1;
             let txt = match a {
+                _ if chip => self.label.unwrap_or(""),
                 Some(v) if r.acdc && v.unit == r.main.unit => meter::text(&mut t, v),
                 Some(v) => join(&mut b, &[meter::text(&mut t, v), sf::unit_text(v.unit, &mut u)]),
                 None => "",
             };
             let k = txt.len().min(23);
             tb[i][..k].copy_from_slice(&txt.as_bytes()[..k]);
-            tb[i][23] = r.acdc as u8 | (lp as u8) << 1;
-            tw[i] = if k == 0 { 0 } else { sf::text_width(sf::LETTERS, txt, 0) };
+            tb[i][23] = r.acdc as u8 | (lp as u8) << 1 | (chip as u8) << 2;
+            tw[i] = if k == 0 {
+                0
+            } else if chip {
+                sf::text_width(sf::TEXT22, txt, 0) + 2 * CHIP_PAD
+            } else {
+                sf::text_width(sf::LETTERS, txt, 0)
+            };
             left[i] = SS_R - tw[i] - if cap(i).is_some() && k > 0 { 4 + cap_w(i) } else { 0 };
         }
         // Sign above the unit (none for continuity / diode / non-V/A). The
@@ -689,7 +755,14 @@ impl DmmView {
             } else if tx > x0 {
                 lcd::fill_rect(x0 as u16, y as u16, (tx - x0) as u16, h as u16, bg);
             }
-            if k > 0 {
+            if k > 0 && tb[i][23] & 4 != 0 {
+                // Pill rows y + 1 .. y + 23 (3 px under the row above).
+                let c = rect(tx, y + 1, SS_R - tx, 23);
+                lcd::fill_rect(tx as u16, y as u16, (SS_R - tx) as u16, 1, bg);
+                lcd::fill_rect(tx as u16, (y + 24) as u16, (SS_R - tx) as u16, (h - 24) as u16, bg);
+                sf::rbox(c, 6, CHIP, bg);
+                sf::glyphs(sf::TEXT22, c, txt, FG, CHIP, 8, 0);
+            } else if k > 0 {
                 sf::label(sf::LETTERS, rect(tx, y, SS_R - tx, h), txt, VALUE, bg, 3, 0);
             }
             st.sub_x[i] = left[i];
@@ -697,8 +770,8 @@ impl DmmView {
         // Badges.
         let b0 = if hv >= 1 {
             B_HV
-        } else if let Some(k) = self.label.and_then(|l| T_LABELS.iter().position(|&x| x == l)) {
-            B_SENSOR + k as u8
+        } else if temp {
+            B_NONE // the sensor chip is the second sub row
         } else if !r.auto {
             B_MANU
         } else if r.auto_plus {

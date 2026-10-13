@@ -234,6 +234,9 @@ Additional requirements:
 - [x] BT phone-app function change (cmd 06) goes through the app's function-change path (App::host_func_changed  (code done; verify on device)
       = func_changed: meter reset, chart restart, function bar / static view redrawn), like touch and SCPI.
 
+- [x] Temperature sensor type shown large (owner): TEXT22 chip with the full sensor name in the DMM page's aux2  (code done; verify on device)
+      slot (its deg F value moved to the status-bar slot, F14) and as the meter strip's second sub row (no deg F there).
+
 ## Backlog (user ideas)
 - [ ] SCPI over Bluetooth serial (classic SPP / BLE UART): the same parser as USBTMC, so standard
       software (sigrok/PyVISA over a serial port, Keysight-style loggers) works wirelessly. Keep the
