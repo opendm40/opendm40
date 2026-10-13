@@ -1453,7 +1453,14 @@ impl App {
         let covered = self.sp.covered();
         if self.sp.frozen_or_pinch() {
             if page {
+                // The drag redraw (DBG:PROF? "s.frame"; touch->frame latency
+                // when the shown frame moved).
+                crate::prof::enter(crate::prof::FRAME);
                 self.sp_tick(now);
+                crate::prof::exit(crate::prof::FRAME);
+                if crate::scope_ui::graph().px > 0 {
+                    crate::prof::drawn();
+                }
             }
             return;
         }
