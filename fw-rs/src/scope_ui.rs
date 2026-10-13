@@ -695,6 +695,27 @@ pub fn zones(m: &Model, out: &mut [Zone; 7]) -> usize {
     n
 }
 
+/// fw-rs addition (port plan sec. 5.2): the cursor lines themselves are
+/// zones too, +-12 px around each line over the graph (the stock zones are
+/// only around the small markers at the graph edge). After `zones`.
+pub fn line_zones(m: &Model, out: &mut [Zone; 4]) -> usize {
+    let (top, h) = (m.top(), m.frame_h());
+    let mut n = 0;
+    if let Some(xc) = m.xcur {
+        for (k, c) in xc.iter().enumerate() {
+            out[n] = Zone { level: false, id: 2 + k as u8, r: rect(14 + c - 12, top, 25, h) };
+            n += 1;
+        }
+    }
+    if let Some(yc) = m.ycur {
+        for (k, r) in yc.iter().enumerate() {
+            out[n] = Zone { level: true, id: 3 + k as u8, r: rect(13, top + trace_fy(h, *r as i32) - 12, 401, 25) };
+            n += 1;
+        }
+    }
+    n
+}
+
 /// The stock zone search for a press at (x, y): the group other than the
 /// last selected one (`last_h`: time group), zones after its current item;
 /// else the same group cycling from its current item + 1 (wrapping, so

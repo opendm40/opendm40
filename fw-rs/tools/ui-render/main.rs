@@ -624,6 +624,13 @@ fn main() {
         let b = pick(&m, 0, 2, true, 214, 25);
         let c = pick(&m, 0, 3, true, 214, 25);
         t("T + 2 X cursors at one spot cycle", a == Some((false, 2)) && b == Some((false, 3)) && c == Some((false, 0)));
+        let mut m = d;
+        m.xcur = Some([100, 300]);
+        m.ycur = Some([60, 220]);
+        let mut lz = [scope_ui::Zone::NONE; 4];
+        let n = scope_ui::line_zones(&m, &mut lz);
+        let lp = |x: i16, y: i16| scope_ui::pick_zone(&lz[..n], 0, 0, false, x, y).map(|k| (lz[k].level, lz[k].id));
+        t("cursor line zones: X1 line, Y2 line, none between", lp(124, 200) == Some((false, 2)) && lp(200, 230) == Some((true, 4)) && lp(200, 150).is_none());
     }
 
     // 0b. Combined view in the stock language (scope_ui meter strip, port
