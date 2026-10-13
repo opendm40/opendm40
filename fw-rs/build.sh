@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")"
 RUSTUP_HOME="$(cd ../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
-cargo build --release
+cargo build --release "$@"
 OBJCOPY=$(find ../toolchain/rustup -name llvm-objcopy | head -1)
 ELF=target/thumbv7em-none-eabihf/release/dm40-fw
 "$OBJCOPY" -O binary "$ELF" dm40-fw.bin

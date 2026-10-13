@@ -48,9 +48,10 @@ pub fn read_data() -> u16 {
 
 /// Memory access control (0x36). The stock firmware draws landscape by rotating
 /// in software with MADCTL=0x48 (MV=0, native 320x480). We instead address the
-/// panel in landscape directly with MV=1 (0x28 = MV | BGR), giving a 480x320
-/// grid that matches `W`/`H` below.
-pub const MADCTL_LANDSCAPE: u16 = 0x28;
+/// panel in landscape directly: MV | MX | MY | BGR = 0xE8 gives a 480x320 grid
+/// with (0,0) at the top left as the meter is held (0x28 is upside down; checked
+/// against a read-back of the stock screen).
+pub const MADCTL_LANDSCAPE: u16 = 0xE8;
 
 pub fn set_madctl(v: u16) {
     cmd(0x36);

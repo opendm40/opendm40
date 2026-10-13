@@ -2,10 +2,15 @@
 #![no_main]
 
 mod clock;
+mod dmm;
+mod fonts;
 mod host;
+mod hy3131;
 mod lcd;
 mod mmio;
 mod startup;
+mod text;
+mod ui;
 mod usb;
 mod wdt;
 
@@ -60,28 +65,28 @@ pub unsafe extern "C" fn rust_start() -> ! {
     main()
 }
 
-/// Bring-up progress as a row of squares at the top left; one per stage.
-fn status(slot: u16, color: lcd::Color) {
-    lcd::fill_rect(8 + slot * 28, 8, 20, 20, color);
+/// Bring-up failures as red squares at the top left, one slot per stage.
+fn fail(slot: u16, failed: bool) {
+    if failed {
+        lcd::fill_rect(8 + slot * 28, 40, 20, 20, lcd::RED);
+    }
 }
 
-const ST_ALIVE: u16 = 0;
-const ST_PLLSAI: u16 = 1;
-const ST_CORE: u16 = 2;
-const ST_CONFIGURED: u16 = 3;
-const ST_HOST: u16 = 4;
+const ST_PLLSAI: u16 = 0;
+const ST_CORE: u16 = 1;
 
 fn main() -> ! {
     wdt::kick();
     let mut clk = Clock::new();
     lcd::set_madctl(lcd::MADCTL_LANDSCAPE);
-    lcd::fill_screen(lcd::BLACK);
-    status(ST_ALIVE, lcd::WHITE);
+    if !cfg!(feature = "keep-screen") {
+        ui::draw_static();
+    }
 
     let hw = usb::init_hw(&mut clk);
     wdt::kick();
-    status(ST_PLLSAI, if hw.pllsai_locked { lcd::GREEN } else { lcd::RED });
-    status(ST_CORE, if hw.core_idle { lcd::GREEN } else { lcd::RED });
+    fail(ST_PLLSAI, !hw.pllsai_locked);
+    fail(ST_CORE, !hw.core_idle);
 
     let bus = synopsys_usb_otg::UsbBus::new(usb::UsbFs, unsafe {
         &mut *core::ptr::addr_of_mut!(EP_MEMORY)
@@ -101,8 +106,11 @@ fn main() -> ! {
     let mut host = host::Host::new();
     let mut deadline = clk.now_ms() + INITIAL_HOLD_MS;
     let mut feeding = true;
-    let mut configured = false;
-    let mut host_seen = false;
+
+    let mut dmm = dmm::Dmm::new();
+    dmm.set_mode(&mut clk, dmm::Mode::DcV);
+    let mut screen = ui::Screen::new();
+    let mut next_poll = 0u64;
 
     loop {
         let now = clk.now_ms();
@@ -121,7 +129,6 @@ fn main() -> ! {
             host::Action::Keepalive(ms) => {
                 let ms = if ms == 0 { KEEPALIVE_MS } else { (ms as u64).min(KEEPALIVE_MAX_MS) };
                 deadline = deadline.max(now + ms);
-                host_seen = true;
             }
             host::Action::StopFeeding => feeding = false,
         }
@@ -134,16 +141,12 @@ fn main() -> ! {
             unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
         }
 
-        // Status squares only while no reply is streaming (GRAM read-back).
-        if !host.busy() {
-            let c = dev.state() == UsbDeviceState::Configured;
-            if c != configured {
-                configured = c;
-                status(ST_CONFIGURED, if c { lcd::GREEN } else { lcd::GREY });
-            }
-            if host_seen {
-                host_seen = false;
-                status(ST_HOST, if feeding { lcd::GREEN } else { lcd::YELLOW });
+        // Measure and draw, but never while a reply is streaming: a GRAM
+        // read-back (screenshot) may be in progress on the LCD bus.
+        if now >= next_poll && !host.busy() {
+            next_poll = now + 5;
+            if let Some(r) = dmm.poll() {
+                screen.reading(&r);
             }
         }
     }
