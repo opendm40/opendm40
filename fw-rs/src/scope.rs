@@ -1,14 +1,14 @@
-//! Oscilloscope acquisition (firmware/re/analysis/scope_gen_v2_6.h).
+//! Oscilloscope: acquisition (scope_gen_v2_6.h) with the stock timebase,
+//! vertical and offset maps (scope_gen_ui_v2_6.h).
 //!
-//! ADC: 3PEAK 3PA1030, 10 bit, data on PB0..PB9, clock = TIM8 CH1 on PC6 at
-//! 50 MHz. Samples are moved by DMA1 (STM32 "DMA2"):
-//!   fs >= 50 MS/s: stream 4 ch 6 (TIM1_CH4 request) GPIOB->IDR -> record;
-//!   fs <  50 MS/s: stream 3 ch 7 (TIM8_CH2) latches GPIOB->IDR at 50 MHz into
-//!                  a word, stream 4 ch 6 copies that word into the record at fs.
-//! Frames are captured one at a time (normal DMA), so the CPU never races the
-//! DMA; the trigger is found in software in the finished frame.
-//! Front end: range relay/4051 on PC13, PB15, PD12, PD13; coupling PE3;
-//! offset = TIM3 CH3 PWM on PC8.
+//! ADC 3PA1030 (10 bit) on PB0..PB9, clocked by TIM8 CH1 on PC6 at 50 MHz.
+//! fs >= 50 MS/s: DMA1 stream 4 ch 6 (TIM1_CH4) GPIOB->IDR -> record;
+//! fs <  50 MS/s: stream 3 ch 7 (TIM8_CH2) latches IDR at 50 MHz, stream 4 copies
+//! the latch into the record at fs (as the stock firmware).
+//! One record per frame; the trigger is found in software in the record
+//! (screen/2 samples of pre-trigger, then a search window, then screen/2).
+//! The analog front end is powered by PC4 (the stock raises it on the scope /
+//! generator pages and lowers PE2, the DMM side; see power()).
 
 use crate::mmio::{modify32, r32, w32};
 
@@ -29,16 +29,24 @@ const S4: u32 = DMA1 + 0x10 + 0x18 * 4;
 const LIFCR: u32 = DMA1 + 0x08;
 const HIFCR: u32 = DMA1 + 0x0C;
 
-/// Record length per frame (samples).
-pub const REC: usize = 1024;
+/// Settings record (read only): scope calibration pairs.
+const REC: u32 = 0x080C_0000;
 
-#[link_section = ".dmabuf"]
-static mut BUF: [u16; REC] = [0; REC];
+/// Screen = 400 columns, 10 divisions; graph height 280 rows (8 x 35).
+pub const COLS: usize = 400;
+pub const ROWS: i32 = 280;
+/// Trigger search window (samples), as the stock software refinement.
+const WIN: usize = 800;
+/// Record buffer (samples) in SRAM0.
+pub const CAP: usize = 52 * 1024;
+
+#[link_section = ".sram"]
+static mut BUF: [u16; CAP] = [0; CAP];
 #[link_section = ".dmabuf"]
 static mut LATCH: [u32; 2] = [0; 2];
 
-/// Timebase table: fs, tim1 psc, tim1 arr, ccr4 (flash 0x08049a54).
-const TB: [(u32, u32, u32, u32); 31] = [
+/// Hardware timer setups (flash 0x08049a54): fs, tim1 psc, tim1 arr, ccr4.
+const HW: [(u32, u32, u32, u32); 31] = [
     (50_000_000, 0, 3, 2),
     (25_000_000, 0, 7, 4),
     (12_500_000, 0, 15, 8),
@@ -72,36 +80,66 @@ const TB: [(u32, u32, u32, u32); 31] = [
     (25, 399, 19999, 10000),
 ];
 
-/// Hardware ranges: V/div, {PC13, PB15, PD12, PD13}, nominal counts per volt.
-pub const RANGES: [(f32, [u8; 4], f32); 11] = [
-    (0.01, [1, 1, 1, 0], 10800.0),
-    (0.02, [1, 1, 1, 1], 5375.0),
-    (0.05, [1, 0, 1, 1], 2150.0),
-    (0.1, [1, 0, 0, 1], 1080.0),
-    (0.2, [1, 0, 1, 0], 537.5),
-    (0.5, [0, 1, 1, 0], 215.0),
-    (1.0, [0, 1, 1, 1], 108.0),
-    (2.0, [0, 1, 0, 1], 53.75),
-    (5.0, [0, 0, 0, 1], 21.5),
-    (10.0, [0, 0, 1, 0], 11.0),
-    (20.0, [0, 0, 0, 0], 5.5),
+/// Timebases (s/div) and the stock Auto entries {fs, num, den, ppp}: each
+/// column covers num/den points of the ppp-times upsampled stream.
+pub const SDIV: [f32; 30] = [
+    10e-9, 20e-9, 50e-9, 100e-9, 200e-9, 500e-9, 1e-6, 2e-6, 5e-6, 10e-6, 20e-6, 50e-6, 100e-6, 200e-6, 500e-6,
+    1e-3, 2e-3, 5e-3, 10e-3, 20e-3, 50e-3, 100e-3, 200e-3, 500e-3, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0,
 ];
+const TB: [(u32, u32, u32, u32); 30] = [
+    (200_000_000, 1, 1, 20),
+    (200_000_000, 1, 1, 10),
+    (200_000_000, 1, 1, 4),
+    (50_000_000, 1, 1, 8),
+    (50_000_000, 1, 1, 4),
+    (50_000_000, 5, 4, 2),
+    (50_000_000, 5, 4, 1),
+    (50_000_000, 5, 2, 1),
+    (50_000_000, 25, 4, 1),
+    (50_000_000, 25, 2, 1),
+    (50_000_000, 25, 1, 1),
+    (50_000_000, 125, 2, 1),
+    (50_000_000, 125, 1, 1),
+    (25_000_000, 125, 1, 1),
+    (10_000_000, 125, 1, 1),
+    (5_000_000, 125, 1, 1),
+    (2_500_000, 125, 1, 1),
+    (1_000_000, 125, 1, 1),
+    (500_000, 125, 1, 1),
+    (250_000, 125, 1, 1),
+    (100_000, 125, 1, 1),
+    (50_000, 125, 1, 1),
+    (25_000, 125, 1, 1),
+    (10_000, 125, 1, 1),
+    (5_000, 125, 1, 1),
+    (2_500, 125, 1, 1),
+    (1_000, 125, 1, 1),
+    (500, 125, 1, 1),
+    (250, 125, 1, 1),
+    (100, 125, 1, 1),
+];
+/// User timebase range (stock: 100 ns/div .., YT up to 1 s/div; here up to
+/// 500 ms/div with one record per frame).
+pub const TB_MIN: usize = 3;
+pub const TB_MAX: usize = 23;
 
-/// Debug: latch word, record DMA count left, first record sample, GPIOB IDR.
-pub fn debug() -> [u32; 4] {
-    unsafe {
-        [
-            core::ptr::read_volatile(core::ptr::addr_of!(LATCH[0])),
-            r32(S4 + 0x04),
-            core::ptr::read_volatile(core::ptr::addr_of!(BUF[0])) as u32,
-            r32(GPIOB_IDR),
-        ]
-    }
-}
-
-pub fn sample_rate(tb: usize) -> u32 {
-    TB[tb.min(30)].0
-}
+/// V/div of hardware range r (x1 probe), front-end GPIO row {PC13, PB15, PD12,
+/// PD13}, calibration voltage X_r and default gain point.
+pub const VDIV: [f32; 10] = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
+const GPIO_ROW: [[u8; 4]; 10] = [
+    [1, 1, 1, 0],
+    [1, 1, 1, 1],
+    [1, 0, 1, 1],
+    [1, 0, 0, 1],
+    [1, 0, 1, 0],
+    [0, 1, 1, 0],
+    [0, 1, 1, 1],
+    [0, 1, 0, 1],
+    [0, 0, 0, 1],
+    [0, 0, 1, 0],
+];
+const XR: [f32; 10] = [0.04, 0.04, 0.04, 0.4, 0.4, 0.4, 4.0, 4.0, 4.0, 4.0];
+const G_DEFAULT: [f32; 10] = [944.0, 727.0, 598.0, 944.0, 727.0, 598.0, 944.0, 727.0, 598.0, 556.0];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TrigMode {
@@ -116,28 +154,20 @@ pub struct Settings {
     pub tb: usize,
     pub range: usize,
     pub ac: bool,
-    /// Trigger level in ADC codes (0..1023) and edge.
-    pub trig_level: u16,
+    /// Trigger level and zero position in screen rows (0..280, 140 = centre).
+    pub trig_row: i32,
+    pub pos: i32,
     pub rising: bool,
     pub mode: TrigMode,
-    /// Offset PWM compare value (0..20000).
-    pub offset: u16,
 }
 
 impl Settings {
-    pub const DEFAULT: Settings = Settings {
-        run: true,
-        tb: 10,
-        range: 6,
-        ac: false,
-        trig_level: 512,
-        rising: true,
-        mode: TrigMode::Auto,
-        offset: 10000,
-    };
+    /// Stock defaults: 200 us/div, 1 V/div, DC, rising, Auto, level row 105.
+    pub const DEFAULT: Settings =
+        Settings { run: true, tb: 13, range: 6, ac: false, trig_row: 105, pos: 0, rising: true, mode: TrigMode::Auto };
 }
 
-/// A finished frame: samples (10-bit codes) and the trigger index.
+/// A finished frame: the visible window of the record.
 pub struct Frame<'a> {
     pub data: &'a [u16],
     pub trig: Option<usize>,
@@ -145,14 +175,12 @@ pub struct Frame<'a> {
     pub seq: u32,
 }
 
-pub struct Scope {
-    pub s: Settings,
-    busy: bool,
-    started: u64,
-    auto_misses: u8,
-    seq: u32,
-    relay_until: u64,
-    last_pc13: u8,
+fn cal_pair(off: u32, i: usize, dflt: (f32, f32)) -> (f32, f32) {
+    let a = REC + off + 8 * i as u32;
+    let rd = |x: u32| unsafe { core::ptr::read_volatile(x as *const f32) };
+    let (p0, p1) = (rd(a), rd(a + 4));
+    let ok = |v: f32| v.is_finite() && v > 0.0 && v < 1024.0;
+    if ok(p0) && ok(p1) && (p0 - p1).abs() > 10.0 { (p0, p1) } else { dflt }
 }
 
 fn pin(port: u32, n: u32, high: bool) {
@@ -160,63 +188,155 @@ fn pin(port: u32, n: u32, high: bool) {
 }
 
 fn out(port: u32, n: u32) {
-    unsafe { modify32(port, 3 << (2 * n), 1 << (2 * n)) };
+    unsafe {
+        modify32(port + 0x0C, 3 << (2 * n), 0);
+        modify32(port + 0x08, 0, 3 << (2 * n));
+        modify32(port, 3 << (2 * n), 1 << (2 * n));
+    }
+}
+
+pub struct Scope {
+    pub s: Settings,
+    busy: bool,
+    deadline: u64,
+    seq: u32,
+    relay_until: u64,
+    last_pc13: u8,
+    powered: bool,
+    screen: usize,
+    rec: usize,
 }
 
 impl Scope {
     pub fn new() -> Self {
         unsafe {
-            modify32(RCU_AHB1EN, 0, (1 << 22) | 0x1F); // DMA1, GPIOA..E
-            modify32(RCU_APB2EN, 0, 0b11); // TIM1, TIM8
-            modify32(RCU_APB1EN, 0, 1 << 1); // TIM3
-
+            modify32(RCU_AHB1EN, 0, (1 << 22) | 0x1F);
+            modify32(RCU_APB2EN, 0, 0b11);
+            modify32(RCU_APB1EN, 0, 1 << 1);
             // PB0..PB9 inputs with pull-down.
             modify32(GPIOB, 0xF_FFFF, 0);
             modify32(GPIOB + 0x0C, 0xF_FFFF, 0xA_AAAA);
-            // PC6: TIM8_CH1 (AF3), fast.
+            // PC6: TIM8_CH1 (AF3). PC8: TIM3_CH3 (AF2) offset PWM.
             modify32(GPIOC + 0x20, 0xF << 24, 3 << 24);
             modify32(GPIOC + 0x08, 3 << 12, 3 << 12);
             modify32(GPIOC, 3 << 12, 2 << 12);
-            // PC8: TIM3_CH3 (AF2) offset PWM.
             modify32(GPIOC + 0x24, 0xF, 2);
             modify32(GPIOC, 3 << 16, 2 << 16);
-        }
-        // Range / coupling outputs.
-        out(GPIOC, 13);
-        out(GPIOB, 15);
-        out(GPIOD, 12);
-        out(GPIOD, 13);
-        out(GPIOE, 3);
-        unsafe {
-            // Offset PWM: PSC 0, ARR 20000 (~10 kHz).
             w32(TIM3 + 0x28, 0);
             w32(TIM3 + 0x2C, 20000);
-            w32(TIM3 + 0x1C, (6 << 4) | (1 << 3)); // CH3 PWM1 preload
-            w32(TIM3 + 0x20, 1 << 8); // CC3E
+            w32(TIM3 + 0x1C, (6 << 4) | (1 << 3));
+            w32(TIM3 + 0x20, 1 << 8);
             w32(TIM3 + 0x14, 1);
             w32(TIM3, 1 | (1 << 7));
         }
-        let mut sc =
-            Scope { s: Settings::DEFAULT, busy: false, started: 0, auto_misses: 0, seq: 0, relay_until: 0, last_pc13: 2 };
+        // Range / coupling GPIOs; PC4 / PE2 keep their current levels.
+        for (p, n) in [(GPIOC, 13), (GPIOB, 15), (GPIOD, 12), (GPIOD, 13), (GPIOE, 3)] {
+            out(p, n);
+        }
+        let mut sc = Scope {
+            s: Settings::DEFAULT,
+            busy: false,
+            deadline: 0,
+            seq: 0,
+            relay_until: 0,
+            last_pc13: 2,
+            powered: false,
+            screen: 0,
+            rec: 0,
+        };
         sc.apply(Settings::DEFAULT, 0);
         sc
     }
 
-    /// Apply new settings; the next frame uses them.
+    /// Analog power as the stock pages do it: scope/generator side (PC4 = 1,
+    /// 10 ms, PE2 = 0) or DMM side (PE2 = 1, 10 ms, PC4 = 0). The new rail always
+    /// comes up before the old one goes down.
+    pub fn power(&mut self, scope_side: bool, clk: &mut crate::clock::Clock) {
+        if scope_side == self.powered {
+            return;
+        }
+        self.powered = scope_side;
+        if scope_side {
+            pin(GPIOC, 4, true);
+            out(GPIOC, 4);
+            clk.delay_ms(10);
+            pin(GPIOE, 2, false);
+            out(GPIOE, 2);
+            self.relay_until = clk.now_ms() + 200;
+        } else {
+            self.stop();
+            pin(GPIOE, 2, true);
+            out(GPIOE, 2);
+            clk.delay_ms(10);
+            pin(GPIOC, 4, false);
+            out(GPIOC, 4);
+        }
+    }
+
+    pub fn powered(&self) -> bool {
+        self.powered
+    }
+
+    fn gain(&self, r: usize) -> (f32, f32) {
+        cal_pair(0x08, r, (G_DEFAULT[r], 512.0))
+    }
+
+    /// ADC code -> volts (FUN_080301a0, without the position).
+    pub fn volts(&self, code: f32) -> f32 {
+        let r = self.s.range;
+        let (g0, g1) = self.gain(r);
+        (code - g1) * XR[r] / (g0 - g1)
+    }
+
+    /// Volts -> screen row (FUN_08030146): 140 + pos - 141 v / (4 V/div).
+    pub fn row_of_volts(&self, v: f32) -> f32 {
+        140.0 + self.s.pos as f32 - 141.0 * v / (4.0 * VDIV[self.s.range])
+    }
+
+    pub fn row_of_code(&self, code: f32) -> f32 {
+        self.row_of_volts(self.volts(code))
+    }
+
+    pub fn trig_volts(&self) -> f32 {
+        (140.0 + self.s.pos as f32 - self.s.trig_row as f32) * 4.0 * VDIV[self.s.range] / 141.0
+    }
+
+    fn trig_code(&self) -> i32 {
+        let r = self.s.range;
+        let (g0, g1) = self.gain(r);
+        (g1 + self.trig_volts() * (g0 - g1) / XR[r]) as i32
+    }
+
     pub fn apply(&mut self, s: Settings, now: u64) {
         self.stop();
+        let mut s = s;
+        s.tb = s.tb.clamp(TB_MIN, TB_MAX);
+        s.range = s.range.min(9);
+        s.trig_row = s.trig_row.clamp(-10, 290);
+        s.pos = s.pos.clamp(-392, 392);
         self.s = s;
-        let g = RANGES[s.range.min(10)].1;
+        let g = GPIO_ROW[s.range];
         if g[0] != self.last_pc13 {
             self.last_pc13 = g[0];
-            self.relay_until = now + 200; // input relay settle
+            self.relay_until = now + 200;
         }
         pin(GPIOC, 13, g[0] != 0);
         pin(GPIOB, 15, g[1] != 0);
         pin(GPIOD, 12, g[2] != 0);
         pin(GPIOD, 13, g[3] != 0);
-        pin(GPIOE, 3, !s.ac); // coupling value 1 (AC) -> PE3 = 0
-        unsafe { w32(TIM3 + 0x3C, s.offset as u32) };
+        pin(GPIOE, 3, !s.ac);
+        // Offset PWM (FUN_080302d6): ADC code of 0 V at this position.
+        let r = s.range;
+        let (g0, g1) = self.gain(r);
+        let code_t = g1 - s.pos as f32 * (4.0 * VDIV[r] / XR[r]) * (g0 - g1) / 141.0;
+        let (o0, o1) = cal_pair(0xA8, r, (730.0, 280.0));
+        let ccr = 8800.0 + (code_t - o1) * (11636.0 - 8800.0) / (o0 - o1);
+        let ccr = if ccr.is_finite() && ccr > 0.0 { ccr.min(20000.0) as u32 } else { 0 };
+        unsafe { w32(TIM3 + 0x3C, ccr) };
+        let (_, num, den, ppp) = TB[s.tb];
+        self.screen = ((num * COLS as u32 / den / ppp) as usize).max(2);
+        self.rec = (self.screen + WIN).min(CAP);
+        self.deadline = 0;
     }
 
     fn stop(&mut self) {
@@ -230,131 +350,143 @@ impl Scope {
         self.busy = false;
     }
 
-    fn start(&mut self, now: u64) {
-        let (fs, psc, arr, ccr4) = TB[self.s.tb.min(30)];
+    fn start(&mut self) {
+        let fs = TB[self.s.tb].0;
+        let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == fs).unwrap_or(&HW[0]);
         let buf = core::ptr::addr_of!(BUF) as u32;
         unsafe {
             w32(LIFCR, 0x3D << 22);
             w32(HIFCR, 0x3D);
-            // TIM8: 50 MHz ADC clock on CH1, latch request on CH2.
             w32(TIM8, 0);
             w32(TIM8 + 0x28, 0);
             w32(TIM8 + 0x2C, 3);
-            w32(TIM8 + 0x34, 2); // CCR1
-            w32(TIM8 + 0x38, 0); // CCR2
-            w32(TIM8 + 0x18, 6 << 4); // CH1 PWM1, CH2 frozen
-            w32(TIM8 + 0x20, 1); // CC1E
-            w32(TIM8 + 0x44, 1 << 15); // MOE
-            // TIM1: sample request on CH4.
+            w32(TIM8 + 0x34, 2);
+            w32(TIM8 + 0x38, 0);
+            w32(TIM8 + 0x18, 6 << 4);
+            w32(TIM8 + 0x20, 1);
+            w32(TIM8 + 0x44, 1 << 15);
             w32(TIM1, 0);
             w32(TIM1 + 0x28, psc);
             w32(TIM1 + 0x2C, arr);
             w32(TIM1 + 0x40, ccr4);
-            w32(TIM1 + 0x1C, 6 << 12); // CH4 PWM1
-            w32(TIM1 + 0x20, 1 << 12); // CC4E
+            w32(TIM1 + 0x1C, 6 << 12);
+            w32(TIM1 + 0x20, 1 << 12);
             w32(TIM1 + 0x44, 1 << 15);
-            w32(TIM1 + 0x0C, 1 << 12); // CC4DE
+            w32(TIM1 + 0x0C, 1 << 12);
             w32(TIM1 + 0x14, 1);
-
             let src = if fs >= 50_000_000 {
                 w32(TIM8 + 0x0C, 0);
                 GPIOB_IDR
             } else {
-                // Latch: GPIOB->IDR -> LATCH at 50 MHz, circular.
-                w32(TIM8 + 0x0C, 1 << 10); // CC2DE
+                w32(TIM8 + 0x0C, 1 << 10);
                 w32(S3 + 0x08, GPIOB_IDR);
                 w32(S3 + 0x0C, core::ptr::addr_of!(LATCH) as u32);
                 w32(S3 + 0x04, 2);
                 w32(S3, (7 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 8) | 1);
                 core::ptr::addr_of!(LATCH) as u32
             };
-            // Record: src -> BUF, 16 bit, MINC, one frame.
             w32(S4 + 0x08, src);
             w32(S4 + 0x0C, buf);
-            w32(S4 + 0x04, REC as u32);
+            w32(S4 + 0x04, self.rec as u32);
             w32(S4, (6 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | 1);
-
             w32(TIM8, 1);
             w32(TIM1, 1);
         }
         self.busy = true;
-        self.started = now;
     }
 
-    /// Frame duration in ms (rounded up).
-    pub fn frame_ms(&self) -> u64 {
-        (REC as u64 * 1000) / sample_rate(self.s.tb) as u64 + 1
+    pub fn sample_rate(&self) -> u32 {
+        TB[self.s.tb].0
     }
 
-    /// Poll: start / finish frames. Returns a frame when one is ready to show.
+    /// Display points per sample (> 1 below 1 us/div).
+    pub fn ppp(&self) -> u32 {
+        TB[self.s.tb].3
+    }
+
+    /// Poll: start / finish frames. Returns the visible window when ready.
     pub fn poll(&mut self, now: u64) -> Option<Frame<'static>> {
-        if !self.s.run || now < self.relay_until {
+        if !self.s.run || !self.powered || now < self.relay_until {
             return None;
         }
         if !self.busy {
-            self.start(now);
+            self.start();
+            if self.deadline == 0 {
+                // Auto: untriggered frame after the stock timeout.
+                let t = match self.s.tb {
+                    0..=15 => 100,
+                    16 => 200,
+                    17 => 500,
+                    18 => 1000,
+                    _ => 2000,
+                };
+                self.deadline = now + t;
+            }
             return None;
         }
         if unsafe { r32(S4 + 0x04) } != 0 {
             return None;
         }
         self.stop();
-        // Mask to 10 bits in place (the record holds raw GPIOB levels).
+        let n = self.rec;
         {
-            let raw = unsafe { &mut *core::ptr::addr_of_mut!(BUF) };
+            let raw = unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..n] };
             for v in raw.iter_mut() {
                 *v &= 0x3FF;
             }
         }
-        let data: &'static [u16] = unsafe { &*core::ptr::addr_of!(BUF) };
-        let trig = self.find_trigger(data);
+        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
+        let half = self.screen / 2;
+        let win = WIN.min(n - self.screen);
+        let trig = self.find_trigger(&data[half..half + win]).map(|i| i + half);
         let show = match (trig, self.s.mode) {
             (Some(_), _) => true,
-            (None, TrigMode::Auto) => {
-                self.auto_misses += 1;
-                self.auto_misses >= 2
-            }
+            (None, TrigMode::Auto) => now >= self.deadline,
             (None, _) => false,
         };
-        if trig.is_some() {
-            self.auto_misses = 0;
-            if self.s.mode == TrigMode::Single {
-                self.s.run = false;
-            }
-        }
         if !show {
             return None;
         }
+        self.deadline = 0;
+        if trig.is_some() && self.s.mode == TrigMode::Single {
+            self.s.run = false;
+        }
+        let start = trig.map(|t| t - half).unwrap_or(win / 2);
         self.seq = self.seq.wrapping_add(1);
-        Some(Frame { data, trig, fs: sample_rate(self.s.tb), seq: self.seq })
+        Some(Frame { data: &data[start..start + self.screen], trig, fs: self.sample_rate(), seq: self.seq })
     }
 
-    /// First edge crossing after the first quarter of the frame, with a small
-    /// hysteresis (as the stock software search: level / level +- 2).
+    /// Stock software trigger: beyond the hysteresis band (code -+ 2) on the
+    /// far side, then the first sample across the level.
     fn find_trigger(&self, d: &[u16]) -> Option<usize> {
-        let l = self.s.trig_level as i32;
-        let start = d.len() / 4;
-        let end = d.len() - d.len() / 2;
+        let l = self.trig_code();
         let mut armed = false;
-        for i in start..end {
-            let v = d[i] as i32;
+        for (i, &v) in d.iter().enumerate() {
+            let v = v as i32;
             if self.s.rising {
                 if v < l - 2 {
                     armed = true;
-                } else if armed && v >= l {
+                } else if armed && v > l {
                     return Some(i);
                 }
             } else if v > l + 2 {
                 armed = true;
-            } else if armed && v <= l {
+            } else if armed && v < l {
                 return Some(i);
             }
         }
         None
     }
+}
 
-    /// Code -> volts with the nominal gains (calibration TBD), zero at 512.
-    pub fn volts(&self, code: f32) -> f32 {
-        (code - 512.0) / RANGES[self.s.range.min(10)].2
+/// Debug: latch word, record DMA count left, first sample, GPIOB IDR.
+pub fn debug() -> [u32; 4] {
+    unsafe {
+        [
+            core::ptr::read_volatile(core::ptr::addr_of!(LATCH[0])),
+            r32(S4 + 0x04),
+            core::ptr::read_volatile(core::ptr::addr_of!(BUF[0])) as u32,
+            r32(GPIOB_IDR),
+        ]
     }
 }

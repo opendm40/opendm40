@@ -275,6 +275,13 @@ pub fn status_right(uptime_s: u32, bt: bool, bars: u8, charging: bool) {
     sf::label(sf::BATTERY, rect(435, 9, 40, 16), g.encode_utf8(&mut b), if charging { 0x04A9 } else { STATUS_FG }, BAR, 8, 0);
 }
 
+/// Battery on the scope page top bar (stock (435,1,40,16)).
+pub fn scope_battery(bars: u8, charging: bool) {
+    let g = char::from_u32(0x22 + bars.min(5) as u32).unwrap_or('"');
+    let mut b = [0u8; 4];
+    sf::label(sf::BATTERY, rect(435, 1, 40, 18), g.encode_utf8(&mut b), if charging { 0x04A9 } else { STATUS_FG }, S_BAR, 8, 0);
+}
+
 /// Strip chart (stock frame (80,176,321,97)) with labels, rate button and
 /// MAX / REL / MIN. `pts` are display values, oldest first.
 pub const CHART_X: u16 = 80;
@@ -369,18 +376,25 @@ pub fn chart(pts: &[f32], dec: u8, rate: u8, max: Option<f32>, min: Option<f32>,
 }
 
 // ---------------------------------------------------------------- scope
+// Stock scope page geometry (scope_gen_ui_v2_6.h section 6).
 
+pub const S_BAR: Color = 0x4208;
+const S_FRAME: Color = 0xAD55;
+const S_FILL: Color = 0x2124;
+const S_GRID: Color = 0x9492; // white blended 50 % into the fill
+const S_PURPLE: Color = 0xA81F;
+const S_ORANGE: Color = 0xFAA0;
+
+/// Graph placement: `x0, y0` of frame column / row 0, height in pixels for the
+/// 280-row model (stock: frame (13,20,401,281), 1:1 rows).
 pub struct ScopeView {
     pub x0: u16,
     pub y0: u16,
-    pub w: u16,
     pub h: u16,
-    pub divs_y: u16,
 }
 
-pub const SCOPE_FULL: ScopeView = ScopeView { x0: 0, y0: 36, w: 400, h: 240, divs_y: 8 };
-pub const SCOPE_COMPACT: ScopeView = ScopeView { x0: 0, y0: 96, w: 400, h: 180, divs_y: 6 };
-pub const SCOPE_BUTTONS: [&str; 6] = ["T-", "T+", "V-", "V+", "Edge", "Mode"];
+pub const SCOPE_FULL: ScopeView = ScopeView { x0: 13, y0: 20, h: 281 };
+pub const SCOPE_COMPACT: ScopeView = ScopeView { x0: 13, y0: 98, h: 178 };
 
 /// "1.25us" style engineering text.
 fn eng(buf: &mut [u8; 24], v: f32, unit: &str) -> usize {
@@ -394,7 +408,7 @@ fn eng(buf: &mut [u8; 24], v: f32, unit: &str) -> usize {
         (1e9, "n")
     };
     let x = v * k;
-    let dec = if x.abs() >= 100.0 {
+    let dec = if x.abs() >= 100.0 || (x - (x as i32) as f32).abs() < 1e-3 {
         0
     } else if x.abs() >= 10.0 {
         1
@@ -412,101 +426,173 @@ fn eng(buf: &mut [u8; 24], v: f32, unit: &str) -> usize {
     n
 }
 
+fn s_btn(y: i16, text: &str, fg: Color) {
+    sf::rbox(rect(417, y, 60, 40), 6, 0x2966, S_BAR);
+    sf::glyphs(sf::F14, rect(417, y, 60, 40), text, fg, 0x2966, 8, 1);
+}
+
+pub const SCOPE_RIGHT: [(i16, &str); 7] =
+    [(20, "+"), (61, ""), (102, "-"), (150, "+"), (191, ""), (232, "-"), (280, "TRIG")];
+
 impl ScopeView {
-    pub fn draw_static(&self, s: &scope::Settings, full: bool) {
+    fn row_px(&self, r: i32) -> u16 {
+        self.y0 + 1 + ((r.clamp(0, 278) as u32 * (self.h as u32 - 3)) / 278) as u16
+    }
+
+    pub fn draw_static(&self, sc: &scope::Scope, full: bool) {
         if full {
-            bar("");
-            lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
-            button_row(&SCOPE_BUTTONS, None);
+            lcd::fill_rect(0, 0, lcd::W, 20, S_BAR);
+            lcd::fill_rect(0, 20, 13, 300, S_BAR);
+            lcd::fill_rect(414, 20, 66, 300, S_BAR);
+            lcd::fill_rect(0, 301, 414, 19, S_BAR);
         }
-        self.labels(s);
-        for x in 0..self.w {
-            self.column(x, None, None);
+        self.labels(sc, full);
+        for i in 0..scope::COLS as u16 {
+            self.column(i, None, None);
         }
     }
 
-    pub fn labels(&self, s: &scope::Settings) {
-        let fs = scope::sample_rate(s.tb) as f32;
+    /// Top bar / right panel labels.
+    pub fn labels(&self, sc: &scope::Scope, full: bool) {
+        let s = &sc.s;
         let mut b = [0u8; 24];
-        let y = if self.y0 > 60 { self.y0 - 6 } else { 27 };
-        let bgc = if self.y0 > 60 { BG } else { BAR };
-        lcd::fill_rect(0, y - SMALL.ascent - 4, 400, SMALL.height() + 4, bgc);
-        let n = eng(&mut b, 40.0 / fs, "s/div");
-        let e = text::draw(&SMALL, 4, y, core::str::from_utf8(&b[..n]).unwrap_or(""), FG, bgc);
-        let n = eng(&mut b, scope::RANGES[s.range].0, "V/div");
-        let e = text::draw(&SMALL, e + 16, y, core::str::from_utf8(&b[..n]).unwrap_or(""), FG, bgc);
-        let mode = match s.mode {
-            scope::TrigMode::Auto => "Auto",
-            scope::TrigMode::Normal => "Norm",
-            scope::TrigMode::Single => "Single",
+        let (status, sc_col) = if !s.run {
+            ("STOP", S_ORANGE)
+        } else {
+            match s.mode {
+                scope::TrigMode::Auto => ("AUTO", S_PURPLE),
+                scope::TrigMode::Normal => ("WAIT", S_PURPLE),
+                scope::TrigMode::Single => ("T'D", S_PURPLE),
+            }
         };
-        let e = text::draw(&SMALL, e + 16, y, mode, FG, bgc);
-        let e = text::draw(&SMALL, e + 8, y, if s.rising { "/" } else { "\\" }, TRIG, bgc);
-        text::draw(&SMALL, e + 16, y, if s.run { "RUN" } else { "STOP" }, FG, bgc);
+        let (y, bg) = if full { (1i16, S_BAR) } else { (self.y0 as i16 - 19, BG) };
+        sf::label(sf::F14, rect(13, y, 62, 17), status, sc_col, bg, 1, 1);
+        let n = eng(&mut b, scope::SDIV[s.tb], "s");
+        sf::label(sf::F14, rect(79, y, 62, 17), core::str::from_utf8(&b[..n]).unwrap_or(""), FG, bg, 1, 1);
+        let n = eng(&mut b, scope::VDIV[s.range], if s.ac { "V~" } else { "V" });
+        sf::label(sf::F14, rect(146, y, 62, 17), core::str::from_utf8(&b[..n]).unwrap_or(""), 0xFFE0, bg, 1, 1);
+        let n = eng(&mut b, sc.trig_volts(), "V");
+        let mut t = [0u8; 28];
+        t[0] = if s.rising { b'/' } else { b'\\' };
+        t[1..1 + n].copy_from_slice(&b[..n]);
+        sf::label(sf::F14, rect(212, y, 80, 17), core::str::from_utf8(&t[..1 + n]).unwrap_or(""), FG, bg, 1, 1);
+        if full {
+            let n = eng(&mut b, scope::VDIV[s.range], "V");
+            for (yy, txt) in SCOPE_RIGHT {
+                let lbl = match yy {
+                    61 => core::str::from_utf8(&b[..n]).unwrap_or(""),
+                    191 => "Time",
+                    _ => txt,
+                };
+                let fg = if yy < 140 { 0xFFE0 } else if yy < 270 { S_PURPLE } else { FG };
+                s_btn(yy, lbl, fg);
+            }
+        }
     }
 
-    /// One column: background, grid dots, trace segment [lo, hi] (rows in the
-    /// plot), trigger level marker.
-    fn column(&self, x: u16, seg: Option<(u16, u16)>, trig_row: Option<u16>) {
-        let gx = self.w / 10;
-        let gy = self.h / self.divs_y;
-        let on_vline = x % gx == 0;
-        let edge_x = x == 0 || x == self.w - 1;
-        lcd::set_window(self.x0 + x, self.y0, self.x0 + x, self.y0 + self.h - 1);
-        for y in 0..self.h {
-            let mut c = BG;
-            if edge_x || y == 0 || y == self.h - 1 || (on_vline && y % 4 == 0) || (y % gy == 0 && x % 4 == 0) {
-                c = DIM;
+    /// One graph column `i` (0..399): fill, grid, trace segment (rows), and
+    /// the trigger level tick on the left edge.
+    fn column(&self, i: u16, seg: Option<(i32, i32)>, trig: Option<i32>) {
+        let x = self.x0 + i;
+        let h = self.h;
+        let seg = seg.map(|(a, b)| (self.row_px(a) - self.y0, self.row_px(b) - self.y0));
+        let trig = trig.map(|t| self.row_px(t) - self.y0);
+        let vline = i % 40 == 0;
+        let centre_v = i == 200;
+        lcd::set_window(x, self.y0, x, self.y0 + h - 1);
+        for y in 0..h {
+            // Rows of the 280-row model for the horizontal grid lines.
+            let r = (y as u32 * 278 / (h as u32 - 3).max(1)) as u16;
+            let hline = r % 35 == 0 && y > 0 && y < h - 1;
+            let mut c = S_FILL;
+            if i == 0 || i == 400 || y == 0 || y == h - 1 {
+                c = S_FRAME;
+            } else if (vline && y % 5 == 0) || (hline && i % 8 == 0) || (centre_v && y % 5 == 0) {
+                c = S_GRID;
             }
-            if trig_row == Some(y) && x < 6 {
-                c = TRIG;
-            }
-            if let Some((lo, hi)) = seg {
-                if y >= lo && y <= hi {
-                    c = TRACE;
+            if let Some((a, b)) = seg {
+                if y >= a && y <= b && i > 0 {
+                    c = 0xFFE0;
                 }
+            }
+            if trig == Some(y) && i < 6 {
+                c = S_ORANGE;
             }
             lcd::data(c);
         }
     }
 
-    /// Draw a frame centred on the trigger (or the middle).
-    pub fn frame(&self, f: &scope::Frame, s: &scope::Settings) {
+    /// Draw a frame: 400 columns of min/max (peak detect), widened to touch
+    /// the previous column, as the stock trace.
+    pub fn frame(&self, f: &scope::Frame, sc: &scope::Scope) {
         let n = f.data.len();
-        let center = f.trig.unwrap_or(n / 2);
-        let start = center.saturating_sub(self.w as usize / 2).min(n - self.w as usize);
-        let counts_per_div = scope::RANGES[s.range].2 * scope::RANGES[s.range].0;
-        let px_per_count = (self.h / self.divs_y) as f32 / counts_per_div;
-        let mid = self.h as f32 / 2.0;
-        let row = |code: u16| -> u16 {
-            let y = mid - (code as f32 - 512.0) * px_per_count;
-            y.clamp(1.0, self.h as f32 - 2.0) as u16
-        };
-        let trig_row = Some(row(s.trig_level));
-        let mut prev = row(f.data[start]);
-        for x in 0..self.w {
-            let y = row(f.data[start + x as usize]);
-            let (lo, hi) = if y < prev { (y, prev) } else { (prev, y) };
-            self.column(x, Some((lo, hi)), trig_row);
-            prev = y;
+        let trig_row = Some(sc.s.trig_row);
+        let row = |code: u16| -> i32 { sc.row_of_code(code as f32) as i32 };
+        let (mut pa, mut pb) = (0i32, 0i32);
+        for i in 0..scope::COLS {
+            let (mut lo, mut hi);
+            if n >= scope::COLS {
+                let a = i * n / scope::COLS;
+                let b = ((i + 1) * n / scope::COLS).max(a + 1);
+                lo = i32::MAX;
+                hi = i32::MIN;
+                for &v in &f.data[a..b.min(n)] {
+                    let r = row(v);
+                    lo = lo.min(r);
+                    hi = hi.max(r);
+                }
+            } else {
+                // Fewer samples than columns: linear interpolation.
+                let pos = i as f32 * (n - 1) as f32 / (scope::COLS - 1) as f32;
+                let k = pos as usize;
+                let fr = pos - k as f32;
+                let v0 = f.data[k] as f32;
+                let v1 = f.data[(k + 1).min(n - 1)] as f32;
+                let r = sc.row_of_code(v0 + (v1 - v0) * fr) as i32;
+                lo = r;
+                hi = r;
+            }
+            if i > 0 {
+                lo = lo.min(pb);
+                hi = hi.max(pa);
+            }
+            pa = lo;
+            pb = hi;
+            let (a, b) = (lo.min(hi), lo.max(hi));
+            self.column(i as u16, Some((a, b)), trig_row);
         }
     }
 }
 
-/// Measurements of a frame: Vpp, mean (V), frequency (Hz) from crossings.
-pub fn measure(f: &scope::Frame, sc: &scope::Scope) -> (f32, f32, f32) {
-    let (mut lo, mut hi, mut sum) = (u16::MAX, 0u16, 0u32);
+/// Measurements of a frame: Vpp, mean, RMS (V) and frequency (Hz).
+pub fn measure(f: &scope::Frame, sc: &scope::Scope) -> (f32, f32, f32, f32) {
+    let (mut lo, mut hi, mut sum, mut sq) = (u16::MAX, 0u16, 0f32, 0f32);
     for &v in f.data {
         lo = lo.min(v);
         hi = hi.max(v);
-        sum += v as u32;
+        let x = sc.volts(v as f32);
+        sum += x;
+        sq += x * x;
     }
-    let mean = sum as f32 / f.data.len() as f32;
+    let n = f.data.len() as f32;
+    let mean = sum / n;
+    let rms = {
+        let m = sq / n;
+        let mut y = if m > 0.0 { f32::from_bits((m.to_bits() >> 1) + 0x1FBD_1DF5) } else { 0.0 };
+        if m > 0.0 {
+            for _ in 0..3 {
+                y = 0.5 * (y + m / y);
+            }
+        }
+        y
+    };
     let mid = (lo as u32 + hi as u32) / 2;
+    // Hysteresis: 10 % of the swing; no frequency below 20 codes of swing.
+    let hy = ((hi - lo) as u32 / 10).max(2);
     let (mut first, mut last, mut count) = (None, 0usize, 0u32);
     let mut below = f.data[0] as u32 <= mid;
     for (i, &v) in f.data.iter().enumerate() {
-        if below && v as u32 > mid + 2 {
+        if below && v as u32 > mid + hy {
             below = false;
             if first.is_none() {
                 first = Some(i);
@@ -514,72 +600,130 @@ pub fn measure(f: &scope::Frame, sc: &scope::Scope) -> (f32, f32, f32) {
                 count += 1;
             }
             last = i;
-        } else if !below && (v as u32) + 2 < mid {
+        } else if !below && (v as u32) + hy < mid {
             below = true;
         }
     }
     let freq = match first {
-        Some(a) if count > 0 && hi > lo + 8 => count as f32 * f.fs as f32 / (last - a) as f32,
+        Some(a) if count > 0 && hi > lo + 20 => count as f32 * f.fs as f32 / (last - a) as f32,
         _ => 0.0,
     };
-    (sc.volts(hi as f32) - sc.volts(lo as f32), sc.volts(mean), freq)
+    (sc.volts(hi as f32) - sc.volts(lo as f32), mean, rms, freq)
 }
 
-pub fn scope_measurements(vpp: f32, mean: f32, freq: f32, y0: u16) {
-    let mut b = [0u8; 24];
-    let items: [(&str, f32, &str); 3] = [("Vpp", vpp, "V"), ("Avg", mean, "V"), ("Freq", freq, "Hz")];
+/// Bottom measurement cells (stock: x 13/113/213/313, 98x17).
+pub fn scope_measurements(vpp: f32, mean: f32, rms: f32, freq: f32) {
+    let items: [(&str, f32, &str); 4] = [("Vpp:", vpp, "V"), ("Freq:", freq, "Hz"), ("Vavg:", mean, "V"), ("Vrms:", rms, "V")];
     for (i, (name, v, u)) in items.iter().enumerate() {
-        let y = y0 + 20 + i as u16 * 48;
-        text::draw(&SMALL, 404, y, name, DIM, BG);
+        let x = 13 + 100 * i as i16;
+        let mut b = [0u8; 24];
         let n = eng(&mut b, *v, u);
-        lcd::fill_rect(404, y + 4, 76, SMALL.height(), BG);
-        text::draw(&SMALL, 404, y + 4 + SMALL.ascent, core::str::from_utf8(&b[..n]).unwrap_or(""), FG, BG);
+        let mut t = [0u8; 32];
+        let k = name.len();
+        t[..k].copy_from_slice(name.as_bytes());
+        t[k..k + n].copy_from_slice(&b[..n]);
+        lcd::fill_rect(x as u16, 302, 98, 1, S_FRAME);
+        sf::label(sf::F14, rect(x, 303, 98, 16), core::str::from_utf8(&t[..k + n]).unwrap_or(""), 0xFFE0, S_BAR, 1, 1);
     }
 }
 
 // ------------------------------------------------------------ generator
+// Stock generator page (scope_gen_ui_v2_6.h section 6).
 
-pub const GEN_BUTTONS: [&str; 6] = ["Wave", "F-", "F+", "A-", "A+", "Out"];
+const G_BG: Color = 0x10A3;
+const G_BAR: Color = 0x2146;
+const G_BOX: Color = 0x3A08;
+const G_TRACE: Color = 0x04A9;
 
-pub fn gen_static() {
-    bar("Generator");
-    lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
-    button_row(&GEN_BUTTONS, None);
+pub fn gen_static(g: &gen::Gen) {
+    lcd::fill_rect(0, 0, lcd::W, 36, G_BAR);
+    lcd::fill_rect(0, 36, lcd::W, lcd::H - 36, G_BG);
+    for (y, name) in [(40i16, "Frequency"), (133, "Vpp"), (226, "Duty")] {
+        sf::rbox(rect(246, y, 230, 90), 3, G_BOX, G_BG);
+        sf::glyphs(sf::TEXT22, rect(257, y + if y == 226 { 0 } else { 8 }, 140, 26), name, STATUS_FG, G_BOX, 1, 0);
+    }
+    gen_values(g);
+}
+
+fn gen_preview(w: gen::Wave) {
+    // Two periods over 238 points between h/4 and 3h/4, as the stock preview.
+    let (x0, y0, ww, hh) = (4u16, 85u16, 239u16, 231u16);
+    let sel = match w {
+        gen::Wave::Sine => 0,
+        gen::Wave::Ramp => 1,
+        gen::Wave::Triangle => 2,
+        gen::Wave::Square => 3,
+    };
+    let yv = |i: u16| -> u16 {
+        let ph = (i as f32 * 2.0 / 238.0) % 1.0;
+        let v = match sel {
+            0 => 0.5 + 0.5 * libsin(ph * 2.0 * core::f32::consts::PI),
+            1 => ph,
+            2 => if ph < 0.5 { ph * 2.0 } else { 2.0 - ph * 2.0 },
+            _ => if ph < 0.5 { 1.0 } else { 0.0 },
+        };
+        y0 + hh * 3 / 4 - (v * (hh / 2) as f32) as u16
+    };
+    let mut prev = yv(0);
+    for i in 0..ww {
+        let y = yv(i.min(237));
+        let (a, b) = if y < prev { (y, prev) } else { (prev, y) };
+        prev = y;
+        lcd::set_window(x0 + i, y0, x0 + i, y0 + hh - 1);
+        for yy in 0..hh {
+            let edge = i == 0 || i == ww - 1 || yy == 0 || yy == hh - 1;
+            let grid = (i % 48 == 0 && i > 0) || (yy % 46 == 0 && yy > 0);
+            let c = if y0 + yy >= a && y0 + yy <= b {
+                G_TRACE
+            } else if edge {
+                0x73CF
+            } else if grid {
+                G_BOX
+            } else {
+                G_BG
+            };
+            lcd::data(c);
+        }
+    }
+}
+
+fn libsin(x: f32) -> f32 {
+    const PI: f32 = core::f32::consts::PI;
+    let mut x = x;
+    while x > PI {
+        x -= 2.0 * PI;
+    }
+    let x = if x > PI / 2.0 { PI - x } else if x < -PI / 2.0 { -PI - x } else { x };
+    let x2 = x * x;
+    x * (1.0 - x2 / 6.0 * (1.0 - x2 / 20.0 * (1.0 - x2 / 42.0)))
 }
 
 pub fn gen_values(g: &gen::Gen) {
     let s = &g.s;
-    let mut b = [0u8; 24];
-    let rows: [&str; 5] = ["Output", "Wave", "Freq", "Ampl", "Duty"];
-    for (i, name) in rows.iter().enumerate() {
-        let y = 80 + i as u16 * 40;
-        text::draw(&LABEL, 20, y, name, DIM, BG);
-        let mut t = [0u8; 16];
-        let v: &str = match i {
-            0 => {
-                if s.on { "ON" } else { "OFF" }
-            }
-            1 => s.wave.name(),
-            2 => {
-                let n = eng(&mut b, s.freq_hz as f32, "Hz");
-                core::str::from_utf8(&b[..n]).unwrap_or("")
-            }
-            3 => {
-                let n = crate::dmm::format(&mut t, s.amp_v, 1).len();
-                t[n] = b' ';
-                t[n + 1] = b'V';
-                core::str::from_utf8(&t[..n + 2]).unwrap_or("")
-            }
-            _ => {
-                let n = crate::dmm::format(&mut t, s.duty as f32 / 100.0, 1).len();
-                t[n] = b'%';
-                core::str::from_utf8(&t[..n + 1]).unwrap_or("")
-            }
-        };
-        let c = if i == 0 && s.on { VALUE_RED } else { FG };
-        lcd::fill_rect(160, y - LABEL.ascent, 320, LABEL.height(), BG);
-        text::draw(&LABEL, 160, y, v, c, BG);
-    }
+    // Top bar: RUN/STOP (output state).
+    sf::label(sf::F21, rect(0, 0, 84, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 8, 0);
+    // Wave drop-down.
+    sf::rbox(rect(4, 40, 239, 42), 3, G_BOX, G_BG);
+    sf::glyphs(sf::TEXT22, rect(14, 40, 180, 42), s.wave.name(), STATUS_FG, G_BOX, 1, 0);
+    sf::glyphs(sf::Font(0x0805_9428), rect(197, 40, 42, 42), " ", STATUS_FG, G_BOX, 8, 0);
+    gen_preview(s.wave);
+    // Values.
+    let f = s.freq_hz as f32;
+    let (fv, fu) = if f >= 1e6 { (f / 1e6, "MHz") } else if f >= 1e3 { (f / 1e3, "KHz") } else { (f, "Hz") };
+    let mut t = [0u8; 16];
+    let fs = crate::dmm::format(&mut t, fv, if fv >= 100.0 { 0 } else if fv >= 10.0 { 1 } else { 2 });
+    sf::label(sf::LETTERS, rect(262, 83, 150, 30), fs, STATUS_FG, G_BOX, 4, 0);
+    sf::label(sf::TEXT22, rect(421, 90, 50, 26), fu, STATUS_FG, G_BOX, 1, 0);
+    let mut t = [0u8; 16];
+    let a = crate::dmm::format(&mut t, s.amp_v, 1);
+    sf::label(sf::LETTERS, rect(262, 173, 150, 30), a, STATUS_FG, G_BOX, 4, 0);
+    sf::label(sf::TEXT22, rect(421, 176, 50, 26), "V", STATUS_FG, G_BOX, 1, 0);
+    let mut t = [0u8; 16];
+    let d = crate::dmm::format(&mut t, s.duty as f32 / 100.0, 1);
+    let duty_ok = s.wave == gen::Wave::Square && s.freq_hz <= 50_000;
+    let fg = if duty_ok { STATUS_FG } else { 0x7BEF };
+    sf::label(sf::LETTERS, rect(262, 266, 150, 30), d, fg, G_BOX, 4, 0);
+    sf::label(sf::TEXT22, rect(421, 269, 50, 26), "%", fg, G_BOX, 1, 0);
 }
 
 // ----------------------------------------------------------------- menu
