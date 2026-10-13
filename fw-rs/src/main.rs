@@ -144,7 +144,8 @@ fn main() -> ! {
 
     let mut scpi = scpi::Scpi::new();
     // SCPI READ?/MEASure?: reply with the first reading whose seq is >= this.
-    let mut scpi_wait: Option<u32> = None;
+    let mut scpi_wait: Option<(u32, bool)> = None;
+    let mut scpi_line_ready = false;
     let mut bt = bt::Bt::new();
     let mut gestures = gesture::Tracker::new();
     let mut touch_events = 0u32;
@@ -173,36 +174,63 @@ fn main() -> ! {
         }
 
         dev.poll(&mut [&mut tmc, &mut port]);
+        // SCPI from USBTMC or from a text line on the serial port.
+        let mut msg = [0u8; 256];
+        let mut msg_n = 0usize;
+        let mut from_tmc = false;
         if let Some(cmd) = tmc.take_command() {
-            let mut msg = [0u8; usbtmc::CMD_MAX];
-            let n = cmd.len();
-            msg[..n].copy_from_slice(cmd);
-            match scpi.handle(&msg[..n], app.dmm.mode()) {
-                scpi::Out::None => {}
-                scpi::Out::Text => tmc.respond(&scpi.buf[..scpi.len]),
+            msg_n = cmd.len().min(256);
+            msg[..msg_n].copy_from_slice(&cmd[..msg_n]);
+            from_tmc = true;
+        } else if scpi_line_ready {
+            scpi_line_ready = false;
+            msg_n = host.take_line(&mut msg);
+        }
+        if msg_n > 0 {
+            let reply = match scpi.handle(&msg[..msg_n], app.dmm.mode()) {
+                scpi::Out::None => false,
+                scpi::Out::Text => true,
                 scpi::Out::Configure(m) => {
                     if m != app.dmm.mode() {
                         app.dmm.select(&mut clk, m);
                         app.meter.reset();
                         app.last_raw = None;
                     }
+                    false
                 }
                 scpi::Out::Measure(m) => {
+                    // The multimeter needs its analog side powered.
+                    app.scope.power(false, &mut clk);
                     if let Some(m) = m.filter(|&m| m != app.dmm.mode()) {
                         app.dmm.select(&mut clk, m);
                         app.meter.reset();
                         app.last_raw = None;
                     }
-                    scpi_wait = Some(app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0));
+                    scpi_wait = Some((app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0), from_tmc));
+                    false
+                }
+                scpi::Out::Instr(c) => {
+                    scpi.len = 0;
+                    app.scpi(&mut clk, c, &mut scpi)
                 }
                 scpi::Out::Fetch => match app.meter.shown().copied() {
                     Some(r) => {
                         scpi.len = 0;
                         scpi.put_reading(&r);
-                        tmc.respond(&scpi.buf[..scpi.len]);
+                        true
                     }
-                    None => scpi_wait = Some(0),
+                    None => {
+                        scpi_wait = Some((0, from_tmc));
+                        false
+                    }
                 },
+            };
+            if reply {
+                if from_tmc {
+                    tmc.respond(&scpi.buf[..scpi.len]);
+                } else {
+                    host.reply_text(&scpi.buf[..scpi.len]);
+                }
             }
         }
         let action = host.poll(&mut port, || host::Info {
@@ -218,6 +246,7 @@ fn main() -> ! {
                 deadline = deadline.max(now + ms);
             }
             host::Action::StopFeeding => feeding = false,
+            host::Action::Scpi => scpi_line_ready = true,
             host::Action::Input(kind, arg) => {
                 deadline = deadline.max(now + KEEPALIVE_MS);
                 let p = touch::Point { x: arg as u16, y: (arg >> 16) as u16 };
@@ -280,12 +309,16 @@ fn main() -> ! {
             }
             if let Some(raw) = app.dmm.poll(&mut clk) {
                 if let Some(r) = app.reading(raw, can_draw) {
-                    if let Some(min) = scpi_wait {
+                    if let Some((min, to_tmc)) = scpi_wait {
                         if r.seq.wrapping_sub(min) < 0x8000_0000 {
                             scpi_wait = None;
                             scpi.len = 0;
                             scpi.put_reading(&r);
-                            tmc.respond(&scpi.buf[..scpi.len]);
+                            if to_tmc {
+                                tmc.respond(&scpi.buf[..scpi.len]);
+                            } else {
+                                host.reply_text(&scpi.buf[..scpi.len]);
+                            }
                         }
                     }
                 }

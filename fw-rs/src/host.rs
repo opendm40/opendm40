@@ -27,7 +27,7 @@ use crate::lcd;
 
 const MAGIC: [u8; 2] = [0xD4, 0x0D];
 const REQ_LEN: usize = 16;
-const STAGE: usize = 128;
+const STAGE: usize = 512;
 
 pub const CMD_PING: u8 = 0;
 pub const CMD_FILL: u8 = 1;
@@ -49,6 +49,8 @@ pub enum Action {
     StopFeeding,
     /// Injected gesture (CMD_INPUT): kind, argument.
     Input(u32, u32),
+    /// A text line (SCPI over the serial port); see `line()`.
+    Scpi,
 }
 
 pub struct Info {
@@ -74,6 +76,10 @@ pub struct Host {
     src: Source,
     pending_reset: bool,
     lcd_read: bool,
+    /// Text line being received (anything not starting with the magic).
+    line: [u8; 256],
+    line_n: usize,
+    line_ready: bool,
 }
 
 fn u32_at(b: &[u8], i: usize) -> u32 {
@@ -91,6 +97,9 @@ impl Host {
             src: Source::Idle,
             pending_reset: false,
             lcd_read: false,
+            line: [0; 256],
+            line_n: 0,
+            line_ready: false,
         }
     }
 
@@ -98,6 +107,22 @@ impl Host {
     /// LCD meanwhile: a GRAM read-back may be in progress.
     pub fn busy(&self) -> bool {
         self.stage_off < self.stage_len || !matches!(self.src, Source::Idle)
+    }
+
+    /// The received SCPI line (after Action::Scpi); clears it.
+    pub fn take_line(&mut self, out: &mut [u8; 256]) -> usize {
+        let n = self.line_n;
+        out[..n].copy_from_slice(&self.line[..n]);
+        self.line_n = 0;
+        self.line_ready = false;
+        n
+    }
+
+    /// Queue a text reply (SCPI) followed by LF.
+    pub fn reply_text(&mut self, t: &[u8]) {
+        let n = t.len().min(STAGE - 1 - self.stage_len);
+        self.push(&t[..n]);
+        self.push(b"\n");
     }
 
     /// True once after a GRAM read-back request. A screenshot is a series of
@@ -128,6 +153,19 @@ impl Host {
             Err(_) => return Action::None,
         };
         for &b in &buf[..n] {
+            // Text mode: a line of SCPI, terminated by LF.
+            if self.req_len == 0 && (self.line_n > 0 || (b != MAGIC[0] && b >= 0x20)) {
+                if b == b'\n' || b == b'\r' {
+                    if self.line_n > 0 {
+                        self.line_ready = true;
+                        return Action::Scpi;
+                    }
+                } else if self.line_n < self.line.len() {
+                    self.line[self.line_n] = b;
+                    self.line_n += 1;
+                }
+                continue;
+            }
             self.req[self.req_len] = b;
             self.req_len += 1;
             // Resync on the magic so stray bytes (e.g. a modem probe) are dropped.
