@@ -1,6 +1,8 @@
 import binascii
+import os
 import socket
 import struct
+import sys
 from binascii import hexlify, unhexlify
 
 
@@ -45,8 +47,13 @@ def decode_packet_bytes(packet: bytes) -> dict:
 
 
 
+# EL15 Bluetooth MAC address (XX:XX:XX:XX:XX:XX): argument or $EL15_MAC
+mac = sys.argv[1] if len(sys.argv) > 1 else os.environ.get('EL15_MAC')
+if not mac:
+    sys.exit("usage: el15.py XX:XX:XX:XX:XX:XX  (or set EL15_MAC)")
+
 s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-s.connect(('XX:XX:XX:XX:XX:XX', 1))
+s.connect((mac, 1))
 
 while 1:
     packet = add_crc(to_bytes('af 07 03 08 00')) # query
