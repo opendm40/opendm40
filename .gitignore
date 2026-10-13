@@ -1,9 +1,27 @@
-# Vendor files
+# Vendor files and build images (firmware update files, dumps, APKs, archives).
+# Note: this also hides any future .bin that should be tracked; add a
+# `!path/to/file.bin` exception for it.
 *.bin
 *.apk
 *.zip
 
+# Build outputs
 firmware/patch/build*/
 __pycache__/
 fw-rs/target/
 toolchain/
+
+# Personal device data: flash / OTP / option-byte dumps, calibration, chip UID,
+# SPI disk backups (the `*.bin` rule is case-sensitive and misses CONFIG.BIN,
+# S00x.BMP, SHA256SUMS and manifests next to them)
+firmware/re/dumps/
+firmware/re/history/
+firmware/spi-disk-backup/
+dist/*/tools/quick.img/
+dist/*/tools/full/
+
+# Ghidra project database (contains the vendor image; rebuilt by Setup.java)
+firmware/re/ghidra/gproj/
+
+# Scratch output of the checksum brute-force runs
+l2bittest/
