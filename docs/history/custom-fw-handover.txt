@@ -1,0 +1,183 @@
+HISTORICAL (kept for reference): the first handover of the Rust PoC (DMM only,
+run from SRAM). Superseded by fw-rs/README.md and fw-rs/docs/native-boot.md.
+
+================================================================================
+DM40 CUSTOM FIRMWARE — HANDOVER
+================================================================================
+Audience: an agent continuing the Rust replacement firmware for the Alientek
+DM40. This covers the custom-firmware effort only. The reverse-engineering of
+the stock firmware is already done; see the analysis headers referenced below
+rather than re-deriving anything. Do NOT read other .md files for RE context —
+use the headers in firmware/re/analysis/.
+
+--------------------------------------------------------------------------------
+GOAL / SCOPE OF THE PoC
+--------------------------------------------------------------------------------
+- Replacement firmware in Rust (no_std). Multimeter (DMM) ONLY for now.
+- GUI must match the stock firmware exactly, EXCEPT the main value colour:
+  change the stock orange/yellow to RED.
+- No settings screens. Boot straight into the multimeter screen.
+- Calibration and configuration are READ from their existing locations;
+  write NOTHING to flash.
+- USB host-side access via USBTMC (see USB section). Bluetooth: not now.
+- Runs from SRAM, taking over from the stock firmware and re-initialising the
+  peripherals it needs. The mechanism that places the image in RAM and starts
+  it is a separate loader owned by the user; this project only builds the image
+  and honours the load contract below.
+
+--------------------------------------------------------------------------------
+HARDWARE (all verified against the stock firmware / datasheet)
+--------------------------------------------------------------------------------
+- MCU: GD32F427 (Cortex-M4F). Clock 200 MHz (PLL M=25 N=400 P=2), APB1/4,
+  APB2/2, PWR over-drive, RCC TIMPRE=1 so all timer clocks are 200 MHz.
+  256 KiB SRAM. USB: USBFS only is wired (PA11/PA12 AF10); the USBHS block has
+  no on-board ULPI PHY, so high-speed is not possible on this board.
+- DMM AFE: HY3131 (HYCON). Bit-banged SPI over GPIO bit-band aliases:
+  SCK=PC10, MOSI=PC12, MISO=PC11, CS=PD2 (active low). SYSCLK to the chip is a
+  4.9152 MHz crystal. Full register map, frame format, all 15 mode config
+  tables, calibration formulas and ranges: firmware/re/analysis/hy3131_v2_6.h
+  (checked against the HYCON DS-HY3131-V10_EN datasheet).
+- LCD: ILI9488, FSMC bank 1. Command reg 0x6001FFFE (RS=FSMC_A16), data reg
+  0x60020000, 16-bit 8080 bus, 16 bpp RGB565 (one 16-bit write per pixel).
+  Panel is NATIVE 320x480 portrait; the stock firmware draws landscape by
+  rotating in software (MADCTL=0x48, MV=0). The custom fw addresses landscape
+  directly with MV=1 (MADCTL=0x28) -> 480x320 grid. Init sequence, FSMC timing,
+  backlight (PA6 TIM13 ~20 kHz PWM) and buzzer (PA7 TIM14 ~3.57 kHz):
+  firmware/re/analysis/lcd_buzzer_v2_6.h.
+- Touch: GT9xxx capacitive controller on I2C3 (stock init FUN_0800cb86). Touch
+  COORDS come through as X/Y; the four side buttons MENU/RUN/AUTO/MF are the
+  controller's HaveKey "virtual keys", delivered as key codes 0x10/0x20/0x40/
+  0x80. The custom fw must read the HaveKey status, not just coordinates, for
+  those buttons to work.
+- Scope/generator (not needed for the DMM PoC, documented for later):
+  firmware/re/analysis/scope_gen_v2_6.h. External ADC is a 3PEAK 3PA1030
+  (10-bit 50 MSa/s, data on PB0..PB9, clock PC6/TIM8). HCF4051 selects the input
+  divider/gain (decoded table in scope_gen_v2_6.h).
+
+--------------------------------------------------------------------------------
+CRITICAL RULE — WATCHDOG / RECOVERY
+--------------------------------------------------------------------------------
+The free watchdog (FWDGT = IWDG layout, reload = write 0xAAAA to 0x40003000) is
+RUNNING. The stock firmware fed it from the TIM7 1 kHz ISR; once the custom fw
+takes over with interrupts off, that ISR no longer runs, so the custom fw must
+feed it.
+
+NEVER feed the watchdog unconditionally. If you do, the device is stuck in the
+custom fw and the ONLY way back to stock is physically disconnecting the battery
+(already hit this once). ALWAYS leave a recovery path:
+  - the current PoC feeds for a bounded number of iterations (HOLD_ITERS) then
+    STOPS, so the watchdog resets back to stock; and
+  - the panic handler does NOT feed, so any crash recovers on reset.
+Going forward, keep a deliberate exit (timeout and/or a touch/button that stops
+feeding) in every build.
+
+--------------------------------------------------------------------------------
+CALIBRATION / CONFIG (read-only)
+--------------------------------------------------------------------------------
+- Settings record: internal flash 0x080C0000, 800 bytes. Layout:
+  u16 crc16 (bytes swapped), u16 ~crc, u32 version=1, then data. CRC16 table at
+  0x0804C24C, init 0xFFFF, over bytes 4..0x31F. Defaults at 0x0804C45C.
+- DMM calibration block: record offset 0x168, 0x1B8 bytes; copied to RAM
+  0x20026B0C at init. Field offsets (gain/offset per range, etc.) and the
+  per-mode value formulas are in hy3131_v2_6.h.
+- Model byte = calibration byte 0 (record offset 0x168): 0=DM40A (40000 counts),
+  1=DM40B (50000), 2=DM40C (60000). Only affects range limits + labels. The
+  device in hand reads 0 (DM40A).
+- Scope calibration lives in the same record (offsets +0x08/+0x58/+0xA8/+0xF8).
+- User settings (ranges, mode, options) live in config.bin on the SPI FAT, not
+  in this record. Not needed for the DMM PoC.
+
+--------------------------------------------------------------------------------
+GUI REFERENCE (manual figure 2.2.1 + real screenshots)
+--------------------------------------------------------------------------------
+Multimeter screen, landscape 480x320. Dark background.
+- Top status bar: range (AUTO / AUTO+ / manual), Aux1, run state (RUN/HOLD),
+  uptime HH:MM:SS, touch lock icon, battery.
+- Left column buttons (GT9xxx keys): MENU, RUN, AUTO, MF.
+- Centre: large main value + unit (THIS is the colour to change to red; stock is
+  orange/yellow), Aux1 top-left, Aux2 top-right.
+- A thin row of secondary readouts, then a small auto-scaling waveform strip
+  (160/320/640 ms/div, default 320), with MAX / RLE / MIN on its right.
+- Bottom: 6 function buttons cycling 8 modes:
+  V(DC/AC/AC+DC) | A(DC/AC/AC+DC) | Ohm(offline/online) | Capacitance |
+  Diode/Continuity | Frequency/Temperature.
+Modes map to HY3131 config tables f0..f15 in hy3131_v2_6.h.
+
+--------------------------------------------------------------------------------
+PROJECT STATE: fw-rs/
+--------------------------------------------------------------------------------
+Rust, no_std, dependency-free (core only, raw volatile MMIO). Files:
+  src/startup.rs  vector table + reset (cpsid i, set SP, VTOR->SRAM, zero .bss)
+  src/mmio.rs     r32/w32/w16/modify32 + crude busy-wait spin()
+  src/wdt.rs      watchdog kick (0xAAAA -> 0x40003000)
+  src/lcd.rs      ILI9488 over FSMC: set_madctl, set_window, fill_rect/screen
+  src/main.rs     milestone 1: set MV=1, fill red, bounded WDT feed, then release
+  link.x          RAM layout; .vectors at 0x20008000; _stack_top=0x20018000
+  build.sh        -> dm40-fw.bin (bare binary)
+  README.md       load contract + milestones
+
+LOAD CONTRACT (for the user's loader):
+  - Bare binary, loaded at 0x20008000. Cortex-M vector-table head:
+    word[0]=initial MSP (0x20018000), word[1]=reset entry (thumb bit set).
+  - 64 KiB window 0x20008000..0x20018000, inside the free SRAM0 the stock fw
+    leaves in DMM mode (free from 0x20005024). The low 32 KiB of SRAM0 (stock
+    scope buffer) is left alone until peripherals are re-initialised.
+  - On entry reset sets MSP, masks IRQs, points VTOR at the SRAM table, zeroes
+    .bss, calls main. The loader need not keep its handlers alive.
+
+STATUS: milestone 1 works on hardware. After load the screen shows the fill and
+the watchdog is held then released (returns to stock). The first "red square"
+was the inherited portrait addressing; fixed by setting MADCTL MV=1 before the
+fill. There is no framebuffer (480x320x2 = 300 KiB won't fit); draw directly to
+the panel like the stock firmware does.
+
+--------------------------------------------------------------------------------
+DELIVERY ONTO THE DEVICE
+--------------------------------------------------------------------------------
+Preferred: copy dm40-fw.bin onto the device's SPI-flash FAT disk over USB mass
+storage (standard file copy), then the loader reads it from the file into
+0x20008000 and transfers control. The loader can reuse the stock FatFs wrappers
+while the stock fw is still alive:
+  FUN_0800e566(fil, name, mode=1/FA_READ)  open
+  FUN_0800e6d4(fil, buf, len, &got)        read
+  FUN_0800eb04(fil)                        close
+  thunk_FUN_080089ba(0x1028)               allocate the FIL object (0x1028 bytes)
+DO NOT name the file dm40*.bin — on USB unplug the stock fw (FUN_080445b8) scans
+for that pattern and runs a real FLASH firmware update, which would brick the
+app. Also avoid config.bin, logo.bmp, factor.bin, factor.txt. Use e.g. ramfw.bin.
+
+memrw helper (user's BT patch, cmd 0x0B: read/write/call): client is
+dm40_memrw.py, device MAC XX:XX:XX:XX:XX:XX. Useful for poking memory and
+confirming addresses. Note: BT packets are only parsed on the multimeter screen,
+and the memrw 'call' runs in the BT receive-handler context.
+
+--------------------------------------------------------------------------------
+BUILD
+--------------------------------------------------------------------------------
+  cd fw-rs && ./build.sh        # -> fw-rs/dm40-fw.bin
+Toolchain is pinned locally in toolchain/ (rustup + stable +
+thumbv7em-none-eabihf, llvm-tools). build.sh sets RUSTUP_HOME/CARGO_HOME to it;
+or `. toolchain/env.sh` from the repo root. Nothing is installed system-wide.
+toolchain/ and *.bin are git-ignored.
+
+Git: work is on branch rust-fw-poc (off master). Milestone 1 committed
+("fw-rs: RAM-loaded multimeter firmware PoC (milestone 1)"). Commit locally
+only; do not push. Commit attribution lines are set by the session reminder.
+
+--------------------------------------------------------------------------------
+NEXT MILESTONES
+--------------------------------------------------------------------------------
+2. Re-init clocks, FSMC and the ILI9488 from scratch (don't rely on stock
+   leaving them set). Text + number rendering (need a font; no framebuffer).
+3. HY3131 driver (bit-banged SPI, see hy3131_v2_6.h): init, mode config write
+   (R20..R35 tables), poll (INTF/data regs), value formulas with calibration
+   read from 0x080C0000. Measurement loop.
+4. Full DMM GUI matching the stock layout, main value in red; GT9xxx touch
+   (coords + HaveKey) to switch modes.
+5. USBTMC + SCPI over USBFS (*IDN?, CONF/MEAS/READ/FETCh for the DMM).
+
+Reference headers (authoritative, do not re-derive):
+  firmware/re/analysis/hy3131_v2_6.h      HY3131 + DMM modes + calibration
+  firmware/re/analysis/lcd_buzzer_v2_6.h  ILI9488 + FSMC + backlight + buzzer
+  firmware/re/analysis/scope_gen_v2_6.h   scope + generator (later)
+================================================================================
