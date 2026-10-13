@@ -305,6 +305,24 @@ impl App {
         }
     }
 
+    /// Leaving the scope views: a drag / pinch in flight is ended (its
+    /// settings applied, the acquisition no longer held), popups close.
+    pub(super) fn sp_leave(&mut self, now: u64) {
+        let held = self.sp.frozen || self.sp.pinch.is_some();
+        self.sp.frozen = false;
+        self.sp.touch = None;
+        self.sp.pinch = None;
+        self.sp.bubble = false;
+        su::graph().set_hole(None);
+        self.sp.popup = su::Popup::None;
+        self.sp.pressed_cell = None;
+        self.sp.slider = None;
+        if held {
+            let s = self.scope.s;
+            self.scope.apply(s, now);
+        }
+    }
+
     /// A stock-replica scope page is shown (the Scope page, or the combined
     /// view: the same page with the meter strip).
     pub(super) fn sp_on(&self) -> bool {
