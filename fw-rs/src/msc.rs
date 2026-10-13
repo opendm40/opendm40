@@ -49,6 +49,14 @@ pub struct Step {
 /// on-device writer (screenshot.rs) waits before reading the FAT.
 pub static HOST_WRITING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+/// A CSV recording session is active (csvlog.rs): host writes are refused
+/// for the whole session (its cached FAT / directory state must not go stale).
+/// Set and cleared by csvlog only.
+pub static LOG_SESSION: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// A csvlog commit is writing the disk: screenshot.rs waits before its FAT
+/// scan (one on-device writer at a time). Set and cleared by csvlog only.
+pub static LOG_FLUSHING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Xfer {
     None,
@@ -65,14 +73,82 @@ const SENSE_NO_MEDIUM: Sense = Sense(0x02, 0x3A, 0x00);
 const SENSE_INVALID: Sense = Sense(0x05, 0x20, 0x00);
 const SENSE_LBA_RANGE: Sense = Sense(0x05, 0x21, 0x00);
 const SENSE_MEDIUM_ERROR: Sense = Sense(0x03, 0x11, 0x00);
-/// NOT READY, LOGICAL UNIT IS IN PROCESS OF BECOMING READY (writes inhibited).
-const SENSE_BECOMING_READY: Sense = Sense(0x02, 0x04, 0x00);
+/// NOT READY, LOGICAL UNIT IS IN PROCESS OF BECOMING READY (writes
+/// inhibited). ASCQ 01, not 00 ("cause not reportable"): Linux
+/// (scsi_io_completion_action) delays and retries 04/01 but fails 04/00 at
+/// once, i.e. a host write during a screenshot would get EIO (review 258c833
+/// M1).
+const SENSE_BECOMING_READY: Sense = Sense(0x02, 0x04, 0x01);
 /// UNIT ATTENTION, NOT READY TO READY CHANGE, MEDIUM MAY HAVE CHANGED: the
 /// firmware itself wrote the disk (screenshot.rs), the host must re-read it.
 const SENSE_MEDIUM_CHANGED: Sense = Sense(0x06, 0x28, 0x00);
 
+/// A host has the medium locked: its last PREVENT ALLOW MEDIUM REMOVAL
+/// (0x1E) had Prevent = 1. Linux sends it on the first open of the block
+/// device (mount) and Allow on the last close (umount / eject); a PC that has
+/// the disk mounted keeps its own FAT / directory cache, so the device must
+/// not write the volume meanwhile (screenshot.rs refuses) and must not send
+/// it UNIT ATTENTION (Linux fails I/O on a mounted removable disk until the
+/// next media poll). Cleared on a bus reset and while the device is not
+/// configured (unplugged / suspended: `set_configured`).
+static HOST_LOCKED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static CONFIGURED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// A PC has the USB disk mounted (see HOST_LOCKED).
+pub fn host_mounted() -> bool {
+    use core::sync::atomic::Ordering::Relaxed;
+    HOST_LOCKED.load(Relaxed) && CONFIGURED.load(Relaxed)
+}
+
+/// The I/O buffer handed to usbd-storage, shared through a raw pointer so
+/// that `handle` can read the CDB bytes the crate does not expose (the
+/// Prevent bit of 0x1E; usbd-storage 3.0.0 only reports the opcode). Neither
+/// side keeps a slice borrowed across calls.
+pub struct IoBuf {
+    p: *mut u8,
+    n: usize,
+}
+
+impl core::borrow::Borrow<[u8]> for IoBuf {
+    fn borrow(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self.p, self.n) }
+    }
+}
+
+impl core::borrow::BorrowMut<[u8]> for IoBuf {
+    fn borrow_mut(&mut self) -> &mut [u8] {
+        unsafe { core::slice::from_raw_parts_mut(self.p, self.n) }
+    }
+}
+
+/// The Prevent bit of the PREVENT ALLOW MEDIUM REMOVAL command being handled,
+/// read from its CBW in the transport buffer. When the callback runs, the
+/// 31-byte CBW the crate has just parsed is still in `io` (it is read in
+/// place, the buffer is only written again for the data / status phase):
+/// "USBC", tag, data length 0, flags, LUN 0, CB length, CB[0] = 0x1E, CB[4]
+/// bit 0 = Prevent. Every match is then defaced (signature zeroed), so a
+/// stale CBW of an earlier 0x1E can never be found again; more than one
+/// match left (host data that happens to look like one) counts as Prevent.
+fn prevent_bit(io: &mut [u8]) -> bool {
+    let (mut found, mut prevent) = (0u32, false);
+    let mut o = 0usize;
+    while o + 31 <= io.len() {
+        let c = &io[o..o + 31];
+        if c[..4] == *b"USBC" && c[8..12] == [0; 4] && c[13] == 0 && (6..=16).contains(&c[14]) && c[15] == 0x1E {
+            found += 1;
+            prevent = c[19] & 1 != 0;
+            io[o..o + 4].fill(0);
+            o += 31;
+        } else {
+            o += 1;
+        }
+    }
+    found != 1 || prevent
+}
+
 pub struct Msc<'a, B: UsbBus> {
-    pub scsi: Scsi<BulkOnly<'a, B, &'static mut [u8]>>,
+    pub scsi: Scsi<BulkOnly<'a, B, IoBuf>>,
+    io: IoBuf,
     xfer: Xfer,
     sense: Sense,
     blk: [u8; MAX_BLOCK],
@@ -85,8 +161,18 @@ type Res = Result<(), TransportError<BulkOnlyError>>;
 
 impl<'a, B: UsbBus> Msc<'a, B> {
     pub fn new(alloc: &'a UsbBusAllocator<B>, io: &'static mut [u8]) -> Self {
-        let scsi = Scsi::new(alloc, 64, 0, io).unwrap_or_else(|_| panic!("msc"));
-        Msc { scsi, xfer: Xfer::None, sense: SENSE_OK, blk: [0; MAX_BLOCK], write_inhibit: false }
+        let (p, n) = (io.as_mut_ptr(), io.len());
+        let scsi = Scsi::new(alloc, 64, 0, IoBuf { p, n }).unwrap_or_else(|_| panic!("msc"));
+        Msc { scsi, io: IoBuf { p, n }, xfer: Xfer::None, sense: SENSE_OK, blk: [0; MAX_BLOCK], write_inhibit: false }
+    }
+
+    /// The device is configured by a host (main loop, every pass): while not
+    /// (unplugged, suspended), no host can have the disk mounted.
+    pub fn set_configured(&mut self, on: bool) {
+        CONFIGURED.store(on, core::sync::atomic::Ordering::Relaxed);
+        if !on {
+            HOST_LOCKED.store(false, core::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// Serve pending SCSI commands from the main loop.
@@ -94,10 +180,14 @@ impl<'a, B: UsbBus> Msc<'a, B> {
         let xfer = &mut self.xfer;
         let sense = &mut self.sense;
         let blk = &mut self.blk;
-        // Also no host writes while a screenshot is being written: its FAT /
-        // directory update spans many main-loop passes.
-        let inhibit = self.write_inhibit || crate::screenshot::busy();
-        let _ = self.scsi.poll_command(|cmd| -> Res { handle(cmd, dev, xfer, sense, blk, inhibit) });
+        let io = &mut self.io;
+        // Also no host writes while a screenshot is being written (its FAT /
+        // directory update spans many main-loop passes) or a CSV recording
+        // session is active (csvlog.rs).
+        let inhibit = self.write_inhibit
+            || crate::screenshot::busy()
+            || LOG_SESSION.load(core::sync::atomic::Ordering::Relaxed);
+        let _ = self.scsi.poll_command(|cmd| -> Res { handle(cmd, dev, xfer, sense, blk, io, inhibit) });
         HOST_WRITING.store(matches!(self.xfer, Xfer::Write { .. }), core::sync::atomic::Ordering::Relaxed);
     }
 
@@ -107,7 +197,7 @@ impl<'a, B: UsbBus> Msc<'a, B> {
     }
 }
 
-type Cmd<'c, 'a, B> = Command<'c, ScsiCommand, Scsi<BulkOnly<'a, B, &'static mut [u8]>>>;
+type Cmd<'c, 'a, B> = Command<'c, ScsiCommand, Scsi<BulkOnly<'a, B, IoBuf>>>;
 
 fn handle<B: UsbBus>(
     mut cmd: Cmd<'_, '_, B>,
@@ -115,6 +205,7 @@ fn handle<B: UsbBus>(
     xfer: &mut Xfer,
     sense: &mut Sense,
     blk: &mut [u8; MAX_BLOCK],
+    io: &mut IoBuf,
     write_inhibit: bool,
 ) -> Res {
     let kind = cmd.kind;
@@ -124,8 +215,12 @@ fn handle<B: UsbBus>(
     // drops its cached FAT / directory and re-reads the volume. Only at the
     // start of a command (a multi-block transfer in progress is never cut),
     // and never for INQUIRY / REQUEST SENSE (SPC: they do not report it).
+    // Held back while a host has the medium locked (mounted Linux vfat: the
+    // UNIT ATTENTION would fail its I/O, review 258c833 M2); it goes out on
+    // the first command after the Allow (umount).
     if *xfer == Xfer::None
         && !matches!(kind, ScsiCommand::Inquiry { .. } | ScsiCommand::RequestSense { .. })
+        && !HOST_LOCKED.load(core::sync::atomic::Ordering::Relaxed)
         && crate::screenshot::MEDIUM_CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed)
     {
         *sense = SENSE_MEDIUM_CHANGED;
@@ -273,6 +368,14 @@ fn handle<B: UsbBus>(
                 }
             }
         }
+        // PREVENT ALLOW MEDIUM REMOVAL: accepted (a failed one makes Linux
+        // stop sending them: sdev->lockable = 0), Prevent bit tracked.
+        ScsiCommand::Unknown { cmd: 0x1E } => {
+            let p = prevent_bit(core::borrow::BorrowMut::<[u8]>::borrow_mut(io));
+            HOST_LOCKED.store(p, core::sync::atomic::Ordering::Relaxed);
+            *sense = SENSE_OK;
+            cmd.pass(0)
+        }
         // START STOP UNIT (eject / power-off by the host): noted for recovery.
         #[cfg(any(feature = "native", feature = "test-recovery"))]
         ScsiCommand::Unknown { cmd: 0x1B } => { STOP_UNIT.store(true, core::sync::atomic::Ordering::Relaxed); cmd.pass(0) }
@@ -292,6 +395,7 @@ impl<B: UsbBus> UsbClass<B> for Msc<'_, B> {
         // ATTENTION from a screenshot taken while unplugged is moot (review
         // 2026-10-13 L3).
         crate::screenshot::MEDIUM_CHANGED.store(false, core::sync::atomic::Ordering::Relaxed);
+        HOST_LOCKED.store(false, core::sync::atomic::Ordering::Relaxed);
         self.scsi.reset()
     }
     fn control_in(&mut self, xfer: ControlIn<B>) {

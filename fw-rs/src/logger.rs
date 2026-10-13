@@ -92,9 +92,18 @@ pub struct Logger {
 }
 
 impl Logger {
+    /// `new()` in place for an instance in NOLOAD RAM (main.rs LOGGER is in
+    /// .dmabuf, not zeroed at reset), without a ~24 KiB temporary on the
+    /// stack: `new()` is all zero bits (false / 0 / zeroed records), and all
+    /// zero bits is a valid Logger. Keep `new()` all-zero.
+    pub fn init_in_place(this: *mut Logger) {
+        unsafe { core::ptr::write_bytes(this, 0, 1) };
+    }
+
     /// All-zero so the ~24 KiB instance lands in `.bss`, not `.data` (the RAM
-    /// image has no room for 24 KiB of initialised data). Runtime defaults
-    /// (OSR) are applied in main.rs via `set_osr(DEFAULT_OSR)`.
+    /// image has no room for 24 KiB of initialised data), and so that
+    /// `init_in_place` equals it. Runtime defaults (OSR) are applied in
+    /// main.rs via `set_osr(DEFAULT_OSR)`.
     pub const fn new() -> Self {
         Logger {
             active: false,

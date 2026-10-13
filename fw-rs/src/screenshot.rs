@@ -18,21 +18,34 @@
 //!   Start    wait for a host WRITE(10) in progress to finish (msc.rs;
 //!            at most 2 s, then "failed");
 //!   Capture  GRAM -> RAM, file rows (bottom-up) in order, each row
-//!            run-length coded into CAP (native: 96 KiB) while it fits;
+//!            run-length coded into CAP (native: 48 KiB) while it fits;
 //!            rows per pass until ~2 ms are spent (~0.3 ms per row);
-//!   Bpb      boot sector (1 block read);
+//!   Bpb      boot sector (1 block read); first waits while a csvlog.rs
+//!            commit holds the disk (msc.rs LOG_FLUSHING);
 //!   Root     one root block per pass: used S%03u numbers, first free slot;
 //!   Alloc    one FAT 1 block per pass: first-fit free clusters;
 //!   Data     per 4 KiB block: fill (header / pixels from CAP or GRAM, CRC),
 //!            then `BlockDevice::write_step` (spiflash.rs: compare, erase,
 //!            16 page programs, read back; <= ~2 ms of CPU per pass, the
 //!            erase and the programs run in the chip between passes);
-//!   Fat      the chain in every FAT copy (FAT 1 first; read, link, write);
-//!   Dir      the root entry (read, check the slot is still free, write);
+//!   Fat      the chain in every FAT copy (FAT 1 first; read, link, then
+//!            `write_block` from the next pass);
+//!   Dir      the root entry (read, check the slot is still free, then
+//!            `write_block` from the next pass);
 //!   Verify   one data block per pass re-read through the new FAT 1 chain,
 //!            CRC-32 compared with the CRC of what was written.
 //! Order data -> FAT -> directory as calbackup / fatren: a power loss leaves
 //! at worst lost clusters, never an entry on unwritten or free clusters.
+//! FAT and root blocks are written synchronously (`write_block`: compare,
+//! erase, 16 page programs and read back in one call, <= ~0.45 s, watchdog
+//! kicked in spiflash.rs `wait_ready`), never with `write_step`: a FAT or
+//! root block must not be left erased or half programmed across a main-loop
+//! pass, where a power-off, a reset (DBG:RESET / UPDATE / RECOVER) or a host
+//! READ could see it (review 258c833 H1). Only the data blocks, which no FAT
+//! entry references until the Fat phase, are written in slices. Between two
+//! `poll` slices the disk is therefore always consistent apart from lost
+//! clusters (FAT 1 written, FAT 2 or the entry not yet), and
+//! `finish_blocking` (power-off / reset paths) may stop a shot there.
 //! Every block write is read back; nothing is written unless the boot sector
 //! is the expected FAT16 volume.
 //!
@@ -48,6 +61,8 @@
 //! the main loop running. The verify pass compares CRCs, so it does not need
 //! the panel again.
 //!
+//! A host that has the disk mounted (it sent PREVENT MEDIUM REMOVAL, msc.rs
+//! `host_mounted`) gets no screenshot: `start` refuses (see there).
 //! While busy the MSC refuses host writes (NOT READY, msc.rs), so the host
 //! cannot change the FAT between our scan and our update; host reads are
 //! served (spiflash.rs waits for an erase / program of ours to finish before
@@ -55,10 +70,10 @@
 //! its own copy of the FAT and root directory and does not see the new file;
 //! worse, its next write can put its cached (older) FAT block back over our
 //! chain. After a write `MEDIUM_CHANGED` is set so the MSC layer can report
-//! UNIT ATTENTION 06/28/00 "medium may have changed" on the next host command,
-//! which makes Windows / macOS re-read the volume (Linux drops its block cache
-//! but a mounted vfat keeps its in-memory state: unmount / re-plug before
-//! writing to the disk from the PC). Safe without caveats when no PC has the
+//! UNIT ATTENTION 06/28/00 "medium may have changed" on the next host command
+//! (msc.rs: only while no host has the medium locked; for a mounted Linux
+//! vfat the UNIT ATTENTION would fail I/O until the next media poll), which
+//! makes the host re-read the volume. Safe without caveats when no PC has the
 //! disk mounted (charger, power bank, battery).
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -115,9 +130,14 @@ const _: () = assert!(HDR_LEN % 2 == 0 && BLK % 2 == 0, "block edges fall betwee
 /// Captured rows, run-length coded (u16 words, per row: tokens until W
 /// pixels; `n` < 0x8000 = a run of n pixels of the next word's colour,
 /// 0x8000 | n = n literal pixels follow). Worst case W + 1 words per row.
+/// Native: 48 KiB (was 96 KiB; SRAM for the logger ring, csvlog, BT). The
+/// host renders of every fw-rs screen (tools/ui-render, 14 views incl. the
+/// scope and the worst-case DMM layouts) code to 27..45 KiB, so they are
+/// still captured at once; a busier screen (a noisy scope trace) fills CAP
+/// part way and its remaining rows are read from the GRAM while writing.
 /// The RAM image has no SRAM to spare (its .dmabuf is full): 0 there, every
 /// row is then read from the GRAM while writing.
-const CAP_WORDS: usize = if cfg!(any(feature = "native", not(target_os = "none"))) { 48 * 1024 } else { 0 };
+const CAP_WORDS: usize = if cfg!(any(feature = "native", not(target_os = "none"))) { 24 * 1024 } else { 0 };
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut CAP: [u16; CAP_WORDS] = [0; CAP_WORDS];
 
@@ -192,7 +212,7 @@ struct Job {
     t0: u32,
 }
 
-/// All zero, so JOB is in .bss (`start` sets the non-zero fields).
+/// The idle job (`init`; `start` sets the non-zero fields).
 const JOB0: Job = Job {
     phase: Phase::Idle,
     frozen: false,
@@ -220,6 +240,11 @@ const JOB0: Job = Job {
     t0: 0,
 };
 
+/// In .dmabuf, not TCM .bss (review 258c833 B1: 1.7 KB of stack margin, and
+/// the target LBAs / cluster list out of the stack-overflow path). .dmabuf is
+/// NOLOAD (not zeroed at reset): `init` must run before anything reads it
+/// (`busy`, `frozen`, `poll`, msc.rs).
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut JOB: Job = JOB0;
 /// The last finished shot, not yet shown (`take_result`).
 static mut RESULT: Option<Shot> = None;
@@ -234,12 +259,25 @@ fn cyc() -> u32 {
     unsafe { crate::mmio::r32(0xE000_1004) }
 }
 
+/// Reset the job state (JOB is not zeroed at reset, see there). main(),
+/// before the main loop and the first `msc.poll`.
+pub fn init() {
+    *job() = JOB0;
+    unsafe { *core::ptr::addr_of_mut!(RESULT) = None };
+}
+
 /// Request a screenshot of the screen as it is now (captured from the next
 /// `poll` on; the caller draws nothing more while `frozen`). False: one is
 /// already in flight (the request is ignored).
+///
+/// Also false while a host has the disk mounted (`msc::host_mounted`: it
+/// sent PREVENT MEDIUM REMOVAL): its cached FAT would be stale after the
+/// shot and could overwrite the new chain, and the UNIT ATTENTION that makes
+/// it re-read would fail its I/O (review 258c833 M2). The caller tells the
+/// two apart with `msc::host_mounted()` ("eject first").
 pub fn start() -> bool {
     let j = job();
-    if j.phase != Phase::Idle {
+    if j.phase != Phase::Idle || crate::msc::host_mounted() {
         return false;
     }
     *j = JOB0;
@@ -268,14 +306,50 @@ pub fn take_result() -> Option<Shot> {
     unsafe { (*core::ptr::addr_of_mut!(RESULT)).take() }
 }
 
+fn disk() -> &'static mut crate::spiflash::SpiFlash {
+    let d = unsafe { &mut *core::ptr::addr_of_mut!(DISK) };
+    d.get_or_insert_with(crate::spiflash::SpiFlash::new)
+}
+
 /// One bounded slice of the job in flight (main loop, every pass).
 pub fn poll() {
     if !busy() {
         return;
     }
-    let disk = unsafe { &mut *core::ptr::addr_of_mut!(DISK) };
-    let d = disk.get_or_insert_with(crate::spiflash::SpiFlash::new);
-    step(d);
+    step(disk());
+}
+
+/// Power-off / reset paths (app.rs `power_off`, main.rs DBG:RESET / UPDATE /
+/// RECOVER): run the shot in flight to its end, at most `max_ms` (a whole
+/// shot is ~5 s; the watchdog is kicked while the main loop feeds it), then
+/// `abort_on` whatever is left. Nothing is drawn meanwhile; rows still to be
+/// captured are read from the panel as it is.
+pub fn finish_blocking(max_ms: u32) {
+    if !busy() {
+        return;
+    }
+    let max = max_ms.min(20_000) * (crate::clock::HCLK_HZ / 1000);
+    let d = disk();
+    let t0 = cyc();
+    while busy() && cyc().wrapping_sub(t0) < max {
+        step(d);
+        crate::wdt::kick_if_feeding();
+    }
+    abort_on(d);
+}
+
+/// Stop a shot in flight between two slices (result Error). Safe at any
+/// slice boundary: FAT / root blocks are only ever written whole, so the
+/// disk holds at worst lost clusters (data written but not linked, or FAT 1
+/// linked and FAT 2 / the entry not yet). Waits (bounded, spiflash.rs) for
+/// an erase / page program of a data block the chip may still be running.
+pub fn abort_on(disk: &mut dyn BlockDevice) {
+    if !busy() {
+        return;
+    }
+    // read_block waits for BUSY to clear first (spiflash.rs).
+    let _ = disk.read_block(0, &mut calbackup::scratch()[2]);
+    finish(job(), Shot::Error);
 }
 
 /// A whole screenshot on any block device, synchronously (host test:
@@ -291,6 +365,12 @@ pub fn take_on(disk: &mut dyn BlockDevice) -> Shot {
             return r;
         }
     }
+}
+
+/// One slice on any block device (host tests: interleaved with csvlog).
+#[allow(dead_code)]
+pub fn poll_on(disk: &mut dyn BlockDevice) -> Option<Shot> {
+    step(disk)
 }
 
 fn step(disk: &mut dyn BlockDevice) -> Option<Shot> {
@@ -311,6 +391,9 @@ fn step(disk: &mut dyn BlockDevice) -> Option<Shot> {
             j.capture();
             None
         }
+        // A csvlog commit holds the disk (and calbackup::scratch): wait. It
+        // is bounded (a few blocks) and never starts while we are busy.
+        Phase::Bpb if crate::msc::LOG_FLUSHING.load(Ordering::Relaxed) => None,
         Phase::Bpb => j.bpb(disk),
         Phase::Root => j.root(disk),
         Phase::Alloc => j.alloc(disk),
@@ -320,14 +403,18 @@ fn step(disk: &mut dyn BlockDevice) -> Option<Shot> {
         Phase::Verify => j.verify(disk),
     };
     if let Some(r) = r {
-        j.phase = Phase::Idle;
-        j.frozen = false;
-        unsafe { *core::ptr::addr_of_mut!(RESULT) = Some(r) };
-        if j.wrote {
-            MEDIUM_CHANGED.store(true, Ordering::Relaxed);
-        }
+        finish(j, r);
     }
     r
+}
+
+fn finish(j: &mut Job, r: Shot) {
+    j.phase = Phase::Idle;
+    j.frozen = false;
+    unsafe { *core::ptr::addr_of_mut!(RESULT) = Some(r) };
+    if j.wrote {
+        MEDIUM_CHANGED.store(true, Ordering::Relaxed);
+    }
 }
 
 impl Job {
@@ -561,11 +648,11 @@ impl Job {
                 buf[o..o + 2].copy_from_slice(&next.to_le_bytes());
             }
             self.filled = true;
-            self.st = STEP0;
             return None; // the write from the next pass (one block read per pass)
         }
+        // Whole block in one call (H1: never left erased across a pass).
         let buf = &calbackup::scratch()[0];
-        match disk.write_step(self.lba, &buf[..], &mut self.st)? {
+        match disk.write_block(self.lba, &buf[..]) {
             false => Some(Shot::Error),
             true => {
                 self.filled = false;
@@ -605,11 +692,11 @@ impl Job {
             e[0x1A..0x1C].copy_from_slice(&self.cl[0].to_le_bytes());
             e[0x1C..0x20].copy_from_slice(&FILE_LEN.to_le_bytes());
             self.filled = true;
-            self.st = STEP0;
             return None; // the write from the next pass
         }
+        // Whole block in one call (H1: never left erased across a pass).
         let buf = &calbackup::scratch()[0];
-        match disk.write_step(self.lba, &buf[..], &mut self.st)? {
+        match disk.write_block(self.lba, &buf[..]) {
             false => Some(Shot::Error),
             true => {
                 self.filled = false;

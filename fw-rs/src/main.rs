@@ -70,8 +70,10 @@ const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
 
 static mut EP_MEMORY: [u32; 320] = [0; 320];
 static mut MSC_IO: [u8; 512] = [0; 512];
-/// Data-logger ring (FR-38). ~24 KiB; kept out of the main stack next to the
-/// USBTMC buffers.
+/// Data-logger ring (FR-38). ~24 KiB; kept out of the main stack. Native: in
+/// SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in main()), not TCM .bss,
+/// which the stack shares.
+#[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".dmabuf")]
 static mut LOGGER: logger::Logger = logger::Logger::new();
 
 /// DIAG block size (DBG:DIAG?).
@@ -128,6 +130,8 @@ const ST_CORE: u16 = 1;
 
 fn main() -> ! {
     wdt::kick();
+    screenshot::init(); // JOB and LOGGER are in NOLOAD .dmabuf
+    logger::Logger::init_in_place(unsafe { core::ptr::addr_of_mut!(LOGGER) });
     let mut clk = Clock::new();
     lcd::set_madctl(lcd::MADCTL_LANDSCAPE);
     if !cfg!(feature = "keep-screen") {
@@ -233,12 +237,14 @@ fn main() -> ! {
             wdt::kick();
         }
         if reset_at.map(|t| now >= t).unwrap_or(false) {
+            screenshot::finish_blocking(8000); // never cut its FAT / dir writes
             unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
         }
 
         dev.poll(&mut [&mut tmc, &mut msc]);
         // M4: no host disk writes while the logger needs a constant interval.
         msc.set_write_inhibit(logger.disk_writes_blocked());
+        msc.set_configured(dev.state() == UsbDeviceState::Configured);
         msc.poll(&mut disk);
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
