@@ -208,3 +208,19 @@ Additional requirements:
       stock BT protocol (cmd 0x09 etc.) working alongside: dispatch on the first byte (ASCII
       letter/'*' = SCPI line ending in \n, else the stock binary frame). Check the BT module's
       throughput for READ? polling and WAV:DATA?.
+
+## Found in the screenshot session 2026-10-13 (native db679a3)
+- [ ] READ?/MEAS? take ~8 s (wait for a full averaging window that never fills -> 20 conversions);
+      PyVISA/kernel usbtmc time out and later replies arrive shifted. [wiring agent]
+- [ ] USBTMC wedges: after a timed-out query (or SmuView/sigrok) every reply is empty for minutes;
+      INITIATE_CLEAR does not help, only a USB bus reset. Pending waits must expire, new commands
+      must cancel them, class CLEAR/ABORT requests must resync. [wiring agent]
+- [ ] SCPI function change (CONF/MEAS) does not redraw like a touch: function bar keeps the old
+      button/sign, chart keeps the previous function's data and axis. [wiring agent]
+- [ ] AC+DC sub-readings line: AC tilde detached at the far left, DC sign drawn after the AC value
+      (user: "значки разъехались"). [ui agent]
+- [ ] Temperature sensor label in the status bar: glyphs overlap for PT100/PT1000/NTC names. [ui agent]
+- [ ] AC+DC current reads ~150 uA AC with nothing connected; AC V of a 0.5 V DC source reads
+      23-56 mV and decays slowly (compare with stock before calling it a bug).
+- [ ] 3-finger screenshot blocks the main loop ~8 s (BMP write to SPI flash); USB and DMM stall.
+- [ ] Data logger (LOG:STAT ON) has no on-screen indicator; the DMM reading freezes silently.
