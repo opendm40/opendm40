@@ -25,17 +25,54 @@ image and defines the contract below.
   `VTOR` at the in-SRAM table, zeroes `.bss` and calls `main`. The loader does
   not need to keep its interrupt handlers alive after the branch.
 
+## USB debug link
+
+The image enumerates as a CDC-ACM port (`1209:0001`, "DM40 RAM firmware
+(debug)") on USBFS, so the host needs no driver, udev rule or root: any user in
+`dialout` can open `/dev/ttyACM*`. Host tool: `tools/dm40dbg.py` (pyserial, PIL
+for screenshots; protocol in `src/host.rs`).
+
+```
+tools/reload.sh                       # build, reset to stock, BT load, wait for USB (~30 s)
+/usr/bin/python3 tools/dm40dbg.py ping
+/usr/bin/python3 tools/dm40dbg.py shot out.png     # full screen in ~0.8 s
+/usr/bin/python3 tools/dm40dbg.py fill x y w h 0xF800
+/usr/bin/python3 tools/dm40dbg.py lcdreg 0xD3 4    # LCD command + read-back
+/usr/bin/python3 tools/dm40dbg.py release|reset    # back to stock (~20 s | now)
+```
+
+Use `/usr/bin/python3`: the linuxbrew `python3` first on PATH has no Bluetooth
+sockets, which `dm40_loader.py` needs.
+
+Watchdog: fed for 60 s after start, then only while the host keeps talking (each
+request extends by 15 s; `PING` with `a` = ms extends up to 10 min). After
+`release`, a timeout or a panic it is not fed and the device returns to stock
+in ~20 s (FWDGT PSC=/256, RLD=2500, measured 19 s).
+
+Bring-up status squares (top left): white = running, then PLLSAI locked, USB
+core answering, USB configured, host request seen (green = ok, red = failed,
+grey = not yet, yellow = watchdog released). Magenta bar at the bottom = panic.
+
+Hardware findings (measured on the device, not from the stock code):
+- USB 48 MHz: the stock clock tree gives PLLQ = 400/9 = 44.4 MHz with IRC48M and
+  PLLSAI off, so we start PLLSAI (N=288, P=6) and select it for CK48M.
+- GSNPSID reads 0 on this GD32; use GRSTCTL.AHBIDL to see the core is clocked.
+- Resetting USBFS does not make the host see a disconnect (the D+ pull-up stays),
+  so `usb::init_hw` drives PA11/PA12 low for 100 ms first.
+- ILI9488 GRAM read-back (0x2E) with COLMOD 16 bpp: one dummy word, then
+  RGB666 as 3 bytes per pixel packed big-endian into the 16-bit words.
+  ID (0xD3) = 00 94 88.
+
 ## Milestones
 
-1. **(done)** Prove load + run + display: fill the screen red, keep the free
-   watchdog (FWDGT, reload 0xAAAA at 0x40003000) fed now that the stock TIM7
-   1 kHz ISR no longer runs. Reuses the FSMC/LCD setup the stock firmware
-   already performed.
+1. **(done)** Prove load + run + display.
+1b. **(done)** USB CDC debug link: keepalive-gated watchdog, screenshots,
+   LCD register access, reset/release to stock.
 2. Re-init clocks, FSMC and the ILI9488 from scratch; text/number rendering.
 3. HY3131 driver (bit-banged SPI) + measurement loop, calibration read from the
    stock settings record at 0x080C0000.
 4. Multimeter GUI matching `firmware/re/analysis/` notes, main value in red.
-5. USBTMC + SCPI over USBFS.
+5. USBTMC + SCPI over USBFS (next to, or instead of, the debug port).
 
 ## Build
 
@@ -44,4 +81,6 @@ image and defines the contract below.
 ```
 
 Needs the pinned toolchain in `../toolchain` (rustup + stable +
-`thumbv7em-none-eabihf`). `build.sh` sources `../toolchain/env.sh`.
+`thumbv7em-none-eabihf`). `build.sh` sources `../toolchain/env.sh`. Crates:
+`usb-device`, `synopsys-usb-otg` (fs), `usbd-serial`, `cortex-m`
+(critical-section only); fetched from crates.io into `../toolchain/cargo`.
