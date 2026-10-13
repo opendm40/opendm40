@@ -222,8 +222,12 @@ impl DmmView {
         let mut ub = [0u8; 16];
         let unit = sf::unit_text(r.main.unit, &mut ub);
         if compact {
-            sf::cells(sf::F78, rect(40, 40, 360, 54), s, &CELLS[f], VALUE_RED, BG);
-            sf::label(sf::UNIT, rect(401, 56, 78, 32), unit, VALUE_RED, BG, 4, -1);
+            sf::cells(sf::F78, rect(40, 36, 360, 78), s, &CELLS[f], VALUE_RED, BG);
+            sf::label(sf::UNIT, rect(401, 80, 78, 32), unit, VALUE_RED, BG, 4, -1);
+            if self.last_mode != r.mode {
+                self.last_mode = r.mode;
+                sf::label(sf::MODE, rect(437, 42, 32, 32), mode_glyph(r.mode), VALUE_RED, BG, 7, 0);
+            }
         } else {
             sf::cells(sf::F78, rect(40, 68, 360, 80), s, &CELLS[f], VALUE_RED, BG);
             if self.last_unit != r.main.unit || self.last_mode != r.mode {
@@ -490,7 +494,7 @@ pub struct ScopeView {
 }
 
 pub const SCOPE_FULL: ScopeView = ScopeView { x0: 13, y0: 20, h: 281 };
-pub const SCOPE_COMPACT: ScopeView = ScopeView { x0: 13, y0: 98, h: 178 };
+pub const SCOPE_COMPACT: ScopeView = ScopeView { x0: 13, y0: 134, h: 143 };
 
 /// "1.25us" style engineering text.
 fn eng(buf: &mut [u8; 24], v: f32, unit: &str) -> usize {

@@ -174,7 +174,7 @@ impl App {
             kp_mult: b'H',
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             cur_drag: None,
-            analog_both: false,
+            analog_both: true,
             persist_trace: false,
             anti_drop: true,
             relay_next: 0,
