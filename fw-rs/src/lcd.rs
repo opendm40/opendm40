@@ -33,6 +33,17 @@ fn data(d: u16) {
     unsafe { w16(LCD_DATA, d) };
 }
 
+/// Memory access control (0x36). The stock firmware draws landscape by rotating
+/// in software with MADCTL=0x48 (MV=0, native 320x480). We instead address the
+/// panel in landscape directly with MV=1 (0x28 = MV | BGR), giving a 480x320
+/// grid that matches `W`/`H` below.
+pub const MADCTL_LANDSCAPE: u16 = 0x28;
+
+pub fn set_madctl(v: u16) {
+    cmd(0x36);
+    data(v);
+}
+
 /// Set the drawing window and leave the controller ready for pixel writes (0x2C).
 pub fn set_window(x0: u16, y0: u16, x1: u16, y1: u16) {
     cmd(0x2A);
