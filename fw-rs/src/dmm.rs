@@ -1449,6 +1449,7 @@ impl Dmm {
         if (s == 2) != self.acdc {
             self.acdc = s == 2;
             self.phase_n = 0;
+            self.acdc_osr_once = true; // as set_sub
             self.reset_values();
         }
     }
