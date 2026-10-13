@@ -127,7 +127,9 @@ pub enum Mmem {
 ///   LOG:DATA?               definite-length #4nnnn block of 12-byte LE records
 ///                           {u32 seq, u32 ts_us, i32 raw_ad1}, oldest first
 ///   LOG:CSV ON|OFF          CSV recording of the DMM readings to the USB disk
-///                           (csvlog.rs; as the DMM page swipe down). ON fails:
+///                           (csvlog.rs; as the DMM page swipe down). ON is
+///                           USB only: refused over Bluetooth ("Command
+///                           protected", main.rs; OFF and LOG:CSV? work). ON fails:
 ///                           "Mass storage busy" while a PC has the disk mounted,
 ///                           else "Settings conflict" (no reading yet, already on)
 ///   LOG:CSV?                state,file,rows,bytes,committed,dropped (state 0 idle,
