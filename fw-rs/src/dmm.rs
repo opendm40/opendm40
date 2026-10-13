@@ -102,22 +102,109 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 // factory default 1.005 on the dumped unit (r1..r6 are calibrated), and the
 // single offset 0x144 is the r1..r6 one: use REL, check the gain on hardware.
 
+// ------------------------------------------------- FR-05 conversion rate
+//
+// `Rate` sets how much converter time goes into one reading of the AD1 (DC)
+// functions; the display smoothing on top of the readings is meter.rs
+// (`Smooth`). Conversion times are estimates (OSR 32768 ~107 ms from the
+// users' ~9.4 readings/s; hy3131::osr_period_us models OSR / SYSCLK, 16x
+// shorter: the two disagree, so `reading_period_ms` MEASURES the period).
+//   rate    AD1 OSR (in range)        code window (step reset ~2 counts)   readings
+//   FAST    8192 (0x15) always         none                                 ~37/s (one per conversion)
+//   MEDIUM  stock: 0x15 while moving,  V r0..r2 / mV r1: 8,                 ~9.4/s (stock)
+//   (dflt)  0x17 (32768) once stable   ohm r0..r3: 16, other ranges: none
+//   SLOW    as MEDIUM                  16 every range (ohm r0..r3: 32)      one per 4 conversions (~2.3/s)
+// The +1 digit (`Val::ext`, ext-capable ranges of the table above) is shown
+// only while the window holds at least AVG_FULL slow (OSR 32768) conversions:
+// never in FAST (one OSR-8192 conversion has ~2x the noise of one at 32768),
+// in MEDIUM / SLOW from the 8th conversion after a step / range change (before
+// fw-rs 2026-10-13 the digit was drawn from the first conversion on).
+// Applies to DC V, DC mV, DC A / mA / uA and ohm, not in AC+DC (fixed OSR
+// 32768, its own phase logic). Not applicable (stock timing in every rate):
+// AC (AD2 / RMS converter, its filter is the RMS EMA), capacitance and
+// frequency (counter gates of 420 / 350 ms), temperature (thermocouple: three
+// phases, ~2.2 s; resistive sensors: fixed OSR 32768 + EMA), continuity
+// (instant beep, fast OSR) and diode (stock EMA).
+
+/// Conversion rate of the AD1 functions (see the table above).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Rate {
+    Slow = 0,
+    Medium = 1,
+    Fast = 2,
+}
+
+/// SCPI / settings names, indexed by `Rate as usize`.
+pub const RATE_NAMES: [&str; 3] = ["SLOW", "MED", "FAST"];
+
+impl Rate {
+    pub const ALL: [Rate; 3] = [Rate::Slow, Rate::Medium, Rate::Fast];
+
+    pub fn from_u8(v: u8) -> Option<Rate> {
+        Rate::ALL.get(v as usize).copied()
+    }
+}
+
+/// AD1OSR codes: the stock steady (32768) and moving (8192) settings.
+const OSR_SLOW: u8 = 0x17;
+const OSR_FAST: u8 = 0x15;
+/// SLOW: one reading per this many conversions.
+const SLOW_DECIM: u8 = 4;
+
+/// UF-21: text for the UI when the mV-first AUTO is selected for V
+/// (`Dmm::mv_auto_warn`).
+pub const MV_AUTO_WARN: &str = "AUTO starts on mV: AUTO+ is safer";
+
+/// Code window of an AD1 range (FR-05 table): (window, restart threshold in
+/// codes, extra digit possible); None = no averaging (avg_n 0). Thresholds
+/// ~2 counts of the 60000-count format: V / mV / A 60.4 codes per count,
+/// mA 30.2, uA 28.7, ohm 75.5, ohm r6 119.8 (see the +1 digit table).
+fn avg_cfg(rate: Rate, acdc: bool, mode: u8, range: i8) -> Option<(usize, i32, bool)> {
+    if acdc || rate == Rate::Fast {
+        return None;
+    }
+    let (medium, thr, ext) = match (mode, range) {
+        (1, 0..=2) | (3, 1) => (8, 120, true),
+        (1 | 3 | 7, _) => (1, 120, false),
+        (8, _) => (1, 60, false),
+        (9, _) => (1, 57, false),
+        (10, 0) => (16, 150, false),
+        (10, 1..=3) => (16, 150, true),
+        (10, 6) => (1, 240, false),
+        (10, _) => (1, 150, false),
+        _ => return None,
+    };
+    let n = match rate {
+        Rate::Slow if mode == 10 && range <= 3 => 32,
+        Rate::Slow => 16,
+        _ => medium,
+    };
+    (n > 1).then_some((n, thr, ext))
+}
+
+/// The extra digit is real: an ext-capable range with at least AVG_FULL
+/// slow conversions in the window (FAST never averages, see `avg_cfg`).
+fn ext_ok(ext: bool, n: u8) -> bool {
+    ext && n >= AVG_FULL
+}
+
 /// Moving average of raw AD1 codes (|AD1| in ohm).
 struct Avg {
     buf: [i32; AVG_MAX],
     n: usize,
     i: usize,
     sum: i32,
+    len: usize,
 }
 
-const AVG_MAX: usize = 16;
-/// Readings with at least this many conversions averaged have the full +1
-/// digit resolution (the shortest window, see `avg_cfg`).
+const AVG_MAX: usize = 32;
+/// Readings with at least this many slow conversions averaged have the full
+/// +1 digit resolution (`Val::ext`); also what SCPI MEAS? waits for.
 pub const AVG_FULL: u8 = 8;
 
 impl Avg {
     const fn new() -> Self {
-        Avg { buf: [0; AVG_MAX], n: 0, i: 0, sum: 0 }
+        Avg { buf: [0; AVG_MAX], n: 0, i: 0, sum: 0, len: 0 }
     }
 
     fn reset(&mut self) {
@@ -127,13 +214,15 @@ impl Avg {
     }
 
     /// Add `x` to a window of `len` codes, restarting when `x` is more than
-    /// `thr` codes from the mean. Returns the mean (sum <= 16 * 2^23 fits i32;
-    /// the fraction is added separately to keep it exact in f32).
+    /// `thr` codes from the mean or the window length changed. Returns the
+    /// mean (sum <= 32 * 2^23 fits i32; the fraction is added separately to
+    /// keep it exact in f32).
     #[inline(never)]
     fn push(&mut self, x: i32, len: usize, thr: i32) -> f32 {
         let len = len.clamp(1, AVG_MAX);
-        if self.n > len || (self.n > 0 && (x - self.sum / self.n as i32).abs() > thr) {
+        if len != self.len || (self.n > 0 && (x - self.sum / self.n as i32).abs() > thr) {
             self.reset();
+            self.len = len;
         }
         if self.n == len {
             self.sum -= self.buf[self.i];
@@ -468,6 +557,30 @@ pub struct Dmm {
     /// taken since the config write (see `ac_settled`).
     ac_win: [f32; 3],
     ac_k: u8,
+    /// FR-05 conversion rate (persisted).
+    rate: Rate,
+    /// SLOW: conversions since the last config write (one reading per
+    /// SLOW_DECIM of them).
+    dec_k: u8,
+    /// Time of `poll` (ms), for the interval measurements below.
+    t_poll: u64,
+    /// Last reading / last AD1 conversion (ms; None: the next interval spans
+    /// a config write and is not counted) and their measured mean intervals.
+    t_rd: Option<u64>,
+    period_ms: f32,
+    t_conv: Option<u64>,
+    conv_ms: f32,
+    /// `avg_n` of the latest reading (`avg_n` itself is per poll).
+    rd_avg_n: u8,
+}
+
+/// Mean interval: first sample taken as is, then an EMA (1/4).
+fn ema_ms(acc: &mut f32, last: &mut Option<u64>, now: u64) {
+    if let Some(t) = *last {
+        let dt = now.saturating_sub(t) as f32;
+        *acc = if *acc == 0.0 { dt } else { *acc + 0.25 * (dt - *acc) };
+    }
+    *last = Some(now);
 }
 
 /// AC+DC AC phase: the phase value is the mean of the last 3 raw AC results
@@ -491,7 +604,9 @@ impl Dmm {
             acdc_seen: 0,
             range: 0,
             manual: false,
-            v_auto: 3,
+            // UF-21: AUTO+ (V first, up-only) by default; the stock default
+            // AUTO (3) steps down to the mV ranges.
+            v_auto: 1,
             a_auto: 3,
             ohm_var: 0,
             deadline: 0,
@@ -544,6 +659,14 @@ impl Dmm {
             skip: false,
             ac_win: [0.0; 3],
             ac_k: 0,
+            rate: Rate::Medium,
+            dec_k: 0,
+            t_poll: 0,
+            t_rd: None,
+            period_ms: 0.0,
+            t_conv: None,
+            conv_ms: 0.0,
+            rd_avg_n: 0,
         }
     }
 
@@ -592,6 +715,62 @@ impl Dmm {
             self.ohm_var = ohm;
         }
     }
+
+    /// UF-21: the V autorange is the mV-first AUTO (stock default, `v_auto`
+    /// 3) and V is measured in auto range: the UI shows MV_AUTO_WARN (Range
+    /// page / status line). AUTO+ (1, the fw-rs default) never warns.
+    pub fn mv_auto_warn(&self) -> bool {
+        self.button() == Button::Volt && !self.manual && self.v_auto == 3
+    }
+
+    // ------------------------------------------------- FR-05 rate / timing
+
+    pub fn rate(&self) -> Rate {
+        self.rate
+    }
+
+    /// Set the conversion rate (see the FR-05 table). Takes effect with the
+    /// next conversion: the code window restarts and `osr` / `poll_ohm`
+    /// write the new steady OSR; no settle, no function restart.
+    pub fn set_rate(&mut self, r: Rate) {
+        if r != self.rate {
+            self.rate = r;
+            self.avg.reset();
+            self.dec_k = 0;
+            self.t_rd = None;
+            self.period_ms = 0.0;
+        }
+    }
+
+    /// The rate setting changes something in the current function (DC V /
+    /// mV / A, ohm; not AC+DC): the UI can grey the row out otherwise.
+    pub fn rate_applies(&self) -> bool {
+        !self.acdc && matches!(self.mode, 1 | 3 | 7..=10)
+    }
+
+    /// Measured mean interval between readings (ms, EMA over the last few;
+    /// intervals across a function / range change are not counted). 0 until
+    /// two readings were seen. Use for "x readings/s" in the UI and SCPI.
+    pub fn reading_period_ms(&self) -> u32 {
+        self.period_ms as u32
+    }
+
+    /// Converter time behind the latest reading (ms): the code window length
+    /// times the measured AD1 conversion interval for the AD1 functions,
+    /// else the reading period (the readings of AC / cap / Hz / temperature
+    /// are not windowed here). The display smoothing (meter.rs) comes on top.
+    pub fn integration_ms(&self) -> u32 {
+        if self.rate_applies() && self.conv_ms > 0.0 {
+            (self.rd_avg_n.max(1) as f32 * self.conv_ms) as u32
+        } else {
+            self.period_ms as u32
+        }
+    }
+
+    /// Steady AD1OSR of the rate (in range, not moving).
+    fn steady_osr(&self) -> u8 {
+        if self.rate == Rate::Fast { OSR_FAST } else { OSR_SLOW }
+    }
     fn factor(&self) -> f32 {
         FACTOR[COUNTS_MODEL as usize]
     }
@@ -628,6 +807,9 @@ impl Dmm {
             _ => &CFG_F15[0],
         };
         self.avg.reset();
+        self.dec_k = 0;
+        self.t_rd = None;
+        self.t_conv = None;
         hy::quiesce();
         let pa = if matches!(m, 0 | 1 | 4..=9) { 0 } else { 1 };
         if self.pa_now != Some(pa) {
@@ -1218,6 +1400,7 @@ impl Dmm {
         if now < self.deadline {
             return None;
         }
+        self.t_poll = now;
         self.avg_n = 0;
         let r = match self.mode {
             0 | 2 | 4..=6 => self.poll_ac(clk, now),
@@ -1231,6 +1414,21 @@ impl Dmm {
             _ if self.t_sensor != 0 => self.poll_rtd(clk, now),
             _ => self.poll_temp(now),
         };
+        // SLOW: one reading per SLOW_DECIM conversions of the AD1 functions
+        // (the autorange above still ran on every conversion). Counted after
+        // the function produced a reading, so a range change (dec_k = 0 in
+        // write_config) restarts the count.
+        let r = match r {
+            Some(_) if self.rate == Rate::Slow && self.rate_applies() => {
+                self.dec_k = self.dec_k.wrapping_add(1);
+                r.filter(|_| self.dec_k % SLOW_DECIM == 0)
+            }
+            _ => r,
+        };
+        if r.is_some() {
+            ema_ms(&mut self.period_ms, &mut self.t_rd, now);
+            self.rd_avg_n = self.avg_n;
+        }
         r.map(|mut r| {
             self.seq = self.seq.wrapping_add(1);
             r.seq = self.seq;
@@ -1265,15 +1463,23 @@ impl Dmm {
         }
         let mut b = [0u8; 3];
         hy::read(hy::R_AD1, &mut b);
+        ema_ms(&mut self.conv_ms, &mut self.t_conv, self.t_poll);
         Some(hy::s24(&b))
     }
 
     /// AD1 OSR switching: stable -> 0x17 (32768, written once), else `fast`.
-    fn osr(&mut self, ad1: i32, thr: i32, fast: u8) {
-        if (ad1 - self.prev_ad1).abs() <= thr {
-            if self.r22 != 0x17 {
-                hy::write(0x22, &[0x17]);
-                self.r22 = 0x17;
+    /// `rated` (DC V / A): the FR-05 rate applies; FAST then keeps OSR 8192.
+    fn osr(&mut self, ad1: i32, thr: i32, fast: u8, rated: bool) {
+        if rated && self.rate == Rate::Fast {
+            if self.r22 != OSR_FAST {
+                hy::write(0x22, &[OSR_FAST]);
+                self.r22 = OSR_FAST;
+                self.avg_skip = true;
+            }
+        } else if (ad1 - self.prev_ad1).abs() <= thr {
+            if self.r22 != OSR_SLOW {
+                hy::write(0x22, &[OSR_SLOW]);
+                self.r22 = OSR_SLOW;
                 self.avg_skip = true;
             }
         } else {
@@ -1283,23 +1489,15 @@ impl Dmm {
         self.prev_ad1 = ad1;
     }
 
-    /// Averaged ranges (see the +1 digit table): (window, restart threshold
-    /// in codes = ~2 counts, extra digit shown).
+    /// Averaged ranges (see the +1 digit and FR-05 tables): (window,
+    /// restart threshold in codes = ~2 counts, extra digit possible).
     fn avg_cfg(&self) -> Option<(usize, i32, bool)> {
-        if self.acdc {
-            return None;
-        }
-        match (self.mode, self.range) {
-            (1, 0..=2) | (3, 1) => Some((8, 120, true)),
-            (10, 0) => Some((16, 150, false)),
-            (10, 1..=3) => Some((16, 150, true)),
-            _ => None,
-        }
+        avg_cfg(self.rate, self.acdc, self.mode, self.range)
     }
 
     /// Code for the value formula: the moving average in averaged ranges
-    /// (restarted by a fast-OSR conversion), else the raw code. Also returns
-    /// whether the extra digit is shown.
+    /// (restarted by a moving-OSR conversion), else the raw code. Also
+    /// returns whether the extra digit is shown (`ext_ok`).
     #[inline(never)]
     fn avg_code(&mut self, code: i32, slow: bool) -> (f32, bool) {
         match self.avg_cfg() {
@@ -1309,7 +1507,7 @@ impl Dmm {
                 }
                 let mean = self.avg.push(code, n, thr);
                 self.avg_n = self.avg.n as u8;
-                (mean, ext)
+                (mean, ext_ok(ext, self.avg_n))
             }
             None => (code as f32, false),
         }
@@ -1320,9 +1518,9 @@ impl Dmm {
         if self.drop_first() {
             return None;
         }
-        // This conversion ran at OSR 32768 (and not the first one after the
-        // switch, which `osr` flags for the next reading).
-        let slow = self.r22 == 0x17 && !self.avg_skip;
+        // This conversion ran at the steady OSR of the rate (and not the first
+        // one after the switch, which `osr` flags for the next reading).
+        let slow = self.r22 == self.steady_osr() && !self.avg_skip;
         self.avg_skip = false;
         let r = self.range as usize;
         let (f, ov) = (self.factor(), self.over());
@@ -1332,7 +1530,7 @@ impl Dmm {
         let acdc = self.acdc;
         let (x, lim, dec, unit, si_k, ext) = if m == 1 {
             if !acdc {
-                self.osr(ad1, 0x206, 0x15);
+                self.osr(ad1, 0x206, 0x15, true);
             }
             let (code, ext) = self.avg_code(ad1, slow);
             let mut v = code * K_ACV[r] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * r as u32, 1.0)
@@ -1346,7 +1544,7 @@ impl Dmm {
             (v, (f * DEC4[r]).min(1000.0), 4 - r as u8, "V", 1.0, ext)
         } else {
             if !acdc {
-                self.osr(ad1, 0xE22 - 0x960 * r as i32, 0x15);
+                self.osr(ad1, 0xE22 - 0x960 * r as i32, 0x15, true);
             }
             let (code, ext) = self.avg_code(ad1, slow);
             let mv = code * (1.25 / 0.9) / MV_DIV[r] / (AD1_DIV / 1000.0) * cal(0x24 + 4 * r as u32, 1.0)
@@ -1434,14 +1632,19 @@ impl Dmm {
         if self.drop_first() {
             return None;
         }
+        // As in poll_dcv: a conversion at the steady OSR may join the window.
+        let slow = self.r22 == self.steady_osr() && !self.avg_skip;
+        self.avg_skip = false;
         if !self.acdc {
-            self.osr(ad1, 0x168, 0x15);
+            self.osr(ad1, 0x168, 0x15, true);
         }
+        // FR-05 SLOW only (MEDIUM: no window in A, as the stock).
+        let (code, _) = self.avg_code(ad1, slow);
         let (m, r) = (self.mode, self.range as usize);
         let before = (m, self.range);
         let u = (m - 7) as usize; // 0 A, 1 mA, 2 uA
         let i = u * 2 + r;
-        let raw = ad1 as f32 * 1.25 / (SHUNT[u] * MV_DIV[r] * 0.9) / AD1_DIV * cal(0x94 + 4 * i as u32, 1.0)
+        let raw = code * 1.25 / (SHUNT[u] * MV_DIV[r] * 0.9) / AD1_DIV * cal(0x94 + 4 * i as u32, 1.0)
             - cal(0xAC + 4 * i as u32, 0.0);
         let mut a = raw;
         if m == 7 && r == 1 {
@@ -1654,7 +1857,8 @@ impl Dmm {
         // r0 (60 ohm) only by a manual choice (set_range); autorange r1..r6.
         let r = self.range.clamp(0, 6) as usize;
         let r22 = hy::read1(0x22);
-        let slow = r22 == 0x17 && !self.avg_skip;
+        let steady = self.steady_osr();
+        let slow = r22 == steady && !self.avg_skip;
         self.avg_skip = false;
         let (code, ext) = self.avg_code(ad1.unsigned_abs() as i32, slow);
         let mut kohm = code * cal(0x124 + 4 * r as u32, 1.0) * OHM_RREF[r] / 0.9 / AD1_DIV - cal(0x144, 0.0);
@@ -1668,8 +1872,8 @@ impl Dmm {
             if r22 != 0x13 {
                 hy::write(0x22, &[0x13]);
             }
-        } else if r22 != 0x17 {
-            hy::write(0x22, &[0x17]);
+        } else if r22 != steady {
+            hy::write(0x22, &[steady]);
             self.deadline = now + 150;
             self.avg_skip = true;
         }
@@ -1720,7 +1924,7 @@ impl Dmm {
 
     fn poll_cont(&mut self) -> Option<Reading> {
         let ad1 = self.ad1()?;
-        self.osr(ad1, 0x206, 0x14);
+        self.osr(ad1, 0x206, 0x14, false);
         let ohm = -(ad1 as f32) * cal(0x15C, 1.0) / 0.9 / (AD1_DIV / 1000.0) - cal(0x160, 0.0);
         let ol = ohm > 1000.0;
         Some(self.reading(if ol { Val::ol(2, "\u{3a9}") } else { Val::new(ohm, 2, "\u{3a9}") }, ohm))
@@ -2189,4 +2393,105 @@ pub fn format(buf: &mut [u8; 16], v: f32, dec: u8) -> &str {
         o += 1;
     }
     core::str::from_utf8(&buf[..o]).unwrap_or("")
+}
+
+// Host tests: tools/meter-test/run.sh (pure logic only; no register access).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_window_per_rate() {
+        // MEDIUM = the stock-plus-+1-digit windows of before.
+        assert_eq!(avg_cfg(Rate::Medium, false, 1, 0), Some((8, 120, true)));
+        assert_eq!(avg_cfg(Rate::Medium, false, 3, 1), Some((8, 120, true)));
+        assert_eq!(avg_cfg(Rate::Medium, false, 10, 2), Some((16, 150, true)));
+        assert_eq!(avg_cfg(Rate::Medium, false, 10, 0), Some((16, 150, false)));
+        assert_eq!(avg_cfg(Rate::Medium, false, 1, 3), None);
+        assert_eq!(avg_cfg(Rate::Medium, false, 8, 0), None);
+        assert_eq!(avg_cfg(Rate::Medium, false, 10, 5), None);
+        // SLOW: every AD1 DC range, longer.
+        assert_eq!(avg_cfg(Rate::Slow, false, 1, 0), Some((16, 120, true)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 1, 3), Some((16, 120, false)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 8, 1), Some((16, 60, false)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 9, 0), Some((16, 57, false)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 10, 3), Some((32, 150, true)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 10, 6), Some((16, 240, false)));
+        // FAST, AC+DC, other functions: none.
+        for m in [1, 3, 7, 8, 9, 10] {
+            assert_eq!(avg_cfg(Rate::Fast, false, m, 1), None);
+            assert_eq!(avg_cfg(Rate::Medium, true, m, 1), None);
+        }
+        for m in [0, 2, 4, 11, 12, 13, 14, 15] {
+            assert_eq!(avg_cfg(Rate::Slow, false, m, 1), None);
+        }
+    }
+
+    #[test]
+    fn extra_digit_only_with_a_full_window() {
+        assert!(!ext_ok(true, 1));
+        assert!(!ext_ok(true, AVG_FULL - 1));
+        assert!(ext_ok(true, AVG_FULL));
+        assert!(ext_ok(true, 32));
+        assert!(!ext_ok(false, 32));
+    }
+
+    #[test]
+    fn code_window_step_reset_and_convergence() {
+        let mut a = Avg::new();
+        // Noise of +-3 codes around 1000: the mean is exact once full.
+        let mut m = 0.0;
+        for i in 0..20 {
+            m = a.push(if i % 2 == 0 { 1003 } else { 997 }, 8, 120);
+        }
+        assert_eq!(a.n, 8);
+        assert_eq!(m, 1000.0);
+        // Sub-code resolution: 1/n steps.
+        let mut a = Avg::new();
+        for x in [1000, 1001, 1001] {
+            m = a.push(x, 8, 120);
+        }
+        assert!((m - 1000.6667).abs() < 1e-3);
+        // A step of more than the threshold restarts the window at once.
+        let mut a = Avg::new();
+        for _ in 0..8 {
+            a.push(1000, 8, 120);
+        }
+        assert_eq!(a.push(1200, 8, 120), 1200.0);
+        assert_eq!(a.n, 1);
+        // Within the threshold it is averaged in.
+        assert_eq!(a.push(1300, 8, 120), 1250.0);
+        // A window length change (rate change) restarts it.
+        assert_eq!(a.push(1250, 16, 120), 1250.0);
+        assert_eq!(a.n, 1);
+        // 32 full-scale codes do not overflow.
+        let mut a = Avg::new();
+        for _ in 0..40 {
+            m = a.push(8_388_607, 32, 120);
+        }
+        assert_eq!(m, 8_388_607.0);
+    }
+
+    #[test]
+    fn rate_names_and_codes() {
+        for (i, r) in Rate::ALL.iter().enumerate() {
+            assert_eq!(Rate::from_u8(i as u8), Some(*r));
+            assert_eq!(*r as usize, i);
+        }
+        assert_eq!(Rate::from_u8(3), None);
+        assert_eq!(RATE_NAMES[Rate::Medium as usize], "MED");
+    }
+
+    #[test]
+    fn interval_mean() {
+        let (mut acc, mut last) = (0.0, None);
+        ema_ms(&mut acc, &mut last, 1000);
+        assert_eq!(acc, 0.0);
+        ema_ms(&mut acc, &mut last, 1107);
+        assert_eq!(acc, 107.0);
+        for i in 2..40 {
+            ema_ms(&mut acc, &mut last, 1000 + 107 * i);
+        }
+        assert!((acc - 107.0).abs() < 0.01);
+    }
 }
