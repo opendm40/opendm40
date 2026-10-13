@@ -424,6 +424,7 @@ impl App {
     fn show(&mut self, v: View, clk: &mut Clock) {
         if v != self.view {
             self.band_until = 0;
+            self.sp_leave(clk.now_ms());
         }
         if is_page(v) && !is_page(self.view) {
             self.back_view = self.view;

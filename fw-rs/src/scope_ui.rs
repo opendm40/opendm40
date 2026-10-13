@@ -975,6 +975,11 @@ impl Graph {
         self.deco = Deco::of(m);
         let d = self.deco;
         let o = self.d_deco;
+        // Nothing changed (most main-loop passes): no per-column work.
+        if self.valid && d == o && self.hole == self.d_hole && self.tr == self.d_tr && self.ps == self.d_ps {
+            self.px = 0;
+            return;
+        }
         let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.top != o.top || d.fh != o.fh;
         let h = d.fh;
         let (cy, dh) = ((h - 1) / 2, (h - 1) / 8);
