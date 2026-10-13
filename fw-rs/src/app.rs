@@ -116,9 +116,16 @@ impl App {
         }
     }
 
-    fn show(&mut self, v: View) {
+    fn show(&mut self, v: View, clk: &mut Clock) {
         if v == View::Menu && self.view != View::Menu {
             self.back_view = self.view;
+        }
+        // Analog power as the stock pages: scope / generator side or DMM side
+        // (scope.rs power()). The menu keeps whatever is on.
+        match v {
+            View::Scope | View::Gen => self.scope.power(true, clk),
+            View::Dmm | View::DmmScope => self.scope.power(false, clk),
+            View::Menu => {}
         }
         self.view = v;
         self.redraw = true;
@@ -130,13 +137,10 @@ impl App {
             View::DmmScope => {
                 self.dmm_view.draw_static(self.dmm.button(), self.dmm.mode());
                 lcd::fill_rect(0, ui::BAR_H, lcd::W, ui::BTN_Y - ui::BAR_H, ui::BG);
-                ui::SCOPE_COMPACT.draw_static(&self.scope.s, false);
+                ui::SCOPE_COMPACT.draw_static(&self.scope, false);
             }
-            View::Scope => ui::SCOPE_FULL.draw_static(&self.scope.s, true),
-            View::Gen => {
-                ui::gen_static();
-                ui::gen_values(&self.gen);
-            }
+            View::Scope => ui::SCOPE_FULL.draw_static(&self.scope, true),
+            View::Gen => ui::gen_static(&self.gen),
             View::Menu => ui::menu(ui::view_name(self.back_view), self.bt_on, self.backlight, self.beep_on),
         }
         if let (Some(r), true) = (self.meter.shown().copied(), matches!(self.view, View::Dmm | View::DmmScope)) {
@@ -161,9 +165,18 @@ impl App {
             self.chart_dirty = true;
         }
         self.power.poll(now);
-        if now >= self.status_next && self.view != View::Menu {
+        if now >= self.status_next {
             self.status_next = now + 1000;
-            ui::status_right((now / 1000) as u32, self.power.bt_connected(), self.power.bars, self.power.charging());
+            match self.view {
+                View::Dmm | View::DmmScope => ui::status_right(
+                    (now / 1000) as u32,
+                    self.power.bt_connected(),
+                    self.power.bars,
+                    self.power.charging(),
+                ),
+                View::Scope => ui::scope_battery(self.power.bars, self.power.charging()),
+                _ => {}
+            }
         }
         // Strip chart point.
         if now >= self.chart_next {
@@ -221,14 +234,14 @@ impl App {
             }
             match self.view {
                 View::Scope => {
-                    ui::SCOPE_FULL.frame(&f, &self.scope.s);
+                    ui::SCOPE_FULL.frame(&f, &self.scope);
                     if now >= self.meas_next {
                         self.meas_next = now + 300;
-                        let (vpp, mean, freq) = ui::measure(&f, &self.scope);
-                        ui::scope_measurements(vpp, mean, freq, ui::SCOPE_FULL.y0);
+                        let (vpp, mean, rms, freq) = ui::measure(&f, &self.scope);
+                        ui::scope_measurements(vpp, mean, rms, freq);
                     }
                 }
-                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope.s),
+                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope),
                 _ => {}
             }
         }
@@ -237,8 +250,8 @@ impl App {
     fn scope_set(&mut self, s: scope::Settings, now: u64) {
         self.scope.apply(s, now);
         match self.view {
-            View::Scope => ui::SCOPE_FULL.labels(&self.scope.s),
-            View::DmmScope => ui::SCOPE_COMPACT.labels(&self.scope.s),
+            View::Scope => ui::SCOPE_FULL.labels(&self.scope, true),
+            View::DmmScope => ui::SCOPE_COMPACT.labels(&self.scope, false),
             _ => {}
         }
     }
@@ -261,11 +274,16 @@ impl App {
                 let i = View::CYCLE.iter().position(|&v| v == self.view).unwrap_or(0);
                 let n = View::CYCLE.len();
                 let j = if g == Gesture::SwipeLeft { (i + 1) % n } else { (i + n - 1) % n };
-                self.show(View::CYCLE[j]);
+                self.show(View::CYCLE[j], clk);
             }
             Gesture::Tap(p) => {
                 self.beep(now, 30);
                 self.tap(clk, p.x, p.y);
+            }
+            Gesture::Drag(p0, p) if self.view == View::Scope && p0.x >= 13 && p0.x < 414 && p0.y >= 20 && p0.y < 301 => {
+                let mut st = self.scope.s;
+                st.trig_row = p.y as i32 - 20;
+                self.scope_set(st, now);
             }
             _ => {}
         }
@@ -276,9 +294,14 @@ impl App {
         match code {
             0 => {
                 let v = if self.view == View::Menu { self.back_view } else { View::Menu };
-                self.show(v);
+                self.show(v, clk);
             }
             1 => match self.view {
+                View::Gen => {
+                    let mut st = self.gen.s;
+                    st.on = !st.on;
+                    self.gen_set(st);
+                }
                 View::Scope => {
                     let mut s = self.scope.s;
                     s.run = !s.run;
@@ -334,61 +357,59 @@ impl App {
                 }
             }
             View::Scope => {
-                if let Some(i) = ui::button_hit(6, x, y) {
-                    let mut s = self.scope.s;
-                    match i {
-                        0 => s.tb = (s.tb + 1).min(20),
-                        1 => s.tb = s.tb.saturating_sub(1),
-                        2 => s.range = (s.range + 1).min(10),
-                        3 => s.range = s.range.saturating_sub(1),
-                        4 => s.rising = !s.rising,
-                        _ => {
-                            s.mode = match s.mode {
+                let mut st = self.scope.s;
+                if x >= 414 {
+                    // Right panel: V/div + / label / -, time + / label / -, TRIG.
+                    match y {
+                        20..=60 => st.range = st.range.saturating_sub(1),
+                        61..=101 => st.ac = !st.ac,
+                        102..=146 => st.range = (st.range + 1).min(9),
+                        150..=190 => st.tb = st.tb.saturating_sub(1),
+                        191..=231 => {
+                            st.mode = match st.mode {
                                 scope::TrigMode::Auto => scope::TrigMode::Normal,
                                 scope::TrigMode::Normal => scope::TrigMode::Single,
                                 scope::TrigMode::Single => scope::TrigMode::Auto,
                             };
-                            s.run = true;
+                            st.run = true;
                         }
+                        232..=272 => st.tb = (st.tb + 1).min(scope::TB_MAX),
+                        _ => st.rising = !st.rising,
                     }
-                    self.scope_set(s, now);
-                } else if x < ui::SCOPE_FULL.w && y >= ui::SCOPE_FULL.y0 {
-                    // Tap in the plot: trigger level there.
-                    let v = &ui::SCOPE_FULL;
-                    let r = scope::RANGES[self.scope.s.range];
-                    let px_per_count = (v.h / v.divs_y) as f32 / (r.2 * r.0);
-                    let code = 512.0 + (v.h as f32 / 2.0 - (y - v.y0) as f32) / px_per_count;
-                    let mut s = self.scope.s;
-                    s.trig_level = code.clamp(0.0, 1023.0) as u16;
-                    self.scope_set(s, now);
+                } else if y < 20 && x < 75 {
+                    st.run = !st.run;
+                } else if x < 13 {
+                    st.pos = 140 - (y as i32 - 20);
+                } else if y >= 20 && y < 301 {
+                    st.trig_row = y as i32 - 20;
                 }
+                self.scope_set(st, now);
             }
             View::Gen => {
-                if let Some(i) = ui::button_hit(6, x, y) {
-                    let mut s = self.gen.s;
-                    let steps: [u32; 23] = [
-                        1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10_000, 20_000, 50_000, 100_000,
-                        200_000, 500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000, 10_000_000,
-                    ];
-                    match i {
-                        0 => {
-                            let k = Wave::ALL.iter().position(|&w| w == s.wave).unwrap_or(0);
-                            s.wave = Wave::ALL[(k + 1) % 4];
-                        }
-                        1 => s.freq_hz = *steps.iter().rev().find(|&&f| f < s.freq_hz).unwrap_or(&1),
-                        2 => s.freq_hz = *steps.iter().find(|&&f| f > s.freq_hz).unwrap_or(&s.freq_hz),
-                        3 => s.amp_v = (s.amp_v - 0.1).max(0.5),
-                        4 => s.amp_v = (s.amp_v + 0.1).min(3.0),
-                        _ => s.on = !s.on,
-                    }
-                    s.freq_hz = gen::snap_freq(s.wave, s.freq_hz);
-                    self.gen_set(s);
-                } else if y > 180 && y < 220 {
-                    // Duty row: left half -, right half +.
-                    let mut s = self.gen.s;
-                    s.duty = if x < 240 { s.duty.saturating_sub(500) } else { (s.duty + 500).min(10000) };
-                    self.gen_set(s);
+                let mut st = self.gen.s;
+                let steps: [u32; 22] = [
+                    1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10_000, 20_000, 50_000, 100_000, 200_000,
+                    500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000,
+                ];
+                let plus = x >= 361;
+                if x < 243 && (40..82).contains(&y) {
+                    let k = Wave::ALL.iter().position(|&w| w == st.wave).unwrap_or(0);
+                    st.wave = Wave::ALL[(k + 1) % 4];
+                } else if x >= 246 && (40..130).contains(&y) {
+                    st.freq_hz = if plus {
+                        *steps.iter().find(|&&f| f > st.freq_hz).unwrap_or(&st.freq_hz)
+                    } else {
+                        *steps.iter().rev().find(|&&f| f < st.freq_hz).unwrap_or(&1)
+                    };
+                } else if x >= 246 && (133..223).contains(&y) {
+                    st.amp_v = if plus { (st.amp_v + 0.1).min(3.0) } else { (st.amp_v - 0.1).max(0.5) };
+                } else if x >= 246 && (226..316).contains(&y) {
+                    st.duty = if plus { (st.duty + 500).min(10000) } else { st.duty.saturating_sub(500) };
+                } else {
+                    return;
                 }
+                st.freq_hz = gen::snap_freq(st.wave, st.freq_hz);
+                self.gen_set(st);
             }
             View::Menu => match ui::menu_hit(y) {
                 Some(0) => {
@@ -409,7 +430,10 @@ impl App {
                     self.beep_on = !self.beep_on;
                     self.redraw = true;
                 }
-                Some(5) => self.show(self.back_view),
+                Some(5) => {
+                    let v = self.back_view;
+                    self.show(v, clk);
+                }
                 _ => {}
             },
         }
