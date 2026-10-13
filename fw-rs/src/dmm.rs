@@ -604,7 +604,7 @@ const ACDC_RELAY_PULSE: bool = true;
 /// 350 ms: R20 = 0xf0, CTA, R20 = 0xf2) in AC+DC too: on every poll, also
 /// during the settle, in the ACV / DCV / DCmV / DCA phases, and after every
 /// result in the ACA phase (never in the ACmV phase).
-const ACDC_FREQ_RESTART: bool = true;
+const ACDC_FREQ_RESTART: bool = false;
 
 /// AC+DC diagnostic ring: AC phases kept (`acdc_diag`).
 const ACDC_DIAG_N: usize = 4;
