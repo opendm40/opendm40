@@ -1,12 +1,13 @@
 #!/bin/sh
 # Rebuild, return the device to stock (if our RAM firmware is running), load the
 # new image over Bluetooth and wait for the USB debug port.
-#   fw-rs/tools/reload.sh [bt-mac]
+#   fw-rs/tools/reload.sh [cargo build args...]     e.g. --features keep-screen
+#   DM40_MAC overrides the Bluetooth address.
 set -e
-MAC=${1:-XX:XX:XX:XX:XX:XX}
+MAC=${DM40_MAC:-XX:XX:XX:XX:XX:XX}
 PY=/usr/bin/python3   # needs AF_BLUETOOTH; the linuxbrew python3 lacks it
 cd "$(dirname "$0")/../.."
-fw-rs/build.sh >/dev/null
+fw-rs/build.sh "$@" >/dev/null
 $PY fw-rs/tools/dm40dbg.py reset 2>/dev/null && echo "reset to stock" || true
 for i in 1 2 3 4 5 6; do
     sleep 4
