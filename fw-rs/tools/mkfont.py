@@ -23,9 +23,11 @@ FONTS = [
     # Main reading: Roboto Bold ~105 px matches the stock digits (cap 77 px).
     ('VALUE', ROBOTO, 700, 100, 105, '0123456789.-+ OL'),
     # Unit next to the reading ('m' fits Bold 40 px within 1 %).
-    ('UNIT', ROBOTO, 700, 100, 40, ' munkMGVAFHz%' + 'Ωµ°C'),
+    ('UNIT', ROBOTO, 700, 100, 40, ' 0123456789.-munkMGVAFHz%L' + 'Ωµ°C'),
     # Status bar and labels: Roboto Regular 27 px ("AUTO", "RUN").
     ('LABEL', ROBOTO, 400, 100, 27, ASCII + 'Ωµ°'),
+    # Small labels (scope / generator / menus).
+    ('SMALL', ROBOTO, 400, 100, 17, ASCII + 'Ωµ°'),
 ]
 
 

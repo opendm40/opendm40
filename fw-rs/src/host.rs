@@ -15,6 +15,8 @@
 //!   5 DIAG      a = block id; returns a diagnostic block from the main loop
 //!               (0 = touch: id[4], found, events u32, last raw frame,
 //!               USBTMC control request log at 80..97).
+//!   6 INPUT     inject a gesture for UI testing: a = 0 tap at b = x | y<<16,
+//!               1 swipe left, 2 swipe right, 3 key down code b.
 //!
 //! Any valid request extends the watchdog keepalive.
 
@@ -33,7 +35,8 @@ pub const CMD_LCD_READ: u8 = 2;
 pub const CMD_LCD_REG: u8 = 3;
 pub const CMD_RELEASE: u8 = 4;
 pub const CMD_DIAG: u8 = 5;
-pub const DIAG_LEN: usize = 100;
+pub const CMD_INPUT: u8 = 6;
+pub const DIAG_LEN: usize = 116;
 
 const ST_OK: u8 = 0;
 const ST_BAD_CMD: u8 = 1;
@@ -44,6 +47,8 @@ pub enum Action {
     None,
     Keepalive(u32),
     StopFeeding,
+    /// Injected gesture (CMD_INPUT): kind, argument.
+    Input(u32, u32),
 }
 
 pub struct Info {
@@ -199,6 +204,10 @@ impl Host {
                     self.header(cmd, ST_BAD_ARG, 0);
                     Action::Keepalive(0)
                 }
+            }
+            CMD_INPUT => {
+                self.header(cmd, ST_OK, 0);
+                Action::Input(a, b)
             }
             CMD_RELEASE => {
                 self.header(cmd, ST_OK, 0);

@@ -1,10 +1,12 @@
 #![no_std]
 #![no_main]
 
+mod app;
 mod bt;
 mod clock;
 mod dmm;
 mod fonts;
+mod gen;
 mod gesture;
 mod host;
 mod hy3131;
@@ -12,6 +14,7 @@ mod hy3131_tables;
 mod lcd;
 mod meter;
 mod mmio;
+mod scope;
 mod scpi;
 mod startup;
 mod text;
@@ -100,7 +103,7 @@ fn main() -> ! {
     let mut clk = Clock::new();
     lcd::set_madctl(lcd::MADCTL_LANDSCAPE);
     if !cfg!(feature = "keep-screen") {
-        ui::draw_static();
+        lcd::fill_rect(0, 0, lcd::W, lcd::H, ui::BG);
     }
 
     let hw = usb::init_hw(&mut clk);
@@ -111,7 +114,8 @@ fn main() -> ! {
     let bus = synopsys_usb_otg::UsbBus::new(usb::UsbFs, unsafe {
         &mut *core::ptr::addr_of_mut!(EP_MEMORY)
     });
-    // USBTMC first (interface 0), then the CDC debug port (interfaces 1, 2).
+    // USBTMC first (interface 0), then the CDC debug port (interfaces 1, 2):
+    // with USBTMC behind CDC its capabilities request got lost at probe time.
     let mut tmc = usbtmc::Usbtmc::new(&bus);
     let mut port = SerialPort::new(&bus);
     let mut dev = UsbDeviceBuilder::new(&bus, USB_VID_PID)
@@ -129,14 +133,10 @@ fn main() -> ! {
     let mut deadline = clk.now_ms() + INITIAL_HOLD_MS;
     let mut feeding = true;
 
-    let mut dmm = dmm::Dmm::new();
-    dmm.select(&mut clk, 1);
+    let mut app = app::App::new(&mut clk);
     let mut scpi = scpi::Scpi::new();
-    let mut last_reading: Option<dmm::Reading> = None;
     // SCPI READ?/MEASure?: reply with the first reading whose seq is >= this.
     let mut scpi_wait: Option<u32> = None;
-    let mut screen = ui::Screen::new();
-    let mut meter = meter::Meter::new();
     let mut bt = bt::Bt::new();
     let mut tp = touch::Touch::new(&mut clk);
     let mut gestures = gesture::Tracker::new();
@@ -145,34 +145,50 @@ fn main() -> ! {
     let mut next_poll = 0u64;
     let mut draw_hold_until = 0u64;
 
+    // Loop timing (debug): longest iteration in the last second, us.
+    let mut loop_t0 = unsafe { mmio::r32(0xE000_1004) };
+    let mut loop_max = 0u32;
+    let mut loop_max_shown = 0u32;
+    let mut loop_win = 0u64;
+
     loop {
         let now = clk.now_ms();
+        let t = unsafe { mmio::r32(0xE000_1004) };
+        loop_max = loop_max.max(t.wrapping_sub(loop_t0) / 200);
+        loop_t0 = t;
+        if now >= loop_win {
+            loop_win = now + 1000;
+            loop_max_shown = loop_max;
+            loop_max = 0;
+        }
         if feeding && now < deadline {
             wdt::kick();
         }
 
-        dev.poll(&mut [&mut port, &mut tmc]);
+        dev.poll(&mut [&mut tmc, &mut port]);
         if let Some(cmd) = tmc.take_command() {
             let mut msg = [0u8; usbtmc::CMD_MAX];
             let n = cmd.len();
             msg[..n].copy_from_slice(cmd);
-            match scpi.handle(&msg[..n], dmm.mode()) {
+            match scpi.handle(&msg[..n], app.dmm.mode()) {
                 scpi::Out::None => {}
                 scpi::Out::Text => tmc.respond(&scpi.buf[..scpi.len]),
                 scpi::Out::Configure(m) => {
-                    if dmm::button_of(m) != dmm.button() || m != dmm.mode() {
-                        dmm.select(&mut clk, m);
-                        last_reading = None;
+                    if m != app.dmm.mode() {
+                        app.dmm.select(&mut clk, m);
+                        app.meter.reset();
+                        app.last_raw = None;
                     }
                 }
                 scpi::Out::Measure(m) => {
-                    if let Some(m) = m.filter(|&m| m != dmm.mode()) {
-                        dmm.select(&mut clk, m);
-                        last_reading = None;
+                    if let Some(m) = m.filter(|&m| m != app.dmm.mode()) {
+                        app.dmm.select(&mut clk, m);
+                        app.meter.reset();
+                        app.last_raw = None;
                     }
-                    scpi_wait = Some(last_reading.map(|r| r.seq.wrapping_add(1)).unwrap_or(0));
+                    scpi_wait = Some(app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0));
                 }
-                scpi::Out::Fetch => match last_reading {
+                scpi::Out::Fetch => match app.meter.shown().copied() {
                     Some(r) => {
                         scpi.len = 0;
                         scpi.put_reading(&r);
@@ -186,7 +202,7 @@ fn main() -> ! {
             uptime_ms: now as u32,
             flags: hw.pllsai_locked as u32 | (hw.core_idle as u32) << 1,
             keepalive_left_ms: if feeding { deadline.saturating_sub(now) as u32 } else { 0 },
-            diag: touch_diag(&tp, touch_events, tmc.dbg_ctl),
+            diag: touch_diag(&tp, touch_events, tmc.dbg_ctl, loop_max_shown),
         });
         match action {
             host::Action::None => {}
@@ -195,22 +211,39 @@ fn main() -> ! {
                 deadline = deadline.max(now + ms);
             }
             host::Action::StopFeeding => feeding = false,
+            host::Action::Input(kind, arg) => {
+                deadline = deadline.max(now + KEEPALIVE_MS);
+                let p = touch::Point { x: arg as u16, y: (arg >> 16) as u16 };
+                let g = match kind {
+                    0 => Some(gesture::Gesture::Tap(p)),
+                    1 => Some(gesture::Gesture::SwipeLeft),
+                    2 => Some(gesture::Gesture::SwipeRight),
+                    3 => Some(gesture::Gesture::KeyDown(arg as u8)),
+                    _ => None,
+                };
+                if let Some(g) = g {
+                    app.gesture(&mut clk, g);
+                }
+            }
         }
         if host.reset_due() {
             // Give the host a moment to collect the reply, then reset to stock.
             let t = clk.now_ms() + 20;
             while clk.now_ms() < t {
-                dev.poll(&mut [&mut port, &mut tmc]);
+                dev.poll(&mut [&mut tmc, &mut port]);
             }
             unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
         }
 
-        // Measure and draw, but never while a reply is streaming (a GRAM
-        // read-back may be in progress on the LCD bus), and not for a while
-        // after one, so a multi-request screenshot does not tear.
+        // Draw only when no reply is streaming (a GRAM read-back may be in
+        // progress on the LCD bus) and not for a while after one, so a
+        // multi-request screenshot does not tear.
         if host.take_lcd_read() {
             draw_hold_until = now + 300;
         }
+        let can_draw = !host.busy() && now >= draw_hold_until;
+        app.tick(&mut clk, can_draw);
+
         if now >= next_touch && !host.busy() {
             next_touch = now + 10;
             let g = match tp.as_mut().and_then(|t| t.poll()) {
@@ -221,54 +254,43 @@ fn main() -> ! {
                 None => gestures.tick(now),
             };
             if let Some(g) = g {
-                if now >= draw_hold_until {
-                    screen.gesture_debug(&g);
-                }
-                // Temporary: swipes change the function button, a tap on the
-                // value cycles the sub-mode.
-                let bs = dmm::Button::ALL;
-                let i = bs.iter().position(|&b| b == dmm.button()).unwrap_or(0);
-                let next = match g {
-                    gesture::Gesture::SwipeLeft => Some(bs[(i + 1) % bs.len()]),
-                    gesture::Gesture::SwipeRight => Some(bs[(i + bs.len() - 1) % bs.len()]),
-                    gesture::Gesture::Tap(p) if p.y > 40 && p.y < 160 => Some(dmm.button()),
-                    _ => None,
-                };
-                if let Some(b) = next {
-                    dmm.press(&mut clk, b);
-                    last_reading = None;
-                    screen.invalidate();
-                }
+                app.gesture(&mut clk, g);
             }
+        }
+        if !host.busy() {
+            app.scope_poll(now, can_draw);
         }
         if now >= next_poll && !host.busy() {
             next_poll = now + 5;
             if let Some(f) = bt.poll() {
-                bt.serve(&f, &mut clk, &mut dmm, &mut meter, last_reading.as_ref());
-            }
-            if let Some(raw) = dmm.poll(&mut clk) {
-                last_reading = Some(raw);
-                let Some(r) = meter.update(&raw) else { continue };
-                if let Some(min) = scpi_wait {
-                    if r.seq.wrapping_sub(min) < 0x8000_0000 {
-                        scpi_wait = None;
-                        scpi.len = 0;
-                        scpi.put_reading(&r);
-                        tmc.respond(&scpi.buf[..scpi.len]);
-                    }
+                if app.bt_on {
+                    let raw = app.last_raw;
+                    bt.serve(&f, &mut clk, &mut app.dmm, &mut app.meter, raw.as_ref());
                 }
-                if now >= draw_hold_until {
-                    screen.reading(&r);
+            }
+            if let Some(raw) = app.dmm.poll(&mut clk) {
+                if let Some(r) = app.reading(raw, can_draw) {
+                    if let Some(min) = scpi_wait {
+                        if r.seq.wrapping_sub(min) < 0x8000_0000 {
+                            scpi_wait = None;
+                            scpi.len = 0;
+                            scpi.put_reading(&r);
+                            tmc.respond(&scpi.buf[..scpi.len]);
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-/// DIAG block 0: touch chip[4], found, -, -, -, events u32, last raw frame[7];
-/// USBTMC control log at 80..97.
-fn touch_diag(tp: &Option<touch::Touch>, events: u32, ctl: (u8, [u8; 16])) -> [u8; host::DIAG_LEN] {
+fn touch_diag(tp: &Option<touch::Touch>, events: u32, ctl: (u8, [u8; 16]), loop_us: u32) -> [u8; host::DIAG_LEN] {
     let mut d = [0u8; host::DIAG_LEN];
+    for (i, v) in scope::debug().iter().enumerate() {
+        d[100 + 4 * i..104 + 4 * i].copy_from_slice(&v.to_le_bytes());
+    }
+    d[97] = (loop_us.min(0xFFFF) & 0xFF) as u8;
+    d[98] = (loop_us.min(0xFFFF) >> 8) as u8;
     d[80] = ctl.0;
     d[81..97].copy_from_slice(&ctl.1);
     if let Some(t) = tp {

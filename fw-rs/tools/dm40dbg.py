@@ -7,6 +7,7 @@
     dm40dbg.py lcdreg cmd nwords         send an LCD command, read words back
     dm40dbg.py lcdread x y w h nwords    raw GRAM read-back (dummy word first)
     dm40dbg.py shot out.png [--format rgb565|rgb666]
+    dm40dbg.py tap x y | left | right | key 0..3   inject touch / side key
     dm40dbg.py release                   stop feeding -> stock fw in ~20 s
     dm40dbg.py reset                     reset to stock now
 
@@ -22,7 +23,7 @@ import serial.tools.list_ports
 
 VID, PID = 0x1209, 0x0001
 MAGIC = b'\xd4\x0d'
-PING, FILL, LCD_READ, LCD_REG, RELEASE = range(5)
+PING, FILL, LCD_READ, LCD_REG, RELEASE, DIAG, INPUT = range(7)
 W, H = 480, 320
 
 
@@ -94,6 +95,10 @@ def main():
         p.add_argument(k, type=int)
     p = sub.add_parser('shot'); p.add_argument('out')
     p.add_argument('--format', choices=['rgb565', 'rgb666'], default='rgb666')
+    p = sub.add_parser('tap'); p.add_argument('x', type=int); p.add_argument('y', type=int)
+    sub.add_parser('left')
+    sub.add_parser('right')
+    p = sub.add_parser('key'); p.add_argument('code', type=int, help='0 MENU, 1 RUN, 2 AUTO, 3 MF')
     sub.add_parser('release')
     sub.add_parser('reset')
     a = ap.parse_args()
@@ -124,6 +129,14 @@ def main():
                 img.putpixel((i % W, y + i // W), c)
         img.save(a.out)
         print('saved %s in %.1f s' % (a.out, time.time() - t0))
+    elif a.cmd == 'tap':
+        ln.req(INPUT, 0, a.x | a.y << 16)
+    elif a.cmd == 'left':
+        ln.req(INPUT, 1)
+    elif a.cmd == 'right':
+        ln.req(INPUT, 2)
+    elif a.cmd == 'key':
+        ln.req(INPUT, 3, a.code)
     elif a.cmd == 'release':
         ln.req(RELEASE, 0)
     elif a.cmd == 'reset':
