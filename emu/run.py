@@ -117,6 +117,27 @@ def build_fwrs(worktree=None):
     return elf
 
 
+def merge_models():
+    """All emu/peripherals/*.cs as ONE compile unit (Renode compiles each
+    include separately: 15 files took 3.4 s, one file 1 s)."""
+    usings, bodies = [], []
+    for f in sorted(glob.glob(os.path.join(HERE, 'peripherals', '*.cs'))):
+        body = []
+        for l in read(f).decode().splitlines():
+            if re.match(r'^using [A-Za-z0-9_.]+;\s*$', l):
+                if l not in usings:
+                    usings.append(l)
+            else:
+                body.append(l)
+        bodies.append('// ---- %s ----\n%s' % (os.path.relpath(f, HERE), '\n'.join(body)))
+    out = os.path.join(OUT, 'dm40-models.cs')
+    text = '\n'.join(usings) + '\n' + '\n'.join(bodies) + '\n'
+    if not os.path.exists(out) or read(out).decode() != text:
+        with open(out, 'w') as f:
+            f.write(text)
+    return out
+
+
 def q(path):
     return '@' + os.path.abspath(path)
 
@@ -191,6 +212,14 @@ def main():
                     help='log when the ROM, FS-loader and app reset vectors are entered')
     ap.add_argument('--pc-samples', type=int, default=0, metavar='N',
                     help='debug: print N PC samples (13 ms apart) at the end')
+    ap.add_argument('--fast', action='store_true',
+                    help='screenshot mode: --mips 50 (the idle GUI loops run 4x fewer iterations; '
+                         'UI work takes up to 4x longer in virtual time, so allow ~1 s more)')
+    ap.add_argument('--mips', type=float, default=None,
+                    help='CPU PerformanceInMips (default 200 = real speed; lower = fewer busy-loop '
+                         'iterations per virtual ms, faster wall clock, compute takes longer virtual time)')
+    ap.add_argument('--quantum', default=None, help='emulation global quantum in seconds (e.g. 0.0005)')
+    ap.add_argument('--stats', action='store_true', help='print virtual time, instructions and wall time')
     ap.add_argument('--dry', action='store_true', help='only write the .resc')
     a = ap.parse_args()
 
@@ -233,8 +262,7 @@ def main():
     name = a.name or a.mode
     log = a.log or os.path.join(OUT, '%s.log' % name)
     s.add('logFile %s' % q(log))
-    for cs in sorted(glob.glob(os.path.join(HERE, 'peripherals', '*.cs'))):
-        s.add('include %s' % q(cs))
+    s.add('include %s' % q(merge_models()))
     s.add('mach create "dm40"')
     s.add('machine LoadPlatformDescription %s' % q(os.path.join(HERE, 'dm40.repl')))
     s.add('sysbus LoadBinary %s 0x08000000' % q(flash))
@@ -251,6 +279,12 @@ def main():
         # PA2 low while the power key is held at power-on: the ROM then runs the
         # FS-loader, which re-tests PA2 and launches the app once it is released.
         s.add('sysbus.gpioPortA OnGPIO 2 false')
+    if a.fast and not a.mips:
+        a.mips = 50
+    if a.mips:
+        s.add('sysbus.cpu PerformanceInMips %d' % int(a.mips))
+    if a.quantum:
+        s.add('emulation SetGlobalQuantum "%s"' % a.quantum)
     vtor = 0x08000000 if a.mode == 'chain' else APP_BASE
     s.add('cpu VectorTableOffset 0x%08X' % vtor)
     # SYSRESETREQ (the FS-loader after an install, fw-rs recovery): Renode runs
@@ -371,6 +405,8 @@ def main():
             s.at(end, 'sysbus.lcd Screenshot %s' % q(v))
         else:
             shot(t, v)
+    if a.stats:
+        s.at(end, 'sysbus.cpu ExecutedInstructions')
     if a.save_disk:
         s.at(end, 'sysbus.spi2.spiflash Save %s' % q(a.save_disk))
     if a.save_flash:
@@ -386,7 +422,13 @@ def main():
     if not a.interactive:
         cmd.insert(1, '--hide-log')
         cmd += ['-e', 'quit']  # also quit when the script aborts on an error
-    return run_renode(cmd, quiet=not a.interactive, log=log)
+    import time
+    t0 = time.time()
+    rc = run_renode(cmd, quiet=not a.interactive, log=log)
+    if a.stats:
+        wall = time.time() - t0
+        print('wall %.1f s for %.2f s virtual (%.1fx slower than real time)' % (wall, end, wall / end))
+    return rc
 
 
 def kill_group(p, grace=2.0):

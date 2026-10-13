@@ -57,6 +57,14 @@ namespace Antmicro.Renode.Peripherals.DMA
 
         /// Feeder API: one peripheral-to-memory unit with `value` as the
         /// peripheral data (the ADC sample) instead of reading PAR.
+        /// Feeder API, bulk: `n` 16-bit peripheral values from buf[off..] into a
+        /// peripheral-to-memory stream; returns how many were taken (the stream may
+        /// stop at the end of a non-circular transfer).
+        public int FeedBlock(int stream, ushort[] buf, int off, int n)
+        {
+            return streams[stream].FeedBlock(buf, off, n);
+        }
+
         public void Feed(int stream, uint value)
         {
             streams[stream].Request(value, true);
@@ -199,6 +207,56 @@ namespace Antmicro.Renode.Peripherals.DMA
             public void Request()
             {
                 Request(0, false);
+            }
+
+            public int FeedBlock(ushort[] buf, int off, int n)
+            {
+                var psize = 1 << (int)((cr >> 11) & 3);
+                var msize = 1 << (int)((cr >> 13) & 3);
+                var minc = (cr & (1 << 10)) != 0;
+                if(psize != 2 || msize != 2 || !minc || Dir != 0)
+                {
+                    var k = 0;
+                    for(; k < n && enabled; k++)
+                    {
+                        Request(buf[off + k], true);
+                    }
+                    return k;
+                }
+                var taken = 0;
+                var bus = parent.machine.SystemBus;
+                while(n > 0 && enabled && remaining > 0)
+                {
+                    var chunk = (int)Math.Min((uint)n, remaining);
+                    var bytes = new byte[chunk * 2];
+                    Buffer.BlockCopy(buf, (off + taken) * 2, bytes, 0, chunk * 2);
+                    bus.WriteBytes(bytes, (CurrentTarget ? m1ar : m0ar) + memOff);
+                    memOff += (uint)(chunk * 2);
+                    var before = remaining;
+                    remaining -= (uint)chunk;
+                    taken += chunk;
+                    n -= chunk;
+                    if(count > 1 && before > count / 2 && remaining <= count / 2)
+                    {
+                        flags |= HTIF;
+                    }
+                    if(remaining == 0)
+                    {
+                        flags |= TCIF;
+                        if((cr & (1 << 8)) != 0)
+                        {
+                            remaining = count;
+                            memOff = 0; perOff = 0;
+                            if((cr & (1 << 18)) != 0) cr ^= 1 << 19;
+                        }
+                        else
+                        {
+                            enabled = false;
+                        }
+                    }
+                }
+                parent.UpdateInterrupts();
+                return taken;
             }
 
             public void Request(uint fed, bool useFed)
