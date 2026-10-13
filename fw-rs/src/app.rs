@@ -56,6 +56,7 @@ pub struct App {
     pub prof: [u32; 3],
     /// Drawn trace segments per scope column (see ScopeView::frame).
     scope_prev: [(u16, u16); 401],
+    persist_next: u64,
     meas_sel: [u8; 4],
     meas_n: usize,
     pub meas_res: crate::scope_meas::Results,
@@ -151,6 +152,7 @@ impl App {
             wave: [0; 400],
             prof: [0; 3],
             scope_prev: [(u16::MAX, 0); 401],
+            persist_next: 0,
             meas_sel: crate::scope_meas::DEFAULT_SEL,
             meas_n: 4,
             meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
@@ -180,8 +182,17 @@ impl App {
             chart_dec: 0,
             chart_dirty: false,
         };
+        crate::persist::init();
+        if let Some(p) = crate::persist::load() {
+            a.restore(&p, clk);
+        }
         backlight(a.backlight);
-        a.gen.apply(gen::Settings::DEFAULT);
+        let g = a.gen.s;
+        a.gen.apply(gen::Settings { on: false, ..g });
+        a.view = START[a.start_page];
+        a.back_view = View::Dmm;
+        let v = a.view;
+        a.show(v, clk);
         a
     }
 
@@ -282,6 +293,7 @@ impl App {
             self.chart_dirty = true;
         }
         self.power.poll(now);
+        self.persist(now);
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
         // key PD6 (hold 1.5 s -> off).
         let idle = now.saturating_sub(self.last_input);
@@ -360,6 +372,73 @@ impl App {
                 self.meter.rel_value(),
                 self.chart_unit,
             );
+        }
+    }
+
+    /// Settings -> backup SRAM words.
+    fn persist_words(&self) -> [u32; crate::persist::WORDS] {
+        let g = &self.gen.s;
+        let sc = &self.scope.s;
+        let mut p = [0u32; crate::persist::WORDS];
+        p[0] = self.dim_idx as u32 | (self.off_idx as u32) << 4 | (self.start_page as u32) << 8 | (self.bt_on as u32) << 12;
+        p[1] = self.backlight as u32 | (self.volume as u32) << 8 | (self.roll as u32) << 16;
+        p[2] = self.dmm.mode() as u32 | (self.dmm.v_auto() as u32) << 8 | (self.dmm.a_auto() as u32) << 16 | (self.dmm.ohm_var() as u32) << 24;
+        p[3] = Wave::ALL.iter().position(|&w| w == g.wave).unwrap_or(0) as u32 | (g.duty as u32) << 8;
+        p[4] = g.freq_hz;
+        p[5] = g.amp_v.to_bits();
+        p[6] = sc.tb as u32 | (sc.range as u32) << 8 | (sc.ac as u32) << 16 | (sc.rising as u32) << 17;
+        p[7] = (sc.trig_row as u32 & 0xFFFF) | (sc.pos as u32) << 16;
+        p[8] = sc.probe.to_bits();
+        for i in 0..4 {
+            p[9] |= (self.meas_sel[i] as u32) << (8 * i);
+        }
+        p[10] = self.meas_n as u32;
+        p
+    }
+
+    fn restore(&mut self, p: &[u32; crate::persist::WORDS], clk: &mut Clock) {
+        self.dim_idx = (p[0] & 3) as usize;
+        self.off_idx = (p[0] >> 4 & 3) as usize;
+        self.start_page = (p[0] >> 8 & 3) as usize;
+        self.bt_on = p[0] >> 12 & 1 != 0;
+        self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
+        self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
+        self.roll = p[1] >> 16 & 1 != 0;
+        self.scope.roll = self.roll;
+        let mode = (p[2] & 0xFF) as u8;
+        if mode <= 15 {
+            self.dmm.select(clk, mode);
+        }
+        let mut g = self.gen.s;
+        g.wave = Wave::ALL[(p[3] & 3) as usize];
+        g.duty = ((p[3] >> 8) & 0xFFFF).min(10000) as u16;
+        g.freq_hz = p[4].clamp(1, 10_000_000);
+        let a = f32::from_bits(p[5]);
+        g.amp_v = if a.is_finite() { a.clamp(0.5, 3.0) } else { 3.0 };
+        self.gen.s = g;
+        let mut sc = self.scope.s;
+        sc.tb = (p[6] & 0xFF) as usize;
+        sc.range = (p[6] >> 8 & 0xFF) as usize;
+        sc.ac = p[6] >> 16 & 1 != 0;
+        sc.rising = p[6] >> 17 & 1 != 0;
+        sc.trig_row = (p[7] & 0xFFFF) as u16 as i16 as i32;
+        sc.pos = (p[7] >> 16) as u16 as i16 as i32;
+        let pr = f32::from_bits(p[8]);
+        sc.probe = if pr == 1.0 || pr == 10.0 || pr == 100.0 { pr } else { 1.0 };
+        self.scope.apply(sc, 0);
+        let n = (p[10] as usize).min(4);
+        for i in 0..n {
+            self.meas_sel[i] = (p[9] >> (8 * i)) as u8;
+        }
+        self.meas_n = n;
+    }
+
+    /// Save the settings now and then (cheap: 18 words of backup SRAM).
+    pub fn persist(&mut self, now: u64) {
+        if now >= self.persist_next {
+            self.persist_next = now + 2000;
+            let w = self.persist_words();
+            crate::persist::save(&w);
         }
     }
 
