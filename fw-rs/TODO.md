@@ -228,6 +228,9 @@ Additional requirements:
       drops it because "Alientek,DM40A" is not in its model table. Add a DM40 profile to libsigrok
       src/hardware/scpi-dmm (command set like the 34401A: CONF:<f>, READ?, FUNC?), test with
       sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<addr> and SmuView, then send upstream.
+- [ ] Scope drag axis lock (user: horizontal drags knock the vertical): dominant axis decided at the
+      slop and locked until release; trigger drag relative, not absolute; dashed trigger line while
+      dragging; optional press-and-hold-to-grab flag to A/B [agent].
 - [ ] Scope touch: pinch = scale (timebase / V/div, 1-2-5 snap), one-finger drag = offset, draggable
       trigger level drawn as a dashed line + marker; gesture map without clashes with view swipes.
       Rendering approach (own strip compositor vs embedded-graphics / Slint / LVGL) evaluated in
