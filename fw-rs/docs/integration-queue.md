@@ -132,3 +132,67 @@ measure apply() time (expect tens of ms).
 
 ## hwtrig (comparator trigger)
 See docs/hwtrig-integration.md (H0..H8); mechanical: `python3 -I tools/hwtrig-check/patch_scope.py src/scope.rs src/scope.rs`. Keep DEFAULT_ENABLED = false until the device test.
+
+## csvlog (CSV recorder + gallery backend; src/csvlog.rs, msc.rs flags, screenshot.rs wait)
+main.rs: `mod csvlog;` after `mod screenshot;`; `csvlog::poll(now);` before `app.tick(&mut clk, can_draw);`;
+in `scpi::Out::Log(l) => match l {` before `scpi::Log::Data => {`:
+```rust
+scpi::Log::Csv(Some(on)) => { if on { if !app.rec_start(now) { scpi.set_err("Settings conflict"); } } else { csvlog::stop(); } false }
+scpi::Log::Csv(None) => { scpi.len = csvlog::status_scpi(&mut scpi.buf); true }
+```
+before `scpi::Out::Log(l) => match l {`:
+```rust
+scpi::Out::Mmem(scpi::Mmem::Cat) => match csvlog::catalog_scpi(tmc.rsp_buf()) {
+    Ok(n) => { tmc.respond_len(n); false }
+    Err(e) => { scpi.set_err(if e == csvlog::GErr::Busy { "Mass storage busy" } else { "Mass storage error" }); false }
+},
+scpi::Out::Mmem(scpi::Mmem::Del(name)) => {
+    match csvlog::delete(&name) { Ok(()) => {}, Err(csvlog::GErr::NotFound) => scpi.set_err("File name not found"),
+        Err(csvlog::GErr::Busy) => scpi.set_err("Mass storage busy"), Err(_) => scpi.set_err("Mass storage error") }
+    false
+}
+```
+(with BT SCPI integrated: use `port.rsp_buf()/respond_len` instead of tmc.)
+scpi.rs: `Csv(Option<bool>)` in `enum Log`; `Mmem(Mmem)` in `enum Out` + `#[derive(Clone, Copy)] pub enum Mmem { Cat, Del([u8; 11]) }`;
+LOG branch after the `kw(sub, "DATA") && query` case:
+`} else if kw(sub, "CSV") { Out::Log(Log::Csv(if query { None } else { Some(a == b"ON" || a == b"1") }))`
+before `_ if kw(p0, "WAVeform") && query => {`:
+```rust
+_ if kw(p0, "MMEMory") => {
+    let sub = parts.get(1).copied().unwrap_or(&[]);
+    out = if kw(sub, "CATalog") && query { Out::Mmem(Mmem::Cat) }
+    else if kw(sub, "DELete") && !query { match crate::csvlog::parse_name(trim(arg)) {
+        Some(n) => Out::Mmem(Mmem::Del(n)), None => { self.err = Some("Illegal parameter value"); continue; } } }
+    else { self.err = Some("Undefined header"); continue; };
+}
+```
+LOG:CSV? -> `state,file,rows,bytes,committed,dropped` (0 idle,1 rec,2 stopping,3 done,4 full,5 no disk,6 error; file -1 until first commit).
+app.rs: fields `rec_func: u8, rec_shown: bool` (init 255/false); `ui::Status { .., csv: crate::csvlog::active() }`;
+after `let u = self.meter.update(&raw, now);` in reading():
+```rust
+if crate::csvlog::active() {
+    let l = &u.live;
+    if crate::meter::func_of(l) != self.rec_func { crate::csvlog::stop(); } else {
+        use crate::csvlog::{F_HI, F_HOLD, F_LO, F_OL, F_REL};
+        let mut f = 0u8;
+        if l.main.ol { f |= F_OL; } if self.meter.rel_active() { f |= F_REL; } if self.meter.hold_state() != 0 { f |= F_HOLD; }
+        match self.meter.verdict() { crate::meter::V_HI => f |= F_HI, crate::meter::V_LO => f |= F_LO, _ => {} }
+        crate::csvlog::push(now, l.si, f);
+    }
+}
+```
+(NOTE: with FR-05 smoothing, `u.live` is the smoothed value; use `u.raw` if the log should be unsmoothed — decide.)
+gesture: `Gesture::SwipeDown if self.view == View::Dmm => self.rec_toggle(now),` before `Gesture::MultiSwipeDown(3) => {`
+tick, after the screenshot take_result block:
+```rust
+if let Some(st) = crate::csvlog::take_result() { self.rec_toast(now, st); return; }
+if crate::csvlog::active() != self.rec_shown { self.rec_shown = !self.rec_shown; self.status_next = 0; }
+```
+methods: rec_start(now)->bool (meter.live(); csvlog::start(csvlog::func_label(func_of(&r)), meter::base_unit(r.main.unit),
+if r.auto {"AUTO"} else {"MANUAL"}, now); set rec_func), rec_toggle(now) (stop/start + beep), rec_toast(now, st) like shot_toast
+("Saved LOGnnn.CSV" / "Disk full: log ended" / "No disk" / "Log failed"); first line of power_off(): `crate::csvlog::finish_blocking(0);`
+ui.rs: `pub csv: bool` in ui::Status; REC badge in the status bar (respect the no-overlap rules; the combined-view top bar
+redesign decides where).
+SRAM: csvlog adds 12 KiB .dmabuf — together with BT (+14.5 KiB) the budget is tight; see the NO-GO-fix agent's figure.
+Caveats: root block erased per commit (~1.5-6k erases/day of continuous logging); a cut between FAT link and dir leaves the
+chain one cluster longer than the size (fsck truncates). TODO items FR-35/FR-16/UF-32/CSV: code done, needs hooks + device.
