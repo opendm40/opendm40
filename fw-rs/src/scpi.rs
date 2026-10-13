@@ -35,6 +35,7 @@ pub enum Out {
 ///   DBG:TAP x,y  DBG:KEY n  DBG:SWIPE L|R    inject touch / side key
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
 ///   DBG:DIAG?               diagnostic block (#3)
+///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
 ///   DBG:RELEASE             stop feeding the watchdog (back to stock ~20 s)
 ///   DBG:RESET               reset to the stock firmware now
 #[derive(Clone, Copy)]
@@ -43,6 +44,7 @@ pub enum Dbg {
     Input(u8, u16, u16),
     Lcd(u16, u16, u16, u16, u32),
     Diag,
+    Flash,
     Release,
     Reset,
 }
@@ -375,6 +377,7 @@ impl Scpi {
                             Dbg::Lcd(v[0] as u16, v[1] as u16, v[2].max(1) as u16, v[3].max(1) as u16, v[4])
                         }
                         b"DIAG" => Dbg::Diag,
+                        b"FLASH" => Dbg::Flash,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
                         _ => {

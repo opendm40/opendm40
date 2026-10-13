@@ -1,10 +1,9 @@
 //! USB mass storage (SCSI over Bulk-Only Transport, usbd-storage), as the
 //! stock firmware's disk mode, but always present in the composite device.
 //!
-//! The medium is a `BlockDevice`. The on-board W25Q128 (FAT16 with 4096-byte
-//! sectors, firmware/re/analysis/spiflash_v2_6.h) is to be plugged in by
-//! implementing the trait; until then `NoMedia` reports NOT READY / MEDIUM NOT
-//! PRESENT like an empty card reader.
+//! The medium is a `BlockDevice`: the on-board W25Q128 (spiflash.rs), whose
+//! FAT16 volume with 4096-byte sectors the stock firmware made
+//! (firmware/re/analysis/spiflash_v2_6.h).
 
 use usb_device::class_prelude::*;
 use usbd_storage::subclass::scsi::{Scsi, ScsiCommand};
@@ -22,27 +21,6 @@ pub trait BlockDevice {
     fn block_count(&self) -> u32;
     fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool;
     fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool;
-}
-
-/// No medium yet.
-pub struct NoMedia;
-
-impl BlockDevice for NoMedia {
-    fn present(&self) -> bool {
-        false
-    }
-    fn block_size(&self) -> u32 {
-        MAX_BLOCK as u32
-    }
-    fn block_count(&self) -> u32 {
-        0
-    }
-    fn read_block(&mut self, _: u32, _: &mut [u8]) -> bool {
-        false
-    }
-    fn write_block(&mut self, _: u32, _: &[u8]) -> bool {
-        false
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

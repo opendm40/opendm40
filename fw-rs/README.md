@@ -28,17 +28,16 @@ image and defines the contract below.
 
 ## USB debug link
 
-The image enumerates as a CDC-ACM port (`1209:0001`, "DM40 RAM firmware
-(debug)") on USBFS, so the host needs no driver, udev rule or root: any user in
-`dialout` can open `/dev/ttyACM*`. Host tool: `tools/dm40dbg.py` (pyserial, PIL
-for screenshots; protocol in `src/host.rs`).
+The image enumerates as a composite USBTMC + mass storage device (`1209:0001`)
+on USBFS. Debug commands are SCPI `DBG:...` over USBTMC (`src/scpi.rs`); the
+host tool `tools/dm40dbg.py` (PIL for screenshots) needs read/write access to
+`/dev/usbtmc*` (udev rule). The disk is the stock SPI flash volume.
 
 ```
 tools/reload.sh                       # build, reset to stock, BT load, wait for USB (~30 s)
 /usr/bin/python3 tools/dm40dbg.py ping
 /usr/bin/python3 tools/dm40dbg.py shot out.png     # full screen in ~0.8 s
-/usr/bin/python3 tools/dm40dbg.py fill x y w h 0xF800
-/usr/bin/python3 tools/dm40dbg.py lcdreg 0xD3 4    # LCD command + read-back
+/usr/bin/python3 tools/dm40dbg.py scpi 'DBG:FLASH?'  # SPI disk: EF4018,4096,0
 /usr/bin/python3 tools/dm40dbg.py release|reset    # back to stock (~20 s | now)
 ```
 
@@ -85,8 +84,11 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   10 MHz via PWM, stock page with keypads; RUN toggles the output. Keeps
   running on every page (state shown on the scope bar).
 - **Bluetooth**: stock phone-app protocol (commands 00..09) on UART4.
-- **USB**: USBTMC/USB488 interface + SCPI; the same SCPI as text lines on the
-  CDC serial port. Debug protocol on the serial port (tools/dm40dbg.py).
+- **USB**: USBTMC/USB488 interface + SCPI, debug commands as `DBG:` SCPI
+  (tools/dm40dbg.py). Mass storage: the stock FAT16 volume on the W25Q128 SPI
+  flash (4096-byte sectors), always attached; `DBG:FLASH?` = JEDEC id, blocks,
+  write error flag. A block write that needs an erase stalls the main loop for
+  ~50 ms (up to 400 ms).
 - **Touch**: CST2xx controller, gestures (tap, long press, swipes, drag),
   side keys MENU / RUN / AUTO / MF. Power key: hold 1.5 s = off, double
   press = key/touch lock.
@@ -97,13 +99,12 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   DMM and the scope measure at the same time (never done by the stock, off by
   default).
 
-Not implemented: USB mass storage, screenshots / CSV to the SPI disk,
+Not implemented: screenshots / CSV to the SPI disk,
 config.bin (settings are in backup SRAM instead), AC+DC (DM40B/C only).
 
 ## SCPI
 
-USBTMC (`/dev/usbtmc*`, needs a udev rule for non-root) or text lines on the
-serial port (`/dev/ttyACM*`):
+USBTMC (`/dev/usbtmc*`, needs a udev rule for non-root):
 
 ```
 *IDN? *RST *CLS *OPC? SYST:ERR?
