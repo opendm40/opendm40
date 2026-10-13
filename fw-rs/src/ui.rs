@@ -39,6 +39,7 @@ pub enum View {
     /// Multimeter reading on top, scope below.
     DmmScope,
     Menu,
+    Settings,
 }
 
 impl View {
@@ -727,52 +728,87 @@ pub fn gen_values(g: &gen::Gen) {
 }
 
 // ----------------------------------------------------------------- menu
+// Stock main menu (gui_v2_6.h section 2): logo, four tiles 190x106 with the
+// stock icons; plus a fifth row for the combined views of this firmware.
 
-pub const MENU_ITEMS: [&str; 6] = ["View", "Bluetooth", "Backlight", "Beep", "About", "Back"];
+const M_BG: Color = 0x10A3;
+const M_TILE: Color = 0x2146;
+const M_ACCENT: Color = 0x04FC;
+const ICONS: sf::Font = sf::Font(0x0805_592C);
+const LOGO: sf::Font = sf::Font(0x0805_6070);
 
-pub fn menu(view_name: &str, bt_on: bool, backlight: u8, beep: bool) {
-    bar("Menu");
-    lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
-    let mut t = [0u8; 16];
-    for (i, name) in MENU_ITEMS.iter().enumerate() {
-        let y = BAR_H + 6 + i as u16 * 46;
-        lcd::fill_rect(8, y, lcd::W - 16, 40, BTN);
-        text::draw(&LABEL, 20, y + 30, name, FG, BTN);
-        let v: &str = match i {
-            0 => view_name,
-            1 => {
-                if bt_on { "On" } else { "Off" }
-            }
-            2 => {
-                let n = crate::dmm::format(&mut t, backlight as f32, 0).len();
-                t[n] = b'%';
-                core::str::from_utf8(&t[..n + 1]).unwrap_or("")
-            }
-            3 => {
-                if beep { "On" } else { "Off" }
-            }
-            4 => "dm40-fw 0.2",
-            _ => "",
-        };
-        let w = LABEL.width(v);
-        text::draw(&LABEL, lcd::W - 24 - w, y + 30, v, FG, BTN);
+pub const TILES: [(i16, i16, &str, u32); 4] = [
+    (46, 52, "Multimeter", 0x20),
+    (244, 52, "Oscilloscope", 0x21),
+    (46, 166, "Signal", 0x22),
+    (244, 166, "Settings", 0x23),
+];
+
+pub fn main_menu(combo: &str) {
+    lcd::fill_rect(0, 0, lcd::W, lcd::H, M_BG);
+    sf::glyphs(LOGO, rect(11, 11, 117, 31), " ", STATUS_FG, M_BG, 8, 0);
+    for (x, y, name, icon) in TILES {
+        sf::rbox(rect(x, y, 190, 106), 8, M_TILE, M_BG);
+        let g = char::from_u32(icon).unwrap_or(' ');
+        let mut b = [0u8; 4];
+        sf::glyphs(ICONS, rect(x + 79, y + 25, 30, 30), g.encode_utf8(&mut b), STATUS_FG, M_TILE, 8, 0);
+        sf::glyphs(sf::TEXT22, rect(x, y + 58, 190, 27), name, STATUS_FG, M_TILE, 8, 0);
     }
+    sf::rbox(rect(46, 280, 388, 34), 8, M_TILE, M_BG);
+    let mut t = [0u8; 48];
+    let pre = b"Combined view: ";
+    t[..pre.len()].copy_from_slice(pre);
+    let k = combo.len().min(48 - pre.len());
+    t[pre.len()..pre.len() + k].copy_from_slice(&combo.as_bytes()[..k]);
+    sf::glyphs(sf::TEXT22, rect(46, 280, 388, 34), core::str::from_utf8(&t[..pre.len() + k]).unwrap_or(""), STATUS_FG, M_TILE, 8, 0);
 }
 
-pub fn menu_hit(y: u16) -> Option<usize> {
-    if y < BAR_H + 6 {
+/// Which tile (0..3) or the combined-view row (4) a touch hits.
+pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
+    let (x, y) = (x as i16, y as i16);
+    for (i, (tx, ty, _, _)) in TILES.iter().enumerate() {
+        if x >= *tx && x < tx + 190 && y >= *ty && y < ty + 106 {
+            return Some(i);
+        }
+    }
+    if (46..434).contains(&x) && (280..314).contains(&y) {
+        return Some(4);
+    }
+    None
+}
+
+/// System settings (subset of the stock sections that this firmware has).
+pub const SETTINGS: [&str; 7] = ["Dim screen", "Shutdown", "Backlight", "Volume", "Bluetooth", "Start page", "Back"];
+
+pub fn settings(vals: &[&str; 7]) {
+    lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
+    lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, M_BG);
+    sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Settings", STATUS_FG, 0x2966, 8, 0);
+    for (i, name) in SETTINGS.iter().enumerate() {
+        let y = 44 + i as i16 * 39;
+        sf::rbox(rect(8, y, 464, 36), 6, M_TILE, M_BG);
+        sf::glyphs(sf::TEXT22, rect(20, y, 220, 36), name, STATUS_FG, M_TILE, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(240, y, 220, 36), vals[i], M_ACCENT, M_TILE, 4, 0);
+    }
+    let mut t = [0u8; 8];
+    let _ = &mut t;
+}
+
+pub fn settings_hit(y: u16) -> Option<usize> {
+    if y < 44 {
         return None;
     }
-    let i = ((y - BAR_H - 6) / 46) as usize;
-    if i < MENU_ITEMS.len() { Some(i) } else { None }
+    let i = ((y - 44) / 39) as usize;
+    if i < SETTINGS.len() { Some(i) } else { None }
 }
 
 pub fn view_name(v: View) -> &'static str {
     match v {
         View::Dmm => "Multimeter",
-        View::Scope => "Scope",
-        View::Gen => "Generator",
+        View::Scope => "Oscilloscope",
+        View::Gen => "Signal",
         View::DmmScope => "DMM + Scope",
-        View::Menu => "Menu",
+        View::Menu => "Main menu",
+        View::Settings => "Settings",
     }
 }

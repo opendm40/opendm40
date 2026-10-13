@@ -132,7 +132,7 @@ pub const fn rect(x: i16, y: i16, w: i16, h: i16) -> Rect {
     Rect { x, y, w, h }
 }
 
-const MAXG: usize = 24;
+const MAXG: usize = 48;
 
 struct Placed {
     g: Glyph,
