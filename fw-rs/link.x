@@ -1,24 +1,23 @@
 /*
- * DM40 replacement firmware, RAM-loaded PoC.
+ * DM40 replacement firmware: runs from internal flash sector 8.
  *
- * The image is a bare binary loaded at IMAGE (0x20008000). Its first word is the
- * initial MSP, its second word is the reset entry (Cortex-M vector-table layout),
- * so a loader only has to copy the image to IMAGE and branch to word[1].
+ * Sector 8 (0x08080000, 128 KiB) is unused by the stock firmware (all 0xFF in
+ * the full dump); the stock app ends below 0x0807D000, sector 9 holds the
+ * bootloader data, sector 10 the settings/calibration record. The image is
+ * written there by the RAM stub (stub/), which also starts it: the vector
+ * table is at the start of the image, word[0] = initial MSP, word[1] = reset.
  *
- * The image (vectors, code, rodata, data) sits in SRAM0 0x20008000..0x2001C000,
- * which the stock firmware leaves free in multimeter mode (free from
- * 0x20005024). Keep the low 32 KiB of SRAM0 (stock scope buffer) untouched.
- *
- * .bss and the stack live in the 64 KiB TCM SRAM (0x10000000, CPU only, no
- * DMA): the loader does not write there, and once we run, the stock firmware's
- * use of it no longer matters. The reset code enables the TCM clock first.
+ * RAM after the takeover is all ours:
+ *   TCM   0x10000000 64 KiB  .data (copied from flash), .bss, stack (CPU only)
+ *   SRAM0 0x20000000 112 KiB .sram: large CPU buffers (not zeroed)
+ *   SRAM1+2 0x2001C000 80 KiB .dmabuf: DMA-reachable buffers (not zeroed)
  */
 MEMORY
 {
-    IMAGE (rwx) : ORIGIN = 0x20008000, LENGTH = 80K
+    FLASH (rx)  : ORIGIN = 0x08080000, LENGTH = 128K
     TCM (rw)    : ORIGIN = 0x10000000, LENGTH = 64K
-    /* SRAM1: DMA-reachable buffers (TCM is CPU only). Not loaded, not zeroed. */
-    DMARAM (rw) : ORIGIN = 0x2001C000, LENGTH = 16K
+    SRAM (rw)   : ORIGIN = 0x20000000, LENGTH = 112K
+    DMARAM (rw) : ORIGIN = 0x2001C000, LENGTH = 80K
 }
 
 ENTRY(reset);
@@ -28,25 +27,28 @@ _stack_top = ORIGIN(TCM) + LENGTH(TCM);       /* 0x10010000 */
 
 SECTIONS
 {
-    .vectors ORIGIN(IMAGE) :
+    .vectors ORIGIN(FLASH) :
     {
         __image_start = .;
         KEEP(*(.vectors));
-    } > IMAGE
+    } > FLASH
 
     .text :
     {
         *(.text .text.*);
         *(.rodata .rodata.*);
         . = ALIGN(4);
-    } > IMAGE
+    } > FLASH
 
     .data :
     {
         . = ALIGN(4);
+        __sdata = .;
         *(.data .data.*);
         . = ALIGN(4);
-    } > IMAGE
+        __edata = .;
+    } > TCM AT > FLASH
+    __sidata = LOADADDR(.data);
 
     .bss (NOLOAD) :
     {
@@ -57,13 +59,19 @@ SECTIONS
         __bss_end = .;
     } > TCM
 
+    .sram (NOLOAD) :
+    {
+        . = ALIGN(4);
+        *(.sram .sram.*);
+    } > SRAM
+
     .dmabuf (NOLOAD) :
     {
         . = ALIGN(4);
         *(.dmabuf .dmabuf.*);
     } > DMARAM
 
-    __image_end = ADDR(.bss);
+    __image_end = LOADADDR(.data) + SIZEOF(.data);
 
     /DISCARD/ :
     {

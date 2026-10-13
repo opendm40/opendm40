@@ -52,12 +52,25 @@ static mut EP_MEMORY: [u32; 320] = [0; 320];
 extern "C" {
     static mut __bss_start: u32;
     static mut __bss_end: u32;
+    static mut __sdata: u32;
+    static mut __edata: u32;
+    static __sidata: u32;
     static __VECTORS: u32;
 }
 
 /// Called from the reset trampoline (startup.rs) with MSP set and IRQs masked.
 #[no_mangle]
 pub unsafe extern "C" fn rust_start() -> ! {
+    // Copy .data from flash.
+    let mut src = core::ptr::addr_of!(__sidata);
+    let mut dst = core::ptr::addr_of_mut!(__sdata);
+    let dend = core::ptr::addr_of_mut!(__edata);
+    while dst < dend {
+        dst.write_volatile(src.read_volatile());
+        dst = dst.add(1);
+        src = src.add(1);
+    }
+
     // Zero .bss.
     let mut p = core::ptr::addr_of_mut!(__bss_start);
     let end = core::ptr::addr_of_mut!(__bss_end);
