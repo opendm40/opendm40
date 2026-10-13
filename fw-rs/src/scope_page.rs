@@ -558,7 +558,17 @@ impl App {
         let m = self.sp_model(self.now);
         let mut z = [su::Zone::NONE; 7];
         let n = su::zones(&m, &mut z);
-        match su::pick_zone(&z[..n], self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16) {
+        let mut pick = su::pick_zone(&z[..n], self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16);
+        if pick.is_none() {
+            // Off the marker zones: the cursor lines themselves (fw-rs).
+            let mut lz = [su::Zone::NONE; 4];
+            let k = su::line_zones(&m, &mut lz);
+            if let Some(i) = su::pick_zone(&lz[..k], self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16) {
+                z[0] = lz[i];
+                pick = Some(0);
+            }
+        }
+        match pick {
             Some(k) => {
                 if z[k].level {
                     self.sp.sel_v = z[k].id;
@@ -624,7 +634,6 @@ impl App {
                         self.show(View::Dmm, clk);
                         return Some(true);
                     }
-                    return Some(false);
                 }
                 Gesture::SwipeLeft | Gesture::SwipeRight => return None,
                 _ => {}
@@ -701,6 +710,18 @@ impl App {
                     }
                 }
                 Some(false)
+            }
+            Gesture::LongPress(_) => {
+                // fw-rs: a still long press on a marker recentres its item:
+                // trigger position -> screen centre, trigger level -> the
+                // middle of the signal (Vmax + Vmin) / 2, CH1 -> 0 V at the
+                // centre row.
+                if let Some(t) = self.sp.touch {
+                    if t.hit && !t.moving {
+                        self.sp_recentre(now);
+                    }
+                }
+                Some(true)
             }
             Gesture::Pinch(axis, s0, s) => {
                 self.sp_pinch(axis, s0, s);
@@ -920,6 +941,35 @@ impl App {
             self.beep(now, 30);
             self.sp_tb_step(t.p0.x <= 207, now);
         }
+    }
+
+    fn sp_recentre(&mut self, now: u64) {
+        let mut st = self.scope.s;
+        if self.sp.last_h {
+            if self.sp.sel_h != 0 {
+                return;
+            }
+            st.hpos = 200;
+        } else {
+            match self.sp.sel_v {
+                0 => {
+                    st.trig_row -= st.pos;
+                    st.pos = 0;
+                }
+                1 => {
+                    let (hi, lo) = (self.meas_res.v[12], self.meas_res.v[13]);
+                    if !(hi.is_finite() && lo.is_finite()) {
+                        return;
+                    }
+                    st.trig_row = (self.scope.row_of_volts((hi + lo) / 2.0) as i32).clamp(-10, 290);
+                }
+                _ => return,
+            }
+        }
+        self.beep(now, 60);
+        self.sp.touch = None;
+        self.sp.guide_until = now + GUIDE_MS;
+        self.scope_set(st, now);
     }
 
     /// Tap-to-step timebase (stock: left half slower, right half faster).
