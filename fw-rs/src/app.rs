@@ -1857,6 +1857,11 @@ impl App {
             return;
         }
         self.off_warned = k + 1;
+        // Dimmed: full backlight for the countdown (`dimmed` stays set, so
+        // the idle dim does not re-trigger; any input restores as usual).
+        if self.dimmed {
+            backlight(self.backlight);
+        }
         buzzer(true, self.volume.max(ALERT_VOL));
         self.beep_until = now + 200;
         let mut b = [0u8; 32];
@@ -2833,11 +2838,12 @@ impl App {
                 Some(())
             }
             C::ChScale(Some(v)) => {
-                sc.range = scope::VDIV.iter().position(|&d| d >= v * 0.999).unwrap_or(9);
+                // V/div at the probe tip (as the screen label), like TRIG:LEV.
+                sc.range = scope::VDIV.iter().position(|&d| d * sc.probe >= v * 0.999).unwrap_or(9);
                 None
             }
             C::ChScale(None) => {
-                out.put_f32(scope::VDIV[sc.range]);
+                out.put_f32(scope::VDIV[sc.range] * sc.probe);
                 Some(())
             }
             C::ChCoup(Some(ac)) => {

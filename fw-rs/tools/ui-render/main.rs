@@ -854,10 +854,10 @@ fn main() {
                 ck.fail("scope-menu/hit", format!("probe {} at ({x},{y})", scope::PROBE_NAMES[k]));
             }
         }
-        for (x, want) in [(76u16, 0usize), (200, 1)] {
+        for (x, want) in [(76u16, Some((3, 0usize))), (200, Some((3, 1))), (330, None)] {
             ck.cases += 1;
-            if ui::scope_menu_hit(3, x, 85) != Some((3, want)) {
-                ck.fail("scope-menu/hit", format!("coupling {want}"));
+            if ui::scope_menu_hit(3, x, 85) != want {
+                ck.fail("scope-menu/hit", format!("coupling row x {x}"));
             }
         }
         w.sc.apply(scope::Settings::DEFAULT, 0);
