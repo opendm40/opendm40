@@ -4,8 +4,11 @@
 (PA5) sets the level, the comparator output on PA15 (AF1 TIM2_CH1) starts TIM2,
 whose OC2REF (TRGO) gates TIM1, the sample-request timer, off `post` samples
 later. The record (circular over the whole 26 K ring) freezes in hardware, so no
-interrupt is needed (fw-rs has no peripheral ISRs). The module is not wired
-yet; this document is the complete wiring. The hooks below were compile-checked
+interrupt is needed (fw-rs has no peripheral ISRs). Status: wired (H0..H8
+integrated with `patch_scope.py` unchanged against the scope.rs of commit
+aa51ae5; `DEFAULT_ENABLED = false`, so the device runs the software trigger
+until `DBG:HWTRIG:ENABLE 1`). The script refuses the patched file (its anchors
+are gone). The text below is the wiring as applied. The hooks were compile-checked
 (`-D warnings`, thumbv7em-none-eabihf) against the 847-line scope.rs with
 `hpos`; `tools/hwtrig-check/patch_scope.py` applies H1..H7 mechanically and
 fails if an anchor has moved:
@@ -391,7 +394,9 @@ with
         self.halt();
 ```
 
-### H8: DBG commands (app.rs / scpi.rs, sketch)
+### H8: DBG commands (app.rs / scpi.rs; integrated: `Cmd::DbgHwTrig`, handled
+as a scope command so the scope rail is on; replies also carry `post_ticks`
+(DBG:HWTRIG?) and the two offset-point codes (CAL?, after `slope`))
 
 | Command | Action |
 |---|---|

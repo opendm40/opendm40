@@ -34,6 +34,8 @@ mod fonts;
 mod gen;
 #[path = "../../src/gesture.rs"]
 mod gesture;
+#[path = "../../src/hwtrig.rs"]
+mod hwtrig;
 #[path = "../../src/hy3131.rs"]
 mod hy3131;
 #[path = "../../src/hy3131_tables.rs"]
