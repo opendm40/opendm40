@@ -25,7 +25,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 {
     public class ScopeFeeder : IDoubleWordPeripheral, IKnownSize
     {
-        public ScopeFeeder(IMachine machine, GD32_DMA dma, IGPIOReceiver portA, int stream = 4, ulong tickUs = 500)
+        public ScopeFeeder(IMachine machine, GD32_DMA dma, IGPIOReceiver portA, int stream = 4, ulong tickUs = 200)
         {
             this.machine = machine;
             this.dma = dma;
@@ -68,13 +68,23 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         {
             // TIM1 running and stream enabled?
             var bus = machine.SystemBus;
-            var tim1Cr1 = bus.ReadDoubleWord(TIM1);
-            if((tim1Cr1 & 1) == 0 || !dma.Enabled(stream))
+            if(!dma.Enabled(stream))
             {
                 return;
             }
-            // TIM1 gated by TIM2 (fw-rs hardware trigger): SMCR SMS=101 and TIM2 OC2REF low -> stopped.
+            var tim1Cr1 = bus.ReadDoubleWord(TIM1);
             var smcr = bus.ReadDoubleWord(TIM1 + 0x08);
+            if((tim1Cr1 & 1) == 0)
+            {
+                // Stock: TIM1 is started by TIM5's TRGO (slave trigger mode, TS = ITR0),
+                // which Renode's timer does not model: treat a running TIM5 as the start.
+                var slaveTrigger = (smcr & 7) == 6 && ((smcr >> 4) & 7) == 0;
+                if(!(slaveTrigger && (bus.ReadDoubleWord(TIM5) & 1) != 0))
+                {
+                    return;
+                }
+            }
+            // TIM1 gated by TIM2 (fw-rs hardware trigger): SMCR SMS=101 and TIM2 OC2REF low -> stopped.
             if((smcr & 7) == 5)
             {
                 // Gate = TIM2 OC2REF: high while TIM2 CNT < CCR2 or TIM2 not running.
@@ -89,16 +99,28 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var psc = bus.ReadDoubleWord(TIM1 + 0x28) & 0xFFFF;
             var arr = bus.ReadDoubleWord(TIM1 + 0x2C) & 0xFFFF;
             Fs = 200e6 / ((psc + 1.0) * (arr + 1.0));
-            var n = (int)Math.Round(Fs * tickUs / 1e6);
-            if(n <= 0) n = 1;
-            if(n > 100000) n = 100000;
+            var now = machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds;
+            // A new acquisition (stream re-enabled, timers restarted): the start was
+            // seen up to one tick late, so samples are fed one tick AHEAD of virtual
+            // time (their values come from the waveform time, so this is harmless) and
+            // the count follows elapsed time instead of a fixed batch size.
+            var gen = dma.EnableCount(stream);
+            if(gen != lastGen || Fs != lastFs)
+            {
+                lastGen = gen; lastFs = Fs;
+                t0 = now; fed = 0;
+            }
+            var due = (long)Math.Floor((now + tickUs / 1e6 - t0) * Fs) - fed;
+            var n = (int)Math.Min(due, 200000);
+            if(n <= 0) return;
             UpdateRange(bus);
             var level = TriggerCode(bus);
             var dt = 1.0 / Fs;
-            var t = machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds;
+            var t = t0 + fed * dt;
             for(var i = 0; i < n; i++)
             {
                 if(!dma.Enabled(stream)) break;
+                fed++;
                 var v = Volts(t + i * dt);
                 var code = (int)Math.Round(512.0 + v * countsPerVolt);
                 if(code < 0) code = 0;
@@ -171,6 +193,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         private const ulong TIM1 = 0x40010000;
         private const ulong TIM2 = 0x40000000;
+        private const ulong TIM5 = 0x40000C00;
         private const ulong GPIOB = 0x40020400;
         private const ulong GPIOC = 0x40020800;
         private const ulong GPIOD = 0x40020C00;
@@ -185,5 +208,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private string shape;
         private double hz, vpp, offset, phase, countsPerVolt = 108;
         private bool lastPa15;
+        private ulong lastGen;
+        private double lastFs, t0;
+        private long fed;
     }
 }

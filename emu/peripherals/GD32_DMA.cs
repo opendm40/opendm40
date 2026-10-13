@@ -63,6 +63,8 @@ namespace Antmicro.Renode.Peripherals.DMA
         }
 
         public uint Remaining(int stream) => streams[stream].remaining;
+        /// Number of times the stream was enabled (acquisition generation).
+        public ulong EnableCount(int stream) => streams[stream].enableCount;
         public bool Enabled(int stream) => streams[stream].enabled;
 
         public uint ReadDoubleWord(long offset)
@@ -174,6 +176,7 @@ namespace Antmicro.Renode.Peripherals.DMA
 
             private void Enable()
             {
+                enableCount++;
                 count = ndtr;
                 remaining = ndtr;
                 memOff = 0; perOff = 0;
@@ -282,6 +285,7 @@ namespace Antmicro.Renode.Peripherals.DMA
             private readonly int id;
             private uint cr, ndtr, par, m0ar, m1ar, fcr, memOff, perOff;
             public uint remaining, count;
+            public ulong enableCount;
             public byte flags;
             public bool enabled;
         }
