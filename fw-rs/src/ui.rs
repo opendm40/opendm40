@@ -42,6 +42,8 @@ pub enum View {
     Settings,
     /// MF range page of the multimeter.
     Range,
+    /// MF settings window of the scope.
+    ScopeMenu,
 }
 
 impl View {
@@ -539,8 +541,10 @@ impl ScopeView {
             lcd::fill_rect(0, 301, 414, 19, S_BAR);
         }
         self.labels(sc, full);
-        for i in 0..scope::COLS as u16 {
-            self.column(i, None, None);
+        let mut tpl = [[0u16; 288]; 4];
+        self.templates(&mut tpl);
+        for i in 0..=scope::COLS as u16 {
+            self.column_t(i, &tpl, None, None);
         }
     }
 
@@ -561,7 +565,7 @@ impl ScopeView {
         sf::label(sf::F14, rect(13, y, 62, 17), status, sc_col, bg, 1, 1);
         let n = eng(&mut b, scope::SDIV[s.tb], "s");
         sf::label(sf::F14, rect(79, y, 62, 17), core::str::from_utf8(&b[..n]).unwrap_or(""), FG, bg, 1, 1);
-        let n = eng(&mut b, scope::VDIV[s.range], if s.ac { "V~" } else { "V" });
+        let n = eng(&mut b, scope::VDIV[s.range] * s.probe, if s.ac { "V~" } else { "V" });
         sf::label(sf::F14, rect(146, y, 62, 17), core::str::from_utf8(&b[..n]).unwrap_or(""), 0xFFE0, bg, 1, 1);
         let n = eng(&mut b, sc.trig_volts(), "V");
         let mut t = [0u8; 28];
@@ -569,7 +573,7 @@ impl ScopeView {
         t[1..1 + n].copy_from_slice(&b[..n]);
         sf::label(sf::F14, rect(212, y, 80, 17), core::str::from_utf8(&t[..1 + n]).unwrap_or(""), FG, bg, 1, 1);
         if full {
-            let n = eng(&mut b, scope::VDIV[s.range], "V");
+            let n = eng(&mut b, scope::VDIV[s.range] * s.probe, "V");
             for (yy, txt) in SCOPE_RIGHT {
                 let lbl = match yy {
                     61 => core::str::from_utf8(&b[..n]).unwrap_or(""),
@@ -582,48 +586,80 @@ impl ScopeView {
         }
     }
 
-    /// One graph column `i` (0..399): fill, grid, trace segment (rows), and
-    /// the trigger level tick on the left edge.
-    fn column(&self, i: u16, seg: Option<(i32, i32)>, trig: Option<i32>) {
+    /// Background templates of a column: [plain, dotted (i % 8 == 0), vertical
+    /// grid line (i % 40 == 0), frame edge].
+    fn templates(&self, t: &mut [[u16; 288]; 4]) {
+        let h = self.h as usize;
+        for y in 0..h {
+            let r = (y as u32 * 278 / (self.h as u32 - 3).max(1)) as usize;
+            let edge = y == 0 || y == h - 1;
+            let hline = r % 35 == 0 && !edge;
+            t[0][y] = if edge { S_FRAME } else { S_FILL };
+            t[1][y] = if edge { S_FRAME } else if hline { S_GRID } else { S_FILL };
+            t[2][y] = if edge { S_FRAME } else if y % 5 == 0 || hline { S_GRID } else { S_FILL };
+            t[3][y] = S_FRAME;
+        }
+    }
+
+    /// One graph column `i` (0..400) from a template, with the trace segment
+    /// (rows of the 280-row model) and the trigger level tick.
+    fn column_t(&self, i: u16, t: &[[u16; 288]; 4], seg: Option<(i32, i32)>, trig: Option<i32>) {
         let x = self.x0 + i;
         let h = self.h;
-        let seg = seg.map(|(a, b)| (self.row_px(a) - self.y0, self.row_px(b) - self.y0));
-        let trig = trig.map(|t| self.row_px(t) - self.y0);
-        let vline = i % 40 == 0;
-        let centre_v = i == 200;
+        let k = if i == 0 || i == 400 { 3 } else if i % 40 == 0 { 2 } else if i % 8 == 0 { 1 } else { 0 };
+        let tpl = &t[k];
+        let (a, b) = match seg {
+            Some((a, b)) if i > 0 => (self.row_px(a) - self.y0, self.row_px(b) - self.y0),
+            _ => (u16::MAX, 0),
+        };
+        let tr = if i < 6 { trig.map(|r| self.row_px(r) - self.y0).unwrap_or(u16::MAX) } else { u16::MAX };
         lcd::set_window(x, self.y0, x, self.y0 + h - 1);
         for y in 0..h {
-            // Rows of the 280-row model for the horizontal grid lines.
-            let r = (y as u32 * 278 / (h as u32 - 3).max(1)) as u16;
-            let hline = r % 35 == 0 && y > 0 && y < h - 1;
-            let mut c = S_FILL;
-            if i == 0 || i == 400 || y == 0 || y == h - 1 {
-                c = S_FRAME;
-            } else if (vline && y % 5 == 0) || (hline && i % 8 == 0) || (centre_v && y % 5 == 0) {
-                c = S_GRID;
-            }
-            if let Some((a, b)) = seg {
-                if y >= a && y <= b && i > 0 {
-                    c = 0xFFE0;
-                }
-            }
-            if trig == Some(y) && i < 6 {
-                c = S_ORANGE;
-            }
+            let c = if y >= a && y <= b {
+                0xFFE0
+            } else if y == tr {
+                S_ORANGE
+            } else {
+                tpl[y as usize]
+            };
             lcd::data(c);
         }
     }
 
+    fn column(&self, i: u16, seg: Option<(i32, i32)>, trig: Option<i32>) {
+        let mut t = [[0u16; 288]; 4];
+        self.templates(&mut t);
+        self.column_t(i, &t, seg, trig);
+    }
+
     /// Draw a frame: 400 columns of min/max (peak detect), widened to touch
     /// the previous column, as the stock trace.
-    pub fn frame(&self, f: &scope::Frame, sc: &scope::Scope) {
+    /// `prev` caches the drawn segment per column (pixel rows); only changed
+    /// columns are redrawn. Fill it with (u16::MAX, 0) to force a full redraw.
+    pub fn frame(&self, f: &scope::Frame, sc: &scope::Scope, prev: &mut [(u16, u16); 401]) {
         let n = f.data.len();
         let trig_row = Some(sc.s.trig_row);
-        let row = |code: u16| -> i32 { sc.row_of_code(code as f32) as i32 };
+        let mut tpl = [[0u16; 288]; 4];
+        self.templates(&mut tpl);
+        // Code -> row is linear: precompute both ends once.
+        let r0 = sc.row_of_code(0.0);
+        let slope = (sc.row_of_code(1000.0) - r0) / 1000.0;
+        let row = |code: u16| -> i32 { (r0 + slope * code as f32) as i32 };
         let (mut pa, mut pb) = (0i32, 0i32);
         for i in 0..scope::COLS {
             let (mut lo, mut hi);
-            if n >= scope::COLS {
+            if let Some(cols) = f.cols {
+                let (a, b) = cols[i];
+                if a == u16::MAX {
+                    if prev[i] != (u16::MAX - 1, 0) {
+                        prev[i] = (u16::MAX - 1, 0);
+                        self.column_t(i as u16, &tpl, None, trig_row);
+                    }
+                    continue;
+                }
+                lo = row(b);
+                hi = row(a);
+            } else if n >= scope::COLS {
                 let a = i * n / scope::COLS;
                 let b = ((i + 1) * n / scope::COLS).max(a + 1);
                 lo = i32::MAX;
@@ -640,7 +676,7 @@ impl ScopeView {
                 let fr = pos - k as f32;
                 let v0 = f.data[k] as f32;
                 let v1 = f.data[(k + 1).min(n - 1)] as f32;
-                let r = sc.row_of_code(v0 + (v1 - v0) * fr) as i32;
+                let r = (r0 + slope * (v0 + (v1 - v0) * fr)) as i32;
                 lo = r;
                 hi = r;
             }
@@ -651,7 +687,11 @@ impl ScopeView {
             pa = lo;
             pb = hi;
             let (a, b) = (lo.min(hi), lo.max(hi));
-            self.column(i as u16, Some((a, b)), trig_row);
+            let px = (self.row_px(a), self.row_px(b));
+            if prev[i] != px {
+                prev[i] = px;
+                self.column_t(i as u16, &tpl, Some((a, b)), trig_row);
+            }
         }
     }
 }
@@ -703,19 +743,86 @@ pub fn measure(f: &scope::Frame, sc: &scope::Scope) -> (f32, f32, f32, f32) {
     (sc.volts(hi as f32) - sc.volts(lo as f32), mean, rms, freq)
 }
 
-/// Bottom measurement cells (stock: x 13/113/213/313, 98x17).
-pub fn scope_measurements(vpp: f32, mean: f32, rms: f32, freq: f32) {
-    let items: [(&str, f32, &str); 4] = [("Vpp:", vpp, "V"), ("Freq:", freq, "Hz"), ("Vavg:", mean, "V"), ("Vrms:", rms, "V")];
-    for (i, (name, v, u)) in items.iter().enumerate() {
+/// Bottom measurement cells (stock: x 13/113/213/313, 98x17), selected items.
+pub fn scope_measurements(sel: &[u8], res: &crate::scope_meas::Results) {
+    for i in 0..4 {
         let x = 13 + 100 * i as i16;
         let mut b = [0u8; 24];
-        let n = eng(&mut b, *v, u);
-        let mut t = [0u8; 32];
-        let k = name.len();
-        t[..k].copy_from_slice(name.as_bytes());
-        t[k..k + n].copy_from_slice(&b[..n]);
+        let t = match sel.get(i) {
+            Some(&id) => crate::scope_meas::format(&mut b, id, res.v[id as usize]),
+            None => "--",
+        };
         lcd::fill_rect(x as u16, 302, 98, 1, S_FRAME);
-        sf::label(sf::F14, rect(x, 303, 98, 16), core::str::from_utf8(&t[..k + n]).unwrap_or(""), 0xFFE0, S_BAR, 1, 1);
+        sf::label(sf::F14, rect(x, 303, 98, 16), t, 0xFFE0, S_BAR, 1, 0);
+    }
+}
+
+/// Scope settings window (stock MF popup (13,20,401,192)): tabs Measure /
+/// Display / Trigger / Settings.
+pub const SCOPE_TABS: [&str; 4] = ["Measure", "Display", "Trigger", "Settings"];
+
+fn tab_btn(r: sf::Rect, text: &str, on: bool) {
+    let c = if on { SEL } else { 0x2966 };
+    sf::rbox(r, 4, c, 0x10A3);
+    sf::glyphs(sf::F14, r, text, STATUS_FG, c, 8, 1);
+}
+
+pub fn scope_menu(tab: usize, sc: &scope::Scope, sel: &[u8], roll: bool) {
+    lcd::fill_rect(13, 20, 401, 192, 0x10A3);
+    for (i, t) in SCOPE_TABS.iter().enumerate() {
+        tab_btn(rect(16 + i as i16 * 99, 23, 95, 28), t, i == tab);
+    }
+    let s = &sc.s;
+    match tab {
+        0 => {
+            for (k, (id, name, _)) in crate::scope_meas::ITEMS.iter().enumerate() {
+                let r = rect(16 + (k % 5) as i16 * 79, 56 + (k / 5) as i16 * 38, 75, 34);
+                tab_btn(r, name, sel.contains(id));
+            }
+        }
+        1 => {
+            tab_btn(rect(16, 60, 190, 34), if roll { "Roll: ON" } else { "Roll: OFF" }, roll);
+        }
+        2 => {
+            tab_btn(rect(16, 60, 120, 34), "Rising", s.rising);
+            tab_btn(rect(140, 60, 120, 34), "Falling", !s.rising);
+            tab_btn(rect(16, 100, 120, 34), "Auto", s.mode == scope::TrigMode::Auto);
+            tab_btn(rect(140, 100, 120, 34), "Normal", s.mode == scope::TrigMode::Normal);
+            tab_btn(rect(264, 100, 120, 34), "Single", s.mode == scope::TrigMode::Single);
+        }
+        _ => {
+            tab_btn(rect(16, 60, 120, 34), "DC", !s.ac);
+            tab_btn(rect(140, 60, 120, 34), "AC", s.ac);
+            for (k, p) in ["x1", "x10", "x100"].iter().enumerate() {
+                let f = [1.0f32, 10.0, 100.0][k];
+                tab_btn(rect(16 + k as i16 * 124, 100, 120, 34), p, s.probe == f);
+            }
+        }
+    }
+}
+
+/// Scope settings window touch: Some((tab, item)) with item 255 = tab header.
+pub fn scope_menu_hit(tab: usize, x: u16, y: u16) -> Option<(usize, usize)> {
+    let (x, y) = (x as i16, y as i16);
+    if !(13..414).contains(&x) || !(20..212).contains(&y) {
+        return None;
+    }
+    if y < 53 {
+        return Some((((x - 16) / 99).clamp(0, 3) as usize, 255));
+    }
+    match tab {
+        0 => {
+            let col = ((x - 16) / 79) as usize;
+            let row = ((y - 56) / 38) as usize;
+            let k = row * 5 + col.min(4);
+            if k < crate::scope_meas::ITEMS.len() { Some((0, k)) } else { None }
+        }
+        1 => Some((1, 0)),
+        _ => {
+            let row = if y < 96 { 0 } else { 1 };
+            let col = ((x - 16) / 124).clamp(0, 2) as usize;
+            Some((tab, row * 3 + col))
+        }
     }
 }
 
@@ -902,5 +1009,6 @@ pub fn view_name(v: View) -> &'static str {
         View::Menu => "Main menu",
         View::Settings => "Settings",
         View::Range => "Range",
+        View::ScopeMenu => "Scope settings",
     }
 }

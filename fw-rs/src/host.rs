@@ -36,7 +36,7 @@ pub const CMD_LCD_REG: u8 = 3;
 pub const CMD_RELEASE: u8 = 4;
 pub const CMD_DIAG: u8 = 5;
 pub const CMD_INPUT: u8 = 6;
-pub const DIAG_LEN: usize = 116;
+pub const DIAG_LEN: usize = 128;
 
 const ST_OK: u8 = 0;
 const ST_BAD_CMD: u8 = 1;

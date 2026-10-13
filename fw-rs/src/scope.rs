@@ -159,17 +159,21 @@ pub struct Settings {
     pub pos: i32,
     pub rising: bool,
     pub mode: TrigMode,
+    /// Probe factor (x1, x10, x100): scales readouts and V/div labels only.
+    pub probe: f32,
 }
 
 impl Settings {
     /// Stock defaults: 200 us/div, 1 V/div, DC, rising, Auto, level row 105.
     pub const DEFAULT: Settings =
-        Settings { run: true, tb: 13, range: 6, ac: false, trig_row: 105, pos: 0, rising: true, mode: TrigMode::Auto };
+        Settings { run: true, tb: 13, range: 6, ac: false, trig_row: 105, pos: 0, rising: true, mode: TrigMode::Auto, probe: 1.0 };
 }
 
-/// A finished frame: the visible window of the record.
+/// A finished frame: the visible window of the record, or (roll mode, empty
+/// `data`) per-column min/max codes in `cols` (u16::MAX = no data yet).
 pub struct Frame<'a> {
     pub data: &'a [u16],
+    pub cols: Option<&'a [(u16, u16); COLS]>,
     pub trig: Option<usize>,
     pub fs: u32,
     pub seq: u32,
@@ -195,8 +199,20 @@ fn out(port: u32, n: u32) {
     }
 }
 
+#[link_section = ".dmabuf"]
+static mut ROLL_COLS: [(u16, u16); COLS] = [(0, 0); COLS];
+
+/// Roll mode (stock: from 200 ms/div): continuous circular capture.
+pub const TB_ROLL: usize = 22;
+
 pub struct Scope {
     pub s: Settings,
+    /// Roll display enabled (used from TB_ROLL up).
+    pub roll: bool,
+    rolling: bool,
+    roll_written: u64,
+    roll_last_wr: usize,
+    roll_next: u64,
     busy: bool,
     deadline: u64,
     seq: u32,
@@ -243,6 +259,11 @@ impl Scope {
             powered: false,
             screen: 0,
             rec: 0,
+            roll: true,
+            rolling: false,
+            roll_written: 0,
+            roll_last_wr: 0,
+            roll_next: 0,
         };
         sc.apply(Settings::DEFAULT, 0);
         sc
@@ -285,12 +306,12 @@ impl Scope {
     pub fn volts(&self, code: f32) -> f32 {
         let r = self.s.range;
         let (g0, g1) = self.gain(r);
-        (code - g1) * XR[r] / (g0 - g1)
+        (code - g1) * XR[r] / (g0 - g1) * self.s.probe
     }
 
     /// Volts -> screen row (FUN_08030146): 140 + pos - 141 v / (4 V/div).
     pub fn row_of_volts(&self, v: f32) -> f32 {
-        140.0 + self.s.pos as f32 - 141.0 * v / (4.0 * VDIV[self.s.range])
+        140.0 + self.s.pos as f32 - 141.0 * v / (4.0 * VDIV[self.s.range] * self.s.probe)
     }
 
     pub fn row_of_code(&self, code: f32) -> f32 {
@@ -298,13 +319,13 @@ impl Scope {
     }
 
     pub fn trig_volts(&self) -> f32 {
-        (140.0 + self.s.pos as f32 - self.s.trig_row as f32) * 4.0 * VDIV[self.s.range] / 141.0
+        (140.0 + self.s.pos as f32 - self.s.trig_row as f32) * 4.0 * VDIV[self.s.range] * self.s.probe / 141.0
     }
 
     fn trig_code(&self) -> i32 {
         let r = self.s.range;
         let (g0, g1) = self.gain(r);
-        (g1 + self.trig_volts() * (g0 - g1) / XR[r]) as i32
+        (g1 + self.trig_volts() / self.s.probe * (g0 - g1) / XR[r]) as i32
     }
 
     pub fn apply(&mut self, s: Settings, now: u64) {
@@ -387,8 +408,12 @@ impl Scope {
             };
             w32(S4 + 0x08, src);
             w32(S4 + 0x0C, buf);
-            w32(S4 + 0x04, self.rec as u32);
-            w32(S4, (6 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | 1);
+            self.rolling = self.roll && self.s.tb >= TB_ROLL;
+            let (len, circ) = if self.rolling { (CAP as u32, 1 << 8) } else { (self.rec as u32, 0) };
+            self.roll_written = 0;
+            self.roll_last_wr = 0;
+            w32(S4 + 0x04, len);
+            w32(S4, (6 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | circ | 1);
             w32(TIM8, 1);
             w32(TIM1, 1);
         }
@@ -424,6 +449,9 @@ impl Scope {
             }
             return None;
         }
+        if self.rolling {
+            return self.roll_poll(now);
+        }
         if unsafe { r32(S4 + 0x04) } != 0 {
             return None;
         }
@@ -453,7 +481,41 @@ impl Scope {
         }
         let start = trig.map(|t| t - half).unwrap_or(win / 2);
         self.seq = self.seq.wrapping_add(1);
-        Some(Frame { data: &data[start..start + self.screen], trig, fs: self.sample_rate(), seq: self.seq })
+        Some(Frame { data: &data[start..start + self.screen], cols: None, trig, fs: self.sample_rate(), seq: self.seq })
+    }
+
+    /// Roll: every 100 ms, min/max of 400 columns over the latest screen.
+    fn roll_poll(&mut self, now: u64) -> Option<Frame<'static>> {
+        if now < self.roll_next {
+            return None;
+        }
+        self.roll_next = now + 100;
+        let wr = CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1);
+        let wr = wr % CAP;
+        let d = (wr + CAP - self.roll_last_wr) % CAP;
+        self.roll_written += d as u64;
+        self.roll_last_wr = wr;
+        let per = (self.screen / COLS).max(1);
+        let buf = unsafe { &*core::ptr::addr_of!(BUF) };
+        let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
+        for i in 0..COLS {
+            // Column i ends (COLS - 1 - i) columns before the write position.
+            let back = (COLS - i) * per;
+            if back as u64 > self.roll_written {
+                cols[i] = (u16::MAX, u16::MAX);
+                continue;
+            }
+            let start = (wr + CAP - back) % CAP;
+            let (mut lo, mut hi) = (u16::MAX, 0u16);
+            for k in 0..per {
+                let v = buf[(start + k) % CAP] & 0x3FF;
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+            cols[i] = (lo, hi);
+        }
+        self.seq = self.seq.wrapping_add(1);
+        Some(Frame { data: &[], cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs: self.sample_rate(), seq: self.seq })
     }
 
     /// Stock software trigger: beyond the hysteresis band (code -+ 2) on the

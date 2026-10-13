@@ -52,6 +52,17 @@ pub struct App {
     pd6_idle: bool,
     /// Last scope frame for SCPI: 400 columns (ADC code / 4) and measurements.
     pub wave: [u8; 400],
+    /// Debug: max duration (us) of scope poll / measurements / draw.
+    pub prof: [u32; 3],
+    /// Drawn trace segments per scope column (see ScopeView::frame).
+    scope_prev: [(u16, u16); 401],
+    meas_sel: [u8; 4],
+    meas_n: usize,
+    pub meas_res: crate::scope_meas::Results,
+    scope_tab: usize,
+    roll: bool,
+    /// AUTO-set: (phase 1/2, candidate index, round, settings to restore).
+    autoset: Option<(u8, usize, u8, scope::Settings)>,
     locked: bool,
     pd6_presses: u8,
     pd6_last_release: u64,
@@ -138,6 +149,14 @@ impl App {
             dimmed: false,
             pd6_since: None,
             wave: [0; 400],
+            prof: [0; 3],
+            scope_prev: [(u16::MAX, 0); 401],
+            meas_sel: crate::scope_meas::DEFAULT_SEL,
+            meas_n: 4,
+            meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
+            scope_tab: 0,
+            roll: true,
+            autoset: None,
             locked: false,
             pd6_presses: 0,
             pd6_last_release: 0,
@@ -174,13 +193,13 @@ impl App {
     }
 
     fn show(&mut self, v: View, clk: &mut Clock) {
-        if matches!(v, View::Menu | View::Settings | View::Range) && !matches!(self.view, View::Menu | View::Settings | View::Range) {
+        if matches!(v, View::Menu | View::Settings | View::Range | View::ScopeMenu) && !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu) {
             self.back_view = self.view;
         }
         // Analog power as the stock pages: scope / generator side or DMM side
         // (scope.rs power()). The menu keeps whatever is on.
         match v {
-            View::Scope | View::Gen => self.scope.power(true, clk),
+            View::Scope | View::Gen | View::ScopeMenu => self.scope.power(true, clk),
             View::Dmm | View::DmmScope => self.scope.power(false, clk),
             View::Menu | View::Settings | View::Range => {}
         }
@@ -200,7 +219,14 @@ impl App {
                 lcd::fill_rect(0, ui::BAR_H, lcd::W, ui::BTN_Y - ui::BAR_H, ui::BG);
                 ui::SCOPE_COMPACT.draw_static(&self.scope, false);
             }
-            View::Scope => ui::SCOPE_FULL.draw_static(&self.scope, true),
+            View::Scope => {
+                ui::SCOPE_FULL.draw_static(&self.scope, true);
+                ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
+            }
+            View::ScopeMenu => {
+                ui::SCOPE_FULL.draw_static(&self.scope, true);
+                ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll);
+            }
             View::Gen => ui::gen_static(&self.gen),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range => {
@@ -250,6 +276,7 @@ impl App {
         }
         if self.redraw {
             self.redraw = false;
+            self.scope_prev = [(u16::MAX, 0); 401];
             self.draw_static();
             self.status_next = 0;
             self.chart_dirty = true;
@@ -336,6 +363,99 @@ impl App {
         }
     }
 
+    /// AUTO-set (stock mode 4), phase 1: DC, 5 us/div, V/div candidates
+    /// 10 V, 1 V, 100 mV, 10 mV until a signal with > 19 codes swing is seen.
+    fn autoset_start(&mut self, now: u64) {
+        let saved = self.scope.s;
+        let mut st = saved;
+        st.ac = false;
+        st.tb = 8;
+        st.range = 9;
+        st.pos = 0;
+        st.mode = scope::TrigMode::Auto;
+        st.run = true;
+        self.autoset = Some((1, 0, 0, saved));
+        self.scope.apply(st, now);
+    }
+
+    fn autoset_step(&mut self, f: &scope::Frame, now: u64) {
+        const CAND: [usize; 4] = [9, 6, 3, 0];
+        let Some((phase, idx, round, saved)) = self.autoset else { return };
+        let mut st = self.scope.s;
+        let (mut lo, mut hi) = (1023u16, 0u16);
+        for &v in f.data {
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        let pp = (hi - lo) as f32;
+        // Period from rising crossings of the 30 % / 70 % levels.
+        let (l30, l70) = (lo as f32 + 0.3 * pp, lo as f32 + 0.7 * pp);
+        let (mut armed, mut first, mut last, mut n) = (false, 0usize, 0usize, 0u32);
+        for (i, &v) in f.data.iter().enumerate() {
+            let v = v as f32;
+            if v < l30 {
+                armed = true;
+            } else if armed && v > l70 {
+                armed = false;
+                if n == 0 {
+                    first = i;
+                }
+                last = i;
+                n += 1;
+            }
+        }
+        let period = if n >= 2 { (last - first) as f32 / (n - 1) as f32 / f.fs as f32 } else { 0.0 };
+        let tb_for = |p: f32| -> usize {
+            scope::SDIV.iter().position(|&d| p / 4.0 < d).unwrap_or(scope::TB_MAX).clamp(scope::TB_MIN, scope::TB_MAX)
+        };
+        if phase == 1 {
+            if l70 - l30 > 19.0 * 0.4 && pp > 19.0 {
+                if period > 0.0 {
+                    st.tb = tb_for(period);
+                }
+                if lo == 0 || hi > 1022 {
+                    st.range = (st.range + 3).min(9);
+                }
+                st.trig_row = 140;
+                self.autoset = Some((2, idx, round, saved));
+            } else if idx + 1 < CAND.len() {
+                st.range = CAND[idx + 1];
+                self.autoset = Some((1, idx + 1, round, saved));
+            } else if round == 0 {
+                st.tb = 19;
+                st.range = CAND[0];
+                self.autoset = Some((1, 0, 1, saved));
+            } else {
+                self.autoset = None;
+                self.scope_set(saved, now);
+                return;
+            }
+            self.scope.apply(st, now);
+            return;
+        }
+        // Phase 2: V/div so that the signal fits +-4 div within 6.4 div, centred.
+        let (vmax, vmin) = (self.scope.volts(hi as f32), self.scope.volts(lo as f32));
+        let probe = st.probe;
+        let mut r = 9;
+        for (i, &d) in scope::VDIV.iter().enumerate() {
+            let d = d * probe;
+            if vmin >= -4.0 * d && vmax <= 4.0 * d && (vmax - vmin) <= 6.4 * d {
+                r = i;
+                break;
+            }
+        }
+        st.range = r;
+        let mid = (vmax + vmin) / 2.0;
+        st.pos = (141.0 * mid / (4.0 * scope::VDIV[r] * probe)) as i32;
+        st.trig_row = 140;
+        if period > 0.0 {
+            st.tb = tb_for(period);
+        }
+        self.autoset = None;
+        self.scope_set(st, now);
+        self.redraw = true;
+    }
+
     /// Index of the current range in the MF page list.
     fn range_sel(&self) -> Option<usize> {
         let b = self.dmm.button();
@@ -375,29 +495,44 @@ impl App {
 
     /// Poll the scope; draws the frame in scope views.
     pub fn scope_poll(&mut self, now: u64, can_draw: bool) {
-        if let Some(f) = self.scope.poll(now) {
+        let cyc = || unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) };
+        let t0 = cyc();
+        let polled = self.scope.poll(now);
+        self.prof[0] = self.prof[0].max(cyc().wrapping_sub(t0) / 200);
+        if let Some(f) = polled {
             let n = f.data.len();
-            for (i, w) in self.wave.iter_mut().enumerate() {
+            for (i, w) in self.wave.iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
                 let a = i * n / 400;
                 let b = ((i + 1) * n / 400).max(a + 1).min(n);
                 let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
                 *w = ((sum / (b - a) as u32) >> 2) as u8;
             }
-            let (vpp, mean, rms, freq) = ui::measure(&f, &self.scope);
-            self.meas = [vpp, mean, rms, freq];
+            if self.autoset.is_some() {
+                self.autoset_step(&f, now);
+                return;
+            }
+            let fresh = now >= self.meas_next && !f.data.is_empty();
+            if fresh {
+                self.meas_next = now + 300;
+                let t1 = cyc();
+                self.meas_res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
+                self.prof[1] = self.prof[1].max(cyc().wrapping_sub(t1) / 200);
+                let r = &self.meas_res.v;
+                self.meas = [r[10], r[19], r[11], r[0]];
+            }
             if !can_draw || self.redraw {
                 return;
             }
             match self.view {
                 View::Scope => {
-                    ui::SCOPE_FULL.frame(&f, &self.scope);
-                    if now >= self.meas_next {
-                        self.meas_next = now + 300;
-                        let [vpp, mean, rms, freq] = self.meas;
-                        ui::scope_measurements(vpp, mean, rms, freq);
+                    let t2 = cyc();
+                    ui::SCOPE_FULL.frame(&f, &self.scope, &mut self.scope_prev);
+                    self.prof[2] = self.prof[2].max(cyc().wrapping_sub(t2) / 200);
+                    if fresh {
+                        ui::scope_measurements(&self.meas_sel[..self.meas_n], &self.meas_res);
                     }
                 }
-                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope),
+                View::DmmScope => ui::SCOPE_COMPACT.frame(&f, &self.scope, &mut self.scope_prev),
                 _ => {}
             }
         }
@@ -405,6 +540,7 @@ impl App {
 
     fn scope_set(&mut self, s: scope::Settings, now: u64) {
         self.scope.apply(s, now);
+        self.scope_prev = [(u16::MAX, 0); 401];
         match self.view {
             View::Scope => ui::SCOPE_FULL.labels(&self.scope, true),
             View::DmmScope => ui::SCOPE_COMPACT.labels(&self.scope, false),
@@ -434,7 +570,7 @@ impl App {
                 self.beep(now, 50);
                 self.key(clk, c);
             }
-            Gesture::SwipeLeft | Gesture::SwipeRight if !matches!(self.view, View::Menu | View::Settings | View::Range) => {
+            Gesture::SwipeLeft | Gesture::SwipeRight if !matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu) => {
                 let i = View::CYCLE.iter().position(|&v| v == self.view).unwrap_or(0);
                 let n = View::CYCLE.len();
                 let j = if g == Gesture::SwipeLeft { (i + 1) % n } else { (i + n - 1) % n };
@@ -462,7 +598,7 @@ impl App {
         let now = clk.now_ms();
         match code {
             0 => {
-                let v = if matches!(self.view, View::Menu | View::Settings | View::Range) { self.back_view } else { View::Menu };
+                let v = if matches!(self.view, View::Menu | View::Settings | View::Range | View::ScopeMenu) { self.back_view } else { View::Menu };
                 self.show(v, clk);
             }
             1 => match self.view {
@@ -483,11 +619,7 @@ impl App {
                 }
             },
             2 => match self.view {
-                View::Scope => {
-                    let mut s = self.scope.s;
-                    s.run = true;
-                    self.scope_set(s, now);
-                }
+                View::Scope => self.autoset_start(now),
                 _ => {
                     self.meter.rel_off();
                     self.meter.set_hold(false);
@@ -503,6 +635,8 @@ impl App {
                     let v = self.back_view;
                     self.show(v, clk)
                 }
+                View::Scope => self.show(View::ScopeMenu, clk),
+                View::ScopeMenu => self.show(View::Scope, clk),
                 _ => {}
             },
         }
@@ -534,6 +668,86 @@ impl App {
                         ui::history(&self.hist, self.hist_n, self.hist_new);
                     }
                 }
+            }
+            View::ScopeMenu => {
+                let mut st = self.scope.s;
+                match ui::scope_menu_hit(self.scope_tab, x, y) {
+                    None => {
+                        self.show(View::Scope, clk);
+                        return;
+                    }
+                    Some((t, 255)) => self.scope_tab = t,
+                    Some((0, k)) => {
+                        let id = crate::scope_meas::ITEMS[k].0;
+                        if let Some(p) = self.meas_sel[..self.meas_n].iter().position(|&i| i == id) {
+                            self.meas_sel.copy_within(p + 1..self.meas_n, p);
+                            self.meas_n -= 1;
+                        } else if self.meas_n < 4 {
+                            self.meas_sel[self.meas_n] = id;
+                            self.meas_n += 1;
+                        }
+                    }
+                    Some((1, _)) => {
+                        self.roll = !self.roll;
+                        self.scope.roll = self.roll;
+                    }
+                    Some((2, k)) => match k {
+                        0 => st.rising = true,
+                        1 => st.rising = false,
+                        3 => st.mode = scope::TrigMode::Auto,
+                        4 => st.mode = scope::TrigMode::Normal,
+                        5 => st.mode = scope::TrigMode::Single,
+                        _ => {}
+                    },
+                    Some((_, k)) => match k {
+                        0 => st.ac = false,
+                        1 => st.ac = true,
+                        3..=5 => st.probe = [1.0, 10.0, 100.0][k - 3],
+                        _ => {}
+                    },
+                }
+                self.scope.apply(st, now);
+                ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll);
+            }
+            View::ScopeMenu => {
+                let mut st = self.scope.s;
+                match ui::scope_menu_hit(self.scope_tab, x, y) {
+                    None => {
+                        self.show(View::Scope, clk);
+                        return;
+                    }
+                    Some((t, 255)) => self.scope_tab = t,
+                    Some((0, k)) => {
+                        let id = crate::scope_meas::ITEMS[k].0;
+                        if let Some(p) = self.meas_sel[..self.meas_n].iter().position(|&i| i == id) {
+                            self.meas_sel.copy_within(p + 1..self.meas_n, p);
+                            self.meas_n -= 1;
+                        } else if self.meas_n < 4 {
+                            self.meas_sel[self.meas_n] = id;
+                            self.meas_n += 1;
+                        }
+                    }
+                    Some((1, _)) => {
+                        self.roll = !self.roll;
+                        self.scope.roll = self.roll;
+                    }
+                    Some((2, k)) => match k {
+                        0 => st.rising = true,
+                        1 => st.rising = false,
+                        3 => st.mode = scope::TrigMode::Auto,
+                        4 => st.mode = scope::TrigMode::Normal,
+                        5 => st.mode = scope::TrigMode::Single,
+                        _ => {}
+                    },
+                    Some((_, k)) => match k {
+                        0 => st.ac = false,
+                        1 => st.ac = true,
+                        3..=5 => st.probe = [1.0, 10.0, 100.0][k - 3],
+                        _ => {}
+                    },
+                }
+                self.scope.apply(st, now);
+                ui::scope_menu(self.scope_tab, &self.scope, &self.meas_sel[..self.meas_n], self.roll);
             }
             View::Range => {
                 let b = self.dmm.button();

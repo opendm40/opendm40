@@ -16,6 +16,7 @@ mod meter;
 mod mmio;
 mod power;
 mod scope;
+mod scope_meas;
 mod scpi;
 mod startup;
 mod stockfont;
@@ -237,7 +238,7 @@ fn main() -> ! {
             uptime_ms: now as u32,
             flags: hw.pllsai_locked as u32 | (hw.core_idle as u32) << 1,
             keepalive_left_ms: if feeding { deadline.saturating_sub(now) as u32 } else { 0 },
-            diag: touch_diag(&tp, touch_events, tmc.dbg_ctl, loop_max_shown),
+            diag: touch_diag(&tp, touch_events, tmc.dbg_ctl, loop_max_shown, app.prof),
         });
         match action {
             host::Action::None => {}
@@ -327,8 +328,11 @@ fn main() -> ! {
     }
 }
 
-fn touch_diag(tp: &Option<touch::Touch>, events: u32, ctl: (u8, [u8; 16]), loop_us: u32) -> [u8; host::DIAG_LEN] {
+fn touch_diag(tp: &Option<touch::Touch>, events: u32, ctl: (u8, [u8; 16]), loop_us: u32, prof: [u32; 3]) -> [u8; host::DIAG_LEN] {
     let mut d = [0u8; host::DIAG_LEN];
+    for (i, v) in prof.iter().enumerate() {
+        d[116 + 4 * i..120 + 4 * i].copy_from_slice(&v.to_le_bytes());
+    }
     for (i, v) in scope::debug().iter().enumerate() {
         d[100 + 4 * i..104 + 4 * i].copy_from_slice(&v.to_le_bytes());
     }
