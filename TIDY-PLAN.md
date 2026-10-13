@@ -1,5 +1,22 @@
 # Repo tidy-up plan
 
+**Executed on 2026-10-13** (commits `26ba0e5`..`HEAD` on `rust-fw-poc`), after
+the repo moved to the private `wirenboard/opendm40`. Done: protocol rewrite in
+`docs/bt-protocol.md`, BT clients in `tools/`, new front-page `README.md`,
+`DM40C_feature_request.md` -> `docs/dm40-feature-request.md`, handover ->
+`docs/history/`, `flash.py` + `dm40_loader.py` -> `fw-rs/tools/legacy/`, kit
+sources -> `firmware/patch/kit/` (+ `mkkit.sh`; the old
+`firmware/patch/dm40_memrw.py` is retired), firmware/patch, firmware/re
+docs/tools, Ghidra scripts and `web/` tracked; `dist/` and `private/`
+ignored; SPI disk backups, `l2bittest/` and the kit test output (UID,
+calibration, OTP) moved to `private/`. Deviations: vendor binaries stay at the
+repo root (ignored; the plan's alternative, so `firmware/vendor/` was not
+created and no path changed); `fw-rs/stub/` stays; the fw-rs review docs were
+not moved to `fw-rs/docs/reviews/` (other agents are editing fw-rs). Left for
+the owners of those files: the stale names in `fw-rs/TODO.md`,
+`fw-rs/src/meter.rs`, `genuine.rs`, `screenshot.rs` (prose only). The text
+below is the original plan.
+
 State as of 2026-10-13 (branch `rust-fw-poc`, after commit `efb7e50`). Nothing
 has been moved or deleted yet. Already done: `.gitignore` for personal dumps,
 SPI disk backups and the Ghidra database (`3aedb6f`), and stale README
@@ -225,7 +242,7 @@ Already broken (no move needed):
 
 ## 10. Personal data notes
 
-- BT MACs `XX:XX:XX:XX:XX:XX` / `XX:XX:XX:XX:XX:XX` are in `README.md` and
+- The unit's BT MACs are in `README.md` and
   `dm40.py` since the first commit (2025-09-01); the kit README uses the same
   MAC as the example.
 - The first 4 bytes of the chip UID appear as an example in the tracked

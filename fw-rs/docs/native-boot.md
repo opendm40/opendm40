@@ -1206,7 +1206,7 @@ else /16 for this boot because `DIFF1`/`DIFF2` (a /4 read differed),
 ## Test plan (coordinator + user)
 
 Build with `./build.sh <mode>`. RAM images load as before (`tools/reload.sh
-<mode>`). Keep `firmware/patch/build/dm40_patched.bin` and a stock
+<mode>`). Keep `firmware/patch/build-memrw/dm40_patched.bin` (`firmware/patch/kit/mkkit.sh`) and a stock
 `dm40_v_2_6.bin` at hand. After T1 and T2, the device must be back on
 (patched) stock.
 
