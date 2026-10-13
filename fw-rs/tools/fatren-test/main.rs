@@ -4,8 +4,10 @@
 //!   main <image> dry|live [marker-hex]  fatren::run (marker = the 12-byte
 //!                                       record at 0x08008000; none = invalid)
 //!   main <image> trigger                fatren::make_trigger
-//!   main <image> backup <dir>           calbackup::run with the calbackup::FILES sources
-//!                                       read from <dir>/CALIB.BIN etc.
+//!   main <image> backup <dir> [flash]   calbackup::run with the calbackup::FILES sources
+//!                                       read from <dir>/CALIB.BIN etc.; [flash] = the
+//!                                       bytes from 0x08004000 (installed body with the
+//!                                       loader marker at +0x4000): also _DM40PRV.BIN
 //!   main <image> shot                   screenshot::take_on with the synthetic screen
 //!                                       of the `lcd` stub below (pattern()).
 //! Live runs rewrite the image.
@@ -25,6 +27,16 @@ mod msc {
 /// Stubs of the fw-rs modules calbackup.rs refers to.
 mod wdt {
     pub fn kick_if_feeding() {}
+}
+#[allow(dead_code)]
+mod mmio {
+    pub unsafe fn r32(_: u32) -> u32 {
+        0
+    }
+}
+#[allow(dead_code)]
+mod clock {
+    pub const HCLK_HZ: u32 = 200_000_000;
 }
 #[allow(dead_code)]
 mod spiflash {
@@ -85,6 +97,7 @@ mod calbackup;
 struct Img {
     d: Vec<u8>,
     writes: Vec<u32>,
+    reads: Vec<u32>,
 }
 
 impl msc::BlockDevice for Img {
@@ -98,6 +111,7 @@ impl msc::BlockDevice for Img {
         (self.d.len() / 4096) as u32
     }
     fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool {
+        self.reads.push(lba);
         let o = lba as usize * 4096;
         buf[..4096].copy_from_slice(&self.d[o..o + 4096]);
         true
@@ -118,7 +132,7 @@ fn unhex(s: &str) -> Vec<u8> {
 
 fn main() {
     let a: Vec<String> = env::args().collect();
-    let mut img = Img { d: fs::read(&a[1]).unwrap(), writes: vec![] };
+    let mut img = Img { d: fs::read(&a[1]).unwrap(), writes: vec![], reads: vec![] };
     if a[2] == "trigger" {
         let t = fatren::make_trigger(&mut img);
         println!("trigger={:?}\n  changed blocks: {:?}", t, img.writes);
@@ -137,17 +151,26 @@ fn main() {
                 fs::read(format!("{}/{}", a[3], name)).unwrap()
             })
             .collect();
+        let slices: Vec<&[u8]> = data.iter().map(|d| &d[..]).collect();
         let srcs: Vec<calbackup::Src> = calbackup::FILES
             .iter()
-            .zip(&data)
+            .zip(&slices)
             .map(|(&(name, addr, _), d)| calbackup::Src { name, addr, data: d })
             .collect();
-        let r = calbackup::run(&mut img, &srcs);
+        let flash = a.get(4).map(|f| fs::read(f).unwrap());
+        let fw = flash.as_ref().map(|f| calbackup::FwFile::from_flash(f).expect("flash: no valid marker"));
+        let r = calbackup::run(&mut img, &srcs, fw.as_ref().map(|f| f as &dyn calbackup::Source));
         println!(
-            "backup={:?} written=0x{:02x} conflict=0x{:02x} freed={}",
+            "backup={:?} written=0x{:03x} conflict=0x{:03x} freed={}",
             r.status, r.written, r.conflict, r.freed
         );
+        // Geometry from the boot sector: blocks >= data_start are file data.
+        let b = &img.d;
+        let le16 = |o: usize| b[o] as u32 | (b[o + 1] as u32) << 8;
+        let data_start = le16(0x0E) + b[0x10] as u32 * le16(0x16) + le16(0x11) * 32 / 4096;
+        let data_reads: Vec<u32> = img.reads.iter().copied().filter(|&l| l >= data_start).collect();
         println!("  changed blocks: {:?}", img.writes);
+        println!("  reads={} data_reads={:?}", img.reads.len(), data_reads);
         fs::write(&a[1], &img.d).unwrap();
         return;
     }

@@ -287,26 +287,15 @@ pub fn marker() -> [u32; 3] {
     unsafe { [r32(MARKER), r32(MARKER + 4), r32(MARKER + 8)] }
 }
 
-/// CRC-16/0x8005, init 0xFFFF, MSB first, no final XOR (dm40fw.py crc16).
-fn crc16(data: &[u8]) -> u16 {
-    let mut c = 0xFFFFu16;
-    for &b in data {
-        c ^= (b as u16) << 8;
-        for _ in 0..8 {
-            c = if c & 0x8000 != 0 { (c << 1) ^ 0x8005 } else { c << 1 };
-        }
-    }
-    c
-}
-
-/// The marker passes the ROM/loader header test (type 1, complement, CRC).
-/// The body CRC (also checked by them) is not recomputed here.
+/// The marker passes the ROM/loader header test (type 1, complement, CRC;
+/// fatren::header_valid). The body CRC (also checked by them) is not
+/// recomputed here.
 pub fn marker_valid() -> bool {
-    let [w0, w1, w2] = marker();
-    let mut b = [0u8; 8];
-    b[..4].copy_from_slice(&w1.to_le_bytes());
-    b[4..].copy_from_slice(&w2.to_le_bytes());
-    (w2 >> 16) == 1 && (w0 & 0xFFFF) == (!w0 >> 16) & 0xFFFF && crc16(&b) as u32 == w0 & 0xFFFF
+    let mut h = [0u8; 12];
+    for (d, w) in h.chunks_mut(4).zip(marker()) {
+        d.copy_from_slice(&w.to_le_bytes());
+    }
+    crate::fatren::header_valid(&h)
 }
 
 fn fmc_wait() -> bool {
@@ -617,7 +606,9 @@ fn dec(s: &mut crate::scpi::Scpi, mut v: u32) {
     s.put_bytes(&t[i..]);
 }
 
-/// DBG:BOOT? reply:
+/// DBG:BOOT? reply (reason: NONE WATCHDOG WDT_AFTER_RECOVERY WDT_STALE
+/// WDT_RETRY KEY_HOLD KEY_HOLD_ABORTED REQUESTED CLOCK_FAIL; clock: HXTAL
+/// IRC16M FAILED):
 /// `rstsck,rstsck_after,mode,reason,clock,last,hold_ms,bcr1,btr1,bwtr1,lcd_id,
 /// fatren_status,found,renamed_8.3_name(11 chars),old_backup,old_deleted,
 /// freed_clusters,others,rcvr_deleted,last_trigger` (others > 0: more

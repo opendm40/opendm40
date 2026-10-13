@@ -157,8 +157,10 @@ fn main() -> ! {
     let mut reset_at: Option<u64> = None;
 
     let mut scpi = scpi::Scpi::new();
-    // SCPI READ?/MEASure?: reply with the first reading whose seq is >= this.
-    let mut scpi_wait: Option<u32> = None;
+    // SCPI READ?/MEASure?/FETCh?: reply with a reading whose seq is >= .0;
+    // .1 (READ?/MEASure?): also wait until the DMM averaging window is full;
+    // .2 = readings accepted so far (a count: .0 is 0 after a mode change).
+    let mut scpi_wait: Option<(u32, bool, u8)> = None;
     // Data logger (FR-38): owns the HY3131 AD1 fast stream while active.
     let logger = unsafe { &mut *core::ptr::addr_of_mut!(LOGGER) };
     logger.set_osr(logger::DEFAULT_OSR);
@@ -256,7 +258,7 @@ fn main() -> ! {
                             app.meter.reset();
                             app.last_raw = None;
                         }
-                        scpi_wait = Some(app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0));
+                        scpi_wait = Some((app.last_raw.map(|r| r.seq.wrapping_add(1)).unwrap_or(0), true, 0));
                         false
                     }
                 }
@@ -276,7 +278,7 @@ fn main() -> ! {
                             scpi.put_bytes(b"+9.90000000E+37");
                             true
                         } else {
-                            scpi_wait = Some(0);
+                            scpi_wait = Some((0, false, 0));
                             false
                         }
                     }
@@ -533,8 +535,15 @@ fn main() -> ! {
             if !logging {
                 if let Some(raw) = app.dmm.poll(&mut clk) {
                     if let Some(r) = app.reading(raw, can_draw) {
-                        if let Some(min) = scpi_wait {
-                            if r.seq.wrapping_sub(min) < 0x8000_0000 {
+                        if let Some((min, full, seen)) = scpi_wait.filter(|w| r.seq.wrapping_sub(w.0) < 0x8000_0000) {
+                            // READ?/MEASure?: a value at the full (+1 digit)
+                            // resolution, i.e. once the moving average holds
+                            // AVG_FULL conversions (avg_n 0 = not an averaged
+                            // range; overload never averages; at most 20 readings).
+                            let n = seen.saturating_add(1);
+                            let ready = !full || r.avg_n == 0 || r.avg_n >= dmm::AVG_FULL || r.main.ol || n >= 20;
+                            scpi_wait = Some((min, full, n));
+                            if ready {
                                 scpi_wait = None;
                                 scpi.len = 0;
                                 scpi.put_reading(&r);
@@ -617,11 +626,16 @@ fn panic(_info: &PanicInfo) -> ! {
 // ---------------------------------------------------------------------------
 // Native-format image (docs/native-boot.md "Implementation"). Appended at the
 // end of the file so the default build stays byte-identical (panic locations
-// carry line numbers). Native watchdog policy: INITIAL_HOLD_MS above makes the
-// main loop feed the FWDGT for as long as it runs; DBG:RELEASE / a panic / a
-// hang stop the feeding -> FWDGT reset -> the shim enters recovery;
-// DBG:RESET = SYSRESETREQ -> normal boot; DBG:RECOVER = backup-SRAM request +
-// SYSRESETREQ -> recovery.
+// carry line numbers). Native watchdog policy (src/boot.rs): INITIAL_HOLD_MS
+// above makes the main loop feed the FWDGT for as long as it runs.
+// DBG:RELEASE, a panic or a hang stop the feeding -> FWDGT reset; the shim
+// counts it as a crash: the 1st reboots fw-rs normally (WDT_RETRY), a 2nd one
+// without 60 s of healthy main loop in between (boot::mark_healthy) enters
+// recovery (marker zeroed -> vendor update screen). DBG:RESET = SYSRESETREQ ->
+// normal reboot of fw-rs. DBG:UPDATE / DBG:RECOVER zero the 12-byte loader
+// marker (boot::enter_loader_update) and reset -> the vendor loader's update
+// screen with its own USB disk until a dm40*.bin is installed. (No backup-SRAM
+// request word is set by any command now.)
 #[cfg(any(feature = "test-initcore", feature = "test-recovery"))]
 #[cfg(feature = "native")]
 compile_error!("native cannot be combined with the RAM test features");
@@ -638,6 +652,11 @@ mod dialog;
 mod screenshot;
 #[cfg(any(feature = "native", feature = "test-initcore", feature = "test-recovery"))]
 mod native;
+// Stock device-authenticity check, informational only: DBG:GENUINE? reports
+// it; nothing changes device behaviour on its result (user decision).
+// (`check` / `verify` are for other callers / the host tests.)
+#[allow(dead_code)]
+mod genuine;
 #[cfg(any(feature = "native", feature = "test-recovery"))]
 mod recovery;
 #[cfg(feature = "native")]

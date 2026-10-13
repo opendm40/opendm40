@@ -78,6 +78,10 @@ pub enum Log {
 /// Debug commands over USBTMC (development aids, not SCPI standard):
 ///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive)
 ///   DBG:TAP x,y  DBG:KEY n  DBG:SWIPE L|R    inject touch / side key
+///   DBG:SWIPE D,n           synthetic n-finger swipe down (3 = screenshot, 2 = power off)
+///   DBG:GENUINE?            device check (src/genuine.rs, docs/genuine-check.md):
+///                           uid_hex,stored_hex,expected_hex,GENUINE|MISMATCH (12 bytes
+///                           each, memory order); read-only
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
 ///   DBG:DIAG?               diagnostic block (#3)
 ///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
@@ -476,7 +480,15 @@ impl Scpi {
                             let v = nums::<2>(a);
                             Dbg::Input(0, v[0] as u16, v[1] as u16)
                         }
-                        b"SWIPE" => Dbg::Input(if a.first() == Some(&b'R') { 2 } else { 1 }, 0, 0),
+                        b"SWIPE" => match a.first() {
+                            Some(&b'R') => Dbg::Input(2, 0, 0),
+                            // D,n: synthetic n-finger swipe down (gesture.rs synth_swipe_down).
+                            Some(&b'D') => {
+                                let n = a.split(|&b| b == b',').nth(1).and_then(parse_num).unwrap_or(1.0);
+                                Dbg::Input(4, (n as u16).clamp(1, 5), 0)
+                            }
+                            _ => Dbg::Input(1, 0, 0),
+                        },
                         b"KEY" => Dbg::Input(3, nums::<1>(a)[0] as u16, 0),
                         b"LCD" => {
                             let v = nums::<5>(a);
@@ -490,6 +502,21 @@ impl Scpi {
                         // marker at 0x08008000, then the deferred SYSRESETREQ ->
                         // vendor update screen + its USB disk (docs/native-boot.md).
                         // RAM build: RECOVER = plain reset. DBG:BOOT? = boot info.
+                        // Stock device-authenticity check, read-only (docs/genuine-check.md).
+                        b"GENUINE" => {
+                            let i = crate::genuine::inspect();
+                            self.len = 0;
+                            for v in [i.uid, i.stored, i.expected] {
+                                for b in v {
+                                    let h = b"0123456789ABCDEF";
+                                    self.put(&[h[(b >> 4) as usize], h[(b & 15) as usize]]);
+                                }
+                                self.put(b",");
+                            }
+                            let ok = i.result == crate::genuine::GenuineResult::Genuine;
+                            self.put(if ok { b"GENUINE" } else { b"MISMATCH" });
+                            continue;
+                        }
                         #[cfg(any(feature = "native", feature = "test-initcore"))]
                         b"BOOT" => {
                             crate::boot::put_info(self);
