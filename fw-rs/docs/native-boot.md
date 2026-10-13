@@ -385,7 +385,7 @@ This section supersedes §2–§10 where they differ. By user decision:
 | File | Role |
 |---|---|
 | `link-native.x` | native layout (below) |
-| `link-test.x` | RAM layout for the T1/T2 test builds: `link.x` with the SRAM0 code region 120 KiB (was 112) and DMA RAM at `0x2001E000` (72 KiB) |
+| `link-test.x` | RAM layout for the T1/T2 test builds: `link.x` with CODE = SRAM0+SRAM1 (`0x20000000`, 128 KiB, as large as the flash sector) and the DMA RAM = SRAM2 (`0x20020000`, 64 KiB; `.dmabuf` ~58 KiB) |
 | `build.sh` | modes `native`, `test-initcore`, `test-recovery`; no mode = the original build, unchanged |
 | `src/shim.rs` | native vector table, `reset` (asm), `shim_main`; all in region A |
 | `src/boot.rs` | shim decision `shim()`, reset flags, power key, power hold on/off, backup-SRAM words, loader marker check + `zero_marker()` (FMC), `DBG:BOOT?` text |
@@ -444,7 +444,10 @@ Checked by `cmp`:
   The default build now links at **114560 bytes**, `.text` 114388 of 114688,
   so **300 bytes are left** in the code region.
 
-**`link-test.x` as the default dev layout** is possible:
+**`link-test.x` as the default dev layout** (done: `link.x` now uses the
+120 KiB / 72 KiB split below; `link-test.x` has since moved on to CODE 128 KiB
+/ DMARAM `0x20020000` 64 KiB for the larger T1 image, see the calibration
+backup section):
 - **Layout:** CODE `0x20000000` 120 KiB, DMARAM `0x2001E000` 72 KiB.
   `.dmabuf` is 59368 B and ends at `0x2002C7E8`, leaving 14 KB.
 - **No collision:**
@@ -572,6 +575,18 @@ H3, M1, M4, M5, L1, L3, L6).*
    - Wait while the key stays pressed for up to **4 s** (`HOLD_MS`). A release
      counts after 30 ms (bounce). A cycle-counter-independent iteration cap
      also bounds the wait (L1).
+   - **The cap fails safe** (review N1): reaching it means the cycle counter
+     does not advance, so it is treated as a **release**, never as "held". It
+     is checked before the time limit. A stopped counter therefore cannot
+     confirm the gesture or zero the marker: the first window ends in a normal
+     boot reported as `KEY_HOLD_ABORTED` with `hold_ms` = 4000 and no cue (an
+     abort with no beep heard means a stuck DWT counter); in the confirm
+     window it is an abort. The cap is `(limit + 100) × cyc_per_ms / 8` passes;
+     a pass is about 20 cycles in the native build, so with a running counter
+     the time limit always comes first. With a stopped counter the first
+     window ends after about 10 s of holding (watchdog fed).
+   - The cue's per-half-period pass cap is `half / 2`, so even a counter that
+     stops during the cue ends it after about 1 s. The cue decides nothing.
    - Released earlier → normal boot.
    - At 4 s comes the **cue**: the backlight goes off, a ~0.3 s beep sounds
      (buzzer PA7 toggled as GPIO at ~2.7 kHz), then the backlight comes back.
@@ -699,7 +714,12 @@ our (possibly hung) app directly. The loader never sees the file.
    - `BKP_TRIG = 0x54520011`, and the FWDGT stops being fed.
    - The watchdog resets the unit; the shim sees that the previous boot was
      recovery and boots normally.
-   - The next normal boot shows the code in `DBG:BOOT?`.
+   - The next normal boot shows `last_trigger` = `0x54520011` in `DBG:BOOT?`.
+     Only that backup-SRAM word survives the reset: `fmc_last` is a `.bss`
+     static, zeroed by `init_ram`, so the FMC error bits / timeout of the
+     failed attempt are **not** visible after the reset (`fmc_last` then reads
+     0). `fmc_last` is only meaningful after a `DBG:UPDATE` that answered
+     "Flash error" (no reset follows then).
 
 This is a **one-way door into the vendor updater.** The app bytes stay intact,
 but nothing can make that installed copy bootable again except a vendor install
@@ -799,8 +819,12 @@ from the stock boot FUN_0800af34:
   - It counts as a crash, the same as a hang.
   - Twice in a row it zeroes the marker.
 - **`DBG:RESET`:** SYSRESETREQ → normal boot.
-- **`DBG:UPDATE` / `DBG:RECOVER`:** zero the loader marker, then SYSRESETREQ →
-  the vendor update screen with its USB disk (see Recovery).
+- **`DBG:UPDATE` / `DBG:RECOVER`:** `boot::enter_loader_update`: clear the
+  previous-mode word `BKP_LAST` (H3) **and reset the crash counter**
+  `BKP_CRASH` to `0x43520000` (N2: a count of 1 left from this session must not
+  survive the stock interlude and turn the first hang after the reinstall into
+  recovery), zero the loader marker, then SYSRESETREQ → the vendor update
+  screen with its USB disk (see Recovery).
 - **`DBG:BOOT?`** returns, in order:
   - `rstsck`, `rstsck_after`, `NORMAL|RECOVERY`, `reason`,
     `HXTAL|IRC16M|FAILED`, `last`, `hold_ms`;
@@ -810,6 +834,12 @@ from the stock boot FUN_0800af34:
     `freed_clusters`, `others`, `rcvr_deleted`, `last_trigger`;
   - `marker_w0`, `marker_w1`, `marker_w2`, `VALID|INVALID`;
   - `crash_word` (`0x435200nn`), `HEALTHY|-`, `fmc_last` (0 = clean);
+  - `PD6`, `moder`, `pupd`, `idr`: the power-key pin, read live at query time:
+    `MODER[13:12]` (0 = input), `PUPD[13:12]` (**2 = pull-down**, B2),
+    `IDR` bit 6 (1 = pressed). In native and T2 the pull-down is the shim's
+    `pd6_input`; in T1 (`test_initcore_start` does not run the shim) it is the
+    one `board::init` sets (`board.rs`, PD6 input + pull-down), on top of the
+    stock's own. Expected `PD6,0,2,0` with the key released;
   - `STAGED`, `n`, `CALBK`, `status`, `written`, `conflict`, `freed`,
     `STACK`, `used`, `size` (`native::put_extra`, see "Stack depth" and the
     calibration backup section).
@@ -956,9 +986,13 @@ None of the names matches the loader's `dm40*.bin`.
 (after board init and fatren), the RAM build from `rust_start` before
 `main()`. Cargo feature `calbackup`: implied by `native`; off in the RAM
 images for CODE space (~6.5 KB; as of 2026-10-13 the default image has
-~250 B of CODE left, so `--features calbackup` overflows by ~6.3 KB, and the
-T1 `test-initcore` image no longer links either, even without calbackup:
-CODE overflow ~6.4 KB, ~400 B of it the `DBG:BOOT?` `put_extra` call).
+~250 B of CODE left, so `--features calbackup` overflows by ~6.3 KB). The T1
+`test-initcore` image links again since `link-test.x` gives CODE all of
+SRAM0+SRAM1 (128 KiB) and moves `.dmabuf` to SRAM2 (`0x20020000`, 64 KiB), but
+without calbackup: the 128 KiB flash sector 8 the RAM images load from is the
+real ceiling (T1 image 130 316 B on 2026-10-13 evening, ~0.75 KB left and
+shrinking with UI work), and calbackup does not fit.
+So calbackup's first run on hardware is still T3 step 1 (review R1).
 
 **Wear:** each file is first compared with its source by reading it: the root
 entry (size), the whole cluster chain through FAT 1 (exact length, valid
@@ -1034,12 +1068,29 @@ popped first. Prologues in the native ELF (2026-10-13):
 | `native::pre_main` (board init inlined) | 120 |
 | `fatren::run` | 10 768 |
 | `calbackup::boot` / `calbackup::run` | 212 / 14 260 (with ROMBOOT/LOADER) |
-| `main` | 26 592 |
-| `ui::ScopeView::frame` | 4 780 |
+| `main` | 26 720 |
+| `app::App::tick` | 1 096 |
+| `ui::ScopeView::draw_static` | 2 360 |
+| `ui::ScopeView::labels` | 224 |
+| `stockfont::label` | 1 728 |
+| `stockfont::layout` | 1 248 |
+| `fatren::delete_file` | 4 152 |
 
-Stack = `__bss_end` (0x100067A0) .. `_stack_top` (0x10010000) = 39 008 B.
-Deepest paths: before main ≈ 48 + 120 + 212 + 14 260 + small callees ≈ 14.7 KB;
-main + scope ≈ 48 + 26 592 + 4 780 + ~100 ≈ 31.5 KB (≈ 7.5 KB margin).
+Stack = `__bss_end` (0x100067A8) .. `_stack_top` (0x10010000) = 39 000 B.
+Deepest paths (static estimate: prologue push/vpush/`sub sp` along `bl` edges,
+no indirect calls; re-measured 2026-10-13 evening, review re-review B1):
+- before main: 48 + `pre_main` 120 + `fatren::run` 10 768 + `delete_file`
+  4 152 + `free_chain`/`flush`/`write_block` ≈ **15.9 KB**; the calbackup path
+  (`calbackup::boot` 212 + `run` 14 296 + …) ≈ 15.4 KB;
+- **main peak:** 48 + `main` 26 720 + `App::tick` 1 096 +
+  `ScopeView::draw_static` 2 360 + `labels` 224 + `stockfont::label` 1 728 +
+  `layout` 1 248 + the panic chain (~100) ≈ **33.5 KB** (the review measured
+  33 428 B with `main` at 26 616), so the margin is **≈ 5.5 KB** (≈ 4.7 KB
+  after allowing for the deepest indirect-call targets, `Msc::poll` 480 and
+  `Usbtmc::endpoint_out` 352, which are called from `main` and sit below this
+  path). Interrupts stay masked, so no exception frames stack on top. (The
+  earlier "main + `ScopeView::frame` ≈ 31.5 KB, 7.5 KB margin" named the wrong
+  path.) Keep the margin ≥ 4 KB when `main` or the UI frames grow.
 
 **Run-time check:** `native::init_ram` (native and T1) paints the free stack
 (`__bss_end` .. SP − 256) with `0x53544B21`; `native::stack_use()` returns the
@@ -1102,7 +1153,14 @@ Build with `./build.sh <mode>`. RAM images load as before (`tools/reload.sh
      `0x0000_5091`-ish / `0x00000F04` / `0x00000201`; if they differ, fix
      `board.rs` before any native flash;
    - `lcd_id` = `0x009488`;
-   - fatren `DRYRUN` or `CLEAN`.
+   - fatren `DRYRUN` or `CLEAN`;
+   - `PD6,0,2,0`: PD6 input with **pull-down** (`PUPD[13:12]` = 0b10), idle
+     level 0; repeat with the key held (a short press, below the 1.5 s
+     power-off) and expect `PD6,0,2,1`. In T1 this pull-down is the one
+     `board::init` sets on top of the stock's; the shim's own `pd6_input` runs
+     only in T2/native;
+   - `CALBK,NOTRUN` (calbackup is not in the T1 image, see the calibration
+     backup section) and `STACK,<used>,<size>`.
 3. Exercise everything after the re-clock:
    - DMM, scope, generator;
    - BT (uses DMA0);
@@ -1142,24 +1200,45 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
 
 ### T3 — native image via the loader
 
-1. **Install.** Stage `fw-rs/dm40-fw-native.bin` as `dm40_fwrs.bin` (the only
-   `dm40*.bin` on the FAT), then cold power-on with a long key hold so the
-   loader runs. Alternatively, from the patched stock, use its own update path.
-   - fw-rs comes up in normal mode. With stale flags, `DBG:BOOT?` shows reason
-     `WDT_STALE`.
+1. **Install from the loader's update screen** (the proven path, review L7 /
+   re-review N4). Reach the screen the T2 way (warm marker zeroing), or by the
+   vendor key-hold entry only if T2b proved it; do **not** rely on "a long key
+   hold at power-on reaches the loader" otherwise, and do not use patched
+   stock's own update path (unverified for a non-stock length). On the
+   loader's USB disk, copy `fw-rs/dm40-fw-native.bin` as `dm40_fwrs.bin` (the
+   only `dm40*.bin`), `sync` and eject, then press "update". The loader
+   installs it and resets (warm, SW reset), or the next cold power-on (short
+   press) launches it.
+   - fw-rs comes up in normal mode. The reason is normally `NONE`; it is
+     `WDT_STALE` only if a watchdog flag from the stock session is still
+     latched (stock never clears the flags; SW or POR set means it is never
+     counted as our crash). Never `WATCHDOG`/`WDT_RETRY` here.
+   - **The first boot is slow and dark:** board init hands the backlight to
+     the PWM at duty 0 while fatren and calbackup run (review R2), and
+     calbackup writes all its files on the first boot (several seconds). **Do
+     not power-cycle during the first 10 s.** calbackup runs on hardware for
+     the first time here (review R1); a fault there costs one `WDT_RETRY`
+     reboot (~20 s), a second one recovery (loader screen): keep
+     `dm40-fw-native.bin` and `dm40_patched.bin` at hand.
    - `DBG:BOOT?` should show:
-     - `HXTAL`;
+     - `NORMAL`, `HXTAL`;
      - marker `VALID` (words = the header of our file);
-     - fatren `RENAMED` `DM40_F~1BIN`.
-   - The disk now holds `_DM40PRV.BIN`.
+     - fatren `RENAMED` `DM40_F~1BIN`;
+     - `PD6,0,2,0`;
+     - `CALBK,WRITTEN`;
+     - `STACK,<used>,39000`; after using the scope view, `used` should be
+       ≤ about 34 000.
+   - The disk now holds `_DM40PRV.BIN` and the backup files.
 2. **First prove the way back.**
    - Over fw-rs's own disk, copy `dm40_patched.bin` as `dm40_v_2_6.bin`, then
      send `DBG:UPDATE`.
    - The loader installs the patched stock (warm path).
    - Return to fw-rs the same way from stock, or through the loader screen.
    - Do this before relying on any recovery trigger.
-3. **`DBG:RESET`:** normal boot. `DBG:BOOT?` shows SW (bit 28) and `NONE`. No
-   fatren run, because this is not a cold boot.
+3. **`DBG:RESET`:** normal boot. `DBG:BOOT?` shows SW (bit 28) and `NONE`.
+   fatren runs on every normal boot (no reset-cause gate, review H1); with the
+   installed file already renamed it finds nothing to do: `CLEAN`. calbackup:
+   `CALBK,UNCHANGED`.
 4. **Key gesture.**
    - **Normal press first:** a short power-on press should light the backlight
      at once. `DBG:BOOT?` then shows `hold_ms` < 300 and reason `NONE`.

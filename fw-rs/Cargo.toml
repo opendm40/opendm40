@@ -28,9 +28,9 @@ panic = "abort"
 # different). Implied by native.
 # Off in the RAM images: it costs ~6.5 KB of CODE. The default image has only
 # ~250 bytes of its 120 KiB CODE left (2026-10-13, after the UI/DMM work), so
-# `./build.sh --features calbackup` no longer fits (overflows by ~6.3 KB);
-# test-initcore no longer links either, even without calbackup (CODE overflow
-# ~6.4 KB, of which ~400 B is the DBG:BOOT? put_extra call).
+# `./build.sh --features calbackup` no longer fits (overflows by ~6.3 KB).
+# Not in test-initcore either: that image is < 1 KB below the 128 KiB flash
+# sector 8 without it.
 calbackup = []
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the stock firmware last drew.
@@ -47,7 +47,8 @@ embedded-fonts = []
 native = ["embedded-fonts", "calbackup"]
 # Hardware tests of the native boot code from the RAM-loaded sector-8 image
 # (docs/native-boot.md "Implementation", test plan T1/T2). They link with
-# link-test.x (SRAM0 code region 8 KiB larger; build.sh selects the script).
+# link-test.x (CODE = SRAM0+SRAM1 128 KiB, DMA RAM = SRAM2 64 KiB; build.sh
+# selects the script).
 #   test-initcore: clock::init_core() from the stock 200 MHz state + the native
 #     board init (GPIO/DMA clocks, rails, FSMC + ILI9488, backlight) + fatren
 #     (dry run unless fatren-live), then the normal fw-rs main.
