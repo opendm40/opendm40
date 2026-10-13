@@ -991,7 +991,9 @@ impl Dmm {
             self.beep_n = self.beep_n.saturating_add(1);
         }
         let mut rd = self.reading(if ol { Val::ol(4, "V") } else { Val::new(v, 4, "V") }, v);
-        rd.aux2 = Some(Val::new(v * g / 0.765 * 1000.0, 3, "\u{3a9}"));
+        // Aux "ohm" readout (stock m+0xdc = V*gain/0.765, shown only below 1.04).
+        let k = v * g / 0.765;
+        rd.aux2 = Some(if k < 1.04 { Val::new(k * 1000.0, 1, "\u{3a9}") } else { Val::ol(1, "\u{3a9}") });
         Some(rd)
     }
 
@@ -1188,7 +1190,8 @@ impl Dmm {
             self.deadline = now + 420;
             ema(CAP_WIN[r], 0.05, f, &mut self.f_cap);
             let fk = self.f_cap.max(1e-9);
-            let c = (cal(0x170 + 4 * r as u32, 1.0) * 0.72135 / (CAP_K[r] * fk) - cal(0x190, 0.0)).min(1.06 * lim);
+            // Negative results are clamped to 0 as in the stock (m+0x18 == 0).
+            let c = (cal(0x170 + 4 * r as u32, 1.0) * 0.72135 / (CAP_K[r] * fk) - cal(0x190, 0.0)).clamp(0.0, 1.06 * lim);
             let ol = c / lim > ov;
             if !self.manual {
                 if r >= 1 && self.f_cap > 2.0 {
@@ -1257,7 +1260,7 @@ impl Dmm {
             self.deadline = now + 255;
             return Some(self.cap_val(0.0, true));
         }
-        let c = (cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r] * dt / dvm).min(1.06 * lim);
+        let c = (cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r] * dt / dvm).clamp(0.0, 1.06 * lim);
         if self.ramp.n < 35 {
             self.ramp.buf[self.ramp.n] = c;
             self.ramp.n += 1;
