@@ -1,5 +1,17 @@
 # Plan: replace the fw-rs scope UI with a replica of the stock V2.6 scope page
 
+**Status 2026-10-14:** S1..S8 implemented (commits 9a6baae S1, 3cd43b9
+S2+S3, 419fd96 S4+S5, b1fb202 S6, d323565 S7, b9c6ddd S8; trigger fixes
+ff0e568; tracker c470be7). Code: `src/scope_ui.rs` (page, markers, graph,
+popups, meter strip), `src/scope_page.rs` (interaction, drag freeze, pinch,
+AUTO-set, popups), host checks `tools/ui-render/stock.rs` +
+`stock-diff.sh` (every reference scene st01..st32 0.00 %; st40..st43 differ
+only by the math engine we do not have). Deviations: the Math popup is
+inert; the MF popup has no 5th "fw-rs" tab (it does not fit; the fw-rs
+settings are in Settings: Scope drag / Scope swipe / Scope press); Save CSV
+shows a toast (no scope CSV yet); the toast restyle (dialog.rs) is not done.
+S9 waits for the owner's V2.6 captures (sec. 7).
+
 2026-10-13. Spec: `docs/stock-scope-ui.md` (+ `tools/stock-ui/notes/`).
 Tooling: `tools/stock-ui/` (renderer of the spec, diff tool, glyph dump).
 Owner verdict: the stock scope UI is "two heads better" than ours, and it is
