@@ -19,3 +19,13 @@ main.rs `touch_diag()`, after `d[12..19].copy_from_slice(&t.raw);`:
 Then remove the two `#[allow(dead_code)]` above `irq_pending` / `diag` in touch.rs.
 DIAG decode: `mode, ctrl, rise_scl, rise_sda, last_us, max_us, last_n, probe_mode, edge, level, timer, ok, bad, naks, faults = struct.unpack_from('<BBHHHHBB7I', d, 20)`.
 Docs: parity.md §6 I2C row -> "hardware I2C2 (400/100 kHz by rise time, bit-bang fallback) + EXTI5 pending-bit gating; no DMA"; TODO.md:35 drop the bit-bang clause.
+
+## bt_scpi (SCPI over Bluetooth)
+Apply `tools/bt-scpi-test/main-hooks.patch` (base d882651; re-apply by hand if main.rs moved):
+two Scpi sessions `scpis[USB|BT]`, `scpi_wait[2]`, `bt.pump()` at the loop top, BT lines taken
+when no BT query is pending, `Out::Dbg(_) if !port.trusted()` refused, replies via
+`&mut dyn bt::ScpiPort`. Keep every debug/destructive SCPI command under the `DBG:` root (or add
+the root to `bt_scpi::UNTRUSTED_DENY`). Optional: report `bt.tx_dma_ok`/`tx_dropped` in DBG:DIAG?.
+Device check first: a long reply's CONTENT over BT (TX DMA0 ch4 request 4 is inferred from the
+STM32F4 map) and the phone app (cmd 09) still working.
+Memory: .dmabuf 184.8/196.6 KB after this — watch new buffers.
