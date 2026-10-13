@@ -1164,9 +1164,13 @@ means it reached `.bss`).
 
 `DBG:BOOT?` extra fields (appended by `boot::put_info` calling
 `crate::native::put_extra(s)` as its last statement):
-`…,STAGED,<n>,CALBK,<status>,<written>,<conflict>,<freed>,STACK,<used>,<size>,CALMS,<ms>`
+`…,STAGED,<n>,CALBK,<status>,<written>,<conflict>,<freed>,STACK,<used>,<size>,CALMS,<ms>,SPICLK,<div>,<check>`
 (`STAGED`: fatren's count of dm40*.bin left because their header is not the
-marker; `CALMS`: calbackup's boot time in ms).
+marker; `CALMS`: calbackup's boot time in ms; `SPICLK`: SPI-flash divider in
+use, 4 or 16, and the boot self-check verdict of spiflash.rs: `OK` = block 0
+and the first FAT block read identically at /16 and twice at /4 with 0x55AA,
+else /16 for this boot because `DIFF1`/`DIFF2` (a /4 read differed),
+`NOSIG` (no 0x55AA at /16), `NOCHIP` or `FORCED` (`spiflash::FORCE_SLOW`)).
 
 ## Risks / open items
 

@@ -65,7 +65,7 @@ pub fn stack_use() -> (u32, u32) {
 }
 
 /// Extra DBG:BOOT? fields, appended by boot::put_info (one call at its end):
-/// `,STAGED,<n>,CALBK,<status>,<written>,<conflict>,<freed>,STACK,<used>,<size>,CALMS,<ms>`.
+/// `,STAGED,<n>,CALBK,<status>,<written>,<conflict>,<freed>,STACK,<used>,<size>,CALMS,<ms>,SPICLK,<div>,<check>`.
 /// STAGED: fatren's dm40*.bin left because their header is not the marker.
 /// status: NOTRUN NOMEDIUM BADBPB UNCHANGED WRITTEN NOSPACE ERROR, with a
 /// `_NOFW` suffix when the firmware file did not fit and the backup was
@@ -75,7 +75,9 @@ pub fn stack_use() -> (u32, u32) {
 /// BACKUP.TXT, bit 8 = _DM40PRV.BIN (running firmware's update file); written
 /// also counts a one-time re-stamp of an equal file; freed: old clusters
 /// freed; used/size: stack high-water mark / stack bytes; CALMS: duration of
-/// calbackup::boot in ms (200 MHz cycles; 12.5x low at 16 MHz).
+/// calbackup::boot in ms (200 MHz cycles; 12.5x low at 16 MHz); SPICLK:
+/// SPI-flash divider in use (4 / 16) and the boot self-check's verdict
+/// (spiflash::ClockCheck: OK FORCED NOCHIP NOSIG DIFF1 DIFF2 NOTRUN).
 pub fn put_extra(s: &mut crate::scpi::Scpi) {
     use crate::calbackup::Status as C;
     let r = crate::calbackup::result();
@@ -121,6 +123,11 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
             s.put_bytes(b",");
         }
     }
+    // SPI-flash clock: divider in use and the boot self-check's verdict
+    // (spiflash::clock_check: OK = /4 verified, else /16 and why).
+    let (div, why) = crate::spiflash::clock();
+    s.put_bytes(if div == 4 { b",SPICLK,4," } else { b",SPICLK,16," });
+    s.put_bytes(why.name());
 }
 
 /// Board bring-up + fatren + calibration backup, then fw-rs main (normal mode).

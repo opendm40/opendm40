@@ -259,7 +259,15 @@ BOOT_POS = ['rstsck', 'rstsck_after', 'mode', 'reason', 'clock', 'last', 'hold_m
             'crash_word', 'healthy', 'fmc_last']
 BOOT_LABELS = {'PD6': ['moder', 'pupd', 'idr'], 'STAGED': ['n'],
                'CALBK': ['status', 'written', 'conflict', 'freed'], 'STACK': ['used', 'size'],
-               'CALMS': ['ms']}
+               'CALMS': ['ms'], 'SPICLK': ['div', 'check']}
+# spiflash.rs ClockCheck (DBG:BOOT? SPICLK,<div>,<check>).
+SPICLK_CHECK = {'OK': '/4 (12.5 MHz) read block 0 + FAT block equal to /16 twice',
+                'FORCED': 'spiflash::FORCE_SLOW: stock /16',
+                'NOCHIP': 'no known chip (JEDEC ID): /16',
+                'NOSIG': 'no 0x55AA in block 0 at /16 (blank/foreign disk): /16, not checked',
+                'DIFF1': '1st /4 read DIFFERED from /16: fell back to /16',
+                'DIFF2': '2nd /4 read DIFFERED from /16: fell back to /16',
+                'NOTRUN': 'no SpiFlash created yet'}
 RST_FLAGS = [(31, 'LP'), (30, 'WWDGT'), (29, 'FWDGT'), (28, 'SW'), (27, 'POR'), (26, 'EP'), (25, 'BOR')]
 # calbackup written / conflict bits (native.rs put_extra).
 CALBK_FILES = ['CALIB', 'BOOTDATA', 'UID', 'OPTBYTES', 'OTP', 'ROMBOOT', 'LOADER', 'BACKUP.TXT',
@@ -324,6 +332,10 @@ def _note(name, v):
         return '+'.join(n for i, n in enumerate(CALBK_FILES) if x >> i & 1) or '-'
     if name == 'CALBK.status' and v.endswith('_NOFW'):
         return 'no space for _DM40PRV.BIN: backed up without the firmware file'
+    if name == 'SPICLK.div':
+        return {'4': '12.5 MHz', '16': '3.125 MHz (stock)'}.get(v, '?')
+    if name == 'SPICLK.check':
+        return SPICLK_CHECK.get(v, '?')
     if name == 'CALMS.ms':
         return 'boot backup time (DWT at 200 MHz; 12.5x low on IRC16M)'
     if name == 'PD6.moder':
@@ -353,6 +365,7 @@ BOOT_GROUPS = [
                 'others', 'rcvr_deleted', 'STAGED.n']),
     ('calbackup', ['CALBK.status', 'CALBK.written', 'CALBK.conflict', 'CALBK.freed', 'CALMS.ms']),
     ('stack', ['STACK.used', 'STACK.size']),
+    ('SPI flash clock', ['SPICLK.div', 'SPICLK.check']),
     ('power key PD6', ['PD6.moder', 'PD6.pupd', 'PD6.idr']),
     ('FSMC/LCD seen', ['bcr1', 'btr1', 'bwtr1', 'lcd_id']),
 ]
