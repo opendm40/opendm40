@@ -40,6 +40,8 @@ pub enum View {
     DmmScope,
     Menu,
     Settings,
+    /// MF range page of the multimeter.
+    Range,
 }
 
 impl View {
@@ -257,8 +259,97 @@ impl DmmView {
     }
 }
 
+/// MF range page (stock "Voltage / Current / Resistor Settings"): title bar,
+/// range buttons, DC / AC buttons. Items: (label, set_range argument).
+pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
+    match b {
+        Button::Volt => &[
+            ("400mV", Some(0)), ("4V", Some(1)), ("40V", Some(2)), ("400V", Some(3)),
+            ("1000V", Some(4)), ("AUTO+", Some(255)), ("AUTO", None),
+        ],
+        Button::Amp => &[
+            ("400uA", Some(0)), ("4000uA", Some(1)), ("40mA", Some(2)), ("400mA", Some(3)),
+            ("4A", Some(4)), ("10A", Some(5)), ("AUTO+", Some(255)), ("AUTO", None),
+        ],
+        Button::Ohm => &[
+            ("400\u{3a9}", Some(1)), ("4K\u{3a9}", Some(2)), ("40K\u{3a9}", Some(3)), ("400K\u{3a9}", Some(4)),
+            ("4M\u{3a9}", Some(5)), ("40M\u{3a9}", Some(6)), ("AUTO", None),
+        ],
+        _ => &[("AUTO", None)],
+    }
+}
+
+fn range_rect(i: usize) -> sf::Rect {
+    rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
+}
+
+pub fn range_page(b: Button, sel: Option<usize>, ac: bool) {
+    let title = match b {
+        Button::Volt => "Voltage Settings",
+        Button::Amp => "Current Settings",
+        Button::Ohm => "Resistor Settings",
+        _ => "Capacitance Settings",
+    };
+    lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
+    lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
+    sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), title, STATUS_FG, 0x2966, 8, 0);
+    for (i, (name, _)) in range_items(b).iter().enumerate() {
+        let c = if Some(i) == sel { SEL } else { 0x2966 };
+        sf::rbox(range_rect(i), 6, c, BG);
+        sf::glyphs(sf::TEXT22, range_rect(i), name, STATUS_FG, c, 8, 0);
+    }
+    if matches!(b, Button::Volt | Button::Amp) {
+        for (i, name) in ["DC", "AC"].iter().enumerate() {
+            let c = if (i == 1) == ac { SEL } else { 0x2966 };
+            let r = rect(8 + i as i16 * 154, 182, 150, 38);
+            sf::rbox(r, 6, c, BG);
+            sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
+        }
+    }
+    let r = rect(319, 240, 150, 38);
+    sf::rbox(r, 6, 0x2966, BG);
+    sf::glyphs(sf::TEXT22, r, "OK", STATUS_FG, 0x2966, 8, 0);
+}
+
+/// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 2 OK).
+pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
+    let (x, y) = (x as i16, y as i16);
+    for i in 0..range_items(b).len() {
+        let r = range_rect(i);
+        if x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
+            return Some(Ok(i));
+        }
+    }
+    if (182..220).contains(&y) && x < 312 {
+        return Some(Err(if x < 158 { 0 } else { 1 }));
+    }
+    if (240..278).contains(&y) && x >= 319 {
+        return Some(Err(2));
+    }
+    None
+}
+
+/// History boxes (stock (5+95i,153,88,19)): values with units, newest orange.
+pub fn history(items: &[(f32, u8, &'static str); 5], n: usize, newest: usize) {
+    for i in 0..5 {
+        let r = rect(5 + 95 * i as i16, 153, 88, 19);
+        sf::rbox(r, 3, BAR, BG);
+        if i < n {
+            let mut b = [0u8; 32];
+            let (v, d, u) = items[i];
+            let t = num_unit(&mut b, v, d, u);
+            sf::glyphs(sf::HIST, r, t, if i == newest { 0xFC40 } else { STATUS_FG }, BAR, 8, 0);
+        }
+    }
+}
+
+/// High-voltage lightning (stock (0,80,40,64), >= 100 V in V modes).
+pub fn hv_warning(on: bool) {
+    sf::label(sf::LIGHTNING, rect(0, 80, 40, 64), if on { " " } else { "" }, 0xC9A0, BG, 8, 0);
+}
+
 /// Right part of the status bar: uptime, lock, BT link, battery.
-pub fn status_right(uptime_s: u32, bt: bool, bars: u8, charging: bool) {
+pub fn status_right(uptime_s: u32, bt: bool, bars: u8, charging: bool, locked: bool) {
     let mut t = [0u8; 8];
     let (h, m, sec) = (uptime_s / 3600 % 100, uptime_s / 60 % 60, uptime_s % 60);
     for (i, v) in [h, m, sec].iter().enumerate() {
@@ -269,7 +360,7 @@ pub fn status_right(uptime_s: u32, bt: bool, bars: u8, charging: bool) {
         }
     }
     sf::label(sf::F21, rect(205, 5, 112, 24), core::str::from_utf8(&t).unwrap_or(""), STATUS_FG, BAR, 1, -1);
-    sf::label(sf::LOCK, rect(335, 7, 24, 20), "\u{21}", STATUS_FG, BAR, 8, 0);
+    sf::label(sf::LOCK, rect(335, 7, 24, 20), if locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
     sf::label(sf::SAVE_BT, rect(390, 0, 15, 32), if bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
     let g = char::from_u32(0x22 + bars.min(5) as u32).unwrap_or('"');
     let mut b = [0u8; 4];
@@ -810,5 +901,6 @@ pub fn view_name(v: View) -> &'static str {
         View::DmmScope => "DMM + Scope",
         View::Menu => "Main menu",
         View::Settings => "Settings",
+        View::Range => "Range",
     }
 }
