@@ -464,7 +464,18 @@ pub struct Dmm {
     /// AC+DC: drop the next conversion (the first one after a phase / range
     /// switch, see `write_config`).
     skip: bool,
+    /// AC+DC AC phase: the last 3 raw AC values (ring) and how many were
+    /// taken since the config write (see `ac_settled`).
+    ac_win: [f32; 3],
+    ac_k: u8,
 }
+
+/// AC+DC AC phase: the phase value is the mean of the last 3 raw AC results
+/// once their spread is within max(AC_TOL_REL * mean, AC_TOL_LIM * limit),
+/// or whatever the last 3 give AC_MAX_MS after the settle deadline.
+const AC_TOL_REL: f32 = 0.004;
+const AC_TOL_LIM: f32 = 0.0003;
+const AC_MAX_MS: u64 = 3000;
 
 impl Dmm {
     pub fn new() -> Self {
@@ -531,6 +542,8 @@ impl Dmm {
             avg_skip: false,
             avg_n: 0,
             skip: false,
+            ac_win: [0.0; 3],
+            ac_k: 0,
         }
     }
 
@@ -647,6 +660,7 @@ impl Dmm {
         // stock starts at 8192 and switches to 32768 after the first reading),
         // so no OSR switch and its partial conversion lands inside a phase.
         self.skip = self.acdc;
+        self.ac_k = 0;
         if self.acdc && matches!(m, 1 | 3 | 7..=9) {
             hy::write(0x22, &[0x17]);
             self.r22 = 0x17;
@@ -656,6 +670,33 @@ impl Dmm {
     /// AC+DC: consume the drop flag (true = discard this conversion).
     fn drop_first(&mut self) -> bool {
         core::mem::take(&mut self.skip)
+    }
+
+    /// AC+DC AC phase: feed one raw AC result; Some(phase value) once the
+    /// RMS has settled after the phase switch.
+    ///
+    /// Every phase switch restarts AD2 / RMS / LPF (the DC rows write R26 =
+    /// R29 = 0, as the stock). Until the DC removal in front of the RMS has
+    /// settled, a residual offset d gives a 50 % square (x - DC)^2 = A^2 +/-
+    /// 2*A*d, and the window's high / low imbalance makes the result scatter
+    /// with either sign (device, 40 Hz 0..9.63 V: 4.2..5.6 V for 4.81 V,
+    /// phase to phase; plain AC, never restarted, is stable to 0.1 %). The
+    /// stock takes the 4th result after 800 ms, which is not settled yet.
+    fn ac_settled(&mut self, ac: f32, lim: f32, now: u64) -> Option<f32> {
+        self.ac_win[self.ac_k as usize % 3] = ac;
+        self.ac_k = self.ac_k.saturating_add(1);
+        if self.ac_k < 3 {
+            return None;
+        }
+        let (mut lo, mut hi, mut s) = (f32::MAX, f32::MIN, 0.0);
+        for &v in &self.ac_win {
+            lo = lo.min(v);
+            hi = hi.max(v);
+            s += v;
+        }
+        let mean = s / 3.0;
+        let tol = (AC_TOL_REL * mean).max(AC_TOL_LIM * lim);
+        (hi - lo <= tol || now >= self.deadline + AC_MAX_MS).then_some(mean)
     }
 
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
@@ -1339,8 +1380,8 @@ impl Dmm {
 
     /// End of a DC reading (modes 1, 3, 7..9): plain DC, or the DC phase of
     /// AC+DC (FUN_08013734 cases 1, 3, 7..9): shown = hypot(AC filtered, DC),
-    /// aux1/aux2 = AC/DC parts; after S+10 readings back to the AC mode
-    /// (DCV 800 ms S+10 = 3, DCmV 800 ms 2, DCA 900 ms 2). A range / unit
+    /// aux1/aux2 = AC/DC parts; after S+10 + 1 readings back to the AC mode
+    /// (DCV / DCmV 800 ms, DCA 900 ms settle). A range / unit
     /// change in AC+DC gives no value this time (stock: OL, m+0xd8 = 0).
     /// `ext`: the value is averaged and shows the extra digit (not in AC+DC).
     #[allow(clippy::too_many_arguments)]
@@ -1372,14 +1413,16 @@ impl Dmm {
         rd.aux1 = Some(part(self.f_ac, lim, dec, unit));
         rd.aux2 = Some(part(x, lim, dec, unit));
         if self.phase_n == 0 {
-            let (to, settle, n) = match self.mode {
-                1 => (0, 800, 3),
-                3 => (2, 800, 2),
-                dm => (dm - 3, 900, 2),
+            // The AC phase ends when its RMS has settled (`ac_settled`), not
+            // after the stock S+10 = 3 / 2 results.
+            let (to, settle) = match self.mode {
+                1 => (0, 800),
+                3 => (2, 800),
+                dm => (dm - 3, 900),
             };
             let r = self.range;
             self.switch_phase(clk, to, r, settle);
-            self.phase_n = n;
+            self.phase_n = 0;
         } else {
             self.phase_n -= 1;
         }
@@ -1437,6 +1480,23 @@ impl Dmm {
         Some(rd)
     }
 
+    /// AC+DC reading during the AC phase: hypot(AC filtered, DC part), parts
+    /// in aux1 / aux2, reported with the DC mode; none before both parts
+    /// were measured.
+    fn acdc_ac_reading(&self, lim: f32, dec: u8, unit: &'static str, si_k: f32) -> Option<Reading> {
+        if self.acdc_seen != 3 {
+            return None;
+        }
+        let m = self.mode;
+        let t = hypot(self.f_ac, self.dc_val);
+        let ol = t / lim > self.over();
+        let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(t, dec, unit) }, t * si_k);
+        rd.mode = if m <= 2 { m + 1 } else { m + 3 };
+        rd.aux1 = Some(part(self.f_ac, lim, dec, unit));
+        rd.aux2 = Some(part(self.dc_val, lim, dec, unit));
+        Some(rd)
+    }
+
     fn poll_ac(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
         let m = self.mode;
         let need = if m <= 2 { hy::INTF_RMS | hy::INTF_LPF } else { hy::INTF_RMS };
@@ -1471,17 +1531,40 @@ impl Dmm {
         if ac < 0.0 {
             ac = 0.0;
         }
-        self.ac_raw = ac;
         let (thr, a_rms, a_lpf) = match m {
             0 => (ACV_WIN[r], 0.25, 0.25),
             2 => (ACMV_WIN[r], 0.35, 0.35),
             _ => (ACA_WIN[(m - 4) as usize * 2 + r], 0.15, 0.35),
         };
-        ema(thr, a_rms, ac, &mut self.f_ac);
         ema(thr, a_lpf, dcp, &mut self.f_lpf);
+        let lim = match m {
+            0 => (f * DEC4[r]).min(1000.0),
+            2 => f * [10.0, 100.0][r],
+            _ => (f * DEC4[(m - 4) as usize + r]).min(if m == 4 { 10.0 } else { f32::MAX }),
+        };
+        let (unit, dec, si_k) = match m {
+            0 => ("V", 4 - r as u8, 1.0),
+            2 => ("mV", 3 - r as u8, 1e-3),
+            4 => ("A", 4 - r as u8, 1.0),
+            5 => ("mA", 3 - r as u8, 1e-3),
+            _ => ("\u{b5}A", 2 - r as u8, 1e-6),
+        };
+        let acdc = self.acdc;
+        if acdc {
+            // AC phase of AC+DC: only the settled phase value reaches the
+            // filter, the autorange and the phase switch. Until then the
+            // reading repeats the held AC part (the chart and a SCPI READ?
+            // keep getting values while the RMS settles).
+            match self.ac_settled(ac, lim, now) {
+                Some(v) => ac = v,
+                None => return self.acdc_ac_reading(lim, dec, unit, si_k),
+            }
+        }
+        self.ac_raw = ac;
+        ema(thr, a_rms, ac, &mut self.f_ac);
 
-        // AC+DC: hypot(AC raw, last DC part) for every quantity.
-        let mag = if self.acdc {
+        // AC+DC: hypot(AC, last DC part) for every quantity.
+        let mag = if acdc {
             hypot(ac, self.dc_val)
         } else if m <= 2 {
             ac
@@ -1489,12 +1572,6 @@ impl Dmm {
             sqrt(ac * ac + 0.25 * dcp * dcp)
         };
         let before = (m, self.range);
-        let acdc = self.acdc;
-        let lim = match m {
-            0 => (f * DEC4[r]).min(1000.0),
-            2 => f * [10.0, 100.0][r],
-            _ => (f * DEC4[(m - 4) as usize + r]).min(if m == 4 { 10.0 } else { f32::MAX }),
-        };
         if !self.manual {
             let up = mag > ov * lim;
             let down = mag < 0.1 * lim / ov;
@@ -1506,7 +1583,7 @@ impl Dmm {
                         let to = if up { r as i8 + 1 } else { r as i8 - 1 };
                         if acdc {
                             self.switch_phase(clk, 1, to, 600);
-                            self.phase_n = 2;
+                            self.phase_n = 1;
                         } else {
                             self.set(clk, 0, to, 450);
                         }
@@ -1518,7 +1595,7 @@ impl Dmm {
                     if up && r == 0 {
                         if acdc {
                             self.switch_phase(clk, 3, 1, 600);
-                            self.phase_n = 2;
+                            self.phase_n = 1;
                         } else {
                             self.set(clk, 2, 1, 450);
                         }
@@ -1539,43 +1616,28 @@ impl Dmm {
                 }
             }
         }
-        let (unit, dec, si_k) = match m {
-            0 => ("V", 4 - r as u8, 1.0),
-            2 => ("mV", 3 - r as u8, 1e-3),
-            4 => ("A", 4 - r as u8, 1.0),
-            5 => ("mA", 3 - r as u8, 1e-3),
-            _ => ("\u{b5}A", 2 - r as u8, 1e-6),
-        };
         if acdc {
             // AC phase of AC+DC (FUN_08013734 cases 0, 2, 4..6): shown =
-            // hypot(AC filtered, DC part); after S+10 readings to the DC mode
-            // (ACV 600 ms + R32 = 0x38, ACmV 500 ms, ACA 700 ms; S+10 = 2).
+            // hypot(AC filtered, DC part). The settled phase value ends the
+            // phase: to the DC mode (ACV 600 ms + R32 = 0x38, ACmV 500 ms,
+            // ACA 700 ms) for S+10 + 1 = 2 readings (the stock takes 3; the
+            // DC part is not averaged in AC+DC, the last one is shown).
             if (self.mode, self.range) != before {
                 return None;
             }
-            let dm = if m <= 2 { m + 1 } else { m + 3 };
             self.acdc_seen |= 1;
-            let t = hypot(self.f_ac, self.dc_val);
-            let ol = t / lim > ov;
-            let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(t, dec, unit) }, t * si_k);
-            rd.mode = dm;
-            rd.aux1 = Some(part(self.f_ac, lim, dec, unit));
-            rd.aux2 = Some(part(self.dc_val, lim, dec, unit));
-            if self.phase_n == 0 {
-                let r = self.range;
-                self.switch_phase(clk, dm, r, match m {
-                    0 => 600,
-                    2 => 500,
-                    _ => 700,
-                });
-                if m == 0 {
-                    hy::write(0x32, &[0x38]);
-                }
-                self.phase_n = 2;
-            } else {
-                self.phase_n -= 1;
+            let rd = self.acdc_ac_reading(lim, dec, unit, si_k);
+            let r = self.range;
+            self.switch_phase(clk, if m <= 2 { m + 1 } else { m + 3 }, r, match m {
+                0 => 600,
+                2 => 500,
+                _ => 700,
+            });
+            if m == 0 {
+                hy::write(0x32, &[0x38]);
             }
-            return (self.acdc_seen == 3).then_some(rd);
+            self.phase_n = 1;
+            return rd;
         }
         let ol = self.f_ac / lim > ov;
         let v = self.f_ac;
