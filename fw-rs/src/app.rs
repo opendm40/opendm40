@@ -130,6 +130,8 @@ pub struct App {
     scope_tab: usize,
     roll: bool,
     /// AUTO-set: (phase 1/2, candidate index, round, settings to restore).
+    /// Rounds 0 / 1 search at 5 us/div / 20 ms/div in the user's coupling;
+    /// 2 / 3 repeat them in DC when an AC search found nothing (UF-04).
     autoset: Option<(u8, usize, u8, scope::Settings)>,
     pub locked: bool,
     /// PD6 click timer (stock DMM key widget timer +0x48, 500 ms one-shot):
@@ -1325,12 +1327,16 @@ impl App {
         }
     }
 
-    /// AUTO-set (stock mode 4), phase 1: DC, 5 us/div, V/div candidates
-    /// 10 V, 1 V, 100 mV, 10 mV until a signal with > 19 codes swing is seen.
+    /// AUTO-set (stock mode 4), phase 1: 5 us/div, V/div candidates 10 V,
+    /// 1 V, 100 mV, 10 mV until a signal with > 19 codes swing is seen.
+    /// UF-04: the stock forces DC coupling here (owners: "AUTO jumps back to
+    /// DC"); fw-rs searches in the user's coupling and the probe and slope
+    /// stay as set. Only when an AC search finds nothing (a flat AC trace: a
+    /// pure DC level) it retries in DC and, if that finds a signal, keeps DC
+    /// with the toast "AUTO: DC (no AC signal)".
     fn autoset_start(&mut self, now: u64) {
         let saved = self.scope.s;
         let mut st = saved;
-        st.ac = false;
         st.tb = 8;
         st.range = 9;
         st.pos = 0;
@@ -1383,10 +1389,16 @@ impl App {
             } else if idx + 1 < CAND.len() {
                 st.range = CAND[idx + 1];
                 self.autoset = Some((1, idx + 1, round, saved));
-            } else if round == 0 {
+            } else if round == 0 || round == 2 {
                 st.tb = 19;
                 st.range = CAND[0];
-                self.autoset = Some((1, 0, 1, saved));
+                self.autoset = Some((1, 0, round + 1, saved));
+            } else if round == 1 && st.ac {
+                // Nothing in AC: the same search in DC (UF-04).
+                st.ac = false;
+                st.tb = 8;
+                st.range = CAND[0];
+                self.autoset = Some((1, 0, 2, saved));
             } else {
                 self.autoset = None;
                 self.scope_set(saved, now);
@@ -1416,6 +1428,9 @@ impl App {
         self.autoset = None;
         self.scope_set(st, now);
         self.redraw = true;
+        if saved.ac && !st.ac {
+            self.toast(now, crate::dialog::AUTO_DC, true);
+        }
     }
 
     /// Index of the current range in the MF page list.
