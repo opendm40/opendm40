@@ -1024,7 +1024,7 @@ pub struct ChartCache {
     rows: [i64; 4],
     time: Option<(u32, bool)>,
     rate: u8,
-    rchip: Option<RateChip>,
+    rchip: Option<(u8, u32, bool)>,
 }
 
 /// DMM reading-rate chip under the chart's timebase chip (owner request):
@@ -1037,6 +1037,16 @@ pub struct RateChip {
     pub rate: u8,
     pub period_ms: u32,
     pub applies: bool,
+}
+
+impl RateChip {
+    /// What the chip shows (rate, rounded readings/s, applies): the cache
+    /// key, so the EMA period's millisecond jitter does not repaint it.
+    fn shown(&self) -> (u8, u32, bool) {
+        let p = self.period_ms;
+        let r10 = if p == 0 { 0 } else { (10_000 + p / 2) / p };
+        (self.rate, if r10 >= 100 { (r10 + 5) / 10 * 10 } else { r10 }, self.applies)
+    }
 }
 
 /// Rate chip rows (between the middle and the bottom axis labels, x 4..76
@@ -1175,8 +1185,8 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: &Side, un
         sf::rbox(r, 4, BTN, BG);
         sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 1);
     }
-    if c.rchip != Some(rc) {
-        c.rchip = Some(rc);
+    if c.rchip != Some(rc.shown()) {
+        c.rchip = Some(rc.shown());
         // "MED 9.4/s" (<= 62 px of F14: "SLOW 2.3/s"); grey "n/a 2.5/s"
         // where the rate setting changes nothing (AC, Hz, cap, temperature..).
         let mut rb = [0u8; 16];

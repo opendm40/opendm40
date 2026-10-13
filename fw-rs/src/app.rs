@@ -437,7 +437,8 @@ impl App {
             View::Scope | View::Gen | View::ScopeMenu | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
-        d |= self.host_dmm || (self.bt_on && self.power.bt_connected());
+        // A CSV recording (csvlog.rs) keeps the DMM measuring in every view.
+        d |= self.host_dmm || (self.bt_on && self.power.bt_connected()) || crate::csvlog::active();
         s |= self.host_scope || self.gen.s.on;
         if self.rails_both {
             (d, s) = (true, true);
