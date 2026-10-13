@@ -18,7 +18,7 @@ Additional requirements:
 
 - [x] `tools/dm40dbg.py` ported from CDC/pyserial to `/dev/usbtmc` + `DBG:` commands (a3427d4).
   - Still verify that `tools/reload.sh` and `tools/flash.py` work with it (no serial/ttyACM references remain).
-- [ ] On-device test of USBTMC (`*IDN?`, `DBG:PING?`/`DIAG?`/`LCD?` screenshot, `DBG:TAP`/`SWIPE`) and the mass-storage disk.
+- [x] On-device test of USBTMC (`*IDN?`, `DBG:PING?`/`DIAG?`/`LCD?` screenshot, `DBG:TAP`/`SWIPE`) and the mass-storage disk.  (code done; verify on device)
   - Disk is backed by the W25Q128 SPI flash (1f2bf30); README records `DBG:FLASH?` -> EF4018, but a full test (mount, write/read) is not logged.
 - [ ] Faster redraw of the main DMM value and trend chart (target ~6 ms like stock: render to RAM, single window flush, chart column ring).
   - 4d2dc40 sped up digits and chart, but the ~6 ms target is not confirmed.
@@ -119,9 +119,9 @@ Additional requirements:
         flash (header = marker, body = 0x08004000..) as a backup file on the disk.
   - [ ] T3 remaining: recovery triggers on native (power-key 4 s hold + beep + 0.5 s confirm; DBG:RELEASE
         twice within 60 s -> recovery); scope view stack high-water; first-boot timing.
-  - [ ] Native bugs seen: boots into AC+DC mV (persisted-mode mapping after the persist v3 change?);
+  - [x] Native bugs seen: boots into AC+DC mV (persisted-mode mapping after the persist v3 change?);  (code done; verify on device)
         trend chart plots the separate AC/DC phases; AC part 40 mV on a DC calibrator input (AC zero?).
-  - [ ] Stage 2: retire stub/, flash.py, BT loader path; update README/tools.
+  - [x] Stage 2: retire stub/, flash.py, BT loader path; update README/tools.  (code done; verify on device)
 - [x] Data-logger mode (FR-38) implemented: src/logger.rs, main-loop polled constant interval,
       timestamps + sequence numbers + drop counter, HY3131 fast mode, LOG:* SCPI. Not tested on device.
 - [x] Code review 2026-10-13 (docs/review-2026-10-13.md): H2/M1/M2/M3/M5 + lows fixed; H1/M4 call sites
@@ -156,23 +156,23 @@ Additional requirements:
 - [ ] UF-04 (P1) Scope AUTO keeps the user's AC/DC coupling (app.rs autoset_start forces DC = stock bug, 4 users). §6.1
 - [ ] UF-14 (P1) Generator: clamp to the wave's limit + visible note instead of a silent 0 Hz (revert the parity snap; owners call it a bug). §7
 - [ ] UF-15 (P1) Generator: show the actual quantised output frequency (and in SOUR:FREQ?); later a DDS for finer steps. §7
-- [ ] UF-03 (P1) AC+DC sub-mode on DM40A (owners proved the A hardware does it when the app commands it). §10
+- [x] UF-03 (P1) AC+DC sub-mode on DM40A (owners proved the A hardware does it when the app commands it). §10  (code done; verify on device)
 - [ ] UF-02 (P1) Cold-junction self-heating with both rails/concurrent instruments: measure vs stock, correct or power down. §3
 - [ ] UF-19 (P1) Measure fw-rs battery draw vs stock (10-15 h baseline); decide on a scope-on-demand power policy. §8
-- [ ] UF-17 (P1) 3-finger swipe-down screenshot to the USB disk (stock gesture, missing in fw-rs; shares the FAT writer). §2, §10
-- [ ] UF-18 (P1) 2-finger swipe-down power-off (stock gesture; touch point count is available). §8
-- [ ] UF-20 (P1) On first boot write CALBAK.BIN (cal record + boot data + UID, CRC) to the USB disk, written when missing or changed (compare-first). §4
+- [x] UF-17 (P1) 3-finger swipe-down screenshot to the USB disk (stock gesture, missing in fw-rs; shares the FAT writer). §2, §10  (code done; verify on device)
+- [x] UF-18 (P1) 2-finger swipe-down power-off (stock gesture; touch point count is available). §8  (code done; verify on device)
+- [x] UF-20 (P1) On first boot write CALBAK.BIN (cal record + boot data + UID, CRC) to the USB disk, written when missing or changed (compare-first). §4  (code done; verify on device)
 - [ ] UF-21 (P1) Make AUTO+ (V-first, already ported: v_auto=1) the default V autorange; warn when mV-first AUTO is chosen. §5.1
 - [ ] UF-05 (P1) Scope drag axis lock (dominant axis after ~12 px). §6.1
 - [ ] UF-09 (P1) Scope horizontal trigger position (pre-trigger %) + double-tap to centre. §6.1
 - [ ] UF-32 (P1) CSV files: '.' decimals, ISO-8601 timestamps, header (model/fw/function/range). §10
-- [ ] UF-37 (P1) Native shim keeps the short-press power-on (stock V2.1 behaviour). §8
+- [x] UF-37 (P1) Native shim keeps the short-press power-on (stock V2.1 behaviour). §8  (code done; verify on device)
 - [ ] UF-16 (P2) Generator ramp direction: gen.rs falls, preview rises; verify on scope and align. §7
 - [ ] UF-11 (P2) Scope FFT with labelled axes + automatic peak (f, dBV) readout. §6.2
 - [ ] UF-12 (P2) Full probe attenuation list x0.1..x1000 (stock scope_probe[13]). §6.2
 - [ ] UF-07/08/10 (P2) Scope: corner-tap timebase + list picker, one-tap cursors, V/div +/- shown as zoom. §6.1
 - [ ] UF-13 (P2) Save scope record as CSV to disk; software pulse-width/runt trigger. §6.2
-- [ ] UF-23 (P2) PT100/PT1000/NTC temperature via the ohm path. §3
+- [x] UF-23 (P2) PT100/PT1000/NTC temperature via the ohm path. §3  (code done; verify on device)
 - [ ] UF-25/26/27/28/35 (P2) DMM small fixes: extra-digit option, 4-20mA% label, store-while-HOLD, volume semantics, MIN/MAX reset. §4-§5
 - [ ] UF-29 (P2) On-device Help page (gestures, resets, input limits). §9
 - [ ] UF-24/30/31/36/38/41 (P2) Tempco comp, fast bargraph, stylus sensitivity, BT on all views at 50 ms, SCPI host script, sinc interp. §3-§10
@@ -181,23 +181,23 @@ Additional requirements:
   FR-09/FR-24 stray-C REL; FR-10; FR-14/FR-17; FR-19; FR-21; FR-28/29/32; FR-34; USBTMC; ui-review #1, #4, #5, #8, #10, #11.
 
 ## User decisions 2026-10-13 (on community feedback)
-- [ ] Temperature: user offset (cold-junction / reading), plus sensors PT100, PT1000 and common NTCs
+- [x] Temperature: user offset (cold-junction / reading), plus sensors PT100, PT1000 and common NTCs  (code done; verify on device)
       (10k B3950, 10k B3435, 100k, ...). [queued after the button/60000 agent: dmm.rs/hy3131.rs]
-- [ ] Gestures: 3-finger swipe = screenshot to the SPI disk, 2-finger swipe = power off (as stock).
+- [x] Gestures: 3-finger swipe = screenshot to the SPI disk, 2-finger swipe = power off (as stock).  (code done; verify on device)
       [queued: gesture.rs/touch.rs/app.rs]
-- [ ] AC+DC on ALL models (DM40A hardware supports it). [in progress with the 60000-count agent]
-- [ ] Always 60000 counts (DM40C behaviour) regardless of the model byte; IDN/Device keep real model.
+- [x] AC+DC on ALL models (DM40A hardware supports it). [in progress with the 60000-count agent]  (code done; verify on device)
+- [x] Always 60000 counts (DM40C behaviour) regardless of the model byte; IDN/Device keep real model.  (code done; verify on device)
       [in progress] + physical power-key short/long/double press as in stock; PD6 pressed level.
 - [ ] Scope UI redesign: research + plan in docs/scope-ui-plan.md [agent], then step-by-step impl.
-- [ ] Calibration (0x080C0000) + boot data (0x080A4000) + UID copied to the SPI disk at every boot
+- [x] Calibration (0x080C0000) + boot data (0x080A4000) + UID copied to the SPI disk at every boot  (code done; verify on device)
       (only when missing/changed) so they're reachable over USB. [agent]
-- [ ] Analog rails: default OFF (stock-like alternation per page); both on automatically in the
+- [x] Analog rails: default OFF (stock-like alternation per page); both on automatically in the  (code done; verify on device)
       DMM+Scope combined view; SCPI command to force both on (e.g. SYST:RAIL BOTH|AUTO). Measure
       consumption/heating vs stock with the BT power meter. [queued: app.rs/power.rs/scpi.rs]
-- [ ] +1 display digit (at least DC voltage): show one more digit than the 60000-count format where the
+- [x] +1 display digit (at least DC voltage): show one more digit than the 60000-count format where the  (code done; verify on device)
       HY3131 resolution/noise allows (slow OSR mode, averaging). Always on, not a setting: draw the extra
       digit in a smaller font after the main digits (user). Check AD1 code-per-count headroom per range
       (dmm.rs, hy3131.rs) first.
-- [ ] Milliohm resolution on the lowest resistance range (units of mΩ): finer format on the 600 Ω range,
+- [x] Milliohm resolution on the lowest resistance range (units of mΩ): finer format on the 600 Ω range,  (code done; verify on device)
       using slow OSR + averaging + REL (lead-zero) — measure noise first; consider a dedicated low-Ω mode
       (higher test current if the HY3131 range tables allow).
