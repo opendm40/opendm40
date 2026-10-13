@@ -29,8 +29,10 @@ pub const BAR_H: u16 = 34;
 pub const BAR_H_C: u16 = 22;
 const VALUE_X1: u16 = 396; // right edge of the last digit
 /// Extra-digit cell of the main readout (x, width); see DmmView::reading.
-const XT_X: u16 = 375;
-const XT_W: u16 = 25;
+/// Ends at 401, where the limit badge (401..436, y 70..112) and the unit box
+/// start; 28 px = the widest half-size F78 digit ("4", 56 / 2).
+const XT_X: u16 = 373;
+const XT_W: u16 = 28;
 const VALUE_BASE: u16 = 146;
 const UNIT_X: u16 = 404;
 const UNIT_BASE: u16 = 144;
@@ -133,13 +135,14 @@ const CELLS: [[u8; 7]; 5] = [
     [40, 52, 52, 52, 60, 60, 40],
 ];
 /// Main-readout cells with the extra digit (formats 0..3 only, never OL):
-/// sign 32, point 18, digits 57 (F78 digits are <= 56 px wide) = 335 px,
-/// leaving 375..400 for the small digit.
+/// sign 29 and point 17 (exactly the F78 '-' / '.' widths), digits 57 (F78
+/// digits are <= 56 px wide) = 331 px: 40..371, then a 2 px gap and the
+/// half-size digit cell XT_X..XT_X + XT_W (373..401).
 const CELLS_X: [[u8; 7]; 4] = [
-    [32, 57, 18, 57, 57, 57, 57],
-    [32, 57, 57, 18, 57, 57, 57],
-    [32, 57, 57, 57, 18, 57, 57],
-    [32, 57, 57, 57, 57, 18, 57],
+    [29, 57, 17, 57, 57, 57, 57],
+    [29, 57, 57, 17, 57, 57, 57],
+    [29, 57, 57, 57, 17, 57, 57],
+    [29, 57, 57, 57, 57, 17, 57],
 ];
 /// Compact main-readout cells for View::DmmScope: the LETTERS font (30 px,
 /// digit advance 18) instead of F78 (78 px), roughly half height, so each cell
@@ -358,23 +361,23 @@ impl DmmView {
                 }
             }
         } else {
-            // Extra digit: the main cells narrow to CELLS_X (40..375) and the
-            // digit goes in LETTERS (22 px) at 375..400, bottom-aligned with
-            // the F78 digits (rows 124..145 vs 69..146), left of the unit box
-            // (x >= 401). x < 40 stays free for the HV warning glyph.
+            // Extra digit: the main cells narrow to CELLS_X (40..371) and the
+            // digit is the F78 glyph at half size (~38 px vs ~76) in
+            // XT_X..XT_X + XT_W (373..401), on the F78 baseline (VALUE_BASE),
+            // left of the limit badge / unit box (x >= 401). The full-draw
+            // tail fill of the main cells clears the 371..373 gap, the digit
+            // paints its whole 80 px high cell, and without the digit the main
+            // cells span 40..400 again, so no stale pixels remain. x < 40
+            // stays free for the HV warning glyph.
             let (w, cells) = match ext {
                 Some(_) => (XT_X - 40, &CELLS_X[f & 3]),
                 None => (360, &CELLS[f]),
             };
-            if ext.is_some() && !same_layout {
-                lcd::fill_rect(XT_X, 68, XT_W, 50, BG);
-            }
             sf::cells_diff(sf::F78, rect(40, 68, w as i16, 80), s, prev, cells, VALUE_RED, BG);
             if let Some(e) = ext {
                 if !same_layout || last_ext != e {
-                    let mut b = [0u8; 4];
-                    let d = (e as char).encode_utf8(&mut b);
-                    sf::label(sf::LETTERS, rect(XT_X as i16, 118, XT_W as i16, 34), d, VALUE_RED, BG, 7, 0);
+                    let r = rect(XT_X as i16, 68, XT_W as i16, 80);
+                    sf::label_half(sf::F78, r, e as char, VALUE_BASE as i16, VALUE_RED, BG);
                 }
             }
             if self.last_unit != r.main.unit || self.last_mode != mkey {
@@ -966,7 +969,7 @@ impl ScopeView {
         let mut tpl = [[0u16; 288]; 4];
         self.templates(&mut tpl);
         for i in 0..=scope::COLS as u16 {
-            self.column_t(i, &tpl, None, None);
+            self.column_t(i, &tpl, None, None, false);
         }
     }
 
@@ -1066,8 +1069,10 @@ impl ScopeView {
     }
 
     /// One graph column `i` (0..400) from a template, with the trace segment
-    /// (rows of the 280-row model) and the trigger level tick.
-    fn column_t(&self, i: u16, t: &[[u16; 288]; 4], seg: Option<(i32, i32)>, trig: Option<i32>) {
+    /// (rows of the 280-row model) and the trigger level tick; `line`: the
+    /// level as a dashed line across the graph (4 px on / 4 off, behind the
+    /// trace).
+    fn column_t(&self, i: u16, t: &[[u16; 288]; 4], seg: Option<(i32, i32)>, trig: Option<i32>, line: bool) {
         let x = self.x0 + i;
         let h = self.h;
         let k = if i == 0 || i == 400 { 3 } else if i % 40 == 0 { 2 } else if i % 8 == 0 { 1 } else { 0 };
@@ -1076,7 +1081,7 @@ impl ScopeView {
             Some((a, b)) if i > 0 => (self.row_px(a) - self.y0, self.row_px(b) - self.y0),
             _ => (u16::MAX, 0),
         };
-        let tr = if i < 6 { trig.map(|r| self.row_px(r) - self.y0).unwrap_or(u16::MAX) } else { u16::MAX };
+        let tr = if i < 6 || (line && i % 8 < 4) { trig.map(|r| self.row_px(r) - self.y0).unwrap_or(u16::MAX) } else { u16::MAX };
         lcd::set_window(x, self.y0, x, self.y0 + h - 1);
         for y in 0..h {
             let c = if y >= a && y <= b {
@@ -1093,14 +1098,15 @@ impl ScopeView {
     fn column(&self, i: u16, seg: Option<(i32, i32)>, trig: Option<i32>) {
         let mut t = [[0u16; 288]; 4];
         self.templates(&mut t);
-        self.column_t(i, &t, seg, trig);
+        self.column_t(i, &t, seg, trig, false);
     }
 
     /// Draw a frame: 400 columns of min/max (peak detect), widened to touch
     /// the previous column, as the stock trace.
     /// `prev` caches the drawn segment per column (pixel rows); only changed
-    /// columns are redrawn. Fill it with (u16::MAX, 0) to force a full redraw.
-    pub fn frame(&self, f: &scope::Frame, sc: &scope::Scope, prev: &mut [(u16, u16); 401], cur: &Cursors, persist: bool) {
+    /// columns are redrawn. Fill it with (u16::MAX, 0) to force a full redraw
+    /// (also needed when `trig_line` changes).
+    pub fn frame(&self, f: &scope::Frame, sc: &scope::Scope, prev: &mut [(u16, u16); 401], cur: &Cursors, persist: bool, trig_line: bool) {
         let n = f.data.len();
         let trig_row = Some(sc.s.trig_row);
         let mut tpl = [[0u16; 288]; 4];
@@ -1128,7 +1134,7 @@ impl ScopeView {
                     pseg = None;
                     if prev[i] != (u16::MAX - 1, 0) {
                         prev[i] = (u16::MAX - 1, 0);
-                        self.column_t(i as u16, &tpl, None, trig_row);
+                        self.column_t(i as u16, &tpl, None, trig_row, trig_line);
                     }
                     continue;
                 }
@@ -1174,7 +1180,7 @@ impl ScopeView {
             let is_cur = cur.x_on && (cur.x[0] as usize == i || cur.x[1] as usize == i);
             if prev[i] != px || is_cur {
                 prev[i] = if is_cur { (u16::MAX, 0) } else { px };
-                self.column_t(i as u16, if is_cur { &vt } else { &tpl }, Some((a, b)), trig_row);
+                self.column_t(i as u16, if is_cur { &vt } else { &tpl }, Some((a, b)), trig_row, trig_line);
             }
         }
     }

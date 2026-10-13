@@ -355,6 +355,11 @@ fn main() -> ! {
                         }
                         false
                     }
+                    scpi::Dbg::Drag(v) => {
+                        let (p0, p1) = (touch::Point { x: v[0], y: v[1] }, touch::Point { x: v[2], y: v[3] });
+                        gestures.synth_drag(p0, p1, v[4], v[5], now, |g| app.gesture(&mut clk, g));
+                        false
+                    }
                     scpi::Dbg::Lcd(x, y, w, h, n) => {
                         // Raw GRAM words after RAMRD (dummy first) as #4 block.
                         let n = (n as usize).min((usbtmc::RSP_MAX - 8) / 2);
@@ -511,6 +516,9 @@ fn main() -> ! {
             app.dmm.start(&mut clk);
             app.meter.reset();
             app.last_raw = None;
+            // Take the logger panel down: repaint the view.
+            dialog::log_panel_reset();
+            app.invalidate();
         }
         logging_prev = logging;
 
@@ -518,7 +526,12 @@ fn main() -> ! {
         // draw must not starve the enumeration; nor right after a GRAM
         // read-back, so a multi-request screenshot does not tear.
         let usb_up = dev.state() == UsbDeviceState::Configured || now > 3000;
-        let can_draw = usb_up && now >= draw_hold_until && !logging;
+        // A screenshot reading the panel (screenshot.rs) freezes it too.
+        let can_draw = usb_up && now >= draw_hold_until && !logging && !screenshot::frozen();
+        if logging && usb_up && now >= draw_hold_until && !screenshot::frozen() {
+            // The logger panel (dialog.rs; one part per pass, ~1 s refresh).
+            dialog::log_panel(now, logger.measured_hz(), logger.captured(), logger.nominal_us());
+        }
         mark(0, &mut ts);
         app.tick(&mut clk, can_draw);
         mark(1, &mut ts);

@@ -1073,10 +1073,11 @@ build on a disk that already has the other backups writes `_DM40PRV.BIN` +
 `BACKUP.TXT` (~62 blocks, ~6 s); **every firmware update** rewrites them once
 again (~6 s; 121 blocks ≈ 12 s if the running firmware were stock-sized); a
 loader update rewrites LOADER.BIN + BACKUP.TXT (~3 s once). The FWDGT is fed
-between blocks (and by spiflash during erases). Speed-up left on the table:
-`spiflash.rs` reads at the stock /16 prescaler (3.125 MHz); the W25Q128
-`READ` (03h) is good to 50 MHz, so /2 (25 MHz) would make every block read
-~8x faster (not done here: not this change's file).
+between blocks (and by spiflash during erases). (These times are for the
+stock /16 SPI prescaler, 3.125 MHz; `spiflash.rs` now runs SPI1 at /4 =
+12.5 MHz, 4x below the W25Q128 `READ` (03h) limit of 50 MHz, so the block
+reads are ~4x faster; erases dominate the writes. /2 = 25 MHz would still be
+in spec but has not been tried on this board.)
 
 **Status** (`calbackup::result()`), appended to `DBG:BOOT?` by
 `native::put_extra` (see below): `CALBK,<status>,<written>,<conflict>,<freed>`

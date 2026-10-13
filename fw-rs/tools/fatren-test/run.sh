@@ -45,11 +45,13 @@
 #   and calibration -> NoSpace retried without the firmware file: CALIB.BIN +
 #   BACKUP.TXT written (fw_skipped), old _DM40PRV.BIN untouched, then
 #   UNCHANGED while full; after freeing space the firmware file is written.
-# screenshot (src/screenshot.rs through calbackup::write_file, synthetic screen):
+# screenshot (src/screenshot.rs incremental writer, driven to completion by take_on; synthetic screen):
 #   12. S000.BMP taken -> S001.BMP, then S002.BMP; after deleting S000.BMP the
 #      next one is S000.BMP again; fsck clean; 307266 bytes, header equal to
 #      the stock S000.BMP in the disk dump (when present), every pixel equal
 #      to the stub screen with bottom-up rows; the other files untouched.
+#      (The stub screen mixes run rows and noise rows, so the RLE capture fills up part way and
+#      the rest is read from the "GRAM" while writing: both paths.)
 set -e
 cd "$(dirname "$0")"
 RUSTUP_HOME="$(cd ../../../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../../../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
@@ -392,7 +394,8 @@ for r in range(320):
     y = 319 - r                          # bottom-up
     row = struct.unpack_from('<480H', d, 66 + 960 * r)
     for x in range(480):
-        want = ((x * 0x9E37 + y * 0x79B9) ^ (y << 11)) & 0xFFFF
+        want = [((x // 13) * 0x1234 + y), ((x // 3) * 0x0F0F + y), ((x // 2) * 0x3333 + y),
+                ((x * 0x9E37 + y * 0x79B9) ^ (y << 11))][y % 4] & 0xFFFF
         assert row[x] == want, (x, y, row[x], want)
 print('pixels == stub screen, bottom-up')
 PY

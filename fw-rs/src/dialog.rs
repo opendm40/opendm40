@@ -101,3 +101,100 @@ pub fn toast(s: &str, ok: bool) {
     centred(r, s, FG, bg);
     frame(r, FRAME);
 }
+
+// --- Data-logger panel (FR-38) ------------------------------------------------
+
+/// Logger panel over any view while LOG:STATe ON: the GUI is frozen then (the
+/// HY3131 belongs to the logger, the DMM reading is not updated), so the
+/// panel says so instead of leaving a stale reading up. Covers the main
+/// reading of the DMM view.
+const LOG_BOX: (u16, u16, u16, u16) = (70, 64, 340, 146);
+const LOG_ROW: [u16; 3] = [102, 138, 174];
+/// Refresh of the rate / count rows, ms.
+const LOG_REFRESH_MS: u64 = 1000;
+
+/// Panel progress: `part` = next part to draw (0 title, 1 rate, 2 count,
+/// 3 hint, 4 frame, 5 = nothing pending); `up` = the whole panel has been
+/// drawn once (later passes redraw only 1 and 2); `next` = next refresh, ms.
+struct LogPanel {
+    part: u8,
+    up: bool,
+    next: u64,
+}
+
+static mut LOG: LogPanel = LogPanel { part: 0, up: false, next: 0 };
+
+fn log_state() -> &'static mut LogPanel {
+    unsafe { &mut *core::ptr::addr_of_mut!(LOG) }
+}
+
+/// Call every main-loop pass while logging and drawing is otherwise
+/// allowed. Draws at most ONE part per call (one label, a ~340 x 36 fill +
+/// glyphs, roughly 0.5 ms) so the logger's sampling (one conversion per
+/// ~0.4 ms at the default OSR) loses at most a sample or two per part; the
+/// rate and sample count are refreshed once per second (two passes).
+/// `hz` = measured rate (0 until two samples: the nominal one from
+/// `nominal_us` is shown with "~"), `n` = samples captured this session.
+pub fn log_panel(now: u64, hz: u32, n: u32, nominal_us: u32) {
+    let st = log_state();
+    let b = LOG_BOX;
+    let row = |i: usize| (b.0 + 1, LOG_ROW[i], b.2 - 2, 36);
+    match st.part {
+        0 => centred((b.0, b.1, b.2, 38), "DATA LOGGING", FG, ERR_BG),
+        1 => {
+            let mut t = [0u8; 24];
+            let (k, approx) = if hz == 0 && nominal_us != 0 { (1_000_000 / nominal_us, true) } else { (hz, false) };
+            let mut i = 0;
+            if approx {
+                t[0] = b'~';
+                i = 1;
+            }
+            i += dec(&mut t[i..], k);
+            t[i..i + 5].copy_from_slice(b" Sa/s");
+            centred(row(0), core::str::from_utf8(&t[..i + 5]).unwrap_or(""), FG, BODY_BG);
+        }
+        2 => {
+            let mut t = [0u8; 24];
+            let i = dec(&mut t, n);
+            t[i..i + 8].copy_from_slice(b" samples");
+            centred(row(1), core::str::from_utf8(&t[..i + 8]).unwrap_or(""), FG, BODY_BG);
+        }
+        3 => centred(row(2), "Display paused", FRAME, BODY_BG),
+        4 => frame(b, FRAME),
+        _ => {
+            if now >= st.next {
+                st.part = 1; // rate now, count on the next pass
+            }
+            return;
+        }
+    }
+    // The hint and the frame are static: a refresh ends after the count.
+    st.part = if st.part == 2 && st.up { 5 } else { st.part + 1 };
+    if st.part == 5 {
+        st.up = true;
+        st.next = now + LOG_REFRESH_MS;
+    }
+}
+
+/// The logger stopped: the next session draws the whole panel again (the
+/// caller repaints the view).
+pub fn log_panel_reset() {
+    *log_state() = LogPanel { part: 0, up: false, next: 0 };
+}
+
+/// `v` in decimal at the start of `t`; returns the length.
+fn dec(t: &mut [u8], v: u32) -> usize {
+    let mut d = [0u8; 10];
+    let (mut k, mut v) = (d.len(), v);
+    loop {
+        k -= 1;
+        d[k] = b'0' + (v % 10) as u8;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    let n = d.len() - k;
+    t[..n].copy_from_slice(&d[k..]);
+    n
+}
