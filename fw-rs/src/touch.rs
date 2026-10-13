@@ -222,13 +222,31 @@ pub struct Point {
     pub y: u16,
 }
 
+/// Most points one frame carries (both controllers report up to 5).
+pub const MAX_POINTS: usize = 5;
+
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Event {
-    /// Number of pressed points (0 = released).
+    /// Number of pressed points (0 = released), at most MAX_POINTS.
     pub points: u8,
+    /// First pressed point (= pts[0]).
     pub p: Point,
+    /// Pressed points in the controller's slot order: pts[..points]; the rest
+    /// are zero (Event equality drives the debounce).
+    pub pts: [Point; MAX_POINTS],
     /// Side key held: 1 << code (code 0..3 from the key report), 0 = none.
     pub keys: u8,
+}
+
+/// One decoded controller frame, identical for both chips.
+struct Frame {
+    pressed: bool,
+    key: bool,
+    /// Pressed screen points (pts[..n]).
+    n: u8,
+    pts: [Point; MAX_POINTS],
+    /// Side-key code 0..3 (valid when `key`).
+    code: u8,
 }
 
 pub struct Touch {
@@ -333,9 +351,11 @@ impl Touch {
     }
 
     /// Poll: reads a frame when due, dispatches to the detected controller, and
-    /// returns the new (debounced) state on a change. The decoded tuple is
-    /// `(pressed, key, point, n_points, key_code)`, identical for both chips, so
-    /// the debounce tail below and the rest of the firmware never see the panel.
+    /// returns the new (debounced) state on a change. The decoded `Frame`
+    /// (pressed, key, the pressed points, key code) is identical for both chips,
+    /// so the debounce tail below and the rest of the firmware never see the
+    /// panel. A change of the point count or of any point while the screen
+    /// stays touched is reported at once (no debounce), like a moving finger.
     pub fn poll(&mut self, now: u64) -> Option<Event> {
         // Hynitron is driven purely by INT level, exactly as before. Goodix is
         // additionally force-polled on a timer: its INT behaviour is unknown and
@@ -364,7 +384,7 @@ impl Touch {
             None
         };
 
-        let (pressed, key, p, n, code) = match frame {
+        let Frame { pressed, key, n, pts, code } = match frame {
             Some(f) => f,
             None => {
                 // No new frame this call: flush a pending debounced state after
@@ -394,8 +414,9 @@ impl Touch {
             if key {
                 ev.keys = 1 << code;
             } else {
-                ev.points = n.max(1);
-                ev.p = p;
+                ev.points = n.clamp(1, MAX_POINTS as u8);
+                ev.pts = pts;
+                ev.p = pts[0];
             }
         }
         // Moving finger: accept position updates of the same contact at once.
@@ -426,11 +447,15 @@ impl Touch {
 
     /// Hynitron 0x5A frame read — byte-identical bus traffic to the original
     /// inline path (D0 00 read 7, 0xAB check, extra points D0 07/0C/11/16, then
-    /// the D0 00 AB ack). Returns the common decode tuple; `code` is the side-key
-    /// code derived from the X of the key report (unused when `key` is false).
-    /// None (bad/absent frame) means "no frame" and is handled without touching
-    /// pending, as before.
-    fn read_hyn(&mut self) -> Option<(bool, bool, Point, u8, u8)> {
+    /// the D0 00 AB ack). Multi-touch (touch_v2_6.h FRAME READ / DRIVER OUTPUT):
+    /// rx[5] & 7 = n records; record 0 is in the 7-byte frame, records 1..n-1
+    /// (5 bytes each, same layout) follow. A record is a pressed point when its
+    /// status low nibble is 6; released records are dropped and the pressed ones
+    /// packed in slot order (as the stock queue entry: "n, minus 1 for each
+    /// released record"). `code` is the side-key code derived from the X of a
+    /// key report (record 0 bit 7). None (bad/absent frame) means "no frame"
+    /// and is handled without touching pending, as before.
+    fn read_hyn(&mut self) -> Option<Frame> {
         let mut b = [0u8; 7];
         if !read_reg(0xD000, &mut b) || b[6] != 0xAB {
             return None;
@@ -439,21 +464,35 @@ impl Touch {
         self.ring[(self.ring_i & 7) as usize] = b;
         self.ring_i = self.ring_i.wrapping_add(1);
         let n = b[5] & 7;
-        let (pressed, key, p) = decode(&b);
-        // Extra points are read (and dropped) so the controller sees the
-        // complete transaction, as the stock driver does.
-        for i in 1..n.min(5) {
+        let (pressed0, key, p) = decode(&b);
+        let mut f = Frame { pressed: pressed0, key, n: 0, pts: [Point::default(); MAX_POINTS], code: 0 };
+        if pressed0 && !key {
+            f.pts[0] = p;
+            f.n = 1;
+        }
+        // Extra points: always read, so the controller sees the complete
+        // transaction, as the stock driver does.
+        for i in 1..n.min(MAX_POINTS as u8) {
             let mut e = [0u8; 5];
-            read_reg(0xD000 + 7 + 5 * (i as u16 - 1), &mut e);
+            if read_reg(0xD000 + 7 + 5 * (i as u16 - 1), &mut e) && !key {
+                let (pr, k, q) = decode(&e);
+                if pr && !k && (f.n as usize) < MAX_POINTS {
+                    f.pts[f.n as usize] = q;
+                    f.n += 1;
+                }
+            }
         }
         write(&[0xD0, 0x00, 0xAB]);
-        let code = match p.x {
+        if !key {
+            f.pressed = f.n > 0;
+        }
+        f.code = match p.x {
             0..=499 => 0,
             500..=749 => 1,
             750..=999 => 2,
             _ => 3,
         };
-        Some((pressed, key, p, n, code))
+        Some(f)
     }
 
     /// Goodix GT1158 frame read (header §Goodix, lines 98/110-118). Correct-by-
@@ -463,7 +502,7 @@ impl Touch {
     /// other file changes. None = no new data (buffer-ready bit clear); the buffer
     /// is NOT acked in that case (header 112 clears only a ready buffer) and the
     /// force-poll timer re-checks, so there is no hang.
-    fn read_goodix(&mut self) -> Option<(bool, bool, Point, u8, u8)> {
+    fn read_goodix(&mut self) -> Option<Frame> {
         let mut st = [0u8; 1];
         if !read_reg_at(ADDR_GOODIX, GT_REG_STATUS, &mut st) {
             return None;
@@ -480,24 +519,23 @@ impl Touch {
         write_at(ADDR_GOODIX, &[(GT_REG_STATUS >> 8) as u8, GT_REG_STATUS as u8, 0x00]);
 
         let mut pressed = false;
-        let mut p = Point::default();
-        if n > 0 {
-            let mut pt = [0u8; 4]; // X lo, X hi, Y lo, Y hi (header line 113)
-            if read_reg_at(ADDR_GOODIX, GT_REG_POINT0, &mut pt) {
+        let mut pts = [Point::default(); MAX_POINTS];
+        let mut np = 0u8;
+        // Every reported point i: 4 bytes at 0x8150 + 8*i = X lo, X hi, Y lo,
+        // Y hi (header line 113; the stock reads them all, table 0x0804976c).
+        for i in 0..n.min(MAX_POINTS as u8) {
+            let mut pt = [0u8; 4];
+            if read_reg_at(ADDR_GOODIX, GT_REG_POINT0 + 8 * i as u16, &mut pt) {
                 let gx = (pt[1] as u16) << 8 | pt[0] as u16; // Goodix native X
                 let gy = (pt[3] as u16) << 8 | pt[2] as u16; // Goodix native Y
                 // Native portrait (320x480) -> landscape GUI, no scale/mirror
                 // (header 115-116): GUI x = Goodix Y, GUI y = Goodix X.
-                p = Point { x: gy, y: gx };
+                pts[np as usize] = Point { x: gy, y: gx };
+                np += 1;
                 pressed = true;
             }
-            // Read and drop the extra points so the controller sees the whole
-            // transaction (parity with the 0x5A path and the stock driver).
-            for i in 1..n.min(5) {
-                let mut e = [0u8; 4];
-                read_reg_at(ADDR_GOODIX, GT_REG_POINT0 + 8 * i as u16, &mut e);
-            }
         }
+        let p = pts[0];
 
         let mut key = false;
         let mut code = 0u8;
@@ -531,6 +569,9 @@ impl Touch {
         self.ring[(self.ring_i & 7) as usize] = rawf;
         self.ring_i = self.ring_i.wrapping_add(1);
 
-        Some((pressed, key, p, n, code))
+        if key {
+            np = 0; // a key report carries no screen point
+        }
+        Some(Frame { pressed, key, n: np, pts, code })
     }
 }

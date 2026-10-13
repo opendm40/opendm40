@@ -315,6 +315,7 @@ fn main() -> ! {
                             1 => Some(gesture::Gesture::SwipeLeft),
                             2 => Some(gesture::Gesture::SwipeRight),
                             3 => Some(gesture::Gesture::KeyDown(x as u8)),
+                            4 => gestures.synth_swipe_down(x as u8, now), // DBG:SWIPE D,n
                             _ => None,
                         };
                         if let Some(g) = g {
@@ -503,7 +504,7 @@ fn main() -> ! {
                 None => gestures.tick(now),
             };
             if let Some(g) = g {
-                app.gesture(&mut clk, g);
+                if app.gesture(&mut clk, g) { gestures.capture(); }
             }
         }
         mark(2, &mut ts);
@@ -633,6 +634,8 @@ mod boot;
 // fatren: also its FAT16 helpers for calbackup in every build.
 mod fatren;
 mod calbackup;
+mod dialog;
+mod screenshot;
 #[cfg(any(feature = "native", feature = "test-initcore", feature = "test-recovery"))]
 mod native;
 #[cfg(any(feature = "native", feature = "test-recovery"))]

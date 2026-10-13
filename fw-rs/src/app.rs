@@ -121,6 +121,15 @@ pub struct App {
     chart_dec: u8,
     chart_dirty: bool,
     chart_cache: ui::ChartCache,
+    /// Power-off confirm / toast over the view (dialog.rs); while set, the
+    /// full redraw stays pending and nothing else draws.
+    overlay: Option<crate::dialog::Overlay>,
+    /// 3-finger swipe seen: take the screenshot in tick() once the view is
+    /// drawn.
+    shot_req: bool,
+    /// Scope state at a touch-down in the scope view, restored when a second
+    /// finger cancels the touch (Gesture::Cancel).
+    touch_snap: Option<(scope::Settings, ui::Cursors)>,
 }
 
 fn backlight(pct: u8) {
@@ -257,6 +266,9 @@ impl App {
             chart_dec: 0,
             chart_dirty: false,
             chart_cache: ui::ChartCache::new(),
+            overlay: None,
+            shot_req: false,
+            touch_snap: None,
         };
         crate::persist::init();
         if let Some(p) = crate::persist::load() {
@@ -585,7 +597,11 @@ impl App {
                 self.beep(now, 150);
             }
         }
-        if !can_draw {
+        if self.overlay.is_some_and(|o| now >= o.until()) {
+            self.overlay = None; // power-off confirm auto-cancel / toast end
+            self.redraw = true;
+        }
+        if !can_draw || self.overlay.is_some() {
             return;
         }
         // ---- drawing only below this point.
@@ -599,6 +615,11 @@ impl App {
             // draw_static() repaints the DMM reading (shown value + HOLD/RUN
             // label) from meter.hold, so the label now matches.
             self.hold_shown = self.meter.hold;
+        }
+        if self.shot_req {
+            self.shot_req = false;
+            self.screenshot(clk);
+            return;
         }
         // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
         // not drive here)? The reading loop skips drawing while held
@@ -1038,17 +1059,64 @@ impl App {
         }
     }
 
-    pub fn gesture(&mut self, clk: &mut Clock, g: Gesture) {
+    /// Handle a gesture. Returns true when the app takes the touch (a
+    /// touch-down or drag in the scope graph): the caller then tells the
+    /// tracker (`gesture::Tracker::capture`), so its release is never a view
+    /// swipe or a tap (docs/scope-ui-plan.md §2.6).
+    pub fn gesture(&mut self, clk: &mut Clock, g: Gesture) -> bool {
         let now = clk.now_ms();
         self.last_input = now;
         if self.locked {
-            return;
+            return false;
         }
         if self.dimmed {
             self.dimmed = false;
             backlight(self.backlight);
         }
+        // A modal overlay takes every gesture: the confirm's buttons, any side
+        // key cancels it; a toast just goes.
+        if let Some(o) = self.overlay {
+            match (o, g) {
+                (crate::dialog::Overlay::PowerOff { .. }, Gesture::Tap(p)) => match crate::dialog::power_off_hit(p.x, p.y) {
+                    Some(true) => {
+                        backlight(0);
+                        power_off();
+                    }
+                    Some(false) => self.overlay_close(),
+                    None => {}
+                },
+                (crate::dialog::Overlay::PowerOff { .. }, Gesture::KeyDown(_)) | (crate::dialog::Overlay::Toast { .. }, Gesture::Tap(_) | Gesture::KeyDown(_)) => {
+                    self.overlay_close()
+                }
+                _ => {}
+            }
+            return false;
+        }
+        let in_graph = |p: crate::touch::Point| p.x >= 13 && p.x < 414 && p.y >= 20 && p.y < 301;
+        let mut captured = false;
+        if let Gesture::Down(_) = g {
+            self.touch_snap = None;
+        }
         match g {
+            // Global gestures (UF-17 / UF-18), any view.
+            Gesture::MultiSwipeDown(3) => {
+                self.shot_req = true;
+            }
+            Gesture::MultiSwipeDown(2) => {
+                self.overlay = Some(crate::dialog::Overlay::PowerOff { until: now + crate::dialog::CONFIRM_MS });
+                self.redraw = true;
+                crate::dialog::power_off();
+                self.beep(now, 50);
+            }
+            Gesture::Cancel => {
+                // A second finger landed: undo the first finger's drag.
+                self.cur_drag = None;
+                if let Some((s, c)) = self.touch_snap.take() {
+                    self.cur = c;
+                    self.cursor_values();
+                    self.scope_set(s, now);
+                }
+            }
             Gesture::KeyDown(c) => {
                 self.beep(now, 50);
                 self.key(clk, c);
@@ -1069,6 +1137,9 @@ impl App {
                 ui::history(&self.hist, 0, 0);
             }
             Gesture::Down(p) if self.view == View::Scope => {
+                self.touch_snap = Some((self.scope.s, self.cur));
+                // A touch that starts in the graph belongs to the scope.
+                captured = in_graph(p);
                 // Grab a cursor within 8 px.
                 let (cx, cy) = (p.x as i32 - 13, p.y as i32 - 20);
                 self.cur_drag = None;
@@ -1081,7 +1152,8 @@ impl App {
                     }
                 }
             }
-            Gesture::Drag(p0, p) if self.view == View::Scope && p0.x >= 13 && p0.x < 414 && p0.y >= 20 && p0.y < 301 => {
+            Gesture::Drag(p0, p) if self.view == View::Scope && in_graph(p0) => {
+                captured = true;
                 match self.cur_drag {
                     Some(k) if k < 2 => {
                         self.cur.x[k as usize] = (p.x.saturating_sub(13)).clamp(1, 399);
@@ -1102,6 +1174,45 @@ impl App {
             }
             _ => {}
         }
+        captured
+    }
+
+    /// Close the overlay; the view is redrawn on the next tick.
+    fn overlay_close(&mut self) {
+        self.overlay = None;
+        self.redraw = true;
+    }
+
+    /// UF-17: write the screen to the disk (screenshot.rs, synchronous, about
+    /// 6-9 s), then a toast + beep. Only a blocking 60 ms chirp before the
+    /// write: a `beep()` is stopped by tick(), which does not run during it.
+    fn screenshot(&mut self, clk: &mut Clock) {
+        use crate::screenshot::Shot;
+        // A short chirp now (the GRAM is not touched), the result beep after.
+        if self.beep_on {
+            buzzer(true, self.volume);
+            clk.delay_ms(60);
+            buzzer(false, self.volume);
+        }
+        let shot = crate::screenshot::take();
+        let now = clk.now_ms();
+        self.last_input = now;
+        let mut t = *b"Saved S000.BMP";
+        let (txt, ok) = match shot {
+            Shot::Saved(n) => {
+                t[7] = b'0' + (n / 100 % 10) as u8;
+                t[8] = b'0' + (n / 10 % 10) as u8;
+                t[9] = b'0' + (n % 10) as u8;
+                (core::str::from_utf8(&t).unwrap_or("Saved"), true)
+            }
+            Shot::NoDisk => ("No disk", false),
+            Shot::Full => ("Disk full", false),
+            Shot::Error => ("Screenshot failed", false),
+        };
+        self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::TOAST_MS });
+        self.redraw = true;
+        crate::dialog::toast(txt, ok);
+        self.beep(now, if ok { 100 } else { 500 });
     }
 
     fn key(&mut self, clk: &mut Clock, code: u8) {

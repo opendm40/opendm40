@@ -6,6 +6,8 @@
 //!   main <image> trigger                fatren::make_trigger
 //!   main <image> backup <dir>           calbackup::run with the calbackup::FILES sources
 //!                                       read from <dir>/CALIB.BIN etc.
+//!   main <image> shot                   screenshot::take_on with the synthetic screen
+//!                                       of the `lcd` stub below (pattern()).
 //! Live runs rewrite the image.
 use std::{env, fs};
 
@@ -50,6 +52,28 @@ mod spiflash {
         }
     }
 }
+
+/// Stub of the fw-rs LCD: a synthetic 480x320 RGB565 screen (the same
+/// pattern run.sh checks the BMP against).
+#[allow(dead_code)]
+mod lcd {
+    pub const W: u16 = 480;
+    pub const H: u16 = 320;
+    pub type Color = u16;
+    pub fn pattern(x: u32, y: u32) -> Color {
+        ((x * 0x9E37 + y * 0x79B9) ^ (y << 11)) as u16
+    }
+    pub fn read_span(x: u16, y: u16, n: u16, mut out: impl FnMut(Color)) {
+        assert!(x as u32 + n as u32 <= W as u32 && y < H, "span outside the screen");
+        for i in 0..n as u32 {
+            out(pattern(x as u32 + i, y as u32));
+        }
+    }
+}
+
+#[path = "../../src/screenshot.rs"]
+#[allow(dead_code)]
+mod screenshot;
 
 #[path = "../../src/fatren.rs"]
 #[allow(dead_code)]
@@ -123,6 +147,14 @@ fn main() {
             "backup={:?} written=0x{:02x} conflict=0x{:02x} freed={}",
             r.status, r.written, r.conflict, r.freed
         );
+        println!("  changed blocks: {:?}", img.writes);
+        fs::write(&a[1], &img.d).unwrap();
+        return;
+    }
+    if a[2] == "shot" {
+        let r = screenshot::take_on(&mut img);
+        let mc = screenshot::MEDIUM_CHANGED.load(std::sync::atomic::Ordering::Relaxed);
+        println!("shot={:?} medium_changed={}", r, mc);
         println!("  changed blocks: {:?}", img.writes);
         fs::write(&a[1], &img.d).unwrap();
         return;
