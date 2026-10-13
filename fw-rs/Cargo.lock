@@ -62,7 +62,7 @@ dependencies = [
  "cortex-m",
  "synopsys-usb-otg",
  "usb-device",
- "usbd-serial",
+ "usbd-storage",
 ]
 
 [[package]]
@@ -80,12 +80,6 @@ name = "embedded-hal"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
-
-[[package]]
-name = "embedded-io"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "hash32"
@@ -120,6 +114,26 @@ name = "nb"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
+
+[[package]]
+name = "num_enum"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a015b430d3c108a207fd776d2e2196aaf8b1cf8cf93253e3a097ff3085076a1"
+dependencies = [
+ "num_enum_derive",
+]
+
+[[package]]
+name = "num_enum_derive"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96667db765a921f7b295ffee8b60472b686a51d4f21c2ee4ffdb94c7013b65a6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "portable-atomic"
@@ -222,14 +236,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "usbd-serial"
-version = "0.2.2"
+name = "usbd-storage"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "065e4eaf93db81d5adac82d9cef8f8da314cb640fa7f89534b972383f1cf80fc"
+checksum = "9596ded13538d5407d0cef1c2879d6e5d9038d6ba601aa9e90a7d08a21ba5215"
 dependencies = [
- "embedded-hal 0.2.7",
- "embedded-io",
- "nb 1.1.0",
+ "num_enum",
  "usb-device",
 ]
 

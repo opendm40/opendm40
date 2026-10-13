@@ -26,6 +26,33 @@ pub enum Out {
     Fetch,
     /// Scope / generator command; `None` argument = query.
     Instr(Cmd),
+    /// Debug command (DBG:...), handled by the main loop.
+    Dbg(Dbg),
+}
+
+/// Debug commands over USBTMC (development aids, not SCPI standard):
+///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive)
+///   DBG:TAP x,y  DBG:KEY n  DBG:SWIPE L|R    inject touch / side key
+///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
+///   DBG:DIAG?               diagnostic block (#3)
+///   DBG:RELEASE             stop feeding the watchdog (back to stock ~20 s)
+///   DBG:RESET               reset to the stock firmware now
+#[derive(Clone, Copy)]
+pub enum Dbg {
+    Ping(u32),
+    Input(u8, u16, u16),
+    Lcd(u16, u16, u16, u16, u32),
+    Diag,
+    Release,
+    Reset,
+}
+
+fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
+    let mut out = [0u32; N];
+    for (i, part) in a.split(|&b| b == b',').take(N).enumerate() {
+        out[i] = parse_num(part).unwrap_or(0.0) as u32;
+    }
+    out
 }
 
 /// Scope / generator commands (handled by the main loop with the app):
@@ -331,6 +358,30 @@ impl Scpi {
                         3
                     };
                     out = Out::Instr(Cmd::Meas(k));
+                }
+                _ if p0 == b"DBG" => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let a = trim(arg);
+                    out = Out::Dbg(match sub {
+                        b"PING" => Dbg::Ping(nums::<1>(a)[0]),
+                        b"TAP" => {
+                            let v = nums::<2>(a);
+                            Dbg::Input(0, v[0] as u16, v[1] as u16)
+                        }
+                        b"SWIPE" => Dbg::Input(if a.first() == Some(&b'R') { 2 } else { 1 }, 0, 0),
+                        b"KEY" => Dbg::Input(3, nums::<1>(a)[0] as u16, 0),
+                        b"LCD" => {
+                            let v = nums::<5>(a);
+                            Dbg::Lcd(v[0] as u16, v[1] as u16, v[2].max(1) as u16, v[3].max(1) as u16, v[4])
+                        }
+                        b"DIAG" => Dbg::Diag,
+                        b"RELEASE" => Dbg::Release,
+                        b"RESET" => Dbg::Reset,
+                        _ => {
+                            self.err = Some("Undefined header");
+                            continue;
+                        }
+                    });
                 }
                 _ if kw(p0, "DIAG") && query => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
