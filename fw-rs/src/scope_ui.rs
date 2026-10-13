@@ -1250,10 +1250,16 @@ fn fill_c(r: Rect, clip: Rect, c: Color) {
 
 /// A plain fill `r` (clipped) with a text on top.
 fn fill_text(r: Rect, clip: Rect, bg: Color, font: Font, tr: Rect, text: &str, fg: Color, align: u8, sp: i8) {
+    fill_text_on(r, clip, bg, bg, font, tr, text, fg, align, sp)
+}
+
+/// `fill_text` of a button-like fill on a `parent` colour (the fill is a
+/// probed shape for the host hit-map checks when it differs from it).
+fn fill_text_on(r: Rect, clip: Rect, bg: Color, parent: Color, font: Font, tr: Rect, text: &str, fg: Color, align: u8, sp: i8) {
     let t = Ink::new(font, tr, text, align, sp);
-    paint(isect(r, clip), &[(K_TEXT, bg)], |x, y| match t.at(x, y) {
+    paint(isect(r, clip), &[(K_TEXT, bg), (K_SHAPE, parent)], |x, y| match t.at(x, y) {
         Some(g) => (fg, tag(1, g)),
-        None => (bg, 0),
+        None => (bg, if bg != parent { tag(2, 0) } else { 0 }),
     });
 }
 
@@ -1277,7 +1283,7 @@ fn option_list(r: Rect, clip: Rect, items: &[&str], item_w: i16, sel: usize) {
         let w = if i + 1 == items.len() { r.w - x - 1 } else { item_w };
         let ir = rect(r.x + x, r.y + 1, w, r.h - 2);
         let (bg, fg) = if i == sel { (C_SEL, C_WHITE) } else { (C_POP_BG, C_BAR) };
-        fill_text(ir, clip, bg, sf::SC_F16, ir, t, fg, 8, 0);
+        fill_text_on(ir, clip, bg, C_BAR, sf::SC_F16, ir, t, fg, 8, 0);
     }
 }
 
@@ -1380,11 +1386,11 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
         let ul = rect(x, 59, 100, 2);
         let t = Ink::new(sf::SC_F22, r, MF_TABS[i as usize], 8, 0);
         let (bg, fg) = if sel { (C_POP_BG, C_FILL) } else { (C_POP_TAB, C_WHITE) };
-        paint(isect(r, tclip), &[(K_TEXT, bg)], |x, y| {
+        paint(isect(r, tclip), &[(K_TEXT, bg), (K_SHAPE, C_FRAME)], |x, y| {
             if let Some(g) = t.at(x, y) {
                 return (fg, tag(1, g));
             }
-            if sel && ul.has(x, y) { (C_POP_TAB, 0) } else { (bg, 0) }
+            (if sel && ul.has(x, y) { C_POP_TAB } else { bg }, tag(2, 0))
         });
     }
     let pc = rect(14, 61, 399, page_h - 1);
@@ -1477,22 +1483,19 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
     let near = |r: Rect| rect(r.x - 1, r.y - 2, r.w + 2, r.h + 4).has(x, y);
     match tab {
         0 => {
-            for i in 0..20i16 {
-                if near(rect(16 + 57 * (i % 7), 66 + 35 * (i / 7), 55, 30)) {
-                    return MfHit::Cell(i as u8);
-                }
+            // Each grid cell owns the gaps around it (pitch 57 x 35).
+            if y < 171 {
+                let (c, r) = (((x - 15) / 57).clamp(0, 6), ((y - 64) / 35).clamp(0, 2));
+                let i = r * 7 + c;
+                return if i < 20 { MfHit::Cell(i as u8) } else { MfHit::Inside };
             }
-            for k in 0..v.meas_n.min(4) as i16 {
-                if near(rect(16 + 57 * k, 176, 55, 30)) {
-                    return MfHit::SelCell(k as u8);
-                }
-            }
-            if near(rect(281, 176, 60, 30)) {
+            let k = ((x - 15) / 57).max(0);
+            if x < 278 {
+                if k < v.meas_n.min(4) as i16 { MfHit::SelCell(k as u8) } else { MfHit::Inside }
+            } else if x < 345 {
                 MfHit::Clear
-            } else if near(rect(348, 176, 60, 30)) {
-                MfHit::Default
             } else {
-                MfHit::Inside
+                MfHit::Default
             }
         }
         1 => {
@@ -1543,11 +1546,11 @@ fn side_popup(title: &str, tabs: &[&str], tab: u8) {
         let ink = Ink::new(sf::SC_F16, r, t, 8, 1);
         let (bg, fg) = if sel { (C_POP_BG, C_BAR) } else { (C_BAR, C_WHITE) };
         let ind = rect(291, y, 2, 40);
-        paint(r, &[(K_TEXT, bg)], |x, y| {
+        paint(r, &[(K_TEXT, bg), (K_SHAPE, C_FRAME)], |x, y| {
             if let Some(g) = ink.at(x, y) {
                 return (fg, tag(1, g));
             }
-            if sel && ind.has(x, y) { (C_BAR, 0) } else { (bg, 0) }
+            (if sel && ind.has(x, y) { C_BAR } else { bg }, tag(2, 0))
         });
     }
     fill_c(rect(293, 50, 120, 250), screen, C_POP_BG);
@@ -1637,4 +1640,186 @@ pub fn draw_popup(p: Popup, v: &PopVals) {
 /// The "Sampling" box (RUN refused during AUTO-set).
 pub fn sampling() {
     rbox_text(rect(190, 150, 100, 20), rect(0, 0, 480, 320), 8, C_PURPLE, C_FILL, sf::SC_F16, "Sampling", C_WHITE);
+}
+
+// ------------------------------------------------------------------ meter strip
+// Combined DMM + scope view (port plan S7, mockup tools/stock-ui mk01/mk02):
+// the stock page with a 56 px meter strip at y 20..75 in the stock language
+// (r5 badges, the 12 px font, the 20 px digit font of the stock generator
+// page), the graph below at (13,76,401,225). Unlike the stock page, the
+// strip passes the owner's layout rules (>= 3 px between ink boxes and
+// inside containers; checked by tools/ui-render).
+
+/// Short text (strip fields).
+#[derive(Clone, Copy, PartialEq)]
+pub struct Txt {
+    b: [u8; 20],
+    n: u8,
+}
+
+impl Txt {
+    pub const EMPTY: Txt = Txt { b: [0; 20], n: 0 };
+    pub fn new(s: &str) -> Txt {
+        let mut t = Txt::EMPTY;
+        t.push(s);
+        t
+    }
+    pub fn push(&mut self, s: &str) {
+        for c in s.chars() {
+            let mut e = [0u8; 4];
+            let e = c.encode_utf8(&mut e).as_bytes();
+            if self.n as usize + e.len() > 20 {
+                return;
+            }
+            self.b[self.n as usize..self.n as usize + e.len()].copy_from_slice(e);
+            self.n += e.len() as u8;
+        }
+    }
+    pub fn as_str(&self) -> &str {
+        core::str::from_utf8(&self.b[..self.n as usize]).unwrap_or("")
+    }
+}
+
+/// What the strip shows.
+#[derive(Clone, Copy, PartialEq)]
+pub struct StripData {
+    /// Function badge (purple).
+    pub func: &'static str,
+    /// Reading (20 px digits) and unit (digit font, or LETTERS for deg C / F).
+    pub value: Txt,
+    pub unit: Txt,
+    pub unit_letters: bool,
+    /// Sub readings, 12 px ASCII, right-aligned.
+    pub sub: [Txt; 2],
+    /// State badge (HOLD / A-HOLD / HV / REC / REL / PASS / FAIL / range).
+    pub badge: &'static str,
+    pub badge_col: Color,
+    /// >= 100 V: the strip ring turns red.
+    pub hv: bool,
+    /// Generator frequency text (empty: generator off).
+    pub gen: Txt,
+}
+
+impl StripData {
+    pub const EMPTY: StripData = StripData {
+        func: "",
+        value: Txt::EMPTY,
+        unit: Txt::EMPTY,
+        unit_letters: false,
+        sub: [Txt::EMPTY; 2],
+        badge: "",
+        badge_col: C_POP_TAB,
+        hv: false,
+        gen: Txt::EMPTY,
+    };
+}
+
+pub const STRIP: Rect = rect(13, 21, 401, 54);
+const ST_INNER: Rect = rect(14, 22, 399, 52);
+const ST_FUNC: Rect = rect(19, 25, 62, 17);
+const ST_BADGE: Rect = rect(19, 46, 62, 17);
+const ST_VALUE: Rect = rect(88, 24, 118, 30);
+const ST_UNIT: Rect = rect(210, 24, 40, 30);
+const ST_SUB: [Rect; 2] = [rect(254, 25, 86, 14), rect(254, 43, 86, 14)];
+const ST_GEN: Rect = rect(348, 25, 60, 17);
+const ST_GEN_T: Rect = rect(348, 46, 60, 17);
+const C_HV: Color = 0xc9a0;
+const C_GEN: Color = 0x0400;
+
+static mut STRIP_SHOWN: Option<StripData> = None;
+
+/// Forget the drawn strip (the next `meter_strip` draws all of it).
+pub fn strip_invalidate() {
+    unsafe { *core::ptr::addr_of_mut!(STRIP_SHOWN) = None };
+}
+
+/// A text field on the strip's dark box.
+fn st_text(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8) {
+    let t = Ink::new(font, r, text, align, sp);
+    paint(r, &[(K_TEXT, C_FILL)], |x, y| match t.at(x, y) {
+        Some(g) => (fg, tag(1, g)),
+        None => (C_FILL, 0),
+    });
+}
+
+/// A badge (r5) on the strip's dark box; empty text = no badge.
+fn st_badge(r: Rect, text: &str, fill: Color) {
+    if text.is_empty() {
+        lcd::fill_rect(r.x as u16, r.y as u16, r.w as u16, r.h as u16, C_FILL);
+        return;
+    }
+    let t = Ink::new(sf::SC_F12, r, text, 8, 1);
+    badge(r, fill, C_FILL, None, &[(&t, C_WHITE)]);
+}
+
+/// Draw the strip, repainting only the fields that changed.
+pub fn meter_strip(d: &StripData) {
+    let shown = unsafe { &mut *core::ptr::addr_of_mut!(STRIP_SHOWN) };
+    let o = match *shown {
+        Some(o) if o.hv == d.hv => Some(o),
+        _ => {
+            // Ring (0xad55, red at >= 100 V) and the dark box, one shape.
+            let ring = if d.hv { C_HV } else { C_FRAME };
+            lcd::fill_rect(13, 20, 401, 1, C_BAR);
+            lcd::fill_rect(13, 75, 401, 1, C_BAR);
+            paint(STRIP, &[(K_SHAPE, C_BAR)], |x, y| {
+                if in_rbox(ST_INNER, 5, 0x0f, x, y) {
+                    (C_FILL, tag(1, 0))
+                } else if in_rbox(STRIP, 5, 0x0f, x, y) {
+                    (ring, tag(1, 0))
+                } else {
+                    (C_BAR, 0)
+                }
+            });
+            None
+        }
+    };
+    let changed = |same: bool| o.is_none() || !same;
+    let ol = o.unwrap_or(*d);
+    if changed(ol.func == d.func) {
+        st_badge(ST_FUNC, d.func, C_PURPLE);
+    }
+    if changed(ol.badge == d.badge && ol.badge_col == d.badge_col) {
+        st_badge(ST_BADGE, d.badge, d.badge_col);
+    }
+    if changed(ol.value == d.value) {
+        st_text(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), C_YELLOW, 4, 1);
+    }
+    if changed(ol.unit == d.unit && ol.unit_letters == d.unit_letters) {
+        let f = if d.unit_letters { sf::LETTERS } else { sf::SC_DIGITS };
+        st_text(ST_UNIT, f, d.unit.as_str(), C_YELLOW, 1, 1);
+    }
+    for i in 0..2 {
+        if changed(ol.sub[i] == d.sub[i]) {
+            st_text(ST_SUB[i], sf::SC_F12, d.sub[i].as_str(), C_WHITE, 4, 1);
+        }
+    }
+    if changed(ol.gen == d.gen) {
+        st_badge(ST_GEN, if d.gen.n > 0 { "GEN" } else { "" }, C_GEN);
+        st_text(ST_GEN_T, sf::SC_F12, d.gen.as_str(), C_GREEN, 8, 1);
+    }
+    *shown = Some(*d);
+}
+
+/// Right-panel button under a touch: the stock rects, x from the panel edge
+/// and 4 px of slop up / down (the 1 / 8 px gaps between the pills go to the
+/// nearer button instead of nowhere).
+pub fn panel_hit(x: u16, y: u16) -> Option<usize> {
+    if x < 414 {
+        return None;
+    }
+    let y = y as i16;
+    let mut best: Option<(i16, usize)> = None;
+    for (k, r) in B_RECT.iter().enumerate() {
+        let d = if y < r.y { r.y - y } else if y >= r.y + r.h { y - (r.y + r.h - 1) } else { 0 };
+        if d <= 4 && best.map_or(true, |b| d < b.0) {
+            best = Some((d, k));
+        }
+    }
+    best.map(|b| b.1)
+}
+
+/// Strip touch areas: the badge column (REL) and the rest (function band).
+pub fn strip_hit(x: u16, y: u16) -> Option<bool> {
+    if (20..76).contains(&y) && x < 414 { Some(x < 86) } else { None }
 }

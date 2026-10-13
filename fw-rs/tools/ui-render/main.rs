@@ -188,8 +188,14 @@ impl Checker {
     /// pages' stock TEXT22 rows are drawn at spacing 0, where that font's
     /// glyphs touch by design; gaps and margins are still checked).
     fn check_opts(&mut self, scene: &str, regions: &[(&str, Bx)], glyph_rule: bool) {
+        self.check_area(scene, regions, glyph_rule, None)
+    }
+
+    /// `check_opts` on the items inside `area` only (our additions on a
+    /// stock-replica page: the combined view's meter strip).
+    fn check_area(&mut self, scene: &str, regions: &[(&str, Bx)], glyph_rule: bool, area: Option<Bx>) {
         self.cases += 1;
-        let its = items();
+        let its: Vec<Item> = items().into_iter().filter(|i| area.map_or(true, |a| a.contains(&i.b))).collect();
         let screen = Bx::new(0, 0, W as i32, H as i32);
         let desc = |i: &Item| format!("{} #{} {:?}", kind_name(i.kind), i.id, i.b);
         // Container of each item: smallest shape, else smallest region.
@@ -618,6 +624,62 @@ fn main() {
         let b = pick(&m, 0, 2, true, 214, 25);
         let c = pick(&m, 0, 3, true, 214, 25);
         t("T + 2 X cursors at one spot cycle", a == Some((false, 2)) && b == Some((false, 3)) && c == Some((false, 0)));
+    }
+
+    // 0b. Combined view in the stock language (scope_ui meter strip, port
+    // plan S7): every strip case x hold x verdict x REL x HV x REC x GEN,
+    // the full layout rules on the strip's items, and A -> B updates equal
+    // a fresh B (no stale pixels).
+    {
+        let mut m = scope_ui::Model::DEFAULT;
+        m.combined = true;
+        let strip_area = Bx::new(13, 20, 401, 56);
+        let strip_regions = [("screen", Bx::new(0, 0, 480, 320))];
+        let page = |m: &scope_ui::Model| {
+            host::reset(0);
+            scope_ui::invalidate();
+            scope_ui::strip_invalidate();
+            scope_ui::graph().clear();
+            scope_ui::update(m);
+        };
+        let mut datas = vec![];
+        for (name, r, label) in &cases {
+            for hold in 0..4u8 {
+                for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
+                    for rel in [false, true] {
+                        for (hv, rec, gen) in [(0u8, false, ""), (hv_of(r), true, "10.00MHz"), (1, false, "1.00kHz"), (2, false, "")] {
+                            let mut d = ui::strip_data(r, hold, lim, rel, hv, hold == 1, *label, rec);
+                            d.gen = scope_ui::Txt::new(gen);
+                            page(&m);
+                            scope_ui::meter_strip(&d);
+                            ck.check_area(&format!("strip/{name}/h{hold}/l{lim}/r{}/hv{hv}", rel as u8), &strip_regions, true, Some(strip_area));
+                            if hold == 0 && lim == 0 && !rel {
+                                datas.push((name, d));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        page(&m);
+        scope_ui::meter_strip(&datas[0].1);
+        save(&out, "s00-replica-combined");
+        // Updates: A then B equals a fresh B (strip area).
+        for (na, a) in datas.iter().step_by(3) {
+            for (nb, b) in datas.iter().step_by(5) {
+                page(&m);
+                scope_ui::meter_strip(a);
+                scope_ui::meter_strip(b);
+                let got = emu().fb.clone();
+                page(&m);
+                scope_ui::meter_strip(b);
+                ck.cases += 1;
+                let bad = (20..76).flat_map(|y| (0..480).map(move |x| y * W + x)).filter(|&i| got[i] != emu().fb[i]).count();
+                if bad > 0 {
+                    ck.fail(&format!("strip update {na} -> {nb}"), format!("{bad} stale pixels"));
+                }
+            }
+        }
     }
 
     // 1. Combined view: every strip case x hold x verdict x REL x alt.
