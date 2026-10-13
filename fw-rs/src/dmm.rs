@@ -636,6 +636,13 @@ impl Dmm {
         before != (self.button(), self.mode_byte() & 0xC0)
     }
 
+    /// Anti-drop: pulse the latching V/A relay again into its current state.
+    pub fn reassert_relay(&mut self, clk: &mut Clock) {
+        if let Some(pa) = self.pa_now {
+            relay_pa(clk, pa);
+        }
+    }
+
     /// (Re)start measuring in the current mode.
     pub fn start(&mut self, clk: &mut Clock) {
         let (m, r) = (self.mode, self.range);
