@@ -278,6 +278,35 @@ fn pinch_tests(ck: &mut Ck) {
     ck.t("2-finger swipe down: MultiSwipeDown(2)", v.last() == Some(&G::MultiSwipeDown(2)));
 }
 
+/// Pre-flash review 7dc32ac B1: a pinch whose end was lost (MF / AUTO /
+/// overlay mid-pinch) must not carry its index into the other axis. The
+/// review's sequence: CH1 at 10 V/div (range 9), vertical pinch, (MF,
+/// release, MF), horizontal pinch closing to ~0.68 -> the index must be a
+/// valid timebase, never a range >= 10; and every pinch result stays in its
+/// own table.
+fn pinch_state_tests(ck: &mut Ck) {
+    use scope_ui::{pinch_step, PinchState};
+    let (tb, range, tb_min, tb_max) = (13usize, 9usize, 3usize, 24usize);
+    let v = pinch_step(None, false, 160, 300, tb, range, tb_min, tb_max);
+    ck.t("pinch V from range 9: vertical, range index", !v.horizontal && v.i <= 9);
+    // The stale V state is fed to a new horizontal pinch (its end was lost).
+    let h = pinch_step(Some(v), true, 200, 136, tb, range, tb_min, tb_max);
+    ck.t("stale V + H pinch to 0.68: horizontal, from the timebase", h.horizontal && h.i0 == tb && (tb_min..=tb_max).contains(&h.i));
+    // Exhaustive: any stored state x any ratio stays inside its table.
+    let mut ok = true;
+    for horizontal in [false, true] {
+        for prev in [None, Some(PinchState { horizontal: true, i0: 29, i: 29 }), Some(PinchState { horizontal: false, i0: 9, i: 0 })] {
+            for s in [1u16, 10, 50, 99, 136, 200, 400, 999] {
+                for (t, r) in [(3usize, 0usize), (29, 9), (13, 6)] {
+                    let n = pinch_step(prev, horizontal, 200, s, t, r, tb_min, 29);
+                    ok &= n.horizontal == horizontal && if horizontal { (tb_min..=29).contains(&n.i) } else { n.i <= scope_ui::RANGE_MAX };
+                }
+            }
+        }
+    }
+    ck.t("pinch_step: every result inside its own table", ok);
+}
+
 fn raw_tests(ck: &mut Ck) {
     // Raw-move capture: every moved report is a Move from the previous point,
     // from the first pixel (no slop), and the release is Up.
@@ -310,6 +339,7 @@ fn raw_tests(ck: &mut Ck) {
 
 fn gesture_tests(ck: &mut Ck) {
     pinch_tests(ck);
+    pinch_state_tests(ck);
     raw_tests(ck);
     let tap = |v: &[G]| v.iter().any(|g| matches!(g, G::Tap(_)));
     ck.t("still tap", tap(&touch(&[(100, 100), (100, 101), (101, 100)], false, 0)));

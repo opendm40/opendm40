@@ -1849,3 +1849,54 @@ pub fn panel_hit(x: u16, y: u16) -> Option<usize> {
 pub fn strip_hit(x: u16, y: u16) -> Option<bool> {
     if (20..76).contains(&y) && x < 414 { Some(x < 86) } else { None }
 }
+
+// ------------------------------------------------------------------ pinch
+
+/// Pinch preview state (scope_page.rs): horizontal = timebase index, else
+/// hardware V/div range index; `i0` at the start, `i` previewed.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct PinchState {
+    pub horizontal: bool,
+    pub i0: usize,
+    pub i: usize,
+}
+
+/// Highest V/div range index (scope::VDIV has 10 entries).
+pub const RANGE_MAX: usize = 9;
+
+/// One pinch report: the stored state (None at the start of a pinch) and the
+/// finger separation `s0` -> `s` along the pair's axis. 1-2-5: one index
+/// step per x2.15 of the separation; spreading zooms in (smaller s/div or
+/// V/div). A stored state of the other direction is dropped (a pinch whose
+/// end was lost must never carry its index into the other axis' table:
+/// pre-flash review 7dc32ac B1). The result is always inside the table of
+/// its own axis: tb `tb_min..=tb_max`, range `0..=RANGE_MAX`.
+pub fn pinch_step(prev: Option<PinchState>, horizontal: bool, s0: u16, s: u16, tb: usize, range: usize, tb_min: usize, tb_max: usize) -> PinchState {
+    let cur = if horizontal { tb } else { range };
+    let p = match prev {
+        Some(p) if p.horizontal == horizontal => p,
+        _ => PinchState { horizontal, i0: cur, i: cur },
+    };
+    let r = s.max(1) as f32 / s0.max(1) as f32;
+    let k = round_i(ln_f(r) / 0.767);
+    let (lo, hi) = if horizontal { (tb_min, tb_max) } else { (0, RANGE_MAX) };
+    let i = (p.i0 as i32 - k).clamp(lo as i32, hi as i32) as usize;
+    PinchState { i, ..p }
+}
+
+/// ln(x) for x > 0 (no libm): exponent + a short series on the mantissa.
+pub fn ln_f(x: f32) -> f32 {
+    if !(x > 0.0) {
+        return 0.0;
+    }
+    let b = x.to_bits();
+    let e = ((b >> 23) & 0xFF) as i32 - 127;
+    let m = f32::from_bits((b & 0x007F_FFFF) | 0x3F80_0000); // 1..2
+    let t = (m - 1.0) / (m + 1.0);
+    let t2 = t * t;
+    e as f32 * core::f32::consts::LN_2 + 2.0 * t * (1.0 + t2 / 3.0 + t2 * t2 / 5.0 + t2 * t2 * t2 / 7.0)
+}
+
+fn round_i(x: f32) -> i32 {
+    if x >= 0.0 { (x + 0.5) as i32 } else { (x - 0.5) as i32 }
+}

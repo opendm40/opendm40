@@ -88,7 +88,8 @@ pub(super) struct Touch {
 #[derive(Clone, Copy)]
 pub(super) struct Pinch {
     axis: Axis,
-    /// Index at the start (tb / range) and the previewed one.
+    /// Index at the start (tb / range) and the previewed one; always inside
+    /// the table of `axis` (scope_ui::pinch_step).
     i0: usize,
     i: usize,
 }
@@ -516,8 +517,10 @@ impl App {
         }
         let s = &self.scope.s;
         let (ky, kx) = match self.sp.pinch {
-            Some(p) if p.axis == Axis::V => (scope::VDIV[c.range] / scope::VDIV[p.i], 1.0),
-            Some(p) => (1.0, scope::SDIV[c.tb] / scope::SDIV[p.i]),
+            // (Indices clamped again: a safety net, pinch_step keeps them in
+            // their tables.)
+            Some(p) if p.axis == Axis::V => (scope::VDIV[c.range.min(9)] / scope::VDIV[p.i.min(9)], 1.0),
+            Some(p) => (1.0, scope::SDIV[c.tb.min(29)] / scope::SDIV[p.i.min(29)]),
             None => (scope::VDIV[c.range] / scope::VDIV[s.range], scope::SDIV[c.tb] / scope::SDIV[s.tb]),
         };
         // A stopped pan moves the record under the trigger column.
@@ -607,6 +610,12 @@ impl App {
     /// handling in `gesture` runs), Some(captured) otherwise.
     pub(super) fn sp_gesture(&mut self, clk: &mut Clock, g: Gesture) -> Option<bool> {
         let now = clk.now_ms();
+        // The end of a pinch always reaches it (before the AUTO / popup
+        // early returns).
+        if let Gesture::PinchEnd(ok) = g {
+            self.sp_pinch_end(ok, now);
+            return Some(false);
+        }
         // Touch lock while AUTO-set runs (stock), keys too except MENU.
         if self.sp.autoset.is_some() {
             return match g {
@@ -997,6 +1006,33 @@ impl App {
         self.scope_set(st, now);
     }
 
+    /// End a held drag / pinch whose end may never arrive (a popup, AUTO,
+    /// an overlay or a key took over): a pinch is dropped (nothing applied),
+    /// a drag applies what it moved so far; the acquisition runs again
+    /// (pre-flash review 7dc32ac B1: a stale pinch kept it held and carried
+    /// its index into the other axis).
+    pub(super) fn sp_end_hold(&mut self, now: u64) {
+        if self.sp.pinch.is_some() {
+            self.sp_pinch_end(false, now);
+        }
+        let held = core::mem::replace(&mut self.sp.frozen, false);
+        if let Some(t) = self.sp.touch.take() {
+            if held {
+                let s = self.scope.s;
+                if !s.run && t.pan != 0 {
+                    if let Some(a) = t.anchor {
+                        self.scope.pan_from(a, t.pan);
+                    }
+                }
+                self.scope.apply(s, now);
+                self.sp_settings_changed();
+            }
+        } else if held {
+            let s = self.scope.s;
+            self.scope.apply(s, now);
+        }
+    }
+
     // ------------------------------------------------------------ pinch
 
     fn sp_pinch(&mut self, axis: Axis, s0: u16, s: u16) {
@@ -1004,18 +1040,14 @@ impl App {
             self.sp.touch = None;
         }
         let st = self.scope.s;
-        let p = *self.sp.pinch.get_or_insert(Pinch { axis, i0: if axis == Axis::H { st.tb } else { st.range }, i: if axis == Axis::H { st.tb } else { st.range } });
-        // 1-2-5: one index step per x2.15 of the finger separation; spreading
-        // zooms in (smaller s/div or V/div).
-        let r = s.max(1) as f32 / s0.max(1) as f32;
-        let k = libm_round(ln(r) / 0.767);
-        let i = if axis == Axis::H {
-            (p.i0 as i32 - k).clamp(scope::TB_MIN as i32, if self.scope.roll { scope::TB_MAX } else { scope::TB_YT_MAX } as i32) as usize
-        } else {
-            (p.i0 as i32 - k).clamp(0, 9) as usize
-        };
-        if i != p.i || !self.sp.bubble {
-            self.sp.pinch = Some(Pinch { i, ..p });
+        let h = axis == Axis::H;
+        let prev = self.sp.pinch.map(|p| su::PinchState { horizontal: p.axis == Axis::H, i0: p.i0, i: p.i });
+        let tb_max = if self.scope.roll { scope::TB_MAX } else { scope::TB_YT_MAX };
+        let n = su::pinch_step(prev, h, s0, s, st.tb, st.range, scope::TB_MIN, tb_max);
+        let p = Pinch { axis, i0: n.i0, i: n.i };
+        let changed = prev.map_or(true, |q| q != n);
+        if changed || !self.sp.bubble {
+            self.sp.pinch = Some(p);
             self.sp_render();
             if !self.redraw && self.overlay.is_none() {
                 self.sp.bubble = true;
@@ -1133,7 +1165,7 @@ impl App {
 
     /// Open (or switch) the popup; the CH1 / math label turns grey.
     fn sp_popup_open(&mut self, p: su::Popup) {
-        self.sp.touch = None;
+        self.sp_end_hold(self.now);
         self.sp.popup = p;
         if !self.redraw {
             // The CH1 / math pill label shows the open popup (0x7bef).
@@ -1338,6 +1370,7 @@ impl App {
     /// user's coupling is kept (the stock forces DC); only when an AC search
     /// finds nothing, it is repeated in DC.
     pub(super) fn autoset_start(&mut self, now: u64) {
+        self.sp_end_hold(now);
         let saved = self.scope.s;
         let mut st = saved;
         st.tb = 8;
@@ -1480,20 +1513,3 @@ fn tb_for(period: f32) -> usize {
 
 /// The pinch value bubble: centred in the graph.
 const BUBBLE: Rect = rect(153, 140, 120, 40);
-
-/// ln(x) for x > 0 (no libm): exponent + a short series on the mantissa.
-fn ln(x: f32) -> f32 {
-    if !(x > 0.0) {
-        return 0.0;
-    }
-    let b = x.to_bits();
-    let e = ((b >> 23) & 0xFF) as i32 - 127;
-    let m = f32::from_bits((b & 0x007F_FFFF) | 0x3F80_0000); // 1..2
-    let t = (m - 1.0) / (m + 1.0);
-    let t2 = t * t;
-    e as f32 * core::f32::consts::LN_2 + 2.0 * t * (1.0 + t2 / 3.0 + t2 * t2 / 5.0 + t2 * t2 * t2 / 7.0)
-}
-
-fn libm_round(x: f32) -> i32 {
-    if x >= 0.0 { (x + 0.5) as i32 } else { (x - 0.5) as i32 }
-}
