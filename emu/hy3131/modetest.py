@@ -281,6 +281,10 @@ def main():
     fws = ['stock', 'fwrs'] if a.fw == 'both' else [a.fw]
     jobs = [(fw, sc) for fw in fws for sc in scs]
     os.makedirs(OUT, exist_ok=True)
+    if 'fwrs' in fws:
+        # build fw-rs once up front: parallel first runs would race in the shared worktree
+        subprocess.run([sys.executable, RUNNER, 'fwrs', '--name', 'hy-prebuild', '--dry'], cwd=ROOT,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=True)
     results = []
     with ThreadPoolExecutor(max_workers=a.jobs) as ex:
         futs = [ex.submit(run_one, fw, sc, a.port_base + i, a.fast) for i, (fw, sc) in enumerate(jobs)]
