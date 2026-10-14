@@ -1,5 +1,24 @@
 # Scope scale and position by touch: survey and DM40 proposal
 
+**Implemented (2026-10-14)**, `src/scope_ui.rs` (tap step section,
+`Popup::Tb`) and `src/scope_page.rs`; tested by `tools/touch-test`
+(`tap_step_tests`) and `tools/ui-render` (section 0a). Owner's choice:
+**Corners is the default** (`scope_ui::TAP_DEFAULT`, one const); Halves and
+Off are in Settings 2/2 "Scope tap step" (persisted in p[1] bits 28..29 as
+the mode XOR the default, so older records restore the default).
+Deviations from the text below:
+* tabs are 52 px wide, (23,280,52,17) and (358,280,52,17): at 50 px the
+  widest labels ("<500ms", 45 px) were 2 px from the ring;
+* the list box's first row is y 21 (79,21,132,191): y 20 is the frame line
+  in the same colour, so it looks the same and keeps 3 px from the badges;
+* Corners hold: the first repeat 500 ms after the press, then every 200 ms
+  (owner's numbers); a tap steps on release, a hold that repeated does not
+  step again on release;
+* a roll-only list entry (orange, beyond 1 s/div) turns Roll on;
+* the top-bar badges win over the top 5 rows of the graph area (y 15..19)
+  where the T marker's zone reaches into the bar; the tabs and corner zones
+  never win over a marker or cursor-line zone.
+
 2026-10-14. Research only, no code changed. Question from the owner: the stock
 tap-to-step timebase (tap off a marker: left half slower, right half faster,
 `stock-scope-ui.md` §10.3) is not obvious. Would "+/- zones in the corners" be
