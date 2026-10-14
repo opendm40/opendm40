@@ -506,7 +506,9 @@ pub fn header_valid(h: &[u8; 12]) -> bool {
 /// bytes from file offset 0 (header included); a = p[0x1F], kp = a if a < 128
 /// else a >> 1, k = p[kp]; c -> (c + a) ^ k except at 0x1F and kp. A block of
 /// at most 0x1F bytes, or with kp outside it (the last, partial one), is
-/// stored as is.
+/// stored as is -- but the real FS-loader mis-decodes a short last block of
+/// more than 0x1F bytes with kp outside it (stale key from its buffer), so
+/// calbackup::FwFile never writes one (FwFile::tail_hazard).
 pub(crate) fn encode_block(p: &mut [u8]) {
     const ADD_POS: usize = 0x1F;
     if p.len() <= ADD_POS {

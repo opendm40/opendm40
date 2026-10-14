@@ -20,10 +20,23 @@ python3 dm40fw.py info   dm40_v_2_6.bin
 python3 dm40fw.py decode dm40_v_2_6.bin dm40_v_2_6.dec.bin   # whole file, header included
 python3 dm40fw.py encode dm40_v_2_6.dec.bin dm40_v_2_6.bin
 python3 dm40fw.py unpack dm40_v_2_6.bin body.bin             # image loaded at 0x08004000
-python3 dm40fw.py pack   body.bin out.bin
+python3 dm40fw.py pack   body.bin out.bin           # as is (vendor round trip)
+python3 dm40fw.py pack   --pad body.bin out.bin     # new images: whole 128-byte blocks
 ```
 
 `unpack` + `pack` reproduce all official files from V1.6 to V2.6 byte for byte.
+
+**Short last block: always `--pad` new images.** The file is obfuscated in
+128-byte blocks (header included); each block's key position comes from its
+byte `0x1F`. If the file is not a multiple of 128 and the short last block is
+longer than `0x1F` bytes with its key position at or past its end, this tool
+stores that block as is, but the vendor FS-loader decodes it with a stale key
+byte, corrupts the tail, fails the body CRC ("update error") and leaves the app
+erased. `pack --pad` (`build(pad=True)`) pads the body with 0xFF so header +
+body is a multiple of 128 (word 1 and the body CRC include the padding);
+`pack` without `--pad` refuses such a body; `info` / `unpack` warn about such
+a file (`tail_hazard`). Vendor files are safe (V2.6: 36-byte last block, key
+position 8). fw-rs `build.sh` and `patch/patcher.py` always pad.
 
 **Header checksum.** `pack` computes both header check words: word 0 is a
 CRC-16 of words 1 and 2 with its complement in the high half, word 2 is

@@ -111,7 +111,9 @@ def main():
     orig = open(orig_path, 'rb').read()
     _, _, _, body = dm40fw.split(dm40fw.decode(orig))
     new_body = patch_body(body, elf)
-    open(out_path, 'wb').write(dm40fw.build(new_body, like=orig))
+    # pad=True: whole 128-byte blocks, so the FS-loader cannot mis-decode a
+    # short final block (dm40fw.tail_hazard).
+    open(out_path, 'wb').write(dm40fw.build(new_body, like=orig, pad=True))
     print('written %s' % out_path)
 
 

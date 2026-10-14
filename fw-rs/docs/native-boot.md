@@ -59,7 +59,34 @@ all 11 official files byte-for-byte:
   bootloader-managed marker (`dm40fw.py:body_checksum`, `MARKER_OFFSET=0x4000`,
   `MARKER_LEN=12`).
 
-So `dm40fw.py pack body.bin out.bin` already produces a correct update file for
+**Obfuscation and the short-last-block rule (2026-10-14).** The whole file
+(header included) is obfuscated in 128-byte blocks: `a = block[0x1F]`, key
+position `kp = a if a < 128 else a >> 1`, `k = block[kp]`, plain = `(c ^ k) - a`
+except at `0x1F` and `kp`. When the file length is not a multiple of 128 the
+last block is short; if it is **longer than `0x1F` bytes and `kp` >= its
+length**, `dm40fw.py` stores it as is, but the real FS-loader does not: it takes
+the key from a stale byte of its 128-byte buffer and corrupts the tail (seen in
+the Renode emulator on the real loader: `bf->41`, `ff->81`), so the body CRC
+(`L2`) fails -> "update error", and the app is already erased (recovery only
+through the loader's USB disk + "update"). Safe: whole blocks, a last block of
+<= `0x1F` bytes (stored as is by both), or `kp` < its length (the vendor
+`dm40_v_2_6.bin`: 36 bytes, `kp` 8). Rule: **every update file we generate
+is padded with 0xFF so 12 + body is a multiple of 128** (`word1` and `L2`
+include the padding; the loader flashes it like any body byte):
+- `dm40fw.py pack --pad` / `build(pad=True)` pads; `pack` without `--pad`
+  packs as is (vendor round trip) but refuses a hazardous body;
+  `info` / `unpack` warn about a hazardous input (`tail_hazard`);
+- `build.sh native` packs with `--pad` and fails unless the file is a multiple
+  of 128; `firmware/patch/patcher.py` builds with `pad=True`;
+- `_DM40PRV.BIN` (`calbackup::FwFile`) is 12 + `word1` bytes, so it is whole
+  blocks for every image built that way; for an installed image whose file
+  would end in a hazardous block, `FwFile::from_flash` returns None (no
+  firmware file is written);
+- `tools/dm40dbg.py image` prints the last-block length and rejects a
+  hazardous file; `tools/reload.sh` refuses to stage it;
+- host test: `tools/fatren-test/run.sh` ("short last 128-byte block").
+
+So `dm40fw.py pack --pad body.bin out.bin` produces a correct update file for
 **any** body length, with no `--like` needed. **`firmware/README.md` is stale**
 where it says words 0/2 are not understood — that was true earlier; the code now
 computes both.
@@ -495,9 +522,10 @@ RAM: TCM 0x10000000 .data/.bss (~26.5 KB) + stack (top 0x10010000);
 - word0 = `0x2002F7F8`;
 - the reset vector is a Thumb address in region A.
 
-It then runs `../firmware/dm40fw.py pack`, which computes both header words
-itself (no `--like`):
-- word1 = body length;
+It then runs `../firmware/dm40fw.py pack --pad`, which pads the body with 0xFF
+to whole 128-byte file blocks ("Update-file format" above) and computes both
+header words itself (no `--like`):
+- word1 = body length (incl. the padding);
 - word2 = `0x10000 | CRC16(body without the 12 marker bytes)`;
 - word0 = CRC16 of words 1–2, with its complement in the high half.
 
@@ -508,7 +536,9 @@ word0  0xa83657c9   length 0x000384c4 (end 0x0803c4c4)   word2  0x0001e49e
 SP     0x2002f7f8   Reset  0x08004041
 ```
 
-`dm40fw.py unpack` of the packed file gives back the body byte-for-byte.
+`dm40fw.py unpack` of the packed file gives back the body byte-for-byte plus
+the 0xFF padding (< 128 bytes). `build.sh` fails if the packed file is not a
+multiple of 128 bytes or the padded body reaches `0x080A0000`.
 
 **Word0 is the stock app's own initial SP** (`0x2002F7F8`). The FS-loader
 launches the app with `msr msp, [0x08004000]; ldr r0, [0x08004004]; bx r0`

@@ -8,7 +8,8 @@
 # BT-loads the T2 image.) The default mode is exactly the original build; the
 # other modes select their linker script through RUSTFLAGS and build in their
 # own target directory. Native: body = 0x08004000..end with the 12-byte loader
-# marker at 0x08008000 as 0xFF, packed by ../firmware/dm40fw.py into the stock
+# marker at 0x08008000 as 0xFF, packed by ../firmware/dm40fw.py pack --pad
+# (0xFF-padded to whole 128-byte blocks, checked below) into the stock
 # update format (renamed to dm40*.bin only when staged on the device).
 set -e
 cd "$(dirname "$0")"
@@ -60,7 +61,7 @@ fi
 
 BODY=target/native/dm40-fw-native.body.bin
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
-python3 ../firmware/dm40fw.py pack "$BODY" dm40-fw-native.bin
+python3 ../firmware/dm40fw.py pack --pad "$BODY" dm40-fw-native.bin
 python3 - "$BODY" "$ELF" <<'PY'
 import struct, subprocess, sys
 body = open(sys.argv[1], 'rb').read()
@@ -93,3 +94,17 @@ assert body[:4] == struct.pack('<I', 0x2002F7F8)
 assert BASE <= entry - 1 < MARK and entry & 1, 'reset vector not in region A (thumb)'
 PY
 python3 ../firmware/dm40fw.py info dm40-fw-native.bin
+# The FS-loader mis-decodes a short last 128-byte block whose key position is
+# outside it (docs/native-boot.md "Update file format"); dm40fw.py pack --pad pads
+# the body so the file is whole blocks. Fail the build if it is not.
+n=$(wc -c < dm40-fw-native.bin)
+if [ $((n % 128)) -ne 0 ]; then
+    echo "build.sh: dm40-fw-native.bin is $n bytes, not a multiple of 128 (short last block)" >&2
+    rm -f dm40-fw-native.bin
+    exit 1
+fi
+if [ $((0x08004000 + n - 12)) -gt $((0x080A0000)) ]; then
+    echo "build.sh: the padded body ends past 0x080A0000 (FS-loader)" >&2
+    rm -f dm40-fw-native.bin
+    exit 1
+fi

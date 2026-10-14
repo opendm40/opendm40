@@ -275,6 +275,15 @@ pub const FW_MAX_BODY: usize = 0x080A_0000 - 0x0800_4000;
 /// (dm40fw.py pack; the vendor's dm40_v_2_6.bin has 0xFF there too). Then
 /// encoded in 128-byte blocks (fatren::encode_block). Rename it to
 /// dm40*.bin and the loader reinstalls exactly this firmware.
+///
+/// Whole blocks: fw-rs build.sh packs with `dm40fw.py pack --pad` (body padded
+/// with 0xFF so the update file, 12 + word1 bytes, is a multiple of 128;
+/// word1 and the body CRC include the padding), and this file is 12 + word1
+/// bytes, so an image built that way gives full blocks only. The
+/// header cannot be changed here (it is the loader's record of the installed
+/// image), so an image with a short last block is reproduced as it is, unless
+/// that block is one the FS-loader mis-decodes (`tail_hazard`): then there is
+/// no firmware file at all (from_flash = None).
 #[derive(Clone, Copy)]
 pub struct FwFile<'a> {
     hdr: [u8; 12],
@@ -296,7 +305,30 @@ impl<'a> FwFile<'a> {
         if len < FW_MARKER_OFF + 12 || len > FW_MAX_BODY || len > flash.len() {
             return None;
         }
-        Some(FwFile { hdr, body: &flash[..len] })
+        let f = FwFile { hdr, body: &flash[..len] };
+        if f.tail_hazard() {
+            return None;
+        }
+        Some(f)
+    }
+
+    /// The FS-loader hazard (dm40fw.py tail_hazard): the file's last block is
+    /// short with 0x1F < n < 128 (n = size % 128) and its key position kp
+    /// (a = plain byte 0x1F of the block, kp = a if a < 128 else a >> 1) is
+    /// >= n. The encoder stores such a block as is, but the real FS-loader
+    /// decodes it with a stale key from its 128-byte buffer: the body CRC
+    /// fails, "update error", the app is erased. Safe: whole blocks, n <= 0x1F
+    /// (stored as is by both sides), kp < n (the vendor's dm40_v_2_6.bin: 36
+    /// bytes, kp 8).
+    pub fn tail_hazard(&self) -> bool {
+        let size = self.size() as usize;
+        let n = size % 128;
+        if n <= 0x1F {
+            return false;
+        }
+        let a = self.plain(size - n + 0x1F);
+        let kp = if a < 128 { a } else { a >> 1 } as usize;
+        kp >= n
     }
 
     /// Decoded (plain) file byte `p`.

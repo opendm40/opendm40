@@ -8,6 +8,8 @@
 //!                                       read from <dir>/CALIB.BIN etc.; [flash] = the
 //!                                       bytes from 0x08004000 (installed body with the
 //!                                       loader marker at +0x4000): also _DM40PRV.BIN
+//!                                       (prints fwfile=none when FwFile::from_flash
+//!                                       refuses that flash)
 //!   main <image> shot                   screenshot::take_on with the synthetic screen
 //!                                       of the `lcd` stub below (pattern()).
 //!   main <image> shotcut [k [abort]]    the same slice by slice on a NOR model of
@@ -337,7 +339,15 @@ fn main() {
             .map(|(&(name, addr, _), d)| calbackup::Src { name, addr, data: d })
             .collect();
         let flash = a.get(4).map(|f| fs::read(f).unwrap());
-        let fw = flash.as_ref().map(|f| calbackup::FwFile::from_flash(f).expect("flash: no valid marker"));
+        let fw = flash.as_ref().and_then(|f| {
+            let r = calbackup::FwFile::from_flash(f);
+            if r.is_none() {
+                // Invalid marker / length, or a last block the FS-loader would
+                // mis-decode (FwFile::tail_hazard): no firmware file.
+                println!("fwfile=none");
+            }
+            r
+        });
         let r = calbackup::run(&mut img, &srcs, fw.as_ref().map(|f| f as &dyn calbackup::Source));
         println!(
             "backup={:?} written=0x{:03x} conflict=0x{:03x} freed={} fw_skipped={}",
