@@ -67,11 +67,16 @@ pub const LABEL: usize = 14;
 /// Spare ids for ad-hoc experiments.
 pub const X1: usize = 15;
 pub const X2: usize = 16;
-pub const N: usize = 17;
+// DMM page sections (hooks in app.rs; nested inside DMM / TICK).
+/// DmmView::reading (main digits, +1 digit, aux rows, labels).
+pub const DREAD: usize = 17;
+/// ui::chart (trend columns, axis labels, side panel, chips).
+pub const DCHART: usize = 18;
+pub const N: usize = 19;
 
 const NAMES: [&str; N] = [
     "usb", "scpi", "csv", "tick", "touch", "gesture", "scope", "bt", "dmm", "s.acq", "s.frame", "s.meas", "s.mtxt",
-    "s.status", "s.labels", "x1", "x2",
+    "s.status", "s.labels", "x1", "x2", "d.read", "d.chart",
 ];
 
 #[derive(Clone, Copy)]
@@ -418,6 +423,6 @@ pub fn report(buf: &mut [u8]) -> usize {
         w.fix(s.total / el_ms, 1, 6);
         w.s("\n");
     }
-    w.s("(s.* nested in scope/tick; max1s = max of the current + last 1 s window)\n");
+    w.s("(s.* nested in scope/tick, d.* in dmm/tick; max1s = max of the current + last 1 s window)\n");
     w.n
 }
