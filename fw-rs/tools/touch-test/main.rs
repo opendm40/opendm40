@@ -258,6 +258,123 @@ fn touch2(frames: &[((u16, u16), (u16, u16))], swap: bool) -> Vec<G> {
     v
 }
 
+/// Controller frames through the real Debounce and Tracker, as the main
+/// loop: `seq` = (time, frame points; empty = a release frame), a poll without
+/// a frame (idle + tick) every 5 ms in between. The app is the scope graph:
+/// it captures every Down with raw moves (scope_page.rs). Returns the gestures.
+fn frames_to_gestures(seq: &[(u64, Vec<(u16, u16)>)]) -> Vec<G> {
+    let mut d = Debounce::new();
+    let mut tr = Tracker::new();
+    let mut v = vec![];
+    let mut feed = |tr: &mut Tracker, g: Option<G>, v: &mut Vec<G>| {
+        if let Some(g) = g {
+            if matches!(g, G::Down(_)) {
+                gesture::raw_next(true);
+                tr.capture();
+            }
+            v.push(g);
+        }
+    };
+    let end = seq.last().map(|s| s.0).unwrap_or(0) + 200;
+    let mut k = 0;
+    let mut t = seq.first().map(|s| s.0).unwrap_or(0);
+    while t <= end {
+        let ev = if k < seq.len() && seq[k].0 <= t {
+            let pts = &seq[k].1;
+            k += 1;
+            let mut f = Frame { pressed: !pts.is_empty(), n: pts.len() as u8, ..Frame::default() };
+            for (i, &(x, y)) in pts.iter().enumerate() {
+                f.pts[i] = Point { x, y };
+            }
+            d.frame(&f, t)
+        } else {
+            let e = d.idle(t);
+            let g = tr.tick(t);
+            feed(&mut tr, g, &mut v);
+            t += 5;
+            e
+        };
+        if let Some(e) = ev {
+            let g = tr.event(&e, t);
+            feed(&mut tr, g, &mut v);
+        }
+    }
+    v
+}
+
+/// Owner finding: after a pinch the finger lifted last kept dragging. Once a
+/// touch had two fingers nothing but the pinch end may come out of it, in
+/// any lift order, also when the controller reports a release between the
+/// two lifts (a one-finger touch-down shortly after a multi-finger release
+/// is the remaining finger, not a new touch).
+fn pinch_lift_tests(ck: &mut Ck) {
+    let one_finger = |v: &[G]| v.iter().any(|g| matches!(g, G::Down(_) | G::Tap(_) | G::LongPress(_) | G::Drag(..) | G::Move(..) | G::Grab(_) | G::Up(_) | G::SwipeLeft | G::SwipeRight | G::SwipeUp | G::SwipeDown));
+    let ends = |v: &[G]| v.iter().filter(|g| matches!(g, G::PinchEnd(_))).count();
+    // Horizontal spread 100 -> 200 px (16 ms reports), then one finger lifts
+    // and the other moves 60 px down and 40 px right, then lifts.
+    let pinch = |lift_a: bool, gap: Option<u64>, first_alone: bool| {
+        let mut seq = vec![];
+        let mut t = 1000;
+        if first_alone {
+            for _ in 0..3 {
+                seq.push((t, vec![(150, 160)]));
+                t += 16;
+            }
+        }
+        for i in 0..=10u16 {
+            seq.push((t, vec![(150 - 5 * i, 160), (250 + 5 * i, 162)]));
+            t += 16;
+        }
+        if let Some(g) = gap {
+            seq.push((t, vec![]));
+            t += g;
+        }
+        let rest = if lift_a { (300u16, 162u16) } else { (100u16, 160u16) };
+        for i in 0..=12u16 {
+            seq.push((t, vec![(rest.0 + 3 * i, rest.1 + 5 * i)]));
+            t += 16;
+        }
+        seq.push((t, vec![]));
+        frames_to_gestures(&seq)
+    };
+    for (name, lift_a, gap, first) in [
+        ("pinch, lift left, right finger moves", true, None, false),
+        ("pinch, lift right, left finger moves", false, None, false),
+        ("pinch, release frame + 40 ms gap, last finger moves", true, Some(40), false),
+        ("pinch, release frame + 120 ms gap, last finger moves", false, Some(120), false),
+        ("1 finger first, pinch, lift, last finger moves", true, None, true),
+    ] {
+        let v = pinch(lift_a, gap, first);
+        let pinched = v.iter().any(|g| matches!(g, G::Pinch(..)));
+        let after_cancel = v.iter().skip_while(|g| !matches!(g, G::Cancel | G::Pinch(..))).cloned().collect::<Vec<_>>();
+        ck.t(&format!("{name}: pinch, one PinchEnd(true), nothing one-finger after it"), pinched && ends(&v) == 1 && v.contains(&G::PinchEnd(true)) && !one_finger(&after_cancel));
+        if !first {
+            ck.t(&format!("{name}: no one-finger gesture at all"), !one_finger(&v));
+        }
+    }
+    // Two-finger tap (both land in one report, lift together or one by one).
+    let v = frames_to_gestures(&[(1000, vec![(150, 160), (250, 160)]), (1016, vec![(150, 160), (250, 161)]), (1032, vec![(150, 160), (250, 161)]), (1048, vec![])]);
+    ck.t("two-finger tap: nothing", v.is_empty());
+    let v = frames_to_gestures(&[(1000, vec![(150, 160), (250, 160)]), (1016, vec![(150, 160), (250, 161)]), (1032, vec![(250, 161)]), (1048, vec![(250, 161)]), (1064, vec![])]);
+    ck.t("two-finger tap, lifted one by one: nothing", v.is_empty());
+    // A new one-finger touch well after a pinch is a normal touch.
+    let mut seq = vec![];
+    let mut t = 1000;
+    for i in 0..=10u16 {
+        seq.push((t, vec![(150 - 5 * i, 160), (250 + 5 * i, 162)]));
+        t += 16;
+    }
+    seq.push((t, vec![]));
+    t += 500;
+    for i in 0..=5u16 {
+        seq.push((t, vec![(200, 100 + 6 * i)]));
+        t += 16;
+    }
+    seq.push((t, vec![]));
+    let v = frames_to_gestures(&seq);
+    ck.t("pinch, then a new touch 500 ms later: Down, moves, Up", v.iter().filter(|g| matches!(g, G::Down(_))).count() == 1 && v.iter().any(|g| matches!(g, G::Move(..))) && matches!(v.last(), Some(G::Up(_))));
+}
+
 fn pinch_tests(ck: &mut Ck) {
     // Horizontal spread 100 -> 200 px, slot order swapping every frame.
     let f: Vec<_> = (0..=10u16).map(|i| ((150 - 5 * i, 160), (250 + 5 * i, 162))).collect();
@@ -339,6 +456,7 @@ fn raw_tests(ck: &mut Ck) {
 
 fn gesture_tests(ck: &mut Ck) {
     pinch_tests(ck);
+    pinch_lift_tests(ck);
     pinch_state_tests(ck);
     raw_tests(ck);
     let tap = |v: &[G]| v.iter().any(|g| matches!(g, G::Tap(_)));
