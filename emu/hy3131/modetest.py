@@ -4,9 +4,11 @@ scripted HY3131 inputs and compare what they report with the input.
 
 Stock: the Bluetooth measurement protocol (bt_meas_v2_6.h, cmd 06 sets the
 mode, cmd 09 returns the shown values); fw-rs: SCPI over the same UART
-(CONF:<f>, READ?). Both go through run.py's --bt-port passthrough; the
-requests are injected at virtual times with the BT module's SendHex, the
-replies are collected on the TCP side.
+(CONF:<f>, READ?). Both go through run.py's --bt-port passthrough: a TCP
+client polls (wall clock, the emulation runs ~10x slower than real time),
+switches the function once the firmware answers, and keeps polling until the
+run ends. (Injecting with `sysbus.btmodule SendHex` from the --script monitor
+lines hangs Renode while the machine is paused between RunFor segments.)
 
   emu/hy3131/modetest.py                 # all scenarios, both firmwares
   emu/hy3131/modetest.py -f stock dcv acv
@@ -53,7 +55,7 @@ SCENARIOS = [
 ]
 
 STOCK_SETTINGS = 0x080C0000
-POLL_FROM, POLL_EVERY = 4.0, 0.5
+POLL_WALL = 1.5  # seconds of wall time between requests (~0.15 s virtual)
 
 
 def crc16_8005(data, init=0xFFFF):
@@ -74,7 +76,7 @@ def stock_settings_patch():
         rec = bytearray(f.read(0x320))
     rec[0x115] = 0x81
     c = crc16_8005(rec[4:0x320])
-    words = [c >> 8, c & 0xFF, (c ^ 0xFFFF) >> 8, (c ^ 0xFFFF) & 0xFF]
+    words = [c & 0xFF, c >> 8, (c ^ 0xFFFF) & 0xFF, (c ^ 0xFFFF) >> 8]  # u16 crc, u16 ~crc, little endian
     cmds = ['sysbus WriteByte 0x%08X 0x%02X' % (STOCK_SETTINGS + i, w) for i, w in enumerate(words)]
     cmds.append('sysbus WriteByte 0x%08X 0x81' % (STOCK_SETTINGS + 0x115))
     return cmds
@@ -135,16 +137,27 @@ def parse_scpi(buf):
     return out
 
 
-class Collector(threading.Thread):
-    def __init__(self, port):
+class Client(threading.Thread):
+    """TCP side of the BT passthrough: polls, switches the function after the
+    first answer, records every reply with its wall time."""
+
+    def __init__(self, port, fw, mode_byte, scpi):
         super().__init__(daemon=True)
-        self.port = port
+        self.port, self.fw, self.mode_byte, self.scpi = port, fw, mode_byte, scpi
         self.buf = bytearray()
         self.stop = False
+        self.switched = False
+        self.t0 = time.time()
+
+    def poll_msg(self):
+        return frame(0x09) if self.fw == 'stock' else b'READ?\n'
+
+    def switch_msg(self):
+        return frame(0x06, [self.mode_byte]) if self.fw == 'stock' else ('CONF:%s\n' % self.scpi).encode()
 
     def run(self):
         s = None
-        for _ in range(600):  # wait up to 60 s for Renode to listen
+        for _ in range(900):  # wait up to 90 s for Renode to listen
             if self.stop:
                 return
             try:
@@ -154,8 +167,23 @@ class Collector(threading.Thread):
                 time.sleep(0.1)
         if s is None:
             return
-        s.settimeout(0.5)
+        s.settimeout(0.2)
+        last_poll = 0
+        seen = 0
         while not self.stop:
+            now = time.time()
+            if now - last_poll >= POLL_WALL:
+                try:
+                    if len(self.buf) > seen and not self.switched:
+                        s.sendall(self.switch_msg())
+                        self.switched = True
+                        self.switch_len = len(self.buf)
+                        self.switch_time = now - self.t0
+                    else:
+                        s.sendall(self.poll_msg())
+                except OSError:
+                    break
+                last_poll = now
             try:
                 d = s.recv(4096)
                 if not d:
@@ -175,20 +203,6 @@ def scenario_script(fw, sc, path):
         for c in stock_settings_patch():
             lines.append('0 monitor %s' % c)
     lines.append('0 monitor sysbus.hy3131 SetInput "%s"' % spec)
-    if fw == 'stock':
-        lines.append('2.5 monitor sysbus.btmodule SendHex %s' % frame(0x06, [mode_byte]).hex())
-        t = POLL_FROM
-        while t < run_for:
-            lines.append('%.2f monitor sysbus.btmodule SendHex %s' % (t, frame(0x09).hex()))
-            t += POLL_EVERY
-    else:
-        lines.append('3.0 monitor sysbus.btmodule SendHex %s' % ('CONF:%s\n' % scpi).encode().hex())
-        t = POLL_FROM + 0.5
-        while t < run_for:
-            lines.append('%.2f monitor sysbus.btmodule SendHex %s' % (t, b'READ?\n'.hex()))
-            t += POLL_EVERY
-        if 'duty' in extra or 'freq' in extra:
-            pass
     with open(path, 'w') as f:
         f.write('\n'.join(lines) + '\n')
 
@@ -198,7 +212,7 @@ def run_one(fw, sc, port, fast):
     tag = 'hy-%s-%s' % (fw, name)
     script = os.path.join(OUT, tag + '.script')
     scenario_script(fw, sc, script)
-    col = Collector(port)
+    col = Client(port, fw, mode_byte, scpi)
     col.start()
     cmd = [sys.executable, RUNNER, fw, '--name', tag, '--run-for', str(run_for), '--script', script,
            '--bt-port', str(port), '--shot', os.path.join(OUT, tag + '.png')]
@@ -212,8 +226,10 @@ def run_one(fw, sc, port, fast):
     col.join(2)
     res = {'fw': fw, 'name': name, 'input': spec, 'want': want, 'rc': p.returncode, 'wall': round(wall, 1),
            'readings': [], 'last': None, 'ok': False, 'extra': {}}
+    buf = bytes(col.buf[getattr(col, 'switch_len', 0):]) if col.switched else b''
+    res['switched_at_wall'] = round(getattr(col, 'switch_time', -1), 1)
     if fw == 'stock':
-        frames = parse_stock(col.buf)
+        frames = parse_stock(buf)
         res['readings'] = [f['main'] for f in frames]
         valid = [f for f in frames if f['main'] is not None]
         if valid:
@@ -229,7 +245,7 @@ def run_one(fw, sc, port, fast):
                 res['extra']['cj'] = last['v2']
         res['n_frames'] = len(frames)
     else:
-        vals = parse_scpi(col.buf)
+        vals = parse_scpi(buf)
         res['readings'] = vals
         nums = [v for v in vals if isinstance(v, float) and v < 9e37]
         if nums:
