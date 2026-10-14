@@ -265,6 +265,21 @@ def run_one(fw, sc, port, fast):
     return res
 
 
+def free_ports(base, n):
+    """n TCP ports from `base` upwards that nothing listens on right now."""
+    ports = []
+    p = base
+    while len(ports) < n:
+        try:
+            with socket.socket() as s:
+                s.bind(('127.0.0.1', p))
+            ports.append(p)
+        except OSError:
+            pass
+        p += 1
+    return ports
+
+
 def fmt_v(v):
     if v is None:
         return '-'
@@ -295,7 +310,8 @@ def main():
             sys.exit('fw-rs build failed:\n' + pre.stdout[-2000:])
     results = []
     with ThreadPoolExecutor(max_workers=a.jobs) as ex:
-        futs = [ex.submit(run_one, fw, sc, a.port_base + i, a.fast) for i, (fw, sc) in enumerate(jobs)]
+        ports = free_ports(a.port_base, len(jobs))
+        futs = [ex.submit(run_one, fw, sc, ports[i], a.fast) for i, (fw, sc) in enumerate(jobs)]
         for f in futs:
             r = f.result()
             results.append(r)

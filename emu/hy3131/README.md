@@ -124,7 +124,7 @@ Input spec keys (`emu/run.py --dmm SPEC[@T]` or `--script` lines
 
 `emu/hy3131/tests/run.sh` (dotnet 8; `DOTNET=` to point at an SDK) compiles
 the real `HY3131.cs` with a 60-line Renode shim and drives it through the SPI
-pins like the firmware: 133 checks of the register semantics, the frame,
+pins like the firmware: 139 checks of the register semantics, the frame,
 conversion timing, DC / AC / A / ohm / continuity / diode / capacitance /
 frequency / temperature physics, calibration consistency, the AC coupling
 transient, the AC+DC cadence and the (optional) enable-order beat.
@@ -138,26 +138,28 @@ the emulated flash with a recomputed CRC):
 
 | scenario | input | expected | stock shows (BT cmd 09) | fw-rs READ? |
 |---|---|---|---|---|
-| dcv | `dcv:1.234` | 1.234 V | 1.2339 / 1.2340 | 1.234 |
-| dcv-neg | `dcv:-12.5` | -12.5 V | -12.501 | -12.5 |
+| dcv | `dcv:1.234` | 1.234 V | 1.2340 | 1.234 |
+| dcv-neg | `dcv:-12.5` | -12.5 V | -12.500 | -12.5 |
 | dcv-hv | `dcv:230` | 230 V | 230.01 | 230.0 |
 | dcmv | `dcv:0.2345` | 234.5 mV (auto -> mV) | 234.5 | 234.494 |
-| acv | `acv:1.0@50` | 1.0 V rms | 1.000, 50.00 Hz | 1.00001 |
-| acv-hv | `acv:230@50` | 230 V rms | 230.0, 50 Hz | 230.001 |
-| acdcv | `acv:1.0@50,dc=0.5` | 1.1180 V (AC+DC) | 1.118 | 1.11804 |
+| acv | `acv:1.0@50` | 1.0 V rms | 1.0000, 50.00 Hz | 0.999982 |
+| acv-hv | `acv:230@50` | 230 V rms | 230.0, 50 Hz | 229.998 |
+| acdcv | `acv:1.0@50,dc=0.5` | 1.1180 V (AC+DC) | 1.1181 | 1.11806 |
 | dca | `dca:0.5` | 0.5 A (auto mA -> A) | 0.5001 | 0.499997 |
-| dcma | `dca:0.0123` | 12.3 mA | 12.30 | 12.3005 |
-| aca | `aca:0.1@60` | 0.1 A rms | 100.0 mA | 99.9997 mA |
+| dcma | `dca:0.0123` | 12.3 mA | 12.30 | 12.2999 |
+| aca | `aca:0.1@60` | 0.1 A rms | 99.99 mA | 99.9989 mA |
 | ohm | `ohm:4700` | 4700 ohm | 4700 | 4699.99 |
-| ohm-1m | `ohm:1e6` | 1 Mohm | 1.000 M | 999987 |
+| ohm-1m | `ohm:1e6` | 1 Mohm | 1.0001 M | 999987 |
 | cont | `ohm:10` | 10 ohm | 10.00 (beeper: CMP pin) | 10.005 |
-| diode | `diode:0.65` | 0.65 V | 0.6500 | 0.649992 |
+| diode | `diode:0.65` | 0.65 V | 0.6501 | 0.650016 |
 | cap | `cap:100e-9` | 100 nF (RC oscillator) | 100.0 nF | 100.002 nF |
-| cap-big | `cap:100e-6` | 100 uF (current ramp) | **104.1 uF** (+4 %, see below) | 102.03 uF (+2 %) |
+| cap-big | `cap:100e-6` | 100 uF (current ramp) | **104.0 uF** (+4 %, see below) | 102.03 uF (+2 %) |
 | hz | `hz:1000,duty=0.25,amp=1.0` | 1000 Hz, 25 % | 1000.0 Hz, 25.0 % | 1000.02 |
-| temp | `temp:100,cj=25` | 100 C, CJ 25 C | 100.3 C, CJ 25.0 | 100.314 |
+| temp | `temp:100,cj=25` | 100 C, CJ 25 C | 100.3 C, CJ 25.0 | 100.29 |
 
-All within the meter's specification except the capacitance ramp ranges: the
+(`modetest.py -j 6`, final run on commit d07fedc + the final model; the fw-rs
+ohm row was rerun alone after a port collision of the harness.) All within the
+meter's specification except the capacitance ramp ranges: the
 stock computes C = I * dt / dV with dt taken from its own millisecond timer at
 the poll (every 255 ms + 10 ms granularity) while dV spans whole AD1
 conversions (50 ms at the ramp row's OSR 4096 with the chopper), so dt / dV is
