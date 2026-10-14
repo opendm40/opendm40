@@ -170,7 +170,7 @@ class Script:
         return '\n'.join(out) + '\n'
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('mode', choices=['stock', 'fwrs', 'chain'])
     ap.add_argument('--flash', help='use this 1 MiB flash image as-is (no composition)')
@@ -220,8 +220,9 @@ def main():
                          'iterations per virtual ms, faster wall clock, compute takes longer virtual time)')
     ap.add_argument('--quantum', default=None, help='emulation global quantum in seconds (e.g. 0.0005)')
     ap.add_argument('--stats', action='store_true', help='print virtual time, instructions and wall time')
+    ap.add_argument('--live', metavar='FILE', help='export the LCD to a memory-mapped file for emu/live.py')
     ap.add_argument('--dry', action='store_true', help='only write the .resc')
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
 
     os.makedirs(OUT, exist_ok=True)
     if not os.path.exists(RENODE):
@@ -303,6 +304,8 @@ def main():
                 "    _boot_region = r\n"
                 "    self.Log(LogLevel.Info, 'boot: entered %s at 0x%08x, t=%s' % (r, pc, machine.ElapsedVirtualTime.TimeElapsed))\n")
         s.add('sysbus.cpu SetHookAtBlockBegin """\n%s"""' % hook)
+    if a.live:
+        s.add('sysbus.lcd LiveFile %s 30' % q(a.live))
     if a.autoshot:
         s.add('sysbus.lcd AutoShot %s %d' % (q(os.path.join(OUT, 'frames')), a.autoshot))
     if a.bt_port:
@@ -417,7 +420,7 @@ def main():
         f.write(s.render(end, not a.interactive))
     print('script:     ', rel(resc))
     if a.dry:
-        return
+        return resc
     cmd = [RENODE, '--console', '--disable-xwt', '-e', 'i @' + os.path.abspath(resc)]
     if not a.interactive:
         cmd.insert(1, '--hide-log')

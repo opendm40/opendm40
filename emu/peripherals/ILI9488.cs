@@ -10,6 +10,8 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.IO.MemoryMappedFiles;
+using System.Threading;
 using Antmicro.Renode.Core;
 using Antmicro.Renode.Logging;
 using Antmicro.Renode.Peripherals.Bus;
@@ -112,6 +114,60 @@ namespace Antmicro.Renode.Peripherals.Video
             }
             File.WriteAllBytes(path, Png.Encode(w, h, rgb));
             this.Log(LogLevel.Info, "screenshot {0} (frames {1}, pixels {2}, t={3})", path, Frames, PixelsWritten, machine.ElapsedVirtualTime.TimeElapsed);
+        }
+
+        /// Live view for emu/live.py: a memory-mapped file refreshed `fps` times per
+        /// second (wall clock) by a host timer. Layout: "DM40LIVE", u32 seq, u32 w,
+        /// u32 h, u32 pad, u64 virtual time in us, u64 pixels written, u64 RAMWR
+        /// count, then w*h RGB565 (LE) of the landscape view. Torn frames are possible
+        /// and harmless (the next refresh fixes them).
+        public void LiveFile(string path, int fps)
+        {
+            var size = LiveHeader + ViewW * ViewH * 2;
+            liveFile = MemoryMappedFile.CreateFromFile(path, FileMode.Create, null, size);
+            liveView = liveFile.CreateViewAccessor(0, size);
+            var magic = System.Text.Encoding.ASCII.GetBytes("DM40LIVE");
+            liveView.WriteArray(0, magic, 0, 8);
+            liveView.Write(12, (uint)ViewW);
+            liveView.Write(16, (uint)ViewH);
+            liveTimer = new Timer(_ => LiveUpdate(), null, 0, Math.Max(10, 1000 / Math.Max(1, fps)));
+            this.Log(LogLevel.Info, "live view in {0} at {1} fps", path, fps);
+        }
+
+        private void LiveUpdate()
+        {
+            try
+            {
+                for(var oy = 0; oy < ViewH; oy++)
+                {
+                    for(var ox = 0; ox < ViewW; ox++)
+                    {
+                        liveBuf[oy * ViewW + ox] = gram[ViewIndex(ox, oy)];
+                    }
+                }
+                liveView.WriteArray(LiveHeader, liveBuf, 0, liveBuf.Length);
+                liveView.Write(24, (ulong)(machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds * 1e6));
+                liveView.Write(32, PixelsWritten);
+                liveView.Write(40, Frames);
+                liveView.Write(8, ++liveSeq);
+            }
+            catch(Exception)
+            {
+                // machine disposed while the timer fired
+            }
+        }
+
+        private int ViewIndex(int ox, int oy)
+        {
+            int px, py;
+            switch(Rotation & 3)
+            {
+            case 0: px = oy; py = PanelH - 1 - ox; break;
+            case 1: px = PanelW - 1 - oy; py = ox; break;
+            case 2: px = oy; py = ox; break;
+            default: px = PanelW - 1 - oy; py = PanelH - 1 - ox; break;
+            }
+            return py * PanelW + px;
         }
 
         /// Save the raw physical GRAM (320x480 RGB565 LE) for debugging.
@@ -305,6 +361,13 @@ namespace Antmicro.Renode.Peripherals.Video
             rdHave--;
             return b;
         }
+
+        private const int LiveHeader = 64;
+        private MemoryMappedFile liveFile;
+        private MemoryMappedViewAccessor liveView;
+        private Timer liveTimer;
+        private uint liveSeq;
+        private readonly ushort[] liveBuf = new ushort[480 * 320];
 
         private const int PanelW = 320;
         private const int PanelH = 480;
