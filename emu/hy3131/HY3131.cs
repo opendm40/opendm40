@@ -950,8 +950,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 }
                 if(score < bestScore) { bestScore = score; best = i; }
             }
-            RoleDebug = string.Format("best {0} score {1}", best, bestScore);
-            if(best >= 0) for(var j = 0; j < 22; j++) { var d = (Rows[best].Bytes[j] ^ regs[0x20 + j]) & RowMask[j]; if(d != 0) RoleDebug += string.Format(" R{0:X2}:{1:X2}^{2:X2}", 0x20 + j, Rows[best].Bytes[j], regs[0x20 + j]); }
+            bestRow = best; bestScore_ = bestScore;
             var newRole = Role.None; var newMode = -1; var newRange = 0;
             if(best >= 0 && bestScore <= 2)
             {
@@ -1081,7 +1080,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private Role role;
         private int roleMode, roleRange;
         private double rowIg = 0.9, rowRg = 1.0, rowIg2 = 1.0;
-        public string RoleDebug;
+        private int bestRow = -1, bestScore_;
+        /// Diagnostics: the closest stock row and the differing configuration bytes.
+        public string RoleDebug
+        {
+            get
+            {
+                var r = string.Format("best {0} score {1}", bestRow, bestScore_);
+                if(bestRow >= 0) for(var j = 0; j < 22; j++) { var d = (Rows[bestRow].Bytes[j] ^ regs[0x20 + j]) & RowMask[j]; if(d != 0) r += string.Format(" R{0:X2}:{1:X2}^{2:X2}", 0x20 + j, Rows[bestRow].Bytes[j], regs[0x20 + j]); }
+                return r;
+            }
+        }
         private Random rng;
     }
 
