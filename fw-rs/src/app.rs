@@ -1332,10 +1332,17 @@ impl App {
         sc.hpos = if h == 0 { 200 } else { h - 1 };
         self.scope.apply(sc, 0);
         let n = (p[10] as usize).min(4);
+        // Only valid measurement ids (0..19, index into meas_res.v), no
+        // duplicates (review 7dc32ac L1).
+        let mut k = 0;
         for i in 0..n {
-            self.meas_sel[i] = (p[9] >> (8 * i)) as u8;
+            let id = (p[9] >> (8 * i)) as u8;
+            if id < 20 && !self.meas_sel[..k].contains(&id) {
+                self.meas_sel[k] = id;
+                k += 1;
+            }
         }
-        self.meas_n = n;
+        self.meas_n = k;
         self.cursors_from_selection();
     }
 
