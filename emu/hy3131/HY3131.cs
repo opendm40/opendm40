@@ -477,7 +477,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     // AD2/AD3 decimation phases differ (BeatModel, empirical).
                     if(BeatModel && beatBad) sq *= 1 + 0.11 * Math.Sin(2 * Math.PI * 2.04 * t);
                 }
-                rmsVal = (long)Math.Min(sq, (double)((1L << 37) - 1));
+                // AD2 clips at +-262143 codes, so the mean square cannot exceed 262143^2
+                // (the stock drops sqrt(RMS) > 0x40000 as garbage: a clipped input must
+                // still produce an accepted, over-range reading)
+                rmsVal = (long)Math.Min(sq, 262143.0 * 262143.0);
                 intf |= 0x10;
             }
         }
@@ -938,6 +941,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 for(var j = 0; j < 22; j++)
                 {
                     var mask = RowMask[j];
+                    // R32: SOP1P distinguishes the A / mA shunt rows (PB2 / PB1), so it is
+                    // compared when the row uses OP1; ENOP1 itself is always masked (AC+DC
+                    // writes R32 = 0x38 after the DC V rows, whose OP1 is off).
+                    if(j == 18) mask = (row.Bytes[18] & 0x08) != 0 ? 0xF7 : 0xF0;
                     var d = (row.Bytes[j] ^ regs[0x20 + j]) & mask;
                     if(d != 0) score += BitCount(d) * (j == 0 ? 1 : 2);
                 }
@@ -983,7 +990,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // row), R31 without SFUVR (ohm variants), R32 without ENOP1 / SOP1P (AC+DC writes 0x38
         // after the DC V row), R33 without SAD1I (temperature phases).
         private static readonly int[] RowMask = {
-            0xF0, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0xF0, 0xFC, 0x7F, 0xFF };
+            0xF0, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0xF7, 0xFC, 0x7F, 0xFF };
 
         // Stock DM40 V2.6 configuration rows (firmware/re/analysis/hy3131_v2_6.h) with their role.
         private static readonly RowDef[] Rows = {
