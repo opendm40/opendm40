@@ -137,18 +137,25 @@ dma1: DMA.GD32_DMA @ sysbus 0x40026000
 dma2: DMA.GD32_DMA @ sysbus 0x40026400
     [0-7] -> nvic@[56-60,68-70]
 
-// Timers: TIMPRE=1 -> every timer clock is 200 MHz on the DM40. Timers whose
-// interrupts the firmware uses (TIM2 scope trigger, TIM4, TIM5 scope window,
-// TIM7 1 kHz tick, TIM9..11) are Renode's STM32_Timer; the output-only ones
-// (TIM1/8 sample clocks, TIM3/12/13/14 PWM, TIM6 DAC trigger) are the
-// event-free PwmTimer (Renode's model handles each overflow as an event, and
-// TIM8 runs at 50 MHz).
-timer1: Timers.PwmTimer @ sysbus 0x40010000
+// Timers: TIMPRE=1 -> every timer clock is 200 MHz on the DM40.
+// TIM1/2/5/8 (the scope chains: TIM5 -> TIM1 -> TIM8 sample clocks, TIM2 trigger
+// from PA15, fw-rs TIM2 OC2REF gating TIM1) are GD32_Timer with slave/trigger
+// modes; ITRx inputs are GPIO 16..19 wired per the GD32F4 interconnect table
+// (TIM1: ITR0=TIM5 ITR1=TIM2; TIM2: ITR0=TIM1 ITR1=TIM8; TIM8: ITR0=TIM1
+// ITR3=TIM5). TIM4/7/9..11 (interrupt tick timers) stay Renode's STM32_Timer,
+// the PWM/trigger-only ones (TIM3/6/12/13/14) are the event-free PwmTimer.
+timer1: Timers.GD32_Timer @ sysbus 0x40010000
+    advanced: true
+    BreakInterrupt -> nvic@24
+    UpdateInterrupt -> nvic@25
+    TriggerInterrupt -> nvic@26
+    CaptureCompareInterrupt -> nvic@27
+    TRGO -> timer8@16
+    TRGO2 -> timer2@16
 
-timer2: Timers.STM32_Timer @ sysbus 0x40000000
-    -> nvic@28
-    frequency: 200000000
-    initialLimit: 0xFFFFFFFF
+timer2: Timers.GD32_Timer @ sysbus 0x40000000
+    IRQ -> nvic@28
+    TRGO -> timer1@17
 
 timer3: Timers.PwmTimer @ sysbus 0x40000400
 
@@ -157,10 +164,10 @@ timer4: Timers.STM32_Timer @ sysbus 0x40000800
     frequency: 200000000
     initialLimit: 0xFFFF
 
-timer5: Timers.STM32_Timer @ sysbus 0x40000C00
-    -> nvic@50
-    frequency: 200000000
-    initialLimit: 0xFFFFFFFF
+timer5: Timers.GD32_Timer @ sysbus 0x40000C00
+    IRQ -> nvic@50
+    TRGO -> timer1@16
+    TRGO2 -> timer8@19
 
 timer6: Timers.PwmTimer @ sysbus 0x40001000
 
@@ -169,7 +176,13 @@ timer7: Timers.STM32_Timer @ sysbus 0x40001400
     frequency: 200000000
     initialLimit: 0xFFFF
 
-timer8: Timers.PwmTimer @ sysbus 0x40010400
+timer8: Timers.GD32_Timer @ sysbus 0x40010400
+    advanced: true
+    BreakInterrupt -> nvic@43
+    UpdateInterrupt -> nvic@44
+    TriggerInterrupt -> nvic@45
+    CaptureCompareInterrupt -> nvic@46
+    TRGO -> timer2@17
 
 timer9: Timers.STM32_Timer @ sysbus 0x40014000
     -> nvic@24
@@ -273,6 +286,7 @@ memtool: Miscellaneous.MemTool @ sysbus 0x7FFF0000
 scopefeed: Miscellaneous.ScopeFeeder @ sysbus 0x7FFF3000
     dma: dma2
     portA: gpioPortA
+    sampleTimer: timer1
 
 // USB OTG FS: register stub, never enumerates.
 usbfs: USB.USBFS_Stub @ sysbus 0x50000000

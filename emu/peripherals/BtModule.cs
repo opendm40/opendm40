@@ -59,6 +59,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             t.Start();
         }
 
+        /// Script side: raise/drop the module's "connected" pin (PC14) without a TCP host.
+        public void SetConnected(bool on)
+        {
+            connPort?.OnGPIO(connPin, on);
+        }
+
         /// Script side: inject bytes as if the host sent them (hex string, e.g. "AF0503000000..").
         public void SendHex(string hex)
         {
@@ -86,6 +92,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // ---- firmware -> module ----
         private void OnChar(byte b)
         {
+            TxLog(b);
             // Pass through to the host first.
             var c = client;
             if(c != null)
@@ -135,6 +142,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             machine.ScheduleAction(TimeInterval.FromMilliseconds(5), _ => SendToUart(r));
         }
 
+        private void TxLog(byte b)
+        {
+            if(b == (byte)'\n' || txLine.Count > 200)
+            {
+                this.Log(LogLevel.Debug, "fw -> host: {0}", Encoding.ASCII.GetString(txLine.ToArray()).TrimEnd('\r'));
+                txLine.Clear();
+            }
+            else
+            {
+                txLine.Add(b);
+            }
+        }
+
         // ---- host socket ----
         private void AcceptLoop()
         {
@@ -170,6 +190,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private readonly IGPIOReceiver connPort;
         private readonly int connPin;
         private readonly List<byte> line = new List<byte>();
+        private readonly List<byte> txLine = new List<byte>();
         private bool inAt;
         private int idleGen;
         private TcpListener listener;

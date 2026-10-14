@@ -75,8 +75,17 @@ namespace Antmicro.Renode.Peripherals.DMA
         public ulong EnableCount(int stream) => streams[stream].enableCount;
         public bool Enabled(int stream) => streams[stream].enabled;
 
+        /// Called with the stream number before a stream register access (the
+        /// scope feeder catches up the sample stream before NDTR is read and
+        /// before the stream is disabled).
+        public Action<int> BeforeStreamRead;
+
         public uint ReadDoubleWord(long offset)
         {
+            if(offset >= 0x10 && offset < 0x10 + 8 * 0x18 && BeforeStreamRead != null)
+            {
+                BeforeStreamRead((int)((offset - 0x10) / 0x18));
+            }
             if(offset == 0x00) return StatusWord(0);
             if(offset == 0x04) return StatusWord(4);
             if(offset == 0x08 || offset == 0x0C) return 0;
@@ -91,6 +100,10 @@ namespace Antmicro.Renode.Peripherals.DMA
 
         public void WriteDoubleWord(long offset, uint value)
         {
+            if(offset >= 0x10 && offset < 0x10 + 8 * 0x18 && BeforeStreamRead != null && (offset - 0x10) % 0x18 == 0)
+            {
+                BeforeStreamRead((int)((offset - 0x10) / 0x18)); // CR write: EN may be cleared
+            }
             if(offset == 0x08) { ClearFlags(0, value); return; }
             if(offset == 0x0C) { ClearFlags(4, value); return; }
             if(offset >= 0x10 && offset < 0x10 + 8 * 0x18)
