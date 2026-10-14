@@ -161,6 +161,10 @@ pub(super) struct Autoset {
     settle: u64,
     /// Give up (stock 15 s abort timer).
     abort: u64,
+    /// Phase 2 measured once more at the finer result range (refine).
+    refined: bool,
+    /// Phase 2: finest range allowed (a range that clipped is not taken).
+    min_r: u8,
 }
 
 /// Scope page state.
@@ -1409,8 +1413,11 @@ impl App {
     ///    again (at most AS_P2_MAX records); the timebase comes from the
     ///    30 / 70 % crossing period (>= 2 crossings), Cycl only when it agrees
     ///    with it within 2x; V/div = the finest that holds the swing in 6.4 div
-    ///    once centred (the stock also demands +-4 div before centring, which
-    ///    gave 5 V/div for a 0..9.6 V signal).
+    ///    with the centre at most 4 div off 0 V (the stock demands the whole
+    ///    signal within +-4 div before centring, 5 V/div for 0..9.6 V); a range
+    ///    that clipped in phase 2 is never the result. A result finer than the
+    ///    measuring range is measured once more at that range (the centre
+    ///    from a 10 V/div record is off by up to ~1 V).
     /// Each record's decision is logged (DBG:GEST? after "|AUTO", `autoset_log`).
     pub(super) fn autoset_start(&mut self, now: u64) {
         self.sp_end_hold(now);
@@ -1422,7 +1429,7 @@ impl App {
         st.mode = scope::TrigMode::Auto;
         st.run = true;
         as_log_clear();
-        self.sp.autoset = Some(Autoset { phase: 1, idx: 0, round: 0, saved, settle: now + 200, abort: now + 15_000 });
+        self.sp.autoset = Some(Autoset { phase: 1, idx: 0, round: 0, saved, settle: now + 200, abort: now + 15_000, refined: false, min_r: 0 });
         self.scope.apply(st, now);
     }
 
@@ -1534,6 +1541,7 @@ impl App {
         // Phase 2: a clipped record cannot be measured: coarser range, again.
         if clipped && st.range < 9 && (a.idx as u8) < AS_P2_MAX {
             a.idx += 1;
+            a.min_r = a.min_r.max(st.range as u8 + 1);
             st.range = (st.range + 3).min(9);
             next(self, a, st);
             return;
@@ -1544,14 +1552,16 @@ impl App {
         let probe = st.probe;
         let mid = (vmax + vmin) / 2.0;
         let mut r = 9;
-        for (i, &d) in scope::VDIV.iter().enumerate() {
+        for (i, &d) in scope::VDIV.iter().enumerate().skip(a.min_r as usize) {
             let d = d * probe;
-            // The centring position must stay within its +-392 rows.
-            if (vmax - vmin) <= 6.4 * d && (141.0 * mid / (4.0 * d)).abs() <= 392.0 {
+            // The centre at most 4 div off 0 V (the stock's +-4 div window,
+            // but for the centre only, so a 0..9.6 V signal gets 2 V/div).
+            if (vmax - vmin) <= 6.4 * d && mid.abs() <= 4.0 * d {
                 r = i;
                 break;
             }
         }
+        let coarser = r < st.range;
         st.range = r;
         st.pos = ((141.0 * mid / (4.0 * scope::VDIV[r] * probe)) as i32).clamp(-392, 392);
         st.trig_row = 140;
@@ -1560,6 +1570,17 @@ impl App {
         if period > 0.0 {
             let ok = cyc.is_finite() && cyc > 0.0 && cyc < 2.0 * period && cyc > 0.5 * period;
             st.tb = tb_for(if ok { cyc } else { period });
+        }
+        // Measured at a coarser range than the result (10 V/div: ~11 codes
+        // per volt): the centre and the swing are off by up to ~1 V (device:
+        // 0..9.6 V centred 0.5 div high, trigger at 3.7 V). Measure once
+        // more at the result range, centred by this estimate.
+        if coarser && !a.refined && (a.idx as u8) < AS_P2_MAX {
+            a.refined = true;
+            a.idx += 1;
+            as_log(5, st.tb, st.range, lo, hi, n, period);
+            next(self, a, st);
+            return;
         }
         as_log(4, st.tb, st.range, lo, hi, n, if cyc.is_finite() { cyc } else { -1.0 });
         st.mode = scope::TrigMode::Auto;
@@ -1604,7 +1625,8 @@ const AS_PERIOD_TB: [usize; 2] = [14, 19];
 const AS_P2_MAX: u8 = 3;
 
 /// AUTO-set decision log (DBG:GEST? after "|AUTO"): per record phase (1
-/// amplitude, 3 period, 2 final; 4 = the result), timebase, range, min /
+/// amplitude, 3 period, 2 final; 5 = re-measure at the result range, 4 =
+/// the result), timebase, range, min /
 /// max code, rising crossings, period (phase 4: Cycl) in us.
 static mut AS_LOG: [(u8, u8, u8, u16, u16, u16, f32); 16] = [(0, 0, 0, 0, 0, 0, 0.0); 16];
 static mut AS_LOG_N: usize = 0;
