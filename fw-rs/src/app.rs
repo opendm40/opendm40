@@ -2490,6 +2490,9 @@ impl App {
                     out.put_bytes(b",");
                     crate::put_u32(out, ms as u32);
                 }
+                // The last AUTO-set's decisions (scope_page.rs autoset_log).
+                out.put_bytes(b"|AUTO");
+                scope_page::autoset_log(out);
                 true
             }
             C::DbgAcdc => {
