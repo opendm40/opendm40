@@ -49,8 +49,10 @@ const PRESS_MS: u64 = 120;
 /// Drag modes (Settings "Scope drag").
 pub const DRAG_STOCK: u8 = 0;
 pub const DRAG_AXIS: u8 = 1;
-pub const DRAG_HOLD: u8 = 2;
-pub const DRAG_NAMES: [&str; 3] = ["Stock", "Axis lock", "Hold 300 ms"];
+/// Names of the drag modes without hold-to-grab (Settings "Scope drag";
+/// Hold is gesture::grab_ms != 0 with the Stock model, shown as "Hold
+/// <ms> ms"; review 7dc32ac L4: a stored mode 2 showed as "Axis lock").
+pub const DRAG_NAMES: [&str; 2] = ["Stock", "Axis lock"];
 /// Persistence (Display tab): OFF, MIN, 1S, INF; layer period (ms).
 pub const PERSIST_NAMES: [&str; 4] = ["OFF", "MIN", "1S", "INF"];
 const PERSIST_MS: [u64; 4] = [0, 40, 500, u64::MAX];
@@ -1518,7 +1520,7 @@ impl App {
         let s = &mut self.sp;
         s.colour = ((p1 >> 17 & 0xF) ^ 2).min(8) as u8;
         s.bright = 100 - (p1 >> 21 & 0x7F).min(100) as u8;
-        s.drag_mode = (p11 >> 1 & 3).min(2) as u8;
+        s.drag_mode = (p11 >> 1 & 3).min(1) as u8;
         s.swipes = p11 >> 3 & 1 != 0;
         s.persist = (p11 >> 4 & 3) as u8;
         s.press_fx = p11 >> 6 & 1 == 0;
