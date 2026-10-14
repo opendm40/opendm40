@@ -84,7 +84,9 @@ None of these inputs are committed; generated images are git-ignored.
   FS-loader -> app; `0` = ROM launches the app directly; `-1` = never, the
   FS-loader stays in its install state with its USB disk), `--zero-marker`
   zeroes the loader marker so the FS-loader installs the first `dm40*.bin` on
-  the FAT.
+  the FAT. The ROM's PA2 poll is a counted loop, so `--fast` (50 MIPS)
+  stretches it 4x: use `--pa2 2.2` there (loader entered at 2.0 s), and give
+  the install path ~20 s.
 
 Coordinates are the 480x320 landscape frame the user sees. The stock main menu
 tiles are at (46,52) Multimeter, (244,52) Oscilloscope, (46,166) Signal,

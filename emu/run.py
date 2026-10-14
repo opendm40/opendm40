@@ -216,8 +216,8 @@ def main(argv=None):
     ap.add_argument('--pause', action='store_true', help='do not start the CPU (use with --gdb)')
     ap.add_argument('--bt-port', type=int, default=0, help='TCP port for the Bluetooth UART')
     ap.add_argument('--usbip', type=float, default=None, metavar='T',
-                    help='start a USB/IP server (TCP 3240) at virtual time T and export the USB device as busid 1-0; '
-                         'implies --interactive unless --run-for is given')
+                    help='start a USB/IP server (TCP 3240) at virtual time T and export the USB device as busid 1-0 '
+                         '(use with a long --run-for or --interactive)')
     ap.add_argument('--log', help='Renode log file (default emu/out/<name>.log)')
     ap.add_argument('--name', help='base name of the generated .resc/.log (default: the mode)')
     ap.add_argument('--pa2', type=float, default=None, metavar='T',
