@@ -87,6 +87,37 @@ Coordinates are the 480x320 landscape frame the user sees. The stock main menu
 tiles are at (46,52) Multimeter, (244,52) Oscilloscope, (46,166) Signal,
 (244,166) Settings (190x106 each; `firmware/re/analysis/gui_v2_6.h`).
 
+### Live window (`emu/live.py`)
+
+```sh
+/usr/bin/python3 emu/live.py stock --fast        # or fwrs | chain, plus any run.py option
+```
+
+A GTK4/libadwaita window drawn like the device (user manual figure 2.1.1):
+the display in its black glass with the MENU / RUN / AUTO / MF touch strip
+on its left, the power button on the left edge, USB-C / charge LED / MCX
+generator / MCX scope on the top edge, the V-Ohm / COM / A jacks on the right
+(Wayland-native, follows the system style; `--tk` or a missing PyGObject falls
+back to a plain Tk window). The LCD is the ILI9488 model's framebuffer,
+exported to a memory-mapped file 30 times a second and shown at an integer
+device-pixel scale (nearest neighbour, HiDPI-aware); everything else goes over
+Renode's monitor TCP port (`renode -P`), so the GUI never blocks the emulation.
+
+* Display: mouse press / drag / release = touch; Ctrl+drag = two-finger pinch
+  around the click point. Strip keys: press-and-hold (held = long press),
+  pressed keys light up. Power button = PD6. Jacks / MCX / USB open the matching
+  page of the inputs sidebar (DMM voltage via the HY3131 model's setters, scope
+  feeder waveform, generator/USB notes, a free monitor command line).
+* Keyboard: `m r a f` = MENU RUN AUTO MF, `p` = power, `F2` / `F3` = 2-/3-finger
+  swipe down (power-off confirm / screenshot gestures), `space` = pause/resume,
+  `s` = screenshot to `emu/out/live-*.png`, `F9` = sidebar, `Esc` / Ctrl-C /
+  close = quit (Renode is stopped, nothing is left running).
+* Header bar: firmware (stock / fwrs / chain, restarts the machine), Fast
+  (PerformanceInMips 50, roughly real time on this host), pause, restart,
+  screenshot, sidebar; the subtitle shows the virtual time and the speed ratio.
+* Logs: `emu/out/live-renode.out` (Renode), `emu/out/live-monitor.log` (every
+  monitor command and reply).
+
 ### GDB
 
 ```sh
@@ -138,11 +169,45 @@ Check 5 (see "Use" below): `emu/out/stock-scope.png` and `emu/out/fwrs-scope.png
 Not modelled: the generator's analog output (DAC1 + TIM6 DMA runs, nothing
 listens), PLL/bus clock values (always 200 MHz), MCO, low-power modes.
 
+## Speed
+
+Wall time for the two reference commands (32-core host, one Renode thread
+each), `--stats`:
+
+| command | before | after | after, `--fast` |
+|---|---|---|---|
+| `stock --run-for 5.5 ... --scope sine,1000,1.0` (stock-scope.png) | 22.1 s (4.0x real time) | 22.1 -> ~15 s (2.7x) | 9.5 s (1.7x) |
+| `fwrs --run-for 6 ... --scope sine,1000,1.0` (fwrs-scope.png) | did not finish in 23 min (12.5 MS/s fed sample by sample) | 19.8 s (3.3x) | 11.2 s (1.9x) |
+| `stock --run-for 3` (boot to the DMM page) | 23.7 s (7.9x) | 17.7 s (5.9x) | 10.7 s (3.6x) |
+
+What was done (`emu/run.py --stats` prints wall / virtual / instructions):
+
+1. Output-only timers (TIM1/8 sample clocks at 50 MHz, TIM6 at 10 MHz, the
+   PWM timers) are an event-free model (`PwmTimer.cs`); Renode's
+   `STM32_Timer` handled every overflow as an event. Screenshots are identical.
+2. The scope feeder hands whole sample runs to the DMA model
+   (`GD32_DMA.FeedBlock`, one bus write per chunk, split at comparator edges)
+   instead of one request per sample.
+3. The C# models are merged into one compile unit (`emu/out/dm40-models.cs`):
+   Renode compiled each `include` separately (start-up 5.6 s -> 3.2 s).
+4. `--fast` = `PerformanceInMips 50`. Both firmwares spin in their main loops,
+   so the wall time is set by instructions per virtual second; at 50 MIPS the
+   UI work takes up to 4x longer in virtual time (fw-rs needs ~4 s instead of
+   ~2.5 s before it takes the first key), timing-sensitive code is unchanged
+   (all delays are timer / DWT based). Screens differ only where the UI is
+   mid-update.
+5. Measured and rejected: the global quantum (no effect), the LCD data path
+   (the ILI9488 write is already a plain array store; the GUI draws about
+   150 k pixels per second, far below the instruction cost).
+
+The remaining cost is the guest's busy loops: the stock idles in its GUI loop
+at 200 MIPS = 600 M instructions per 3 s. Fast-forwarding known delay loops
+would need per-firmware hooks and was not done.
+
 ## Known limitations / next steps
 
-* Speed: about 10x slower than real time while the UI is idle (a 3 s virtual
-  run takes ~30 s). The scope at fast timebases is much slower (the feeder
-  writes every sample through the DMA model).
+* Speed: see above; 2-4x slower than real time at full MIPS, about real time
+  with `--fast`.
 * fw-rs: taps and side keys work; horizontal swipes were not recognised by
   the gesture engine in the emulator (the drag reports arrive every 20 ms
   with an INT pulse each; not investigated).

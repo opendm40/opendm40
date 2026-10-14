@@ -1,20 +1,25 @@
 #!/usr/bin/python3
 """Interactive DM40 emulator window.
 
-    emu/live.py [stock|fwrs|chain] [--fast] [--app FILE] [--scale 2] [run.py options...]
+    emu/live.py [stock|fwrs|chain] [--fast] [--app FILE] [--tk] [run.py options...]
 
-Shows the LCD live (memory-mapped framebuffer written by the ILI9488 model at
-30 fps), turns the mouse into touches on the Hynitron controller and drives
-the rest of the machine through Renode's monitor TCP port, so the GUI never
-blocks the emulation.
+A GTK4/libadwaita window (Tk fallback with --tk or when gi is missing) that
+draws the DM40 front panel as on the device (manual figure 2.1.1): the
+display in its glass with the MENU/RUN/AUTO/MF touch strip on its left, the
+power button on the left edge, USB-C / LED / MCX generator / MCX scope on the
+top edge, the V-Ohm / COM / A jacks on the right. The LCD is a memory-mapped
+framebuffer written by the ILI9488 model at 30 fps, shown at an integer scale
+(nearest neighbour). Everything else goes through Renode's monitor TCP port,
+so the GUI never blocks the emulation.
 
-Mouse     press/drag/release = touch (tap, drag, swipe)
-          Ctrl+drag  = two-finger pinch around the click point (horizontal
-                       motion changes the finger spread)
-Keyboard  m r a f = MENU RUN AUTO MF (held = long press), p = power key,
-          F2/F3 = 2-/3-finger swipe down, space = pause/resume,
-          s = screenshot, Esc / Ctrl-C / window close = quit
-Needs Tk + PIL + numpy (the system /usr/bin/python3 has them).
+Mouse     on the display: press/drag/release = touch (tap, drag, swipe);
+          Ctrl+drag = two-finger pinch around the click point. On the key
+          strip: press-and-hold = the key (held = long press). Power button
+          = PD6. Jacks / MCX / USB open the matching input page in the sidebar.
+Keyboard  m r a f = MENU RUN AUTO MF, p = power, F2/F3 = 2-/3-finger swipe
+          down, space = pause/resume, s = screenshot, F9 = sidebar,
+          Esc / Ctrl-C / window close = quit.
+Needs /usr/bin/python3 (PyGObject + libadwaita, pycairo, numpy, PIL).
 """
 import argparse
 import mmap
@@ -58,12 +63,14 @@ class Emulator:
         self.port = free_port()
         self.fb_path = os.path.join(run.OUT, 'live-fb.bin')
         self.log_path = os.path.join(run.OUT, 'live-renode.out')
+        self.monitor_log = open(os.path.join(run.OUT, 'live-monitor.log'), 'w')
         if os.path.exists(self.fb_path):
             os.unlink(self.fb_path)
         argv = [mode, '--interactive', '--dry', '--run-for', '0', '--name', 'live',
                 '--live', self.fb_path] + extra
         resc = run.main(argv)
-        cmd = [run.RENODE, '--disable-xwt', '--hide-log', '--console', '-P', str(self.port),
+        # No --console: it disables the -P monitor port (verified with 1.17.0).
+        cmd = [run.RENODE, '--disable-xwt', '--hide-log', '-P', str(self.port),
                '-e', 'i @' + os.path.abspath(resc)]
         self.out = open(self.log_path, 'w')
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=self.out,
@@ -101,6 +108,11 @@ class Emulator:
                 return
             if not d:
                 return
+            try:
+                self.monitor_log.write(bytes(c for c in d if 32 <= c < 127 or c == 10).decode(errors='replace'))
+                self.monitor_log.flush()
+            except (OSError, ValueError):
+                pass
             buf = (buf + d)[-4096:]
             text = bytes(c for c in buf if 32 <= c < 127 or c == 10).decode(errors='replace')
             lines = [l for l in text.splitlines() if l.strip() and not l.startswith('(')]
@@ -115,8 +127,9 @@ class Emulator:
             if cmd is None:
                 return
             try:
+                self.monitor_log.write('> %s\n' % cmd)
                 self.sock.sendall((cmd + '\n').encode())
-            except OSError:
+            except (OSError, ValueError):
                 return
 
     # ---- framebuffer ----
@@ -163,7 +176,7 @@ class Emulator:
             os.unlink(self.fb_path)
 
 
-class App:
+class TkApp:
     def __init__(self, args, extra):
         self.args, self.extra = args, extra
         self.root = tk.Tk()
@@ -414,9 +427,23 @@ def main():
     ap.add_argument('mode', nargs='?', default='stock', choices=['stock', 'fwrs', 'chain'])
     ap.add_argument('--fast', action='store_true', help='PerformanceInMips 50 (about 2x faster)')
     ap.add_argument('--app', help='application image (run.py --app)')
-    ap.add_argument('--scale', type=int, default=2, help='window scale (default 2)')
+    ap.add_argument('--scale', type=int, default=2, help='Tk window scale (default 2)')
+    ap.add_argument('--tk', action='store_true', help='use the Tk window instead of GTK')
     args, extra = ap.parse_known_args()
-    app = App(args, extra)
+    if not args.tk:
+        try:
+            import gi
+            gi.require_version('Gtk', '4.0')
+            gi.require_version('Adw', '1')
+            gi.require_version('Gsk', '4.0')
+            gi.require_version('Graphene', '1.0')
+            import gtkpanel
+        except (ImportError, ValueError) as e:
+            print('GTK4/libadwaita not available (%s): using the Tk window' % e, file=sys.stderr)
+            args.tk = True
+    if not args.tk:
+        sys.exit(gtkpanel.run_app(args, extra, Emulator))
+    app = TkApp(args, extra)
     try:
         app.root.mainloop()
     finally:
