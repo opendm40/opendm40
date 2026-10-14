@@ -1,17 +1,21 @@
 //
-// 3PA1030 scope ADC path (firmware/re/analysis/scope_gen_v2_6.h, fw-rs/src/scope.rs).
-// The real chain is TIM1_CH4 -> DMA2 stream 4 reading GPIOB->IDR (PB0..PB9,
-// 10-bit straight binary) at fs = 200 MHz / ((TIM1 PSC+1)(ARR+1)); below
-// 50 MS/s stream 3 (TIM8_CH2) latches IDR into a word that stream 4 copies.
-// Renode's timers raise no DMA requests, so this model is the "ADC + DMA
-// request": while DMA2 stream 4 is enabled and TIM1 is counting it delivers
-// samples to the stream at fs (in bulk every tick), computing each sample
-// from a scripted waveform at virtual time: code = 512 + (v - offset) *
-// counts_per_volt(range) where the range follows the front-end GPIOs
-// (PC13/PB15/PD12/PD13 table of the stock).
-// It also drives the trigger comparator output PA15 (TIM2_CH1): PA15 = sample
-// code > level, level = DAC2 code mapped with the stock default calibration
-// (DAC 1780 -> code 300, 2401 -> code 780).
+// 3PA1030 scope ADC path + trigger comparator (firmware/re/analysis/
+// scope_gen_v2_6.h, fw-rs/src/scope.rs, hwtrig.rs). The real chain: TIM1_CH4
+// requests -> DMA2 stream 4 reads GPIOB->IDR (PB0..PB9, 10-bit) at the TIM1
+// update rate (below 50 MS/s through the TIM8-latched word); the comparator
+// compares the front-end node with DAC2 and drives PA15 = TIM2_CH1.
+// Here: sample n is TIM1's update event n (GD32_Timer.UpdateEventsUntil /
+// TimeOfUpdate, so TIM5 trigger start, one-pulse stop and TIM2 gating are
+// exact); its value is the scripted waveform at that virtual time, scaled
+// with the front-end range read from PC13/PB15/PD12/PD13 (code = 512 + V *
+// counts/V). Samples are delivered in bulk (GD32_DMA.FeedBlock) every tick and
+// on demand whenever the firmware reads a DMA2 stream register, so NDTR is
+// exact. Comparator edges are found one tick ahead and PA15 is driven at the
+// edge's own virtual time; level = DAC2 code mapped with the stock default
+// calibration (DAC 1780 -> code 300, 2401 -> code 780), 2 codes hysteresis.
+// The board's comparator output is INVERTED (PA15 high while signal < level;
+// fw-rs/src/hwtrig.rs: a rising-edge trigger captures a falling PA15) and
+// lags the crossing by about 2 us (the stock's trig_delay); both modelled.
 // SetWave(shape, hz, vpp, offset): sine | square | triangle | ramp | dc | noise.
 //
 using System;
@@ -19,31 +23,32 @@ using Antmicro.Renode.Core;
 using Antmicro.Renode.Logging;
 using Antmicro.Renode.Peripherals.Bus;
 using Antmicro.Renode.Peripherals.DMA;
+using Antmicro.Renode.Peripherals.Timers;
 using Antmicro.Renode.Time;
 
 namespace Antmicro.Renode.Peripherals.Miscellaneous
 {
     public class ScopeFeeder : IDoubleWordPeripheral, IKnownSize
     {
-        public ScopeFeeder(IMachine machine, GD32_DMA dma, IGPIOReceiver portA, int stream = 4, ulong tickUs = 200)
+        public ScopeFeeder(IMachine machine, GD32_DMA dma, IGPIOReceiver portA, GD32_Timer sampleTimer, int stream = 4, ulong tickUs = 100)
         {
             this.machine = machine;
             this.dma = dma;
             this.portA = portA;
+            this.timer = sampleTimer;
             this.stream = stream;
             this.tickUs = tickUs;
             SetWave("sine", 1000, 1.0, 0.0);
             Reset();
-            // Self-rescheduling action on the emulation thread (a ClockEntry handler
-            // tripped a time-framework semaphore when a tick fed many samples).
+            dma.BeforeStreamRead = s => { if(s == stream) CatchUp(); };
             machine.ScheduleAction(TimeInterval.FromMicroseconds(tickUs), _ => Tick());
         }
 
         public void Reset()
         {
-            phase = 0;
-            lastPa15 = false;
+            lastAbove = false;
             Samples = 0;
+            fed = 0; scanned = 0; lastGen = ulong.MaxValue;
         }
 
         public long Size => 0x100;
@@ -59,12 +64,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             this.Log(LogLevel.Info, "wave {0} {1} Hz {2} Vpp offset {3} V", shape, hz, vpp, offset);
         }
 
-        /// Trigger comparator on/off (PA15 driving).
         public bool Comparator { get; set; } = true;
+        public int Hysteresis { get; set; } = 2;
+        /// Comparator output polarity: true = PA15 high while signal < level (the board).
+        public bool Inverted { get; set; } = true;
+        /// Comparator latency, microseconds (stock trig_delay = 2 us at the fast rates).
+        public double DelayUs { get; set; } = 2.0;
         public ulong Samples { get; private set; }
+        public ulong Fallbacks { get; private set; }
         public int LastCode { get; private set; }
-        public double Fs { get; private set; }
+        public double Fs => timer.SampleRate;
         public int Range { get; private set; }
+        public int TriggerLevel { get; private set; }
 
         private void Tick()
         {
@@ -79,99 +90,98 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             machine.ScheduleAction(TimeInterval.FromMicroseconds(tickUs), _ => Tick());
         }
 
-        private void Step()
+        private double Now() => machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds;
+
+        /// Feed everything due up to now (called every tick and before DMA reads).
+        private void CatchUp()
         {
-            // TIM1 running and stream enabled?
-            var bus = machine.SystemBus;
-            if(!dma.Enabled(stream))
-            {
-                return;
-            }
-            var tim1Cr1 = bus.ReadDoubleWord(TIM1);
-            var smcr = bus.ReadDoubleWord(TIM1 + 0x08);
-            if((tim1Cr1 & 1) == 0)
-            {
-                // Stock: TIM1 is started by TIM5's TRGO (slave trigger mode, TS = ITR0),
-                // which Renode's timer does not model: treat a running TIM5 as the start.
-                var slaveTrigger = (smcr & 7) == 6 && ((smcr >> 4) & 7) == 0;
-                if(!(slaveTrigger && (bus.ReadDoubleWord(TIM5) & 1) != 0))
-                {
-                    return;
-                }
-            }
-            // TIM1 gated by TIM2 (fw-rs hardware trigger): SMCR SMS=101 and TIM2 OC2REF low -> stopped.
-            if((smcr & 7) == 5)
-            {
-                // Gate = TIM2 OC2REF: high while TIM2 CNT < CCR2 or TIM2 not running.
-                var t2cr1 = bus.ReadDoubleWord(TIM2);
-                if((t2cr1 & 1) != 0)
-                {
-                    var cnt = bus.ReadDoubleWord(TIM2 + 0x24);
-                    var ccr2 = bus.ReadDoubleWord(TIM2 + 0x38);
-                    if(cnt >= ccr2) return;
-                }
-            }
-            var psc = bus.ReadDoubleWord(TIM1 + 0x28) & 0xFFFF;
-            var arr = bus.ReadDoubleWord(TIM1 + 0x2C) & 0xFFFF;
-            Fs = 200e6 / ((psc + 1.0) * (arr + 1.0));
-            var now = machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds;
-            // A new acquisition (stream re-enabled, timers restarted): the start was
-            // seen up to one tick late, so samples are fed one tick AHEAD of virtual
-            // time (their values come from the waveform time, so this is harmless) and
-            // the count follows elapsed time instead of a fixed batch size.
+            if(!dma.Enabled(stream)) return;
             var gen = dma.EnableCount(stream);
-            if(gen != lastGen || Fs != lastFs)
+            if(gen != lastGen)
             {
-                if(Fs != lastFs)
-                {
-                    this.Log(LogLevel.Info, "acquisition at {0} S/s, range {1}", Fs, Range);
-                }
-                lastGen = gen; lastFs = Fs;
-                t0 = now; fed = 0;
+                // New acquisition: samples count from this stream enable.
+                lastGen = gen;
+                var now0 = Now();
+                var base0 = timer.UpdateEventsUntil(now0);
+                fedBase = base0;
+                fed = 0;
+                scanned = 0;
+                UpdateRange();
+                this.Log(LogLevel.Debug, "acquisition {0}: {1} S/s, range {2}, trigger code {3}, base {4}, timer counting {5}", gen, timer.SampleRate, Range, TriggerCode(), fedBase, timer.Counting);
             }
-            var due = (long)Math.Floor((now + tickUs / 1e6 - t0) * Fs) - fed;
-            var n = (int)Math.Min(due, 200000);
-            if(n <= 0) return;
-            UpdateRange(bus);
-            var level = TriggerCode(bus);
-            var dt = 1.0 / Fs;
-            var t = t0 + fed * dt;
+            var now = Now();
+            var due = timer.UpdateEventsUntil(now) - fedBase;
+            if(due <= fed) return;
+            var n = (int)Math.Min(due - fed, 500000);
             if(block.Length < n) block = new ushort[n];
-            var start = 0;
             for(var i = 0; i < n; i++)
             {
-                var v = Volts(t + i * dt);
-                var code = (int)Math.Round(512.0 + v * countsPerVolt);
-                if(code < 0) code = 0;
-                if(code > 1023) code = 1023;
-                block[i] = (ushort)code;
-                if(Comparator)
+                var t = timer.TimeOfUpdate(fedBase + fed + (ulong)i);
+                if(t < 0)
                 {
-                    var pa15 = code > level;
-                    if(pa15 != lastPa15)
+                    Fallbacks++;
+                    if(Fallbacks < 5) this.Log(LogLevel.Warning, "no time for update {0} (base {1}, fed {2}, due {3})", fedBase + fed + (ulong)i, fedBase, fed, due);
+                    t = now;
+                }
+                block[i] = (ushort)Code(t);
+            }
+            var took = dma.FeedBlock(stream, block, 0, n);
+            fed += (ulong)took;
+            Samples += (ulong)took;
+            if(n > 0) LastCode = block[n - 1];
+        }
+
+        private void Step()
+        {
+            CatchUp();
+            if(!dma.Enabled(stream) || !Comparator) return;
+            // Look one tick ahead for comparator crossings and schedule PA15 at
+            // the exact virtual time of the crossing sample.
+            var now = Now();
+            var horizon = now + 2.0 * tickUs / 1e6;
+            var level = TriggerCode();
+            TriggerLevel = level;
+            if(scanned < fed) scanned = fed;
+            var guard = 0;
+            while(guard++ < 1000000)
+            {
+                var t = timer.TimeOfUpdate(fedBase + scanned);
+                if(t < 0 || t > horizon) break;
+                var code = Code(t);
+                scanned++;
+                var above = lastAbove;
+                if(!lastAbove && code > level + Hysteresis) above = true;
+                else if(lastAbove && code < level - Hysteresis) above = false;
+                if(above != lastAbove)
+                {
+                    lastAbove = above;
+                    var delay = t + DelayUs * 1e-6 - now;
+                    var lvl = Inverted ? !above : above;
+                    if(delay <= 0)
                     {
-                        // Deliver the samples up to the edge first, so the DMA position
-                        // seen by the trigger logic matches the edge.
-                        var took = dma.FeedBlock(stream, block, start, i + 1 - start);
-                        fed += took; Samples += (ulong)took;
-                        start = i + 1;
-                        lastPa15 = pa15;
-                        portA.OnGPIO(15, pa15);
-                        if(!dma.Enabled(stream)) { LastCode = code; return; }
+                        portA.OnGPIO(15, lvl);
+                    }
+                    else
+                    {
+                        machine.ScheduleAction(TimeInterval.FromMicroseconds((ulong)Math.Max(1, Math.Round(delay * 1e6))), _ => portA.OnGPIO(15, lvl));
                     }
                 }
-                LastCode = code;
             }
-            if(start < n)
-            {
-                var took = dma.FeedBlock(stream, block, start, n - start);
-                fed += took; Samples += (ulong)took;
-            }
+        }
+
+        private int Code(double t)
+        {
+            var v = Volts(t);
+            var code = (int)Math.Round(512.0 + v * countsPerVolt);
+            if(code < 0) code = 0;
+            if(code > 1023) code = 1023;
+            return code;
         }
 
         private double Volts(double t)
         {
             var ph = (t * hz) % 1.0;
+            if(ph < 0) ph += 1.0;
             double x;
             switch(shape)
             {
@@ -186,8 +196,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         }
 
         // Front-end range from PC13/PB15/PD12/PD13 (stock scope_range_gpio table).
-        private void UpdateRange(IBusController bus)
+        private void UpdateRange()
         {
+            var bus = machine.SystemBus;
             var pc13 = (bus.ReadDoubleWord(GPIOC + 0x14) >> 13) & 1;
             var pb15 = (bus.ReadDoubleWord(GPIOB + 0x14) >> 15) & 1;
             var pd12 = (bus.ReadDoubleWord(GPIOD + 0x14) >> 12) & 1;
@@ -205,9 +216,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             countsPerVolt = CountsPerVolt[r];
         }
 
-        private int TriggerCode(IBusController bus)
+        private int TriggerCode()
         {
-            var dac = (int)(bus.ReadDoubleWord(DAC_DHR12R2) & 0xFFF);
+            var dac = (int)(machine.SystemBus.ReadDoubleWord(DAC_DHR12R2) & 0xFFF);
             return 300 + (int)((dac - 1780) * (780.0 - 300.0) / (2401.0 - 1780.0));
         }
 
@@ -220,9 +231,6 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private static readonly double[] CountsPerVolt =
             { 10800, 5375, 2150, 1080, 537.5, 215, 108, 53.75, 21.5, 11, 5.5 };
 
-        private const ulong TIM1 = 0x40010000;
-        private const ulong TIM2 = 0x40000000;
-        private const ulong TIM5 = 0x40000C00;
         private const ulong GPIOB = 0x40020400;
         private const ulong GPIOC = 0x40020800;
         private const ulong GPIOD = 0x40020C00;
@@ -231,15 +239,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private readonly IMachine machine;
         private readonly GD32_DMA dma;
         private readonly IGPIOReceiver portA;
+        private readonly GD32_Timer timer;
         private readonly int stream;
         private readonly ulong tickUs;
         private readonly Random rng = new Random(1);
         private string shape;
-        private double hz, vpp, offset, phase, countsPerVolt = 108;
-        private bool lastPa15;
+        private double hz, vpp, offset, countsPerVolt = 108;
+        private bool lastAbove;
         private ushort[] block = new ushort[4096];
-        private ulong lastGen;
-        private double lastFs, t0;
-        private long fed;
+        private ulong lastGen, fedBase, fed, scanned;
     }
 }
