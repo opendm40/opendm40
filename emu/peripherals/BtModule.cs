@@ -81,12 +81,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             SendToUart(Encoding.ASCII.GetBytes(text));
         }
 
+        /// Injection goes through a timed action so that a monitor command (also
+        /// one issued while the emulation is paused) never blocks on the UART's
+        /// receive path; the bytes arrive once the emulation runs.
         private void SendToUart(byte[] bytes)
         {
-            foreach(var b in bytes)
+            machine.ScheduleAction(TimeInterval.FromMicroseconds(1), _ =>
             {
-                uart.WriteChar(b);
-            }
+                foreach(var b in bytes)
+                {
+                    uart.WriteChar(b);
+                }
+            });
         }
 
         // ---- firmware -> module ----
@@ -174,8 +180,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     {
                         var copy = new byte[n];
                         Array.Copy(buf, copy, n);
-                        // Deliver on the emulation thread.
-                        machine.ScheduleAction(TimeInterval.FromMicroseconds(1), _ => SendToUart(copy));
+                        SendToUart(copy); // delivered on the emulation thread
                     }
                 }
                 catch(Exception) { }

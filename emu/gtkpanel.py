@@ -444,23 +444,50 @@ class GtkApp(Adw.Application):
 
     def build_sidebar(self):
         page = Adw.PreferencesPage()
-        # DMM input
-        g = Adw.PreferencesGroup(title='DMM input', description='V Ω / COM jacks')
-        self.vin = Adw.SpinRow.new_with_range(-1000, 1000, 0.001)
-        self.vin.set_title('DC voltage')
-        self.vin.set_subtitle('V, applied with SetVin (HY3131 model)')
-        self.vin.set_digits(4)
-        self.vin.set_value(0.0)
-        apply_v = Gtk.Button(label='Apply', valign=Gtk.Align.CENTER)
-        apply_v.connect('clicked', lambda *a: self.send('sysbus.hy3131 SetVin %s' % self.vin.get_value()))
-        self.vin.add_suffix(apply_v)
-        g.add(self.vin)
+        # DMM input (HY3131 model: SetInput "spec", emu/hy3131/README.md)
+        g = Adw.PreferencesGroup(title='DMM input', description='V Ω / COM / A jacks -> sysbus.hy3131 SetInput')
+        self.dmm_fn = Adw.ComboRow(title='Function')
+        self.dmm_modes = [
+            ('DC voltage', 'dcv:{v}', 'V'), ('AC voltage', 'acv:{v}@{f},dc={dc},shape={shape}', 'V rms'),
+            ('DC current', 'dca:{v}', 'A'), ('AC current', 'aca:{v}@{f},dc={dc},shape={shape}', 'A rms'),
+            ('Resistance', 'ohm:{v}', 'ohm'), ('Short', 'short', ''), ('Open', 'open', ''),
+            ('Diode', 'diode:{v}', 'V forward'), ('Capacitance', 'cap:{v}', 'F'),
+            ('Frequency', 'hz:{f},duty={duty},amp={v}', 'V amplitude'), ('Thermocouple', 'temp:{v},cj={cj}', 'C'),
+        ]
+        self.dmm_fn.set_model(Gtk.StringList.new([m[0] for m in self.dmm_modes]))
+        self.dmm_fn.connect('notify::selected', lambda *a: self.dmm_update_subtitle())
+        g.add(self.dmm_fn)
+        self.dmm_v = Adw.EntryRow(title='Value')
+        self.dmm_v.set_text('1.234')
+        g.add(self.dmm_v)
+        self.dmm_f = Adw.EntryRow(title='Frequency, Hz')
+        self.dmm_f.set_text('50')
+        g.add(self.dmm_f)
+        self.dmm_dc = Adw.EntryRow(title='DC offset, V or A')
+        self.dmm_dc.set_text('0')
+        g.add(self.dmm_dc)
+        self.dmm_shape = Adw.ComboRow(title='Shape')
+        self.dmm_shape.set_model(Gtk.StringList.new(['sine', 'square', 'triangle']))
+        g.add(self.dmm_shape)
+        self.dmm_duty = Adw.EntryRow(title='Duty 0..1')
+        self.dmm_duty.set_text('0.25')
+        g.add(self.dmm_duty)
+        self.dmm_cj = Adw.EntryRow(title='Cold junction, C')
+        self.dmm_cj.set_text('25')
+        g.add(self.dmm_cj)
+        row = Adw.ActionRow(title='Apply input')
+        self.dmm_spec = row
+        b = Gtk.Button(label='Apply', valign=Gtk.Align.CENTER)
+        b.connect('clicked', lambda *a: self.apply_dmm())
+        row.add_suffix(b)
+        g.add(row)
         self.dmm_cmd = Adw.EntryRow(title='HY3131 monitor command')
-        self.dmm_cmd.set_text('sysbus.hy3131 SetVin 1.234')
+        self.dmm_cmd.set_text('sysbus.hy3131 SetInput "dcv:1.234"')
         self.dmm_cmd.connect('entry-activated', lambda r: self.send(r.get_text()))
         g.add(self.dmm_cmd)
         page.add(g)
         self.group_dmm = g
+        self.dmm_update_subtitle()
         # Scope input
         g = Adw.PreferencesGroup(title='Scope input', description='MCX scope jack, ScopeFeeder')
         self.wave = Adw.ComboRow(title='Waveform')
@@ -629,6 +656,22 @@ class GtkApp(Adw.Application):
                       'scope': self.group_scope, 'gen': self.group_gen, 'usb': self.group_gen,
                       'led': self.group_gen}[data]
             target.grab_focus()
+
+    def dmm_spec_text(self):
+        name, fmt, unit = self.dmm_modes[self.dmm_fn.get_selected()]
+        return fmt.format(v=self.dmm_v.get_text().strip() or '0', f=self.dmm_f.get_text().strip() or '50',
+                          dc=self.dmm_dc.get_text().strip() or '0',
+                          shape=self.dmm_shape.get_selected_item().get_string(),
+                          duty=self.dmm_duty.get_text().strip() or '0.5', cj=self.dmm_cj.get_text().strip() or '25')
+
+    def dmm_update_subtitle(self):
+        name, fmt, unit = self.dmm_modes[self.dmm_fn.get_selected()]
+        self.dmm_v.set_title('Value' + (' (%s)' % unit if unit else ''))
+        self.dmm_spec.set_subtitle('SetInput "%s"' % self.dmm_spec_text())
+
+    def apply_dmm(self):
+        self.dmm_update_subtitle()
+        self.send('sysbus.hy3131 SetInput "%s"' % self.dmm_spec_text())
 
     def apply_wave(self):
         shape = self.wave.get_selected_item().get_string()

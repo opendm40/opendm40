@@ -66,17 +66,22 @@ None of these inputs are committed; generated images are git-ignored.
   disk), `--save-disk OUT`, `--save-flash OUT` (write the images back at the end).
 * `--run-for S` virtual seconds (default 3). Events take `@T` (virtual seconds):
   * `--tap X,Y[@T]`, `--drag X0,Y0,X1,Y1[@T]` (300 ms), `--key menu|run|auto|mf|power|power-hold|pa2[@T]`
-  * `--vin V[@T]` DMM input voltage (DC V ranges), `--scope shape,Hz,Vpp[,offset][@T]`
-    scope input (`sine square triangle ramp dc noise`)
+  * `--dmm SPEC[@T]` DMM input (HY3131 model; no spaces, several specs with `;`):
+    `dcv:1.234`, `acv:1.0@50,dc=0.5,shape=square,duty=0.3`, `dca:0.5`,
+    `aca:0.1@60`, `ohm:4700`, `short`, `open`, `diode:0.65`, `cap:100e-9`,
+    `hz:1000,duty=0.25,amp=1.0`, `temp:100,cj=25` (full list and options in
+    `emu/hy3131/README.md`); `--vin V[@T]` = DC voltage only (old scripts)
+  * `--scope shape,Hz,Vpp[,offset][@T]` scope input (`sine square triangle ramp dc noise`)
   * `--shot PNG[@T]` (no `@T` = at the end), `--autoshot N` a PNG every N frames
-  * `--script FILE` lines `T tap X Y | drag X0 Y0 X1 Y1 | key K | shot PNG | vin V | scope SPEC | monitor <renode command>`
+  * `--script FILE` lines `T tap X Y | drag X0 Y0 X1 Y1 | key K | shot PNG | dmm SPEC | vin V | scope SPEC | monitor <renode command>`
 * `--gdb [PORT]` GDB server (default 3333), `--pause` do not start the CPU,
   `--interactive` keep the Renode monitor open (`--dry` only writes the `.resc`).
 * `--bt-port PORT` TCP passthrough of the Bluetooth UART (stock measurement
   protocol / fw-rs SCPI from the host). From scripts: `monitor sysbus.btmodule
   SetConnected true` raises PC14 ("module connected"), `SendText "..."` /
-  `SendHex ...` inject host bytes; the firmware's UART output is logged with
-  `--debug sysbus.btmodule`.
+  `SendHex ...` inject host bytes (queued as a timed action, so they are safe
+  from a script line while the emulation is paused and arrive after resume);
+  the firmware's UART output is logged with `--debug sysbus.btmodule`.
 * `--trace-boot` log every ROM / FS-loader / app region transition,
   `--pc-samples N` print PCs at the end, `--debug periph,...` Renode debug log
   for peripherals (e.g. `sysbus.i2c3,sysbus.i2c3.touch,sysbus.hy3131,sysbus.btmodule`).
@@ -111,8 +116,9 @@ Renode's monitor TCP port (`renode -P`), so the GUI never blocks the emulation.
 * Display: mouse press / drag / release = touch; Ctrl+drag = two-finger pinch
   around the click point. Strip keys: press-and-hold (held = long press),
   pressed keys light up. Power button = PD6. Jacks / MCX / USB open the matching
-  page of the inputs sidebar (DMM voltage via the HY3131 model's setters, scope
-  feeder waveform, generator/USB notes, a free monitor command line).
+  page of the inputs sidebar (DMM function picker + value fields -> the
+  HY3131 model's `SetInput`, scope feeder waveform, generator/USB notes, a
+  free monitor command line).
 * Keyboard: `m r a f` = MENU RUN AUTO MF, `p` = power, `F2` / `F3` = 2-/3-finger
   swipe down (power-off confirm / screenshot gestures), `space` = pause/resume,
   `s` = screenshot to `emu/out/live-*.png`, `F9` = sidebar, `Esc` / Ctrl-C /
@@ -190,7 +196,7 @@ Check 5 (see "Use" below): `emu/out/stock-scope.png` and `emu/out/fwrs-scope.png
 | DMA1/DMA2 | `GD32_DMA.cs` | own model: one request = one data unit, NDTR counts down, HTIF/TCIF, circular, double buffer, M2M; `Feed(stream, value)` for the ADC feeder |
 | SPI1 (0x40003800) + W25Q128 | Renode `STM32SPI` + `W25Q128.cs` | file-backed 16 MiB, CS = PE4; READ/FAST READ/PP/SE/BE/CE/WREN/RDSR/REMS/JEDEC/RUID; `Load`, `Save` |
 | I2C2 (0x40005C00) + touch | `GD32_I2C.cs` + `CST_Touch.cs` | own I2C master (SBSEND/ADDSEND/BTC/TBE/RBNE, AERR for absent addresses, ACKEN/POAP, DMA RX/TX requests, DMALST); Hynitron 0x5A protocol (D1 01/09, D2 04, D0 00 frame, D0 07.., D0 00 AB ack); `Tap`, `Press`, `Move`, `Release`, `Drag`, `Key` |
-| HY3131 DMM ADC | `HY3131.cs` on the bit-banged pins | register file, INTF always "all converters ready", AD1 from `SetVin` (stock DC V scale of the configured range row) or `SetAd1`; AC/RMS/LPF/counter values are placeholders |
+| HY3131 DMM ADC | `HY3131.cs` (from `emu/hy3131/`, its README has the research and tests) | full register map with the datasheet semantics (INTF cleared on read, CTA/CTB/CTC counter, ENxxx clears, R37 reset); conversion timing: AD1 period = OSR1 * 30 / SYSCLK, doubled with the chopper (25 / 100 / 400 ms), AD2/AD3 + LPF + true RMS at their own rates, frequency counter, comparator (CMP pin), peak hold, temperature sensor; a per-row analog model of every stock configuration (V, mV, A ranges, ohm, continuity, diode, capacitance by RC oscillator and current ramp, Hz/duty, thermocouple with cold junction) that applies the meter's own calibration so the stock and fw-rs show the scripted input. Inputs: `SetInput "spec"` / `--dmm SPEC[@T]` / script `T dmm SPEC`; `SetVin V` kept for old scripts |
 | 3PA1030 scope ADC + comparator | `ScopeFeeder.cs` | sample n = TIM1 update event n (`GD32_Timer.UpdateEventsUntil/TimeOfUpdate`, so TIM5's trigger start, one-pulse stops and TIM2 gating are exact); code = 512 + V * counts/V of the front-end range read from PC13/PB15/PD12/PD13; samples go to DMA2 stream 4 in bulk every 100 us and before any stream register access (NDTR exact). Comparator: crossings found one tick ahead, PA15 driven at the crossing's virtual time + 2 us (the board's comparator latency = stock `trig_delay`), INVERTED (high while signal < level, as `fw-rs/src/hwtrig.rs` documents), level = DAC2 with the stock default map (1780 -> code 300, 2401 -> 780), 2 codes hysteresis |
 | UART4 + BT module | Renode `STM32_UART` + `BtModule.cs` | AT+SBN/CBN/SLED0/RESET answered, PC14 "connected" while a TCP host is attached (`--bt-port`), `SendHex`/`SendText` from scripts |
 | ADC0 | `SimpleADC.cs` | SW-started single conversions, GD32 calibration bits self-clear; channel 15 = 4.0 V battery by default (`SetVolts ch v`) |
@@ -246,9 +252,6 @@ would need per-firmware hooks and was not done.
 * fw-rs: taps and side keys work; horizontal swipes were not recognised by
   the gesture engine in the emulator (the drag reports arrive every 20 ms
   with an INT pulse each; not investigated).
-* HY3131: only the DC V path is scaled; other modes read the raw placeholder
-  values. An AC/ohm/capacitance model needs the per-mode scaling from
-  `firmware/re/analysis/dmm_v2_6.h`.
 * Scope trigger (verified 2026-10-14, `--fast`, screenshots in `emu/out/`):
   stock Auto with a 1 kHz sine at 10 ms/div -> `T'D`; 40 Hz square -> the
   falling edge sits on the T marker with the default Edge = Falling, the
