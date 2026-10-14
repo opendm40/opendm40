@@ -65,6 +65,55 @@ pub const INNER: Rect = rect(0, 15, 414, 290);
 pub const B_RECT: [Rect; 7] =
     [rect(417, 20, 60, 40), rect(417, 61, 60, 40), rect(417, 102, 60, 40), rect(417, 150, 60, 40), rect(417, 191, 60, 40), rect(417, 232, 60, 40), rect(417, 280, 60, 40)];
 
+/// Top-bar badges (sec. 2): run status, timebase, CH1 V/div, trigger.
+pub const RUN_BADGE: Rect = rect(13, 1, 62, 17);
+pub const TB_BADGE: Rect = rect(79, 1, 62, 17);
+pub const VDIV_BADGE: Rect = rect(286, 1, 62, 17);
+pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
+
+// fw-rs timebase tap step (docs/scope-scale-ux.md sec. 3). The rects are
+// absolute; both views share the frame's bottom edge (y 300), so they are
+// the same in the combined view.
+/// Value-preview tabs (left: the next slower timebase, right: the next
+/// faster one), in the bottom graph corners. 52 px wide (the doc's 50 px
+/// left 2 px beside the widest labels, "<500ms" is 45 px in the 12 px font).
+pub const TAB_L: Rect = rect(23, 280, 52, 17);
+pub const TAB_R: Rect = rect(358, 280, 52, 17);
+/// "Corners" tap zones (80 x 73 px, about 13.6 x 12.4 mm); the left one
+/// starts after the strip markers' press zones (x <= 22).
+pub const ZONE_L: Rect = rect(23, 228, 80, 73);
+pub const ZONE_R: Rect = rect(333, 228, 80, 73);
+/// `Model::tabs` bits.
+pub const TAB_SHOW_L: u8 = 1;
+pub const TAB_SHOW_R: u8 = 2;
+pub const TAB_PRESS_L: u8 = 4;
+pub const TAB_PRESS_R: u8 = 8;
+/// Settings "Scope tap step": stock halves (left half slower, right half
+/// faster), the corner zones, or no tap step at all (badge list + pinch).
+pub const TAP_HALVES: u8 = 0;
+pub const TAP_CORNERS: u8 = 1;
+pub const TAP_OFF: u8 = 2;
+/// The default tap-step mode (the owner's corner zones). Persisted XOR this
+/// value, so a record without the field restores it.
+pub const TAP_DEFAULT: u8 = TAP_CORNERS;
+pub const TAP_NAMES: [&str; 3] = ["Halves (stock)", "Corners", "Off"];
+
+/// Persisted tap-step code (2 bits): the mode XOR TAP_DEFAULT, so a record
+/// written before the setting existed (0) restores the default.
+pub fn tap_code(mode: u8) -> u32 {
+    ((mode ^ TAP_DEFAULT) & 3) as u32
+}
+
+/// Tap-step mode of a persisted code (an unknown code: the default).
+pub fn tap_decode(code: u32) -> u8 {
+    let m = (code & 3) as u8 ^ TAP_DEFAULT;
+    if m > TAP_OFF { TAP_DEFAULT } else { m }
+}
+/// Corners: holding a zone still steps again after REPEAT_FIRST_MS, then
+/// every REPEAT_MS.
+pub const REPEAT_FIRST_MS: u64 = 500;
+pub const REPEAT_MS: u64 = 200;
+
 /// Everything the page shows.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Model {
@@ -120,6 +169,12 @@ pub struct Model {
     /// Math mode of the math pill label (stock S+0xd4: 0 "--" .. 5 FFT, 6
     /// ABS; shown even while math is off). fw-rs has no math engine: 0.
     pub math_mode: u8,
+    /// fw-rs timebase tabs (docs/scope-scale-ux.md sec. 3): TAB_SHOW_L /
+    /// TAB_SHOW_R shown, TAB_PRESS_L / TAB_PRESS_R in pressed style
+    /// (`tabs_of`); 0 = none (the stock page).
+    pub tabs: u8,
+    /// Timebase badge drawn inverted (150 ms after a timebase change).
+    pub tb_flash: bool,
 }
 
 impl Model {
@@ -152,6 +207,8 @@ impl Model {
         pressed: 0,
         combined: false,
         math_mode: 0,
+        tabs: 0,
+        tb_flash: false,
     };
 
     pub fn pal(&self) -> Color {
@@ -292,16 +349,18 @@ fn badge(r: Rect, fill: Color, outside: Color, inner: Option<(Rect, Color)>, ink
 
 /// 2.1 run-status badge.
 pub fn status_badge(m: &Model) {
-    let r = rect(13, 1, 62, 17);
+    let r = RUN_BADGE;
     let t = Ink::new(sf::SC_C, r, STATUS[m.status.min(4) as usize], 8, 0);
     badge(r, if m.status == ST_STOP { C_ORANGE } else { C_PURPLE }, C_BAR, None, &[(&t, C_WHITE)]);
 }
 
-/// 2.2 timebase badge.
+/// 2.2 timebase badge; `tb_flash`: inverted (white box, magenta text), the
+/// fw-rs feedback of a timebase change.
 pub fn tb_badge(m: &Model) {
     let h = Ink::new(sf::SC_C, rect(83, 1, 12, 17), "H", 1, 0);
     let t = Ink::new(sf::SC_F12, rect(95, 1, 46, 17), TB_LABELS[m.tb.min(29) as usize], 8, 0);
-    badge(rect(79, 1, 62, 17), C_MAGENTA, C_BAR, None, &[(&h, C_WHITE), (&t, C_WHITE)]);
+    let (fill, fg) = if m.tb_flash { (C_WHITE, C_MAGENTA) } else { (C_MAGENTA, C_WHITE) };
+    badge(TB_BADGE, fill, C_BAR, None, &[(&h, fg), (&t, fg)]);
 }
 
 /// 2.3 record-position bar; while running (record = screen) it shows the
@@ -882,10 +941,11 @@ pub struct Graph {
     deco: Deco,
     d_deco: Deco,
     valid: bool,
-    /// A screen rect the graph leaves alone (an overlay drawn on top, e.g.
-    /// the pinch bubble), and the one of the last flush.
-    hole: Option<Rect>,
-    d_hole: Option<Rect>,
+    /// Screen rects the graph leaves alone (overlays drawn on top: 0 the
+    /// pinch bubble, 1 / 2 the timebase tabs), and those of the last flush.
+    /// Overlays never share a column range with another one.
+    holes: [Option<Rect>; NH],
+    d_holes: [Option<Rect>; NH],
     /// Pixels written by the last flush (host budget check / DBG).
     pub px: u32,
 }
@@ -901,10 +961,13 @@ static mut GRAPH: Graph = Graph {
     deco: Deco::NONE,
     d_deco: Deco::NONE,
     valid: false,
-    hole: None,
-    d_hole: None,
+    holes: [None; NH],
+    d_holes: [None; NH],
     px: 0,
 };
+
+/// Graph hole slots (`Graph::set_hole_at`).
+const NH: usize = 3;
 
 /// Set the graph state up in place (its static is not loaded on the
 /// device). Call once before any other scope_ui function.
@@ -919,8 +982,8 @@ pub fn init() {
     g.deco = Deco::NONE;
     g.d_deco = Deco::NONE;
     g.valid = false;
-    g.hole = None;
-    g.d_hole = None;
+    g.holes = [None; NH];
+    g.d_holes = [None; NH];
     g.px = 0;
 }
 
@@ -988,9 +1051,15 @@ impl Graph {
         self.valid = false;
     }
 
-    /// Leave `r` (screen) alone from now on (None: paint it again).
+    /// Leave `r` (screen) alone from now on (None: paint it again): the
+    /// pinch bubble's slot.
     pub fn set_hole(&mut self, r: Option<Rect>) {
-        self.hole = r;
+        self.holes[0] = r;
+    }
+
+    /// Hole slot `i` (1 / 2: the timebase tabs, set by `update`).
+    pub fn set_hole_at(&mut self, i: usize, r: Option<Rect>) {
+        self.holes[i] = r;
     }
 
     /// Clear the trace and persistence (an empty graph).
@@ -1006,7 +1075,7 @@ impl Graph {
         let d = self.deco;
         let o = self.d_deco;
         // Nothing changed (most main-loop passes): no per-column work.
-        if self.valid && d == o && self.hole == self.d_hole && self.tr == self.d_tr && self.ps == self.d_ps {
+        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps {
             self.px = 0;
             return;
         }
@@ -1055,9 +1124,11 @@ impl Graph {
                     sp.add((r, r));
                 }
                 // A hole that went away / moved: its rows come back.
-                if let Some(o) = self.d_hole.filter(|_| self.hole != self.d_hole) {
-                    if 13 + fx >= o.x && 13 + fx < o.x + o.w {
-                        sp.add((o.y - d.top, o.y + o.h - 1 - d.top));
+                for k in 0..NH {
+                    if let Some(o) = self.d_holes[k].filter(|_| self.holes[k] != self.d_holes[k]) {
+                        if 13 + fx >= o.x && 13 + fx < o.x + o.w {
+                            sp.add((o.y - d.top, o.y + o.h - 1 - d.top));
+                        }
                     }
                 }
             }
@@ -1067,8 +1138,9 @@ impl Graph {
             let (tr, ps) = (self.tr[i], self.ps[i]);
             let vcol = vl(&d, fx);
             let sx = 13 + fx;
-            // Rows of this column under the hole (not painted).
-            let hole = self.hole.filter(|r| sx >= r.x && sx < r.x + r.w).map(|r| (r.y - d.top, r.y + r.h - 1 - d.top));
+            // Rows of this column under a hole (not painted; the overlays
+            // do not share columns, so at most one per column).
+            let hole = self.holes.iter().flatten().find(|r| sx >= r.x && sx < r.x + r.w).map(|r| (r.y - d.top, r.y + r.h - 1 - d.top));
             let mut cut = [(0i16, 0i16); 24];
             let mut nc = 0;
             for &(a, b) in sp.merged(1, h - 2) {
@@ -1127,7 +1199,7 @@ impl Graph {
         self.d_tr = self.tr;
         self.d_ps = self.ps;
         self.d_deco = d;
-        self.d_hole = self.hole;
+        self.d_holes = self.holes;
         self.valid = true;
     }
 }
@@ -1174,7 +1246,7 @@ pub fn update(m: &Model) {
     if d(ol.status != m.status) {
         status_badge(m);
     }
-    if d(ol.tb != m.tb) {
+    if d(ol.tb != m.tb || ol.tb_flash != m.tb_flash) {
         tb_badge(m);
     }
     if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz) {
@@ -1227,7 +1299,18 @@ pub fn update(m: &Model) {
         s.strip = nm;
     }
     s.m = Some(*m);
-    graph().flush(m);
+    // The timebase tabs: holes in the graph, painted over it.
+    let g = graph();
+    let tabs = [(TAB_L, TAB_SHOW_L | TAB_PRESS_L), (TAB_R, TAB_SHOW_R | TAB_PRESS_R)];
+    for (k, &(r, bits)) in tabs.iter().enumerate() {
+        g.set_hole_at(1 + k, (m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0).then_some(r));
+    }
+    g.flush(m);
+    for (k, &(_, bits)) in tabs.iter().enumerate() {
+        if m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0 && d((ol.tabs ^ m.tabs) & bits != 0 || ol.tb != m.tb) {
+            tb_tab(m, k == 0);
+        }
+    }
 }
 
 /// Measurement bar texts (<= 4, "--" for unused cells); only changed cells
@@ -1244,6 +1327,176 @@ pub fn cells(m: &Model, texts: &[&str]) {
         meas_cell(m, i, t);
         s.cells[i][..n].copy_from_slice(&b[..n]);
         s.cells_n[i] = n as u8;
+    }
+}
+
+// ------------------------------------------------------------------ tap step
+// fw-rs timebase tap step (docs/scope-scale-ux.md sec. 3): value-preview
+// tabs, tap zones, the press decision, the hold repeat. Pure functions of
+// the model and the touch so the host tests (tools/touch-test, ui-render)
+// run exactly what the page runs.
+
+/// A timebase preview tab: the measurement-cell style (r5 box in the bar
+/// colour, 1 px ring) in the timebase badge's magenta; pressed / just
+/// stepped: filled magenta. Text: the value the next tap on that side sets
+/// ("<500us" / "100us>"). The pixels outside the rounded corners are the
+/// graph fill (the graph leaves the tab rect alone: `Graph` holes).
+pub fn tb_tab(m: &Model, left: bool) {
+    let (r, press) = if left { (TAB_L, TAB_PRESS_L) } else { (TAB_R, TAB_PRESS_R) };
+    let tb = m.tb.min(29) as usize;
+    let mut b = Buf::new();
+    if left {
+        b.push("<").push(TB_LABELS[(tb + 1).min(29)]);
+    } else {
+        b.push(TB_LABELS[tb.saturating_sub(1)]).push(">");
+    }
+    let t = Ink::new(sf::SC_F12, r, b.as_str(), 8, 0);
+    let pressed = m.tabs & press != 0;
+    let fill = if pressed { C_MAGENTA } else { C_BAR };
+    paint(r, &[(K_SHAPE, C_FILL), (K_TEXT, fill)], |x, y| {
+        if let Some(g) = t.at(x, y) {
+            return (C_WHITE, tag(2, g));
+        }
+        if !in_rbox(r, 5, 0x0f, x, y) {
+            (C_FILL, 0)
+        } else if on_ring(r, 5, 0x0f, x, y) {
+            (C_MAGENTA, tag(1, 0))
+        } else {
+            (fill, tag(1, 0))
+        }
+    });
+}
+
+/// Highest timebase index the scope accepts (scope.rs `apply`): roll on and
+/// not Single = TB_MAX, else the YT maximum.
+pub fn tb_top(roll: bool, single: bool) -> u8 {
+    (if roll && !single { crate::scope::TB_MAX } else { crate::scope::TB_YT_MAX }) as u8
+}
+
+/// `Model::tabs` for a tap-step `mode`: Corners always shows both tabs,
+/// Halves while `transient` (2 s after a step, the first page entries) or
+/// a press is armed, Off never. A tab whose step is at its limit is hidden
+/// (slower at `tb_max`, faster at TB_MIN). `pressed`: the side armed by the
+/// finger or just stepped (true = left / slower).
+pub fn tabs_of(mode: u8, tb: u8, tb_max: u8, transient: bool, pressed: Option<bool>) -> u8 {
+    let show = match mode {
+        TAP_CORNERS => true,
+        TAP_HALVES => transient || pressed.is_some(),
+        _ => false,
+    };
+    if !show {
+        return 0;
+    }
+    let mut b = 0;
+    if tb < tb_max {
+        b |= TAB_SHOW_L;
+        if pressed == Some(true) {
+            b |= TAB_PRESS_L;
+        }
+    }
+    if tb as usize > crate::scope::TB_MIN {
+        b |= TAB_SHOW_R;
+        if pressed == Some(false) {
+            b |= TAB_PRESS_R;
+        }
+    }
+    b
+}
+
+/// The tap-step side of a press at (x, y) inside INNER that hit no marker:
+/// Some(true) = slower, Some(false) = faster, None = no step there.
+pub fn tap_zone(mode: u8, x: i16, y: i16) -> Option<bool> {
+    match mode {
+        TAP_HALVES if INNER.has(x, y) => Some(x <= 207),
+        TAP_CORNERS if ZONE_L.has(x, y) => Some(true),
+        TAP_CORNERS if ZONE_R.has(x, y) => Some(false),
+        _ => None,
+    }
+}
+
+/// What a press in the graph area does.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Press {
+    /// A marker / cursor-line zone: select (level group, item id).
+    Marker(bool, u8),
+    /// No marker: the release steps the timebase (true = slower).
+    Step(bool),
+    /// Nothing (a drag still moves the selected item).
+    None,
+}
+
+/// The page's press decision at (x, y) inside INNER: the object under the
+/// finger wins: the stock marker zones (search order, `pick_zone`), then
+/// the cursor lines (fw-rs), and only then the tap-step zone of `mode`.
+pub fn graph_press(m: &Model, mode: u8, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Press {
+    let mut z = [Zone::NONE; 7];
+    let n = zones(m, &mut z);
+    if let Some(k) = pick_zone(&z[..n], sel_v, sel_h, last_h, x, y) {
+        return Press::Marker(z[k].level, z[k].id);
+    }
+    let mut lz = [Zone::NONE; 4];
+    let k = line_zones(m, &mut lz);
+    if let Some(i) = pick_zone(&lz[..k], sel_v, sel_h, last_h, x, y) {
+        return Press::Marker(lz[i].level, lz[i].id);
+    }
+    match tap_zone(mode, x, y) {
+        Some(s) => Press::Step(s),
+        None => Press::None,
+    }
+}
+
+/// Tappable top-bar badge under (x, y) (y < 20, the badge's x span): 0 run
+/// status (RUN/STOP), 1 timebase (list popup), 2 V/div (CH1 popup), 3
+/// trigger (Trigger tab). Tested before the graph area (INNER starts at y
+/// 15): a badge wins over the top 5 rows of a marker zone there.
+pub fn top_badge(x: u16, y: u16) -> Option<u8> {
+    if y >= 20 {
+        return None;
+    }
+    let x = x as i16;
+    [RUN_BADGE, TB_BADGE, VDIV_BADGE, TRIG_BADGE].iter().position(|r| x >= r.x && x < r.x + r.w).map(|k| k as u8)
+}
+
+/// Corners hold repeat: the `done`-th repeat (0-based) of a press at `t0`
+/// is due at t0 + REPEAT_FIRST_MS + done * REPEAT_MS.
+pub fn repeat_due(t0: u64, done: u32, now: u64) -> bool {
+    now >= t0 + REPEAT_FIRST_MS + done as u64 * REPEAT_MS
+}
+
+/// The tap step of one press (scope_page Touch): the side `graph_press`
+/// armed (None: a marker or no zone), the press time, the hold repeats done.
+/// `still`: the touch has not left the tap tolerance and is not a drag.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Arm {
+    pub side: Option<bool>,
+    pub t0: u64,
+    pub rep: u8,
+}
+
+impl Arm {
+    pub const NONE: Arm = Arm { side: None, t0: 0, rep: 0 };
+
+    /// Per main-loop pass while the finger is down: the side to step now
+    /// (Corners only: a still hold, first after REPEAT_FIRST_MS, then every
+    /// REPEAT_MS).
+    pub fn repeat(&mut self, mode: u8, still: bool, now: u64) -> Option<bool> {
+        let s = self.side?;
+        if mode != TAP_CORNERS || !still || !repeat_due(self.t0, self.rep as u32, now) {
+            return None;
+        }
+        self.rep = self.rep.saturating_add(1);
+        Some(s)
+    }
+
+    /// The step of the release: a still tap that has not repeated.
+    pub fn release(&self, still: bool) -> Option<bool> {
+        if still && self.rep == 0 { self.side } else { None }
+    }
+
+    /// The side shown pressed while the finger is down (a still press that
+    /// has not repeated: it previews what the release does).
+    pub fn armed(&self, still: bool) -> Option<bool> {
+        self.release(still)
     }
 }
 
@@ -1286,6 +1539,9 @@ pub enum Popup {
     Mf(u8),
     Ch1(u8),
     Math(u8),
+    /// fw-rs timebase list (tap on the timebase badge): the timebase index
+    /// in the list's centre band.
+    Tb(u8),
 }
 
 /// Intersection of two rects (w / h 0 when disjoint).
@@ -1690,7 +1946,104 @@ pub fn draw_popup(p: Popup, v: &PopVals) {
         Popup::Mf(t) => draw_mf(t, v),
         Popup::Ch1(t) => draw_ch1(t, v),
         Popup::Math(t) => draw_math(t, v),
+        Popup::Tb(i) => draw_tb(i),
     }
+}
+
+// fw-rs timebase list popup (docs/scope-scale-ux.md sec. 3): the stock
+// popup box and header, the stock spinner widget over every timebase. The
+// box's top row is y 21: y 20 is the frame line in the same colour (the
+// stock popups start at y 20), and the box keeps 3 px from the badges.
+pub const TB_BOX: Rect = rect(79, 21, 132, 191);
+const TB_HEAD: Rect = rect(80, 22, 130, 29);
+pub const TB_SPIN: Rect = rect(85, 55, 120, 150);
+/// Timebases beyond the YT maximum (roll only) in the list.
+const C_ROLL: Color = 0xfd20;
+/// Drag travel per list row, px.
+pub const TB_ROW_PX: i32 = 30;
+
+/// The timebase list popup with `cur` (timebase index) in the band. Items
+/// TB_MIN..=TB_MAX; roll-only entries (beyond TB_YT_MAX) in orange.
+pub fn draw_tb(cur: u8) {
+    let (lo, hi) = (crate::scope::TB_MIN, crate::scope::TB_MAX);
+    let cur = (cur as usize).clamp(lo, hi);
+    let screen = rect(0, 0, 480, 320);
+    paint(TB_BOX, &[(K_SHAPE, C_BAR)], |x, y| if TB_HEAD.has(x, y) { (C_POP_TAB, tag(1, 0)) } else { (C_FRAME, tag(1, 0)) });
+    let t = Ink::new(sf::SC_F16, TB_HEAD, "Time/div", 8, 0);
+    paint(TB_HEAD, &[(K_TEXT, C_POP_TAB)], |x, y| match t.at(x, y) {
+        Some(g) => (C_YELLOW, tag(1, g)),
+        None => (C_POP_TAB, 0),
+    });
+    // The stock spinner (FUN_080274b2), one probe layer per row.
+    let r = TB_SPIN;
+    let band = rect(r.x, r.y + (r.h - 30) / 2, r.w, 30);
+    let mut ink = [Ink::none(); 5];
+    let mut col = [0u16; 5];
+    for k in 0..5i16 {
+        let idx = cur as i16 - 2 + k;
+        if idx < lo as i16 || idx > hi as i16 {
+            continue;
+        }
+        let y = r.y + k * 30;
+        col[k as usize] = if idx as usize > crate::scope::TB_YT_MAX {
+            C_ROLL
+        } else if y == band.y {
+            C_WHITE
+        } else {
+            C_POP_BG
+        };
+        ink[k as usize] = Ink::new(sf::SC_F16, rect(r.x, y, r.w, 30), TB_LABELS[idx as usize], 8, 0);
+    }
+    let layers = [(K_SHAPE, C_FRAME), (K_TEXT, C_BAR), (K_TEXT, C_BAR), (K_TEXT, C_SEL), (K_TEXT, C_BAR), (K_TEXT, C_BAR)];
+    paint(isect(r, screen), &layers, |x, y| {
+        for k in 0..5 {
+            if let Some(g) = ink[k].at(x, y) {
+                return (col[k], tag(2 + k as u16, g));
+            }
+        }
+        if band.has(x, y) {
+            (C_SEL, tag(1, 0))
+        } else if in_rbox(r, 8, 0x0f, x, y) {
+            (C_BAR, tag(1, 0))
+        } else {
+            (C_FRAME, 0)
+        }
+    });
+}
+
+/// What a touch on the timebase list hits.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum TbHit {
+    /// A list row: its timebase index.
+    Row(u8),
+    Inside,
+    /// Outside the box: closes.
+    Close,
+}
+
+pub fn tb_hit(cur: u8, x: i16, y: i16) -> TbHit {
+    if !TB_BOX.has(x, y) && !(y == 20 && x >= TB_BOX.x && x < TB_BOX.x + TB_BOX.w) {
+        return TbHit::Close;
+    }
+    let (lo, hi) = (crate::scope::TB_MIN as i16, crate::scope::TB_MAX as i16);
+    let cur = (cur as i16).clamp(lo, hi);
+    if !TB_SPIN.has(x, y) {
+        return TbHit::Inside;
+    }
+    let idx = cur - 2 + (y - TB_SPIN.y) / 30;
+    if idx < lo || idx > hi { TbHit::Inside } else { TbHit::Row(idx as u8) }
+}
+
+/// Drag scroll of the list: `acc` px of vertical travel not yet turned into
+/// rows (down = earlier, faster entries come into the band). Returns the
+/// new centre index and the remainder (0 at either end of the list).
+pub fn tb_scroll(cur: u8, acc: i32) -> (u8, i32) {
+    let (lo, hi) = (crate::scope::TB_MIN as i32, crate::scope::TB_MAX as i32);
+    let rows = acc / TB_ROW_PX;
+    let want = cur as i32 - rows;
+    let i = want.clamp(lo, hi);
+    let rem = if i != want { 0 } else { acc - rows * TB_ROW_PX };
+    (i as u8, rem)
 }
 
 /// The "Sampling" box (RUN refused during AUTO-set).

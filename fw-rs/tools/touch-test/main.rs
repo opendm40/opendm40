@@ -733,6 +733,178 @@ fn hit_tests(ck: &mut Ck) {
     page(ck, "generator", &gen_hit, &|b| b.y0 >= 36, &[0, 1, 2, 3, 100]);
 }
 
+// ------------------------------------------------- 5. timebase tap step
+
+/// fw-rs timebase tap step on the replica scope page (docs/scope-scale-ux.md
+/// sec. 3; scope_ui `graph_press`, `top_badge`, `Arm`, `tb_hit`,
+/// `tb_scroll`, the functions scope_page.rs runs): corner / halves hits
+/// against the drawn tabs, marker priority, badge taps, the hold repeat,
+/// the timebase list rows and scroll, the persisted mode.
+fn tap_step_tests(ck: &mut Ck) {
+    use scope_ui::{self as su, Press};
+    // (The flash map is set up by hit_tests.)
+    let d = su::Model::DEFAULT;
+    let gp = |m: &su::Model, mode: u8, x: i16, y: i16| su::graph_press(m, mode, 0, 0, false, x, y);
+    let step = |p: Press| match p {
+        Press::Step(true) => Some(1u32),
+        Press::Step(false) => Some(2),
+        _ => None,
+    };
+    // Hit maps: every pixel of each drawn tab arms its side (Corners, and
+    // Halves where the tab is a preview), both views.
+    for combined in [false, true] {
+        for mode in [su::TAP_CORNERS, su::TAP_HALVES] {
+            let mut m = d;
+            m.combined = combined;
+            m.tabs = su::tabs_of(su::TAP_CORNERS, m.tb, 24, false, None);
+            host::reset(0);
+            su::invalidate();
+            su::graph().clear();
+            su::update(&m);
+            let hit = move |x: u16, y: u16| if su::INNER.has(x as i16, y as i16) { step(su::graph_press(&m, mode, 0, 0, false, x as i16, y as i16)) } else { None };
+            page(ck, &format!("tabs mode {mode} combined {combined}"), &hit, &|b| b.y0 >= 228 && b.y1 <= 300 && b.x1 < 414, &[1, 2]);
+        }
+    }
+    let inside = |a: stockfont::Rect, b: stockfont::Rect| a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h;
+    ck.t("tabs inside their corner zones", inside(su::TAB_L, su::ZONE_L) && inside(su::TAB_R, su::ZONE_R));
+    ck.t("corner zones inside the graph area, left after the strip zones (x > 22)", su::ZONE_L.x > 22 && su::ZONE_R.x + su::ZONE_R.w <= 414 && su::ZONE_L.y + su::ZONE_L.h <= 301);
+    // Zones per mode.
+    let c = su::TAP_CORNERS;
+    ck.t("corners: bottom-left slower, bottom-right faster", gp(&d, c, 40, 290) == Press::Step(true) && gp(&d, c, 400, 290) == Press::Step(false));
+    ck.t("corners: zone edges (23..102 / 333..412, y 228..300)", gp(&d, c, 23, 228) == Press::Step(true) && gp(&d, c, 102, 300) == Press::Step(true) && gp(&d, c, 103, 290) == Press::None && gp(&d, c, 40, 227) == Press::None && gp(&d, c, 333, 300) == Press::Step(false) && gp(&d, c, 412, 228) == Press::Step(false) && gp(&d, c, 332, 290) == Press::None);
+    ck.t("corners: a tap elsewhere in the graph does nothing", gp(&d, c, 200, 290) == Press::None && gp(&d, c, 100, 150) == Press::None && gp(&d, c, 300, 60) == Press::None);
+    let h = su::TAP_HALVES;
+    ck.t("halves: left half slower, right half faster (stock x <= 207)", gp(&d, h, 100, 150) == Press::Step(true) && gp(&d, h, 207, 60) == Press::Step(true) && gp(&d, h, 208, 60) == Press::Step(false) && gp(&d, h, 400, 290) == Press::Step(false));
+    ck.t("off: no tap step anywhere", [(40, 290), (400, 290), (100, 150), (300, 150)].iter().all(|&(x, y)| gp(&d, su::TAP_OFF, x, y) == Press::None));
+    let mut cm = d;
+    cm.combined = true;
+    ck.t("corners in the combined view (same bottom edge)", gp(&cm, c, 40, 290) == Press::Step(true) && gp(&cm, c, 400, 290) == Press::Step(false));
+    // Marker priority: the object under the finger wins over the zones.
+    for mode in [su::TAP_CORNERS, su::TAP_HALVES] {
+        let mut m = d;
+        m.ycur = Some([270, 100]);
+        ck.t(&format!("mode {mode}: Y1 cursor line across the left corner wins"), gp(&m, mode, 40, 290) == Press::Marker(true, 3));
+        let mut m = d;
+        m.xcur = Some([30, 385]);
+        ck.t(&format!("mode {mode}: X cursor lines in both corners win"), gp(&m, mode, 44, 260) == Press::Marker(false, 2) && gp(&m, mode, 399, 260) == Press::Marker(false, 3));
+        let mut m = d;
+        m.pos = 300;
+        m.trig_row = 300;
+        ck.t(&format!("mode {mode}: CH1 / level markers clamped at the bottom keep their zone (x <= 22)"), matches!(gp(&m, mode, 15, 292), Press::Marker(true, _)));
+        ck.t(&format!("mode {mode}: trigger level marker zone"), gp(&d, mode, 6, 125) == Press::Marker(true, 1));
+        ck.t(&format!("mode {mode}: T marker zone"), gp(&d, mode, 214, 30) == Press::Marker(false, 0));
+        let mut m = d;
+        m.trig_px = 40;
+        ck.t(&format!("mode {mode}: still a step next to the cursor-free corner"), gp(&m, mode, 60, 280) == Press::Step(true));
+    }
+    // Top-bar badges: hit map against the drawn badges, then the edges.
+    host::reset(0);
+    su::invalidate();
+    su::update(&d);
+    page(ck, "top badges", &|x, y| su::top_badge(x, y).map(|k| k as u32), &|b| b.y1 < 20, &[0, 1, 2, 3]);
+    let tb = |x: u16, y: u16| su::top_badge(x, y);
+    ck.t("badges: run / timebase / V/div / trigger", tb(40, 10) == Some(0) && tb(100, 10) == Some(1) && tb(300, 5) == Some(2) && tb(380, 10) == Some(3));
+    ck.t("badges: rows 15..19 (inside INNER) are the badge, y 20 the graph", tb(100, 15) == Some(1) && tb(100, 19) == Some(1) && tb(100, 20).is_none() && tb(300, 19) == Some(2));
+    ck.t("badges: record bar, gaps and battery are not badges", tb(200, 10).is_none() && tb(77, 10).is_none() && tb(143, 10).is_none() && tb(450, 10).is_none());
+    let mut m = d;
+    m.trig_px = 90;
+    ck.t("badges win over the T zone's top rows (T under the timebase badge)", gp(&m, c, 100, 17) == Press::Marker(false, 0) && tb(100, 17) == Some(1) && gp(&m, c, 100, 25) == Press::Marker(false, 0));
+    // Hold repeat (Corners): a press every 5 ms of main loop from t0.
+    let hold = |mode: u8, side: Option<bool>, ms: u64, still_until: u64| -> (Vec<u64>, Option<bool>) {
+        let mut a = su::Arm { side, t0: 1000, rep: 0 };
+        let mut at = vec![];
+        let mut t = 1000;
+        while t <= 1000 + ms {
+            let still = t < 1000u64.saturating_add(still_until);
+            if a.repeat(mode, still, t).is_some() {
+                at.push(t - 1000);
+            }
+            t += 5;
+        }
+        (at, a.release(ms < still_until))
+    };
+    let (at, rel) = hold(c, Some(true), 100, u64::MAX);
+    ck.t("corners: a 100 ms tap steps once, on release", at.is_empty() && rel == Some(true));
+    let (at, rel) = hold(c, Some(false), 495, u64::MAX);
+    ck.t("corners: no repeat before 500 ms", at.is_empty() && rel == Some(false));
+    let (at, rel) = hold(c, Some(false), 1300, u64::MAX);
+    ck.t(&format!("corners: hold repeats at 500, 700, 900, 1100, 1300 ms, none on release ({at:?})"), at == vec![500, 700, 900, 1100, 1300] && rel.is_none());
+    let (at, rel) = hold(c, Some(true), 1300, 300);
+    ck.t("corners: a press that became a drag never repeats nor steps", at.is_empty() && rel.is_none());
+    let (at, rel) = hold(c, Some(true), 1000, 800);
+    ck.t(&format!("corners: repeats stop when the finger moves ({at:?})"), at == vec![500, 700] && rel.is_none());
+    let (at, rel) = hold(h, Some(true), 1500, u64::MAX);
+    ck.t("halves: no repeat (one step on release)", at.is_empty() && rel == Some(true));
+    let (at, rel) = hold(c, None, 1500, u64::MAX);
+    ck.t("a marker press (no side) never steps", at.is_empty() && rel.is_none());
+    ck.t("armed side shown pressed while still, not after a repeat", {
+        let a = su::Arm { side: Some(true), t0: 0, rep: 0 };
+        let b = su::Arm { rep: 1, ..a };
+        a.armed(true) == Some(true) && a.armed(false).is_none() && b.armed(true).is_none()
+    });
+    // Timebase list popup: every drawn row label is the row its touch picks;
+    // outside the box closes; scroll by whole rows, clamped at the ends.
+    for cur in [scope::TB_MIN as u8, 4, 13, 24, 28, scope::TB_MAX as u8] {
+        host::reset(0);
+        su::draw_tb(cur);
+        let e = emu();
+        let mut rows: std::collections::BTreeMap<u32, (i32, i32, i32, i32)> = Default::default();
+        let sp = su::TB_SPIN;
+        for y in sp.y as usize..(sp.y + sp.h) as usize {
+            for x in sp.x as usize..(sp.x + sp.w) as usize {
+                let o = e.owner[y * W + x];
+                if o == 0 || e.kinds[(o >> 8) as usize - 1] != probe::TEXT {
+                    continue;
+                }
+                let b = rows.entry(o >> 8).or_insert((x as i32, y as i32, x as i32, y as i32));
+                *b = (b.0.min(x as i32), b.1.min(y as i32), b.2.max(x as i32), b.3.max(y as i32));
+            }
+        }
+        let lo = (cur as i32 - 2).max(scope::TB_MIN as i32);
+        let hi = (cur as i32 + 2).min(scope::TB_MAX as i32);
+        ck.t(&format!("tb list {cur}: {} rows drawn", hi - lo + 1), rows.len() as i32 == hi - lo + 1);
+        let mut ok = true;
+        for (_, b) in &rows {
+            let (cx, cy) = ((b.0 + b.2) / 2, (b.1 + b.3) / 2);
+            match su::tb_hit(cur, cx as i16, cy as i16) {
+                su::TbHit::Row(i) => {
+                    // The row's label width matches the label of its index.
+                    let want = su::TB_LABELS[i as usize].len();
+                    let glyphs: std::collections::BTreeSet<u8> = (b.1..=b.3).flat_map(|y| (b.0..=b.2).map(move |x| (x, y))).map(|(x, y)| (e.owner[y as usize * W + x as usize] & 255) as u8).filter(|_| true).collect();
+                    ok &= glyphs.len() >= want;
+                    // The whole 30 px row picks the same item.
+                    let ry = sp.y as i32 + ((cy - sp.y as i32) / 30) * 30;
+                    ok &= (ry..ry + 30).all(|y| su::tb_hit(cur, cx as i16, y as i16) == su::TbHit::Row(i));
+                    ok &= (i as i32 - cur as i32) == (ry - (sp.y as i32 + 60)) / 30;
+                }
+                _ => ok = false,
+            }
+        }
+        ck.t(&format!("tb list {cur}: each drawn label picks its own row"), ok);
+        ck.t(&format!("tb list {cur}: outside the box closes, header / margins do not"), su::tb_hit(cur, 300, 100) == su::TbHit::Close && su::tb_hit(cur, 78, 100) == su::TbHit::Close && su::tb_hit(cur, 100, 215) == su::TbHit::Close && su::tb_hit(cur, 120, 30) == su::TbHit::Inside && su::tb_hit(cur, 81, 100) == su::TbHit::Inside && su::tb_hit(cur, 100, 20) == su::TbHit::Inside);
+    }
+    ck.t("tb list: rows beyond the ends are no pick", su::tb_hit(3, 140, 60) == su::TbHit::Inside && su::tb_hit(29, 140, 200) == su::TbHit::Inside);
+    let sc = |c: u8, a: i32| su::tb_scroll(c, a);
+    ck.t("tb scroll: < 30 px no row, 30 px one row (down = faster)", sc(13, 29) == (13, 29) && sc(13, 30) == (12, 0) && sc(13, -65) == (15, -5));
+    ck.t("tb scroll: clamped at both ends, remainder dropped", sc(4, 90) == (3, 0) && sc(28, -90) == (29, 0) && sc(3, 45) == (3, 0));
+    // A drag of 3 px reports up 137 px: 4 rows, applied once on release.
+    let (mut cur, mut acc) = (13u8, 0);
+    let mut shown = vec![];
+    for _ in 0..46 {
+        acc -= 3;
+        let (i, r) = sc(cur, acc);
+        if i != cur {
+            shown.push(i);
+        }
+        cur = i;
+        acc = r;
+    }
+    ck.t(&format!("tb scroll: drag 138 px up = 4 rows slower, one redraw per row ({shown:?})"), cur == 17 && shown == vec![14, 15, 16, 17]);
+    // Persisted mode: 0 (older records) = the default; round trip.
+    ck.t("tap mode persist: 0 = TAP_DEFAULT (Corners)", su::tap_decode(0) == su::TAP_DEFAULT && su::TAP_DEFAULT == su::TAP_CORNERS);
+    ck.t("tap mode persist: round trip, unknown = default", (0..3u8).all(|m| su::tap_decode(su::tap_code(m)) == m && su::tap_code(m) < 4) && (0..4u32).filter(|c| !(0..3u8).any(|m| su::tap_code(m) == *c)).all(|c| su::tap_decode(c) == su::TAP_DEFAULT));
+}
+
 fn main() {
     let verbose = std::env::args().any(|a| a == "-v");
     let mut ck = Ck { cases: 0, fails: 0, verbose };
@@ -740,6 +912,7 @@ fn main() {
     gesture_tests(&mut ck);
     log_tests(&mut ck);
     hit_tests(&mut ck);
+    tap_step_tests(&mut ck);
     println!("cases {}, failures {}", ck.cases, ck.fails);
     std::process::exit(if ck.fails == 0 { 0 } else { 1 });
 }
