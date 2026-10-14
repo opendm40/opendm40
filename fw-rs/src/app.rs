@@ -1577,8 +1577,13 @@ impl App {
     pub fn gesture(&mut self, clk: &mut Clock, g: Gesture) -> bool {
         let now = clk.now_ms();
         self.last_input = now;
-        // A screenshot is reading the panel: nothing may draw (a key release
-        // only clears key state).
+        // A scope-page drag / pinch whose end would be swallowed below (a
+        // screenshot, the lock, an overlay): end it now, so the acquisition
+        // is not left held and no stale pinch survives (review 7dc32ac B1).
+        let blocked = crate::screenshot::frozen() || self.locked || self.overlay.is_some();
+        if blocked && matches!(g, Gesture::PinchEnd(_) | Gesture::Up(_) | Gesture::Cancel | Gesture::KeyDown(_)) {
+            self.sp_end_hold(now);
+        }
         if crate::screenshot::frozen() && !matches!(g, Gesture::KeyUp(_)) {
             return false;
         }
@@ -1861,6 +1866,7 @@ impl App {
     /// A toast over the view (dialog.rs); the view is redrawn when it goes.
     fn toast(&mut self, now: u64, txt: &str, ok: bool) {
         self.last_input = now;
+        self.sp_end_hold(now);
         self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::TOAST_MS });
         self.redraw = true;
         crate::dialog::toast(txt, ok);
