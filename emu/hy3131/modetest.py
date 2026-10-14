@@ -56,6 +56,7 @@ SCENARIOS = [
 
 STOCK_SETTINGS = 0x080C0000
 POLL_WALL = 1.5  # seconds of wall time between requests (~0.15 s virtual)
+START_LOCK = threading.Lock()  # run.py's fw-rs preparation (git checkout in the shared worktree) is not reentrant
 
 
 def crc16_8005(data, init=0xFFFF):
@@ -147,6 +148,7 @@ class Client(threading.Thread):
         self.buf = bytearray()
         self.stop = False
         self.switched = False
+        self.connected = threading.Event()
         self.t0 = time.time()
 
     def poll_msg(self):
@@ -167,6 +169,7 @@ class Client(threading.Thread):
                 time.sleep(0.1)
         if s is None:
             return
+        self.connected.set()
         s.settimeout(0.2)
         last_poll = 0
         seen = 0
@@ -219,7 +222,10 @@ def run_one(fw, sc, port, fast):
     if fast:
         cmd.append('--fast')
     t0 = time.time()
-    p = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    with START_LOCK:
+        p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        col.connected.wait(90)  # Renode is listening: run.py's preparation is over
+    out, _ = p.communicate()
     wall = time.time() - t0
     time.sleep(0.5)
     col.stop = True
@@ -255,7 +261,7 @@ def run_one(fw, sc, port, fast):
         res['ok'] = err <= max(atol, abs(want) * rtol)
         res['err'] = err
     if p.returncode != 0:
-        res['log'] = p.stdout[-800:]
+        res['log'] = out[-800:]
     return res
 
 
@@ -283,8 +289,10 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     if 'fwrs' in fws:
         # build fw-rs once up front: parallel first runs would race in the shared worktree
-        subprocess.run([sys.executable, RUNNER, 'fwrs', '--name', 'hy-prebuild', '--dry'], cwd=ROOT,
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=True)
+        pre = subprocess.run([sys.executable, RUNNER, 'fwrs', '--name', 'hy-prebuild', '--dry'], cwd=ROOT,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if not os.path.exists(os.path.join(OUT, 'hy-prebuild.resc')):  # --dry exits 1 with the .resc path
+            sys.exit('fw-rs build failed:\n' + pre.stdout[-2000:])
     results = []
     with ThreadPoolExecutor(max_workers=a.jobs) as ex:
         futs = [ex.submit(run_one, fw, sc, a.port_base + i, a.fast) for i, (fw, sc) in enumerate(jobs)]

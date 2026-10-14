@@ -136,7 +136,37 @@ with `CONF:<f>` / `READ?` over the same link. Results (last reported value
 after settling; stock Bluetooth is enabled by patching settings byte 0x115 in
 the emulated flash with a recomputed CRC):
 
-RESULTS_TABLE
+| scenario | input | expected | stock shows (BT cmd 09) | fw-rs READ? |
+|---|---|---|---|---|
+| dcv | `dcv:1.234` | 1.234 V | 1.2339 / 1.2340 | 1.234 |
+| dcv-neg | `dcv:-12.5` | -12.5 V | -12.501 | -12.5 |
+| dcv-hv | `dcv:230` | 230 V | 230.01 | 230.0 |
+| dcmv | `dcv:0.2345` | 234.5 mV (auto -> mV) | 234.5 | 234.494 |
+| acv | `acv:1.0@50` | 1.0 V rms | 1.000, 50.00 Hz | 1.00001 |
+| acv-hv | `acv:230@50` | 230 V rms | 230.0, 50 Hz | 230.001 |
+| acdcv | `acv:1.0@50,dc=0.5` | 1.1180 V (AC+DC) | 1.118 | 1.11804 |
+| dca | `dca:0.5` | 0.5 A (auto mA -> A) | 0.5001 | 0.499997 |
+| dcma | `dca:0.0123` | 12.3 mA | 12.30 | 12.3005 |
+| aca | `aca:0.1@60` | 0.1 A rms | 100.0 mA | 99.9997 mA |
+| ohm | `ohm:4700` | 4700 ohm | 4700 | 4699.99 |
+| ohm-1m | `ohm:1e6` | 1 Mohm | 1.000 M | 999987 |
+| cont | `ohm:10` | 10 ohm | 10.00 (beeper: CMP pin) | 10.005 |
+| diode | `diode:0.65` | 0.65 V | 0.6500 | 0.649992 |
+| cap | `cap:100e-9` | 100 nF (RC oscillator) | 100.0 nF | 100.002 nF |
+| cap-big | `cap:100e-6` | 100 uF (current ramp) | **104.1 uF** (+4 %, see below) | 102.03 uF (+2 %) |
+| hz | `hz:1000,duty=0.25,amp=1.0` | 1000 Hz, 25 % | 1000.0 Hz, 25.0 % | 1000.02 |
+| temp | `temp:100,cj=25` | 100 C, CJ 25 C | 100.3 C, CJ 25.0 | 100.314 |
+
+All within the meter's specification except the capacitance ramp ranges: the
+stock computes C = I * dt / dV with dt taken from its own millisecond timer at
+the poll (every 255 ms + 10 ms granularity) while dV spans whole AD1
+conversions (50 ms at the ramp row's OSR 4096 with the chopper), so dt / dV is
+quantised to 250 / 300 ms steps and the trimmed mean lands ~4 % high; the
+factory calibration leaves the r5..r7 gains at 1.0. Whether the real meter
+shows the same bias is unknown (no device test). fw-rs's +2 % has the same
+origin with its own timing. Run time per scenario: 8..18 virtual seconds,
+25..80 s wall at `-j 6`.
+
 
 ## Open points
 
