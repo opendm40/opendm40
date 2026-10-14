@@ -347,6 +347,12 @@ impl App {
             let s = self.scope.s;
             self.scope.apply(s, now);
         }
+        // A running AUTO-set ends with the page (review 7dc32ac L2: it went
+        // on off-page and applied its result / toast on another view).
+        if let Some(a) = self.sp.autoset.take() {
+            self.sp.sampling = false;
+            self.scope_set(a.saved, now);
+        }
     }
 
     /// A stock-replica scope page is shown (the Scope page, or the combined
