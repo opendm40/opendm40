@@ -33,6 +33,12 @@
 //!   >= 60 px = `MultiSwipeDown(2)` (power-off confirm), 3 fingers >= 30 px
 //!   (the stock threshold, gui_v2_6.h "Screenshot") = `MultiSwipeDown(3)`
 //!   (screenshot). 4-5 points (a palm) are ignored.
+//! * Once a touch had two or more fingers it stays multi-finger until every
+//!   finger is up (stock: a second finger kills the drag, nothing resumes
+//!   until release): the finger lifted last never drags, taps or swipes. A
+//!   one-finger touch-down within LIFT_GAP_MS of a multi-finger release is
+//!   that remaining finger (the controller can report a release frame
+//!   between two lifts) and is ignored until it is up as well.
 //!
 //! * Raw moves (the stock scope drag model, docs/stock-scope-ui.md sec. 10.2):
 //!   when the app captures a touch-down after `raw_next(true)`, every later
@@ -115,6 +121,9 @@ const PINCH_SWIPE: i32 = 30;
 const MULTI_MIN: [i32; MAX_POINTS + 1] = [0, 0, 60, 30, 0, 0];
 /// An n-finger swipe must be done within this time of the n-th finger landing.
 const MULTI_MAX_MS: u64 = 2000;
+/// A one-finger touch-down this soon after a multi-finger touch ended is its
+/// last finger (a release reported between the lifts), ms.
+const LIFT_GAP_MS: u64 = 300;
 
 /// The locked axis of a one-finger drag.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -212,6 +221,11 @@ pub struct Tracker {
     pair: Option<Pair>,
     /// Raw-move touch (`raw_next` at the capture).
     raw: bool,
+    /// End time of the last multi-finger touch (LIFT_GAP_MS).
+    multi_end: Option<u64>,
+    /// The current one-finger touch is the remaining finger of a multi-finger
+    /// one: no gesture until it is up.
+    residual: bool,
     keys: u8,
 }
 
@@ -232,6 +246,8 @@ impl Tracker {
             multi: None,
             pair: None,
             raw: false,
+            multi_end: None,
+            residual: false,
             keys: 0,
         }
     }
@@ -286,9 +302,13 @@ impl Tracker {
                 return None;
             }
             self.active = false;
+            if core::mem::replace(&mut self.residual, false) {
+                return None;
+            }
             let single = self.down.take();
             let pinch = self.pair.take().is_some_and(|p| p.state == 1);
             if let Some(m) = self.multi.take() {
+                self.multi_end = Some(now);
                 if pinch {
                     return Some(Gesture::PinchEnd(true));
                 }
@@ -298,6 +318,9 @@ impl Tracker {
             return self.release(p0, t0, now);
         }
         if n >= 2 {
+            // The lifted-last finger of a multi touch gaining fingers again:
+            // a new multi-finger touch.
+            self.residual = false;
             let c = centroid(&ev.pts[..n as usize]);
             let had_single = self.active && self.down.is_some();
             // Pinch tracking (two fingers only).
@@ -342,11 +365,19 @@ impl Tracker {
             return if had_single { Some(Gesture::Cancel) } else { None };
         }
         // One finger.
-        if self.multi.is_some() {
+        if self.multi.is_some() || self.residual {
             return None; // fingers lifting after a multi-finger touch
         }
         let p = ev.p;
         match self.down {
+            None if self.multi_end.take().is_some_and(|t| now.saturating_sub(t) < LIFT_GAP_MS) => {
+                // The remaining finger after a release reported between the
+                // lifts: part of the multi-finger touch, ignored until up.
+                self.active = true;
+                self.residual = true;
+                crate::touch::log(b'G', now, b'N', 250, 0, p);
+                None
+            }
             None => {
                 self.active = true;
                 self.down = Some((p, now));
@@ -430,7 +461,9 @@ impl Tracker {
     /// One-finger release: swipe (not captured, dominant axis), tap or nothing.
     /// "Nothing" is logged for DBG:TOUCH? as `N` with the reason: 1 moved
     /// farther than TAP_SLOP (argument 100 + the farthest px, max 99), 2 after
-    /// a long press (200), 3 diagonal swipe (logged as 255).
+    /// a long press (200), 3 diagonal swipe (logged as 255). `N` 250 (at the
+    /// touch-down, from `step`): the remaining finger of a multi-finger touch
+    /// (LIFT_GAP_MS), ignored until up.
     fn release(&mut self, p0: Point, t0: u64, now: u64) -> Option<Gesture> {
         let p1 = self.last;
         let dx = p1.x as i32 - p0.x as i32;
