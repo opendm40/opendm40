@@ -94,6 +94,27 @@ namespace Hy3131Tests
         {
             {
                 var m = NewChip();
+                m.Chip.SetInput("acv:230@50");
+                m.Configure(F1R0);
+                m.Advance(2.0);
+                var f0r2 = Master.Row("f2 dd 16 03 33 40 80 9d 31 fc 20 00 90 00 28 a0 80 c7 38 ac 88 94");
+                m.Configure(f0r2);
+                for(var i = 0; i < 12; i++)
+                {
+                    m.Advance(0.25);
+                    m.Read1(0x1E);
+                    var b = ReadAfter(m, 0x18, 1);
+                    Console.WriteLine("r2 t {0:F2} role {1} rms {2:F0} -> {3:F2} V lpf {4} vc {5:F4}", m.Now, m.Chip.Role, SqrtRms(b), SqrtRms(b) * 1.25 / 262144 * 1000, Lpf(b), m.Chip.Core.AcNodeVc);
+                }
+                m.Write(0x20, 0xF0); m.Write(0x1B, 0x00, 0x00, 0xFC); m.Write(0x20, 0xF2);
+                var fl = m.WaitFlag(0x01, 1);
+                var c = m.Read(0x15, 9);
+                var ctb = c[3] | c[4] << 8 | c[5] << 16; var cta = c[6] | c[7] << 8 | c[8] << 16;
+                Console.WriteLine("counter: CTF {0:X2} f {1:F2} Hz", fl, ctb / (double)(cta + 0x40000) * 4915200);
+                return;
+            }
+            {
+                var m = NewChip();
                 m.Chip.SetInput("acv:3.4@40,dc=4.8,shape=square");
                 m.Configure(F0R1);
                 m.Advance(3.0);
@@ -324,6 +345,11 @@ namespace Hy3131Tests
                 m.Read1(0x1E);
                 b = ReadAfter(m, 0x18, 1);
                 Near(SqrtRms(b) * 1.25 / 262144 * 10, 1.0, 2e-3, "square 1.0 Vrms");
+                m.Chip.SetInput("acv:230@50"); // 23 V at the AD2 node: clipped
+                m.Advance(3.0);
+                m.Read1(0x1E);
+                b = ReadAfter(m, 0x18, 1);
+                Check(SqrtRms(b) <= 0x40000 && SqrtRms(b) > 0x3F000, "230 V on the 4 V range: sqrt(RMS) at the AD2 full scale (not above the stock's 0x40000 guard)", SqrtRms(b).ToString("F0"));
             }
             {
                 // entry transient: AC V right after a plain DC V row with OP1 off
@@ -369,6 +395,19 @@ namespace Hy3131Tests
         private static void Current()
         {
             Console.WriteLine("DC / AC A");
+            {
+                // A r1 (10 A, PB2) and mA r1 (400 mA, PB1) differ only in SOP1P
+                var m = NewChip();
+                m.Chip.SetInput("dca:0.5");
+                m.Configure(Master.Row("f0 dd 15 83 35 00 00 55 31 00 00 00 00 00 08 81 80 c7 3d ac 00 50")); // mA r1
+                Check(m.Chip.Role == "DcA m8 r1", "mA r1 row recognised", m.Chip.Role);
+                m.WaitFlag(0x04, 1);
+                Near(m.ReadS24(0) * 1.25 / (0.0005 * 1 * 0.9) / 8388606.0, 500, 0.5, "0.5 A on the 400 mA range reads 500 mA (software OL -> autorange)");
+                m.Configure(Master.Row("f0 dd 15 83 35 00 00 55 31 00 00 00 00 00 08 81 80 c7 3e ac 00 50")); // A r1
+                Check(m.Chip.Role == "DcA m7 r1", "A r1 row recognised", m.Chip.Role);
+                m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(m.ReadS24(0) * 1.25 / (0.01 * 1 * 0.9) / 8388606.0, 0.5, 0.001, "0.5 A on the 10 A range");
+            }
             {
                 var m = NewChip();
                 m.Chip.SetInput("dca:0.0123");
