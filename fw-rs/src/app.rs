@@ -30,6 +30,12 @@ const DIM_MS: [u64; 4] = [300_000, 600_000, 1_800_000, 0];
 const OFF_MS: [u64; 4] = [600_000, 1_800_000, 3_600_000, 0];
 const DIM_TXT: [&str; 4] = ["5 min", "10 min", "30 min", "Never"];
 const OFF_TXT: [&str; 4] = ["10 min", "30 min", "1 hour", "Never"];
+/// Wake gate (stock FUN_08020248, tools/stock-ui/notes/interaction.md D.3):
+/// after an idle dim the first touch / side key only restores the backlight,
+/// and input is ignored for this long from it. fw-rs also drops the rest of
+/// that waking touch or key press (its release would otherwise still tap):
+/// the gate ends at the first touch-down / key-down after the window.
+const WAKE_GATE_MS: u64 = 500;
 const START: [View; 4] = [View::Dmm, View::Scope, View::Gen, View::Menu];
 /// UF-28: the idle power-off is announced OFF_WARN_MS before (then every
 /// OFF_WARN_STEP_MS): a toast and a beep at no less than ALERT_VOL %, so it
@@ -91,6 +97,8 @@ pub struct App {
     /// Idle power-off warnings given since the last input (UF-28).
     off_warned: u64,
     dimmed: bool,
+    /// Wake gate start (the input that undimmed), see WAKE_GATE_MS.
+    wake_gate: Option<u64>,
     pd6_since: Option<u64>,
     /// PD6 events are taken only after the key was seen released once (the
     /// stock key state starts at 4 = wait for release, FUN_0800b7e0/b87c), so
@@ -308,6 +316,7 @@ impl App {
             combo: View::DmmScope,
             last_input: 0,
             dimmed: false,
+            wake_gate: None,
             pd6_since: None,
             wave: [0; 400],
             prof: [0; 3],
@@ -1516,6 +1525,17 @@ impl App {
         if self.dimmed {
             self.dimmed = false;
             backlight(self.backlight);
+            self.wake_gate = Some(now);
+        }
+        // Wake gate: the waking touch / key and anything within
+        // WAKE_GATE_MS of it only woke the screen; the idle timers restarted
+        // (last_input above), as stock.
+        if let Some(t) = self.wake_gate {
+            let start = matches!(g, Gesture::Down(_) | Gesture::KeyDown(_));
+            if !start || now < t + WAKE_GATE_MS {
+                return false;
+            }
+            self.wake_gate = None;
         }
         // A modal overlay takes every gesture: the confirm's buttons, any side
         // key cancels it; a toast just goes.
