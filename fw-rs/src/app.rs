@@ -642,7 +642,12 @@ impl App {
         let Some(r) = self.meter.shown().copied() else { return };
         let (hold, lim) = (self.meter.hold_state(), self.meter.verdict());
         match self.view {
-            View::Dmm => self.dmm_view.reading(&r, hold, lim),
+            View::Dmm => {
+                // DBG:PROF? "d.read" (digits + aux rows + labels).
+                crate::prof::enter(crate::prof::DREAD);
+                self.dmm_view.reading(&r, hold, lim);
+                crate::prof::exit(crate::prof::DREAD);
+            }
             View::DmmScope => {
                 let _ = (hold, lim);
                 self.sp_strip();
@@ -1028,7 +1033,10 @@ impl App {
                 rec: self.meter.stats.rec,
             };
             let rc = ui::RateChip { rate: self.dmm.rate() as u8, period_ms: self.dmm.reading_period_ms(), applies: self.dmm.rate_applies() };
+            // DBG:PROF? "d.chart" (one trend point: columns + labels + side).
+            crate::prof::enter(crate::prof::DCHART);
             ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, &side, self.chart_unit, rc);
+            crate::prof::exit(crate::prof::DCHART);
         }
     }
 
