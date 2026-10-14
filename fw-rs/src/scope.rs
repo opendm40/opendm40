@@ -361,6 +361,16 @@ impl Scope {
             last_frame: 0,
         };
         sc.hw.init();
+        // Comparator trigger on by default (the stock always uses it): the
+        // software search of a linear record only covers CAP - screen = 1624
+        // samples from 100 us/div up (65 us .. 0.65 ms at 100 us .. 1 ms/div),
+        // so a slow signal triggered only now and then (device 2026-10-14:
+        // 100 Hz square, 1/5 .. 4/5 frames T'D at 100 us .. 1 ms/div; with
+        // the comparator 16/16, 1891 hits, 0 misses, refined crossing -1..+7
+        // samples from the estimate). Three misses in a row still hand the
+        // scope back to the software trigger; DBG:HWTRIG:ENABLE 0|1 switches
+        // it at run time. hwtrig::DEFAULT_ENABLED stays the module default.
+        sc.hw.set_enabled(true);
         sc.apply(Settings::DEFAULT, 0);
         sc
     }
@@ -495,7 +505,11 @@ impl Scope {
 
     pub fn apply(&mut self, s: Settings, now: u64) {
         // A new trigger mode or a RUN press waits for its first frame (WAIT).
-        if s.mode != self.s.mode || (s.run && !self.s.run) {
+        // So does leaving the roll range: the roll chip (RUN) and the roll
+        // trace would otherwise stay until the first triggered frame (in
+        // Normal possibly never).
+        let rolls = |x: &Settings| self.roll && x.tb >= TB_ROLL && x.mode != TrigMode::Single;
+        if s.mode != self.s.mode || (s.run && !self.s.run) || (self.status == 3 && !rolls(&s)) {
             self.set_status(0);
         }
         // A user STOP (run -> stop) freezes what is on screen; any other change
@@ -853,7 +867,10 @@ impl Scope {
                 let hi = (th + WIN / 2).min(len - post);
                 self.snapshot_mark(len, th, None, false);
                 let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
-                let found = if lo < hi { self.find_trigger(&data[lo..hi]).map(|i| i + lo) } else { None };
+                // The crossing nearest the estimate: at slow rates the window
+                // spans several periods, and the first crossing in it was a
+                // period early (device: delta -250 samples at 100 ms/div).
+                let found = if lo < hi { self.find_trigger_near(&data[lo..hi], th - lo).map(|i| i + lo) } else { None };
                 let t = match found {
                     Some(t) => {
                         self.hw.note_hit(t as i32 - th as i32);
@@ -1290,6 +1307,22 @@ impl Scope {
             *c = (lo, hi);
         }
         Some(Frame { data: &[], cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs: self.stored_fs, seq: self.seq })
+    }
+
+    /// As find_trigger, but the crossing closest to index `near` (the
+    /// comparator's estimate) instead of the first one.
+    fn find_trigger_near(&self, d: &[u16], near: usize) -> Option<usize> {
+        let mut best: Option<usize> = None;
+        let mut from = 0;
+        while from < d.len() {
+            let Some(i) = self.find_trigger(&d[from..]).map(|i| i + from) else { break };
+            if best.is_some_and(|b| b.abs_diff(near) <= i.abs_diff(near)) {
+                break; // crossings only get farther from here on
+            }
+            best = Some(i);
+            from = i + 1;
+        }
+        best
     }
 
     /// Stock software trigger: beyond the hysteresis band (code -+ 2) on the
