@@ -3,9 +3,10 @@
 #
 #   tools/reload.sh [options] [build args...]     e.g. --features keep-screen
 #
-# Default: ./build.sh native [build args], stage dm40-fw-native.bin as
-# dm40_fwrs.bin on the fw-rs USB disk (1209:0001; any other dm40*.bin there is
-# removed), sync, verify, eject, send DBG:UPDATE (the vendor loader installs the
+# Default: ./build.sh native [build args], check the image (tools/dm40dbg.py
+# image: CRCs, size, no short last block the loader mis-decodes), stage
+# dm40-fw-native.bin as dm40_fwrs.bin on the fw-rs USB disk (1209:0001; any
+# other dm40*.bin there is removed), sync, verify, eject, send DBG:UPDATE (the vendor loader installs the
 # file and deletes it), wait for fw-rs to come back and check with DBG:BOOT?
 # that the loader marker is the header of the new file ("installed OK").
 #
@@ -173,9 +174,23 @@ disk (or re-plug) once the meter is back before using the disk again.
 EOF
 }
 
-# check_image FILE: the vendor format, CRCs, size (a bad file parks the meter
-# on the loader screen)
-check_image() { "${DBG[@]}" image "$1" || die "$1 is not a valid update file"; }
+# check_image FILE: the vendor format, CRCs, size, and no short last 128-byte
+# block that the FS-loader mis-decodes (key position outside it, dm40fw.py
+# tail_hazard) -- a bad file parks the meter on the loader screen with the app
+# erased. Staging is refused for all of these (fw-rs and --stock images).
+check_image() {
+    "${DBG[@]}" image "$1" || die "$1 is not a valid update file (see BAD above); not staged"
+    # Belt and braces for the last-block rule (independent of dm40dbg.py).
+    "$PY" -I - "$ROOT/firmware" "$1" <<'PY' || die "$1: short last block the FS-loader would corrupt; not staged"
+import sys
+sys.path.insert(0, sys.argv[1])
+import dm40fw
+w = dm40fw.tail_warning(open(sys.argv[2], 'rb').read())
+if w:
+    print(w, file=sys.stderr)
+    sys.exit(1)
+PY
+}
 
 # ---- LEGACY: RAM/sector-8 image over Bluetooth --------------------------------
 

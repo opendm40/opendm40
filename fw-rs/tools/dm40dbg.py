@@ -209,8 +209,12 @@ def open_link(timeout):
 
 def image_info(path):
     """Validate a dm40*.bin update file (the vendor format, firmware/dm40fw.py).
-    Returns dict(header=(w0, length, w2), sp, reset, end, problems=[...]);
-    the header is what the loader writes to the marker at 0x08008000."""
+    Returns dict(header=(w0, length, w2), sp, reset, end, last, problems=[...]);
+    the header is what the loader writes to the marker at 0x08008000; last =
+    the length of the last 128-byte obfuscation block (128 = whole blocks). A
+    short last block whose key position is outside it (dm40fw.tail_hazard) is
+    a problem: the FS-loader decodes it with a stale key, the body CRC fails
+    and the app is erased."""
     sys.path.insert(0, FIRMWARE)
     import dm40fw
     data = open(path, 'rb').read()
@@ -220,6 +224,13 @@ def image_info(path):
         return dict(header=None, problems=['not an update file (%s) -- a RAM image '
                                            '(dm40-fw.bin) or a decoded file?' % e])
     probs = []
+    last = len(data) % dm40fw.BLOCK or dm40fw.BLOCK
+    haz = dm40fw.tail_hazard(data)
+    if haz:
+        n, ka, kp = haz
+        probs.append('short last block (%d bytes) with key position 0x%02x outside it '
+                     '([0x1F] = 0x%02x): the FS-loader mis-decodes it ("update error", app '
+                     'erased); repack with firmware/dm40fw.py pack --pad' % (n, kp, ka))
     if w0 != dm40fw.header_word0(length, w2):
         probs.append('header word0 (CRC of words 1/2) wrong: 0x%08x' % w0)
     if w2 >> 16 != 1 or (w2 & 0xFFFF) != dm40fw.body_checksum(body):
@@ -230,7 +241,7 @@ def image_info(path):
     sp, reset = struct.unpack_from('<2I', body, 0) if len(body) >= 8 else (0, 0)
     if not (reset & 1 and APP_BASE <= reset - 1 < end):
         probs.append('reset vector 0x%08x not a thumb address inside the body' % reset)
-    return dict(header=(w0, length, w2), sp=sp, reset=reset, end=end, problems=probs)
+    return dict(header=(w0, length, w2), sp=sp, reset=reset, end=end, last=last, problems=probs)
 
 
 def print_image(path):
@@ -241,6 +252,7 @@ def print_image(path):
         print('  header (= loader marker after install): 0x%08X 0x%08X 0x%08X' % (w0, length, w2))
         print('  body 0x%08x..0x%08x (%d bytes), SP 0x%08x, reset 0x%08x'
               % (APP_BASE, i['end'], length, i['sp'], i['reset']))
+        print('  last 128-byte block: %d bytes%s' % (i['last'], ' (whole blocks)' if i['last'] == 128 else ''))
     for p in i['problems']:
         print('  BAD: ' + p)
     print('  OK' if not i['problems'] else '  -> do NOT install this file')
