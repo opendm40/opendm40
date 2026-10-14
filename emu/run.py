@@ -130,6 +130,27 @@ def build_fwrs(worktree=None, rev='HEAD'):
     return elf
 
 
+def merge_models():
+    """All emu/peripherals/*.cs as ONE compile unit (Renode compiles each
+    include separately: 15 files took 3.4 s, one file 1 s)."""
+    usings, bodies = [], []
+    for f in sorted(glob.glob(os.path.join(HERE, 'peripherals', '*.cs'))):
+        body = []
+        for l in read(f).decode().splitlines():
+            if re.match(r'^using [A-Za-z0-9_.]+;\s*$', l):
+                if l not in usings:
+                    usings.append(l)
+            else:
+                body.append(l)
+        bodies.append('// ---- %s ----\n%s' % (os.path.relpath(f, HERE), '\n'.join(body)))
+    out = os.path.join(OUT, 'dm40-models.cs')
+    text = '\n'.join(usings) + '\n' + '\n'.join(bodies) + '\n'
+    if not os.path.exists(out) or read(out).decode() != text:
+        with open(out, 'w') as f:
+            f.write(text)
+    return out
+
+
 def q(path):
     return '@' + os.path.abspath(path)
 
