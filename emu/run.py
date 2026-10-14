@@ -57,10 +57,10 @@ def app_from_file(path):
     d = read(path)
     if d[:4] == b'\x7fELF':
         body = elf_body(path)
-        return dm40fw.split(dm40fw.decode(dm40fw.build(body)))[:3], body
+        return dm40fw.split(dm40fw.decode(dm40fw.build(body, pad=True)))[:3], body
     if len(d) > 12 and struct.unpack_from('<I', d, 0)[0] == 0x2002F7F8:
         body = d  # raw body (word 0 = stock SP)
-        w0, ln, w2, _ = dm40fw.split(dm40fw.decode(dm40fw.build(body)))
+        w0, ln, w2, _ = dm40fw.split(dm40fw.decode(dm40fw.build(body, pad=True)))
         return (w0, ln, w2), body
     try:
         w0, ln, w2, body = dm40fw.split(d)  # already decoded (12-byte header)
@@ -215,6 +215,9 @@ def main(argv=None):
     ap.add_argument('--interactive', action='store_true', help='leave the Renode monitor open')
     ap.add_argument('--pause', action='store_true', help='do not start the CPU (use with --gdb)')
     ap.add_argument('--bt-port', type=int, default=0, help='TCP port for the Bluetooth UART')
+    ap.add_argument('--usbip', type=float, default=None, metavar='T',
+                    help='start a USB/IP server (TCP 3240) at virtual time T and export the USB device as busid 1-0; '
+                         'implies --interactive unless --run-for is given')
     ap.add_argument('--log', help='Renode log file (default emu/out/<name>.log)')
     ap.add_argument('--name', help='base name of the generated .resc/.log (default: the mode)')
     ap.add_argument('--pa2', type=float, default=None, metavar='T',
@@ -386,6 +389,8 @@ def main(argv=None):
     for spec in a.scope:
         v, t = parse_at(spec, 0.0)
         scope(t, v)
+    if a.usbip is not None:
+        s.at(a.usbip, 'emulation CreateUSBIPServer', 'host.usb Register sysbus.usbfs')
     if a.mode == 'chain':
         pa2 = 0.55 if a.pa2 is None else a.pa2
         if pa2 >= 0:
