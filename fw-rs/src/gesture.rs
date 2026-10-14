@@ -429,15 +429,17 @@ impl Tracker {
 
     /// One-finger release: swipe (not captured, dominant axis), tap or nothing.
     /// "Nothing" is logged for DBG:TOUCH? as `N` with the reason: 1 moved
-    /// farther than TAP_SLOP (argument: the farthest px, max 255), 2 after a
-    /// long press, 3 diagonal swipe.
+    /// farther than TAP_SLOP (argument 100 + the farthest px, max 99), 2 after
+    /// a long press (200), 3 diagonal swipe (logged as 255).
     fn release(&mut self, p0: Point, t0: u64, now: u64) -> Option<Gesture> {
         let p1 = self.last;
         let dx = p1.x as i32 - p0.x as i32;
         let dy = p1.y as i32 - p0.y as i32;
         let dt = now.saturating_sub(t0);
         let none = |why: u8, arg: i32| {
-            crate::touch::log(b'G', now, b'N', why * 100 + arg.clamp(0, 99) as u8, 0, p1);
+            // u16, saturated into the u8 log field: 1xx / 200 / 255 (= 300,
+            // diagonal swipe); `why * 100` overflowed u8 for reason 3.
+            crate::touch::log(b'G', now, b'N', (why as u16 * 100 + arg.clamp(0, 99) as u16).min(255) as u8, 0, p1);
             None
         };
         if self.captured {
