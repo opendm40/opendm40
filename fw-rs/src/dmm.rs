@@ -90,10 +90,11 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 // (R22 = 0x17, OSR 32768, the stock's steady-state setting and already the
 // slowest AD1OSR code): the mean of N codes has 1/N code granularity (N = 8:
 // 48 levels per step, N = 16: 120) and the noise drops by sqrt(N). The window
-// slides, so the reading rate stays the stock one (~9.4/s at OSR 32768,
-// inferred from the users' ~10 readings/s; modulator ~SYSCLK/16); it restarts
-// on a step of more than ~2 counts of the 60000-count format, on any OSR / range
-// / mode change, and is not used in AC+DC. Noise floor: not measured yet.
+// slides, so the reading rate stays the stock one (one reading per 400 ms
+// conversion at OSR 32768 chopped, hy3131::ad1_period_us; a window of 8 spans
+// 3.2 s, of 16 6.4 s); it restarts on a step of more than ~2 counts of the
+// 60000-count format, on any OSR / range / mode change, and is not used in
+// AC+DC. Noise floor: not measured yet.
 // Ohm r0 is the stock 60 ohm row (f10 row 0: OPS1 = 1, the OP1 x10 gain also
 // used by DC mV / A r0; the stock Rref constant 0.1 kohm = the 1 kohm r1
 // reference / 10) that the stock never selects: manual only here, always with
@@ -106,21 +107,32 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //
 // `Rate` sets how much converter time goes into one reading of the AD1 (DC)
 // functions; the display smoothing on top of the readings is meter.rs
-// (`Smooth`). Conversion times are estimates (OSR 32768 ~107 ms from the
-// users' ~9.4 readings/s; hy3131::osr_period_us models OSR / SYSCLK, 16x
-// shorter: the two disagree, so `reading_period_ms` MEASURES the period).
+// (`Smooth`). Conversion periods from the datasheet formula
+// (hy3131::ad1_period_us, OSR * 30 / SYSCLK, x2 with the chopper the stock
+// rows always set; emu/hy3131/RESEARCH.md 3): OSR 8192 (0x15) 100 ms, OSR
+// 32768 (0x17) 400 ms. The emulator models the same; on the device only the
+// logger's 38/s at 0x13 (40/s by the formula) was measured so far, so `reading_period_ms` MEASURES
+// the period (SENS:RATE:PER?, the rate chip). Before 2026-10-14 this table
+// assumed ~107 ms at OSR 32768 ("~9.4/s"): every time below was 4x too short.
 //   rate    AD1 OSR (in range)        code window (step reset ~2 counts)   readings
-//   FAST    8192 (0x15) always         none                                 ~37/s (one per conversion)
-//   MEDIUM  stock: 0x15 while moving,  V r0..r2 / mV r1: 8,                 ~9.4/s (stock)
-//   (dflt)  0x17 (32768) once stable   ohm r0..r3: 16, other ranges: none
-//   SLOW    as MEDIUM                  16 every range (ohm r0..r3: 32)      one per 4 conversions (~2.3/s)
+//   FAST    8192 (0x15) always         none                                 10/s (one per conversion)
+//   MEDIUM  stock: 0x15 while moving,  V r0..r2 / mV r1: 8 (3.2 s),         10/s moving, 2.5/s steady
+//   (dflt)  0x17 (32768) once stable   ohm r0..r3: 16 (6.4 s), others none  (stock)
+//   SLOW    as MEDIUM                  16 every range (6.4 s; ohm r0..r3:    one per 4 conversions:
+//                                      32, 12.8 s)                          0.625/s steady (1.6 s)
+// SLOW_DECIM (4) and the SLOW windows were sized for the old ~107 ms guess
+// (~2.3/s, ~1.7 s window): with the real 400 ms they give 0.625/s and READ?
+// (SCPI_QUICK_MS 850 ms) never sees a fresh SLOW reading, it answers the
+// latest one. Kept as is pending a decision (SLOW_DECIM = 1 would restore
+// the intended ~2.5/s with the same 16-conversion window).
 // The +1 digit (`Val::ext`, ext-capable ranges of the table above) is shown
 // only while the window holds at least AVG_FULL slow (OSR 32768) conversions:
 // never in FAST (one OSR-8192 conversion has ~2x the noise of one at 32768),
-// in MEDIUM / SLOW from the 8th conversion after a step / range change (before
+// in MEDIUM / SLOW from the 8th conversion after a step / range change, i.e.
+// ~3.2 s at 400 ms plus the moving-OSR conversions before the switch (before
 // fw-rs 2026-10-13 the digit was drawn from the first conversion on).
-// Applies to DC V, DC mV, DC A / mA / uA and ohm, not in AC+DC (fixed OSR
-// 32768, its own phase logic). Not applicable (stock timing in every rate):
+// Applies to DC V, DC mV, DC A / mA / uA and ohm, not in AC+DC (the DC phase
+// stays at the row's OSR 8192, ACDC_STOCK_OSR; its own phase logic). Not applicable (stock timing in every rate):
 // AC (AD2 / RMS converter, its filter is the RMS EMA), capacitance and
 // frequency (counter gates of 420 / 350 ms), temperature (thermocouple: three
 // phases, ~2.2 s; resistive sensors: fixed OSR 32768 + EMA), continuity
@@ -2609,6 +2621,15 @@ mod tests {
             m = a.push(8_388_607, 32, 120);
         }
         assert_eq!(m, 8_388_607.0);
+    }
+
+    #[test]
+    fn fr05_conversion_periods() {
+        // The FR-05 table's times (datasheet: OSR * 30 / SYSCLK, x2 chopped).
+        assert_eq!(hy::ad1_period_us_r22(OSR_FAST), 100_000);
+        assert_eq!(hy::ad1_period_us_r22(OSR_SLOW), 400_000);
+        assert_eq!(SLOW_DECIM as u32 * hy::ad1_period_us_r22(OSR_SLOW), 1_600_000);
+        assert_eq!(AVG_FULL as u32 * hy::ad1_period_us_r22(OSR_SLOW), 3_200_000);
     }
 
     #[test]

@@ -58,7 +58,11 @@ const USB: usize = 0;
 const BT: usize = 1;
 const KEEPALIVE_MAX_MS: u64 = 600_000;
 /// MEASure:<f>? after a function change waits for a full averaging window at
-/// most this long (then any fresh reading answers), ms.
+/// most this long (then any fresh reading answers), ms. A full window
+/// (dmm::AVG_FULL = 8 conversions at OSR 32768, 400 ms each) needs ~3.2 s
+/// after the switch to the steady OSR, so within this budget the answer is
+/// a partial average without the +1 digit; a later READ? has it. Kept short
+/// for the 2 s PyVISA default timeout rather than raised to ~4.5 s.
 const SCPI_SETTLE_MS: u64 = 1500;
 /// READ? / MEASure? / FETCh? with no reading of the current function yet
 /// (after a function change): give up this long after the converter's settle
@@ -68,8 +72,12 @@ const SCPI_WAIT_MS: u64 = 1900;
 /// flowing: the next fresh reading if it comes within this, else the latest
 /// one, ms. libsigrok's USBTMC transport reads Bulk-IN with a hard 1000 ms
 /// timeout; the expiry is checked once per main-loop iteration, hence the
-/// margin.
+/// margin. Fits the slowest DC conversion (OSR 32768 chopped, 400 ms: the
+/// steady MEDIUM reading) with room for the poll; a SLOW-rate reading (one
+/// per 4 conversions, 1.6 s) does not fit, READ? then answers the latest.
 const SCPI_QUICK_MS: u64 = 850;
+// The next fresh steady reading: at most one conversion away + poll / loop.
+const _: () = assert!(SCPI_QUICK_MS >= hy3131::ad1_period_us_r22(0x17) as u64 / 1000 + 300);
 
 /// pid.codes test VID/PID, for the debug build only.
 const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
@@ -577,6 +585,15 @@ fn main() -> ! {
                         put_u32(&mut scpi, logger.osr() as u32);
                         true
                     }
+                    scpi::Log::Chop(Some(on)) => {
+                        logger.set_chop(on);
+                        false
+                    }
+                    scpi::Log::Chop(None) => {
+                        scpi.len = 0;
+                        scpi.put_bytes(if logger.chop() { b"1" } else { b"0" });
+                        true
+                    }
                     scpi::Log::Rate => {
                         scpi.len = 0;
                         put_u32(&mut scpi, logger.measured_hz());
@@ -603,6 +620,7 @@ fn main() -> ! {
                             logger.osr() as u32,
                             logger.nominal_us(),
                             logger.measured_hz(),
+                            logger.chop() as u32,
                         ];
                         for (i, v) in vals.iter().enumerate() {
                             if i > 0 {

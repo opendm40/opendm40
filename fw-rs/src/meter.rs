@@ -209,16 +209,20 @@ impl Stats {
 // Counts are of the 60000-count format (1 count = 10^-dec display units);
 // temperature uses absolute deg C. Off by default (P3 in
 // docs/user-feedback.md; the +1 digit does not need it: it comes from the
-// Dmm code window). Per function (spans at the MEDIUM rate):
+// Dmm code window). Per function (spans at the MEDIUM rate; DC readings come
+// every 0.4 s once steady (AD1 OSR 32768 chopped), every 0.1 s while moving
+// (OSR 8192); hy3131::ad1_period_us, dmm.rs FR-05 table):
 //   function                   reading every  Low (span)     High (span)    restart on
-//   DC V / mV / A, ohm, diode  ~0.11 s        4 (~0.4 s)     16 (~1.7 s)    3 counts or 0.05 % (ohm 0.1 %)
+//   DC V / mV / A, ohm         0.4 s steady   4 (~1.6 s)     16 (~6.4 s)    3 counts or 0.05 % (ohm 0.1 %)
+//   diode                      25 ms (0x13)   4 (~0.1 s)     16 (~0.4 s)    3 counts or 0.05 %
 //   AC V / A, AC+DC            RMS update     4              16             30 counts or 0.3 %
 //   capacitance                0.42 s or more 2 (~0.8 s)     4 (~1.7 s)     5 counts or 1 %
 //   frequency                  0.35 s         2 (0.7 s)      4 (1.4 s)      3 counts or 0.2 %
 //   temperature, thermocouple  ~2.2 s         2 (~4.4 s)     4 (~9 s)       0.3 C
-//   temperature, PT / NTC      ~0.11 s        4              16             0.3 C
+//   temperature, PT / NTC      0.4 s          4 (~1.6 s)     16 (~6.4 s)    0.3 C
 //   continuity                 never (the readout must follow the beeper)
-// SLOW rate: readings every ~0.43 s, so the DC spans are 4x longer.
+// SLOW rate: DC readings every 1.6 s, so the DC spans are 4x longer (Low
+// ~6.4 s, High ~26 s); FAST: every 0.1 s, 4x shorter.
 // The +1 digit is decided by the Dmm (`Val::ext`: only with a full converter
 // window, dmm.rs FR-05 table); smoothing never adds it.
 
@@ -327,8 +331,9 @@ impl Smoother {
     }
 }
 
-/// The readout is drawn at most this often (ms): FAST and the stock
-/// moving-OSR bursts give up to ~37 readings/s, more than the panel needs.
+/// The readout is drawn at most this often (ms): diode and ohm over range
+/// (R22 0x13, 40 readings/s) and continuity while the reading moves (0x14,
+/// 20/s) come faster than the panel needs; DC FAST / moving (0x15) is 10/s.
 /// Continuity, a unit / resolution / OL change and an AutoHold capture are
 /// drawn at once.
 const SHOW_MIN_MS: u64 = 80;
@@ -844,7 +849,8 @@ mod tests {
         }
     }
 
-    /// Feed `vals` 110 ms apart (MEDIUM rate); the live values.
+    /// Feed `vals` 110 ms apart (about the 100 ms moving / FAST DC rate); the
+    /// live values.
     fn feed(m: &mut Meter, t: &mut u64, vals: &[f32]) -> [f32; 64] {
         let mut out = [0.0; 64];
         for (i, &v) in vals.iter().enumerate() {
@@ -1075,8 +1081,8 @@ mod tests {
 
     #[test]
     fn draw_rate_is_limited() {
-        // 27 ms readings (FAST): drawn at most every SHOW_MIN_MS; 110 ms
-        // readings: every one.
+        // 27 ms readings (about ohm over range, 25 ms): drawn at most every
+        // SHOW_MIN_MS; 110 ms readings: every one.
         let mut m = Meter::new();
         let mut drawn = 0;
         for i in 1..=37u64 {

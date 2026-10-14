@@ -16,12 +16,15 @@
 //!     naming the current function): the next fresh reading, or the latest
 //!     one if none comes within SCPI_QUICK_MS (0.85 s). libsigrok's USBTMC
 //!     transport has a hard 1000 ms Bulk-IN timeout, so this must hold also
-//!     in a slow capacitance / temperature range or during a range hunt.
+//!     in a slow capacitance / temperature range, at the SLOW rate (one
+//!     reading per 1.6 s) or during a range hunt.
 //!   - just switched (MEAS:<f>? changing the function, CONF:<f> then READ?,
 //!     FETCh? before any reading): the first reading after the converter's
 //!     settle deadline (Dmm::deadline: 2.5 s for resistance, then the
 //!     autorange, about 3 s in all), MEAS:<f>? preferring a full-resolution
-//!     average for at most SCPI_SETTLE_MS after the command. Meant for hosts
+//!     average for at most SCPI_SETTLE_MS (1.5 s) after the command (a full
+//!     window takes ~3.2 s at OSR 32768, so that first answer is usually a
+//!     partial average; a later READ? has the +1 digit). Meant for hosts
 //!     with a timeout of 5 s or more (pyvisa, a human); the 2 s PyVISA
 //!     default is too short for resistance, and libsigrok waits after a
 //!     function change itself.
@@ -68,7 +71,8 @@
 //!
 //! Conversion rate / display smoothing (FR-05; persisted):
 //!   [SENSe:]RATE SLOW|MEDium|FAST / ?     AD1 conversion rate of DC V / mV /
-//!     A and ohm (dmm.rs FR-05 table; other functions keep the stock timing);
+//!     A and ohm (dmm.rs FR-05 table; other functions keep the stock timing):
+//!     FAST 10/s, MED 2.5/s steady (10/s while moving), SLOW 0.625/s;
 //!     query: SLOW / MED / FAST
 //!   [SENSe:]RATE:PERiod?                  measured interval between readings,
 //!     s (0 until two readings were seen)
@@ -117,12 +121,19 @@ pub enum Mmem {
 /// Data-logger commands (FR-38), executed by the main loop against `Logger`:
 ///   LOG:STATe ON|OFF        start / stop the fast stream
 ///   LOG:STATe?              1 / 0
-///   LOG:OSR <0..7>          AD1OSR code (OSR = 256 << n); takes effect at START
+///   LOG:OSR <0..7>          AD1OSR code (OSR = 256 << n, default 3); takes
+///                           effect at START. Period OSR * 30 / 4.9152 MHz, x2
+///                           chopped: 3 = 25 ms (40/s) .. 0 = 3.125 ms (320/s)
 ///   LOG:OSR?                current code
+///   LOG:CHOP ON|OFF         AD1 chopper (default ON, as every stock row); OFF
+///                           doubles the rate (OSR 256: 640/s, the chip's max)
+///                           but leaves the converter offset in the samples
+///                           and adds low-frequency noise; takes effect at START
+///   LOG:CHOP?               1 / 0
 ///   LOG:RATE?               measured mean sample rate, Hz (0 until 2 samples)
 ///   LOG:COUNt?              buffered,captured,overwritten,missed
-///   LOG:PREamble?           mode,range,osr,nominal_us,measured_hz (scaling: raw
-///                           AD1 counts, 1.389 V / 8388607 cts * range decade;
+///   LOG:PREamble?           mode,range,osr,nominal_us,measured_hz,chop (scaling:
+///                           raw AD1 counts, 1.389 V / 8388607 cts * range decade;
 ///                           calibration gain/offset NOT applied)
 ///   LOG:DATA?               definite-length #4nnnn block of 12-byte LE records
 ///                           {u32 seq, u32 ts_us, i32 raw_ad1}, oldest first
@@ -139,6 +150,7 @@ pub enum Mmem {
 pub enum Log {
     State(Option<bool>),
     Osr(Option<u8>),
+    Chop(Option<bool>),
     Rate,
     Count,
     Preamble,
@@ -730,6 +742,8 @@ impl Scpi {
                         Out::Log(Log::State(if query { None } else { Some(a == b"ON" || a == b"1") }))
                     } else if kw(sub, "OSR") {
                         Out::Log(Log::Osr(if query { None } else { Some(parse_num(a).unwrap_or(0.0) as u8) }))
+                    } else if kw(sub, "CHOP") {
+                        Out::Log(Log::Chop(if query { None } else { Some(a == b"ON" || a == b"1") }))
                     } else if kw(sub, "RATE") && query {
                         Out::Log(Log::Rate)
                     } else if kw(sub, "COUNt") && query {
