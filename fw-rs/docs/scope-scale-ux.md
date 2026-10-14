@@ -77,7 +77,10 @@ only a search snippet or a secondary copy.
 | Rigol DHO800/900/1000, MSO5000, MHO5000 | Tap, drag, **pinch & stretch**: horizontal = timebase, vertical = V/div. Drag the trigger cursor = level. Drag a waveform = position. These models also have knobs. | unverified/secondary: quick guide on [manualslib (DHO800)](https://www.manualslib.com/manual/3194042/Rigol-Dho800-Series.html), [manualslib (MHO5000)](https://www.manualslib.com/manual/3657782/Rigol-Mho5000-Series.html) |
 | Teledyne LeCroy WaveSurfer (MAUI OneTouch) | Drag, drop, pinch, flick. Pinch on a trace zooms. Drag the trigger level indicator. Drop a channel descriptor onto the trigger descriptor = trigger source. **Expanded touch area around cursors**. Flick a descriptor off-screen = close. | vendor blog: [the evolving user interface: cursors](https://blog.teledynelecroy.com/2016/05/the-evolving-user-interface-cursors.html) |
 | Tek 4 Series B | Double-tap a badge = configuration menu. Drag = position, pinch = scale. | marketing/quick start, see the Tek row above |
-| Hantek 2C/2D, FNIRSI DPOX180H / 2C23T, Owon HDS, Zeeweii DSO3D12 | **No touch screen.** Button pairs for time/div, V/div and level. The DPOX180H has 26 keys, and "knobs are replaced by Up/Down buttons". | review: [Elektor DPOX180H](https://elektormagazine.com/review/fnirsi-dpox180h-2-in-1-digital-phosphor-oscilloscope-review), [Elektor HDS2102S](https://www.elektor.com/blogs/review-blog/owon-hds2102s-handheld-2-channel-100-mhz-oscilloscope-multimeter-signal-generator-review); forum: [portable list](https://eevblog.com/forum/testgear/portable-oscilloscopes-list/msg5654619) |
+| Keysight InfiniiVision 4000X; Tek 4/5/6 Series | Same touch model as the 3000T / 2 Series rows above (same vendor UI families); not read separately. | — |
+| Siglent SDS1000X-E | No touch screen on this series (knobs + softkeys); SDS800X HD / SDS2000X Plus are the touch models. | — |
+| FNIRSI 1014D, FNIRSI 2C23T, BSIDE, Sainsmart pocket scopes, Owon VDS (PC/USB) | Not surveyed: no touch-scale documentation found in the time spent. | — |
+| Hantek 2C/2D, FNIRSI DPOX180H, Owon HDS, Zeeweii DSO3D12 | **No touch screen.** Button pairs for time/div, V/div and level. The DPOX180H has 26 keys, and "knobs are replaced by Up/Down buttons". | review: [Elektor DPOX180H](https://elektormagazine.com/review/fnirsi-dpox180h-2-in-1-digital-phosphor-oscilloscope-review), [Elektor HDS2102S](https://www.elektor.com/blogs/review-blog/owon-hds2102s-handheld-2-channel-100-mhz-oscilloscope-multimeter-signal-generator-review); forum: [portable list](https://eevblog.com/forum/testgear/portable-oscilloscopes-list/msg5654619) |
 
 ### 1.3 Mobile and tablet scope apps
 
@@ -190,18 +193,20 @@ smaller?" ambiguity that owners already hit on the V/div buttons (UF-10).
 
 | Item | Left tab | Right tab |
 |---|---|---|
-| rect (absolute) | (17, 280, 50, 17) → x 17..66, y 280..296 | (360, 280, 50, 17) → x 360..409, y 280..296 |
-| rect (relative to F; F.x+F.w = 414, F.y+F.h = 301) | (F.x+4, F.y+F.h−21, 50, 17) | (F.x+F.w−54, F.y+F.h−21, 50, 17) |
-| margins | 3 px to the frame border (x 13 / y 300); 4 px to the strip (x <= 12) | 3 px to the frame border (x 413 / y 300); 7 px to the panel's B7 (x 417) |
-| text | `TB_LABELS[tb+1]`, font 0x0804f24c (12 px), align 8, white (e.g. "500us") | `TB_LABELS[tb−1]` (e.g. "100us") |
+| rect (absolute) | (23, 280, 50, 17) → x 23..72, y 280..296 | (360, 280, 50, 17) → x 360..409, y 280..296 |
+| rect (relative to F; F.x+F.w = 414, F.y+F.h = 301) | (F.x+10, F.y+F.h−21, 50, 17) | (F.x+F.w−54, F.y+F.h−21, 50, 17) |
+| margins | 9 px to the frame border (x 13), 3 px to it at y 300; starts right after the strip markers' press zones (x <= 22) | 3 px to the frame border (x 413 / y 300); 7 px to the panel's B7 (x 417) |
+| text | "<" + `TB_LABELS[tb+1]`, font 0x0804f24c (12 px), align 8, white (e.g. "<500us") | `TB_LABELS[tb−1]` + ">" (e.g. "100us>") |
 | style at rest | measurement-cell style: rbox r5 0x4208 + 1 px ring r5, ring in the timebase colour **0xb833** | same |
 | style pressed / just stepped | rbox r5 filled 0xb833, text white (the timebase badge's own style) | same |
 | at the limit | hidden (TB_MAX, or `TB_YT_MAX` without roll) | hidden (TB_MIN) |
 
-The widest label in F12 is "100ms" / "500us", about 32 px, so 50 px leaves at
-least 9 px on each side. The 17 px height matches every stock badge and cell.
-Roll: the slower tab shows the roll entry's label. The status badge already
-says RUN/ROLL.
+The widest label in F12 is "100ms" / "500us", about 32 px. With the arrow it
+is about 40 px, so 50 px leaves about 5 px on each side (>= 3 px rule). The
+arrows `<` (0x3c) and `>` (0x3e) exist in the font's own glyph table (dumped
+as `tools/stock-ui/assets/glyphs/font_0804f24c_3c.png` / `_3e.png`). The 17 px
+height matches every stock badge and cell. Roll: the slower tab shows the roll
+entry's label; the record bar already shows "ROLL" once roll is active.
 
 Shared element: the **badge flash**. On every timebase step (tap, picker,
 pinch end) the timebase badge (79,1,62,17) is drawn inverted for 150 ms: rbox
@@ -225,7 +230,7 @@ Shared element: the **timebase spinner popup** (tap the timebase badge).
   the spinner settles: one `scope_set` per settled row, not per pixel.
 * **Close:** a tap outside the box, MF or MENU (stock popup rules). RUN/AUTO
   are swallowed.
-* **Margins:** spinner to box 6 px (x) and 6 px (bottom). The box starts
+* **Margins:** spinner to box 6 px (x) and 7 px (bottom). The box starts
   under the top bar (y 20) and covers only the left third of the graph
   (x 79..210), so the trace stays partly visible while scrolling.
 * **Optional:** a long-press on the badge = default 200 us/div (index 13),
@@ -260,7 +265,7 @@ Mockup (ASCII, the bottom of the graph after a tap on the left half at
 x=13                                                              x=413
  |  ... trace / grid ...                                             |
  | +------------+                                    +------------+  |   y 280
- | |   500us    |  (filled 0xb833, just stepped)     |   100us    |  |   (ring 0xb833)
+ | |   <500us   |  (filled 0xb833, just stepped)     |   100us>   |  |   (ring 0xb833)
  | +------------+                                    +------------+  |   y 296
  +-------------------------------------------------------------------+   y 300 frame
  [ Freq: ...  ][ Vp-p: ... ][ Cycl: ...  ][ Vrms: ... ]                  y 302 cells
@@ -291,7 +296,8 @@ With **Corners**:
   marker search still runs first (stock precedence).
 * A tap elsewhere in the graph does nothing. This matches scope-ui-plan §2.1
   rule 3 ("a single tap in the graph never changes a setting").
-* **The tabs are always visible**: the §3 tab rects, in rest style. They
+* **The tabs are always visible**: the §3 tab rects (each inside its zone:
+  the left tab x 23..72 in zone x 23..102), in rest style. They
   switch to pressed style while their zone is pressed and after a step.
 * **Hold a zone >= 500 ms**: auto-repeat every 400 ms with a 30 ms beep per
   step, until release or the limit. Off a marker a long-press is unused, so
@@ -357,12 +363,10 @@ Cons:
    * the tabs against the meas cells, the strip and the panel;
    * the popup against the top bar.
 
-   The 12-px font has no `<` / `>`, so the tabs carry no arrows; their
-   position gives the direction.
-
 Supersedes:
-* scope-ui-plan.md §2.4 (60x40 top corners with "‹ ›"; the glyphs do not
-  exist in the 12-px font, and the top corners collide with markers).
+* scope-ui-plan.md §2.4 (60x40 top corners with "‹ ›" hints; the top
+  corners collide with the T / X-cursor markers and the strip marker zones,
+  and "‹ ›" are not in the stock fonts, while `<` `>` are).
 * §2.6's "pinch-zoom is not proposed": pinch is implemented
   (`scope_page.rs`; combined-view-design §6.3).
 
