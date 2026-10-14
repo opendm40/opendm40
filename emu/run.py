@@ -106,27 +106,34 @@ def compose_flash(mode, app, out_path, base=DUMP, zero_marker=False):
 
 def build_fwrs(worktree=None, rev='HEAD'):
     """Build fw-rs native at `rev` of the main repo (default: its HEAD) in a
-    separate worktree; skip the build when the ELF already matches that commit."""
+    separate worktree; skip the build when the ELF already matches the fw-rs
+    tree of that commit. A lock file serialises parallel runs (the worktree
+    checkout is not reentrant)."""
+    import fcntl
     wt = worktree or os.path.join(OUT, 'fwrs-worktree')
     commit = subprocess.check_output(['git', 'rev-parse', rev], cwd=ROOT, text=True).strip()
-    if not os.path.isdir(os.path.join(wt, 'fw-rs')):
-        subprocess.check_call(['git', 'worktree', 'add', '--detach', wt, commit], cwd=ROOT)
-    else:
-        subprocess.check_call(['git', 'checkout', '--quiet', '--detach', commit], cwd=wt)
-    tc = os.path.join(wt, 'toolchain')
-    if not os.path.exists(tc):
-        os.symlink(os.path.join(ROOT, 'toolchain'), tc)
+    tree = subprocess.check_output(['git', 'rev-parse', commit + ':fw-rs'], cwd=ROOT, text=True).strip()
     elf = os.path.join(wt, 'fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw')
-    stamp = os.path.join(wt, 'fw-rs/target/native/built-commit')
-    built = read(stamp).decode().strip() if os.path.exists(stamp) else ''
-    if built == commit and os.path.exists(elf):
-        print('fw-rs: %s already built (%s)' % (commit[:12], rel(elf)))
-        return elf
-    print('fw-rs: building %s (%s)' % (commit[:12], subprocess.check_output(
-        ['git', 'log', '-1', '--format=%s', commit], cwd=ROOT, text=True).strip()))
-    subprocess.check_call(['./build.sh', 'native'], cwd=os.path.join(wt, 'fw-rs'))
-    with open(stamp, 'w') as f:
-        f.write(commit + '\n')
+    stamp = os.path.join(wt, 'fw-rs/target/native/built-tree')
+    os.makedirs(OUT, exist_ok=True)
+    with open(os.path.join(OUT, 'fwrs-worktree.lock'), 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        built = read(stamp).decode().strip() if os.path.exists(stamp) else ''
+        if built == tree and os.path.exists(elf):
+            print('fw-rs: tree %s of %s already built (%s)' % (tree[:12], commit[:12], rel(elf)))
+            return elf
+        if not os.path.isdir(os.path.join(wt, 'fw-rs')):
+            subprocess.check_call(['git', 'worktree', 'add', '--detach', wt, commit], cwd=ROOT)
+        else:
+            subprocess.check_call(['git', 'checkout', '--quiet', '--detach', commit], cwd=wt)
+        tc = os.path.join(wt, 'toolchain')
+        if not os.path.exists(tc):
+            os.symlink(os.path.join(ROOT, 'toolchain'), tc)
+        print('fw-rs: building %s (%s)' % (commit[:12], subprocess.check_output(
+            ['git', 'log', '-1', '--format=%s', commit], cwd=ROOT, text=True).strip()))
+        subprocess.check_call(['./build.sh', 'native'], cwd=os.path.join(wt, 'fw-rs'))
+        with open(stamp, 'w') as f:
+            f.write(tree + '\n')
     return elf
 
 
@@ -207,7 +214,11 @@ def main(argv=None):
     ap.add_argument('--drag', action='append', default=[], metavar='X0,Y0,X1,Y1[@T]', help='drag over 0.3 s')
     ap.add_argument('--key', action='append', default=[], metavar='NAME[@T]',
                     help='side key menu|run|auto|mf, or power (PD6), or pa2')
-    ap.add_argument('--vin', action='append', default=[], metavar='V[@T]', help='DMM input voltage')
+    ap.add_argument('--vin', action='append', default=[], metavar='V[@T]', help='DMM input voltage (DC V on V/COM)')
+    ap.add_argument('--dmm', action='append', default=[], metavar='SPEC[@T]',
+                    help='DMM input for the HY3131 model (SetInput), e.g. dcv:1.234 | acv:1.0@50,dc=0.5,shape=square,duty=0.3 | '
+                         'dca:0.5 | aca:0.1@60 | ohm:4700 | short | open | diode:0.65 | cap:100e-9 | hz:1000,duty=0.25 | '
+                         'temp:100,cj=25 (no spaces; several specs with ";"; see emu/hy3131/README.md)')
     ap.add_argument('--scope', action='append', default=[], metavar='SPEC[@T]',
                     help='scope input waveform, e.g. sine,1000,1.0 (shape,Hz,Vpp[,offset])')
     ap.add_argument('--script', help='event file: lines "<t> <tap|drag|key|shot|vin|scope|monitor> args"')
@@ -366,6 +377,9 @@ def main(argv=None):
     def vin(t, v):
         s.at(t, 'sysbus.hy3131 SetVin %s' % v)
 
+    def dmm(t, spec):
+        s.at(t, 'sysbus.hy3131 SetInput "%s"' % spec)
+
     def scope(t, spec):
         parts = spec.split(',')
         shape = parts[0]
@@ -386,6 +400,9 @@ def main(argv=None):
     for spec in a.vin:
         v, t = parse_at(spec, 0.0)
         vin(t, v)
+    for spec in a.dmm:
+        v, t = parse_at(spec, 0.0)
+        dmm(t, v)
     for spec in a.scope:
         v, t = parse_at(spec, 0.0)
         scope(t, v)
@@ -414,6 +431,8 @@ def main(argv=None):
                     shot(t, args[0])
                 elif cmd == 'vin':
                     vin(t, args[0])
+                elif cmd == 'dmm':
+                    dmm(t, args[0])
                 elif cmd == 'scope':
                     scope(t, args[0])
                 elif cmd == 'monitor':
