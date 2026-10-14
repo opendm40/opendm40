@@ -1468,6 +1468,14 @@ impl App {
         }
         let period = if n >= 2 { (last - first) as f32 / (n - 1) as f32 / f.fs as f32 } else { 0.0 };
         as_log(a.phase, st.tb, st.range, lo, hi, n, period);
+        // Trigger level for the next record at the middle of this one's swing
+        // (its Auto timeout is 2 s at 20 ms/div: an untriggered record there
+        // costs that much), else the centre row.
+        let vmid = self.scope.volts((lo as f32 + hi as f32) / 2.0);
+        let mid_row = |st: &scope::Settings| {
+            let r = 140.0 + st.pos as f32 - 141.0 * vmid / (4.0 * scope::VDIV[st.range] * st.probe);
+            if swing && r.is_finite() { (r as i32).clamp(10, 270) } else { 140 }
+        };
         // Next step: apply `st` and wait for its record.
         let next = |me: &mut Self, a: Autoset, st: scope::Settings| {
             let mut a = a;
@@ -1484,7 +1492,7 @@ impl App {
                 } else if clipped {
                     st.range = (st.range + 3).min(9);
                 }
-                st.trig_row = 140;
+                st.trig_row = mid_row(&st);
                 a.idx = 0;
                 if period > 0.0 {
                     st.tb = tb_for(period);
@@ -1523,6 +1531,7 @@ impl App {
             if clipped && st.range < 9 {
                 st.range = (st.range + 3).min(9);
             }
+            st.trig_row = mid_row(&st);
             if period > 0.0 {
                 st.tb = tb_for(period);
                 a.phase = 2;
@@ -1543,6 +1552,7 @@ impl App {
             a.idx += 1;
             a.min_r = a.min_r.max(st.range as u8 + 1);
             st.range = (st.range + 3).min(9);
+            st.trig_row = mid_row(&st);
             next(self, a, st);
             return;
         }
