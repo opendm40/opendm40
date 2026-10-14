@@ -104,38 +104,30 @@ def compose_flash(mode, app, out_path, base=DUMP, zero_marker=False):
     return out_path
 
 
-def build_fwrs(worktree=None):
-    """Build fw-rs native from a clean worktree of HEAD; return the ELF path."""
+def build_fwrs(worktree=None, rev='HEAD'):
+    """Build fw-rs native at `rev` of the main repo (default: its HEAD) in a
+    separate worktree; skip the build when the ELF already matches that commit."""
     wt = worktree or os.path.join(OUT, 'fwrs-worktree')
+    commit = subprocess.check_output(['git', 'rev-parse', rev], cwd=ROOT, text=True).strip()
     if not os.path.isdir(os.path.join(wt, 'fw-rs')):
-        subprocess.check_call(['git', 'worktree', 'add', '--detach', wt, 'HEAD'], cwd=ROOT)
+        subprocess.check_call(['git', 'worktree', 'add', '--detach', wt, commit], cwd=ROOT)
+    else:
+        subprocess.check_call(['git', 'checkout', '--quiet', '--detach', commit], cwd=wt)
     tc = os.path.join(wt, 'toolchain')
     if not os.path.exists(tc):
         os.symlink(os.path.join(ROOT, 'toolchain'), tc)
-    subprocess.check_call(['./build.sh', 'native'], cwd=os.path.join(wt, 'fw-rs'))
     elf = os.path.join(wt, 'fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw')
+    stamp = os.path.join(wt, 'fw-rs/target/native/built-commit')
+    built = read(stamp).decode().strip() if os.path.exists(stamp) else ''
+    if built == commit and os.path.exists(elf):
+        print('fw-rs: %s already built (%s)' % (commit[:12], rel(elf)))
+        return elf
+    print('fw-rs: building %s (%s)' % (commit[:12], subprocess.check_output(
+        ['git', 'log', '-1', '--format=%s', commit], cwd=ROOT, text=True).strip()))
+    subprocess.check_call(['./build.sh', 'native'], cwd=os.path.join(wt, 'fw-rs'))
+    with open(stamp, 'w') as f:
+        f.write(commit + '\n')
     return elf
-
-
-def merge_models():
-    """All emu/peripherals/*.cs as ONE compile unit (Renode compiles each
-    include separately: 15 files took 3.4 s, one file 1 s)."""
-    usings, bodies = [], []
-    for f in sorted(glob.glob(os.path.join(HERE, 'peripherals', '*.cs'))):
-        body = []
-        for l in read(f).decode().splitlines():
-            if re.match(r'^using [A-Za-z0-9_.]+;\s*$', l):
-                if l not in usings:
-                    usings.append(l)
-            else:
-                body.append(l)
-        bodies.append('// ---- %s ----\n%s' % (os.path.relpath(f, HERE), '\n'.join(body)))
-    out = os.path.join(OUT, 'dm40-models.cs')
-    text = '\n'.join(usings) + '\n' + '\n'.join(bodies) + '\n'
-    if not os.path.exists(out) or read(out).decode() != text:
-        with open(out, 'w') as f:
-            f.write(text)
-    return out
 
 
 def q(path):
@@ -176,6 +168,7 @@ def main(argv=None):
     ap.add_argument('--flash', help='use this 1 MiB flash image as-is (no composition)')
     ap.add_argument('--base', default=DUMP, help='1 MiB flash dump to compose from')
     ap.add_argument('--app', help='application: .dec.bin / packed dm40*.bin / body / ELF, or "dump"')
+    ap.add_argument('--rev', default='HEAD', help='fwrs: build fw-rs from this commit of the main repo (default HEAD)')
     ap.add_argument('--disk', help='16 MiB SPI-flash image (default: working copy of the MSC dump in emu/out/)')
     ap.add_argument('--disk-add', action='append', default=[], metavar='FILE[::NAME]',
                     help='copy FILE into the working disk image (mtools), e.g. dm40-fw-native.bin::DM40_FW.BIN')
@@ -237,7 +230,7 @@ def main(argv=None):
         elif a.app:
             app = app_from_file(a.app)
         elif a.mode == 'fwrs':
-            app = app_from_file(build_fwrs())
+            app = app_from_file(build_fwrs(rev=a.rev))
         else:
             app = app_from_file(STOCK_DEC)
         flash = compose_flash(a.mode, app, os.path.join(OUT, 'flash-%s.bin' % (a.name or a.mode)), a.base, a.zero_marker)
