@@ -16,8 +16,7 @@
 //!     naming the current function): the next fresh reading, or the latest
 //!     one if none comes within SCPI_QUICK_MS (0.85 s). libsigrok's USBTMC
 //!     transport has a hard 1000 ms Bulk-IN timeout, so this must hold also
-//!     in a slow capacitance / temperature range, at the SLOW rate (one
-//!     reading per 1.6 s) or during a range hunt.
+//!     in a slow capacitance / temperature range or during a range hunt.
 //!   - just switched (MEAS:<f>? changing the function, CONF:<f> then READ?,
 //!     FETCh? before any reading): the first reading after the converter's
 //!     settle deadline (Dmm::deadline: 2.5 s for resistance, then the
@@ -72,7 +71,8 @@
 //! Conversion rate / display smoothing (FR-05; persisted):
 //!   [SENSe:]RATE SLOW|MEDium|FAST / ?     AD1 conversion rate of DC V / mV /
 //!     A and ohm (dmm.rs FR-05 table; other functions keep the stock timing):
-//!     FAST 10/s, MED 2.5/s steady (10/s while moving), SLOW 0.625/s;
+//!     FAST 10/s, MED and SLOW 2.5/s steady (10/s while moving; SLOW
+//!     averages 16 conversions, 32 on ohm r0..r3);
 //!     query: SLOW / MED / FAST
 //!   [SENSe:]RATE:PERiod?                  measured interval between readings,
 //!     s (0 until two readings were seen)

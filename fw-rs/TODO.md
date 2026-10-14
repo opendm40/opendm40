@@ -329,11 +329,11 @@ Additional requirements:
       (emu/hy3131/RESEARCH.md 3), device confirmation pending: AD1 period = OSR * 30 / SYSCLK, x2
       with AD1CHOP (set in every stock R22): 0x15 (OSR 8192) 100 ms, 0x17 (OSR 32768) 400 ms. Both
       old guesses were wrong (~9.4/s at OSR 32768 and OSR / SYSCLK ~150/s). fw-rs: FAST 10/s, MED
-      10/s moving / 2.5/s steady, SLOW 0.625/s (one per 4 conversions); hy3131::ad1_period_us, dmm.rs
-      FR-05 table. Device: SENS:RATE:PER? per rate on a steady input.
-      Open decision: SLOW_DECIM 4 was sized for ~107 ms conversions (target ~2.3/s); with 400 ms it
-      is 0.625/s and READ? never gets a fresh SLOW reading within SCPI_QUICK_MS. SLOW_DECIM = 1
-      would give 2.5/s with the same 16-conversion window. MEAS:<f>? after a function change can no
+      10/s moving / 2.5/s steady, SLOW as MED (one reading per conversion, 16-conversion window, 32
+      on ohm r0..r3); hy3131::ad1_period_us, dmm.rs FR-05 table. Device: SENS:RATE:PER? per rate on
+      a steady input (expect 0.4 s for MED and SLOW, 0.1 s for FAST).
+      Decided 2026-10-14: SLOW reports every conversion (it was one per 4 = 0.625/s, sized for the
+      old ~107 ms guess, so READ? never got a fresh SLOW reading). MEAS:<f>? after a function change can no
       longer reach a full +1-digit window within SCPI_SETTLE_MS 1.5 s (needs ~3.2 s); kept for
       the 2 s PyVISA default.
 - [x] Data logger runs at 38 Hz at OSR 2048 — that is the chip, not the SPI link (datasheet +
