@@ -900,6 +900,12 @@ fn tap_step_tests(ck: &mut Ck) {
         acc = r;
     }
     ck.t(&format!("tb scroll: drag 138 px up = 4 rows slower, one redraw per row ({shown:?})"), cur == 17 && shown == vec![14, 15, 16, 17]);
+    // List pick (review a2f4b01 L8): a roll-only row turns Roll on except in
+    // Single, which takes the YT maximum and leaves Roll alone.
+    let yt = scope::TB_YT_MAX as u8;
+    ck.t("tb pick: YT row as is, Roll untouched", su::tb_pick(13, false, false) == (13, false) && su::tb_pick(13, false, true) == (13, false));
+    ck.t("tb pick: roll-only row in Auto/Normal turns Roll on", su::tb_pick(27, false, false) == (27, true) && su::tb_pick(27, true, false) == (27, false));
+    ck.t("tb pick: roll-only row in Single = YT max, Roll stays off", su::tb_pick(27, false, true) == (yt, false) && su::tb_pick(29, true, true) == (yt, false));
     // Persisted mode: 0 (older records) = the default; round trip.
     ck.t("tap mode persist: 0 = TAP_DEFAULT (Corners)", su::tap_decode(0) == su::TAP_DEFAULT && su::TAP_DEFAULT == su::TAP_CORNERS);
     ck.t("tap mode persist: round trip, unknown = default", (0..3u8).all(|m| su::tap_decode(su::tap_code(m)) == m && su::tap_code(m) < 4) && (0..4u32).filter(|c| !(0..3u8).any(|m| su::tap_code(m) == *c)).all(|c| su::tap_decode(c) == su::TAP_DEFAULT));

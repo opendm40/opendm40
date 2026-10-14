@@ -82,7 +82,8 @@ pub(super) struct Touch {
     /// The press selected a marker zone (no timebase step on release).
     hit: bool,
     t0: u64,
-    /// Settings / cursors at the press (undo for a second finger).
+    /// Settings / cursors at the press (undo for a second finger); the
+    /// settings are rebased after each Corners hold-repeat step.
     snap: scope::Settings,
     cur: ui::Cursors,
     /// Stopped scope: stored-record anchor at the press (pan base), and the
@@ -687,7 +688,15 @@ impl App {
             if let Some(mut t) = self.sp.touch {
                 if let Some(slower) = t.arm.repeat(self.sp.tap_mode, t.still(), now) {
                     self.sp.touch = Some(t);
-                    self.sp_tb_step(slower, now);
+                    // The repeated step is kept: a later drag + second
+                    // finger (Cancel) undoes only what the drag moved
+                    // (pre-flash review a2f4b01 L9). Still = nothing
+                    // dragged yet, so the whole snapshot is rebased.
+                    if self.sp_tb_step(slower, now) {
+                        if let Some(t) = self.sp.touch.as_mut() {
+                            t.snap = self.scope.s;
+                        }
+                    }
                 }
             }
         }
@@ -1466,12 +1475,13 @@ impl App {
         self.sp_tb_pick(pick, now);
     }
 
-    /// Timebase picked in the list. A roll-only entry (beyond 1 s/div,
-    /// orange) turns Roll on; the list then shows what the scope took
-    /// (Single stays at the YT maximum).
+    /// Timebase picked in the list (`su::tb_pick`). A roll-only entry
+    /// (beyond 1 s/div, orange) turns Roll on, except in Single (it stays at
+    /// the YT maximum, Roll untouched); the list then shows what the scope
+    /// took.
     fn sp_tb_pick(&mut self, i: u8, now: u64) {
         let mut st = self.scope.s;
-        let roll_on = i as usize > scope::TB_YT_MAX && !self.scope.roll;
+        let (i, roll_on) = su::tb_pick(i, self.scope.roll, st.mode == scope::TrigMode::Single);
         if roll_on {
             self.roll = true;
             self.scope.roll = true;

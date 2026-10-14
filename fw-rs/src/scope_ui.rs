@@ -1373,6 +1373,16 @@ pub fn tb_top(roll: bool, single: bool) -> u8 {
     (if roll && !single { crate::scope::TB_MAX } else { crate::scope::TB_YT_MAX }) as u8
 }
 
+/// Timebase list pick of row `i` with the Roll setting `roll` and trigger
+/// mode Single `single`: (the timebase to apply, turn the saved Roll setting
+/// on). A roll-only row (beyond 1 s/div, orange) turns Roll on, except in
+/// Single: it never rolls, so the scope takes the YT maximum and the saved
+/// Roll setting is left alone (pre-flash review a2f4b01 L8).
+pub fn tb_pick(i: u8, roll: bool, single: bool) -> (u8, bool) {
+    let roll_on = i as usize > crate::scope::TB_YT_MAX && !roll && !single;
+    (i.min(tb_top(roll || roll_on, single)), roll_on)
+}
+
 /// `Model::tabs` for a tap-step `mode`: Corners always shows both tabs,
 /// Halves while `transient` (2 s after a step, the first page entries) or
 /// a press is armed, Off never. A tab whose step is at its limit is hidden
