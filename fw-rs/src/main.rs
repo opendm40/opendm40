@@ -334,7 +334,9 @@ fn main() -> ! {
                             app.select_func(&mut clk, m);
                         }
                         // meter.live() is reset on every function change.
-                        let expire = if app.meter.live().is_some() {
+                        // *IDN? emulation (scpi::idn_emul): the host does not
+                        // wait after CONF, never hold a reply past its 1 s.
+                        let expire = if app.meter.live().is_some() || scpi::idn_emul() != 0 {
                             now + SCPI_QUICK_MS
                         } else {
                             now.max(app.dmm.deadline()) + SCPI_WAIT_MS
