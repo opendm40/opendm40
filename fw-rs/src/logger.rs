@@ -6,7 +6,28 @@
 //! paced by the DWT cycle counter (clock.rs enables CYCCNT; HCLK = 200 MHz), not
 //! by an interrupt. FR-38 trades resolution for speed: the HY3131 AD1OSR is
 //! dropped to its fast setting (see `hy3131::set_ad1_osr`) and we stream the raw
-//! signed 24-bit AD1 counts. SI scaling is intentionally not applied here (the
+//! signed 24-bit AD1 counts.
+//!
+//! Rate ceiling: the HY3131 itself, not the SPI link (hy3131.rs "AD1
+//! conversion timing"): period = OSR * 30 / 4.9152 MHz, x2 with the chopper.
+//!   LOG:OSR  OSR     chopped (default)   LOG:CHOP OFF
+//!   3        2048    25 ms    40/s        12.5 ms    80/s   (default code)
+//!   2        1024    12.5 ms  80/s        6.25 ms   160/s
+//!   1        512     6.25 ms 160/s        3.125 ms  320/s
+//!   0        256     3.125 ms 320/s       1.5625 ms 640/s   (the chip's max)
+//!   4..7     4096..32768: 50..400 ms chopped (20..2.5/s)
+//! The 38 Hz measured on the device at the default is this 40/s (the old
+//! "SPI-limited" diagnosis assumed OSR / SYSCLK, 417 us). Each sample costs
+//! ~122 us of bit-banged SPI, so even 640/s keeps the link < 10 % busy; the
+//! limit there is the main-loop period, which must stay below the conversion
+//! period or samples are lost (`missed`; not measured on the device above
+//! 40/s yet). Trade-offs: a lower OSR has fewer effective bits (more noise
+//! per sample); LOG:CHOP OFF (AD1CHOP = 00) leaves the converter offset in
+//! every sample (the calibration was taken chopped: zero the host's scale
+//! with a shorted input at the same settings) and adds low-frequency noise.
+//! Both settings apply to the logger only and take effect at LOG:STATe ON;
+//! LOG:STATe OFF restores the DMM row (main.rs: `app.dmm.start` rewrites the
+//! full configuration, R22 included). SI scaling is intentionally not applied here (the
 //! calibration path lives in dmm.rs); `LOG:PREamble?` reports mode/range/OSR so
 //! the host can scale, per FR-38's "accuracy sacrificed for speed".
 //!
@@ -40,13 +61,15 @@ use crate::mmio::r32;
 const DWT_CYCCNT: u32 = 0xE000_1004;
 const CYC_PER_US: u64 = (crate::clock::HCLK_HZ / 1_000_000) as u64; // 200
 
-/// Ring capacity in records. 2048 * 12 B = 24 KiB; ~0.85 s at ~2.4 kSa/s. Held
+/// Ring capacity in records. 2048 * 12 B = 24 KiB; ~51 s at the default
+/// 40/s, ~3.2 s at the fastest 640/s (OSR 256 unchopped). Held
 /// in a `static mut` (see main.rs) so it does not sit on the main stack next to
 /// the ~12.5 KiB USBTMC buffers.
 pub const CAP: usize = 2048;
 
-/// Default AD1OSR code, applied at startup (main.rs). OSR 2048 (~417 us) is the
-/// stock-proven fastest and the realistic floor over the bit-banged SPI link.
+/// Default AD1OSR code, applied at startup (main.rs). OSR 2048 chopped (R22 =
+/// 0x13, 25 ms, 40/s) is the stock's fastest setting; faster ones are opt-in
+/// (LOG:OSR, LOG:CHOP OFF; table above).
 pub const DEFAULT_OSR: u8 = hy::AD1OSR_STREAM;
 
 /// One sample: 12 bytes, little-endian on the wire (seq, ts_us, raw).
@@ -62,6 +85,9 @@ const REC_BYTES: usize = 12;
 pub struct Logger {
     active: bool,
     osr: u8,
+    /// LOG:CHOP OFF. Stored inverted so that the all-zero `new()` (see
+    /// `init_in_place`) is the chopped default.
+    nochop: bool,
     nominal_us: u32,
     mode: u8,
     range: i8,
@@ -108,6 +134,7 @@ impl Logger {
         Logger {
             active: false,
             osr: 0,
+            nochop: false,
             nominal_us: 0,
             mode: 0,
             range: 0,
@@ -150,6 +177,14 @@ impl Logger {
     pub fn osr(&self) -> u8 {
         self.osr
     }
+    /// AD1 chopper (offset cancelled, half the rate; default on). Takes
+    /// effect at the next `start`.
+    pub fn set_chop(&mut self, on: bool) {
+        self.nochop = !on;
+    }
+    pub fn chop(&self) -> bool {
+        !self.nochop
+    }
     pub fn mode(&self) -> u8 {
         self.mode
     }
@@ -174,7 +209,7 @@ impl Logger {
 
     /// Measured mean sample rate in Hz over the current session, from the first
     /// and last sample times (64-bit, no 71.6 min wrap) and the capture count
-    /// (the real number, off the device, not the nominal OSR rate). 0 until at
+    /// (the real number, off the device, not the nominal rate). 0 until at
     /// least two samples.
     pub fn measured_hz(&self) -> u32 {
         if self.captured < 2 {
@@ -187,13 +222,13 @@ impl Logger {
         (((self.captured as u64 - 1) * 1_000_000) / span) as u32
     }
 
-    /// Begin a session: configure the HY3131 AD1OSR fast and reset all state.
+    /// Begin a session: configure the HY3131 AD1OSR / chopper and reset all state.
     /// `mode`/`range` are the current DMM function (for the preamble); the caller
     /// must have selected an AD1 DC mode (1/3/7/8/9) and powered the analog side.
     pub fn start(&mut self, mode: u8, range: i8) {
         self.mode = mode;
         self.range = range;
-        self.nominal_us = hy::osr_period_us(self.osr);
+        self.nominal_us = hy::ad1_period_us(self.osr, self.chop());
         self.head = 0;
         self.tail = 0;
         self.len = 0;
@@ -208,7 +243,7 @@ impl Logger {
         self.first_us = 0;
         self.last_us = 0;
         self.last_cyc = unsafe { r32(DWT_CYCCNT) };
-        hy::set_ad1_osr(self.osr);
+        hy::set_ad1_osr(self.osr, self.chop());
         self.active = true;
     }
 

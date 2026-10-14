@@ -171,38 +171,64 @@ pub fn configure(cfg: &[u8; CFG_LEN]) {
     }
 }
 
-// -------------------------------------------------------- data-logger fast AD1
+// ------------------------------------------------------- AD1 conversion timing
 //
-// Fast-stream support for the data logger (FR-38, src/logger.rs). The HY3131
-// conversion rate for the main (AD1) converter is set by R22 AD1OSR:
-//   R22 = AD1OS[7:5] AD1CHOP[4:3] AD1OSR[2:0]   (hy3131_v2_6.h, datasheet p.17)
-//   OSR = 256 << (AD1OSR)        sample/conversion interval ~= OSR / SYSCLK
-// Every DC-mode config row (f1 DCV, f3 DCmV, f7/f8_9 DCA) writes R22 = 0x15, i.e.
-// AD1OS=000, AD1CHOP=10, AD1OSR=101 (OSR 8192); stock only ever rewrites the low
-// three bits at run time (0x13=OSR2048 its fastest, 0x15=OSR8192, 0x17=OSR32768).
-// So the logger keeps the same 0x10 base and varies only AD1OSR:
-//   code 0 -> OSR 256 (~52 us)   ... code 3 -> 0x13 OSR 2048 (~417 us, stock's
-//   fastest) ... code 7 -> 0x17 OSR 32768. SYSCLK = 4.9152 MHz.
-// Practical floor is the bit-banged SPI link, not the ADC: with HALF ~1 us a
-// read1(INTF) is ~45 us and a 3-byte AD1 read ~77 us, so ~122 us/sample before
-// any loop work. OSR 256/512 convert faster than the link can read them; OSR
-// 2048 (0x13) is the realistic default and is already proven by the stock fw.
+// R22 = AD1OS[7:5] AD1CHOP[4:3] AD1OSR[2:0] (hy3131_v2_6.h; datasheet 13.1).
+// The AD1 modulator runs at AD1CLK = SYSCLK / 30 (fixed divider, chapter 11)
+// and delivers one result per OSR1 = 256 << AD1OSR clocks; with AD1CHOP = 1x
+// the chip alternates the input polarity per conversion to cancel the offset
+// and "the ADC output rate will be one time slower", i.e. halved:
+//   period = OSR1 * 30 / SYSCLK * (AD1CHOP = 1x ? 2 : 1), SYSCLK 4.9152 MHz
+// Every R22 the stock writes is chopped (AD1CHOP = 10):
+//   0x13 OSR 2048   25 ms  40/s   (ohm over range; the data logger default)
+//   0x14 OSR 4096   50 ms  20/s   (continuity while the reading moves)
+//   0x15 OSR 8192  100 ms  10/s   (every DC row; the stock's moving reading)
+//   0x16 OSR 16384 200 ms   5/s   (temperature)
+//   0x17 OSR 32768 400 ms 2.5/s   (the stock's steady DC / ohm reading)
+// Unchopped, the same codes run twice as fast (OSR 256: 1.5625 ms, 640/s;
+// the datasheet's "5 Hz" headline is OSR 32768 unchopped). Source:
+// emu/hy3131/RESEARCH.md 3; the emulator models this formula (and agrees
+// with the data logger's 38 Hz measured on the device at 0x13); a direct
+// device measurement of the DMM rates is still pending (TODO.md).
+// Before 2026-10-14 fw-rs assumed OSR / SYSCLK here (16x too short at OSR
+// 2048: 417 us) and an "SPI-limited" logger; the bit-banged link needs
+// ~122 us per sample (read1(INTF) ~45 us + 3-byte AD1 read ~77 us), far
+// below every conversion period, so the chip sets the pace at every code.
 
-/// AD1OSR run-time code (0..7); OSR = 256 << code. Default logger value is 3.
-pub const AD1OSR_STREAM: u8 = 3; // R22 = 0x13, OSR 2048, ~417 us/conv
+/// HY3131 system clock (crystal), Hz.
+pub const SYSCLK_HZ: u32 = 4_915_200;
+/// AD1CLK = SYSCLK / AD1CLK_DIV (fixed in the chip).
+pub const AD1CLK_DIV: u32 = 30;
+/// R22 AD1CHOP = 10: chopped, offset cancelled, half the rate. The stock DC
+/// base (AD1OS = 000) is 0x10 | AD1OSR.
+pub const R22_CHOP: u8 = 0x10;
 
-/// Set only the AD1OSR field of R22, keeping the stock DC base (AD1OS=000,
-/// AD1CHOP=10). `code` is clamped to 0..7. Lower = faster, fewer effective bits.
-pub fn set_ad1_osr(code: u8) {
-    write(0x22, &[0x10 | (code & 7)]);
+/// AD1 conversion period in microseconds for an AD1OSR code (0..7, OSR =
+/// 256 << code) with or without the chopper: 1563 us (OSR 256, unchopped)
+/// .. 400000 us (OSR 32768, chopped); rounded to the nearest us.
+pub const fn ad1_period_us(osr_code: u8, chop: bool) -> u32 {
+    let clocks = (256u64 << (osr_code & 7)) * AD1CLK_DIV as u64 * if chop { 2 } else { 1 };
+    ((clocks * 1_000_000 + SYSCLK_HZ as u64 / 2) / SYSCLK_HZ as u64) as u32
 }
 
-/// Nominal conversion interval in microseconds for an AD1OSR code, from the
-/// datasheet-inferred `OSR / SYSCLK` (SYSCLK = 4.9152 MHz). This is the ADC
-/// pacing only; the real sample interval is max(this, SPI+loop time).
-pub fn osr_period_us(code: u8) -> u32 {
-    let osr = 256u32 << (code & 7);
-    ((osr as u64 * 1_000_000) / 4_915_200) as u32
+/// `ad1_period_us` of a raw R22 value (AD1OSR = bits 2..0, AD1CHOP bit 4).
+pub const fn ad1_period_us_r22(r22: u8) -> u32 {
+    ad1_period_us(r22 & 7, r22 & R22_CHOP != 0)
+}
+
+/// AD1OSR run-time code of the data logger's default (R22 = 0x13, OSR 2048,
+/// chopped: 25 ms, 40/s, the stock's fastest setting).
+pub const AD1OSR_STREAM: u8 = 3;
+
+/// Write R22 with AD1OS = 000 (no DC offset) and the given AD1OSR code
+/// (clamped to 0..7) and chopper. Lower code = faster, fewer effective bits;
+/// `chop` false (AD1CHOP = 00: VX + VOS) doubles the rate but leaves the
+/// converter offset in every result (the calibration was taken chopped) and
+/// raises the low-frequency noise. A legal setting: Hycon's own ENOB tool
+/// runs AD1 unchopped in its AC rows (R22 = 0x04 / 0x07).
+pub fn set_ad1_osr(code: u8, chop: bool) {
+    let chop = if chop { R22_CHOP } else { 0 };
+    write(0x22, &[chop | (code & 7)]);
 }
 
 /// True when AD1 has a fresh conversion (INTF AD1F). Reading the AD1 data
@@ -217,4 +243,27 @@ pub fn read_ad1() -> i32 {
     let mut b = [0u8; 3];
     read(R_AD1, &mut b);
     s24(&b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ad1_periods_match_the_datasheet() {
+        // Chopped, as every stock R22 (emu/hy3131/RESEARCH.md 3).
+        assert_eq!(ad1_period_us_r22(0x13), 25_000);
+        assert_eq!(ad1_period_us_r22(0x14), 50_000);
+        assert_eq!(ad1_period_us_r22(0x15), 100_000);
+        assert_eq!(ad1_period_us_r22(0x16), 200_000);
+        assert_eq!(ad1_period_us_r22(0x17), 400_000);
+        // Unchopped: half; the fastest setting, OSR 256: 1.5625 ms = 640/s.
+        assert_eq!(ad1_period_us(0, false), 1_563);
+        assert_eq!(ad1_period_us(0, true), 3_125);
+        assert_eq!(ad1_period_us(3, false), 12_500);
+        assert_eq!(ad1_period_us(7, false), 200_000);
+        assert_eq!(ad1_period_us_r22(0x07), 200_000);
+        assert_eq!(ad1_period_us_r22(0x18 | 3), 25_000); // AD1CHOP = 11 chops too
+        assert_eq!(ad1_period_us(9, true), ad1_period_us(1, true)); // code masked to 0..7
+    }
 }

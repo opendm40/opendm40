@@ -325,13 +325,26 @@ Additional requirements:
   LVGL via lv_binding_rust (C, MIT, experimental bindings), egui (needs std + framebuffer/GPU-style
   rasteriser: does not fit 125 KB SRAM). Revisit with a one-screen Slint/LVGL prototype if the
   hand-made widgets stay clumsy. Meanwhile: layout rules + automated overlap check for every screen.
-- [ ] Measure the real DMM conversion period per rate (SENS:RATE:PER?, after the integration build): code
-      assumes ~9.4/s at OSR 32768 (stock-like), the datasheet formula OSR/SYSCLK gives ~150/s — settle it.
-- [ ] Data logger runs at 38 Hz at OSR 2048 although AD1 allows up to ~2400 Hz by the formula: the SPI
-      read loop limits it — profile (bit-banged SPI on PC10-12?) and speed up (hardware SPI / DMA / read
-      only the AD1 data bytes).
-      Device test: LOG:OSR 0..7 sweep with LOG:RATE? and the noise (counts) per code on a steady 0.5 V,
-      to fix the real rate/noise table (OSR 256 ~1 kHz by the formula, unverified).
+- [x] Measure the real DMM conversion period per rate — resolved by the datasheet + emulator
+      (emu/hy3131/RESEARCH.md 3), device confirmation pending: AD1 period = OSR * 30 / SYSCLK, x2
+      with AD1CHOP (set in every stock R22): 0x15 (OSR 8192) 100 ms, 0x17 (OSR 32768) 400 ms. Both
+      old guesses were wrong (~9.4/s at OSR 32768 and OSR / SYSCLK ~150/s). fw-rs: FAST 10/s, MED
+      10/s moving / 2.5/s steady, SLOW 0.625/s (one per 4 conversions); hy3131::ad1_period_us, dmm.rs
+      FR-05 table. Device: SENS:RATE:PER? per rate on a steady input.
+      Open decision: SLOW_DECIM 4 was sized for ~107 ms conversions (target ~2.3/s); with 400 ms it
+      is 0.625/s and READ? never gets a fresh SLOW reading within SCPI_QUICK_MS. SLOW_DECIM = 1
+      would give 2.5/s with the same 16-conversion window. MEAS:<f>? after a function change can no
+      longer reach a full +1-digit window within SCPI_SETTLE_MS 1.5 s (needs ~3.2 s); kept for
+      the 2 s PyVISA default.
+- [x] Data logger runs at 38 Hz at OSR 2048 — that is the chip, not the SPI link (datasheet +
+      emulator, device confirmation pending): OSR 2048 chopped = 25 ms = 40/s. The SPI read is ~122
+      us/sample. Faster rates are now opt-in: LOG:OSR 0..2 (OSR 256 chopped 320/s) and LOG:CHOP OFF
+      (AD1CHOP = 00, x2: OSR 256 unchopped 1.5625 ms = 640/s, the chip's max; converter offset not
+      cancelled, more low-frequency noise); LOG:PREamble? reports chop as a 6th field. The logger's
+      nominal period (gate, `missed`) was 16x too short before: `missed` counted ~60 phantom
+      samples per real one. Device test: LOG:OSR 0..3 x LOG:CHOP ON/OFF sweep with LOG:RATE?,
+      LOG:COUNt? (missed) and the noise / offset (counts) per setting on a steady 0.5 V and a
+      shorted input, to fix the real rate / noise / offset table.
 
 ## Owner hands-on feedback 2026-10-13 night (build a9d200f / experiment e0272ef)
 - [x] Scope drag lags: while a drag is in progress freeze acquisition/redraw of new frames and only
