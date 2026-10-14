@@ -487,6 +487,10 @@ fn main() {
             stock::draw(&sc);
             host::save_ppm(&format!("{dir}/{}.ppm", sc.name), 1);
         }
+        for sc in stock::emu_scenes() {
+            stock::draw_with(&sc, &stock::emu_popvals(&sc.m));
+            host::save_ppm(&format!("{dir}/{}.ppm", sc.name), 1);
+        }
         return;
     }
     let mut w = World {

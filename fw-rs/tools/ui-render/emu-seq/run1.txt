@@ -1,0 +1,20 @@
+0.1 scope dc,0,0
+2.5 key menu
+3.2 tap 339 105
+5.5 shot @OUT@/e01-page.png
+5.6 tap 447 81
+6.5 shot @OUT@/e02-ch1-coupling.png
+6.6 tap 254 111
+7.4 shot @OUT@/e03-ch1-probe.png
+7.5 tap 254 152
+8.3 shot @OUT@/e04-ch1-color.png
+8.4 tap 100 150
+8.8 tap 447 300
+9.6 shot @OUT@/e05-mf-trigger.png
+9.7 tap 64 41
+10.5 shot @OUT@/e06-mf-measure.png
+10.6 tap 165 41
+11.4 shot @OUT@/e07-mf-display.png
+11.5 tap 367 41
+12.3 shot @OUT@/e08-mf-settings.png
+12.4 key mf

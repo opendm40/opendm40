@@ -117,6 +117,9 @@ pub struct Model {
     pub pressed: u8,
     /// Combined view geometry.
     pub combined: bool,
+    /// Math mode of the math pill label (stock S+0xd4: 0 "--" .. 5 FFT, 6
+    /// ABS; shown even while math is off). fw-rs has no math engine: 0.
+    pub math_mode: u8,
 }
 
 impl Model {
@@ -148,6 +151,7 @@ impl Model {
         math_open: false,
         pressed: 0,
         combined: false,
+        math_mode: 0,
     };
 
     pub fn pal(&self) -> Color {
@@ -428,7 +432,12 @@ pub fn panel_button(m: &Model, k: usize) {
         0 | 3 => (Ink::new(sf::SC_F20, r, "+", 8, 0), Ink::none()),
         2 | 5 => (Ink::new(sf::SC_F20, r, "-", 8, 0), Ink::none()),
         1 => (Ink::new(sf::SC_F20, rect(417, 61, 60, 24), "CHA", 8, 0), Ink::new(sf::SC_F12, rect(417, 85, 60, 16), b.as_str(), 8, 0)),
-        4 => (Ink::new(sf::SC_F20, rect(417, 191, 60, 24), "--", 8, 0), Ink::new(sf::SC_F12, rect(417, 215, 60, 16), b.as_str(), 8, 0)),
+        4 => {
+            // FFT: the dB/div label (index 10 = "10dB" by default).
+            const MATH: [&str; 7] = ["--", "+", "-", "*", "/", "FFT", "ABS"];
+            let t2 = if m.math_mode == 5 { "10dB" } else { b.as_str() };
+            (Ink::new(sf::SC_F20, rect(417, 191, 60, 24), MATH[m.math_mode.min(6) as usize], 8, 0), Ink::new(sf::SC_F12, rect(417, 215, 60, 16), t2, 8, 0))
+        }
         _ => (Ink::new(sf::SC_F20, r, "TRIG", 8, 0), Ink::none()),
     };
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill)], |x, y| {
@@ -1186,7 +1195,7 @@ pub fn update(m: &Model) {
         let dep = match k {
             0 | 2 => pal,
             1 => pal || ol.vdiv != m.vdiv || ol.ch1_open != m.ch1_open,
-            4 => ol.vdiv != m.vdiv || ol.math_open != m.math_open,
+            4 => ol.vdiv != m.vdiv || ol.math_open != m.math_open || ol.math_mode != m.math_mode,
             _ => false,
         };
         if d(dep || was(&ol) != was(m)) {
