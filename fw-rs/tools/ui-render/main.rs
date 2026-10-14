@@ -1080,8 +1080,17 @@ fn main() {
         // themselves are the stock keypad geometry (not checked here: its
         // 40 px keys sit 1 px apart and 3 px from the screen edge).
         if k == 0 {
-            ui::keypad_input(true, "1234567", "KHz");
+            ui::keypad_input(true, "1234567", "KHz", false);
             ck.check_opts("gen/keypad-freq-input", &gen_regions, false);
+            // Prefilled current value, selected (ui-review #10).
+            ui::keypad_input(true, "2", "MHz", true);
+            ck.check_opts("gen/keypad-freq-sel", &gen_regions, false);
+            ui::keypad(ui::KP_FREQ, "Frequency", "2", "MHz", true);
+            save(&out, "g03-keypad-freq-sel");
+            host::reset(0);
+            ui::gen_static(&w.gen);
+            ui::keypad(ui::KP_NUM, "Vpp", "3.00", "V", true);
+            save(&out, "g04-keypad-vpp-sel");
         }
     }
     w.gen.apply(gen::Settings::DEFAULT);
