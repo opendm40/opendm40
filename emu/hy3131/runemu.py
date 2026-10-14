@@ -46,7 +46,8 @@ def main():
     ns = {'__name__': 'dm40_run', '__file__': RUN}
     exec(compile(src, RUN, 'exec'), ns)
     ns['merge_models'] = merge_models
-    return ns['main']()
+    r = ns['main']()
+    return r if isinstance(r, int) else 0  # --dry returns the .resc path
 
 
 if __name__ == '__main__':
