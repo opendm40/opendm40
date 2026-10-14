@@ -1141,9 +1141,11 @@ impl App {
         p[0] = self.dim_idx as u32
             | (self.off_idx as u32) << 4
             | (self.start_page as u32) << 8
-            | (self.bt_on as u32) << 12;
+            | (self.bt_on as u32) << 12
+            | (crate::scpi::idn_emul() as u32 & 1) << 14;
         // (p[0] bit 13 was the old "both rails" flag, default 1: retired so
-        // units upgraded from it start in the new Auto default.)
+        // units upgraded from it start in the new Auto default.) Bit 14: SCPI
+        // *IDN? emulation (SYST:IDN:EMUL 34401A; never used before, 0 = OFF).
         p[1] = self.backlight as u32 | (self.volume as u32) << 8 | (self.roll as u32) << 16;
         p[2] = self.dmm.func() as u32 | (self.dmm.v_auto() as u32) << 8 | (self.dmm.a_auto() as u32) << 16 | (self.dmm.ohm_var() as u32) << 24;
         p[3] = Wave::ALL.iter().position(|&w| w == g.wave).unwrap_or(0) as u32 | (g.duty as u32) << 8;
@@ -1210,6 +1212,7 @@ impl App {
         self.off_idx = (p[0] >> 4 & 3) as usize;
         self.start_page = (p[0] >> 8 & 3) as usize;
         self.bt_on = p[0] >> 12 & 1 != 0;
+        crate::scpi::set_idn_emul((p[0] >> 14 & 1) as u8);
         self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
         self.roll = p[1] >> 16 & 1 != 0;
@@ -2378,6 +2381,10 @@ impl App {
             }
             C::SysTemp => {
                 out.put_f32(self.power.mcu_t);
+                true
+            }
+            C::ConfQuery => {
+                out.put_conf(self.dmm.func(), self.meter.live());
                 true
             }
             C::SysRail(Some(b)) => {

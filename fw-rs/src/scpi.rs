@@ -4,7 +4,8 @@
 //! per message separated by ';'. Supported:
 //!   *IDN?  *RST  *CLS  *OPC?  *ESR?  *STB?  SYSTem:ERRor?
 //!   CONFigure:<f>  MEASure:<f>?  READ?  FETCh?  [SENSe:]FUNCtion?
-//!   [SENSe:]FUNCtion "<f>"
+//!   [SENSe:]FUNCtion "<f>"   CONFigure?   INITiate  ABORt  SYSTem:LOCal|REMote
+//!   (no-ops)   SYSTem:IDN:EMULation OFF|34401A / ?
 //! where <f> = VOLTage[:DC] | VOLTage:AC | VOLTage:ACDC | CURRent[:DC] |
 //! CURRent:AC | CURRent:ACDC | RESistance | CONTinuity | DIODe | CAPacitance |
 //! FREQuency | TEMPerature. Functions are stock DMM mode numbers (see dmm.rs),
@@ -32,6 +33,24 @@
 //!   - no late reply to a query the host gave up on: USBTMC
 //!     INITIATE_ABORT_BULK_IN / INITIATE_CLEAR, or a new command ("Query
 //!     INTERRUPTED").
+//!
+//! CONFigure? answers as the Agilent / HP meters: "<func> <range>,<resolution>"
+//! with <func> as FUNCtion? ("VOLT", "VOLT:AC", "CURR:ACDC", "RES", "CAP",
+//! "FREQ", "TEMP", ...; "CONT" and "DIOD" bare), the resolution that of the
+//! readout (its decimals, one more with the +1 digit), the range 60000 counts
+//! of it (DM40 ranges are 6 / 60 / 600..., not the 34401A's 1 / 10 / 100...).
+//! No reading of the current function yet: +6.000000E+00,+1.000000E-04.
+//!
+//! *IDN? compatibility (SYSTem:IDN:EMULation, persisted, default OFF): with
+//! 34401A, *IDN? answers "HEWLETT-PACKARD,34401A,0,dm40-fw 0.1" so that hosts
+//! with a 34401A profile only (libsigrok >= 0.5.2 / SmuView without the DM40
+//! profile) take the meter; READ? then never waits longer than the quick
+//! budget (+9.9E37 until the first reading after a function change).
+//! Caveats: that profile knows DC / AC V and A, RES (and FRES = RES here),
+//! CONT, DIOD, FREQ (and PER, which the DM40 lacks): in CAP, TEMP and AC+DC
+//! the host stops with "unknown measurement quantity"; no ranges or
+//! resolution settings; the digits come from CONFigure?. PyVISA scripts
+//! written for a real 34401A get its command subset only.
 //!
 //! Temperature / system (fw-rs extensions):
 //!   CONFigure:TEMPerature [<sensor>]   MEASure:TEMPerature? [<sensor>]
@@ -85,6 +104,29 @@
 use crate::dmm::Reading;
 
 pub const IDN: &[u8] = b"Alientek,DM40A,0,dm40-fw 0.1";
+/// *IDN? while SYST:IDN:EMUL 34401A is on: the HP 34401A identity (vendor
+/// as the real meter's, libsigrok maps it to "HP"), our firmware in the
+/// version field.
+pub const IDN_34401A: &[u8] = b"HEWLETT-PACKARD,34401A,0,dm40-fw 0.1";
+
+/// *IDN? compatibility mode (SYSTem:IDN:EMULation OFF|34401A; persisted, app.rs
+/// persist_words p[0] bit 14): 0 = off (default), 1 = HP 34401A. For hosts
+/// that pick a driver profile from *IDN? and know no DM40, e.g. libsigrok /
+/// SmuView builds without the Alientek DM40 scpi-dmm profile: their "HP
+/// 34401A" profile (since libsigrok 0.5.2) sends CONF:<f>, CONF?, INIT,
+/// READ?, *OPC?, ABORT. With it on, READ? / MEAS? / FETCh? never wait for a
+/// first reading longer than the quick budget (main.rs: +9.9E37 for the
+/// first ~1..3 s after a function change), since such hosts do not wait
+/// after CONF and time out after 1 s (USBTMC) / 1.5 s.
+static IDN_EMUL: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+pub fn idn_emul() -> u8 {
+    IDN_EMUL.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_idn_emul(v: u8) {
+    IDN_EMUL.store(if v == 1 { 1 } else { 0 }, core::sync::atomic::Ordering::Relaxed);
+}
 
 pub enum Out {
     /// Nothing to send (command without a query).
@@ -280,6 +322,9 @@ pub enum Cmd {
     TempExc,
     TempCj,
     SysTemp,
+    /// CONFigure?: "<func> <range>,<resolution>" as the Agilent / HP meters
+    /// (App::scpi_dmm; "CONT" / "DIOD" bare).
+    ConfQuery,
     SysRail(Option<bool>),
     SysRailState,
     /// CALCulate (FR-01 / 02 / 06; App::set_ahold etc.).
@@ -513,7 +558,23 @@ impl Scpi {
                 self.put(b";");
             }
             match (p0, query) {
-                (b"*IDN", true) => self.put(IDN),
+                (b"*IDN", true) => self.put(if idn_emul() == 1 { IDN_34401A } else { IDN }),
+                _ if kw(p0, "SYSTem") && parts.len() > 2 && kw(parts[1], "IDN") && kw(parts[2], "EMULation") => {
+                    if query {
+                        self.put(if idn_emul() == 1 { b"34401A" } else { b"OFF" });
+                    } else {
+                        match trim(arg) {
+                            b"OFF" | b"0" => set_idn_emul(0),
+                            b"34401A" | b"HP34401A" => set_idn_emul(1),
+                            _ => self.err = Some("Illegal parameter value"),
+                        }
+                    }
+                }
+                // Accepted for Agilent / HP-style hosts (libsigrok's 34401A
+                // profile sends INIT at the start, ABORT at the end); the
+                // meter measures continuously, READ? takes the next reading.
+                _ if (kw(p0, "INITiate") || kw(p0, "ABORt")) && !query => {}
+                _ if kw(p0, "SYSTem") && parts.len() == 2 && (kw(parts[1], "LOCal") || kw(parts[1], "REMote")) && !query => {}
                 (b"*RST", false) | (b"*CLS", false) => self.err = None,
                 (b"*OPC", true) => self.put(b"1"),
                 (b"*ESR", true) | (b"*STB", true) => self.put(b"0"),
@@ -552,6 +613,7 @@ impl Scpi {
                     Some(f) => out = Out::Measure(Some(f)),
                     None => self.err = Some("Command error"),
                 },
+                _ if kw(p0, "CONFigure") && query && parts.len() == 1 => out = Out::Instr(Cmd::ConfQuery),
                 _ if kw(p0, "CONFigure") && !query => match parse_func_arg(&parts[1..], arg) {
                     Some(f) => out = Out::Configure(f),
                     None => self.err = Some("Command error"),
@@ -932,6 +994,44 @@ impl Scpi {
         let mut b = [0u8; 20];
         let n = nr3(&mut b, v);
         self.put(&b[..n]);
+    }
+
+    /// CONFigure? reply for stock mode `mode` (Scpi::handle `cur`) and the
+    /// latest reading of it: "\"VOLT +6.000000E+00,+1.000000E-04\"". Exact
+    /// powers of ten (hosts take the resolution's exponent as the digits).
+    pub fn put_conf(&mut self, mode: u8, r: Option<&Reading>) {
+        let name = func_name(mode).as_bytes();
+        self.put(&name[..name.len() - 1]);
+        if matches!(mode, 11 | 12) {
+            self.put(b"\"");
+            return;
+        }
+        // Resolution exponent of the readout: -decimals + the unit prefix.
+        let (exp, ext) = match r {
+            Some(r) => {
+                let pfx = match r.main.unit.chars().next() {
+                    Some('m') => -3,
+                    Some('\u{b5}') | Some('u') => -6,
+                    Some('n') => -9,
+                    Some('k') => 3,
+                    Some('M') => 6,
+                    _ => 0,
+                };
+                let pfx = if r.main.unit.chars().count() > 1 { pfx } else { 0 };
+                (pfx - r.main.dec as i32, r.main.ext as i32)
+            }
+            None => (-4, 0),
+        };
+        fn pow10(s: &mut Scpi, m: u8, e: i32) {
+            s.put(&[b'+', m, b'.', b'0', b'0', b'0', b'0', b'0', b'0', b'E', if e < 0 { b'-' } else { b'+' }]);
+            let a = e.unsigned_abs();
+            s.put(&[b'0' + (a / 10 % 10) as u8, b'0' + (a % 10) as u8]);
+        }
+        self.put(b" ");
+        pow10(self, b'6', exp + 4);
+        self.put(b",");
+        pow10(self, b'1', exp - ext);
+        self.put(b"\"");
     }
 
     /// Format a reading as SCPI NR3 (+1.234567E+00), or the overload value.
