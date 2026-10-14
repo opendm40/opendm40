@@ -113,9 +113,12 @@ OP3 source / sink 600..900 uA; comparator BW 6 MHz; NMR 120 dB at 5 sps, 75 dB a
 
 ## 3. Conversion rate: resolving "~9.4/s vs OSR/SYSCLK"
 
-`fw-rs/src/dmm.rs` assumes the stock's ~9.4 readings/s come from OSR 32768 and
-`fw-rs/src/hy3131.rs::osr_period_us` models OSR / SYSCLK (OSR 2048 -> 417 us).
-Neither matches the datasheet:
+Before f306cf5, `fw-rs/src/dmm.rs` assumed the stock's ~9.4 readings/s come from
+OSR 32768 and `fw-rs/src/hy3131.rs::osr_period_us` modelled OSR / SYSCLK (OSR
+2048 -> 417 us). Neither matched the datasheet. Fixed in f306cf5:
+`osr_period_us` is gone, `hy3131::ad1_period_us` / `ad1_period_us_r22` use the
+formula below and dmm.rs's FR-05 table (and the data logger's nominal period)
+follow it:
 
     AD1 period = OSR1 * 30 / FSYSCLK * (AD1CHOP = 1x ? 2 : 1)
 
