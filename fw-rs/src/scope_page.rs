@@ -109,6 +109,9 @@ struct Cache {
     ps_t: u64,
 }
 
+// In SRAM (.dmabuf, NOLOAD) on the device (4.8 KB out of TCM); set up by
+// `sp_init`.
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut CACHE: Cache = Cache {
     seg: [su::EMPTY; 400],
     valid: false,
@@ -123,6 +126,26 @@ static mut CACHE: Cache = Cache {
 
 fn cache() -> &'static mut Cache {
     unsafe { &mut *core::ptr::addr_of_mut!(CACHE) }
+}
+
+/// Set the page buffers up in place (their statics are not loaded on the
+/// device): the frame cache here, the graph in scope_ui.
+pub(super) fn sp_init() {
+    let c = cache();
+    for i in 0..400 {
+        c.seg[i] = su::EMPTY;
+    }
+    for i in 0..399 {
+        c.ps_a[i] = su::EMPTY;
+        c.ps_b[i] = su::EMPTY;
+    }
+    c.valid = false;
+    c.pos = 0;
+    c.hpos = 200;
+    c.range = 6;
+    c.tb = 13;
+    c.ps_t = 0;
+    su::init();
 }
 
 /// AUTO-set state (stock mode 4).

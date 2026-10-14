@@ -881,6 +881,9 @@ pub struct Graph {
     pub px: u32,
 }
 
+// In SRAM (.dmabuf, NOLOAD) on the device: 6.5 KB that TCM .data / the
+// stack margin need more (pre-flash review 7dc32ac); `init` sets it up.
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut GRAPH: Graph = Graph {
     tr: [EMPTY; 399],
     ps: [EMPTY; 399],
@@ -893,6 +896,24 @@ static mut GRAPH: Graph = Graph {
     d_hole: None,
     px: 0,
 };
+
+/// Set the graph state up in place (its static is not loaded on the
+/// device). Call once before any other scope_ui function.
+pub fn init() {
+    let g = unsafe { &mut *core::ptr::addr_of_mut!(GRAPH) };
+    for i in 0..399 {
+        g.tr[i] = EMPTY;
+        g.ps[i] = EMPTY;
+        g.d_tr[i] = EMPTY;
+        g.d_ps[i] = EMPTY;
+    }
+    g.deco = Deco::NONE;
+    g.d_deco = Deco::NONE;
+    g.valid = false;
+    g.hole = None;
+    g.d_hole = None;
+    g.px = 0;
+}
 
 /// The graph state (single-threaded firmware).
 pub fn graph() -> &'static mut Graph {
