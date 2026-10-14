@@ -305,6 +305,78 @@ impl Checker {
         }
     }
 
+    /// fw-rs additions on the stock-replica page (timebase tabs, list
+    /// popup): the full layout rules for every item inside one of the `add`
+    /// rects: >= 3 px inside its container (the smallest shape holding it,
+    /// else the smallest of `regions`), glyphs of one text not touching,
+    /// and >= 3 px from every other item that is not its container or
+    /// content, among all items on the screen inside `against` (the replica
+    /// chrome around it included; the replica's own items among themselves
+    /// stay exempt).
+    fn check_add(&mut self, scene: &str, regions: &[(&str, Bx)], add: &[Bx], against: Bx) {
+        self.cases += 1;
+        let its: Vec<Item> = items().into_iter().filter(|i| against.contains(&i.b) || add.iter().any(|a| a.contains(&i.b))).collect();
+        let is_add: Vec<bool> = its.iter().map(|i| add.iter().any(|a| a.contains(&i.b))).collect();
+        let desc = |i: &Item| format!("{} #{} {:?}", kind_name(i.kind), i.id, i.b);
+        let mut parent: Vec<Option<usize>> = vec![None; its.len()];
+        for (a, ia) in its.iter().enumerate() {
+            let mut best: Option<(usize, i32)> = None;
+            for (b, ib) in its.iter().enumerate() {
+                if a != b && ib.kind == probe::SHAPE && ib.b.contains(&ia.b) && ib.b.area() > ia.b.area() && best.map_or(true, |(_, ar)| ib.b.area() < ar) {
+                    best = Some((b, ib.b.area()));
+                }
+            }
+            parent[a] = best.map(|x| x.0);
+        }
+        for (a, ia) in its.iter().enumerate() {
+            if !is_add[a] {
+                continue;
+            }
+            match parent[a] {
+                Some(p) => {
+                    let m = its[p].b.margin(&ia.b);
+                    if m < 3 {
+                        self.fail(scene, format!("{} only {} px inside {}", desc(ia), m, desc(&its[p])));
+                    }
+                }
+                None => match regions.iter().filter(|(_, r)| r.contains(&ia.b)).min_by_key(|(_, r)| r.area()) {
+                    Some((name, r)) if r.margin(&ia.b) < 3 => self.fail(scene, format!("{} only {} px inside region {} {:?}", desc(ia), r.margin(&ia.b), name, r)),
+                    Some(_) => {}
+                    None => self.fail(scene, format!("{} not inside any region", desc(ia))),
+                },
+            }
+            if ia.kind == probe::TEXT {
+                let mut g = ia.glyphs.clone();
+                g.sort_by_key(|(k, _)| *k);
+                for w in g.windows(2) {
+                    if w[0].1.gap(&w[1].1) < 1 {
+                        self.fail(scene, format!("{}: glyphs {} / {} touch", desc(ia), w[0].0, w[1].0));
+                    }
+                }
+            }
+        }
+        let anc = |mut x: usize, y: usize| {
+            while let Some(p) = parent[x] {
+                if p == y {
+                    return true;
+                }
+                x = p;
+            }
+            false
+        };
+        for a in 0..its.len() {
+            for b in a + 1..its.len() {
+                if !(is_add[a] || is_add[b]) || anc(a, b) || anc(b, a) {
+                    continue;
+                }
+                let g = its[a].b.gap(&its[b].b);
+                if g < 3 {
+                    self.fail(scene, format!("{} and {} {} by {} px", desc(&its[a]), desc(&its[b]), if g < 0 { "overlap" } else { "too close" }, g));
+                }
+            }
+        }
+    }
+
     /// The screen equals `want` (an incremental update left no stale pixel).
     fn same_as(&mut self, scene: &str, want: &[u16]) {
         self.cases += 1;
@@ -608,6 +680,147 @@ fn main() {
         t("cursor line zones: X1 line, Y2 line, none between", lp(124, 200) == Some((false, 2)) && lp(200, 230) == Some((true, 4)) && lp(200, 150).is_none());
     }
 
+    // 0a. fw-rs timebase tap step (docs/scope-scale-ux.md sec. 3): the
+    // preview tabs (every label, rest / pressed, both views, markers and
+    // cursors clamped at the bottom, worst measurement cells) and the list
+    // popup (every centre index) under the full layout rules against the
+    // replica around them; the flashed badge at every timebase; tabs shown
+    // / pressed / hidden over a trace as updates equal their fresh draw.
+    {
+        let base = &stock::scenes()[0];
+        let rb = |r: stockfont::Rect| Bx::new(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
+        let tabs_add = [rb(scope_ui::TAB_L), rb(scope_ui::TAB_R)];
+        let screen = Bx::new(0, 0, 480, 320);
+        let graph_region = |m: &scope_ui::Model| [("graph", Bx::new(14, m.top() as i32 + 1, 399, m.frame_h() as i32 - 2))];
+        let (_, res) = meas_worst();
+        let mut wb = [[0u8; 24]; 4];
+        let worst: Vec<String> = [10u8, 11, 0, 9].iter().enumerate().map(|(k, id)| scope_meas::format(&mut wb[k], *id, res.v[*id as usize]).to_string()).collect();
+        let wc: Vec<&'static str> = worst.into_iter().map(|s| &*Box::leak(s.into_boxed_str())).collect();
+        let mut n_tab = 0;
+        for combined in [false, true] {
+            for tb in 0..30u8 {
+                for (k, press) in [None, Some(true), Some(false)].iter().enumerate() {
+                    let mut m = base.m;
+                    m.combined = combined;
+                    m.tb = tb;
+                    m.tabs = scope_ui::tabs_of(scope_ui::TAP_CORNERS, tb, 29, false, *press);
+                    // Markers / cursors at the bottom edge next to the tabs.
+                    if k == 1 {
+                        m.pos = 300;
+                        m.trig_row = 300;
+                        m.ycur = Some([279, 278]);
+                        m.xcur = Some([12, 395]);
+                    }
+                    let mut sc = stock::Scene { name: "tabs", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+                    if k == 2 {
+                        sc.cells = wc.clone();
+                    }
+                    stock::draw(&sc);
+                    let name = format!("tabs/{}/tb{tb}/{k}", if combined { "dmmscope" } else { "scope" });
+                    ck.check_replica(&name);
+                    ck.check_add(&name, &graph_region(&m), &tabs_add, screen);
+                    n_tab += 1;
+                    if tb == 13 && !combined && k == 1 {
+                        save(&out, "s01-tabs-corners-pressed-left");
+                    }
+                    if tb == 13 && combined && k == 0 {
+                        save(&out, "s01-tabs-dmmscope");
+                    }
+                }
+            }
+        }
+        // Limits: no slower tab at the top index, no faster one at TB_MIN.
+        ck.cases += 1;
+        let (lo, top) = (scope::TB_MIN as u8, scope_ui::tb_top(false, false));
+        if scope_ui::tabs_of(scope_ui::TAP_CORNERS, top, top, false, None) != scope_ui::TAB_SHOW_R || scope_ui::tabs_of(scope_ui::TAP_CORNERS, lo, top, false, None) != scope_ui::TAB_SHOW_L {
+            ck.fail("tabs/limits", "a tab shown at its limit".into());
+        }
+        // Halves: hidden at rest, shown while armed / after a step; Off: never.
+        ck.cases += 1;
+        let h = |tr: bool, p: Option<bool>| scope_ui::tabs_of(scope_ui::TAP_HALVES, 13, 24, tr, p);
+        if h(false, None) != 0 || h(true, None) != 3 || h(false, Some(false)) != 3 | scope_ui::TAB_PRESS_R || scope_ui::tabs_of(scope_ui::TAP_OFF, 13, 24, true, Some(true)) != 0 {
+            ck.fail("tabs/modes", "Halves / Off visibility".into());
+        }
+        println!("timebase tabs: {n_tab} scenes");
+        // Updates: tabs appear / press / move label / vanish over the trace;
+        // each step equals its fresh draw (the hole rows come back).
+        let states: [(u8, u8); 6] = [(13, 0), (13, 3), (13, 3 | scope_ui::TAB_PRESS_L), (14, 3), (14, 0), (3, scope_ui::TAB_SHOW_L)];
+        for combined in [false, true] {
+            for (i, a) in states.iter().enumerate() {
+                for (j, b) in states.iter().enumerate() {
+                    if i == j {
+                        continue;
+                    }
+                    let mk = |s: &(u8, u8)| {
+                        let mut m = base.m;
+                        m.combined = combined;
+                        m.tb = s.0;
+                        m.tabs = s.1;
+                        stock::Scene { name: "tabs", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() }
+                    };
+                    let (sa, sb) = (mk(a), mk(b));
+                    stock::draw(&sb);
+                    let want = emu().fb.clone();
+                    stock::draw(&sa);
+                    stock::load(&sb);
+                    scope_ui::update(&sb.m);
+                    scope_ui::cells(&sb.m, &sb.cells);
+                    ck.same_as(&format!("tabs/update/{}/{i}->{j}", combined as u8), &want);
+                }
+            }
+        }
+        // The trace dragged under shown tabs: no stale pixels, no ink on them.
+        for d in [5, -9, 40] {
+            let mut m = base.m;
+            m.tabs = 3;
+            let s0 = stock::Scene { name: "tabs", m, popup: scope_ui::Popup::None, trace: base.trace.as_ref().map(|t| t.shifted(110)), persist: None, cols: 399, cells: base.cells.clone() };
+            let s1 = stock::Scene { name: "tabs", m, popup: scope_ui::Popup::None, trace: base.trace.as_ref().map(|t| t.shifted(110 + d)), persist: None, cols: 399, cells: base.cells.clone() };
+            stock::draw(&s1);
+            let want = emu().fb.clone();
+            stock::draw(&s0);
+            stock::load(&s1);
+            scope_ui::update(&m);
+            ck.same_as(&format!("tabs/drag{d}"), &want);
+        }
+        // Flashed timebase badge, every label.
+        for tb in 0..30u8 {
+            let mut m = scope_ui::Model::DEFAULT;
+            m.tb = tb;
+            m.tb_flash = true;
+            host::reset(0);
+            scope_ui::invalidate();
+            scope_ui::graph().clear();
+            scope_ui::update(&m);
+            ck.check_replica(&format!("tb-flash/{tb}"));
+            if tb == 13 {
+                save(&out, "s01-tb-flash");
+            }
+        }
+        // Timebase list popup, every centre index, both views: its items
+        // under the full rules (the box as their region), the box against
+        // the top bar.
+        let bx = scope_ui::TB_BOX;
+        let box_b = Bx::new(bx.x as i32, bx.y as i32, bx.w as i32, bx.h as i32);
+        for combined in [false, true] {
+            for cur in scope::TB_MIN as u8..=scope::TB_MAX as u8 {
+                let mut m = base.m;
+                m.combined = combined;
+                m.tb = cur;
+                let sc = stock::Scene { name: "tblist", m, popup: scope_ui::Popup::Tb(cur), trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+                stock::draw(&sc);
+                let name = format!("tb-list/{}/{cur}", combined as u8);
+                ck.check_area(&name, &[("screen", screen)], true, Some(box_b));
+                ck.check_add(&name, &[("screen", screen)], &[box_b], Bx::new(0, 0, 480, 20));
+                if cur == 13 && !combined {
+                    save(&out, "s01-tb-list");
+                }
+                if cur == 27 && !combined {
+                    save(&out, "s01-tb-list-roll");
+                }
+            }
+        }
+    }
+
     // 0b. Combined view in the stock language (scope_ui meter strip, port
     // plan S7): every strip case x hold x verdict x REL x HV x REC x GEN,
     // the full layout rules on the strip's items, and A -> B updates equal
@@ -887,9 +1100,9 @@ fn main() {
     let page_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
     for (page, vals) in [
         (0u8, vec!["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto (per view)", "Hold 5000 ms", ""]),
-        (1, vec!["SLOW (n/a here)", "HIGH", "Top bar", "OFF (stock)", "", ""]),
-        (1, vec!["FAST  37/s", "LOW", "Off (stock)", "ON", "", ""]),
-        (1, vec!["MED  --/s", "OFF", "Off (stock)", "ON", "", ""]),
+        (1, vec!["SLOW (n/a here)", "HIGH", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]),
+        (1, vec!["FAST  37/s", "LOW", "Off (stock)", "ON", "Corners", "", ""]),
+        (1, vec!["MED  --/s", "OFF", "Off (stock)", "ON", "Off", "", ""]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -1116,7 +1329,7 @@ fn main() {
         ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]);
         save(&out, "m01-settings");
         host::reset(0);
-        ui::settings(1, &["SLOW (n/a here)", "HIGH", "Top bar", "OFF (stock)", "", ""]);
+        ui::settings(1, &["SLOW (n/a here)", "HIGH", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));

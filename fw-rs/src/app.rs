@@ -381,6 +381,9 @@ impl App {
         a.back_view = View::Dmm;
         let v = a.view;
         a.show(v, clk);
+        if a.sp_on() {
+            a.sp_enter(clk.now_ms());
+        }
         a
     }
 
@@ -395,6 +398,9 @@ impl App {
         if v != self.view {
             self.band_until = 0;
             self.sp_leave(clk.now_ms());
+            if matches!(v, View::Scope | View::DmmScope) {
+                self.sp_enter(clk.now_ms());
+            }
         }
         if is_page(v) && !is_page(self.view) {
             self.back_view = self.view;
@@ -524,6 +530,7 @@ impl App {
                     crate::meter::SMOOTH_NAMES[self.meter.smoothing() as usize],
                     if self.sp.swipes { "Top bar" } else { "Off (stock)" },
                     if self.sp.press_fx { "ON" } else { "OFF (stock)" },
+                    crate::scope_ui::TAP_NAMES[self.sp.tap_mode.min(2) as usize],
                     "", // Device row: opens the About page, no inline value
                     "", // Help row: opens the help pages (UF-29)
                 ];
@@ -1173,9 +1180,9 @@ impl App {
             p[21 + 2 * i] = l.hi.unwrap_or(0.0).to_bits();
         }
         p[6] |= (sc.hpos as u32 + 1) << 18;
-        // Scope page: colour, brightness (p[1] bits 17..27), drag mode, swipes,
-        // persistence, pressed feedback, grid intensity (p[11] bits 1..6,
-        // 12..15); 0 = default everywhere.
+        // Scope page: colour, brightness, tap-step mode (p[1] bits 17..29),
+        // drag mode, swipes, persistence, pressed feedback, grid intensity
+        // (p[11] bits 1..6, 12..15); 0 = default everywhere.
         let (mut p1, mut p11) = (p[1], p[11]);
         self.sp_persist(&mut p1, &mut p11);
         p[1] = p1;
@@ -2083,10 +2090,19 @@ impl App {
                     Some(2) => self.sp.swipes = !self.sp.swipes,
                     Some(3) => self.sp.press_fx = !self.sp.press_fx,
                     Some(4) => {
+                        // Scope tap step: Corners -> Halves (stock) -> Off.
+                        use crate::scope_ui::{TAP_CORNERS, TAP_HALVES, TAP_OFF};
+                        self.sp.tap_mode = match self.sp.tap_mode {
+                            TAP_CORNERS => TAP_HALVES,
+                            TAP_HALVES => TAP_OFF,
+                            _ => TAP_CORNERS,
+                        };
+                    }
+                    Some(5) => {
                         self.show(View::Device, clk);
                         return;
                     }
-                    Some(5) => {
+                    Some(6) => {
                         self.help_page = 0;
                         self.show(View::Help, clk);
                         return;

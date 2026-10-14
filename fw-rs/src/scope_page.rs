@@ -14,8 +14,18 @@
 //!   by dy rows, else the selected time item (trigger position / stored
 //!   record pan, X cursor) by dx px; a 4 px tap tolerance before the first
 //!   move applies (the stock nudges the item on a wobbly tap);
-//! * a tap off the zones steps the timebase (left half slower, right half
-//!   faster); the right panel: V/div + / -, CH1 popup, TRIG -> Trigger tab;
+//! * timebase tap step (Settings "Scope tap step", docs/scope-scale-ux.md
+//!   sec. 3): Halves (stock: a tap off the zones, left half slower, right
+//!   half faster), Corners (default: only the two bottom corner zones step,
+//!   a still hold there repeats; elsewhere a tap does nothing) or Off; the
+//!   marker zones win over both. Value-preview tabs in the bottom corners
+//!   (Corners: always; Halves: while a press is armed, 2 s after a step and
+//!   on the first 3 page entries after power-on); the timebase badge flashes
+//!   on every timebase change;
+//! * top bar (fw-rs, the stock one is not tappable): run badge = RUN/STOP,
+//!   timebase badge = timebase list popup, V/div badge = CH1 popup, trigger
+//!   badge = Trigger tab; the right panel: V/div + / -, CH1 popup, TRIG ->
+//!   Trigger tab;
 //! * no page swipe (MENU leaves the page) unless Settings "Scope swipes" is
 //!   on (swipes that start outside the drag area: top bar, panel);
 //! * alternatives (Settings "Scope drag"): Axis lock (the first 15 px decide
@@ -46,6 +56,10 @@ const TAP_TOL: i32 = 4;
 const LOCK_SLOP: i32 = 15;
 /// Pressed-button feedback (one stock pressed colour frame), ms.
 const PRESS_MS: u64 = 120;
+/// Timebase badge flash / stepped tab pressed style after a step, ms.
+const FLASH_MS: u64 = 150;
+/// Halves: the tabs show on this many page entries after power-on.
+const INTRO_ENTRIES: u8 = 3;
 /// Drag modes (Settings "Scope drag").
 pub const DRAG_STOCK: u8 = 0;
 pub const DRAG_AXIS: u8 = 1;
@@ -84,6 +98,25 @@ pub(super) struct Touch {
     /// What moved (DBG:GEST? code) and its travel.
     code: u8,
     travel: i32,
+    /// Tap step of the press (scope_ui::Arm: the side armed when no marker
+    /// was hit, the hold repeats done).
+    arm: su::Arm,
+}
+
+/// A touch on the timebase list (drag scroll / row tap).
+#[derive(Clone, Copy)]
+pub(super) struct ListTouch {
+    p0: Point,
+    y: i16,
+    far: i32,
+    acc: i32,
+}
+
+impl Touch {
+    /// Still a tap: within the tap tolerance, not dragging.
+    fn still(&self) -> bool {
+        !self.moving && self.far <= TAP_TOL
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -198,6 +231,22 @@ pub(super) struct Sp {
     /// Pinch bubble shown / to be (re)drawn.
     bubble: bool,
     bubble_dirty: bool,
+    /// Settings "Scope tap step" (scope_ui::TAP_*).
+    pub tap_mode: u8,
+    /// Halves: tabs shown until (after a step, on an intro page entry).
+    tabs_until: u64,
+    /// The side just stepped (pressed style) until `step_until`.
+    step_until: u64,
+    step_side: bool,
+    /// Timebase badge flash: the timebase last seen, flash end.
+    flash_tb: u8,
+    flash_until: u64,
+    /// Halves intro: page entries counted since power-on.
+    entries: u8,
+    /// Timebase list touch; timebase badge drawn while the list covers the
+    /// page (timebase, flash).
+    list: Option<ListTouch>,
+    tb_drawn: (u8, bool),
 }
 
 impl Sp {
@@ -236,6 +285,15 @@ impl Sp {
             sampling: false,
             bubble: false,
             bubble_dirty: false,
+            tap_mode: su::TAP_DEFAULT,
+            tabs_until: 0,
+            step_until: 0,
+            step_side: false,
+            flash_tb: 0,
+            flash_until: 0,
+            entries: 0,
+            list: None,
+            tb_drawn: (255, false),
         }
     }
 }
@@ -302,6 +360,11 @@ impl App {
             self.scope.status.min(3)
         };
         let record = self.scope.record_frac();
+        // Tap-step tabs: the side a still press armed (not once it drags or
+        // a pinch took over), else the side just stepped.
+        let armed = sp.touch.filter(|_| sp.pinch.is_none()).and_then(|t| t.arm.armed(t.still()));
+        let pressed = armed.or(if now < sp.step_until { Some(sp.step_side) } else { None });
+        let tabs = su::tabs_of(sp.tap_mode, s.tb as u8, self.tb_top(), now < sp.tabs_until, pressed);
         Model {
             status,
             tb: s.tb as u8,
@@ -332,6 +395,24 @@ impl App {
             pressed: if now < sp.pressed_until { sp.pressed } else { 0 },
             combined: self.view == View::DmmScope,
             math_mode: 0,
+            tabs,
+            tb_flash: now < sp.flash_until,
+        }
+    }
+
+    /// Highest timebase index the scope takes now (scope.rs `apply`).
+    fn tb_top(&self) -> u8 {
+        su::tb_top(self.scope.roll, self.scope.s.mode == scope::TrigMode::Single)
+    }
+
+    /// A scope page (Scope / DMM+Scope) is entered: no flash for the
+    /// timebase it opens with; Halves: the intro tabs on the first entries.
+    pub(super) fn sp_enter(&mut self, now: u64) {
+        self.sp.flash_tb = self.scope.s.tb as u8;
+        self.sp.flash_until = 0;
+        if self.sp.tap_mode == su::TAP_HALVES && self.sp.entries < INTRO_ENTRIES {
+            self.sp.entries += 1;
+            self.sp.tabs_until = now + GUIDE_MS;
         }
     }
 
@@ -347,6 +428,7 @@ impl App {
         self.sp.popup = su::Popup::None;
         self.sp.pressed_cell = None;
         self.sp.slider = None;
+        self.sp.list = None;
         if held {
             let s = self.scope.s;
             self.scope.apply(s, now);
@@ -593,7 +675,32 @@ impl App {
             self.redraw = true;
             return;
         }
+        // Every timebase change (tap, list, pinch, AUTO, SCPI) flashes the
+        // badge.
+        let tb = self.scope.s.tb as u8;
+        if tb != self.sp.flash_tb {
+            self.sp.flash_tb = tb;
+            self.sp.flash_until = now + FLASH_MS;
+        }
+        // Corners: a still hold in a zone repeats the step.
+        if self.sp.popup == su::Popup::None && self.sp.pinch.is_none() {
+            if let Some(mut t) = self.sp.touch {
+                if let Some(slower) = t.arm.repeat(self.sp.tap_mode, t.still(), now) {
+                    self.sp.touch = Some(t);
+                    self.sp_tb_step(slower, now);
+                }
+            }
+        }
         if self.sp_covered() {
+            // The timebase list leaves the top bar visible: its badge
+            // follows the picks.
+            if matches!(self.sp.popup, su::Popup::Tb(_)) && !self.redraw {
+                let m = self.sp_model(now);
+                if self.sp.tb_drawn != (m.tb, m.tb_flash) {
+                    self.sp.tb_drawn = (m.tb, m.tb_flash);
+                    su::tb_badge(&m);
+                }
+            }
             return;
         }
         self.sp_update(now);
@@ -601,34 +708,24 @@ impl App {
 
     // ------------------------------------------------------------ zones
 
-    /// Stock selection on press (zone search, scope_ui::pick_zone): true
-    /// when a marker zone was hit.
-    fn sp_select(&mut self, p: Point) -> bool {
+    /// Stock selection on press (zone search, then the cursor lines, then
+    /// the tap-step zone: scope_ui::graph_press). Returns (a marker zone was
+    /// hit, the tap-step side armed).
+    fn sp_select(&mut self, p: Point) -> (bool, Option<bool>) {
         let m = self.sp_model(self.now);
-        let mut z = [su::Zone::NONE; 7];
-        let n = su::zones(&m, &mut z);
-        let mut pick = su::pick_zone(&z[..n], self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16);
-        if pick.is_none() {
-            // Off the marker zones: the cursor lines themselves (fw-rs).
-            let mut lz = [su::Zone::NONE; 4];
-            let k = su::line_zones(&m, &mut lz);
-            if let Some(i) = su::pick_zone(&lz[..k], self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16) {
-                z[0] = lz[i];
-                pick = Some(0);
-            }
-        }
-        match pick {
-            Some(k) => {
-                if z[k].level {
-                    self.sp.sel_v = z[k].id;
+        match su::graph_press(&m, self.sp.tap_mode, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16) {
+            su::Press::Marker(level, id) => {
+                if level {
+                    self.sp.sel_v = id;
                     self.sp.last_h = false;
                 } else {
-                    self.sp.sel_h = z[k].id;
+                    self.sp.sel_h = id;
                     self.sp.last_h = true;
                 }
-                true
+                (true, None)
             }
-            None => false,
+            su::Press::Step(slower) => (false, Some(slower)),
+            su::Press::None => (false, None),
         }
     }
 
@@ -695,8 +792,11 @@ impl App {
             }
         }
         match g {
+            // A top-bar badge (before the graph area: INNER starts at y 15):
+            // not captured, its release is the Tap below.
+            Gesture::Down(p) if su::top_badge(p.x, p.y).is_some() => Some(false),
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
-                let hit = self.sp_select(p);
+                let (hit, side) = self.sp_select(p);
                 let s = self.scope.s;
                 self.sp.touch = Some(Touch {
                     p0: p,
@@ -715,6 +815,7 @@ impl App {
                     acc: 0,
                     code: 0,
                     travel: 0,
+                    arm: su::Arm { side, t0: now, rep: 0 },
                 });
                 self.sp.guide_until = now + GUIDE_MS;
                 gesture::raw_next(true);
@@ -793,14 +894,27 @@ impl App {
                     return Some(false);
                 }
                 // fw-rs additions (the stock top bar is not tappable): the
-                // status badge = RUN/STOP, the trigger badge = Trigger tab.
-                let (x, y) = (p.x as i16, p.y as i16);
-                if y < 20 && (13..75).contains(&x) {
-                    self.beep(now, 30);
-                    self.sp_key(clk, 1);
-                } else if y < 20 && (352..414).contains(&x) {
-                    self.beep(now, 30);
-                    self.sp_popup_open(su::Popup::Mf(2));
+                // status badge = RUN/STOP, the timebase badge = timebase
+                // list, the V/div badge = CH1 popup (as B2), the trigger
+                // badge = Trigger tab.
+                match su::top_badge(p.x, p.y) {
+                    Some(0) => {
+                        self.beep(now, 30);
+                        self.sp_key(clk, 1);
+                    }
+                    Some(1) => {
+                        self.beep(now, 30);
+                        self.sp_popup_open(su::Popup::Tb(self.scope.s.tb as u8));
+                    }
+                    Some(2) => {
+                        self.beep(now, 30);
+                        self.sp_popup_open(su::Popup::Ch1(0));
+                    }
+                    Some(_) => {
+                        self.beep(now, 30);
+                        self.sp_popup_open(su::Popup::Mf(2));
+                    }
+                    None => {}
                 }
                 Some(false)
             }
@@ -992,9 +1106,10 @@ impl App {
             }
             return;
         }
-        if !t.moving && !t.hit && t.far <= TAP_TOL {
-            self.beep(now, 30);
-            self.sp_tb_step(t.p0.x <= 207, now);
+        // A tap on an armed tap-step zone steps once (a hold that already
+        // repeated does not step again on release).
+        if let Some(slower) = t.arm.release(t.still()) {
+            self.sp_tb_step(slower, now);
         }
     }
 
@@ -1027,11 +1142,25 @@ impl App {
         self.scope_set(st, now);
     }
 
-    /// Tap-to-step timebase (stock: left half slower, right half faster).
-    fn sp_tb_step(&mut self, slower: bool, now: u64) {
+    /// Tap-step of the timebase (true = slower): applied with a 30 ms beep
+    /// and the stepped tab's pressed style; Halves: the tabs stay 2 s (the
+    /// guide-line time). Nothing at the limit (its tab is hidden).
+    fn sp_tb_step(&mut self, slower: bool, now: u64) -> bool {
         let mut st = self.scope.s;
-        st.tb = if slower { (st.tb + 1).min(scope::TB_MAX) } else { st.tb.saturating_sub(1).max(scope::TB_MIN) };
+        let top = self.tb_top() as usize;
+        let tb = if slower { (st.tb + 1).min(top) } else { st.tb.saturating_sub(1).max(scope::TB_MIN) };
+        if tb == st.tb {
+            return false;
+        }
+        st.tb = tb;
+        self.beep(now, 30);
         self.scope_set(st, now);
+        self.sp.step_until = now + FLASH_MS;
+        self.sp.step_side = slower;
+        if self.sp.tap_mode == su::TAP_HALVES {
+            self.sp.tabs_until = now + GUIDE_MS;
+        }
+        true
     }
 
     /// End a held drag / pinch whose end may never arrive (a popup, AUTO,
@@ -1195,6 +1324,8 @@ impl App {
     fn sp_popup_open(&mut self, p: su::Popup) {
         self.sp_end_hold(self.now);
         self.sp.popup = p;
+        self.sp.list = None;
+        self.sp.tb_drawn = (255, false);
         if !self.redraw {
             // The CH1 / math pill label shows the open popup (0x7bef).
             let m = self.sp_model(self.now);
@@ -1208,6 +1339,7 @@ impl App {
         self.sp.popup = su::Popup::None;
         self.sp.pressed_cell = None;
         self.sp.slider = None;
+        self.sp.list = None;
         self.redraw = true;
     }
 
@@ -1228,6 +1360,12 @@ impl App {
             Gesture::KeyDown(_) => self.beep(now, 50), // RUN / AUTO swallowed
             Gesture::Down(p) => {
                 let (x, y) = (p.x as i16, p.y as i16);
+                if matches!(self.sp.popup, su::Popup::Tb(_)) && su::TB_SPIN.has(x, y) {
+                    // The timebase list: drag scrolls, a still tap picks.
+                    self.sp.list = Some(ListTouch { p0: p, y: p.y as i16, far: 0, acc: 0 });
+                    gesture::raw_next(true);
+                    return Some(true);
+                }
                 if let su::Popup::Mf(t) = self.sp.popup {
                     match su::mf_hit(t, &v, x, y) {
                         su::MfHit::Cell(i) => {
@@ -1248,7 +1386,21 @@ impl App {
                 self.sp_slider(p.x as i16);
                 return Some(true);
             }
-            Gesture::Up(_) => self.sp.slider = None,
+            Gesture::Move(_, p) | Gesture::Drag(_, p, _) if self.sp.list.is_some() => {
+                self.sp_list_move(p);
+                return Some(true);
+            }
+            Gesture::Up(_) => {
+                self.sp.slider = None;
+                self.sp_list_release(now);
+            }
+            Gesture::Cancel if self.sp.list.is_some() => {
+                // A second finger: the list goes back to the timebase in use.
+                self.sp.list = None;
+                let tb = self.scope.s.tb as u8;
+                self.sp.popup = su::Popup::Tb(tb);
+                su::draw_tb(tb);
+            }
             Gesture::Tap(p) => {
                 self.beep(now, 30);
                 let (x, y) = (p.x as i16, p.y as i16);
@@ -1257,6 +1409,11 @@ impl App {
                     su::Popup::Mf(t) => self.sp_mf_tap(clk, t, su::mf_hit(t, &v, x, y), now),
                     su::Popup::Ch1(t) => self.sp_side_tap(false, t, su::side_hit(false, t, &v, x, y), now),
                     su::Popup::Math(t) => self.sp_side_tap(true, t, su::side_hit(true, t, &v, x, y), now),
+                    su::Popup::Tb(i) => match su::tb_hit(i, x, y) {
+                        su::TbHit::Close => self.sp_popup_close(),
+                        su::TbHit::Row(r) => self.sp_tb_pick(r, now),
+                        su::TbHit::Inside => {}
+                    },
                     su::Popup::None => {}
                 }
                 if had_press && self.sp.popup != su::Popup::None && !self.redraw {
@@ -1272,6 +1429,60 @@ impl App {
             }
         }
         Some(false)
+    }
+
+    /// One move of a timebase-list touch: whole rows per TB_ROW_PX of
+    /// vertical travel once it is a drag; nothing is applied until release.
+    fn sp_list_move(&mut self, p: Point) {
+        let (Some(mut l), su::Popup::Tb(cur)) = (self.sp.list, self.sp.popup) else { return };
+        let dy = p.y as i32 - l.y as i32;
+        l.y = p.y as i16;
+        l.far = l.far.max((p.x as i32 - l.p0.x as i32).abs().max((p.y as i32 - l.p0.y as i32).abs()));
+        l.acc += dy;
+        if l.far > TAP_TOL {
+            let (i, rem) = su::tb_scroll(cur, l.acc);
+            l.acc = rem;
+            if i != cur {
+                self.sp.popup = su::Popup::Tb(i);
+                su::draw_tb(i);
+            }
+        }
+        self.sp.list = Some(l);
+    }
+
+    /// Release of a timebase-list touch: a still tap picks its row, a drag
+    /// applies the row it settled on (one scope_set per pick).
+    fn sp_list_release(&mut self, now: u64) {
+        let (Some(l), su::Popup::Tb(cur)) = (self.sp.list.take(), self.sp.popup) else { return };
+        let pick = if l.far <= TAP_TOL {
+            match su::tb_hit(cur, l.p0.x as i16, l.p0.y as i16) {
+                su::TbHit::Row(r) => r,
+                _ => return,
+            }
+        } else {
+            cur
+        };
+        self.beep(now, 30);
+        self.sp_tb_pick(pick, now);
+    }
+
+    /// Timebase picked in the list. A roll-only entry (beyond 1 s/div,
+    /// orange) turns Roll on; the list then shows what the scope took
+    /// (Single stays at the YT maximum).
+    fn sp_tb_pick(&mut self, i: u8, now: u64) {
+        let mut st = self.scope.s;
+        let roll_on = i as usize > scope::TB_YT_MAX && !self.scope.roll;
+        if roll_on {
+            self.roll = true;
+            self.scope.roll = true;
+        }
+        if i as usize != st.tb || roll_on {
+            st.tb = i as usize;
+            self.scope_set(st, now);
+        }
+        let tb = self.scope.s.tb as u8;
+        self.sp.popup = su::Popup::Tb(tb);
+        su::draw_tb(tb);
     }
 
     fn sp_slider(&mut self, x: i16) {
@@ -1604,10 +1815,13 @@ impl App {
 
     // ------------------------------------------------------------ persist
 
-    /// Page settings -> persist words (p[1] bits 17..27, p[11] bits 1..7, 12..15).
+    /// Page settings -> persist words (p[1] bits 17..29, p[11] bits 1..6,
+    /// 12..15). p[1] bits 28..29: tap-step mode XOR TAP_DEFAULT (older
+    /// records: 0 = the default).
     pub(super) fn sp_persist(&self, p1: &mut u32, p11: &mut u32) {
         let s = &self.sp;
         *p1 |= ((s.colour as u32 ^ 2) & 0xF) << 17 | ((100 - s.bright.min(100)) as u32 & 0x7F) << 21;
+        *p1 |= su::tap_code(s.tap_mode) << 28;
         *p11 |= (s.drag_mode as u32 & 3) << 1 | (s.swipes as u32) << 3 | (s.persist as u32 & 3) << 4 | (!s.press_fx as u32) << 6;
         *p11 |= ((s.grid.min(100) as u32 / 10) ^ 5) << 12;
     }
@@ -1621,6 +1835,7 @@ impl App {
         s.persist = (p11 >> 4 & 3) as u8;
         s.press_fx = p11 >> 6 & 1 == 0;
         s.grid = (((p11 >> 12 & 0xF) ^ 5).min(10) * 10) as u8;
+        s.tap_mode = su::tap_decode(p1 >> 28);
     }
 }
 
