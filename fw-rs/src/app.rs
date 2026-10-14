@@ -119,6 +119,12 @@ pub struct App {
     kp_buf: [u8; 8],
     kp_n: usize,
     kp_mult: u8,
+    /// Generator keypad: the text is the prefilled current value, selected
+    /// (the first digit / '.' / backspace replaces it all).
+    kp_sel: bool,
+    /// The text was edited since the keypad opened (OK on an untouched
+    /// prefill keeps the setting as it is, no re-rounding).
+    kp_edit: bool,
     cur: ui::Cursors,
     /// Analog rail policy: false = Auto (default, stock-like: the rails the
     /// shown view needs, see update_rails), true = both rails always on.
@@ -325,6 +331,8 @@ impl App {
             kp_buf: [0; 8],
             kp_n: 0,
             kp_mult: b'H',
+            kp_sel: false,
+            kp_edit: false,
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             rails_both: false,
             host_dmm: false,
@@ -484,7 +492,7 @@ impl App {
                 let (title, unit) = self.kp_labels();
                 let n = self.kp_n;
                 let t = core::str::from_utf8(&self.kp_buf[..n]).unwrap_or("");
-                ui::keypad(self.kp_kind(), title, t, unit);
+                ui::keypad(self.kp_kind(), title, t, unit, self.kp_sel);
             }
             View::Limits => self.limits_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
@@ -1078,10 +1086,39 @@ impl App {
         self.scope_invalidate();
     }
 
+    /// Open the keypad for `target`. The generator targets open with the
+    /// current value (and unit) prefilled and selected (ui-review #10); the
+    /// DMM limits (3 / 4) open empty.
     fn kp_open(&mut self, target: u8, clk: &mut Clock) {
         self.kp_target = target;
-        self.kp_n = 0;
         self.kp_mult = b'K';
+        let s = &self.gen.s;
+        let mut t = [0u8; 16];
+        let pre: &str = match target {
+            0 => {
+                // Integer in the largest unit that keeps it exact (the
+                // frequency pad has no '.').
+                let f = s.freq_hz;
+                let (m, d) = if f >= 1_000_000 && f % 1_000_000 == 0 {
+                    (b'M', 1_000_000)
+                } else if f >= 1_000 && f % 1_000 == 0 {
+                    (b'K', 1_000)
+                } else {
+                    (b'H', 1)
+                };
+                self.kp_mult = m;
+                crate::dmm::format(&mut t, (f / d) as f32, 0)
+            }
+            1 => crate::dmm::format(&mut t, s.amp_v, 2),
+            2 => crate::dmm::format(&mut t, s.duty as f32 / 100.0, 1),
+            5 => s.offset_v.map_or("", |o| crate::dmm::format(&mut t, o, 2)),
+            _ => "",
+        };
+        let n = pre.len().min(self.kp_buf.len() - 1);
+        self.kp_buf[..n].copy_from_slice(&pre.as_bytes()[..n]);
+        self.kp_n = n;
+        self.kp_sel = n > 0;
+        self.kp_edit = false;
         self.show(View::Keypad, clk);
     }
 
@@ -1885,9 +1922,27 @@ impl App {
             View::Keypad => {
                 let freq = self.kp_target == 0;
                 let back = if matches!(self.kp_target, 3 | 4) { View::Limits } else { View::Gen };
-                match ui::keypad_hit(self.kp_kind(), x, y) {
+                let key = ui::keypad_hit(self.kp_kind(), x, y);
+                // Select-all prefill: the first digit / '.' / backspace
+                // replaces the whole value; H/K/M keep it selected (a unit
+                // change); the sign toggle edits it.
+                match key {
+                    Some(b'=') | None => {}
+                    Some(c) => {
+                        if self.kp_sel && !matches!(c, b'H' | b'K' | b'M' | b'-') {
+                            self.kp_n = 0;
+                        }
+                        if c != b'H' && c != b'K' && c != b'M' {
+                            self.kp_sel = false;
+                        }
+                        self.kp_edit = true;
+                    }
+                }
+                match key {
                     Some(b'=') => {
-                        self.kp_apply();
+                        if self.kp_edit {
+                            self.kp_apply();
+                        }
                         self.show(back, clk);
                     }
                     Some(b'<') => self.kp_n = self.kp_n.saturating_sub(1),
@@ -1928,7 +1983,7 @@ impl App {
                 let (_, unit) = self.kp_labels();
                 let n = self.kp_n;
                 let t = core::str::from_utf8(&self.kp_buf[..n]).unwrap_or("");
-                ui::keypad_input(freq, t, unit);
+                ui::keypad_input(freq, t, unit, self.kp_sel);
             }
             View::Range if self.dmm.hy_mode() == 15 => {
                 let k = self.dmm.t_sensor();

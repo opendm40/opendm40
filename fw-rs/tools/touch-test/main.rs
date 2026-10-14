@@ -648,7 +648,7 @@ fn hit_tests(ck: &mut Ck) {
     // Keypads.
     for kind in [ui::KP_FREQ, ui::KP_NUM, ui::KP_SIGNED] {
         host::reset(0);
-        ui::keypad(kind, "Vpp", "1.5", "V");
+        ui::keypad(kind, "Vpp", "1.5", "V", true);
         page(ck, &format!("keypad {kind}"), &|x, y| ui::keypad_hit(kind, x, y).map(|c| c as u32), &|b| b.x0 >= 224, &[b'0' as u32, b'9' as u32, b'=' as u32, b'<' as u32]);
     }
     // DMM page: function row (ui::button_hit) and the app.rs View::Dmm tap

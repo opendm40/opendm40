@@ -1284,8 +1284,14 @@ pub fn gen_box_hit(x: u16, y: u16) -> Option<usize> {
 /// Value / unit row of generator box `k` (the frequency keypad types into
 /// box 0's). `letters`: the value in LETTERS (digits), else TEXT22 ("auto").
 fn gen_box_value(k: usize, v: &str, letters: bool, unit: &str, fg: Color) {
+    gen_box_value_bg(k, v, letters, unit, fg, G_BOX);
+}
+
+/// `gen_box_value` with the value field's background (the keypad's
+/// selected prefill: K_SEL).
+fn gen_box_value_bg(k: usize, v: &str, letters: bool, unit: &str, fg: Color, bg: Color) {
     let y = GEN_BOX_Y[k];
-    sf::label(if letters { sf::LETTERS } else { sf::TEXT22 }, rect(262, y + 33, 150, 30), v, fg, G_BOX, 4, 0);
+    sf::label(if letters { sf::LETTERS } else { sf::TEXT22 }, rect(262, y + 33, 150, 30), v, fg, bg, 4, 0);
     sf::label(sf::TEXT22, rect(421, y + 36, 50, 26), unit, fg, G_BOX, 1, 0);
 }
 
@@ -1450,7 +1456,9 @@ pub fn keypad_keys(kind: u8) -> &'static [Key; 15] {
     }
 }
 
-pub fn keypad(kind: u8, title: &str, input: &str, unit: &str) {
+/// `sel`: `input` is the current value, prefilled and selected (the next
+/// digit replaces it): drawn on the stock pressed-key colour.
+pub fn keypad(kind: u8, title: &str, input: &str, unit: &str, sel: bool) {
     let freq = kind == KP_FREQ;
     if freq {
         lcd::fill_rect(224, 142, 256, 178, K_PANEL);
@@ -1458,7 +1466,7 @@ pub fn keypad(kind: u8, title: &str, input: &str, unit: &str) {
         lcd::fill_rect(224, 100, 256, 220, K_PANEL);
         sf::label(sf::TEXT22, rect(228, 108, 100, 26), title, 0x0000, K_PANEL, 1, 0);
     }
-    keypad_input(freq, input, unit);
+    keypad_input(freq, input, unit, sel);
     for &(r, l, c) in keypad_keys(kind) {
         if c == 0 {
             continue;
@@ -1468,14 +1476,24 @@ pub fn keypad(kind: u8, title: &str, input: &str, unit: &str) {
     }
 }
 
+/// Selected keypad text (the prefilled current value): the stock pressed-key
+/// colour as the field background.
+const K_SEL: Color = 0x04FC;
+
 /// The typed text: in the page's frequency field, or the popup's value box.
-pub fn keypad_input(freq: bool, input: &str, unit: &str) {
+/// `sel`: the prefilled value, selected (see `keypad`).
+pub fn keypad_input(freq: bool, input: &str, unit: &str, sel: bool) {
     if freq {
-        gen_box_value(0, input, true, unit, 0x04FC);
+        if sel {
+            gen_box_value_bg(0, input, true, unit, STATUS_FG, K_SEL);
+        } else {
+            gen_box_value(0, input, true, unit, K_SEL);
+        }
         gen_box_note(0, "", G_DIM);
     } else {
         // 300..439: room for "-12.345" (112 px); titles end before 300.
-        sf::label(sf::LETTERS, rect(300, 104, 139, 34), input, 0x0000, K_PANEL, 4, 0);
+        let (fg, bg) = if sel { (STATUS_FG, K_SEL) } else { (0x0000, K_PANEL) };
+        sf::label(sf::LETTERS, rect(300, 104, 139, 34), input, fg, bg, 4, 0);
         sf::label(sf::TEXT22, rect(446, 110, 30, 22), unit, 0x0000, K_PANEL, 1, 0);
     }
 }
