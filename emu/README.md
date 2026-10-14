@@ -73,7 +73,10 @@ None of these inputs are committed; generated images are git-ignored.
 * `--gdb [PORT]` GDB server (default 3333), `--pause` do not start the CPU,
   `--interactive` keep the Renode monitor open (`--dry` only writes the `.resc`).
 * `--bt-port PORT` TCP passthrough of the Bluetooth UART (stock measurement
-  protocol / fw-rs SCPI from the host).
+  protocol / fw-rs SCPI from the host). From scripts: `monitor sysbus.btmodule
+  SetConnected true` raises PC14 ("module connected"), `SendText "..."` /
+  `SendHex ...` inject host bytes; the firmware's UART output is logged with
+  `--debug sysbus.btmodule`.
 * `--trace-boot` log every ROM / FS-loader / app region transition,
   `--pc-samples N` print PCs at the end, `--debug periph,...` Renode debug log
   for peripherals (e.g. `sysbus.i2c3,sysbus.i2c3.touch,sysbus.hy3131,sysbus.btmodule`).
@@ -153,12 +156,14 @@ Check 5 (see "Use" below): `emu/out/stock-scope.png` and `emu/out/fwrs-scope.png
 | FSMC | registers = RAM; bank 1 = `ILI9488.cs` | A16 = RS; 2A/2B/2C/2E (RGB666 read-back packing), 36 MADCTL, 3A, D3 ID = 0x9488, 11/29; `Screenshot path`, `AutoShot dir n`, `DumpGram` |
 | GPIO A..I | `GD32_GPIO.cs` | own model: Renode 1.17.0's `STM32_GPIOPort` writes every pin's input state on an ODR write (no mode check), which broke the bit-banged HY3131 MISO. Pull-ups give the idle level of undriven inputs (PA2 reads high unless driven). PE5 -> EXTI line 5, PA15 -> TIM2 CH1 |
 | EXTI, SYSCFG | Renode `STM32F4_EXTI`; SYSCFG = RAM | only line 5 (touch INT) is wired |
-| TIM1..14 | Renode `STM32_Timer` at 200 MHz | interrupts, one-pulse, PWM registers; no DMA requests, no ITRx slave start (the scope feeder works around both), no output pins |
+| TIM1, TIM2, TIM5, TIM8 | `GD32_Timer.cs` | own model: counter from virtual time, slave mode controller (SMS reset / gated / trigger / external clock, TS = ITR0..3 wired per the GD32F4 interconnect table, TI1FP1 / TI1F_ED from the CH1 pin with CCER polarity), one-pulse, CC1 capture, OC PWM1/PWM2/force, TRGO (enable, update, compare pulse, OCxREF level), UIE/CCxIE/TIE on the general or the split advanced lines. Flags are evaluated lazily and interrupts scheduled at their exact virtual time, so a 50 MHz TIM8 costs nothing. No DMA request lines: the scope feeder asks TIM1 for its update events |
+| TIM4, TIM7, TIM9..11 | Renode `STM32_Timer` at 200 MHz | interrupt tick timers |
+| TIM3, TIM6, TIM12..14 | `PwmTimer.cs` | PWM / DAC trigger: registers, CNT from virtual time, no events |
 | DMA1/DMA2 | `GD32_DMA.cs` | own model: one request = one data unit, NDTR counts down, HTIF/TCIF, circular, double buffer, M2M; `Feed(stream, value)` for the ADC feeder |
 | SPI1 (0x40003800) + W25Q128 | Renode `STM32SPI` + `W25Q128.cs` | file-backed 16 MiB, CS = PE4; READ/FAST READ/PP/SE/BE/CE/WREN/RDSR/REMS/JEDEC/RUID; `Load`, `Save` |
 | I2C2 (0x40005C00) + touch | `GD32_I2C.cs` + `CST_Touch.cs` | own I2C master (SBSEND/ADDSEND/BTC/TBE/RBNE, AERR for absent addresses, ACKEN/POAP, DMA RX/TX requests, DMALST); Hynitron 0x5A protocol (D1 01/09, D2 04, D0 00 frame, D0 07.., D0 00 AB ack); `Tap`, `Press`, `Move`, `Release`, `Drag`, `Key` |
 | HY3131 DMM ADC | `HY3131.cs` on the bit-banged pins | register file, INTF always "all converters ready", AD1 from `SetVin` (stock DC V scale of the configured range row) or `SetAd1`; AC/RMS/LPF/counter values are placeholders |
-| 3PA1030 scope ADC + comparator | `ScopeFeeder.cs` | delivers waveform samples to DMA2 stream 4 at the TIM1 rate (TIM1 running, or slave of a running TIM5 as the stock does), code = 512 + V * counts/V of the front-end range read from PC13/PB15/PD12/PD13; comparator output on PA15 from DAC2's level (stock default calibration) |
+| 3PA1030 scope ADC + comparator | `ScopeFeeder.cs` | sample n = TIM1 update event n (`GD32_Timer.UpdateEventsUntil/TimeOfUpdate`, so TIM5's trigger start, one-pulse stops and TIM2 gating are exact); code = 512 + V * counts/V of the front-end range read from PC13/PB15/PD12/PD13; samples go to DMA2 stream 4 in bulk every 100 us and before any stream register access (NDTR exact). Comparator: crossings found one tick ahead, PA15 driven at the crossing's virtual time + 2 us (the board's comparator latency = stock `trig_delay`), INVERTED (high while signal < level, as `fw-rs/src/hwtrig.rs` documents), level = DAC2 with the stock default map (1780 -> code 300, 2401 -> 780), 2 codes hysteresis |
 | UART4 + BT module | Renode `STM32_UART` + `BtModule.cs` | AT+SBN/CBN/SLED0/RESET answered, PC14 "connected" while a TCP host is attached (`--bt-port`), `SendHex`/`SendText` from scripts |
 | ADC0 | `SimpleADC.cs` | SW-started single conversions, GD32 calibration bits self-clear; channel 15 = 4.0 V battery by default (`SetVolts ch v`) |
 | DAC | RAM | DHR12R2 is read by the scope feeder for the trigger level; no analog output |
@@ -214,10 +219,21 @@ would need per-firmware hooks and was not done.
 * HY3131: only the DC V path is scaled; other modes read the raw placeholder
   values. An AC/ohm/capacitance model needs the per-mode scaling from
   `firmware/re/analysis/dmm_v2_6.h`.
-* Scope trigger: TIM2 is started from PA15 edges through Renode's timer
-  trigger mode; the post-trigger TIM2 update was not verified against the
-  stock's trigger search (the stock shows "AUTO" acquisitions and correct
-  measurements).
+* Scope trigger (verified 2026-10-14, `--fast`, screenshots in `emu/out/`):
+  stock Auto with a 1 kHz sine at 10 ms/div -> `T'D`; 40 Hz square -> the
+  falling edge sits on the T marker with the default Edge = Falling, the
+  rising edge with Edge = Rising (`stock-trigger-square40-*.png`); AUTO-set
+  of the sine lands at 5 us/div = 50 MS/s with a continuous trace through
+  the marker (`stock-trigger-1khz-5us.png`); Normal mode -> `T'D` with the
+  signal and `WAIT` after `--scope dc,0,0` (`stock-trigger-normal-*.png`).
+  fw-rs: its comparator engine (TIM2 PWM2 OC2REF gating TIM1 from ITR1) runs
+  in the emulator once enabled (`fwrs-hwtrig.png`); `DBG:*` is refused over
+  Bluetooth, so until USB exists enable it by patching `HwTrig::available`
+  to `movs r0,#1; bx lr` before start (script lines
+  `0 monitor sysbus WriteWord 0x08025870 0x2001` / `0x08025872 0x4770`,
+  address from `llvm-nm` of the ELF). Timebase/trigger controls of the
+  stock: MF key -> popup, Trigger tab at (263,42), Rising (55,92) /
+  Falling (115,92), Auto (245,92) / Normal (305,92) / Single (365,92).
 * USB host side (USBTMC/MSC) would need a real DWC2 model.
 * The ROM's and FS-loader's PA2 timing is reproduced only empirically
   (release at 0.55 s gives the three-stage chain).
