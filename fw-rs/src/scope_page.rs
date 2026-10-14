@@ -328,6 +328,7 @@ impl App {
             math_open: matches!(sp.popup, su::Popup::Math(_)),
             pressed: if now < sp.pressed_until { sp.pressed } else { 0 },
             combined: self.view == View::DmmScope,
+            math_mode: 0,
         }
     }
 

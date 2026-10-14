@@ -958,17 +958,25 @@ impl Scope {
         self.s.run && self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single
     }
 
-    /// Record bar (stock 2.3) while stopped: the shown window as fractions
-    /// (start, end) of the stored record; (0, 1) without one.
+    /// Record bar (stock 2.3, FUN_0802d1c6) while stopped: the stored
+    /// record's extent in screen widths relative to the shown window (0..1 =
+    /// the screen: start = -(window start) / window, end = (record length -
+    /// window start) / window; "[" drawn when 0 <= start < 1, "]" when end <=
+    /// 1); (0, 1) while running or without a record.
     pub fn record_frac(&self) -> (f32, f32) {
         if self.s.run || !self.stored_valid || self.stored_len < 2 {
             return (0.0, 1.0);
         }
         let len = self.stored_len as f32;
         let want = self.zoom_screen(self.s.tb) as f32;
-        let start = if self.stored_roll { len - want } else { self.stored_anchor as f32 - (want / 2.0) as u32 as f32 };
-        let start = if want <= len { start.clamp(0.0, len - want) } else { start };
-        (start / len, (start + want) / len)
+        let w0 = if self.stored_roll {
+            len - want
+        } else if want <= len {
+            (self.stored_anchor as f32 - (want / 2.0) as u32 as f32).clamp(0.0, len - want)
+        } else {
+            self.stored_anchor as f32 - (want / 2.0) as u32 as f32
+        };
+        (-w0 / want, (len - w0) / want)
     }
 
     /// Ask for one re-render of the stored record while stopped (a scope view

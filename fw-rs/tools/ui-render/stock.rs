@@ -171,6 +171,98 @@ pub fn scenes() -> Vec<Scene> {
     v
 }
 
+/// States of the stock V2.6 captured in the Renode emulator
+/// (tools/ui-render/emu-diff.sh): the unit's persisted state (10 ms/div,
+/// falling edge at -88.3 mV, trigger column 158, charging) and the cell texts
+/// read off the capture; DC 0 V input: a flat trace on row 140 (the
+/// emulator's ADC feeder ignores the offset PWM, so the trace does not
+/// follow the position of -4 rows).
+pub fn emu_scenes() -> Vec<Scene> {
+    let mut m = Model::DEFAULT;
+    m.status = su::ST_AUTO;
+    m.tb = 18;
+    m.rising = false;
+    m.trig_v = -0.0883;
+    m.trig_row = 139;
+    m.pos = -4;
+    m.trig_px = 158;
+    m.battery = 4;
+    m.charging = true;
+    // The unit has FFT as its math mode (math off): the pill says "FFT".
+    m.math_mode = 5;
+    let cells = vec!["Freq:167kHz", "Vp-p:0.00uV", "Cycl:6.00us", "Vrms:122mV"];
+    let none = vec!["--", "--", "--", "--"];
+    let flat = Trace { a: vec![140; 400], b: vec![140; 400] };
+    let mut v = vec![];
+    // (name, model, popup, battery level (the charging animation), cells)
+    // Right after a V/div / timebase / level change the stock graph is
+    // empty until the next record (sec. 4.5): no trace in e12..e16.
+    let mut add = |name: &'static str, m: Model, popup: su::Popup, batt: u8, c: &Vec<&'static str>| {
+        let mut m = m;
+        m.battery = batt;
+        let blank = matches!(&name[..3], "e12" | "e13" | "e14" | "e15" | "e16" | "e22" | "e23");
+        v.push(Scene { name, m, popup, trace: if blank { None } else { Some(flat.clone()) }, persist: None, cols: 399, cells: c.clone() })
+    };
+    add("e01-page", m, su::Popup::None, 4, &cells);
+    let mut c = m;
+    c.ch1_open = true;
+    add("e02-ch1-coupling", c, su::Popup::Ch1(0), 3, &cells);
+    add("e03-ch1-probe", c, su::Popup::Ch1(1), 4, &cells);
+    add("e04-ch1-color", c, su::Popup::Ch1(2), 4, &cells);
+    add("e05-mf-trigger", m, su::Popup::Mf(2), 4, &cells);
+    add("e06-mf-measure", m, su::Popup::Mf(0), 3, &cells);
+    add("e07-mf-display", m, su::Popup::Mf(1), 4, &cells);
+    add("e08-mf-settings", m, su::Popup::Mf(3), 4, &cells);
+    // Run 2 (seq2): V/div and timebase steps, a trigger-level drag, cursors.
+    add("e11-page", m, su::Popup::None, 3, &cells);
+    let mut s = m;
+    s.vdiv = 10;
+    s.trig_v = -0.183;
+    add("e12-vdiv2v", s, su::Popup::None, 4, &none);
+    s.vdiv = 8;
+    s.trig_v = -0.043;
+    add("e13-vdiv500mv", s, su::Popup::None, 4, &none);
+    s.tb = 19;
+    s.guide = true;
+    add("e14-tb-slower", s, su::Popup::None, 3, &none);
+    s.tb = 17;
+    add("e15-tb-faster", s, su::Popup::None, 4, &none);
+    s.trig_row = 101;
+    s.trig_v = 0.496;
+    s.sel_v = 1;
+    add("e16-trig-drag", s, su::Popup::None, 3, &none);
+    s.guide = false;
+    let c17 = vec!["Freq:333kHz", "Vp-p:0.00uV", "Cycl:3.00us", "Vrms:59.8mV"];
+    add("e17-guide-gone", s, su::Popup::None, 3, &c17);
+    s.xcur = Some([10, 20]);
+    add("e18-xcursors", s, su::Popup::None, 4, &vec!["X2-1:1.25ms", "--", "--", "--"]);
+    s.ycur = Some([10, 20]);
+    add("e19-xycursors", s, su::Popup::None, 4, &vec!["X2-1:1.25ms", "Y2-1:-143mV", "--", "--"]);
+    // Run 3 (seq3): STOP, AC coupling, rising edge + Normal (WAIT), roll.
+    let mut s = m;
+    s.status = su::ST_STOP;
+    // The stored record is longer than the screen: no "]".
+    s.record = (0.0, 1.5);
+    add("e20-stop", s, su::Popup::None, 4, &cells);
+    let mut s = m;
+    s.ac = true;
+    add("e21-ac-x10-green", s, su::Popup::None, 3, &cells);
+    s.rising = true;
+    s.status = su::ST_WAIT;
+    add("e22-rising-normal", s, su::Popup::None, 4, &none);
+    s.status = su::ST_RUN;
+    s.tb = 26;
+    s.roll = true;
+    s.guide = true;
+    add("e23-roll", s, su::Popup::None, 4, &vec!["Freq:333Hz", "Vp-p:0.00uV", "Cycl:3.00ms", "Vrms:122mV"]);
+    v
+}
+
+/// Popup values of the emulator captures.
+pub fn emu_popvals(m: &Model) -> su::PopVals {
+    su::PopVals { persist: 1, rising: false, pressed_cell: None, ..popvals(m) }
+}
+
 /// Popup values of the reference scenes (tools/stock-ui Scene::default).
 pub fn popvals(m: &Model) -> su::PopVals {
     su::PopVals {
@@ -209,10 +301,14 @@ pub fn load(sc: &Scene) {
 
 /// Draw a scene on a fresh screen.
 pub fn draw(sc: &Scene) {
+    draw_with(sc, &popvals(&sc.m))
+}
+
+pub fn draw_with(sc: &Scene, pv: &su::PopVals) {
     host::reset(0);
     su::invalidate();
     load(sc);
     su::update(&sc.m);
     su::cells(&sc.m, &sc.cells);
-    su::draw_popup(sc.popup, &popvals(&sc.m));
+    su::draw_popup(sc.popup, pv);
 }

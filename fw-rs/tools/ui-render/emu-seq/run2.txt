@@ -1,0 +1,26 @@
+0.1 scope dc,0,0
+2.5 key menu
+3.2 tap 339 105
+5.0 shot @OUT@/e11-page.png
+5.1 tap 447 40
+6.0 shot @OUT@/e12-vdiv2v.png
+6.1 tap 447 122
+6.6 tap 447 122
+7.4 shot @OUT@/e13-vdiv500mv.png
+7.5 tap 100 230
+8.4 shot @OUT@/e14-tb-slower.png
+8.5 tap 300 230
+9.0 tap 300 230
+9.8 shot @OUT@/e15-tb-faster.png
+9.9 drag 6 158 6 120
+10.6 shot @OUT@/e16-trig-drag.png
+13.0 shot @OUT@/e17-guide-gone.png
+13.1 key mf
+13.8 tap 311 191
+14.4 tap 43 116
+15.0 key mf
+15.8 shot @OUT@/e18-xcursors.png
+15.9 key mf
+16.6 tap 214 151
+17.2 key mf
+18.0 shot @OUT@/e19-xycursors.png

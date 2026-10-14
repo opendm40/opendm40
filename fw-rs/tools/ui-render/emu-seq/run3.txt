@@ -1,0 +1,29 @@
+0.1 scope dc,0,0
+2.5 key menu
+3.2 tap 339 105
+5.0 key run
+5.8 shot @OUT@/e20-stop.png
+5.9 key run
+6.3 tap 447 81
+6.9 tap 375 83
+7.5 tap 254 111
+8.1 tap 353 205
+8.7 tap 353 175
+9.3 tap 254 152
+9.9 tap 353 175
+10.5 tap 100 150
+11.3 shot @OUT@/e21-ac-x10-green.png
+11.4 tap 447 300
+12.0 tap 84 93
+12.6 tap 304 93
+13.2 key mf
+14.0 shot @OUT@/e22-rising-normal.png
+14.1 key mf
+14.7 tap 165 41
+15.3 tap 46 93
+15.9 key mf
+16.5 tap 100 230
+17.0 tap 100 230
+17.5 tap 100 230
+18.0 tap 100 230
+19.5 shot @OUT@/e23-roll.png
