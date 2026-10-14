@@ -288,5 +288,7 @@ scopefeed: Miscellaneous.ScopeFeeder @ sysbus 0x7FFF3000
     portA: gpioPortA
     sampleTimer: timer1
 
-// USB OTG FS: register stub, never enumerates.
-usbfs: USB.USBFS_Stub @ sysbus 0x50000000
+// USB OTG FS device mode (Synopsys DWC2): DWC2_OTG.cs, exported to a USB/IP
+// server with `emulation CreateUSBIPServer` + `host.usb Register sysbus.usbfs`.
+usbfs: USB.DWC2_OTG @ sysbus 0x50000000
+    IRQ -> nvic@67
