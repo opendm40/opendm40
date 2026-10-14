@@ -121,6 +121,32 @@ Renode's monitor TCP port (`renode -P`), so the GUI never blocks the emulation.
 * Logs: `emu/out/live-renode.out` (Renode), `emu/out/live-monitor.log` (every
   monitor command and reply).
 
+### USB over USB/IP
+
+```sh
+emu/run.py fwrs  --fast --usbip 5 --run-for 600        # USB/IP server on TCP 3240 from t = 5 s
+emu/run.py stock --app ../alientek-dm40-tools/patch/build/dm40_patched.bin --fast --usbip 6 --run-for 600
+# other terminal (plain TCP, no root, no vhci):
+emu/usbip_client.py list                 # busid=1-0 1209:0001 interfaces fe/03/01 08/06/50
+emu/usbip_client.py desc   1-0           # device descriptor
+emu/usbip_client.py config 1-0           # interfaces + endpoints
+emu/usbip_client.py usbtmc 1-0 "*IDN?"   # -> Alientek,DM40A,0,dm40-fw 0.1
+emu/usbip_client.py msc    1-0 0         # INQUIRY, READ CAPACITY (4096 x 4096 B), READ(10) LBA 0 (FAT boot sector)
+emu/usbip_client.py read   1-0 0x1FFF7A10 12    # usbrw image: vendor EP0 read (the UID)
+emu/usbip_client.py write  1-0 0x20028FC0 02    # usbrw image: vendor EP0 write + read-back
+```
+
+Renode exports the registered device as busid `1-0`. The client is a stdlib
+USB/IP implementation (list / import / control and bulk URBs; Renode reads
+the URB direction from `transfer_flags` bit 0x200, not from the direction
+word). Verified 2026-10-14: the usbrw image (ep0 memrw session) passes its
+acceptance (descriptor 28e9:02f0, UID read, RAM write + read-back); fw-rs
+enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk
+over MSC (a 4 KiB block = 64 bulk URBs, each a main-loop turn of fw-rs: a
+few seconds in `--fast` mode). Attaching the device to the host kernel
+(`usbip attach`, then `dm40dbg.py` / mounting the disk) needs vhci-hcd and
+root and was not run. The stock's "USB Connect" MSC was not tried yet.
+
 ### GDB
 
 ```sh
@@ -139,7 +165,7 @@ commands go to the Renode monitor (`monitor sysbus.lcd Screenshot @/tmp/x.png`).
 |---|---|---|
 | a | stock app boots to its main UI -> PNG | **reached**: DMM page at ~1 s virtual, 3 s run takes ~30 s wall |
 | b | stock DMM and scope pages via injected taps -> PNG | **reached**: MENU key -> main menu -> Oscilloscope tile; scope page acquires and measures the fed waveform (`emu/out/stock-scope.png`) |
-| c | fw-rs native image boots through the shim -> PNG | **reached**: DMM page with the scripted input, BT module set-up, menu, scope page (`emu/out/fwrs-scope.png`) |
+| c | fw-rs native image boots through the shim -> PNG | **reached**: DMM page with the scripted input, BT module set-up, menu, scope page (`emu/out/fwrs-scope.png`); USBTMC `*IDN?` and MSC over USB/IP |
 | d | full chain ROM -> FS-loader -> app from the dump | **reached** (`--trace-boot`): ROM at 0, FS-loader at 0.50 s, app at 0.64 s; with PA2 held the loader shows its "open file error / Update" screen; with `--zero-marker --disk-add <update>` the loader installs the file into flash (verified byte-for-byte against the fw-rs body) and resets into it |
 
 Check 5 (see "Use" below): `emu/out/stock-scope.png` and `emu/out/fwrs-scope.png`.
@@ -168,7 +194,7 @@ Check 5 (see "Use" below): `emu/out/stock-scope.png` and `emu/out/fwrs-scope.png
 | ADC0 | `SimpleADC.cs` | SW-started single conversions, GD32 calibration bits self-clear; channel 15 = 4.0 V battery by default (`SetVolts ch v`) |
 | DAC | RAM | DHR12R2 is read by the scope feeder for the trigger level; no analog output |
 | IWDG, RTC, CRC, RNG | Renode models | the stock feeds the IWDG from its 1 kHz timer ISR |
-| USB OTG FS | `USBFS_Stub.cs` | registers only: AHBIDL set, resets self-clear, no interrupts -> never enumerates. The FS-loader's and the stock's MSC bring-up run through; fw-rs's USBTMC never sees a host |
+| USB OTG FS (DWC2) | `DWC2_OTG*.cs` | Renode 1.17.0's `STM_USB` (the Synopsys OTG device model, renamed `DesignWare_USB_OTG` upstream) with the fixes the GD32 drivers need: DTXFSTS = programmed FIFO depth minus queued words (the stock driver only writes while free > needed), EP0's 2-bit MPSIZ code decoded (0 = 64 bytes), OUT data held while an endpoint NAKs. Exported to Renode's USB/IP server (see "USB over USB/IP"); IRQ 67 |
 | buzzer (TIM14 PWM), backlight (TIM13 PWM), relays (PA9/PA10, PE0/PE1, PC13...), rails (PE2/PC4) | GPIO/timer registers only | nothing observes them yet |
 
 Not modelled: the generator's analog output (DAC1 + TIM6 DMA runs, nothing
@@ -234,7 +260,9 @@ would need per-firmware hooks and was not done.
   address from `llvm-nm` of the ELF). Timebase/trigger controls of the
   stock: MF key -> popup, Trigger tab at (263,42), Rising (55,92) /
   Falling (115,92), Auto (245,92) / Normal (305,92) / Single (365,92).
-* USB host side (USBTMC/MSC) would need a real DWC2 model.
+* USB: EP0, USBTMC and MSC work over USB/IP with the forked DWC2 model;
+  isochronous/interrupt endpoints, suspend/resume and the host-kernel
+  attach path are untested.
 * The ROM's and FS-loader's PA2 timing is reproduced only empirically
   (release at 0.55 s gives the three-stage chain).
 
