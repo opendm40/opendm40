@@ -311,6 +311,7 @@ fn restore_func(version: u32, code: u8) -> u8 {
 
 impl App {
     pub fn new(clk: &mut Clock) -> Self {
+        scope_page::sp_init();
         let mut dmm = Dmm::new();
         dmm.select(clk, 1);
         buzzer_init();
