@@ -41,7 +41,27 @@ if [ "$MODE" = native ]; then
 else
     SCRIPT=link-test.x; FEAT=$MODE; TDIR=target/test-$MODE
 fi
-RUSTFLAGS="-C link-arg=-T$SCRIPT -C target-cpu=cortex-m4" CARGO_TARGET_DIR=$TDIR \
+# Reproducible image (review L10): the same commit gives the same bytes in
+# any checkout / worktree. Absolute paths reach rodata through panic
+# locations of the dependencies (CARGO_HOME/registry/src/..., resolved
+# through the worktree's toolchain symlink); remap them to relative ones,
+# e.g. crates/usb-device-0.3.2/src/bus.rs (our own sources are already
+# src/..., core is /rustc/<hash>/...). rustc applies the LAST matching
+# prefix, so the most specific comes last; logical (pwd) and physical
+# (pwd -P) spellings both. Paths must not contain spaces (RUSTFLAGS).
+REMAP=
+remap() { # remap FROM-dir TO
+    for d in "$(cd "$1" && pwd)" "$(cd "$1" && pwd -P)"; do
+        REMAP="$REMAP --remap-path-prefix=$d=$2"
+    done
+}
+remap .. dm40
+remap "$RUSTUP_HOME" rustup
+remap "$CARGO_HOME" cargo
+for d in "$CARGO_HOME"/registry/src/*/; do
+    [ -d "$d" ] && remap "$d" crates
+done
+RUSTFLAGS="-C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
     cargo build --release --features "$FEAT" "$@"
 ELF=$TDIR/thumbv7em-none-eabihf/release/dm40-fw
 
