@@ -1392,6 +1392,26 @@ impl App {
     /// waits 200 ms (relays, offset PWM) before its record counts. UF-04: the
     /// user's coupling is kept (the stock forces DC); only when an AC search
     /// finds nothing, it is repeated in DC.
+    ///
+    /// fw-rs fixes (device 2026-10-14, 100 Hz 0..9.6 V square ended at 5 us/div,
+    /// 2 V/div, flat top): a 5 us/div record of a slow signal holds one edge
+    /// or none, so phase 1 found a swing without a period (n < 2 crossings)
+    /// and phase 2 took the timebase from Cycl of a one-edge / flat record
+    /// (the noise-floor ~9 us); or a flat record clipped at a finer range let
+    /// the descent go on until noise passed at 10 mV/div.
+    ///  * Phase 1: a record flat at the ADC rail (clipped, no swing) means the
+    ///    signal is beyond this range: the previous (coarser) candidate is
+    ///    taken without descending further.
+    ///  * Phase 3 (new): range known but no period: the period is measured at
+    ///    AS_PERIOD_TB (500 us/div, then 20 ms/div); none at all (DC, < 5 Hz):
+    ///    20 ms/div is kept.
+    ///  * Phase 2: a clipped record moves to a coarser range and measures
+    ///    again (at most AS_P2_MAX records); the timebase comes from the
+    ///    30 / 70 % crossing period (>= 2 crossings), Cycl only when it agrees
+    ///    with it within 2x; V/div = the finest that holds the swing in 6.4 div
+    ///    once centred (the stock also demands +-4 div before centring, which
+    ///    gave 5 V/div for a 0..9.6 V signal).
+    /// Each record's decision is logged (DBG:GEST? after "|AUTO", `autoset_log`).
     pub(super) fn autoset_start(&mut self, now: u64) {
         self.sp_end_hold(now);
         let saved = self.scope.s;
@@ -1401,6 +1421,7 @@ impl App {
         st.pos = 0;
         st.mode = scope::TrigMode::Auto;
         st.run = true;
+        as_log_clear();
         self.sp.autoset = Some(Autoset { phase: 1, idx: 0, round: 0, saved, settle: now + 200, abort: now + 15_000 });
         self.scope.apply(st, now);
     }
@@ -1419,32 +1440,52 @@ impl App {
         }
         let pp = (hi - lo) as f32;
         let (l30, l70) = (lo as f32 + 0.3 * pp, lo as f32 + 0.7 * pp);
+        let swing = l70 - l30 > 19.0;
+        let clipped = lo == 0 || hi > 1022;
         // Period from rising crossings of the 30 % / 70 % levels.
         let (mut armed, mut first, mut last, mut n) = (false, 0usize, 0usize, 0u32);
-        for (i, &v) in f.data.iter().enumerate() {
-            let v = v as f32;
-            if v < l30 {
-                armed = true;
-            } else if armed && v > l70 {
-                armed = false;
-                if n == 0 {
-                    first = i;
+        if swing {
+            for (i, &v) in f.data.iter().enumerate() {
+                let v = v as f32;
+                if v < l30 {
+                    armed = true;
+                } else if armed && v > l70 {
+                    armed = false;
+                    if n == 0 {
+                        first = i;
+                    }
+                    last = i;
+                    n += 1;
                 }
-                last = i;
-                n += 1;
             }
         }
         let period = if n >= 2 { (last - first) as f32 / (n - 1) as f32 / f.fs as f32 } else { 0.0 };
+        as_log(a.phase, st.tb, st.range, lo, hi, n, period);
+        // Next step: apply `st` and wait for its record.
+        let next = |me: &mut Self, a: Autoset, st: scope::Settings| {
+            let mut a = a;
+            a.settle = now + 200;
+            me.sp.autoset = Some(a);
+            me.scope.apply(st, now);
+        };
         if a.phase == 1 {
-            if l70 - l30 > 19.0 {
-                if period > 0.0 {
-                    st.tb = tb_for(period);
-                }
-                if lo == 0 || hi > 1022 {
+            let beyond = clipped && !swing;
+            if swing || beyond {
+                if beyond {
+                    // Flat at the rail: the signal is beyond this range.
+                    st.range = if a.idx > 0 { AS_CAND[a.idx - 1] } else { 9 };
+                } else if clipped {
                     st.range = (st.range + 3).min(9);
                 }
                 st.trig_row = 140;
-                a.phase = 2;
+                a.idx = 0;
+                if period > 0.0 {
+                    st.tb = tb_for(period);
+                    a.phase = 2;
+                } else {
+                    a.phase = 3;
+                    st.tb = AS_PERIOD_TB[0];
+                }
             } else if a.idx + 1 < AS_CAND.len() {
                 a.idx += 1;
                 st.range = AS_CAND[a.idx];
@@ -1467,34 +1508,60 @@ impl App {
                 self.toast(now, "AUTO: no signal found", false);
                 return;
             }
-            a.settle = now + 200;
-            self.sp.autoset = Some(a);
-            self.scope.apply(st, now);
+            next(self, a, st);
             return;
         }
-        // Phase 2: V/div so that the signal fits +-4 div within 6.4 div,
-        // centred; trigger at the middle; timebase from the measured cycle.
+        if a.phase == 3 {
+            // Range known, period not: coarser timebases until >= 2 cycles.
+            if clipped && st.range < 9 {
+                st.range = (st.range + 3).min(9);
+            }
+            if period > 0.0 {
+                st.tb = tb_for(period);
+                a.phase = 2;
+                a.idx = 0;
+            } else if a.idx + 1 < AS_PERIOD_TB.len() {
+                a.idx += 1;
+                st.tb = AS_PERIOD_TB[a.idx];
+            } else {
+                // No period at all (DC or very slow): keep 20 ms/div.
+                a.phase = 2;
+                a.idx = 0;
+            }
+            next(self, a, st);
+            return;
+        }
+        // Phase 2: a clipped record cannot be measured: coarser range, again.
+        if clipped && st.range < 9 && (a.idx as u8) < AS_P2_MAX {
+            a.idx += 1;
+            st.range = (st.range + 3).min(9);
+            next(self, a, st);
+            return;
+        }
+        // V/div so that the swing fits 6.4 div, centred; trigger at the
+        // middle; timebase from the measured cycle.
         let (vmax, vmin) = (self.scope.volts(hi as f32), self.scope.volts(lo as f32));
         let probe = st.probe;
+        let mid = (vmax + vmin) / 2.0;
         let mut r = 9;
         for (i, &d) in scope::VDIV.iter().enumerate() {
             let d = d * probe;
-            if vmin >= -4.0 * d && vmax <= 4.0 * d && (vmax - vmin) <= 6.4 * d {
+            // The centring position must stay within its +-392 rows.
+            if (vmax - vmin) <= 6.4 * d && (141.0 * mid / (4.0 * d)).abs() <= 392.0 {
                 r = i;
                 break;
             }
         }
         st.range = r;
-        let mid = (vmax + vmin) / 2.0;
         st.pos = ((141.0 * mid / (4.0 * scope::VDIV[r] * probe)) as i32).clamp(-392, 392);
         st.trig_row = 140;
         let res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
         let cyc = res.v[9];
-        if cyc.is_finite() && cyc > 0.0 {
-            st.tb = tb_for(cyc);
-        } else if period > 0.0 {
-            st.tb = tb_for(period);
+        if period > 0.0 {
+            let ok = cyc.is_finite() && cyc > 0.0 && cyc < 2.0 * period && cyc > 0.5 * period;
+            st.tb = tb_for(if ok { cyc } else { period });
         }
+        as_log(4, st.tb, st.range, lo, hi, n, if cyc.is_finite() { cyc } else { -1.0 });
         st.mode = scope::TrigMode::Auto;
         self.sp.autoset = None;
         self.scope_set(st, now);
@@ -1528,6 +1595,54 @@ impl App {
 
 /// AUTO-set V/div candidates (hardware ranges 10 V, 1 V, 100 mV, 10 mV).
 const AS_CAND: [usize; 4] = [9, 6, 3, 0];
+/// AUTO-set phase 3: timebases that look for the period when the range is
+/// known but a 5 us/div record held fewer than two cycles (500 us/div: 50 us
+/// .. 4.5 ms periods; 20 ms/div: up to 180 ms, sampled at 125 kS/s).
+const AS_PERIOD_TB: [usize; 2] = [14, 19];
+/// AUTO-set phase 2: at most this many re-measurements at a coarser range
+/// after a clipped record.
+const AS_P2_MAX: u8 = 3;
+
+/// AUTO-set decision log (DBG:GEST? after "|AUTO"): per record phase (1
+/// amplitude, 3 period, 2 final; 4 = the result), timebase, range, min /
+/// max code, rising crossings, period (phase 4: Cycl) in us.
+static mut AS_LOG: [(u8, u8, u8, u16, u16, u16, f32); 16] = [(0, 0, 0, 0, 0, 0, 0.0); 16];
+static mut AS_LOG_N: usize = 0;
+
+fn as_log_clear() {
+    unsafe { AS_LOG_N = 0 };
+}
+
+fn as_log(phase: u8, tb: usize, range: usize, lo: u16, hi: u16, n: u32, period: f32) {
+    unsafe {
+        let i = AS_LOG_N;
+        if i < 16 {
+            (*core::ptr::addr_of_mut!(AS_LOG))[i] = (phase, tb as u8, range as u8, lo, hi, n.min(65535) as u16, period);
+            AS_LOG_N = i + 1;
+        }
+    }
+}
+
+/// The AUTO-set log as text: `;A<phase>,<tb>,<range>,<lo>,<hi>,<n>,<us>`.
+pub(super) fn autoset_log(out: &mut crate::scpi::Scpi) {
+    let n = unsafe { AS_LOG_N };
+    for i in 0..n {
+        let (ph, tb, r, lo, hi, k, per) = unsafe { (*core::ptr::addr_of!(AS_LOG))[i] };
+        out.put_bytes(b";A");
+        for (j, v) in [ph as u32, tb as u32, r as u32, lo as u32, hi as u32, k as u32].iter().enumerate() {
+            if j > 0 {
+                out.put_bytes(b",");
+            }
+            crate::put_u32(out, *v);
+        }
+        out.put_bytes(b",");
+        if per < 0.0 {
+            out.put_bytes(b"-1");
+        } else {
+            crate::put_u32(out, (per * 1e6) as u32);
+        }
+    }
+}
 
 /// First timebase whose s/div exceeds a quarter period (FUN_08033388).
 fn tb_for(period: f32) -> usize {
