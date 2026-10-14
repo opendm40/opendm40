@@ -207,11 +207,13 @@ each), `--stats`:
 
 | command | before | after | after, `--fast` |
 |---|---|---|---|
-| `stock --run-for 5.5 ... --scope sine,1000,1.0` (stock-scope.png) | 22.1 s (4.0x real time) | 22.1 -> ~15 s (2.7x) | 9.5 s (1.7x) |
-| `fwrs --run-for 6 ... --scope sine,1000,1.0` (fwrs-scope.png) | did not finish in 23 min (12.5 MS/s fed sample by sample) | 19.8 s (3.3x) | 11.2 s (1.9x) |
+| `stock --run-for 5.5 ... --scope sine,1000,1.0` (stock-scope.png) | 22.1 s (4.0x real time) | 20.8 s (3.8x) | 8.8 s (1.6x) |
+| `fwrs --run-for 6 ... --scope sine,1000,1.0` (fwrs-scope.png) | did not finish in 23 min (12.5 MS/s fed sample by sample) | 18.6 s (3.1x) | 11.2 s (1.9x) |
 | `stock --run-for 3` (boot to the DMM page) | 23.7 s (7.9x) | 17.7 s (5.9x) | 10.7 s (3.6x) |
 
-What was done (`emu/run.py --stats` prints wall / virtual / instructions):
+Measured with the final models (GD32_Timer for TIM1/2/5/8, sample-exact
+feeder). What was done (`emu/run.py --stats` prints wall / virtual /
+instructions):
 
 1. Output-only timers (TIM1/8 sample clocks at 50 MHz, TIM6 at 10 MHz, the
    PWM timers) are an event-free model (`PwmTimer.cs`); Renode's
