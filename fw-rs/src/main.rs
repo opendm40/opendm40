@@ -73,8 +73,8 @@ const SCPI_WAIT_MS: u64 = 1900;
 /// one, ms. libsigrok's USBTMC transport reads Bulk-IN with a hard 1000 ms
 /// timeout; the expiry is checked once per main-loop iteration, hence the
 /// margin. Fits the slowest DC conversion (OSR 32768 chopped, 400 ms: the
-/// steady MEDIUM reading) with room for the poll; a SLOW-rate reading (one
-/// per 4 conversions, 1.6 s) does not fit, READ? then answers the latest.
+/// steady MEDIUM and SLOW reading, both one per conversion) with room for
+/// the poll.
 const SCPI_QUICK_MS: u64 = 850;
 // The next fresh steady reading: at most one conversion away + poll / loop.
 const _: () = assert!(SCPI_QUICK_MS >= hy3131::ad1_period_us_r22(0x17) as u64 / 1000 + 300);

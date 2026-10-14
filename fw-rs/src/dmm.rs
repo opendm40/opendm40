@@ -118,13 +118,13 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   FAST    8192 (0x15) always         none                                 10/s (one per conversion)
 //   MEDIUM  stock: 0x15 while moving,  V r0..r2 / mV r1: 8 (3.2 s),         10/s moving, 2.5/s steady
 //   (dflt)  0x17 (32768) once stable   ohm r0..r3: 16 (6.4 s), others none  (stock)
-//   SLOW    as MEDIUM                  16 every range (6.4 s; ohm r0..r3:    one per 4 conversions:
-//                                      32, 12.8 s)                          0.625/s steady (1.6 s)
-// SLOW_DECIM (4) and the SLOW windows were sized for the old ~107 ms guess
-// (~2.3/s, ~1.7 s window): with the real 400 ms they give 0.625/s and READ?
-// (SCPI_QUICK_MS 850 ms) never sees a fresh SLOW reading, it answers the
-// latest one. Kept as is pending a decision (SLOW_DECIM = 1 would restore
-// the intended ~2.5/s with the same 16-conversion window).
+//   SLOW    as MEDIUM                  16 every range (6.4 s; ohm r0..r3:    as MEDIUM (one per conversion):
+//                                      32, 12.8 s)                          10/s moving, 2.5/s steady
+// SLOW differs from MEDIUM only by the longer window (lower noise, slower to
+// settle); it reports every conversion like MEDIUM, so READ? (SCPI_QUICK_MS
+// 850 ms) always gets a fresh reading. (Until 2026-10-14 SLOW reported one
+// reading per 4 conversions, sized for the old ~107 ms guess: 0.625/s at the
+// real 400 ms.)
 // The +1 digit (`Val::ext`, ext-capable ranges of the table above) is shown
 // only while the window holds at least AVG_FULL slow (OSR 32768) conversions:
 // never in FAST (one OSR-8192 conversion has ~2x the noise of one at 32768),
@@ -160,8 +160,6 @@ impl Rate {
 /// AD1OSR codes: the stock steady (32768) and moving (8192) settings.
 const OSR_SLOW: u8 = 0x17;
 const OSR_FAST: u8 = 0x15;
-/// SLOW: one reading per this many conversions.
-const SLOW_DECIM: u8 = 4;
 
 /// UF-21: text for the UI when the mV-first AUTO is selected for V
 /// (`Dmm::mv_auto_warn`).
@@ -607,9 +605,6 @@ pub struct Dmm {
     diag_ctr: u8,
     /// FR-05 conversion rate (persisted).
     rate: Rate,
-    /// SLOW: conversions since the last config write (one reading per
-    /// SLOW_DECIM of them).
-    dec_k: u8,
     /// Time of `poll` (ms), for the interval measurements below.
     t_poll: u64,
     /// Last reading / last AD1 conversion (ms; None: the next interval spans
@@ -754,7 +749,6 @@ impl Dmm {
             diag_t: 0,
             diag_ctr: 0,
             rate: Rate::Medium,
-            dec_k: 0,
             t_poll: 0,
             t_rd: None,
             period_ms: 0.0,
@@ -830,7 +824,6 @@ impl Dmm {
         if r != self.rate {
             self.rate = r;
             self.avg.reset();
-            self.dec_k = 0;
             self.t_rd = None;
             self.period_ms = 0.0;
         }
@@ -901,7 +894,6 @@ impl Dmm {
             _ => &CFG_F15[0],
         };
         self.avg.reset();
-        self.dec_k = 0;
         self.t_rd = None;
         self.t_conv = None;
         hy::quiesce();
@@ -1575,17 +1567,6 @@ impl Dmm {
             14 => self.poll_freq_mode(now),
             _ if self.t_sensor != 0 => self.poll_rtd(clk, now),
             _ => self.poll_temp(now),
-        };
-        // SLOW: one reading per SLOW_DECIM conversions of the AD1 functions
-        // (the autorange above still ran on every conversion). Counted after
-        // the function produced a reading, so a range change (dec_k = 0 in
-        // write_config) restarts the count.
-        let r = match r {
-            Some(_) if self.rate == Rate::Slow && self.rate_applies() => {
-                self.dec_k = self.dec_k.wrapping_add(1);
-                r.filter(|_| self.dec_k % SLOW_DECIM == 0)
-            }
-            _ => r,
         };
         if r.is_some() {
             ema_ms(&mut self.period_ms, &mut self.t_rd, now);
@@ -2628,8 +2609,13 @@ mod tests {
         // The FR-05 table's times (datasheet: OSR * 30 / SYSCLK, x2 chopped).
         assert_eq!(hy::ad1_period_us_r22(OSR_FAST), 100_000);
         assert_eq!(hy::ad1_period_us_r22(OSR_SLOW), 400_000);
-        assert_eq!(SLOW_DECIM as u32 * hy::ad1_period_us_r22(OSR_SLOW), 1_600_000);
         assert_eq!(AVG_FULL as u32 * hy::ad1_period_us_r22(OSR_SLOW), 3_200_000);
+        // Window spans (one reading per conversion in every rate): MEDIUM
+        // V r0 8 (3.2 s), SLOW 16 (6.4 s), SLOW ohm r0..r3 32 (12.8 s).
+        let span = |r, m, g| avg_cfg(r, false, m, g).unwrap().0 as u32 * hy::ad1_period_us_r22(OSR_SLOW);
+        assert_eq!(span(Rate::Medium, 1, 0), 3_200_000);
+        assert_eq!(span(Rate::Slow, 1, 0), 6_400_000);
+        assert_eq!(span(Rate::Slow, 10, 3), 12_800_000);
     }
 
     #[test]

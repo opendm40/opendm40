@@ -969,10 +969,10 @@ fn main() {
     for (name, r, label) in &cases {
         for ext in [false, true] {
             for (hold, lim) in [(0u8, meter::V_NONE), (1, meter::V_PASS), (2, meter::V_HI), (3, meter::V_LO)] {
-                // Timebase x rate chip (FR-05: worst widths SLOW 2.3/s,
+                // Timebase x rate chip (FR-05: worst widths SLOW 2.5/s,
                 // FAST 37/s, MED --/s, grey n/a) x REC.
                 let chips = [
-                    ui::RateChip { rate: 0, period_ms: 430, applies: true },
+                    ui::RateChip { rate: 0, period_ms: 400, applies: true },
                     ui::RateChip { rate: 2, period_ms: 27, applies: true },
                     ui::RateChip { rate: 1, period_ms: 0, applies: true },
                     ui::RateChip { rate: 1, period_ms: 400, applies: false },

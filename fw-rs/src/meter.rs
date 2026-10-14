@@ -221,8 +221,8 @@ impl Stats {
 //   temperature, thermocouple  ~2.2 s         2 (~4.4 s)     4 (~9 s)       0.3 C
 //   temperature, PT / NTC      0.4 s          4 (~1.6 s)     16 (~6.4 s)    0.3 C
 //   continuity                 never (the readout must follow the beeper)
-// SLOW rate: DC readings every 1.6 s, so the DC spans are 4x longer (Low
-// ~6.4 s, High ~26 s); FAST: every 0.1 s, 4x shorter.
+// SLOW rate: DC readings as MEDIUM (every 0.4 s steady; SLOW only lengthens
+// the Dmm code window), so the same spans; FAST: every 0.1 s, 4x shorter.
 // The +1 digit is decided by the Dmm (`Val::ext`: only with a full converter
 // window, dmm.rs FR-05 table); smoothing never adds it.
 
