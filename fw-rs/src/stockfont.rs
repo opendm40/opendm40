@@ -478,101 +478,6 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
     crate::probe::end();
 }
 
-/// Mean coverage (0..15) of the 2x2 block of full-size glyph pixels behind
-/// half-size pixel (hx, hy) of `g`; pixels outside the glyph count as 0.
-fn alpha_half(g: &Glyph, hx: i32, hy: i32) -> u8 {
-    let (w, h) = (g.w as i32, g.h as i32);
-    let mut s = 0u32;
-    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-        let (px, py) = (2 * hx + dx, hy + dy);
-        if px >= 0 && px < w && py >= 0 && py < h {
-            s += g.alpha(px as u32, py as u32) as u32;
-        }
-    }
-    ((s + 2) / 4) as u8
-}
-
-const MAXH: usize = 12;
-
-/// Half-size glyphs of `text` and their x offsets from the text start:
-/// proportional spacing, each glyph advances by its half-size width plus
-/// `gap` (the stock digit advances are tabular, which at half size left a
-/// visible hole after a narrow '1'). Returns the count and the total width.
-fn half_layout(font: Font, text: &str, gap: i16, gs: &mut [Option<Glyph>; MAXH], xs: &mut [i16; MAXH]) -> (usize, i16) {
-    let (mut n, mut pen, mut end) = (0usize, 0i16, 0i16);
-    for ch in text.chars().take(MAXH) {
-        let g = font.glyph(ch as u32);
-        xs[n] = pen;
-        gs[n] = g;
-        let w = g.map_or(font.line_h() as i16 / 4, |g| (g.w as i16 + 1) / 2);
-        if g.is_some() {
-            end = pen + w;
-        }
-        pen += w + gap;
-        n += 1;
-    }
-    (n, end)
-}
-
-
-/// `text` in `font` at half size (each pixel the mean of a 2x2 block of the
-/// full-size glyph, as `label_half`), proportionally spaced (`half_layout`),
-/// sitting on `base` (exclusive bottom y of the full-size baseline, halved)
-/// and aligned in `r` (align 3..5 right, 6..8 centred, else left). Paints all
-/// of `r`, so one call replaces the previous text without flicker. Used for
-/// the meter-strip reading of the combined view (F78 at half size = "F39").
-pub fn half_text(font: Font, r: Rect, text: &str, base: i16, gap: i16, align: u8, fg: Color, bg: Color) {
-    if r.w <= 0 || r.h <= 0 {
-        return;
-    }
-    let mut gs = [None; MAXH];
-    let mut xs = [0i16; MAXH];
-    let (n, tw) = half_layout(font, text, gap, &mut gs, &mut xs);
-    let ox = r.x
-        + match align {
-            3..=5 => r.w - tw,
-            6..=8 => (r.w - tw) / 2,
-            _ => 0,
-        };
-    let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);
-    let y1 = (r.y + r.h - 1).min(lcd::H as i16 - 1);
-    let (x0, y0) = (r.x.max(0), r.y.max(0));
-    // Glyph per column, as in `label`.
-    let mut cover = [u8::MAX; 480];
-    for i in 0..n {
-        if let Some(g) = &gs[i] {
-            for gx in 0..(g.w as i16 + 1) / 2 {
-                let x = ox + xs[i] + gx;
-                if x >= x0 && x <= x1 {
-                    cover[x as usize] = i as u8;
-                }
-            }
-        }
-    }
-    let lut = ramp(fg, bg);
-    #[cfg(test)]
-    crate::probe::begin(crate::probe::TEXT, bg);
-    lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
-    for y in y0..=y1 {
-        for x in x0..=x1 {
-            let gi = cover[x as usize];
-            #[cfg(test)]
-            crate::probe::sub(gi);
-            let mut c = bg;
-            if let Some(Some(g)) = gs.get(gi as usize) {
-                // Full-size glyph row of half-size row y (see label_half).
-                let gy = 2 * (y as i32 - base as i32) + g.h as i32 + g.yoff as i32;
-                if gy > -2 && gy < g.h as i32 {
-                    c = lut[alpha_half(g, (x - ox - xs[gi as usize]) as i32, gy) as usize];
-                }
-            }
-            lcd::data(c);
-        }
-    }
-    #[cfg(test)]
-    crate::probe::end();
-}
-
 mod logo_data {
     include!("stockfont_logo.rs");
 }
@@ -682,22 +587,6 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
     }
     #[cfg(test)]
     crate::probe::end();
-}
-
-/// Rows of `text`'s glyph boxes relative to its line top: (first, last),
-/// None for no glyphs (to fit text whose glyphs reach above the caps ('i',
-/// '%') or below the baseline ('y', 'q') into a tight bar).
-pub fn glyph_rows(font: Font, text: &str) -> Option<(i16, i16)> {
-    let base = font.line_h() as i16 - font.descent();
-    let (mut t, mut b) = (i16::MAX, i16::MIN);
-    for ch in text.chars() {
-        if let Some(g) = font.glyph(ch as u32) {
-            let top = base - g.h as i16 - g.yoff as i16;
-            t = t.min(top);
-            b = b.max(top + g.h as i16 - 1);
-        }
-    }
-    if t > b { None } else { Some((t, b)) }
 }
 
 /// Width in pixels of `text` as `label` lays it out (pen advance plus the
@@ -958,11 +847,6 @@ impl Ink {
             }
         }
         None
-    }
-
-    /// Ink width as laid out (glyph boxes), 0 for none.
-    pub fn width(&self) -> i16 {
-        self.bx.w
     }
 }
 

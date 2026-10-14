@@ -53,8 +53,7 @@ pub const DRAG_AXIS: u8 = 1;
 /// Hold is gesture::grab_ms != 0 with the Stock model, shown as "Hold
 /// <ms> ms"; review 7dc32ac L4: a stored mode 2 showed as "Axis lock").
 pub const DRAG_NAMES: [&str; 2] = ["Stock", "Axis lock"];
-/// Persistence (Display tab): OFF, MIN, 1S, INF; layer period (ms).
-pub const PERSIST_NAMES: [&str; 4] = ["OFF", "MIN", "1S", "INF"];
+/// Persistence (Display tab: OFF, MIN, 1S, INF): layer period (ms).
 const PERSIST_MS: [u64; 4] = [0, 40, 500, u64::MAX];
 
 /// A touch on the scope page's drag area.
@@ -450,14 +449,7 @@ impl App {
         let s = self.scope.s;
         // Persistence: the previous frame joins the current layer (stock
         // 4.3); layers swap every period; off in roll and STOP.
-        // (The settings window still has one Persist toggle: INF.)
-        let pm = if self.scope.rolling() || !s.run {
-            0
-        } else if self.persist_trace {
-            3
-        } else {
-            self.sp.persist as usize
-        };
+        let pm = if self.scope.rolling() || !s.run { 0 } else { self.sp.persist as usize };
         if pm == 0 {
             c.ps_a = [su::EMPTY; 399];
             c.ps_b = [su::EMPTY; 399];
@@ -1338,7 +1330,6 @@ impl App {
             }
             su::MfHit::Persist(i) => {
                 self.sp.persist = i.min(3);
-                self.persist_trace = i == 3;
                 self.sp_settings_changed();
             }
             su::MfHit::Rising(r) => {

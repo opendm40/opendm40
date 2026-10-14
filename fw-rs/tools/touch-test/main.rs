@@ -560,21 +560,14 @@ fn hit_tests(ck: &mut Ck) {
     };
     page(ck, "dmm function row", &dmm_hit, &|b| b.y0 >= ui::BTN_Y as i32 - 4, &[0, 1, 2, 3, 4, 5]);
     page(ck, "dmm REL + rate chip", &dmm_hit, &|b| b.y0 >= 175 && b.y1 < 279, &[100, 103]);
-    // Combined view: function band, panel, chips.
-    let sc = scope::Scope::new();
+    // Combined view: the DMM function band over the replica page.
     host::reset(0);
-    ui::SCOPE_COMBINED.draw_static(&sc);
+    let mut cm = scope_ui::Model::DEFAULT;
+    cm.combined = true;
+    scope_ui::invalidate();
+    scope_ui::update(&cm);
     ui::func_band(dmm::Button::Volt, 1, false);
     page(ck, "function band", &|x, y| o(ui::func_band_hit(x, y)), &|b| b.y0 >= ui::FUNC_Y as i32, &[0, 1, 2, 3, 4, 5]);
-    let pidx = |full: bool| move |x: u16, y: u16| ui::panel_hit(full, x, y).map(|p| p as u32);
-    host::reset(0);
-    ui::SCOPE_COMBINED.draw_static(&sc);
-    page(ck, "combined panel", &pidx(false), &|b| b.x0 >= 414, &[]);
-    page(ck, "combined chips", &|x, y| o(ui::chip_hit(x, y)), &|b| b.y1 < ui::SBAR_H as i32, &[0, 1, 2, 3]);
-    host::reset(0);
-    ui::SCOPE_FULL.draw_static(&sc);
-    page(ck, "scope panel", &pidx(true), &|b| b.x0 >= 414, &[]);
-    page(ck, "scope chips", &|x, y| o(ui::chip_hit(x, y)), &|b| b.y1 < ui::SBAR_H as i32, &[0, 1, 2, 3]);
     // Stock-replica scope page: right panel (4 px vertical slop), MF popup
     // tabs, CH1 popup.
     host::reset(0);
@@ -612,13 +605,6 @@ fn hit_tests(ck: &mut Ck) {
             _ => None,
         };
         page(ck, &format!("replica CH1 tab {tab}"), &hit, &|b| b.x0 >= 215 && b.y0 >= 50, &[1000, 1001, 1002]);
-    }
-    // Scope settings window, every tab.
-    for tab in 0..4usize {
-        host::reset(0);
-        ui::scope_menu(tab, &sc, &[0, 10], false, false);
-        let hit = move |x, y| ui::scope_menu_hit(tab, x, y).map(|(t, k)| if k == 255 { 1000 + t as u32 } else { k as u32 });
-        page(ck, &format!("scope menu tab {tab}"), &hit, &all, &[1000, 1001, 1002, 1003]);
     }
     // Generator page: value boxes (ui::gen_box_hit) + the wave box (app.rs
     // View::Gen: x < 243, y 40..82).
