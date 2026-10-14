@@ -404,13 +404,6 @@ fn status(page: u8) -> ui::Status {
     ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, bars: 5, charging: false, locked: false, rec: true, csv: true, page }
 }
 
-fn frame(w: &World, v: &ui::ScopeView, clip: u16) {
-    let f = scope::Frame { data: &w.data, cols: None, trig: Some(1000), fs: 1_000_000, seq: 1 };
-    let mut prev = [(u16::MAX, 0u16); 401];
-    let cur = ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] };
-    v.frame(&f, &w.sc, &mut prev, &cur, false, false, clip);
-}
-
 fn meas_worst() -> (Vec<u8>, scope_meas::Results) {
     let mut res = scope_meas::Results { v: [f32::NAN; 20] };
     // Widest strings per unit class.
@@ -426,45 +419,23 @@ fn meas_worst() -> (Vec<u8>, scope_meas::Results) {
     (vec![0, 10, 9, 11], res)
 }
 
-fn combined_regions(band: bool) -> Vec<(&'static str, Bx)> {
-    let mut r = vec![
-        ("screen", Bx::new(0, 0, 480, 320)),
-        ("bar", Bx::new(0, 0, 480, ui::SBAR_H as i32)),
-        ("strip", Bx::new(0, ui::STRIP_Y as i32, 480, ui::STRIP_H as i32)),
-        ("panel", Bx::new(414, ui::SCOPE_COMBINED.y0 as i32, 66, ui::SCOPE_COMBINED.h as i32)),
-        ("meas", Bx::new(0, 301, 480, 19)),
-    ];
-    if band {
-        r.push(("band", Bx::new(0, ui::FUNC_Y as i32 + 1, 480, 301 - ui::FUNC_Y as i32 - 1)));
-    }
-    r
-}
-
-fn full_regions() -> Vec<(&'static str, Bx)> {
-    vec![
-        ("screen", Bx::new(0, 0, 480, 320)),
-        ("bar", Bx::new(0, 0, 480, ui::SCOPE_FULL.y0 as i32)),
-        ("panel", Bx::new(414, ui::SCOPE_FULL.y0 as i32, 66, ui::SCOPE_FULL.h as i32)),
-        ("meas", Bx::new(0, 301, 480, 19)),
-    ]
-}
-
-/// The combined view as the app draws it after a view switch + one reading.
-fn combined(w: &World, dv: &mut ui::DmmView, r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bool, alt: bool, band: bool, st: &ui::Status) {
+/// The combined view as the app draws it: the replica page (graph empty),
+/// the meter strip from a reading, optionally the DMM function band.
+fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bool, alt: bool, band: bool, gen: &str) {
     host::reset(0);
-    dv.invalidate();
-    dv.strip_static();
-    dv.label = label;
-    ui::SCOPE_COMBINED.draw_static(&w.sc);
-    let (sel, res) = meas_worst();
-    ui::scope_measurements(&sel, &res);
+    let mut m = scope_ui::Model::DEFAULT;
+    m.combined = true;
+    scope_ui::invalidate();
+    scope_ui::strip_invalidate();
+    scope_ui::graph().clear();
+    scope_ui::update(&m);
+    scope_ui::cells(&m, &["Freq:444.4kHz", "Vp-p:-444mV", "Cycl:444.4us", "Vrms:-444mV"]);
+    let mut d = ui::strip_data(r, hold, lim, rel, hv_of(r), alt, label, false);
+    d.gen = scope_ui::Txt::new(gen);
+    scope_ui::meter_strip(&d);
     if band {
         ui::func_band(r_button(r), r.mode, r.acdc);
     }
-    frame(w, &ui::SCOPE_COMBINED, if band { ui::FUNC_Y } else { u16::MAX });
-    ui::scope_status(st);
-    ui::ScopeView::gen_chip(&w.gen);
-    dv.strip(r, hold, lim, rel, hv_of(r), alt);
 }
 
 fn r_button(r: &Reading) -> Button {
@@ -693,157 +664,52 @@ fn main() {
         }
     }
 
-    // 1. Combined view: every strip case x hold x verdict x REL x alt.
+    // 1. Combined view: the DMM function band over the replica page (full
+    //    layout rules on the band's items), every strip case.
+    let band_area = Bx::new(0, ui::FUNC_Y as i32, 480, 301 - ui::FUNC_Y as i32);
     for (name, r, label) in &cases {
-        for hold in 0..4u8 {
-            for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
-                for rel in [false, true] {
-                    combined(&w, &mut dv, r, *label, hold, lim, rel, false, false, &st);
-                    ck.check(&format!("combined/{name}/h{hold}/l{lim}/r{}", rel as u8), &combined_regions(false));
-                }
-            }
-        }
-        // HV forced on V cases.
-        if r.mode <= 3 {
-            for hv in 0..3u8 {
+        combined(r, *label, 0, 0, false, false, true, "");
+        ck.check_area(&format!("combined/{name}/band"), &[("band", band_area)], true, Some(band_area));
+    }
+
+    // 3. Replica top bar / panel / cells over timebase x V/div x probe x
+    //    coupling x status x trigger level x edge: no text collisions.
+    for tb in 0..30u8 {
+        for vdiv in 0..22u8 {
+            for (k, tv) in [-444.4e-3f32, 0.0, 9.876e3].iter().enumerate() {
+                let mut m = scope_ui::Model::DEFAULT;
+                m.tb = tb;
+                m.vdiv = vdiv;
+                m.probe = (vdiv % 13).min(12);
+                m.ac = vdiv % 2 == 0;
+                m.status = (tb + vdiv) % 5;
+                m.trig_v = *tv;
+                m.rising = k != 1;
+                m.roll = k == 2;
+                m.gen_hz = if k == 1 { 10.0e6 } else { 0.0 };
+                m.battery = vdiv % 6;
+                m.charging = k == 0;
                 host::reset(0);
-                dv.invalidate();
-                ui::SCOPE_COMBINED.draw_static(&w.sc);
-                dv.strip(r, 0, 0, false, hv, false);
-                ck.check(&format!("combined/{name}/hv{hv}"), &combined_regions(false));
-            }
-        }
-        // Function band open.
-        combined(&w, &mut dv, r, *label, 0, 0, false, false, true, &st);
-        ck.check(&format!("combined/{name}/band"), &combined_regions(true));
-    }
-
-    // 2. Strip updates: A then B equals a fresh B (no stale pixels).
-    let mut stale = 0;
-    for (na, a, la) in &cases {
-        for (nb, b, lb) in &cases {
-            let draw = |dv: &mut ui::DmmView, r: &Reading, l: Option<&'static str>, hold: u8, rel: bool| {
-                dv.label = l;
-                dv.strip(r, hold, if rel { meter::V_PASS } else { 0 }, rel, hv_of(r), false);
-            };
-            host::reset(0);
-            dv.invalidate();
-            draw(&mut dv, a, *la, 3, true);
-            draw(&mut dv, b, *lb, 0, false);
-            let got: Vec<u16> = emu().fb.clone();
-            host::reset(0);
-            dv.invalidate();
-            draw(&mut dv, b, *lb, 0, false);
-            ck.cases += 1;
-            let y0 = ui::STRIP_Y as usize * W;
-            let y1 = (ui::STRIP_Y + ui::STRIP_H) as usize * W;
-            let diff: Vec<usize> = (y0..y1).filter(|&i| got[i] != emu().fb[i]).collect();
-            if !diff.is_empty() {
-                stale += 1;
-                let mut b = EMPTY;
-                for &i in &diff {
-                    b.add((i % W) as i32, (i / W) as i32);
-                }
-                ck.fail(&format!("update {na} -> {nb}"), format!("{} stale pixels in the strip at {:?}", diff.len(), b));
+                scope_ui::invalidate();
+                scope_ui::graph().clear();
+                scope_ui::update(&m);
+                ck.check_replica(&format!("replica-bar/tb{tb}/v{vdiv}/{k}"));
             }
         }
     }
-
-    // 3. Scope-family top bar: chips over timebase x V/div x probe x
-    //    coupling x run state x trigger level x slope.
-    let modes = [scope::TrigMode::Auto, scope::TrigMode::Normal, scope::TrigMode::Single];
-    let bar_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, ui::SBAR_H as i32))];
-    for tb in scope::TB_MIN..=scope::TB_MAX {
-        for range in 0..10 {
-            for probe in scope::PROBES {
-                for (k, trig_row) in [-10, 140, 290].iter().enumerate() {
-                    let s = scope::Settings {
-                        run: k != 1,
-                        tb,
-                        range,
-                        ac: range % 2 == 0,
-                        trig_row: *trig_row,
-                        pos: if k == 2 { -392 } else { 0 },
-                        rising: k != 0,
-                        mode: modes[(tb + range) % 3],
-                        probe,
-                        hpos: 200,
-                    };
-                    w.sc.apply(s, 0);
-                    host::reset(0);
-                    lcd::fill_rect(0, 0, 480, ui::SBAR_H, ui::S_BAR);
-                    stockfont::logo(4, 4, ui::S_BAR);
-                    ui::SCOPE_COMBINED.labels(&w.sc);
-                    ui::scope_status(&st);
-                    ck.check(&format!("bar/tb{tb}/r{range}/p{probe}/t{trig_row}"), &bar_regions);
-                    // Probe extremes: "1mV" (10 mV x0.1), "10kV" (10 V x1000).
-                    if tb == 13 && k == 1 && ((range, probe) == (0, 0.1) || (range, probe) == (9, 1000.0)) {
-                        save(&out, &format!("s03-bar-r{range}-p{probe}"));
-                    }
-                }
-            }
-        }
-    }
-    w.sc.apply(scope::Settings::DEFAULT, 0);
-    // Status block combinations (with the widest chips).
-    let mut wide = scope::Settings::DEFAULT;
-    wide.range = 5;
-    wide.ac = true;
-    wide.tb = 14;
-    wide.trig_row = -10;
-    wide.probe = 100.0;
-    wide.run = false;
-    w.sc.apply(wide, 0);
-    for bits in 0..128u32 {
-        for page in [0u8, 1, 2, 3, 255] {
-            let s = ui::Status {
-                uptime_s: if bits & 1 != 0 { 0 } else { 99 * 3600 + 59 * 60 + 59 },
-                bt: bits & 2 != 0,
-                bars: if bits & 4 != 0 { 0 } else { 5 },
-                charging: bits & 8 != 0,
-                locked: bits & 16 != 0,
-                rec: bits & 32 != 0,
-                csv: bits & 64 != 0,
-                page,
-            };
-            host::reset(0);
-            lcd::fill_rect(0, 0, 480, ui::SBAR_H, ui::S_BAR);
-            stockfont::logo(4, 4, ui::S_BAR);
-            ui::SCOPE_COMBINED.labels(&w.sc);
-            ui::scope_status(&s);
-            ck.check(&format!("status/{bits}/{page}"), &bar_regions);
-        }
-    }
-
-    // 4. Full Scope page: panel states, measurement bar, generator chip.
-    for (k, gen_hz) in [0u32, 1, 999, 50_000, 999_000, 2_000_000, 10_000_000].iter().enumerate() {
-        let mut s = wide;
-        s.mode = modes[k % 3];
-        s.ac = k % 2 == 0;
-        s.rising = k % 2 == 1;
-        s.run = k % 3 != 0;
-        w.sc.apply(s, 0);
-        let mut g = w.gen.s;
-        g.on = *gen_hz != 0;
-        g.freq_hz = (*gen_hz).max(1);
-        w.gen.apply(g);
-        host::reset(0);
-        ui::SCOPE_FULL.draw_static(&w.sc);
-        frame(&w, &ui::SCOPE_FULL, u16::MAX);
-        let (sel, res) = meas_worst();
-        ui::scope_measurements(&sel, &res);
-        ui::scope_status(&status(2));
-        ui::ScopeView::gen_chip(&w.gen);
-        ck.check(&format!("scope/{k}/gen{gen_hz}"), &full_regions());
-    }
-    // Every measurement item in every cell.
+    // Every measurement item, worst values, in every cell.
     let (_, res) = meas_worst();
-    for (id, _, _) in scope_meas::ITEMS.iter() {
+    for (id, name, _) in scope_meas::ITEMS.iter() {
+        let mut b = [0u8; 24];
+        let t = scope_meas::format(&mut b, *id, res.v[*id as usize]);
+        let _ = name;
         host::reset(0);
-        ui::SCOPE_FULL.draw_static(&w.sc);
-        ui::scope_measurements(&[*id, *id, *id, *id], &res);
-        ui::ScopeView::gen_chip(&w.gen);
-        ck.check(&format!("meas/{id}"), &full_regions());
+        scope_ui::invalidate();
+        scope_ui::graph().clear();
+        let m = scope_ui::Model::DEFAULT;
+        scope_ui::update(&m);
+        scope_ui::cells(&m, &[t, t, t, t]);
+        ck.check_replica(&format!("replica-meas/{id}"));
     }
 
     // 5. DMM page status bar.
@@ -1139,69 +1005,16 @@ fn main() {
         }
     }
 
-    // 6e. Scope settings window (MF on the scope page), every tab; the
-    //     Settings tab with each probe factor (UF-12) and both couplings.
-    //     The hit map must land every probe button on its own item.
-    {
-        let menu_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("menu", Bx::new(13, 28, 401, 192))];
-        let (sel, _) = meas_worst();
-        for tab in 0..4usize {
-            let probes: Vec<usize> = if tab == 3 { (0..scope::PROBES.len()).collect() } else { vec![3] };
-            for k in probes {
-                let mut s = scope::Settings::DEFAULT;
-                s.probe = scope::PROBES[k];
-                s.ac = k % 2 == 0;
-                w.sc.apply(s, 0);
-                host::reset(0);
-                ui::scope_menu(tab, &w.sc, &sel, k % 2 == 0, k % 3 == 0);
-                ck.check_opts(&format!("scope-menu/{tab}/{}", scope::PROBE_NAMES[k]), &menu_regions, false);
-                if tab == 3 && k == 12 {
-                    save(&out, "s02-scope-menu-probe");
-                }
-            }
-        }
-        for k in 0..scope::PROBES.len() {
-            let (x, y) = (16 + (k % 7) as u16 * 56 + 26, 28 + 80 + (k / 7) as u16 * 38 + 17);
-            ck.cases += 1;
-            if ui::scope_menu_hit(3, x, y) != Some((3, 3 + k)) {
-                ck.fail("scope-menu/hit", format!("probe {} at ({x},{y})", scope::PROBE_NAMES[k]));
-            }
-        }
-        for (x, want) in [(76u16, Some((3, 0usize))), (200, Some((3, 1))), (330, None)] {
-            ck.cases += 1;
-            if ui::scope_menu_hit(3, x, 85) != want {
-                ck.fail("scope-menu/hit", format!("coupling row x {x}"));
-            }
-        }
-        w.sc.apply(scope::Settings::DEFAULT, 0);
-    }
-
     // 7. Gestures: zone table, axis lock, hold-to-grab, Up on captured
     //    touches (gesture.rs through its DBG:DRAG hook).
     {
-        use gesture::{Axis, Gesture as G, Target as T};
+        use gesture::{Axis, Gesture as G};
         let mut t = |name: &str, ok: bool| {
             ck.cases += 1;
             if !ok {
                 ck.fail(&format!("gesture/{name}"), "unexpected result".into());
             }
         };
-        let lv = 100; // trigger level pixel row
-        let cx = Some([50, 300]);
-        let cy = Some([30, 180]);
-        t("band V = level", gesture::target(380, 10, Axis::V, false, lv, None, None) == T::Level);
-        t("band H = trigger position", gesture::target(380, 10, Axis::H, false, lv, None, None) == T::TrigPos);
-        t("body V = offset", gesture::target(200, 10, Axis::V, false, lv, None, None) == T::Offset);
-        t("gutter V = offset", gesture::target(0, 200, Axis::V, false, lv, None, None) == T::Offset);
-        t("body H = trigger position", gesture::target(200, 10, Axis::H, false, lv, None, None) == T::TrigPos);
-        t("near Y cursor V", gesture::target(200, 170, Axis::V, false, lv, cx, cy) == T::CurY(1));
-        t("near Y cursor H = position", gesture::target(200, 170, Axis::H, false, lv, cx, cy) == T::TrigPos);
-        t("near X cursor H", gesture::target(60, 250, Axis::H, false, lv, cx, cy) == T::CurX(0));
-        t("near X cursor V = offset", gesture::target(60, 250, Axis::V, false, lv, cx, cy) == T::Offset);
-        t("X cursor 21 px away", gesture::target(321, 250, Axis::H, false, lv, cx, cy) == T::TrigPos);
-        t("hold: near level line anywhere", gesture::target(20, 120, Axis::V, true, lv, None, None) == T::Level);
-        t("hold: far from the line", gesture::target(380, 130, Axis::V, true, lv, None, None) == T::Offset);
-        t("hold: cursor within 24", gesture::target(200, 204, Axis::V, true, lv, cx, cy) == T::CurY(1));
         let run = |grab: u16, p0: (u16, u16), p1: (u16, u16), hold: u16| -> Vec<G> {
             gesture::set_grab_ms(grab);
             let mut tr = gesture::Tracker::new();
@@ -1235,8 +1048,6 @@ fn main() {
     g.freq_hz = 1000;
     w.gen.apply(g);
     let find = |n: &str| cases.iter().find(|c| c.0 == n).map(|c| (c.1, c.2)).unwrap();
-    let mut st2 = status(1);
-    st2.rec = false;
     let scenes: [(&str, &str, u8, u8, bool, bool); 10] = [
         ("c01-dcv", "dcv", 0, 0, false, false),
         ("c02-acdc-hold-rel", "acdc_600mv", 1, 0, true, false),
@@ -1255,24 +1066,10 @@ fn main() {
         if case == "hz_mhz" {
             r.auto_plus = true;
         }
-        combined(&w, &mut dv, &r, l, hold, lim, rel, alt, file == "c10-band", &st2);
+        combined(&r, l, hold, lim, rel, alt, file == "c10-band", if file == "c01-dcv" { "1.00kHz" } else { "" });
         save(&out, file);
     }
     {
-        let mut s = wide;
-        s.run = false;
-        w.sc.apply(s, 0);
-        host::reset(0);
-        ui::SCOPE_FULL.draw_static(&w.sc);
-        frame(&w, &ui::SCOPE_FULL, u16::MAX);
-        let (sel, res) = meas_worst();
-        ui::scope_measurements(&sel, &res);
-        let mut s2 = status(2);
-        s2.charging = true;
-        s2.locked = true;
-        ui::scope_status(&s2);
-        ui::ScopeView::gen_chip(&w.gen);
-        save(&out, "s01-scope");
         host::reset(0);
         let (r, _) = find("dcv");
         dv.label = None;

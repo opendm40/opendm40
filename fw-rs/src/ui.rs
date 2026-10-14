@@ -8,7 +8,6 @@ use crate::fonts::LABEL;
 use crate::gen;
 use crate::lcd::{self, Color};
 use crate::meter;
-use crate::scope;
 use crate::text;
 
 /// RGB565 of the stock colours (panel reads back RGB666).
@@ -24,7 +23,6 @@ pub const SEL: Color = 0x0419; // (0, 128, 200) selected button
 /// stock layout table gui_v2_6.h:330-339 uses it). Owner request: back to
 /// the stock colour (an earlier fw-rs build drew the reading red).
 pub const VALUE: Color = 0xFC40;
-pub const TRACE: Color = 0xFFE0;
 
 pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items after the logo (4 + LOGO + 3).
@@ -52,8 +50,6 @@ pub enum View {
     Settings,
     /// MF range page of the multimeter.
     Range,
-    /// MF settings window of the scope.
-    ScopeMenu,
     /// Generator value entry (frequency / Vpp / duty).
     Keypad,
     /// Device / About page (stock gui_v2_6.h section 6 "6.产品信息").
@@ -236,8 +232,6 @@ pub struct DmmView {
     last_chip: Option<&'static str>,
     /// Temperature deg F text in the status-bar slot as last drawn.
     last_f: [u8; 12],
-    /// Meter strip of the combined view, as last drawn.
-    st: Strip,
 }
 
 /// Bottom button `i` (0..5) with its stock glyphs, in the box (x, y, 76, 40)
@@ -285,57 +279,15 @@ pub fn func_band(button: Button, mode: u8, acdc: bool) {
     }
 }
 
-/// Repaint the band area with the chrome colour (band closed; the graph
-/// columns and the panel are redrawn by the caller).
-pub fn band_clear() {
-    lcd::fill_rect(0, FUNC_Y, lcd::W, MEAS_Y - FUNC_Y, S_BAR);
-}
-
-/// Whether a touch at row `y` is on the meter strip.
-pub fn strip_hit(y: u16) -> bool {
-    (y as i16) >= STRIP_Y && (y as i16) < STRIP_Y + STRIP_H
-}
-
 /// Function button (0..5) of the band under a tap, None outside the band.
 pub fn func_band_hit(x: u16, y: u16) -> Option<usize> {
     if (FUNC_Y..MEAS_Y).contains(&y) { Some((x.saturating_sub(2) / 79).min(5) as usize) } else { None }
 }
 
-// ------------------------------------------------------------ meter strip
-// Combined DMM+Scope view (docs/combined-view-design.md §2.3/§2.4, geometry
-// reworked for the layout rules: every ink box >= 3 px from any other and
-// inside its container, >= 4 px from the screen edges; checked on the host by
-// tools/ui-render). Band rows 27..83 under the 27 px scope-family top bar:
-//   badges  x 4..50, rows 30..44 / 48..62 / 66..80 (F14 in 47x15 pills)
-//   value   F78 at half size ("F39"), right-aligned to x 233, rows 40..79,
-//           its bottom on the unit / sub row 1 bottom
-//   sign    AUX_TAG glyph above the unit, unit LETTERS (F21 for "F"/"n",
-//           which LETTERS lacks), from x 237
-//   sub rows LETTERS right-aligned to x 475, ink rows 31..52 and 57..78; the
-//           AC+DC parts (in the main unit, which is not repeated) get their
-//           AC / DC tag 4 px before the text.
-// Widths (all measured by the host check): "-444.44" = 180 px (value field
-// 54..233), "MHz" = 62 px (237..298), "444.444KΩ" (NTC) = 151 px.
+// ------------------------------------------------------------ chips
 
-/// Top of the meter strip (= the scope-family bar height) and its height.
-pub const STRIP_Y: i16 = SBAR_H as i16;
-pub const STRIP_H: i16 = 57;
-/// Strip background; dark red at >= 100 V (stock lightning threshold).
-const ST_BG_HV: Color = 0x4800;
-/// Badge column: taps left of this x toggle REL (app.rs).
-pub const STRIP_BADGE_X1: u16 = 54;
-const BADGE_X: i16 = 4;
-const BADGE_W: i16 = 47;
-const BADGE_H: i16 = 15;
-const BADGE_Y: [i16; 3] = [30, 48, 66];
+/// Chip fill (temperature sensor pill).
 const CHIP: Color = 0x3186;
-const SV_X: i16 = 54;
-const SV_R: i16 = 234;
-const SV_BASE: i16 = 79;
-const SU_X: i16 = 237;
-const SU_W: i16 = 62;
-const SS_R: i16 = 476;
-const SS_Y: [i16; 2] = [29, 55];
 
 /// Temperature sensor chip (owner 2026-10-13: the sensor type must be
 /// legible at a glance): the full T_LABELS name in TEXT22 on a CHIP pill,
@@ -343,62 +295,6 @@ const SS_Y: [i16; 2] = [29, 55];
 /// bar slot, F14), in the meter strip as the second sub row (deg F not
 /// shown there). Pill: text + 2 x CHIP_PAD wide.
 const CHIP_PAD: i16 = 8;
-
-/// Strip badge contents (codes, so the cache is a byte compare).
-const B_NONE: u8 = 0;
-const B_AUTO: u8 = 1;
-const B_AUTOP: u8 = 2;
-const B_MANU: u8 = 3;
-const B_HV: u8 = 4;
-const B_HOLD: u8 = 5;
-const B_AHOLD_WAIT: u8 = 6;
-const B_AHOLD_HELD: u8 = 7;
-const B_REL: u8 = 8;
-const B_PASS: u8 = 9;
-const B_FAIL: u8 = 10;
-
-fn badge(slot: usize, code: u8, bg: Color) {
-    let r = rect(BADGE_X, BADGE_Y[slot], BADGE_W, BADGE_H);
-    let (t, fg, fill) = match code {
-        B_AUTO => ("AUTO", FG, CHIP),
-        B_AUTOP => ("AUTO+", FG, CHIP),
-        B_MANU => ("MANU", FG, CHIP),
-        B_HV => ("HV", 0xFFFF, 0xC9A0),
-        B_HOLD => ("HOLD", BG, VALUE),
-        B_AHOLD_WAIT => ("A-HOLD", 0x04FC, CHIP),
-        B_AHOLD_HELD => ("A-HOLD", BG, VALUE),
-        B_REL => ("REL", FG, SEL),
-        B_PASS => ("PASS", 0xFFFF, 0x04A9),
-        B_FAIL => ("FAIL", 0xFFFF, 0xF800),
-        _ => {
-            lcd::fill_rect(r.x as u16, r.y as u16, r.w as u16, r.h as u16, bg);
-            return;
-        }
-    };
-    sf::rbox(r, 4, fill, bg);
-    // F14 caps sit 1 px high in their line: centre the ink.
-    sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), t, fg, fill, 8, 1);
-}
-
-/// What the strip last drew (see DmmView::strip).
-#[derive(Clone, Copy)]
-struct Strip {
-    /// Static part (band background, HV colour) drawn; false = full redraw.
-    drawn: bool,
-    hv: u8,
-    value: [u8; 8],
-    unit: (&'static str, &'static str),
-    sub: [[u8; 24]; 2],
-    /// Left edge of each sub row as drawn (SS_R = empty).
-    sub_x: [i16; 2],
-    badge: [u8; 3],
-}
-
-impl Strip {
-    const fn new() -> Self {
-        Strip { drawn: false, hv: 0, value: [0; 8], unit: ("", ""), sub: [[0; 24]; 2], sub_x: [SS_R; 2], badge: [255; 3] }
-    }
-}
 
 /// `join` into a 16-byte buffer.
 fn join16<'a>(buf: &'a mut [u8; 16], parts: &[&str]) -> &'a str {
@@ -422,13 +318,6 @@ fn join<'a>(buf: &'a mut [u8; 24], parts: &[&str]) -> &'a str {
     core::str::from_utf8(&buf[..n]).unwrap_or("")
 }
 
-/// A unit in the strip font: LETTERS, or F21 when LETTERS lacks a glyph of
-/// it ("nF", "uF": no 'n' / 'F' in LETTERS). Returns the font and the y
-/// offset that puts its caps on the same baseline.
-fn unit_font(u: &str) -> (sf::Font, i16) {
-    if u.chars().all(|c| sf::LETTERS.glyph(c as u32).is_some()) { (sf::LETTERS, 0) } else { (sf::F21, 3) }
-}
-
 impl DmmView {
     pub const fn new() -> Self {
         DmmView {
@@ -444,7 +333,6 @@ impl DmmView {
             last_lim: 255,
             last_chip: None,
             last_f: [0; 12],
-            st: Strip::new(),
         }
     }
 
@@ -473,7 +361,6 @@ impl DmmView {
         self.last_lim = 255;
         self.last_chip = None;
         self.last_f = [0xFF; 12];
-        self.st.drawn = false;
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -634,170 +521,6 @@ impl DmmView {
         }
     }
 
-    /// Empty meter strip (view drawn, no reading yet).
-    pub fn strip_static(&mut self) {
-        self.st = Strip::new();
-        self.st.drawn = true;
-        lcd::fill_rect(0, STRIP_Y as u16, lcd::W, STRIP_H as u16, BG);
-    }
-
-    /// Meter strip of the combined view (layout above). Draws only what
-    /// changed since the last call: the value as one half-size text (a
-    /// changed digit can move the others: proportional spacing), the
-    /// sign / unit pair on a unit or mode change, each sub row on a text
-    /// change, each badge on a change. `rel`: REL active; `hv`: 0 / 1 (>= 30 V,
-    /// HV badge) / 2 (>= 100 V, red band) from the live value; `alt`: show
-    /// REL instead of the limit verdict in the shared badge (the app flips it
-    /// once a second when both apply).
-    pub fn strip(&mut self, r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool) {
-        let st = &mut self.st;
-        let bg = if hv >= 2 { ST_BG_HV } else { BG };
-        if !st.drawn || st.hv != hv {
-            *st = Strip::new();
-            st.drawn = true;
-            st.hv = hv;
-            lcd::fill_rect(0, STRIP_Y as u16, lcd::W, STRIP_H as u16, bg);
-        }
-        // Value: "%7.<dec>f" without the extra digit (no room), OL = "0L".
-        let mut buf = [0u8; 16];
-        let (s, _, _) = fmt7(&mut buf, &r.main, false);
-        let s = s.trim();
-        let mut vb = [0u8; 8];
-        let n = s.len().min(8);
-        vb[..n].copy_from_slice(&s.as_bytes()[..n]);
-        if st.value != vb {
-            st.value = vb;
-            // Half-size F78 rows: SV_BASE - 39 ..= SV_BASE.
-            sf::half_text(sf::F78, rect(SV_X, SV_BASE - 40, SV_R - SV_X, 42), s, SV_BASE, 3, 5, VALUE, bg);
-        }
-        // Sub rows: AC+DC parts (tagged), Hz + duty, CJ + F, 4-20 mA %;
-        // right-aligned, so each row's left edge moves with its text.
-        let mut tb = [[0u8; 24]; 2];
-        let mut left = [SS_R; 2];
-        let mut tw = [0i16; 2];
-        // A caption left of a sub row: the AC / DC tag of an AC+DC part, or
-        // "4-20mA" before the loop percentage (UF-26); its width.
-        let (aux, lp) = aux_shown(r);
-        // Temperature: row 1 is the sensor chip (CHIP_PAD note).
-        let temp = r.mode == 15 && self.label.is_some();
-        let cap = |i: usize| -> Option<(sf::Font, &'static str, i8)> {
-            if r.acdc {
-                Some((sf::AUX_TAG, AUX_TAGS[i], 0))
-            } else if lp && i == 1 {
-                Some((sf::F14, LOOP_CAP, 1))
-            } else {
-                None
-            }
-        };
-        let cap_w = |i: usize| cap(i).map_or(0, |(f, t, sp)| if r.acdc { 24 } else { sf::text_width(f, t, sp) });
-        for (i, a) in aux.iter().enumerate() {
-            let mut t = [0u8; 16];
-            let mut u = [0u8; 16];
-            let mut b = [0u8; 24];
-            // AC+DC parts are in the main unit, shown right next to them:
-            // no unit repeated (keeps a wide gap after the sign / unit).
-            let chip = temp && i == 1;
-            let txt = match a {
-                _ if chip => self.label.unwrap_or(""),
-                Some(v) if r.acdc && v.unit == r.main.unit => meter::text(&mut t, v),
-                Some(v) => join(&mut b, &[meter::text(&mut t, v), sf::unit_text(v.unit, &mut u)]),
-                None => "",
-            };
-            let k = txt.len().min(23);
-            tb[i][..k].copy_from_slice(&txt.as_bytes()[..k]);
-            tb[i][23] = r.acdc as u8 | (lp as u8) << 1 | (chip as u8) << 2;
-            tw[i] = if k == 0 {
-                0
-            } else if chip {
-                sf::text_width(sf::TEXT22, txt, 0) + 2 * CHIP_PAD
-            } else {
-                sf::text_width(sf::LETTERS, txt, 0)
-            };
-            left[i] = SS_R - tw[i] - if cap(i).is_some() && k > 0 { 4 + cap_w(i) } else { 0 };
-        }
-        // Sign above the unit (none for continuity / diode / non-V/A). The
-        // pair repaints its column up to the new sub rows (an old wider unit
-        // is erased there); the sub rows repaint from their old / new left
-        // edge but never into the new unit's ink.
-        let mut ub = [0u8; 16];
-        let unit = sf::unit_text(r.main.unit, &mut ub);
-        let sign = match r.mode {
-            0..=9 => mode_glyph(r.mode, r.acdc),
-            _ => "",
-        };
-        let (uf, dy) = unit_font(unit);
-        let uend = [SU_X + sf::text_width(sf::AUX_TAG, sign, 0), SU_X + sf::text_width(uf, unit, 0)];
-        let ukey = (r.main.unit, sign);
-        if st.unit != ukey {
-            st.unit = ukey;
-            let w = |i: usize| SU_W.min(left[i] - SU_X);
-            sf::label(sf::AUX_TAG, rect(SU_X, STRIP_Y + 3, w(0), 23), sign, VALUE, bg, 2, 0);
-            let gap = SS_Y[1] - STRIP_Y - 26;
-            lcd::fill_rect(SU_X as u16, (STRIP_Y + 26) as u16, w(0).min(w(1)) as u16, gap as u16, bg);
-            sf::label(uf, rect(SU_X, SS_Y[1] + dy, w(1), 25 - dy), unit, VALUE, bg, 0, 0);
-            if dy > 0 {
-                lcd::fill_rect(SU_X as u16, SS_Y[1] as u16, w(1) as u16, dy as u16, bg);
-            }
-        }
-        for i in 0..2 {
-            if st.sub[i] == tb[i] {
-                continue;
-            }
-            st.sub[i] = tb[i];
-            let k = tb[i][..23].iter().position(|&c| c == 0).unwrap_or(23);
-            let txt = core::str::from_utf8(&tb[i][..k]).unwrap_or("");
-            let tx = SS_R - tw[i];
-            let x0 = left[i].min(st.sub_x[i]).max(uend[i]);
-            let (y, h) = (SS_Y[i], 25);
-            if let (Some((f, t, sp)), true) = (cap(i), k > 0) {
-                sf::label(f, rect(x0, y, tx - 4 - x0, h), t, VALUE, bg, 4, sp);
-                lcd::fill_rect((tx - 4) as u16, y as u16, 4, h as u16, bg);
-            } else if tx > x0 {
-                lcd::fill_rect(x0 as u16, y as u16, (tx - x0) as u16, h as u16, bg);
-            }
-            if k > 0 && tb[i][23] & 4 != 0 {
-                // Pill rows y + 1 .. y + 23 (3 px under the row above).
-                let c = rect(tx, y + 1, SS_R - tx, 23);
-                lcd::fill_rect(tx as u16, y as u16, (SS_R - tx) as u16, 1, bg);
-                lcd::fill_rect(tx as u16, (y + 24) as u16, (SS_R - tx) as u16, (h - 24) as u16, bg);
-                sf::rbox(c, 6, CHIP, bg);
-                sf::glyphs(sf::TEXT22, c, txt, FG, CHIP, 8, 0);
-            } else if k > 0 {
-                sf::label(sf::LETTERS, rect(tx, y, SS_R - tx, h), txt, VALUE, bg, 3, 0);
-            }
-            st.sub_x[i] = left[i];
-        }
-        // Badges.
-        let b0 = if hv >= 1 {
-            B_HV
-        } else if temp {
-            B_NONE // the sensor chip is the second sub row
-        } else if !r.auto {
-            B_MANU
-        } else if r.auto_plus {
-            B_AUTOP
-        } else {
-            B_AUTO
-        };
-        let b1 = match hold {
-            1 => B_HOLD,
-            2 => B_AHOLD_WAIT,
-            3 => B_AHOLD_HELD,
-            _ => B_NONE,
-        };
-        let verdict = match lim {
-            meter::V_PASS => B_PASS,
-            meter::V_HI | meter::V_LO => B_FAIL,
-            _ => B_NONE,
-        };
-        let b2 = if rel && (verdict == B_NONE || alt) { B_REL } else { verdict };
-        for (k, b) in [b0, b1, b2].iter().enumerate() {
-            if st.badge[k] != *b {
-                st.badge[k] = *b;
-                badge(k, *b, bg);
-            }
-        }
-    }
 }
 
 /// ASCII form of a unit for the 12 px stock font (no ohm / micro / degree
@@ -1246,62 +969,6 @@ pub fn status_right(st: &Status) {
     sf::label(sf::BATTERY, rect(435, 9, 40, 16), battery_glyph(&mut b, st.bars), bc, BAR, 8, 0);
 }
 
-// ------------------------------------------------- scope-family top bar
-// Scope page and combined view (docs/combined-view-design.md §2.3 / §4),
-// 27 px tall so the 20 px status icons keep >= 4 px to the screen edge and
-// >= 3 px to the bar's bottom edge (the stock 20 px bar could not hold them
-// with any margin):
-//   logo 4..23 | chips (17 px pills, rows 5..21): run state 27..63, timebase
-//   67..108, V/div + coupling 112..181 ("100mV AC" with a real space),
-//   trigger 185..246 | REC 251..271 |
-//   page dots 301..332 | uptime ..385 | lock ..412 | BT 416..431 |
-//   battery 436..475. Ink rows of the icons 4..23.
-
-/// Scope-family bar height (rows 0..26; the full Scope page paints row 27
-/// too, its graph starts at 28).
-pub const SBAR_H: u16 = 27;
-const CHIPS: [(i16, i16); 4] = [(27, 37), (67, 42), (112, 70), (185, 62)];
-const CHIP_Y: i16 = 5;
-const CHIP_H: i16 = 17;
-
-fn chip(k: usize, text: &str, fg: Color) {
-    let (x, w) = CHIPS[k];
-    let r = rect(x, CHIP_Y, w, CHIP_H);
-    sf::rbox(r, 4, CHIP, S_BAR);
-    sf::glyphs(sf::F14, r, text, fg, CHIP, 8, 1);
-}
-
-/// Which top-bar chip (0 run state, 1 timebase, 2 V/div, 3 trigger) a tap
-/// at (x, y) hits (8 px of slop below the bar).
-pub fn chip_hit(x: u16, y: u16) -> Option<usize> {
-    let (x, y) = (x as i16, y as i16);
-    if y >= SBAR_H as i16 + 8 {
-        return None;
-    }
-    CHIPS.iter().position(|&(cx, w)| x >= cx - 1 && x < cx + w + 2)
-}
-
-/// Status block of the scope-family bar: page dots, uptime, lock, BT,
-/// battery, REC (every second, and on a change).
-pub fn scope_status(st: &Status) {
-    let mut t = [0u8; 8];
-    let mut b = [0u8; 4];
-    lcd::fill_rect(250, 5, 28, 17, S_BAR);
-    // REC: red = CSV recording (csvlog.rs), orange = the MIN/MAX session only.
-    if st.csv || st.rec {
-        sf::label(sf::F14, rect(251, 6, 27, 16), "REC", if st.csv { REC_CSV } else { VALUE }, S_BAR, 1, 1);
-    }
-    for k in 0..4i16 {
-        let c = if k as u8 == st.page { FG } else { 0x6B4D };
-        sf::rbox(rect(301 + 9 * k, 11, 5, 5), 2, c, S_BAR);
-    }
-    sf::label(sf::F14, rect(336, 5, 50, 17), hms(&mut t, st.uptime_s), STATUS_FG, S_BAR, 4, 1);
-    sf::label(sf::LOCK, rect(389, 4, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, S_BAR, 4, 0);
-    sf::label(sf::SAVE_BT, rect(416, 3, 16, 21), if st.bt { "\u{21}" } else { "" }, STATUS_FG, S_BAR, 0, 0);
-    let bc = if st.charging { 0x04A9 } else { STATUS_FG };
-    sf::label(sf::BATTERY, rect(436, 4, 40, 20), battery_glyph(&mut b, st.bars), bc, S_BAR, 8, 0);
-}
-
 /// Strip chart (stock frame (80,176,321,97)) with labels, rate button and
 /// MAX / REL / MIN. `pts` are display values, oldest first.
 pub const CHART_X: u16 = 80;
@@ -1569,415 +1236,14 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: &Side, un
 }
 
 // ---------------------------------------------------------------- scope
-// Stock scope page geometry (scope_gen_ui_v2_6.h section 6), with the
-// scope-family top bar above (SBAR_H) and the right panel / measurement bar
-// laid out for the >= 3 px margin rules.
+// The scope page and the combined view's graph are the stock replica
+// (src/scope_ui.rs, src/scope_page.rs); what is left here: the colours the
+// combined view's function band uses and the cursor state.
 
-pub const S_BAR: Color = 0x4208;
+const S_BAR: Color = 0x4208;
 const S_FRAME: Color = 0xAD55;
-const S_FILL: Color = 0x2124;
-const S_GRID: Color = 0x9492; // white blended 50 % into the fill
-const S_PURPLE: Color = 0xA81F;
-const S_ORANGE: Color = 0xFAA0;
-
-/// Graph placement: `x0, y0` of frame column / row 0, height in pixels for the
-/// 280-row model (rows scale by (h - 3) / 278; grid lines every (h - 1) / 8).
-pub struct ScopeView {
-    pub x0: u16,
-    pub y0: u16,
-    pub h: u16,
-}
-
-/// Full Scope page: 401 x 273 (8 x 34 px divisions) under the 28 px bar
-/// (stock 281 rows 1:1; the taller bar costs 8 rows).
-pub const SCOPE_FULL: ScopeView = ScopeView { x0: 13, y0: 28, h: 273 };
-/// Combined DMM+Scope view: under the bar and the meter strip, 401 x 217
-/// (8 x 27 px divisions), down to the measurement bar.
-pub const SCOPE_COMBINED: ScopeView = ScopeView { x0: 13, y0: (STRIP_Y + STRIP_H) as u16, h: 217 };
-/// Measurement bar rows (both scope views).
+/// Measurement bar rows (the function band ends there).
 const MEAS_Y: u16 = 301;
-
-/// "1.25us" / "2MHz" style engineering text. A product like 10 mV x 0.1
-/// (probe) lands a hair under 1e-3 in f32: the decade tests allow for that
-/// (else "1000uV"), and a near-integer mantissa prints without decimals.
-fn eng(buf: &mut [u8; 24], v: f32, unit: &str) -> usize {
-    let a = v.abs() * 1.000_01;
-    let (k, p) = if a >= 1e6 {
-        (1e-6, "M")
-    } else if a >= 1e3 {
-        (1e-3, "k")
-    } else if a >= 1.0 || v == 0.0 {
-        (1.0, "")
-    } else if a >= 1e-3 {
-        (1e3, "m")
-    } else if a >= 1e-6 {
-        (1e6, "u")
-    } else {
-        (1e9, "n")
-    };
-    let x = v * k;
-    let xi = (x + if x < 0.0 { -0.5 } else { 0.5 }) as i32;
-    let dec = if x.abs() >= 100.0 || (x - xi as f32).abs() < 1e-3 {
-        0
-    } else if x.abs() >= 10.0 {
-        1
-    } else {
-        2
-    };
-    let mut t = [0u8; 16];
-    let s = crate::dmm::format(&mut t, x, dec);
-    let mut n = 0;
-    for part in [s.as_bytes(), p.as_bytes(), unit.as_bytes()] {
-        let k = part.len().min(24 - n);
-        buf[n..n + k].copy_from_slice(&part[..k]);
-        n += k;
-    }
-    n
-}
-
-/// Right-panel buttons. Combined view: V+ V- T+ T- AUTOSET (doc §2.3); full
-/// Scope page: the same zoom keys plus coupling, trigger mode and slope, each
-/// labelled with its current state.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Pb {
-    VIn,
-    VOut,
-    TIn,
-    TOut,
-    Autoset,
-    Coupling,
-    Mode,
-    Slope,
-}
-
-const PANEL_COMBINED: [Pb; 5] = [Pb::VIn, Pb::VOut, Pb::TIn, Pb::TOut, Pb::Autoset];
-const PANEL_FULL: [Pb; 7] = [Pb::VIn, Pb::Coupling, Pb::VOut, Pb::TIn, Pb::Mode, Pb::TOut, Pb::Slope];
-const PANEL_X: i16 = 417;
-const PANEL_W: i16 = 59;
-
-/// (buttons, top y, pitch, height) of the right panel.
-fn panel(full: bool) -> (&'static [Pb], i16, i16, i16) {
-    if full {
-        (&PANEL_FULL, SCOPE_FULL.y0 as i16 + 3, 38, 35)
-    } else {
-        (&PANEL_COMBINED, SCOPE_COMBINED.y0 as i16 + 3, 43, 39)
-    }
-}
-
-/// Which right-panel button a tap at (x, y) hits (gaps count to the
-/// nearer button).
-pub fn panel_hit(full: bool, x: u16, y: u16) -> Option<Pb> {
-    let (b, y0, pitch, h) = panel(full);
-    let y = y as i16;
-    if x < 414 || y < y0 - 2 || y >= y0 + (b.len() as i16 - 1) * pitch + h + 2 {
-        return None;
-    }
-    Some(b[((y - y0 + (pitch - h) / 2) / pitch).clamp(0, b.len() as i16 - 1) as usize])
-}
-
-/// Magnifier-style ring icon (a 2 px circle of radius 9 around a 10 px bar,
-/// plus a vertical bar for "+"), 20 x 20 at (x, y), 2x2 supersampled.
-fn ring_icon(x: i16, y: i16, plus: bool, fg: Color, bg: Color) {
-    let lut = sf::ramp(fg, bg);
-    #[cfg(test)]
-    crate::probe::begin(crate::probe::ICON, bg);
-    lcd::set_window(x as u16, y as u16, (x + 19) as u16, (y + 19) as u16);
-    for py in 0..20i32 {
-        for px in 0..20i32 {
-            let mut n = 0;
-            for (ox, oy) in [(1, 1), (3, 1), (1, 3), (3, 3)] {
-                let (sx, sy) = (4 * px + ox - 40, 4 * py + oy - 40);
-                let d2 = sx * sx + sy * sy;
-                let ring = (28 * 28..=36 * 36).contains(&d2);
-                let bar = (sy.abs() < 4 && sx.abs() <= 20) || (plus && sx.abs() < 4 && sy.abs() <= 20);
-                n += (ring || bar) as usize;
-            }
-            lcd::data(lut[[0, 4, 8, 11, 15][n]]);
-        }
-    }
-    #[cfg(test)]
-    crate::probe::end();
-}
-
-/// Right panel of a scope view.
-pub fn scope_panel(sc: &scope::Scope, full: bool) {
-    let (b, y0, pitch, h) = panel(full);
-    let s = &sc.s;
-    for (k, &p) in b.iter().enumerate() {
-        let y = y0 + k as i16 * pitch;
-        let r = rect(PANEL_X, y, PANEL_W, h);
-        sf::rbox(r, 6, BTN, S_BAR);
-        let icon = |letter: &str, fg: Color, plus: bool| {
-            sf::glyphs(sf::F21, rect(PANEL_X + 6, y, 20, h), letter, fg, BTN, 8, 0);
-            ring_icon(PANEL_X + 32, y + (h - 20) / 2, plus, fg, BTN);
-        };
-        match p {
-            Pb::VIn => icon("V", TRACE, true),
-            Pb::VOut => icon("V", TRACE, false),
-            Pb::TIn => icon("T", S_PURPLE, true),
-            Pb::TOut => icon("T", S_PURPLE, false),
-            _ => {
-                let (t, fg) = match p {
-                    Pb::Autoset => ("AUTOSET", FG),
-                    Pb::Coupling => (if s.ac { "AC" } else { "DC" }, TRACE),
-                    Pb::Mode => (
-                        match s.mode {
-                            scope::TrigMode::Auto => "AUTO",
-                            scope::TrigMode::Normal => "NORM",
-                            scope::TrigMode::Single => "SINGLE",
-                        },
-                        S_ORANGE,
-                    ),
-                    _ => (if s.rising { "EDGE /" } else { "EDGE \\" }, S_ORANGE),
-                };
-                sf::glyphs(sf::F14, r, t, fg, BTN, 8, 1);
-            }
-        }
-    }
-}
-
-impl ScopeView {
-    fn row_px(&self, r: i32) -> u16 {
-        self.y0 + 1 + ((r.clamp(0, 278) as u32 * (self.h as u32 - 3)) / 278) as u16
-    }
-
-    /// Pixel row (from the graph top) of row `r` of the 280-row model.
-    pub fn row_y(&self, r: i32) -> i32 {
-        (self.row_px(r) - self.y0) as i32
-    }
-
-    /// Full Scope page or the combined view's graph part.
-    fn full(&self) -> bool {
-        self.y0 == SCOPE_FULL.y0
-    }
-
-    /// Whether (x, y) is inside the graph (frame included).
-    pub fn contains(&self, x: u16, y: u16) -> bool {
-        x >= self.x0 && x <= self.x0 + 400 && y >= self.y0 && y < self.y0 + self.h
-    }
-
-    /// Chrome, chips, panel and an empty graph. The status block and the
-    /// generator chip are drawn by the app (scope_status, gen_chip).
-    /// Not inlined (here and `frame`): their 2-5 KB of column templates
-    /// would otherwise all add up in main()'s frame.
-    #[inline(never)]
-    pub fn draw_static(&self, sc: &scope::Scope) {
-        let full = self.full();
-        let bar = if full { self.y0 } else { SBAR_H };
-        lcd::fill_rect(0, 0, lcd::W, bar, S_BAR);
-        lcd::fill_rect(0, self.y0, self.x0, self.h, S_BAR);
-        lcd::fill_rect(414, self.y0, 66, self.h, S_BAR);
-        lcd::fill_rect(0, MEAS_Y, lcd::W, lcd::H - MEAS_Y, S_BAR);
-        sf::logo(4, 4, S_BAR);
-        self.labels(sc);
-        scope_panel(sc, full);
-        let mut tpl = [[0u16; 288]; 4];
-        self.templates(&mut tpl);
-        for i in 0..=scope::COLS as u16 {
-            self.column_t(i, &tpl, None, None, false);
-        }
-    }
-
-    /// Generator chip at the right end of the measurement bar: the frequency
-    /// actually output, "--" when the wave is silent at the set frequency
-    /// (non-square above 50 kHz); nothing while the output is off.
-    pub fn gen_chip(g: &gen::Gen) {
-        let mut b = [0u8; 24];
-        let mut t = [0u8; 24];
-        let txt = if g.s.on {
-            let k = eng(&mut b, g.actual_hz(), "Hz");
-            join(&mut t, &["G ", core::str::from_utf8(&b[..k]).unwrap_or("")])
-        } else {
-            ""
-        };
-        sf::label(sf::F14, rect(415, MEAS_Y as i16 + 1, 61, 15), txt, 0x04A9, S_BAR, 4, 1);
-    }
-
-    /// Top-bar chips: run state, timebase, V/div + coupling, trigger.
-    pub fn labels(&self, sc: &scope::Scope) {
-        let s = &sc.s;
-        let mut b = [0u8; 24];
-        let mut t = [0u8; 24];
-        // Stock status strings from the acquisition, not the mode: WAIT (no
-        // frame yet / Normal without a trigger), AUTO (untriggered Auto
-        // frame), T'D (triggered), RUN (roll). Mode is on the panel button.
-        let (status, sc_col) = if !s.run {
-            ("STOP", S_ORANGE)
-        } else {
-            (["WAIT", "AUTO", "T'D", "RUN"][sc.status.min(3) as usize], S_PURPLE)
-        };
-        chip(0, status, sc_col);
-        let n = eng(&mut b, scope::SDIV[s.tb], "s");
-        chip(1, core::str::from_utf8(&b[..n]).unwrap_or(""), FG);
-        let n = eng(&mut b, scope::VDIV[s.range] * s.probe, "V");
-        let v = join(&mut t, &[core::str::from_utf8(&b[..n]).unwrap_or(""), if s.ac { " AC" } else { " DC" }]);
-        chip(2, v, TRACE);
-        let n = eng(&mut b, sc.trig_volts(), "V");
-        let v = join(&mut t, &[if s.rising { "/" } else { "\\" }, core::str::from_utf8(&b[..n]).unwrap_or("")]);
-        chip(3, v, S_ORANGE);
-    }
-
-    /// Background templates of a column: [plain, dotted (i % 8 == 0), vertical
-    /// grid line (i % 40 == 0), frame edge].
-    fn templates(&self, t: &mut [[u16; 288]; 4]) {
-        self.templates_c(t, None);
-    }
-
-    /// Templates with horizontal cursor rows (280-row model) drawn dotted.
-    /// Grid rows every (h - 1) / 8 pixels, from the pixel row (any height,
-    /// not only the stock 1:1 281).
-    fn templates_c(&self, t: &mut [[u16; 288]; 4], ycur: Option<[i32; 2]>) {
-        let h = self.h as usize;
-        let pitch = ((h - 1) / 8).max(1);
-        for y in 0..h {
-            let edge = y == 0 || y == h - 1;
-            let hline = y % pitch == 0 && !edge;
-            t[0][y] = if edge { S_FRAME } else { S_FILL };
-            t[1][y] = if edge { S_FRAME } else if hline { S_GRID } else { S_FILL };
-            t[2][y] = if edge { S_FRAME } else if y % 5 == 0 || hline { S_GRID } else { S_FILL };
-            t[3][y] = S_FRAME;
-        }
-        if let Some(yc) = ycur {
-            for r in yc {
-                let y = (self.row_px(r) - self.y0) as usize;
-                if y > 0 && y < h - 1 {
-                    for k in 0..3 {
-                        t[k][y] = S_FRAME;
-                    }
-                }
-            }
-        }
-    }
-
-    /// One graph column `i` (0..400) from a template, with the trace segment
-    /// (rows of the 280-row model) and the trigger level tick (columns 1..5,
-    /// inside the frame); `line`: the level as a dashed line across the graph
-    /// (4 px on / 4 off, behind the trace).
-    fn column_t(&self, i: u16, t: &[[u16; 288]; 4], seg: Option<(i32, i32)>, trig: Option<i32>, line: bool) {
-        self.column_c(i, t, seg, trig, line, u16::MAX)
-    }
-
-    /// `column_t` drawing only the rows above screen row `clip`.
-    fn column_c(&self, i: u16, t: &[[u16; 288]; 4], seg: Option<(i32, i32)>, trig: Option<i32>, line: bool, clip: u16) {
-        let x = self.x0 + i;
-        let h = self.h.min(clip.saturating_sub(self.y0));
-        if h == 0 {
-            return;
-        }
-        let k = if i == 0 || i == 400 { 3 } else if i % 40 == 0 { 2 } else if i % 8 == 0 { 1 } else { 0 };
-        let tpl = &t[k];
-        let (a, b) = match seg {
-            Some((a, b)) if i > 0 => (self.row_px(a) - self.y0, self.row_px(b) - self.y0),
-            _ => (u16::MAX, 0),
-        };
-        let on = (1..6).contains(&i) || (line && i > 0 && i < 400 && i % 8 < 4);
-        let tr = if on { trig.map(|r| self.row_px(r) - self.y0).unwrap_or(u16::MAX) } else { u16::MAX };
-        lcd::set_window(x, self.y0, x, self.y0 + h - 1);
-        for y in 0..h {
-            let c = if y >= a && y <= b {
-                0xFFE0
-            } else if y == tr {
-                S_ORANGE
-            } else {
-                tpl[y as usize]
-            };
-            lcd::data(c);
-        }
-    }
-
-    fn column(&self, i: u16, seg: Option<(i32, i32)>, trig: Option<i32>) {
-        let mut t = [[0u16; 288]; 4];
-        self.templates(&mut t);
-        self.column_t(i, &t, seg, trig, false);
-    }
-
-    /// Draw a frame: 400 columns of min/max (peak detect), widened to touch
-    /// the previous column, as the stock trace.
-    /// `prev` caches the drawn segment per column (pixel rows); only changed
-    /// columns are redrawn. Fill it with (u16::MAX, 0) to force a full redraw
-    /// (also needed when `trig_line` changes).
-    /// `clip`: draw only the rows above this screen row (the combined view's
-    /// function band covers the rest).
-    #[inline(never)]
-    pub fn frame(&self, f: &scope::Frame, sc: &scope::Scope, prev: &mut [(u16, u16); 401], cur: &Cursors, persist: bool, trig_line: bool, clip: u16) {
-        let n = f.data.len();
-        let trig_row = Some(sc.s.trig_row);
-        let mut tpl = [[0u16; 288]; 4];
-        self.templates_c(&mut tpl, if cur.y_on { Some(cur.y) } else { None });
-        // Vertical cursor columns use a dotted template.
-        let mut vt = tpl;
-        for k in 0..3 {
-            for y in (0..self.h as usize).step_by(3) {
-                vt[k][y] = S_FRAME;
-            }
-        }
-        // Code -> row is linear: precompute both ends once.
-        let r0 = sc.row_of_code(0.0);
-        let slope = (sc.row_of_code(1000.0) - r0) / 1000.0;
-        let row = |code: u16| -> i32 { (r0 + slope * code as f32) as i32 };
-        // Previous column's segment, for joining; None at the left edge and
-        // after an empty column (roll start, or a stopped record narrower than
-        // the screen), so the first column after a gap is not stretched to row 0.
-        let mut pseg: Option<(i32, i32)> = None;
-        for i in 0..scope::COLS {
-            let (mut lo, mut hi);
-            if let Some(cols) = f.cols {
-                let (a, b) = cols[i];
-                if a == u16::MAX {
-                    pseg = None;
-                    if prev[i] != (u16::MAX - 1, 0) {
-                        prev[i] = (u16::MAX - 1, 0);
-                        self.column_c(i as u16, &tpl, None, trig_row, trig_line, clip);
-                    }
-                    continue;
-                }
-                lo = row(b);
-                hi = row(a);
-            } else if n >= scope::COLS {
-                let a = i * n / scope::COLS;
-                let b = ((i + 1) * n / scope::COLS).max(a + 1);
-                lo = i32::MAX;
-                hi = i32::MIN;
-                for &v in &f.data[a..b.min(n)] {
-                    let r = row(v);
-                    lo = lo.min(r);
-                    hi = hi.max(r);
-                }
-            } else {
-                // Fewer samples than columns: linear interpolation.
-                let pos = i as f32 * (n - 1) as f32 / (scope::COLS - 1) as f32;
-                let k = pos as usize;
-                let fr = pos - k as f32;
-                let v0 = f.data[k] as f32;
-                let v1 = f.data[(k + 1).min(n - 1)] as f32;
-                let r = (r0 + slope * (v0 + (v1 - v0) * fr)) as i32;
-                lo = r;
-                hi = r;
-            }
-            if let Some((pa, pb)) = pseg {
-                lo = lo.min(pb);
-                hi = hi.max(pa);
-            }
-            pseg = Some((lo, hi));
-            let (a, b) = (lo.min(hi), lo.max(hi));
-            let (a, b) = if persist && prev[i].0 != u16::MAX && prev[i].0 != u16::MAX - 1 {
-                // Infinite persistence: keep the union of all segments drawn.
-                let (pa, pb) = prev[i];
-                let ra = ((pa - self.y0 - 1) as i32 * 278 / (self.h as i32 - 3).max(1)).min(a);
-                let rb = ((pb - self.y0 - 1) as i32 * 278 / (self.h as i32 - 3).max(1)).max(b);
-                (ra, rb)
-            } else {
-                (a, b)
-            };
-            let px = (self.row_px(a), self.row_px(b));
-            let is_cur = cur.x_on && (cur.x[0] as usize == i || cur.x[1] as usize == i);
-            if prev[i] != px || is_cur {
-                prev[i] = if is_cur { (u16::MAX, 0) } else { px };
-                self.column_c(i as u16, if is_cur { &vt } else { &tpl }, Some((a, b)), trig_row, trig_line, clip);
-            }
-        }
-    }
-}
 
 /// Scope cursors: two vertical (columns 1..399) and two horizontal (rows of
 /// the 280-row model), as the stock X2-1 / Xf / Y2-1 items.
@@ -1987,178 +1253,6 @@ pub struct Cursors {
     pub y_on: bool,
     pub x: [u16; 2],
     pub y: [i32; 2],
-}
-
-/// Measurements of a frame: Vpp, mean, RMS (V) and frequency (Hz).
-pub fn measure(f: &scope::Frame, sc: &scope::Scope) -> (f32, f32, f32, f32) {
-    let (mut lo, mut hi, mut sum, mut sq) = (u16::MAX, 0u16, 0f32, 0f32);
-    for &v in f.data {
-        lo = lo.min(v);
-        hi = hi.max(v);
-        let x = sc.volts(v as f32);
-        sum += x;
-        sq += x * x;
-    }
-    let n = f.data.len() as f32;
-    let mean = sum / n;
-    let rms = {
-        let m = sq / n;
-        let mut y = if m > 0.0 { f32::from_bits((m.to_bits() >> 1) + 0x1FBD_1DF5) } else { 0.0 };
-        if m > 0.0 {
-            for _ in 0..3 {
-                y = 0.5 * (y + m / y);
-            }
-        }
-        y
-    };
-    let mid = (lo as u32 + hi as u32) / 2;
-    // Hysteresis: 10 % of the swing; no frequency below 20 codes of swing.
-    let hy = ((hi - lo) as u32 / 10).max(2);
-    let (mut first, mut last, mut count) = (None, 0usize, 0u32);
-    let mut below = f.data[0] as u32 <= mid;
-    for (i, &v) in f.data.iter().enumerate() {
-        if below && v as u32 > mid + hy {
-            below = false;
-            if first.is_none() {
-                first = Some(i);
-            } else {
-                count += 1;
-            }
-            last = i;
-        } else if !below && (v as u32) + hy < mid {
-            below = true;
-        }
-    }
-    let freq = match first {
-        Some(a) if count > 0 && hi > lo + 20 => count as f32 * f.fs as f32 / (last - a) as f32,
-        _ => 0.0,
-    };
-    (sc.volts(hi as f32) - sc.volts(lo as f32), mean, rms, freq)
-}
-
-/// Bottom measurement cells (stock: x 13/113/213/313, 98x17), selected items.
-pub fn scope_measurements(sel: &[u8], res: &crate::scope_meas::Results) {
-    for i in 0..4 {
-        let x = 13 + 100 * i as i16;
-        let mut b = [0u8; 24];
-        let t = match sel.get(i) {
-            Some(&id) => crate::scope_meas::format(&mut b, id, res.v[id as usize]),
-            None => "--",
-        };
-        // Name and value on one baseline, caps at row 304 (ink rows
-        // 304..315: 3 px under the graph frame, 4 above the screen edge),
-        // 1 px lower when a glyph reaches above the caps ('i', '%'); a part
-        // that would then hang below 315 (a descender: "+Duty:" next to
-        // "44.4%") keeps row 304. 1 px glyph spacing (F14 glyphs have no
-        // side bearing: at 0 they touch); the value 3 px after the colon.
-        let (name, val) = match t.find(':') {
-            Some(k) => (&t[..=k], t[k + 1..].trim_start()),
-            None => (t, ""),
-        };
-        let wn = sf::text_width(sf::F14, name, 1) + 3;
-        let (top, y0, y1) = (MEAS_Y as i16 + 1, MEAS_Y as i16 + 3, lcd::H as i16 - 5);
-        let rows = [sf::glyph_rows(sf::F14, name), sf::glyph_rows(sf::F14, val)];
-        let cell = rows.iter().flatten().map(|r| y0 - r.0).fold(y0 - 2, i16::max);
-        for (k, (s, x0, w)) in [(name, x, wn), (val, x + wn, 98 - wn)].into_iter().enumerate() {
-            let y = rows[k].map_or(cell, |r| cell.min(y1 - r.1));
-            if y > top {
-                lcd::fill_rect(x0 as u16, top as u16, w as u16, (y - top) as u16, S_BAR);
-            }
-            sf::label(sf::F14, rect(x0, y, w, lcd::H as i16 - y), s, 0xFFE0, S_BAR, 0, 1);
-        }
-    }
-}
-
-/// Scope settings window (stock MF popup (13,20,401,192)): tabs Measure /
-/// Display / Trigger / Settings.
-/// Top of the scope settings window (under the 28 px bar).
-const MENU_Y: u16 = 28;
-pub const SCOPE_TABS: [&str; 4] = ["Measure", "Display", "Trigger", "Settings"];
-
-fn tab_btn(r: sf::Rect, text: &str, on: bool) {
-    let c = if on { SEL } else { 0x2966 };
-    sf::rbox(r, 4, c, 0x10A3);
-    sf::glyphs(sf::F14, r, text, STATUS_FG, c, 8, 1);
-}
-
-pub fn scope_menu(tab: usize, sc: &scope::Scope, sel: &[u8], roll: bool, persist: bool) {
-    lcd::fill_rect(13, MENU_Y, 401, 192, 0x10A3);
-    for (i, t) in SCOPE_TABS.iter().enumerate() {
-        tab_btn(rect(16 + i as i16 * 99, MENU_Y as i16 + 3, 95, 28), t, i == tab);
-    }
-    let s = &sc.s;
-    match tab {
-        0 => {
-            for (k, (id, name, _)) in crate::scope_meas::ITEMS.iter().enumerate() {
-                let r = rect(16 + (k % 5) as i16 * 79, MENU_Y as i16 + 36 + (k / 5) as i16 * 38, 75, 34);
-                tab_btn(r, name, sel.contains(id));
-            }
-        }
-        1 => {
-            tab_btn(rect(16, MENU_Y as i16 + 40, 190, 34), if roll { "Roll: ON" } else { "Roll: OFF" }, roll);
-            tab_btn(rect(210, MENU_Y as i16 + 40, 190, 34), if persist { "Persist: INF" } else { "Persist: OFF" }, persist);
-        }
-        2 => {
-            tab_btn(rect(16, MENU_Y as i16 + 40, 120, 34), "Rising", s.rising);
-            tab_btn(rect(140, MENU_Y as i16 + 40, 120, 34), "Falling", !s.rising);
-            tab_btn(rect(16, MENU_Y as i16 + 80, 120, 34), "Auto", s.mode == scope::TrigMode::Auto);
-            tab_btn(rect(140, MENU_Y as i16 + 80, 120, 34), "Normal", s.mode == scope::TrigMode::Normal);
-            tab_btn(rect(264, MENU_Y as i16 + 80, 120, 34), "Single", s.mode == scope::TrigMode::Single);
-        }
-        _ => {
-            tab_btn(rect(16, MENU_Y as i16 + 40, 120, 34), "DC", !s.ac);
-            tab_btn(rect(140, MENU_Y as i16 + 40, 120, 34), "AC", s.ac);
-            // Probe x0.1 .. x1000 (stock list, UF-12): 7 + 6 buttons.
-            for (k, p) in scope::PROBE_NAMES.iter().enumerate() {
-                tab_btn(probe_btn(k), p, s.probe == scope::PROBES[k]);
-            }
-        }
-    }
-}
-
-/// Probe button `k` (0..12) of the Settings tab: two rows of 7 / 6, 52 px
-/// wide at a 56 px pitch, under the DC / AC row (`scope_menu_hit` mirrors it).
-fn probe_btn(k: usize) -> sf::Rect {
-    let (row, col) = ((k / 7) as i16, (k % 7) as i16);
-    rect(16 + col * 56, MENU_Y as i16 + 80 + row * 38, 52, 34)
-}
-
-/// Scope settings window touch: Some((tab, item)) with item 255 = tab header.
-/// Settings tab items: 0 DC, 1 AC, 3 + k probe k (PROBES).
-pub fn scope_menu_hit(tab: usize, x: u16, y: u16) -> Option<(usize, usize)> {
-    let (x, y) = (x as i16, y as i16);
-    if !(13..414).contains(&x) || !(MENU_Y as i16..MENU_Y as i16 + 192).contains(&y) {
-        return None;
-    }
-    let y = y - (MENU_Y as i16 - 20);
-    if y < 53 {
-        return Some((((x - 16) / 99).clamp(0, 3) as usize, 255));
-    }
-    match tab {
-        0 => {
-            let col = ((x - 16) / 79) as usize;
-            let row = ((y - 56) / 38) as usize;
-            let k = row * 5 + col.min(4);
-            if k < crate::scope_meas::ITEMS.len() { Some((0, k)) } else { None }
-        }
-        1 => Some((1, if x < 208 { 0 } else { 1 })),
-        3 => {
-            // Screen rows: DC / AC 68..101, probes 108..141 and 146..179.
-            let sy = y + (MENU_Y as i16 - 20);
-            if sy < 105 {
-                let col = (x - 16) / 124;
-                return if (0..2).contains(&col) { Some((3, col as usize)) } else { None };
-            }
-            let row = if sy < 144 { 0 } else { 1 };
-            let k = row * 7 + ((x - 16) / 56).clamp(0, 6) as usize;
-            if k < scope::PROBES.len() { Some((3, 3 + k)) } else { None }
-        }
-        _ => {
-            let row = if y < 96 { 0 } else { 1 };
-            let col = ((x - 16) / 124).clamp(0, 2) as usize;
-            Some((tab, row * 3 + col))
-        }
-    }
 }
 
 // ------------------------------------------------------------ generator
@@ -2551,7 +1645,6 @@ pub fn view_name(v: View) -> &'static str {
         View::Menu => "Main menu",
         View::Settings => "Settings",
         View::Range => "Range",
-        View::ScopeMenu => "Scope settings",
         View::Keypad => "Keypad",
         View::Device => "Device",
         View::Limits => "Hold & Limits",
