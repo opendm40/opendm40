@@ -569,9 +569,7 @@ impl Job {
                 continue;
             }
             let n = (e[d] - b'0') as u16 * 100 + (e[d + 1] - b'0') as u16 * 10 + (e[d + 2] - b'0') as u16;
-            // (A legacy SCOP%03u.CSV keeps its number too: LUN 1 shows the
-            // DLG as SCOP%03u.CSV.)
-            if sfn_is(e, &calbackup::numbered_name(pre, n, ext)) || (self.kind == K_CSV && sfn_is(e, &calbackup::numbered_name(pre, n, b"CSV"))) {
+            if sfn_is(e, &calbackup::numbered_name(pre, n, ext)) {
                 self.taken[(n / 32) as usize] |= 1 << (n % 32);
             }
         }

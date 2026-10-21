@@ -161,16 +161,16 @@ pub enum Out {
 
 /// File commands on the USB disk's root (csvlog.rs gallery backend):
 ///   MMEMory:CATalog?        <used>,<free>{,"<name>,<type>,<size>"} (bytes; type
-///                           BIN = S*.BMP, ASC = LOG*.CSV; csvlog::catalog_scpi_on)
-///   MMEMory:DELete "<name>" delete one S*.BMP / LOG*.CSV / LOG*.DLG (USB only:
+///                           always BIN: S*.BMP, LOG*.DLG, SCOP*.DLG; csvlog::catalog_scpi_on)
+///   MMEMory:DELete "<name>" delete one S*.BMP / LOG*.DLG / SCOP*.DLG (USB only:
 ///                           refused over Bluetooth; refused for the file being recorded)
 ///   MMEMory:DATA? "<name>"[,<offset>[,<length>]]
 ///                           definite-length block #4nnnn of file bytes
 ///                           offset.. (length default and max 6000; short or
-///                           empty at the end). "LOGnnn.CSV" of a LOGnnn.DLG
-///                           is the CSV generated from it (dlog.rs, the same
-///                           bytes as LUN 1's virtual file); any other root
-///                           file (DLG, BMP, legacy CSV) its raw bytes
+///                           empty at the end). "LOGnnn.CSV" / "SCOPnnn.CSV"
+///                           = the CSV generated from LOGnnn.DLG / SCOPnnn.DLG
+///                           (dlog.rs, the same bytes as LUN 1's virtual
+///                           file); any other root file its raw bytes
 #[derive(Clone, Copy)]
 pub enum Mmem {
     Cat,

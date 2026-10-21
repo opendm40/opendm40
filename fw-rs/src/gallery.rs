@@ -1,8 +1,8 @@
 //! Screenshot + log gallery (TODO FR-16): browse the S*.BMP screenshots and
-//! LOG*.CSV recordings in the root of the SPI-flash USB disk, view them full
+//! LOG*.DLG recordings in the root of the SPI-flash USB disk, view them full
 //! screen, delete them. Backend: csvlog.rs (`list_on` for the count and the
 //! free space, `delete_on`); the reading side (directory pages, cluster
-//! chains, BMP / CSV decoding) is here.
+//! chains, BMP / log decoding) is here.
 //!
 //! Screens (480 x 320, stock fonts, the menu-page style of ui.rs):
 //!   Grid    title bar ("< Back" | "Gallery" | count, free space), 3 x 2 tiles
@@ -13,7 +13,7 @@
 //!           Swipe left / right = next / previous page, title bar = back.
 //!   Viewer  BMP: the image full screen, drawn top-down; tap = overlay bar
 //!           ("< Back" | name, index / total | Delete); swipe left / right =
-//!           next / previous file. CSV: header info, min / avg / max, a
+//!           next / previous file. Log: header info, min / avg / max, a
 //!           value-vs-time chart; the bar stays.
 //!   Dialog  delete confirm (dialog.rs box and buttons, "Cancel" / "Delete"),
 //!           or an info box with OK ("Disk in use by the PC", ...).
@@ -30,16 +30,14 @@
 //! (scaled down to fit, never up); others (8 bpp, RLE8, JPEG / PNG in a BMP,
 //! truncated files) show "Unsupported format".
 //!
-//! Logs are LOG*.DLG (compact binary, dlog.rs: read chunk by chunk, every
-//! row, exact counts) or legacy LOG*.CSV text (below).
-//! CSV tiles: function and duration, a sparkline of value vs time, the row
-//! count. The file is read in up to 24 (tile) / 256 (viewer) blocks evenly
-//! spaced over it (all of a smaller file), twice: pass A for count / min /
-//! max / average / time span, pass B to draw (x = time). When blocks were
-//! skipped the row count is an estimate ("~") and min / avg / max cover the
-//! sampled rows ("sampled").
+//! Logs are LOG*.DLG (compact binary, dlog.rs; their CSV exists only as the
+//! export on LUN 1 / MMEM:DATA?), read chunk by chunk, every row.
+//! Log tiles: function and duration, a sparkline of value vs time, the row
+//! count. The file is read twice, one chunk per pass: pass A for count /
+//! min / max / average / time span, pass B to draw (x = time).
 //!
 //! Main loop: `poll` does ONE bounded slice per pass: one data block read
+//! (a log: one chunk, 1..2 block reads)
 //! (+ at most one FAT block when the cached cluster runs end), or one
 //! directory page scan (1..4 root blocks), or the catalog (csvlog::list_on:
 //! boot block, root, FAT, ~7 blocks once on open / after the disk changed),
@@ -135,9 +133,6 @@ const PLOT: (i16, i16, i16, i16) = (84, 88, 380, 196);
 /// Info dialog OK button (centred under dialog::BOX).
 const OK_BTN: (u16, u16, u16, u16) = (176, 180, 128, 48);
 
-/// Blocks read for a CSV tile / the CSV viewer (all if the file is smaller).
-const CSV_TILE_BLOCKS: u32 = 24;
-const CSV_VIEW_BLOCKS: u32 = 256;
 
 // ------------------------------------------------------------------ disk lock
 
@@ -255,7 +250,7 @@ fn kind_of(e: &[u8]) -> Option<Kind> {
     let ext = [up(e[8]), up(e[9]), up(e[10])];
     if up(e[0]) == b'S' && &ext == b"BMP" {
         Some(Kind::Bmp)
-    } else if up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G' && (&ext == b"CSV" || &ext == b"DLG") {
+    } else if up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G' && &ext == b"DLG" {
         Some(Kind::Csv)
     } else {
         None
@@ -396,11 +391,6 @@ fn file_lba(io: &mut Io, ch: &mut Chain, fb: u32) -> Option<u32> {
 }
 
 /// Read file block `fb` into io.data.
-/// "LOGnnn  DLG" / "SCOPnnn DLG": a compact binary log (dlog.rs).
-fn is_dlg(n: &[u8; 11]) -> bool {
-    n[8..].eq_ignore_ascii_case(b"DLG")
-}
-
 /// A gallery file as a dlog::Src (through the block cache and its chain).
 struct GSrc<'a, 'b, 'c> {
     io: &'a mut Io<'c>,
@@ -742,29 +732,16 @@ impl Rle {
 
 // ------------------------------------------------------------------ CSV
 
-/// Longest CSV line kept (data rows are ~30 bytes; a longer header line is
-/// parsed from its first LINE bytes).
-const LINE: usize = 112;
-
-/// CSV reader: header fields, pass A statistics, pass B plot state.
+/// Log reader state: header fields, pass A statistics, pass B plot state.
 #[derive(Clone, Copy)]
 struct Csv {
-    line: [u8; LINE],
-    ll: usize,
-    over: bool,
-    /// Last block parsed (a line continues only into the next one).
-    prev: u32,
-    /// Discard up to the first line end (a sampled block starts mid-line).
-    skip: bool,
-    /// File offset of the current byte (for the header length).
-    pos: u32,
     func: [u8; 16],
     fl: u8,
     range: [u8; 8],
     rl: u8,
     unit: [u8; 8],
     ul: u8,
-    /// Bytes up to the end of the "time_s,..." line.
+    /// File offset of the first chunk (after the header text).
     hdr: u32,
     rows: u32,
     vals: u32,
@@ -774,9 +751,6 @@ struct Csv {
     comp: f32,
     t0: u32,
     t1: u32,
-    /// Bytes of the data rows parsed (row count estimate).
-    bytes: u32,
-    sampled: bool,
     // pass B
     pb: bool,
     plot: (i16, i16, i16, i16),
@@ -791,12 +765,6 @@ struct Csv {
 }
 
 const CSV0: Csv = Csv {
-    line: [0; LINE],
-    ll: 0,
-    over: false,
-    prev: NONE,
-    skip: false,
-    pos: 0,
     func: [0; 16],
     fl: 0,
     range: [0; 8],
@@ -812,8 +780,6 @@ const CSV0: Csv = Csv {
     comp: 0.0,
     t0: u32::MAX,
     t1: 0,
-    bytes: 0,
-    sampled: false,
     pb: false,
     plot: (0, 0, 1, 1),
     key: 0,
@@ -825,105 +791,6 @@ const CSV0: Csv = Csv {
     lcol: -1,
     ly: 0,
 };
-
-fn digit(c: u8) -> Option<u32> {
-    c.is_ascii_digit().then(|| (c - b'0') as u32)
-}
-
-/// "12.345" (seconds, <= 3 decimals) -> ms.
-fn parse_ms(s: &[u8]) -> Option<u32> {
-    let (mut v, mut frac, mut i, mut any) = (0u32, None::<u32>, 0, false);
-    while i < s.len() {
-        match (s[i], frac) {
-            (b'.', None) => frac = Some(0),
-            (c, f) => {
-                let d = digit(c)?;
-                any = true;
-                match f {
-                    None => v = v.checked_mul(10)?.checked_add(d)?,
-                    Some(n) if n < 3 => {
-                        v = v.checked_mul(10)?.checked_add(d)?;
-                        frac = Some(n + 1);
-                    }
-                    Some(_) => {}
-                }
-            }
-        }
-        i += 1;
-    }
-    let mut n = frac.unwrap_or(0);
-    while n < 3 {
-        v = v.checked_mul(10)?;
-        n += 1;
-    }
-    any.then_some(v)
-}
-
-/// Decimal number ("-1.23456", "1.2E+03"); None for anything else.
-fn parse_f32(s: &[u8]) -> Option<f32> {
-    let mut i = 0;
-    let neg = matches!(s.first(), Some(b'-'));
-    if matches!(s.first(), Some(b'-' | b'+')) {
-        i = 1;
-    }
-    let (mut m, mut nd, mut e, mut any) = (0u64, 0u32, 0i32, false);
-    let mut dot = false;
-    while i < s.len() {
-        let c = s[i];
-        if c == b'.' && !dot {
-            dot = true;
-        } else if let Some(d) = digit(c) {
-            any = true;
-            if nd < 18 {
-                m = m * 10 + d as u64;
-                nd += (m != 0) as u32;
-                e -= dot as i32;
-            } else {
-                e += !dot as i32;
-            }
-        } else {
-            break;
-        }
-        i += 1;
-    }
-    if !any {
-        return None;
-    }
-    if i < s.len() && (s[i] == b'e' || s[i] == b'E') {
-        i += 1;
-        let en = matches!(s.get(i), Some(b'-'));
-        if matches!(s.get(i), Some(b'-' | b'+')) {
-            i += 1;
-        }
-        let (mut x, mut ad) = (0i32, false);
-        while i < s.len() {
-            let d = digit(s[i])?;
-            x = (x * 10 + d as i32).min(999);
-            ad = true;
-            i += 1;
-        }
-        if !ad {
-            return None;
-        }
-        e += if en { -x } else { x };
-    }
-    if i != s.len() {
-        return None;
-    }
-    let mut v = m as f32;
-    let mut k = e.unsigned_abs().min(60);
-    let mut p = 10.0f32;
-    let mut f = 1.0f32;
-    while k > 0 {
-        if k & 1 != 0 {
-            f *= p;
-        }
-        p *= p;
-        k >>= 1;
-    }
-    v = if e < 0 { v / f } else { v * f };
-    Some(if neg { -v } else { v })
-}
 
 fn find(h: &[u8], n: &[u8]) -> Option<usize> {
     (0..=h.len().saturating_sub(n.len())).find(|&i| h.len() >= n.len() && &h[i..i + n.len()] == n)
@@ -944,80 +811,15 @@ fn field_after(h: &[u8], key: &[u8], out: &mut [u8]) -> u8 {
 }
 
 impl Csv {
-    /// Parse the bytes of file block `fb` (`d`, `len` valid bytes).
-    fn block(&mut self, d: &[u8], fb: u32, len: usize) {
-        let mut i = 0;
-        if fb != 0 && self.prev.wrapping_add(1) != fb {
-            self.ll = 0;
-            self.over = false;
-            self.skip = true;
-        }
-        self.prev = fb;
-        self.pos = fb * BLK;
-        while i < len {
-            let c = d[i];
-            i += 1;
-            self.pos += 1;
-            if self.skip {
-                self.skip = c != b'\n';
-                continue;
-            }
-            if c == b'\n' {
-                if !self.over || self.line[0] == b'#' {
-                    self.line();
-                }
-                self.ll = 0;
-                self.over = false;
-            } else if c != b'\r' {
-                if self.ll < LINE {
-                    self.line[self.ll] = c;
-                    self.ll += 1;
-                } else {
-                    self.over = true;
-                }
-            }
-        }
+    /// Function and range from the log's header text (the CSV header
+    /// lines: "# ..., function DC V, range AUTO, ...").
+    fn header(&mut self, t: &[u8]) {
+        let l = t.split(|&c| c == b'\n').next().unwrap_or(&[]);
+        self.fl = field_after(l, b"function ", &mut self.func);
+        self.rl = field_after(l, b"range ", &mut self.range);
     }
 
-    fn line(&mut self) {
-        let l = self.line;
-        let l = &l[..self.ll];
-        if l.is_empty() {
-            return;
-        }
-        if l[0] == b'#' {
-            if self.fl == 0 && self.pos <= BLK {
-                self.fl = field_after(l, b"function ", &mut self.func);
-                self.rl = field_after(l, b"range ", &mut self.range);
-            }
-            return;
-        }
-        if l.starts_with(b"time_s") {
-            self.hdr = self.pos;
-            return;
-        }
-        let mut f = l.split(|&c| c == b',');
-        let Some(t) = f.next().and_then(parse_ms) else { return };
-        let vf = f.next().unwrap_or(&[]);
-        let v = parse_f32(vf);
-        if self.ul == 0 {
-            if let Some(u) = f.next() {
-                let n = u.len().min(self.unit.len());
-                for (o, &c) in self.unit.iter_mut().zip(&u[..n]) {
-                    *o = if c.is_ascii_graphic() { c } else { b'?' };
-                }
-                self.ul = n as u8;
-            }
-        }
-        if self.pb {
-            self.plot_row(t, v);
-            return;
-        }
-        self.bytes += self.ll as u32 + 2;
-        self.sample(t, v);
-    }
-
-    /// One reading (a CSV row, a DLG row): pass A statistics or pass B plot.
+    /// One reading: pass A statistics or pass B plot.
     fn sample(&mut self, t: u32, v: Option<f32>) {
         if self.pb {
             self.plot_row(t, v);
@@ -1042,25 +844,12 @@ impl Csv {
         if self.vals == 0 { f32::NAN } else { self.sum / self.vals as f32 }
     }
 
-    /// Rows in the file: exact when every block was read, else scaled from
-    /// the bytes per row of the sampled ones.
-    fn rows_est(&self, size: u32) -> u32 {
-        if !self.sampled || self.bytes == 0 {
-            return self.rows;
-        }
-        (self.rows as u64 * size.saturating_sub(self.hdr) as u64 / self.bytes as u64) as u32
-    }
-
     fn begin_plot(&mut self, plot: (i16, i16, i16, i16), key: u32) {
         self.pb = true;
         self.plot = plot;
         self.key = key;
         self.col = -1;
         self.lcol = -1;
-        self.prev = NONE;
-        self.ll = 0;
-        self.over = false;
-        self.skip = false;
     }
 
     fn vy(&self, v: f32) -> i32 {
@@ -2164,45 +1953,7 @@ impl Gallery {
                     j.i += 1;
                 }
             }
-            (Kind::Csv, ph) if is_dlg(&e.name) => self.step_dlg(io, ph),
-            (Kind::Csv, Ph::Head) => {
-                if self.job.stats {
-                    self.begin_b();
-                    return;
-                }
-                let nb = size.div_ceil(BLK);
-                let lim = if self.job.kind == JK::Chart { CSV_VIEW_BLOCKS } else { CSV_TILE_BLOCKS };
-                let j = &mut self.job;
-                j.csv = CSV0;
-                j.end = nb.min(lim);
-                j.csv.sampled = nb > lim;
-                j.i = 0;
-                j.ph = Ph::A;
-                if nb == 0 {
-                    j.end = 0;
-                    self.end_a();
-                }
-            }
-            (Kind::Csv, ph) => {
-                let j = &mut self.job;
-                let nb = size.div_ceil(BLK);
-                let fb = if j.end == nb || j.end < 2 { j.i } else { j.i * (nb - 1) / (j.end - 1) };
-                if !read_fb(io, &mut self.job.chain, fb) {
-                    return self.fail("Read error", 0, 0);
-                }
-                let len = (size - fb * BLK).min(BLK) as usize;
-                let j = &mut self.job;
-                j.csv.block(&io.data[..], fb, len);
-                j.i += 1;
-                if j.i >= j.end {
-                    if ph == Ph::A {
-                        self.end_a();
-                    } else {
-                        self.job.csv.flush();
-                        self.finish();
-                    }
-                }
-            }
+            (Kind::Csv, ph) => self.step_dlg(io, ph),
         }
     }
 
@@ -2222,13 +1973,13 @@ impl Gallery {
             let Some((_, hl, ul, unit)) = dlog::parse_file(&mut src, e.size) else {
                 return self.fail("Unsupported format", 0, 0);
             };
-            // The header text through the CSV line parser (function, range).
-            let mut t = [0u8; 256];
+            // The header text's first line: function, range.
+            let mut t = [0u8; 160];
             let n = (hl as usize).min(t.len());
             if !src.read(dlog::FHDR as u32, &mut t[..n]) {
                 return self.fail("Read error", 0, 0);
             }
-            j.csv.block(&t, 0, n);
+            j.csv.header(&t[..n]);
             let k = ul.min(j.csv.unit.len());
             j.csv.unit[..k].copy_from_slice(&unit[..k]);
             j.csv.ul = k as u8;
@@ -2270,14 +2021,10 @@ impl Gallery {
     fn begin_b(&mut self) {
         let j = &mut self.job;
         let c = j.csv;
-        let size = j.ent.size;
         let mut func = Tb::new();
-        func.bytes(if c.fl > 0 { &c.func[..c.fl as usize] } else { b"CSV" });
+        func.bytes(if c.fl > 0 { &c.func[..c.fl as usize] } else { b"Log" });
         let mut rows = Tb::new();
-        if c.sampled {
-            rows.c(b'~');
-        }
-        let n = c.rows_est(size);
+        let n = c.rows;
         rows.u(n);
         rows.s(if n == 1 { " row" } else { " rows" });
         let mut dur = Tb::new();
@@ -2316,9 +2063,6 @@ impl Gallery {
                 if c.rows > 0 {
                     r.s(", ");
                     r.bytes(dur.str().as_bytes());
-                }
-                if c.sampled {
-                    r.s(" (sampled)");
                 }
                 small(rect(8, 44, 464, 16), r.str(), FG, M_BG, 4);
                 for (k, (lab, v)) in [("Min ", c.min), ("Avg ", c.avg()), ("Max ", c.max)].iter().enumerate() {
@@ -2557,12 +2301,12 @@ impl Gallery {
 
     // ----------------------------------------------------------- tests
 
-    /// (rows, estimated rows, values, min, max, avg, span ms, sampled) of the
-    /// last CSV job.
+    /// (rows, values, min, max, avg, span ms) of the
+    /// last log job.
     #[cfg(test)]
-    pub fn csv_stats(&self) -> (u32, u32, u32, f32, f32, f32, u32, bool) {
+    pub fn csv_stats(&self) -> (u32, u32, f32, f32, f32, u32) {
         let c = &self.job.csv;
-        (c.rows, c.rows_est(self.job.ent.size), c.vals, c.min, c.max, c.avg(), c.t1.saturating_sub(c.t0), c.sampled)
+        (c.rows, c.vals, c.min, c.max, c.avg(), c.t1.saturating_sub(c.t0))
     }
 
     /// Open the viewer on rank `r` (tests).

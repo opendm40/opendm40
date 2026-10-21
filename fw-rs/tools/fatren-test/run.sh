@@ -86,7 +86,7 @@
 #   17. nearly full disk (5 free clusters): recording ends Full, file valid
 #      (the chunk cut at the end of the disk is a torn tail the reader skips);
 #   18. gallery: list (names, sizes vs mdir, free bytes), MMEM:CAT? text,
-#      delete LOG / BMP / a long-named LOG_WI~1.CSV (LFN entries removed),
+#      delete LOG / BMP / a long-named LOG_WI~1.DLG (LFN entries removed),
 #      fsck clean; a delete between two commits of a recording; deleting the
 #      file being recorded is refused; a delete while a PC has the disk
 #      mounted is refused (Busy, nothing written; review 3443cea M1).
@@ -873,26 +873,28 @@ SZ=$(mdir -i $IMGF :: | grep LOG000 | awk '{print $3}')
 [ $SZ = 20480 ] && echo "ok: the 5 free clusters filled ($SZ bytes); the chunk cut at the end is a torn tail, skipped by the reader" || { echo "FAIL at line $LINENO"; exit 1; }
 
 echo "--- gallery"
-mcopy -i $IMGS $W/keep.bin "::Log_with_a_long_name.csv"
+mcopy -i $IMGS $W/keep.bin "::Log_with_a_long_name.dlg"
+mcopy -i $IMGS $W/keep.bin ::LOG007.CSV               # text CSV: not a gallery file any more
 mdir -i $IMGS ::
 "$W/t" $IMGS csv list | tee $W/g1
-grep -q "list n=5 total=5" $W/g1 && grep -qE "  LOG000.DLG 255[0-9][0-9] Csv" $W/g1 && grep -q "  S001.BMP 307266 Bmp" $W/g1 && grep -q "  LOG_WI~1.CSV 9000 Csv" $W/g1 && grep -q "changed blocks: \[\]" $W/g1 && echo "ok: list: 3 BMP + 2 CSV with sizes, CONFIG.BIN not listed, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "list n=5 total=5" $W/g1 && grep -qE "  LOG000.DLG 255[0-9][0-9] Csv" $W/g1 && grep -q "  S001.BMP 307266 Bmp" $W/g1 && grep -q "  LOG_WI~1.DLG 9000 Csv" $W/g1 && ! grep -q "LOG007" $W/g1 && grep -q "changed blocks: \[\]" $W/g1 && echo "ok: list: 3 BMP + 2 DLG with sizes, CONFIG.BIN and a text LOG007.CSV not listed, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
 F0=$(grep -o "free=[0-9]*" $W/g1 | cut -d= -f2)
 L0=$(grep "  LOG000.DLG" $W/g1 | awk '{print $2}')
 "$W/t" $IMGS csv cat | tee $W/g0
-grep -qx "cat=$((16740352 - F0)),$F0,\"LOG000.DLG,BIN,$L0\",\"S000.BMP,BIN,307266\",\"S001.BMP,BIN,307266\",\"S002.BMP,BIN,307266\",\"LOG_WI~1.CSV,ASC,9000\"" $W/g0 && echo "ok: MMEM:CAT? text" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -qx "cat=$((16740352 - F0)),$F0,\"LOG000.DLG,BIN,$L0\",\"S000.BMP,BIN,307266\",\"S001.BMP,BIN,307266\",\"S002.BMP,BIN,307266\",\"LOG_WI~1.DLG,BIN,9000\"" $W/g0 && echo "ok: MMEM:CAT? text" || { echo "FAIL at line $LINENO"; exit 1; }
 [ $F0 = $(( $(fsck.fat -n $IMGS | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}') * 4096 )) ] && echo "ok: free bytes = fsck free clusters" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMGS csv del LOG000.DLG | tee $W/g2
 grep -q "del=Ok(())" $W/g2 && grep -q "free=$((F0 + 7 * 4096)) " $W/g2 && echo "ok: LOG000.DLG deleted, its 7 clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
-"$W/t" $IMGS csv del log_wi~1.csv mounted | tee $W/g2m
+"$W/t" $IMGS csv del log_wi~1.dlg mounted | tee $W/g2m
 grep -q "del=Err(Busy)" $W/g2m && grep -q "changed blocks: \[\]" $W/g2m && echo "ok: delete refused while a PC has the disk mounted, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
-"$W/t" $IMGS csv del log_wi~1.csv | grep -q "del=Ok(())" && echo "ok: long-named file deleted" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGS csv del log_wi~1.dlg | grep -q "del=Ok(())" && echo "ok: long-named file deleted" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
 mdir -i $IMGS :: | grep -qi "long_name" && { echo "FAIL at line $LINENO: long name left"; exit 1; }
 "$W/t" $IMGS csv del S001.BMP | grep -q "del=Ok(())" && echo "ok: S001.BMP deleted" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMGS csv del S001.BMP | grep -q "del=Err(NotFound)" && echo "ok: second delete = NotFound" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMGS csv del CONFIG.BIN | grep -q "del=Err(NotFound)" && echo "ok: CONFIG.BIN is not a gallery file" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGS csv del LOG007.CSV | grep -q "del=Err(NotFound)" && echo "ok: a text LOG007.CSV is not a gallery file" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
 bmpok $IMGS S000.BMP
 bmpok $IMGS S002.BMP

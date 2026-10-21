@@ -2,9 +2,9 @@
 //! recording", FR-35, UF-32; "Compact binary logs (DLG)") and the
 //! file-gallery backend (FR-16).
 //!
-//! File: the next free `LOG%03u.DLG` in the root (lowest number used by
-//! neither a LOG%03u.DLG nor a legacy LOG%03u.CSV, as the screenshots; the
-//! FAT code has no subdirectory support), in the compact binary format of
+//! File: the next free `LOG%03u.DLG` in the root (lowest unused number, as
+//! the screenshots; the FAT code has no subdirectory support), in the
+//! compact binary format of
 //! dlog.rs (docs/compact-log-format.md): ~1.1..1.9 bytes per reading instead
 //! of ~21, CRC-protected chunks, one per commit. The CSV exists only on read
 //! (virtual LOG%03u.CSV on the read-only LUN 1, SCPI MMEM:DATA?,
@@ -634,8 +634,7 @@ impl Job {
         None
     }
 
-    /// One root block: LOG%03u numbers in use (.DLG or a legacy .CSV), the
-    /// first free slot.
+    /// One root block: LOG%03u.DLG numbers in use, the first free slot.
     fn root(&mut self, disk: &mut dyn BlockDevice) -> Option<State> {
         let v = self.vol();
         let buf = &mut calbackup::scratch()[0];
@@ -664,9 +663,7 @@ impl Job {
                 continue;
             }
             let n = (e[3] - b'0') as u16 * 100 + (e[4] - b'0') as u16 * 10 + (e[5] - b'0') as u16;
-            if crate::fatren::sfn_is(e, &calbackup::numbered_name(b"LOG", n, b"DLG"))
-                || crate::fatren::sfn_is(e, &calbackup::numbered_name(b"LOG", n, b"CSV"))
-            {
+            if crate::fatren::sfn_is(e, &calbackup::numbered_name(b"LOG", n, b"DLG")) {
                 self.taken[(n / 32) as usize] |= 1 << (n % 32);
             }
         }
@@ -1035,9 +1032,10 @@ pub enum Kind {
 
 #[derive(Clone, Copy, Debug)]
 pub struct FileInfo {
-    /// 8.3 name, space padded ("LOG001  CSV"); `name_str` formats it.
+    /// 8.3 name, space padded ("LOG001  DLG"); `name_str` formats it.
     pub name: [u8; 11],
     pub size: u32,
+    #[allow(dead_code)] // tests; the firmware's lists need only the count
     pub kind: Kind,
 }
 
@@ -1092,11 +1090,9 @@ fn kind_of_name(e: &[u8]) -> Option<Kind> {
     let ext = [up(e[8]), up(e[9]), up(e[10])];
     if up(e[0]) == b'S' && &ext == b"BMP" {
         Some(Kind::Bmp)
-    } else if (&ext == b"CSV" || &ext == b"DLG")
-        && ((up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G') || e[..4].iter().map(|&c| up(c)).eq(*b"SCOP"))
-    {
-        // LOG*.CSV (DMM recordings) and SCOP*.CSV (scope records, UF-13),
-        // as text (legacy) or as compact binary logs (.DLG, dlog.rs).
+    } else if &ext == b"DLG" && ((up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G') || e[..4].iter().map(|&c| up(c)).eq(*b"SCOP")) {
+        // LOG*.DLG (DMM recordings) and SCOP*.DLG (scope records, UF-13),
+        // compact binary logs (dlog.rs); their CSV is generated on read.
         Some(Kind::Csv)
     } else {
         None
@@ -1163,7 +1159,7 @@ fn for_each_file(disk: &mut dyn BlockDevice, f: &mut dyn FnMut(&FileInfo)) -> Re
 }
 
 /// SCPI MMEMory:CATalog? reply into `out`: `<used>,<free>{,"<name>,<type>,<size>"}`
-/// (bytes; type BIN for a BMP or a DLG log, ASC for a CSV; gallery files only). Entries
+/// (bytes; type BIN: S*.BMP, LOG*.DLG, SCOP*.DLG; gallery files only). Entries
 /// that do not fit are left out. Returns the length.
 pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usize, GErr> {
     // The two numbers first need the free count, known only after the scan:
@@ -1180,7 +1176,7 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
         let mut t = W { b: &mut e, n: 0 };
         t.s(",\"");
         t.s(name_str(&f.name, &mut nb));
-        t.s(if f.kind == Kind::Bmp || f.name[8..].eq_ignore_ascii_case(b"DLG") { ",BIN," } else { ",ASC," });
+        t.s(",BIN,");
         t.u(f.size as u64);
         t.c(b'"');
         let n = t.n;
