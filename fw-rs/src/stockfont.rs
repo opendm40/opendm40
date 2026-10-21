@@ -64,7 +64,13 @@ mod data {
 
         /// Coverage 0..15 of pixel (x, y) inside the glyph box.
         pub fn alpha(&self, x: u32, y: u32) -> u8 {
-            let p = x * self.h as u32 + y;
+            self.alpha_at(x * self.h as u32 + y)
+        }
+
+        /// Coverage of pixel index `p` = x * h + y (column-major), so a row
+        /// walk steps `p` by `h` instead of multiplying per pixel.
+        #[inline(always)]
+        pub fn alpha_at(&self, p: u32) -> u8 {
             if self.four {
                 let b = r8(self.bits + p / 2);
                 if p & 1 == 0 { b >> 4 } else { b & 0xF }
@@ -207,7 +213,13 @@ mod data {
         /// Coverage 0..15 of pixel (x, y) inside the glyph box. Column-major,
         /// MSB-first; 4 bpp packs two pixels per byte (high nibble first).
         pub fn alpha(&self, x: u32, y: u32) -> u8 {
-            let p = x * self.h as u32 + y;
+            self.alpha_at(x * self.h as u32 + y)
+        }
+
+        /// Coverage of pixel index `p` = x * h + y (column-major), so a row
+        /// walk steps `p` by `h` instead of multiplying per pixel.
+        #[inline(always)]
+        pub fn alpha_at(&self, p: u32) -> u8 {
             if self.four {
                 let b = self.blob[(self.off + p / 2) as usize];
                 if p & 1 == 0 { b >> 4 } else { b & 0xF }
@@ -407,20 +419,38 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
     crate::probe::begin(crate::probe::TEXT, bg);
     lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
     for y in y0..=y1 {
-        for x in x0..=x1 {
+        // Runs of columns with the same covering glyph: background runs are
+        // a plain fill, glyph runs step the bitmap index by the glyph height
+        // (column-major bitmaps, row-major window).
+        let mut x = x0;
+        while x <= x1 {
             let gi = cover[x as usize];
+            let mut e = x + 1;
+            while e <= x1 && cover[e as usize] == gi {
+                e += 1;
+            }
             #[cfg(test)]
             crate::probe::sub(gi);
-            let mut c = bg;
-            if gi != u8::MAX {
-                if let Some(p) = &pl[gi as usize] {
-                    let gy = y - p.y;
-                    if gy >= 0 && gy < p.g.h as i16 {
-                        c = lut[p.g.alpha((x - p.x) as u32, gy as u32) as usize];
+            let hit = match pl.get(gi as usize) {
+                Some(Some(p)) if y >= p.y && y - p.y < p.g.h as i16 => Some(p),
+                _ => None,
+            };
+            match hit {
+                Some(p) => {
+                    let h = p.g.h as u32;
+                    let mut i = (x - p.x) as u32 * h + (y - p.y) as u32;
+                    for _ in x..e {
+                        lcd::data(lut[p.g.alpha_at(i) as usize]);
+                        i += h;
+                    }
+                }
+                None => {
+                    for _ in x..e {
+                        lcd::data(bg);
                     }
                 }
             }
-            lcd::data(c);
+            x = e;
         }
     }
     #[cfg(test)]
@@ -453,25 +483,34 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
     #[cfg(test)]
     crate::probe::begin(crate::probe::TEXT, bg);
     lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
+    let (x0, x1) = (x0 as i32, x1 as i32);
     for y in y0..=y1 {
         let gy = 2 * (y as i32 - base as i32) - top;
-        for x in x0..=x1 {
-            let mut c = bg;
-            if let Some(g) = &g {
-                let gx = 2 * (x as i32 - ox);
-                let (w, h) = (g.w as i32, g.h as i32);
-                if gx >= 0 && gx < w && gy > -2 && gy < h {
-                    let mut s = 0u32;
-                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                        let (px, py) = (gx + dx, gy + dy);
-                        if px < w && py >= 0 && py < h {
-                            s += g.alpha(px as u32, py as u32) as u32;
-                        }
+        // Columns of this row inside the glyph (gx = 2 (x - ox) in 0..w):
+        // ox ..= ox + (w - 1) / 2; background before and after.
+        let (xa, xb) = match &g {
+            Some(g) if g.w > 0 && gy > -2 && gy < g.h as i32 => (ox.max(x0), (ox + (g.w as i32 - 1) / 2).min(x1)),
+            _ => (x1 + 1, x1),
+        };
+        for _ in x0..xa.min(x1 + 1) {
+            lcd::data(bg);
+        }
+        if let Some(g) = &g {
+            let (w, h) = (g.w as i32, g.h as i32);
+            for x in xa..=xb {
+                let gx = 2 * (x - ox);
+                let mut s = 0u32;
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let (px, py) = (gx + dx, gy + dy);
+                    if px < w && py >= 0 && py < h {
+                        s += g.alpha(px as u32, py as u32) as u32;
                     }
-                    c = lut[((s + 2) / 4) as usize];
                 }
+                lcd::data(lut[((s + 2) / 4) as usize]);
             }
-            lcd::data(c);
+        }
+        for _ in (xb + 1).max(xa).max(x0)..=x1 {
+            lcd::data(bg);
         }
     }
     #[cfg(test)]

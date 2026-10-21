@@ -232,6 +232,11 @@ pub struct DmmView {
     last_chip: Option<&'static str>,
     /// Temperature deg F text in the status-bar slot as last drawn.
     last_f: [u8; 12],
+    /// Per aux row: the value part (text, AC+DC / loop flags) and the unit
+    /// part (unit, AC+DC) as last drawn; None = repaint. A reading that
+    /// leaves a part unchanged does not repaint it.
+    aux_val: [Option<([u8; 16], u8)>; 2],
+    aux_unit: [Option<(&'static str, bool)>; 2],
 }
 
 /// Bottom button `i` (0..5) with its stock glyphs, in the box (x, y, 76, 40)
@@ -333,6 +338,8 @@ impl DmmView {
             last_lim: 255,
             last_chip: None,
             last_f: [0; 12],
+            aux_val: [None; 2],
+            aux_unit: [None; 2],
         }
     }
 
@@ -361,6 +368,8 @@ impl DmmView {
         self.last_lim = 255;
         self.last_chip = None;
         self.last_f = [0xFF; 12];
+        self.aux_val = [None; 2];
+        self.aux_unit = [None; 2];
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -406,6 +415,9 @@ impl DmmView {
         if self.last_unit != r.main.unit || self.last_mode != mkey {
             self.last_unit = r.main.unit;
             self.last_mode = mkey;
+            // The aux row layout follows the mode (AC+DC tags, loop caption).
+            self.aux_val = [None; 2];
+            self.aux_unit = [None; 2];
             // From x 404: clear of the +1 digit cell (375..402).
             sf::label(sf::UNIT, rect(404, 114, 72, 32), unit, VALUE, BG, 4, -1);
             // Stock box (437,76,32,32) align 7, widened 3 px right so the
@@ -439,6 +451,8 @@ impl DmmView {
                     sf::rbox(c, 6, CHIP, BG);
                     sf::glyphs(sf::TEXT22, c, l, FG, CHIP, 8, 0);
                     self.last_chip = self.label;
+                    self.aux_val[1] = None;
+                    self.aux_unit[1] = None;
                 }
                 self.last_aux[1] = true;
                 continue;
@@ -447,13 +461,21 @@ impl DmmView {
                 // Leaving temperature: the chip spans columns the value /
                 // unit boxes below do not repaint (397..398).
                 lcd::fill_rect(260, 36, 216, 30, BG);
+                self.aux_val[1] = None;
+                self.aux_unit[1] = None;
             }
             match a {
                 Some(v) => {
                     let mut t = [0u8; 16];
                     let txt = meter::text(&mut t, v);
                     let mut u = [0u8; 16];
-                    if i == 1 && lp {
+                    let mut key = [0u8; 16];
+                    let kn = txt.len().min(16);
+                    key[..kn].copy_from_slice(&txt.as_bytes()[..kn]);
+                    let vkey = Some((key, (i == 1 && lp) as u8 | (r.acdc as u8) << 1));
+                    if self.aux_val[i] == vkey {
+                        // Value part unchanged.
+                    } else if i == 1 && lp {
                         // UF-26: "-25.0".."125.0" (<= 78 px: ink from 319)
                         // right-aligned in 316..396, the F14 caption
                         // right-aligned in 256..315 (ink from ~272: clear of
@@ -474,16 +496,23 @@ impl DmmView {
                     } else {
                         sf::label(sf::LETTERS, rect(vx - 30, 36, 137, 30), txt, VALUE, BG, 4, 0);
                     }
+                    self.aux_val[i] = vkey;
                     // AC+DC: the aux1 unit box (V..uA, <= 48 px) ends at 231,
                     // the aux2 tag slot starts at 232; else full width (kHz 57 px).
-                    let uw = if i == 0 && r.acdc { 54 } else { 76 };
-                    lcd::fill_rect((ux - 1) as u16, 36, 4, 30, BG);
-                    sf::label(sf::LETTERS, rect(ux + 3, 36, uw - 3, 30), sf::unit_text(v.unit, &mut u), VALUE, BG, 1, 0);
+                    let ukey = Some((v.unit, r.acdc));
+                    if self.aux_unit[i] != ukey {
+                        self.aux_unit[i] = ukey;
+                        let uw = if i == 0 && r.acdc { 54 } else { 76 };
+                        lcd::fill_rect((ux - 1) as u16, 36, 4, 30, BG);
+                        sf::label(sf::LETTERS, rect(ux + 3, 36, uw - 3, 30), sf::unit_text(v.unit, &mut u), VALUE, BG, 1, 0);
+                    }
                     self.last_aux[i] = true;
                 }
                 None if self.last_aux[i] => {
                     lcd::fill_rect((vx - 30) as u16, 36, (ux + 76 - vx + 30) as u16, 30, BG);
                     self.last_aux[i] = false;
+                    self.aux_val[i] = None;
+                    self.aux_unit[i] = None;
                 }
                 None => {}
             }
@@ -998,7 +1027,16 @@ pub struct ChartCache {
     time: Option<(u32, bool)>,
     rate: u8,
     rchip: Option<(u8, u32, bool)>,
+    /// Trace rows (first, last) each column shows, NO_SPAN = none; only
+    /// valid with `drawn` (else every column is drawn in full). A new point
+    /// rewrites just the columns whose span changed, and in them only the
+    /// rows of the old and the new span (one window per column).
+    cols: [(u8, u8); CHART_W as usize],
+    drawn: bool,
 }
+
+/// Column without trace (first > last).
+const NO_SPAN: (u8, u8) = (u8::MAX, 0);
 
 /// DMM reading-rate chip under the chart's timebase chip (owner request):
 /// the FR-05 rate setting (`rate` = dmm::Rate as u8) and the measured
@@ -1075,7 +1113,16 @@ const AXIS_Y: [i16; 3] = [176, 219, 262];
 
 impl ChartCache {
     pub const fn new() -> Self {
-        ChartCache { scale: None, side: None, rows: [i64::MIN; 4], time: None, rate: 0, rchip: None }
+        ChartCache {
+            scale: None,
+            side: None,
+            rows: [i64::MIN; 4],
+            time: None,
+            rate: 0,
+            rchip: None,
+            cols: [NO_SPAN; CHART_W as usize],
+            drawn: false,
+        }
     }
     pub fn invalidate(&mut self) {
         *self = ChartCache::new();
@@ -1125,8 +1172,11 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: &Side, un
     let n = pts.len();
     let first = CHART_W as usize - n.min(CHART_W as usize);
     let mut prev: Option<u16> = None;
+    let full = !c.drawn;
+    c.drawn = true;
     for x in 0..CHART_W {
-        let (a, b2) = if (x as usize) >= first {
+        // Trace rows of this column (rows 1..CHART_H - 2: fit a u8).
+        let span = if (x as usize) >= first {
             let y = row(pts[x as usize - first]);
             let s = match prev {
                 Some(p) if p < y => (p, y),
@@ -1134,15 +1184,39 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: &Side, un
                 None => (y, y),
             };
             prev = Some(y);
-            s
+            (s.0 as u8, s.1 as u8)
         } else {
-            (u16::MAX, 0)
+            NO_SPAN
+        };
+        let old = core::mem::replace(&mut c.cols[x as usize], span);
+        // Rows to rewrite: the whole column on a full draw, else the union
+        // of the old and the new trace span (the rest is unchanged).
+        let (y0, y1) = if full {
+            (0, CHART_H - 1)
+        } else if old == span {
+            continue;
+        } else if old == NO_SPAN {
+            (span.0 as u16, span.1 as u16)
+        } else if span == NO_SPAN {
+            (old.0 as u16, old.1 as u16)
+        } else {
+            (old.0.min(span.0) as u16, old.1.max(span.1) as u16)
         };
         let k = if x == 0 || x == CHART_W - 1 { 3 } else if x % 16 == 0 { 2 } else if x % 4 == 0 { 1 } else { 0 };
         let t = &tpl[k];
-        lcd::set_window(CHART_X + x, CHART_Y, CHART_X + x, CHART_Y + CHART_H - 1);
-        for y in 0..CHART_H {
-            lcd::data(if y >= a && y <= b2 { 0xFC40 } else { t[y as usize] });
+        lcd::set_window(CHART_X + x, CHART_Y + y0, CHART_X + x, CHART_Y + y1);
+        // Template above the trace, trace, template below (NO_SPAN: the
+        // first loop covers the column).
+        let (a, b2) = (span.0 as u16, span.1 as u16);
+        let a_end = a.min(y1 + 1);
+        for y in y0..a_end {
+            lcd::data(t[y as usize]);
+        }
+        for _ in a.max(y0)..=b2.min(y1) {
+            lcd::data(0xFC40);
+        }
+        for y in (b2 + 1).max(y0).max(a_end)..=y1 {
+            lcd::data(t[y as usize]);
         }
     }
     if c.rate != rate {
@@ -1630,10 +1704,27 @@ pub fn title_back_hit(y: u16) -> bool {
     (y as i16) < PAGE_BAR_H
 }
 
+/// Settings page 1 rows with -/+ steppers (Backlight, Key/alert volume;
+/// ui-review #12): no more wrap-around +10 % per tap.
+pub const SET_STEP_ROWS: [usize; 2] = [2, 3];
+/// Stepper keys of a settings row (x of "-", "+"), value between them.
+const STEP_MINUS_X: i16 = 210;
+const STEP_PLUS_X: i16 = 410;
+const STEP_KEY_W: i16 = 54;
+
 /// Settings page `page` (0 / 1) with its row values.
 pub fn settings(page: u8, vals: &[&str]) {
     if page == 0 {
-        list_page("Settings", &SETTINGS, vals);
+        let mut v = [""; 9];
+        for (i, s) in vals.iter().enumerate().take(9) {
+            v[i] = if SET_STEP_ROWS.contains(&i) { "" } else { s };
+        }
+        list_page("Settings", &SETTINGS, &v[..vals.len().min(9)]);
+        for i in SET_STEP_ROWS {
+            if let Some(t) = vals.get(i) {
+                set_stepper(i, t);
+            }
+        }
     } else {
         list_page("Settings 2/2", &SETTINGS2, vals);
     }
@@ -1652,6 +1743,25 @@ pub fn list_page(title: &str, names: &[&str], vals: &[&str]) {
         sf::glyphs(sf::TEXT22, rect(r.x + 12, r.y, 190, r.h), name, STATUS_FG, M_TILE, 1, 0);
         sf::glyphs(sf::TEXT22, rect(r.x + 202, r.y, 250, r.h), vals[i], M_ACCENT, M_TILE, 1, 0);
     }
+}
+
+/// "-" key, value, "+" key in the value column of settings row `i`.
+fn set_stepper(i: usize, val: &str) {
+    let r = set_row(i);
+    for (x, t) in [(STEP_MINUS_X, "-"), (STEP_PLUS_X, "+")] {
+        let k = rect(x, r.y + 3, STEP_KEY_W, r.h - 6);
+        sf::rbox(k, 4, M_ACCENT, M_TILE);
+        sf::glyphs(sf::TEXT22, k, t, STATUS_FG, M_ACCENT, 8, 0);
+    }
+    let vx = STEP_MINUS_X + STEP_KEY_W + 6;
+    sf::glyphs(sf::TEXT22, rect(vx, r.y, STEP_PLUS_X - 6 - vx, r.h), val, M_ACCENT, M_TILE, 8, 0);
+}
+
+/// A tap at `x` on a stepper row: -1 (left of the value's centre: the
+/// label and the "-" key) or +1.
+pub fn settings_step(x: u16) -> i8 {
+    let mid = (STEP_MINUS_X + STEP_KEY_W + STEP_PLUS_X) / 2;
+    if (x as i16) < mid { -1 } else { 1 }
 }
 
 pub fn settings_hit(page: u8, y: u16) -> Option<usize> {
