@@ -191,6 +191,19 @@ Code work (in this order):
         never in Halves, every tap steps there). (2c47fa5; verify on device)
 - [x] CSV-to-disk recording on the DMM screen, swipe-triggered (user). (a1a7e74; verify on device)
       decided: see docs/decisions-2026-10-22.md #1 (Record page: intervals, mean per row, duration, estimate)
+  - [x] Record page (decision #1): "Record" row on Hold & Limits -> View::Record: Interval (every reading /
+        1 s / 10 s / 1 min, -/+ stepper), Duration (until stopped / 10 min / 1 h / 8 h / 24 h), "Free: about
+        N h left" (free clusters x 2 B/row at the interval or the measured reading period, scanned on page
+        entry, "disk busy" while a commit holds it, capped at the 49.7-day limit), Start / Stop (Start returns
+        to the DMM page). csvlog.rs: interval rows = mean of the readings, time_s = interval END (k x I),
+        flags ORed; an OL in the interval makes it an OL row (the DLG / CSV format carries no value on an OL
+        row: decision text "mean of the non-OL readings" is not representable without a format change);
+        no row for an interval without readings; the partial last interval at stop is written at its
+        nominal end; the duration ends the recording (push and poll) with the normal "Saved" toast. One
+        extra "# interval N s: ..." header line in interval mode; every-reading mode byte-identical (the
+        fatren-test md5). SCPI LOG:CSV:INTerval / DURation (discrete values; Settings conflict while
+        recording) / FREE?. Persist v8 word W_REC. The idle auto power-off is held while recording (it was not). Swipe REC uses the same settings. Help page 5.
+        fatren-test "interval recording". (verify on device: checklist in the decisions doc #1)
       src/csvlog.rs: one-finger swipe down on the DMM page = start / stop,
       toasts, red REC in the status blocks, LOG:CSV ON|OFF / LOG:CSV?, power-off / reset commit the tail.
       (Since the USB storage redesign the PC cannot write or mount the SPI disk: no "Disk in use"
@@ -528,6 +541,11 @@ Firmware:
         Hold & Limits, tap on P to cycle the main readout (P / S / PF / E).
 - [x] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
       decided: see docs/decisions-2026-10-22.md #5 (A-JACK / LIVE? alternate with HOLD in the status slot)
+      Done (decision #5): ui::slot_alert / alert_alternates; DmmView.alt = the app's 1 s strip_alt (now
+      toggled in every view); the live alert (meter.live) is drawn while HOLD / AutoHold freeze the readout
+      and an alert change under HOLD repaints at once (shown_state); strip_data the same rule. ui-render:
+      both phases over the DMM page / strip matrices + a phase-flip stale-pixel check (0 violations).
+      (verify on device: HOLD then current into A in DC V -> HOLD / A-JACK alternate 1 s each)
       Researched: GO for current-in-A-jack in non-current modes (idle comparator on PB1, 47.5 Ω shunt, trips ~0.44 mA),
       partial for "V leads while in A mode"; blown fuse not detectable (fuse-check dialog instead). Doc §4, ~4-5 days.
       Done (sentinel.rs, doc §4.6): A-JACK by the comparator on PB1 (DC V / mV / ohm / temp) and the AD1 peak

@@ -119,7 +119,7 @@ first row number and the CSV byte offset of its first row, so:
 | 6 | 2 | header text length `hl` |
 | 8 | 4 | CRC-32 (zlib) of bytes 12 .. 12 + 12 + hl |
 | 12 | 12 | unit (ASCII, `ul` bytes used, rest 0) as in each CSV row |
-| 24 | hl | the CSV header text exactly as the old writer printed it (the two `#` lines and `time_s,value,unit,flags`, CRLF) |
+| 24 | hl | the CSV header text exactly as the old writer printed it (the two `#` lines and `time_s,value,unit,flags`, CRLF); an interval recording (Record page, decisions-2026-10-22.md #1) has a third `#` line before the column names: `# interval N s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overload in it` |
 
 ### Chunk (kind 1)
 
