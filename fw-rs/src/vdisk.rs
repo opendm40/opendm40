@@ -252,6 +252,41 @@ pub fn set_extra(files: &[Extra]) -> usize {
     nx
 }
 
+/// DBG:VDISK:ADD (media-change experiment): append test file TESTnnn.TXT to
+/// the extras (a later `set_extra` of another module drops it again).
+pub fn dbg_add() -> usize {
+    static N: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+    let Some(st) = state() else {
+        return 0;
+    };
+    let n = N.fetch_add(1, core::sync::atomic::Ordering::Relaxed) % 1000;
+    let mut x = [NO_EXTRA; MAX_EXTRA];
+    let k = st.nx.min(MAX_EXTRA - 1);
+    x[..k].copy_from_slice(&st.extra[..k]);
+    let mut name = *b"TEST000 TXT";
+    name[4] = b'0' + (n / 100) as u8;
+    name[5] = b'0' + (n / 10 % 10) as u8;
+    name[6] = b'0' + (n % 10) as u8;
+    x[k] = Extra { name, size: TEST_LEN, read: test_read, arg: n };
+    set_extra(&x[..k + 1])
+}
+
+const TEST_LEN: u32 = 32;
+
+fn test_read(arg: u32, off: u32, buf: &mut [u8]) {
+    let mut line = *b"DM40 vdisk test file 000       \n";
+    line[21] = b'0' + (arg / 100) as u8;
+    line[22] = b'0' + (arg / 10 % 10) as u8;
+    line[23] = b'0' + (arg % 10) as u8;
+    for (i, b) in buf.iter_mut().enumerate() {
+        let o = off as usize + i;
+        if o >= TEST_LEN as usize {
+            break;
+        }
+        *b = line[o];
+    }
+}
+
 /// (name, size, first cluster) of root file `i` (built-ins, then extras).
 fn entry(st: &State, i: usize) -> Option<([u8; 11], u32, u32)> {
     if i < st.n {

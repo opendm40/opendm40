@@ -818,6 +818,8 @@ impl Scpi {
                             crate::boot::put_info(self);
                             continue;
                         }
+                        #[cfg(feature = "vdisk")] // media-change experiment: ADD | FORCE 0|1 | EJECT n
+                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); let o = core::sync::atomic::Ordering::Relaxed; match parts.get(2).copied().unwrap_or(b"") { b"ADD" => { let n = crate::vdisk::dbg_add(); self.put(if n > 0 { b"ADDED" } else { b"FAIL" }) } b"FORCE" => { crate::msc::DBG_FORCE_UA.store(v[0] != 0, o); self.put(b"OK") } b"EJECT" => { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, o); self.put(b"OK") } _ => self.err = Some("Undefined header") } continue; }
                         #[cfg(feature = "native")]
                         b"RECOVER" | b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err = Some("Flash error"); continue; } Dbg::Reset }
                         #[cfg(not(feature = "native"))]
