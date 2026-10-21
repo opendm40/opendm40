@@ -197,7 +197,13 @@ Code work (in this order):
             flips contained. tools/dlog.py: standalone decoder (same bytes).
       - [x] csvlog.rs records LOGnnn.DLG (same swipe / LOG:CSV UI); numbers shared with legacy LOGnnn.CSV;
             fatren-test: md5 of the decoded CSV == the old writer's LOG000.CSV, cut sweeps, disk full.
-      - [x] scope "Save CSV" writes SCOPnnn.DLG (codes + map), CSV md5 == the old SCOPnnn.CSV.
+      - [x] scope "Save CSV" writes SCOPnnn.DLG, CSV md5 == the old SCOPnnn.CSV. Coded (owner
+            2026-10-21, docs/log-format-standards.md 4): fixed predictor order 0-3 per 4096-sample
+            block (or raw 10-bit) + adaptive Rice, 3.7-5.8x smaller than u16 (emulator record 4231 B);
+            the length is planned at Save, the writer fills 512-byte pieces per pass.
+            (verify on device: a real noisy record's size; the ~10-20 ms planning stall at Save)
+      - [x] Owner 2026-10-21: no text LOG*.CSV / SCOP*.CSV on the SPI disk any more (gallery CSV
+            parser, shared numbering, list / delete removed); CSV only as the export.
       - [x] Export: virtual LOGnnn.CSV / SCOPnnn.CSV on the read-only LUN 1 (dlog::refresh ->
             vdisk::set_extra, refreshed when a recording ends / a delete / a host write ends);
             SCPI MMEM:DATA? "<name>"[,off[,len]] (LOGnnn.CSV generated, any file raw);
