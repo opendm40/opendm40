@@ -202,7 +202,17 @@ pub struct Model {
     /// Runt trigger: the second level row (orange T strip marker, level
     /// item 5), None for the other trigger types.
     pub runt_row: Option<i16>,
+    /// fw-rs cursor tab (UF-08): 0 hidden, else CUR_OFF / CUR_X / CUR_Y.
+    pub cur_tab: u8,
 }
+
+/// Cursor tab states (`Model::cur_tab`).
+pub const CUR_OFF: u8 = 1;
+pub const CUR_X: u8 = 2;
+pub const CUR_Y: u8 = 3;
+/// The cursor tab: bottom row of the graph, between the left Corners tap
+/// zone (x <= 102) and the FFT scale box (x >= 168).
+pub const CUR_TAB: Rect = rect(108, 280, 54, 17);
 
 /// fw-rs FFT additions (UF-11): the vertical scale ("10dB/div"), the
 /// horizontal scale ("50kHz/div"), the automatic peak readout and the peak
@@ -254,6 +264,7 @@ impl Model {
         fft_hz: Txt::EMPTY,
         fft: None,
         runt_row: None,
+        cur_tab: 0,
     };
 
     pub fn pal(&self) -> Color {
@@ -537,9 +548,17 @@ pub fn panel_button(m: &Model, k: usize) {
         _ => (C_ORANGE, 8, 0xf, C_WHITE),
     };
     let fill = if pressed { C_DIS } else { fill };
+    // UF-10: the CH1 V/div buttons as magnifiers (top = zoom in = smaller
+    // V/div, bottom = zoom out), drawn as shapes instead of "+" / "-".
+    let mag = match k {
+        0 => Some(true),
+        2 => Some(false),
+        _ => None,
+    };
     let (t1, t2) = match k {
-        0 | 3 => (Ink::new(sf::SC_F20, r, "+", 8, 0), Ink::none()),
-        2 | 5 => (Ink::new(sf::SC_F20, r, "-", 8, 0), Ink::none()),
+        0 | 2 => (Ink::none(), Ink::none()),
+        3 => (Ink::new(sf::SC_F20, r, "+", 8, 0), Ink::none()),
+        5 => (Ink::new(sf::SC_F20, r, "-", 8, 0), Ink::none()),
         1 => (Ink::new(sf::SC_F20, rect(417, 61, 60, 24), "CHA", 8, 0), Ink::new(sf::SC_F12, rect(417, 85, 60, 16), b.as_str(), 8, 0)),
         4 => {
             // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
@@ -556,7 +575,12 @@ pub fn panel_button(m: &Model, k: usize) {
         }
         _ => (Ink::new(sf::SC_F20, r, "TRIG", 8, 0), Ink::none()),
     };
-    paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill)], |x, y| {
+    paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill), (K_ICON, fill)], |x, y| {
+        if let Some(plus) = mag {
+            if magnifier(r, plus, x, y) {
+                return (fg, tag(4, 0));
+            }
+        }
         if let Some(g) = t1.at(x, y) {
             return (fg, tag(2, g));
         }
@@ -565,6 +589,22 @@ pub fn panel_button(m: &Model, k: usize) {
         }
         if mask == 0 || in_rbox(r, radius, mask, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
     });
+}
+
+/// Magnifier icon (UF-10) centred in `r`: a 2 px ring of radius 8 with a
+/// "+" (`plus`) or "-" inside and a 3 px handle to the bottom right.
+fn magnifier(r: Rect, plus: bool, x: i16, y: i16) -> bool {
+    let (cx, cy) = (r.x + r.w / 2 - 3, r.y + r.h / 2 - 3);
+    let (dx, dy) = ((x - cx) as i32, (y - cy) as i32);
+    let d2 = dx * dx + dy * dy;
+    if (49..=90).contains(&d2) {
+        return true; // ring: radius 7..9.5
+    }
+    if dx.abs() <= 3 && dy.abs() <= 1 || (plus && dy.abs() <= 3 && dx.abs() <= 1) {
+        return d2 < 49;
+    }
+    // Handle: along the diagonal from the ring outwards.
+    (dx - dy).abs() <= 2 && dx >= 7 && dx <= 14 && dy >= 7 && dy <= 14
 }
 
 /// Measurement cell i (0..3): ringed box with `text` in the trace colour.
@@ -1484,9 +1524,13 @@ pub fn update(m: &Model) {
     g.set_hole_at(H_FFT_Y, add.map(|_| fft_ydiv_rect(m)));
     g.set_hole_at(H_FFT_X, add.map(|_| FFT_XDIV));
     g.set_hole_at(H_FFT_PK, add.map(|_| fft_peak_rect(m)));
+    g.set_hole_at(H_CUR, (m.cur_tab != 0).then_some(CUR_TAB));
     let deco0 = g.d_deco;
     let valid0 = g.valid;
     g.flush(m);
+    if m.cur_tab != 0 && d(ol.cur_tab != m.cur_tab) {
+        cur_tab(m.cur_tab);
+    }
     for (k, &(_, bits)) in tabs.iter().enumerate() {
         if m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0 && d((ol.tabs ^ m.tabs) & bits != 0 || ol.tb != m.tb) {
             tb_tab(m, k == 0);
@@ -1640,6 +1684,33 @@ pub fn tb_tab(m: &Model, left: bool) {
     });
 }
 
+/// The cursor tab (UF-08), the timebase-tab style in the cursor colours:
+/// grey ring, white "CUR" at rest; filled grey with "CUR X" / "CUR Y" while
+/// those cursors are on.
+pub fn cur_tab(state: u8) {
+    let r = CUR_TAB;
+    let txt = match state {
+        CUR_X => "CUR X",
+        CUR_Y => "CUR Y",
+        _ => "CUR",
+    };
+    let on = state == CUR_X || state == CUR_Y;
+    let t = Ink::new(sf::SC_F12, r, txt, 8, 1);
+    let (fill, fg) = if on { (C_FRAME, C_FILL) } else { (C_BAR, C_WHITE) };
+    paint(r, &[(K_SHAPE, C_FILL), (K_TEXT, fill)], |x, y| {
+        if let Some(g) = t.at(x, y) {
+            return (fg, tag(2, g));
+        }
+        if !in_rbox(r, 5, 0x0f, x, y) {
+            (C_FILL, 0)
+        } else if on_ring(r, 5, 0x0f, x, y) {
+            (C_FRAME, tag(1, 0))
+        } else {
+            (fill, tag(1, 0))
+        }
+    });
+}
+
 /// Highest timebase index the scope accepts (scope.rs `apply`): roll on and
 /// not Single = TB_MAX, else the YT maximum.
 pub fn tb_top(roll: bool, single: bool) -> u8 {
@@ -1704,6 +1775,8 @@ pub enum Press {
     Marker(bool, u8),
     /// No marker: the release steps the timebase (true = slower).
     Step(bool),
+    /// The cursor tab (UF-08): the release cycles the cursors.
+    Cur,
     /// Nothing (a drag still moves the selected item).
     None,
 }
@@ -1721,6 +1794,9 @@ pub fn graph_press(m: &Model, mode: u8, sel_v: u8, sel_h: u8, last_h: bool, x: i
     let k = line_zones(m, &mut lz);
     if let Some(i) = pick_zone(&lz[..k], sel_v, sel_h, last_h, x, y) {
         return Press::Marker(lz[i].level, lz[i].id);
+    }
+    if m.cur_tab != 0 && rect(CUR_TAB.x - 3, CUR_TAB.y - 6, CUR_TAB.w + 6, CUR_TAB.h + 6).has(x, y) {
+        return Press::Cur;
     }
     match tap_zone(mode, x, y) {
         Some(s) => Press::Step(s),
