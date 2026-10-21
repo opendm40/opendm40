@@ -55,7 +55,7 @@ pub enum View {
     Limits,
     /// Screenshot + log gallery (FR-16, gallery.rs).
     Gallery,
-    /// On-device help (UF-29), Settings 2/2 -> Help: HELP pages.
+    /// On-device help (UF-29), Settings 2/3 -> Help: HELP pages.
     Help,
 }
 
@@ -175,7 +175,7 @@ pub struct DmmView {
     last_ext: u8,
     last_unit: &'static str,
     last_mode: u8,
-    last_top: Option<(bool, u8, bool)>,
+    last_top: Option<(bool, u8, bool, crate::sentinel::Alert)>,
     last_aux: [bool; 2],
     /// Temperature sensor name shown instead of AUTO / MANU (set by the app,
     /// `None` outside the temperature function).
@@ -583,7 +583,7 @@ impl DmmView {
                 None => {}
             }
         }
-        let top = (r.auto && !r.auto_plus, hold, r.auto_plus);
+        let top = (r.auto && !r.auto_plus, hold, r.auto_plus, r.alert);
         // Temperature: the status-bar slot shows AUTO / MANU like the other
         // functions (the sensor name is the chip above; the deg F second
         // readout that used to sit here is gone: one global unit, owner).
@@ -598,7 +598,7 @@ impl DmmView {
             } else {
                 sf::label(sf::F21, rect(BAR_X, 1, 90, 32), s, STATUS_FG, BAR, 1, 0);
             }
-            hold_label(hold);
+            hold_label(hold, r.alert);
         }
         if self.last_lim != lim {
             self.last_lim = lim;
@@ -628,7 +628,8 @@ fn ascii_unit(u: &str, out: &mut crate::scope_ui::Txt) {
 /// meter_strip): the reading as on the old strip (value without the extra
 /// digit, OL = "0L"), sub readings (AC+DC parts tagged "AC" / "DC", Hz and
 /// duty, the 4-20 mA percentage, the temperature sensor name), one state
-/// badge by priority HOLD / A-HOLD > HV (>= 30 V) > REC > REL / limit
+/// badge by priority HOLD / A-HOLD > A-JACK / V-JACK? / LIVE? (r.alert) >
+/// HV (>= 30 V) > REC > REL / limit
 /// verdict (alternating with `alt`) > range (AUTO / AUTO+ / MANU).
 pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, label: Option<&'static str>, rec: bool) -> crate::scope_ui::StripData {
     use crate::scope_ui::{StripData, Txt};
@@ -677,10 +678,13 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         meter::V_LO => Some(("LO", 0xf800)),
         _ => None,
     };
+    let alert = r.alert;
     let (b, c) = match hold {
         1 => ("HOLD", 0xfaa0),
         2 => ("A-HOLD", 0x5acb),
         3 => ("A-HOLD", 0xfaa0),
+        // Wrong-connection alert (sentinel.rs): above HV, below HOLD.
+        _ if alert != crate::sentinel::Alert::None => (alert.strip_badge(), alert.color()),
         _ if hv >= 1 => ("HV", 0xc9a0),
         _ if rec => ("REC", 0xf800),
         _ if rel && (verdict.is_none() || alt) => ("REL", 0xb833),
@@ -701,8 +705,23 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
 /// "A-HOLD" in TEXT22 (66 px, F21 would need 103), accent blue while it waits
 /// for a stable value, inverted (dark on orange) while it shows a captured
 /// one. Slot 119..190 (after the logo-shifted range label; uptime from 205).
-fn hold_label(hold: u8) {
+///
+/// With no HOLD / AutoHold the slot carries the wrong-connection alert
+/// (sentinel.rs) instead of "RUN", in the same TEXT22 face: "A-JACK" white
+/// on red (the HI / LO badge red), "V-JACK?" / "LIVE?" in the stock value
+/// amber on the bar; letter-spaced 1 px, so the alert box runs to x 201
+/// (3 px before the uptime at 205) and the other states clear 190..201.
+fn hold_label(hold: u8, alert: crate::sentinel::Alert) {
+    use crate::sentinel::Alert;
     let r = rect(119, 1, 71, 32);
+    if hold == 0 && alert != Alert::None {
+        let (fg, bg) = if alert == Alert::AJack { (0xFFFF, alert.color()) } else { (alert.color(), BAR) };
+        lcd::fill_rect(119, 1, 83, 4, BAR);
+        lcd::fill_rect(119, 29, 83, 4, BAR);
+        sf::label(sf::TEXT22, rect(119, 5, 83, 24), alert.badge(), fg, bg, 8, 1);
+        return;
+    }
+    lcd::fill_rect(190, 1, 12, 32, BAR);
     match hold {
         2 | 3 => {
             let (fg, bg) = if hold == 3 { (BG, VALUE) } else { (0x04FC, BAR) };
@@ -1741,18 +1760,21 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
 }
 
 /// System settings (subset of the stock sections that this firmware has),
-/// two pages of at most SET_ROWS rows. Page 1: the last row "More" opens
+/// three pages of at most SET_ROWS rows. Page 1: the last row "More" opens
 /// page 2 (SETTINGS2): the DMM rate / smoothing (FR-05), the DMM page's
-/// bargraph / history row (UF-30) and "Device", the
-/// stock §6 Device/About page. "Back" is the tappable title bar (stock
-/// settings have a title-bar back, not a list row), handled by
-/// `title_back_hit` (page 2 -> page 1 -> menu), so the lists hold only
-/// settings.
+/// bargraph / history row (UF-30), Help; its "More" opens page 3
+/// (SETTINGS3): the wrong-connection alerts and "Device", the stock §6
+/// Device/About page. "Back" is the tappable title bar (stock settings have
+/// a title-bar back, not a list row), handled by `title_back_hit` (page 3 ->
+/// page 2 -> page 1 -> menu), so the lists hold only settings.
 pub const SETTINGS: [&str; 9] = [
     "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
     "Scope drag", "More",
 ];
-pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit", "Scope swipe", "Scope press", "Scope tap step", "Device", "Help"];
+pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit", "Scope swipe", "Scope press", "Scope tap step", "Help", "More"];
+/// Page 3: the wrong-connection alerts (sentinel.rs; ON = all, A-JACK only,
+/// OFF) and the Device / About page.
+pub const SETTINGS3: [&str; 2] = ["Jack alerts", "Device"];
 
 /// Settings/menu-page title bar: 40 px, bg 0x2966 (stock gui_v2_6.h:101).
 pub const PAGE_BAR_H: i16 = 40;
@@ -1790,7 +1812,7 @@ const STEP_MINUS_X: i16 = 210;
 const STEP_PLUS_X: i16 = 410;
 const STEP_KEY_W: i16 = 54;
 
-/// Settings page `page` (0 / 1) with its row values.
+/// Settings page `page` (0 / 1 / 2) with its row values.
 pub fn settings(page: u8, vals: &[&str]) {
     if page == 0 {
         let mut v = [""; 9];
@@ -1803,8 +1825,10 @@ pub fn settings(page: u8, vals: &[&str]) {
                 set_stepper(i, t);
             }
         }
+    } else if page == 1 {
+        list_page("Settings 2/3", &SETTINGS2, vals);
     } else {
-        list_page("Settings 2/2", &SETTINGS2, vals);
+        list_page("Settings 3/3", &SETTINGS3, vals);
     }
 }
 
@@ -1843,7 +1867,7 @@ pub fn settings_step(x: u16) -> i8 {
 }
 
 pub fn settings_hit(page: u8, y: u16) -> Option<usize> {
-    list_hit(y, if page == 0 { SETTINGS.len() } else { SETTINGS2.len() })
+    list_hit(y, [SETTINGS.len(), SETTINGS2.len(), SETTINGS3.len()][page.min(2) as usize])
 }
 
 /// Row of a `list_page` with `n` rows under a touch at `y`.

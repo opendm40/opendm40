@@ -56,6 +56,22 @@ const GEST_N: usize = 32;
 /// Toast when a PC has the USB disk mounted (screenshot / CSV start, M2).
 const DISK_IN_USE: &str = "Disk in use by PC - eject first";
 
+/// "Jack alerts" setting value (Settings 3/3) of an alert mask.
+fn alert_mask_name(b: &mut [u8; 16], m: u8) -> &str {
+    use crate::sentinel::{M_AJACK, M_ALL};
+    match m {
+        M_ALL => "ON",
+        M_AJACK => "A-JACK only",
+        0 => "OFF",
+        _ => {
+            let t = b"Mask ";
+            b[..5].copy_from_slice(t);
+            b[5] = b'0' + (m & 7);
+            core::str::from_utf8(&b[..6]).unwrap_or("")
+        }
+    }
+}
+
 /// Menu-like pages (not instrument views): no view swipe, MENU steps back.
 fn is_page(v: View) -> bool {
     matches!(v, View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Gallery | View::Help)
@@ -189,6 +205,12 @@ pub struct App {
     kp_unit: &'static str,
     /// Last limit-fail beep (rate limit for a reading that hovers at a limit).
     fail_beep_at: u64,
+    /// Wrong-connection alert (sentinel.rs): the assertion last toasted,
+    /// the start of the A-JACK beep pattern (None: silent) and whether the
+    /// pattern has the buzzer on.
+    alert_seq: u32,
+    alert_beep_t0: Option<u64>,
+    alert_buzz: bool,
     pub meas: [f32; 4],
     beep_until: u64,
     pub last_raw: Option<Reading>,
@@ -378,6 +400,9 @@ impl App {
             run_down: None,
             kp_unit: "",
             fail_beep_at: 0,
+            alert_seq: 0,
+            alert_beep_t0: None,
+            alert_buzz: false,
             meas: [0.0; 4],
             pd6_armed: false,
             pd6_off: false,
@@ -556,10 +581,18 @@ impl App {
                     if self.sp.swipes { "Top bar" } else { "Off (stock)" },
                     if self.sp.press_fx { "ON" } else { "OFF (stock)" },
                     crate::scope_ui::TAP_NAMES[self.sp.tap_mode.min(2) as usize],
-                    "", // Device row: opens the About page, no inline value
                     "", // Help row: opens the help pages (UF-29)
+                    "", // More row: opens page 3
                 ];
                 ui::settings(1, &vals);
+            }
+            View::Settings if self.set_page == 2 => {
+                let mut b = [0u8; 16];
+                let vals = [
+                    alert_mask_name(&mut b, self.dmm.alert_mask()),
+                    "", // Device row: opens the About page, no inline value
+                ];
+                ui::settings(2, &vals);
             }
             View::Settings => {
                 let mut b = [[0u8; 8]; 2];
@@ -920,6 +953,7 @@ impl App {
             buzzer(false, self.volume);
             self.beep_until = 0;
         }
+        self.alert_beep(now);
         if !can_draw {
             self.note_host_activity(now);
         }
@@ -1349,7 +1383,8 @@ impl App {
         // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
         p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing())
             | if self.dmm_view.bar_on { 0 } else { crate::meter::EXT_HISTORY_ROW }
-            | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 };
+            | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 }
+            | ((!self.dmm.alert_mask() & crate::sentinel::M_ALL) as u32) << crate::meter::EXT_ALERT_OFF_SHIFT;
         p
     }
 
@@ -1400,6 +1435,9 @@ impl App {
         self.meter.set_smoothing(ext.smooth);
         self.dmm_view.bar_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_HISTORY_ROW == 0;
         self.dmm.set_temp_f(p[crate::persist::W_DMM_EXT] & crate::meter::EXT_TEMP_F != 0);
+        // Before the first row is written (select below).
+        let off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_ALL;
+        self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
         let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
         self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
         let mode = if same_session { restore_func(rec.version, p[2] as u8) } else { 1 };
@@ -1540,6 +1578,7 @@ impl App {
                 ui::hv_warning(hv);
             }
         }
+        self.alert(now, raw.alert);
         // AutoHold capture: short beep; a capture that fails the limits (with
         // the fail beep on) gets the long fail beep instead. A live value
         // crossing out of the limits: long beep, at most once a second.
@@ -1894,6 +1933,48 @@ impl App {
         crate::dialog::toast(core::str::from_utf8(&b[..n]).unwrap_or(""), false);
     }
 
+    /// Wrong-connection alert of the latest reading (sentinel.rs): a toast
+    /// once per assertion, in any view; A-JACK starts the beep pattern
+    /// (`alert_beep`), LIVE? beeps once 100 ms, V-JACK? is silent. The badge
+    /// comes with the reading (DMM status slot, combined-view strip).
+    fn alert(&mut self, now: u64, a: crate::sentinel::Alert) {
+        use crate::sentinel::Alert;
+        let seq = self.dmm.sent.seq;
+        if seq != self.alert_seq {
+            self.alert_seq = seq;
+            if a != Alert::None {
+                if !is_page(self.view) || self.view == View::Menu {
+                    self.toast(now, a.toast(), false);
+                }
+                match a {
+                    Alert::AJack => self.alert_beep_t0 = Some(now),
+                    Alert::Live => self.beep(now, 100),
+                    _ => {}
+                }
+            }
+        }
+        if a != Alert::AJack {
+            self.alert_beep_t0 = None;
+        }
+    }
+
+    /// A-JACK beep pattern: 3 x 50 ms (50 ms apart) every 2 s while the
+    /// alert is on, at the key / alert volume (0 % = silent); never over
+    /// another beep in progress.
+    fn alert_beep(&mut self, now: u64) {
+        let on = match self.alert_beep_t0 {
+            Some(t0) => {
+                let ph = now.saturating_sub(t0) % 2000;
+                ph < 250 && (ph / 50) % 2 == 0
+            }
+            None => false,
+        };
+        if on != self.alert_buzz && self.beep_until == 0 {
+            self.alert_buzz = on;
+            buzzer(on, self.volume);
+        }
+    }
+
     /// A toast over the view (dialog.rs); the view is redrawn when it goes.
     fn toast(&mut self, now: u64, txt: &str, ok: bool) {
         self.last_input = now;
@@ -1989,8 +2070,8 @@ impl App {
                 // they were opened from.
                 let v = match self.view {
                     View::Device | View::Help => View::Settings,
-                    View::Settings if self.set_page == 1 => {
-                        self.set_page = 0;
+                    View::Settings if self.set_page >= 1 => {
+                        self.set_page -= 1;
                         View::Settings
                     }
                     View::Settings => View::Menu,
@@ -2389,12 +2470,34 @@ impl App {
                         };
                     }
                     Some(7) => {
-                        self.show(View::Device, clk);
-                        return;
-                    }
-                    Some(8) => {
                         self.help_page = 0;
                         self.show(View::Help, clk);
+                        return;
+                    }
+                    Some(8) => self.set_page = 2,
+                    Some(_) | None => return,
+                }
+                self.redraw = true;
+            }
+            View::Settings if self.set_page == 2 => {
+                if ui::title_back_hit(y) {
+                    self.set_page = 1;
+                    self.redraw = true;
+                    return;
+                }
+                match ui::settings_hit(2, y) {
+                    Some(0) => {
+                        // Jack alerts: ON (all) -> A-JACK only -> OFF -> ON.
+                        use crate::sentinel::{M_AJACK, M_ALL};
+                        let m = match self.dmm.alert_mask() {
+                            M_ALL => M_AJACK,
+                            M_AJACK => 0,
+                            _ => M_ALL,
+                        };
+                        self.dmm.set_alert_mask(clk, m);
+                    }
+                    Some(1) => {
+                        self.show(View::Device, clk);
                         return;
                     }
                     Some(_) | None => return,
@@ -2877,6 +2980,24 @@ impl App {
                 // The last AUTO-set's decisions (scope_page.rs autoset_log).
                 out.put_bytes(b"|AUTO");
                 scope_page::autoset_log(out);
+                true
+            }
+            C::SysAlert => {
+                out.put_bytes(self.dmm.sent.alert.name().as_bytes());
+                true
+            }
+            C::SysAlertEnable(Some(m)) => {
+                self.dmm.set_alert_mask(clk, m);
+                false
+            }
+            C::SysAlertEnable(None) => {
+                out.put_bytes(&[b'0' + self.dmm.alert_mask()]);
+                true
+            }
+            C::DbgSent => {
+                let mut b = [0u8; 96];
+                let n = self.dmm.sent.diag_text(&mut b);
+                out.put_bytes(&b[..n]);
                 true
             }
             C::DbgAcdc => {

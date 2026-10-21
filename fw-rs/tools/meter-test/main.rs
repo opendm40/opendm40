@@ -10,6 +10,8 @@ mod hy3131;
 mod hy3131_tables;
 #[path = "../../src/clock.rs"]
 mod clock;
+#[path = "../../src/sentinel.rs"]
+mod sentinel;
 #[path = "../../src/dmm.rs"]
 mod dmm;
 #[path = "../../src/meter.rs"]

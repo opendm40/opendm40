@@ -28,6 +28,8 @@ mod bargraph;
 mod clock;
 #[path = "../../src/dialog.rs"]
 mod dialog;
+#[path = "../../src/sentinel.rs"]
+mod sentinel;
 #[path = "../../src/dmm.rs"]
 mod dmm;
 #[path = "../../src/gen.rs"]
@@ -399,9 +401,12 @@ fn ol(dec: u8, unit: &'static str) -> Val {
     Val { v: 0.0, dec, unit, ol: true, ext: false }
 }
 
+/// Wrong-connection alerts (sentinel.rs) cycled through the page / strip matrices.
+const ALERTS: [sentinel::Alert; 4] = [sentinel::Alert::None, sentinel::Alert::AJack, sentinel::Alert::VJack, sentinel::Alert::Live];
+
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
-    Reading { mode, range: 0, main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, seq: 0, avg_n: 0 }
+    Reading { mode, range: 0, main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, seq: 0, avg_n: 0, alert: sentinel::Alert::None }
 }
 
 /// Meter-strip worst cases: (name, reading, temperature label).
@@ -850,12 +855,17 @@ fn main() {
             for hold in 0..4u8 {
                 for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
                     for rel in [false, true] {
-                        for (hv, rec, gen) in [(0u8, false, ""), (hv_of(r), true, "10.00MHz"), (1, false, "1.00kHz"), (2, false, "")] {
+                        for (j, (hv, rec, gen)) in [(0u8, false, ""), (hv_of(r), true, "10.00MHz"), (1, false, "1.00kHz"), (2, false, "")].into_iter().enumerate() {
+                            let mut r = *r;
+                            if !(hold == 0 && lim == 0 && !rel) {
+                                r.alert = ALERTS[(j + hold as usize + rel as usize) % 4];
+                            }
+                            let r = &r;
                             let mut d = ui::strip_data(r, hold, lim, rel, hv, hold == 1, *label, rec);
                             d.gen = scope_ui::Txt::new(gen);
                             page(&m);
                             scope_ui::meter_strip(&d);
-                            ck.check_area(&format!("strip/{name}/h{hold}/l{lim}/r{}/hv{hv}", rel as u8), &strip_regions, true, Some(strip_area));
+                            ck.check_area(&format!("strip/{name}/h{hold}/l{lim}/r{}/hv{hv}/a{}", rel as u8, r.alert.name()), &strip_regions, true, Some(strip_area));
                             if hold == 0 && lim == 0 && !rel {
                                 datas.push((name, d));
                             }
@@ -992,6 +1002,8 @@ fn main() {
                     let rc = chips[k];
                     let mut r = *r;
                     r.main.ext = ext && !r.main.ol;
+                    // Every alert badge in the status slot, against every hold state.
+                    r.alert = ALERTS[(k + hold as usize) % 4];
                     host::reset(0);
                     let mut dv = ui::DmmView::new();
                     dv.label = *label;
@@ -1017,7 +1029,7 @@ fn main() {
                     let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
                     ui::chart(&mut cc, &pts, dec, rate, &side, r.main.unit, rc);
-                    ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}", ext as u8), &dmm_page_regions);
+                    ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}", ext as u8, r.alert.name()), &dmm_page_regions);
                 }
             }
         }
@@ -1306,6 +1318,10 @@ fn main() {
         ("SLOW 600000 counts / 12.8 s", true),
         ("FAST 60000 counts / 10/s", true),
         ("Fixed rate in this function", false),
+        // Wrong-connection alerts (sentinel.rs).
+        (sentinel::Alert::AJack.toast(), false),
+        (sentinel::Alert::VJack.toast(), false),
+        (sentinel::Alert::Live.toast(), false),
     ]
     .iter()
     .enumerate()
@@ -1316,6 +1332,9 @@ fn main() {
         ck.check(&format!("toast/{t}"), &[("screen", Bx::new(0, 0, 480, 320)), ("toast", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))]);
         if k == 0 {
             save(&out, "t01-toast-disk-in-use");
+        }
+        if k == 11 {
+            save(&out, "t03-toast-ajack");
         }
         if k == 8 {
             save(&out, "t02-toast-resolution");
@@ -1436,6 +1455,9 @@ fn main() {
         ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
+        ui::settings(2, &["A-JACK only", ""]);
+        save(&out, "m10-settings3");
+        host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));
         save(&out, "m03-range-v-warn");
         // Second ohm mode ("ON" low current): Resistor Settings with it
@@ -1461,6 +1483,29 @@ fn main() {
         ui::status_right(&status(0));
         ui::hv_warning(true);
         save(&out, "d11-dmm-hv-red");
+        // Wrong-connection alerts in the status slot (sentinel.rs): A-JACK in
+        // DC V (red), V-JACK? in DC mA, LIVE? in ohm; the combined strip badge.
+        for (case, file, b, a) in [
+            ("dcv", "d12-dmm-ajack", Button::Volt, sentinel::Alert::AJack),
+            ("dcma_420lo", "d13-dmm-vjack", Button::Amp, sentinel::Alert::VJack),
+            ("ohm_k", "d14-dmm-live", Button::Ohm, sentinel::Alert::Live),
+        ] {
+            host::reset(0);
+            let (mut r, _) = find(case);
+            r.alert = a;
+            let mut dv = ui::DmmView::new();
+            dv.draw_static(b, r.mode, false, false);
+            dv.bar_update(&r);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            save(&out, file);
+        }
+        {
+            let (mut r, l) = find("acv_230");
+            r.alert = sentinel::Alert::AJack;
+            combined(&r, l, 0, 0, false, false, false, "");
+            save(&out, "c11-strip-ajack");
+        }
         // UF-30 bargraph: bipolar DC V (negative), unipolar ohm, overload.
         for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt)] {
             host::reset(0);

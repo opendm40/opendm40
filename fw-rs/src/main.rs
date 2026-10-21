@@ -27,6 +27,7 @@ mod fft;
 mod sinc;
 mod trigsoft;
 mod scpi;
+mod sentinel;
 mod startup;
 mod stockfont;
 mod touch;
