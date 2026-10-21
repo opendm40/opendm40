@@ -102,7 +102,7 @@ Where DLG2 spends its bits (ideal bits/row): time 3.05-3.75 against a 2.81-3.46
 floor; value 4.0 / 0.8 / 5.0 / 7.1 / 4.6 / 4.8 / 5.6 against 3.6 / 0.6 / 4.4 /
 6.6 / 4.4 / 4.3 / 4.8. The remaining gap is ~0.25 bit for time and ~0.4 bit for
 value per row. Most of it is adaptation cost after each chunk restart: the
-single-chunk run reaches 2.92 bits for time.
+single-chunk run (one 6000-row chunk, slow-EMA time predictor only; printed by lab.py) reaches 2.92 bits for time.
 
 What each idea gives (ablation in the lab):
 
