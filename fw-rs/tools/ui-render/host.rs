@@ -28,6 +28,10 @@ pub struct Emu {
     pub grouping: bool,
     /// Pixels written (RAMWR data words), for the redraw budget checks.
     pub writes: u64,
+    /// Every 16-bit bus write (commands + window arguments + pixels) and
+    /// RAMWR commands (= windows opened), for the DMM redraw budget.
+    pub bus: u64,
+    pub wins: u64,
 }
 
 pub static mut EMU: Option<Emu> = None;
@@ -48,6 +52,8 @@ pub fn emu() -> &'static mut Emu {
                 group: None,
                 grouping: false,
                 writes: 0,
+                bus: 0,
+                wins: 0,
             });
         }
         EMU.as_mut().unwrap()
@@ -119,7 +125,11 @@ pub fn set(id: u32, bg: u16, g: u8) {
 
 fn lcd_w16(addr: u32, v: u16) {
     let e = emu();
+    if addr == 0x6001_FFFE || addr == 0x6002_0000 {
+        e.bus += 1;
+    }
     if addr == 0x6001_FFFE {
+        e.wins += (v == 0x2C) as u64;
         e.cmd = v;
         e.args.clear();
         e.writing = v == 0x2C;

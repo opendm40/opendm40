@@ -1040,6 +1040,76 @@ fn main() {
         }
     }
 
+    // 5d. DMM trend chart: points added one at a time (ui::chart redraws only
+    //     the columns whose trace span changed) equal a fresh chart of the
+    //     final points after every point: flat, noise, a step, range growth
+    //     and shrink, the 321-column scroll, a unit change (n back to 0) and
+    //     a resolution change. Plus the redraw budget of one point.
+    {
+        let mut g = 12345u32;
+        let mut noise = move |k: i32| {
+            g = g.wrapping_mul(1664525).wrapping_add(1013904223);
+            ((g >> 16) % (2 * k as u32 + 1)) as i32 - k
+        };
+        let mut runs: Vec<(&str, Vec<(f32, u8, &'static str)>)> = vec![];
+        runs.push(("flat", (0..340).map(|_| (0.5, 4, "V")).collect()));
+        runs.push(("noise", (0..340).map(|_| (0.5 + noise(2) as f32 * 1e-4, 4, "V")).collect()));
+        runs.push(("step", (0..340).map(|i| (if i < 150 { 0.5 } else { 1.0 }, 4, "V")).collect()));
+        runs.push(("square", (0..340).map(|i| (if (i / 20) % 2 == 0 { 0.5 } else { 1.5 }, 4, "V")).collect()));
+        // A spike that scrolls out: the range grows, then shrinks back.
+        runs.push(("spike", (0..400).map(|i| (if i == 30 { 3.0 } else { 0.5 + noise(2) as f32 * 1e-4 }, 4, "V")).collect()));
+        let mut uc: Vec<(f32, u8, &'static str)> = (0..330).map(|_| (0.5 + noise(2) as f32 * 1e-4, 4, "V")).collect();
+        uc.extend((0..20).map(|_| (444.44 + noise(5) as f32 * 0.01, 2, "mV")));
+        runs.push(("unit", uc));
+        runs.push(("dec", (0..340).map(|i| (0.5 + noise(2) as f32 * 1e-4, if i < 325 { 4 } else { 3 }, "V")).collect()));
+        let rc = ui::RateChip { rate: 1, period_ms: 106, applies: true };
+        for (name, vals) in &runs {
+            let mut cc = ui::ChartCache::new();
+            let mut pts: Vec<f32> = vec![];
+            let mut unit = vals[0].2;
+            let (mut words, mut wins, mut steps) = (0u64, 0u64, 0u64);
+            let mut bad = 0;
+            for (i, &(v, dec, u)) in vals.iter().enumerate() {
+                if u != unit {
+                    unit = u;
+                    pts.clear();
+                }
+                if pts.len() == ui::CHART_W as usize {
+                    pts.remove(0);
+                }
+                pts.push(v);
+                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: None, secs: Some(i as u32), rec: false };
+                if i == 0 {
+                    host::reset(0);
+                }
+                emu().bus = 0;
+                emu().wins = 0;
+                ui::chart(&mut cc, &pts, dec, 1, &side, unit, rc);
+                if i > 0 {
+                    words += emu().bus;
+                    wins += emu().wins;
+                    steps += 1;
+                }
+                // Every 7th point (and the last ones): compare with a fresh chart.
+                if i % 7 == 0 || i + 3 >= vals.len() {
+                    let got = emu().fb.clone();
+                    host::reset(0);
+                    ui::chart(&mut ui::ChartCache::new(), &pts, dec, 1, &side, unit, rc);
+                    ck.cases += 1;
+                    let diff = (0..W * H).filter(|&k| got[k] != emu().fb[k]).count();
+                    if diff > 0 && bad == 0 {
+                        ck.fail(&format!("chart/{name}/{i}"), format!("{diff} stale pixels after an incremental point"));
+                        bad += 1;
+                    }
+                    // Continue from the fresh frame (same state as `got`).
+                    emu().fb.copy_from_slice(&got);
+                }
+            }
+            let n = steps.max(1) as f64;
+            println!("dmm chart budget: {name}: {:.0} bus words / point ({:.1} windows; {:.3} ms at 25 ns)", words as f64 / n, wins as f64 / n, words as f64 / n * 25e-6);
+        }
+    }
+
     // 6. Generator page bar, menu-page title bars.
     for on in [false, true] {
         w.gen.s.on = on;
