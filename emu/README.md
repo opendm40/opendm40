@@ -150,6 +150,7 @@ Renode's monitor TCP port (`renode -P`), so the GUI never blocks the emulation.
 ```sh
 emu/live.py fwrs                                      # GUI: USB/IP on TCP 3240 by default (--no-usbip, --usbip-port P)
 emu/run.py fwrs  --fast --usbip 0.01 --run-for 600     # headless: USB/IP on TCP 3240 (--usbip-port P) from t = 10 ms
+                                                      # (the model's server; --usbip-renode: Renode's)
 emu/run.py stock --app ../alientek-dm40-tools/patch/build/dm40_patched.bin --fast --usbip 6 --run-for 600
 # other terminal (plain TCP, no root, no vhci):
 emu/usbip_client.py list                 # busid=1-0 1209:0001 interfaces fe/03/01 08/06/50
@@ -166,46 +167,90 @@ emu/usbip_client.py mscdump 1-0 0 out.img  # FAT volume of a LUN (metadata + use
                                          # DEBUG/SPIFLASH.BIN: ~2 min) for fsck.fat / mtools; resumable
                                          # (exit 2: restart the emulator, rerun)
 emu/usbip_client.py upload 1-0 dm40-fw-native.bin  # fw-rs DBG:UPLOAD -> DM40FW.BIN in the SPI root (~8 s)
-USBIP_PORT=3251 emu/usbip_client.py ...  # a server on another port (CreateUSBIPServer 3251)
+USBIP_PORT=3251 emu/usbip_client.py ...  # a server on another port (--usbip-port 3251)
 emu/usbip_client.py read   1-0 0x1FFF7A10 12    # usbrw image: vendor EP0 read (the UID)
 emu/usbip_client.py write  1-0 0x20028FC0 02    # usbrw image: vendor EP0 write + read-back
 ```
 
-Renode exports the registered device as busid `1-0`. The client is a stdlib
-USB/IP implementation (list / import / control and bulk URBs; Renode reads
-the URB direction from `transfer_flags` bit 0x200, not from the direction
-word). Verified 2026-10-14: the usbrw image (ep0 memrw session) passes its
+The USB/IP server is the model's own (`sysbus.usbfs StartUSBIPServer <port>`,
+`emu/peripherals/DWC2_OTG_USBIP.cs`); `run.py --usbip-renode` falls back to
+Renode's (`emulation CreateUSBIPServer` + `host.usb Register`), which only
+`usbip_client.py` can use. The device is busid `1-0` (devid 0x10000), full
+speed. Verified 2026-10-14: the usbrw image (ep0 memrw session) passes its
 acceptance (descriptor 28e9:02f0, UID read, RAM write + read-back); fw-rs
-enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk
-over MSC (a 4 KiB block = 64 bulk URBs, each a main-loop turn of fw-rs: a
-few seconds in `--fast` mode). Attaching the device to the host kernel
-(`usbip attach`, then `dm40dbg.py` / mounting the disk) needs vhci-hcd and
-root and was not run. Stock firmware: the device exists only after Settings >
-Other > USB Connect; until then Renode's DEVLIST / IMPORT wait for the
-descriptor read forever, so `usbip_client.py` gives up after 5 s
-(`USBIP_TIMEOUT`) with a "no answer" message. Checked 2026-10-21: even after
-USB Connect the stock never answers the descriptor read in the emulator (90 s
-wait; its USB does not enumerate here - not investigated); a request that timed
-out does not wedge the server (fw-rs paused during a `list`, resumed: the next
-`list` answers at once). Fixed 2026-10-21: "after a few dozen bulk
-transfers the emulated DWC2 stops answering URBs (EP0 too)" was a race in the
-model: the USB/IP server thread cleared DIEPCTL.EPENA while the CPU polled
-that register, the clear was lost, the driver saw its IN endpoint busy
-forever, and the server (one URB at a time, an IN URB waits for data) stopped
-answering everything after it. CPU register accesses and the server's endpoint
-calls are now serialised (`DWC2_OTG.HostLock`); 1500 x 4 KiB MSC reads and
-`usbtmc_stress.py` (5000+ mixed USBTMC exchanges) pass. A Bulk-OUT URB longer
-than 64 bytes is now split into packets (it was dropped as one oversized
-packet: a USBTMC message over 52 bytes never arrived).
+enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk over
+MSC. Stock firmware: the device exists only after Settings > Other > USB
+Connect; a DEVLIST / IMPORT whose descriptor read gets no answer within 3 s
+lists no device / refuses the import (checked 2026-10-21 with Renode's server:
+even after USB Connect the stock never answers the descriptor read in the
+emulator - not investigated).
 
-Renode's USB/IP server handles URBs strictly in order and an IN URB blocks it
-until the device sends a packet: a client must submit a Bulk-IN URB only when
-a reply is due (a query the device never answers, e.g. an unknown one, or a
-reply later than the client's timeout, leaves the URB pending and every later
-URB, EP0 included, waits behind it). `emu/usbtmc_stress.py` (thousands of
-command / query pairs, multi-packet messages and replies, small TransferSize
-rounds, pipelined URBs, stale REQUESTs, INITIATE_CLEAR, aborts; `--port`,
-`--seed`, `--cases`) exercises fw-rs's USBTMC over it.
+#### Attaching to the Linux kernel (vhci-hcd)
+
+```sh
+emu/run.py fwrs --fast --usbip 0.01 --usbip-port 3240 --run-for 3600 &   # usbip attach only knows TCP 3240
+sudo modprobe vhci-hcd
+sudo usbip attach -r 127.0.0.1 -b 1-0       # lsusb: a second 1209:0001, on the vhci bus (9 here)
+ls /sys/bus/usb/devices/9-1:1.0/usbmisc/    # its /dev/usbtmcN (the real DM40 has another one)
+DM40_USBTMC=emu fw-rs/tools/dm40scpi.py info    # emu = the usbtmc under vhci_hcd, real = the other,
+DM40_USBTMC=emu fw-rs/tools/dm40dbg.py ping     # or DM40_USBTMC=/dev/usbtmcN
+udisksctl mount -b /dev/sdX                 # sdX: the disk under vhci_hcd (/sys/block/sdX/device), mounts ro
+sigrok-cli -d scpi-dmm:conn=usbtmc/9.N --samples 3   # libsigrok's usbtmc is libusb (bus.address);
+                                            # scpi-dmm knows the IDN after SYST:IDN:EMUL 34401A
+sudo usbip port; sudo usbip detach -p 0
+```
+
+Verified 2026-10-22 (kernel 7.0): enumeration (device, BOS, strings,
+config; the device qualifier STALLs -> -EPIPE as on hardware), usbtmc binds
+and answers `*IDN?`, dm40scpi.py info / read, dm40dbg.py ping, usb-storage
++ udisks mount read-only (INFO/FIRMWARE.BIN byte-identical to the built
+image, ~250 kB/s), sigrok scpi-dmm readings, a usbtmc read timeout (unknown
+query) unlinked and the next query answered, detach + re-attach.
+
+Why Renode's server could not do this (Renode 1.17.0, `USBIPServer.cs`):
+the kernel's first request is GET_DESCRIPTOR(device, wLength 64) and Renode
+completes a control IN only when wLength bytes arrived (`ReadAtLeast`), not on
+the short packet; the 18-byte descriptor never filled it, the server thread
+blocked for good, the kernel's UNLINK after 5 s was never read and the socket
+died ~28 s later. Also missing there: RET_UNLINK, STALL (-EPIPE),
+URB_SHORT_NOT_OK, one queue per endpoint (one pending Bulk-IN URB blocked
+EP0 and everything else), full speed (it advertises high). The model's
+server:
+
+* per-endpoint workers (EP0 one worker for both directions), the socket
+  reader never blocks; URBs of one endpoint complete in order;
+* control IN ends on wLength or a short packet, then the OUT ZLP status;
+  control OUT / no-data waits for the device's IN ZLP status; STALL (DxEPCTL
+  bit 21, now modelled; EP0's is cleared by the next SETUP) -> -EPIPE;
+* Bulk/Interrupt IN collects packets up to the URB length or a short packet;
+  URB_SHORT_NOT_OK -> -EREMOTEIO (usb-storage's scatter-gather reads);
+  Bulk OUT is split into max-packet packets, URB_ZERO_PACKET adds a ZLP;
+* CMD_UNLINK -> RET_UNLINK -ECONNRESET for a pending URB (no RET_SUBMIT
+  follows), 0 for one already completed (its RET_SUBMIT went out first);
+* IMPORT is a USB bus reset (endpoint FIFOs dropped, the firmware
+  re-enumerates; the reply waits until it handled USBRST); one import at a
+  time; DEVLIST of an imported device answers from cached descriptors.
+* EP0 now always counts as active (USBAEP read 1 but its stored value was 0
+  after a peripheral reset until the CPU next read DIEPCTL0).
+
+Debugging the wire: a transparent TCP proxy that logs the PDUs (listen on
+3240 for `usbip attach`, forward to the emulator on another `--usbip-port`)
+shows every SUBMIT / RET_SUBMIT / UNLINK; Renode's log has
+`USB/IP: device 1-0 imported / released`.
+
+Earlier fixes in the model (2026-10-21), still relevant: the USB/IP thread
+cleared DIEPCTL.EPENA while the CPU polled that register, the clear was
+lost and the IN endpoint looked busy forever: CPU register accesses and the
+host side's endpoint calls are serialised (`DWC2_OTG.HostLock`); a Bulk-OUT
+URB longer than 64 bytes is split into packets (a USBTMC message over 52
+bytes used to be dropped). `usbtmc_stress.py` (thousands of command / query
+pairs, multi-packet messages and replies, small TransferSize rounds,
+pipelined URBs, stale REQUESTs, INITIATE_CLEAR, aborts; `--port`, `--seed`,
+`--cases`) exercises fw-rs's USBTMC over USB/IP: 1500 iterations pass on the
+model's server (54 s; MSC reads are no longer one main-loop turn per URB
+round trip). A Bulk-IN URB for which the device never sends data stays
+pending on its own endpoint only (with Renode's server it blocked every
+later URB).
 
 ### GDB
 

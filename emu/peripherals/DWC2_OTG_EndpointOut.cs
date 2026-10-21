@@ -48,6 +48,13 @@ public partial class DWC2_OTG
             }
         }
 
+        public void DropHeld()
+        {
+            pending.Clear();
+        }
+
+        public int MaxPacket => (int)MaxPacketBytes;
+
         public void Write(byte[] data)
         {
             lock(parent.HostLock)
@@ -130,6 +137,12 @@ public partial class DWC2_OTG
                 return;
             }
             parent.DebugLog("Out endpoint #{0} - writing setup packet from host - {1}", endpointNumber, packet);
+            if(endpointNumber == 0)
+            {
+                // The core clears a control endpoint's STALL on SETUP.
+                ClearStall();
+                parent.endpointsIn[0].ClearStall();
+            }
             parent.rxFifoPackets.Enqueue(new RxPacket
             {
                 IsSetup = true,

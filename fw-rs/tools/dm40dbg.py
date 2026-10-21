@@ -128,8 +128,16 @@ def usb_present(vid, pid):
 
 
 def find_dev(required=True):
+    """/dev/usbtmcN of the first 1209:0001. DM40_USBTMC=/dev/usbtmcN picks
+    one; DM40_USBTMC=emu the emulator's (attached with `usbip attach`, under
+    vhci_hcd), DM40_USBTMC=real the one that is not."""
+    sel = os.environ.get('DM40_USBTMC', '')
+    if sel.startswith('/dev/'):
+        return sel
     for d in sorted(glob.glob('/sys/class/usbmisc/usbtmc*')):
         usb = os.path.realpath(os.path.join(d, 'device', '..'))
+        if sel in ('emu', 'real') and ('vhci_hcd' in usb) != (sel == 'emu'):
+            continue
         try:
             v = int(open(os.path.join(usb, 'idVendor')).read(), 16)
             p = int(open(os.path.join(usb, 'idProduct')).read(), 16)

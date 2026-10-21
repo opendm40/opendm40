@@ -7,6 +7,8 @@
 //     the words already queued, not the remaining transfer size: the stock
 //     driver writes the FIFO only while the free space is LARGER than the
 //     packet it wants to send, so it hung on EP0 with exactly 5 free words.
+//   * STALL (bit 21) is a real flag the USB/IP bridge reports as -EPIPE;
+//     EP0 is always active.
 //
 using Antmicro.Renode.Core.Structure.Registers;
 using Antmicro.Renode.Core.USB;
@@ -36,7 +38,24 @@ public partial class DWC2_OTG
 
         public IEnumRegisterField<EndpointTransferType> EndpointTransferTypeField { get; private set; }
 
-        public bool Active => endpointActiveFlag.Value;
+        // EP0 is always active (USBAEP reads 1); its stored value was 0 after
+        // a peripheral reset until the CPU next read DIEPCTL0, so the host
+        // side saw an "inactive" EP0 and a control read hung.
+        public bool Active => endpointNumber == 0 || endpointActiveFlag.Value;
+
+        /// STALL handshake (DxEPCTL bit 21): set by the driver, cleared by the
+        /// driver or, on EP0, by the core when a SETUP arrives.
+        public bool Stalled => stallFlag.Value;
+
+        public void ClearStall()
+        {
+            stallFlag.Value = false;
+        }
+
+        protected virtual void OnStallSet()
+        {
+            // Intentionally left empty
+        }
 
         protected void DefineRegisters(ulong offset, bool isIn, bool isEp0)
         {
@@ -51,7 +70,13 @@ public partial class DWC2_OTG
                 .If(isIn)
                     .Then(reg => reg.WithReservedBits(20, 1))
                     .Else(reg => reg.WithTaggedFlag("Snoop mode (SNPM)", 20))
-                .WithTaggedFlag("STALL handshake (STALL)", 21)
+                .WithFlag(21, out stallFlag, changeCallback: (_, value) =>
+                {
+                    if(value)
+                    {
+                        OnStallSet();
+                    }
+                }, name: "STALL handshake (STALL)")
                 .If(isIn)
                     .Then(reg => reg.WithTag("Tx FIFO number (TXFNUM)", 22, 4))
                     .Else(reg => reg.WithReservedBits(22, 4))
@@ -152,6 +177,7 @@ public partial class DWC2_OTG
         // This endpoint is waiting for relevant IN/OUT requests to send/receive data
         protected IFlagRegisterField endpointEnabledFlag;
         protected IFlagRegisterField nakStatusFlag;
+        protected IFlagRegisterField stallFlag;
         protected IFlagRegisterField transferCompleteInterruptFlag;
         protected IFlagRegisterField endpointDisabledInterruptFlag;
         protected IFlagRegisterField setupPhaseDoneInterruptFlag;
