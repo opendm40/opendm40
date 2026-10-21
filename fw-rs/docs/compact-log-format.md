@@ -231,68 +231,56 @@ clusters and one directory write at the end. Left for a later item.
 
 ## 4. Export: CSV on read
 
-The DLG files live on the SPI disk (LUN 0) as `LOGnnn.DLG` / `SCOPnnn.DLG`;
-the firmware neither writes nor reads text CSV files there (owner
+The DLG files live on the SPI flash (internal storage, src/fatdir.rs) as
+`LOGS/LOGnnn.DLG` / `SCOPE/SCOPnnn.DLG` (files of earlier builds in its
+root); the firmware neither writes nor reads text CSV files there (owner
 2026-10-21: the CSV is only the export). CSV is produced three ways from one
 generator in src/dlog.rs:
 
-1. **Virtual CSV files on the read-only LUN 1** (vdisk.rs `set_extra`, the
-   hook the vdisk agent built): `LOGnnn.CSV` for each finished `LOGnnn.DLG`,
-   (and `SCOPnnn.CSV` for each `SCOPnnn.DLG`), exact size from the chunk
-   headers / block table. Section 5.
+1. **Generated files on the read-only USB volume** (vdisk.rs, the only USB
+   disk since the 2026-10-21 storage redesign): `LOGS/LOGnnn.CSV` for each
+   finished `LOGnnn.DLG`, `SCOPE/SCOPnnn.CSV` for each `SCOPnnn.DLG`, exact
+   size from the chunk headers / block table. Section 5.
 2. **SCPI** `MMEMory:DATA? "<name>"[,<offset>[,<length>]]`: definite-length
    block `#4nnnn` of up to 6000 bytes of the file starting at `offset`
    (default 0); a name ending in `.CSV` whose `.DLG` exists is served as the
-   generated CSV, any other root file as its raw bytes. The host loops until
-   a short block. `MMEM:CAT?` lists the gallery files (S*.BMP, LOG*.DLG,
-   SCOP*.DLG), all as `BIN`:
-   `"LOG000.DLG,BIN,<bytes>"`.
+   generated CSV, any other file as its raw bytes (the name decides the
+   directory; a `LOGS/` / `SCOPE/` / `SHOTS/` prefix is accepted). The host
+   loops until a short block. `MMEM:CAT?` lists the gallery files (S*.BMP,
+   LOG*.DLG, SCOP*.DLG; those in a directory with it), all as `BIN`:
+   `"LOGS/LOG000.DLG,BIN,<bytes>"`.
 3. **Host decoders**: `tools/dlog.py` (standalone, stdlib only:
    `dlog.py LOG000.DLG > LOG000.CSV`, `--check` reports chunk errors) and
-   `tools/dm40scpi.py get LOG000.CSV` (over USBTMC, `MMEM:DATA?`).
+   `tools/dm40scpi.py get LOGS/LOG000.CSV` (over USBTMC, `MMEM:DATA?`).
 
 The gallery reads `.DLG` directly (chunk decoder into its min / avg / max and
 sparkline passes).
 
-## 5. LUN-1 hook (vdisk.rs `set_extra`, implemented)
+## 5. The USB volume's CSV files (vdisk.rs `refresh`, implemented)
 
-src/dlog.rs (feature `vdisk`, i.e. the native image):
-
-```rust
-/// Rebuild the LUN-1 extra files: one LOGnnn.CSV / SCOPnnn.CSV per valid
-/// LOGnnn.DLG / SCOPnnn.DLG in the SPI-disk root (directory order; with
-/// more than vdisk::MAX_EXTRA the newest ones), exact sizes (chunk headers,
-/// every CRC checked), then vdisk::set_extra (its one-shot media change)
-/// unless the table is unchanged. `exclude` = the file being
-/// recorded (its size still changes; it appears when it ends).
-pub fn refresh(exclude: Option<[u8; 11]>) -> usize;
-/// Extra::read: CSV bytes of table entry `arg`; a cursor makes sequential
-/// 512-byte sector reads O(1), a seek walks the chunk headers.
-pub fn vread(arg: u32, off: u32, buf: &mut [u8]);
-pub fn set_stale();   // csvlog: a recording ended, a file was deleted
-pub fn stale() -> bool;
-```
-
-Main loop (main.rs, after `csvlog::poll`): a host WRITE marks it stale (the
-PC may have copied / deleted logs); when stale, 2 s after the last host
-WRITE(10) (a file copy is ~100 of them) and while no csvlog commit or
-screenshot / scope job runs: `dlog::refresh(csvlog::recording_name())`.
-Cost: a synchronous read of every DLG file (CRC of every chunk), ~0.1 s
-per 100 KB of logs at the 12.5 MHz SPI clock (a 10 h log at 10/s is 0.4 MB:
-~0.4 s of main-loop stall, once per recording end / delete / host copy). `vread` reads the SPI flash itself
+`vdisk::refresh(exclude)` scans the SPI directories (dlog.rs `each_entry`
+over cluster chains, `dir_start`) and keeps a table of the generated files
+(docs/native-boot.md "Unit data": existing files keep their slot and
+clusters, new ones are appended, a compaction only while unmounted); a new
+DLG's CSV size comes from `Gen::open` (every chunk header + CRC; once per
+file, not per refresh), `exclude` = the file being recorded (it appears when
+it ends). Reads go through one cached `Gen` (sequential 512-byte sector reads
+O(1), a seek walks the chunk headers); it reads the SPI flash itself
 (spiflash.rs `read_at`, through `dlog::FnRaw`; no 4 KiB block buffer, no
-calbackup scratch: csvlog holds those across passes) and waits for a
-running erase like every SpiFlash read (<= 0.4 s at worst). RAM: the table
-(64 x 20 B) and the cursor (~0.4 KiB) in .bss; `refresh` puts the 64-entry
-Extra list (~1.5 KiB) on the stack once. Volume size: the vdisk data area is 64 MiB;
-CSVs are ~20x their DLG, so a full 13 MB disk of logs would expand past it:
-`set_extra` takes the prefix that fits (newest last in directory order), so
-very large logs are reachable by SCPI / dlog.py only. Raising the cluster
-size to 32 KiB (FAT16 limit 2 GiB) would cover every case.
+calbackup scratch) and waits for a running erase like every SpiFlash read.
 
-Tested: tools/fatren-test (`vdisk ... logs <spi.img>`: the LUN-1 volume
-dumped, fsck, mtools, LOG000.CSV == the old writer's file by md5, SCOP000 /
-SCOP001.CSV too) and the emulator (section 7).
+Main loop (main.rs, after `csvlog::poll`): `dlog::set_stale()` (a recording
+ended, a screenshot / scope record was written, a file deleted, an upload)
+bumps `dlog::gen()`; once it has not moved for 1 s and no csvlog commit /
+screenshot job runs: `vdisk::refresh(csvlog::recording_name())`. Cost: the
+directory scan plus `Gen::open` of the new DLGs, ~0.1 s per 100 KB of new
+logs at the 12.5 MHz SPI clock. The volume is 1.98 GiB (32 KiB clusters):
+CSVs are ~10-20x their DLG, so a full 16 MB SPI disk of logs fits.
+
+Tested: tools/fatren-test (the USB volume over a SPI image with logs, scope
+records and screenshots: dumped, fsck, mtools, LOGS/LOG000.CSV == the old
+writer's file by md5, SCOPE/SCOP000.CSV too, every CSV == dlog.py) and the
+emulator (USB/IP `mscdump`).
 
 ## 6. Cost on the MCU
 
@@ -302,7 +290,7 @@ SCOP001.CSV too) and the emulator (section 7).
   The FIFO now holds ~2 min (worst case) to ~10 min of readings while a PC
   write or mount defers commits (was ~27 s).
 * Code: the whole change is +~19 KB of native .text (codec, generator,
-  LUN-1 table, MMEM:DATA?, gallery reader); .bss +~1 KB.
+  USB-volume table, MMEM:DATA?, gallery reader); .bss +~1 KB.
 * Gallery: same decoder, one chunk per main-loop pass.
 
 ## 7. Results
@@ -324,6 +312,6 @@ Host (tools/dlog-test, 6000 rows per set, chunks of 1..1200 rows):
 Emulator (native image, Renode, USB/IP): `LOG:CSV ON` for 60 s on a 1.234 V
 input (154 readings, MEDIUM 2.5/s): LOG000.DLG 455 bytes (248 of them the
 header), CSV 3108 bytes; `MMEM:DATA? "LOG000.CSV"` == tools/dlog.py of
-`MMEM:DATA? "LOG000.DLG"` == LUN-1 LOG000.CSV read over MSC.
+`MMEM:DATA? "LOG000.DLG"` == LUN-1 LOG000.CSV read over MSC (the two-LUN layout of that day).
 
 Status and the device checklist: TODO.md "Compact binary logs".

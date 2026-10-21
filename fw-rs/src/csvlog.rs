@@ -502,11 +502,12 @@ pub fn poll_on(disk: &mut dyn BlockDevice, now_ms: u64) {
             }
             return;
         }
-        // Deferred while a screenshot / scope record holds the disk, or a
+        // Deferred while a screenshot / scope record / an update-file upload
+        // (upload.rs) holds the disk, or a
         // host WRITE(10) is in progress (only builds that still export the
         // SPI disk writable). Rows queue in the FIFO meanwhile; an overflow
         // drops them and flags the next row GAP.
-        if !due || crate::screenshot::busy() || crate::msc::HOST_WRITING.load(Ordering::Relaxed) {
+        if !due || crate::screenshot::busy() || crate::upload::busy() || crate::msc::HOST_WRITING.load(Ordering::Relaxed) {
             return;
         }
         if !disk.present() || disk.block_size() as usize != BLK {
@@ -1067,7 +1068,7 @@ pub enum GErr {
 
 /// The disk is free for a synchronous gallery operation.
 fn gallery_free() -> bool {
-    !crate::screenshot::busy() && !writing() && !crate::msc::HOST_WRITING.load(Ordering::Relaxed)
+    !crate::screenshot::busy() && !writing() && !crate::upload::busy() && !crate::msc::HOST_WRITING.load(Ordering::Relaxed)
 }
 
 fn gallery_vol(disk: &mut dyn BlockDevice) -> Result<Vol, GErr> {

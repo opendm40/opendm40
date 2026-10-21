@@ -16,6 +16,8 @@ Talks the USB/IP protocol to Renode's server (emu/run.py ... --usbip T, TCP
     emu/usbip_client.py mscdump 1-0 LUN OUT     # FAT volume of LUN -> OUT: boot sector,
                                                 # FATs, root, allocated clusters (the rest
                                                 # zero), for fsck.fat / mtools
+    emu/usbip_client.py upload 1-0 FILE         # fw-rs DBG:UPLOAD: FILE -> DM40FW.BIN in the
+                                                # SPI disk's root (as dm40dbg.py upload)
     emu/usbip_client.py read   1-0 0x1FFF7A10 12   # usbrw vendor EP0 read
     emu/usbip_client.py write  1-0 0x20028FC0 02   # usbrw vendor EP0 write
     emu/usbip_client.py scpi-tcp 1-0 5025       # line-based SCPI over TCP <-> USBTMC
@@ -239,7 +241,9 @@ class Usbtmc:
         return self.tag
 
     def write(self, text):
-        msg = text.encode() + b'\n'
+        self.write_raw(text.encode() + b'\n')
+
+    def write_raw(self, msg):
         t = self._next_tag()
         hdr = struct.pack('<BBBBIB3x', 1, t, 0xFF ^ t, 0, len(msg), 1)  # DEV_DEP_MSG_OUT, EOM
         self.d.bulk_out(self.ep_out, hdr + msg + b'\0' * ((-len(msg)) % 4))
@@ -266,6 +270,39 @@ class Usbtmc:
             resp += data
             if len(resp) >= 12 and len(resp) >= 12 + struct.unpack_from('<I', resp, 4)[0]:
                 return resp[12:12 + struct.unpack_from('<I', resp, 4)[0]]
+
+
+def upload(d, path, chunk=232):
+    """fw-rs DBG:UPLOAD (as tools/dm40dbg.py upload): FILE -> DM40FW.BIN in
+    the SPI disk's root."""
+    import time
+    import zlib
+    data = open(path, 'rb').read()
+    crc = zlib.crc32(data)
+    u = Usbtmc(d)
+
+    def err():
+        u.write('SYST:ERR?')
+        return u.read().decode(errors='replace').strip()
+    u.write('DBG:UPLOAD:BEGIN %d,%d' % (len(data), crc))
+    e = err()
+    if not e.startswith('0,'):
+        sys.exit('BEGIN: %s' % e)
+    t0 = time.time()
+    for i, off in enumerate(range(0, len(data), chunk)):
+        u.write_raw(b'DBG:UPLOAD:DATA %d,' % off + data[off:off + chunk])
+        if i % 256 == 255:
+            e = err()
+            if not e.startswith('0,'):
+                sys.exit('DATA at %d: %s' % (off, e))
+            print('  %d / %d bytes, %.1f s' % (off + chunk, len(data), time.time() - t0), flush=True)
+    u.write('DBG:UPLOAD:END?')
+    try:
+        r = u.read(timeout=30).decode(errors='replace').strip()
+    except OSError:
+        r = 'no reply; SYST:ERR? -> %s' % err()
+    print('END? -> %s (want %d,%d), %.1f s' % (r, len(data), crc, time.time() - t0))
+    return r == '%d,%d' % (len(data), crc)
 
 
 def scpi_tcp(busid, port):
@@ -533,6 +570,8 @@ def main1():
             msc_read(d, int(a[2], 0) if len(a) > 2 else 0, int(a[3]) if len(a) > 3 else 0)
         elif cmd == 'luns':
             msc_luns(d)
+        elif cmd == 'upload':
+            sys.exit(0 if upload(d, a[2]) else 1)
         elif cmd == 'mscdump':
             msc_dump(d, int(a[2]), a[3])
         elif cmd == 'read':

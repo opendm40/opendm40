@@ -1,101 +1,129 @@
-//! Read-only "information" volume: the second USB mass-storage LUN, a FAT16
-//! file system synthesized on the fly from the MCU memory (DAPLink-style
-//! virtual FAT). Nothing is stored: the boot sector, both FATs and the root
-//! directory are generated from a static file table, file data is read from
-//! the source regions when the host READs the sector. Always current, no SPI
-//! wear, no boot-time disk writes (it replaces calbackup's per-boot copies on
-//! the SPI disk; calbackup keeps only a write-once safety copy there).
+//! The USB disk: a read-only FAT16 volume synthesized on the fly
+//! (DAPLink-style virtual FAT), the only mass-storage LUN of the native
+//! build. Nothing of it is stored: the boot sector, both FATs and every
+//! directory are generated from tables, file data is produced when the host
+//! READs the sector. The SPI flash (our FAT16 internal storage, fatdir.rs)
+//! is no longer exported, so no host can write it or hold a stale copy of
+//! its FAT, and the device never has to wait for an eject.
 //!
-//! Volume "DM40-INFO", 512-byte sectors, 4 sectors (2 KiB) per cluster, 2
-//! FATs of 129 sectors, 128 root entries, 32768 clusters (FAT16 by the
-//! cluster-count rule: >= 4085), 131339 sectors = 64.1 MiB. The fixed size
-//! leaves room for generated files of other modules (`set_extra`); the
-//! built-in files use ~600 KiB, every other data sector reads as zeros (free
-//! clusters). Built-in files (root, 8.3, read-only attribute), each on
-//! consecutive clusters in this order:
-//!   CALIB.BIN BOOTDATA.BIN UID.BIN OPTBYTES.BIN OTP.BIN ROMBOOT.BIN
-//!   LOADER.BIN   calbackup::FILES: raw bytes of the region (address, size
-//!                there), read on every access;
-//!   BACKUP.TXT   generated text: each file's address, size and CRC-32, the
-//!                UID, the firmware version and loader record, restore notes;
-//!   FIRMWARE.BIN the running firmware as its vendor update file
-//!                (calbackup::FwFile: whole 128-byte blocks for a `pack --pad`
-//!                build, byte-identical to the dm40*.bin that installed it).
-//!                Only when the loader record at 0x08008000 is a valid
-//!                header. The name does not match the FS-loader's dm40*.bin
-//!                pattern (irrelevant here: the loader never sees this volume,
-//!                but a copy dropped onto the SPI disk as is stays inert).
+//! Volume "DM40", 512-byte sectors, 64 sectors (32 KiB) per cluster, 2 FATs
+//! of 254 sectors, 512 root entries, 65000 clusters (FAT16 by the cluster
+//! count), 4160541 sectors = 1.98 GiB: room for SPIFLASH.BIN, the CSV
+//! files (a DLG log expands ~10-20x into CSV, a scope record more; a full
+//! 16 MiB SPI disk of logs is a few hundred MiB of CSV) and a margin for
+//! the append-only allocation below. Layout (fixed clusters first):
+//!   README.TXT     what is where, how to update the firmware (cluster 7);
+//!   INFO/          (cluster 2) CALIB / BOOTDATA / UID / OPTBYTES / OTP /
+//!                  ROMBOOT / LOADER .BIN (raw bytes of the MCU regions,
+//!                  calbackup::FILES), BACKUP.TXT (addresses, sizes, CRC-32s,
+//!                  restore notes), FIRMWARE.BIN (the running firmware as its
+//!                  vendor update file, calbackup::FwFile; only with a valid
+//!                  loader record); from cluster 8, each contiguous;
+//!   DEBUG/         (cluster 3) SPIFLASH.BIN: the raw 16 MiB of the SPI
+//!                  flash (`fsck.fat -n` / mtools on it show the internal
+//!                  FAT16), read on every access;
+//!   LOGS/          (cluster 4) LOGnnn.CSV: the CSV generated from each
+//!                  LOGnnn.DLG (dlog.rs `Gen`, the exact text the old CSV
+//!                  writer produced);
+//!   SCOPE/         (cluster 5) SCOPnnn.CSV from SCOPnnn.DLG;
+//!   SHOTS/         (cluster 6) Snnn.BMP: the screenshots, streamed from the
+//!                  SPI file (its FAT chain);
+//! the LOGS / SCOPE / SHOTS files come from the SPI disk's LOGS/, SCOPE/,
+//! SHOTS/ and from its root (earlier builds), numbered names only, up to
+//! MAX_VF of them. A file being recorded (csvlog) is left out until it
+//! ends. Every subdirectory is one cluster (1024 slots: "." / ".." and up to
+//! 1022 files).
 //!
-//! The sources do not change while fw-rs runs (fw-rs never programs the
-//! internal flash except the recovery marker, followed by a reset), so the
-//! CRC-32s for BACKUP.TXT are computed once at boot (`init`, ~0.1 s for the
-//! ~570 KiB) and BACKUP.TXT has a fixed size (fixed-width fields).
-//!
-//! Generic hook (`set_extra`): after the built-ins, a list of up to
-//! MAX_EXTRA more files, each `Extra { name, size, read, arg }` with its size
-//! known up front and its bytes produced on demand by `read(arg, offset,
-//! buf)` (e.g. CSV files rendered from the binary DMM logs on the SPI disk).
-//! Replacing the list re-allocates their clusters (the built-ins keep
-//! theirs) and raises a one-shot media change: the next LUN-1 command gets
-//! UNIT ATTENTION 06/28/00 (msc.rs, via `BlockDevice::take_media_changed`),
-//! so the host drops its cached FAT / directory and re-reads them. Like the
-//! SPI disk's, it is held back while a host has LUN 1 locked (PREVENT:
-//! mounted on Linux, where a UNIT ATTENTION would fail its I/O) and goes out
-//! after the unmount. Call it from the main loop (the context msc.poll runs
-//! in); a READ of LUN 1 in progress then finishes on the new table.
+//! Changes (`refresh`, from the main loop when dlog.rs `stale()` and the
+//! disk has been quiet for a second, see main.rs): the SPI disk is scanned
+//! (directories only; a DLG's CSV size is computed once, when it is new)
+//! and the table updated:
+//!   * an existing file keeps its directory slot and its clusters for as
+//!     long as it exists (a host's cached directory / FAT / inode stays
+//!     right for it);
+//!   * a new file gets the next slot of its directory and clusters from the
+//!     high-water mark (append-only: a freed slot shows as deleted, 0xE5,
+//!     and its clusters stay unused);
+//!   * a deleted / changed file disappears (`forget` does it at once for a
+//!     delete on the device, so a new file of the same name never inherits
+//!     its place);
+//!   * when the slots of a directory or the clusters run out, the table is
+//!     compacted (every file renumbered from the start), but only while no
+//!     host holds the medium locked (msc.rs `host_mounted`: Linux sends
+//!     PREVENT on mount); else the new files wait for the unmount. After a
+//!     USB bus reset (re-plug) the next refresh compacts.
+//! Any change raises a one-shot media change: the next command gets UNIT
+//! ATTENTION 06/28/00 at once, also while the volume is mounted and locked
+//! (msc.rs; the 2026-10-21 experiment: Linux then re-reads and shows the new
+//! files, a file manager after a refresh; holding it back while locked hid
+//! them until the unmount).
 //!
 //! Writes are refused (msc.rs: DATA PROTECT, WRITE PROTECTED 07/27/00; the
 //! MODE SENSE header has the WP bit, so hosts mount it read-only).
 //!
-//! Host test: tools/fatren-test/run.sh (section 19: the whole volume dumped
-//! through `read_block`, fsck.fat -n, mtools, contents vs the sources).
+//! RAM: the file table (MAX_VF x 16 bytes) and the built-in table in SRAM
+//! (.sram_bss / .dmabuf), the CSV / BMP read cursors in .bss.
+//!
+//! Host test: tools/fatren-test/run.sh section 19 (the whole volume dumped
+//! through `read_block`, fsck.fat -n, mtools, contents vs the sources, the
+//! allocation rules across refreshes).
 
 use crate::calbackup::{crc32_upd, FwFile, Source, FILES};
+use crate::dlog::{self, FatFile, FnRaw, Gen, Geo, Raw, Src as _};
 use crate::msc::BlockDevice;
 
 pub const BS: usize = 512;
 /// Sectors per cluster, and bytes per cluster.
-const SPC: u32 = 4;
+const SPC: u32 = 64;
 const CB: u32 = SPC * BS as u32;
 const RSVD: u32 = 1;
 const NFATS: u32 = 2;
-const ROOT_ENTRIES: u32 = 128;
+const ROOT_ENTRIES: u32 = 512;
 const ROOT_SECS: u32 = ROOT_ENTRIES * 32 / BS as u32;
-pub const CLUSTERS: u32 = 32768;
+pub const CLUSTERS: u32 = 65_000;
 const FAT_SECS: u32 = ((CLUSTERS + 2) * 2).div_ceil(BS as u32);
 const FAT_START: u32 = RSVD;
 const ROOT_START: u32 = RSVD + NFATS * FAT_SECS;
 const DATA_START: u32 = ROOT_START + ROOT_SECS;
 pub const TOTAL: u32 = DATA_START + CLUSTERS * SPC;
 const _: () = assert!(CLUSTERS >= 4085 + 16 && CLUSTERS < 65525 - 16, "FAT16 by the cluster count, with a margin");
-pub const LABEL: [u8; 11] = *b"DM40-INFO  ";
+pub const LABEL: [u8; 11] = *b"DM40       ";
 /// Directory dates 2026-10-13 (no RTC), as calbackup / screenshot.
 const DATE: u16 = (46 << 9) | (10 << 5) | 13;
 const TXT: [u8; 11] = *b"BACKUP  TXT";
 const FW: [u8; 11] = *b"FIRMWAREBIN";
-/// Built-ins: FILES + BACKUP.TXT + FIRMWARE.BIN.
+/// Built-ins of INFO/: FILES + BACKUP.TXT + FIRMWARE.BIN.
 pub const NF: usize = FILES.len() + 2;
-/// Files of other modules (`set_extra`) at most.
-pub const MAX_EXTRA: usize = 64;
-const _: () = assert!(1 + NF + MAX_EXTRA <= ROOT_ENTRIES as usize, "root directory: label + files");
 /// Upper bound of BACKUP.TXT (asserted against the worst case below).
 const TXT_MAX: u32 = 4096;
-const _: () = {
-    let mut sum = 0u32;
-    let mut i = 0;
-    while i < FILES.len() {
-        sum += FILES[i].2.div_ceil(CB);
-        i += 1;
-    }
-    sum += TXT_MAX.div_ceil(CB);
-    sum += (12 + crate::calbackup::FW_MAX_BODY as u32).div_ceil(CB);
-    assert!(sum <= CLUSTERS / 8, "the built-ins must leave most of the data area to set_extra");
-};
 const UID_ADDR: u32 = 0x1FFF_7A10;
 const VERSION: &str = match option_env!("CARGO_PKG_VERSION") {
     Some(v) => v,
     None => "?",
 };
+
+/// Fixed clusters: the five subdirectories (one cluster each), README.TXT,
+/// then the INFO/ files from C_FILES.
+const C_INFO: u32 = 2;
+const C_DEBUG: u32 = 3;
+/// LOGS, SCOPE, SHOTS: C_VDIR + d (d = the file kind, `VDIRS`).
+const C_VDIR: u32 = 4;
+const C_README: u32 = 7;
+const C_FILES: u32 = 8;
+/// DEBUG/SPIFLASH.BIN: the W25Q128, 16 MiB.
+pub const SPI_BYTES: u32 = 16 << 20;
+/// Root entries after the label: README.TXT, INFO, DEBUG, LOGS, SCOPE, SHOTS.
+const ROOT_N: usize = 6;
+/// Generated directories, file kinds: (name, file prefix, file extension).
+const VDIRS: [([u8; 11], &[u8], [u8; 3]); 3] = [
+    (*b"LOGS       ", b"LOG", *b"CSV"),
+    (*b"SCOPE      ", b"SCOP", *b"CSV"),
+    (*b"SHOTS      ", b"S", *b"BMP"),
+];
+/// Slots of a one-cluster directory.
+const SLOTS: u32 = CB / 32;
+/// Files of LOGS / SCOPE / SHOTS at most (16 bytes of SRAM each).
+pub const MAX_VF: usize = 400;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -115,42 +143,55 @@ struct VFile {
     crc: u32,
 }
 
-/// A file of another module on this volume (`set_extra`): 8.3 name (upper
-/// case, space padded), size in bytes (fixed until the next `set_extra`),
-/// and its contents: `read(arg, off, buf)` fills `buf` with bytes `off ..
-/// off + buf.len()` (never past `size`; at most one sector, 512 bytes, per
-/// call; the same bytes every time for the same table).
-#[derive(Clone, Copy)]
-pub struct Extra {
-    pub name: [u8; 11],
-    pub size: u32,
-    pub read: fn(arg: u32, off: u32, buf: &mut [u8]),
-    pub arg: u32,
-}
-
-fn no_read(_: u32, _: u32, _: &mut [u8]) {}
-
-const NO_EXTRA: Extra = Extra { name: [b' '; 11], size: 0, read: no_read, arg: 0 };
-
 struct State {
     files: [VFile; NF],
     n: usize,
     fw: Option<FwFile<'static>>,
     mem: fn(u32, &mut [u8]),
     uid: [u8; 12],
-    extra: [Extra; MAX_EXTRA],
-    /// First cluster of each extra (0 = empty file).
-    extra_start: [u32; MAX_EXTRA],
-    nx: usize,
+    /// DEBUG/SPIFLASH.BIN's first cluster, and the first dynamic cluster.
+    spi_start: u32,
+    dyn0: u32,
 }
 
-/// The volume (~2 KiB). NOLOAD SRAM (.dmabuf, as calbackup's scratch): not
-/// initialised at reset, written by `init` before READY is set; TCM is kept
+/// One generated file of LOGS / SCOPE / SHOTS. `id` = kind << 10 | number
+/// (the name), `slot` its directory slot, `vstart` its first cluster here,
+/// `src` / `ssize` the SPI file (first cluster, bytes), `vsize` its size
+/// here (the CSV's for a DLG).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct VF {
+    id: u16,
+    slot: u16,
+    vstart: u16,
+    src: u16,
+    ssize: u32,
+    vsize: u32,
+}
+
+const VF0: VF = VF { id: 0, slot: 0, vstart: 0, src: 0, ssize: 0, vsize: 0 };
+
+/// The dynamic table, ascending `vstart` (allocation is append-only, a
+/// compaction keeps the order), so the FAT and data lookups bisect it.
+struct Tab {
+    e: [VF; MAX_VF],
+    n: usize,
+    /// Next free cluster, next free slot per directory.
+    hw: u32,
+    slot_hw: [u16; 3],
+    /// Compact at the next refresh (bus reset), or when a file did not fit.
+    want_compact: bool,
+    /// Files left out (no slot / cluster / table room) at the last refresh.
+    left_out: u16,
+}
+
+/// NOLOAD SRAM (.dmabuf): written by `init` before READY is set; TCM is kept
 /// for the stack.
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut STATE: core::mem::MaybeUninit<State> = core::mem::MaybeUninit::uninit();
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+static mut TAB: core::mem::MaybeUninit<Tab> = core::mem::MaybeUninit::uninit();
 static READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-/// One-shot media change for LUN 1 (`set_extra`), taken by msc.rs.
+/// One-shot media change, taken by msc.rs.
 static CHANGED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 fn state() -> Option<&'static State> {
@@ -159,6 +200,10 @@ fn state() -> Option<&'static State> {
     } else {
         None
     }
+}
+
+fn tab() -> &'static mut Tab {
+    unsafe { (*core::ptr::addr_of_mut!(TAB)).assume_init_mut() }
 }
 
 /// Target memory reader: byte loads (the OTP / option-byte areas included).
@@ -181,10 +226,11 @@ fn mem_crc(mem: fn(u32, &mut [u8]), addr: u32, len: u32) -> u32 {
     !c
 }
 
-/// Build the file table and the CRC-32s (boot, before USB; ~0.1 s). `mem`
-/// reads the source regions, `flash` = the bytes from 0x08004000 (at most
-/// calbackup::FW_MAX_BODY) for FIRMWARE.BIN. Never inlined: its buffers are
-/// gone before main().
+/// Build the built-in tables and the CRC-32s (boot, before USB; ~0.1 s).
+/// `mem` reads the source regions, `flash` = the bytes from 0x08004000 (at
+/// most calbackup::FW_MAX_BODY) for FIRMWARE.BIN. The LOGS / SCOPE / SHOTS
+/// files come with the first `refresh`. Never inlined: its buffers are gone
+/// before main().
 #[inline(never)]
 pub fn init(mem: fn(u32, &mut [u8]), flash: &'static [u8]) {
     let none = VFile { name: [b' '; 11], kind: Kind::Mem, addr: 0, size: 0, start: 0, crc: 0 };
@@ -205,102 +251,311 @@ pub fn init(mem: fn(u32, &mut [u8]), flash: &'static [u8]) {
     }
     let mut uid = [0u8; 12];
     mem(UID_ADDR, &mut uid);
-    let mut st = State { files, n, fw, mem, uid, extra: [NO_EXTRA; MAX_EXTRA], extra_start: [0; MAX_EXTRA], nx: 0 };
+    let mut st = State { files, n, fw, mem, uid, spi_start: 0, dyn0: 0 };
     // The text's length does not depend on the CRC values (fixed width).
     st.files[txt].size = describe(&st, 0, &mut []) as u32;
-    let mut c = 2u32;
+    let mut c = C_FILES;
     for f in st.files[..n].iter_mut() {
         let k = f.size.div_ceil(CB);
         f.start = if k == 0 { 0 } else { c };
         c += k;
     }
-    unsafe { (*core::ptr::addr_of_mut!(STATE)).write(st) };
+    st.spi_start = c;
+    st.dyn0 = c + SPI_BYTES / CB;
+    unsafe {
+        (*core::ptr::addr_of_mut!(STATE)).write(st);
+        (*core::ptr::addr_of_mut!(TAB)).write(Tab { e: [VF0; MAX_VF], n: 0, hw: 0, slot_hw: [2; 3], want_compact: false, left_out: 0 });
+    }
+    tab().hw = st_dyn0();
     READY.store(true, core::sync::atomic::Ordering::Release);
 }
 
-/// First cluster after the built-ins.
-#[allow(dead_code)] // with set_extra
-fn builtin_end(st: &State) -> u32 {
-    st.files[..st.n].iter().map(|f| f.start + f.size.div_ceil(CB)).max().unwrap_or(2).max(2)
+fn st_dyn0() -> u32 {
+    unsafe { (*core::ptr::addr_of!(STATE)).assume_init_ref().dyn0 }
 }
 
-/// Replace the extra files (after the built-ins, in this order) and raise
-/// the LUN-1 media change. Files that do not fit (more than MAX_EXTRA, or
-/// past the data area) are left out: returns how many were taken (a prefix
-/// of `files`). No effect before `init`. (The hook for the binary-log CSV
-/// files; no caller yet.)
-#[allow(dead_code)]
-pub fn set_extra(files: &[Extra]) -> usize {
-    if !READY.load(core::sync::atomic::Ordering::Acquire) {
-        return 0;
-    }
-    let st = unsafe { (*core::ptr::addr_of_mut!(STATE)).assume_init_mut() };
-    let mut c = builtin_end(st);
-    let mut nx = 0;
-    for f in files.iter().take(MAX_EXTRA) {
-        let k = f.size.div_ceil(CB);
-        if c + k > CLUSTERS + 2 {
-            break;
-        }
-        st.extra[nx] = *f;
-        st.extra_start[nx] = if k == 0 { 0 } else { c };
-        c += k;
-        nx += 1;
-    }
-    st.nx = nx;
-    CHANGED.store(true, core::sync::atomic::Ordering::Relaxed);
-    nx
-}
+// --- the dynamic files -----------------------------------------------------------
 
-/// DBG:VDISK:ADD (media-change experiment): append test file TESTnnn.TXT to
-/// the extras (a later `set_extra` of another module drops it again).
-pub fn dbg_add() -> usize {
-    static N: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
-    let Some(st) = state() else {
-        return 0;
-    };
-    let n = N.fetch_add(1, core::sync::atomic::Ordering::Relaxed) % 1000;
-    let mut x = [NO_EXTRA; MAX_EXTRA];
-    let k = st.nx.min(MAX_EXTRA - 1);
-    x[..k].copy_from_slice(&st.extra[..k]);
-    let mut name = *b"TEST000 TXT";
-    name[4] = b'0' + (n / 100) as u8;
-    name[5] = b'0' + (n / 10 % 10) as u8;
-    name[6] = b'0' + (n % 10) as u8;
-    x[k] = Extra { name, size: TEST_LEN, read: test_read, arg: n };
-    set_extra(&x[..k + 1])
-}
-
-const TEST_LEN: u32 = 32;
-
-fn test_read(arg: u32, off: u32, buf: &mut [u8]) {
-    let mut line = *b"DM40 vdisk test file 000       \n";
-    line[21] = b'0' + (arg / 100) as u8;
-    line[22] = b'0' + (arg / 10 % 10) as u8;
-    line[23] = b'0' + (arg % 10) as u8;
-    for (i, b) in buf.iter_mut().enumerate() {
-        let o = off as usize + i;
-        if o >= TEST_LEN as usize {
-            break;
-        }
-        *b = line[o];
-    }
-}
-
-/// (name, size, first cluster) of root file `i` (built-ins, then extras).
-fn entry(st: &State, i: usize) -> Option<([u8; 11], u32, u32)> {
-    if i < st.n {
-        let f = &st.files[i];
-        Some((f.name, f.size, f.start))
-    } else if i - st.n < st.nx {
-        let f = &st.extra[i - st.n];
-        Some((f.name, f.size, st.extra_start[i - st.n]))
+/// (kind, number) of an SPI file of ours with a numbered name (LOGnnn.DLG,
+/// SCOPnnn.DLG, Snnn.BMP), else None.
+fn ours(n: &[u8; 11]) -> Option<(usize, u16)> {
+    let k = if dlog::dlg_name(n) == Some(3) {
+        0
+    } else if dlog::dlg_name(n).is_some() {
+        1
+    } else if n[8..].eq_ignore_ascii_case(b"BMP") && n[0].eq_ignore_ascii_case(&b'S') {
+        2
     } else {
-        None
+        return None;
+    };
+    let p = VDIRS[k].1.len();
+    let d = &n[p..p + 3];
+    if !d.iter().all(|c| c.is_ascii_digit()) || n[p + 3..8].iter().any(|&c| c != b' ') {
+        return None;
+    }
+    Some((k, (d[0] - b'0') as u16 * 100 + (d[1] - b'0') as u16 * 10 + (d[2] - b'0') as u16))
+}
+
+/// 8.3 name of table id `id` on this volume ("LOG007  CSV").
+fn vname(id: u16) -> [u8; 11] {
+    let (pre, ext) = (VDIRS[(id >> 10) as usize].1, &VDIRS[(id >> 10) as usize].2);
+    crate::calbackup::numbered_name(pre, id & 0x3FF, ext)
+}
+
+fn nclus(size: u32) -> u32 {
+    size.div_ceil(CB)
+}
+
+/// Every SPI file of ours (root, LOGS/, SCOPE/, SHOTS/) to `f(id, start,
+/// size)`, except `exclude` (8.3 SPI name). False: no disk / a read failed.
+fn scan_spi(exclude: Option<[u8; 11]>, f: &mut dyn FnMut(u16, u16, u32)) -> bool {
+    let mut d = dlog::disk();
+    let Some(g) = dlog::geometry(&mut d) else {
+        return false;
+    };
+    let dirs = [None, dlog::dir_start(&mut d, &g, &dlog::DIR_LOGS), dlog::dir_start(&mut d, &g, &dlog::DIR_SCOPE), dlog::dir_start(&mut d, &g, &dlog::DIR_SHOTS)];
+    for (i, start) in dirs.iter().enumerate() {
+        if i > 0 && start.is_none() {
+            continue;
+        }
+        let ok = dlog::each_entry(&mut d, &g, *start, &mut |e| {
+            if e[0] == 0xE5 || e[11] & 0x18 != 0 || e[11] & 0x3F == 0x0F {
+                return true;
+            }
+            let mut n = [0u8; 11];
+            n.copy_from_slice(&e[..11]);
+            if Some(n) == exclude {
+                return true;
+            }
+            if let Some((k, num)) = ours(&n) {
+                let start = e[0x1A] as u16 | (e[0x1B] as u16) << 8;
+                let size = u32::from_le_bytes([e[0x1C], e[0x1D], e[0x1E], e[0x1F]]);
+                f((k as u16) << 10 | num, start, size);
+            }
+            true
+        });
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+/// Size on this volume of SPI file `id` (start, size): the generated CSV's
+/// for a DLG (None: not a valid DLG), the file's own for a BMP.
+fn vsize_of(id: u16, src: u16, ssize: u32) -> Option<u32> {
+    if id >> 10 == 2 {
+        return (ssize > 0).then_some(ssize);
+    }
+    let mut d = dlog::disk();
+    let g = dlog::geometry(&mut d)?;
+    #[cfg(target_os = "none")]
+    crate::wdt::kick_if_feeding();
+    Gen::open(FatFile::new(d, g, src as u32, ssize), ssize).map(|g| g.info.csv)
+}
+
+/// Remove table entry `i` (its slot reads as deleted, its clusters stay
+/// unused until a compaction).
+fn remove(t: &mut Tab, i: usize) {
+    t.e.copy_within(i + 1..t.n, i);
+    t.n -= 1;
+}
+
+/// Renumber every file from the start: slots 2.. per directory, clusters
+/// from dyn0, in table order. True if anything moved.
+fn compact(t: &mut Tab) -> bool {
+    let mut c = st_dyn0();
+    let mut sl = [2u16; 3];
+    let mut moved = false;
+    for e in t.e[..t.n].iter_mut() {
+        let k = (e.id >> 10) as usize;
+        moved |= e.slot != sl[k] || e.vstart as u32 != c;
+        e.slot = sl[k];
+        e.vstart = c as u16;
+        sl[k] += 1;
+        c += nclus(e.vsize);
+    }
+    moved |= t.hw != c || t.slot_hw != sl;
+    t.hw = c;
+    t.slot_hw = sl;
+    t.want_compact = false;
+    moved
+}
+
+/// Add the SPI files not in the table yet. Returns (added, left out for
+/// want of slots / clusters, left out because the table is full).
+fn add_new(t: &mut Tab, exclude: Option<[u8; 11]>) -> (u32, u32, u32) {
+    let (mut added, mut out, mut full) = (0u32, 0u32, 0u32);
+    scan_spi(exclude, &mut |id, src, ssize| {
+        if t.e[..t.n].iter().any(|e| e.id == id) {
+            return; // present (or a duplicate number: the first one stays)
+        }
+        let Some(vsize) = vsize_of(id, src, ssize) else { return };
+        let k = (id >> 10) as usize;
+        let need = nclus(vsize);
+        if t.n == MAX_VF {
+            full += 1;
+            return;
+        }
+        if t.slot_hw[k] as u32 >= SLOTS || t.hw + need > CLUSTERS + 2 {
+            out += 1;
+            return;
+        }
+        t.e[t.n] = VF { id, slot: t.slot_hw[k], vstart: t.hw as u16, src, ssize, vsize };
+        t.n += 1;
+        t.slot_hw[k] += 1;
+        t.hw += need;
+        added += 1;
+    });
+    (added, out, full)
+}
+
+/// Rebuild LOGS / SCOPE / SHOTS from the SPI disk (main loop, when dlog.rs
+/// `stale()` and no on-device writer holds the disk; see the module text).
+/// `exclude` = the SPI file being recorded. Raises the media change when the
+/// volume changed. Returns the number of files.
+pub fn refresh(exclude: Option<[u8; 11]>) -> usize {
+    if state().is_none() {
+        return 0;
+    }
+    dlog::clear_stale();
+    let t = tab();
+    // 1. Keep the files that are still there unchanged (same first cluster
+    //    and size), drop the others.
+    let mut seen = [0u32; MAX_VF.div_ceil(32)];
+    let ok = scan_spi(exclude, &mut |id, src, ssize| {
+        if let Some(i) = t.e[..t.n].iter().position(|e| e.id == id && e.src == src && e.ssize == ssize) {
+            seen[i / 32] |= 1 << (i % 32);
+        }
+    });
+    if !ok {
+        return t.n; // no disk / a read error: the volume stays as it is
+    }
+    let mut changed = false;
+    for i in (0..t.n).rev() {
+        if seen[i / 32] & (1 << (i % 32)) == 0 {
+            remove(t, i);
+            changed = true;
+        }
+    }
+    // 2. Compaction (after a bus reset, or files left out last time), only
+    //    while no host has the volume locked.
+    let free = !crate::msc::host_mounted();
+    if t.want_compact && free {
+        changed |= compact(t);
+    }
+    // 3. New files, append-only; what does not fit for want of slots /
+    //    clusters triggers a compaction (now if free, else after the unmount:
+    //    `on_unlock`) and a second try. A full table stays full (MAX_VF).
+    let (mut added, mut out, mut full) = add_new(t, exclude);
+    if out > 0 && free && compact(t) {
+        changed = true;
+        let (a2, o2, f2) = add_new(t, exclude);
+        added += a2;
+        out = o2;
+        full = f2;
+    }
+    t.want_compact |= out > 0;
+    t.left_out = (out + full) as u16;
+    if changed || added > 0 {
+        CHANGED.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
+    t.n
+}
+
+/// The first `refresh`, at boot before USB: no host has seen the volume
+/// yet, so no media change is raised for it.
+#[inline(never)]
+pub fn boot_refresh() {
+    refresh(None);
+    CHANGED.store(false, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// A file of ours was deleted on the device (csvlog::delete_on, 8.3 SPI
+/// name): drop it from the volume at once (before the next refresh, so a
+/// new file of the same name can never inherit its slot / clusters while a
+/// host caches them).
+pub fn forget(name: &[u8; 11]) {
+    if state().is_none() {
+        return;
+    }
+    let Some((k, num)) = ours(name) else { return };
+    let t = tab();
+    let id = (k as u16) << 10 | num;
+    if let Some(i) = t.e[..t.n].iter().position(|e| e.id == id) {
+        remove(t, i);
+        CHANGED.store(true, core::sync::atomic::Ordering::Relaxed);
     }
 }
 
-/// The LUN-1 block device (a handle; the volume itself is `STATE`).
+/// USB bus reset (msc.rs): a new session, compact at the next refresh.
+pub fn on_bus_reset() {
+    if state().is_some() {
+        tab().want_compact = true;
+        dlog::set_stale();
+    }
+}
+
+/// (files, next free cluster, files left out) for DBG / tests.
+pub fn stats() -> (usize, u32, u16) {
+    if state().is_none() {
+        return (0, 0, 0);
+    }
+    let t = tab();
+    (t.n, t.hw, t.left_out)
+}
+
+/// The entry holding cluster `c` (>= dyn0): bisect on `vstart`.
+fn at_cluster(t: &Tab, c: u32) -> Option<&VF> {
+    let i = t.e[..t.n].partition_point(|e| e.vstart as u32 <= c);
+    let e = t.e[..t.n].get(i.checked_sub(1)?)?;
+    (c < e.vstart as u32 + nclus(e.vsize)).then_some(e)
+}
+
+// --- read cursors ------------------------------------------------------------
+
+/// The CSV generator of the last DLG read (key: SPI start, size), ~0.7 KiB
+/// of .bss; a BMP's chain cursor likewise.
+static mut CSV_CUR: dlog::Slot<(u16, u32)> = dlog::Slot::new();
+static mut BMP_KEY: (u16, u32) = (0, 0);
+static mut BMP_CUR: core::mem::MaybeUninit<FatFile<FnRaw>> = core::mem::MaybeUninit::uninit();
+
+fn geo() -> Option<(FnRaw, Geo)> {
+    let mut d = dlog::disk();
+    let g = dlog::geometry(&mut d)?;
+    Some((d, g))
+}
+
+/// Bytes `off..` of table file `e` into `buf` (zeros on a read error).
+fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
+    let key = (e.src, e.ssize);
+    if e.id >> 10 == 2 {
+        let cur = unsafe { &mut *core::ptr::addr_of_mut!(BMP_CUR) };
+        let k = unsafe { &mut *core::ptr::addr_of_mut!(BMP_KEY) };
+        if *k != key || k.1 == 0 {
+            let Some((d, g)) = geo() else { return };
+            cur.write(FatFile::new(d, g, e.src as u32, e.ssize));
+            *k = key;
+        }
+        if !unsafe { cur.assume_init_mut() }.read(off, buf) {
+            buf.fill(0);
+            *k = (0, 0);
+        }
+        return;
+    }
+    let cur = unsafe { &mut *core::ptr::addr_of_mut!(CSV_CUR) };
+    let open = || {
+        let (d, g) = geo()?;
+        Gen::open(FatFile::new(d, g, e.src as u32, e.ssize), e.ssize)
+    };
+    if let Some(g) = cur.get(key, open) {
+        g.read(off, buf);
+    }
+}
+
+// --- the block device --------------------------------------------------------------
+
+/// The USB block device (a handle; the volume itself is `STATE` / `TAB`).
 pub struct VDisk;
 
 impl BlockDevice for VDisk {
@@ -314,6 +569,12 @@ impl BlockDevice for VDisk {
         TOTAL
     }
     fn read_only(&self) -> bool {
+        true
+    }
+    fn product(&self) -> &'static [u8; 16] {
+        b"DM40 files      "
+    }
+    fn media_change_immediate(&self) -> bool {
         true
     }
     fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool {
@@ -330,7 +591,7 @@ impl BlockDevice for VDisk {
         } else if lba < ROOT_START {
             fat_sector(st, (lba - FAT_START) % FAT_SECS, buf);
         } else if lba < DATA_START {
-            root_sector(st, lba - ROOT_START, buf);
+            root_sector(lba - ROOT_START, buf);
         } else {
             data_sector(st, lba - DATA_START, buf);
         }
@@ -382,23 +643,21 @@ fn boot_sector(st: &State, b: &mut [u8]) {
     b[0x1FF] = 0xAA;
 }
 
-/// FAT entry of cluster `c`: media / EOC marks, the next cluster of a
-/// file's contiguous chain, 0xFFFF at its end, 0 = free.
+/// FAT entry of cluster `c`: media / EOC marks, one-cluster directories and
+/// README, the contiguous chains of the INFO / DEBUG files and of every
+/// table file, 0 = free.
 fn fat_entry(st: &State, c: u32) -> u16 {
+    let chain = |start: u32, size: u32| -> Option<u16> {
+        let end = start + nclus(size);
+        (start != 0 && c >= start && c < end).then(|| if c + 1 == end { 0xFFFF } else { (c + 1) as u16 })
+    };
     match c {
         0 => 0xFFF8,
         1 => 0xFFFF,
-        _ => {
-            let mut i = 0;
-            while let Some((_, size, start)) = entry(st, i) {
-                let end = start + size.div_ceil(CB);
-                if start != 0 && c >= start && c < end {
-                    return if c + 1 == end { 0xFFFF } else { (c + 1) as u16 };
-                }
-                i += 1;
-            }
-            0
-        }
+        C_INFO..=C_README => 0xFFFF,
+        _ if c < st.spi_start => st.files[..st.n].iter().find_map(|f| chain(f.start, f.size)).unwrap_or(0),
+        _ if c < st.dyn0 => chain(st.spi_start, SPI_BYTES).unwrap_or(0),
+        _ => at_cluster(tab(), c).and_then(|e| chain(e.vstart as u32, e.vsize)).unwrap_or(0),
     }
 }
 
@@ -409,23 +668,86 @@ fn fat_sector(st: &State, s: u32, b: &mut [u8]) {
     }
 }
 
-fn root_sector(st: &State, s: u32, b: &mut [u8]) {
-    let per = (BS / 32) as u32;
-    for i in 0..per {
-        let idx = (s * per + i) as usize;
-        let e = &mut b[(i * 32) as usize..(i * 32 + 32) as usize];
-        if idx == 0 {
+/// A short directory entry.
+fn dirent(e: &mut [u8], name: &[u8; 11], attr: u8, start: u32, size: u32) {
+    e[..11].copy_from_slice(name);
+    e[11] = attr;
+    put16(e, 0x10, DATE); // created
+    put16(e, 0x12, DATE); // accessed
+    put16(e, 0x18, DATE); // written
+    put16(e, 0x1A, start as u16);
+    put32(e, 0x1C, size);
+}
+
+/// Root entry `i` (0 = label).
+fn root_entry(i: usize, e: &mut [u8]) {
+    match i {
+        0 => {
             e[..11].copy_from_slice(&LABEL);
             e[11] = 0x08; // volume label
             put16(e, 0x18, DATE);
-        } else if let Some((name, size, start)) = entry(st, idx - 1) {
-            e[..11].copy_from_slice(&name);
-            e[11] = 0x01; // read-only
-            put16(e, 0x10, DATE); // created
-            put16(e, 0x12, DATE); // accessed
-            put16(e, 0x18, DATE); // written
-            put16(e, 0x1A, start as u16);
-            put32(e, 0x1C, size);
+        }
+        1 => dirent(e, b"README  TXT", 0x01, C_README, readme(0, &mut [])),
+        2 => dirent(e, b"INFO       ", 0x10, C_INFO, 0),
+        3 => dirent(e, b"DEBUG      ", 0x10, C_DEBUG, 0),
+        4..=6 => dirent(e, &VDIRS[i - 4].0, 0x10, C_VDIR + (i - 4) as u32, 0),
+        _ => {}
+    }
+}
+
+fn root_sector(s: u32, b: &mut [u8]) {
+    let per = (BS / 32) as u32;
+    for i in 0..per {
+        let idx = (s * per + i) as usize;
+        if idx <= ROOT_N {
+            root_entry(idx, &mut b[(i * 32) as usize..(i * 32 + 32) as usize]);
+        }
+    }
+}
+
+/// Sector `s` of a one-cluster subdirectory at cluster `c`: "." / "..",
+/// then its files by slot (a slot below the high-water mark without a file
+/// = a deleted entry, 0xE5).
+fn dir_sector(st: &State, c: u32, s: u32, b: &mut [u8]) {
+    let per = (BS / 32) as u32;
+    let (lo, hi) = (s * per, s * per + per);
+    let ent = |slot: u32| {
+        let o = ((slot - lo) * 32) as usize;
+        o..o + 32
+    };
+    for slot in lo..hi.min(2) {
+        let name = if slot == 0 { b".          " } else { b"..         " };
+        let r = ent(slot);
+        dirent(&mut b[r], name, 0x10, if slot == 0 { c } else { 0 }, 0);
+    }
+    match c {
+        C_INFO => {
+            for (i, f) in st.files[..st.n].iter().enumerate() {
+                let slot = i as u32 + 2;
+                if (lo..hi).contains(&slot) {
+                    let r = ent(slot);
+                    dirent(&mut b[r], &f.name, 0x01, f.start, f.size);
+                }
+            }
+        }
+        C_DEBUG => {
+            if (lo..hi).contains(&2) {
+                let r = ent(2);
+                dirent(&mut b[r], b"SPIFLASHBIN", 0x01, st.spi_start, SPI_BYTES);
+            }
+        }
+        _ => {
+            let k = (c - C_VDIR) as usize;
+            let t = tab();
+            for slot in lo.max(2)..hi.min(t.slot_hw[k] as u32) {
+                let r = ent(slot);
+                b[r.start] = 0xE5;
+            }
+            for e in t.e[..t.n].iter().filter(|e| (e.id >> 10) as usize == k && (lo..hi).contains(&(e.slot as u32))) {
+                let r = ent(e.slot as u32);
+                b[r.clone()].fill(0);
+                dirent(&mut b[r], &vname(e.id), 0x01, e.vstart as u32, e.vsize);
+            }
         }
     }
 }
@@ -433,38 +755,79 @@ fn root_sector(st: &State, s: u32, b: &mut [u8]) {
 /// Data sector `s` (0 = the first sector of cluster 2).
 fn data_sector(st: &State, s: u32, b: &mut [u8]) {
     let c = s / SPC + 2;
-    let mut i = 0;
-    while let Some((_, size, start)) = entry(st, i) {
-        i += 1;
-        let k = size.div_ceil(CB);
-        if start == 0 || c < start || c >= start + k {
-            continue;
-        }
-        let off = (c - start) * CB + (s % SPC) * BS as u32;
-        if off >= size {
-            return; // slack of the last cluster
-        }
-        let len = (size - off).min(BS as u32) as usize;
-        let d = &mut b[..len];
-        if i - 1 >= st.n {
-            let x = &st.extra[i - 1 - st.n];
-            (x.read)(x.arg, off, d);
-            return;
-        }
-        let f = &st.files[i - 1];
-        match f.kind {
-            Kind::Mem => (st.mem)(f.addr + off, d),
-            Kind::Txt => {
-                describe(st, off as usize, d);
+    let within = (s % SPC) * BS as u32;
+    // (file start cluster, size): the bytes of this sector.
+    let span = |start: u32, size: u32| -> Option<(u32, usize)> {
+        let off = (c - start) * CB + within;
+        (off < size).then(|| (off, (size - off).min(BS as u32) as usize))
+    };
+    match c {
+        C_INFO..=C_DEBUG | C_VDIR..=6 => dir_sector(st, c, s % SPC, b),
+        C_README => {
+            if let Some((off, len)) = span(C_README, readme(0, &mut [])) {
+                readme(off as usize, &mut b[..len]);
             }
-            Kind::Fw => {
-                if let Some(fw) = st.fw.as_ref() {
-                    fw.fill(off, d);
+        }
+        _ if c < st.spi_start => {
+            let Some(f) = st.files[..st.n].iter().find(|f| f.start != 0 && c >= f.start && c < f.start + nclus(f.size)) else { return };
+            let Some((off, len)) = span(f.start, f.size) else { return };
+            let d = &mut b[..len];
+            match f.kind {
+                Kind::Mem => (st.mem)(f.addr + off, d),
+                Kind::Txt => {
+                    describe(st, off as usize, d);
+                }
+                Kind::Fw => {
+                    if let Some(fw) = st.fw.as_ref() {
+                        fw.fill(off, d);
+                    }
                 }
             }
         }
-        return;
+        _ if c < st.dyn0 => {
+            if let Some((off, len)) = span(st.spi_start, SPI_BYTES) {
+                if !dlog::disk().read_at(off, &mut b[..len]) {
+                    b.fill(0);
+                }
+            }
+        }
+        _ => {
+            let Some(e) = at_cluster(tab(), c).copied() else { return };
+            if let Some((off, len)) = span(e.vstart as u32, e.vsize) {
+                file_read(&e, off, &mut b[..len]);
+            }
+        }
     }
+}
+
+// --- README.TXT -------------------------------------------------------------------
+
+/// README.TXT bytes `base .. base + out.len()` into `out`; returns its
+/// whole length (constant).
+fn readme(base: usize, out: &mut [u8]) -> u32 {
+    let mut w = W { b: out, base, n: 0 };
+    w.s(b"DM40 (dm40-fw ");
+    w.s(VERSION.as_bytes());
+    w.s(b") - USB disk, read-only, generated by the meter.\r\n\r\n");
+    w.s(b"LOGS\\    LOGnnn.CSV   DMM recordings (swipe down on the DMM page)\r\n");
+    w.s(b"SCOPE\\   SCOPnnn.CSV  scope records (Save on the scope page)\r\n");
+    w.s(b"SHOTS\\   Snnn.BMP     screenshots (three-finger swipe down)\r\n");
+    w.s(b"INFO\\    calibration, boot data, UID, option bytes, OTP, boot\r\n");
+    w.s(b"         loader images and FIRMWARE.BIN (the running firmware as\r\n");
+    w.s(b"         an update file); BACKUP.TXT tells what each one is.\r\n");
+    w.s(b"DEBUG\\   SPIFLASH.BIN: raw image of the 16 MiB SPI flash (the\r\n");
+    w.s(b"         meter's internal FAT16 storage).\r\n\r\n");
+    w.s(b"The files are stored on the meter in a compact form and converted\r\n");
+    w.s(b"when read; new ones appear by themselves (refresh the file manager).\r\n");
+    w.s(b"Delete files on the meter (Gallery) or over USB/SCPI: MMEM:DEL.\r\n\r\n");
+    w.s(b"Firmware update: tools/reload.sh (fw-rs repository) uploads the\r\n");
+    w.s(b"update file over USBTMC (DBG:UPLOAD) and installs it (DBG:UPDATE).\r\n");
+    w.s(b"Without the tools (also when the meter does not start): from off,\r\n");
+    w.s(b"hold the power key ~4 s until the beep and 0.5 s more. The vendor\r\n");
+    w.s(b"loader's update screen shows its own USB disk: copy the update file\r\n");
+    w.s(b"there as dm40fw.bin (INFO\\FIRMWARE.BIN = the running firmware) and\r\n");
+    w.s(b"press \"update\".\r\n");
+    w.n as u32
 }
 
 // --- BACKUP.TXT ---------------------------------------------------------------
@@ -522,7 +885,7 @@ impl W<'_> {
 /// text's whole length (constant for a given file table).
 fn describe(st: &State, base: usize, out: &mut [u8]) -> usize {
     let mut w = W { b: out, base, n: 0 };
-    w.s(b"DM40 information volume: generated on the fly by dm40-fw ");
+    w.s(b"DM40 INFO: generated on the fly by dm40-fw ");
     w.s(VERSION.as_bytes());
     w.s(b" from the\r\nMCU memory, read-only. Raw copies of internal flash / chip data;\r\n");
     w.s(b"CRC-32 as zlib, 7-Zip, crc32.\r\n\r\n");
@@ -555,8 +918,8 @@ fn describe(st: &State, base: usize, out: &mut [u8]) -> usize {
                 w.hex(u32::from_le_bytes([ch[0], ch[1], ch[2], ch[3]]));
             }
             w.s(b"\r\n\r\nFIRMWARE.BIN = the running firmware as its vendor update file. To\r\n");
-            w.s(b"reinstall it: copy it to the DM40 disk as dm40fw.bin, power-cycle\r\n");
-            w.s(b"(or DBG:UPDATE).\r\n");
+            w.s(b"reinstall it: tools/reload.sh --image FIRMWARE.BIN, or copy it as\r\n");
+            w.s(b"dm40fw.bin to the vendor loader's own USB disk (see README.TXT).\r\n");
         }
         None => w.s(b"; no FIRMWARE.BIN (no valid loader record at 08008000).\r\n"),
     }
@@ -564,15 +927,19 @@ fn describe(st: &State, base: usize, out: &mut [u8]) -> usize {
     w.s(b"then LOADER.BIN at 0x080A0000 and CALIB.BIN at 0x080C0000, then install\r\n");
     w.s(b"a firmware. BOOTDATA.BIN = LOADER.BIN bytes 0x4000..0x7FFF. The loader\r\n");
     w.s(b"data is bound to UID.BIN: this unit only.\r\n");
-    w.s(b"Copy these files to a PC: this volume is made from the MCU flash and\r\n");
-    w.s(b"goes with it. The DM40 disk keeps one write-once safety copy of\r\n");
+    w.s(b"Copy these files to a PC: they are made from the MCU flash and go\r\n");
+    w.s(b"with it. The meter's SPI flash keeps one write-once safety copy of\r\n");
     w.s(b"CALIB.BIN, BOOTDATA.BIN and UID.BIN (written when missing, never\r\n");
     w.s(b"overwritten; it survives an SWD mass erase of the MCU).\r\n");
     debug_assert!(w.n <= TXT_MAX as usize);
     w.n
 }
 
-/// A file of ours was deleted on the device: drop it from the volume at
-/// once (before the next refresh, so a new file of the same name can never
-/// inherit its directory slot / clusters while a host caches them).
-pub fn forget(_name: &[u8; 11]) {}
+
+/// The host released the volume (Allow): a compaction it held back can run
+/// now (msc.rs).
+pub fn on_unlock() {
+    if state().is_some() && tab().want_compact {
+        dlog::set_stale();
+    }
+}

@@ -25,7 +25,7 @@
 //!
 //! Pure code (no hardware): the coder, `Gen` over any `Src`, `FatFile` over
 //! any `Raw` byte reader (FAT16 chain walking) and the root scan `scan`.
-//! Device glue (`vfiles` / `vread` for vdisk.rs, `export`) at the end.
+//! Device glue (the SPI reader, MMEM:DATA?, the refresh flag of vdisk.rs) at the end.
 //! Host tests: tools/dlog-test (round trip vs the old writer, truncation at
 //! every byte), tools/fatren-test (csvlog on a FAT image, fsck, dlog.py).
 
@@ -1730,7 +1730,8 @@ pub fn set_disk(f: fn(u32, &mut [u8]) -> bool) {
     unsafe { *core::ptr::addr_of_mut!(DISK) = FnRaw(f) };
 }
 
-fn disk() -> FnRaw {
+/// The SPI disk's raw reader (the flash on the device, `set_disk`'s in tests).
+pub fn disk() -> FnRaw {
     unsafe { *core::ptr::addr_of!(DISK) }
 }
 
@@ -1816,108 +1817,32 @@ pub fn data(name: &[u8; 11], off: u32, out: &mut [u8]) -> Result<usize, DataErr>
 #[cfg(feature = "vdisk")]
 pub use vfs::*;
 
-/// The virtual CSV files of LUN 1 (vdisk.rs `set_extra`): one LOGnnn.CSV
-/// per finished LOGnnn.DLG on the SPI disk (docs/compact-log-format.md 5).
+/// When the generated USB volume (vdisk.rs) must be rebuilt: a recording
+/// ended, a screenshot / scope record was written, a file was deleted.
 #[cfg(feature = "vdisk")]
 mod vfs {
-    use super::*;
-    use crate::vdisk::{Extra, MAX_EXTRA};
-    use core::sync::atomic::{AtomicBool, Ordering};
+    use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-    const ENT0: Ent = Ent { name: [0; 11], start: 0, size: 0 };
-    // SRAM (.sram_bss, zeroed at reset), not TCM: the stack's memory.
-    #[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".sram_bss")]
-    static mut TAB: [Ent; MAX_EXTRA] = [ENT0; MAX_EXTRA];
-    static mut NT: usize = 0;
-    /// CRC of the last published table.
-    static mut SUM: u32 = 0;
-    static mut PUBLISHED: bool = false;
-    /// The read cursor: (table index, generator), ~0.4 KiB of .bss (not
-    /// .dmabuf: that is not zeroed at reset).
-    static mut CUR: Slot<u32> = Slot::new();
     static STALE: AtomicBool = AtomicBool::new(true);
+    static GEN: AtomicU32 = AtomicU32::new(0);
 
-    /// The DLG set changed (a recording ended, a file was deleted, the PC
-    /// wrote the disk): `refresh` rebuilds the table.
+    /// The SPI files changed: vdisk::refresh is due (main.rs runs it once
+    /// the disk has been quiet for a second: `gen` stops moving).
     pub fn set_stale() {
         STALE.store(true, Ordering::Relaxed);
+        GEN.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn stale() -> bool {
         STALE.load(Ordering::Relaxed)
     }
 
-    /// Main loop, when `stale()` and nothing writes the disk (no recording
-    /// commit, no screenshot / scope CSV job, no host write): rebuild the
-    /// LUN-1 extra files (vdisk::set_extra raises its media change). The
-    /// file being recorded (`exclude`) is left out until it ends. Reads every
-    /// chunk header + CRC of every DLG file: ~10 ms per 100 KB of logs.
-    /// Returns the number of files.
-    pub fn refresh(exclude: Option<[u8; 11]>) -> usize {
+    pub fn clear_stale() {
         STALE.store(false, Ordering::Relaxed);
-        unsafe { (*core::ptr::addr_of_mut!(CUR)).clear() };
-        let tab = unsafe { &mut *core::ptr::addr_of_mut!(TAB) };
-        let mut x = [Extra { name: [b' '; 11], size: 0, read: vread, arg: 0 }; MAX_EXTRA];
-        let mut n = 0;
-        // CRC of the table (start, DLG size, CSV size, name per file).
-        let mut sum = !0u32;
-        let mut d = disk();
-        if let Some(g) = geometry(&mut d) {
-            // The root's DLG files into TAB (the last MAX_EXTRA in
-            // directory order: the newest), then the valid ones compacted.
-            let mut ne = 0;
-            scan(&mut d, &g, &mut |e| {
-                if Some(e.name) != exclude {
-                    if ne == MAX_EXTRA {
-                        tab.copy_within(1.., 0);
-                        ne -= 1;
-                    }
-                    tab[ne] = *e;
-                    ne += 1;
-                }
-            });
-            for i in 0..ne {
-                let e = tab[i];
-                #[cfg(target_os = "none")]
-                crate::wdt::kick_if_feeding();
-                let Some(gen) = Gen::open(FatFile::new(d, g, e.start, e.size), e.size) else { continue };
-                tab[n] = e;
-                for v in [e.start, e.size, gen.info.csv] {
-                    sum = crc32_upd(sum, &v.to_le_bytes());
-                }
-                sum = crc32_upd(sum, &e.name);
-                x[n] = Extra { name: csv_name(&e.name), size: gen.info.csv, read: vread, arg: n as u32 };
-                n += 1;
-            }
-        }
-        // Unchanged (names, sizes, places): no media change for the host.
-        let same = unsafe { *core::ptr::addr_of!(SUM) } == sum;
-        unsafe {
-            *core::ptr::addr_of_mut!(NT) = n;
-            *core::ptr::addr_of_mut!(SUM) = sum;
-        }
-        if same && unsafe { *core::ptr::addr_of!(PUBLISHED) } {
-            return n;
-        }
-        unsafe { *core::ptr::addr_of_mut!(PUBLISHED) = true };
-        crate::vdisk::set_extra(&x[..n])
     }
 
-    /// `Extra::read`: CSV bytes `off..` of table entry `arg`.
-    pub fn vread(arg: u32, off: u32, buf: &mut [u8]) {
-        buf.fill(0);
-        if arg as usize >= unsafe { *core::ptr::addr_of!(NT) } {
-            return;
-        }
-        let cur = unsafe { &mut *core::ptr::addr_of_mut!(CUR) };
-        let open = || {
-            let e = unsafe { (*core::ptr::addr_of!(TAB))[arg as usize] };
-            let mut d = disk();
-            let g = geometry(&mut d)?;
-            Gen::open(FatFile::new(d, g, e.start, e.size), e.size)
-        };
-        if let Some(g) = cur.get(arg, open) {
-            g.read(off, buf);
-        }
+    /// Bumped by every `set_stale` (debounce).
+    pub fn gen() -> u32 {
+        GEN.load(Ordering::Relaxed)
     }
 }

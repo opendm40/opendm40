@@ -4,8 +4,8 @@ Replacement firmware for the Alientek DM40 (GD32F427, Cortex-M4F @ 200 MHz):
 multimeter, scope and generator running at the same time, stock-like GUI with
 the main colour red, menus, touch, Bluetooth app protocol, USBTMC/SCPI.
 Calibration and the vendor boot data are read from their stock locations, never
-rewritten (served read-only on a second USB disk, plus one write-once
-safety copy of the calibration on the SPI disk).
+rewritten (served read-only on the USB disk, plus one write-once safety copy
+of the calibration on the SPI flash).
 
 fw-rs is installed like a stock update: `dm40-fw-native.bin` is a vendor-format
 update file that the vendor FS-loader flashes to `0x08004000`; a small shim in
@@ -18,15 +18,17 @@ kept only for the T1/T2 test images (see "Legacy RAM loader").
 fw-rs enumerates as a composite USBTMC + mass storage device (`1209:0001`) on
 USBFS. Debug commands are SCPI `DBG:...` over USBTMC (`src/scpi.rs`); the host
 tool `tools/dm40dbg.py` (PIL for screenshots) needs read/write access to
-`/dev/usbtmc*` (udev rule). Mass storage has two LUNs (two removable disks
-on the PC): LUN 0 "DM40 disk" = the stock SPI flash FAT volume, LUN 1 "DM40
-info" = a read-only volume `DM40-INFO` generated from the MCU memory.
+`/dev/usbtmc*` (udev rule). Mass storage is ONE read-only removable disk
+"DM40" generated on the fly (`src/vdisk.rs`): `LOGS/*.CSV`, `SCOPE/*.CSV`,
+`SHOTS/*.BMP`, `INFO/` (calibration, boot data, firmware image),
+`DEBUG/SPIFLASH.BIN`, `README.TXT`. The SPI flash itself is internal storage.
 
 ```
 python3 tools/dm40dbg.py ping
 python3 tools/dm40dbg.py shot out.png        # full screen in ~0.8 s
 python3 tools/dm40dbg.py boot                # DBG:BOOT? decoded: reset cause, marker, crash counter...
-python3 tools/dm40dbg.py scpi 'DBG:FLASH?'   # SPI disk: EF4018,4096,0 (last = write error)
+python3 tools/dm40dbg.py scpi 'DBG:FLASH?'   # SPI flash: EF4018,4096,0 (last = write error)
+python3 tools/dm40dbg.py upload FILE         # update file -> DM40FW.BIN in the SPI root (DBG:UPLOAD)
 python3 tools/dm40dbg.py reset               # reboot fw-rs
 python3 tools/dm40dbg.py image FILE          # offline: is FILE a valid dm40*.bin update file?
 ```
@@ -71,19 +73,25 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   running on every page (state shown on the scope bar).
 - **Bluetooth**: stock phone-app protocol (commands 00..09) on UART4.
 - **USB**: USBTMC/USB488 interface + SCPI, debug commands as `DBG:` SCPI
-  (tools/dm40dbg.py). Mass storage: the stock FAT16 volume on the W25Q128 SPI
-  flash (4096-byte sectors), always attached; `DBG:FLASH?` = JEDEC id, blocks,
-  write error flag. A block write that needs an erase stalls the main loop for
-  ~50 ms (up to 400 ms). Second LUN (`src/vdisk.rs`, native builds):
-  read-only FAT16 volume `DM40-INFO` synthesized on the fly — `CALIB.BIN`,
+  (tools/dm40dbg.py). Mass storage (native builds): ONE read-only FAT16
+  volume "DM40" (2 GiB, 32 KiB clusters) synthesized on the fly
+  (`src/vdisk.rs`): `LOGS/LOGnnn.CSV` and `SCOPE/SCOPnnn.CSV` (generated from
+  the compact DLG logs), `SHOTS/Snnn.BMP`, `INFO/` (`CALIB.BIN`,
   `BOOTDATA.BIN`, `UID.BIN`, `OPTBYTES.BIN`, `OTP.BIN`, `ROMBOOT.BIN`,
-  `LOADER.BIN` (raw copies of their regions), `BACKUP.TXT` (sizes, CRC-32s,
-  UID, version, restore notes) and `FIRMWARE.BIN` (the running firmware as a
-  vendor update file; copy it to the DM40 disk as `dm40fw.bin` to reinstall).
-  Always current, nothing written. The SPI disk keeps only a write-once
-  safety copy of `CALIB.BIN` / `BOOTDATA.BIN` / `UID.BIN` (made when missing,
-  never overwritten: it survives an SWD mass erase of the MCU; delete it to
-  have it made again). docs/native-boot.md "Unit data".
+  `LOADER.BIN` raw region copies, `BACKUP.TXT` with CRC-32s and restore notes,
+  `FIRMWARE.BIN` = the running firmware as a vendor update file),
+  `DEBUG/SPIFLASH.BIN` (raw 16 MiB SPI flash image) and `README.TXT`. New
+  files appear by themselves (UNIT ATTENTION at once, also while mounted;
+  existing files keep their place). The W25Q128 SPI flash (stock FAT16,
+  4096-byte sectors) is internal storage: our files in `LOGS/`, `SHOTS/`,
+  `SCOPE/` (`src/fatdir.rs`; files of earlier builds stay in its root and are
+  shown too), the vendor loader's `dm40*.bin` and a write-once safety copy of
+  `CALIB.BIN` / `BOOTDATA.BIN` / `UID.BIN` in its root (made when missing,
+  never overwritten: it survives an SWD mass erase of the MCU).
+  `DBG:FLASH?` = JEDEC id, blocks, write error flag. A block write that needs
+  an erase stalls the main loop for ~50 ms (up to 400 ms). Firmware files
+  reach the SPI root over USBTMC (`DBG:UPLOAD`, `tools/dm40dbg.py upload`).
+  docs/native-boot.md "Unit data".
 - **Touch**: CST2xx controller, gestures (tap, long press, swipes, drag),
   side keys MENU / RUN / AUTO / MF. Power key: hold 1.5 s = off, double
   press = key/touch lock.
@@ -94,10 +102,10 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   DMM and the scope measure at the same time (never done by the stock, off by
   default).
 
-Not implemented: CSV recording to the SPI disk, config.bin (settings are in
-backup SRAM instead). Screenshots to the SPI disk (3-finger swipe, stock
-`S%03u.BMP` files) and AC+DC on all models (stock: DM40B/C only) are
-implemented; their open items are in TODO.md.
+Not implemented: config.bin (settings are in backup SRAM instead).
+Recordings (`LOGS/`), screenshots (3-finger swipe, stock `S%03u.BMP` files,
+`SHOTS/`), scope records (`SCOPE/`) and AC+DC on all models (stock: DM40B/C
+only) are implemented; their open items are in TODO.md.
 
 ## SCPI
 
@@ -179,8 +187,9 @@ tools/fatren-test/run.sh         # host tests (also tools/genuine-test/run.sh)
 tools/reload.sh [cargo args]     # e.g. --features keep-screen
 ```
 
-builds, stages the image as `dm40_fwrs.bin` on fw-rs's own USB disk (other
-`dm40*.bin` there are removed), syncs, verifies, ejects, sends `DBG:UPDATE`
+builds, uploads the image over USBTMC as `DM40FW.BIN` into the SPI flash's
+root (`dm40dbg.py upload` = `DBG:UPLOAD`; other `dm40*.bin` there are
+removed, the meter re-reads and checks the CRC-32), sends `DBG:UPDATE`
 (zero the loader marker + reset; the vendor loader installs the file and
 deletes it), waits for fw-rs to come back (the first boot after an install is
 dark for several seconds: do not power-cycle) and checks `DBG:BOOT?`: the

@@ -4,11 +4,15 @@
 #   tools/reload.sh [options] [build args...]     e.g. --features keep-screen
 #
 # Default: ./build.sh native [build args], check the image (tools/dm40dbg.py
-# image: CRCs, size, no short last block the loader mis-decodes), stage
-# dm40-fw-native.bin as dm40_fwrs.bin on the fw-rs USB disk (1209:0001; any
-# other dm40*.bin there is removed), sync, verify, eject, send DBG:UPDATE (the vendor loader installs the
-# file and deletes it), wait for fw-rs to come back and check with DBG:BOOT?
-# that the loader marker is the header of the new file ("installed OK").
+# image: CRCs, size, no short last block the loader mis-decodes), upload it
+# over USBTMC into the SPI disk's root as DM40FW.BIN (tools/dm40dbg.py upload
+# = DBG:UPLOAD, src/upload.rs: any other dm40*.bin there is removed, the file
+# is re-read and its CRC-32 checked on the meter; the fw-rs USB disk is a
+# read-only generated volume), send DBG:UPDATE (the vendor loader installs
+# the file and deletes it), wait for fw-rs to come back and check with
+# DBG:BOOT? that the loader marker is the header of the new file ("installed
+# OK"). A running fw-rs without DBG:UPLOAD (older build): staged on its
+# writable USB disk as dm40_fwrs.bin instead (mount, copy, verify, eject).
 #
 # Options:
 #   --no-build      do not build, use the existing image
@@ -40,7 +44,7 @@ STOCK_ID=28e9:028f
 usage() { sed -n '2,/^set -euo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; }
 die() { echo "reload.sh: $*" >&2; exit 1; }
 
-BUILD=1 IMAGE= STOCK= FROM_STOCK=0 WAIT=90 RAM= ARGS=()
+BUILD=1 IMAGE= STOCK= FROM_STOCK=0 WAIT=90 RAM= ARGS=() UPLOAD=0
 while (($#)); do
     case "$1" in
         -h|--help) usage; exit 0 ;;
@@ -239,10 +243,15 @@ if usb_present "$FWRS_ID"; then
     "${DBG[@]}" boot >/dev/null 2>&1 ||
         die "the running fw-rs does not answer DBG:BOOT? (a LEGACY RAM build?): no
 DBG:UPDATE there. Return to stock (tools/dm40dbg.py reset) and use --from-stock."
-    DISK=$(wait_disk "$FWRS_ID" 10) || die "fw-rs is running but its USB disk did not appear"
-    echo "fw-rs disk: $DISK ($FWRS_ID)"
     ((FROM_STOCK)) && echo "(--from-stock ignored: fw-rs is running, using DBG:UPDATE)"
     FROM_STOCK=0
+    if R=$("${DBG[@]}" scpi 'DBG:UPLOAD?' 2>/dev/null) && [ -n "$R" ]; then
+        UPLOAD=1
+    else
+        echo "this fw-rs has no DBG:UPLOAD (older build): staging on its USB disk"
+        DISK=$(wait_disk "$FWRS_ID" 10) || die "fw-rs is running but its USB disk did not appear"
+        echo "fw-rs disk: $DISK ($FWRS_ID)"
+    fi
 elif usb_present "$STOCK_ID"; then
     if [ -n "$STOCK" ]; then
         die "the attached DM40 is $STOCK_ID (stock \"USB Connect\" or the loader update
@@ -264,11 +273,15 @@ else
 Plug in the cable; on stock choose \"USB Connect\"."
 fi
 
-DEV=$(fs_dev "$DISK")
-MNT=$(mount_fs "$DEV")
-echo "mounted $DEV at $MNT"
-stage "$MNT" "$IMG" "$NAME"
-eject "$DEV" "$MNT"
+if ((UPLOAD)); then
+    "${DBG[@]}" upload "$IMG" || die "upload failed (nothing installed; the meter runs on unchanged)"
+else
+    DEV=$(fs_dev "$DISK")
+    MNT=$(mount_fs "$DEV")
+    echo "mounted $DEV at $MNT"
+    stage "$MNT" "$IMG" "$NAME"
+    eject "$DEV" "$MNT"
+fi
 
 if ((FROM_STOCK)); then
     cat <<EOF

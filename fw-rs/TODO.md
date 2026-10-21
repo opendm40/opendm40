@@ -187,8 +187,8 @@ Code work (in this order):
 - [x] CSV-to-disk recording on the DMM screen, swipe-triggered (user). (a1a7e74; verify on device)
       src/csvlog.rs: one-finger swipe down on the DMM page = start / stop,
       toasts, red REC in the status blocks, LOG:CSV ON|OFF / LOG:CSV?, power-off / reset commit the tail.
-      Host writes are refused while recording; start refused ("Disk in use by PC - eject first") while
-      a PC has the disk mounted.
+      (Since the USB storage redesign the PC cannot write or mount the SPI disk: no "Disk in use"
+      refusals any more; files in LOGS/ on the SPI flash.)
 - [x] Compact binary logs, CSV only on read (owner 2026-10-21: "not CSV on the disk, RLE or a
       standard compressed format; CSV only for export"). docs/compact-log-format.md: own DLG format
       (adaptive Rice of delta-of-delta time + 6-digit value deltas, CRC chunk per commit) chosen over
@@ -212,12 +212,11 @@ Code work (in this order):
             tools/dm40scpi.py get LOG000.CSV. Gallery reads .DLG (exact counts).
       - [x] Emulator: LOG:CSV ON 60 s (154 readings at 2.5/s): LOG000.DLG 455 B, CSV 3108 B; MMEM:DATA?
             CSV == dlog.py of the DLG == LUN-1 LOG000.CSV read over USB/IP MSC.
-      - [ ] Verify on device: swipe REC 10 min, LUN 1 shows LOG000.CSV on Windows / Linux after the
-            recording (re-plug or eject if it does not appear: UNIT ATTENTION is held while mounted),
-            open in a spreadsheet; scope Save CSV -> SCOP000.CSV on LUN 1; gallery tile of a .DLG;
-            DBG:PROF? csv lap during a LUN-1 refresh with a large log (~0.1 s per 100 KB expected);
-            DBG:DIAG? STACK high-water after a LUN-1 refresh with several logs (~2 KiB frame);
-            copy a file to the DM40 disk: LUN 1 re-reads once, 2 s after the copy, not per write.
+      - [ ] Verify on device: swipe REC 10 min, the USB disk shows LOGS/LOG000.CSV on Windows / Linux
+            right after the recording (UNIT ATTENTION at once, also while mounted), open in a
+            spreadsheet; scope Save CSV -> SCOPE/SCOP000.CSV; gallery tile of a .DLG; DBG:PROF? csv lap
+            during a refresh with a large new log (~0.1 s per 100 KB expected); DBG:DIAG? STACK
+            high-water after a refresh with several logs.
       - [x] Owner 2026-10-21: drop legacy text LOG*.CSV / SCOP*.CSV support on the SPI disk (gallery parser,
             numbering, list/delete): only .DLG is written and read; CSV exists only as the generated export.
             (4544d4e)
@@ -527,13 +526,48 @@ Firmware:
       mounted. Nautilus: no auto refresh, F5 shows the new files (owner: acceptable).
       => live file lists on a virtual read-only volume work on Linux without MTP if the UA is NOT held
       while locked; keep existing files' clusters fixed (cached inodes). Windows / macOS / Nautilus refresh: untested.
-- [ ] USB storage redesign (owner 2026-10-21): stop exporting the SPI FAT as LUN 0. The SPI flash becomes internal
+- [x] USB storage redesign (owner 2026-10-21): stop exporting the SPI FAT as LUN 0. The SPI flash becomes internal
       storage (FAT16 kept for the vendor FS-loader: dm40*.bin in the root + the calibration safety copy) with
       subdirectories (LOGS/, SHOTS/, SCOPE/) in our FAT code. USB exports ONE generated volume: LOGS/*.CSV,
       SCOPE/*.CSV (from DLG), SHOTS/*.BMP, INFO/ (today's LUN-1 files), DEBUG/SPIFLASH.BIN (raw image), with the
       media-change UA sent at once (not held while locked; existing files keep their clusters). Then: delete from
       the PC (recognise directory-entry 0xE5 writes) and dropping dm40*.bin for an update (DAPLink-style write
       recognition) as follow-ups. Removes "disk in use" refusals and host-side FAT corruption.
+      docs/native-boot.md "Unit data".
+      - [x] src/fatdir.rs: subdirectories in our FAT code (create with . / .., grow, rmdir, directory views
+            for the writers, for_each over root + dirs); LOGS/ SHOTS/ SCOPE/ made at native boot (8 clusters =
+            1002 slots each), DBG:BOOT? FATDIR. Writers -> directories, numbering over root + directory;
+            files of earlier builds STAY in the root (no boot-time move: two-live-entries / lost-file window),
+            every reader lists both. Host: create / grow / power cut before every write, fsck after each.
+      - [x] src/vdisk.rs: ONE read-only LUN "DM40 files", 1.98 GiB FAT16 / 32 KiB clusters: README.TXT,
+            INFO/ (the old LUN-1 files), DEBUG/SPIFLASH.BIN, LOGS/ SCOPE/ (CSV from DLG), SHOTS/ (BMP
+            streamed); table of 400 files (SRAM): existing files keep slot + clusters, append-only, compaction
+            only when out of space / after a bus reset AND unlocked; UA at once also while locked; refresh 1 s
+            after the last change. Host test: sparse dump, fsck, mtools, CSV == dlog.py, BMP == SPI file,
+            SPIFLASH.BIN == the SPI image, places kept across refreshes, compaction. Emulator (USB/IP): luns,
+            mscdump (fsck clean, files equal their sources), screenshot under PREVENT -> UA after 4 s, new
+            SHOTS/S003.BMP appended, the rest in place.
+      - [x] "Disk in use by PC" refusals removed (screenshot, scope record, recording start / commits, gallery
+            and MMEM delete); MMEM:CAT? lists "LOGS/LOG000.DLG", names accept a LOGS/ SHOTS/ SCOPE/ prefix.
+      - [x] Firmware update without the writable disk: DBG:UPLOAD BEGIN / DATA (raw binary, before the SCPI
+            parser) / END? / ABORT (src/upload.rs: DM40FW.BIN in the SPI root, other dm40*.bin removed, CRC
+            re-read, header checked, data -> FAT -> directory); tools/dm40dbg.py upload; tools/reload.sh uses it
+            (falls back to the USB disk for an older fw-rs); emu/usbip_client.py upload (emulator: 480 KB in
+            7.9 s). Recovery path (the loader's own disk) untouched.
+      - [ ] Device: Linux kernel attach + udisks ro mount of the 2 GiB volume; a recording / screenshot while
+            mounted -> new file visible after F5 (UA at once); Windows Explorer and macOS Finder with the UA
+            while mounted; `fsck.fat -n` on a copied DEBUG/SPIFLASH.BIN; first boot after the update: FATDIR
+            0x7 created 0x7 (~1 s extra boot, once), boot time of vdisk::boot_refresh with many logs;
+            reload.sh end-to-end (upload ~10-20 s?, DBG:UPDATE, "installed OK"); MMEM:CAT? / DATA? / DEL with
+            directories (dm40scpi.py get LOGS/LOG000.CSV).
+            If Explorer does not show new files after the UA: try a volume serial that changes with every
+            refresh (Windows may key "same medium" on it).
+      - [ ] Follow-up: delete from the PC (a 0xE5 directory-entry write on the volume for a LOGS / SHOTS /
+            SCOPE file deletes the source; everything else refused), experimental. Not done: it needs the WP
+            bit cleared (with WP set Linux mounts ro and never writes), and then every host writes its own
+            files (.Trash-1000, System Volume Information, .fseventsd) into a volume that cannot store them:
+            the refusals must be per write, and the host's view of a refused write is an I/O error. Delete
+            on the meter (gallery) or with MMEM:DEL meanwhile.
 Emulator (emu/):
 - [ ] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
       use per function (from the rows / mux selections: e.g. which PA tap, SENSE, PB0..PB7, FB/RLU), not "the
@@ -553,8 +587,7 @@ Emulator (emu/):
       WRITE -> 07/27/00, PREVENT / UNIT ATTENTION per LUN). SPI disk: only a write-once safety copy of
       CALIB/BOOTDATA/UID (DBG:BOOT? CALBK SAFECOPY_PRESENT/WRITTEN + differs). Host-tested (fatren-test) and
       emulator-tested over USB/IP (userspace client). docs/native-boot.md "Unit data".
-      Open: device test (Linux kernel attach + mount ro, Windows, macOS); vdisk::init time on the device;
-      generated CSV files from the binary logs via vdisk::set_extra (hook ready, no caller).
+      Superseded by the USB storage redesign (one generated volume with INFO/ etc., above).
 
 ## DMM page / settings batch (owner notes ../замечания.txt, 2026-10-21)
 - [x] Second stock resistance mode = the stock m+8 "ON" variant (p8set rows, lower test current for

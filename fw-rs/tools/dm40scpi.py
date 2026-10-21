@@ -420,7 +420,7 @@ def get_file(link, name, out=None, progress=None):
 
 
 def do_get(link, args):
-    out = args.out or args.name
+    out = args.out or args.name.replace('\\', '/').split('/')[-1]
     t0 = time.monotonic()
     prog = None if args.quiet else (lambda n: print('\r%d bytes' % n, end='', flush=True))
     d = get_file(link, args.name, out, prog)
@@ -535,7 +535,7 @@ def main():
     s.add_argument('--rungs', help='R26 low bits, comma separated (default: /2 OSR 32..1024 plain and chopped, 600/s)')
     s.set_defaults(func_=do_ad2)
     s = sub.add_parser('get', help='copy a disk file (LOGnnn.CSV = generated from LOGnnn.DLG)')
-    s.add_argument('name', help='e.g. LOG000.CSV, LOG000.DLG, S000.BMP (MMEM:CAT? lists them)')
+    s.add_argument('name', help='e.g. LOG000.CSV, LOGS/LOG000.DLG, SHOTS/S000.BMP (MMEM:CAT? lists them)')
     s.add_argument('-o', '--out', help='output file (default: the name)')
     s.add_argument('-q', '--quiet', action='store_true')
     s.set_defaults(func_=do_get)

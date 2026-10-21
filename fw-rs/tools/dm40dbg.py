@@ -20,13 +20,20 @@
                                          DBG:BOOT? decoded (native); --expect
                                          compares the loader marker with FILE's
                                          update header ("installed OK")
+    dm40dbg.py upload FILE               NATIVE: write FILE (an update file,
+                                         checked first) as DM40FW.BIN into the
+                                         SPI disk's root over USBTMC
+                                         (DBG:UPLOAD, src/upload.rs; the USB
+                                         disk is read-only); every other
+                                         dm40*.bin there is deleted first
     dm40dbg.py update [--wait S] [--expect FILE]
                                          NATIVE: DBG:UPDATE = zero the loader
                                          marker + reset; the vendor loader then
-                                         installs the one dm40*.bin on the disk.
-                                         --wait: wait for fw-rs to come back and
-                                         print `boot`. tools/reload.sh does the
-                                         whole flow (stage file, eject, update)
+                                         installs the one dm40*.bin of the SPI
+                                         disk's root. --wait: wait for fw-rs to
+                                         come back and print `boot`.
+                                         tools/reload.sh does the whole flow
+                                         (upload, update, check)
     dm40dbg.py genuine                   DBG:GENUINE? (device-authenticity check,
                                          only in builds that have it)
     dm40dbg.py image FILE                offline: validate a dm40*.bin update
@@ -49,6 +56,7 @@ import os
 import struct
 import sys
 import time
+import zlib
 
 VID, PID = 0x1209, 0x0001
 STOCK_VID, STOCK_PID = 0x28e9, 0x028f   # stock "USB Connect" disk = loader update disk
@@ -436,6 +444,43 @@ def print_boot(text, expect=None, raw=False):
     return False
 
 
+UPLOAD_CHUNK = 232  # 256-byte USBTMC command buffer - 'DBG:UPLOAD:DATA <offset>,'
+
+
+def syst_err(ln):
+    r, err = ln.try_query('SYST:ERR?')
+    return r.decode(errors='replace').strip() if r else err
+
+
+def cmd_upload(ln, path, quiet=False):
+    """DBG:UPLOAD BEGIN / DATA (raw binary, 232 bytes a message) / END?:
+    `path` becomes DM40FW.BIN in the SPI disk's root (src/upload.rs)."""
+    data = open(path, 'rb').read()
+    crc = zlib.crc32(data)
+    ln.write('DBG:UPLOAD:BEGIN %d,%d' % (len(data), crc))
+    e = syst_err(ln)
+    if not e.startswith('0,'):
+        sys.exit('DBG:UPLOAD:BEGIN: %s%s' % (e, ' (firmware without DBG:UPLOAD?)' if 'Undefined' in e else ''))
+    t0 = time.time()
+    for i, off in enumerate(range(0, len(data), UPLOAD_CHUNK)):
+        os.write(ln.fd, b'DBG:UPLOAD:DATA %d,' % off + data[off:off + UPLOAD_CHUNK])
+        if i % 256 == 255:
+            e = syst_err(ln)
+            if not e.startswith('0,'):
+                sys.exit('DBG:UPLOAD:DATA at %d: %s' % (off, e))
+            if not quiet:
+                print('\r%d / %d bytes' % (off + UPLOAD_CHUNK, len(data)), end='', flush=True)
+    r, err = ln.try_query('DBG:UPLOAD:END?')
+    if not quiet:
+        print()
+    want = '%d,%d' % (len(data), crc)
+    got = r.decode(errors='replace').strip() if r else None
+    if got != want:
+        sys.exit('DBG:UPLOAD:END?: %s (want %s)' % (got or err, want))
+    print('uploaded %s: %d bytes, CRC-32 %08x, as DM40FW.BIN in %.1f s' % (path, len(data), crc, time.time() - t0))
+    return 0
+
+
 def cmd_update(ln, wait, expect):
     """DBG:UPDATE; True once the device dropped off USB (= marker zeroed, reset)."""
     ln.write('DBG:UPDATE')
@@ -538,8 +583,11 @@ def main():
     p = sub.add_parser('boot', help='DBG:BOOT? decoded (native builds)')
     p.add_argument('--expect', metavar='FILE', help='update file whose header the loader marker must match')
     p.add_argument('--raw', action='store_true', help='also print the raw reply')
+    p = sub.add_parser('upload', help='NATIVE: write an update file as DM40FW.BIN into the SPI '
+                       'root over USBTMC (DBG:UPLOAD)')
+    p.add_argument('file')
     p = sub.add_parser('update', help='NATIVE: DBG:UPDATE (zero the loader marker + reset; the '
-                       'loader installs the dm40*.bin staged on the disk)')
+                       'loader installs the dm40*.bin staged on the SPI disk)')
     p.add_argument('--wait', type=int, default=0, metavar='S',
                    help='wait up to S s for fw-rs to come back, then print `boot`')
     p.add_argument('--expect', metavar='FILE', help='with --wait: check the marker against FILE')
@@ -556,6 +604,9 @@ def main():
 
     if a.cmd == 'image':
         sys.exit(0 if print_image(a.file) else 1)
+    if a.cmd == 'upload' and image_info(a.file)['problems']:
+        print_image(a.file)
+        sys.exit(1)
     if a.cmd in ('update', 'boot') and a.expect and image_info(a.expect)['problems']:
         print_image(a.expect)
         sys.exit(1)
@@ -612,6 +663,8 @@ def main():
             sys.exit('DBG:BOOT? not available (%s); RAM builds other than T1 have none' % err)
         ok = print_boot(r.decode(errors='replace'), a.expect, a.raw)
         sys.exit(3 if ok is False else 0)
+    elif a.cmd == 'upload':
+        sys.exit(cmd_upload(ln, a.file))
     elif a.cmd == 'update':
         sys.exit(cmd_update(ln, a.wait, a.expect))
     elif a.cmd == 'genuine':
