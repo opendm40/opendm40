@@ -460,6 +460,14 @@ pub enum Pow {
     Method(Option<bool>),
     /// :LIMit <A>,<s> / ? (continuous current, countdown; s 0 = none).
     Limit(Option<(f32, u16)>),
+    /// :COUPling AC|DC|AUTO / ? (pw::COUP_*).
+    Coupling(Option<u8>),
+    /// :ZERO (0: start the self-zero, leads open), :ZERO CLEar (1), :ZERO? (2).
+    Zero(u8),
+    /// :VOLTage:CALibrate (0: start the V self-cal on the current V range),
+    /// :VOLTage:CALibrate DEFault (1: the factory-derived gain again),
+    /// :VOLTage:CALibrate? (2). :VOLTage:GAIN? (3): the 4 gains in force.
+    VCal(u8),
     DbgRow,
     DbgPoke(u8, u8),
     DbgStat(u8),
@@ -566,6 +574,44 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
                 _ => Err(BAD),
             },
             _ => Err(HDR),
+        };
+    }
+    if kw(l0, "VOLTage") && l1.is_some_and(|p| kw(p, "CALibrate")) {
+        return if query {
+            Ok(Pow::VCal(2))
+        } else if a.is_empty() {
+            Ok(Pow::VCal(0))
+        } else if kw(a, "DEFault") {
+            Ok(Pow::VCal(1))
+        } else {
+            Err(BAD)
+        };
+    }
+    if kw(l0, "VOLTage") && l1.is_some_and(|p| kw(p, "GAIN")) && query {
+        return Ok(Pow::VCal(3));
+    }
+    if kw(l0, "COUPling") && l1.is_none() {
+        return if query {
+            Ok(Pow::Coupling(None))
+        } else if a == b"AC" {
+            Ok(Pow::Coupling(Some(crate::dmm::pw::COUP_AC)))
+        } else if a == b"DC" {
+            Ok(Pow::Coupling(Some(crate::dmm::pw::COUP_DC)))
+        } else if kw(a, "AUTO") {
+            Ok(Pow::Coupling(Some(crate::dmm::pw::COUP_AUTO)))
+        } else {
+            Err(BAD)
+        };
+    }
+    if kw(l0, "ZERO") && l1.is_none() {
+        return if query {
+            Ok(Pow::Zero(2))
+        } else if a.is_empty() {
+            Ok(Pow::Zero(0))
+        } else if kw(a, "CLEar") {
+            Ok(Pow::Zero(1))
+        } else {
+            Err(BAD)
         };
     }
     if kw(l0, "VOLTage") && l1.is_some_and(|p| kw(p, "RANGe")) {

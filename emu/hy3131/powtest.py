@@ -128,14 +128,63 @@ SC.update({
         (0, 'open;pow:230@50,i=1,pf=1', ring({'XY', 'YY', 'XX'}, '0'), 'T3 hook: d = 0, XY / YY / XX every result'),
     ]),
 })
+# Follow-ups (doc 3.11 "Follow-ups"): LPF zeros (powz:1 = the device's
+# zeros) and POW:ZERO, negative DC, the V self-cal (powvg: a Y gain error the
+# factory calibration does not explain), the counter's window / PB4, the DC
+# (AD1) method and the AUTO coupling.
+def x(q, want):
+    return lambda d: d['X'].get(q) == want
+
+
+def zeros(want):
+    # POW:ZERO? = result,SET,<Y>,<X 600 uA .. 10 A> within 3 codes (noise).
+    def chk(d):
+        z = d['X'].get('POW:ZERO?', '').split(',')
+        return len(z) == 9 and z[:2] == ['OK', 'SET'] and all(abs(int(a) - b) <= 3 for a, b in zip(z[2:], want))
+    return chk
+
+
+SC.update({
+    'zero': (['CONF:POW', 'POW:BURD:STAT OFF'], 66, [
+        (0, 'open;powz:1', lambda d: d['V'] > 0.04 and d['I'] > 5e-6, 'device zeros, no POW:ZERO: phantom V / I'),
+        (16, None, lambda d: d['V'] < 0.003 and d['I'] < 1e-6 and zeros([1080, 888, 155, 888, 155, 888, 155])(d), 'after POW:ZERO: V, I ~0'),
+        (34, 'open;powz:1;vsrc:5;isrc:0.4', both(pw(2.0, 1, 5, 0.4), lambda d: near(d['Vdc'], 5, 0.002)), 'DC 5 V 0.4 A with the zeros subtracted'),
+        (50, 'open;powz:1;vsrc:-5;isrc:0.4', both(pw(-2.0, -1, 5, 0.4), lambda d: near(d['Vdc'], -5, 0.002) and near(d['Idc'], 0.4, 0.002)), 'negative DC: LPF polarity, P < 0'),
+    ]),
+    'vcal': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:VOLT:RANG 60'], 64, [
+        (0, 'open;powvg:0.99;pow:30@50,i=0.1', lambda d: near(d['V'], 29.7, 0.002), 'Y gain 1 % low: V 29.7'),
+        (12, None, lambda d: near(d['V'], 30, 0.002) and d['X']['POW:VOLT:CAL?'].startswith('OK,+6.0'), 'after POW:VOLT:CAL (AC V reference): V 30.00'),
+        (26, 'open;powvg:0.98;vsrc:20', lambda d: near(d['Vdc'], 20 * 0.98 / 0.99, 0.002), 'DC, Y gain 2 % low (the AC cal of 1 % kept)'),
+        (36, None, lambda d: near(d['Vdc'], 20, 0.002) and d['X']['POW:VOLT:CAL?'].startswith('OK'), 'after POW:VOLT:CAL (DC V reference): 20.00 V'),
+        (50, 'open;vsrc:0.2', lambda d: d['X']['POW:VOLT:CAL?'].startswith('SMALL'), 'refused: 0.2 V on 60 V'),
+    ]),
+    'freq': (['CONF:POW', 'POW:BURD:STAT OFF'], 36, [
+        (0, 'open;vsrc:4.8,ac=4.8,f=40,shape=square', lambda d: near(d['F'], 40, 0.01), 'unipolar 40 Hz square (T1): f 40 Hz'),
+        (18, 'open;vsrc:12;isrc:0,ac=3,f=50', lambda d: near(d['F'], 50, 0.01), 'DC voltage, AC current: f of the current (PB4)'),
+    ]),
+    'dcad1': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:COUP DC'], 64, [
+        (0, 'open;vsrc:12;isrc:2', both(pw(24, 1, 12, 2, rel=0.001), lambda d: d['F'] == 0 and x('POW:COUP?', 'DC')(d)), 'AD1 method: 12 V 2 A = 24.00 W'),
+        (16, 'open;vsrc:12;isrc:-2', pw(-24, -1, 12, 2, rel=0.001), 'reversed: -24.00 W'),
+        (32, 'open;vsrc:5;isrc:0.004', both(pw(0.02, 1, 5, 0.004, rel=0.002), ranges('6.000000E+00', '6.000000E-03')), '5 V 4 mA on 6 mA'),
+        (48, 'open;vsrc:5;isrc:200e-6', both(pw(1e-3, 1, 5, 200e-6, rel=0.003), ranges('6.000000E+00', '6.000000E-04')), '5 V 200 uA on 600 uA'),
+    ]),
+    'dcburden': (['CONF:POW', 'POW:BURD 0.5', 'POW:COUP DC'], 30, [
+        (0, 'open;vsrc:5;isrc:0.4', both(pw(1.92, 1, math.sqrt(25 - 2 * 0.5 * 2 + 0.04), 0.4, rel=0.002), lambda d: near(d['Vb'], 0.2, 0.01)), 'AD1 method: burden compensation 0.5 ohm'),
+    ]),
+    'auto': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:COUP AUTO'], 50, [
+        (0, 'open;vsrc:12;isrc:2', both(pw(24, 1, 12, 2, rel=0.002), x('POW:COUP?', 'AUTO,DC')), 'AUTO: DC source -> the AD1 method'),
+        (22, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), x('POW:COUP?', 'AUTO,AC')), 'AUTO: mains -> method B'),
+    ]),
+})
 SC['scpi'] = (['MEAS:POW?', 'POW:LIM 2.5,12', 'POW:BURD:STAT OFF'], 24, [
     (0, 'open;pow:100@60,i=0.5,pf=0.6', lambda d: near(num(d['X']['MEAS:POW:PFAC?']), 0.6, 0, 0.01) and near(num(d['X']['READ?']), 30, 0.01)
      and d['X']['CONF?'] == '"POW AUTO,AUTO"' and d['X']['POW:LIM?'] == '+2.500000E+00,12' and d['X']['POW:CYC?'] == '2,642,1284'
      and d['X']['FUNC?'] == '"POW"', 'MEAS:POW:PFAC?, READ?, CONF?, POW:LIM?, POW:CYC?, FUNC?'),
 ])
 EXTRA = {'t1-yy': ['DBG:POW:RAW?', 'DBG:POW:ROW?'], 't3-cycle': ['DBG:POW:RAW?'],
+         'zero': ['POW:ZERO?'], 'vcal': ['POW:VOLT:CAL?'], 'dcad1': ['POW:COUP?'], 'auto': ['POW:COUP?'],
          'scpi': ['MEAS:POW:PFAC?', 'READ?', 'CONF?', 'POW:LIM?', 'POW:CYC?', 'FUNC?']}
-ACTIONS = {'phasecal': {20: 'POW:PHAS:CAL REAC'}}
+ACTIONS = {'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'}}
 
 
 def num(s):

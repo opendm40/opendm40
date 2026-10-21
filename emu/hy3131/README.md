@@ -123,8 +123,17 @@ Chip (datasheet DS-HY3131-V10):
   saw; the next block is clean (`powmix:0`: no mixing; the real chip's
   behaviour is unknown, design 3.4 / device test T3). Calibration: X carries
   the stock AC A gains folded in (AC part / cal(0xC4 + 4 ci), DC part /
-  cal(0xF4 + 4 ci), ci = iu * 2 + ir, no offsets), Y is ideal. The
-  comparator / counter (SCMPI = SENSE) sees the V tap: the voltage's frequency.
+  cal(0xF4 + 4 ci) or, while that is the default 1.0, / cal(0xC4 + 4 ci);
+  ci = iu * 2 + ir, no offsets); Y carries the factory-derived tap gain
+  (6 V: DC V r0 x AC V r1 / DC V r1, else AC V r1..r3; fw-rs
+  pw::v_gain_factory) times `powvg:` (a deviation for the V self-cal tests).
+  `powz:1` adds the device's LPF zeros (Y +1080 codes, X +888 with OP1 x10,
+  +155 with x1; doc 3.11 T1 / T3). The comparator / counter: SCMPI = SENSE
+  sees the V tap DC-coupled (dc + AC against VRH / VRL: a unipolar signal
+  never crosses a negative VRL), SCMPI = PB4 the current's AC at OP1O. DC V
+  rows with SCMPI = SENSE (the fw-rs DC power method's AC check) drive
+  CMPHO / CMPLO from the tap waveform. The f8_9 DC A rows fold the uA
+  calibration when PE selects the 47.5 ohm shunt (stock mode 9).
 * Comparator: VRHCMP / VRLCMP from the R21 mux tables and the reference divider
   (VDSC<n> = K1 * VDDA, AGNDP/N<n> = AGND +- K2 * REFO), latch -> ACPO, CMPO on
   the CMP pin when ENPCMPO = 1 (`CmpPin`: the continuity beeper).

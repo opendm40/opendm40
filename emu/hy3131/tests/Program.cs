@@ -503,6 +503,52 @@ namespace Hy3131Tests
                 Near(ctb / (double)(cta + 0x40000) * 4915200, 60, 0.01, "power row counter: the voltage's 60 Hz (current at 50 Hz)");
             }
             {
+                // fw-rs power meter follow-ups (doc 3.11): a unipolar square (the T1 calibrator,
+                // 0..9.6 V) on the 60 V tap never crosses the default -20.8 mV: no count; the
+                // window around its DC (R21 0xBF: +62.5 / +20.8 mV) counts 40 Hz.
+                foreach(var r21 in new byte[] { 0xDD, 0xBF })
+                {
+                    var m = NewChip();
+                    m.Chip.SetInput("vsrc:4.8,ac=4.8,f=40,shape=square");
+                    PowerConfigure(m, Hy3131Core.PowerRow(1, 0, 1), 0);
+                    m.Write(0x21, r21);
+                    m.Write(0x20, 0x10); m.Write(0x1B, 0x00, 0x00, 0xFC); m.Write(0x20, 0x12);
+                    var ok = m.WaitFlag(0x01, 1);
+                    var c = m.Read(0x15, 9);
+                    var ctb = c[3] | c[4] << 8 | c[5] << 16; var cta = c[6] | c[7] << 8 | c[8] << 16;
+                    var f = (ok & 1) != 0 ? ctb / (double)(cta + 0x40000) * 4915200 : 0;
+                    Near(f, r21 == 0xDD ? 0 : 40, 0.01, string.Format("unipolar square on the power row, R21 0x{0:X2}", r21));
+                }
+                // PB4 (SCMPI 7): the current's frequency, also with no voltage.
+                {
+                    var m = NewChip();
+                    m.Chip.SetInput("vsrc:12;isrc:0,ac=3,f=50");
+                    PowerConfigure(m, Hy3131Core.PowerRow(1, 0, 1), 0);
+                    m.Write(0x20, 0xF0); m.Write(0x1B, 0x00, 0x00, 0xFC); m.Write(0x20, 0xF2);
+                    var ok = m.WaitFlag(0x01, 1);
+                    var c = m.Read(0x15, 9);
+                    var ctb = c[3] | c[4] << 8 | c[5] << 16; var cta = c[6] | c[7] << 8 | c[8] << 16;
+                    Near((ok & 1) != 0 ? ctb / (double)(cta + 0x40000) * 4915200 : 0, 50, 0.01, "power row counter on PB4: the current's 50 Hz");
+                }
+                // powz:1: the device's LPF zeros (Y +1080 codes, X +155 with OP1 x1).
+                {
+                    var m = NewChip();
+                    m.Chip.SetInput("open;powz:1");
+                    PowerConfigure(m, Hy3131Core.PowerRow(1, 0, 1), 0);
+                    Near(Lpf(PowerStat(m, 0x8c)), 1080, 1, "powz:1 Y LPF zero");
+                    Near(Lpf(PowerStat(m, 0x80)), 155, 1, "powz:1 X LPF zero (x1)");
+                    m.Chip.SetInput("powz:0");
+                }
+                // powvg: the Y gain deviation.
+                {
+                    var m = NewChip();
+                    m.Chip.SetInput("open;vsrc:10;powvg:0.98");
+                    PowerConfigure(m, Hy3131Core.PowerRow(1, 0, 1), 0);
+                    Near(Lpf(PowerStat(m, 0x8c)), 0.98 * 0.1 / 1.25 * 262144, 2, "powvg:0.98 scales Y");
+                    m.Chip.SetInput("powvg:1");
+                }
+            }
+            {
                 // fallback: stock AC V with the A shunt selected and current flowing; stock AC A with V on V-COM
                 var m = NewChip();
                 m.Chip.SetInput("vsrc:0,ac=10,f=50;isrc:0,ac=1,f=50");

@@ -321,7 +321,8 @@ fn ntc_temp(r: f32, r25: f32, beta: f32) -> Option<f32> {
     if (-55.0..=300.0).contains(&t) { Some(t) } else { None }
 }
 
-/// The six bottom buttons of the stock screen.
+/// The bottom buttons: the stock six and the power meter (owner
+/// 2026-10-22: a full function, the 7th button).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Button {
     Volt,
@@ -330,10 +331,11 @@ pub enum Button {
     Cap,
     ContDiode,
     HzTemp,
+    Power,
 }
 
 impl Button {
-    pub const ALL: [Button; 6] = [Button::Volt, Button::Amp, Button::Ohm, Button::Cap, Button::ContDiode, Button::HzTemp];
+    pub const ALL: [Button; 7] = [Button::Volt, Button::Amp, Button::Ohm, Button::Cap, Button::ContDiode, Button::HzTemp, Button::Power];
 }
 
 /// A formatted readout: value in display units, digits, unit text, OL.
@@ -390,7 +392,7 @@ pub struct Reading {
 
 impl Reading {
     pub fn button(&self) -> Button {
-        button_of(self.mode)
+        if self.power.is_some() { Button::Power } else { button_of(self.mode) }
     }
     pub fn is_ac(&self) -> bool {
         matches!(self.mode, 0 | 2 | 4 | 5 | 6)
@@ -832,7 +834,7 @@ impl Dmm {
         self.range
     }
     pub fn button(&self) -> Button {
-        button_of(self.mode)
+        if self.pw.on { Button::Power } else { button_of(self.mode) }
     }
     pub fn is_auto(&self) -> bool {
         !self.manual
@@ -1437,6 +1439,13 @@ impl Dmm {
                 let to = if same && m == 14 { 15 } else { 14 };
                 let r = if to == 15 { self.t_range0() } else { 0 };
                 self.set(clk, to, r, if to == 14 { 1000 } else { 500 });
+            }
+            // Again in the power meter: nothing (the app shows the wiring
+            // dialog first when it was never confirmed).
+            Button::Power => {
+                if !self.pw.on {
+                    self.pw_enter(clk);
+                }
             }
         }
     }

@@ -22,8 +22,11 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// loads zero-extended with nothing to migrate).
 /// v6: 52 words; p[48..52] the power meter's settings (app_power.rs
 /// pw_words; 0 = defaults, so a v5 record loads zero-extended).
-const VERSION: u32 = 6;
-pub const WORDS: usize = 52;
+/// v7: 58 words; the power block grows to 10 words (p[48..58]: V gains,
+/// LPF zeros, the wiring-dialog flag; 0 = defaults, v6 loads zero-extended).
+const VERSION: u32 = 7;
+pub const WORDS: usize = 58;
+const V6_WORDS: usize = 52;
 /// First word of the power-meter block (app_power::PW_WORDS words).
 pub const W_POWER: usize = 48;
 const V5_WORDS: usize = 48;
@@ -82,6 +85,7 @@ pub fn load() -> Option<Record> {
     let version = rd(1);
     let n = match version {
         VERSION => WORDS,
+        6 => V6_WORDS,
         5 => V5_WORDS,
         4 => V4_WORDS,
         3 => V3_WORDS,
