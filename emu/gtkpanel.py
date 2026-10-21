@@ -387,10 +387,13 @@ class FrontendView(Gtk.DrawingArea):
     """Schematic of the DM40 front end: jacks -> relays -> divider / shunt / ohm network -> HY3131,
     with the route the firmware selected highlighted."""
 
-    def __init__(self):
+    # the schematic is laid out on a fixed canvas and scaled to the widget (the pop-out window is resizable)
+    DW, DH = 540, 250
+
+    def __init__(self, height=250):
         super().__init__()
         self.st = {}
-        self.set_content_height(250)
+        self.set_content_height(height)
         self.set_draw_func(self.draw)
 
     def update(self, st):
@@ -406,6 +409,10 @@ class FrontendView(Gtk.DrawingArea):
         cr.set_source_rgb(*rgb('#1E1F22'))
         cr.rectangle(0, 0, w, h)
         cr.fill()
+        k = min(w / self.DW, h / self.DH)
+        cr.translate((w - self.DW * k) / 2, (h - self.DH * k) / 2)
+        cr.scale(k, k)
+        w, h = self.DW, self.DH
         if not st:
             cr.set_source_rgb(*txt)
             cr.move_to(12, h / 2)
@@ -447,7 +454,7 @@ class FrontendView(Gtk.DrawingArea):
             cr.move_to(x + (bw - ext.width) / 2, y + bh / 2 + 4)
             cr.show_text(s)
 
-        yv, ycom, ya = 40, 130, 200
+        yv, ycom, ya = 40, 140, 200
         # jacks
         for y, name, col in ((yv, 'V Ω', rgb('#C8102E')), (ycom, 'COM', rgb('#111111')), (ya, 'A', rgb('#C8102E'))):
             cr.set_source_rgb(*col)
@@ -471,23 +478,24 @@ class FrontendView(Gtk.DrawingArea):
         divs = {'0': '/10', '1': '/100', '2': '/1000', '3': '/10000'}
         box(150, yv - 12, 78, 24, 'divider ' + (divs.get(rng, '') if rv else ''), va and rv)
         box(150, yv + 20, 78, 24, 'Ω/mV network', (not va) and (rmv or rohm))
-        line(228, yv, 262, yv, va and rv)
-        line(228, yv + 32, 262, yv + 32, (not va) and (rmv or rohm))
+        line(228, yv, 290, yv, va and rv)
+        line(228, yv + 32, 290, yv + 32, (not va) and (rmv or rohm))
         # ohm source
         if rohm:
-            label(150, yv + 62, 'source %s V, Rref %s' % (st.get('vsrc', '?'), st.get('rref', '?')), True, hot)
+            label(150, yv + 62, 'source %s V' % st.get('vsrc', '?'), True, hot)
+            label(150, yv + 76, 'Rref %s Ω' % st.get('rref', '?'), True, hot)
             if 'vx' in st:
-                label(150, yv + 76, 'node %s V' % st['vx'], True, hot)
+                label(150, yv + 90, 'node %s V' % st['vx'], True, hot)
         # A path: shunt
         line(31, ya, 70, ya, True)
-        box(70, ya - 12, 90, 24, 'shunt %s (%s)' % (shunt, {'A': '10 mΩ', 'mA': '0.5 Ω', 'uA': '47.5 Ω'}.get(shunt, '')), ra)
-        line(160, ya, 262, ya, ra)
-        label(165, ya - 6, 'Vshunt %s V' % st.get('vshunt', '0'), ra, hot if ra else None)
+        box(70, ya - 12, 112, 24, 'shunt %s (%s)' % (shunt, {'A': '10 mΩ', 'mA': '0.5 Ω', 'uA': '47.5 Ω'}.get(shunt, '')), ra)
+        line(182, ya, 290, ya, ra)
+        label(70, ya + 30, 'Vshunt %s V' % st.get('vshunt', '0'), ra, hot if ra else None)
         # COM
-        line(31, ycom, 262, ycom, True)
+        line(31, ycom, 290, ycom, True)
         label(40, ycom - 6, 'COM / AGND', True)
         # HY3131 box
-        x0 = 262
+        x0 = 290
         cr.set_source_rgb(*on)
         cr.rectangle(x0, 14, max(60, w - x0 - 8), h - 28)
         cr.stroke()
@@ -505,13 +513,29 @@ class FrontendView(Gtk.DrawingArea):
             if key == 'op1' and active:
                 extra = '  + %s' % st.get('sop1p', '')
             if key == 'cmp' and active:
-                extra = '  in %s%s' % (st.get('scmpi', ''), '  CMP pin HIGH (beep)' if st.get('cmppin') == '1' else '')
+                extra = '  in %s%s' % (st.get('scmpi', ''), '  pin HIGH' if st.get('cmppin') == '1' else '')
             label(x0 + 22, y, name + extra, active)
             y += 15
         label(x0 + 8, y + 2, 'AD1 in %s-%s ref %s-%s' % (st.get('sad1fp', ''), st.get('sad1fn', ''), st.get('sad1rh', ''), st.get('sad1rl', '')), True)
-        label(x0 + 8, y + 16, 'SAD1I %s  SDIO %s  SMODE %s  SFUVR %s  PC7 %s' % (
-            st.get('sad1i', ''), st.get('sdio', ''), st.get('smode', ''), st.get('sfuvr', ''), st.get('pc7', '')), True)
-        label(x0 + 8, y + 30, 'AD1 %s  period %s s  die %s C' % (st.get('ad1code', ''), st.get('period', ''), st.get('die', '')), True)
+        label(x0 + 8, y + 16, 'SAD1I %s  SDIO %s  SMODE %s' % (st.get('sad1i', ''), st.get('sdio', ''), st.get('smode', '')), True)
+        label(x0 + 8, y + 30, 'SFUVR %s  PC7 %s' % (st.get('sfuvr', ''), st.get('pc7', '')), True)
+        label(x0 + 8, y + 44, 'AD1 %s  period %s s  die %s C' % (st.get('ad1code', ''), st.get('period', ''), st.get('die', '')), True)
+
+
+class FrontendWindow(Adw.Window):
+    def __init__(self, parent, st):
+        super().__init__(title='DM40 front end', transient_for=parent)
+        self.set_default_size(1180, 660)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(Adw.HeaderBar())
+        self.view = FrontendView(height=600)
+        self.view.set_vexpand(True)
+        self.view.update(st)
+        box.append(self.view)
+        self.set_content(box)
+
+    def update(self, st):
+        self.view.update(st)
 
 
 class GtkApp(Adw.Application):
@@ -525,6 +549,12 @@ class GtkApp(Adw.Application):
         self.last_image = None
         self.connect('activate', self.on_activate)
         self.connect('shutdown', lambda *a: self.stop_emulator())
+
+    def open_frontend_window(self):
+        if self.fe_big is None:
+            self.fe_big = FrontendWindow(self.win, self.fe_view.st)
+            self.fe_big.connect('close-request', lambda *a: setattr(self, 'fe_big', None) or False)
+        self.fe_big.present()
 
     # ---- window ----
     def on_activate(self, app):
@@ -642,6 +672,15 @@ class GtkApp(Adw.Application):
         g = Adw.PreferencesGroup(title='Front end', description='relays and HY3131 route chosen by the firmware')
         self.fe_view = FrontendView()
         g.add(self.fe_view)
+        big = Gtk.Button(icon_name='view-fullscreen-symbolic', valign=Gtk.Align.CENTER)
+        big.set_tooltip_text('open the schematic in its own resizable window')
+        big.add_css_class('flat')
+        big.connect('clicked', lambda *a: self.open_frontend_window())
+        g.set_header_suffix(big)
+        click = Gtk.GestureClick()
+        click.connect('released', lambda *a: self.open_frontend_window())
+        self.fe_view.add_controller(click)
+        self.fe_big = None
         self.fe_row = Adw.ActionRow(title='state', subtitle='-')
         self.fe_row.set_subtitle_lines(4)
         g.add(self.fe_row)
@@ -927,6 +966,8 @@ class GtkApp(Adw.Application):
             self.fe_last = line
             st = parse_state(line)
             self.fe_view.update(st)
+            if self.fe_big:
+                self.fe_big.update(st)
             self.fe_row.set_subtitle('%s  shunt %s  PC7 %s · %s mode %s range %s · AD1 %s AD2 %s AD3 %s LPF %s RMS %s CTR %s · '
                                      'Vjack %s V  Ijack %s A%s' % (
                                          'V/A path' if st.get('pa') == '0' else 'Ω/mV network', st.get('shunt'), st.get('pc7'),
