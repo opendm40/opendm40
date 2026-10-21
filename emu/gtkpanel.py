@@ -925,6 +925,7 @@ class GtkApp(Adw.Application):
         self.key_down = {}
         self.rate_hist = []
         self.last_image = None
+        self.closing = False
         self.connect('activate', self.on_activate)
         self.connect('shutdown', lambda *a: self.stop_emulator())
 
@@ -1010,7 +1011,7 @@ class GtkApp(Adw.Application):
         keys.connect('key-released', self.on_key_released)
         self.win.add_controller(keys)
         self.win.connect('close-request', self.on_close)
-        for sig in (signal.SIGINT, signal.SIGTERM):
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, self.on_close)
         self.win.present()
         self.start_emulator()
@@ -1031,6 +1032,11 @@ class GtkApp(Adw.Application):
         self.starting = True
         mode = ['stock', 'fwrs', 'chain'][self.fw.get_selected()]
         self.title.set_subtitle('building / starting %s …' % mode)
+        if self.usb_sub:
+            self.usb_note.set_label('USB: ' + self.usb_sub + (
+                '. Stock firmware: the device exists only after Settings > Other > USB Connect; before that '
+                'usbip_client.py reports "no answer" after 5 s (and in the emulator the stock USB does not '
+                'enumerate even after USB Connect)' if mode == 'stock' else ''))
         self.t_start = time.time()
         self.rate_hist = []
         extra = self.extra_args()
@@ -1045,6 +1051,9 @@ class GtkApp(Adw.Application):
 
     def started(self, emu):
         self.starting = False
+        if self.closing and not isinstance(emu, Exception):
+            emu.stop()                    # the window closed while Renode was starting
+            return False
         if isinstance(emu, Exception):
             self.title.set_subtitle('start failed: %s' % emu)
             return False
@@ -1064,6 +1073,7 @@ class GtkApp(Adw.Application):
         self.start_emulator()
 
     def on_close(self, *a):
+        self.closing = True
         self.stop_emulator()
         self.quit()
         return True
@@ -1305,6 +1315,7 @@ class GtkApp(Adw.Application):
                    'scpi-tcp 1-0 5025; or sudo usbip attach -r 127.0.0.1 -b 1-0' % (port, env))
         else:
             sub = 'not exported (live.py --no-usbip)'
+        self.usb_sub = sub if port else None
         self.usb_note = self.note('USB: ' + sub)
         box.append(self.usb_note)
         cards['gen'] = outer
@@ -1533,4 +1544,12 @@ def run_app(args, extra, emulator_cls):
     try:
         return app.run([])
     finally:
+        app.closing = True
+        app.stop_emulator()
+        # a start still in progress (building / launching): wait for it and stop what it started;
+        # the Renode watchdog (live.py WATCHDOG) covers a hard exit
+        t = time.time() + 120
+        while app.starting and time.time() < t:
+            time.sleep(0.1)
+            GLib.MainContext.default().iteration(False)
         app.stop_emulator()

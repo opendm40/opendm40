@@ -55,6 +55,82 @@ def free_port():
     return p
 
 
+# Watchdog started next to every Renode: when live.py is gone (killed, crashed, terminal closed)
+# it terminates Renode's process group, so no emulator is left running without its window.
+WATCHDOG = r"""
+import os, signal, sys, time
+parent, pg = int(sys.argv[1]), int(sys.argv[2])
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+def alive(p):
+    try:
+        os.kill(p, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+while alive(pg):
+    if os.getppid() != parent:
+        for sig, wait in ((signal.SIGTERM, 3.0), (signal.SIGKILL, 0)):
+            try:
+                os.killpg(pg, sig)
+            except ProcessLookupError:
+                break
+            t = time.time() + wait
+            while time.time() < t and alive(pg):
+                time.sleep(0.1)
+        break
+    time.sleep(0.5)
+"""
+
+
+def proc_cmdline(pid):
+    try:
+        with open('/proc/%d/cmdline' % pid, 'rb') as f:
+            return f.read().replace(b'\0', b' ').decode(errors='replace')
+    except OSError:
+        return ''
+
+
+def proc_ppid(pid):
+    try:
+        with open('/proc/%d/stat' % pid) as f:
+            return int(f.read().rsplit(')', 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+def kill_orphans(resc):
+    """Renode processes running this .resc whose ancestors include no live.py (left over from a
+    live.py that died without stopping them): terminate their process groups."""
+    key = 'i @' + os.path.abspath(resc)
+    for d in os.listdir('/proc'):
+        if not d.isdigit() or int(d) == os.getpid():
+            continue
+        pid = int(d)
+        if key not in proc_cmdline(pid):
+            continue
+        a, owned = proc_ppid(pid), False
+        while a > 1:
+            if 'live.py' in proc_cmdline(a):
+                owned = True
+                break
+            a = proc_ppid(a)
+        if owned:
+            continue
+        print('live.py: stopping a leftover Renode (pid %d) of %s' % (pid, run.rel(resc)), file=sys.stderr)
+        try:
+            pg = os.getpgid(pid)
+            os.killpg(pg, signal.SIGTERM)
+            for _ in range(30):
+                time.sleep(0.1)
+                os.killpg(pg, 0)
+            os.killpg(pg, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
 class Emulator:
     """One Renode process: monitor socket + live framebuffer."""
 
@@ -72,9 +148,12 @@ class Emulator:
         # No --console: it disables the -P monitor port (verified with 1.17.0).
         cmd = [run.RENODE, '--disable-xwt', '--hide-log', '-P', str(self.port),
                '-e', 'i @' + os.path.abspath(resc)]
+        kill_orphans(resc)
         self.out = open(self.log_path, 'w')
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=self.out,
                                      stderr=subprocess.STDOUT, start_new_session=True)
+        self.watchdog = subprocess.Popen([sys.executable, '-I', '-c', WATCHDOG, str(os.getpid()), str(self.proc.pid)],
+                                         stdin=subprocess.DEVNULL, start_new_session=True)
         self.q = queue.Queue()
         self.sock = None
         self.mm = None
@@ -167,6 +246,9 @@ class Emulator:
             self.mm.close()
             self.mm = None
         run.kill_group(self.proc, 2.0)
+        if self.watchdog.poll() is None:
+            self.watchdog.kill()
+        self.watchdog.wait()
         try:
             self.proc.stdin.close()
         except OSError:
