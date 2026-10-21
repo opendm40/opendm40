@@ -1292,7 +1292,7 @@ fn main() {
     // 6c. Toasts (dialog.rs) over the DMM page: the longest texts.
     for (k, (t, ok)) in [
         ("Disk in use by PC - eject first", false),
-        ("Saved LOG000.CSV", true),
+        ("Saved LOG000.DLG", true),
         ("Disk full: log ended", false),
         ("No reading to log", false),
         ("Recording CSV", true),

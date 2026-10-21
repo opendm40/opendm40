@@ -206,7 +206,9 @@ Code work (in this order):
       - [ ] Verify on device: swipe REC 10 min, LUN 1 shows LOG000.CSV on Windows / Linux after the
             recording (re-plug or eject if it does not appear: UNIT ATTENTION is held while mounted),
             open in a spreadsheet; scope Save CSV -> SCOP000.CSV on LUN 1; gallery tile of a .DLG;
-            DBG:PROF? csv lap during a LUN-1 refresh with a large log.
+            DBG:PROF? csv lap during a LUN-1 refresh with a large log (~0.1 s per 100 KB expected);
+            DBG:DIAG? STACK high-water after a LUN-1 refresh with several logs (~2 KiB frame);
+            copy a file to the DM40 disk: LUN 1 re-reads once, 2 s after the copy, not per write.
       - [ ] FR-38 logger to disk (DLG kind 3 reserved): needs pre-allocated clusters (commit stalls
             lose ~290 samples at 640/s); see the doc section 3.
 

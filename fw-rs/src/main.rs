@@ -179,8 +179,9 @@ fn main() -> ! {
     let mut disk = spiflash::SpiFlash::new();
     #[cfg(feature = "vdisk")]
     let mut info = vdisk::VDisk;
+    /// Last time a host WRITE was in progress (LUN-1 refresh debounce).
     #[cfg(feature = "vdisk")]
-    let mut dlog_hw = false;
+    let mut dlog_hw_t = 0u64;
     let mut dev = UsbDeviceBuilder::new(&bus, USB_VID_PID)
         .strings(&[StringDescriptors::default()
             .manufacturer("dm40-fw")
@@ -773,12 +774,19 @@ fn main() -> ! {
         // the disk, while nothing writes it.
         #[cfg(feature = "vdisk")]
         {
-            let hw = msc::HOST_WRITING.load(core::sync::atomic::Ordering::Relaxed);
-            if dlog_hw && !hw {
-                dlog::set_stale();
-            }
-            dlog_hw = hw;
-            if dlog::stale() && !hw && !csvlog::writing() && !screenshot::busy() {
+            // HOST_WRITING is per WRITE(10): a file copy toggles it ~100
+            // times, so refresh 2 s after the last one, not after each.
+            if msc::HOST_WRITING.load(core::sync::atomic::Ordering::Relaxed) {
+                if dlog_hw_t == 0 {
+                    dlog::set_stale();
+                }
+                dlog_hw_t = now.max(1);
+            } else if dlog::stale()
+                && now.saturating_sub(dlog_hw_t) >= 2000
+                && !csvlog::writing()
+                && !screenshot::busy()
+            {
+                dlog_hw_t = 0;
                 dlog::refresh(csvlog::recording_name());
             }
         }

@@ -238,6 +238,8 @@ fn vdisk_dump(a: &[String]) {
         dlog::set_disk(spi_read);
         println!("logs taken={} stale={}", dlog::refresh(None), dlog::stale());
         println!("media_changed={}", d.take_media_changed());
+        dlog::set_stale();
+        println!("unchanged: taken={} media_changed={}", dlog::refresh(None), d.take_media_changed());
     }
     let n = d.block_count();
     let bs = d.block_size() as usize;

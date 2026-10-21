@@ -381,6 +381,11 @@ pub fn push(t_ms: u64, value: f32, flags: u8) {
     // the coded row; all or nothing (a full FIFO drops it, the next row that
     // fits carries GAP).
     let t = t_ms.saturating_sub(j.t0_ms);
+    // The DLG time is u32 ms: a recording ends after 49.7 days.
+    if t > u32::MAX as u64 {
+        stop();
+        return;
+    }
     let fl = (flags & 31) | if j.gap { dlog::F_GAP } else { 0 };
     let v = dlog::dec6(value);
     let u = j.unit;

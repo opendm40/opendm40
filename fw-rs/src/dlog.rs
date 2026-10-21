@@ -1464,6 +1464,9 @@ mod vfs {
     const ENT0: Ent = Ent { name: [0; 11], start: 0, size: 0 };
     static mut TAB: [Ent; MAX_EXTRA] = [ENT0; MAX_EXTRA];
     static mut NT: usize = 0;
+    /// CRC of the last published table.
+    static mut SUM: u32 = 0;
+    static mut PUBLISHED: bool = false;
     /// The read cursor: (table index, generator), ~0.4 KiB of .bss (not
     /// .dmabuf: that is not zeroed at reset).
     static mut CUR: Slot<u32> = Slot::new();
@@ -1491,12 +1494,19 @@ mod vfs {
         let tab = unsafe { &mut *core::ptr::addr_of_mut!(TAB) };
         let mut x = [Extra { name: [b' '; 11], size: 0, read: vread, arg: 0 }; MAX_EXTRA];
         let mut n = 0;
+        // CRC of the table (start, DLG size, CSV size, name per file).
+        let mut sum = !0u32;
         let mut d = disk();
         if let Some(g) = geometry(&mut d) {
-            // The root's DLG files into TAB, then the valid ones compacted.
+            // The root's DLG files into TAB (the last MAX_EXTRA in
+            // directory order: the newest), then the valid ones compacted.
             let mut ne = 0;
             scan(&mut d, &g, &mut |e| {
-                if ne < MAX_EXTRA && Some(e.name) != exclude {
+                if Some(e.name) != exclude {
+                    if ne == MAX_EXTRA {
+                        tab.copy_within(1.., 0);
+                        ne -= 1;
+                    }
                     tab[ne] = *e;
                     ne += 1;
                 }
@@ -1507,11 +1517,24 @@ mod vfs {
                 crate::wdt::kick_if_feeding();
                 let Some(gen) = Gen::open(FatFile::new(d, g, e.start, e.size), e.size) else { continue };
                 tab[n] = e;
+                for v in [e.start, e.size, gen.info.csv] {
+                    sum = crc32_upd(sum, &v.to_le_bytes());
+                }
+                sum = crc32_upd(sum, &e.name);
                 x[n] = Extra { name: csv_name(&e.name), size: gen.info.csv, read: vread, arg: n as u32 };
                 n += 1;
             }
         }
-        unsafe { *core::ptr::addr_of_mut!(NT) = n };
+        // Unchanged (names, sizes, places): no media change for the host.
+        let same = unsafe { *core::ptr::addr_of!(SUM) } == sum;
+        unsafe {
+            *core::ptr::addr_of_mut!(NT) = n;
+            *core::ptr::addr_of_mut!(SUM) = sum;
+        }
+        if same && unsafe { *core::ptr::addr_of!(PUBLISHED) } {
+            return n;
+        }
+        unsafe { *core::ptr::addr_of_mut!(PUBLISHED) = true };
         crate::vdisk::set_extra(&x[..n])
     }
 

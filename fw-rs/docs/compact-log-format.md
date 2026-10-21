@@ -39,7 +39,7 @@ Hours of logging in 13 MB:
 
 | rate | CSV (21 B DMM / 25 B FR-38) | DLG (measured, below) | gain |
 |---|---|---|---|
-| 1/s DMM | 172 h (7 days) | 2800 h (117 days; 1.29 B/row) | 16x |
+| 1/s DMM | 172 h (7 days) | 2800 h (117 days; 1.29 B/row; one recording ends at 49.7 days, the u32 ms time) | 16x |
 | 10/s DMM | 17 h | 325 h (13.5 days; 1.11 B/row) | 19x |
 | 40/s FR-38 | 3.6 h | 41 h (2.2 B/row) | 11x |
 | 634/s FR-38 | 14 min | 2.6 h (2.15 B/row) | 11x |
@@ -226,9 +226,10 @@ src/dlog.rs (feature `vdisk`, i.e. the native image):
 
 ```rust
 /// Rebuild the LUN-1 extra files: one LOGnnn.CSV / SCOPnnn.CSV per valid
-/// LOGnnn.DLG / SCOPnnn.DLG in the SPI-disk root (directory order, at most
-/// vdisk::MAX_EXTRA), exact sizes (chunk headers, every CRC checked), then
-/// vdisk::set_extra (its one-shot media change). `exclude` = the file being
+/// LOGnnn.DLG / SCOPnnn.DLG in the SPI-disk root (directory order; with
+/// more than vdisk::MAX_EXTRA the newest ones), exact sizes (chunk headers,
+/// every CRC checked), then vdisk::set_extra (its one-shot media change)
+/// unless the table is unchanged. `exclude` = the file being
 /// recorded (its size still changes; it appears when it ends).
 pub fn refresh(exclude: Option<[u8; 11]>) -> usize;
 /// Extra::read: CSV bytes of table entry `arg`; a cursor makes sequential
@@ -238,10 +239,13 @@ pub fn set_stale();   // csvlog: a recording ended, a file was deleted
 pub fn stale() -> bool;
 ```
 
-Main loop (main.rs, after `csvlog::poll`): a host WRITE ending marks it
-stale (the PC may have copied / deleted logs); when stale and no host write,
-csvlog commit or screenshot / scope job runs: `dlog::refresh(
-csvlog::recording_name())`. `vread` reads the SPI flash itself
+Main loop (main.rs, after `csvlog::poll`): a host WRITE marks it stale (the
+PC may have copied / deleted logs); when stale, 2 s after the last host
+WRITE(10) (a file copy is ~100 of them) and while no csvlog commit or
+screenshot / scope job runs: `dlog::refresh(csvlog::recording_name())`.
+Cost: a synchronous read of every DLG file (CRC of every chunk), ~0.1 s
+per 100 KB of logs at the 12.5 MHz SPI clock (a 10 h log at 10/s is 0.4 MB:
+~0.4 s of main-loop stall, once per recording end / delete / host copy). `vread` reads the SPI flash itself
 (spiflash.rs `read_at`, through `dlog::FnRaw`; no 4 KiB block buffer, no
 calbackup scratch: csvlog holds those across passes) and waits for a
 running erase like every SpiFlash read (<= 0.4 s at worst). RAM: the table
