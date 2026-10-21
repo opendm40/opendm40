@@ -472,3 +472,12 @@ Emulator (emu/):
 - [x] ui-review #15 dead code: ui::bar / button_row / DMM_BUTTONS / sub_label / val_line and four unused
       layout constants, src/fonts.rs and src/text.rs (the anti-aliased Roboto set; nothing else used them),
       tools/mkfont.py and fonts/Roboto-*; host-test module lists updated (ui::button_hit stays: live).
+- [x] Continuity: a negative result (source / reversed diode / charged capacitor on the jacks) clamps to
+      0.00 ohm as the stock (was -666 / -1114 ohm; emulator cross table). (emulator-verified: V 1.234|cont = 0)
+- [ ] AC V on a pure DC source reads ~18 mV in the emulator (stock ~0): NOT a firmware bug. The model's
+      coupling capacitor charges to the raw jack DC (UpdateAcNode: src = dc * NodeRatioAc) while the
+      seen step uses the calibration-folded node DC (NodeDcAc: DcQ(...)), so step = dcNode - vc never
+      reaches 0: residual = 1.5 x V x (cal gain/offset error) = 17.7 mV at 1.234 V. With `cal:0` fw-rs
+      settles at 0.64 mV (the model's noise floor). The stock escapes it because its mV-first AUTO steps
+      to AC mV (DC coupled in the model, no coupling term); fw-rs stays on the 6 V range (AUTO+, UF-21).
+      Fix belongs in emu/hy3131/HY3131.cs (charge vc towards the same DcQ-folded level).
