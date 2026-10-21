@@ -489,7 +489,7 @@ pub fn settings_status(p: &pw::Pw, key: u32) -> u32 {
     let nk = k.key();
     if nk != key {
         sf::label(sf::F14, rect(8, 284, 464, 14), t.s(), if warn { VALUE } else { STATUS_FG }, BG, 1, 1);
-        sf::label(sf::F14, rect(8, 302, 464, 14), "Zero: leads open. V cal: steady V, 10-70 % of range", DIM, BG, 1, 1);
+        sf::label(sf::F14, rect(8, 302, 464, 14), "Zero: leads open; V cal: steady V, 10-70 %", DIM, BG, 1, 1);
     }
     nk
 }

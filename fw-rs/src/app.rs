@@ -857,6 +857,11 @@ impl App {
             // The wiring dialog until it was confirmed once (owner: no
             // nagging; MF > Power Settings > Wiring shows it again).
             if !self.dmm.pw.wired {
+                // From the combined view's band too: the dialog over the
+                // DMM page (Cancel leaves the DMM page shown).
+                if self.view != View::Dmm {
+                    self.show(View::Dmm, clk);
+                }
                 self.pw_open_entry(clk.now_ms());
                 return;
             }
@@ -2170,7 +2175,8 @@ impl App {
             }
             _ => match self.view {
                 View::Dmm | View::DmmScope
-                    if matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap)
+                    // Power meter: its Power Settings page (View::Range).
+                    if matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap | Button::Power)
                         || self.dmm.hy_mode() == 15 =>
                 {
                     self.show(View::Range, clk)

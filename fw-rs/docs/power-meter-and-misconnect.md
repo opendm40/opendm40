@@ -788,9 +788,9 @@ missed it because its counter tested only the AC peak; it now tests dc +-
 peak against both thresholds on DC-coupled nodes (power role). Fix
 (`pw_cmp_select`, after each V / I result): `cmp_window(V_dc / k, V_ac / k)`
 picks the nearest R21 thresholds around the tap's DC (AGNDP / AGNDN taps,
-the VDSC taps where those have no level; at least 3 mV off the DC, inside
-the swing); a bipolar signal keeps 0xDD; the T1 square gets 0xBF (+62.5 /
-+20.8 mV). No window (pure DC or too small an AC part) but >= 25 mV rms of
+the VDSC taps where those have no level; at least 6 mV off the DC - an
+un-zeroed unit's ~5 mV Y phantom keeps 0xDD -, inside the swing); a bipolar
+signal keeps 0xDD; the T1 square gets 0xBF (+62.5 / +20.8 mV). No window (pure DC or too small an AC part) but >= 25 mV rms of
 current AC at OP1O: the counter on PB4 = the current's frequency
 (INFERRED from the stock AC A rows' R20 0xF2). Else "--". A V range change
 returns to SENSE / 0xDD. The sentinel is off in the power meter
@@ -890,13 +890,16 @@ renders p07 (settings + status), p09 (I ranging), p10 (refused V cal), p11
    square (AC reference).
 3. The 40 Hz square on 60 V: f = 40 Hz (R21 0xBF in `DBG:POW:ROW?`); on the
    current 7dce69f build the theory can be checked first: `DBG:POW:POKE
-   1,191`.
+   1,191` (R21 0xBF; f in `FETC:POW:ALL?` field 7 should become 40).
 4. Entry from the W button: the dialog once, then direct; the page shows V
    within ~1 s and "I ranging..." until P; MF > Power Settings: Zero / V cal
    / coupling buttons and the status line; a reboot comes back in W.
 5. `POW:COUP DC` with the calibrator's DC on V-COM: Vdc = DC V reading,
-   no relay clicks per phase, ~0.45 s per phase; `POW:COUP AUTO` with the
-   square: back to AC within a V phase.
+   no relay clicks per phase, ~0.45 s per phase; compare at steady state
+   *and* the first readings after the alternation starts (DC_SETTLE_MS = 150
+   is a guess against the stock's 450 ms: raise it if the first V of each
+   phase is off); `POW:COUP AUTO` with the square: back to AC within a V
+   phase.
 6. With current through A (T2 / T3 / T4 of 3.11): Idc of B vs DC A (the
    RMS gain now applied to I_dc), the DC method's P vs V x I of the stock
    functions, XY / XX switch cost with a real current (DISC 2 kept), PB4 f
