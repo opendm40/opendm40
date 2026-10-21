@@ -62,6 +62,11 @@ mod data {
     impl Glyph {
         pub const EMPTY: Glyph = Glyph { bits: 0, four: false, w: 0, h: 0, adv: 0, yoff: 0 };
 
+        /// A glyph of our own (stockfont_w.rs), same packing as the stock's.
+        pub fn own(b: &'static [u8], four: bool, w: u8, h: u8, adv: u8, yoff: i8) -> Glyph {
+            Glyph { bits: b.as_ptr() as u32, four, w, h, adv, yoff }
+        }
+
         /// Coverage 0..15 of pixel (x, y) inside the glyph box.
         pub fn alpha(&self, x: u32, y: u32) -> u8 {
             self.alpha_at(x * self.h as u32 + y)
@@ -210,6 +215,11 @@ mod data {
     impl Glyph {
         pub const EMPTY: Glyph = Glyph { blob: &[], off: 0, four: false, w: 0, h: 0, adv: 0, yoff: 0 };
 
+        /// A glyph of our own (stockfont_w.rs), same packing as the stock's.
+        pub fn own(b: &'static [u8], four: bool, w: u8, h: u8, adv: u8, yoff: i8) -> Glyph {
+            Glyph { blob: b, off: 0, four, w, h, adv, yoff }
+        }
+
         /// Coverage 0..15 of pixel (x, y) inside the glyph box. Column-major,
         /// MSB-first; 4 bpp packs two pixels per byte (high nibble first).
         pub fn alpha(&self, x: u32, y: u32) -> u8 {
@@ -316,14 +326,20 @@ struct Placed {
     twin: i16,
 }
 
-/// Glyph of `ch`, or for a 'W' the font lacks (the stock DMM fonts have only
-/// the units they need: no W in UNIT / LETTERS / HIST) two of its 'V'
-/// overlapped, the second `twin` px to the right: same face, no extra font
-/// data (power meter, dmm::pw). Returns (glyph, twin).
+// Real W glyphs for the stock DMM fonts without one (tools/mkwglyph.py).
+include!("stockfont_w.rs");
+
+/// Glyph of `ch`. The stock DMM fonts have only the units they need: no W in
+/// UNIT / LETTERS / SC_DIGITS / HIST (power meter, dmm::pw); those take our W
+/// of the same face (stockfont_w.rs), any other font without one two of its
+/// 'V' overlapped, the second `twin` px to the right. Returns (glyph, twin).
 fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
     match font.glyph(ch as u32) {
         Some(g) => Some((g, 0)),
-        None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
+        None if ch == 'W' => match W_GLYPHS.iter().find(|w| w.0 == font.0) {
+            Some(&(_, four, w, h, adv, yoff, b)) => Some((Glyph::own(b, four, w, h, adv, yoff), 0)),
+            None => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
+        },
         None => None,
     }
 }

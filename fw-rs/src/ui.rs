@@ -253,7 +253,7 @@ fn btn_pair(x: i16, y: i16, h: i16, c: Color, a: (sf::Font, &str, i16), b: (sf::
 /// current, in-circuit) ohm variant is selected (dmm.rs `ohm_var`): the ohm
 /// button carries the stock small "ON" tag (gui_v2_6.h: glyph 0x20 of font
 /// 0x0806c724, 20 x 12) right of the ohm glyph. Button 6 = the power meter:
-/// "W" from the LETTERS face (its V twinned, stockfont::glyph_or_twin).
+/// "W" in the LETTERS face (our W of that face, stockfont_w.rs).
 fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, mode: u8, acdc: bool, ohm_on: bool) {
     let c = if selected { SEL } else { BTN };
     sf::rbox(rect(x, y, BTN_W, h), 8, c, outside);
