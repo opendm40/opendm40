@@ -463,6 +463,20 @@ namespace Hy3131Tests
                 Check(SqrtRms(b) <= 0x40000 && SqrtRms(b) > 0x3F000, "230 V on the 4 V range: sqrt(RMS) at the AD2 full scale (not above the stock's 0x40000 guard)", SqrtRms(b).ToString("F0"));
             }
             {
+                // a DC source in AC V with a non-unity AC V calibration: the coupling capacitor charges to
+                // the calibration-adjusted level, so the step (and the RMS) decays to the floor
+                var cal = Hy3131Core.DefaultCal();
+                cal[0x64 / 4] = 1.012064f; cal[0x74 / 4] = 0.000125f;
+                var m = NewChip(cal: cal);
+                m.Chip.SetInput("dcv:1.234");
+                m.Configure(F0R0, 0);
+                m.Advance(4.0);
+                m.Read1(0x1E);
+                var b = ReadAfter(m, 0x18, 1);
+                var v = SqrtRms(b) * 1.25 / 262144 * 10;
+                Check(v < 0.002, "AC V on 1.234 V DC with AC V cal 1.012: settles to the floor (was ~18 mV)", string.Format("{0:F4} V", v));
+            }
+            {
                 // entry transient: AC V right after a plain DC V row with OP1 off
                 var m = NewChip();
                 m.Chip.SetInput("dcv:0.5");

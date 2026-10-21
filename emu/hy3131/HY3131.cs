@@ -601,7 +601,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 double dc, ac, hz, duty; string shape;
                 Fe.VJack(0, out dc, out ac, out hz, out shape, out duty);
-                src = dc * NodeRatioAc();
+                // AC V: toward the same calibration-adjusted level NodeDcAc measures the step against
+                // (else the difference, 1.5 x V x the cal error, never decays: ~18 mV RMS on 1.234 V DC)
+                src = role == Role.AcV ? DcQ(dc, 0x64 + 4 * roleRange, 0x74 + 4 * roleRange) / (AcvK[roleRange] * Ad2IgRow())
+                                       : dc * NodeRatioAc();
             }
             vc += (src - vc) * (1 - Math.Exp(-dt / AcNodeTau));
         }
