@@ -994,7 +994,7 @@ impl Dmm {
         pc7(m == 14);
         // Misconnect sentinel: the stock row with the idle comparator / AD1
         // pointed at the A-jack shunt (or the V tap in DC A), sentinel.rs.
-        let (row, kind) = sentinel::sentinel_row(m, self.acdc, self.sent.mask, cfg);
+        let (row, kind) = sentinel::sentinel_row(m, r as u8, self.acdc, self.sent.mask, cfg);
         hy::configure(&row);
         self.r22 = row[2];
         self.r29 = row[9];
@@ -1371,6 +1371,16 @@ impl Dmm {
 
     pub fn alert_mask(&self) -> u8 {
         self.sent.mask
+    }
+
+    /// DBG:SENTinel:VARiant: a device-check variant of the sentinel rows
+    /// (sentinel::VAR_*), applied by rewriting the current row.
+    pub fn set_sent_variant(&mut self, clk: &mut Clock, v: u8) {
+        sentinel::set_variant(v);
+        if !self.suspended && self.mode != 255 {
+            self.write_config(clk);
+            self.deadline = self.deadline.max(clk.now_ms() + 200);
+        }
     }
 
     /// Bottom button press (FUN_0803e108..e1a8 -> m+0xf..0x14, consumed by

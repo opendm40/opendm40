@@ -42,6 +42,10 @@ SC = {
     'dcv-aac':  ('VOLT:DC', 20, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0,ac=0.005,f=50', {'AJACK'})]),
     'dcv-avs':  ('VOLT:DC', 18, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'avsrc:5', {'AJACK'})]),
     'dcv-small': ('VOLT:DC', 18, [(0, 'open;vsrc:1.234;isrc:0.0002', {'NONE'})]),
+    # 9dd1222 device check: A-JACK with 10 V on the 60 V range, A jack open. The model has no
+    # such coupling; this checks that the autorange 6 <-> 60 V leaves the r0 sentinel working.
+    'dcv-step': ('VOLT:DC', 36, [(0, 'open;vsrc:1', {'NONE'}), (8, 'vsrc:10', {'NONE'}), (14, 'vsrc:1', {'NONE'}),
+                                 (20, 'vsrc:10', {'NONE'}), (26, 'vsrc:1;isrc:0.001', {'AJACK'})]),
     'dcmv':     ('VOLT:DC', 20, [(0, 'open;vsrc:0.1', {'NONE'}), (10, 'isrc:0.002', {'AJACK'})]),
     'ohm':      ('RES', 26, [(0, 'open;r:4700', {'NONE'}), (12, 'isrc:0.002', {'AJACK'})]),
     'temp':     ('TEMP', 26, [(0, 'open;tc:100;cj:25', {'NONE'}), (12, 'isrc:0.005', {'AJACK'})]),
@@ -113,6 +117,14 @@ def run(name):
             if r['SYST:ALER?'] not in allowed:
                 ok = False
                 bad.append('%.2f %s not in %s' % (r['t'], r['SYST:ALER?'], sorted(allowed)))
+            # DC V 60 V+ carries no comparator sentinel (9dd1222 device check)
+            try:
+                v = float(r['READ?'])
+            except ValueError:
+                v = 0.0
+            if name == 'dcv-step' and 7.0 < v < 1e6 and not r['DBG:SENT?'].startswith('OFF'):
+                ok = False
+                bad.append('%.2f %g V: sentinel %s on the 60 V range' % (r['t'], v, r['DBG:SENT?'].split(',')[0]))
     res = {'name': name, 'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-600:] if p.returncode else ''}
     with open(os.path.join(OUT, tag + '.json'), 'w') as f:
         json.dump(res, f, indent=1)

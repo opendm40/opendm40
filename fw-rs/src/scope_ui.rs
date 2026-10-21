@@ -1097,12 +1097,15 @@ pub struct Graph {
 }
 
 /// Device: a flush that only moves traces (decoration and holes unchanged:
-/// the frame-to-frame case) stops after this many DWT cycles (4 ms) and
+/// the frame-to-frame case) stops after this many DWT cycles (1.5 ms) and
 /// continues on the next pass at the column it reached, so a busy trace
 /// (a square wave's edges) does not stretch one main-loop pass (device
-/// check 2026-10-21). Host: no limit, every flush completes.
+/// check 2026-10-21). 4 ms was too long for USB: a noise-triggered trace
+/// at ~50 fps (every column changes, ~10 ms of paint per frame) kept the
+/// loop in 2-10 ms passes back to back, DBG:PING? p50 11.8 ms (device check
+/// of 9dd1222, combined view). Host: no limit, every flush completes.
 #[cfg(target_os = "none")]
-const FLUSH_BUDGET: u32 = 800_000;
+const FLUSH_BUDGET: u32 = 300_000;
 
 #[cfg(target_os = "none")]
 fn cycles() -> u32 {

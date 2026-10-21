@@ -64,8 +64,10 @@ pub const MTXT: usize = 12;
 pub const STAT: usize = 13;
 /// Top-bar labels after a settings change (ScopeView::labels).
 pub const LABEL: usize = 14;
-/// Spare ids for ad-hoc experiments.
-pub const X1: usize = 15;
+/// Scope graph paint in a pass without a new frame (App::sp_tick: the
+/// budgeted trace flush continuing, badges).
+pub const PAINT: usize = 15;
+/// Spare id for ad-hoc experiments.
 pub const X2: usize = 16;
 // DMM page sections (hooks in app.rs; nested inside DMM / TICK).
 /// DmmView::reading (main digits, +1 digit, aux rows, labels).
@@ -82,7 +84,7 @@ pub const N: usize = 21;
 
 const NAMES: [&str; N] = [
     "usb", "scpi", "csv", "tick", "touch", "gesture", "scope", "bt", "dmm", "s.acq", "s.frame", "s.meas", "s.mtxt",
-    "s.status", "s.labels", "x1", "x2", "d.read", "d.chart", "s.fft", "d.bar",
+    "s.status", "s.labels", "s.paint", "x2", "d.read", "d.chart", "s.fft", "d.bar",
 ];
 
 #[derive(Clone, Copy)]

@@ -241,7 +241,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// AD1 conversion period in seconds (datasheet 13.1 + the chopper halving).
         public double Ad1Period => Osr1 * 30.0 / SysClk * (Ad1Chop ? 2 : 1);
-        public double Ad2Period => Osr2 * ((regs[0x26] & 0x08) != 0 ? 4.0 : 2.0) / SysClk * ((regs[0x26] & 0x20) != 0 ? 2 : 1);
+        // ENCHOPAD2 does not slow AD2 down on the device (fw-rs device check of 9dd1222), whatever the datasheet says
+        public double Ad2Period => Osr2 * ((regs[0x26] & 0x08) != 0 ? 4.0 : 2.0) / SysClk;
         public double LpfPeriod => Ad2Period * Osr4 * LpfRateDivisor;
 
         /// Comparator thresholds (V relative to AGND) from R21.
@@ -458,8 +459,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// Per-result AD2 noise, codes rms: the device floor of the stock AC rows (~30
         /// codes at OSR2 = 32, acdc doc 6a/6b) scaled as white noise by the modulator
-        /// samples per result (OSR2, x2 chopped). A model, not a measurement (test 6.4).
-        public double Ad2NoiseCodes => 30.0 * NoiseScale * Math.Sqrt(32.0 / (Osr2 * ((regs[0x26] & 0x20) != 0 ? 2 : 1)));
+        /// samples per result (OSR2; the chopper does not change the rate). A model, not a
+        /// measurement (test 6.4).
+        public double Ad2NoiseCodes => 30.0 * NoiseScale * Math.Sqrt(32.0 / Osr2);
 
         private void UpdateLpf(double now)
         {
@@ -1330,12 +1332,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     // writes R32 = 0x38 after the DC V rows, whose OP1 is off).
                     if(j == 18) mask = (row.Bytes[18] & 0x08) != 0 ? 0xF7 : 0xF0;
                     // fw-rs sentinel fields (sentinel.rs): in the rows that leave AD1 off (the AC
-                    // rows) its input / gain / reference fields are free; PKHSEL / ENPKH are free
+                    // rows) its input / gain / reference fields are free, and so is OP1CHOP (the
+                    // AC V sentinel row holds OP1's chopper off); PKHSEL / ENPKH are free
                     // everywhere; SS5 (R2C bit 4) is free in the current rows.
                     if((row.Bytes[3] & 0x80) == 0)
                     {
                         if(j == 3 || j == 4 || j == 8) mask = 0;
                         if(j == 5) mask = 0xCF;
+                        if(j == 19) mask = 0x3C;
                     }
                     if(j == 9) mask = 0xF8;
                     if(j == 12 && (row.Role == Role.DcA || row.Role == Role.AcA)) mask = 0xEF;

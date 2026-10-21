@@ -57,7 +57,7 @@
 //!
 //! AD2 source (FR-38 (B), LOG:SOURce AD2; docs/dmm-input-scope-feasibility.md
 //! sections 1, 2.3, 4): the HY3131's fast 19-bit converter in the stock AC
-//! rows, at 600 .. 9600 S/s instead of the row's 76.8 kS/s (hy3131::
+//! rows, at 1200 .. 9600 S/s instead of the row's 76.8 kS/s (hy3131::
 //! ad2_r26_for: SAD2CLK, OSR2, ENCHOPAD2). The row's mux is kept, so the
 //! source is DC-coupled in AC mV (OP2O - AGND) and AC A / mA / uA (OP1O -
 //! PB3, the shunt drop through OP1) and AC-coupled (~0.5 Hz) in AC V (PB4 fed
@@ -239,7 +239,7 @@ impl Logger {
     pub fn osr(&self) -> u8 {
         self.osr
     }
-    /// AD1 chopper / AD2 ENCHOPAD2 (offset cancelled, half the rate; default
+    /// AD1 chopper (half the rate) / AD2 ENCHOPAD2 (same rate); offset cancelled; default
     /// on). Takes effect at the next `start`.
     pub fn set_chop(&mut self, on: bool) {
         self.nochop = !on;
