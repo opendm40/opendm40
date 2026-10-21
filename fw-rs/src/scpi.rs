@@ -114,7 +114,7 @@ pub const IDN_34401A: &[u8] = b"HEWLETT-PACKARD,34401A,0,dm40-fw 0.1";
 /// that pick a driver profile from *IDN? and know no DM40, e.g. libsigrok /
 /// SmuView builds without the Alientek DM40 scpi-dmm profile: their "HP
 /// 34401A" profile (since libsigrok 0.5.2) sends CONF:<f>, CONF?, INIT,
-/// READ?, *OPC?, ABORT. With it on, READ? / MEAS? / FETCh? never wait for a
+/// READ?, *OPC?, ABORT. With it on, READ? / MEAS:<f>? never wait for a
 /// first reading longer than the quick budget (main.rs: +9.9E37 for the
 /// first ~1..3 s after a function change), since such hosts do not wait
 /// after CONF and time out after 1 s (USBTMC) / 1.5 s.
