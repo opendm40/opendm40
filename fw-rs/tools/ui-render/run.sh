@@ -14,7 +14,7 @@ mkdir -p "$OUT"
 B=$(mktemp -d)
 trap 'rm -rf "$B"' EXIT
 CARGO_PKG_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' ../../Cargo.toml | head -1) \
-    rustc --edition 2021 -O --cfg test --cfg 'feature="embedded-fonts"' -A warnings main.rs -o "$B/r"
+    rustc --edition 2021 -O --cfg test -A warnings main.rs -o "$B/r"
 set +e
 "$B/r" "$OUT" | tee "$OUT/check.txt"
 RC=${PIPESTATUS[0]}

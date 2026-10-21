@@ -24,7 +24,7 @@ mkdir -p "$OUT"
 W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT
 CARGO_PKG_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' ../../Cargo.toml | head -1) \
-    rustc --edition 2021 -O --cfg test --cfg 'feature="embedded-fonts"' -A warnings main.rs -o "$W/t"
+    rustc --edition 2021 -O --cfg test -A warnings main.rs -o "$W/t"
 /usr/bin/python3 -I gen.py "$W/d" >/dev/null
 export MTOOLS_SKIP_CHECK=1
 mkimg() {

@@ -18,7 +18,7 @@ today; re-check against DBG:BOOT? after big changes.
 
 --check BYTES: exit 1 unless (stack size - worst path) >= BYTES, where the
 stack size is _stack_top - __bss_end (the TCM left after .data/.bss).
-build.sh native runs it with 16 KiB (device check 2026-10-21).
+build.sh runs it with 16 KiB (device check 2026-10-21).
 """
 import argparse, glob, os, re, subprocess, sys
 
