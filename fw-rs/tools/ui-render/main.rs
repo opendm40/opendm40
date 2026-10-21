@@ -1299,6 +1299,10 @@ fn main() {
         ("Screenshot failed", false),
         (dialog::AUTO_DC, true),
         ("Auto power-off in 30 s", false),
+        // Tap on the DMM value (resolution / rate), widest variants.
+        ("SLOW 600000 counts / 12.8 s", true),
+        ("FAST 60000 counts / 10/s", true),
+        ("Fixed rate in this function", false),
     ]
     .iter()
     .enumerate()
@@ -1309,6 +1313,9 @@ fn main() {
         ck.check(&format!("toast/{t}"), &[("screen", Bx::new(0, 0, 480, 320)), ("toast", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))]);
         if k == 0 {
             save(&out, "t01-toast-disk-in-use");
+        }
+        if k == 8 {
+            save(&out, "t02-toast-resolution");
         }
     }
 

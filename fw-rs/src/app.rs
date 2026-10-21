@@ -742,6 +742,54 @@ impl App {
         self.chart_dirty = true;
     }
 
+    /// Owner: a tap on the main value switches the resolution, fewer digits
+    /// = faster. The steps are the FR-05 rates, in resolution order
+    /// FAST -> MED -> SLOW -> FAST, with what they really give here (HY3131
+    /// AD1 at 163.84 kHz / OSR, chopped; dmm.rs tables): FAST = one OSR-8192
+    /// conversion per reading, 60000 counts at 10/s; MED / SLOW = steady
+    /// OSR-32768 conversions (2.5/s) averaged over 8 / 16 (ohm 16 / 32) of
+    /// them where the range has the +1 digit (600000 counts, the last digit
+    /// small). A toast says which (1.5 s). No rate choice (AC, Hz, cap,
+    /// temperature, AC+DC): low beep + toast.
+    fn resolution_cycle(&mut self, now: u64) {
+        if !self.dmm.rate_applies() {
+            self.beep(now, 300);
+            self.toast(now, "Fixed rate in this function", false);
+            return;
+        }
+        use dmm::Rate;
+        let r = match self.dmm.rate() {
+            Rate::Fast => Rate::Medium,
+            Rate::Medium => Rate::Slow,
+            Rate::Slow => Rate::Fast,
+        };
+        self.dmm.set_rate(r);
+        self.chart_dirty = true;
+        let (n, ext) = self.dmm.rate_info(r);
+        let mut b = [0u8; 40];
+        let mut k = 0;
+        let mut put = |t: &str| {
+            let m = t.len().min(40 - k);
+            b[k..k + m].copy_from_slice(&t.as_bytes()[..m]);
+            k += m;
+        };
+        put(dmm::RATE_NAMES[r as usize]);
+        put(if ext { " 600000 counts" } else { " 60000 counts" });
+        let mut t = [0u8; 16];
+        if r == Rate::Fast {
+            put(" / 10/s");
+        } else if n > 1 {
+            // Averaging window (s).
+            put(" / ");
+            put(dmm::format(&mut t, n as f32 * 0.4, 1));
+            put(" s");
+        } else {
+            put(" / 2.5/s");
+        }
+        let s = core::str::from_utf8(&b[..k]).unwrap_or("");
+        self.toast(now, s, true);
+    }
+
     /// DMM function button `i` (DMM page row, combined-view band): as the
     /// stock function bar, a second tap on the current button cycles its
     /// sub-mode; then the common function-change path (`func_changed`, as
@@ -2176,7 +2224,9 @@ impl App {
                 }
             }
             View::Dmm => {
-                if ui::rate_chip_hit(x, y) {
+                if ui::value_hit(x, y) {
+                    self.resolution_cycle(now);
+                } else if ui::rate_chip_hit(x, y) {
                     self.rate_cycle(now);
                 } else if x < ui::CHART_X && (176..280).contains(&y) {
                     self.chart_rate = match self.chart_rate {

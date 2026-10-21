@@ -532,3 +532,10 @@ Emulator (emu/):
       active re-enters the sensor (NTC entry range follows R25).
 - [x] Fix of 1a3efbd: Settings 2/2 had the "Temp unit" value but not its row name (rows shifted by one:
       tapping "Scope swipe" toggled the unit). Row added.
+- [x] Tap on the DMM main value = resolution step FAST -> MED -> SLOW (fewer digits = faster), with a
+      1.5 s toast of what the step really gives here: FAST "60000 counts / 10/s" (one OSR-8192 chopped
+      conversion: 163.84 kHz / 8192 / 2); MED / SLOW "600000 counts / <window> s" where the range has the
+      +1 digit (8 / 16 steady OSR-32768 conversions of 400 ms, ohm 16 / 32), else "60000 counts / 2.5/s".
+      The +1 digit stays the small half-size glyph. Functions without a rate choice: low beep + toast.
+      Not added: a 6000-count / ~40/s step (OSR 0x13, the logger's measured 38/s): its noise on AD1 is not
+      measured (dmm.rs: noise floor open); add it after a device noise run.

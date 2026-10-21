@@ -843,6 +843,14 @@ impl Dmm {
         }
     }
 
+    /// What `rate` gives in the current function and range: (code window
+    /// in conversions, 1 = none; the +1 digit is shown). See the FR-05 and
+    /// +1 digit tables: FAST never averages; MEDIUM / SLOW average 8..32
+    /// steady OSR-32768 conversions (400 ms each) where the table says so.
+    pub fn rate_info(&self, rate: Rate) -> (usize, bool) {
+        avg_cfg(rate, self.acdc, self.mode, self.range).map_or((1, false), |(n, _, ext)| (n, ext))
+    }
+
     /// The rate setting changes something in the current function (DC V /
     /// mV / A, ohm; not AC+DC): the UI can grey the row out otherwise.
     pub fn rate_applies(&self) -> bool {

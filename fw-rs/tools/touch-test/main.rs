@@ -678,7 +678,9 @@ fn hit_tests(ck: &mut Ck) {
     let pts: Vec<f32> = (0..321).map(|i| i as f32).collect();
     ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, &side, "V", ui::RateChip { rate: 1, period_ms: 100, applies: true });
     let dmm_hit = |x: u16, y: u16| -> Option<u32> {
-        if x >= 402 && (205..243).contains(&y) {
+        if ui::value_hit(x, y) {
+            Some(105) // main value: resolution / rate
+        } else if x >= 402 && (205..243).contains(&y) {
             Some(100) // REL
         } else if x >= 402 && (175..279).contains(&y) {
             Some(101) // MIN/MAX column
