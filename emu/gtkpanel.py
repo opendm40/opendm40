@@ -1086,7 +1086,15 @@ class GtkApp(Adw.Application):
         g = Adw.PreferencesGroup(title='Generator and USB', description='MCX generator jack, USB-C')
         r = Adw.ActionRow(title='Generator output', subtitle='DAC/TIM6/TIM12 registers run; no analog output is modelled yet')
         g.add(r)
-        r = Adw.ActionRow(title='USB', subtitle='stub: the device never enumerates')
+        port = getattr(self.args, 'usbip', None)
+        if port:
+            env = '' if port == 3240 else 'USBIP_PORT=%d ' % port
+            sub = ('USB/IP on 127.0.0.1:%d, busid 1-0: %semu/usbip_client.py list | usbtmc 1-0 "*IDN?" | '
+                   'scpi-tcp 1-0 5025; or sudo usbip attach -r 127.0.0.1 -b 1-0' % (port, env))
+        else:
+            sub = 'not exported (live.py --no-usbip)'
+        r = Adw.ActionRow(title='USB', subtitle=sub)
+        r.set_subtitle_selectable(True)
         g.add(r)
         page.add(g)
         self.group_gen = g
