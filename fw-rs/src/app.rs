@@ -2211,11 +2211,16 @@ impl App {
                 match ui::settings_hit(0, y) {
                     Some(0) => self.dim_idx = (self.dim_idx + 1) % 4,
                     Some(1) => self.off_idx = (self.off_idx + 1) % 4,
+                    // -/+ steppers (ui-review #12): 10 % steps, clamped.
                     Some(2) => {
-                        self.backlight = if self.backlight >= 100 { 10 } else { (self.backlight + 10).min(100) };
+                        let d = ui::settings_step(x) as i16 * 10;
+                        self.backlight = (self.backlight as i16 + d).clamp(10, 100) as u8;
                         backlight(self.backlight);
                     }
-                    Some(3) => self.volume = if self.volume >= 100 { 0 } else { self.volume + 10 },
+                    Some(3) => {
+                        let d = ui::settings_step(x) as i16 * 10;
+                        self.volume = (self.volume as i16 + d).clamp(0, 100) as u8;
+                    }
                     Some(4) => self.bt_on = !self.bt_on,
                     Some(5) => self.start_page = (self.start_page + 1) % 4,
                     Some(6) => {
