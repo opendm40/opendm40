@@ -1042,6 +1042,12 @@ pub fn rate_chip_hit(x: u16, y: u16) -> bool {
     x < CHART_X && y >= RATE_CHIP_Y - 3 && y < RATE_CHIP_Y + RATE_CHIP_H + 3
 }
 
+/// A tap on the DMM page's main value (the F78 cells 40..400 x 68..148,
+/// the +1 digit cell, 4 px around): resolution / rate step (App).
+pub fn value_hit(x: u16, y: u16) -> bool {
+    (36..402).contains(&x) && (64..151).contains(&y)
+}
+
 /// Readings per second from a reading period: "9.4/s", "37/s", "--/s"
 /// (period 0 = not measured yet).
 pub fn rps_text(buf: &mut [u8; 16], period_ms: u32) -> &str {
@@ -1824,7 +1830,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 4] = [
             ("Tap MIN/MAX column", "Session on / off"),
             ("Hold MIN/MAX column", "Reset MIN/MAX/AVG"),
             ("Tap REL", "Zero on / off"),
-            ("Tap rate chip", "SLOW / MED / FAST"),
+            ("Tap value, rate chip", "Digits / rate"),
             ("Tap a function again", "Next sub-mode"),
             ("Hold meter strip", "Full DMM page"),
         ],
