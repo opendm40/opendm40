@@ -43,7 +43,8 @@ POWER = (0.0, 30.0, 6.5, 14.0)        # power button on the left edge
 TOPV_H, TOPV_GAP = 18.0, 4.0          # case depth, gap to the front view (mm)
 TOPV_Y = -(TOPV_GAP + TOPV_H)         # back of the case; the front face is at y = -TOPV_GAP
 TOPV_CY = TOPV_Y + 10.0               # connector axis
-PANEL_Y0, PANEL_H = TOPV_Y, DEV_H - TOPV_Y   # drawn area: top view + gap + front view
+SHOW_TOP_VIEW = False                  # the top-edge view (USB / OUT / OSC): off, the cards cover them
+PANEL_Y0, PANEL_H = (TOPV_Y, DEV_H - TOPV_Y) if SHOW_TOP_VIEW else (0.0, DEV_H)
 USB_RECESS = (16.2, TOPV_CY - 3.7, 17.2, 7.4)
 USB_PORT = (19.45, TOPV_CY - 1.5, 8.9, 3.0)
 LED_C = (32.0, TOPV_CY + 0.2)
@@ -129,9 +130,10 @@ class FrontPanel(Gtk.Widget):
         return k, s, ox, oy
 
     def do_measure(self, orientation, for_size):
-        s = PX_PER_MM_1X * self.want_k / self.get_scale_factor()
-        n = int((DEV_W if orientation == Gtk.Orientation.HORIZONTAL else PANEL_H) * s) + 1
-        return n, n, -1, -1
+        # minimum: half scale (the Paned handle may shrink the device), natural: the scale picked
+        sf = self.get_scale_factor()
+        mm = DEV_W if orientation == Gtk.Orientation.HORIZONTAL else PANEL_H
+        return int(mm * PX_PER_MM_1X * 0.5 / sf) + 1, int(mm * PX_PER_MM_1X * self.want_k / sf) + 1, -1, -1
 
     def to_mm(self, x, y):
         _, s, ox, oy = self.layout()
@@ -155,7 +157,7 @@ class FrontPanel(Gtk.Widget):
         for name, (cx, cy) in JACKS.items():
             if (mx - cx) ** 2 + (my - cy) ** 2 <= (JACK_R + 0.8) ** 2:
                 return 'jack', name
-        for name, r in TOP.items():
+        for name, r in (TOP.items() if SHOW_TOP_VIEW else ()):
             if self.inside((r[0] - 0.5, r[1] - 0.8, r[2] + 1, r[3] + 1.6), mx, my):
                 return 'jack', name
         return None
@@ -302,7 +304,8 @@ class FrontPanel(Gtk.Widget):
 
     def draw_panel(self, cr):
         cr.new_path()
-        self.draw_top_view(cr)
+        if SHOW_TOP_VIEW:
+            self.draw_top_view(cr)
         # Holster (yellow bumper) and the dark grey face
         cr.set_source_rgb(*C_HOLSTER)
         self.rrect(cr, 0, 0, DEV_W, DEV_H, 10)
@@ -1279,7 +1282,11 @@ class GtkApp(Adw.Application):
         # The device picture at an integer scale top-left; the input cards fill the rest: DMM jacks and
         # the front-end schematic in the right column, scope / generator+USB / monitor under the device
         # when there is room there (else at the end of the right column, which scrolls).
-        body = Gtk.Box(vexpand=True)
+        # a Paned: the handle between the device and the card column is draggable; the device scales
+        # to the left side (on_body_tick)
+        body = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, wide_handle=True, vexpand=True)
+        self.body = body
+        self.side_set = False
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.START)
         left.set_hexpand(False)               # not inherited from the cards under the device
         left.append(self.panel)
@@ -1291,13 +1298,17 @@ class GtkApp(Adw.Application):
                                               vscrollbar_policy=Gtk.PolicyType.NEVER, propagate_natural_height=True)
         self.bottom_wrap.set_child(self.bottom)
         left.append(self.bottom_wrap)
-        body.append(left)
+        body.set_start_child(left)
+        body.set_resize_start_child(True)
+        body.set_shrink_start_child(False)
         self.right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=CARD_GAP, margin_start=CARD_GAP // 2,
                              margin_end=CARD_GAP, margin_top=CARD_GAP, margin_bottom=CARD_GAP)
         scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroll.set_size_request(SIDE_MIN_W, -1)
         scroll.set_child(self.right)
-        body.append(scroll)
+        body.set_end_child(scroll)
+        body.set_resize_end_child(True)
+        body.set_shrink_end_child(False)
         self.cards = self.build_cards()
         self.right.append(self.cards['dmm'])
         self.right.append(self.cards['fe'])
@@ -1645,16 +1656,22 @@ class GtkApp(Adw.Application):
     def on_body_tick(self, body, _clock):
         """Window size changed: the device's scale, and where the small cards go."""
         W, H = body.get_width(), body.get_height()
-        if W <= 0 or (W, H) == self.body_size:
+        if W <= 0:
             return True
-        self.body_size = (W, H)
         sf = self.win.get_scale_factor()
         pw1 = DEV_W * PX_PER_MM_1X / sf + 2 * PANEL_MARGIN
         ph1 = PANEL_H * PX_PER_MM_1X / sf + 2 * PANEL_MARGIN
-        # the device and the card column both grow with the window: the column takes ~30 % (at least
-        # SIDE_MIN_W), the device the rest at a fractional scale
-        side = max(SIDE_MIN_W, min(0.3 * W, W - pw1))   # (the device keeps scale 1 while it can)
-        k = max(0.5, min((W - side) / pw1, H / ph1))
+        if not self.side_set:
+            # first layout: the card column ~30 % (at least SIDE_MIN_W; the device keeps scale 1 while
+            # it can); afterwards the user drags the handle
+            self.side_set = True
+            body.set_position(int(W - max(SIDE_MIN_W, min(0.3 * W, W - pw1))))
+            return True
+        LW = body.get_position()
+        if (W, H, LW) == self.body_size:
+            return True
+        self.body_size = (W, H, LW)
+        k = max(0.5, min(LW / pw1, H / ph1))
         # shrink the device a little (<= 15 %) when that lets the small cards sit under it
         each = (DEV_W * PX_PER_MM_1X * k / sf - 2 * CARD_GAP) / len(self.bottom_cards)
         need = max(c.measure(Gtk.Orientation.VERTICAL, max(1, int(each)))[1] for c in self.bottom_cards)
