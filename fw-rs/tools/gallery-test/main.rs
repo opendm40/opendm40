@@ -227,7 +227,7 @@ fn dir_order(img: &Img) -> Vec<String> {
         let base = String::from_utf8_lossy(&e[..8]).trim_end().to_string();
         let ext = String::from_utf8_lossy(&e[8..11]).trim_end().to_string();
         let n = format!("{base}.{ext}");
-        if (n.starts_with('S') && ext == "BMP") || (n.starts_with("LOG") && (ext == "CSV" || ext == "DLG")) {
+        if (n.starts_with('S') && ext == "BMP") || (n.starts_with("LOG") && ext == "DLG") {
             v.push(n);
         }
     }
@@ -546,9 +546,9 @@ fn ui(out: &str, data: &str, imgs: &str) -> bool {
     {
         let mut img = load("fmt");
         for name in dir_order(&img) {
-            let keep = matches!(name.as_str(), "S003.BMP" | "LOG001.CSV" | "S012.BMP" | "LOG004.CSV" | "LOG002.CSV" | "LOG201.DLG");
+            let keep = matches!(name.as_str(), "S003.BMP" | "LOG001.DLG" | "S012.BMP" | "LOG004.DLG" | "LOG002.DLG");
             let g = view(&mut img, &name);
-            scene(&mut ck, &format!("view-{name}"), keep && (name.ends_with("CSV") || name.ends_with("DLG")));
+            scene(&mut ck, &format!("view-{name}"), keep && name.ends_with("DLG"));
             if name.ends_with("BMP") {
                 tap(g, 240, 200); // overlay on
                 run(g, &mut img);
@@ -564,7 +564,7 @@ fn ui(out: &str, data: &str, imgs: &str) -> bool {
         tap(g, 240, 200);
         run(g, &mut img);
         scene(&mut ck, "view-long-name-bar", true);
-        let g = view(&mut img, "LOG99999.CSV");
+        let g = view(&mut img, "LOG99999.DLG");
         scene(&mut ck, "view-LOG99999", true);
         let mut img = load("e99");
         let g = view(&mut img, "S100.BMP");
@@ -573,15 +573,15 @@ fn ui(out: &str, data: &str, imgs: &str) -> bool {
         scene(&mut ck, "view-99-bar", false);
         // Busy before the viewer stream.
         let mut img = load("fmt");
-        let g = view(&mut img, "LOG001.CSV");
-        let r = rank_of(&img, "LOG002.CSV");
+        let g = view(&mut img, "LOG001.DLG");
+        let r = rank_of(&img, "LOG002.DLG");
         g.test_view(r);
         for _ in 0..6 {
             g.poll_on(&mut img);
         }
         scene(&mut ck, "view-csv-loading", true);
         msc::HOST_WRITING.store(true, Relaxed);
-        g.test_view(rank_of(&img, "LOG000.CSV"));
+        g.test_view(rank_of(&img, "LOG000.DLG"));
         g.draw();
         for _ in 0..3 {
             g.poll_on(&mut img);
@@ -611,7 +611,7 @@ fn ui(out: &str, data: &str, imgs: &str) -> bool {
     // Dialogs: delete confirm over BMP / CSV (full repaint), info boxes.
     {
         let mut img = load("e7");
-        for name in ["SWWWWWWW.BMP", "LOG99999.CSV"] {
+        for name in ["SWWWWWWW.BMP", "LOG99999.DLG"] {
             let g = view(&mut img, &name);
             if name.ends_with("BMP") {
                 tap(g, 240, 200);
@@ -730,15 +730,14 @@ fn decode(imgp: &str, data: &str) -> bool {
             let e = std::fs::read_to_string(format!("{data}/{base}.exp")).unwrap();
             let f: Vec<f64> = e.split_whitespace().map(|s| s.parse().unwrap()).collect();
             let g = view(&mut img, name);
-            let (rows, est, vals, mn, mx, avg, span, sampled) = g.csv_stats();
+            let (rows, vals, mn, mx, avg, span) = g.csv_stats();
             let close = |a: f64, b: f64, tol: f64| (a - b).abs() <= tol * b.abs().max(1e-12);
-            let good = if !sampled {
-                rows as f64 == f[0] && vals as f64 == f[1] && (vals == 0 || (close(mn as f64, f[2], 1e-5) && close(mx as f64, f[3], 1e-5) && close(avg as f64, f[4], 1e-4))) && span as f64 == f[5]
-            } else {
-                close(est as f64, f[0], 0.03) && mn as f64 >= f[2] - 1e-3 * f[2].abs() && mx as f64 <= f[3] + 1e-3 * f[3].abs() && close(avg as f64, f[4], 0.05) && span as f64 == f[5]
-            };
+            let good = rows as f64 == f[0]
+                && vals as f64 == f[1]
+                && (vals == 0 || (close(mn as f64, f[2], 1e-5) && close(mx as f64, f[3], 1e-5) && close(avg as f64, f[4], 1e-4)))
+                && span as f64 == f[5];
             println!(
-                "{}: {name}: rows {rows} (est {est}) vals {vals} min {mn} max {mx} avg {avg} span {span} ms sampled {sampled} | expected {:?}",
+                "{}: {name}: rows {rows} vals {vals} min {mn} max {mx} avg {avg} span {span} ms | expected {:?}",
                 if good { "ok" } else { "FAIL" },
                 f
             );

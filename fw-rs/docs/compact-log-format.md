@@ -228,26 +228,28 @@ clusters and one directory write at the end. Left for a later item.
 
 ## 4. Export: CSV on read
 
-The DLG files live on the SPI disk (LUN 0) as `LOGnnn.DLG` / `SCOPnnn.DLG`
-(numbers shared with legacy `LOGnnn.CSV` / `SCOPnnn.CSV`: a number taken by
-either is taken). CSV is produced three ways from one generator in
-src/dlog.rs:
+The DLG files live on the SPI disk (LUN 0) as `LOGnnn.DLG` / `SCOPnnn.DLG`;
+the firmware neither writes nor reads text CSV files there (owner
+2026-10-21: the CSV is only the export). CSV is produced three ways from one
+generator in src/dlog.rs:
 
 1. **Virtual CSV files on the read-only LUN 1** (vdisk.rs `set_extra`, the
    hook the vdisk agent built): `LOGnnn.CSV` for each finished `LOGnnn.DLG`,
-   exact size from the chunk headers. Spec in section 5.
+   (and `SCOPnnn.CSV` for each `SCOPnnn.DLG`), exact size from the chunk
+   headers / block table. Section 5.
 2. **SCPI** `MMEMory:DATA? "<name>"[,<offset>[,<length>]]`: definite-length
    block `#4nnnn` of up to 6000 bytes of the file starting at `offset`
    (default 0); a name ending in `.CSV` whose `.DLG` exists is served as the
    generated CSV, any other root file as its raw bytes. The host loops until
-   a short block. `MMEM:CAT?` lists `.DLG` files as `BIN`:
+   a short block. `MMEM:CAT?` lists the gallery files (S*.BMP, LOG*.DLG,
+   SCOP*.DLG), all as `BIN`:
    `"LOG000.DLG,BIN,<bytes>"`.
 3. **Host decoders**: `tools/dlog.py` (standalone, stdlib only:
    `dlog.py LOG000.DLG > LOG000.CSV`, `--check` reports chunk errors) and
    `tools/dm40scpi.py get LOG000.CSV` (over USBTMC, `MMEM:DATA?`).
 
 The gallery reads `.DLG` directly (chunk decoder into its min / avg / max and
-sparkline passes), and still reads legacy `.CSV` files.
+sparkline passes).
 
 ## 5. LUN-1 hook (vdisk.rs `set_extra`, implemented)
 

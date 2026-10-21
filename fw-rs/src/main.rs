@@ -179,7 +179,7 @@ fn main() -> ! {
     let mut disk = spiflash::SpiFlash::new();
     #[cfg(feature = "vdisk")]
     let mut info = vdisk::VDisk;
-    /// Last time a host WRITE was in progress (LUN-1 refresh debounce).
+    // Last time a host WRITE was in progress (LUN-1 refresh debounce).
     #[cfg(feature = "vdisk")]
     let mut dlog_hw_t = 0u64;
     let mut dev = UsbDeviceBuilder::new(&bus, USB_VID_PID)

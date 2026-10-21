@@ -3,9 +3,9 @@
 # real gallery / csvlog / FAT / font / LCD code for the host (--cfg test:
 # draw-call probes on) against the LCD emulator of tools/ui-render/host.rs,
 # makes DM40-geometry FAT16 images (mkfs.fat / mtools, as tools/fatren-test)
-# from gen.py's BMP / CSV files, then
+# from gen.py's BMP files and its CSVs re-coded as LOGnnn.DLG, then
 #   1. decode: every BMP format full screen + thumbnail vs. its reference,
-#      unsupported ones refused, CSV statistics vs. the generator's, on a
+#      unsupported ones refused, log (DLG) statistics vs. the generator's, on a
 #      plain and on a fragmented disk (+ the stock RLE4 factory screenshots
 #      from private/spi-disk-backup when present, reference by an
 #      independent Python RLE4 decode);
@@ -31,6 +31,11 @@ mkimg() {
     dd if=/dev/zero of=$1 bs=1M count=16 status=none
     mkfs.fat -F 16 -S 4096 -s 1 -f 2 -r 512 -R 1 -n "ATK-DM40" $1 >/dev/null
 }
+# The meter stores logs only as compact binary LOGnnn.DLG (dlog.rs): gen.py's
+# CSVs (what the meter exports) are re-coded as the recorder would write them.
+for f in $W/d/LOG*.CSV; do
+    "$W/t" dlg $f ${f%.CSV}.DLG >/dev/null
+done
 mkdir -p "$W/img"
 for s in e0 e1 e6 e7 e99 fmt; do
     I="$W/img/$s.img"
@@ -38,6 +43,7 @@ for s in e0 e1 e6 e7 e99 fmt; do
     echo "dummy" > $W/cfg.bin
     mcopy -i $I $W/cfg.bin ::CONFIG.BIN          # not a gallery file
     while read -r f; do
+        case $f in LOG*.CSV) f=${f%.CSV}.DLG ;; esac   # the lists name the CSVs
         [ -n "$f" ] && mcopy -i $I "$W/d/$f" "::$f"
     done < "$W/d/set-$s.txt"
 done
@@ -83,20 +89,13 @@ PY
     # The e6 grid shows a real stock screenshot.
     mcopy -o -i $W/img/e6.img $STOCK/S001.BMP ::S003.BMP
 fi
-# Compact binary logs (LOGnnn.DLG, dlog.rs): CSVs re-coded, on the format
-# disk next to the CSVs, same expectations (every row read: exact counts).
-for n in 000 001 002 005 006; do
-    "$W/t" dlg $W/d/LOG$n.CSV $W/d/LOG2${n:1}.DLG
-    cp $W/d/LOG$n.exp $W/d/LOG2${n:1}.exp
-    mcopy -i $W/img/fmt.img $W/d/LOG2${n:1}.DLG ::LOG2${n:1}.DLG
-done
 # Fragmented disk: S000.BMP over every other freed 8 KiB hole.
 I="$W/img/frag.img"
 mkimg $I
 for k in $(seq 10 49); do head -c 8192 /dev/urandom > $W/f.bin; mcopy -i $I $W/f.bin ::F$k.BIN; done
 for k in $(seq 10 2 48); do mdel -i $I ::F$k.BIN; done
 mcopy -i $I $W/d/S000.BMP ::S000.BMP
-mcopy -i $I $W/d/LOG001.CSV ::LOG001.CSV
+mcopy -i $I $W/d/LOG001.DLG ::LOG001.DLG
 mcopy -i $I $W/d/S005.BMP ::S005.BMP
 
 RC=0
