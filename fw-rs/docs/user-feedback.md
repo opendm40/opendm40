@@ -131,7 +131,7 @@ All three are cheap to fix. Stock parity is the wrong target for them.
 | P11 | Resume to the last mode at power-on (V2.0 "mode memory"), optional. | 2 | #16313, #16314 | Done (backup-SRAM persist) |
 | P12 | Uptime counter since power-on. | 1 | #15793 | Done (status bar) |
 | P13 | Generator runs independently of the scope; scope can watch the generator. | 3 | #50397, #61569, #59900 | Done, and extended (everything runs at once) |
-| P14 | In-circuit ("ON line", low-current) resistance mode works in ~80 % of cases. | 3 | #20559, #22994, #54211 | `ohm_var` toggle ported (`dmm.rs:435`); verify the on-screen "ON" mark |
+| P14 | In-circuit ("ON line", low-current) resistance mode works in ~80 % of cases. | 3 | #20559, #22994, #54211 | `ohm_var` toggle ported (second tap on the ohm button, `Dmm::set_ohm_var`); 2026-10-21: the stock "ON" tag drawn on the ohm button (DMM page + combined band) and a Normal / "Low current ON" pair on the Resistor Settings page; verify on device |
 | P15 | Single current jack with automatic MOSFET shunt switching. | 1 | #26977 | MATCH (hardware + stock logic) |
 | P16 | Short-press power-on (V2.1). | 2 | #18842, #18883 | Must survive the native-boot shim's PD6 handling. → **UF-37** |
 | P17 | Auto-off countdown with a 10 s buzzer warning (V2.0). | – | changelog #15892 | fw-rs has the idle dim/off; confirm the warning (FR-10) |

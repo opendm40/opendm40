@@ -475,7 +475,7 @@ impl App {
         self.dmm_view.label = self.t_label();
         match self.view {
             View::Dmm => {
-                self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2);
+                self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
                 ui::history(&self.hist, self.hist_n, self.hist_new);
                 self.hv_shown = false;
             }
@@ -532,7 +532,8 @@ impl App {
                 let note = (b == Button::Volt).then(|| {
                     if self.dmm.mv_auto_warn() { (dmm::MV_AUTO_WARN, true) } else { ("AUTO+ recommended: it never steps to mV", false) }
                 });
-                ui::range_page(b, sel, self.dmm.sub(), note);
+                let sub = if b == Button::Ohm { self.dmm.ohm_var() } else { self.dmm.sub() };
+                ui::range_page(b, sel, sub, note);
             }
             View::Settings if self.set_page == 1 => {
                 // FR-05: rate setting and the measured readings/s.
@@ -694,7 +695,7 @@ impl App {
     /// Combined view: open (or keep open) the DMM function band.
     fn band_open(&mut self, now: u64) {
         if self.band_until == 0 {
-            ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2);
+            ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
         }
         self.band_until = now + BAND_MS;
     }
@@ -2074,6 +2075,13 @@ impl App {
                         self.show(v, clk);
                     }
                     Some(Err(4)) => self.show(View::Limits, clk),
+                    Some(Err(k @ 0..=1)) if b == Button::Ohm => {
+                        if k != self.dmm.ohm_var() {
+                            self.dmm.set_ohm_var(clk, k);
+                            self.func_changed();
+                        }
+                        self.redraw = true;
+                    }
                     Some(Err(k)) => {
                         // DC / AC / AC+DC buttons (Err 0 / 1 / 3) -> sub-mode 0 / 1 / 2.
                         let sub = if k == 3 { 2 } else { k };

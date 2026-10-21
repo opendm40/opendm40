@@ -646,6 +646,9 @@ fn hit_tests(ck: &mut Ck) {
         if matches!(b, dmm::Button::Volt | dmm::Button::Amp) {
             want.extend([100, 101, 103]);
         }
+        if b == dmm::Button::Ohm {
+            want.extend([100, 101]); // Normal / Low current ON
+        }
         page(ck, &format!("range {n} items"), &hit, &|b| b.y0 >= 40, &want);
     }
     host::reset(0);
@@ -662,7 +665,7 @@ fn hit_tests(ck: &mut Ck) {
     // history row, rate chip, chart axis column, function row).
     host::reset(0);
     let mut dv = ui::DmmView::new();
-    dv.draw_static(dmm::Button::Volt, 1, false);
+    dv.draw_static(dmm::Button::Volt, 1, false, true);
     ui::history(&[(1.0, 3, "V"); 5], 5, 4);
     let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), rel: Some(1.0), secs: Some(5), rec: false };
     let pts: Vec<f32> = (0..321).map(|i| i as f32).collect();
@@ -690,7 +693,7 @@ fn hit_tests(ck: &mut Ck) {
     cm.combined = true;
     scope_ui::invalidate();
     scope_ui::update(&cm);
-    ui::func_band(dmm::Button::Volt, 1, false);
+    ui::func_band(dmm::Button::Volt, 1, false, true);
     page(ck, "function band", &|x, y| o(ui::func_band_hit(x, y)), &|b| b.y0 >= ui::FUNC_Y as i32, &[0, 1, 2, 3, 4, 5]);
     // Stock-replica scope page: right panel (4 px vertical slop), MF popup
     // tabs, CH1 popup.

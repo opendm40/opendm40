@@ -571,7 +571,7 @@ impl App {
             su::strip_invalidate();
             self.sp_strip();
             if self.band_until != 0 {
-                ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2);
+                ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
             }
         }
         if self.sp.popup != su::Popup::None {
