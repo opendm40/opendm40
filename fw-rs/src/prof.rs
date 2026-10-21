@@ -72,11 +72,15 @@ pub const X2: usize = 16;
 pub const DREAD: usize = 17;
 /// ui::chart (trend columns, axis labels, side panel, chips).
 pub const DCHART: usize = 18;
-pub const N: usize = 19;
+/// Scope FFT (UF-11, hooks in scope_page.rs): one load (decimation +
+/// window, on the frame's pass) or one `step` slice, and the spectrum ->
+/// columns render.
+pub const FFT: usize = 19;
+pub const N: usize = 20;
 
 const NAMES: [&str; N] = [
     "usb", "scpi", "csv", "tick", "touch", "gesture", "scope", "bt", "dmm", "s.acq", "s.frame", "s.meas", "s.mtxt",
-    "s.status", "s.labels", "x1", "x2", "d.read", "d.chart",
+    "s.status", "s.labels", "x1", "x2", "d.read", "d.chart", "s.fft",
 ];
 
 #[derive(Clone, Copy)]

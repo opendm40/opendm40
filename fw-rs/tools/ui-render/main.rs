@@ -50,6 +50,7 @@ mod scope;
 mod scope_meas;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
+mod scope_add;
 mod stock;
 #[path = "../../src/stockfont.rs"]
 mod stockfont;
@@ -645,7 +646,7 @@ fn main() {
         // Stock zone selection (sec. 10.2): 32x32 zones, search order,
         // cycling on repeated presses over overlapping zones.
         let pick = |m: &scope_ui::Model, sv: u8, sh: u8, lh: bool, x: i16, y: i16| -> Option<(bool, u8)> {
-            let mut z = [scope_ui::Zone::NONE; 7];
+            let mut z = [scope_ui::Zone::NONE; scope_ui::NZONE];
             let n = scope_ui::zones(m, &mut z);
             scope_ui::pick_zone(&z[..n], sv, sh, lh, x, y).map(|k| (z[k].level, z[k].id))
         };
@@ -820,6 +821,9 @@ fn main() {
             }
         }
     }
+
+    // 0c. fw-rs additions on the replica page (FFT boxes / peak, ...).
+    scope_add::run(&mut ck, &out);
 
     // 0b. Combined view in the stock language (scope_ui meter strip, port
     // plan S7): every strip case x hold x verdict x REL x HV x REC x GEN,

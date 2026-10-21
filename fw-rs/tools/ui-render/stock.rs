@@ -78,6 +78,11 @@ pub struct Scene {
     pub cells: Vec<&'static str>,
 }
 
+/// The math trace of a scene (tools/stock-ui st11-fft).
+pub fn math_trace(sc: &Scene) -> Option<Trace> {
+    if sc.name == "st11-fft" { Some(Trace::noise(230, 3, 3)) } else { None }
+}
+
 const VDIV: [f32; 22] = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0];
 const PROBE: [f32; 13] = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0];
 
@@ -137,6 +142,16 @@ pub fn scenes() -> Vec<Scene> {
     m.trig_row = 295;
     m.trig_px = 5;
     add("st10-offscreen-markers", m, Some(Trace::sine(1.5, 2.0, 0.0).shifted(200)), None, 399, cells.clone());
+    // Math on, FFT (tools/stock-ui st11-fft: noise at row 230, orange, the
+    // 20dB label, offset 0, "1.25kHz"); the stock look only (no fw-rs FFT
+    // additions).
+    let mut m = d;
+    m.math_on = true;
+    m.math_mode = 5;
+    m.math_colour = 1;
+    m.math_scale = su::Txt::new("20dB");
+    m.fft_hz = su::Txt::new("1.25kHz");
+    add("st11-fft", m, sine(), None, 399, cells.clone());
     add("st12-persistence", d, sine(), Some(Trace::sine(1.5, 2.0, 0.03)), 399, cells.clone());
     let mut m = d;
     m.ac = true;
@@ -160,6 +175,11 @@ pub fn scenes() -> Vec<Scene> {
     for (t, n) in ["st40-math-mode", "st41-math-color", "st42-math-hzdiv", "st43-math-other"].iter().enumerate() {
         let mut m = d;
         m.math_open = true;
+        // The stock reference opens them with math on, FFT.
+        m.math_on = true;
+        m.math_mode = 5;
+        m.math_scale = su::Txt::new("20dB");
+        m.fft_hz = su::Txt::new("1.25kHz");
         pops.push((n, m, su::Popup::Math(t as u8)));
     }
     drop(add);
@@ -277,8 +297,13 @@ pub fn popvals(m: &Model) -> su::PopVals {
         ac: m.ac,
         probe: m.probe,
         colour: m.colour,
-        math_colour: 1,
+        math_colour: m.math_colour,
         pressed_cell: Some(11),
+        math_mode: 5,
+        fft_hz: 2,
+        hz_opts: [su::Txt::new("250Hz"), su::Txt::new("500Hz"), su::Txt::new("1.25kHz"), su::Txt::new("2.50kHz")],
+        fft_win: 0,
+        fft_vrms: false,
     }
 }
 
@@ -295,6 +320,11 @@ pub fn load(sc: &Scene) {
     if let Some(t) = &sc.persist {
         for (i, (a, b)) in t.columns(399).iter().enumerate().take(399) {
             g.ps[i] = (su::trace_fy(h, *a), su::trace_fy(h, *b));
+        }
+    }
+    if let Some(t) = math_trace(sc) {
+        for (i, (a, b)) in t.columns(399).iter().enumerate().take(399) {
+            g.ma[i] = (su::trace_fy(h, *a), su::trace_fy(h, *b));
         }
     }
 }

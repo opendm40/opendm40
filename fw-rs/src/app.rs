@@ -1249,6 +1249,7 @@ impl App {
         self.sp_persist(&mut p1, &mut p11);
         p[1] = p1;
         p[11] = p11;
+        self.sp_persist_ext(&mut p[crate::persist::W_SCOPE_EXT..]);
         // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
         p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing());
         p
@@ -1271,6 +1272,7 @@ impl App {
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
         self.sp_restore(p[1], p[11]);
+        self.sp_restore_ext(&p[crate::persist::W_SCOPE_EXT..]);
         gesture::set_grab_ms((p[11] >> 16) as u16);
         let mut o = [0i16; 7];
         for (i, v) in o.iter_mut().enumerate() {

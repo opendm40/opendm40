@@ -177,7 +177,8 @@ pub struct Fft {
 
 impl Fft {
     pub const fn new() -> Fft {
-        Fft { buf: [0.0; N], db: [DB_FLOOR; BINS], bins: 0, bin_hz: 0.0, win: 0, seq: 0, len: 0, s1: 1.0, hz: 0.0, jwin: 0, phase: Phase::Idle }
+        // All zero: .bss, not a 12 KB .data image (`bins` 0 = no result).
+        Fft { buf: [0.0; N], db: [0.0; BINS], bins: 0, bin_hz: 0.0, win: 0, seq: 0, len: 0, s1: 0.0, hz: 0.0, jwin: 0, phase: Phase::Idle }
     }
 
     /// A job is in flight (`load` refuses).
