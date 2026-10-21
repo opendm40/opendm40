@@ -21,6 +21,11 @@ use crate::hy3131_tables::*;
 use crate::mmio::{modify32, w32};
 use crate::sentinel::{self, Alert, Kind, Sentinel};
 
+/// Power meter (function 18): docs/power-meter-and-misconnect.md section 3.
+#[path = "powermeter.rs"]
+pub mod pw;
+use pw::Pw;
+
 const GPIOA: u32 = 0x4002_0000;
 const GPIOC: u32 = 0x4002_0800;
 const GPIOE: u32 = 0x4002_1000;
@@ -378,6 +383,9 @@ pub struct Reading {
     pub avg_n: u8,
     /// Wrong-connection alert in force (sentinel.rs).
     pub alert: Alert,
+    /// Power meter (`pw`): all its values; main = P (fallback: S), aux1 =
+    /// V, aux2 = I, `mode` = the AC A mode of the current range.
+    pub power: Option<pw::PowerVals>,
 }
 
 impl Reading {
@@ -645,6 +653,8 @@ pub struct Dmm {
     sent_mode: u8,
     r29: u8,
     live: bool,
+    /// Power meter state and settings (powermeter.rs).
+    pub pw: &'static mut Pw,
 }
 
 /// Mean interval: first sample taken as is, then an EMA (1/4).
@@ -801,6 +811,7 @@ impl Dmm {
             sent_mode: 255,
             r29: 0,
             live: false,
+            pw: pw::pw_static(),
         }
     }
 
@@ -934,6 +945,9 @@ impl Dmm {
 
     /// FUN_08012c30: quiesce, relays, 22 config bytes, INTE = 0.
     fn write_config(&mut self, clk: &mut Clock) {
+        if self.pw.on {
+            return self.pw_write_config(clk);
+        }
         let m = self.mode;
         let r = self.range.max(0) as usize;
         let cfg: &[u8; hy::CFG_LEN] = match m {
@@ -1095,7 +1109,8 @@ impl Dmm {
     }
 
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
-        let changed_mode = mode != self.mode;
+        let changed_mode = mode != self.mode || self.pw.on;
+        self.pw_leave();
         self.mode = mode;
         self.range = range;
         self.write_config(clk);
@@ -1144,6 +1159,9 @@ impl Dmm {
 
     /// SCPI function code: the stock mode, or 16 = V AC+DC, 17 = A AC+DC.
     pub fn func(&self) -> u8 {
+        if self.pw.on {
+            return pw::FUNC;
+        }
         match (self.acdc, self.mode) {
             (true, 0..=3) => 16,
             (true, _) => 17,
@@ -1185,6 +1203,12 @@ impl Dmm {
     /// Enter a stock mode directly (SCPI, BT command 06). Auto range.
     /// 16 / 17 = V / A AC+DC (see `func`).
     pub fn select(&mut self, clk: &mut Clock, mode: u8) {
+        if mode == pw::FUNC {
+            if !self.pw.on {
+                self.pw_enter(clk);
+            }
+            return;
+        }
         if (32..32 + T_NAMES.len() as u8).contains(&mode) {
             // 32 + k: temperature with sensor k (SCPI CONF/MEAS:TEMP <type>).
             self.t_sensor = mode - 32;
@@ -1359,7 +1383,8 @@ impl Dmm {
     ///   cap: from elsewhere r0 auto; again does nothing.
     ///   cont/diode: diode first, then 11 <-> 12. Hz/temp: 14 first, 14 <-> 15.
     pub fn press(&mut self, clk: &mut Clock, b: Button) {
-        let same = self.button() == b;
+        // Power meter: any function button leaves it (A: DC A as from elsewhere).
+        let same = self.button() == b && !self.pw.on;
         let m = self.mode;
         if same && matches!(b, Button::Volt | Button::Amp) {
             // DC -> AC -> AC+DC -> DC (the stock skips AC+DC for model 0).
@@ -1412,6 +1437,9 @@ impl Dmm {
     /// range; only when the range was fixed (manual or REL, m+3 != 0): V in mV
     /// with AUTO (m+6 == 1) -> V r0, A with AUTO (m+7 == 1) -> mA r0.
     pub fn auto_key(&mut self, clk: &mut Clock) {
+        if self.pw.on {
+            return self.pw_set_ranges(clk, Some(None), Some(None));
+        }
         let was_manual = self.manual;
         self.manual = false;
         if !was_manual {
@@ -1435,6 +1463,9 @@ impl Dmm {
 
     /// Freeze the current range (REL does this) or release it.
     pub fn hold_range(&mut self, manual: bool) {
+        if self.pw.on {
+            return; // the power meter's ranges: its own page / SCPI
+        }
         self.manual = manual;
     }
 
@@ -1642,6 +1673,9 @@ impl Dmm {
 
     /// (Re)start measuring in the current mode.
     pub fn start(&mut self, clk: &mut Clock) {
+        if self.pw.on {
+            return self.pw_restart(clk);
+        }
         let (m, r) = (self.mode, self.range);
         self.mode = 255;
         self.set(clk, m, r, 450);
@@ -1673,7 +1707,11 @@ impl Dmm {
             // the poll rhythm (OR over 100 ms windows).
             self.sent.sample_cmp(now, hy::read1(0x14));
         }
-        let r = match self.mode {
+        if self.pw.on {
+            self.pw_service(clk);
+        }
+        let r = if self.pw.on { self.poll_power(clk, now) } else { None };
+        let r = if self.pw.on { r } else { match self.mode {
             0 | 2 | 4..=6 => self.poll_ac(clk, now),
             1 | 3 => self.poll_dcv(clk),
             7..=9 => self.poll_dca(clk),
@@ -1684,7 +1722,7 @@ impl Dmm {
             14 => self.poll_freq_mode(now),
             _ if self.t_sensor != 0 => self.poll_rtd(clk, now),
             _ => self.poll_temp(now),
-        };
+        } };
         if let Some(rd) = &r {
             ema_ms(&mut self.period_ms, &mut self.t_rd, now);
             self.rd_avg_n = self.avg_n;
@@ -1710,7 +1748,7 @@ impl Dmm {
             r.seq = self.seq;
             r.auto = !self.manual;
             r.auto_plus = (self.button() == Button::Volt && self.v_auto == 1)
-                || (self.button() == Button::Amp && self.a_auto == 1);
+                || (self.button() == Button::Amp && self.a_auto == 1 && !self.pw.on);
             r.acdc = self.acdc;
             r.avg_n = self.avg_n;
             r.alert = self.sent.alert;
@@ -1732,6 +1770,7 @@ impl Dmm {
             seq: 0,
             avg_n: 0,
             alert: Alert::None,
+            power: None,
         }
     }
 
@@ -2647,7 +2686,9 @@ impl Dmm {
     /// Time (ms) before which `poll` gives no reading: the settle after a
     /// function / range change (SCPI starts its reply timeout from here).
     pub fn deadline(&self) -> u64 {
-        self.deadline
+        // Power meter: the first full P / V / I set takes one phase cycle
+        // after the settle.
+        if self.pw.on { self.deadline + self.pw_cycle().2 as u64 } else { self.deadline }
     }
 }
 

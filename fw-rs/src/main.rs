@@ -939,6 +939,11 @@ fn main() -> ! {
         prof::lap(prof::TICK);
         mark(1, &mut ts);
         for src in [USB, BT] {
+            // Power meter: a wait for the host's own settle follows its range
+            // hunt (each step restarts the P / V / I cycle, ~1.9 s).
+            if let Some(w) = scpi_wait[src].as_mut().filter(|w| w.1 && app.dmm.pw.on) {
+                w.3 = w.3.max(app.dmm.deadline() + SCPI_WAIT_MS).min(w.2 + 15_000);
+            }
             if !scpi_wait[src].is_some_and(|w| now >= w.3) {
                 continue;
             }

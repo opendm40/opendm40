@@ -428,9 +428,212 @@ pub enum Cmd {
     DbgSent,
     /// DBG:HWTRIG...: 0 query, 1 ENABLE (bool), 2 CAL?, 3 STAT?, 4 STAT:RESET.
     DbgHwTrig(u8, bool),
+    /// Power meter (dmm::pw): CONF:POW, FETC:POW:ALL?, [SENS:]POW:..., DBG:POW:...
+    Pow(Pow),
 }
 
 /// ON | 1 -> true, OFF | 0 -> false.
+/// Power-meter commands (`parse_pow`). Ranges: None = query, Some(None) =
+/// AUTO, Some(Some(r)) = range index (V 0..3, I 0..5).
+#[derive(Clone, Copy)]
+pub enum Pow {
+    /// CONFigure:POWer [<V>|AUTO[,<A>|AUTO]].
+    Conf(Option<u8>, Option<u8>),
+    /// FETCh:POWer:ALL?
+    All,
+    /// MEASure:POWer:APParent? (0) / :PFACtor? (1) / :ENERgy? (2) /
+    /// :REACtive? (3) / :VOLTage? (4) / :CURRent? (5): the latest value.
+    Get(u8),
+    VRange(Option<Option<u8>>),
+    IRange(Option<Option<u8>>),
+    EnergyReset,
+    EnergyState(Option<bool>),
+    /// :BURDen <ohm>|DEFault (NaN) / ?, :BURDen:STATe ON|OFF / ?
+    Burden(Option<f32>),
+    BurdenState(Option<bool>),
+    Phase(Option<i8>),
+    PhaseCal(bool),
+    Cycle,
+    Method(Option<bool>),
+    /// :LIMit <A>,<s> / ? (continuous current, countdown; s 0 = none).
+    Limit(Option<(f32, u16)>),
+    DbgRow,
+    DbgPoke(u8, u8),
+    DbgStat(u8),
+    DbgRaw,
+    DbgDisc(Option<u8>),
+}
+
+/// The message is a power-meter command (`parse_pow`).
+fn is_pow(parts: &[&[u8]], query: bool) -> bool {
+    let p0 = parts[0];
+    let p1 = parts.get(1).is_some_and(|p| kw(p, "POWer"));
+    kw(p0, "POWer")
+        || (p1 && (kw(p0, "SENSe") || p0 == b"DBG"))
+        || (p1 && kw(p0, "CONFigure") && !query)
+        || (p1 && kw(p0, "FETCh") && query)
+        || (p1 && kw(p0, "MEASure") && query && parts.len() > 2)
+}
+
+/// V range index for a value in V (the smallest that holds it).
+fn pow_vrange(a: &[u8]) -> Option<Option<u8>> {
+    if kw(a, "AUTO") {
+        return Some(None);
+    }
+    let v = parse_num(a)?;
+    crate::dmm::pw::V_LIM.iter().position(|&l| v <= l * 1.0001).map(|k| Some(k as u8))
+}
+
+/// I range index for a value in A.
+fn pow_irange(a: &[u8]) -> Option<Option<u8>> {
+    if kw(a, "AUTO") {
+        return Some(None);
+    }
+    let v = parse_num(a)?;
+    crate::dmm::pw::I_LIM.iter().position(|&l| v <= l * 1.0001).map(|k| Some(k as u8))
+}
+
+/// Parse a power-meter command (docs/power-meter-and-misconnect.md 3.9).
+fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static str> {
+    const BAD: &str = "Illegal parameter value";
+    const HDR: &str = "Undefined header";
+    let a = trim(arg);
+    let p0 = parts[0];
+    let mut args = a.split(|&b| b == b',').map(trim);
+    if kw(p0, "CONFigure") {
+        let v = match args.next() {
+            None | Some(b"") => None,
+            Some(x) => Some(pow_vrange(x).ok_or(BAD)?.unwrap_or(255)),
+        };
+        let i = match args.next() {
+            None => None,
+            Some(x) => Some(pow_irange(x).ok_or(BAD)?.unwrap_or(255)),
+        };
+        return Ok(Pow::Conf(v, i));
+    }
+    if kw(p0, "FETCh") {
+        return if parts.get(2).is_some_and(|p| kw(p, "ALL")) { Ok(Pow::All) } else { Err(HDR) };
+    }
+    if kw(p0, "MEASure") {
+        let l = parts[2];
+        let k = if kw(l, "APParent") {
+            0
+        } else if kw(l, "PFACtor") {
+            1
+        } else if kw(l, "ENERgy") {
+            2
+        } else if kw(l, "REACtive") {
+            3
+        } else if kw(l, "VOLTage") {
+            4
+        } else if kw(l, "CURRent") {
+            5
+        } else {
+            return Err(HDR);
+        };
+        return Ok(Pow::Get(k));
+    }
+    // [SENSe:]POWer:..., DBG:POWer:...
+    let dbg = p0 == b"DBG";
+    let rest = if kw(p0, "POWer") { &parts[1..] } else { &parts[2..] };
+    let l0 = rest.first().copied().unwrap_or(b"");
+    let l1 = rest.get(1).copied();
+    let state = |q: bool| if q { Ok(None) } else { on_off(a).map(Some).ok_or(BAD) };
+    if dbg {
+        return match l0 {
+            b"ROW" if query => Ok(Pow::DbgRow),
+            b"RAW" if query => Ok(Pow::DbgRaw),
+            b"POKE" if !query => {
+                if kw(a, "CLEar") {
+                    return Ok(Pow::DbgPoke(255, 0));
+                }
+                let v = nums::<2>(a);
+                if v[0] < 22 && v[1] < 256 { Ok(Pow::DbgPoke(v[0] as u8, v[1] as u8)) } else { Err(BAD) }
+            }
+            b"STAT" if !query => match a {
+                b"XY" => Ok(Pow::DbgStat(crate::dmm::pw::R34_XY)),
+                b"XX" => Ok(Pow::DbgStat(crate::dmm::pw::R34_XX)),
+                b"YY" => Ok(Pow::DbgStat(crate::dmm::pw::R34_YY)),
+                b"AUTO" => Ok(Pow::DbgStat(0)),
+                _ => Err(BAD),
+            },
+            b"DISC" if query => Ok(Pow::DbgDisc(None)),
+            b"DISC" => match parse_num(a) {
+                Some(v) if (0.0..=8.0).contains(&v) => Ok(Pow::DbgDisc(Some(v as u8))),
+                _ => Err(BAD),
+            },
+            _ => Err(HDR),
+        };
+    }
+    if kw(l0, "VOLTage") && l1.is_some_and(|p| kw(p, "RANGe")) {
+        return if query { Ok(Pow::VRange(None)) } else { pow_vrange(a).map(|r| Pow::VRange(Some(r))).ok_or(BAD) };
+    }
+    if kw(l0, "CURRent") && l1.is_some_and(|p| kw(p, "RANGe")) {
+        return if query { Ok(Pow::IRange(None)) } else { pow_irange(a).map(|r| Pow::IRange(Some(r))).ok_or(BAD) };
+    }
+    if kw(l0, "ENERgy") {
+        return match l1 {
+            Some(p) if kw(p, "RESet") && !query => Ok(Pow::EnergyReset),
+            Some(p) if kw(p, "STATe") => state(query).map(Pow::EnergyState),
+            _ => Err(HDR),
+        };
+    }
+    if kw(l0, "BURDen") {
+        return match l1 {
+            Some(p) if kw(p, "STATe") => state(query).map(Pow::BurdenState),
+            None if query => Ok(Pow::Burden(None)),
+            None if kw(a, "DEFault") => Ok(Pow::Burden(Some(f32::NAN))),
+            None => match parse_num(a) {
+                Some(v) if (0.0..=1000.0).contains(&v) => Ok(Pow::Burden(Some(v))),
+                _ => Err(BAD),
+            },
+            _ => Err(HDR),
+        };
+    }
+    if kw(l0, "PHASe") {
+        return match l1 {
+            Some(p) if kw(p, "CALibrate") && !query => {
+                if a.is_empty() || kw(a, "REACtive") {
+                    Ok(Pow::PhaseCal(true))
+                } else if kw(a, "RESistive") {
+                    Ok(Pow::PhaseCal(false))
+                } else {
+                    Err(BAD)
+                }
+            }
+            None if query => Ok(Pow::Phase(None)),
+            None => match parse_num(a) {
+                Some(v) if (-127.0..=127.0).contains(&v) => Ok(Pow::Phase(Some(v as i8))),
+                _ => Err(BAD),
+            },
+            _ => Err(HDR),
+        };
+    }
+    if kw(l0, "CYCle") && query {
+        return Ok(Pow::Cycle);
+    }
+    if kw(l0, "METHod") {
+        return if query {
+            Ok(Pow::Method(None))
+        } else if kw(a, "SIMultaneous") || a == b"P" {
+            Ok(Pow::Method(Some(false)))
+        } else if kw(a, "ALTernate") || a == b"VA" {
+            Ok(Pow::Method(Some(true)))
+        } else {
+            Err(BAD)
+        };
+    }
+    if kw(l0, "LIMit") {
+        if query {
+            return Ok(Pow::Limit(None));
+        }
+        let i = args.next().and_then(parse_num).ok_or(BAD)?;
+        let t = args.next().map_or(Some(crate::dmm::pw::T_LIM_DEFAULT as f32), parse_num).ok_or(BAD)?;
+        return if (0.0..=10.0).contains(&i) && (0.0..=3600.0).contains(&t) { Ok(Pow::Limit(Some((i, t as u16)))) } else { Err(BAD) };
+    }
+    Err(HDR)
+}
+
 fn on_off(a: &[u8]) -> Option<bool> {
     match a {
         b"ON" | b"1" => Some(true),
@@ -544,6 +747,8 @@ fn parse_func(parts: &[&[u8]]) -> Option<u8> {
         Some(14)
     } else if kw(p0, "TEMPerature") {
         Some(15)
+    } else if kw(p0, "POWer") && parts.len() == 1 {
+        Some(crate::dmm::pw::FUNC)
     } else {
         None
     }
@@ -576,6 +781,7 @@ fn func_name(mode: u8) -> &'static str {
         7..=9 => "\"CURR\"",
         16 => "\"VOLT:ACDC\"",
         17 => "\"CURR:ACDC\"",
+        crate::dmm::pw::FUNC => "\"POW\"",
         10 => "\"RES\"",
         11 => "\"CONT\"",
         12 => "\"DIOD\"",
@@ -734,6 +940,10 @@ impl Scpi {
                         None => self.put(b"0,\"No error\""),
                     }
                 }
+                _ if is_pow(parts, query) => match parse_pow(parts, arg, query) {
+                    Ok(c) => out = Out::Instr(Cmd::Pow(c)),
+                    Err(e) => self.err = Some(e),
+                },
                 _ if kw(p0, "MEASure") && query => match parse_func_arg(&parts[1..], arg) {
                     Some(f) => out = Out::Measure(Some(f)),
                     None => self.err = Some("Command error"),

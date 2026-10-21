@@ -65,6 +65,9 @@ fn p10(d: u8) -> f32 {
 /// SCPI-style function code of a reading (dmm.rs `Dmm::func`): the HY3131
 /// mode, 16 / 17 = V / A AC+DC.
 pub fn func_of(r: &Reading) -> u8 {
+    if r.power.is_some() {
+        return crate::dmm::pw::FUNC;
+    }
     match (r.acdc, r.mode) {
         (true, 0..=3) => 16,
         (true, _) => 17,
@@ -119,7 +122,8 @@ impl Limit {
     /// Verdict for a displayed reading. OL is above the range: a fail when
     /// an upper limit is set, a pass otherwise.
     pub fn check(&self, r: &Reading) -> u8 {
-        if !self.on || (self.lo.is_none() && self.hi.is_none()) {
+        // The power meter has no limit slot (W): never checked.
+        if !self.on || (self.lo.is_none() && self.hi.is_none()) || r.power.is_some() {
             return V_NONE;
         }
         if r.main.ol {
@@ -872,6 +876,7 @@ mod tests {
             seq: 0,
             avg_n: 0,
             alert: crate::sentinel::Alert::None,
+            power: None,
         }
     }
 

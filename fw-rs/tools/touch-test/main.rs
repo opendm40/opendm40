@@ -678,7 +678,7 @@ fn hit_tests(ck: &mut Ck) {
     ui::history(&[(1.0, 3, "V"); 5], 5, 4);
     let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), rel: Some(1.0), secs: Some(5), rec: false };
     let pts: Vec<f32> = (0..321).map(|i| i as f32).collect();
-    ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, &side, "V", ui::RateChip { rate: 1, period_ms: 100, applies: true });
+    ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 100, applies: true });
     let dmm_hit = |x: u16, y: u16| -> Option<u32> {
         if ui::value_hit(x, y) {
             Some(105) // main value: resolution / rate

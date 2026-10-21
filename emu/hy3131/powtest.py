@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""fw-rs power meter (fw-rs/src/powermeter.rs) in the emulator: fw-rs native +
+the HY3131 model's Power role, a timed connection script per scenario, SCPI
+over USB/IP (setup commands, then DBG:PING? uptime, FETCh:POWer:ALL?,
+POW:VOLT:RANG?, POW:CURR:RANG? in a loop); the last samples of every phase
+must match its expectation.
+
+  emu/hy3131/powtest.py                          # all scenarios, fw-rs built from HEAD
+  emu/hy3131/powtest.py --app fw-rs/dm40-fw-native.bin --port 3381 mains
+  emu/hy3131/powtest.py --list
+
+FETC:POW:ALL? fields: P,S,Q,PF,Vrms,Irms,F,E_Wh,seconds,Vdc,Idc,VAh,burden_V.
+Results: emu/out/pow-<name>.json (+ .png of the end). One emulator per port.
+"""
+import argparse
+import json
+import math
+import os
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+EMU = os.path.dirname(HERE)
+ROOT = os.path.dirname(EMU)
+OUT = os.path.join(EMU, 'out')
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument('names', nargs='*')
+ap.add_argument('--app', help='fw-rs native image (default: run.py builds HEAD)')
+ap.add_argument('--port', type=int, default=3381, help='USB/IP port (default 3381)')
+ap.add_argument('--list', action='store_true')
+A = ap.parse_args()
+os.environ['USBIP_PORT'] = str(A.port)
+sys.path.insert(0, EMU)
+import usbip_client as uc  # noqa: E402
+
+F = ['P', 'S', 'Q', 'PF', 'V', 'I', 'F', 'Wh', 'secs', 'Vdc', 'Idc', 'VAh', 'Vb']
+
+
+def near(x, want, rel, ab=0.0):
+    return x is not None and not math.isnan(x) and abs(x - want) <= max(abs(want) * rel, ab)
+
+
+# Expectation helpers: d = the FETC:POW:ALL? fields of a sample.
+def pw(p, pf, v, i, rel=0.01, f=None):
+    def chk(d):
+        ok = near(d['P'], p, rel, 0.002 * abs(v * i)) and near(d['PF'], pf, 0.0, 0.01) and near(d['V'], v, rel) and near(d['I'], i, rel)
+        return ok and (f is None or near(d['F'], f, 0.01))
+    return chk
+
+
+def reactive(v, i):
+    return lambda d: near(d['V'], v, 0.01) and near(d['I'], i, 0.01) and abs(d['PF']) < 0.02 and near(d['Q'], v * i, 0.02)
+
+
+def alt(v, i):
+    # Fallback: S only; P / Q / PF are NaN (9.91E37 on the wire).
+    return lambda d: near(d['S'], v * i, 0.015) and near(d['V'], v, 0.01) and near(d['I'], i, 0.01) and math.isnan(d['PF'])
+
+
+def ranges(vr, ir):
+    return lambda d: d['VR'].endswith(vr) and d['IR'].endswith(ir)
+
+
+def both(*fs):
+    return lambda d: all(f(d) for f in fs)
+
+
+# name: (setup SCPI, run_for, [(t, spec, check, label)]); a phase is checked on
+# its samples from the next phase's start - 4 s to that start - 0.5 s.
+SC = {
+    'mains': (['CONF:POW', 'POW:BURD:STAT OFF'], 58, [
+        (0, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), ranges('6.000000E+02', '1.000000E+01')), 'resistive 230 V 1 A: PF 1, 50 Hz, 600 V / 10 A'),
+        (14, 'open;pow:230@50,i=1,pf=0.5', pw(115, 0.5, 230, 1), 'PF 0.5'),
+        (28, 'open;pow:230@50,i=1,ph=90', reactive(230, 1), 'reactive (90 deg): PF 0'),
+        (43, 'open;pow:230@50,i=1,pf=-1', pw(-230, -1, 230, 1), 'reversed current: P < 0'),
+    ]),
+    'dc': (['CONF:POW', 'POW:BURD:STAT OFF'], 50, [
+        (0, 'open;vsrc:12;isrc:2', both(pw(24, 1, 12, 2), lambda d: near(d['Vdc'], 12, 0.01) and near(d['Idc'], 2, 0.01)), 'DC 12 V 2 A: 24 W (LPFs)'),
+        (16, 'open;vsrc:12;isrc:-2', pw(-24, -1, 12, 2), 'DC source: -24 W'),
+        (32, 'open;vsrc:5;isrc:0.4', both(pw(2.0, 1, 5, 0.4), ranges('6.000000E+00', '6.000000E-01')), 'DC 5 V 0.4 A: autorange 6 V / 600 mA'),
+    ]),
+    'small': (['CONF:POW', 'POW:BURD:STAT OFF'], 44, [
+        (0, 'open;pow:5@50,i=0.01,pf=1', both(pw(0.05, 1, 5, 0.01), ranges('6.000000E+00', '6.000000E-02')), '5 V 10 mA: 6 V / 60 mA'),
+        (22, 'open;pow:5@50,i=0.002,pf=0.8', both(pw(0.008, 0.8, 5, 0.002, rel=0.015), ranges('6.000000E+00', '6.000000E-03')), '5 V 2 mA PF 0.8: 6 mA (uA shunt)'),
+    ]),
+    'burden': (['CONF:POW', 'POW:BURD 0.5'], 40, [
+        # 5 V, 0.4 A on the mA shunt; the model's V jack is ideal, so with
+        # R_path 0.5 ohm the load values are P = 2 - 0.08, V = sqrt(25 - 2 + 0.04).
+        (0, 'open;vsrc:5;isrc:0.4', both(pw(1.92, 1, math.sqrt(25 - 2 * 0.5 * 2 + 0.04), 0.4, rel=0.01), lambda d: near(d['Vb'], 0.2, 0.01)), 'burden compensation 0.5 ohm'),
+    ]),
+    'manual': (['CONF:POW 60,6', 'POW:BURD:STAT OFF'], 24, [
+        (0, 'open;pow:5@50,i=0.1,pf=1', both(pw(0.5, 1, 5, 0.1, rel=0.02), ranges('6.000000E+01', '6.000000E+00')), 'manual 60 V / 6 A held'),
+    ]),
+    'alt': (['CONF:POW', 'POW:METH ALT'], 40, [
+        (0, 'open;pow:230@50,i=1,pf=0.5', alt(230, 1), 'fallback: S 230 VA, PF n/a'),
+    ]),
+    'phasecal': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:PHAS 40'], 60, [
+        # 1 kHz, current lagging 90 deg: SPHACAL 40 makes P visible (6 deg);
+        # POW:PHAS:CAL at 20 s nulls it.
+        (0, 'open;pow:10@1000,i=0.1,ph=90', lambda d: abs(d['PF']) > 0.05, 'SPHACAL 40 at 1 kHz: PF off zero'),
+        (20, None, lambda d: abs(d['PF']) < 0.02 and abs(d['PH']) <= 3, 'after POW:PHAS:CAL: PF ~0, SPHACAL ~0'),
+    ]),
+    'energy': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:ENER:RES'], 40, [
+        (0, 'open;vsrc:10;isrc:1', lambda d: d['secs'] > 5 and near(d['Wh'] * 3600 / d['secs'], 10, 0.05) and near(d['VAh'] * 3600 / d['secs'], 10, 0.05), 'energy: 10 W x t'),
+    ]),
+}
+
+# Device-test hooks (doc 3.11, T1..T3): the raw ring with R34 frozen at YY
+# (T1: V on OP2 / AD3 alone) and with no discards (T3: every result logged).
+def ring(stats, disc):
+    def chk(d):
+        r = d.get('RAW', '').split(';')[1:]
+        e = [x.split(',') for x in r]
+        return len(e) >= 8 and all(x[0] in stats for x in e) and all(x[1] == disc for x in e) and (len(stats) == 1 or len({x[0] for x in e}) == len(stats))
+    return chk
+
+
+SC.update({
+    't1-yy': (['CONF:POW', 'DBG:POW:STAT YY'], 20, [
+        (0, 'open;pow:230@50,i=1,pf=1', lambda d: ring({'YY'}, '0')(d) and d['ROW'].split()[20] == '8C', 'T1 hook: R34 frozen at YY, ring all YY'),
+    ]),
+    't3-cycle': (['CONF:POW', 'DBG:POW:DISC 0'], 20, [
+        # d = 0: every result after an R34 switch is taken; with the model's
+        # mid-block mixing (powmix) the values are then off, which is what
+        # the discards are for (on the device T3 measures the real cost).
+        (0, 'open;pow:230@50,i=1,pf=1', ring({'XY', 'YY', 'XX'}, '0'), 'T3 hook: d = 0, XY / YY / XX every result'),
+    ]),
+})
+SC['scpi'] = (['MEAS:POW?', 'POW:LIM 2.5,12', 'POW:BURD:STAT OFF'], 24, [
+    (0, 'open;pow:100@60,i=0.5,pf=0.6', lambda d: near(num(d['X']['MEAS:POW:PFAC?']), 0.6, 0, 0.01) and near(num(d['X']['READ?']), 30, 0.01)
+     and d['X']['CONF?'] == '"POW AUTO,AUTO"' and d['X']['POW:LIM?'] == '+2.500000E+00,12' and d['X']['POW:CYC?'] == '2,642,1284'
+     and d['X']['FUNC?'] == '"POW"', 'MEAS:POW:PFAC?, READ?, CONF?, POW:LIM?, POW:CYC?, FUNC?'),
+])
+EXTRA = {'t1-yy': ['DBG:POW:RAW?', 'DBG:POW:ROW?'], 't3-cycle': ['DBG:POW:RAW?'],
+         'scpi': ['MEAS:POW:PFAC?', 'READ?', 'CONF?', 'POW:LIM?', 'POW:CYC?', 'FUNC?']}
+ACTIONS = {'phasecal': {20: 'POW:PHAS:CAL REAC'}}
+
+
+def num(s):
+    v = float(s)
+    return float('nan') if abs(v) > 1e37 else v
+
+
+def run(name):
+    setup, run_for, phases = SC[name]
+    script = [(t, spec) for t, spec, _, _ in phases if spec]
+    tag = 'pow-' + name
+    os.makedirs(OUT, exist_ok=True)
+    sp = os.path.join(OUT, tag + '.script')
+    with open(sp, 'w') as f:
+        for t, spec in script:
+            f.write('%g dmm %s\n' % (t, spec))
+    cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
+           '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', tag,
+           '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else [])
+    p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    rows = []
+    t_wall = time.time()
+    tm = None
+    while p.poll() is None and tm is None and time.time() - t_wall < 300:
+        try:
+            tm = uc.Usbtmc(uc.Dev('1-0'))
+        except Exception as e:
+            print('attach:', type(e).__name__, e, flush=True)
+            time.sleep(1)
+    acts = dict(ACTIONS.get(name, {}))
+    if tm is not None:
+        try:
+            for c in setup:
+                tm.write(c)
+                if c.endswith('?'):
+                    print(name, c, tm.read(timeout=60).decode(errors='replace').strip(), flush=True)
+            while p.poll() is None:
+                row = {}
+                for q in ['DBG:PING?', 'FETC:POW:ALL?', 'POW:VOLT:RANG?', 'POW:CURR:RANG?', 'POW:PHAS?'] + EXTRA.get(name, []):
+                    tm.write(q)
+                    row[q] = tm.read(timeout=60).decode(errors='replace').strip()
+                t = int(row['DBG:PING?'].split(',')[0]) / 1000.0
+                d = {'t': t, 'VR': row['POW:VOLT:RANG?'], 'IR': row['POW:CURR:RANG?'], 'PH': int(row['POW:PHAS?'] or 0),
+                     'RAW': row.get('DBG:POW:RAW?', ''), 'ROW': row.get('DBG:POW:ROW?', ''), 'X': row}
+                try:
+                    d.update(zip(F, [num(x) for x in row['FETC:POW:ALL?'].split(',')]))
+                except ValueError:
+                    pass
+                rows.append(d)
+                print('%s %6.2f %s %s %s ph %d' % (name, t, row['FETC:POW:ALL?'], d['VR'], d['IR'], d['PH']), flush=True)
+                for ta in sorted(acts):
+                    if t >= ta:
+                        tm.write(acts.pop(ta))
+        except Exception as e:
+            print(name, 'link ended:', e, flush=True)
+    out, _ = p.communicate()
+    ok = True
+    bad = []
+    for i, (t, _, chk, label) in enumerate(phases):
+        t1 = phases[i + 1][0] if i + 1 < len(phases) else run_for
+        seen = [r for r in rows if t1 - 4.0 <= r['t'] <= t1 - 0.5 and ('P' in r or name.startswith('t1'))]
+        if not seen:
+            ok = False
+            bad.append('%s: no samples' % label)
+            continue
+        fails = [r for r in seen if not chk(r)]
+        if fails:
+            ok = False
+            r = fails[-1]
+            bad.append('%s: %.2f %s %s %s %s' % (label, r['t'], ' '.join('%s=%g' % (k, r[k]) for k in F if k in r), r['VR'], r['IR'], r['RAW'][:120]))
+        else:
+            r = seen[-1]
+            print('  ok  %-50s %s' % (label, ' '.join('%s=%.6g' % (k, r[k]) for k in F[:8] if k in r) or r['RAW'][:100]), flush=True)
+    res = {'name': name, 'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-600:] if p.returncode else ''}
+    with open(os.path.join(OUT, tag + '.json'), 'w') as f:
+        json.dump(res, f, indent=1)
+    print('RESULT %s %s %s' % (name, 'OK' if ok else 'FAIL', '; '.join(bad[:5])), flush=True)
+    return ok
+
+
+if __name__ == '__main__':
+    if A.list:
+        for n, (su, rf, ph) in SC.items():
+            print('%-9s %s | %s' % (n, ' '.join(su), ' | '.join('%g %s: %s' % (t, s, l) for t, s, _, l in ph)))
+        sys.exit(0)
+    allok = True
+    for n in A.names or list(SC):
+        allok &= run(n)
+    sys.exit(0 if allok else 1)
