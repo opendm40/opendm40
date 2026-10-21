@@ -429,7 +429,23 @@ def main():
     ap.add_argument('--app', help='application image (run.py --app)')
     ap.add_argument('--scale', type=int, default=2, help='Tk window scale (default 2)')
     ap.add_argument('--tk', action='store_true', help='use the Tk window instead of GTK')
+    ap.add_argument('--no-usbip', action='store_true', help='do not export the USB device over USB/IP')
+    ap.add_argument('--usbip-port', type=int, default=3240,
+                    help='USB/IP TCP port (default 3240; a free one is picked if it is busy)')
     args, extra = ap.parse_known_args()
+    # USB/IP right after the start (10 ms of virtual time: at t = 0, before the machine has run, Renode's
+    # server never listened); a host that attaches early gets no answer until the firmware's USB is up
+    args.usbip = None
+    if not args.no_usbip and '--usbip' not in extra:
+        port = args.usbip_port
+        try:
+            socket.create_server(('127.0.0.1', port)).close()
+        except OSError:
+            port = free_port()
+            print('USB/IP port %d is busy: using %d (USBIP_PORT=%d emu/usbip_client.py ...)' % (
+                args.usbip_port, port, port), file=sys.stderr)
+        args.usbip = port
+        extra += ['--usbip', '0.01', '--usbip-port', str(port)]
     if not args.tk:
         try:
             import gi
