@@ -1347,6 +1347,33 @@ fn flash_read(_: u32, _: &mut [u8]) -> bool {
 
 static mut DISK: FnRaw = FnRaw(flash_read);
 
+/// A cached generator in zero-initialised RAM (.bss): an `Option<Gen>`
+/// static would be ~0.45 KiB of .data (its None is not all zero bits).
+pub struct Slot<K: Copy + PartialEq> {
+    ok: bool,
+    key: core::mem::MaybeUninit<K>,
+    gen: core::mem::MaybeUninit<DiskGen>,
+}
+
+impl<K: Copy + PartialEq> Slot<K> {
+    pub const fn new() -> Self {
+        Slot { ok: false, key: core::mem::MaybeUninit::uninit(), gen: core::mem::MaybeUninit::uninit() }
+    }
+    pub fn clear(&mut self) {
+        self.ok = false;
+    }
+    /// The generator for `key`, opened with `open` when it is not the cached one.
+    pub fn get(&mut self, key: K, open: impl FnOnce() -> Option<DiskGen>) -> Option<&mut DiskGen> {
+        if !(self.ok && unsafe { self.key.assume_init() } == key) {
+            self.ok = false;
+            self.gen.write(open()?);
+            self.key.write(key);
+            self.ok = true;
+        }
+        Some(unsafe { self.gen.assume_init_mut() })
+    }
+}
+
 /// Host tests: read the "SPI disk" through `f`.
 pub fn set_disk(f: fn(u32, &mut [u8]) -> bool) {
     unsafe { *core::ptr::addr_of_mut!(DISK) = FnRaw(f) };
@@ -1395,7 +1422,7 @@ pub enum DataErr {
 
 /// The SCPI generator, kept between MMEM:DATA? calls (a host reads a file
 /// in 6000-byte pieces: sequential, O(1) each) while the entry is unchanged.
-static mut SCPI_GEN: Option<(Ent, DiskGen)> = None;
+static mut SCPI_GEN: Slot<Ent> = Slot::new();
 
 /// MMEM:DATA?: bytes `off..` of root file `name` into `out` (count
 /// returned, 0 at the end). "LOGnnn.CSV" with a LOGnnn.DLG next to it =
@@ -1408,12 +1435,7 @@ pub fn data(name: &[u8; 11], off: u32, out: &mut [u8]) -> Result<usize, DataErr>
         dn[8..].copy_from_slice(b"DLG");
         if let Some(e) = find(&mut d, &g, &dn) {
             let cache = unsafe { &mut *core::ptr::addr_of_mut!(SCPI_GEN) };
-            if cache.as_ref().map(|c| c.0) != Some(e) {
-                *cache = None;
-                let gen = Gen::open(FatFile::new(d, g, e.start, e.size), e.size).ok_or(DataErr::Read)?;
-                *cache = Some((e, gen));
-            }
-            let Some((_, gen)) = cache.as_mut() else { return Err(DataErr::Read) };
+            let gen = cache.get(e, || Gen::open(FatFile::new(d, g, e.start, e.size), e.size)).ok_or(DataErr::Read)?;
             let n = (gen.info.csv.saturating_sub(off) as usize).min(out.len());
             gen.read(off, &mut out[..n]);
             return Ok(n);
@@ -1444,7 +1466,7 @@ mod vfs {
     static mut NT: usize = 0;
     /// The read cursor: (table index, generator), ~0.4 KiB of .bss (not
     /// .dmabuf: that is not zeroed at reset).
-    static mut CUR: Option<(u32, DiskGen)> = None;
+    static mut CUR: Slot<u32> = Slot::new();
     static STALE: AtomicBool = AtomicBool::new(true);
 
     /// The DLG set changed (a recording ended, a file was deleted, the PC
@@ -1465,7 +1487,7 @@ mod vfs {
     /// Returns the number of files.
     pub fn refresh(exclude: Option<[u8; 11]>) -> usize {
         STALE.store(false, Ordering::Relaxed);
-        unsafe { *core::ptr::addr_of_mut!(CUR) = None };
+        unsafe { (*core::ptr::addr_of_mut!(CUR)).clear() };
         let tab = unsafe { &mut *core::ptr::addr_of_mut!(TAB) };
         let mut x = [Extra { name: [b' '; 11], size: 0, read: vread, arg: 0 }; MAX_EXTRA];
         let mut n = 0;
@@ -1496,19 +1518,17 @@ mod vfs {
     /// `Extra::read`: CSV bytes `off..` of table entry `arg`.
     pub fn vread(arg: u32, off: u32, buf: &mut [u8]) {
         buf.fill(0);
+        if arg as usize >= unsafe { *core::ptr::addr_of!(NT) } {
+            return;
+        }
         let cur = unsafe { &mut *core::ptr::addr_of_mut!(CUR) };
-        if cur.as_ref().map(|c| c.0) != Some(arg) {
-            *cur = None;
-            if arg as usize >= unsafe { *core::ptr::addr_of!(NT) } {
-                return;
-            }
+        let open = || {
             let e = unsafe { (*core::ptr::addr_of!(TAB))[arg as usize] };
             let mut d = disk();
-            let Some(g) = geometry(&mut d) else { return };
-            let Some(gen) = Gen::open(FatFile::new(d, g, e.start, e.size), e.size) else { return };
-            *cur = Some((arg, gen));
-        }
-        if let Some((_, g)) = cur.as_mut() {
+            let g = geometry(&mut d)?;
+            Gen::open(FatFile::new(d, g, e.start, e.size), e.size)
+        };
+        if let Some(g) = cur.get(arg, open) {
             g.read(off, buf);
         }
     }
