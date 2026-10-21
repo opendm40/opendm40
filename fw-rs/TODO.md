@@ -419,7 +419,11 @@ Firmware:
       HY3131 timing + measured noise (not ad hoc); the +1 digit always drawn small at the end.
 - [ ] Power-meter mode: HY3131 can measure V and I at once (AD2/AD3 + MUL → active power in RMSDATA); Vrms, Irms, P (and
       energy) by switching internal modes — check feasibility with the DM40 front-end wiring first.
+      Researched: GO, docs/power-meter-and-misconnect.md §3 (I on the stock OP1 path, V via OP2→AD3 DC-coupled,
+      signed 38-bit X·Y RMS read, ~10-12 days). Gate: device test T1 (OP2 on SENSE). Owner: fuse/CAT/10 A limits.
 - [ ] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
+      Researched: GO for current-in-A-jack in non-current modes (idle comparator on PB1, 47.5 Ω shunt, trips ~0.44 mA),
+      partial for "V leads while in A mode"; blown fuse not detectable (fuse-check dialog instead). Doc §4, ~4-5 days.
 Emulator (emu/):
 - [ ] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
       at the same time); the firmware's mux/relay choices route it through a modelled DM40 front-end (dividers, shunts, relays,
