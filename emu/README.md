@@ -182,9 +182,20 @@ session) passes its acceptance (descriptor 28e9:02f0, UID read, RAM write +
 read-back). fw-rs enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk over
 MSC. Stock firmware: the device exists only after Settings > Other > USB
 Connect; a DEVLIST / IMPORT whose descriptor read gets no answer within 3 s
-lists no device / refuses the import (checked 2026-10-21 with Renode's server:
-even after USB Connect the stock never answers the descriptor read in the
-emulator - not investigated).
+lists no device / refuses the import. After USB Connect the stock (V2.6,
+28e9:028f, one MSC interface: the 16 MiB SPI disk, 4096 x 4 KiB, writable)
+attaches to the kernel and mounts (2026-10-22: `udisksctl mount -o ro`,
+S000.BMP identical to the working image's, ~100 kB/s):
+
+```sh
+emu/run.py stock --fast --key menu@2.5 --tap 365,207@3.5 --tap 112,211@4.5 \
+    --tap 309,65@5.5 --tap 219,96@6.5 --usbip 7 --run-for 1800    # Settings > Other > USB Connect
+```
+
+The desktop may automount it read-write (it is the working copy
+`emu/out/disk.bin`). The stock never answers GET_DESCRIPTOR(string 4) (its
+interface string pointer reads unmapped 0x00400000 in the emulator): the
+kernel times out twice (2 x 5 s, unlinked) and goes on.
 
 #### Attaching to the Linux kernel (vhci-hcd)
 
@@ -229,8 +240,18 @@ server:
 * CMD_UNLINK -> RET_UNLINK -ECONNRESET for a pending URB (no RET_SUBMIT
   follows), 0 for one already completed (its RET_SUBMIT went out first);
 * IMPORT is a USB bus reset (endpoint FIFOs dropped, the firmware
-  re-enumerates; the reply waits until it handled USBRST); one import at a
-  time; DEVLIST of an imported device answers from cached descriptors.
+  re-enumerates; the reply waits until it handled USBRST) followed by
+  SET_ADDRESS(1): vhci-hcd handles SET_ADDRESS itself and never sends it,
+  and the stock's GD32 library STALLs SET_CONFIGURATION in the Default state
+  (fw-rs's usb-device accepts it); one import at a time; DEVLIST of an
+  imported device answers from cached descriptors.
+* EP0 STALL is cleared when the driver pops the SETUP from the Rx FIFO
+  (GRXSTSP), not when the host queues it, and the host ignores an EP0 STALL
+  while a SETUP is still queued: the host here sends the next SETUP right
+  after a status stage, before the driver handled it.
+* IN endpoints give the host one packet per read (XFRSIZ counts down, TXFE
+  when the FIFO is half empty and more is to come): the stock's 4 KiB MSC
+  transfers do not fit the Tx FIFO and used to wait for the whole transfer.
 * EP0 now always counts as active (USBAEP read 1 but its stored value was 0
   after a peripheral reset until the CPU next read DIEPCTL0).
 

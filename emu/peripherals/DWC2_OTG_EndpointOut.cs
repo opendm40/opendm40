@@ -139,9 +139,8 @@ public partial class DWC2_OTG
             parent.DebugLog("Out endpoint #{0} - writing setup packet from host - {1}", endpointNumber, packet);
             if(endpointNumber == 0)
             {
-                // The core clears a control endpoint's STALL on SETUP.
-                ClearStall();
-                parent.endpointsIn[0].ClearStall();
+                // STALL is cleared when the driver takes it (RxFifoStatusPop).
+                parent.ep0SetupsQueued++;
             }
             parent.rxFifoPackets.Enqueue(new RxPacket
             {

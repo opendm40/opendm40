@@ -8,6 +8,8 @@
 //     driver writes the FIFO only while the free space is LARGER than the
 //     packet it wants to send, so it hung on EP0 with exactly 5 free words.
 //   * A packet read by the host clears EPENA before it raises XFRC.
+//   * The host takes one packet at a time (XFRSIZ counts down), so a
+//     transfer larger than the Tx FIFO completes.
 //
 using System;
 using System.Collections.Generic;
@@ -50,14 +52,28 @@ public partial class DWC2_OTG
             fifo.EnqueueRange(bytes);
             parent.DebugLog("In endpoint #{0} - got {1:X08} from device, taking {2}", endpointNumber, data, bytesToTake);
 
-            var hasPacket = fifo.Count >= (int)transferSizeField.Value;
-            if(hasPacket)
+            if(fifo.Count >= NextPacketBytes)
             {
                 parent.DebugLog("In endpoint #{0} - got full packet from device, notifying host", endpointNumber);
                 parent.QueueNewPacket(this);
             }
-            txFifoEmptyInterruptFlag.Value = !hasPacket;
+            UpdateTxFifoEmpty();
             parent.UpdateInterrupts();
+        }
+
+        /// The next packet of the transfer: max packet size or what is left.
+        private int NextPacketBytes => (int)Math.Min((ulong)Math.Max(1u, MaxPacketBytes), transferSizeField.Value);
+
+        /// TXFE: more of the transfer to write and the Tx FIFO at least half
+        /// empty (as the core does). A transfer larger than the FIFO (the
+        /// stock's 4 KiB MSC reads) is written in parts while the host takes
+        /// packets; it used to wait for the whole transfer to be in the FIFO,
+        /// which never fit.
+        private void UpdateTxFifoEmpty()
+        {
+            var depthBytes = (int)parent.TxFifoDepthWords(endpointNumber) * 4;
+            txFifoEmptyInterruptFlag.Value = fifo.Count < (int)transferSizeField.Value
+                && (depthBytes == 0 || fifo.Count * 2 <= depthBytes);
         }
 
         public bool TryRead(out byte[] data)
@@ -84,18 +100,25 @@ public partial class DWC2_OTG
                 return false;
             }
             parent.DebugLog("In endpoint #{0} - host tried to read at {1}/{2} (max: {3})", endpointNumber, fifo.Count, transferSizeField.Value, maxPacketSize.Value);
-            if(fifo.Count < (int)transferSizeField.Value)
+            // One packet per IN token, as on the bus: XFRSIZ counts down.
+            var n = NextPacketBytes;
+            if(fifo.Count < n)
             {
                 return false;
             }
-            data = fifo.DequeueRange((int)transferSizeField.Value);
-            if(fifo.Count == 0)
+            data = fifo.DequeueRange(n);
+            transferSizeField.Value -= (ulong)n;
+            if(transferSizeField.Value == 0)
             {
                 // EPENA first, as the core does: the driver re-arms the
                 // endpoint as soon as it sees XFRC.
                 endpointEnabledFlag.Value = false;
                 txFifoEmptyInterruptFlag.Value = true;
                 transferCompleteInterruptFlag.Value = true;
+            }
+            else
+            {
+                UpdateTxFifoEmpty();
             }
             parent.UpdateInterrupts();
             return true;
@@ -122,7 +145,7 @@ public partial class DWC2_OTG
             {
                 parent.QueueNewPacket(this);
             }
-            txFifoEmptyInterruptFlag.Value = fifo.Count < (int)transferSizeField.Value;
+            UpdateTxFifoEmpty();
             parent.UpdateInterrupts();
         }
 
