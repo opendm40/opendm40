@@ -15,9 +15,9 @@ so the GUI never blocks the emulation.
 Mouse     on the display: press/drag/release = touch (tap, drag, swipe);
           Ctrl+drag = two-finger pinch around the click point. On the key
           strip: press-and-hold = the key (held = long press). Power button
-          = PD6. Jacks / MCX / USB open the matching input page in the sidebar.
+          = PD6. Jacks / MCX / USB focus the matching input card.
 Keyboard  m r a f = MENU RUN AUTO MF, p = power, F2/F3 = 2-/3-finger swipe
-          down, space = pause/resume, s = screenshot, F9 = sidebar,
+          down, space = pause/resume, s = screenshot,
           Esc / Ctrl-C / window close = quit.
 Needs /usr/bin/python3 (PyGObject + libadwaita, pycairo, numpy, PIL).
 """
