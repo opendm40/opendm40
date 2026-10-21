@@ -652,7 +652,7 @@ fn main() -> ! {
                             // The DMM needs its analog side (as MEAS?).
                             app.dmm_power(&mut clk);
                             if !app.rec_start(now) {
-                                scpi.set_err(if msc::host_mounted() { "Mass storage busy" } else { "Settings conflict" });
+                                scpi.set_err("Settings conflict");
                             }
                         } else {
                             csvlog::stop();
@@ -1131,6 +1131,7 @@ mod scope_csv;
 mod csvlog;
 mod dlog;
 mod gallery;
+mod fatdir;
 #[cfg(any(feature = "native", feature = "test-initcore", feature = "test-recovery"))]
 mod native;
 // Stock device-authenticity check, informational only: DBG:GENUINE? reports

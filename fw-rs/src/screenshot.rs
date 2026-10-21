@@ -1,10 +1,12 @@
-//! Screenshot to the SPI-flash USB disk (docs/user-feedback.md UF-17, stock
+//! Screenshot to the SPI-flash disk (docs/user-feedback.md UF-17, stock
 //! "PriScr": 3-finger swipe down, gui_v2_6.h "Screenshot"). The same job
 //! writes the scope record (UF-13, `start_csv`, content from scope_csv.rs:
-//! SCOP%03u.DLG, the compact binary form of the CSV, which LUN 1 / MMEM:DATA?
-//! serve as SCOP%03u.CSV; no capture phase, length from scope_csv).
+//! SCOPE/SCOP%03u.DLG, the compact binary form of the CSV, which the USB
+//! volume / MMEM:DATA? serve as SCOP%03u.CSV; no capture phase, length from
+//! scope_csv).
 //!
-//! File: the next free `S%03u.BMP` in the root (lowest unused number, as the
+//! File: the next free `SHOTS/S%03u.BMP` (fatdir.rs; lowest number used
+//! neither in SHOTS/ nor in the root, where earlier builds wrote them, as the
 //! stock "s%.3d.bmp" / first free number, spiflash_v2_6.h), byte-compatible
 //! with the stock files on this unit's disk (dumps/spi_dumps
 //! dm40_msc_full_2026-10-13.bin S000..S002.BMP): 480x320, 16 bpp RGB565,
@@ -25,7 +27,10 @@
 //!            rows per pass until ~2 ms are spent (~0.3 ms per row);
 //!   Bpb      boot sector (1 block read); first waits while a csvlog.rs
 //!            commit holds the disk (msc.rs LOG_FLUSHING);
-//!   Root     one root block per pass: used S%03u numbers, first free slot;
+//!   Bpb      also opens SHOTS/ / SCOPE/ (fatdir::ensure: created here only
+//!            if missing, synchronously);
+//!   Root     one directory block per pass (the root, then SHOTS/ or SCOPE/:
+//!            used numbers in either, the first free slot of the directory);
 //!   Alloc    one FAT 1 block per pass: first-fit free clusters;
 //!   Data     per 4 KiB block: fill (header / pixels from CAP or GRAM, CRC),
 //!            then `BlockDevice::write_step` (spiflash.rs: compare, erase,
@@ -33,7 +38,7 @@
 //!            erase and the programs run in the chip between passes);
 //!   Fat      the chain in every FAT copy (FAT 1 first; read, link, then
 //!            `write_block` from the next pass);
-//!   Dir      the root entry (read, check the slot is still free, then
+//!   Dir      the directory entry (read, check the slot is still free, then
 //!            `write_block` from the next pass);
 //!   Verify   one data block per pass re-read through the new FAT 1 chain,
 //!            CRC-32 compared with the CRC of what was written.
@@ -64,24 +69,17 @@
 //! the main loop running. The verify pass compares CRCs, so it does not need
 //! the panel again.
 //!
-//! A host that has the disk mounted (it sent PREVENT MEDIUM REMOVAL, msc.rs
-//! `host_mounted`) gets no screenshot: `start` refuses (see there).
-//! While busy the MSC refuses host writes (NOT READY, msc.rs), so the host
-//! cannot change the FAT between our scan and our update; host reads are
-//! served (spiflash.rs waits for an erase / program of ours to finish before
-//! any read). Host-cache caveat: a host that has the USB disk MOUNTED keeps
-//! its own copy of the FAT and root directory and does not see the new file;
-//! worse, its next write can put its cached (older) FAT block back over our
-//! chain. After a write `MEDIUM_CHANGED` is set so the MSC layer can report
-//! UNIT ATTENTION 06/28/00 "medium may have changed" on the next host command
-//! (msc.rs: only while no host has the medium locked; for a mounted Linux
-//! vfat the UNIT ATTENTION would fail I/O until the next media poll), which
-//! makes the host re-read the volume. Safe without caveats when no PC has the
-//! disk mounted (charger, power bank, battery).
+//! The native build does not export this disk over USB (the PC sees the
+//! read-only generated volume of vdisk.rs, rebuilt after a shot: dlog.rs
+//! `set_stale`), so no host can write it or hold a stale FAT: shots are
+//! never refused for a "mounted" disk. Builds that still export it (no
+//! `vdisk`) refuse host writes while busy (NOT READY, msc.rs) and set
+//! `MEDIUM_CHANGED` after a write (UNIT ATTENTION, msc.rs).
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::calbackup::{self, crc32_upd};
+use crate::fatdir;
 use crate::fatren::{le16, parse_bpb, sfn_is, Vol};
 use crate::lcd;
 use crate::msc::{BlockDevice, Step};
@@ -296,16 +294,11 @@ pub fn init() {
 
 /// Request a screenshot of the screen as it is now (captured from the next
 /// `poll` on; the caller draws nothing more while `frozen`). False: one is
-/// already in flight (the request is ignored).
-///
-/// Also false while a host has the disk mounted (`msc::host_mounted`: it
-/// sent PREVENT MEDIUM REMOVAL): its cached FAT would be stale after the
-/// shot and could overwrite the new chain, and the UNIT ATTENTION that makes
-/// it re-read would fail its I/O (review 258c833 M2). The caller tells the
-/// two apart with `msc::host_mounted()` ("eject first").
+/// already in flight (the request is ignored). (A PC can no longer have
+/// this disk mounted: USB exports only the generated volume, vdisk.rs.)
 pub fn start() -> bool {
     let j = job();
-    if j.phase != Phase::Idle || crate::msc::host_mounted() {
+    if j.phase != Phase::Idle {
         return false;
     }
     *j = JOB0;
@@ -322,10 +315,10 @@ pub fn start() -> bool {
 /// Request a scope-record file (scope_csv.rs, set up by the caller first):
 /// the next free SCOP%03u.DLG, written like a screenshot (no screen
 /// capture, nothing frozen). Its result comes from `take_csv_result`, not
-/// `take_result`. False: a disk job is in flight, a PC has the disk mounted.
+/// `take_result`. False: a disk job is in flight.
 pub fn start_csv() -> bool {
     let j = job();
-    if j.phase != Phase::Idle || crate::msc::host_mounted() {
+    if j.phase != Phase::Idle {
         return false;
     }
     let len = crate::scope_csv::len();
@@ -488,6 +481,10 @@ fn finish(j: &mut Job, r: Shot) {
     }
     if j.wrote {
         MEDIUM_CHANGED.store(true, Ordering::Relaxed);
+        // The generated USB volume shows the new file (dlog.rs / vdisk.rs
+        // refresh, debounced in main.rs).
+        #[cfg(feature = "vdisk")]
+        crate::dlog::set_stale();
     }
 }
 
@@ -531,30 +528,43 @@ impl Job {
         let Some(v) = parse_bpb(&buf[..], disk.block_count()) else {
             return Some(Shot::NoDisk);
         };
+        // The file's directory (fatdir.rs; created at boot, here only if it
+        // went missing: synchronous, ~1 s once). scratch[1] (FAT cache) is
+        // overwritten: `cur` is NONE until Alloc.
+        let dir = if self.kind == K_CSV { &fatdir::SCOPE } else { &fatdir::SHOTS };
+        let v = match fatdir::ensure(disk, &v, dir, calbackup::scratch()) {
+            Ok(d) => d,
+            Err(fatdir::Err::Io) => return Some(Shot::Error),
+            Err(_) => return Some(Shot::Full),
+        };
         self.v = Some(v);
+        self.cur = NONE;
         self.ncl = self.len.div_ceil(v.spc * BLK as u32);
         self.i = 0;
         self.phase = Phase::Root;
         None
     }
 
-    /// One root block: S%03u.BMP numbers in use, the first free slot.
+    /// One directory block (the root, then the file's directory, fatdir.rs
+    /// `seq`): S%03u.BMP / SCOP%03u.DLG numbers in use in either, the first
+    /// free slot of the directory.
     fn root(&mut self, disk: &mut dyn BlockDevice) -> Option<Shot> {
         let v = self.vol();
+        let (lba, sub, base, lim) = fatdir::seq(&v, self.i);
         let buf = &mut calbackup::scratch()[0];
-        if !disk.read_block(v.root_start + self.i, buf) {
+        if !disk.read_block(lba, buf) {
             return Some(Shot::Error);
         }
         let mut end = false;
         for k in 0..PER {
-            let idx = self.i * PER + k;
-            if idx >= v.root_entries {
+            let idx = base + k;
+            if idx >= lim {
                 end = true;
                 break;
             }
             let e = &buf[(k * 32) as usize..(k * 32 + 32) as usize];
             if e[0] == 0x00 || e[0] == 0xE5 {
-                if self.slot == NONE {
+                if sub && self.slot == NONE {
                     self.slot = idx;
                 }
                 if e[0] == 0x00 {
@@ -574,7 +584,12 @@ impl Job {
             }
         }
         self.i += 1;
-        if !end && self.i < v.root_blocks {
+        if end && !sub {
+            self.i = v.root_blocks; // the root's end: on to the directory
+        } else if end {
+            self.i = fatdir::seq_blocks(&v);
+        }
+        if self.i < fatdir::seq_blocks(&v) {
             return None;
         }
         let Some(n) = (0..1000u16).find(|&n| self.taken[(n / 32) as usize] & (1 << (n % 32)) == 0) else {
@@ -764,7 +779,7 @@ impl Job {
     fn dir(&mut self, disk: &mut dyn BlockDevice) -> Option<Shot> {
         let v = self.vol();
         if !self.filled {
-            self.lba = v.root_start + self.slot / PER;
+            self.lba = v.dlba(self.slot / PER);
             let buf = &mut calbackup::scratch()[0];
             if !disk.read_block(self.lba, buf) {
                 return Some(Shot::Error);

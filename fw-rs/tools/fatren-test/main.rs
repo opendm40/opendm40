@@ -161,6 +161,8 @@ mod dlog;
 #[allow(dead_code)]
 mod csvlog;
 
+#[path = "../../src/fatdir.rs"]
+mod fatdir;
 #[path = "../../src/fatren.rs"]
 #[allow(dead_code)]
 mod fatren;
@@ -410,8 +412,10 @@ fn shotcut(a: &[String], img: &mut Img) {
     let le16 = |o: usize| b[o] as u32 | (b[o + 1] as u32) << 8;
     let fat_start = le16(0x0E) as usize;
     let data = fat_start + b[0x10] as usize * le16(0x16) as usize + le16(0x11) as usize * 32 / 4096;
-    let erased: Vec<usize> = (fat_start * 16..data * 16).filter(|&p| b[p * 256..p * 256 + 256].iter().all(|&x| x == 0xFF)).collect();
-    let meta: Vec<String> = fat_ops.iter().filter(|&&(_, l)| (l as usize) < data).map(|(n, l)| format!("{n}:{l}")).collect();
+    let dirs = dir_blocks(b);
+    let pages: Vec<usize> = (fat_start * 16..data * 16).chain(dirs.iter().flat_map(|&l| l as usize * 16..l as usize * 16 + 16)).collect();
+    let erased: Vec<usize> = pages.into_iter().filter(|&p| b[p * 256..p * 256 + 256].iter().all(|&x| x == 0xFF)).collect();
+    let meta: Vec<String> = fat_ops.iter().filter(|&&(_, l)| (l as usize) < data || dirs.contains(&l)).map(|(n, l)| format!("{n}:{l}")).collect();
     println!("shotcut slices={} result={:?} busy={} erased_meta_pages={:?}", n, res, screenshot::busy(), erased);
     println!("  metadata writes (slice:lba) {:?}", meta);
 }
@@ -429,6 +433,11 @@ fn main() {
     let mut img = Img::new(fs::read(&a[1]).unwrap());
     if a[2] == "csv" {
         csv(&a, &mut img);
+        fs::write(&a[1], &img.d).unwrap();
+        return;
+    }
+    if a[2] == "fatdir" {
+        fatdir_cmd(&a, &mut img);
         fs::write(&a[1], &img.d).unwrap();
         return;
     }
@@ -541,6 +550,75 @@ fn main() {
     }
 }
 
+/// `main <img> fatdir boot|ensure <NAME>|rm <NAME> [cut <k>]`: fatdir.rs on
+/// the image (boot = the native boot step: LOGS, SHOTS, SCOPE ensured);
+/// cut = power cut before the k-th changing block write.
+fn fatdir_cmd(a: &[String], img: &mut Img) {
+    let mut k = 4;
+    let name = a.get(4).filter(|_| a[3] != "boot").map(|n| {
+        k = 5;
+        let mut b = [b' '; 11];
+        b[..n.len()].copy_from_slice(n.as_bytes());
+        b
+    });
+    if a.get(k).is_some_and(|x| x == "cut") {
+        img.cut = Some(a[k + 1].parse().unwrap());
+    }
+    let s = calbackup::scratch();
+    let mut v = || {
+        let mut b = [0u8; 4096];
+        msc::BlockDevice::read_block(img, 0, &mut b);
+        fatren::parse_bpb(&b, (img.d.len() / 4096) as u32).unwrap()
+    };
+    match a[3].as_str() {
+        "boot" => {
+            let r = fatdir::boot(img);
+            println!("fatdir boot ok={:#x} created={:#x} failed={:#x}", r.ok, r.created, r.failed);
+        }
+        "ensure" => {
+            let v = v();
+            match fatdir::ensure(img, &v, &name.unwrap(), s) {
+                Ok(d) => println!("fatdir ensure ok clusters={:?}", &d.dcl[..d.dn as usize]),
+                Err(e) => println!("fatdir ensure err={e:?}"),
+            }
+        }
+        "rm" => {
+            let v = v();
+            println!("fatdir rm {:?}", fatdir::remove_empty(img, &v, &name.unwrap(), s));
+        }
+        x => panic!("{x}"),
+    }
+    println!("  writes={} changed blocks: {:?} cut_kind={}", img.writes.len(), img.writes, img.cut_kind);
+}
+
+/// Blocks of the root's subdirectories (their clusters; 1 cluster = 1
+/// block on this disk): directory metadata like the root region.
+fn dir_blocks(b: &[u8]) -> Vec<u32> {
+    let le16 = |o: usize| b[o] as u32 | (b[o + 1] as u32) << 8;
+    let fat = le16(0x0E) as usize * 4096;
+    let root = (le16(0x0E) + b[0x10] as u32 * le16(0x16)) as usize * 4096;
+    let ne = le16(0x11) as usize;
+    let data = (root / 4096 + ne * 32 / 4096) as u32;
+    let mut out = vec![];
+    for i in 0..ne {
+        let e = &b[root + 32 * i..root + 32 * i + 32];
+        if e[0] == 0 {
+            break;
+        }
+        if e[0] == 0xE5 || e[11] & 0x3F == 0x0F || e[11] & 0x10 == 0 {
+            continue;
+        }
+        let mut c = e[26] as u32 | (e[27] as u32) << 8;
+        let mut n = 0;
+        while (2..0xFFF0).contains(&c) && n < 64 {
+            out.push(data + c - 2);
+            c = le16(fat + 2 * c as usize);
+            n += 1;
+        }
+    }
+    out
+}
+
 /// Synthetic reading i: value over 1e-9 .. 1e4 magnitudes, flags pattern (run.sh
 /// csvok() recomputes both).
 fn row(i: u32) -> (f32, u8) {
@@ -588,7 +666,7 @@ fn csv(a: &[String], img: &mut Img) {
                 println!("del={:?}", csvlog::delete_on(img, &n));
                 msc::HOST_MOUNTED.store(false, Relaxed);
             }
-            let mut out = [csvlog::FileInfo { name: [0; 11], size: 0, kind: csvlog::Kind::Csv }; 64];
+            let mut out = [csvlog::FileInfo { name: [0; 11], size: 0, kind: csvlog::Kind::Csv, in_dir: false }; 64];
             let c = csvlog::list_on(img, &mut out).expect("list");
             println!("list n={} total={} free={} disk={}", c.n, c.total, c.free_bytes, c.disk_bytes);
             for f in &out[..c.n] {
@@ -776,10 +854,11 @@ fn csv(a: &[String], img: &mut Img) {
     let root = fat_start + b[0x10] as u32 * le16(0x16);
     let data = root + le16(0x11) * 32 / 4096;
     let (mut fat_e, mut root_e, mut data_e, mut data_max) = (0, 0, 0, 0);
+    let dirs = dir_blocks(b);
     for (&l, &c) in &img.erases {
         if l < root {
             fat_e += c;
-        } else if l < data {
+        } else if l < data || dirs.contains(&l) {
             root_e += c;
         } else {
             data_e += c;
@@ -787,7 +866,7 @@ fn csv(a: &[String], img: &mut Img) {
         }
     }
     println!(
-        "  writes={} programs={} erases: fat={} root={} data={} data_max_per_block={} cut={:?} cut_kind={}",
+        "  writes={} programs={} erases: fat={} dir={} data={} data_max_per_block={} cut={:?} cut_kind={}",
         img.writes.len(),
         img.programs,
         fat_e,

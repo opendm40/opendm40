@@ -271,7 +271,7 @@ BOOT_POS = ['rstsck', 'rstsck_after', 'mode', 'reason', 'clock', 'last', 'hold_m
             'crash_word', 'healthy', 'fmc_last']
 BOOT_LABELS = {'PD6': ['moder', 'pupd', 'idr'], 'STAGED': ['n'],
                'CALBK': ['status', 'written', 'conflict', 'differs'], 'STACK': ['used', 'size'],
-               'CALMS': ['ms'], 'SPICLK': ['div', 'check']}
+               'CALMS': ['ms'], 'SPICLK': ['div', 'check'], 'FATDIR': ['ok', 'created', 'failed']}
 # spiflash.rs ClockCheck (DBG:BOOT? SPICLK,<div>,<check>).
 SPICLK_CHECK = {'OK': '/4 (12.5 MHz) read block 0 + FAT block equal to /16 twice',
                 'FORCED': 'spiflash::FORCE_SLOW: stock /16',

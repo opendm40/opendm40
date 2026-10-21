@@ -137,6 +137,8 @@ mod dialog;
 mod touch;
 #[path = "../../src/gesture.rs"]
 mod gesture;
+#[path = "../../src/fatdir.rs"]
+mod fatdir;
 #[path = "../../src/fatren.rs"]
 mod fatren;
 #[path = "../../src/calbackup.rs"]
@@ -205,33 +207,71 @@ impl msc::BlockDevice for Img {
     }
 }
 
-/// Gallery files of the image in directory order (independent parse).
+/// Gallery files of the image in the gallery's order (independent parse):
+/// the root's, then LOGS/, then SHOTS/ (fatdir.rs), each in directory order.
 fn dir_order(img: &Img) -> Vec<String> {
     let d = &img.d;
     let le16 = |o: usize| d[o] as usize | (d[o + 1] as usize) << 8;
     let bs = le16(11);
+    let spc = d[13] as usize;
     let res = le16(14);
     let nf = d[16] as usize;
     let ne = le16(17);
     let fsz = le16(22);
     let root = (res + nf * fsz) * bs;
-    let mut v = vec![];
-    for i in 0..ne {
-        let e = &d[root + 32 * i..root + 32 * i + 32];
-        if e[0] == 0 {
-            break;
+    let data = root + ne * 32;
+    let cb = spc * bs;
+    // A directory's entries: the root region, or a cluster chain.
+    let entries = |start: Option<usize>| -> Vec<[u8; 32]> {
+        let mut out = vec![];
+        let mut offs = vec![];
+        match start {
+            None => offs.extend((0..ne).map(|i| root + 32 * i)),
+            Some(mut c) => {
+                while (2..0xFFF0).contains(&c) {
+                    offs.extend((0..cb / 32).map(|i| data + (c - 2) * cb + 32 * i));
+                    c = le16(res * bs + 2 * c);
+                }
+            }
         }
-        if e[0] == 0xE5 || e[11] & 0x18 != 0 || e[11] & 0x3F == 0x0F {
-            continue;
+        for o in offs {
+            let mut e = [0u8; 32];
+            e.copy_from_slice(&d[o..o + 32]);
+            if e[0] == 0 {
+                break;
+            }
+            out.push(e);
         }
+        out
+    };
+    let name = |e: &[u8; 32]| {
         let base = String::from_utf8_lossy(&e[..8]).trim_end().to_string();
         let ext = String::from_utf8_lossy(&e[8..11]).trim_end().to_string();
-        let n = format!("{base}.{ext}");
-        if (n.starts_with('S') && ext == "BMP") || (n.starts_with("LOG") && ext == "DLG") {
-            v.push(n);
+        (format!("{base}.{ext}"), ext)
+    };
+    let rootv = entries(None);
+    let sub = |n: &str| rootv.iter().find(|e| e[0] != 0xE5 && e[11] & 0x10 != 0 && name(e).0.trim_end_matches('.') == n).map(|e| le16_of(e, 26));
+    let mut v = vec![];
+    for dir in [Some(None), sub("LOGS").map(Some), sub("SHOTS").map(Some)].into_iter().flatten() {
+        let es = match dir {
+            None => rootv.clone(),
+            Some(c) => entries(Some(c)),
+        };
+        for e in es {
+            if e[0] == 0xE5 || e[11] & 0x18 != 0 || e[11] & 0x3F == 0x0F {
+                continue;
+            }
+            let (n, ext) = name(&e);
+            if (n.starts_with('S') && ext == "BMP") || (n.starts_with("LOG") && ext == "DLG") {
+                v.push(n);
+            }
         }
     }
     v
+}
+
+fn le16_of(e: &[u8; 32], o: usize) -> usize {
+    e[o] as usize | (e[o + 1] as usize) << 8
 }
 
 fn rank_of(img: &Img, name: &str) -> u32 {
@@ -788,24 +828,7 @@ fn lock(imgp: &str, data: &str) -> bool {
     run(g, &mut img);
     t("viewer: image complete after the pause", compare("S000 after pause", &expect(w, h, &px, 0, 0, 480, 320)));
 
-    // 3. Delete refused while the host has the disk mounted.
     let before = dir_order(&img);
-    let g = view(&mut img, name);
-    tap(g, 240, 200);
-    run(g, &mut img);
-    tap(g, 420, 20);
-    run(g, &mut img);
-    msc::MOUNTED.store(true, Relaxed);
-    let w0 = img.writes;
-    tap(g, 300, 200); // Delete in the confirm
-    run(g, &mut img);
-    t("delete while mounted: nothing written", img.writes == w0 && dir_order(&img) == before);
-    let txt = emu().fb[(100 * W)..(240 * W)].iter().any(|&c| c == 0xF79E);
-    t("delete while mounted: info box shown", txt);
-    tap(g, 240, 200); // OK
-    run(g, &mut img);
-    msc::MOUNTED.store(false, Relaxed);
-
     // 4. Delete: gone, the viewer moves on.
     let g = view(&mut img, name);
     let r = rank_of(&img, name);
