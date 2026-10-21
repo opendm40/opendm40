@@ -40,6 +40,7 @@ public partial class DWC2_OTG : BasicDoubleWordPeripheral, IUSBDevice, IDoubleWo
         UpdateInterrupts();
         rxFifo.Clear();
         rxFifoPackets.Clear();
+        ep0SetupsQueued = 0;
         foreach(var ep in endpointsIn)
         {
             ep.Flush();
@@ -202,6 +203,7 @@ public partial class DWC2_OTG : BasicDoubleWordPeripheral, IUSBDevice, IDoubleWo
                 {
                     rxFifo.Clear();
                     rxFifoPackets.Clear();
+                    ep0SetupsQueued = 0;
                 }
             }, name: "Rx FIFO flush (RXFFLSH)")
             .WithFlag(5, out var txFifoFlush, name: "Tx FIFO flush (TXFFLSH)")
@@ -325,6 +327,21 @@ public partial class DWC2_OTG : BasicDoubleWordPeripheral, IUSBDevice, IDoubleWo
                 this.DebugLog("Dequeued RX packet: {0}, {1} packets left", packet, rxFifoPackets.Count);
                 rxFifo.EnqueueRange(BitHelper.ToUInt32Array(packet.Data, littleEndian: true));
                 var ep = endpointsOut[packet.Endpoint];
+                if(packet.IsSetup && packet.Endpoint == 0)
+                {
+                    // The core clears a control endpoint's STALL on SETUP. Done
+                    // when the driver takes the SETUP, not when the host queues
+                    // it: the host here sends the next SETUP right after the
+                    // previous status stage, and a driver that STALLs EP0 when
+                    // it handles that status stage (the stock's GD32 library)
+                    // does so after the SETUP was queued.
+                    endpointsIn[0].ClearStall();
+                    ep.ClearStall();
+                    if(ep0SetupsQueued > 0)
+                    {
+                        ep0SetupsQueued--;
+                    }
+                }
                 ep.SetInterruptsForPacket(packet);
             });
 
@@ -626,6 +643,10 @@ public partial class DWC2_OTG : BasicDoubleWordPeripheral, IUSBDevice, IDoubleWo
     private IFlagRegisterField vbusSensingEnableFlag;
 
     private bool hostResetPending;
+
+    /// SETUPs on EP0 the driver has not taken from the Rx FIFO yet: until
+    /// then an EP0 STALL is the previous transfer's and not an answer.
+    private int ep0SetupsQueued;
 
     private readonly EndpointInterruptMask allMaskIn;
     private readonly EndpointInterruptMask allMaskOut;

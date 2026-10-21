@@ -47,6 +47,8 @@ public partial class DWC2_OTG
         /// driver or, on EP0, by the core when a SETUP arrives.
         public bool Stalled => stallFlag.Value;
 
+        public byte Number => endpointNumber;
+
         public void ClearStall()
         {
             stallFlag.Value = false;

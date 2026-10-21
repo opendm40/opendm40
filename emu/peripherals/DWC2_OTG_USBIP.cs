@@ -19,7 +19,8 @@
 //   * STALL completes the URB with -EPIPE; URB_SHORT_NOT_OK gives -EREMOTEIO
 //     on a short IN (usb-storage's scatter-gather reads rely on it);
 //     URB_ZERO_PACKET appends a ZLP;
-//   * IMPORT is a bus reset (the firmware re-enumerates), DEVLIST of an
+//   * IMPORT is a bus reset + SET_ADDRESS(1) (the firmware re-enumerates;
+//     vhci-hcd never forwards SET_ADDRESS), DEVLIST of an
 //     imported device answers from the cached descriptors;
 //   * the speed is reported as full (the GD32 USBFS core), not high.
 //
@@ -72,6 +73,7 @@ public partial class DWC2_OTG
             ep.DropHeld();
         }
         rxFifoPackets.Clear();
+        ep0SetupsQueued = 0;
         EnqueueHostReset();
     }
 
@@ -177,6 +179,15 @@ public partial class DWC2_OTG
                         Thread.Sleep(2);
                     }
                     Thread.Sleep(20);
+                    // vhci-hcd handles SET_ADDRESS itself and never sends it
+                    // (a usbip server exports a device its own host already
+                    // addressed): address it here, as that host would. The
+                    // stock's GD32 library STALLs SET_CONFIGURATION in the
+                    // Default state (usb-device in fw-rs accepts it).
+                    if(ControlSync(new byte[] { 0x00, 5, 1, 0, 0, 0, 0, 0 }, null, 3000) == null)
+                    {
+                        dev.WarningLog("USB/IP: SET_ADDRESS after the bus reset failed");
+                    }
                     rec = DeviceRecord(false);
                     ok = rec != null;
                 }
@@ -343,7 +354,7 @@ public partial class DWC2_OTG
                 {
                     return EConnReset;
                 }
-                if(ep.Stalled)
+                if(StallVisible(ep))
                 {
                     return EPipe;
                 }
@@ -363,6 +374,15 @@ public partial class DWC2_OTG
                     continue;
                 }
                 sig.WaitOne(10);
+            }
+        }
+
+        /// An EP0 STALL counts only once the driver took the current SETUP.
+        private bool StallVisible(Endpoint ep)
+        {
+            lock(dev.HostLock)
+            {
+                return ep.Stalled && !(ep.Number == 0 && dev.ep0SetupsQueued > 0);
             }
         }
 
@@ -547,7 +567,7 @@ public partial class DWC2_OTG
                 else
                 {
                     var ep = dev.endpointsOut[u.Ep];
-                    if(ep.Stalled)
+                    if(srv.StallVisible(ep))
                     {
                         status = EPipe;
                     }
