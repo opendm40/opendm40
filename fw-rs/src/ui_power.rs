@@ -4,7 +4,7 @@
 //!   status bar  AUTO / MANU (both channels), HOLD / alerts as everywhere
 //!   aux rows    Vrms (aux1), Irms (aux2): the stock LETTERS rows
 //!   main        P (fallback: S) in the F78 cells; unit "W" in the stock UNIT
-//!               face (two of its V, stockfont::glyph_or_twin), the AC+DC
+//!               face (our W of that face, stockfont_w.rs), the AC+DC
 //!               glyph above it (P counts AC and DC)
 //!   history row the five 88 x 19 boxes: PF, S, Q, f, burden voltage (F14
 //!               tag + HIST value; units the HIST face lacks in F14)
