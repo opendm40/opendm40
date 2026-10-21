@@ -25,6 +25,7 @@ mod scope_meas;
 mod scope_ui;
 mod fft;
 mod sinc;
+mod trigsoft;
 mod scpi;
 mod startup;
 mod stockfont;

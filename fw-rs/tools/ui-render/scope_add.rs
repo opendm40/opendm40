@@ -90,5 +90,52 @@ pub fn run(ck: &mut Checker, out: &str) {
             }
         }
     }
-    println!("scope additions: {n} FFT scenes");
+    // Trigger tab with the trigger-type rows (UF-13): every type x
+    // condition x widest width text, both views; the runt marker.
+    let tab_area = Bx::new(14, 116, 399, 70);
+    let mut nt = 0;
+    for combined in [false, true] {
+        for ttype in 0..3u8 {
+            for (pcond, w, rv) in [(0u8, 500e-9f32, -444.4e-3f32), (1, 200e-3, 9.876e3), (2, 10.0, 0.0)] {
+                let mut m = base.m;
+                m.combined = combined;
+                m.runt_row = (ttype == 2).then_some(60);
+                let mut pv = stock::popvals(&m);
+                pv.ttype = ttype;
+                pv.pcond = pcond;
+                pv.pwidth = w;
+                pv.runt_v = rv;
+                let sc = stock::Scene { name: "trig", m, popup: scope_ui::Popup::Mf(2), trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+                stock::draw_with(&sc, &pv);
+                let name = format!("trigtab/{}/{ttype}/{pcond}", combined as u8);
+                // The option lists are the stock widget (abutting items,
+                // 1 px frame): checked as neighbours of the new labels /
+                // buttons / texts, not among their own items.
+                let mut add = vec![rb(scope_ui::TT_LABEL), rb(scope_ui::TP_LABEL)];
+                match ttype {
+                    1 => add.extend([rb(scope_ui::TP_MINUS), rb(scope_ui::TP_VALUE), rb(scope_ui::TP_PLUS)]),
+                    2 => add.extend([rb(scope_ui::TP_COND), rb(scope_ui::TR_HINT)]),
+                    _ => {}
+                }
+                ck.check_add(&name, &[("page", tab_area)], &add, Bx::new(13, 20, 401, 167));
+                nt += 1;
+                if ttype == 1 && pcond == 0 && !combined {
+                    save(out, "s03-trig-pulse");
+                }
+                if ttype == 2 && pcond == 0 && !combined {
+                    save(out, "s03-trig-runt");
+                }
+            }
+        }
+    }
+    // The runt level marker on the strip (selected, guide line).
+    let mut m = base.m;
+    m.runt_row = Some(60);
+    m.sel_v = 5;
+    m.guide = true;
+    let sc = stock::Scene { name: "runt", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+    stock::draw(&sc);
+    ck.check_replica("runt-marker");
+    save(out, "s03-runt-marker");
+    println!("scope additions: {n} FFT scenes, {nt} trigger-tab scenes");
 }
