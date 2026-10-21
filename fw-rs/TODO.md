@@ -28,11 +28,8 @@ Device needed (in this order):
 
 Code work (in this order):
 1. Faster DMM value + chart redraw (~6 ms target).
-2. UF-11 FFT: computed spectrum, labelled axes, automatic peak (f, dBV).
-3. UF-13 scope record as CSV to the disk (the MF "Save CSV" is a toast today) + software
-   pulse-width / runt trigger.
-4. UI punch-list remainder (UF-08 cursors, UF-10, UF-09 double-tap; wake tap / keypad / #9 / #11 / #12 done).
-5. Wire the new pure modules: src/sinc.rs into the scope trace (UF-41), src/bargraph.rs into DmmView (UF-30).
+2. (done 2026-10-21: UF-11 FFT, UF-13 scope CSV + pulse / runt trigger, UF-08/09/10, UF-41 wired.)
+3. Wire src/bargraph.rs into DmmView (UF-30).
 6. libsigrok DM40 profile: device retest over USBTMC (all functions passed in the emulator), send upstream.
 
 ## Remaining work
@@ -177,10 +174,14 @@ Code work (in this order):
         LABEL used only by those two fns); removing fonts.rs touches main.rs + the host-test
         module lists: left for a quiet moment (DMM-page area of ui.rs).
       Open:
-      - UF-08 one-tap cursors (stock port: cursors only via the Measure tab; scope-ui-plan "CUR");
-      - UF-10 V/div +/- shown as zoom (magnifier) rather than bare +/-;
-      - UF-09 remainder: double-tap on the graph = centre position + trigger at 50 % (trigger
-        position itself = the stock T marker drag);
+      - [x] UF-08 cursor tab "CUR" at the graph bottom (108,280): off -> X -> Y -> off, as the
+        stock cursor measurements (X2-1 + Xf / Y2-1) in the measurement row; "off" restores the
+        selection. (2c47fa5; verify on device)
+      - [x] UF-10 CH1 V/div buttons drawn as magnifiers: top = zoom in (smaller V/div), bottom =
+        zoom out (2c47fa5; stock-diff: btn_vdiv_up/down ~9 % by design; verify on device)
+      - [x] UF-09 double tap = CH1 position 0 + trigger at 50 % (stopped: centred on the trigger
+        point); only where a single tap does nothing (Corners: the graph middle; Off: anywhere;
+        never in Halves, every tap steps there). (2c47fa5; verify on device)
 - [x] CSV-to-disk recording on the DMM screen, swipe-triggered (user). (a1a7e74; verify on device)
       src/csvlog.rs: one-finger swipe down on the DMM page = start / stop,
       toasts, red REC in the status blocks, LOG:CSV ON|OFF / LOG:CSV?, power-off / reset commit the tail.
@@ -231,16 +232,31 @@ Code work (in this order):
 - [x] UF-32 (P1) CSV files: '.' decimals, ISO-8601 timestamps, header (model/fw/function/range). §10  (verify on device. No RTC: time_s since the start + the start uptime, no ISO dates)
 - [x] UF-37 (P1) Native shim keeps the short-press power-on (stock V2.1 behaviour). §8  (verify on device)
 - [x] UF-16 (P2) Generator ramp direction: gen.rs falls, preview rises; verify on scope and align. §7  (300e530: ramp rises; verify on device)
-- [ ] UF-11 (P2) Scope FFT with labelled axes + automatic peak (f, dBV) readout. §6.2 (stock port has
-      the Math/FFT popups and labels only; no spectrum is computed yet)
+- [x] UF-11 (P2) Scope FFT with labelled axes + automatic peak (f, dBV) readout. §6.2  (45885cb, bde5bff; verify on device)
+      src/fft.rs: 2048-pt real FFT (1024-pt complex radix-2, f32), 6 windows (stock 5 + flat-top),
+      dBV / Vrms, sliced: load on the frame's pass, 3 butterfly stages per pass, split + dB in one
+      pass. Source: the record around the frame (decimated by the mean of k samples when the screen
+      holds >= 2048, else 2048 record samples centred on it). Stock math pill / popup (Mode FFT/ABS,
+      Color, Hz/Div = 4 1-2-5 values, Window, Unit) live; the M strip marker (0 dBV row) and the M
+      top marker (FFT centre, drag pans) as the stock; fw-rs: "10dB/div", "50kHz/div" boxes, peak
+      readout "f dBV" + white peak marker. ABS math too. Emulator (1 IPC, so ~1.5x on the device):
+      FFT section avg 0.54 ms, max 1.3 ms per pass; frame 6 ms avg. Persist v5 (48 words).
+      Not in roll (no linear record).
 - [x] UF-12 (P2) Full probe attenuation list x0.1..x1000 (stock scope_probe[13]). §6.2  (bc2c478, 3845408; verify on device)
       Scope MF -> Settings tab, 13 buttons; persisted. No SCPI probe command exists (none added); TRIG:LEV <V>
       now takes probe-tip volts like TRIG:LEV? answers.
 - [x] UF-07 (P2) Scope corner-tap timebase + list picker: Corners (default) / Halves / Off, preview tabs,
       timebase list popup. §6.1  (e4bae33, docs/scope-scale-ux.md; verify on device)
       UF-08 (one-tap cursors) and UF-10 (V/div +/- as zoom): open, in the UI punch-list remainder.
-- [ ] UF-13 (P2) Save scope record as CSV to disk (MF "Save CSV" only toasts "use SCPI WAV:DATA?");
-      software pulse-width/runt trigger. §6.2
+- [x] UF-13 (P2) Save scope record as CSV to disk; software pulse-width/runt trigger. §6.2  (c8db910, 6b392af; verify on device)
+      MF Settings "Save CSV": stopped scope only (stock "Please stop sample"); the whole stored record
+      (<= 26624 rows, ~690 KB, ~10 s) as SCOPnnn.CSV through the screenshot writer (fixed 26-byte rows,
+      header timebase / V/div / probe / coupling / trigger / sample rate); the scope is held stopped
+      while it writes; refused while a PC has the disk mounted. Trigger tab Type Edge / Pulse (> < =,
+      1-2-5 width 20 ns..10 s, = within 5 %) / Runt (second level = orange T marker, drag).
+      Limits (src/trigsoft.rs): searched after each complete linear record (no comparator), dead time
+      between records misses events, width resolution 1 sample, slow timebases wait for a full
+      26624-sample record (10.6 s at 1 s/div).
 - [x] UF-23 (P2) PT100/PT1000/NTC temperature via the ohm path. §3  (device-verified on the calibrator, 19:10 run)
 - [x] UF-25/26/27/28/35 (P2) DMM small fixes: extra-digit option, 4-20mA% label, store-while-HOLD, volume semantics, MIN/MAX reset. §4-§5  (59614fa; verify on device)
       UF-25: no option (owner: the extra digit is always on). UF-26: DC mA loop % captioned "4-20mA", hidden
@@ -265,8 +281,9 @@ Code work (in this order):
         logger session (BT frames are not served then, by design).  (verify on device)
   - [x] UF-38 tools/dm40scpi.py: info / conf / read / log CSV / scpi / btpoll, USBTMC or --bt (890047b).
         (verify on device)
-  - [ ] UF-41 sin(x)/x: src/sinc.rs (Lanczos-3) + tools/sinc-test (44f035c); not wired: the scope
-        page's "fewer samples than columns" branch -> sinc::at(&f.data, p).
+  - [x] UF-41 sin(x)/x: src/sinc.rs (Lanczos-3) + tools/sinc-test (44f035c), wired (553e7a4): the
+        "fewer samples than columns" branch (100..500 ns/div). Emulator: frame ~5.2 ms avg at 100 ns/div
+        vs ~3.3 ms at 1 us/div (linear path). (verify on device)
 - Community-confirmed existing items (priority signal only): native boot/recovery; FR-26 temperature offset (raise to P1);
   FR-36 user calibration; FR-13 sub-mode memory; FR-01/FR-02 (AVG on chart); FR-04/CSV record + FR-38 logger; FR-05;
   FR-09/FR-24 stray-C REL; FR-10; FR-14/FR-17; FR-19; FR-21; FR-28/29/32; FR-34; USBTMC; ui-review #1, #4, #5, #8, #10, #11.
