@@ -64,7 +64,9 @@
 //!   CONFigure:TEMPerature [<sensor>]   MEASure:TEMPerature? [<sensor>]
 //!     <sensor> = TCK | PT100 | PT1000 | NTC10K3950 | NTC10K3435 | NTC100K3950
 //!     | NTCUSER (dmm.rs T_NAMES; also TC / K for TCK); without it the current
-//!     sensor is kept. Reading in C (OL = +9.9E37).
+//!     sensor is kept. Reading in the UNIT:TEMP unit (OL = +9.9E37).
+//!   UNIT:TEMPerature C | F / ?   global temperature unit (also Settings 2/2):
+//!     readings, MEAS:TEMP:CJ? and SYST:TEMP? follow it; offsets stay in C
 //!   [SENSe:]TEMPerature:TRANsducer <sensor> / ?   select / query the sensor
 //!   [SENSe:]TEMPerature:OFFSet <C> / ?   offset of the CURRENT sensor, -20..20
 //!     in 0.1 C steps (thermocouple: applied to the cold junction)
@@ -329,6 +331,8 @@ pub enum Cmd {
     TempNtc(Option<(f32, f32)>),
     TempExc,
     TempCj,
+    /// UNIT:TEMPerature C|F (true = F) / ?
+    TempUnit(Option<bool>),
     SysTemp,
     /// CONFigure?: "<func> <range>,<resolution>" as the Agilent / HP meters
     /// (App::scpi_dmm; "CONT" / "DIOD" bare).
@@ -599,6 +603,19 @@ impl Scpi {
                         Cmd::SysRail(Some(true))
                     } else if kw(a, "AUTO") {
                         Cmd::SysRail(Some(false))
+                    } else {
+                        self.err = Some("Illegal parameter value");
+                        continue;
+                    });
+                }
+                _ if kw(p0, "UNIT") && parts.len() > 1 && kw(parts[1], "TEMPerature") => {
+                    let a = trim(arg);
+                    out = Out::Instr(if query {
+                        Cmd::TempUnit(None)
+                    } else if kw(a, "C") || kw(a, "CEL") {
+                        Cmd::TempUnit(Some(false))
+                    } else if kw(a, "F") || kw(a, "FAR") {
+                        Cmd::TempUnit(Some(true))
                     } else {
                         self.err = Some("Illegal parameter value");
                         continue;
