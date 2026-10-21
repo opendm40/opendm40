@@ -287,6 +287,13 @@ pub const FUNC_Y: u16 = 258;
 
 pub fn func_band(button: Button, mode: u8, acdc: bool, ohm_on: bool) {
     lcd::fill_rect(0, FUNC_Y, lcd::W, MEAS_Y - FUNC_Y, S_BAR);
+    // The scope panel's last two keys (V/div "-" at 232..271, TRIG at
+    // 280..319) straddle the band: in the panel column the band runs from
+    // the "-" key's top to the screen bottom, so no half key shows while
+    // the band is open (band_close repaints the page).
+    let py = crate::scope_ui::B_RECT[5].y as u16;
+    lcd::fill_rect(BAND_PANEL_X, py, lcd::W - BAND_PANEL_X, lcd::H - py, S_BAR);
+    lcd::fill_rect(BAND_PANEL_X, py, lcd::W - BAND_PANEL_X, 1, S_FRAME);
     lcd::fill_rect(0, FUNC_Y, lcd::W, 1, S_FRAME);
     let sel = button_index(button);
     // Power meter: the V / A buttons with their plain DC glyphs.
@@ -295,6 +302,10 @@ pub fn func_band(button: Button, mode: u8, acdc: bool, ohm_on: bool) {
         dmm_button(i, btn_x(i), FUNC_Y as i16 + 4, 36, S_BAR, i == sel, mode, acdc, ohm_on);
     }
 }
+
+/// Left edge of the scope page's right panel (scope_ui::PANEL), whose last
+/// key ends below the measurement bar.
+const BAND_PANEL_X: u16 = 414;
 
 /// Function button (0..6) of the band under a tap, None outside the band.
 pub fn func_band_hit(x: u16, y: u16) -> Option<usize> {
@@ -701,7 +712,9 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
             if r.acdc {
                 t.push(["AC ", "DC "][i]);
             } else if lp && i == 1 {
-                t.push("4-20mA ");
+                // The strip's sub box is 86 px: "4-20mA 50.0%" did not fit
+                // (its "4" was clipped next to the value's unit).
+                t.push("4-20 ");
             }
             let mut b = [0u8; 16];
             t.push(meter::text(&mut b, v));

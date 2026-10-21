@@ -522,6 +522,17 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
     }
 }
 
+/// Pixels per drawn item (probe owner ids) on the screen now.
+fn owner_counts() -> std::collections::HashMap<u32, usize> {
+    let mut m = std::collections::HashMap::new();
+    for &o in emu().owner.iter() {
+        if o != 0 {
+            *m.entry(o >> 8).or_insert(0) += 1;
+        }
+    }
+    m
+}
+
 fn r_button(r: &Reading) -> Button {
     dmm::button_of(r.mode)
 }
@@ -979,8 +990,33 @@ fn main() {
     //    layout rules on the band's items), every strip case.
     let band_area = Bx::new(0, ui::FUNC_Y as i32, 480, 301 - ui::FUNC_Y as i32);
     for (name, r, label) in &cases {
-        combined(r, *label, 0, 0, false, false, true, "");
+        // The page items the band cuts: drawn before the band, partly
+        // overwritten by it (a half key / cell left visible) = a violation;
+        // fully covered or untouched is fine.
+        combined(r, *label, 0, 0, false, false, false, "");
+        let before = owner_counts();
+        let boxes: std::collections::HashMap<u32, Bx> = items().into_iter().map(|i| (i.id, i.b)).collect();
+        ui::func_band(r_button(r), r.mode, r.acdc, r.mode == 10);
+        let after = owner_counts();
+        ck.cases += 1;
+        for (id, n) in &before {
+            let m = after.get(id).copied().unwrap_or(0);
+            if m > 0 && m < *n {
+                ck.fail(&format!("combined/{name}/band-cut"), format!("page item {:?} cut by the band: {m} of {n} px left", boxes.get(id)));
+            }
+        }
         ck.check_area(&format!("combined/{name}/band"), &[("band", band_area)], true, Some(band_area));
+        // The strip's sub texts fit their boxes (scope_ui::ST_SUB; the label
+        // clips, so an overlong text loses its first glyphs silently).
+        let d = ui::strip_data(r, 0, 0, false, hv_of(r), false, *label, false);
+        for i in 0..2 {
+            ck.cases += 1;
+            let w = stockfont::text_width(stockfont::SC_F12, d.sub[i].as_str(), 1);
+            let bw = scope_ui::st_sub(i, false).w;
+            if w > bw {
+                ck.fail(&format!("combined/{name}/strip-sub{i}"), format!("strip sub text {:?} {} px > its {} px box", d.sub[i].as_str(), w, bw));
+            }
+        }
     }
 
     // 3. Replica top bar / panel / cells over timebase x V/div x probe x

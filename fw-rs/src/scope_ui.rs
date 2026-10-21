@@ -2637,7 +2637,10 @@ const ST_FUNC: Rect = rect(19, 25, 62, 17);
 const ST_BADGE: Rect = rect(19, 46, 62, 17);
 const ST_VALUE: Rect = rect(88, 24, 118, 30);
 const ST_UNIT: Rect = rect(210, 24, 40, 30);
-const ST_SUB: [Rect; 2] = [rect(254, 25, 86, 14), rect(254, 43, 86, 14)];
+/// Sub rows: left-aligned from 4 px after the unit box, to 4 px before the
+/// GEN column while it shows, else to 4 px inside the strip (`st_sub`).
+pub const ST_SUB: [Rect; 2] = [rect(254, 25, 86, 14), rect(254, 43, 86, 14)];
+const ST_SUB_END: i16 = 409;
 const ST_GEN: Rect = rect(348, 25, 60, 17);
 const ST_GEN_T: Rect = rect(348, 46, 60, 17);
 const C_HV: Color = 0xc9a0;
@@ -2651,6 +2654,12 @@ pub fn strip_invalidate() {
 }
 
 /// A text field on the strip's dark box.
+/// Sub row `i`'s box with / without the GEN column (see ST_SUB).
+pub fn st_sub(i: usize, gen: bool) -> Rect {
+    let r = ST_SUB[i & 1];
+    rect(r.x, r.y, if gen { ST_GEN.x - 4 - r.x } else { ST_SUB_END - r.x }, r.h)
+}
+
 fn st_text(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8) {
     let t = Ink::new(font, r, text, align, sp);
     paint(r, &[(K_TEXT, C_FILL)], |x, y| match t.at(x, y) {
@@ -2706,14 +2715,38 @@ pub fn meter_strip(d: &StripData) {
         let f = if d.unit_letters { sf::LETTERS } else { sf::SC_DIGITS };
         st_text(ST_UNIT, f, d.unit.as_str(), C_YELLOW, 1, 1);
     }
-    for i in 0..2 {
-        if changed(ol.sub[i] == d.sub[i]) {
-            st_text(ST_SUB[i], sf::SC_F12, d.sub[i].as_str(), C_WHITE, 4, 1);
-        }
+    // The sub rows' width follows the GEN column: on a change of it, clear
+    // both columns first, then GEN, then the subs (left-aligned, so a long
+    // text is not clipped at its start next to the unit as before).
+    let gen_on = d.gen.n > 0;
+    let gen_moved = changed((ol.gen.n > 0) == gen_on);
+    if gen_moved && o.is_some() {
+        lcd::fill_rect(ST_SUB[0].x as u16, ST_SUB[0].y as u16, (ST_SUB_END + 1 - ST_SUB[0].x) as u16, (ST_GEN_T.y + ST_GEN_T.h - ST_SUB[0].y) as u16, C_FILL);
     }
-    if changed(ol.gen == d.gen) {
-        st_badge(ST_GEN, if d.gen.n > 0 { "GEN" } else { "" }, C_GEN);
+    if changed(ol.gen == d.gen) || gen_moved {
+        st_badge(ST_GEN, if gen_on { "GEN" } else { "" }, C_GEN);
         st_text(ST_GEN_T, sf::SC_F12, d.gen.as_str(), C_GREEN, 8, 1);
+    }
+    for i in 0..2 {
+        if changed(ol.sub[i] == d.sub[i]) || gen_moved {
+            let r = st_sub(i, gen_on);
+            let t = d.sub[i].as_str();
+            // Narrow (GEN shown): the text without its spaces if it is too wide.
+            let mut b = [0u8; 24];
+            let t = if sf::text_width(sf::SC_F12, t, 1) > r.w {
+                let mut n = 0;
+                for &c in t.as_bytes().iter().filter(|&&c| c != b' ') {
+                    if n < b.len() {
+                        b[n] = c;
+                        n += 1;
+                    }
+                }
+                core::str::from_utf8(&b[..n]).unwrap_or(t)
+            } else {
+                t
+            };
+            st_text(r, sf::SC_F12, t, C_WHITE, 1, 1);
+        }
     }
     *shown = Some(*d);
 }
