@@ -41,6 +41,8 @@ public partial class DWC2_OTG
             fifo.Clear();
         }
 
+        public int MaxPacket => (int)MaxPacketBytes;
+
         public void SubmitData(uint data)
         {
             var bytesToTake = Math.Min(FifoAvailableSpace, sizeof(uint));
@@ -106,6 +108,12 @@ public partial class DWC2_OTG
         public void FireNewPacket()
         {
             NewPacket?.Invoke();
+        }
+
+        // Wake the host side waiting for a packet: it reports the STALL.
+        protected override void OnStallSet()
+        {
+            parent.QueueNewPacket(this);
         }
 
         protected override void OnEndpointEnable()
