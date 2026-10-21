@@ -259,6 +259,9 @@ namespace Hy3131Tests
                 m.RelaysForMode(1); m.Read1(0x1E); m.WaitFlag(0x04, 1);
                 Near(Dcv(m, 0), 1.234, 2e-4, "  relay back: 1.234 V");
                 Check(m.Chip.Frontend.Contains("pa=0") && m.Chip.Frontend.Contains("role=DcV"), "Frontend state line", m.Chip.Frontend.Substring(0, 60));
+                var fe = m.Chip.Frontend;
+                Check(fe.Contains(" sop2p=") && fe.Contains(" sad3ip=") && fe.Contains(" vrefsel=") && fe.Contains(" pasw="),
+                    "Frontend state line: internal switches (sop2p, sad2*/sad3*, vrefsel, pasw)", fe.Substring(fe.IndexOf(" sop2p=")));
             }
         }
 

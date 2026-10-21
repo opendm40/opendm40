@@ -282,6 +282,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 Sop1pNames[regs[0x32] & 7], Sad1fpNames[regs[0x24] >> 4], Sad1fnNames[regs[0x24] & 7], Sad1rhNames[(regs[0x28] >> 4) & 7],
                 Sad1rlNames[regs[0x28] & 7], Sad2ipNames[regs[0x27] >> 6], ScmpiNames[regs[0x20] >> 5], (regs[0x24] & 8) != 0 ? 1 : 0,
                 Sad1I, regs[0x2F] & 0x7F, Sfuvr);
+            // the rest of the internal switching, for the GTK schematic (names as in ref/registers.md)
+            var smode3 = (regs[0x2F] & 0x08) != 0;
+            sb.AppendFormat(ci, " sop2p={0} sad2in={1} sad2rh={2} sad2rl={3} sad3ip={4} sad3in={5} ops1={6} ops2={7} sft1={8} srefo={9} sagnd={10} vrefsel={11} pasw={12}",
+                Sop2pNames[(regs[0x32] >> 4) & 7], Sad2inNames[(regs[0x27] >> 4) & 3], Sad2rhNames[(regs[0x27] >> 2) & 3],
+                Sad2inNames[regs[0x27] & 3], Sad2ipNames[regs[0x35] >> 6], Sad2inNames[(regs[0x35] >> 4) & 3],
+                regs[0x25] & 1, (regs[0x25] >> 1) & 1, (regs[0x33] >> 2) & 3, regs[0x30] >> 7, (regs[0x31] >> 4) & 3,
+                smode3 ? SfuvrSmode3[Sfuvr, acpo ? 1 : 0] : SfuvrNames[Sfuvr], PaSwitches());
             double jdc, jac, hz, duty; string shape;
             Fe.VJack(Fe.RelayPa, out jdc, out jac, out hz, out shape, out duty);
             sb.AppendFormat(ci, " vjack={0:G5} vjack_ac={1:G5} vjack_hz={2:G5}", jdc, jac, hz);
@@ -302,6 +309,28 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             return sb.ToString();
         }
 
+        /// Closed PA<n> switches (R2A..R2E: PS power bus, DS OP3 output, FS FB node, SS SENSE node),
+        /// e.g. "9S,5F,4D" (pin number + letters), "-" when all are open.
+        private string PaSwitches()
+        {
+            var parts = new List<string>();
+            for(var n = 9; n >= 0; n--)
+            {
+                var nib = (regs[0x2A + n / 2] >> (4 * (n & 1))) & 0xF;
+                if(nib == 0) continue;
+                var sw = "";
+                if((nib & 8) != 0) sw += "P";
+                if((nib & 4) != 0) sw += "D";
+                if((nib & 2) != 0) sw += "F";
+                if((nib & 1) != 0) sw += "S";
+                parts.Add(n + sw);
+            }
+            return parts.Count == 0 ? "-" : string.Join(",", parts);
+        }
+
+        private static readonly string[] Sop2pNames = { "SENSE", "FB", "RLU", "AGND", "PB0", "PB1", "PB2", "PB3" };
+        private static readonly string[] Sad2inNames = { "RLU", "AGND", "PB3", "PB5" };
+        private static readonly string[] Sad2rhNames = { "FB", "REFO", "VREF", "PB6" };
         private static readonly string[] Sop1pNames = { "SENSE", "FB", "RLU", "AGND", "PB0", "PB1", "PB2", "PB8" };
         private static readonly string[] Sad1fpNames = { "SENSE", "FB", "RLU", "OP1O", "OP2O", "VDDA", "REFO", "VREF", "PB0", "PB1", "PB2", "PB3", "PB4", "PB5", "PB6", "PB7" };
         private static readonly string[] Sad1fnNames = { "SENSE", "RLU", "VSSA", "AGND", "PB2", "PB3", "PB4", "PB5" };
