@@ -509,8 +509,16 @@ Firmware:
       MOUNTED read-only LUN 1 (DBG:VDISK:FORCE? 1 + ADD?) -> kernel rescans sdb, udev change DISK_MEDIA_CHANGE=1,
       the mounted vfat lists the new files at once with correct content, no I/O errors, no unmount. Held UA (the
       default) shows nothing until unmount. Simulated eject (EJECT? 3: NOT READY x3): capacity 0 -> back, stays
-      mounted. => live file lists on a virtual read-only volume work on Linux without MTP if the UA is NOT held
+      mounted. Nautilus: no auto refresh, F5 shows the new files (owner: acceptable).
+      => live file lists on a virtual read-only volume work on Linux without MTP if the UA is NOT held
       while locked; keep existing files' clusters fixed (cached inodes). Windows / macOS / Nautilus refresh: untested.
+- [ ] USB storage redesign (owner 2026-10-21): stop exporting the SPI FAT as LUN 0. The SPI flash becomes internal
+      storage (FAT16 kept for the vendor FS-loader: dm40*.bin in the root + the calibration safety copy) with
+      subdirectories (LOGS/, SHOTS/, SCOPE/) in our FAT code. USB exports ONE generated volume: LOGS/*.CSV,
+      SCOPE/*.CSV (from DLG), SHOTS/*.BMP, INFO/ (today's LUN-1 files), DEBUG/SPIFLASH.BIN (raw image), with the
+      media-change UA sent at once (not held while locked; existing files keep their clusters). Then: delete from
+      the PC (recognise directory-entry 0xE5 writes) and dropping dm40*.bin for an update (DAPLink-style write
+      recognition) as follow-ups. Removes "disk in use" refusals and host-side FAT corruption.
 Emulator (emu/):
 - [ ] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
       use per function (from the rows / mux selections: e.g. which PA tap, SENSE, PB0..PB7, FB/RLU), not "the
