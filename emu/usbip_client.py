@@ -8,7 +8,14 @@ Talks the USB/IP protocol to Renode's server (emu/run.py ... --usbip T, TCP
     emu/usbip_client.py desc   1-0              # device descriptor
     emu/usbip_client.py config 1-0              # interfaces and endpoints
     emu/usbip_client.py usbtmc 1-0 "*IDN?"      # fw-rs: SCPI over USBTMC
-    emu/usbip_client.py msc    1-0 [LBA]        # INQUIRY, READ CAPACITY, READ(10)
+    emu/usbip_client.py msc    1-0 [LBA [LUN]]  # INQUIRY, READ CAPACITY, READ(10)
+    emu/usbip_client.py luns   1-0              # GET MAX LUN + per-LUN checks (INQUIRY,
+                                                # TEST UNIT READY, READ CAPACITY, MODE
+                                                # SENSE 6/10 WP bit, WRITE(10) -> sense,
+                                                # PREVENT/ALLOW)
+    emu/usbip_client.py mscdump 1-0 LUN OUT     # FAT volume of LUN -> OUT: boot sector,
+                                                # FATs, root, allocated clusters (the rest
+                                                # zero), for fsck.fat / mtools
     emu/usbip_client.py read   1-0 0x1FFF7A10 12   # usbrw vendor EP0 read
     emu/usbip_client.py write  1-0 0x20028FC0 02   # usbrw vendor EP0 write
     emu/usbip_client.py scpi-tcp 1-0 5025       # line-based SCPI over TCP <-> USBTMC
@@ -17,11 +24,12 @@ Talks the USB/IP protocol to Renode's server (emu/run.py ... --usbip T, TCP
 Renode exports a registered device as busid 1-0. Protocol framing after the
 ep0-memrw session's emu-usbtest/usbip/usbip_client.py.
 """
+import os
 import socket
 import struct
 import sys
 
-HOST, PORT = '127.0.0.1', 3240
+HOST, PORT = '127.0.0.1', int(os.environ.get('USBIP_PORT', 3240))  # USBIP_PORT: a server on another port
 VERSION = 0x0111
 OP_REQ_DEVLIST = 0x8005
 OP_REQ_IMPORT = 0x8003
@@ -65,6 +73,7 @@ def devlist():
 
 class Dev:
     def __init__(self, busid):
+        self.busid = busid
         self.s = socket.create_connection((HOST, PORT), timeout=20)
         self.s.sendall(op_header(OP_REQ_IMPORT) + busid.encode('latin1').ljust(32, b'\0'))
         _, _, status = struct.unpack('>HHI', recvn(self.s, 8))
@@ -287,40 +296,182 @@ def scpi_tcp(busid, port):
         c.close()
 
 
-def msc_read(d, lba=0):
-    ifs = parse_config(d.config_descriptor())
-    found = find_bulk(ifs, 8)
-    if not found:
-        raise IOError('no MSC interface (interfaces: %s)' % ifs)
-    _, ep_out, ep_in = found
-    d.set_configuration(1)
-    tag = [0]
+class Msc:
+    """SCSI over Bulk-Only Transport on the device's MSC interface."""
 
-    def scsi(cb, data_len, direction):
-        tag[0] += 1
-        cbw = struct.pack('<4sIIBBB16s', b'USBC', tag[0], data_len, 0x80 if direction == DIR_IN else 0, 0, len(cb), cb.ljust(16, b'\0'))
-        d.bulk_out(ep_out, cbw)
+    def __init__(self, d):
+        ifs = parse_config(d.config_descriptor())
+        found = find_bulk(ifs, 8)
+        if not found:
+            raise IOError('no MSC interface (interfaces: %s)' % ifs)
+        self.iface, self.ep_out, self.ep_in = found
+        self.d = d
+        d.set_configuration(1)
+        self.tag = 0
+
+    def max_lun(self):
+        """Class request GET MAX LUN (0xFE)."""
+        return self.d.control_in(0xA1, 0xFE, 0, self.iface, 1)[0]
+
+    def cmd(self, lun, cb, data_len=0, direction=DIR_IN, out=b''):
+        """-> (CSW status, residue, data in)."""
+        self.tag += 1
+        cbw = struct.pack('<4sIIBBB16s', b'USBC', self.tag, data_len, 0x80 if direction == DIR_IN else 0, lun,
+                          len(cb), cb.ljust(16, b'\0'))
+        self.d.bulk_out(self.ep_out, cbw)
         data = b''
         if direction == DIR_IN and data_len:
             while len(data) < data_len:
-                chunk = d.bulk_in(ep_in, min(4096, data_len - len(data)))
+                chunk = self.d.bulk_in(self.ep_in, min(4096, data_len - len(data)))
                 if not chunk:
                     break
                 data += chunk
-        csw = d.bulk_in(ep_in, 13)
+                if len(chunk) % 64:
+                    break  # short packet: the device sent less
+        elif direction == DIR_OUT and data_len:
+            # One URB per 64-byte packet: Renode's DWC2 OUT endpoint keeps at
+            # most one packet while the device NAKs, so a longer URB loses data.
+            out = out.ljust(data_len, b'\0')
+            for o in range(0, data_len, 64):
+                self.d.bulk_out(self.ep_out, out[o:o + 64])
+        csw = self.d.bulk_in(self.ep_in, 13)
         sig, rtag, residue, status = struct.unpack('<4sIIB', csw)
-        if sig != b'USBS' or status != 0:
-            raise IOError('CSW status %d for %s' % (status, cb.hex()))
+        if sig != b'USBS' or rtag != self.tag:
+            raise IOError('bad CSW %s for %s' % (csw.hex(), cb.hex()))
+        return status, residue, data
+
+    def ok(self, lun, cb, data_len=0, direction=DIR_IN, out=b''):
+        st, _, data = self.cmd(lun, cb, data_len, direction, out)
+        if st != 0:
+            raise IOError('CSW status %d for %s on LUN %d (sense %s)' % (st, cb.hex(), lun, self.sense(lun)))
         return data
 
-    inq = scsi(bytes([0x12, 0, 0, 0, 36, 0]), 36, DIR_IN)
+    def sense(self, lun):
+        d = self.ok(lun, bytes([0x03, 0, 0, 0, 18, 0]), 18)
+        return '%02X/%02X/%02X' % (d[2] & 15, d[12], d[13])
+
+    def inquiry(self, lun):
+        return self.ok(lun, bytes([0x12, 0, 0, 0, 36, 0]), 36)
+
+    def capacity(self, lun):
+        return struct.unpack('>II', self.ok(lun, bytes([0x25]) + b'\0' * 9, 8))
+
+    def read(self, lun, lba, n, bs, retries=0):
+        """READ(10). retries > 0: on a stuck transfer (the emulated DWC2
+        sometimes stops answering a bulk URB, also with one LUN) reconnect,
+        Bulk-Only Mass Storage Reset + clear both halts, and try again."""
+        for k in range(retries + 1):
+            try:
+                return self.ok(lun, struct.pack('>BBIBHB', 0x28, 0, lba, 0, n, 0), n * bs)
+            except (TimeoutError, socket.timeout):
+                if k == retries:
+                    raise
+                print('  READ LBA %d x %d stuck: BOT reset recovery, retry' % (lba, n), flush=True)
+                self.recover()
+
+    def recover(self):
+        busid = self.d.busid
+        self.d.close()
+        self.d = Dev(busid)
+        self.d.control_out(0x21, 0xFF, 0, self.iface)          # Bulk-Only Mass Storage Reset
+        for ep in (self.ep_in, self.ep_out):
+            self.d.control_out(0x02, 0x01, 0, ep)              # CLEAR_FEATURE(ENDPOINT_HALT)
+
+
+def msc_read(d, lba=0, lun=0):
+    m = Msc(d)
+    inq = m.inquiry(lun)
     print('INQUIRY: %r' % inq[8:36].decode(errors='replace'))
-    cap = scsi(bytes([0x25]) + b'\0' * 9, 8, DIR_IN)
-    last, bsz = struct.unpack('>II', cap)
+    last, bsz = m.capacity(lun)
     print('READ CAPACITY: %d blocks of %d bytes (%.1f MiB)' % (last + 1, bsz, (last + 1) * bsz / 1048576))
-    blk = scsi(struct.pack('>BBIBHB', 0x28, 0, lba, 0, 1, 0), bsz, DIR_IN)
+    blk = m.read(lun, lba, 1, bsz)
     print('READ(10) LBA %d: %d bytes, head %s, sig %s' % (lba, len(blk), blk[:16].hex(), blk[510:512].hex()))
     return blk
+
+
+def msc_luns(d):
+    """GET MAX LUN and the per-LUN behaviour a host OS relies on."""
+    m = Msc(d)
+    n = m.max_lun() + 1
+    print('GET MAX LUN: %d -> %d LUN(s)' % (n - 1, n))
+    res = {}
+    for lun in range(n):
+        inq = m.inquiry(lun)
+        tur = m.cmd(lun, bytes(6))[0]
+        last, bs = m.capacity(lun)
+        ms6 = m.ok(lun, bytes([0x1A, 0, 0x3F, 0, 192, 0]), 192)
+        ms10 = m.ok(lun, bytes([0x5A, 0, 0x3F, 0, 0, 0, 0, 0, 192, 0]), 192)
+        wp6, wp10 = bool(ms6[2] & 0x80), bool(ms10[3] & 0x80)
+        print('LUN %d: INQUIRY type %02x rmb %d %r; TEST UNIT READY %s; %d x %d B (%.1f MiB); '
+              'MODE SENSE(6) WP %d, (10) WP %d' % (lun, inq[0], inq[1] >> 7, inq[8:32].decode(errors='replace'),
+                                                    'ok' if tur == 0 else 'FAIL %s' % m.sense(lun),
+                                                    last + 1, bs, (last + 1) * bs / 1048576, wp6, wp10))
+        res[lun] = dict(inq=inq, wp=wp6, bs=bs, blocks=last + 1)
+    for lun in range(n):
+        if not res[lun]['wp']:
+            continue
+        bs = res[lun]['bs']
+        before = m.read(lun, 0, 1, bs)
+        st, residue, _ = m.cmd(lun, struct.pack('>BBIBHB', 0x2A, 0, 0, 0, 1, 0), bs, DIR_OUT, b'\xA5' * bs)
+        sense = m.sense(lun)
+        after = m.read(lun, 0, 1, bs)
+        print('LUN %d: WRITE(10) LBA 0 -> CSW status %d residue %d, sense %s (want 07/27/00); LBA 0 %s'
+              % (lun, st, residue, sense, 'unchanged' if after == before else 'CHANGED'))
+        assert st == 1 and sense == '07/27/00' and after == before
+        # PREVENT / ALLOW on the read-only LUN: accepted (host_mounted is LUN 0 only).
+        print('LUN %d: PREVENT %d, ALLOW %d' % (lun, m.cmd(lun, bytes([0x1E, 0, 0, 0, 1, 0]))[0],
+                                                m.cmd(lun, bytes([0x1E, 0, 0, 0, 0, 0]))[0]))
+    print('LUN 0 TEST UNIT READY after: %s' % ('ok' if m.cmd(0, bytes(6))[0] == 0 else 'FAIL ' + m.sense(0)))
+    return res
+
+
+def msc_dump(d, lun, out):
+    """FAT12/16 volume -> image: metadata + allocated clusters (zeros elsewhere).
+    Resumable: progress is kept in OUT.part / OUT.done; a stuck transfer (the
+    emulated DWC2 sometimes stops answering, also with one LUN and the
+    pre-LUN-1 firmware) saves what was read and exits 2: restart the
+    emulator and run the same command again."""
+    import os
+    m = Msc(d)
+    last, bs = m.capacity(lun)
+    part, prog = out + '.part', out + '.done'
+    img = bytearray(open(part, 'rb').read()) if os.path.exists(part) else bytearray((last + 1) * bs)
+    done = int(open(prog).read()) if os.path.exists(prog) else -1  # -1: metadata not read yet
+    try:
+        if done < 0:
+            boot = m.read(lun, 0, 1, bs)
+            b16 = lambda o: struct.unpack_from('<H', boot, o)[0]
+            data = b16(0x0E) + boot[0x10] * b16(0x16) + b16(0x11) * 32 // bs
+            for l in range(0, data, 64):
+                n = min(64, data - l)
+                img[l * bs:(l + n) * bs] = m.read(lun, l, n, bs)
+            done = 0
+        boot = bytes(img[:bs])
+        b16 = lambda o: struct.unpack_from('<H', boot, o)[0]
+        spc, rsvd, nf, rootn, fsz = boot[0x0D], b16(0x0E), boot[0x10], b16(0x11), b16(0x16)
+        tot = b16(0x13) or struct.unpack_from('<I', boot, 0x20)[0]
+        data = rsvd + nf * fsz + rootn * 32 // bs
+        fat = img[rsvd * bs:(rsvd + fsz) * bs]
+        clusters = (tot - data) // spc
+        used = [c for c in range(2, clusters + 2) if struct.unpack_from('<H', fat, 2 * c)[0] != 0]
+        print('LUN %d: %d sectors of %d, metadata %d sectors, %d clusters used of %d, %d done'
+              % (lun, tot, bs, data, len(used), clusters, done), flush=True)
+        for i in range(done, len(used)):
+            lba = data + (used[i] - 2) * spc
+            img[lba * bs:(lba + spc) * bs] = m.read(lun, lba, spc, bs)
+            done = i + 1
+            if done % 32 == 0:
+                print('  %d / %d clusters' % (done, len(used)), flush=True)
+    except (TimeoutError, socket.timeout):
+        open(part, 'wb').write(img)
+        open(prog, 'w').write(str(done))
+        print('stuck after %d clusters: saved, restart the emulator and run again' % max(done, 0))
+        sys.exit(2)
+    open(out, 'wb').write(img)
+    for f in (part, prog):
+        if os.path.exists(f):
+            os.remove(f)
+    print('wrote %s' % out)
 
 
 def main():
@@ -346,7 +497,11 @@ def main():
         elif cmd == 'usbtmc':
             print(usbtmc_query(d, a[2]).strip())
         elif cmd == 'msc':
-            msc_read(d, int(a[2], 0) if len(a) > 2 else 0)
+            msc_read(d, int(a[2], 0) if len(a) > 2 else 0, int(a[3]) if len(a) > 3 else 0)
+        elif cmd == 'luns':
+            msc_luns(d)
+        elif cmd == 'mscdump':
+            msc_dump(d, int(a[2]), a[3])
         elif cmd == 'read':
             addr, n = int(a[2], 0), int(a[3], 0)
             data = d.control_in(0xC0, 0x02, addr & 0xFFFF, addr >> 16, n)
