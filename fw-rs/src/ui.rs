@@ -4,11 +4,9 @@
 //! columns so redraws do not flicker.
 
 use crate::dmm::{Button, Reading};
-use crate::fonts::LABEL;
 use crate::gen;
 use crate::lcd::{self, Color};
 use crate::meter;
-use crate::text;
 
 /// RGB565 of the stock colours (panel reads back RGB666).
 pub const BG: Color = 0x0883; // (8, 16, 24)
@@ -27,17 +25,13 @@ pub const VALUE: Color = 0xFC40;
 pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items after the logo (4 + LOGO + 3).
 const BAR_X: i16 = 4 + sf::LOGO + 3;
-const VALUE_X1: u16 = 396; // right edge of the last digit
 /// Extra-digit cell of the main readout (x, width); see DmmView::reading.
 /// 375..402, before the limit badge (403..433, y 72..88) and the unit box
 /// (from 404); 28 px = the widest half-size F78 digit ("4", 56 / 2).
 const XT_X: u16 = 375;
 const XT_W: u16 = 28;
 const VALUE_BASE: u16 = 146;
-const UNIT_X: u16 = 404;
-const UNIT_BASE: u16 = 144;
 pub const BTN_Y: u16 = 280;
-pub const BTN_H: u16 = 40;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -67,24 +61,6 @@ impl View {
     pub const CYCLE: [View; 4] = [View::Dmm, View::DmmScope, View::Scope, View::Gen];
 }
 
-fn bar(title: &str) {
-    lcd::fill_rect(0, 0, lcd::W, BAR_H, BAR);
-    text::draw(&LABEL, 4, 27, title, FG, BAR);
-}
-
-pub fn button_row(labels: &[&str], selected: Option<usize>) {
-    let n = labels.len() as u16;
-    let w = lcd::W / n;
-    lcd::fill_rect(0, BTN_Y - 2, lcd::W, BTN_H + 2, BG);
-    for (i, l) in labels.iter().enumerate() {
-        let x = i as u16 * w;
-        let c = if Some(i) == selected { SEL } else { BTN };
-        lcd::fill_rect(x + 2, BTN_Y, w - 4, BTN_H - 2, c);
-        let tw = LABEL.width(l);
-        text::draw(&LABEL, x + (w - tw.min(w)) / 2, BTN_Y + 29, l, FG, c);
-    }
-}
-
 /// Which of `n` bottom buttons a touch at (x, y) hits.
 /// (DMM page function row: 6 buttons at x 4 + 79 i, see DmmView::draw_static.)
 pub fn button_hit(n: usize, x: u16, y: u16) -> Option<usize> {
@@ -95,32 +71,8 @@ pub fn button_hit(n: usize, x: u16, y: u16) -> Option<usize> {
     }
 }
 
-pub const DMM_BUTTONS: [&str; 6] = ["V", "A", "\u{3a9}", "Cap", "Diode", "Hz/\u{b0}C"];
-
 fn button_index(b: Button) -> usize {
     Button::ALL.iter().position(|&x| x == b).unwrap_or(0)
-}
-
-fn sub_label(mode: u8) -> &'static str {
-    match mode {
-        0 | 2 | 4..=6 => "AC",
-        1 | 3 | 7..=9 => "DC",
-        11 => "Cont",
-        12 => "Diode",
-        _ => "",
-    }
-}
-
-fn val_line<'a>(buf: &'a mut [u8; 40], v: &crate::dmm::Val) -> &'a str {
-    let mut t = [0u8; 16];
-    let s = meter::text(&mut t, v);
-    let n = s.len().min(20);
-    buf[..n].copy_from_slice(&s.as_bytes()[..n]);
-    buf[n] = b' ';
-    let u = v.unit.as_bytes();
-    let k = u.len().min(40 - n - 1);
-    buf[n + 1..n + 1 + k].copy_from_slice(&u[..k]);
-    core::str::from_utf8(&buf[..n + 1 + k]).unwrap_or("")
 }
 
 // ------------------------------------------------------------------ DMM

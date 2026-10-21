@@ -170,9 +170,8 @@ Code work (in this order):
       - #14 won't do: the preview is the stock geometry (4,85,239,231; stock UI is the baseline);
         the bar now carries the status (#9).
       - #15 the duplicate Keypad/ScopeMenu arms are gone (ScopeMenu removed by the scope port).
-        Still dead: ui::bar / button_row / DMM_BUTTONS and all of fonts.rs (VALUE/UNIT/LABEL/SMALL,
-        LABEL used only by those two fns); removing fonts.rs touches main.rs + the host-test
-        module lists: left for a quiet moment (DMM-page area of ui.rs).
+        Dead code removed (2026-10-21): ui::bar / button_row / DMM_BUTTONS / sub_label / val_line,
+        src/fonts.rs + src/text.rs (only those used them), tools/mkfont.py + fonts/Roboto-*.
       Open:
       - [x] UF-08 cursor tab "CUR" at the graph bottom (108,280): off -> X -> Y -> off, as the
         stock cursor measurements (X2-1 + Xf / Y2-1) in the measurement row; "off" restores the
@@ -470,3 +469,6 @@ Emulator (emu/):
       now the stock "ON" tag (ON_TAG font, glyph 0x20) on the ohm button (DMM page + combined band)
       and Normal / "Low current ON" buttons on the Resistor Settings page. (verify on device: tag shows,
       the ~0.27 mA vs ~0.85 mA test current)
+- [x] ui-review #15 dead code: ui::bar / button_row / DMM_BUTTONS / sub_label / val_line and four unused
+      layout constants, src/fonts.rs and src/text.rs (the anti-aliased Roboto set; nothing else used them),
+      tools/mkfont.py and fonts/Roboto-*; host-test module lists updated (ui::button_hit stays: live).
