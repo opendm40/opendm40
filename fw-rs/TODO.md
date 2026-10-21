@@ -395,3 +395,10 @@ Emulator (emu/):
 - [ ] Cold-junction temperature and the HY3131 die temperature are separate inputs (die temp always set; default equal).
 - [ ] GUI: Apply on Enter in the HY3131 input fields; show only the fields relevant to the chosen source (no freq/DC offset
       for plain DC etc.).
+- [ ] Virtual backup files (owner 2026-10-21): serve BACKUP.TXT, BOOTDATA.BIN, CALIB.BIN, LOADER.BIN, OTP.BIN, ROMBOOT.BIN
+      (+ OPTBYTES, UID, the running firmware as an update file) as VIRTUAL read-only files generated on the fly from the MCU
+      flash instead of writing them to the SPI disk — e.g. a second USB MSC LUN with a synthesized read-only FAT volume
+      (DAPLink-style). Benefits: always current, no SPI wear, no 8 s first-boot write, drop most of calbackup's writer.
+      Caveat: the SPI-disk copy is the only copy that survives an SWD/BOOT0 recovery (RDP1 → mass erase of the MCU flash
+      incl. calibration) — proposal: keep ONE write-once safety copy of CALIB/BOOTDATA/UID on the SPI disk (written only if
+      missing), everything else virtual. Check Linux/Windows/macOS handling of a 2-LUN device and read-only media.
