@@ -526,11 +526,20 @@ Firmware:
       ~2x faster than ad2_r26_for's nominal (600 -> 1128/s, 2400 -> 3832/s measured; 0x24 = 0x04 readout), so
       LOG:COUNt? lost clamps at 0 below 9600; link ceiling ~6.5 kS/s; DRAW 2 = 26 ms gap per 100 ms. Open: the
       --chop off pair, a shorted-input mV noise run, then the rate cap.
+- [x] (E2) HY3131 on the hardware SPI2 (src/hy3131.rs; feasibility doc 8): SPI2 @ 0x4000_3C00, PC10/11/12 AF6
+      (VERIFIED: GD32F450xx DS table 5, UM V2.2), mode 0, /16 = 3.125 MHz, CS PD2 GPIO, the read-period clock as
+      one GPIO pulse on PC10 between SPI bytes (exact datasheet frame). It is THE bus (no runtime switch); the old
+      bit-bang stays only as the fallback build feature `hyspi-bitbang`. DBG:HYSPI:SELF? n[,div]: constant-row /
+      write-pattern / AD2-sign check + us per frame (div 8 / 16 / 32 for one call). Emulator: HY3131SpiPort on
+      spi3; AD2 logger loss at 2400 / 9600 S/s 16 % / 79 % (BB) -> 1.5 % / 8 % (SPI2), plumbing only.
+- [ ] (E2) device check (10 min, feasibility doc 8.4): SPI2 build, SELF? at 16 / 32 / 8, readings vs the
+      bit-bang fallback build, AD2 logger loss; on failure flash the `hyspi-bitbang` build. Then drop the
+      fallback feature and the bit-bang code.
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
       V/mV/A on the isolated jacks (current waveforms). Scope UI reused ("Wave" from DMM, MCX|DMM source badge),
-      software trigger. Needs one ISR (owner decision; fw-rs is ISR-free) + HY3131 on hardware SPI2; ~2.5-3 weeks.
+      software trigger. Needs one ISR (owner decision; fw-rs is ISR-free); HY3131 on hardware SPI2 done (E2); ~2-2.5 weeks.
 - [x] Device 2026-10-21 (docs/device-check-2026-10-21.md "Fixes"): stack 37468/46048 B (81 %) on 16b3eb9.
       d957027: no USBTMC tx copy, 8-byte logger records, .sram_bss (EP_MEMORY, MSC_IO, MSC block, touch
       log, dlog TAB); build.sh native checks the static worst path (tools/stack-depth) >= 16 KiB headroom,

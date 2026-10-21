@@ -298,6 +298,7 @@ pub enum Log {
 ///   DBG:DIAG?               diagnostic block (#3)
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
+///   DBG:HYSPI:SELF? n[,div]  HY3131 bus self-test (src/hyspi.rs)
 ///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
 ///   DBG:RELEASE             stop feeding the watchdog. RAM: back to stock in ~20 s.
 ///                           Native: the WDT reset counts as a crash (1st: fw-rs
@@ -329,6 +330,8 @@ pub enum Dbg {
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level).
     Ad2(u8, u8, u16, u8),
+    /// DBG:HYSPI:SELF? n[,div] (src/hyspi.rs): (n, div; 0 = the build's).
+    HySpi(u16, u8),
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
@@ -1058,6 +1061,25 @@ impl Scpi {
                     };
                     match c {
                         Some(c) => out = Out::Instr(c),
+                        None => self.err = Some("Undefined header"),
+                    }
+                }
+                // HY3131 bus self-test (src/hyspi.rs, main.rs).
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HYSPI"[..]) => {
+                    let a = trim(arg);
+                    let mut it = a.split(|&b| b == b',').map(trim);
+                    let first = it.next().unwrap_or(&[]);
+                    let div = it.next().and_then(parse_num).map_or(0, |d| d as u32);
+                    let div = if matches!(div, 8 | 16 | 32) { div as u8 } else { 0 };
+                    let d = match (parts.get(2).copied(), query) {
+                        (Some(b"SELF"), true) => {
+                            let n = parse_num(first).map_or(100, |v| v as u32).clamp(1, crate::hyspi::N_MAX);
+                            Some(Dbg::HySpi(n as u16, div))
+                        }
+                        _ => None,
+                    };
+                    match d {
+                        Some(d) => out = Out::Dbg(d),
                         None => self.err = Some("Undefined header"),
                     }
                 }

@@ -90,6 +90,7 @@ namespace Hy3131Tests
             CrossCases();
             Sentinel();
             Power();
+            HwSpi();
             Console.WriteLine("{0} passed, {1} failed", passes, failures);
             return failures == 0 ? 0 : 1;
         }
@@ -679,6 +680,64 @@ namespace Hy3131Tests
         /// FR-38 (B): the data logger's AD2 source (fw-rs hy3131::set_ad2_stream): one AD2F and
         /// one fresh R03..R05 per conversion period on the chip's grid, the code of the DC-coupled
         /// AC mA row, the rung's rate, and the per-result noise model.
+        private static string Hex(byte[] b) => BitConverter.ToString(b).Replace("-", " ");
+
+        /// The hardware-SPI byte path (HY3131SpiPort / SpiByte) against the
+        /// bit-banged frames: fw-rs hy3131.rs's SPI2 frame (pulse) and the
+        /// alternative shifted framing (cmd + n + 1 bytes).
+        private static void HwSpi()
+        {
+            Console.WriteLine("Hardware SPI byte path (fw-rs SPI2 bus)");
+            var m = NewChip();
+            m.Configure(F0R0, 0);
+            m.Write(0x36, 0x5A);
+            var bb = m.Read(0x1F, 23);
+            Check(bb[0] == 0 && Hex(bb).EndsWith(Hex(F0R0)), "BB read R1F..R35 = INTE + the row", Hex(bb));
+            Check(Hex(m.HwRead(0x1F, 23, false)) == Hex(bb), "HW pulse framing: R1F..R35 = BB");
+            Check(Hex(m.HwRead(0x1F, 23, true)) == Hex(bb), "HW shift framing: R1F..R35 = BB");
+            Check(m.HwRead(0x36, 1, false)[0] == 0x5A && m.HwRead(0x36, 1, true)[0] == 0x5A, "R36 read 1 byte, both framings");
+            // Writes at speed (no read period): pattern via HW, read back bit-banged.
+            var bad = 0;
+            for(var i = 0; i < 256; i++)
+            {
+                m.HwWrite(0x36, (byte)i);
+                if(m.Read1(0x36) != i) bad++;
+            }
+            Check(bad == 0, "HW write R36 0..255, BB read-back", bad + " bad");
+            m.HwWrite(0x20, F1R0);
+            Check(Hex(m.Read(0x20, 22)) == Hex(F1R0), "HW write of a whole 22-byte row");
+            // Live data with forced codes: R00..R05 identical on all three.
+            m.Chip.SetAd1(-1234567); m.Chip.SetAd2(0x2ABCD);
+            m.Configure(F1R0, 1);
+            m.Advance(0.5);
+            var d = m.Read(0x00, 6);
+            Check(Hex(m.HwRead(0x00, 6, false)) == Hex(d) && Hex(m.HwRead(0x00, 6, true)) == Hex(d), "R00..R05 (AD1 + AD2) equal on BB / HW / HWS", Hex(d));
+            Check(S24(d, 0) == -1234567, "AD1 code through the frame", S24(d, 0).ToString());
+            // The register after the frame (reg + n): its MSB is put on DO at the
+            // last falling edge of every framing (BB included), so the model reads
+            // it (side effects included) on BB, pulse and shift alike; the shift's
+            // 6 further clocks add nothing. R15..R1D runs into R1E = INTF (clear-
+            // on-read): cleared on all three; R15..R1C (tail R1D) on none.
+            // (fw-rs uses the pulse framing: the same clocks as BB.)
+            foreach(var fr in new[] { 0, 1, 2 })
+            {
+                var nm = new[] { "BB", "HW pulse", "HW shift" }[fr];
+                m.Chip.Core.ForceIntf(0x1C);
+                if(fr == 0) m.Read(0x15, 8); else m.HwRead(0x15, 8, fr == 2);
+                Check((m.Chip.Core.Intf & 0x1C) == 0x1C, nm + ", R15..R1C: INTF untouched (new conversions may add bits)", "0x" + m.Chip.Core.Intf.ToString("X2"));
+                if(fr == 0) m.Read(0x15, 9); else m.HwRead(0x15, 9, fr == 2);
+                Check(m.Chip.Core.Intf == 0, nm + ", R15..R1D: the fetch of R1E clears INTF (model)", "0x" + m.Chip.Core.Intf.ToString("X2"));
+            }
+            m.Chip.Core.ForceIntf(0x1C);
+            Check(m.HwRead(0x1E, 1, true)[0] == 0x1C && m.Chip.Core.Intf == 0, "INTF read over HWS: value, then cleared like BB");
+            m.Configure(F0R0, 0);
+            // CS high: the chip ignores the clock; the byte is the IRQ level.
+            m.Write(0x1E, 0); m.Write(0x1F, 0);
+            var t = m.Chip.Transfers;
+            Check(m.SpiX(0x41) == 0x00 && m.Chip.Transfers == t, "byte with CS high: IRQ level (0), no frame");
+            Check(Hex(m.Read(0x20, 22)) == Hex(F0R0), "row intact after the CS-high byte");
+        }
+
         private static void Ad2Stream()
         {
             Console.WriteLine("AD2 stream (data logger source)");

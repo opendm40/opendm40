@@ -84,3 +84,8 @@ namespace Antmicro.Renode.Peripherals.Bus
 {
     public interface IDoubleWordPeripheral { uint ReadDoubleWord(long offset); void WriteDoubleWord(long offset, uint value); }
 }
+
+namespace Antmicro.Renode.Peripherals.SPI
+{
+    public interface ISPIPeripheral { byte Transmit(byte data); void FinishTransmission(); void Reset(); }
+}

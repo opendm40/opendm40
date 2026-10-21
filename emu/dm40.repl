@@ -271,6 +271,11 @@ hy3131: Miscellaneous.HY3131 @ sysbus 0x7FFF1000
     portA: gpioPortA
     portE: gpioPortE
 
+// ... and on the same pins as GD32 SPI2 (spi3 here, PC10/11/12 AF6): fw-rs
+// hy3131.rs back end HW / HWS. Bytes only; CS PD2 stays with hy3131.
+hy3131spi: SPI.HY3131SpiPort @ spi3
+    chip: hy3131
+
 // ADC0 (battery PC5 = channel 15, internal temperature channel 16)
 adc1: Analog.SimpleADC @ sysbus 0x40012000
 
