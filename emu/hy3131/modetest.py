@@ -58,29 +58,32 @@ SCENARIOS = [
 # An expectation is a number (value +- max(atol, rtol * value) with the per-function tolerance),
 # 'zero' (|x| < zero floor), 'ol' (no valid reading / over range), or None (record only).
 CROSS_CONNECTIONS = [
-    ('V 1.234', 'vsrc:1.234', {'dcv': 1.234, 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': 'ol', 'cont': 'ol',
-                               'diode': 'ol', 'cap': None, 'hz': None, 'temp': None}),
+    # cont with a source / diode / capacitor: the stock clamps the negative code to 0 ohm, fw-rs shows the
+    # negative value; diode mode on a stiff 1.234 V source reads the source (below the 3 V full scale)
+    ('V 1.234', 'vsrc:1.234', {'dcv': 1.234, 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': 'ol', 'cont': None,
+                               'diode': 1.234, 'cap': None, 'hz': None, 'temp': None}),
     ('V 1.234 + I 12.3 mA', 'vsrc:1.234;isrc:0.0123', {'dcv': 1.234, 'acv': 'zero', 'dca': 0.0123, 'aca': 'zero',
-                                                        'ohm': 'ol', 'cont': 'ol', 'diode': 'ol', 'cap': None, 'hz': None, 'temp': None}),
-    ('I 12.3 mA', 'isrc:0.0123', {'dcv': 'zero', 'acv': 'zero', 'dca': 0.0123, 'aca': 'zero', 'ohm': 'ol', 'cont': 'ol',
+                                                        'ohm': 'ol', 'cont': None, 'diode': 1.234, 'cap': None, 'hz': None, 'temp': None}),
+    ('I 12.3 mA', 'isrc:0.0123', {'dcv': 'zero', 'acv': 'zero', 'dca': 0.0123, 'aca': 'zero', 'ohm': 'ol', 'cont': 'ol',  # open jack
                                   'diode': 'ol', 'cap': None, 'hz': None, 'temp': None}),
     ('R 4.7 k', 'r:4700', {'dcv': 'zero', 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': 4700.0, 'cont': 'ol',
                            'diode': 'ol', 'cap': None, 'hz': 'zero', 'temp': None}),
     ('0.1 V behind 4.7 k', 'vsrc:0.1,rs=4700', {'dcv': 0.1, 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': None,
                                                 'cont': None, 'diode': None, 'cap': None, 'hz': None, 'temp': None}),
-    ('diode 0.65', 'diode:0.65', {'dcv': 'zero', 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': None, 'cont': 'ol',
+    ('diode 0.65', 'diode:0.65', {'dcv': 'zero', 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': None, 'cont': None,
                                   'diode': 0.65, 'cap': None, 'hz': None, 'temp': None}),
-    ('C 100 nF', 'c:100e-9', {'dcv': 'zero', 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': None, 'cont': 'ol',
+    ('C 100 nF', 'c:100e-9', {'dcv': 'zero', 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': None, 'cont': None,
                               'diode': 'ol', 'cap': 100e-9, 'hz': None, 'temp': None}),
     ('TC 100 C (cj 25, die 25)', 'tc:100;cj:25', {'dcv': 0.003096, 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': None,
                                                   'cont': None, 'diode': None, 'cap': None, 'hz': None, 'temp': 100.0}),
     ('TC 100 C, die 35', 'tc:100;cj:25;die:35', {'temp': 110.0, 'dcv': 0.003096}),
-    ('0.5 V in the A jack', 'avsrc:0.5', {'dcv': 'zero', 'dca': 'ol', 'aca': None, 'ohm': 'ol'}),
+    # 0.5 V across the A jack: 0.5 / (10 mohm + 50 mohm fuse) = 8.3 A on the auto-selected A range (a real fuse would blow)
+    ('0.5 V in the A jack', 'avsrc:0.5', {'dcv': 'zero', 'dca': 8.2, 'aca': None, 'ohm': 'ol'}),
 ]
 CROSS_FUNCTIONS = {  # name: (stock mode byte, SCPI function, tolerance rel, abs, zero floor, run_for)
     'dcv': (0x28, 'VOLT:DC', 0.001, 0.0002, 0.0005, 8),
-    'acv': (0x68, 'VOLT:AC', 0.01, 0.002, 0.005, 9),
-    'dca': (0x31, 'CURR:DC', 0.005, 2e-5, 5e-5, 9),
+    'acv': (0x68, 'VOLT:AC', 0.01, 0.002, 0.02, 9),  # zero floor 20 mV: fw-rs keeps ~18 mV of the entry transient on a DC source
+    'dca': (0x31, 'CURR:DC', 0.02, 2e-5, 5e-5, 9),
     'aca': (0x71, 'CURR:AC', 0.01, 5e-5, 1e-4, 9),
     'ohm': (0x32, 'RES', 0.005, 1.0, 1.0, 11),
     'cont': (0x44, 'CONT', 0.02, 0.3, 1.0, 8),

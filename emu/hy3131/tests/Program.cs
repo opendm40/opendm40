@@ -572,6 +572,9 @@ namespace Hy3131Tests
             m.Chip.Core.Update(m.Now);
             m.Write(0x20, 0x56);
             Check(!m.Chip.CmpPin, "CMP pin low at 200 ohm");
+            m.Chip.SetInput("open");
+            m.Read1(0x1E); m.WaitFlag(0x04, 1);
+            Check(m.ReadS24(0) == -8388608, "open in continuity: negative clip -> stock -AD1 = +1114 ohm > 1000 = OL", m.ReadS24(0).ToString());
             Near(m.Chip.Core.CmpLowThreshold, -0.0417, 0.0005, "  threshold AGNDN<2>");
         }
 
