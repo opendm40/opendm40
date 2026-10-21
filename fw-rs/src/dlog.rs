@@ -1257,6 +1257,64 @@ pub fn open(name: &[u8; 11]) -> Option<DiskGen> {
     Gen::open(FatFile::new(d, g, e.start, e.size), e.size)
 }
 
+/// Root entry `name` (8.3, case-insensitive; any file, not a directory).
+pub fn find(raw: &mut dyn Raw, g: &Geo, name: &[u8; 11]) -> Option<Ent> {
+    let mut e = [0u8; 32];
+    for i in 0..g.root_entries {
+        if !raw.read_at(g.root + i * 32, &mut e) || e[0] == 0 {
+            return None;
+        }
+        if e[0] != 0xE5 && e[11] & 0x18 == 0 && e[11] & 0x3F != 0x0F && e[..11].eq_ignore_ascii_case(name) {
+            let mut n = [0u8; 11];
+            n.copy_from_slice(&e[..11]);
+            return Some(Ent { name: n, start: le16(&e, 0x1A), size: le32(&e, 0x1C) });
+        }
+    }
+    None
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DataErr {
+    NoDisk,
+    NotFound,
+    Read,
+}
+
+/// The SCPI generator, kept between MMEM:DATA? calls (a host reads a file
+/// in 6000-byte pieces: sequential, O(1) each) while the entry is unchanged.
+static mut SCPI_GEN: Option<(Ent, DiskGen)> = None;
+
+/// MMEM:DATA?: bytes `off..` of root file `name` into `out` (count
+/// returned, 0 at the end). "LOGnnn.CSV" with a LOGnnn.DLG next to it =
+/// the CSV generated from the DLG; else the file's raw bytes.
+pub fn data(name: &[u8; 11], off: u32, out: &mut [u8]) -> Result<usize, DataErr> {
+    let mut d = disk();
+    let g = geometry(&mut d).ok_or(DataErr::NoDisk)?;
+    if name[8..].eq_ignore_ascii_case(b"CSV") {
+        let mut dn = *name;
+        dn[8..].copy_from_slice(b"DLG");
+        if let Some(e) = find(&mut d, &g, &dn) {
+            let cache = unsafe { &mut *core::ptr::addr_of_mut!(SCPI_GEN) };
+            if cache.as_ref().map(|c| c.0) != Some(e) {
+                *cache = None;
+                let gen = Gen::open(FatFile::new(d, g, e.start, e.size), e.size).ok_or(DataErr::Read)?;
+                *cache = Some((e, gen));
+            }
+            let Some((_, gen)) = cache.as_mut() else { return Err(DataErr::Read) };
+            let n = (gen.info.csv.saturating_sub(off) as usize).min(out.len());
+            gen.read(off, &mut out[..n]);
+            return Ok(n);
+        }
+    }
+    let e = find(&mut d, &g, name).ok_or(DataErr::NotFound)?;
+    let n = (e.size.saturating_sub(off) as usize).min(out.len());
+    let mut f = FatFile::new(d, g, e.start, e.size);
+    if n > 0 && !f.read(off, &mut out[..n]) {
+        return Err(DataErr::Read);
+    }
+    Ok(n)
+}
+
 #[cfg(feature = "vdisk")]
 pub use vfs::*;
 

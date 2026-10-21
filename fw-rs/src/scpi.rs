@@ -162,13 +162,24 @@ pub enum Out {
 /// File commands on the USB disk's root (csvlog.rs gallery backend):
 ///   MMEMory:CATalog?        <used>,<free>{,"<name>,<type>,<size>"} (bytes; type
 ///                           BIN = S*.BMP, ASC = LOG*.CSV; csvlog::catalog_scpi_on)
-///   MMEMory:DELete "<name>" delete one S*.BMP / LOG*.CSV (USB only: refused
-///                           over Bluetooth; refused for the file being recorded)
+///   MMEMory:DELete "<name>" delete one S*.BMP / LOG*.CSV / LOG*.DLG (USB only:
+///                           refused over Bluetooth; refused for the file being recorded)
+///   MMEMory:DATA? "<name>"[,<offset>[,<length>]]
+///                           definite-length block #4nnnn of file bytes
+///                           offset.. (length default and max 6000; short or
+///                           empty at the end). "LOGnnn.CSV" of a LOGnnn.DLG
+///                           is the CSV generated from it (dlog.rs, the same
+///                           bytes as LUN 1's virtual file); any other root
+///                           file (DLG, BMP, legacy CSV) its raw bytes
 #[derive(Clone, Copy)]
 pub enum Mmem {
     Cat,
     Del([u8; 11]),
+    Data([u8; 11], u32, u32),
 }
+
+/// MMEM:DATA? block payload at most (fits the 6144-byte USBTMC response).
+pub const MMEM_DATA_MAX: u32 = 6000;
 
 /// Data-logger commands (FR-38), executed by the main loop against `Logger`:
 ///   LOG:STATe ON|OFF        start / stop the fast stream
@@ -850,6 +861,23 @@ impl Scpi {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     out = if kw(sub, "CATalog") && query {
                         Out::Mmem(Mmem::Cat)
+                    } else if kw(sub, "DATA") && query {
+                        // "<name>"[,<offset>[,<length>]]
+                        let mut it = arg.split(|&c| c == b',');
+                        let name = it.next().and_then(|n| crate::csvlog::parse_name(trim(n)));
+                        let mut num = |d: u32| -> Option<u32> {
+                            match it.next() {
+                                None => Some(d),
+                                Some(t) => core::str::from_utf8(trim(t)).ok()?.parse().ok(),
+                            }
+                        };
+                        match (name, num(0), num(MMEM_DATA_MAX)) {
+                            (Some(n), Some(off), Some(len)) => Out::Mmem(Mmem::Data(n, off, len.min(MMEM_DATA_MAX))),
+                            _ => {
+                                self.err = Some("Illegal parameter value");
+                                continue;
+                            }
+                        }
                     } else if kw(sub, "DELete") && !query {
                         match crate::csvlog::parse_name(trim(arg)) {
                             Some(n) => Out::Mmem(Mmem::Del(n)),
