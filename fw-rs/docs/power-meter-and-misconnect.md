@@ -639,6 +639,80 @@ sentinel readings are also exposed for the emulator/device tests:
 Effort: rows + sentinel state + A-JACK alert 2 days; V-JACK / LIVE / hints 1
 day; fuse check dialog 0.5 day; tests 1 day.
 
+### 4.6 Implemented (fw-rs, 2026-10-21)
+
+`fw-rs/src/sentinel.rs` (row builder, alert state machine, host tests),
+hooks in `dmm.rs` (`write_config`, `poll`, `poll_ac`, ohm / continuity /
+diode), `app.rs` / `ui.rs` (badge, toast, beep, Settings 3/3), `scpi.rs`.
+What was built, against the plan of 4.5:
+
+| sentinel | modes | row change (byte-diff host test vs the stock rows) | detection |
+|---|---|---|---|
+| A-JACK, comparator on PB1 | DC V r0..r3, DC mV, ohm (both variants, also the resistive temperature sensors), thermocouple | R20 -> 0x90 only (SCMPI PB1, ENCMP; no counter, no CMP pin) | CTSTA read (1 byte) on every `poll`, ORed into 100 ms windows; 2 hit windows in a row assert, 1 s without a hit clears |
+| A-JACK, AD1 peak hold on PB1 - PB3 | AC V r0..r3, AC mV | R22 0x00 (OSR 256 unchopped), R23 \|= ENAD1, R24 0x95, R25 AD1IG 3.6, R29 ENPKH + PKHSEL 01 | PKHMIN / PKHMAX come with `poll_ac`'s 20-byte read; > 17 900 (0.5 mA on 47.5 ohm) is a hit; ENPKH toggled after each harvest (`PKH_RESTART`, T9) |
+| V-JACK?, comparator on SENSE via /1000 (SS5 only) | DC A / mA / uA | R20 -> 0x10, R2C \|= 0x10 (SS5; PS5 never) | hit windows for 1 s while \|I\| < 0.5 % of the range; clears 0.5 s after the last hit or when current flows |
+| LIVE? (no hardware) | ohm, continuity, diode | none | ohm AD1 code < -20 000 (sign the formula otherwise drops), continuity < -2 ohm before the clamp, diode < -0.05 V; 0.3 s to assert, 1 s to clear |
+
+Not done (as allowed by 4.2-4.4): AC+DC (both phases keep the stock rows:
+`freq_secondary` rewrites R20), diode / continuity / capacitance /
+frequency / AC A A-jack or V-jack sentinels (their comparators / converters
+are busy; AD2 + OP2 variants need T8 first), the DC? / AC? / FUSE? hints, the
+OVERLOAD shunt rule, the fuse-check dialog, STAT:QUES bit 9. The MOSFETs are
+never switched by the sentinel.
+
+UI (stock visual language, `tools/ui-render` ink / overlap check over every
+alert x hold x verdict x rate-chip case, renders d12-d14, c11, t03, m10):
+the DMM status slot (where RUN / HOLD / A-HOLD sit) shows "A-JACK" white on
+red or "V-JACK?" / "LIVE?" in the value amber when no HOLD / AutoHold is on
+(HOLD wins; the alert box runs 119..201); the combined-view strip badge has
+priority HOLD > alert > HV > REC > REL; one toast per assertion ("Current in
+A jack: check leads" / "Voltage on V jack, no current" / "Voltage on circuit
+- power off"); A-JACK beeps 3 x 50 ms every 2 s at the key / alert volume (0 %
+= silent), LIVE? once 100 ms, V-JACK? silent. Settings 3/3 "Jack alerts": ON
+(all) / A-JACK only / OFF, persisted in p[38] bits 11..13; a disabled
+sentinel writes the stock row. SCPI: `SYSTem:ALERt?` (NONE | AJACK | VJACK |
+LIVE), `SYSTem:ALERt:ENABle <0..7> | ON | OFF` / `?`, `DBG:SENTinel?`
+(kind,alert,mask,ctsta,pkhmin,pkhmax,streak,hit_windows,samples).
+
+Emulator: the HY3131 model got the sentinel nodes (comparator on PB1 = the
+A current times the relay-selected shunt, instantaneous, in the DC V / mV /
+ohm / temperature roles; SENSE = V jack / 1000 with SS5 in DC A; AD1 on PB1 -
+PB3 in the AC roles with the peak hold over every elapsed conversion; row
+matching ignores the AD1 fields of rows with AD1 off, PKHSEL / ENPKH, and SS5
+in the current rows): 199 host checks. fw-rs end to end over USB/IP (18
+scenarios, all as expected): 1 mA DC / -1 mA / 5 mA AC 50 Hz / 5 V across
+A-COM in DC V, 2 mA in DC mV, 2 mA in ohm, 5 mA with a thermocouple, 10 mA AC
+and 1 mA DC in AC V, 5 mA AC 60 Hz in AC mV -> AJACK, cleared ~1 s after the
+source goes; 0.2 mA in DC V -> NONE; 24 V DC and 230 V AC on V-COM in DC A ->
+VJACK, 5 V or 24 V with 12.3 mA flowing -> NONE; -1 V in ohm and diode, 1.234
+V in continuity -> LIVE; ENAB 6 -> NONE. The readings stayed those of the
+stock rows (1.2340 V, 100.3 C, 1.0000 V AC, 4699.98 ohm), and the
+`modetest.py --cross` table of fw-rs (86 cells) is unchanged against the parent
+commit within the model noise (all ok; largest moves: the AC V floor 0.84 ->
+0.89 mV, diode on a thermocouple 10.79 -> 10.76 mV).
+
+Device test plan (sentinel build; commit the tree before flashing):
+
+* **T7** DC V / DC mV zero (shorted leads) and 1 V reading, ohm 100 ohm / 10
+  kohm, thermocouple: equal within noise with Jack alerts ON and OFF
+  (Settings 3/3), i.e. comparator on PB1 vs the stock row. `DBG:SENT?` with
+  the A jack open over 10 minutes in each: alert NONE, hit_windows 0.
+* **T8** (not needed by this build: no AD2 sentinel) DC A zero / gain with AD2
+  + OP2 enabled, before any AD2-based V-JACK? in AC A.
+* **T9** A-JACK: 1 mA and 10 mA DC (both polarities) and 10 mA AC 50 Hz into
+  A-COM while in DC V, DC mV, ohm, temperature, AC V, AC mV: badge within
+  ~0.3 s, toast once, 3-beep pattern every 2 s (volume 50 % and 0 %),
+  cleared ~1 s after removal; trip threshold (expect ~0.44 mA DC on the
+  comparator, ~0.5 mA on AD1); `DBG:SENT?` pkhmin / pkhmax in AC V. AC V
+  reading of 1 V / 230 V 50 Hz with alerts ON vs OFF (AD1 running + the R29
+  ENPKH toggle every ~107 ms must not move the RMS / LPF / Hz readouts; if it
+  does, `PKH_RESTART = false`). No false trips in any of those modes with the
+  A jack open (10 min each) and during autoranging.
+* **T10** V-JACK?: 5 V (no alert expected, below 21 V), 24 V DC and mains on
+  V-COM with nothing in A while in DC A / mA / uA: amber badge after ~1 s,
+  cleared 0.5 s after removal; DC mA reading with SS5 closed unchanged
+  (12.3 mA reference); no alert while a current flows.
+
 ---------------------------------------------------------------------------
 
 ## 5. Open points for the owner

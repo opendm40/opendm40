@@ -479,9 +479,16 @@ Firmware:
       energy) by switching internal modes — check feasibility with the DM40 front-end wiring first.
       Researched: GO, docs/power-meter-and-misconnect.md §3 (I on the stock OP1 path, V via OP2→AD3 DC-coupled,
       signed 38-bit X·Y RMS read, ~10-12 days). Gate: device test T1 (OP2 on SENSE). Owner: fuse/CAT/10 A limits.
-- [ ] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
+- [x] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
       Researched: GO for current-in-A-jack in non-current modes (idle comparator on PB1, 47.5 Ω shunt, trips ~0.44 mA),
       partial for "V leads while in A mode"; blown fuse not detectable (fuse-check dialog instead). Doc §4, ~4-5 days.
+      Done (sentinel.rs, doc §4.6): A-JACK by the comparator on PB1 (DC V / mV / ohm / temp) and the AD1 peak
+      hold on PB1-PB3 (AC V / mV); V-JACK? by the comparator on the /1000 tap (DC A, SS5 only); LIVE? from the
+      ohm / continuity / diode results; status-slot / strip badge, toast, 3x50 ms beep every 2 s; Settings 3/3
+      "Jack alerts"; SYST:ALER? / :ENAB, DBG:SENT?. Emulator model + 18 USB/IP scenarios; cross table unchanged.
+      (verify on device: T7, T9, T10 of the doc; T9 decides PKH_RESTART)
+  - [ ] Not done: sentinels in AC+DC / diode / continuity / cap / Hz / AC A, DC? / AC? / FUSE? hints, OVERLOAD
+        shunt rule, fuse-check dialog, STAT:QUES bit 9 (doc §4.6).
 - [ ] (B) AD2 fast data logger: 600..9600 S/s above AD1's 640 S/s, ~14 ENOB, gaps marked (seq/timestamps); ~2 days.
       Doubles as the device experiment for (A): torn-read histogram, loss per rate, SPI2 read-back.
       docs/dmm-input-scope-feasibility.md.
