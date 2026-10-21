@@ -176,9 +176,10 @@ The USB/IP server is the model's own (`sysbus.usbfs StartUSBIPServer <port>`,
 `emu/peripherals/DWC2_OTG_USBIP.cs`); `run.py --usbip-renode` falls back to
 Renode's (`emulation CreateUSBIPServer` + `host.usb Register`), which only
 `usbip_client.py` can use. The device is busid `1-0` (devid 0x10000), full
-speed. Verified 2026-10-14: the usbrw image (ep0 memrw session) passes its
-acceptance (descriptor 28e9:02f0, UID read, RAM write + read-back); fw-rs
-enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk over
+speed. Verified 2026-10-14 with Renode's server (not re-run on the model's:
+its control OUT with a data stage is untested): the usbrw image (ep0 memrw
+session) passes its acceptance (descriptor 28e9:02f0, UID read, RAM write +
+read-back). fw-rs enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk over
 MSC. Stock firmware: the device exists only after Settings > Other > USB
 Connect; a DEVLIST / IMPORT whose descriptor read gets no answer within 3 s
 lists no device / refuses the import (checked 2026-10-21 with Renode's server:
@@ -233,9 +234,9 @@ server:
 * EP0 now always counts as active (USBAEP read 1 but its stored value was 0
   after a peripheral reset until the CPU next read DIEPCTL0).
 
-Debugging the wire: a transparent TCP proxy that logs the PDUs (listen on
-3240 for `usbip attach`, forward to the emulator on another `--usbip-port`)
-shows every SUBMIT / RET_SUBMIT / UNLINK; Renode's log has
+Debugging the wire: `emu/usbip_proxy.py 3240 3241` (a transparent TCP proxy:
+listens on 3240 for `usbip attach`, forwards to the emulator on
+`--usbip-port 3241`) logs every SUBMIT / RET_SUBMIT / UNLINK; Renode's log has
 `USB/IP: device 1-0 imported / released`.
 
 Earlier fixes in the model (2026-10-21), still relevant: the USB/IP thread
