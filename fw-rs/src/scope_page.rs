@@ -661,13 +661,12 @@ impl App {
                 lo = r1.min(r2);
                 hi = r1.max(r2);
             } else if n >= 2 {
-                // Fewer samples than columns: linear interpolation.
+                // Fewer samples than columns (fast timebases, <= 1 us/div
+                // with the 50 MS/s record): band-limited sin(x)/x
+                // interpolation (UF-41, src/sinc.rs Lanczos-3) instead of
+                // straight lines between the samples.
                 let p = i as f32 * (n - 1) as f32 / (scope::COLS - 1) as f32;
-                let k = p as usize;
-                let fr = p - k as f32;
-                let v0 = f.data[k] as f32;
-                let v1 = f.data[(k + 1).min(n - 1)] as f32;
-                let r = (r0 + slope * (v0 + (v1 - v0) * fr)) as i32;
+                let r = (r0 + slope * crate::sinc::at(f.data, p)) as i32;
                 lo = r;
                 hi = r;
             } else {

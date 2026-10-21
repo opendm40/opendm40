@@ -24,6 +24,7 @@ mod hwtrig;
 mod scope_meas;
 mod scope_ui;
 mod fft;
+mod sinc;
 mod scpi;
 mod startup;
 mod stockfont;
