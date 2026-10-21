@@ -230,7 +230,8 @@ def main(argv=None):
     ap.add_argument('--bt-port', type=int, default=0, help='TCP port for the Bluetooth UART')
     ap.add_argument('--usbip', type=float, default=None, metavar='T',
                     help='start a USB/IP server (TCP 3240) at virtual time T and export the USB device as busid 1-0 '
-                         '(use with a long --run-for or --interactive)')
+                         '(use with a long --run-for or --interactive); 0 = from the start')
+    ap.add_argument('--usbip-port', type=int, default=3240, metavar='P', help='USB/IP server TCP port (default 3240)')
     ap.add_argument('--log', help='Renode log file (default emu/out/<name>.log)')
     ap.add_argument('--name', help='base name of the generated .resc/.log (default: the mode)')
     ap.add_argument('--pa2', type=float, default=None, metavar='T',
@@ -409,7 +410,7 @@ def main(argv=None):
         v, t = parse_at(spec, 0.0)
         scope(t, v)
     if a.usbip is not None:
-        s.at(a.usbip, 'emulation CreateUSBIPServer', 'host.usb Register sysbus.usbfs')
+        s.at(a.usbip, 'emulation CreateUSBIPServer %d' % a.usbip_port, 'host.usb Register sysbus.usbfs')
     if a.mode == 'chain':
         pa2 = 0.55 if a.pa2 is None else a.pa2
         if pa2 >= 0:

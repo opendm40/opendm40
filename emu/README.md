@@ -132,7 +132,8 @@ Renode's monitor TCP port (`renode -P`), so the GUI never blocks the emulation.
 ### USB over USB/IP
 
 ```sh
-emu/run.py fwrs  --fast --usbip 5 --run-for 600        # USB/IP server on TCP 3240 from t = 5 s
+emu/live.py fwrs                                      # GUI: USB/IP on TCP 3240 by default (--no-usbip, --usbip-port P)
+emu/run.py fwrs  --fast --usbip 0.01 --run-for 600     # headless: USB/IP on TCP 3240 (--usbip-port P) from t = 10 ms
 emu/run.py stock --app ../alientek-dm40-tools/patch/build/dm40_patched.bin --fast --usbip 6 --run-for 600
 # other terminal (plain TCP, no root, no vhci):
 emu/usbip_client.py list                 # busid=1-0 1209:0001 interfaces fe/03/01 08/06/50
