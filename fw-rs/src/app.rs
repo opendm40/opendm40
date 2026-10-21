@@ -125,6 +125,8 @@ pub struct App {
     /// The text was edited since the keypad opened (OK on an untouched
     /// prefill keeps the setting as it is, no re-rounding).
     kp_edit: bool,
+    /// Keypad key drawn pressed since its touch-down (ui-review #11).
+    kp_pressed: Option<u8>,
     cur: ui::Cursors,
     /// Analog rail policy: false = Auto (default, stock-like: the rails the
     /// shown view needs, see update_rails), true = both rails always on.
@@ -333,6 +335,7 @@ impl App {
             kp_mult: b'H',
             kp_sel: false,
             kp_edit: false,
+            kp_pressed: None,
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             rails_both: false,
             host_dmm: false,
@@ -1604,6 +1607,24 @@ impl App {
         let mut captured = false;
         if let Gesture::Down(_) = g {
             self.slider_drag = false;
+        }
+        // Keypad pressed-key feedback (ui-review #11): the key under the
+        // finger is drawn pressed from touch-down until the touch ends.
+        if self.view == View::Keypad {
+            match g {
+                Gesture::Down(p) => {
+                    self.kp_pressed = ui::keypad_hit(self.kp_kind(), p.x, p.y);
+                    if let Some(c) = self.kp_pressed {
+                        ui::keypad_key(self.kp_kind(), c, true);
+                    }
+                }
+                Gesture::Drag(..) | Gesture::Move(..) | Gesture::Grab(_) => {}
+                _ => {
+                    if let Some(c) = self.kp_pressed.take() {
+                        ui::keypad_key(self.kp_kind(), c, false);
+                    }
+                }
+            }
         }
         match g {
             // Global gestures (UF-17 / UF-18), any view.
