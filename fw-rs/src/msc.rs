@@ -140,6 +140,13 @@ fn lock_of(lun: u8) -> &'static core::sync::atomic::AtomicBool {
     if lun == 0 { &HOST_LOCKED } else { &INFO_LOCKED }
 }
 
+/// DBG:VDISK:FORCE 1 (media-change experiment): LUN 1's UNIT ATTENTION goes
+/// out even while the host holds the medium locked.
+pub static DBG_FORCE_UA: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// DBG:VDISK:EJECT n: the next n LUN-1 commands (not INQUIRY / REQUEST SENSE)
+/// fail with NOT READY, MEDIUM NOT PRESENT, then a UNIT ATTENTION.
+pub static DBG_EJECT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 /// A PC has the USB disk mounted (see HOST_LOCKED).
 pub fn host_mounted() -> bool {
     HOST_LOCKED.load(core::sync::atomic::Ordering::Relaxed)
@@ -302,8 +309,21 @@ fn handle<B: UsbBus>(
     // information volume's (vdisk.rs set_extra, `take_media_changed`) only by
     // a LUN-1 one, each held back by its own LUN's lock.
     if *xfer == Xfer::None
+        && lun == 1
         && !matches!(kind, ScsiCommand::Inquiry { .. } | ScsiCommand::RequestSense { .. })
-        && !lock_of(lun).load(core::sync::atomic::Ordering::Relaxed)
+        && DBG_EJECT.load(core::sync::atomic::Ordering::Relaxed) > 0
+    {
+        if DBG_EJECT.fetch_sub(1, core::sync::atomic::Ordering::Relaxed) == 1 {
+            DBG_FORCE_UA.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
+        *sense = SENSE_NO_MEDIUM;
+        cmd.fail(0);
+        return Ok(());
+    }
+    if *xfer == Xfer::None
+        && !matches!(kind, ScsiCommand::Inquiry { .. } | ScsiCommand::RequestSense { .. })
+        && (!lock_of(lun).load(core::sync::atomic::Ordering::Relaxed)
+            || (lun == 1 && DBG_FORCE_UA.load(core::sync::atomic::Ordering::Relaxed)))
         && if lun == 0 {
             crate::screenshot::MEDIUM_CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed)
         } else {
