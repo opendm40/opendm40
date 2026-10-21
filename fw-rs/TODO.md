@@ -370,6 +370,11 @@ Code work (in this order):
 - [x] SCPI over Bluetooth serial: the same parser as USBTMC (session per transport, DBG:* refused on BT),
       stock binary frames (0xAF) dispatched alongside, DMA TX ring. docs/bt-scpi.md,
       tools/dm40bt_scpi.py.  (74b8890, 4c2f0a6; verify on device incl. READ? / WAV:DATA? throughput)
+- [ ] Auto AC/DC for V and I (as UNI-T UT197 "Auto AC/DC Voltage"): an AUTO coupling next to DC / AC /
+      AC+DC that picks DC or AC by itself from the signal (DC part vs AC RMS) and shows which one it chose,
+      as the power meter's AUTO does (7c431e5, powermeter.rs). Open: the decision rule and its
+      hysteresis, the switch time (AC+DC alternates phases), what goes in the aux row, SCPI
+      (e.g. VOLT:COUP / CURR:COUP AUTO), persisted per function.
 
 ## Found in the screenshot session 2026-10-13 (native db679a3)
 - [x] READ?/MEAS? take ~8 s (wait for a full averaging window that never fills -> 20 conversions).
