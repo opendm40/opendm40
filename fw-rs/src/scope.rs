@@ -553,11 +553,12 @@ impl Scope {
         }
         // A user STOP (run -> stop) freezes what is on screen; any other change
         // just aborts the acquisition in flight (it restarts in poll()).
-        if self.s.run && !s.run {
-            self.freeze(now);
+        let redraw = if self.s.run && !s.run {
+            self.freeze(now)
         } else {
             self.halt();
-        }
+            true
+        };
         // Roll on: full 3..29 (22.. rolls). Roll off: YT only, capped at 24
         // (1 s/div). Single never rolls (one linear record), so it is capped at
         // the YT maximum too: at 2..50 s/div a full linear record would take
@@ -569,7 +570,7 @@ impl Scope {
         // extent: zooming out past it shows the record at the true scale with
         // empty columns around it (zoom_frame), so neither the STOP press nor a
         // later change silently picks a different s/div.
-        if !s.run && self.stored_valid {
+        if !s.run && self.stored_valid && redraw {
             self.zoom_pending = true;
         }
         s.range = s.range.min(9);
@@ -636,38 +637,60 @@ impl Scope {
         self.rolling = false;
     }
 
-    /// User STOP: keep the frame the user is looking at.
+    /// User STOP: keep the frame the user is looking at, and always leave a
+    /// stored record for Save CSV / the stopped zoom when samples exist.
     ///  * Roll: the roll display is the newest data in BUF, so linearise it.
     ///  * Nothing in flight: the stored record is the last frame poll() showed
     ///    (or nothing, if poll() discarded the last record).
-    ///  * A linear acquisition in flight has already overwritten (part of) the
-    ///    displayed frame. If it is complete, treat it exactly as poll() would:
-    ///    trigger search and the Auto/Normal/Single show rule; a frame poll()
-    ///    would have shown becomes the stored record and is drawn. Otherwise
-    ///    (partial, or a record poll() would have discarded) there is no record
-    ///    to zoom: the screen stays frozen as drawn, as the stock STOP does.
-    fn freeze(&mut self, now: u64) {
+    ///  * A complete linear record in flight: treated exactly as poll() would
+    ///    (trigger search and the Auto/Normal/Single show rule); a frame
+    ///    poll() would have shown becomes the stored record and is drawn.
+    ///  * Anything else in flight (a partial linear record, a record poll()
+    ///    would have discarded, the circular hardware-trigger / stream ring)
+    ///    has already overwritten the displayed frame in BUF, so the samples
+    ///    captured so far (oldest first) become an untriggered stored record,
+    ///    anchored on the newest screen. The screen stays frozen as drawn (as
+    ///    the stock STOP does) until a zoom / pan re-renders the record
+    ///    (returns false: no re-render for the STOP press itself). Before
+    ///    this, STOP mid-acquisition left no record ("No record to save";
+    ///    coordinator 2026-10-21): with Auto and no trigger event, nearly
+    ///    every STOP lands mid-acquisition.
+    fn freeze(&mut self, now: u64) -> bool {
         let was_busy = self.busy;
         let was_rolling = self.rolling;
-        let was_hw = self.hw_mode || self.stream;
-        let ndtr = unsafe { r32(S4 + 0x04) };
+        let was_hw = self.hw_mode;
+        let was_stream = self.stream;
         self.halt();
         if !was_busy {
-            return;
+            return true;
         }
+        // Read after the stop: the DMA was still running before it.
+        let ndtr = unsafe { r32(S4 + 0x04) } as usize;
         self.stored_valid = false;
-        if was_rolling {
+        let len = if was_rolling {
             self.snapshot_roll();
+            return true;
+        } else if was_stream {
+            let wr = self.stream_wr();
+            if wr > CAP as u64 {
+                unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left((wr % CAP as u64) as usize) };
+            }
+            wr.min(CAP as u64) as usize
         } else if was_hw {
-            // Circular record (hardware trigger or software stream): only a
-            // stopped one is a complete frame; poll() would have shown it on
-            // the next tick, so leave the screen as drawn (as a partial
-            // linear record).
+            let wr = CAP - ndtr.min(CAP);
+            // HISR TCIF4: the ring has wrapped at least once.
+            let wrapped = unsafe { r32(DMA1 + 0x04) } & (1 << 5) != 0;
+            self.hw_linearise(wr, wrapped)
         } else if ndtr == 0 {
             if self.finish(now).is_some() {
-                self.zoom_pending = true;
+                return true;
             }
-        }
+            self.rec
+        } else {
+            self.rec - ndtr.min(self.rec)
+        };
+        self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false);
+        false
     }
 
     /// Mask BUF[0..len] to 10 bits and mark it as the stored record, captured
