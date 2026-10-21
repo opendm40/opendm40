@@ -671,6 +671,43 @@ fn main() -> ! {
                         scpi.len = csvlog::status_scpi(&mut scpi.buf);
                         true
                     }
+                    // Record page settings (decision 2026-10-22 #1): for
+                    // the next recording; a running one keeps its own.
+                    scpi::Log::CsvInt(Some(_)) | scpi::Log::CsvDur(Some(_)) if csvlog::active() => {
+                        scpi.set_err("Settings conflict");
+                        false
+                    }
+                    scpi::Log::CsvInt(Some(i)) => {
+                        csvlog::set_next(i, csvlog::next().1);
+                        app.invalidate();
+                        false
+                    }
+                    scpi::Log::CsvDur(Some(d)) => {
+                        csvlog::set_next(csvlog::next().0, d);
+                        app.invalidate();
+                        false
+                    }
+                    scpi::Log::CsvInt(None) => {
+                        scpi.len = 0;
+                        put_u32(&mut scpi, csvlog::INTERVALS_S[csvlog::next().0 as usize]);
+                        true
+                    }
+                    scpi::Log::CsvDur(None) => {
+                        scpi.len = 0;
+                        put_u32(&mut scpi, csvlog::DURATIONS_S[csvlog::next().1 as usize]);
+                        true
+                    }
+                    scpi::Log::CsvFree => match csvlog::free_bytes() {
+                        Ok(f) => {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, f);
+                            true
+                        }
+                        Err(e) => {
+                            scpi.set_err(if e == csvlog::GErr::Busy { "Mass storage busy" } else { "Mass storage error" });
+                            false
+                        }
+                    },
                     scpi::Log::State(Some(on)) => {
                         if on {
                             // AD1 needs a DC mode (1 DCV, 3 DCmV, 7/8/9 DCA),

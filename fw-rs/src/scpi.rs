@@ -237,6 +237,16 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///   LOG:CSV?                state,file,rows,bytes,committed,dropped (state 0 idle,
 ///                           1 recording, 2 stopping, 3 done, 4 full, 5 no disk,
 ///                           6 error; file -1 until the first commit)
+///   LOG:CSV:INTerval <s> / ?  row interval of the next recording (Record page,
+///                           decision 2026-10-22 #1): 0 = every reading
+///                           (default), 1, 10, 60 = one row per interval with
+///                           the mean of its readings; other values: "Illegal
+///                           parameter value"; while recording: "Settings
+///                           conflict" (the running one keeps its settings)
+///   LOG:CSV:DURation <s> / ?  length of the next recording: 0 = until stopped
+///                           (default), 600, 3600, 28800, 86400; as INTerval
+///   LOG:CSV:FREE?           free bytes on the USB disk ("Mass storage busy"
+///                           while a commit / screenshot / upload holds it)
 #[derive(Clone, Copy)]
 pub enum Log {
     State(Option<bool>),
@@ -252,6 +262,11 @@ pub enum Log {
     Preamble,
     Data,
     Csv(Option<bool>),
+    /// LOG:CSV:INTerval / DURation: Some(index into csvlog::INTERVALS_S /
+    /// DURATIONS_S) to set, None = query.
+    CsvInt(Option<u8>),
+    CsvDur(Option<u8>),
+    CsvFree,
 }
 
 /// Debug commands over USBTMC (development aids, not SCPI standard):
@@ -1290,6 +1305,29 @@ impl Scpi {
                         Out::Log(Log::Preamble)
                     } else if kw(sub, "DATA") && query {
                         Out::Log(Log::Data)
+                    } else if kw(sub, "CSV") && parts.len() > 2 {
+                        let s2 = parts[2];
+                        // Seconds -> index of the allowed value (exact).
+                        let idx = |set: &[u32]| parse_num(a).and_then(|v| set.iter().position(|&x| x as f32 == v)).map(|i| i as u8);
+                        if kw(s2, "INTerval") || kw(s2, "DURation") {
+                            let int = kw(s2, "INTerval");
+                            let set: &[u32] = if int { &crate::csvlog::INTERVALS_S } else { &crate::csvlog::DURATIONS_S };
+                            let v = if query { None } else {
+                                match idx(set) {
+                                    Some(i) => Some(i),
+                                    None => {
+                                        self.err = Some("Illegal parameter value");
+                                        continue;
+                                    }
+                                }
+                            };
+                            Out::Log(if int { Log::CsvInt(v) } else { Log::CsvDur(v) })
+                        } else if kw(s2, "FREE") && query {
+                            Out::Log(Log::CsvFree)
+                        } else {
+                            self.err = Some("Undefined header");
+                            continue;
+                        }
                     } else if kw(sub, "CSV") {
                         Out::Log(Log::Csv(if query { None } else { Some(a == b"ON" || a == b"1") }))
                     } else {
