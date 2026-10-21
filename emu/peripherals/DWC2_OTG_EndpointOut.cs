@@ -7,6 +7,7 @@
 //     the words already queued, not the remaining transfer size: the stock
 //     driver writes the FIFO only while the free space is LARGER than the
 //     packet it wants to send, so it hung on EP0 with exactly 5 free words.
+//   * A Bulk-OUT URB longer than the max packet size is split into packets.
 //
 using Antmicro.Renode.Core.USB;
 using Antmicro.Renode.Logging;
@@ -49,16 +50,42 @@ public partial class DWC2_OTG
 
         public void Write(byte[] data)
         {
+            lock(parent.HostLock)
+            {
+                WriteLocked(data);
+            }
+        }
+
+        private void WriteLocked(byte[] data)
+        {
             if(!Active)
             {
                 parent.WarningLog("Out endpoint #{0} - host tried to write out when endpoint is inactive", endpointNumber);
                 return;
             }
-            if(data.Length > (int)MaxPacketBytes)
+            // A USB/IP URB is a whole transfer, not a packet: split it into
+            // max-packet-size packets as the host controller would (a 68-byte
+            // USBTMC message used to be dropped here as one oversized packet).
+            // A transfer that is an exact multiple of the packet size gets no
+            // ZLP: the class protocols here (USBTMC, MSC BOT) carry their own
+            // lengths.
+            var mps = (int)MaxPacketBytes;
+            if(data.Length > mps && mps > 0)
             {
-                parent.WarningLog("Out endpoint #{0} - host didn't respect max packet size ({1} > {2}), ignoring packet", endpointNumber, data.Length, MaxPacketBytes);
+                for(var off = 0; off < data.Length; off += mps)
+                {
+                    var n = System.Math.Min(mps, data.Length - off);
+                    var chunk = new byte[n];
+                    System.Array.Copy(data, off, chunk, 0, n);
+                    WritePacket(chunk);
+                }
                 return;
             }
+            WritePacket(data);
+        }
+
+        private void WritePacket(byte[] data)
+        {
             if(nakStatusFlag.Value)
             {
                 // NAK: the real host retries until CNAK; keep the packet until then.
@@ -88,6 +115,14 @@ public partial class DWC2_OTG
         }
 
         public void SetupPacketWrite(SetupPacket packet)
+        {
+            lock(parent.HostLock)
+            {
+                SetupPacketWriteLocked(packet);
+            }
+        }
+
+        private void SetupPacketWriteLocked(SetupPacket packet)
         {
             if(!Active)
             {

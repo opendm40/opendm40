@@ -7,6 +7,7 @@
 //     the words already queued, not the remaining transfer size: the stock
 //     driver writes the FIFO only while the free space is LARGER than the
 //     packet it wants to send, so it hung on EP0 with exactly 5 free words.
+//   * A packet read by the host clears EPENA before it raises XFRC.
 //
 using System;
 using System.Collections.Generic;
@@ -51,13 +52,23 @@ public partial class DWC2_OTG
             if(hasPacket)
             {
                 parent.DebugLog("In endpoint #{0} - got full packet from device, notifying host", endpointNumber);
-                NewPacket?.Invoke();
+                parent.QueueNewPacket(this);
             }
             txFifoEmptyInterruptFlag.Value = !hasPacket;
             parent.UpdateInterrupts();
         }
 
         public bool TryRead(out byte[] data)
+        {
+            // Host side (USB/IP server thread): serialised with CPU register
+            // accesses (DWC2_OTG.HostLock).
+            lock(parent.HostLock)
+            {
+                return TryReadLocked(out data);
+            }
+        }
+
+        private bool TryReadLocked(out byte[] data)
         {
             data = null;
             if(!Active)
@@ -78,9 +89,11 @@ public partial class DWC2_OTG
             data = fifo.DequeueRange((int)transferSizeField.Value);
             if(fifo.Count == 0)
             {
+                // EPENA first, as the core does: the driver re-arms the
+                // endpoint as soon as it sees XFRC.
+                endpointEnabledFlag.Value = false;
                 txFifoEmptyInterruptFlag.Value = true;
                 transferCompleteInterruptFlag.Value = true;
-                endpointEnabledFlag.Value = false;
             }
             parent.UpdateInterrupts();
             return true;
@@ -88,11 +101,18 @@ public partial class DWC2_OTG
 
         public event Action NewPacket;
 
+        /// Raised by DWC2_OTG after it released HostLock (the server's
+        /// handler may wait for its own thread, which takes the lock).
+        public void FireNewPacket()
+        {
+            NewPacket?.Invoke();
+        }
+
         protected override void OnEndpointEnable()
         {
             if(transferSizeField.Value == 0)
             {
-                NewPacket?.Invoke();
+                parent.QueueNewPacket(this);
             }
             txFifoEmptyInterruptFlag.Value = fifo.Count < (int)transferSizeField.Value;
             parent.UpdateInterrupts();
