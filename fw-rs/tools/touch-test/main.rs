@@ -621,6 +621,10 @@ fn hit_tests(ck: &mut Ck) {
         let want: Vec<u32> = (0..n as u32).collect();
         page(ck, &format!("settings {}", p + 1), &|_, y| o(ui::settings_hit(p, y)), &|b| b.y0 >= 40, &want);
     }
+    // Backlight / volume steppers (ui-review #12): the "-" key (x 210..263)
+    // steps down, the "+" key (410..463) up; the label side is "-".
+    ck.t("settings stepper: '-' key and label step down", ui::settings_step(237) == -1 && ui::settings_step(20) == -1);
+    ck.t("settings stepper: '+' key steps up", ui::settings_step(437) == 1 && ui::settings_step(463) == 1);
     host::reset(0);
     ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &["ON"; 8]);
     page(ck, "limits", &|_, y| o(ui::list_hit(y, ui::LIMIT_ROWS.len())), &|b| b.y0 >= 40, &(0..8).collect::<Vec<u32>>());
