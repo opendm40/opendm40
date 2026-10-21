@@ -3,7 +3,7 @@
 #
 #   tools/reload.sh [options] [build args...]     e.g. --features keep-screen
 #
-# Default: ./build.sh native [build args], check the image (tools/dm40dbg.py
+# Default: ./build.sh [build args], check the image (tools/dm40dbg.py
 # image: CRCs, size, no short last block the loader mis-decodes), upload it
 # over USBTMC into the SPI disk's root as DM40FW.BIN (tools/dm40dbg.py upload
 # = DBG:UPLOAD, src/upload.rs: any other dm40*.bin there is removed, the file
@@ -25,13 +25,9 @@
 #                   (USB disk 28e9:028f): stage the image there, then you press
 #                   "update" / power-cycle; waits for fw-rs
 #   --wait S        seconds to wait for fw-rs after the update (default 90)
-#   --ram, test-initcore, test-recovery
-#                   LEGACY: build the RAM/sector-8 image (T1/T2 test images)
-#                   and load it over Bluetooth (tools/legacy/flash.py + stub/); needs
-#                   STOCK firmware on the meter. DM40_MAC = Bluetooth address.
 #   -h, --help      this text
 #
-# Environment: PYTHON (default /usr/bin/python3: has PIL and AF_BLUETOOTH).
+# Environment: PYTHON (default /usr/bin/python3).
 set -euo pipefail
 
 FW=$(cd "$(dirname "$0")/.." && pwd)
@@ -44,7 +40,7 @@ STOCK_ID=28e9:028f
 usage() { sed -n '2,/^set -euo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; }
 die() { echo "reload.sh: $*" >&2; exit 1; }
 
-BUILD=1 IMAGE= STOCK= FROM_STOCK=0 WAIT=90 RAM= ARGS=() UPLOAD=0
+BUILD=1 IMAGE= STOCK= FROM_STOCK=0 WAIT=90 ARGS=() UPLOAD=0
 while (($#)); do
     case "$1" in
         -h|--help) usage; exit 0 ;;
@@ -53,8 +49,6 @@ while (($#)); do
         --stock) (($# > 1)) || die "--stock needs a file"; STOCK=$2; BUILD=0; shift ;;
         --from-stock) FROM_STOCK=1 ;;
         --wait) (($# > 1)) || die "--wait needs seconds"; WAIT=$2; shift ;;
-        --ram) RAM=ram ;;
-        test-initcore|test-recovery) RAM=$1 ;;
         *) ARGS+=("$1") ;;
     esac
     shift
@@ -196,28 +190,6 @@ if w:
 PY
 }
 
-# ---- LEGACY: RAM/sector-8 image over Bluetooth --------------------------------
-
-if [ -n "$RAM" ]; then
-    echo "LEGACY RAM loader (Bluetooth, flash sector 8): needs STOCK firmware on the meter."
-    if [ "$RAM" = ram ]; then "$FW/build.sh" "${ARGS[@]}"; else "$FW/build.sh" "$RAM" "${ARGS[@]}"; fi
-    "$FW/stub/build.sh" >/dev/null
-    if usb_present "$FWRS_ID"; then
-        # RAM build: DBG:RESET goes back to stock. Native: it reboots fw-rs.
-        "${DBG[@]}" reset 2>/dev/null || true
-        echo "reset sent, waiting 20 s: stock (RAM build) or fw-rs again (native)"
-        sleep 2
-        for ((i = 0; i < 36; i++)); do usb_present "$FWRS_ID" && break; sleep 0.5; done
-        if usb_present "$FWRS_ID"; then
-            die "fw-rs came back after DBG:RESET: native fw-rs is installed. Install stock
-first (the Bluetooth RAM loader needs it), e.g.:
-  tools/reload.sh --stock $ROOT/firmware/patch/build-memrw/dm40_patched.bin
-(build it with $ROOT/firmware/patch/kit/mkkit.sh)"
-        fi
-    fi
-    exec "$PY" "$FW/tools/legacy/flash.py"
-fi
-
 # ---- native ----------------------------------------------------------------------
 
 if [ -n "$STOCK" ]; then
@@ -228,7 +200,7 @@ if [ -n "$STOCK" ]; then
     shopt -u nocasematch
 else
     if ((BUILD)); then
-        "$FW/build.sh" native "${ARGS[@]}"
+        "$FW/build.sh" "${ARGS[@]}"
     elif ((${#ARGS[@]})); then
         die "build arguments given with --no-build/--image: ${ARGS[*]}"
     fi
@@ -239,10 +211,8 @@ fi
 check_image "$IMG"
 
 if usb_present "$FWRS_ID"; then
-    # A RAM build of fw-rs enumerates the same way but has no DBG:UPDATE.
     "${DBG[@]}" boot >/dev/null 2>&1 ||
-        die "the running fw-rs does not answer DBG:BOOT? (a LEGACY RAM build?): no
-DBG:UPDATE there. Return to stock (tools/dm40dbg.py reset) and use --from-stock."
+        die "the running fw-rs does not answer DBG:BOOT?: no DBG:UPDATE there."
     ((FROM_STOCK)) && echo "(--from-stock ignored: fw-rs is running, using DBG:UPDATE)"
     FROM_STOCK=0
     if R=$("${DBG[@]}" scpi 'DBG:UPLOAD?' 2>/dev/null) && [ -n "$R" ]; then
