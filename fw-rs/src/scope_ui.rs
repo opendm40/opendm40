@@ -199,6 +199,9 @@ pub struct Model {
     /// fw-rs FFT additions (UF-11): axis scale boxes, the peak readout and
     /// marker. None = the stock look only.
     pub fft: Option<FftAdd>,
+    /// Runt trigger: the second level row (orange T strip marker, level
+    /// item 5), None for the other trigger types.
+    pub runt_row: Option<i16>,
 }
 
 /// fw-rs FFT additions (UF-11): the vertical scale ("10dB/div"), the
@@ -250,6 +253,7 @@ impl Model {
         math_scale: Txt::EMPTY,
         fft_hz: Txt::EMPTY,
         fft: None,
+        runt_row: None,
     };
 
     pub fn pal(&self) -> Color {
@@ -702,7 +706,8 @@ impl MarkInk {
     }
 }
 
-/// Strip marker slots (CH1, trigger level, math offset, Y cursors, spare).
+/// Strip marker slots (CH1, trigger level, math offset, runt level, Y
+/// cursors).
 pub const NSTRIP: usize = 6;
 
 /// Strip markers in creation order with their level-item ids (CH1 zero 0,
@@ -731,6 +736,10 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     n += 1;
     if m.math_on {
         out[n] = (2, level(off_row(m.math_off), FAM_M, m.sel_v == 2, m.math_pal()));
+        n += 1;
+    }
+    if let Some(r) = m.runt_row {
+        out[n] = (5, level(if r > 280 { 281 } else { r }, FAM_T, m.sel_v == 5, C_ORANGE));
         n += 1;
     }
     if let Some(yc) = m.ycur {
@@ -1001,6 +1010,11 @@ impl Deco {
                 0 => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.pos as i32), solid: true, col: ctr }),
                 1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: ctr }),
                 2 if m.math_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.math_off as i32), solid: true, col: d.math }),
+                5 => {
+                    if let Some(r) = m.runt_row {
+                        d.h[0] = Some(HLine { fy: line_fy(h, r as i32), solid: false, col: C_ORANGE });
+                    }
+                }
                 _ => {}
             }
         }
@@ -1808,6 +1822,11 @@ pub struct PopVals {
     pub hz_opts: [Txt; 4],
     pub fft_win: u8,
     pub fft_vrms: bool,
+    /// Trigger type, pulse condition and width (s), runt second level (V).
+    pub ttype: u8,
+    pub pcond: u8,
+    pub pwidth: f32,
+    pub runt_v: f32,
 }
 
 /// Which popup is open (tab).
@@ -1959,7 +1978,8 @@ pub fn slider_value(x: i16) -> f32 {
 }
 
 /// MF popup page height per tab (box h = 40 + page).
-const MF_PAGE_H: [i16; 4] = [150, 100, 55, 55];
+/// (Trigger: stock 55; fw-rs 125 with the trigger-type rows, UF-13.)
+const MF_PAGE_H: [i16; 4] = [150, 100, 125, 55];
 
 /// MF settings popup (FUN_08037574), tab 0..3.
 pub fn draw_mf(tab: u8, v: &PopVals) {
@@ -2015,6 +2035,29 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             fill_text(rect(214, 61, 189, 20), pc, C_POP_BG, sf::SC_F16, rect(214, 61, 189, 20), "Mode:", C_FILL, 1, 0);
             option_list(rect(24, 81, 120, 24), pc, &["Rising", "Falling"], 60, if v.rising { 0 } else { 1 });
             option_list(rect(214, 81, 180, 24), pc, &["Auto", "Normal", "Single"], 60, v.mode as usize);
+            // fw-rs (UF-13): trigger type and its parameters.
+            fill_c(rect(14, 116, 399, 70), pc, C_POP_BG);
+            fill_text(TT_LABEL, pc, C_POP_BG, sf::SC_F16, TT_LABEL, "Type:", C_FILL, 1, 0);
+            option_list(TT_LIST, pc, &crate::trigsoft::TYPE_NAMES, 60, v.ttype.min(2) as usize);
+            match v.ttype {
+                crate::trigsoft::PULSE => {
+                    fill_text(TP_LABEL, pc, C_POP_BG, sf::SC_F16, TP_LABEL, "Width:", C_FILL, 1, 0);
+                    option_list(TP_COND, pc, &crate::trigsoft::COND_NAMES, 30, v.pcond.min(2) as usize);
+                    rbox_text(TP_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
+                    rbox_text(TP_PLUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
+                    let mut b = Buf::new();
+                    fmt_s125(&mut b, v.pwidth);
+                    fill_text(TP_VALUE, pc, C_POP_BG, sf::SC_F16, TP_VALUE, b.as_str(), C_FILL, 8, 0);
+                }
+                crate::trigsoft::RUNT => {
+                    fill_text(TP_LABEL, pc, C_POP_BG, sf::SC_F16, TP_LABEL, "2nd level:", C_FILL, 1, 0);
+                    let mut b = Buf::new();
+                    fmt_v(&mut b, v.runt_v, "V");
+                    fill_text(TP_COND, pc, C_POP_BG, sf::SC_F16, TP_COND, b.as_str(), C_ORANGE, 1, 0);
+                    fill_text(TR_HINT, pc, C_POP_BG, sf::SC_F16, TR_HINT, "drag orange T", C_FILL, 1, 0);
+                }
+                _ => {}
+            }
         }
         _ => {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
@@ -2025,6 +2068,31 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
 }
 
 /// Display tab: the two sliders and their values (repainted while dragged).
+// Trigger tab rows (fw-rs, UF-13).
+pub const TT_LABEL: Rect = rect(24, 116, 180, 20);
+pub const TT_LIST: Rect = rect(24, 136, 180, 24);
+pub const TP_LABEL: Rect = rect(214, 116, 189, 20);
+pub const TP_COND: Rect = rect(214, 136, 92, 24);
+pub const TP_MINUS: Rect = rect(214, 164, 36, 18);
+pub const TP_VALUE: Rect = rect(254, 164, 104, 18);
+pub const TP_PLUS: Rect = rect(362, 164, 36, 18);
+pub const TR_HINT: Rect = rect(214, 164, 189, 18);
+
+/// "500ns", "20us", "1ms", "2s": a 1-2-5 time (integer in its unit).
+pub fn fmt_s125(out: &mut Buf, s: f32) {
+    let (x, u) = if s >= 0.999 {
+        (s, "s")
+    } else if s >= 0.999e-3 {
+        (s * 1e3, "ms")
+    } else if s >= 0.999e-6 {
+        (s * 1e6, "us")
+    } else {
+        (s * 1e9, "ns")
+    };
+    let mut t = [0u8; 16];
+    out.push(crate::dmm::format(&mut t, x + 0.001, 0)).push(u);
+}
+
 pub fn mf_display_values(v: &PopVals) {
     let pc = rect(14, 61, 399, MF_PAGE_H[1] - 1);
     for (y, val) in [(81i16, v.bright), (125, v.grid)] {
@@ -2051,6 +2119,10 @@ pub enum MfHit {
     Grid,
     Rising(bool),
     Mode(u8),
+    /// Trigger type, pulse condition, width step (true = up).
+    TType(u8),
+    PCond(u8),
+    Width(bool),
     PriScr,
     SaveCsv,
     /// Inside the box, nothing there.
@@ -2106,6 +2178,18 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Rising(i == 0)
             } else if let Some(i) = option_hit(rect(214, 81, 180, 24), 3, 60, x, y) {
                 MfHit::Mode(i)
+            } else if let Some(i) = option_hit(TT_LIST, 3, 60, x, y) {
+                MfHit::TType(i)
+            } else if v.ttype == crate::trigsoft::PULSE {
+                if let Some(i) = option_hit(TP_COND, 3, 30, x, y) {
+                    MfHit::PCond(i)
+                } else if near(TP_MINUS) {
+                    MfHit::Width(false)
+                } else if near(TP_PLUS) {
+                    MfHit::Width(true)
+                } else {
+                    MfHit::Inside
+                }
             } else {
                 MfHit::Inside
             }

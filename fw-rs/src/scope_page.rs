@@ -460,6 +460,7 @@ impl App {
             math_scale: self.math_scale(),
             fft_hz: sp.fft_hz,
             fft: sp.fft_view,
+            runt_row: (s.ttype == crate::trigsoft::RUNT).then_some(s.runt_row as i16),
         }
     }
 
@@ -784,7 +785,22 @@ impl App {
 
     /// Trigger type text of the CSV header.
     fn sp_trig_desc(&self, h: &mut crate::scope_csv::Hdr) {
-        h.s("Edge");
+        let s = &self.scope.s;
+        match s.ttype {
+            crate::trigsoft::PULSE => {
+                let mut b = su::Buf::new();
+                su::fmt_s125(&mut b, s.pwidth);
+                h.s("Pulse width ").s(crate::trigsoft::COND_NAMES[s.pcond.min(2) as usize]).s(" ").s(b.as_str()).s(" (software),");
+            }
+            crate::trigsoft::RUNT => {
+                let mut b = su::Buf::new();
+                su::fmt_v(&mut b, self.scope.row_volts(s.runt_row), "V");
+                h.s("Runt, 2nd level ").s(b.as_str()).s(" (software),");
+            }
+            _ => {
+                h.s("Edge");
+            }
+        }
     }
 
     /// Per pass: a finished CSV releases the scope and shows its result.
@@ -1377,12 +1393,17 @@ impl App {
                 // CH1 position; the trigger row moves with it (same voltage).
                 let p = (st.pos + rows).clamp(-392, 392);
                 st.trig_row += p - st.pos;
+                st.runt_row += p - st.pos;
                 st.pos = p;
                 self.sp_code(3);
             }
             1 => {
                 st.trig_row = (st.trig_row + rows).clamp(-10, 290);
                 self.sp_code(1);
+            }
+            5 if st.ttype == crate::trigsoft::RUNT => {
+                st.runt_row = (st.runt_row + rows).clamp(-10, 290);
+                self.sp_code(8);
             }
             2 if self.sp.math.on => {
                 // Math / FFT offset (the 'M' strip marker).
@@ -1481,7 +1502,7 @@ impl App {
                 self.gest_log.copy_within(1.., 0);
                 GEST_N - 1
             };
-            let v = matches!(t.code, 1 | 3 | 5 | 15) as u8;
+            let v = matches!(t.code, 1 | 3 | 5 | 6 | 8 | 15) as u8;
             self.gest_log[i] = (t.code, v, t.travel.clamp(-999, 999) as i16, now.saturating_sub(t.t0).min(9999) as u16);
         }
         if self.sp.frozen {
@@ -1492,7 +1513,7 @@ impl App {
                     self.scope.pan_from(a, t.pan);
                 }
             }
-            if s.pos != t.snap.pos || s.trig_row != t.snap.trig_row || s.hpos != t.snap.hpos {
+            if s.pos != t.snap.pos || s.trig_row != t.snap.trig_row || s.hpos != t.snap.hpos || s.runt_row != t.snap.runt_row {
                 self.scope.apply(s, now);
                 self.sp_settings_changed();
             } else {
@@ -1538,6 +1559,7 @@ impl App {
                 }
                 0 => {
                     st.trig_row -= st.pos;
+                    st.runt_row -= st.pos;
                     st.pos = 0;
                 }
                 1 => {
@@ -1762,6 +1784,10 @@ impl App {
             }),
             fft_win: self.sp.math.win,
             fft_vrms: self.sp.math.vrms,
+            ttype: s.ttype,
+            pcond: s.pcond,
+            pwidth: s.pwidth,
+            runt_v: self.scope.row_volts(s.runt_row),
         }
     }
 
@@ -2006,6 +2032,23 @@ impl App {
             }
             su::MfHit::Rising(r) => {
                 st.rising = r;
+                self.scope_set(st, now);
+            }
+            su::MfHit::TType(t) => {
+                st.ttype = t.min(2);
+                if t == crate::trigsoft::RUNT && (st.runt_row - st.trig_row).abs() < 10 {
+                    // A second level 2 div above the first (below at the top).
+                    st.runt_row = if st.trig_row >= 80 { st.trig_row - 70 } else { st.trig_row + 70 };
+                }
+                self.scope_set(st, now);
+                // The page height is the same, the rows below change.
+            }
+            su::MfHit::PCond(c) => {
+                st.pcond = c.min(2);
+                self.scope_set(st, now);
+            }
+            su::MfHit::Width(up) => {
+                st.pwidth = crate::trigsoft::width_step(st.pwidth, up);
                 self.scope_set(st, now);
             }
             su::MfHit::Mode(m) => {
@@ -2320,6 +2363,12 @@ impl App {
             | ((m.hz ^ d.hz) as u32 & 3) << 19;
         p[1] = ((m.fft_off - d.fft_off) as i16 as u16 as u32) | ((m.abs_off - d.abs_off) as i16 as u16 as u32) << 16;
         p[2] = m.ctr.to_bits();
+        // [3] trigger type / pulse condition / runt row - default; [4] the
+        // pulse width (f32 bits, 0 = default 1 ms).
+        let s = &self.scope.s;
+        let dr = scope::Settings::DEFAULT.runt_row;
+        p[3] = (s.ttype as u32 & 3) | (s.pcond as u32 & 3) << 2 | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
+        p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
     }
 
     pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
@@ -2339,6 +2388,13 @@ impl App {
             abs_off: (d.abs_off + ((p[1] >> 16) as u16 as i16) as i32).clamp(-392, 392),
             ctr: if ctr.is_finite() && ctr >= 0.0 { ctr } else { 0.0 },
         };
+        let mut st = self.scope.s;
+        let dd = scope::Settings::DEFAULT;
+        st.ttype = (p[3] & 3).min(2) as u8;
+        st.pcond = (p[3] >> 2 & 3).min(2) as u8;
+        st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
+        st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };
+        self.scope.apply(st, 0);
     }
 
     pub(super) fn sp_restore(&mut self, p1: u32, p11: u32) {

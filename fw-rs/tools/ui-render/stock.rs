@@ -304,6 +304,10 @@ pub fn popvals(m: &Model) -> su::PopVals {
         hz_opts: [su::Txt::new("250Hz"), su::Txt::new("500Hz"), su::Txt::new("1.25kHz"), su::Txt::new("2.50kHz")],
         fft_win: 0,
         fft_vrms: false,
+        ttype: 0,
+        pcond: 0,
+        pwidth: 1e-3,
+        runt_v: 0.0,
     }
 }
 

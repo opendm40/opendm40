@@ -190,12 +190,21 @@ pub struct Settings {
     /// centre (stock: always the centre). Sets the pre-trigger part of each
     /// record; ignored in roll mode.
     pub hpos: i32,
+    /// Trigger type (trigsoft.rs: 0 edge, 1 pulse width, 2 runt). Pulse /
+    /// runt are searched in software in a complete linear record (no
+    /// comparator, no stream search); `rising` = a positive pulse.
+    pub ttype: u8,
+    /// Pulse width condition (trigsoft GT / LT / EQ) and width (s).
+    pub pcond: u8,
+    pub pwidth: f32,
+    /// Runt: the second level (row, like trig_row).
+    pub runt_row: i32,
 }
 
 impl Settings {
     /// Stock defaults: 200 us/div, 1 V/div, DC, rising, Auto, level row 105.
     pub const DEFAULT: Settings =
-        Settings { run: true, tb: 13, range: 6, ac: false, trig_row: 105, pos: 0, rising: true, mode: TrigMode::Auto, probe: 1.0, hpos: 200 };
+        Settings { run: true, tb: 13, range: 6, ac: false, trig_row: 105, pos: 0, rising: true, mode: TrigMode::Auto, probe: 1.0, hpos: 200, ttype: 0, pcond: 0, pwidth: 1e-3, runt_row: 70 };
 }
 
 /// A finished frame: the visible window of the record, or (roll mode, empty
@@ -478,10 +487,31 @@ impl Scope {
     /// after AUTOSET on a 0..9.6 V square (5 V/div, pos 33) the level sat at
     /// 9.36 V for a badge of 4.68 V.
     fn trig_code(&self) -> i32 {
+        self.code_of_row(self.s.trig_row)
+    }
+
+    /// ADC code of a level row (trig_code; the runt's second level).
+    fn code_of_row(&self, row: i32) -> i32 {
         let r = self.s.range;
         let (g0, g1) = self.gain(r);
-        let dv = (140.0 - self.s.trig_row as f32) * 4.0 * VDIV[r] / 141.0;
+        let dv = (140.0 - row as f32) * 4.0 * VDIV[r] / 141.0;
         (g1 + dv * (g0 - g1) / XR[r]) as i32
+    }
+
+    /// Volts of a level row (the runt's second level).
+    pub fn row_volts(&self, row: i32) -> f32 {
+        (140.0 + self.s.pos as f32 - row as f32) * 4.0 * VDIV[self.s.range] * self.s.probe / 141.0
+    }
+
+    /// Software trigger of a pulse / runt type in a linear record: the
+    /// trigger point in [lo, hi), or None (trigsoft.rs).
+    fn find_soft(&self, d: &[u16], lo: usize, hi: usize) -> Option<usize> {
+        let l = self.trig_code();
+        let w = self.s.pwidth * self.sample_rate() as f32;
+        match self.s.ttype {
+            crate::trigsoft::PULSE => crate::trigsoft::pulse(d, lo, hi, l, self.s.rising, self.s.pcond, w),
+            _ => crate::trigsoft::runt(d, lo, hi, l, self.code_of_row(self.s.runt_row), self.s.rising),
+        }
     }
 
     /// Stock auto timeout (ms) of the current timebase (scope_auto_timeout_ms).
@@ -543,6 +573,10 @@ impl Scope {
         }
         s.range = s.range.min(9);
         s.trig_row = s.trig_row.clamp(-10, 290);
+        s.runt_row = s.runt_row.clamp(-10, 290);
+        s.ttype = s.ttype.min(2);
+        s.pcond = s.pcond.min(2);
+        s.pwidth = if s.pwidth.is_finite() { s.pwidth.clamp(crate::trigsoft::W_MIN, crate::trigsoft::W_MAX) } else { 1e-3 };
         s.pos = s.pos.clamp(-392, 392);
         s.hpos = s.hpos.clamp(0, COLS as i32);
         self.s = s;
@@ -664,7 +698,7 @@ impl Scope {
         // Mask once here (snapshot_mark), then search in the masked record.
         self.snapshot_mark(n, 0, None, false);
         let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
-        let trig = self.find_trigger(&data[pre..pre + win]).map(|i| i + pre);
+        let trig = if self.s.ttype != 0 { self.find_soft(data, pre, pre + win) } else { self.find_trigger(&data[pre..pre + win]).map(|i| i + pre) };
         let show = match (trig, self.s.mode) {
             (Some(_), _) => true,
             (None, TrigMode::Auto) => now >= self.deadline,
@@ -745,10 +779,13 @@ impl Scope {
             self.stored_valid = false;
             // Comparator trigger: circular record over CAP, frozen in hardware
             // `post` samples after the edge (hwtrig.rs). Roll never triggers.
-            let hw = self.hw.available() && !self.rolling;
+            // Pulse / runt (software, trigsoft.rs): one complete linear
+            // record per frame.
+            let soft = self.s.ttype != 0;
+            let hw = self.hw.available() && !self.rolling && !soft;
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
-            let stream = !self.rolling && !hw && fs <= STREAM_FS;
+            let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
             let (len, circ) = if self.rolling || hw || stream { (CAP as u32, 1 << 8) } else { (self.rec as u32, 0) };
             self.roll_written = 0;
             self.roll_last_wr = 0;
@@ -991,6 +1028,7 @@ impl Scope {
     /// markers that read `s` follow at once.
     pub fn preview(&mut self, s: Settings) {
         self.s.trig_row = s.trig_row.clamp(-10, 290);
+        self.s.runt_row = s.runt_row.clamp(-10, 290);
         self.s.pos = s.pos.clamp(-392, 392);
         self.s.hpos = s.hpos.clamp(0, COLS as i32);
     }

@@ -48,6 +48,8 @@ mod meter;
 mod scope;
 #[path = "../../src/scope_meas.rs"]
 mod scope_meas;
+#[path = "../../src/trigsoft.rs"]
+mod trigsoft;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
 mod scope_add;
