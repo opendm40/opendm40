@@ -240,6 +240,10 @@ pub struct App {
     /// Meter strip: 0 / 1 (>= 30 V, HV badge) / 2 (>= 100 V) from the live
     /// value, and the REL / verdict badge alternation phase.
     hv_level: u8,
+    /// Power meter: what the "I ranging" texts / the settings status line
+    /// last drew (text keys, 0 = nothing; app_power.rs).
+    pw_rng_key: u32,
+    pw_status_key: u32,
     strip_alt: bool,
     /// The last scope drags (target code, axis 0 H / 1 V, travel px, ms) for
     /// DBG:GEST?, oldest first once full (scope_page.rs).
@@ -340,9 +344,9 @@ fn power_off() -> ! {
 fn restore_func(version: u32, code: u8) -> u8 {
     let max = if version >= 3 { 17 } else { 15 };
     match code {
-        // The power meter is entered only through its wiring dialog: after a
-        // restart, DC A on the 10 A shunt (a load current may still flow).
-        dmm::pw::FUNC => 7,
+        // The power meter restarts as itself (owner 2026-10-22: a full
+        // function); `pw_enter` resets the energy integrator.
+        dmm::pw::FUNC => dmm::pw::FUNC,
         2 | 3 => code - 2,
         c if c <= max => c,
         _ => 1,
@@ -436,6 +440,8 @@ impl App {
             shot_req: false,
             band_until: 0,
             hv_level: 0,
+            pw_rng_key: 0,
+            pw_status_key: 0,
             strip_alt: false,
             gest_log: [(0, 0, 0, 0); GEST_N],
             gest_n: 0,
@@ -530,6 +536,7 @@ impl App {
             View::Dmm => {
                 self.dmm_view.power = self.dmm.pw.on;
                 self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2 || self.dmm.pw.on, self.dmm.ohm_var() == 1);
+                self.pw_rng_key = 0;
                 if self.dmm.pw.on {
                     ui::pw::side_clear(&mut self.dmm_view.pwc);
                 } else if !self.dmm_view.bar_on {
@@ -561,7 +568,10 @@ impl App {
             View::Limits => self.limits_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(|p| ui::temp_page(p)),
-            View::Range if self.dmm.pw.on => ui::pw::settings_page(&self.dmm.pw_state()),
+            View::Range if self.dmm.pw.on => {
+                ui::pw::settings_page(&self.dmm.pw_state());
+                self.pw_status_key = ui::pw::settings_status(&self.dmm.pw, 0);
+            }
             View::Range => {
                 let b = self.dmm.button();
                 let sel = self.range_sel();
@@ -840,6 +850,17 @@ impl App {
     /// sub-mode; then the common function-change path (`func_changed`, as
     /// `select_func`).
     fn press_func(&mut self, clk: &mut Clock, i: usize) {
+        if Button::ALL[i] == Button::Power {
+            if self.dmm.pw.on {
+                return;
+            }
+            // The wiring dialog until it was confirmed once (owner: no
+            // nagging; MF > Power Settings > Wiring shows it again).
+            if !self.dmm.pw.wired {
+                self.pw_open_entry(clk.now_ms());
+                return;
+            }
+        }
         self.dmm.press(clk, Button::ALL[i]);
         self.func_changed();
         self.last_raw = None;
@@ -1587,6 +1608,12 @@ impl App {
         // DMM page: the stock >= 30 V red value (ui-review #13).
         self.dmm_view.hv_red = hv_level >= 1;
         if dmm_view && (u.show.is_some() || hv_changed) {
+            if self.pw_rng_key != 0 && self.view == View::Dmm {
+                // The first power reading after the "I ranging" texts.
+                ui::pw::ranging_clear();
+                self.dmm_view.invalidate();
+                self.pw_rng_key = 0;
+            }
             self.draw_reading();
             self.hold_shown = self.shown_state();
         }
@@ -1894,7 +1921,7 @@ impl App {
                 self.tap(clk, p.x, p.y);
             }
             // Long press on the A button: the power meter's wiring dialog.
-            Gesture::LongPress(p) if self.view == View::Dmm && p.y >= ui::BTN_Y && ui::button_hit(6, p.x, p.y) == Some(1) => {
+            Gesture::LongPress(p) if self.view == View::Dmm && p.y >= ui::BTN_Y && ui::button_hit(p.x, p.y) == Some(1) => {
                 captured = true;
                 self.pw_open_entry(now);
             }
@@ -2340,7 +2367,6 @@ impl App {
                         self.show(v, clk);
                     }
                     Some(Err(4)) => self.show(View::Limits, clk),
-                    Some(Err(5)) => self.pw_open_entry(now),
                     Some(Err(k @ 0..=1)) if b == Button::Ohm => {
                         if k != self.dmm.ohm_var() {
                             self.dmm.set_ohm_var(clk, k);
@@ -2373,7 +2399,7 @@ impl App {
                     };
                     self.chart_n = 0;
                     self.chart_dirty = true;
-                } else if let Some(i) = ui::button_hit(6, x, y) {
+                } else if let Some(i) = ui::button_hit(x, y) {
                     self.press_func(clk, i);
                 }
             }

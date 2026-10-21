@@ -68,14 +68,10 @@ impl View {
     pub const CYCLE: [View; 4] = [View::Dmm, View::DmmScope, View::Scope, View::Gen];
 }
 
-/// Which of `n` bottom buttons a touch at (x, y) hits.
-/// (DMM page function row: 6 buttons at x 4 + 79 i, see DmmView::draw_static.)
-pub fn button_hit(n: usize, x: u16, y: u16) -> Option<usize> {
-    if y >= BTN_Y && n > 0 {
-        Some((x.saturating_sub(2) as usize / 79).min(n - 1))
-    } else {
-        None
-    }
+/// Which DMM function button a touch at (x, y) hits (the function row:
+/// BTN_N buttons at `btn_x`, see DmmView::draw_static).
+pub fn button_hit(x: u16, y: u16) -> Option<usize> {
+    if y >= BTN_Y { Some(btn_col(x)) } else { None }
 }
 
 fn button_index(b: Button) -> usize {
@@ -224,43 +220,62 @@ const BAR_LBL_Y: i16 = 161;
 const BAR_LBL_H: i16 = 12;
 const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
 
-/// Bottom button `i` (0..5) with its stock glyphs, in the box (x, y, 76, 40)
-/// (DMM page: stock (2 + 80 i, BTN_Y); combined view: the function band).
-/// `ohm_on`: the stock m+8 "ON" (low-current, in-circuit) ohm variant is
-/// selected (dmm.rs `ohm_var`): the ohm button carries the stock small "ON"
-/// tag (gui_v2_6.h: glyph 0x20 of font 0x0806c724 at +(50,19,20,12) of the
-/// 40 px button, align 1; here 2 px higher for the 36 px button and 1 px
-/// right, 3 px clear of the ohm glyph's ink).
+/// The DMM function row: 7 buttons (the stock six + the power meter, owner
+/// 2026-10-22) of BTN_W px at a BTN_PITCH pitch from x 4: 4 px gaps, 4 px to
+/// both screen edges (4 + 6 x 68 + 64 = 476).
+pub const BTN_N: usize = 7;
+pub const BTN_W: i16 = 64;
+pub const BTN_PITCH: i16 = 68;
+
+/// Left edge of function button `i`.
+pub const fn btn_x(i: usize) -> i16 {
+    4 + BTN_PITCH * i as i16
+}
+
+/// Function button under x (the 4 px gaps split 2 / 2 between neighbours).
+fn btn_col(x: u16) -> usize {
+    (x.saturating_sub(2) as usize / BTN_PITCH as usize).min(BTN_N - 1)
+}
+
+/// Two glyph runs centred together in a function button (3 px apart at
+/// their advance boxes): (font, text, dy) each.
+fn btn_pair(x: i16, y: i16, h: i16, c: Color, a: (sf::Font, &str, i16), b: (sf::Font, &str, i16), gap: i16) {
+    let (wa, wb) = (sf::text_width(a.0, a.1, 0), sf::text_width(b.0, b.1, 0));
+    let x0 = x + (BTN_W - (wa + gap + wb)) / 2;
+    sf::glyphs(a.0, rect(x0, y + a.2, wa + 1, h), a.1, STATUS_FG, c, 1, 0);
+    sf::glyphs(b.0, rect(x0 + wa + gap, y + b.2, wb + 1, h), b.1, STATUS_FG, c, 1, 0);
+}
+
+/// Bottom button `i` (0..6) with its stock glyphs, in the box (x, y, BTN_W,
+/// h) (DMM page: BTN_Y; combined view: the function band). The stock 76 px
+/// buttons placed their glyphs at fixed offsets; at 64 px every button
+/// centres its glyph run (`btn_pair`). `ohm_on`: the stock m+8 "ON" (low-
+/// current, in-circuit) ohm variant is selected (dmm.rs `ohm_var`): the ohm
+/// button carries the stock small "ON" tag (gui_v2_6.h: glyph 0x20 of font
+/// 0x0806c724, 20 x 12) right of the ohm glyph. Button 6 = the power meter:
+/// "W" from the LETTERS face (its V twinned, stockfont::glyph_or_twin).
 fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, mode: u8, acdc: bool, ohm_on: bool) {
     let c = if selected { SEL } else { BTN };
-    sf::rbox(rect(x, y, 76, h), 8, c, outside);
+    sf::rbox(rect(x, y, BTN_W, h), 8, c, outside);
     let ac = matches!(mode, 0 | 2 | 4..=6);
     let sub = if acdc { "\u{6}" } else if ac { "\u{5}" } else { "\u{4}" };
-    let r = |dx: i16, dy: i16, w: i16| rect(x + dx, y + dy, w, h);
     match i {
-        0 => {
-            sf::glyphs(sf::LETTERS, r(0, 0, 36), "V", STATUS_FG, c, 4, 0);
-            sf::glyphs(sf::BTN_GLYPH, r(40, 0, 30), if mode <= 3 { sub } else { "\u{4}" }, STATUS_FG, c, 1, 0);
-        }
-        1 => {
-            sf::glyphs(sf::LETTERS, r(0, 0, 36), "A", STATUS_FG, c, 4, 0);
-            sf::glyphs(sf::BTN_GLYPH, r(40, 0, 30), if (4..=9).contains(&mode) { sub } else { "\u{4}" }, STATUS_FG, c, 1, 0);
-        }
+        0 => btn_pair(x, y, h, c, (sf::LETTERS, "V", 0), (sf::BTN_GLYPH, if mode <= 3 { sub } else { "\u{4}" }, 0), 3),
+        1 => btn_pair(x, y, h, c, (sf::LETTERS, "A", 0), (sf::BTN_GLYPH, if (4..=9).contains(&mode) { sub } else { "\u{4}" }, 0), 3),
         2 => {
-            sf::glyphs(sf::BTN_GLYPH, r(0, -1, 76), "\u{3a9}", STATUS_FG, c, 8, 0);
             if ohm_on {
-                sf::glyphs(sf::ON_TAG, rect(x + 51, y + h / 2 - 3, 20, 12), " ", STATUS_FG, c, 1, 0);
+                let w = sf::text_width(sf::BTN_GLYPH, "\u{3a9}", 0);
+                let x0 = x + (BTN_W - (w + 3 + 20)) / 2;
+                sf::glyphs(sf::BTN_GLYPH, rect(x0, y - 1, w + 1, h), "\u{3a9}", STATUS_FG, c, 1, 0);
+                sf::glyphs(sf::ON_TAG, rect(x0 + w + 3, y + h / 2 - 3, 20, 12), " ", STATUS_FG, c, 1, 0);
+            } else {
+                sf::glyphs(sf::BTN_GLYPH, rect(x, y - 1, BTN_W, h), "\u{3a9}", STATUS_FG, c, 8, 0);
             }
         }
-        3 => sf::glyphs(sf::BTN_GLYPH, r(0, 0, 76), "\u{11}", STATUS_FG, c, 8, 0),
-        4 => {
-            sf::glyphs(sf::BTN_GLYPH, r(4, -1, 33), "\u{8}", STATUS_FG, c, 8, 0);
-            sf::glyphs(sf::BTN_GLYPH, r(42, 0, 33), "\u{7}", STATUS_FG, c, 1, 0);
-        }
-        _ => {
-            sf::glyphs(sf::BTN_GLYPH, r(3, -2, 36), "\u{10}", STATUS_FG, c, 8, 0);
-            sf::glyphs(sf::BTN_GLYPH, r(40, 0, 30), "\u{2103}", STATUS_FG, c, 8, 0);
-        }
+        3 => sf::glyphs(sf::BTN_GLYPH, rect(x, y, BTN_W, h), "\u{11}", STATUS_FG, c, 8, 0),
+        4 => btn_pair(x, y, h, c, (sf::BTN_GLYPH, "\u{8}", -1), (sf::BTN_GLYPH, "\u{7}", 0), 3),
+        5 => btn_pair(x, y, h, c, (sf::BTN_GLYPH, "\u{10}", -2), (sf::BTN_GLYPH, "\u{2103}", 0), 3),
+        _ => sf::glyphs(sf::LETTERS, rect(x, y, BTN_W, h), "W", STATUS_FG, c, 8, 0),
     }
 }
 
@@ -274,14 +289,16 @@ pub fn func_band(button: Button, mode: u8, acdc: bool, ohm_on: bool) {
     lcd::fill_rect(0, FUNC_Y, lcd::W, MEAS_Y - FUNC_Y, S_BAR);
     lcd::fill_rect(0, FUNC_Y, lcd::W, 1, S_FRAME);
     let sel = button_index(button);
-    for i in 0..6 {
-        dmm_button(i, 4 + 79 * i as i16, FUNC_Y as i16 + 4, 36, S_BAR, i == sel, mode, acdc, ohm_on);
+    // Power meter: the V / A buttons with their plain DC glyphs.
+    let mode = if button == Button::Power { 255 } else { mode };
+    for i in 0..BTN_N {
+        dmm_button(i, btn_x(i), FUNC_Y as i16 + 4, 36, S_BAR, i == sel, mode, acdc, ohm_on);
     }
 }
 
-/// Function button (0..5) of the band under a tap, None outside the band.
+/// Function button (0..6) of the band under a tap, None outside the band.
 pub fn func_band_hit(x: u16, y: u16) -> Option<usize> {
-    if (FUNC_Y..MEAS_Y).contains(&y) { Some((x.saturating_sub(2) / 79).min(5) as usize) } else { None }
+    if (FUNC_Y..MEAS_Y).contains(&y) { Some(btn_col(x)) } else { None }
 }
 
 // ------------------------------------------------------------ chips
@@ -423,9 +440,10 @@ impl DmmView {
             }
         }
         let sel = button_index(button);
+        let mode = if button == Button::Power { 255 } else { mode };
         // 36 px tall (rows 280..315) and from x 4: 4 px off the screen edges.
-        for i in 0..6 {
-            dmm_button(i, 4 + 79 * i as i16, BTN_Y as i16, 36, BG, i == sel, mode, acdc, ohm_on);
+        for i in 0..BTN_N {
+            dmm_button(i, btn_x(i), BTN_Y as i16, 36, BG, i == sel, mode, acdc, ohm_on);
         }
         self.invalidate();
     }
@@ -466,7 +484,7 @@ impl DmmView {
         self.last_fmt = f;
         let last_ext = self.last_ext;
         self.last_ext = ext.unwrap_or(0);
-        let mkey = r.mode | (r.acdc as u8) << 7;
+        let mkey = r.mode | (r.acdc as u8) << 7 | (r.power.is_some_and(|p| p.dc) as u8) << 6;
         // Extra digit: the main cells narrow to CELLS_X (40..372) and the
         // digit is the F78 glyph at half size (~38 px vs ~76) in
         // XT_X..XT_X + XT_W (375..402), on the F78 baseline (VALUE_BASE),
@@ -502,7 +520,9 @@ impl DmmView {
             // Stock box (437,76,32,32) align 7, widened 3 px right so the
             // 35 px AC glyph is not clipped (ends at 471, 3 px after the
             // limit badge 403..433).
-            sf::label(sf::MODE, rect(437, 76, 35, 32), mode_glyph(r.mode, r.acdc || r.power.is_some()), VALUE, BG, 7, 0);
+            // Power meter: AC+DC (method B counts both), DC with the AD1 method.
+            let g = if r.power.is_some_and(|p| p.dc) { "\u{4}" } else { mode_glyph(r.mode, r.acdc || r.power.is_some()) };
+            sf::label(sf::MODE, rect(437, 76, 35, 32), g, VALUE, BG, 7, 0);
             if !r.acdc {
                 // Leaving AC+DC: the tag slots left of the aux values.
                 for i in 0..2 {
@@ -842,13 +862,6 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
         }
     }
     ok_and_limits_buttons();
-    if b == Button::Amp {
-        // Power meter entry (the wiring dialog first): between Hold/Limits
-        // and OK.
-        let r = rect(162, 240, 150, 38);
-        sf::rbox(r, 6, 0x2966, BG);
-        sf::glyphs(sf::TEXT22, r, "Power W", STATUS_FG, 0x2966, 8, 0);
-    }
 }
 
 /// Range page note line (`range_page`): rows 142..177, under the second
@@ -871,9 +884,8 @@ fn ok_and_limits_buttons() {
 /// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
 pub const OHM_VARS: [&str; 2] = ["Normal", "Low current ON"];
 
-/// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 5 Power
-/// (Current page),
-/// 4 Hold/Limits); ohm: Err(0 / 1) = the OHM_VARS buttons.
+/// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
+/// Hold/Limits); ohm: Err(0 / 1) = the OHM_VARS buttons.
 pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
@@ -894,9 +906,6 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     }
     if (240..278).contains(&y) && (8..158).contains(&x) {
         return Some(Err(4));
-    }
-    if (240..278).contains(&y) && (162..312).contains(&x) && b == Button::Amp {
-        return Some(Err(5));
     }
     None
 }

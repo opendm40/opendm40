@@ -81,6 +81,141 @@ const I_FLOOR: f32 = 50e-6;
 /// DBG:POW:RAW? ring.
 pub const RING_N: usize = 16;
 
+/// Coupling setting (`Pw::coup`, POW:COUP, persisted): AC = method B (the
+/// RMS / LPF row; DC parts from the LPFs), DC = the AD1 method (the stock
+/// DC V and DC A rows alternately, 24 bit, factory DC calibration), AUTO =
+/// B until a full set is DC-like (`dc_like`), then DC until the comparator
+/// on the V tap sees an AC swing in a V phase (`DC_AC_BITS`).
+pub const COUP_AC: u8 = 0;
+pub const COUP_DC: u8 = 1;
+pub const COUP_AUTO: u8 = 2;
+/// DC method: settle after a row write (no relay change: DC V and DC A
+/// both use PA state 0, the shunt stays; the AD1 pre-filter and the first
+/// chopped conversion), results dropped, results taken per phase (AD1 at
+/// the DC rows' R22 0x15: OSR 8192 chopped, 100 ms).
+const DC_SETTLE_MS: u64 = 150;
+const DC_SKIP: u8 = 1;
+const DC_N: u8 = 2;
+/// CTSTA CMPHO | CMPLO: both seen during a DC V phase = an AC swing on the
+/// V tap around its DC (the window `cmp_window(c, 0)`-like, +-3 mV margin).
+const DC_AC_BITS: u8 = 0x30;
+
+/// Self-zero (POW:ZERO) and V self-calibration (POW:VOLT:CAL) jobs: results
+/// dropped after each row write, results averaged per step.
+const JOB_SKIP: u8 = 1;
+const JOB_N: u8 = 3;
+pub const JOB_ZERO: u8 = 1;
+pub const JOB_VCAL: u8 = 2;
+/// POW:ZERO refuses a step whose sqrt(RMS) (an AC signal) or |LPF - the
+/// old zero| (a DC signal; the device's raw zeros are ~150..1100 codes)
+/// exceeds these (codes).
+const ZERO_MAX_RMS: f32 = 400.0;
+const ZERO_MAX_LPF: i32 = 4000;
+/// POW:VOLT:CAL level window (fraction of the V range): below, the ratio is
+/// resolution-limited; above (AC), the 6 V tap clips (doc 3.11 T1: the
+/// op amp's +0.7 V headroom).
+const VCAL_MIN: f32 = 0.1;
+const VCAL_MAX_AC: f32 = 0.7;
+const VCAL_MAX_DC: f32 = 1.0;
+/// V cal, AC reference: the stock AC V node is AC-coupled (tau ~0.3 s) and
+/// starts from the power row's OP1O level: 2 s (> 6 tau) before its results
+/// (the emulator: +0.46 % with the fallback's 0.6 s).
+const VCAL_AC_SETTLE_MS: u64 = 2000;
+/// Agreement of the two rounds (ratio, and the raw level: steadiness).
+const VCAL_SPREAD: f32 = 0.003;
+/// Job results (`Pw::job_res`).
+pub const JR_NONE: u8 = 0;
+pub const JR_RUN: u8 = 1;
+pub const JR_OK: u8 = 2;
+/// Zero: a signal / current is present.
+pub const JR_SIGNAL: u8 = 3;
+pub const JR_SMALL: u8 = 4;
+pub const JR_BIG: u8 = 5;
+pub const JR_UNSTABLE: u8 = 6;
+/// V cal: the ratio is outside 0.9..1.1 (wrong range / wiring).
+pub const JR_RANGE: u8 = 7;
+pub const JR_ABORT: u8 = 8;
+/// The fallback method (VA only) has no OP2 channel to calibrate / zero.
+pub const JR_METHOD: u8 = 9;
+
+/// The V channel's gain from the factory calibration (no self-cal stored):
+/// 60 / 600 / 1000 V use the same divider taps as the stock AC V r1..r3
+/// (OP1 x1 -> AD2 there, OP2 x1 -> AD3 here), so their AC V RMS gains
+/// (cal 0x38..0x40) apply; 6 V uses the DC V r0 /10 tap (PA7, AD1 there):
+/// its DC V gain (0x04) times the AD2-path / AD1-path ratio measured on the
+/// 60 V tap by both calibrations (0x38 / 0x08). On the dumped unit:
+/// 1.02065 / 1.01614 / 1.00453 / 0.99815 against the device's T1 needs
+/// 1.0209 / 1.0170 / 1.0033 (doc 3.11): residuals -0.03 / -0.08 / +0.12 %.
+/// A missing or implausible record gives 1.0.
+pub fn v_gain_factory(vr: u8) -> f32 {
+    let g = match vr.min(3) {
+        0 => cal(0x04, 1.0) * cal(0x38, 1.0) / cal(0x08, 1.0),
+        r => cal(0x34 + 4 * r as u32, 1.0),
+    };
+    if (0.9..=1.1).contains(&g) { g } else { 1.0 }
+}
+
+/// Comparator thresholds relative to AGND for R21 (registers.md mux tables;
+/// REFO - AGND = 1.25 V, VDDA = 3.6 V for the VDSC taps, which only fill
+/// the levels the AGNDP / AGNDN taps lack). (code, volts).
+const CMP_RH: [(u8, f32); 12] = [
+    (0xF, -0.0208),
+    (0xE, 0.0),
+    (0xD, 0.0208),
+    (0xC, 0.0417),
+    (0xB, 0.0625),
+    (0xA, 0.1042),
+    (0x9, 0.2083),
+    (0x8, 0.4167),
+    (0x1, 0.8),
+    (0x0, 1.6),
+    (0x5, -0.2),
+    (0x6, -0.4),
+];
+const CMP_RL: [(u8, f32); 12] = [
+    (0x8, -0.4167),
+    (0x9, -0.2083),
+    (0xA, -0.1042),
+    (0xB, -0.0625),
+    (0xC, -0.0417),
+    (0xD, -0.0208),
+    (0xE, 0.0),
+    (0xF, 0.0208),
+    (0x1, -0.8),
+    (0x0, -1.6),
+    (0x5, 0.2),
+    (0x6, 0.4),
+];
+/// The default window (+-20.8 mV, the stock AC rows' R21).
+pub const R21_DEFAULT: u8 = 0xDD;
+/// R20 for the counter on the current (PB4: OP1O coupled, as the stock
+/// AC A rows' 0xF2): the fallback source when the V tap has no window.
+const R20_PB4: u8 = 0xF0;
+
+/// R21 for a DC-coupled comparator input at `c` V (DC) with `a` V rms of AC
+/// on it (doc 3.11: the T1 square was 0..96 mV on the 60 V tap: it never
+/// crossed the default -20.8 mV, f = 0): the nearest high threshold above
+/// c + 3 mV and low threshold below c - 3 mV, both inside the swing (every
+/// usual waveform reaches at least its rms around its mean). None = no
+/// window (pure DC, too small an AC part).
+pub fn cmp_window(c: f32, a: f32) -> Option<u8> {
+    const M: f32 = 0.003;
+    let mut rh: Option<(u8, f32)> = None;
+    for &(k, v) in &CMP_RH {
+        if v >= c + M && rh.is_none_or(|(_, b)| v < b) {
+            rh = Some((k, v));
+        }
+    }
+    let mut rl: Option<(u8, f32)> = None;
+    for &(k, v) in &CMP_RL {
+        if v <= c - M && rl.is_none_or(|(_, b)| v > b) {
+            rl = Some((k, v));
+        }
+    }
+    let ((h, vh), (l, vl)) = (rh?, rl?);
+    if vh < c + 0.9 * a && vl > c - 0.9 * a { Some(h << 4 | l) } else { None }
+}
+
 /// R36 for a signed SPHACAL step count: > 0 = AD2 (the current) leads
 /// (bit 7), < 0 = AD2 lags; |steps| <= 127.
 pub fn r36_of(steps: i8) -> u8 {
@@ -155,6 +290,10 @@ pub struct PowerVals {
     pub i_auto: bool,
     /// Fallback (VA only): no P / Q / PF.
     pub alt: bool,
+    /// The DC (AD1) method in force: P = V I; PF / S / Q / f not shown.
+    pub dc: bool,
+    /// Coupling setting (COUP_*).
+    pub coup: u8,
     pub comp: bool,
     /// Energy integration running / paused.
     pub run: bool,
@@ -189,6 +328,8 @@ impl PowerVals {
         v_auto: true,
         i_auto: true,
         alt: false,
+        dc: false,
+        coup: COUP_AC,
         comp: true,
         run: true,
         v_ol: false,
@@ -236,6 +377,11 @@ pub struct Pw {
     pub on: bool,
     /// Method: false = simultaneous (P, PF), true = fallback (VA only).
     pub alt: bool,
+    /// Coupling setting (COUP_*) and the DC method in force (`coup` DC, or
+    /// AUTO after a DC-like set); CTSTA bits seen in the DC V phase.
+    pub coup: u8,
+    pub dc: bool,
+    dc_cmp: u8,
     pub vr: u8,
     pub ik: u8,
     pub v_auto: bool,
@@ -298,6 +444,44 @@ pub struct Pw {
     pub r36: u8,
     /// Range changes / restarts since entry (energy gaps).
     pub restarts: u32,
+    /// Parts kept over the next `pw_apply` (2 V, 4 I: the other channel's
+    /// range changed, its scale did not).
+    keep: u8,
+    /// V channel gain per range (raw x gain = V), 0 = `v_gain_factory`;
+    /// set by POW:VOLT:CAL, persisted.
+    pub vgain: [f32; 4],
+    /// LPF zeros (codes; POW:ZERO, persisted when `zero_ok`): X per current
+    /// range, Y once (after the divider: the same on every V range).
+    pub zx: [i16; 6],
+    pub zy: i16,
+    pub zero_ok: bool,
+    /// The wiring dialog was confirmed once (the W button enters directly
+    /// afterwards; persisted).
+    pub wired: bool,
+    /// Running job (JOB_ZERO / JOB_VCAL, 0 none), its step, results taken,
+    /// sums; the V cal's reference kind (DC V vs AC V) and its two rounds;
+    /// the ranges to restore; the outcome (JR_*) and its V range.
+    pub job: u8,
+    pub job_step: u8,
+    job_n: u8,
+    job_a: f32,
+    job_b: f32,
+    job_dc: bool,
+    job_raw: [f32; 2],
+    job_ref: [f32; 2],
+    job_zx: [i16; 6],
+    job_save: (u8, u8, bool, bool),
+    pub job_res: u8,
+    pub job_vr: u8,
+    /// The kind of the last job started (its `job_res`).
+    pub job_last: u8,
+    /// Counter source / comparator window (R20 without ENCTR, R21) and
+    /// whether the frequency is meaningful (`pw_cmp_select`); the V range
+    /// the window was chosen for.
+    pub r20: u8,
+    pub r21: u8,
+    f_ok: bool,
+    cmp_vr: u8,
 }
 
 impl Pw {
@@ -305,6 +489,9 @@ impl Pw {
         Pw {
             on: false,
             alt: false,
+            coup: COUP_AC,
+            dc: false,
+            dc_cmp: 0,
             vr: 3,
             ik: 5,
             v_auto: true,
@@ -351,7 +538,36 @@ impl Pw {
             row: [0; hy::CFG_LEN],
             r36: 0,
             restarts: 0,
+            keep: 0,
+            vgain: [0.0; 4],
+            zx: [0; 6],
+            zy: 0,
+            zero_ok: false,
+            wired: false,
+            job: 0,
+            job_step: 0,
+            job_n: 0,
+            job_a: 0.0,
+            job_b: 0.0,
+            job_dc: false,
+            job_raw: [0.0; 2],
+            job_ref: [0.0; 2],
+            job_zx: [0; 6],
+            job_save: (3, 5, true, true),
+            job_res: JR_NONE,
+            job_vr: 0,
+            job_last: 0,
+            r20: R20_SENSE,
+            r21: R21_DEFAULT,
+            f_ok: true,
+            cmp_vr: 255,
         }
+    }
+
+    /// The V gain in force for range `vr`.
+    pub fn v_gain(&self, vr: u8) -> f32 {
+        let g = self.vgain[vr.min(3) as usize];
+        if g > 0.0 { g } else { v_gain_factory(vr) }
     }
 
     /// Zero Wh / VAh / time (POW:ENER:RES, the energy box).
@@ -388,6 +604,8 @@ impl Pw {
                 R34_YY => b"YY",
                 1 => b"V",
                 2 => b"I",
+                3 => b"DV",
+                4 => b"DI",
                 _ => b"?",
             };
             put(st, &mut at);
@@ -474,6 +692,11 @@ impl Dmm {
         pw.over_t0 = None;
         pw.cal = 0;
         pw.restarts = 0;
+        pw.job = 0;
+        pw.keep = 0;
+        pw.cmp_vr = 255;
+        // DC: the AD1 method at once; AUTO starts with B (a full set tells).
+        pw.dc = pw.coup == COUP_DC;
         self.mode = 255;
         self.reset_values();
         self.entry = clk.now_ms();
@@ -482,6 +705,7 @@ impl Dmm {
 
     /// Leave the power meter (the next `set` does it: any function change).
     pub(super) fn pw_leave(&mut self) {
+        self.pw_job_end(JR_ABORT);
         self.pw.on = false;
         self.pw.freeze = 0;
         self.pw.poke_n = 0;
@@ -492,13 +716,34 @@ impl Dmm {
     /// scale changed); the energy keeps integrating the last P over the gap.
     pub fn pw_apply(&mut self, clk: &mut Clock) {
         let pw = &mut *self.pw;
-        pw.phase = 0;
-        pw.seen = 0;
+        // After a range change of one channel its own statistic comes first
+        // (B: XX / YY, DC: the I / V row), so an autorange hunt costs one
+        // phase per step (~0.9 s from the settle), not a whole P V P I set.
+        pw.phase = match (pw.keep, pw.dc, pw.alt) {
+            (2, false, false) => 3,
+            (4, false, false) => 1,
+            (2, true, _) => 1,
+            _ => 0,
+        };
+        // A range change of one channel keeps the other's parts (its scale
+        // did not change): the page keeps V while I autoranges (doc 3.11).
+        pw.seen &= pw.keep & !1;
+        pw.keep = 0;
         pw.taken = 0;
-        pw.skip = if pw.alt { ALT_V_SKIP } else { 0 };
+        if pw.cmp_vr != pw.vr {
+            // The window was for another tap: back to the default until the
+            // next V result (`pw_cmp_select`).
+            pw.cmp_vr = pw.vr;
+            pw.r20 = R20_SENSE;
+            pw.r21 = R21_DEFAULT;
+            pw.f_ok = true;
+        }
+        pw.skip = if pw.dc { DC_SKIP } else if pw.alt { ALT_V_SKIP } else { 0 };
+        pw.dc_cmp = 0;
+        let settle = if pw.dc { DC_SETTLE_MS } else { SETTLE_MS };
         pw.restarts = pw.restarts.wrapping_add(1);
         self.write_config(clk);
-        self.deadline = clk.now_ms() + SETTLE_MS;
+        self.deadline = clk.now_ms() + settle;
         self.freq.next = 0;
     }
 
@@ -510,9 +755,44 @@ impl Dmm {
         self.mode = 4 + iu;
         self.range = ir as i8;
         let pw = &mut *self.pw;
-        pw.stat = if pw.freeze != 0 { pw.freeze } else { CYCLE[0] };
-        let mut row = if pw.alt { alt_row(pw.phase & 1 == 0, pw.vr, pw.ik) } else { power_row(pw.vr, pw.ik, pw.stat) };
-        if !pw.alt {
+        pw.stat = match pw.job {
+            JOB_ZERO if pw.job_step < 6 => R34_XX,
+            JOB_ZERO | JOB_VCAL => R34_YY,
+            _ if pw.freeze != 0 => pw.freeze,
+            _ => CYCLE[pw.phase as usize & 3],
+        };
+        // V cal, odd steps: the stock reference row of the range (DC V on
+        // AD1 or AC V), with the power meter's shunt kept (below).
+        let vref = pw.job == JOB_VCAL && pw.job_step & 1 == 1;
+        let dcm = pw.dc && pw.job == 0;
+        let stock = pw.alt || vref || dcm;
+        let (iu_, ir_) = iu_ir(pw.ik);
+        let mut row = if vref {
+            if pw.job_dc { CFG_F1[pw.vr.min(3) as usize] } else { CFG_F0[pw.vr.min(3) as usize] }
+        } else if dcm {
+            // The DC method: the stock DC V row of the V range (phase 0) /
+            // the DC A row of the current range (phase 1); the comparator
+            // of the V row on SENSE (the tap) with a window around its DC
+            // for the AUTO coupling's AC check (`pw_poll_dc`).
+            if pw.phase & 1 == 0 {
+                let mut r = CFG_F1[pw.vr.min(3) as usize];
+                r[0] = R20_SENSE;
+                r[1] = pw.r21;
+                r
+            } else if iu_ == 0 {
+                CFG_F7[ir_ as usize]
+            } else {
+                CFG_F8_9[ir_ as usize]
+            }
+        } else if pw.alt {
+            alt_row(pw.phase & 1 == 0, pw.vr, pw.ik)
+        } else {
+            power_row(pw.vr, pw.ik, pw.stat)
+        };
+        if !stock {
+            // The counter's source and window (`pw_cmp_select`).
+            row[0] = pw.r20 | 0x02;
+            row[1] = pw.r21;
             for &(i, v) in &pw.poke[..pw.poke_n as usize] {
                 if (i as usize) < row.len() {
                     row[i as usize] = v;
@@ -521,7 +801,7 @@ impl Dmm {
             pw.stat = row[20];
         }
         pw.row = row;
-        pw.r36 = if pw.alt { 0 } else { r36_of(pw.sph) };
+        pw.r36 = if stock { 0 } else { r36_of(pw.sph) };
         self.avg.reset();
         self.t_rd = None;
         self.t_conv = None;
@@ -532,7 +812,7 @@ impl Dmm {
         }
         relay_pe(iu);
         pc7(false);
-        if self.pw.alt {
+        if stock {
             hy::configure(&row);
         } else {
             hy::configure_ph(&row, self.pw.r36);
@@ -553,6 +833,9 @@ impl Dmm {
     /// Ranges: `v` / `i` None = keep, Some(None) = AUTO, Some(Some(r)) =
     /// that range (V 0..3, I index 0..5).
     pub fn pw_set_ranges(&mut self, clk: &mut Clock, v: Option<Option<u8>>, i: Option<Option<u8>>) {
+        if self.pw.job != 0 {
+            self.pw_job_end(JR_ABORT);
+        }
         let pw = &mut *self.pw;
         let (vr, ik) = (pw.vr, pw.ik);
         match v {
@@ -573,6 +856,7 @@ impl Dmm {
         }
         self.manual = !(pw.v_auto && pw.i_auto);
         if pw.on && (pw.vr, pw.ik) != (vr, ik) {
+            pw.keep = if pw.vr == vr { 2 } else if pw.ik == ik { 4 } else { 0 };
             self.pw_apply(clk);
         }
     }
@@ -610,6 +894,22 @@ impl Dmm {
         pw.cal_s0 = pw.sph;
         pw.cal_result = None;
         true
+    }
+
+    /// Coupling (POW:COUP, the settings page): AC, DC or AUTO; the method
+    /// follows at once (AUTO: from B).
+    pub fn pw_set_coupling(&mut self, clk: &mut Clock, coup: u8) {
+        if self.pw.job != 0 {
+            self.pw_job_end(JR_ABORT);
+        }
+        let pw = &mut *self.pw;
+        pw.coup = coup.min(COUP_AUTO);
+        let dc = pw.coup == COUP_DC;
+        if pw.on && (dc != pw.dc || pw.job_res == JR_ABORT) {
+            pw.dc = dc;
+            pw.keep = 0;
+            self.pw_apply(clk);
+        }
     }
 
     /// DBG:POW:STAT: freeze R34 (0 = cycle P / V / P / I again).
@@ -653,13 +953,13 @@ impl Dmm {
     /// Values for the UI / SCPI (None before V, I and P were measured).
     pub fn pw_vals(&self) -> Option<PowerVals> {
         let pw = &*self.pw;
-        let need = if pw.alt { 6 } else { 7 };
+        let need = if pw.alt && !pw.dc { 6 } else { 7 };
         if !pw.on || pw.seen & need != need {
             return None;
         }
         let (iu, _) = iu_ir(pw.ik);
         let r = if pw.comp { pw.r_path[iu as usize] } else { 0.0 };
-        let (p, s, q, pf, v, i) = if pw.alt {
+        let (p, s, q, pf, v, i) = if pw.alt && !pw.dc {
             let (v, i) = (pw.v_ac, hypot(pw.i_ac, pw.i_dc));
             (f32::NAN, v * i, f32::NAN, f32::NAN, v, i)
         } else {
@@ -681,19 +981,21 @@ impl Dmm {
             pf,
             v,
             i,
-            vdc: if pw.alt { f32::NAN } else { pw.v_dc },
+            vdc: if pw.alt && !pw.dc { f32::NAN } else { pw.v_dc },
             idc: pw.i_dc,
-            f_hz: self.freq.f_khz * 1000.0,
+            f_hz: if pw.dc { 0.0 } else if pw.alt || pw.f_ok { self.freq.f_khz * 1000.0 } else { 0.0 },
             burden_v: i * pw.r_path[iu as usize],
             e_wh: pw.e.wh(),
             vah: pw.va.wh(),
             secs: (pw.t_int / 1000) as u32,
-            p_avg: if pw.t_int > 0 && !pw.alt { pw.e.wh() * 3.6e6 / pw.t_int as f32 } else { f32::NAN },
+            p_avg: if pw.t_int > 0 && (!pw.alt || pw.dc) { pw.e.wh() * 3.6e6 / pw.t_int as f32 } else { f32::NAN },
             vr: pw.vr,
             ik: pw.ik,
             v_auto: pw.v_auto,
             i_auto: pw.i_auto,
-            alt: pw.alt,
+            alt: pw.alt && !pw.dc,
+            dc: pw.dc,
+            coup: pw.coup,
             comp: pw.comp,
             run: pw.run,
             v_ol: hypot(pw.v_ac, pw.v_dc) > ov * V_LIM[pw.vr as usize],
@@ -714,7 +1016,9 @@ impl Dmm {
                 ik: pw.ik,
                 v_auto: pw.v_auto,
                 i_auto: pw.i_auto,
-                alt: pw.alt,
+                alt: pw.alt && !pw.dc,
+                dc: pw.dc,
+                coup: pw.coup,
                 comp: pw.comp,
                 run: pw.run,
                 e_wh: pw.e.wh(),
@@ -738,10 +1042,21 @@ impl Dmm {
 
     /// Poll in the power meter (from `poll`, after the settle deadline).
     pub(super) fn poll_power(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
-        // Frequency of the voltage: the comparator on SENSE (method B); the
-        // fallback's AC V row has it on PB4 (the coupled V node).
+        if self.pw.job != 0 {
+            return self.pw_job_poll(clk);
+        }
+        if self.pw.dc {
+            return self.pw_poll_dc(clk, now);
+        }
+        // Frequency: the comparator on SENSE with a window around the V
+        // tap's DC, or on PB4 (the current) when the V tap has none
+        // (`pw_cmp_select`; method B); the fallback's AC V row has it on PB4
+        // (the coupled V node). The sentinel is off in the power meter
+        // (`pw_write_config`): R20 / R21 are the counter's alone.
         if !self.pw.alt {
-            self.freq_secondary(now, R20_SENSE);
+            if self.pw.f_ok {
+                self.freq_secondary(now, self.pw.r20);
+            }
         } else if self.pw.phase & 1 == 0 {
             self.freq_secondary(now, 0xF0);
         }
@@ -791,6 +1106,9 @@ impl Dmm {
             let st = self.pw.stat;
             if st != R34_XY {
                 ranged = self.pw_autorange(clk, st == R34_YY);
+                if !ranged {
+                    self.pw_cmp_select(now);
+                }
             }
             if !ranged && self.pw.freeze == 0 {
                 let pw = &mut *self.pw;
@@ -809,6 +1127,107 @@ impl Dmm {
         let pv = self.pw_vals()?;
         self.pw_account(now, &pv);
         let pv = self.pw_vals()?;
+        // AUTO coupling: a DC-like set after the I phase -> the DC method.
+        if self.pw.coup == COUP_AUTO && !self.pw.alt && self.pw.stat == CYCLE[0] && self.pw.phase == 0 && self.pw_dc_like() {
+            self.pw.dc = true;
+            self.pw.keep = 6;
+            self.pw_apply(clk);
+        }
+        Some(self.pw_reading(&pv))
+    }
+
+    /// Method B's parts are DC-like: each channel's AC part below 1 % of its
+    /// DC part plus the noise floor (~100 codes of its converter).
+    fn pw_dc_like(&self) -> bool {
+        let pw = &*self.pw;
+        let (iu, ir) = iu_ir(pw.ik);
+        let fv = 100.0 * CODE * KV[pw.vr as usize];
+        let fi = 100.0 * CODE / (SHUNT_OHM[iu as usize] * MV_DIV[ir as usize]);
+        pw.seen & 6 == 6 && pw.v_ac < 0.01 * pw.v_dc.abs() + fv && pw.i_ac < 0.01 * pw.i_dc.abs() + fi
+    }
+
+    /// The DC method (`Pw::dc`): one AD1 result of the stock DC V row (phase
+    /// 0) or DC A row (phase 1), scaled as `poll_dcv` / `poll_dca` with the
+    /// factory DC calibration; DC_N per phase, then the autorange of that
+    /// channel and the other row. P = V I (`totals` with the AC parts 0:
+    /// the burden compensation as in B). A reading after each phase.
+    fn pw_poll_dc(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
+        let v_phase = self.pw.phase & 1 == 0;
+        if v_phase && self.pw.coup == COUP_AUTO {
+            // AUTO: the comparator's high / low latches over the V phase.
+            self.pw.dc_cmp |= hy::read1(0x14) & DC_AC_BITS;
+        }
+        let ad1 = self.ad1()?;
+        let pw = &mut *self.pw;
+        if pw.skip > 0 {
+            pw.skip -= 1;
+            return None;
+        }
+        {
+            let dt = now.saturating_sub(pw.t_res).min(u16::MAX as u64) as u16;
+            pw.t_res = now;
+            pw.ring[pw.ring_k as usize % RING_N] = Raw { stat: if v_phase { 3 } else { 4 }, disc: false, rms: 0, lpf: ad1, dt };
+            pw.ring_k = pw.ring_k.wrapping_add(1);
+        }
+        if v_phase {
+            let r = pw.vr.min(3) as usize;
+            let mut v = ad1 as f32 * K_ACV[r] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * r as u32, 1.0) - cal(0x14 + 4 * r as u32, 0.0);
+            if v < 0.0 {
+                v *= DCV_NEGK[r];
+            }
+            if pw.seen & 2 == 0 {
+                pw.v_dc = v;
+            } else {
+                ema(ACV_WIN[r], 0.5, v, &mut pw.v_dc);
+            }
+            pw.v_ac = 0.0;
+            pw.seen |= 2;
+        } else {
+            let (iu, ir) = iu_ir(pw.ik);
+            let i = (iu * 2 + ir) as u32;
+            let us = [1.0, 1e-3, 1e-6][iu as usize];
+            let a = (ad1 as f32 * 1.25 / (SHUNT[iu as usize] * MV_DIV[ir as usize] * 0.9) / AD1_DIV * cal(0x94 + 4 * i, 1.0) - cal(0xAC + 4 * i, 0.0)) * us;
+            if pw.seen & 4 == 0 {
+                pw.i_dc = a;
+            } else {
+                ema(ACA_WIN[i as usize] * us, 0.5, a, &mut pw.i_dc);
+            }
+            pw.i_ac = 0.0;
+            pw.seen |= 4;
+        }
+        pw.p_ac = 0.0;
+        if pw.seen & 6 == 6 {
+            pw.seen |= 1;
+        }
+        pw.taken += 1;
+        if pw.taken < DC_N {
+            return None;
+        }
+        pw.taken = 0;
+        // AUTO: an AC swing on the V tap in this V phase -> method B.
+        if v_phase && pw.coup == COUP_AUTO && pw.dc_cmp == DC_AC_BITS {
+            pw.dc = false;
+            pw.keep = 0;
+            self.pw_apply(clk);
+            return None;
+        }
+        if v_phase {
+            // The AC check's window around the tap's DC (no swing needed).
+            let c = self.pw.v_dc / KV[self.pw.vr as usize];
+            self.pw.r21 = cmp_window(c, 1.0).unwrap_or(R21_DEFAULT);
+        }
+        if self.pw_autorange(clk, v_phase) {
+            return None;
+        }
+        let pw = &mut *self.pw;
+        pw.phase ^= 1;
+        pw.skip = DC_SKIP;
+        pw.dc_cmp = 0;
+        self.write_config(clk);
+        self.deadline = clk.now_ms() + DC_SETTLE_MS;
+        let pv = self.pw_vals()?;
+        self.pw_account(now, &pv);
+        let pv = self.pw_vals()?;
         Some(self.pw_reading(&pv))
     }
 
@@ -818,9 +1237,20 @@ impl Dmm {
         let (iu, ir) = iu_ir(pw.ik);
         let ci = (iu * 2 + ir) as u32;
         let s_i = CODE / (SHUNT_OHM[iu as usize] * MV_DIV[ir as usize]);
-        let s_v = CODE * KV[pw.vr as usize];
-        let (g_i, g_il) = (cal(0xC4 + 4 * ci, 1.0), cal(0xF4 + 4 * ci, 1.0));
-        let i_dc = lpf as f32 * s_i * g_il;
+        let s_v = CODE * KV[pw.vr as usize] * pw.v_gain(pw.vr);
+        // The DC part runs through the same shunt / OP1 / AD2 as the AC part:
+        // with the LPF gain at its default 1.0 (never calibrated: so on the
+        // dumped unit, while the AC A RMS gains are 0.954..1.036) the RMS
+        // gain applies to it too (INFERRED; device check T4: Idc vs DC A).
+        let g_i = cal(0xC4 + 4 * ci, 1.0);
+        let g_il = match cal(0xF4 + 4 * ci, 1.0) {
+            g if g == 1.0 => g_i,
+            g => g,
+        };
+        // LPF zeros (POW:ZERO): the X one of this current range; the Y one
+        // in the V phase below. The RMS statistics are after the HPF.
+        let (zx, zy) = if pw.zero_ok { (pw.zx[pw.ik.min(5) as usize] as i32, pw.zy as i32) } else { (0, 0) };
+        let i_dc = (lpf - zx) as f32 * s_i * g_il;
         let first = |seen: u8, bit: u8| seen & bit == 0;
         let ia = (ACA_WIN[ci as usize] * [1.0, 1e-3, 1e-6][iu as usize], 0.15);
         match st {
@@ -865,7 +1295,7 @@ impl Dmm {
                     }
                     pw.seen |= 4;
                 } else {
-                    let (a, d) = (sq * s_v, lpf as f32 * s_v);
+                    let (a, d) = (sq * s_v, (lpf - zy) as f32 * s_v);
                     let thr = ACV_WIN[pw.vr as usize];
                     if first(pw.seen, 2) {
                         pw.v_ac = a;
@@ -959,6 +1389,7 @@ impl Dmm {
             }
         };
         if changed {
+            self.pw.keep = if v { 4 } else { 2 };
             self.pw_apply(clk);
         }
         changed
@@ -1019,6 +1450,252 @@ impl Dmm {
                 pw.cal_req = true;
             }
         }
+    }
+
+    /// After a V or I result: the counter's source and window. The V tap
+    /// (SENSE, DC-coupled) with the R21 window around its DC (`cmp_window`);
+    /// else the current on PB4 (AC-coupled, the default window) when its AC
+    /// part at OP1O is >= 25 mV rms (INFERRED: the stock AC A rows count
+    /// there); else no frequency ("--").
+    fn pw_cmp_select(&mut self, now: u64) {
+        let pw = &mut *self.pw;
+        if pw.seen & 6 != 6 {
+            return;
+        }
+        let k = KV[pw.vr as usize] * pw.v_gain(pw.vr);
+        let (iu, ir) = iu_ir(pw.ik);
+        let i_op = pw.i_ac * SHUNT_OHM[iu as usize] * MV_DIV[ir as usize];
+        let (r20, r21, ok) = match cmp_window(pw.v_dc / k, pw.v_ac / k) {
+            Some(w) => (R20_SENSE, w, true),
+            None if i_op >= 0.025 => (R20_PB4, R21_DEFAULT, true),
+            None => (pw.r20, pw.r21, false),
+        };
+        pw.f_ok = ok;
+        if (r20, r21) != (pw.r20, pw.r21) {
+            pw.r20 = r20;
+            pw.r21 = r21;
+            if r21 != self.pw.row[1] {
+                hy::write(0x21, &[r21]);
+                self.pw.row[1] = r21;
+            }
+            self.pw.row[0] = r20 | 0x02;
+            // Restart the counter on the new source now.
+            self.freq.next = 0;
+            self.freq.f_khz = 0.0;
+            self.freq_secondary(now, r20);
+        }
+    }
+
+    /// POW:ZERO / the Power Settings "Zero" button: with the leads open
+    /// (nothing on V-COM, nothing through A) the LPF zeros of the six
+    /// current ranges (XX phase) and of the V channel (YY phase, the current
+    /// V range), ~6 s. Refused per step when a signal is present
+    /// (`JR_SIGNAL`: the old zeros stay).
+    pub fn pw_zero_start(&mut self, clk: &mut Clock) -> bool {
+        self.pw_job_start(clk, JOB_ZERO)
+    }
+
+    /// POW:VOLT:CAL / the "V cal" button: with a steady AC or DC voltage on
+    /// V-COM (10..70 % (AC) / 100 % (DC) of the V range), the power V
+    /// channel and the stock's factory-calibrated DC V (AD1) or AC V row of
+    /// the same range, alternately, two rounds; the ratio becomes the
+    /// range's gain. The kind follows the larger part of the first round.
+    pub fn pw_vcal_start(&mut self, clk: &mut Clock) -> bool {
+        self.pw_job_start(clk, JOB_VCAL)
+    }
+
+    fn pw_job_start(&mut self, clk: &mut Clock, job: u8) -> bool {
+        let pw = &mut *self.pw;
+        if !pw.on || pw.job != 0 {
+            return false;
+        }
+        if pw.alt {
+            pw.job_last = job;
+            pw.job_res = JR_METHOD;
+            return false;
+        }
+        pw.job_save = (pw.vr, pw.ik, pw.v_auto, pw.i_auto);
+        pw.job = job;
+        pw.job_last = job;
+        pw.job_step = 0;
+        pw.job_res = JR_RUN;
+        pw.job_vr = pw.vr;
+        pw.job_zx = pw.zx;
+        pw.cal = 0;
+        self.pw_job_step(clk);
+        true
+    }
+
+    /// Write the row of the current job step and settle.
+    fn pw_job_step(&mut self, clk: &mut Clock) {
+        let pw = &mut *self.pw;
+        pw.job_n = 0;
+        pw.job_a = 0.0;
+        pw.job_b = 0.0;
+        if pw.job == JOB_ZERO && pw.job_step < 6 {
+            pw.ik = pw.job_step;
+        }
+        let vref = pw.job == JOB_VCAL && pw.job_step & 1 == 1;
+        let (settle, skip) = match (vref, pw.job_dc) {
+            (true, false) => (VCAL_AC_SETTLE_MS, ALT_V_SKIP),
+            (true, true) => (450, JOB_SKIP),
+            _ => (SETTLE_MS, JOB_SKIP),
+        };
+        pw.skip = skip;
+        self.write_config(clk);
+        self.deadline = clk.now_ms() + settle;
+    }
+
+    /// End the job (`res`): restore the ranges, back to the phase machine.
+    fn pw_job_end(&mut self, res: u8) {
+        let pw = &mut *self.pw;
+        if pw.job == 0 {
+            return;
+        }
+        pw.job = 0;
+        pw.job_res = res;
+        (pw.vr, pw.ik, pw.v_auto, pw.i_auto) = pw.job_save;
+        // `pw_apply` follows from the caller (or the function changes).
+        pw.cal_req = pw.on;
+    }
+
+    /// A job's result: the zero / gain steps (no reading meanwhile).
+    fn pw_job_poll(&mut self, clk: &mut Clock) -> Option<Reading> {
+        let pw = &*self.pw;
+        let vref = pw.job == JOB_VCAL && pw.job_step & 1 == 1;
+        let r = pw.vr.min(3) as usize;
+        // (main value, second value, sqrt(RMS) for the zero's signal check)
+        let (x, y, sq) = if vref && pw.job_dc {
+            let ad1 = self.ad1()?;
+            let mut v = ad1 as f32 * K_ACV[r] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * r as u32, 1.0)
+                - cal(0x14 + 4 * r as u32, 0.0);
+            if v < 0.0 {
+                v *= DCV_NEGK[r];
+            }
+            (v, 0.0, 0.0)
+        } else {
+            let need = hy::INTF_RMS | hy::INTF_LPF;
+            if hy::read1(hy::R_INTF) & need != need {
+                return None;
+            }
+            let mut b = [0u8; 14];
+            hy::read(hy::R_AD1, &mut b);
+            let lpf = hy::lpf19(&b[6..9]);
+            let rms = hy::rms_signed(&b[9..14]);
+            let sq = sqrt(rms.max(0) as f32);
+            if vref {
+                // The stock AC V row with its calibration (`poll_ac`).
+                let v = (sq * K_ACV[r] * CODE * cal(0x34 + 4 * r as u32, 1.0) - cal(0x44 + 4 * r as u32, 0.0)).max(0.0);
+                (v, 0.0, sq)
+            } else if pw.job == JOB_VCAL {
+                // The power V channel, raw (gain 1, zero applied).
+                let zy = if pw.zero_ok { pw.zy as i32 } else { 0 };
+                (sq * CODE * KV[r], (lpf - zy) as f32 * CODE * KV[r], sq)
+            } else {
+                (lpf as f32, 0.0, sq)
+            }
+        };
+        let pw = &mut *self.pw;
+        if pw.skip > 0 {
+            pw.skip -= 1;
+            return None;
+        }
+        if pw.job == JOB_ZERO {
+            // Against the previous zero of the step (a stored zero of
+            // ~1000 codes is not a signal).
+            let old = if pw.job_step < 6 { pw.job_zx[pw.job_step as usize] } else { pw.zy } as i32;
+            let old = if pw.zero_ok { old } else { 0 };
+            if sq > ZERO_MAX_RMS || (x as i32 - old).abs() > ZERO_MAX_LPF {
+                self.pw_job_end(JR_SIGNAL);
+                return None;
+            }
+        }
+        pw.job_a += x;
+        pw.job_b += y;
+        pw.job_n += 1;
+        if pw.job_n < JOB_N {
+            return None;
+        }
+        let (a, b) = (pw.job_a / JOB_N as f32, pw.job_b / JOB_N as f32);
+        let step = pw.job_step;
+        let res = match pw.job {
+            JOB_ZERO => {
+                let z = (if a < 0.0 { a - 0.5 } else { a + 0.5 }) as i32;
+                let z = z.clamp(-32768, 32767) as i16;
+                if step < 6 {
+                    pw.job_zx[step as usize] = z;
+                    None
+                } else {
+                    pw.zx = pw.job_zx;
+                    pw.zy = z;
+                    pw.zero_ok = true;
+                    Some(JR_OK)
+                }
+            }
+            _ if step & 1 == 0 => {
+                // Power V channel: AC (a) or DC (b) part, the kind decided by
+                // the first round.
+                if step == 0 {
+                    pw.job_dc = b.abs() > a;
+                }
+                let m = if pw.job_dc { b } else { a };
+                let lim = V_LIM[r];
+                let max = if pw.job_dc { VCAL_MAX_DC } else { VCAL_MAX_AC };
+                pw.job_raw[(step / 2) as usize] = m;
+                if m.abs() < VCAL_MIN * lim {
+                    Some(JR_SMALL)
+                } else if m.abs() > max * lim {
+                    Some(JR_BIG)
+                } else {
+                    None
+                }
+            }
+            _ => {
+                pw.job_ref[(step / 2) as usize] = a;
+                if step < 3 {
+                    None
+                } else {
+                    let r0 = pw.job_ref[0] / pw.job_raw[0];
+                    let r1 = pw.job_ref[1] / pw.job_raw[1];
+                    let g = 0.5 * (r0 + r1);
+                    let steady = (pw.job_raw[0] - pw.job_raw[1]).abs() <= VCAL_SPREAD * pw.job_raw[0].abs();
+                    if !g.is_finite() || (r0 - r1).abs() > VCAL_SPREAD * g.abs() || !steady {
+                        Some(JR_UNSTABLE)
+                    } else if !(0.9..=1.1).contains(&g) {
+                        Some(JR_RANGE)
+                    } else {
+                        pw.vgain[r] = g;
+                        Some(JR_OK)
+                    }
+                }
+            }
+        };
+        match res {
+            Some(res) => self.pw_job_end(res),
+            None => {
+                self.pw.job_step += 1;
+                self.pw_job_step(clk);
+            }
+        }
+        None
+    }
+
+    /// What the DMM page shows while no full reading exists yet: the V of
+    /// the latest V result (the I channel still autoranging from 10 A) and
+    /// the state text. None when a reading exists or nothing is measured.
+    pub fn pw_partial(&self) -> Option<(Option<Val>, &'static str)> {
+        let pw = &*self.pw;
+        if !pw.on {
+            return None;
+        }
+        let txt = match pw.job {
+            JOB_ZERO => "Zeroing: leads open",
+            JOB_VCAL => "V calibration...",
+            _ if self.pw_vals().is_some() => return None,
+            _ => "I ranging...",
+        };
+        let v = (pw.seen & 2 != 0 && pw.job == 0).then(|| Val::new(hypot(pw.v_ac, pw.v_dc), 4 - pw.vr.min(3), "V"));
+        Some((v, txt))
     }
 
     /// Pending SPHACAL rewrite of the calibration (from `poll`).
@@ -1208,6 +1885,25 @@ mod tests {
         assert_eq!(f(1000.0 * 10.0), (3, "kW"));
         assert_eq!(p_format(0.36, 0.1234, true).0, 123.4);
         assert_eq!(p_format(36.0, 1.0, false).2, "VA");
+    }
+
+    #[test]
+    fn comparator_windows() {
+        // A bipolar signal: the stock window (+-20.8 mV).
+        assert_eq!(cmp_window(0.0, 0.1), Some(R21_DEFAULT));
+        assert_eq!(cmp_window(0.001, 0.03), Some(R21_DEFAULT));
+        // The T1 square on the 60 V tap: 0..96 mV (DC 48 mV, AC 48 mV rms):
+        // RH 62.5 mV (0xB), RL 20.8 mV (0xF), both inside 0..96 mV.
+        assert_eq!(cmp_window(0.048, 0.048), Some(0xBF));
+        // Negative DC with ripple: -0.3 V +- 0.15 V.
+        let w = cmp_window(-0.3, 0.15).unwrap();
+        let rh = CMP_RH.iter().find(|e| e.0 == w >> 4).unwrap().1;
+        let rl = CMP_RL.iter().find(|e| e.0 == w & 15).unwrap().1;
+        assert!(rh > -0.3 && rh < -0.3 + 0.135 && rl < -0.3 && rl > -0.3 - 0.135, "{rh} {rl}");
+        // Pure DC / too small an AC part: no window.
+        assert_eq!(cmp_window(0.048, 0.0), None);
+        assert_eq!(cmp_window(0.0, 0.01), None);
+        assert_eq!(cmp_window(0.5, 0.05), None);
     }
 
     #[test]

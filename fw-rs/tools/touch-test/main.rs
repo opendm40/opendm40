@@ -693,10 +693,10 @@ fn hit_tests(ck: &mut Ck) {
         } else if x < ui::CHART_X && (176..280).contains(&y) {
             Some(104) // chart rate
         } else {
-            o(ui::button_hit(6, x, y))
+            o(ui::button_hit(x, y))
         }
     };
-    page(ck, "dmm function row", &dmm_hit, &|b| b.y0 >= ui::BTN_Y as i32 - 4, &[0, 1, 2, 3, 4, 5]);
+    page(ck, "dmm function row", &dmm_hit, &|b| b.y0 >= ui::BTN_Y as i32 - 4, &[0, 1, 2, 3, 4, 5, 6]);
     page(ck, "dmm REL + rate chip", &dmm_hit, &|b| b.y0 >= 175 && b.y1 < 279, &[100, 103]);
     // Combined view: the DMM function band over the replica page.
     host::reset(0);
@@ -705,7 +705,7 @@ fn hit_tests(ck: &mut Ck) {
     scope_ui::invalidate();
     scope_ui::update(&cm);
     ui::func_band(dmm::Button::Volt, 1, false, true);
-    page(ck, "function band", &|x, y| o(ui::func_band_hit(x, y)), &|b| b.y0 >= ui::FUNC_Y as i32, &[0, 1, 2, 3, 4, 5]);
+    page(ck, "function band", &|x, y| o(ui::func_band_hit(x, y)), &|b| b.y0 >= ui::FUNC_Y as i32, &[0, 1, 2, 3, 4, 5, 6]);
     // Stock-replica scope page: right panel (4 px vertical slop), MF popup
     // tabs, CH1 popup.
     host::reset(0);

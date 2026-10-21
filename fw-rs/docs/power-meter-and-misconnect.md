@@ -495,7 +495,7 @@ Effort: 3.7 skeleton 1-2 days; B row + phase machine + SCPI 3-4 days; UI 2
 days; phase cal + tests 2 days; emulator role 2 days.
 
 
-### 3.11 Implemented (fw-rs, 2026-10-22)
+### 3.11 Implemented (fw-rs, 2026-10-22; follow-ups in 3.12)
 
 `fw-rs/src/powermeter.rs` (a child of dmm.rs: row builder, phase machine,
 scaling, energy, autorange, burden, limit; host tests), `src/ui_power.rs`
@@ -710,6 +710,197 @@ Not done here (need current through A): T2 (PF, sign, phase cal), T4 DC
 power, T5 ranges, T6 burden, the limit countdown, XY / XX switch cost.
 Follow-ups for the build: per-range V gain (or a user V cal), LPF zero on X
 and Y, f in power mode.
+
+### 3.12 Follow-ups (fw-rs, 2026-10-22): V gain, zeros, f, DC method, 7th button
+
+Built on 853f945 against the device results of 3.11. Parts of 3.11 this
+replaces: the entry (now the W button), "the function is not restored",
+"V channel gain 1.0", "f on SENSE", "DC parts from the LPFs only".
+
+**V gain per range (factory-derived default + self-cal).** The V channel's
+raw gain error is the divider tap's (plus OP2 / AD3), and the factory record
+already measured the same taps through the stock AC V path (OP1 x1 -> AD2):
+
+| range | tap | default gain (`pw::v_gain_factory`) | dumped unit | T1 needs (1 / raw) | residual |
+|---|---|---|---|---|---|
+| 6 V | PA7 /10 (DC V r0's) | DC V r0 gain (cal 0x04) x AC V r1 / DC V r1 (0x38 / 0x08: the AD2-path / AD1-path ratio on a tap both measure) | 1.02065 | 1.0209 | -0.03 % |
+| 60 V | PA6 /100 | AC V r1 (0x38) | 1.01614 | 1.0170 | -0.08 % |
+| 600 V | PA5 /1000 | AC V r2 (0x3C) | 1.00453 | 1.0033 | +0.12 % |
+| 1000 V | PA4+PA5 | AC V r3 (0x40) | 0.99815 | - | (not measured) |
+
+(The AC V / DC V ratio is 1.00849 on both r1 and r2 of the dump: a constant
+AD2-vs-AD1 converter factor, which is why the 6 V derivation works.) The
+dump (`private/memrw-kit-test/quick.img`, 2026-10-13) is assumed to be the
+T1 unit: its AC V r1 gain reproduces the T1 ratio stock / raw (1.0166) to
+0.04 %. So most units need no self-cal; the gains are applied as
+`raw x gain` in `pw_take` (Vrms and V_dc). A missing record or a derived
+gain outside 0.9..1.1 gives 1.0.
+
+`POW:VOLT:CAL` / Power Settings "V cal": steady AC or DC on V-COM, the V range
+fixed during the job (~8 s AC, ~3 s DC): power row (R34 frozen YY, 1 dropped
++ 3 averaged) -> the stock reference row of the same range -> power row ->
+reference; the kind follows the larger part of the first round: **DC** = the
+stock DC V row (AD1, `poll_dcv` scaling with cal 0x04 / 0x14 and DCV_NEGK)
+vs V_dc (zero applied); **AC** = the stock AC V row (cal 0x34 / 0x44, 2 s
+settle: the AC-coupled node starts from the power row's OP1O level, the
+emulator showed +0.46 % with 0.6 s) vs V_ac. gain = mean(ref / raw) of the
+two rounds, stored per range (persisted). Refusals (`POW:VOLT:CAL?` =
+`<result>,<range V>,<gain in force>,SELF|FACT`): SMALL (< 10 % of the range),
+BIG (> 70 % AC: the 6 V tap clips at +0.7 V; > 100 % DC), UNSTABLE (the two
+rounds' ratios or raw levels differ > 0.3 %), RANGE (gain outside 0.9..1.1),
+METHOD (the VA-only fallback), ABORT (a range / function change).
+`POW:VOLT:CAL DEF` returns the range to the factory-derived gain,
+`POW:VOLT:GAIN?` lists the 4 gains in force.
+
+**LPF zeros.** Internal zero (datasheet mux tables): `SOP2P = AGND` (011) and
+`SOP1P = AGND` exist, so OP2 + AD3 (and OP1 + AD2) offsets *can* be measured
+without the leads. Not used as the default: AD2IN is PB3 (not AGND) in the
+I row, and the T1 POKE test showed the reference nodes themselves differ by
+~0.7 mV (AD3IN = RLU: LPF -175 codes, PB5: -136), so an AGND-input zero
+leaves a residual of that order (~150 codes = 0.07 V phantom on 60 V, 0.7 V
+on 600 V) - and the X zeros differ per range (155 / 880 codes seen in T3)
+where the internal zero would need a row rewrite + settle per range change.
+Built instead: **`POW:ZERO`** / "Zero" (leads open, nothing in A, ~6 s):
+the six current ranges in turn (R34 XX: the X LPF; 1 dropped + 3
+averaged) and the V channel once (YY; the zero is after the divider, the
+same on every V range), refused (SIGNAL) when sqrt(RMS) > 400 codes (AC
+present) or |LPF - old zero| > 4000 codes (DC present); stored per unit
+(persisted), subtracted from V_dc / I_dc only (the RMS statistics are after
+the HPF). `POW:ZERO?` = `<result>,SET|NONE,<Y>,<X 600 uA..10 A>`,
+`POW:ZERO CLE` clears. Polarity: `lpf19` sign-extends bit 18; the emulator
+runs -5 V / 0.4 A to P = -2.000 W, Vdc -5.000 (scenario `zero`).
+Device hook to settle the internal-zero question later: `DBG:POW:STAT YY`,
+`DBG:POW:POKE 18,<0x80 | 0x30 | R32 low nibble>` (SOP2P = AGND) and compare
+the LPF with the open-lead zero of `POW:ZERO?`.
+
+**I_dc gain.** The DC part of the current runs through the same shunt / OP1
+/ AD2 as the AC part; the record's LPF gains (0xF4..) are the default 1.0 on
+the dumped unit while its AC A RMS gains are 0.954..1.036, i.e. never
+calibrated. B now applies the RMS gain to I_dc when the LPF gain is exactly
+1.0 (INFERRED: device check T4 = Idc of B vs the DC A function).
+
+**Frequency.** Cause of f = 0 in T1: the comparator window R21 0xDD is
++-20.8 mV around AGND; SENSE is DC-coupled, and the calibrator's 40 Hz
+square is unipolar (0..9.6 V = 0..96 mV on the 60 V tap): it crosses +20.8
+mV but never -20.8 mV, the latch never resets (AC V counts on PB4, the
+AC-coupled node). Real mains (bipolar) would have counted. The emulator
+missed it because its counter tested only the AC peak; it now tests dc +-
+peak against both thresholds on DC-coupled nodes (power role). Fix
+(`pw_cmp_select`, after each V / I result): `cmp_window(V_dc / k, V_ac / k)`
+picks the nearest R21 thresholds around the tap's DC (AGNDP / AGNDN taps,
+the VDSC taps where those have no level; at least 3 mV off the DC, inside
+the swing); a bipolar signal keeps 0xDD; the T1 square gets 0xBF (+62.5 /
++20.8 mV). No window (pure DC or too small an AC part) but >= 25 mV rms of
+current AC at OP1O: the counter on PB4 = the current's frequency
+(INFERRED from the stock AC A rows' R20 0xF2). Else "--". A V range change
+returns to SENSE / 0xDD. The sentinel is off in the power meter
+(`sent.configured(Kind::Off)`), so R20 / R21 are the counter's alone; the
+fixes agent's sentinel.rs changes do not touch this path.
+
+**Entry ranging.** `pw_apply` dropped every part on any range change, and a
+range change restarted the cycle at P: each I autorange step cost a whole
+P V P I set (~1.8 s; the T1 page stayed blank ~9 s from 10 A down to 600
+uA). Now a change of one channel keeps the other channel's parts and starts
+with its own statistic (XX / YY; DC method: its own row): ~0.9 s per step.
+Until the first full set the page shows the V reading in the aux1 slot and
+"I ranging..." in the main area (`ui::pw::ranging`, also "Zeroing: leads
+open" / "V calibration..." during the jobs).
+
+**Discards.** `DISC_DEFAULT` stays 2 (T3: YY clean from the 1st result, XX
+at the floor needs 2). XY and XX switch costs with a real current are
+untested (T3 with a load, device list below).
+
+**DC method (owner: "DC power meter too").** `POW:COUP AC|DC|AUTO` /
+Power Settings coupling button (AC / DC / AC/DC = AUTO), persisted; the W
+button enters with the last coupling.
+
+| | AC (method B) | DC (AD1 method) |
+|---|---|---|
+| rows | the power row (RMS / LPF, R34 P V P I) | stock DC V row of the V range / DC A row of the I range (f7 / f8_9), alternately |
+| relays | PA 0, PE = the I range's shunt | the same: DC V and DC A both use PA state 0 (`write_config`: modes 1 and 7..9), PE kept on the I range's shunt in both rows -> no relay click per phase |
+| V | OP2 -> AD3, 19-bit LPF, factory-derived gain, POW:ZERO | AD1 24 bit, OSR 8192 chopped, stock DC V cal (0x04 / 0x14, DCV_NEGK) |
+| I | OP1 -> AD2 LPF, AC A RMS gain, POW:ZERO | AD1, stock DC A cal (0x94 / 0xAC) |
+| P | P_ac + V_dc I_dc | V I (signed), the same `totals` (burden compensation, S = |P|, PF +-1, Q 0) |
+| cadence | full set 1.28 s | phase = 150 ms settle + 1 dropped + 2 taken (100 ms each) = ~0.45 s; a reading after each phase |
+| shown | PF / S / Q / f | PF / S / Q / f "--", the DC glyph above W, Vb |
+| expected accuracy (manual specs of the stock functions) | V: AC V +-(0.3 % + 15 d) class, gain residual ~0.1 %; I: AC A +-(0.5..0.75 % + 15 d); P ~+-1 % at PF >= 0.5; DC parts after POW:ZERO ~0.1..0.2 % (V), I_dc as AC A | V: DC V +-(0.03 % + 5 d); I: DC A +-(0.15..0.2 % + 5 d); P ~+-0.25 % + digits, no zero needed (factory offsets) |
+
+AUTO: starts in B; after a full set whose AC parts are both below 1 % of
+their DC parts plus ~100 codes of floor (`pw_dc_like`), the DC method.
+In the DC method the V row's comparator watches SENSE with a window +-3 mV
+(nearest taps) around the tap's DC; CMPHO and CMPLO both seen during one V
+phase (an AC swing of >= ~20 mV at the tap: 0.2 V on 6 V, 2 V on 60 V, 20 V
+on 600 V) -> back to B. Predictable: a DC source with less ripple than that
+stays DC; mains goes to B within one V phase. `POW:COUP?` answers `AUTO,DC`
+/ `AUTO,AC` in AUTO. The fallback (VA only) is ignored while DC is in force.
+
+**7th function button.** Owner request: the power meter as a full function.
+The DMM row (and the combined view's band) has 7 buttons of 64 px at a 68 px
+pitch from x 4 (4 px gaps, 4 px to both edges); every button centres its
+glyph run (V / A + the DC / AC / AC+DC glyph 3 px apart, ohm (+ ON tag),
+cap, diode + continuity, Hz + degC 3 px apart - the stock 76 px offsets do
+not fit), W = the LETTERS V twinned (`glyph_or_twin`) as on the page. In the
+power meter the V / A buttons show their plain DC glyph. Hit boxes: the 4 px
+gaps split 2 / 2 (no dead pixels between buttons; touch-test 0 failures).
+The W button opens the wiring dialog until it was confirmed once
+(persisted), then enters directly; Power Settings > Wiring shows it again,
+the long press on A stays as a shortcut, the "Power W" button of the Current
+Settings page is gone. A reboot in the power meter restarts it (energy
+reset, `pw_enter`); BT still reports the AC A byte with P as the value.
+
+**Persist v7** (58 words): the power block grows to 10 words (p[48..58]: the
+4 V gains as u16, the Y zero + flags (zeros valid, wiring dialog seen,
+coupling), the 6 X zeros); a v6 record loads zero-extended (= factory gains,
+no zeros, dialog not seen, AC).
+
+**Emulator** (both HY3131.cs / DM40Frontend.cs copies identical): Y gain =
+the factory-derived tap gain (inverse, so fw-rs reads true) x `powvg:`;
+`powz:1` = the device's LPF zeros (Y +1080, X +888 x10 / +155 x1); the
+power role's counter on SENSE (dc + AC against the window) and PB4 (the
+current); DC V rows with SCMPI = SENSE drive CMPHO / CMPLO from the tap
+waveform; the f8_9 DC A rows fold the uA calibration when PE selects the
+47.5 ohm shunt (the stock mode 9; before: always mA, +3 % on the uA ranges).
+Host tests 306 OK (unipolar square f = 0 at 0xDD / 40 Hz at 0xBF, PB4 50 Hz,
+powz zeros, powvg). `emu/hy3131/powtest.py` 17 scenarios OK:
+
+| scenario | result |
+|---|---|
+| zero | no POW:ZERO: V 0.0526 V, I 8.92 uA (= the device's phantoms); after: V 0.0015 (noise), zeros 1080 / 888,155,... ; DC 5 V 0.4 A 1.99997 W; -5 V: P -1.99997 W, Vdc -4.9999 |
+| vcal | powvg 0.99: V 29.700 -> POW:VOLT:CAL (AC ref) -> 29.9999; powvg 0.98 DC 20 V -> POW:VOLT:CAL (DC ref) -> 19.9999; 0.2 V on 60 V: SMALL |
+| freq | unipolar 40 Hz square: F 40.0007; 12 V DC + 3 A AC 50 Hz: F 50.0008 (PB4) |
+| dcad1 | 12 V 2 A: 24.004 W; reversed -24.0025 W; 5 V 4 mA on 6 mA: 0.02000 W; 5 V 200 uA on 600 uA: 1.000 mW |
+| dcburden | 5 V 0.4 A, R 0.5: P_L 1.92006 W, V_L 4.8001, Vb 0.200 |
+| auto | 12 V 2 A -> AUTO,DC 23.999 W; mains 230 V 1 A -> AUTO,AC 230.00 W 50 Hz |
+| the 11 of 3.11 | unchanged (mains, dc, small, burden, manual, alt, phasecal, energy, t1-yy, t3-cycle, scpi) |
+
+UI (ui-render: 0 violations over 22996 cases incl. the 7-button rows in
+every function, the power page in the DC method, the ranging texts, the
+settings status line in 13 job states; touch-test 789 cases 0 failures):
+renders p07 (settings + status), p09 (I ranging), p10 (refused V cal), p11
+(DC method).
+
+#### Device re-check list (this build)
+
+1. Open leads, nothing in A: `CONF:POW`, then `POW:ZERO`, `POW:ZERO?` -> OK,
+   Y ~1080, X per range (expect ~880 on the x10 ranges, ~155 on x1); page:
+   V ~0, I ~0, P ~0.
+2. 1 V and 5 V DC on 6 V (`POW:VOLT:RANG 6`): Vdc vs DC V within 0.1 %
+   before any cal (factory-derived 1.02065); `POW:VOLT:CAL`, `POW:VOLT:CAL?`
+   -> stored gain vs 1.0209; same on 60 V with 5 V (1.0170) and the 40 Hz
+   square (AC reference).
+3. The 40 Hz square on 60 V: f = 40 Hz (R21 0xBF in `DBG:POW:ROW?`); on the
+   current 7dce69f build the theory can be checked first: `DBG:POW:POKE
+   1,191`.
+4. Entry from the W button: the dialog once, then direct; the page shows V
+   within ~1 s and "I ranging..." until P; MF > Power Settings: Zero / V cal
+   / coupling buttons and the status line; a reboot comes back in W.
+5. `POW:COUP DC` with the calibrator's DC on V-COM: Vdc = DC V reading,
+   no relay clicks per phase, ~0.45 s per phase; `POW:COUP AUTO` with the
+   square: back to AC within a V phase.
+6. With current through A (T2 / T3 / T4 of 3.11): Idc of B vs DC A (the
+   RMS gain now applied to I_dc), the DC method's P vs V x I of the stock
+   functions, XY / XX switch cost with a real current (DISC 2 kept), PB4 f
+   with a current-only AC signal.
 
 ---------------------------------------------------------------------------
 

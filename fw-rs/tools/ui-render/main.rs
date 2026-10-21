@@ -551,6 +551,9 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
         ("ol", P { p: 0.0, v_ol: true, i_ol: true, pf: 0.0, f_hz: 0.0, e_wh: 12345.6, vah: 99999.9, vr: 3, ik: 1, ..z }),
         ("alt", P { p: f32::NAN, q: f32::NAN, pf: f32::NAN, vdc: f32::NAN, s: 1234.5, v: 230.0, i: 5.367, f_hz: 60.0, alt: true, vah: 1.5, secs: 3600, vr: 2, ik: 4, ..z }),
         ("dc", P { p: -24.012, s: 24.012, q: 0.0, pf: -1.0, v: 12.006, i: 2.0, vdc: 12.006, idc: -2.0, f_hz: 0.0, burden_v: 0.02, e_wh: -1.25, vah: 1.25, secs: 187, p_avg: -24.064, vr: 1, ik: 4, ..z }),
+        // The DC (AD1) method: PF / S / Q / f blank, the DC glyph; AUTO.
+        ("dc-ad1", P { p: -24.012, s: 24.012, q: 0.0, pf: -1.0, v: -12.006, i: 2.0, vdc: -12.006, idc: 2.0, f_hz: 0.0, burden_v: 0.02, e_wh: -1.25, vah: 1.25, secs: 187, p_avg: -24.064, vr: 1, ik: 4, dc: true, coup: dmm::pw::COUP_AUTO, ..z }),
+        ("dc-ua", P { p: 5.9999e-3, s: 5.9999e-3, pf: 1.0, v: 9.9999, i: 599.99e-6, vdc: 9.9999, idc: 599.99e-6, vr: 1, ik: 0, dc: true, coup: dmm::pw::COUP_DC, ..z }),
     ]
 }
 
@@ -561,7 +564,7 @@ fn power_page(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: ui::
     let mut dv = ui::DmmView::new();
     dv.power = true;
     dv.hv_red = pv.v.abs() >= 30.0;
-    dv.draw_static(Button::Amp, r.mode, true, false);
+    dv.draw_static(Button::Power, r.mode, true, false);
     let mut pc = ui::pw::PwCache::new();
     ui::pw::side_clear(&mut pc);
     dv.reading(&r, hold, 0);
@@ -571,6 +574,30 @@ fn power_page(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: ui::
     ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, None, r.main.unit, rc);
     ui::pw::side(&mut pc, &pv);
     r
+}
+
+/// (job running, last job, result) of the settings status line.
+fn pw_status_cases() -> Vec<(u8, u8, u8)> {
+    use dmm::pw::*;
+    let mut v = vec![(JOB_ZERO, JOB_ZERO, JR_RUN), (JOB_VCAL, JOB_VCAL, JR_RUN), (0, 0, JR_NONE)];
+    for r in [JR_OK, JR_SIGNAL, JR_ABORT, JR_METHOD] {
+        v.push((0, JOB_ZERO, r));
+    }
+    for r in [JR_OK, JR_SMALL, JR_BIG, JR_UNSTABLE, JR_RANGE, JR_ABORT] {
+        v.push((0, JOB_VCAL, r));
+    }
+    v
+}
+
+fn pw_status_pw(job: u8, last: u8, res: u8) -> dmm::pw::Pw {
+    let mut p = dmm::pw::Pw::new();
+    p.job = job;
+    p.job_last = last;
+    p.job_res = res;
+    p.vr = 3;
+    p.job_vr = 3;
+    p.vgain[3] = 1.00453;
+    p
 }
 
 fn page_regions_pw() -> Vec<(&'static str, Bx)> {
@@ -1297,7 +1324,7 @@ fn main() {
                 let rb = pw_rd(*b);
                 let mut dv = ui::DmmView::new();
                 dv.power = true;
-                dv.draw_static(Button::Amp, ra.mode, true, false);
+                dv.draw_static(Button::Power, ra.mode, true, false);
                 let mut pc = ui::pw::PwCache::new();
                 ui::pw::side_clear(&mut pc);
                 dv.reading(&ra, 0, 0);
@@ -1308,7 +1335,7 @@ fn main() {
                 host::reset(0);
                 let mut dv = ui::DmmView::new();
                 dv.power = true;
-                dv.draw_static(Button::Amp, rb.mode, true, false);
+                dv.draw_static(Button::Power, rb.mode, true, false);
                 let mut pc = ui::pw::PwCache::new();
                 ui::pw::side_clear(&mut pc);
                 dv.reading(&rb, 0, 0);
@@ -1329,6 +1356,26 @@ fn main() {
                 host::reset(0);
                 ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: va, i_auto: ia, ..*pv });
                 ck.check_opts(&format!("power-settings/{name}/{va}/{ia}"), &page_regions_pw(), false);
+            }
+        }
+        // The settings page's status line in every job state (the longest
+        // texts: the V cal result / refusals on 1000V).
+        for (k, (job, last, res)) in pw_status_cases().iter().enumerate() {
+            host::reset(0);
+            ui::pw::settings_page(&pcs[0].1);
+            ui::pw::settings_status(&pw_status_pw(*job, *last, *res), 0);
+            ck.check_opts(&format!("power-settings-status/{k}"), &page_regions_pw(), false);
+        }
+        // Before the first full reading: V + "I ranging..." (and the job
+        // texts) over the power page's static parts.
+        for txt in ["I ranging...", "Zeroing: leads open", "V calibration..."] {
+            for v in [Some(dmm::Val { v: -999.99, dec: 2, unit: "V", ol: false, ext: false }), None] {
+                host::reset(0);
+                let mut dv = ui::DmmView::new();
+                dv.power = true;
+                dv.draw_static(Button::Power, 4, true, false);
+                ui::pw::ranging(v, txt, 0);
+                ck.check_opts(&format!("power-ranging/{txt}/{}", v.is_some()), &page_regions_pw(), false);
             }
         }
     }
@@ -1669,7 +1716,7 @@ fn main() {
     {
         let pcs = pw_cases();
         let rc = ui::RateChip { rate: 1, period_ms: 430, applies: false };
-        for (file, k, hold) in [("p01-power-mains", 0usize, 0u8), ("p02-power-worst", 1, 1), ("p03-power-mw-over", 2, 0), ("p04-power-alt", 4, 0), ("p05-power-dc-source", 5, 0)] {
+        for (file, k, hold) in [("p01-power-mains", 0usize, 0u8), ("p02-power-worst", 1, 1), ("p03-power-mw-over", 2, 0), ("p04-power-alt", 4, 0), ("p05-power-dc-source", 5, 0), ("p11-power-dc-ad1", 6, 0)] {
             host::reset(0);
             power_page(pcs[k].1, hold, sentinel::Alert::None, rc);
             save(&out, file);
@@ -1680,7 +1727,18 @@ fn main() {
         save(&out, "p06-power-entry");
         host::reset(0);
         ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pcs[0].1 });
+        ui::pw::settings_status(&pw_status_pw(0, dmm::pw::JOB_VCAL, dmm::pw::JR_OK), 0);
         save(&out, "p07-power-settings");
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.power = true;
+        dv.draw_static(Button::Power, 4, true, false);
+        ui::pw::ranging(Some(dmm::Val { v: 229.97, dec: 2, unit: "V", ol: false, ext: false }), "I ranging...", 0);
+        save(&out, "p09-power-ranging");
+        host::reset(0);
+        ui::pw::settings_page(&pcs[0].1);
+        ui::pw::settings_status(&pw_status_pw(0, dmm::pw::JOB_VCAL, dmm::pw::JR_BIG), 0);
+        save(&out, "p10-power-settings-refused");
         host::reset(0);
         ui::range_page(Button::Amp, Some(7), 0, None);
         save(&out, "p08-range-a-power");

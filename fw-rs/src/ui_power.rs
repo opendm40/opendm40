@@ -35,16 +35,16 @@ impl PwCache {
 
 /// Small text buffer.
 struct T {
-    b: [u8; 32],
+    b: [u8; 64],
     n: usize,
 }
 
 impl T {
     fn new() -> T {
-        T { b: [0; 32], n: 0 }
+        T { b: [0; 64], n: 0 }
     }
     fn push(&mut self, s: &str) -> &mut T {
-        let k = s.len().min(32 - self.n);
+        let k = s.len().min(64 - self.n);
         self.b[self.n..self.n + k].copy_from_slice(&s.as_bytes()[..k]);
         self.n += k;
         self
@@ -120,20 +120,22 @@ impl DmmView {
     /// text changed). PF, Q are "--" in the fallback (no phase relation).
     pub fn power_row(&mut self, pv: &PowerVals) {
         let mut b = [0u8; 16];
-        let pf = if pv.pf.is_finite() { crate::dmm::format(&mut b, pv.pf, 3) } else { "--" };
+        // DC method: no phase relation, no AC: PF / S / Q / f blank ("--").
+        let pf = if pv.pf.is_finite() && !pv.dc { crate::dmm::format(&mut b, pv.pf, 3) } else { "--" };
         let mut pft = T::new();
         pft.push(pf);
         // Below 1 VA: mVA / mvar (the mW ranges).
         let (k, su, qu, sg) = if pv.s < 1.0 { (1e3, "mVA", "mvar", 3) } else { (1.0, "VA", "var", 4) };
         let mut st = T::new();
-        st.push(sig_text(&mut b, pv.s * k, sg));
+        st.push(if pv.dc { "--" } else { sig_text(&mut b, pv.s * k, sg) });
         let mut qt = T::new();
-        qt.push(sig_text(&mut b, pv.q * k, sg));
+        qt.push(if pv.dc { "--" } else { sig_text(&mut b, pv.q * k, sg) });
         let (fv, fu) = if pv.f_hz >= 1000.0 { (pv.f_hz * 1e-3, "kHz") } else { (pv.f_hz, "Hz") };
         let mut ft = T::new();
-        ft.push(if pv.f_hz > 0.0 { sig_text(&mut b, fv, if pv.f_hz >= 1000.0 { 3 } else { 4 }) } else { "--" });
+        ft.push(if pv.f_hz > 0.0 && !pv.dc { sig_text(&mut b, fv, if pv.f_hz >= 1000.0 { 3 } else { 4 }) } else { "--" });
         let mut bt = T::new();
         bt.push(sig_text(&mut b, pv.burden_v, 4));
+        let (su, qu, fu) = if pv.dc { ("", "", "") } else { (su, qu, fu) };
         let items: [(&str, &T, &str); 5] = [("PF", &pft, ""), ("S", &st, su), ("Q", &qt, qu), ("f", &ft, fu), ("Vb", &bt, "V")];
         for (i, (tag, t, u)) in items.iter().enumerate() {
             let mut k = T::new();
@@ -330,6 +332,9 @@ pub const PS_BURDEN: u8 = 22;
 pub const PS_RESET: u8 = 23;
 pub const PS_WIRING: u8 = 24;
 pub const PS_OK: u8 = 25;
+pub const PS_ZERO: u8 = 26;
+pub const PS_COUP: u8 = 28;
+pub const PS_VCAL: u8 = 27;
 
 /// Grid: label column 8..40, five 83 px columns from 44 (87 px pitch).
 fn ps_cell(row: i16, col: i16) -> sf::Rect {
@@ -361,6 +366,17 @@ pub fn settings_page(pv: &PowerVals) {
         ps_button(ps_cell((1 + i / 5) as i16, (i % 5) as i16), n, !pv.i_auto && pv.ik as usize == i);
     }
     ps_button(ps_cell(2, 1), "AUTO", pv.i_auto);
+    // Self-zero and V self-calibration (doc 3.11 follow-ups); the status
+    // line under the last row (`settings_status`).
+    // Coupling: AC (method B), DC (AD1), AC/DC = AUTO.
+    let cp = match pv.coup {
+        pw::COUP_DC => "DC",
+        pw::COUP_AUTO => "AC/DC",
+        _ => "AC",
+    };
+    ps_button(ps_cell(2, 2), cp, false);
+    ps_button(ps_cell(2, 3), "Zero", false);
+    ps_button(ps_cell(2, 4), "V cal", false);
     for (i, (t, sel)) in [("P + PF", !pv.alt), ("VA only", pv.alt), (if pv.comp { "Burden ON" } else { "Burden OFF" }, pv.comp)].iter().enumerate() {
         ps_button(rect(PS_ROW4[i], 182, 150, 38), t, *sel);
     }
@@ -380,6 +396,9 @@ pub fn settings_hit(x: u16, y: u16) -> Option<u8> {
                     (1, c) => Some(PS_I + c as u8),
                     (2, 0) => Some(PS_I + 5),
                     (2, 1) => Some(PS_I + 6),
+                    (2, 2) => Some(PS_COUP),
+                    (2, 3) => Some(PS_ZERO),
+                    (2, 4) => Some(PS_VCAL),
                     _ => None,
                 };
             }
@@ -394,4 +413,113 @@ pub fn settings_hit(x: u16, y: u16) -> Option<u8> {
         }
     }
     None
+}
+
+/// Status and help lines of the Power Settings page (under the last button
+/// row, 282..318): the running job, the last result, else the gain and zero
+/// in force. Redrawn when the text differs from `key` (its FNV); returns
+/// the new key.
+pub fn settings_status(p: &pw::Pw, key: u32) -> u32 {
+    let mut t = T::new();
+    let mut b = [0u8; 16];
+    let vr = if p.job_last == pw::JOB_VCAL && p.job == 0 { p.job_vr } else { p.vr } as usize;
+    let rn = pw::V_NAMES[vr & 3];
+    let res = if p.job != 0 { pw::JR_RUN } else { p.job_res };
+    let warn = match (p.job_last, res) {
+        (pw::JOB_ZERO, pw::JR_RUN) => {
+            t.push("Zeroing: leads open, nothing in A (6 s)");
+            false
+        }
+        (pw::JOB_VCAL, pw::JR_RUN) => {
+            t.push("V cal ").push(rn).push(": keep the voltage steady (8 s)");
+            false
+        }
+        (_, pw::JR_METHOD) => {
+            t.push("Zero / V cal need the P + PF method");
+            true
+        }
+        (pw::JOB_ZERO, pw::JR_OK) => {
+            t.push("Zero stored");
+            false
+        }
+        (pw::JOB_ZERO, pw::JR_SIGNAL) => {
+            t.push("Zero refused: a signal on V or in A");
+            true
+        }
+        (pw::JOB_VCAL, pw::JR_OK) => {
+            t.push("V cal ").push(rn).push(": gain ").push(crate::dmm::format(&mut b, p.v_gain(vr as u8), 5)).push(" stored");
+            false
+        }
+        (pw::JOB_VCAL, pw::JR_SMALL) => {
+            t.push("V cal refused: below 10 % of ").push(rn);
+            true
+        }
+        (pw::JOB_VCAL, pw::JR_BIG) => {
+            t.push("V cal refused: too high for ").push(rn);
+            true
+        }
+        (pw::JOB_VCAL, pw::JR_UNSTABLE) => {
+            t.push("V cal refused: the voltage is not steady");
+            true
+        }
+        (pw::JOB_VCAL, pw::JR_RANGE) => {
+            t.push("V cal refused: off by more than 10 %");
+            true
+        }
+        (_, pw::JR_ABORT) => {
+            t.push("Aborted");
+            true
+        }
+        _ => {
+            t.push(rn)
+                .push(" gain ")
+                .push(crate::dmm::format(&mut b, p.v_gain(vr as u8), 5))
+                .push(if p.vgain[vr] > 0.0 { " (V cal)" } else { " (factory)" })
+                .push(if p.zero_ok { ", zero set" } else { ", no zero" })
+                .push(match (p.coup, p.dc) {
+                    (pw::COUP_AUTO, true) => ", auto: DC",
+                    (pw::COUP_AUTO, false) => ", auto: AC",
+                    _ => "",
+                });
+            false
+        }
+    };
+    let mut k = T::new();
+    k.push(t.s()).push(if warn { "w" } else { "" });
+    let nk = k.key();
+    if nk != key {
+        sf::label(sf::F14, rect(8, 284, 464, 14), t.s(), if warn { VALUE } else { STATUS_FG }, BG, 1, 1);
+        sf::label(sf::F14, rect(8, 302, 464, 14), "Zero: leads open. V cal: steady V, 10-70 % of range", DIM, BG, 1, 1);
+    }
+    nk
+}
+
+/// The DMM page before the first full power reading (`Dmm::pw_partial`):
+/// the V reading in the aux1 slot and the state text in the main area.
+/// Returns the new key (drawn when it differs from `key`).
+pub fn ranging(v: Option<crate::dmm::Val>, txt: &str, key: u32) -> u32 {
+    let mut b = [0u8; 16];
+    let vt = match v {
+        Some(v) => crate::meter::text(&mut b, &v),
+        None => "",
+    };
+    let mut k = T::new();
+    k.push(vt).push("|").push(txt);
+    let nk = k.key();
+    if nk != key {
+        // aux1: value right-aligned in 38..175, unit from 181 (DmmView::reading).
+        sf::label(sf::LETTERS, rect(38, 36, 137, 30), vt, VALUE, BG, 4, 0);
+        sf::label(sf::LETTERS, rect(181, 36, 73, 30), if vt.is_empty() { "" } else { "V" }, VALUE, BG, 1, 0);
+        sf::label(sf::TEXT22, RANGING_TXT, txt, DIM, BG, 8, 0);
+    }
+    nk
+}
+
+/// The state text's box in the main readout area.
+const RANGING_TXT: sf::Rect = rect(40, 92, 360, 32);
+
+/// Before the first full reading is drawn over the `ranging` texts.
+pub fn ranging_clear() {
+    lcd::fill_rect(RANGING_TXT.x as u16, RANGING_TXT.y as u16, RANGING_TXT.w as u16, RANGING_TXT.h as u16, BG);
+    lcd::fill_rect(38, 36, 216, 30, BG);
 }

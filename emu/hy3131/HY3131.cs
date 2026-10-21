@@ -257,6 +257,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double NoiseScale = 1.0;        // 0 = noise free
         public bool BeatModel = false;         // empirical AD2/AD3 enable-order beat (RESEARCH.md 8.2)
         public bool PowMix = true;             // power role: an R34 statistic switch mid-block mixes that block
+        public double PowVGain = 1.0;          // power role: extra Y gain deviation ("powvg:", for the V self-cal)
+        public bool PowZeros = false;          // power role: the device's LPF zeros ("powz:1", doc 3.11 T1)
         public bool CntPin;                    // CNT pin level (ENCNTI source); set by the board model
         public int ForcedAd1 = int.MinValue;   // SetAd1: raw code override
         public int ForcedAd2 = int.MinValue;
@@ -393,6 +395,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "cal": CalConsistent = o.Value != 0; break;
                 case "beat": BeatModel = o.Value != 0; break;
                 case "powmix": PowMix = o.Value != 0; break;
+                case "powvg": PowVGain = o.Value; break;
+                case "powz": PowZeros = o.Value != 0; break;
                 case "vnoise": vNoise = o.Value; break;
                 }
             }
@@ -587,7 +591,22 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(!EnCmp) return;
             switch(role)
             {
-            case Role.AcV: case Role.AcMv: case Role.Freq: case Role.DcV: case Role.DcMv: case Role.AcA: case Role.DcA: case Role.Power:
+            case Role.Power:
+            {
+                // SENSE is DC coupled (the V tap: its DC counts against the window); PB4 is
+                // OP1O coupled (the current's AC, around AGND).
+                var scmpi = regs[0x20] >> 5;
+                if(scmpi == 7)
+                {
+                    double idc, iac, ihz, iduty; string ishape;
+                    Fe.ACurrent(out idc, out iac, out ihz, out ishape, out iduty);
+                    sigHz = ihz; sigShape = ishape; sigDuty = iduty;
+                    SignalEdgesDc(0, iac * Fe.ShuntR * ((regs[0x25] & 1) != 0 ? 10 : 1), out f, out duty, CmpHighThreshold, CmpLowThreshold);
+                }
+                else if(scmpi == 0) SignalEdgesDc(dc, ac, out f, out duty, CmpHighThreshold, CmpLowThreshold);
+                break;
+            }
+            case Role.AcV: case Role.AcMv: case Role.Freq: case Role.DcV: case Role.DcMv: case Role.AcA: case Role.DcA:
                 SignalEdges(ac, out f, out duty, CmpHighThreshold, CmpLowThreshold);
                 break;
             }
@@ -611,6 +630,24 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             default:
                 duty = 0.5 + (Math.Asin(Math.Min(1, Math.Abs(vrl) / pk)) - Math.Asin(Math.Min(1, vrh / pk))) / (2 * Math.PI);
                 break;
+            }
+        }
+
+        /// A DC-coupled node (dc + the AC waveform) against the window: it toggles only when the
+        /// waveform crosses both thresholds (a unipolar signal never reaches a negative VRL).
+        private void SignalEdgesDc(double dc, double rms, out double f, out double duty, double vrh, double vrl)
+        {
+            f = 0; duty = 0;
+            var shape = sigShape;
+            var pk = Peak(rms, shape);
+            if(rms <= 0 || dc + pk <= vrh || dc - pk >= vrl) return;
+            f = sigHz;
+            double h = vrh - dc, l = vrl - dc;
+            switch(shape)
+            {
+            case "square": duty = sigDuty; break;
+            case "triangle": duty = 0.5 - (h + l) / (4 * pk); break;
+            default: duty = 0.5 - (Math.Asin(Math.Max(-1, Math.Min(1, h / pk))) + Math.Asin(Math.Max(-1, Math.Min(1, l / pk)))) / (2 * Math.PI); break;
             }
         }
 
@@ -809,7 +846,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             case Role.DcA:
             {
-                var m = roleMode; var r = roleRange; var i = (m - 7) * 2 + r;
+                // The mA and uA rows are the same bytes (f8_9): the shunt relays (PE) tell the
+                // unit, as in the stock (mode 8: PE1, mode 9: none = the 47.5 ohm shunt).
+                var m = roleMode >= 8 ? (Fe.ShuntSel == 2 ? 9 : 8) : roleMode; var r = roleRange; var i = (m - 7) * 2 + r;
                 Fe.ACurrent(out jdc, out jac, out hz, out shape, out duty);
                 var unit = AUnit[m - 7];
                 var q = DcQ(jdc * unit, 0x94 + 4 * i, 0xac + 4 * i) / unit; // A, calibration folded in
@@ -1033,7 +1072,20 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var scmpi = regs[0x20] >> 5;
             switch(role)
             {
-            case Role.DcV: case Role.DcMv: case Role.Ohm: case Role.Temp: case Role.None:
+            case Role.DcV:
+                // fw-rs power meter, DC method (AUTO coupling): SENSE = the V tap; its swing
+                // across the window tells AC from DC.
+                if(scmpi == 0)
+                {
+                    double dc, ac, hz, duty; string shape;
+                    Fe.VJack(0, out dc, out ac, out hz, out shape, out duty);
+                    v = Wave(t, dc, ac, hz, shape, duty) * NodeRatioAc();
+                    return true;
+                }
+                if(scmpi != 4) return false;
+                v = Pb1Volts(t);
+                return true;
+            case Role.DcMv: case Role.Ohm: case Role.Temp: case Role.None:
                 if(scmpi != 4) return false;
                 v = Pb1Volts(t);
                 return true;
@@ -1121,7 +1173,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// X and Y in codes (1.25 V / 2^18 at the converter, times IG): DC and AC RMS, and the
         /// waveform of each AC part. The firmware applies the stock AC A gains to X (RMS gain on the
-        /// AC part, LPF gain on the DC part, no offsets); Y is ideal.
+        /// AC part, LPF gain on the DC part - the RMS gain while the LPF gain is the default 1.0 -,
+        /// no offsets); Y has the factory-derived tap gain (PowerTapGain) and "powvg:".
         private void PowerNodes(out double xdc, out double xac, out double ydc, out double yac)
         {
             double hz, duty; string shape;
@@ -1130,11 +1183,33 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var ci = PowIu * 2 + PowIr;
             var xs = Fe.ShuntR * ((regs[0x25] & 1) != 0 ? 10 : 1) * Ad2Scale();
             xac = xac / CalGain(0xc4 + 4 * ci) * xs;
-            xdc = xdc / CalGain(0xf4 + 4 * ci) * xs;
+            // one path (shunt, OP1, AD2) for both parts: the DC part carries the LPF gain when the
+            // record has one, else (1.0, never calibrated) the RMS gain as the AC part (fw-rs pw_take)
+            var gl = CalGain(0xf4 + 4 * ci);
+            xdc = xdc / (gl == 1f ? CalGain(0xc4 + 4 * ci) : gl) * xs;
             Fe.VJack(0, out ydc, out yac, out hz, out shape, out duty);
             vHz = hz; vShape = shape; vDuty = duty;
             var ys = EnAd3 ? ((regs[0x25] & 2) != 0 ? 10 : 1) / AcvK[PowVr] * Ad3Ig / (Ad3Rg * Vref) * 262144.0 : 0;
+            // The divider tap's true ratio (doc 3.11 T1): what the factory calibration says of the
+            // same taps (fw-rs pw::v_gain_factory), times the "powvg:" deviation.
+            ys *= PowVGain / PowerTapGain();
             ydc *= ys; yac *= ys;
+            if(PowZeros)
+            {
+                // The LPF zeros of the device (OP / converter offsets): Y ~1080 codes on every V
+                // range, X 888 with OP1 x10 and 155 with x1 (doc 3.11 T1 / T3).
+                if(EnAd3) ydc += 1080;
+                xdc += (regs[0x25] & 1) != 0 ? 888 : 155;
+            }
+        }
+
+        /// fw-rs pw::v_gain_factory: 60 / 600 / 1000 V = the AC V r1..r3 gains, 6 V = DC V r0 x
+        /// (AC V r1 / DC V r1); 1 without the calibration deviations.
+        private double PowerTapGain()
+        {
+            if(!CalConsistent) return 1;
+            var g = PowVr == 0 ? CalGain(0x04) * CalGain(0x38) / CalGain(0x08) : CalGain(0x34 + 4 * PowVr);
+            return g >= 0.9 && g <= 1.1 ? g : 1;
         }
         private double iHz, iDuty, iPh, vHz, vDuty;
         private string iShape = "sine", vShape = "sine";

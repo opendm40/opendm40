@@ -6,15 +6,30 @@ use super::*;
 use crate::dmm::pw::{self, PowerVals};
 use crate::scpi::Pow;
 
-/// Persisted words (persist::W_POWER..+4): p0 = SPHACAL (i8) | method << 8 |
+/// Persisted words (persist::W_POWER..+10): p0 = SPHACAL (i8) | method << 8 |
 /// burden comp OFF << 9 | (discards + 1) << 12 (0 = default) | I limit in
 /// 0.1 A << 16 (0 = default) | time limit s << 24 (0 = default, 255 = none);
-/// p1..p3 = R_path per unit (f32 bits, 0 = the shunt value).
-pub const PW_WORDS: usize = 4;
+/// p1..p3 = R_path per unit (f32 bits, 0 = the shunt value); p4 / p5 = the
+/// V gains of 6 / 60 and 600 / 1000 V, u16 each (0 = factory-derived, else
+/// 0.5 + n / 65536); p6 = the Y zero (i16) | zeros valid << 16 | wiring
+/// dialog seen << 17 | coupling (pw::COUP_*) << 18; p7..p9 = the X zeros
+/// of the 6 current ranges (i16).
+pub const PW_WORDS: usize = 10;
+
+fn gain_bits(g: f32) -> u32 {
+    if g > 0.0 { ((g - 0.5) * 65536.0 + 0.5).clamp(1.0, 65535.0) as u32 } else { 0 }
+}
+
+fn gain_of(n: u32) -> f32 {
+    let n = n & 0xFFFF;
+    let g = 0.5 + n as f32 / 65536.0;
+    if n != 0 && (0.9..=1.1).contains(&g) { g } else { 0.0 }
+}
 
 impl App {
-    /// Open the wiring dialog (long press on A, "Power W" on the Current
-    /// Settings page). Auto-cancel after a minute.
+    /// Open the wiring dialog (the W function button until it was confirmed
+    /// once, a long press on A, Power Settings > Wiring). Auto-cancel after
+    /// a minute.
     pub(super) fn pw_open_entry(&mut self, now: u64) {
         self.overlay = Some(crate::dialog::Overlay::PowerEntry { until: now + 60_000 });
         self.redraw = true;
@@ -25,6 +40,7 @@ impl App {
     /// The dialog's OK: enter the power meter on the DMM page.
     pub(super) fn pw_enter(&mut self, clk: &mut Clock) {
         self.overlay = None;
+        self.dmm.pw.wired = true;
         self.dmm.select(clk, pw::FUNC);
         self.func_changed();
         self.last_raw = None;
@@ -58,6 +74,18 @@ impl App {
                     Some(ui::pw::PS_METHOD_B) => self.dmm.pw_set_method(clk, false),
                     Some(ui::pw::PS_METHOD_ALT) => self.dmm.pw_set_method(clk, true),
                     Some(ui::pw::PS_BURDEN) => self.dmm.pw.comp = !pv.comp,
+                    Some(ui::pw::PS_COUP) => {
+                        // AC -> DC -> AUTO -> AC.
+                        self.dmm.pw_set_coupling(clk, (pv.coup + 1) % 3);
+                    }
+                    Some(ui::pw::PS_ZERO) => {
+                        self.dmm.pw_zero_start(clk);
+                        return true;
+                    }
+                    Some(ui::pw::PS_VCAL) => {
+                        self.dmm.pw_vcal_start(clk);
+                        return true;
+                    }
                     Some(ui::pw::PS_RESET) => {
                         self.dmm.pw.energy_reset();
                         self.beep(now, 300);
@@ -95,6 +123,14 @@ impl App {
         if !self.dmm.pw.on {
             return;
         }
+        self.pw_settings_status();
+        // DMM page before the first full reading: V and "I ranging..."
+        // (the I channel walks down from 10 A, ~0.9 s per range).
+        if self.view == View::Dmm && !self.redraw && self.meter.shown().is_none() {
+            if let Some((v, txt)) = self.dmm.pw_partial() {
+                self.pw_rng_key = ui::pw::ranging(v, txt, self.pw_rng_key);
+            }
+        }
         if self.dmm.pw_over_expired() {
             self.toast(now, "Current above the limit: reduce it", false);
             self.alert_beep_t0 = Some(now);
@@ -113,6 +149,12 @@ impl App {
         w[0] = p.sph as u8 as u32 | (p.alt as u32) << 8 | (!p.comp as u32) << 9 | ((p.disc as u32 + 1) & 0xF) << 12 | ic << 16 | tl << 24;
         for i in 0..3 {
             w[1 + i] = if p.r_path[i] == pw::SHUNT_OHM[i] { 0 } else { p.r_path[i].to_bits() };
+        }
+        w[4] = gain_bits(p.vgain[0]) | gain_bits(p.vgain[1]) << 16;
+        w[5] = gain_bits(p.vgain[2]) | gain_bits(p.vgain[3]) << 16;
+        w[6] = p.zy as u16 as u32 | (p.zero_ok as u32) << 16 | (p.wired as u32) << 17 | (p.coup as u32 & 3) << 18;
+        for i in 0..3 {
+            w[7 + i] = p.zx[2 * i] as u16 as u32 | (p.zx[2 * i + 1] as u16 as u32) << 16;
         }
         w
     }
@@ -134,6 +176,15 @@ impl App {
         for i in 0..3 {
             let r = f32::from_bits(w[1 + i]);
             p.r_path[i] = if w[1 + i] != 0 && r.is_finite() && (0.0..=1000.0).contains(&r) { r } else { pw::SHUNT_OHM[i] };
+        }
+        p.vgain = [gain_of(w[4]), gain_of(w[4] >> 16), gain_of(w[5]), gain_of(w[5] >> 16)];
+        p.zy = w[6] as u16 as i16;
+        p.zero_ok = w[6] >> 16 & 1 != 0;
+        p.wired = w[6] >> 17 & 1 != 0;
+        p.coup = (w[6] >> 18 & 3).min(2) as u8;
+        for i in 0..3 {
+            p.zx[2 * i] = w[7 + i] as u16 as i16;
+            p.zx[2 * i + 1] = (w[7 + i] >> 16) as u16 as i16;
         }
     }
 
@@ -275,6 +326,81 @@ impl App {
                 put_i(out, &mut t, self.dmm.pw.t_lim as i64);
                 true
             }
+            Pow::Coupling(Some(c)) => {
+                self.dmm.pw_set_coupling(clk, c);
+                self.redraw |= self.view == View::Range;
+                false
+            }
+            Pow::Coupling(None) => {
+                // The setting, and with AUTO the method in force.
+                let p = &self.dmm.pw;
+                out.put_bytes(match p.coup {
+                    pw::COUP_DC => b"DC",
+                    pw::COUP_AUTO if p.dc => b"AUTO,DC",
+                    pw::COUP_AUTO => b"AUTO,AC",
+                    _ => b"AC",
+                });
+                true
+            }
+            Pow::Zero(0) => {
+                if !self.dmm.pw_zero_start(clk) {
+                    out.set_err("Settings conflict");
+                }
+                self.redraw |= self.view == View::Range;
+                false
+            }
+            Pow::Zero(1) => {
+                let p = &mut self.dmm.pw;
+                p.zero_ok = false;
+                p.zx = [0; 6];
+                p.zy = 0;
+                false
+            }
+            Pow::Zero(_) => {
+                // <last job result>,<SET|NONE>,<Y zero>,<X zeros 600 uA..10 A>
+                let p = &self.dmm.pw;
+                out.put_bytes(job_text(if p.job_last == pw::JOB_ZERO { p.job_res } else { pw::JR_NONE }).as_bytes());
+                out.put_bytes(if p.zero_ok { b",SET," } else { b",NONE," });
+                put_i(out, &mut t, p.zy as i64);
+                for z in p.zx {
+                    out.put_bytes(b",");
+                    put_i(out, &mut t, z as i64);
+                }
+                true
+            }
+            Pow::VCal(0) => {
+                if !self.dmm.pw_vcal_start(clk) {
+                    out.set_err("Settings conflict");
+                }
+                self.redraw |= self.view == View::Range;
+                false
+            }
+            Pow::VCal(1) => {
+                let vr = self.dmm.pw.vr as usize;
+                self.dmm.pw.vgain[vr] = 0.0;
+                false
+            }
+            Pow::VCal(2) => {
+                // <last job result>,<V range>,<gain in force>,<SELF|FACT>
+                let p = &self.dmm.pw;
+                let vr = if p.job_last == pw::JOB_VCAL { p.job_vr } else { p.vr };
+                out.put_bytes(job_text(if p.job_last == pw::JOB_VCAL { p.job_res } else { pw::JR_NONE }).as_bytes());
+                out.put_bytes(b",");
+                out.put_f32(pw::V_LIM[vr as usize]);
+                out.put_bytes(b",");
+                out.put_f32(p.v_gain(vr));
+                out.put_bytes(if p.vgain[vr as usize] > 0.0 { b",SELF" } else { b",FACT" });
+                true
+            }
+            Pow::VCal(_) => {
+                for vr in 0..4u8 {
+                    if vr > 0 {
+                        out.put_bytes(b",");
+                    }
+                    out.put_f32(self.dmm.pw.v_gain(vr));
+                }
+                true
+            }
             Pow::DbgRow => {
                 // 22 row bytes R20..R35 then R36, hex; the R34 in force.
                 const H: &[u8; 16] = b"0123456789ABCDEF";
@@ -314,6 +440,16 @@ impl App {
         }
     }
 
+    /// Power Settings page: the status line (job progress / result, the
+    /// gain and zero in force), redrawn when its text changes.
+    pub(super) fn pw_settings_status(&mut self) {
+        if self.view != View::Range || !self.dmm.pw.on || self.redraw {
+            return;
+        }
+        let k = ui::pw::settings_status(&self.dmm.pw, self.pw_status_key);
+        self.pw_status_key = k;
+    }
+
     /// CONFigure? in the power meter: "POW <V range>,<I range>" (AUTO or the
     /// range limits in V / A).
     pub(super) fn pw_conf(&self, out: &mut crate::scpi::Scpi) {
@@ -331,5 +467,21 @@ impl App {
             out.put_f32(pw::I_LIM[pv.ik as usize]);
         }
         out.put_bytes(b"\"");
+    }
+}
+
+/// SCPI word of a job result (pw::JR_*).
+fn job_text(r: u8) -> &'static str {
+    match r {
+        pw::JR_RUN => "RUN",
+        pw::JR_OK => "OK",
+        pw::JR_SIGNAL => "SIGNAL",
+        pw::JR_SMALL => "SMALL",
+        pw::JR_BIG => "BIG",
+        pw::JR_UNSTABLE => "UNSTABLE",
+        pw::JR_RANGE => "RANGE",
+        pw::JR_ABORT => "ABORT",
+        pw::JR_METHOD => "METHOD",
+        _ => "NONE",
     }
 }
