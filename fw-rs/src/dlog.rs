@@ -605,8 +605,227 @@ pub fn file_header(kind: u8, unit: &[u8], text: &[u8], out: &mut [u8]) -> usize 
 /// Kind 2 (scope record): after the header text, SCOPE_PAR bytes of
 /// parameters (f32 a, f32 b: volts = a + b * code; f32 dt, s per sample;
 /// u32 t0, the sample of time 0; u32 n samples; u32 CRC-32 of these 20),
-/// then n codes (u16 LE, 10 bits).
+/// the block table (per SBLK-sample block: u32 coded bytes, u32 CRC-32 of
+/// them; then u32 CRC-32 of the table), then the coded blocks. A block:
+/// 3 bits mode (0..3 = FLAC-style fixed predictor order, 4 = raw 10-bit
+/// codes), then per sample the adaptive Rice code of the zigzag residual
+/// (raw: 10 bits), zero-padded to a byte. Every block restarts the
+/// predictor (sample j < order uses order j; order 0 predicts 512) and the
+/// Rice state, so a block decodes on its own (random access for the CSV).
 pub const SCOPE_PAR: usize = 24;
+/// Samples per coded block, blocks per record at most (65536 samples).
+pub const SBLK: usize = 4096;
+pub const SBLK_MAX: usize = 16;
+/// Raw-mode block bytes (the bound of any block).
+pub const SBLK_RAW: usize = (3 + SBLK * 10).div_ceil(8);
+const S_RAW: u32 = 4;
+const AS0: u32 = 16;
+
+/// Fixed predictor of `order` from the previous codes h[0] = x[-1],
+/// h[1] = x[-2], h[2] = x[-3] (`j` = index in the block).
+fn s_pred(order: u32, j: usize, h: &[i32; 3]) -> i32 {
+    match order.min(j as u32) {
+        0 => 512,
+        1 => h[0],
+        2 => 2 * h[0] - h[1],
+        _ => 3 * h[0] - 3 * h[1] + h[2],
+    }
+}
+
+/// The fixed order (0..3) with the least sum of |residual| over `codes`.
+pub fn scope_order(codes: &[u16]) -> u32 {
+    let mut sum = [0u64; 4];
+    let mut h = [0i32; 3];
+    for (j, &c) in codes.iter().enumerate() {
+        let x = (c & 0x3FF) as i32;
+        for (o, s) in sum.iter_mut().enumerate() {
+            *s += (x - s_pred(o as u32, j, &h)).unsigned_abs() as u64;
+        }
+        h = [x, h[0], h[1]];
+    }
+    (0..4).min_by_key(|&o| sum[o]).unwrap_or(1) as u32
+}
+
+/// Resumable encoder of one scope block: bytes one at a time (the writer
+/// fills a disk block in pieces; a sequential fill never codes a sample
+/// twice). `pos` counts the bytes given out (the caller's file offset).
+#[derive(Clone, Copy)]
+pub struct SEnc {
+    pub pos: u32,
+    mode: u32,
+    j: usize,
+    acc: u64,
+    nb: u32,
+    h: [i32; 3],
+    ad: Ad,
+    q: [u8; 16],
+    qh: u8,
+    qt: u8,
+    flushed: bool,
+}
+
+impl SEnc {
+    pub const fn new(mode: u32, pos: u32) -> SEnc {
+        let mut e = SEnc { pos, mode, j: 0, acc: 0, nb: 0, h: [0; 3], ad: Ad::new(AS0), q: [0; 16], qh: 0, qt: 0, flushed: false };
+        e.acc = mode as u64;
+        e.nb = 3;
+        e
+    }
+    fn put(&mut self, v: u32, bits: u32) {
+        if bits == 0 {
+            return;
+        }
+        let v = if bits >= 32 { v as u64 } else { (v & ((1u32 << bits) - 1)) as u64 };
+        self.acc = (self.acc << bits) | v;
+        self.nb += bits;
+        while self.nb >= 8 {
+            self.nb -= 8;
+            self.q[(self.qt & 15) as usize] = (self.acc >> self.nb) as u8;
+            self.qt = self.qt.wrapping_add(1);
+        }
+        self.acc &= (1u64 << self.nb) - 1;
+    }
+    /// The next byte of the block coding `codes`; None at its end.
+    pub fn next(&mut self, codes: &[u16]) -> Option<u8> {
+        loop {
+            if self.qh != self.qt {
+                let b = self.q[(self.qh & 15) as usize];
+                self.qh = self.qh.wrapping_add(1);
+                self.pos += 1;
+                return Some(b);
+            }
+            if self.j < codes.len() {
+                let x = (codes[self.j] & 0x3FF) as i32;
+                if self.mode == S_RAW {
+                    self.put(x as u32, 10);
+                } else {
+                    let u = zz(x - s_pred(self.mode, self.j, &self.h));
+                    let k = self.ad.k();
+                    let q = u >> k;
+                    if q < QMAX {
+                        let mut r = q;
+                        while r > 0 {
+                            let n = r.min(16);
+                            self.put((1 << n) - 1, n);
+                            r -= n;
+                        }
+                        self.put(0, 1);
+                        self.put(u, k);
+                    } else {
+                        self.put((1 << 16) - 1, 16);
+                        self.put((1 << (QMAX - 16)) - 1, QMAX - 16);
+                        self.put(u, 32);
+                    }
+                    self.ad.upd(u);
+                }
+                self.h = [x, self.h[0], self.h[1]];
+                self.j += 1;
+                continue;
+            }
+            if !self.flushed {
+                self.flushed = true;
+                if self.nb > 0 {
+                    let pad = 8 - self.nb;
+                    self.put(0, pad);
+                }
+                continue;
+            }
+            return None;
+        }
+    }
+}
+
+/// Code one block (`codes`, at most SBLK) in `mode` (0..3 order, 4 raw)
+/// into `sink`; returns the byte count.
+pub fn scope_block(codes: &[u16], mode: u32, sink: &mut dyn FnMut(u8)) -> usize {
+    let mut e = SEnc::new(mode, 0);
+    while let Some(b) = e.next(codes) {
+        sink(b);
+    }
+    e.pos as usize
+}
+
+/// Choose and size a block's coding: (mode, bytes, CRC-32 of the bytes).
+/// The fixed order with the least |residual|, or raw when that is smaller.
+pub fn scope_plan(codes: &[u16]) -> (u32, u32, u32) {
+    let o = scope_order(codes);
+    let mut crc = !0u32;
+    let n = scope_block(codes, o, &mut |b| crc = crc32_upd(crc, &[b]));
+    let raw = (3 + codes.len() * 10).div_ceil(8);
+    if n > raw {
+        let mut crc = !0u32;
+        let n = scope_block(codes, S_RAW, &mut |b| crc = crc32_upd(crc, &[b]));
+        return (S_RAW, n as u32, !crc);
+    }
+    (o, n as u32, !crc)
+}
+
+/// The block table (`lens[i]`, `crcs[i]` per block, then the table CRC)
+/// into `out`; returns its length (8 * blocks + 4).
+pub fn scope_table(lens: &[u32], crcs: &[u32], out: &mut [u8]) -> usize {
+    let mut k = 0;
+    for (l, c) in lens.iter().zip(crcs) {
+        out[k..k + 4].copy_from_slice(&l.to_le_bytes());
+        out[k + 4..k + 8].copy_from_slice(&c.to_le_bytes());
+        k += 8;
+    }
+    let c = !crc32_upd(!0, &out[..k]);
+    out[k..k + 4].copy_from_slice(&c.to_le_bytes());
+    k + 4
+}
+
+/// Decoder of one scope block.
+#[derive(Clone, Copy)]
+struct SDec {
+    pos: u32,
+    bit: u32,
+    end: u32,
+    mode: u32,
+    j: usize,
+    h: [i32; 3],
+    ad: Ad,
+}
+
+impl SDec {
+    fn new<S: Src>(s: &mut S, w: &mut Win, start: u32, end: u32) -> Option<SDec> {
+        let mut d = SDec { pos: start, bit: 0, end, mode: 0, j: 0, h: [0; 3], ad: Ad::new(AS0) };
+        d.mode = d.get(s, w, 3)?;
+        (d.mode <= S_RAW).then_some(d)
+    }
+    fn get<S: Src>(&mut self, s: &mut S, w: &mut Win, mut bits: u32) -> Option<u32> {
+        let mut v = 0u32;
+        while bits > 0 {
+            let b = w.byte(s, self.pos, self.end)?;
+            let take = (8 - self.bit).min(bits);
+            let x = (b >> (8 - self.bit - take)) as u32 & ((1u32 << take) - 1);
+            v = if take == 32 { x } else { (v << take) | x };
+            self.bit += take;
+            bits -= take;
+            if self.bit == 8 {
+                self.bit = 0;
+                self.pos += 1;
+            }
+        }
+        Some(v)
+    }
+    fn next<S: Src>(&mut self, s: &mut S, w: &mut Win) -> Option<u16> {
+        let x = if self.mode == S_RAW {
+            self.get(s, w, 10)? as i32
+        } else {
+            let k = self.ad.k();
+            let mut q = 0;
+            while q < QMAX && self.get(s, w, 1)? == 1 {
+                q += 1;
+            }
+            let u = if q == QMAX { self.get(s, w, 32)? } else { (q << k) | self.get(s, w, k)? };
+            self.ad.upd(u);
+            s_pred(self.mode, self.j, &self.h) + unzz(u)
+        };
+        self.h = [x, self.h[0], self.h[1]];
+        self.j += 1;
+        Some((x & 0x3FF) as u16)
+    }
+}
 /// The generated CSV row: "+d.ddddde+xx,+d.dddde+xx\r\n".
 pub const SCOPE_ROW: usize = 26;
 
@@ -970,8 +1189,14 @@ pub struct Gen<S: Src> {
     ul: usize,
     unit: [u8; UNIT_MAX],
     win: Win,
-    /// Kind 2: a, b, dt, t0, offset of code 0.
-    sc: (f32, f32, f32, u32, u32),
+    /// Kind 2: a, b, dt, t0; block start offsets (`nb` + 1 used); the
+    /// block decoder (`sd_b` = its block, `sd_ok`), the last code it gave.
+    sc: (f32, f32, f32, u32),
+    offs: [u32; SBLK_MAX + 1],
+    sd: SDec,
+    sd_b: u32,
+    sd_ok: bool,
+    sd_code: u16,
     // cursor
     cur: Option<Chunk>,
     rd: RowDec,
@@ -996,7 +1221,12 @@ impl<S: Src> Gen<S> {
             ul,
             unit,
             win: Win::new(),
-            sc: (0.0, 0.0, 0.0, 0, 0),
+            sc: (0.0, 0.0, 0.0, 0),
+            offs: [0; SBLK_MAX + 1],
+            sd: SDec { pos: 0, bit: 0, end: 0, mode: 0, j: 0, h: [0; 3], ad: Ad::new(AS0) },
+            sd_b: 0,
+            sd_ok: false,
+            sd_code: 0,
             cur: None,
             rd: RowDec::new(&Chunk { off: 0, pl: 0, row0: 0, csv_base: 0, csv_len: 0, t0: 0, nrows: 0, flags0: 0 }),
             rpos: 0,
@@ -1011,13 +1241,44 @@ impl<S: Src> Gen<S> {
             }
             let f = |o: usize| f32::from_le_bytes([p[o], p[o + 1], p[o + 2], p[o + 3]]);
             let n = le32(&p, 16);
-            let c0 = at + SCOPE_PAR as u32;
-            // Whole codes present (a short file: what is there).
-            let n = n.min(size.saturating_sub(c0) / 2);
-            g.sc = (f(0), f(4), f(8), le32(&p, 12), c0);
-            g.info.rows = n;
-            g.info.csv = hl + n * SCOPE_ROW as u32;
-            g.info.valid = c0 + 2 * n;
+            let nb = (n as usize).div_ceil(SBLK);
+            if nb > SBLK_MAX {
+                return None;
+            }
+            let t0 = at + SCOPE_PAR as u32;
+            let mut t = [0u8; 8 * SBLK_MAX + 4];
+            let tl = 8 * nb + 4;
+            if !g.s.read(t0, &mut t[..tl]) || !crc32_upd(!0, &t[..tl - 4]) != le32(&t, tl - 4) {
+                return None;
+            }
+            g.sc = (f(0), f(4), f(8), le32(&p, 12));
+            // The whole, CRC-correct blocks (a torn file: the ones before).
+            let mut o = t0 + tl as u32;
+            let mut rows = 0u32;
+            g.offs[0] = o;
+            for b in 0..nb {
+                let e = o + le32(&t, 8 * b);
+                if e > size {
+                    break;
+                }
+                let mut c = !0u32;
+                let mut x = o;
+                while x < e {
+                    let Some(v) = g.win.byte(&mut g.s, x, e) else { break };
+                    c = crc32_upd(c, &[v]);
+                    x += 1;
+                }
+                if x < e || !c != le32(&t, 8 * b + 4) {
+                    break;
+                }
+                g.offs[b + 1] = e;
+                o = e;
+                rows = ((b + 1) * SBLK).min(n as usize) as u32;
+            }
+            g.info.rows = rows;
+            g.info.chunks = rows.div_ceil(SBLK as u32);
+            g.info.csv = hl + rows * SCOPE_ROW as u32;
+            g.info.valid = o;
             g.size = g.info.valid;
             return Some(g);
         }
@@ -1103,6 +1364,30 @@ impl<S: Src> Gen<S> {
         false
     }
 
+    /// Code `k` of a scope record (the block decoder continues forward,
+    /// else restarts at the block's start).
+    fn scope_code(&mut self, k: u32) -> Option<u16> {
+        let b = k / SBLK as u32;
+        let j = (k % SBLK as u32) as usize;
+        if !(self.sd_ok && self.sd_b == b && self.sd.j > 0 && self.sd.j - 1 <= j) {
+            self.sd_ok = false;
+            self.sd = SDec::new(&mut self.s, &mut self.win, self.offs[b as usize], self.offs[b as usize + 1])?;
+            self.sd_b = b;
+            self.sd_code = self.sd.next(&mut self.s, &mut self.win)?;
+            self.sd_ok = true;
+        }
+        while self.sd.j - 1 < j {
+            match self.sd.next(&mut self.s, &mut self.win) {
+                Some(c) => self.sd_code = c,
+                None => {
+                    self.sd_ok = false;
+                    return None;
+                }
+            }
+        }
+        Some(self.sd_code)
+    }
+
     /// CSV bytes `off .. off + buf.len()` (zeros past the end).
     pub fn read(&mut self, mut off: u32, buf: &mut [u8]) {
         let mut i = 0;
@@ -1119,13 +1404,10 @@ impl<S: Src> Gen<S> {
             }
             if self.info.kind == KIND_SCOPE {
                 let k = (off - self.info.hl) / SCOPE_ROW as u32;
-                let mut c = [0u8; 2];
-                if !self.s.read(self.sc.4 + 2 * k, &mut c) {
-                    return;
-                }
+                let Some(code) = self.scope_code(k) else { return };
                 let mut r = [0u8; SCOPE_ROW];
-                let (a, b, dt, t0, _) = self.sc;
-                scope_row(a, b, dt, t0, k as usize, u16::from_le_bytes(c), &mut r);
+                let (a, b, dt, t0) = self.sc;
+                scope_row(a, b, dt, t0, k as usize, code, &mut r);
                 let o = ((off - self.info.hl) % SCOPE_ROW as u32) as usize;
                 let n = (SCOPE_ROW - o).min(buf.len() - i);
                 buf[i..i + n].copy_from_slice(&r[o..o + n]);

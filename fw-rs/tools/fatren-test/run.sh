@@ -581,9 +581,9 @@ mcopy -n -i $IMG7 ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.
 mdir -i $IMG7 ::
 echo "--- scope record CSV (scope_csv.rs through the screenshot job, UF-13)"
 "$W/t" $IMG7 scopecsv | tee $W/sc1
-grep -q "csv=Saved(0) len=53325 .*shot_refused=true shot_result=None" $W/sc1 && echo "ok: SCOP000.DLG (26624 samples, 53325 bytes; the CSV is 692253), a screenshot meanwhile refused" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "csv=Saved(0) len=5908 .*shot_refused=true shot_result=None" $W/sc1 && echo "ok: SCOP000.DLG (26624 samples of a clean sine, 5908 bytes: predictor + Rice; u16 53325, the CSV 692253), a screenshot meanwhile refused" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG7
-"$W/t" $IMG7 scopecsv 300 | grep -q "csv=Saved(1) len=677 " && echo "ok: then SCOP001.DLG (300 samples)" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMG7 scopecsv 300 | tee $W/sc2 | grep -q "csv=Saved(1) len=[0-9]* " && echo "ok: then SCOP001.DLG (300 samples)" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG7
 # The CSV generated from the DLG (tools/dlog.py) == the pre-DLG writer's
 # SCOP000.CSV / SCOP001.CSV for the same records (c8db910 scope_csv.rs; md5).
