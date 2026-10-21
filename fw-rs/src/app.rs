@@ -97,8 +97,9 @@ pub struct App {
     /// Idle power-off warnings given since the last input (UF-28).
     off_warned: u64,
     dimmed: bool,
-    /// Wake gate start (the input that undimmed), see WAKE_GATE_MS.
-    wake_gate: Option<u64>,
+    /// Wake gate: start (the input that undimmed) and whether that touch /
+    /// key press is still in progress, see WAKE_GATE_MS.
+    wake_gate: Option<(u64, bool)>,
     pd6_since: Option<u64>,
     /// PD6 events are taken only after the key was seen released once (the
     /// stock key state starts at 4 = wait for release, FUN_0800b7e0/b87c), so
@@ -1567,14 +1568,23 @@ impl App {
         if self.dimmed {
             self.dimmed = false;
             backlight(self.backlight);
-            self.wake_gate = Some(now);
+            // In progress: a touch-down / key-down (or a touch that began
+            // before the dim) whose release is still to come. A finished
+            // event (DBG:TAP / DBG:SWIPE inject a bare Tap / swipe) leaves
+            // only the time window.
+            let open = !matches!(
+                g,
+                Gesture::Tap(_) | Gesture::Up(_) | Gesture::SwipeLeft | Gesture::SwipeRight | Gesture::SwipeUp | Gesture::SwipeDown
+                    | Gesture::KeyUp(_) | Gesture::MultiSwipeDown(_) | Gesture::PinchEnd(_) | Gesture::Cancel
+            );
+            self.wake_gate = Some((now, open));
         }
         // Wake gate: the waking touch / key and anything within
         // WAKE_GATE_MS of it only woke the screen; the idle timers restarted
         // (last_input above), as stock.
-        if let Some(t) = self.wake_gate {
+        if let Some((t, open)) = self.wake_gate {
             let start = matches!(g, Gesture::Down(_) | Gesture::KeyDown(_));
-            if !start || now < t + WAKE_GATE_MS {
+            if now < t + WAKE_GATE_MS || (open && !start) {
                 return false;
             }
             self.wake_gate = None;
@@ -1613,12 +1623,18 @@ impl App {
         if self.view == View::Keypad {
             match g {
                 Gesture::Down(p) => {
+                    if let Some(c) = self.kp_pressed.take() {
+                        ui::keypad_key(self.kp_kind(), c, false);
+                    }
                     self.kp_pressed = ui::keypad_hit(self.kp_kind(), p.x, p.y);
                     if let Some(c) = self.kp_pressed {
                         ui::keypad_key(self.kp_kind(), c, true);
                     }
                 }
-                Gesture::Drag(..) | Gesture::Move(..) | Gesture::Grab(_) => {}
+                // A finger rolled off the key (its release may emit
+                // nothing): unpress; still on it: keep.
+                Gesture::Drag(_, p, _) | Gesture::Move(_, p) if ui::keypad_hit(self.kp_kind(), p.x, p.y) == self.kp_pressed => {}
+                Gesture::Grab(_) => {}
                 _ => {
                     if let Some(c) = self.kp_pressed.take() {
                         ui::keypad_key(self.kp_kind(), c, false);
