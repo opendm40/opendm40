@@ -653,6 +653,11 @@ What was built, against the plan of 4.5:
 | V-JACK?, comparator on SENSE via /1000 (SS5 only) | DC A / mA / uA | R20 -> 0x10, R2C \|= 0x10 (SS5; PS5 never) | hit windows for 1 s while \|I\| < 0.5 % of the range; clears 0.5 s after the last hit or when current flows |
 | LIVE? (no hardware) | ohm, continuity, diode | none | ohm AD1 code < -20 000 (sign the formula otherwise drops), continuity < -2 ohm before the clamp, diode < -0.05 V; 0.3 s to assert, 1 s to clear |
 
+Known limit: in the temperature function `poll` gets past its settle
+deadline only ~1.4 times a second (the sensor phases), so the comparator is
+sampled that rarely there: DC trips as elsewhere, an AC current trips and
+clears more slowly and may flicker.
+
 Not done (as allowed by 4.2-4.4): AC+DC (both phases keep the stock rows:
 `freq_secondary` rewrites R20), diode / continuity / capacitance /
 frequency / AC A A-jack or V-jack sentinels (their comparators / converters
@@ -679,8 +684,8 @@ A current times the relay-selected shunt, instantaneous, in the DC V / mV /
 ohm / temperature roles; SENSE = V jack / 1000 with SS5 in DC A; AD1 on PB1 -
 PB3 in the AC roles with the peak hold over every elapsed conversion; row
 matching ignores the AD1 fields of rows with AD1 off, PKHSEL / ENPKH, and SS5
-in the current rows): 199 host checks. fw-rs end to end over USB/IP (18
-scenarios, all as expected): 1 mA DC / -1 mA / 5 mA AC 50 Hz / 5 V across
+in the current rows): 199 host checks. fw-rs end to end over USB/IP
+(`emu/hy3131/senttest.py`, 18 scenarios, all as expected): 1 mA DC / -1 mA / 5 mA AC 50 Hz / 5 V across
 A-COM in DC V, 2 mA in DC mV, 2 mA in ohm, 5 mA with a thermocouple, 10 mA AC
 and 1 mA DC in AC V, 5 mA AC 60 Hz in AC mV -> AJACK, cleared ~1 s after the
 source goes; 0.2 mA in DC V -> NONE; 24 V DC and 230 V AC on V-COM in DC A ->
@@ -707,7 +712,8 @@ Device test plan (sentinel build; commit the tree before flashing):
   reading of 1 V / 230 V 50 Hz with alerts ON vs OFF (AD1 running + the R29
   ENPKH toggle every ~107 ms must not move the RMS / LPF / Hz readouts; if it
   does, `PKH_RESTART = false`). No false trips in any of those modes with the
-  A jack open (10 min each) and during autoranging.
+  A jack open (10 min each) and during autoranging. Temperature: expect a
+  slower trip / clear with AC (sparse CTSTA samples).
 * **T10** V-JACK?: 5 V (no alert expected, below 21 V), 24 V DC and mains on
   V-COM with nothing in A while in DC A / mA / uA: amber badge after ~1 s,
   cleared 0.5 s after removal; DC mA reading with SS5 closed unchanged

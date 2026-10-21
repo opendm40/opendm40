@@ -1043,6 +1043,10 @@ fn main() {
                 let (mut a, mut b) = (*a, *b);
                 a.main.ext = xa && !a.main.ol;
                 b.main.ext = xb && !b.main.ol;
+                // Status slot: an alert badge (the widest, A-JACK, or V-JACK?)
+                // then RUN or another badge.
+                a.alert = if xb { sentinel::Alert::VJack } else { sentinel::Alert::AJack };
+                b.alert = if xa && xb { sentinel::Alert::Live } else { sentinel::Alert::None };
                 let page = |dv: &mut ui::DmmView, steps: &[(Reading, Option<&'static str>, u8)]| {
                     host::reset(0);
                     dv.label = steps[0].1;
