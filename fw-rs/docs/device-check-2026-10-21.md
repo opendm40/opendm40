@@ -283,3 +283,262 @@ The emulator cannot show the fps difference. Its comparator path (the ScopeFeede
    - `dm40scpi.py read -n 200`.
    - LOG:STAT ON, then LOG:DATA?: the seqs should be contiguous.
    - MSC copy of a large file. The MSC block buffer is now in SRAM.
+
+## 9dd1222
+
+**Build.** The owner installed **9dd1222** before the run. At the start it was healthy: stack 24 608 / 48 336 B (51 %), crash count 0. No firmware was installed during the run.
+Screenshots, profiles and CSVs are in the session scratchpad (`dev-9dd1222/`), not in git.
+
+**The run was cut short.** The coordinator stopped it at about 00:15 on 2026-10-22 so the owner could flash a new build. These were not run:
+- the AC mV and thermocouple soak modes;
+- item 5 (swipe-REC, LOGnnn.DLG/CSV, MMEM:DATA?);
+- item 6 (DBG:BOOT? stack after everything);
+- the follow-ups listed under "Not run" below;
+- the end-state restore.
+
+**Wiring.** The calibrator (`/dev/ttyACM1`) drives the scope probe and the DMM V/COM jacks in parallel. The A jack is not wired, so AC A, T9 and T10 were skipped.
+- The MR9270S+ has **no sine output.** Func 2 modes 0 and 3 give the 40 Hz, 0..10.4 V square. Mode 1 gives about 10 mVpp. Mode 4 gives a waveform that read about 16 V AC; it is undefined and was not used again.
+  Every "sine" step ran with the 40 Hz square or a DC level instead.
+- The calibrator's "0 V" is a low-impedance 0 V, not a short: DC V reads −17 µV on it.
+
+**The flicker the owner reported** came from the deliberate `DBG:AD2:DRAW 2` load. DRAW 2 repaints the full DMM view every 100 ms. It ran during the loss runs in four 20 s windows:
+- 23:21:41-23:22:01
+- 23:22:41-23:23:02
+- 23:23:42-23:24:02
+- 23:24:42-23:25:02
+
+DRAW was set back to the default 1 at 23:25:02. Right after that, DBG:PROF? showed no long passes (dmm max 2.0 ms) and the screen looked normal (`04-after-ad2loss.png`).
+
+### Summary
+
+| # | Check | Result |
+|---|---|---|
+| 1a | AD2 torn reads, 13 rungs, blind and SYNC | **PASS.** signbad 0, diff(no conv) 0, no bump at 9 / 17 bits |
+| 1b | AD2 loss per rate × DRAW 0/1/2 | Numbers below. **The chop-ON rungs run faster than nominal**, so "lost 0 %" at 600-4800 is a clamp artefact. Link ceiling about 6.5 kS/s |
+| 1c | AD2 noise / ENOB | Converter floor (AC A, jacks open): ENOB 16.1-17.6 (13.4 at 76.8 k). The calibrator 0 V into AC mV is input-dominated: ENOB 11.8, flat. A true shorted-mV input was not tested |
+| 1d | AD2 waveforms | AC V on the square: 40.00 Hz, mean ≈ 0 (AC coupling), rms −1.6 % vs the DMM. AC mV on 100 mV DC: −1.7 % vs DC mV (calibration not applied) |
+| 1e | Loop profile while logging at 9600 | loop max 2.5 ms; the logger is inside the `usb` lap (96 % CPU) |
+| 2a | Scope page, open input, 1 ms/div | loop max **12.38 ms** (marginal: target ≤ 12). No 20-50 ms passes. Ping p99 0.7 ms |
+| 2b | 40 Hz square 1 ms/div after AUTO | **PASS.** 40.0 fps, HWTRIG 1,1, loop max 10.65 ms, ping p99 9.3 ms. Level drags 38 fps |
+| 2c | STOP → Save CSV, three cases | **PASS** on the SPI disk: SCOP000-002.DLG, "untriggered" headers, dlog.py == MMEM CSV. **FAIL: SCOPnnn.CSV did not appear on DM40-INFO** after unmount/mount (see below) |
+| 3a | AutoHold re-capture | **PASS.** 1.10 → 1.20 → 1.10 → 1.12 captured; 1.11 held at 1.1210 |
+| 3b | Bargraph | **PASS.** Visible, segmented, bipolar −6/0/+6 V. d.bar cost 1 µs |
+| 3c | Tap value → FAST/MED/SLOW toasts | **PASS** |
+| 3d | Hz after AC+DC, 40 Hz square | **PASS.** 2 × 43 reads all 40.0017-40.0018 Hz, duty 50.0 %, MIN/MAX clean |
+| 3e | Continuity with 1.234 V on the jacks | **PASS.** 0.00 Ω, LIVE? badge |
+| 3f | °F toggle and back | **PASS** (unit, CJ, SYST:TEMP? converted). TC K reads 192-198 °C on a 0 V source (see below) |
+| 4a | T7: alerts ON vs OFF | DC V, Ω, AC mV, Hz and the AC V square: equal within noise. **FAIL: AC V 6 V range reads +37.2 mV with alerts ON** on any DC input (0.15-0.35 mV OFF) |
+| 4b | No false trips, 5 min per mode, A jack open | DC V 1 V, DC mV, Ω 100, AC V square: 0 hits. **FAIL: DC V autorange 1 ↔ 10 V asserted A-JACK** (+1476 hit windows, streak 96). AC mV and TC not run (stopped) |
+| 5 | Swipe-REC LOG / MMEM:DATA? | **not run** (stopped) |
+| 6 | DBG:BOOT? stack after everything | **not run** (stopped). 51 % at the start |
+
+### 1. AD2 fast logger (doc dmm-input-scope-feasibility §7.3)
+
+The meter was in AC mV (the 600 mV button on the range page) with 0.312 V DC from the calibrator. The stream is AD2 code ≈ 64 000, i.e. 0.305 V.
+
+**Torn reads** (`ad2 torn -n 2000`, blind and `--sync`)
+- On every rung: signbad 0 and diff(no conv) 0.
+- The bit-length histograms are smooth noise distributions. They peak at 6-8 bits at 76.8 k / 38.4 k and lower at the slow rungs.
+- There is no separate bump at 9 or 17 bits. **No tears at any rate.**
+- With SYNC, pairs at 0x04 / 0x05 / 0x24 / 0x25 / 0x2D are 2000 / 2000 identical. Pairs at 0x03 / 0x23 and faster mostly differ: the two-read pair (~140 µs) is longer than the period there.
+
+**Loss per rate** (20 s each; DBG:AD2:DRAW d; `ad2-loss.txt`)
+
+| requested (rung) | DRAW | captured | measured S/s | reported lost | gaps 2 / 3-4 / 5-16 / 17-128 / >128, max |
+|---|---|---|---|---|---|
+| 600 (0x2D) | 1 | 22 520 | 1125 | 0 % | 0/0/0/0/0, 2.1 ms |
+| 600 | 0 | 22 583 | 1128 | 0 % | 0/0/0/0/0, 0.9 ms |
+| 600 | 2 | 18 153 | 907 | 0 % | 0/0/200/0/0, 26.2 ms |
+| 2400 (0x24) | 1 | 76 318 | 3814 | 0 % | 0/40/20/0/0, 2.0 ms |
+| 2400 | 0 | 76 668 | 3832 | 0 % | 0/0/0/0/0, 0.4 ms |
+| 2400 | 2 | 59 204 | 2958 | 0 % | 0/538/266/200/0, 25.8 ms |
+| 4800 | 1 | 122 308 | 6111 | 0 % | 10/0/60/0/0, 2.0 ms |
+| 4800 | 0 | 123 608 | 6179 | 0 % | 10/0/0/0/0, 0.4 ms |
+| 4800 | 2 | 94 372 | 4715 | 1.76 % | 24/0/804/200/0, 25.7 ms |
+| 9600 | 1 | 129 956 | 6493 | 32.4 % | 29024/3404/2/58/0, 2.1 ms |
+| 9600 | 0 | 131 428 | 6568 | 31.6 % | 29380/3461/0/0/0, 0.4 ms |
+| 9600 | 2 | 100 080 | 5001 | 47.9 % | 21466/2547/21/785/200, 26.0 ms |
+
+**Finding: the chop-ON rungs deliver a result faster than the ladder's nominal rate.** The logger's spacing is perfectly uniform:
+- 886 µs at "600" and 261 µs at "2400";
+- 157 µs at "4800" (with 250 µs steps);
+- that is P/2 + ~53 µs each time, i.e. AD2F is already set when the P/2 gate opens.
+
+`DBG:AD2:NOISE?` (flag-synced) gives the same picture:
+- 0x25 ("1200") and 0x05 ("2400", chop OFF) both take 422 µs per sample;
+- 0x24 ("2400") and 0x04 ("4800") both take 232 µs.
+
+So ENCHOPAD2 does not halve the AD2F rate the way `ad2_r26_for` / §7.1 assume. The labels of the chop-ON rungs are 2x low; 0x2D is 1063 µs, ~940/s, which fits neither. Because `lost = span / nominal − captured` goes negative and is clamped, **the 0 % at 600-4800 means nothing**.
+- What the timestamps show directly:
+  - every result is captured through 0x24 (~3.8 kS/s real, all dt = 261 µs);
+  - at "4800" there are already 250 µs steps;
+  - the bit-banged link tops out at **~6.2-6.6 kS/s**, not the doc's ~8 k.
+- **DRAW 2** (the DMM page repaint) costs a 25.7-26.2 ms gap every 100 ms at every rate. That is ~26 % dead time, which the counter does not show below 9600.
+- Not run, the discriminating check: `log --chop off --rate 2400 / 4800` (measured ≈ nominal would confirm that the chop-ON labels are the issue).
+- Each stream starts with two rail samples: seq 2 = −262144, seq 3 = +262143. Without them, the stream sd is 62-70 codes (0.3 mV, mostly 50 Hz-like wander).
+
+**Noise / ENOB**
+
+| input | rungs | sd (codes) | ENOB | readout µs/sample |
+|---|---|---|---|---|
+| AC mV r1, calibrator 0 V (`ad2-noise-0V.txt`) | all 13 | 141-158, flat | 11.7-11.9 | 141 (fast) .. 1063 (0x2D) |
+| AC A (600 µA r0), jacks open, op1chop 0 | 0x00 / 0x03 / 0x05 / 0x22 / 0x24 / 0x2D | 47.5 / 4.5 / 2.7 / 7.2 / 3.5 / 3.1 | 13.4 / 16.8 / 17.6 / 16.1 / 17.2 / 17.4 | |
+| same, op1chop 3 | same | 47.4 / 4.5 / 2.7 / 7.2 / 3.3 / 3.1 | 13.4 / 16.9 / 17.6 / 16.2 / 17.3 / 17.4 | |
+
+- The flat ~145 codes (0.68 mV rms) in AC mV are the calibrator's output and pickup, not the converter. The DMM's own AC mV reads 0.7 mV on it.
+- The open AC A path is the converter floor, and it matches §1.2 (14-16 bits or better).
+- OP1 chop moves the offset from +868 to −742 codes.
+- A shorted mV input was not available.
+
+**Waveforms**
+- AC V, 40 Hz square, 2400 and 4800 (`v.csv`, `v4800.csv`):
+  - 40.00 Hz;
+  - mean 0.008 / −0.019 V (AC coupled, coupling AC in the header);
+  - rms 4.691 / 4.713 V vs DMM AC V 4.768 V (−1.6 % / −1.2 %, uncalibrated);
+  - p-p −4.78..+5.10 V.
+- AC mV, 100 mV DC (`w.csv`, 4800): mean 97.1 mV vs DMM DC mV 98.75 mV (−1.7 %); rms 0.4 mV vs DMM AC mV 0.47 mV.
+- During the session, DMM AC V on the same square read 4.768 V at 23:26 and 4.8076 V at 23:55-00:00 (+0.8 %). The cause is not known: the calibrator, temperature, or something else. It was unrelated to logging (checked before and after a log session).
+
+**Profile while logging 9600** (`prof-ad2-9600.txt`):
+- loop avg 615 µs, max 2.49 ms; 30 passes of 2-5 ms per 10 s;
+- the logger poll is counted in the `usb` lap (590 µs avg, 95.7 %).
+
+### 2. Scope re-checks
+
+**Test conditions**
+- "Open input" = calibrator output disabled.
+- Shots 10-13 and the first profile were taken on the **combined view**. There AUTO went to the DMM.
+- The pure scope page numbers are below.
+
+**Profiles**
+
+| view / input, 1 ms/div | fps | loop max | loop hist 10-20 ms | s.frame max | s.meas max | s.mtxt max | ping p50 / p99 / max |
+|---|---|---|---|---|---|---|---|
+| combined view, open (noise-triggered at 20 mV) | 49.8 | 11.37 ms | 31 | 6.5 | 7.0 | 3.5 | **11.8 / 16.5 / 17.5 ms** |
+| scope page, open (AUTO sweep, level 4.88 V) | 9.1 | **12.38 ms** | 32 | 6.4 | 6.9 | 3.5 | 0.5 / 0.7 / 8.7 ms |
+| scope page, square, 20 mV/div overdriven, before AUTO | 9.5 | 16.7 ms | 40 | 14.5 | 5.5 | 3.3 | 0.5 / 9.3 / 11.5 ms |
+| scope page, square, after AUTO + 3 steps to 1 ms/div | **40.0** | 10.65 ms | 33 | 6.3 | 5.4 | 3.1 | 0.5 / 9.3 / 17.6 ms |
+| same, during 6 level drags | 38.0 | 12.9 ms | 28 | | | | |
+
+**Results**
+- The 32 ms passes are gone. The worst is now 12.4 ms on the open scope page, 0.4 ms over the ≤ 12 target.
+- **HWTRIG.** Before AUTO the square overdrove the 20 mV/div input, and the comparator was suspended (fields 5,6 = 1,0; 9.5 fps).
+  - AUTO ended at 10 ms/div, 2 V, level 4.88 V, T'D.
+  - After that, HWTRIG? read 1,1 and stayed 1,1 through three timebase steps and six level drags.
+  - DBG:HWTRIG:STAT? read 723 hits / 25 misses.
+  - **The 53bdb9d suspend/resume works.** The ~9 fps after AUTO is fixed.
+  - AUTO took more than 4 s (the screenshot at 4 s still showed level 4.14 V; 4.88 V by 7 s).
+- **Observation: the combined view's USB latency.** Ping p50 was 11.8 ms there, against 0.5 ms on the scope page.
+- **Observation: the side keys.** RUN (key 1) and the RUN badge tap did nothing while the MF popup was open (`30-*.png`, `31*.png`). The MF key toggles the popup.
+  - The scripted key sequences got out of step because of this. The scope page also ignores DBG:SWIPE: the "Scope swipe" setting is "Off (stock)". MENU → Multimeter is the way back.
+
+**STOP then Save CSV** (MF → Settings → Save CSV)
+- The first try showed "Disk in use by PC - eject first", because the PC had ATK-DM40 mounted. It was then unmounted with `udisksctl unmount -b /dev/sda`, and **left unmounted** when the run was stopped.
+
+| case | file | size | header |
+|---|---|---|---|
+| Auto, open input, 1 ms/div, STOP | SCOP000.DLG | 11 544 B | mode Auto, untriggered, 2.5 MS/s, 26 624 samples, −0.15..+0.08 V |
+| Auto, square, 50 ms/div, STOP during acquisition | SCOP001.DLG | 13 732 B | mode Auto, untriggered, square visible (−0.27..+10.03 V) |
+| Normal showing WAIT (calibrator off), STOP | SCOP002.DLG | 12 704 B | mode Normal, untriggered, flat 0 V |
+
+- Each case showed the toast "Saved SCOPnnn.DLG".
+- `dlog.py` of each DLG was byte-identical to MMEM:DATA? "SCOPnnn.CSV" (692 550-692 553 B).
+- On STOP from WAIT, the screen repainted the captured untriggered samples (flat), not the old frame.
+- A real noisy 1 ms/div record is 11.5 KB.
+- **FAIL: no SCOPnnn.CSV on DM40-INFO.**
+  - Repro: after the saves, `udisksctl unmount -b /dev/sdb; udisksctl mount -b /dev/sdb`. The listing still held only the 9 unit files.
+  - Code reading: the Save CSV job (screenshot.rs) never calls `dlog::set_stale()`. Only csvlog's finish, a delete and a host write do (main.rs ~885, csvlog.rs 592 / 1314). So `dlog::refresh` is not run after a scope save.
+  - Not verified: that a later REC stop makes the SCOP CSVs appear. Item 5 was not run.
+
+### 3. DMM
+
+- **AutoHold** (RUN held 1.2 s; CALC:AHOL? 1; `47-ah-sheet.png`)
+  - Captures: 1.1007 → 1.2005 → 1.1009 → 1.1210 (1.12 V).
+  - At 1.11 V it stayed at 1.1210, as meter-test expects.
+  - READ? keeps returning the live value.
+- **Bargraph.** Segmented, bipolar −6 / 0 / +6 V, orange lit segments (`46-dmm.png`).
+- **Resolution step** (tap on the value; `48-rate-sheet.png`)
+  - MED → "SLOW 600000 counts / 6.4 s" → "FAST 60000 counts / 10/s" → "MED 600000 counts / 3.2 s".
+  - RATE? follows the steps. It was left at MED.
+  - The rate chip under the chart updates a moment after the toast.
+- **Hz after AC+DC** (40 Hz square; CONF:VOLT:ACDC, 4 s, CONF:FREQ, then 43 READ? at 0.5 s, twice)
+  - All 86 reads: 40.0017 / 40.0018 Hz.
+  - Duty 50.0 %; MIN 40.0017, MAX 40.0018.
+  - The 16b3eb9 bug (13.334 / 26.668 Hz, 100 % duty) is gone.
+- **Continuity** with 1.234 V DC: 0.00 Ω (five reads), SYST:ALER? LIVE, amber LIVE? in the status slot.
+- **Temperature unit**
+  - UNIT:TEMP F: 191.9 C → 377.9 F, CJ 26.38 C → 79.45 F, SYST:TEMP? 97.4 F; the screen showed F.
+  - Back to C: 192.8 C. Left at C.
+- **TC K on the calibrator.** With 0 V (low impedance) or the output disabled, TC K reads 192-198 °C, independent of Jack alerts.
+  - 0 mV should read about the CJ (26 °C).
+  - The calibrator is not a thermocouple, and the TC path's jack wiring was not checked, so this is **not assessable here**. Check it with a real thermocouple.
+
+### 4. Misconnect sentinel
+
+**T7** (`t7.py`: CONF, settle, then 10 READ? each with SYST:ALER:ENAB ON / OFF / ON; `t7.txt`)
+
+| function | input | ON | OFF | ON |
+|---|---|---|---|---|
+| DC V | 0 V | 26.8 µV | −7.6 µV | 153 µV (sd 110) |
+| DC V | 1 V | 1.000620 | 1.000476 | 1.000552 |
+| DC mV | 0 V | 59 µV | 239 µV | 352 µV (drifting, sd 40-110 µV) |
+| DC mV | 0.1 V | 99.497 mV | 99.550 mV | 99.418 mV |
+| Ω | open | 418.27 kΩ | 418.74 kΩ | 419.15 kΩ (drifting) |
+| Ω | 100 Ω (calibrator) | 99.9546 | 99.9541 | 99.9551 |
+| TC K | 0 V | 195.2 | 194.9 | – |
+| AC V | 40 Hz square | 4.807473 | 4.808188 | 4.807519 |
+| Hz | 40 Hz square | 40.00173 | 40.00173 | 40.00173 |
+| AC mV | 0 V | 0.725 mV | 0.723 mV | 0.717 mV |
+| AC mV | 0.1 V DC | 0.485 mV | 0.470 mV | 0.476 mV |
+| **AC V (6 V)** | **0 / 0.5 / 1 / 2 / 5 V DC** | **37.28 / 37.24 / 37.22 / 37.18 / 37.19 mV** | **0.35 / 0.14 / 0.17 / 0.15 / 0.18 mV** | **37.22 / 37.22 / 37.22 / 37.15 / 37.17 mV** |
+
+**FAIL: AC V on the 6 V range with Jack alerts ON reads a constant ~37.2 mV floor.**
+- Repro: `CONF:VOLT:AC` with any DC (or 0 V) on V-COM.
+- With alerts OFF it reads 0.15-0.35 mV. The effect follows SYST:ALER:ENAB on every toggle.
+- The first screenshot of the run shows it too: AC V 0.0374 V on 1 V DC.
+- On the 4.8 V square the difference is −0.7 mV.
+- AC mV is unaffected.
+- DBG:SENT? in AC V: `AD1PK_PB1,NONE,7,0,~1300,~1368,...`. The peak hold is well below the 17 900 threshold, so this is not a trip.
+- This is the case doc §4.5 T9 names ("AD1 running + the R29 ENPKH toggle every ~107 ms must not move the RMS / LPF readouts; if it does, PKH_RESTART = false"). Here it moves the AC V RMS floor by 37 mV.
+
+**No false trips** (`soak.py`: 5 min per mode, DBG:SENT? + SYST:ALER? every 1 s, A jack open; `soak.txt`)
+
+| mode | hit windows | max streak | alerts seen |
+|---|---|---|---|
+| DC V 1 V (6 V range) | +0 | 0 | NONE |
+| **DC V, calibrator 1 V ↔ 10 V every 10 s (autorange 6 ↔ 60 V)** | **+1476** | **96** | **AJACK**, NONE |
+| DC mV 0.1 V (600 mV) | +0 | 0 | NONE |
+| Ω, 100 Ω | +0 | 0 | NONE |
+| AC V, 40 Hz square | +0 | 0 | NONE |
+| AC mV, TC K | not run (the run was stopped) | | |
+
+**FAIL: A-JACK false trip in DC V with 10 V on V-COM and nothing in the A jack.**
+- A streak of 96 windows means the comparator on PB1 hit for the whole 10 s at 10 V. This is not a range-change transient.
+- 1476 windows ≈ 148 s ≈ every 10 V half-period of the 300 s.
+- Not isolated (stopped): which of these causes it:
+  - 10 V on the 60 V range;
+  - or anything above ~6 V, including 10 V on the 6 V range.
+
+  Next step: DC V manual 60 V and AUTO+ at 5 / 7 / 10 V, polling SYST:ALER? and DBG:SENT? ctsta.
+- Before the soak, the cumulative hit counter had also risen by 1-2 per function or row change, and by +23 across one DC V → DC mV switch made while the jacks still had 5 V on them (overload on 600 mV). That was not watched live.
+- The counter is cumulative since boot and never reset (sentinel.rs `hits`).
+
+### Not run (stopped by the coordinator)
+
+- Soak: AC mV, TC K.
+- The DC V / A-JACK isolation above.
+- The DC mV overload trip check.
+- The AD2 `--chop off` pair.
+- Item 5: swipe-REC 2 min (DBG:SWIPE D,1), LOGnnn.DLG, the LUN-1 LOGnnn.CSV vs dlog.py, MMEM:DATA?, and whether the SCOP CSVs then appear.
+- Item 6: DBG:BOOT? stack after everything.
+
+### State when stopped
+
+- **Device**
+  - DMM page, AC V on the 600 mV manual range (the soak's last setup).
+  - Jack alerts 7 (ON), RATE MED, UNIT C, DBG:AD2:DRAW 1.
+  - Scope: Auto trigger, 50 ms/div, running.
+  - Volume, backlight, Dim and Shutdown were not touched.
+- **Calibrator:** 0.1 V DC, enabled. It was **not** set back to 1 V: the run stopped with no further device access.
+- **Host:** ATK-DM40 (/dev/sda) **unmounted** by this run. DM40-INFO was remounted.
+- Files on the SPI disk added by this run: SCOP000.DLG, SCOP001.DLG, SCOP002.DLG.

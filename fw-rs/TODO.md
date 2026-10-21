@@ -217,6 +217,8 @@ Code work (in this order):
             spreadsheet; scope Save CSV -> SCOPE/SCOP000.CSV; gallery tile of a .DLG; DBG:PROF? csv lap
             during a refresh with a large new log (~0.1 s per 100 KB expected); DBG:DIAG? STACK
             high-water after a refresh with several logs.
+            (Device 9dd1222, the old LUN-1 layout: scope Save CSV -> no SCOP*.CSV on DM40-INFO after
+            unmount/mount; the Save CSV job never called dlog::set_stale. Re-check on the new layout.)
       - [x] Owner 2026-10-21: drop legacy text LOG*.CSV / SCOP*.CSV support on the SPI disk (gallery parser,
             numbering, list/delete): only .DLG is written and read; CSV exists only as the generated export.
             (4544d4e)
@@ -225,7 +227,8 @@ Code work (in this order):
 
 ## Feature requests to add (from ../docs/dm40-feature-request.md; user: add autohold + useful ones)
 - [x] **FR-01 AutoHold (P0, critical).** Auto-freeze the reading when it stabilises, re-arm on a new
-      signal, beep on capture (Fluke/Keysight style). (adcfa23; verify on device)
+      signal, beep on capture (Fluke/Keysight style). (adcfa23; verify on device) (26e964a re-capture: verified on
+      device 9dd1222: 1.10 -> 1.20 -> 1.10 -> 1.12 V captured, 1.11 V not, as meter-test)
 - [x] FR-02 MIN/MAX/AVG (P0): MIN/MAX exist; add AVG (running average, no auto-off while active).  (adcfa23; verify on device)
 - [x] FR-05 smoothing + selectable sample rate (P1): slow/fast conversion + display smoothing.  (7399d86, 0cb58e8; verify on device)
       Rate chip under the DMM chart timebase (tap = SLOW/MED/FAST, grey "n/a" where the
@@ -464,7 +467,7 @@ Code work (in this order):
 ## Owner notes 2026-10-14 (../замечания.txt)
 Firmware:
 - [x] °F shown in the top-left status slot is odd; move the °C/°F choice to a global Settings option and show only the chosen unit.
-      (1a3efbd: Settings 2/2 Temp unit, UNIT:TEMP; verify on device)
+      (1a3efbd: Settings 2/2 Temp unit, UNIT:TEMP; verified on device 9dd1222: UNIT:TEMP F/C, reading, CJ, SYST:TEMP?)
 - [x] Temperature settings: remove the unclear "Offset 0" button (reset via the slider/long-press instead).
       (bdbbfcb: offset stepper + keypad, no Offset 0; verify on device)
 - [x] "NTC user" is unclear: make its R25/Beta editable right there (or remove); explain on screen.
@@ -473,7 +476,7 @@ Firmware:
       (d6fc216: stock "ON" low-current variant made visible; verify on device)
 - [x] Tap on the DMM value cycles averaging/resolution: fewer digits = faster readings; compute digits vs OSR/noise from the
       HY3131 timing + measured noise (not ad hoc); the +1 digit always drawn small at the end.
-      (24f7080: FAST/MED/SLOW with a counts / rate toast; verify on device)
+      (24f7080: FAST/MED/SLOW with a counts / rate toast; verified on device 9dd1222)
 - [ ] Power-meter mode: HY3131 can measure V and I at once (AD2/AD3 + MUL → active power in RMSDATA); Vrms, Irms, P (and
       energy) by switching internal modes — check feasibility with the DM40 front-end wiring first.
       Researched: GO, docs/power-meter-and-misconnect.md §3 (I on the stock OP1 path, V via OP2→AD3 DC-coupled,
@@ -486,6 +489,10 @@ Firmware:
       ohm / continuity / diode results; status-slot / strip badge, toast, 3x50 ms beep every 2 s; Settings 3/3
       "Jack alerts"; SYST:ALER? / :ENAB, DBG:SENT?. Emulator model + 18 USB/IP scenarios; cross table unchanged.
       (verify on device: T7, T9, T10 of the doc; T9 decides PKH_RESTART)
+      Device 9dd1222 FAILS (docs/device-check-2026-10-21.md "9dd1222" 4): AC V 6 V range reads a ~37.2 mV floor
+      with alerts ON (0.15-0.35 mV OFF, any DC input) -> PKH_RESTART / AD1 in AC V moves the RMS; A-JACK false
+      trip in DC V with 10 V on V-COM, A jack open (calibrator 1 <-> 10 V autorange soak: streak 96, AJACK).
+      T7 equal within noise for DC V / DC mV / ohm / AC mV / Hz. T9 / T10 not run (A jack not wired).
   - [ ] Not done: sentinels in AC+DC / diode / continuity / cap / Hz / AC A, DC? / AC? / FUSE? hints, OVERLOAD
         shunt rule, fuse-check dialog, STAT:QUES bit 9 (doc §4.6).
 - [x] (B) AD2 fast data logger, main-loop (E1, no ISR): LOG:SOURce AD1|AD2, LOG:SRATe 600..9600 (R26 ladder,
@@ -497,6 +504,11 @@ Firmware:
       Emulator only so far (50 MIPS: ~2 kS/s readout, not the device's): docs/dmm-input-scope-feasibility.md 7.
 - [ ] (B) device session (30 min, feasibility doc 7.3): torn reads per OSR, loss per rate with / without redraw,
       shorted-input ENOB, a waveform; then decide the rate cap and the ISR (E2-E4).
+      Partly done on device 9dd1222 (docs/device-check-2026-10-21.md "9dd1222" 1): torn reads none at any rung;
+      waveforms AC V / AC mV ok; converter floor ENOB 16-17.6 (AC A open). FOUND: the chop-ON rungs give AD2F
+      ~2x faster than ad2_r26_for's nominal (600 -> 1128/s, 2400 -> 3832/s measured; 0x24 = 0x04 readout), so
+      LOG:COUNt? lost clamps at 0 below 9600; link ceiling ~6.5 kS/s; DRAW 2 = 26 ms gap per 100 ms. Open: the
+      --chop off pair, a shorted-input mV noise run, then the rate cap.
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
@@ -510,15 +522,17 @@ Firmware:
 - [x] Scope 32 ms loop passes ~3/s (meas 11.4 + frame 5 + cells 12.3 ms in one pass): a33e3ad integer
       measurement maths, graph paint and cells on later passes (one changed cell per pass); fa3358d a
       trace-only graph flush stops after 4 ms. Emulator 1 ms/div loop max: noise 10.9 -> 5.7 ms, 40 Hz
-      square 21.5 -> 8-10.5 ms. (verify on device: DBG:PROF? loop max <= 12 ms, 400 DBG:PING? p99)
+      square 21.5 -> 8-10.5 ms. (verify on device: DBG:PROF? loop max <= 12 ms, 400 DBG:PING? p99) Device 9dd1222: no 20-50 ms passes any more;
+      scope page open input loop max 12.38 ms (marginal), ping p99 0.7 ms; square after AUTO 10.65 ms. Combined
+      view: loop max 11.4 ms but ping p50 11.8 / p99 16.5 ms.
 - [x] Scope ~9 fps at 1 ms/div after AUTO: three comparator misses (AUTO's fast-timebase sweep) disabled
       the hardware trigger for good; 53bdb9d suspends it until the next range / timebase / coupling /
       edge / mode / type change. The emulator's comparator model barely fires (ScopeFeeder TIM2 gate
-      timing; separate), so the fps itself is unverified. (verify on device: AUTO on the 40 Hz square,
-      then 1 ms/div: ~36 fps, DBG:HWTRIG? fields 5/6 = 1,1)
+      timing; separate), so the fps itself is unverified. (verified on device 9dd1222: AUTO on the 40 Hz square,
+      then 1 ms/div: 40.0 fps, DBG:HWTRIG? fields 5/6 = 1,1, 38 fps during level drags)
 - [x] STOP then Save CSV gave "No record to save" (Auto untriggered / STOP mid-acquisition): f09b3b0 the
-      samples captured so far become an untriggered stored record on STOP. (verify on device: Auto, open
-      input, STOP, MF > Settings > Save CSV -> "Saved SCOPnnn.DLG")
+      samples captured so far become an untriggered stored record on STOP. (verified on device 9dd1222: Auto open
+      input, Auto square mid-acquisition, Normal WAIT -> SCOP000..002.DLG, "untriggered" headers, dlog.py == MMEM)
 - [x] Experiment 2026-10-21 (6e32fe7 on the device, Linux 7.0, GNOME/udisks): a UNIT ATTENTION 06/28/00 on the
       MOUNTED read-only LUN 1 (DBG:VDISK:FORCE? 1 + ADD?) -> kernel rescans sdb, udev change DISK_MEDIA_CHANGE=1,
       the mounted vfat lists the new files at once with correct content, no I/O errors, no unmount. Held UA (the
@@ -599,7 +613,7 @@ Emulator (emu/):
       layout constants, src/fonts.rs and src/text.rs (the anti-aliased Roboto set; nothing else used them),
       tools/mkfont.py and fonts/Roboto-*; host-test module lists updated (ui::button_hit stays: live).
 - [x] Continuity: a negative result (source / reversed diode / charged capacitor on the jacks) clamps to
-      0.00 ohm as the stock (was -666 / -1114 ohm; emulator cross table). (emulator-verified: V 1.234|cont = 0)
+      0.00 ohm as the stock (was -666 / -1114 ohm; emulator cross table). (emulator-verified: V 1.234|cont = 0; verified on device 9dd1222: 0.00 ohm + LIVE?)
 - [x] AC V on a pure DC source reads ~18 mV in the emulator (stock ~0): NOT a firmware bug. The model's
       coupling capacitor charges to the raw jack DC (UpdateAcNode: src = dc * NodeRatioAc) while the
       seen step uses the calibration-folded node DC (NodeDcAc: DcQ(...)), so step = dcNode - vc never
@@ -646,6 +660,7 @@ Emulator (emu/):
       segments orange, all red + a red "OL" marker on overload, F14 scale labels under it: 0 / half / full
       scale with unit (bipolar -FS / 0 / +FS unit), full scale = the range's (1000 V / 10 A where limited).
       Rows 147..172 (3 px from the F78 ink and the chart frame), probed for the ui-render ink check;
+      (verified on device 9dd1222: visible, segmented, bipolar; d.bar 1 us)
       incremental update repaints only the changed segments (98..150 bus words / update; bargraph-test:
       every update equals a fresh draw).
 - [x] ui-review #13 remainder: the DMM page value turns the stock red (0xC9A0) in the V functions from 30 V
@@ -660,6 +675,7 @@ Emulator (emu/):
       and duty >= 99.95 % neither wins the choice nor reaches the readout / MIN / AVG (no reading that gate).
       Cause of the missed edges (input path settling after the AC+DC relay pulses?) still open: retest on
       the device; if the wrong readings persist, compare the stock's AC+DC -> Hz entry (R20 / relay order).
+      (verified on device 9dd1222: AC+DC -> Hz 2 x 43 reads all 40.002 Hz, duty 50 %, MIN/MAX clean)
 - [ ] DMM batch polish (open): bargraph full-scale labels in diode / continuity say the 60000-count scale
       (6 V / 600 ohm), not their real ceilings (3 V / 1000 ohm); Help "Tap history row" applies only with
       Settings 2/2 DMM row = History; a debug_assert in ui::list_page (vals.len() == names.len()) would have
