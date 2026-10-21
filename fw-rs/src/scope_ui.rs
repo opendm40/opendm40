@@ -1092,6 +1092,21 @@ pub struct Graph {
     d_holes: [Option<Rect>; NH],
     /// Pixels written by the last flush (host budget check / DBG).
     pub px: u32,
+    /// Trace-only flush resumes at this column (`FLUSH_BUDGET`).
+    next: u16,
+}
+
+/// Device: a flush that only moves traces (decoration and holes unchanged:
+/// the frame-to-frame case) stops after this many DWT cycles (4 ms) and
+/// continues on the next pass at the column it reached, so a busy trace
+/// (a square wave's edges) does not stretch one main-loop pass (device
+/// check 2026-10-21). Host: no limit, every flush completes.
+#[cfg(target_os = "none")]
+const FLUSH_BUDGET: u32 = 800_000;
+
+#[cfg(target_os = "none")]
+fn cycles() -> u32 {
+    unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) }
 }
 
 // In SRAM (.dmabuf, NOLOAD) on the device: 9.7 KB that TCM .data / the
@@ -1110,6 +1125,7 @@ static mut GRAPH: Graph = Graph {
     holes: [None; NH],
     d_holes: [None; NH],
     px: 0,
+    next: 0,
 };
 
 /// Graph hole slots (`Graph::set_hole_at`): the pinch bubble, the timebase
@@ -1143,6 +1159,7 @@ pub fn init() {
     g.holes = [None; NH];
     g.d_holes = [None; NH];
     g.px = 0;
+    g.next = 0;
 }
 
 /// The graph state, read only (overlays reading its background).
@@ -1266,7 +1283,19 @@ impl Graph {
         let marks_changed = d.marks != o.marks;
         let vl = |dd: &Deco, fx: i16| dd.v.iter().flatten().find(|l| l.fx == fx).map(|l| l.col);
         self.px = 0;
-        for i in 0..399usize {
+        // Trace-only: per-column bookkeeping, from the resume column, under
+        // the device's time budget (`FLUSH_BUDGET`).
+        let trace_only = !full && d == o && self.holes == self.d_holes;
+        let start = if trace_only { self.next as usize % 399 } else { 0 };
+        #[cfg(target_os = "none")]
+        let t0 = cycles();
+        for j in 0..399usize {
+            let i = (start + j) % 399;
+            #[cfg(target_os = "none")]
+            if trace_only && self.px > 0 && cycles().wrapping_sub(t0) > FLUSH_BUDGET {
+                self.next = i as u16;
+                return;
+            }
             let fx = i as i16 + 1;
             let sx = 13 + fx;
             let mut sp = Spans { s: [(0, 0); 12], n: 0 };
@@ -1297,6 +1326,11 @@ impl Graph {
                         }
                     }
                 }
+            }
+            if trace_only {
+                self.d_tr[i] = self.tr[i];
+                self.d_ps[i] = self.ps[i];
+                self.d_ma[i] = self.ma[i];
             }
             if sp.n == 0 {
                 continue;
@@ -1383,6 +1417,7 @@ impl Graph {
                 }
             }
         }
+        self.next = 0;
         self.d_tr = self.tr;
         self.d_ps = self.ps;
         self.d_ma = self.ma;
