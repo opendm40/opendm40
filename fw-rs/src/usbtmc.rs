@@ -407,6 +407,13 @@ impl<B: UsbBus> UsbClass<B> for Usbtmc<'_, B> {
     }
 
     fn poll(&mut self) {
+        // A packet (or the closing ZLP) whose write found the endpoint still
+        // busy: retry here, not only on the next IN completion, which never
+        // comes then (the emulator's DWC2 model once raised XFRC before
+        // clearing EPENA; a stuck transfer starves every later reply).
+        if self.tx_off < self.tx_len || (self.tx_zlp && self.tx_off == self.tx_len && self.tx_len != 0) {
+            self.pump_in();
+        }
         self.try_start_in();
     }
 
