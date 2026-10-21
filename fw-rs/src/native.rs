@@ -11,6 +11,8 @@ use crate::mmio;
 extern "C" {
     static mut __bss_start: u32;
     static mut __bss_end: u32;
+    static mut __sram_bss_start: u32;
+    static mut __sram_bss_end: u32;
     static mut __sdata: u32;
     static mut __edata: u32;
     static __sidata: u32;
@@ -40,6 +42,7 @@ unsafe fn init_ram() {
         p.write_volatile(0);
         p = p.add(1);
     }
+    zero_sram_bss();
     // Paint the free stack (__bss_end .. SP - PAINT_GAP) for the high-water mark.
     let sp: u32;
     core::arch::asm!("mov {}, sp", out(reg) sp);
@@ -49,6 +52,17 @@ unsafe fn init_ram() {
         q = q.add(1);
     }
     mmio::w32(SCB_VTOR, core::ptr::addr_of!(__VECTORS) as u32);
+}
+
+/// Zero .sram_bss (all-zero statics placed in SRAM to keep TCM for the
+/// stack; the linker scripts' NOLOAD section).
+unsafe fn zero_sram_bss() {
+    let mut p = core::ptr::addr_of_mut!(__sram_bss_start);
+    let end = core::ptr::addr_of_mut!(__sram_bss_end);
+    while p < end {
+        p.write_volatile(0);
+        p = p.add(1);
+    }
 }
 
 /// (deepest stack use so far, stack size) in bytes: the first word above

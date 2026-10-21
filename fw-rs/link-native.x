@@ -83,6 +83,18 @@ SECTIONS
         *(.sram .sram.*);
     } > SRAM
 
+    /* Zero-initialised CPU-only statics kept out of TCM (the stack's
+     * memory): `#[link_section = ".sram_bss"]` on an all-zero static; zeroed
+     * at reset next to .bss (native.rs init_ram, main.rs rust_start). */
+    .sram_bss (NOLOAD) :
+    {
+        . = ALIGN(4);
+        __sram_bss_start = .;
+        *(.sram_bss .sram_bss.*);
+        . = ALIGN(4);
+        __sram_bss_end = .;
+    } > SRAM
+
     __image_end = LOADADDR(.data) + SIZEOF(.data);
 
     /DISCARD/ :
@@ -96,4 +108,10 @@ SECTIONS
 ASSERT(__region_a_end <= _marker_start, "region A (vectors + shim) overlaps the loader marker at 0x08008000");
 ASSERT(ADDR(.text) >= _marker_end, "code placed in the loader marker at 0x08008000..0x0800800B");
 ASSERT(__image_end <= 0x080A0000, "image reaches the FS-loader at 0x080A0000");
-ASSERT(_stack_top - __bss_end >= 16K, "less than 16 KiB of stack left in TCM");
+/* Stack = TCM above .bss. Measured high-water 28 412 B (emulator, scope walk
+ * of the device check 2026-10-21: TB list, CHA popup, MF tabs, corner step,
+ * AUTO; DBG:BOOT? STACK) + the required 16 KiB headroom: .data/.bss may not
+ * grow into that. build.sh native also checks the static worst call path
+ * (tools/stack-depth/stackdepth.py --check 16384), which catches frame
+ * growth this assert cannot see. */
+ASSERT(_stack_top - __bss_end >= 28K + 16K, "TCM stack below the measured high-water (28 KiB) + 16 KiB headroom: move statics to .sram_bss / .dmabuf");
