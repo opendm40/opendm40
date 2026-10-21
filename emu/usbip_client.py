@@ -11,6 +11,8 @@ Talks the USB/IP protocol to Renode's server (emu/run.py ... --usbip T, TCP
     emu/usbip_client.py msc    1-0 [LBA]        # INQUIRY, READ CAPACITY, READ(10)
     emu/usbip_client.py read   1-0 0x1FFF7A10 12   # usbrw vendor EP0 read
     emu/usbip_client.py write  1-0 0x20028FC0 02   # usbrw vendor EP0 write
+    emu/usbip_client.py scpi-tcp 1-0 5025       # line-based SCPI over TCP <-> USBTMC
+                                                # (libsigrok conn=tcp-raw/127.0.0.1/5025)
 
 Renode exports a registered device as busid 1-0. Protocol framing after the
 ep0-memrw session's emu-usbtest/usbip/usbip_client.py.
@@ -75,12 +77,18 @@ class Dev:
         self.idVendor, self.idProduct = struct.unpack('>HH', d[296:300])
 
     def submit(self, direction, ep, setup=b'\0' * 8, out_data=b'', in_len=0):
+        self.send_submit(direction, ep, setup, out_data, in_len)
+        return self.recv_ret(direction)
+
+    def send_submit(self, direction, ep, setup=b'\0' * 8, out_data=b'', in_len=0):
         self.seq += 1
         buflen = len(out_data) if direction == DIR_OUT else in_len
         flags = 0x200 if direction == DIR_IN else 0  # URB_DIR_IN: Renode reads the direction from transfer_flags
         hdr = struct.pack('>IIIIIIIiiI', CMD_SUBMIT, self.seq, self.devid, direction, ep,
                           flags, buflen, 0, 0, 0) + setup
         self.s.sendall(hdr + (out_data if direction == DIR_OUT else b''))
+
+    def recv_ret(self, direction):
         rh = recvn(self.s, 48)
         cmd, seq, devid, dirn, rep, status, actual = struct.unpack('>IIIIIIi', rh[:28])
         if cmd != RET_SUBMIT:
@@ -181,6 +189,104 @@ def usbtmc_query(d, text, timeout_reads=4):
     return resp.decode(errors='replace')
 
 
+class Usbtmc:
+    """USBTMC message layer over a Dev (bulk OUT / IN, bTag sequence)."""
+
+    def __init__(self, d):
+        found = find_bulk(parse_config(d.config_descriptor()), 0xFE, 3)
+        if not found:
+            raise IOError('no USBTMC interface')
+        _, self.ep_out, self.ep_in = found
+        d.set_configuration(1)
+        self.d, self.tag = d, 0
+        self.in_pending = False  # a Bulk-IN URB of an unanswered query still queued
+
+    def _next_tag(self):
+        self.tag = self.tag % 255 + 1
+        return self.tag
+
+    def write(self, text):
+        msg = text.encode() + b'\n'
+        t = self._next_tag()
+        hdr = struct.pack('<BBBBIB3x', 1, t, 0xFF ^ t, 0, len(msg), 1)  # DEV_DEP_MSG_OUT, EOM
+        self.d.bulk_out(self.ep_out, hdr + msg + b'\0' * ((-len(msg)) % 4))
+
+    def read(self, maxlen=4096, timeout=5.0):
+        """One reply; OSError (socket.timeout) after `timeout` s without one."""
+        t = self._next_tag()
+        self.d.bulk_out(self.ep_out, struct.pack('<BBBBIBB2x', 2, t, 0xFF ^ t, 0, maxlen, 0, 0))
+        resp = b''
+        while True:
+            # A URB left over from a query the device never answered takes
+            # this reply (USB/IP has no cheap cancel in Renode).
+            if not self.in_pending:
+                self.d.send_submit(DIR_IN, self.ep_in & 0x7F, in_len=maxlen + 12)
+                self.in_pending = True
+            self.d.s.settimeout(timeout)
+            try:
+                st, data = self.d.recv_ret(DIR_IN)
+            finally:
+                self.d.s.settimeout(20)
+            self.in_pending = False
+            if st != 0:
+                raise IOError('bulk_in status %d' % st)
+            resp += data
+            if len(resp) >= 12 and len(resp) >= 12 + struct.unpack_from('<I', resp, 4)[0]:
+                return resp[12:12 + struct.unpack_from('<I', resp, 4)[0]]
+
+
+def scpi_tcp(busid, port):
+    """Serve SCPI lines on TCP `port` (one client at a time) and forward each
+    line as one USBTMC message; a line with a '?' gets the device's reply
+    plus '\n'. Empty lines are dropped. Every exchange is logged with its wall
+    time; a reply later than 1 s (libsigrok's hard USBTMC Bulk-IN timeout) is
+    flagged with '!!'. Virtual time runs at or below wall speed (0.7x with
+    --fast on a loaded host, 0.9x with --mips 25), so the flag is
+    conservative; fw-rs DBG:PING? (uptime ms) around a query gives the
+    virtual latency."""
+    import time
+    while True:  # the USB/IP server appears only at run.py --usbip T
+        try:
+            if any(x['busid'] == busid for x in devlist()):
+                break
+        except OSError:
+            pass
+        time.sleep(0.5)
+    tmc = Usbtmc(Dev(busid))
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(('127.0.0.1', port))
+    srv.listen(1)
+    print('scpi-tcp: %s on tcp-raw/127.0.0.1/%d' % (busid, port), flush=True)
+    t_start = time.monotonic()
+    while True:
+        c, _ = srv.accept()
+        buf = b''
+        while True:
+            data = c.recv(4096)
+            if not data:
+                break
+            buf += data
+            while b'\n' in buf:
+                line, buf = buf.split(b'\n', 1)
+                cmd = line.decode(errors='replace').strip()
+                if not cmd:
+                    continue
+                t0 = time.monotonic()
+                print('%8.3f << %s' % (t0 - t_start, cmd), flush=True)
+                tmc.write(cmd)
+                if '?' in cmd:
+                    try:
+                        rep = tmc.read().decode(errors='replace').strip()
+                    except socket.timeout:  # no reply (unknown query): nothing to the client
+                        print('         !! no reply within 5 s', flush=True)
+                        continue
+                    dt = time.monotonic() - t0
+                    print('         >> %s (%.0f ms)%s' % (rep, dt * 1e3, '  !! > 1 s' if dt > 1.0 else ''), flush=True)
+                    c.sendall(rep.encode() + b'\n')
+        c.close()
+
+
 def msc_read(d, lba=0):
     ifs = parse_config(d.config_descriptor())
     found = find_bulk(ifs, 8)
@@ -225,6 +331,8 @@ def main():
                   ' '.join('%02x/%02x/%02x' % i for i in d['ifs'])))
         return
     cmd, busid = a[0], a[1]
+    if cmd == 'scpi-tcp':
+        return scpi_tcp(busid, int(a[2]) if len(a) > 2 else 5025)
     d = Dev(busid)
     try:
         if cmd == 'desc':

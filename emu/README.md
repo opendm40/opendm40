@@ -139,6 +139,8 @@ emu/usbip_client.py list                 # busid=1-0 1209:0001 interfaces fe/03/
 emu/usbip_client.py desc   1-0           # device descriptor
 emu/usbip_client.py config 1-0           # interfaces + endpoints
 emu/usbip_client.py usbtmc 1-0 "*IDN?"   # -> Alientek,DM40A,0,dm40-fw 0.1
+emu/usbip_client.py scpi-tcp 1-0 5025    # SCPI lines on TCP 5025 <-> USBTMC, e.g. for
+                                         # sigrok-cli -d scpi-dmm:conn=tcp-raw/127.0.0.1/5025
 emu/usbip_client.py msc    1-0 0         # INQUIRY, READ CAPACITY (4096 x 4096 B), READ(10) LBA 0 (FAT boot sector)
 emu/usbip_client.py read   1-0 0x1FFF7A10 12    # usbrw image: vendor EP0 read (the UID)
 emu/usbip_client.py write  1-0 0x20028FC0 02    # usbrw image: vendor EP0 write + read-back
