@@ -618,6 +618,99 @@ R34), `DBG:POW:DISC <0..8>`. All rewrite the row (550 ms settle).
   dialog -> OK, the page with a lamp load, MF -> Power Settings, a function
   button leaves; with a 5 A+ load (if available) the countdown and the alarm.
 
+#### Device results (2026-10-22, build 7dce69f; T1, T3 at zero current, UI)
+
+Setup: the MR9270S+ calibrator (no sine) on V-COM and the scope probe; the A
+jack **not wired**, so T2 / T4 / T5 / T6 (and the XY / XX parts of T3) were
+not possible. AC source = calibrator func 2 mode 0 value 40000, the 40 Hz
+square (stock AC V 4.8068 V, DC V 4.8109 V: about 0..9.6 V on this unit, not
+10.4); DC levels func 1 (1 V, 5 V, 0 V; it cannot source negative). Scale as
+above: code x k x 1.25 / 2^18, k = 10 / 100 / 1000 for 6 / 60 / 600 V.
+`DBG:POW:STAT YY`, last 8..16 ring entries each, sd of sqrt(rms) 0.1..1 code.
+
+**T1: OP2 on SENSE works (method B is GO); the V channel needs a per-range
+gain and an LPF zero.** Default row `12 DD 15 03 52 40 80 2D 31 F8 20 00 00
+09 28 A0 80 C7 8E AC 8C 54 00` (R2E 0x28, R2F 0xA0, R35 0x54).
+
+| range | source | sqrt(rms) | lpf | V (AC part) | vs stock | V_dc from lpf - 1080 | vs DC V |
+|---|---|---|---|---|---|---|---|
+| 60 V | square 40 Hz | 9916.3 | 11005 | 4.7285 | **-1.63 %** | 4.7328 | -1.62 % |
+| 60 V | DC 1 V / 5 V | 53 / 42 (floor) | 3144 / 11389 | - | - | slope 2062.2 codes/V (ideal 2097.2) | **-1.67 %** |
+| 6 V | square 40 Hz | 98522 | 99855 | 4.6979 | -2.27 % (the square's 0.96 V peak at the /10 tap is past the +0.7 V op amp headroom of 3.2) | - | - |
+| 6 V | DC 1 V / 5 V | 43 / 60 | 21620 / 103759 | - | - | slope 20542 codes/V (ideal 20972) | **-2.05 %** |
+| 600 V | square 40 Hz | 1004.7 | 2085.7 | 4.7907 | **-0.33 %** | 4.7956 | -0.32 % |
+
+* The literal 0.5 % criterion with the channel on gain 1.0 is met only on
+  600 V. But the AC part (after the HPF) and the offset-corrected DC part
+  agree to ~0.1 % on every range, 1 V and 5 V DC give the same slope, and
+  the result is the same with the square at the calibrator's other
+  frequency settings: a constant per-range gain of the divider tap + OP2 x1
+  + AD3 (0.9795 / 0.9833 / 0.9967 for 6 / 60 / 600 V), the per-range V cal
+  the plan expected (3.3: "start with gain 1.0"), not a wrong node.
+* **LPF zero offset ~1080 codes** on Y (0 V and open leads, the same on 6 /
+  60 / 600 V, i.e. after the divider: ~5.15 mV at AD3) = a phantom V_dc of
+  0.052 / 0.515 / 5.15 V. It is not compensated: on the 40 Hz square the page
+  shows Vrms 7.062 V = hypot(4.728, 5.246), the true AC+DC rms is ~6.80 V
+  (+3.9 %); with the leads open Vrms 0.051 V on 6 V. The X LPF has its own
+  ~888 codes: the page's I = 8.9 uA with nothing in A is exactly that offset
+  (888 x 1.25 / 2^18 / 475 ohm on the 600 uA range), and V_dc x I_dc gives the
+  P = 0.047 mW. Both LPF zeros need subtracting (a zero at entry with the
+  inputs at rest, or a fixed per-unit constant). The LPF polarity was not
+  checked (no negative source).
+* Noise floor, sqrt(rms) of YY: 47 codes on 60 V (22 mV rms), 50 codes on 6 V
+  (2.4 mV), the same with 0 V (low impedance) and open leads; the stock AC V
+  floor is ~31 codes.
+
+POKE fallbacks (60 V, the square; each 3.5 s after the write; `POKE CLEAR` restored
+the default bit for bit):
+
+| override | sqrt(rms) | lpf | V (AC part) | verdict |
+|---|---|---|---|---|
+| none | 9916.9 | 11000 | 4.7288 | reference |
+| `14,8` + `15,129` (R2E 0x08, R2F 0x81) | 47.1 | 1090 | 0.022 | **kills the signal** (floor): the stock I row's R2E / R2F are required |
+| `21,68` (R35 0x44, AD3IN = RLU) | 9910.4 | 10825 | 4.7257 | same as SENSE (-0.07 %), LPF offset ~ -175 codes |
+| `21,116` (R35 0x74, PB5) | 9859.6 | 10864 | 4.7014 | -0.58 % |
+
+Keep the default row; no override fixes the gain (it is not a node problem).
+
+**T3 (zero current, 60 V, the square; `DBG:POW:DISC 0`, then the default 2).**
+`dt` 105 / 110 ms alternating (one 215 ms). With d = 0, `POW:CYC?` =
+`0,214,428`; with 2 `2,642,1284`.
+
+* YY right after an XY block: the first result equals the steady value
+  within 0.003 % (98.34 M +- 4 k); the switch contamination is a few k counts
+  absolute, invisible against 98 M. So no proportional block mixing: the R34
+  write appears to restart the block (or the result straddling it is clean).
+* XX right after XY (at the floor, steady `STAT XX` = 2200..2350): the 1st
+  and 2nd results are off and often negative (-5188, -969, -3129, 137; 1866,
+  -1758, 691, -898; impossible for a sum of squares = the mixed-block mark),
+  the 3rd matches (1920..2275). So **d = 2 is needed** at least at the floor;
+  whether the transient matters with a real current (XX >> 5 k) and for XY
+  is not assessable without current: keep `DISC_DEFAULT` = 2 until T3 with a
+  load. Side effect of d = 0: the garbage XX made the I autorange hunt (the X
+  LPF flipping 155 <-> 880 codes = shunt changes, 640 ms gaps = the 550 ms
+  settle). An artefact of d = 0 only; `DBG:POW:DISC 2` restored (persisted).
+
+**UI** (screenshots in the session scratchpad, `dev-pow/01..09`): power page
+on the square: AUTO RUN, aux 7.062 V / 8.95 uA, P 0.047 mW (synthesised W
+face), PF 0.742 (noise / offset ratio, meaningless at the floor) | S 0.06 mVA
+| Q 0.04 mvar | **F `-- Hz`** | Vb 0.000 V, Wh / VAh 0.0000, E RUN with the
+time, AVG, `60V 600uA`. **f is 0 in power mode** (FETC:POW:ALL? field 7 =
+0) while AC V on the same signal shows 40.00 Hz 50.0 %: the counter on SENSE
+does not run with the power row (the emulator shows f): open. Long press on
+the A button (DBG:DRAG hold 1.2 s) -> the wiring dialog (source / load, COM
+V A, "Max 10 A; above 5.0 A: 30 s"); OK -> `CONF? "POW AUTO,AUTO"`; the page
+stays empty (no value, no AUTO / RUN, the DC V side column) for a few
+seconds after the entry while the I channel walks down from 10 A (550 ms per
+range) - cosmetic. MF -> Power Settings (V / A ranges + AUTO, P + PF / VA
+only, Burden ON, Reset Wh, Wiring, OK); OK -> back to the page. CONF:VOLT:DC
+leaves (DC V AUTO+).
+
+Not done here (need current through A): T2 (PF, sign, phase cal), T4 DC
+power, T5 ranges, T6 burden, the limit countdown, XY / XX switch cost.
+Follow-ups for the build: per-range V gain (or a user V cal), LPF zero on X
+and Y, f in power mode.
+
 ---------------------------------------------------------------------------
 
 ## 4. Wrong-connection detection: what the signals allow

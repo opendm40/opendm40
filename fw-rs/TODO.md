@@ -487,6 +487,14 @@ Firmware:
       behind POW:METH / the page; long press on A or "Power W" on the Current page → wiring dialog; Power Settings
       page; SCPI CONF:POW / FETC:POW:ALL? / [SENS:]POW:…; DBG:POW:ROW?/POKE/STAT/RAW?/DISC. Emulator Power role
       + emu/hy3131/powtest.py (11 scenarios OK). (verify on device: T1, T2, T3 of doc §3.11, then T5/T6)
+      Device 2026-10-22 (7dce69f, calibrator on V-COM, A not wired; doc §3.11 "Device results"): T1 GO -
+      OP2 on SENSE linear, default row best (POKE 14/15 kills the signal, R35 0x44/0x74 no better), but raw
+      gain -2.05 % / -1.63 % / -0.33 % (6 / 60 / 600 V) -> 0.5 % only after a per-range gain; T3 at zero
+      current: YY clean from the 1st result, XX needs the 2 discards (keep DISC 2); UI dialog / settings OK.
+      T2, T3 with current, T4-T6 pending (need current through A).
+  - [ ] Device follow-ups (doc §3.11): per-range V gain (0.9795 / 0.9833 / 0.9967 on this unit) or the user V
+        cal below; LPF zero offsets not subtracted (Y ~1080 codes = 0.52 V phantom V_dc on 60 V, Vrms +3.9 % on a
+        square; X ~888 codes = the 8.9 uA shown with A open); f = 0 / "-- Hz" in power mode (AC V sees 40 Hz).
   - [ ] Not done: a user V-gain calibration (the OP2 / AD3 channel runs on gain 1.0), RESistive phase cal (flat
         optimum), BT protocol slot (BT reports the AC A byte), limits (W) in Hold & Limits, tap on P to cycle the
         main readout (P / S / PF / E); owner: the manual's fuse / CAT / 10 A time limit for the dialog defaults.
