@@ -775,6 +775,59 @@ fn csv(a: &[String], img: &mut Img) {
             println!("  changed blocks: {:?}", img.writes);
             return;
         }
+        "ival" => {
+            // ival <interval idx> <duration idx> <readings> [<push until ms>]:
+            // interval mode (Record page). Reading i at T0 + 100 i ms, value
+            // i, flags: i = 25 OL, 30..39 all OL, 42 HOLD, 43 REL, 44 HI,
+            // 45 LO; readings 60..69 left out (an interval with none). Then
+            // polls until the recording ends: by its duration, or a stop
+            // after the last reading when the duration is 0.
+            let (ii, di, n): (u8, u8, u32) = (a[4].parse().unwrap(), a[5].parse().unwrap(), a[6].parse().unwrap());
+            csvlog::set_next(ii, di);
+            assert_eq!(csvlog::next(), (ii, di));
+            assert!(csvlog::start("DC V", "V", "AUTO", T0));
+            let mut now = T0;
+            for i in 0..n {
+                now = T0 + 100 * i as u64;
+                if (60..70).contains(&i) {
+                    csvlog::poll_on(img, now);
+                    continue;
+                }
+                let mut f = 0u8;
+                if i == 25 || (30..40).contains(&i) {
+                    f |= csvlog::F_OL;
+                }
+                f |= match i {
+                    42 => csvlog::F_HOLD,
+                    43 => csvlog::F_REL,
+                    44 => csvlog::F_HI,
+                    45 => csvlog::F_LO,
+                    _ => 0,
+                };
+                csvlog::push(now, i as f32, f);
+                csvlog::poll_on(img, now);
+                if csvlog::status().state != csvlog::State::Recording {
+                    println!("  ended by its duration at reading {i}");
+                    break;
+                }
+            }
+            if di == 0 {
+                csvlog::stop();
+            }
+            let mut k = 0u64;
+            while csvlog::active() && k < 100_000_000 {
+                now += 10;
+                csvlog::poll_on(img, now);
+                k += 1;
+            }
+            let st = csvlog::status();
+            println!("ival={:?} file={:?} rows={} dropped={} end_ms={}", st.state, st.file, st.rows, st.dropped, now - T0);
+            match csvlog::free_bytes_on(img) {
+                Ok(f) => println!("free={f} est_1s={} est_every={} cap={}", csvlog::est_hours(f, 1000), csvlog::est_hours(f, 100), csvlog::EST_CAP_H),
+                Err(e) => println!("free={e:?}"),
+            }
+            return;
+        }
         "busydel" => {
             assert!(csvlog::start("DC V", "V", "AUTO", T0));
             for k in 0..20 {
