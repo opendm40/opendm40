@@ -13,6 +13,8 @@
 //!                                       system-memory files: every sector read through
 //!                                       read_block into <out> (created), twice (must be
 //!                                       equal); write_block / out-of-range reads refused;
+//!                                       logs <spi.img>: dlog::refresh over that SPI-disk
+//!                                       image (LOGnnn.DLG -> virtual LOGnnn.CSV);
 //!                                       extra: vdisk::set_extra with n files LOGnnn.CSV of
 //!                                       size * (i + 1) bytes, contents extra_byte(i, off)
 //!   main <image> shot                   screenshot::take_on with the synthetic screen
@@ -152,6 +154,9 @@ mod screenshot;
 #[path = "../../src/scope_csv.rs"]
 mod scope_csv;
 
+#[path = "../../src/dlog.rs"]
+mod dlog;
+
 #[path = "../../src/csvlog.rs"]
 #[allow(dead_code)]
 mod csvlog;
@@ -181,6 +186,19 @@ fn mem_read(addr: u32, buf: &mut [u8]) {
 }
 
 /// Contents of the synthetic extra file `arg` (run.sh recomputes it).
+/// The SPI-disk image behind dlog's reader (vdisk ... logs <img>).
+static SPI: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+
+fn spi_read(addr: u32, buf: &mut [u8]) -> bool {
+    let d = SPI.get().unwrap();
+    let o = addr as usize;
+    if o + buf.len() > d.len() {
+        return false;
+    }
+    buf.copy_from_slice(&d[o..o + buf.len()]);
+    true
+}
+
 fn extra_read(arg: u32, off: u32, buf: &mut [u8]) {
     for (i, b) in buf.iter_mut().enumerate() {
         *b = b"0123456789,\n"[(arg as usize * 5 + off as usize + i) % 12];
@@ -212,6 +230,14 @@ fn vdisk_dump(a: &[String]) {
             .collect();
         println!("set_extra taken={}", vdisk::set_extra(&x));
         println!("media_changed={} again={}", d.take_media_changed(), d.take_media_changed());
+    }
+    if a.get(7).map(|s| s.as_str()) == Some("logs") {
+        // The binary logs of a SPI-disk image as virtual CSV files (dlog.rs
+        // refresh -> vdisk::set_extra), as the device's main loop does.
+        SPI.set(fs::read(&a[8]).unwrap()).unwrap();
+        dlog::set_disk(spi_read);
+        println!("logs taken={} stale={}", dlog::refresh(None), dlog::stale());
+        println!("media_changed={}", d.take_media_changed());
     }
     let n = d.block_count();
     let bs = d.block_size() as usize;
@@ -577,7 +603,7 @@ fn csv(a: &[String], img: &mut Img) {
             }
             let st = csvlog::status();
             let mut b = [0u8; 12];
-            let name = calbackup::numbered_name(b"LOG", st.file.expect("file"), b"CSV");
+            let name = calbackup::numbered_name(b"LOG", st.file.expect("file"), b"DLG");
             println!("busydel {} -> {:?}", csvlog::name_str(&name, &mut b), csvlog::delete_on(img, &name));
             csvlog::stop();
             for k in 0..20 {

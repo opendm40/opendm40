@@ -1,9 +1,15 @@
-//! CSV recording of DMM readings to the SPI-flash USB disk (TODO "CSV-to-disk
-//! recording", FR-35, UF-32) and the file-gallery backend (FR-16).
+//! Recording of DMM readings to the SPI-flash USB disk (TODO "CSV-to-disk
+//! recording", FR-35, UF-32; "Compact binary logs (DLG)") and the
+//! file-gallery backend (FR-16).
 //!
-//! File: the next free `LOG%03u.CSV` in the root (lowest unused number, as
-//! the screenshots; the FAT code has no subdirectory support). Content, CRLF
-//! line ends, '.' decimal point, ASCII only:
+//! File: the next free `LOG%03u.DLG` in the root (lowest number used by
+//! neither a LOG%03u.DLG nor a legacy LOG%03u.CSV, as the screenshots; the
+//! FAT code has no subdirectory support), in the compact binary format of
+//! dlog.rs (docs/compact-log-format.md): ~1.1..1.9 bytes per reading instead
+//! of ~21, CRC-protected chunks, one per commit. The CSV exists only on read
+//! (virtual LOG%03u.CSV on the read-only LUN 1, SCPI MMEM:DATA?,
+//! tools/dlog.py) and is byte for byte what this module wrote before DLG:
+//! CRLF line ends, '.' decimal point, ASCII only:
 //!   # Alientek DM40A, fw-rs 0.1.0, function DC V, range AUTO, started uptime 12.345 s
 //!   # time_s = seconds since the start of this recording (no real-time clock); empty value = overload
 //!   time_s,value,unit,flags
@@ -31,7 +37,10 @@
 //! programmed across a main-loop pass, where a power-off, a reset or a host
 //! READ could see it (review 258c833 H1, as screenshot.rs).
 //!
-//! RAM: rows are formatted into FIFO (8 KiB ring, native) as they arrive; the
+//! RAM: rows are coded into FIFO (8 KiB ring, native) as they arrive (the
+//! file header at `start`, then per chunk a CHDR-byte header placeholder
+//! and the coded rows; the chunk is closed and its header + CRC patched in
+//! the ring when a commit starts); the
 //! file's last, partially filled 4 KiB block lives in TAIL. A flush ("commit")
 //! moves the FIFO into TAIL block by block and writes it, in this order:
 //!   Data  TAIL to its block (`write_step`); a full TAIL moves on to the next
@@ -57,8 +66,8 @@
 //! when TAIL fills (one block; on this disk 1 cluster = 1 block, so the chain
 //! grows by one cluster per commit), every COMMIT_MS with new rows, when FIFO
 //! is 3/4 full, and at `stop`. Root-block wear: one erase per commit, i.e. at
-//! ~30 bytes per row one per 4 KiB (~2 min at 1 reading/s, ~14 s at 10/s) or
-//! per minute, whichever is first: ~1500..6000 a day of continuous logging
+//! ~1.2 bytes per row one per 4 KiB (~1 h at 1 reading/s, ~6 min at 10/s) or
+//! per minute, whichever is first: ~1440 a day of continuous logging
 //! against the W25Q128's 100k cycles. FAT block: one erase per copy per
 //! commit that adds a cluster. Power-loss window: rows not yet committed (at
 //! most COMMIT_MS or one block of rows).
@@ -105,6 +114,7 @@
 use core::sync::atomic::Ordering;
 
 use crate::calbackup;
+use crate::dlog;
 use crate::fatren::{le16, le32, parse_bpb, Vol};
 use crate::msc::{BlockDevice, Step};
 
@@ -147,7 +157,6 @@ pub const F_REL: u8 = 2;
 pub const F_HOLD: u8 = 4;
 pub const F_HI: u8 = 8;
 pub const F_LO: u8 = 16;
-const FLAG_TXT: [(u8, &str); 5] = [(F_OL, "OL"), (F_REL, "REL"), (F_HOLD, "HOLD"), (F_HI, "HI"), (F_LO, "LO")];
 
 /// Recorder state (`status().state`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -171,11 +180,11 @@ pub enum State {
 #[derive(Clone, Copy, Debug)]
 pub struct Status {
     pub state: State,
-    /// LOG%03u.CSV number, once chosen (first commit).
+    /// LOG%03u.DLG number, once chosen (first commit).
     pub file: Option<u16>,
     /// Rows accepted (dropped ones not counted).
     pub rows: u32,
-    /// File bytes accepted (header included), committed or pending.
+    /// File (DLG) bytes accepted (header included), committed or pending.
     pub bytes: u32,
     /// File size on the disk (directory entry).
     pub committed: u32,
@@ -247,6 +256,9 @@ struct Job {
     now: u64,
     unit: [u8; 12],
     ulen: usize,
+    /// Chunk coder; FIFO index of the open chunk's header placeholder.
+    enc: dlog::Enc,
+    hpos: u32,
 }
 
 const JOB0: Job = Job {
@@ -292,6 +304,8 @@ const JOB0: Job = Job {
     now: 0,
     unit: [0; 12],
     ulen: 0,
+    enc: dlog::ENC0,
+    hpos: 0,
 };
 
 static mut JOB: Job = JOB0;
@@ -345,7 +359,11 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     w.s(" s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overload\r\n");
     w.s("time_s,value,unit,flags\r\n");
     let n = w.n;
-    j.put(&h[..n]);
+    let mut f = [0u8; dlog::FHDR + 384];
+    let u = j.unit;
+    let fl = dlog::file_header(dlog::KIND_DMM, &u[..j.ulen], &h[..n], &mut f);
+    j.put(&f[..fl]);
+    j.enc = dlog::Enc::new(n);
     set_flags(true, false);
     unsafe { *core::ptr::addr_of_mut!(RESULT) = None };
     true
@@ -359,36 +377,29 @@ pub fn push(t_ms: u64, value: f32, flags: u8) {
     if j.state != State::Recording || j.stopping {
         return;
     }
-    let mut row = [0u8; 96];
-    let mut w = W { b: &mut row, n: 0 };
-    w.ms(t_ms.saturating_sub(j.t0_ms));
-    w.c(b',');
-    if flags & F_OL == 0 && value.is_finite() {
-        w.num(value);
-    }
-    w.c(b',');
+    // The CSV row's length (the chunk header carries the CSV length), then
+    // the coded row; all or nothing (a full FIFO drops it, the next row that
+    // fits carries GAP).
+    let t = t_ms.saturating_sub(j.t0_ms);
+    let fl = (flags & 31) | if j.gap { dlog::F_GAP } else { 0 };
+    let v = dlog::dec6(value);
     let u = j.unit;
-    w.bytes(&u[..j.ulen]);
-    w.c(b',');
-    let mut sep = false;
-    let mut tok = |w: &mut W, t: &str| {
-        if sep {
-            w.c(b' ');
+    let mut row = [0u8; dlog::ROW_MAX];
+    let len = dlog::fmt_row(t, v, &u[..j.ulen], fl, &mut row);
+    let mut e = j.enc;
+    let opening = !e.open;
+    let mut b = [0u8; dlog::ROW_BYTES];
+    let k = e.row(t as u32, v, fl, len as u32, &mut b);
+    // Room for the chunk header (a new chunk) and the close's pad byte.
+    let need = k + if opening { dlog::CHDR } else { 0 } + 1;
+    let used = j.fh.wrapping_sub(j.ft) as usize;
+    if FIFO - used >= need {
+        if opening {
+            j.hpos = j.fh;
+            j.put(&[0u8; dlog::CHDR]);
         }
-        w.s(t);
-        sep = true;
-    };
-    for (bit, t) in FLAG_TXT {
-        if flags & bit != 0 {
-            tok(&mut w, t);
-        }
-    }
-    if j.gap {
-        tok(&mut w, "GAP");
-    }
-    w.s("\r\n");
-    let n = w.n;
-    if j.put(&row[..n]) {
+        j.put(&b[..k]);
+        j.enc = e;
         j.rows += 1;
         j.gap = false;
     } else {
@@ -410,6 +421,12 @@ pub fn stop() {
 /// A recording is active (recording or stopping): show REC.
 pub fn active() -> bool {
     matches!(job().state, State::Recording | State::Stopping)
+}
+
+/// The 8.3 name of the file being recorded (once it exists).
+pub fn recording_name() -> Option<[u8; 11]> {
+    let j = job();
+    (active() && j.has_file).then(|| calbackup::numbered_name(b"LOG", j.n, b"DLG"))
 }
 
 /// A commit is writing the disk right now.
@@ -474,6 +491,7 @@ pub fn poll_on(disk: &mut dyn BlockDevice, now_ms: u64) {
             || j.stopping
             || j.tfill + pending >= BLK as u32
             || pending >= (FIFO as u32 / 4) * 3
+            || j.enc.nrows >= 60_000
             || now_ms.saturating_sub(j.last_commit) >= COMMIT_MS;
         if pending == 0 {
             if j.stopping {
@@ -499,7 +517,8 @@ pub fn poll_on(disk: &mut dyn BlockDevice, now_ms: u64) {
             j.finish(State::NoDisk);
             return;
         }
-        j.tx_left = pending;
+        j.close_chunk();
+        j.tx_left = j.fh.wrapping_sub(j.ft);
         j.cur = NONE; // scratch[1] was free for others since the last commit
         j.phase = if j.v.is_none() { Phase::Bpb } else { Phase::Data };
         set_flags(true, true);
@@ -519,6 +538,31 @@ pub fn poll_on(disk: &mut dyn BlockDevice, now_ms: u64) {
 }
 
 impl Job {
+    /// Close the open chunk (if any): pad byte, header with CRC patched
+    /// into its placeholder in FIFO (not flushed yet: a commit takes FIFO
+    /// only after this).
+    fn close_chunk(&mut self) {
+        if !self.enc.open {
+            return;
+        }
+        let mut b = [0u8; 1];
+        let n = self.enc.close(&mut b);
+        // Room for it was reserved by push.
+        let _ = self.put(&b[..n]);
+        let mut h = self.enc.header();
+        let f = fifo();
+        let mut c = dlog::crc32_upd(!0, &h[8..]);
+        let mut i = self.hpos.wrapping_add(dlog::CHDR as u32);
+        while i != self.fh {
+            c = dlog::crc32_upd(c, &[f[i as usize % FIFO]]);
+            i = i.wrapping_add(1);
+        }
+        h[4..8].copy_from_slice(&(!c).to_le_bytes());
+        for (k, &x) in h.iter().enumerate() {
+            f[self.hpos.wrapping_add(k as u32) as usize % FIFO] = x;
+        }
+    }
+
     /// Append bytes to FIFO, all or nothing.
     fn put(&mut self, b: &[u8]) -> bool {
         let used = self.fh.wrapping_sub(self.ft) as usize;
@@ -538,6 +582,9 @@ impl Job {
         self.phase = Phase::None;
         self.state = s;
         set_flags(false, false);
+        // A finished LOG%03u.DLG appears as LOG%03u.CSV on LUN 1.
+        #[cfg(feature = "vdisk")]
+        dlog::set_stale();
         if self.wrote {
             crate::screenshot::MEDIUM_CHANGED.store(true, Ordering::Relaxed);
         }
@@ -582,7 +629,8 @@ impl Job {
         None
     }
 
-    /// One root block: LOG%03u.CSV numbers in use, the first free slot.
+    /// One root block: LOG%03u numbers in use (.DLG or a legacy .CSV), the
+    /// first free slot.
     fn root(&mut self, disk: &mut dyn BlockDevice) -> Option<State> {
         let v = self.vol();
         let buf = &mut calbackup::scratch()[0];
@@ -611,7 +659,9 @@ impl Job {
                 continue;
             }
             let n = (e[3] - b'0') as u16 * 100 + (e[4] - b'0') as u16 * 10 + (e[5] - b'0') as u16;
-            if crate::fatren::sfn_is(e, &calbackup::numbered_name(b"LOG", n, b"CSV")) {
+            if crate::fatren::sfn_is(e, &calbackup::numbered_name(b"LOG", n, b"DLG"))
+                || crate::fatren::sfn_is(e, &calbackup::numbered_name(b"LOG", n, b"CSV"))
+            {
                 self.taken[(n / 32) as usize] |= 1 << (n % 32);
             }
         }
@@ -734,14 +784,12 @@ impl Job {
             }
         }
         if self.scanned >= v.clusters {
-            // Disk full: commit what is written up to its last whole row
-            // (TAIL = the last, full block), then stop.
+            // Disk full: commit what is written (TAIL = the last, full
+            // block), then stop. The chunk cut there is a torn tail: the
+            // readers (dlog.rs, dlog.py) skip it, every whole chunk before
+            // it stays readable.
             self.full = true;
             self.tx_left = 0;
-            if self.tfill == BLK as u32 {
-                let p = tail().iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1);
-                self.size = self.tb * BLK as u32 + p as u32;
-            }
             self.phase = if self.nnew > 0 { self.fat_begin() } else { Phase::Dir };
         }
         None
@@ -843,7 +891,7 @@ impl Job {
                 return Some(State::Error);
             }
             let o = ((self.slot % PER) * 32) as usize;
-            let name = calbackup::numbered_name(b"LOG", self.n, b"CSV");
+            let name = calbackup::numbered_name(b"LOG", self.n, b"DLG");
             let e = &mut buf[o..o + 32];
             let ok = if self.has_file {
                 e[..11] == name[..] && le16(e, 0x1A) == self.first && le32(e, 0x1C) == self.csize
@@ -935,75 +983,6 @@ impl W<'_> {
         self.c(b'0' + (r / 10 % 10) as u8);
         self.c(b'0' + (r % 10) as u8);
     }
-    /// 6 significant digits: plain for 1e-3 <= |v| < 1e6, else d.dddddE+xx.
-    fn num(&mut self, v: f32) {
-        if v < 0.0 {
-            self.c(b'-');
-        }
-        let x = if v < 0.0 { -v } else { v };
-        if x < 1e-30 {
-            self.c(b'0');
-            return;
-        }
-        // Decimal exponent: p10(e) <= x < p10(e + 1); one rounding step for
-        // the mantissa (m = 100000..999999).
-        let mut e = P10_MIN;
-        while e < P10_MAX && p10(e + 1) <= x {
-            e += 1;
-        }
-        let f = if e - 5 >= P10_MIN { x / p10(e - 5) } else { x / p10(e) * 1e5 };
-        let mut m = (f + 0.5) as u32;
-        if m >= 1_000_000 {
-            m /= 10;
-            e += 1;
-        }
-        let m = m.clamp(100_000, 999_999);
-        let mut dg = [0u8; 6];
-        let mut t = m;
-        for i in (0..6).rev() {
-            dg[i] = b'0' + (t % 10) as u8;
-            t /= 10;
-        }
-        if (-3..6).contains(&e) {
-            if e < 0 {
-                self.s("0.");
-                for _ in 0..(-e - 1) {
-                    self.c(b'0');
-                }
-                self.bytes(&dg);
-            } else {
-                let ip = (e + 1) as usize;
-                self.bytes(&dg[..ip]);
-                if ip < 6 {
-                    self.c(b'.');
-                    self.bytes(&dg[ip..]);
-                }
-            }
-        } else {
-            self.c(dg[0]);
-            self.c(b'.');
-            self.bytes(&dg[1..]);
-            self.c(b'E');
-            self.c(if e < 0 { b'-' } else { b'+' });
-            let a = e.unsigned_abs();
-            if a < 10 {
-                self.c(b'0');
-            }
-            self.u(a as u64);
-        }
-    }
-}
-
-const P10_MIN: i32 = -30;
-const P10_MAX: i32 = 30;
-const P10: [f32; 61] = [
-    1e-30, 1e-29, 1e-28, 1e-27, 1e-26, 1e-25, 1e-24, 1e-23, 1e-22, 1e-21, 1e-20, 1e-19, 1e-18, 1e-17, 1e-16, 1e-15, 1e-14, 1e-13,
-    1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9,
-    1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22, 1e23, 1e24, 1e25, 1e26, 1e27, 1e28, 1e29, 1e30,
-];
-
-fn p10(e: i32) -> f32 {
-    P10[(e.clamp(P10_MIN, P10_MAX) - P10_MIN) as usize]
 }
 
 /// ASCII copy of `s` (transliterating the meter's symbols, no ',' '"' or
@@ -1108,8 +1087,11 @@ fn kind_of_name(e: &[u8]) -> Option<Kind> {
     let ext = [up(e[8]), up(e[9]), up(e[10])];
     if up(e[0]) == b'S' && &ext == b"BMP" {
         Some(Kind::Bmp)
-    } else if &ext == b"CSV" && ((up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G') || e[..4].iter().map(|&c| up(c)).eq(*b"SCOP")) {
-        // LOG*.CSV (DMM recordings) and SCOP*.CSV (scope records, UF-13).
+    } else if (&ext == b"CSV" || &ext == b"DLG")
+        && ((up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G') || e[..4].iter().map(|&c| up(c)).eq(*b"SCOP"))
+    {
+        // LOG*.CSV (DMM recordings) and SCOP*.CSV (scope records, UF-13),
+        // as text (legacy) or as compact binary logs (.DLG, dlog.rs).
         Some(Kind::Csv)
     } else {
         None
@@ -1176,7 +1158,7 @@ fn for_each_file(disk: &mut dyn BlockDevice, f: &mut dyn FnMut(&FileInfo)) -> Re
 }
 
 /// SCPI MMEMory:CATalog? reply into `out`: `<used>,<free>{,"<name>,<type>,<size>"}`
-/// (bytes; type BIN for a BMP, ASC for a CSV; gallery files only). Entries
+/// (bytes; type BIN for a BMP or a DLG log, ASC for a CSV; gallery files only). Entries
 /// that do not fit are left out. Returns the length.
 pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usize, GErr> {
     // The two numbers first need the free count, known only after the scan:
@@ -1193,7 +1175,7 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
         let mut t = W { b: &mut e, n: 0 };
         t.s(",\"");
         t.s(name_str(&f.name, &mut nb));
-        t.s(if f.kind == Kind::Bmp { ",BIN," } else { ",ASC," });
+        t.s(if f.kind == Kind::Bmp || f.name[8..].eq_ignore_ascii_case(b"DLG") { ",BIN," } else { ",ASC," });
         t.u(f.size as u64);
         t.c(b'"');
         let n = t.n;
@@ -1255,7 +1237,7 @@ pub fn delete_on(disk: &mut dyn BlockDevice, name: &[u8; 11]) -> Result<(), GErr
         return Err(GErr::Busy);
     }
     let j = job();
-    if active() && j.has_file && *name == calbackup::numbered_name(b"LOG", j.n, b"CSV") {
+    if active() && j.has_file && *name == calbackup::numbered_name(b"LOG", j.n, b"DLG") {
         return Err(GErr::Busy);
     }
     let v = gallery_vol(disk)?;
@@ -1327,6 +1309,8 @@ pub fn delete_on(disk: &mut dyn BlockDevice, name: &[u8; 11]) -> Result<(), GErr
         }
     }
     crate::screenshot::MEDIUM_CHANGED.store(true, Ordering::Relaxed);
+    #[cfg(feature = "vdisk")]
+    dlog::set_stale();
     let (ok, _) = crate::fatren::free_chain(disk, &v, start, fat1, buf, tmp);
     if ok {
         Ok(())

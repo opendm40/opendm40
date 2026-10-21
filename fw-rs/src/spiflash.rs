@@ -258,6 +258,17 @@ fn read(addr: u32, buf: &mut [u8]) {
 }
 
 impl SpiFlash {
+    /// Raw bytes at flash address `addr` (any length; dlog.rs reads the
+    /// binary logs for the CSV export without a 4 KiB block buffer). Waits
+    /// for a running erase / program first, as `read_block`.
+    pub fn read_at(&mut self, addr: u32, buf: &mut [u8]) -> bool {
+        if addr as u64 + buf.len() as u64 > self.blocks as u64 * SECTOR as u64 || (!self.failed && !self.wait_ready()) {
+            return false;
+        }
+        read(addr, buf);
+        true
+    }
+
     /// Set up the pins and SPI1 and identify the chip. A missing or unknown
     /// chip leaves the medium absent rather than showing 0xFF garbage.
     pub fn new() -> Self {

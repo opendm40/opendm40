@@ -58,27 +58,33 @@
 #      shot's lost clusters / FAT 1 ahead; a host-mounted disk refuses the shot.
 # Untracked inputs (device dumps, dm40_v_2_6.bin, a native build) are used when
 # present, else synthetic stand-ins of the same sizes (noted in the log).
-# csvlog (src/csvlog.rs non-blocking CSV recorder, driven pass by pass; rows
-# from main.rs row(i): 100 ms apart, values 1e-9..1e4, OL/REL/HOLD/HI/LO):
-#   13. long recording, 3000 rows = 76 KB over 19 clusters: LOG000.CSV, fsck
-#      clean, every row checked by Python's csv module; NOR model: every data
-#      block erased once (appends are program-only), one root erase per commit;
+# csvlog (src/csvlog.rs non-blocking recorder of compact binary logs, DLG,
+# src/dlog.rs; driven pass by pass; rows from main.rs row(i): 100 ms apart,
+# values 1e-9..1e4, OL/REL/HOLD/HI/LO). Every check decodes the LOGnnn.DLG
+# with tools/dlog.py and validates the CSV:
+#   13. long recording, 3000 rows = 25.5 KB over 7 clusters (the old CSV:
+#      76 KB): LOG000.DLG, fsck clean, every row checked by Python's csv
+#      module, the decoded CSV byte-identical to the old writer's LOG000.CSV
+#      (md5); NOR model: every data block erased once (appends are
+#      program-only), one root erase per commit; then LUN 1 (vdisk.rs
+#      set_extra via dlog::refresh): LOG000.CSV / LOG001.CSV == dlog.py;
 #   14. interleaved with three screenshots (one started while a commit runs):
 #      both BMPs pixel-exact, the CSV complete, no commit started during a shot;
 #   15. host write in progress (HOST_WRITING) for 120 rows: no block written
-#      meanwhile, nothing dropped; for 600 rows: FIFO overflow -> rows dropped,
+#      meanwhile, nothing dropped; for 1200 rows: FIFO overflow -> rows dropped,
 #      the next row flagged GAP, file consistent;
 #   15b. a PC mounts the disk mid-recording (msc::host_mounted, review 3443cea
 #      H1): no block written while mounted although the same window unmounted
-#      holds commits; 15 s: nothing dropped; 60 s: rows dropped, GAP, file
+#      holds commits; 50 s: nothing dropped; 120 s: rows dropped, GAP, file
 #      consistent;
 #   16. power cut before every block write of a 1500-row recording (and a
 #      program-only write cut half way): fsck finds at most a lost cluster, a
 #      LOG chain longer than its size (truncated) or FAT 1 ahead of FAT 2;
-#      the committed CSV is always a clean prefix; CONFIG.BIN untouched;
+#      the committed log always decodes to a clean prefix; CONFIG.BIN untouched;
 #      Also with the chain crossing the FAT 1 block boundary (2047 -> 2048:
 #      the new entry in block 1 first, the link in block 0 last);
-#   17. nearly full disk (5 free clusters): recording ends Full, file valid;
+#   17. nearly full disk (5 free clusters): recording ends Full, file valid
+#      (the chunk cut at the end of the disk is a torn tail the reader skips);
 #   18. gallery: list (names, sizes vs mdir, free bytes), MMEM:CAT? text,
 #      delete LOG / BMP / a long-named LOG_WI~1.CSV (LFN entries removed),
 #      fsck clean; a delete between two commits of a recording; deleting the
@@ -89,7 +95,7 @@ cd "$(dirname "$0")"
 RUSTUP_HOME="$(cd ../../../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../../../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
 W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT
-rustc --edition 2021 -O --cfg 'feature="recovery-file"' main.rs -o "$W/t"
+rustc --edition 2021 -O --cfg 'feature="recovery-file"' --cfg 'feature="vdisk"' main.rs -o "$W/t"
 export MTOOLS_SKIP_CHECK=1
 mkimg() {
     dd if=/dev/zero of=$1 bs=1M count=16 status=none
@@ -638,10 +644,14 @@ cp $W/cutbase.img $W/cut.img
 grep -q "start=false busy=false changed blocks: \[\]" $W/sm && echo "ok: host has the disk mounted: shot refused, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
 
 echo "=== csvlog"
-# csvok <img> <name> <rows> <full|prefix|gap>: header, columns, every row
-# recomputed (row(i) in main.rs) through Python's csv module.
+# csvok <img> <name> <rows> <full|prefix|gap>: the binary log <name>
+# (LOGnnn.DLG) decoded to CSV by tools/dlog.py (a torn tail chunk is
+# skipped), then header, columns, every row recomputed (row(i) in main.rs)
+# through Python's csv module.
 csvok() {
-    mcopy -n -i $1 ::$2 $W/log.csv || { echo "FAIL: no $2"; exit 1; }
+    mcopy -n -i $1 ::$2 $W/log.dlg || { echo "FAIL: no $2"; exit 1; }
+    python3 -I ../dlog.py $W/log.dlg -o $W/log.csv 2>$W/dlog.err || { cat $W/dlog.err; echo "FAIL: $2 does not decode"; exit 1; }
+    if [ "$4" != prefix ] && [ -s $W/dlog.err ]; then cat $W/dlog.err; echo "FAIL: $2 has a torn / bad chunk"; exit 1; fi
     python3 -I - $W/log.csv $3 $4 <<'PY' || { echo "FAIL: $2 content"; exit 1; }
 import csv, re, sys
 path, n, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]
@@ -694,7 +704,7 @@ cutok() {
     local rc=0
     fsck.fat -n $1 > $W/fsck.out 2>&1 || rc=$?
     [ $rc -le 1 ] || { cat $W/fsck.out; echo "FAIL: fsck rc=$rc"; exit 1; }   # 1 = findings, checked below
-    if grep -vE "^fsck.fat|files, .*clusters|^$|Leaving filesystem unchanged|FATs differ but appear to be intact|Using first FAT|Reclaimed [0-9]+ unused clusters?|^/LOG[0-9]{3}\.CSV$|File size is [0-9]+ bytes, cluster chain length is > [0-9]+ bytes|Truncating file to [0-9]+ bytes" $W/fsck.out | grep -q .; then
+    if grep -vE "^fsck.fat|files, .*clusters|^$|Leaving filesystem unchanged|FATs differ but appear to be intact|Using first FAT|Reclaimed [0-9]+ unused clusters?|^/LOG[0-9]{3}\.DLG$|File size is [0-9]+ bytes, cluster chain length is > [0-9]+ bytes|Truncating file to [0-9]+ bytes" $W/fsck.out | grep -q .; then
         cat $W/fsck.out; echo "FAIL: unexpected fsck finding ${CUTK:-}"; exit 1
     fi
 }
@@ -703,27 +713,44 @@ mkimg $IMGC
 mcopy -i $IMGC $W/keep.bin ::CONFIG.BIN
 cp $IMGC $W/csvbase.img
 "$W/t" $IMGC csv rec 3000 | tee $W/c1
-grep -q "csv=Done file=Some(0) rows=3000 bytes=76028 committed=76028 dropped=0 medium_changed=true result=true" $W/c1 && echo "ok: 3000 rows recorded and committed as LOG000.CSV" || { echo "FAIL at line $LINENO"; exit 1; }
-grep -q "LOG:CSV? -> 3,0,3000,76028,76028,0" $W/c1 && echo "ok: LOG:CSV? reply" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "csv=Done file=Some(0) rows=3000 bytes=25520 committed=25520 dropped=0 medium_changed=true result=true" $W/c1 && echo "ok: 3000 rows recorded and committed as LOG000.DLG" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "LOG:CSV? -> 3,0,3000,25520,25520,0" $W/c1 && echo "ok: LOG:CSV? reply" || { echo "FAIL at line $LINENO"; exit 1; }
 grep -q "session_flag=false" $W/c1 && grep -q "data_max_per_block=1 " $W/c1 && echo "ok: host writes allowed again; no data block erased twice (tail rewrites program-only)" || { echo "FAIL at line $LINENO"; exit 1; }
-grep -q "erases: fat=38 root=20 data=19" $W/c1 && echo "ok: 20 commits = 20 root erases, 19 clusters = 2 x 19 FAT erases" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "erases: fat=14 root=8 data=7" $W/c1 && echo "ok: 8 commits = 8 root erases, 7 clusters = 2 x 7 FAT erases" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGC
-csvok $IMGC LOG000.CSV 3000 full
-[ "$(mdir -i $IMGC :: | grep LOG000 | awk '{print $3}')" = 76028 ] && echo "ok: directory size 76028" || { echo "FAIL at line $LINENO"; exit 1; }
+csvok $IMGC LOG000.DLG 3000 full
+# The pre-DLG writer's LOG000.CSV of the same 3000 push() calls (76028 bytes,
+# commit 5a0dd55's csvlog.rs): the decoded CSV is byte-identical.
+[ "$(md5sum < $W/log.csv | cut -c1-32)" = bf3b94db37e0b9c57d7d34479af4661a ] && [ $(stat -c%s $W/log.csv) = 76028 ] && echo "ok: decoded CSV == the old CSV writer's file, byte for byte (76028 bytes from 25520: 3.0x on this worst-case decade sweep)" || { echo "FAIL at line $LINENO"; exit 1; }
+[ "$(mdir -i $IMGC :: | grep LOG000 | awk '{print $3}')" = 25520 ] && echo "ok: directory size 25520" || { echo "FAIL at line $LINENO"; exit 1; }
 mcopy -n -i $IMGC ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.BIN untouched" || { echo "FAIL at line $LINENO"; exit 1; }
-"$W/t" $IMGC csv rec 50 | grep -q "csv=Done file=Some(1) rows=50" && echo "ok: next recording is LOG001.CSV" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGC csv rec 50 | grep -q "csv=Done file=Some(1) rows=50" && echo "ok: next recording is LOG001.DLG" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGC
-csvok $IMGC LOG001.CSV 50 full
-csvok $IMGC LOG000.CSV 3000 full
+csvok $IMGC LOG001.DLG 50 full
+csvok $IMGC LOG000.DLG 3000 full
+
+echo "--- LUN 1: the binary logs as virtual CSV files (dlog::refresh -> vdisk::set_extra)"
+cp $IMGC $W/logs.img
+mcopy -i $W/logs.img $W/keep.bin ::LOG002.DLG          # not a DLG file: left out
+vdisk $W/f1m_native $VD logs $W/logs.img
+grep -q "logs taken=2 stale=false" $W/vd.out && grep -q "media_changed=true" $W/vd.out && echo "ok: LOG000.CSV + LOG001.CSV published, a foreign LOG002.DLG skipped, media change raised" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $VD
+for n in 000 001; do
+    mcopy -n -i $W/logs.img ::LOG$n.DLG $W/l.dlg
+    python3 -I ../dlog.py $W/l.dlg -o $W/l.csv
+    mcopy -n -i $VD ::LOG$n.CSV $W/v.csv
+    cmp $W/l.csv $W/v.csv || { echo "FAIL: LUN-1 LOG$n.CSV != dlog.py"; exit 1; }
+done
+[ "$(mcopy -n -i $VD ::LOG000.CSV - | md5sum | cut -c1-32)" = bf3b94db37e0b9c57d7d34479af4661a ] && echo "ok: LUN-1 LOG000.CSV / LOG001.CSV == dlog.py output; LOG000.CSV == the old writer's file" || { echo "FAIL at line $LINENO"; exit 1; }
 
 echo "--- interleaved with screenshots"
 IMGS=$W/disks.img
 cp $W/csvbase.img $IMGS
 "$W/t" $IMGS csv rec 3000 shot 10 shotw 1000 shot 2400 | tee $W/c2
-grep -q "csv=Done file=Some(0) rows=3000 bytes=76028 committed=76028 dropped=0" $W/c2 && grep -q "shots=\[Saved(0), Saved(1), Saved(2)\]" $W/c2 && grep -q "lock_ok=true" $W/c2 && echo "ok: three screenshots during the recording, no commit started during a shot" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -qE "csv=Done file=Some\(0\) rows=3000 bytes=([0-9]+) committed=\1 dropped=0" $W/c2 && grep -q "shots=\[Saved(0), Saved(1), Saved(2)\]" $W/c2 && grep -q "lock_ok=true" $W/c2 && echo "ok: three screenshots during the recording, no commit started during a shot" || { echo "FAIL at line $LINENO"; exit 1; }
 grep -q "during a commit: true" $W/c2 && grep -qE "shot_waits=[1-9]" $W/c2 && echo "ok: a shot started during a commit waited for it before its FAT scan" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
-csvok $IMGS LOG000.CSV 3000 full
+csvok $IMGS LOG000.DLG 3000 full
 bmpok $IMGS S000.BMP
 bmpok $IMGS S001.BMP
 bmpok $IMGS S002.BMP
@@ -734,28 +761,28 @@ cp $W/csvbase.img $IMGH
 "$W/t" $IMGH csv rec 2000 host 300 120 | tee $W/c3
 grep -q "csv=Done file=Some(0) rows=2000 .* dropped=0" $W/c3 && grep -q "host_writes=0 " $W/c3 && echo "ok: 12 s host write: no block written meanwhile, nothing dropped" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGH
-csvok $IMGH LOG000.CSV 2000 full
+csvok $IMGH LOG000.DLG 2000 full
 cp $W/csvbase.img $IMGH
-"$W/t" $IMGH csv rec 2000 host 300 600 | tee $W/c4
-grep -q "csv=Done file=Some(0) .* dropped=[1-9]" $W/c4 && grep -q "host_writes=0 " $W/c4 && echo "ok: 60 s host write: FIFO overflow, rows dropped and counted, nothing written meanwhile" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGH csv rec 2000 host 300 1200 | tee $W/c4
+grep -q "csv=Done file=Some(0) .* dropped=[1-9]" $W/c4 && grep -q "host_writes=0 " $W/c4 && echo "ok: 120 s host write (the 8 KiB FIFO holds ~960 rows of compact log here, ~2 min): FIFO overflow, rows dropped and counted, nothing written meanwhile" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGH
-csvok $IMGH LOG000.CSV 2000 gap | tee $W/c4p
+csvok $IMGH LOG000.DLG 2000 gap | tee $W/c4p
 grep -qE "[1-9][0-9]* skipped" $W/c4p && echo "ok: the row after the gap carries GAP" || { echo "FAIL at line $LINENO"; exit 1; }
 
 echo "--- PC mounts the disk mid-recording (commits deferred)"
 cp $W/csvbase.img $IMGH
-"$W/t" $IMGH csv rec 2000 mountwin 300 150 | tee $W/c7
+"$W/t" $IMGH csv rec 2000 mountwin 300 500 | tee $W/c7
 grep -qE "mount_writes=[1-9]" $W/c7 && echo "ok: baseline: the window holds commits when not mounted" || { echo "FAIL at line $LINENO"; exit 1; }
 cp $W/csvbase.img $IMGH
-"$W/t" $IMGH csv rec 2000 mount 300 150 | tee $W/c8
-grep -q "csv=Done file=Some(0) rows=2000 .* dropped=0" $W/c8 && grep -q "mount_writes=0 " $W/c8 && echo "ok: mounted for 15 s: no block written meanwhile, nothing dropped" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGH csv rec 2000 mount 300 500 | tee $W/c8
+grep -q "csv=Done file=Some(0) rows=2000 .* dropped=0" $W/c8 && grep -q "mount_writes=0 " $W/c8 && echo "ok: mounted for 50 s: no block written meanwhile, nothing dropped" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGH
-csvok $IMGH LOG000.CSV 2000 full
+csvok $IMGH LOG000.DLG 2000 full
 cp $W/csvbase.img $IMGH
-"$W/t" $IMGH csv rec 2000 mount 300 600 | tee $W/c9
-grep -q "csv=Done file=Some(0) .* dropped=[1-9]" $W/c9 && grep -q "mount_writes=0 " $W/c9 && echo "ok: mounted for 60 s: FIFO overflow, rows dropped and counted, nothing written meanwhile" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGH csv rec 2000 mount 300 1200 | tee $W/c9
+grep -q "csv=Done file=Some(0) .* dropped=[1-9]" $W/c9 && grep -q "mount_writes=0 " $W/c9 && echo "ok: mounted for 120 s: FIFO overflow, rows dropped and counted, nothing written meanwhile" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGH
-csvok $IMGH LOG000.CSV 2000 gap | tee $W/c9p
+csvok $IMGH LOG000.DLG 2000 gap | tee $W/c9p
 grep -qE "[1-9][0-9]* skipped" $W/c9p && echo "ok: the row after the gap carries GAP" || { echo "FAIL at line $LINENO"; exit 1; }
 
 echo "--- chain across the FAT 1 block boundary (clusters 2045..2048: link in block 0 written last)"
@@ -764,10 +791,10 @@ cp $W/csvbase.img $IMGB
 head -c $(( 2040 * 4096 )) /dev/zero > $W/fill
 mcopy -i $IMGB $W/fill ::FILL.DAT
 cp $IMGB $W/fatbase.img
-"$W/t" $IMGB csv rec 500 | tee $W/c6
-grep -q "csv=Done file=Some(0) rows=500 " $W/c6 && echo "ok: recorded across the FAT block boundary" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGB csv rec 1500 | tee $W/c6
+grep -q "csv=Done file=Some(0) rows=1500 " $W/c6 && echo "ok: recorded across the FAT block boundary" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGB
-csvok $IMGB LOG000.CSV 500 full
+csvok $IMGB LOG000.DLG 1500 full
 python3 -I - $IMGB <<'PY' || { echo "FAIL at line $LINENO: chain"; exit 1; }
 import struct, sys
 d = open(sys.argv[1], 'rb').read()
@@ -775,7 +802,7 @@ rsvd, nf, fsz, rootn = struct.unpack_from('<H', d, 0x0E)[0], d[0x10], struct.unp
 root = (rsvd + nf * fsz) * 4096
 for i in range(rootn):
     e = d[root + 32 * i: root + 32 * i + 32]
-    if e[:11] == b'LOG000  CSV':
+    if e[:11] == b'LOG000  DLG':
         c, chain = struct.unpack_from('<H', e, 0x1A)[0], []
         while c < 0xFFF8:
             chain.append(c); c = struct.unpack_from('<H', d, rsvd * 4096 + 2 * c)[0]
@@ -799,7 +826,7 @@ cutsweep() {
         "$W/t" $W/cut.img csv rec $2 cut $k > $W/cr
         cutok $W/cut.img
         if mdir -i $W/cut.img :: | grep -q LOG000; then
-            csvok $W/cut.img LOG000.CSV $2 prefix > $W/cp || { cat $W/cp; echo "FAIL: cut $k"; exit 1; }
+            csvok $W/cut.img LOG000.DLG $2 prefix > $W/cp || { cat $W/cp; echo "FAIL: cut $k"; exit 1; }
             c=$(mdir -i $W/cut.img :: | grep LOG000 | awk '{print $3}')
         else
             c=0
@@ -811,7 +838,7 @@ cutsweep() {
         "$W/t" $W/cut.img csv rec $2 cut $k half > $W/cr
         cutok $W/cut.img
         if mdir -i $W/cut.img :: | grep -q LOG000; then
-            csvok $W/cut.img LOG000.CSV $2 prefix > $W/cp || { cat $W/cp; echo "FAIL: cut $k half"; exit 1; }
+            csvok $W/cut.img LOG000.DLG $2 prefix > $W/cp || { cat $W/cp; echo "FAIL: cut $k half"; exit 1; }
         fi
     done
     CUTK=
@@ -820,7 +847,7 @@ cutsweep() {
 echo "--- power cut before every block write"
 cutsweep $W/csvbase.img 1500
 echo "--- power cut before every block write, chain across the FAT block boundary"
-cutsweep $W/fatbase.img 500
+cutsweep $W/fatbase.img 1500
 
 echo "--- nearly full disk"
 IMGF=$W/diskf.img
@@ -831,21 +858,22 @@ mcopy -i $IMGF $W/fill ::FILL.DAT
 "$W/t" $IMGF csv rec 3000 | tee $W/c5
 grep -q "csv=Full file=Some(0)" $W/c5 && echo "ok: disk full ends the recording (Full)" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGF
-csvok $IMGF LOG000.CSV 3000 prefix
+csvok $IMGF LOG000.DLG 3000 prefix
 SZ=$(mdir -i $IMGF :: | grep LOG000 | awk '{print $3}')
-[ $SZ -gt $((20480 - 96)) ] && [ $SZ -le 20480 ] && echo "ok: the 5 free clusters filled, size cut back to the last whole row ($SZ bytes)" || { echo "FAIL at line $LINENO"; exit 1; }
+[ $SZ = 20480 ] && echo "ok: the 5 free clusters filled ($SZ bytes); the chunk cut at the end is a torn tail, skipped by the reader" || { echo "FAIL at line $LINENO"; exit 1; }
 
 echo "--- gallery"
 mcopy -i $IMGS $W/keep.bin "::Log_with_a_long_name.csv"
 mdir -i $IMGS ::
 "$W/t" $IMGS csv list | tee $W/g1
-grep -q "list n=5 total=5" $W/g1 && grep -q "  LOG000.CSV 76028 Csv" $W/g1 && grep -q "  S001.BMP 307266 Bmp" $W/g1 && grep -q "  LOG_WI~1.CSV 9000 Csv" $W/g1 && grep -q "changed blocks: \[\]" $W/g1 && echo "ok: list: 3 BMP + 2 CSV with sizes, CONFIG.BIN not listed, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "list n=5 total=5" $W/g1 && grep -qE "  LOG000.DLG 255[0-9][0-9] Csv" $W/g1 && grep -q "  S001.BMP 307266 Bmp" $W/g1 && grep -q "  LOG_WI~1.CSV 9000 Csv" $W/g1 && grep -q "changed blocks: \[\]" $W/g1 && echo "ok: list: 3 BMP + 2 CSV with sizes, CONFIG.BIN not listed, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
 F0=$(grep -o "free=[0-9]*" $W/g1 | cut -d= -f2)
+L0=$(grep "  LOG000.DLG" $W/g1 | awk '{print $2}')
 "$W/t" $IMGS csv cat | tee $W/g0
-grep -qx "cat=$((16740352 - F0)),$F0,\"LOG000.CSV,ASC,76028\",\"S000.BMP,BIN,307266\",\"S001.BMP,BIN,307266\",\"S002.BMP,BIN,307266\",\"LOG_WI~1.CSV,ASC,9000\"" $W/g0 && echo "ok: MMEM:CAT? text" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -qx "cat=$((16740352 - F0)),$F0,\"LOG000.DLG,BIN,$L0\",\"S000.BMP,BIN,307266\",\"S001.BMP,BIN,307266\",\"S002.BMP,BIN,307266\",\"LOG_WI~1.CSV,ASC,9000\"" $W/g0 && echo "ok: MMEM:CAT? text" || { echo "FAIL at line $LINENO"; exit 1; }
 [ $F0 = $(( $(fsck.fat -n $IMGS | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}') * 4096 )) ] && echo "ok: free bytes = fsck free clusters" || { echo "FAIL at line $LINENO"; exit 1; }
-"$W/t" $IMGS csv del LOG000.CSV | tee $W/g2
-grep -q "del=Ok(())" $W/g2 && grep -q "free=$((F0 + 19 * 4096)) " $W/g2 && echo "ok: LOG000.CSV deleted, its 19 clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGS csv del LOG000.DLG | tee $W/g2
+grep -q "del=Ok(())" $W/g2 && grep -q "free=$((F0 + 7 * 4096)) " $W/g2 && echo "ok: LOG000.DLG deleted, its 7 clusters freed" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
 "$W/t" $IMGS csv del log_wi~1.csv mounted | tee $W/g2m
 grep -q "del=Err(Busy)" $W/g2m && grep -q "changed blocks: \[\]" $W/g2m && echo "ok: delete refused while a PC has the disk mounted, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
@@ -862,12 +890,12 @@ mcopy -n -i $IMGS ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.
 "$W/t" $IMGS csv rec 1200 del 300 S002.BMP | tee $W/g4
 grep -q "gallery delete at row 3[0-9][0-9]: Ok(())" $W/g4 && grep -q "csv=Done file=Some(0) rows=1200 " $W/g4 && echo "ok: S002.BMP deleted from the gallery between two commits of a recording" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
-csvok $IMGS LOG000.CSV 1200 full
+csvok $IMGS LOG000.DLG 1200 full
 mdir -i $IMGS :: | grep -q "^S002" && { echo "FAIL at line $LINENO"; exit 1; }
 bmpok $IMGS S000.BMP
-mdel -i $IMGS ::LOG000.CSV
+mdel -i $IMGS ::LOG000.DLG
 "$W/t" $IMGS csv busydel | tee $W/g3
-grep -q "busydel LOG000.CSV -> Err(Busy)" $W/g3 && grep -q "then del -> Ok(())" $W/g3 && echo "ok: the file being recorded cannot be deleted; after stop it can" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "busydel LOG000.DLG -> Err(Busy)" $W/g3 && grep -q "then del -> Ok(())" $W/g3 && echo "ok: the file being recorded cannot be deleted; after stop it can" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
 mdir -i $IMGS ::
 echo PASS

@@ -179,6 +179,8 @@ fn main() -> ! {
     let mut disk = spiflash::SpiFlash::new();
     #[cfg(feature = "vdisk")]
     let mut info = vdisk::VDisk;
+    #[cfg(feature = "vdisk")]
+    let mut dlog_hw = false;
     let mut dev = UsbDeviceBuilder::new(&bus, USB_VID_PID)
         .strings(&[StringDescriptors::default()
             .manufacturer("dm40-fw")
@@ -748,6 +750,20 @@ fn main() -> ! {
         // CSV recording: one bounded slice of a commit (csvlog.rs).
         prof::lap_skip();
         csvlog::poll(now);
+        // LUN 1: the virtual LOGnnn.CSV files of the binary logs (dlog.rs),
+        // rebuilt when a recording ended / a file was deleted / the PC wrote
+        // the disk, while nothing writes it.
+        #[cfg(feature = "vdisk")]
+        {
+            let hw = msc::HOST_WRITING.load(core::sync::atomic::Ordering::Relaxed);
+            if dlog_hw && !hw {
+                dlog::set_stale();
+            }
+            dlog_hw = hw;
+            if dlog::stale() && !hw && !csvlog::writing() && !screenshot::busy() {
+                dlog::refresh(csvlog::recording_name());
+            }
+        }
         prof::lap(prof::CSV);
         app.tick(&mut clk, can_draw);
         prof::lap(prof::TICK);
@@ -977,6 +993,7 @@ mod dialog;
 mod screenshot;
 mod scope_csv;
 mod csvlog;
+mod dlog;
 mod gallery;
 #[cfg(any(feature = "native", feature = "test-initcore", feature = "test-recovery"))]
 mod native;
