@@ -3,7 +3,18 @@
 //!
 //! The medium is a `BlockDevice`: the on-board W25Q128 (spiflash.rs), whose
 //! FAT16 volume with 4096-byte sectors the stock firmware made
-//! (firmware/re/analysis/spiflash_v2_6.h).
+//! (firmware/re/analysis/spiflash_v2_6.h). LUN 0.
+//!
+//! Normal mode has a second, read-only LUN (`Msc::new(.., 2)`, GET MAX LUN =
+//! 1): the information volume generated from the MCU memory (vdisk.rs). Every
+//! command is dispatched to the device of its CBW's LUN; INQUIRY gives each
+//! LUN its own product name (both removable), READ CAPACITY / READ FORMAT
+//! CAPACITIES its own geometry, MODE SENSE the write-protect bit of a
+//! read-only device, and a WRITE to it fails with DATA PROTECT, WRITE
+//! PROTECTED (07/27/00) without touching anything. Sense data is per LUN.
+//! The host lock (PREVENT ALLOW MEDIUM REMOVAL -> `host_mounted`) and the
+//! one-shot UNIT ATTENTION after an on-device write concern the SPI disk
+//! only: LUN 0. Recovery mode (recovery-usb) keeps a single LUN.
 
 use usb_device::class_prelude::*;
 use usb_device::prelude::UsbDeviceState;
@@ -22,6 +33,17 @@ pub trait BlockDevice {
     fn block_count(&self) -> u32;
     fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool;
     fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool;
+    /// Write-protected medium (MODE SENSE WP bit; WRITE fails with DATA
+    /// PROTECT before any data is taken).
+    fn read_only(&self) -> bool {
+        false
+    }
+    /// One-shot "the volume changed under the host" (vdisk.rs `set_extra`):
+    /// true once, and the next command of this LUN gets UNIT ATTENTION
+    /// 06/28/00. LUN 0 uses screenshot::MEDIUM_CHANGED instead.
+    fn take_media_changed(&mut self) -> bool {
+        false
+    }
     /// `write_block` spread over several calls, for a caller that must not
     /// stall the main loop (screenshot.rs). Call again with the same `lba`,
     /// `buf` and `st` (starting from `Step::default()`) until it returns
@@ -83,6 +105,15 @@ const SENSE_BECOMING_READY: Sense = Sense(0x02, 0x04, 0x01);
 /// UNIT ATTENTION, NOT READY TO READY CHANGE, MEDIUM MAY HAVE CHANGED: the
 /// firmware itself wrote the disk (screenshot.rs), the host must re-read it.
 const SENSE_MEDIUM_CHANGED: Sense = Sense(0x06, 0x28, 0x00);
+/// DATA PROTECT, WRITE PROTECTED: a WRITE to a read-only LUN.
+const SENSE_WRITE_PROTECTED: Sense = Sense(0x07, 0x27, 0x00);
+/// ILLEGAL REQUEST, LOGICAL UNIT NOT SUPPORTED (a LUN above GET MAX LUN).
+const SENSE_BAD_LUN: Sense = Sense(0x05, 0x25, 0x00);
+
+/// LUNs at most (SPI disk, information volume).
+pub const MAX_LUNS: usize = 2;
+/// INQUIRY product identification per LUN (16 characters).
+const PRODUCT: [&[u8; 16]; MAX_LUNS] = [b"DM40 disk       ", b"DM40 info       "];
 
 /// A host has the medium locked: its last PREVENT ALLOW MEDIUM REMOVAL
 /// (0x1E) had Prevent = 1. Linux sends it on the first open of the block
@@ -98,6 +129,13 @@ const SENSE_MEDIUM_CHANGED: Sense = Sense(0x06, 0x28, 0x00);
 /// then stays set ("Disk in use") until the replug's bus reset or a reboot,
 /// the safe side.
 static HOST_LOCKED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// The same for LUN 1 (information volume): only holds back its UNIT
+/// ATTENTION; nothing on the device waits for it.
+static INFO_LOCKED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+fn lock_of(lun: u8) -> &'static core::sync::atomic::AtomicBool {
+    if lun == 0 { &HOST_LOCKED } else { &INFO_LOCKED }
+}
 
 /// A PC has the USB disk mounted (see HOST_LOCKED).
 pub fn host_mounted() -> bool {
@@ -129,16 +167,16 @@ impl core::borrow::BorrowMut<[u8]> for IoBuf {
 /// read from its CBW in the transport buffer. When the callback runs, the
 /// 31-byte CBW the crate has just parsed is still in `io` (it is read in
 /// place, the buffer is only written again for the data / status phase):
-/// "USBC", tag, data length 0, flags, LUN 0, CB length, CB[0] = 0x1E, CB[4]
-/// bit 0 = Prevent. Every match is then defaced (signature zeroed), so a
-/// stale CBW of an earlier 0x1E can never be found again; more than one
+/// "USBC", tag, data length 0, flags, LUN `lun`, CB length, CB[0] = 0x1E,
+/// CB[4] bit 0 = Prevent. Every match is then defaced (signature zeroed), so
+/// a stale CBW of an earlier 0x1E can never be found again; more than one
 /// match left (host data that happens to look like one) counts as Prevent.
-fn prevent_bit(io: &mut [u8]) -> bool {
+fn prevent_bit(io: &mut [u8], lun: u8) -> bool {
     let (mut found, mut prevent) = (0u32, false);
     let mut o = 0usize;
     while o + 31 <= io.len() {
         let c = &io[o..o + 31];
-        if c[..4] == *b"USBC" && c[8..12] == [0; 4] && c[13] == 0 && (6..=16).contains(&c[14]) && c[15] == 0x1E {
+        if c[..4] == *b"USBC" && c[8..12] == [0; 4] && c[13] == lun && (6..=16).contains(&c[14]) && c[15] == 0x1E {
             found += 1;
             prevent = c[19] & 1 != 0;
             io[o..o + 4].fill(0);
@@ -154,7 +192,8 @@ pub struct Msc<'a, B: UsbBus> {
     pub scsi: Scsi<BulkOnly<'a, B, IoBuf>>,
     io: IoBuf,
     xfer: Xfer,
-    sense: Sense,
+    /// Per LUN.
+    sense: [Sense; MAX_LUNS],
     blk: [u8; MAX_BLOCK],
     /// Refuse host writes (NOT READY, becoming ready) while set (M4: the
     /// logger's constant sample interval cannot survive a 50..400 ms erase).
@@ -164,10 +203,13 @@ pub struct Msc<'a, B: UsbBus> {
 type Res = Result<(), TransportError<BulkOnlyError>>;
 
 impl<'a, B: UsbBus> Msc<'a, B> {
-    pub fn new(alloc: &'a UsbBusAllocator<B>, io: &'static mut [u8]) -> Self {
+    /// `luns`: 1 (SPI disk) or 2 (+ the information volume); GET MAX LUN
+    /// answers `luns - 1`, `poll` takes that many devices.
+    pub fn new(alloc: &'a UsbBusAllocator<B>, io: &'static mut [u8], luns: u8) -> Self {
         let (p, n) = (io.as_mut_ptr(), io.len());
-        let scsi = Scsi::new(alloc, 64, 0, IoBuf { p, n }).unwrap_or_else(|_| panic!("msc"));
-        Msc { scsi, io: IoBuf { p, n }, xfer: Xfer::None, sense: SENSE_OK, blk: [0; MAX_BLOCK], write_inhibit: false }
+        let max_lun = luns.clamp(1, MAX_LUNS as u8) - 1;
+        let scsi = Scsi::new(alloc, 64, max_lun, IoBuf { p, n }).unwrap_or_else(|_| panic!("msc"));
+        Msc { scsi, io: IoBuf { p, n }, xfer: Xfer::None, sense: [SENSE_OK; MAX_LUNS], blk: [0; MAX_BLOCK], write_inhibit: false }
     }
 
     /// The USB device state (main loop, every pass). Default / Addressed
@@ -176,11 +218,12 @@ impl<'a, B: UsbBus> Msc<'a, B> {
     pub fn set_usb_state(&mut self, st: UsbDeviceState) {
         if matches!(st, UsbDeviceState::Default | UsbDeviceState::Addressed) {
             HOST_LOCKED.store(false, core::sync::atomic::Ordering::Relaxed);
+            INFO_LOCKED.store(false, core::sync::atomic::Ordering::Relaxed);
         }
     }
 
-    /// Serve pending SCSI commands from the main loop.
-    pub fn poll(&mut self, dev: &mut dyn BlockDevice) {
+    /// Serve pending SCSI commands from the main loop. `devs[i]` = LUN i.
+    pub fn poll(&mut self, devs: &mut [&mut dyn BlockDevice]) {
         let xfer = &mut self.xfer;
         let sense = &mut self.sense;
         let blk = &mut self.blk;
@@ -191,7 +234,13 @@ impl<'a, B: UsbBus> Msc<'a, B> {
         let inhibit = self.write_inhibit
             || crate::screenshot::busy()
             || LOG_SESSION.load(core::sync::atomic::Ordering::Relaxed);
-        let _ = self.scsi.poll_command(|cmd| -> Res { handle(cmd, dev, xfer, sense, blk, io, inhibit) });
+        let _ = self.scsi.poll_command(|cmd| -> Res {
+            let lun = cmd.lun as usize;
+            match (devs.get_mut(lun), sense.get_mut(lun)) {
+                (Some(dev), Some(sense)) => handle(cmd, &mut **dev, xfer, sense, blk, io, inhibit),
+                _ => bad_lun(cmd),
+            }
+        });
         HOST_WRITING.store(matches!(self.xfer, Xfer::Write { .. }), core::sync::atomic::Ordering::Relaxed);
     }
 
@@ -203,6 +252,29 @@ impl<'a, B: UsbBus> Msc<'a, B> {
 
 type Cmd<'c, 'a, B> = Command<'c, ScsiCommand, Scsi<BulkOnly<'a, B, IoBuf>>>;
 
+/// A LUN above GET MAX LUN (a host should never address one): INQUIRY says
+/// "no device here" (peripheral qualifier 3), REQUEST SENSE "LUN not
+/// supported", anything else fails.
+fn bad_lun<B: UsbBus>(mut cmd: Cmd<'_, '_, B>) -> Res {
+    match cmd.kind {
+        ScsiCommand::Inquiry { .. } => {
+            let mut d = [0u8; 36];
+            d[0] = 0x7F;
+            d[4] = 31;
+            cmd.try_write_data_all(&d)?;
+            cmd.pass(36);
+        }
+        ScsiCommand::RequestSense { .. } => {
+            let s = SENSE_BAD_LUN;
+            let d = [0x70, 0, s.0, 0, 0, 0, 0, 10, 0, 0, 0, 0, s.1, s.2, 0, 0, 0, 0];
+            cmd.try_write_data_all(&d)?;
+            cmd.pass(d.len() as u32);
+        }
+        _ => cmd.fail(0),
+    }
+    Ok(())
+}
+
 fn handle<B: UsbBus>(
     mut cmd: Cmd<'_, '_, B>,
     dev: &mut dyn BlockDevice,
@@ -213,6 +285,7 @@ fn handle<B: UsbBus>(
     write_inhibit: bool,
 ) -> Res {
     let kind = cmd.kind;
+    let lun = cmd.lun;
     let bs = dev.block_size();
     // One-shot UNIT ATTENTION after an on-device file write (screenshot.rs
     // sets MEDIUM_CHANGED): the next command fails with 06/28/00, so the host
@@ -221,11 +294,18 @@ fn handle<B: UsbBus>(
     // and never for INQUIRY / REQUEST SENSE (SPC: they do not report it).
     // Held back while a host has the medium locked (mounted Linux vfat: the
     // UNIT ATTENTION would fail its I/O, review 258c833 M2); it goes out on
-    // the first command after the Allow (umount).
+    // the first command after the Allow (umount). Per LUN: the SPI disk's
+    // flag (screenshot::MEDIUM_CHANGED) is only taken by a LUN-0 command, the
+    // information volume's (vdisk.rs set_extra, `take_media_changed`) only by
+    // a LUN-1 one, each held back by its own LUN's lock.
     if *xfer == Xfer::None
         && !matches!(kind, ScsiCommand::Inquiry { .. } | ScsiCommand::RequestSense { .. })
-        && !HOST_LOCKED.load(core::sync::atomic::Ordering::Relaxed)
-        && crate::screenshot::MEDIUM_CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed)
+        && !lock_of(lun).load(core::sync::atomic::Ordering::Relaxed)
+        && if lun == 0 {
+            crate::screenshot::MEDIUM_CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed)
+        } else {
+            dev.take_media_changed()
+        }
     {
         *sense = SENSE_MEDIUM_CHANGED;
         cmd.fail(0);
@@ -240,7 +320,7 @@ fn handle<B: UsbBus>(
             d[3] = 0x02;
             d[4] = 31;
             d[8..16].copy_from_slice(b"ALIENTEK");
-            d[16..32].copy_from_slice(b"DM40 disk       ");
+            d[16..32].copy_from_slice(PRODUCT[(lun as usize).min(MAX_LUNS - 1)]);
             d[32..36].copy_from_slice(b"0.2 ");
             cmd.try_write_data_all(&d)?;
             cmd.pass(36);
@@ -262,13 +342,16 @@ fn handle<B: UsbBus>(
             cmd.pass(d.len() as u32);
         }
         ScsiCommand::ModeSense6 { .. } => {
-            // Mode parameter header: no block descriptors, not write protected.
-            let d = [3u8, 0, 0, 0];
+            // Mode parameter header only (no block descriptors, no pages);
+            // device-specific parameter bit 7 = write protected.
+            let wp = if dev.read_only() { 0x80 } else { 0 };
+            let d = [3u8, 0, wp, 0];
             cmd.try_write_data_all(&d)?;
             cmd.pass(4);
         }
         ScsiCommand::ModeSense10 { .. } => {
-            let d = [0u8, 6, 0, 0, 0, 0, 0, 0];
+            let wp = if dev.read_only() { 0x80 } else { 0 };
+            let d = [0u8, 6, 0, wp, 0, 0, 0, 0];
             cmd.try_write_data_all(&d)?;
             cmd.pass(8);
         }
@@ -338,6 +421,11 @@ fn handle<B: UsbBus>(
                 return Ok(());
             }
             if *xfer == Xfer::None {
+                if dev.read_only() {
+                    *sense = SENSE_WRITE_PROTECTED;
+                    cmd.fail(0);
+                    return Ok(());
+                }
                 if write_inhibit {
                     *sense = SENSE_BECOMING_READY;
                     cmd.fail(0);
@@ -373,10 +461,13 @@ fn handle<B: UsbBus>(
             }
         }
         // PREVENT ALLOW MEDIUM REMOVAL: accepted (a failed one makes Linux
-        // stop sending them: sdev->lockable = 0), Prevent bit tracked.
+        // stop sending them: sdev->lockable = 0), Prevent bit tracked per
+        // LUN: only LUN 0's lock is `host_mounted` (mounting the read-only
+        // information volume must not block the on-device writers); LUN 1's
+        // only holds back its UNIT ATTENTION.
         ScsiCommand::Unknown { cmd: 0x1E } => {
-            let p = prevent_bit(core::borrow::BorrowMut::<[u8]>::borrow_mut(io));
-            HOST_LOCKED.store(p, core::sync::atomic::Ordering::Relaxed);
+            let p = prevent_bit(core::borrow::BorrowMut::<[u8]>::borrow_mut(io), lun);
+            lock_of(lun).store(p, core::sync::atomic::Ordering::Relaxed);
             *sense = SENSE_OK;
             cmd.pass(0)
         }
@@ -400,6 +491,7 @@ impl<B: UsbBus> UsbClass<B> for Msc<'_, B> {
         // 2026-10-13 L3).
         crate::screenshot::MEDIUM_CHANGED.store(false, core::sync::atomic::Ordering::Relaxed);
         HOST_LOCKED.store(false, core::sync::atomic::Ordering::Relaxed);
+        INFO_LOCKED.store(false, core::sync::atomic::Ordering::Relaxed);
         self.scsi.reset()
     }
     fn control_in(&mut self, xfer: ControlIn<B>) {

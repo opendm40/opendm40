@@ -171,8 +171,12 @@ fn main() -> ! {
     // storage (interface 1) on the SPI flash. Two IN endpoints + EP0 of the
     // four of USBFS.
     let mut tmc = usbtmc::Usbtmc::new(&bus);
-    let mut msc = msc::Msc::new(&bus, unsafe { &mut *core::ptr::addr_of_mut!(MSC_IO) });
+    // LUN 0 = the SPI disk; with `vdisk` LUN 1 = the read-only information
+    // volume (vdisk.rs, its table built in native::pre_main).
+    let mut msc = msc::Msc::new(&bus, unsafe { &mut *core::ptr::addr_of_mut!(MSC_IO) }, if cfg!(feature = "vdisk") { 2 } else { 1 });
     let mut disk = spiflash::SpiFlash::new();
+    #[cfg(feature = "vdisk")]
+    let mut info = vdisk::VDisk;
     let mut dev = UsbDeviceBuilder::new(&bus, USB_VID_PID)
         .strings(&[StringDescriptors::default()
             .manufacturer("dm40-fw")
@@ -265,7 +269,10 @@ fn main() -> ! {
         // M4: no host disk writes while the logger needs a constant interval.
         msc.set_write_inhibit(logger.disk_writes_blocked());
         msc.set_usb_state(dev.state());
-        msc.poll(&mut disk);
+        #[cfg(feature = "vdisk")]
+        msc.poll(&mut [&mut disk, &mut info]);
+        #[cfg(not(feature = "vdisk"))]
+        msc.poll(&mut [&mut disk]);
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
         logger.poll();
@@ -912,6 +919,8 @@ mod boot;
 // fatren: also its FAT16 helpers for calbackup in every build.
 mod fatren;
 mod calbackup;
+#[cfg(feature = "vdisk")]
+mod vdisk;
 mod dialog;
 mod screenshot;
 mod csvlog;

@@ -65,24 +65,24 @@ pub fn stack_use() -> (u32, u32) {
 }
 
 /// Extra DBG:BOOT? fields, appended by boot::put_info (one call at its end):
-/// `,STAGED,<n>,CALBK,<status>,<written>,<conflict>,<freed>,STACK,<used>,<size>,CALMS,<ms>,SPICLK,<div>,<check>`.
+/// `,STAGED,<n>,CALBK,<status>,<written>,<conflict>,<differs>,STACK,<used>,<size>,CALMS,<ms>,SPICLK,<div>,<check>`.
 /// STAGED: fatren's dm40*.bin left because their header is not the marker.
-/// status: NOTRUN NOMEDIUM BADBPB UNCHANGED WRITTEN NOSPACE ERROR, with a
-/// `_NOFW` suffix when the firmware file did not fit and the backup was
-/// retried without it (calbackup::run, review M1; e.g. WRITTEN_NOFW); written /
-/// conflict: decimal bit masks, bit i = file i of calbackup::FILES (0 CALIB,
-/// 1 BOOTDATA, 2 UID, 3 OPTBYTES, 4 OTP, 5 ROMBOOT, 6 LOADER), bit 7 =
-/// BACKUP.TXT, bit 8 = _DM40PRV.BIN (running firmware's update file); written
-/// also counts a one-time re-stamp of an equal file; freed: old clusters
-/// freed; used/size: stack high-water mark / stack bytes; CALMS: duration of
-/// calbackup::boot in ms (200 MHz cycles; 12.5x low at 16 MHz); SPICLK:
+/// CALBK = the write-once calibration safety copy on the SPI disk
+/// (calbackup.rs): status NOTRUN NOMEDIUM BADBPB SAFECOPY_PRESENT (all three
+/// files there, nothing written) SAFECOPY_WRITTEN (the missing ones written)
+/// NOSPACE ERROR; written / conflict / differs: decimal bit masks, bit i =
+/// file i of calbackup::FILES (0 CALIB, 1 BOOTDATA, 2 UID); conflict = the
+/// name is a directory / label; differs = a present copy no longer equals the
+/// flash (kept: write-once); used/size: stack high-water mark / stack bytes;
+/// CALMS: duration of calbackup::boot in ms (200 MHz cycles; 12.5x low at
+/// 16 MHz); SPICLK:
 /// SPI-flash divider in use (4 / 16) and the boot self-check's verdict
 /// (spiflash::ClockCheck: OK FORCED NOCHIP NOSIG DIFF1 DIFF2 NOTRUN).
 pub fn put_extra(s: &mut crate::scpi::Scpi) {
     use crate::calbackup::Status as C;
     let r = crate::calbackup::result();
     let (used, size) = stack_use();
-    let vals = [crate::fatren::result().staged as u32, 0, r.written as u32, r.conflict as u32, r.freed, 0, used, size, 0, r.ms];
+    let vals = [crate::fatren::result().staged as u32, 0, r.written as u32, r.conflict as u32, r.differs as u32, 0, used, size, 0, r.ms];
     for (i, v) in vals.iter().enumerate() {
         if i == 0 {
             s.put_bytes(b",STAGED,");
@@ -92,15 +92,11 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
                 C::NotRun => b"CALBK,NOTRUN" as &[u8],
                 C::NoMedium => b"CALBK,NOMEDIUM",
                 C::BadBpb => b"CALBK,BADBPB",
-                C::Unchanged => b"CALBK,UNCHANGED",
-                C::Written => b"CALBK,WRITTEN",
+                C::Present => b"CALBK,SAFECOPY_PRESENT",
+                C::Written => b"CALBK,SAFECOPY_WRITTEN",
                 C::NoSpace => b"CALBK,NOSPACE",
                 C::Error => b"CALBK,ERROR",
             });
-            if r.fw_skipped {
-                // NoSpace for _DM40PRV.BIN: the status of the retry without it.
-                s.put_bytes(b"_NOFW");
-            }
         } else if i == 5 {
             s.put_bytes(b"STACK");
         } else if i == 8 {
@@ -138,7 +134,7 @@ fn normal(_info: &BootInfo, dry: bool) -> ! {
 }
 
 /// Everything before main(), in its own never-inlined frame so the SPI-disk
-/// block buffers (fatren ~9 KiB, calbackup ~14 KiB, each in its own
+/// block buffers (fatren ~9 KiB, calbackup ~2 KiB + scratch, each in its own
 /// never-inlined function too) are popped before main()'s 26 KiB frame is
 /// pushed (review 2026-10-13 B1).
 #[cfg(any(feature = "native", feature = "test-initcore"))]
@@ -165,15 +161,18 @@ fn pre_main(dry: bool) {
         crate::fatren::run(&mut disk, dry, marker);
     }
     boot::feed();
-    // Calibration / boot-data backup files + _DM40PRV.BIN (the running
-    // firmware's update file, regenerated from flash) on the same volume,
-    // after fatren, still before USB. Not a dry run in T1: it only writes its
-    // own files. No fight with fatren: fatren only replaces _DM40PRV.BIN when
-    // it renames the INSTALLED dm40*.bin (header == marker), i.e. the same
-    // firmware; calbackup then finds it equal (at most re-stamps the entry,
-    // or rewrites it once if that file had non-0xFF bytes in the 12-byte
-    // marker gap) and never touches dm40*.bin names.
+    // Write-once calibration safety copy (CALIB.BIN, BOOTDATA.BIN, UID.BIN,
+    // only the missing ones) on the same volume, after fatren, still before
+    // USB. Not a dry run in T1: it only creates its own files; it never
+    // touches dm40*.bin or _DM40PRV.BIN names.
     crate::calbackup::boot();
+    boot::feed();
+    // The read-only information volume (USB LUN 1): file table + CRC-32s of
+    // the sources (~0.1 s), before USB.
+    #[cfg(feature = "vdisk")]
+    crate::vdisk::init(crate::vdisk::mem_read, unsafe {
+        core::slice::from_raw_parts(crate::calbackup::FW_BASE as *const u8, crate::calbackup::FW_MAX_BODY)
+    });
     boot::feed();
 }
 
