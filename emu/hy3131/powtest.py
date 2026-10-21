@@ -67,7 +67,8 @@ def both(*fs):
 
 
 # name: (setup SCPI, run_for, [(t, spec, check, label)]); a phase is checked on
-# its samples from the next phase's start - 4 s to that start - 0.5 s.
+# its samples from the next phase's start - 4.5 s to that start - 1.5 s (the
+# fw uptime lags the virtual time by ~0.5 s or more).
 SC = {
     'mains': (['CONF:POW', 'POW:BURD:STAT OFF'], 58, [
         (0, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), ranges('6.000000E+02', '1.000000E+01')), 'resistive 230 V 1 A: PF 1, 50 Hz, 600 V / 10 A'),
@@ -195,7 +196,7 @@ def run(name):
     bad = []
     for i, (t, _, chk, label) in enumerate(phases):
         t1 = phases[i + 1][0] if i + 1 < len(phases) else run_for
-        seen = [r for r in rows if t1 - 4.0 <= r['t'] <= t1 - 0.5 and ('P' in r or name.startswith('t1'))]
+        seen = [r for r in rows if t1 - 4.5 <= r['t'] <= t1 - 1.5 and ('P' in r or name.startswith('t1'))]
         if not seen:
             ok = False
             bad.append('%s: no samples' % label)

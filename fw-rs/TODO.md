@@ -477,10 +477,19 @@ Firmware:
 - [x] Tap on the DMM value cycles averaging/resolution: fewer digits = faster readings; compute digits vs OSR/noise from the
       HY3131 timing + measured noise (not ad hoc); the +1 digit always drawn small at the end.
       (24f7080: FAST/MED/SLOW with a counts / rate toast; verified on device 9dd1222)
-- [ ] Power-meter mode: HY3131 can measure V and I at once (AD2/AD3 + MUL → active power in RMSDATA); Vrms, Irms, P (and
+- [x] Power-meter mode: HY3131 can measure V and I at once (AD2/AD3 + MUL → active power in RMSDATA); Vrms, Irms, P (and
       energy) by switching internal modes — check feasibility with the DM40 front-end wiring first.
       Researched: GO, docs/power-meter-and-misconnect.md §3 (I on the stock OP1 path, V via OP2→AD3 DC-coupled,
       signed 38-bit X·Y RMS read, ~10-12 days). Gate: device test T1 (OP2 on SENSE). Owner: fuse/CAT/10 A limits.
+      Done (powermeter.rs / ui_power.rs / app_power.rs, doc §3.11): function 18, row B with SPHACAL before the
+      AD3-first enables, P→V→P→I on R34 (2 discards), DC parts from the LPFs, S/Q/PF, Wh/VAh, per-channel autorange,
+      burden compensation, current-limit countdown, auto-off held; fallback (stock AC V / AC A alternated, VA only)
+      behind POW:METH / the page; long press on A or "Power W" on the Current page → wiring dialog; Power Settings
+      page; SCPI CONF:POW / FETC:POW:ALL? / [SENS:]POW:…; DBG:POW:ROW?/POKE/STAT/RAW?/DISC. Emulator Power role
+      + emu/hy3131/powtest.py (11 scenarios OK). (verify on device: T1, T2, T3 of doc §3.11, then T5/T6)
+  - [ ] Not done: a user V-gain calibration (the OP2 / AD3 channel runs on gain 1.0), RESistive phase cal (flat
+        optimum), BT protocol slot (BT reports the AC A byte), limits (W) in Hold & Limits, tap on P to cycle the
+        main readout (P / S / PF / E); owner: the manual's fuse / CAT / 10 A time limit for the dialog defaults.
 - [x] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
       Researched: GO for current-in-A-jack in non-current modes (idle comparator on PB1, 47.5 Ω shunt, trips ~0.44 mA),
       partial for "V leads while in A mode"; blown fuse not detectable (fuse-check dialog instead). Doc §4, ~4-5 days.
