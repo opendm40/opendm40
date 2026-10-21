@@ -34,7 +34,9 @@ pub const ROW: usize = crate::dlog::SCOPE_ROW;
 const HDR_MAX: usize = 512;
 /// Largest record (scope::CAP, asserted in scope_page.rs) and file.
 pub const REC_MAX: usize = 26 * 1024;
-pub const MAX_LEN: u32 = (crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR + REC_MAX * 2) as u32;
+pub const MAX_LEN: u32 = (crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR + 8 * crate::dlog::SBLK_MAX + 4
+    + REC_MAX.div_ceil(crate::dlog::SBLK) * crate::dlog::SBLK_RAW) as u32;
+const _: () = assert!(REC_MAX <= crate::dlog::SBLK * crate::dlog::SBLK_MAX);
 
 struct Snap {
     rec: &'static [u16],
@@ -45,9 +47,39 @@ struct Snap {
     t0: usize,
     hdr: [u8; HDR_MAX],
     hdr_n: usize,
+    /// Coded blocks (dlog::SBLK samples each; PLAN holds their coding).
+    nb: usize,
+    /// PLAN's fill cursor is valid.
+    cur_ok: bool,
 }
 
-static mut SNAP: Snap = Snap { rec: &[], a: 0.0, b: 0.0, dt: 0.0, t0: 0, hdr: [0; HDR_MAX], hdr_n: 0 };
+static mut SNAP: Snap = Snap { rec: &[], a: 0.0, b: 0.0, dt: 0.0, t0: 0, hdr: [0; HDR_MAX], hdr_n: 0, nb: 0, cur_ok: false };
+
+/// Per block: mode (fixed predictor order / raw), coded bytes, CRC-32.
+/// Written by `set` before any use: SRAM (.dmabuf, not zeroed at reset),
+/// not TCM.
+struct Plan {
+    mode: [u32; crate::dlog::SBLK_MAX],
+    len: [u32; crate::dlog::SBLK_MAX],
+    crc: [u32; crate::dlog::SBLK_MAX],
+    /// The fill cursor: block `cb` coded up to `enc.pos` (valid while
+    /// Snap::cur_ok).
+    enc: crate::dlog::SEnc,
+    cb: usize,
+}
+
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+static mut PLAN: Plan = Plan {
+    mode: [0; crate::dlog::SBLK_MAX],
+    len: [0; crate::dlog::SBLK_MAX],
+    crc: [0; crate::dlog::SBLK_MAX],
+    enc: crate::dlog::SEnc::new(0, 0),
+    cb: 0,
+};
+
+fn plan() -> &'static mut Plan {
+    unsafe { &mut *core::ptr::addr_of_mut!(PLAN) }
+}
 
 fn snap() -> &'static mut Snap {
     unsafe { &mut *core::ptr::addr_of_mut!(SNAP) }
@@ -97,37 +129,76 @@ pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr) {
         }
     }
     s.hdr_n = n;
+    // Code every block once (~1 ms per block at 200 MHz): the file length
+    // must be known before the writer allocates; `fill` codes them again.
+    let p = plan();
+    s.cur_ok = false;
+    s.nb = rec.len().div_ceil(crate::dlog::SBLK).min(crate::dlog::SBLK_MAX);
+    for (b, c) in rec.chunks(crate::dlog::SBLK).take(s.nb).enumerate() {
+        (p.mode[b], p.len[b], p.crc[b]) = crate::dlog::scope_plan(c);
+    }
+}
+
+/// Bytes before the first coded block: DLG header, parameters, table.
+fn head_len(s: &Snap) -> usize {
+    crate::dlog::FHDR + s.hdr_n + crate::dlog::SCOPE_PAR + 8 * s.nb + 4
 }
 
 /// File length in bytes (the DLG file).
 pub fn len() -> u32 {
     let s = snap();
-    (crate::dlog::FHDR + s.hdr_n + crate::dlog::SCOPE_PAR + s.rec.len() * 2) as u32
+    let p = plan();
+    (head_len(s) + p.len[..s.nb].iter().map(|&l| l as usize).sum::<usize>()) as u32
 }
 
-/// File bytes `off .. off + buf.len()`: the DLG header + parameters, then
-/// the codes (u16 LE, 10 bits).
+/// File bytes `off .. off + buf.len()`: the DLG header, parameters and
+/// block table, then the coded blocks. Sequential calls continue the
+/// coding where the last one stopped (screenshot.rs fills a disk block in
+/// pieces: each piece costs only its own samples).
 pub fn fill(off: u32, buf: &mut [u8]) {
     let s = snap();
-    let mut off = off as usize;
+    let p = plan();
+    let off = off as usize;
+    let head = head_len(s);
     let mut i = 0;
-    let head = crate::dlog::FHDR + s.hdr_n + crate::dlog::SCOPE_PAR;
     if off < head {
-        let mut h = [0u8; crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR];
-        let n = crate::dlog::scope_header(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, s.rec.len() as u32, &mut h);
-        while i < buf.len() && off < n {
-            buf[i] = h[off];
-            i += 1;
-            off += 1;
-        }
+        let mut h = [0u8; crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR + 8 * crate::dlog::SBLK_MAX + 4];
+        let k = crate::dlog::scope_header(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, s.rec.len() as u32, &mut h);
+        crate::dlog::scope_table(&p.len[..s.nb], &p.crc[..s.nb], &mut h[k..]);
+        i = (head - off).min(buf.len());
+        buf[..i].copy_from_slice(&h[off..off + i]);
     }
+    let codes = |b: usize| &s.rec[b * crate::dlog::SBLK..((b + 1) * crate::dlog::SBLK).min(s.rec.len())];
     while i < buf.len() {
-        let k = (off - head) / 2;
-        if k >= s.rec.len() {
-            break;
+        let at = (off + i) as u32;
+        if !s.cur_ok || p.enc.pos != at {
+            // Seek: the block holding `at`, coded from its start.
+            let mut o = head as u32;
+            let mut b = 0;
+            while b < s.nb && o + p.len[b] <= at {
+                o += p.len[b];
+                b += 1;
+            }
+            if b == s.nb {
+                return;
+            }
+            p.cb = b;
+            p.enc = crate::dlog::SEnc::new(p.mode[b], o);
+            while p.enc.pos < at && p.enc.next(codes(b)).is_some() {}
+            s.cur_ok = true;
         }
-        buf[i] = ((s.rec[k] & 0x3FF) >> (8 * ((off - head) % 2))) as u8;
-        i += 1;
-        off += 1;
+        match p.enc.next(codes(p.cb)) {
+            Some(x) => {
+                buf[i] = x;
+                i += 1;
+            }
+            None => {
+                if p.cb + 1 >= s.nb {
+                    return;
+                }
+                p.cb += 1;
+                p.enc = crate::dlog::SEnc::new(p.mode[p.cb], at);
+            }
+        }
     }
 }

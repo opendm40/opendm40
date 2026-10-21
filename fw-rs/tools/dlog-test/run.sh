@@ -16,6 +16,11 @@ if [ -f ../dlog.py ]; then
         cmp "$B/py.csv" "$B/t$i.csv" || { echo "FAIL: dlog.py set $i"; exit 1; }
     done
     echo "ok: tools/dlog.py output == reference CSV (9 sets)"
+    for i in 0 1 2 3 4 5 6 7; do
+        python3 -I ../dlog.py "$B/s$i.dlg" -o "$B/py.csv"
+        cmp "$B/py.csv" "$B/s$i.csv" || { echo "FAIL: dlog.py scope record $i"; exit 1; }
+    done
+    echo "ok: tools/dlog.py scope records == reference CSV (8 records)"
     head -c $(( $(stat -c%s "$B/t6.dlg") / 2 )) "$B/t6.dlg" > "$B/torn.dlg"
     python3 -I ../dlog.py --check "$B/torn.dlg"
 fi

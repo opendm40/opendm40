@@ -369,8 +369,128 @@ fn gen_all(f: &[u8]) -> Option<(Info, Vec<u8>)> {
     Some((g.info, out))
 }
 
-fn main() {
+// ------------------------------------------------- scope records
+
+const SN: usize = 26624;
+
+/// Synthetic 10-bit records (as tools/logcodec-lab/scope.py).
+fn scope_records() -> Vec<(&'static str, Vec<u16>)> {
+    let mut r = Rng(7);
+    let mut g = |s: f32| r.gauss() * s;
+    let cl = |x: f32| (x.round().clamp(0.0, 1023.0)) as u16;
+    let pi2 = 2.0 * std::f32::consts::PI;
+    let n = SN as f32;
+    let mut v = vec![];
+    v.push(("DC + 1 LSB noise", (0..SN).map(|_| cl(612.0 + g(1.0))).collect()));
+    v.push(("sine 13 periods, 0.7 LSB noise", (0..SN).map(|i| cl(512.0 + 400.0 * (pi2 * 13.0 * i as f32 / n).sin() + g(0.7))).collect()));
+    v.push(("square 10 periods", (0..SN).map(|i| cl(if (i * 20 / SN) % 2 == 1 { 812.0 } else { 212.0 } + g(0.8))).collect()));
+    v.push((
+        "mains + harmonics, 2 LSB noise",
+        (0..SN)
+            .map(|i| {
+                let t = i as f32 / n;
+                cl(512.0 + 300.0 * (pi2 * 40.0 * t).sin() + 40.0 * (pi2 * 120.0 * t + 1.0).sin() + 15.0 * (pi2 * 200.0 * t).sin() + g(2.0))
+            })
+            .collect(),
+    ));
+    v.push(("sine 400 periods (fast)", (0..SN).map(|i| cl(512.0 + 450.0 * (pi2 * 400.0 * i as f32 / n).sin() + g(0.7))).collect()));
+    v.push(("noise burst on DC", (0..SN).map(|i| cl(512.0 + if (10000..14000).contains(&i) { g(60.0) } else { g(0.8) })).collect()));
+    v.push(("white noise, full scale (raw blocks)", (0..SN).map(|_| (r.next() % 1024) as u16).collect()));
+    v.push(("300 samples", (0..300).map(|i| cl(500.0 + 3.0 * (i as f32 * 0.1).sin())).collect()));
+    v
+}
+
+/// The DLG file of a record, as scope_csv.rs writes it.
+fn scope_file(codes: &[u16], text: &[u8]) -> (Vec<u8>, Vec<usize>) {
+    let (a, b, dt, t0) = (-5.0f32, 10.0 / 1023.0, 1.0 / 12.5e6, codes.len() as u32 / 2);
+    let mut h = vec![0u8; FHDR + text.len() + SCOPE_PAR + 8 * SBLK_MAX + 4];
+    let k = scope_header(text, a, b, dt, t0, codes.len() as u32, &mut h);
+    let plans: Vec<_> = codes.chunks(SBLK).map(scope_plan).collect();
+    let lens: Vec<u32> = plans.iter().map(|p| p.1).collect();
+    let crcs: Vec<u32> = plans.iter().map(|p| p.2).collect();
+    let tl = scope_table(&lens, &crcs, &mut h[k..]);
+    h.truncate(k + tl);
+    let mut ends = vec![];
+    for (c, p) in codes.chunks(SBLK).zip(&plans) {
+        let n0 = h.len();
+        scope_block(c, p.0, &mut |x| h.push(x));
+        assert_eq!(h.len() - n0, p.1 as usize, "plan size");
+        ends.push(h.len());
+    }
+    (h, ends)
+}
+
+fn scope_tests(dir: Option<String>) -> u32 {
     let mut fails = 0;
+    let text = b"# test record\r\ntime_s,volts\r\n";
+    println!("{:<40} {:>8} {:>8} {:>7}", "scope record", "u16 B/s", "DLG B/s", "vs u16");
+    for (si, (name, codes)) in scope_records().into_iter().enumerate() {
+        let (f, ends) = scope_file(&codes, text);
+        let (a, b, dt, t0) = (-5.0f32, 10.0 / 1023.0, 1.0 / 12.5e6, codes.len() as u32 / 2);
+        let mut csv = text.to_vec();
+        for (i, &c) in codes.iter().enumerate() {
+            let mut r = [0u8; SCOPE_ROW];
+            scope_row(a, b, dt, t0, i, c, &mut r);
+            csv.extend_from_slice(&r);
+        }
+        match gen_all(&f) {
+            Some((info, out)) if out == csv && info.rows as usize == codes.len() => {}
+            _ => {
+                println!("FAIL {name}: CSV differs");
+                fails += 1;
+                continue;
+            }
+        }
+        // Random access.
+        let mut g = Gen::open(&f[..], f.len() as u32).unwrap();
+        let mut rr = Rng(3 + si as u64);
+        for _ in 0..400 {
+            let off = rr.next() as usize % (csv.len() + 10);
+            let len = 1 + rr.next() as usize % 900;
+            let mut b = vec![0xAAu8; len];
+            g.read(off as u32, &mut b);
+            let want: Vec<u8> = (off..off + len).map(|i| csv.get(i).copied().unwrap_or(0)).collect();
+            if b != want {
+                println!("FAIL {name}: random read at {off}+{len}");
+                fails += 1;
+                break;
+            }
+        }
+        // Torn file: exactly the whole blocks before the cut.
+        // Header, parameters and table: a cut inside them = not a DLG file.
+        let head = FHDR + text.len() + SCOPE_PAR + 8 * ends.len() + 4;
+        let mut bad = 0;
+        let mut cuts: Vec<usize> = (0..=f.len()).step_by(97).collect();
+        for &e in &ends {
+            cuts.extend([e - 1, e, e + 1]);
+        }
+        for l in cuts.into_iter().filter(|&l| l <= f.len()) {
+            let whole = ends.iter().filter(|&&e| e <= l).count();
+            let rows = (whole * SBLK).min(codes.len());
+            let want = &csv[..text.len() + rows * SCOPE_ROW];
+            match gen_all(&f[..l]) {
+                Some((_, o)) if o == want => {}
+                None if l < head => {}
+                _ => bad += 1,
+            }
+        }
+        if bad > 0 {
+            println!("FAIL {name}: {bad} truncations decode wrong");
+            fails += 1;
+        }
+        let n = codes.len() as f64;
+        let data = (f.len() - (FHDR + text.len() + SCOPE_PAR + 8 * ends.len() + 4)) as f64;
+        println!("{:<40} {:>8.3} {:>8.3} {:>6.1}x  ok", name, 2.0, data / n, 2.0 * n / data);
+        if let Some(d) = &dir {
+            std::fs::write(format!("{d}/s{si}.dlg"), &f).unwrap();
+            std::fs::write(format!("{d}/s{si}.csv"), &csv).unwrap();
+        }
+    }
+    fails
+}
+
+fn main() {
+    let mut fails = scope_tests(std::env::args().nth(1));
     let n = 6000;
     println!("{:<30} {:>6} {:>8} {:>8} {:>7}", "set", "rows", "CSV B/r", "DLG B/r", "ratio");
     for si in 0..9 {

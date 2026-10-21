@@ -138,6 +138,39 @@ def chunk_rows(d, off, pl, t0, nrows, flags, unit):
     return out
 
 
+SBLK = 4096
+
+
+def s_pred(order, j, h):
+    o = min(order, j)
+    if o == 0:
+        return 512
+    if o == 1:
+        return h[0]
+    if o == 2:
+        return 2 * h[0] - h[1]
+    return 3 * h[0] - 3 * h[1] + h[2]
+
+
+def scope_block(d, start, end, n):
+    """The codes of one coded scope block (mode 0..3 = fixed order, 4 = raw)."""
+    bits = Bits(d, start, end)
+    mode = bits.get(3)
+    ad = Ad(16)
+    h = [0, 0, 0]
+    out = []
+    for j in range(n):
+        if mode == 4:
+            x = bits.get(10)
+        else:
+            u = bits.rice(ad.k())
+            ad.upd(u)
+            x = s_pred(mode, j, h) + unzz(u)
+        h = [x, h[0], h[1]]
+        out.append(x & 0x3FF)
+    return out
+
+
 def sci(v, dig):
     """scope_csv.rs sci(): '+d.dd..de+xx' from an f32 computation."""
     f = lambda x: struct.unpack('<f', struct.pack('<f', x))[0]
@@ -177,15 +210,24 @@ def decode(d, errors):
         if zlib.crc32(d[off:off + 20]) != crc:
             raise ValueError('bad scope parameters')
         f = lambda x: struct.unpack('<f', struct.pack('<f', x))[0]
+        nb = (n + SBLK - 1) // SBLK
         p = off + 24
-        for i in range(n):
-            if p + 2 > len(d):
-                errors.append('torn at sample %d' % i)
+        tl = 8 * nb
+        if zlib.crc32(d[p:p + tl]) != struct.unpack_from('<I', d, p + tl)[0]:
+            raise ValueError('bad scope block table')
+        tab = [struct.unpack_from('<II', d, p + 8 * i) for i in range(nb)]
+        p += tl + 4
+        i = 0
+        for bi, (ln, bcrc) in enumerate(tab):
+            if p + ln > len(d) or zlib.crc32(d[p:p + ln]) != bcrc:
+                errors.append('scope block %d: %s' % (bi, 'torn' if p + ln > len(d) else 'CRC error'))
                 break
-            c = struct.unpack_from('<H', d, p)[0] & 0x3FF
-            p += 2
-            t = f(f(i - t0 if i >= t0 else -(t0 - i)) * dt)
-            out.append(sci(t, 5) + ',' + sci(f(a + f(b * c)), 4) + '\r\n')
+            for c in scope_block(d, p, p + ln, min(SBLK, n - bi * SBLK)):
+                t = f(f(i - t0) * dt)
+                out.append(sci(t, 5) + ',' + sci(f(a + f(b * c)), 4) + '\r\n')
+                i += 1
+            p += ln
+        n = i
         return ''.join(out), {'rows': n, 'chunks': 0}
     rows = chunks = 0
     csv = hl

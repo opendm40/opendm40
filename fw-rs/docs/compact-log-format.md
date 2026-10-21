@@ -43,7 +43,7 @@ Hours of logging in 13 MB:
 | 10/s DMM | 17 h | 325 h (13.5 days; 1.11 B/row) | 19x |
 | 40/s FR-38 | 3.6 h | 41 h (2.2 B/row) | 11x |
 | 634/s FR-38 | 14 min | 2.6 h (2.15 B/row) | 11x |
-| scope record | 690 KB / record, 18 records | 53 KB / record, 245 records | 13x |
+| scope record | 690 KB / record, 18 records | ~9-14 KB / record, ~1000 records | 50-75x |
 
 ## 2. Candidates
 
@@ -176,15 +176,44 @@ Bytes of a row are known at encode time (the old row formatter runs into a
 
 ### Scope record (kind 2)
 
-Not entropy coded: the record is written by the screenshot writer, which
-needs the file length up front and fills any block on its own. File: the
-file header (kind 2, unit "V", the CSV header text incl. `time_s,volts`),
-then 24 bytes: f32 a, f32 b (volts = a + b * code), f32 dt (s/sample), u32
-t0 (index of time 0), u32 n, u32 CRC-32 of these 20; then n codes as u16
-(10-bit). 26624 samples: 53 KB instead of 692 KB
-(13x); the CSV export is arithmetic (row i at hl + 26 i, fixed width) with
-`scope_csv::row`. Packing the codes into 10 bits would give 33 KB (21x) at
-the cost of an unaligned fill; not worth it at 245 records per disk.
+File: the file header (kind 2, unit "V", the CSV header text incl.
+`time_s,volts`), then 24 bytes of parameters (f32 a, f32 b: volts = a + b *
+code; f32 dt, s/sample; u32 t0, the index of time 0; u32 n; u32 CRC-32 of
+these 20), the block table (per 4096-sample block: u32 coded bytes, u32
+CRC-32 of them; then u32 CRC-32 of the table), then the coded blocks.
+
+A block (docs/log-format-standards.md section 4): 3 bits mode, 0..3 = the
+FLAC fixed polynomial predictor of that order (chosen per block: the least
+sum of |residual|), 4 = raw 10-bit codes (used when it is smaller, so a
+block is never above 1.25 B/sample); then per sample the adaptive Rice code
+(the DMM coder's) of the zigzag residual; zero-padded to a byte. Predictor
+and Rice state restart per block (sample j < order uses order j, order 0
+predicts 512), so the CSV export seeks to a block through the table and
+decodes forward from its start.
+
+File length up front (the screenshot writer allocates the chain before
+writing): `scope_csv::set` codes every block once to get its length and
+CRC (~1-2 ms per block on the device, a one-off at "Save CSV"); the writer
+then calls `fill` in 512-byte pieces, one per main-loop pass, and a resumable
+encoder (dlog::SEnc) continues where the last piece stopped, so no sample is
+coded twice and a pass costs ~2500 samples at most. No truncation, no
+over-allocation.
+
+Size (tools/dlog-test, synthetic 26624-sample records), bytes per sample:
+
+| record | u16 (before) | DLG | vs u16 |
+|---|---|---|---|
+| DC + 1 LSB noise | 2.000 | 0.370 | 5.4x |
+| sine 13 periods, 0.7 LSB noise | 2.000 | 0.345 | 5.8x |
+| square 10 periods | 2.000 | 0.355 | 5.6x |
+| mains + harmonics, 2 LSB noise | 2.000 | 0.539 | 3.7x |
+| sine 400 periods (fast) | 2.000 | 0.531 | 3.8x |
+| noise burst on DC | 2.000 | 0.377 | 5.3x |
+| white noise, full scale | 2.000 | 1.250 (raw blocks) | 1.6x |
+
+A full record is ~9-14 KB instead of 53 KB (the CSV: 692 KB); the
+fatren-test record (a clean sine) is 5908 bytes. The generated CSV is byte
+for byte the old SCOPnnn.CSV (fatren-test md5, dlog-test vs scope_row).
 
 ### FR-38 raw stream (kind 3, reserved, not implemented)
 

@@ -138,6 +138,8 @@ const MAX_NBLK: u32 = {
 /// File kinds: the screenshot, a scope record CSV (UF-13).
 const K_BMP: u8 = 0;
 const K_CSV: u8 = 1;
+/// Scope record bytes coded per pass (~2500 samples at 0.2 B/sample).
+const CSV_PIECE: usize = 512;
 const _: () = assert!(HDR_LEN % 2 == 0 && BLK % 2 == 0, "block edges fall between pixels");
 
 /// Captured rows, run-length coded (u16 words, per row: tokens until W
@@ -212,6 +214,9 @@ struct Job {
     got: u32,
     /// scratch[0] holds the block being written (`lba`), step `st`.
     filled: bool,
+    /// Scope record: bytes of the current data block filled so far (it is
+    /// filled in CSV_PIECE pieces, one per pass).
+    part: u32,
     lba: u32,
     st: Step,
     /// CRC-32 register of the bytes written / re-read.
@@ -248,6 +253,7 @@ const JOB0: Job = Job {
     ncl: 0,
     got: 0,
     filled: false,
+    part: 0,
     lba: 0,
     st: STEP0,
     crc: 0,
@@ -664,7 +670,18 @@ impl Job {
             let len = (self.len - off).min(BLK as u32) as usize;
             let buf = &mut calbackup::scratch()[0];
             if self.kind == K_CSV {
-                crate::scope_csv::fill(off, &mut buf[..len]);
+                // The coded record (scope_csv.rs) in pieces: ~1 ms of coding
+                // per pass at most, not a whole 4 KiB block (~20000 samples
+                // of a well-compressed record) in one. scratch[0] is ours
+                // across the passes (busy() holds the disk).
+                let p = self.part as usize;
+                let n = (len - p).min(CSV_PIECE);
+                crate::scope_csv::fill(off + p as u32, &mut buf[p..p + n]);
+                self.part += n as u32;
+                if (self.part as usize) < len {
+                    return None;
+                }
+                self.part = 0;
             } else {
                 self.fill(off, &mut buf[..len]);
             }
