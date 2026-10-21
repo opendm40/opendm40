@@ -463,3 +463,10 @@ Emulator (emu/):
       emulator-tested over USB/IP (userspace client). docs/native-boot.md "Unit data".
       Open: device test (Linux kernel attach + mount ro, Windows, macOS); vdisk::init time on the device;
       generated CSV files from the binary logs via vdisk::set_extra (hook ready, no caller).
+
+## DMM page / settings batch (owner notes ../замечания.txt, 2026-10-21)
+- [x] Second stock resistance mode = the stock m+8 "ON" variant (p8set rows, lower test current for
+      in-circuit use). It was ported (second tap on the ohm button, persisted in p[2]) but invisible:
+      now the stock "ON" tag (ON_TAG font, glyph 0x20) on the ohm button (DMM page + combined band)
+      and Normal / "Low current ON" buttons on the Resistor Settings page. (verify on device: tag shows,
+      the ~0.27 mA vs ~0.85 mA test current)

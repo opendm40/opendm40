@@ -241,7 +241,12 @@ pub struct DmmView {
 
 /// Bottom button `i` (0..5) with its stock glyphs, in the box (x, y, 76, 40)
 /// (DMM page: stock (2 + 80 i, BTN_Y); combined view: the function band).
-fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, mode: u8, acdc: bool) {
+/// `ohm_on`: the stock m+8 "ON" (low-current, in-circuit) ohm variant is
+/// selected (dmm.rs `ohm_var`): the ohm button carries the stock small "ON"
+/// tag (gui_v2_6.h: glyph 0x20 of font 0x0806c724 at +(50,19,20,12) of the
+/// 40 px button, align 1; here 2 px higher for the 36 px button and 1 px
+/// right, 3 px clear of the ohm glyph's ink).
+fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, mode: u8, acdc: bool, ohm_on: bool) {
     let c = if selected { SEL } else { BTN };
     sf::rbox(rect(x, y, 76, h), 8, c, outside);
     let ac = matches!(mode, 0 | 2 | 4..=6);
@@ -256,7 +261,12 @@ fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, 
             sf::glyphs(sf::LETTERS, r(0, 0, 36), "A", STATUS_FG, c, 4, 0);
             sf::glyphs(sf::BTN_GLYPH, r(40, 0, 30), if (4..=9).contains(&mode) { sub } else { "\u{4}" }, STATUS_FG, c, 1, 0);
         }
-        2 => sf::glyphs(sf::BTN_GLYPH, r(0, -1, 76), "\u{3a9}", STATUS_FG, c, 8, 0),
+        2 => {
+            sf::glyphs(sf::BTN_GLYPH, r(0, -1, 76), "\u{3a9}", STATUS_FG, c, 8, 0);
+            if ohm_on {
+                sf::glyphs(sf::ON_TAG, rect(x + 51, y + h / 2 - 3, 20, 12), " ", STATUS_FG, c, 1, 0);
+            }
+        }
         3 => sf::glyphs(sf::BTN_GLYPH, r(0, 0, 76), "\u{11}", STATUS_FG, c, 8, 0),
         4 => {
             sf::glyphs(sf::BTN_GLYPH, r(4, -1, 33), "\u{8}", STATUS_FG, c, 8, 0);
@@ -275,12 +285,12 @@ fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, 
 /// measurement bar.
 pub const FUNC_Y: u16 = 258;
 
-pub fn func_band(button: Button, mode: u8, acdc: bool) {
+pub fn func_band(button: Button, mode: u8, acdc: bool, ohm_on: bool) {
     lcd::fill_rect(0, FUNC_Y, lcd::W, MEAS_Y - FUNC_Y, S_BAR);
     lcd::fill_rect(0, FUNC_Y, lcd::W, 1, S_FRAME);
     let sel = button_index(button);
     for i in 0..6 {
-        dmm_button(i, 4 + 79 * i as i16, FUNC_Y as i16 + 4, 36, S_BAR, i == sel, mode, acdc);
+        dmm_button(i, 4 + 79 * i as i16, FUNC_Y as i16 + 4, 36, S_BAR, i == sel, mode, acdc, ohm_on);
     }
 }
 
@@ -344,7 +354,7 @@ impl DmmView {
     }
 
     /// Static part of the standalone DMM page.
-    pub fn draw_static(&mut self, button: Button, mode: u8, acdc: bool) {
+    pub fn draw_static(&mut self, button: Button, mode: u8, acdc: bool, ohm_on: bool) {
         lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
         lcd::fill_rect(0, 0, lcd::W, BAR_H, BAR);
         sf::logo(4, 7, BAR);
@@ -354,7 +364,7 @@ impl DmmView {
         let sel = button_index(button);
         // 36 px tall (rows 280..315) and from x 4: 4 px off the screen edges.
         for i in 0..6 {
-            dmm_button(i, 4 + 79 * i as i16, BTN_Y as i16, 36, BG, i == sel, mode, acdc);
+            dmm_button(i, 4 + 79 * i as i16, BTN_Y as i16, 36, BG, i == sel, mode, acdc, ohm_on);
         }
         self.invalidate();
     }
@@ -729,6 +739,17 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     if let Some((t, warn)) = note {
         range_note(t, warn);
     }
+    if b == Button::Ohm {
+        // The stock's second ohm mode (m+8, toggled by a second tap on the
+        // ohm button; "ON" tag on the button): the p8set rows, a lower test
+        // current for in-circuit measurements. `sub` = Dmm::ohm_var here.
+        for (i, name) in OHM_VARS.iter().enumerate() {
+            let c = if i as u8 == sub { SEL } else { 0x2966 };
+            let r = rect([8, 244][i], 182, 228, 38);
+            sf::rbox(r, 6, c, BG);
+            sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
+        }
+    }
     if matches!(b, Button::Volt | Button::Amp) {
         // Stock: DC (8,182), AC (162,182), AC+DC (319,182), 150x38 each.
         for (i, name) in ["DC", "AC", "AC+DC"].iter().enumerate() {
@@ -758,8 +779,11 @@ fn ok_and_limits_buttons() {
     }
 }
 
+/// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
+pub const OHM_VARS: [&str; 2] = ["Normal", "Low current ON"];
+
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK,
-/// 4 Hold/Limits).
+/// 4 Hold/Limits); ohm: Err(0 / 1) = the OHM_VARS buttons.
 pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
@@ -768,6 +792,9 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
         if x >= r.x - 2 && x < r.x + r.w + 2 && y >= r.y - 3 && y < r.y + r.h + 3 {
             return Some(Ok(i));
         }
+    }
+    if (179..223).contains(&y) && b == Button::Ohm {
+        return Some(Err(if x < 240 { 0 } else { 1 }));
     }
     if (182..220).contains(&y) && matches!(b, Button::Volt | Button::Amp) {
         return Some(Err(if x < 158 { 0 } else if x < 316 { 1 } else { 3 }));

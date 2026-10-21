@@ -509,7 +509,8 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
     d.gen = scope_ui::Txt::new(gen);
     scope_ui::meter_strip(&d);
     if band {
-        ui::func_band(r_button(r), r.mode, r.acdc);
+        // Ohm cases with the "ON" variant tag (worst case for the button).
+        ui::func_band(r_button(r), r.mode, r.acdc, r.mode == 10);
     }
 }
 
@@ -943,7 +944,7 @@ fn main() {
                     r.auto = auto;
                     r.auto_plus = plus;
                     dv.label = *l;
-                    dv.draw_static(Button::Volt, 1, false);
+                    dv.draw_static(Button::Volt, 1, false, false);
                     dv.reading(&r, hold, 0);
                     let mut s = status(0);
                     s.locked = locked;
@@ -991,7 +992,7 @@ fn main() {
                     host::reset(0);
                     let mut dv = ui::DmmView::new();
                     dv.label = *label;
-                    dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc);
+                    dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, r.mode == 10);
                     // History / chart / statistics: the case's own value (an
                     // OL case: 1.0 in its unit and resolution).
                     let v = if r.main.ol { 1.0 } else { r.main.v };
@@ -1022,7 +1023,7 @@ fn main() {
                 let page = |dv: &mut ui::DmmView, steps: &[(Reading, Option<&'static str>, u8)]| {
                     host::reset(0);
                     dv.label = steps[0].1;
-                    dv.draw_static(Button::Volt, steps[0].0.mode, steps[0].0.acdc);
+                    dv.draw_static(Button::Volt, steps[0].0.mode, steps[0].0.acdc, false);
                     for (r, l, lim) in steps {
                         dv.label = *l;
                         dv.reading(r, 0, *lim);
@@ -1380,7 +1381,7 @@ fn main() {
         host::reset(0);
         let (r, _) = find("dcv");
         dv.label = None;
-        dv.draw_static(Button::Volt, 1, false);
+        dv.draw_static(Button::Volt, 1, false, false);
         ui::history(&[(4.8170, 4, "V"); 5], 3, 2);
         dv.reading(&Reading { main: Val { ext: true, ..r.main }, ..r }, 3, meter::V_PASS);
         ui::status_right(&status(0));
@@ -1391,7 +1392,7 @@ fn main() {
         host::reset(0);
         let (r, l) = find("acdc_600mv");
         dv.label = l;
-        dv.draw_static(Button::Volt, r.mode, r.acdc);
+        dv.draw_static(Button::Volt, r.mode, r.acdc, false);
         ui::history(&[(-600.00, 2, "mV"); 5], 5, 4);
         dv.reading(&r, 1, meter::V_HI);
         ui::status_right(&status(0));
@@ -1402,7 +1403,7 @@ fn main() {
         host::reset(0);
         let (r, _) = find("dcma_420mid");
         dv.label = None;
-        dv.draw_static(Button::Amp, r.mode, false);
+        dv.draw_static(Button::Amp, r.mode, false, false);
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d03-dmm-420ma");
@@ -1410,7 +1411,7 @@ fn main() {
             host::reset(0);
             let (r, l) = find(case);
             dv.label = l;
-            dv.draw_static(Button::HzTemp, r.mode, false);
+            dv.draw_static(Button::HzTemp, r.mode, false, false);
             dv.reading(&r, 0, 0);
             ui::status_right(&status(0));
             save(&out, file);
@@ -1428,6 +1429,18 @@ fn main() {
         host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));
         save(&out, "m03-range-v-warn");
+        // Second ohm mode ("ON" low current): Resistor Settings with it
+        // selected, the DMM page with the tag on the ohm button.
+        host::reset(0);
+        ui::range_page(Button::Ohm, Some(7), 1, None);
+        save(&out, "m07-range-ohm-on");
+        host::reset(0);
+        let (r, _) = find("ohm_k");
+        dv.label = None;
+        dv.draw_static(Button::Ohm, r.mode, false, true);
+        dv.reading(&r, 0, 0);
+        ui::status_right(&status(0));
+        save(&out, "d06-dmm-ohm-on");
     }
 
     for (msg, (n, scene)) in &ck.seen {

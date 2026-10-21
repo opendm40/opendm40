@@ -786,6 +786,17 @@ impl Dmm {
     pub fn a_auto(&self) -> u8 {
         self.a_auto
     }
+    /// Select the ohm variant (stock m+8: 0 normal, 1 "ON" low current,
+    /// the p8set rows; r0 always uses the normal row) and re-enter ohm in
+    /// the current range, as the stock's second tap on the ohm button.
+    pub fn set_ohm_var(&mut self, clk: &mut Clock, v: u8) {
+        self.ohm_var = v & 1;
+        if self.mode == 10 {
+            let r = self.range.clamp(0, 6);
+            self.set(clk, 10, r, 300);
+        }
+    }
+
     pub fn ohm_var(&self) -> u8 {
         self.ohm_var
     }
@@ -1269,9 +1280,7 @@ impl Dmm {
             }
             Button::Ohm => {
                 if same {
-                    self.ohm_var ^= 1;
-                    let r = self.range.clamp(0, 6);
-                    self.set(clk, 10, r, 300);
+                    self.set_ohm_var(clk, self.ohm_var ^ 1);
                 } else {
                     self.manual = false;
                     self.set(clk, 10, 6, 2500);
