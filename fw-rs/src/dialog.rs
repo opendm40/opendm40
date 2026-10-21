@@ -47,12 +47,15 @@ pub enum Overlay {
     /// Power-meter wiring dialog (ui::pw::entry_dialog), cancelled at
     /// `until` (ms).
     PowerEntry { until: u64 },
+    /// Power-meter energy reset confirm (`energy_reset`, the power-off
+    /// confirm's box and buttons), cancelled at `until` (ms).
+    EnergyReset { until: u64 },
 }
 
 impl Overlay {
     pub fn until(&self) -> u64 {
         match *self {
-            Overlay::PowerOff { until } | Overlay::Toast { until } | Overlay::PowerEntry { until } => until,
+            Overlay::PowerOff { until } | Overlay::Toast { until } | Overlay::PowerEntry { until } | Overlay::EnergyReset { until } => until,
         }
     }
 }
@@ -87,6 +90,18 @@ pub fn power_off() {
     let b = BOX;
     centred((b.0, b.1, b.2, 40), "Power off?", FG, TITLE_BG);
     centred((b.0, b.1 + 40, b.2, 60), "Cancels in 3 s", FG, BODY_BG);
+    lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
+    frame(b, FRAME);
+    button(NO, "No", BTN);
+    button(YES, "Yes", BTN_RED);
+}
+
+/// Draw the energy reset confirm (power meter: a long press on the energy
+/// readout / the side column); hit test = `power_off_hit`.
+pub fn energy_reset() {
+    let b = BOX;
+    centred((b.0, b.1, b.2, 40), "Reset energy?", FG, TITLE_BG);
+    centred((b.0, b.1 + 40, b.2, 60), "Wh, VAh and the time", FG, BODY_BG);
     lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
     frame(b, FRAME);
     button(NO, "No", BTN);

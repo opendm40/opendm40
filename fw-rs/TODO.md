@@ -505,6 +505,9 @@ Firmware:
         factory DC cal, P = V I, burden comp), AUTO by the B set's AC/DC ratio and the comparator on the tap.
   - [x] 7th DMM function button "W" (64 px buttons, 68 px pitch, DMM page + combined band); the wiring dialog
         only until confirmed once; restored after a reboot; "Power W" on the Current page removed. Persist v7.
+  - [x] Power page round 2 (doc §3.12): real W glyphs (stockfont_w.rs), coupling chip (tap cycles), energy in
+        aux2 + tap on the main value cycles P / Wh / VAh, I in the boxes row, reset with a confirm; the energy is
+        not persisted over a power cycle (owner's call).
   - [ ] Verify on device: the re-check list of doc §3.12 (zero, V cal, f on the square, W entry, DC method /
         AUTO, then T2 / T3 / T4 with current through A).
   - [ ] Not done: RESistive phase cal (flat optimum), BT protocol slot (BT reports the AC A byte), limits (W) in

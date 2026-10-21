@@ -56,6 +56,21 @@ impl App {
                 self.chart_dirty = true;
                 true
             }
+            // The coupling chip: AC -> DC -> AUTO.
+            View::Dmm if ui::pw::coupling_hit(x, y) => {
+                let c = self.dmm.pw.coup;
+                self.dmm.pw_set_coupling(clk, (c + 1) % 3);
+                true
+            }
+            // The main value: P -> Wh -> VAh (display only; the next reading
+            // redraws it).
+            View::Dmm if ui::value_hit(x, y) => {
+                let p = &mut self.dmm.pw;
+                p.main = (p.main + 1) % 3;
+                self.chart_n = 0;
+                self.redraw = true;
+                true
+            }
             // The side column and the power boxes have no other tap action
             // (no MIN / MAX session, no history slot).
             View::Dmm if (x >= 402 && (175..279).contains(&y)) || (153..172).contains(&y) => true,
@@ -109,11 +124,13 @@ impl App {
         }
     }
 
-    /// Long press on the side column in the power meter: reset the energy.
+    /// Long press on the energy readout / the side column in the power
+    /// meter: the reset confirm (dialog.rs; Yes resets Wh, VAh, the time).
     pub(super) fn pw_long_side(&mut self, now: u64) {
-        self.dmm.pw.energy_reset();
-        self.beep(now, 300);
-        self.chart_dirty = true;
+        self.overlay = Some(crate::dialog::Overlay::EnergyReset { until: now + 10_000 });
+        self.redraw = true;
+        crate::dialog::energy_reset();
+        self.beep(now, 50);
     }
 
     /// Per tick: the continuous-current limit expired -> toast + the alert

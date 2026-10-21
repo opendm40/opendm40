@@ -31,6 +31,40 @@
 
 use super::*;
 
+/// Main readout of the power page (a tap on it cycles P -> Wh -> VAh): the
+/// display only; SCPI READ? / the Reading's SI value stay P (S in the
+/// fallback).
+pub const MAIN_P: u8 = 0;
+pub const MAIN_WH: u8 = 1;
+pub const MAIN_VAH: u8 = 2;
+
+/// An energy in the unit that keeps 5 digits: mWh below 1, Wh to 999.99,
+/// kWh above (VAh alike). Returns (value, decimals, unit).
+pub fn energy_format(wh: f32, va: bool) -> (f32, u8, &'static str) {
+    let m = wh.abs();
+    // VAh has no milli step and its kilo step only from 100 kVAh ("mVAh" /
+    // "kVAh" are wider than the unit box).
+    let (k, u) = if m < 1.0 && !va {
+        (1e3, "mWh")
+    } else if m < 1000.0 || (va && m < 100_000.0) {
+        (1.0, if va { "VAh" } else { "Wh" })
+    } else {
+        (1e-3, if va { "kVAh" } else { "kWh" })
+    };
+    let x = wh * k;
+    let a = x.abs();
+    let dec = if a < 10.0 {
+        4
+    } else if a < 100.0 {
+        3
+    } else if a < 1000.0 {
+        2
+    } else {
+        1
+    };
+    (x, dec, u)
+}
+
 /// Function code of the power meter (`Dmm::func`, SCPI, persist): after
 /// 16 / 17 = V / A AC+DC.
 pub const FUNC: u8 = 18;
@@ -309,6 +343,8 @@ pub struct PowerVals {
     pub over_left: u16,
     /// The SPHACAL in force (steps).
     pub sph: i8,
+    /// The main readout (MAIN_*: P, Wh, VAh; a tap on it cycles).
+    pub main: u8,
 }
 
 impl PowerVals {
@@ -341,6 +377,7 @@ impl PowerVals {
         over: 0,
         over_left: 0,
         sph: 0,
+        main: MAIN_P,
     };
 }
 
@@ -448,6 +485,8 @@ pub struct Pw {
     pub r36: u8,
     /// Range changes / restarts since entry (energy gaps).
     pub restarts: u32,
+    /// The main readout (MAIN_*), kept over entries (not persisted).
+    pub main: u8,
     /// Parts kept over the next `pw_apply` (2 V, 4 I: the other channel's
     /// range changed, its scale did not).
     keep: u8,
@@ -542,6 +581,7 @@ impl Pw {
             row: [0; hy::CFG_LEN],
             r36: 0,
             restarts: 0,
+            main: MAIN_P,
             keep: 0,
             vgain: [0.0; 4],
             zx: [0; 6],
@@ -1008,6 +1048,7 @@ impl Dmm {
             over,
             over_left,
             sph: pw.sph,
+            main: pw.main,
         })
     }
 
@@ -1030,6 +1071,7 @@ impl Dmm {
                 vah: pw.va.wh(),
                 secs: (pw.t_int / 1000) as u32,
                 sph: pw.sph,
+                main: pw.main,
                 ..PowerVals::ZERO
             }
         })
@@ -1037,10 +1079,10 @@ impl Dmm {
 
     /// The reading of the power meter (`reading_vals`).
     fn pw_reading(&self, pv: &PowerVals) -> Reading {
-        let (main, v, i, si) = reading_vals(pv);
+        let (main, v, _, si) = reading_vals(pv);
         let mut rd = self.reading(main, si);
         rd.aux1 = Some(v);
-        rd.aux2 = Some(i);
+        rd.aux2 = Some(aux2_val(pv));
         rd.power = Some(*pv);
         rd
     }
@@ -1739,10 +1781,33 @@ pub fn reading_vals(pv: &PowerVals) -> (Val, Val, Val, f32) {
     };
     let i = if pv.i_ol { Val::ol(idec, unit) } else { Val::new(pv.i * us, idec, unit) };
     let (main_si, w) = if pv.alt { (pv.s, false) } else { (pv.p, true) };
-    let (x, dec, u) = p_format(V_LIM[pv.vr.min(3) as usize] * I_LIM[pv.ik.min(5) as usize], main_si, w);
     let ol = pv.v_ol || pv.i_ol;
-    let main = if ol { Val::ol(dec, u) } else { Val::new(x, dec, u) };
+    let main = match pv.main {
+        // Energy (the fallback has no Wh: VAh): never OL, the integral holds.
+        MAIN_WH | MAIN_VAH => {
+            let va = pv.main == MAIN_VAH || pv.alt;
+            let (x, dec, u) = energy_format(if va { pv.vah } else { pv.e_wh }, va);
+            Val::new(x, dec, u)
+        }
+        _ => {
+            let (x, dec, u) = p_format(V_LIM[pv.vr.min(3) as usize] * I_LIM[pv.ik.min(5) as usize], main_si, w);
+            if ol { Val::ol(dec, u) } else { Val::new(x, dec, u) }
+        }
+    };
     (main, v, i, if ol { 0.0 } else { main_si })
+}
+
+/// The second aux readout of the power page: the energy (Wh; VAh in the
+/// fallback) in the large aux face (owner: the energy counter prominent),
+/// or P when the main readout shows the energy (the current is in the
+/// boxes row, `ui::pw`).
+pub fn aux2_val(pv: &PowerVals) -> Val {
+    if pv.main == MAIN_P {
+        let (x, dec, u) = energy_format(if pv.alt { pv.vah } else { pv.e_wh }, pv.alt);
+        Val::new(x, dec, u)
+    } else {
+        reading_vals(&PowerVals { main: MAIN_P, ..*pv }).0
+    }
 }
 
 /// Main-value format of P (or S) for a range pair whose full-scale product
@@ -1912,6 +1977,17 @@ mod tests {
         assert_eq!(cmp_window(0.048, 0.0), None);
         assert_eq!(cmp_window(0.0, 0.01), None);
         assert_eq!(cmp_window(0.5, 0.05), None);
+    }
+
+    #[test]
+    fn energy_formats() {
+        let (x, d, u) = energy_format(0.1234, false);
+        assert!((x - 123.4).abs() < 1e-3 && d == 2 && u == "mWh");
+        assert_eq!(energy_format(0.5, true), (0.5, 4, "VAh"));
+        assert_eq!(energy_format(1.23456, false).1, 4);
+        assert_eq!(energy_format(123.45, true).2, "VAh");
+        assert_eq!(energy_format(-2500.0, false), (-2.5, 4, "kWh"));
+        assert_eq!(energy_format(0.0, false), (0.0, 4, "mWh"));
     }
 
     #[test]

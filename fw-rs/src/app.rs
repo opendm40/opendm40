@@ -1835,7 +1835,17 @@ impl App {
                     Some(false) => self.overlay_close(),
                     None => {}
                 },
-                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. }, Gesture::KeyDown(_))
+                (crate::dialog::Overlay::EnergyReset { .. }, Gesture::Tap(p)) => match crate::dialog::power_off_hit(p.x, p.y) {
+                    Some(true) => {
+                        self.overlay_close();
+                        self.dmm.pw.energy_reset();
+                        self.beep(now, 300);
+                        self.chart_dirty = true;
+                    }
+                    Some(false) => self.overlay_close(),
+                    None => {}
+                },
+                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. }, Gesture::KeyDown(_))
                 | (crate::dialog::Overlay::Toast { .. }, Gesture::Tap(_) | Gesture::KeyDown(_)) => {
                     self.overlay_close()
                 }
@@ -1937,7 +1947,9 @@ impl App {
                 captured = true;
                 self.pw_open_entry(now);
             }
-            Gesture::LongPress(p) if self.view == View::Dmm && self.dmm.pw.on && p.x >= 402 && (175..279).contains(&p.y) => {
+            // Power meter: a long press on the energy readout (aux2) or the
+            // side column asks to reset the energy.
+            Gesture::LongPress(p) if self.view == View::Dmm && self.dmm.pw.on && ((p.x >= 402 && (175..279).contains(&p.y)) || ui::pw::energy_hit(p.x, p.y)) => {
                 captured = true;
                 self.pw_long_side(now);
             }

@@ -526,14 +526,28 @@ impl DmmView {
             self.aux_unit = [None; 2];
             // From x 404: clear of the +1 digit cell (375..402).
             // Power meter fallback "VA": its V and A touch at the stock -1.
-            let sp = if r.main.unit.ends_with("VA") { 1 } else { -1 };
-            sf::label(sf::UNIT, rect(404, 114, 72, 32), unit, VALUE, BG, 4, sp);
+            // The UNIT face has no 'h' (power meter energy: Wh / VAh):
+            // LETTERS, 1 px apart when that fits the box (W and h touch).
+            let uf = if sf::has_all(sf::UNIT, unit) { sf::UNIT } else { sf::LETTERS };
+            let sp = if r.main.unit.ends_with("VA") {
+                1
+            } else if uf.0 != sf::UNIT.0 {
+                // V / A of the stock overhang by 1: 2 px spacing for "VAh".
+                if sf::text_width(uf, unit, 2) <= 72 { 2 } else { 0 }
+            } else {
+                -1
+            };
+            sf::label(uf, rect(404, 114, 72, 32), unit, VALUE, BG, 4, sp);
             // Stock box (437,76,32,32) align 7, widened 3 px right so the
             // 35 px AC glyph is not clipped (ends at 471, 3 px after the
             // limit badge 403..433).
-            // Power meter: AC+DC (method B counts both), DC with the AD1 method.
-            let g = if r.power.is_some_and(|p| p.dc) { "\u{4}" } else { mode_glyph(r.mode, r.acdc || r.power.is_some()) };
-            sf::label(sf::MODE, rect(437, 76, 35, 32), g, VALUE, BG, 7, 0);
+            // Power meter: the coupling chip in this slot (ui::pw::coupling).
+            if r.power.is_none() || !self.power {
+                sf::label(sf::MODE, rect(437, 76, 35, 32), mode_glyph(r.mode, r.acdc || r.power.is_some()), VALUE, BG, 7, 0);
+            } else {
+                // The chip's slot may hold the last function's glyph.
+                self.pwc.coup_invalidate();
+            }
             if !r.acdc {
                 // Leaving AC+DC: the tag slots left of the aux values.
                 for i in 0..2 {
@@ -614,7 +628,14 @@ impl DmmView {
                         self.aux_unit[i] = ukey;
                         let uw = if i == 0 && r.acdc { 54 } else { 76 };
                         lcd::fill_rect((ux - 1) as u16, 36, 4, 30, BG);
-                        sf::label(sf::LETTERS, rect(ux + 3, 36, uw - 3, 30), sf::unit_text(v.unit, &mut u), VALUE, BG, 1, 0);
+                        // Energy units (Wh, VAh: power meter): the 'h'
+                        // ascender is above the caps; 1 px lower, its glyphs
+                        // 1 px apart (W and h touch at 0).
+                        let hh = v.unit.ends_with('h') as i16;
+                        let ut = sf::unit_text(v.unit, &mut u);
+                        let sp = if hh == 1 && sf::text_width(sf::LETTERS, ut, 2) <= uw - 3 { 2 } else { 0 };
+                        lcd::fill_rect((ux + 3) as u16, 36, (uw - 3) as u16, 1, BG);
+                        sf::label(sf::LETTERS, rect(ux + 3, 36 + hh, uw - 3, 30 - hh), ut, VALUE, BG, 1, sp);
                     }
                     self.last_aux[i] = true;
                 }

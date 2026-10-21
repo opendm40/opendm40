@@ -540,9 +540,9 @@ fn r_button(r: &Reading) -> Button {
 
 /// A power-meter reading (dmm::pw::reading_vals, as the Dmm builds it).
 fn pw_rd(pv: dmm::pw::PowerVals) -> Reading {
-    let (main, v, i, si) = dmm::pw::reading_vals(&pv);
+    let (main, v, _, si) = dmm::pw::reading_vals(&pv);
     let (iu, ir) = dmm::pw::iu_ir(pv.ik);
-    let mut r = rd(4 + iu, main, Some(v), Some(i), false);
+    let mut r = rd(4 + iu, main, Some(v), Some(dmm::pw::aux2_val(&pv)), false);
     r.range = ir as i8;
     r.si = si;
     r.auto = pv.v_auto && pv.i_auto;
@@ -564,6 +564,11 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
         ("dc", P { p: -24.012, s: 24.012, q: 0.0, pf: -1.0, v: 12.006, i: 2.0, vdc: 12.006, idc: -2.0, f_hz: 0.0, burden_v: 0.02, e_wh: -1.25, vah: 1.25, secs: 187, p_avg: -24.064, vr: 1, ik: 4, ..z }),
         // The DC (AD1) method: PF / S / Q / f blank, the DC glyph; AUTO.
         ("dc-ad1", P { p: -24.012, s: 24.012, q: 0.0, pf: -1.0, v: -12.006, i: 2.0, vdc: -12.006, idc: 2.0, f_hz: 0.0, burden_v: 0.02, e_wh: -1.25, vah: 1.25, secs: 187, p_avg: -24.064, vr: 1, ik: 4, dc: true, coup: dmm::pw::COUP_AUTO, ..z }),
+        // Main readout cycled to the energy (Wh: kWh worst; VAh) and the
+        // coupling chip in its states.
+        ("main-wh", P { main: dmm::pw::MAIN_WH, e_wh: -99999.0, coup: dmm::pw::COUP_AUTO, ..base }),
+        ("main-vah", P { main: dmm::pw::MAIN_VAH, vah: 0.12345, coup: dmm::pw::COUP_DC, dc: true, ..base }),
+        ("main-mwh", P { main: dmm::pw::MAIN_WH, e_wh: -0.99999, ..base }),
         ("dc-ua", P { p: 5.9999e-3, s: 5.9999e-3, pf: 1.0, v: 9.9999, i: 599.99e-6, vdc: 9.9999, idc: 599.99e-6, vr: 1, ik: 0, dc: true, coup: dmm::pw::COUP_DC, ..z }),
     ]
 }
@@ -1752,7 +1757,7 @@ fn main() {
     {
         let pcs = pw_cases();
         let rc = ui::RateChip { rate: 1, period_ms: 430, applies: false };
-        for (file, k, hold) in [("p01-power-mains", 0usize, 0u8), ("p02-power-worst", 1, 1), ("p03-power-mw-over", 2, 0), ("p04-power-alt", 4, 0), ("p05-power-dc-source", 5, 0), ("p11-power-dc-ad1", 6, 0)] {
+        for (file, k, hold) in [("p01-power-mains", 0usize, 0u8), ("p02-power-worst", 1, 1), ("p03-power-mw-over", 2, 0), ("p04-power-alt", 4, 0), ("p05-power-dc-source", 5, 0), ("p11-power-dc-ad1", 6, 0), ("p12-power-main-wh", 7, 0), ("p13-power-main-vah", 8, 0)] {
             host::reset(0);
             power_page(pcs[k].1, hold, sentinel::Alert::None, rc);
             save(&out, file);
@@ -1761,6 +1766,10 @@ fn main() {
         power_page(pcs[0].1, 0, sentinel::Alert::None, rc);
         ui::pw::entry_dialog(5.0, 30);
         save(&out, "p06-power-entry");
+        host::reset(0);
+        power_page(pcs[0].1, 0, sentinel::Alert::None, rc);
+        crate::dialog::energy_reset();
+        save(&out, "p14-power-energy-reset");
         host::reset(0);
         ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pcs[0].1 });
         ui::pw::settings_status(&pw_status_pw(0, dmm::pw::JOB_VCAL, dmm::pw::JR_OK), 0);

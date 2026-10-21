@@ -326,6 +326,11 @@ struct Placed {
     twin: i16,
 }
 
+/// Every character of `s` has a glyph in `font` (W: ours where missing).
+pub fn has_all(font: Font, s: &str) -> bool {
+    s.chars().all(|c| glyph_or_twin(font, c).is_some())
+}
+
 // Real W glyphs for the stock DMM fonts without one (tools/mkwglyph.py).
 include!("stockfont_w.rs");
 
