@@ -7,6 +7,8 @@
 //     the words already queued, not the remaining transfer size: the stock
 //     driver writes the FIFO only while the free space is LARGER than the
 //     packet it wants to send, so it hung on EP0 with exactly 5 free words.
+//   * CPU register accesses and the USB/IP server's endpoint calls are
+//     serialised (HostLock): lost EPENA clears stalled the bus.
 //
 using System;
 
@@ -45,7 +47,66 @@ public partial class DWC2_OTG : BasicDoubleWordPeripheral, IUSBDevice, IDoubleWo
         base.Reset();
     }
 
-    public IUSBConnection ConnectUSB() => new USBConnection(this);
+    public IUSBConnection ConnectUSB()
+    {
+        lock(HostLock)
+        {
+            return new USBConnection(this);
+        }
+    }
+
+    // The USB/IP server calls the endpoints (TryRead / Write / SETUP) on its
+    // own thread while the CPU keeps running. Register state is one value per
+    // register, updated read-modify-write by both sides: a CPU read of
+    // DIEPCTL racing the host's EPENA clear lost that clear, the driver then
+    // saw its endpoint busy forever, the next IN URB never completed and the
+    // server (strictly in order) stopped answering every later URB, EP0 too.
+    // CPU accesses and host-side calls are serialised on this lock.
+    internal readonly object HostLock = new object();
+
+    public override uint ReadDoubleWord(long offset)
+    {
+        lock(HostLock)
+        {
+            return base.ReadDoubleWord(offset);
+        }
+    }
+
+    public override void WriteDoubleWord(long offset, uint value)
+    {
+        lock(HostLock)
+        {
+            base.WriteDoubleWord(offset, value);
+        }
+        FirePendingNewPackets();
+    }
+
+    private void QueueNewPacket(EndpointIn ep)
+    {
+        lock(pendingNewPackets)
+        {
+            pendingNewPackets.Enqueue(ep);
+        }
+    }
+
+    private void FirePendingNewPackets()
+    {
+        while(true)
+        {
+            EndpointIn ep;
+            lock(pendingNewPackets)
+            {
+                if(pendingNewPackets.Count == 0)
+                {
+                    return;
+                }
+                ep = pendingNewPackets.Dequeue();
+            }
+            ep.FireNewPacket();
+        }
+    }
+
+    private readonly Queue<EndpointIn> pendingNewPackets = new Queue<EndpointIn>();
 
     public long Size => 0x40000;
 

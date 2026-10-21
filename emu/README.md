@@ -161,11 +161,25 @@ enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk
 over MSC (a 4 KiB block = 64 bulk URBs, each a main-loop turn of fw-rs: a
 few seconds in `--fast` mode). Attaching the device to the host kernel
 (`usbip attach`, then `dm40dbg.py` / mounting the disk) needs vhci-hcd and
-root and was not run. The stock's "USB Connect" MSC was not tried yet. Known model issue (2026-10-21): after a few dozen
-bulk transfers the emulated DWC2 sometimes stops answering URBs (EP0 too),
-with the current and the previous fw-rs alike; restart the emulator
-(`mscdump` resumes). OUT data is sent one URB per 64-byte packet (the model
-holds only one packet while the device NAKs).
+root and was not run. The stock's "USB Connect" MSC was not tried yet. Fixed 2026-10-21: "after a few dozen bulk
+transfers the emulated DWC2 stops answering URBs (EP0 too)" was a race in the
+model: the USB/IP server thread cleared DIEPCTL.EPENA while the CPU polled
+that register, the clear was lost, the driver saw its IN endpoint busy
+forever, and the server (one URB at a time, an IN URB waits for data) stopped
+answering everything after it. CPU register accesses and the server's endpoint
+calls are now serialised (`DWC2_OTG.HostLock`); 1500 x 4 KiB MSC reads and
+`usbtmc_stress.py` (5000+ mixed USBTMC exchanges) pass. A Bulk-OUT URB longer
+than 64 bytes is now split into packets (it was dropped as one oversized
+packet: a USBTMC message over 52 bytes never arrived).
+
+Renode's USB/IP server handles URBs strictly in order and an IN URB blocks it
+until the device sends a packet: a client must submit a Bulk-IN URB only when
+a reply is due (a query the device never answers, e.g. an unknown one, or a
+reply later than the client's timeout, leaves the URB pending and every later
+URB, EP0 included, waits behind it). `emu/usbtmc_stress.py` (thousands of
+command / query pairs, multi-packet messages and replies, small TransferSize
+rounds, pipelined URBs, stale REQUESTs, INITIATE_CLEAR, aborts; `--port`,
+`--seed`, `--cases`) exercises fw-rs's USBTMC over it.
 
 ### GDB
 
