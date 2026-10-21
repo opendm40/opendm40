@@ -11,5 +11,5 @@ RUSTUP_HOME="$(cd ../../../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../../../
 B=$(mktemp -d)
 trap 'rm -rf "$B"' EXIT
 CARGO_PKG_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' ../../Cargo.toml | head -1) \
-    rustc --edition 2021 -O --cfg test --cfg 'feature="embedded-fonts"' -A warnings main.rs -o "$B/t"
+    rustc --edition 2021 -O --cfg test -A warnings main.rs -o "$B/t"
 "$B/t" "$@"

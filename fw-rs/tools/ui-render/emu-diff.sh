@@ -15,7 +15,7 @@ mkdir -p "$OUT/ours"
 B=$(mktemp -d)
 trap 'rm -rf "$B"' EXIT
 CARGO_PKG_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' ../../Cargo.toml | head -1) \
-    rustc --edition 2021 -O --cfg test --cfg 'feature="embedded-fonts"' -A warnings main.rs -o "$B/r"
+    rustc --edition 2021 -O --cfg test -A warnings main.rs -o "$B/r"
 "$B/r" "$OUT" --stock "$OUT/ours"
 for p in "$OUT"/ours/e*.ppm; do
     n=$(basename "$p" .ppm)
