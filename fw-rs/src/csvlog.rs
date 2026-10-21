@@ -258,6 +258,19 @@ struct Job {
     /// Chunk coder; FIFO index of the open chunk's header placeholder.
     enc: dlog::Enc,
     hpos: u32,
+    // --- interval mode (Record page, decision 2026-10-22 #1)
+    /// Row interval (ms, 0 = one row per reading) and recording length
+    /// (ms, 0 = until stopped) of this recording (`set_interval` /
+    /// `set_duration` at `start`).
+    ival: u32,
+    dur: u32,
+    /// The open interval: its index k (it ends at k * ival), the sum and
+    /// count of its non-OL readings, its readings, its ORed flags.
+    ik: u32,
+    isum: f64,
+    inum: u32,
+    iall: u32,
+    iflags: u8,
 }
 
 const JOB0: Job = Job {
@@ -305,7 +318,37 @@ const JOB0: Job = Job {
     ulen: 0,
     enc: dlog::ENC0,
     hpos: 0,
+    ival: 0,
+    dur: 0,
+    ik: 1,
+    isum: 0.0,
+    inum: 0,
+    iall: 0,
+    iflags: 0,
 };
+
+/// Record page choices (decision 2026-10-22 #1): row interval in s (0 =
+/// every reading, the default and today's behaviour) and recording length
+/// in s (0 = until stopped). SCPI LOG:CSV:INTerval / DURation accept these
+/// values only; persisted as their indices (app.rs, persist.rs W_REC).
+pub const INTERVALS_S: [u32; 4] = [0, 1, 10, 60];
+pub const DURATIONS_S: [u32; 5] = [0, 600, 3600, 8 * 3600, 24 * 3600];
+/// Row interval / length of the next recording (indices into the above).
+static mut NEXT: (u8, u8) = (0, 0);
+
+/// Settings of the next recording (Record page, LOG:CSV:INTerval /
+/// DURation; the swipe-down REC uses them too). Out-of-range indices = the
+/// defaults. A running recording keeps the values it started with.
+pub fn set_next(ival_idx: u8, dur_idx: u8) {
+    let i = if (ival_idx as usize) < INTERVALS_S.len() { ival_idx } else { 0 };
+    let d = if (dur_idx as usize) < DURATIONS_S.len() { dur_idx } else { 0 };
+    unsafe { *core::ptr::addr_of_mut!(NEXT) = (i, d) };
+}
+
+/// (interval index, duration index) of the next recording.
+pub fn next() -> (u8, u8) {
+    unsafe { *core::ptr::addr_of!(NEXT) }
+}
 
 static mut JOB: Job = JOB0;
 /// The last finished recording, not yet shown (`take_result`).
@@ -355,6 +398,16 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     w.s(", started uptime ");
     w.ms(now_ms);
     w.s(" s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overload\r\n");
+    let (ii, di) = next();
+    j.ival = INTERVALS_S[ii as usize] * 1000;
+    j.dur = DURATIONS_S[di as usize] * 1000;
+    if j.ival > 0 {
+        // Interval mode (Record page): one more comment line; every
+        // reading mode keeps the header byte for byte.
+        w.s("# interval ");
+        w.u(j.ival as u64 / 1000);
+        w.s(" s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overload in it\r\n");
+    }
     w.s("time_s,value,unit,flags\r\n");
     let n = w.n;
     let mut f = [0u8; dlog::FHDR + 384];
@@ -368,46 +421,25 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
 }
 
 /// One reading: `t_ms` = uptime (same clock as `start`), `value` in the
-/// recording's unit, `flags` = F_* bits. Dropped (and counted) when FIFO is
-/// full; the next row that fits carries GAP. Ignored unless recording.
+/// recording's unit, `flags` = F_* bits. Every-reading mode: one row each;
+/// interval mode: added to the open interval (`Job::add`). A row that does
+/// not fit FIFO is dropped (and counted); the next row that fits carries
+/// GAP. Ignored unless recording. Ends the recording at its duration and
+/// at the 49.7-day limit of the u32 ms DLG time.
 pub fn push(t_ms: u64, value: f32, flags: u8) {
     let j = job();
     if j.state != State::Recording || j.stopping {
         return;
     }
-    // The CSV row's length (the chunk header carries the CSV length), then
-    // the coded row; all or nothing (a full FIFO drops it, the next row that
-    // fits carries GAP).
     let t = t_ms.saturating_sub(j.t0_ms);
-    // The DLG time is u32 ms: a recording ends after 49.7 days.
-    if t > u32::MAX as u64 {
+    if (j.dur > 0 && t >= j.dur as u64) || t > u32::MAX as u64 {
         stop();
         return;
     }
-    let fl = (flags & 31) | if j.gap { dlog::F_GAP } else { 0 };
-    let v = dlog::dec6(value);
-    let u = j.unit;
-    let mut row = [0u8; dlog::ROW_MAX];
-    let len = dlog::fmt_row(t, v, &u[..j.ulen], fl, &mut row);
-    let mut e = j.enc;
-    let opening = !e.open;
-    let mut b = [0u8; dlog::ROW_BYTES];
-    let k = e.row(t as u32, v, fl, len as u32, &mut b);
-    // Room for the chunk header (a new chunk) and the close's pad byte.
-    let need = k + if opening { dlog::CHDR } else { 0 } + 1;
-    let used = j.fh.wrapping_sub(j.ft) as usize;
-    if FIFO - used >= need {
-        if opening {
-            j.hpos = j.fh;
-            j.put(&[0u8; dlog::CHDR]);
-        }
-        j.put(&b[..k]);
-        j.enc = e;
-        j.rows += 1;
-        j.gap = false;
+    if j.ival == 0 {
+        j.row(t, value, flags & 31);
     } else {
-        j.dropped += 1;
-        j.gap = true;
+        j.add(t, value, flags & 31);
     }
 }
 
@@ -416,6 +448,9 @@ pub fn push(t_ms: u64, value: f32, flags: u8) {
 pub fn stop() {
     let j = job();
     if j.state == State::Recording {
+        // Interval mode: the open (partial) interval becomes the last row,
+        // stamped at its nominal end like every other row.
+        j.close_interval();
         j.stopping = true;
         j.state = State::Stopping;
     }
@@ -488,6 +523,10 @@ pub fn poll_on(disk: &mut dyn BlockDevice, now_ms: u64) {
     if !active() {
         return;
     }
+    // Duration reached with no reading to notice it (push checks too).
+    if j.state == State::Recording && j.dur > 0 && now_ms.saturating_sub(j.t0_ms) >= j.dur as u64 {
+        stop();
+    }
     if j.phase == Phase::None {
         let pending = j.fh.wrapping_sub(j.ft);
         let due = !j.has_file
@@ -535,6 +574,75 @@ pub fn poll_on(disk: &mut dyn BlockDevice, now_ms: u64) {
 }
 
 impl Job {
+    /// Code one row (`t` ms since the start) into FIFO: the CSV row's
+    /// length (the chunk header carries the CSV length), then the coded
+    /// row; all or nothing (a full FIFO drops it, the next row that fits
+    /// carries GAP).
+    fn row(&mut self, t: u64, value: f32, flags: u8) {
+        let fl = flags | if self.gap { dlog::F_GAP } else { 0 };
+        let v = dlog::dec6(value);
+        let u = self.unit;
+        let mut row = [0u8; dlog::ROW_MAX];
+        let len = dlog::fmt_row(t, v, &u[..self.ulen], fl, &mut row);
+        let mut e = self.enc;
+        let opening = !e.open;
+        let mut b = [0u8; dlog::ROW_BYTES];
+        let k = e.row(t as u32, v, fl, len as u32, &mut b);
+        // Room for the chunk header (a new chunk) and the close's pad byte.
+        let need = k + if opening { dlog::CHDR } else { 0 } + 1;
+        let used = self.fh.wrapping_sub(self.ft) as usize;
+        if FIFO - used >= need {
+            if opening {
+                self.hpos = self.fh;
+                self.put(&[0u8; dlog::CHDR]);
+            }
+            self.put(&b[..k]);
+            self.enc = e;
+            self.rows += 1;
+            self.gap = false;
+        } else {
+            self.dropped += 1;
+            self.gap = true;
+        }
+    }
+
+    /// Interval mode: a reading at `t` ms. Interval k covers
+    /// [(k-1) I, k I); a reading at or past its end first closes it (one row
+    /// at k I) and opens the interval it falls in (intervals without a
+    /// reading write no row: a 2.2 s capacitance reading in 1 s intervals
+    /// leaves holes in time_s, not empty rows that would read as OL).
+    fn add(&mut self, t: u64, value: f32, flags: u8) {
+        let i = self.ival as u64;
+        if t >= self.ik as u64 * i {
+            self.close_interval();
+            self.ik = (t / i + 1) as u32;
+        }
+        self.iall += 1;
+        self.iflags |= flags;
+        if flags & F_OL == 0 && value.is_finite() {
+            self.isum += value as f64;
+            self.inum += 1;
+        }
+    }
+
+    /// Write the open interval's row (if it has readings): time = its end
+    /// k I, value = the mean of its non-OL readings, flags = OR of its
+    /// readings' flags. OL in any reading makes it an OL row, whose value
+    /// the DLG / CSV format does not carry (an OL row prints no value).
+    fn close_interval(&mut self) {
+        if self.ival == 0 || self.iall == 0 {
+            return;
+        }
+        let v = if self.inum > 0 { (self.isum / self.inum as f64) as f32 } else { f32::NAN };
+        let t = self.ik as u64 * self.ival as u64;
+        let f = self.iflags;
+        self.row(t, v, f);
+        self.isum = 0.0;
+        self.inum = 0;
+        self.iall = 0;
+        self.iflags = 0;
+    }
+
     /// Close the open chunk (if any): pad byte, header with CRC patched
     /// into its placeholder in FIFO (not flushed yet: a commit takes FIFO
     /// only after this).
@@ -1137,6 +1245,12 @@ fn for_each_file(disk: &mut dyn BlockDevice, f: &mut dyn FnMut(&FileInfo)) -> Re
         true
     })
     .map_err(|_| GErr::Error)?;
+    cat.free_bytes = free_in(disk, &v, buf)?;
+    Ok(cat)
+}
+
+/// Free bytes of the volume: the free clusters of FAT 1 (a few block reads).
+fn free_in(disk: &mut dyn BlockDevice, v: &Vol, buf: &mut [u8; BLK]) -> Result<u32, GErr> {
     let mut free = 0u32;
     let mut fb = NONE;
     for c in 2..=v.clusters + 1 {
@@ -1150,9 +1264,32 @@ fn for_each_file(disk: &mut dyn BlockDevice, f: &mut dyn FnMut(&FileInfo)) -> Re
             free += 1;
         }
     }
-    cat.free_bytes = free * v.spc * BLK as u32;
-    Ok(cat)
+    Ok(free * v.spc * BLK as u32)
 }
+
+/// Free bytes on the disk (Record page estimate, SCPI LOG:CSV:FREE?).
+/// Synchronous (the boot block + the FAT 1 blocks, ~3 reads); Busy while a
+/// screenshot, a commit, an upload or a host write holds the disk.
+pub fn free_bytes_on(disk: &mut dyn BlockDevice) -> Result<u32, GErr> {
+    let v = gallery_vol(disk)?;
+    free_in(disk, &v, &mut calbackup::scratch()[0])
+}
+
+pub fn free_bytes() -> Result<u32, GErr> {
+    free_bytes_on(disk())
+}
+
+/// Recording time the free space holds at one row per `row_ms` (hours,
+/// rounded down), at a conservative 2 bytes per row (DLG measures
+/// 1.1..1.9), capped at the 49.7-day (u32 ms) limit of one recording.
+pub fn est_hours(free: u32, row_ms: u32) -> u32 {
+    let rows = free as u64 / 2;
+    let ms = rows * row_ms.max(1) as u64;
+    (ms.min(u32::MAX as u64) / 3_600_000) as u32
+}
+
+/// `est_hours` reaches the per-recording limit (shown as "max").
+pub const EST_CAP_H: u32 = (u32::MAX as u64 / 3_600_000) as u32;
 
 /// SCPI MMEMory:CATalog? reply into `out`: `<used>,<free>{,"<name>,<type>,<size>"}`
 /// (bytes; type BIN: S*.BMP, LOG*.DLG, SCOP*.DLG; gallery files only). Entries

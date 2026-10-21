@@ -878,6 +878,43 @@ fsckok $IMGC
 csvok $IMGC LOGS/LOG001.DLG 50 full
 csvok $IMGC LOGS/LOG000.DLG 3000 full
 
+# Interval mode (Record page, decision 2026-10-22 #1): one row per interval
+# at its end, the mean of its readings, flags ORed, OL rows without a value,
+# no row for an interval without readings, the partial last interval at
+# stop; the duration ends the recording on its own.
+echo "--- interval recording"
+IMGI=$W/diski.img
+cp $W/csvbase.img $IMGI
+"$W/t" $IMGI csv ival 1 0 105 | tee $W/i1
+grep -q "ival=Done file=Some(0) rows=10 dropped=0" $W/i1 && echo "ok: 1 s interval, 105 readings at 10/s, 10 with a gap: 10 rows" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGI
+mcopy -n -i $IMGI ::LOGS/LOG000.DLG $W/i.dlg && python3 -I ../dlog.py $W/i.dlg -o $W/i.csv || { echo "FAIL at line $LINENO"; exit 1; }
+python3 -I - $W/i.csv <<'PY' || { echo "FAIL at line $LINENO: interval CSV"; exit 1; }
+import sys
+raw = open(sys.argv[1], 'rb').read().decode()
+lines = raw.split('\r\n')
+assert lines[2] == '# interval 1 s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overload in it', lines[2]
+assert lines[3] == 'time_s,value,unit,flags', lines[3]
+rows = [l for l in lines[4:] if l]
+want = ['1.000,4.50000,V,', '2.000,14.5000,V,', '3.000,,V,OL', '4.000,,V,OL', '5.000,44.5000,V,REL HOLD HI LO',
+        '6.000,54.5000,V,', '8.000,74.5000,V,', '9.000,84.5000,V,', '10.000,94.5000,V,', '11.000,102.000,V,']
+assert rows == want, rows
+print('interval csv ok: %d rows' % len(rows))
+PY
+cp $W/csvbase.img $IMGI
+"$W/t" $IMGI csv ival 2 1 7000 | tee $W/i2
+grep -q "ended by its duration at reading 6000" $W/i2 && grep -q "ival=Done file=Some(0) rows=60 " $W/i2 && echo "ok: 10 s interval, 10 min duration: ends itself at 600 s with 60 rows" || { echo "FAIL at line $LINENO"; exit 1; }
+mcopy -n -i $IMGI ::LOGS/LOG000.DLG $W/i.dlg && python3 -I ../dlog.py $W/i.dlg -o $W/i.csv || { echo "FAIL at line $LINENO"; exit 1; }
+tail -c 200 $W/i.csv | grep -q "^600.000,5949.50,V," && echo "ok: the last row is 600.000 (mean of readings 5900..5999 = 5949.5)" || { echo "FAIL at line $LINENO"; exit 1; }
+cp $W/csvbase.img $IMGI
+"$W/t" $IMGI csv ival 1 1 50 | tee $W/i3
+grep -q "ival=Done file=Some(0) rows=5 " $W/i3 && grep -qE "end_ms=600[0-9]{3}$" $W/i3 && echo "ok: no reading after 5 s: the duration still ends it at 600 s (poll)" || { echo "FAIL at line $LINENO"; exit 1; }
+F=$(grep -o "^free=[0-9]*" $W/i3 | cut -d= -f2)
+FS=$(( $(fsck.fat -n $IMGI | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}') * 4096 ))
+E1=$(( F / 2 / 3600 > 1193 ? 1193 : F / 2 / 3600 ))
+[ "$F" = "$FS" ] && grep -qE "est_1s=$E1 est_every=$(( F / 2 / 36000 )) cap=1193" $W/i3 && echo "ok: free bytes == fsck's free clusters x 4096 ($F); estimate 2 B/row, capped at 1193 h" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGI csv ival 0 0 200 | grep -q "ival=Done file=Some(1) rows=190 " && echo "ok: every-reading mode (index 0): one row per reading" || { echo "FAIL at line $LINENO"; exit 1; }
+
 cp $IMGC $W/logs.img                                 # for the USB volume section
 mcopy -i $W/logs.img $W/keep.bin ::LOGS/LOG002.DLG     # not a DLG file: left out there
 
