@@ -196,7 +196,7 @@ pub struct App {
     /// the frozen value) need a repaint. Compared in tick() so a toggle from
     /// the side key, a BT command or a limit change from SCPI repaint without
     /// a full static redraw (no framebuffer).
-    hold_shown: u16,
+    hold_shown: u32,
     /// Time of the last tick (ms), for the reading path (AutoHold windows).
     now: u64,
     /// RUN key went down at this time in a DMM view, not released yet
@@ -723,12 +723,13 @@ impl App {
     /// Repaint the shown DMM reading in the DMM page / the combined view's
     /// meter strip (only what changed is drawn).
     fn draw_reading(&mut self) {
-        let Some(r) = self.meter.shown().copied() else { return };
+        let Some(r) = self.shown_reading() else { return };
         let (hold, lim) = (self.meter.hold_state(), self.meter.verdict());
         match self.view {
             View::Dmm => {
                 // DBG:PROF? "d.read" (digits + aux rows + labels).
                 crate::prof::enter(crate::prof::DREAD);
+                self.dmm_view.alt = self.strip_alt;
                 self.dmm_view.reading(&r, hold, lim);
                 crate::prof::exit(crate::prof::DREAD);
             }
@@ -1148,17 +1149,20 @@ impl App {
         if now >= self.status_next {
             self.status_next = now + 1000;
             let st = self.status(now);
+            // The 1 s alternation phase: REL / limit verdict in the strip
+            // badge, A-JACK / LIVE? with HOLD in the DMM status slot and
+            // the strip badge (ui::slot_alert).
+            self.strip_alt = !self.strip_alt;
             match self.view {
-                View::Dmm => ui::status_right(&st),
-                View::Gen => ui::gen_status(&st),
-                View::Keypad if !self.kp_dmm() => ui::gen_status(&st),
-                View::DmmScope => {
-                    // REL and a limit verdict share a strip badge: alternate.
-                    self.strip_alt = !self.strip_alt;
-                    if self.view == View::DmmScope {
+                View::Dmm => {
+                    ui::status_right(&st);
+                    if ui::alert_alternates(self.meter.hold_state(), self.live_alert()) {
                         self.draw_reading();
                     }
                 }
+                View::Gen => ui::gen_status(&st),
+                View::Keypad if !self.kp_dmm() => ui::gen_status(&st),
+                View::DmmScope => self.draw_reading(),
                 _ => {}
             }
         }
@@ -1211,9 +1215,27 @@ impl App {
         }
     }
 
-    /// What the DMM status label and limit badge show (see `hold_shown`).
-    fn shown_state(&self) -> u16 {
-        self.meter.hold_state() as u16 | (self.meter.verdict() as u16) << 8
+    /// What the DMM status label and limit badge show (see `hold_shown`),
+    /// with the live alert (an alert that appears under HOLD shows at once).
+    fn shown_state(&self) -> u32 {
+        self.meter.hold_state() as u32 | (self.meter.verdict() as u32) << 8 | (self.live_alert() as u32) << 16
+    }
+
+    /// The wrong-connection alert of the live reading (sentinel.rs
+    /// evaluates the hardware also while HOLD freezes the readout).
+    fn live_alert(&self) -> crate::sentinel::Alert {
+        self.meter.live().map_or(crate::sentinel::Alert::None, |r| r.alert)
+    }
+
+    /// The reading to draw: the shown (possibly frozen) one, with the live
+    /// alert while HOLD / AutoHold hold it (decision 2026-10-22 #5: A-JACK
+    /// / LIVE? alternate with HOLD in the status slot and the strip badge).
+    pub(crate) fn shown_reading(&self) -> Option<Reading> {
+        let mut r = self.meter.shown().copied()?;
+        if self.meter.hold_state() != 0 {
+            r.alert = self.live_alert();
+        }
+        Some(r)
     }
 
     /// Make sure the DMM side is powered (SCPI / BT measurement requests).
