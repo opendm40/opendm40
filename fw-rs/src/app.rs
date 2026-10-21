@@ -61,6 +61,20 @@ fn is_page(v: View) -> bool {
     matches!(v, View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Gallery | View::Help)
 }
 
+/// Keypad targets of the temperature page (after the generator 0..2 / 5
+/// and the limits 3 / 4).
+const KP_T_OFFS: u8 = 6;
+const KP_NTC_R25: u8 = 7;
+const KP_NTC_BETA: u8 = 8;
+
+/// "10.000" -> "10", "4.700" -> "4.7" (keypad prefill).
+fn trim_zeros(s: &str) -> &str {
+    if !s.contains('.') {
+        return s;
+    }
+    s.trim_end_matches('0').trim_end_matches('.')
+}
+
 /// Unit text the keypad's TEXT22 font can show (no deg / micro glyphs).
 fn kp_unit_text(u: &'static str) -> &'static str {
     match u {
@@ -92,7 +106,11 @@ pub struct App {
     combo: View,
     last_input: u64,
     /// A slider (temperature offset) owns the current touch.
-    slider_drag: bool,
+    /// Temperature page key drawn pressed (ui::temp_key), if any.
+    tp_pressed: Option<u8>,
+    /// A new NTC user R25 / Beta while that sensor is active: re-enter it
+    /// (kp_apply has no clock).
+    ntc_reenter: bool,
     /// Help page shown (UF-29, ui::HELP index).
     help_page: usize,
     /// Idle power-off warnings given since the last input (UF-28).
@@ -367,7 +385,8 @@ impl App {
             beep_until: 0,
             off_warned: 0,
             help_page: 0,
-            slider_drag: false,
+            tp_pressed: None,
+            ntc_reenter: false,
             last_raw: None,
             redraw: true,
             meas_next: 0,
@@ -451,7 +470,7 @@ impl App {
             View::Dmm => (true, false),
             View::DmmScope => (true, true),
             // The limits keypad is a DMM page: keep the rails as they are.
-            View::Keypad if matches!(self.kp_target, 3 | 4) => (self.scope.dmm_rail(), self.scope.powered()),
+            View::Keypad if self.kp_dmm() => (self.scope.dmm_rail(), self.scope.powered()),
             View::Scope | View::Gen | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
@@ -493,6 +512,8 @@ impl App {
             View::Keypad => {
                 if matches!(self.kp_target, 3 | 4) {
                     self.limits_page();
+                } else if self.kp_dmm() {
+                    self.with_temp_page(|p| ui::temp_page(p));
                 } else {
                     ui::gen_static(&self.gen);
                 }
@@ -503,31 +524,7 @@ impl App {
             }
             View::Limits => self.limits_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
-            View::Range if self.dmm.hy_mode() == 15 => {
-                // Temperature: sensor, its offset, an info line.
-                let k = self.dmm.t_sensor();
-                let mut b = [0u8; 64];
-                let mut n = 0;
-                let mut put = |t: &[u8]| {
-                    let m = t.len().min(64 - n);
-                    b[n..n + m].copy_from_slice(&t[..m]);
-                    n += m;
-                };
-                let mut t = [0u8; 16];
-                // (The offset is the slider's value.)
-                if let Some((_, _, i, _)) = self.dmm.t_excitation() {
-                    // Estimated sensor current (dmm.rs T_VSRC, unverified).
-                    put(b"Sensor current ~");
-                    put(dmm::format(&mut t, i * 1e3, 3).as_bytes());
-                    put(b" mA");
-                } else if let Some((cj, _)) = self.dmm.t_cj(u64::MAX) {
-                    let (v, u) = self.dmm.t_disp(cj);
-                    put(b"Cold junction ");
-                    put(dmm::format(&mut t, v, 1).as_bytes());
-                    put(if u == "\u{b0}F" { b" F" } else { b" C" });
-                }
-                ui::temp_page(k, self.dmm.t_offs(k), core::str::from_utf8(&b[..n]).unwrap_or(""));
-            }
+            View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(|p| ui::temp_page(p)),
             View::Range => {
                 let b = self.dmm.button();
                 let sel = self.range_sel();
@@ -555,7 +552,7 @@ impl App {
                     core::str::from_utf8(&vb[..n]).unwrap_or(""),
                     crate::meter::SMOOTH_NAMES[self.meter.smoothing() as usize],
                     if self.dmm_view.bar_on { "Bargraph" } else { "History" },
-                    if self.dmm.temp_f() { "\u{b0}F" } else { "\u{b0}C" },
+                    if self.dmm.temp_f() { "F (Fahrenheit)" } else { "C (Celsius)" },
                     if self.sp.swipes { "Top bar" } else { "Off (stock)" },
                     if self.sp.press_fx { "ON" } else { "OFF (stock)" },
                     crate::scope_ui::TAP_NAMES[self.sp.tap_mode.min(2) as usize],
@@ -824,8 +821,23 @@ impl App {
     fn kp_kind(&self) -> u8 {
         match self.kp_target {
             0 => ui::KP_FREQ,
-            1 | 2 | 5 => ui::KP_NUM,
+            1 | 2 | 5 | KP_NTC_R25 | KP_NTC_BETA => ui::KP_NUM,
             _ => ui::KP_SIGNED,
+        }
+    }
+
+    /// The keypad edits a DMM setting (limits, temperature page): DMM
+    /// rails, no generator status, back to that page.
+    fn kp_dmm(&self) -> bool {
+        matches!(self.kp_target, 3 | 4 | KP_T_OFFS | KP_NTC_R25 | KP_NTC_BETA)
+    }
+
+    /// Where OK / cancel / MENU on the keypad return to.
+    fn kp_back(&self) -> View {
+        match self.kp_target {
+            3 | 4 => View::Limits,
+            KP_T_OFFS | KP_NTC_R25 | KP_NTC_BETA => View::Range,
+            _ => View::Gen,
         }
     }
 
@@ -1014,7 +1026,7 @@ impl App {
             match self.view {
                 View::Dmm => ui::status_right(&st),
                 View::Gen => ui::gen_status(&st),
-                View::Keypad if !matches!(self.kp_target, 3 | 4) => ui::gen_status(&st),
+                View::Keypad if !self.kp_dmm() => ui::gen_status(&st),
                 View::DmmScope => {
                     // REL and a limit verdict share a strip badge: alternate.
                     self.strip_alt = !self.strip_alt;
@@ -1125,6 +1137,9 @@ impl App {
             1 => crate::dmm::format(&mut t, s.amp_v, 2),
             2 => crate::dmm::format(&mut t, s.duty as f32 / 100.0, 1),
             5 => s.offset_v.map_or("", |o| crate::dmm::format(&mut t, o, 2)),
+            KP_T_OFFS => crate::dmm::format(&mut t, self.dmm.t_offs(self.dmm.t_sensor()), 1),
+            KP_NTC_R25 => trim_zeros(crate::dmm::format(&mut t, self.dmm.ntc_user().0 / 1000.0, 3)),
+            KP_NTC_BETA => crate::dmm::format(&mut t, self.dmm.ntc_user().1, 0),
             _ => "",
         };
         let n = pre.len().min(self.kp_buf.len() - 1);
@@ -1145,6 +1160,9 @@ impl App {
             1 => ("Vpp", "V"),
             2 => ("Duty", "%"),
             5 => ("Offset", "V"),
+            KP_T_OFFS => ("Offset", "C"),
+            KP_NTC_R25 => ("R25", "k"),
+            KP_NTC_BETA => ("Beta", "K"),
             3 => ("Upper", kp_unit_text(self.kp_unit)),
             _ => ("Lower", kp_unit_text(self.kp_unit)),
         }
@@ -1159,6 +1177,29 @@ impl App {
             return;
         }
         let Some(v) = crate::scpi::parse_num(&self.kp_buf[..n]) else { return };
+        match self.kp_target {
+            KP_T_OFFS => {
+                let k = self.dmm.t_sensor();
+                self.dmm.set_t_offs(k, v);
+                return;
+            }
+            KP_NTC_R25 | KP_NTC_BETA => {
+                // Limits: dmm.rs set_ntc_user (R25 100 ohm..10 Mohm, Beta
+                // 1000..10000 K). Re-enter the sensor so the NTC entry range
+                // (t_range0) follows a new R25.
+                let (r25, b) = self.dmm.ntc_user();
+                if self.kp_target == KP_NTC_R25 {
+                    self.dmm.set_ntc_user(v * 1000.0, b);
+                } else {
+                    self.dmm.set_ntc_user(r25, v);
+                }
+                if self.dmm.t_sensor() == 6 {
+                    self.ntc_reenter = true;
+                }
+                return;
+            }
+            _ => {}
+        }
         if matches!(self.kp_target, 3 | 4) {
             // DMM limit, typed in the unit shown on the keypad; stored SI.
             // Setting a limit turns the check on.
@@ -1637,8 +1678,27 @@ impl App {
             }
         }
         let mut captured = false;
-        if let Gesture::Down(_) = g {
-            self.slider_drag = false;
+        // Temperature page pressed feedback (the keypad's rule below).
+        if self.temp_page_on() {
+            let k = self.dmm.t_sensor();
+            match g {
+                Gesture::Down(p) => {
+                    if let Some(c) = self.tp_pressed.take() {
+                        self.with_temp_page(|tp| ui::temp_key(tp, c, false));
+                    }
+                    self.tp_pressed = ui::temp_hit(k, p.x, p.y);
+                    if let Some(c) = self.tp_pressed {
+                        self.with_temp_page(|tp| ui::temp_key(tp, c, true));
+                    }
+                }
+                Gesture::Drag(_, p, _) | Gesture::Move(_, p) if ui::temp_hit(k, p.x, p.y) == self.tp_pressed => {}
+                Gesture::Grab(_) => {}
+                _ => {
+                    if let Some(c) = self.tp_pressed.take() {
+                        self.with_temp_page(|tp| ui::temp_key(tp, c, false));
+                    }
+                }
+            }
         }
         // Keypad pressed-key feedback (ui-review #11): the key under the
         // finger is drawn pressed from touch-down until the touch ends.
@@ -1677,7 +1737,6 @@ impl App {
                 crate::dialog::power_off();
                 self.beep(now, 50);
             }
-            Gesture::Cancel => self.slider_drag = false,
             Gesture::KeyDown(c) => {
                 self.beep(now, 50);
                 self.key(clk, c);
@@ -1715,20 +1774,6 @@ impl App {
                 self.beep(now, 300);
                 self.chart_dirty = true;
             }
-            // Temperature offset slider: the touch belongs to it; the value
-            // follows the finger (down sets it at once).
-            Gesture::Down(p) if self.view == View::Range && self.dmm.hy_mode() == 15 && ui::T_OFFS.hit(p.x, p.y) => {
-                captured = true;
-                self.slider_drag = true;
-                self.set_t_offs(ui::T_OFFS.value_at(p.x));
-            }
-            Gesture::Drag(_, p, _) if self.slider_drag => {
-                captured = true;
-                if self.view == View::Range && self.dmm.hy_mode() == 15 {
-                    self.set_t_offs(ui::T_OFFS.value_at(p.x));
-                }
-            }
-            Gesture::Up(_) => self.slider_drag = false,
             _ => {}
         }
         captured
@@ -1887,7 +1932,7 @@ impl App {
                         View::Settings
                     }
                     View::Settings => View::Menu,
-                    View::Keypad if matches!(self.kp_target, 3 | 4) => View::Limits,
+                    View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Menu | View::Range | View::Keypad | View::Limits => self.back_view,
                     _ => View::Menu,
                 };
@@ -1982,7 +2027,7 @@ impl App {
             }
             View::Keypad => {
                 let freq = self.kp_target == 0;
-                let back = if matches!(self.kp_target, 3 | 4) { View::Limits } else { View::Gen };
+                let back = self.kp_back();
                 let key = ui::keypad_hit(self.kp_kind(), x, y);
                 // Select-all prefill: the first digit / '.' / backspace
                 // replaces the whole value; H/K/M keep it selected (a unit
@@ -2003,6 +2048,11 @@ impl App {
                     Some(b'=') => {
                         if self.kp_edit {
                             self.kp_apply();
+                        }
+                        if core::mem::take(&mut self.ntc_reenter) {
+                            self.dmm.set_t_sensor(clk, 6);
+                            self.func_changed();
+                            self.last_raw = None;
                         }
                         self.show(back, clk);
                     }
@@ -2025,7 +2075,9 @@ impl App {
                         let digits = self.kp_buf[..self.kp_n].iter().filter(|d| d.is_ascii_digit()).count();
                         let ok = match self.kp_target {
                             0 => self.kp_n < 7,
-                            1 | 2 | 5 => self.kp_n < 5,
+                            1 | 2 | 5 | KP_NTC_BETA => self.kp_n < 5,
+                            KP_T_OFFS => self.kp_n < 5,
+                            KP_NTC_R25 => self.kp_n < 7,
                             _ => c == b'.' || digits < 5,
                         };
                         if ok && self.kp_n < self.kp_buf.len() - 1 && !(c == b'.' && self.kp_buf[..self.kp_n].contains(&b'.')) {
@@ -2048,13 +2100,13 @@ impl App {
             }
             View::Range if self.dmm.hy_mode() == 15 => {
                 let k = self.dmm.t_sensor();
-                match ui::temp_hit(x, y) {
-                    Some(255) => {
+                match ui::temp_hit(k, x, y) {
+                    Some(ui::TK_OK) => {
                         let v = self.back_view;
                         self.show(v, clk);
                         return;
                     }
-                    Some(254) => {
+                    Some(ui::TK_LIMITS) => {
                         self.show(View::Limits, clk);
                         return;
                     }
@@ -2065,13 +2117,25 @@ impl App {
                             self.last_raw = None;
                         }
                     }
-                    Some(7) => {
-                        self.set_t_offs(0.0);
+                    Some(ui::TK_UNIT) => {
+                        let f = !self.dmm.temp_f();
+                        self.set_temp_f(f);
+                    }
+                    Some(i @ (ui::TK_MINUS | ui::TK_PLUS)) => {
+                        let d = if i == ui::TK_MINUS { -0.1 } else { 0.1 };
+                        self.set_t_offs(self.dmm.t_offs(k) + d);
                         return;
                     }
-                    Some(i @ 8..=9) => {
-                        let d = if i == 8 { -ui::T_OFFS.step } else { ui::T_OFFS.step };
-                        self.set_t_offs(self.dmm.t_offs(k) + d);
+                    Some(ui::TK_OFFS) => {
+                        self.kp_open(KP_T_OFFS, clk);
+                        return;
+                    }
+                    Some(ui::TK_R25) => {
+                        self.kp_open(KP_NTC_R25, clk);
+                        return;
+                    }
+                    Some(ui::TK_BETA) => {
+                        self.kp_open(KP_NTC_BETA, clk);
                         return;
                     }
                     Some(_) | None => return,
@@ -2345,19 +2409,60 @@ impl App {
     }
 
     /// A slider owns the current touch (main.rs: capture it with
-    /// gesture::Tracker::capture_direct, no hold-to-grab).
+    /// gesture::Tracker::capture_direct, no hold-to-grab). No DMM page has
+    /// a slider since the temperature offset became a stepper.
     pub fn slider_active(&self) -> bool {
-        self.slider_drag
+        false
     }
 
-    /// Temperature page: the current sensor's offset, redrawing only the
-    /// value and the slider (also on every drag step).
+    /// The temperature page's state (sensor, offset, unit, NTC user
+    /// parameters, info line) for drawing it or one of its keys.
+    fn with_temp_page(&self, f: impl FnOnce(&ui::TempPage)) {
+        let k = self.dmm.t_sensor();
+        let mut b = [0u8; 64];
+        let mut n = 0;
+        let mut put = |t: &[u8]| {
+            let m = t.len().min(64 - n);
+            b[n..n + m].copy_from_slice(&t[..m]);
+            n += m;
+        };
+        let mut t = [0u8; 16];
+        if let Some((_, _, i, _)) = self.dmm.t_excitation() {
+            // Estimated sensor current (dmm.rs T_VSRC, unverified).
+            put(b"Sensor current ~");
+            put(dmm::format(&mut t, i * 1e3, 3).as_bytes());
+            put(b" mA");
+        } else if let Some((cj, _)) = self.dmm.t_cj(u64::MAX) {
+            let (v, u) = self.dmm.t_disp(cj);
+            put(b"Cold junction ");
+            put(dmm::format(&mut t, v, 1).as_bytes());
+            put(if u == "\u{b0}F" { b" F" } else { b" C" });
+        }
+        let (r25, beta) = self.dmm.ntc_user();
+        let p = ui::TempPage {
+            sensor: k,
+            offs: self.dmm.t_offs(k),
+            unit_f: self.dmm.temp_f(),
+            r25,
+            beta,
+            info: core::str::from_utf8(&b[..n]).unwrap_or(""),
+        };
+        f(&p);
+    }
+
+    /// Temperature page: the current sensor's offset (C, clamped to
+    /// -20..20), redrawing only the value field.
     fn set_t_offs(&mut self, c: f32) {
         let k = self.dmm.t_sensor();
         self.dmm.set_t_offs(k, c);
         if self.view == View::Range && self.dmm.hy_mode() == 15 {
-            ui::temp_offset(self.dmm.t_offs(k));
+            self.with_temp_page(|p| ui::temp_key(p, ui::TK_OFFS, false));
         }
+    }
+
+    /// The temperature page is shown.
+    fn temp_page_on(&self) -> bool {
+        self.view == View::Range && self.dmm.hy_mode() == 15
     }
 
     /// Global temperature unit (Settings 2/2, SCPI UNIT:TEMP): a change
