@@ -1,21 +1,26 @@
-//! Power-meter screens (dmm::pw, docs/power-meter-and-misconnect.md 3.9),
-//! a child of ui.rs, in the stock DMM page's slots and visual language:
+//! Power-meter screens (dmm::pw, docs/power-meter-and-misconnect.md 3.9 /
+//! 3.12), a child of ui.rs, in the stock DMM page's slots and visual
+//! language:
 //!
 //!   status bar  AUTO / MANU (both channels), HOLD / alerts as everywhere
-//!   aux rows    Vrms (aux1), Irms (aux2): the stock LETTERS rows
-//!   main        P (fallback: S) in the F78 cells; unit "W" in the stock UNIT
-//!               face (our W of that face, stockfont_w.rs), the AC+DC
-//!               glyph above it (P counts AC and DC)
-//!   history row the five 88 x 19 boxes: PF, S, Q, f, burden voltage (F14
-//!               tag + HIST value; units the HIST face lacks in F14)
-//!   chart       P (the main value), as every function
-//!   side column Wh, VAh, the energy box (run / pause, time; tap = run /
-//!               pause, long press = reset), average P, ranges / the
-//!               continuous-current countdown
+//!   aux rows    Vrms (aux1); the energy (aux2: Wh, mWh / kWh; VAh in the
+//!               fallback; P while the main readout shows the energy) in the
+//!               stock LETTERS rows; long press = reset (confirm)
+//!   main        P (fallback: S), or Wh / VAh (a tap on it cycles), in the F78
+//!               cells; unit in the stock UNIT face (our W of that face,
+//!               stockfont_w.rs), LETTERS for the energy units (UNIT has no h)
+//!   chip        the coupling above the unit: AC / DC / AUTO over the method
+//!               in use; tap = AC -> DC -> AUTO (`coupling`)
+//!   history row the five 88 x 19 boxes: I, PF, S, Q, f (F14 tag + HIST
+//!               value; units the HIST face lacks in F14)
+//!   chart       the main readout, as every function
+//!   side column burden V, VAh, the energy box (run / pause, time; tap = run /
+//!               pause, long press = reset with a confirm), average P,
+//!               ranges / the continuous-current countdown
 //!
-//! Entry: long press on the A button or "Power" on the Current Settings page
-//! -> the wiring dialog (`entry_dialog`) -> OK. Any function button leaves.
-//! The MF key opens the Power Settings page (`settings_page`).
+//! Entry: the W function button (the wiring dialog until confirmed once),
+//! a long press on the A button. Any other function button leaves. The MF
+//! key opens the Power Settings page (`settings_page`).
 
 use super::*;
 use crate::dmm::pw::{self, PowerVals};
@@ -25,11 +30,45 @@ use crate::dmm::pw::{self, PowerVals};
 pub struct PwCache {
     rows: [u32; 5],
     side: [u32; 5],
+    coup: u32,
 }
 
 impl PwCache {
     pub const fn new() -> Self {
-        PwCache { rows: [0; 5], side: [0; 5] }
+        PwCache { rows: [0; 5], side: [0; 5], coup: 0 }
+    }
+
+    /// Redraw the coupling chip with the next reading.
+    pub fn coup_invalidate(&mut self) {
+        self.coup = 0;
+    }
+}
+
+/// The coupling chip above the unit (the stock mode-glyph / limit-badge
+/// slot, free in the power meter): "AC" / "DC", or "AUTO" over the method
+/// in use. A tap cycles AC -> DC -> AUTO (as the Power Settings button).
+pub const COUP_CHIP: sf::Rect = rect(404, 72, 72, 36);
+
+pub fn coupling_hit(x: u16, y: u16) -> bool {
+    let (x, y) = (x as i16, y as i16);
+    x >= COUP_CHIP.x - 2 && y >= COUP_CHIP.y - 2 && y < COUP_CHIP.y + COUP_CHIP.h + 3
+}
+
+fn coupling(c: &mut PwCache, pv: &PowerVals) {
+    let k = 1 + pv.coup as u32 * 2 + pv.dc as u32;
+    if c.coup == k {
+        return;
+    }
+    c.coup = k;
+    let r = COUP_CHIP;
+    let fill = if pv.coup == pw::COUP_AUTO { SEL } else { 0x2966 };
+    sf::rbox(r, 6, fill, BG);
+    let m = if pv.dc { "DC" } else { "AC" };
+    if pv.coup == pw::COUP_AUTO {
+        sf::glyphs(sf::F14, rect(r.x, r.y + 3, r.w, 14), "AUTO", STATUS_FG, fill, 8, 1);
+        sf::glyphs(sf::F14, rect(r.x, r.y + 19, r.w, 14), m, STATUS_FG, fill, 8, 1);
+    } else {
+        sf::glyphs(sf::TEXT22, r, m, STATUS_FG, fill, 8, 1);
     }
 }
 
@@ -119,6 +158,7 @@ impl DmmView {
     /// The power boxes in the history row's place (redrawn per box when its
     /// text changed). PF, Q are "--" in the fallback (no phase relation).
     pub fn power_row(&mut self, pv: &PowerVals) {
+        coupling(&mut self.pwc, pv);
         let mut b = [0u8; 16];
         // DC method: no phase relation, no AC: PF / S / Q / f blank ("--").
         let pf = if pv.pf.is_finite() && !pv.dc { crate::dmm::format(&mut b, pv.pf, 3) } else { "--" };
@@ -133,20 +173,25 @@ impl DmmView {
         let (fv, fu) = if pv.f_hz >= 1000.0 { (pv.f_hz * 1e-3, "kHz") } else { (pv.f_hz, "Hz") };
         let mut ft = T::new();
         ft.push(if pv.f_hz > 0.0 && !pv.dc { sig_text(&mut b, fv, if pv.f_hz >= 1000.0 { 3 } else { 4 }) } else { "--" });
-        let mut bt = T::new();
-        bt.push(sig_text(&mut b, pv.burden_v, 4));
+        // The current (the aux row carries V and the energy): the reading's
+        // I in its range format, ASCII unit (no micro in HIST / F14).
+        let iv = pw::reading_vals(pv).2;
+        let mut it = T::new();
+        // 4 significant digits as S / Q (the box holds a tag, value, unit).
+        it.push(if iv.ol { "0L" } else { sig_text(&mut b, iv.v, 4) });
+        let iu = match iv.unit {
+            "\u{b5}A" => "uA",
+            u => u,
+        };
         let (su, qu, fu) = if pv.dc { ("", "", "") } else { (su, qu, fu) };
-        let items: [(&str, &T, &str); 5] = [("PF", &pft, ""), ("S", &st, su), ("Q", &qt, qu), ("f", &ft, fu), ("Vb", &bt, "V")];
+        let items: [(&str, &T, &str); 5] = [("I", &it, iu), ("PF", &pft, ""), ("S", &st, su), ("Q", &qt, qu), ("f", &ft, fu)];
         for (i, (tag, t, u)) in items.iter().enumerate() {
             let mut k = T::new();
             k.push(t.s()).push(u).push(if pv.comp { "c" } else { "" });
             let key = k.key();
             if self.pwc.rows[i] != key {
                 self.pwc.rows[i] = key;
-                // Burden box: amber with the compensation off and the drop
-                // above 1 % of the V reading (it is inside P then).
-                let warn = i == 4 && !pv.comp && pv.burden_v > 0.01 * pv.v;
-                power_box(i, tag, t.s(), u, warn);
+                power_box(i, tag, t.s(), u, false);
             }
         }
     }
@@ -156,19 +201,23 @@ impl DmmView {
 /// time; same rows, same F14 face, the REL box is the energy box).
 pub fn side(c: &mut PwCache, pv: &PowerVals) {
     let mut b = [0u8; 16];
-    // Wh / VAh rows, label dim left, value right (no unit: the label is it).
-    let wh = if pv.alt { "--" } else { sig_text(&mut b, pv.e_wh, 5) };
+    // Burden voltage (amber with the compensation off and the drop above 1 %
+    // of the V reading: it is inside P then) and VAh; label dim left, value
+    // right. The Wh moved to the aux row (large).
     let mut t0 = T::new();
-    t0.push(wh);
+    t0.push(sig_text(&mut b, pv.burden_v, 4));
+    let warn = !pv.comp && pv.burden_v > 0.01 * pv.v;
     let mut b1 = [0u8; 16];
     let mut t1 = T::new();
     t1.push(sig_text(&mut b1, pv.vah, 5));
-    for (i, (lbl, t)) in [("Wh", &t0), ("VAh", &t1)].iter().enumerate() {
-        let k = t.key();
+    for (i, (lbl, t, fg)) in [("Vb", &t0, if warn { VALUE } else { STATUS_FG }), ("VAh", &t1, STATUS_FG)].iter().enumerate() {
+        let mut kk = T::new();
+        kk.push(t.s()).push(if *fg == VALUE { "w" } else { "" });
+        let k = kk.key();
         if c.side[i] != k {
             c.side[i] = k;
             sf::label(sf::F14, rect(SIDE_X, SIDE_Y[i], 24, 14), lbl, DIM, BG, 0, 1);
-            sf::label(sf::F14, rect(SIDE_X + 26, SIDE_Y[i], SIDE_R - SIDE_X - 26, 14), t.s(), STATUS_FG, BG, 3, 1);
+            sf::label(sf::F14, rect(SIDE_X + 26, SIDE_Y[i], SIDE_R - SIDE_X - 26, 14), t.s(), *fg, BG, 3, 1);
         }
     }
     // Energy box (405, 205, 71, 38): "E" + RUN / PAUSE, the time below.
@@ -221,6 +270,11 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
 pub fn side_clear(c: &mut PwCache) {
     lcd::fill_rect(402, 174, 78, 105, BG);
     c.side = [0; 5];
+}
+
+/// The energy readout (aux2 slot, `pw::aux2_val`): long press = reset.
+pub fn energy_hit(x: u16, y: u16) -> bool {
+    x >= 256 && (34..68).contains(&y)
 }
 
 /// Energy box tap target (the stock REL box).

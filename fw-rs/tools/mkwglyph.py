@@ -75,7 +75,9 @@ def w_from_face(f):
     width = max(1, round(w.size[0] * sx))
     r = w.resize((width, e['h']), Image.BOX)
     px = [[min(15, (r.getpixel((x, y)) + 8) // 17) for x in range(width)] for y in range(e['h'])]
-    return dict(w=width, h=e['h'], adv=width + e['adv'] - e['w'], yoff=e['yoff'], px=px)
+    # adv = w + 1: a 1 px gap after the W at spacing 0 (the stock V has adv
+    # w - 1, which overhangs; a W is followed by 'h' in the energy units).
+    return dict(w=width, h=e['h'], adv=width + 1, yoff=e['yoff'], px=px)
 
 
 def w_from_m(f):
