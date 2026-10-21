@@ -969,7 +969,9 @@ fn main() {
         ("screen", Bx::new(0, 0, 480, 320)),
         ("bar", Bx::new(0, 0, 480, ui::BAR_H as i32)),
         ("top", Bx::new(0, 34, 480, 118)),
-        ("history", Bx::new(0, 150, 480, 25)),
+        // History row 153..171, or the UF-30 bargraph in its place
+        // (rows 147..172).
+        ("history", Bx::new(0, 144, 480, 32)),
         ("axis", Bx::new(0, 174, 80, 106)),
         ("side", Bx::new(402, 174, 78, 106)),
         ("buttons", Bx::new(0, 277, 480, 43)),

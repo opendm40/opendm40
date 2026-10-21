@@ -13,7 +13,7 @@ mod lcd;
 #[path = "../../src/bargraph.rs"]
 mod bargraph;
 
-use bargraph::{frac, Bar};
+use bargraph::{frac, full_scale, Bar};
 
 const BG: u16 = 0x0883;
 static mut FAILS: u32 = 0;
@@ -29,18 +29,34 @@ fn check(name: &str, ok: bool, msg: String) {
     }
 }
 
-/// The history-row geometry the bar is proposed for (ui.rs history boxes,
-/// y 153..172) and a thin strip variant.
-const GEOM: [(u16, u16, u16, u16); 2] = [(8, 154, 464, 18), (4, 148, 472, 7)];
+/// ui.rs BAR_RECT (the history row's place) and a wider-pitch variant.
+const GEOM: [(u16, u16, u16, u16); 2] = [(12, 150, 400, 9), (4, 150, 450, 12)];
 
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| ".".into());
     host::map_flash();
-    // frac: 60000-count scale from the decimals.
-    check("frac 4.8176 V dec 4", (frac(4.8176, 4, false).unwrap() - 48176.0 / 60000.0).abs() < 1e-6, String::new());
-    check("frac -600.00 mV dec 2", (frac(-600.0, 2, false).unwrap() + 1.0).abs() < 1e-6, String::new());
-    check("frac clamps", frac(70000.0, 0, false) == Some(1.0), String::new());
-    check("frac OL", frac(1.0, 4, true).is_none() && frac(f32::NAN, 1, false).is_none(), String::new());
+    // full_scale: 60000 counts from the decimals; 1000 V / 10 A ranges.
+    check("fs 6 V", full_scale(4, "V") == 6.0, String::new());
+    check("fs 600 mV", (full_scale(2, "mV") - 600.0).abs() < 1e-3, String::new());
+    check("fs 1000 V", full_scale(1, "V") == 1000.0, String::new());
+    check("fs 10 A", full_scale(3, "A") == 10.0, String::new());
+    check("fs 60 mA", (full_scale(3, "mA") - 60.0).abs() < 1e-4, String::new());
+    // frac: fraction of the full scale.
+    check("frac 4.8176 V", (frac(4.8176, 6.0, false).unwrap() - 4.8176 / 6.0).abs() < 1e-6, String::new());
+    check("frac -600 mV", (frac(-600.0, 600.0, false).unwrap() + 1.0).abs() < 1e-6, String::new());
+    check("frac 500 V of 1000", (frac(500.0, full_scale(1, "V"), false).unwrap() - 0.5).abs() < 1e-6, String::new());
+    check("frac clamps", frac(70000.0, 60000.0, false) == Some(1.0), String::new());
+    check("frac OL", frac(1.0, 6.0, true).is_none() && frac(f32::NAN, 6.0, false).is_none(), String::new());
+    // Segments: 0 / half / full scale light 0 / 25 / 50 (unipolar); the
+    // bipolar scale lights from the centre.
+    for (bip, f, want) in [(false, 0.0f32, 0usize), (false, 0.5, 25), (false, 1.0, 50), (true, 1.0, 25), (true, -0.5, 13), (true, 0.02, 1)] {
+        host::reset(BG);
+        let mut bar = Bar::new(12, 150, 400, 9, bip);
+        bar.draw_static(BG);
+        bar.update(Some(f));
+        let lit = (0..bargraph::SEGS).filter(|&i| host::emu().fb[(158 * host::W) + bar.seg_x(i) as usize] == 0xFC40).count();
+        check(&format!("segments bipolar {bip} f {f}"), lit == want, format!("{lit} lit, want {want}"));
+    }
 
     let mut seed = 0x1234_5678u32;
     let mut rnd = move || {
@@ -84,6 +100,7 @@ fn main() {
     for (name, bipolar, f) in [("b01-uni-080", false, Some(0.8)), ("b02-bi-neg035", true, Some(-0.35)), ("b03-ol", false, None)] {
         host::reset(BG);
         let (x, y, w, h) = GEOM[0];
+        let _ = (x, y);
         let mut bar = Bar::new(x, y, w, h, bipolar);
         bar.draw_static(BG);
         bar.update(f);
