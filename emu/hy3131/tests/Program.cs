@@ -86,6 +86,7 @@ namespace Hy3131Tests
             Frequency();
             Temperature();
             Beat();
+            Ad2Stream();
             CrossCases();
             Sentinel();
             Console.WriteLine("{0} passed, {1} failed", passes, failures);
@@ -458,6 +459,66 @@ namespace Hy3131Tests
             Check(m.Read1(0x22) == 0 && m.Read1(0x2A) == 0, "R37 = 0x60 resets the register file");
             m.Write(0x37, 0x00);
             Check(m.Chip.Transfers > 0, "transfer counter");
+        }
+
+        /// FR-38 (B): the data logger's AD2 source (fw-rs hy3131::set_ad2_stream): one AD2F and
+        /// one fresh R03..R05 per conversion period on the chip's grid, the code of the DC-coupled
+        /// AC mA row, the rung's rate, and the per-result noise model.
+        private static void Ad2Stream()
+        {
+            Console.WriteLine("AD2 stream (data logger source)");
+            var m = NewChip();
+            m.Chip.SetInput("dca:0.0123");
+            m.Configure(F5R0, 5); // AC mA r0: OP1+ = PB1 (0.5 ohm) x10, AD2 = OP1O - PB3, DC-coupled
+            m.Advance(0.05);
+            // fw-rs set_ad2_stream(0x22): AD3 off, RMS / LPF off, R26 = ENAD2 | ENCHOPAD2 | OSR 128 = 9600/s
+            m.Write(0x34, 0); m.Write(0x29, 0); m.Write(0x26, 0xA2); m.Write(0x1E, 0);
+            Near(m.Chip.Core.Ad2Period * 1e6, 104.167, 0.01, "R26 0xA2: 104.167 us (9600/s)");
+            var c0 = m.Chip.Core.Ad2Conversions;
+            int seen = 0;
+            var t0 = m.Now;
+            while(m.Now - t0 < 0.1)
+            {
+                if((m.Read1(0x1E) & 0x02) != 0) seen++;
+                m.Advance(20e-6);
+            }
+            var made = m.Chip.Core.Ad2Conversions - c0;
+            Near(made, 960, 2, "conversions in 100 ms of virtual time");
+            Check(seen == made || seen == made - 1, "one AD2F per conversion (polled faster than the period)", string.Format("seen {0}, made {1}", seen, made));
+            m.BitTime = 0.05e-6; // short frames: the check is about the grid, not the link
+            m.WaitFlag(0x02, 0.01, 1e-6); // just after a grid point
+            m.Advance(30e-6);
+            var f1 = m.Read1(0x1E) & 0x02;
+            m.Advance(80e-6);
+            var f2 = m.Read1(0x1E) & 0x02;
+            Check(f1 == 0 && f2 != 0, "AD2F not set again before the next grid point, set after it");
+            var a = m.ReadS24(0x03);
+            var b = m.ReadS24(0x03);
+            Check(a == b, "R03..R05 unchanged between two reads inside one period", a + " / " + b);
+            // 12.3 mA * 0.5 ohm * 10 = 61.5 mV at the AD2 input, IG 1.0: 61.5 mV / 1.25 V * 2^18
+            Near(a, 0.0615 / 1.25 * 262144, 30, "AD2 code of 12.3 mA DC on the 40 mA range (DC-coupled)");
+            Check(a >= -0x40000 && a <= 0x3FFFF, "19-bit signed, bits 23:19 = sign copy");
+            // Slow rung: /4, OSR 1024, chopped = 600/s.
+            m.Write(0x26, 0xAD);
+            Near(m.Chip.Core.Ad2Period * 1e3, 1.6667, 0.001, "R26 0xAD: 1.667 ms (600/s)");
+            // Noise model: 30 codes at the stock OSR2 32, white scaling.
+            foreach(var t in new[] { new { r26 = (byte)0x80, sd = 30.0 }, new { r26 = (byte)0xA2, sd = 30.0 / Math.Sqrt(8) } })
+            {
+                var n = NewChip(noise: true);
+                n.Chip.SetInput("dca:0.0");
+                n.Configure(F5R0, 5);
+                n.Write(0x34, 0); n.Write(0x29, 0); n.Write(0x26, t.r26);
+                double s1 = 0, s2 = 0; int k = 0;
+                for(int i = 0; i < 2000; i++)
+                {
+                    n.Advance(n.Chip.Core.Ad2Period * 1.01);
+                    if((n.Read1(0x1E) & 0x02) == 0) continue;
+                    double v = n.ReadS24(0x03);
+                    s1 += v; s2 += v * v; k++;
+                }
+                var sd = Math.Sqrt(s2 / k - (s1 / k) * (s1 / k));
+                Near(sd, t.sd, t.sd * 0.1, string.Format("R26 0x{0:X2}: per-result noise model", t.r26));
+            }
         }
 
         private static void Timing()

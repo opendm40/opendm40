@@ -75,6 +75,13 @@ Chip (datasheet DS-HY3131-V10):
   AD2 / AD3 at `OSR2 * 2 (or 4) / SYSCLK` (13.02 us); LPF and RMS results every
   `AD2 period * OSR4 * 0.5` (the measured 106.7 ms for LPFBW = 111); AD1F,
   AD2F, LPFF, RMSF, CTF set at those times and accumulated until INTF is read.
+  AD2 runs on its own grid from the last R26 change (as AD1): one AD2F and one
+  fresh R03..R05 per period, the input at the grid point plus a per-result
+  noise model (30 codes at OSR2 32, white scaling with OSR2 / ENCHOPAD2:
+  `Ad2NoiseCodes`; a model, not a measurement), an unread result overwritten;
+  a read is never torn (the chip advances at CS low only). The row
+  recognition also accepts an AC row with AD3 / RMS / LPF off and another
+  AD2 rate (fw-rs data logger, LOG:SOURce AD2).
   Conversions are evaluated lazily when the firmware touches the bus (no
   Renode timers): `Hy3131Core.Update(now)`.
 * AD1 transfer: `code = IG * Vin / (RG * VR) * 2^23 + DCOS / RG * 2^23`, IG /

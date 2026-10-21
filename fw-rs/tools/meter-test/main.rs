@@ -1,4 +1,4 @@
-// Host test crate for src/meter.rs and src/dmm.rs (FR-05 smoothing / rate,
+// Host test crate for src/meter.rs, src/dmm.rs and src/logger.rs (FR-05 smoothing / rate,
 // UF-21): the modules are compiled for the host with their register-level
 // dependencies; the tests only call pure logic (no MMIO is touched).
 #![allow(dead_code, unused_imports, clippy::all)]
@@ -16,6 +16,9 @@ mod sentinel;
 mod dmm;
 #[path = "../../src/meter.rs"]
 mod meter;
+// The data logger's ring / gap accounting and the AD2 rate ladder (hy3131.rs).
+#[path = "../../src/logger.rs"]
+mod logger;
 
 fn main() {}
 

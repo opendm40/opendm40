@@ -14,6 +14,7 @@ mod hy3131;
 mod hy3131_tables;
 mod lcd;
 mod logger;
+mod ad2exp;
 mod meter;
 mod mmio;
 mod persist;
@@ -242,6 +243,10 @@ fn main() -> ! {
     let logger = unsafe { &mut *core::ptr::addr_of_mut!(LOGGER) };
     logger.set_osr(logger::DEFAULT_OSR);
     let mut logging_prev = false;
+    // DBG:AD2:DRAW (src/ad2exp.rs): 0 no logger panel, 1 panel (default),
+    // 2 panel + a full DMM-view redraw every 100 ms; next forced redraw, ms.
+    let mut log_draw = 1u8;
+    let mut log_redraw_at = 0u64;
     let mut bt = bt::Bt::new();
     let mut gestures = gesture::Tracker::new();
     let mut touch_events = 0u32;
@@ -566,6 +571,31 @@ fn main() -> ! {
                         reset_at = Some(now + 50);
                         false
                     }
+                    scpi::Dbg::Ad2(2, level, _, _) => {
+                        log_draw = level;
+                        false
+                    }
+                    scpi::Dbg::Ad2(kind, r26, n, b) => {
+                        // Synchronous AD2 experiment in the current stock AC
+                        // row; the row is rewritten afterwards.
+                        if logger.active() || !logger::Logger::mode_ok(true, app.dmm.mode()) {
+                            scpi.set_err("Settings conflict");
+                            false
+                        } else {
+                            app.dmm_power(&mut clk);
+                            let buf = port.rsp_buf();
+                            let len = if kind == 0 {
+                                ad2exp::torn(r26, n as u32, b != 0, buf)
+                            } else {
+                                ad2exp::noise(r26, n as u32, b, buf)
+                            };
+                            port.respond_len(len);
+                            app.dmm.start(&mut clk);
+                            app.meter.reset();
+                            app.last_raw = None;
+                            false
+                        }
+                    }
                 },
                 scpi::Out::Mmem(scpi::Mmem::Cat) => match csvlog::catalog_scpi(port.rsp_buf()) {
                     Ok(n) => {
@@ -635,14 +665,15 @@ fn main() -> ! {
                     }
                     scpi::Log::State(Some(on)) => {
                         if on {
-                            // Fast stream needs an AD1 (DC) mode: 1 DCV, 3 DCmV,
-                            // 7/8/9 DCA. AC/ohm/cap/freq/temp drive AD2 or the
-                            // counter, so AD1 would be meaningless.
+                            // AD1 needs a DC mode (1 DCV, 3 DCmV, 7/8/9 DCA),
+                            // AD2 a stock AC row (0 ACV, 2 ACmV, 4/5/6 ACA);
+                            // never AC+DC (16/17, alternating rows), ohm, cap,
+                            // freq, temp (logger::Logger::mode_ok).
                             let m = app.dmm.mode();
-                            if matches!(m, 1 | 3 | 7..=9) {
+                            if logger::Logger::mode_ok(logger.ad2(), m) {
                                 app.dmm_power(&mut clk);
-                                // Guarantee the full DC config is applied before
-                                // the logger overrides R22 (AD1OSR).
+                                // Guarantee the full row is applied before the
+                                // logger overrides R22 (AD1OSR) / R26 (AD2).
                                 app.dmm.start(&mut clk);
                                 logger.start(m, app.dmm.range());
                             } else {
@@ -656,6 +687,42 @@ fn main() -> ! {
                     scpi::Log::State(None) => {
                         scpi.len = 0;
                         scpi.put_bytes(if logger.active() { b"1" } else { b"0" });
+                        true
+                    }
+                    scpi::Log::Source(Some(ad2)) => {
+                        // The source also selects what poll() reads: not
+                        // switched under a running session.
+                        if logger.active() && ad2 != logger.ad2() {
+                            scpi.set_err("Settings conflict");
+                        } else {
+                            logger.set_ad2(ad2);
+                        }
+                        false
+                    }
+                    scpi::Log::Source(None) => {
+                        scpi.len = 0;
+                        scpi.put_bytes(if logger.ad2() { b"AD2" } else { b"AD1" });
+                        true
+                    }
+                    scpi::Log::SRate(Some(hz)) => {
+                        logger.set_req_hz(hz);
+                        false
+                    }
+                    scpi::Log::SRate(None) => {
+                        scpi.len = 0;
+                        put_u32(&mut scpi, logger.req_hz());
+                        true
+                    }
+                    scpi::Log::Gaps => {
+                        scpi.len = 0;
+                        let g = logger.gaps();
+                        let vals = [logger.bad(), logger.max_gap_us(), g[0], g[1], g[2], g[3], g[4]];
+                        for (i, v) in vals.iter().enumerate() {
+                            if i > 0 {
+                                scpi.put_bytes(b",");
+                            }
+                            put_u32(&mut scpi, *v);
+                        }
                         true
                     }
                     scpi::Log::Osr(Some(n)) => {
@@ -683,7 +750,7 @@ fn main() -> ! {
                     }
                     scpi::Log::Count => {
                         scpi.len = 0;
-                        for (i, v) in [logger.buffered(), logger.captured(), logger.overwritten(), logger.missed()]
+                        for (i, v) in [logger.buffered(), logger.captured(), logger.overwritten(), logger.missed(), logger.lost()]
                             .iter()
                             .enumerate()
                         {
@@ -696,13 +763,20 @@ fn main() -> ! {
                     }
                     scpi::Log::Preamble => {
                         scpi.len = 0;
+                        let ad2 = logger.ad2();
+                        let r26 = logger.r26();
                         let vals = [
                             logger.mode() as u32,
                             logger.range() as u32,
-                            logger.osr() as u32,
+                            if ad2 { (r26 & 7) as u32 } else { logger.osr() as u32 },
                             logger.nominal_us(),
                             logger.measured_hz(),
                             logger.chop() as u32,
+                            ad2 as u32,
+                            if ad2 { logger.req_hz() } else { 0 },
+                            logger.nominal_mhz(),
+                            if ad2 { r26 as u32 } else { 0 },
+                            (ad2 && logger.mode() == 0) as u32, // AC V: AC-coupled
                         ];
                         for (i, v) in vals.iter().enumerate() {
                             if i > 0 {
@@ -777,9 +851,26 @@ fn main() -> ! {
         let usb_up = dev.state() == UsbDeviceState::Configured || now > 3000;
         // A screenshot reading the panel (screenshot.rs) freezes it too.
         let can_draw = usb_up && now >= draw_hold_until && !logging && !screenshot::frozen();
-        if logging && usb_up && now >= draw_hold_until && !screenshot::frozen() {
+        // DBG:AD2:DRAW 2: the DMM page's redraw load during a log session
+        // (loss-per-rate experiment): a full view repaint every 100 ms, then
+        // the panel again on top.
+        let force_draw = logging && log_draw == 2 && usb_up && now >= log_redraw_at && !screenshot::frozen();
+        if force_draw {
+            log_redraw_at = now + 100;
+            app.invalidate(); // drawn by app.tick below; the panel after it
+        }
+        if logging && log_draw >= 1 && usb_up && now >= draw_hold_until && !screenshot::frozen() {
             // The logger panel (dialog.rs; one part per pass, ~1 s refresh).
-            dialog::log_panel(now, logger.measured_hz(), logger.captured(), logger.nominal_us());
+            dialog::log_panel(
+                now,
+                dialog::LogInfo {
+                    hz: logger.measured_hz(),
+                    n: logger.captured(),
+                    nominal_hz: (logger.nominal_mhz() + 500) / 1000,
+                    ad2: logger.ad2(),
+                    lost: logger.lost(),
+                },
+            );
         }
         mark(0, &mut ts);
         // CSV recording: one bounded slice of a commit (csvlog.rs).
@@ -807,7 +898,10 @@ fn main() -> ! {
             }
         }
         prof::lap(prof::CSV);
-        app.tick(&mut clk, can_draw);
+        app.tick(&mut clk, can_draw || force_draw);
+        if force_draw {
+            dialog::log_panel_reset(); // the repaint covered it: draw it again
+        }
         prof::lap(prof::TICK);
         mark(1, &mut ts);
         for src in [USB, BT] {
