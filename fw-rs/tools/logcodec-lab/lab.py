@@ -210,6 +210,12 @@ def main():
     for nm, tb, vb, fl in brk:
         print('| %s | %.2f | %s | %.2f | %s |' % (nm, tb, '%.2f' % fl[0] if fl else '-', vb, '%.2f' % fl[1] if fl else '-'))
 
+    hdr, unit, rows, _ = load('%s/t0.csv' % D)
+    csv = open('%s/t0.csv' % D, 'rb').read().decode()
+    _, acc = run_rc(hdr, unit, rows, [len(rows)], dict(codec.DEF, tpred=(3,)), csv)
+    print('\nnoisy DC V in one 6000-row chunk, slow-EMA time predictor only: time %.2f bits/row'
+          % (acc['time'] / len(rows)))
+
     # 10 h run, chunk-size sweep
     hdr, unit, rows, _ = load('%s/long.csv' % D)
     csv = open('%s/long.csv' % D, 'rb').read().decode()
@@ -222,7 +228,7 @@ def main():
     for cn in (60, 600, 3000, 6000):
         cuts = [cn] * (n // cn) + ([n % cn] if n % cn else [])
         v1 = sum((dlg_bits(c) + 7) // 8 + HDR1 for c in chunks(rows, cuts))
-        b, _ = run_rc(hdr, unit, rows, cuts, o, csv, verify=(cn == 600))
+        b, _ = run_rc(hdr, unit, rows, cuts, o, csv)
         print('| %d (%s) | %.3f | %.3f | %.2fx | %s |' % (
             cn, '%g s' % (cn / 10) if cn < 600 else '%g min' % (cn / 600), v1 / n, b / n, v1 / b,
             '%d s of readings' % (cn // 10)))
