@@ -1555,6 +1555,7 @@ class GtkApp(Adw.Application):
         self.a_val = self.entry(acol, sa, 'Value', '0.0123')
         self.a_ac = self.entry(acol, sa, 'AC, A rms', '0')
         self.a_f = self.entry(acol, sa, 'Frequency, Hz', '50')
+        self.a_ph = self.entry(acol, sa, 'Phase lag, °', '0')
         self.a_compl = self.entry(acol, sa, 'Compliance, V', '10')
         self.cj = self.entry(acol, sa, 'Cold junction, °C', '25')
         self.die_follows = self.switch(acol, sa, 'Die = cold junction', self.dmm_fields_changed, active=True)
@@ -1715,6 +1716,9 @@ class GtkApp(Adw.Application):
                               'voltage source (wrong jack)': 'DC, V'}.get(ak, 'Value'))
         self.a_ac.set_visible(ak == 'AC current source')
         self.a_f.set_visible(ak == 'AC current source')
+        self.a_ph.set_visible(ak == 'AC current source')
+        # lag behind the V source's AC part (PF = cos); only meaningful with an AC V source
+        self.a_ph.set_tooltip_text('current lags the V source by this angle: + inductive, − capacitive; PF = cos')
         self.a_compl.set_visible(ak in ('DC current source', 'AC current source'))
         self.die.set_visible(not self.die_follows.get_active())
         self.apply_dmm()
@@ -1756,7 +1760,8 @@ class GtkApp(Adw.Application):
         if ak == 'DC current source':
             parts.append('isrc:%s,compl=%s' % (a, self.num(self.a_compl, '10')))
         elif ak == 'AC current source':
-            parts.append('isrc:%s,ac=%s,f=%s,compl=%s' % (a, self.num(self.a_ac, '0'), self.num(self.a_f, '50'), self.num(self.a_compl, '10')))
+            parts.append('isrc:%s,ac=%s,f=%s,compl=%s,ph=%s' % (a, self.num(self.a_ac, '0'), self.num(self.a_f, '50'),
+                                                               self.num(self.a_compl, '10'), self.num(self.a_ph, '0')))
         elif ak == 'voltage source (wrong jack)':
             parts.append('avsrc:%s' % a)
         parts.append('cj:%s' % self.num(self.cj, '25'))
