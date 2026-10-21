@@ -505,7 +505,16 @@ Firmware:
 - [x] STOP then Save CSV gave "No record to save" (Auto untriggered / STOP mid-acquisition): f09b3b0 the
       samples captured so far become an untriggered stored record on STOP. (verify on device: Auto, open
       input, STOP, MF > Settings > Save CSV -> "Saved SCOPnnn.DLG")
+- [x] Experiment 2026-10-21 (6e32fe7 on the device, Linux 7.0, GNOME/udisks): a UNIT ATTENTION 06/28/00 on the
+      MOUNTED read-only LUN 1 (DBG:VDISK:FORCE? 1 + ADD?) -> kernel rescans sdb, udev change DISK_MEDIA_CHANGE=1,
+      the mounted vfat lists the new files at once with correct content, no I/O errors, no unmount. Held UA (the
+      default) shows nothing until unmount. Simulated eject (EJECT? 3: NOT READY x3): capacity 0 -> back, stays
+      mounted. => live file lists on a virtual read-only volume work on Linux without MTP if the UA is NOT held
+      while locked; keep existing files' clusters fixed (cached inodes). Windows / macOS / Nautilus refresh: untested.
 Emulator (emu/):
+- [ ] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
+      use per function (from the rows / mux selections: e.g. which PA tap, SENSE, PB0..PB7, FB/RLU), not "the
+      datasheet's typical circuit" (owner 2026-10-21).
 - [x] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
       at the same time); the firmware's mux/relay choices route it through a modelled DM40 front-end (dividers, shunts, relays,
       switches) — no per-mode magic inputs. (0b464bd DM40 front-end model + connection editor, 213fc83 cross table)
