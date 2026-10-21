@@ -45,6 +45,13 @@ pub const TB_LABELS: [&str; 30] = [
 /// V/div labels 0x0807551c (index = V/div index + 3; 1mV .. 10kV).
 pub const VDIV_LABELS: [&str; 22] =
     ["1m", "2m", "5m", "10m", "20m", "50m", "100m", "200m", "500m", "1", "2", "5", "10", "20", "50", "100", "200", "500", "1k", "2k", "5k", "10k"];
+/// FFT dB/div labels (stock table 0x080755b0; default index 9 = "10dB").
+pub const FFT_DB: [&str; 13] = ["10mdB", "20mdB", "50mdB", "100mdB", "200mdB", "500mdB", "1dB", "2dB", "5dB", "10dB", "20dB", "50dB", "100dB"];
+/// Their values (dB per division).
+pub const FFT_DB_VAL: [f32; 13] = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0];
+/// Volts of the VDIV_LABELS entries.
+pub const VDIV_VAL: [f32; 22] =
+    [1e-3, 2e-3, 5e-3, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1e3, 2e3, 5e3, 1e4];
 pub const STATUS: [&str; 5] = ["WAIT", "AUTO", "T'D", "RUN", "STOP"];
 pub const ST_WAIT: u8 = 0;
 pub const ST_AUTO: u8 = 1;
@@ -175,6 +182,34 @@ pub struct Model {
     pub tabs: u8,
     /// Timebase badge drawn inverted (150 ms after a timebase change).
     pub tb_flash: bool,
+    /// Math display on (stock S+0x10b): the math pill in the math colour,
+    /// the math trace (`Graph::ma`), the 'M' strip marker; in FFT mode
+    /// (math_mode 5) the 'M' top marker and the centre-frequency label.
+    pub math_on: bool,
+    /// Palette index of the math trace (default 1 = orange).
+    pub math_colour: u8,
+    /// Math / FFT offset rows: the 'M' strip marker at row 140 + offset
+    /// (FFT: the 0 dBV row).
+    pub math_off: i16,
+    /// Math pill second line ("10dB", "1V"); empty: the stock defaults
+    /// ("10dB" in FFT mode, else the CH1 V/div text).
+    pub math_scale: Txt,
+    /// FFT centre-frequency label text (stock, FFT mode).
+    pub fft_hz: Txt,
+    /// fw-rs FFT additions (UF-11): axis scale boxes, the peak readout and
+    /// marker. None = the stock look only.
+    pub fft: Option<FftAdd>,
+}
+
+/// fw-rs FFT additions (UF-11): the vertical scale ("10dB/div"), the
+/// horizontal scale ("50kHz/div"), the automatic peak readout and the peak
+/// position (graph column 0..398, 280-row model row) for its marker.
+#[derive(Clone, Copy, PartialEq)]
+pub struct FftAdd {
+    pub ydiv: Txt,
+    pub xdiv: Txt,
+    pub peak: Txt,
+    pub peak_at: Option<(i16, i16)>,
 }
 
 impl Model {
@@ -209,6 +244,12 @@ impl Model {
         math_mode: 0,
         tabs: 0,
         tb_flash: false,
+        math_on: false,
+        math_colour: 1,
+        math_off: 0,
+        math_scale: Txt::EMPTY,
+        fft_hz: Txt::EMPTY,
+        fft: None,
     };
 
     pub fn pal(&self) -> Color {
@@ -221,6 +262,11 @@ impl Model {
     /// Persistence: the same at half alpha.
     pub fn half_colour(&self) -> Color {
         blend565(self.pal(), C_FILL, ((self.bright.min(100) as u32 * 255 / 100) >> 1) as u8)
+    }
+    /// Math colour: the palette entry (unblended, stock), grey while math
+    /// is off (the pill).
+    pub fn math_pal(&self) -> Color {
+        PALETTE[self.math_colour as usize % 9]
     }
     pub fn grid_colour(&self) -> Color {
         blend565(0xffff, C_FILL, (self.grid.min(100) as u32 * 255 / 100) as u8)
@@ -473,7 +519,7 @@ pub fn battery(m: &Model) {
 pub fn panel_button(m: &Model, k: usize) {
     let r = B_RECT[k];
     let pal = m.pal();
-    let mc = C_FRAME; // math off (no math engine): grey
+    let mc = if m.math_on { m.math_pal() } else { C_FRAME };
     let mut b = Buf::new();
     vdiv_text(&mut b, m.vdiv);
     let pressed = m.pressed as usize == k + 1;
@@ -492,9 +538,16 @@ pub fn panel_button(m: &Model, k: usize) {
         2 | 5 => (Ink::new(sf::SC_F20, r, "-", 8, 0), Ink::none()),
         1 => (Ink::new(sf::SC_F20, rect(417, 61, 60, 24), "CHA", 8, 0), Ink::new(sf::SC_F12, rect(417, 85, 60, 16), b.as_str(), 8, 0)),
         4 => {
-            // FFT: the dB/div label (index 10 = "10dB" by default).
+            // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
+            // math_scale shows the stock defaults.
             const MATH: [&str; 7] = ["--", "+", "-", "*", "/", "FFT", "ABS"];
-            let t2 = if m.math_mode == 5 { "10dB" } else { b.as_str() };
+            let t2 = if m.math_scale.n > 0 {
+                m.math_scale.as_str()
+            } else if m.math_mode == 5 {
+                FFT_DB[9]
+            } else {
+                b.as_str()
+            };
             (Ink::new(sf::SC_F20, rect(417, 191, 60, 24), MATH[m.math_mode.min(6) as usize], 8, 0), Ink::new(sf::SC_F12, rect(417, 215, 60, 16), t2, 8, 0))
         }
         _ => (Ink::new(sf::SC_F20, r, "TRIG", 8, 0), Ink::none()),
@@ -566,6 +619,7 @@ pub fn chrome(m: &Model) {
 const FAM_1: u32 = 0x20;
 const FAM_2: u32 = 0x28;
 const FAM_A: u32 = 0x30;
+const FAM_M: u32 = 0x38;
 const FAM_T: u32 = 0x40;
 const DOWN: u32 = 0;
 const LEFT: u32 = 1;
@@ -648,10 +702,13 @@ impl MarkInk {
     }
 }
 
-/// Strip markers in draw order (creation order, the selected level item
-/// last): CH1 zero, trigger level, Y cursors (sec. 3.1). Rows scaled to the
-/// frame for the combined view.
-pub fn strip_marks(m: &Model, out: &mut [Mark; 5]) -> usize {
+/// Strip marker slots (CH1, trigger level, math offset, Y cursors, spare).
+pub const NSTRIP: usize = 6;
+
+/// Strip markers in creation order with their level-item ids (CH1 zero 0,
+/// trigger level 1, math offset 2 while math is on, Y cursors 3 / 4) (sec.
+/// 3.1). Rows scaled to the frame for the combined view.
+pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     let top = m.top();
     let h = m.frame_h();
     let pal = m.pal();
@@ -665,26 +722,36 @@ pub fn strip_marks(m: &Model, out: &mut [Mark; 5]) -> usize {
             Mark::new(1, top + fy - 6, fam, RIGHT, sel, col)
         }
     };
-    let ch1 = |sel| {
-        // CH1 range is +-140 rows around the centre (the 280-row model).
-        let row = 140 + m.pos;
-        level(if m.pos < -140 { -1 } else if m.pos > 140 { 281 } else { row }, FAM_A, sel, pal)
-    };
+    // CH1 / math range is +-140 rows around the centre (the 280-row model).
+    let off_row = |off: i16| if off < -140 { -1 } else if off > 140 { 281 } else { 140 + off };
     let mut n = 0;
-    let mut items: [(u8, Mark); 4] = [(0, Mark::NONE); 4];
-    items[n] = (0, ch1(m.sel_v == 0));
+    out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
     n += 1;
-    items[n] = (1, level(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
+    out[n] = (1, level(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
     n += 1;
-    if let Some(yc) = m.ycur {
-        items[n] = (3, level(yc[0], FAM_1, m.sel_v == 3, C_WHITE));
-        n += 1;
-        items[n] = (4, level(yc[1], FAM_2, m.sel_v == 4, C_WHITE));
+    if m.math_on {
+        out[n] = (2, level(off_row(m.math_off), FAM_M, m.sel_v == 2, m.math_pal()));
         n += 1;
     }
+    if let Some(yc) = m.ycur {
+        out[n] = (3, level(yc[0], FAM_1, m.sel_v == 3, C_WHITE));
+        n += 1;
+        out[n] = (4, level(yc[1], FAM_2, m.sel_v == 4, C_WHITE));
+        n += 1;
+    }
+    for o in out[n..].iter_mut() {
+        *o = (255, Mark::NONE);
+    }
+    n
+}
+
+/// Strip markers in draw order (creation order, the selected level item
+/// last).
+pub fn strip_marks(m: &Model, out: &mut [Mark; NSTRIP]) -> usize {
+    let mut items = [(0u8, Mark::NONE); NSTRIP];
+    let n = strip_items(m, &mut items);
     let mut k = 0;
-    for &(id, mk) in items[..n].iter().filter(|i| i.0 != m.sel_v) {
-        let _ = id;
+    for &(_, mk) in items[..n].iter().filter(|i| i.0 != m.sel_v) {
         out[k] = mk;
         k += 1;
     }
@@ -710,15 +777,32 @@ fn top_mark(top: i16, col: i16, fam: u32, sel: bool, colour: Color) -> Mark {
     }
 }
 
-/// Graph markers in draw order: T, X cursor 1, X cursor 2.
-pub fn graph_marks(m: &Model, out: &mut [Mark; 3]) {
+/// Graph marker slots: T, X cursor 1, X cursor 2, FFT centre, FFT peak.
+pub const NGRAPH: usize = 5;
+/// Time-item id of each graph marker slot (255: not selectable).
+const GRAPH_IDS: [u8; NGRAPH] = [0, 2, 3, 1, 255];
+
+/// Graph markers in draw order: T, X cursor 1, X cursor 2, the FFT centre
+/// 'M' (stock, fixed at column 200, FFT mode), the FFT peak (fw-rs: a white
+/// filled 'M' pointing down at the peak, its tip on the peak row).
+pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
     let top = m.top();
+    *out = [Mark::NONE; NGRAPH];
     out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, m.pal());
-    out[1] = Mark::NONE;
-    out[2] = Mark::NONE;
     if let Some(xc) = m.xcur {
         out[1] = top_mark(top, xc[0], FAM_1, m.sel_h == 2, C_WHITE);
         out[2] = top_mark(top, xc[1], FAM_2, m.sel_h == 3, C_WHITE);
+    }
+    if m.math_on && m.math_mode == 5 {
+        out[3] = top_mark(top, 200, FAM_M, m.sel_h == 1, m.math_pal());
+        if let Some((col, row)) = m.fft.and_then(|f| f.peak_at) {
+            // Tip (glyph row 11) one row above the peak's frame row; kept
+            // below the top marker row.
+            let fy = trace_fy(m.frame_h(), row as i32);
+            if (0..399).contains(&col) && fy >= 25 {
+                out[4] = Mark::new(14 + col - 6, top + fy - 12, FAM_M, DOWN, true, C_WHITE);
+            }
+        }
     }
 }
 
@@ -736,27 +820,24 @@ impl Zone {
     pub const NONE: Zone = Zone { level: false, id: 0, r: rect(0, 0, 0, 0) };
 }
 
+/// Most zones (strip markers + selectable graph markers).
+pub const NZONE: usize = NSTRIP + NGRAPH;
+
 /// The marker zones of the page in creation order (level group first).
-pub fn zones(m: &Model, out: &mut [Zone; 7]) -> usize {
+pub fn zones(m: &Model, out: &mut [Zone; NZONE]) -> usize {
     let grow = |r: Rect| rect(r.x - 10, r.y - 10, r.w + 20, r.h + 20);
     let mut n = 0;
-    let mut mm = *m;
-    mm.sel_v = 255; // creation order
-    let mut marks = [Mark::NONE; 5];
-    strip_marks(&mm, &mut marks);
-    let ids: [u8; 4] = [0, 1, 3, 4];
-    for (k, mk) in marks.iter().enumerate().take(4) {
-        if mk.some() {
-            out[n] = Zone { level: true, id: ids[k], r: grow(mk.rect()) };
-            n += 1;
-        }
+    let mut items = [(0u8, Mark::NONE); NSTRIP];
+    let k = strip_items(m, &mut items);
+    for &(id, mk) in &items[..k] {
+        out[n] = Zone { level: true, id, r: grow(mk.rect()) };
+        n += 1;
     }
-    let mut g = [Mark::NONE; 3];
+    let mut g = [Mark::NONE; NGRAPH];
     graph_marks(m, &mut g);
-    let hids: [u8; 3] = [0, 2, 3];
     for (k, mk) in g.iter().enumerate() {
-        if mk.some() {
-            out[n] = Zone { level: false, id: hids[k], r: grow(mk.rect()) };
+        if mk.some() && GRAPH_IDS[k] != 255 {
+            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grow(mk.rect()) };
             n += 1;
         }
     }
@@ -791,11 +872,11 @@ pub fn line_zones(m: &Model, out: &mut [Zone; 4]) -> usize {
 /// other group from its first zone. Index into `z`.
 pub fn pick_zone(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<usize> {
     let same_level = !last_h;
-    let of = |level: bool| -> ([usize; 7], usize) {
-        let mut l = [0usize; 7];
+    let of = |level: bool| -> ([usize; NZONE], usize) {
+        let mut l = [0usize; NZONE];
         let mut k = 0;
         for (i, q) in z.iter().enumerate() {
-            if q.level == level && k < 7 {
+            if q.level == level && k < NZONE {
                 l[k] = i;
                 k += 1;
             }
@@ -828,12 +909,12 @@ pub fn pick_zone(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16)
 
 /// Repaint strip rows y0..=y1 (x 1..12) with the markers `marks` (draw order).
 fn strip_rows(marks: &[Mark], y0: i16, y1: i16) {
-    let mut ink: [MarkInk; 5] = [MarkInk::NONE; 5];
-    for (i, mk) in marks.iter().enumerate().take(5) {
+    let mut ink: [MarkInk; NSTRIP] = [MarkInk::NONE; NSTRIP];
+    for (i, mk) in marks.iter().enumerate().take(NSTRIP) {
         ink[i] = MarkInk::of(mk);
     }
-    let n = marks.len().min(5);
-    let layers = [(K_ICON, C_BAR), (K_ICON, C_BAR), (K_ICON, C_BAR), (K_ICON, C_BAR), (K_ICON, C_BAR)];
+    let n = marks.len().min(NSTRIP);
+    let layers = [(K_ICON, C_BAR); NSTRIP];
     paint(rect(1, y0, 12, y1 - y0 + 1), &layers[..n], |x, y| {
         for i in (0..n).rev() {
             if let Some(c) = ink[i].at(x, y, C_BAR) {
@@ -874,32 +955,34 @@ struct VLine {
 
 const NL: usize = 3;
 
-/// Overlay lines + top markers + colours: what besides the trace decides
+/// Overlay lines + graph markers + colours: what besides the traces decides
 /// the graph pixels.
 #[derive(Clone, Copy, PartialEq)]
 struct Deco {
     h: [Option<HLine>; NL],
     v: [Option<VLine>; NL],
-    marks: [Mark; 3],
+    marks: [Mark; NGRAPH],
     grid: Color,
     trace: Color,
     half: Color,
+    math: Color,
     top: i16,
     fh: i16,
 }
 
 impl Deco {
-    const NONE: Deco = Deco { h: [None; NL], v: [None; NL], marks: [Mark::NONE; 3], grid: 0, trace: 0, half: 0, top: 0, fh: 0 };
+    const NONE: Deco = Deco { h: [None; NL], v: [None; NL], marks: [Mark::NONE; NGRAPH], grid: 0, trace: 0, half: 0, math: 0, top: 0, fh: 0 };
 
     fn of(m: &Model) -> Deco {
         let h = m.frame_h();
         let mut d = Deco {
             h: [None; NL],
             v: [None; NL],
-            marks: [Mark::NONE; 3],
+            marks: [Mark::NONE; NGRAPH],
             grid: m.grid_colour(),
             trace: m.trace_colour(),
             half: m.half_colour(),
+            math: m.math_pal(),
             top: m.top(),
             fh: h,
         };
@@ -907,12 +990,17 @@ impl Deco {
         let ctr = d.trace;
         // 4.4: guide lines of the selected items, then the cursor lines.
         if m.guide {
-            if m.sel_h == 0 && (1..=399).contains(&m.trig_px) {
-                d.v[0] = Some(VLine { fx: m.trig_px, col: ctr });
+            match m.sel_h {
+                0 if (1..=399).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: ctr }),
+                // FFT centre (stock: a line at x 0 that is never positioned;
+                // fw-rs: the centre column the 'M' marker stands on).
+                1 if m.math_on && m.math_mode == 5 => d.v[0] = Some(VLine { fx: 200, col: d.math }),
+                _ => {}
             }
             match m.sel_v {
                 0 => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.pos as i32), solid: true, col: ctr }),
                 1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: ctr }),
+                2 if m.math_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.math_off as i32), solid: true, col: d.math }),
                 _ => {}
             }
         }
@@ -933,31 +1021,35 @@ pub const EMPTY: (i16, i16) = (i16::MAX, i16::MIN);
 
 /// The graph: what each column shows and what is on the panel.
 pub struct Graph {
-    /// Trace / persistence frame rows per graph column (EMPTY = none).
+    /// Trace / persistence / math trace frame rows per graph column (EMPTY
+    /// = none).
     pub tr: [(i16, i16); 399],
     pub ps: [(i16, i16); 399],
+    pub ma: [(i16, i16); 399],
     d_tr: [(i16, i16); 399],
     d_ps: [(i16, i16); 399],
+    d_ma: [(i16, i16); 399],
     deco: Deco,
     d_deco: Deco,
     valid: bool,
-    /// Screen rects the graph leaves alone (overlays drawn on top: 0 the
-    /// pinch bubble, 1 / 2 the timebase tabs), and those of the last flush.
-    /// Overlays never share a column range with another one.
+    /// Screen rects the graph leaves alone (overlays drawn on top, slots
+    /// H_*), and those of the last flush.
     holes: [Option<Rect>; NH],
     d_holes: [Option<Rect>; NH],
     /// Pixels written by the last flush (host budget check / DBG).
     pub px: u32,
 }
 
-// In SRAM (.dmabuf, NOLOAD) on the device: 6.5 KB that TCM .data / the
+// In SRAM (.dmabuf, NOLOAD) on the device: 9.7 KB that TCM .data / the
 // stack margin need more (pre-flash review 7dc32ac); `init` sets it up.
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut GRAPH: Graph = Graph {
     tr: [EMPTY; 399],
     ps: [EMPTY; 399],
+    ma: [EMPTY; 399],
     d_tr: [EMPTY; 399],
     d_ps: [EMPTY; 399],
+    d_ma: [EMPTY; 399],
     deco: Deco::NONE,
     d_deco: Deco::NONE,
     valid: false,
@@ -966,8 +1058,18 @@ static mut GRAPH: Graph = Graph {
     px: 0,
 };
 
-/// Graph hole slots (`Graph::set_hole_at`).
-const NH: usize = 3;
+/// Graph hole slots (`Graph::set_hole_at`): the pinch bubble, the timebase
+/// tabs, the FFT label and boxes, the cursor tab.
+const NH: usize = 9;
+pub const H_BUBBLE: usize = 0;
+pub const H_TAB_L: usize = 1;
+pub const H_TAB_R: usize = 2;
+pub const H_FFT_HZ: usize = 3;
+pub const H_FFT_Y: usize = 4;
+pub const H_FFT_X: usize = 5;
+pub const H_FFT_PK: usize = 6;
+pub const H_CUR: usize = 7;
+pub const H_SPARE: usize = 8;
 
 /// Set the graph state up in place (its static is not loaded on the
 /// device). Call once before any other scope_ui function.
@@ -976,8 +1078,10 @@ pub fn init() {
     for i in 0..399 {
         g.tr[i] = EMPTY;
         g.ps[i] = EMPTY;
+        g.ma[i] = EMPTY;
         g.d_tr[i] = EMPTY;
         g.d_ps[i] = EMPTY;
+        g.d_ma[i] = EMPTY;
     }
     g.deco = Deco::NONE;
     g.d_deco = Deco::NONE;
@@ -985,6 +1089,11 @@ pub fn init() {
     g.holes = [None; NH];
     g.d_holes = [None; NH];
     g.px = 0;
+}
+
+/// The graph state, read only (overlays reading its background).
+fn graph_ref() -> &'static Graph {
+    unsafe { &*core::ptr::addr_of!(GRAPH) }
 }
 
 /// The graph state (single-threaded firmware).
@@ -1054,7 +1163,7 @@ impl Graph {
     /// Leave `r` (screen) alone from now on (None: paint it again): the
     /// pinch bubble's slot.
     pub fn set_hole(&mut self, r: Option<Rect>) {
-        self.holes[0] = r;
+        self.holes[H_BUBBLE] = r;
     }
 
     /// Hole slot `i` (1 / 2: the timebase tabs, set by `update`).
@@ -1066,23 +1175,24 @@ impl Graph {
     pub fn clear(&mut self) {
         self.tr = [EMPTY; 399];
         self.ps = [EMPTY; 399];
+        self.ma = [EMPTY; 399];
     }
 
-    /// Bring the panel up to date with `tr` / `ps` and the model's lines,
-    /// markers and colours, repainting only the rows that changed.
+    /// Bring the panel up to date with `tr` / `ps` / `ma` and the model's
+    /// lines, markers and colours, repainting only the rows that changed.
     pub fn flush(&mut self, m: &Model) {
         self.deco = Deco::of(m);
         let d = self.deco;
         let o = self.d_deco;
         // Nothing changed (most main-loop passes): no per-column work.
-        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps {
+        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma {
             self.px = 0;
             return;
         }
-        let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.top != o.top || d.fh != o.fh;
+        let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh;
         let h = d.fh;
         let (cy, dh) = ((h - 1) / 2, (h - 1) / 8);
-        let mut minks = [MarkInk::NONE; 3];
+        let mut minks = [MarkInk::NONE; NGRAPH];
         for (i, mk) in d.marks.iter().enumerate() {
             minks[i] = MarkInk::of(mk);
         }
@@ -1100,25 +1210,27 @@ impl Graph {
             }
         }
         let marks_changed = d.marks != o.marks;
-        let covers = |marks: &[Mark; 3], fx: i16| marks.iter().any(|mk| mk.some() && 13 + fx >= mk.x && 13 + fx < mk.x + 12);
         let vl = |dd: &Deco, fx: i16| dd.v.iter().flatten().find(|l| l.fx == fx).map(|l| l.col);
         self.px = 0;
         for i in 0..399usize {
             let fx = i as i16 + 1;
+            let sx = 13 + fx;
             let mut sp = Spans { s: [(0, 0); 12], n: 0 };
             if full || vl(&d, fx) != vl(&o, fx) {
                 sp.add((1, h - 2));
             } else {
-                if self.tr[i] != self.d_tr[i] {
-                    sp.add(self.tr[i]);
-                    sp.add(self.d_tr[i]);
+                for (a, b) in [(self.tr[i], self.d_tr[i]), (self.ps[i], self.d_ps[i]), (self.ma[i], self.d_ma[i])] {
+                    if a != b {
+                        sp.add(a);
+                        sp.add(b);
+                    }
                 }
-                if self.ps[i] != self.d_ps[i] {
-                    sp.add(self.ps[i]);
-                    sp.add(self.d_ps[i]);
-                }
-                if marks_changed && (covers(&d.marks, fx) || covers(&o.marks, fx)) {
-                    sp.add((1, 12));
+                if marks_changed {
+                    for mk in d.marks.iter().chain(o.marks.iter()) {
+                        if mk.some() && sx >= mk.x && sx < mk.x + 12 {
+                            sp.add((mk.y - d.top, mk.y - d.top + 11));
+                        }
+                    }
                 }
                 for &r in &hrows[..nh] {
                     sp.add((r, r));
@@ -1126,7 +1238,7 @@ impl Graph {
                 // A hole that went away / moved: its rows come back.
                 for k in 0..NH {
                     if let Some(o) = self.d_holes[k].filter(|_| self.holes[k] != self.d_holes[k]) {
-                        if 13 + fx >= o.x && 13 + fx < o.x + o.w {
+                        if sx >= o.x && sx < o.x + o.w {
                             sp.add((o.y - d.top, o.y + o.h - 1 - d.top));
                         }
                     }
@@ -1135,28 +1247,48 @@ impl Graph {
             if sp.n == 0 {
                 continue;
             }
-            let (tr, ps) = (self.tr[i], self.ps[i]);
+            let (tr, ps, ma) = (self.tr[i], self.ps[i], self.ma[i]);
             let vcol = vl(&d, fx);
-            let sx = 13 + fx;
-            // Rows of this column under a hole (not painted; the overlays
-            // do not share columns, so at most one per column).
-            let hole = self.holes.iter().flatten().find(|r| sx >= r.x && sx < r.x + r.w).map(|r| (r.y - d.top, r.y + r.h - 1 - d.top));
+            // Markers over this column.
+            let mut mcol = [0usize; NGRAPH];
+            let mut nm = 0;
+            for (k, mk) in d.marks.iter().enumerate() {
+                if mk.some() && sx >= mk.x && sx < mk.x + 12 {
+                    mcol[nm] = k;
+                    nm += 1;
+                }
+            }
+            // Rows of this column under holes are not painted.
             let mut cut = [(0i16, 0i16); 24];
             let mut nc = 0;
             for &(a, b) in sp.merged(1, h - 2) {
-                match hole {
-                    Some((ha, hb)) if a <= hb && b >= ha => {
-                        if a < ha {
-                            cut[nc] = (a, ha - 1);
-                            nc += 1;
+                let mut segs = [(a, b); 12];
+                let mut ns = 1;
+                for r in self.holes.iter().flatten().filter(|r| sx >= r.x && sx < r.x + r.w) {
+                    let (ha, hb) = (r.y - d.top, r.y + r.h - 1 - d.top);
+                    let mut next = [(0i16, 0i16); 12];
+                    let mut nn = 0;
+                    for &(sa, sb) in &segs[..ns] {
+                        if sb < ha || sa > hb {
+                            next[nn] = (sa, sb);
+                            nn += 1;
+                            continue;
                         }
-                        if b > hb {
-                            cut[nc] = (hb + 1, b);
-                            nc += 1;
+                        if sa < ha && nn < 12 {
+                            next[nn] = (sa, ha - 1);
+                            nn += 1;
+                        }
+                        if sb > hb && nn < 12 {
+                            next[nn] = (hb + 1, sb);
+                            nn += 1;
                         }
                     }
-                    _ => {
-                        cut[nc] = (a, b);
+                    segs = next;
+                    ns = nn;
+                }
+                for &sg in &segs[..ns] {
+                    if nc < cut.len() {
+                        cut[nc] = sg;
                         nc += 1;
                     }
                 }
@@ -1167,12 +1299,13 @@ impl Graph {
                 for fy in a..=b {
                     let sy = d.top + fy;
                     let c = 'px: {
-                        if fy <= 12 {
-                            for mi in (0..3).rev() {
-                                if let Some(c) = minks[mi].at(sx, sy, C_FILL) {
-                                    break 'px c;
-                                }
+                        for &mi in mcol[..nm].iter().rev() {
+                            if let Some(c) = minks[mi].at(sx, sy, C_FILL) {
+                                break 'px c;
                             }
+                        }
+                        if fy >= ma.0 && fy <= ma.1 {
+                            break 'px d.math;
                         }
                         if fy >= tr.0 && fy <= tr.1 {
                             break 'px d.trace;
@@ -1198,9 +1331,33 @@ impl Graph {
         }
         self.d_tr = self.tr;
         self.d_ps = self.ps;
+        self.d_ma = self.ma;
         self.d_deco = d;
         self.d_holes = self.holes;
         self.valid = true;
+    }
+
+    /// The graph background at screen (x, y) without the traces and
+    /// markers: grid, guide / cursor lines (for transparent overlays such
+    /// as the stock FFT label). Uses the last flushed decoration.
+    pub fn bg_at(&self, x: i16, y: i16) -> Color {
+        let d = self.d_deco;
+        let (fx, fy) = (x - 13, y - d.top);
+        let h = d.fh;
+        if fx < 1 || fx > 399 || fy < 1 || fy > h - 2 {
+            return C_FILL;
+        }
+        if let Some(c) = d.v.iter().flatten().find(|l| l.fx == fx).map(|l| l.col) {
+            if (fy - 1) % 2 == 0 && fy <= h - 4 {
+                return c;
+            }
+        }
+        for l in d.h.iter().flatten() {
+            if l.fy == fy && fx <= 397 && (l.solid || fx % 2 == 1) {
+                return l.col;
+            }
+        }
+        if grid_on(fx, fy, (h - 1) / 2, (h - 1) / 8) { d.grid } else { C_FILL }
     }
 }
 
@@ -1209,12 +1366,12 @@ impl Graph {
 /// What the page last drew (None: nothing / invalid).
 struct Shown {
     m: Option<Model>,
-    strip: [Mark; 5],
+    strip: [Mark; NSTRIP],
     cells: [[u8; 16]; 4],
     cells_n: [u8; 4],
 }
 
-static mut SHOWN: Shown = Shown { m: None, strip: [Mark::NONE; 5], cells: [[0; 16]; 4], cells_n: [0; 4] };
+static mut SHOWN: Shown = Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 4], cells_n: [0; 4] };
 
 fn shown() -> &'static mut Shown {
     unsafe { &mut *core::ptr::addr_of_mut!(SHOWN) }
@@ -1236,7 +1393,7 @@ pub fn update(m: &Model) {
     let fresh = old.map_or(true, |o| o.combined != m.combined);
     if fresh {
         chrome(m);
-        s.strip = [Mark::NONE; 5];
+        s.strip = [Mark::NONE; NSTRIP];
         s.cells_n = [255; 4];
         graph().invalidate();
     }
@@ -1267,7 +1424,8 @@ pub fn update(m: &Model) {
         let dep = match k {
             0 | 2 => pal,
             1 => pal || ol.vdiv != m.vdiv || ol.ch1_open != m.ch1_open,
-            4 => ol.vdiv != m.vdiv || ol.math_open != m.math_open || ol.math_mode != m.math_mode,
+            3 | 5 => ol.math_on != m.math_on || ol.math_colour != m.math_colour,
+            4 => ol.vdiv != m.vdiv || ol.math_open != m.math_open || ol.math_mode != m.math_mode || ol.math_on != m.math_on || ol.math_colour != m.math_colour || ol.math_scale != m.math_scale,
             _ => false,
         };
         if d(dep || was(&ol) != was(m)) {
@@ -1278,13 +1436,13 @@ pub fn update(m: &Model) {
         s.cells_n = [255; 4];
     }
     // Strip markers: repaint the rows of every marker that changed.
-    let mut nm = [Mark::NONE; 5];
+    let mut nm = [Mark::NONE; NSTRIP];
     let n = strip_marks(m, &mut nm);
     if nm != s.strip {
         let lo = m.top();
         let hi = lo + m.frame_h() - 1;
         let mut sp = Spans { s: [(0, 0); 12], n: 0 };
-        for k in 0..5 {
+        for k in 0..NSTRIP {
             if nm[k] != s.strip[k] {
                 for mk in [nm[k], s.strip[k]] {
                     if mk.some() {
@@ -1303,14 +1461,115 @@ pub fn update(m: &Model) {
     let g = graph();
     let tabs = [(TAB_L, TAB_SHOW_L | TAB_PRESS_L), (TAB_R, TAB_SHOW_R | TAB_PRESS_R)];
     for (k, &(r, bits)) in tabs.iter().enumerate() {
-        g.set_hole_at(1 + k, (m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0).then_some(r));
+        g.set_hole_at(H_TAB_L + k, (m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0).then_some(r));
     }
+    // FFT: the stock centre-frequency label and the fw-rs boxes, holes too.
+    let fft_on = m.math_on && m.math_mode == 5;
+    let add = if fft_on { m.fft } else { None };
+    g.set_hole_at(H_FFT_HZ, fft_on.then_some(fft_label_rect(m)));
+    g.set_hole_at(H_FFT_Y, add.map(|_| fft_ydiv_rect(m)));
+    g.set_hole_at(H_FFT_X, add.map(|_| FFT_XDIV));
+    g.set_hole_at(H_FFT_PK, add.map(|_| fft_peak_rect(m)));
+    let deco0 = g.d_deco;
+    let valid0 = g.valid;
     g.flush(m);
     for (k, &(_, bits)) in tabs.iter().enumerate() {
         if m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0 && d((ol.tabs ^ m.tabs) & bits != 0 || ol.tb != m.tb) {
             tb_tab(m, k == 0);
         }
     }
+    // The label shows the graph background through it: repainted with it.
+    let bg_changed = !valid0 || deco0 != g.d_deco;
+    let was_fft = ol.math_on && ol.math_mode == 5;
+    if fft_on && (bg_changed || d(!was_fft || ol.fft_hz != m.fft_hz || ol.math_colour != m.math_colour)) {
+        fft_label(m);
+    }
+    if let Some(a) = add {
+        let old = if was_fft { ol.fft } else { None };
+        let mc = m.math_pal();
+        let col = d(old.is_none() || ol.math_colour != m.math_colour) || bg_changed;
+        if col || old.map_or(true, |o| o.ydiv != a.ydiv) {
+            fft_box(fft_ydiv_rect(m), a.ydiv.as_str(), mc);
+        }
+        if col || old.map_or(true, |o| o.xdiv != a.xdiv) {
+            fft_box(FFT_XDIV, a.xdiv.as_str(), mc);
+        }
+        if col || old.map_or(true, |o| o.peak != a.peak) {
+            fft_box(fft_peak_rect(m), a.peak.as_str(), C_WHITE);
+        }
+    }
+}
+
+// ------------------------------------------------------------------ FFT
+// Stock: the centre-frequency label (spec sec. 3.2). fw-rs additions
+// (UF-11): the vertical scale box (top left), the horizontal scale box
+// (bottom, between the timebase tap zones), the peak readout (right, under
+// the label, white like the peak marker). All are graph holes painted over it.
+
+/// Stock FFT label: graph (200,12,60,17).
+pub fn fft_label_rect(m: &Model) -> Rect {
+    rect(214, m.top() + 13, 60, 17)
+}
+pub fn fft_ydiv_rect(m: &Model) -> Rect {
+    rect(18, m.top() + 13, 92, 17)
+}
+/// Peak readout: right, under the label row (the label leaves too little
+/// room beside it for "12.5MHz -99.9dBV").
+pub fn fft_peak_rect(m: &Model) -> Rect {
+    rect(266, m.top() + 34, 144, 17)
+}
+/// Horizontal scale box: bottom row (both views share the frame bottom),
+/// outside the Corners tap zones (x 23..102 / 333..412) and the cursor tab.
+pub const FFT_XDIV: Rect = rect(168, 280, 92, 17);
+
+/// The stock FFT label: no fill (the graph background shows through), 1 px
+/// ring r5 with the top-left corner square (mask 0x0e), centred 12 px text,
+/// both in the math colour.
+pub fn fft_label(m: &Model) {
+    let r = fft_label_rect(m);
+    let mc = m.math_pal();
+    let t = Ink::new(sf::SC_F12, r, m.fft_hz.as_str(), 8, 0);
+    let g = graph_ref();
+    paint(r, &[(K_SHAPE, C_FILL), (K_TEXT, C_FILL)], |x, y| {
+        if let Some(gl) = t.at(x, y) {
+            return (mc, tag(2, gl));
+        }
+        if on_ring(r, 5, 0x0e, x, y) { (mc, tag(1, 0)) } else { (g.bg_at(x, y), 0) }
+    });
+}
+
+/// An FFT box (fw-rs): ring r5 and text in `col` on the graph fill (letter
+/// spacing 1: "B/", "z/" touch in this font otherwise).
+fn fft_box(r: Rect, text: &str, col: Color) {
+    let t = Ink::new(sf::SC_F12, r, text, 8, 1);
+    let g = graph_ref();
+    paint(r, &[(K_SHAPE, C_FILL), (K_TEXT, C_FILL)], |x, y| {
+        if let Some(gl) = t.at(x, y) {
+            return (col, tag(2, gl));
+        }
+        if !in_rbox(r, 5, 0x0f, x, y) {
+            (g.bg_at(x, y), 0)
+        } else if on_ring(r, 5, 0x0f, x, y) {
+            (col, tag(1, 0))
+        } else {
+            (C_FILL, tag(1, 0))
+        }
+    });
+}
+
+/// "50kHz/div", "200mHz/div": a 1-2-5 frequency without decimals.
+pub fn fmt_hz125(out: &mut Buf, hz: f32) {
+    let (x, p) = if hz >= 0.999e6 {
+        (hz / 1e6, "MHz")
+    } else if hz >= 999.0 {
+        (hz / 1e3, "kHz")
+    } else if hz >= 0.999 {
+        (hz, "Hz")
+    } else {
+        (hz * 1e3, "mHz")
+    };
+    let mut t = [0u8; 16];
+    out.push(crate::dmm::format(&mut t, x, if x < 0.999 { 1 } else { 0 })).push(p);
 }
 
 /// Measurement bar texts (<= 4, "--" for unused cells); only changed cells
@@ -1439,7 +1698,7 @@ pub enum Press {
 /// finger wins: the stock marker zones (search order, `pick_zone`), then
 /// the cursor lines (fw-rs), and only then the tap-step zone of `mode`.
 pub fn graph_press(m: &Model, mode: u8, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Press {
-    let mut z = [Zone::NONE; 7];
+    let mut z = [Zone::NONE; NZONE];
     let n = zones(m, &mut z);
     if let Some(k) = pick_zone(&z[..n], sel_v, sel_h, last_h, x, y) {
         return Press::Marker(z[k].level, z[k].id);
@@ -1518,7 +1777,9 @@ impl Arm {
 pub const MEAS_NAMES: [&str; 20] =
     ["Freq", "+Duty", "-Duty", "+Wid", "-Wid", "+Pul", "-Pul", "X2-1", "Xf", "Cycl", "Vp-p", "Vrms", "Vmax", "Vmin", "Vtop", "Vbas", "Vamp", "Y2-1", "Vcrm", "Vavg"];
 pub const PROBE_NAMES: [&str; 13] = ["0.1X", "0.2X", "0.5X", "1X", "2X", "5X", "10X", "20X", "50X", "100X", "200X", "500X", "1000X"];
-const WINDOWS: [&str; 5] = ["Rectangular", "Blackman", "Hanning", "Hanming", "Triangular"];
+/// FFT windows (stock five, "Hanming" spelled Hamming, + flat-top; the same
+/// order as fft::WIN_NAMES).
+pub const WINDOWS: [&str; 6] = ["Rectangular", "Blackman", "Hanning", "Hamming", "Triangular", "Flat-top"];
 pub const MF_TABS: [&str; 4] = ["Measure", "Display", "Trigger", "Settings"];
 
 /// Values the popups show.
@@ -1540,6 +1801,13 @@ pub struct PopVals {
     pub math_colour: u8,
     /// Measure grid cell under the finger (0x7bef while pressed).
     pub pressed_cell: Option<u8>,
+    /// Math popup: mode (5 FFT, 6 ABS), Hz/div choice 0..3 and its four
+    /// labels (ascending), FFT window, FFT unit Vrms.
+    pub math_mode: u8,
+    pub fft_hz: u8,
+    pub hz_opts: [Txt; 4],
+    pub fft_win: u8,
+    pub fft_vrms: bool,
 }
 
 /// Which popup is open (tab).
@@ -1896,23 +2164,27 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
     }
 }
 
-/// Math popup: drawn as the stock, but inert (no math engine): the Mode list
-/// shows nothing selected.
+/// Math popup (stock layout): Mode FFT / ABS, Color, Hz/Div (four values
+/// from the current FFT span), Other (window, unit).
 pub fn draw_math(tab: u8, v: &PopVals) {
     let tab = tab.min(3);
     side_popup("MATH", &["Mode", "Color", "Hz/Div", "Other"], tab);
     let pc = rect(293, 50, 120, 250);
     match tab {
-        0 => option_list(rect(308, 71, 90, 24), pc, &["FFT", "ABS"], 44, usize::MAX),
+        // Stock: FFT selected unless the mode is ABS (also while math is off).
+        0 => option_list(rect(308, 71, 90, 24), pc, &["FFT", "ABS"], 44, (v.math_mode == 6) as usize),
         1 => spinner(rect(298, 70, 110, 150), pc, &COLOUR_NAMES, v.math_colour as usize, true),
-        2 => spinner(rect(298, 70, 110, 150), pc, &["250Hz", "500Hz", "1.25kHz", "2.50kHz"], 2, false),
+        2 => {
+            let o = [v.hz_opts[0].as_str(), v.hz_opts[1].as_str(), v.hz_opts[2].as_str(), v.hz_opts[3].as_str()];
+            spinner(rect(298, 70, 110, 150), pc, &o, v.fft_hz.min(3) as usize, false)
+        }
         _ => {
             let r = rect(293, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Window", C_BAR, 8, 0);
-            spinner(rect(298, 70, 110, 150), pc, &WINDOWS, 0, false);
+            spinner(rect(298, 70, 110, 150), pc, &WINDOWS, v.fft_win.min(5) as usize, false);
             let r = rect(293, 224, 120, 24);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "FFT Unit", C_BAR, 8, 0);
-            option_list(rect(308, 250, 90, 24), pc, &["dB", "Vrms"], 44, 0);
+            option_list(rect(308, 250, 90, 24), pc, &["dB", "Vrms"], 44, v.fft_vrms as usize);
         }
     }
 }
@@ -1925,6 +2197,13 @@ pub enum SideHit {
     Coupling(u8),
     Probe(u8),
     Colour(u8),
+    /// Math popup: mode 5 FFT / 6 ABS, colour, Hz/div choice, window, unit
+    /// (1 = Vrms).
+    MathMode(u8),
+    MathColour(u8),
+    HzDiv(u8),
+    Window(u8),
+    Unit(u8),
     Inside,
     /// Outside the box: closes.
     Close,
@@ -1940,7 +2219,18 @@ pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
         return if i < ntabs { SideHit::Tab(i as u8) } else { SideHit::Inside };
     }
     if math {
-        return SideHit::Inside;
+        return match tab {
+            0 => option_hit(rect(308, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, |i| SideHit::MathMode(5 + i)),
+            1 => spinner_hit(rect(298, 70, 110, 150), 9, v.math_colour as usize, x, y).map_or(SideHit::Inside, SideHit::MathColour),
+            2 => spinner_hit(rect(298, 70, 110, 150), 4, v.fft_hz.min(3) as usize, x, y).map_or(SideHit::Inside, SideHit::HzDiv),
+            _ => {
+                if let Some(i) = spinner_hit(rect(298, 70, 110, 150), WINDOWS.len(), v.fft_win.min(5) as usize, x, y) {
+                    SideHit::Window(i)
+                } else {
+                    option_hit(rect(308, 250, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Unit)
+                }
+            }
+        };
     }
     match tab {
         0 => option_hit(rect(308, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),

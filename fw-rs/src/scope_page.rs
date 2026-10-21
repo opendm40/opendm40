@@ -201,6 +201,55 @@ pub(super) struct Autoset {
     min_r: u8,
 }
 
+/// Math display (stock math popup / pill; UF-11: the FFT is computed by
+/// src/fft.rs from the scope record, ABS from the shown columns).
+#[derive(Clone, Copy)]
+pub(super) struct Math {
+    pub on: bool,
+    /// 5 FFT, 6 ABS (stock S+0xd4).
+    pub mode: u8,
+    pub colour: u8,
+    /// FFT dB/div (su::FFT_DB index) and the V/div of ABS / FFT in Vrms
+    /// (su::VDIV_LABELS index).
+    pub db: u8,
+    pub vdiv: u8,
+    pub vrms: bool,
+    /// FFT window (fft::WIN_NAMES) and Hz/div choice (0..3 ascending, 3 =
+    /// the widest 1-2-5 step that fits 0 .. Nyquist).
+    pub win: u8,
+    pub hz: u8,
+    /// Offsets (rows): FFT 0 dBV / 0 Vrms row and ABS 0 V row = 140 + off.
+    pub fft_off: i32,
+    pub abs_off: i32,
+    /// FFT centre frequency (Hz; clamped to the span when drawn, 0 = the
+    /// span starts at DC).
+    pub ctr: f32,
+}
+
+impl Math {
+    pub const DEFAULT: Math = Math { on: false, mode: 5, colour: 1, db: 9, vdiv: 9, vrms: false, win: crate::fft::W_HANN, hz: 3, fft_off: -105, abs_off: 105, ctr: 0.0 };
+    /// Offset of the active mode.
+    fn off(&self) -> i32 {
+        if self.mode == 5 { self.fft_off } else { self.abs_off }
+    }
+}
+
+/// The spectrum job and result: 12 KB, TCM .bss (all-zero `Fft::new`).
+static mut FFT: crate::fft::Fft = crate::fft::Fft::new();
+
+fn fft() -> &'static mut crate::fft::Fft {
+    unsafe { &mut *core::ptr::addr_of_mut!(FFT) }
+}
+
+/// FFT Hz/div choices (ascending) for a spectrum up to `nyq` Hz: the widest
+/// 1-2-5 value whose 10 divisions fit 0 .. nyq and the three below it.
+fn hz_opts(nyq: f32) -> [f32; 4] {
+    let full = crate::fft::floor125(nyq / 10.0);
+    let a = crate::fft::down125(full);
+    let b = crate::fft::down125(a);
+    [crate::fft::down125(b), b, a, full]
+}
+
 /// Scope page state.
 pub(super) struct Sp {
     pub sel_v: u8,
@@ -248,6 +297,10 @@ pub(super) struct Sp {
     /// page (timebase, flash).
     list: Option<ListTouch>,
     tb_drawn: (u8, bool),
+    /// Math display settings; what the FFT additions show (from `sp_math`).
+    pub math: Math,
+    fft_view: Option<su::FftAdd>,
+    fft_hz: su::Txt,
 }
 
 impl Sp {
@@ -295,6 +348,9 @@ impl Sp {
             entries: 0,
             list: None,
             tb_drawn: (255, false),
+            math: Math::DEFAULT,
+            fft_view: None,
+            fft_hz: su::Txt::EMPTY,
         }
     }
 }
@@ -395,9 +451,27 @@ impl App {
             math_open: matches!(sp.popup, su::Popup::Math(_)),
             pressed: if now < sp.pressed_until { sp.pressed } else { 0 },
             combined: self.view == View::DmmScope,
-            math_mode: 0,
             tabs,
             tb_flash: now < sp.flash_until,
+            math_on: sp.math.on,
+            math_mode: sp.math.mode,
+            math_colour: sp.math.colour,
+            math_off: sp.math.off().clamp(-400, 400) as i16,
+            math_scale: self.math_scale(),
+            fft_hz: sp.fft_hz,
+            fft: sp.fft_view,
+        }
+    }
+
+    /// Math pill second line: FFT dB/div, else the math V/div.
+    fn math_scale(&self) -> su::Txt {
+        let m = &self.sp.math;
+        if m.mode == 5 && !m.vrms {
+            su::Txt::new(su::FFT_DB[m.db.min(12) as usize])
+        } else {
+            let mut t = su::Txt::new(su::VDIV_LABELS[m.vdiv.min(21) as usize]);
+            t.push("V");
+            t
         }
     }
 
@@ -478,6 +552,7 @@ impl App {
         su::invalidate();
         self.sp.bubble_dirty = self.sp.bubble;
         self.sp_render();
+        self.sp_math();
         self.sp_update(self.now);
         self.sp_cells();
         if self.view == View::DmmScope {
@@ -613,6 +688,7 @@ impl App {
         c.hpos = s.hpos;
         c.range = s.range;
         c.tb = s.tb;
+        self.sp_math_frame(f);
         self.sp_render();
     }
 
@@ -652,6 +728,214 @@ impl App {
         }
     }
 
+    // ------------------------------------------------------------ math / FFT
+
+    /// A new frame with math on: FFT mode starts a spectrum job from the
+    /// record around the frame (now, while its samples are still in the
+    /// record; `step` finishes it over the next passes), ABS maps the shown
+    /// columns.
+    fn sp_math_frame(&mut self, f: &scope::Frame) {
+        let m = self.sp.math;
+        if !m.on {
+            return;
+        }
+        if m.mode != 5 {
+            self.sp_math();
+            return;
+        }
+        if self.scope.rolling() {
+            // No linear record in roll: no spectrum.
+            if fft().bins > 0 {
+                fft().clear();
+                self.sp_math();
+            }
+            return;
+        }
+        if fft().busy() {
+            return;
+        }
+        let rec = self.scope.record();
+        if rec.len() < crate::fft::N_MIN {
+            return;
+        }
+        // The frame's window in the record (zoomed out past it: all of it).
+        let (off, n) = if f.data.is_empty() {
+            (0, rec.len())
+        } else {
+            let o = (f.data.as_ptr() as usize).wrapping_sub(rec.as_ptr() as usize) / 2;
+            if o + f.data.len() > rec.len() {
+                return;
+            }
+            (o, f.data.len())
+        };
+        // N points: the window decimated by k (mean of k samples) when it
+        // holds N or more, else N record samples centred on it (fast
+        // timebases: a finer resolution than the screen span), else the
+        // largest power of two the record holds.
+        let nn = crate::fft::N;
+        let (len, k, start) = if n >= nn {
+            let k = n / nn;
+            (nn, k, off + (n - nn * k) / 2)
+        } else {
+            let len = if rec.len() >= nn { nn } else { 1 << (usize::BITS - 1 - rec.len().leading_zeros()) };
+            let c = off + n / 2;
+            (len, 1, c.saturating_sub(len / 2).min(rec.len() - len))
+        };
+        let a = self.scope.volts(0.0);
+        let b = self.scope.volts(1.0) - a;
+        crate::prof::enter(crate::prof::FFT);
+        fft().load(&rec[start..], k, len, a, b, f.fs as f32, m.win);
+        crate::prof::exit(crate::prof::FFT);
+    }
+
+    /// One slice of the spectrum job (every pass on the page): a finished
+    /// spectrum is drawn.
+    fn sp_math_step(&mut self) {
+        if !(self.sp.math.on && self.sp.math.mode == 5 && fft().busy()) {
+            return;
+        }
+        crate::prof::enter(crate::prof::FFT);
+        let done = fft().step();
+        crate::prof::exit(crate::prof::FFT);
+        // (sp_math is its own FFT section, not nested.)
+        if done {
+            self.sp_math();
+        }
+    }
+
+    /// FFT Hz/div choices of the current spectrum (zeros without one).
+    fn fft_hz_opts(&self) -> [f32; 4] {
+        let f = fft();
+        if f.bins < 2 {
+            return [0.0; 4];
+        }
+        hz_opts(f.bin_hz * (f.bins - 1) as f32)
+    }
+
+    /// The math trace (`Graph::ma`) and the FFT texts from the current
+    /// spectrum / shown columns and the math settings (cheap: re-run on
+    /// every math change and drag, "the last spectrum is kept while
+    /// dragging").
+    pub(super) fn sp_math(&mut self) {
+        crate::prof::enter(crate::prof::FFT);
+        let g = su::graph();
+        let h = if self.view == View::DmmScope { 301 - su::COMBINED_TOP } else { 281 };
+        let m = self.sp.math;
+        self.sp.fft_view = None;
+        self.sp.fft_hz = su::Txt::EMPTY;
+        g.ma = [su::EMPTY; 399];
+        if !m.on {
+            crate::prof::exit(crate::prof::FFT);
+            return;
+        }
+        let zr = 140 + m.off();
+        let widen = |g: &mut su::Graph, j: usize, r: Option<i32>, prev: &mut Option<i32>| {
+            g.ma[j] = match r {
+                Some(r) => {
+                    let (a, b) = prev.map_or((r, r), |p| (r.min(p), r.max(p)));
+                    (su::trace_fy(h, a), su::trace_fy(h, b))
+                }
+                None => su::EMPTY,
+            };
+            *prev = r;
+        };
+        if m.mode != 5 {
+            // ABS: |v| of the shown CH1 columns (cached rows -> volts with
+            // the settings they were drawn with).
+            let c = cache();
+            let mv = su::VDIV_VAL[m.vdiv.min(21) as usize];
+            let vr = 4.0 * scope::VDIV[c.range.min(9)] * self.scope.s.probe / 141.0;
+            // (The CH1 columns are already widened: the bars touch.)
+            for j in 0..399 {
+                let (lo, hi) = c.seg[j];
+                if !c.valid || lo > hi {
+                    g.ma[j] = su::EMPTY;
+                    continue;
+                }
+                let (va, vb) = ((140 + c.pos - hi as i32) as f32 * vr, (140 + c.pos - lo as i32) as f32 * vr);
+                let top = va.abs().max(vb.abs());
+                let bot = if va <= 0.0 && vb >= 0.0 { 0.0 } else { va.abs().min(vb.abs()) };
+                let ra = (zr as f32 - top / mv * 35.0).clamp(-30000.0, 30000.0) as i32;
+                let rb = (zr as f32 - bot / mv * 35.0).clamp(-30000.0, 30000.0) as i32;
+                g.ma[j] = (su::trace_fy(h, ra), su::trace_fy(h, rb));
+            }
+            crate::prof::exit(crate::prof::FFT);
+            return;
+        }
+        let f = fft();
+        if f.bins < 2 {
+            crate::prof::exit(crate::prof::FFT);
+            return;
+        }
+        let opts = self.fft_hz_opts();
+        let (hzd, full) = (opts[m.hz.min(3) as usize], opts[3]);
+        if !(hzd > 0.0) {
+            crate::prof::exit(crate::prof::FFT);
+            return;
+        }
+        let half = 5.0 * hzd;
+        let ctr = m.ctr.clamp(half, half.max(10.0 * full - half));
+        self.sp.math.ctr = ctr;
+        let f0 = ctr - half;
+        let px = hzd / 40.0;
+        let ydiv_db = su::FFT_DB_VAL[m.db.min(12) as usize];
+        let ydiv_v = su::VDIV_VAL[m.vdiv.min(21) as usize];
+        let row = |db: f32| -> i32 {
+            let r = if m.vrms { zr as f32 - crate::fft::db_to_v(db) / ydiv_v * 35.0 } else { zr as f32 - db / ydiv_db * 35.0 };
+            r.clamp(-30000.0, 30000.0) as i32
+        };
+        let mut prev = None;
+        for j in 0..399 {
+            let fa = f0 + j as f32 * px;
+            let r = f.col_max(fa, fa + px).map(row);
+            widen(g, j, r, &mut prev);
+        }
+        // Texts: centre (stock label), scales, peak.
+        let mut b = su::Buf::new();
+        su::fmt_hz(&mut b, ctr);
+        self.sp.fft_hz = su::Txt::new(b.as_str());
+        let mut y = su::Buf::new();
+        if m.vrms {
+            y.push(su::VDIV_LABELS[m.vdiv.min(21) as usize]).push("V/div");
+        } else {
+            y.push(su::FFT_DB[m.db.min(12) as usize]).push("/div");
+        }
+        let mut x = su::Buf::new();
+        su::fmt_hz125(&mut x, hzd);
+        x.push("/div");
+        let mut pk = su::Buf::new();
+        let mut at = None;
+        match f.peak(f0, f0 + 10.0 * hzd) {
+            Some((pf, pd)) => {
+                su::fmt_hz(&mut pk, pf);
+                pk.push(" ");
+                if m.vrms {
+                    su::fmt_v(&mut pk, crate::fft::db_to_v(pd), "V");
+                } else {
+                    let mut t = [0u8; 16];
+                    pk.push(crate::dmm::format(&mut t, pd, if pd.abs() < 99.95 { 1 } else { 0 })).push("dBV");
+                }
+                at = Some((((pf - f0) / px) as i16, row(pd).clamp(-1000, 1000) as i16));
+            }
+            None => {
+                pk.push("--");
+            }
+        }
+        self.sp.fft_view = Some(su::FftAdd { ydiv: su::Txt::new(y.as_str()), xdiv: su::Txt::new(x.as_str()), peak: su::Txt::new(pk.as_str()), peak_at: at });
+        crate::prof::exit(crate::prof::FFT);
+    }
+
+    /// A math setting changed: a new spectrum where the computation depends
+    /// on it (`fresh`: on / mode / window; a stopped scope re-emits its
+    /// stored record), the trace and texts again.
+    fn sp_math_changed(&mut self, fresh: bool) {
+        if fresh {
+            fft().clear();
+            self.scope_invalidate();
+        }
+        self.sp_math();
+    }
+
     /// Settings changed outside a drag: forget the persistence.
     pub(super) fn sp_settings_changed(&mut self) {
         let c = cache();
@@ -665,6 +949,7 @@ impl App {
         if self.sp.pressed != 0 && now >= self.sp.pressed_until {
             self.sp.pressed = 0;
         }
+        self.sp_math_step();
         if let Some(a) = self.sp.autoset {
             if now >= a.abort {
                 self.sp.autoset = None;
@@ -1019,6 +1304,18 @@ impl App {
                 st.trig_row = (st.trig_row + rows).clamp(-10, 290);
                 self.sp_code(1);
             }
+            2 if self.sp.math.on => {
+                // Math / FFT offset (the 'M' strip marker).
+                let m = &mut self.sp.math;
+                if m.mode == 5 {
+                    m.fft_off = (m.fft_off + rows).clamp(-392, 392);
+                } else {
+                    m.abs_off = (m.abs_off + rows).clamp(-392, 392);
+                }
+                self.sp_math();
+                self.sp_code(6);
+                return;
+            }
             k @ (3 | 4) => {
                 let i = (k - 3) as usize;
                 self.cur.y[i] = (self.cur.y[i] + rows).clamp(1, 279);
@@ -1057,6 +1354,14 @@ impl App {
                 let mut st = self.scope.s;
                 st.hpos = (st.hpos + dx).clamp(0, scope::COLS as i32);
                 self.sp_preview(st);
+            }
+            1 if self.sp.math.on && self.sp.math.mode == 5 => {
+                // FFT centre (stock: centre -= dx, the spectrum follows the
+                // finger); the last spectrum is re-drawn, no new one.
+                let o = self.fft_hz_opts()[self.sp.math.hz.min(3) as usize];
+                self.sp.math.ctr -= dx as f32 * o / 40.0;
+                self.sp_math();
+                self.sp_code(7);
             }
             k @ (2 | 3) => {
                 let i = (k - 2) as usize;
@@ -1125,12 +1430,32 @@ impl App {
     fn sp_recentre(&mut self, now: u64) {
         let mut st = self.scope.s;
         if self.sp.last_h {
+            if self.sp.sel_h == 1 {
+                // FFT centre: the span starts at DC again.
+                self.sp.math.ctr = 0.0;
+                self.sp_math();
+                self.beep(now, 60);
+                self.sp.touch = None;
+                return;
+            }
             if self.sp.sel_h != 0 {
                 return;
             }
             st.hpos = 200;
         } else {
             match self.sp.sel_v {
+                2 => {
+                    let m = &mut self.sp.math;
+                    if m.mode == 5 {
+                        m.fft_off = Math::DEFAULT.fft_off;
+                    } else {
+                        m.abs_off = Math::DEFAULT.abs_off;
+                    }
+                    self.sp_math();
+                    self.beep(now, 60);
+                    self.sp.touch = None;
+                    return;
+                }
                 0 => {
                     st.trig_row -= st.pos;
                     st.pos = 0;
@@ -1273,6 +1598,12 @@ impl App {
                 return;
             }
             4 => {
+                // Stock: the math label turns math on and opens the popup
+                // (a second tap on it, popup open, turns math off).
+                if !self.sp.math.on {
+                    self.sp.math.on = true;
+                    self.sp_math_changed(true);
+                }
                 self.sp_popup_open(su::Popup::Math(0));
                 return;
             }
@@ -1280,7 +1611,20 @@ impl App {
                 self.sp_popup_open(su::Popup::Mf(2));
                 return;
             }
-            _ => return, // math scale: no engine
+            3 | 5 => {
+                // Math scale +1 / -1: FFT dB/div, else the math V/div.
+                let m = &mut self.sp.math;
+                let up = k == 3;
+                let step = |v: u8, max: u8| if up { (v + 1).min(max) } else { v.saturating_sub(1) };
+                if m.mode == 5 && !m.vrms {
+                    m.db = step(m.db, 12);
+                } else {
+                    m.vdiv = step(m.vdiv, 21);
+                }
+                self.sp_math();
+                return;
+            }
+            _ => return,
         }
         self.scope_set(st, now);
     }
@@ -1319,8 +1663,21 @@ impl App {
             ac: s.ac,
             probe: probe_idx(s.probe) as u8,
             colour: self.sp.colour,
-            math_colour: 1,
+            math_colour: self.sp.math.colour,
             pressed_cell: self.sp.pressed_cell,
+            math_mode: self.sp.math.mode,
+            fft_hz: self.sp.math.hz,
+            hz_opts: self.fft_hz_opts().map(|f| {
+                let mut b = su::Buf::new();
+                if f > 0.0 {
+                    su::fmt_hz125(&mut b, f);
+                } else {
+                    b.push("--");
+                }
+                su::Txt::new(b.as_str())
+            }),
+            fft_win: self.sp.math.win,
+            fft_vrms: self.sp.math.vrms,
         }
     }
 
@@ -1417,6 +1774,12 @@ impl App {
                 match self.sp.popup {
                     su::Popup::Mf(t) => self.sp_mf_tap(clk, t, su::mf_hit(t, &v, x, y), now),
                     su::Popup::Ch1(t) => self.sp_side_tap(false, t, su::side_hit(false, t, &v, x, y), now),
+                    su::Popup::Math(_) if su::panel_hit(p.x, p.y) == Some(4) => {
+                        // Stock: the math label with its popup open = math off.
+                        self.sp.math.on = false;
+                        self.sp_math_changed(false);
+                        self.sp_popup_close();
+                    }
                     su::Popup::Math(t) => self.sp_side_tap(true, t, su::side_hit(true, t, &v, x, y), now),
                     su::Popup::Tb(i) => match su::tb_hit(i, x, y) {
                         su::TbHit::Close => self.sp_popup_close(),
@@ -1605,6 +1968,27 @@ impl App {
                 self.scope_set(st, now);
             }
             su::SideHit::Colour(i) => self.sp.colour = i.min(8),
+            su::SideHit::MathMode(md) => {
+                if md != self.sp.math.mode {
+                    self.sp.math.mode = md;
+                    self.sp_math_changed(true);
+                }
+            }
+            su::SideHit::MathColour(i) => self.sp.math.colour = i.min(8),
+            su::SideHit::HzDiv(i) => {
+                self.sp.math.hz = i.min(3);
+                self.sp_math();
+            }
+            su::SideHit::Window(i) => {
+                if i != self.sp.math.win {
+                    self.sp.math.win = i.min(5);
+                    self.sp_math_changed(true);
+                }
+            }
+            su::SideHit::Unit(i) => {
+                self.sp.math.vrms = i == 1;
+                self.sp_math();
+            }
         }
         self.sp_popup_draw();
     }
@@ -1834,6 +2218,43 @@ impl App {
         *p1 |= su::tap_code(s.tap_mode) << 28;
         *p11 |= (s.drag_mode as u32 & 3) << 1 | (s.swipes as u32) << 3 | (s.persist as u32 & 3) << 4 | (!s.press_fx as u32) << 6;
         *p11 |= ((s.grid.min(100) as u32 / 10) ^ 5) << 12;
+    }
+
+    /// Extension words (persist::W_SCOPE_EXT..): [0] math flags / indices,
+    /// [1] math offsets, [2] FFT centre (f32 bits); 0 = defaults
+    /// everywhere (fields stored XOR their default).
+    pub(super) fn sp_persist_ext(&self, p: &mut [u32]) {
+        let m = &self.sp.math;
+        let d = Math::DEFAULT;
+        p[0] = m.on as u32
+            | ((m.mode == 6) as u32) << 1
+            | ((m.colour ^ d.colour) as u32 & 0xF) << 2
+            | ((m.db ^ d.db) as u32 & 0xF) << 6
+            | ((m.vdiv ^ d.vdiv) as u32 & 0x1F) << 10
+            | (m.vrms as u32) << 15
+            | ((m.win ^ d.win) as u32 & 7) << 16
+            | ((m.hz ^ d.hz) as u32 & 3) << 19;
+        p[1] = ((m.fft_off - d.fft_off) as i16 as u16 as u32) | ((m.abs_off - d.abs_off) as i16 as u16 as u32) << 16;
+        p[2] = m.ctr.to_bits();
+    }
+
+    pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
+        let d = Math::DEFAULT;
+        let w = p[0];
+        let ctr = f32::from_bits(p[2]);
+        self.sp.math = Math {
+            on: w & 1 != 0,
+            mode: if w >> 1 & 1 != 0 { 6 } else { 5 },
+            colour: ((w >> 2 & 0xF) as u8 ^ d.colour).min(8),
+            db: ((w >> 6 & 0xF) as u8 ^ d.db).min(12),
+            vdiv: ((w >> 10 & 0x1F) as u8 ^ d.vdiv).min(21),
+            vrms: w >> 15 & 1 != 0,
+            win: ((w >> 16 & 7) as u8 ^ d.win).min(5),
+            hz: (w >> 19 & 3) as u8 ^ d.hz,
+            fft_off: (d.fft_off + (p[1] as u16 as i16) as i32).clamp(-392, 392),
+            abs_off: (d.abs_off + ((p[1] >> 16) as u16 as i16) as i32).clamp(-392, 392),
+            ctr: if ctr.is_finite() && ctr >= 0.0 { ctr } else { 0.0 },
+        };
     }
 
     pub(super) fn sp_restore(&mut self, p1: u32, p11: u32) {

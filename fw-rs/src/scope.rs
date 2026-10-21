@@ -959,6 +959,17 @@ impl Scope {
         self.zoom_pending = true;
     }
 
+    /// The stored record (10-bit codes, oldest first), empty without one.
+    /// Every frame `poll` returns is a window of it (or, zoomed out past
+    /// it, the whole of it), valid until the next acquisition starts (the
+    /// next `poll` while running).
+    pub fn record(&self) -> &'static [u16] {
+        if !self.stored_valid || self.stored_len < 2 {
+            return &[];
+        }
+        unsafe { &(&*core::ptr::addr_of!(BUF))[..self.stored_len] }
+    }
+
     /// Drag preview: take the position settings (CH1 position, trigger level
     /// row, trigger position) into `s` without touching the hardware or the
     /// acquisition in flight (same clamps as `apply`); the caller applies them

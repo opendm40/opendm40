@@ -3,7 +3,7 @@
 //! user settings in config.bin on the SPI disk.) Layout: magic, version,
 //! payload, CRC32; anything that does not check out falls back to defaults.
 //! The boot shim's words at the end of the 4 KiB (boot.rs, 0x40024FF0..) are
-//! outside the record (v4: 0x40024000..0x400240AB).
+//! outside the record (v5: 0x40024000..0x400240CB).
 
 use crate::mmio::{modify32, r32, w32};
 
@@ -17,8 +17,14 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// every new field reads 0 = its default). Layout: app.rs persist_words().
 /// p[38] / p[39] were spare in v4 and are now W_DMM_EXT / W_GEN_OFFS. A v4
 /// record from before reads 0 there = defaults, so no version change.
-const VERSION: u32 = 4;
-pub const WORDS: usize = 40;
+/// v5: 48 words; p[40..48] the scope page's math / FFT and trigger-type
+/// settings (scope_page.rs sp_persist_ext; 0 = defaults, so a v4 record
+/// loads zero-extended with nothing to migrate).
+const VERSION: u32 = 5;
+pub const WORDS: usize = 48;
+/// First word of the scope page's extension block (8 words).
+pub const W_SCOPE_EXT: usize = 40;
+const V4_WORDS: usize = 40;
 /// FR-05 conversion rate + display smoothing, UF-21 V-autorange migration
 /// flag: meter::ext_word() / meter::ext_settings() pack and decode it.
 pub const W_DMM_EXT: usize = 38;
@@ -71,6 +77,7 @@ pub fn load() -> Option<Record> {
     let version = rd(1);
     let n = match version {
         VERSION => WORDS,
+        4 => V4_WORDS,
         3 => V3_WORDS,
         2 => V2_WORDS,
         _ => return None,
