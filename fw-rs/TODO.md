@@ -555,7 +555,7 @@ Firmware:
       bit-bang stays only as the fallback build feature `hyspi-bitbang`. DBG:HYSPI:SELF? n[,div]: constant-row /
       write-pattern / AD2-sign check + us per frame (div 8 / 16 / 32 for one call). Emulator: HY3131SpiPort on
       spi3; AD2 logger loss at 2400 / 9600 S/s 16 % / 79 % (BB) -> 1.5 % / 8 % (SPI2), plumbing only.
-- [ ] (E2) device check (10 min, feasibility doc 8.4): SPI2 build, SELF? at 16 / 32 / 8, readings vs the
+- [x] (E2) device check (10 min, feasibility doc 8.4): SPI2 build, SELF? at 16 / 32 / 8, readings vs the
       bit-bang fallback build, AD2 logger loss; on failure flash the `hyspi-bitbang` build. Then drop the
       fallback feature and the bit-bang code.
       8e5efa6 on the device FAILED (doc 8.5): DC V wrong, w1 write/read-back ~25 % bad at /16 and /32, reads
@@ -563,8 +563,12 @@ Firmware:
       DIAG image fca31fd on the device (doc 8.6): SPI2-written data bytes with bit 7 = 1 and bit 0 = 0 arrive
       with bit 0 = 1 (64 / 256 values, every divider / CS timing / pin speed); SPI2 reads clean at /8 /16 /32.
       Fixed: reads on SPI2 /16, writes bit-banged (pins switched per write frame); DIAG / RAW removed.
-- [ ] (E2) device check of the read-SPI2 / write-bit-bang image (doc 8.6, 5 min); on a pass drop the
-      `hyspi-bitbang` feature (bit-banged reads). Optional later: pure-SPI2 writes (continuous TX + dummy byte).
+- [x] (E2) device check of the read-SPI2 / write-bit-bang image 7889e6c: PASS 2026-10-22. DC V 0.99979..0.99990 V
+      (1 V cal), SELF? 2000 at /16 and /32: all error counts 0, 23 stable bytes, 7.65 us 1-byte / 21.4 us AD1+AD2
+      read; AD2 logger 9600 S/s -> 8534 S/s measured, 11.1 % lost, 0 bad, max gap 2.05 ms (bit-bang ceiling was
+      ~6.5 kS/s); 4800 S/s -> 8.0 % lost (main-loop gaps: the ISR decision).
+- [ ] Drop the `hyspi-bitbang` feature (bit-banged reads) now that 7889e6c passed. Optional later: pure-SPI2
+      writes (continuous TX + dummy byte).
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
