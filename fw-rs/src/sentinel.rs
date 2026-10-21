@@ -129,24 +129,71 @@ pub const R29_ENPKH: u8 = 0x04;
 /// CTSTA CMPHO | CMPLO.
 pub const CTSTA_CMP: u8 = 0x30;
 
-/// The stock row of `mode` with the sentinel overrides (module table) when
-/// the alert that uses it is enabled in `mask`, and the sentinel kind.
-pub fn sentinel_row(mode: u8, acdc: bool, mask: u8, row: &[u8; CFG_LEN]) -> ([u8; CFG_LEN], Kind) {
+/// R33 bits 7:6: OP1CHOP (00 = CHOP_CLK held at 0).
+pub const R33_OP1CHOP: u8 = 0xC0;
+
+/// Device-check variants (DBG:SENTinel:VARiant, RAM only, 0 = the build's
+/// choice): bit 0 keeps the row's OP1 chopper in the AC V sentinel row (the
+/// 9dd1222 row), bit 1 drops the AC V sentinel (stock AC V row), bit 2 puts
+/// the comparator sentinel back on DC V 60 / 600 / 1000 V (the 9dd1222 rows).
+pub const VAR_ACV_CHOP: u8 = 1;
+pub const VAR_ACV_OFF: u8 = 2;
+pub const VAR_DCV_HI: u8 = 4;
+static VARIANT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+pub fn set_variant(v: u8) {
+    VARIANT.store(v & 7, core::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn variant() -> u8 {
+    VARIANT.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// The stock row of `mode` / `range` with the sentinel overrides (module
+/// table) when the alert that uses it is enabled in `mask`, and the
+/// sentinel kind.
+///
+/// Device check of 9dd1222 (docs/device-check-2026-10-21.md):
+/// * DC V 60 / 600 / 1000 V (r1..r3) carry no comparator sentinel: there
+///   the comparator on PB1 tripped for as long as 10 V was on V-COM with
+///   the A jack open (r0 at 1 V: never). Those rows drive the power bus
+///   from OP3 (R2F SMODE 0100, PS6 + PS8 closed; r0 leaves the bus off), so
+///   PB1 picks up an input-dependent level on the board. Leads in A/COM
+///   with the function on DC V leave V-COM open: the autorange then sits on
+///   6 V (r0), where the sentinel stays.
+/// * AC V: the stock row keeps OP1CHOP = 10 (2 kHz) with AD1 off. OP1's
+///   chopper clock evidently runs only with AD1 converting (the stock pairs
+///   them in DC V 6 V / DC A), so turning AD1 on for the peak hold started a
+///   2 kHz square of OP1's offset (x10 in 6 V) at OP1O -> PB4 -> AD2 / AD3:
+///   a constant ~37 mV RMS floor for any input (AC mV reads OP2: clean).
+///   The sentinel row holds the chopper off (OP1CHOP = 00); AC V is
+///   AC-coupled, so OP1's static offset does not reach the reading.
+pub fn sentinel_row(mode: u8, range: u8, acdc: bool, mask: u8, row: &[u8; CFG_LEN]) -> ([u8; CFG_LEN], Kind) {
+    row_for(mode, range, acdc, mask, variant(), row)
+}
+
+/// `sentinel_row` with an explicit variant (host tests).
+pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CFG_LEN]) -> ([u8; CFG_LEN], Kind) {
     let mut c = *row;
     if acdc {
         return (c, Kind::Off);
     }
     let kind = match mode {
+        1 if range > 0 && var & VAR_DCV_HI == 0 => Kind::Off,
         1 | 3 | 10 | 15 if mask & M_AJACK != 0 => {
             c[0] = R20_PB1;
             Kind::CmpA
         }
+        0 if var & VAR_ACV_OFF != 0 => Kind::Off,
         0 | 2 if mask & M_AJACK != 0 => {
             c[2] = 0x00;
             c[3] |= 0x80;
             c[4] = R24_PB1_PB3;
             c[5] |= R25_AD1IG_36;
             c[9] = (c[9] & 0xF8) | R29_PKH_AD1;
+            if mode == 0 && var & VAR_ACV_CHOP == 0 {
+                c[19] &= !R33_OP1CHOP;
+            }
             Kind::PeakA
         }
         7..=9 if mask & M_VJACK != 0 => {
@@ -418,15 +465,17 @@ mod tests {
     fn comparator_rows_change_only_r20() {
         // DC V r0..r3, DC mV, ohm (both variants: also the resistive
         // temperature sensors), thermocouple.
-        let mut rows: Vec<(u8, &[u8; CFG_LEN])> = vec![];
-        rows.extend(CFG_F1.iter().map(|r| (1u8, r)));
-        rows.extend(CFG_F3.iter().map(|r| (3u8, r)));
-        rows.extend(CFG_F10_P8SET.iter().map(|r| (10u8, r)));
-        rows.extend(CFG_F10_P8CLR.iter().map(|r| (10u8, r)));
-        rows.extend(CFG_F10_P8CLR.iter().map(|r| (15u8, r)));
-        rows.extend(CFG_F15.iter().map(|r| (15u8, r)));
-        for (m, r) in rows {
-            let (c, k) = sentinel_row(m, false, M_ALL, r);
+        let mut rows: Vec<(u8, u8, &[u8; CFG_LEN])> = vec![(1, 0, &CFG_F1[0])];
+        rows.extend(CFG_F3.iter().enumerate().map(|(i, r)| (3u8, i as u8, r)));
+        rows.extend(CFG_F10_P8SET.iter().enumerate().map(|(i, r)| (10u8, i as u8, r)));
+        rows.extend(CFG_F10_P8CLR.iter().enumerate().map(|(i, r)| (10u8, i as u8, r)));
+        rows.extend(CFG_F10_P8CLR.iter().enumerate().map(|(i, r)| (15u8, i as u8, r)));
+        rows.extend(CFG_F15.iter().map(|r| (15u8, 0, r)));
+        // DC V 60 V+ only with the device-check variant.
+        rows.extend(CFG_F1[1..].iter().map(|r| (1u8, 0x80, r)));
+        for (m, rr, r) in rows {
+            let var = if rr & 0x80 != 0 { VAR_DCV_HI } else { 0 };
+            let (c, k) = row_for(m, rr & 0x7F | (rr >> 7), false, M_ALL, var, r);
             assert_eq!(k, Kind::CmpA);
             assert_eq!(diff(r, &c), vec![(0, r[0], 0x90)], "mode {m}");
             // The stock R20 of these rows: SCMPI = PB4 (0xf0) or ENCMP off
@@ -441,15 +490,43 @@ mod tests {
     }
 
     #[test]
+    fn dcv_high_ranges_have_no_comparator() {
+        // 9dd1222: A-JACK for as long as 10 V sat on the 60 V range (open A
+        // jack). DC V r1..r3 keep the stock row; r0 keeps the sentinel.
+        for (i, r) in CFG_F1.iter().enumerate() {
+            let (c, k) = row_for(1, i as u8, false, M_ALL, 0, r);
+            if i == 0 {
+                assert_eq!((k, c[0]), (Kind::CmpA, R20_PB1));
+            } else {
+                assert_eq!((c, k), (*r, Kind::Off), "r{i}");
+                // What sets them apart: OP3 drives the power bus (SMODE 0100).
+                assert_eq!(r[15] & 0x0F, 0x04);
+            }
+        }
+        assert_eq!(CFG_F1[0][15] & 0x0F, 0);
+    }
+
+    #[test]
     fn peak_rows_change_only_the_ad1_fields() {
         for (m, rows) in [(0u8, &CFG_F0[..]), (2, &CFG_F2[..])] {
-            for r in rows {
-                let (c, k) = sentinel_row(m, false, M_ALL, r);
+            for (i, r) in rows.iter().enumerate() {
+                let (c, k) = row_for(m, i as u8, false, M_ALL, 0, r);
                 assert_eq!(k, Kind::PeakA);
                 let d = diff(r, &c);
                 let idx: Vec<usize> = d.iter().map(|x| x.0).collect();
-                // R22 OSR, R23 ENAD1, R24 inputs, R25 AD1IG, R29 PKH.
-                assert_eq!(idx, vec![2, 3, 4, 5, 9], "mode {m}");
+                // R22 OSR, R23 ENAD1, R24 inputs, R25 AD1IG, R29 PKH; AC V
+                // also R33 OP1CHOP held off (the 9dd1222 37 mV floor).
+                if m == 0 {
+                    assert_eq!(idx, vec![2, 3, 4, 5, 9, 19], "mode {m}");
+                    assert_eq!(c[19], r[19] & 0x3F);
+                    assert_eq!(r[19] & 0xC0, 0x80, "stock: OP1CHOP 2 kHz");
+                    let (c1, _) = row_for(m, i as u8, false, M_ALL, VAR_ACV_CHOP, r);
+                    assert_eq!(c1[19], r[19]);
+                    assert_eq!(row_for(m, i as u8, false, M_ALL, VAR_ACV_OFF, r), (*r, Kind::Off));
+                } else {
+                    assert_eq!(idx, vec![2, 3, 4, 5, 9], "mode {m}");
+                    assert_eq!(row_for(m, i as u8, false, M_ALL, VAR_ACV_OFF | VAR_ACV_CHOP, r).0, c);
+                }
                 assert_eq!(r[3] & 0x80, 0, "AD1 off in the stock AC row");
                 assert_eq!(c[3], r[3] | 0x80);
                 assert_eq!(c[4], 0x95);
@@ -467,8 +544,8 @@ mod tests {
     #[test]
     fn current_rows_close_ss5_only() {
         for (m, rows) in [(7u8, &CFG_F7[..]), (8, &CFG_F8_9[..]), (9, &CFG_F8_9[..])] {
-            for r in rows {
-                let (c, k) = sentinel_row(m, false, M_ALL, r);
+            for (i, r) in rows.iter().enumerate() {
+                let (c, k) = row_for(m, i as u8, false, M_ALL, 0, r);
                 assert_eq!(k, Kind::CmpV);
                 assert_eq!(diff(r, &c), vec![(0, r[0], 0x10), (12, r[12], r[12] | 0x10)]);
                 // The A rows: power bus as SGND (R2F 0x81), PS5 never closed.
@@ -483,13 +560,13 @@ mod tests {
     fn other_rows_masks_and_acdc_untouched() {
         let all: Vec<(u8, &[u8; CFG_LEN])> = vec![(4, &CFG_F4[0]), (5, &CFG_F5_6[1]), (11, &CFG_F11[0]), (12, &CFG_F12[0]), (13, &CFG_F13[0]), (13, &CFG_F13[6]), (14, &CFG_F14[0])];
         for (m, r) in all {
-            assert_eq!(sentinel_row(m, false, M_ALL, r), (*r, Kind::Off));
+            assert_eq!(row_for(m, 0, false, M_ALL, 0, r), (*r, Kind::Off));
         }
-        assert_eq!(sentinel_row(1, true, M_ALL, &CFG_F1[0]), (CFG_F1[0], Kind::Off));
-        assert_eq!(sentinel_row(0, true, M_ALL, &CFG_F0[1]), (CFG_F0[1], Kind::Off));
-        assert_eq!(sentinel_row(1, false, M_VJACK | M_LIVE, &CFG_F1[0]), (CFG_F1[0], Kind::Off));
-        assert_eq!(sentinel_row(0, false, 0, &CFG_F0[0]), (CFG_F0[0], Kind::Off));
-        assert_eq!(sentinel_row(7, false, M_AJACK, &CFG_F7[0]), (CFG_F7[0], Kind::Off));
+        assert_eq!(row_for(1, 0, true, M_ALL, 0, &CFG_F1[0]), (CFG_F1[0], Kind::Off));
+        assert_eq!(row_for(0, 0, true, M_ALL, 0, &CFG_F0[1]), (CFG_F0[1], Kind::Off));
+        assert_eq!(row_for(1, 0, false, M_VJACK | M_LIVE, 0, &CFG_F1[0]), (CFG_F1[0], Kind::Off));
+        assert_eq!(row_for(0, 0, false, 0, 0, &CFG_F0[0]), (CFG_F0[0], Kind::Off));
+        assert_eq!(row_for(7, 0, false, M_AJACK, 0, &CFG_F7[0]), (CFG_F7[0], Kind::Off));
     }
 
     #[test]

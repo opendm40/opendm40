@@ -1718,13 +1718,17 @@ impl App {
                 let t2 = cyc();
                 crate::prof::enter(crate::prof::FRAME);
                 self.sp_frame(&f, now);
-                // With a measurement in this pass the screen update (the
-                // graph diff) waits for the next pass's sp_tick (below), so
-                // no pass does maths + frame + paint (device check
-                // 2026-10-21).
-                if !fresh {
+                // The screen update (the graph diff) waits for the next
+                // pass's sp_tick (below): no pass does maths or frame +
+                // paint (device check 2026-10-21), and USB is served
+                // between the frame and its paint (9dd1222: a frame pass
+                // with paint was ~6 ms at ~50 fps, ping p50 11.8 ms). Frames
+                // in back-to-back passes (roll, fast timebases) paint here,
+                // as before, so the screen keeps up.
+                if self.sp.paint_due && !fresh {
                     self.sp_tick(now);
                 }
+                self.sp.paint_due = true;
                 crate::prof::exit(crate::prof::FRAME);
                 crate::prof::drawn();
                 self.prof[2] = self.prof[2].max(cyc().wrapping_sub(t2) / 200);
@@ -1737,7 +1741,10 @@ impl App {
                 return;
             }
         } else if page {
+            crate::prof::enter(crate::prof::PAINT);
             self.sp_tick(now);
+            self.sp.paint_due = false;
+            crate::prof::exit(crate::prof::PAINT);
             if self.sp.cells_due && !covered {
                 crate::prof::enter(crate::prof::MTXT);
                 self.sp_cells_step();
@@ -3076,6 +3083,14 @@ impl App {
             }
             C::SysAlertEnable(None) => {
                 out.put_bytes(&[b'0' + self.dmm.alert_mask()]);
+                true
+            }
+            C::DbgSentVar(Some(v)) => {
+                self.dmm.set_sent_variant(clk, v);
+                false
+            }
+            C::DbgSentVar(None) => {
+                out.put_bytes(&[b'0' + crate::sentinel::variant()]);
                 true
             }
             C::DbgSent => {

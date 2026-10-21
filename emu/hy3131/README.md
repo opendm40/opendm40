@@ -78,7 +78,8 @@ Chip (datasheet DS-HY3131-V10):
   AD2F, LPFF, RMSF, CTF set at those times and accumulated until INTF is read.
   AD2 runs on its own grid from the last R26 change (as AD1): one AD2F and one
   fresh R03..R05 per period, the input at the grid point plus a per-result
-  noise model (30 codes at OSR2 32, white scaling with OSR2 / ENCHOPAD2:
+  noise model (30 codes at OSR2 32, white scaling with OSR2; ENCHOPAD2 changes
+  neither the rate nor the noise, as on the device:
   `Ad2NoiseCodes`; a model, not a measurement), an unread result overwritten;
   a read is never torn (the chip advances at CS low only). The row
   recognition also accepts an AC row with AD3 / RMS / LPF off and another

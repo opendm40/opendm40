@@ -480,8 +480,11 @@ pub fn read_ad1() -> i32 {
 //
 // R26 = ENAD2 . 0 . ENCHOPAD2 . AD2RG . SAD2CLK . AD2OSR[2:0] (datasheet 13.2,
 // emu/hy3131/ref/registers.md). AD2CLK = SYSCLK / 2 (SAD2CLK = 0) or / 4;
-// one result per OSR2 = 32 << AD2OSR clocks (codes 5..7 all 1024); ENCHOPAD2
-// halves the rate (offset cancelled). Every stock AC row writes R26 = 0x80:
+// one result per OSR2 = 32 << AD2OSR clocks (codes 5..7 all 1024). ENCHOPAD2
+// does NOT halve the output rate on the device, whatever the datasheet says
+// (device check of 9dd1222: R26 0x25 and 0x05 both 422 us per flag-synced
+// sample, 0x24 and 0x04 both 232 us; the logger at "2400" = 0x24 took a
+// result on every P/2 gate). Every stock AC row writes R26 = 0x80:
 // /2, OSR 32, unchopped = 76.8 kS/s (13 us). The data logger's AD2 source
 // keeps the row (mux, gain, op amps) and only rewrites R26 to a slower rung
 // (docs/dmm-input-scope-feasibility.md 1.1); results: 19-bit signed in
@@ -494,11 +497,11 @@ pub const R_AD2: u8 = 0x03;
 pub const R26_CHOP: u8 = 0x20;
 pub const R26_CLK4: u8 = 0x08;
 
-/// AD2 output period in nanoseconds for an R26 value (ENAD2 ignored): 13021
-/// ns (0x80, the stock AC rows) .. 1_666_667 ns (/4, OSR 1024, chopped).
+/// AD2 output period in nanoseconds for an R26 value (ENAD2 and ENCHOPAD2
+/// ignored): 13021 ns (0x80, the stock AC rows) .. 833_333 ns (/4, OSR 1024).
 pub const fn ad2_period_ns(r26: u8) -> u32 {
     let osr = 32u64 << if r26 & 7 > 5 { 5 } else { r26 & 7 };
-    let clocks = osr * if r26 & R26_CLK4 != 0 { 4 } else { 2 } * if r26 & R26_CHOP != 0 { 2 } else { 1 };
+    let clocks = osr * if r26 & R26_CLK4 != 0 { 4 } else { 2 };
     ((clocks * 1_000_000_000 + SYSCLK_HZ as u64 / 2) / SYSCLK_HZ as u64) as u32
 }
 
@@ -506,33 +509,35 @@ pub const fn ad2_period_ns(r26: u8) -> u32 {
 #[allow(dead_code)] // tests, docs
 pub const fn ad2_rate_mhz(r26: u8) -> u32 {
     let osr = 32u64 << if r26 & 7 > 5 { 5 } else { r26 & 7 };
-    let clocks = osr * if r26 & R26_CLK4 != 0 { 4 } else { 2 } * if r26 & R26_CHOP != 0 { 2 } else { 1 };
+    let clocks = osr * if r26 & R26_CLK4 != 0 { 4 } else { 2 };
     ((SYSCLK_HZ as u64 * 1000 + clocks / 2) / clocks) as u32
 }
 
 /// The data logger's AD2 rate ladder: R26 low bits for a requested rate in
 /// S/s. Prefers the /2 clock (more modulator samples per result) and the
-/// largest OSR that gives the rate; with `chop` (offset cancelled, the
-/// logger default) 600 .. 9600 S/s, without 1200 .. 9600 (600 S/s needs the
-/// chopper: /4, OSR 1024 unchopped is already 1200). A request between two
-/// rungs takes the nearest one in log scale (rounding down on a tie); the
-/// achieved rung is what LOG:PREamble? reports.
+/// largest OSR that gives the rate: 1200 .. 9600 S/s, the same rungs with
+/// `chop` (ENCHOPAD2, offset cancelled, the logger default) and without
+/// (ENCHOPAD2 does not slow AD2 down, see above; /4, OSR 1024 = 1200 S/s is
+/// the slowest the chip has). A request between two rungs takes the nearest
+/// one in log scale (rounding down on a tie); the achieved rung is what
+/// LOG:PREamble? reports. Above ~6.5 kS/s the bit-banged bus was the limit
+/// (device 9dd1222: 6.2-6.6 kS/s captured at 9600); LOG:COUNt? lost shows
+/// what the bus in use misses.
 pub const fn ad2_r26_for(req_hz: u32, chop: bool) -> u8 {
-    // (rate S/s, R26 low bits)
-    const CHOP: [(u32, u8); 5] =
-        [(600, R26_CHOP | R26_CLK4 | 5), (1200, R26_CHOP | 5), (2400, R26_CHOP | 4), (4800, R26_CHOP | 3), (9600, R26_CHOP | 2)];
-    const PLAIN: [(u32, u8); 4] = [(1200, R26_CLK4 | 5), (2400, 5), (4800, 4), (9600, 3)];
-    let t: &[(u32, u8)] = if chop { &CHOP } else { &PLAIN };
+    // (rate S/s, R26 low bits without ENCHOPAD2)
+    const T: [(u32, u8); 4] = [(1200, R26_CLK4 | 5), (2400, 5), (4800, 4), (9600, 3)];
+    let c = if chop { R26_CHOP } else { 0 };
+    let t = &T;
     let mut i = 0;
     while i + 1 < t.len() {
         // geometric midpoint of a 2x step: rate * sqrt(2); req^2 vs 2 rate^2
         let r = t[i].0 as u64;
         if (req_hz as u64) * (req_hz as u64) <= 2 * r * r {
-            return t[i].1;
+            return t[i].1 | c;
         }
         i += 1;
     }
-    t[t.len() - 1].1
+    t[t.len() - 1].1 | c
 }
 
 /// Logger AD2 stream: AD3 off (the row starts it before AD2, so its grid is
@@ -583,25 +588,30 @@ mod tests {
         // The stock AC rows: /2, OSR 32, unchopped: 76.8 kS/s.
         assert_eq!(ad2_rate_mhz(0x80), 76_800_000);
         assert_eq!(ad2_period_ns(0x80), 13_021);
-        for hz in [600u32, 1200, 2400, 4800, 9600] {
+        for hz in [1200u32, 2400, 4800, 9600] {
             let r = ad2_r26_for(hz, true);
             assert_eq!(ad2_rate_mhz(r), hz * 1000, "chop {hz}");
             assert!(r & R26_CHOP != 0);
-            if hz >= 1200 {
-                let r = ad2_r26_for(hz, false);
-                assert_eq!(ad2_rate_mhz(r), hz * 1000, "plain {hz}");
-                assert!(r & R26_CHOP == 0);
-            }
+            let r = ad2_r26_for(hz, false);
+            assert_eq!(ad2_rate_mhz(r), hz * 1000, "plain {hz}");
+            assert!(r & R26_CHOP == 0);
         }
+        // The device (9dd1222 check): ENCHOPAD2 does not halve the rate.
+        assert_eq!(ad2_period_ns(0x25), ad2_period_ns(0x05));
+        assert_eq!(ad2_period_ns(0x24), 208_333);
+        // The 9dd1222 labels: 0x2D was "600" (measured 1125/s captured,
+        // 886 us spacing <= the real 833 us + the gate), 0x24 was "2400".
+        assert_eq!(ad2_rate_mhz(0x2D), 1_200_000);
         // Out-of-ladder requests: nearest rung, clamped at the ends.
-        assert_eq!(ad2_rate_mhz(ad2_r26_for(1, true)), 600_000);
+        assert_eq!(ad2_rate_mhz(ad2_r26_for(1, true)), 1_200_000);
+        assert_eq!(ad2_rate_mhz(ad2_r26_for(600, true)), 1_200_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(600, false)), 1_200_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(50_000, true)), 9_600_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(3000, true)), 2_400_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(3500, true)), 4_800_000);
-        // 9600 S/s: 104.167 us; 600 S/s: 1.6667 ms.
+        // 9600 S/s: 104.167 us; 1200 S/s: 833.3 us.
         assert_eq!(ad2_period_ns(ad2_r26_for(9600, true)), 104_167);
-        assert_eq!(ad2_period_ns(ad2_r26_for(600, true)), 1_666_667);
+        assert_eq!(ad2_period_ns(ad2_r26_for(1200, true)), 833_333);
         // AD2OSR codes 5..7 are all 1024.
         assert_eq!(ad2_period_ns(7), ad2_period_ns(5));
         assert!(ad2_sign_ok(0x3FFFF) && ad2_sign_ok(-0x40000) && !ad2_sign_ok(0x40000) && !ad2_sign_ok(0x7F0000));

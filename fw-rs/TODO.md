@@ -219,6 +219,9 @@ Code work (in this order):
             high-water after a refresh with several logs.
             (Device 9dd1222, the old LUN-1 layout: scope Save CSV -> no SCOP*.CSV on DM40-INFO after
             unmount/mount; the Save CSV job never called dlog::set_stale. Re-check on the new layout.)
+            Emulator on e832a86 (new layout): scope STOP -> MF -> Settings -> Save CSV -> SCOPE/SCOP000.CSV on
+            LUN 0 at the next read (UNIT ATTENTION 06/28 first, then the listing has it; screenshot.rs finish()
+            calls set_stale since 4a484f7); LOG:CSV ON/OFF -> LOGS/LOG000.CSV likewise. Device re-check pending.
       - [x] Owner 2026-10-21: drop legacy text LOG*.CSV / SCOP*.CSV support on the SPI disk (gallery parser,
             numbering, list/delete): only .DLG is written and read; CSV exists only as the generated export.
             (4544d4e)
@@ -518,6 +521,11 @@ Firmware:
       with alerts ON (0.15-0.35 mV OFF, any DC input) -> PKH_RESTART / AD1 in AC V moves the RMS; A-JACK false
       trip in DC V with 10 V on V-COM, A jack open (calibrator 1 <-> 10 V autorange soak: streak 96, AJACK).
       T7 equal within noise for DC V / DC mV / ohm / AC mV / Hz. T9 / T10 not run (A jack not wired).
+      Fixed (doc device-check "Fixes after 9dd1222"): AC V sentinel row holds OP1CHOP = 00 (OP1's 2 kHz chopper
+      starts with AD1: offset square x10 -> 37 mV RMS floor; AC mV reads OP2, clean); DC V 60 / 600 / 1000 V
+      carry no comparator sentinel (those rows drive the power bus from OP3; r0 keeps it, and leads in A/COM
+      leave V-COM open = r0). DBG:SENTinel:VARiant 0..7 restores the 9dd1222 rows per bit for the re-check.
+      Host tests + senttest dcv-step. (verify on device: re-check list of that section)
   - [ ] Not done: sentinels in AC+DC / diode / continuity / cap / Hz / AC A, DC? / AC? / FUSE? hints, OVERLOAD
         shunt rule, fuse-check dialog, STAT:QUES bit 9 (doc §4.6).
 - [x] (B) AD2 fast data logger, main-loop (E1, no ISR): LOG:SOURce AD1|AD2, LOG:SRATe 600..9600 (R26 ladder,
@@ -534,6 +542,10 @@ Firmware:
       ~2x faster than ad2_r26_for's nominal (600 -> 1128/s, 2400 -> 3832/s measured; 0x24 = 0x04 readout), so
       LOG:COUNt? lost clamps at 0 below 9600; link ceiling ~6.5 kS/s; DRAW 2 = 26 ms gap per 100 ms. Open: the
       --chop off pair, a shorted-input mV noise run, then the rate cap.
+      Fixed: ENCHOPAD2 does not slow AD2 (0x25 = 0x05, 0x24 = 0x04): ad2_period_ns ignores it, the ladder is
+      1200 / 2400 / 4800 / 9600 S/s with or without chop (600 does not exist: /4 OSR 1024 = 1200), so nominal /
+      lost are right; the bit-banged link topped out at ~6.5 kS/s (9600 showed ~32 % lost; SPI2 (E2) should lift that). Emulator model
+      and tests follow. (verify on device: log 1200 / 2400 / 4800 measured == nominal, lost 0; 9600 lost vs the bus build)
 - [x] (E2) HY3131 on the hardware SPI2 (src/hy3131.rs; feasibility doc 8): SPI2 @ 0x4000_3C00, PC10/11/12 AF6
       (VERIFIED: GD32F450xx DS table 5, UM V2.2), mode 0, /16 = 3.125 MHz, CS PD2 GPIO, the read-period clock as
       one GPIO pulse on PC10 between SPI bytes (exact datasheet frame). It is THE bus (no runtime switch); the old
@@ -559,6 +571,12 @@ Firmware:
       square 21.5 -> 8-10.5 ms. (verify on device: DBG:PROF? loop max <= 12 ms, 400 DBG:PING? p99) Device 9dd1222: no 20-50 ms passes any more;
       scope page open input loop max 12.38 ms (marginal), ping p99 0.7 ms; square after AUTO 10.65 ms. Combined
       view: loop max 11.4 ms but ping p50 11.8 / p99 16.5 ms.
+      Cause (device profile): not the view but a noise-triggered trace at 49.8 fps: every column changes, the
+      paint is ~10 ms per frame (frame pass 6.2 ms incl. a 4 ms flush slice + 2-3 more 4 ms slices), so the loop
+      ran 2-10 ms passes back to back (scope 98 % CPU, 56 % of it in sp_tick outside the nested sections).
+      Fix: flush slice 1.5 ms, the paint starts on the pass after the frame (frames in back-to-back passes still
+      paint at once), DBG:PROF? "s.paint" (was x1) times it. Not measurable in the emulator (it does not reach
+      that frame rate at 1 ms/div). (verify on device: combined view, open input, 1 ms/div: ping p50 <= 2 ms)
 - [x] Scope ~9 fps at 1 ms/div after AUTO: three comparator misses (AUTO's fast-timebase sweep) disabled
       the hardware trigger for good; 53bdb9d suspends it until the next range / timebase / coupling /
       edge / mode / type change. The emulator's comparator model barely fires (ScopeFeeder TIM2 gate

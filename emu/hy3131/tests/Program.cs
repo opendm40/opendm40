@@ -791,9 +791,10 @@ namespace Hy3131Tests
             m.Chip.SetInput("dca:0.0123");
             m.Configure(F5R0, 5); // AC mA r0: OP1+ = PB1 (0.5 ohm) x10, AD2 = OP1O - PB3, DC-coupled
             m.Advance(0.05);
-            // fw-rs set_ad2_stream(0x22): AD3 off, RMS / LPF off, R26 = ENAD2 | ENCHOPAD2 | OSR 128 = 9600/s
-            m.Write(0x34, 0); m.Write(0x29, 0); m.Write(0x26, 0xA2); m.Write(0x1E, 0);
-            Near(m.Chip.Core.Ad2Period * 1e6, 104.167, 0.01, "R26 0xA2: 104.167 us (9600/s)");
+            // fw-rs set_ad2_stream(0x23): AD3 off, RMS / LPF off, R26 = ENAD2 | ENCHOPAD2 | OSR 256 = 9600/s
+            // (the chopper does not halve the rate: device check of 9dd1222)
+            m.Write(0x34, 0); m.Write(0x29, 0); m.Write(0x26, 0xA3); m.Write(0x1E, 0);
+            Near(m.Chip.Core.Ad2Period * 1e6, 104.167, 0.01, "R26 0xA3: 104.167 us (9600/s)");
             var c0 = m.Chip.Core.Ad2Conversions;
             int seen = 0;
             var t0 = m.Now;
@@ -818,11 +819,13 @@ namespace Hy3131Tests
             // 12.3 mA * 0.5 ohm * 10 = 61.5 mV at the AD2 input, IG 1.0: 61.5 mV / 1.25 V * 2^18
             Near(a, 0.0615 / 1.25 * 262144, 30, "AD2 code of 12.3 mA DC on the 40 mA range (DC-coupled)");
             Check(a >= -0x40000 && a <= 0x3FFFF, "19-bit signed, bits 23:19 = sign copy");
-            // Slow rung: /4, OSR 1024, chopped = 600/s.
+            // Slow rung: /4, OSR 1024, chopped = 1200/s (as unchopped 0x8D).
             m.Write(0x26, 0xAD);
-            Near(m.Chip.Core.Ad2Period * 1e3, 1.6667, 0.001, "R26 0xAD: 1.667 ms (600/s)");
+            Near(m.Chip.Core.Ad2Period * 1e3, 0.8333, 0.001, "R26 0xAD: 0.833 ms (1200/s)");
+            m.Write(0x26, 0x8D);
+            Near(m.Chip.Core.Ad2Period * 1e3, 0.8333, 0.001, "R26 0x8D: 0.833 ms (1200/s)");
             // Noise model: 30 codes at the stock OSR2 32, white scaling.
-            foreach(var t in new[] { new { r26 = (byte)0x80, sd = 30.0 }, new { r26 = (byte)0xA2, sd = 30.0 / Math.Sqrt(8) } })
+            foreach(var t in new[] { new { r26 = (byte)0x80, sd = 30.0 }, new { r26 = (byte)0xA3, sd = 30.0 / Math.Sqrt(8) } })
             {
                 var n = NewChip(noise: true);
                 n.Chip.SetInput("dca:0.0");

@@ -542,3 +542,59 @@ So ENCHOPAD2 does not halve the AD2F rate the way `ad2_r26_for` / §7.1 assume. 
 - **Calibrator:** 0.1 V DC, enabled. It was **not** set back to 1 V: the run stopped with no further device access.
 - **Host:** ATK-DM40 (/dev/sda) **unmounted** by this run. DM40-INFO was remounted.
 - Files on the SPI disk added by this run: SCOP000.DLG, SCOP001.DLG, SCOP002.DLG.
+
+### Fixes after 9dd1222 (on 7939217; not on the device yet)
+
+**4a. AC V floor with Jack alerts ON (sentinel.rs).** The AC V and AC mV sentinel rows differ from the stock rows in the same five AD1 fields (R22, R23 ENAD1, R24, R25 AD1IG, R29 PKHSEL) and both get the same R29 rewrite every ~107 ms, yet only AC V moved. So the R29 toggle and the AD1 sampling of PB1 / PB3 are unlikely causes. The difference is the path:
+- AC V reads OP1 (SENSE x10 on 6 V -> OP1O -> PB4 -> AD2 / AD3). AC mV reads OP2O, and its OP1 sits idle on RLU.
+- Every stock row has R33 = 0xac, which includes OP1CHOP = 10 (a 2 kHz chopper). The stock pairs OP1's chopper with AD1 in DC V 6 V and DC A. In AC V, AD1 is off and the chopper evidently stands still.
+- When AD1 is on, OP1's chopper runs. That puts a 2 kHz square of OP1's offset (×10 on 6 V) on PB4. This is in band for the RMS block and shows up as a constant floor whatever the input. 37.2 mV on 6 V equals 3.7 mV at PB4, or 0.37 mV of offset at OP1's input. The datasheet allows up to 2 mV unchopped.
+- This is inferred from the rows and the datasheet. The device re-check below settles it.
+
+Fix: the AC V sentinel row also clears OP1CHOP (R33 bits 7:6 = 00, CHOP_CLK held at 0). AC V is AC-coupled, so OP1's static offset does not reach the reading. AC mV is unchanged.
+
+**4b. A-JACK in DC V at 10 V.** The DC V rows for r1..r3 (60 / 600 / 1000 V) are the only comparator-sentinel rows that drive the power bus from OP3 (R2F SMODE 0100, PS6 + PS8 closed). The r0 row (6 V) leaves the bus off and never tripped.
+- The likely mechanism: OP3's bus current returns near PB1, so PB1 picks up a level that depends on the input.
+- Fix: DC V r1..r3 carry no sentinel (kind OFF, stock row).
+- What this gives up: only "leads in A/COM on a manual 60 V+ range". With the leads in A/COM and the function on DC V, V-COM is open, so the autorange sits on 6 V, where the sentinel stays.
+- Host test `dcv_high_ranges_have_no_comparator`. Emulator `senttest.py dcv-step`: 1 ↔ 10 V autorange with the A jack open shows NONE and kind OFF at 10 V, then 1 mA at 1 V shows AJACK. The model has no PB1 coupling, so this only checks that the gating does not break the r0 sentinel.
+
+**Device-check hook.** `DBG:SENTinel:VARiant <0..7>` (RAM only) puts back parts of the 9dd1222 rows:
+- +1: AC V keeps OP1's chopper;
+- +2: no AC V sentinel;
+- +4: comparator on DC V 60 V+.
+
+**1. AD2 rate (hy3131.rs, logger.rs).** ENCHOPAD2 does not halve AD2's rate: 0x25 = 0x05 and 0x24 = 0x04 measured the same.
+- `ad2_period_ns` now ignores the bit.
+- The ladder is 1200 / 2400 / 4800 / 9600 S/s, with or without chop. 600 S/s does not exist: /4 at OSR 1024 is already 1200.
+- The "600" sessions ran at 1200/s, so 1125/s captured was a real 6 % loss to the old P/2 gate. The "2400" sessions ran at 4800/s.
+- Nominal, `lost` and the P/2 gate now use the real period.
+- The bit-banged link (9dd1222) tops out at **~6.5 kS/s**; 9600 showed that as ~32 % lost. The SPI2 bus (E2, landed meanwhile) should lift it; the re-check measures it.
+- The emulator model (Ad2Period, noise) and its tests follow.
+
+**2. Combined view ping p50 11.8 ms.** From `prof-scope-open-1ms.txt`, this is not caused by the view itself.
+- The trace was noise-triggered at 49.8 fps. Every column changed every frame, so painting cost about 10 ms per frame.
+- Each frame took a 6.2 ms frame pass (which included a 4 ms flush slice), plus 2-3 more 4 ms `sp_tick` slices. The scope section used 98 % of the CPU, and 56 % of that was outside the nested sections.
+- The scope page at 9 fps (auto sweep), or on a square (columns mostly unchanged), had idle passes in between.
+
+Fix (scope_ui.rs, app.rs):
+- The flush slice is now 1.5 ms (was 4 ms).
+- A frame's paint starts on the next pass without a frame. Frames in back-to-back passes still paint at once.
+- `DBG:PROF?` "s.paint" (formerly the spare x1) times that paint.
+
+The emulator does not reach that frame rate at 1 ms/div, so this is not measured yet.
+
+**3. RUN key and RUN badge while the MF popup is open.** This matches stock and was left as is. docs/stock-scope-ui.md 7.1 / 10.3 / 10.4: the popups are full-screen modal roots, and RUN / AUTO are swallowed while one is open. Scripts must close the popup with MF first.
+
+**5. Save CSV on the USB volume.** Checked in the emulator on e832a86 and again on 7939217 (SPI2 bus):
+- Scope page, STOP, MF → Settings → Save CSV: the next LUN 0 read gets UNIT ATTENTION 06/28, then the listing has `SCOPE/SCOP000.CSV`. screenshot.rs `finish()` calls `dlog::set_stale()` since 4a484f7.
+- `LOG:CSV ON` / `OFF` (the same csvlog path as swipe-REC) gives `LOGS/LOG000.CSV` the same way.
+- No change needed.
+
+**Re-check list (next device session, this build)**
+1. T7 AC V, 6 V range, 0 / 1 / 5 V DC: ON == OFF within 0.1 mV. Then `DBG:SENT:VAR 1` should bring back the ~37 mV floor (this confirms the cause), then `VAR 0`. If the floor stays with VAR 0, use `VAR 2` and report: the AC V sentinel then goes off by default.
+2. Soak: DC V 1 ↔ 10 V autorange, A jack open, 5 min: no AJACK, `DBG:SENT?` kind OFF at 10 V. Also `VAR 4` at 10 V manual 60 V (expect the trip again), and 10 V on manual 6 V (OL, r0 sentinel): note whether it trips.
+3. The AC mV and TC soaks that were not run. T9 with a source in A (1 mA in DC V r0 and in AC V).
+4. AD2: `log --rate 1200 / 2400 / 4800`, chop on and off: measured ≈ nominal, lost 0 (DRAW 0/1). 9600: the loss on the SPI2 bus.
+5. Combined view, open input, 1 ms/div, noise-triggered: 400 × DBG:PING? p50 ≤ 2 ms, DBG:PROF? s.paint max ≤ 2 ms, fps.
+6. Save CSV and swipe-REC on the USB volume (the emulator result above), DBG:BOOT? stack.

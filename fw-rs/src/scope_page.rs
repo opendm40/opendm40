@@ -285,6 +285,9 @@ pub(super) struct Sp {
     bubble_dirty: bool,
     /// New measurement results not all drawn yet (`sp_cells_step`).
     pub cells_due: bool,
+    /// A frame was built and its paint not started yet (scope_poll: the
+    /// paint follows in the next pass without a frame).
+    pub paint_due: bool,
     /// Settings "Scope tap step" (scope_ui::TAP_*).
     pub tap_mode: u8,
     /// Halves: tabs shown until (after a step, on an intro page entry).
@@ -349,6 +352,7 @@ impl Sp {
             bubble: false,
             bubble_dirty: false,
             cells_due: false,
+            paint_due: false,
             tap_mode: su::TAP_DEFAULT,
             tabs_until: 0,
             step_until: 0,

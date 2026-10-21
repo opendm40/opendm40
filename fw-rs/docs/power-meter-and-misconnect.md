@@ -1113,6 +1113,13 @@ stock rows (1.2340 V, 100.3 C, 1.0000 V AC, 4699.98 ohm), and the
 commit within the model noise (all ok; largest moves: the AC V floor 0.84 ->
 0.89 mV, diode on a thermocouple 10.79 -> 10.76 mV).
 
+After the device check of 9dd1222 (docs/device-check-2026-10-21.md, "Fixes
+after 9dd1222"): the AC V sentinel row also holds OP1's chopper off (R33
+OP1CHOP = 00; with AD1 on, the 2 kHz chopper put a ~37 mV RMS floor on the 6 V
+range), and DC V 60 / 600 / 1000 V carry no comparator sentinel (those rows
+drive the power bus from OP3; A-JACK tripped at 10 V with the A jack open).
+`DBG:SENTinel:VARiant` restores either for a device check.
+
 Device test plan (sentinel build; commit the tree before flashing):
 
 * **T7** DC V / DC mV zero (shorted leads) and 1 V reading, ohm 100 ohm / 10

@@ -206,8 +206,9 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///                           rate LOG:SRATe, LOG:CHOP = ENCHOPAD2 (logger.rs)
 ///                           ("Settings conflict" while a session runs)
 ///   LOG:SOURce?             AD1 / AD2
-///   LOG:SRATe <S/s>         requested AD2 rate; the nearest rung of 600, 1200,
-///                           2400, 4800, 9600 (chop OFF: 1200..9600) is used
+///   LOG:SRATe <S/s>         requested AD2 rate; the nearest rung of 1200,
+///                           2400, 4800, 9600 is used (chop on or off: the
+///                           chopper does not slow AD2; ~6.5 kS/s link limit)
 ///                           (default 2400); takes effect at START
 ///   LOG:SRATe?              the requested rate
 ///   LOG:RATE?               measured mean sample rate, Hz (0 until 2 samples)
@@ -268,6 +269,10 @@ pub enum Log {
 ///                           axis H|V)
 ///   DBG:SENTinel?           misconnect sentinel (sentinel.rs): kind,alert,mask,
 ///                           ctsta,pkhmin,pkhmax,streak,hit_windows,samples
+///   DBG:SENTinel:VARiant <0..7> / ?
+///                           device-check row variants, RAM only (sentinel.rs
+///                           VAR_*): +1 AC V keeps OP1's chopper (9dd1222 row),
+///                           +2 no AC V sentinel, +4 comparator on DC V 60 V+
 ///   DBG:ACDC?               AC+DC phase diagnostic (Dmm::acdc_diag_text): phases
 ///                           started, then per recent AC phase (oldest first)
 ///                           ";late_ms:sq/lpf/dcp,..."; read-only
@@ -429,6 +434,9 @@ pub enum Cmd {
     SysAlertEnable(Option<u8>),
     /// DBG:SENTinel?: sentinel raw state (Sentinel::diag_text).
     DbgSent,
+    /// DBG:SENTinel:VARiant <0..7> / ?: device-check row variants
+    /// (sentinel::VAR_*, RAM only).
+    DbgSentVar(Option<u8>),
     /// DBG:HWTRIG...: 0 query, 1 ENABLE (bool), 2 CAL?, 3 STAT?, 4 STAT:RESET.
     DbgHwTrig(u8, bool),
     /// Power meter (dmm::pw): CONF:POW, FETC:POW:ALL?, [SENS:]POW:..., DBG:POW:...
@@ -1095,6 +1103,13 @@ impl Scpi {
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"ACDC"[..]) => out = Out::Instr(Cmd::DbgAcdc),
+                _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
+                    match parse_num(arg) {
+                        _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
+                        Some(v) if (0.0..=7.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
+                        _ => self.err = Some("Illegal parameter value"),
+                    }
+                }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {
                     let c = match (parts.get(2).copied(), parts.get(3).copied(), query) {
