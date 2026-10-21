@@ -998,6 +998,7 @@ fn main() {
                     // UF-30: every other chip variant with the bargraph
                     // instead of the history row.
                     dv.bar_on = k % 2 == 0;
+                    dv.hv_red = hv_of(&r) >= 1;
                     dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, r.mode == 10);
                     // History / chart / statistics: the case's own value (an
                     // OL case: 1.0 in its unit and resolution).
@@ -1449,6 +1450,17 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d06-dmm-ohm-on");
+        // ui-review #13: the stock >= 30 V red value (230 V AC).
+        host::reset(0);
+        let (r, _) = find("acv_230");
+        let mut dv = ui::DmmView::new();
+        dv.hv_red = true;
+        dv.draw_static(Button::Volt, r.mode, false, false);
+        dv.bar_update(&r);
+        dv.reading(&r, 0, 0);
+        ui::status_right(&status(0));
+        ui::hv_warning(true);
+        save(&out, "d11-dmm-hv-red");
         // UF-30 bargraph: bipolar DC V (negative), unipolar ohm, overload.
         for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt)] {
             host::reset(0);
