@@ -19,6 +19,7 @@ use crate::clock::Clock;
 use crate::hy3131 as hy;
 use crate::hy3131_tables::*;
 use crate::mmio::{modify32, w32};
+use crate::sentinel::{self, Alert, Kind, Sentinel};
 
 const GPIOA: u32 = 0x4002_0000;
 const GPIOC: u32 = 0x4002_0800;
@@ -375,6 +376,8 @@ pub struct Reading {
     /// Conversions in the moving average behind `main` / `si` (0 = not an
     /// averaged range); `AVG_FULL` or more = full +1-digit resolution.
     pub avg_n: u8,
+    /// Wrong-connection alert in force (sentinel.rs).
+    pub alert: Alert,
 }
 
 impl Reading {
@@ -635,6 +638,13 @@ pub struct Dmm {
     conv_ms: f32,
     /// `avg_n` of the latest reading (`avg_n` itself is per poll).
     rd_avg_n: u8,
+    /// Wrong-connection sentinel (sentinel.rs), the mode its history
+    /// belongs to, R29 of the row (peak-hold restart), the last ohm /
+    /// continuity / diode result was one only a source gives (LIVE?).
+    pub sent: Sentinel,
+    sent_mode: u8,
+    r29: u8,
+    live: bool,
 }
 
 /// Mean interval: first sample taken as is, then an EMA (1/4).
@@ -655,6 +665,17 @@ fn ema_ms(acc: &mut f32, last: &mut Option<u64>, now: u64) {
 /// by an AD1 step), so its DC phase stays at 8192. false: R22 = 0x17 right
 /// after every DC-phase row.
 const ACDC_STOCK_OSR: bool = true;
+
+/// Misconnect sentinel, AC V / AC mV: restart AD1's peak hold (ENPKH 0 -> 1
+/// in R29) after each harvest. The datasheet says ENPKH = 0 only presets
+/// PKHMAX / PKHMIN; whether rewriting R29 disturbs the RMS / LPF blocks on
+/// the real chip is device test T9 (false: the hold is never restarted, so
+/// A-JACK latches until the row is rewritten - a range or function change).
+const PKH_RESTART: bool = true;
+/// LIVE? thresholds: ohm AD1 code (0.24 % of 2^23), continuity ohm, diode V.
+const LIVE_CODE: i32 = 20_000;
+const LIVE_CONT_OHM: f32 = 2.0;
+const LIVE_DIODE_V: f32 = 0.05;
 /// FUN_08012c30 pulses the PA latching relay (10 ms) on every call, i.e. on
 /// every phase switch, between the R26/R34/R36 zeroing and the 22-byte row.
 /// false: only when the PA state changes (never inside V AC+DC).
@@ -776,6 +797,10 @@ impl Dmm {
             t_conv: None,
             conv_ms: 0.0,
             rd_avg_n: 0,
+            sent: Sentinel::new(),
+            sent_mode: 255,
+            r29: 0,
+            live: false,
         }
     }
 
@@ -951,8 +976,15 @@ impl Dmm {
             _ => 2,
         });
         pc7(m == 14);
-        hy::configure(cfg);
-        self.r22 = cfg[2];
+        // Misconnect sentinel: the stock row with the idle comparator / AD1
+        // pointed at the A-jack shunt (or the V tap in DC A), sentinel.rs.
+        let (row, kind) = sentinel::sentinel_row(m, self.acdc, self.sent.mask, cfg);
+        hy::configure(&row);
+        self.r22 = row[2];
+        self.r29 = row[9];
+        let fresh = self.sent_mode != (m | (self.acdc as u8) << 7);
+        self.sent_mode = m | (self.acdc as u8) << 7;
+        self.sent.configured(kind, clk.now_ms(), fresh);
         if m == 15 && self.t_sensor != 0 {
             // Resistive sensor: the stock in-range ohm OSR (32768) for a quiet
             // reading; the range is fixed, so no fast open-circuit switching.
@@ -1296,6 +1328,25 @@ impl Dmm {
         self.suspended
     }
 
+    /// Wrong-connection alerts enabled (sentinel::M_*; Settings, SCPI
+    /// SYST:ALER:ENAB). A change rewrites the row: a disabled sentinel
+    /// leaves the stock row untouched.
+    pub fn set_alert_mask(&mut self, clk: &mut Clock, mask: u8) {
+        let mask = mask & sentinel::M_ALL;
+        if mask == self.sent.mask {
+            return;
+        }
+        self.sent.set_mask(mask);
+        if !self.suspended && self.mode != 255 {
+            self.write_config(clk);
+            self.deadline = self.deadline.max(clk.now_ms() + 200);
+        }
+    }
+
+    pub fn alert_mask(&self) -> u8 {
+        self.sent.mask
+    }
+
     /// Bottom button press (FUN_0803e108..e1a8 -> m+0xf..0x14, consumed by
     /// FUN_08013262, app_decompile.c:14575): enter the function, or cycle its
     /// sub-mode when it is already active. The in-function cycle is also what
@@ -1616,6 +1667,12 @@ impl Dmm {
         }
         self.t_poll = now;
         self.avg_n = 0;
+        if matches!(self.sent.kind, Kind::CmpA | Kind::CmpV) {
+            // One byte (CTSTA): CMPHO / CMPLO of the comparator on PB1 /
+            // the V tap, on every poll so an AC current is caught whatever
+            // the poll rhythm (OR over 100 ms windows).
+            self.sent.sample_cmp(now, hy::read1(0x14));
+        }
         let r = match self.mode {
             0 | 2 | 4..=6 => self.poll_ac(clk, now),
             1 | 3 => self.poll_dcv(clk),
@@ -1628,9 +1685,25 @@ impl Dmm {
             _ if self.t_sensor != 0 => self.poll_rtd(clk, now),
             _ => self.poll_temp(now),
         };
-        if r.is_some() {
+        if let Some(rd) = &r {
             ema_ms(&mut self.period_ms, &mut self.t_rd, now);
             self.rd_avg_n = self.avg_n;
+            match self.mode {
+                7..=9 if self.sent.kind == Kind::CmpV => {
+                    // V-JACK? precondition: |I| < 0.5 % of the range.
+                    let fs = match (self.mode, self.range) {
+                        (7, 0) => 6.0,
+                        (7, _) => 10.0,
+                        (8, 0) => 0.06,
+                        (8, _) => 0.6,
+                        (_, 0) => 600e-6,
+                        _ => 6000e-6,
+                    };
+                    self.sent.current_small(now, !rd.main.ol && rd.si.abs() < 0.005 * fs);
+                }
+                10..=12 if !self.acdc => self.sent.live_reading(now, self.live),
+                _ => {}
+            }
         }
         r.map(|mut r| {
             self.seq = self.seq.wrapping_add(1);
@@ -1640,6 +1713,7 @@ impl Dmm {
                 || (self.button() == Button::Amp && self.a_auto == 1);
             r.acdc = self.acdc;
             r.avg_n = self.avg_n;
+            r.alert = self.sent.alert;
             r
         })
     }
@@ -1657,6 +1731,7 @@ impl Dmm {
             acdc: false,
             seq: 0,
             avg_n: 0,
+            alert: Alert::None,
         }
     }
 
@@ -1912,6 +1987,15 @@ impl Dmm {
         }
         let mut b = [0u8; 20];
         hy::read(hy::R_AD1, &mut b);
+        if self.sent.kind == Kind::PeakA {
+            // A-JACK on AD1's peak hold (PB1 - PB3): PKHMIN / PKHMAX came
+            // with this read; restart the hold for the next result.
+            self.sent.sample_peak(now, hy::s24(&b[14..17]), hy::s24(&b[17..20]));
+            if PKH_RESTART {
+                hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
+                hy::write(0x29, &[self.r29]);
+            }
+        }
         let rms = (b[9] as u64) | (b[10] as u64) << 8 | (b[11] as u64) << 16 | (b[12] as u64) << 24
             | ((b[13] & 0x1F) as u64) << 32;
         let sq = sqrt(rms as f32);
@@ -2083,6 +2167,9 @@ impl Dmm {
         let steady = self.steady_osr();
         let slow = r22 == steady && !self.avg_skip;
         self.avg_skip = false;
+        // LIVE?: a passive Rx never gives a negative code; a source of the
+        // other polarity does (0.24 % of full scale: far above the noise).
+        self.live = ad1 < -LIVE_CODE;
         let (code, ext) = self.avg_code(ad1.unsigned_abs() as i32, slow);
         let mut kohm = code * cal(0x124 + 4 * r as u32, 1.0) * OHM_RREF[r] / 0.9 / AD1_DIV - cal(0x144, 0.0);
         if kohm < 0.0 {
@@ -2151,7 +2238,9 @@ impl Dmm {
         // Negative results (a source, a diode the wrong way or a charged
         // capacitor on the jacks) clamp to 0 as the stock (dmm_v2_6.h m+0x18:
         // only its raw mode skips the clamp); emulator cross table.
-        let ohm = (-(ad1 as f32) * cal(0x15C, 1.0) / 0.9 / (AD1_DIV / 1000.0) - cal(0x160, 0.0)).max(0.0);
+        let ohm = -(ad1 as f32) * cal(0x15C, 1.0) / 0.9 / (AD1_DIV / 1000.0) - cal(0x160, 0.0);
+        self.live = ohm < -LIVE_CONT_OHM;
+        let ohm = ohm.max(0.0);
         let ol = ohm > 1000.0;
         Some(self.reading(if ol { Val::ol(2, "\u{3a9}") } else { Val::new(ohm, 2, "\u{3a9}") }, ohm))
     }
@@ -2160,6 +2249,7 @@ impl Dmm {
         let ad1 = self.ad1()?;
         let g = cal(0x164, 1.0);
         let mut v = ad1 as f32 * g * 1.25 * 10.0 / 0.9 / AD1_DIV - cal(0x168, 0.0);
+        self.live = v < -LIVE_DIODE_V;
         if v < 0.0 {
             v = 0.0;
         }

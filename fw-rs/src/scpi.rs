@@ -80,6 +80,12 @@
 //!   SYSTem:TEMPerature?   MCU (GD32) internal sensor, C (typical constants)
 //!   SYSTem:RAIL AUTO|BOTH / ?   analog rail policy (default AUTO, persisted)
 //!   SYSTem:RAIL:STATe?   dmm_rail,scope_rail (1/0)
+//!   SYSTem:ALERt?   wrong-connection alert in force (sentinel.rs, docs/
+//!     power-meter-and-misconnect.md 4): NONE | AJACK (current in the A jack
+//!     outside the current functions) | VJACK (voltage on V/ohm, no current,
+//!     in DC A) | LIVE (a source on the circuit in ohm / continuity / diode)
+//!   SYSTem:ALERt:ENABle <mask> | ON | OFF / ?   alerts enabled, bit 0 AJACK,
+//!     1 VJACK, 2 LIVE (default 7 = ON; Settings 3/3 "Jack alerts", persisted)
 //!
 //! Statistics / limits of the CURRENT DMM function (FR-01 / 02 / 06; values
 //! in SI units of the function, as READ?):
@@ -234,6 +240,8 @@ pub enum Log {
 ///                           ";target,axis,delta_px,ms" (target 1 level, 2 trigger
 ///                           position / pan, 3 offset, 4/5 X/Y cursor a, 14/15 b;
 ///                           axis H|V)
+///   DBG:SENTinel?           misconnect sentinel (sentinel.rs): kind,alert,mask,
+///                           ctsta,pkhmin,pkhmax,streak,hit_windows,samples
 ///   DBG:ACDC?               AC+DC phase diagnostic (Dmm::acdc_diag_text): phases
 ///                           started, then per recent AC phase (oldest first)
 ///                           ";late_ms:sq/lpf/dcp,..."; read-only
@@ -378,6 +386,13 @@ pub enum Cmd {
     DbgGest,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
     DbgAcdc,
+    /// SYSTem:ALERt?: the wrong-connection alert in force (sentinel.rs).
+    SysAlert,
+    /// SYSTem:ALERt:ENABle <mask> | ON | OFF / ?: alerts enabled (bit 0
+    /// A-JACK, 1 V-JACK?, 2 LIVE?).
+    SysAlertEnable(Option<u8>),
+    /// DBG:SENTinel?: sentinel raw state (Sentinel::diag_text).
+    DbgSent,
     /// DBG:HWTRIG...: 0 query, 1 ENABLE (bool), 2 CAL?, 3 STAT?, 4 STAT:RESET.
     DbgHwTrig(u8, bool),
 }
@@ -623,6 +638,28 @@ impl Scpi {
                         continue;
                     });
                 }
+                _ if kw(p0, "SYSTem") && parts.len() > 1 && kw(parts[1], "ALERt") => {
+                    let a = trim(arg);
+                    out = Out::Instr(if parts.len() == 2 && query {
+                        Cmd::SysAlert
+                    } else if parts.len() == 3 && kw(parts[2], "ENABle") && query {
+                        Cmd::SysAlertEnable(None)
+                    } else if parts.len() == 3 && kw(parts[2], "ENABle") {
+                        match on_off(a) {
+                            Some(on) => Cmd::SysAlertEnable(Some(if on { crate::sentinel::M_ALL } else { 0 })),
+                            None => match parse_num(a) {
+                                Some(v) if (0.0..=7.0).contains(&v) && v == (v as u8) as f32 => Cmd::SysAlertEnable(Some(v as u8)),
+                                _ => {
+                                    self.err = Some("Illegal parameter value");
+                                    continue;
+                                }
+                            },
+                        }
+                    } else {
+                        self.err = Some("Undefined header");
+                        continue;
+                    });
+                }
                 _ if kw(p0, "UNIT") && parts.len() > 1 && kw(parts[1], "TEMPerature") => {
                     let a = trim(arg);
                     out = Out::Instr(if query {
@@ -751,6 +788,7 @@ impl Scpi {
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"ACDC"[..]) => out = Out::Instr(Cmd::DbgAcdc),
+                _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {
                     let c = match (parts.get(2).copied(), parts.get(3).copied(), query) {
                         (None, _, true) => Some(Cmd::DbgHwTrig(0, false)),

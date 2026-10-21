@@ -25,6 +25,8 @@ mod bargraph;
 mod clock;
 #[path = "../../src/dialog.rs"]
 mod dialog;
+#[path = "../../src/sentinel.rs"]
+mod sentinel;
 #[path = "../../src/dmm.rs"]
 mod dmm;
 #[path = "../../src/gen.rs"]
@@ -612,12 +614,12 @@ fn hit_tests(ck: &mut Ck) {
     host::reset(0);
     ui::main_menu("DMM + Scope");
     page(ck, "menu", &|x, y| o(ui::main_menu_hit(x, y)), &all, &[0, 1, 2, 3, 4, 5]);
-    // Settings 1/2 and 2/2, Hold & Limits (list pages).
+    // Settings 1/3, 2/3 and 3/3, Hold & Limits (list pages).
     let vals = ["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto", "Hold 300 ms", "", "", ""];
-    for p in 0..2u8 {
+    for p in 0..3u8 {
         host::reset(0);
-        ui::settings(p, &vals);
-        let n = if p == 0 { ui::SETTINGS.len() } else { ui::SETTINGS2.len() };
+        ui::settings(p, &vals[..[11, 11, 2][p as usize]]);
+        let n = [ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize];
         let want: Vec<u32> = (0..n as u32).collect();
         page(ck, &format!("settings {}", p + 1), &|_, y| o(ui::settings_hit(p, y)), &|b| b.y0 >= 40, &want);
     }

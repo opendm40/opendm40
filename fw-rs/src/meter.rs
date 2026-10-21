@@ -350,12 +350,17 @@ const SHOW_MIN_MS: u64 = 80;
 //   bit 9      temperatures in deg F (0 = deg C), EXT_TEMP_F
 //   bit 10     DMM page shows the history row instead of the UF-30
 //              bargraph (0 = bargraph), EXT_HISTORY_ROW
+//   bits 11..13 wrong-connection alerts switched OFF (A-JACK, V-JACK?,
+//              LIVE?; 0 = on), EXT_ALERT_OFF_SHIFT
 // (bits 9.. are set / read by app.rs next to ext_word / ext_settings.)
 
 /// p[38] bit 9: temperature unit deg F.
 pub const EXT_TEMP_F: u32 = 1 << 9;
 /// p[38] bit 10: history row instead of the bargraph.
 pub const EXT_HISTORY_ROW: u32 = 1 << 10;
+/// p[38] bits 11..13: wrong-connection alerts DISABLED (sentinel::M_* << 11;
+/// 0 = all on, the default of every older record).
+pub const EXT_ALERT_OFF_SHIFT: u32 = 11;
 
 /// Settings decoded from p[38].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -714,7 +719,7 @@ impl Meter {
         // Draw-rate limit (SHOW_MIN_MS); `shown` stays the value drawn.
         let show = show.filter(|s| {
             let same = self.shown.is_some_and(|p| {
-                p.main.unit == s.main.unit && p.main.dec == s.main.dec && p.main.ol == s.main.ol && p.main.ext == s.main.ext
+                p.main.unit == s.main.unit && p.main.dec == s.main.dec && p.main.ol == s.main.ol && p.main.ext == s.main.ext && p.alert == s.alert
             });
             u.captured || s.mode == 11 || !same || now >= self.show_t + SHOW_MIN_MS
         });
@@ -866,6 +871,7 @@ mod tests {
             acdc: false,
             seq: 0,
             avg_n: 0,
+            alert: crate::sentinel::Alert::None,
         }
     }
 
