@@ -21,10 +21,6 @@ panic = "abort"
 
 [features]
 default = ["vdisk"]
-# HY3131 on the old bit-banged GPIO bus instead of the hardware SPI2 (the
-# fallback build until SPI2 is verified on the device; src/hy3131.rs,
-# fw-rs/docs/dmm-input-scope-feasibility.md section 8).
-hyspi-bitbang = []
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []

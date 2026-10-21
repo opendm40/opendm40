@@ -625,8 +625,9 @@ Firmware:
       (1 V cal), SELF? 2000 at /16 and /32: all error counts 0, 23 stable bytes, 7.65 us 1-byte / 21.4 us AD1+AD2
       read; AD2 logger 9600 S/s -> 8534 S/s measured, 11.1 % lost, 0 bad, max gap 2.05 ms (bit-bang ceiling was
       ~6.5 kS/s); 4800 S/s -> 8.0 % lost (main-loop gaps: the ISR decision).
-- [ ] Drop the `hyspi-bitbang` feature (bit-banged reads) now that 7889e6c passed. Optional later: pure-SPI2
-      writes (continuous TX + dummy byte).
+- [x] Drop the `hyspi-bitbang` feature (bit-banged reads) now that 7889e6c passed: done (bit-banged WRITES stay,
+      DBG:HYSPI:SELF? stays).
+- [ ] Optional later: pure-SPI2 writes (continuous TX + dummy byte).
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,

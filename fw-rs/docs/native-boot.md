@@ -437,7 +437,7 @@ are always embedded, the calibration backup always runs):
 - `vdisk` (default: the generated read-only USB volume);
 - `fatren-dry-run`;
 - `recovery-file`, `recovery-usb`;
-- `hyspi-bitbang`, `keep-screen`.
+- `keep-screen`.
 
 Until 2026-10-22 there was also a RAM build (`./build.sh` with no mode: the
 image in flash sector 8, copied to SRAM, loaded over Bluetooth into the
