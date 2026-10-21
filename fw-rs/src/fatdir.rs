@@ -40,7 +40,7 @@
 //! Host test: tools/fatren-test/run.sh (mkdir / grow / delete, power cut
 //! after every block write, fsck.fat after every step).
 
-#![cfg_attr(not(feature = "native"), allow(dead_code))]
+#![cfg_attr(not(target_os = "none"), allow(dead_code))]
 
 use crate::fatren::{le16, sfn_is, verify, Vol, DIR_MAX_CL};
 use crate::msc::BlockDevice;

@@ -63,7 +63,7 @@
 //! drops input): normally until the Capture slices are done (all 320 rows fit
 //! in CAP: ~0.1 s of GRAM reads spread over ~50 passes; mostly flat UI screens
 //! code to a fraction of the 300 KiB raw frame). If CAP fills up first (a busy
-//! scope trace, or the RAM build, which has no room for CAP), the remaining
+//! scope trace), the remaining
 //! rows are read from the GRAM when their data block is filled, and the
 //! screen stays frozen until the last data block (~4-5 s), as before but with
 //! the main loop running. The verify pass compares CRCs, so it does not need
@@ -150,7 +150,7 @@ const _: () = assert!(HDR_LEN % 2 == 0 && BLK % 2 == 0, "block edges fall betwee
 /// part way and its remaining rows are read from the GRAM while writing.
 /// The RAM image has no SRAM to spare (its .dmabuf is full): 0 there, every
 /// row is then read from the GRAM while writing.
-const CAP_WORDS: usize = if cfg!(any(feature = "native", not(target_os = "none"))) { 24 * 1024 } else { 0 };
+const CAP_WORDS: usize = 24 * 1024;
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut CAP: [u16; CAP_WORDS] = [0; CAP_WORDS];
 

@@ -133,7 +133,7 @@ const FW: &str = match option_env!("CARGO_PKG_VERSION") {
 };
 
 /// Row FIFO (formatted text). The RAM test image has no SRAM to spare.
-const FIFO: usize = if cfg!(any(feature = "native", not(target_os = "none"))) { 8192 } else { 1024 };
+const FIFO: usize = 8192;
 const _: () = assert!(FIFO.is_power_of_two());
 /// Clusters a single commit may add (FIFO / block + the block in TAIL).
 const MAXNEW: usize = FIFO / BLK + 2;

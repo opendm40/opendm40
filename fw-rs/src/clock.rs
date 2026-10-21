@@ -53,14 +53,11 @@ pub fn delay_us(us: u32) {
 }
 
 // ===========================================================================
-// Core-clock bring-up for the native (XIP) image and the T1/T2 RAM tests.
+// Core-clock bring-up for the native (XIP) image.
 //
-// The RAM-loaded sector-8 image inherits the 200 MHz clock the stock firmware
-// configured and never calls this. The native image (feature `native`) runs
-// from flash at 0x08004000 after the FS-loader, which leaves the clock tree in
-// an unknown state, so the shim (src/shim.rs) calls `init_core` before anything
-// else that depends on HCLK. test-initcore / test-recovery call it from the
-// stock 200 MHz state to prove it on hardware before a native flash.
+// fw-rs runs from flash at 0x08004000 after the FS-loader, which leaves the
+// clock tree in an unknown state, so the shim (src/shim.rs) calls `init_core`
+// before anything else that depends on HCLK.
 //
 // Sequence = the stock bring-up FUN_08008710 (addresses and values from its
 // literal pool), with the target register values MEASURED on a live device
@@ -76,7 +73,7 @@ pub fn delay_us(us: u32) {
 // internal 16 MHz RC as the PLL source (`Src::Irc16m`, same 1 MHz PLL input, so
 // SYSCLK is 200 MHz and PLLSAI still gives 48 MHz; RC accuracy only).
 //
-// FPU (CPACR) and VTOR are set by the reset code (src/shim.rs, src/startup.rs),
+// FPU (CPACR) and VTOR are set by the reset code (src/shim.rs, src/native.rs),
 // not here.
 
 const RCU_CTL: u32 = 0x4002_3800; // RCC_CR
@@ -100,7 +97,7 @@ const PLL_RESET: u32 = 0x2400_3010; // RCU_PLL reset value (stock writes it back
 const WAIT: u32 = 0x4_0000;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // the RAM image never calls init_core
+#[cfg_attr(not(target_os = "none"), allow(dead_code))]
 pub enum Src {
     Hxtal,
     Irc16m,
@@ -124,8 +121,8 @@ fn wait(reg: u32, mask: u32, want: u32) -> bool {
 /// state the preamble leaves) and the PLL is off or unused; the caller may
 /// retry with another source. On `true`, the measured stock register values
 /// above are in place (RCU_CTL apart from the HXTAL bits for `Irc16m`).
-#[cfg_attr(not(any(feature = "native", feature = "test-initcore", feature = "test-recovery")), allow(dead_code))]
-#[cfg_attr(feature = "native", link_section = ".shim")]
+#[cfg_attr(not(target_os = "none"), allow(dead_code))]
+#[cfg_attr(target_os = "none", link_section = ".shim")]
 #[inline(never)]
 pub fn init_core(src: Src) -> bool {
     unsafe {

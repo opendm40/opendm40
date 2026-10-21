@@ -1,9 +1,5 @@
 //! Entry after the boot decision: RAM init, then recovery or the normal fw-rs
-//! main with the board bring-up the stock firmware used to do. Also the entry
-//! points of the T1/T2 RAM test builds (called from src/startup.rs).
-
-// The RAM test builds use only part of the native boot code.
-#![cfg_attr(not(feature = "native"), allow(dead_code, unused_imports))]
+//! main with the board bring-up the stock firmware used to do.
 
 use crate::boot::{self, BootInfo, Mode};
 use crate::mmio;
@@ -26,7 +22,7 @@ const STACK_PAINT: u32 = 0x5354_4B21; // "!KTS"
 /// Not painted below the SP at paint time (init_ram's own frame + margin).
 const PAINT_GAP: u32 = 256;
 
-/// Copy .data, zero .bss, VTOR = our table (same as main.rs rust_start).
+/// Copy .data, zero .bss, VTOR = our table.
 unsafe fn init_ram() {
     let mut src = core::ptr::addr_of!(__sidata);
     let mut dst = core::ptr::addr_of_mut!(__sdata);
@@ -151,7 +147,6 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
 }
 
 /// Board bring-up + fatren + calibration backup, then fw-rs main (normal mode).
-#[cfg(any(feature = "native", feature = "test-initcore"))]
 fn normal(_info: &BootInfo, dry: bool) -> ! {
     pre_main(dry);
     crate::main()
@@ -161,7 +156,6 @@ fn normal(_info: &BootInfo, dry: bool) -> ! {
 /// block buffers (fatren ~9 KiB, calbackup ~2 KiB + scratch, each in its own
 /// never-inlined function too) are popped before main()'s 26 KiB frame is
 /// pushed (review 2026-10-13 B1).
-#[cfg(any(feature = "native", feature = "test-initcore"))]
 #[inline(never)]
 fn pre_main(dry: bool) {
     let before = crate::board::init();
@@ -187,7 +181,7 @@ fn pre_main(dry: bool) {
     boot::feed();
     // Write-once calibration safety copy (CALIB.BIN, BOOTDATA.BIN, UID.BIN,
     // only the missing ones) on the same volume, after fatren, still before
-    // USB. Not a dry run in T1: it only creates its own files; it never
+    // USB. Not affected by fatren-dry-run: it only creates its own files; it never
     // touches dm40*.bin or _DM40PRV.BIN names.
     crate::calbackup::boot();
     boot::feed();
@@ -212,8 +206,7 @@ fn pre_main(dry: bool) {
     boot::feed();
 }
 
-/// Native: called by the shim (src/shim.rs) with the decision.
-#[cfg(feature = "native")]
+/// Called by the shim (src/shim.rs) with the decision.
 pub unsafe fn start(info: BootInfo) -> ! {
     init_ram();
     boot::set_info(info);
@@ -221,48 +214,4 @@ pub unsafe fn start(info: BootInfo) -> ! {
         Mode::Recovery => crate::recovery::run(),
         Mode::Normal => normal(&info, cfg!(feature = "fatren-dry-run")),
     }
-}
-
-/// T1 (RAM build, feature test-initcore): from the running stock (200 MHz),
-/// redo the clock with init_core, start the FWDGT as the shim does, run the
-/// native board init + fatren (dry run unless fatren-live), then fw-rs main.
-/// Reset flags are only read (not cleared) so the stock keeps its view.
-#[cfg(feature = "test-initcore")]
-#[no_mangle]
-pub unsafe extern "C" fn test_initcore_start() -> ! {
-    init_ram();
-    crate::wdt::start::fwdgt();
-    let rstsck = mmio::r32(boot::RCU_RSTSCK);
-    use crate::clock::{init_core, Src};
-    let clock = if init_core(Src::Hxtal) {
-        boot::ClockState::Hxtal
-    } else if init_core(Src::Irc16m) {
-        boot::ClockState::Irc16m
-    } else {
-        boot::ClockState::Failed
-    };
-    let info = BootInfo {
-        rstsck,
-        rstsck_after: rstsck,
-        mode: Mode::Normal,
-        reason: boot::Reason::None,
-        clock,
-        last: 0,
-        hold_ms: 0,
-        decided: Mode::Normal,
-    };
-    boot::set_info(info);
-    normal(&info, !cfg!(feature = "fatren-live"))
-}
-
-/// T2 (RAM build, feature test-recovery): the full shim sequence (FWDGT,
-/// power hold, reset flags read + cleared, init_core, request word, key hold;
-/// decision recorded but recovery forced), then recovery mode.
-#[cfg(feature = "test-recovery")]
-#[no_mangle]
-pub unsafe extern "C" fn test_recovery_start() -> ! {
-    init_ram();
-    let info = boot::shim(true);
-    boot::set_info(info);
-    crate::recovery::run()
 }

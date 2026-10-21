@@ -1,11 +1,11 @@
-//! Native image reset path (feature `native`, link-native.x).
+//! Reset path of the image (link-native.x).
 //!
 //! The FS-loader (0x080a0000) launches the app at 0x08004000 with
 //! `msr msp, [0x08004000]; ldr r0, [0x08004004]; bx r0` (loader 0x080a18f4).
 //! Word[0] is therefore only used by the loader for those two instructions;
 //! it is the stock app's own value (0x2002F7F8, SRAM) so any check the loader
 //! might apply to it passes exactly as for stock. `reset` immediately moves the
-//! stack to the TCM top as in the RAM build.
+//! stack to the TCM top.
 //!
 //! `reset` (asm, region A at the start of the image, no RAM used):
 //!   cpsid i; CONTROL = 0; TCM clock on; FPU on (CPACR CP10/CP11); MSP = TCM top;
@@ -84,6 +84,6 @@ default_handler:
 #[no_mangle]
 #[link_section = ".shim"]
 pub unsafe extern "C" fn shim_main() -> ! {
-    let info = crate::boot::shim(false);
+    let info = crate::boot::shim();
     crate::native::start(info)
 }

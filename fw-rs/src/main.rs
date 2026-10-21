@@ -30,7 +30,6 @@ mod sinc;
 mod trigsoft;
 mod scpi;
 mod sentinel;
-mod startup;
 mod stockfont;
 mod touch;
 mod ui;
@@ -47,16 +46,14 @@ use usb_device::prelude::*;
 
 use clock::Clock;
 
-/// System control block: vector table offset register.
-const SCB_VTOR: u32 = 0xE000_ED08;
+/// System control block: application interrupt and reset control.
 const SCB_AIRCR: u32 = 0xE000_ED0C;
 
-/// Watchdog policy. We must NEVER feed the watchdog unconditionally, or the
-/// only way back to stock is pulling the battery. We feed only until a deadline:
-/// INITIAL_HOLD_MS after start (time to plug USB / start the host tool), pushed
-/// forward by every host request. Past the deadline, or after RELEASE, the
-/// watchdog (~20 s) resets the device back to the stock firmware.
-const INITIAL_HOLD_MS: u64 = if cfg!(feature = "native") { u64::MAX / 4 } else { 60_000 }; // native: feed while the loop runs
+/// Watchdog policy (see the end of this file): the main loop feeds the FWDGT
+/// until a deadline, INITIAL_HOLD_MS after start (in effect: for as long as
+/// the loop runs), pushed forward by host requests. After DBG:RELEASE, a panic
+/// or a hang the watchdog (~20 s) resets and the shim counts a crash.
+const INITIAL_HOLD_MS: u64 = u64::MAX / 4;
 const KEEPALIVE_MS: u64 = 15_000;
 /// SCPI session / transport index (scpis, scpi_wait).
 const USB: usize = 0;
@@ -89,68 +86,21 @@ const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
 
 // CPU-only buffers in SRAM (.sram_bss, zeroed at reset) rather than TCM,
 // which the stack shares (device check 2026-10-21: stack headroom).
-#[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".sram_bss")]
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut EP_MEMORY: [u32; 320] = [0; 320];
-#[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".sram_bss")]
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut MSC_IO: [u8; 512] = [0; 512];
 /// The MSC block buffer (was a 4 KiB field of `Msc` on the main stack).
-#[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".sram_bss")]
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
 /// Data-logger ring (FR-38). ~16 KiB; kept out of the main stack. Native: in
 /// SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in main()), not TCM .bss,
 /// which the stack shares.
-#[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".dmabuf")]
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut LOGGER: logger::Logger = logger::Logger::new();
 
 /// DIAG block size (DBG:DIAG?).
 const DIAG_LEN: usize = 212;
-
-extern "C" {
-    static mut __bss_start: u32;
-    static mut __bss_end: u32;
-    static mut __sram_bss_start: u32;
-    static mut __sram_bss_end: u32;
-    static mut __sdata: u32;
-    static mut __edata: u32;
-    static __sidata: u32;
-    static __VECTORS: u32;
-}
-
-/// Called from the reset trampoline (startup.rs) with MSP set and IRQs masked.
-#[no_mangle]
-pub unsafe extern "C" fn rust_start() -> ! {
-    // Copy .data from flash.
-    let mut src = core::ptr::addr_of!(__sidata);
-    let mut dst = core::ptr::addr_of_mut!(__sdata);
-    let dend = core::ptr::addr_of_mut!(__edata);
-    while dst < dend {
-        dst.write_volatile(src.read_volatile());
-        dst = dst.add(1);
-        src = src.add(1);
-    }
-
-    // Zero .bss.
-    let mut p = core::ptr::addr_of_mut!(__bss_start);
-    let end = core::ptr::addr_of_mut!(__bss_end);
-    while p < end {
-        p.write_volatile(0);
-        p = p.add(1);
-    }
-    let mut p = core::ptr::addr_of_mut!(__sram_bss_start);
-    let end = core::ptr::addr_of_mut!(__sram_bss_end);
-    while p < end {
-        p.write_volatile(0);
-        p = p.add(1);
-    }
-
-    // Point the vector table at our table in SRAM.
-    mmio::w32(SCB_VTOR, core::ptr::addr_of!(__VECTORS) as u32);
-
-    // Calibration / boot-data backup to the SPI disk, before USB exists
-    // (src/calbackup.rs; no-op without the `calbackup` feature).
-    calbackup::boot();
-    main()
-}
 
 /// Bring-up failures as red squares at the top left, one slot per stage.
 fn fail(slot: u16, failed: bool) {
@@ -275,7 +225,6 @@ fn main() -> ! {
         let now = clk.now_ms();
         // Profiler (DBG:PROF?, src/prof.rs): loop period + the `lap` chain.
         prof::pass(now);
-        #[cfg(feature = "native")]
         boot::mark_healthy(now);
         let t = unsafe { mmio::r32(0xE000_1004) };
         loop_max = loop_max.max(t.wrapping_sub(loop_t0) / 200);
@@ -1139,8 +1088,9 @@ fn touch_diag(
     d
 }
 
-/// Stop feeding the watchdog and wait for it to reset us back to stock.
-fn release_to_stock() -> ! {
+/// Stop feeding the watchdog and wait for the FWDGT reset (the shim counts it
+/// as a crash).
+fn wait_for_watchdog() -> ! {
     loop {
         mmio::spin(1_000_000);
     }
@@ -1148,17 +1098,16 @@ fn release_to_stock() -> ! {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    // Mark the panic on screen; do not feed the watchdog, so a crash recovers to
-    // the stock firmware on reset.
+    // Mark the panic on screen; do not feed the watchdog: the FWDGT resets and
+    // the shim counts a crash (WDT_RETRY, then recovery).
     lcd::fill_rect(0, lcd::H - 24, lcd::W, 24, lcd::MAGENTA);
-    release_to_stock()
+    wait_for_watchdog()
 }
 
 // ---------------------------------------------------------------------------
-// Native-format image (docs/native-boot.md "Implementation"). Appended at the
-// end of the file so the default build stays byte-identical (panic locations
-// carry line numbers). Native watchdog policy (src/boot.rs): INITIAL_HOLD_MS
-// above makes the main loop feed the FWDGT for as long as it runs.
+// Native-format image (docs/native-boot.md "Implementation"). Watchdog policy
+// (src/boot.rs): INITIAL_HOLD_MS above makes the main loop feed the FWDGT for
+// as long as it runs.
 // DBG:RELEASE, a panic or a hang stop the feeding -> FWDGT reset; the shim
 // counts it as a crash: the 1st reboots fw-rs normally (WDT_RETRY), a 2nd one
 // without 60 s of healthy main loop in between (boot::mark_healthy) enters
@@ -1167,16 +1116,8 @@ fn panic(_info: &PanicInfo) -> ! {
 // marker (boot::enter_loader_update) and reset -> the vendor loader's update
 // screen with its own USB disk until a dm40*.bin is installed. (No backup-SRAM
 // request word is set by any command now.)
-#[cfg(any(feature = "test-initcore", feature = "test-recovery"))]
-#[cfg(feature = "native")]
-compile_error!("native cannot be combined with the RAM test features");
-#[cfg(all(feature = "test-initcore", feature = "test-recovery"))]
-compile_error!("test-initcore and test-recovery are separate builds");
-#[cfg(any(feature = "native", feature = "test-initcore"))]
 mod board;
-#[cfg(any(feature = "native", feature = "test-initcore", feature = "test-recovery"))]
 mod boot;
-// fatren: also its FAT16 helpers for calbackup in every build.
 mod fatren;
 mod calbackup;
 #[cfg(feature = "vdisk")]
@@ -1189,14 +1130,11 @@ mod dlog;
 mod gallery;
 mod fatdir;
 mod upload;
-#[cfg(any(feature = "native", feature = "test-initcore", feature = "test-recovery"))]
 mod native;
 // Stock device-authenticity check, informational only: DBG:GENUINE? reports
 // it; nothing changes device behaviour on its result (user decision).
 // (`check` / `verify` are for other callers / the host tests.)
 #[allow(dead_code)]
 mod genuine;
-#[cfg(any(feature = "native", feature = "test-recovery"))]
 mod recovery;
-#[cfg(feature = "native")]
 mod shim;

@@ -1,11 +1,6 @@
-//! Text with the stock firmware's bitmap fonts. Two data sources, chosen by the
-//! `embedded-fonts` Cargo feature; the drawing code below is shared.
-//!   default (feature off): read the stock app's fonts in place from the
-//!     internal flash (the stock app stays installed, we only read it) — small
-//!     enough for the RAM-loaded sector-8 image.
-//!   `embedded-fonts`: use our own copy of the glyph tables + bitmaps, embedded
-//!     from stockfont_data.rs (extracted by tools/mkstockfont.py), so no stock
-//!     app in flash is needed — for the future native-flash layout.
+//! Text with the stock firmware's bitmap fonts: our own copy of the glyph
+//! tables + bitmaps, embedded from stockfont_data.rs (extracted by
+//! tools/mkstockfont.py), so no stock app in flash is needed.
 //! Format and placement rules: firmware/re/analysis/gui_v2_6.h section 5.
 //!
 //! Font object F = { D*, vtable*, u16 line_h, i16 descent }.
@@ -23,156 +18,11 @@ use crate::lcd::{self, Color};
 pub struct Font(pub u32);
 
 // The glyph struct and the per-font data-access layer (Font::valid/line_h/
-// descent/glyph and Glyph::alpha) are the only parts that differ between the
-// two sources, so only they are cfg-gated; one `mod data` survives, and its
-// `Glyph` is re-exported below. Everything from `Rect` on down is shared.
+// descent/glyph and Glyph::alpha) live in `mod data`; its `Glyph` is
+// re-exported below.
 pub use data::Glyph;
 
-// ---- Default: read the stock fonts in place from internal flash ----
-#[cfg(not(feature = "embedded-fonts"))]
-mod data {
-    use super::Font;
-
-    const VT_A: u32 = 0x0802_3509;
-    const VT_B: u32 = 0x0802_36F5;
-    const VT_BPLUS: u32 = 0x0802_3425;
-    const FONT_C: u32 = 0x0805_4828;
-    const FONT12: u32 = 0x0804_F24C;
-    const ASCII12: u32 = 0x0805_471C;
-    const FONT16: u32 = 0x0804_F260;
-    const ASCII16: u32 = 0x0805_34C4;
-
-    fn r32(a: u32) -> u32 {
-        unsafe { core::ptr::read_volatile(a as *const u32) }
-    }
-    fn r8(a: u32) -> u8 {
-        unsafe { core::ptr::read_volatile(a as *const u8) }
-    }
-
-    #[derive(Clone, Copy)]
-    pub struct Glyph {
-        bits: u32,
-        four: bool,
-        pub w: u8,
-        pub h: u8,
-        pub adv: u8,
-        pub yoff: i8,
-    }
-
-    impl Glyph {
-        pub const EMPTY: Glyph = Glyph { bits: 0, four: false, w: 0, h: 0, adv: 0, yoff: 0 };
-
-        /// A glyph of our own (stockfont_w.rs), same packing as the stock's.
-        pub fn own(b: &'static [u8], four: bool, w: u8, h: u8, adv: u8, yoff: i8) -> Glyph {
-            Glyph { bits: b.as_ptr() as u32, four, w, h, adv, yoff }
-        }
-
-        /// Coverage 0..15 of pixel (x, y) inside the glyph box.
-        pub fn alpha(&self, x: u32, y: u32) -> u8 {
-            self.alpha_at(x * self.h as u32 + y)
-        }
-
-        /// Coverage of pixel index `p` = x * h + y (column-major), so a row
-        /// walk steps `p` by `h` instead of multiplying per pixel.
-        #[inline(always)]
-        pub fn alpha_at(&self, p: u32) -> u8 {
-            if self.four {
-                let b = r8(self.bits + p / 2);
-                if p & 1 == 0 { b >> 4 } else { b & 0xF }
-            } else {
-                let b = r8(self.bits + p / 8);
-                if b & (0x80 >> (p & 7)) != 0 { 15 } else { 0 }
-            }
-        }
-    }
-
-    impl Font {
-        /// The stock app is present and this looks like a font object.
-        pub fn valid(&self) -> bool {
-            if self.0 == FONT_C || self.0 == FONT16 {
-                return Font(ASCII16).valid();
-            }
-            let vt = r32(self.0 + 4);
-            (0x0800_4000..0x0808_0000).contains(&vt) && matches!(r32(vt), VT_A | VT_B | VT_BPLUS)
-        }
-
-        pub fn line_h(&self) -> u16 {
-            match self.0 {
-                FONT_C => 16,
-                FONT16 => Font(ASCII16).line_h(),
-                _ => (r32(self.0 + 8) & 0xFFFF) as u16,
-            }
-        }
-
-        pub fn descent(&self) -> i16 {
-            match self.0 {
-                FONT_C => 0,
-                FONT16 => Font(ASCII16).descent(),
-                _ => (r32(self.0 + 8) >> 16) as i16,
-            }
-        }
-
-        /// Glyph lookup with the stock chains of the scope page fonts: class C
-        /// (fixed bitmaps, FUN_0802362c), the 12 px B+ font (0x0805471c first,
-        /// then its own table, FUN_08023425) and the 16 px wrapper (its ASCII
-        /// part 0x080534c4; the CJK part is not used).
-        pub fn glyph(&self, code: u32) -> Option<Glyph> {
-            match self.0 {
-                FONT_C => {
-                    let i = b"'RUNSTOPWAIDH".iter().position(|&c| c as u32 == code)? as u32;
-                    let (bits, w) = if i == 0 { (0x0805_4728, 4) } else { (0x0805_4730 + 20 * (i - 1), 10) };
-                    return Some(Glyph { bits, four: false, w, h: 16, adv: w, yoff: 0 });
-                }
-                FONT16 => return Font(ASCII16).glyph(code),
-                FONT12 => {
-                    if let Some(g) = Font(ASCII12).glyph_own(code) {
-                        return Some(g);
-                    }
-                }
-                _ => {}
-            }
-            self.glyph_own(code)
-        }
-
-        fn glyph_own(&self, code: u32) -> Option<Glyph> {
-            let d = r32(self.0);
-            let class_a = r32(r32(self.0 + 4)) == VT_A;
-            let (bits, tab, n, fmt) = (r32(d), r32(d + 4), r32(d + 8), r8(d + 12));
-            let es = if class_a { 12 } else { 8 };
-            let (mut lo, mut hi) = (0u32, n);
-            while lo < hi {
-                let mid = (lo + hi) / 2;
-                let e = tab + mid * es;
-                let c = r32(e);
-                if c == code {
-                    let four = fmt == 4;
-                    return Some(if class_a {
-                        Glyph {
-                            bits: bits + r32(e + 4),
-                            four,
-                            yoff: r8(e + 8) as i8,
-                            w: r8(e + 9),
-                            h: r8(e + 10),
-                            adv: r8(e + 11),
-                        }
-                    } else {
-                        let v = r32(e + 4);
-                        let w = (v & 0xFF) as u8;
-                        Glyph { bits: bits + (v >> 8), four, yoff: 0, w, h: self.line_h() as u8, adv: w }
-                    });
-                } else if c < code {
-                    lo = mid + 1;
-                } else {
-                    hi = mid;
-                }
-            }
-            None
-        }
-    }
-}
-
-// ---- Feature: use our embedded copy of the stock fonts ----
-#[cfg(feature = "embedded-fonts")]
+// ---- Our embedded copy of the stock fonts ----
 mod data {
     use super::Font;
 
@@ -731,7 +581,7 @@ pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
 // a repaint of any sub-rectangle is exact.
 
 /// Fonts of the stock scope page (stock font-object addresses; embedded by
-/// tools/mkstockfont.py, or read in place on the RAM image).
+/// tools/mkstockfont.py).
 pub const SC_C: Font = Font(0x0805_4828); // 10x16 status letters ' R U N S T O P W A I D H
 pub const SC_F12: Font = Font(0x0804_F24C); // 12 px texts (ASCII of 0x0805471c + own table)
 pub const SC_F16: Font = Font(0x0804_F260); // 16 px popup texts (ASCII 0x080534c4)

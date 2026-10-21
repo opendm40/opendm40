@@ -15,8 +15,8 @@
  *
  * RAM:
  *   TCM     0x10000000  64 KiB  .data, .bss, stack (top 0x10010000)
- *   SRAM    0x20000000 192 KiB  .dmabuf (DMA buffers, scope record); SRAM0
- *                               (the old code copy) is free now
+ *   SRAM    0x20000000 192 KiB  .dmabuf (DMA buffers, scope record),
+ *                               .sram_bss
  */
 MEMORY
 {

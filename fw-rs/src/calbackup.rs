@@ -41,9 +41,7 @@
 //! dm40*.bin to _DM40PRV.BIN (loader re-install protection, not a backup).
 //!
 //! When: every normal boot, before USB exists (the host cannot have the volume
-//! mounted): native from native.rs `pre_main` (after board init and fatren),
-//! the RAM build from main.rs `rust_start` before `main()`. Cargo feature
-//! `calbackup` (implied by native). Cost of a boot with the copy present: the
+//! mounted): from native.rs `pre_main` (after board init and fatren). Cost of a boot with the copy present: the
 //! boot sector, the root block, FAT 1 and the six data blocks of the three
 //! files are read (the files are compared with the flash: `differs`, for
 //! DBG:BOOT?), nothing is written. First boot: 6 data blocks + 2 FAT blocks
@@ -104,7 +102,7 @@ const _: () = assert!(N <= 16, "written / conflict / differs are u16 bit masks")
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
-    /// Not run (recovery, feature off).
+    /// Not run (recovery).
     NotRun,
     NoMedium,
     /// Boot sector is not the expected FAT16 volume; untouched.
@@ -327,13 +325,10 @@ impl Source for FwFile<'_> {
 
 // --- Boot: the write-once safety copy ---------------------------------------------
 
-/// Boot entry (the RAM build and native): the safety copy of FILES[..SAFE].
+/// Boot entry: the safety copy of FILES[..SAFE].
 /// Never inlined: its frame is gone before main() runs (review 2026-10-13 B1).
 #[inline(never)]
 pub fn boot() {
-    if !cfg!(feature = "calbackup") {
-        return;
-    }
     let t0 = unsafe { crate::mmio::r32(DWT_CYCCNT) };
     let mut slices: [&[u8]; SAFE] = [&[]; SAFE];
     for (s, &(_, addr, len)) in slices.iter_mut().zip(FILES.iter()) {

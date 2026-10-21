@@ -1,5 +1,5 @@
-//! Native boot decision (the "shim"), shared by the native reset path
-//! (src/shim.rs) and the RAM test entries (src/native.rs, test-recovery).
+//! Native boot decision (the "shim"), called by the native reset path
+//! (src/shim.rs).
 //!
 //! Runs before .data/.bss exist: no statics are touched until `native::start`
 //! has initialised RAM (only `set_info`/`info` below use one, afterwards).
@@ -34,9 +34,6 @@
 //! after the shim started gives a cue (beep + backlight blink); the key must
 //! then STILL be held CONFIRM_MS (0.5 s) to enter recovery. Releasing during
 //! that window aborts to a normal boot.
-
-// The RAM test builds use only part of the native boot code.
-#![cfg_attr(not(feature = "native"), allow(dead_code, unused_imports))]
 
 use crate::clock::{self, Src};
 use crate::mmio::{modify32, r32, w32};
@@ -140,9 +137,6 @@ pub struct BootInfo {
     pub last: u32,
     /// How long PD6 was held after the shim started (capped at HOLD_MS).
     pub hold_ms: u32,
-    /// test-recovery: the mode the decision chose (`mode` is forced).
-    #[allow(dead_code)]
-    pub decided: Mode,
 }
 
 #[inline(always)]
@@ -463,11 +457,10 @@ fn key_gesture(cyc_per_ms: u32) -> (u32, bool) {
     }
 }
 
-/// The whole shim sequence. `test`: RAM test build, the decision is computed
-/// and recorded (`decided`) but recovery is forced.
-#[cfg_attr(feature = "native", link_section = ".shim")]
+/// The whole shim sequence.
+#[link_section = ".shim"]
 #[inline(never)]
-pub fn shim(test: bool) -> BootInfo {
+pub fn shim() -> BootInfo {
     // (b) watchdog first: from here on any hang resets into this shim.
     crate::wdt::start::fwdgt();
     // Keep the unit powered before anything slow (the key may be released),
@@ -510,7 +503,7 @@ pub fn shim(test: bool) -> BootInfo {
     // native normal boot. Stale stock flags or an install never count.
     let genuine = wdt && rstsck & (SWRSTF | PORRSTF) == 0 && last == LAST_NORMAL;
     let failed = clock == ClockState::Failed;
-    let (decided, reason) = if req {
+    let (mode, reason) = if req {
         (Mode::Recovery, Reason::Requested)
     } else if confirmed {
         (Mode::Recovery, Reason::KeyHold)
@@ -522,7 +515,7 @@ pub fn shim(test: bool) -> BootInfo {
         let why = if failed { Reason::ClockFail } else { Reason::Watchdog };
         if n >= CRASH_MAX {
             (Mode::Recovery, why)
-        } else if failed && !test {
+        } else if failed {
             // Transient clock failure: retry the whole boot (the ROM sets the
             // clock up again) instead of running fw-rs at 16 MHz.
             unsafe { w32(BKP_LAST, LAST_NORMAL) };
@@ -537,7 +530,6 @@ pub fn shim(test: bool) -> BootInfo {
     } else {
         (Mode::Normal, Reason::None)
     };
-    let mode = if test { Mode::Recovery } else { decided };
     unsafe {
         if mode == Mode::Recovery {
             w32(BKP_CRASH, CRASH_TAG); // a fresh start after the reinstall
@@ -545,20 +537,18 @@ pub fn shim(test: bool) -> BootInfo {
         w32(BKP_LAST, if mode == Mode::Recovery { LAST_RECOVERY } else { LAST_NORMAL });
     }
     feed();
-    BootInfo { rstsck, rstsck_after, mode, reason, clock, last, hold_ms, decided }
+    BootInfo { rstsck, rstsck_after, mode, reason, clock, last, hold_ms }
 }
 
 // --- After RAM init: boot info for DBG:BOOT? --------------------------------
 
 static mut INFO: Option<BootInfo> = None;
-#[cfg(any(feature = "native", feature = "test-initcore"))]
 static mut BOARD: Option<crate::board::Before> = None;
 
 pub fn set_info(i: BootInfo) {
     unsafe { INFO = Some(i) };
 }
 
-#[cfg(any(feature = "native", feature = "test-initcore"))]
 pub fn set_board(b: crate::board::Before) {
     unsafe { BOARD = Some(b) };
 }
@@ -582,7 +572,6 @@ pub fn mark_healthy(now_ms: u64) {
     }
 }
 
-#[cfg(any(feature = "native", feature = "test-initcore"))]
 fn hex(s: &mut crate::scpi::Scpi, v: u32) {
     let mut t = [0u8; 10];
     t[0] = b'0';
@@ -593,7 +582,6 @@ fn hex(s: &mut crate::scpi::Scpi, v: u32) {
     s.put_bytes(&t);
 }
 
-#[cfg(any(feature = "native", feature = "test-initcore"))]
 fn dec(s: &mut crate::scpi::Scpi, mut v: u32) {
     let mut t = [0u8; 10];
     let mut i = t.len();
@@ -620,7 +608,6 @@ fn dec(s: &mut crate::scpi::Scpi, mut v: u32) {
 /// PD6,moder,pupd,idr (power key pin read live: MODER[13:12] 0 = input,
 /// PUPD[13:12] 2 = pull-down, IDR bit 6 1 = pressed), then
 /// native::put_extra: STAGED,n,CALBK,status,written,conflict,freed,STACK,used,size.
-#[cfg(any(feature = "native", feature = "test-initcore"))]
 pub fn put_info(s: &mut crate::scpi::Scpi) {
     s.len = 0;
     let Some(i) = (unsafe { INFO }) else {

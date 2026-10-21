@@ -32,20 +32,15 @@ pub fn kick_if_feeding() {
     }
 }
 
-/// End of app.rs power_off() once the rails are dropped. RAM build: spin (the
-/// stock watchdog then resets to stock if the unit is still powered). Native:
-/// still powered means USB power, so do not let the FWDGT turn this into a
+/// End of app.rs power_off() once the rails are dropped. Still powered means
+/// USB power, so do not let the FWDGT turn this into a
 /// "hang" (-> recovery): backlight off, keep feeding, and a new press of the
 /// power key (after the off-press is released) restarts fw-rs normally.
 #[inline(always)]
 pub fn powered_off() -> ! {
-    #[cfg(feature = "native")]
-    off_wait();
-    #[allow(unreachable_code)]
-    loop {}
+    off_wait()
 }
 
-#[cfg(feature = "native")]
 fn off_wait() -> ! {
     unsafe { w32(0x4000_1C34, 0) }; // TIM13 CCR1: backlight off
     let mut armed = false;
@@ -70,7 +65,6 @@ fn off_wait() -> ! {
 // when the FS-loader jumps to us. Stock configuration: PSC = 6 (/256),
 // RLD = 2500 (~16..20 s on the ~32 kHz IRC32K; measured 19 s).
 
-#[cfg(any(feature = "native", feature = "test-recovery", feature = "test-initcore"))]
 pub mod start {
     use crate::mmio::{r32, w32};
 
@@ -82,7 +76,7 @@ pub mod start {
 
     /// Start (or keep) the watchdog with the stock timeout and reload it. Once
     /// started it cannot be stopped until reset. Bounded waits only.
-    #[cfg_attr(feature = "native", link_section = ".shim")]
+    #[link_section = ".shim"]
     #[inline(never)]
     pub fn fwdgt() {
         unsafe {
