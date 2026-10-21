@@ -331,11 +331,12 @@ impossible without a second COM - the load's other terminal is the A jack. If
 the user puts V/ohm on load(-) (the A-jack conductor) the reading is just the
 burden voltage. Keep wiring 1 and compensate.
 
-Sign: with the current flowing source -> load -> A -> COM, I in the shunt is
-negative in the stock's convention (the stock current modes show it); P reads
-negative. Define the power mode's positive direction as "into the A jack, out
-of COM" (consumer convention for wiring 1) and say so in the entry dialog;
-sources (PV, battery discharge) then read negative.
+Sign: in wiring 1 the load current enters the A jack and leaves through COM,
+which is the stock's positive direction (emulator README: `dca:0.5` = "current
+into the A terminal", the stock shows +0.5001), so a consumer reads P > 0 with
+no sign games. Define the power mode's positive direction as "into the A jack,
+out of COM" and say so in the entry dialog; sources (PV, battery discharge)
+then read negative, which is why the signed RMS read of 3.3 matters.
 
 Safety:
 
@@ -529,6 +530,13 @@ rows' own R21 = 0xdd (+-20.8 mV at the comparator input, VERIFIED): 0.44 mA on
 | DC A (f7 / f8_9) | AD1, OP1; comparator idle (R20 0xf0) | - (the reading is the current) | **comparator on SENSE** with the /1000 tap closed in the row: **SS5 only** (the A rows run the power bus as SGND, R2F 0x81, so PS5 would ground the tap); the /100 tap would put 230 V = 2.3 V at the tap, outside the op amp / switch common-mode range. Trips at 20.8 mV * 1000 = 21 V (AGNDP/N<1>), 42 V (<2>), 62 V (<3>). Below 21 V: AD2 via OP2 <- SENSE (free in DC A, R32 0x3e / 0x3d) with LPF/RMS - enabled with the row, never toggled; **T8**: check that the DC A zero / gain are unchanged with AD2 on (note 7) |
 | AC A (f4 / f5_6) | AD2/AD3, OP1, comparator = frequency readout (R20 0xf2, SCMPI = PB4: in AC A the PB4 node carries the current signal coupled from OP1O, INFERRED) | - | **AD1 free** (R23 0x03): SENSE - PB5 with the /1000 tap (SS5), chopped OSR 2048 (25 ms) for DC, peak hold for AC: ~2 V detection |
 | frequency (f14) | counter, AD1 (PB5 - PB5 zero reading), AD2 | comparator busy -> AD1 (PB1 - PB3) replaces the zero-reading input | - |
+
+AC+DC caveat: in AC+DC the stock and fw-rs (`freq_secondary(now, 0xF0)`, acdc
+doc 7 item 1) rewrite R20 = 0xf0 / 0xf2 every 350 ms in **both** phases, which
+points the comparator back at PB4. The DC-phase A-jack sentinel must therefore
+fold its SCMPI = PB1 into the `src` byte that `freq_secondary` writes (and
+accept that the counter then measures the current node's frequency, or run the
+frequency readout from the AC phase only), or be disabled in AC+DC.
 
 Decode note: byte 18 of each 22-byte row is R32 (`ENOP2 SOP2P<2:0> ENOP1
 SOP1P<2:0>`); the values quoted above are from the rows in
