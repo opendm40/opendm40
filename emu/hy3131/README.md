@@ -100,6 +100,30 @@ Chip (datasheet DS-HY3131-V10):
   in the AC V / mV roles, with the AD1 peak hold over every elapsed conversion.
   Row matching ignores AD1's fields in rows that leave AD1 off, PKHSEL /
   ENPKH, and SS5 in the current rows.
+* fw-rs power meter rows (`fw-rs/docs/power-meter-and-misconnect.md` 3.1,
+  assignment B; role `Power`, mode 16, `Power vr<V range> iu<I unit> ir<I
+  range>`, Range = vr * 6 + iu * 2 + ir): the 16 distinct rows of the design's
+  builder (`Hy3131Core.PowerRow`; iu 1 / 2 share the bytes, PE tells mA from
+  uA) with R34 SVXI / SDO23, R35 AD3IN / AD3IG, R20, R22, R36 and the I row's
+  R2E / R2F = 08 81 free. X = AD2 = A current x relay-selected shunt x OP1 (x10
+  with OPS1) x AD2IG; Y = AD3 = V jack / kV[vr] (10 .. 10000) x OP2 (x10 with
+  OPS2) x AD3IG / AD3RG; codes of 1.25 V / 2^18, both DC coupled. RMS block:
+  SDO23 -> sum(Yac^2)/N, else SVXI -> sum(Xac*Yac)/N (signed: 38-bit two's
+  complement in RMS<37:0>, bits 39:38 sign copies), else sum(Xac^2)/N; LPF =
+  DC of Y with SDO23, else of X; R03..R05 = Y with SDO23, else X. The cross
+  term is Xac * Yac * mean(u_V(t) u_I(t - ph)) over one period of the unit
+  waveforms (sine: cos ph; square / triangle in phase: 1; different V / I
+  frequencies: 0); XY noise is the uncorrelated residue (floor x
+  sqrt((X^2 + Y^2 + floor^2) / N)), XX / YY keep the 30-code floor. SPHACAL
+  (R36) shifts only the cross term: <6:0> AD2CLK periods (0.407 us) of the I
+  channel, bit 7 = 1 advances I (phase lag reduced by 360 f n / 2.4576 MHz
+  deg), bit 7 = 0 delays it. An R34 statistic change in the middle of a block
+  makes that block (RMS and LPF) the time-weighted mix of the selections it
+  saw; the next block is clean (`powmix:0`: no mixing; the real chip's
+  behaviour is unknown, design 3.4 / device test T3). Calibration: X carries
+  the stock AC A gains folded in (AC part / cal(0xC4 + 4 ci), DC part /
+  cal(0xF4 + 4 ci), ci = iu * 2 + ir, no offsets), Y is ideal. The
+  comparator / counter (SCMPI = SENSE) sees the V tap: the voltage's frequency.
 * Comparator: VRHCMP / VRLCMP from the R21 mux tables and the reference divider
   (VDSC<n> = K1 * VDDA, AGNDP/N<n> = AGND +- K2 * REFO), latch -> ACPO, CMPO on
   the CMP pin when ENPCMPO = 1 (`CmpPin`: the continuity beeper).
@@ -131,6 +155,7 @@ run-time R22 / R32 / R33 writes still match) and gives the analog path:
 | capacitance 13 r5..r7 | constant current ramp on AD1 | `dV/dt = I[r] / C` (4.06 / 41 / 400 uA at the AD1 node) between the R21 thresholds, ACPO toggles, discharge row -> 0 V |
 | frequency 14 | comparator on the input (+-20.8 mV) or CNT pin | counter; AD2 RMS of the level |
 | temperature 15 | AD1: sensor phases (R33), thermocouple on the mV x10 path | type K EMF (NIST ITS-90) of (hot - cold junction) |
+| power (fw-rs, mode 16) | AD2 = I (stock AC A path), AD3 = V tap through OP2, RMS = XX / XY / YY by R34, LPF | `X = I * shunt * OP1 * AD2IG`, `Y = V / kV[vr] * OP2 * AD3IG` in 1.25 V / 2^18 codes; XY signed (above) |
 
 The real PA / PB wiring of the DM40 is not known (hy3131_v2_6.h); the chain
 constants are the stock's nominal scale factors, i.e. the design intent of the
@@ -168,13 +193,14 @@ Connection spec (`emu/run.py --dmm SPEC[@T]`, script lines `T dmm SPEC` or
 | spec | connected |
 |---|---|
 | `vsrc:1.234[,ac=1.0,f=50,shape=sine|square|triangle,duty=0.3,rs=4700]` | voltage source V-COM: DC, AC rms, source resistance |
-| `isrc:0.0123[,ac=,f=,shape=,duty=,compl=10]` | current source A-COM (compliance V) |
+| `isrc:0.0123[,ac=,f=,shape=,duty=,compl=10,ph=DEG]` | current source A-COM (compliance V); `ph`: phase of its AC part behind the V source's AC part (positive = current lags, inductive; PF = cos ph) |
+| `pow:230@50,i=1[,pf=0.8\|ph=DEG,dc=VDC,idc=IDC,f=HZ,shape=]` | power meter shorthand: V source (AC rms 230 at 50 Hz + dc) on V-COM and current source (AC rms 1 A at the same frequency + idc) into A, the current lagging by `ph` or `acos(pf)` (`pf < 0` = energy flowing out, P < 0; `ph` wins over `pf`); negative `idc` = negative DC power. With `emu/run.py --dmm` the last `@` is the time: write `pow:230,f=50,i=1` or `pow:230@50,i=1@0` |
 | `r:4700`, `short` (= `r:0`), `c:100e-9`, `diode:0.65[,rev=1]` | resistor, short, capacitor, diode (anode at V unless `rev`) between V and COM |
 | `tc:100`, `tcmv:4.096`, `tcopen` | type K thermocouple: hot junction C, or its mV, or connected but open |
 | `cj:25`, `die:35` (`die:none` = follows cj) | cold junction (jacks) and HY3131 die temperature |
 | `avsrc:0.5[,rs=]`, `isrcv:0.001`, `aload:100` | wrong-jack cases: voltage source across A-COM, current source across V-COM, resistor across A-COM |
 | `dcv:`, `acv:V@Hz`, `hz:F,duty=,amp=`, `dca:`, `aca:`, `ohm:`, `cap:`, `temp:T,cj=`, `chip:` | the older per-function keys: each replaces the whole connection with the equivalent one |
-| `noise:0`, `cal:0`, `beat:1` | model options |
+| `noise:0`, `cal:0`, `beat:1`, `powmix:0` | model options (`powmix:0`: an R34 switch in the power role does not mix the block in progress) |
 
 State: `sysbus.hy3131 Frontend` returns one line of `key=value` tokens (relay
 and shunt state, role / mode / range, which converters and switches are on,
@@ -186,10 +212,13 @@ GTK panel's schematic reads it).
 
 `emu/hy3131/tests/run.sh` (dotnet 8; `DOTNET=` to point at an SDK) compiles
 the real `HY3131.cs` with a 60-line Renode shim and drives it through the SPI
-pins like the firmware: 199 checks of the register semantics, the frame,
+pins like the firmware: 297 checks of the register semantics, the frame,
 conversion timing, DC / AC / A / ohm / continuity / diode / capacitance /
 frequency / temperature physics, calibration consistency, the AC coupling
-transient, the AC+DC cadence and the (optional) enable-order beat.
+transient, the AC+DC cadence, the (optional) enable-order beat, the misconnect
+sentinel and the fw-rs power rows (recognition, PF 1 / 0.5 / 0 / -1, DC, the
+38-bit sign, SPHACAL, statistic-switch mixing, the counter, the stock AC V /
+AC A rows with both jacks driven).
 
 `emu/hy3131/modetest.py` runs the stock firmware and fw-rs in the emulator:
 the input is scripted, the stock is switched with Bluetooth command 06 and

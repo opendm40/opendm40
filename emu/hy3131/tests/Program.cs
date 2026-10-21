@@ -89,6 +89,7 @@ namespace Hy3131Tests
             Ad2Stream();
             CrossCases();
             Sentinel();
+            Power();
             Console.WriteLine("{0} passed, {1} failed", passes, failures);
             return failures == 0 ? 0 : 1;
         }
@@ -301,6 +302,220 @@ namespace Hy3131Tests
                 m.Chip.SetInput("open;isrc:0.0123");
                 m.Configure(Sent(F8R0, 8), 8); m.Read1(0x1E); m.WaitFlag(0x04, 1);
                 Near(Ma(m, 8, 0), 12.3, 0.01, "  DC mA reading unchanged with SS5 closed");
+            }
+        }
+
+        // fw-rs power meter rows (fw-rs/docs/power-meter-and-misconnect.md 3.1 B): written as
+        // hy3131::configure does: the row with ENAD2 / ENAD3 clear, R36, R34, then R26.
+        private static void PowerConfigure(Master m, byte[] row, int iu, int sph = 0)
+        {
+            m.Write(0x26, 0); m.Write(0x34, 0);
+            m.Relays(0, iu);
+            var c = (byte[])row.Clone();
+            c[6] &= 0x7F; c[20] &= 0x7F;
+            m.Write(0x20, c);
+            m.Write(0x36, (byte)sph);
+            m.Write(0x34, row[20]);
+            m.Write(0x26, row[6]);
+            m.Write(0x1F, 0);
+        }
+
+        /// RMS<37:0> as a signed 38-bit value (bit 37 = sign).
+        private static long RmsSigned(byte[] b)
+        {
+            var v = b[9] | (long)b[10] << 8 | (long)b[11] << 16 | (long)b[12] << 24 | (long)(b[13] & 0x3F) << 32;
+            return (v & (1L << 37)) != 0 ? v - (1L << 38) : v;
+        }
+
+        /// Select the statistic (R34), skip the block in progress (mixed), return the next block's bytes.
+        private static byte[] PowerStat(Master m, byte r34)
+        {
+            m.Write(0x34, r34);
+            m.Read1(0x1E); m.WaitFlag(0x10, 1, 0.005);
+            m.Read1(0x1E);
+            return ReadAfter(m, 0x18, 1);
+        }
+
+        /// XX, XY, YY (codes^2) of the current input.
+        private static double[] PowerTriple(Master m)
+        {
+            var xx = RmsSigned(PowerStat(m, 0x80));
+            var xy = RmsSigned(PowerStat(m, 0x88));
+            var yy = RmsSigned(PowerStat(m, 0x8c));
+            return new double[] { xx, xy, yy };
+        }
+
+        private static readonly byte[] F4R1 = Master.Row("f2 dd 15 03 52 40 80 2d 31 f4 00 00 00 00 08 81 80 c7 3e ac 88 24");
+
+        private static void Power()
+        {
+            Console.WriteLine("fw-rs power meter rows (X = AD2 = I, Y = AD3 = V)");
+            const double C = 262144.0 / 1.25; // codes per volt at IG 1.0
+            foreach(var (vr, iu, ir, hex) in new[] { (1, 0, 1, "12 dd 15 03 52 40 80 2d 31 f8 20 00 00 09 28 a0 80 c7 8e ac 88 54"),
+                                                    (0, 1, 0, "12 dd 14 03 35 41 80 2d 31 f8 06 00 00 90 28 a0 80 c7 8d ac 88 54"),
+                                                    (2, 2, 1, "12 dd 14 03 35 40 80 2d 31 f8 20 00 90 00 28 a0 80 c7 8d ac 88 54") })
+                Check(BitConverter.ToString(Hy3131Core.PowerRow(vr, iu, ir)) == BitConverter.ToString(Master.Row(hex)),
+                      string.Format("power row builder vr{0} iu{1} ir{2}", vr, iu, ir), BitConverter.ToString(Hy3131Core.PowerRow(vr, iu, ir)));
+            foreach(var (vr, iu, ir) in new[] { (0, 0, 0), (1, 0, 1), (3, 0, 1), (0, 1, 0), (2, 1, 1), (2, 2, 1), (3, 2, 0) })
+            {
+                var m = NewChip();
+                PowerConfigure(m, Hy3131Core.PowerRow(vr, iu, ir), iu);
+                var want = string.Format("Power vr{0} iu{1} ir{2}", vr, iu, ir);
+                Check(m.Chip.Role == want, "power row recognised: " + want, m.Chip.Role);
+            }
+            {
+                var m = NewChip();
+                PowerConfigure(m, Hy3131Core.PowerRow(2, 0, 1), 0);
+                var ok = true; var got = "";
+                foreach(var (reg, val) in new[] { (0x34, 0x80), (0x34, 0x8c), (0x20, 0x10), (0x35, 0x5C), (0x35, 0x74), (0x36, 0x85), (0x2E, 0x08) })
+                {
+                    m.Write(reg, (byte)val);
+                    if(reg == 0x2E) m.Write(0x2F, 0x81);
+                    ok &= m.Chip.Role == "Power vr2 iu0 ir1"; got += m.Chip.Role + ";";
+                }
+                Check(ok, "  run-time R34 / R20 / R35 / R36 / R2E-R2F 08 81 variants keep the role", got);
+                Check(m.Chip.Core.Mode == Hy3131Core.PowerMode && m.Chip.Range == 2 * 6 + 0 + 1, "  Mode 16, Range vr*6 + iu*2 + ir", m.Chip.Mode + " " + m.Chip.Range);
+            }
+            {
+                // 230 V / 1 A, PF 1, on 400 V (/1000) x 10 A (10 mohm, x1)
+                var m = NewChip(true);
+                m.Chip.SetInput("pow:230@50,i=1");
+                PowerConfigure(m, Hy3131Core.PowerRow(2, 0, 1), 0);
+                var r = PowerTriple(m);
+                Near(Math.Sqrt(r[0]), 1 * 0.01 * C, 0.005 * 0.01 * C, "resistive: sqrt(XX) = 1 A x 10 mohm", string.Format("{0:F4} A", Math.Sqrt(r[0]) / C / 0.01));
+                Near(Math.Sqrt(r[2]), 0.23 * C, 0.002 * 0.23 * C, "  sqrt(YY) = 230 V / 1000", string.Format("{0:F2} V", Math.Sqrt(r[2]) / C * 1000));
+                Near(r[1] / Math.Sqrt(r[0] * r[2]), 1.0, 0.005, "  XY = sqrt(XX * YY) (PF 1)", string.Format("P {0:F2} W", r[1] / C / C * 1000 / 0.01));
+                m.Chip.SetInput("pow:230@50,i=1,ph=90");
+                r = PowerTriple(m);
+                Check(Math.Abs(r[1]) < 0.01 * Math.Sqrt(r[0] * r[2]), "reactive (ph 90): |XY| < 1 % of sqrt(XX * YY)", (r[1] / Math.Sqrt(r[0] * r[2])).ToString("F5"));
+                m.Chip.SetInput("pow:230@50,i=1,pf=0.5");
+                r = PowerTriple(m);
+                Near(r[1] / Math.Sqrt(r[0] * r[2]), 0.5, 0.005, "pf 0.5: XY / sqrt(XX * YY)");
+                m.Chip.SetInput("pow:230@50,i=1,shape=square");
+                r = PowerTriple(m);
+                Near(r[1] / Math.Sqrt(r[0] * r[2]), 1.0, 0.005, "square V and I in phase: PF 1");
+                m.Chip.SetInput("pow:230@50,i=1,pf=-1");
+                var b = PowerStat(m, 0x88);
+                var xy = RmsSigned(b);
+                var xx = RmsSigned(PowerStat(m, 0x80));
+                Check(xy < 0 && (b[13] & 0xE0) == 0xE0, "reversed current (pf -1): XY negative, R0D bits 7:5 = sign (37) and its copies (39:38)", string.Format("R0D 0x{0:X2}", b[13]));
+                Near(-xy / Math.Sqrt(xx), 0.23 * C, 0.005 * 0.23 * C, "  |XY| / sqrt(XX) = Y rms");
+                m.Chip.SetInput("pow:230@50,i=1,f=60,pf=0.8");
+                r = PowerTriple(m);
+                Near(r[1] / Math.Sqrt(r[0] * r[2]), 0.8, 0.005, "pow f= option (60 Hz), pf 0.8");
+                m.Chip.SetInput("open;vsrc:0,ac=230,f=50;isrc:0,ac=1,f=50,ph=60");
+                r = PowerTriple(m);
+                Near(r[1] / Math.Sqrt(r[0] * r[2]), 0.5, 0.005, "isrc ph=60: cos 60");
+            }
+            {
+                // DC power: 12 V on 40 V (/100), 0.5 A on 10 A x1
+                var m = NewChip(true);
+                m.Chip.SetInput("vsrc:12;isrc:0.5");
+                PowerConfigure(m, Hy3131Core.PowerRow(1, 0, 1), 0);
+                var bx = PowerStat(m, 0x80);
+                Near(Lpf(bx), 0.5 * 0.01 * C, 2, "DC: LPF(X) = 0.5 A x 10 mohm");
+                var bxy = PowerStat(m, 0x88);
+                Check(Math.Abs(RmsSigned(bxy)) < 200, "  XY ~ 0 (the HPF removes DC)", RmsSigned(bxy).ToString());
+                Near(Lpf(bxy), 0.5 * 0.01 * C, 2, "  LPF follows SDO23 = 0: still X");
+                var by = PowerStat(m, 0x8c);
+                Near(Lpf(by), 12 / 100.0 * C, 3, "  SDO23: LPF(Y) = 12 V / 100");
+                m.Chip.SetInput("isrc:-0.5");
+                bx = PowerStat(m, 0x80);
+                Check(Lpf(bx) < 0 && Math.Abs(Lpf(bx) + 0.5 * 0.01 * C) < 3, "  negative DC current: LPF(X) negative", Lpf(bx).ToString());
+                var mq = NewChip();
+                mq.Chip.SetInput("vsrc:12;isrc:0.5");
+                PowerConfigure(mq, Hy3131Core.PowerRow(1, 0, 1), 0);
+                mq.Read1(0x1E); mq.WaitFlag(0x02, 1, 0.001);
+                Near(S24(mq.Read(0x00, 6), 3), 0.5 * 0.01 * C, 1, "  AD2 data register = X");
+                mq.Write(0x34, 0x8c); mq.Read1(0x1E); mq.WaitFlag(0x02, 1, 0.001);
+                Near(S24(mq.Read(0x00, 6), 3), 12 / 100.0 * C, 1, "  SDO23: AD2 data register = Y (AD3)");
+                mq.Write(0x35, 0x5C);
+                mq.Read1(0x1E); mq.WaitFlag(0x02, 1, 0.001);
+                Near(S24(mq.Read(0x00, 6), 3), 12 / 100.0 * C * 2, 2, "  AD3IG 2.0 (R35 0x5C) scales Y");
+                mq.Write(0x35, 0x54); mq.Write(0x25, (byte)(mq.Chip.Core.Peek(0x25) | 0x02));
+                mq.Read1(0x1E); mq.WaitFlag(0x02, 1, 0.001);
+                Near(S24(mq.Read(0x00, 6), 3), 12 / 100.0 * C * 10, 2, "  OPS2 x10 scales Y");
+            }
+            {
+                // the stock AC A gains: RMS gain on the AC part, LPF gain on the DC part of X; Y ideal
+                var cal = Hy3131Core.DefaultCal();
+                cal[(0xc4 + 4 * 1) / 4] = 1.02f; cal[(0xf4 + 4 * 1) / 4] = 0.98f;
+                var m = NewChip(false, cal);
+                m.Chip.SetInput("pow:230@50,i=1,idc=0.5");
+                PowerConfigure(m, Hy3131Core.PowerRow(2, 0, 1), 0);
+                var b = PowerStat(m, 0x80);
+                Near(Math.Sqrt(RmsSigned(b)), 0.01 * C / 1.02, 0.5, "cal: sqrt(XX) / RMS gain 0xc4[1]");
+                Near(Lpf(b), 0.5 * 0.01 * C / 0.98, 1, "  LPF(X) / LPF gain 0xf4[1]");
+                Near(Math.Sqrt(RmsSigned(PowerStat(m, 0x8c))), 0.23 * C, 0.5, "  Y: no calibration");
+            }
+            {
+                // SPHACAL at 1 kHz: 127 AD2CLK = 51.7 us = 18.60 deg
+                var dphi = 127 / 2457600.0 * 1000 * 360;
+                var m = NewChip();
+                m.Chip.SetInput("pow:2@1000,i=1");
+                PowerConfigure(m, Hy3131Core.PowerRow(0, 0, 1), 0, 0x7F);
+                var r = PowerTriple(m);
+                Near(r[1] / Math.Sqrt(r[0] * r[2]), Math.Cos(dphi * Math.PI / 180), 0.002, "SPHACAL 0x7F (AD2 late), ph 0: cos 18.6 deg");
+                Near(Math.Sqrt(r[0]), 0.01 * C, 0.5, "  XX unaffected");
+                m.Chip.SetInput("pow:2@1000,i=1,ph=60");
+                m.Write(0x36, 0xFF);
+                r = PowerTriple(m);
+                Near(r[1] / Math.Sqrt(r[0] * r[2]), Math.Cos((60 - dphi) * Math.PI / 180), 0.002, "SPHACAL 0xFF (AD2 leads), ph 60: cos(60 - 18.6)");
+                m.Write(0x36, 0x7F);
+                r = PowerTriple(m);
+                Near(r[1] / Math.Sqrt(r[0] * r[2]), Math.Cos((60 + dphi) * Math.PI / 180), 0.002, "SPHACAL 0x7F, ph 60: cos(60 + 18.6)");
+                m.Chip.SetInput("pow:2@50,i=1,ph=60");
+                r = PowerTriple(m);
+                Near(r[1] / Math.Sqrt(r[0] * r[2]), Math.Cos((60 + dphi / 20) * Math.PI / 180), 0.002, "  50 Hz: 0.93 deg");
+            }
+            foreach(var mix in new[] { true, false })
+            {
+                // R34 write half way through a block: that block is the time-weighted mix (powmix)
+                var m = NewChip();
+                m.Chip.SetInput("pow:230@50,i=1,ph=90" + (mix ? "" : ";powmix:0"));
+                PowerConfigure(m, Hy3131Core.PowerRow(2, 0, 1), 0);
+                var t0 = m.Now; var p = m.Chip.Core.LpfPeriod;
+                var xx = 0.01 * C * 0.01 * C;
+                m.Now = t0 + 2.5 * p;
+                m.Write(0x34, 0x80);                      // XY (~0) -> XX at 0.5 of block 3
+                m.Now = t0 + 3.05 * p;
+                var b = m.Read(0x00, 20);
+                Near(RmsSigned(b) / xx, mix ? 0.5 : 1.0, 0.01, mix ? "mixing: XY -> XX mid-block gives half of XX" : "powmix:0: that block is clean");
+                m.Now = t0 + 4.05 * p;
+                Near(RmsSigned(m.Read(0x00, 20)) / xx, 1.0, 0.001, "  the next block is clean");
+                m.Chip.SetInput("open;vsrc:120;isrc:0.5");
+                m.Now = t0 + 6.25 * p;
+                m.Write(0x34, 0x8c);                      // LPF X -> Y at 0.25 of block 7
+                m.Now = t0 + 7.05 * p;
+                var want = mix ? 0.25 * 0.5 * 0.01 * C + 0.75 * 0.12 * C : 0.12 * C; // 120 V / 1000
+                Near(Lpf(m.Read(0x00, 20)), want, 0.01 * want, "  LPF source switch " + (mix ? "mixed 1/4 X + 3/4 Y" : "clean"));
+            }
+            {
+                // the counter on SENSE: frequency of the voltage
+                var m = NewChip();
+                m.Chip.SetInput("vsrc:0,ac=230,f=60;isrc:0,ac=1,f=50");
+                PowerConfigure(m, Hy3131Core.PowerRow(2, 0, 1), 0);
+                m.Write(0x20, 0x10); m.Write(0x1B, 0x00, 0x00, 0xFC); m.Write(0x20, 0x12);
+                var fl = m.WaitFlag(0x01, 1);
+                var c = m.Read(0x15, 9);
+                var ctb = c[3] | c[4] << 8 | c[5] << 16; var cta = c[6] | c[7] << 8 | c[8] << 16;
+                Near(ctb / (double)(cta + 0x40000) * 4915200, 60, 0.01, "power row counter: the voltage's 60 Hz (current at 50 Hz)");
+            }
+            {
+                // fallback: stock AC V with the A shunt selected and current flowing; stock AC A with V on V-COM
+                var m = NewChip();
+                m.Chip.SetInput("vsrc:0,ac=10,f=50;isrc:0,ac=1,f=50");
+                m.Configure(F0R1, 0);
+                m.Relays(0, 0);
+                m.Advance(3.3);
+                m.Read1(0x1E);
+                var b = ReadAfter(m, 0x18, 1);
+                Near(SqrtRms(b) * 1.25 * 100 / 262144.0, 10, 0.01, "stock AC V r1 with PE0 = 1 and 1 A flowing: reads the V jack");
+                m.Configure(F4R1, 4);
+                m.Advance(0.5);
+                m.Read1(0x1E);
+                b = ReadAfter(m, 0x18, 1);
+                Near(SqrtRms(b) * 1.25 / 0.01 / 262144.0, 1.0, 0.002, "stock AC A r1 with 10 V on V-COM: reads the current");
             }
         }
 

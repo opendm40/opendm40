@@ -180,6 +180,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 break;
             case 0x34:
                 if(((old ^ masked) & 0x80) != 0) ad3Start = now;
+                if(((old ^ masked) & 0x0C) != 0 && role == Role.Power && PowMix) PowerStatSwitch(old, now);
                 break;
             }
             if(reg >= 0x20 && reg <= 0x35)
@@ -249,6 +250,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public bool CalConsistent = true;      // apply the meter's calibration deviations (README "Calibration")
         public double NoiseScale = 1.0;        // 0 = noise free
         public bool BeatModel = false;         // empirical AD2/AD3 enable-order beat (RESEARCH.md 8.2)
+        public bool PowMix = true;             // power role: an R34 statistic switch mid-block mixes that block
         public bool CntPin;                    // CNT pin level (ENCNTI source); set by the board model
         public int ForcedAd1 = int.MinValue;   // SetAd1: raw code override
         public int ForcedAd2 = int.MinValue;
@@ -262,9 +264,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public bool Acpo => acpo;
         public bool CmpPin => EnPCmpO && acpo;  // CMP output pin (continuity beeper)
         public bool Irq => (intf & regs[0x1F]) != 0;
-        public string RoleName => role.ToString() + (role == Role.None ? "" : " m" + roleMode + " r" + roleRange);
+        public string RoleName => role == Role.Power ? string.Format("Power vr{0} iu{1} ir{2}", PowVr, PowIu, PowIr)
+                                : role.ToString() + (role == Role.None ? "" : " m" + roleMode + " r" + roleRange);
         public int Mode => roleMode;
-        public int Range => roleRange;
+        public int Range => role == Role.Power ? PowVr * 6 + PowIu * 2 + PowIr : roleRange;
         public double RampNodeV => rampV;
         public double AcNodeVc => vc;
         public double LastAd1Time => ad1Last;
@@ -383,6 +386,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "noise": NoiseScale = o.Value; break;
                 case "cal": CalConsistent = o.Value != 0; break;
                 case "beat": BeatModel = o.Value != 0; break;
+                case "powmix": PowMix = o.Value != 0; break;
                 case "vnoise": vNoise = o.Value; break;
                 }
             }
@@ -455,6 +459,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(n <= lpfDone) return;
             lpfDone = n;
             var t = lpfStart + n * p;
+            if(role == Role.Power) { PowerBlock(t, p, n); return; }
             double dc, acRms;
             Ad2Window(t, p, out dc, out acRms);
             if(EnLpf)
@@ -576,7 +581,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(!EnCmp) return;
             switch(role)
             {
-            case Role.AcV: case Role.AcMv: case Role.Freq: case Role.DcV: case Role.DcMv: case Role.AcA: case Role.DcA:
+            case Role.AcV: case Role.AcMv: case Role.Freq: case Role.DcV: case Role.DcMv: case Role.AcA: case Role.DcA: case Role.Power:
                 SignalEdges(ac, out f, out duty, CmpHighThreshold, CmpLowThreshold);
                 break;
             }
@@ -636,6 +641,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// Instantaneous AD2 code.
         private int Ad2Sample(double t)
         {
+            if(role == Role.Power) return (int)Math.Round(PowerSample(t));
             double dc, ac;
             NodeDcAc(t, out dc, out ac);
             var w = 2 * Math.PI * sigHz * t;
@@ -712,6 +718,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
                 sigHz = hz; sigShape = shape; sigDuty = duty;
                 ac = jac; dc = jdc;
+                break;
+            case Role.Power:
+                // SENSE: the V divider tap (what the comparator / counter sees)
+                Fe.VJack(0, out jdc, out jac, out hz, out shape, out duty);
+                sigHz = hz; sigShape = shape; sigDuty = duty;
+                dc = jdc / AcvK[PowVr]; ac = jac / AcvK[PowVr];
                 break;
             case Role.DcV:
                 Fe.VJack(0, out jdc, out jac, out hz, out shape, out duty);
@@ -1059,8 +1071,165 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
         }
 
+        // ------------------------------------------------------------ power role (fw-rs power meter)
+        // fw-rs/docs/power-meter-and-misconnect.md 3.1 "assignment B": X = AD2 = OP1O - PB3 (the A-jack
+        // shunt through OP1, as the stock AC A rows), Y = AD3 = OP2O - AGND (OP2 x1 on SENSE = the V
+        // divider tap of the row's switch bytes). Both DC coupled. The RMS block: SDO23 -> sum(Yac^2),
+        // else SVXI -> sum(Xac*Yac) (signed), else sum(Xac^2); the LPF: SDO23 -> DC of Y, else of X.
+        public const int PowerMode = 16;
+        public const double Ad2Clk = 2457600.0;   // SPHACAL step: one AD2CLK period
+
+        /// The 16 distinct fw-rs power rows (iu 1 and 2 share the row; PE decides), the Python
+        /// builder of the design: I row (AC A f4 / f5_6) + the V range's switch bytes R2A..R30.
+        public static byte[] PowerRow(int vr, int iu, int ir) => PowerRow(Rows, vr, iu, ir);
+
+        private static byte[] PowerRow(RowDef[] rows, int vr, int iu, int ir)
+        {
+            var b = (byte[])Array.Find(rows, x => x.Role == Role.AcA && x.Mode == (iu == 0 ? 4 : 5) && x.Range == ir).Bytes.Clone();
+            var v = vr == 0 ? Array.Find(rows, x => x.Role == Role.DcV && x.Range == 0).Bytes : Array.Find(rows, x => x.Role == Role.AcV && x.Range == vr).Bytes;
+            b[0] = 0x12; b[5] &= 0xFD; b[9] = 0xF8;
+            Array.Copy(v, 10, b, 10, 7);
+            b[18] = (byte)(0x80 | (b[18] & 0x0F));
+            b[20] = 0x88; b[21] = 0x54;
+            return b;
+        }
+
+        private static RowDef[] WithPowerRows(RowDef[] stock)
+        {
+            var all = new List<RowDef>(stock);
+            for(var vr = 0; vr < 4; vr++)
+                for(var iu = 0; iu < 2; iu++)
+                    for(var ir = 0; ir < 2; ir++)
+                        all.Add(new RowDef(Role.Power, PowerMode, vr * 6 + iu * 2 + ir, PowerRow(stock, vr, iu, ir)));
+            return all.ToArray();
+        }
+
+        private int PowVr => roleRange / 6;
+        /// The mA and uA rows are the same bytes: the shunt relays (PE) tell them apart.
+        private int PowIu => (roleRange % 6) / 2 == 0 ? 0 : Fe.ShuntSel == 2 ? 2 : 1;
+        private int PowIr => roleRange % 2;
+        public double Ad3Ig => new[] { 0.5, 1.0, 1.5, 2.0 }[(regs[0x35] >> 2) & 3];
+        public double Ad3Rg => (regs[0x34] & 0x10) != 0 ? 1.0 / 3 : 1.0;
+        /// The RMS / LPF statistic R34 selects: 0 = X^2, 1 = X*Y, 2 = Y^2.
+        private static int PowerStat(byte r34) => (r34 & 0x04) != 0 ? 2 : (r34 & 0x08) != 0 ? 1 : 0;
+
+        /// X and Y in codes (1.25 V / 2^18 at the converter, times IG): DC and AC RMS, and the
+        /// waveform of each AC part. The firmware applies the stock AC A gains to X (RMS gain on the
+        /// AC part, LPF gain on the DC part, no offsets); Y is ideal.
+        private void PowerNodes(out double xdc, out double xac, out double ydc, out double yac)
+        {
+            double hz, duty; string shape;
+            Fe.ACurrent(out xdc, out xac, out hz, out shape, out duty);
+            iHz = hz; iShape = shape; iDuty = duty; iPh = Fe.ISrc != null ? Fe.ISrc.Ph : 0;
+            var ci = PowIu * 2 + PowIr;
+            var xs = Fe.ShuntR * ((regs[0x25] & 1) != 0 ? 10 : 1) * Ad2Scale();
+            xac = xac / CalGain(0xc4 + 4 * ci) * xs;
+            xdc = xdc / CalGain(0xf4 + 4 * ci) * xs;
+            Fe.VJack(0, out ydc, out yac, out hz, out shape, out duty);
+            vHz = hz; vShape = shape; vDuty = duty;
+            var ys = EnAd3 ? ((regs[0x25] & 2) != 0 ? 10 : 1) / AcvK[PowVr] * Ad3Ig / (Ad3Rg * Vref) * 262144.0 : 0;
+            ydc *= ys; yac *= ys;
+        }
+        private double iHz, iDuty, iPh, vHz, vDuty;
+        private string iShape = "sine", vShape = "sine";
+
+        /// mean(u_V(t) * u_I(t)) of the unit-RMS AC waveforms, the current lagging by phDeg; 0 when
+        /// the frequencies differ (orthogonal over the block).
+        private double PowerCorr(double phDeg)
+        {
+            if(vHz <= 0 || Math.Abs(iHz - vHz) > 1e-9 * vHz) return 0;
+            const int K = 720;
+            var lag = phDeg / 360.0;
+            double s = 0;
+            for(var k = 0; k < K; k++)
+            {
+                var c = (k + 0.5) / K + 4;
+                s += Wave(c, 0, 1, 1, vShape, vDuty) * Wave(c - lag, 0, 1, 1, iShape, iDuty);
+            }
+            return s / K;
+        }
+
+        /// Instantaneous AD2 data register: X, or Y when SDO23 (registers.md R03..R05).
+        private double PowerSample(double t)
+        {
+            double xdc, xac, ydc, yac;
+            PowerNodes(out xdc, out xac, out ydc, out yac);
+            if(Sdo23) return Wave(t, ydc, yac, vHz, vShape, vDuty);
+            return Wave(t - iPh / 360.0 / Math.Max(iHz, 1e-9), xdc, xac, iHz, iShape, iDuty);
+        }
+
+        /// One LPF / RMS block ending at t (length p, index n): the selected statistics, time-weighted
+        /// over the R34 selections of the block when it changed mid-block (PowMix).
+        private void PowerBlock(double t, double p, long n)
+        {
+            double xdc, xac, ydc, yac;
+            PowerNodes(out xdc, out xac, out ydc, out yac);
+            var w = new double[3];
+            var cur = PowerStat(regs[0x34]);
+            if(mixIdx == n && mixLpfStart == lpfStart)
+            {
+                for(var i = 0; i < 3; i++) w[i] = mixW[i];
+                w[cur] += t - Math.Max(mixSegStart, t - p);
+            }
+            else w[cur] = 1;
+            mixIdx = -1;
+            var floor = 30.0 * NoiseScale;
+            // SPHACAL: AD2 (I) sampled n AD2CLK periods early (bit 7) or late: only the cross term moves
+            var sph = (regs[0x36] & 0x7F) / Ad2Clk * vHz * 360.0 * ((regs[0x36] & 0x80) != 0 ? -1 : 1);
+            double rms = 0, lpf = 0, wsum = 0;
+            for(var s = 0; s < 3; s++)
+            {
+                if(w[s] <= 0) continue;
+                double v;
+                if(s == 1)
+                {
+                    // uncorrelated noise averages out over the block's samples
+                    v = xac * yac * PowerCorr(iPh + sph);
+                    if(NoiseScale > 0) v += Gauss() * floor * Math.Sqrt((xac * xac + yac * yac + floor * floor) / (Osr4 * LpfRateDivisor));
+                }
+                else
+                {
+                    var a = s == 0 ? xac : yac;
+                    var r = Math.Sqrt(a * a + floor * floor);
+                    if(a > 0 && NoiseScale > 0) r += Gauss() * NoiseScale;
+                    v = r * r;
+                }
+                rms += w[s] * v; lpf += w[s] * (s == 2 ? ydc : xdc); wsum += w[s];
+            }
+            if(EnLpf)
+            {
+                lpfCode = Clamp19((int)Math.Round(lpf / wsum));
+                intf |= 0x08;
+                if(EnPkh && (regs[0x29] & 3) >= 2) PeakHold(lpfCode);
+            }
+            if(EnRms)
+            {
+                // 38-bit signed in RMS<37:0>, the long's two's complement gives bits 39:38 as sign copies
+                rmsVal = (long)Math.Max(-262143.0 * 262143.0, Math.Min(262143.0 * 262143.0, rms / wsum));
+                intf |= 0x10;
+            }
+        }
+
+        /// R34 changed the statistic: credit the time since the block (or the last switch) began to
+        /// the old selection; the block in progress ends as the time-weighted mix.
+        private void PowerStatSwitch(byte old, double now)
+        {
+            var p = LpfPeriod;
+            var bStart = lpfStart + lpfDone * p;
+            if(mixIdx != lpfDone + 1 || mixLpfStart != lpfStart)
+            {
+                Array.Clear(mixW, 0, 3);
+                mixIdx = lpfDone + 1; mixLpfStart = lpfStart; mixSegStart = bStart;
+            }
+            mixW[PowerStat(old)] += Math.Max(0, now - Math.Max(mixSegStart, bStart));
+            mixSegStart = now;
+        }
+        private readonly double[] mixW = new double[3];
+        private long mixIdx = -1;
+        private double mixLpfStart, mixSegStart;
+
         // ------------------------------------------------------------ roles
-        public enum Role { None, DcV, DcMv, AcV, AcMv, DcA, AcA, Ohm, Cont, Diode, CapOsc, CapRamp, CapDischarge, Freq, Temp }
+        public enum Role { None, DcV, DcMv, AcV, AcMv, DcA, AcA, Ohm, Cont, Diode, CapOsc, CapRamp, CapDischarge, Freq, Temp, Power }
 
         private void DeriveRole(double now)
         {
@@ -1090,6 +1259,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     if(j == 9) mask = 0xF8;
                     if(j == 12 && (row.Role == Role.DcA || row.Role == Role.AcA)) mask = 0xEF;
                     if(ad2Stream && (j == 9 || j == 20)) mask = 0;
+                    // fw-rs power rows: R34 statistic select (SVXI / SDO23) and R35 AD3IN / AD3IG are
+                    // run-time choices; the I row's power-bus bytes R2E / R2F = 08 81 are accepted too
+                    if(row.Role == Role.Power)
+                    {
+                        if(j == 20) mask = 0x73;
+                        if(j == 21) mask = 0xC3;
+                        if((j == 14 || j == 15) && regs[0x2E] == 0x08 && regs[0x2F] == 0x81) mask = 0;
+                    }
                     var d = (row.Bytes[j] ^ regs[0x20 + j]) & mask;
                     if(d != 0) score += BitCount(d) * (j == 0 ? 1 : 2);
                 }
@@ -1127,6 +1304,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 Bytes = new byte[22];
                 for(var i = 0; i < 22; i++) Bytes[i] = Convert.ToByte(parts[i], 16);
             }
+            public RowDef(Role role, int mode, int range, byte[] bytes) { Role = role; Mode = mode; Range = range; Bytes = bytes; }
         }
 
         // Compare masks per configuration byte R20..R35 (0 = ignored): R20 ignored (the counter and
@@ -1138,7 +1316,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0xF7, 0xFC, 0x7F, 0xFF };
 
         // Stock DM40 V2.6 configuration rows (firmware/re/analysis/hy3131_v2_6.h) with their role.
-        private static readonly RowDef[] Rows = {
+        private static readonly RowDef[] Rows = WithPowerRows(new[] {
             new RowDef(Role.AcV, 0, 0, "f2 dd 16 03 33 43 80 9d 31 fc 20 00 00 09 28 a0 80 c7 38 ac 88 94"),
             new RowDef(Role.AcV, 0, 1, "f2 dd 16 03 33 40 80 9d 31 fc 20 00 00 09 28 a0 80 c7 38 ac 88 94"),
             new RowDef(Role.AcV, 0, 2, "f2 dd 16 03 33 40 80 9d 31 fc 20 00 90 00 28 a0 80 c7 38 ac 88 94"),
@@ -1180,7 +1358,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             new RowDef(Role.Freq, 14, 0, "f2 dd 15 83 df 00 80 15 11 f8 00 00 00 00 08 91 80 c7 3a 2f 00 50"),
             new RowDef(Role.Temp, 15, 0, "f0 dd 16 83 33 01 00 55 31 00 00 06 00 60 08 95 80 d7 3c af 00 50"),
             new RowDef(Role.Temp, 15, 1, "f0 dd 16 83 33 00 00 55 31 00 00 00 00 06 08 95 80 d7 3c af 00 50"),
-        };
+        });
 
         // Write masks of R20..R35 (datasheet "0" bits are held at 0, "-" bits are kept).
         private static readonly byte[] WriteMask = {
