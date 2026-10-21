@@ -33,7 +33,7 @@ Code work (in this order):
    pulse-width / runt trigger.
 4. UI punch-list remainder (wake tap, keypad prefill, UF-08 cursors, UF-10, UF-09 double-tap).
 5. UF-24/30/31/36/38/41.
-6. libsigrok DM40 profile: retest RES, send upstream; optional *IDN? compatibility mode.
+6. libsigrok DM40 profile: device retest over USBTMC (all functions passed in the emulator), send upstream.
 
 ## Remaining work
 
@@ -297,10 +297,15 @@ Code work (in this order):
 - [ ] sigrok/SmuView (merged from three items): libsigrok scpi-dmm DM40 profile exists as
       ../libsigrok-dm40/0001-scpi-dmm-add-support-for-Alientek-DM40A-B-C-dm40-fw-.patch (command set
       like the 34401A: CONF:<f>, READ?, FUNC?; 3 s delay after RES/CAP/TEMP/FREQ/CONT/DIOD). DC V works
-      on the device via usbtmc/1209.0001; RES was blocked by H1 (fixed in 258c833). Remaining: retest
-      RES/CAP/TEMP with sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<addr> and SmuView, send upstream,
-      consider an Agilent-style CONF? reply; scpi-dmm cannot force a model, so optionally an *IDN?
-      compatibility mode in fw-rs.
+      on the device via usbtmc/1209.0001; RES was blocked by H1 (fixed in 258c833). 2026-10-21: every
+      function passes with sigrok-cli in the emulator (emu/usbip_client.py scpi-tcp, tcp-raw; replies
+      <= 0.86 s), AC+DC now also waits 3 s (first reading 1.4-1.6 s); patch regenerated as one squashed
+      commit (branch alientek-dm40-upstream). Done in fw-rs (809000a): CONF? (Agilent-style reply),
+      INIT/ABORT no-ops, SYST:IDN:EMUL OFF|34401A (persisted, default OFF) for unpatched
+      libsigrok >= 0.5.2 / SmuView (verified with the distro libsigrok 0.5.2 in the emulator).
+      Remaining: device retest over USBTMC (sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<addr>, SmuView),
+      send upstream. Open: a function change on the meter during a native-profile acquisition makes
+      READ? wait for the settle (up to ~3 s, past the 1 s USBTMC timeout) and sigrok stops.
 - [x] Scope touch: pinch = scale (timebase / V/div, 1-2-5 snap, value bubble), one-finger drag =
       offset, draggable trigger level, no clash with view swipes.  (c470be7, 419fd96, ebff9b4, 81c9dd8;
       verify on device, two-finger report rate first)

@@ -126,7 +126,10 @@ Reply timing of `READ?` / `MEAS:<f>?` / `FETC?`:
   The reply can take
   about 3 s for resistance, so give the host a timeout of 5 s or more
   (PyVISA defaults to 2 s; libsigrok's DM40 profile waits 3 s after switching
-  to RES / CAP / TEMP / FREQ / CONT / DIOD).
+  to RES / CAP / TEMP / FREQ / CONT / DIOD / AC+DC). With `SYST:IDN:EMUL
+  34401A` (for sigrok / SmuView builds without the DM40 profile: `*IDN?`
+  then reads as an HP 34401A) this wait is capped at 0.85 s, `+9.9E37` until
+  the first reading.
 - `+9.9E37` with "Data stale" in `SYST:ERR?` only when the current function
   has no reading at all within 1.9 s after the settle. A query the host gave
   up on (USBTMC abort / clear, or a new command: "Query INTERRUPTED") gets no
