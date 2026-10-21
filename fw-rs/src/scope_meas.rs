@@ -59,33 +59,55 @@ fn sqrt(x: f32) -> f32 {
 }
 
 pub fn compute(d: &[u16], fs: f32, sc: &Scope) -> Results {
+    // Volts are linear in the code: precompute instead of calling the
+    // calibrated map per sample (that made a 50k-sample frame take ~100 ms).
+    let v_0 = sc.volts(0.0);
+    let v_k = sc.volts(1.0) - v_0;
+    compute_codes(d, fs, v_0, v_k)
+}
+
+/// Sum of (v_0 + v_k c)^2 over `n` samples with code sum `s1` and code
+/// square sum `s2`, in f64 (exact integer moments; the f64 expansion keeps
+/// the cancellation of a large offset harmless).
+fn sum_sq(n: u32, s1: u64, s2: u64, v_0: f32, v_k: f32) -> f64 {
+    let (a, k) = (v_0 as f64, v_k as f64);
+    n as f64 * a * a + 2.0 * a * k * s1 as f64 + k * k * s2 as f64
+}
+
+/// `compute` on codes with volts = v_0 + v_k * code. Per sample only integer
+/// work (device check 2026-10-21: 11.4 ms per frame on the device with f32
+/// sums and float compares): a histogram (min / max / top / base and the
+/// mean / RMS moments come from it), then the edge state machine on integer
+/// thresholds, then whole-cycle duty and the integer moments of Vcrm. The
+/// sums are exact (integer moments, combined in f64), so the values match
+/// the old f32 running sums to their rounding.
+pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
     let mut r = Results { v: [f32::NAN; 20] };
     let n = d.len();
     if n < 4 {
         return r;
     }
-    // Volts are linear in the code: precompute instead of calling the
-    // calibrated map per sample (that made a 50k-sample frame take ~100 ms).
-    let v_0 = sc.volts(0.0);
-    let v_k = sc.volts(1.0) - v_0;
     let volts = |c: f32| v_0 + v_k * c;
     let mut hist = [0u16; 1024];
-    let (mut lo, mut hi) = (1023u16, 0u16);
-    let (mut sum, mut sq) = (0f32, 0f32);
     for &c in d {
-        let c = c.min(1023);
-        hist[c as usize] = hist[c as usize].saturating_add(1);
-        lo = lo.min(c);
-        hi = hi.max(c);
-        let v = volts(c as f32);
-        sum += v;
-        sq += v * v;
+        let c = c.min(1023) as usize;
+        hist[c] = hist[c].saturating_add(1);
+    }
+    let (mut lo, mut hi) = (1023u16, 0u16);
+    let (mut s1, mut s2) = (0u64, 0u64);
+    for (c, &h) in hist.iter().enumerate() {
+        if h != 0 {
+            lo = lo.min(c as u16);
+            hi = c as u16;
+            s1 += h as u64 * c as u64;
+            s2 += h as u64 * (c * c) as u64;
+        }
     }
     let (vmax, vmin) = (volts(hi as f32), volts(lo as f32));
     r.v[12] = vmax;
     r.v[13] = vmin;
-    r.v[19] = sum / n as f32;
-    r.v[11] = sqrt(sq / n as f32);
+    r.v[19] = ((v_0 as f64 * n as f64 + v_k as f64 * s1 as f64) / n as f64) as f32;
+    r.v[11] = sqrt((sum_sq(n as u32, s1, s2, v_0, v_k) / n as f64) as f32);
     let clipped = lo == 0 || hi >= 1023;
     r.v[10] = if clipped { f32::NAN } else { vmax - vmin };
     // Top / base: most populated bin in the upper / lower 30 % band.
@@ -113,31 +135,35 @@ pub fn compute(d: &[u16], fs: f32, sc: &Scope) -> Results {
         let l10 = bb as f32 + 0.1 * span;
         let l50 = bb as f32 + 0.5 * span;
         let l90 = bb as f32 + 0.9 * span;
+        // The same tests on integer codes (all three levels are > 0):
+        // c >= l <=> c >= ceil(l); c <= l <=> c <= floor(l).
+        let ceil = |l: f32| -> u16 {
+            let f = l as u16;
+            if (f as f32) < l { f + 1 } else { f }
+        };
+        let (h50, h90, f10) = (ceil(l50), ceil(l90), l10 as u16);
         // State: true = high (passed 90 %), false = low (passed 10 %).
         let mut state: Option<bool> = None;
         let mut rises = [0usize; 2]; // first, last rising 50 % crossing
         let mut nrise = 0u32;
-        let (mut high_n, mut low_n) = (0u32, 0u32);
         let (mut hp, mut lp) = (0u32, 0u32);
-        let mut prev_v = d[0] as f32;
+        let mut prev_hi = d[0] >= h50;
         let mut cross50: Option<usize> = None;
         for (i, &c) in d.iter().enumerate() {
-            let v = c as f32;
-            if prev_v < l50 && v >= l50 {
+            let now_hi = c >= h50;
+            if now_hi != prev_hi {
                 cross50 = Some(i);
             }
-            if prev_v >= l50 && v < l50 {
-                cross50 = Some(i);
-            }
+            prev_hi = now_hi;
             match state {
                 None => {
-                    if v >= l90 {
+                    if c >= h90 {
                         state = Some(true);
-                    } else if v <= l10 {
+                    } else if c <= f10 {
                         state = Some(false);
                     }
                 }
-                Some(false) if v >= l90 => {
+                Some(false) if c >= h90 => {
                     state = Some(true);
                     let at = cross50.unwrap_or(i);
                     if nrise == 0 {
@@ -147,20 +173,12 @@ pub fn compute(d: &[u16], fs: f32, sc: &Scope) -> Results {
                     nrise += 1;
                     lp += 1;
                 }
-                Some(true) if v <= l10 => {
+                Some(true) if c <= f10 => {
                     state = Some(false);
                     hp += 1;
                 }
                 _ => {}
             }
-            if nrise >= 1 {
-                if v >= l50 {
-                    high_n += 1;
-                } else {
-                    low_n += 1;
-                }
-            }
-            prev_v = v;
         }
         if nrise >= 2 && rises[1] > rises[0] {
             let cycles = (nrise - 1) as f32;
@@ -169,26 +187,23 @@ pub fn compute(d: &[u16], fs: f32, sc: &Scope) -> Results {
             r.v[0] = f;
             r.v[9] = 1.0 / f;
             // Duty / widths over whole cycles.
-            let (mut hn, mut ln) = (0u32, 0u32);
-            let (mut s2, mut cnt) = (0f32, 0u32);
-            for &c in &d[rises[0]..rises[1]] {
-                if c as f32 >= l50 {
-                    hn += 1;
-                } else {
-                    ln += 1;
-                }
-                let v = volts(c as f32);
-                s2 += v * v;
-                cnt += 1;
+            let mut hn = 0u32;
+            let (mut c1, mut c2) = (0u64, 0u64);
+            let w = &d[rises[0]..rises[1]];
+            for &c in w {
+                hn += (c >= h50) as u32;
+                c1 += c as u64;
+                c2 += (c as u32 * c as u32) as u64;
             }
+            let cnt = w.len() as u32;
+            let ln = cnt - hn;
             let tot = (hn + ln).max(1) as f32;
             r.v[1] = hn as f32 * 100.0 / tot;
             r.v[2] = 100.0 - r.v[1];
             r.v[3] = hn as f32 / cycles / fs;
             r.v[4] = ln as f32 / cycles / fs;
-            r.v[18] = sqrt(s2 / cnt.max(1) as f32);
+            r.v[18] = sqrt((sum_sq(cnt, c1, c2, v_0, v_k) / cnt.max(1) as f64) as f32);
         }
-        let _ = (high_n, low_n);
         r.v[5] = hp as f32;
         r.v[6] = lp as f32;
     }
