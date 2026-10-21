@@ -244,9 +244,13 @@ pub enum Log {
 ///                           released; runs synchronously
 ///   DBG:HWTRIG?             comparator trigger (hwtrig.rs): TIM2 SR,CNT,CCR1,
 ///                           PA15<<16|DOR2,enabled,available,map rising lo,hi,
-///                           map falling lo,hi,post_ticks
-///   DBG:HWTRIG:ENABLE 0|1   use the comparator trigger (default off,
-///                           hwtrig::DEFAULT_ENABLED; 1 resets the miss count)
+///                           map falling lo,hi,post_ticks (available = enabled,
+///                           not suspended by 3 misses, map present; a suspension
+///                           ends at the next range / timebase / coupling / edge
+///                           / mode change)
+///   DBG:HWTRIG:ENABLE 0|1   use the comparator trigger (scope default on,
+///                           scope.rs Scope::new; 1 resets the miss count and
+///                           a suspension)
 ///   DBG:HWTRIG:CAL?         wire-free calibration (scope rail on, MCX open):
 ///                           flip00,flip01,flip10,flip11,map0lo,map0hi,map1lo,
 ///                           map1hi,hyst,slope,code0,code1 or the error name

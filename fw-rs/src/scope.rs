@@ -381,7 +381,8 @@ impl Scope {
         // 100 Hz square, 1/5 .. 4/5 frames T'D at 100 us .. 1 ms/div; with
         // the comparator 16/16, 1891 hits, 0 misses, refined crossing -1..+7
         // samples from the estimate). Three misses in a row still hand the
-        // scope back to the software trigger; DBG:HWTRIG:ENABLE 0|1 switches
+        // scope back to the software trigger until the next range / timebase
+        // / coupling / edge / mode change (apply); DBG:HWTRIG:ENABLE 0|1 switches
         // it at run time. hwtrig::DEFAULT_ENABLED stays the module default.
         sc.hw.set_enabled(true);
         sc.apply(Settings::DEFAULT, 0);
@@ -579,6 +580,16 @@ impl Scope {
         s.pwidth = if s.pwidth.is_finite() { s.pwidth.clamp(crate::trigsoft::W_MIN, crate::trigsoft::W_MAX) } else { 1e-3 };
         s.pos = s.pos.clamp(-392, 392);
         s.hpos = s.hpos.clamp(0, COLS as i32);
+        // A comparator suspended by misses (hwtrig::note_miss: overdrive, a
+        // settling front end, a bad map) gets another chance with a new
+        // range / timebase / coupling / edge / mode / trigger type, e.g. the
+        // result of AUTO, whose sweep through overdriven ranges collected
+        // the misses. Level / position drags do not resume it (a broken map
+        // would cost up to three miss frames per drag step).
+        let o = &self.s;
+        if s.range != o.range || s.tb != o.tb || s.ac != o.ac || s.rising != o.rising || s.mode != o.mode || s.ttype != o.ttype {
+            self.hw.resume();
+        }
         self.s = s;
         let g = GPIO_ROW[s.range];
         if g[0] != self.last_pc13 {
@@ -834,7 +845,9 @@ impl Scope {
         let wrapped = unsafe { r32(DMA1 + 0x04) } & (1 << 5) != 0;
         let st = self.hw.status();
         // Health: nothing written 100 ms after the start means the TIM1 gate
-        // is stuck: give up on the comparator, the software path restarts.
+        // is stuck: give up on the comparator for good (a hardware fault, not
+        // a signal condition; DBG:HWTRIG:ENABLE 1 retries), the software
+        // path restarts.
         if wr == 0 && !wrapped && now >= self.hw_t0 + 100 {
             self.halt();
             self.hw.set_enabled(false);

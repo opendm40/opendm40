@@ -933,6 +933,30 @@ fn tap_step_tests(ck: &mut Ck) {
     ck.t("tap mode persist: round trip, unknown = default", (0..3u8).all(|m| su::tap_decode(su::tap_code(m)) == m && su::tap_code(m) < 4) && (0..4u32).filter(|c| !(0..3u8).any(|m| su::tap_code(m) == *c)).all(|c| su::tap_decode(c) == su::TAP_DEFAULT));
 }
 
+/// Comparator trigger policy (device 2026-10-21: after AUTO the comparator
+/// stayed off for good): misses suspend it, `resume` (a scope settings
+/// change) and `set_enabled(true)` lift that; a disabled engine stays off.
+fn hwtrig_tests(ck: &mut Ck) {
+    let mut h = hwtrig::HwTrig::new();
+    h.set_enabled(true);
+    h.note_miss();
+    h.note_miss();
+    ck.t("hwtrig: two misses keep the comparator", h.enabled() && !h.suspended());
+    h.note_miss();
+    ck.t("hwtrig: three misses suspend, still enabled", h.enabled() && h.suspended());
+    h.resume();
+    ck.t("hwtrig: resume lifts the suspension", h.enabled() && !h.suspended());
+    h.note_miss();
+    h.note_miss();
+    ck.t("hwtrig: resume also clears the miss count", !h.suspended());
+    h.note_miss();
+    h.set_enabled(true);
+    ck.t("hwtrig: enable clears a suspension", !h.suspended());
+    h.set_enabled(false);
+    h.resume();
+    ck.t("hwtrig: resume does not enable a disabled engine", !h.enabled());
+}
+
 fn main() {
     let verbose = std::env::args().any(|a| a == "-v");
     let mut ck = Ck { cases: 0, fails: 0, verbose };
@@ -941,6 +965,7 @@ fn main() {
     log_tests(&mut ck);
     hit_tests(&mut ck);
     tap_step_tests(&mut ck);
+    hwtrig_tests(&mut ck);
     println!("cases {}, failures {}", ck.cases, ck.fails);
     std::process::exit(if ck.fails == 0 { 0 } else { 1 });
 }
