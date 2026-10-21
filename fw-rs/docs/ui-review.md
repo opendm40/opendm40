@@ -387,7 +387,7 @@ Suggested order to ship: 1, 3, 4, 2, 5, 11 (all quick, high-impact) → 9, 10, 1
 **Status 2026-10-21** (fw-rs/TODO.md has the commits): done 1, 2, 3, 5, 6, 9, 10, 12, 13;
 4 / 7 / 8 superseded by the stock scope port; 11 keypads only; 14 won't do (stock
 geometry); 15 duplicate arms gone, dead `ui::bar` / `button_row` / `DMM_BUTTONS` /
-fonts.rs still to delete. The line numbers above are from the review date and stale.
+fonts.rs deleted 2026-10-21 (with text.rs, mkfont.py, Roboto). The line numbers above are from the review date and stale.
 
 ---
 

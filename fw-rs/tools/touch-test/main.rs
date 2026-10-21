@@ -25,8 +25,6 @@ mod clock;
 mod dialog;
 #[path = "../../src/dmm.rs"]
 mod dmm;
-#[path = "../../src/fonts.rs"]
-mod fonts;
 #[path = "../../src/gen.rs"]
 mod gen;
 #[path = "../../src/gesture.rs"]
@@ -51,8 +49,6 @@ mod trigsoft;
 mod scope_ui;
 #[path = "../../src/stockfont.rs"]
 mod stockfont;
-#[path = "../../src/text.rs"]
-mod text;
 #[path = "../../src/touch.rs"]
 mod touch;
 #[path = "../../src/ui.rs"]
