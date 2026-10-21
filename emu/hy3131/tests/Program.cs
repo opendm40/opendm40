@@ -777,6 +777,12 @@ namespace Hy3131Tests
             m.Chip.Core.ForceIntf(0x1C);
             Check(m.HwRead(0x1E, 1, true)[0] == 0x1C && m.Chip.Core.Intf == 0, "INTF read over HWS: value, then cleared like BB");
             m.Configure(F0R0, 0);
+            // A bit-banged frame right after SPI frames (fw-rs switches the pins for
+            // its references): the SPI's DI bits must not stick in the GPIO's MOSI.
+            m.Configure(F0R0, 0);
+            m.HwRead(0x1F, 23, false);
+            m.PortC.Drive(12, false);
+            Check(Hex(m.Read(0x1F, 23)) == Hex(bb), "bit-banged read right after an SPI read (MOSI state kept apart)");
             // CS high: the chip ignores the clock; the byte is the IRQ level.
             m.Write(0x1E, 0); m.Write(0x1F, 0);
             var t = m.Chip.Transfers;
