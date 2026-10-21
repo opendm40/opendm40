@@ -862,3 +862,17 @@ Device test plan (sentinel build; commit the tree before flashing):
    use a converter.
 4. BT protocol: no mode slot for power; SCPI-only unless the BT cmd set is
    extended (bt-protocol.md).
+
+Answers from the DM40 user manual (EN v1.x, emu/out/tmp/manual/manual.txt, section 2.4 and
+Table 2.3.1; checked 2026-10-22):
+- Points 1-2: ONE current jack "A mA uA", "10A (Max)", "Built-in 10A ceramic fuse. Replace with the
+  same model if burned" -> a single 10 A ceramic fuse in front of all shunts (10 mohm and 47.5 ohm
+  alike). The manual gives NO time limit for 10 A and no mA/uA fuse. Current ranges (DM40C):
+  600 uA / 6000 uA / 60 mA / 600 mA / 6 A / 10 A; AC V max 750 V, DC V 1000 V.
+- CAT: the manual does not state one for the DMM inputs (only the scope probe: x1 150 Vrms CAT II,
+  x10 300 Vrms CAT II); the case print reads "CAT IV 600V CAT III 1000V" (owner's photos, emulator
+  panel). Treat the case print as the vendor's claim, unverified.
+- Defaults chosen: hard limit 10 A (manual max), a 30 s countdown above 6 A (the top regular range;
+  no vendor duty-cycle figure, so the common hand-held DMM practice of >= 30 s limits at the top
+  range), the 47.5 ohm path protected only by the 10 A fuse -> the OVERLOAD rule of 4.3 matters
+  (a uA/mA-range overload heats the 47.5 ohm resistor long before the fuse opens).

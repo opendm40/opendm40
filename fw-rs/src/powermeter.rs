@@ -71,9 +71,10 @@ const ALT_N: u8 = 2;
 /// 2 left +1.8 % of the coupling step in Vrms at 230 V).
 const ALT_V_SETTLE_MS: u64 = 600;
 const ALT_V_SKIP: u8 = 4;
-/// Continuous-current limit defaults (doc 3.6; the owner sets the real ones
-/// from the manual): above I_CONT a countdown of T_LIM s.
-pub const I_CONT_DEFAULT: f32 = 5.0;
+/// Continuous-current limit defaults (doc 3.6, 5): above I_CONT a countdown
+/// of T_LIM s. The manual gives 10 A max behind one 10 A ceramic fuse and no
+/// duty-cycle figure; 6 A is the top regular range (DM40C 6 A / 10 A).
+pub const I_CONT_DEFAULT: f32 = 6.0;
 pub const T_LIM_DEFAULT: u16 = 30;
 /// Integration counts as running (auto power-off held) above this current.
 const I_FLOOR: f32 = 50e-6;
