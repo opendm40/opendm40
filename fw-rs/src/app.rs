@@ -1448,6 +1448,8 @@ impl App {
     /// Poll the scope; draws the frame in scope views.
     pub fn scope_poll(&mut self, now: u64, can_draw: bool) {
         let cyc = || unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) };
+        // A scope CSV that finished (UF-13): release the record, toast.
+        self.sp_csv_poll(now);
         // Drag / pinch on the scope page: no new frames and no acquisition
         // restart while the finger moves the shown frame (scope_page.rs);
         // only the page diff repaint.

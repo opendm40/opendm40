@@ -1108,7 +1108,8 @@ fn kind_of_name(e: &[u8]) -> Option<Kind> {
     let ext = [up(e[8]), up(e[9]), up(e[10])];
     if up(e[0]) == b'S' && &ext == b"BMP" {
         Some(Kind::Bmp)
-    } else if up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G' && &ext == b"CSV" {
+    } else if &ext == b"CSV" && ((up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G') || e[..4].iter().map(|&c| up(c)).eq(*b"SCOP")) {
+        // LOG*.CSV (DMM recordings) and SCOP*.CSV (scope records, UF-13).
         Some(Kind::Csv)
     } else {
         None

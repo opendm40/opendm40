@@ -149,6 +149,9 @@ mod lcd {
 #[allow(dead_code)]
 mod screenshot;
 
+#[path = "../../src/scope_csv.rs"]
+mod scope_csv;
+
 #[path = "../../src/csvlog.rs"]
 #[allow(dead_code)]
 mod csvlog;
@@ -449,6 +452,32 @@ fn main() {
         // M2: a host has the disk mounted -> start() refuses, nothing written.
         msc::HOST_MOUNTED.store(true, std::sync::atomic::Ordering::Relaxed);
         println!("start={} busy={} changed blocks: {:?}", screenshot::start(), screenshot::busy(), img.writes);
+        return;
+    }
+    if a[2] == "scopecsv" {
+        // A synthetic scope record (sine, 10-bit codes) of n samples as
+        // SCOPnnn.CSV, driven slice by slice; a screenshot request while it
+        // runs is refused.
+        let n: usize = a.get(3).map_or(26 * 1024, |v| v.parse().unwrap());
+        let rec: &'static mut [u16] = Box::leak(vec![0u16; n].into_boxed_slice());
+        for (i, c) in rec.iter_mut().enumerate() {
+            *c = (512.0 + 400.0 * (i as f32 * 0.01).sin()) as u16;
+        }
+        let mut h = scope_csv::Hdr::new();
+        h.s("# test record\r\n");
+        scope_csv::set(rec, -5.0, 10.0 / 1023.0, 1.0e6, n / 2, &h);
+        assert!(screenshot::start_csv());
+        let refused = !screenshot::start();
+        let mut slices = 0;
+        let r = loop {
+            screenshot::poll_on(&mut img);
+            slices += 1;
+            if let Some(r) = screenshot::take_csv_result() {
+                break r;
+            }
+        };
+        println!("csv={:?} len={} slices={} shot_refused={} shot_result={:?}", r, scope_csv::len(), slices, refused, screenshot::take_result());
+        fs::write(&a[1], &img.d).unwrap();
         return;
     }
     if a[2] == "shot" {
