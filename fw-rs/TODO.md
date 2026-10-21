@@ -557,8 +557,11 @@ Firmware:
       fallback feature and the bit-bang code.
       8e5efa6 on the device FAILED (doc 8.5): DC V wrong, w1 write/read-back ~25 % bad at /16 and /32, reads
       fine -> frame-boundary timing (CS hold / idle vs the HY3131's 4.9 MHz SYSCLK), not the bit clock.
-      DIAG image (runtime bus knobs DBG:HYSPI:DIAG / RAW?, masked SELF? reference) for the bring-up; then fix
-      the constants and REMOVE the DIAG knobs + RAW.
+      DIAG image fca31fd on the device (doc 8.6): SPI2-written data bytes with bit 7 = 1 and bit 0 = 0 arrive
+      with bit 0 = 1 (64 / 256 values, every divider / CS timing / pin speed); SPI2 reads clean at /8 /16 /32.
+      Fixed: reads on SPI2 /16, writes bit-banged (pins switched per write frame); DIAG / RAW removed.
+- [ ] (E2) device check of the read-SPI2 / write-bit-bang image (doc 8.6, 5 min); on a pass drop the
+      `hyspi-bitbang` feature (bit-banged reads). Optional later: pure-SPI2 writes (continuous TX + dummy byte).
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,

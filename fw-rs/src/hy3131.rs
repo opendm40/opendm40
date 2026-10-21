@@ -7,38 +7,39 @@
 //! byte (the datasheet's read period), then MISO is sampled with SCK low before
 //! each clock pulse.
 //!
-//! The bus is the GD32's hardware SPI2 (docs/dmm-input-scope-feasibility.md
-//! 2.2 and 8): 0x4000_3C00 on APB1 (50 MHz), PC10 / PC11 / PC12 on AF6
+//! Reads go over the GD32's hardware SPI2, writes stay bit-banged
+//! (docs/dmm-input-scope-feasibility.md 2.2 and 8):
+//!
+//! SPI2 (reads): 0x4000_3C00 on APB1 (50 MHz), PC10 / PC11 / PC12 on AF6
 //! (GD32F450xx datasheet Rev1.1 table 5; SPI2EN = RCU_APB1EN bit 15, SPI_CTL0
 //! / SPI_STAT per GD32F4xx UM V2.2 21.11), master, mode 0 (HY3131 DS 7.1 /
-//! 7.2: CK idle low, DI latched on the rising edge, DO changes after the
-//! falling edge), software NSS, 8-bit frames, PSC /16 = 3.125 MHz (`DIV`).
-//! CS stays a GPIO. Timing budget at 3.125 MHz (160 ns per half period):
-//! DO path = isolator out (CA-IS3741, ~10-15 ns, INFERRED) + TDODL <= 60 ns
-//! + isolator back ~10-15 ns = ~80-90 ns before the MCU samples at the next
-//! rising edge: ~70 ns margin; DI setup 160 ns vs TDISET >= 60 ns; TCKLO /
-//! TCKHI 160 vs 60 / 20 ns. /8 (6.25 MHz, 80 ns) would leave the DO path
-//! no margin; `DBG:HYSPI:SELF? n,8` measures it, nothing runs there.
-//!
+//! 7.2: CK idle low, DO changes after the falling edge, sampled on the
+//! rising one), software NSS, 8-bit frames, PSC /16 = 3.125 MHz. CS stays a
+//! GPIO. Budget at 3.125 MHz (160 ns half period): DO path = isolator out
+//! (CA-IS3741, ~10-15 ns, INFERRED) + TDODL <= 60 ns + back = ~80-90 ns:
+//! ~70 ns margin. Device 2026-10-22 (fca31fd DIAG image): 2000 x {1, 6, 23
+//! byte} reads and 256 values read back clean at /8, /16 and /32.
 //! The read period (the 9th clock) cannot come out of a byte-wide SPI: the
 //! command byte goes out on SPI2, PC10 is switched to GPIO output for one
 //! hand-made SCK pulse (ODR = 0 = the SPI idle level: no edge on either
-//! switch) and back to AF, then the data bytes. The exact datasheet frame,
-//! the same clocks as the bit-banged bus had (the register after the frame
-//! gets its MSB fetched by the last falling edge, as before).
+//! switch) and back to AF, then the data bytes: the exact datasheet frame.
 //!
-//! Fallback build: feature `hyspi-bitbang` keeps the old bit-banged GPIO bus
-//! (~1 us half period) until the hardware bus is verified on the device.
+//! Writes: bit-banged, the pins switched to GPIO for the frame (SCK low on
+//! both sides of the switch, CS high). On the device every SPI2-written data
+//! byte with bit 7 = 1 and bit 0 = 0 arrived with bit 0 = 1 (all 64 such
+//! values of 256, every byte of a multi-byte write, at /16 and /32, CS
+//! setup / hold / idle 0.2 .. 5 us, pin speed 2 .. 200 MHz, both read
+//! framings alike; CPHA = 1 wrote nothing): the chip takes the LSB late, after
+//! the end of the byte, when the GD32 no longer holds it on MOSI. Commands
+//! (bit 7 = 0) and reads are unaffected. Writes are rare (mode changes,
+//! counter restarts, the power meter's R34 phases): ~25 us per byte.
 //!
-//! DIAG image (REMOVE BEFORE FINAL): on the device 8e5efa6 lost ~25 % of the
-//! R36 write / read-back pairs at /16 and /32 alike (0 bit-banged) and read
-//! DC V wrong, so every bus parameter (divider, CPOL / CPHA, framing incl.
-//! bit-bang, CS setup / hold / idle, pulse widths, pin speed) is a runtime
-//! value here (`diag_set`, DBG:HYSPI:DIAG / RAW? / SELF?, src/hyspi.rs).
-//! Defaults = 8e5efa6's constants.
+//! Fallback build: feature `hyspi-bitbang` keeps reads bit-banged as well
+//! until SPI2 reads are verified in normal use on the device.
 
-use crate::mmio::{modify32, r32, spin, w16, w32};
-use core::sync::atomic::{AtomicU16, Ordering};
+use crate::mmio::{modify32, r32, spin, w32};
+#[cfg(not(feature = "hyspi-bitbang"))]
+use crate::mmio::w16;
 
 const GPIOC: u32 = 0x4002_0800;
 const GPIOD: u32 = 0x4002_0C00;
@@ -82,78 +83,11 @@ fn out_pin(port: u32, pin: u32) {
     }
 }
 
-// ----------------------------------------------------------------- DIAG
-// DIAG (device bring-up of SPI2, REMOVE BEFORE FINAL): every bus parameter
-// is a runtime value (DBG:HYSPI:DIAG, src/hyspi.rs); the constants of the
-// final bus come out of the device runs. Defaults = 8e5efa6's constants
-// (the build that failed w1 on the device), FRAME 2 in the bit-bang build.
-
-/// Parameter indices of `diag_get` / `diag_set` (DBG:HYSPI:DIAG order).
-pub const P_DIV: usize = 0; // SPI2 prescaler divisor 2..256 (16 = 3.125 MHz)
-pub const P_CPOL: usize = 1;
-pub const P_CPHA: usize = 2;
-pub const P_FRAME: usize = 3; // 0 SPI2 + GPIO read-period pulse, 1 SPI2 shift, 2 bit-bang
-pub const P_SETUP: usize = 4; // spins: CS low -> first SCK edge
-pub const P_HOLD: usize = 5; // spins: last SCK edge (TRANS = 0) -> CS high
-pub const P_IDLE: usize = 6; // spins: CS high after a frame
-pub const P_PHI: usize = 7; // spins: read-period pulse active
-pub const P_PLO: usize = 8; // spins: read-period pulse idle before the data bytes
-pub const P_OSPEED: usize = 9; // SCK / MOSI OSPEED 0..3 (2 / 25 / 50 / 200 MHz)
-pub const P_N: usize = 10;
-
-#[cfg(not(feature = "hyspi-bitbang"))]
-const FRAME0: u16 = 0;
-#[cfg(feature = "hyspi-bitbang")]
-const FRAME0: u16 = 2;
-
-static PAR: [AtomicU16; P_N] = [
-    AtomicU16::new(16),
-    AtomicU16::new(0),
-    AtomicU16::new(0),
-    AtomicU16::new(FRAME0),
-    AtomicU16::new(8),
-    AtomicU16::new(4),
-    AtomicU16::new(20),
-    AtomicU16::new(4),
-    AtomicU16::new(4),
-    AtomicU16::new(1),
-];
-
-#[inline(always)]
-fn par(i: usize) -> u32 {
-    PAR[i].load(Ordering::Relaxed) as u32
-}
-
-pub fn diag_get() -> [u16; P_N] {
-    core::array::from_fn(|i| PAR[i].load(Ordering::Relaxed))
-}
-
-/// Set the parameters (0xFFFF = keep) and re-apply them between frames: pins
-/// to GPIO (CS high throughout), SPI2 reconfigured, then pins to AF unless
-/// FRAME is bit-bang.
-pub fn diag_set(p: &[u16; P_N]) {
-    for (i, &v) in p.iter().enumerate() {
-        if v != 0xFFFF {
-            PAR[i].store(v, Ordering::Relaxed);
-        }
-    }
-    apply();
-}
-
-/// The SPI2 prescaler divisor (DBG:HYSPI:SELF? reports it; 0 = bit-bang).
-pub fn div() -> u8 {
-    if par(P_FRAME) == 2 {
-        0
-    } else {
-        par(P_DIV).min(255) as u8
-    }
-}
-
 /// Configure the bus (other pins on these ports are left alone): CS high
-/// first and for good, SCK at its idle level as a GPIO, then SPI2 configured
-/// and enabled (it drives SCK to the same idle level) before the pins are
-/// handed to it, so SCK never moves and CS never glitches (the HY3131
-/// ignores CK while CS is high and needs CK low when CS falls, DS 7.2 (6)).
+/// first and for good, SCK low as a GPIO, then SPI2 configured and enabled
+/// (it drives SCK low, its idle level) before the pins are handed to it, so
+/// SCK never moves and CS never glitches (the HY3131 ignores CK while CS is
+/// high and needs CK low when CS falls, DS 7.2 (6)).
 pub fn init_pins() {
     set(GPIOD, CS, true);
     set(GPIOC, SCK, false);
@@ -161,80 +95,44 @@ pub fn init_pins() {
     out_pin(GPIOC, MOSI);
     out_pin(GPIOD, CS);
     unsafe { modify32(GPIOC + MODER, 3 << (2 * MISO), 0) }; // input
-    apply();
+    #[cfg(not(feature = "hyspi-bitbang"))]
+    spi::init();
 }
 
-fn apply() {
-    set(GPIOD, CS, true);
-    spi::to_gpio();
-    if par(P_FRAME) != 2 {
-        spi::to_spi();
-    }
+/// The SPI2 prescaler of the read bus (8 / 16 / 32 = 6.25 / 3.125 / 1.5625
+/// MHz); 0 = the bit-banged fallback build.
+#[cfg(not(feature = "hyspi-bitbang"))]
+pub const DIV: u8 = 16;
+#[cfg(feature = "hyspi-bitbang")]
+pub const DIV: u8 = 0;
+
+/// Read divider for the next frames (DBG:HYSPI:SELF? only; the caller
+/// restores `DIV`). No-op in the bit-banged build.
+pub fn set_div(div: u8) {
+    #[cfg(not(feature = "hyspi-bitbang"))]
+    spi::set_div(div);
+    #[cfg(feature = "hyspi-bitbang")]
+    let _ = div;
 }
 
-/// Write `data` to `reg`, `reg + 1`, ..
+/// Write `data` to `reg`, `reg + 1`, .. (bit-banged, see the module notes).
 pub fn write(reg: u8, data: &[u8]) {
-    if par(P_FRAME) == 2 {
-        bb::write(reg, data)
-    } else {
-        spi::write(reg, data)
-    }
+    #[cfg(not(feature = "hyspi-bitbang"))]
+    spi::to_gpio();
+    bb::write(reg, data);
+    #[cfg(not(feature = "hyspi-bitbang"))]
+    spi::to_af();
 }
 
 /// Read `buf.len()` registers from `reg`.
 pub fn read(reg: u8, buf: &mut [u8]) {
-    if par(P_FRAME) == 2 {
-        bb::read(reg, buf)
-    } else {
-        spi::read(reg, buf, None)
-    }
+    #[cfg(not(feature = "hyspi-bitbang"))]
+    spi::read(reg, buf);
+    #[cfg(feature = "hyspi-bitbang")]
+    bb::read(reg, buf);
 }
 
-/// DIAG: one frame on a given bus regardless of FRAME (`hw` false = bit-bang;
-/// the pins are switched around it, CS high throughout).
-pub fn diag_read(hw: bool, reg: u8, buf: &mut [u8], raw: Option<&mut [u8]>) {
-    let cur_hw = par(P_FRAME) != 2;
-    if hw == cur_hw {
-        if hw { spi::read(reg, buf, raw) } else { bb::read(reg, buf) }
-        return;
-    }
-    if hw {
-        spi::to_spi();
-        spi::read(reg, buf, raw);
-        spi::to_gpio();
-    } else {
-        spi::to_gpio();
-        bb::read(reg, buf);
-        spi::to_spi();
-    }
-}
-
-/// DIAG: see `diag_read`.
-pub fn diag_write(hw: bool, reg: u8, data: &[u8]) {
-    let cur_hw = par(P_FRAME) != 2;
-    if hw == cur_hw {
-        if hw { spi::write(reg, data) } else { bb::write(reg, data) }
-        return;
-    }
-    if hw {
-        spi::to_spi();
-        spi::write(reg, data);
-        spi::to_gpio();
-    } else {
-        spi::to_gpio();
-        bb::write(reg, data);
-        spi::to_spi();
-    }
-}
-
-/// DIAG: an empty write frame to R00 (read-only data: no effect). Follows
-/// each scratch-register write in the tests: if a CS high was missed, its
-/// command byte 0x00 lands in the next register as data, and when that is
-/// R37 (test mode, "write 0 only"; 0x60 resets the chip) 0 is the safe value.
-pub fn guard() {
-    write(R_AD1, &[]);
-}
-
+#[cfg(not(feature = "hyspi-bitbang"))]
 mod spi {
     use super::*;
 
@@ -248,8 +146,8 @@ mod spi {
     const STAT_RBNE: u32 = 1 << 0;
     const STAT_TBE: u32 = 1 << 1;
     const STAT_TRANS: u32 = 1 << 7;
-    /// Master (MSTMOD), software NSS high (SWNSSEN | SWNSS), MSB first, 8 bit;
-    /// CKPL bit 1, CKPH bit 0, PSC bits 5:3.
+    /// Master (MSTMOD), software NSS high (SWNSSEN | SWNSS), MSB first, 8 bit,
+    /// CKPL = CKPH = 0 (mode 0); PSC goes into bits 5:3.
     const CTL0_BASE: u32 = (1 << 9) | (1 << 8) | (1 << 2);
     const CTL0_SPIEN: u32 = 1 << 6;
     const OSPEED: u32 = 0x08;
@@ -259,53 +157,70 @@ mod spi {
     const AF6: u32 = (6 << (4 * (SCK - 8))) | (6 << (4 * (MISO - 8))) | (6 << (4 * (MOSI - 8)));
     const MODER_AF: u32 = (2 << (2 * SCK)) | (2 << (2 * MISO)) | (2 << (2 * MOSI));
     const MODER_GPIO: u32 = (1 << (2 * SCK)) | (1 << (2 * MOSI));
+    /// OSPEED 01 = 25 MHz for SCK / MOSI (2 .. 200 MHz made no difference on
+    /// the device).
     const OSPEED_PINS: u32 = (3 << (2 * SCK)) | (3 << (2 * MOSI));
+    const OSPEED_SPI: u32 = (1 << (2 * SCK)) | (1 << (2 * MOSI));
+    /// CS low -> first SCK edge, last SCK edge -> CS high, CS high time
+    /// (spin iterations, 5 cycles = 25 ns each at 200 MHz, measured):
+    /// ~200 / ~100 / ~500 ns (0.2 .. 5 us made no difference on the device).
+    const CS_SETUP: u32 = 8;
+    const CS_HOLD: u32 = 4;
+    const CS_IDLE: u32 = 20;
+    /// The hand-made read-period pulse: ~100 ns high (TCKHI >= 20 ns), then
+    /// ~100 ns low before the SPI's first sampling edge (another half period
+    /// later) for DO (TDODL 60 ns + the isolator both ways).
+    const PULSE_HI: u32 = 4;
+    const PULSE_LO: u32 = 4;
 
-    fn psc_of(div: u32) -> u32 {
-        // 2 << psc = div
-        let mut p = 0;
-        while p < 7 && (2u32 << p) < div {
-            p += 1;
+    const fn psc_of(div: u8) -> u32 {
+        match div {
+            8 => 2,
+            32 => 4,
+            _ => 3,
         }
-        p
     }
 
-    fn clocked() -> bool {
-        unsafe { r32(RCU_APB1EN) & RCU_SPI2EN != 0 }
-    }
-
-    /// Pins to GPIO (SCK low, MOSI out, MISO in), SPI2 off. CS untouched.
-    pub(super) fn to_gpio() {
-        if clocked() {
-            idle();
-        }
-        set(GPIOC, SCK, false);
+    fn config(div: u8) {
+        let cfg = CTL0_BASE | (psc_of(div) << 3);
         unsafe {
-            modify32(GPIOC + MODER, PINS2, MODER_GPIO);
-            if clocked() {
-                w32(SPI_CTL0, CTL0_BASE);
-            }
-        }
-    }
-
-    /// SPI2 on with the current parameters, then the pins to AF6.
-    pub(super) fn to_spi() {
-        let cfg = CTL0_BASE | (psc_of(par(P_DIV)) << 3) | (par(P_CPOL) & 1) << 1 | (par(P_CPHA) & 1);
-        unsafe {
-            modify32(RCU_APB1EN, 0, RCU_SPI2EN);
-            let _ = r32(RCU_APB1EN);
             w32(SPI_CTL0, CTL0_BASE);
             modify32(SPI_I2SCTL, 1 << 11, 0); // SPI, not I2S
             w32(SPI_CTL0, cfg);
             w32(SPI_CTL0, cfg | CTL0_SPIEN);
             let _ = r32(SPI_DATA); // drop a stale byte
-            let sp = par(P_OSPEED) & 3;
-            modify32(GPIOC + OSPEED, OSPEED_PINS, (sp << (2 * SCK)) | (sp << (2 * MOSI)));
-            modify32(GPIOC + AFRH, AF_MASK, AF6);
-            // The SCK GPIO level = the SPI idle level before the hand-over.
-            set(GPIOC, SCK, par(P_CPOL) & 1 != 0);
-            modify32(GPIOC + MODER, PINS2, MODER_AF);
         }
+    }
+
+    pub(super) fn init() {
+        unsafe {
+            modify32(RCU_APB1EN, 0, RCU_SPI2EN);
+            let _ = r32(RCU_APB1EN); // clock on before the first register access
+            modify32(GPIOC + OSPEED, OSPEED_PINS, OSPEED_SPI);
+            modify32(GPIOC + AFRH, AF_MASK, AF6);
+        }
+        config(DIV);
+        to_af();
+    }
+
+    /// Between frames only (SPI2 idle, SCK low, CS high).
+    pub(super) fn set_div(div: u8) {
+        idle();
+        config(div);
+    }
+
+    /// Pins to GPIO for a bit-banged frame: SCK output low (= the SPI idle
+    /// level), MOSI output, MISO input. SPI2 stays enabled and idle.
+    pub(super) fn to_gpio() {
+        idle();
+        set(GPIOC, SCK, false);
+        unsafe { modify32(GPIOC + MODER, PINS2, MODER_GPIO) };
+    }
+
+    /// Pins back to SPI2 (SCK low on both sides of the switch).
+    pub(super) fn to_af() {
+        set(GPIOC, SCK, false);
+        unsafe { modify32(GPIOC + MODER, PINS2, MODER_AF) };
     }
 
     fn idle() {
@@ -322,76 +237,36 @@ mod spi {
         }
     }
 
-    fn begin() {
+    /// Read `buf.len()` registers from `reg`. The command byte has bit 7 = 0,
+    /// so the late-LSB effect of SPI2 writes (module notes) cannot touch it.
+    pub(super) fn read(reg: u8, buf: &mut [u8]) {
         set(GPIOD, CS, false);
-        spin(par(P_SETUP));
-    }
-
-    fn end() {
-        idle();
-        spin(par(P_HOLD));
-        set(GPIOD, CS, true);
-        spin(par(P_IDLE));
-    }
-
-    pub fn write(reg: u8, data: &[u8]) {
-        begin();
-        xfer(reg << 1);
-        for &b in data {
-            xfer(b);
-        }
-        end();
-    }
-
-    /// `raw`: the RX bytes after the command byte as they came (n for the
-    /// pulse framing, n + 1 for the shift), as many as fit.
-    pub fn read(reg: u8, buf: &mut [u8], mut raw: Option<&mut [u8]>) {
-        begin();
+        spin(CS_SETUP);
         xfer((reg << 1) | 1);
-        let mut k = 0;
-        let mut keep = |b: u8| {
-            if let Some(r) = raw.as_deref_mut() {
-                if k < r.len() {
-                    r[k] = b;
-                }
-            }
-            k += 1;
-        };
-        if par(P_FRAME) == 1 {
-            // RX byte k = [junk or LSB of data k - 1 | 7 MSBs of data k].
-            let mut prev = xfer(0xFF);
-            keep(prev);
-            for b in buf.iter_mut() {
-                let cur = xfer(0xFF);
-                keep(cur);
-                *b = (prev << 1) | (cur >> 7);
-                prev = cur;
-            }
-        } else {
-            // Read period: SPI2 idle, PC10 to GPIO output at the idle level
-            // (ODR = CPOL: no edge), one pulse, back to AF.
-            idle();
-            let idle_hi = par(P_CPOL) & 1 != 0;
-            unsafe {
-                set(GPIOC, SCK, idle_hi);
-                modify32(GPIOC + MODER, 3 << (2 * SCK), 1 << (2 * SCK));
-                set(GPIOC, SCK, !idle_hi);
-                spin(par(P_PHI));
-                set(GPIOC, SCK, idle_hi);
-                spin(par(P_PLO));
-                modify32(GPIOC + MODER, 3 << (2 * SCK), 2 << (2 * SCK));
-            }
-            for b in buf.iter_mut() {
-                *b = xfer(0xFF);
-                keep(*b);
-            }
+        // Read period: SPI2 idle (SCK low after the 8th clock), PC10 to GPIO
+        // output (ODR 0: stays low), one pulse, back to AF.
+        idle();
+        unsafe {
+            modify32(GPIOC + MODER, 3 << (2 * SCK), 1 << (2 * SCK));
+            set(GPIOC, SCK, true);
+            spin(PULSE_HI);
+            set(GPIOC, SCK, false);
+            spin(PULSE_LO);
+            modify32(GPIOC + MODER, 3 << (2 * SCK), 2 << (2 * SCK));
         }
-        end();
+        // MOSI 1 during the data phase, as on the bit-banged bus (the R bit).
+        for b in buf.iter_mut() {
+            *b = xfer(0xFF);
+        }
+        idle();
+        spin(CS_HOLD);
+        set(GPIOD, CS, true);
+        spin(CS_IDLE);
     }
 }
 
-/// The old bit-banged bus (~1 us half period; the reference while SPI2 is
-/// brought up, and the `hyspi-bitbang` build's bus).
+/// The bit-banged bus (~1 us half period): every write, and the reads of the
+/// `hyspi-bitbang` build.
 mod bb {
     use super::*;
 
@@ -451,6 +326,7 @@ mod bb {
         end();
     }
 
+    #[cfg_attr(not(feature = "hyspi-bitbang"), allow(dead_code))]
     pub fn read(reg: u8, buf: &mut [u8]) {
         begin();
         tx((reg << 1) | 1);

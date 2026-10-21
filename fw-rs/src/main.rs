@@ -614,45 +614,21 @@ fn main() -> ! {
                         reset_at = Some(now + 50);
                         false
                     }
-                    scpi::Dbg::HySpi(1, _, _) => {
-                        let len = hyspi::diag_text(port.rsp_buf());
-                        port.respond_len(len);
-                        false
-                    }
-                    scpi::Dbg::HySpi(kind, n, div) => {
-                        // Bus self-test / raw capture (hyspi.rs): the DMM is
-                        // paused and its row rewritten afterwards; the logger
-                        // owns the chip.
+                    scpi::Dbg::HySpi(n, div) => {
+                        // Bus self-test (hyspi.rs): the DMM is paused and its
+                        // row rewritten afterwards; the logger owns the chip.
                         if logger.active() {
                             scpi.set_err("Settings conflict");
                             false
                         } else {
                             app.dmm_power(&mut clk);
-                            let len = if kind == 0 {
-                                hyspi::self_test(n as u32, div, port.rsp_buf())
-                            } else {
-                                hyspi::raw(port.rsp_buf())
-                            };
+                            let len = hyspi::self_test(n as u32, div, port.rsp_buf());
                             port.respond_len(len);
                             app.dmm.start(&mut clk);
                             app.meter.reset();
                             app.last_raw = None;
                             false
                         }
-                    }
-                    scpi::Dbg::HySpiDiag(p) => {
-                        // SPI2 bring-up knobs (remove before final): applied
-                        // between frames, then the row is rewritten on the
-                        // new bus parameters.
-                        if logger.active() {
-                            scpi.set_err("Settings conflict");
-                        } else {
-                            hyspi::diag_set(&p);
-                            app.dmm.start(&mut clk);
-                            app.meter.reset();
-                            app.last_raw = None;
-                        }
-                        false
                     }
                     scpi::Dbg::Ad2(2, level, _, _) => {
                         log_draw = level;

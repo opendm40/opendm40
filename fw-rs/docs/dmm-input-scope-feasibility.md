@@ -719,3 +719,50 @@ bit-bang) then `READ?` on the 1 V calibrator + `SELF? 2000` + `RAW?`; if
 that is clean, bring hold and idle down separately (20, 10, 5) to find the
 cliff, and set the final constants at >= 2x it. The emulator cannot show
 any of this (SPI bytes are instantaneous, the model has no SYSCLK phase).
+
+### 8.6 Device bring-up with the DIAG image fca31fd, and the fix (2026-10-22)
+
+Run over USBTMC on the device, 1.000 V DC calibrator on V/COM.
+`DIAG?`: spin(1000) = 5017 cycles, i.e. one spin = 25 ns at 200 MHz.
+
+`RAW?` with 8e5efa6's parameters: `A=064,B=000,C=064`. Every mismatch is
+`App>(pp|1)`: exactly the 64 values with bit 7 = 1 and bit 0 = 0, written
+over SPI2, arrive with bit 0 = 1 (A: SPI2 write / bit-bang read; C: SPI2
+both); B (bit-bang write, SPI2 read) is clean for all 256 values. The same
+64 values, unchanged, with: CS setup / hold / idle 8/40/40, 40/4/20 and
+40/200/200 spins (0.2 .. 5 us); pin speed OSPEED 0 (2 MHz) and 3 (200 MHz);
+/32; the shift framing. CPHA = 1 wrote nothing (`A=255`, READ? overload).
+SELF? (masked reference, 23 stable bytes): reads clean at /8, /16 and /32
+(bad_r1 = bad_r23 = signbad = 0 in 2000 iterations; us_r1 5.6 / 8.0 / 12.8,
+us_r6 13.4 / 21.8 / 38.6, us_r23 40.4 / 69.2 / 126.8), w1 501/2000 bad at
+every divider (= the 25 % of patterns with bit 7 = 1, bit 0 = 0). The
+SPI2-written row read back as 0091..9128A181.. against the bit-banged
+0090..9028A080..: interior bytes of a multi-byte write are hit too (every
+transfer ends after its byte, the next one is loaded on RBNE).
+
+Conclusion: the chip takes a data byte's LSB after the GD32 has stopped
+holding it on MOSI (the peripheral drives the byte's MSB level there once the
+byte is out; a 1 wins). Command bytes always have bit 7 = 0, so reads are
+not affected. Not a timing margin: no divider, CS time or edge rate changes
+it.
+
+Fix (this commit): reads on SPI2 (/16, pulse framing, the constants of
+8e5efa6), writes bit-banged with the three pins switched to GPIO for the
+frame (SCK low on both sides of the switch, CS high, SPI2 left enabled and
+idle). DIAG / RAW removed. Writes are rare (mode changes, counter restarts,
+the power meter's R34 phases), ~25 us per byte. A pure-SPI2 write (keep
+TX continuous so no byte ends early, plus a dummy byte with MSB = the last
+LSB while CS rises mid-byte) is possible but timing-delicate and untested.
+
+Emulator (plumbing): DC V 0.99999, AC V 0.50000, SELF? 200 clean at /16 and
+/32, AD2 logger 9600 S/s 7.1 % lost (bit-bang 79 %).
+
+Device verification of this image (5 min, the meter on USB, 1 V DC on V/COM):
+1. `READ?` x3 in DC V: 1.0000 V (the 8e5efa6 SPI2 build read -0.0002).
+2. `DBG:HYSPI:SELF? 2000`, `... 2000,32`: every bad_* and signbad = 0
+   (w1 included now: writes are bit-banged), 23 stable bytes, us_r1 ~8.
+3. AC V and FREQ on a 50 Hz sine (or the calibrator's AC): readings as on the
+   bit-bang build; ohm on a resistor.
+4. `dm40scpi.py log s.csv --source ad2 --rate 9600 -d 10` in AC V / mV: lost
+   well below the bit-banged ~6.5 kS/s ceiling; bad 0.
+Fail -> the fallback build `./build.sh native --features hyspi-bitbang`.
