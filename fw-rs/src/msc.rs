@@ -85,6 +85,9 @@ enum Xfer {
     None,
     Read { lba: u32, left: u32, off: usize, done: u32 },
     Write { lba: u32, left: u32, off: usize, done: u32 },
+    /// A refused WRITE: its data phase is read and dropped, then the
+    /// command fails (sense already set). `left` bytes still to take.
+    Discard { left: u32 },
 }
 
 /// Sense key / ASC / ASCQ for REQUEST SENSE.
@@ -415,28 +418,40 @@ fn handle<B: UsbBus>(
             }
         }
         ScsiCommand::Write { lba, len } => {
-            if !dev.present() {
-                *sense = SENSE_NO_MEDIUM;
-                cmd.fail(0);
-                return Ok(());
-            }
+            // A refused WRITE still takes its whole data phase (dropped) and
+            // only then fails: failing at once leaves the data to
+            // usbd-storage's "read up to the residue" path, which never sent
+            // the CSW in the emulator (USB/IP, 2026-10-21: the host waited
+            // forever for it). The host's data length is len x block size.
             if *xfer == Xfer::None {
-                if dev.read_only() {
-                    *sense = SENSE_WRITE_PROTECTED;
+                let refuse = if !dev.present() {
+                    Some(SENSE_NO_MEDIUM)
+                } else if dev.read_only() {
+                    Some(SENSE_WRITE_PROTECTED)
+                } else if write_inhibit {
+                    Some(SENSE_BECOMING_READY)
+                } else if lba + len as u32 > dev.block_count() {
+                    Some(SENSE_LBA_RANGE)
+                } else {
+                    None
+                };
+                *xfer = match refuse {
+                    Some(s) => {
+                        *sense = s;
+                        Xfer::Discard { left: len as u32 * bs }
+                    }
+                    None => Xfer::Write { lba, left: len as u32, off: 0, done: 0 },
+                };
+            }
+            if let Xfer::Discard { left } = *xfer {
+                let n = if left == 0 { 0 } else { cmd.read_data(&mut blk[..(left as usize).min(MAX_BLOCK)])? as u32 };
+                if n >= left {
+                    *xfer = Xfer::None;
                     cmd.fail(0);
-                    return Ok(());
+                } else {
+                    *xfer = Xfer::Discard { left: left - n };
                 }
-                if write_inhibit {
-                    *sense = SENSE_BECOMING_READY;
-                    cmd.fail(0);
-                    return Ok(());
-                }
-                if lba + len as u32 > dev.block_count() {
-                    *sense = SENSE_LBA_RANGE;
-                    cmd.fail(0);
-                    return Ok(());
-                }
-                *xfer = Xfer::Write { lba, left: len as u32, off: 0, done: 0 };
+                return Ok(());
             }
             if let Xfer::Write { lba, left, off, done } = *xfer {
                 let n = cmd.read_data(&mut blk[off..bs as usize])?;
