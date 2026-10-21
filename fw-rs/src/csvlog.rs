@@ -1023,6 +1023,7 @@ pub fn func_label(code: u8) -> &'static str {
         14 => "Frequency",
         16 => "AC+DC V",
         17 => "AC+DC A",
+        18 => "Power",
         _ => "Temperature",
     }
 }

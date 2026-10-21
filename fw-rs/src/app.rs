@@ -1991,7 +1991,8 @@ impl App {
                 }
             }
         }
-        if a != Alert::AJack {
+        // (The power meter's expired current limit keeps the same pattern.)
+        if a != Alert::AJack && !(self.dmm.pw.on && self.dmm.pw_state().over == 2) {
             self.alert_beep_t0 = None;
         }
     }
@@ -2934,6 +2935,11 @@ impl App {
             C::CalcAverState(None) => {
                 out.put_bytes(if self.stats_rec() { b"1" } else { b"0" });
                 true
+            }
+            // The power meter has no limit slot (W).
+            C::CalcLim(..) | C::CalcLimState(_) | C::CalcLimClear if self.dmm.pw.on => {
+                out.set_err("Settings conflict");
+                false
             }
             C::CalcLim(k, Some(v)) => {
                 self.set_limit(k == 1, Some(v));
