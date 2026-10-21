@@ -542,7 +542,8 @@ fn r_button(r: &Reading) -> Button {
 fn pw_rd(pv: dmm::pw::PowerVals) -> Reading {
     let (main, v, _, si) = dmm::pw::reading_vals(&pv);
     let (iu, ir) = dmm::pw::iu_ir(pv.ik);
-    let mut r = rd(4 + iu, main, Some(v), Some(dmm::pw::aux2_val(&pv)), false);
+    let (_, _, i, _) = dmm::pw::reading_vals(&pv);
+    let mut r = rd(4 + iu, main, Some(v), Some(i), false);
     r.range = ir as i8;
     r.si = si;
     r.auto = pv.v_auto && pv.i_auto;

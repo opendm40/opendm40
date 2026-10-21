@@ -578,6 +578,7 @@ impl App {
             su::strip_invalidate();
             self.sp_strip();
             if self.band_until != 0 {
+                self.pw_btn_glyph();
                 ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
             }
         }

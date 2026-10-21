@@ -123,6 +123,17 @@ pub const RING_N: usize = 16;
 pub const COUP_AC: u8 = 0;
 pub const COUP_DC: u8 = 1;
 pub const COUP_AUTO: u8 = 2;
+
+/// The next coupling of a tap on the active W button, as a tap on the active
+/// V / A button steps DC -> AC -> AC+DC (`Dmm::press`): DC -> AC+DC (method
+/// B, the RMS of AC and DC) -> AUTO -> DC.
+pub fn next_coupling(c: u8) -> u8 {
+    match c {
+        COUP_DC => COUP_AC,
+        COUP_AC => COUP_AUTO,
+        _ => COUP_DC,
+    }
+}
 /// DC method: settle after a row write (no relay change: DC V and DC A
 /// both use PA state 0, the shunt stays; the AD1 pre-filter and the first
 /// chopped conversion), results dropped, results taken per phase (AD1 at
@@ -1079,10 +1090,10 @@ impl Dmm {
 
     /// The reading of the power meter (`reading_vals`).
     fn pw_reading(&self, pv: &PowerVals) -> Reading {
-        let (main, v, _, si) = reading_vals(pv);
+        let (main, v, i, si) = reading_vals(pv);
         let mut rd = self.reading(main, si);
         rd.aux1 = Some(v);
-        rd.aux2 = Some(aux2_val(pv));
+        rd.aux2 = Some(i);
         rd.power = Some(*pv);
         rd
     }
@@ -1797,11 +1808,10 @@ pub fn reading_vals(pv: &PowerVals) -> (Val, Val, Val, f32) {
     (main, v, i, if ol { 0.0 } else { main_si })
 }
 
-/// The second aux readout of the power page: the energy (Wh; VAh in the
-/// fallback) in the large aux face (owner: the energy counter prominent),
-/// or P when the main readout shows the energy (the current is in the
-/// boxes row, `ui::pw`).
-pub fn aux2_val(pv: &PowerVals) -> Val {
+/// The energy box of the power page (the first box of the lower row): the
+/// energy (Wh; VAh in the fallback), or P when the main readout shows the
+/// energy (owner: V and I on top, the Wh counter below).
+pub fn energy_val(pv: &PowerVals) -> Val {
     if pv.main == MAIN_P {
         let (x, dec, u) = energy_format(if pv.alt { pv.vah } else { pv.e_wh }, pv.alt);
         Val::new(x, dec, u)

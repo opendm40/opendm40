@@ -889,28 +889,37 @@ renders p07 (settings + status), p09 (I ranging), p10 (refused V cal), p11
   ink box, 4 bpp, advance = width + 1; HIST (1 bpp pixel font) gets its M
   mirrored top to bottom. `glyph_or_twin` uses it; the twin stays only as
   the fallback for other fonts.
-* **Coupling chip** in the mode-glyph / limit-badge slot above the unit
-  (the power meter has no limit slot): "AC", "DC", or "AUTO" over the
-  method in use ("AC" / "DC"); tap = AC -> DC -> AUTO (as the Power
-  Settings button and `POW:COUP`). It replaces the coupling glyph there.
-* **Energy**: aux2 (the large LETTERS row) shows the energy, Wh with
-  mWh below 1 Wh and kWh from 1000 Wh, 5 digits (`energy_format`; the
-  fallback VAh, no mVAh / kVAh below 100 kVAh: wider than the unit box). A tap on the main
-  value cycles P -> Wh -> VAh (display only: `READ?`, BT and the
-  Reading's SI value stay P / S; the chart follows the main readout, cleared
-  on the switch); with the energy in the main readout aux2 shows P. The
-  current moved into the boxes row (I | PF | S | Q | f), the burden voltage
-  into the side column (amber as before). The energy box (RUN / PAUSE, the
-  time) stays in the side column: tap = run / pause; a long press on the
-  energy readout or the side column opens "Reset energy?" (No / Yes,
-  cancels after 10 s); Power Settings "Reset Wh" and `POW:ENER:RES` reset
-  directly.
+* **Coupling, the stock way** (owner, round 3): a tap on the active W
+  button steps the coupling as a tap on the active V / A button steps DC ->
+  AC -> AC+DC: **DC -> AC+DC -> AUTO -> DC** (`pw::next_coupling`; also
+  the locked-key path and the combined band). "AC+DC" is method B (the RMS
+  of AC and DC; the old name "AC" stays a `POW:COUP` alias), "DC" the DC
+  method, AUTO the last state. The page shows the stock glyph of the method
+  in use above the unit (DC / AC+DC) with "AUTO" left of it in AUTO; the W
+  button carries the same glyph as the V / A buttons carry theirs. The
+  Power Settings page has a DC / AC+DC / AUTO row in the Current Settings
+  page's DC / AC / AC+DC style; Burden is a cell in the third row, the
+  VA-only fallback (`POW:METH ALT`) is SCPI only (shown in the status line).
+  `POW:COUP DC|ACDC|AUTO` (AC = ACDC), `POW:COUP?` = `DC` / `ACDC` /
+  `AUTO,DC` / `AUTO,ACDC`. The separate chip of round 2 is gone.
+* **Energy** (owner, round 3: "V and I on top, the Wh counter below"): the
+  aux row is V and I again; the energy is the first, wider box of the lower
+  row (E | PF | S | Q | f: 116 / 78 / 90 / 90 / 84 px): Wh with mWh below 1
+  Wh and kWh from 1000 Wh, 5 digits (`energy_format`; as many decimals as
+  the box holds), VAh in the fallback. A tap on the main value cycles P ->
+  Wh -> VAh (display only: `READ?`, BT and the Reading's SI value stay P /
+  S; the chart follows the main readout, cleared on the switch); with the
+  energy in the main readout the box shows P. The energy box in the side
+  column (RUN / PAUSE, the time) stays: tap = run / pause; a long press on
+  the energy box (lower row) or the side column opens "Reset energy?" (No /
+  Yes, cancels after 10 s); Power Settings "Reset Wh" and `POW:ENER:RES`
+  reset directly. The burden voltage moved into the side column.
 * **Energy over a power cycle**: not persisted; `pw_enter` resets it, so a
   reboot (the power meter is restored) starts at 0 Wh. Persisting it would
   need the backup-SRAM record written per accepted reading - only if the
   owner wants it.
-* Renders p12 (main = kWh, AUTO chip), p13 (main = VAh, DC chip), p14 (the
-  reset confirm); ui-render 0 violations over 24899 cases; touch-test 0
+* Renders p12 (main = kWh, AUTO), p13 (main = VAh, DC), p14 (the reset
+  confirm); ui-render 0 violations over 24899 cases; touch-test 0
   failures.
 
 #### Device re-check list (this build)
@@ -928,9 +937,9 @@ renders p07 (settings + status), p09 (I ranging), p10 (refused V cal), p11
 4. Entry from the W button: the dialog once, then direct; the page shows V
    within ~1 s and "I ranging..." until P; MF > Power Settings: Zero / V cal
    / coupling buttons and the status line; a reboot comes back in W (energy
-   0). On the page: the W glyphs, a tap on the coupling chip cycles AC / DC
-   / AUTO, a tap on the value P / Wh / VAh, a long press on the Wh readout
-   asks "Reset energy?".
+   0). On the page: the W glyphs, a tap on the active W button cycles DC /
+   AC+DC / AUTO (glyph on the button and above the unit), a tap on the value
+   P / Wh / VAh, a long press on the E box asks "Reset energy?".
 5. `POW:COUP DC` with the calibrator's DC on V-COM: Vdc = DC V reading,
    no relay clicks per phase, ~0.45 s per phase; compare at steady state
    *and* the first readings after the alternation starts (DC_SETTLE_MS = 150

@@ -56,12 +56,6 @@ impl App {
                 self.chart_dirty = true;
                 true
             }
-            // The coupling chip: AC -> DC -> AUTO.
-            View::Dmm if ui::pw::coupling_hit(x, y) => {
-                let c = self.dmm.pw.coup;
-                self.dmm.pw_set_coupling(clk, (c + 1) % 3);
-                true
-            }
             // The main value: P -> Wh -> VAh (display only; the next reading
             // redraws it).
             View::Dmm if ui::value_hit(x, y) => {
@@ -86,12 +80,9 @@ impl App {
                         let i = if i == 6 { None } else { Some(i) };
                         self.dmm.pw_set_ranges(clk, None, Some(i));
                     }
-                    Some(ui::pw::PS_METHOD_B) => self.dmm.pw_set_method(clk, false),
-                    Some(ui::pw::PS_METHOD_ALT) => self.dmm.pw_set_method(clk, true),
                     Some(ui::pw::PS_BURDEN) => self.dmm.pw.comp = !pv.comp,
-                    Some(ui::pw::PS_COUP) => {
-                        // AC -> DC -> AUTO -> AC.
-                        self.dmm.pw_set_coupling(clk, (pv.coup + 1) % 3);
+                    Some(c @ ui::pw::PS_COUP..=30) => {
+                        self.dmm.pw_set_coupling(clk, ui::pw::PS_COUPS[(c - ui::pw::PS_COUP) as usize].0);
                     }
                     Some(ui::pw::PS_ZERO) => {
                         self.dmm.pw_zero_start(clk);
@@ -141,6 +132,10 @@ impl App {
             return;
         }
         self.pw_settings_status();
+        // AUTO switched the method: the W button's glyph (a page redraw).
+        if self.dmm.pw.dc != self.pw_btn_dc && matches!(self.view, View::Dmm) {
+            self.redraw = true;
+        }
         // DMM page before the first full reading: V and "I ranging..."
         // (the I channel walks down from 10 A, ~0.9 s per range).
         if self.view == View::Dmm && !self.redraw && self.meter.shown().is_none() {
@@ -155,6 +150,15 @@ impl App {
         if self.alert_beep_t0.is_some() && self.dmm.pw_state().over != 2 && self.dmm.sent.alert == crate::sentinel::Alert::None {
             self.alert_beep_t0 = None;
         }
+    }
+
+    /// The W button's coupling glyph for the next button draw: the method in
+    /// use in the power meter, else the stored coupling (DC = the DC glyph).
+    pub(super) fn pw_btn_glyph(&mut self) {
+        let p = &self.dmm.pw;
+        let dc = if p.on { p.dc } else { p.coup == crate::dmm::pw::COUP_DC };
+        self.pw_btn_dc = dc;
+        ui::set_power_dc(dc);
     }
 
     /// Settings words (persist).
@@ -354,8 +358,8 @@ impl App {
                 out.put_bytes(match p.coup {
                     pw::COUP_DC => b"DC",
                     pw::COUP_AUTO if p.dc => b"AUTO,DC",
-                    pw::COUP_AUTO => b"AUTO,AC",
-                    _ => b"AC",
+                    pw::COUP_AUTO => b"AUTO,ACDC",
+                    _ => b"ACDC",
                 });
                 true
             }

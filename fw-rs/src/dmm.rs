@@ -1450,10 +1450,14 @@ impl Dmm {
                 let r = if to == 15 { self.t_range0() } else { 0 };
                 self.set(clk, to, r, if to == 14 { 1000 } else { 500 });
             }
-            // Again in the power meter: nothing (the app shows the wiring
-            // dialog first when it was never confirmed).
+            // Again in the power meter: the next coupling, as a second tap
+            // on V / A steps DC / AC / AC+DC (the app shows the wiring dialog
+            // first when it was never confirmed).
             Button::Power => {
-                if !self.pw.on {
+                if self.pw.on {
+                    let c = pw::next_coupling(self.pw.coup);
+                    self.pw_set_coupling(clk, c);
+                } else {
                     self.pw_enter(clk);
                 }
             }
