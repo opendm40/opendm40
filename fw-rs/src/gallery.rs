@@ -30,6 +30,8 @@
 //! (scaled down to fit, never up); others (8 bpp, RLE8, JPEG / PNG in a BMP,
 //! truncated files) show "Unsupported format".
 //!
+//! Logs are LOG*.DLG (compact binary, dlog.rs: read chunk by chunk, every
+//! row, exact counts) or legacy LOG*.CSV text (below).
 //! CSV tiles: function and duration, a sparkline of value vs time, the row
 //! count. The file is read in up to 24 (tile) / 256 (viewer) blocks evenly
 //! spaced over it (all of a smaller file), twice: pass A for count / min /
@@ -69,6 +71,7 @@ use core::sync::atomic::Ordering::Relaxed;
 
 use crate::calbackup;
 use crate::csvlog::{self, GErr, Kind};
+use crate::dlog::{self, Src as _};
 use crate::fatren::{le16, le32, parse_bpb, Vol};
 use crate::gesture::Gesture;
 use crate::lcd::{self, Color};
@@ -252,7 +255,7 @@ fn kind_of(e: &[u8]) -> Option<Kind> {
     let ext = [up(e[8]), up(e[9]), up(e[10])];
     if up(e[0]) == b'S' && &ext == b"BMP" {
         Some(Kind::Bmp)
-    } else if up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G' && &ext == b"CSV" {
+    } else if up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G' && (&ext == b"CSV" || &ext == b"DLG") {
         Some(Kind::Csv)
     } else {
         None
@@ -393,6 +396,39 @@ fn file_lba(io: &mut Io, ch: &mut Chain, fb: u32) -> Option<u32> {
 }
 
 /// Read file block `fb` into io.data.
+/// "LOGnnn  DLG" / "SCOPnnn DLG": a compact binary log (dlog.rs).
+fn is_dlg(n: &[u8; 11]) -> bool {
+    n[8..].eq_ignore_ascii_case(b"DLG")
+}
+
+/// A gallery file as a dlog::Src (through the block cache and its chain).
+struct GSrc<'a, 'b, 'c> {
+    io: &'a mut Io<'c>,
+    chain: &'b mut Chain,
+    size: u32,
+}
+
+impl dlog::Src for GSrc<'_, '_, '_> {
+    fn read(&mut self, mut off: u32, buf: &mut [u8]) -> bool {
+        if off as u64 + buf.len() as u64 > self.size as u64 {
+            return false;
+        }
+        let mut i = 0;
+        while i < buf.len() {
+            let fb = off / BLK;
+            if !read_fb(self.io, self.chain, fb) {
+                return false;
+            }
+            let o = (off % BLK) as usize;
+            let n = (BLK as usize - o).min(buf.len() - i);
+            buf[i..i + n].copy_from_slice(&self.io.data[o..o + n]);
+            i += n;
+            off += n as u32;
+        }
+        true
+    }
+}
+
 fn read_fb(io: &mut Io, ch: &mut Chain, fb: u32) -> bool {
     match file_lba(io, ch, fb) {
         Some(lba) => io.block(lba),
@@ -977,8 +1013,17 @@ impl Csv {
             self.plot_row(t, v);
             return;
         }
-        self.rows += 1;
         self.bytes += self.ll as u32 + 2;
+        self.sample(t, v);
+    }
+
+    /// One reading (a CSV row, a DLG row): pass A statistics or pass B plot.
+    fn sample(&mut self, t: u32, v: Option<f32>) {
+        if self.pb {
+            self.plot_row(t, v);
+            return;
+        }
+        self.rows += 1;
         self.t0 = self.t0.min(t);
         self.t1 = self.t1.max(t);
         if let Some(v) = v.filter(|v| v.is_finite()) {
@@ -2119,6 +2164,7 @@ impl Gallery {
                     j.i += 1;
                 }
             }
+            (Kind::Csv, ph) if is_dlg(&e.name) => self.step_dlg(io, ph),
             (Kind::Csv, Ph::Head) => {
                 if self.job.stats {
                     self.begin_b();
@@ -2155,6 +2201,61 @@ impl Gallery {
                         self.job.csv.flush();
                         self.finish();
                     }
+                }
+            }
+        }
+    }
+
+    /// A compact binary log (LOGnnn.DLG, dlog.rs): the header text (function,
+    /// range) and unit at Head, then one chunk per pass (pass A statistics,
+    /// pass B plot; every row, exact counts). `j.i` = file offset of the next
+    /// chunk; `csv.hdr` = the first chunk's. A torn tail ends the pass.
+    fn step_dlg(&mut self, io: &mut Io, ph: Ph) {
+        let e = self.job.ent;
+        let j = &mut self.job;
+        let mut src = GSrc { io, chain: &mut j.chain, size: e.size };
+        if ph == Ph::Head {
+            if j.stats {
+                return self.begin_b();
+            }
+            j.csv = CSV0;
+            let Some((_, hl, ul, unit)) = dlog::parse_file(&mut src, e.size) else {
+                return self.fail("Unsupported format", 0, 0);
+            };
+            // The header text through the CSV line parser (function, range).
+            let mut t = [0u8; 256];
+            let n = (hl as usize).min(t.len());
+            if !src.read(dlog::FHDR as u32, &mut t[..n]) {
+                return self.fail("Read error", 0, 0);
+            }
+            j.csv.block(&t, 0, n);
+            let k = ul.min(j.csv.unit.len());
+            j.csv.unit[..k].copy_from_slice(&unit[..k]);
+            j.csv.ul = k as u8;
+            j.csv.hdr = dlog::FHDR as u32 + hl;
+            j.i = j.csv.hdr;
+            j.ph = Ph::A;
+            return;
+        }
+        if j.i == 0 {
+            j.i = j.csv.hdr; // pass B starts at the first chunk
+        }
+        let mut w = dlog::Win::new();
+        let c = dlog::chunk_at(&mut src, &mut w, j.i, e.size, true);
+        let ok = c.is_some_and(|c| {
+            let csv = &mut j.csv;
+            dlog::rows(&mut src, &mut w, &c, &mut |t, v, fl| {
+                csv.sample(t, if fl & dlog::F_OL != 0 { None } else { v.to_f32() })
+            })
+        });
+        match c {
+            Some(c) if ok => j.i = c.end(),
+            _ => {
+                if ph == Ph::A {
+                    self.end_a();
+                } else {
+                    self.job.csv.flush();
+                    self.finish();
                 }
             }
         }
