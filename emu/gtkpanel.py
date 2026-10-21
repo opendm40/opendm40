@@ -101,7 +101,7 @@ class FrontPanel(Gtk.Widget):
         self.pinch = None
         self.last_move = 0.0
         self.ink = None               # list -> draw_panel records ink boxes (overlap check)
-        self.want_k = 1               # integer scale the window picked (GtkApp.on_body_tick)
+        self.want_k = 1.0             # scale the window picked (GtkApp.on_body_tick; fractional)
         self.set_margin_start(PANEL_MARGIN)
         self.set_margin_end(PANEL_MARGIN)
         self.set_margin_top(PANEL_MARGIN)
@@ -122,7 +122,7 @@ class FrontPanel(Gtk.Widget):
         panel origin (logical px)."""
         sf = self.get_scale_factor()
         aw, ah = self.get_width(), self.get_height()
-        k = max(1, int(min(aw * sf / (DEV_W * PX_PER_MM_1X), ah * sf / (PANEL_H * PX_PER_MM_1X))))
+        k = max(0.5, min(aw * sf / (DEV_W * PX_PER_MM_1X), ah * sf / (PANEL_H * PX_PER_MM_1X)))
         s = PX_PER_MM_1X * k / sf
         ox = (aw - DEV_W * s) / 2
         oy = (ah - PANEL_H * s) / 2 - PANEL_Y0 * s
@@ -239,12 +239,13 @@ class FrontPanel(Gtk.Widget):
         cr.translate(ox, oy)
         cr.scale(s, s)
         self.draw_panel(cr)
-        # Display: texture at an exact integer device-pixel scale.
+        # Display: nearest-neighbour at an integer device-pixel scale, smooth otherwise.
         dx = ox + DISP[0] * s
         dy = oy + DISP[1] * s
         dw, dh = DISP[2] * s, DISP[3] * s
         if self.texture is not None:
-            snapshot.append_scaled_texture(self.texture, Gsk.ScalingFilter.NEAREST,
+            filt = Gsk.ScalingFilter.NEAREST if abs(k - round(k)) < 0.01 else Gsk.ScalingFilter.LINEAR
+            snapshot.append_scaled_texture(self.texture, filt,
                                            Graphene.Rect().init(dx, dy, dw, dh))
             if self.backlight < 0.98:
                 snapshot.append_color(Gdk.RGBA(0, 0, 0, 1 - self.backlight), Graphene.Rect().init(dx, dy, dw, dh))
@@ -1641,7 +1642,7 @@ class GtkApp(Adw.Application):
         return cards
 
     def on_body_tick(self, body, _clock):
-        """Window size changed: the device's integer scale, and where the small cards go."""
+        """Window size changed: the device's scale, and where the small cards go."""
         W, H = body.get_width(), body.get_height()
         if W <= 0 or (W, H) == self.body_size:
             return True
@@ -1649,8 +1650,17 @@ class GtkApp(Adw.Application):
         sf = self.win.get_scale_factor()
         pw1 = DEV_W * PX_PER_MM_1X / sf + 2 * PANEL_MARGIN
         ph1 = PANEL_H * PX_PER_MM_1X / sf + 2 * PANEL_MARGIN
-        k = max(1, int(min((W - SIDE_MIN_W) / pw1, H / ph1)))
-        if k != self.panel.want_k:
+        # the device and the card column both grow with the window: the column takes ~30 % (at least
+        # SIDE_MIN_W), the device the rest at a fractional scale
+        side = max(SIDE_MIN_W, min(0.3 * W, W - pw1))   # (the device keeps scale 1 while it can)
+        k = max(0.5, min((W - side) / pw1, H / ph1))
+        # shrink the device a little (<= 15 %) when that lets the small cards sit under it
+        each = (DEV_W * PX_PER_MM_1X * k / sf - 2 * CARD_GAP) / len(self.bottom_cards)
+        need = max(c.measure(Gtk.Orientation.VERTICAL, max(1, int(each)))[1] for c in self.bottom_cards)
+        k2 = (H - need - CARD_GAP - 2 * PANEL_MARGIN) / (PANEL_H * PX_PER_MM_1X / sf)
+        if max(0.85 * k, min(1.0, k)) <= k2 < k:
+            k = k2
+        if abs(k - self.panel.want_k) > 1e-3:
             self.panel.want_k = k
             self.panel.queue_resize()
         # the small cards go under the device when they fit there, else into the right column
