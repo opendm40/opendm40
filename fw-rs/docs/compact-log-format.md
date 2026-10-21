@@ -212,7 +212,10 @@ Size (tools/dlog-test, synthetic 26624-sample records), bytes per sample:
 | white noise, full scale | 2.000 | 1.250 (raw blocks) | 1.6x |
 
 A full record is ~9-14 KB instead of 53 KB (the CSV: 692 KB); the
-fatren-test record (a clean sine) is 5908 bytes. The generated CSV is byte
+fatren-test record (a clean sine) is 5908 bytes. Emulator (native image,
+1 kHz 3 V sine, Single trigger, MF > Settings > Save CSV): SCOP000.DLG 4231
+bytes for 26624 samples (0.16 B/sample; the model has no ADC noise; u16
+would be 53624), decoded by dlog.py to the 692552-byte CSV. The generated CSV is byte
 for byte the old SCOPnnn.CSV (fatren-test md5, dlog-test vs scope_row).
 
 ### FR-38 raw stream (kind 3, reserved, not implemented)
