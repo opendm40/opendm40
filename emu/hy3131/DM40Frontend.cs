@@ -29,10 +29,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public string Shape = "sine";
     }
 
-    /// A current source: DC + AC (RMS), compliance voltage (what it can drive).
+    /// A current source: DC + AC (RMS), compliance voltage (what it can drive), Ph: phase of
+    /// the AC part relative to the V source's AC part, degrees (positive = current lags).
     public class CurrentSource
     {
-        public double Dc, Ac, Hz = 50, Duty = 0.5, Compliance = 10;
+        public double Dc, Ac, Hz = 50, Duty = 0.5, Compliance = 10, Ph = 0;
         public string Shape = "sine";
     }
 
@@ -254,13 +255,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // ---- spec parser ----
         /// Connection spec. Elements accumulate; `open` clears everything. Keys:
         ///   vsrc:DC[,ac=RMS,f=Hz,shape=sine|square|triangle,duty=D,rs=OHM]   voltage source V-COM
-        ///   isrc:DC[,ac=,f=,shape=,duty=,compl=V]                          current source A-COM
+        ///   isrc:DC[,ac=,f=,shape=,duty=,compl=V,ph=DEG]                   current source A-COM (ph: lag behind the V source)
+        ///   pow:V@Hz,i=I[,pf=PF|ph=DEG,dc=VDC,idc=IDC,f=,shape=]          V source + current source at the same frequency
         ///   r:OHM | c:F | diode:VF[,rev=1] | tc:C | cj:C | die:C | short | open
         ///   avsrc:V[,rs=] (voltage source in the A jack) | aload:OHM | isrcv:A (current source in V-COM)
         ///   vsrc:none, isrc:none, r:none ... remove one element
         /// Aliases of the older per-function form: dcv:V, acv:RMS@Hz[,dc=,shape=,duty=], hz:F[,duty=,amp=],
         ///   dca:A, aca:RMS@Hz[,dc=], ohm:OHM, cap:F, temp:C[,cj=], tcmv:MV, tcopen, chip:C.
-        /// Model options (returned to the caller): noise:, cal:, beat:.
+        /// Model options (returned to the caller): noise:, cal:, beat:, powmix:.
         public List<KeyValuePair<string, double>> Apply(string spec)
         {
             var options = new List<KeyValuePair<string, double>>();
@@ -323,7 +325,22 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     if(opts.ContainsKey("shape")) ISrc.Shape = opts["shape"].ToLowerInvariant();
                     ISrc.Duty = Opt(opts, "duty", 0.5);
                     ISrc.Compliance = Opt(opts, "compl", 10);
+                    ISrc.Ph = Opt(opts, "ph", 0);
                     break;
+                case "pow":
+                {
+                    // power meter shorthand: V (AC rms + dc) on V-COM, I (AC rms + idc) into A at the
+                    // same frequency, the current lagging by ph (or acos(pf): pf < 0 -> P < 0)
+                    if(none) { VSrc = null; ISrc = null; break; }
+                    VSrc = new VoltageSource { Ac = v, Dc = Opt(opts, "dc", 0) };
+                    ISrc = new CurrentSource { Ac = Opt(opts, "i", 0), Dc = Opt(opts, "idc", 0) };
+                    if(opts.ContainsKey("f")) hz = D(opts["f"]);
+                    if(!double.IsNaN(hz)) { VSrc.Hz = hz; ISrc.Hz = hz; }
+                    if(opts.ContainsKey("shape")) VSrc.Shape = ISrc.Shape = opts["shape"].ToLowerInvariant();
+                    ISrc.Ph = opts.ContainsKey("ph") ? D(opts["ph"])
+                            : Math.Acos(Math.Max(-1, Math.Min(1, Opt(opts, "pf", 1)))) * 180 / Math.PI;
+                    break;
+                }
                 case "isrcv":
                     if(none) { ISrcV = null; break; }
                     ISrcV = new CurrentSource { Dc = v, Ac = Opt(opts, "ac", 0), Compliance = Opt(opts, "compl", 10) };
@@ -366,7 +383,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     if(none) { DieFollowsCj = true; break; }
                     DieTemp = v; DieFollowsCj = false;
                     break;
-                case "noise": case "cal": case "beat":
+                case "noise": case "cal": case "beat": case "powmix":
                     options.Add(new KeyValuePair<string, double>(key, v));
                     break;
                 default:
@@ -393,7 +410,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(!double.IsNaN(DiodeVf)) sb.AppendFormat(ci, "diode:{0:G6}{1};", DiodeVf, DiodeRev ? ",rev=1" : "");
             if(Tc) sb.AppendFormat(ci, TcOpen ? "tcopen;" : "tc:{0:G6};", TcTemp);
             sb.AppendFormat(ci, "cj:{0:G6};die:{1:G6};", CjTemp, Die);
-            if(ISrc != null) sb.AppendFormat(ci, "isrc:{0:G6},ac={1:G6},f={2:G6};", ISrc.Dc, ISrc.Ac, ISrc.Hz);
+            if(ISrc != null) sb.AppendFormat(ci, "isrc:{0:G6},ac={1:G6},f={2:G6}{3};", ISrc.Dc, ISrc.Ac, ISrc.Hz, ISrc.Ph != 0 ? string.Format(ci, ",ph={0:G6}", ISrc.Ph) : "");
             if(VSrcA != null) sb.AppendFormat(ci, "avsrc:{0:G6};", VSrcA.Dc);
             if(!double.IsInfinity(RLoadA)) sb.AppendFormat(ci, "aload:{0:G6};", RLoadA);
             return sb.ToString();
