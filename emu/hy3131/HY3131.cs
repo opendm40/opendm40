@@ -21,6 +21,12 @@
 // Frame: cmd = (reg << 1) | rd, MSB first; a read has one extra SCK pulse after
 // the command, then MISO is sampled with SCK low before each pulse; registers
 // auto-increment. With CS high, DO carries the IRQ (INTF & INTE).
+// Hardware SPI (fw-rs hy3131.rs: SPI2 is the bus): HY3131SpiPort, registered
+// on the GD32 SPI2 controller (Renode's STM32SPI "spi3" @ 0x40003C00), hands
+// each byte to HY3131.SpiByte, which runs the same bit engine for 8 mode-0
+// clocks (sample DO, rising, falling). CS stays the GPIO; the read-period
+// pulse fw-rs makes on the PC10 GPIO between SPI bytes lands in the same
+// engine (so would the extra clocks of a shifted framing).
 //
 using System;
 using System.Collections.Generic;
@@ -1487,7 +1493,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             Core.Reset(Now);
             selected = false; sck = false; mosi = false;
             rising = 0; falling = 0; shift = 0; cmdDone = false; reg = 0; rd = false; wbyte = 0;
-            Transfers = 0;
+            Transfers = 0; SpiBytes = 0;
             calLoaded = false;
         }
 
@@ -1655,8 +1661,31 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         private void DriveMiso(bool b)
         {
+            doLevel = b;
             ((IGPIOReceiver)portC).OnGPIO(misoPin, b);
         }
+
+        /// One byte on a hardware SPI in mode 0 (HY3131SpiPort): per bit, MSB
+        /// first, the master samples DO, puts the bit on DI and clocks a rising
+        /// then a falling edge. CS is the GPIO as on the bit-banged bus; with CS
+        /// high the chip ignores the clock and the master reads the IRQ level.
+        public byte SpiByte(byte tx)
+        {
+            SpiBytes++;
+            if(!selected || Core == null) return doLevel ? (byte)0xFF : (byte)0x00;
+            var rx = 0;
+            for(var i = 7; i >= 0; i--)
+            {
+                rx = (rx << 1) | (doLevel ? 1 : 0);
+                mosi = ((tx >> i) & 1) != 0;
+                OnRising();
+                OnFalling();
+            }
+            return (byte)rx;
+        }
+
+        /// Bytes clocked through SpiByte (hardware SPI back end).
+        public ulong SpiBytes { get; private set; }
 
         /// The meter's calibration record in flash (0x080C0000: crc, ~crc, version 1, data;
         /// DMM calibration at +0x168) is loaded once, on the first SPI transfer.
@@ -1691,8 +1720,28 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private readonly IMachine machine;
         private readonly INumberedGPIOOutput portC;
         private readonly int misoPin;
-        private bool selected, sck, mosi, cmdDone, rd, calLoaded;
+        private bool selected, sck, mosi, cmdDone, rd, calLoaded, doLevel;
         private int rising, falling, reg, wbyte, readIdx;
         private byte shift, curByte;
+    }
+}
+
+namespace Antmicro.Renode.Peripherals.SPI
+{
+    // The HY3131 as the slave of a hardware SPI controller (dm40.repl: on spi3 =
+    // GD32 SPI2, PC10/11/12 AF6). Only the byte path: chip select, the IRQ level
+    // and the bit-banged frames stay with the HY3131 peripheral itself.
+    public class HY3131SpiPort : ISPIPeripheral
+    {
+        public HY3131SpiPort(Antmicro.Renode.Peripherals.Miscellaneous.HY3131 chip)
+        {
+            this.chip = chip;
+        }
+
+        public byte Transmit(byte data) => chip.SpiByte(data);
+        public void FinishTransmission() { }
+        public void Reset() { }
+
+        private readonly Antmicro.Renode.Peripherals.Miscellaneous.HY3131 chip;
     }
 }

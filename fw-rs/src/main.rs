@@ -12,6 +12,7 @@ mod msc;
 mod spiflash;
 mod hy3131;
 mod hy3131_tables;
+mod hyspi;
 mod lcd;
 mod logger;
 mod ad2exp;
@@ -612,6 +613,22 @@ fn main() -> ! {
                     scpi::Dbg::Reset => {
                         reset_at = Some(now + 50);
                         false
+                    }
+                    scpi::Dbg::HySpi(n, div) => {
+                        // Bus self-test (hyspi.rs): the DMM is paused and its
+                        // row rewritten afterwards; the logger owns the chip.
+                        if logger.active() {
+                            scpi.set_err("Settings conflict");
+                            false
+                        } else {
+                            app.dmm_power(&mut clk);
+                            let len = hyspi::self_test(n as u32, div, port.rsp_buf());
+                            port.respond_len(len);
+                            app.dmm.start(&mut clk);
+                            app.meter.reset();
+                            app.last_raw = None;
+                            false
+                        }
                     }
                     scpi::Dbg::Ad2(2, level, _, _) => {
                         log_draw = level;

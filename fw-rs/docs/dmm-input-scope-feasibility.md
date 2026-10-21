@@ -160,8 +160,10 @@ bit-bang loop. Realistic from the main loop: see 2.3.
 * **Pins.** PC10 / PC11 / PC12 are SPI3 SCK / MISO / MOSI on alternate
   function 6 in the STM32F4 pin map that the GD32F4xx follows (GD32 naming:
   **SPI2**, base 0x4000_3C00, APB1, VERIFIED in the UM memory map; the AF
-  assignment itself is in the GD32F427 datasheet, not in the UM at hand ->
-  INFERRED, confirmed by test 6.1). CS = PD2 stays a GPIO (no hardware-NSS
+  assignment VERIFIED in the GD32F450xx datasheet Rev1.1 table 5 (p. 29:
+  PC10 SPI2_SCK, PC11 SPI2_MISO, PC12 SPI2_MOSI, all AF6; same GD32F4xx pin
+  map as the F427), SPI2EN = RCU_APB1EN bit 15, SPI_CTL0 / SPI_STAT layout
+  per GD32F4xx UM V2.2 21.11.1 / 21.11.3; implemented, section 8). CS = PD2 stays a GPIO (no hardware-NSS
   framing is possible there; the UM's hardware NSS only toggles per transfer
   burst or per word in TI mode, neither matches a multi-byte HY3131 frame).
   SPI mode 0 (CK idle low, DO changes on the falling edge: datasheet 7.2
@@ -181,7 +183,9 @@ bit-bang loop. Realistic from the main loop: see 2.3.
   byte k (k >= 1) holds [1 blank or carry bit | 7 MSBs of data byte k], the
   next byte supplies the LSB. For the 3-byte AD2 read that is 5 bytes = 40
   clocks (the extra 7 clocks read into R06, harmless; "readout stops when CS
-  goes high"). Writes need no shift (7.2 (3)).
+  goes high"). Writes need no shift (7.2 (3)). **Implemented instead**
+  (section 8): the 9th clock as one GPIO pulse on PC10 between the SPI
+  bytes (the exact datasheet frame, no extra clocks).
 * **Cost.** At 3.125 MHz: flag check 3 bytes = 7.7 us, AD2 read 5 bytes =
   12.8 us, plus ~1-2 us of CS handling: **~22 us per sample with the flag
   check, ~14 us blind**; at 6.25 MHz half of that. The 20-byte DMM AC poll
@@ -591,6 +595,82 @@ this doc. Step 1 is the go/no-go for every higher rate.
 | 23-28 | waveform (6.6) | AC mV, generator 50 Hz 100 mV rms + 50 mV DC: `log w.csv --source ad2 --rate 4800 -d 2`; AC V, 5 V 50 Hz: `log v.csv --source ad2 --rate 2400 -d 2` | plot value vs t_s: amplitude and mean vs the DMM's AC mV / DC mV readings (calibration not applied: expect < 1 %); AC V: no DC (coupling AC in the header) |
 | 28-30 | profile | during one 9600 session: `dm40scpi.py scpi "DBG:PROF?"` | the longest main-loop passes while logging (what still stalls) |
 
-Not covered by this plan: SPI2 (6.1, E2) and the DC-coupled V row (6.5,
-E7): both need code that is not written yet.
+Not covered by this plan: the DC-coupled V row (6.5, E7), which needs code
+that is not written yet. SPI2 (6.1, E2): section 8.
+
+## 8. E2 implemented: the HY3131 on the hardware SPI2 (2026-10-22)
+
+Owner decision: no runtime switch between bit-bang and SPI2; if the hardware
+bus is reliable it is simply the bus. fw-rs now talks to the HY3131 over SPI2
+only; the bit-banged bus survives as a compile-time fallback (`--features
+hyspi-bitbang`) until the device check below passes, then it goes.
+
+### 8.1 What exists
+
+| piece | where | what |
+|---|---|---|
+| bus | `src/hy3131.rs` (`init_pins`, `spi::read` / `write`) | SPI2 @ 0x4000_3C00, PCLK1 50 MHz / 16 = **3.125 MHz**, master, mode 0 (CKPL = CKPH = 0), MSB first, 8 bit, software NSS; PC10 / PC11 / PC12 AF6 (VERIFIED, 2.2), OSPEED 25 MHz on SCK / MOSI; CS = PD2 GPIO. `read` / `write` keep their signatures, so the DMM, the AD2 logger, ad2exp and the sentinel all use it unchanged. Polled byte exchange (TBE, DATA, RBNE), TRANS idle before CS goes high. No buffers, no ISR. |
+| read period | `spi::read` | command byte on SPI2; wait TRANS = 0 (SCK low); PC10 MODER AF -> output (ODR bit = 0, the SPI idle level: no edge), one pulse (~100 ns high, ~100 ns low), back to AF; then the n data bytes (MOSI = 1 as on the bit-banged bus). The datasheet frame exactly (8 + 1 + 8n clocks), so the register after the frame sees what it saw before (its MSB fetched at the last falling edge). The "shift" alternative (cmd + n + 1 bytes, RX shifted one bit) is not used: it clocks 6 more bits of reg + n, which after the counter frame (R15..R1D) is R1E = INTF, clear-on-read. |
+| pin hand-over | `init_pins` | CS high first, SCK low as GPIO, SPI2 configured and enabled (drives SCK low), then AFRH, then MODER: SCK never moves while CS is high, CS never glitches (and the chip ignores CK while CS is high, DS 7.2 (6)). Only at init; no switching back at run time. |
+| CS timing | `spi::{begin,end}` | CS low -> first edge ~200 ns, last edge -> CS high ~100 ns, CS high >= ~500 ns between frames (the bit-banged bus had ~1 us; the datasheet gives no minimum). |
+| self-test | `src/hyspi.rs`, `DBG:HYSPI:SELF? n[,div]` | in the current row (run it in an AC row: AD2 on): reference = first read of R1F..R35 (INTE + the row: the HY3131 has no ID / version register); n x {read1(R20), read(R00,6) AD2 sign copy, read(R1F,23) = ref, write(R36, pattern) + read1(R36) = pattern}; reply `div,n,bad_r1,bad_r23,bad_w1,signbad,us_r1,us_r6,us_r23,us_w1`. `div` 8 / 16 / 32 runs that call at 6.25 / 3.125 / 1.5625 MHz (the margin probe), then back to /16. The write-pattern check is absolute (a consistently shifted bus fails it even though the reference would shift too). DMM paused and its row rewritten afterwards, refused while logging, n <= 2000. In the fallback build the same test runs on the bit-banged bus (div 0). |
+| fallback | Cargo feature `hyspi-bitbang` | the old bit-banged bus, nothing else changes. |
+| emulator | `emu/hy3131/HY3131.cs` (= `emu/peripherals/HY3131.cs`), `emu/dm40.repl` | `HY3131SpiPort` (ISPIPeripheral) on Renode's STM32SPI `spi3` @ 0x40003C00 hands each byte to `HY3131.SpiByte`, which runs the existing bit engine for 8 mode-0 clocks (sample DO, rising, falling); the GPIO pulse on PC10 lands in the same engine. Host tests (`emu/hy3131/tests`, "Hardware SPI byte path"): R1F..R35, R36 and live R00..R05 equal on bit-bang / SPI-pulse / SPI-shift, 256 SPI writes read back bit-banged, a 22-byte row written over SPI, INTF side effects of the frame tails, a byte with CS high is ignored. |
+
+### 8.2 Timing budget (why /16)
+
+Mode 0: the master changes MOSI and the chip changes DO after the falling
+edge; both sample at the rising edge, half a period later. The SPI crosses
+a CA-IS3741 isolator (~10-15 ns per direction, INFERRED, not from its
+datasheet).
+
+| | /8 = 6.25 MHz (80 ns half) | **/16 = 3.125 MHz (160 ns)** | /32 = 1.5625 MHz (320 ns) |
+|---|---|---|---|
+| DO path: SCK out through the isolator + TDODL <= 60 ns + back = ~80-90 ns, vs the half period | **-0 .. -10 ns** (fails or marginal) | **+70 ns** | +230 ns |
+| DI setup TDISET >= 60 ns (+ channel skew, few ns) | +15 ns | +95 ns | +255 ns |
+| TCKLO >= 60 / TCKHI >= 20 ns | ok | ok | ok |
+| byte | 1.28 us | 2.56 us | 5.12 us |
+
+So /16 is the bus; /8 is only probed (SELF? n,8) to see the real margin;
+/32 is the step back if /16 shows any error on the device.
+
+### 8.3 Emulator results (plumbing only, not the device)
+
+`emu/run.py fwrs --fast` (50 MIPS), DC V 1.2 V / AC V 0.5 V 50 Hz, both
+images built from this tree:
+
+| | SPI2 build | `hyspi-bitbang` build |
+|---|---|---|
+| READ? DC V / AC V | 1.19999 / 0.49990 | 1.20000 / 0.49995 |
+| SELF? 200 (AC V) at 16 / 8 / 32: bad_r1, bad_r23, bad_w1, signbad | 0 on all | 0 |
+| us per frame r1 / r6 / r23 / w1 | 5 / 7 / 11 / 6 (Renode quantum noise) | 156 / 435 / 1381 / 178 |
+| AD2 logger 2400 S/s, 10 s: measured, lost | 2364 S/s, 1.5 % | 2017 S/s, 15.9 % |
+| AD2 logger 9600 S/s, 10 s: measured, lost | 8806 S/s, 8.3 % | 2010 S/s, 79 % |
+
+The SPI bytes are instantaneous in Renode, so the SPI2 us are CPU overhead
+under the emulator's quantum, not bus time; the bit-banged numbers scale ~4x
+down on the device (200 MHz). Device expectation from 2.2: flag check ~8 us,
+3-byte AD2 read ~13 us, the 20-byte AC poll ~60 us at 3.125 MHz, i.e. SELF?
+us_r1 ~ 6-8, us_r6 ~ 19-21, us_r23 ~ 62-66, us_w1 ~ 6-7.
+
+### 8.4 Device check (10 minutes)
+
+One build: the SPI2 image (this tree, `./build.sh native`). Meter on USB,
+`tools/dm40scpi.py`; a DC source (1-10 V) and a 50 Hz sine (a few V) for V-COM.
+
+| min | step | commands | pass |
+|---|---|---|---|
+| 0-1 | boots, DMM reads | DC V, 5 V in: `dm40scpi.py scpi "READ?"` x3 | the source's value (compare the last bit-banged session's reading of the same source) |
+| 1-4 | bus self-test | AC V, sine in: `scpi "DBG:HYSPI:SELF? 2000"`, then `"DBG:HYSPI:SELF? 2000,32"`, then `"DBG:HYSPI:SELF? 2000,8"` | /16 and /32: every bad_* and signbad = 0, us_r1 ~6-8, us_r6 ~19-21 (8.3). /8: record the counts (errors there are the expected margin answer, not a failure) |
+| 4-6 | DMM functions | DC V, AC V (sine), ohm (a resistor), FREQ (the sine: the 9-byte counter frame) - `READ?` each | readings as on the bit-bang firmware, no flicker / no stuck reading |
+| 6-9 | logger | AC mV or AC V: `dm40scpi.py log s9.csv --source ad2 --rate 9600 -d 10` and `--rate 2400` | lost well below the bit-bang emulator figures; signbad (`bad`) 0 |
+| 9-10 | profile | `scpi "DBG:PROF?"` on the DMM page | the DMM poll no longer near the top |
+
+If step 1 or 2 fails at /16 and /32 (bad_w1 > 0, nonsense readings), flash
+the fallback build `./build.sh native --features hyspi-bitbang` (identical
+otherwise) to keep the meter usable, and report the SELF? lines: bad_w1 with
+good bad_r23 points at the read-period pulse (PULSE_LO / CS_SETUP in
+hy3131.rs), all bad at every divider at the pin mux / AF, errors only at /16
+at the isolator margin (then make /32 the bus). On a pass: remove the
+fallback feature and the bit-banged code.
 

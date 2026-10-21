@@ -105,6 +105,47 @@ namespace Hy3131Tests
 
         public byte Read1(int reg) => Read(reg, 1)[0];
 
+        // ---- hardware SPI (fw-rs hy3131.rs SPI2 bus; shift = an alternative
+        // framing, kept to document the model) ----
+        // Bytes go through HY3131SpiPort as Renode's SPI controller hands them
+        // over; CS and the read-period pulse are GPIO, as in the firmware.
+        private Antmicro.Renode.Peripherals.SPI.HY3131SpiPort port;
+        public byte SpiX(byte b) => (port ??= new Antmicro.Renode.Peripherals.SPI.HY3131SpiPort(Chip)).Transmit(b);
+
+        public void HwWrite(int reg, params byte[] data)
+        {
+            PortD.Drive(2, false);
+            SpiX((byte)(reg << 1));
+            foreach(var b in data) SpiX(b);
+            PortD.Drive(2, true);
+        }
+
+        /// shift false: command byte, one GPIO pulse on PC10, n bytes;
+        /// shift true: command + n + 1 bytes, the stream shifted left by one bit.
+        public byte[] HwRead(int reg, int n, bool shift)
+        {
+            var r = new byte[n];
+            PortD.Drive(2, false);
+            SpiX((byte)((reg << 1) | 1));
+            if(shift)
+            {
+                var prev = SpiX(0xFF);
+                for(var i = 0; i < n; i++)
+                {
+                    var cur = SpiX(0xFF);
+                    r[i] = (byte)((prev << 1) | (cur >> 7));
+                    prev = cur;
+                }
+            }
+            else
+            {
+                PortC.Drive(10, true); PortC.Drive(10, false);
+                for(var i = 0; i < n; i++) r[i] = SpiX(0xFF);
+            }
+            PortD.Drive(2, true);
+            return r;
+        }
+
         public int ReadS24(int reg)
         {
             var b = Read(reg, 3);

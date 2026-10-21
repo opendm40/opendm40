@@ -1,29 +1,52 @@
-//! HY3131 DMM front end over bit-banged SPI (firmware/re/analysis/hy3131_v2_6.h).
+//! HY3131 DMM front end on PC10 / PC11 / PC12 + CS PD2
+//! (firmware/re/analysis/hy3131_v2_6.h).
 //!
 //! SCK = PC10, MOSI = PC12, MISO = PC11, CS = PD2 (active low). MSB first, SCK
 //! idle low, CS low for the whole transfer. Command byte = (reg << 1) | rd;
 //! registers auto-increment. A read has one extra SCK pulse after the command
 //! byte (the datasheet's read period), then MISO is sampled with SCK low before
 //! each clock pulse.
+//!
+//! The bus is the GD32's hardware SPI2 (docs/dmm-input-scope-feasibility.md
+//! 2.2 and 8): 0x4000_3C00 on APB1 (50 MHz), PC10 / PC11 / PC12 on AF6
+//! (GD32F450xx datasheet Rev1.1 table 5; SPI2EN = RCU_APB1EN bit 15, SPI_CTL0
+//! / SPI_STAT per GD32F4xx UM V2.2 21.11), master, mode 0 (HY3131 DS 7.1 /
+//! 7.2: CK idle low, DI latched on the rising edge, DO changes after the
+//! falling edge), software NSS, 8-bit frames, PSC /16 = 3.125 MHz (`DIV`).
+//! CS stays a GPIO. Timing budget at 3.125 MHz (160 ns per half period):
+//! DO path = isolator out (CA-IS3741, ~10-15 ns, INFERRED) + TDODL <= 60 ns
+//! + isolator back ~10-15 ns = ~80-90 ns before the MCU samples at the next
+//! rising edge: ~70 ns margin; DI setup 160 ns vs TDISET >= 60 ns; TCKLO /
+//! TCKHI 160 vs 60 / 20 ns. /8 (6.25 MHz, 80 ns) would leave the DO path
+//! no margin; `DBG:HYSPI:SELF? n,8` measures it, nothing runs there.
+//!
+//! The read period (the 9th clock) cannot come out of a byte-wide SPI: the
+//! command byte goes out on SPI2, PC10 is switched to GPIO output for one
+//! hand-made SCK pulse (ODR = 0 = the SPI idle level: no edge on either
+//! switch) and back to AF, then the data bytes. The exact datasheet frame,
+//! the same clocks as the bit-banged bus had (the register after the frame
+//! gets its MSB fetched by the last falling edge, as before).
+//!
+//! Fallback build: feature `hyspi-bitbang` keeps the old bit-banged GPIO bus
+//! (~1 us half period) until the hardware bus is verified on the device.
 
-use crate::mmio::{modify32, r32, spin, w32};
+#[cfg(feature = "hyspi-bitbang")]
+use crate::mmio::w32;
+use crate::mmio::{modify32, r32, spin};
+#[cfg(not(feature = "hyspi-bitbang"))]
+use crate::mmio::{w16, w32};
 
 const GPIOC: u32 = 0x4002_0800;
 const GPIOD: u32 = 0x4002_0C00;
 const MODER: u32 = 0x00;
 const OTYPER: u32 = 0x04;
 const PUPD: u32 = 0x0C;
-const IDR: u32 = 0x10;
 const BOP: u32 = 0x18;
 
 const SCK: u32 = 10; // PC10
 const MISO: u32 = 11; // PC11
 const MOSI: u32 = 12; // PC12
 const CS: u32 = 2; // PD2
-
-/// Half SCK period in spin iterations (~1 us at 200 MHz, well inside the
-/// HY3131 SPI timing).
-const HALF: u32 = 40;
 
 pub const R_AD1: u8 = 0x00;
 pub const R_INTF: u8 = 0x1E;
@@ -47,11 +70,6 @@ fn set(port: u32, pin: u32, high: bool) {
     unsafe { w32(port + BOP, bit) };
 }
 
-#[inline(always)]
-fn miso() -> bool {
-    (unsafe { r32(GPIOC + IDR) } & (1 << MISO)) != 0
-}
-
 fn out_pin(port: u32, pin: u32) {
     unsafe {
         modify32(port + MODER, 3 << (2 * pin), 1 << (2 * pin));
@@ -60,7 +78,11 @@ fn out_pin(port: u32, pin: u32) {
     }
 }
 
-/// Configure the four bus pins (other pins on these ports are left alone).
+/// Configure the bus (other pins on these ports are left alone): CS high
+/// first and for good, SCK low as a GPIO, then SPI2 configured and enabled
+/// (it drives SCK low, its idle level) before the pins are handed to it, so
+/// SCK never moves and CS never glitches (the HY3131 ignores CK while CS is
+/// high anyway and only needs CK low when CS falls, DS 7.2 (6)).
 pub fn init_pins() {
     set(GPIOD, CS, true);
     set(GPIOC, SCK, false);
@@ -68,62 +90,238 @@ pub fn init_pins() {
     out_pin(GPIOC, MOSI);
     out_pin(GPIOD, CS);
     unsafe { modify32(GPIOC + MODER, 3 << (2 * MISO), 0) }; // input
+    #[cfg(not(feature = "hyspi-bitbang"))]
+    spi::init(DIV);
 }
 
-fn clock() {
-    set(GPIOC, SCK, true);
-    spin(HALF);
-    set(GPIOC, SCK, false);
-    spin(HALF);
+/// The SPI2 prescaler of the bus (8 / 16 / 32 = 6.25 / 3.125 / 1.5625 MHz);
+/// 0 = the bit-banged fallback build.
+#[cfg(not(feature = "hyspi-bitbang"))]
+pub const DIV: u8 = 16;
+#[cfg(feature = "hyspi-bitbang")]
+pub const DIV: u8 = 0;
+
+/// Divider for the next frames (DBG:HYSPI:SELF? only; the caller restores
+/// `DIV`). No-op in the bit-banged build.
+pub fn set_div(div: u8) {
+    #[cfg(not(feature = "hyspi-bitbang"))]
+    spi::set_div(div);
+    #[cfg(feature = "hyspi-bitbang")]
+    let _ = div;
 }
 
-fn tx(b: u8) {
-    for i in (0..8).rev() {
-        set(GPIOC, MOSI, b & (1 << i) != 0);
+#[cfg(not(feature = "hyspi-bitbang"))]
+pub use spi::{read, write};
+#[cfg(feature = "hyspi-bitbang")]
+pub use bb::{read, write};
+
+#[cfg(not(feature = "hyspi-bitbang"))]
+mod spi {
+    use super::*;
+
+    const RCU_APB1EN: u32 = 0x4002_3840;
+    const RCU_SPI2EN: u32 = 1 << 15;
+    const SPI2: u32 = 0x4000_3C00;
+    const SPI_CTL0: u32 = SPI2 + 0x00;
+    const SPI_STAT: u32 = SPI2 + 0x08;
+    const SPI_DATA: u32 = SPI2 + 0x0C;
+    const SPI_I2SCTL: u32 = SPI2 + 0x1C;
+    const STAT_RBNE: u32 = 1 << 0;
+    const STAT_TBE: u32 = 1 << 1;
+    const STAT_TRANS: u32 = 1 << 7;
+    /// Master (MSTMOD), software NSS high (SWNSSEN | SWNSS), MSB first, 8 bit,
+    /// CKPL = CKPH = 0 (mode 0); PSC goes into bits 5:3.
+    const CTL0_BASE: u32 = (1 << 9) | (1 << 8) | (1 << 2);
+    const CTL0_SPIEN: u32 = 1 << 6;
+    const OSPEED: u32 = 0x08;
+    const AFRH: u32 = 0x24;
+    const PINS2: u32 = (3 << (2 * SCK)) | (3 << (2 * MISO)) | (3 << (2 * MOSI));
+    const AF_MASK: u32 = (0xF << (4 * (SCK - 8))) | (0xF << (4 * (MISO - 8))) | (0xF << (4 * (MOSI - 8)));
+    const AF6: u32 = (6 << (4 * (SCK - 8))) | (6 << (4 * (MISO - 8))) | (6 << (4 * (MOSI - 8)));
+    const MODER_AF: u32 = (2 << (2 * SCK)) | (2 << (2 * MISO)) | (2 << (2 * MOSI));
+    /// OSPEED 01 = 25 MHz for SCK / MOSI: enough for 3.125 (and 6.25) MHz,
+    /// softer edges into the isolator than 50 / 200 MHz.
+    const OSPEED_PINS: u32 = (3 << (2 * SCK)) | (3 << (2 * MOSI));
+    const OSPEED_SPI: u32 = (1 << (2 * SCK)) | (1 << (2 * MOSI));
+    /// CS low -> first SCK edge, last SCK edge -> CS high, CS high time
+    /// (spin iterations, ~25 ns each at 200 MHz): ~200 / ~100 / ~500 ns.
+    /// The chip switches DO to IRQ output at CS high; no minimum given.
+    const CS_SETUP: u32 = 8;
+    const CS_HOLD: u32 = 4;
+    const CS_IDLE: u32 = 20;
+    /// The hand-made read-period pulse: high >= TCKHI 20 ns, then low long
+    /// enough for DO (TDODL 60 ns + the isolator both ways) before the
+    /// SPI's first sampling edge (another half period later).
+    const PULSE_HI: u32 = 4;
+    const PULSE_LO: u32 = 4;
+
+    const fn psc_of(div: u8) -> u32 {
+        match div {
+            8 => 2,
+            32 => 4,
+            _ => 3,
+        }
+    }
+
+    fn config(div: u8) {
+        let cfg = CTL0_BASE | (psc_of(div) << 3);
+        unsafe {
+            w32(SPI_CTL0, CTL0_BASE);
+            modify32(SPI_I2SCTL, 1 << 11, 0); // SPI, not I2S
+            w32(SPI_CTL0, cfg);
+            w32(SPI_CTL0, cfg | CTL0_SPIEN);
+            let _ = r32(SPI_DATA); // drop a stale byte
+        }
+    }
+
+    pub(super) fn init(div: u8) {
+        unsafe {
+            modify32(RCU_APB1EN, 0, RCU_SPI2EN);
+            let _ = r32(RCU_APB1EN); // clock on before the first register access
+        }
+        config(div);
+        unsafe {
+            modify32(GPIOC + OSPEED, OSPEED_PINS, OSPEED_SPI);
+            modify32(GPIOC + AFRH, AF_MASK, AF6);
+            modify32(GPIOC + MODER, PINS2, MODER_AF);
+        }
+    }
+
+    /// Between frames only: SPI2 idle, SCK low; a disabled SPI2 for a few
+    /// cycles leaves SCK as it was (CS is high, the chip ignores it).
+    pub(super) fn set_div(div: u8) {
+        idle();
+        config(div);
+    }
+
+    fn idle() {
+        unsafe { while r32(SPI_STAT) & STAT_TRANS != 0 {} }
+    }
+
+    #[inline(always)]
+    fn xfer(b: u8) -> u8 {
+        unsafe {
+            while r32(SPI_STAT) & STAT_TBE == 0 {}
+            w16(SPI_DATA, b as u16);
+            while r32(SPI_STAT) & STAT_RBNE == 0 {}
+            r32(SPI_DATA) as u8
+        }
+    }
+
+    fn begin() {
+        set(GPIOD, CS, false);
+        spin(CS_SETUP);
+    }
+
+    fn end() {
+        idle();
+        spin(CS_HOLD);
+        set(GPIOD, CS, true);
+        spin(CS_IDLE);
+    }
+
+    /// Write `data` to `reg`, `reg + 1`, ..
+    pub fn write(reg: u8, data: &[u8]) {
+        begin();
+        xfer(reg << 1);
+        for &b in data {
+            xfer(b);
+        }
+        end();
+    }
+
+    /// Read `buf.len()` registers from `reg`.
+    pub fn read(reg: u8, buf: &mut [u8]) {
+        begin();
+        xfer((reg << 1) | 1);
+        // Read period: SPI2 idle (SCK low after the 8th clock), PC10 to GPIO
+        // output (ODR 0: stays low), one pulse, back to AF.
+        idle();
+        unsafe {
+            modify32(GPIOC + MODER, 3 << (2 * SCK), 1 << (2 * SCK));
+            set(GPIOC, SCK, true);
+            spin(PULSE_HI);
+            set(GPIOC, SCK, false);
+            spin(PULSE_LO);
+            modify32(GPIOC + MODER, 3 << (2 * SCK), 2 << (2 * SCK));
+        }
+        // MOSI 1 during the data phase, as on the bit-banged bus (the R bit).
+        for b in buf.iter_mut() {
+            *b = xfer(0xFF);
+        }
+        end();
+    }
+}
+
+#[cfg(feature = "hyspi-bitbang")]
+mod bb {
+    use super::*;
+
+    const IDR: u32 = 0x10;
+    /// Half SCK period in spin iterations (~1 us at 200 MHz, well inside the
+    /// HY3131 SPI timing).
+    const HALF: u32 = 40;
+
+    #[inline(always)]
+    fn miso() -> bool {
+        (unsafe { r32(GPIOC + IDR) } & (1 << MISO)) != 0
+    }
+
+    fn clock() {
+        set(GPIOC, SCK, true);
         spin(HALF);
-        clock();
+        set(GPIOC, SCK, false);
+        spin(HALF);
     }
-}
 
-fn rx() -> u8 {
-    let mut b = 0u8;
-    for _ in 0..8 {
-        b = (b << 1) | miso() as u8;
-        clock();
+    fn tx(b: u8) {
+        for i in (0..8).rev() {
+            set(GPIOC, MOSI, b & (1 << i) != 0);
+            spin(HALF);
+            clock();
+        }
     }
-    b
-}
 
-fn begin() {
-    set(GPIOC, SCK, false);
-    set(GPIOD, CS, false);
-    spin(HALF);
-}
-
-fn end() {
-    spin(HALF);
-    set(GPIOD, CS, true);
-    set(GPIOC, SCK, false);
-    spin(HALF);
-}
-
-pub fn write(reg: u8, data: &[u8]) {
-    begin();
-    tx(reg << 1);
-    for &b in data {
-        tx(b);
+    fn rx() -> u8 {
+        let mut b = 0u8;
+        for _ in 0..8 {
+            b = (b << 1) | miso() as u8;
+            clock();
+        }
+        b
     }
-    end();
-}
 
-pub fn read(reg: u8, buf: &mut [u8]) {
-    begin();
-    tx((reg << 1) | 1);
-    clock(); // read period
-    for b in buf.iter_mut() {
-        *b = rx();
+    fn begin() {
+        set(GPIOC, SCK, false);
+        set(GPIOD, CS, false);
+        spin(HALF);
     }
-    end();
+
+    fn end() {
+        spin(HALF);
+        set(GPIOD, CS, true);
+        set(GPIOC, SCK, false);
+        spin(HALF);
+    }
+
+    pub fn write(reg: u8, data: &[u8]) {
+        begin();
+        tx(reg << 1);
+        for &b in data {
+            tx(b);
+        }
+        end();
+    }
+
+    pub fn read(reg: u8, buf: &mut [u8]) {
+        begin();
+        tx((reg << 1) | 1);
+        clock(); // read period
+        for b in buf.iter_mut() {
+            *b = rx();
+        }
+        end();
+    }
 }
 
 pub fn read1(reg: u8) -> u8 {
