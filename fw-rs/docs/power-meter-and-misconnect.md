@@ -1207,3 +1207,24 @@ Table 2.3.1; checked 2026-10-22):
   no vendor duty-cycle figure, so the common hand-held DMM practice of >= 30 s limits at the top
   range), the 47.5 ohm path protected only by the 10 A fuse -> the OVERLOAD rule of 4.3 matters
   (a uA/mA-range overload heats the 47.5 ohm resistor long before the fuse opens).
+
+### HPF bypass probe (device 7889e6c, 2026-10-22)
+
+Question: can the RMS block's high-pass filter be turned off so X·Y includes DC (hardware DC power)?
+The datasheet (13.2) defines X / Y as AD2 / AD3 "after the High Pass Filter" and documents no control
+bit for it. Probed the reserved bits of the related registers on the device: power mode, AC method,
+6 V range, 1.000 V DC on V-COM, R34 frozen at YY (DBG:POW:STAT YY), each bit set alone with
+DBG:POW:POKE, 2 results each. Baseline: RMS (ΣY²/N) ≈ 1830 codes (noise), LPF = 21592 codes (the DC).
+With the HPF bypassed RMS would be ≈ 21592² ≈ 4.7e8.
+
+| poke | register / bit | RMS | LPF |
+|---|---|---|---|
+| 20,204 | R34 bit 6 | 1820 / 1863 | 21595 |
+| 20,142 | R34 bit 1 | 1803 / 1825 | 21600 |
+| 20,141 | R34 bit 0 | 1830 / 1822 | 21593 |
+| 6,192 | R26 bit 6 | 1814 / 1826 | 21595 |
+| 21,85 | R35 bit 0 | 1816 / 1821 | 21596 |
+| 21,86 | R35 bit 1 | 1828 / 1831 | 21589 |
+
+No reserved bit bypasses the HPF: DC power stays a software product (LPF means or AD1), the hardware
+multiplier covers the AC part only. Overrides cleared afterwards (POKE CLEAR), meter back on DC V.
