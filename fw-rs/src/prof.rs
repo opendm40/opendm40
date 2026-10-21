@@ -76,11 +76,13 @@ pub const DCHART: usize = 18;
 /// window, on the frame's pass) or one `step` slice, and the spectrum ->
 /// columns render.
 pub const FFT: usize = 19;
-pub const N: usize = 20;
+/// DMM page fast bargraph (UF-30, bargraph.rs update in App::reading).
+pub const DBAR: usize = 20;
+pub const N: usize = 21;
 
 const NAMES: [&str; N] = [
     "usb", "scpi", "csv", "tick", "touch", "gesture", "scope", "bt", "dmm", "s.acq", "s.frame", "s.meas", "s.mtxt",
-    "s.status", "s.labels", "x1", "x2", "d.read", "d.chart", "s.fft",
+    "s.status", "s.labels", "x1", "x2", "d.read", "d.chart", "s.fft", "d.bar",
 ];
 
 #[derive(Clone, Copy)]

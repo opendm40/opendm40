@@ -476,7 +476,9 @@ impl App {
         match self.view {
             View::Dmm => {
                 self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
-                ui::history(&self.hist, self.hist_n, self.hist_new);
+                if !self.dmm_view.bar_on {
+                    ui::history(&self.hist, self.hist_n, self.hist_new);
+                }
                 self.hv_shown = false;
             }
             View::DmmScope => {
@@ -550,6 +552,7 @@ impl App {
                 let vals = [
                     core::str::from_utf8(&vb[..n]).unwrap_or(""),
                     crate::meter::SMOOTH_NAMES[self.meter.smoothing() as usize],
+                    if self.dmm_view.bar_on { "Bargraph" } else { "History" },
                     if self.sp.swipes { "Top bar" } else { "Off (stock)" },
                     if self.sp.press_fx { "ON" } else { "OFF (stock)" },
                     crate::scope_ui::TAP_NAMES[self.sp.tap_mode.min(2) as usize],
@@ -1252,7 +1255,8 @@ impl App {
         p[11] = p11;
         self.sp_persist_ext(&mut p[crate::persist::W_SCOPE_EXT..]);
         // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
-        p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing());
+        p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing())
+            | if self.dmm_view.bar_on { 0 } else { crate::meter::EXT_HISTORY_ROW };
         p
     }
 
@@ -1301,6 +1305,7 @@ impl App {
         let ext = crate::meter::ext_settings(p[crate::persist::W_DMM_EXT]);
         self.dmm.set_rate(ext.rate);
         self.meter.set_smoothing(ext.smooth);
+        self.dmm_view.bar_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_HISTORY_ROW == 0;
         let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
         self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
         let mode = if same_session { restore_func(rec.version, p[2] as u8) } else { 1 };
@@ -1424,6 +1429,13 @@ impl App {
         if dmm_view && (u.show.is_some() || (hv_changed && self.view == View::DmmScope)) {
             self.draw_reading();
             self.hold_shown = self.shown_state();
+        }
+        if dmm_view && self.view == View::Dmm {
+            // UF-30: the bar moves with every conversion (raw, pre-REL; also
+            // while HOLD / AutoHold freeze the digits).
+            crate::prof::enter(crate::prof::DBAR);
+            self.dmm_view.bar_update(&raw);
+            crate::prof::exit(crate::prof::DBAR);
         }
         if dmm_view {
             let hv = self.view == View::Dmm && l.mode <= 1 && !l.main.ol && l.si.abs() >= 100.0;
@@ -1684,7 +1696,7 @@ impl App {
                 self.beep(now, 30);
                 self.tap(clk, p.x, p.y);
             }
-            Gesture::LongPress(p) if self.view == View::Dmm && (153..172).contains(&p.y) => {
+            Gesture::LongPress(p) if self.view == View::Dmm && !self.dmm_view.bar_on && (153..172).contains(&p.y) => {
                 captured = true;
                 self.hist_n = 0;
                 self.beep(now, 300);
@@ -1933,7 +1945,7 @@ impl App {
                 self.meter.stats.rec = on;
                 self.chart_dirty = true;
             }
-            View::Dmm if (153..172).contains(&y) => {
+            View::Dmm if !self.dmm_view.bar_on && (153..172).contains(&y) => {
                 // History row: record the shown value (not OL). While HOLD
                 // (or an AutoHold capture) that is the frozen value (UF-27:
                 // owners hold a reading, then store it).
@@ -2227,9 +2239,10 @@ impl App {
                         let s = Smooth::from_u8((self.meter.smoothing() as u8 + 1) % 3).unwrap_or(Smooth::Off);
                         self.meter.set_smoothing(s);
                     }
-                    Some(2) => self.sp.swipes = !self.sp.swipes,
-                    Some(3) => self.sp.press_fx = !self.sp.press_fx,
-                    Some(4) => {
+                    Some(2) => self.dmm_view.bar_on = !self.dmm_view.bar_on,
+                    Some(3) => self.sp.swipes = !self.sp.swipes,
+                    Some(4) => self.sp.press_fx = !self.sp.press_fx,
+                    Some(5) => {
                         // Scope tap step: Corners -> Halves (stock) -> Off.
                         use crate::scope_ui::{TAP_CORNERS, TAP_HALVES, TAP_OFF};
                         self.sp.tap_mode = match self.sp.tap_mode {
@@ -2238,11 +2251,11 @@ impl App {
                             _ => TAP_CORNERS,
                         };
                     }
-                    Some(5) => {
+                    Some(6) => {
                         self.show(View::Device, clk);
                         return;
                     }
-                    Some(6) => {
+                    Some(7) => {
                         self.help_page = 0;
                         self.show(View::Help, clk);
                         return;

@@ -269,8 +269,8 @@ Code work (in this order):
 - [ ] UF-24/30/31/36/38/41 (P2) §3-§10, worked 2026-10-21 (decisions in docs/user-feedback.md):
   - [ ] UF-24 tempco compensation: parked, documented (needs FR-36 + a per-unit two-temperature
         characterisation; the only always-on sensor is the MCU die, biased by the rails, UF-02).
-  - [ ] UF-30 fast bargraph: widget src/bargraph.rs + tools/bargraph-test (bf17876); not wired:
-        DmmView hook (place + feed from App::reading). Rate = the AD1 conversion rate (10/s FAST /
+  - [x] UF-30 fast bargraph: widget src/bargraph.rs + tools/bargraph-test (bf17876); wired 2026-10-21
+        (see the DMM batch below). Rate = the AD1 conversion rate (10/s FAST /
         moving, 2.5/s steady); >= 40/s needs OSR 0x13 + a firmware average for the readout.
   - [x] UF-31 stylus: no sensitivity register (stock writes only D1 01 / D2 04 / D1 09); documented.
         Possible firmware cause found: touch.rs Debounce drops a touch whose only pressed frame is
@@ -481,3 +481,9 @@ Emulator (emu/):
       settles at 0.64 mV (the model's noise floor). The stock escapes it because its mV-first AUTO steps
       to AC mV (DC coupled in the model, no coupling term); fw-rs stays on the 6 V range (AUTO+, UF-21).
       Fix belongs in emu/hy3131/HY3131.cs (charge vc towards the same DcQ-folded level).
+- [x] UF-30 bargraph wired: in the history row's place (8,154,464,18; the 7 px strip under the digits
+      cannot keep 3 px from the F78 ink and the history boxes), Settings 2/2 "DMM row" Bargraph (default) /
+      History (p[38] bit 10). Fed in App::reading with the raw reading (pre-REL, pre-smoothing; keeps
+      moving while HOLD / AutoHold freeze the digits); bipolar in DC V / mV / A (not AC+DC), unipolar
+      elsewhere, empty track in temperature, red track on OL. History taps / long press only in History
+      mode. DBG:PROF? section "d.bar". (verify on device: d.bar cost, bar at 10/s moving / 2.5/s steady)

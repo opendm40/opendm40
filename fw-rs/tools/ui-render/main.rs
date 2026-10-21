@@ -22,6 +22,8 @@
 mod host;
 pub use host::mmio;
 
+#[path = "../../src/bargraph.rs"]
+mod bargraph;
 #[path = "../../src/clock.rs"]
 mod clock;
 #[path = "../../src/dialog.rs"]
@@ -988,13 +990,20 @@ fn main() {
                     host::reset(0);
                     let mut dv = ui::DmmView::new();
                     dv.label = *label;
+                    // UF-30: every other chip variant with the bargraph
+                    // instead of the history row.
+                    dv.bar_on = k % 2 == 0;
                     dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, r.mode == 10);
                     // History / chart / statistics: the case's own value (an
                     // OL case: 1.0 in its unit and resolution).
                     let v = if r.main.ol { 1.0 } else { r.main.v };
                     let dec = r.main.dec;
                     let hist = [(v, dec, r.main.unit); 5];
-                    ui::history(&hist, 5, 4);
+                    if dv.bar_on {
+                        dv.bar_update(&r);
+                    } else {
+                        ui::history(&hist, 5, 4);
+                    }
                     dv.reading(&r, hold, lim);
                     ui::status_right(&status(0));
                     ui::hv_warning(hv_of(&r) >= 2);
@@ -1191,9 +1200,9 @@ fn main() {
     let page_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
     for (page, vals) in [
         (0u8, vec!["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto (per view)", "Hold 5000 ms", ""]),
-        (1, vec!["SLOW (n/a here)", "HIGH", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]),
-        (1, vec!["FAST  37/s", "LOW", "Off (stock)", "ON", "Corners", "", ""]),
-        (1, vec!["MED  --/s", "OFF", "Off (stock)", "ON", "Off", "", ""]),
+        (1, vec!["SLOW (n/a here)", "HIGH", "Bargraph", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]),
+        (1, vec!["FAST  37/s", "LOW", "History", "Off (stock)", "ON", "Corners", "", ""]),
+        (1, vec!["MED  --/s", "OFF", "Bargraph", "Off (stock)", "ON", "Off", "", ""]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -1420,7 +1429,7 @@ fn main() {
         ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]);
         save(&out, "m01-settings");
         host::reset(0);
-        ui::settings(1, &["SLOW (n/a here)", "HIGH", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
+        ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));
@@ -1437,6 +1446,19 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d06-dmm-ohm-on");
+        // UF-30 bargraph: bipolar DC V (negative), unipolar ohm, overload.
+        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt)] {
+            host::reset(0);
+            let (r, _) = find(case);
+            let mut dv = ui::DmmView::new();
+            dv.draw_static(b, r.mode, false, false);
+            dv.bar_update(&r);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            let side = ui::Side { max: None, avg: None, min: None, rel: None, secs: None, rec: false };
+            ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, &side, r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
+            save(&out, file);
+        }
     }
 
     for (msg, (n, scene)) in &ck.seen {
