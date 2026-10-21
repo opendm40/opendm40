@@ -1002,6 +1002,8 @@ impl App {
             let st = self.status(now);
             match self.view {
                 View::Dmm => ui::status_right(&st),
+                View::Gen => ui::gen_status(&st),
+                View::Keypad if !matches!(self.kp_target, 3 | 4) => ui::gen_status(&st),
                 View::DmmScope => {
                     // REL and a limit verdict share a strip badge: alternate.
                     self.strip_alt = !self.strip_alt;
@@ -2076,7 +2078,10 @@ impl App {
             View::Scope => {}
             View::Gen => {
                 let mut st = self.gen.s;
-                if x < 243 && (40..82).contains(&y) {
+                if ui::gen_run_hit(x, y) {
+                    // RUN/STOP label: output on / off, as the RUN key.
+                    st.on = !st.on;
+                } else if x < 243 && (40..82).contains(&y) {
                     let k = Wave::ALL.iter().position(|&w| w == st.wave).unwrap_or(0);
                     st.wave = Wave::ALL[(k + 1) % 4];
                 } else if let Some(b) = ui::gen_box_hit(x, y) {
