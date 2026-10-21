@@ -194,7 +194,7 @@ Connection spec (`emu/run.py --dmm SPEC[@T]`, script lines `T dmm SPEC` or
 |---|---|
 | `vsrc:1.234[,ac=1.0,f=50,shape=sine|square|triangle,duty=0.3,rs=4700]` | voltage source V-COM: DC, AC rms, source resistance |
 | `isrc:0.0123[,ac=,f=,shape=,duty=,compl=10,ph=DEG]` | current source A-COM (compliance V); `ph`: phase of its AC part behind the V source's AC part (positive = current lags, inductive; PF = cos ph) |
-| `pow:230@50,i=1[,pf=0.8\|ph=DEG,dc=VDC,idc=IDC,f=HZ,shape=]` | power meter shorthand: V source (AC rms 230 at 50 Hz + dc) on V-COM and current source (AC rms 1 A at the same frequency + idc) into A, the current lagging by `ph` or `acos(pf)` (`pf < 0` = energy flowing out, P < 0; `ph` wins over `pf`); negative `idc` = negative DC power. With `emu/run.py --dmm` the last `@` is the time: write `pow:230,f=50,i=1` or `pow:230@50,i=1@0` |
+| `pow:230@50,i=1[,pf=0.8\|ph=DEG,dc=VDC,idc=IDC,f=HZ,shape=]` | power meter shorthand: V source (AC rms 230 at 50 Hz + dc) on V-COM and current source (AC rms 1 A at the same frequency + idc) into A, the current lagging by `ph` or `acos(pf)` (`pf < 0` = energy flowing out, P < 0; `ph` wins over `pf`); negative `idc` = negative DC power. Replaces only the V and A sources (other elements stay; prefix `open;` for a clean connection). With `emu/run.py --dmm` the last `@` is the time: write `pow:230,f=50,i=1` or `pow:230@50,i=1@0` |
 | `r:4700`, `short` (= `r:0`), `c:100e-9`, `diode:0.65[,rev=1]` | resistor, short, capacitor, diode (anode at V unless `rev`) between V and COM |
 | `tc:100`, `tcmv:4.096`, `tcopen` | type K thermocouple: hot junction C, or its mV, or connected but open |
 | `cj:25`, `die:35` (`die:none` = follows cj) | cold junction (jacks) and HY3131 die temperature |
