@@ -186,6 +186,29 @@ Code work (in this order):
       toasts, red REC in the status blocks, LOG:CSV ON|OFF / LOG:CSV?, power-off / reset commit the tail.
       Host writes are refused while recording; start refused ("Disk in use by PC - eject first") while
       a PC has the disk mounted.
+- [x] Compact binary logs, CSV only on read (owner 2026-10-21: "not CSV on the disk, RLE or a
+      standard compressed format; CSV only for export"). docs/compact-log-format.md: own DLG format
+      (adaptive Rice of delta-of-delta time + 6-digit value deltas, CRC chunk per commit) chosen over
+      gzip / sigrok / FLAC on measured data: 0.9..1.9 B per DMM reading vs ~21 B CSV (11..26x; 13 MB of
+      disk = 325 h at 10/s instead of 17 h); scope record 53 KB vs 692 KB.
+      - [x] src/dlog.rs codec + CSV generator; tools/dlog-test: decoded CSV byte-identical to the old
+            writer for 9 data sets, random access, truncation at every byte keeps every whole chunk, bit
+            flips contained. tools/dlog.py: standalone decoder (same bytes).
+      - [x] csvlog.rs records LOGnnn.DLG (same swipe / LOG:CSV UI); numbers shared with legacy LOGnnn.CSV;
+            fatren-test: md5 of the decoded CSV == the old writer's LOG000.CSV, cut sweeps, disk full.
+      - [x] scope "Save CSV" writes SCOPnnn.DLG (codes + map), CSV md5 == the old SCOPnnn.CSV.
+      - [x] Export: virtual LOGnnn.CSV / SCOPnnn.CSV on the read-only LUN 1 (dlog::refresh ->
+            vdisk::set_extra, refreshed when a recording ends / a delete / a host write ends);
+            SCPI MMEM:DATA? "<name>"[,off[,len]] (LOGnnn.CSV generated, any file raw);
+            tools/dm40scpi.py get LOG000.CSV. Gallery reads .DLG (exact counts).
+      - [x] Emulator: LOG:CSV ON 60 s (154 readings at 2.5/s): LOG000.DLG 455 B, CSV 3108 B; MMEM:DATA?
+            CSV == dlog.py of the DLG == LUN-1 LOG000.CSV read over USB/IP MSC.
+      - [ ] Verify on device: swipe REC 10 min, LUN 1 shows LOG000.CSV on Windows / Linux after the
+            recording (re-plug or eject if it does not appear: UNIT ATTENTION is held while mounted),
+            open in a spreadsheet; scope Save CSV -> SCOP000.CSV on LUN 1; gallery tile of a .DLG;
+            DBG:PROF? csv lap during a LUN-1 refresh with a large log.
+      - [ ] FR-38 logger to disk (DLG kind 3 reserved): needs pre-allocated clusters (commit stalls
+            lose ~290 samples at 640/s); see the doc section 3.
 
 ## Feature requests to add (from ../docs/dm40-feature-request.md; user: add autohold + useful ones)
 - [x] **FR-01 AutoHold (P0, critical).** Auto-freeze the reading when it stabilises, re-arm on a new
