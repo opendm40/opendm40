@@ -36,6 +36,7 @@ TOP = {'usb': (22.0, 0.0, 9.0, 6.5), 'led': (34.0, 1.5, 3.0, 3.0), 'gen': (37.5,
 JACKS = {'v': (124.0, 20.0), 'com': (124.0, 41.0), 'a': (124.0, 62.0)}
 JACK_R = 4.2
 KEY_NAMES = ['MENU', 'RUN', 'AUTO', 'MF']
+WIN_W, SIDEBAR_W = 1440, 480       # default window width, default sidebar width (drag the handle; the panel needs >= 916 px)
 KEY_CHARS = {'m': 0, 'r': 1, 'a': 2, 'f': 3}
 PX_PER_MM_1X = W / DISP[2]           # 6.53 px/mm at k = 1
 
@@ -556,10 +557,18 @@ class GtkApp(Adw.Application):
             self.fe_big.connect('close-request', lambda *a: setattr(self, 'fe_big', None) or False)
         self.fe_big.present()
 
+    def on_split_sized(self, split, _clock):
+        # first frame: place the handle so the sidebar is SIDEBAR_W wide (the window may differ from WIN_W)
+        w = split.get_width()
+        if w <= 0:
+            return True
+        split.set_position(max(0, w - SIDEBAR_W))
+        return False
+
     # ---- window ----
     def on_activate(self, app):
         self.win = Adw.ApplicationWindow(application=self, title='DM40 emulator')
-        self.win.set_default_size(1120, 700)
+        self.win.set_default_size(WIN_W, 720)
         self.title = Adw.WindowTitle(title='DM40 emulator', subtitle='starting…')
         header = Adw.HeaderBar()
         header.set_title_widget(self.title)
@@ -594,15 +603,21 @@ class GtkApp(Adw.Application):
         self.panel = FrontPanel(self.on_panel_event)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         content.append(header)
-        self.split = Adw.OverlaySplitView()
-        self.split.set_sidebar_position(Gtk.PackType.END)
-        self.split.set_min_sidebar_width(340)
-        self.split.set_max_sidebar_width(400)
-        self.split.set_sidebar_width_fraction(0.3)
-        self.split.set_show_sidebar(True)
-        self.split.set_sidebar(self.build_sidebar())
-        self.split.set_content(self.panel)
-        self.side_btn.bind_property('active', self.split, 'show-sidebar', 1 | 2)  # bidirectional | sync
+        # a Paned, not an Adw.OverlaySplitView: the sidebar width is dragged with the handle; resizing the
+        # window resizes the panel and keeps the sidebar width
+        self.split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, wide_handle=True, vexpand=True)
+        self.split.set_start_child(self.panel)
+        self.split.set_resize_start_child(True)
+        self.split.set_shrink_start_child(False)
+        self.sidebar = self.build_sidebar()
+        self.sidebar.set_size_request(340, -1)
+        self.split.set_end_child(self.sidebar)
+        self.split.set_resize_end_child(False)
+        self.split.set_shrink_end_child(False)
+        self.split.set_position(WIN_W - SIDEBAR_W)
+        self.split.add_tick_callback(self.on_split_sized)
+        self.side_btn.set_active(True)
+        self.side_btn.connect('toggled', lambda b: self.sidebar.set_visible(b.get_active()))
         content.append(self.split)
         self.win.set_content(content)
 
@@ -853,7 +868,7 @@ class GtkApp(Adw.Application):
         elif kind == 'power':
             self.send('sysbus.gpioPortD OnGPIO 6 %s' % ('true' if data else 'false'))
         elif kind == 'jack':
-            self.split.set_show_sidebar(True)
+            self.side_btn.set_active(True)
             target = {'v': self.group_dmm, 'com': self.group_dmm, 'a': self.group_dmm,
                       'scope': self.group_scope, 'gen': self.group_gen, 'usb': self.group_gen,
                       'led': self.group_gen}[data]
@@ -1010,7 +1025,7 @@ class GtkApp(Adw.Application):
             self.send('sysbus.i2c3.touch MultiSwipe 3 240 80 0 120 300')
             return True
         if low == 'f9':
-            self.split.set_show_sidebar(not self.split.get_show_sidebar())
+            self.side_btn.set_active(not self.side_btn.get_active())
             return True
         if low == 'space':
             self.play.set_active(not self.play.get_active())
