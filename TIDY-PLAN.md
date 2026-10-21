@@ -1,5 +1,10 @@
 # Repo tidy-up plan
 
+> **2026-10-22:** the fw-rs RAM build was removed (owner decision): `fw-rs/stub/`,
+> `fw-rs/tools/legacy/` (`flash.py`, `dm40_loader.py`), `link.x`, `link-test.x`
+> and the RAM / T1 / T2 modes of `build.sh` / `reload.sh` no longer exist. The
+> rows below that mention them are historical.
+
 **Executed on 2026-10-13** (commits `26ba0e5`..`HEAD` on `rust-fw-poc`), after
 the repo moved to the private `wirenboard/opendm40`. Done: protocol rewrite in
 `docs/bt-protocol.md`, BT clients in `tools/`, new front-page `README.md`,

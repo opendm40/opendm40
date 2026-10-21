@@ -419,4 +419,5 @@ the flash controller, the SPI disk and the reset path end to end.
 * `firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin` (copied to `emu/out/disk.bin`)
 * `dm40_v_2_6.dec.bin` (stock body), `firmware/dm40fw.py` (header words)
 * fw-rs: `git worktree add --detach emu/out/fwrs-worktree HEAD` + `./build.sh native`
+  (`native` = the default and only build now; kept so `--rev` of older commits builds)
   (left in place for reuse; `git worktree remove emu/out/fwrs-worktree` to drop it)

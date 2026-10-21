@@ -10,8 +10,8 @@ of the calibration on the SPI flash).
 fw-rs is installed like a stock update: `dm40-fw-native.bin` is a vendor-format
 update file that the vendor FS-loader flashes to `0x08004000`; a small shim in
 front of it handles the power key, the watchdog and recovery
-(docs/native-boot.md). The older RAM/sector-8 image loaded over Bluetooth is
-kept only for the T1/T2 test images (see "Legacy RAM loader").
+(docs/native-boot.md). This is the only build: the older RAM/sector-8 image
+loaded over Bluetooth into the stock firmware was removed (2026-10-22).
 
 ## USB debug link
 
@@ -177,7 +177,7 @@ Needs the pinned toolchain in `../toolchain` (rustup + stable +
 `thumbv7em-none-eabihf`); crates come from crates.io into `../toolchain/cargo`.
 
 ```
-./build.sh native [cargo args]   # -> dm40-fw-native.bin (vendor update file, 0x08004000)
+./build.sh [cargo args]          # -> dm40-fw-native.bin (vendor update file, 0x08004000)
 tools/fatren-test/run.sh         # host tests (also tools/genuine-test/run.sh)
 ```
 
@@ -196,13 +196,12 @@ dark for several seconds: do not power-cycle) and checks `DBG:BOOT?`: the
 loader marker must equal the header of the new file ("installed OK", ~1 min).
 `--no-build`, `--image FILE`, `--wait S`: see `tools/reload.sh --help`.
 
-**First install** (the meter runs stock): either reach the vendor loader's
-update screen (its USB disk is `28e9:028f`; the proven way from stock is the
-LEGACY `tools/reload.sh test-recovery`, which zeroes the marker), copy
-`dm40-fw-native.bin` onto that disk as `dm40_fwrs.bin` (the only `dm40*.bin`),
-eject and press "update"; or, on the stock "USB Connect" disk,
-`tools/reload.sh --from-stock` stages the file and tells you to press
-"update" / power-cycle, then waits for fw-rs.
+**First install** (the meter runs stock): on the stock "USB Connect" disk
+(`28e9:028f`), `tools/reload.sh --from-stock` stages the file and tells you to
+power-cycle (the stock update procedure), then waits for fw-rs. By hand: copy
+`dm40-fw-native.bin` onto that disk (or the vendor loader's update-screen
+disk, same id) as `dm40_fwrs.bin` (the only `dm40*.bin`), eject, power-cycle
+or press "update".
 
 **Recovery** (fw-rs hangs or does not start): the loader update screen and its
 USB disk appear by themselves after two watchdog resets in a row. By hand:
@@ -219,15 +218,3 @@ From the loader screen: copy the stock file onto its disk, press "update".
 Back to fw-rs from stock: `tools/reload.sh --from-stock`.
 
 Native image, shim, recovery and boot info fields: docs/native-boot.md.
-
-### Legacy RAM loader
-
-`./build.sh` (RAM image `dm40-fw.bin`, flash sector 8, run from SRAM at
-`0x20008000`), `./build.sh test-initcore` (T1) and `./build.sh test-recovery`
-(T2) are loaded over Bluetooth by the RAM stub (`stub/`) and
-`tools/legacy/flash.py` (with `tools/legacy/dm40_loader.py`):
-`tools/reload.sh --ram | test-initcore | test-recovery [cargo args]`. This
-needs STOCK firmware on the meter (go back to stock first), and
-`/usr/bin/python3` (the linuxbrew `python3` has no Bluetooth sockets). In the
-RAM build the watchdog is fed for 60 s, then only while the host talks
-(`dm40dbg.py hold`); `release`/`reset` return to stock.

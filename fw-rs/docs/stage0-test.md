@@ -1,5 +1,9 @@
 # Native-boot Stage 0 — prove the recovery path
 
+> **Historical (2026-10-13).** Run with the RAM-loaded fw-rs build, which was
+> removed on 2026-10-22; `DBG:RECOVER` is now the destructive marker-zeroing
+> recovery (`tools/dm40dbg.py recover -h`), not a plain reset.
+
 Goal: prove end-to-end that the stock **FS-loader** will re-install a firmware
 image from the SPI-flash FAT on reset, **before** we ever replace the stock app.
 This is the first, zero-risk step of the plan in
