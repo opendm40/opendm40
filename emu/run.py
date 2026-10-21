@@ -131,6 +131,8 @@ def build_fwrs(worktree=None, rev='HEAD'):
             os.symlink(os.path.join(ROOT, 'toolchain'), tc)
         print('fw-rs: building %s (%s)' % (commit[:12], subprocess.check_output(
             ['git', 'log', '-1', '--format=%s', commit], cwd=ROOT, text=True).strip()))
+        # `native`: the only build now (a no-op argument); older commits (--rev)
+        # need it to select the native image instead of their RAM default.
         subprocess.check_call(['./build.sh', 'native'], cwd=os.path.join(wt, 'fw-rs'))
         with open(stamp, 'w') as f:
             f.write(tree + '\n')

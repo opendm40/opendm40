@@ -148,6 +148,11 @@ Code work (in this order):
         trend chart plots the separate AC/DC phases; AC part 40 mV on a DC calibrator input (AC zero?).
         (f4dc59d; verify on device)
   - [x] Stage 2: retire stub/, flash.py, BT loader path; update README/tools. (fa29a80; verify on device)
+  - [x] RAM build removed (owner 2026-10-22; it no longer linked, ~200 KB over): build.sh builds
+        only the native image (`native` kept as a no-op argument), link.x / link-test.x /
+        startup.rs, the test-initcore / test-recovery (T1/T2) images, stub/, tools/legacy/
+        (flash.py, dm40_loader.py) and reload.sh --ram are gone; features native /
+        embedded-fonts / calbackup / fatren-live dropped (always on / unused), vdisk is default.
 - [x] Data-logger mode (FR-38) implemented: src/logger.rs, main-loop polled constant interval,
       timestamps + sequence numbers + drop counter, HY3131 fast mode, LOG:* SCPI. Not tested on device.
 - [x] Code review 2026-10-13 (docs/review-2026-10-13.md): H2/M1/M2/M3/M5 + lows fixed; H1/M4 call sites

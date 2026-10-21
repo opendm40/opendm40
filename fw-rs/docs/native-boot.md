@@ -76,7 +76,7 @@ include the padding; the loader flashes it like any body byte):
 - `dm40fw.py pack --pad` / `build(pad=True)` pads; `pack` without `--pad`
   packs as is (vendor round trip) but refuses a hazardous body;
   `info` / `unpack` warn about a hazardous input (`tail_hazard`);
-- `build.sh native` packs with `--pad` and fails unless the file is a multiple
+- `build.sh` packs with `--pad` and fails unless the file is a multiple
   of 128; `firmware/patch/patcher.py` builds with `pad=True`;
 - `INFO/FIRMWARE.BIN` on the USB volume (`calbackup::FwFile`) is 12 +
   `word1` bytes, so it is whole blocks for every image built that way; for an
@@ -417,82 +417,34 @@ This section supersedes §2–§10 where they differ. By user decision:
 
 | File | Role |
 |---|---|
-| `link-native.x` | native layout (below) |
-| `link-test.x` | RAM layout for the T1/T2 test builds: `link.x` with CODE = SRAM0+SRAM1 (`0x20000000`, 128 KiB, as large as the flash sector) and the DMA RAM = SRAM2 (`0x20020000`, 64 KiB; `.dmabuf` ~58 KiB) |
-| `build.sh` | modes `native`, `test-initcore`, `test-recovery`; no mode = the original build, unchanged |
+| `link-native.x` | native layout (below); the only linker script since the RAM build was removed (2026-10-22) |
+| `build.sh` | builds the native image (`native` accepted as a no-op argument) |
 | `src/shim.rs` | native vector table, `reset` (asm), `shim_main`; all in region A |
 | `src/boot.rs` | shim decision `shim()`, reset flags, power key, power hold on/off, backup-SRAM words, loader marker check + `zero_marker()` (FMC), `DBG:BOOT?` text |
-| `src/native.rs` | after the decision: `.data`/`.bss` init, then recovery, or board init + fatren + `main`; T1/T2 entry points |
+| `src/native.rs` | after the decision: `.data`/`.bss` init, then recovery, or board init + fatren + `main` |
 | `src/board.rs` | native board bring-up (everything the stock used to do for us) |
 | `src/recovery.rs` | recovery: zero the loader marker + SYSRESETREQ. Features `recovery-file` (`DM40RCVR.BIN` + power off) and `recovery-usb` (our own USB-MSC) keep the earlier variants for tests |
 | `src/fatren.rs` | FAT16 root-directory edits: rename the installed image, remove a leftover `DM40RCVR.BIN`; with `recovery-file`, create `DM40RCVR.BIN` |
 | `src/clock.rs` | `init_core(Src)`: measured stock values, bounded waits, IRC16M fallback, no FLASH_ACR write |
 | `src/wdt.rs` | `start::fwdgt()` (shim); `powered_off()` (end of the app's power-off) |
-| `src/msc.rs` | `STOP_UNIT` flag on SCSI START STOP UNIT (native / test-recovery builds only) |
-| `src/scpi.rs` | `DBG:BOOT?`; `DBG:UPDATE` = `DBG:RECOVER`: zero the marker + reset (native only) |
-| `src/main.rs`, `src/app.rs`, `src/startup.rs` | hooks (see "Default build") |
+| `src/msc.rs` | `STOP_UNIT` flag on SCSI START STOP UNIT |
+| `src/scpi.rs` | `DBG:BOOT?`; `DBG:UPDATE` = `DBG:RECOVER`: zero the marker + reset |
+| `src/main.rs`, `src/app.rs` | hooks |
 | `tools/fatren-test/run.sh` | host test of fatren on mkfs.fat images (fsck.fat + mtools) |
 
-Cargo features:
-- `native` (implies `embedded-fonts`, since the stock fonts in flash are gone
-  once we replace the app);
-- `test-initcore`, `test-recovery`;
-- `fatren-dry-run`, `fatren-live`;
-- `recovery-file`, `recovery-usb`.
+Cargo features (2026-10-22, after the RAM build was removed; the stock fonts
+are always embedded, the calibration backup always runs):
+- `vdisk` (default: the generated read-only USB volume);
+- `fatren-dry-run`;
+- `recovery-file`, `recovery-usb`;
+- `hyspi-bitbang`, `keep-screen`.
 
-## Default build (RAM image)
-
-`./build.sh` with no mode runs exactly the old command. Two traps:
-
-- **Panic `Location`s** embed source line numbers in `.rodata`. Inserting a line
-  anywhere above a panic site in `main.rs`, `app.rs`, `scpi.rs` or `msc.rs`
-  changes the binary. Every edit in those files therefore keeps the line count:
-  - `INITIAL_HOLD_MS` stays one line;
-  - the `scpi.rs` DBG:RECOVER/BOOT block replaces a stale 14-line comment
-    with 14 lines;
-  - the `msc.rs` START STOP arm replaces 4 lines with 4;
-  - `app.rs` `loop {}` → `crate::wdt::powered_off()`;
-  - new `mod` lines are appended at the end of `main.rs`.
-- **Any `build.rs`** (even one that only adds a linker search path) changed
-  codegen by 4 bytes. So `build.sh` chooses the linker script through
-  `RUSTFLAGS` (`-Tlink-native.x` / `-Tlink-test.x`) with a separate
-  `CARGO_TARGET_DIR`, and `.cargo/config.toml` (`-Tlink.x`) is unchanged. A
-  plain `cargo build --features native` fails to link (`_loader_sp` is
-  undefined) instead of producing a wrong image.
-
-Checked by `cmp`:
-- **Native-boot work alone:** the default `dm40-fw.bin` (114624 bytes) stayed
-  identical.
-- **Concurrent `scope.rs`/`ui.rs` edits by another agent:** for a while the
-  default build overflowed the 112 KiB SRAM0 code region. Neutrality was then
-  checked on two snapshots of the same tree, with and without the native
-  changes, both linked with `link-test.x`. They were identical (115416 bytes).
-- **Coordinator review fixes in `main.rs`/`msc.rs`** (not line-neutral, so they
-  intentionally change the default build):
-  - H1: `app.note_host_activity()` on USBTMC commands and on BT frames.
-  - M4: `Msc::set_write_inhibit(logger.disk_writes_blocked())`. A host WRITE
-    then fails with NOT READY / becoming ready (02/04/00).
-  - BT AT init: skipped while the logger is active.
-  
-  The default build now links at **114560 bytes**, `.text` 114388 of 114688,
-  so **300 bytes are left** in the code region.
-
-**`link-test.x` as the default dev layout** (done: `link.x` now uses the
-120 KiB / 72 KiB split below; `link-test.x` has since moved on to CODE 128 KiB
-/ DMARAM `0x20020000` 64 KiB for the larger T1 image, see the calibration
-backup section):
-- **Layout:** CODE `0x20000000` 120 KiB, DMARAM `0x2001E000` 72 KiB.
-  `.dmabuf` is 59368 B and ends at `0x2002C7E8`, leaving 14 KB.
-- **No collision:**
-  - The BT stub (`0x20008000`, 16 KiB) and its payload
-    (`0x2000C000..0x2001C000`) are used only before the image starts. The
-    image's reset code runs from flash and overwrites them anyway, as today.
-  - No source file hard-codes `0x2001C000`.
-  - The 128 KiB sector-8 flash limit still bounds the image.
-- **What it takes:**
-  - `cp link-test.x link.x` (two numbers change).
-  - Every `.dmabuf` address moves by 8 KiB, so the default binary changes once.
-  - Nothing else: `build.sh` and the BT tools are unaffected.
+Until 2026-10-22 there was also a RAM build (`./build.sh` with no mode: the
+image in flash sector 8, copied to SRAM, loaded over Bluetooth into the
+running stock firmware, `link.x`) and the T1/T2 RAM test images
+(`test-initcore`, `test-recovery`, `link-test.x`). The native work was kept
+byte-neutral for that build while it existed; see git history before that
+date for its layout and traps.
 
 ## Native memory map and the loader marker
 
@@ -515,7 +467,7 @@ RAM: TCM 0x10000000 .data/.bss (~26.5 KB) + stack (top 0x10010000);
 - the image ends at or below `0x080A0000`;
 - at least 16 KiB of TCM stack.
 
-**`build.sh native`** checks the binary again:
+**`build.sh`** checks the binary again:
 - the 16 bytes at `0x08008000`, and all padding from the end of region A to
   `0x08008010`, are 0xFF;
 - the end is below `0x080A0000`;
@@ -967,8 +919,7 @@ never two live entries with the same name or a live entry on freed clusters.
    is `RENAMED`, otherwise `ERROR`.
 6. **Restore:** remove the leading underscore on the disk.
 
-`fatren-dry-run` (native) only reports. `test-initcore` is always a dry run
-unless built with `fatren-live`.
+`fatren-dry-run` only reports.
 
 **Host test:** `tools/fatren-test/run.sh` passes. It uses mkfs.fat images in
 the DM40 geometry: 4096 B sectors, 2 FATs, 512 root entries, 4087 clusters.
@@ -1345,13 +1296,13 @@ else /16 for this boot because `DIFF1`/`DIFF2` (a /4 read differed),
   screen without any marker change. This is the vendor's own entry, still to be
   tested (fsloader-install-trigger.md §6). If confirmed, it is the preferred,
   non-destructive manual entry.
-- **Code space:** the default RAM build has 300 bytes left in its code region
-  (see "Default build").
 
 ## Test plan (coordinator + user)
 
-Build with `./build.sh <mode>`. RAM images load as before (`tools/reload.sh
-<mode>`). Keep `firmware/patch/build-memrw/dm40_patched.bin` (`firmware/patch/kit/mkkit.sh`) and a stock
+T1 and T2 used RAM test images loaded over Bluetooth into the running stock
+firmware (`./build.sh test-initcore | test-recovery`, `tools/reload.sh
+<mode>`); both passed on the device on 2026-10-13 and the images were removed
+with the RAM build on 2026-10-22. They are kept here as the record. Keep `firmware/patch/build-memrw/dm40_patched.bin` (`firmware/patch/kit/mkkit.sh`) and a stock
 `dm40_v_2_6.bin` at hand. After T1 and T2, the device must be back on
 (patched) stock.
 
@@ -1498,11 +1449,11 @@ vendor loader then installs the single `dm40*.bin` in the SPI FAT's root
 installs the same way.
 
 `tools/reload.sh [cargo args]` (default):
-1. `./build.sh native [cargo args]`; `tools/dm40dbg.py image` validates the
+1. `./build.sh [cargo args]`; `tools/dm40dbg.py image` validates the
    file (vendor header CRC, body CRC, size, reset vector) before anything is
    staged.
-2. A running fw-rs that does not answer `DBG:BOOT?` (legacy RAM build, no
-   `DBG:UPDATE`) is refused. `28e9:028f` (stock "USB Connect" or the loader
+2. A running fw-rs that does not answer `DBG:BOOT?` (no `DBG:UPDATE`) is
+   refused. `28e9:028f` (stock "USB Connect" or the loader
    update screen) is refused unless `--from-stock`.
 3. `dm40dbg.py upload <file>` (2026-10-21, the USB volume is read-only):
    `DBG:UPLOAD` writes the file as `DM40FW.BIN` into the SPI root, every
@@ -1523,6 +1474,4 @@ installs the same way.
 Options: `--no-build`, `--image FILE`, `--wait S`, `--stock FILE` (stock or
 patched stock, same flow, no wait: stock does not enumerate `1209:0001`),
 `--from-stock` (stage onto the `28e9:028f` disk, the user presses "update" or
-power-cycles, waits up to 300 s for fw-rs). `--ram`, `test-initcore`,
-`test-recovery` keep the LEGACY Bluetooth RAM path (`tools/legacy/flash.py` +
-`stub/`, needs stock running) for the T1/T2 images.
+power-cycles, waits up to 300 s for fw-rs).
