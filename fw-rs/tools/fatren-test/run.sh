@@ -573,6 +573,26 @@ fsckok $IMG7
 bmpok $IMG7 S000.BMP
 mcopy -n -i $IMG7 ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.BIN untouched" || { echo "FAIL at line $LINENO"; exit 1; }
 mdir -i $IMG7 ::
+echo "--- scope record CSV (scope_csv.rs through the screenshot job, UF-13)"
+"$W/t" $IMG7 scopecsv | tee $W/sc1
+grep -q "csv=Saved(0) len=692253 .*shot_refused=true shot_result=None" $W/sc1 && echo "ok: SCOP000.CSV, 26624 rows, a screenshot meanwhile refused" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG7
+"$W/t" $IMG7 scopecsv 300 | grep -q "csv=Saved(1) len=7829 " && echo "ok: then SCOP001.CSV (300 rows)" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMG7
+mcopy -n -i $IMG7 ::SCOP000.CSV $W/s.csv
+python3 -I - $W/s.csv <<'PY' || { echo "FAIL: SCOP000.CSV content"; exit 1; }
+import math, sys
+L = open(sys.argv[1], 'rb').read().split(b'\r\n')
+assert L[0] == b'# test record' and L[1] == b'time_s,volts', L[:2]
+rows = [l for l in L[2:] if l]
+assert len(rows) == 26624, len(rows)
+for i in (0, 1, 13311, 13312, 20000, 26623):
+    t, v = map(float, rows[i].split(b','))
+    code = int(512.0 + 400.0 * math.sin(i * 0.01))
+    assert abs(t - (i - 13312) / 1e6) < 1e-9 + abs(t) * 2e-5, (i, t)
+    assert abs(v - (-5.0 + code * 10.0 / 1023.0)) < 1e-3, (i, v)
+print("ok: SCOP000.CSV parses, time_s / volts exact to the printed digits")
+PY
 
 echo "--- screenshot: power cut / abort between every two slices (NOR model of write_step)"
 # Review 258c833 H1 / L4: the shot driven slice by slice (screenshot::poll_on)

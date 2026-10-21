@@ -925,6 +925,7 @@ mod calbackup;
 mod vdisk;
 mod dialog;
 mod screenshot;
+mod scope_csv;
 mod csvlog;
 mod gallery;
 #[cfg(any(feature = "native", feature = "test-initcore", feature = "test-recovery"))]

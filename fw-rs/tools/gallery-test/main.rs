@@ -143,6 +143,9 @@ mod fatren;
 mod calbackup;
 #[path = "../../src/screenshot.rs"]
 mod screenshot;
+#[path = "../../src/scope_csv.rs"]
+#[allow(dead_code)]
+mod scope_csv;
 #[path = "../../src/csvlog.rs"]
 mod csvlog;
 #[path = "../../src/gallery.rs"]

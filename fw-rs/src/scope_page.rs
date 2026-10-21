@@ -727,6 +727,86 @@ impl App {
         }
     }
 
+    // ------------------------------------------------------------ CSV
+
+    /// MF Settings "Save CSV" (UF-13): the stored record of the stopped
+    /// scope as SCOP%03u.CSV (scope_csv.rs, written by the screenshot job).
+    /// Stock rule: refused while sampling ("Please stop sample").
+    pub(super) fn sp_save_csv(&mut self, now: u64) {
+        let rec = self.scope.record();
+        if self.scope.s.run || rec.is_empty() {
+            self.toast(now, if self.scope.s.run { "Please stop sample" } else { "No record to save" }, false);
+            return;
+        }
+        if crate::msc::host_mounted() {
+            self.toast(now, "Disk in use by PC - eject first", false);
+            return;
+        }
+        if crate::screenshot::busy() || crate::csvlog::writing() {
+            self.toast(now, "Disk busy, try again", false);
+            return;
+        }
+        let s = self.scope.s;
+        let (fs, t0, trig) = self.scope.record_info();
+        let a = self.scope.volts(0.0);
+        let b = self.scope.volts(1.0) - a;
+        let mut h = crate::scope_csv::Hdr::new();
+        let mut t = [0u8; 16];
+        h.s("# Alientek DM40A, fw-rs ").s(option_env!("CARGO_PKG_VERSION").unwrap_or("dev")).s(", scope record (no real-time clock)\r\n");
+        let mut v = su::Buf::new();
+        su::vdiv_text(&mut v, vdiv_idx(s.range, s.probe));
+        let mut sr = su::Buf::new();
+        su::fmt_hz(&mut sr, fs as f32);
+        let sr = sr.as_str();
+        h.s("# timebase ").s(su::TB_LABELS[s.tb.min(29)]).s("/div, ").s(v.as_str()).s("/div, probe ").s(scope::PROBE_NAMES[probe_idx(s.probe)]);
+        h.s(", coupling ").s(if s.ac { "AC" } else { "DC" }).s(", sample rate ").s(sr.strip_suffix("Hz").unwrap_or(sr)).s("S/s, samples ");
+        h.s(crate::dmm::format(&mut t, rec.len() as f32, 0)).s("\r\n");
+        let mut tv = su::Buf::new();
+        su::fmt_v(&mut tv, self.scope.trig_volts(), "V");
+        h.s("# trigger ");
+        self.sp_trig_desc(&mut h);
+        h.s(" ").s(if s.rising { "rising" } else { "falling" }).s(" ").s(tv.as_str());
+        h.s(", mode ").s(match s.mode {
+            scope::TrigMode::Auto => "Auto",
+            scope::TrigMode::Normal => "Normal",
+            scope::TrigMode::Single => "Single",
+        });
+        h.s(if trig { ", triggered\r\n" } else { ", untriggered\r\n" });
+        h.s("# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n");
+        crate::scope_csv::set(rec, a, b, fs as f32, t0, &h);
+        if !crate::screenshot::start_csv() {
+            self.toast(now, "Save CSV Error", false);
+            return;
+        }
+        self.scope.hold = true;
+        self.toast(now, "Saving CSV...", true);
+    }
+
+    /// Trigger type text of the CSV header.
+    fn sp_trig_desc(&self, h: &mut crate::scope_csv::Hdr) {
+        h.s("Edge");
+    }
+
+    /// Per pass: a finished CSV releases the scope and shows its result.
+    pub(super) fn sp_csv_poll(&mut self, now: u64) {
+        let Some(r) = crate::screenshot::take_csv_result() else { return };
+        self.scope.hold = false;
+        let mut t = *b"Saved SCOP000.CSV";
+        let (txt, ok) = match r {
+            crate::screenshot::Shot::Saved(n) => {
+                t[10] = b'0' + (n / 100 % 10) as u8;
+                t[11] = b'0' + (n / 10 % 10) as u8;
+                t[12] = b'0' + (n % 10) as u8;
+                (core::str::from_utf8(&t).unwrap_or("Save CSV OK"), true)
+            }
+            crate::screenshot::Shot::NoDisk => ("No disk", false),
+            crate::screenshot::Shot::Full => ("Disk full", false),
+            crate::screenshot::Shot::Error => ("Save CSV Error", false),
+        };
+        self.toast(now, txt, ok);
+        self.beep(now, if ok { 100 } else { 500 });
+    }
+
     // ------------------------------------------------------------ math / FFT
 
     /// A new frame with math on: FFT mode starts a spectrum job from the
@@ -945,6 +1025,7 @@ impl App {
     /// Per main-loop pass on the scope page (from scope_poll): timers, the
     /// diff repaint.
     pub(super) fn sp_tick(&mut self, now: u64) {
+        self.sp_csv_poll(now);
         if self.sp.pressed != 0 && now >= self.sp.pressed_until {
             self.sp.pressed = 0;
         }
@@ -1630,6 +1711,10 @@ impl App {
 
     fn sp_key(&mut self, clk: &mut Clock, code: u8) {
         let now = clk.now_ms();
+        if self.scope.hold && (code == 1 || code == 2) {
+            self.toast(now, "Saving CSV, wait", false);
+            return;
+        }
         match code {
             0 => self.show(View::Menu, clk),
             1 => {
@@ -1936,7 +2021,7 @@ impl App {
             }
             su::MfHit::SaveCsv => {
                 self.sp_popup_close();
-                self.toast(now, "Scope CSV: use SCPI WAV:DATA?", false);
+                self.sp_save_csv(now);
                 return;
             }
         }
@@ -2325,6 +2410,8 @@ pub(super) fn autoset_log(out: &mut crate::scpi::Scpi) {
 fn tb_for(period: f32) -> usize {
     scope::SDIV.iter().position(|&d| period / 4.0 < d).unwrap_or(scope::TB_MAX).clamp(scope::TB_MIN, scope::TB_YT_MAX)
 }
+
+const _: () = assert!(scope::CAP <= crate::scope_csv::REC_MAX, "scope CSV sized for the record");
 
 /// The pinch value bubble: centred in the graph.
 const BUBBLE: Rect = rect(153, 140, 120, 40);

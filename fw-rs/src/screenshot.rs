@@ -1,5 +1,7 @@
 //! Screenshot to the SPI-flash USB disk (docs/user-feedback.md UF-17, stock
-//! "PriScr": 3-finger swipe down, gui_v2_6.h "Screenshot").
+//! "PriScr": 3-finger swipe down, gui_v2_6.h "Screenshot"). The same job
+//! writes the scope record CSV (UF-13, `start_csv`, content from
+//! scope_csv.rs: SCOP%03u.CSV, no capture phase, length from scope_csv).
 //!
 //! File: the next free `S%03u.BMP` in the root (lowest unused number, as the
 //! stock "s%.3d.bmp" / first free number, spiflash_v2_6.h), byte-compatible
@@ -125,6 +127,14 @@ const HDR: [u8; HDR_LEN as usize] = [
     0x00, 0xF8, 0x00, 0x00, 0xE0, 0x07, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00, // R G B masks
 ];
 const _: () = assert!(FILE_LEN == 307_266 && NBLK == 76);
+/// Blocks of the largest file (a scope CSV, scope_csv.rs) and the cluster
+/// list size (1 cluster = 1 block on this disk; a bigger cluster only needs
+/// fewer entries).
+const MAX_NBLK: u32 = crate::scope_csv::MAX_LEN.div_ceil(BLK as u32);
+const _: () = assert!(MAX_NBLK >= NBLK);
+/// File kinds: the screenshot, a scope record CSV (UF-13).
+const K_BMP: u8 = 0;
+const K_CSV: u8 = 1;
 const _: () = assert!(HDR_LEN % 2 == 0 && BLK % 2 == 0, "block edges fall between pixels");
 
 /// Captured rows, run-length coded (u16 words, per row: tokens until W
@@ -190,7 +200,11 @@ struct Job {
     slot: u32,
     n: u16,
     /// Clusters of the new file, in chain order (ascending, first fit).
-    cl: [u16; NBLK as usize],
+    cl: [u16; MAX_NBLK as usize],
+    /// K_BMP / K_CSV, file length, data blocks.
+    kind: u8,
+    len: u32,
+    nblk: u32,
     ncl: u32,
     got: u32,
     /// scratch[0] holds the block being written (`lba`), step `st`.
@@ -224,7 +238,10 @@ const JOB0: Job = Job {
     taken: [0; 32],
     slot: 0,
     n: 0,
-    cl: [0; NBLK as usize],
+    cl: [0; MAX_NBLK as usize],
+    kind: K_BMP,
+    len: FILE_LEN,
+    nblk: NBLK,
     ncl: 0,
     got: 0,
     filled: false,
@@ -246,8 +263,10 @@ const JOB0: Job = Job {
 /// (`busy`, `frozen`, `poll`, msc.rs).
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut JOB: Job = JOB0;
-/// The last finished shot, not yet shown (`take_result`).
+/// The last finished shot, not yet shown (`take_result`); the last scope
+/// CSV (`take_csv_result`).
 static mut RESULT: Option<Shot> = None;
+static mut CSV_RESULT: Option<Shot> = None;
 /// The device's own SpiFlash handle (created on the first shot).
 static mut DISK: Option<crate::spiflash::SpiFlash> = None;
 
@@ -289,6 +308,48 @@ pub fn start() -> bool {
     j.frozen = true;
     j.t0 = cyc();
     true
+}
+
+/// Request a scope-record CSV (scope_csv.rs, set up by the caller first):
+/// the next free SCOP%03u.CSV, written like a screenshot (no screen
+/// capture, nothing frozen). Its result comes from `take_csv_result`, not
+/// `take_result`. False: a disk job is in flight, a PC has the disk mounted.
+pub fn start_csv() -> bool {
+    let j = job();
+    if j.phase != Phase::Idle || crate::msc::host_mounted() {
+        return false;
+    }
+    let len = crate::scope_csv::len();
+    if len == 0 || len > crate::scope_csv::MAX_LEN {
+        return false;
+    }
+    *j = JOB0;
+    j.kind = K_CSV;
+    j.len = len;
+    j.nblk = len.div_ceil(BLK as u32);
+    j.slot = NONE;
+    j.cur = NONE;
+    j.crc = !0;
+    j.vcrc = !0;
+    j.phase = Phase::Start;
+    j.t0 = cyc();
+    true
+}
+
+/// A scope CSV is being written.
+pub fn csv_busy() -> bool {
+    let j = job();
+    j.phase != Phase::Idle && j.kind == K_CSV
+}
+
+/// The result of the last finished CSV, once.
+pub fn take_csv_result() -> Option<Shot> {
+    unsafe { (*core::ptr::addr_of_mut!(CSV_RESULT)).take() }
+}
+
+/// (prefix, extension) of the job's file name.
+fn name_of(kind: u8) -> (&'static [u8], &'static [u8; 3]) {
+    if kind == K_CSV { (b"SCOP", b"CSV") } else { (b"S", b"BMP") }
 }
 
 /// A screenshot is in flight (host disk writes are refused meanwhile).
@@ -383,7 +444,7 @@ fn step(disk: &mut dyn BlockDevice) -> Option<Shot> {
             } else if !disk.present() || disk.block_size() as usize != BLK {
                 Some(Shot::NoDisk)
             } else {
-                j.phase = Phase::Capture;
+                j.phase = if j.kind == K_CSV { Phase::Bpb } else { Phase::Capture };
                 None
             }
         }
@@ -411,7 +472,11 @@ fn step(disk: &mut dyn BlockDevice) -> Option<Shot> {
 fn finish(j: &mut Job, r: Shot) {
     j.phase = Phase::Idle;
     j.frozen = false;
-    unsafe { *core::ptr::addr_of_mut!(RESULT) = Some(r) };
+    if j.kind == K_CSV {
+        unsafe { *core::ptr::addr_of_mut!(CSV_RESULT) = Some(r) };
+    } else {
+        unsafe { *core::ptr::addr_of_mut!(RESULT) = Some(r) };
+    }
     if j.wrote {
         MEDIUM_CHANGED.store(true, Ordering::Relaxed);
     }
@@ -458,7 +523,7 @@ impl Job {
             return Some(Shot::NoDisk);
         };
         self.v = Some(v);
-        self.ncl = FILE_LEN.div_ceil(v.spc * BLK as u32);
+        self.ncl = self.len.div_ceil(v.spc * BLK as u32);
         self.i = 0;
         self.phase = Phase::Root;
         None
@@ -489,11 +554,13 @@ impl Job {
                 }
                 continue;
             }
-            if e[11] & 0x3F == 0x0F || !e[1..4].iter().all(|c| c.is_ascii_digit()) {
+            let (pre, ext) = name_of(self.kind);
+            let d = pre.len();
+            if e[11] & 0x3F == 0x0F || !e[d..d + 3].iter().all(|c| c.is_ascii_digit()) {
                 continue;
             }
-            let n = (e[1] - b'0') as u16 * 100 + (e[2] - b'0') as u16 * 10 + (e[3] - b'0') as u16;
-            if sfn_is(e, &calbackup::numbered_name(b"S", n, b"BMP")) {
+            let n = (e[d] - b'0') as u16 * 100 + (e[d + 1] - b'0') as u16 * 10 + (e[d + 2] - b'0') as u16;
+            if sfn_is(e, &calbackup::numbered_name(pre, n, ext)) {
                 self.taken[(n / 32) as usize] |= 1 << (n % 32);
             }
         }
@@ -589,9 +656,13 @@ impl Job {
         let v = self.vol();
         if !self.filled {
             let off = self.i * BLK as u32;
-            let len = (FILE_LEN - off).min(BLK as u32) as usize;
+            let len = (self.len - off).min(BLK as u32) as usize;
             let buf = &mut calbackup::scratch()[0];
-            self.fill(off, &mut buf[..len]);
+            if self.kind == K_CSV {
+                crate::scope_csv::fill(off, &mut buf[..len]);
+            } else {
+                self.fill(off, &mut buf[..len]);
+            }
             buf[len..].fill(0xFF);
             self.crc = crc32_upd(self.crc, &buf[..len]);
             let c = self.cl[(self.i / v.spc) as usize] as u32;
@@ -599,7 +670,7 @@ impl Job {
             self.filled = true;
             self.wrote = true;
             self.st = STEP0;
-            if self.i + 1 == NBLK {
+            if self.i + 1 == self.nblk {
                 self.frozen = false; // every row has been read
             }
         }
@@ -609,7 +680,7 @@ impl Job {
             true => {
                 self.filled = false;
                 self.i += 1;
-                if self.i == NBLK {
+                if self.i == self.nblk {
                     self.fat_k = 0;
                     self.fat_fb = self.cl[0] as u32 / FPER;
                     self.phase = Phase::Fat;
@@ -684,13 +755,14 @@ impl Job {
                 return Some(Shot::Error); // taken since the scan
             }
             e.fill(0);
-            e[..11].copy_from_slice(&calbackup::numbered_name(b"S", self.n, b"BMP"));
+            let (pre, ext) = name_of(self.kind);
+            e[..11].copy_from_slice(&calbackup::numbered_name(pre, self.n, ext));
             e[11] = 0x20; // archive
             e[0x10..0x12].copy_from_slice(&DATE.to_le_bytes()); // created
             e[0x12..0x14].copy_from_slice(&DATE.to_le_bytes()); // accessed
             e[0x18..0x1A].copy_from_slice(&DATE.to_le_bytes()); // written (time 0)
             e[0x1A..0x1C].copy_from_slice(&self.cl[0].to_le_bytes());
-            e[0x1C..0x20].copy_from_slice(&FILE_LEN.to_le_bytes());
+            e[0x1C..0x20].copy_from_slice(&self.len.to_le_bytes());
             self.filled = true;
             return None; // the write from the next pass
         }
@@ -726,14 +798,14 @@ impl Job {
         }
         self.linked = false;
         let off = self.i * BLK as u32;
-        let len = (FILE_LEN - off).min(BLK as u32) as usize;
+        let len = (self.len - off).min(BLK as u32) as usize;
         let buf = &mut calbackup::scratch()[2];
         if !disk.read_block(v.data_start + (self.vc - 2) * v.spc + self.i % v.spc, buf) {
             return Some(Shot::Error);
         }
         self.vcrc = crc32_upd(self.vcrc, &buf[..len]);
         self.i += 1;
-        if self.i < NBLK {
+        if self.i < self.nblk {
             return None;
         }
         let eoc = self.fat_get(disk, self.vc).is_some_and(|n| n >= 0xFFF8);

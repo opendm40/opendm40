@@ -292,6 +292,9 @@ pub struct Scope {
     pub status: u8,
     status_new: bool,
     last_frame: u64,
+    /// The stored record is being read (scope CSV, scope_csv.rs): `apply`
+    /// keeps the scope stopped, so BUF is not overwritten.
+    pub hold: bool,
 }
 
 impl Scope {
@@ -359,6 +362,7 @@ impl Scope {
             status: 0,
             status_new: true,
             last_frame: 0,
+            hold: false,
         };
         sc.hw.init();
         // Comparator trigger on by default (the stock always uses it): the
@@ -504,6 +508,10 @@ impl Scope {
     }
 
     pub fn apply(&mut self, s: Settings, now: u64) {
+        let mut s = s;
+        if self.hold && !self.s.run {
+            s.run = false;
+        }
         // A new trigger mode or a RUN press waits for its first frame (WAIT).
         // So does leaving the roll range: the roll chip (RUN) and the roll
         // trace would otherwise stay until the first triggered frame (in
@@ -519,7 +527,6 @@ impl Scope {
         } else {
             self.halt();
         }
-        let mut s = s;
         // Roll on: full 3..29 (22.. rolls). Roll off: YT only, capped at 24
         // (1 s/div). Single never rolls (one linear record), so it is capped at
         // the YT maximum too: at 2..50 s/div a full linear record would take
@@ -968,6 +975,13 @@ impl Scope {
             return &[];
         }
         unsafe { &(&*core::ptr::addr_of!(BUF))[..self.stored_len] }
+    }
+
+    /// The stored record's sample rate, time-zero index (the trigger point,
+    /// else the sample at the screen centre) and whether it triggered.
+    pub fn record_info(&self) -> (u32, usize, bool) {
+        let t0 = self.stored_trig.unwrap_or(if self.stored_roll { self.stored_len.saturating_sub(1) } else { self.stored_anchor });
+        (self.stored_fs, t0, self.stored_trig.is_some())
     }
 
     /// Drag preview: take the position settings (CH1 position, trigger level
