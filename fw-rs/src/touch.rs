@@ -981,7 +981,7 @@ struct Log {
 }
 
 // SRAM (.sram_bss, zeroed at reset), not TCM: the stack's memory.
-#[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".sram_bss")]
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut LOG: Log = Log { e: [LogEntry { t: 0, kind: 0, a: 0, b: 0, c: 0, x: 0, y: 0 }; LOG_N], n: 0 };
 
 fn log_ref() -> &'static mut Log {

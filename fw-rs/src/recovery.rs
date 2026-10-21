@@ -1,4 +1,4 @@
-//! Recovery mode (native shim decision, or test-recovery from RAM).
+//! Recovery mode (the shim decision).
 //!
 //! Hands recovery to the vendor FS-loader's update mode by zeroing the 12-byte
 //! app marker at 0x08008000 (boot::zero_marker: FMC word programs of 0, no

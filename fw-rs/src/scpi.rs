@@ -305,17 +305,15 @@ pub enum Log {
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
 ///   DBG:HYSPI:SELF? n[,div]  HY3131 bus self-test (src/hyspi.rs)
 ///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
-///   DBG:RELEASE             stop feeding the watchdog. RAM: back to stock in ~20 s.
-///                           Native: the WDT reset counts as a crash (1st: fw-rs
-///                           reboots; 2nd without 60 s healthy: recovery = marker
-///                           zeroed, DESTRUCTIVE)
-///   DBG:RESET               RAM: reset to stock now. Native: reboot fw-rs (SW reset)
-///   DBG:RECOVER, DBG:UPDATE RAM: RECOVER = plain reset (Stage 0). Native, DESTRUCTIVE:
-///                           clear the previous-mode word, zero the 12-byte loader
+///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
+///                           as a crash (1st: fw-rs reboots; 2nd without 60 s
+///                           healthy: recovery = marker zeroed, DESTRUCTIVE)
+///   DBG:RESET               reboot fw-rs (SW reset)
+///   DBG:RECOVER, DBG:UPDATE DESTRUCTIVE: clear the previous-mode word, zero the 12-byte loader
 ///                           marker, reset -> vendor update screen + its USB disk until
 ///                           a dm40*.bin is installed. "Flash error" = marker did not
 ///                           read back as zero (no reset). Sync + eject a copied file first.
-///   DBG:BOOT?               native boot info (src/boot.rs put_info)
+///   DBG:BOOT?               boot info (src/boot.rs put_info)
 #[derive(Clone, Copy)]
 pub enum Dbg {
     Ping(u32),
@@ -1216,10 +1214,10 @@ impl Scpi {
                         b"FLASH" => Dbg::Flash,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
-                        // DBG:UPDATE = DBG:RECOVER (native): zero the 12-byte loader
+                        // DBG:UPDATE = DBG:RECOVER: zero the 12-byte loader
                         // marker at 0x08008000, then the deferred SYSRESETREQ ->
                         // vendor update screen + its USB disk (docs/native-boot.md).
-                        // RAM build: RECOVER = plain reset. DBG:BOOT? = boot info.
+                        // DBG:BOOT? = boot info.
                         // Stock device-authenticity check, read-only (docs/genuine-check.md).
                         b"GENUINE" => {
                             let i = crate::genuine::inspect();
@@ -1235,7 +1233,6 @@ impl Scpi {
                             self.put(if ok { b"GENUINE" } else { b"MISMATCH" });
                             continue;
                         }
-                        #[cfg(any(feature = "native", feature = "test-initcore"))]
                         b"BOOT" => {
                             crate::boot::put_info(self);
                             continue;
@@ -1245,11 +1242,7 @@ impl Scpi {
                         // cluster>,<files left out>.
                         #[cfg(feature = "vdisk")]
                         b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, core::sync::atomic::Ordering::Relaxed); self.put(b"OK") } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err = Some("Undefined header") } continue; }
-                        #[cfg(feature = "native")]
                         b"RECOVER" | b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err = Some("Flash error"); continue; } Dbg::Reset }
-                        #[cfg(not(feature = "native"))]
-                        b"RECOVER" => Dbg::Reset,
-                        // (block kept at its original line count: panic locations)
                         _ => {
                             self.err = Some("Undefined header");
                             continue;

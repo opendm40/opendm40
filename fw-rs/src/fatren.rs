@@ -50,9 +50,8 @@
 //!
 //! Host test: tools/fatren-test/run.sh (mkfs.fat image, mtools, fsck.fat).
 
-// test-recovery uses only make_trigger, test-initcore only run, the RAM build
-// only the helpers calbackup uses.
-#![cfg_attr(not(feature = "native"), allow(dead_code))]
+// Host tests include only parts of it.
+#![cfg_attr(not(target_os = "none"), allow(dead_code))]
 
 use crate::msc::BlockDevice;
 

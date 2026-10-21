@@ -1,7 +1,6 @@
-//! Native board bring-up: everything the RAM-loaded image used to inherit from
-//! the stock firmware and that fw-rs never initialised itself (audit in
-//! docs/native-boot.md "Implementation"). Runs after clock::init_core and
-//! before `main` (native normal boot, and test-initcore from RAM).
+//! Native board bring-up: everything the old RAM-loaded image used to inherit
+//! from the stock firmware (audit in docs/native-boot.md "Implementation").
+//! Runs after clock::init_core and before `main` (normal boot).
 //!
 //! Values are the stock ones (firmware/re/analysis/lcd_buzzer_v2_6.h,
 //! scope_gen_ui_v2_6.h, and the stock boot FUN_0800af34 -> FUN_0800b410 rails,
@@ -43,8 +42,8 @@ const BWTR1_VAL: u32 = 0x0FF0_0201;
 
 const TIM13: u32 = 0x4000_1C00;
 
-/// What the stock-era registers held before `init` overwrote them (useful in
-/// T1 from RAM, where the stock values are live): BCR1, BTR1, BWTR1, panel ID.
+/// What the registers held before `init` overwrote them (as the FS-loader left
+/// them): BCR1, BTR1, BWTR1, panel ID.
 #[derive(Clone, Copy, Default)]
 pub struct Before {
     pub bcr1: u32,

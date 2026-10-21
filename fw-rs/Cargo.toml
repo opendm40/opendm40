@@ -2,7 +2,7 @@
 name = "dm40-fw"
 version = "0.0.1"
 edition = "2021"
-description = "Replacement firmware for the Alientek DM40 (GD32F427), RAM-loaded PoC"
+description = "Replacement firmware for the Alientek DM40 (GD32F427)"
 
 [[bin]]
 name = "dm40-fw"
@@ -20,57 +20,22 @@ opt-level = "z"
 panic = "abort"
 
 [features]
-# Back up the calibration record (0x080C0000), the UID-bound boot data
-# (0x080A4000), UID, option bytes, OTP, the primary bootloader (0x08000000) and
-# the loader sector (0x080A0000) to the SPI-flash USB disk at boot
-# (src/calbackup.rs: CALIB.BIN, BOOTDATA.BIN, UID.BIN, OPTBYTES.BIN, OTP.BIN,
-# ROMBOOT.BIN, LOADER.BIN, BACKUP.TXT; written only when missing or
-# different). Implied by native.
-# Off in the RAM images: it costs ~6.5 KB of CODE. The default image has only
-# ~250 bytes of its 120 KiB CODE left (2026-10-13, after the UI/DMM work), so
-# `./build.sh --features calbackup` no longer fits (overflows by ~6.3 KB).
-# Not in test-initcore either: that image is < 1 KB below the 128 KiB flash
-# sector 8 without it.
-calbackup = []
+default = ["vdisk"]
 # HY3131 on the old bit-banged GPIO bus instead of the hardware SPI2 (the
 # fallback build until SPI2 is verified on the device; src/hy3131.rs,
 # fw-rs/docs/dmm-input-scope-feasibility.md section 8).
 hyspi-bitbang = []
 # Leave the panel contents alone at start (no clear, status squares only on
-# failure) so a screenshot captures what the stock firmware last drew.
+# failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []
-# Embed the stock bitmap fonts (stockfont_data.rs, ~83 KB) into our image for
-# the future native-flash layout. Off by default: the RAM-loaded sector-8 image
-# reads the stock fonts in place from internal flash instead (fits in 128 KB).
-embedded-fonts = []
-# Native-flash (XIP) image at 0x08004000: fw-rs runs with no stock firmware
-# having configured the clock first, so the native shim calls clock::init_core()
-# to bring up the 200 MHz tree itself. Off by default: the RAM-loaded sector-8
-# image inherits the clock the stock firmware already set, so init_core stays
-# defined-but-uncalled there (silenced with #[allow(dead_code)]).
-native = ["embedded-fonts", "calbackup", "vdisk"]
-# Second USB mass-storage LUN: the read-only information volume generated
-# from the MCU memory (src/vdisk.rs: CALIB / BOOTDATA / UID / OPTBYTES / OTP /
-# ROMBOOT / LOADER .BIN, BACKUP.TXT, FIRMWARE.BIN). Implied by native.
+# USB mass-storage LUN = the read-only information volume generated from the
+# MCU memory and the SPI-disk files (src/vdisk.rs: LOGS / SCOPE / SHOTS /
+# INFO / DEBUG). Default; without it the LUN is the writable SPI disk.
 vdisk = []
-# Hardware tests of the native boot code from the RAM-loaded sector-8 image
-# (docs/native-boot.md "Implementation", test plan T1/T2). They link with
-# link-test.x (CODE = SRAM0+SRAM1 128 KiB, DMA RAM = SRAM2 64 KiB; build.sh
-# selects the script).
-#   test-initcore: clock::init_core() from the stock 200 MHz state + the native
-#     board init (GPIO/DMA clocks, rails, FSMC + ILI9488, backlight) + fatren
-#     (dry run unless fatren-live), then the normal fw-rs main.
-#   test-recovery: the shim sequence (decision recorded, recovery forced) then
-#     the native recovery mode: ZERO the stock app's 12-byte marker at
-#     0x08008000 + reset. DESTRUCTIVE but recoverable: the meter then stays in
-#     the vendor update screen until dm40_patched.bin is reinstalled through it.
-test-initcore = []
-test-recovery = []
-# fatren (src/fatren.rs: after a native boot, rename the installed dm40*.bin
-# on the SPI FAT to _DM40PRV.BIN; its exact condition is owned by fatren.rs): fatren-dry-run only reports what
-# it would do. test-initcore is always a dry run unless fatren-live is given.
+# fatren (src/fatren.rs: after a boot, rename the installed dm40*.bin on the
+# SPI FAT to _DM40PRV.BIN; its exact condition is owned by fatren.rs) only
+# reports what it would do.
 fatren-dry-run = []
-fatren-live = []
 # Recovery alternatives for tests (default recovery = zero the 12-byte loader
 # marker at 0x08008000 + reset -> vendor loader update screen + USB disk):
 #   recovery-file: 0-byte DM40RCVR.BIN on the SPI FAT + power off (needs a cold

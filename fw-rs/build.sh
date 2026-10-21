@@ -1,46 +1,19 @@
 #!/bin/sh
-# Build fw-rs.
-#   ./build.sh [cargo args]                RAM image (sector 8, BT-loaded) -> dm40-fw.bin
-#   ./build.sh test-initcore [cargo args]  T1 RAM test image              -> dm40-fw.bin
-#   ./build.sh test-recovery [cargo args]  T2 RAM test image              -> dm40-fw.bin
-#   ./build.sh native [cargo args]         native update file             -> dm40-fw-native.bin
-# (tools/reload.sh passes its arguments here, so `tools/reload.sh test-recovery`
-# BT-loads the T2 image.) The default mode is exactly the original build; the
-# other modes select their linker script through RUSTFLAGS and build in their
-# own target directory. Native: body = 0x08004000..end with the 12-byte loader
-# marker at 0x08008000 as 0xFF, packed by ../firmware/dm40fw.py pack --pad
-# (0xFF-padded to whole 128-byte blocks, checked below) into the stock
-# update format (renamed to dm40*.bin only when staged on the device).
+# Build fw-rs: the native update file -> dm40-fw-native.bin.
+#   ./build.sh [native] [cargo args]       e.g. ./build.sh --features keep-screen
+# (`native` is accepted as a no-op first argument for older callers, e.g.
+# emu/run.py.) Body = 0x08004000..end with the 12-byte loader marker at
+# 0x08008000 as 0xFF, linked with link-native.x, packed by
+# ../firmware/dm40fw.py pack --pad (0xFF-padded to whole 128-byte blocks,
+# checked below) into the stock update format (renamed to dm40*.bin only when
+# staged on the device). tools/reload.sh passes its arguments here.
 set -e
 cd "$(dirname "$0")"
 RUSTUP_HOME="$(cd ../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
 OBJCOPY=$(find ../toolchain/rustup -name llvm-objcopy | head -1)
 
-MODE=ram
-case "$1" in
-    native|test-initcore|test-recovery) MODE=$1; shift ;;
-esac
-
-if [ "$MODE" = ram ]; then
-    cargo build --release "$@"
-    ELF=target/thumbv7em-none-eabihf/release/dm40-fw
-    "$OBJCOPY" -O binary "$ELF" dm40-fw.bin
-    echo "dm40-fw.bin: $(wc -c < dm40-fw.bin) bytes, flash at 0x08080000"
-    python3 - <<'PY'
-import struct
-d = open('dm40-fw.bin', 'rb').read()
-sp, entry = struct.unpack_from('<II', d)
-print("  initial SP   = 0x%08x" % sp)
-print("  reset entry  = 0x%08x" % entry)
-PY
-    exit 0
-fi
-
-if [ "$MODE" = native ]; then
-    SCRIPT=link-native.x; FEAT=native; TDIR=target/native
-else
-    SCRIPT=link-test.x; FEAT=$MODE; TDIR=target/test-$MODE
-fi
+if [ "$1" = native ]; then shift; fi
+SCRIPT=link-native.x; TDIR=target/native
 # Reproducible image (review L10): the same commit gives the same bytes in
 # any checkout / worktree. Absolute paths reach rodata through panic
 # locations of the dependencies (CARGO_HOME/registry/src/..., resolved
@@ -62,22 +35,8 @@ for d in "$CARGO_HOME"/registry/src/*/; do
     [ -d "$d" ] && remap "$d" crates
 done
 RUSTFLAGS="-C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
-    cargo build --release --features "$FEAT" "$@"
+    cargo build --release "$@"
 ELF=$TDIR/thumbv7em-none-eabihf/release/dm40-fw
-
-if [ "$MODE" != native ]; then
-    "$OBJCOPY" -O binary "$ELF" dm40-fw.bin
-    echo "dm40-fw.bin ($MODE RAM test image): $(wc -c < dm40-fw.bin) bytes, flash at 0x08080000"
-    python3 - <<'PY'
-import struct
-d = open('dm40-fw.bin', 'rb').read()
-assert len(d) <= 128 * 1024, 'image larger than flash sector 8'
-sp, entry = struct.unpack_from('<II', d)
-print("  initial SP   = 0x%08x" % sp)
-print("  reset entry  = 0x%08x" % entry)
-PY
-    exit 0
-fi
 
 # Static worst-case stack path vs the TCM stack (>= 16 KiB headroom).
 if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 16384 --top 0 > target/native/stackdepth.txt; then

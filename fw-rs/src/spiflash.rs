@@ -117,7 +117,7 @@ pub enum ClockCheck {
 }
 
 impl ClockCheck {
-    /// DBG:BOOT? text (native.rs; unused in the RAM images).
+    /// DBG:BOOT? text (native.rs).
     #[allow(dead_code)]
     pub fn name(self) -> &'static [u8] {
         match self {

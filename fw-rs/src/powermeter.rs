@@ -666,7 +666,7 @@ impl Pw {
 
 /// The power meter's state lives in SRAM (.sram_bss), not in the App on the
 /// TCM stack: `Dmm::new` writes it once (`pw_static`).
-#[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".sram_bss")]
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut PW: core::mem::MaybeUninit<Pw> = core::mem::MaybeUninit::uninit();
 
 /// Initialise and hand out the one `Pw` (call once: `Dmm::new`).

@@ -104,23 +104,15 @@ pub fn load() -> Option<Record> {
 /// firmware (own settings in config.bin, power-on default DC V) and the
 /// vendor loader never touch it. So after a round trip through other
 /// firmware it holds whatever fw-rs measured last, possibly days and another
-/// firmware ago (seen: the first native boot came up in AC+DC from an old RAM
+/// firmware ago (seen: the first native boot came up in AC+DC from an old
 /// session although the user had been measuring DC V on the stock firmware).
-/// Native: the boot shim records every normal fw-rs boot in BKP_LAST
+/// The boot shim records every normal fw-rs boot in BKP_LAST
 /// (boot.rs; DBG:UPDATE / DBG:RECOVER clear it, a recovery leaves "RCVR"), so
-/// only a previous boot that was a normal fw-rs one continues the mode. RAM
-/// builds (loaded by the stock) cannot tell: they keep restoring it.
+/// only a previous boot that was a normal fw-rs one continues the mode.
 pub fn same_session() -> bool {
-    #[cfg(feature = "native")]
-    {
-        // boot.rs LAST_NORMAL ("NRML"), as the shim found BKP_LAST.
-        const LAST_NORMAL: u32 = 0x4C4D_524E;
-        crate::boot::info().is_some_and(|i| i.last == LAST_NORMAL)
-    }
-    #[cfg(not(feature = "native"))]
-    {
-        true
-    }
+    // boot.rs LAST_NORMAL ("NRML"), as the shim found BKP_LAST.
+    const LAST_NORMAL: u32 = 0x4C4D_524E;
+    crate::boot::info().is_some_and(|i| i.last == LAST_NORMAL)
 }
 
 pub fn save(p: &[u32; WORDS]) {
