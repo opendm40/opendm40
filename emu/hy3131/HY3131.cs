@@ -744,7 +744,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 double vx, vref;
                 Fe.OhmNode(vs, rref, out vx, out vref);
                 var pol = ((regs[0x28] >> 4) & 7) == 4 && (regs[0x28] & 7) == 4 ? -1.0 : 1.0;
-                if(Math.Abs(vref) < 1e-9) { code = pol * Math.Sign(vx) * 1e12; break; }
+                // open jack: vx -> vs, vref -> 0 with the same sign: the ratio goes to +infinity
+                if(Math.Abs(vref) < 1e-9) { code = pol * 1e12; break; }
                 code = 0.9 * vx / vref * 8388606.0 * pol;
                 code *= ig / rowIg;
                 break;
