@@ -1563,12 +1563,20 @@ pub fn keypad(kind: u8, title: &str, input: &str, unit: &str, sel: bool) {
         sf::label(sf::TEXT22, rect(228, 108, 100, 26), title, 0x0000, K_PANEL, 1, 0);
     }
     keypad_input(freq, input, unit, sel);
-    for &(r, l, c) in keypad_keys(kind) {
-        if c == 0 {
-            continue;
+    for &(_, _, c) in keypad_keys(kind) {
+        if c != 0 {
+            keypad_key(kind, c, false);
         }
-        sf::rbox(r, 4, K_KEY, K_PANEL);
-        sf::glyphs(if l.len() > 1 || c == b'<' { sf::TEXT22 } else { K_FONT }, r, l, STATUS_FG, K_KEY, 8, 0);
+    }
+}
+
+/// Keypad key `code` normal or pressed (stock pressed colour 0x04FC;
+/// ui-review #11: feedback at touch-down).
+pub fn keypad_key(kind: u8, code: u8, pressed: bool) {
+    if let Some(&(r, l, c)) = keypad_keys(kind).iter().find(|k| k.2 == code && code != 0) {
+        let bg = if pressed { K_SEL } else { K_KEY };
+        sf::rbox(r, 4, bg, K_PANEL);
+        sf::glyphs(if l.len() > 1 || c == b'<' { sf::TEXT22 } else { K_FONT }, r, l, STATUS_FG, bg, 8, 0);
     }
 }
 

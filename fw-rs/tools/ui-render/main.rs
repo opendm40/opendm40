@@ -1167,6 +1167,8 @@ fn main() {
             host::reset(0);
             ui::gen_static(&w.gen);
             ui::keypad(ui::KP_NUM, "Vpp", "3.00", "V", true);
+            // Key '5' held (ui-review #11 pressed feedback).
+            ui::keypad_key(ui::KP_NUM, b'5', true);
             save(&out, "g04-keypad-vpp-sel");
         }
     }
