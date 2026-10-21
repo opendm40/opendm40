@@ -92,7 +92,9 @@ pub const COUP_AUTO: u8 = 2;
 /// DC method: settle after a row write (no relay change: DC V and DC A
 /// both use PA state 0, the shunt stays; the AD1 pre-filter and the first
 /// chopped conversion), results dropped, results taken per phase (AD1 at
-/// the DC rows' R22 0x15: OSR 8192 chopped, 100 ms).
+/// the DC rows' R22 0x15: OSR 8192 chopped, 100 ms). 150 ms is a guess (the
+/// stock settles DC V 450 ms after a function change, with relay moves):
+/// device re-check 5 of doc 3.12.
 const DC_SETTLE_MS: u64 = 150;
 const DC_SKIP: u8 = 1;
 const DC_N: u8 = 2;
@@ -195,11 +197,13 @@ const R20_PB4: u8 = 0xF0;
 /// R21 for a DC-coupled comparator input at `c` V (DC) with `a` V rms of AC
 /// on it (doc 3.11: the T1 square was 0..96 mV on the 60 V tap: it never
 /// crossed the default -20.8 mV, f = 0): the nearest high threshold above
-/// c + 3 mV and low threshold below c - 3 mV, both inside the swing (every
+/// c + 6 mV and low threshold below c - 6 mV, both inside the swing (every
 /// usual waveform reaches at least its rms around its mean). None = no
 /// window (pure DC, too small an AC part).
 pub fn cmp_window(c: f32, a: f32) -> Option<u8> {
-    const M: f32 = 0.003;
+    // 6 mV: an un-zeroed unit's Y phantom (~5 mV at the tap) keeps a
+    // bipolar signal on the default window.
+    const M: f32 = 0.006;
     let mut rh: Option<(u8, f32)> = None;
     for &(k, v) in &CMP_RH {
         if v >= c + M && rh.is_none_or(|(_, b)| v < b) {
@@ -693,6 +697,7 @@ impl Dmm {
         pw.cal = 0;
         pw.restarts = 0;
         pw.job = 0;
+        pw.cal_req = false;
         pw.keep = 0;
         pw.cmp_vr = 255;
         // DC: the AD1 method at once; AUTO starts with B (a full set tells).
@@ -1404,7 +1409,7 @@ impl Dmm {
             if let Some(t) = pw.t_last {
                 let dt = now.saturating_sub(t);
                 let s = dt as f32 * 1e-3;
-                if !pw.alt {
+                if !pw.alt || pw.dc {
                     pw.e.add(pw.p_tot * s);
                 }
                 pw.va.add(pw.s_last * s);
@@ -1893,8 +1898,11 @@ mod tests {
         assert_eq!(cmp_window(0.0, 0.1), Some(R21_DEFAULT));
         assert_eq!(cmp_window(0.001, 0.03), Some(R21_DEFAULT));
         // The T1 square on the 60 V tap: 0..96 mV (DC 48 mV, AC 48 mV rms):
-        // RH 62.5 mV (0xB), RL 20.8 mV (0xF), both inside 0..96 mV.
+        // RH 62.5 mV (0xB), RL 20.8 mV (0xF, the highest RL tap below
+        // +0.2 V), both inside 0..96 mV.
         assert_eq!(cmp_window(0.048, 0.048), Some(0xBF));
+        // An un-zeroed Y phantom (5 mV) keeps the default window.
+        assert_eq!(cmp_window(0.005, 0.1), Some(R21_DEFAULT));
         // Negative DC with ripple: -0.3 V +- 0.15 V.
         let w = cmp_window(-0.3, 0.15).unwrap();
         let rh = CMP_RH.iter().find(|e| e.0 == w >> 4).unwrap().1;
