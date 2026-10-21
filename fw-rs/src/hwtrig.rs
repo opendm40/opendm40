@@ -167,9 +167,16 @@ pub struct HwTrig {
     /// Starts as `DEFAULT_ENABLED`.
     enabled: bool,
     /// Consecutive frames where the comparator fired but no crossing was in
-    /// the search window (bad map): after `MAX_MISSES` the engine disables
-    /// itself.
+    /// the search window (bad map), or a timeout where software found one:
+    /// after `MAX_MISSES` the engine suspends itself.
     misses: u8,
+    /// Suspended by `MAX_MISSES` misses or a stuck gate (`suspend`): the
+    /// software trigger runs until `resume`, which the scope calls on any
+    /// change of the trigger-relevant settings. Not a permanent switch-off
+    /// (device 2026-10-21: AUTO's sweep through overdriven ranges collected
+    /// three misses, and the comparator stayed off for the rest of the
+    /// session: ~9 fps at 1 ms/div after AUTO vs ~36 fps before).
+    suspended: bool,
     prepared: bool,
     armed: bool,
     post_ticks: u32,
@@ -190,6 +197,7 @@ impl HwTrig {
             stats: Stats { hits: 0, misses: 0, delta_last: 0, delta_min: i32::MAX, delta_max: i32::MIN, delta_sum: 0 },
             enabled: DEFAULT_ENABLED,
             misses: 0,
+            suspended: false,
             prepared: false,
             armed: false,
             post_ticks: 0,
@@ -242,16 +250,34 @@ impl HwTrig {
         self.enabled = on;
         if on {
             self.misses = 0;
+            self.suspended = false;
         }
+    }
+
+    /// Hand the scope to the software trigger until `resume`.
+    pub fn suspend(&mut self) {
+        self.suspended = true;
+    }
+
+    /// Try the comparator again (new settings): clears a suspension and the
+    /// miss count. No effect while disabled.
+    pub fn resume(&mut self) {
+        self.suspended = false;
+        self.misses = 0;
+    }
+
+    pub fn suspended(&self) -> bool {
+        self.suspended
     }
 
     pub fn enabled(&self) -> bool {
         self.enabled
     }
 
-    /// The comparator path is usable: enabled and a plausible map exists.
+    /// The comparator path is usable: enabled, not suspended, and a plausible
+    /// map exists.
     pub fn available(&self) -> bool {
-        self.enabled && (self.cal.is_some() || rec_pair(REC_TRIG, 0).is_some())
+        self.enabled && !self.suspended && (self.cal.is_some() || rec_pair(REC_TRIG, 0).is_some())
     }
 
     /// Per-edge map {code at DAC 1780, code at DAC 2401}: RAM calibration,
@@ -389,12 +415,13 @@ impl HwTrig {
 
     /// The comparator fired but the software search found no crossing near
     /// the estimate: the map is off (or the signal is too fast for the
-    /// comparator). Three in a row switch the engine off.
+    /// comparator, or the front end is overdriven / still settling). Three in
+    /// a row suspend the engine until the next settings change (`resume`).
     pub fn note_miss(&mut self) {
         self.misses = self.misses.saturating_add(1);
         self.stats.misses = self.stats.misses.wrapping_add(1);
         if self.misses >= MAX_MISSES {
-            self.enabled = false;
+            self.suspended = true;
         }
     }
 
