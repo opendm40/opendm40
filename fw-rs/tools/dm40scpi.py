@@ -18,6 +18,11 @@ transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:0001) or Bluetooth
                                               '#' header lines (model, fw,
                                               function, CONFigure?); Ctrl-C
                                               ends it cleanly
+    dm40scpi.py get LOG000.CSV [-o f.csv]     copy a disk file (MMEM:DATA?): a
+                                              LOGnnn.CSV is generated from the
+                                              binary LOGnnn.DLG on the meter
+                                              (or copy the .DLG and decode it
+                                              with tools/dlog.py)
     dm40scpi.py scpi 'CMD' ...                send commands / queries in order
     dm40scpi.py --bt btpoll [-p 50] [-d 10]   UF-36 check: poll the stock
                                               phone-app measurement frame (cmd
@@ -63,6 +68,10 @@ class UsbLink:
             return None
         return self.l.read().decode(errors='replace').strip()
 
+    def query_raw(self, line):
+        self.l.write(line)
+        return self.l.read()
+
     def close(self):
         os.close(self.l.fd)
 
@@ -82,6 +91,13 @@ class BtLink:
             return None
         data, block = r
         return data if block else data.decode(errors='replace').strip()
+
+    def query_raw(self, line):
+        r = self.l.query(line)
+        if r is None:
+            return b''
+        data, block = r
+        return b'#4%04d' % len(data) + data if block else data
 
     def close(self):
         self.l.close()
@@ -187,6 +203,37 @@ def do_log(link, args):
     return 0
 
 
+def get_file(link, name, out=None, progress=None):
+    """A disk file over MMEM:DATA? (6000-byte pieces). "LOGnnn.CSV" of a
+    LOGnnn.DLG binary log is the CSV the meter generates from it."""
+    data = bytearray()
+    while True:
+        r = link.query_raw('MMEM:DATA? "%s",%d' % (name, len(data)))
+        if not r.startswith(b'#4'):
+            err = link.query('SYST:ERR?') or ''
+            raise IOError('MMEM:DATA? %s: %r (%s)' % (name, bytes(r[:40]), err))
+        n = int(r[2:6])
+        data += r[6:6 + n]
+        if progress:
+            progress(len(data))
+        if n < 6000:
+            break
+    if out:
+        open(out, 'wb').write(data)
+    return bytes(data)
+
+
+def do_get(link, args):
+    out = args.out or args.name
+    t0 = time.monotonic()
+    prog = None if args.quiet else (lambda n: print('\r%d bytes' % n, end='', flush=True))
+    d = get_file(link, args.name, out, prog)
+    if not args.quiet:
+        print()
+    print('%s: %d bytes in %.1f s' % (out, len(d), time.monotonic() - t0))
+    return 0
+
+
 def do_scpi(link, args):
     for c in args.commands:
         r = link.query(c)
@@ -279,6 +326,11 @@ def main():
     s.add_argument('--conf', help='switch to this function first')
     s.add_argument('-q', '--quiet', action='store_true')
     s.set_defaults(func_=do_log)
+    s = sub.add_parser('get', help='copy a disk file (LOGnnn.CSV = generated from LOGnnn.DLG)')
+    s.add_argument('name', help='e.g. LOG000.CSV, LOG000.DLG, S000.BMP (MMEM:CAT? lists them)')
+    s.add_argument('-o', '--out', help='output file (default: the name)')
+    s.add_argument('-q', '--quiet', action='store_true')
+    s.set_defaults(func_=do_get)
     s = sub.add_parser('scpi', help='send commands / queries')
     s.add_argument('commands', nargs='+')
     s.set_defaults(func_=do_scpi)

@@ -560,6 +560,24 @@ fn main() -> ! {
                         false
                     }
                 },
+                scpi::Out::Mmem(scpi::Mmem::Data(name, off, len)) => {
+                    // #4nnnn + up to 6000 bytes (dlog.rs: a LOGnnn.CSV is
+                    // generated from its LOGnnn.DLG).
+                    let b = port.rsp_buf();
+                    let len = (len as usize).min(b.len().saturating_sub(6));
+                    match dlog::data(&name, off, &mut b[6..6 + len]) {
+                        Ok(n) => {
+                            b[..2].copy_from_slice(b"#4");
+                            for (i, d) in [1000usize, 100, 10, 1].iter().enumerate() {
+                                b[2 + i] = b'0' + (n / d % 10) as u8;
+                            }
+                            port.respond_len(6 + n);
+                        }
+                        Err(dlog::DataErr::NotFound) => scpi.set_err("File name not found"),
+                        Err(_) => scpi.set_err("Mass storage error"),
+                    }
+                    false
+                }
                 // Deleting files over an open radio link: USB only.
                 scpi::Out::Mmem(scpi::Mmem::Del(_)) if !port.trusted() => {
                     scpi.set_err(bt::proto::REFUSED);
