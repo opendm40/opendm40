@@ -56,6 +56,10 @@ fn main() {
         }
     }
     check("weights vs f64 kernel", ew < 1e-5, format!("max error {ew:e}"));
+    // fr just below 1 (p - floor(p) can give 1 - ulp): finite, sum 1, the
+    // weight moves to the next sample.
+    let w = sinc::weights(1.0 - f32::EPSILON);
+    check("weights fr = 1 - ulp", w.iter().all(|v| v.is_finite()) && (w.iter().sum::<f32>() - 1.0).abs() < 1e-4 && w[3] > 0.99, format!("{w:?}"));
 
     // Samples and DC pass through.
     let src: Vec<u16> = (0..40).map(|i| ((i * 37 + 11) % 1024) as u16).collect();
