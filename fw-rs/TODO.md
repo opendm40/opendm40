@@ -39,8 +39,10 @@ Code work (in this order):
 - [x] On-device test of USBTMC (`*IDN?`, `DBG:PING?`/`DIAG?`/`LCD?` screenshot, `DBG:TAP`/`SWIPE`) and
       the mass-storage disk (W25Q128, 1f2bf30).  (device-verified: used in every device run since;
       CALBK files written, dm40_patched.bin copied onto the disk for DBG:UPDATE)
-- [ ] Faster redraw of the main DMM value and trend chart (target ~6 ms like stock: render to RAM,
+- [x] Faster redraw of the main DMM value and trend chart (target ~6 ms like stock: render to RAM,
       single window flush, chart column ring). 4d2dc40 sped it up; measure with DBG:PROF? (95287a8).
+      Done: be9425b (d.read / d.chart prof sections), 1f19f05 (chart column-span cache, aux rows repainted
+      only on change, faster stockfont::label; pixel-identical). (verify on device: DBG:PROF? d.read / d.chart)
 - [x] Item-by-item parity check vs stock -> `docs/parity.md`. DMM/scope/gen/BT/GUI/touch/USB
   tabulated; punch-list extracted. Deliberate deviations recorded (red value, no logo,
   English-only, temp F 1.8 not the stock 1.82 bug, combined views, USBTMC, gestures).
@@ -216,8 +218,9 @@ Code work (in this order):
             DBG:PROF? csv lap during a LUN-1 refresh with a large log (~0.1 s per 100 KB expected);
             DBG:DIAG? STACK high-water after a LUN-1 refresh with several logs (~2 KiB frame);
             copy a file to the DM40 disk: LUN 1 re-reads once, 2 s after the copy, not per write.
-      - [ ] Owner 2026-10-21: drop legacy text LOG*.CSV / SCOP*.CSV support on the SPI disk (gallery parser,
+      - [x] Owner 2026-10-21: drop legacy text LOG*.CSV / SCOP*.CSV support on the SPI disk (gallery parser,
             numbering, list/delete): only .DLG is written and read; CSV exists only as the generated export.
+            (4544d4e)
       - [ ] FR-38 logger to disk (DLG kind 3 reserved): needs pre-allocated clusters (commit stalls
             lose ~290 samples at 640/s); see the doc section 3.
 
@@ -461,12 +464,17 @@ Code work (in this order):
 
 ## Owner notes 2026-10-14 (../замечания.txt)
 Firmware:
-- [ ] °F shown in the top-left status slot is odd; move the °C/°F choice to a global Settings option and show only the chosen unit.
-- [ ] Temperature settings: remove the unclear "Offset 0" button (reset via the slider/long-press instead).
-- [ ] "NTC user" is unclear: make its R25/Beta editable right there (or remove); explain on screen.
-- [ ] Second resistance mode present in the stock is missing in fw-rs — check stock parity (dmm_v2_6.h) and add it.
-- [ ] Tap on the DMM value cycles averaging/resolution: fewer digits = faster readings; compute digits vs OSR/noise from the
+- [x] °F shown in the top-left status slot is odd; move the °C/°F choice to a global Settings option and show only the chosen unit.
+      (1a3efbd: Settings 2/2 Temp unit, UNIT:TEMP; verify on device)
+- [x] Temperature settings: remove the unclear "Offset 0" button (reset via the slider/long-press instead).
+      (bdbbfcb: offset stepper + keypad, no Offset 0; verify on device)
+- [x] "NTC user" is unclear: make its R25/Beta editable right there (or remove); explain on screen.
+      (bdbbfcb: R25 / Beta fields on the temperature page; verify on device)
+- [x] Second resistance mode present in the stock is missing in fw-rs — check stock parity (dmm_v2_6.h) and add it.
+      (d6fc216: stock "ON" low-current variant made visible; verify on device)
+- [x] Tap on the DMM value cycles averaging/resolution: fewer digits = faster readings; compute digits vs OSR/noise from the
       HY3131 timing + measured noise (not ad hoc); the +1 digit always drawn small at the end.
+      (24f7080: FAST/MED/SLOW with a counts / rate toast; verify on device)
 - [ ] Power-meter mode: HY3131 can measure V and I at once (AD2/AD3 + MUL → active power in RMSDATA); Vrms, Irms, P (and
       energy) by switching internal modes — check feasibility with the DM40 front-end wiring first.
       Researched: GO, docs/power-meter-and-misconnect.md §3 (I on the stock OP1 path, V via OP2→AD3 DC-coupled,
@@ -486,13 +494,15 @@ Firmware:
       pass; split across passes and redraw only changed cells (3-4 % of touch/USB wait up to 33 ms).
 - [ ] Scope ~9 fps at 1 ms/div 2 V/div after AUTO vs 36 fps before at the same timebase — investigate.
 Emulator (emu/):
-- [ ] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
+- [x] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
       at the same time); the firmware's mux/relay choices route it through a modelled DM40 front-end (dividers, shunts, relays,
-      switches) — no per-mode magic inputs.
-- [ ] Show the firmware's current mux/relay/switch selection as feedback in the GUI (draw the front-end path).
-- [ ] Cold-junction temperature and the HY3131 die temperature are separate inputs (die temp always set; default equal).
-- [ ] GUI: Apply on Enter in the HY3131 input fields; show only the fields relevant to the chosen source (no freq/DC offset
-      for plain DC etc.).
+      switches) — no per-mode magic inputs. (0b464bd DM40 front-end model + connection editor, 213fc83 cross table)
+- [x] Show the firmware's current mux/relay/switch selection as feedback in the GUI (draw the front-end path).
+      (0b464bd schematic, 0b2e01f HY3131 pins + internal switching, 6df6db9 Frontend state line)
+- [x] Cold-junction temperature and the HY3131 die temperature are separate inputs (die temp always set; default equal).
+      (0b464bd CJ/die split)
+- [x] GUI: Apply on Enter in the HY3131 input fields; show only the fields relevant to the chosen source (no freq/DC offset
+      for plain DC etc.). (0b464bd GTK connection editor: Enter applies, per-source fields)
 - [x] Virtual backup files (owner 2026-10-21): second USB MSC LUN = read-only FAT16 volume DM40-INFO
       generated from the MCU memory (src/vdisk.rs: CALIB / BOOTDATA / UID / OPTBYTES / OTP / ROMBOOT / LOADER .BIN,
       BACKUP.TXT, FIRMWARE.BIN = running firmware as update file); per-LUN SCSI in msc.rs (INQUIRY names, WP bit,
@@ -513,13 +523,14 @@ Emulator (emu/):
       tools/mkfont.py and fonts/Roboto-*; host-test module lists updated (ui::button_hit stays: live).
 - [x] Continuity: a negative result (source / reversed diode / charged capacitor on the jacks) clamps to
       0.00 ohm as the stock (was -666 / -1114 ohm; emulator cross table). (emulator-verified: V 1.234|cont = 0)
-- [ ] AC V on a pure DC source reads ~18 mV in the emulator (stock ~0): NOT a firmware bug. The model's
+- [x] AC V on a pure DC source reads ~18 mV in the emulator (stock ~0): NOT a firmware bug. The model's
       coupling capacitor charges to the raw jack DC (UpdateAcNode: src = dc * NodeRatioAc) while the
       seen step uses the calibration-folded node DC (NodeDcAc: DcQ(...)), so step = dcNode - vc never
       reaches 0: residual = 1.5 x V x (cal gain/offset error) = 17.7 mV at 1.234 V. With `cal:0` fw-rs
       settles at 0.64 mV (the model's noise floor). The stock escapes it because its mV-first AUTO steps
       to AC mV (DC coupled in the model, no coupling term); fw-rs stays on the 6 V range (AUTO+, UF-21).
       Fix belongs in emu/hy3131/HY3131.cs (charge vc towards the same DcQ-folded level).
+      Fixed in cd80de8 (vc charges to the calibration-adjusted level; test settles to the floor).
 - [x] UF-30 bargraph wired: in the history row's place (8,154,464,18; the 7 px strip under the digits
       cannot keep 3 px from the F78 ink and the history boxes), Settings 2/2 "DMM row" Bargraph (default) /
       History (p[38] bit 10). Fed in App::reading with the raw reading (pre-REL, pre-smoothing; keeps
