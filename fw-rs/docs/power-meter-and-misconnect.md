@@ -1,6 +1,7 @@
 # Power meter mode and wrong-connection detection: feasibility and design
 
-Date 2026-10-21. Research + design only; no fw-rs source changed. Answers the two
+Date 2026-10-21 (implemented since: misconnect sentinel 4.6, power meter
+3.11). Answers the two
 owner ideas of `TODO.md` "Owner notes 2026-10-14" (power meter, misconnect
 warnings) for the DM40 hardware as far as it is known without a netlist.
 
@@ -303,11 +304,16 @@ COM**, and COM is at the potential of the conductor you break into.
  source (L / +) ---------------------+------------------- load (+)
                                      |
                                    [V/ohm]
-                              DM40  [COM] -------------------- load (-)   (return conductor broken here)
-                                    [A]  ---+
-                                            |   fuse, MOSFETs, shunt (R_path)
- source (N / -) -----------------------------+
+                              DM40  [A]   -------------------- load (-)   (return conductor broken here)
+                                    [COM] ---+                  fuse, MOSFETs, shunt (R_path) between A and COM
+                                             |
+ source (N / -) ------------------------------+
 ```
+
+(Corrected 2026-10-22: an earlier version of this sketch had A and COM
+swapped, which contradicts the sign paragraph below; the load current must
+enter A and leave through COM to read positive. The fw-rs entry dialog draws
+this version.)
 
 Wiring 1 (above, "V on the source side"): V-COM = V_load + I * R_path. The
 meter's own burden is inside the voltage reading: P_meas = P_load + I_rms^2 *
@@ -487,6 +493,128 @@ BT SCPI).
 
 Effort: 3.7 skeleton 1-2 days; B row + phase machine + SCPI 3-4 days; UI 2
 days; phase cal + tests 2 days; emulator role 2 days.
+
+
+### 3.11 Implemented (fw-rs, 2026-10-22)
+
+`fw-rs/src/powermeter.rs` (a child of dmm.rs: row builder, phase machine,
+scaling, energy, autorange, burden, limit; host tests), `src/ui_power.rs`
+(page slots, wiring dialog, Power Settings page), `src/app_power.rs`
+(taps, settings words, SCPI), hooks in `dmm.rs` / `hy3131.rs` / `app.rs` /
+`scpi.rs` / `meter.rs` / `persist.rs` (v6, 4 words) / `stockfont.rs`.
+Against the plan of 3.10:
+
+| plan item | as built |
+|---|---|
+| 1 hy3131.rs | `configure_ph(row, r36)`: the row with ENAD2 / ENAD3 cleared, INTE, **R36 (SPHACAL)**, then R34 (AD3) and R26 (AD2) - datasheet order + the AD3-first beat fix; `rms_signed` (bit 37 sign, bits 39:38 ignored), `lpf19`; the statistic switch is a one-byte R34 write |
+| 2 row | `power_row(vr, k, stat)` exactly as 3.10 (6 V: the DC V r0 /10 tap bytes; 60 / 600 / 1000 V: AC V r1..r3); host test `power_row_bytes`: every byte = the stock I row's, the V row's R2A..R30 or a listed override, plus the decoded intent (OP1 on PB2 / PB1, OP2 on SENSE x1, AD2 = OP1O - PB3, AD3 = OP2O - AGND, AD1 off). Relays: PA state 0, PE = the current range's shunt in **every** write (also the fallback's AC V row) |
+| 3 dmm.rs | function code **18** (16 / 17 were AC+DC already); internally the HY mode stays the AC A mode of the current range (`hy_mode` 4..6) with `pw.on`, so the button, relay and catch-all code paths stay AC A; any `set` (a function button, BT cmd 06, SCPI CONF of another function) leaves. Cycle P -> V -> P -> I, **2 results discarded** per R34 switch (`DISC_DEFAULT`, DBG:POW:DISC), each accepted part through the stock EMAs (V: AC V windows, I: AC A windows, P: 5 % relative jump, a 0.25); P = P_ac + V_dc I_dc etc. as 3.3. Calibration: I channel the stock AC A RMS gain (0xC4 + 4 ci) and LPF gain (0xF4 + 4 ci), no offsets; V channel gain 1.0 (no stock cal applies to OP2 / AD3). Readings once P, V and I were measured; every accepted result gives one. The state (`Pw`, ~0.6 KB with the T3 ring) lives in SRAM (.sram_bss), not in the App on the TCM stack |
+| autorange | per channel after its own result, stock thresholds (up > 1.03 x limit, down < 0.1 x limit / 1.03); V from 600 V, I from 10 A (least burden); the I floor follows the A key's AUTO / AUTO+ (AUTO+ never enters the 47.5 ohm shunt). A range change rewrites the row, settles 550 ms, restarts the cycle; manual ranges per channel (page / SCPI), AUTO key = both auto |
+| energy | Wh and VAh from the totals of the previous reading over the time since it (a range-change gap holds the last P), i64 mJ + f32 remainder (host test: 1 mW s steps on top of 1 kWh); RUN / PAUSE (energy box tap, POW:ENER:STAT), reset (long press on the side column, page, POW:ENER:RES); average P = E / t |
+| burden | R_path per shunt (default the shunt: 10 mohm / 0.5 ohm / 47.5 ohm; POW:BURD sets the current range's), compensation ON by default: P_L = P - I^2 R, V_L^2 = V^2 - 2 R P + R^2 I^2 (exact for any waveform: v_L = v - R i), S_L = V_L I, Q, PF from those; the burden voltage I R in its own box (amber when the compensation is off and it exceeds 1 % of V) |
+| limit | continuous-current limit (default 5 A / 30 s, POW:LIM <A>,<s>, persisted; the owner should set the manual's numbers): above it a countdown in the side column, at expiry a toast and the A-JACK beep pattern while it stays above; the auto power-off (and its warning) is held while the energy integrates with I > 50 uA, the DMM rail stays on in every view |
+| 4 SCPI | `CONFigure:POWer [<V>|AUTO[,<A>|AUTO]]`, `MEASure:POWer?` (P; waits through the range hunt, at most 15 s), `READ?` / `FETCh?` = P, `FETCh:POWer:ALL?` = `P,S,Q,PF,Vrms,Irms,F,E_Wh,seconds,Vdc,Idc,VAh,burden_V` (NaN = +9.91E37: the fallback's P / Q / PF / Vdc), `MEASure:POWer:APParent? / :PFACtor? / :ENERgy? / :REACtive? / :VOLTage? / :CURRent?` (latest values), `[SENSe:]POWer:VOLTage:RANGe` / `:CURRent:RANGe <value>|AUTO` / `?` (`AUTO,+6.000000E+02`), `:ENERgy:RESet`, `:ENERgy:STATe`, `:BURDen <ohm>|DEFault` / `?`, `:BURDen:STATe`, `:PHASe <-127..127>` / `?`, `:PHASe:CALibrate [REACtive]` (RESistive: "Settings conflict", see 3.5: the cos optimum is flat), `:CYCle?` (`d,P period ms,full set ms`), `:METHod SIMultaneous|ALTernate` / `?`, `:LIMit <A>[,<s>]` / `?`; `CONFigure?` = `"POW AUTO,AUTO"` / `"POW +6.0E+01,+6.0E+00"`, `FUNCtion?` = `"POW"`. BT keeps the stock protocol (cmd 06 / 09 report the AC A byte and P as the value) |
+| 5 UI | see below |
+| 6 settings | p[48..52]: SPHACAL, method, compensation, discards, I limit, time limit, R_path x 3 (0 = default); the function itself is **not** restored: a restart after a power session comes up in DC A on the 10 A shunt (a load current may still flow) |
+| 7 emulator | Power role in `emu/hy3131/HY3131.cs` (both copies; X = I x shunt x OP1 gain, Y = V / k, signed XY with the phase, SPHACAL on the cross term, mid-block R34 mixing, LPF and the counter as the hardware): 88 host checks; `emu/hy3131/powtest.py` end to end over USB/IP |
+| phase cal | `POW:PHAS:CAL` on a reactive load: P / S averaged over 8 results at the current SPHACAL and 48 steps away, then the Newton step that nulls it (works for C and L loads; the sign of the slope comes from the measurement) |
+
+UI (stock DMM page slots and faces, ui-render matrix: 6 worst cases x 4
+hold states x 4 alerts on the full page, every case as an update of every
+other one equal to its fresh draw, the dialog at 3 limit settings, the
+settings page at 18 states, 0 violations; renders p01..p08, c12):
+
+* status bar: AUTO (both channels auto) / MANU; HOLD / A-HOLD / alerts as
+  everywhere. aux1 = Vrms (the load's with the compensation), aux2 = Irms in
+  the AC V / AC A formats of the ranges. Main: P in the F78 cells, unit `W`
+  (`mW` below 1 W of full scale, `kW` for 1000 V x 10 A) in the stock UNIT
+  face - it has no W, so `stockfont::glyph_or_twin` draws two of its V
+  overlapped (also in LETTERS / HIST / the meter strip); the AC+DC glyph
+  above it and on the A button; red from 30 V on the V channel as the stock V
+  functions. Fallback: S in `VA`.
+* history row: five boxes PF | S (VA / mVA) | Q (var) | f (Hz, the counter on
+  SENSE) | Vb (burden V); F14 tags, HIST values, units the HIST face lacks
+  (var) in F14. No history in this function (taps / long press do nothing).
+* chart: P (the main value). Side column: Wh, VAh, the energy box (E RUN /
+  PAUSE, h:m:s; tap = run / pause, long press on the column = reset), AVG
+  (W), the ranges (`600V 10A`) or the countdown `I>LIM 23s` (amber) /
+  `I>LIM!` (red).
+* entry (the stock 6 function buttons unchanged): **long press on the A
+  button** or **"Power W" on the Current Settings page** (MF in an A
+  function) -> the wiring dialog: source / load boxes, the + wire with V/ohm
+  on it, the return conductor broken through A (load side) and COM (source
+  side), current arrows, "COM carries the load current; P > 0: I into A",
+  the limit; Cancel / OK. Any function button leaves. MF in the power meter
+  -> Power Settings: V ranges + AUTO, I ranges + AUTO, P + PF / VA only
+  (the fallback), Burden ON / OFF, Reset Wh, Wiring (the dialog again), OK.
+
+Emulator results (`emu/hy3131/powtest.py`, fw-rs native over USB/IP, the
+model's Power role; burden compensation off unless stated; all 11 OK):
+
+| scenario | input | fw-rs (FETC:POW:ALL?) |
+|---|---|---|
+| resistive | `pow:230@50,i=1,pf=1` | P 230.02 W, S 229.95 VA, PF 1.000, 230.00 V, 0.9998 A, 50.001 Hz, 600 V / 10 A |
+| PF 0.5 | `pf=0.5` | P 115.00, S 230.02, Q 199.2, PF 0.49995 |
+| reactive | `ph=90` | P -0.014 W, PF -0.00006, Q 230.0 |
+| reversed | `pf=-1` | P -230.01, PF -0.99993 |
+| DC | `vsrc:12;isrc:2` | P 23.998, PF 0.99998, Vdc 12.000, Idc 2.000 |
+| DC source | `isrc:-2` | P -23.998 |
+| DC autorange | `vsrc:5;isrc:0.4` | 2.0000 W on 6 V / 600 mA |
+| small AC | `pow:5@50,i=0.01` / `i=0.002,pf=0.8` | 0.05000 W on 6 V / 60 mA; 8.000 mW PF 0.800 on 6 V / 6 mA (47.5 ohm shunt) |
+| burden | `vsrc:5;isrc:0.4`, POW:BURD 0.5 | P_L 1.9200 W, V_L 4.8000 V, Vb 0.200 V |
+| manual | CONF:POW 60,6 | 0.500 W held on 60 V / 6 A |
+| fallback | POW:METH ALT, `pf=0.5` | S 230.5..231.0 VA (+0.2 %: the AC V coupling node after each phase switch, 4 results dropped), PF n/a |
+| phase cal | 1 kHz, `ph=90`, POW:PHAS 40 | PF 0.102 (6 deg) -> POW:PHAS:CAL -> PF 0.000006, SPHACAL ~0 |
+| energy | 10 W DC | Wh x 3600 / s within 5 % of 10 W (also VAh) |
+| SCPI | MEAS:POW? from DC V, PF 0.6 at 60 Hz | 29.88 W after the range hunt; MEAS:POW:PFAC? 0.600, READ? 30.00, CONF? `"POW AUTO,AUTO"`, POW:CYC? `2,642,1284` |
+| T1 / T3 hooks | DBG:POW:STAT YY / DBG:POW:DISC 0 | ring all YY with R34 = 0x8C; ring cycling XY / YY / XY / XX every 106 ms (with the model's mid-block mixing the d = 0 values are visibly wrong: what the discards are for) |
+
+What the emulator cannot tell (the model implements the doc's assumptions):
+OP2 on SENSE, the PA8 / power-bus question, the real R34 switch cost, the
+AD2 / AD3 gain match, the true phase error. That is the device session.
+
+#### Device test plan (power build; commit the exact tree before flashing)
+
+Tools: `tools/dm40dbg.py scpi '<cmd>'` (USBTMC). Rows: `DBG:POW:ROW?` = the
+22 row bytes R20..R35 + R36 in hex and ON / OFF. Ring: `DBG:POW:RAW?` =
+`n;STAT,discarded,rms,lpf,dt_ms;...` (last 16 RMS / LPF results, raw: rms =
+signed RMS<37:0>, sqrt(rms) in AD codes of 1.25 V / 2^18 for XX / YY; lpf =
+19-bit LPF). Overrides: `DBG:POW:POKE <index 0..21>,<decimal byte>` (R20 +
+index; up to 4, `DBG:POW:POKE CLEAR`), `DBG:POW:STAT XY|XX|YY|AUTO` (freeze
+R34), `DBG:POW:DISC <0..8>`. All rewrite the row (550 ms settle).
+
+* **T1 OP2 on SENSE (go / no-go of method B), ~10 min.** AC source (e.g.
+  12 V AC transformer or the generator through an amplifier) on V-COM,
+  nothing in A: `CONF:POW`, `POW:VOLT:RANG 60`, `DBG:POW:STAT YY`; read
+  `DBG:POW:RAW?` a few times: sqrt(rms) x 100 x 1.25 / 2^18 = Vrms, compare
+  with `CONF:VOLT:AC` / `READ?` of the same source (expect within 0.5 %);
+  lpf x 100 x 1.25 / 2^18 = DC part (a DC source: compare with DC V). Shorted
+  leads: noise floor (sqrt(rms) in codes; the stock AC V floor is ~31 codes).
+  Repeat at `POW:VOLT:RANG 6` and `600` (mains only with the usual care).
+  If T1 is bad: try `DBG:POW:POKE 14,8` + `DBG:POW:POKE 15,129` (R2E / R2F
+  of the I row: power bus as SGND, PA8 P), then AD3IN = RLU / PB5 (`DBG:POW:POKE
+  21,68` / `21,116`); if nothing helps, `POW:METH ALT` (the fallback, VA only)
+  and note it for the default.
+* **T2 two different nodes, resistive and reactive, ~15 min.** 12 V AC
+  transformer + power resistor (~1 A) wired as the dialog: `CONF:POW`,
+  `FETC:POW:ALL?`: PF = 1.000 +- 0.005 and P = Vrms x Irms within the channel
+  errors; compare V and I with the AC V / AC A functions. Reverse the current
+  (swap A / COM at the load): P negative, same magnitude. Then a capacitor
+  (or the transformer unloaded): PF near 0, run `POW:PHAS:CAL REAC` (~5 s)
+  and read `POW:PHAS?` (the step count; expected small at 50 Hz, the doc
+  estimates < 10). DC: PSU + resistor (T4): `Vdc,Idc` of FETC:POW:ALL? vs
+  DC V / DC A.
+* **T3 switch cost, ~5 min.** Same resistive setup: `DBG:POW:DISC 0`, read
+  `DBG:POW:RAW?` repeatedly: per statistic, how many results after a switch
+  differ from the steady value (XY vs the steady XY, XX vs XX, YY vs YY), and
+  `dt` (106.7 ms expected). Then set the default discards to that count
+  (`DISC_DEFAULT` in powermeter.rs, or `DBG:POW:DISC n`, persisted) and note
+  `POW:CYC?`.
+* T5 ranges / T6 burden as 3.8 (every V range x the I ranges on suitable
+  sources; 5 V / 0.4 A with `POW:BURD` set to the R_path measured with the
+  ohm function between A and COM). UI on the device: long press on A ->
+  dialog -> OK, the page with a lamp load, MF -> Power Settings, a function
+  button leaves; with a 5 A+ load (if available) the countdown and the alarm.
 
 ---------------------------------------------------------------------------
 
