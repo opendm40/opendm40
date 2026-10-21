@@ -198,12 +198,17 @@ fn pre_main(dry: bool) {
         crate::fatdir::boot(&mut disk);
     }
     boot::feed();
-    // The read-only information volume (USB LUN 1): file table + CRC-32s of
-    // the sources (~0.1 s), before USB.
+    // The generated USB volume (vdisk.rs): built-in tables + CRC-32s of the
+    // INFO sources (~0.1 s), before USB.
     #[cfg(feature = "vdisk")]
     crate::vdisk::init(crate::vdisk::mem_read, unsafe {
         core::slice::from_raw_parts(crate::calbackup::FW_BASE as *const u8, crate::calbackup::FW_MAX_BODY)
     });
+    boot::feed();
+    // Its LOGS / SCOPE / SHOTS files from the SPI disk, so the host's first
+    // look is complete (a DLG's CSV size: ~10 ms per 100 KB of logs).
+    #[cfg(feature = "vdisk")]
+    crate::vdisk::boot_refresh();
     boot::feed();
 }
 

@@ -329,6 +329,9 @@ pub enum Dbg {
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level).
     Ad2(u8, u8, u16, u8),
+    /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
+    /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
+    Upload(u8, u32, u32),
 }
 
 fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
@@ -591,6 +594,21 @@ impl Scpi {
         let n = s.len().min(self.buf.len() - self.len);
         self.buf[self.len..self.len + n].copy_from_slice(&s[..n]);
         self.len += n;
+    }
+
+    /// Decimal `v`.
+    pub fn put_u32(&mut self, mut v: u32) {
+        let mut t = [0u8; 10];
+        let mut n = t.len();
+        loop {
+            n -= 1;
+            t[n] = b'0' + (v % 10) as u8;
+            v /= 10;
+            if v == 0 {
+                break;
+            }
+        }
+        self.put(&t[n..]);
     }
 
     /// Process one message. Returns what the caller must do; text replies are
@@ -882,6 +900,25 @@ impl Scpi {
                             Dbg::Lcd(v[0] as u16, v[1] as u16, v[2].max(1) as u16, v[3].max(1) as u16, v[4])
                         }
                         b"DIAG" => Dbg::Diag, b"TOUCH" => Dbg::Touch(!query),
+                        _ if kw(sub, "UPLoad") => {
+                            let op = parts.get(2).copied().unwrap_or(b"");
+                            let mut v = [0u32; 2];
+                            for (d, t) in v.iter_mut().zip(a.split(|&b| b == b',')) {
+                                *d = core::str::from_utf8(trim(t)).ok().and_then(|t| t.parse().ok()).unwrap_or(0);
+                            }
+                            if op.is_empty() && query {
+                                Dbg::Upload(3, 0, 0)
+                            } else if kw(op, "BEGin") {
+                                Dbg::Upload(0, v[0], v[1])
+                            } else if kw(op, "END") && query {
+                                Dbg::Upload(1, 0, 0)
+                            } else if kw(op, "ABORt") {
+                                Dbg::Upload(2, 0, 0)
+                            } else {
+                                self.err = Some("Undefined header");
+                                continue;
+                            }
+                        }
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),
                         b"FLASH" => Dbg::Flash,
                         b"RELEASE" => Dbg::Release,
@@ -910,8 +947,11 @@ impl Scpi {
                             crate::boot::put_info(self);
                             continue;
                         }
-                        #[cfg(feature = "vdisk")] // media-change experiment: ADD | FORCE 0|1 | EJECT n
-                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); let o = core::sync::atomic::Ordering::Relaxed; match parts.get(2).copied().unwrap_or(b"") { b"ADD" => { let n = crate::vdisk::dbg_add(); self.put(if n > 0 { b"ADDED" } else { b"FAIL" }) } b"FORCE" => { crate::msc::DBG_FORCE_UA.store(v[0] != 0, o); self.put(b"OK") } b"EJECT" => { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, o); self.put(b"OK") } _ => self.err = Some("Undefined header") } continue; }
+                        // The generated USB volume: EJECT n ("no medium" for n
+                        // commands, then UNIT ATTENTION) | STAT? -> <files>,<next free
+                        // cluster>,<files left out>.
+                        #[cfg(feature = "vdisk")]
+                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, core::sync::atomic::Ordering::Relaxed); self.put(b"OK") } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err = Some("Undefined header") } continue; }
                         #[cfg(feature = "native")]
                         b"RECOVER" | b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err = Some("Flash error"); continue; } Dbg::Reset }
                         #[cfg(not(feature = "native"))]

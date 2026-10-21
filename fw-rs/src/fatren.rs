@@ -502,6 +502,36 @@ fn delete_file(dev: &mut dyn BlockDevice, v: &Vol, h: &Hit, res: &mut Result, bu
     ok
 }
 
+/// Delete every dm40*.bin of the root (8.3 or long name; not
+/// _DM40PRV.BIN, not the recovery trigger): entries first, then the chains
+/// (upload.rs, before it writes a new one: the loader wants exactly one).
+/// Some(count) / None = no sane volume or an I/O error.
+pub fn delete_updates(dev: &mut dyn BlockDevice, buf: &mut [u8; BLK], tmp: &mut [u8; BLK]) -> Option<u32> {
+    let mut n = 0;
+    loop {
+        if !dev.read_block(0, buf) {
+            return None;
+        }
+        let v = parse_bpb(buf, dev.block_count())?;
+        let s = scan(dev, &v, buf)?;
+        if s.nhits == 0 {
+            return Some(n);
+        }
+        let mut res = Result::new(Status::Clean);
+        for h in &s.hits[..s.nhits] {
+            if !delete_file(dev, &v, h, &mut res, buf, tmp) {
+                return None;
+            }
+            n += 1;
+        }
+    }
+}
+
+/// The first free root slot (0xE5 or the end marker): Some(None) = full.
+pub fn free_root_slot(dev: &mut dyn BlockDevice, v: &Vol, buf: &mut [u8; BLK]) -> Option<Option<u32>> {
+    scan(dev, v, buf).map(|s| s.free_slot)
+}
+
 /// The decoded first 12 bytes (update header) of a dm40*.bin whose first
 /// data block is `b`. The update file is encoded in 128-byte blocks
 /// (firmware/dm40fw.py decode_block): a = b[0x1F], key position kp = a if

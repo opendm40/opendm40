@@ -7,22 +7,23 @@
 //!   main <image> backup <dir>           calbackup::safe_copy (write-once safety copy)
 //!                                       of calbackup::FILES[..SAFE] read from
 //!                                       <dir>/CALIB.BIN, BOOTDATA.BIN, UID.BIN
-//!   main <out> vdisk <flash> <uid> <otp> <optbytes> [extra <n> <size>]
-//!                                       vdisk.rs (USB LUN 1 information volume) over
-//!                                       the 1 MiB <flash> image (0x08000000..) and the
+//!   main <out> vdisk <flash> <uid> <otp> <optbytes> [step]...
+//!                                       vdisk.rs (the read-only USB volume) over the
+//!                                       1 MiB <flash> image (0x08000000..) and the
 //!                                       system-memory files: every sector read through
-//!                                       read_block into <out> (created), twice (must be
-//!                                       equal); write_block / out-of-range reads refused;
-//!                                       logs <spi.img>: dlog::refresh over that SPI-disk
-//!                                       image (LOGnnn.DLG -> virtual LOGnnn.CSV);
-//!                                       extra: vdisk::set_extra with n files LOGnnn.CSV of
-//!                                       size * (i + 1) bytes, contents extra_byte(i, off)
+//!                                       read_block into the sparse <out>; write_block /
+//!                                       out-of-range reads refused; steps (spi <img>,
+//!                                       locked, free, reset, forget <NAME>) each
+//!                                       followed by a dump to <out>.<i> (vdisk_dump)
+//!   main <image> fatdir boot|ensure <NAME>|rm <NAME> [cut <k>]
+//!                                       fatdir.rs (fatdir_cmd)
+//!   main <image> upload <file> [crc <hex>] [order] [chunk <n>] [cut <k>]
+//!                                       upload.rs as main.rs drives it (upload_cmd)
 //!   main <image> shot                   screenshot::take_on with the synthetic screen
 //!                                       of the `lcd` stub below (pattern()).
 //!   main <image> shotcut [k [abort]]    the same slice by slice on a NOR model of
 //!                                       write_step, cut after k slices (or stopped
 //!                                       there by screenshot::abort_on); see shotcut().
-//!   main <image> shotmounted            start() with a host-mounted disk (refused).
 //!   main <image> csv rec <rows> [cut <k> [half]] [shot <row>]... [host <row> <rows>] [mount|mountwin <row> <rows>]
 //!                                       csvlog recording of <rows> synthetic rows
 //!                                       (row(i) below), polled pass by pass;
@@ -32,9 +33,10 @@
 //!                                       a screenshot at that row (interleaved);
 //!                                       host = HOST_WRITING set for that many rows;
 //!                                       mount = msc::host_mounted() for that many rows
-//!                                       (mountwin: the same window, not mounted);
-//!                                       mount_writes = block writes in that window.
-//!   main <image> csv list | del <NAME> [mounted] | busydel
+//!                                       (no effect since the PC cannot mount the SPI
+//!                                       disk; kept for the knob); mount_writes = block
+//!                                       writes in that window.
+//!   main <image> csv list | del <NAME> | busydel
 //!                                       gallery list / delete; busydel = delete the
 //!                                       file being recorded (must be refused).
 //! Live runs rewrite the image.
@@ -42,7 +44,7 @@ use std::{env, fs};
 
 #[allow(dead_code)]
 mod msc {
-    /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 6 methods,
+    /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 8 methods,
     /// write_step with its default = the whole write at once).
     pub trait BlockDevice {
         fn present(&self) -> bool;
@@ -55,6 +57,12 @@ mod msc {
         }
         fn take_media_changed(&mut self) -> bool {
             false
+        }
+        fn media_change_immediate(&self) -> bool {
+            false
+        }
+        fn product(&self) -> &'static [u8; 16] {
+            b"DM40 disk       "
         }
         fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
             let _ = st;
@@ -163,6 +171,9 @@ mod csvlog;
 
 #[path = "../../src/fatdir.rs"]
 mod fatdir;
+#[path = "../../src/upload.rs"]
+#[allow(dead_code)]
+mod upload;
 #[path = "../../src/fatren.rs"]
 #[allow(dead_code)]
 mod fatren;
@@ -187,12 +198,12 @@ fn mem_read(addr: u32, buf: &mut [u8]) {
     panic!("vdisk read outside the memory map: {addr:#010x} + {}", buf.len());
 }
 
-/// Contents of the synthetic extra file `arg` (run.sh recomputes it).
-/// The SPI-disk image behind dlog's reader (vdisk ... logs <img>).
-static SPI: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+/// The SPI-disk image behind dlog's reader (vdisk ... spi <img>), replaced
+/// between the refresh steps.
+static SPI: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
 
 fn spi_read(addr: u32, buf: &mut [u8]) -> bool {
-    let d = SPI.get().unwrap();
+    let d = SPI.lock().unwrap();
     let o = addr as usize;
     if o + buf.len() > d.len() {
         return false;
@@ -201,15 +212,42 @@ fn spi_read(addr: u32, buf: &mut [u8]) -> bool {
     true
 }
 
-fn extra_read(arg: u32, off: u32, buf: &mut [u8]) {
-    for (i, b) in buf.iter_mut().enumerate() {
-        *b = b"0123456789,\n"[(arg as usize * 5 + off as usize + i) % 12];
+/// The whole volume through read_block into the sparse file `out` (only
+/// non-zero sectors written); every written sector read a second time and
+/// compared.
+fn vdisk_write(d: &mut vdisk::VDisk, out: &str) {
+    use msc::BlockDevice;
+    use std::io::{Seek, SeekFrom, Write};
+    let n = d.block_count();
+    let bs = d.block_size() as usize;
+    let mut f = fs::File::create(out).unwrap();
+    f.set_len(n as u64 * bs as u64).unwrap();
+    let mut b = vec![0u8; bs];
+    let mut c = vec![0u8; bs];
+    let mut nz = 0u32;
+    for lba in 0..n {
+        assert!(d.read_block(lba, &mut b), "read {lba}");
+        if b.iter().any(|&x| x != 0) {
+            assert!(d.read_block(lba, &mut c) && b == c, "sector {lba} differs between two reads");
+            f.seek(SeekFrom::Start(lba as u64 * bs as u64)).unwrap();
+            f.write_all(&b).unwrap();
+            nz += 1;
+        }
     }
+    println!("  dump {out}: {n} sectors, {nz} non-zero");
 }
 
-/// `main <out> vdisk <flash> <uid> <otp> <optbytes> [extra <n> <size>]`.
+/// `main <out> vdisk <flash> <uid> <otp> <optbytes> [step]...`: vdisk.rs
+/// over the 1 MiB <flash> image (0x08000000..) and the system-memory files;
+/// the volume dumped to <out> after init, and to <out>.<i> after step i:
+///   spi <img>        the SPI disk is now <img>; refresh
+///   locked / free    a host holds / released the medium lock (msc stub);
+///                    refresh
+///   reset            USB bus reset (vdisk::on_bus_reset); refresh
+///   forget <NAME>    vdisk::forget (8.3 SPI name, e.g. LOG001.DLG)
 fn vdisk_dump(a: &[String]) {
     use msc::BlockDevice;
+    use std::sync::atomic::Ordering::Relaxed;
     let flash = fs::read(&a[3]).unwrap();
     assert_eq!(flash.len(), 1 << 20, "1 MiB flash image");
     let body: &'static [u8] = Vec::leak(flash[0x4000..0x4000 + calbackup::FW_MAX_BODY].to_vec());
@@ -220,49 +258,49 @@ fn vdisk_dump(a: &[String]) {
         (0x1FFF_C000, fs::read(&a[6]).unwrap()),
     ])
     .unwrap();
+    dlog::set_disk(spi_read);
     let mut d = vdisk::VDisk;
     println!("present_before_init={}", d.present());
     vdisk::init(mem_read, body);
     println!("media_changed_after_init={}", d.take_media_changed());
-    if a.get(7).map(|s| s.as_str()) == Some("extra") {
-        let n: usize = a[8].parse().unwrap();
-        let size: u32 = a[9].parse().unwrap();
-        let x: Vec<vdisk::Extra> = (0..n)
-            .map(|i| vdisk::Extra { name: calbackup::numbered_name(b"LOG", i as u16, b"CSV"), size: size * (i as u32 + 1), read: extra_read, arg: i as u32 })
-            .collect();
-        println!("set_extra taken={}", vdisk::set_extra(&x));
-        println!("media_changed={} again={}", d.take_media_changed(), d.take_media_changed());
-    }
-    if a.get(7).map(|s| s.as_str()) == Some("logs") {
-        // The binary logs of a SPI-disk image as virtual CSV files (dlog.rs
-        // refresh -> vdisk::set_extra), as the device's main loop does.
-        SPI.set(fs::read(&a[8]).unwrap()).unwrap();
-        dlog::set_disk(spi_read);
-        println!("logs taken={} stale={}", dlog::refresh(None), dlog::stale());
-        println!("media_changed={}", d.take_media_changed());
-        dlog::set_stale();
-        println!("unchanged: taken={} media_changed={}", dlog::refresh(None), d.take_media_changed());
-    }
-    let n = d.block_count();
-    let bs = d.block_size() as usize;
-    let mut img = vec![0u8; n as usize * bs];
-    for pass in 0..2 {
-        let mut b = vec![0u8; bs];
-        for lba in 0..n {
-            assert!(d.read_block(lba, &mut b), "read {lba}");
-            let o = lba as usize * bs;
-            if pass == 0 {
-                img[o..o + bs].copy_from_slice(&b);
-            } else {
-                assert!(img[o..o + bs] == b[..], "sector {lba} differs between two reads");
+    let mut b = vec![0u8; 512];
+    let past = d.read_block(d.block_count(), &mut b);
+    let wr = d.write_block(0, &b);
+    println!("vdisk sectors={} bs={} read_only={} write_block={} read_past_end={}", d.block_count(), d.block_size(), d.read_only(), wr, past);
+    vdisk_write(&mut d, &a[1]);
+    let (mut k, mut step) = (7, 0);
+    while k < a.len() {
+        step += 1;
+        match a[k].as_str() {
+            "spi" => {
+                *SPI.lock().unwrap() = fs::read(&a[k + 1]).unwrap();
+                k += 2;
             }
+            "locked" | "free" => {
+                msc::HOST_MOUNTED.store(a[k] == "locked", Relaxed);
+                k += 1;
+            }
+            "reset" => {
+                vdisk::on_bus_reset();
+                k += 1;
+            }
+            "forget" => {
+                let n = csvlog::parse_name(a[k + 1].as_bytes()).unwrap();
+                vdisk::forget(&n);
+                println!("step {step}: forget {} media_changed={}", a[k + 1], d.take_media_changed());
+                vdisk_write(&mut d, &format!("{}.{step}", a[1]));
+                k += 2;
+                continue;
+            }
+            x => panic!("{x}"),
         }
+        let n = vdisk::refresh(None);
+        let (_, hw, out) = vdisk::stats();
+        println!("step {step}: {} files={n} next_cluster={hw} left_out={out} media_changed={} stale={}", a[k - 1], d.take_media_changed(), dlog::stale());
+        let n2 = vdisk::refresh(None);
+        println!("  again: files={n2} media_changed={}", d.take_media_changed());
+        vdisk_write(&mut d, &format!("{}.{step}", a[1]));
     }
-    let mut b = vec![0u8; bs];
-    let past = d.read_block(n, &mut b);
-    let wr = d.write_block(0, &img[..bs]);
-    println!("vdisk sectors={} bs={} read_only={} write_block={} read_past_end={}", n, bs, d.read_only(), wr, past);
-    fs::write(&a[1], &img).unwrap();
 }
 
 struct Img {
@@ -436,6 +474,11 @@ fn main() {
         fs::write(&a[1], &img.d).unwrap();
         return;
     }
+    if a[2] == "upload" {
+        upload_cmd(&a, &mut img);
+        fs::write(&a[1], &img.d).unwrap();
+        return;
+    }
     if a[2] == "fatdir" {
         fatdir_cmd(&a, &mut img);
         fs::write(&a[1], &img.d).unwrap();
@@ -483,12 +526,6 @@ fn main() {
     if a[2] == "shotcut" {
         shotcut(&a, &mut img);
         fs::write(&a[1], &img.d).unwrap();
-        return;
-    }
-    if a[2] == "shotmounted" {
-        // M2: a host has the disk mounted -> start() refuses, nothing written.
-        msc::HOST_MOUNTED.store(true, std::sync::atomic::Ordering::Relaxed);
-        println!("start={} busy={} changed blocks: {:?}", screenshot::start(), screenshot::busy(), img.writes);
         return;
     }
     if a[2] == "scopecsv" {
@@ -589,6 +626,68 @@ fn fatdir_cmd(a: &[String], img: &mut Img) {
         x => panic!("{x}"),
     }
     println!("  writes={} changed blocks: {:?} cut_kind={}", img.writes.len(), img.writes, img.cut_kind);
+}
+
+/// `main <img> upload <file> [crc <hex>] [order [keep]] [chunk <n>] [cut <k>]`:
+/// upload.rs as main.rs drives it (BEGIN, DATA messages of `chunk` bytes,
+/// END?); crc = announce this CRC instead of the file's; order = send the
+/// second chunk twice; cut = power cut before the k-th changing write.
+fn upload_cmd(a: &[String], img: &mut Img) {
+    let f = fs::read(&a[3]).unwrap();
+    let mut crc = calbackup::crc32(&f);
+    let (mut order, mut chunk, mut keep) = (false, 240usize, false);
+    let mut k = 4;
+    while k < a.len() {
+        match a[k].as_str() {
+            "crc" => {
+                crc = u32::from_str_radix(&a[k + 1], 16).unwrap();
+                k += 2;
+            }
+            "order" => {
+                order = true;
+                k += 1;
+            }
+            // keep: go on after a DATA error (as the host tool streams) and
+            // let END? report it.
+            "keep" => {
+                keep = true;
+                k += 1;
+            }
+            "chunk" => {
+                chunk = a[k + 1].parse().unwrap();
+                k += 2;
+            }
+            "cut" => {
+                img.cut = Some(a[k + 1].parse().unwrap());
+                k += 2;
+            }
+            x => panic!("{x}"),
+        }
+    }
+    let r = (|| -> Result<(u32, u32), &'static str> {
+        upload::begin_on(img, f.len() as u32, crc, 0)?;
+        let mut off = 0usize;
+        let mut i = 0;
+        while off < f.len() {
+            let n = chunk.min(f.len() - off);
+            let mut m = format!("{off},").into_bytes();
+            m.extend_from_slice(&f[off..off + n]);
+            let r = upload::data_msg_on(img, &m, i);
+            if !keep {
+                r?;
+            }
+            if order && i == 1 {
+                let r = upload::data_msg_on(img, &m, i);
+                if !keep {
+                    r?;
+                }
+            }
+            off += n;
+            i += 1;
+        }
+        upload::end_on(img)
+    })();
+    println!("upload {:?} busy={} writes={} changed blocks: {:?}", r, upload::busy(), img.writes.len(), img.writes.len());
 }
 
 /// Blocks of the root's subdirectories (their clusters; 1 cluster = 1

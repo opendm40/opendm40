@@ -139,6 +139,9 @@ mod touch;
 mod gesture;
 #[path = "../../src/fatdir.rs"]
 mod fatdir;
+#[path = "../../src/upload.rs"]
+#[allow(dead_code)]
+mod upload;
 #[path = "../../src/fatren.rs"]
 mod fatren;
 #[path = "../../src/calbackup.rs"]

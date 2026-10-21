@@ -28,19 +28,25 @@
 #   9. a disk of an earlier build (all nine per-boot files): nothing written,
 #      nothing deleted; a directory named UID.BIN = conflict; fatren on the
 #      same volume; a nearly full disk: NOSPACE, nothing written.
-# vdisk (src/vdisk.rs, the read-only information volume = USB LUN 1; every
-# sector dumped through read_block, twice, from a 1 MiB flash image = the
-# device dump when present + the installed firmware at 0x08004000):
-#   10. fsck.fat clean, label DM40-INFO, FAT16 / 512-byte sectors / 2 KiB
-#      clusters, the 7 region files equal their sources, BACKUP.TXT sizes and
-#      CRC-32s match zlib, read-only attributes; write_block refused;
-#   11. FIRMWARE.BIN byte-identical to the installed update file (native build,
-#      stock dm40_v_2_6.bin, an unpadded 480010-byte body with a stored-as-is
-#      tail, a pack --pad image), dm40fw.py info + body CRC ok; no valid loader
-#      record or a hazardous short last block -> no FIRMWARE.BIN;
-#   12. set_extra hook: 40 generated files after the built-ins (contents =
-#      read(arg, offset)), one-shot media change; 2000 x growing files: the
-#      prefix that fits is taken, fsck clean.
+# vdisk (src/vdisk.rs, the read-only USB volume; every sector read through
+# read_block into a sparse dump, non-zero sectors twice, from a 1 MiB flash
+# image = the device dump when present + the installed firmware at 0x08004000):
+#   10. fsck.fat clean, label DM40, FAT16 / 512-byte sectors / 32 KiB
+#      clusters, root README.TXT + INFO DEBUG LOGS SCOPE SHOTS, the 7 INFO
+#      region files equal their sources, BACKUP.TXT sizes and CRC-32s match
+#      zlib, read-only attributes; write_block refused;
+#   11. INFO/FIRMWARE.BIN byte-identical to the installed update file (native
+#      build, stock dm40_v_2_6.bin, an unpadded 480010-byte body with a
+#      stored-as-is tail, a pack --pad image), dm40fw.py info + body CRC ok; no
+#      valid loader record or a hazardous short last block -> no FIRMWARE.BIN;
+#   12. (at the end) over a SPI image with logs, scope records, screenshots
+#      and root files of earlier builds: CSV == dlog.py, BMP == the SPI file,
+#      DEBUG/SPIFLASH.BIN == the image; refresh steps: a new file appended,
+#      a deleted one (slot 0xE5), lock + bus reset (no compaction), unlock
+#      (compacted), forget.
+# upload (src/upload.rs, DBG:UPLOAD): DM40FW.BIN byte-identical, staged
+#   dm40*.bin removed, _DM40PRV.BIN kept, chunk sizes, wrong CRC / repeated
+#   chunk / not an update file refused, power cut before every block write.
 #   Short last 128-byte block (docs/native-boot.md "Update file format"):
 #   pack --pad gives whole blocks; an unpadded body whose last block is
 #   hazardous (0x1F < len < 128, key position >= len) is refused by pack, a
@@ -77,8 +83,7 @@
 #      76 KB): LOG000.DLG, fsck clean, every row checked by Python's csv
 #      module, the decoded CSV byte-identical to the old writer's LOG000.CSV
 #      (md5); NOR model: every data block erased once (appends are
-#      program-only), one LOGS/ block erase per commit; then LUN 1 (vdisk.rs
-#      set_extra via dlog::refresh): LOG000.CSV / LOG001.CSV == dlog.py;
+#      program-only), one LOGS/ block erase per commit;
 #   14. interleaved with three screenshots (one started while a commit runs):
 #      both BMPs pixel-exact, the CSV complete, no commit started during a shot;
 #   15. host write in progress (HOST_WRITING) for 120 rows: no block written
@@ -326,7 +331,7 @@ mdel -i $IMG9 ::FILL.DAT
 "$W/t" $IMG9 backup $W/src | grep -q "backup=Written written=0x007" && echo "ok: written once there is space" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG9
 
-echo "=== vdisk: information volume (USB LUN 1), generated from the MCU memory"
+echo "=== vdisk: the read-only USB volume (INFO/ from the MCU memory)"
 # mkflash <fw.bin> <flash.out>: what the installed image looks like in flash
 # from 0x08004000: the decoded body, the loader's 12-byte marker (= the file's
 # decoded header) at +0x4000.
@@ -406,7 +411,9 @@ if fw != 'none':
 open(out, 'wb').write(f)
 PY
 }
-# vdisk <flash1m> <img> [extra n size]: the whole volume through read_block.
+# vdisk <flash1m> <img> [step...]: the whole volume through read_block
+# (main.rs vdisk_dump: a sparse dump of the 1.98 GiB volume; steps: spi
+# <img> / locked / free / reset / forget <NAME>, dumped to <img>.<i>).
 vdisk() {
     local fl=$1 img=$2; shift 2
     "$W/t" $img vdisk $fl $W/src/UID.BIN $W/src/OTP.BIN $W/src/OPTBYTES.BIN "$@" | tee $W/vd.out
@@ -417,16 +424,18 @@ vdisk() {
 # to its source, BACKUP.TXT CRC-32s, read-only attributes.
 vdok() {
     fsckok $1
-    mdir -i $1 :: | tee $W/vdir | head -3 | grep -q "Volume in drive : is DM40-INFO" && echo "ok: label DM40-INFO" || { echo "FAIL: label"; exit 1; }
+    mdir -i $1 :: | head -3 | grep -q "Volume in drive : is DM40" && echo "ok: label DM40" || { echo "FAIL: label"; exit 1; }
+    mdir -i $1 ::INFO > $W/vdir
+    mdir -i $1 :: | grep -qE "^README +TXT" && for d in INFO DEBUG LOGS SCOPE SHOTS; do mdir -i $1 :: | grep -qE "^$d +<DIR>" || { echo "FAIL: no $d/"; exit 1; }; done && echo "ok: root: README.TXT, INFO DEBUG LOGS SCOPE SHOTS" || { echo "FAIL: root"; exit 1; }
     python3 -I - $1 <<'PY' || { echo "FAIL: geometry"; exit 1; }
 import struct, sys
 d = open(sys.argv[1], 'rb').read(512)
 bps, spc, rsvd, nf, rootn, tot16, media, fsz, tot32 = struct.unpack_from('<HBHBHHBH', d, 0x0B) + struct.unpack_from('<I', d, 0x20)
 data = rsvd + nf * fsz + rootn * 32 // bps
 clusters = ((tot16 or tot32) - data) // spc
-assert (bps, spc, nf, media) == (512, 4, 2, 0xF8) and 4085 <= clusters < 65525 and d[0x36:0x3E] == b'FAT16   ', (bps, spc, clusters)
+assert (bps, spc, nf, media) == (512, 64, 2, 0xF8) and 4085 <= clusters < 65525 and d[0x36:0x3E] == b'FAT16   ', (bps, spc, clusters)
 assert fsz * bps // 2 >= clusters + 2 and d[510:512] == b'\x55\xaa' and d[0x26] == 0x29
-print('ok: FAT16, 512-byte sectors, %d clusters of %d bytes, %.1f MiB' % (clusters, spc * bps, (tot16 or tot32) * bps / 1048576))
+print('ok: FAT16, 512-byte sectors, %d clusters of %d bytes, %.2f GiB' % (clusters, spc * bps, (tot16 or tot32) * bps / 2**30))
 PY
     python3 -I - $2 $W/src $1 <<'PY' || { echo "FAIL: region contents"; exit 1; }
 import subprocess, sys, zlib
@@ -436,7 +445,7 @@ regions = {'CALIB.BIN': f[0xC0000:0xC1000], 'BOOTDATA.BIN': f[0xA4000:0xA8000], 
            'LOADER.BIN': f[0xA0000:0xC0000], 'UID.BIN': open(src + '/UID.BIN', 'rb').read(),
            'OTP.BIN': open(src + '/OTP.BIN', 'rb').read(), 'OPTBYTES.BIN': open(src + '/OPTBYTES.BIN', 'rb').read()}
 def get(n):
-    return subprocess.run(['mtype', '-i', img, '::' + n], capture_output=True, check=True).stdout
+    return subprocess.run(['mtype', '-i', img, '::INFO/' + n], capture_output=True, check=True).stdout
 txt = get('BACKUP.TXT').decode()
 lines = txt.splitlines()
 h = lines.index('file         address     bytes  crc32')
@@ -451,7 +460,7 @@ if 'FIRMWARE.BIN' in rows:
     assert int(r[2]) == len(got) and int(r[3], 16) == zlib.crc32(got), r
 print('ok: 7 region files equal their sources, BACKUP.TXT sizes + CRC-32s match (%d lines)' % len(rows))
 PY
-    mattrib -i $1 ::CALIB.BIN | grep -qE "^ *A? *R|  R " && echo "ok: read-only attribute" || { mattrib -i $1 ::CALIB.BIN; echo "FAIL: attribute"; exit 1; }
+    mattrib -i $1 ::INFO/CALIB.BIN | grep -qE "^ *A? *R|  R " && echo "ok: read-only attribute" || { mattrib -i $1 ::INFO/CALIB.BIN; echo "FAIL: attribute"; exit 1; }
 }
 for f in $STOCK $NATIVE; do [ -f $f ] || { echo "FAIL: $f missing"; exit 1; }; done
 mkflash $STOCK $W/flash_stock
@@ -461,41 +470,21 @@ for k in stock native t; do mkflash1m $W/flash_$k $W/f1m_$k; done
 VD=$W/vd.img
 vdisk $W/f1m_native $VD
 vdok $VD $W/f1m_native
-mcopy -n -i $VD ::FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $NATIVE
-mtype -i $VD ::BACKUP.TXT
-[ $(grep -c " BIN\| TXT" $W/vdir) = 9 ] && echo "ok: 9 files" || { echo "FAIL at line $LINENO"; exit 1; }
+mcopy -n -i $VD ::INFO/FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $NATIVE
+mtype -i $VD ::INFO/BACKUP.TXT
+[ $(grep -c " BIN\| TXT" $W/vdir) = 9 ] && echo "ok: INFO/: 9 files" || { echo "FAIL at line $LINENO"; exit 1; }
 vdisk $W/f1m_stock $VD
 vdok $VD $W/f1m_stock
-mcopy -n -i $VD ::FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $STOCK
+mcopy -n -i $VD ::INFO/FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $STOCK
 vdisk $W/f1m_t $VD
 vdok $VD $W/f1m_t
-mcopy -n -i $VD ::FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $W/t.bin
+mcopy -n -i $VD ::INFO/FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $W/t.bin
 echo "--- no valid loader record: no FIRMWARE.BIN"
 mkflash1m none $W/f1m_none
 vdisk $W/f1m_none $VD
 vdok $VD $W/f1m_none
-mdir -i $VD ::FIRMWARE.BIN >/dev/null 2>&1 && { echo "FAIL at line $LINENO: FIRMWARE.BIN"; exit 1; }
-mtype -i $VD ::BACKUP.TXT | grep -q "no FIRMWARE.BIN (no valid loader record" && echo "ok: none, BACKUP.TXT says why" || { echo "FAIL at line $LINENO"; exit 1; }
-echo "--- set_extra hook: 40 generated files (LOG000..039.CSV, 3000 * (i + 1) bytes) after the built-ins"
-vdisk $W/f1m_native $VD extra 40 3000
-grep -q "set_extra taken=40" $W/vd.out && grep -q "media_changed=true again=false" $W/vd.out && echo "ok: taken, one-shot media change" || { echo "FAIL at line $LINENO"; exit 1; }
-vdok $VD $W/f1m_native
-python3 -I - $VD <<'PY' || { echo "FAIL: extra files"; exit 1; }
-import subprocess, sys
-for i in range(40):
-    got = subprocess.run(['mtype', '-i', sys.argv[1], '::LOG%03d.CSV' % i], capture_output=True, check=True).stdout
-    want = bytes(b'0123456789,\n'[(i * 5 + o) % 12] for o in range(3000 * (i + 1)))
-    assert got == want, i
-print('ok: 40 extra files, contents = read(arg, offset)')
-PY
-mcopy -n -i $VD ::FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $NATIVE
-echo "--- set_extra: more than fits (2000 x 64 KiB): a prefix is taken, the volume stays consistent"
-vdisk $W/f1m_native $VD extra 2000 65536
-# File i takes 32 * (i + 1) clusters: 44 files = 31680 of the 32768, the
-# 45th (+ 1440) no longer fits after the ~300 clusters of the built-ins.
-grep -q "set_extra taken=44$" $W/vd.out && echo "ok: taken=44 of 2000 (64 MiB data area)" || { echo "FAIL at line $LINENO"; exit 1; }
-fsckok $VD
-
+mdir -i $VD ::INFO/FIRMWARE.BIN >/dev/null 2>&1 && { echo "FAIL at line $LINENO: FIRMWARE.BIN"; exit 1; }
+mtype -i $VD ::INFO/BACKUP.TXT | grep -q "no FIRMWARE.BIN (no valid loader record" && echo "ok: none, BACKUP.TXT says why" || { echo "FAIL at line $LINENO"; exit 1; }
 echo "--- short last 128-byte block: padded images give whole blocks; a hazardous one gives no FIRMWARE.BIN"
 # p: a body whose unpadded file would end in a short block; pack refuses it
 # when that block is hazardous, --pad always gives whole blocks, and the
@@ -534,13 +523,13 @@ python3 -I ../dm40dbg.py image $W/p.bin | grep -q "last 128-byte block: 128 byte
 mkflash $W/p.bin $W/flash_p
 mkflash1m $W/flash_p $W/f1m_p
 vdisk $W/f1m_p $VD
-mcopy -n -i $VD ::FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $W/p.bin
+mcopy -n -i $VD ::INFO/FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $W/p.bin
 [ $(( $(stat -c %s $W/fw.bin) % 128 )) -eq 0 ] && echo "ok: FIRMWARE.BIN of a padded image is whole 128-byte blocks" || { echo "FAIL at line $LINENO"; exit 1; }
 mkflash $W/haz.bin $W/flash_haz
 mkflash1m $W/flash_haz $W/f1m_haz
 vdisk $W/f1m_haz $VD
 vdok $VD $W/f1m_haz
-mdir -i $VD ::FIRMWARE.BIN >/dev/null 2>&1 && { echo "FAIL at line $LINENO: FIRMWARE.BIN of a hazardous image"; exit 1; }
+mdir -i $VD ::INFO/FIRMWARE.BIN >/dev/null 2>&1 && { echo "FAIL at line $LINENO: FIRMWARE.BIN of a hazardous image"; exit 1; }
 echo "ok: hazardous installed image: no FIRMWARE.BIN"
 
 echo "=== screenshot"
@@ -664,6 +653,54 @@ fsckok $IMGG
 "$W/t" $IMGG fatdir rm SHOTS | grep -q "fatdir rm Ok(false)" && echo "ok: SHOTS (files) kept" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMGG fatdir rm "CONFIG  BIN" | grep -q "fatdir rm Err(Bad)" && echo "ok: CONFIG.BIN is a file: refused (Bad)" || { echo "FAIL at line $LINENO"; exit 1; }
 
+echo "=== upload: the update file over USBTMC (upload.rs, DBG:UPLOAD) into the SPI root"
+IMGU=$W/disku.img
+mkimg $IMGU
+mcopy -i $IMGU $W/keep.bin ::CONFIG.BIN
+"$W/t" $IMGU fatdir boot >/dev/null
+mcopy -i $IMGU $W/b.bin ::dm40_old_staged.bin            # earlier staged files: removed by BEGIN
+mcopy -i $IMGU $W/a.bin ::DM40X.BIN
+mcopy -i $IMGU $W/old.bin ::_DM40PRV.BIN                 # the backup stays
+cp $IMGU $W/upbase.img
+"$W/t" $IMGU upload $NATIVE | tee $W/u1
+grep -q "upload Ok(($(stat -c %s $NATIVE), " $W/u1 && grep -q "busy=false" $W/u1 && echo "ok: uploaded ($(stat -c %s $NATIVE) bytes)" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGU
+mcopy -n -i $IMGU ::DM40FW.BIN $W/o && cmp $W/o $NATIVE && echo "ok: DM40FW.BIN byte-identical" || { echo "FAIL at line $LINENO"; exit 1; }
+[ "$(mdir -b -i $IMGU :: | grep -ciE '/dm40[^/]*\.bin$' )" = 1 ] && mdir -i $IMGU ::_DM40PRV.BIN >/dev/null && echo "ok: the only dm40*.bin (the staged ones deleted, _DM40PRV.BIN kept)" || { mdir -i $IMGU ::; echo "FAIL at line $LINENO"; exit 1; }
+M=$(python3 -I - $FW $NATIVE <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location('dm40fw', sys.argv[1]); f = importlib.util.module_from_spec(spec); spec.loader.exec_module(f)
+print(f.decode(open(sys.argv[2], 'rb').read())[:12].hex())
+PY
+)
+"$W/t" $IMGU dry $M | grep -q "status=DryRun found=1 renamed='DM40FW  BIN'" && echo "ok: fatren sees it as the image the loader installs (marker = its header)" || { echo "FAIL at line $LINENO"; exit 1; }
+for c in 1 4096 255; do
+    cp $W/upbase.img $W/u.img
+    "$W/t" $W/u.img upload $NATIVE chunk $c | grep -q "upload Ok(" && mcopy -n -i $W/u.img ::DM40FW.BIN - | cmp -s - $NATIVE || { echo "FAIL: chunk $c"; exit 1; }
+done
+echo "ok: chunks of 1, 255, 4096 bytes"
+cp $W/upbase.img $W/u.img
+"$W/t" $W/u.img upload $NATIVE crc 12345678 | grep -q 'upload Err("CRC mismatch") busy=false' && ! mdir -i $W/u.img ::DM40FW.BIN >/dev/null 2>&1 && echo "ok: wrong CRC: refused, no file" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $W/u.img
+cp $W/upbase.img $W/u.img
+"$W/t" $W/u.img upload $NATIVE order | grep -q 'upload Err("Data out of order") busy=false' && echo "ok: a repeated chunk: Data out of order, aborted" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $W/u.img upload $NATIVE order keep | grep -q 'upload Err("Data out of order") busy=false' && ! mdir -i $W/u.img ::DM40FW.BIN >/dev/null 2>&1 && echo "ok: the stream goes on after the error: later chunks dropped, END? reports the first error" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $W/u.img
+head -c 300000 /dev/urandom > $W/junk.bin
+cp $W/upbase.img $W/u.img
+"$W/t" $W/u.img upload $W/junk.bin | grep -q 'upload Err("Not an update file")' && ! mdir -i $W/u.img ::DM40FW.BIN >/dev/null 2>&1 && echo "ok: not an update file: refused" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $W/u.img
+NWU=$(grep -oE "writes=[0-9]+" $W/u1 | cut -d= -f2)
+for k in $(seq 0 $((NWU - 1))); do
+    cp $W/upbase.img $W/cut.img
+    "$W/t" $W/cut.img upload $NATIVE cut $k > $W/uc
+    dircutok $W/cut.img "upload cut $k"
+    if mdir -i $W/cut.img ::DM40FW.BIN >/dev/null 2>&1; then
+        mcopy -n -i $W/cut.img ::DM40FW.BIN - | cmp -s - $NATIVE || { echo "FAIL: upload cut $k: a partial DM40FW.BIN"; exit 1; }
+    fi
+done
+echo "ok: $NWU cut points of an upload: fsck at worst lost clusters / FAT 1 ahead, DM40FW.BIN only ever complete"
+
 IMG7=$W/disk7.img
 mkimg $IMG7
 mcopy -i $IMG7 $W/keep.bin ::CONFIG.BIN
@@ -699,9 +736,6 @@ mcopy -n -i $IMG7 ::SCOPE/SCOP001.DLG $W/s1.dlg
 python3 -I ../dlog.py $W/s1.dlg -o $W/s1.csv
 [ "$(md5sum < $W/s.csv | cut -c1-32)" = 4921f54425a8f14d910a25e65a4fc3c6 ] && [ "$(md5sum < $W/s1.csv | cut -c1-32)" = cdc42f159193ea1a1cc7b2b2b4f44dd2 ] && echo "ok: decoded SCOP000.CSV / SCOP001.CSV == the old CSV writer's files, byte for byte" || { echo "FAIL at line $LINENO"; exit 1; }
 cp $IMG7 $W/scop.img
-vdisk $W/f1m_native $VD logs $W/scop.img
-grep -q "logs taken=2 " $W/vd.out || { echo "FAIL at line $LINENO"; exit 1; }
-mcopy -n -i $VD ::SCOP000.CSV - | cmp - $W/s.csv && mcopy -n -i $VD ::SCOP001.CSV - | cmp - $W/s1.csv && echo "ok: LUN 1 serves SCOP000.CSV / SCOP001.CSV (== dlog.py)" || { echo "FAIL at line $LINENO"; exit 1; }
 python3 -I - $W/s.csv <<'PY' || { echo "FAIL: SCOP000.CSV content"; exit 1; }
 import math, sys
 L = open(sys.argv[1], 'rb').read().split(b'\r\n')
@@ -844,19 +878,8 @@ fsckok $IMGC
 csvok $IMGC LOGS/LOG001.DLG 50 full
 csvok $IMGC LOGS/LOG000.DLG 3000 full
 
-echo "--- LUN 1: the binary logs as virtual CSV files (dlog::refresh -> vdisk::set_extra)"
-cp $IMGC $W/logs.img
-mcopy -i $W/logs.img $W/keep.bin ::LOGS/LOG002.DLG     # not a DLG file: left out
-vdisk $W/f1m_native $VD logs $W/logs.img
-grep -q "logs taken=2 stale=false" $W/vd.out && grep -q "^media_changed=true" $W/vd.out && grep -q "unchanged: taken=2 media_changed=false" $W/vd.out && echo "ok: LOG000.CSV + LOG001.CSV published, a foreign LOG002.DLG skipped, media change raised (not again for an unchanged set)" || { echo "FAIL at line $LINENO"; exit 1; }
-fsckok $VD
-for n in 000 001; do
-    mcopy -n -i $W/logs.img ::LOGS/LOG$n.DLG $W/l.dlg
-    python3 -I ../dlog.py $W/l.dlg -o $W/l.csv
-    mcopy -n -i $VD ::LOG$n.CSV $W/v.csv
-    cmp $W/l.csv $W/v.csv || { echo "FAIL: LUN-1 LOG$n.CSV != dlog.py"; exit 1; }
-done
-[ "$(mcopy -n -i $VD ::LOG000.CSV - | md5sum | cut -c1-32)" = bf3b94db37e0b9c57d7d34479af4661a ] && echo "ok: LUN-1 LOG000.CSV / LOG001.CSV == dlog.py output; LOG000.CSV == the old writer's file" || { echo "FAIL at line $LINENO"; exit 1; }
+cp $IMGC $W/logs.img                                 # for the USB volume section
+mcopy -i $W/logs.img $W/keep.bin ::LOGS/LOG002.DLG     # not a DLG file: left out there
 
 echo "--- interleaved with screenshots"
 IMGS=$W/disks.img
@@ -1004,4 +1027,101 @@ mdel -i $IMGS ::LOGS/LOG000.DLG
 grep -q "busydel LOG000.DLG -> Err(Busy)" $W/g3 && grep -q "then del -> Ok(())" $W/g3 && echo "ok: the file being recorded cannot be deleted; after stop it can" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGS
 mdir -i $IMGS ::
+
+echo "=== the USB volume (vdisk.rs) over a SPI disk: LOGS / SCOPE / SHOTS / DEBUG, refreshes"
+# SPI disk: LOGS/LOG000.DLG (3000 rows), LOG001.DLG (50 rows), a foreign
+# LOGS/LOG002.DLG; SHOTS/S000..S002.BMP, SCOPE/SCOP000/001.DLG (the
+# screenshot section's); earlier builds' root files LOG005.DLG (= LOG001's
+# bytes) and S007.BMP; SNAP.BMP (no number: not shown).
+VS=$W/vs1.img
+cp $W/logs.img $VS
+for f in S000 S001 S002; do mcopy -n -i $IMG7 ::SHOTS/$f.BMP $W/$f.bmp; mcopy -i $VS $W/$f.bmp ::SHOTS/$f.BMP; done
+mcopy -i $VS $W/s.dlg ::SCOPE/SCOP000.DLG
+mcopy -i $VS $W/s1.dlg ::SCOPE/SCOP001.DLG
+mcopy -n -i $VS ::LOGS/LOG001.DLG $W/l1.dlg
+mcopy -i $VS $W/l1.dlg ::LOG005.DLG
+mcopy -i $VS $W/S001.bmp ::S007.BMP
+mcopy -i $VS $W/S002.bmp ::SNAP.BMP
+fsckok $VS
+cp $VS $W/vs2.img
+mcopy -i $W/vs2.img $W/l1.dlg ::LOGS/LOG003.DLG        # 2: a new log
+cp $W/vs2.img $W/vs3.img
+mdel -i $W/vs3.img ::LOGS/LOG001.DLG                  # 3: one deleted
+vdisk $W/f1m_native $VD spi $VS spi $W/vs2.img spi $W/vs3.img locked reset free forget LOG000.DLG
+grep -A1 "^step 1: " $W/vd.out | tr '\n' ' ' | grep -qE "files=9 .*media_changed=true .*again: files=9 media_changed=false" && echo "ok: step 1: 9 files (2 + LOG005 logs, 2 scope, 3 + S007 shots), media change once" || { echo "FAIL at line $LINENO"; exit 1; }
+for i in 1 2 3 4 5 6 7; do fsckok $VD.$i >/dev/null || { echo "FAIL: fsck $VD.$i"; exit 1; }; done
+echo "ok: fsck clean after every step"
+# volok <vol> <spi>: every generated file equals its source (CSV = dlog.py
+# of the DLG, BMP = the SPI file), SPIFLASH.BIN = the SPI image (fsck clean).
+volok() {
+    for n in $(mdir -b -i $1 ::LOGS ::SCOPE | grep -oE "(LOG|SCOP)[0-9]{3}\.CSV"); do
+        b=${n%.CSV}
+        case $b in LOG00[5]) src=::$b.DLG ;; LOG*) src=::LOGS/$b.DLG ;; *) src=::SCOPE/$b.DLG ;; esac
+        d=LOGS; case $b in SCOP*) d=SCOPE ;; esac
+        mcopy -n -i $2 $src $W/x.dlg && python3 -I ../dlog.py $W/x.dlg -o $W/x.csv && mcopy -n -i $1 ::$d/$n - | cmp -s - $W/x.csv || { echo "FAIL: $d/$n"; exit 1; }
+    done
+    for n in $(mdir -b -i $1 ::SHOTS | grep -oE "S[0-9]{3}\.BMP"); do
+        src=::SHOTS/$n; [ $n = S007.BMP ] && src=::S007.BMP
+        mcopy -n -i $2 $src - | cmp -s - <(mcopy -n -i $1 ::SHOTS/$n -) || { echo "FAIL: SHOTS/$n"; exit 1; }
+    done
+    mcopy -n -i $1 ::DEBUG/SPIFLASH.BIN $W/spi.bin && cmp $W/spi.bin $2 || { echo "FAIL: SPIFLASH.BIN"; exit 1; }
+    fsck.fat -n $W/spi.bin >/dev/null || { echo "FAIL: fsck SPIFLASH.BIN"; exit 1; }
+}
+volok $VD.1 $VS && echo "ok: step 1: every CSV == dlog.py of its DLG (LOG005 from the root), BMPs == the SPI files (S007 from the root), DEBUG/SPIFLASH.BIN == the SPI image (fsck clean)" || exit 1
+mdir -b -i $VD.1 ::LOGS ::SHOTS ::SCOPE | grep -qE "LOG002|SNAP" && { echo "FAIL at line $LINENO: foreign / unnumbered file shown"; exit 1; }
+echo "ok: the foreign LOG002.DLG and the unnumbered SNAP.BMP are not shown"
+[ "$(mcopy -n -i $VD.1 ::LOGS/LOG000.CSV - | md5sum | cut -c1-32)" = bf3b94db37e0b9c57d7d34479af4661a ] && [ "$(mcopy -n -i $VD.1 ::SCOPE/SCOP000.CSV - | md5sum | cut -c1-32)" = 4921f54425a8f14d910a25e65a4fc3c6 ] && echo "ok: LOGS/LOG000.CSV and SCOPE/SCOP000.CSV == the old CSV writer's files" || { echo "FAIL at line $LINENO"; exit 1; }
+mtype -i $VD.1 ::README.TXT | grep -q "DBG:UPLOAD" && echo "ok: README.TXT" || { echo "FAIL at line $LINENO"; exit 1; }
+# places <a> <b> <rule>: directory slot + first cluster of every LOGS /
+# SCOPE / SHOTS file in two dumps (independent parse).
+places() {
+    python3 -I - "$@" <<'PY'
+import struct, sys
+def scan(path):
+    f = open(path, 'rb')
+    bs = f.read(512)
+    bps, spc, rsvd, nf, rootn, tot16, media, fsz = struct.unpack_from('<HBHBHHBH', bs, 0x0B)
+    root = (rsvd + nf * fsz) * bps
+    data = root + rootn * 32
+    f.seek(root); r = f.read(rootn * 32)
+    out, deleted = {}, {}
+    for i in range(rootn):
+        e = r[32 * i:32 * i + 32]
+        if e[0] == 0: break
+        if e[11] & 0x10 and e[:11].strip() in (b'LOGS', b'SCOPE', b'SHOTS'):
+            c = struct.unpack_from('<H', e, 26)[0]
+            f.seek(data + (c - 2) * spc * bps); d = f.read(spc * bps)
+            deleted[e[:11].strip().decode()] = []
+            for k in range(len(d) // 32):
+                x = d[32 * k:32 * k + 32]
+                if x[0] == 0: break
+                if x[0] == 0xE5: deleted[e[:11].strip().decode()].append(k); continue
+                if x[11] & 0x10: continue
+                n = x[:8].strip().decode() + '.' + x[8:11].strip().decode()
+                out[n] = (e[:11].strip().decode(), k, struct.unpack_from('<H', x, 26)[0])
+    return out, deleted
+a, da = scan(sys.argv[1]); b, db = scan(sys.argv[2]); rule = sys.argv[3]
+common = set(a) & set(b)
+if rule == 'kept':
+    assert all(a[n] == b[n] for n in common), [(n, a[n], b[n]) for n in common if a[n] != b[n]]
+    hw = max(v[2] for v in a.values())
+    for n in set(b) - set(a):
+        assert b[n][2] > hw and b[n][1] == max(v[1] for v in a.values() if v[0] == b[n][0]) + 1, (n, b[n])
+    for n in set(a) - set(b):
+        assert a[n][1] in db[a[n][0]], (n, 'slot not shown deleted')
+    print('kept: %d files at the same slot / cluster, %d new after the high-water mark, %d gone (slot deleted)' % (len(common), len(set(b) - set(a)), len(set(a) - set(b))))
+elif rule == 'compact':
+    assert set(a) == set(b) and not any(db.values())
+    for d in ('LOGS', 'SCOPE', 'SHOTS'):
+        assert sorted(v[1] for v in b.values() if v[0] == d) == list(range(2, 2 + sum(1 for v in b.values() if v[0] == d))), d
+    print('compacted: %d files, slots 2.. without holes, no deleted entries' % len(b))
+PY
+}
+grep -q "^step 2: .*files=10 .*media_changed=true" $W/vd.out && places $VD.1 $VD.2 kept && echo "ok: step 2: the new LOG003 appended, everything else in place" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "^step 3: .*files=9 .*media_changed=true" $W/vd.out && places $VD.2 $VD.3 kept && echo "ok: step 3: LOG001 gone, its slot shown deleted, the rest in place" || { echo "FAIL at line $LINENO"; exit 1; }
+volok $VD.3 $W/vs3.img || exit 1
+grep -q "^step 4: locked .*media_changed=false" $W/vd.out && grep -q "^step 5: reset .*media_changed=false" $W/vd.out && places $VD.3 $VD.5 kept >/dev/null && echo "ok: steps 4-5: a host holds the lock: a bus reset changes nothing yet" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "^step 6: free .*media_changed=true" $W/vd.out && places $VD.5 $VD.6 compact && echo "ok: step 6: unlocked: compacted, media change" || { echo "FAIL at line $LINENO"; exit 1; }
+volok $VD.6 $W/vs3.img || exit 1
+grep -q "^step 7: forget LOG000.DLG media_changed=true" $W/vd.out && ! mdir -b -i $VD.7 ::LOGS | grep -q LOG000 && echo "ok: step 7: forget (device delete): gone at once, media change" || { echo "FAIL at line $LINENO"; exit 1; }
 echo PASS

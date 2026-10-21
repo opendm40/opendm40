@@ -311,6 +311,9 @@ fn buzzer(on: bool, vol: u8) {
 /// runs, and a screenshot waits for a commit in flight: commit what can be
 /// committed, finish the screenshot, then the last commit.
 pub fn finish_disk_writes(now: u64) {
+    // An update-file upload holds the disk (the others wait for it): drop it
+    // first, nothing of it is linked yet (upload.rs).
+    crate::upload::abort();
     crate::csvlog::finish_blocking(now);
     crate::screenshot::finish_blocking(8000);
     crate::csvlog::finish_blocking(now);

@@ -144,6 +144,8 @@ pub enum Busy {
     Log,
     /// A host WRITE(10) is in progress.
     Host,
+    /// An update file is being uploaded (upload.rs).
+    Upload,
 }
 
 /// The disk lock (csvlog.rs `gallery_free`, the same three conditions).
@@ -154,6 +156,8 @@ pub fn busy_reason() -> Option<Busy> {
         Some(Busy::Log)
     } else if crate::msc::HOST_WRITING.load(Relaxed) {
         Some(Busy::Host)
+    } else if crate::upload::busy() {
+        Some(Busy::Upload)
     } else {
         None
     }
@@ -164,6 +168,7 @@ fn busy_text(b: Busy) -> &'static str {
         Busy::Shot => "Saving a screenshot",
         Busy::Log => "Saving the CSV log",
         Busy::Host => "USB host is writing",
+        Busy::Upload => "Firmware upload",
     }
 }
 
