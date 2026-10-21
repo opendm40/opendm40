@@ -261,7 +261,8 @@ Code work (in this order):
         Possible firmware cause found: touch.rs Debounce drops a touch whose only pressed frame is
         followed by a release frame. Device check first: DBG:TOUCH? log of stylus taps.
   - [x] UF-36 BT on every view: by design (bt.poll every 5 ms in all views, DMM rail kept on while
-        linked); check tool `tools/dm40scpi.py --bt btpoll -p 50` (890047b).  (verify on device)
+        linked); check tool `tools/dm40scpi.py --bt btpoll -p 50` (890047b). Not during an FR-38
+        logger session (BT frames are not served then, by design).  (verify on device)
   - [x] UF-38 tools/dm40scpi.py: info / conf / read / log CSV / scpi / btpoll, USBTMC or --bt (890047b).
         (verify on device)
   - [ ] UF-41 sin(x)/x: src/sinc.rs (Lanczos-3) + tools/sinc-test (44f035c); not wired: the scope
