@@ -86,6 +86,13 @@ Chip (datasheet DS-HY3131-V10):
   edge: CTB whole cycles, CTC high time, CTF; no edges -> CTA keeps running,
   CTB = 0, no CTF; CTBOV on CTB overflow. Source ACPO (comparator) or the CNT
   pin (ENCNTI).
+* fw-rs misconnect sentinel nodes (fw-rs/src/sentinel.rs): the comparator on
+  SCMPI = PB1 sees the A current times the relay-selected shunt (DC V / mV /
+  ohm / temperature roles), on SCMPI = SENSE in DC A the V jack / 1000 when SS5
+  is closed (CMPHO / CMPLO instantaneous, DC + AC waveform); AD1 on PB1 - PB3
+  in the AC V / mV roles, with the AD1 peak hold over every elapsed conversion.
+  Row matching ignores AD1's fields in rows that leave AD1 off, PKHSEL /
+  ENPKH, and SS5 in the current rows.
 * Comparator: VRHCMP / VRLCMP from the R21 mux tables and the reference divider
   (VDSC<n> = K1 * VDDA, AGNDP/N<n> = AGND +- K2 * REFO), latch -> ACPO, CMPO on
   the CMP pin when ENPCMPO = 1 (`CmpPin`: the continuity beeper).
@@ -172,7 +179,7 @@ GTK panel's schematic reads it).
 
 `emu/hy3131/tests/run.sh` (dotnet 8; `DOTNET=` to point at an SDK) compiles
 the real `HY3131.cs` with a 60-line Renode shim and drives it through the SPI
-pins like the firmware: 139 checks of the register semantics, the frame,
+pins like the firmware: 199 checks of the register semantics, the frame,
 conversion timing, DC / AC / A / ohm / continuity / diode / capacitance /
 frequency / temperature physics, calibration consistency, the AC coupling
 transient, the AC+DC cadence and the (optional) enable-order beat.

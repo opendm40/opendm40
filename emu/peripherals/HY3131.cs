@@ -197,7 +197,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             double vs, rref;
             OhmSource(out vs, out rref);
             Fe.Update(now, vs, rref);
-            UpdateComparatorStatic();
+            UpdateComparatorStatic(now);
             UpdateAcNode(now);
             UpdateAd1(now);
             UpdateRamp(now);
@@ -405,6 +405,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var p = Ad1Period;
             var n = (long)Math.Floor((now - ad1Start) / p);
             if(n <= ad1Done) return;
+            if(EnPkh && (regs[0x29] & 3) == 1 && ForcedAd1 == int.MinValue)
+            {
+                // the peak hold sees every conversion, also those between two bus accesses
+                // (the last 256 of them: 0.4 s at OSR 256)
+                for(var k = Math.Max(ad1Done + 1, n - 255); k < n; k++)
+                    PeakHold(Clamp24(ComputeAd1(ad1Start + k * p)) >> 5);
+            }
             ad1Done = n;
             ad1Last = ad1Start + n * p;
             UpdateRamp(ad1Last); // the ramp node as it was when the conversion ended
@@ -733,6 +740,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var ig = Ad1Ig; var rg = Ad1Rg;
             var fs = 8388608.0;
             double jdc, jac, hz, duty; string shape;
+            var fp = regs[0x24] >> 4; var fn_ = regs[0x24] & 7;
+            if((role == Role.AcV || role == Role.AcMv) && fp == 9 && fn_ == 5)
+            {
+                // fw-rs sentinel: AD1 on PB1 - PB3 (the A-jack shunt drop, PB3 = its return),
+                // reference PB6 - AGND: code = IG * V / (RG * VR) * 2^23, instantaneous (OSR 256)
+                code = ig * Pb1Volts(t) / (rg * Vref) * fs;
+                if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
+                return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
+            }
             switch(role)
             {
             case Role.DcV:
@@ -911,9 +927,20 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // ------------------------------------------------------------ comparator
         private bool cmpHigh, cmpLow;
 
-        private void UpdateComparatorStatic()
+        private void UpdateComparatorStatic(double now)
         {
             if(!EnCmp) { acpo = false; cmpHigh = cmpLow = false; return; }
+            // Sentinel nodes (fw-rs sentinel.rs): PB1 = the A-jack shunt node in every role that
+            // leaves the comparator idle, SENSE with the /1000 tap (SS5) in the DC A rows.
+            // CMPHO / CMPLO follow the instantaneous node against VRH / VRL.
+            double node;
+            if(SentinelNode(now, out node))
+            {
+                cmpHigh = node > CmpHighThreshold;
+                cmpLow = node < CmpLowThreshold;
+                return;
+            }
+            cmpHigh = cmpLow = false;
             switch(role)
             {
             case Role.Cont:
@@ -961,6 +988,60 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             return 0;
         }
 
+        // ------------------------------------------------------------ sentinel nodes
+        /// The comparator input when the firmware points it at a sentinel node: SCMPI = PB1 (the
+        /// A-jack shunt drop) in DC V / DC mV / ohm / temperature / None roles, SCMPI = SENSE in
+        /// the DC A roles with SS5 closed (V jack through the /1000 divider tap).
+        private bool SentinelNode(double t, out double v)
+        {
+            v = 0;
+            var scmpi = regs[0x20] >> 5;
+            switch(role)
+            {
+            case Role.DcV: case Role.DcMv: case Role.Ohm: case Role.Temp: case Role.None:
+                if(scmpi != 4) return false;
+                v = Pb1Volts(t);
+                return true;
+            case Role.DcA:
+                if(scmpi != 0) return false;
+                v = SenseTapVolts(t);
+                return true;
+            }
+            return false;
+        }
+
+        /// PB1: drop across the relay-selected shunt (47.5 ohm while no current mode closed a
+        /// MOSFET), instantaneous.
+        private double Pb1Volts(double t)
+        {
+            double dc, ac, hz, duty; string shape;
+            Fe.ACurrent(out dc, out ac, out hz, out shape, out duty);
+            return Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR;
+        }
+
+        /// SENSE in the A rows: the /1000 divider tap through SS5 (PA5), else open (0).
+        private double SenseTapVolts(double t)
+        {
+            if((regs[0x2C] & 0x10) == 0) return 0;
+            double dc, ac, hz, duty; string shape;
+            Fe.VJack(0, out dc, out ac, out hz, out shape, out duty);
+            return Wave(t, dc, ac, hz, shape, duty) / 1000.0;
+        }
+
+        /// Instantaneous value of a DC + AC (RMS) waveform at time t.
+        private static double Wave(double t, double dc, double ac, double hz, string shape, double duty)
+        {
+            if(ac <= 0 || hz <= 0) return dc;
+            var ph = (t * hz) % 1.0;
+            var pk = Peak(ac, shape);
+            switch(shape)
+            {
+            case "square": return dc + (ph < duty ? pk : -pk);
+            case "triangle": return dc + pk * (ph < 0.5 ? 4 * ph - 1 : 3 - 4 * ph);
+            default: return dc + pk * Math.Sin(2 * Math.PI * ph);
+            }
+        }
+
         // ------------------------------------------------------------ roles
         public enum Role { None, DcV, DcMv, AcV, AcMv, DcA, AcA, Ohm, Cont, Diode, CapOsc, CapRamp, CapDischarge, Freq, Temp }
 
@@ -978,6 +1059,16 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     // compared when the row uses OP1; ENOP1 itself is always masked (AC+DC
                     // writes R32 = 0x38 after the DC V rows, whose OP1 is off).
                     if(j == 18) mask = (row.Bytes[18] & 0x08) != 0 ? 0xF7 : 0xF0;
+                    // fw-rs sentinel fields (sentinel.rs): in the rows that leave AD1 off (the AC
+                    // rows) its input / gain / reference fields are free; PKHSEL / ENPKH are free
+                    // everywhere; SS5 (R2C bit 4) is free in the current rows.
+                    if((row.Bytes[3] & 0x80) == 0)
+                    {
+                        if(j == 3 || j == 4 || j == 8) mask = 0;
+                        if(j == 5) mask = 0xCF;
+                    }
+                    if(j == 9) mask = 0xF8;
+                    if(j == 12 && (row.Role == Role.DcA || row.Role == Role.AcA)) mask = 0xEF;
                     var d = (row.Bytes[j] ^ regs[0x20 + j]) & mask;
                     if(d != 0) score += BitCount(d) * (j == 0 ? 1 : 2);
                 }
@@ -1000,7 +1091,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             // the AD2/AD3 enable-order phase: bad when ENAD2 was set before ENAD3 (empirical)
             beatBad = EnAd2 && EnAd3 && ad2Start <= ad3Start;
-            UpdateComparatorStatic();
+            UpdateComparatorStatic(now);
         }
 
         private static int BitCount(int v) { var c = 0; while(v != 0) { c += v & 1; v >>= 1; } return c; }

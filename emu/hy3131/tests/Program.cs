@@ -87,6 +87,7 @@ namespace Hy3131Tests
             Temperature();
             Beat();
             CrossCases();
+            Sentinel();
             Console.WriteLine("{0} passed, {1} failed", passes, failures);
             return failures == 0 ? 0 : 1;
         }
@@ -165,6 +166,143 @@ namespace Hy3131Tests
         private static readonly byte[] F8R1 = Master.Row("f0 dd 15 83 35 00 00 55 31 00 00 00 00 00 08 81 80 c7 3d ac 00 50");
 
         /// Fixed connections through the firmware's function changes (relays + rows as the firmware drives them).
+        // fw-rs misconnect sentinel rows (fw-rs/src/sentinel.rs): the stock row with the idle
+        // comparator / AD1 repointed. R20 0x90 = SCMPI PB1 + ENCMP; R20 0x10 = SENSE + ENCMP and
+        // R2C |= SS5 in DC A; AC V / mV: R22 0, ENAD1, R24 0x95 (PB1 - PB3), AD1IG 3.6, PKHSEL AD1.
+        private static byte[] Sent(byte[] row, int mode)
+        {
+            var c = (byte[])row.Clone();
+            switch(mode)
+            {
+            case 1: case 3: case 10: case 15: c[0] = 0x90; break;
+            case 0: case 2: c[2] = 0; c[3] |= 0x80; c[4] = 0x95; c[5] |= 0x30; c[9] = (byte)((c[9] & 0xF8) | 5); break;
+            case 7: case 8: case 9: c[0] = 0x10; c[12] |= 0x10; break;
+            }
+            return c;
+        }
+
+        /// CMPHO / CMPLO seen in n CTSTA reads dt apart: (any high, any low, reads with either).
+        private static int[] CmpScan(Master m, int n, double dt)
+        {
+            var r = new int[3];
+            for(var i = 0; i < n; i++)
+            {
+                var c = m.Read1(0x14);
+                if((c & 0x20) != 0) r[0]++;
+                if((c & 0x10) != 0) r[1]++;
+                if((c & 0x30) != 0) r[2]++;
+                m.Advance(dt);
+            }
+            return r;
+        }
+
+        private static void Sentinel()
+        {
+            Console.WriteLine("fw-rs misconnect sentinel (comparator on PB1 / SENSE tap, AD1 peak on PB1 - PB3)");
+            foreach(var (row, mode, name) in new[] { (F1R0, 1, "DcV m1 r0"), (F1R1, 1, "DcV m1 r1"), (F3R1, 3, "DcMv m3 r1"), (F10R1, 10, "Ohm m10 r1"), (F15R0, 15, "Temp m15 r0"),
+                                                     (F0R0, 0, "AcV m0 r0"), (F0R1, 0, "AcV m0 r1"), (F2R1, 2, "AcMv m2 r1"), (F8R0, 8, "DcA m8 r0") })
+            {
+                var m = NewChip();
+                m.Configure(Sent(row, mode), mode);
+                Check(m.Chip.Role == name, "sentinel row keeps its role: " + name, m.Chip.Role);
+            }
+            {
+                // DC V, nothing in the A jack: no comparator output; 1 mA DC: CMPHO; -1 mA: CMPLO.
+                var m = NewChip(true);
+                m.Chip.SetInput("vsrc:1.234");
+                m.Configure(Sent(F1R0, 1), 1);
+                var q = CmpScan(m, 50, 0.0071);
+                Check(q[2] == 0, "DC V, A jack open: comparator quiet", string.Join(",", q));
+                m.Chip.SetInput("isrc:0.001");
+                q = CmpScan(m, 20, 0.0071);
+                Check(q[0] == 20 && q[1] == 0, "  1 mA DC into A: CMPHO (47.5 mV on PB1 > 20.8 mV)", string.Join(",", q));
+                m.Chip.SetInput("isrc:-0.001");
+                q = CmpScan(m, 20, 0.0071);
+                Check(q[1] == 20 && q[0] == 0, "  -1 mA: CMPLO", string.Join(",", q));
+                m.Chip.SetInput("isrc:0.0003");
+                q = CmpScan(m, 20, 0.0071);
+                Check(q[2] == 0, "  0.3 mA (14 mV): below the 20.8 mV threshold", string.Join(",", q));
+                m.Chip.SetInput("isrc:0,ac=0.01,f=50");
+                q = CmpScan(m, 100, 0.0037);
+                Check(q[0] > 20 && q[1] > 20, "  10 mA AC 50 Hz: both bits toggle", string.Join(",", q));
+                m.Chip.SetInput("isrc:0;vsrc:1.234");
+                m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Dcv(m, 0), 1.234, 2e-3, "  the DC V reading is unchanged with the comparator on PB1");
+                m.Chip.SetInput("avsrc:5");
+                q = CmpScan(m, 10, 0.0071);
+                Check(q[0] == 10, "  5 V source across A-COM (~0.1 A through 47.5 ohm): CMPHO", string.Join(",", q));
+            }
+            {
+                // Stock R20 (SCMPI PB4): nothing seen on the comparator bits
+                var m = NewChip();
+                m.Chip.SetInput("isrc:0.01");
+                m.Configure(F1R0, 1);
+                var q = CmpScan(m, 10, 0.01);
+                Check(q[2] == 0, "stock DC V row (comparator on PB4): no sentinel bits", string.Join(",", q));
+            }
+            {
+                // Ohm r1 (PA relay on the ohm network): the A jack still rests on the shunt
+                var m = NewChip();
+                m.Chip.SetInput("r:100;isrc:0.002");
+                m.Configure(Sent(F10R1, 10), 10);
+                var q = CmpScan(m, 10, 0.01);
+                Check(q[0] == 10, "ohm: 2 mA into A -> CMPHO", string.Join(",", q));
+                m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Ohm(m, 1), 100, 0.2, "  ohm reading unchanged");
+            }
+            {
+                // AC V: AD1 peak hold on PB1 - PB3
+                var m = NewChip(true);
+                m.Chip.SetInput("vsrc:0,ac=1.0,f=50");
+                m.Configure(Sent(F0R1, 0), 0);
+                m.Advance(0.3);
+                var b = ReadAfter(m, 0x18, 1);
+                var pmin = S24(b, 14); var pmax = S24(b, 17);
+                Check(pmax < 2000 && pmin > -2000 && pmax >= pmin, "AC V, A jack open: AD1 peak near 0", pmin + ".." + pmax);
+                m.Advance(3.0);
+                b = ReadAfter(m, 0x18, 1);
+                var ms = NewChip(true);
+                ms.Chip.SetInput("vsrc:0,ac=1.0,f=50");
+                ms.Configure(F0R1, 0);
+                ms.Advance(3.3);
+                var bs = ReadAfter(ms, 0x18, 1);
+                Near(SqrtRms(b), SqrtRms(bs), 0.002 * SqrtRms(bs), "  the AC V RMS is that of the stock row with AD1 on", string.Format("{0:F4} V", SqrtRms(b) * 1.25 * 100 / 262144.0));
+                m.Chip.SetInput("isrc:0,ac=0.001,f=50");
+                m.Write(0x29, (byte)(Sent(F0R1, 0)[9] & 0xFB)); m.Write(0x29, Sent(F0R1, 0)[9]);
+                m.Advance(0.12);
+                b = m.Read(0x00, 20);
+                pmin = S24(b, 14); pmax = S24(b, 17);
+                // 1 mA rms = 67 mV peak on 47.5 ohm: 3.6 * 0.0672 / 1.25 * 2^23 / 32 = 50.7 k
+                Near(pmax, 50700, 1500, "  1 mA AC into A: PKHMAX ~ +50.7 k");
+                Near(pmin, -50700, 1500, "  PKHMIN ~ -50.7 k");
+                m.Chip.SetInput("isrc:0.0005");
+                m.Write(0x29, (byte)(Sent(F0R1, 0)[9] & 0xFB)); m.Write(0x29, Sent(F0R1, 0)[9]);
+                m.Advance(0.12);
+                b = m.Read(0x00, 20);
+                Near(S24(b, 17), 18000, 400, "  0.5 mA DC: PKHMAX ~ 18 k (the fw-rs threshold 17.9 k)");
+            }
+            {
+                // DC A: comparator on SENSE through the /1000 tap (SS5)
+                var m = NewChip();
+                m.Chip.SetInput("vsrc:24");
+                m.Configure(Sent(F8R0, 8), 8);
+                var q = CmpScan(m, 10, 0.01);
+                Check(q[0] == 10, "DC mA, 24 V on V-COM: 24 mV at the tap -> CMPHO", string.Join(",", q));
+                m.Chip.SetInput("vsrc:12");
+                q = CmpScan(m, 10, 0.01);
+                Check(q[2] == 0, "  12 V: below the 20.8 V trip", string.Join(",", q));
+                m.Chip.SetInput("vsrc:0,ac=230,f=50");
+                q = CmpScan(m, 100, 0.0037);
+                Check(q[0] > 20 && q[1] > 20, "  230 V AC: both bits toggle", string.Join(",", q));
+                m.Configure(F8R0, 8);
+                q = CmpScan(m, 10, 0.01);
+                Check(q[2] == 0, "  stock DC mA row: nothing", string.Join(",", q));
+                m.Chip.SetInput("open;isrc:0.0123");
+                m.Configure(Sent(F8R0, 8), 8); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Ma(m, 8, 0), 12.3, 0.01, "  DC mA reading unchanged with SS5 closed");
+            }
+        }
+
         private static void CrossCases()
         {
             Console.WriteLine("front end: fixed connections across functions");
