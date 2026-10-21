@@ -61,10 +61,10 @@ use crate::mmio::r32;
 const DWT_CYCCNT: u32 = 0xE000_1004;
 const CYC_PER_US: u64 = (crate::clock::HCLK_HZ / 1_000_000) as u64; // 200
 
-/// Ring capacity in records. 2048 * 12 B = 24 KiB; ~51 s at the default
+/// Ring capacity in records. 2048 * 8 B = 16 KiB (`Rec`); ~51 s at the default
 /// 40/s, ~3.2 s at the fastest 640/s (OSR 256 unchopped). Held
 /// in a `static mut` (see main.rs) so it does not sit on the main stack next to
-/// the ~12.5 KiB USBTMC buffers.
+/// the USBTMC response buffer.
 pub const CAP: usize = 2048;
 
 /// Default AD1OSR code, applied at startup (main.rs). OSR 2048 chopped (R22 =
@@ -72,10 +72,11 @@ pub const CAP: usize = 2048;
 /// (LOG:OSR, LOG:CHOP OFF; table above).
 pub const DEFAULT_OSR: u8 = hy::AD1OSR_STREAM;
 
-/// One sample: 12 bytes, little-endian on the wire (seq, ts_us, raw).
+/// One sample in the ring: 8 bytes. On the wire 12, little-endian (seq,
+/// ts_us, raw); the seq is not stored: the ring holds consecutive seqs (only
+/// the oldest is ever dropped), so the one at `tail` is `seq - (len - 1)`.
 #[derive(Clone, Copy)]
 struct Rec {
-    seq: u32,
     ts_us: u32,
     raw: i32,
 }
@@ -142,7 +143,7 @@ impl Logger {
             acc: 0,
             now_us: 0,
             last_sample_us: 0,
-            buf: [Rec { seq: 0, ts_us: 0, raw: 0 }; CAP],
+            buf: [Rec { ts_us: 0, raw: 0 }; CAP],
             head: 0,
             tail: 0,
             len: 0,
@@ -314,7 +315,7 @@ impl Logger {
         self.last_ts_us = ts_us;
         self.last_us = self.now_us;
 
-        self.buf[self.head] = Rec { seq: self.seq, ts_us, raw };
+        self.buf[self.head] = Rec { ts_us, raw };
         self.head = (self.head + 1) % CAP;
         if self.len == CAP {
             // Overflow: drop the oldest. The host sees a sequence jump.
@@ -332,11 +333,12 @@ impl Logger {
         let room = out.len() / REC_BYTES;
         let n = self.len.min(room);
         for i in 0..n {
+            let seq = self.seq.wrapping_sub(self.len as u32 - 1);
             let r = self.buf[self.tail];
             self.tail = (self.tail + 1) % CAP;
             self.len -= 1;
             let o = i * REC_BYTES;
-            out[o..o + 4].copy_from_slice(&r.seq.to_le_bytes());
+            out[o..o + 4].copy_from_slice(&seq.to_le_bytes());
             out[o + 4..o + 8].copy_from_slice(&r.ts_us.to_le_bytes());
             out[o + 8..o + 12].copy_from_slice(&r.raw.to_le_bytes());
         }

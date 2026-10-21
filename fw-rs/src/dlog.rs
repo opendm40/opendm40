@@ -1744,6 +1744,8 @@ mod vfs {
     use core::sync::atomic::{AtomicBool, Ordering};
 
     const ENT0: Ent = Ent { name: [0; 11], start: 0, size: 0 };
+    // SRAM (.sram_bss, zeroed at reset), not TCM: the stack's memory.
+    #[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".sram_bss")]
     static mut TAB: [Ent; MAX_EXTRA] = [ENT0; MAX_EXTRA];
     static mut NT: usize = 0;
     /// CRC of the last published table.

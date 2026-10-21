@@ -81,6 +81,18 @@ SECTIONS
         *(.sram .sram.*);
     } > DMARAM
 
+    /* Zero-initialised CPU-only statics kept out of TCM (the stack's
+     * memory): `#[link_section = ".sram_bss"]` on an all-zero static; zeroed
+     * at reset next to .bss (native.rs init_ram, main.rs rust_start). */
+    .sram_bss (NOLOAD) :
+    {
+        . = ALIGN(4);
+        __sram_bss_start = .;
+        *(.sram_bss .sram_bss.*);
+        . = ALIGN(4);
+        __sram_bss_end = .;
+    } > DMARAM
+
     __image_end = LOADADDR(.data) + SIZEOF(.data);
 
     /DISCARD/ :

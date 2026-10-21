@@ -79,6 +79,13 @@ PY
     exit 0
 fi
 
+# Static worst-case stack path vs the TCM stack (>= 16 KiB headroom).
+if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 16384 --top 0 > target/native/stackdepth.txt; then
+    cat target/native/stackdepth.txt >&2
+    exit 1
+fi
+head -1 target/native/stackdepth.txt
+
 BODY=target/native/dm40-fw-native.body.bin
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
 python3 ../firmware/dm40fw.py pack --pad "$BODY" dm40-fw-native.bin

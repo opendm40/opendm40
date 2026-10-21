@@ -79,7 +79,14 @@ pub struct Usbtmc<'a, B: UsbBus> {
     /// TransferSize goes out in several REQUEST_DEV_DEP_MSG_IN rounds).
     rsp_off: usize,
     rsp_ready: bool,
-    tx: [u8; RSP_MAX + 16],
+    /// The Bulk-IN transfer in progress: header (12 B) + `rsp[tx_base ..
+    /// tx_base + tx_n]` + zero padding to a multiple of 4, `tx_len` bytes in
+    /// all, `tx_off` of them written. Packets are assembled from `rsp` as
+    /// they go (`pump_in`); there is no second copy of the response (6 KiB
+    /// less on the main stack, device check 2026-10-21).
+    tx_hdr: [u8; 12],
+    tx_base: usize,
+    tx_n: usize,
     tx_len: usize,
     tx_off: usize,
     tx_zlp: bool,
@@ -113,7 +120,9 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
             rsp_len: 0,
             rsp_off: 0,
             rsp_ready: false,
-            tx: [0; RSP_MAX + 16],
+            tx_hdr: [0; 12],
+            tx_base: 0,
+            tx_n: 0,
             tx_len: 0,
             tx_off: 0,
             tx_zlp: false,
@@ -154,7 +163,19 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
 
     /// Response buffer to fill in place (then `respond_len`).
     pub fn rsp_buf(&mut self) -> &mut [u8; RSP_MAX] {
+        self.cut_unsent();
         &mut self.rsp
+    }
+
+    /// A new response is about to overwrite `rsp` while the previous one
+    /// still has payload to send from it (only when the host sent a new
+    /// command in the middle of a read, i.e. gave that read up): end that
+    /// transfer after the packets already written (`stop_in`) rather than
+    /// send it a mix of both.
+    fn cut_unsent(&mut self) {
+        if self.tx_off < self.tx_len {
+            self.stop_in();
+        }
     }
 
     /// Queue the first `n` bytes of `rsp_buf()` as the response.
@@ -168,6 +189,7 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
     /// Queue response text; sent when the host requests it.
     pub fn respond(&mut self, data: &[u8]) {
         let n = data.len().min(RSP_MAX);
+        self.cut_unsent();
         self.rsp[..n].copy_from_slice(&data[..n]);
         self.rsp_len = n;
         self.rsp_off = 0;
@@ -303,7 +325,7 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         let Some(tag) = self.req_tag.take() else { return };
         let rem = self.rsp_len - self.rsp_off;
         let n = rem.min(self.req_max as usize);
-        let t = &mut self.tx;
+        let t = &mut self.tx_hdr;
         t[0] = DEV_DEP_MSG_IN;
         t[1] = tag;
         t[2] = !tag;
@@ -311,13 +333,10 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         t[4..8].copy_from_slice(&(n as u32).to_le_bytes());
         t[8] = (n == rem) as u8; // EOM
         t[9..12].fill(0);
-        t[12..12 + n].copy_from_slice(&self.rsp[self.rsp_off..self.rsp_off + n]);
+        self.tx_base = self.rsp_off;
+        self.tx_n = n;
         self.rsp_off += n;
-        let mut len = 12 + n;
-        while len % 4 != 0 {
-            t[len] = 0;
-            len += 1;
-        }
+        let len = (12 + n + 3) & !3;
         self.tx_len = len;
         self.tx_off = 0;
         self.tx_zlp = len % MPS == 0;
@@ -329,7 +348,24 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
     fn pump_in(&mut self) {
         if self.tx_off < self.tx_len {
             let end = (self.tx_off + MPS).min(self.tx_len);
-            if let Ok(n) = self.ep_in.write(&self.tx[self.tx_off..end]) {
+            // Header, then payload from `rsp`, then the zero padding.
+            let mut p = [0u8; MPS];
+            let mut k = self.tx_off;
+            while k < end {
+                let o = k - self.tx_off;
+                if k < 12 {
+                    let e = end.min(12);
+                    p[o..o + e - k].copy_from_slice(&self.tx_hdr[k..e]);
+                    k = e;
+                } else if k < 12 + self.tx_n {
+                    let e = end.min(12 + self.tx_n);
+                    p[o..o + e - k].copy_from_slice(&self.rsp[self.tx_base + k - 12..self.tx_base + e - 12]);
+                    k = e;
+                } else {
+                    break; // padding: already zero
+                }
+            }
+            if let Ok(n) = self.ep_in.write(&p[..end - self.tx_off]) {
                 self.tx_off += n;
             }
         } else if self.tx_len != 0 {

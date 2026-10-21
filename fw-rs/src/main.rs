@@ -84,9 +84,16 @@ const _: () = assert!(SCPI_QUICK_MS >= hy3131::ad1_period_us_r22(0x17) as u64 / 
 /// pid.codes test VID/PID, for the debug build only.
 const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
 
+// CPU-only buffers in SRAM (.sram_bss, zeroed at reset) rather than TCM,
+// which the stack shares (device check 2026-10-21: stack headroom).
+#[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".sram_bss")]
 static mut EP_MEMORY: [u32; 320] = [0; 320];
+#[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".sram_bss")]
 static mut MSC_IO: [u8; 512] = [0; 512];
-/// Data-logger ring (FR-38). ~24 KiB; kept out of the main stack. Native: in
+/// The MSC block buffer (was a 4 KiB field of `Msc` on the main stack).
+#[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".sram_bss")]
+static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
+/// Data-logger ring (FR-38). ~16 KiB; kept out of the main stack. Native: in
 /// SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in main()), not TCM .bss,
 /// which the stack shares.
 #[cfg_attr(all(target_os = "none", feature = "native"), link_section = ".dmabuf")]
@@ -98,6 +105,8 @@ const DIAG_LEN: usize = 212;
 extern "C" {
     static mut __bss_start: u32;
     static mut __bss_end: u32;
+    static mut __sram_bss_start: u32;
+    static mut __sram_bss_end: u32;
     static mut __sdata: u32;
     static mut __edata: u32;
     static __sidata: u32;
@@ -120,6 +129,12 @@ pub unsafe extern "C" fn rust_start() -> ! {
     // Zero .bss.
     let mut p = core::ptr::addr_of_mut!(__bss_start);
     let end = core::ptr::addr_of_mut!(__bss_end);
+    while p < end {
+        p.write_volatile(0);
+        p = p.add(1);
+    }
+    let mut p = core::ptr::addr_of_mut!(__sram_bss_start);
+    let end = core::ptr::addr_of_mut!(__sram_bss_end);
     while p < end {
         p.write_volatile(0);
         p = p.add(1);
@@ -175,7 +190,7 @@ fn main() -> ! {
     let mut tmc = usbtmc::Usbtmc::new(&bus);
     // LUN 0 = the SPI disk; with `vdisk` LUN 1 = the read-only information
     // volume (vdisk.rs, its table built in native::pre_main).
-    let mut msc = msc::Msc::new(&bus, unsafe { &mut *core::ptr::addr_of_mut!(MSC_IO) }, if cfg!(feature = "vdisk") { 2 } else { 1 });
+    let mut msc = msc::Msc::new(&bus, unsafe { &mut *core::ptr::addr_of_mut!(MSC_IO) }, unsafe { &mut *core::ptr::addr_of_mut!(MSC_BLK) }, if cfg!(feature = "vdisk") { 2 } else { 1 });
     let mut disk = spiflash::SpiFlash::new();
     #[cfg(feature = "vdisk")]
     let mut info = vdisk::VDisk;

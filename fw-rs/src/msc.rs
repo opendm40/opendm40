@@ -204,7 +204,8 @@ pub struct Msc<'a, B: UsbBus> {
     xfer: Xfer,
     /// Per LUN.
     sense: [Sense; MAX_LUNS],
-    blk: [u8; MAX_BLOCK],
+    /// Block buffer (a static from main.rs, in SRAM: not on the main stack).
+    blk: &'static mut [u8; MAX_BLOCK],
     /// Refuse host writes (NOT READY, becoming ready) while set (M4: the
     /// logger's constant sample interval cannot survive a 50..400 ms erase).
     write_inhibit: bool,
@@ -215,11 +216,11 @@ type Res = Result<(), TransportError<BulkOnlyError>>;
 impl<'a, B: UsbBus> Msc<'a, B> {
     /// `luns`: 1 (SPI disk) or 2 (+ the information volume); GET MAX LUN
     /// answers `luns - 1`, `poll` takes that many devices.
-    pub fn new(alloc: &'a UsbBusAllocator<B>, io: &'static mut [u8], luns: u8) -> Self {
+    pub fn new(alloc: &'a UsbBusAllocator<B>, io: &'static mut [u8], blk: &'static mut [u8; MAX_BLOCK], luns: u8) -> Self {
         let (p, n) = (io.as_mut_ptr(), io.len());
         let max_lun = luns.clamp(1, MAX_LUNS as u8) - 1;
         let scsi = Scsi::new(alloc, 64, max_lun, IoBuf { p, n }).unwrap_or_else(|_| panic!("msc"));
-        Msc { scsi, io: IoBuf { p, n }, xfer: Xfer::None, sense: [SENSE_OK; MAX_LUNS], blk: [0; MAX_BLOCK], write_inhibit: false }
+        Msc { scsi, io: IoBuf { p, n }, xfer: Xfer::None, sense: [SENSE_OK; MAX_LUNS], blk, write_inhibit: false }
     }
 
     /// The USB device state (main loop, every pass). Default / Addressed
@@ -236,7 +237,7 @@ impl<'a, B: UsbBus> Msc<'a, B> {
     pub fn poll(&mut self, devs: &mut [&mut dyn BlockDevice]) {
         let xfer = &mut self.xfer;
         let sense = &mut self.sense;
-        let blk = &mut self.blk;
+        let blk = &mut *self.blk;
         let io = &mut self.io;
         // Also no host writes while a screenshot is being written (its FAT /
         // directory update spans many main-loop passes) or a CSV recording
