@@ -1198,118 +1198,137 @@ pub fn csv_name(n: &[u8; 11]) -> [u8; 11] {
 
 // ------------------------------------------------------------- device glue
 
-#[cfg(target_os = "none")]
-pub use dev::*;
+/// A `Raw` through a plain function (the SPI flash on the device, an image
+/// in the host tests).
+#[derive(Clone, Copy)]
+pub struct FnRaw(pub fn(u32, &mut [u8]) -> bool);
 
-#[cfg(target_os = "none")]
-mod dev {
-    use super::*;
-    use crate::spiflash::SpiFlash;
-
-    /// Raw reads of the SPI flash (waits for a running erase / program).
-    pub struct Flash;
-
-    static mut FLASH: Option<SpiFlash> = None;
-
-    fn flash() -> &'static mut SpiFlash {
-        let f = unsafe { &mut *core::ptr::addr_of_mut!(FLASH) };
-        f.get_or_insert_with(SpiFlash::new)
-    }
-
-    impl Raw for Flash {
-        fn read_at(&mut self, addr: u32, buf: &mut [u8]) -> bool {
-            flash().read_at(addr, buf)
-        }
-    }
-
-    pub type DevGen = Gen<FatFile<Flash>>;
-
-    /// Open DLG file `name` (8.3) of the SPI disk.
-    pub fn open(name: &[u8; 11]) -> Option<DevGen> {
-        let g = geometry(&mut Flash)?;
-        let mut hit = None;
-        scan(&mut Flash, &g, &mut |e| {
-            if hit.is_none() && e.name.eq_ignore_ascii_case(name) {
-                hit = Some(*e);
-            }
-        });
-        let e = hit?;
-        Gen::open(FatFile::new(Flash, g, e.start, e.size), e.size)
+impl Raw for FnRaw {
+    fn read_at(&mut self, addr: u32, buf: &mut [u8]) -> bool {
+        (self.0)(addr, buf)
     }
 }
 
-#[cfg(all(target_os = "none", feature = "vdisk"))]
+pub type DiskGen = Gen<FatFile<FnRaw>>;
+
+#[cfg(target_os = "none")]
+static mut FLASH: Option<crate::spiflash::SpiFlash> = None;
+
+/// The SPI flash, raw (waits for a running erase / program first).
+#[cfg(target_os = "none")]
+pub fn flash_read(addr: u32, buf: &mut [u8]) -> bool {
+    let f = unsafe { &mut *core::ptr::addr_of_mut!(FLASH) };
+    f.get_or_insert_with(crate::spiflash::SpiFlash::new).read_at(addr, buf)
+}
+
+#[cfg(not(target_os = "none"))]
+fn flash_read(_: u32, _: &mut [u8]) -> bool {
+    false
+}
+
+static mut DISK: FnRaw = FnRaw(flash_read);
+
+/// Host tests: read the "SPI disk" through `f`.
+pub fn set_disk(f: fn(u32, &mut [u8]) -> bool) {
+    unsafe { *core::ptr::addr_of_mut!(DISK) = FnRaw(f) };
+}
+
+fn disk() -> FnRaw {
+    unsafe { *core::ptr::addr_of!(DISK) }
+}
+
+/// Open root file `name` (8.3, a .DLG) of the SPI disk.
+pub fn open(name: &[u8; 11]) -> Option<DiskGen> {
+    let mut d = disk();
+    let g = geometry(&mut d)?;
+    let mut hit = None;
+    scan(&mut d, &g, &mut |e| {
+        if hit.is_none() && e.name.eq_ignore_ascii_case(name) {
+            hit = Some(*e);
+        }
+    });
+    let e = hit?;
+    Gen::open(FatFile::new(d, g, e.start, e.size), e.size)
+}
+
+#[cfg(feature = "vdisk")]
 pub use vfs::*;
 
-/// The virtual CSV files of LUN 1 (vdisk.rs `set_extra`).
-#[cfg(all(target_os = "none", feature = "vdisk"))]
+/// The virtual CSV files of LUN 1 (vdisk.rs `set_extra`): one LOGnnn.CSV
+/// per finished LOGnnn.DLG on the SPI disk (docs/compact-log-format.md 5).
+#[cfg(feature = "vdisk")]
 mod vfs {
     use super::*;
     use crate::vdisk::{Extra, MAX_EXTRA};
     use core::sync::atomic::{AtomicBool, Ordering};
 
-    #[derive(Clone, Copy)]
-    struct VEnt {
-        ent: Ent,
-    }
-
-    static mut TAB: [VEnt; MAX_EXTRA] = [VEnt { ent: Ent { name: [0; 11], start: 0, size: 0 } }; MAX_EXTRA];
+    const ENT0: Ent = Ent { name: [0; 11], start: 0, size: 0 };
+    static mut TAB: [Ent; MAX_EXTRA] = [ENT0; MAX_EXTRA];
     static mut NT: usize = 0;
-    /// The cursor: (table index, generator).
-    #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
-    static mut CUR: Option<(u32, DevGen)> = None;
+    /// The read cursor: (table index, generator), ~0.4 KiB of .bss (not
+    /// .dmabuf: that is not zeroed at reset).
+    static mut CUR: Option<(u32, DiskGen)> = None;
     static STALE: AtomicBool = AtomicBool::new(true);
 
-    /// The DLG set changed (a recording ended, a delete, a host unmount).
+    /// The DLG set changed (a recording ended, a file was deleted, the PC
+    /// wrote the disk): `refresh` rebuilds the table.
     pub fn set_stale() {
         STALE.store(true, Ordering::Relaxed);
     }
 
-    /// Main loop: rebuild the LUN-1 extra files when stale and the disk is
-    /// free (no recording commit, no screenshot / scope CSV job, no host
-    /// write). The file being recorded is left out until it ends.
-    pub fn refresh(exclude: Option<[u8; 11]>) {
-        if !STALE.load(Ordering::Relaxed) {
-            return;
-        }
+    pub fn stale() -> bool {
+        STALE.load(Ordering::Relaxed)
+    }
+
+    /// Main loop, when `stale()` and nothing writes the disk (no recording
+    /// commit, no screenshot / scope CSV job, no host write): rebuild the
+    /// LUN-1 extra files (vdisk::set_extra raises its media change). The
+    /// file being recorded (`exclude`) is left out until it ends. Reads every
+    /// chunk header + CRC of every DLG file: ~10 ms per 100 KB of logs.
+    /// Returns the number of files.
+    pub fn refresh(exclude: Option<[u8; 11]>) -> usize {
         STALE.store(false, Ordering::Relaxed);
         unsafe { *core::ptr::addr_of_mut!(CUR) = None };
         let tab = unsafe { &mut *core::ptr::addr_of_mut!(TAB) };
         let mut x = [Extra { name: [b' '; 11], size: 0, read: vread, arg: 0 }; MAX_EXTRA];
         let mut n = 0;
-        if let Some(g) = geometry(&mut Flash) {
-            let mut ents = [Ent { name: [0; 11], start: 0, size: 0 }; MAX_EXTRA];
+        let mut d = disk();
+        if let Some(g) = geometry(&mut d) {
+            // The root's DLG files into TAB, then the valid ones compacted.
             let mut ne = 0;
-            scan(&mut Flash, &g, &mut |e| {
+            scan(&mut d, &g, &mut |e| {
                 if ne < MAX_EXTRA && Some(e.name) != exclude {
-                    ents[ne] = *e;
+                    tab[ne] = *e;
                     ne += 1;
                 }
             });
-            for e in &ents[..ne] {
+            for i in 0..ne {
+                let e = tab[i];
+                #[cfg(target_os = "none")]
                 crate::wdt::kick_if_feeding();
-                let Some(gen) = Gen::open(FatFile::new(Flash, g, e.start, e.size), e.size) else { continue };
-                tab[n] = VEnt { ent: *e };
+                let Some(gen) = Gen::open(FatFile::new(d, g, e.start, e.size), e.size) else { continue };
+                tab[n] = e;
                 x[n] = Extra { name: csv_name(&e.name), size: gen.info.csv, read: vread, arg: n as u32 };
                 n += 1;
             }
         }
         unsafe { *core::ptr::addr_of_mut!(NT) = n };
-        crate::vdisk::set_extra(&x[..n]);
+        crate::vdisk::set_extra(&x[..n])
     }
 
-    /// `Extra::read`: CSV bytes of table entry `arg`.
+    /// `Extra::read`: CSV bytes `off..` of table entry `arg`.
     pub fn vread(arg: u32, off: u32, buf: &mut [u8]) {
         buf.fill(0);
         let cur = unsafe { &mut *core::ptr::addr_of_mut!(CUR) };
         if cur.as_ref().map(|c| c.0) != Some(arg) {
             *cur = None;
-            if arg as usize >= unsafe { NT } {
+            if arg as usize >= unsafe { *core::ptr::addr_of!(NT) } {
                 return;
             }
-            let e = unsafe { (*core::ptr::addr_of!(TAB))[arg as usize].ent };
-            let Some(g) = geometry(&mut Flash) else { return };
-            let Some(gen) = Gen::open(FatFile::new(Flash, g, e.start, e.size), e.size) else { return };
+            let e = unsafe { (*core::ptr::addr_of!(TAB))[arg as usize] };
+            let mut d = disk();
+            let Some(g) = geometry(&mut d) else { return };
+            let Some(gen) = Gen::open(FatFile::new(d, g, e.start, e.size), e.size) else { return };
             *cur = Some((arg, gen));
         }
         if let Some((_, g)) = cur.as_mut() {
