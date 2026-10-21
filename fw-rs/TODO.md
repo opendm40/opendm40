@@ -375,3 +375,23 @@ Code work (in this order):
       DBG:TOUCH? log + tools/touch-log.py.  (verify with the owner's finger)
 - [x] DMM frequency: ~700 Hz shown as "1 kHz": Hz readout decimals.  (da0f874; verify on device)
 - [x] Pinch-to-zoom on the scope: see "Scope touch" above (c470be7, 419fd96).
+
+## Owner notes 2026-10-14 (../замечания.txt)
+Firmware:
+- [ ] °F shown in the top-left status slot is odd; move the °C/°F choice to a global Settings option and show only the chosen unit.
+- [ ] Temperature settings: remove the unclear "Offset 0" button (reset via the slider/long-press instead).
+- [ ] "NTC user" is unclear: make its R25/Beta editable right there (or remove); explain on screen.
+- [ ] Second resistance mode present in the stock is missing in fw-rs — check stock parity (dmm_v2_6.h) and add it.
+- [ ] Tap on the DMM value cycles averaging/resolution: fewer digits = faster readings; compute digits vs OSR/noise from the
+      HY3131 timing + measured noise (not ad hoc); the +1 digit always drawn small at the end.
+- [ ] Power-meter mode: HY3131 can measure V and I at once (AD2/AD3 + MUL → active power in RMSDATA); Vrms, Irms, P (and
+      energy) by switching internal modes — check feasibility with the DM40 front-end wiring first.
+- [ ] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
+Emulator (emu/):
+- [ ] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
+      at the same time); the firmware's mux/relay choices route it through a modelled DM40 front-end (dividers, shunts, relays,
+      switches) — no per-mode magic inputs.
+- [ ] Show the firmware's current mux/relay/switch selection as feedback in the GUI (draw the front-end path).
+- [ ] Cold-junction temperature and the HY3131 die temperature are separate inputs (die temp always set; default equal).
+- [ ] GUI: Apply on Enter in the HY3131 input fields; show only the fields relevant to the chosen source (no freq/DC offset
+      for plain DC etc.).
