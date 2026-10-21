@@ -209,6 +209,8 @@ Code work (in this order):
             DBG:PROF? csv lap during a LUN-1 refresh with a large log (~0.1 s per 100 KB expected);
             DBG:DIAG? STACK high-water after a LUN-1 refresh with several logs (~2 KiB frame);
             copy a file to the DM40 disk: LUN 1 re-reads once, 2 s after the copy, not per write.
+      - [ ] Owner 2026-10-21: drop legacy text LOG*.CSV / SCOP*.CSV support on the SPI disk (gallery parser,
+            numbering, list/delete): only .DLG is written and read; CSV exists only as the generated export.
       - [ ] FR-38 logger to disk (DLG kind 3 reserved): needs pre-allocated clusters (commit stalls
             lose ~290 samples at 640/s); see the doc section 3.
 
