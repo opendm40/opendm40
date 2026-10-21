@@ -63,6 +63,27 @@ widgets.
   interval aggregation (boundaries, OL mix, GAP); a USB/IP run `LOG:CSV:INT 1` 60 s -> 60 rows.
 - Device verify: 1 min interval for 10 min, the file opens, the estimate is within 2x.
 
+**Implemented (2026-10-22).** As above, with these points fixed in the code (csvlog.rs header):
+- time_s of an interval row = the interval's **end**, k x I (the value is known only then;
+  "when the firmware saw it"); the header says so in a third `#` line (interval mode only).
+- An interval with an OL reading is an **OL row without a value**: the DLG coder / CSV
+  generator print no value on an OL row (dlog.rs `fmt_row`, the OL row coding), so "OL + the
+  mean of the non-OL readings" cannot be stored without the format change this decision
+  rules out. The mean of a partly overloaded interval would also understate it.
+- An interval without readings writes no row (a 2.2 s capacitance reading at 1 s; an empty
+  value would read as OL); the partial last interval at a stop is written at its nominal end.
+- The settings apply to the next recording; changing them while one runs is refused (page:
+  beep + toast; SCPI: "Settings conflict"). Persisted as persist v8 word W_REC.
+- The idle auto power-off did NOT count a recording as activity (the premise above was
+  wrong: `csvlog::active()` only kept the DMM rail on); it is now held off while a
+  recording runs (app.rs tick / off_warn), the backlight dim still applies.
+- The estimate reads "about N h left" (the `~` glyph of TEXT22 touches the row box),
+  "(limit)" at the 49.7-day cap, "-- (disk busy)" / "-- (no disk)".
+Device checklist: Hold & Limits shows the ninth row; Record page steppers / Start returns to
+the DMM page with REC; 1 min interval for 10 min -> 10 rows, the CSV opens, the estimate within
+2x; 10 min duration stops itself with "Saved LOGnnn.DLG"; swipe REC uses the chosen interval;
+settings survive a reboot; `LOG:CSV:INT 1`, `LOG:CSV ON`, 60 s, `LOG:CSV OFF` -> ~60 rows.
+
 **Revisit.** If users ask for min / max per interval: add them as a new DLG chunk kind with
 three value columns (mean, min, max), bump tools/dlog.py and the CSV generator together; the
 UI then gets a "Mean / Min-Max / All" option. Not before.
@@ -251,6 +272,14 @@ a blink over HOLD.
 - sentinel.rs unchanged: it already evaluates on the live hardware while HOLD freezes the
   display; the toast per assertion and the beep pattern stay.
 - Help / Settings 3/3 text: "alerts alternate with HOLD".
+
+**Implemented (2026-10-22).** ui.rs `slot_alert` / `alert_alternates`; the phase is the app's
+1 s `strip_alt`, toggled in every view; the DMM page repaints the slot each second only while it
+alternates. While HOLD / AutoHold freeze the readout the slot and the strip draw the **live**
+alert (meter.live), so a probe swap after HOLD shows. Help page 5 says "alerts alternate with
+HOLD" (Settings 3/3 keeps its value text: no room in the row). Device check: HOLD in DC V, then
+current through A -> HOLD / A-JACK alternate 1 s each, beep continues; V-JACK? under HOLD shows
+HOLD only.
 
 **Revisit.** If the device check of the sentinel re-check list (A-JACK false trips) shows the
 alert is too noisy to blink over HOLD, go back to A for the slot and keep the beep, rather than
