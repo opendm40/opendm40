@@ -566,3 +566,7 @@ Emulator (emu/):
       and duty >= 99.95 % neither wins the choice nor reaches the readout / MIN / AVG (no reading that gate).
       Cause of the missed edges (input path settling after the AC+DC relay pulses?) still open: retest on
       the device; if the wrong readings persist, compare the stock's AC+DC -> Hz entry (R20 / relay order).
+- [ ] DMM batch polish (open): bargraph full-scale labels in diode / continuity say the 60000-count scale
+      (6 V / 600 ohm), not their real ceilings (3 V / 1000 ohm); Help "Tap history row" applies only with
+      Settings 2/2 DMM row = History; a debug_assert in ui::list_page (vals.len() == names.len()) would have
+      caught the 1a3efbd row mis-mapping.
