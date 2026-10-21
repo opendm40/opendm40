@@ -1312,6 +1312,28 @@ pub fn gen_static(g: &gen::Gen) {
     gen_values(g);
 }
 
+/// RUN/STOP label of the generator bar (logo + label, x < GEN_RUN_W): a tap
+/// toggles the output like the RUN key (ui-review #9).
+const GEN_RUN_W: u16 = BAR_X as u16 + 80;
+
+pub fn gen_run_hit(x: u16, y: u16) -> bool {
+    x < GEN_RUN_W && y < 36
+}
+
+/// Generator bar status (ui-review #9; stock: uptime (186,0,120,36), battery
+/// (430,8,40,18)): uptime, REC, lock, BT link, battery, at the DMM bar's x
+/// positions (`status_right`), centred in the 36 px bar.
+pub fn gen_status(st: &Status) {
+    let mut t = [0u8; 8];
+    let mut b = [0u8; 4];
+    let bc = if st.charging { 0x04A9 } else { STATUS_FG };
+    sf::label(sf::F21, rect(186, 6, 120, 24), hms(&mut t, st.uptime_s), STATUS_FG, G_BAR, 1, -1);
+    sf::label(sf::F14, rect(361, 11, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, G_BAR, 8, 1);
+    sf::label(sf::LOCK, rect(335, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
+    sf::label(sf::SAVE_BT, rect(390, 2, 15, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, G_BAR, 1, 0);
+    sf::label(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);
+}
+
 fn gen_preview(w: gen::Wave) {
     // Two periods over 238 points between h/4 and 3h/4, as the stock preview.
     let (x0, y0, ww, hh) = (4u16, 85u16, 239u16, 231u16);

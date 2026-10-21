@@ -1045,6 +1045,13 @@ fn main() {
         w.gen.s.on = on;
         host::reset(0);
         ui::gen_static(&w.gen);
+        // Bar status (ui-review #9), worst case: 99:59:59, REC, lock, BT.
+        let mut st = status(255);
+        st.locked = on;
+        ui::gen_status(&st);
+        if on {
+            save(&out, "g05-genbar-status");
+        }
         let keep = 36 * W;
         for p in emu().owner[keep..].iter_mut() {
             *p = 0;

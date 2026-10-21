@@ -731,6 +731,10 @@ fn hit_tests(ck: &mut Ck) {
     ui::gen_static(&g);
     let gen_hit = |x: u16, y: u16| if x < 243 && (40..82).contains(&y) { Some(100) } else { o(ui::gen_box_hit(x, y)) };
     page(ck, "generator", &gen_hit, &|b| b.y0 >= 36, &[0, 1, 2, 3, 100]);
+    // RUN/STOP label in the bar (ui-review #9): tappable, the status
+    // (uptime from x 186) is not.
+    ck.t("generator: RUN/STOP label tappable", ui::gen_run_hit(40, 18) && ui::gen_run_hit(4, 2));
+    ck.t("generator: uptime not a RUN/STOP tap", !ui::gen_run_hit(186, 18) && !ui::gen_run_hit(40, 36));
 }
 
 // ------------------------------------------------- 5. timebase tap step
