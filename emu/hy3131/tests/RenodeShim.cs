@@ -45,12 +45,14 @@ namespace Antmicro.Renode.Core
     {
         ElapsedTime ElapsedVirtualTime { get; }
         SystemBusStub SystemBus { get; }
+        bool TryGetByName<T>(string name, out T peripheral) where T : class;
     }
 
     public class MachineStub : IMachine
     {
         public ElapsedTime ElapsedVirtualTime { get; } = new ElapsedTime();
         public SystemBusStub SystemBus { get; } = new SystemBusStub();
+        public bool TryGetByName<T>(string name, out T peripheral) where T : class { peripheral = null; return false; }
         public double Now
         {
             get => ElapsedVirtualTime.TimeElapsed.TotalSeconds;
@@ -75,6 +77,7 @@ namespace Antmicro.Renode.Logging
 namespace Antmicro.Renode.Peripherals
 {
     public interface IKnownSize { long Size { get; } }
+    public interface IPeripheral { }
 }
 
 namespace Antmicro.Renode.Peripherals.Bus

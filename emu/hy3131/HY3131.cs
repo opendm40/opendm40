@@ -32,23 +32,6 @@ using Antmicro.Renode.Peripherals.Bus;
 
 namespace Antmicro.Renode.Peripherals.Miscellaneous
 {
-    /// What the input terminals carry. Voltages in V, currents in A, R in ohm, C in F.
-    public class Hy3131Input
-    {
-        public double Vdc, Vac, Vhz = 50, Vphase, Vnoise; // V / COM node: DC + AC (RMS) at Vhz
-        public string Vshape = "sine";                     // sine | square | triangle
-        public double Vduty = 0.5;                         // square only
-        public double Idc, Iac, Ihz = 50;                  // A terminal current
-        public string Ishape = "sine";
-        public double Iduty = 0.5;
-        public double R = double.PositiveInfinity;         // ohm between V and COM (ohm / continuity)
-        public double C;                                   // F (capacitance), 0 = open
-        public double DiodeVf = double.PositiveInfinity;   // forward voltage (infinity = open)
-        public double TcTemp = 25, ChipTemp = 25;          // thermocouple hot junction / die (C)
-        public bool TcOpen;                                // thermocouple not connected
-        public double TcMv = double.NaN;                   // explicit thermocouple mV (overrides TcTemp)
-    }
-
     public class Hy3131Core
     {
         public const double SysClk = 4915200.0;
@@ -211,6 +194,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public void Update(double now)
         {
             if(now < lastUpdate) now = lastUpdate; // monotonic
+            double vs, rref;
+            OhmSource(out vs, out rref);
+            Fe.Update(now, vs, rref);
+            UpdateComparatorStatic();
             UpdateAcNode(now);
             UpdateAd1(now);
             UpdateRamp(now);
@@ -255,7 +242,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double CmpLowThreshold => RefNode(ScmprlNames[regs[0x21] & 0x0F]);
 
         // ------------------------------------------------------------ observable state
-        public Hy3131Input Input = new Hy3131Input();
+        /// The DM40 front end: what is connected to the jacks, the relay / shunt state.
+        public Dm40Frontend Fe = new Dm40Frontend();
+        private double vNoise;                          // V-jack white noise (V rms), "noise=" of a source
+        private double sigHz = 50, sigDuty = 0.5; private string sigShape = "sine"; // the waveform at the node
         public bool CalConsistent = true;      // apply the meter's calibration deviations (README "Calibration")
         public double NoiseScale = 1.0;        // 0 = noise free
         public bool BeatModel = false;         // empirical AD2/AD3 enable-order beat (RESEARCH.md 8.2)
@@ -277,6 +267,48 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double RampNodeV => rampV;
         public double AcNodeVc => vc;
         public double LastAd1Time => ad1Last;
+
+        /// One-line description of the front end and the chip configuration (key=value tokens).
+        public string FrontendState()
+        {
+            var ci = CultureInfo.InvariantCulture;
+            var sb = new System.Text.StringBuilder();
+            sb.Append(Fe.PinState());
+            sb.AppendFormat(ci, " role={0} mode={1} range={2}", role, roleMode, roleRange);
+            sb.AppendFormat(ci, " ad1={0} ad2={1} ad3={2} lpf={3} rms={4} ctr={5} cmp={6} cmppin={7} op1={8} op2={9} osr1={10} chop={11}",
+                EnAd1 ? 1 : 0, EnAd2 ? 1 : 0, EnAd3 ? 1 : 0, EnLpf ? 1 : 0, EnRms ? 1 : 0, (regs[0x20] & 2) != 0 ? 1 : 0,
+                EnCmp ? 1 : 0, CmpPin ? 1 : 0, EnOp1 ? 1 : 0, (regs[0x32] & 0x80) != 0 ? 1 : 0, Osr1, Ad1Chop ? 1 : 0);
+            sb.AppendFormat(ci, " sop1p={0} sad1fp={1} sad1fn={2} sad1rh={3} sad1rl={4} sad2ip={5} scmpi={6} sdio={7} sad1i={8} smode=0x{9:X2} sfuvr={10}",
+                Sop1pNames[regs[0x32] & 7], Sad1fpNames[regs[0x24] >> 4], Sad1fnNames[regs[0x24] & 7], Sad1rhNames[(regs[0x28] >> 4) & 7],
+                Sad1rlNames[regs[0x28] & 7], Sad2ipNames[regs[0x27] >> 6], ScmpiNames[regs[0x20] >> 5], (regs[0x24] & 8) != 0 ? 1 : 0,
+                Sad1I, regs[0x2F] & 0x7F, Sfuvr);
+            double jdc, jac, hz, duty; string shape;
+            Fe.VJack(Fe.RelayPa, out jdc, out jac, out hz, out shape, out duty);
+            sb.AppendFormat(ci, " vjack={0:G5} vjack_ac={1:G5} vjack_hz={2:G5}", jdc, jac, hz);
+            double idc, iac;
+            Fe.ACurrent(out idc, out iac, out hz, out shape, out duty);
+            sb.AppendFormat(ci, " ijack={0:G5} ijack_ac={1:G5} vshunt={2:G5}", idc, iac, idc * Fe.ShuntR);
+            double vs, rref;
+            OhmSource(out vs, out rref);
+            if(rref > 0)
+            {
+                double vx, vref;
+                Fe.OhmNode(vs, rref, out vx, out vref);
+                sb.AppendFormat(ci, " vsrc={0:G4} rref={1:G5} vx={2:G5}", vs, rref, vx);
+            }
+            if(role == Role.Diode) sb.AppendFormat(ci, " vx={0:G5}", Fe.DiodeNode(DiodeTestCurrent, DiodeCompliance));
+            sb.AppendFormat(ci, " ad1code={0} lpf={1} rms={2} period={3:G4} cj={4:G4} die={5:G4} conn=\"{6}\"",
+                ad1Code, lpfCode, rmsVal, Ad1Period, Fe.CjTemp, Fe.Die, Fe.Connection());
+            return sb.ToString();
+        }
+
+        private static readonly string[] Sop1pNames = { "SENSE", "FB", "RLU", "AGND", "PB0", "PB1", "PB2", "PB8" };
+        private static readonly string[] Sad1fpNames = { "SENSE", "FB", "RLU", "OP1O", "OP2O", "VDDA", "REFO", "VREF", "PB0", "PB1", "PB2", "PB3", "PB4", "PB5", "PB6", "PB7" };
+        private static readonly string[] Sad1fnNames = { "SENSE", "RLU", "VSSA", "AGND", "PB2", "PB3", "PB4", "PB5" };
+        private static readonly string[] Sad1rhNames = { "FB", "REFO", "VREF", "PB6", "RLU", "VDDA", "AGND", "-" };
+        private static readonly string[] Sad1rlNames = { "RLU", "AGND", "PB3", "PB5", "FB", "VSSA", "VREF", "-" };
+        private static readonly string[] Sad2ipNames = { "OP1O", "OP2O", "PB4", "PB7" };
+        private static readonly string[] ScmpiNames = { "SENSE", "FB", "OP1O", "PB0", "PB1", "RLD", "PB3", "PB4" };
 
         /// Calibration record (stock layout, hy3131_v2_6.h): gain / offset per path.
         public float[] Cal = DefaultCal();
@@ -309,113 +341,23 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private float CalOffs(int off) => CalConsistent ? Cal[off / 4] : 0f;
 
         // ------------------------------------------------------------ input spec
-        /// "dcv:1.234", "acv:1.0@50[,dc=0.5][,shape=square][,duty=0.3][,noise=1e-4]",
-        /// "dca:0.5", "aca:0.1@60[,dc=..]", "ohm:1000", "short", "open", "diode:0.65",
-        /// "cap:1e-6", "hz:1000[,duty=0.25][,amp=1.0]", "temp:100[,cj=25]", "tcmv:4.1",
-        /// "chip:25", "tcopen". Several specs may be separated by ';'.
+        /// Connection spec (Dm40Frontend.Apply): what is on the jacks, plus the model options
+        /// noise:, cal:, beat:. The old per-function keys (dcv:, acv:, dca:, ohm:, cap:, temp: ...)
+        /// are aliases for the equivalent connection.
         public void SetInput(string spec)
         {
-            foreach(var part in spec.Split(';'))
+            foreach(var o in Fe.Apply(spec))
             {
-                var s = part.Trim();
-                if(s.Length == 0) continue;
-                var kv = s.Split(new[] { ':' }, 2);
-                var key = kv[0].Trim().ToLowerInvariant();
-                var args = kv.Length > 1 ? kv[1].Split(',') : new string[0];
-                var opts = new Dictionary<string, string>();
-                string main = null;
-                foreach(var a in args)
+                switch(o.Key)
                 {
-                    var t = a.Trim();
-                    if(t.Length == 0) continue;
-                    var eq = t.IndexOf('=');
-                    if(eq > 0) opts[t.Substring(0, eq).Trim().ToLowerInvariant()] = t.Substring(eq + 1).Trim();
-                    else if(main == null) main = t;
-                }
-                double v = 0, hz = double.NaN;
-                if(main != null)
-                {
-                    var at = main.IndexOf('@');
-                    if(at >= 0)
-                    {
-                        hz = D(main.Substring(at + 1));
-                        main = main.Substring(0, at);
-                    }
-                    v = D(main);
-                }
-                var inp = Input;
-                switch(key)
-                {
-                case "dcv":
-                    inp.Vdc = v; inp.Vac = 0; inp.Vnoise = Opt(opts, "noise", 0);
-                    break;
-                case "acv":
-                    inp.Vac = v; inp.Vdc = Opt(opts, "dc", 0);
-                    if(!double.IsNaN(hz)) inp.Vhz = hz;
-                    inp.Vshape = opts.ContainsKey("shape") ? opts["shape"] : "sine";
-                    inp.Vduty = Opt(opts, "duty", 0.5);
-                    inp.Vnoise = Opt(opts, "noise", 0);
-                    break;
-                case "hz":
-                    inp.Vhz = v; inp.Vac = Opt(opts, "amp", 1.0); inp.Vdc = Opt(opts, "dc", 0);
-                    inp.Vshape = opts.ContainsKey("shape") ? opts["shape"] : "square";
-                    inp.Vduty = Opt(opts, "duty", 0.5);
-                    break;
-                case "dca":
-                    inp.Idc = v; inp.Iac = 0;
-                    break;
-                case "aca":
-                    inp.Iac = v; inp.Idc = Opt(opts, "dc", 0);
-                    if(!double.IsNaN(hz)) inp.Ihz = hz;
-                    inp.Ishape = opts.ContainsKey("shape") ? opts["shape"] : "sine";
-                    inp.Iduty = Opt(opts, "duty", 0.5);
-                    break;
-                case "ohm": case "r":
-                    inp.R = v; inp.C = 0; inp.DiodeVf = double.PositiveInfinity;
-                    break;
-                case "short":
-                    inp.R = 0; inp.DiodeVf = 0; inp.Vdc = 0; inp.Vac = 0; inp.C = 0;
-                    break;
-                case "open":
-                    inp.R = double.PositiveInfinity; inp.DiodeVf = double.PositiveInfinity; inp.C = 0;
-                    inp.Vdc = 0; inp.Vac = 0; inp.Idc = 0; inp.Iac = 0; inp.TcOpen = true;
-                    break;
-                case "diode":
-                    inp.DiodeVf = v; inp.R = double.PositiveInfinity;
-                    break;
-                case "cap": case "c":
-                    inp.C = v; inp.R = double.PositiveInfinity;
-                    break;
-                case "temp": case "tc":
-                    inp.TcTemp = v; inp.TcOpen = false; inp.TcMv = double.NaN;
-                    if(opts.ContainsKey("cj")) { inp.ChipTemp = D(opts["cj"]); }
-                    break;
-                case "tcmv":
-                    inp.TcMv = v; inp.TcOpen = false;
-                    break;
-                case "tcopen":
-                    inp.TcOpen = true;
-                    break;
-                case "chip": case "cj":
-                    inp.ChipTemp = v;
-                    break;
-                case "noise":
-                    NoiseScale = v;
-                    break;
-                case "cal":
-                    CalConsistent = v != 0;
-                    break;
-                case "beat":
-                    BeatModel = v != 0;
-                    break;
-                default:
-                    throw new ArgumentException("unknown input key '" + key + "'");
+                case "noise": NoiseScale = o.Value; break;
+                case "cal": CalConsistent = o.Value != 0; break;
+                case "beat": BeatModel = o.Value != 0; break;
+                case "vnoise": vNoise = o.Value; break;
                 }
             }
         }
 
-        private static double D(string s) => double.Parse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture);
-        private static double Opt(Dictionary<string, string> o, string k, double dflt) => o.ContainsKey(k) ? D(o[k]) : dflt;
 
         // ============================================================ the chip
         private void RestartAd1(double now)
@@ -562,41 +504,42 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(role == Role.CapOsc)
             {
                 var r = CapOscR();
-                var c = Input.C + CalOffs(0x190) * 1e-6;
+                var c = Fe.CapOscC(r);
+                if(double.IsNaN(c)) return; // the network cannot oscillate
+                c += CalOffs(0x190) * 1e-6;  // stray capacitance (the cal offset)
                 if(c <= 0) return;
                 f = CalGain(0x170 + 4 * roleRange) * 0.72135 / (r * c);
                 duty = 0.5;
                 return;
             }
+            double dc, ac;
+            NodeDcAc(0, out dc, out ac);
             if(EnCntI)
             {
-                // CNT pin: the DM40 wiring is unknown; assume the same input (RESEARCH.md 8.4)
-                SignalEdges(Input.Vac * NodeRatioAc(), out f, out duty, 0.0, 0.0);
+                // CNT pin: the DM40 wiring is unknown; assume the same node (RESEARCH.md 8.4)
+                SignalEdges(ac, out f, out duty, 0.0, 0.0);
                 return;
             }
             if(!EnCmp) return;
-            if(role == Role.AcV || role == Role.AcMv || role == Role.Freq || role == Role.DcV || role == Role.DcMv)
+            switch(role)
             {
-                var ratio = NodeRatioAc();
-                SignalEdges(Input.Vac * ratio, out f, out duty, CmpHighThreshold, CmpLowThreshold);
-            }
-            else if(role == Role.AcA || role == Role.DcA)
-            {
-                SignalEdges(Input.Iac * NodeRatioAc(), out f, out duty, CmpHighThreshold, CmpLowThreshold);
+            case Role.AcV: case Role.AcMv: case Role.Freq: case Role.DcV: case Role.DcMv: case Role.AcA: case Role.DcA:
+                SignalEdges(ac, out f, out duty, CmpHighThreshold, CmpLowThreshold);
+                break;
             }
         }
 
         private void SignalEdges(double rms, out double f, out double duty, double vrh, double vrl)
         {
             f = 0; duty = 0;
-            var shape = Input.Vshape;
+            var shape = sigShape;
             var pk = Peak(rms, shape);
             if(pk <= Math.Max(Math.Abs(vrh), Math.Abs(vrl))) return;
-            f = Input.Vhz;
+            f = sigHz;
             switch(shape)
             {
             case "square":
-                duty = Input.Vduty;
+                duty = sigDuty;
                 break;
             case "triangle":
                 duty = 0.5 + (Math.Abs(vrl) - vrh) / (4 * pk);
@@ -624,7 +567,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             vcLast = now;
             if(dt <= 0) return;
             // the coupling capacitor charges to the OP1O DC level (or its off level)
-            var src = EnOp1 && (role == Role.AcV || role == Role.DcV) ? Input.Vdc * NodeRatioAc() : Op1OffLevel;
+            var src = Op1OffLevel;
+            if(EnOp1 && (role == Role.AcV || role == Role.DcV))
+            {
+                double dc, ac, hz, duty; string shape;
+                Fe.VJack(0, out dc, out ac, out hz, out shape, out duty);
+                src = dc * NodeRatioAc();
+            }
             vc += (src - vc) * (1 - Math.Exp(-dt / AcNodeTau));
         }
 
@@ -633,12 +582,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         {
             double dc, ac;
             NodeDcAc(t, out dc, out ac);
-            var w = 2 * Math.PI * Input.Vhz * t;
-            var pk = Peak(ac, Input.Vshape);
+            var w = 2 * Math.PI * sigHz * t;
+            var pk = Peak(ac, sigShape);
             double s;
-            switch(Input.Vshape)
+            switch(sigShape)
             {
-            case "square": s = ((w / (2 * Math.PI)) % 1.0) < Input.Vduty ? pk : -pk; break;
+            case "square": s = ((w / (2 * Math.PI)) % 1.0) < sigDuty ? pk : -pk; break;
             case "triangle": { var ph = (w / (2 * Math.PI)) % 1.0; s = pk * (ph < 0.5 ? 4 * ph - 1 : 3 - 4 * ph); break; }
             default: s = pk * Math.Sin(w); break;
             }
@@ -660,20 +609,23 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// Codes per volt at the AD2 input: IG / (RG * VR) * 2^18.
         private double Ad2Scale() => Ad2Ig / (Ad2Rg * Vref) * 262144.0;
 
-        /// DC level and AC RMS (V, at the AD2 input node) for the current role, with the
-        /// calibration deviations folded in.
+        /// DC level and AC RMS (V, at the AD2 / OP1 input node) for the current role, with the
+        /// calibration deviations folded in. Also records the waveform parameters (sigHz ...).
         private void NodeDcAc(double t, out double dc, out double ac)
         {
             dc = 0; ac = 0;
+            double jdc, jac, hz, duty; string shape;
             switch(role)
             {
             case Role.AcV:
             {
                 var r = roleRange;
+                Fe.VJack(0, out jdc, out jac, out hz, out shape, out duty);
+                sigHz = hz; sigShape = shape; sigDuty = duty;
                 // display = sqrt(RMS) * VR / 2^18 * k and sqrt(RMS) = IG * Vnode / VR * 2^18
                 // -> Vnode = display / (k * IG)
-                ac = AcQ(Input.Vac, 0x34 + 4 * r, 0x44 + 4 * r) / (AcvK[r] * Ad2IgRow());
-                var dcNode = DcQ(Input.Vdc, 0x64 + 4 * r, 0x74 + 4 * r) / (AcvK[r] * Ad2IgRow());
+                ac = AcQ(jac, 0x34 + 4 * r, 0x44 + 4 * r) / (AcvK[r] * Ad2IgRow());
+                var dcNode = DcQ(jdc, 0x64 + 4 * r, 0x74 + 4 * r) / (AcvK[r] * Ad2IgRow());
                 var step = dcNode - vc;                                   // AC coupled: only the un-charged part is seen
                 dc = step;
                 ac = Math.Sqrt(ac * ac + Math.Pow(HpfTransientGain * step, 2));
@@ -682,25 +634,43 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case Role.AcMv:
             {
                 var r = roleRange;
-                ac = AcQ(Input.Vac * 1000, 0x54 + 4 * r, 0x5c + 4 * r) / 1000 * MvDiv[r] / Ad2IgRow();
-                dc = DcQ(Input.Vdc * 1000, 0x84 + 4 * r, 0x8c + 4 * r) / 1000 * MvDiv[r] / Ad2IgRow();
+                Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
+                sigHz = hz; sigShape = shape; sigDuty = duty;
+                ac = AcQ(jac * 1000, 0x54 + 4 * r, 0x5c + 4 * r) / 1000 * MvDiv[r] / Ad2IgRow();
+                dc = DcQ(jdc * 1000, 0x84 + 4 * r, 0x8c + 4 * r) / 1000 * MvDiv[r] / Ad2IgRow();
                 break;
             }
             case Role.AcA:
             {
                 var m = roleMode; var r = roleRange; var i = (m - 4) * 2 + r;
                 var unit = AUnit[m - 4];
-                var g = Shunt[m - 4] * MvDiv[r];                         // V per unit of current (A / mA / uA)
-                ac = AcQ(Input.Iac * unit, 0xc4 + 4 * i, 0xdc + 4 * i) * g / Ad2IgRow();
-                dc = DcQ(Input.Idc * unit, 0xf4 + 4 * i, 0x10c + 4 * i) * g / Ad2IgRow();
+                Fe.ACurrent(out jdc, out jac, out hz, out shape, out duty);
+                sigHz = hz; sigShape = shape; sigDuty = duty;
+                // the drop across the shunt the relays selected, through the row's OP1 gain
+                var g = Fe.ShuntR * MvDiv[r] / unit;
+                ac = AcQ(jac * unit, 0xc4 + 4 * i, 0xdc + 4 * i) * g / Ad2IgRow();
+                dc = DcQ(jdc * unit, 0xf4 + 4 * i, 0x10c + 4 * i) * g / Ad2IgRow();
                 break;
             }
             case Role.Freq:
-                ac = Input.Vac; dc = 0;
+                Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
+                sigHz = hz; sigShape = shape; sigDuty = duty;
+                ac = jac; dc = jdc;
                 break;
-            case Role.DcV: case Role.DcMv:
-                // AD2 off in these rows; the node still exists for the coupling model
-                dc = Input.Vdc * NodeRatioAc(); ac = Input.Vac * NodeRatioAc();
+            case Role.DcV:
+                Fe.VJack(0, out jdc, out jac, out hz, out shape, out duty);
+                sigHz = hz; sigShape = shape; sigDuty = duty;
+                dc = jdc * NodeRatioAc(); ac = jac * NodeRatioAc();
+                break;
+            case Role.DcMv:
+                Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
+                sigHz = hz; sigShape = shape; sigDuty = duty;
+                dc = jdc * NodeRatioAc(); ac = jac * NodeRatioAc();
+                break;
+            case Role.DcA:
+                Fe.ACurrent(out jdc, out jac, out hz, out shape, out duty);
+                sigHz = hz; sigShape = shape; sigDuty = duty;
+                dc = jdc * Fe.ShuntR * MvDiv[roleRange]; ac = jac * Fe.ShuntR * MvDiv[roleRange];
                 break;
             }
         }
@@ -711,7 +681,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         private double Ad2IgRow() => rowIg2;
 
-        /// Node volts per input volt (or amp) for the AC-path roles.
+        /// Node volts per V-jack volt for the voltage roles.
         private double NodeRatioAc()
         {
             switch(role)
@@ -719,8 +689,6 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case Role.AcV: return 1.0 / (AcvK[roleRange] * rowIg2);
             case Role.DcV: return 1.0 / (AcvK[roleRange] * 1.0);
             case Role.AcMv: case Role.DcMv: return MvDiv[roleRange];
-            case Role.AcA: return Shunt[roleMode - 4] * AUnit[roleMode - 4] * MvDiv[roleRange];
-            case Role.DcA: return Shunt[roleMode - 7] * AUnit[roleMode - 7] * MvDiv[roleRange];
             default: return 1.0;
             }
         }
@@ -732,12 +700,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             double code;
             var ig = Ad1Ig; var rg = Ad1Rg;
             var fs = 8388608.0;
+            double jdc, jac, hz, duty; string shape;
             switch(role)
             {
             case Role.DcV:
             {
                 var r = roleRange;
-                var q = Input.Vdc + Input.Vnoise * Gauss();
+                Fe.VJack(0, out jdc, out jac, out hz, out shape, out duty);
+                var q = jdc + vNoise * Gauss();
                 // stock: V = AD1 * k * 1.38889 / 8388606 * gain - offs (+ negative-side gain, r0 correction)
                 if(q < 0) q /= DcvNegK[r];
                 if(r == 0 && Math.Abs(q) / 20000 > 3e-5) q -= 1e-4 - Math.Abs(q) / 20000;
@@ -748,7 +718,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case Role.DcMv:
             {
                 var r = roleRange;
-                var q = Input.Vdc * 1000 + Input.Vnoise * 1000 * Gauss();
+                Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
+                var q = jdc * 1000 + vNoise * 1000 * Gauss();
                 code = DcQ(q, 0x24 + 4 * r, 0x2c + 4 * r) / (1.38889 / MvDiv[r] / 8388.606);
                 code *= (ig / rowIg) / (rg / rowRg);
                 break;
@@ -756,35 +727,32 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case Role.DcA:
             {
                 var m = roleMode; var r = roleRange; var i = (m - 7) * 2 + r;
-                var q = Input.Idc * AUnit[m - 7];
-                code = DcQ(q, 0x94 + 4 * i, 0xac + 4 * i) / (1.25 / (Shunt[m - 7] * MvDiv[r] * 0.9) / 8388606.0);
+                Fe.ACurrent(out jdc, out jac, out hz, out shape, out duty);
+                var unit = AUnit[m - 7];
+                var q = DcQ(jdc * unit, 0x94 + 4 * i, 0xac + 4 * i) / unit; // A, calibration folded in
+                // drop across the relay-selected shunt through the row's OP1 gain: IG * V / VR * 2^23
+                code = q * Fe.ShuntR * MvDiv[r] * 0.9 / 1.25 * 8388606.0;
                 code *= (ig / rowIg) / (rg / rowRg);
                 break;
             }
-            case Role.Ohm:
+            case Role.Ohm: case Role.Cont:
             {
-                var r = roleRange;
-                var rk = Input.R / 1000.0;
-                if(double.IsInfinity(rk)) { code = 1e12; break; }
-                var q = (rk + CalOffs(0x144)) / CalGain(0x124 + 4 * r);
-                code = q / (OhmRref[r] / 0.9 / 8388606.0);
-                code *= ig / rowIg; // ratiometric: RG cancels
-                break;
-            }
-            case Role.Cont:
-            {
-                var ro = Input.R;
-                if(double.IsInfinity(ro)) { code = -1e12; break; }
-                var q = (ro + CalOffs(0x160)) / CalGain(0x15c);
-                code = -q / (1.0 / 0.9 / 8388.606);
+                // ratiometric: VIN = drop across Rx (OP1O - PB3), VR = drop across the reference
+                // resistor (FB - RLU, or RLU - FB in the continuity row -> negative)
+                double vs, rref;
+                OhmSource(out vs, out rref);
+                double vx, vref;
+                Fe.OhmNode(vs, rref, out vx, out vref);
+                var pol = ((regs[0x28] >> 4) & 7) == 4 && (regs[0x28] & 7) == 4 ? -1.0 : 1.0;
+                if(Math.Abs(vref) < 1e-9) { code = pol * Math.Sign(vx) * 1e12; break; }
+                code = 0.9 * vx / vref * 8388606.0 * pol;
                 code *= ig / rowIg;
                 break;
             }
             case Role.Diode:
             {
-                var vf = Input.DiodeVf;
-                if(double.IsInfinity(vf)) vf = 3.3; // source compliance: over range
-                var q = (vf + CalOffs(0x168)) / CalGain(0x164);
+                var vx = Fe.DiodeNode(DiodeTestCurrent, DiodeCompliance);
+                var q = (vx + CalOffs(0x168)) / CalGain(0x164);
                 code = q / (1.25 * 10 / 0.9 / 8388606.0);
                 code *= (ig / rowIg) / (rg / rowRg);
                 break;
@@ -797,17 +765,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 if(Sad1I >= 2)
                 {
-                    // internal sensor: codeA (SAD1I 11) - codeB (SAD1I 10) = (Tcj + 289.15 - cal) / 314.15 * 640000
-                    var d = (Input.ChipTemp + 289.15 - CalOffs(0x194)) / 314.15 * 640000.0;
+                    // internal sensor: codeA (SAD1I 11) - codeB (SAD1I 10) = (Tdie + 289.15 - cal) / 314.15 * 640000
+                    var d = (Fe.Die + 289.15 - CalOffs(0x194)) / 314.15 * 640000.0;
                     code = Sad1I == 3 ? d / 2 : -d / 2;
                     code *= ig / rowIg;
                 }
                 else
                 {
+                    // the thermocouple (or whatever is on the jacks) on the mV x10 path
                     double mv;
-                    if(Input.TcOpen) mv = 200; // open thermocouple: far over range
-                    else if(!double.IsNaN(Input.TcMv)) mv = Input.TcMv;
-                    else mv = TypeK.Emf(Input.TcTemp) - TypeK.Emf(Input.ChipTemp);
+                    if(Fe.TcConnectedOpen) mv = 200; // open thermocouple: far over range
+                    else { Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty); mv = jdc * 1000; }
                     code = DcQ(mv, 0x24, 0x2c) / (1.38889 * 100 / 8388606.0);
                     code *= (ig / rowIg) / (rg / rowRg);
                 }
@@ -826,6 +794,30 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
             }
             return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code)));
+        }
+
+        /// Diode test: constant current source (the stock's 0.765 mA constant) with ~3.3 V compliance.
+        public const double DiodeTestCurrent = 0.765e-3, DiodeCompliance = 3.3;
+
+        /// The ohm source of the current row: OP3 at VREF (SFUVR) through the reference resistor
+        /// (stock Rref table, scaled by the calibration gain); 0 / 0 outside the ohm rows. The
+        /// calibration offset becomes lead resistance.
+        private void OhmSource(out double vs, out double rref)
+        {
+            vs = 0; rref = 0;
+            if(role == Role.Ohm)
+            {
+                vs = OhmSourceVolts();
+                rref = OhmRref[roleRange] * 1000.0 * CalGain(0x124 + 4 * roleRange);
+                Fe.LeadOhm = CalOffs(0x144) * 1000.0;
+            }
+            else if(role == Role.Cont)
+            {
+                vs = OhmSourceVolts();
+                rref = 1000.0 * CalGain(0x15c);
+                Fe.LeadOhm = CalOffs(0x160);
+            }
+            else Fe.LeadOhm = 0;
         }
 
         private double Gauss()
@@ -853,11 +845,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 return;
             }
             if(role != Role.CapRamp) return;
-            var c = Input.C * 1e6; // uF
-            if(c <= 0) c = 1e-4;   // open: ramps instantly to the threshold
-            var slope = CalGain(0x170 + 4 * roleRange) * CapK[roleRange] / c; // V/s at the AD1 node
             var vh = CmpHighThreshold; var vl = CmpLowThreshold;
             if(vh < vl) { var x = vh; vh = vl; vl = x; }
+            var cf = Fe.CapRampC(CapK[roleRange] * 1e-6, vh);
+            if(double.IsNaN(cf))
+            {
+                // the network cannot ramp (a leak, a source): the node sits at the leak level
+                rampV = double.IsInfinity(Fe.R) ? 0 : Math.Min(vh * 0.9, CapK[roleRange] * 1e-6 * Fe.R);
+                return;
+            }
+            var c = cf * 1e6; // uF
+            if(c <= 0) c = 1e-4;   // open: ramps instantly to the threshold
+            var slope = CalGain(0x170 + 4 * roleRange) * CapK[roleRange] / c; // V/s at the AD1 node
             var remaining = dt;
             while(remaining > 0)
             {
@@ -886,11 +885,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
             case Role.Cont:
             {
-                // OP1O against AGNDN<2> (-41.7 mV) with the 1 k reference at the SFUVR source:
-                // beep (CMPO high) while the drop across Rx is inside the window.
-                var isrc = OhmSourceVolts() / 1000.0;
-                var thr = Math.Abs(CmpLowThreshold) / Math.Max(isrc, 1e-9);
-                acpo = Input.R < thr;
+                // OP1O (the drop across Rx) against the AGNDN<2> window (-41.7 mV): CMPO high
+                // -> beeper while the drop is inside the window
+                double vs, rref, vx, vref;
+                OhmSource(out vs, out rref);
+                Fe.OhmNode(vs, rref, out vx, out vref);
+                acpo = Fe.RelayPa == 1 && Math.Abs(vx) < Math.Abs(CmpLowThreshold);
                 break;
             }
             case Role.Diode:
@@ -904,12 +904,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
         }
 
-        /// |VREF| of OP3 in volts for the ohm rows (SFUVR with SMODE<3> = 0).
+        /// VREF of OP3 relative to AGND (signed; SFUVR, SMODE<3>, CMPO): the open-circuit test voltage.
         private double OhmSourceVolts()
         {
             var smode3 = (regs[0x2F] & 0x08) != 0;
             var name = smode3 ? SfuvrSmode3[Sfuvr, acpo ? 1 : 0] : SfuvrNames[Sfuvr];
-            return Math.Abs(RefNode(name));
+            return RefNode(name);
         }
 
         /// Voltage of a reference-divider node relative to AGND.
@@ -984,12 +984,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
         }
 
-        // Compare masks per configuration byte R20..R35 (0 = ignored): R20 keeps SCMPI/ENCMP,
+        // Compare masks per configuration byte R20..R35 (0 = ignored): R20 ignored (the counter and
+        // comparator source bits change at run time: Hz mode alternates 0xF2 / 0x0A),
         // R21 / R22 / R36 ignored, R26 / R34 without the enable bits (fw-rs sets them after the
         // row), R31 without SFUVR (ohm variants), R32 without ENOP1 / SOP1P (AC+DC writes 0x38
         // after the DC V row), R33 without SAD1I (temperature phases).
         private static readonly int[] RowMask = {
-            0xF0, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0xF7, 0xFC, 0x7F, 0xFF };
+            0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0xF7, 0xFC, 0x7F, 0xFF };
 
         // Stock DM40 V2.6 configuration rows (firmware/re/analysis/hy3131_v2_6.h) with their role.
         private static readonly RowDef[] Rows = {
@@ -1122,7 +1123,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
     public class HY3131 : IDoubleWordPeripheral, IKnownSize, IGPIOReceiver
     {
         public HY3131(IMachine machine, INumberedGPIOOutput portC, INumberedGPIOOutput portD,
-                      int sck = 10, int miso = 11, int mosi = 12, int cs = 2)
+                      int sck = 10, int miso = 11, int mosi = 12, int cs = 2,
+                      INumberedGPIOOutput portA = null, INumberedGPIOOutput portE = null)
         {
             this.machine = machine;
             this.portC = portC;
@@ -1134,6 +1136,27 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             portC.Connections[sck].Connect(this, 0);
             portC.Connections[mosi].Connect(this, 1);
             portD.Connections[cs].Connect(this, 2);
+            // Front-end relays: PA9 / PA10 latching pair, PE0 / PE1 shunt select, PC7 (frequency mode).
+            // The ports are looked up by name when the platform description does not pass them.
+            if(portA == null) portA = FindPort("sysbus.gpioPortA") ?? FindPort("gpioPortA");
+            if(portE == null) portE = FindPort("sysbus.gpioPortE") ?? FindPort("gpioPortE");
+            portC.Connections[7].Connect(this, 7);
+            if(portA != null) { portA.Connections[9].Connect(this, 3); portA.Connections[10].Connect(this, 4); }
+            else this.Log(LogLevel.Warning, "gpioPortA not found: the V/A relay is not tracked (ohm / mV paths always connected)");
+            if(portE != null) { portE.Connections[0].Connect(this, 5); portE.Connections[1].Connect(this, 6); }
+            else this.Log(LogLevel.Warning, "gpioPortE not found: the shunt relays are not tracked");
+            relayTracked = portA != null;
+        }
+
+        private INumberedGPIOOutput FindPort(string name)
+        {
+            try
+            {
+                IPeripheral p;
+                if(machine.TryGetByName(name, out p)) return p as INumberedGPIOOutput;
+            }
+            catch(Exception) { }
+            return null;
         }
 
         public void Reset()
@@ -1157,7 +1180,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public void ClearAd1() { Core.ForcedAd1 = int.MinValue; }
         public void SetAd2(int raw) { Core.ForcedAd2 = raw; }
         /// DC voltage on the V / COM input (kept for the older scripts).
-        public void SetVin(double volts) { Core.ForcedAd1 = int.MinValue; Core.Input.Vdc = volts; Core.Input.Vac = 0; }
+        public void SetVin(double volts) { Core.ForcedAd1 = int.MinValue; Core.SetInput("vsrc:" + volts.ToString(CultureInfo.InvariantCulture)); }
         /// Input spec, see Hy3131Core.SetInput.
         public void SetInput(string spec) { Core.ForcedAd1 = int.MinValue; Core.SetInput(spec); this.Log(LogLevel.Info, "input: {0}", spec); }
         public void SetOption(string name, double value) { Core.SetInput(name + ":" + value.ToString(CultureInfo.InvariantCulture)); }
@@ -1192,6 +1215,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case 1: // MOSI
                 mosi = value;
                 break;
+            case 3: Pin("PA9", value); break;
+            case 4: Pin("PA10", value); break;
+            case 5: Pin("PE0", value); break;
+            case 6: Pin("PE1", value); break;
+            case 7: Pin("PC7", value); break;
             case 2: // CS (active low)
                 if(!value && !selected)
                 {
@@ -1206,10 +1234,51 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 {
                     selected = false;
                     DriveMiso(Core.Irq); // DO = IRQ while CS is high
+                    MaybeWriteState();
                 }
                 break;
             }
         }
+
+        private void Pin(string name, bool level)
+        {
+            if(Core == null) return;
+            Core.Fe.SetPin(name, level);
+            if(name != "PC7" || level) this.Log(LogLevel.Debug, "pin {0} = {1}: {2}", name, level, Core.Fe.PinState());
+            MaybeWriteState();
+        }
+
+        /// One-line front-end state (relays, HY3131 configuration, what the chip sees), for
+        /// scripts and the GTK panel. Also written to StateFile when it changes.
+        public string Frontend => Core.FrontendState();
+
+        /// Write the front-end state line to `path` (atomically, on change, at most ~10 Hz).
+        public void StateFile(string path) { statePath = path; stateLast = ""; MaybeWriteState(); }
+
+        private void MaybeWriteState()
+        {
+            if(statePath == null || Core == null) return;
+            var now = Now;
+            if(now - stateTime < 0.1 && stateLast.Length > 0) return;
+            var line = Core.FrontendState();
+            if(line == stateLast) return;
+            stateLast = line; stateTime = now;
+            try
+            {
+                var tmp = statePath + ".tmp";
+                System.IO.File.WriteAllText(tmp, line + "\n");
+                System.IO.File.Move(tmp, statePath, true);
+            }
+            catch(Exception e)
+            {
+                this.Log(LogLevel.Warning, "state file: {0}", e.Message);
+                statePath = null;
+            }
+        }
+
+        private string statePath, stateLast = "";
+        private double stateTime;
+        private bool relayTracked;
 
         private void OnRising()
         {

@@ -21,7 +21,11 @@ def merge_models():
     usings, bodies = [], []
     files = sorted(glob.glob(os.path.join(EMU, 'peripherals', '*.cs')))
     if DEV:
-        files = [os.path.join(HERE, 'HY3131.cs') if os.path.basename(f) == 'HY3131.cs' else f for f in files]
+        dev = {'HY3131.cs', 'DM40Frontend.cs'}
+        files = [os.path.join(HERE, os.path.basename(f)) if os.path.basename(f) in dev else f for f in files]
+        for name in dev:  # not yet installed in peripherals/
+            if not any(os.path.basename(f) == name for f in files):
+                files.append(os.path.join(HERE, name))
     for f in files:
         body = []
         with open(f, 'rb') as fh:

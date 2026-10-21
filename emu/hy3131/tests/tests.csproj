@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../HY3131.cs" />
+    <Compile Include="../DM40Frontend.cs" />
     <Compile Include="RenodeShim.cs" />
     <Compile Include="Spi.cs" />
     <Compile Include="Program.cs" />

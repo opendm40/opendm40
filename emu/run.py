@@ -216,9 +216,11 @@ def main(argv=None):
                     help='side key menu|run|auto|mf, or power (PD6), or pa2')
     ap.add_argument('--vin', action='append', default=[], metavar='V[@T]', help='DMM input voltage (DC V on V/COM)')
     ap.add_argument('--dmm', action='append', default=[], metavar='SPEC[@T]',
-                    help='DMM input for the HY3131 model (SetInput), e.g. dcv:1.234 | acv:1.0@50,dc=0.5,shape=square,duty=0.3 | '
-                         'dca:0.5 | aca:0.1@60 | ohm:4700 | short | open | diode:0.65 | cap:100e-9 | hz:1000,duty=0.25 | '
-                         'temp:100,cj=25 (no spaces; several specs with ";"; see emu/hy3131/README.md)')
+                    help='what is connected to the DMM jacks (DM40 front-end model, sysbus.hy3131 SetInput): '
+                         'vsrc:1.234[,ac=1.0,f=50,shape=square,duty=0.3,rs=4700] | isrc:0.0123 | r:4700 | c:100e-9 | '
+                         'diode:0.65[,rev=1] | tc:100 | cj:25 | die:35 | avsrc:0.5 | short | open; several with ";" '
+                         '(elements add up); the older dcv:/acv:/dca:/aca:/ohm:/cap:/hz:/temp: keys still work '
+                         '(see emu/hy3131/README.md)')
     ap.add_argument('--scope', action='append', default=[], metavar='SPEC[@T]',
                     help='scope input waveform, e.g. sine,1000,1.0 (shape,Hz,Vpp[,offset])')
     ap.add_argument('--script', help='event file: lines "<t> <tap|drag|key|shot|vin|scope|monitor> args"')

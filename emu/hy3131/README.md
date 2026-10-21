@@ -8,12 +8,55 @@ Hycon tool data, open-source drivers) and the stock firmware analysis in
 
 ```
 emu/hy3131/HY3131.cs      the model: Hy3131Core (chip, no Renode types) + HY3131 (Renode peripheral)
+emu/hy3131/DM40Frontend.cs the DM40 front end: jacks, relays, shunts, divider / ohm network (installed as emu/peripherals/DM40Frontend.cs)
 emu/hy3131/tests/         host unit tests (dotnet 8): tests/run.sh
 emu/hy3131/modetest.py    stock + fw-rs through every DMM mode in the emulator, results below
 emu/hy3131/runemu.py      emu/run.py with this directory's HY3131.cs compiled in (development)
 emu/hy3131/RESEARCH.md    sources, facts, open points
 emu/hy3131/ref/           transcribed register map and mux tables
 ```
+
+## Terminal-level model (DM40 front end)
+
+`DM40Frontend.cs` (`Dm40Frontend`) sits between the jacks and the chip. The
+user says what is **connected** to V-ohm / COM / A; the firmware's own relay
+pulses (PA9 / PA10 latching pair = V/A path or the ohm-mV network, PE0 / PE1 =
+A / mA / none shunt, PC7 = frequency mode; `fw-rs/src/dmm.rs` relay_pa /
+relay_pe / pc7, stock FUN_08012780 / FUN_080127be) and its HY3131 row decide
+the route, so a fixed connection behaves like on the real meter when the
+function changes:
+
+| connected | DC V | DC A | ohm | diode | cap | temperature |
+|---|---|---|---|---|---|---|
+| voltage source V-COM | V | 0 (nothing in A) | KCL node of the ohm source against the source: clipped (OL) or a wrong value | OL / Vsource | no oscillation | reads it as thermocouple mV |
+| current source A-COM | 0 (nothing on V) | I x relay-selected shunt | OL | OL | - | - |
+| resistor | 0 | 0 | R (ratiometric) | 0.765 mA x R | no oscillation (R < 3 Rref) | 0 mV |
+| diode | 0 | 0 | Vf / (Vs - Vf) x Rref | Vf (reversed: OL) | no oscillation | - |
+| capacitor | 0 | 0 | charges through Rref: rising, then OL | OL | f = 1 / (2 ln2 R C) or the current ramp | - |
+| thermocouple | E(T) - E(Tcj) | 0 | - | - | - | T (die sensor as cold junction) |
+| voltage source in the A jack | 0 | V / (Rs + shunt) -> OL | OL | | | |
+
+Queries the chip model makes: `VJack(path)` (Thevenin of the V-COM elements
+into 10 M, gated by the relay: 0 when the jack is routed elsewhere),
+`ACurrent()` (through the shunt the relays selected; the row's OP1 gain and
+tap scale it), `OhmNode(Vs, Rref)` (DC operating point: the OP3 source at VREF
+through the reference resistor against everything on the jack; a plain
+resistor gives `Vx / Vref = Rx / Rref` exactly, the continuity row's swapped
+reference mux gives the negative code), `DiodeNode(0.765 mA, 3.3 V)`,
+`CapOscC(R)` / `CapRampC(I, Vthr)` (0 or NaN when the network cannot
+oscillate / ramp), `TcEmf()`. The calibration record is folded in physically:
+Rref x gain, the ohm offset as lead resistance, the V / A gains on the
+source. Cold junction (`cj`, the jacks) and HY3131 die (`die`, what SAD1I 10/11
+report) are separate; the die follows the cold junction unless set
+(`die:35`): a thermocouple at 100 C with cj 25 and die 35 reads ~110 C on both
+firmwares, because they take the die sensor as the cold junction.
+
+Unknowns stated once: the DM40 netlist (the per-row scale factors are the
+stock's nominal constants), the ohm source open-circuit voltage (SFUVR table
+at VDDA 3.6 V: 1.4 V on the normal ohm rows, 0.625 V on the "ON" variant,
+-0.625 V continuity; the community measured ~0.85 / 0.27 mA short-circuit on
+the real meter) which only the cross cases depend on, and PE2 (DMM rail /
+power hold) which is not modelled as chip power.
 
 ## What is modelled
 
@@ -104,21 +147,26 @@ spec) gives the ideal chain instead (the stock then shows 1.234 V as 1.2488 V).
 | `BrownOut` | chip reset with BORF set |
 | `Status`, `Role`, `Mode`, `Range`, `Intf`, `Ad1`, `CmpPin`, `Transfers` | state for scripts and tests |
 
-Input spec keys (`emu/run.py --dmm SPEC[@T]` or `--script` lines
-`T monitor sysbus.hy3131 SetInput "SPEC"`):
+Connection spec (`emu/run.py --dmm SPEC[@T]`, script lines `T dmm SPEC` or
+`T monitor sysbus.hy3131 SetInput "SPEC"`, the GTK panel). Elements add up
+(several with `;`), `open` clears everything, `KEY:none` removes one:
 
-| spec | input |
+| spec | connected |
 |---|---|
-| `dcv:1.234` | 1.234 V DC on V / COM (`noise=` V rms white noise) |
-| `acv:1.0@50` | 1.0 V rms sine at 50 Hz; options `dc=0.5`, `shape=square|triangle`, `duty=0.3` |
-| `hz:1000,duty=0.25,amp=1.0` | square wave for the frequency / duty functions |
-| `dca:0.5`, `aca:0.1@60` | current into the A terminal (A rms for AC; `dc=`, `shape=`) |
-| `ohm:4700`, `short`, `open` | resistance on the ohm path (also continuity) |
-| `diode:0.65` | forward voltage; `open` = no diode |
-| `cap:100e-9` | capacitance (F); `cap:0` = open |
-| `temp:100,cj=25` | thermocouple hot junction and chip (cold junction) temperature, C |
-| `tcmv:4.096`, `tcopen`, `chip:25` | thermocouple mV directly, open thermocouple, die temperature |
+| `vsrc:1.234[,ac=1.0,f=50,shape=sine|square|triangle,duty=0.3,rs=4700]` | voltage source V-COM: DC, AC rms, source resistance |
+| `isrc:0.0123[,ac=,f=,shape=,duty=,compl=10]` | current source A-COM (compliance V) |
+| `r:4700`, `short` (= `r:0`), `c:100e-9`, `diode:0.65[,rev=1]` | resistor, short, capacitor, diode (anode at V unless `rev`) between V and COM |
+| `tc:100`, `tcmv:4.096`, `tcopen` | type K thermocouple: hot junction C, or its mV, or connected but open |
+| `cj:25`, `die:35` (`die:none` = follows cj) | cold junction (jacks) and HY3131 die temperature |
+| `avsrc:0.5[,rs=]`, `isrcv:0.001`, `aload:100` | wrong-jack cases: voltage source across A-COM, current source across V-COM, resistor across A-COM |
+| `dcv:`, `acv:V@Hz`, `hz:F,duty=,amp=`, `dca:`, `aca:`, `ohm:`, `cap:`, `temp:T,cj=`, `chip:` | the older per-function keys: each replaces the whole connection with the equivalent one |
 | `noise:0`, `cal:0`, `beat:1` | model options |
+
+State: `sysbus.hy3131 Frontend` returns one line of `key=value` tokens (relay
+and shunt state, role / mode / range, which converters and switches are on,
+the V-jack voltage, the A current and shunt drop, the ohm node, the
+connection); `StateFile @path` writes the same line to a file on change (the
+GTK panel's schematic reads it).
 
 ## Tests
 

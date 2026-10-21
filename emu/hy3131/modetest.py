@@ -54,6 +54,57 @@ SCENARIOS = [
     ('temp',   'temp:100,cj=25',            0x45, 'TEMP',      100.0,   0.0, 1.5, 12, {'cj': 25.0}),
 ]
 
+# Fixed connections x functions ("cross" table): connection spec, expectations per function.
+# An expectation is a number (value +- max(atol, rtol * value) with the per-function tolerance),
+# 'zero' (|x| < zero floor), 'ol' (no valid reading / over range), or None (record only).
+CROSS_CONNECTIONS = [
+    ('V 1.234', 'vsrc:1.234', {'dcv': 1.234, 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': 'ol', 'cont': 'ol',
+                               'diode': 'ol', 'cap': None, 'hz': None, 'temp': None}),
+    ('V 1.234 + I 12.3 mA', 'vsrc:1.234;isrc:0.0123', {'dcv': 1.234, 'acv': 'zero', 'dca': 0.0123, 'aca': 'zero',
+                                                        'ohm': 'ol', 'cont': 'ol', 'diode': 'ol', 'cap': None, 'hz': None, 'temp': None}),
+    ('I 12.3 mA', 'isrc:0.0123', {'dcv': 'zero', 'acv': 'zero', 'dca': 0.0123, 'aca': 'zero', 'ohm': 'ol', 'cont': 'ol',
+                                  'diode': 'ol', 'cap': None, 'hz': None, 'temp': None}),
+    ('R 4.7 k', 'r:4700', {'dcv': 'zero', 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': 4700.0, 'cont': 'ol',
+                           'diode': 'ol', 'cap': None, 'hz': 'zero', 'temp': None}),
+    ('0.1 V behind 4.7 k', 'vsrc:0.1,rs=4700', {'dcv': 0.1, 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': None,
+                                                'cont': None, 'diode': None, 'cap': None, 'hz': None, 'temp': None}),
+    ('diode 0.65', 'diode:0.65', {'dcv': 'zero', 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': None, 'cont': 'ol',
+                                  'diode': 0.65, 'cap': None, 'hz': None, 'temp': None}),
+    ('C 100 nF', 'c:100e-9', {'dcv': 'zero', 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': None, 'cont': 'ol',
+                              'diode': 'ol', 'cap': 100e-9, 'hz': None, 'temp': None}),
+    ('TC 100 C (cj 25, die 25)', 'tc:100;cj:25', {'dcv': 0.003096, 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': None,
+                                                  'cont': None, 'diode': None, 'cap': None, 'hz': None, 'temp': 100.0}),
+    ('TC 100 C, die 35', 'tc:100;cj:25;die:35', {'temp': 110.0, 'dcv': 0.003096}),
+    ('0.5 V in the A jack', 'avsrc:0.5', {'dcv': 'zero', 'dca': 'ol', 'aca': None, 'ohm': 'ol'}),
+]
+CROSS_FUNCTIONS = {  # name: (stock mode byte, SCPI function, tolerance rel, abs, zero floor, run_for)
+    'dcv': (0x28, 'VOLT:DC', 0.001, 0.0002, 0.0005, 8),
+    'acv': (0x68, 'VOLT:AC', 0.01, 0.002, 0.005, 9),
+    'dca': (0x31, 'CURR:DC', 0.005, 2e-5, 5e-5, 9),
+    'aca': (0x71, 'CURR:AC', 0.01, 5e-5, 1e-4, 9),
+    'ohm': (0x32, 'RES', 0.005, 1.0, 1.0, 11),
+    'cont': (0x44, 'CONT', 0.02, 0.3, 1.0, 8),
+    'diode': (0x04, 'DIOD', 0.005, 0.002, 0.01, 8),
+    'cap': (0x03, 'CAP', 0.03, 1e-9, 1e-9, 12),
+    'hz': (0x05, 'FREQ', 0.001, 0.1, 0.5, 9),
+    'temp': (0x45, 'TEMP', 0.0, 1.5, 1.0, 12),
+}
+
+
+def cross_scenarios(only=None):
+    out = []
+    for cname, spec, exp in CROSS_CONNECTIONS:
+        for fname, (mode_byte, scpi, rtol, atol, zero, run_for) in CROSS_FUNCTIONS.items():
+            if fname not in exp:
+                continue
+            if only and fname not in only and cname not in only:
+                continue
+            want = exp[fname]
+            extra = {'cross': cname, 'fn': fname, 'zero': zero}
+            out.append(('%s|%s' % (cname.replace(' ', '_'), fname), spec, mode_byte, scpi, want, rtol, atol, run_for, extra))
+    return out
+
+
 STOCK_SETTINGS = 0x080C0000
 POLL_WALL = 1.5  # seconds of wall time between requests (~0.15 s virtual)
 START_LOCK = threading.Lock()  # run.py's fw-rs preparation (git checkout in the shared worktree) is not reentrant
@@ -256,7 +307,16 @@ def run_one(fw, sc, port, fast):
         nums = [v for v in vals if isinstance(v, float) and v < 9e37]
         if nums:
             res['last'] = nums[-1]
-    if res['last'] is not None:
+    if want is None:
+        res['ok'] = True  # record only
+    elif want == 'ol':
+        # no valid reading: the stock sends 0xFFFF (None), fw-rs +9.9E37 (filtered out) -> last stays None
+        res['ok'] = res['last'] is None
+        if fw == 'fwrs' and res['last'] is None and not any(isinstance(v, float) and v >= 9e37 for v in res['readings']):
+            res['ok'] = False  # no reply at all
+    elif want == 'zero':
+        res['ok'] = res['last'] is not None and abs(res['last']) <= extra.get('zero', 0)
+    elif res['last'] is not None:
         err = abs(res['last'] - want)
         res['ok'] = err <= max(atol, abs(want) * rtol)
         res['err'] = err
@@ -285,6 +345,8 @@ def fmt_v(v):
         return '-'
     if isinstance(v, str):
         return v
+    if isinstance(v, str):
+        return v
     return '%.6g' % v
 
 
@@ -297,8 +359,12 @@ def main():
     ap.add_argument('--fast', action='store_true', help='pass --fast to run.py')
     ap.add_argument('--json', default=os.path.join(OUT, 'hy3131-modes.json'))
     ap.add_argument('--md', help='write a markdown results table here')
+    ap.add_argument('--cross', action='store_true', help='fixed connections x functions instead of the per-function scenarios')
     a = ap.parse_args()
-    scs = [s for s in SCENARIOS if not a.names or s[0] in a.names]
+    if a.cross:
+        scs = cross_scenarios(a.names)
+    else:
+        scs = [s for s in SCENARIOS if not a.names or s[0] in a.names]
     fws = ['stock', 'fwrs'] if a.fw == 'both' else [a.fw]
     jobs = [(fw, sc) for fw in fws for sc in scs]
     os.makedirs(OUT, exist_ok=True)
@@ -315,9 +381,9 @@ def main():
         for f in futs:
             r = f.result()
             results.append(r)
-            print('%-5s %-8s %-28s want %-10s got %-10s %s  (%d readings, %.0f s wall)%s' % (
+            print('%-5s %-30s %-28s want %-10s got %-10s %s  (%d readings, %.0f s wall)%s' % (
                 r['fw'], r['name'], r['input'], fmt_v(r['want']), fmt_v(r['last']), 'ok ' if r['ok'] else 'BAD',
-                len(r['readings']), r['wall'], ' ' + json.dumps(r['extra']) if r['extra'] else ''))
+                len(r['readings']), r['wall'], ' ' + json.dumps({k: v for k, v in r['extra'].items() if k in ('freq', 'duty', 'cj')}) if r['extra'] else ''))
             sys.stdout.flush()
     with open(a.json, 'w') as f:
         json.dump(results, f, indent=1)
@@ -328,6 +394,21 @@ def main():
                 f.write('| %s | %s | `%s` | %s | %s | %s | %s | %s |\n' % (
                     r['fw'], r['name'], r['input'], fmt_v(r['want']), fmt_v(r['last']),
                     fmt_v(r.get('err')), 'ok' if r['ok'] else 'FAIL', ' '.join(fmt_v(v) for v in r['readings'][-6:])))
+    if a.cross and a.md:
+        with open(a.md, 'w') as f:
+            fns = list(CROSS_FUNCTIONS)
+            f.write('| connection | firmware | ' + ' | '.join(fns) + ' |\n|---|---|' + '---|' * len(fns) + '\n')
+            for cname, spec, exp in CROSS_CONNECTIONS:
+                for fw in fws:
+                    cells = []
+                    for fn in fns:
+                        r = next((x for x in results if x['fw'] == fw and x['extra'].get('cross') == cname and x['extra'].get('fn') == fn), None)
+                        if r is None:
+                            cells.append('')
+                            continue
+                        shown = 'OL' if r['last'] is None else fmt_v(r['last'])
+                        cells.append('%s%s' % (shown, '' if r['ok'] else ' **!**'))
+                    f.write('| %s `%s` | %s | %s |\n' % (cname, spec, fw, ' | '.join(cells)))
     bad = [r for r in results if not r['ok']]
     print('%d scenarios, %d failed' % (len(results), len(bad)))
     return 1 if bad else 0
