@@ -218,6 +218,47 @@ origin with its own timing. Run time per scenario: 8..18 virtual seconds,
 25..80 s wall at `-j 6`.
 
 
+### Fixed connections x functions (cross table)
+
+`modetest.py --cross`: one connection, every function, both firmwares
+(readings as reported over Bluetooth cmd 09 / SCPI READ?; OL = no valid
+reading; cells are the last value after the settle; blank = not run):
+
+| connection | fw | dcv | acv | dca | aca | ohm | cont | diode | cap | hz | temp |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| V 1.234 `vsrc:1.234` | stock | 1.234 | 0.00012 | -2.71e-06 | 7.2e-06 | OL | 0 | 1.234 | 0 | 0 | OL |
+| V 1.234 `vsrc:1.234` | fwrs | 1.23399 | 0.017731 | -2.71462e-06 | 7.20722e-06 | OL | -665.907 | 1.23402 | 3.14321e-15 | 0 | OL |
+| V 1.234 + I 12.3 mA `vsrc:1.234;isrc:0.0123` | stock | 1.234 | 0.00012 | 0.012301 | 2.2e-05 | OL | 0 | 1.234 | 0 | 0 | OL |
+| V 1.234 + I 12.3 mA `vsrc:1.234;isrc:0.0123` | fwrs | 1.23399 | 0.017731 | 0.0123003 | 2.19533e-05 | OL | -665.908 | 1.23401 | 3.14321e-15 | 0 | OL |
+| I 12.3 mA `isrc:0.0123` | stock | 0 | 0.00012 | 0.0123 | 2.2e-05 | OL | OL | OL | 0 | 0 | 24.7 |
+| I 12.3 mA `isrc:0.0123` | fwrs | -1.55273e-06 | 0.00083487 | 0.0122997 | 2.19349e-05 | OL | OL | OL | 3.52156e-15 | 0 | 24.6698 |
+| R 4.7 k `r:4700` | stock | 0 | 0.00012 | -2.71e-06 | 7.2e-06 | 4700 | OL | OL | 0 | 0 | 24.7 |
+| R 4.7 k `r:4700` | fwrs | 2.00805e-06 | 0.000830868 | -2.70869e-06 | 7.20722e-06 | 4699.99 | OL | OL | 3.14321e-15 | 0 | 24.6942 |
+| 0.1 V behind 4.7 k `vsrc:0.1,rs=4700` | stock | 0.09995 | 0.00012 | -2.71e-06 | 7.2e-06 | 4.213e+06 | OL | OL | 0 | 0 | OL |
+| 0.1 V behind 4.7 k `vsrc:0.1,rs=4700` | fwrs | 0.0999482 | 0.00144192 | -2.70207e-06 | 7.20592e-06 | 779228 | OL | OL | 3.14321e-15 | 0 | OL |
+| diode 0.65 `diode:0.65` | stock | 0 | 0.00012 | -2.71e-06 | 7.2e-06 | OL | OL | 0.65 | 0 | 0 | 24.7 |
+| diode 0.65 `diode:0.65` | fwrs | -1.55273e-06 | 0.000843113 | -2.70032e-06 | 7.20592e-06 | 4.31845e+07 | 3.01894e-06 | 0.650005 | 3.14321e-15 | 0 | 24.6698 |
+| C 100 nF `c:100e-9` | stock | 0 | 0.00012 | -2.69e-06 | 7.2e-06 | 3.8684e+07 | OL | OL | 1e-07 | 0 | 24.7 |
+| C 100 nF `c:100e-9` | fwrs | -1.55273e-06 | 0.000833298 | -2.7066e-06 | 7.20592e-06 | 5.77772e+07 | OL | OL | 1.00002e-07 | 0 | 24.6698 |
+| TC 100 C (cj 25, die 25) `tc:100;cj:25` | stock | 0.00309 | 0.00012 | -2.71e-06 | 7.2e-06 | 12.2 | 4.68 | 0.0108 | 0 | 0 | 100.3 |
+| TC 100 C (cj 25, die 25) `tc:100;cj:25` | fwrs | 0.00309109 | 0.000834009 | -2.70207e-06 | 7.20592e-06 | 12.196 | 4.68485 | 0.0107508 | 3.52156e-15 | 0 | 100.314 |
+| TC 100 C, die 35 `tc:100;cj:25;die:35` | stock | 0.00309 |  |  |  |  |  |  |  |  | 110.3 |
+| TC 100 C, die 35 `tc:100;cj:25;die:35` | fwrs | 0.00309109 |  |  |  |  |  |  |  |  | 110.315 |
+| 0.5 V in the A jack `avsrc:0.5` | stock | 0 |  | 8.197 | 0.0011 | OL |  |  |  |  |  |
+| 0.5 V in the A jack `avsrc:0.5` | fwrs | -1.55273e-06 |  | 8.19661 | 0.000255177 | OL |  |  |  |  |  |
+
+Reading the table: a voltage source alone in ohm gives OL (the ratiometric
+node clips); in continuity the stock shows "0.00" (it clamps the negative
+code to 0) and fw-rs the negative value: a firmware difference, not the
+model; the same source in diode mode reads its own voltage (1.234 V < 3 V
+full scale); in AC V the stock settles at 0 while fw-rs keeps ~18 mV of the
+coupling transient on a DC input (the device-measured stock autoranges to mV
+and reads 1 mV, acdc doc 6a); 0.5 V across the A jack reads 8.2 A on the
+auto-selected 10 A range (no fuse in the model); a thermocouple with the die
+10 C above the cold junction reads 110 C on both (they take the die sensor as
+the cold junction); 1 V behind 4.7 k in ohm is OL, 0.1 V behind 4.7 k shows
+12 k instead of 4.7 k.
+
 ## Open points
 
 See RESEARCH.md 8: LPF / RMS output rate (modelled with the measured value),
