@@ -1874,7 +1874,7 @@ impl App {
     /// The outcome of a finished CSV recording.
     fn rec_toast(&mut self, now: u64, st: crate::csvlog::Status) {
         use crate::csvlog::State;
-        let mut t = *b"Saved LOG000.CSV";
+        let mut t = *b"Saved LOG000.DLG";
         let (txt, ok) = match (st.state, st.file) {
             (State::Done, Some(n)) => {
                 t[9] = b'0' + (n / 100 % 10) as u8;

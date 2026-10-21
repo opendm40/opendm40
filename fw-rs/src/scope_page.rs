@@ -818,7 +818,7 @@ impl App {
     pub(super) fn sp_csv_poll(&mut self, now: u64) {
         let Some(r) = crate::screenshot::take_csv_result() else { return };
         self.scope.hold = false;
-        let mut t = *b"Saved SCOP000.CSV";
+        let mut t = *b"Saved SCOP000.DLG";
         let (txt, ok) = match r {
             crate::screenshot::Shot::Saved(n) => {
                 t[10] = b'0' + (n / 100 % 10) as u8;

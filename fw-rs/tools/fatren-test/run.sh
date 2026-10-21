@@ -743,7 +743,7 @@ echo "--- LUN 1: the binary logs as virtual CSV files (dlog::refresh -> vdisk::s
 cp $IMGC $W/logs.img
 mcopy -i $W/logs.img $W/keep.bin ::LOG002.DLG          # not a DLG file: left out
 vdisk $W/f1m_native $VD logs $W/logs.img
-grep -q "logs taken=2 stale=false" $W/vd.out && grep -q "media_changed=true" $W/vd.out && echo "ok: LOG000.CSV + LOG001.CSV published, a foreign LOG002.DLG skipped, media change raised" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "logs taken=2 stale=false" $W/vd.out && grep -q "^media_changed=true" $W/vd.out && grep -q "unchanged: taken=2 media_changed=false" $W/vd.out && echo "ok: LOG000.CSV + LOG001.CSV published, a foreign LOG002.DLG skipped, media change raised (not again for an unchanged set)" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $VD
 for n in 000 001; do
     mcopy -n -i $W/logs.img ::LOG$n.DLG $W/l.dlg
