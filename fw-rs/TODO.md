@@ -487,3 +487,10 @@ Emulator (emu/):
       moving while HOLD / AutoHold freeze the digits); bipolar in DC V / mV / A (not AC+DC), unipolar
       elsewhere, empty track in temperature, red track on OL. History taps / long press only in History
       mode. DBG:PROF? section "d.bar". (verify on device: d.bar cost, bar at 10/s moving / 2.5/s steady)
+- [x] Temperature unit deg C / deg F as one global setting (owner: the deg F readout in the top-left status
+      slot was odd): Settings 2/2 "Temp unit", SCPI UNIT:TEMPerature C|F / ?, persisted (p[38] bit 9).
+      Applied to TC / PT100 / PT1000 / NTC readings, the cold junction (aux row, temperature page, MEAS:TEMP:CJ?)
+      and SYST:TEMP? (MCU die). The second deg F readout is gone (status slot shows AUTO / MANU again).
+      A unit change restarts the meter like a function change and converts the temperature limits; offsets
+      stay in C (0.1 C trim steps). Bluetooth keeps the stock frame (main C, CJ C, value 3 deg F), converted
+      back in bt.rs. (verify on device: phone app in F mode still shows C/F correctly)

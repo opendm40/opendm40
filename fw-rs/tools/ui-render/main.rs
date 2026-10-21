@@ -442,11 +442,14 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("hz_mhz", rd(14, val(9.9999, 4, "MHz"), None, Some(val(100.0, 1, "%")), false), None),
         ("hz_khz", rd(14, val(99.999, 3, "kHz"), None, Some(val(44.4, 1, "%")), false), None),
         ("hz_ol", rd(14, ol(4, "MHz"), None, Some(ol(1, "%")), false), None),
-        ("temp_tc", rd(15, val(-200.00, 2, c), Some(val(26.5, 1, c)), Some(val(-328.00, 2, f)), false), Some("TC K")),
-        ("temp_tc_ol", rd(15, ol(2, c), Some(val(-44.4, 1, c)), Some(ol(2, f)), false), Some("TC K")),
-        ("temp_ntc", rd(15, val(125.00, 2, c), Some(val(444.444, 3, "k\u{3a9}")), Some(val(257.00, 2, f)), false), Some("NTC100k B3950")),
-        ("temp_pt", rd(15, val(-44.44, 2, c), Some(val(444.44, 2, "\u{3a9}")), Some(val(-44.44, 2, f)), false), Some("PT1000")),
-        ("temp_ntcu", rd(15, val(4.44, 2, c), Some(ol(2, "M\u{3a9}")), Some(ol(2, f)), false), Some("NTC user")),
+        ("temp_tc", rd(15, val(-200.0, 1, c), Some(val(26.5, 1, c)), None, false), Some("TC K")),
+        ("temp_tc_ol", rd(15, ol(1, c), Some(val(-44.4, 1, c)), None, false), Some("TC K")),
+        ("temp_ntc", rd(15, val(125.00, 2, c), Some(val(444.444, 3, "k\u{3a9}")), None, false), Some("NTC100k B3950")),
+        ("temp_pt", rd(15, val(-44.44, 2, c), Some(val(444.44, 2, "\u{3a9}")), None, false), Some("PT1000")),
+        ("temp_ntcu", rd(15, val(4.44, 2, c), Some(ol(2, "M\u{3a9}")), None, false), Some("NTC user")),
+        // Global unit deg F (widest: -328.0 / 1562.00 F, CJ in F).
+        ("temp_tc_f", rd(15, val(-328.0, 1, f), Some(val(-40.0, 1, f)), None, false), Some("TC K")),
+        ("temp_pt_f", rd(15, val(1562.00, 2, f), Some(val(3904.8, 1, "\u{3a9}")), None, false), Some("PT100")),
     ];
     // AUTO+ / MANU variants of a few.
     let mut extra = vec![];
@@ -1412,7 +1415,7 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d03-dmm-420ma");
-        for (case, file) in [("temp_ntc", "d04-dmm-temp-ntc"), ("temp_tc", "d05-dmm-temp-tc")] {
+        for (case, file) in [("temp_ntc", "d04-dmm-temp-ntc"), ("temp_tc", "d05-dmm-temp-tc"), ("temp_pt_f", "d10-dmm-temp-f")] {
             host::reset(0);
             let (r, l) = find(case);
             dv.label = l;

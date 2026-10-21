@@ -65,6 +65,7 @@ fn is_page(v: View) -> bool {
 fn kp_unit_text(u: &'static str) -> &'static str {
     match u {
         "\u{b0}C" => "C",
+        "\u{b0}F" => "F",
         "\u{b5}A" => "uA",
         "\u{b5}F" => "uF",
         u => u,
@@ -520,9 +521,10 @@ impl App {
                     put(dmm::format(&mut t, i * 1e3, 3).as_bytes());
                     put(b" mA");
                 } else if let Some((cj, _)) = self.dmm.t_cj(u64::MAX) {
+                    let (v, u) = self.dmm.t_disp(cj);
                     put(b"Cold junction ");
-                    put(dmm::format(&mut t, cj, 1).as_bytes());
-                    put(b" C");
+                    put(dmm::format(&mut t, v, 1).as_bytes());
+                    put(if u == "\u{b0}F" { b" F" } else { b" C" });
                 }
                 ui::temp_page(k, self.dmm.t_offs(k), core::str::from_utf8(&b[..n]).unwrap_or(""));
             }
@@ -553,6 +555,7 @@ impl App {
                     core::str::from_utf8(&vb[..n]).unwrap_or(""),
                     crate::meter::SMOOTH_NAMES[self.meter.smoothing() as usize],
                     if self.dmm_view.bar_on { "Bargraph" } else { "History" },
+                    if self.dmm.temp_f() { "\u{b0}F" } else { "\u{b0}C" },
                     if self.sp.swipes { "Top bar" } else { "Off (stock)" },
                     if self.sp.press_fx { "ON" } else { "OFF (stock)" },
                     crate::scope_ui::TAP_NAMES[self.sp.tap_mode.min(2) as usize],
@@ -764,7 +767,7 @@ impl App {
                 4 => "\u{3a9}",
                 6 => "nF",
                 7 => "Hz",
-                _ => "\u{b0}C",
+                _ => self.dmm.t_disp(0.0).1,
             },
         }
     }
@@ -1256,7 +1259,8 @@ impl App {
         self.sp_persist_ext(&mut p[crate::persist::W_SCOPE_EXT..]);
         // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
         p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing())
-            | if self.dmm_view.bar_on { 0 } else { crate::meter::EXT_HISTORY_ROW };
+            | if self.dmm_view.bar_on { 0 } else { crate::meter::EXT_HISTORY_ROW }
+            | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 };
         p
     }
 
@@ -1306,6 +1310,7 @@ impl App {
         self.dmm.set_rate(ext.rate);
         self.meter.set_smoothing(ext.smooth);
         self.dmm_view.bar_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_HISTORY_ROW == 0;
+        self.dmm.set_temp_f(p[crate::persist::W_DMM_EXT] & crate::meter::EXT_TEMP_F != 0);
         let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
         self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
         let mode = if same_session { restore_func(rec.version, p[2] as u8) } else { 1 };
@@ -2240,9 +2245,13 @@ impl App {
                         self.meter.set_smoothing(s);
                     }
                     Some(2) => self.dmm_view.bar_on = !self.dmm_view.bar_on,
-                    Some(3) => self.sp.swipes = !self.sp.swipes,
-                    Some(4) => self.sp.press_fx = !self.sp.press_fx,
-                    Some(5) => {
+                    Some(3) => {
+                        let f = !self.dmm.temp_f();
+                        self.set_temp_f(f);
+                    }
+                    Some(4) => self.sp.swipes = !self.sp.swipes,
+                    Some(5) => self.sp.press_fx = !self.sp.press_fx,
+                    Some(6) => {
                         // Scope tap step: Corners -> Halves (stock) -> Off.
                         use crate::scope_ui::{TAP_CORNERS, TAP_HALVES, TAP_OFF};
                         self.sp.tap_mode = match self.sp.tap_mode {
@@ -2251,11 +2260,11 @@ impl App {
                             _ => TAP_CORNERS,
                         };
                     }
-                    Some(6) => {
+                    Some(7) => {
                         self.show(View::Device, clk);
                         return;
                     }
-                    Some(7) => {
+                    Some(8) => {
                         self.help_page = 0;
                         self.show(View::Help, clk);
                         return;
@@ -2348,6 +2357,25 @@ impl App {
         self.dmm.set_t_offs(k, c);
         if self.view == View::Range && self.dmm.hy_mode() == 15 {
             ui::temp_offset(self.dmm.t_offs(k));
+        }
+    }
+
+    /// Global temperature unit (Settings 2/2, SCPI UNIT:TEMP): a change
+    /// restarts the meter like a function change (REL, MIN/MAX, chart and
+    /// smoothing hold deg values of the old unit) and converts the
+    /// temperature limits, which are kept in the display unit.
+    pub fn set_temp_f(&mut self, f: bool) {
+        if f == self.dmm.temp_f() {
+            return;
+        }
+        self.dmm.set_temp_f(f);
+        let conv = |v: f32| if f { v * 1.8 + 32.0 } else { (v - 32.0) / 1.8 };
+        let l = &mut self.meter.lim[crate::meter::lim_slot(15)];
+        l.lo = l.lo.map(conv);
+        l.hi = l.hi.map(conv);
+        if self.dmm.hy_mode() == 15 {
+            self.func_changed();
+            self.last_raw = None;
         }
     }
 
@@ -2507,9 +2535,18 @@ impl App {
                     false
                 }
             },
+            C::TempUnit(Some(f)) => {
+                self.set_temp_f(f);
+                false
+            }
+            C::TempUnit(None) => {
+                out.put_bytes(if self.dmm.temp_f() { b"F" } else { b"C" });
+                true
+            }
             C::TempCj => {
                 match self.dmm.t_cj(now) {
                     Some((t, age)) => {
+                        let t = self.dmm.t_disp(t).0;
                         // Fresh only while the thermocouple mode cycles (one
                         // CJ phase every ~2.2 s).
                         if !(self.dmm.mode() == 15 && k == 0 && !self.dmm.suspended()) {
@@ -2527,7 +2564,7 @@ impl App {
                 true
             }
             C::SysTemp => {
-                out.put_f32(self.power.mcu_t);
+                out.put_f32(self.dmm.t_disp(self.power.mcu_t).0);
                 true
             }
             C::ConfQuery => {

@@ -606,6 +606,20 @@ impl Bt {
                     | (power.charging() as u8) << 3
                     | (power.bars & 0x07);
                 let shown = meter.shown();
+                // Temperature: the stock frame is main in C, value 2 the cold
+                // junction in C, value 3 deg F; fw-rs readings follow the
+                // global unit (Settings / UNIT:TEMP) and carry no deg F
+                // second value, so rebuild the stock triple here.
+                let to_c = |v: crate::dmm::Val| if v.unit == "\u{b0}F" { crate::dmm::Val { v: (v.v - 32.0) / 1.8, unit: "\u{b0}C", ..v } } else { v };
+                let shown = shown.copied().map(|mut r| {
+                    if r.mode == 15 {
+                        r.main = to_c(r.main);
+                        r.aux1 = r.aux1.map(to_c);
+                        r.aux2 = Some(crate::dmm::Val { v: r.main.v * 1.8 + 32.0, unit: "\u{b0}F", ..r.main });
+                    }
+                    r
+                });
+                let shown = shown.as_ref();
                 let main = shown.map(|r| r.main);
                 let (fm, vm) = encode(mode, main.as_ref(), None);
                 // AC+DC (sub 2): value 2 = AC part, value 3 = DC part, sent

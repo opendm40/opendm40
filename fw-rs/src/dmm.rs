@@ -579,11 +579,13 @@ pub struct Dmm {
     /// TC one is applied to the cold junction), user NTC R25 (ohm) / Beta.
     t_sensor: u8,
     t_offs: [i16; 7],
+    /// Temperatures (main, cold junction) in deg F instead of deg C.
+    t_f: bool,
     ntc_user: (f32, f32),
     /// ms of the last cold-junction measurement (0 = never).
     t_cj_at: u64,
     /// Resistive sensors: filtered C, last R (ohm), range-change votes.
-    t_f: f32,
+    t_ema: f32,
     t_res: f32,
     t_votes: u8,
     /// +1 digit: moving average of the raw codes (`avg_cfg`); `avg_skip`
@@ -734,9 +736,10 @@ impl Dmm {
             suspended: false,
             t_sensor: 0,
             t_offs: [0; 7],
+            t_f: false,
             ntc_user: (10_000.0, 3950.0),
             t_cj_at: 0,
-            t_f: 0.0,
+            t_ema: 0.0,
             t_res: 0.0,
             t_votes: 0,
             avg: Avg::new(),
@@ -1185,6 +1188,22 @@ impl Dmm {
         if r25.is_finite() && beta.is_finite() {
             self.ntc_user = (r25.clamp(100.0, 10.0e6), beta.clamp(1000.0, 10_000.0));
         }
+    }
+
+    /// Global temperature unit (Settings 2/2 "Temp unit", SCPI UNIT:TEMP):
+    /// deg F instead of deg C for the main reading and the cold junction.
+    /// Offsets stay in C (0.1 C steps, a calibration trim).
+    pub fn temp_f(&self) -> bool {
+        self.t_f
+    }
+
+    pub fn set_temp_f(&mut self, f: bool) {
+        self.t_f = f;
+    }
+
+    /// A deg C value in the display unit: (value, unit).
+    pub fn t_disp(&self, c: f32) -> (f32, &'static str) {
+        if self.t_f { (c * 1.8 + 32.0, "\u{b0}F") } else { (c, "\u{b0}C") }
     }
 
     /// Cold junction (HY3131 internal sensor, C incl. the TC offset) and its
@@ -2257,9 +2276,10 @@ impl Dmm {
                 self.t_phase = 0;
                 self.deadline = now + 700;
                 let ol = !(-40.0..=1000.0).contains(&t);
-                let mut rd = self.reading(if ol { Val::ol(1, "\u{b0}C") } else { Val::new(t, 1, "\u{b0}C") }, t);
-                rd.aux1 = Some(Val::new(self.t_cj, 1, "\u{b0}C"));
-                rd.aux2 = Some(if ol { Val::ol(1, "\u{b0}F") } else { Val::new(32.0 + t * 1.8, 1, "\u{b0}F") });
+                // One unit everywhere (owner: no second deg F readout).
+                let (td, u) = self.t_disp(t);
+                let mut rd = self.reading(if ol { Val::ol(1, u) } else { Val::new(td, 1, u) }, td);
+                rd.aux1 = Some(Val::new(self.t_disp(self.t_cj).0, 1, u));
                 Some(rd)
             }
         }
@@ -2311,15 +2331,14 @@ impl Dmm {
         if let Some(t) = t {
             if self.t_phase == 0 {
                 self.t_phase = 1;
-                self.t_f = t;
+                self.t_ema = t;
             } else {
-                ema(0.5, 0.3, t, &mut self.t_f);
+                ema(0.5, 0.3, t, &mut self.t_ema);
             }
         } else {
             self.t_phase = 0;
         }
-        let tv = self.t_f;
-        let c = "\u{b0}C";
+        let (tv, c) = self.t_disp(self.t_ema);
         let mut rd = self.reading(if t.is_some() { Val::new(tv, 2, c) } else { Val::ol(2, c) }, tv);
         rd.aux1 = Some(if ohm > self.over() * lim {
             Val::ol(2, "\u{3a9}")
@@ -2330,7 +2349,6 @@ impl Dmm {
         } else {
             Val::new(ohm * 1e-6, 3, "M\u{3a9}")
         });
-        rd.aux2 = Some(if t.is_some() { Val::new(32.0 + tv * 1.8, 2, "\u{b0}F") } else { Val::ol(2, "\u{b0}F") });
         Some(rd)
     }
 

@@ -182,8 +182,6 @@ pub struct DmmView {
     last_lim: u8,
     /// Temperature sensor chip as last drawn (aux2 slot), None = not drawn.
     last_chip: Option<&'static str>,
-    /// Temperature deg F text in the status-bar slot as last drawn.
-    last_f: [u8; 12],
     /// Per aux row: the value part (text, AC+DC / loop flags) and the unit
     /// part (unit, AC+DC) as last drawn; None = repaint. A reading that
     /// leaves a part unchanged does not repaint it.
@@ -268,21 +266,9 @@ const CHIP: Color = 0x3186;
 
 /// Temperature sensor chip (owner 2026-10-13: the sensor type must be
 /// legible at a glance): the full T_LABELS name in TEXT22 on a CHIP pill,
-/// on the DMM page in the aux2 slot (its deg F value moves to the status
-/// bar slot, F14), in the meter strip as the second sub row (deg F not
-/// shown there). Pill: text + 2 x CHIP_PAD wide.
+/// on the DMM page in the aux2 slot, in the meter strip as the second sub
+/// row. Pill: text + 2 x CHIP_PAD wide.
 const CHIP_PAD: i16 = 8;
-
-/// `join` into a 16-byte buffer.
-fn join16<'a>(buf: &'a mut [u8; 16], parts: &[&str]) -> &'a str {
-    let mut n = 0;
-    for p in parts {
-        let k = p.len().min(16 - n);
-        buf[n..n + k].copy_from_slice(&p.as_bytes()[..k]);
-        n += k;
-    }
-    core::str::from_utf8(&buf[..n]).unwrap_or("")
-}
 
 /// Copy `parts` into `buf` (truncated), returning the text.
 fn join<'a>(buf: &'a mut [u8; 24], parts: &[&str]) -> &'a str {
@@ -309,7 +295,6 @@ impl DmmView {
             last_label: None,
             last_lim: 255,
             last_chip: None,
-            last_f: [0; 12],
             aux_val: [None; 2],
             aux_unit: [None; 2],
             bar_on: true,
@@ -357,7 +342,6 @@ impl DmmView {
         self.last_top = None;
         self.last_lim = 255;
         self.last_chip = None;
-        self.last_f = [0xFF; 12];
         self.aux_val = [None; 2];
         self.aux_unit = [None; 2];
     }
@@ -508,25 +492,15 @@ impl DmmView {
             }
         }
         let top = (r.auto && !r.auto_plus, hold, r.auto_plus);
-        // Temperature: the deg F value (aux2) in the status-bar slot (F14,
-        // 1 px spacing; "-328.00" + U+2109 is 57 px of 90), its sensor name
-        // being the chip above.
-        let mut fb = [0u8; 16];
-        let mut ft = [0u8; 12];
-        if temp {
-            let mut t = [0u8; 16];
-            let txt = r.aux2.map_or("", |v| join16(&mut fb, &[meter::text(&mut t, &v), "\u{2109}"]));
-            let n = txt.len().min(12);
-            ft[..n].copy_from_slice(&txt.as_bytes()[..n]);
-        }
-        if self.last_top != Some(top) || self.last_label != self.label || self.last_f != ft {
+        // Temperature: the status-bar slot shows AUTO / MANU like the other
+        // functions (the sensor name is the chip above; the deg F second
+        // readout that used to sit here is gone: one global unit, owner).
+        if self.last_top != Some(top) || self.last_label != self.label {
             self.last_top = Some(top);
             self.last_label = self.label;
-            self.last_f = ft;
             let s = if !r.auto { "MANU" } else if r.auto_plus { "AUTO+" } else { "AUTO" };
             if temp {
-                let n = ft.iter().position(|&c| c == 0).unwrap_or(12);
-                sf::label(sf::F14, rect(BAR_X, 1, 90, 32), core::str::from_utf8(&ft[..n]).unwrap_or(""), STATUS_FG, BAR, 1, 1);
+                sf::label(sf::F21, rect(BAR_X, 1, 90, 32), s, STATUS_FG, BAR, 1, 0);
             } else if let Some(l) = self.label {
                 sf::label(sf::F14, rect(BAR_X, 1, 90, 32), l, STATUS_FG, BAR, 1, 1);
             } else {
