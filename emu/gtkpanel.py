@@ -1508,10 +1508,7 @@ class GtkApp(Adw.Application):
         big.connect('clicked', lambda *a: self.open_frontend_window())
         outer, box = self.card('Front end, HY3131', big)
         self.fe_view = FrontendView()
-        self.fe_view.set_tooltip_text('the route the firmware chose (relays, HY3131 muxes and switches); click: own window')
-        click = Gtk.GestureClick()
-        click.connect('released', lambda *a: self.open_frontend_window())
-        self.fe_view.add_controller(click)
+        self.fe_view.set_tooltip_text('the route the firmware chose (relays, HY3131 muxes and switches)')
         box.append(self.fe_view)
         self.fe_big = None
         self.fe_row = self.note('-', lines=3)    # one-line summary (the schematic shows it all): not shown
