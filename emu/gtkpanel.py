@@ -706,6 +706,12 @@ class FrontendView(Gtk.DrawingArea):
             for _ in range(4):
                 need = self.layout(None, w / z)
                 z = max(1.0, min(3.0, z * h / max(1.0, need * z)))
+            # taller than the window even at zoom 1: ask for that height, the window's ScrolledWindow scrolls
+            hh = int(self.layout(None, w / z) * z) + 1
+            target = hh if hh > h + 1 else 100
+            if target != self.want_h and (target > h + 1 or self.want_h > h + 1):
+                self.want_h = target
+                GLib.idle_add(lambda: self.set_content_height(self.want_h) or False)
         cr.scale(z, z)
         need = self.layout(cr, w / z)
         if not self.fit:
@@ -1114,7 +1120,9 @@ class FrontendWindow(Adw.Window):
         self.view = FrontendView(fit=True)
         self.view.set_vexpand(True)
         self.view.update(st)
-        box.append(self.view)
+        scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroll.set_child(self.view)
+        box.append(scroll)
         self.set_content(box)
 
     def update(self, st):
