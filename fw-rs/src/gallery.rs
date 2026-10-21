@@ -1,14 +1,15 @@
 //! Screenshot + log gallery (TODO FR-16): browse the S*.BMP screenshots and
-//! LOG*.DLG recordings in the root of the SPI-flash USB disk, view them full
-//! screen, delete them. Backend: csvlog.rs (`list_on` for the count and the
+//! LOG*.DLG recordings of the SPI-flash disk (SHOTS/, LOGS/ and the root's
+//! files of earlier builds; fatdir.rs), view them full screen, delete them. Backend: csvlog.rs (`list_on` for the count and the
 //! free space, `delete_on`); the reading side (directory pages, cluster
 //! chains, BMP / log decoding) is here.
 //!
 //! Screens (480 x 320, stock fonts, the menu-page style of ui.rs):
 //!   Grid    title bar ("< Back" | "Gallery" | count, free space), 3 x 2 tiles
 //!           of 148 x 116 (thumbnail 140 x 93, name + size under it), a nav
-//!           row (Prev / "Page i of n" / Next). Newest first: reverse
-//!           directory order (new files are appended to the root; a deleted
+//!           row (Prev / "Page i of n" / Next). Newest first: reverse order
+//!           of the root, LOGS/, SHOTS/ (screenshots first, then logs, then
+//!           the root's; new files are appended to their directory; a deleted
 //!           slot that gets reused breaks the order, there is no RTC date).
 //!           Swipe left / right = next / previous page, title bar = back.
 //!   Viewer  BMP: the image full screen, drawn top-down; tap = overlay bar
@@ -54,10 +55,9 @@
 //!     viewer), and after the disk was busy the catalog and the page are
 //!     re-read (a new screenshot appears, a recording grows, a host may have
 //!     changed anything; tiles whose entry changed are redrawn).
-//!   * Reads while a host has the disk mounted are fine (we never write).
-//!   * Delete is refused while a host has it mounted (msc::host_mounted, the
-//!     PREVENT MEDIUM REMOVAL lock: its cached FAT would go stale), and
-//!     csvlog::delete_on refuses while busy or for the file being recorded.
+//!   * No host writes this disk in the native build (USB exports the
+//!     generated volume, vdisk.rs); csvlog::delete_on refuses while busy or
+//!     for the file being recorded.
 //!   * calbackup::scratch() (3 x 4 KiB) is the block buffer: [0] data,
 //!     [1] FAT 1. Only used inside one `poll` while the disk is free, never
 //!     kept across passes (screenshot.rs, csvlog commits and the SCPI
@@ -77,7 +77,6 @@ use crate::msc::BlockDevice;
 use crate::stockfont::{self as sf, rect, Rect};
 
 const BLK: u32 = 4096;
-const PER: u32 = BLK / 32;
 const FPER: u32 = BLK / 2;
 const NONE: u32 = u32::MAX;
 
@@ -257,38 +256,30 @@ fn kind_of(e: &[u8]) -> Option<Kind> {
     }
 }
 
-/// Root scan: gallery files with directory index lo..hi into `out` (in
-/// directory order); `name` set: also the index of that file. Returns the
-/// number of gallery files, the number stored and the found index.
+/// Directory scan (the root's legacy files, then LOGS/, then SHOTS/:
+/// fatdir::for_each): gallery files with index lo..hi into `out` (in that
+/// order); `name` set: also the index of that file. Returns the number of
+/// gallery files, the number stored and the found index.
 fn scan(io: &mut Io, lo: u32, hi: u32, out: &mut [Ent], name: Option<&[u8; 11]>) -> Option<(u32, usize, Option<(u32, Ent)>)> {
     let v = io.v;
     let (mut idx, mut n, mut hit) = (0u32, 0usize, None);
-    'blocks: for b in 0..v.root_blocks {
-        if !io.block(v.root_start + b) {
-            return None;
+    io.dtag = NONE;
+    let r = crate::fatdir::for_each(&mut *io.disk, &v, &[&crate::fatdir::LOGS, &crate::fatdir::SHOTS], io.data, &mut |_, _, e| {
+        let Some(kind) = kind_of(e) else { return true };
+        let mut nm = [0u8; 11];
+        nm.copy_from_slice(&e[..11]);
+        let ent = Ent { name: nm, size: le32(e, 0x1C), start: le16(e, 0x1A) as u16, kind };
+        if idx >= lo && idx < hi && n < out.len() {
+            out[n] = ent;
+            n += 1;
         }
-        for k in 0..PER {
-            if b * PER + k >= v.root_entries {
-                break 'blocks;
-            }
-            let e = &io.data[(k * 32) as usize..(k * 32 + 32) as usize];
-            if e[0] == 0 {
-                break 'blocks;
-            }
-            let Some(kind) = kind_of(e) else { continue };
-            let mut nm = [0u8; 11];
-            nm.copy_from_slice(&e[..11]);
-            let ent = Ent { name: nm, size: le32(e, 0x1C), start: le16(e, 0x1A) as u16, kind };
-            if idx >= lo && idx < hi && n < out.len() {
-                out[n] = ent;
-                n += 1;
-            }
-            if name == Some(&nm) {
-                hit = Some((idx, ent));
-            }
-            idx += 1;
+        if name == Some(&nm) {
+            hit = Some((idx, ent));
         }
-    }
+        idx += 1;
+        true
+    });
+    r.ok()?;
     Some((idx, n, hit))
 }
 
@@ -1767,18 +1758,14 @@ impl Gallery {
         if self.mode != Mode::Dialog || self.dlg != Dlg::Deleting {
             return;
         }
-        let r = if crate::msc::host_mounted() {
-            Err(("Disk in use by the PC", "Eject it, then retry"))
-        } else {
-            crate::wdt::kick_if_feeding();
-            let r = csvlog::delete_on(disk, &self.cur.name);
-            crate::wdt::kick_if_feeding();
-            match r {
-                Ok(()) => Ok(()),
-                Err(GErr::Busy) => Err(("Cannot delete", "Disk busy, try again")),
-                Err(GErr::NotFound) => Err(("Cannot delete", "File not found")),
-                Err(_) => Err(("Cannot delete", "Delete failed")),
-            }
+        crate::wdt::kick_if_feeding();
+        let r = csvlog::delete_on(disk, &self.cur.name);
+        crate::wdt::kick_if_feeding();
+        let r = match r {
+            Ok(()) => Ok(()),
+            Err(GErr::Busy) => Err(("Cannot delete", "Disk busy, try again")),
+            Err(GErr::NotFound) => Err(("Cannot delete", "File not found")),
+            Err(_) => Err(("Cannot delete", "Delete failed")),
         };
         match r {
             Ok(()) => {

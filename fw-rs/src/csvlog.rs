@@ -2,12 +2,12 @@
 //! recording", FR-35, UF-32; "Compact binary logs (DLG)") and the
 //! file-gallery backend (FR-16).
 //!
-//! File: the next free `LOG%03u.DLG` in the root (lowest unused number, as
-//! the screenshots; the FAT code has no subdirectory support), in the
+//! File: the next free `LOGS/LOG%03u.DLG` (fatdir.rs; lowest number used
+//! neither in LOGS/ nor in the root, where earlier builds wrote them), in the
 //! compact binary format of
 //! dlog.rs (docs/compact-log-format.md): ~1.1..1.9 bytes per reading instead
 //! of ~21, CRC-protected chunks, one per commit. The CSV exists only on read
-//! (virtual LOG%03u.CSV on the read-only LUN 1, SCPI MMEM:DATA?,
+//! (virtual LOGS/LOG%03u.CSV on the read-only USB volume, SCPI MMEM:DATA?,
 //! tools/dlog.py) and is byte for byte what this module wrote before DLG:
 //! CRLF line ends, '.' decimal point, ASCII only:
 //!   # Alientek DM40A, fw-rs 0.1.0, function DC V, range AUTO, started uptime 12.345 s
@@ -49,7 +49,7 @@
 //!   Fat   the new clusters chained + EOC and the old last cluster linked to
 //!         the first new one, in every FAT copy (FAT 1 first; per copy the
 //!         block holding the link last);
-//!   Dir   the root entry: start cluster and size (= every byte written).
+//!   Dir   the LOGS/ entry: start cluster and size (= every byte written).
 //! Data -> FAT -> directory, as screenshot.rs / calbackup: the directory size
 //! only ever covers written, linked data.
 //!
@@ -86,14 +86,11 @@
 //!                         including the screenshot and a PC.
 //!
 //! Sharing the disk (one writer at a time):
-//!   * Host: for the whole recording session host WRITE(10)s are refused (NOT
-//!     READY, msc.rs `LOG_SESSION`); host reads are served. Between commits
-//!     the cached FAT / directory state here would otherwise go stale under a
-//!     PC that writes, exactly the screenshot's reasoning but for hours. A
-//!     commit does not start while a host write is in progress
-//!     (`HOST_WRITING`, only possible right at `start`). MEDIUM_CHANGED
-//!     (UNIT ATTENTION, screenshot.rs / msc.rs) is set after the first commit
-//!     (the new file) and after the last one.
+//!   * Host: the native build does not export this disk (USB shows the
+//!     generated read-only volume, vdisk.rs; the finished log appears there
+//!     as LOGS/LOGnnn.CSV). Builds that still export it refuse host
+//!     WRITE(10)s for the whole session (NOT READY, msc.rs `LOG_SESSION`)
+//!     and a commit does not start while one is in progress (`HOST_WRITING`).
 //!   * Screenshot: a commit never starts while `screenshot::busy()`; the
 //!     screenshot waits before its FAT scan while a commit runs
 //!     (msc.rs `LOG_FLUSHING`). Both use calbackup::scratch() only while they
@@ -104,9 +101,10 @@
 //!     must still be this file with the last committed size. Otherwise the
 //!     recording stops with Error and nothing more is written.
 //!
-//! Gallery (FR-16): `list_on` (S*.BMP, LOG*.CSV in the root, sizes, free
-//! space) and `delete_on` (root entry + its long-name entries 0xE5 first, then
-//! the chain freed in every FAT copy: a cut in between = lost clusters).
+//! Gallery (FR-16): `list_on` (S*.BMP, LOG*.DLG, SCOP*.DLG in the root,
+//! LOGS/, SHOTS/, SCOPE/, sizes, free space) and `delete_on` (the entry + its
+//! long-name entries 0xE5 first, then the chain freed in every FAT copy: a
+//! cut in between = lost clusters).
 //! Synchronous (a list is ~4 block reads, a delete one root-block erase + FAT
 //! programs, ~50..400 ms); refused while a screenshot or a commit holds the
 //! disk, while a host write is in progress, and for the file being recorded.
@@ -115,6 +113,7 @@ use core::sync::atomic::Ordering;
 
 use crate::calbackup;
 use crate::dlog;
+use crate::fatdir;
 use crate::fatren::{le16, le32, parse_bpb, Vol};
 use crate::msc::{BlockDevice, Step};
 
@@ -329,12 +328,11 @@ fn set_flags(session: bool, flushing: bool) {
 /// "AUTO"), `unit` into every row (e.g. "V"; non-ASCII is transliterated:
 /// "\u{3a9}" -> "Ohm", "\u{b0}" -> "deg", "\u{b5}" -> "u"). `now_ms` = uptime,
 /// the zero of time_s. False: a recording is already active, or a PC has
-/// the disk mounted (`msc::host_mounted`, as screenshot.rs `start`: its
-/// cached FAT would go stale under the commits; the caller can tell with
-/// `msc::host_mounted()` and say "eject first").
+/// the disk mounted: no longer possible (USB exports only the generated
+/// volume, vdisk.rs).
 pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     let j = job();
-    if active() || crate::msc::host_mounted() {
+    if active() {
         return false;
     }
     *j = JOB0;
@@ -504,18 +502,11 @@ pub fn poll_on(disk: &mut dyn BlockDevice, now_ms: u64) {
             }
             return;
         }
-        // Deferred while a PC has the disk mounted (review 3443cea H1): its
-        // cached FAT / root would go stale under the commit, and a later host
-        // copy could reuse the CSV's clusters. Rows queue in the FIFO meanwhile;
-        // an overflow drops them and flags the next row GAP (as HOST_WRITING).
-        // A stop while mounted finishes after the eject; finish_blocking
-        // (power-off / reset) gives up after its bound with these rows
-        // uncommitted (the file stays a clean prefix).
-        if !due
-            || crate::screenshot::busy()
-            || crate::msc::HOST_WRITING.load(Ordering::Relaxed)
-            || crate::msc::host_mounted()
-        {
+        // Deferred while a screenshot / scope record holds the disk, or a
+        // host WRITE(10) is in progress (only builds that still export the
+        // SPI disk writable). Rows queue in the FIFO meanwhile; an overflow
+        // drops them and flags the next row GAP.
+        if !due || crate::screenshot::busy() || crate::msc::HOST_WRITING.load(Ordering::Relaxed) {
             return;
         }
         if !disk.present() || disk.block_size() as usize != BLK {
@@ -628,29 +619,39 @@ impl Job {
         let Some(v) = parse_bpb(&buf[..], disk.block_count()) else {
             return Some(State::NoDisk);
         };
+        // LOGS/ (fatdir.rs; created at boot, here only if it went missing:
+        // synchronous, ~1 s once). scratch[1] (FAT cache) is overwritten.
+        let v = match fatdir::ensure(disk, &v, &fatdir::LOGS, calbackup::scratch()) {
+            Ok(d) => d,
+            Err(fatdir::Err::Io) => return Some(State::Error),
+            Err(_) => return Some(State::Full),
+        };
+        self.cur = NONE;
         self.v = Some(v);
         self.i = 0;
         self.phase = Phase::Root;
         None
     }
 
-    /// One root block: LOG%03u.DLG numbers in use, the first free slot.
+    /// One directory block (the root, then LOGS/, fatdir.rs `seq`):
+    /// LOG%03u.DLG numbers in use in either, the first free slot of LOGS/.
     fn root(&mut self, disk: &mut dyn BlockDevice) -> Option<State> {
         let v = self.vol();
+        let (lba, sub, base, lim) = fatdir::seq(&v, self.i);
         let buf = &mut calbackup::scratch()[0];
-        if !disk.read_block(v.root_start + self.i, buf) {
+        if !disk.read_block(lba, buf) {
             return Some(State::Error);
         }
         let mut end = false;
         for k in 0..PER {
-            let idx = self.i * PER + k;
-            if idx >= v.root_entries {
+            let idx = base + k;
+            if idx >= lim {
                 end = true;
                 break;
             }
             let e = &buf[(k * 32) as usize..(k * 32 + 32) as usize];
             if e[0] == 0x00 || e[0] == 0xE5 {
-                if self.slot == NONE {
+                if sub && self.slot == NONE {
                     self.slot = idx;
                 }
                 if e[0] == 0x00 {
@@ -668,7 +669,10 @@ impl Job {
             }
         }
         self.i += 1;
-        if !end && self.i < v.root_blocks {
+        if end {
+            self.i = if sub { fatdir::seq_blocks(&v) } else { v.root_blocks };
+        }
+        if self.i < fatdir::seq_blocks(&v) {
             return None;
         }
         let Some(n) = (0..1000u16).find(|&n| self.taken[(n / 32) as usize] & (1 << (n % 32)) == 0) else {
@@ -887,7 +891,7 @@ impl Job {
             if self.has_file && self.size == self.csize {
                 return self.committed(); // nothing new (disk full at once)
             }
-            self.lba = v.root_start + self.slot / PER;
+            self.lba = v.dlba(self.slot / PER);
             let buf = &mut calbackup::scratch()[0];
             if !disk.read_block(self.lba, buf) {
                 return Some(State::Error);
@@ -1037,6 +1041,8 @@ pub struct FileInfo {
     pub size: u32,
     #[allow(dead_code)] // tests; the firmware's lists need only the count
     pub kind: Kind,
+    /// In its directory (LOGS/, SHOTS/, SCOPE/), not a legacy root file.
+    pub in_dir: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1113,34 +1119,22 @@ pub fn list_on(disk: &mut dyn BlockDevice, out: &mut [FileInfo]) -> Result<Catal
     Ok(cat)
 }
 
-/// Every gallery file to `f` (directory order); `n` = 0 in the result.
+/// Every gallery file to `f` (the root's legacy files, then LOGS/, SHOTS/,
+/// SCOPE/; directory order); `n` = 0 in the result.
 fn for_each_file(disk: &mut dyn BlockDevice, f: &mut dyn FnMut(&FileInfo)) -> Result<Catalog, GErr> {
     let v = gallery_vol(disk)?;
     let mut cat = Catalog { n: 0, total: 0, free_bytes: 0, disk_bytes: v.clusters * v.spc * BLK as u32 };
     let buf = &mut calbackup::scratch()[0];
-    'blocks: for b in 0..v.root_blocks {
-        if !disk.read_block(v.root_start + b, buf) {
-            return Err(GErr::Error);
+    fatdir::for_each(disk, &v, &[&fatdir::LOGS, &fatdir::SHOTS, &fatdir::SCOPE], buf, &mut |d, _, e| {
+        if let Some(kind) = kind_of(e) {
+            let mut name = [0u8; 11];
+            name.copy_from_slice(&e[..11]);
+            f(&FileInfo { name, size: le32(e, 0x1C), kind, in_dir: d.dn > 0 });
+            cat.total += 1;
         }
-        for k in 0..PER {
-            if b * PER + k >= v.root_entries {
-                break 'blocks;
-            }
-            let e = &buf[(k * 32) as usize..(k * 32 + 32) as usize];
-            if e[0] == 0x00 {
-                break 'blocks;
-            }
-            if e[0] == 0xE5 {
-                continue;
-            }
-            if let Some(kind) = kind_of(e) {
-                let mut name = [0u8; 11];
-                name.copy_from_slice(&e[..11]);
-                f(&FileInfo { name, size: le32(e, 0x1C), kind });
-                cat.total += 1;
-            }
-        }
-    }
+        true
+    })
+    .map_err(|_| GErr::Error)?;
     let mut free = 0u32;
     let mut fb = NONE;
     for c in 2..=v.clusters + 1 {
@@ -1172,9 +1166,13 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
     let mut w = W { b: rest, n: 0 };
     let cat = for_each_file(disk, &mut |f| {
         let mut nb = [0u8; 12];
-        let mut e = [0u8; 40];
+        let mut e = [0u8; 48];
         let mut t = W { b: &mut e, n: 0 };
         t.s(",\"");
+        if let (true, Some(d)) = (f.in_dir, fatdir::dir_of(&f.name)) {
+            t.s(name_str(d, &mut nb));
+            t.c(b'/');
+        }
         t.s(name_str(&f.name, &mut nb));
         t.s(",BIN,");
         t.u(f.size as u64);
@@ -1225,35 +1223,47 @@ fn sfn_checksum(e: &[u8]) -> u8 {
     s
 }
 
-/// Delete root file `name` (8.3, space padded; only S*.BMP / LOG*.CSV):
-/// its entry and long-name entries 0xE5 (read back), then its chain freed in
-/// every FAT copy (fatren::free_chain: bits cleared, no erase).
+/// Delete gallery file `name` (8.3, space padded; S*.BMP / LOG*.DLG /
+/// SCOP*.DLG) from its directory (fatdir::dir_of) or, a legacy file, from
+/// the root: its entry and long-name entries 0xE5 (read back), then its
+/// chain freed in every FAT copy (fatren::free_chain: bits cleared, no erase).
 pub fn delete_on(disk: &mut dyn BlockDevice, name: &[u8; 11]) -> Result<(), GErr> {
     if kind_of_name(name).is_none() {
         return Err(GErr::NotFound);
-    }
-    // A PC with the disk mounted keeps its own FAT / root cache (review
-    // 3443cea M1; the gallery checks this itself too).
-    if crate::msc::host_mounted() {
-        return Err(GErr::Busy);
     }
     let j = job();
     if active() && j.has_file && *name == calbackup::numbered_name(b"LOG", j.n, b"DLG") {
         return Err(GErr::Busy);
     }
-    let v = gallery_vol(disk)?;
+    let root = gallery_vol(disk)?;
     let [buf, fat1, tmp] = calbackup::scratch();
+    let sub = match fatdir::dir_of(name).map(|d| fatdir::open(disk, &root, d, buf)) {
+        Some(Ok(d)) => d,
+        Some(Err(fatdir::Err::Io)) => return Err(GErr::Error),
+        _ => None,
+    };
+    for v in [sub, Some(root)].into_iter().flatten() {
+        match delete_in(disk, &v, name, buf, fat1, tmp) {
+            Err(GErr::NotFound) => continue,
+            r => return r,
+        }
+    }
+    Err(GErr::NotFound)
+}
+
+/// `delete_on` in one directory (`v`'s view).
+fn delete_in(disk: &mut dyn BlockDevice, v: &Vol, name: &[u8; 11], buf: &mut [u8; BLK], fat1: &mut [u8; BLK], tmp: &mut [u8; BLK]) -> Result<(), GErr> {
     // Find the entry; remember the live LFN run just before it (global indexes).
     let mut run = [0u32; 20];
     let mut nrun = 0usize;
     let mut hit: Option<(u32, u32, [u32; 20], usize)> = None;
-    'blocks: for b in 0..v.root_blocks {
-        if !disk.read_block(v.root_start + b, buf) {
+    'blocks: for b in 0..v.dblocks() {
+        if !disk.read_block(v.dlba(b), buf) {
             return Err(GErr::Error);
         }
         for k in 0..PER {
             let idx = b * PER + k;
-            if idx >= v.root_entries {
+            if idx >= v.dentries() {
                 break 'blocks;
             }
             let e = &buf[(k * 32) as usize..(k * 32 + 32) as usize];
@@ -1287,13 +1297,13 @@ pub fn delete_on(disk: &mut dyn BlockDevice, name: &[u8; 11]) -> Result<(), GErr
     };
     let (start, ck) = (start_ck & 0xFFFF, (start_ck >> 16) as u8);
     // Entries 0xE5, block by block (LFN entries only with a matching checksum).
-    for b in 0..v.root_blocks {
+    for b in 0..v.dblocks() {
         let (lo, hi) = (b * PER, b * PER + PER);
         let inb = |i: u32| i >= lo && i < hi;
         if !inb(idx) && !lfn[..nl].iter().any(|&i| inb(i)) {
             continue;
         }
-        if !disk.read_block(v.root_start + b, buf) {
+        if !disk.read_block(v.dlba(b), buf) {
             return Err(GErr::Error);
         }
         for &i in &lfn[..nl] {
@@ -1305,14 +1315,17 @@ pub fn delete_on(disk: &mut dyn BlockDevice, name: &[u8; 11]) -> Result<(), GErr
         if inb(idx) {
             buf[((idx - lo) * 32) as usize] = 0xE5;
         }
-        if !(disk.write_block(v.root_start + b, buf) && crate::fatren::verify(disk, v.root_start + b, buf, tmp)) {
+        if !(disk.write_block(v.dlba(b), buf) && crate::fatren::verify(disk, v.dlba(b), buf, tmp)) {
             return Err(GErr::Error);
         }
     }
     crate::screenshot::MEDIUM_CHANGED.store(true, Ordering::Relaxed);
     #[cfg(feature = "vdisk")]
-    dlog::set_stale();
-    let (ok, _) = crate::fatren::free_chain(disk, &v, start, fat1, buf, tmp);
+    {
+        dlog::set_stale();
+        crate::vdisk::forget(name);
+    }
+    let (ok, _) = crate::fatren::free_chain(disk, v, start, fat1, buf, tmp);
     if ok {
         Ok(())
     } else {
@@ -1329,12 +1342,23 @@ pub fn delete(name: &[u8; 11]) -> Result<(), GErr> {
     delete_on(disk(), name)
 }
 
-/// "log1.csv" / "LOG001.CSV" -> "LOG1    CSV" (8.3, upper case). None: not
-/// an 8.3 name.
+/// "log1.csv" / "LOG001.CSV" -> "LOG1    CSV" (8.3, upper case). A
+/// directory prefix "LOGS/", "SHOTS/" or "SCOPE/" (any case, '/' or '\\', a
+/// leading '/' too) is accepted and dropped: the names are unique across
+/// the directories (fatdir::dir_of). None: not an 8.3 name.
 pub fn parse_name(s: &[u8]) -> Option<[u8; 11]> {
     let s = match s {
         [b'"', m @ .., b'"'] => m,
         _ => s,
+    };
+    let s = match s {
+        [b'/' | b'\\', m @ ..] => m,
+        _ => s,
+    };
+    let s = match s.iter().position(|&c| c == b'/' || c == b'\\') {
+        Some(i) if fatdir::DIRS.iter().any(|d| d.len() >= i && d[..i].eq_ignore_ascii_case(&s[..i]) && d[i..].iter().all(|&c| c == b' ')) => &s[i + 1..],
+        Some(_) => return None,
+        None => s,
     };
     let dot = s.iter().position(|&c| c == b'.').unwrap_or(s.len());
     let (base, ext) = (&s[..dot], if dot < s.len() { &s[dot + 1..] } else { &[][..] });

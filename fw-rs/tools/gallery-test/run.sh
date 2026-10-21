@@ -9,8 +9,8 @@
 #      plain and on a fragmented disk (+ the stock RLE4 factory screenshots
 #      from private/spi-disk-backup when present, reference by an
 #      independent Python RLE4 decode);
-#   2. lock: no disk read while busy, resume, delete refused while mounted,
-#      delete (fsck clean after);
+#   2. lock: no disk read while busy, resume, delete in SHOTS/ (fsck clean
+#      after);
 #   3. ui: the worst-case layout matrix (0 / 1 / 6 / 7 / 99 files, long
 #      names, CSV + BMP mixed, unsupported BMP, disk busy, no disk, delete
 #      confirm, info boxes): zero violations; PNG renders (2x) + contact sheet.
@@ -42,9 +42,16 @@ for s in e0 e1 e6 e7 e99 fmt; do
     mkimg $I
     echo "dummy" > $W/cfg.bin
     mcopy -i $I $W/cfg.bin ::CONFIG.BIN          # not a gallery file
+    # e6 / e99: the files in LOGS/ and SHOTS/ (fatdir.rs, the firmware's
+    # layout; mmd makes one-cluster directories); the others in the root
+    # (files of earlier builds, still listed).
+    D=
+    case $s in e6|e99) mmd -i $I ::LOGS ::SHOTS; D=1 ;; esac
     while read -r f; do
         case $f in LOG*.CSV) f=${f%.CSV}.DLG ;; esac   # the lists name the CSVs
-        [ -n "$f" ] && mcopy -i $I "$W/d/$f" "::$f"
+        t=$f
+        if [ -n "$D" ]; then case $f in LOG*) t=LOGS/$f ;; S*) t=SHOTS/$f ;; esac; fi
+        [ -n "$f" ] && mcopy -i $I "$W/d/$f" "::$t"
     done < "$W/d/set-$s.txt"
 done
 # Stock factory screenshots (4 bpp RLE4) when this checkout has them.
@@ -87,7 +94,7 @@ PY
     mkimg $I
     for n in 0 1 2 3; do mcopy -i $I $STOCK/S00$n.BMP ::STK$n.BMP; done
     # The e6 grid shows a real stock screenshot.
-    mcopy -o -i $W/img/e6.img $STOCK/S001.BMP ::S003.BMP
+    mcopy -o -i $W/img/e6.img $STOCK/S001.BMP ::SHOTS/S003.BMP
 fi
 # Fragmented disk: S000.BMP over every other freed 8 KiB hole.
 I="$W/img/frag.img"

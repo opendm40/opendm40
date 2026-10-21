@@ -1570,22 +1570,91 @@ pub fn dlg_name(n: &[u8]) -> Option<usize> {
     (n[p..p + 3].iter().all(|c| c.is_ascii_digit()) && n[p + 3..8].iter().all(|&c| c == b' ')).then_some(p)
 }
 
-/// Root files `LOGnnn.DLG` / `SCOPnnn.DLG` (directory order) to `f`.
-pub fn scan(raw: &mut dyn Raw, g: &Geo, f: &mut dyn FnMut(&Ent)) -> bool {
+/// Directory of the DMM logs / scope records on the SPI disk (fatdir.rs;
+/// the root may still hold files of earlier builds).
+pub const DIR_LOGS: [u8; 11] = *b"LOGS       ";
+pub const DIR_SCOPE: [u8; 11] = *b"SCOPE      ";
+pub const DIR_SHOTS: [u8; 11] = *b"SHOTS      ";
+
+/// Every 32-byte entry of a directory, in order, to `f` (false = stop),
+/// until the end marker: the root (`start` None) or the subdirectory whose
+/// chain starts at cluster `start` (followed in FAT 1, at most 64 clusters).
+/// False: a read failed.
+pub fn each_entry(raw: &mut dyn Raw, g: &Geo, start: Option<u32>, f: &mut dyn FnMut(&[u8; 32]) -> bool) -> bool {
     let mut e = [0u8; 32];
-    for i in 0..g.root_entries {
-        if !raw.read_at(g.root + i * 32, &mut e) {
+    let (mut base, mut n, mut cl) = match start {
+        None => (g.root, g.root_entries, 0),
+        Some(c) if c >= 2 && c <= g.clusters + 1 => (g.data + (c - 2) * g.cb, g.cb / 32, c),
+        Some(_) => return true,
+    };
+    let mut hops = 0;
+    loop {
+        for i in 0..n {
+            if !raw.read_at(base + i * 32, &mut e) {
+                return false;
+            }
+            if e[0] == 0 || !f(&e) {
+                return true;
+            }
+        }
+        if cl == 0 {
+            return true;
+        }
+        let mut b = [0u8; 2];
+        if !raw.read_at(g.fat + cl * 2, &mut b) {
             return false;
         }
-        if e[0] == 0 {
-            break;
+        let next = le16(&b, 0);
+        hops += 1;
+        if !(2..=g.clusters + 1).contains(&next) || hops >= 64 {
+            return true;
         }
-        if e[0] == 0xE5 || e[11] & 0x18 != 0 || e[11] & 0x3F == 0x0F || dlg_name(&e[..11]).is_none() {
+        cl = next;
+        base = g.data + (cl - 2) * g.cb;
+        n = g.cb / 32;
+    }
+}
+
+/// Start cluster of root subdirectory `name` (None: there is none).
+pub fn dir_start(raw: &mut dyn Raw, g: &Geo, name: &[u8; 11]) -> Option<u32> {
+    let mut hit = None;
+    each_entry(raw, g, None, &mut |e| {
+        if e[0] != 0xE5 && e[11] & 0x3F != 0x0F && e[11] & 0x10 != 0 && e[..11].eq_ignore_ascii_case(name) {
+            hit = Some(le16(e, 0x1A));
+            return false;
+        }
+        true
+    });
+    hit
+}
+
+/// A live plain-file 8.3 entry (not deleted, long-name, label, directory).
+fn file_entry(e: &[u8; 32]) -> Option<Ent> {
+    if e[0] == 0xE5 || e[11] & 0x18 != 0 || e[11] & 0x3F == 0x0F {
+        return None;
+    }
+    let mut name = [0u8; 11];
+    name.copy_from_slice(&e[..11]);
+    Some(Ent { name, start: le16(e, 0x1A), size: le32(e, 0x1C) })
+}
+
+/// Files `LOGnnn.DLG` / `SCOPnnn.DLG` to `f`: the root's (earlier builds),
+/// then LOGS/, then SCOPE/, each in directory order.
+pub fn scan(raw: &mut dyn Raw, g: &Geo, f: &mut dyn FnMut(&Ent)) -> bool {
+    let dirs = [None, dir_start(raw, g, &DIR_LOGS), dir_start(raw, g, &DIR_SCOPE)];
+    for (i, d) in dirs.iter().enumerate() {
+        if i > 0 && d.is_none() {
             continue;
         }
-        let mut name = [0u8; 11];
-        name.copy_from_slice(&e[..11]);
-        f(&Ent { name, start: le16(&e, 0x1A), size: le32(&e, 0x1C) });
+        let ok = each_entry(raw, g, *d, &mut |e| {
+            if let Some(x) = file_entry(e).filter(|x| dlg_name(&x.name).is_some()) {
+                f(&x);
+            }
+            true
+        });
+        if !ok {
+            return false;
+        }
     }
     true
 }
@@ -1665,34 +1734,46 @@ fn disk() -> FnRaw {
     unsafe { *core::ptr::addr_of!(DISK) }
 }
 
-/// Open root file `name` (8.3, a .DLG) of the SPI disk.
+/// Open file `name` (8.3, a .DLG; in its directory or the root) of the
+/// SPI disk.
 pub fn open(name: &[u8; 11]) -> Option<DiskGen> {
     let mut d = disk();
     let g = geometry(&mut d)?;
-    let mut hit = None;
-    scan(&mut d, &g, &mut |e| {
-        if hit.is_none() && e.name.eq_ignore_ascii_case(name) {
-            hit = Some(*e);
-        }
-    });
-    let e = hit?;
+    let e = find(&mut d, &g, name)?;
     Gen::open(FatFile::new(d, g, e.start, e.size), e.size)
 }
 
-/// Root entry `name` (8.3, case-insensitive; any file, not a directory).
+/// The directory a file of ours lives in (fatdir.rs `dir_of`).
+pub fn dir_of(n: &[u8; 11]) -> Option<[u8; 11]> {
+    let up = |c: u8| c.to_ascii_uppercase();
+    match (dlg_name(n), [up(n[8]), up(n[9]), up(n[10])]) {
+        (Some(3), _) => Some(DIR_LOGS),
+        (Some(_), _) => Some(DIR_SCOPE),
+        (None, x) if &x == b"BMP" && up(n[0]) == b'S' => Some(DIR_SHOTS),
+        _ => None,
+    }
+}
+
+/// Entry `name` (8.3, case-insensitive; any file, not a directory): in its
+/// directory (`dir_of`), else in the root.
 pub fn find(raw: &mut dyn Raw, g: &Geo, name: &[u8; 11]) -> Option<Ent> {
-    let mut e = [0u8; 32];
-    for i in 0..g.root_entries {
-        if !raw.read_at(g.root + i * 32, &mut e) || e[0] == 0 {
-            return None;
-        }
-        if e[0] != 0xE5 && e[11] & 0x18 == 0 && e[11] & 0x3F != 0x0F && e[..11].eq_ignore_ascii_case(name) {
-            let mut n = [0u8; 11];
-            n.copy_from_slice(&e[..11]);
-            return Some(Ent { name: n, start: le16(&e, 0x1A), size: le32(&e, 0x1C) });
+    let look = |raw: &mut dyn Raw, start: Option<u32>| {
+        let mut hit = None;
+        each_entry(raw, g, start, &mut |e| {
+            if let Some(x) = file_entry(e).filter(|x| x.name.eq_ignore_ascii_case(name)) {
+                hit = Some(x);
+                return false;
+            }
+            true
+        });
+        hit
+    };
+    if let Some(d) = dir_of(name).and_then(|d| dir_start(raw, g, &d)) {
+        if let Some(x) = look(raw, Some(d)) {
+            return Some(x);
         }
     }
-    None
+    look(raw, None)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -770,10 +770,6 @@ impl App {
             self.toast(now, if self.scope.s.run { "Please stop sample" } else { "No record to save" }, false);
             return;
         }
-        if crate::msc::host_mounted() {
-            self.toast(now, "Disk in use by PC - eject first", false);
-            return;
-        }
         if crate::screenshot::busy() || crate::csvlog::writing() {
             self.toast(now, "Disk busy, try again", false);
             return;

@@ -138,6 +138,16 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
     let (div, why) = crate::spiflash::clock();
     s.put_bytes(if div == 4 { b",SPICLK,4," } else { b",SPICLK,16," });
     s.put_bytes(why.name());
+    // FATDIR,<ok>,<created>,<failed>: fatdir::boot (LOGS / SHOTS / SCOPE on
+    // the SPI disk), bit i = fatdir::DIRS[i].
+    let f = crate::fatdir::boot_result();
+    s.put_bytes(b",FATDIR,");
+    for (i, v) in [f.ok, f.created, f.failed].iter().enumerate() {
+        s.put_bytes(&[b'0' + v / 10 % 10, b'0' + v % 10][(*v < 10) as usize..]);
+        if i < 2 {
+            s.put_bytes(b",");
+        }
+    }
 }
 
 /// Board bring-up + fatren + calibration backup, then fw-rs main (normal mode).
@@ -180,6 +190,13 @@ fn pre_main(dry: bool) {
     // USB. Not a dry run in T1: it only creates its own files; it never
     // touches dm40*.bin or _DM40PRV.BIN names.
     crate::calbackup::boot();
+    boot::feed();
+    // LOGS/ SHOTS/ SCOPE/ for our files (fatdir.rs): created on the first
+    // boot (~1 s), nothing written afterwards.
+    {
+        let mut disk = crate::spiflash::SpiFlash::new();
+        crate::fatdir::boot(&mut disk);
+    }
     boot::feed();
     // The read-only information volume (USB LUN 1): file table + CRC-32s of
     // the sources (~0.1 s), before USB.

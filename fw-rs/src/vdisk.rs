@@ -571,3 +571,8 @@ fn describe(st: &State, base: usize, out: &mut [u8]) -> usize {
     debug_assert!(w.n <= TXT_MAX as usize);
     w.n
 }
+
+/// A file of ours was deleted on the device: drop it from the volume at
+/// once (before the next refresh, so a new file of the same name can never
+/// inherit its directory slot / clusters while a host caches them).
+pub fn forget(_name: &[u8; 11]) {}

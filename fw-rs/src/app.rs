@@ -53,8 +53,6 @@ const RUN_LONG_MS: u64 = 1000;
 const BAND_MS: u64 = 4000;
 /// Scope drags kept for DBG:GEST?.
 const GEST_N: usize = 32;
-/// Toast when a PC has the USB disk mounted (screenshot / CSV start, M2).
-const DISK_IN_USE: &str = "Disk in use by PC - eject first";
 
 /// "Jack alerts" setting value (Settings 3/3) of an alert mask.
 fn alert_mask_name(b: &mut [u8; 16], m: u8) -> &str {
@@ -1893,10 +1891,6 @@ impl App {
     fn screenshot(&mut self, now: u64) {
         let ok = crate::screenshot::start();
         self.beep(now, if ok { 60 } else { 300 });
-        if !ok && crate::msc::host_mounted() {
-            // M2: a PC has the disk mounted; its cached FAT would go stale.
-            self.toast(now, DISK_IN_USE, false);
-        }
     }
 
     /// UF-28: before the idle power-off, "Auto power-off in 30 s" (20, 10)
@@ -1986,7 +1980,7 @@ impl App {
 
     /// Start a CSV recording of the current DMM function (DMM page swipe
     /// down, SCPI LOG:CSV ON). False: no reading of the function yet, a
-    /// recording is already running, or a PC has the disk mounted.
+    /// recording is already running.
     pub fn rec_start(&mut self, now: u64) -> bool {
         let Some(r) = self.meter.live().copied() else { return false };
         let func = crate::meter::func_of(&r);
@@ -2009,8 +2003,7 @@ impl App {
             self.toast(now, "Recording CSV", true);
         } else {
             self.beep(now, 300);
-            let why = if crate::msc::host_mounted() { DISK_IN_USE } else { "No reading to log" };
-            self.toast(now, why, false);
+            self.toast(now, "No reading to log", false);
         }
     }
 

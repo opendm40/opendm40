@@ -147,6 +147,42 @@ pub(crate) struct Vol {
     pub root_entries: u32,
     /// Data clusters (valid cluster numbers 2..=clusters + 1).
     pub clusters: u32,
+    /// Directory view (src/fatdir.rs): 0 = the root directory; else a
+    /// subdirectory whose cluster chain is `dcl[..dn]` (`dblocks` /
+    /// `dentries` / `dlba` address either one). `parse_bpb` gives the root.
+    pub dn: u8,
+    pub dcl: [u16; DIR_MAX_CL],
+}
+
+/// Clusters of a subdirectory at most (src/fatdir.rs; 16 x 4 KiB = 2048
+/// entries on this disk).
+pub(crate) const DIR_MAX_CL: usize = 16;
+
+impl Vol {
+    /// Blocks of the directory this view addresses (the root or `dcl`).
+    pub fn dblocks(&self) -> u32 {
+        if self.dn == 0 { self.root_blocks } else { self.dn as u32 * self.spc }
+    }
+    /// Entry slots of that directory.
+    pub fn dentries(&self) -> u32 {
+        if self.dn == 0 { self.root_entries } else { self.dblocks() * (BLK / 32) as u32 }
+    }
+    /// LBA of directory block `b` (< `dblocks()`).
+    pub fn dlba(&self, b: u32) -> u32 {
+        if self.dn == 0 {
+            self.root_start + b
+        } else {
+            self.clba(self.dcl[(b / self.spc) as usize] as u32) + b % self.spc
+        }
+    }
+    /// First LBA of cluster `c`.
+    pub fn clba(&self, c: u32) -> u32 {
+        self.data_start + (c - 2) * self.spc
+    }
+    /// The root view of the same volume.
+    pub fn root(&self) -> Vol {
+        Vol { dn: 0, ..*self }
+    }
 }
 
 pub(crate) fn le16(b: &[u8], o: usize) -> u32 {
@@ -199,6 +235,8 @@ pub(crate) fn parse_bpb(b: &[u8], dev_blocks: u32) -> Option<Vol> {
         root_blocks,
         root_entries,
         clusters,
+        dn: 0,
+        dcl: [0; DIR_MAX_CL],
     })
 }
 
