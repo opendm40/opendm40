@@ -1752,6 +1752,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         {
             SpiBytes++;
             if(!selected || Core == null) return doLevel ? (byte)0xFF : (byte)0x00;
+            // DI comes from the SPI here, not from the PC12 GPIO level: keep the
+            // GPIO's view of the line (OnGPIO only reports changes of it).
+            var gpioMosi = mosi;
             var rx = 0;
             for(var i = 7; i >= 0; i--)
             {
@@ -1760,6 +1763,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 OnRising();
                 OnFalling();
             }
+            mosi = gpioMosi;
             return (byte)rx;
         }
 

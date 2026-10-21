@@ -304,6 +304,7 @@ pub enum Log {
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
 ///   DBG:HYSPI:SELF? n[,div]  HY3131 bus self-test (src/hyspi.rs)
+///   DBG:HYSPI:DIAG p,..[?] / RAW?  SPI2 bring-up knobs + raw capture (remove before final)
 ///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
 ///   DBG:RELEASE             stop feeding the watchdog. RAM: back to stock in ~20 s.
 ///                           Native: the WDT reset counts as a crash (1st: fw-rs
@@ -335,8 +336,11 @@ pub enum Dbg {
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level).
     Ad2(u8, u8, u16, u8),
-    /// DBG:HYSPI:SELF? n[,div] (src/hyspi.rs): (n, div; 0 = the build's).
-    HySpi(u16, u8),
+    /// DBG:HYSPI (src/hyspi.rs): (kind 0 SELF? n[,div] | 1 DIAG? | 2 RAW?,
+    /// n, div; 0 = the current). DIAG / RAW: SPI2 bring-up, remove before final.
+    HySpi(u8, u16, u8),
+    /// DBG:HYSPI:DIAG p0,..,p9 (0xFFFF = keep; hy3131::P_*).
+    HySpiDiag([u16; 10]),
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
@@ -1135,7 +1139,18 @@ impl Scpi {
                     let d = match (parts.get(2).copied(), query) {
                         (Some(b"SELF"), true) => {
                             let n = parse_num(first).map_or(100, |v| v as u32).clamp(1, crate::hyspi::N_MAX);
-                            Some(Dbg::HySpi(n as u16, div))
+                            Some(Dbg::HySpi(0, n as u16, div))
+                        }
+                        (Some(b"DIAG"), true) => Some(Dbg::HySpi(1, 0, 0)),
+                        (Some(b"RAW"), true) => Some(Dbg::HySpi(2, 0, 0)),
+                        (Some(b"DIAG"), false) => {
+                            let mut p = [0xFFFFu16; 10];
+                            for (i, f) in a.split(|&b| b == b',').map(trim).take(10).enumerate() {
+                                if let Some(v) = parse_num(f) {
+                                    p[i] = (v as u32).min(0xFFFE) as u16;
+                                }
+                            }
+                            Some(Dbg::HySpiDiag(p))
                         }
                         _ => None,
                     };

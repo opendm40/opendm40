@@ -21,7 +21,8 @@ namespace Hy3131Tests
         /// External drive (the chip's DO into our MISO pin).
         public void OnGPIO(int number, bool value) { Level[number] = value; }
         /// MCU drive of an output pin.
-        public void Drive(int pin, bool v) { Level[pin] = v; Connections[pin].Set(v); }
+        /// Reports changes only, as GD32_GPIO does.
+        public void Drive(int pin, bool v) { if(Level[pin] == v) return; Level[pin] = v; Connections[pin].Set(v); }
     }
 
     public class Master

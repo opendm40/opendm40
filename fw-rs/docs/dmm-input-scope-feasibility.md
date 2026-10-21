@@ -674,3 +674,48 @@ hy3131.rs), all bad at every divider at the pin mux / AF, errors only at /16
 at the isolator margin (then make /32 the bus). On a pass: remove the
 fallback feature and the bit-banged code.
 
+
+### 8.5 Device result of 8e5efa6 and the DIAG image (2026-10-22)
+
+Calibrator 1.000 V DC on V/COM. SPI2 build: DC V READ? = -0.0002 V (wrong);
+`SELF? 2000` -> `16,2000,0,1024,508,0,7.71,21.38,68.33,7.26`; `,32` ->
+`32,2000,0,965,505,0,12.57,...`; `,8` -> `8,2000,65,1745,626,0,5.31,...`.
+Bit-bang build of the same commit: DC V 0.99978 V; `SELF? 500` ->
+`0,500,0,257,0,0,51.87,144.00,457.66,58.72`.
+
+Reading it:
+- r1 (1-byte read of a constant row byte, pulse framing) is clean at /16 and
+  /32: mode 0, AF6, the GPIO read-period pulse and the data-phase sampling
+  work. /8: 65 errors = the DO-path margin of 8.2, as predicted.
+- us_r1 7.71 at /16 = 16 clocks x 320 ns + ~2.6 us, 12.57 at /32 = 16 x 640
+  + ~2.3 us: APB1 is 50 MHz and the PSC coding is right.
+- w1 (write R36, read back) fails ~25 % at /16 AND /32: independent of the
+  bit period -> a fixed-time quantity at a frame boundary, not SPI edge
+  timing. Candidates: CS hold after the last clock (~100 ns), CS high
+  between frames (~500 ns), CS setup (~200 ns); the bit-banged bus had ~1 us
+  for each. The HY3131 runs on a 4.9152 MHz SYSCLK (203 ns): a write commit
+  or CS sampling synchronised to it and lost on a per-frame phase basis
+  gives exactly a divider-independent fraction. DC V wrong fits: single-byte
+  config writes (R22, R23, INTE, R26 / R34 enables) lost one time in four.
+- r23 is unusable as evidence: 51 % "bad" on the bit-banged bus too (the
+  reference was one read; bytes of the row change between reads). SELF? now
+  takes 8 bit-banged reads and masks live bytes (reported as `..`).
+
+The DIAG image (this commit; REMOVE the DIAG pieces before the final bus):
+every bus parameter is runtime (`DBG:HYSPI:DIAG div,cpol,cpha,frame,setup,
+hold,idle,phi,plo,ospeed`, `DIAG?` also prints DWT cycles of spin(1000)),
+`DBG:HYSPI:RAW?` (256 values into R36 three ways: A SPI2 write / bit-bang
+read, B bit-bang write / SPI2 read, C SPI2 both; each mismatch with the
+previous value written, so `got = previous` = a lost write), SELF? on the
+current parameters with the masked reference. Every scratch write is
+followed by an empty write frame to R00 so a missed CS high could only put
+0x00 into R37 (test mode). Defaults = 8e5efa6's constants (the first run
+reproduces); frame 2 = bit-bang at run time for comparison.
+
+First device runs (in this order): `DIAG?` (spin calibration); `RAW?` with
+the defaults (classify: A failures = write side, B = read side, got =
+previous = write lost); `DIAG ,,,,40,40,40` (~1 us setup / hold / idle like
+bit-bang) then `READ?` on the 1 V calibrator + `SELF? 2000` + `RAW?`; if
+that is clean, bring hold and idle down separately (20, 10, 5) to find the
+cliff, and set the final constants at >= 2x it. The emulator cannot show
+any of this (SPI bytes are instantaneous, the model has no SYSCLK phase).
