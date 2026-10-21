@@ -53,7 +53,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             Array.Clear(regs, 0, regs.Length);
             intf = 0; ctbov = false; acpo = false;
             ad1Start = now; ad1Done = 0; ad1Code = 0; ad1Last = now;
-            ad2Start = now; lpfStart = now; lpfDone = 0;
+            ad2Start = now; ad2Done = 0; lpfStart = now; lpfDone = 0;
             lpfCode = 0; rmsVal = 0; ad2Code = 0;
             pkhMin = 0x3FFFF; pkhMax = -0x40000;
             ctEnabled = false; ctStart = double.NaN; ctStop = double.NaN;
@@ -166,11 +166,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case 0x26:
                 if(((old ^ masked) & 0x80) != 0)
                 {
-                    ad2Start = now;
+                    ad2Start = now; ad2Done = 0;
                     if((masked & 0x80) == 0) ad2Code = 0;
                     RestartLpf(now);
                 }
-                else if(old != masked) { ad2Start = now; RestartLpf(now); }
+                else if(old != masked) { ad2Start = now; ad2Done = 0; RestartLpf(now); }
                 break;
             case 0x29:
                 if((masked & 0x40) == 0) lpfCode = 0;
@@ -253,6 +253,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public int ForcedAd1 = int.MinValue;   // SetAd1: raw code override
         public int ForcedAd2 = int.MinValue;
         public ulong Rewrites;                 // configuration writes (R20..R35)
+        public long Ad2Conversions;            // AD2 results produced so far (tests)
         public void ForceIntf(byte bits) { intf |= bits; }
         public int Intf => intf;
         public int Ad1Code => ad1Code;
@@ -420,15 +421,31 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(EnPkh && (regs[0x29] & 3) == 1) PeakHold(ad1Code >> 5);
         }
 
+        /// One AD2 result per conversion period on the grid from the last (re)start (as AD1):
+        /// AD2F set once per result, R03..R05 = the input at the grid point plus the
+        /// per-sample noise (Ad2NoiseCodes). A register that is not read is overwritten
+        /// (no FIFO). The chip advances only at CS low (the Renode peripheral calls Update
+        /// there), so a read is never torn here; whether the device latches R03..R05 during
+        /// a read is device test 6.2 (docs/dmm-input-scope-feasibility.md 1.4, DBG:AD2:TORN?).
         private void UpdateAd2(double now)
         {
             if(!EnAd2) return;
-            if(now - ad2Start < Ad2Period) return;
+            var p = Ad2Period;
+            var n = (long)Math.Floor((now - ad2Start) / p);
+            if(n <= ad2Done) return;
+            Ad2Conversions += n - ad2Done;
+            ad2Done = n;
+            var t = ad2Start + n * p;
             intf |= 0x02;
-            var x = ForcedAd2 != int.MinValue ? ForcedAd2 : Ad2Sample(now);
-            ad2Code = Clamp19(Sdo23 ? x : x);
+            var x = ForcedAd2 != int.MinValue ? ForcedAd2 : Ad2Sample(t) + (int)Math.Round(Gauss() * Ad2NoiseCodes);
+            ad2Code = Clamp19(x);
             if(EnPkh && (regs[0x29] & 3) == 0) PeakHold(ad2Code);
         }
+
+        /// Per-result AD2 noise, codes rms: the device floor of the stock AC rows (~30
+        /// codes at OSR2 = 32, acdc doc 6a/6b) scaled as white noise by the modulator
+        /// samples per result (OSR2, x2 chopped). A model, not a measurement (test 6.4).
+        public double Ad2NoiseCodes => 30.0 * NoiseScale * Math.Sqrt(32.0 / (Osr2 * ((regs[0x26] & 0x20) != 0 ? 2 : 1)));
 
         private void UpdateLpf(double now)
         {
@@ -1048,6 +1065,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private void DeriveRole(double now)
         {
             var best = -1; var bestScore = int.MaxValue;
+            // fw-rs data logger, AD2 source (hy3131::set_ad2_stream): an AC row with AD3, RMS and
+            // LPF switched off (R34 = 0, R29 = 0) and another AD2 rate in R26: still that row.
+            var ad2Stream = EnAd2 && !EnAd3 && regs[0x29] == 0;
             for(var i = 0; i < Rows.Length; i++)
             {
                 var row = Rows[i];
@@ -1069,6 +1089,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     }
                     if(j == 9) mask = 0xF8;
                     if(j == 12 && (row.Role == Role.DcA || row.Role == Role.AcA)) mask = 0xEF;
+                    if(ad2Stream && (j == 9 || j == 20)) mask = 0;
                     var d = (row.Bytes[j] ^ regs[0x20 + j]) & mask;
                     if(d != 0) score += BitCount(d) * (j == 0 ? 1 : 2);
                 }
@@ -1110,11 +1131,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         // Compare masks per configuration byte R20..R35 (0 = ignored): R20 ignored (the counter and
         // comparator source bits change at run time: Hz mode alternates 0xF2 / 0x0A),
-        // R21 / R22 / R36 ignored, R26 / R34 without the enable bits (fw-rs sets them after the
-        // row), R31 without SFUVR (ohm variants), R32 without ENOP1 / SOP1P (AC+DC writes 0x38
+        // R21 / R22 / R36 ignored, R26 only AD2RG (the enable bit: fw-rs sets it after the row; the
+        // rate bits: the data logger's AD2 rungs), R34 without the enable bit, R31 without SFUVR (ohm variants), R32 without ENOP1 / SOP1P (AC+DC writes 0x38
         // after the DC V row), R33 without SAD1I (temperature phases).
         private static readonly int[] RowMask = {
-            0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0xF7, 0xFC, 0x7F, 0xFF };
+            0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0xF7, 0xFC, 0x7F, 0xFF };
 
         // Stock DM40 V2.6 configuration rows (firmware/re/analysis/hy3131_v2_6.h) with their role.
         private static readonly RowDef[] Rows = {
@@ -1193,7 +1214,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private byte intf;
         private bool ctbov, acpo, beatBad;
         private double ad1Start, ad1Last, ad2Start, ad3Start, lpfStart, lastUpdate;
-        private long ad1Done, lpfDone;
+        private long ad1Done, ad2Done, lpfDone;
         private int ad1Code, ad2Code, lpfCode, pkhMin, pkhMax;
         private long rmsVal;
         private bool ctEnabled, ctStartDecided;

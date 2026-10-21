@@ -199,13 +199,34 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///                           but leaves the converter offset in the samples
 ///                           and adds low-frequency noise; takes effect at START
 ///   LOG:CHOP?               1 / 0
+///   LOG:SOURce AD1|AD2      converter (default AD1; takes effect at START).
+///                           AD1: DC V / mV / A modes, LOG:OSR + LOG:CHOP.
+///                           AD2 (FR-38 B): the stock AC rows, AC mV and AC A /
+///                           mA / uA DC-coupled, AC V AC-coupled (~0.5 Hz);
+///                           rate LOG:SRATe, LOG:CHOP = ENCHOPAD2 (logger.rs)
+///                           ("Settings conflict" while a session runs)
+///   LOG:SOURce?             AD1 / AD2
+///   LOG:SRATe <S/s>         requested AD2 rate; the nearest rung of 600, 1200,
+///                           2400, 4800, 9600 (chop OFF: 1200..9600) is used
+///                           (default 2400); takes effect at START
+///   LOG:SRATe?              the requested rate
 ///   LOG:RATE?               measured mean sample rate, Hz (0 until 2 samples)
-///   LOG:COUNt?              buffered,captured,overwritten,missed
-///   LOG:PREamble?           mode,range,osr,nominal_us,measured_hz,chop (scaling:
-///                           raw AD1 counts, 1.389 V / 8388607 cts * range decade;
-///                           calibration gain/offset NOT applied)
+///   LOG:COUNt?              buffered,captured,overwritten,missed,lost (lost =
+///                           conversions not captured, from the span and the
+///                           nominal period; missed = the per-gap estimate)
+///   LOG:GAPs?               bad,max_gap_us,g2,g3_4,g5_16,g17_128,g129 (bad =
+///                           AD2 reads dropped as torn; gN = gaps of N periods)
+///   LOG:PREamble?           mode,range,osr,nominal_us,measured_hz,chop,source,
+///                           req_hz,nominal_mhz,r26,coupling (source 0 AD1 / 1
+///                           AD2; osr = AD1OSR or AD2OSR code; r26 = AD2 R26 low
+///                           bits; coupling 0 DC / 1 AC). Scaling: AD1 raw
+///                           counts, 1.389 V / 8388607 cts * range decade; AD2
+///                           +-262143 codes = +-1.25 V at the AD2 input (IG
+///                           1.0), times the stock range factor (mV: /x10 or
+///                           x1 op gain; A: / (shunt * op gain); AC V: the
+///                           divider); calibration gain/offset NOT applied
 ///   LOG:DATA?               definite-length #4nnnn block of 12-byte LE records
-///                           {u32 seq, u32 ts_us, i32 raw_ad1}, oldest first
+///                           {u32 seq, u32 ts_us, i32 raw}, oldest first
 ///   LOG:CSV ON|OFF          CSV recording of the DMM readings to the USB disk
 ///                           (csvlog.rs; as the DMM page swipe down). ON is
 ///                           USB only: refused over Bluetooth ("Command
@@ -218,6 +239,11 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 #[derive(Clone, Copy)]
 pub enum Log {
     State(Option<bool>),
+    /// LOG:SOURce AD1 (false) | AD2 (true).
+    Source(Option<bool>),
+    /// LOG:SRATe <S/s> (AD2).
+    SRate(Option<u32>),
+    Gaps,
     Osr(Option<u8>),
     Chop(Option<bool>),
     Rate,
@@ -299,6 +325,10 @@ pub enum Dbg {
     Reset,
     /// DBG:PROF? (false) / DBG:PROF:RESET (true).
     Prof(bool),
+    /// DBG:AD2:TORN? r26,n[,SYNC] / NOISE? r26,n[,op1chop] / DRAW 0|1|2
+    /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
+    /// = the row's), 2 draw (r26 = level).
+    Ad2(u8, u8, u16, u8),
 }
 
 fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
@@ -803,6 +833,26 @@ impl Scpi {
                         None => self.err = Some("Undefined header"),
                     }
                 }
+                // AD2 device experiments (src/ad2exp.rs, main.rs).
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"AD2"[..]) => {
+                    let a = trim(arg);
+                    let v = nums::<2>(a);
+                    let third = a.split(|&b| b == b',').nth(2).map(trim);
+                    let n = v[1].clamp(1, 2000) as u16; // ad2exp::N_MAX
+                    let r26 = (v[0] & 0x3F) as u8;
+                    let d = match (parts.get(2).copied(), query) {
+                        (Some(b"TORN"), true) => Some(Dbg::Ad2(0, r26, n, third.is_some_and(|t| kw(t, "SYNChronous")) as u8)),
+                        (Some(b"NOISE"), true) => {
+                            Some(Dbg::Ad2(1, r26, n, third.and_then(parse_num).map_or(255, |c| (c as u8).min(3))))
+                        }
+                        (Some(b"DRAW"), false) => Some(Dbg::Ad2(2, (v[0].min(2)) as u8, 0, 0)),
+                        _ => None,
+                    };
+                    match d {
+                        Some(d) => out = Out::Dbg(d),
+                        None => self.err = Some("Undefined header"),
+                    }
+                }
                 _ if p0 == b"DBG" => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     let a = trim(arg);
@@ -882,6 +932,26 @@ impl Scpi {
                     let a = trim(arg);
                     out = if kw(sub, "STATe") {
                         Out::Log(Log::State(if query { None } else { Some(a == b"ON" || a == b"1") }))
+                    } else if kw(sub, "SOURce") {
+                        if query {
+                            Out::Log(Log::Source(None))
+                        } else if a == b"AD2" || a == b"AD1" {
+                            Out::Log(Log::Source(Some(a == b"AD2")))
+                        } else {
+                            self.err = Some("Illegal parameter value");
+                            continue;
+                        }
+                    } else if kw(sub, "SRATe") {
+                        match (query, parse_num(a)) {
+                            (true, _) => Out::Log(Log::SRate(None)),
+                            (false, Some(v)) if v >= 1.0 && v <= 1.0e6 => Out::Log(Log::SRate(Some(v as u32))),
+                            _ => {
+                                self.err = Some("Illegal parameter value");
+                                continue;
+                            }
+                        }
+                    } else if kw(sub, "GAPs") && query {
+                        Out::Log(Log::Gaps)
                     } else if kw(sub, "OSR") {
                         Out::Log(Log::Osr(if query { None } else { Some(parse_num(a).unwrap_or(0.0) as u8) }))
                     } else if kw(sub, "CHOP") {

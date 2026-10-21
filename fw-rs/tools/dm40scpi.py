@@ -18,6 +18,22 @@ transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:0001) or Bluetooth
                                               '#' header lines (model, fw,
                                               function, CONFigure?); Ctrl-C
                                               ends it cleanly
+    dm40scpi.py log out.csv --source ad2 [--rate 2400] [--chop on|off] -d 10
+                                              FR-38 fast stream (LOG:* SCPI, USB
+                                              only): every conversion of the
+                                              HY3131 AD1 (DC rows, --osr) or AD2
+                                              (AC mV / AC A rows DC-coupled, AC V
+                                              AC-coupled; 600..9600 S/s) with
+                                              seq, device time, raw code, the
+                                              scaled value (AD2) and the
+                                              conversions lost before each row;
+                                              requested vs measured rate and the
+                                              loss statistics in the trailer
+    dm40scpi.py ad2 torn|noise [-n 2000] [--sync] [--rungs ...]
+                                              AD2 device experiments (fw-rs
+                                              DBG:AD2:TORN? / NOISE?, meter in an
+                                              AC mV / A row): torn-read
+                                              histogram / noise and ENOB per rung
     dm40scpi.py get LOG000.CSV [-o f.csv]     copy a disk file (MMEM:DATA?): a
                                               LOGnnn.CSV is generated from the
                                               binary LOGnnn.DLG on the meter
@@ -29,6 +45,9 @@ transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:0001) or Bluetooth
                                               09) every P ms like the app, print
                                               replies/s, latency and how often
                                               the value changed
+
+Emulator: --usbip BUSID (e.g. 1-0; USBIP_PORT=3293 for a server on another
+port) talks USBTMC to emu/run.py ... --usbip through emu/usbip_client.py.
 
 Bluetooth options (with --bt): --mac AA:BB:.. (or DM40_MAC; found via
 bluetoothctl when omitted), --dev /dev/rfcomm0, --rescan. Close the phone app
@@ -101,6 +120,28 @@ class BtLink:
 
     def close(self):
         self.l.close()
+
+
+class UsbipLink:
+    """USBTMC over the emulator's USB/IP server (emu/usbip_client.py)."""
+
+    def __init__(self, busid):
+        sys.path.insert(0, os.path.join(HERE, '..', '..', 'emu'))
+        import usbip_client
+        self.t = usbip_client.Usbtmc(usbip_client.Dev(busid))
+
+    def query(self, line):
+        self.t.write(line)
+        if not any(c.strip().split(None, 1)[0].endswith('?') for c in line.split(';') if c.strip()):
+            return None
+        return self.t.read(maxlen=8192, timeout=20).decode(errors='replace').strip()
+
+    def query_raw(self, line):
+        self.t.write(line)
+        return self.t.read(maxlen=8192, timeout=20)
+
+    def close(self):
+        pass
 
 
 def scpi_func(name):
@@ -200,6 +241,161 @@ def do_log(link, args):
     if not args.quiet:
         print()
     print('%s: %d readings' % (args.out, n))
+    return 0
+
+
+# ---------------------------------------------------------- FR-38 fast stream
+# AD2 scaling (dmm.rs poll_ac, docs/dmm-input-scope-feasibility.md 3.3): code =
+# IG * Vin / VR * 2^18 with IG = 1.0 and VR = 1.25 V in every stock AC row.
+AD2_V = 1.25 / 262144.0
+K_ACV = [10.0, 100.0, 1000.0, 10000.0]   # AC V divider per range (AC-coupled)
+MV_DIV = [10.0, 1.0]                      # OP gain per range (mV, A rows)
+SHUNT = {4: 0.01, 5: 0.5, 6: 47.5}        # ohm: A, mA, uA
+
+
+def ad2_scale(mode, rng):
+    """(SI per code, unit) of an AD2 code in DMM mode / range; calibration
+    gain / offset not applied (the stock LPF cal would be the DC scale)."""
+    if mode == 0:
+        return AD2_V * K_ACV[min(rng, 3)], 'V'
+    if mode == 2:
+        return AD2_V / MV_DIV[min(rng, 1)], 'V'
+    if mode in SHUNT:
+        return AD2_V / (SHUNT[mode] * MV_DIV[min(rng, 1)]), 'A'
+    return None, ''
+
+
+def check_err(link, what):
+    e = link.query('SYST:ERR?') or ''
+    if e and not e.startswith('0') and not e.startswith('+0'):
+        raise IOError('%s: %s' % (what, e))
+
+
+def log_records(raw):
+    """(seq, ts_us, code) of a LOG:DATA? #4nnnn block."""
+    import struct
+    if not raw.startswith(b'#4'):
+        raise IOError('LOG:DATA? answered %r' % bytes(raw[:20]))
+    n = int(raw[2:6])
+    d = raw[6:6 + n]
+    return [struct.unpack_from('<IIi', d, o) for o in range(0, n - n % 12, 12)]
+
+
+def do_stream(link, args):
+    if args.bt:
+        print('dm40scpi: warning: Bluetooth carries ~1 kS/s at best; the ring overflows (seq gaps)', file=sys.stderr)
+    if args.conf:
+        switch(link, args.conf)
+    ad2 = args.source == 'ad2'
+    link.query('LOG:SOUR %s' % ('AD2' if ad2 else 'AD1'))
+    if args.chop:
+        link.query('LOG:CHOP %s' % args.chop.upper())
+    if ad2:
+        link.query('LOG:SRAT %d' % args.rate)
+    elif args.osr is not None:
+        link.query('LOG:OSR %d' % args.osr)
+    check_err(link, 'LOG settings')
+    link.query('LOG:STAT ON')
+    check_err(link, 'LOG:STAT ON (AD2: AC mV / AC A / AC V; AD1: DC V / mV / A)')
+    pre = [int(x) for x in link.query('LOG:PRE?').split(',')]
+    mode, rng, osr, nom_us, _, chop = pre[:6]
+    req, nom_mhz, r26, coupling = (pre[7], pre[8], pre[9], pre[10]) if len(pre) > 10 else (0, 0, 0, 0)
+    period_us = 1e9 / nom_mhz if nom_mhz else float(nom_us)
+    scale, unit = ad2_scale(mode, rng) if ad2 else (None, '')
+    rows, last_seq, last_ts, wrap = 0, None, None, 0
+    t_start = time.monotonic()
+    with open(args.out, 'w', newline='') as f:
+        f.write('# source,%s\n# mode,%d\n# range,%d\n# chop,%d\n' % (args.source.upper(), mode, rng, chop))
+        if ad2:
+            f.write('# requested_sps,%d\n# nominal_sps,%.3f\n# r26,0x%02X\n# coupling,%s\n'
+                    % (req, nom_mhz / 1000.0, r26, 'AC' if coupling else 'DC'))
+            f.write('# scale,%.9g %s/code (IG 1.0, VR 1.25 V, stock range factor; calibration NOT applied)\n' % (scale or 0, unit))
+        else:
+            f.write('# osr,%d\n# nominal_period_us,%d\n# scale,raw AD1 counts (1.389 V / 8388607 * range decade, uncalibrated)\n' % (osr, nom_us))
+        f.write('# start,%s\n' % iso_now())
+        f.write('seq,t_s,raw,%s,lost_before\n' % ('value_' + unit if ad2 else 'value'))
+
+        def drain():
+            nonlocal rows, last_seq, last_ts, wrap
+            got = 0
+            while True:
+                recs = log_records(link.query_raw('LOG:DATA?'))
+                for seq, ts, code in recs:
+                    if last_ts is not None and ts < last_ts:
+                        wrap += 1 << 32
+                    t = (ts + wrap) / 1e6
+                    lost = 0
+                    if last_seq is not None:
+                        # conversions between two kept rows: from the time (stalls) or the seq (ring overflow)
+                        lost = max(round((ts + wrap - last_t_us[0]) / period_us) - 1, seq - last_seq - 1, 0)
+                    last_t_us[0] = ts + wrap
+                    f.write('%d,%.6f,%d,%s,%d\n' % (seq, t, code, '%.7g' % (code * scale) if scale else '', lost))
+                    last_seq, last_ts = seq, ts
+                    rows += 1
+                got += len(recs)
+                if len(recs) < 500:
+                    return got
+
+        last_t_us = [0]
+        try:
+            while True:
+                if args.duration and time.monotonic() - t_start >= args.duration:
+                    break
+                if args.n and rows >= args.n:
+                    break
+                if drain() == 0:
+                    time.sleep(0.005)
+                if not args.quiet:
+                    print('\r%d samples   ' % rows, end='', flush=True)
+        except KeyboardInterrupt:
+            pass
+        link.query('LOG:STAT OFF')
+        drain()
+        cnt = [int(x) for x in link.query('LOG:COUN?').split(',')]
+        gaps = (link.query('LOG:GAP?') or '').strip()
+        hz = int(link.query('LOG:RATE?') or 0)
+        f.write('# end,%s\n# measured_sps,%d\n# count,buffered %d captured %d overwritten %d missed %d lost %d\n'
+                % (iso_now(), hz, *(cnt + [0] * 5)[:5]))
+        f.write('# gaps,bad max_gap_us g2 g3_4 g5_16 g17_128 g129+: %s\n' % gaps.replace(',', ' '))
+    if not args.quiet:
+        print()
+    lost = cnt[4] if len(cnt) > 4 else 0
+    due = cnt[1] + lost
+    print('%s: %d samples; requested %s S/s, chip %.1f S/s, measured %d S/s; lost %d of %d (%.2f %%), '
+          'ring overwritten %d; gaps (bad,max_us,2,3-4,5-16,17-128,>128) %s'
+          % (args.out, rows, req if ad2 else '-', (nom_mhz / 1000.0) if nom_mhz else 1e6 / max(nom_us, 1), hz,
+             lost, due, 100.0 * lost / max(due, 1), cnt[2], gaps))
+    return 0
+
+
+def do_ad2(link, args):
+    """Sweep DBG:AD2:TORN? / NOISE? over R26 rungs (ad2exp.rs)."""
+    import math
+    # Refused (no reply: the query would time out) outside an AC row or while logging.
+    f = (link.query('FUNC?') or '').strip('"').upper()
+    if f not in ('VOLT:AC', 'CURR:AC') or (link.query('LOG:STAT?') or '0').strip() != '0':
+        sys.exit('dm40scpi: ad2 needs AC V / AC mV / AC A (not AC+DC) and no log session (FUNC? %s)' % f)
+    rungs = [int(x, 0) for x in args.rungs.split(',')] if args.rungs else \
+        [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x2D]
+    for r26 in rungs:
+        if args.what == 'torn':
+            r = link.query('DBG:AD2:TORN? %d,%d%s' % (r26, args.n, ',SYNC' if args.sync else ''))
+            check_err(link, 'DBG:AD2:TORN?')
+            head, hist = r.split(';')
+            v = [int(x) for x in head.split(',')]
+            h = [int(x) for x in hist.split(',')]
+            print('r26 0x%02X %7.0f S/s n %d timeouts %d same %d diff(new conv) %d diff(no conv) %d signbad %d | '
+                  'bits: %s' % (v[0], 1e9 / v[1], v[2], v[3], v[4], v[5], v[6], v[7],
+                                ' '.join('%d:%d' % (k, c) for k, c in enumerate(h) if c)), flush=True)
+        else:
+            r = link.query('DBG:AD2:NOISE? %d,%d%s' % (r26, args.n, (',%d' % args.op1chop) if args.op1chop is not None else ''))
+            check_err(link, 'DBG:AD2:NOISE?')
+            v = [int(x) for x in r.split(',')]
+            sd = v[6] / 1000.0
+            enob = math.log2(2 ** 19 / sd) if sd > 0 else float('inf')
+            print('r26 0x%02X %7.0f S/s n %d timeouts %d signbad %d mean %.1f sd %.2f codes min %d max %d '
+                  'ENOB %.2f readout %.0f us/sample' % (v[0], 1e9 / v[1], v[2], v[3], v[4], v[5] / 1000.0, sd,
+                                                        v[7], v[8], enob, v[9] / max(v[2], 1)), flush=True)
     return 0
 
 
@@ -307,6 +503,7 @@ def main():
     p.add_argument('--dev', help='(--bt) bound serial device, e.g. /dev/rfcomm0')
     p.add_argument('--rescan', action='store_true', help='(--bt) search the address again')
     p.add_argument('--timeout', type=float, default=5.0, help='(--bt) reply timeout, s')
+    p.add_argument('--usbip', metavar='BUSID', help='the emulator\'s USB/IP server (emu/run.py --usbip), e.g. 1-0')
     sub = p.add_subparsers(dest='cmd', required=True)
     s = sub.add_parser('info', help='*IDN?, FUNC?, CONF?')
     s.set_defaults(func_=do_info)
@@ -318,14 +515,25 @@ def main():
     s.add_argument('-i', '--interval', type=float, default=0.0, help='seconds between readings (0 = as fast as they come)')
     s.add_argument('--conf', help='switch to this function first')
     s.set_defaults(func_=do_read)
-    s = sub.add_parser('log', help='log readings to a CSV file')
+    s = sub.add_parser('log', help='log readings (or, with --source, the FR-38 fast stream) to a CSV file')
     s.add_argument('out')
+    s.add_argument('--source', choices=['ad1', 'ad2'], help='FR-38 fast stream from this converter (LOG:SOURce)')
+    s.add_argument('--rate', type=int, default=2400, help='(ad2) requested S/s: 600, 1200, 2400, 4800, 9600 (nearest rung)')
+    s.add_argument('--chop', choices=['on', 'off'], help='(stream) converter chopper (default on; ad2 off: 1200..9600)')
+    s.add_argument('--osr', type=int, help='(ad1) AD1OSR code 0..7')
     s.add_argument('-i', '--interval', type=float, default=1.0)
     s.add_argument('-n', type=int, default=0, help='stop after N readings')
     s.add_argument('-d', '--duration', type=float, default=0, help='stop after S seconds')
     s.add_argument('--conf', help='switch to this function first')
     s.add_argument('-q', '--quiet', action='store_true')
-    s.set_defaults(func_=do_log)
+    s.set_defaults(func_=lambda link, a: (do_stream if a.source else do_log)(link, a))
+    s = sub.add_parser('ad2', help='AD2 device experiments (DBG:AD2:TORN? / NOISE?)')
+    s.add_argument('what', choices=['torn', 'noise'])
+    s.add_argument('-n', type=int, default=2000, help='pairs / samples per rung (max 2000)')
+    s.add_argument('--sync', action='store_true', help='(torn) read right after AD2F instead of blind')
+    s.add_argument('--op1chop', type=int, choices=[0, 1, 2, 3], help='(noise) R33 OP1CHOP for the run')
+    s.add_argument('--rungs', help='R26 low bits, comma separated (default: /2 OSR 32..1024 plain and chopped, 600/s)')
+    s.set_defaults(func_=do_ad2)
     s = sub.add_parser('get', help='copy a disk file (LOGnnn.CSV = generated from LOGnnn.DLG)')
     s.add_argument('name', help='e.g. LOG000.CSV, LOG000.DLG, S000.BMP (MMEM:CAT? lists them)')
     s.add_argument('-o', '--out', help='output file (default: the name)')
@@ -339,7 +547,7 @@ def main():
     s.add_argument('-d', '--duration', type=float, default=10.0)
     s.set_defaults(func_=do_btpoll)
     args = p.parse_args()
-    link = BtLink(args) if args.bt else UsbLink()
+    link = BtLink(args) if args.bt else UsbipLink(args.usbip) if args.usbip else UsbLink()
     try:
         return args.func_(link, args)
     except KeyboardInterrupt:

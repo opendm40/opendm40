@@ -136,48 +136,108 @@ fn log_state() -> &'static mut LogPanel {
     unsafe { &mut *core::ptr::addr_of_mut!(LOG) }
 }
 
+/// What the logger panel shows (main.rs fills it from the Logger).
+#[derive(Clone, Copy)]
+pub struct LogInfo {
+    /// Measured rate, S/s (0 until two samples: the nominal one is shown
+    /// with "~").
+    pub hz: u32,
+    /// Samples captured this session.
+    pub n: u32,
+    /// Nominal (chip) rate, S/s (Logger::nominal_mhz, rounded).
+    pub nominal_hz: u32,
+    /// AD2 source (FR-38 B): the rate row reads "AD2 <measured>/<nominal>".
+    pub ad2: bool,
+    /// Conversions not captured (Logger::lost); 0 = the "Display paused" hint.
+    pub lost: u32,
+}
+
+/// The three text rows of the logger panel (rate, count, hint / loss).
+pub fn log_panel_text(i: &LogInfo, row: usize, t: &mut [u8; 32]) -> usize {
+    let nominal = i.nominal_hz;
+    let mut k = 0;
+    let mut put = |t: &mut [u8; 32], s: &[u8]| {
+        let n = s.len().min(32 - k);
+        t[k..k + n].copy_from_slice(&s[..n]);
+        k += n;
+    };
+    let mut d = [0u8; 10];
+    match row {
+        0 => {
+            if i.ad2 {
+                put(t, b"AD2 ");
+            }
+            if i.hz == 0 && nominal != 0 {
+                put(t, b"~");
+                let n = dec(&mut d, nominal);
+                put(t, &d[..n]);
+            } else {
+                let n = dec(&mut d, i.hz);
+                put(t, &d[..n]);
+                if i.ad2 {
+                    put(t, b"/");
+                    let n = dec(&mut d, nominal);
+                    put(t, &d[..n]);
+                }
+            }
+            put(t, b" Sa/s");
+        }
+        1 => {
+            let n = dec(&mut d, i.n);
+            put(t, &d[..n]);
+            put(t, b" samples");
+        }
+        _ => {
+            if i.lost == 0 {
+                put(t, b"Display paused");
+            } else {
+                put(t, b"lost ");
+                let n = dec(&mut d, i.lost);
+                put(t, &d[..n]);
+                // per mille of the conversions due, one decimal of a percent
+                let pm = (i.lost as u64 * 1000 / (i.lost as u64 + i.n as u64).max(1)) as u32;
+                put(t, b" (");
+                let n = dec(&mut d, pm / 10);
+                put(t, &d[..n]);
+                put(t, b".");
+                let n = dec(&mut d, pm % 10);
+                put(t, &d[..n]);
+                put(t, b"%)");
+            }
+        }
+    }
+    k
+}
+
 /// Call every main-loop pass while logging and drawing is otherwise
 /// allowed. Draws at most ONE part per call (one label, a ~340 x 36 fill +
-/// glyphs, roughly 0.5 ms) so the logger's sampling (one conversion per
-/// ~0.4 ms at the default OSR) loses at most a sample or two per part; the
-/// rate and sample count are refreshed once per second (two passes).
-/// `hz` = measured rate (0 until two samples: the nominal one from
-/// `nominal_us` is shown with "~"), `n` = samples captured this session.
-pub fn log_panel(now: u64, hz: u32, n: u32, nominal_us: u32) {
+/// glyphs, roughly 0.5 ms) so the logger's sampling loses at most a sample
+/// or two per part at AD1 rates (at AD2 rates a part costs several
+/// conversions: LOG:GAPs? shows it); the rate, sample count and loss rows
+/// are refreshed once per second (three passes).
+pub fn log_panel(now: u64, info: LogInfo) {
     let st = log_state();
     let b = LOG_BOX;
     let row = |i: usize| (b.0 + 1, LOG_ROW[i], b.2 - 2, 36);
+    let mut t = [0u8; 32];
     match st.part {
-        0 => centred((b.0, b.1, b.2, 38), "DATA LOGGING", FG, ERR_BG),
-        1 => {
-            let mut t = [0u8; 24];
-            let (k, approx) = if hz == 0 && nominal_us != 0 { (1_000_000 / nominal_us, true) } else { (hz, false) };
-            let mut i = 0;
-            if approx {
-                t[0] = b'~';
-                i = 1;
-            }
-            i += dec(&mut t[i..], k);
-            t[i..i + 5].copy_from_slice(b" Sa/s");
-            centred(row(0), core::str::from_utf8(&t[..i + 5]).unwrap_or(""), FG, BODY_BG);
+        // Letter spacing 2 as the toasts (ASCII26 glyphs touch at 0).
+        0 => centred_sp((b.0, b.1, b.2, 38), "DATA LOGGING", FG, ERR_BG, 2),
+        p @ 1..=3 => {
+            let k = log_panel_text(&info, p as usize - 1, &mut t);
+            let fg = if p == 3 && info.lost == 0 { FRAME } else { FG };
+            centred_sp(row(p as usize - 1), core::str::from_utf8(&t[..k]).unwrap_or(""), fg, BODY_BG, 2);
         }
-        2 => {
-            let mut t = [0u8; 24];
-            let i = dec(&mut t, n);
-            t[i..i + 8].copy_from_slice(b" samples");
-            centred(row(1), core::str::from_utf8(&t[..i + 8]).unwrap_or(""), FG, BODY_BG);
-        }
-        3 => centred(row(2), "Display paused", FRAME, BODY_BG),
         4 => frame(b, FRAME),
         _ => {
             if now >= st.next {
-                st.part = 1; // rate now, count on the next pass
+                st.part = 1; // rate now, count and loss on the next passes
             }
             return;
         }
     }
-    // The hint and the frame are static: a refresh ends after the count.
-    st.part = if st.part == 2 && st.up { 5 } else { st.part + 1 };
+    // The frame is static: a refresh ends after the loss row.
+    st.part = if st.part == 3 && st.up { 5 } else { st.part + 1 };
     if st.part == 5 {
         st.up = true;
         st.next = now + LOG_REFRESH_MS;

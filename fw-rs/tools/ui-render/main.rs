@@ -1345,6 +1345,30 @@ fn main() {
         }
     }
 
+    // 6d. Data-logger panel (FR-38, dialog::log_panel) over the DMM page:
+    //     the widest rows (AD2 measured / nominal, a big loss), AD1 and the
+    //     nominal-only start.
+    for (k, info) in [
+        dialog::LogInfo { hz: 0, n: 0, nominal_hz: 40, ad2: false, lost: 0 },
+        dialog::LogInfo { hz: 9599, n: 4_294_967_295, nominal_hz: 9600, ad2: true, lost: 4_000_000_000 },
+        dialog::LogInfo { hz: 0, n: 0, nominal_hz: 600, ad2: true, lost: 0 },
+        dialog::LogInfo { hz: 638, n: 123_456, nominal_hz: 640, ad2: false, lost: 17 },
+    ]
+    .iter()
+    .enumerate()
+    {
+        host::reset(0);
+        dialog::log_panel_reset();
+        for i in 0..5 {
+            dialog::log_panel(i, *info);
+        }
+        ck.check(&format!("log-panel/{k}"), &[("screen", Bx::new(0, 0, 480, 320))]);
+        if k == 1 {
+            save(&out, "t03-log-panel-ad2");
+        }
+    }
+    dialog::log_panel_reset();
+
     // 7. Gestures: zone table, axis lock, hold-to-grab, Up on captured
     //    touches (gesture.rs through its DBG:DRAG hook).
     {

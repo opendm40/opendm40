@@ -489,9 +489,17 @@ Firmware:
       (verify on device: T7, T9, T10 of the doc; T9 decides PKH_RESTART)
   - [ ] Not done: sentinels in AC+DC / diode / continuity / cap / Hz / AC A, DC? / AC? / FUSE? hints, OVERLOAD
         shunt rule, fuse-check dialog, STAT:QUES bit 9 (doc §4.6).
-- [ ] (B) AD2 fast data logger: 600..9600 S/s above AD1's 640 S/s, ~14 ENOB, gaps marked (seq/timestamps); ~2 days.
-      Doubles as the device experiment for (A): torn-read histogram, loss per rate, SPI2 read-back.
-      docs/dmm-input-scope-feasibility.md.
+- [x] (B) AD2 fast data logger, main-loop (E1, no ISR): LOG:SOURce AD1|AD2, LOG:SRATe 600..9600 (R26 ladder,
+      hy3131::ad2_r26_for), AD2F-gated 19-bit reads with a sign-copy torn-read check, AD3/RMS/LPF off, burst
+      polling (500 us), LOG:COUNt? lost (span-based), LOG:GAPs?, LOG:PREamble? source/req/nominal/r26/coupling,
+      panel "AD2 meas/nominal Sa/s" + loss row; ring unchanged (2048 x 8 B: 213 ms at 9600/s). Rows: AC mV / AC A /
+      mA / uA (DC-coupled), AC V (AC-coupled). Host: dm40scpi.py `log --source ad2 --rate N` (CSV with
+      lost_before), `ad2 torn|noise`; emulator AD2 grid + noise model. Hooks: DBG:AD2:TORN? / NOISE? / DRAW.
+      Emulator only so far (50 MIPS: ~2 kS/s readout, not the device's): docs/dmm-input-scope-feasibility.md 7.
+- [ ] (B) device session (30 min, feasibility doc 7.3): torn reads per OSR, loss per rate with / without redraw,
+      shorted-input ENOB, a waveform; then decide the rate cap and the ISR (E2-E4).
+- [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
+- [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
       V/mV/A on the isolated jacks (current waveforms). Scope UI reused ("Wave" from DMM, MCX|DMM source badge),
       software trigger. Needs one ISR (owner decision; fw-rs is ISR-free) + HY3131 on hardware SPI2; ~2.5-3 weeks.

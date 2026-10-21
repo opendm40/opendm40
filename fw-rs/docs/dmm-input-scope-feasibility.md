@@ -1,7 +1,8 @@
 # DMM inputs as a scope source (AD2 streaming): feasibility
 
-Date 2026-10-21. Research only; no fw-rs source changed. Evaluates two owner
-ideas for the TODO:
+Date 2026-10-21. Sections 0-6: research (no fw-rs source changed then).
+Section 7: (B) implemented on the main loop (E0 + E1), emulator results and
+the 30-minute device plan. Evaluates two owner ideas for the TODO:
 
 * **(A)** a "scope-like" mode on the DMM jacks: switch the HY3131 to its fast
   ADC (AD2), stream raw samples, show them with the stock-scope page, trigger
@@ -530,3 +531,66 @@ jacks; log with `dm40scpi.py`.
 
 Total: a half day with the DBG commands of E0/E1 in place. Outcomes map
 directly to the rate table of 2.3 and to the GO conditions of 5.1.
+
+## 7. (B) implemented: main-loop AD2 logger + the E0 hooks (2026-10-21)
+
+Status: E0 (the DBG hooks of section 6, steps 2-4) and E1 (main-loop AD2
+logger, bit-banged, gaps marked) are in fw-rs. No ISR, no SPI2 (E2-E4 wait for
+the owner's ISR decision and the device numbers below). Nothing of it has run
+on the device yet; every number in 7.2 is from the Renode emulator.
+
+### 7.1 What exists
+
+| piece | where | what |
+|---|---|---|
+| rate ladder | `hy3131::ad2_r26_for`, `ad2_period_ns` | requested S/s -> R26 low bits. Chop ON (default, `LOG:CHOP`): 600 = /4 OSR 1024, 1200 / 2400 / 4800 / 9600 = /2 OSR 1024 / 512 / 256 / 128, all with ENCHOPAD2. Chop OFF: 1200 = /4 OSR 1024, 2400..9600 = /2 OSR 1024..256 (600 needs the chopper). Nearest rung in log scale; the achieved rung is reported, never silently another rate. Tested against the 1.1 table (meter-test). |
+| stream setup | `hy3131::set_ad2_stream` | after the full stock row (dmm.start): ENAD1 cleared if set (the misconnect sentinel runs AD1 in AC V / mV; off first, so note 7 cannot apply), R34 = 0 (AD3 off: the row starts it before AD2, so with both on AD2F would come twice per period on two skewed grids), R29 = 0 (RMS / LPF off), R26 = ENAD2 \| rung, INTF cleared. ENAD2 never toggled. LOG:STATe OFF rewrites the row, sentinel included (unchanged path). |
+| rows | `Logger::mode_ok` | AD2: AC mV (2) and AC A / mA / uA (4..6) **DC-coupled** (OP2O / OP1O, stock rows unchanged), AC V (0) **AC-coupled** (PB4, ~0.5 Hz; preamble `coupling` = 1). AC+DC (16/17) refused (alternating rows). The DC-coupled V row (1.3 last row) is **not implemented: needs device test 6.5**. |
+| sampling | `Logger::poll` | AD2F-gated (INTF read, then R03..R05), P/2 gate from the last sample, timestamp at the flag observation. Since one sample costs ~122 us bit-banged and the period is 104..1667 us, a call keeps sampling while the next result is due within `AD2_BURST_US` = 500 us of the call. A read whose bits 23:19 are not a copy of bit 18 is dropped and counted (`bad`, a torn read for sure). |
+| honesty | LOG:COUNt?, LOG:GAPs?, LOG:PREamble?, panel | `lost` = round(span / nominal period) + 1 - captured (counts the steady "slightly late" losses of a rate the link cannot sustain, which the per-gap `missed` cannot); gap histogram in periods (2, 3-4, 5-16, 17-128, >128) + max gap; preamble `...,source,req_hz,nominal_mhz,r26,coupling` (requested vs chip rate; measured_hz in field 5); the on-screen panel shows "AD2 measured/nominal Sa/s", samples and "lost N (x.x%)" (ui-render checked, no overlaps). |
+| ring | `logger.rs` | unchanged: 2048 records of 8 B (seq implicit, d957027), 16 KiB of SRAM (+40 B of stats). Only 213 ms at 9600/s: the host must drain `LOG:DATA?` (511 records per block) at least ~5x/s, else `overwritten` counts the loss; a bigger ring does not fit (SRAM free ~4.5 KB). Wire format unchanged (12-byte {seq, ts_us, raw}). |
+| hooks (E0) | `src/ad2exp.rs`, `DBG:AD2:*` | `TORN? r26,n[,SYNC]`: n back-to-back pairs of R03..R05 reads, INTF after each pair; same / differ-with-new-conversion / differ-without / signbad + a histogram of bit_length(\|a-b\|) (tears show as a bump at 9 or 17 above the noise). `NOISE? r26,n[,op1chop]`: n flag-synced samples: mean, sd (1/1000 code), min, max, readout us; ENOB = log2(2^19/sd) on the host. `DRAW 0\|1\|2`: during a log session no panel / the panel / panel + a full DMM-view repaint every 100 ms (the DMM page's redraw load). Bounded (n <= 2000 per call, watchdog kicked), refused while logging or outside an AC row (no reply: `dm40scpi.py ad2` checks FUNC? first), the row is rewritten afterwards. |
+| host | `tools/dm40scpi.py` | `log out.csv --source ad2 --rate N [--chop off] -d S`: CSV `seq,t_s,raw,value_<unit>,lost_before` (scaled with IG 1.0, VR 1.25 V and the stock range factor, calibration NOT applied, said in the header; lost_before from the timestamps and the seq), trailer with measured rate, counts and gaps; `ad2 torn\|noise [--sync] [--op1chop k] [--rungs ...]` sweeps the rungs. `--usbip BUSID` talks to the emulator. |
+| emulator | `emu/hy3131/HY3131.cs` (+ peripherals copy), tests | AD2 on its own grid (one AD2F and one fresh result per period; before: the flag was set and the code resampled on every bus access after the first period), per-result noise model, the logger's row variant still recognised. `emu/hy3131/tests`: `Ad2Stream` (960 conversions in 100 ms at 9600/s, one flag each, code of 12.3 mA in AC mA r0, noise model). |
+
+### 7.2 Emulator results (plumbing only, not the device)
+
+`emu/run.py fwrs --fast` (50 MIPS: a quarter of the device's 200 MHz, so the
+bit-banged readout costs ~4x the device's) with `isrc:0.5,ac=0.3,f=50`, AC A
+(the meter picked mA r1), 15-20 s per run, USB/IP draining LOG:DATA?:
+
+| requested | chip | measured | lost | gaps (2 / 3-4 / 5-16 / 17-128 / >128), max |
+|---|---|---|---|---|
+| 600 | 600.0 | 593 | 1.1 % | 0 / 51 / 0 / 0 / 0, 6.5 ms |
+| 2400 | 2400.0 | 2030 | 15.4 % | 5616 / 7 / 96 / 0 / 0, 6.1 ms |
+| 9600, panel (DRAW 1) | 9600.0 | 2011 | 79 % | 0 / 10913 / 19660 / 48 / 0, 6.0 ms |
+| 9600, no panel (DRAW 0) | 9600.0 | 2055 | 79 % | 0 / 11514 / 19493 / 0 / 0, 1.1 ms |
+| 9600, DMM-view repaint every 100 ms (DRAW 2) | 9600.0 | 685 | 93 % | 0 / 2182 / 3095 / 333 / 83, 47 ms |
+
+`ad2 noise` (DC 50 mA, the emulator's noise model): sd 31.5 codes at 76.8
+kS/s (ENOB 14.0) .. 8.3 at 600/s (16.0); `ad2 torn --sync`: signbad 0, no
+difference without a conversion (the model latches by construction). Readout
+426 us per flag-synced sample at 50 MIPS. What this shows: the AD2 path,
+the ladder, the counters and the host CSV work end to end, the counters
+expose loss honestly, and the repaint costs whole tens of ms. The rates are
+the emulator's, not the device's: at 200 MHz expect ~4x the readout speed
+(~8 kS/s link ceiling, section 2.1).
+
+### 7.3 Device test plan (30 minutes)
+
+Meter on fw-rs with this build, USB to the PC (`tools/dm40scpi.py`, USBTMC);
+a DC source and a signal generator; write the outputs into a new section of
+this doc. Step 1 is the go/no-go for every higher rate.
+
+| min | step | commands | record / pass |
+|---|---|---|---|
+| 0-3 | setup | AC mV on the meter (V key -> mV, AC; `dm40scpi.py info`: FUNC? VOLT:AC); DC 0.312 V into V-COM (AD2 code ~0x00FF80, a byte boundary at 400 mV x1) | - |
+| 3-8 | torn reads (6.2) | `dm40scpi.py ad2 torn -n 2000` then `... --sync` | per rung: signbad, diff(no conv), the bits histogram. Pass = signbad 0 and no bump at 9 / 17 beyond the noise. A bump at a rung = the rate cap of every flag-synced scheme (1.4) |
+| 8-18 | loss per rate (6.3) | for r in 600 2400 4800 9600, for d in 1 0 2: `dm40scpi.py scpi "DBG:AD2:DRAW $d"; dm40scpi.py log l$r-$d.csv --source ad2 --rate $r -d 20` (then DRAW 1) | the trailer line: measured S/s, lost %, gaps. Fills the 2.3 table with the real loop: expected loss-free at 600-2400 with DRAW 0 / 1, the link ceiling (~8 kS/s) at 9600 |
+| 18-23 | noise / ENOB (6.4) | V-COM shorted (mV): `dm40scpi.py ad2 noise -n 2000`; AC A, jacks open: `ad2 noise -n 2000 --op1chop 0` and `--op1chop 3` | sd / ENOB per rung (compare 1.2: 14-16 bits; the emulator's model is 14.0 .. 16.0) |
+| 23-28 | waveform (6.6) | AC mV, generator 50 Hz 100 mV rms + 50 mV DC: `log w.csv --source ad2 --rate 4800 -d 2`; AC V, 5 V 50 Hz: `log v.csv --source ad2 --rate 2400 -d 2` | plot value vs t_s: amplitude and mean vs the DMM's AC mV / DC mV readings (calibration not applied: expect < 1 %); AC V: no DC (coupling AC in the header) |
+| 28-30 | profile | during one 9600 session: `dm40scpi.py scpi "DBG:PROF?"` | the longest main-loop passes while logging (what still stalls) |
+
+Not covered by this plan: SPI2 (6.1, E2) and the DC-coupled V row (6.5,
+E7): both need code that is not written yet.
+
