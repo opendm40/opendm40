@@ -599,7 +599,7 @@ class GtkApp(Adw.Application):
         self.split.set_min_sidebar_width(340)
         self.split.set_max_sidebar_width(400)
         self.split.set_sidebar_width_fraction(0.3)
-        self.split.set_show_sidebar(False)
+        self.split.set_show_sidebar(True)
         self.split.set_sidebar(self.build_sidebar())
         self.split.set_content(self.panel)
         self.side_btn.bind_property('active', self.split, 'show-sidebar', 1 | 2)  # bidirectional | sync
