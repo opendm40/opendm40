@@ -10,6 +10,7 @@ front view, like an engineering drawing (y < 0 in the same mm frame). The displa
 scale k (nearest neighbour), the rest with Cairo at 480k/73.5 px per mm.
 """
 import os
+import re
 import signal
 import sys
 import threading
@@ -666,6 +667,8 @@ def parse_state(line):
     for tok in rest.split():
         if '=' in tok:
             k, v = tok.split('=', 1)
+            if k in st:                   # lpf= / rms= appear twice: enable flag, then the data
+                k += 'code'
             st[k] = v
     return st
 
@@ -683,6 +686,8 @@ class FrontendView(Gtk.DrawingArea):
         self.zoom = zoom
         self.fit = fit            # pop-out window: zoom so the content fills the height
         self.want_h = 0
+        self.ink = None               # list -> layout() records label boxes (overlap check)
+        self.inside_h = 0
         self.set_content_height(120)
         self.set_draw_func(self.draw)
 
@@ -709,28 +714,62 @@ class FrontendView(Gtk.DrawingArea):
                 self.want_h = hh
                 GLib.idle_add(lambda: self.set_content_height(self.want_h) or False)
 
+    # HY3131 mux option lists (emu/hy3131/ref/registers.md); the state line names the selected one
+    MUX = {
+        'sop1p': ['SENSE', 'FB', 'RLU', 'AGND', 'PB0', 'PB1', 'PB2', 'PB8'],
+        'sop2p': ['SENSE', 'FB', 'RLU', 'AGND', 'PB0', 'PB1', 'PB2', 'PB3'],
+        'sad1fp': ['SENSE', 'FB', 'RLU', 'OP1O', 'OP2O', 'VDDA', 'REFO', 'VREF',
+                   'PB0', 'PB1', 'PB2', 'PB3', 'PB4', 'PB5', 'PB6', 'PB7'],
+        'sad1fn': ['SENSE', 'RLU', 'VSSA', 'AGND', 'PB2', 'PB3', 'PB4', 'PB5'],
+        'sad1rh': ['FB', 'REFO', 'VREF', 'PB6', 'RLU', 'VDDA', 'AGND'],
+        'sad1rl': ['RLU', 'AGND', 'PB3', 'PB5', 'FB', 'VSSA', 'VREF'],
+        'sad1i': ['filter', 'FB / RLU', 'TS1P / TS2N', 'TS1N / TS2P'],
+        'sft1': ['100 k', '10 k', '0 Ω', 'open'],
+        'sad2ip': ['OP1O', 'OP2O', 'PB4', 'PB7'],
+        'sad2in': ['RLU', 'AGND', 'PB3', 'PB5'],
+        'sad2rh': ['FB', 'REFO', 'VREF', 'PB6'],
+        'sad2rl': ['RLU', 'AGND', 'PB3', 'PB5'],
+        'sad3ip': ['OP1O', 'OP2O', 'PB4', 'PB7'],
+        'sad3in': ['RLU', 'AGND', 'PB3', 'PB5'],
+        'scmpi': ['SENSE', 'FB', 'OP1O', 'PB0', 'PB1', 'RLD', 'PB3', 'PB4'],
+    }
+    INTERNAL = {'OP1O', 'OP2O', 'REFO', 'VREF', 'VDDA', 'VSSA', 'filter', '100 k', '10 k', '0 Ω', 'open',
+                'FB / RLU', 'TS1P / TS2N', 'TS1N / TS2P'}
+    # SMODE<3:0> (with CMPO) -> power-bus / OP3 switches (registers.md)
+    SMODE = {0: 'none', 1: 'SGND', 2: 'SVDD', 3: 'SVSS', 4: 'SVSO1', 5: 'SGND+SVSO1', 6: 'SVDD+SCP+SCN',
+             7: 'SVSS+SVSO2+SCN', 8: 'none / SGND (CMPO)', 10: 'SVDD / SVSS (CMPO)', 12: 'SVSO1 / SGND+SVSO1 (CMPO)',
+             14: 'SVDD+SCP+SCN / SVSS+SVSO2+SCN (CMPO)'}
+
     def layout(self, cr, w):
-        """Draw (cr) or only measure (cr None) at width w; returns the height used."""
+        """Draw (cr) or only measure (cr None) at width w; returns the height used. Board part: jacks ->
+        relays -> divider / Ω-mV network / shunt -> the HY3131 pins they land on; chip part: every mux with
+        its options (the selected one filled), the blocks it feeds (on / off), the PA switch matrix."""
         st = self.st
+        if cr is not None:
+            self.layout(None, w)               # measure first: the chip box is drawn behind its content
         on, off, hot, txt = rgb('#3584E4'), rgb('#6E6E6E'), rgb('#F3B51E'), rgb('#E8E8E8')
+        dim, chipc = rgb('#9A9A9A'), rgb('#2A2C31')
         pl = self.create_pango_layout('Ag')
         L = pl.get_pixel_size()[1]          # line height of the widget font
         pad = L * 0.4
+        ink = self.ink if cr is not None else None
 
         def tw(s):
             pl.set_text(s, -1)
             return pl.get_pixel_size()[0]
 
-        def label(x, y, s, color=txt, width=None):
+        def label(x, y, s, color=txt, width=None, mark=True):
             """text with its top-left at x, y; wraps at width; returns its height"""
             pl.set_text(s, -1)
             pl.set_width(int(width * Pango.SCALE) if width else -1)
             pl.set_wrap(Pango.WrapMode.WORD_CHAR)
-            hgt = pl.get_pixel_size()[1]
+            tw_, hgt = pl.get_pixel_size()
             if cr:
                 cr.set_source_rgb(*color)
                 cr.move_to(x, y)
                 PangoCairo.show_layout(cr, pl)
+            if ink is not None and mark and s.strip():
+                ink.append((s, x, y, x + tw_, y + hgt))
             pl.set_width(-1)
             return hgt
 
@@ -747,7 +786,9 @@ class FrontendView(Gtk.DrawingArea):
                 cr.set_source_rgb(*(on if active else off))
                 cr.rectangle(x, yc - bh / 2, bw, bh)
                 cr.stroke()
-            label(x + (bw - tw(s)) / 2, yc - L / 2, s, txt if active else off)
+            label(x + (bw - tw(s)) / 2, yc - L / 2, s, txt if active else off, mark=False)
+            if ink is not None:
+                ink.append(('box ' + s, x - 1, yc - bh / 2 - 1, x + bw + 1, yc + bh / 2 + 1))
 
         if cr:
             cr.set_line_width(max(1.5, L / 9))
@@ -766,37 +807,76 @@ class FrontendView(Gtk.DrawingArea):
         divs = {'0': '/10', '1': '/100', '2': '/1000', '3': '/10000'}
         shunts = {'A': '10 mΩ', 'mA': '0.5 Ω', 'uA': '47.5 Ω'}
 
-        # columns from the text widths; spare width goes into the wires
-        r = L * 0.5
-        c_name = pad + 2 * r + pad
+        y = pad
+        y += label(pad, y, 'HY3131  %s  mode %s  range %s' % (role, st.get('mode', '-1'), rng), txt, w - 2 * pad)
+        y += pad
+
+        # ---- board: jacks -> relays -> networks -> pins ----
+        # pins after the datasheet's typical circuit (the DM40 netlist is not known): divider on SENSE and
+        # the PA taps, the AC-coupled node on PB4, the Ω/mV network on PB0 / PB3 with Rref between FB and RLU
+        # (OP3 drives it through the PA D switches), the shunts into PB1 / PB2, COM on AGND
+        pin_v = ['SENSE', 'PA9…5'] + (['PB4'] if role == 'AcV' else [])
+        pin_n = ['PB0, PB3', 'FB, RLU']
+        pin_c = ['AGND']
+        pin_a = ['PB1, PB2']
+
+        def pins(yc, lines, active):
+            yy = yc - len(lines) * (L + pad / 2) / 2 + pad / 4
+            for s in lines:
+                label(x_chip + pad * 0.75, yy, s, txt if active else dim)
+                yy += L + pad / 2
+        r = L * 0.45
+        c_name = pad + 2 * r + pad * 0.75
         name_w = max(tw(n) for n in ('V Ω', 'COM', 'A'))
-        relay_w = max(tw('PA: V/A'), tw('PA: Ω/mV')) + 2 * pad
-        net_w = max(tw('divider /10000'), tw('Ω/mV network')) + 2 * pad
-        chip_w = tw('HY3131') + 2 * pad
-        base = c_name + name_w + relay_w + net_w + chip_w + pad
-        gap = max(pad * 2, (w - base) / 3)
-        x_relay = c_name + name_w + gap
+        pins_w = max(tw(p) for p in pin_v + pin_n + pin_c + pin_a) + 1.5 * pad
+        names = dict(rva='PA: V/A', rom='PA: Ω/mV', div='divider ', net='Ω/mV network',
+                     sh='shunt %s (%s)' % (shunt, shunts.get(shunt, '')))
+        name_x = name_w                        # jack names left of the wires (0: above them)
+        for mode_ in ('long', 'short', 'tiny'):
+            short = mode_ != 'long'
+            if mode_ == 'tiny':
+                name_x = 0
+            if short:                          # narrow: short box names
+                names = dict(rva='V/A', rom='Ω/mV', div='', net='Ω/mV', sh='%s %s' % (shunt, shunts.get(shunt, '')))
+            bp = pad * (1 if short else 2)     # box padding
+            relay_w = max(tw(names['rva']), tw(names['rom'])) + bp
+            net_w = max(tw(names['div'] + (divs.get(rng, '') if rv else '')), tw(names['net'])) + bp
+            sh_w = tw(names['sh']) + bp
+            base = c_name + name_x + relay_w + net_w + pins_w + pad
+            if base + 6 * pad <= w and c_name + name_x + 2 * pad + sh_w + 2 * pad + pins_w + pad <= w:
+                break
+        notes_below = short                    # narrow: the ohm source notes go under the A row
+        sh = names['sh']
+        gap = max(pad * (1.2 if short else 2), (w - base) / 3)
+        x_relay = c_name + name_x + gap
         x_net = x_relay + relay_w + gap
-        x_chip = w - chip_w - pad
+        x_chip = w - pins_w - pad              # chip's left edge; pin names inside it
         row_h = 2 * L + pad * 2
 
-        yv = pad + L * 2                             # room for the HY3131 title above the chip box
+        yv = y + L * 1.5                       # room for 'COM / AGND' style labels above wires
         rows = [('V Ω', C_RED), ('COM', C_BLACK), ('A', C_RED)]
-        y_net = yv + row_h * 0.75
+        y_net = yv + 2 * L + pad * 3
         extra = []
         if rohm:
-            extra = ['source %s V' % st.get('vsrc', '?'), 'Rref %s Ω' % st.get('rref', '?')]
+            extra = ['source %s V (%s)' % (st.get('vsrc', '?'), st.get('vrefsel', '?')), 'Rref %s Ω' % st.get('rref', '?')]
             if 'vx' in st:
                 extra.append('node %s V' % st['vx'])
-        ycom = y_net + L + pad * 2 + len(extra) * L + pad
+        ext_h = 0
+        for s_ in ([] if notes_below else extra):                       # measured like the drawing below (they wrap before the chip)
+            pl.set_text(s_, -1)
+            pl.set_width(int((x_chip - pad * 2 - x_net) * Pango.SCALE))
+            pl.set_wrap(Pango.WrapMode.WORD_CHAR)
+            ext_h += pl.get_pixel_size()[1] + pad / 2
+            pl.set_width(-1)
+        ycom = y_net + L + pad * 2 + ext_h + pad
         ya = ycom + row_h
-        y_end = ya + L + pad
-        # chip bar spans the three rows
-        if cr:
-            cr.set_source_rgb(*on)
-            cr.rectangle(x_chip, yv - L, chip_w, y_end - yv)
-            cr.stroke()
-        label(x_chip + pad, yv - L * 2 - pad / 2, 'HY3131', txt)
+        y_end = ya + L
+        if cr:                                 # the chip, continued below as the 'inside' box
+            cr.set_source_rgb(*chipc)
+            cr.rectangle(x_chip, yv - L, w - pad - x_chip, y_end - yv + L + pad * 2)
+            cr.fill()
+        if ink is not None:                    # the chip edge: boxes must keep clear of it
+            ink.append(('chip edge', x_chip - 1, yv - L, x_chip, y_end + pad * 2))
         for (name, col), yy in zip(rows, (yv, ycom, ya)):
             if cr:
                 cr.new_path()
@@ -806,71 +886,222 @@ class FrontendView(Gtk.DrawingArea):
                 cr.set_source_rgb(*txt)
                 cr.arc(pad + r, yy, r * 0.45, 0, 6.3)
                 cr.fill()
-            label(c_name, yy - L / 2, name, txt)
-        x_wire = c_name + name_w + pad / 2
+            if name_x:
+                label(c_name, yy - L / 2, name, txt)
+            else:
+                label(pad, yy - r - pad / 2 - L, name, txt)
+        x_wire = c_name + name_x + (pad / 2 if name_x else 0)
         # V row: relay, then divider or the ohm / mV network
         line(x_wire, yv, x_relay, yv, True)
-        box(x_relay, yv, relay_w, 'PA: V/A' if va else 'PA: Ω/mV', True)
+        box(x_relay, yv, relay_w, names['rva'] if va else names['rom'], True)
         line(x_relay + relay_w, yv, x_net, yv, va)
         line(x_relay + relay_w, yv, x_net, y_net, not va)
-        box(x_net, yv, net_w, 'divider ' + (divs.get(rng, '') if rv else ''), va and rv)
-        box(x_net, y_net, net_w, 'Ω/mV network', (not va) and (rmv or rohm))
+        box(x_net, yv, net_w, names['div'] + (divs.get(rng, '') if rv else ''), va and rv)
+        box(x_net, y_net, net_w, names['net'], (not va) and (rmv or rohm))
         line(x_net + net_w, yv, x_chip, yv, va and rv)
         line(x_net + net_w, y_net, x_chip, y_net, (not va) and (rmv or rohm))
+        pins(yv, pin_v, va and rv)
+        pins(y_net, pin_n, (not va) and (rmv or rohm))
         yy = y_net + L / 2 + pad * 1.5
-        for s in extra:
-            label(x_net, yy, s, hot)
-            yy += L
+        for s in ([] if notes_below else extra):
+            yy += label(x_net, yy, s, hot, x_chip - pad * 2 - x_net) + pad / 2
         # COM
         line(x_wire, ycom, x_chip, ycom, True)
-        label(x_wire, ycom - L - pad, 'COM / AGND', txt)
+        pins(ycom, pin_c, True)
         # A row: shunt
-        sh = 'shunt %s (%s)' % (shunt, shunts.get(shunt, ''))
-        sh_w = tw(sh) + 2 * pad
         line(x_wire, ya, x_relay, ya, True)
         box(x_relay, ya, sh_w, sh, ra)
         line(x_relay + sh_w, ya, x_chip, ya, ra)
-        # what the jacks see, under the schematic (not on the wires: no room at narrow widths)
-        y = y_end + pad
-        y += label(pad, y, 'V\u00a0jack\u00a0%s\u00a0V    I\u00a0jack\u00a0%s\u00a0A    V\u00a0shunt\u00a0%s\u00a0V' % (
+        pins(ya, pin_a, ra)
+        y = y_end + pad * 3
+        if notes_below and extra:
+            y += label(pad, y, '   '.join(s.replace(' ', '\u00a0') for s in extra), hot, w - 2 * pad) + pad / 2
+        y += label(pad, y, 'V jack %s V    I jack %s A    V shunt %s V' % (
             st.get('vjack', '0'), st.get('ijack', '0'), st.get('vshunt', '0')), hot, w - 2 * pad)
+        y += pad / 2
+        y += label(pad, y, 'pins: the datasheet\'s typical circuit (the DM40 netlist is not known)', dim, w - 2 * pad)
+        y += pad
 
-        # HY3131 blocks: two columns when they fit
-        y += pad * 2
-        label(pad, y, 'HY3131  %s  mode %s  range %s' % (role, st.get('mode', '-1'), rng), txt)
-        y += L + pad
-        items = []
-        for key, name in (('ad1', 'AD1 (24 bit)'), ('ad2', 'AD2'), ('ad3', 'AD3'), ('lpf', 'LPF'), ('rms', 'RMS'),
-                          ('ctr', 'counter'), ('cmp', 'comparator'), ('op1', 'OP1'), ('op2', 'OP2')):
-            active = st.get(key) == '1'
-            ex = ''
-            if key == 'ad1' and active:
-                ex = '  OSR %s%s' % (st.get('osr1', ''), ' chop' if st.get('chop') == '1' else '')
-            if key == 'op1' and active:
-                ex = '  + %s' % st.get('sop1p', '')
-            if key == 'cmp' and active:
-                ex = '  in %s%s' % (st.get('scmpi', ''), '  pin HIGH' if st.get('cmppin') == '1' else '')
-            items.append((name + ex, active))
+        # ---- inside the chip: muxes (selected option filled) -> blocks ----
+        top = y
+        if cr and self.inside_h:
+            cr.set_source_rgb(*chipc)
+            cr.rectangle(pad, top, w - 2 * pad, self.inside_h)
+            cr.fill()
+        x0, x1 = pad * 2, w - pad * 2          # content inside the chip box
+        y += pad
+        y += label(x0, y, 'inside the HY3131', txt)
+        y += pad
+
+        def tokens(y, head, active, key, note=''):
+            """'head' then the options of mux `key` flowing to the right, the selected one filled."""
+            opts = self.MUX[key]
+            sel = st.get(key, '')
+            if key in ('sad1i', 'sft1'):
+                try:
+                    sel = opts[int(sel)]
+                except (ValueError, IndexError):
+                    sel = ''
+            hw = tw(head)
+            label(x0, y, head, txt if active else off)
+            x = x0 + hw + pad
+            if x > x1 - tw('SENSE') - pad:
+                y += L + pad / 2
+                x = x0 + pad * 2
+            tx0 = x
+            for o in opts:
+                ow = tw(o) + pad
+                if x + ow > x1:
+                    y += L + pad / 2
+                    x = tx0
+                if o == sel:
+                    if cr:
+                        cr.set_source_rgb(*(on if active else off))
+                        cr.rectangle(x - pad / 2, y - pad / 4, ow, L + pad / 2)
+                        cr.fill()
+                    label(x, y, o, txt)
+                else:
+                    label(x, y, o, dim if o not in self.INTERNAL else off)
+                x += ow + pad / 2
+            if note:
+                nw = tw(note)
+                if x + nw > x1:
+                    y += L + pad / 2
+                    x = tx0
+                y += label(x, y, note, hot, x1 - x) - L
+            return y + L + pad
+
+        def flag(k):
+            return st.get(k) == '1'
+
+        op1x = ' x10' if flag('ops1') else ''
+        ad1 = flag('ad1')
+        cmpn = ''
+        if flag('cmp'):
+            cmpn = '→ ACPO%s%s' % (' → counter' if flag('ctr') else '', ', CMP pin HIGH' if flag('cmppin') else '')
+        blocks = [('OP1' + op1x, 'op1', [('+in', 'sop1p')], ''),
+                  ('OP2', 'op2', [('+in', 'sop2p')], ''),
+                  ('AD1', 'ad1', [('+in', 'sad1fp'), ('−in', 'sad1fn'), ('ref+', 'sad1rh'), ('ref−', 'sad1rl'),
+                                  ('input', 'sad1i'), ('pre-filter', 'sft1')],
+                   'OSR %s%s  code %s' % (st.get('osr1', ''), ' chop' if flag('chop') else '', st.get('ad1code', ''))
+                   if ad1 else ''),
+                  ('AD2', 'ad2', [('+in', 'sad2ip'), ('−in', 'sad2in'), ('ref+', 'sad2rh'), ('ref−', 'sad2rl')], ''),
+                  ('AD3', 'ad3', [('+in', 'sad3ip'), ('−in', 'sad3in')], ''),
+                  ('CMP', 'cmp', [('in', 'scmpi')], cmpn)]
+        if w >= 760:
+            # wide (pop-out): every mux with all its options
+            for head, en, muxes, note in blocks:
+                for i, (pre, key) in enumerate(muxes):
+                    y = tokens(y, '%s %s (%s)' % (head, pre, key.upper()), flag(en), key,
+                               note if i == len(muxes) - 1 else '')
+                y += pad / 2
+        else:
+            # narrow: one line per block, its selections as filled chips
+            for head, en, muxes, note in blocks:
+                a_ = flag(en)
+                hw = max(tw(b[0]) for b in blocks) + pad * 2
+                label(x0, y, head, txt if a_ else off)
+                x = x0 + hw
+                for pre, key in muxes:
+                    sel = st.get(key, '')
+                    if key in ('sad1i', 'sft1'):
+                        try:
+                            sel = self.MUX[key][int(sel)]
+                        except (ValueError, IndexError):
+                            pass
+                    pw_, sw_ = tw(pre), tw(sel)
+                    cw_ = pw_ + pad + sw_ + pad
+                    if x + cw_ > x1:
+                        y += L + pad / 2
+                        x = x0 + hw
+                    label(x, y, pre, dim)
+                    if cr:
+                        cr.set_source_rgb(*(on if a_ else off))
+                        cr.rectangle(x + pw_ + pad / 2, y - pad / 4, sw_ + pad, L + pad / 2)
+                        cr.fill()
+                    label(x + pw_ + pad, y, sel, txt)
+                    x += cw_ + pad * 1.5
+                if note:
+                    if x + tw(note) > x1:
+                        y += L + pad / 2
+                        x = x0 + hw
+                    y += label(x, y, note, hot, x1 - x) - L
+                y += L + pad
+        # blocks after the converters
+        y += pad / 2
+        items = [('LPF', flag('lpf')), ('RMS', flag('rms')), ('counter', flag('ctr')), ('comparator', flag('cmp')),
+                 ('diode /10 (SDIO)', flag('sdio'))]
         sq = L * 0.55
-        col_w = max(tw(s) for s, _ in items) + sq + pad * 3
-        ncol = 2 if 2 * col_w <= w - 2 * pad else 1
-        nrow = (len(items) + ncol - 1) // ncol
-        for i, (s, active) in enumerate(items):
-            cx = pad + (i // nrow) * col_w
-            cy = y + (i % nrow) * L
+        x = x0
+        for s, a in items:
+            iw = sq + pad + tw(s) + pad * 3
+            if x + iw > x1:
+                y += L + pad / 2
+                x = x0
             if cr:
-                cr.set_source_rgb(*(on if active else off))
-                cr.rectangle(cx, cy + (L - sq) / 2, sq, sq)
+                cr.set_source_rgb(*(on if a else off))
+                cr.rectangle(x, y + (L - sq) / 2, sq, sq)
                 cr.fill()
-            label(cx + sq + pad, cy, s, txt if active else off)
-        y += nrow * L + pad
-        for s in ('AD1 in %s-%s  ref %s-%s' % (st.get('sad1fp', ''), st.get('sad1fn', ''), st.get('sad1rh', ''),
-                                               st.get('sad1rl', '')),
-                  'SAD1I %s  SDIO %s  SMODE %s  SFUVR %s  PC7 %s' % (
-                      st.get('sad1i', ''), st.get('sdio', ''), st.get('smode', ''), st.get('sfuvr', ''),
-                      st.get('pc7', '')),
-                  'AD1 %s  period %s s  die %s °C' % (st.get('ad1code', ''), st.get('period', ''), st.get('die', ''))):
-            y += label(pad, y, s, txt, w - 2 * pad)
+            label(x + sq + pad, y, s, txt if a else off)
+            x += iw
+        y += L + pad * 1.5
+        # OP3 source and the switch network
+        try:
+            sm = int(st.get('smode', '0'), 16)
+        except ValueError:
+            sm = 0
+        y += label(x0, y, 'OP3 source: VREF = %s (SFUVR %s)   power bus (SMODE<3:0> = %d): %s%s%s' % (
+            st.get('vrefsel', '?'), st.get('sfuvr', '?'), sm & 15, self.SMODE.get(sm & 15, '?'),
+            ', RLU' if sm & 0x10 else '', ', cap array' if sm & 0x20 else ''), txt, x1 - x0)
+        y += pad
+        # PA switch matrix: rows P / D / F / S, columns PA9..PA0, closed = filled
+        closed = {}
+        for part in st.get('pasw', '-').split(','):
+            if part and part != '-' and part[0].isdigit():
+                n = int(part.rstrip('PDFS'))
+                closed[n] = part[len(str(n)):]
+        rows_m = [('P', 'power bus'), ('D', 'OP3 out'), ('F', 'FB'), ('S', 'SENSE')]
+        if w < 760:
+            sw = '  '.join('PA%d %s' % (n, closed[n]) for n in sorted(closed, reverse=True)) or 'all open'
+            y += label(x0, y, 'PA switches (P power bus, D OP3 out, F FB, S SENSE): ' + sw, txt, x1 - x0)
+            y += pad
+            rows_m = []
+        rl_w = max([tw(n) for _, n in rows_m] or [0]) + pad
+        cw = max(tw('PA9'), L) + pad
+        if x0 + rl_w + 10 * cw > x1:           # narrow: shorter row names
+            rows_m = [(k, k) for k, _ in rows_m]
+            rl_w = tw('P') + pad * 2
+        if rows_m:
+            for i in range(10):
+                label(x0 + rl_w + i * cw + (cw - tw('PA%d' % (9 - i))) / 2, y, 'PA%d' % (9 - i), dim)
+            y += L + pad / 2
+        dot = L * 0.45
+        for k, name in rows_m:
+            label(x0, y, name, dim)
+            for i in range(10):
+                n = 9 - i
+                cx = x0 + rl_w + i * cw + cw / 2
+                if cr:
+                    cr.new_path()
+                    cr.arc(cx, y + L / 2, dot / 2, 0, 6.3)
+                    if k in closed.get(n, ''):
+                        cr.set_source_rgb(*on)
+                        cr.fill()
+                    else:
+                        cr.set_source_rgb(*off)
+                        cr.set_line_width(1)
+                        cr.stroke()
+                        cr.set_line_width(max(1.5, L / 9))
+                if ink is not None:
+                    ink.append(('dot', cx - dot / 2, y + (L - dot) / 2, cx + dot / 2, y + (L + dot) / 2))
+            y += L + pad / 2
+        y += pad
+        y += label(x0, y, 'period %s s   die %s °C   %s' % (st.get('period', ''), st.get('die', ''),
+                                                          'LPF %s  RMS %s' % (st.get('lpfcode', ''), st.get('rmscode', ''))
+                                                          if flag('ad2') else ''), txt, x1 - x0)
+        y += pad
+        if cr is None:
+            self.inside_h = y - top
         return y + pad
 
 
@@ -1034,9 +1265,8 @@ class GtkApp(Adw.Application):
         self.title.set_subtitle('building / starting %s …' % mode)
         if self.usb_sub:
             self.usb_note.set_label('USB: ' + self.usb_sub + (
-                '. Stock firmware: the device exists only after Settings > Other > USB Connect; before that '
-                'usbip_client.py reports "no answer" after 5 s (and in the emulator the stock USB does not '
-                'enumerate even after USB Connect)' if mode == 'stock' else ''))
+                '. Stock: only after Settings > Other > USB Connect (and even then it does not enumerate in the '
+                'emulator): until then "no answer" after 5 s' if mode == 'stock' else ''))
         self.t_start = time.time()
         self.rate_hist = []
         extra = self.extra_args()
@@ -1112,7 +1342,7 @@ class GtkApp(Adw.Application):
         state = 'paused' if self.play.get_active() else '%.2fx real time' % ratio
         self.title.set_subtitle('%s · virtual %.2f s · %s' % (mode, vus / 1e6, state))
         if self.emu.last_reply:
-            self.reply.set_label('last reply: ' + self.emu.last_reply)
+            self.reply.set_label('last reply: ' + re.sub(r'\[[0-9;]*m', '', self.emu.last_reply))
         self.fe_poll()
         return True
 
@@ -1268,15 +1498,16 @@ class GtkApp(Adw.Application):
         big.set_tooltip_text('open the schematic in its own resizable window')
         big.add_css_class('flat')
         big.connect('clicked', lambda *a: self.open_frontend_window())
-        outer, box = self.card('Front end', big)
-        box.append(self.note('relays and HY3131 route chosen by the firmware (click: own window)'))
+        outer, box = self.card('Front end, HY3131', big)
         self.fe_view = FrontendView()
+        self.fe_view.set_tooltip_text('the route the firmware chose (relays, HY3131 muxes and switches); click: own window')
         click = Gtk.GestureClick()
         click.connect('released', lambda *a: self.open_frontend_window())
         self.fe_view.add_controller(click)
         box.append(self.fe_view)
         self.fe_big = None
-        self.fe_row = self.note('-', lines=3)
+        self.fe_row = self.note('-', lines=3)    # one-line summary (the schematic shows it all): not shown
+        self.fe_row.set_visible(False)
         box.append(self.fe_row)
         cards['fe'] = outer
         self.fe_state_path = os.path.join(run.OUT, 'live-frontend-%d.txt' % os.getpid())
@@ -1307,16 +1538,20 @@ class GtkApp(Adw.Application):
         self.focus_scope = self.wave
         # Generator / USB
         outer, box = self.card('Generator, USB')
-        box.append(self.note('Generator: DAC / TIM6 / TIM12 registers run; no analog output is modelled yet.'))
+        gen = self.note('Generator: no analog output yet')
+        gen.set_tooltip_text('the DAC / TIM6 / TIM12 registers run; the MCX OUT signal is not modelled')
+        box.append(gen)
         port = getattr(self.args, 'usbip', None)
         if port:
             env = '' if port == 3240 else 'USBIP_PORT=%d ' % port
-            sub = ('USB/IP on 127.0.0.1:%d, busid 1-0: %semu/usbip_client.py list | usbtmc 1-0 "*IDN?" | '
-                   'scpi-tcp 1-0 5025; or sudo usbip attach -r 127.0.0.1 -b 1-0' % (port, env))
+            sub = 'USB/IP 127.0.0.1:%d, busid 1-0 (hover: how to connect)' % port
+            tip = ('%semu/usbip_client.py list | desc 1-0 | usbtmc 1-0 "*IDN?" | scpi-tcp 1-0 5025 | msc 1-0; '
+                   'or sudo usbip attach -r 127.0.0.1 -b 1-0' % env)
         else:
-            sub = 'not exported (live.py --no-usbip)'
+            sub, tip = 'not exported (live.py --no-usbip)', None
         self.usb_sub = sub if port else None
         self.usb_note = self.note('USB: ' + sub)
+        self.usb_note.set_tooltip_text(tip)
         box.append(self.usb_note)
         cards['gen'] = outer
         self.focus_gen = self.usb_note
