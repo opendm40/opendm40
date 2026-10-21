@@ -600,6 +600,82 @@ pub fn file_header(kind: u8, unit: &[u8], text: &[u8], out: &mut [u8]) -> usize 
     n
 }
 
+// ------------------------------------------------------------- scope record
+
+/// Kind 2 (scope record): after the header text, SCOPE_PAR bytes of
+/// parameters (f32 a, f32 b: volts = a + b * code; f32 dt, s per sample;
+/// u32 t0, the sample of time 0; u32 n samples; u32 CRC-32 of these 20),
+/// then n codes (u16 LE, 10 bits).
+pub const SCOPE_PAR: usize = 24;
+/// The generated CSV row: "+d.ddddde+xx,+d.dddde+xx\r\n".
+pub const SCOPE_ROW: usize = 26;
+
+/// The scope record file header (header text = the CSV's, column line
+/// included) into `out`; returns its length (FHDR + text + SCOPE_PAR).
+pub fn scope_header(text: &[u8], a: f32, b: f32, dt: f32, t0: u32, n: u32, out: &mut [u8]) -> usize {
+    let k = file_header(KIND_SCOPE, b"V", text, out);
+    let p = &mut out[k..k + SCOPE_PAR];
+    p[0..4].copy_from_slice(&a.to_le_bytes());
+    p[4..8].copy_from_slice(&b.to_le_bytes());
+    p[8..12].copy_from_slice(&dt.to_le_bytes());
+    p[12..16].copy_from_slice(&t0.to_le_bytes());
+    p[16..20].copy_from_slice(&n.to_le_bytes());
+    let c = !crc32_upd(!0, &p[..20]);
+    p[20..24].copy_from_slice(&c.to_le_bytes());
+    k + SCOPE_PAR
+}
+
+/// "+d.dd..de+xx" with `dig` decimals into `out` (2 + dig + 4 bytes).
+fn sci(out: &mut [u8], v: f32, dig: usize) {
+    let mut v = if v.is_finite() { v } else { 0.0 };
+    out[0] = if v < 0.0 { b'-' } else { b'+' };
+    v = v.abs();
+    let mut e = 0i32;
+    if v != 0.0 {
+        while v >= 10.0 {
+            v *= 0.1;
+            e += 1;
+        }
+        while v < 1.0 {
+            v *= 10.0;
+            e -= 1;
+        }
+    }
+    let mut scale = 1u32;
+    for _ in 0..dig {
+        scale *= 10;
+    }
+    let mut m = (v * scale as f32 + 0.5) as u32;
+    if m >= 10 * scale {
+        m /= 10;
+        e += 1;
+    }
+    let ip = m / scale;
+    let mut fp = m % scale;
+    out[1] = b'0' + ip as u8;
+    out[2] = b'.';
+    for i in (0..dig).rev() {
+        out[3 + i] = b'0' + (fp % 10) as u8;
+        fp /= 10;
+    }
+    let k = 3 + dig;
+    out[k] = b'e';
+    out[k + 1] = if e < 0 { b'-' } else { b'+' };
+    let ea = e.unsigned_abs().min(99);
+    out[k + 2] = b'0' + (ea / 10) as u8;
+    out[k + 3] = b'0' + (ea % 10) as u8;
+}
+
+/// CSV row `i` of a scope record (the scope_csv.rs text format).
+pub fn scope_row(a: f32, b: f32, dt: f32, t0: u32, i: usize, code: u16, out: &mut [u8; SCOPE_ROW]) {
+    let t = (i as i32 - t0 as i32) as f32 * dt;
+    sci(&mut out[0..12], t, 5);
+    out[12] = b',';
+    sci(&mut out[13..24], a + b * (code & 0x3FF) as f32, 4);
+    out[24] = b'\r';
+    out[25] = b'\n';
+}
+
 // ------------------------------------------------------------- decoder
 
 /// Random-access bytes of one file.
@@ -894,6 +970,8 @@ pub struct Gen<S: Src> {
     ul: usize,
     unit: [u8; UNIT_MAX],
     win: Win,
+    /// Kind 2: a, b, dt, t0, offset of code 0.
+    sc: (f32, f32, f32, u32, u32),
     // cursor
     cur: Option<Chunk>,
     rd: RowDec,
@@ -908,7 +986,7 @@ impl<S: Src> Gen<S> {
     /// a DLG file of a known kind.
     pub fn open(mut s: S, size: u32) -> Option<Gen<S>> {
         let (kind, hl, ul, unit) = parse_file(&mut s, size)?;
-        if kind != KIND_DMM {
+        if kind != KIND_DMM && kind != KIND_SCOPE {
             return None;
         }
         let mut g = Gen {
@@ -918,12 +996,31 @@ impl<S: Src> Gen<S> {
             ul,
             unit,
             win: Win::new(),
+            sc: (0.0, 0.0, 0.0, 0, 0),
             cur: None,
             rd: RowDec::new(&Chunk { off: 0, pl: 0, row0: 0, csv_base: 0, csv_len: 0, t0: 0, nrows: 0, flags0: 0 }),
             rpos: 0,
             row: [0; ROW_MAX],
             rlen: 0,
         };
+        if kind == KIND_SCOPE {
+            let mut p = [0u8; SCOPE_PAR];
+            let at = FHDR as u32 + hl;
+            if !g.s.read(at, &mut p) || !crc32_upd(!0, &p[..20]) != le32(&p, 20) {
+                return None;
+            }
+            let f = |o: usize| f32::from_le_bytes([p[o], p[o + 1], p[o + 2], p[o + 3]]);
+            let n = le32(&p, 16);
+            let c0 = at + SCOPE_PAR as u32;
+            // Whole codes present (a short file: what is there).
+            let n = n.min(size.saturating_sub(c0) / 2);
+            g.sc = (f(0), f(4), f(8), le32(&p, 12), c0);
+            g.info.rows = n;
+            g.info.csv = hl + n * SCOPE_ROW as u32;
+            g.info.valid = c0 + 2 * n;
+            g.size = g.info.valid;
+            return Some(g);
+        }
         let mut off = g.info.valid;
         while let Some(c) = chunk_at(&mut g.s, &mut g.win, off, size, true) {
             if c.csv_base != g.info.csv || c.row0 != g.info.rows {
@@ -1016,6 +1113,22 @@ impl<S: Src> Gen<S> {
                 if !self.header_text(off, &mut buf[i..i + n]) {
                     return;
                 }
+                i += n;
+                off += n as u32;
+                continue;
+            }
+            if self.info.kind == KIND_SCOPE {
+                let k = (off - self.info.hl) / SCOPE_ROW as u32;
+                let mut c = [0u8; 2];
+                if !self.s.read(self.sc.4 + 2 * k, &mut c) {
+                    return;
+                }
+                let mut r = [0u8; SCOPE_ROW];
+                let (a, b, dt, t0, _) = self.sc;
+                scope_row(a, b, dt, t0, k as usize, u16::from_le_bytes(c), &mut r);
+                let o = ((off - self.info.hl) % SCOPE_ROW as u32) as usize;
+                let n = (SCOPE_ROW - o).min(buf.len() - i);
+                buf[i..i + n].copy_from_slice(&r[o..o + n]);
                 i += n;
                 off += n as u32;
                 continue;
