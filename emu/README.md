@@ -132,8 +132,15 @@ Renode's monitor TCP port (`renode -P`), so the GUI never blocks the emulation.
   Renode is still starting). A watchdog process next to Renode stops it when
   live.py dies without cleaning up (SIGKILL, crash), and a starting live.py
   stops leftover Renodes running `out/live.resc` that no live.py owns.
+* Real-time cap (default on; header `≤1x`, `--no-realtime-cap` to start
+  without it): Renode runs the guest as fast as the host allows, so a fast
+  host or Fast mode put virtual time ahead of the wall clock; live.py pauses
+  the emulation over the monitor while virtual time is ahead and resumes it
+  when the clock has caught up (no catch-up of time lost while slower). Fast
+  fw-rs DMM / scope runs: 0.97x average, <= 1.05x in any 1 s window (uncapped:
+  up to 1.23x). `run.py` (batch) is not capped.
 * Header bar: firmware (stock / fwrs / chain, restarts the machine), Fast
-  (PerformanceInMips 50, roughly real time on this host), pause, restart,
+  (PerformanceInMips 50, roughly real time on this host), real-time cap, pause, restart,
   screenshot; the subtitle shows the virtual time and the speed ratio.
 * Logs: `emu/out/live-renode.out` (Renode), `emu/out/live-monitor.log` (every
   monitor command and reply).

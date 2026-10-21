@@ -1254,6 +1254,10 @@ class GtkApp(Adw.Application):
         self.fast.set_active(self.args.fast)
         self.fast.connect('toggled', lambda *a: self.restart())
         header.pack_start(self.fast)
+        self.cap = Gtk.ToggleButton(label='≤1x', active=not getattr(self.args, 'no_realtime_cap', False))
+        self.cap.set_tooltip_text('real-time cap: virtual time never runs ahead of the wall clock '
+                                  '(off: as fast as the host allows; live.py --no-realtime-cap)')
+        header.pack_start(self.cap)
         self.play = Gtk.ToggleButton(icon_name='media-playback-pause-symbolic')
         self.play.set_tooltip_text('pause / resume (space)')
         self.play.connect('toggled', self.on_pause_toggled)
@@ -1396,6 +1400,8 @@ class GtkApp(Adw.Application):
             self.title.set_subtitle('waiting for the emulator … %.0f s' % (time.time() - self.t_start))
             return True
         seq, vus, pix, rgbarr = f
+        self.emu.cap = self.cap.get_active()
+        self.emu.pace(vus)
         if seq != getattr(self, 'last_seq', None):
             self.last_seq = seq
             self.last_rgb = rgbarr
@@ -1837,6 +1843,7 @@ class GtkApp(Adw.Application):
             return
         paused = btn.get_active()
         self.emu.paused = paused
+        self.emu.held = False             # the user's pause / start replaces the cap's
         btn.set_icon_name('media-playback-start-symbolic' if paused else 'media-playback-pause-symbolic')
         self.send('pause' if paused else 'start')
 

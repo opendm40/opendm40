@@ -157,9 +157,38 @@ class Emulator:
         self.q = queue.Queue()
         self.sock = None
         self.mm = None
-        self.paused = False
+        self.paused = False               # paused by the user
         self.last_reply = ''
+        self.cap = True                   # real-time cap (pace)
+        self.held = False                 # paused by the cap
+        self.pace_at = None
+        self.credit = 0.0
         threading.Thread(target=self._sender, daemon=True).start()
+
+    # ---- real-time cap ----
+    def pace(self, vus):
+        """Keep virtual time from running ahead of the wall clock (call with the frame header's virtual
+        time a few dozen times a second). Renode runs the guest as fast as the host allows (at 200 MIPS a
+        busy loop on a fast host, or --fast, gets ahead of real time); this pauses the emulation over the
+        monitor while virtual time is ahead and resumes it when the wall clock has caught up. Being
+        slower than real time is not paid back later (at most 20 ms of credit)."""
+        now = time.monotonic()
+        if self.paused or not self.cap or self.pace_at is None:
+            if self.held and not self.paused:
+                self.send('start')
+            self.held = False
+            self.pace_at = (now, vus)
+            self.credit = 0.0
+            return
+        w0, v0 = self.pace_at
+        self.pace_at = (now, vus)
+        self.credit = min(self.credit + (now - w0) - (vus - v0) / 1e6, 0.02)
+        if not self.held and self.credit < -0.02:
+            self.held = True
+            self.send('pause')
+        elif self.held and self.credit >= 0:
+            self.held = False
+            self.send('start')
 
     # ---- monitor ----
     def send(self, cmd):
@@ -389,6 +418,8 @@ class TkApp:
             self.status.set('waiting for the emulator ... %.0f s' % (time.time() - self.t_start))
             return
         seq, vus, pix, rgb = f
+        self.emu.cap = not getattr(self.args, 'no_realtime_cap', False)
+        self.emu.pace(vus)
         im = Image.fromarray(rgb, 'RGB')
         self.last_image = im
         if self.scale != 1:
@@ -508,6 +539,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('mode', nargs='?', default='stock', choices=['stock', 'fwrs', 'chain'])
     ap.add_argument('--fast', action='store_true', help='PerformanceInMips 50 (about 2x faster)')
+    ap.add_argument('--no-realtime-cap', action='store_true',
+                    help='let virtual time run ahead of the wall clock (default: capped at 1.0x real time)')
     ap.add_argument('--app', help='application image (run.py --app)')
     ap.add_argument('--scale', type=int, default=2, help='Tk window scale (default 2)')
     ap.add_argument('--tk', action='store_true', help='use the Tk window instead of GTK')
