@@ -57,6 +57,9 @@ pub enum View {
     Device,
     /// DMM AutoHold and Hi/Lo limits of the current function (MF).
     Limits,
+    /// Record page (decision 2026-10-22 #1): the CSV recording's interval,
+    /// duration, free-time estimate, Start / Stop; Hold & Limits -> Record.
+    Record,
     /// Screenshot + log gallery (FR-16, gallery.rs).
     Gallery,
     /// On-device help (UF-29), Settings 2/3 -> Help: HELP pages.
@@ -1940,7 +1943,7 @@ pub fn settings(page: u8, vals: &[&str]) {
         list_page("Settings", &SETTINGS, &v[..vals.len().min(9)]);
         for i in SET_STEP_ROWS {
             if let Some(t) = vals.get(i) {
-                set_stepper(i, t);
+                set_stepper(i, t, STEP_MINUS_X);
             }
         }
     } else if page == 1 {
@@ -1965,22 +1968,41 @@ pub fn list_page(title: &str, names: &[&str], vals: &[&str]) {
     }
 }
 
-/// "-" key, value, "+" key in the value column of settings row `i`.
-fn set_stepper(i: usize, val: &str) {
+/// "-" key at `minus_x`, value, "+" key (STEP_PLUS_X) in settings row `i`.
+fn set_stepper(i: usize, val: &str, minus_x: i16) {
     let r = set_row(i);
-    for (x, t) in [(STEP_MINUS_X, "-"), (STEP_PLUS_X, "+")] {
+    for (x, t) in [(minus_x, "-"), (STEP_PLUS_X, "+")] {
         let k = rect(x, r.y + 3, STEP_KEY_W, r.h - 6);
         sf::rbox(k, 4, M_ACCENT, M_TILE);
         sf::glyphs(sf::TEXT22, k, t, STATUS_FG, M_ACCENT, 8, 0);
     }
-    let vx = STEP_MINUS_X + STEP_KEY_W + 6;
-    sf::glyphs(sf::TEXT22, rect(vx, r.y, STEP_PLUS_X - 6 - vx, r.h), val, M_ACCENT, M_TILE, 8, 0);
+    let vx = minus_x + STEP_KEY_W + 6;
+    sf::glyphs(sf::TEXT22, rect(vx, r.y, step_value_w(minus_x), r.h), val, M_ACCENT, M_TILE, 8, 0);
 }
+
+/// Width of a stepper's value box between the "-" key at `minus_x` and "+".
+pub const fn step_value_w(minus_x: i16) -> i16 {
+    STEP_PLUS_X - 6 - (minus_x + STEP_KEY_W + 6)
+}
+
+/// The Record page's "-" keys sit further left (its labels are short):
+/// "Every reading" / "Until stopped" (143 px) need more than Settings 1's
+/// 134 px value box.
+pub const REC_STEP_MINUS_X: i16 = 150;
 
 /// A tap at `x` on a stepper row: -1 (left of the value's centre: the
 /// label and the "-" key) or +1.
 pub fn settings_step(x: u16) -> i8 {
-    let mid = (STEP_MINUS_X + STEP_KEY_W + STEP_PLUS_X) / 2;
+    step_dir(x, STEP_MINUS_X)
+}
+
+/// `settings_step` on the Record page.
+pub fn record_step(x: u16) -> i8 {
+    step_dir(x, REC_STEP_MINUS_X)
+}
+
+fn step_dir(x: u16, minus_x: i16) -> i8 {
+    let mid = (minus_x + STEP_KEY_W + STEP_PLUS_X) / 2;
     if (x as i16) < mid { -1 } else { 1 }
 }
 
@@ -2000,11 +2022,40 @@ pub fn list_hit(y: u16, n: usize) -> Option<usize> {
     if i < n.min(SET_ROWS) { Some(i) } else { None }
 }
 
-/// Rows of the DMM Hold & Limits page (View::Limits).
-pub const LIMIT_ROWS: [&str; 8] = [
+/// Rows of the DMM Hold & Limits page (View::Limits). The ninth, "Record",
+/// opens the Record page (View::Record; 9 rows at the settings pitch fit:
+/// 44 + 8 x 30 + 27 = 311).
+pub const LIMIT_ROWS: [&str; 9] = [
     "Auto Hold", "Limits", "Upper limit", "Lower limit", "Upper = reading", "Lower = reading", "Clear limits",
-    "Fail beep",
+    "Fail beep", "Record",
 ];
+
+/// Record page rows (decision 2026-10-22 #1): interval and duration with
+/// -/+ steppers (as Settings 1), the free-time estimate, Start / Stop.
+pub const RECORD_ROWS: [&str; 4] = ["Interval", "Duration", "Free", ""];
+/// Rows with a stepper on the Record page.
+pub const REC_STEP_ROWS: [usize; 2] = [0, 1];
+/// Value texts of csvlog::INTERVALS_S / DURATIONS_S.
+pub const REC_INTERVALS: [&str; 4] = ["Every reading", "1 s", "10 s", "1 min"];
+pub const REC_DURATIONS: [&str; 5] = ["Until stopped", "10 min", "1 h", "8 h", "24 h"];
+/// Record page row of the Start / Stop button.
+pub const REC_START_ROW: usize = 3;
+
+/// The Record page: title bar, interval / duration steppers, the estimate
+/// (`free`: "about N h left" at the interval, or why there is none), Start / Stop
+/// (a filled row: accent Start, red Stop while recording). `vals` =
+/// interval, duration texts.
+pub fn record_page(vals: [&str; 2], free: &str, recording: bool) {
+    let names = RECORD_ROWS;
+    list_page("Record", &names[..3], &["", "", free]);
+    for (i, v) in REC_STEP_ROWS.iter().zip(vals) {
+        set_stepper(*i, v, REC_STEP_MINUS_X);
+    }
+    let r = set_row(REC_START_ROW);
+    let (t, bg) = if recording { ("Stop recording", 0xF800) } else { ("Start recording", M_ACCENT) };
+    sf::rbox(r, 6, bg, M_BG);
+    sf::glyphs(sf::TEXT22, r, t, STATUS_FG, bg, 8, 0);
+}
 
 pub fn view_name(v: View) -> &'static str {
     match v {
@@ -2018,6 +2069,7 @@ pub fn view_name(v: View) -> &'static str {
         View::Keypad => "Keypad",
         View::Device => "Device",
         View::Limits => "Hold & Limits",
+        View::Record => "Record",
         View::Gallery => "Gallery",
         View::Help => "Help",
     }
@@ -2029,12 +2081,12 @@ pub fn view_name(v: View) -> &'static str {
 /// MENU goes back. Only behaviour of this firmware (app.rs, gesture.rs) and
 /// limits the repo documents (genplan.rs, docs/user-feedback.md section
 /// 6.3 / 7 / 3) - no input ratings that are not sourced.
-pub const HELP: [(&str, [(&str, &str); 8]); 4] = [
+pub const HELP: [(&str, [(&str, &str); 8]); 5] = [
     (
         "Gestures",
         [
             ("Swipe left / right", "Next / previous view"),
-            ("Swipe down (DMM)", "CSV record on / off"),
+            ("Swipe down (DMM)", "Record on / off"),
             ("3 fingers down", "Screenshot to disk"),
             ("2 fingers down", "Power off (confirm)"),
             ("Scope: drag up/down", "Move the trace"),
@@ -2080,6 +2132,19 @@ pub const HELP: [(&str, [(&str, &str); 8]); 4] = [
             ("Gen output", "Never apply voltage"),
             ("Supplied TC probe", "Rated to 300 C"),
             ("Key/alert volume", "Keys and alerts"),
+        ],
+    ),
+    (
+        "Record + alerts",
+        [
+            ("Record page", "MF > Hold & Limits"),
+            ("Interval rows", "Mean of the readings"),
+            ("Swipe down (DMM)", "Same settings"),
+            ("While recording", "No auto power-off"),
+            ("Backlight", "Still dims (battery)"),
+            ("A-JACK / LIVE?", "Alternate with HOLD"),
+            ("V-JACK?", "Hint, below HOLD"),
+            ("Jack alerts", "Settings 3/3"),
         ],
     ),
 ];

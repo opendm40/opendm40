@@ -1404,7 +1404,7 @@ fn main() {
     w.gen.apply(gen::Settings::DEFAULT);
     for title in ["Hold & Limits: Temperature", "Settings", "Hold & Limits: Capacitance"] {
         host::reset(0);
-        ui::list_page(title, &ui::LIMIT_ROWS, &["ON"; 8]);
+        ui::list_page(title, &ui::LIMIT_ROWS, &["ON"; 9]);
         let keep = 40 * W;
         for p in emu().owner[keep..].iter_mut() {
             *p = 0;
@@ -1503,6 +1503,43 @@ fn main() {
         host::reset(0);
         ui::settings(page, &vals);
         ck.check_opts(&format!("settings/{page}/{}", vals[0]), &page_regions, false);
+    }
+    // Hold & Limits with its ninth row "Record" (decision 2026-10-22 #1),
+    // the widest limit values.
+    for rec in ui::REC_INTERVALS {
+        host::reset(0);
+        ui::list_page("Hold & Limits: Diode", &ui::LIMIT_ROWS, &["OFF", "OFF", "-99999.9 mA", "-99999.9 mA", "", "", "", "OFF", rec]);
+        ck.check_opts(&format!("limits/{rec}"), &page_regions, false);
+        if rec == "Every reading" {
+            save(&out, "m11-hold-limits");
+        }
+    }
+    // Record page: every interval x duration value in the steppers (they
+    // fit the 134 px between the keys), the estimate texts, Start / Stop.
+    for (k, (iv, du, free, on)) in [
+        ("Every reading", "Until stopped", "about 1193 h (limit)", false),
+        ("1 min", "24 h", "about 62 h left", true),
+        ("10 s", "10 min", "-- (disk busy)", false),
+        ("1 s", "8 h", "< 1 h left", true),
+        ("Every reading", "1 h", "-- (no disk)", false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        host::reset(0);
+        ui::record_page([iv, du], free, on);
+        ck.check_opts(&format!("record/{iv}/{du}/{free}/{on}"), &page_regions, false);
+        if k < 2 {
+            save(&out, &format!("m12-record-{}", if on { "stop" } else { "start" }));
+        }
+    }
+    for t in ui::REC_INTERVALS.iter().chain(ui::REC_DURATIONS.iter()) {
+        ck.cases += 1;
+        let w = stockfont::text_width(stockfont::TEXT22, t, 0);
+        let vw = ui::step_value_w(ui::REC_STEP_MINUS_X);
+        if w > vw {
+            ck.fail("record/stepper", format!("too wide: {t:?} {w} > {vw}"));
+        }
     }
     for b in [Button::Volt, Button::Amp, Button::Ohm] {
         for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: it never steps to mV", false))] {
