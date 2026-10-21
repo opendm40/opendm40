@@ -953,19 +953,23 @@ fn main() {
                 for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
                     for rel in [false, true] {
                         for (j, (hv, rec, gen)) in [(0u8, false, ""), (hv_of(r), true, "10.00MHz"), (1, false, "1.00kHz"), (2, false, "")].into_iter().enumerate() {
+                          // Both phases of the 1 s alternation (REL / verdict;
+                          // A-JACK / LIVE? with HOLD, decision 2026-10-22 #5).
+                          for alt in [false, true] {
                             let mut r = *r;
                             if !(hold == 0 && lim == 0 && !rel) {
                                 r.alert = ALERTS[(j + hold as usize + rel as usize) % 4];
                             }
                             let r = &r;
-                            let mut d = ui::strip_data(r, hold, lim, rel, hv, hold == 1, *label, rec);
+                            let mut d = ui::strip_data(r, hold, lim, rel, hv, alt, *label, rec);
                             d.gen = scope_ui::Txt::new(gen);
                             page(&m);
                             scope_ui::meter_strip(&d);
-                            ck.check_area(&format!("strip/{name}/h{hold}/l{lim}/r{}/hv{hv}/a{}", rel as u8, r.alert.name()), &strip_regions, true, Some(strip_area));
-                            if hold == 0 && lim == 0 && !rel {
+                            ck.check_area(&format!("strip/{name}/h{hold}/l{lim}/r{}/hv{hv}/a{}/p{}", rel as u8, r.alert.name(), alt as u8), &strip_regions, true, Some(strip_area));
+                            if hold == 0 && lim == 0 && !rel && !alt {
                                 datas.push((name, d));
                             }
+                          }
                         }
                     }
                 }
@@ -1125,13 +1129,20 @@ fn main() {
                     ui::RateChip { rate: 0, period_ms: 2200, applies: true },
                 ];
                 for (k, (rate, rec)) in [(1u8, false), (4, true), (2, false), (1, true), (4, false)].into_iter().enumerate() {
+                  for alt in [false, true] {
                     let rc = chips[k];
                     let mut r = *r;
                     r.main.ext = ext && !r.main.ol;
                     // Every alert badge in the status slot, against every hold state.
                     r.alert = ALERTS[(k + hold as usize) % 4];
+                    // The alert phase of A-JACK / LIVE? with HOLD (decision
+                    // 2026-10-22 #5); the other cases look the same in both.
+                    if alt && !ui::alert_alternates(hold, r.alert) {
+                        continue;
+                    }
                     host::reset(0);
                     let mut dv = ui::DmmView::new();
+                    dv.alt = alt;
                     dv.label = *label;
                     // UF-30: every other chip variant with the bargraph
                     // instead of the history row.
@@ -1155,7 +1166,8 @@ fn main() {
                     let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
                     ui::chart(&mut cc, &pts, dec, rate, Some(&side), r.main.unit, rc);
-                    ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}", ext as u8, r.alert.name()), &dmm_page_regions);
+                    ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}/p{}", ext as u8, r.alert.name(), alt as u8), &dmm_page_regions);
+                  }
                 }
             }
         }
@@ -1195,6 +1207,63 @@ fn main() {
                         bx.add((i % W) as i32, (i / W) as i32);
                     }
                     ck.fail(&format!("dmm update {na} -> {nb} ext {xa}->{xb}"), format!("{} stale pixels at {:?}", diff.len(), bx));
+                }
+            }
+        }
+    }
+
+    // 5c'. Status slot alternation (decision 2026-10-22 #5): HOLD / A-HOLD
+    //     with A-JACK / LIVE? flipped phase by phase (and from / to RUN
+    //     with an alert, and a V-JACK? that must not alternate) equals a
+    //     fresh page in the last phase: each phase clears the whole box.
+    {
+        use sentinel::Alert;
+        let (r0, l0) = cases.iter().find(|c| c.0 == "dcv").map(|c| (c.1, c.2)).unwrap();
+        for hold in 0..4u8 {
+            for a in [Alert::AJack, Alert::Live, Alert::VJack, Alert::None] {
+                for seq in [&[false, true][..], &[true, false], &[false, true, false], &[true, false, true]] {
+                    let mut r = r0;
+                    r.alert = a;
+                    let run = |dv: &mut ui::DmmView, steps: &[(u8, bool)]| {
+                        host::reset(0);
+                        dv.label = l0;
+                        dv.draw_static(Button::Volt, r.mode, r.acdc, false);
+                        for &(h, p) in steps {
+                            dv.alt = p;
+                            dv.reading(&r, h, 0);
+                        }
+                    };
+                    // From RUN with the alert, a hold change, then the phases.
+                    let mut steps = vec![(0u8, false)];
+                    steps.extend(seq.iter().map(|&p| (hold, p)));
+                    let mut dv = ui::DmmView::new();
+                    run(&mut dv, &steps);
+                    let got = emu().fb.clone();
+                    let last = *steps.last().unwrap();
+                    let mut dv = ui::DmmView::new();
+                    run(&mut dv, &[last]);
+                    ck.cases += 1;
+                    let bad = (0..W * 40).filter(|&i| got[i] != emu().fb[i]).count();
+                    if bad > 0 {
+                        ck.fail(&format!("slot phase h{hold} {} {:?}", a.name(), seq), format!("{bad} stale pixels"));
+                    }
+                    // Back to RUN.
+                    steps.push((0, !last.1));
+                    let mut dv = ui::DmmView::new();
+                    run(&mut dv, &steps);
+                    let got = emu().fb.clone();
+                    let mut dv = ui::DmmView::new();
+                    run(&mut dv, &[(0, !last.1)]);
+                    ck.cases += 1;
+                    let bad = (0..W * 40).filter(|&i| got[i] != emu().fb[i]).count();
+                    if bad > 0 {
+                        ck.fail(&format!("slot phase h{hold} {} {:?} -> RUN", a.name(), seq), format!("{bad} stale pixels"));
+                    }
+                    // The phase shows what slot_alert says.
+                    let alerting = ui::slot_alert(hold, a, last.1);
+                    if alerting != (hold != 0 && last.1 && matches!(a, Alert::AJack | Alert::Live)) {
+                        ck.fail(&format!("slot_alert h{hold} {}", a.name()), "rule".into());
+                    }
                 }
             }
         }
@@ -1738,6 +1807,29 @@ fn main() {
             r.alert = sentinel::Alert::AJack;
             combined(&r, l, 0, 0, false, false, false, "");
             save(&out, "c11-strip-ajack");
+            // HOLD with A-JACK: both phases (decision 2026-10-22 #5).
+            combined(&r, l, 1, 0, false, true, false, "");
+            save(&out, "c13-strip-hold-ajack-p1");
+            combined(&r, l, 1, 0, false, false, false, "");
+            save(&out, "c14-strip-hold-ajack-p0");
+        }
+        // DMM status slot: HOLD / A-HOLD with A-JACK / LIVE?, both phases.
+        for (case, file, b, a, hold) in [
+            ("dcv", "d15-dmm-hold-ajack", Button::Volt, sentinel::Alert::AJack, 1u8),
+            ("ohm_k", "d16-dmm-ahold-live", Button::Ohm, sentinel::Alert::Live, 3),
+        ] {
+            for alt in [true, false] {
+                host::reset(0);
+                let (mut r, _) = find(case);
+                r.alert = a;
+                let mut dv = ui::DmmView::new();
+                dv.alt = alt;
+                dv.draw_static(b, r.mode, false, false);
+                dv.bar_update(&r);
+                dv.reading(&r, hold, 0);
+                ui::status_right(&status(0));
+                save(&out, &format!("{file}-p{}", alt as u8));
+            }
         }
         // UF-30 bargraph: bipolar DC V (negative), unipolar ohm, overload.
         for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt)] {

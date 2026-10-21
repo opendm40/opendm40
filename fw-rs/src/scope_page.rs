@@ -552,7 +552,7 @@ impl App {
         if self.sp.covered() {
             return;
         }
-        let Some(r) = self.meter.shown().copied() else {
+        let Some(r) = self.shown_reading() else {
             su::meter_strip(&su::StripData::EMPTY);
             return;
         };

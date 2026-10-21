@@ -175,8 +175,13 @@ pub struct DmmView {
     last_ext: u8,
     last_unit: &'static str,
     last_mode: u8,
-    last_top: Option<(bool, u8, bool, crate::sentinel::Alert)>,
+    last_top: Option<(bool, u8, bool, crate::sentinel::Alert, bool)>,
     last_aux: [bool; 2],
+    /// Alternation phase (the app's 1 s `strip_alt`): with HOLD / A-HOLD
+    /// and an A-JACK / LIVE? alert the status slot shows the alert while it
+    /// is true, the hold state while false (`slot_alert`). Set by the app
+    /// before `reading`.
+    pub alt: bool,
     /// Temperature sensor name shown instead of AUTO / MANU (set by the app,
     /// `None` outside the temperature function).
     pub label: Option<&'static str>,
@@ -357,6 +362,7 @@ impl DmmView {
             last_mode: 255,
             last_top: None,
             last_aux: [false; 2],
+            alt: false,
             label: None,
             last_label: None,
             last_lim: 255,
@@ -665,7 +671,9 @@ impl DmmView {
                 None => {}
             }
         }
-        let top = (r.auto && !r.auto_plus, hold, r.auto_plus, r.alert);
+        // The phase is part of the key only while it alternates: no
+        // repaint every second otherwise.
+        let top = (r.auto && !r.auto_plus, hold, r.auto_plus, r.alert, self.alt && alert_alternates(hold, r.alert));
         // Temperature: the status-bar slot shows AUTO / MANU like the other
         // functions (the sensor name is the chip above; the deg F second
         // readout that used to sit here is gone: one global unit, owner).
@@ -680,7 +688,7 @@ impl DmmView {
             } else {
                 sf::label(sf::F21, rect(BAR_X, 1, 90, 32), s, STATUS_FG, BAR, 1, 0);
             }
-            hold_label(hold, r.alert);
+            hold_label(hold, r.alert, self.alt);
         }
         if self.last_lim != lim {
             self.last_lim = lim;
@@ -713,7 +721,8 @@ fn ascii_unit(u: &str, out: &mut crate::scope_ui::Txt) {
 /// meter_strip): the reading as on the old strip (value without the extra
 /// digit, OL = "0L"), sub readings (AC+DC parts tagged "AC" / "DC", Hz and
 /// duty, the 4-20 mA percentage, the temperature sensor name), one state
-/// badge by priority HOLD / A-HOLD > A-JACK / V-JACK? / LIVE? (r.alert) >
+/// badge by priority A-JACK / LIVE? alternating with HOLD / A-HOLD (`alt`,
+/// `slot_alert`) > HOLD / A-HOLD > A-JACK / V-JACK? / LIVE? (r.alert) >
 /// HV (>= 30 V) > REC > REL / limit
 /// verdict (alternating with `alt`) > range (AUTO / AUTO+ / MANU).
 pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, label: Option<&'static str>, rec: bool) -> crate::scope_ui::StripData {
@@ -767,6 +776,8 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         _ => None,
     };
     let alert = r.alert;
+    // A-JACK / LIVE? with HOLD / A-HOLD: alternate (decision 2026-10-22 #5).
+    let hold = if slot_alert(hold, alert, alt) { 0 } else { hold };
     let (b, c) = match hold {
         1 => ("HOLD", 0xfaa0),
         2 => ("A-HOLD", 0x5acb),
@@ -788,6 +799,20 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
     d
 }
 
+/// Decision 2026-10-22 #5: the safety alerts A-JACK and LIVE? alternate
+/// with HOLD / A-HOLD in the status slot (and the combined-view strip
+/// badge) at the 1 s `alt` cadence, so neither the alert nor the frozen
+/// display is hidden; V-JACK? (a silent hint) stays below HOLD.
+pub fn alert_alternates(hold: u8, alert: crate::sentinel::Alert) -> bool {
+    use crate::sentinel::Alert;
+    hold != 0 && matches!(alert, Alert::AJack | Alert::Live)
+}
+
+/// The alternating slot shows the alert in this phase (`alt` true).
+pub fn slot_alert(hold: u8, alert: crate::sentinel::Alert, alt: bool) -> bool {
+    alt && alert_alternates(hold, alert)
+}
+
 /// HOLD / RUN slot of the DMM status bar. Manual HOLD keeps the stock F21
 /// "HOLD"; AutoHold is a different face so the two cannot be confused:
 /// "A-HOLD" in TEXT22 (66 px, F21 would need 103), accent blue while it waits
@@ -799,10 +824,12 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
 /// on red (the HI / LO badge red), "V-JACK?" / "LIVE?" in the stock value
 /// amber on the bar; letter-spaced 1 px, so the alert box runs to x 201
 /// (3 px before the uptime at 205) and the other states clear 190..201.
-fn hold_label(hold: u8, alert: crate::sentinel::Alert) {
+/// With HOLD / A-HOLD, A-JACK and LIVE? take the slot every other second
+/// (`slot_alert`); each phase repaints the whole 119..201 box.
+fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
     use crate::sentinel::Alert;
     let r = rect(119, 1, 71, 32);
-    if hold == 0 && alert != Alert::None {
+    if (hold == 0 && alert != Alert::None) || slot_alert(hold, alert, alt) {
         let (fg, bg) = if alert == Alert::AJack { (0xFFFF, alert.color()) } else { (alert.color(), BAR) };
         lcd::fill_rect(119, 1, 83, 4, BAR);
         lcd::fill_rect(119, 29, 83, 4, BAR);
