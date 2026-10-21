@@ -30,6 +30,14 @@
 //!     function change itself.
 //!   - +9.9E37 and "Data stale" in SYST:ERR? only if the current function
 //!     has no reading at all SCPI_WAIT_MS (1.9 s) after that deadline.
+//!   - the settle wait is only for a change this host asked for (CONF,
+//!     MEAS:<f>?, FUNC, TEMP:TRAN on the same transport, or READ? powering
+//!     the DMM up). After a change made on the meter (touch, keys, the phone
+//!     app, DBG:TAP / KEY, the other transport) READ? and MEAS:<f>? naming
+//!     the current function answer within SCPI_QUICK_MS: the latest reading
+//!     of the current function, else +9.9E37 and "Data stale" (libsigrok
+//!     would otherwise time out after 1 s and end the acquisition). Such a
+//!     change also cuts a READ? already waiting down to that budget.
 //!   - no late reply to a query the host gave up on: USBTMC
 //!     INITIATE_ABORT_BULK_IN / INITIATE_CLEAR, or a new command ("Query
 //!     INTERRUPTED").

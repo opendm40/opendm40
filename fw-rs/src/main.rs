@@ -211,6 +211,14 @@ fn main() -> ! {
     // reply would shift every later one.
     // Per transport ([USB], [BT]); a BT line is taken only while [BT] is None.
     let mut scpi_wait: [Option<(u32, bool, u64, u64)>; 2] = [None, None];
+    // Who made the DMM's last function change, for the READ? cap: func_key =
+    // (function, temperature sensor) as last seen; host_key[src] = that key
+    // when transport src's SCPI made the change (CONF, MEAS:<f>?, FUNC,
+    // TEMP:TRAN), None after any other change (touch / keys / phone app /
+    // DBG:TAP / the other transport). Only then may READ? / MEAS? wait for
+    // the settle; otherwise SCPI_QUICK_MS at most (scpi.rs header).
+    let mut func_key = (app.dmm.func(), app.dmm.t_sensor());
+    let mut host_key: [Option<(u8, u8)>; 2] = [None, None];
     // Data logger (FR-38): owns the HY3131 AD1 fast stream while active.
     let logger = unsafe { &mut *core::ptr::addr_of_mut!(LOGGER) };
     logger.set_osr(logger::DEFAULT_OSR);
@@ -284,6 +292,16 @@ fn main() -> ! {
             // USBTMC INITIATE_CLEAR / bus reset: no reply to a pending query.
             scpi_wait[USB] = None;
         }
+        if (app.dmm.func(), app.dmm.t_sensor()) != func_key {
+            // Changed on the meter (or by DBG:KEY's deferred key-up): no host
+            // waits for its settle; a READ? already waiting is cut short.
+            func_key = (app.dmm.func(), app.dmm.t_sensor());
+            host_key = [None, None];
+            for w in scpi_wait.iter_mut().flatten() {
+                w.1 = false;
+                w.3 = w.3.min(w.2 + SCPI_QUICK_MS);
+            }
+        }
         let mut msg = [0u8; 256];
         let mut msg_n = 0usize;
         let mut src = USB;
@@ -321,7 +339,11 @@ fn main() -> ! {
                 if src == BT { (&mut scpis[BT], &mut bt) } else { (&mut scpis[USB], &mut tmc) };
             // dmm.func(): the stock mode, 16 / 17 = V / A AC+DC (stable while
             // AC+DC alternates the HY3131 mode).
-            let reply = match scpi.handle(&msg[..msg_n], app.dmm.func()) {
+            let out = scpi.handle(&msg[..msg_n], app.dmm.func());
+            // DBG:TAP / KEY / DRAG stand in for the user: a change they make
+            // is not the host's (READ? cap).
+            let by_host = !matches!(out, scpi::Out::Dbg(_));
+            let reply = match out {
                 scpi::Out::None => false,
                 scpi::Out::Text => true,
                 scpi::Out::Configure(m) => {
@@ -336,16 +358,28 @@ fn main() -> ! {
                         scpi.put_bytes(b"+9.90000000E+37");
                         true
                     } else {
-                        // The multimeter needs its analog side powered.
+                        // The multimeter needs its analog side powered (a
+                        // power-up starts a settle: the host's doing).
+                        let d0 = app.dmm.deadline();
                         app.dmm_power(&mut clk);
                         let changed = m.is_some_and(|m| !app.is_func(m));
                         if let Some(m) = m.filter(|_| changed) {
                             app.select_func(&mut clk, m);
                         }
+                        // The settle this query may wait for was requested by
+                        // this host: this message (MEAS:<f>? changing the
+                        // function), its earlier CONF / FUNC / TEMP:TRAN, or
+                        // the power-up. Not after a change made on the meter:
+                        // READ? then answers within SCPI_QUICK_MS (latest
+                        // reading, else +9.9E37 and "Data stale"), as libsigrok
+                        // times out after 1 s.
+                        let host_settle = changed
+                            || app.dmm.deadline() != d0
+                            || host_key[src] == Some((app.dmm.func(), app.dmm.t_sensor()));
                         // meter.live() is reset on every function change.
                         // *IDN? emulation (scpi::idn_emul): the host does not
                         // wait after CONF, never hold a reply past its 1 s.
-                        let expire = if app.meter.live().is_some() || scpi::idn_emul() != 0 {
+                        let expire = if app.meter.live().is_some() || scpi::idn_emul() != 0 || !host_settle {
                             now + SCPI_QUICK_MS
                         } else {
                             now.max(app.dmm.deadline()) + SCPI_WAIT_MS
@@ -654,6 +688,22 @@ fn main() -> ! {
             };
             if reply {
                 port.respond(&scpi.buf[..scpi.len]);
+            }
+            let key = (app.dmm.func(), app.dmm.t_sensor());
+            if key != func_key {
+                func_key = key;
+                host_key = [None, None];
+                if by_host {
+                    host_key[src] = Some(key);
+                }
+                // A wait of the other transport (or any, after DBG:TAP / KEY)
+                // was not for this change: cut it to the quick budget.
+                for (i, w) in scpi_wait.iter_mut().enumerate() {
+                    if let Some(w) = w.as_mut().filter(|_| !by_host || i != src) {
+                        w.1 = false;
+                        w.3 = w.3.min(w.2 + SCPI_QUICK_MS);
+                    }
+                }
             }
             prof::lap(prof::SCPI);
         }
