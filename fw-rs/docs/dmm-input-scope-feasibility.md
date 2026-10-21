@@ -23,8 +23,8 @@ row facts; they are cited, not re-derived.
 
 | idea | verdict | one line |
 |---|---|---|
-| (A) DMM-input scope | **GO, conditional**, as a *slow* scope: ~5-20 ms/div .. 50 s/div roll, 2.4-9.6 kS/s, bandwidth ~1-2.5 kHz | single AD2 conversions are readable (R03..R05, flag AD2F), but there is no FIFO and fw-rs has no ISRs; the usable rate is set by the main-loop stalls (1-25 ms) and the bit-banged link (~122 us per sample), not by the chip (76.8 kS/s). Gap-free capture needs one small architectural change (section 5.2). Not "1 ms/div". |
-| (B) AD2 logger | **GO** (low effort) | adds the 600 .. 9600 S/s rungs above AD1's 640 S/s, ~13-15 bits, gaps marked by the existing seq/timestamp scheme; same readout machinery as (A). Do (B) first: it is the device experiment for (A). |
+| (A) DMM-input scope | **GO, conditional**, as a *slow* scope: ~5-20 ms/div .. 50 s/div roll, 2.4-9.6 kS/s, bandwidth ~1-2.5 kHz | single AD2 conversions are readable (R03..R05, flag AD2F; ~14 ENOB), but there is no FIFO and fw-rs has no ISRs; the usable rate is set by the main-loop stalls (1-25 ms) and the bit-banged link (~122 us per sample), not by the chip (76.8 kS/s). Gap-free capture needs one small architectural change (section 5.2). Not "1 ms/div". |
+| (B) AD2 logger | **GO** (low effort) | adds the 600 .. 9600 S/s rungs above AD1's 640 S/s, ~14-16 bits, gaps marked by the existing seq/timestamp scheme; same readout machinery as (A). Do (B) first: it is the device experiment for (A). |
 
 The decisive UNKNOWN for both: whether the HY3131 latches the 3-byte AD2 data
 register for the duration of a read (torn reads) and how many samples the real
@@ -71,20 +71,21 @@ both before any UI work.
 
 The device floor in the stock AC V 4 V row is 31..33 `sqrt(RMS)` counts with a
 quiet input (acdc doc 6a, 6b). RMS = sum(X^2)/N of the high-passed AD2 stream,
-so that is the per-sample rms noise: **~32 codes of 2^18 at 76.8 kS/s = 13.0
-ENOB** by Hycon's own definition (APD-DMM001 eq. 3: ENOB = log2(FSR / rms
-noise)); ~10.5 noise-free bits. It includes the divider / OP1 front-end noise,
+so that is the per-sample rms noise: **~32 codes against the 2^19 full span
+at 76.8 kS/s = 14.0 ENOB** by Hycon's own definition (APD-DMM001 eq. 3: ENOB =
+log2(FSR / rms noise), FSR = the full code span; the same convention is used
+for AD1 below); ~11.3 noise-free bits (pp ~ 6.6 sd). It includes the divider / OP1 front-end noise,
 so the converter alone is at least that good. At higher OSR2 the comb filter
-averages the modulator noise: white-noise scaling predicts ~15 ENOB at OSR2 =
+averages the modulator noise: white-noise scaling predicts ~16 ENOB at OSR2 =
 512 (4.8 kS/s), but the 1/f part of the front end does not scale, so treat
-13 .. 15 bits as the range until the shorted-input test (section 6, step 4).
+14 .. 16 bits as the range until the shorted-input test (section 6, step 4).
 For a 280-row display that is 5-7 bits more than needed; for the logger it
 sits between AD1's 24-bit DC path and the scope's 10 bits.
 
 For comparison AD1 at its fastest (OSR 256 unchopped, 640 S/s): 25 counts sd
 at OSR 32768 chopped (6c) scaled by 1/sqrt(OSR) (the emulator's model, INFERRED)
 gives ~280 counts of 2^24, ~15.9 ENOB. So AD2 at 2.4-9.6 kS/s and AD1 at 640
-S/s have similar effective resolution; AD2 buys rate, not bits.
+S/s have similar effective resolution (14-16 vs 15.9); AD2 buys rate, not bits.
 
 ### 1.3 Coupling: which jack reaches AD2, and how (VERIFIED rows + device)
 
@@ -213,8 +214,11 @@ device, 104-120 s each, DMM page):
 | `d.read` (DMM poll, bit-bang) max | - | 15.5 ms |
 | `d.chart` (strip chart redraw) | - | 0.9 .. 3.2 ms |
 
-(VERIFIED: scratch captures `prof-before.txt` / `prof-after.txt` of this
-session's device runs; the sections are the ones prof.rs names.) The 1-25 ms
+(VERIFIED numbers from `DBG:PROF?` captures found in the session scratchpad,
+`prof-before.txt` / `prof-after.txt`, taken earlier on 2026-10-21 on the DMM
+page, 104-120 s each; raw files not committed, this table is the record - as
+acdc doc 9 does for its /tmp captures. The sections are the ones prof.rs
+names. No device was used for this study.) The 1-25 ms
 stalls are LCD redraws, the 20-byte bit-banged DMM read, the 10 ms relay pulse
 and SPI-flash writes (45-400 ms per sector erase, logger.rs header).
 
@@ -346,9 +350,16 @@ as the stock AC rows do, or subtract the zero), vs the scope channel's 10-bit
   current, inrush) with the USB cable connected - none of which the MCX scope
   input (40 Vrms CAT II at x1, shared ground) can do. Current waveforms are the
   strongest case: the scope has no current input at all.
-* DMM readings: they need **not** stop. AD1 (DC rows) and the RMS/LPF blocks
-  (AC rows) run independently of a raw AD2 read; the stock AC rows already run
-  AD2 + AD3 + RMS + LPF together. Rules: enable AD2 with the row (note 7),
+* DMM readings: in the **DC rows they need not stop** - AD1 converts
+  independently of a raw AD2 read. In the **AC rows only partly**: the RMS/LPF
+  chain is clocked by the same OSR2, so streaming at OSR2 = 128 .. 1024 slows
+  the RMS/LPF cadence 4-32x (106 ms -> 0.4-3.4 s) and moves the comb response
+  the stock calibration was taken at; keeping OSR2 = 32 preserves the AC
+  reading but the readout cannot follow 76.8 kS/s. So in the Wave view either
+  pause the AC reading (the first cut below) or compute RMS / mean from the
+  record in software. Note also that AD2F is set by AD3 conversions too (13.2
+  "in common with AD2"): with both converters on, the flag / IRQ paces at
+  both. Rules: enable AD2 with the row (note 7),
   never toggle it during the mode; INTF is cleared by every read, so the
   streaming reader must keep a **shadow of the flags it clears** (AD1F, RMSF,
   LPFF, CTF) for dmm.rs's poll, and dmm.rs's own frames must go through the
@@ -372,7 +383,7 @@ as the stock AC rows do, or subtract the zero), vs the scope channel's 10-bit
 | | AD1 today (logger.rs) | AD2 |
 |---|---|---|
 | rates | 40 / 80 / 160 / 320 / 640 S/s nominal (chopped 2048 .. unchopped 256); 38 / ~80 / 318 / 634 measured | 600, 1 200, 2 400, 4 800, 9 600 (19 200) S/s, section 2.3 limits |
-| resolution | 24 bit, ~16 ENOB at 640 S/s, chopper-cancelled offset, 2.5 ppm/C | 19 bit, 13-15 ENOB (1.2), offset via ENCHOPAD2 (halves the rate) or OP1CHOP, 10-30 ppm/C |
+| resolution | 24 bit, ~16 ENOB at 640 S/s, chopper-cancelled offset, 2.5 ppm/C | 19 bit, 14-16 ENOB (1.2), offset via ENCHOPAD2 (halves the rate) or OP1CHOP, 10-30 ppm/C |
 | functions | DC V / mV / A (AD1 rows) | mV, A directly (DC-coupled AC rows), V with the new DC row; AC-coupled V with the stock row |
 | gaps | none below 640 S/s (main loop 30 us typical) when nothing stalls | every stall drops samples until the ISR variant; marked by the seq / timestamp scheme (logger.rs `missed`, `overwritten`), as the FR-38 design already requires |
 | ring | 2048 x 12 B = 24 KiB = 51 s at 40 S/s | 213 ms at 9.6 kS/s: size per rate; 16 K x 4 B (24-bit sample + seq byte) = 64 KiB = 1.7 s at 9.6 kS/s covers a 400 ms sector erase |
@@ -380,7 +391,7 @@ as the stock AC rows do, or subtract the zero), vs the scope channel's 10-bit
 | BT 115200 | fine | 11.5 kB/s -> ~1 kS/s packed, 2.4 kS/s with 16-bit deltas: BT is the limit, not the chip |
 | CSV to the SPI disk | works at 40 S/s (csvlog.rs slices) | text at ~20 B/sample x 9.6 kS/s = 190 kB/s exceeds the flash's erase-limited ~90 kB/s and the erases stall the loop: disk logging only at <= 1 kS/s, binary, with the big ring |
 
-Noise trade: at 2.4 kS/s AD2 gives ~15 bits per sample; averaging 4 samples
+Noise trade: at 2.4 kS/s AD2 gives ~15-16 bits per sample; averaging 4 samples
 on the host matches AD1's 640 S/s figure, so (B) only pays off for the rates
 AD1 cannot do (> 640 S/s) and for the AC-coupled / current paths. Accuracy:
 the stock LPF calibration applies to mV and A; the V DC row is uncalibrated
@@ -400,7 +411,7 @@ one-day change and is the natural first device experiment.
   the DC V row) and is useful on its own (current / mV logging at kS/s to the
   host).
 * **(A) GO as a slow floating scope**, scoped honestly: 5-10 ms/div .. 50 s/div,
-  ~1-2.5 kHz bandwidth, 13+ bits, V / mV / A on the isolated jacks, with the
+  ~1-2.5 kHz bandwidth, 14+ bits, V / mV / A on the isolated jacks, with the
   stock-scope rendering, trigger, roll, stop-and-zoom and cursors; **not** a
   replacement for the MCX channel and not "1 ms/div". Condition: the gap-free
   readout of 5.2 (an ISR), because a waveform display with a hole at every
@@ -441,7 +452,7 @@ HY3131 ----SPI2 (PC10/11/12, 3.125 MHz) + CS PD2----> hy3131 bus owner (ISR or m
    top bar shows the DMM function and range instead of CH1 V/div (V/div +/-
    step the DMM range; the "AC/DC" coupling pill selects the AC V row vs the
    DC row), the trigger, timebase, run/stop, cursors and measurements as the
-   scope (RMS / mean / freq from the record at 13 bits are better than the
+   scope (RMS / mean / freq from the record at 14 bits are better than the
    MCX channel's). In the scope page a **source badge "MCX | DMM"** opens the
    same view, so the owner's "DMM input source in the scope page" and the
    "Wave view in the DMM" are one screen reached from both sides. The DMM
