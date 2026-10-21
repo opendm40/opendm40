@@ -34,12 +34,10 @@
 //! (bit 7 = 0) and reads are unaffected. Writes are rare (mode changes,
 //! counter restarts, the power meter's R34 phases): ~25 us per byte.
 //!
-//! Fallback build: feature `hyspi-bitbang` keeps reads bit-banged as well
-//! until SPI2 reads are verified in normal use on the device.
+//! The all-bit-banged bus (the `hyspi-bitbang` fallback build) is gone since
+//! the read-SPI2 / write-bit-bang bus passed on the device (7889e6c).
 
-use crate::mmio::{modify32, r32, spin, w32};
-#[cfg(not(feature = "hyspi-bitbang"))]
-use crate::mmio::w16;
+use crate::mmio::{modify32, r32, spin, w16, w32};
 
 const GPIOC: u32 = 0x4002_0800;
 const GPIOD: u32 = 0x4002_0C00;
@@ -95,44 +93,31 @@ pub fn init_pins() {
     out_pin(GPIOC, MOSI);
     out_pin(GPIOD, CS);
     unsafe { modify32(GPIOC + MODER, 3 << (2 * MISO), 0) }; // input
-    #[cfg(not(feature = "hyspi-bitbang"))]
     spi::init();
 }
 
 /// The SPI2 prescaler of the read bus (8 / 16 / 32 = 6.25 / 3.125 / 1.5625
-/// MHz); 0 = the bit-banged fallback build.
-#[cfg(not(feature = "hyspi-bitbang"))]
+/// MHz).
 pub const DIV: u8 = 16;
-#[cfg(feature = "hyspi-bitbang")]
-pub const DIV: u8 = 0;
 
 /// Read divider for the next frames (DBG:HYSPI:SELF? only; the caller
-/// restores `DIV`). No-op in the bit-banged build.
+/// restores `DIV`).
 pub fn set_div(div: u8) {
-    #[cfg(not(feature = "hyspi-bitbang"))]
     spi::set_div(div);
-    #[cfg(feature = "hyspi-bitbang")]
-    let _ = div;
 }
 
 /// Write `data` to `reg`, `reg + 1`, .. (bit-banged, see the module notes).
 pub fn write(reg: u8, data: &[u8]) {
-    #[cfg(not(feature = "hyspi-bitbang"))]
     spi::to_gpio();
     bb::write(reg, data);
-    #[cfg(not(feature = "hyspi-bitbang"))]
     spi::to_af();
 }
 
 /// Read `buf.len()` registers from `reg`.
 pub fn read(reg: u8, buf: &mut [u8]) {
-    #[cfg(not(feature = "hyspi-bitbang"))]
     spi::read(reg, buf);
-    #[cfg(feature = "hyspi-bitbang")]
-    bb::read(reg, buf);
 }
 
-#[cfg(not(feature = "hyspi-bitbang"))]
 mod spi {
     use super::*;
 
@@ -265,20 +250,13 @@ mod spi {
     }
 }
 
-/// The bit-banged bus (~1 us half period): every write, and the reads of the
-/// `hyspi-bitbang` build.
+/// The bit-banged bus (~1 us half period): every write.
 mod bb {
     use super::*;
 
-    const IDR: u32 = 0x10;
     /// Half SCK period in spin iterations (~1 us at 200 MHz, well inside the
     /// HY3131 SPI timing).
     const HALF: u32 = 40;
-
-    #[inline(always)]
-    fn miso() -> bool {
-        (unsafe { r32(GPIOC + IDR) } & (1 << MISO)) != 0
-    }
 
     fn clock() {
         set(GPIOC, SCK, true);
@@ -293,15 +271,6 @@ mod bb {
             spin(HALF);
             clock();
         }
-    }
-
-    fn rx() -> u8 {
-        let mut b = 0u8;
-        for _ in 0..8 {
-            b = (b << 1) | miso() as u8;
-            clock();
-        }
-        b
     }
 
     fn begin() {
@@ -322,17 +291,6 @@ mod bb {
         tx(reg << 1);
         for &b in data {
             tx(b);
-        }
-        end();
-    }
-
-    #[cfg_attr(not(feature = "hyspi-bitbang"), allow(dead_code))]
-    pub fn read(reg: u8, buf: &mut [u8]) {
-        begin();
-        tx((reg << 1) | 1);
-        clock(); // read period
-        for b in buf.iter_mut() {
-            *b = rx();
         }
         end();
     }

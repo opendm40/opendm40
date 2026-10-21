@@ -602,8 +602,9 @@ that is not written yet. SPI2 (6.1, E2): section 8.
 
 Owner decision: no runtime switch between bit-bang and SPI2; if the hardware
 bus is reliable it is simply the bus. fw-rs now talks to the HY3131 over SPI2
-only; the bit-banged bus survives as a compile-time fallback (`--features
-hyspi-bitbang`) until the device check below passes, then it goes.
+only; the bit-banged bus survived as a compile-time fallback (`--features
+hyspi-bitbang`) until the device check passed (8.6, 7889e6c); the feature and
+the bit-banged read path are gone since (bit-banged writes stay, 8.6).
 
 ### 8.1 What exists
 
@@ -614,7 +615,7 @@ hyspi-bitbang`) until the device check below passes, then it goes.
 | pin hand-over | `init_pins` | CS high first, SCK low as GPIO, SPI2 configured and enabled (drives SCK low), then AFRH, then MODER: SCK never moves while CS is high, CS never glitches (and the chip ignores CK while CS is high, DS 7.2 (6)). Only at init; no switching back at run time. |
 | CS timing | `spi::{begin,end}` | CS low -> first edge ~200 ns, last edge -> CS high ~100 ns, CS high >= ~500 ns between frames (the bit-banged bus had ~1 us; the datasheet gives no minimum). |
 | self-test | `src/hyspi.rs`, `DBG:HYSPI:SELF? n[,div]` | in the current row (run it in an AC row: AD2 on): reference = first read of R1F..R35 (INTE + the row: the HY3131 has no ID / version register); n x {read1(R20), read(R00,6) AD2 sign copy, read(R1F,23) = ref, write(R36, pattern) + read1(R36) = pattern}; reply `div,n,bad_r1,bad_r23,bad_w1,signbad,us_r1,us_r6,us_r23,us_w1`. `div` 8 / 16 / 32 runs that call at 6.25 / 3.125 / 1.5625 MHz (the margin probe), then back to /16. The write-pattern check is absolute (a consistently shifted bus fails it even though the reference would shift too). DMM paused and its row rewritten afterwards, refused while logging, n <= 2000. In the fallback build the same test runs on the bit-banged bus (div 0). |
-| fallback | Cargo feature `hyspi-bitbang` | the old bit-banged bus, nothing else changes. |
+| fallback | Cargo feature `hyspi-bitbang` (removed after 8.6) | the old bit-banged bus, nothing else changed. |
 | emulator | `emu/hy3131/HY3131.cs` (= `emu/peripherals/HY3131.cs`), `emu/dm40.repl` | `HY3131SpiPort` (ISPIPeripheral) on Renode's STM32SPI `spi3` @ 0x40003C00 hands each byte to `HY3131.SpiByte`, which runs the existing bit engine for 8 mode-0 clocks (sample DO, rising, falling); the GPIO pulse on PC10 lands in the same engine. Host tests (`emu/hy3131/tests`, "Hardware SPI byte path"): R1F..R35, R36 and live R00..R05 equal on bit-bang / SPI-pulse / SPI-shift, 256 SPI writes read back bit-banged, a 22-byte row written over SPI, INTF side effects of the frame tails, a byte with CS high is ignored. |
 
 ### 8.2 Timing budget (why /16)
@@ -766,3 +767,4 @@ Device verification of this image (5 min, the meter on USB, 1 V DC on V/COM):
 4. `dm40scpi.py log s.csv --source ad2 --rate 9600 -d 10` in AC V / mV: lost
    well below the bit-banged ~6.5 kS/s ceiling; bad 0.
 Fail -> the fallback build `./build.sh native --features hyspi-bitbang`.
+(Passed on the device, TODO 2026-10-22; the fallback feature is removed.)

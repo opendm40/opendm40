@@ -348,7 +348,7 @@ pub enum Dbg {
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level).
     Ad2(u8, u8, u16, u8),
-    /// DBG:HYSPI:SELF? n[,div] (src/hyspi.rs): (n, div; 0 = the build's).
+    /// DBG:HYSPI:SELF? n[,div] (src/hyspi.rs): (n, div; 0 = hy3131::DIV).
     HySpi(u16, u8),
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).

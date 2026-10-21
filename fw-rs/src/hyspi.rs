@@ -13,8 +13,8 @@
 //!         r23  read(R1F, 23)         stable bytes = ref
 //!         w1   write(R36, pattern) (SPHACAL, restored), read1(R36) = pattern
 //!       Reply: div,n,bad_r1,bad_r23,bad_w1,signbad,us_r1,us_r6,us_r23,us_w1,
-//!       stable,ref (div 0 = bit-banged reads; us = mean per frame, DWT, incl.
-//!       CS; ref = R1F..R35 in hex, live bytes as "..").
+//!       stable,ref (us = mean per frame, DWT, incl. CS; ref = R1F..R35 in
+//!       hex, live bytes as "..").
 
 use crate::hy3131 as hy;
 use crate::mmio::r32;
@@ -22,7 +22,7 @@ use crate::mmio::r32;
 const DWT_CYCCNT: u32 = 0xE000_1004;
 const CYC_PER_US: u64 = (crate::clock::HCLK_HZ / 1_000_000) as u64;
 
-/// Iterations per call at most (~0.2 s with SPI2 reads, ~1.4 s bit-banged).
+/// Iterations per call at most (~0.2 s).
 pub const N_MAX: u32 = 2000;
 
 const REF_LEN: usize = 1 + hy::CFG_LEN; // R1F..R35
@@ -72,7 +72,7 @@ impl Out<'_> {
 /// DBG:HYSPI:SELF? (see the module header). Returns the reply length.
 pub fn self_test(n: u32, div: u8, out: &mut [u8]) -> usize {
     let n = n.clamp(1, N_MAX);
-    let div = if hy::DIV == 0 || !matches!(div, 8 | 16 | 32) { hy::DIV } else { div };
+    let div = if matches!(div, 8 | 16 | 32) { div } else { hy::DIV };
     hy::set_div(div);
     // Reference: 8 reads; live bytes masked out.
     let mut reff = [0u8; REF_LEN];
