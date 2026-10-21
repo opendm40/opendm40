@@ -764,148 +764,138 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
 
 /// Temperature sensor names on screen (dmm.rs T_NAMES order).
 pub const T_LABELS: [&str; 7] = ["TC K", "PT100", "PT1000", "NTC10k B3950", "NTC10k B3435", "NTC100k B3950", "NTC user"];
-const T_KEYS: [&str; 8] = ["TC K", "PT100", "PT1000", "10k 3950", "10k 3435", "100k 3950", "NTC user", "Offset 0"];
+/// Sensor buttons of the temperature page (dmm.rs T_NAMES order).
+const T_KEYS: [&str; 7] = ["TC K", "PT100", "PT1000", "10k 3950", "10k 3435", "100k 3950", "NTC user"];
 
-/// A horizontal value slider (owner: the +/- offset buttons were "absolutely
-/// unintuitive"): a track with a thumb, drawn as one item, plus a fine-step
-/// button at each end. The value maps linearly to the track: `min` at x0,
-/// `max` at x0 + w. Touch: down / drag anywhere in `touch` sets the value
-/// under the finger (app.rs captures the touch); the end buttons step by
-/// `step`.
-pub struct Slider {
-    /// Track ends (screen x of `min` / `max`).
-    pub x0: i16,
-    pub w: i16,
-    /// Centre row of the track.
-    pub y: i16,
-    pub min: f32,
-    pub max: f32,
-    pub step: f32,
+/// Temperature page (MF on the temperature function), redesigned 2026-10-21
+/// (owner: the "Offset 0" key was unclear, the offset slider unintuitive,
+/// "NTC user" unexplained, the buttons "fuzzy" = hit boxes exactly the drawn
+/// boxes, so a touch in the 5..6 px gaps did nothing):
+///   rows 50 / 96   sensors (range-page grid), slot 7 = the global deg C /
+///                  deg F unit (the Settings 2/2 row; a shortcut here)
+///   row 144..180   "Offset"  [ - ]  value  [ + ]  (settings-stepper look;
+///                  0.1 C steps; a tap on the value opens the signed keypad)
+///   row 186..222   NTC user only: R25 and Beta fields (tap = keypad)
+///   row 240..278   Hold/Limits, OK;  282..316 the info line.
+/// Every hit box reaches 3 px into the gaps around its button.
+#[derive(Clone, Copy)]
+pub struct TempPage<'a> {
+    pub sensor: u8,
+    /// Offset of the sensor, C.
+    pub offs: f32,
+    pub unit_f: bool,
+    /// NTC user parameters (ohm, K).
+    pub r25: f32,
+    pub beta: f32,
+    pub info: &'a str,
 }
 
-/// Slider drawing geometry: the thumb is 2 * THUMB_HW + 1 px wide and
-/// 32 px tall, the item spans the track +- THUMB_HW + 3.
-const THUMB_HW: i16 = 7;
+/// Temperature page hit codes besides the sensors 0..6.
+pub const TK_UNIT: u8 = 7;
+pub const TK_MINUS: u8 = 8;
+pub const TK_PLUS: u8 = 9;
+pub const TK_OFFS: u8 = 10;
+pub const TK_R25: u8 = 11;
+pub const TK_BETA: u8 = 12;
+pub const TK_LIMITS: u8 = 254;
+pub const TK_OK: u8 = 255;
 
-impl Slider {
-    /// The drawn item's rectangle (track, centre tick, thumb).
-    fn area(&self) -> sf::Rect {
-        rect(self.x0 - THUMB_HW - 3, self.y - 18, self.w + 2 * THUMB_HW + 7, 37)
-    }
+const T_ROW_Y: i16 = 144;
+const T_NTC_Y: i16 = 186;
+const T_ROW_H: i16 = 36;
 
-    /// Fine-step buttons: (minus, plus), 44 x 40 just outside the area.
-    pub fn buttons(&self) -> (sf::Rect, sf::Rect) {
-        let a = self.area();
-        (rect(a.x - 52, self.y - 20, 44, 40), rect(a.x + a.w + 8, self.y - 20, 44, 40))
-    }
+/// Button rectangle of a temperature-page code (None: not on this page).
+fn temp_rect(sensor: u8, code: u8) -> Option<sf::Rect> {
+    Some(match code {
+        0..=7 => range_rect(code as usize),
+        TK_MINUS => rect(132, T_ROW_Y, 72, T_ROW_H),
+        TK_OFFS => rect(210, T_ROW_Y, 186, T_ROW_H),
+        TK_PLUS => rect(402, T_ROW_Y, 70, T_ROW_H),
+        TK_R25 if sensor == 6 => rect(8, T_NTC_Y, 228, T_ROW_H),
+        TK_BETA if sensor == 6 => rect(244, T_NTC_Y, 228, T_ROW_H),
+        TK_LIMITS => rect(8, 240, 150, 38),
+        TK_OK => rect(319, 240, 150, 38),
+        _ => return None,
+    })
+}
 
-    /// Value under screen column x (clamped, snapped to `step`).
-    pub fn value_at(&self, x: u16) -> f32 {
-        let f = ((x as i16 - self.x0) as f32 / self.w as f32).clamp(0.0, 1.0);
-        let v = self.min + f * (self.max - self.min);
-        ((v / self.step) + if v < 0.0 { -0.5 } else { 0.5 }) as i32 as f32 * self.step
-    }
+const T_CODES: [u8; 15] = [0, 1, 2, 3, 4, 5, 6, TK_UNIT, TK_MINUS, TK_OFFS, TK_PLUS, TK_R25, TK_BETA, TK_LIMITS, TK_OK];
 
-    /// Touch on the track area (a drag may start here).
-    pub fn hit(&self, x: u16, y: u16) -> bool {
-        let a = self.area();
-        let (x, y) = (x as i16, y as i16);
-        x >= a.x - 4 && x < a.x + a.w + 4 && y >= a.y - 6 && y < a.y + a.h + 6
-    }
+/// Offset text "+7.3 C" (TEXT22 has no degree sign).
+fn temp_offs_text<'a>(b: &'a mut [u8; 24], offs: f32) -> &'a str {
+    let mut t = [0u8; 16];
+    let v = crate::dmm::format(&mut t, offs, 1);
+    join(b, &[if offs > 0.0 { "+" } else { "" }, v, " C"])
+}
 
-    /// Draw track + thumb for value `v` (one pass over the area: no flicker
-    /// on a drag). The part from 0 (or `min`) to the value is accented.
-    pub fn draw(&self, v: f32) {
-        let a = self.area();
-        let span = self.max - self.min;
-        let pos = |v: f32| self.x0 + ((v.clamp(self.min, self.max) - self.min) / span * self.w as f32 + 0.5) as i16;
-        let (tx, zx) = (pos(v), pos(0.0f32.clamp(self.min, self.max)));
-        let (lo, hi) = (tx.min(zx), tx.max(zx));
-        #[cfg(test)]
-        crate::probe::begin(crate::probe::ICON, BG);
-        lcd::set_window(a.x as u16, a.y as u16, (a.x + a.w - 1) as u16, (a.y + a.h - 1) as u16);
-        for py in a.y..a.y + a.h {
-            let dy = py - self.y;
-            for px in a.x..a.x + a.w {
-                let dx = px - tx;
-                let c = if dx.abs() <= THUMB_HW && dy.abs() <= 15 && !(dx.abs() == THUMB_HW && dy.abs() == 15) {
-                    VALUE
-                } else if px == zx && dy.abs() <= 10 {
-                    STATUS_FG
-                } else if dy.abs() <= 2 && px >= self.x0 && px <= self.x0 + self.w {
-                    if px >= lo && px <= hi { SEL } else { 0x4208 }
-                } else {
-                    BG
-                };
-                lcd::data(c);
-            }
+/// One temperature-page button, normal or pressed (stock pressed colour,
+/// ui-review #11: feedback from touch-down).
+pub fn temp_key(p: &TempPage, code: u8, pressed: bool) {
+    let Some(r) = temp_rect(p.sensor, code) else { return };
+    let sel = code < 7 && code == p.sensor;
+    let c = if pressed { K_SEL } else if sel { SEL } else { 0x2966 };
+    let mut b = [0u8; 24];
+    let mut t = [0u8; 16];
+    let txt: &str = match code {
+        0..=6 => T_KEYS[code as usize],
+        TK_UNIT => if p.unit_f { "Unit: F" } else { "Unit: C" },
+        TK_MINUS => "-",
+        TK_PLUS => "+",
+        TK_OFFS => temp_offs_text(&mut b, p.offs),
+        TK_R25 => {
+            let k = p.r25 / 1000.0;
+            let v = crate::dmm::format(&mut t, k, if k < 10.0 { 2 } else if k < 100.0 { 1 } else { 0 });
+            join(&mut b, &["R25  ", v, " kohm"])
         }
-        #[cfg(test)]
-        crate::probe::end();
+        TK_BETA => {
+            let v = crate::dmm::format(&mut t, p.beta, 0);
+            join(&mut b, &["Beta  ", v, " K"])
+        }
+        TK_LIMITS => "Hold/Limits",
+        _ => "OK",
+    };
+    if code == TK_OFFS {
+        // The value field: darker than the keys, the value in orange.
+        let c = if pressed { K_SEL } else { BAR };
+        sf::rbox(r, 6, c, BG);
+        sf::glyphs(sf::TEXT22, r, txt, VALUE, c, 8, 0);
+    } else {
+        sf::rbox(r, 6, c, BG);
+        sf::glyphs(sf::TEXT22, r, txt, STATUS_FG, c, 8, 0);
     }
 }
 
-/// Temperature offset slider (C): -20..+20 in 0.1 steps (dmm.rs set_t_offs
-/// range), 340 px track: about 0.12 C per pixel; the end buttons step 0.1.
-pub const T_OFFS: Slider = Slider { x0: 70, w: 340, y: 204, min: -20.0, max: 20.0, step: 0.1 };
-
-/// MF page of the temperature function: sensor (items 0..6), offset reset
-/// (7), the offset slider (T_OFFS, temp_offset) with its -/+ 0.1 buttons
-/// (8 / 9), an info line, OK.
-pub fn temp_page(sensor: u8, offs: f32, info: &str) {
+pub fn temp_page(p: &TempPage) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
     sf::logo(4, 10, 0x2966);
     sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Temperature Settings", STATUS_FG, 0x2966, 8, 0);
-    for (i, name) in T_KEYS.iter().enumerate() {
-        let c = if i == sensor as usize { SEL } else { 0x2966 };
-        sf::rbox(range_rect(i), 6, c, BG);
-        sf::glyphs(sf::TEXT22, range_rect(i), name, STATUS_FG, c, 8, 0);
+    sf::glyphs(sf::TEXT22, rect(8, T_ROW_Y, 118, T_ROW_H), "Offset", STATUS_FG, BG, 1, 0);
+    for code in T_CODES {
+        temp_key(p, code, false);
     }
-    sf::glyphs(sf::TEXT22, rect(8, 142, 120, 32), "Offset", STATUS_FG, BG, 1, 0);
-    let (m, p) = T_OFFS.buttons();
-    for (r, t) in [(m, "-"), (p, "+")] {
-        sf::rbox(r, 6, 0x2966, BG);
-        sf::glyphs(sf::TEXT22, r, t, STATUS_FG, 0x2966, 8, 0);
+    if p.sensor != 6 {
+        // The NTC row's place: how to enter the offset exactly.
+        let hint = if p.sensor == 0 { "Tap the value to type it (TC: on the CJ)" } else { "Tap the value to type it" };
+        sf::glyphs(sf::TEXT22, rect(8, T_NTC_Y, 464, T_ROW_H), hint, DIM, BG, 8, 0);
     }
-    temp_offset(offs);
-    sf::glyphs(sf::TEXT22, rect(8, 282, 464, 34), info, STATUS_FG, BG, 1, 0);
-    ok_and_limits_buttons();
+    sf::glyphs(sf::TEXT22, rect(8, 282, 464, 34), p.info, STATUS_FG, BG, 1, 0);
 }
 
-/// The offset value (large, over the slider) and the slider; redrawn alone
-/// while it is dragged.
-pub fn temp_offset(offs: f32) {
-    let mut t = [0u8; 16];
-    let mut b = [0u8; 24];
-    let v = crate::dmm::format(&mut t, offs, 1);
-    let txt = join(&mut b, &[if offs > 0.0 { "+" } else { "" }, v, "\u{2103}"]);
-    sf::label(sf::LETTERS, rect(140, 140, 200, 34), txt, VALUE, BG, 8, 0);
-    T_OFFS.draw(offs);
-}
-
-/// Temperature page touch: item 0..7, 8 / 9 offset -/+ step, 255 = OK, 254 =
-/// Hold/Limits. (The slider track itself is a drag: `T_OFFS.hit`.)
-pub fn temp_hit(x: u16, y: u16) -> Option<u8> {
+/// Temperature page touch: a T_CODES code (3 px of slop into the gaps:
+/// the gaps are >= 6 px, so the halves split between neighbours).
+pub fn temp_hit(sensor: u8, x: u16, y: u16) -> Option<u8> {
     let (x, y) = (x as i16, y as i16);
-    let inside = |r: sf::Rect| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
-    for i in 0..T_KEYS.len() {
-        if inside(range_rect(i)) {
-            return Some(i as u8);
+    for s in [0i16, 3] {
+        for code in T_CODES {
+            if let Some(r) = temp_rect(sensor, code) {
+                if x >= r.x - s && x < r.x + r.w + s && y >= r.y - s && y < r.y + r.h + s {
+                    return Some(code);
+                }
+            }
         }
     }
-    let (m, p) = T_OFFS.buttons();
-    if inside(m) {
-        Some(8)
-    } else if inside(p) {
-        Some(9)
-    } else if (240..278).contains(&y) && x >= 319 {
-        Some(255)
-    } else if (240..278).contains(&y) && (8..158).contains(&x) {
-        Some(254)
-    } else {
-        None
-    }
+    None
 }
 
 /// History boxes (stock (5+95i,153,88,19)): values with units, newest orange.
@@ -1664,7 +1654,7 @@ pub const SETTINGS: [&str; 9] = [
     "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
     "Scope drag", "More",
 ];
-pub const SETTINGS2: [&str; 8] = ["DMM rate", "Smoothing", "DMM row", "Scope swipe", "Scope press", "Scope tap step", "Device", "Help"];
+pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit", "Scope swipe", "Scope press", "Scope tap step", "Device", "Help"];
 
 /// Settings/menu-page title bar: 40 px, bg 0x2966 (stock gui_v2_6.h:101).
 pub const PAGE_BAR_H: i16 = 40;

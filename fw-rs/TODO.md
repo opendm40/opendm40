@@ -517,3 +517,16 @@ Emulator (emu/):
       A unit change restarts the meter like a function change and converts the temperature limits; offsets
       stay in C (0.1 C trim steps). Bluetooth keeps the stock frame (main C, CJ C, value 3 deg F), converted
       back in bt.rs. (verify on device: phone app in F mode still shows C/F correctly)
+- [x] Temperature page redesign (owner notes): "Offset 0" key removed; the offset is a settings-style
+      stepper "Offset [-] +7.3 C [+]" (0.1 C steps) and a tap on the value opens the signed keypad (the
+      0.12 C/px slider is gone); slot 8 of the sensor grid = the global unit (Unit: C / F). "Fuzzy" buttons
+      found: the page's hit boxes were exactly the drawn boxes (4302 dead px in the 5..6 px gaps, touch-test
+      reach L+0 T+0 R+0 B+0) and nothing showed a press: now 3 px slop on every key (dead px 953, all in
+      the wide gaps) and pressed feedback from touch-down (ui-review #11 rule). The sensor type stays the large
+      TEXT22 chip on the DMM page (875d958).
+- [x] NTC user R25 / Beta editable on the temperature page (fields shown with "NTC user" selected; numeric
+      keypad, R25 in kohm, limits 100 ohm..10 Mohm / Beta 1000..10000 K as dmm.rs set_ntc_user), persisted
+      (p[16] / p[17], existing), SCPI [SENS:]TEMP:NTC <R25>,<Beta> (existing). A change while NTC user is
+      active re-enters the sensor (NTC entry range follows R25).
+- [x] Fix of 1a3efbd: Settings 2/2 had the "Temp unit" value but not its row name (rows shifted by one:
+      tapping "Scope swipe" toggled the unit). Row added.

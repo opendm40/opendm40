@@ -1203,9 +1203,9 @@ fn main() {
     let page_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
     for (page, vals) in [
         (0u8, vec!["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto (per view)", "Hold 5000 ms", ""]),
-        (1, vec!["SLOW (n/a here)", "HIGH", "Bargraph", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]),
-        (1, vec!["FAST  37/s", "LOW", "History", "Off (stock)", "ON", "Corners", "", ""]),
-        (1, vec!["MED  --/s", "OFF", "Bargraph", "Off (stock)", "ON", "Off", "", ""]),
+        (1, vec!["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]),
+        (1, vec!["FAST  37/s", "LOW", "History", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]),
+        (1, vec!["MED  --/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Off", "", ""]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -1228,49 +1228,40 @@ fn main() {
         }
     }
 
-    // 6g. Temperature settings page: sensor buttons, offset slider (value
-    //     extremes and both sides of 0), info lines; slider mapping / hits.
-    for (k, offs, info) in [
-        (0u8, -20.0f32, "Cold junction -44.4 C"),
-        (3, 20.0, "Sensor current ~0.850 mA"),
-        (6, 0.0, ""),
-        (1, -0.1, "Sensor current ~0.850 mA"),
-        (2, 0.1, ""),
-        (5, 7.3, "Sensor current ~0.008 mA"),
-        (4, -13.7, ""),
+    // 6g. Temperature settings page: sensors, unit, offset stepper (value
+    //     extremes, both signs), NTC user R25 / Beta fields, info lines;
+    //     every key drawn pressed equals its own box (no stale pixels).
+    for (k, offs, unit_f, r25, beta, info) in [
+        (0u8, -20.0f32, false, 10_000.0f32, 3950.0f32, "Cold junction -44.4 C"),
+        (3, 20.0, true, 10_000.0, 3950.0, "Sensor current ~0.850 mA"),
+        (6, 0.0, false, 10_000_000.0, 10_000.0, "Sensor current ~0.000 mA"),
+        (6, -13.7, true, 100.0, 1000.0, ""),
+        (6, 7.3, false, 4_700.0, 3977.0, "Sensor current ~0.008 mA"),
+        (1, -0.1, false, 10_000.0, 3950.0, "Sensor current ~0.850 mA"),
+        (2, 0.1, true, 10_000.0, 3950.0, ""),
+        (5, 7.3, false, 10_000.0, 3950.0, "Sensor current ~0.008 mA"),
     ] {
+        let tp = ui::TempPage { sensor: k, offs, unit_f, r25, beta, info };
         host::reset(0);
-        ui::temp_page(k, offs, info);
-        ck.check_opts(&format!("temp/{k}/{offs}"), &page_regions, false);
-        // A drag step redraws value + slider alone: same pixels.
+        ui::temp_page(&tp);
+        ck.check_opts(&format!("temp/{k}/{offs}/{r25}"), &page_regions, false);
         let before: Vec<u16> = emu().fb.clone();
-        ui::temp_offset(-offs);
-        ui::temp_offset(offs);
+        for code in [0u8, 6, ui::TK_UNIT, ui::TK_MINUS, ui::TK_OFFS, ui::TK_PLUS, ui::TK_R25, ui::TK_BETA, ui::TK_LIMITS, ui::TK_OK] {
+            ui::temp_key(&tp, code, true);
+            ui::temp_key(&tp, code, false);
+        }
         ck.cases += 1;
         if emu().fb != before {
-            ck.fail(&format!("temp/{k}/{offs}"), "slider redraw differs from a full draw".into());
+            ck.fail(&format!("temp/{k}/{offs}"), "pressed / released key differs from a full draw".into());
         }
         if k == 5 {
             save(&out, "m06-temp-offset");
         }
-    }
-    {
-        let s = &ui::T_OFFS;
-        let mut t = |name: &str, ok: bool| {
-            ck.cases += 1;
-            if !ok {
-                ck.fail(&format!("slider/{name}"), "unexpected".into());
-            }
-        };
-        t("left end", s.value_at(0) == -20.0 && s.value_at(s.x0 as u16) == -20.0);
-        t("right end", s.value_at(479) == 20.0);
-        t("centre", s.value_at((s.x0 + s.w / 2) as u16).abs() < 1e-4);
-        t("0.1 steps", (s.value_at((s.x0 + s.w / 2 + 17) as u16) * 10.0).fract().abs() < 1e-3);
-        let (m, p) = s.buttons();
-        t("minus button", ui::temp_hit((m.x + 5) as u16, (m.y + 5) as u16) == Some(8));
-        t("plus button", ui::temp_hit((p.x + 5) as u16, (p.y + 5) as u16) == Some(9));
-        t("track hit", s.hit(240, s.y as u16) && !s.hit(240, 140) && !s.hit(240, 250));
-        t("buttons outside the track", !s.hit((m.x + 5) as u16, s.y as u16) && !s.hit((p.x + 30) as u16, s.y as u16));
+        if k == 6 && offs > 0.0 {
+            save(&out, "m08-temp-ntc-user");
+            ui::temp_key(&tp, ui::TK_PLUS, true);
+            save(&out, "m09-temp-pressed");
+        }
     }
 
     // 6f. Help pages (UF-29): whole page; every text fits its column.
@@ -1432,7 +1423,7 @@ fn main() {
         ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]);
         save(&out, "m01-settings");
         host::reset(0);
-        ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
+        ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));

@@ -650,8 +650,17 @@ fn hit_tests(ck: &mut Ck) {
         page(ck, &format!("range {n} items"), &hit, &|b| b.y0 >= 40, &want);
     }
     host::reset(0);
-    ui::temp_page(0, 0.0, "info");
-    page(ck, "temperature", &|x, y| ui::temp_hit(x, y).map(|v| v as u32), &|b| b.y0 >= 40, &[0, 254, 255]);
+    // Temperature page: every key of both layouts (NTC user adds R25 / Beta).
+    for k in [0u8, 6] {
+        host::reset(0);
+        ui::temp_page(&ui::TempPage { sensor: k, offs: -12.5, unit_f: false, r25: 10_000.0, beta: 3950.0, info: "info" });
+        let mut want: Vec<u32> = (0..=10).collect();
+        if k == 6 {
+            want.extend([11, 12]);
+        }
+        want.extend([254, 255]);
+        page(ck, &format!("temperature {k}"), &move |x, y| ui::temp_hit(k, x, y).map(|v| v as u32), &|b| b.y0 >= 40 && b.y1 < 280, &want);
+    }
     // Keypads.
     for kind in [ui::KP_FREQ, ui::KP_NUM, ui::KP_SIGNED] {
         host::reset(0);
