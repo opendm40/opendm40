@@ -391,8 +391,12 @@ pub fn ext_settings(w: u32) -> ExtSettings {
 //   - the input went idle since the last capture (OL, or below the minimum
 //     level: probes lifted / open leads), so measuring the same value again
 //     on the next part beeps again, or
-//   - it differs from the captured value by more than `change` (2 % of the
-//     range, Appendix B) without going idle.
+//   - it differs from the captured value by more than `change` without going
+//     idle: max(4x the stability spread, 0.5 % of the held value). Appendix B
+//     had 2 % of the range, which on the 6 V range is 120 mV: 1.1 V -> 1.2 V
+//     never re-captured (owner 2026-10-21). A new capture still needs a
+//     window that is stable within the spread, so noise cannot re-trigger it;
+//     a value that drifts by more than `change` is captured again.
 // Idle / OL readings are never captured and restart the window. Deviation
 // from Appendix B: there OL returns to IDLE and only a > 2 % change re-arms,
 // so the same resistor measured twice through open leads would never beep
@@ -418,6 +422,10 @@ pub fn ext_settings(w: u32) -> ExtSettings {
 // Not changed either: on a manual high range 300 counts is large (30 V on
 // the 1000 V range), so small voltages there never capture.
 
+/// AutoHold re-captures on a change of 0.5 % of the held value (or more, see
+/// AhCfg::change_cnt).
+const AH_CHANGE_REL: f32 = 0.005;
+
 #[derive(Clone, Copy)]
 struct AhCfg {
     /// Stable for at least this long (ms) ...
@@ -432,7 +440,9 @@ struct AhCfg {
     /// ... or below this |value| in SI units (V, A; 0 = none): the floor
     /// for the smallest ranges (see above).
     level_si: f32,
-    /// A change bigger than this (counts) re-captures without going idle.
+    /// A change bigger than this (counts; 4x spread_cnt) or than
+    /// max(CHANGE_REL, 4 x spread_rel) of the held value re-captures without
+    /// going idle.
     change_cnt: f32,
     /// Temperature: the *_cnt fields are deg C.
     abs: bool,
@@ -453,25 +463,25 @@ fn ah_cfg(r: &Reading) -> AhCfg {
     match r.mode {
         // AC V / A and AC+DC: RMS converter ripple, a few times the DC noise;
         // open AC leads pick up hum: idle below 2 % FS (12 mV on 600 mV).
-        _ if r.acdc => c(1000, 4, 100.0, 0.003, FS2, FS2),
-        0 | 2 | 4..=6 => c(1000, 4, 100.0, 0.003, FS2, FS2),
+        _ if r.acdc => c(1000, 4, 100.0, 0.003, FS2, 400.0),
+        0 | 2 | 4..=6 => c(1000, 4, 100.0, 0.003, FS2, 400.0),
         // DC V / A: idle below 0.5 % FS (3 mV on the 600 mV range, 3 uA on
         // 600 uA) and below the SI floor (5 mV, 1 uA): open leads / no
         // current.
-        1 | 3 => AhCfg { level_si: 5e-3, ..c(1000, 4, 40.0, 0.001, 300.0, FS2) },
-        7..=9 => AhCfg { level_si: 1e-6, ..c(1000, 4, 40.0, 0.001, 300.0, FS2) },
+        1 | 3 => AhCfg { level_si: 5e-3, ..c(1000, 4, 40.0, 0.001, 300.0, 160.0) },
+        7..=9 => AhCfg { level_si: 1e-6, ..c(1000, 4, 40.0, 0.001, 300.0, 160.0) },
         // Ohm / continuity / diode: open = OL (idle); a short is a valid
         // reading and may be captured.
-        10 | 11 => c(1000, 3, 40.0, 0.002, 0.0, FS2),
-        12 => c(800, 3, 40.0, 0.002, 0.0, FS2),
+        10 | 11 => c(1000, 3, 40.0, 0.002, 0.0, 160.0),
+        12 => c(800, 3, 40.0, 0.002, 0.0, 160.0),
         // Capacitance: slow conversions (one per 0.3..several s), so a longer
         // window and fewer readings; 1 % spread; stray C of open leads below
         // 0.5 % FS is idle.
-        13 => c(1500, 2, 40.0, 0.01, 300.0, FS2),
+        13 => c(1500, 2, 40.0, 0.01, 300.0, 160.0),
         // Frequency: no signal reads 0.
-        14 => c(1000, 3, 20.0, 0.001, 1.0, FS2),
-        // Temperature: 0.3 C peak-to-peak over 1.5 s, re-capture on 2 C.
-        _ => AhCfg { t_ms: 1500, n_min: 2, spread_cnt: 0.3, spread_rel: 0.0, level_cnt: 0.0, level_si: 0.0, change_cnt: 2.0, abs: true },
+        14 => c(1000, 3, 20.0, 0.001, 1.0, 80.0),
+        // Temperature: 0.3 C peak-to-peak over 1.5 s, re-capture on 1.2 C.
+        _ => AhCfg { t_ms: 1500, n_min: 2, spread_cnt: 0.3, spread_rel: 0.0, level_cnt: 0.0, level_si: 0.0, change_cnt: 1.2, abs: true },
     }
 }
 
@@ -757,7 +767,8 @@ impl Meter {
         let fresh = match self.ah_held {
             None => true,
             Some((_, held)) => {
-                let change = c.change_cnt / cnt * unit_scale(v.unit);
+                let rel = AH_CHANGE_REL.max(4.0 * c.spread_rel) * held.abs();
+                let change = (c.change_cnt / cnt * unit_scale(v.unit)).max(rel);
                 self.ah_rearm || (si - held).abs() > change
             }
         };
@@ -1041,6 +1052,57 @@ mod tests {
             t += 110;
             m.update(&r, t).captured
         })
+    }
+
+    /// AutoHold over a sequence of steady levels (each held `ms`, readings
+    /// 110 ms apart, +-`noise` alternating): the captured values, in order.
+    fn ah_captures_seq(levels: &[f32], noise: f32, ms: u64, mk: fn(f32) -> Reading) -> Vec<f32> {
+        let mut m = Meter::new();
+        m.set_ahold(true);
+        let mut t = 0;
+        let mut out = Vec::new();
+        for &l in levels {
+            for i in 0..(ms / 110) {
+                t += 110;
+                let x = if i % 2 == 0 { l + noise } else { l - noise };
+                let u = m.update(&mk(x), t);
+                if u.captured {
+                    out.push(u.show.map(|s| s.main.v).unwrap());
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn autohold_recaptures_a_new_stable_value() {
+        let near = |a: &[f32], b: &[f32]| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 2e-4);
+        // The owner's case: 1.1 V -> 1.2 V on the 6 V range (was 2 % FS = 120 mV: missed).
+        let c = ah_captures_seq(&[1.1, 1.2], 0.0001, 3000, dcv);
+        assert!(near(&c, &[1.1, 1.2]), "{c:?}");
+        // Down too, and back to the first value.
+        let c = ah_captures_seq(&[1.2, 1.1, 1.2], 0.0001, 3000, dcv);
+        assert!(near(&c, &[1.2, 1.1, 1.2]), "{c:?}");
+        // 6 V range: the change floor is 160 counts (16 mV): 20 mV captures,
+        // 10 mV does not.
+        let c = ah_captures_seq(&[1.1, 1.12], 0.0001, 3000, dcv);
+        assert_eq!(c.len(), 2, "{c:?}");
+        let c = ah_captures_seq(&[1.1, 1.11], 0.0001, 3000, dcv);
+        assert_eq!(c.len(), 1, "{c:?}");
+        // Noise within the spread never re-captures, however long.
+        let c = ah_captures_seq(&[1.1], 0.0002, 30_000, dcv);
+        assert_eq!(c.len(), 1, "{c:?}");
+        // Small values: 4x spread (160 counts = 16 mV on 6 V) is the floor.
+        let c = ah_captures_seq(&[0.100, 0.110], 0.0001, 3000, dcv);
+        assert_eq!(c.len(), 1, "{c:?}");
+        let c = ah_captures_seq(&[0.100, 0.120], 0.0001, 3000, dcv);
+        assert_eq!(c.len(), 2, "{c:?}");
+        // A level that never settles (steps every 0.5 s) is never captured.
+        let c = ah_captures_seq(&[1.0, 1.1, 1.2, 1.3, 1.4, 1.5], 0.0, 500, dcv);
+        assert!(c.is_empty(), "{c:?}");
+        // Going idle (open leads) re-arms: the same value captures again.
+        let c = ah_captures_seq(&[1.1, 0.0, 1.1], 0.0001, 3000, dcv);
+        assert_eq!(c.len(), 2, "{c:?}");
     }
 
     #[test]
