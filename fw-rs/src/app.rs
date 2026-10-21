@@ -244,6 +244,8 @@ pub struct App {
     /// last drew (text keys, 0 = nothing; app_power.rs).
     pw_rng_key: u32,
     pw_status_key: u32,
+    /// The W button's glyph as last drawn (DC method), `pw_btn_glyph`.
+    pw_btn_dc: bool,
     strip_alt: bool,
     /// The last scope drags (target code, axis 0 H / 1 V, travel px, ms) for
     /// DBG:GEST?, oldest first once full (scope_page.rs).
@@ -442,6 +444,7 @@ impl App {
             hv_level: 0,
             pw_rng_key: 0,
             pw_status_key: 0,
+            pw_btn_dc: false,
             strip_alt: false,
             gest_log: [(0, 0, 0, 0); GEST_N],
             gest_n: 0,
@@ -535,6 +538,7 @@ impl App {
         match self.view {
             View::Dmm => {
                 self.dmm_view.power = self.dmm.pw.on;
+                self.pw_btn_glyph();
                 self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2 || self.dmm.pw.on, self.dmm.ohm_var() == 1);
                 self.pw_rng_key = 0;
                 if self.dmm.pw.on {
@@ -753,6 +757,7 @@ impl App {
     /// Combined view: open (or keep open) the DMM function band.
     fn band_open(&mut self, now: u64) {
         if self.band_until == 0 {
+            self.pw_btn_glyph();
             ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
         }
         self.band_until = now + BAND_MS;
@@ -851,12 +856,10 @@ impl App {
     /// `select_func`).
     fn press_func(&mut self, clk: &mut Clock, i: usize) {
         if Button::ALL[i] == Button::Power {
-            if self.dmm.pw.on {
-                return;
-            }
-            // The wiring dialog until it was confirmed once (owner: no
+            // Active: Dmm::press cycles the coupling (as V / A their DC / AC /
+            // AC+DC). Else the wiring dialog until it was confirmed once (owner: no
             // nagging; MF > Power Settings > Wiring shows it again).
-            if !self.dmm.pw.wired {
+            if !self.dmm.pw.on && !self.dmm.pw.wired {
                 // From the combined view's band too: the dialog over the
                 // DMM page (Cancel leaves the DMM page shown).
                 if self.view != View::Dmm {

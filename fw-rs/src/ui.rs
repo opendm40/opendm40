@@ -227,6 +227,16 @@ pub const BTN_N: usize = 7;
 pub const BTN_W: i16 = 64;
 pub const BTN_PITCH: i16 = 68;
 
+/// The W button's coupling glyph: the DC one (the AD1 method / coupling DC)
+/// or AC+DC (method B), as the V / A buttons show theirs (`set_power_dc`).
+static POWER_DC: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// The W button's glyph for the next button draw (the app: the method in
+/// use in the power meter, else the stored coupling).
+pub fn set_power_dc(dc: bool) {
+    POWER_DC.store(dc, core::sync::atomic::Ordering::Relaxed);
+}
+
 /// Left edge of function button `i`.
 pub const fn btn_x(i: usize) -> i16 {
     4 + BTN_PITCH * i as i16
@@ -275,7 +285,10 @@ fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, 
         3 => sf::glyphs(sf::BTN_GLYPH, rect(x, y, BTN_W, h), "\u{11}", STATUS_FG, c, 8, 0),
         4 => btn_pair(x, y, h, c, (sf::BTN_GLYPH, "\u{8}", -1), (sf::BTN_GLYPH, "\u{7}", 0), 3),
         5 => btn_pair(x, y, h, c, (sf::BTN_GLYPH, "\u{10}", -2), (sf::BTN_GLYPH, "\u{2103}", 0), 3),
-        _ => sf::glyphs(sf::LETTERS, rect(x, y, BTN_W, h), "W", STATUS_FG, c, 8, 0),
+        _ => {
+            let g = if POWER_DC.load(core::sync::atomic::Ordering::Relaxed) { "\u{4}" } else { "\u{6}" };
+            btn_pair(x, y, h, c, (sf::LETTERS, "W", 0), (sf::BTN_GLYPH, g, 0), 3)
+        }
     }
 }
 
@@ -445,7 +458,8 @@ impl DmmView {
             self.bar.draw_static(BG);
             self.bar_scale = None;
             self.bar_ol = None;
-        } else {
+        } else if !self.power {
+            // (The power meter draws its own boxes: ui::pw power_row.)
             for i in 0..5i16 {
                 sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
             }
@@ -495,7 +509,7 @@ impl DmmView {
         self.last_fmt = f;
         let last_ext = self.last_ext;
         self.last_ext = ext.unwrap_or(0);
-        let mkey = r.mode | (r.acdc as u8) << 7 | (r.power.is_some_and(|p| p.dc) as u8) << 6;
+        let mkey = r.mode | (r.acdc as u8) << 7 | (r.power.is_some_and(|p| p.dc) as u8) << 6 | (r.power.is_some_and(|p| p.coup == crate::dmm::pw::COUP_AUTO) as u8) << 5;
         // Extra digit: the main cells narrow to CELLS_X (40..372) and the
         // digit is the F78 glyph at half size (~38 px vs ~76) in
         // XT_X..XT_X + XT_W (375..402), on the F78 baseline (VALUE_BASE),
@@ -542,12 +556,15 @@ impl DmmView {
             // 35 px AC glyph is not clipped (ends at 471, 3 px after the
             // limit badge 403..433).
             // Power meter: the coupling chip in this slot (ui::pw::coupling).
-            if r.power.is_none() || !self.power {
-                sf::label(sf::MODE, rect(437, 76, 35, 32), mode_glyph(r.mode, r.acdc || r.power.is_some()), VALUE, BG, 7, 0);
-            } else {
-                // The chip's slot may hold the last function's glyph.
-                self.pwc.coup_invalidate();
-            }
+            // Power meter: the glyph of the method in use (DC: the AD1
+            // method, AC+DC: method B), as V / A show their coupling; AUTO is
+            // the label left of it (ui::pw::coupling).
+            let g = match r.power {
+                Some(p) if self.power => if p.dc { "\u{4}" } else { "\u{6}" },
+                _ => mode_glyph(r.mode, r.acdc || r.power.is_some()),
+            };
+            sf::label(sf::MODE, rect(437, 76, 35, 32), g, VALUE, BG, 7, 0);
+            self.pwc.coup_invalidate();
             if !r.acdc {
                 // Leaving AC+DC: the tag slots left of the aux values.
                 for i in 0..2 {

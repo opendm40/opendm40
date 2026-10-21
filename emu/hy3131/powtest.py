@@ -173,7 +173,7 @@ SC.update({
     ]),
     'auto': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:COUP AUTO'], 50, [
         (0, 'open;vsrc:12;isrc:2', both(pw(24, 1, 12, 2, rel=0.002), x('POW:COUP?', 'AUTO,DC')), 'AUTO: DC source -> the AD1 method'),
-        (22, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), x('POW:COUP?', 'AUTO,AC')), 'AUTO: mains -> method B'),
+        (22, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), x('POW:COUP?', 'AUTO,ACDC')), 'AUTO: mains -> method B'),
     ]),
 })
 SC['scpi'] = (['MEAS:POW?', 'POW:LIM 2.5,12', 'POW:BURD:STAT OFF'], 24, [

@@ -44,32 +44,20 @@ impl PwCache {
     }
 }
 
-/// The coupling chip above the unit (the stock mode-glyph / limit-badge
-/// slot, free in the power meter): "AC" / "DC", or "AUTO" over the method
-/// in use. A tap cycles AC -> DC -> AUTO (as the Power Settings button).
-pub const COUP_CHIP: sf::Rect = rect(404, 72, 72, 36);
-
-pub fn coupling_hit(x: u16, y: u16) -> bool {
-    let (x, y) = (x as i16, y as i16);
-    x >= COUP_CHIP.x - 2 && y >= COUP_CHIP.y - 2 && y < COUP_CHIP.y + COUP_CHIP.h + 3
-}
+/// The coupling on the page: the stock mode glyph above the unit (DC /
+/// AC+DC = the method in use, ui.rs `reading`) and, with AUTO, "AUTO" in
+/// the limit-badge slot left of it (the power meter has no limit slot).
+/// The coupling itself is switched by the active W button (DC -> AC+DC ->
+/// AUTO, as V / A) or the Power Settings row.
+const AUTO_LBL: sf::Rect = rect(403, 72, 31, 17);
 
 fn coupling(c: &mut PwCache, pv: &PowerVals) {
-    let k = 1 + pv.coup as u32 * 2 + pv.dc as u32;
+    let k = 1 + (pv.coup == pw::COUP_AUTO) as u32;
     if c.coup == k {
         return;
     }
     c.coup = k;
-    let r = COUP_CHIP;
-    let fill = if pv.coup == pw::COUP_AUTO { SEL } else { 0x2966 };
-    sf::rbox(r, 6, fill, BG);
-    let m = if pv.dc { "DC" } else { "AC" };
-    if pv.coup == pw::COUP_AUTO {
-        sf::glyphs(sf::F14, rect(r.x, r.y + 3, r.w, 14), "AUTO", STATUS_FG, fill, 8, 1);
-        sf::glyphs(sf::F14, rect(r.x, r.y + 19, r.w, 14), m, STATUS_FG, fill, 8, 1);
-    } else {
-        sf::glyphs(sf::TEXT22, r, m, STATUS_FG, fill, 8, 1);
-    }
+    sf::label(sf::F14, AUTO_LBL, if pv.coup == pw::COUP_AUTO { "AUTO" } else { "" }, VALUE, BG, 8, 1);
 }
 
 /// Small text buffer.
@@ -127,8 +115,13 @@ pub fn sig_text(buf: &mut [u8; 16], v: f32, sig: u8) -> &str {
 }
 
 /// History-row box `i` (stock 5 + 95 i, 153, 88 x 19).
+/// The power page's lower row: the energy box wider (5 digits + mWh /
+/// kWh), then PF / S / Q / f; 3 px gaps, x 5..475 as the stock row.
+const ROW_X: [i16; 5] = [5, 124, 205, 298, 391];
+const ROW_W: [i16; 5] = [116, 78, 90, 90, 84];
+
 fn row_rect(i: usize) -> sf::Rect {
-    rect(5 + 95 * i as i16, 153, 88, 19)
+    rect(ROW_X[i], 153, ROW_W[i], 19)
 }
 
 /// Every character of `s` in the HIST face.
@@ -173,18 +166,26 @@ impl DmmView {
         let (fv, fu) = if pv.f_hz >= 1000.0 { (pv.f_hz * 1e-3, "kHz") } else { (pv.f_hz, "Hz") };
         let mut ft = T::new();
         ft.push(if pv.f_hz > 0.0 && !pv.dc { sig_text(&mut b, fv, if pv.f_hz >= 1000.0 { 3 } else { 4 }) } else { "--" });
-        // The current (the aux row carries V and the energy): the reading's
-        // I in its range format, ASCII unit (no micro in HIST / F14).
-        let iv = pw::reading_vals(pv).2;
-        let mut it = T::new();
-        // 4 significant digits as S / Q (the box holds a tag, value, unit).
-        it.push(if iv.ol { "0L" } else { sig_text(&mut b, iv.v, 4) });
-        let iu = match iv.unit {
-            "\u{b5}A" => "uA",
-            u => u,
-        };
+        // The energy (owner: V and I on top, the Wh counter below): Wh with
+        // mWh / kWh, 5 digits; P instead while the main readout shows the
+        // energy. Long press = reset (confirm).
+        let ev = pw::energy_val(pv);
+        let etag = if pv.main == pw::MAIN_P { "E" } else { "P" };
+        // As many of its decimals as the box holds next to the tag and unit.
+        let (uf, us) = if in_hist(ev.unit) { (sf::HIST, 0) } else { (sf::F14, 1) };
+        let room = ROW_W[0] - 8 - sf::text_width(sf::F14, etag, 1) - 3 - (sf::text_width(uf, ev.unit, us) + 1) - 3 - 3;
+        let mut et = T::new();
+        if ev.ol {
+            et.push("0L");
+        } else {
+            let mut d = ev.dec;
+            while d > 0 && sf::text_width(sf::HIST, crate::dmm::format(&mut b, ev.v, d), 0) > room {
+                d -= 1;
+            }
+            et.push(crate::dmm::format(&mut b, ev.v, d));
+        }
         let (su, qu, fu) = if pv.dc { ("", "", "") } else { (su, qu, fu) };
-        let items: [(&str, &T, &str); 5] = [("I", &it, iu), ("PF", &pft, ""), ("S", &st, su), ("Q", &qt, qu), ("f", &ft, fu)];
+        let items: [(&str, &T, &str); 5] = [(etag, &et, ev.unit), ("PF", &pft, ""), ("S", &st, su), ("Q", &qt, qu), ("f", &ft, fu)];
         for (i, (tag, t, u)) in items.iter().enumerate() {
             let mut k = T::new();
             k.push(t.s()).push(u).push(if pv.comp { "c" } else { "" });
@@ -272,9 +273,10 @@ pub fn side_clear(c: &mut PwCache) {
     c.side = [0; 5];
 }
 
-/// The energy readout (aux2 slot, `pw::aux2_val`): long press = reset.
+/// The energy box (the lower row's first, `pw::energy_val`): long press =
+/// reset.
 pub fn energy_hit(x: u16, y: u16) -> bool {
-    x >= 256 && (34..68).contains(&y)
+    x < (ROW_X[1] - 2) as u16 && (150..175).contains(&y)
 }
 
 /// Energy box tap target (the stock REL box).
@@ -380,14 +382,17 @@ pub fn entry_dialog(i_cont: f32, t_lim: u16) {
 /// Power Settings page touch codes (besides range items).
 pub const PS_V: u8 = 0; // + 0..3 = V range, 4 = V AUTO
 pub const PS_I: u8 = 8; // + 0..5 = I range, 6 = I AUTO
-pub const PS_METHOD_B: u8 = 20;
-pub const PS_METHOD_ALT: u8 = 21;
 pub const PS_BURDEN: u8 = 22;
 pub const PS_RESET: u8 = 23;
 pub const PS_WIRING: u8 = 24;
 pub const PS_OK: u8 = 25;
 pub const PS_ZERO: u8 = 26;
+/// + 0..2 = the coupling row DC / AC+DC / AUTO (`PS_COUPS`).
 pub const PS_COUP: u8 = 28;
+/// The coupling row, left to right, as the Current Settings page's DC / AC /
+/// AC+DC row: DC (the AD1 method), AC+DC (method B: RMS of AC and DC),
+/// AUTO (B until DC-like, then the AD1 method).
+pub const PS_COUPS: [(u8, &str); 3] = [(pw::COUP_DC, "DC"), (pw::COUP_AC, "AC+DC"), (pw::COUP_AUTO, "AUTO")];
 pub const PS_VCAL: u8 = 27;
 
 /// Grid: label column 8..40, five 83 px columns from 44 (87 px pitch).
@@ -403,8 +408,10 @@ fn ps_button(r: sf::Rect, t: &str, sel: bool) {
     sf::glyphs(sf::TEXT22, r, t, STATUS_FG, c, 8, 0);
 }
 
-/// The page: V ranges + AUTO, I ranges + AUTO (two rows), method, burden
-/// compensation, Reset energy / Wiring / OK.
+/// The page: V ranges + AUTO, I ranges + AUTO (two rows), burden
+/// compensation, Zero, V cal; the coupling row (DC / AC+DC / AUTO, the
+/// Current Settings page's DC / AC / AC+DC style); Reset energy / Wiring /
+/// OK. The VA-only fallback (POW:METH ALT) is SCPI only (status line).
 pub fn settings_page(pv: &PowerVals) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
@@ -420,19 +427,13 @@ pub fn settings_page(pv: &PowerVals) {
         ps_button(ps_cell((1 + i / 5) as i16, (i % 5) as i16), n, !pv.i_auto && pv.ik as usize == i);
     }
     ps_button(ps_cell(2, 1), "AUTO", pv.i_auto);
-    // Self-zero and V self-calibration (doc 3.11 follow-ups); the status
-    // line under the last row (`settings_status`).
-    // Coupling: AC (method B), DC (AD1), AC/DC = AUTO.
-    let cp = match pv.coup {
-        pw::COUP_DC => "DC",
-        pw::COUP_AUTO => "AC/DC",
-        _ => "AC",
-    };
-    ps_button(ps_cell(2, 2), cp, false);
+    // Burden compensation (selected = on), self-zero, V self-calibration
+    // (doc 3.12); the status line under the last row (`settings_status`).
+    ps_button(ps_cell(2, 2), "Burden", pv.comp);
     ps_button(ps_cell(2, 3), "Zero", false);
     ps_button(ps_cell(2, 4), "V cal", false);
-    for (i, (t, sel)) in [("P + PF", !pv.alt), ("VA only", pv.alt), (if pv.comp { "Burden ON" } else { "Burden OFF" }, pv.comp)].iter().enumerate() {
-        ps_button(rect(PS_ROW4[i], 182, 150, 38), t, *sel);
+    for (i, (c, t)) in PS_COUPS.iter().enumerate() {
+        ps_button(rect(PS_ROW4[i], 182, 150, 38), t, pv.coup == *c);
     }
     for (i, t) in ["Reset Wh", "Wiring", "OK"].iter().enumerate() {
         ps_button(rect(PS_ROW4[i], 240, 150, 38), t, false);
@@ -450,7 +451,7 @@ pub fn settings_hit(x: u16, y: u16) -> Option<u8> {
                     (1, c) => Some(PS_I + c as u8),
                     (2, 0) => Some(PS_I + 5),
                     (2, 1) => Some(PS_I + 6),
-                    (2, 2) => Some(PS_COUP),
+                    (2, 2) => Some(PS_BURDEN),
                     (2, 3) => Some(PS_ZERO),
                     (2, 4) => Some(PS_VCAL),
                     _ => None,
@@ -460,7 +461,7 @@ pub fn settings_hit(x: u16, y: u16) -> Option<u8> {
     }
     for (i, &bx) in PS_ROW4.iter().enumerate() {
         if hit(rect(bx, 182, 150, 38), x, y) {
-            return Some(PS_METHOD_B + i as u8);
+            return Some(PS_COUP + i as u8);
         }
         if hit(rect(bx, 240, 150, 38), x, y) {
             return Some(PS_RESET + i as u8);
@@ -532,9 +533,10 @@ pub fn settings_status(p: &pw::Pw, key: u32) -> u32 {
                 .push(if p.zero_ok { ", zero set" } else { ", no zero" })
                 .push(match (p.coup, p.dc) {
                     (pw::COUP_AUTO, true) => ", auto: DC",
-                    (pw::COUP_AUTO, false) => ", auto: AC",
+                    (pw::COUP_AUTO, false) => ", auto: AC+DC",
                     _ => "",
-                });
+                })
+                .push(if p.alt { ", VA only" } else { "" });
             false
         }
     };
