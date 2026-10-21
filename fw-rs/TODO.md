@@ -488,11 +488,23 @@ Firmware:
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
       V/mV/A on the isolated jacks (current waveforms). Scope UI reused ("Wave" from DMM, MCX|DMM source badge),
       software trigger. Needs one ISR (owner decision; fw-rs is ISR-free) + HY3131 on hardware SPI2; ~2.5-3 weeks.
-- [ ] Device 2026-10-21 (docs/device-check-2026-10-21.md): stack 37468/46048 B (81 %) on 16b3eb9 — the stack
-      region shrank 59152 -> 46048; re-check on 24f7080 and restore headroom (>= 16 KB).
-- [ ] Scope 32 ms loop passes ~3/s: measurement maths (11.4 ms) + 4 measurement cells redraw (12.3 ms) in one
-      pass; split across passes and redraw only changed cells (3-4 % of touch/USB wait up to 33 ms).
-- [ ] Scope ~9 fps at 1 ms/div 2 V/div after AUTO vs 36 fps before at the same timebase — investigate.
+- [x] Device 2026-10-21 (docs/device-check-2026-10-21.md "Fixes"): stack 37468/46048 B (81 %) on 16b3eb9.
+      d957027: no USBTMC tx copy, 8-byte logger records, .sram_bss (EP_MEMORY, MSC_IO, MSC block, touch
+      log, dlog TAB); build.sh native checks the static worst path (tools/stack-depth) >= 16 KiB headroom,
+      link-native.x stack >= 28 KiB + 16 KiB. Emulator walk 38580/43448 -> 28532/48344 B.
+      (verify on device: DBG:BOOT? STACK after the scope walk, expect ~28.5 K used of ~48.3 K)
+- [x] Scope 32 ms loop passes ~3/s (meas 11.4 + frame 5 + cells 12.3 ms in one pass): a33e3ad integer
+      measurement maths, graph paint and cells on later passes (one changed cell per pass); fa3358d a
+      trace-only graph flush stops after 4 ms. Emulator 1 ms/div loop max: noise 10.9 -> 5.7 ms, 40 Hz
+      square 21.5 -> 8-10.5 ms. (verify on device: DBG:PROF? loop max <= 12 ms, 400 DBG:PING? p99)
+- [x] Scope ~9 fps at 1 ms/div after AUTO: three comparator misses (AUTO's fast-timebase sweep) disabled
+      the hardware trigger for good; 53bdb9d suspends it until the next range / timebase / coupling /
+      edge / mode / type change. The emulator's comparator model barely fires (ScopeFeeder TIM2 gate
+      timing; separate), so the fps itself is unverified. (verify on device: AUTO on the 40 Hz square,
+      then 1 ms/div: ~36 fps, DBG:HWTRIG? fields 5/6 = 1,1)
+- [x] STOP then Save CSV gave "No record to save" (Auto untriggered / STOP mid-acquisition): f09b3b0 the
+      samples captured so far become an untriggered stored record on STOP. (verify on device: Auto, open
+      input, STOP, MF > Settings > Save CSV -> "Saved SCOPnnn.DLG")
 Emulator (emu/):
 - [x] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
       at the same time); the firmware's mux/relay choices route it through a modelled DM40 front-end (dividers, shunts, relays,

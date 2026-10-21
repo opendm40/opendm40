@@ -183,3 +183,103 @@ Notes:
 - 2 LUNs and write protect.
 - dm40scpi.py read -n 200 stress.
 - READ? latency after a meter-side change.
+
+## Fixes (emulator-verified, not yet on the device)
+
+The emulator (Renode, 200 MIPS) ran the native image built from each commit. Commands went through USB/IP: DBG:BOOT?, DBG:PROF?, DBG:DRAG and DBG:KEY.
+- **Stack walk** (the B steps): scope page, TB list, CHA popup and its tabs, MF and all four tabs, a corner step each way, then AUTO. The input was a 40 Hz 0..10.4 V square.
+- **Profiles** ran for 10 s at 1 ms/div. There were two inputs:
+  - "noise": open-input-like, 50 mVpp noise, AUTO sweep, Vpp and Vrms cells changing;
+  - "square": the 40 Hz square.
+- **Emulator vs device timing.** The emulator runs the frame paint about 1.4x faster than the device. The measurement maths ran 3.7x faster (3.1 vs 11.4 ms), so its device-to-emulator ratio is unclear. Treat the pass times below as relative.
+
+### 1. Stack / TCM (d957027)
+
+| | 891f5dd (before) | d957027 + rebase (after) |
+|---|---|---|
+| TCM .data + .bss | 22 088 B | 17 192 B |
+| Stack (TCM above .bss) | 43 448 B | 48 344 B |
+| Stack used, walk (DBG:BOOT? STACK) | 38 580 B | 28 532 B |
+| Headroom | 4 868 B | **19 812 B** |
+| Static worst path (tools/stack-depth) | 38 596 B | 28 548 B |
+| main's frame | 29 608 B | 19 440 B |
+| SRAM free (.dmabuf + .sram_bss) | 5 464 B | ~4.3 KB |
+
+**What used the TCM and the stack:**
+- **main's frame.** It held three things:
+  - Usbtmc, 12.7 KB: `rsp` plus a second 6 KB `tx` copy of every reply;
+  - Msc, 4.2 KB, with its 4 KB block buffer;
+  - App, 5.5 KB.
+- **.bss.** The FFT (12.3 KB, from bde5bff) was the bulk of it. The rest was the touch log (1.9 KB), EP_MEMORY (1.3 KB), the dlog vfs table (1.3 KB) and the profiler (1 KB).
+- **The worst path** was main → App::tick → sp_update → panel_button → Ink::new / Ink::none, which returns about 600 B by value.
+
+**Changes**
+- **USBTMC.** Bulk-IN packets are assembled from the header and `rsp` as they go, so there is no tx copy.
+  If a new reply would overwrite `rsp` while the previous transfer still has payload to send, that transfer is ended first. This only happens when the host sends a command in the middle of a read.
+- **Logger ring.** Records shrank from 12 to 8 B. The seq is implied, because the ring holds consecutive seqs. The ring went from 24 to 16 KiB of SRAM, still 2048 records.
+  LOG:DATA? was checked in the emulator: the seqs are contiguous and the timestamps step 25 ms.
+- **`.sram_bss`.** This is a new zeroed NOLOAD SRAM section, zeroed by native.rs `init_ram` and main.rs `rust_start`. It holds EP_MEMORY, MSC_IO, the MSC block buffer (now a static passed to `Msc::new`), touch::LOG and the dlog vfs TAB.
+  - All of these are CPU-only, so it does not matter that they are in SRAM.
+  - TCM cannot be reached by DMA. Nothing that DMA uses moved into it.
+- **Build-time guards**
+  - `build.sh native` runs `tools/stack-depth/stackdepth.py --check 16384`. It takes the worst static call path from the disassembly and fails the build below 16 KiB headroom. Its result matched DBG:BOOT? STACK to within 16 B.
+  - link-native.x asserts that the stack is at least 28 KiB + 16 KiB, so .data/.bss cannot eat the headroom.
+- **The FFT** stays in TCM. Moving it would need 12.3 KB of SRAM, and only about 4 KB is free.
+- **Pre-existing failures, unchanged:** the RAM image (`./build.sh`, link.x) and test-initcore already failed to link at 891f5dd. Their CODE and DMARAM regions overflow.
+
+### 2. Scope main-loop passes (a33e3ad, fa3358d)
+
+**Changes**
+- **Measurement maths** (`scope_meas::compute_codes`). Each sample now costs only:
+  - a histogram increment;
+  - the edge state machine on integer thresholds (the same tests);
+  - integer moments.
+
+  Min, max, top, base, mean and RMS come from the histogram's exact moments. A comparison over 3000 random records matched the old code exactly, except Vavg, Vrms and Vcrm, which differ by at most 2.2e-4 relative (the old f32 running sums).
+- **Measurement pass.** The pass that measures only converts the frame (`sp_frame`). The graph paint runs on the next pass.
+- **Cells** follow one changed cell per pass. Unchanged cells were already skipped.
+- **Graph flush.** A trace-only flush stops after 4 ms of DWT cycles and resumes at that column on the next pass. Host renders are unchanged: ui-render shows 0 violations.
+
+**Results** (emulator, DBG:PROF?, max per 10 s)
+
+| Section | noise before | noise after | square before | square after |
+|---|---|---|---|---|
+| loop max | 10.9 ms | 5.7 ms | 21.5 ms | 8.2-10.5 ms |
+| s.meas | 3.1 ms | 1.4-1.5 ms | 7.7 ms | 4.6 ms |
+| s.frame | 3.6 ms | 3.6 ms | 10.3 ms | 5.9-9.1 ms |
+| s.mtxt (one pass) | 2.1 ms (all cells) | 2.2 ms (one cell) | 2.1 ms | 2.2 ms |
+| graph flush (x1, instrumented) | – | – | – | 3.8 ms |
+
+### 3. ~9 fps after AUTO (53bdb9d)
+
+**Cause.** At 1 ms/div the record (26 624 samples) is barely longer than the screen (25 000), so a software trigger search only sees 0.65 ms of the 25 ms period. A fast frame rate therefore needs the comparator.
+- Three comparator misses in a row disabled the hardware trigger for good (`hwtrig::note_miss`), until DBG:HWTRIG:ENABLE 1 or a reboot.
+- AUTO's sweep starts at 5 us/div on fine ranges, where the 10.4 V square overdrives the input. That sweep produces the misses.
+- Without the comparator almost every frame is the 100 ms Auto timeout, about 9 fps whatever the level. Before AUTO the comparator fired on every edge, giving 36 fps.
+
+**Fix.** Misses now suspend the comparator. A change of range, timebase, coupling, edge, mode or trigger type resumes it. Level and position drags do not. A stuck TIM1 gate still disables it for good.
+- touch-test has 6 new hwtrig cases.
+- In the emulator, after AUTO, DBG:HWTRIG? shows enabled=1 and available=1 again, where before it was 0,0 for good.
+
+The emulator cannot show the fps difference. Its comparator path (the ScopeFeeder TIM2 gate timing) misses even before AUTO. That is a separate emulator bug and was not fixed.
+
+### 4. STOP then Save CSV (f09b3b0, coordinator item)
+
+**Problem.** STOP in the middle of an acquisition (Auto with no trigger, the common case) left no stored record, so Save CSV answered "No record to save".
+
+**Fix.** On STOP, the samples captured so far become an untriggered stored record, oldest first. This covers a partial record, the hardware-trigger ring and the stream ring. The screen stays as it was drawn.
+
+**Emulator check:** a never-triggered sine, STOP, then Save CSV saved SCOP000.DLG (4157 B, 200 us/div) and SCOP001.DLG (4312 B, 2 ms/div).
+
+### Device re-check list
+
+1. **Stack.** Run the B walk, then DBG:BOOT? STACK. Expect about 28.5 K used of about 48.3 K, so 19 K or more headroom.
+2. **Scope on an open input**, 1 ms/div, cells changing. DBG:PROF? loop max should be 12 ms or less, with no 20-50 ms passes. 400 DBG:PING? round trips: p99 should be below 15 ms.
+3. **The 40 Hz square at 1 ms/div**, triggered: check the loop max and s.frame max.
+4. **AUTO on the square**, then 1 ms/div: expect about 36 fps and T'D. DBG:HWTRIG? fields 5 and 6 should read 1,1. Drag the level a few times: the scope should stay smooth.
+5. **Save CSV after STOP**: try Auto on an open input, STOP mid-acquisition with the square, and Normal while it shows WAIT. Each should give "Saved SCOPnnn.DLG", with an "untriggered" header where no trigger happened.
+6. **USB**
+   - DBG:LCD? screenshots (multi-round replies).
+   - `dm40scpi.py read -n 200`.
+   - LOG:STAT ON, then LOG:DATA?: the seqs should be contiguous.
+   - MSC copy of a large file. The MSC block buffer is now in SRAM.
