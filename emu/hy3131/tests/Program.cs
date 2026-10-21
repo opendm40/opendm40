@@ -86,6 +86,7 @@ namespace Hy3131Tests
             Frequency();
             Temperature();
             Beat();
+            CrossCases();
             Console.WriteLine("{0} passed, {1} failed", passes, failures);
             return failures == 0 ? 0 : 1;
         }
@@ -95,10 +96,10 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("acv:230@50");
-                m.Configure(F1R0);
+                m.Configure(F1R0, 1);
                 m.Advance(2.0);
                 var f0r2 = Master.Row("f2 dd 16 03 33 40 80 9d 31 fc 20 00 90 00 28 a0 80 c7 38 ac 88 94");
-                m.Configure(f0r2);
+                m.Configure(f0r2, 0);
                 for(var i = 0; i < 12; i++)
                 {
                     m.Advance(0.25);
@@ -116,17 +117,17 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("acv:3.4@40,dc=4.8,shape=square");
-                m.Configure(F0R1);
+                m.Configure(F0R1, 0);
                 m.Advance(3.0);
                 m.Read1(0x1E);
                 Console.WriteLine("after AC 3 s: vc {0:F4} role {1} op1 {2}", m.Chip.Core.AcNodeVc, m.Chip.Role, m.Chip.Core.EnOp1);
-                m.Configure(F1R1); m.Write(0x32, 0x38);
+                m.Configure(F1R1, 1); m.Write(0x32, 0x38);
                 m.Read1(0x1E);
                 Console.WriteLine("DC row: vc {0:F4} role {1} op1 {2}", m.Chip.Core.AcNodeVc, m.Chip.Role, m.Chip.Core.EnOp1);
                 m.Advance(0.8);
                 m.Read1(0x1E);
                 Console.WriteLine("DC +0.8: vc {0:F4} role {1} op1 {2}", m.Chip.Core.AcNodeVc, m.Chip.Role, m.Chip.Core.EnOp1);
-                m.Configure(F0R1);
+                m.Configure(F0R1, 0);
                 m.Read1(0x1E);
                 Console.WriteLine("AC row: vc {0:F4} role {1} op1 {2}", m.Chip.Core.AcNodeVc, m.Chip.Role, m.Chip.Core.EnOp1);
                 m.Advance(0.8);
@@ -152,6 +153,113 @@ namespace Hy3131Tests
             m2.Write(0x25, 0x50);
             m2.Read1(0x1E); var f = m2.WaitFlag(0x04, 1);
             Console.WriteLine("after R25=0x17: intf {0:X2} code {1} role {2} ig {3} {4}", f, m2.ReadS24(0), m2.Chip.Role, m2.Chip.Core.Ad1Ig, m2.Chip.Core.RoleDebug);
+        }
+
+        private static double Ohm(Master m, int r) => Math.Abs(m.ReadS24(0)) * new[] { 0.1, 1, 10, 100, 1000, 10000, 63000 }[r] / 0.9 / 8388606.0 * 1000; // ohm
+        private static double Dcv(Master m, int r) => m.ReadS24(0) * new[] { 10.0, 100, 1000, 10000 }[r] * K;
+        private static double Ma(Master m, int mode, int r) => m.ReadS24(0) * 1.25 / (new[] { 0.01, 0.0005, 4.75e-5 }[mode - 7] * new[] { 10.0, 1 }[r] * 0.9) / 8388606.0;
+
+        private static readonly byte[] F10R2 = Master.Row("e0 dd 14 83 35 00 00 55 00 00 00 40 60 00 00 94 80 d2 3c 68 00 50");
+        private static readonly byte[] F10R3 = Master.Row("e0 dd 14 83 35 00 00 55 00 00 00 40 00 06 00 94 80 d2 3c 68 00 50");
+        private static readonly byte[] F3R0 = Master.Row("f0 dd 15 83 33 01 00 55 31 00 00 00 00 00 08 91 80 d7 3a ac 00 50");
+        private static readonly byte[] F8R1 = Master.Row("f0 dd 15 83 35 00 00 55 31 00 00 00 00 00 08 81 80 c7 3d ac 00 50");
+
+        /// Fixed connections through the firmware's function changes (relays + rows as the firmware drives them).
+        private static void CrossCases()
+        {
+            Console.WriteLine("front end: fixed connections across functions");
+            {
+                var m = NewChip();
+                m.Chip.SetInput("vsrc:1.234;isrc:0.0123");
+                m.Configure(F1R0, 1); m.WaitFlag(0x04, 1);
+                Near(Dcv(m, 0), 1.234, 2e-4, "V source + A source: DC V reads the V source");
+                m.Configure(F8R0, 8); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Ma(m, 8, 0), 12.3, 0.01, "  DC mA reads the A source");
+                m.Chip.SetInput("vsrc:none");
+                m.Configure(F1R0, 1); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Dcv(m, 0), 0, 1e-4, "only the A source: DC V reads 0");
+                m.Chip.SetInput("open;vsrc:1.234");
+                m.Configure(F8R0, 8); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Ma(m, 8, 0), 0, 1e-3, "only the V source: DC mA reads 0");
+                m.Configure(F10R3, 10); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Check(m.ReadS24(0) == 8388607 || m.ReadS24(0) == -8388608, "V source alone in ohm: over range", m.ReadS24(0).ToString());
+            }
+            {
+                var m = NewChip();
+                m.Chip.SetInput("r:4700");
+                m.Configure(F1R0, 1); m.WaitFlag(0x04, 1);
+                Near(Dcv(m, 0), 0, 1e-4, "resistor in DC V: 0");
+                m.Configure(F10R3, 10); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Ohm(m, 3), 4700, 0.5, "  in ohm r3: 4700");
+                m.Chip.SetInput("open;vsrc:1.0,rs=4700"); // powered circuit: 1 V behind 4.7 k
+                m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                var vs = 1.4; var rref = 100e3;  // SFUVR 2 = VDS15 - AGND at 3.6 V, r3 reference
+                var vx = (1.0 / 4700 + vs / rref) / (1.0 / 4700 + 1 / rref);
+                // vx / (vs - vx) = 2.67 > the AD1 full scale (1 / 0.9): the reading clips (OL on the meter)
+                Check(m.ReadS24(0) == 8388607, "  powered 4.7 k in ohm: node at 1.018 V, ratio 2.67 -> clipped (OL), not 4700", string.Format("vx {0:F3} V, code {1}", vx, m.ReadS24(0)));
+                m.Chip.SetInput("open;vsrc:0.1,rs=4700"); // a weaker source: inside the range, wrong value
+                m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                vx = (0.1 / 4700 + vs / rref) / (1.0 / 4700 + 1 / rref);
+                Near(Ohm(m, 3), vx / (vs - vx) * rref, 20, "  0.1 V behind 4.7 k: KCL node (12.3 k shown), not 4700", string.Format("vx {0:F4} V", vx));
+                m.Chip.SetInput("open;diode:0.65");
+                m.Configure(F10R2, 10); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Ohm(m, 2), 0.65 / (1.4 - 0.65) * 10e3, 20, "diode in ohm r2: Vf / (Vs - Vf) * Rref");
+                m.Configure(F12, 12); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(m.ReadS24(0) * 1.25 * 10 / 0.9 / 8388606.0, 0.65, 2e-4, "  in diode mode: 0.65 V");
+                m.Chip.SetInput("open;diode:0.65,rev=1");
+                m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Check(m.ReadS24(0) * 1.25 * 10 / 0.9 / 8388606.0 > 3.12, "reversed diode in diode mode: OL");
+                m.Chip.SetInput("open;r:100");
+                m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(m.ReadS24(0) * 1.25 * 10 / 0.9 / 8388606.0, 0.0765, 2e-4, "100 ohm in diode mode: 0.765 mA * 100 = 76.5 mV");
+            }
+            {
+                var m = NewChip();
+                m.Chip.SetInput("avsrc:0.5"); // a voltage source in the A jack
+                m.Configure(F8R1, 8); m.WaitFlag(0x04, 1);
+                Near(Ma(m, 8, 1), 500 / (0.5 + 0.05), 2, "0.5 V in the A jack on the mA shunt: 0.5 / 0.55 ohm = 909 mA (software OL)");
+                m.Configure(F1R0, 1); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Dcv(m, 0), 0, 1e-4, "  DC V reads 0 (nothing on V)");
+            }
+            {
+                var m = NewChip();
+                m.Chip.SetInput("c:100e-9");
+                m.Configure(F1R0, 1); m.WaitFlag(0x04, 1);
+                Near(Dcv(m, 0), 0, 1e-4, "capacitor in DC V: 0");
+                m.Configure(F10R6, 10); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                var early = Ohm(m, 6);
+                m.Advance(60); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                var late = Math.Abs(m.ReadS24(0));
+                Check(late == 8388607, "  in ohm r6: charges to the source voltage -> over range", string.Format("early {0:G4} ohm, late code {1}", early, late));
+            }
+            {
+                var m = NewChip();
+                m.Chip.SetInput("tc:100;cj:25");
+                m.Configure(F3R0, 3); m.WaitFlag(0x04, 1);
+                Near(m.ReadS24(0) * 1.38889 / 10 / 8388.606, TypeK.Emf(100) - TypeK.Emf(25), 0.003, "thermocouple in DC mV r0: E(100) - E(25) mV");
+                m.Chip.SetInput("die:35");
+                m.Configure(F15R0, 15); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                var a = m.ReadS24(0);
+                m.Write(0x33, 0xAE); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                var b = m.ReadS24(0);
+                Near((a - b) / 640000.0 * 314.15 - 289.15, 35, 0.05, "die 35 C: the internal sensor reports the die, not the cold junction");
+                m.Write(0x33, 0xAC); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(m.ReadS24(0) * 1.25 / 0.9 * 100 / 8388606.0, TypeK.Emf(100) - TypeK.Emf(25), 0.003, "  EMF still relative to the 25 C junction -> the firmware will read ~110 C");
+                m.Chip.SetInput("open;vsrc:4.096e-3");
+                m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(m.ReadS24(0) * 1.25 / 0.9 * 100 / 8388606.0, 4.096, 0.003, "a 4.096 mV DC source in temperature mode reads like a thermocouple");
+            }
+            {
+                var m = NewChip();
+                m.Chip.SetInput("vsrc:1.234");
+                m.Configure(F10R3, 10);   // relay on the ohm network
+                m.Configure(F1R0);        // the DC V row without the relay pulse: the jack is not on the divider
+                m.WaitFlag(0x04, 1);
+                Near(Dcv(m, 0), 0, 1e-4, "DC V row with the relay left on the ohm network: 0 (jack disconnected)");
+                m.RelaysForMode(1); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Dcv(m, 0), 1.234, 2e-4, "  relay back: 1.234 V");
+                Check(m.Chip.Frontend.Contains("pa=0") && m.Chip.Frontend.Contains("role=DcV"), "Frontend state line", m.Chip.Frontend.Substring(0, 60));
+            }
         }
 
         private static void Registers()
@@ -220,7 +328,7 @@ namespace Hy3131Tests
                 m.Chip.SetInput("dcv:1.0");
                 var row = (byte[])F1R1.Clone();
                 row[2] = t.r22;
-                m.Configure(row);
+                m.Configure(row, 1);
                 var t0 = m.Now;
                 var f = m.WaitFlag(0x04, 1.0, 0.001);
                 var first = m.Now - t0;
@@ -233,7 +341,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("acv:1.0@50");
-                m.Configure(F0R0);
+                m.Configure(F0R0, 0);
                 var t0 = m.Now;
                 Near(m.Chip.Core.Ad2Period * 1e6, 13.02, 0.05, "AD2 sample period 13.02 us (OSR2 32 at SYSCLK/2)");
                 m.WaitFlag(0x18, 1.0, 0.001);
@@ -255,7 +363,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("dcv:" + v.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                m.Configure(F1R0);
+                m.Configure(F1R0, 1);
                 m.WaitFlag(0x04, 1);
                 var ad1 = m.ReadS24(0);
                 Near(DcvDisplay(ad1, 0, cal), v, 2e-4, "DC V r0 " + v + " V");
@@ -263,7 +371,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("dcv:12.5");
-                m.Configure(F1R1);
+                m.Configure(F1R1, 1);
                 m.WaitFlag(0x04, 1);
                 Near(DcvDisplay(m.ReadS24(0), 1, cal), 12.5, 1e-3, "DC V r1 12.5 V");
                 Check(m.Chip.Role == "DcV m1 r1", "role " + m.Chip.Role);
@@ -289,7 +397,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("dcv:0.2345");
-                m.Configure(F3R1);
+                m.Configure(F3R1, 3);
                 m.WaitFlag(0x04, 1);
                 var mv = m.ReadS24(0) * 1.38889 / 1.0 / 8388.606;
                 Near(mv, 234.5, 0.05, "DC mV r1 234.5 mV");
@@ -297,7 +405,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip(noise: true);
                 m.Chip.SetInput("dcv:0.0");
-                m.Configure(F3R1);
+                m.Configure(F3R1, 3);
                 m.Write(0x22, 0x17);
                 var codes = new List<int>();
                 for(var i = 0; i < 20; i++) { m.Read1(0x1E); m.WaitFlag(0x04, 1); codes.Add(m.ReadS24(0)); }
@@ -315,7 +423,7 @@ namespace Hy3131Tests
             cal[0x124 / 4 + 1] = 1.002732f; cal[0x144 / 4] = 4.7e-5f;
             var m = NewChip(cal: cal);
             m.Chip.SetInput("dcv:1.234");
-            m.Configure(F1R0);
+            m.Configure(F1R0, 1);
             m.WaitFlag(0x04, 1);
             Near(DcvDisplay(m.ReadS24(0), 0, cal), 1.234, 2e-4, "stock display with the dump's DC V r0 calibration = input");
             m.Chip.Core.CalConsistent = false;
@@ -323,7 +431,7 @@ namespace Hy3131Tests
             Near(DcvDisplay(m.ReadS24(0), 0, cal), 1.234 * 1.012064 - 0.000125, 3e-4, "with CalConsistent off the stock shows the raw deviation");
             m.Chip.Core.CalConsistent = true;
             m.Chip.SetInput("ohm:1000");
-            m.Configure(F10R1);
+            m.Configure(F10R1, 10);
             m.WaitFlag(0x04, 1);
             var r = Math.Abs(m.ReadS24(0)) * cal[0x124 / 4 + 1] * 1.0 / 0.9 / 8388606.0 - cal[0x144 / 4];
             Near(r * 1000, 1000, 0.2, "ohm r1 with calibration");
@@ -335,7 +443,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("acv:1.0@50,dc=0.5");
-                m.Configure(F0R0);
+                m.Configure(F0R0, 0);
                 m.Advance(3.0); // AC coupling settles
                 var b = ReadAfter(m, 0x18, 1);
                 Near(SqrtRms(b) * 1.25 / 262144 * 10, 1.0, 2e-3, "AC V r0 1.0 Vrms (sine)");
@@ -355,9 +463,9 @@ namespace Hy3131Tests
                 // entry transient: AC V right after a plain DC V row with OP1 off
                 var m = NewChip();
                 m.Chip.SetInput("dcv:0.5");
-                m.Configure(F1R1);
+                m.Configure(F1R1, 1);
                 m.Advance(2.0);
-                m.Configure(F0R0);
+                m.Configure(F0R0, 0);
                 var b = ReadAfter(m, 0x18, 1);
                 var first = SqrtRms(b) * 1.25 / 262144 * 10;
                 m.Advance(3.0);
@@ -369,7 +477,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("acv:0.2@60,dc=0.1");
-                m.Configure(F2R1);
+                m.Configure(F2R1, 2);
                 m.Advance(0.5);
                 var b = ReadAfter(m, 0x18, 1);
                 Near(SqrtRms(b) * 1.25 / 1.0 / 262.144, 200, 0.5, "AC mV r1 200 mVrms");
@@ -379,11 +487,11 @@ namespace Hy3131Tests
                 // AC+DC: AC phase after a DC phase with OP1 kept on (R32 = 0x38): no transient
                 var m = NewChip();
                 m.Chip.SetInput("acv:3.4@40,dc=4.8,shape=square");
-                m.Configure(F0R1);
+                m.Configure(F0R1, 0);
                 m.Advance(3.0);
-                m.Configure(F1R1); m.Write(0x32, 0x38);
+                m.Configure(F1R1, 1); m.Write(0x32, 0x38);
                 m.Advance(0.8);
-                m.Configure(F0R1);
+                m.Configure(F0R1, 0);
                 m.Advance(0.8);
                 m.Read1(0x1E);
                 var b = ReadAfter(m, 0x18, 1);
@@ -399,11 +507,11 @@ namespace Hy3131Tests
                 // A r1 (10 A, PB2) and mA r1 (400 mA, PB1) differ only in SOP1P
                 var m = NewChip();
                 m.Chip.SetInput("dca:0.5");
-                m.Configure(Master.Row("f0 dd 15 83 35 00 00 55 31 00 00 00 00 00 08 81 80 c7 3d ac 00 50")); // mA r1
+                m.Configure(Master.Row("f0 dd 15 83 35 00 00 55 31 00 00 00 00 00 08 81 80 c7 3d ac 00 50"), 8); // mA r1
                 Check(m.Chip.Role == "DcA m8 r1", "mA r1 row recognised", m.Chip.Role);
                 m.WaitFlag(0x04, 1);
                 Near(m.ReadS24(0) * 1.25 / (0.0005 * 1 * 0.9) / 8388606.0, 500, 0.5, "0.5 A on the 400 mA range reads 500 mA (software OL -> autorange)");
-                m.Configure(Master.Row("f0 dd 15 83 35 00 00 55 31 00 00 00 00 00 08 81 80 c7 3e ac 00 50")); // A r1
+                m.Configure(Master.Row("f0 dd 15 83 35 00 00 55 31 00 00 00 00 00 08 81 80 c7 3e ac 00 50"), 7); // A r1
                 Check(m.Chip.Role == "DcA m7 r1", "A r1 row recognised", m.Chip.Role);
                 m.Read1(0x1E); m.WaitFlag(0x04, 1);
                 Near(m.ReadS24(0) * 1.25 / (0.01 * 1 * 0.9) / 8388606.0, 0.5, 0.001, "0.5 A on the 10 A range");
@@ -411,7 +519,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("dca:0.0123");
-                m.Configure(F8R0); // DC mA r0 (40 mA, x10)
+                m.Configure(F8R0, 8); // DC mA r0 (40 mA, x10)
                 m.WaitFlag(0x04, 1);
                 var ma = m.ReadS24(0) * 1.25 / (0.0005 * 10 * 0.9) / 8388606.0;
                 Near(ma, 12.3, 0.005, "DC mA r0 12.3 mA");
@@ -419,7 +527,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("aca:0.0123@50");
-                m.Configure(F5R0);
+                m.Configure(F5R0, 5);
                 m.Advance(0.5);
                 var b = ReadAfter(m, 0x10, 1);
                 var ma = SqrtRms(b) * 1.25 / (0.0005 * 10) / 262144.0;
@@ -432,20 +540,20 @@ namespace Hy3131Tests
             Console.WriteLine("ohm");
             var m = NewChip();
             m.Chip.SetInput("ohm:4700");
-            m.Configure(F10R1);
+            m.Configure(F10R1, 10);
             m.WaitFlag(0x04, 1);
             var r = Math.Abs(m.ReadS24(0)) * 1.0 / 0.9 / 8388606.0;
             Check(r > 1.0, "4.7 k on the 400 ohm range: over the reference (OL)", r.ToString("F3") + " kohm");
             Check(m.ReadS24(0) == 8388607, "  code clipped");
             m.Chip.SetInput("ohm:1.5e6");
-            m.Configure(F10R6);
+            m.Configure(F10R6, 10);
             m.WaitFlag(0x04, 1);
             Near(Math.Abs(m.ReadS24(0)) * 63000.0 / 0.9 / 8388606.0, 1500, 3, "1.5 M on the 40 M range (kohm)");
             m.Chip.SetInput("open");
             m.Read1(0x1E); m.WaitFlag(0x04, 1);
             Check(m.ReadS24(0) == 8388607, "open: clipped (OL)");
             m.Chip.SetInput("ohm:330");
-            m.Configure(F10R1);
+            m.Configure(F10R1, 10);
             m.Write(0x22, 0x17);
             m.WaitFlag(0x04, 1);
             Near(Math.Abs(m.ReadS24(0)) * 1.0 / 0.9 / 8388606.0 * 1000, 330, 0.05, "330 ohm r1");
@@ -456,7 +564,7 @@ namespace Hy3131Tests
             Console.WriteLine("continuity");
             var m = NewChip();
             m.Chip.SetInput("ohm:10");
-            m.Configure(F11);
+            m.Configure(F11, 11);
             m.WaitFlag(0x04, 1);
             Near(-m.ReadS24(0) / 0.9 / 8388.606, 10, 0.02, "10 ohm (negative code, 1 k reference)");
             Check(m.Chip.CmpPin, "CMP pin high (beep) at 10 ohm");
@@ -472,7 +580,7 @@ namespace Hy3131Tests
             Console.WriteLine("diode");
             var m = NewChip();
             m.Chip.SetInput("diode:0.65");
-            m.Configure(F12);
+            m.Configure(F12, 12);
             m.WaitFlag(0x04, 1);
             Near(m.ReadS24(0) * 1.25 * 10 / 0.9 / 8388606.0, 0.65, 2e-4, "0.65 V");
             Check(!m.Chip.CmpPin, "CMP pin silent with ENPCMPO = 0");
@@ -489,7 +597,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("cap:100e-9");
-                m.Configure(F13R2);
+                m.Configure(F13R2, 13);
                 // stock: restart the counter, read after the gate
                 m.Write(0x20, 0x70); m.Write(0x1B, 0x00, 0x00, 0xFC); m.Write(0x20, 0x72);
                 var f = m.WaitFlag(0x01, 1);
@@ -502,12 +610,12 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("cap:100e-6");
-                m.Configure(F13DIS);
+                m.Configure(F13DIS, 13);
                 m.Advance(0.3);
                 m.WaitFlag(0x04, 1);
                 var v0 = m.ReadS24(0) * 1000 * 1.25 / 0.9 / 8388606.0;
                 Check(Math.Abs(v0) < 30, "discharge row: |V| < 30 mV", v0.ToString("F2") + " mV");
-                m.Configure(F13R5);
+                m.Configure(F13R5, 13);
                 m.Write(0x21, 0xBB);
                 var t0 = m.Chip.Core.LastAd1Time;
                 m.Read1(0x1E); m.WaitFlag(0x04, 1); var v1 = m.ReadS24(0) * 1000 * 1.25 / 0.9 / 8388606.0; var t1 = m.Chip.Core.LastAd1Time;
@@ -528,7 +636,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("hz:1000,duty=0.25,amp=1.0");
-                m.Configure(F14);
+                m.Configure(F14, 14);
                 m.Write(0x20, 0xF0); m.Write(0x1B, 0x00, 0x00, 0xFC); m.Write(0x20, 0xF2);
                 var f = m.WaitFlag(0x01, 1);
                 Check(f != 0, "CTF after the gate");
@@ -548,7 +656,7 @@ namespace Hy3131Tests
             {
                 var m = NewChip();
                 m.Chip.SetInput("dcv:1.0"); // no edges
-                m.Configure(F14);
+                m.Configure(F14, 14);
                 m.Write(0x20, 0xF0); m.Write(0x1B, 0x00, 0x00, 0xFC); m.Write(0x20, 0xF2);
                 m.Advance(0.35);
                 Check((m.Read1(0x1E) & 1) == 0, "no input edges: no CTF");
@@ -564,7 +672,7 @@ namespace Hy3131Tests
                 // secondary readout in AC V r1 (comparator on the divided node)
                 var m = NewChip();
                 m.Chip.SetInput("acv:5@40,shape=square,dc=5");
-                m.Configure(F0R1);
+                m.Configure(F0R1, 0);
                 m.Write(0x20, 0xF0); m.Write(0x1B, 0x00, 0x00, 0xFC); m.Write(0x20, 0xF2);
                 m.WaitFlag(0x01, 1);
                 var b = m.Read(0x15, 9);
@@ -578,7 +686,7 @@ namespace Hy3131Tests
             Console.WriteLine("temperature");
             var m = NewChip();
             m.Chip.SetInput("temp:100,cj=25");
-            m.Configure(F15R0); // R33 = 0xAF: SAD1I = 11
+            m.Configure(F15R0, 15); // R33 = 0xAF: SAD1I = 11
             m.WaitFlag(0x04, 1);
             var codeA = m.ReadS24(0);
             m.Write(0x33, 0xAE);
@@ -607,14 +715,14 @@ namespace Hy3131Tests
             Console.WriteLine("AD2/AD3 enable order (empirical beat model, off by default)");
             var m = NewChip();
             m.Chip.SetInput("acv:4.8@40,shape=square");
-            m.Configure(F0R1); // row sets ENAD2 (byte 6) before ENAD3 (byte 20)
+            m.Configure(F0R1, 0); // row sets ENAD2 (byte 6) before ENAD3 (byte 20)
             m.Advance(3.0);
             var vals = new List<double>();
             for(var i = 0; i < 12; i++) { m.Read1(0x1E); var b = ReadAfter(m, 0x10, 1); vals.Add(SqrtRms(b) * 1.25 / 262144 * 100); }
             double lo = double.MaxValue, hi = double.MinValue; foreach(var v in vals) { lo = Math.Min(lo, v); hi = Math.Max(hi, v); }
             Check(hi - lo < 0.01, "default: stable RMS", string.Format("{0:F4}..{1:F4}", lo, hi));
             m.Chip.Core.BeatModel = true;
-            m.Configure(F0R1);
+            m.Configure(F0R1, 0);
             m.Advance(3.0);
             vals.Clear();
             for(var i = 0; i < 12; i++) { m.Read1(0x1E); var b = ReadAfter(m, 0x10, 1); vals.Add(SqrtRms(b) * 1.25 / 262144 * 100); }
@@ -622,7 +730,7 @@ namespace Hy3131Tests
             Check(hi - lo > 0.3, "beat on, row order (AD2 first): +-5 % wander", string.Format("{0:F3}..{1:F3}", lo, hi));
             // fw-rs order: both off in the row, AD3 then AD2
             var row = (byte[])F0R1.Clone(); row[6] &= 0x7F; row[20] &= 0x7F;
-            m.Configure(row); m.Write(0x34, F0R1[20]); m.Write(0x26, F0R1[6]);
+            m.Configure(row, 0); m.Write(0x34, F0R1[20]); m.Write(0x26, F0R1[6]);
             m.Advance(3.0);
             vals.Clear();
             for(var i = 0; i < 12; i++) { m.Read1(0x1E); var b = ReadAfter(m, 0x10, 1); vals.Add(SqrtRms(b) * 1.25 / 262144 * 100); }

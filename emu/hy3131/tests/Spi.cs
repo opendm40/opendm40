@@ -27,14 +27,32 @@ namespace Hy3131Tests
     public class Master
     {
         public readonly MachineStub Machine = new MachineStub();
-        public readonly PortStub PortC = new PortStub(), PortD = new PortStub();
+        public readonly PortStub PortC = new PortStub(), PortD = new PortStub(), PortA = new PortStub(), PortE = new PortStub();
         public readonly HY3131 Chip;
         public double BitTime = 1e-6; // seconds per SCK phase (the stock is faster, fw-rs ~1 us)
 
         public Master()
         {
             PortD.Drive(2, true);
-            Chip = new HY3131(Machine, PortC, PortD);
+            Chip = new HY3131(Machine, PortC, PortD, 10, 11, 12, 2, PortA, PortE);
+        }
+
+        /// The firmware's relay drive (dmm.rs relay_pa / relay_pe / pc7): PA latching pulse
+        /// (0 = V/A path, 1 = ohm/mV network), PE shunt (0 A, 1 mA, 2 none), PC7.
+        public void Relays(int pa, int pe, bool pc7 = false)
+        {
+            var (set, clr) = pa == 0 ? (10, 9) : (9, 10);
+            PortA.Drive(clr, false); PortA.Drive(set, true); Advance(0.010); PortA.Drive(set, false);
+            PortE.Drive(0, pe == 0); PortE.Drive(1, pe == 1);
+            PortC.Drive(7, pc7);
+        }
+
+        /// Relay state of a stock mode (hy3131_v2_6.h "relays" column).
+        public void RelaysForMode(int m)
+        {
+            var pa = (m == 0 || m == 1 || (m >= 4 && m <= 9)) ? 0 : 1;
+            var pe = (m == 4 || m == 7) ? 0 : (m == 5 || m == 8) ? 1 : 2;
+            Relays(pa, pe, m == 14);
         }
 
         public double Now { get => Machine.Now; set => Machine.Now = value; }
@@ -93,10 +111,12 @@ namespace Hy3131Tests
             return (int)((uint)(b[0] | b[1] << 8 | b[2] << 16) << 8) >> 8;
         }
 
-        /// Stock mode change: zero R26/R34/R36, the 22-byte row, INTE = 0.
-        public void Configure(byte[] row)
+        /// Stock mode change: zero R26/R34/R36, relays of stock mode `mode` (-1 = unchanged),
+        /// the 22-byte row, INTE = 0.
+        public void Configure(byte[] row, int mode = -1)
         {
             Write(0x26, 0); Write(0x34, 0); Write(0x36, 0);
+            if(mode >= 0) RelaysForMode(mode);
             Write(0x20, row);
             Write(0x1F, 0);
         }

@@ -369,6 +369,151 @@ class FrontPanel(Gtk.Widget):
         cr.restore()
 
 
+def parse_state(line):
+    """key=value tokens of the HY3131 Frontend line (conn="..." quoted)."""
+    st = {}
+    rest = line
+    if ' conn="' in rest:
+        rest, conn = rest.split(' conn="', 1)
+        st['conn'] = conn.rstrip('"')
+    for tok in rest.split():
+        if '=' in tok:
+            k, v = tok.split('=', 1)
+            st[k] = v
+    return st
+
+
+class FrontendView(Gtk.DrawingArea):
+    """Schematic of the DM40 front end: jacks -> relays -> divider / shunt / ohm network -> HY3131,
+    with the route the firmware selected highlighted."""
+
+    def __init__(self):
+        super().__init__()
+        self.st = {}
+        self.set_content_height(250)
+        self.set_draw_func(self.draw)
+
+    def update(self, st):
+        self.st = st
+        self.queue_draw()
+
+    def draw(self, area, cr, w, h):
+        st = self.st
+        on = rgb('#3584E4')
+        off = rgb('#6E6E6E')
+        hot = rgb('#F3B51E')
+        txt = rgb('#E8E8E8')
+        cr.set_source_rgb(*rgb('#1E1F22'))
+        cr.rectangle(0, 0, w, h)
+        cr.fill()
+        if not st:
+            cr.set_source_rgb(*txt)
+            cr.move_to(12, h / 2)
+            cr.show_text('waiting for the HY3131 state …')
+            return
+        pa = st.get('pa', '0')
+        role = st.get('role', 'None')
+        shunt = st.get('shunt', 'uA')
+        mode = st.get('mode', '-1')
+        rng = st.get('range', '0')
+        rv = role in ('DcV', 'AcV')
+        rmv = role in ('DcMv', 'AcMv', 'Freq', 'Temp')
+        rohm = role in ('Ohm', 'Cont', 'Diode', 'CapOsc', 'CapRamp', 'CapDischarge')
+        ra = role in ('DcA', 'AcA')
+        cr.set_line_width(2)
+        cr.select_font_face('Cantarell')
+        cr.set_font_size(11)
+
+        def line(x0, y0, x1, y1, active):
+            cr.set_source_rgb(*(on if active else off))
+            cr.move_to(x0, y0)
+            cr.line_to(x1, y1)
+            cr.stroke()
+
+        def label(x, y, s, active=True, color=None):
+            cr.set_source_rgb(*(color or (txt if active else off)))
+            cr.move_to(x, y)
+            cr.show_text(s)
+
+        def box(x, y, bw, bh, s, active, fill=False):
+            cr.set_source_rgb(*(on if active else off))
+            cr.rectangle(x, y, bw, bh)
+            if fill:
+                cr.fill()
+            else:
+                cr.stroke()
+            cr.set_source_rgb(*(txt if active else off))
+            ext = cr.text_extents(s)
+            cr.move_to(x + (bw - ext.width) / 2, y + bh / 2 + 4)
+            cr.show_text(s)
+
+        yv, ycom, ya = 40, 130, 200
+        # jacks
+        for y, name, col in ((yv, 'V Ω', rgb('#C8102E')), (ycom, 'COM', rgb('#111111')), (ya, 'A', rgb('#C8102E'))):
+            cr.set_source_rgb(*col)
+            cr.arc(22, y, 9, 0, 6.3)
+            cr.fill()
+            cr.set_source_rgb(*txt)
+            cr.arc(22, y, 4, 0, 6.3)
+            cr.fill()
+            label(4, y + 24, name)
+        vj = st.get('vjack', '0')
+        ij = st.get('ijack', '0')
+        label(36, yv - 14, '%s V' % vj, True, hot)
+        label(36, ya - 14, '%s A' % ij, True, hot)
+        # V path: relay PA
+        line(31, yv, 70, yv, True)
+        va = pa == '0'
+        box(70, yv - 12, 54, 24, 'PA: V/A' if va else 'PA: Ω/mV', True, fill=False)
+        # two routes out of the relay
+        line(124, yv, 150, yv, va)
+        line(124, yv, 150, yv + 32, not va)
+        divs = {'0': '/10', '1': '/100', '2': '/1000', '3': '/10000'}
+        box(150, yv - 12, 78, 24, 'divider ' + (divs.get(rng, '') if rv else ''), va and rv)
+        box(150, yv + 20, 78, 24, 'Ω/mV network', (not va) and (rmv or rohm))
+        line(228, yv, 262, yv, va and rv)
+        line(228, yv + 32, 262, yv + 32, (not va) and (rmv or rohm))
+        # ohm source
+        if rohm:
+            label(150, yv + 62, 'source %s V, Rref %s' % (st.get('vsrc', '?'), st.get('rref', '?')), True, hot)
+            if 'vx' in st:
+                label(150, yv + 76, 'node %s V' % st['vx'], True, hot)
+        # A path: shunt
+        line(31, ya, 70, ya, True)
+        box(70, ya - 12, 90, 24, 'shunt %s (%s)' % (shunt, {'A': '10 mΩ', 'mA': '0.5 Ω', 'uA': '47.5 Ω'}.get(shunt, '')), ra)
+        line(160, ya, 262, ya, ra)
+        label(165, ya - 6, 'Vshunt %s V' % st.get('vshunt', '0'), ra, hot if ra else None)
+        # COM
+        line(31, ycom, 262, ycom, True)
+        label(40, ycom - 6, 'COM / AGND', True)
+        # HY3131 box
+        x0 = 262
+        cr.set_source_rgb(*on)
+        cr.rectangle(x0, 14, max(60, w - x0 - 8), h - 28)
+        cr.stroke()
+        label(x0 + 8, 30, 'HY3131  %s  m%s r%s' % (role, mode, rng))
+        y = 48
+        for key, name in (('ad1', 'AD1 (24 bit)'), ('ad2', 'AD2'), ('ad3', 'AD3'), ('lpf', 'LPF'), ('rms', 'RMS'),
+                          ('ctr', 'counter'), ('cmp', 'comparator'), ('op1', 'OP1'), ('op2', 'OP2')):
+            active = st.get(key) == '1'
+            cr.set_source_rgb(*(on if active else off))
+            cr.rectangle(x0 + 8, y - 8, 8, 8)
+            cr.fill()
+            extra = ''
+            if key == 'ad1' and active:
+                extra = '  OSR %s%s' % (st.get('osr1', ''), ' chop' if st.get('chop') == '1' else '')
+            if key == 'op1' and active:
+                extra = '  + %s' % st.get('sop1p', '')
+            if key == 'cmp' and active:
+                extra = '  in %s%s' % (st.get('scmpi', ''), '  CMP pin HIGH (beep)' if st.get('cmppin') == '1' else '')
+            label(x0 + 22, y, name + extra, active)
+            y += 15
+        label(x0 + 8, y + 2, 'AD1 in %s-%s ref %s-%s' % (st.get('sad1fp', ''), st.get('sad1fn', ''), st.get('sad1rh', ''), st.get('sad1rl', '')), True)
+        label(x0 + 8, y + 16, 'SAD1I %s  SDIO %s  SMODE %s  SFUVR %s  PC7 %s' % (
+            st.get('sad1i', ''), st.get('sdio', ''), st.get('smode', ''), st.get('sfuvr', ''), st.get('pc7', '')), True)
+        label(x0 + 8, y + 30, 'AD1 %s  period %s s  die %s C' % (st.get('ad1code', ''), st.get('period', ''), st.get('die', '')), True)
+
+
 class GtkApp(Adw.Application):
     def __init__(self, args, extra, emulator_cls):
         super().__init__(application_id='win.xcvb.dm40emu')
@@ -444,50 +589,67 @@ class GtkApp(Adw.Application):
 
     def build_sidebar(self):
         page = Adw.PreferencesPage()
-        # DMM input (HY3131 model: SetInput "spec", emu/hy3131/README.md)
-        g = Adw.PreferencesGroup(title='DMM input', description='V Ω / COM / A jacks -> sysbus.hy3131 SetInput')
-        self.dmm_fn = Adw.ComboRow(title='Function')
-        self.dmm_modes = [
-            ('DC voltage', 'dcv:{v}', 'V'), ('AC voltage', 'acv:{v}@{f},dc={dc},shape={shape}', 'V rms'),
-            ('DC current', 'dca:{v}', 'A'), ('AC current', 'aca:{v}@{f},dc={dc},shape={shape}', 'A rms'),
-            ('Resistance', 'ohm:{v}', 'ohm'), ('Short', 'short', ''), ('Open', 'open', ''),
-            ('Diode', 'diode:{v}', 'V forward'), ('Capacitance', 'cap:{v}', 'F'),
-            ('Frequency', 'hz:{f},duty={duty},amp={v}', 'V amplitude'), ('Thermocouple', 'temp:{v},cj={cj}', 'C'),
-        ]
-        self.dmm_fn.set_model(Gtk.StringList.new([m[0] for m in self.dmm_modes]))
-        self.dmm_fn.connect('notify::selected', lambda *a: self.dmm_update_subtitle())
-        g.add(self.dmm_fn)
-        self.dmm_v = Adw.EntryRow(title='Value')
-        self.dmm_v.set_text('1.234')
-        g.add(self.dmm_v)
-        self.dmm_f = Adw.EntryRow(title='Frequency, Hz')
-        self.dmm_f.set_text('50')
-        g.add(self.dmm_f)
-        self.dmm_dc = Adw.EntryRow(title='DC offset, V or A')
-        self.dmm_dc.set_text('0')
-        g.add(self.dmm_dc)
-        self.dmm_shape = Adw.ComboRow(title='Shape')
-        self.dmm_shape.set_model(Gtk.StringList.new(['sine', 'square', 'triangle']))
-        g.add(self.dmm_shape)
-        self.dmm_duty = Adw.EntryRow(title='Duty 0..1')
-        self.dmm_duty.set_text('0.25')
-        g.add(self.dmm_duty)
-        self.dmm_cj = Adw.EntryRow(title='Cold junction, C')
-        self.dmm_cj.set_text('25')
-        g.add(self.dmm_cj)
-        row = Adw.ActionRow(title='Apply input')
+        # DMM jacks: what is connected to V-ohm / COM / A (DM40 front-end model, emu/hy3131/README.md).
+        # The firmware's relays and HY3131 switches route it; the schematic below shows the route.
+        g = Adw.PreferencesGroup(title='DMM jacks', description='what is connected to V Ω / COM / A (Enter applies)')
+        self.v_kind = Adw.ComboRow(title='V Ω / COM')
+        self.v_kinds = ['nothing', 'DC voltage source', 'AC voltage source', 'resistor', 'capacitor', 'diode',
+                        'thermocouple (type K)', 'short', 'current source (wrong jack)']
+        self.v_kind.set_model(Gtk.StringList.new(self.v_kinds))
+        self.v_kind.set_selected(1)
+        self.v_kind.connect('notify::selected', lambda *a: self.dmm_fields_changed())
+        g.add(self.v_kind)
+        self.v_val = self.entry(g, 'Value', '1.234')
+        self.v_ac = self.entry(g, 'AC, V rms', '0')
+        self.v_f = self.entry(g, 'Frequency, Hz', '50')
+        self.v_shape = Adw.ComboRow(title='Shape')
+        self.v_shape.set_model(Gtk.StringList.new(['sine', 'square', 'triangle']))
+        self.v_shape.connect('notify::selected', lambda *a: self.apply_dmm())
+        g.add(self.v_shape)
+        self.v_duty = self.entry(g, 'Duty 0..1', '0.5')
+        self.v_rs = self.entry(g, 'Source resistance, ohm', '0')
+        self.v_rev = Adw.SwitchRow(title='Reversed (cathode at V)')
+        self.v_rev.connect('notify::active', lambda *a: self.apply_dmm())
+        g.add(self.v_rev)
+        self.a_kind = Adw.ComboRow(title='A / COM')
+        self.a_kinds = ['nothing', 'DC current source', 'AC current source', 'voltage source (wrong jack)']
+        self.a_kind.set_model(Gtk.StringList.new(self.a_kinds))
+        self.a_kind.connect('notify::selected', lambda *a: self.dmm_fields_changed())
+        g.add(self.a_kind)
+        self.a_val = self.entry(g, 'Value', '0.0123')
+        self.a_ac = self.entry(g, 'AC, A rms', '0')
+        self.a_f = self.entry(g, 'Frequency, Hz', '50')
+        self.a_compl = self.entry(g, 'Compliance, V', '10')
+        self.cj = self.entry(g, 'Cold junction (jacks), C', '25')
+        self.die = self.entry(g, 'HY3131 die temperature, C', '25')
+        self.die_follows = Adw.SwitchRow(title='Die temperature = cold junction')
+        self.die_follows.set_active(True)
+        self.die_follows.connect('notify::active', lambda *a: self.dmm_fields_changed())
+        g.add(self.die_follows)
+        row = Adw.ActionRow(title='Connection')
         self.dmm_spec = row
         b = Gtk.Button(label='Apply', valign=Gtk.Align.CENTER)
         b.connect('clicked', lambda *a: self.apply_dmm())
         row.add_suffix(b)
         g.add(row)
         self.dmm_cmd = Adw.EntryRow(title='HY3131 monitor command')
-        self.dmm_cmd.set_text('sysbus.hy3131 SetInput "dcv:1.234"')
+        self.dmm_cmd.set_text('sysbus.hy3131 SetInput "vsrc:1.234"')
         self.dmm_cmd.connect('entry-activated', lambda r: self.send(r.get_text()))
         g.add(self.dmm_cmd)
         page.add(g)
         self.group_dmm = g
-        self.dmm_update_subtitle()
+        # Front end: the route the firmware selected (relays, HY3131 switches), live from the state file
+        g = Adw.PreferencesGroup(title='Front end', description='relays and HY3131 route chosen by the firmware')
+        self.fe_view = FrontendView()
+        g.add(self.fe_view)
+        self.fe_row = Adw.ActionRow(title='state', subtitle='-')
+        self.fe_row.set_subtitle_lines(4)
+        g.add(self.fe_row)
+        page.add(g)
+        self.fe_state_path = os.path.join(run.OUT, 'live-frontend-%d.txt' % os.getpid())
+        self.fe_state_sent = None
+        self.fe_last = ''
+        self.dmm_fields_changed()
         # Scope input
         g = Adw.PreferencesGroup(title='Scope input', description='MCX scope jack, ScopeFeeder')
         self.wave = Adw.ComboRow(title='Waveform')
@@ -623,6 +785,7 @@ class GtkApp(Adw.Application):
         self.title.set_subtitle('%s · virtual %.2f s · %s' % (mode, vus / 1e6, state))
         if self.emu.last_reply:
             self.reply.set_subtitle(self.emu.last_reply)
+        self.fe_poll()
         return True
 
     def screenshot(self):
@@ -657,21 +820,119 @@ class GtkApp(Adw.Application):
                       'led': self.group_gen}[data]
             target.grab_focus()
 
-    def dmm_spec_text(self):
-        name, fmt, unit = self.dmm_modes[self.dmm_fn.get_selected()]
-        return fmt.format(v=self.dmm_v.get_text().strip() or '0', f=self.dmm_f.get_text().strip() or '50',
-                          dc=self.dmm_dc.get_text().strip() or '0',
-                          shape=self.dmm_shape.get_selected_item().get_string(),
-                          duty=self.dmm_duty.get_text().strip() or '0.5', cj=self.dmm_cj.get_text().strip() or '25')
+    def entry(self, group, title, text):
+        e = Adw.EntryRow(title=title)
+        e.set_text(text)
+        e.connect('entry-activated', lambda r: self.apply_dmm())
+        group.add(e)
+        return e
 
-    def dmm_update_subtitle(self):
-        name, fmt, unit = self.dmm_modes[self.dmm_fn.get_selected()]
-        self.dmm_v.set_title('Value' + (' (%s)' % unit if unit else ''))
-        self.dmm_spec.set_subtitle('SetInput "%s"' % self.dmm_spec_text())
+    V_DEFAULTS = {'DC voltage source': '1.234', 'AC voltage source': '0', 'resistor': '4700', 'capacitor': '100e-9',
+                  'diode': '0.65', 'thermocouple (type K)': '100', 'current source (wrong jack)': '0.001'}
+    A_DEFAULTS = {'DC current source': '0.0123', 'AC current source': '0', 'voltage source (wrong jack)': '0.5'}
+
+    def dmm_fields_changed(self):
+        """Show only the fields of the chosen sources (with a typical value when the kind changes), then apply."""
+        vk = self.v_kinds[self.v_kind.get_selected()]
+        ak = self.a_kinds[self.a_kind.get_selected()]
+        if vk != getattr(self, 'last_vk', vk) and vk in self.V_DEFAULTS:
+            self.v_val.set_text(self.V_DEFAULTS[vk])
+        if ak != getattr(self, 'last_ak', ak) and ak in self.A_DEFAULTS:
+            self.a_val.set_text(self.A_DEFAULTS[ak])
+        self.last_vk, self.last_ak = vk, ak
+        src = vk in ('DC voltage source', 'AC voltage source', 'current source (wrong jack)')
+        self.v_val.set_visible(vk not in ('nothing', 'short'))
+        self.v_val.set_title({'DC voltage source': 'DC, V', 'AC voltage source': 'DC offset, V', 'resistor': 'Resistance, ohm',
+                              'capacitor': 'Capacitance, F', 'diode': 'Forward voltage, V',
+                              'thermocouple (type K)': 'Hot junction, C', 'current source (wrong jack)': 'DC, A'}.get(vk, 'Value'))
+        self.v_ac.set_visible(vk == 'AC voltage source')
+        self.v_f.set_visible(vk == 'AC voltage source')
+        self.v_shape.set_visible(vk == 'AC voltage source')
+        self.v_duty.set_visible(vk == 'AC voltage source' and self.v_shape.get_selected() == 1)
+        self.v_rs.set_visible(src and vk != 'current source (wrong jack)')
+        self.v_rev.set_visible(vk == 'diode')
+        self.a_val.set_visible(ak != 'nothing')
+        self.a_val.set_title({'DC current source': 'DC, A', 'AC current source': 'DC offset, A',
+                              'voltage source (wrong jack)': 'DC, V'}.get(ak, 'Value'))
+        self.a_ac.set_visible(ak == 'AC current source')
+        self.a_f.set_visible(ak == 'AC current source')
+        self.a_compl.set_visible(ak in ('DC current source', 'AC current source'))
+        self.die.set_visible(not self.die_follows.get_active())
+        self.apply_dmm()
+
+    @staticmethod
+    def num(entry, default):
+        t = entry.get_text().strip().replace(',', '.')
+        try:
+            float(t)
+            return t
+        except ValueError:
+            return default
+
+    def dmm_spec_text(self):
+        vk = self.v_kinds[self.v_kind.get_selected()]
+        ak = self.a_kinds[self.a_kind.get_selected()]
+        parts = ['open']
+        v = self.num(self.v_val, '0')
+        f = self.num(self.v_f, '50')
+        shape = self.v_shape.get_selected_item().get_string()
+        if vk == 'DC voltage source':
+            parts.append('vsrc:%s,rs=%s' % (v, self.num(self.v_rs, '0')))
+        elif vk == 'AC voltage source':
+            parts.append('vsrc:%s,ac=%s,f=%s,shape=%s,duty=%s,rs=%s' % (
+                v, self.num(self.v_ac, '0'), f, shape, self.num(self.v_duty, '0.5'), self.num(self.v_rs, '0')))
+        elif vk == 'resistor':
+            parts.append('r:%s' % v)
+        elif vk == 'capacitor':
+            parts.append('c:%s' % v)
+        elif vk == 'diode':
+            parts.append('diode:%s%s' % (v, ',rev=1' if self.v_rev.get_active() else ''))
+        elif vk == 'thermocouple (type K)':
+            parts.append('tc:%s' % v)
+        elif vk == 'short':
+            parts.append('r:0')
+        elif vk == 'current source (wrong jack)':
+            parts.append('isrcv:%s' % v)
+        a = self.num(self.a_val, '0')
+        if ak == 'DC current source':
+            parts.append('isrc:%s,compl=%s' % (a, self.num(self.a_compl, '10')))
+        elif ak == 'AC current source':
+            parts.append('isrc:%s,ac=%s,f=%s,compl=%s' % (a, self.num(self.a_ac, '0'), self.num(self.a_f, '50'), self.num(self.a_compl, '10')))
+        elif ak == 'voltage source (wrong jack)':
+            parts.append('avsrc:%s' % a)
+        parts.append('cj:%s' % self.num(self.cj, '25'))
+        parts.append('die:none' if self.die_follows.get_active() else 'die:%s' % self.num(self.die, '25'))
+        return ';'.join(parts)
 
     def apply_dmm(self):
-        self.dmm_update_subtitle()
-        self.send('sysbus.hy3131 SetInput "%s"' % self.dmm_spec_text())
+        spec = self.dmm_spec_text()
+        self.dmm_spec.set_subtitle(spec)
+        self.send('sysbus.hy3131 SetInput "%s"' % spec)
+
+    def fe_poll(self):
+        """Front-end state: ask the peripheral to write its state file once, then read it."""
+        if not self.emu or not self.emu.alive():
+            return
+        if self.fe_state_sent is not self.emu:
+            self.fe_state_sent = self.emu
+            self.send('sysbus.hy3131 StateFile @%s' % self.fe_state_path)
+            self.apply_dmm()
+            return
+        try:
+            with open(self.fe_state_path) as f:
+                line = f.read().strip()
+        except OSError:
+            return
+        if line and line != self.fe_last:
+            self.fe_last = line
+            st = parse_state(line)
+            self.fe_view.update(st)
+            self.fe_row.set_subtitle('%s  shunt %s  PC7 %s · %s mode %s range %s · AD1 %s AD2 %s AD3 %s LPF %s RMS %s CTR %s · '
+                                     'Vjack %s V  Ijack %s A%s' % (
+                                         'V/A path' if st.get('pa') == '0' else 'Ω/mV network', st.get('shunt'), st.get('pc7'),
+                                         st.get('role'), st.get('mode'), st.get('range'), st.get('ad1'), st.get('ad2'), st.get('ad3'),
+                                         st.get('lpf'), st.get('rms'), st.get('ctr'), st.get('vjack'), st.get('ijack'),
+                                         ('  node %s V' % st['vx']) if 'vx' in st else ''))
 
     def apply_wave(self):
         shape = self.wave.get_selected_item().get_string()

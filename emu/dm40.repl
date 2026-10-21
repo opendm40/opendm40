@@ -268,6 +268,8 @@ touch: I2C.CST_Touch @ i2c3 0x5A
 hy3131: Miscellaneous.HY3131 @ sysbus 0x7FFF1000
     portC: gpioPortC
     portD: gpioPortD
+    portA: gpioPortA
+    portE: gpioPortE
 
 // ADC0 (battery PC5 = channel 15, internal temperature channel 16)
 adc1: Analog.SimpleADC @ sysbus 0x40012000
