@@ -541,3 +541,10 @@ Emulator (emu/):
       The +1 digit stays the small half-size glyph. Functions without a rate choice: low beep + toast.
       Not added: a 6000-count / ~40/s step (OSR 0x13, the logger's measured 38/s): its noise on AD1 is not
       measured (dmm.rs: noise floor open); add it after a device noise run.
+- [x] UF-30 bargraph restyled (owner: "unclear what it is"): a classic segmented DMM bargraph: 50 segments
+      (2 % each; bipolar 25 per side from a centre zero), the 10 % marks as full-height segments (ruler), lit
+      segments orange, all red + a red "OL" marker on overload, F14 scale labels under it: 0 / half / full
+      scale with unit (bipolar -FS / 0 / +FS unit), full scale = the range's (1000 V / 10 A where limited).
+      Rows 147..172 (3 px from the F78 ink and the chart frame), probed for the ui-render ink check;
+      incremental update repaints only the changed segments (98..150 bus words / update; bargraph-test:
+      every update equals a fresh draw).

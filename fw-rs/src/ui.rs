@@ -192,12 +192,22 @@ pub struct DmmView {
     /// `draw_static`.
     pub bar_on: bool,
     bar: crate::bargraph::Bar,
+    /// Bargraph scale as last labelled: (full scale bits, unit, bipolar),
+    /// None = labels to draw; and the overload marker as last drawn.
+    bar_scale: Option<(u32, &'static str, bool)>,
+    bar_ol: Option<bool>,
 }
 
-/// Bargraph area = the history row (5 boxes 5..473 x 153..171): track
-/// 8..471 x 154..167, ticks 168..171. The F78 digits' ink ends at 146
-/// (>= 3 px above), the chart frame starts at 176.
-pub const BAR_RECT: (u16, u16, u16, u16) = (8, 154, 464, 18);
+/// Bargraph geometry in the history row's place (rows 150..172 between the
+/// F78 ink, which ends at 146, and the chart frame at 176):
+///   segments  12..410 x 150..158 (50 x 8 px pitch, bargraph.rs)
+///   labels    F14 row 161..172 under the scale: 0 / half / full scale
+///             (bipolar: -FS / 0 / +FS), the full scale with its unit
+///   OL marker 418..472 x 147..160 (red "OL" on overload)
+pub const BAR_RECT: (u16, u16, u16, u16) = (12, 150, 400, 9);
+const BAR_LBL_Y: i16 = 161;
+const BAR_LBL_H: i16 = 12;
+const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
 
 /// Bottom button `i` (0..5) with its stock glyphs, in the box (x, y, 76, 40)
 /// (DMM page: stock (2 + 80 i, BTN_Y); combined view: the function band).
@@ -299,7 +309,60 @@ impl DmmView {
             aux_unit: [None; 2],
             bar_on: true,
             bar: crate::bargraph::Bar::new(BAR_RECT.0, BAR_RECT.1, BAR_RECT.2, BAR_RECT.3, false),
+            bar_scale: None,
+            bar_ol: None,
         }
+    }
+
+    /// Bargraph scale labels for full scale `fs` in `unit` (empty = none,
+    /// temperature).
+    fn bar_labels(&self, fs: f32, unit: &str) {
+        lcd::fill_rect(8, BAR_LBL_Y as u16, 468, BAR_LBL_H as u16, BG);
+        if unit.is_empty() {
+            return;
+        }
+        let num = |b: &mut [u8; 16], v: f32| -> usize {
+            let mut t = [0u8; 16];
+            let s = crate::dmm::format(&mut t, v, 2);
+            let s = if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.') } else { s };
+            let n = s.len().min(16);
+            b[..n].copy_from_slice(&s.as_bytes()[..n]);
+            n
+        };
+        let mut u = crate::scope_ui::Txt::new("");
+        ascii_unit(unit, &mut u);
+        let (bx, mid, end) = (self.bar.x as i16, self.bar.mid_x() as i16, self.bar.end_x() as i16);
+        // Left / centre / right labels.
+        let mut l = [0u8; 16];
+        let mut c = [0u8; 16];
+        let mut r = [0u8; 24];
+        let mut v = [0u8; 16];
+        let k = num(&mut v, fs);
+        let (nl, nc, mut nr);
+        if self.bar.bipolar {
+            l[0] = b'-';
+            l[1..1 + k].copy_from_slice(&v[..k]);
+            nl = 1 + k;
+            c[0] = b'0';
+            nc = 1;
+            r[0] = b'+';
+            r[1..1 + k].copy_from_slice(&v[..k]);
+            nr = 1 + k;
+        } else {
+            l[0] = b'0';
+            nl = 1;
+            nc = num(&mut c, fs / 2.0);
+            r[..k].copy_from_slice(&v[..k]);
+            nr = k;
+        }
+        sf::label(sf::F14, rect(bx, BAR_LBL_Y, 80, BAR_LBL_H), core::str::from_utf8(&l[..nl]).unwrap_or(""), DIM, BG, 1, 1);
+        let us = u.as_str();
+        r[nr] = b' ';
+        let k = us.len().min(24 - nr - 1);
+        r[nr + 1..nr + 1 + k].copy_from_slice(&us.as_bytes()[..k]);
+        nr += 1 + k;
+        sf::label(sf::F14, rect(mid - 40, BAR_LBL_Y, 81, BAR_LBL_H), core::str::from_utf8(&c[..nc]).unwrap_or(""), DIM, BG, 8, 1);
+        sf::label(sf::F14, rect(end - 120, BAR_LBL_Y, 120, BAR_LBL_H), core::str::from_utf8(&r[..nr]).unwrap_or(""), DIM, BG, 4, 1);
     }
 
     /// UF-30: feed the bargraph with a raw (un-smoothed, pre-REL) reading;
@@ -309,7 +372,19 @@ impl DmmView {
         if !self.bar_on {
             return;
         }
-        let f = if r.mode == 15 { Some(0.0) } else { crate::bargraph::frac(r.main.v, r.main.dec, r.main.ol) };
+        let temp = r.mode == 15;
+        let fs = crate::bargraph::full_scale(r.main.dec, r.main.unit);
+        let key = if temp { (0, "", false) } else { (fs.to_bits(), r.main.unit, self.bar.bipolar) };
+        if self.bar_scale != Some(key) {
+            self.bar_scale = Some(key);
+            self.bar_labels(fs, key.1);
+        }
+        let f = if temp { Some(0.0) } else { crate::bargraph::frac(r.main.v, fs, r.main.ol) };
+        let ol = f.is_none();
+        if self.bar_ol != Some(ol) {
+            self.bar_ol = Some(ol);
+            sf::label(sf::F14, BAR_OL, if ol { "OL" } else { "" }, 0xF800, BG, 1, 1);
+        }
         self.bar.update(f);
     }
 
@@ -321,6 +396,8 @@ impl DmmView {
         if self.bar_on {
             self.bar.bipolar = matches!(mode, 1 | 3 | 7..=9) && !acdc;
             self.bar.draw_static(BG);
+            self.bar_scale = None;
+            self.bar_ol = None;
         } else {
             for i in 0..5i16 {
                 sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
