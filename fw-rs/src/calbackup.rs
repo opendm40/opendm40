@@ -1,12 +1,26 @@
-//! Calibration / boot-data backup to the SPI-flash FAT16 volume (the USB
-//! disk), so the owner always has a copy of the unit's irreplaceable data on
-//! the PC side (docs/user-feedback.md UF-20), enough for a full restore after
-//! an SWD mass erase: ROMBOOT.BIN + LOADER.BIN + CALIB.BIN written back to
-//! their addresses, plus any firmware (stock update file through the loader,
-//! or fw-rs native), give a working unit again.
+//! Write-once safety copy of the unit's irreplaceable data on the SPI-flash
+//! FAT16 volume (the USB disk, LUN 0): CALIB.BIN, BOOTDATA.BIN and UID.BIN,
+//! each written only when the root has no entry of that name, never
+//! overwritten, never deleted.
 //!
-//! Files (root directory, 8.3 names, exact raw bytes; none matches the
-//! FS-loader's `dm40*.bin` pattern). Bit i of `written` / `conflict` = row i:
+//! Why on the SPI disk at all: everything else is served read-only from the
+//! MCU memory on the second USB LUN (vdisk.rs: CALIB, BOOTDATA, UID,
+//! OPTBYTES, OTP, ROMBOOT, LOADER, BACKUP.TXT, FIRMWARE.BIN, always current,
+//! no disk writes). But that volume is generated from the internal flash, and
+//! the one recovery path for a unit whose flash is unusable, an SWD / BOOT0
+//! session with read protection level 1, can only lift RDP by a MASS ERASE of
+//! the whole internal flash, the calibration (0x080C0000) and the UID-bound
+//! loader data (0x080A4000) included. The SPI flash is a separate chip and
+//! survives that, so one copy of the calibration has to live there before it
+//! is needed (docs/user-feedback.md UF-20; docs/native-boot.md "Calibration
+//! safety copy"). Write-once: the first copy is the unit's factory state
+//! (or the state of the first fw-rs boot); a later boot never replaces it
+//! with whatever the flash holds then (e.g. a corrupted or foreign record),
+//! the owner deletes it to have it made again.
+//!
+//! Files (root directory, 8.3 names, exact raw bytes; bit i of `written` /
+//! `conflict` / `differs` = row i, = the first rows of `FILES`, which
+//! vdisk.rs serves in full):
 //!   0 CALIB.BIN     0x080C0000   4096  settings + calibration record (sector 10).
 //!                   The stock record is 800 bytes (u16 crc, u16 ~crc, u32
 //!                   version 1, data; calibration struct at +0x168, hy3131_v2_6.h);
@@ -17,94 +31,42 @@
 //!                   device-specific block starts at 0x080A4000 (2 KiB dump
 //!                   dumps/dump_boot_data_uid.bin; the first 0x14 bytes are data,
 //!                   b[0x10..0x13] = the version bytes BT command 02 reports).
-//!                   A subset of LOADER.BIN (its +0x4000..+0x8000), kept for
-//!                   backward compatibility: earlier builds wrote it, calbackup
-//!                   never deletes, so dropping it from this list would leave a
-//!                   copy that goes stale when the loader rewrites that block.
-//!   2 UID.BIN       0x1FFF7A10     12  96-bit unique ID.
-//!   3 OPTBYTES.BIN  0x1FFFC000     16  option bytes.
-//!   4 OTP.BIN       0x1FFF7800    528  OTP area + lock bytes (0xFF on this unit).
-//!   5 ROMBOOT.BIN   0x08000000  16384  primary bootloader (sector 0).
-//!   6 LOADER.BIN    0x080A0000 131072  the whole update-loader sector 9, incl.
-//!                   the UID-bound data (non-0xFF run 0x080A4000..0x080AE6D3 on
-//!                   this unit, so BOOTDATA.BIN alone does not cover all of it).
-//!   7 BACKUP.TXT                       name, address, size, CRC-32 of each file
-//!                                      + restore note (deterministic: no time,
-//!                                      no counters); also the CRC-first index.
-//!   8 _DM40PRV.BIN  0x08004000  12+len the running firmware's update file,
-//!                   regenerated from flash (`FwFile`), byte-identical to the
-//!                   dm40*.bin the loader installed (and deleted). Only when the
-//!                   marker at 0x08008000 is a valid update header. Rename it to
-//!                   DM40PRV.BIN + power-cycle / DBG:UPDATE to reinstall it.
-//! New files are appended (bit indices of the older ones never change); 16 is
-//! the limit of the u16 masks. Internal flash and the system areas are only
-//! READ. Disk: ~430 KiB (~107 clusters of 4 KiB with fw-rs) of the 16 MiB volume.
-//!
-//! fatren (runs first) renames an installed dm40*.bin to _DM40PRV.BIN, deleting
-//! the old one: that file is the same firmware (header == marker), so this
-//! module finds it equal and only re-stamps its entry once; no fight. The
-//! regenerated file has 0xFF in the 12-byte marker gap (body 0x4000..0x400B),
-//! as build.sh and the vendor's file do; a file with other bytes there would
-//! be rewritten once.
+//!   2 UID.BIN       0x1FFF7A10     12  96-bit unique ID (says which unit the
+//!                   loader data belongs to).
+//! The other FILES rows (OPTBYTES, OTP, ROMBOOT, LOADER) are only on the
+//! information volume now. Earlier builds wrote all of them + BACKUP.TXT +
+//! _DM40PRV.BIN to the SPI disk at every boot (compare-first, rewritten on
+//! change); copies left by those builds are not touched (not updated, not
+//! deleted: the owner's files). fatren.rs still renames an installed
+//! dm40*.bin to _DM40PRV.BIN (loader re-install protection, not a backup).
 //!
 //! When: every normal boot, before USB exists (the host cannot have the volume
 //! mounted): native from native.rs `pre_main` (after board init and fatren),
 //! the RAM build from main.rs `rust_start` before `main()`. Cargo feature
-//! `calbackup` (implied by native; off in the RAM images for CODE space:
-//! `./build.sh --features calbackup` currently does not fit, see Cargo.toml).
-//! In the RAM build
-//! the stock firmware may have had its own USB disk mounted on the host just
-//! before the BT load; fw-rs comes back as a different USB device, so the
-//! host re-reads the volume.
+//! `calbackup` (implied by native). Cost of a boot with the copy present: the
+//! boot sector, the root block, FAT 1 and the six data blocks of the three
+//! files are read (the files are compared with the flash: `differs`, for
+//! DBG:BOOT?), nothing is written. First boot: 6 data blocks + 2 FAT blocks
+//! + 1 root block written.
 //!
-//! CRC-first (boot backup only, `quick_trust`): BACKUP.TXT on the disk is read
-//! once; a file whose exact line there (name, address, size, CRC-32 of the
-//! source NOW) is present, and whose entry has that size, our write stamp and a
-//! well-formed chain, is not read at all. Unchanged boot = 4 block reads (boot
-//! sector, root, FAT 1, BACKUP.TXT). NOT detected: a data block changed in
-//! place without a size / chain / stamp change; delete BACKUP.TXT to force the
-//! full compare of every file on the next boot.
-//!
-//! Wear: every other file is compared with its source by reading it (directory
-//! entry size + whole cluster chain + contents). Equal => nothing is written
-//! (only a foreign write stamp is replaced by ours, once). Only a missing or
-//! different file is (re)written; there is only ever one copy per name (no
-//! versions).
-//!
-//! Write order for the files that need it (one pass each, so a power loss
-//! anywhere leaves at worst lost clusters, never a live entry on free or
-//! half-written clusters, never two entries with the same name):
-//!   1. allocate NEW clusters first-fit from FAT 1 (copy-on-write: the old
-//!      chain stays intact and referenced until step 4);
+//! Write order (one pass, so a power loss anywhere leaves at worst lost
+//! clusters, never a live entry on free or half-written clusters):
+//!   1. allocate clusters first-fit from FAT 1;
 //!   2. write the data blocks (read, overlay, write, read back);
-//!   3. link the new chains (EOC at the end) in every FAT copy, one write per
-//!      touched FAT block and copy (0x0000 -> link needs an erase, so batched);
-//!   4. directory entries: new start cluster + size (+ write date, archive
-//!      bit), one write per touched root block for all files together;
-//!   5. free the old chains in every FAT copy (only clears bits: programmed
-//!      without erase), only if they were well formed (exact length, valid
-//!      links, EOC) - a broken old chain is left as lost clusters rather than
-//!      risk freeing clusters of another file;
-//!   6. re-read every written file through its new entry and compare.
+//!   3. link the chains (EOC at the end) in every FAT copy, one write per
+//!      touched FAT block and copy;
+//!   4. directory entries (start cluster, size, date, archive bit), one write
+//!      per touched root block;
+//!   5. re-read every written file through its new entry and compare.
 //! Every block write is verified by a read-back. The volume is not touched
 //! unless fatren::parse_bpb accepts it (FAT16, 4096-byte sectors = device
-//! block, sane geometry). A power loss during the erase of a FAT or root block
-//! can still damage that block: a property of this NOR-backed FAT (host writes
-//! have the same window); the steps above keep that to at most 2 x FAT blocks
-//! (both copies, one after the other) + 1 root block per changed boot.
+//! block, sane geometry).
 //!
-//! Time (measured with the old 3.125 MHz SPI clock; spiflash.rs now runs
-//! 12.5 MHz, block reads ~4x faster): unchanged = 4 block reads (~13 ms each
-//! at 3.125 MHz polled SPI clock) + CRC-32 over ~165 KiB of sources and the ~250 KiB firmware file
-//! (nibble table) ~= 0.1 s (DBG:BOOT? CALMS; was ~0.65 s reading 45 data
-//! blocks). Writes: empty disk ~107 blocks (~10 s), each firmware update
-//! _DM40PRV.BIN + BACKUP.TXT (~62 blocks, ~6 s), a loader update ~3 s. The
-//! FWDGT is fed between blocks (wdt::kick_if_feeding; spiflash feeds during
-//! erases).
-//!
-//! The same writer (compare, allocate, data, link, entry, free, re-read)
-//! also stores screenshots (screenshot.rs): `write_file` with a streaming
-//! `Source` instead of a byte slice, and `free_number` for the next S%03u.BMP.
+//! The same writer also keeps a general `write_file` (compare, new chain,
+//! entry switch, old chain freed, re-read; copy-on-write) and the helpers the
+//! on-device writers use (screenshot.rs, csvlog.rs, gallery.rs: `scratch`,
+//! `numbered_name`, `free_number`, `crc32_upd`). `FwFile` (the running
+//! firmware as its update file) is vdisk.rs's FIRMWARE.BIN.
 //!
 //! Host test: tools/fatren-test/run.sh.
 
@@ -114,22 +76,17 @@ use crate::fatren::{free_chain, le16, le32, parse_bpb, sfn_is, verify, Vol};
 use crate::msc::BlockDevice;
 
 const BLK: usize = 4096;
-/// Most clusters one run allocates: all backup files on an empty disk = 46
-/// + the largest firmware update file (12 + 0x9C000 bytes = 157 clusters);
-/// a 480x320 screenshot is 307266 bytes = 76 clusters.
-const MAX_NEW: usize = 210;
+/// Most clusters one run allocates (the safety copy: 6; `write_file` up to
+/// the largest firmware update file, 12 + 0x9C000 bytes = 157 clusters).
+const MAX_NEW: usize = 160;
 /// Root slots per 4 KiB block.
 const PER: u32 = (BLK / 32) as u32;
 /// Write date 2026-10-13 (FAT: (year - 1980) << 9 | month << 5 | day), time 0.
-/// Constant (no RTC): a varying date would make every rewrite differ.
+/// Constant (no RTC).
 const DATE: u16 = (46 << 9) | (10 << 5) | 13;
-/// Directory entry bytes 0x16..0x1A (write time, write date) as this writer
-/// sets them: time 0, DATE. A host that modifies a file sets its own stamp,
-/// which is how the CRC-first check (`quick_trust`) notices host edits.
-const STAMP: u32 = (DATE as u32) << 16;
 
-/// The binary files: 8.3 name, source address, length.
-/// Append only (bit i of the masks = entry i; BACKUP.TXT is bit FILES.len()).
+/// The regions: 8.3 name, source address, length. vdisk.rs serves all of
+/// them; the first `SAFE` are also the write-once copy on the SPI disk.
 pub const FILES: [([u8; 11], u32, u32); 7] = [
     (*b"CALIB   BIN", 0x080C_0000, 4096),
     (*b"BOOTDATABIN", 0x080A_4000, 16384),
@@ -139,19 +96,11 @@ pub const FILES: [([u8; 11], u32, u32); 7] = [
     (*b"ROMBOOT BIN", 0x0800_0000, 16384),
     (*b"LOADER  BIN", 0x080A_0000, 131072),
 ];
-const TXT: [u8; 11] = *b"BACKUP  TXT";
-/// The running firmware's update file (bit FW_BIT), see `FwFile`. Same name
-/// fatren gives an installed dm40*.bin it renames.
-pub const FW_NAME: [u8; 11] = crate::fatren::BACKUP;
-/// Bit of BACKUP.TXT and of the firmware file in `written` / `conflict`.
-pub const TXT_BIT: usize = FILES.len();
-pub const FW_BIT: usize = FILES.len() + 1;
-/// FILES + BACKUP.TXT + _DM40PRV.BIN.
-pub const N: usize = FILES.len() + 2;
-const _: () = assert!(N <= 16, "written / conflict are u16 bit masks");
-/// BACKUP.TXT buffer (the text is ~1.1 KiB with the firmware line).
-const TXT_MAX: usize = 2048;
-const _: () = assert!(TXT_MAX <= BLK, "BACKUP.TXT must fit one block for quick_trust");
+/// FILES[..SAFE] = CALIB.BIN, BOOTDATA.BIN, UID.BIN: the safety copy.
+pub const SAFE: usize = 3;
+/// Most files one writer run handles.
+const N: usize = FILES.len();
+const _: () = assert!(N <= 16, "written / conflict / differs are u16 bit masks");
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
@@ -160,9 +109,10 @@ pub enum Status {
     NoMedium,
     /// Boot sector is not the expected FAT16 volume; untouched.
     BadBpb,
-    /// Every file already equal: nothing written.
-    Unchanged,
-    /// The files in `written` were (re)written and verified.
+    /// Every file already there (safety copy: present, whatever its
+    /// contents; `write_file`: equal): nothing written.
+    Present,
+    /// The files in `written` were written and verified.
     Written,
     /// Root directory full or not enough free clusters; nothing written.
     NoSpace,
@@ -173,33 +123,32 @@ pub enum Status {
 #[derive(Clone, Copy, Debug)]
 pub struct Result {
     pub status: Status,
-    /// Bit i = file i (FILES order, then BACKUP.TXT = TXT_BIT, then
-    /// _DM40PRV.BIN = FW_BIT) (re)written, or only re-stamped (an equal file
-    /// with a foreign write stamp gets ours once, see `quick_trust`).
+    /// Bit i = file i written (it was missing).
     pub written: u16,
     /// Bit i = the name is taken by a directory / volume label: skipped.
     pub conflict: u16,
-    /// Old chains freed (clusters).
+    /// Bit i = a copy is present but differs from the source now (size or
+    /// contents; safety copy only, which keeps it): e.g. the calibration was
+    /// changed after the first copy. Informational (DBG:BOOT?).
+    pub differs: u16,
+    /// Old chains freed (clusters; `write_file` only).
     pub freed: u32,
     /// `boot()` duration in ms (DWT cycles at 200 MHz; 12.5x too low when
     /// the core runs at 16 MHz). 0 = not measured.
     pub ms: u32,
-    /// The run with the firmware file `_DM40PRV.BIN` was `NoSpace`; this is
-    /// the result of the retry without it (review 2026-10-13 M1). DBG:BOOT?
-    /// shows the status with a `_NOFW` suffix.
-    pub fw_skipped: bool,
 }
 
-static mut RESULT: Result = Result { status: Status::NotRun, written: 0, conflict: 0, freed: 0, ms: 0, fw_skipped: false };
+static mut RESULT: Result = Result { status: Status::NotRun, written: 0, conflict: 0, differs: 0, freed: 0, ms: 0 };
 
 /// Work buffers of run_inner (buf, tmp, fat) and free_number, 3 x 4 KiB, kept
 /// off the TCM stack: a screenshot calls the writer from deep in the main
 /// loop, whose frames (main ~26 KiB) leave too little of the ~38 KiB stack
 /// for three more blocks. NOLOAD SRAM (.dmabuf, as the scope record): the
 /// contents are undefined at reset and always written before they are read.
-/// One user at a time: the boot backup before main(), then the screenshot
-/// writer (screenshot.rs), which keeps blocks in it across main-loop passes
-/// while a shot is in flight (no interrupts; nothing else uses it then).
+/// One user at a time: the boot safety copy before main(), then the on-device
+/// writers (screenshot.rs, csvlog.rs, gallery.rs), which keep blocks in it
+/// across main-loop passes while a job is in flight (no interrupts; nothing
+/// else uses it then).
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut SCRATCH: [[u8; BLK]; 3] = [[0; BLK]; 3];
 
@@ -211,7 +160,7 @@ pub fn result() -> Result {
     unsafe { RESULT }
 }
 
-/// One file: 8.3 name, source address (for BACKUP.TXT), contents.
+/// One file: 8.3 name, source address, contents.
 #[derive(Clone, Copy)]
 pub struct Src<'a> {
     pub name: [u8; 11],
@@ -228,7 +177,7 @@ pub trait Source {
     /// Must return the same bytes every time (the writer reads them twice:
     /// to write and to verify).
     fn fill(&self, off: u32, buf: &mut [u8]);
-    /// CRC-32 of the whole contents (BACKUP.TXT).
+    /// CRC-32 of the whole contents (vdisk.rs BACKUP.TXT).
     fn crc(&self) -> u32 {
         let mut t = [0u8; 256];
         let mut c = !0u32;
@@ -264,7 +213,7 @@ pub const FW_BASE: u32 = 0x0800_4000;
 pub const FW_MARKER_OFF: usize = 0x4000;
 pub const FW_MAX_BODY: usize = 0x080A_0000 - 0x0800_4000;
 
-/// `_DM40PRV.BIN`: the update file of the firmware that is running,
+/// FIRMWARE.BIN (vdisk.rs): the update file of the firmware that is running,
 /// regenerated from flash, byte-identical to the dm40*.bin the FS-loader
 /// installed (which the loader deletes after a good install). Decoded file =
 /// the 12-byte header || body; the header is exactly the 12-byte record the
@@ -310,6 +259,11 @@ impl<'a> FwFile<'a> {
             return None;
         }
         Some(f)
+    }
+
+    /// The decoded 12-byte update header (= the loader record at 0x08008000).
+    pub fn header(&self) -> &[u8; 12] {
+        &self.hdr
     }
 
     /// The FS-loader hazard (dm40fw.py tail_hazard): the file's last block is
@@ -371,12 +325,48 @@ impl Source for FwFile<'_> {
     }
 }
 
-/// BACKUP.TXT as expected for this run, for the CRC-first check: the text,
-/// and each file's line in it (byte range, empty = no line).
-struct Quick<'a> {
-    text: &'a [u8],
-    lines: &'a [(u16, u16); N],
-    txt: usize,
+// --- Boot: the write-once safety copy ---------------------------------------------
+
+/// Boot entry (the RAM build and native): the safety copy of FILES[..SAFE].
+/// Never inlined: its frame is gone before main() runs (review 2026-10-13 B1).
+#[inline(never)]
+pub fn boot() {
+    if !cfg!(feature = "calbackup") {
+        return;
+    }
+    let t0 = unsafe { crate::mmio::r32(DWT_CYCCNT) };
+    let mut slices: [&[u8]; SAFE] = [&[]; SAFE];
+    for (s, &(_, addr, len)) in slices.iter_mut().zip(FILES.iter()) {
+        // Read-only views of internal flash / system memory.
+        *s = unsafe { core::slice::from_raw_parts(addr as *const u8, len as usize) };
+    }
+    static EMPTY: &[u8] = &[];
+    let mut srcs = [Src { name: [0; 11], addr: 0, data: &EMPTY }; SAFE];
+    for ((s, &(name, addr, _)), d) in srcs.iter_mut().zip(FILES.iter()).zip(slices.iter()) {
+        *s = Src { name, addr, data: d };
+    }
+    let mut disk = crate::spiflash::SpiFlash::new();
+    safe_copy(&mut disk, &srcs);
+    let cyc = unsafe { crate::mmio::r32(DWT_CYCCNT) }.wrapping_sub(t0);
+    unsafe { RESULT.ms = cyc / (crate::clock::HCLK_HZ / 1000) };
+}
+
+const DWT_CYCCNT: u32 = 0xE000_1004;
+
+/// Write each of `srcs` whose name has no root entry yet; leave every
+/// present one as it is (`differs` says which no longer equal their source).
+/// Records and returns the result.
+pub fn safe_copy(dev: &mut dyn BlockDevice, srcs: &[Src]) -> Result {
+    static EMPTY: &[u8] = &[];
+    let mut fs = [F { name: [0; 11], src: &EMPTY }; N];
+    let k = srcs.len().min(N);
+    for (f, s) in fs.iter_mut().zip(srcs[..k].iter()) {
+        *f = F { name: s.name, src: s.data };
+    }
+    let mut r = run_inner(dev, &fs[..k], true);
+    r.ms = unsafe { RESULT.ms }; // previous value; boot() stores this run's after
+    unsafe { RESULT = r };
+    r
 }
 
 /// A file for run_inner: 8.3 name + contents.
@@ -386,91 +376,12 @@ struct F<'a> {
     src: &'a dyn Source,
 }
 
-/// Boot entry: back up the internal sources and the running firmware's update
-/// file (the RAM build and native). Never inlined: its ~15 KiB frame is gone
-/// before main() runs (review 2026-10-13 B1).
-#[inline(never)]
-pub fn boot() {
-    if !cfg!(feature = "calbackup") {
-        return;
-    }
-    let t0 = unsafe { crate::mmio::r32(DWT_CYCCNT) };
-    let mut slices: [&[u8]; FILES.len()] = [&[]; FILES.len()];
-    for (s, &(_, addr, len)) in slices.iter_mut().zip(FILES.iter()) {
-        // Read-only views of internal flash / system memory.
-        *s = unsafe { core::slice::from_raw_parts(addr as *const u8, len as usize) };
-    }
-    static EMPTY: &[u8] = &[];
-    let mut srcs = [Src { name: [0; 11], addr: 0, data: &EMPTY }; FILES.len()];
-    for ((s, &(name, addr, _)), d) in srcs.iter_mut().zip(FILES.iter()).zip(slices.iter()) {
-        *s = Src { name, addr, data: d };
-    }
-    // The installed image: 0x08004000 up to the FS-loader, read-only.
-    let flash = unsafe { core::slice::from_raw_parts(FW_BASE as *const u8, FW_MAX_BODY) };
-    let fw = FwFile::from_flash(flash);
-    let mut disk = crate::spiflash::SpiFlash::new();
-    run(&mut disk, &srcs, fw.as_ref().map(|f| f as &dyn Source));
-    let cyc = unsafe { crate::mmio::r32(DWT_CYCCNT) }.wrapping_sub(t0);
-    unsafe { RESULT.ms = cyc / (crate::clock::HCLK_HZ / 1000) };
-}
-
-const DWT_CYCCNT: u32 = 0xE000_1004;
-
-/// Back up `srcs` (+ BACKUP.TXT describing them, + the firmware file `fw` if
-/// given). CRC-first: BACKUP.TXT on the disk is read once; a file whose line
-/// there (name, address, size, CRC-32 of the source NOW) is present and whose
-/// directory entry still has its size, our write stamp and a well-formed
-/// chain is not read at all (`quick_trust`). Every other file is compared in
-/// full and (re)written if different. Records and returns the result.
-///
-/// A run is all-or-nothing on space (`NoSpace`: nothing written), and the
-/// firmware file (~63 new clusters, copy-on-write) is by far the largest
-/// job: on a nearly full disk it would block every later CALIB / LOADER
-/// backup. So a `NoSpace` with `fw` is retried once without it (BACKUP.TXT
-/// then has no firmware line; an existing `_DM40PRV.BIN` is left as it is)
-/// and the result says `fw_skipped` (review 2026-10-13 M1).
-pub fn run(dev: &mut dyn BlockDevice, srcs: &[Src], fw: Option<&dyn Source>) -> Result {
-    let mut r = run_once(dev, srcs, fw);
-    if r.status == Status::NoSpace && fw.is_some() {
-        r = run_once(dev, srcs, None);
-        r.fw_skipped = true;
-    }
-    r.ms = unsafe { RESULT.ms }; // previous value; boot() stores this run's after
-    unsafe { RESULT = r };
-    r
-}
-
-/// One pass of `run` (never inlined: the BACKUP.TXT buffer is on the stack
-/// once, not once per pass).
-#[inline(never)]
-fn run_once(dev: &mut dyn BlockDevice, srcs: &[Src], fw: Option<&dyn Source>) -> Result {
-    let mut text = [0u8; TXT_MAX];
-    let mut lines = [(0u16, 0u16); N];
-    let k = srcs.len().min(TXT_BIT);
-    let n = describe(&srcs[..k], fw, &mut text, &mut lines);
-    let txt: &[u8] = &text[..n];
-    static EMPTY: &[u8] = &[];
-    let mut fs = [F { name: TXT, src: &EMPTY }; N];
-    for (f, s) in fs.iter_mut().zip(srcs[..k].iter()) {
-        *f = F { name: s.name, src: s.data };
-    }
-    fs[k] = F { name: TXT, src: &txt };
-    let mut cnt = k + 1;
-    if let Some(f) = fw {
-        // Bit FW_BIT when all FILES are given (describe numbers it k + 1 too).
-        fs[cnt] = F { name: FW_NAME, src: f };
-        cnt += 1;
-    }
-    let q = Quick { text: txt, lines: &lines, txt: k };
-    run_inner(dev, &fs[..cnt], Some(&q))
-}
-
 /// Write one file `name` (8.3, upper case) from `src` through the same
 /// ordered copy-on-write path as the backup: unchanged = nothing written; new
 /// or different = new clusters, data, FAT links, directory entry, old chain
 /// freed, re-read and compared with `src`. Does not touch `result()`.
 pub fn write_file(dev: &mut dyn BlockDevice, name: [u8; 11], src: &dyn Source) -> Result {
-    run_inner(dev, &[F { name, src }], None)
+    run_inner(dev, &[F { name, src }], false)
 }
 
 /// 8.3 name `<prefix>NNN.<ext>` (prefix 1..5 upper-case chars, NNN = `n` with
@@ -529,11 +440,10 @@ pub fn free_number(dev: &mut dyn BlockDevice, prefix: &[u8], ext: &[u8; 3]) -> O
     (0..1000u16).find(|&n| used[(n / 32) as usize] & (1 << (n % 32)) == 0)
 }
 
-// --- BACKUP.TXT ----------------------------------------------------------------
+// --- CRC-32 ----------------------------------------------------------------------
 
 /// CRC-32 (ISO-HDLC, as zlib / `crc32` / 7-Zip report it). Nibble table
-/// (64 bytes): ~4x the bit loop; ~165 KiB of sources + the firmware file
-/// (~250 KiB) at every boot.
+/// (64 bytes): ~4x the bit loop; vdisk.rs runs it over ~570 KiB at boot.
 pub fn crc32(d: &[u8]) -> u32 {
     !crc32_upd(!0, d)
 }
@@ -561,82 +471,6 @@ pub(crate) fn crc32_upd(mut c: u32, d: &[u8]) -> u32 {
         c = (c >> 4) ^ T[(c & 15) as usize];
     }
     c
-}
-
-struct W<'a> {
-    b: &'a mut [u8],
-    n: usize,
-}
-
-impl W<'_> {
-    fn s(&mut self, t: &[u8]) {
-        for &c in t {
-            if self.n < self.b.len() {
-                self.b[self.n] = c;
-                self.n += 1;
-            }
-        }
-    }
-    fn hex(&mut self, v: u32) {
-        for i in (0..8).rev() {
-            self.s(&[b"0123456789ABCDEF"[(v >> (4 * i)) as usize & 15]]);
-        }
-    }
-    fn dec(&mut self, mut v: u32) {
-        let mut t = [b' '; 7];
-        for i in (0..7).rev() {
-            t[i] = b'0' + (v % 10) as u8;
-            v /= 10;
-            if v == 0 {
-                break;
-            }
-        }
-        self.s(&t);
-    }
-    /// 8.3 name as "NAME.EXT", padded to 13.
-    fn name(&mut self, n: &[u8; 11]) {
-        let start = self.n;
-        self.s(n[..8].split(|&c| c == b' ').next().unwrap_or(&[]));
-        self.s(b".");
-        self.s(n[8..].split(|&c| c == b' ').next().unwrap_or(&[]));
-        while self.n < start + 13 {
-            self.s(b" ");
-        }
-    }
-}
-
-/// BACKUP.TXT for `srcs` (+ `fw`, numbered srcs.len() + 1). `lines[i]` = the
-/// byte range of file i's line, its leading CR LF included (so a line can
-/// only match a whole line of the disk copy).
-fn describe(srcs: &[Src], fw: Option<&dyn Source>, out: &mut [u8], lines: &mut [(u16, u16); N]) -> usize {
-    let mut w = W { b: out, n: 0 };
-    w.s(b"DM40 backup written by fw-rs at boot (only when missing or changed).\r\n");
-    w.s(b"Raw copies of internal flash / chip data; CRC-32 as zlib, 7-Zip, crc32.\r\n");
-    w.s(b"file         address     bytes  crc32");
-    let fw_src = fw.map(|f| (srcs.len() + 1, Src { name: FW_NAME, addr: FW_BASE, data: f }));
-    for (i, s) in srcs.iter().enumerate().chain(fw_src.iter().map(|(i, s)| (*i, s))) {
-        let start = w.n;
-        w.s(b"\r\n");
-        w.name(&s.name);
-        w.hex(s.addr);
-        w.s(b" ");
-        w.dec(s.data.size());
-        w.s(b"  ");
-        w.hex(s.data.crc());
-        if i < N {
-            lines[i] = (start as u16, w.n as u16);
-        }
-    }
-    w.s(b"\r\n\r\n");
-    w.s(b"Full restore after a mass erase (SWD): write ROMBOOT.BIN at 0x08000000,\r\n");
-    w.s(b"then LOADER.BIN at 0x080A0000 and CALIB.BIN at 0x080C0000, then install\r\n");
-    w.s(b"a firmware. BOOTDATA.BIN = LOADER.BIN bytes 0x4000..0x7FFF (kept for\r\n");
-    w.s(b"older copies). The loader data is bound to UID.BIN: this unit only.\r\n");
-    if fw.is_some() {
-        w.s(b"_DM40PRV.BIN = update file of the running firmware, from its flash;\r\n");
-        w.s(b"to reinstall it: rename to DM40PRV.BIN, power-cycle (or DBG:UPDATE).\r\n");
-    }
-    w.n
 }
 
 // --- FAT writer --------------------------------------------------------------------
@@ -731,95 +565,15 @@ struct Job {
     /// New clusters: cl[first..first + n].
     first: usize,
     n: usize,
-    /// Contents equal, only the entry's write stamp is set to ours (no new
-    /// clusters; start / size unchanged; nothing to free or re-read).
-    stamp_only: bool,
 }
 
-const NO_JOB: Job = Job { file: 0, slot: 0, new: false, old: 0, first: 0, n: 0, stamp_only: false };
+const NO_JOB: Job = Job { file: 0, slot: 0, new: false, old: 0, first: 0, n: 0 };
 
-/// Follow a chain of `size` bytes from `start` through FAT 1 (`fat`/`cur`
-/// one-block cache): Some(true) = well formed (exactly the clusters `size`
-/// needs, valid links, EOC at the end), Some(false) = not, None = read error.
-/// Reads FAT blocks only.
-fn chain_ok(dev: &mut dyn BlockDevice, v: &Vol, start: u32, size: u32, fat: &mut [u8; BLK], cur: &mut u32) -> Option<bool> {
-    let n = nclusters(v, size);
-    if n == 0 {
-        return Some(start == 0);
-    }
-    if n > v.clusters {
-        return Some(false);
-    }
-    let mut c = start;
-    for i in 0..n {
-        if c < 2 || c > v.clusters + 1 {
-            return Some(false);
-        }
-        let next = fat_get(dev, v, c, fat, cur)?;
-        if i + 1 == n {
-            return Some(next >= 0xFFF8);
-        }
-        c = next;
-    }
-    Some(false)
-}
-
-/// Does `hay` contain `needle`?
-fn contains(hay: &[u8], needle: &[u8]) -> bool {
-    needle.is_empty() || hay.windows(needle.len()).any(|w| w == needle)
-}
-
-/// CRC-first check (boot backup): the files that need no data read at all.
-/// Reads BACKUP.TXT's single block and FAT 1 blocks (one, normally) only.
-/// File i is trusted when ALL of:
-///   - BACKUP.TXT on the disk has the exact line this run would write for it
-///     (name, address, size, CRC-32 of the source as it is NOW), and
-///     BACKUP.TXT itself carries our write stamp and a well-formed chain;
-///   - its directory entry has that size and our write stamp (time 0, DATE;
-///     any host modification sets the host's clock) and a well-formed chain.
-/// BACKUP.TXT is trusted when it is byte-equal to this run's text (stamp,
-/// chain too). Not detected: a data block changed in place without a size,
-/// chain or stamp change (flash bit rot, a raw sector writer); deleting
-/// BACKUP.TXT forces the full compare of every file on the next boot.
-#[inline(never)]
-#[allow(clippy::too_many_arguments)]
-fn quick_trust(dev: &mut dyn BlockDevice, v: &Vol, files: &[F], found: &[Option<(u32, u32, u32, u32)>; N], q: &Quick, fat: &mut [u8; BLK], buf: &mut [u8; BLK]) -> u16 {
-    let Some((_, tstart, tsize, tstamp)) = found.get(q.txt).copied().flatten() else {
-        return 0;
-    };
-    let mut cur = u32::MAX;
-    if tsize == 0 || tsize as usize > BLK || tstamp != STAMP || chain_ok(dev, v, tstart, tsize, fat, &mut cur) != Some(true) {
-        return 0;
-    }
-    if !dev.read_block(lba_of(v, tstart), buf) {
-        return 0;
-    }
-    let disk = &buf[..tsize as usize];
-    let mut ok = 0u16;
-    if disk == q.text {
-        ok |= 1 << q.txt;
-    }
-    for (i, f) in files.iter().enumerate() {
-        let (a, b) = q.lines[i];
-        if i == q.txt || a == b {
-            continue;
-        }
-        let Some((_, start, size, stamp)) = found[i] else {
-            continue;
-        };
-        if size == f.src.size()
-            && stamp == STAMP
-            && contains(disk, &q.text[a as usize..b as usize])
-            && chain_ok(dev, v, start, size, fat, &mut cur) == Some(true)
-        {
-            ok |= 1 << i;
-        }
-    }
-    ok
-}
-
-fn run_inner(dev: &mut dyn BlockDevice, files: &[F], quick: Option<&Quick>) -> Result {
-    let mut res = Result { status: Status::Error, written: 0, conflict: 0, freed: 0, ms: 0, fw_skipped: false };
+/// The writer. `missing_only` (safety copy): a file whose name is present is
+/// never rewritten, only compared (`differs`); else (`write_file`) a present
+/// file that differs is replaced copy-on-write and its old chain freed.
+fn run_inner(dev: &mut dyn BlockDevice, files: &[F], missing_only: bool) -> Result {
+    let mut res = Result { status: Status::Error, written: 0, conflict: 0, differs: 0, freed: 0, ms: 0 };
     if !dev.present() || dev.block_size() as usize != BLK {
         res.status = Status::NoMedium;
         return res;
@@ -833,9 +587,8 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], quick: Option<&Quick>) -> R
         return res;
     };
 
-    // Root scan: the live entry of each name (slot, start, size, write
-    // stamp), free slots.
-    let mut found: [Option<(u32, u32, u32, u32)>; N] = [None; N];
+    // Root scan: the live entry of each name (slot, start, size), free slots.
+    let mut found: [Option<(u32, u32, u32)>; N] = [None; N];
     let mut free = [0u32; N];
     let mut nfree = 0usize;
     'scan: for blk in 0..v.root_blocks {
@@ -874,18 +627,12 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], quick: Option<&Quick>) -> R
                     if e[11] & 0x18 != 0 {
                         res.conflict |= 1 << i; // a directory / label of that name
                     } else {
-                        found[i] = Some((idx, le16(e, 0x1A), le32(e, 0x1C), le32(e, 0x16)));
+                        found[i] = Some((idx, le16(e, 0x1A), le32(e, 0x1C)));
                     }
                 }
             }
         }
     }
-
-    // CRC-first (boot backup only): files proven unchanged without reading them.
-    let trusted = match quick {
-        Some(q) => quick_trust(dev, &v, files, &found, q, fat, buf),
-        None => 0,
-    };
 
     // Which files differ? Plan new chains for them.
     let mut jobs = [NO_JOB; N];
@@ -893,23 +640,19 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], quick: Option<&Quick>) -> R
     let mut need = 0usize;
     let mut nnew = 0usize;
     for (i, f) in files.iter().enumerate() {
-        if (res.conflict | trusted) & (1 << i) != 0 {
+        if res.conflict & (1 << i) != 0 {
             continue;
         }
         let mut j = Job { file: i, first: need, n: nclusters(&v, f.src.size()) as usize, ..NO_JOB };
         match found[i] {
-            Some((slot, start, size, stamp)) => {
+            Some((slot, start, size)) => {
                 let Some((wf, eq)) = walk(dev, &v, start, size, f.src, fat, buf, tmp) else {
                     return res;
                 };
-                if eq {
-                    // Equal but stamped by someone else (a host copy, fatren's
-                    // rename of the installed dm40*.bin): give it our stamp
-                    // once, so the next boots trust it without a full read.
-                    if quick.is_some() && stamp != STAMP {
-                        jobs[nj] = Job { file: i, slot, stamp_only: true, ..NO_JOB };
-                        nj += 1;
-                    }
+                if !eq {
+                    res.differs |= 1 << i;
+                }
+                if eq || missing_only {
                     continue;
                 }
                 j.slot = slot;
@@ -930,7 +673,7 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], quick: Option<&Quick>) -> R
         nj += 1;
     }
     if nj == 0 {
-        res.status = Status::Unchanged;
+        res.status = Status::Present;
         return res;
     }
     if need > MAX_NEW {
@@ -1017,13 +760,8 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], quick: Option<&Quick>) -> R
         }
     }
 
-    // 4. Directory entries, one write per touched root block. The block
-    // holding BACKUP.TXT's entry goes last: a power loss between root-block
-    // writes must not leave the new BACKUP.TXT (new CRC lines) next to an
-    // old entry of a same-size file, which quick_trust would then accept.
-    let txt_blk = quick.and_then(|q| jobs[..nj].iter().find(|j| j.file == q.txt)).map(|j| j.slot / PER);
-    let last = txt_blk.unwrap_or(u32::MAX);
-    for blk in (0..v.root_blocks).filter(|&b| b != last).chain(txt_blk) {
+    // 4. Directory entries, one write per touched root block.
+    for blk in 0..v.root_blocks {
         let (lo, hi) = (blk * PER, blk * PER + PER);
         if !jobs[..nj].iter().any(|j| j.slot >= lo && j.slot < hi) {
             continue;
@@ -1045,11 +783,9 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], quick: Option<&Quick>) -> R
             e[0x14..0x16].fill(0); // cluster high (FAT32 only)
             e[0x16..0x18].fill(0); // write time
             e[0x18..0x1A].copy_from_slice(&DATE.to_le_bytes()); // write date
-            if !j.stamp_only {
-                let start = if j.n == 0 { 0 } else { cl[j.first] as u16 };
-                e[0x1A..0x1C].copy_from_slice(&start.to_le_bytes());
-                e[0x1C..0x20].copy_from_slice(&files[j.file].src.size().to_le_bytes());
-            }
+            let start = if j.n == 0 { 0 } else { cl[j.first] as u16 };
+            e[0x1A..0x1C].copy_from_slice(&start.to_le_bytes());
+            e[0x1C..0x20].copy_from_slice(&files[j.file].src.size().to_le_bytes());
         }
         if !(dev.write_block(lba, &buf[..]) && verify(dev, lba, buf, tmp)) {
             return res;
@@ -1072,7 +808,7 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], quick: Option<&Quick>) -> R
     }
 
     // 6. Read every written file back through its new chain.
-    for j in jobs[..nj].iter().filter(|j| !j.stamp_only) {
+    for j in &jobs[..nj] {
         let d = files[j.file].src;
         let start = if j.n == 0 { 0 } else { cl[j.first] };
         match walk(dev, &v, start, d.size(), d, fat, buf, tmp) {

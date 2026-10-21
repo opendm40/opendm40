@@ -270,7 +270,7 @@ BOOT_POS = ['rstsck', 'rstsck_after', 'mode', 'reason', 'clock', 'last', 'hold_m
             'marker_w0', 'marker_w1', 'marker_w2', 'marker',
             'crash_word', 'healthy', 'fmc_last']
 BOOT_LABELS = {'PD6': ['moder', 'pupd', 'idr'], 'STAGED': ['n'],
-               'CALBK': ['status', 'written', 'conflict', 'freed'], 'STACK': ['used', 'size'],
+               'CALBK': ['status', 'written', 'conflict', 'differs'], 'STACK': ['used', 'size'],
                'CALMS': ['ms'], 'SPICLK': ['div', 'check']}
 # spiflash.rs ClockCheck (DBG:BOOT? SPICLK,<div>,<check>).
 SPICLK_CHECK = {'OK': '/4 (12.5 MHz) read block 0 + FAT block equal to /16 twice',
@@ -281,9 +281,16 @@ SPICLK_CHECK = {'OK': '/4 (12.5 MHz) read block 0 + FAT block equal to /16 twice
                 'DIFF2': '2nd /4 read DIFFERED from /16: fell back to /16',
                 'NOTRUN': 'no SpiFlash created yet'}
 RST_FLAGS = [(31, 'LP'), (30, 'WWDGT'), (29, 'FWDGT'), (28, 'SW'), (27, 'POR'), (26, 'EP'), (25, 'BOR')]
-# calbackup written / conflict bits (native.rs put_extra).
-CALBK_FILES = ['CALIB', 'BOOTDATA', 'UID', 'OPTBYTES', 'OTP', 'ROMBOOT', 'LOADER', 'BACKUP.TXT',
-               '_DM40PRV.BIN']
+# calbackup (write-once safety copy) written / conflict / differs bits
+# (native.rs put_extra). Firmware before the information volume (USB LUN 1)
+# reported 9 files and 'freed' as the 4th field.
+CALBK_FILES = ['CALIB', 'BOOTDATA', 'UID']
+CALBK_STATUS = {'SAFECOPY_PRESENT': 'safety copy on the SPI disk, nothing written',
+                'SAFECOPY_WRITTEN': 'missing safety-copy files written',
+                'NOSPACE': 'no room on the SPI disk for the safety copy',
+                'BADBPB': 'SPI disk is not the expected FAT16: untouched',
+                'NOMEDIUM': 'no SPI flash', 'ERROR': 'SPI disk read/write/verify failed',
+                'NOTRUN': 'not run'}
 TRIGGERS = {0x54520010: 'marker zeroed by recovery/update', 0x54520011: 'marker zeroing FAILED',
             0x54520000: 'rcvr file created', 0x54520001: 'rcvr file already there',
             0x54520002: 'rcvr: no medium', 0x54520003: 'rcvr: bad BPB',
@@ -340,16 +347,19 @@ def _note(name, v):
         return 'clean' if x == 0 else 'FMC error/timeout'
     if name == 'last_trigger' and x is not None:
         return TRIGGERS.get(x, 'none' if x == 0 else '?')
-    if name in ('CALBK.written', 'CALBK.conflict') and x is not None:
-        return '+'.join(n for i, n in enumerate(CALBK_FILES) if x >> i & 1) or '-'
-    if name == 'CALBK.status' and v.endswith('_NOFW'):
-        return 'no space for _DM40PRV.BIN: backed up without the firmware file'
+    if name in ('CALBK.written', 'CALBK.conflict', 'CALBK.differs') and x is not None:
+        s = '+'.join(n for i, n in enumerate(CALBK_FILES) if x >> i & 1) or '-'
+        if name == 'CALBK.differs' and x:
+            s += ' (copy kept: write-once; the flash changed after it was made)'
+        return s
+    if name == 'CALBK.status':
+        return CALBK_STATUS.get(v, 'older firmware (per-boot backup)' if v in ('UNCHANGED', 'WRITTEN') or v.endswith('_NOFW') else '?')
     if name == 'SPICLK.div':
         return {'4': '12.5 MHz', '16': '3.125 MHz (stock)'}.get(v, '?')
     if name == 'SPICLK.check':
         return SPICLK_CHECK.get(v, '?')
     if name == 'CALMS.ms':
-        return 'boot backup time (DWT at 200 MHz; 12.5x low on IRC16M)'
+        return 'boot safety-copy time (DWT at 200 MHz; 12.5x low on IRC16M)'
     if name == 'PD6.moder':
         return 'input' if v == '0' else 'NOT input'
     if name == 'PD6.pupd':
@@ -375,7 +385,7 @@ BOOT_GROUPS = [
     ('loader marker', ['marker_w0', 'marker_w1', 'marker_w2', 'marker']),
     ('fatren', ['fatren', 'found', 'renamed', 'old_backup', 'old_deleted', 'freed_clusters',
                 'others', 'rcvr_deleted', 'STAGED.n']),
-    ('calbackup', ['CALBK.status', 'CALBK.written', 'CALBK.conflict', 'CALBK.freed', 'CALMS.ms']),
+    ('calbackup', ['CALBK.status', 'CALBK.written', 'CALBK.conflict', 'CALBK.differs', 'CALMS.ms']),
     ('stack', ['STACK.used', 'STACK.size']),
     ('SPI flash clock', ['SPICLK.div', 'SPICLK.check']),
     ('power key PD6', ['PD6.moder', 'PD6.pupd', 'PD6.idr']),

@@ -44,7 +44,11 @@ embedded-fonts = []
 # to bring up the 200 MHz tree itself. Off by default: the RAM-loaded sector-8
 # image inherits the clock the stock firmware already set, so init_core stays
 # defined-but-uncalled there (silenced with #[allow(dead_code)]).
-native = ["embedded-fonts", "calbackup"]
+native = ["embedded-fonts", "calbackup", "vdisk"]
+# Second USB mass-storage LUN: the read-only information volume generated
+# from the MCU memory (src/vdisk.rs: CALIB / BOOTDATA / UID / OPTBYTES / OTP /
+# ROMBOOT / LOADER .BIN, BACKUP.TXT, FIRMWARE.BIN). Implied by native.
+vdisk = []
 # Hardware tests of the native boot code from the RAM-loaded sector-8 image
 # (docs/native-boot.md "Implementation", test plan T1/T2). They link with
 # link-test.x (CODE = SRAM0+SRAM1 128 KiB, DMA RAM = SRAM2 64 KiB; build.sh

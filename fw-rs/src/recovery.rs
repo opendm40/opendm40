@@ -103,7 +103,7 @@ fn usb_disk(mut disk: spiflash::SpiFlash) -> ! {
     let _ = hw;
     boot::feed();
     let bus = synopsys_usb_otg::UsbBus::new(usb::UsbFs, unsafe { &mut *core::ptr::addr_of_mut!(crate::EP_MEMORY) });
-    let mut msc = msc::Msc::new(&bus, unsafe { &mut *core::ptr::addr_of_mut!(crate::MSC_IO) });
+    let mut msc = msc::Msc::new(&bus, unsafe { &mut *core::ptr::addr_of_mut!(crate::MSC_IO) }, 1);
     let mut dev = UsbDeviceBuilder::new(&bus, crate::USB_VID_PID)
         .strings(&[StringDescriptors::default()
             .manufacturer("dm40-fw")
@@ -124,7 +124,7 @@ fn usb_disk(mut disk: spiflash::SpiFlash) -> ! {
         boot::feed();
         let now = clk.now_ms();
         dev.poll(&mut [&mut msc]);
-        msc.poll(&mut disk);
+        msc.poll(&mut [&mut disk]);
 
         if eject_at.is_none() && msc::STOP_UNIT.load(Ordering::Relaxed) {
             eject_at = Some(now + EJECT_DELAY_MS);

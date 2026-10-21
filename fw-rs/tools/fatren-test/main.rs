@@ -1,15 +1,20 @@
-//! Host test for src/fatren.rs and src/calbackup.rs against a real FAT16 image
+//! Host test for src/fatren.rs, src/calbackup.rs (+ src/vdisk.rs) against a real FAT16 image
 //! (run.sh builds one with mkfs.fat/mtools in the DM40 geometry: 4096-byte
 //! sectors, 2 FATs, 512 root entries, 16 MiB).
 //!   main <image> dry|live [marker-hex]  fatren::run (marker = the 12-byte
 //!                                       record at 0x08008000; none = invalid)
 //!   main <image> trigger                fatren::make_trigger
-//!   main <image> backup <dir> [flash]   calbackup::run with the calbackup::FILES sources
-//!                                       read from <dir>/CALIB.BIN etc.; [flash] = the
-//!                                       bytes from 0x08004000 (installed body with the
-//!                                       loader marker at +0x4000): also _DM40PRV.BIN
-//!                                       (prints fwfile=none when FwFile::from_flash
-//!                                       refuses that flash)
+//!   main <image> backup <dir>           calbackup::safe_copy (write-once safety copy)
+//!                                       of calbackup::FILES[..SAFE] read from
+//!                                       <dir>/CALIB.BIN, BOOTDATA.BIN, UID.BIN
+//!   main <out> vdisk <flash> <uid> <otp> <optbytes> [extra <n> <size>]
+//!                                       vdisk.rs (USB LUN 1 information volume) over
+//!                                       the 1 MiB <flash> image (0x08000000..) and the
+//!                                       system-memory files: every sector read through
+//!                                       read_block into <out> (created), twice (must be
+//!                                       equal); write_block / out-of-range reads refused;
+//!                                       extra: vdisk::set_extra with n files LOGnnn.CSV of
+//!                                       size * (i + 1) bytes, contents extra_byte(i, off)
 //!   main <image> shot                   screenshot::take_on with the synthetic screen
 //!                                       of the `lcd` stub below (pattern()).
 //!   main <image> shotcut [k [abort]]    the same slice by slice on a NOR model of
@@ -43,6 +48,12 @@ mod msc {
         fn block_count(&self) -> u32;
         fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool;
         fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool;
+        fn read_only(&self) -> bool {
+            false
+        }
+        fn take_media_changed(&mut self) -> bool {
+            false
+        }
         fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
             let _ = st;
             Some(self.write_block(lba, buf))
@@ -148,6 +159,78 @@ mod fatren;
 
 #[path = "../../src/calbackup.rs"]
 mod calbackup;
+
+#[path = "../../src/vdisk.rs"]
+mod vdisk;
+
+/// Memory map for vdisk's reader: (address, bytes).
+static MEM: std::sync::OnceLock<Vec<(u32, Vec<u8>)>> = std::sync::OnceLock::new();
+
+fn mem_read(addr: u32, buf: &mut [u8]) {
+    for (base, d) in MEM.get().unwrap() {
+        if addr >= *base && (addr - base) as usize + buf.len() <= d.len() {
+            let o = (addr - base) as usize;
+            buf.copy_from_slice(&d[o..o + buf.len()]);
+            return;
+        }
+    }
+    panic!("vdisk read outside the memory map: {addr:#010x} + {}", buf.len());
+}
+
+/// Contents of the synthetic extra file `arg` (run.sh recomputes it).
+fn extra_read(arg: u32, off: u32, buf: &mut [u8]) {
+    for (i, b) in buf.iter_mut().enumerate() {
+        *b = b"0123456789,\n"[(arg as usize * 5 + off as usize + i) % 12];
+    }
+}
+
+/// `main <out> vdisk <flash> <uid> <otp> <optbytes> [extra <n> <size>]`.
+fn vdisk_dump(a: &[String]) {
+    use msc::BlockDevice;
+    let flash = fs::read(&a[3]).unwrap();
+    assert_eq!(flash.len(), 1 << 20, "1 MiB flash image");
+    let body: &'static [u8] = Vec::leak(flash[0x4000..0x4000 + calbackup::FW_MAX_BODY].to_vec());
+    MEM.set(vec![
+        (0x0800_0000, flash),
+        (0x1FFF_7A10, fs::read(&a[4]).unwrap()),
+        (0x1FFF_7800, fs::read(&a[5]).unwrap()),
+        (0x1FFF_C000, fs::read(&a[6]).unwrap()),
+    ])
+    .unwrap();
+    let mut d = vdisk::VDisk;
+    println!("present_before_init={}", d.present());
+    vdisk::init(mem_read, body);
+    println!("media_changed_after_init={}", d.take_media_changed());
+    if a.get(7).map(|s| s.as_str()) == Some("extra") {
+        let n: usize = a[8].parse().unwrap();
+        let size: u32 = a[9].parse().unwrap();
+        let x: Vec<vdisk::Extra> = (0..n)
+            .map(|i| vdisk::Extra { name: calbackup::numbered_name(b"LOG", i as u16, b"CSV"), size: size * (i as u32 + 1), read: extra_read, arg: i as u32 })
+            .collect();
+        println!("set_extra taken={}", vdisk::set_extra(&x));
+        println!("media_changed={} again={}", d.take_media_changed(), d.take_media_changed());
+    }
+    let n = d.block_count();
+    let bs = d.block_size() as usize;
+    let mut img = vec![0u8; n as usize * bs];
+    for pass in 0..2 {
+        let mut b = vec![0u8; bs];
+        for lba in 0..n {
+            assert!(d.read_block(lba, &mut b), "read {lba}");
+            let o = lba as usize * bs;
+            if pass == 0 {
+                img[o..o + bs].copy_from_slice(&b);
+            } else {
+                assert!(img[o..o + bs] == b[..], "sector {lba} differs between two reads");
+            }
+        }
+    }
+    let mut b = vec![0u8; bs];
+    let past = d.read_block(n, &mut b);
+    let wr = d.write_block(0, &img[..bs]);
+    println!("vdisk sectors={} bs={} read_only={} write_block={} read_past_end={}", n, bs, d.read_only(), wr, past);
+    fs::write(&a[1], &img).unwrap();
+}
 
 struct Img {
     d: Vec<u8>,
@@ -308,6 +391,10 @@ fn unhex(s: &str) -> Vec<u8> {
 
 fn main() {
     let a: Vec<String> = env::args().collect();
+    if a[2] == "vdisk" {
+        vdisk_dump(&a);
+        return;
+    }
     let mut img = Img::new(fs::read(&a[1]).unwrap());
     if a[2] == "csv" {
         csv(&a, &mut img);
@@ -321,7 +408,7 @@ fn main() {
         return;
     }
     if a[2] == "backup" {
-        let data: Vec<Vec<u8>> = calbackup::FILES
+        let data: Vec<Vec<u8>> = calbackup::FILES[..calbackup::SAFE]
             .iter()
             .map(|(n, _, _)| {
                 let name = format!(
@@ -338,20 +425,10 @@ fn main() {
             .zip(&slices)
             .map(|(&(name, addr, _), d)| calbackup::Src { name, addr, data: d })
             .collect();
-        let flash = a.get(4).map(|f| fs::read(f).unwrap());
-        let fw = flash.as_ref().and_then(|f| {
-            let r = calbackup::FwFile::from_flash(f);
-            if r.is_none() {
-                // Invalid marker / length, or a last block the FS-loader would
-                // mis-decode (FwFile::tail_hazard): no firmware file.
-                println!("fwfile=none");
-            }
-            r
-        });
-        let r = calbackup::run(&mut img, &srcs, fw.as_ref().map(|f| f as &dyn calbackup::Source));
+        let r = calbackup::safe_copy(&mut img, &srcs);
         println!(
-            "backup={:?} written=0x{:03x} conflict=0x{:03x} freed={} fw_skipped={}",
-            r.status, r.written, r.conflict, r.freed, r.fw_skipped
+            "backup={:?} written=0x{:03x} conflict=0x{:03x} differs=0x{:03x}",
+            r.status, r.written, r.conflict, r.differs
         );
         // Geometry from the boot sector: blocks >= data_start are file data.
         let b = &img.d;
