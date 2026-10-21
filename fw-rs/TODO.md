@@ -441,6 +441,12 @@ Firmware:
 - [ ] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
       Researched: GO for current-in-A-jack in non-current modes (idle comparator on PB1, 47.5 Ω shunt, trips ~0.44 mA),
       partial for "V leads while in A mode"; blown fuse not detectable (fuse-check dialog instead). Doc §4, ~4-5 days.
+- [ ] (B) AD2 fast data logger: 600..9600 S/s above AD1's 640 S/s, ~14 ENOB, gaps marked (seq/timestamps); ~2 days.
+      Doubles as the device experiment for (A): torn-read histogram, loss per rate, SPI2 read-back.
+      docs/dmm-input-scope-feasibility.md.
+- [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
+      V/mV/A on the isolated jacks (current waveforms). Scope UI reused ("Wave" from DMM, MCX|DMM source badge),
+      software trigger. Needs one ISR (owner decision; fw-rs is ISR-free) + HY3131 on hardware SPI2; ~2.5-3 weeks.
 Emulator (emu/):
 - [ ] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
       at the same time); the firmware's mux/relay choices route it through a modelled DM40 front-end (dividers, shunts, relays,
