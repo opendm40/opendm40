@@ -44,12 +44,15 @@ pub enum Overlay {
     PowerOff { until: u64 },
     /// Toast, gone at `until` (ms).
     Toast { until: u64 },
+    /// Power-meter wiring dialog (ui::pw::entry_dialog), cancelled at
+    /// `until` (ms).
+    PowerEntry { until: u64 },
 }
 
 impl Overlay {
     pub fn until(&self) -> u64 {
         match *self {
-            Overlay::PowerOff { until } | Overlay::Toast { until } => until,
+            Overlay::PowerOff { until } | Overlay::Toast { until } | Overlay::PowerEntry { until } => until,
         }
     }
 }

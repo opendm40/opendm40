@@ -171,6 +171,39 @@ pub fn configure(cfg: &[u8; CFG_LEN]) {
     }
 }
 
+/// R36: SPHACAL (HY3131 only), the AD2 / AD3 phase trim of the power
+/// measurement: bit 7 = AD2 leads AD3, bits 6..0 = delay in AD2CLK periods
+/// (1 / 2.4576 MHz = 0.407 us, up to 51.7 us).
+pub const R_SPHACAL: u8 = 0x36;
+
+/// Power-meter row (dmm::pw): as `configure` (AD3 enabled before AD2, the
+/// beat fix) with SPHACAL written before both enables, as the datasheet
+/// asks ("Set SPHACAL first, then ENAD2 and ENAD3 = 1, otherwise the data
+/// would be stabilized later"). `quiesce` zeroed R36 before.
+pub fn configure_ph(cfg: &[u8; CFG_LEN], r36: u8) {
+    let mut c = *cfg;
+    c[6] &= !ENAD2;
+    c[20] &= !ENAD3;
+    write(R_CFG, &c);
+    write(R_INTE, &[0]);
+    write(R_SPHACAL, &[r36]);
+    write(0x34, &[cfg[20]]);
+    write(0x26, &[cfg[6]]);
+}
+
+/// RMS<37:0> (R09..R0D, `b[0..5]`) as a signed 38-bit value: sum(X*Y)/N of
+/// the power statistic is negative when the energy flows the other way.
+/// (The stock and `poll_ac` read 37 bits unsigned: right for the squares.)
+pub fn rms_signed(b: &[u8]) -> i64 {
+    let raw = b[0] as u64 | (b[1] as u64) << 8 | (b[2] as u64) << 16 | (b[3] as u64) << 24 | ((b[4] & 0x3F) as u64) << 32;
+    ((raw << 26) as i64) >> 26
+}
+
+/// LPF<18:0> (R06..R08, `b[0..3]`), 19-bit signed.
+pub fn lpf19(b: &[u8]) -> i32 {
+    (((b[0] as u32) << 13 | (b[1] as u32) << 21 | (b[2] as u32) << 29) as i32) >> 13
+}
+
 // ------------------------------------------------------- AD1 conversion timing
 //
 // R22 = AD1OS[7:5] AD1CHOP[4:3] AD1OSR[2:0] (hy3131_v2_6.h; datasheet 13.1).
@@ -392,5 +425,18 @@ mod tests {
         assert_eq!(ad1_period_us_r22(0x07), 200_000);
         assert_eq!(ad1_period_us_r22(0x18 | 3), 25_000); // AD1CHOP = 11 chops too
         assert_eq!(ad1_period_us(9, true), ad1_period_us(1, true)); // code masked to 0..7
+    }
+
+    #[test]
+    fn rms_and_lpf_sign() {
+        assert_eq!(rms_signed(&[0x10, 0, 0, 0, 0]), 16);
+        // Bit 37 set: negative; bits 39..38 (sign copies or not) ignored.
+        assert_eq!(rms_signed(&[0xFF, 0xFF, 0xFF, 0xFF, 0x3F]), -1);
+        assert_eq!(rms_signed(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF]), -1);
+        assert_eq!(rms_signed(&[0, 0, 0, 0, 0x20]), -(1i64 << 37));
+        assert_eq!(rms_signed(&[0xFF, 0xFF, 0xFF, 0xFF, 0x1F]), (1i64 << 37) - 1);
+        assert_eq!(lpf19(&[0xFF, 0xFF, 0x07]), -1);
+        assert_eq!(lpf19(&[0x00, 0x00, 0x04]), -262_144);
+        assert_eq!(lpf19(&[0xFF, 0xFF, 0x03]), 262_143);
     }
 }

@@ -23,6 +23,9 @@ use crate::ui::{self, View};
 /// The stock-replica scope page (interaction, drag path, AUTO-set).
 #[path = "scope_page.rs"]
 mod scope_page;
+/// Power meter: entry dialog, page taps, settings, SCPI (dmm::pw).
+#[path = "app_power.rs"]
+mod app_power;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
 /// Offered stock options: dim 5/10/30 min/never, shutdown 10/30/60 min/never.
@@ -337,6 +340,9 @@ fn power_off() -> ! {
 fn restore_func(version: u32, code: u8) -> u8 {
     let max = if version >= 3 { 17 } else { 15 };
     match code {
+        // The power meter is entered only through its wiring dialog: after a
+        // restart, DC A on the 10 A shunt (a load current may still flow).
+        dmm::pw::FUNC => 7,
         2 | 3 => code - 2,
         c if c <= max => c,
         _ => 1,
@@ -501,7 +507,8 @@ impl App {
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
         // A CSV recording (csvlog.rs) keeps the DMM measuring in every view.
-        d |= self.host_dmm || (self.bt_on && self.power.bt_connected()) || crate::csvlog::active();
+        // So does the power meter (energy, the shunt state): every view.
+        d |= self.host_dmm || (self.bt_on && self.power.bt_connected()) || crate::csvlog::active() || self.dmm.pw.on;
         s |= self.host_scope || self.gen.s.on;
         if self.rails_both {
             (d, s) = (true, true);
@@ -521,8 +528,11 @@ impl App {
         self.dmm_view.label = self.t_label();
         match self.view {
             View::Dmm => {
-                self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
-                if !self.dmm_view.bar_on {
+                self.dmm_view.power = self.dmm.pw.on;
+                self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2 || self.dmm.pw.on, self.dmm.ohm_var() == 1);
+                if self.dmm.pw.on {
+                    ui::pw::side_clear(&mut self.dmm_view.pwc);
+                } else if !self.dmm_view.bar_on {
                     ui::history(&self.hist, self.hist_n, self.hist_new);
                 }
                 self.hv_shown = false;
@@ -551,6 +561,7 @@ impl App {
             View::Limits => self.limits_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(|p| ui::temp_page(p)),
+            View::Range if self.dmm.pw.on => ui::pw::settings_page(&self.dmm.pw_state()),
             View::Range => {
                 let b = self.dmm.button();
                 let sel = self.range_sel();
@@ -975,13 +986,15 @@ impl App {
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
         // key PD6 (hold 1.5 s -> off).
         let idle = now.saturating_sub(self.last_input);
+        self.pw_tick(now);
         if DIM_MS[self.dim_idx] != 0 && idle > DIM_MS[self.dim_idx] && !self.dimmed {
             self.dimmed = true;
             backlight(5);
         }
         // No idle shutdown during a MIN/MAX/AVG recording session (FR-02;
         // started explicitly, see Stats::rec). Dimming still applies.
-        if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] && !self.meter.stats.rec {
+        // Nor while the power meter integrates energy with a current flowing.
+        if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] && !self.meter.stats.rec && !self.dmm.pw.integrating() {
             power_off();
         }
         self.off_warn(now, idle);
@@ -1160,7 +1173,11 @@ impl App {
             let rc = ui::RateChip { rate: self.dmm.rate() as u8, period_ms: self.dmm.reading_period_ms(), applies: self.dmm.rate_applies() };
             // DBG:PROF? "d.chart" (one trend point: columns + labels + side).
             crate::prof::enter(crate::prof::DCHART);
-            ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, &side, self.chart_unit, rc);
+            let pv = self.meter.live().and_then(|r| r.power).filter(|_| self.dmm.pw.on);
+            ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, if pv.is_some() { None } else { Some(&side) }, self.chart_unit, rc);
+            if let Some(pv) = pv {
+                ui::pw::side(&mut self.dmm_view.pwc, &pv);
+            }
             crate::prof::exit(crate::prof::DCHART);
         }
     }
@@ -1382,6 +1399,8 @@ impl App {
         p[11] = p11;
         self.sp_persist_ext(&mut p[crate::persist::W_SCOPE_EXT..]);
         // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
+        let w = self.pw_words();
+        p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS].copy_from_slice(&w);
         p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing())
             | if self.dmm_view.bar_on { 0 } else { crate::meter::EXT_HISTORY_ROW }
             | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 }
@@ -1439,6 +1458,7 @@ impl App {
         // Before the first row is written (select below).
         let off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_ALL;
         self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
+        self.pw_restore(&p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS]);
         let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
         self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
         let mode = if same_session { restore_func(rec.version, p[2] as u8) } else { 1 };
@@ -1555,7 +1575,12 @@ impl App {
         // from 100 V (the stock lightning threshold); V functions only.
         // Unsmoothed (FR-05): the warning must not lag.
         let l = &u.raw;
-        let v = if l.mode <= 3 && !l.main.ol { l.si.abs() } else { 0.0 };
+        // Power meter: the voltage channel.
+        let v = match l.power {
+            Some(p) if !p.v_ol => p.v,
+            _ if l.mode <= 3 && !l.main.ol => l.si.abs(),
+            _ => 0.0,
+        };
         let hv_level = if v >= 100.0 { 2 } else if v >= 30.0 { 1 } else { 0 };
         let hv_changed = hv_level != self.hv_level;
         self.hv_level = hv_level;
@@ -1766,7 +1791,13 @@ impl App {
                     Some(false) => self.overlay_close(),
                     None => {}
                 },
-                (crate::dialog::Overlay::PowerOff { .. }, Gesture::KeyDown(_)) | (crate::dialog::Overlay::Toast { .. }, Gesture::Tap(_) | Gesture::KeyDown(_)) => {
+                (crate::dialog::Overlay::PowerEntry { .. }, Gesture::Tap(p)) => match ui::pw::entry_hit(p.x, p.y) {
+                    Some(true) => self.pw_enter(clk),
+                    Some(false) => self.overlay_close(),
+                    None => {}
+                },
+                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. }, Gesture::KeyDown(_))
+                | (crate::dialog::Overlay::Toast { .. }, Gesture::Tap(_) | Gesture::KeyDown(_)) => {
                     self.overlay_close()
                 }
                 _ => {}
@@ -1862,6 +1893,16 @@ impl App {
                 self.beep(now, 30);
                 self.tap(clk, p.x, p.y);
             }
+            // Long press on the A button: the power meter's wiring dialog.
+            Gesture::LongPress(p) if self.view == View::Dmm && p.y >= ui::BTN_Y && ui::button_hit(6, p.x, p.y) == Some(1) => {
+                captured = true;
+                self.pw_open_entry(now);
+            }
+            Gesture::LongPress(p) if self.view == View::Dmm && self.dmm.pw.on && p.x >= 402 && (175..279).contains(&p.y) => {
+                captured = true;
+                self.pw_long_side(now);
+            }
+            Gesture::LongPress(p) if self.view == View::Dmm && self.dmm.pw.on && (153..172).contains(&p.y) => captured = true,
             Gesture::LongPress(p) if self.view == View::Dmm && !self.dmm_view.bar_on && (153..172).contains(&p.y) => {
                 captured = true;
                 self.hist_n = 0;
@@ -1901,7 +1942,7 @@ impl App {
     /// goes on unless the user touches the screen or a key.
     fn off_warn(&mut self, now: u64, idle: u64) {
         let off = OFF_MS[self.off_idx];
-        if off == 0 || self.meter.stats.rec || idle + OFF_WARN_MS <= off {
+        if off == 0 || self.meter.stats.rec || self.dmm.pw.integrating() || idle + OFF_WARN_MS <= off {
             self.off_warned = 0;
             return;
         }
@@ -2120,6 +2161,9 @@ impl App {
 
     fn tap(&mut self, clk: &mut Clock, x: u16, y: u16) {
         let now = clk.now_ms();
+        if self.dmm.pw.on && self.pw_tap(clk, x, y) {
+            return;
+        }
         match self.view {
             // REL button (stock (402,205,76,38)).
             View::Dmm if x >= 402 && (205..243).contains(&y) => self.rel_toggle(now),
@@ -2295,6 +2339,7 @@ impl App {
                         self.show(v, clk);
                     }
                     Some(Err(4)) => self.show(View::Limits, clk),
+                    Some(Err(5)) => self.pw_open_entry(now),
                     Some(Err(k @ 0..=1)) if b == Button::Ohm => {
                         if k != self.dmm.ohm_var() {
                             self.dmm.set_ohm_var(clk, k);
@@ -2835,10 +2880,15 @@ impl App {
                 out.put_f32(self.dmm.t_disp(self.power.mcu_t).0);
                 true
             }
+            C::ConfQuery if self.dmm.pw.on => {
+                self.pw_conf(out);
+                true
+            }
             C::ConfQuery => {
                 out.put_conf(self.dmm.func(), self.meter.live());
                 true
             }
+            C::Pow(c) => self.pw_scpi(clk, c, out),
             C::SysRail(Some(b)) => {
                 self.set_rails_both(b, clk);
                 self.redraw |= self.view == View::Settings;

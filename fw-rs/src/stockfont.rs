@@ -311,6 +311,29 @@ struct Placed {
     g: Glyph,
     x: i16,
     y: i16,
+    /// Synthesised glyph (`glyph_or_twin`): the bitmap drawn a second time
+    /// `twin` px to the right (max coverage of the two); 0 = plain.
+    twin: i16,
+}
+
+/// Glyph of `ch`, or for a 'W' the font lacks (the stock DMM fonts have only
+/// the units they need: no W in UNIT / LETTERS / HIST) two of its 'V'
+/// overlapped, the second `twin` px to the right: same face, no extra font
+/// data (power meter, dmm::pw). Returns (glyph, twin).
+fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
+    match font.glyph(ch as u32) {
+        Some(g) => Some((g, 0)),
+        None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
+        None => None,
+    }
+}
+
+/// Coverage of a placed glyph at column `gx` (0.. w + twin) and row `gy`.
+fn twin_alpha(g: &Glyph, twin: i16, gx: u32, gy: u32) -> u8 {
+    let w = g.w as u32;
+    let a = if gx < w { g.alpha(gx, gy) } else { 0 };
+    let t = twin as u32;
+    if t > 0 && gx >= t && gx - t < w { a.max(g.alpha(gx - t, gy)) } else { a }
 }
 
 fn layout(font: Font, r: Rect, text: &str, align: u8, spacing: i8, out: &mut [Option<Placed>; MAXG]) -> usize {
@@ -321,20 +344,20 @@ fn layout(font: Font, r: Rect, text: &str, align: u8, spacing: i8, out: &mut [Op
     let mut pen = 0i32;
     let lh = font.line_h() as i32;
     let mut xs = [0i32; MAXG];
-    let mut gs: [Option<Glyph>; MAXG] = [None; MAXG];
+    let mut gs: [Option<(Glyph, i16)>; MAXG] = [None; MAXG];
     for ch in text.chars() {
         if n == MAXG {
             break;
         }
-        let g = font.glyph(ch as u32);
+        let g = glyph_or_twin(font, ch);
         xs[n] = pen;
         gs[n] = g;
         match g {
-            Some(g) => {
+            Some((g, tw)) => {
                 // A space advances at least a third of the line height: the
                 // stock F14 space glyph advances 1 px ("40rows").
-                pen += (if ch == ' ' { (g.adv as i32).max(lh / 3) } else { g.adv as i32 }) + spacing as i32;
-                last_w = g.w as i32;
+                pen += (if ch == ' ' { (g.adv as i32).max(lh / 3) } else { g.adv as i32 + tw as i32 }) + spacing as i32;
+                last_w = g.w as i32 + tw as i32;
             }
             None => {
                 pen += lh;
@@ -359,10 +382,11 @@ fn layout(font: Font, r: Rect, text: &str, align: u8, spacing: i8, out: &mut [Op
     };
     let desc = font.descent() as i32;
     for i in 0..n {
-        out[i] = gs[i].map(|g| Placed {
+        out[i] = gs[i].map(|(g, twin)| Placed {
             g,
             x: (r.x as i32 + ox + xs[i]) as i16,
             y: (r.y as i32 + oy + lh - desc - g.h as i32 - g.yoff as i32) as i16,
+            twin,
         });
     }
     n
@@ -406,7 +430,7 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
     let mut cover = [u8::MAX; 480];
     for (gi, p) in pl[..n].iter().enumerate() {
         if let Some(p) = p {
-            for gx in 0..p.g.w as i16 {
+            for gx in 0..p.g.w as i16 + p.twin {
                 let x = p.x + gx;
                 if x >= x0 && x <= x1 {
                     cover[x as usize] = gi as u8;
@@ -436,6 +460,11 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
                 _ => None,
             };
             match hit {
+                Some(p) if p.twin != 0 => {
+                    for c in x..e {
+                        lcd::data(lut[twin_alpha(&p.g, p.twin, (c - p.x) as u32, (y - p.y) as u32) as usize]);
+                    }
+                }
                 Some(p) => {
                     let h = p.g.h as u32;
                     let mut i = (x - p.x) as u32 * h + (y - p.y) as u32;
@@ -617,10 +646,11 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
         crate::probe::sub(_i as u8);
         let (x, y) = (p.x as u16, p.y as u16);
         let lut = ramp(fg, bg);
-        lcd::set_window(x, y, x + p.g.w as u16 - 1, y + p.g.h as u16 - 1);
+        let w = p.g.w as u16 + p.twin as u16;
+        lcd::set_window(x, y, x + w - 1, y + p.g.h as u16 - 1);
         for gy in 0..p.g.h as u32 {
-            for gx in 0..p.g.w as u32 {
-                lcd::data(lut[p.g.alpha(gx, gy) as usize]);
+            for gx in 0..w as u32 {
+                lcd::data(lut[twin_alpha(&p.g, p.twin, gx, gy) as usize]);
             }
         }
     }
@@ -634,10 +664,10 @@ pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
     let (mut pen, mut last) = (0i32, 0i32);
     let lh = font.line_h() as i32;
     for ch in text.chars() {
-        let (adv, w) = match font.glyph(ch as u32) {
+        let (adv, w) = match glyph_or_twin(font, ch) {
             // As `layout`: a space advances at least lh / 3.
-            Some(g) if ch == ' ' => ((g.adv as i32).max(lh / 3), g.w as i32),
-            Some(g) => (g.adv as i32, g.w as i32),
+            Some((g, _)) if ch == ' ' => ((g.adv as i32).max(lh / 3), g.w as i32),
+            Some((g, tw)) => (g.adv as i32 + tw as i32, g.w as i32 + tw as i32),
             None => (font.line_h() as i32, font.line_h() as i32),
         };
         last = pen + w;
@@ -788,6 +818,8 @@ const INK_N: usize = 24;
 #[derive(Clone, Copy)]
 pub struct Ink {
     g: [(Glyph, i16, i16); INK_N],
+    /// Per glyph: the `glyph_or_twin` offset (0 = plain).
+    tw: [i16; INK_N],
     n: u8,
     /// Ink bounds (glyph boxes), for a quick reject.
     pub bx: Rect,
@@ -796,7 +828,7 @@ pub struct Ink {
 impl Ink {
     pub const fn none() -> Ink {
         // A zero-size glyph box never has ink.
-        Ink { g: [(Glyph::EMPTY, 0, 0); INK_N], n: 0, bx: rect(0, 0, 0, 0) }
+        Ink { g: [(Glyph::EMPTY, 0, 0); INK_N], tw: [0; INK_N], n: 0, bx: rect(0, 0, 0, 0) }
     }
 
     /// Lay `text` out in `r` with the stock rules: text_w = sum(adv) of all
@@ -807,19 +839,19 @@ impl Ink {
         let mut k = Ink::none();
         let lh = font.line_h() as i32;
         let mut xs = [0i32; INK_N];
-        let mut gs: [Option<Glyph>; INK_N] = [None; INK_N];
+        let mut gs: [Option<(Glyph, i16)>; INK_N] = [None; INK_N];
         let (mut pen, mut last_w, mut n) = (0i32, 0i32, 0usize);
         for ch in text.chars() {
             if n == INK_N {
                 break;
             }
-            let g = font.glyph(ch as u32);
+            let g = glyph_or_twin(font, ch);
             xs[n] = pen;
             gs[n] = g;
             match g {
-                Some(g) => {
-                    pen += g.adv as i32 + spacing as i32;
-                    last_w = g.w as i32;
+                Some((g, t)) => {
+                    pen += g.adv as i32 + t as i32 + spacing as i32;
+                    last_w = g.w as i32 + t as i32;
                 }
                 None => {
                     pen += lh + spacing as i32;
@@ -842,17 +874,18 @@ impl Ink {
         let desc = font.descent() as i32;
         let (mut x0, mut y0, mut x1, mut y1) = (i16::MAX, i16::MAX, i16::MIN, i16::MIN);
         for i in 0..n {
-            if let Some(g) = gs[i] {
+            if let Some((g, t)) = gs[i] {
                 if g.w == 0 || g.h == 0 {
                     continue;
                 }
                 let x = (r.x as i32 + ox + xs[i]) as i16;
                 let y = (r.y as i32 + oy + lh - desc - g.h as i32 - g.yoff as i32) as i16;
                 k.g[k.n as usize] = (g, x, y);
+                k.tw[k.n as usize] = t;
                 k.n += 1;
                 x0 = x0.min(x);
                 y0 = y0.min(y);
-                x1 = x1.max(x + g.w as i16);
+                x1 = x1.max(x + g.w as i16 + t);
                 y1 = y1.max(y + g.h as i16);
             }
         }
@@ -881,7 +914,8 @@ impl Ink {
         for i in 0..self.n as usize {
             let (g, gx, gy) = &self.g[i];
             let (dx, dy) = (x - gx, y - gy);
-            if dx >= 0 && dy >= 0 && dx < g.w as i16 && dy < g.h as i16 && g.alpha(dx as u32, dy as u32) >= 8 {
+            let t = self.tw[i];
+            if dx >= 0 && dy >= 0 && dx < g.w as i16 + t && dy < g.h as i16 && twin_alpha(g, t, dx as u32, dy as u32) >= 8 {
                 return Some(i as u8);
             }
         }

@@ -20,8 +20,13 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// v5: 48 words; p[40..48] the scope page's math / FFT and trigger-type
 /// settings (scope_page.rs sp_persist_ext; 0 = defaults, so a v4 record
 /// loads zero-extended with nothing to migrate).
-const VERSION: u32 = 5;
-pub const WORDS: usize = 48;
+/// v6: 52 words; p[48..52] the power meter's settings (app_power.rs
+/// pw_words; 0 = defaults, so a v5 record loads zero-extended).
+const VERSION: u32 = 6;
+pub const WORDS: usize = 52;
+/// First word of the power-meter block (app_power::PW_WORDS words).
+pub const W_POWER: usize = 48;
+const V5_WORDS: usize = 48;
 /// First word of the scope page's extension block (8 words).
 pub const W_SCOPE_EXT: usize = 40;
 const V4_WORDS: usize = 40;
@@ -77,6 +82,7 @@ pub fn load() -> Option<Record> {
     let version = rd(1);
     let n = match version {
         VERSION => WORDS,
+        5 => V5_WORDS,
         4 => V4_WORDS,
         3 => V3_WORDS,
         2 => V2_WORDS,

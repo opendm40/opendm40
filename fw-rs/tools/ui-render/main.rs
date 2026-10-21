@@ -406,7 +406,7 @@ const ALERTS: [sentinel::Alert; 4] = [sentinel::Alert::None, sentinel::Alert::AJ
 
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
-    Reading { mode, range: 0, main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, seq: 0, avg_n: 0, alert: sentinel::Alert::None }
+    Reading { mode, range: 0, main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None }
 }
 
 /// Meter-strip worst cases: (name, reading, temperature label).
@@ -467,6 +467,8 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         extra.push((*n, m, *l));
     }
     v.extend(extra);
+    // Power meter readings (strip: "POWER", aux V / I; DMM page).
+    v.extend(pw_cases().into_iter().map(|(n, p)| (n, pw_rd(p), None)));
     v
 }
 
@@ -522,6 +524,57 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
 
 fn r_button(r: &Reading) -> Button {
     dmm::button_of(r.mode)
+}
+
+
+/// A power-meter reading (dmm::pw::reading_vals, as the Dmm builds it).
+fn pw_rd(pv: dmm::pw::PowerVals) -> Reading {
+    let (main, v, i, si) = dmm::pw::reading_vals(&pv);
+    let (iu, ir) = dmm::pw::iu_ir(pv.ik);
+    let mut r = rd(4 + iu, main, Some(v), Some(i), false);
+    r.range = ir as i8;
+    r.si = si;
+    r.auto = pv.v_auto && pv.i_auto;
+    r.power = Some(pv);
+    r
+}
+
+/// Power-meter worst cases: (name, values).
+fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
+    use dmm::pw::PowerVals as P;
+    let z = P::ZERO;
+    let base = P { p: 229.43, s: 229.9, q: 14.7, pf: 0.998, v: 229.98, i: 0.99962, f_hz: 50.0, burden_v: 0.02, e_wh: 0.1234, vah: 0.1236, secs: 754, p_avg: 0.58918, vr: 2, ik: 4, ..z };
+    vec![
+        ("mains", base),
+        ("worst", P { p: -10499.9, s: 10499.9, q: 10499.9, pf: -0.999, v: -1049.99, i: 10.4999, vdc: -1049.0, idc: -10.4, f_hz: 99999.0, burden_v: 0.2851, e_wh: -99999.0, vah: 99999.0, secs: 99 * 3600 + 59 * 60 + 59, p_avg: -9999.9, vr: 3, ik: 5, v_auto: false, i_auto: false, run: false, over: 1, over_left: 3600, comp: false, ..z }),
+        ("mw", P { p: -3.7799e-3, s: 3.78e-3, q: 1.2e-3, pf: -0.5, v: 6.2999, i: 599.99e-6, f_hz: 999.99, burden_v: 0.285, e_wh: 0.00001, vah: 0.0, secs: 1, p_avg: -0.036, vr: 0, ik: 0, over: 2, ..z }),
+        ("ol", P { p: 0.0, v_ol: true, i_ol: true, pf: 0.0, f_hz: 0.0, e_wh: 12345.6, vah: 99999.9, vr: 3, ik: 1, ..z }),
+        ("alt", P { p: f32::NAN, q: f32::NAN, pf: f32::NAN, vdc: f32::NAN, s: 1234.5, v: 230.0, i: 5.367, f_hz: 60.0, alt: true, vah: 1.5, secs: 3600, vr: 2, ik: 4, ..z }),
+        ("dc", P { p: -24.012, s: 24.012, q: 0.0, pf: -1.0, v: 12.006, i: 2.0, vdc: 12.006, idc: -2.0, f_hz: 0.0, burden_v: 0.02, e_wh: -1.25, vah: 1.25, secs: 187, p_avg: -24.064, vr: 1, ik: 4, ..z }),
+    ]
+}
+
+/// The DMM page in the power meter with `pv` (status, rows, chart, side).
+fn power_page(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: ui::RateChip) -> Reading {
+    let mut r = pw_rd(pv);
+    r.alert = alert;
+    let mut dv = ui::DmmView::new();
+    dv.power = true;
+    dv.hv_red = pv.v.abs() >= 30.0;
+    dv.draw_static(Button::Amp, r.mode, true, false);
+    let mut pc = ui::pw::PwCache::new();
+    ui::pw::side_clear(&mut pc);
+    dv.reading(&r, hold, 0);
+    ui::status_right(&status(0));
+    let v = if r.main.ol { 1.0 } else { r.main.v };
+    let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
+    ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, None, r.main.unit, rc);
+    ui::pw::side(&mut pc, &pv);
+    r
+}
+
+fn page_regions_pw() -> Vec<(&'static str, Bx)> {
+    vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))]
 }
 
 fn save(out: &str, name: &str) {
@@ -987,6 +1040,10 @@ fn main() {
         ("buttons", Bx::new(0, 277, 480, 43)),
     ];
     for (name, r, label) in &cases {
+        // Power readings: their own page below (no history row there).
+        if r.power.is_some() {
+            continue;
+        }
         for ext in [false, true] {
             for (hold, lim) in [(0u8, meter::V_NONE), (1, meter::V_PASS), (2, meter::V_HI), (3, meter::V_LO)] {
                 // Timebase x rate chip (FR-05: worst widths SLOW 2.5/s,
@@ -1028,7 +1085,7 @@ fn main() {
                     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
                     let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
-                    ui::chart(&mut cc, &pts, dec, rate, &side, r.main.unit, rc);
+                    ui::chart(&mut cc, &pts, dec, rate, Some(&side), r.main.unit, rc);
                     ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}", ext as u8, r.alert.name()), &dmm_page_regions);
                 }
             }
@@ -1118,7 +1175,7 @@ fn main() {
                 }
                 emu().bus = 0;
                 emu().wins = 0;
-                ui::chart(&mut cc, &pts, dec, 1, &side, unit, rc);
+                ui::chart(&mut cc, &pts, dec, 1, Some(&side), unit, rc);
                 if i > 0 {
                     words += emu().bus;
                     wins += emu().wins;
@@ -1128,7 +1185,7 @@ fn main() {
                 if i % 7 == 0 || i + 3 >= vals.len() {
                     let got = emu().fb.clone();
                     host::reset(0);
-                    ui::chart(&mut ui::ChartCache::new(), &pts, dec, 1, &side, unit, rc);
+                    ui::chart(&mut ui::ChartCache::new(), &pts, dec, 1, Some(&side), unit, rc);
                     ck.cases += 1;
                     let diff = (0..W * H).filter(|&k| got[k] != emu().fb[k]).count();
                     if diff > 0 && bad == 0 {
@@ -1215,6 +1272,65 @@ fn main() {
             *p = 0;
         }
         ck.check(&format!("title/{title}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))]);
+    }
+
+    // 5e. Power meter (dmm::pw, ui::pw): the DMM page with the power boxes
+    //     and the energy column over every worst case x hold x alert; an
+    //     update from each case to each other equals its fresh draw; the
+    //     entry dialog; the Power Settings page in several states.
+    {
+        let pcs = pw_cases();
+        let rc = ui::RateChip { rate: 1, period_ms: 430, applies: false };
+        for (name, pv) in &pcs {
+            for hold in 0..4u8 {
+                for a in ALERTS {
+                    host::reset(0);
+                    power_page(*pv, hold, a, rc);
+                    ck.check(&format!("power/{name}/h{hold}/a{}", a.name()), &dmm_page_regions);
+                }
+            }
+        }
+        for (na, a) in &pcs {
+            for (nb, b) in &pcs {
+                host::reset(0);
+                let ra = pw_rd(*a);
+                let rb = pw_rd(*b);
+                let mut dv = ui::DmmView::new();
+                dv.power = true;
+                dv.draw_static(Button::Amp, ra.mode, true, false);
+                let mut pc = ui::pw::PwCache::new();
+                ui::pw::side_clear(&mut pc);
+                dv.reading(&ra, 0, 0);
+                ui::pw::side(&mut pc, a);
+                dv.reading(&rb, 0, 0);
+                ui::pw::side(&mut pc, b);
+                let inc = emu().fb.clone();
+                host::reset(0);
+                let mut dv = ui::DmmView::new();
+                dv.power = true;
+                dv.draw_static(Button::Amp, rb.mode, true, false);
+                let mut pc = ui::pw::PwCache::new();
+                ui::pw::side_clear(&mut pc);
+                dv.reading(&rb, 0, 0);
+                ui::pw::side(&mut pc, b);
+                let want = emu().fb.clone();
+                emu().fb.copy_from_slice(&inc);
+                ck.same_as(&format!("power-update/{na}->{nb}"), &want);
+            }
+        }
+        for (ic, tl) in [(5.0f32, 30u16), (10.0, 0), (0.5, 3600)] {
+            host::reset(0);
+            ui::pw::entry_dialog(ic, tl);
+            let (x, y, w2, h2) = ui::pw::DLG;
+            ck.check(&format!("power-dialog/{ic}/{tl}"), &[("screen", Bx::new(0, 0, 480, 320)), ("dialog", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))]);
+        }
+        for (name, pv) in &pcs {
+            for (va, ia) in [(true, true), (false, false), (true, false)] {
+                host::reset(0);
+                ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: va, i_auto: ia, ..*pv });
+                ck.check_opts(&format!("power-settings/{name}/{va}/{ia}"), &page_regions_pw(), false);
+            }
+        }
     }
 
     // 6b. Settings pages 1 / 2 (worst values), Range pages with the UF-21
@@ -1443,7 +1559,7 @@ fn main() {
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| 4.8170 + ((i / 40) % 3) as f32 * 1e-4).collect();
         let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), rel: None, secs: Some(5), rec: false };
-        ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, &side, "V", ui::RateChip { rate: 1, period_ms: 106, applies: true });
+        ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 106, applies: true });
         save(&out, "d01-dmm");
         host::reset(0);
         let (r, l) = find("acdc_600mv");
@@ -1454,7 +1570,7 @@ fn main() {
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| -600.0 + (i % 64) as f32 * 0.5).collect();
         let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
-        ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, &side, "mV", ui::RateChip { rate: 0, period_ms: 430, applies: false });
+        ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, Some(&side), "mV", ui::RateChip { rate: 0, period_ms: 430, applies: false });
         save(&out, "d02-dmm-acdc");
         host::reset(0);
         let (r, _) = find("dcma_420mid");
@@ -1544,9 +1660,32 @@ fn main() {
             dv.reading(&r, 0, 0);
             ui::status_right(&status(0));
             let side = ui::Side { max: None, avg: None, min: None, rel: None, secs: None, rec: false };
-            ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, &side, r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
+            ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             save(&out, file);
         }
+    }
+
+    // Power meter scenes.
+    {
+        let pcs = pw_cases();
+        let rc = ui::RateChip { rate: 1, period_ms: 430, applies: false };
+        for (file, k, hold) in [("p01-power-mains", 0usize, 0u8), ("p02-power-worst", 1, 1), ("p03-power-mw-over", 2, 0), ("p04-power-alt", 4, 0), ("p05-power-dc-source", 5, 0)] {
+            host::reset(0);
+            power_page(pcs[k].1, hold, sentinel::Alert::None, rc);
+            save(&out, file);
+        }
+        host::reset(0);
+        power_page(pcs[0].1, 0, sentinel::Alert::None, rc);
+        ui::pw::entry_dialog(5.0, 30);
+        save(&out, "p06-power-entry");
+        host::reset(0);
+        ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pcs[0].1 });
+        save(&out, "p07-power-settings");
+        host::reset(0);
+        ui::range_page(Button::Amp, Some(7), 0, None);
+        save(&out, "p08-range-a-power");
+        combined(&pw_rd(pcs[0].1), None, 0, 0, false, false, false, "");
+        save(&out, "c12-strip-power");
     }
 
     for (msg, (n, scene)) in &ck.seen {

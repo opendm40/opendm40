@@ -8,6 +8,10 @@ use crate::gen;
 use crate::lcd::{self, Color};
 use crate::meter;
 
+/// Power-meter screens (DMM page slots, entry dialog, settings page).
+#[path = "ui_power.rs"]
+pub mod pw;
+
 /// RGB565 of the stock colours (panel reads back RGB666).
 pub const BG: Color = 0x0883; // (8, 16, 24)
 pub const BAR: Color = 0x1904; // (24, 32, 32) status bar
@@ -203,6 +207,10 @@ pub struct DmmView {
     /// app before `reading`); as last drawn.
     pub hv_red: bool,
     last_red: bool,
+    /// Power meter shown (set by the app before `draw_static`): the
+    /// history row holds the power boxes, never the bargraph.
+    pub power: bool,
+    pub pwc: pw::PwCache,
 }
 
 /// Bargraph geometry in the history row's place (rows 150..172 between the
@@ -320,6 +328,8 @@ impl DmmView {
             bar_ol: None,
             hv_red: false,
             last_red: false,
+            power: false,
+            pwc: pw::PwCache::new(),
         }
     }
 
@@ -378,7 +388,7 @@ impl DmmView {
     /// bipolar in DC V / mV / A (not AC+DC), unipolar elsewhere, empty in
     /// temperature (no meaningful full scale). No-op in history mode.
     pub fn bar_update(&mut self, r: &Reading) {
-        if !self.bar_on {
+        if !self.bar_on || self.power {
             return;
         }
         let temp = r.mode == 15;
@@ -402,7 +412,7 @@ impl DmmView {
         lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
         lcd::fill_rect(0, 0, lcd::W, BAR_H, BAR);
         sf::logo(4, 7, BAR);
-        if self.bar_on {
+        if self.bar_on && !self.power {
             self.bar.bipolar = matches!(mode, 1 | 3 | 7..=9) && !acdc;
             self.bar.draw_static(BG);
             self.bar_scale = None;
@@ -430,6 +440,7 @@ impl DmmView {
         self.last_chip = None;
         self.aux_val = [None; 2];
         self.aux_unit = [None; 2];
+        self.pwc = pw::PwCache::new();
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -485,11 +496,13 @@ impl DmmView {
             self.aux_val = [None; 2];
             self.aux_unit = [None; 2];
             // From x 404: clear of the +1 digit cell (375..402).
-            sf::label(sf::UNIT, rect(404, 114, 72, 32), unit, VALUE, BG, 4, -1);
+            // Power meter fallback "VA": its V and A touch at the stock -1.
+            let sp = if r.main.unit.ends_with("VA") { 1 } else { -1 };
+            sf::label(sf::UNIT, rect(404, 114, 72, 32), unit, VALUE, BG, 4, sp);
             // Stock box (437,76,32,32) align 7, widened 3 px right so the
             // 35 px AC glyph is not clipped (ends at 471, 3 px after the
             // limit badge 403..433).
-            sf::label(sf::MODE, rect(437, 76, 35, 32), mode_glyph(r.mode, r.acdc), VALUE, BG, 7, 0);
+            sf::label(sf::MODE, rect(437, 76, 35, 32), mode_glyph(r.mode, r.acdc || r.power.is_some()), VALUE, BG, 7, 0);
             if !r.acdc {
                 // Leaving AC+DC: the tag slots left of the aux values.
                 for i in 0..2 {
@@ -604,6 +617,9 @@ impl DmmView {
             self.last_lim = lim;
             lim_badge(lim);
         }
+        if let Some(pv) = r.power.filter(|_| self.power) {
+            self.power_row(&pv);
+        }
     }
 
 }
@@ -645,6 +661,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         13 => "CAP",
         14 => "FREQ",
         16 | 17 => "AC+DC",
+        crate::dmm::pw::FUNC => "POWER",
         _ => "TEMP",
     };
     let mut buf = [0u8; 16];
@@ -825,6 +842,13 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
         }
     }
     ok_and_limits_buttons();
+    if b == Button::Amp {
+        // Power meter entry (the wiring dialog first): between Hold/Limits
+        // and OK.
+        let r = rect(162, 240, 150, 38);
+        sf::rbox(r, 6, 0x2966, BG);
+        sf::glyphs(sf::TEXT22, r, "Power W", STATUS_FG, 0x2966, 8, 0);
+    }
 }
 
 /// Range page note line (`range_page`): rows 142..177, under the second
@@ -847,7 +871,8 @@ fn ok_and_limits_buttons() {
 /// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
 pub const OHM_VARS: [&str; 2] = ["Normal", "Low current ON"];
 
-/// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK,
+/// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 5 Power
+/// (Current page),
 /// 4 Hold/Limits); ohm: Err(0 / 1) = the OHM_VARS buttons.
 pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
@@ -869,6 +894,9 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     }
     if (240..278).contains(&y) && (8..158).contains(&x) {
         return Some(Err(4));
+    }
+    if (240..278).contains(&y) && (162..312).contains(&x) && b == Button::Amp {
+        return Some(Err(5));
     }
     None
 }
@@ -1217,7 +1245,9 @@ impl ChartCache {
     }
 }
 
-pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: &Side, unit: &'static str, rc: RateChip) {
+/// `side` None: the right column is not touched (the power meter draws its
+/// own, `pw::side`).
+pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&Side>, unit: &'static str, rc: RateChip) {
     let mut step = 1.0f32;
     for _ in 0..dec {
         step /= 10.0;
@@ -1332,6 +1362,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: &Side, un
         sf::rbox(r, 4, BTN, BG);
         sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, if rc.applies { STATUS_FG } else { DIM }, BTN, 8, 1);
     }
+    let Some(side) = side else { return };
     // Right column (x 405..475, the stock REL box rows 205..242 kept as the
     // tap target): MAX and AVG above the REL box, MIN and the session time
     // below; one F14 row each, label left (dim), value right-aligned
