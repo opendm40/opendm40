@@ -49,6 +49,8 @@ use crate::touch::Point;
 
 /// Guide lines stay this long after the last drag event / release (stock).
 const GUIDE_MS: u64 = 2000;
+/// UF-09: two taps within this time (and 30 px) are a double tap.
+const DOUBLE_MS: u64 = 400;
 /// Movement (px from the press) a touch may wobble and still be a tap; the
 /// drag starts beyond it (with the accumulated delta, nothing is lost).
 const TAP_TOL: i32 = 4;
@@ -297,6 +299,11 @@ pub(super) struct Sp {
     /// page (timebase, flash).
     list: Option<ListTouch>,
     tb_drawn: (u8, bool),
+    /// UF-08: the press is on the cursor tab; the selection before the
+    /// cursor tab turned the cursors on. UF-09: the last plain tap.
+    cur_press: bool,
+    cur_saved: Option<([u8; 4], usize)>,
+    last_tap: Option<(u64, Point)>,
     /// Math display settings; what the FFT additions show (from `sp_math`).
     pub math: Math,
     fft_view: Option<su::FftAdd>,
@@ -348,6 +355,9 @@ impl Sp {
             entries: 0,
             list: None,
             tb_drawn: (255, false),
+            cur_press: false,
+            cur_saved: None,
+            last_tap: None,
             math: Math::DEFAULT,
             fft_view: None,
             fft_hz: su::Txt::EMPTY,
@@ -461,6 +471,7 @@ impl App {
             fft_hz: sp.fft_hz,
             fft: sp.fft_view,
             runt_row: (s.ttype == crate::trigsoft::RUNT).then_some(s.runt_row as i16),
+            cur_tab: self.sp_cur_state(),
         }
     }
 
@@ -1102,6 +1113,7 @@ impl App {
     /// the tap-step zone: scope_ui::graph_press). Returns (a marker zone was
     /// hit, the tap-step side armed).
     fn sp_select(&mut self, p: Point) -> (bool, Option<bool>) {
+        self.sp.cur_press = false;
         let m = self.sp_model(self.now);
         match su::graph_press(&m, self.sp.tap_mode, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16) {
             su::Press::Marker(level, id) => {
@@ -1115,6 +1127,10 @@ impl App {
                 (true, None)
             }
             su::Press::Step(slower) => (false, Some(slower)),
+            su::Press::Cur => {
+                self.sp.cur_press = true;
+                (false, None)
+            }
             su::Press::None => (false, None),
         }
     }
@@ -1521,10 +1537,113 @@ impl App {
             }
             return;
         }
+        // UF-08: a tap on the cursor tab cycles the cursors.
+        if self.sp.cur_press {
+            self.sp.cur_press = false;
+            if t.still() {
+                self.beep(now, 30);
+                self.sp_cur_cycle();
+            }
+            return;
+        }
         // A tap on an armed tap-step zone steps once (a hold that already
         // repeated does not step again on release).
         if let Some(slower) = t.arm.release(t.still()) {
+            self.sp.last_tap = None;
             self.sp_tb_step(slower, now);
+            return;
+        }
+        // UF-09: a double tap where a tap does nothing (no marker, no
+        // tap-step zone: the graph middle in Corners mode, anywhere with the
+        // tap step Off; never in Halves, where every tap steps): CH1 position
+        // to the centre and the trigger at 50 % (a stopped record: centred on
+        // its trigger point).
+        if t.still() && !t.hit {
+            let p = t.p0;
+            let dbl = self.sp.last_tap.is_some_and(|(t1, q)| {
+                now.saturating_sub(t1) <= DOUBLE_MS && (p.x as i32 - q.x as i32).abs() <= 30 && (p.y as i32 - q.y as i32).abs() <= 30
+            });
+            if dbl {
+                self.sp.last_tap = None;
+                self.sp_centre(now);
+            } else {
+                self.sp.last_tap = Some((now, p));
+            }
+        } else {
+            self.sp.last_tap = None;
+        }
+    }
+
+    /// UF-09 double tap: CH1 position 0 (the trigger levels keep their
+    /// volts), trigger position 50 %; stopped: the stored record centred on
+    /// its trigger point.
+    fn sp_centre(&mut self, now: u64) {
+        let mut st = self.scope.s;
+        st.trig_row -= st.pos;
+        st.runt_row -= st.pos;
+        st.pos = 0;
+        st.hpos = 200;
+        self.scope.centre_stored();
+        self.beep(now, 60);
+        self.sp.guide_until = now + GUIDE_MS;
+        self.scope_set(st, now);
+    }
+
+    /// UF-08 cursor tab: off -> X -> Y -> off. The cursors are the stock
+    /// cursor measurements (X2-1 + Xf, Y2-1) in the measurement row; the
+    /// selection from before the first tap comes back with "off".
+    fn sp_cur_cycle(&mut self) {
+        const XS: [u8; 2] = [7, 8];
+        const YS: [u8; 1] = [17];
+        let cur = |id: &u8| XS.contains(id) || YS.contains(id);
+        let state = self.sp_cur_state();
+        let base = match self.sp.cur_saved {
+            Some(b) if state != su::CUR_OFF => b,
+            _ => {
+                let b = (self.meas_sel, self.meas_n);
+                self.sp.cur_saved = Some(b);
+                b
+            }
+        };
+        let rest = base.0[..base.1].iter().copied().filter(|id| !cur(id));
+        let mut sel = [0u8; 4];
+        let mut n = 0;
+        let lead: &[u8] = match state {
+            su::CUR_OFF => &XS,
+            su::CUR_X => &YS,
+            _ => &[],
+        };
+        if lead.is_empty() {
+            // Back to the saved selection.
+            sel = base.0;
+            n = base.1;
+            self.sp.cur_saved = None;
+        } else {
+            for id in lead.iter().copied().chain(rest) {
+                if n < 4 {
+                    sel[n] = id;
+                    n += 1;
+                }
+            }
+        }
+        self.meas_sel = sel;
+        self.meas_n = n;
+        self.cursors_from_selection();
+        self.cursor_values();
+        self.sp_cells();
+    }
+
+    /// Cursor tab state from the measurement selection.
+    fn sp_cur_state(&self) -> u8 {
+        let sel = &self.meas_sel[..self.meas_n];
+        let x = sel.contains(&7) || sel.contains(&8);
+        let y = sel.contains(&17);
+        match (x, y) {
+            (true, false) => su::CUR_X,
+            (false, true) => su::CUR_Y,
+            (false, false) => su::CUR_OFF,
+            // Both (chosen in the Measure tab): the next tap turns them off.
+            _ => su::CUR_Y,
         }
     }
 
@@ -1693,8 +1812,9 @@ impl App {
     fn sp_panel(&mut self, _clk: &mut Clock, k: usize, now: u64) {
         let mut st = self.scope.s;
         match k {
-            0 => st.range = (st.range + 1).min(9),
-            2 => st.range = st.range.saturating_sub(1),
+            // UF-10: B1 = zoom in (smaller V/div), B3 = zoom out.
+            0 => st.range = st.range.saturating_sub(1),
+            2 => st.range = (st.range + 1).min(9),
             1 => {
                 self.sp_popup_open(su::Popup::Ch1(0));
                 return;

@@ -128,6 +128,34 @@ pub fn run(ck: &mut Checker, out: &str) {
             }
         }
     }
+    // Cursor tab (UF-08), every state, both views, with the timebase tabs,
+    // the FFT boxes and the cursors on; zoom buttons (UF-10) with it.
+    for combined in [false, true] {
+        for st in [scope_ui::CUR_OFF, scope_ui::CUR_X, scope_ui::CUR_Y] {
+            let mut m = base.m;
+            m.combined = combined;
+            m.cur_tab = st;
+            m.tabs = 3;
+            m.math_on = true;
+            m.math_mode = 5;
+            m.fft = Some(fft_add(None, 1));
+            if st == scope_ui::CUR_X {
+                m.xcur = Some([100, 300]);
+            }
+            if st == scope_ui::CUR_Y {
+                m.ycur = Some([70, 278]);
+            }
+            let sc = stock::Scene { name: "cur", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+            stock::draw(&sc);
+            let name = format!("curtab/{}/{st}", combined as u8);
+            ck.check_replica(&name);
+            let graph = [("graph", Bx::new(14, m.top() as i32 + 1, 399, m.frame_h() as i32 - 2))];
+            ck.check_add(&name, &graph, &[rb(scope_ui::CUR_TAB), rb(scope_ui::FFT_XDIV)], screen);
+            if st == scope_ui::CUR_X && !combined {
+                save(out, "s04-cur-x-zoom");
+            }
+        }
+    }
     // The runt level marker on the strip (selected, guide line).
     let mut m = base.m;
     m.runt_row = Some(60);

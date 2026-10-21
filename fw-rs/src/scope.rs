@@ -1014,6 +1014,18 @@ impl Scope {
         unsafe { &(&*core::ptr::addr_of!(BUF))[..self.stored_len] }
     }
 
+    /// Stopped: centre the stored record on its trigger point (UF-09
+    /// double tap); re-rendered on the next poll.
+    pub fn centre_stored(&mut self) {
+        if !self.s.run && self.stored_valid {
+            if let Some(t) = self.stored_trig {
+                self.stored_anchor = t.min(self.stored_len.saturating_sub(1));
+                self.stored_roll = false;
+                self.zoom_pending = true;
+            }
+        }
+    }
+
     /// The stored record's sample rate, time-zero index (the trigger point,
     /// else the sample at the screen centre) and whether it triggered.
     pub fn record_info(&self) -> (u32, usize, bool) {
