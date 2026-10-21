@@ -384,6 +384,11 @@ Each: what / why / effort (S/M/L) / stock deviation. Quick wins marked ★.
 Suggested order to ship: 1, 3, 4, 2, 5, 11 (all quick, high-impact) → 9, 10, 13,
 14 → 6, 7, 8 → 12, 15.
 
+**Status 2026-10-21** (fw-rs/TODO.md has the commits): done 1, 2, 3, 5, 6, 9, 10, 12, 13;
+4 / 7 / 8 superseded by the stock scope port; 11 keypads only; 14 won't do (stock
+geometry); 15 duplicate arms gone, dead `ui::bar` / `button_row` / `DMM_BUTTONS` /
+fonts.rs still to delete. The line numbers above are from the review date and stale.
+
 ---
 
 ## 5. Layout sketches

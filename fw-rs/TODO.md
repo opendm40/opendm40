@@ -31,8 +31,8 @@ Code work (in this order):
 2. UF-11 FFT: computed spectrum, labelled axes, automatic peak (f, dBV).
 3. UF-13 scope record as CSV to the disk (the MF "Save CSV" is a toast today) + software
    pulse-width / runt trigger.
-4. UI punch-list remainder (wake tap, keypad prefill, UF-08 cursors, UF-10, UF-09 double-tap).
-5. UF-24/30/31/36/38/41.
+4. UI punch-list remainder (UF-08 cursors, UF-10, UF-09 double-tap; wake tap / keypad / #9 / #11 / #12 done).
+5. Wire the new pure modules: src/sinc.rs into the scope trace (UF-41), src/bargraph.rs into DmmView (UF-30).
 6. libsigrok DM40 profile: device retest over USBTMC (all functions passed in the emulator), send upstream.
 
 ## Remaining work
@@ -159,14 +159,28 @@ Code work (in this order):
 - [ ] UI/UX review punch-list (docs/ui-review.md §4) remainder. Done: #1 drag-misread-as-swipe
       (gesture.rs: a drag never swipes), #2 unified status block with lock/BT/battery on every bar,
       #5 page dots, #4/#8 superseded by the stock scope port (stock right panel, markers, T/trigger
-      handles). Open:
-      - #3 swallow the wake tap after dim (app.rs undims and still acts on the gesture);
-      - #10 generator keypad prefill with the current value/unit (keypad opens empty);
+      handles). Done 2026-10-21 (verify on device):
+      - #3 wake gate (70bed89): after an idle dim the first touch / side key only wakes; input is
+        ignored for 500 ms (stock FUN_08020248) and the rest of the waking touch is dropped.
+      - #10 generator keypad prefill (579f951): current value + unit, drawn selected; the first
+        digit / '.' / backspace replaces it; OK on an untouched prefill keeps the setting.
+      - #9 generator bar status + tappable RUN/STOP (22e7dd6).
+      - #11 pressed-key feedback on the keypads (7dad1b9); menu tiles / settings rows / gen boxes
+        still have none (the scope page has its own press_fx).
+      - #12 backlight / volume -/+ steppers, clamped (1f19f05 drawing, 7e2abce logic).
+      - #13 already in: DMM lightning >= 100 V (stock), combined strip HV badge >= 30 V and red
+        ring >= 100 V. The >= 30 V tint on the DMM page itself: not done (the value is red anyway).
+      - #14 won't do: the preview is the stock geometry (4,85,239,231; stock UI is the baseline);
+        the bar now carries the status (#9).
+      - #15 the duplicate Keypad/ScopeMenu arms are gone (ScopeMenu removed by the scope port).
+        Still dead: ui::bar / button_row / DMM_BUTTONS and all of fonts.rs (VALUE/UNIT/LABEL/SMALL,
+        LABEL used only by those two fns); removing fonts.rs touches main.rs + the host-test
+        module lists: left for a quiet moment (DMM-page area of ui.rs).
+      Open:
       - UF-08 one-tap cursors (stock port: cursors only via the Measure tab; scope-ui-plan "CUR");
       - UF-10 V/div +/- shown as zoom (magnifier) rather than bare +/-;
       - UF-09 remainder: double-tap on the graph = centre position + trigger at 50 % (trigger
         position itself = the stock T marker drag);
-      - unverified against the current code: #9, #11-#15.
 - [x] CSV-to-disk recording on the DMM screen, swipe-triggered (user). (a1a7e74; verify on device)
       src/csvlog.rs: one-finger swipe down on the DMM page = start / stop,
       toasts, red REC in the status blocks, LOG:CSV ON|OFF / LOG:CSV?, power-off / reset commit the tail.
@@ -237,8 +251,21 @@ Code work (in this order):
 - [x] UF-29 (P2) On-device Help page (gestures, resets, input limits). §9  (a98ef21; verify on device)
       Settings 2/2 -> Help: 4 list pages (gestures, side keys, multimeter taps, limits; ui::HELP); tap = next page,
       title bar / MENU = back. No input voltage ratings (none sourced in the repo).
-- [ ] UF-24/30/31/36/38/41 (P2) Tempco comp, fast bargraph, stylus sensitivity, BT from all views at the
-      app's 50 ms poll (device check), SCPI host logging script, sinc interp. §3-§10
+- [ ] UF-24/30/31/36/38/41 (P2) §3-§10, worked 2026-10-21 (decisions in docs/user-feedback.md):
+  - [ ] UF-24 tempco compensation: parked, documented (needs FR-36 + a per-unit two-temperature
+        characterisation; the only always-on sensor is the MCU die, biased by the rails, UF-02).
+  - [ ] UF-30 fast bargraph: widget src/bargraph.rs + tools/bargraph-test (bf17876); not wired:
+        DmmView hook (place + feed from App::reading). Rate = the AD1 conversion rate (10/s FAST /
+        moving, 2.5/s steady); >= 40/s needs OSR 0x13 + a firmware average for the readout.
+  - [x] UF-31 stylus: no sensitivity register (stock writes only D1 01 / D2 04 / D1 09); documented.
+        Possible firmware cause found: touch.rs Debounce drops a touch whose only pressed frame is
+        followed by a release frame. Device check first: DBG:TOUCH? log of stylus taps.
+  - [x] UF-36 BT on every view: by design (bt.poll every 5 ms in all views, DMM rail kept on while
+        linked); check tool `tools/dm40scpi.py --bt btpoll -p 50` (890047b).  (verify on device)
+  - [x] UF-38 tools/dm40scpi.py: info / conf / read / log CSV / scpi / btpoll, USBTMC or --bt (890047b).
+        (verify on device)
+  - [ ] UF-41 sin(x)/x: src/sinc.rs (Lanczos-3) + tools/sinc-test (44f035c); not wired: the scope
+        page's "fewer samples than columns" branch -> sinc::at(&f.data, p).
 - Community-confirmed existing items (priority signal only): native boot/recovery; FR-26 temperature offset (raise to P1);
   FR-36 user calibration; FR-13 sub-mode memory; FR-01/FR-02 (AVG on chart); FR-04/CSV record + FR-38 logger; FR-05;
   FR-09/FR-24 stray-C REL; FR-10; FR-14/FR-17; FR-19; FR-21; FR-28/29/32; FR-34; USBTMC; ui-review #1, #4, #5, #8, #10, #11.
