@@ -83,6 +83,13 @@ PY
     # The e6 grid shows a real stock screenshot.
     mcopy -o -i $W/img/e6.img $STOCK/S001.BMP ::S003.BMP
 fi
+# Compact binary logs (LOGnnn.DLG, dlog.rs): CSVs re-coded, on the format
+# disk next to the CSVs, same expectations (every row read: exact counts).
+for n in 000 001 002 005 006; do
+    "$W/t" dlg $W/d/LOG$n.CSV $W/d/LOG2${n:1}.DLG
+    cp $W/d/LOG$n.exp $W/d/LOG2${n:1}.exp
+    mcopy -i $W/img/fmt.img $W/d/LOG2${n:1}.DLG ::LOG2${n:1}.DLG
+done
 # Fragmented disk: S000.BMP over every other freed 8 KiB hole.
 I="$W/img/frag.img"
 mkimg $I

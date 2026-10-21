@@ -629,7 +629,7 @@ pub struct Win {
 }
 
 impl Win {
-    const fn new() -> Win {
+    pub const fn new() -> Win {
         Win { base: 0, n: 0, b: [0; WIN] }
     }
     /// Byte `off` (< `end`, the readable limit).
@@ -856,6 +856,19 @@ pub fn chunk_at<S: Src>(s: &mut S, w: &mut Win, off: u32, size: u32, check: bool
     Some(c)
 }
 
+/// Rows of chunk `c` to `f(t_ms, value, flags)` (gallery). False on a
+/// decode error.
+pub fn rows<S: Src>(s: &mut S, w: &mut Win, c: &Chunk, f: &mut dyn FnMut(u32, Val, u8)) -> bool {
+    let mut rd = RowDec::new(c);
+    for _ in 0..c.nrows {
+        match rd.next(s, w) {
+            Some((t, v, fl)) => f(t, v, fl),
+            None => return false,
+        }
+    }
+    true
+}
+
 /// Summary of a DLG file (`Gen::open`).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Info {
@@ -949,14 +962,7 @@ impl<S: Src> Gen<S> {
     /// Rows of chunk `c` to `f(t_ms, value, flags)` (gallery). False on a
     /// decode error.
     pub fn rows(&mut self, c: &Chunk, f: &mut dyn FnMut(u32, Val, u8)) -> bool {
-        let mut rd = RowDec::new(c);
-        for _ in 0..c.nrows {
-            match rd.next(&mut self.s, &mut self.win) {
-                Some((t, v, fl)) => f(t, v, fl),
-                None => return false,
-            }
-        }
-        true
+        rows(&mut self.s, &mut self.win, c, f)
     }
 
     /// The CSV header text bytes `off..` (into `buf`).

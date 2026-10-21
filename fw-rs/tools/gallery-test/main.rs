@@ -146,6 +146,8 @@ mod screenshot;
 #[path = "../../src/scope_csv.rs"]
 #[allow(dead_code)]
 mod scope_csv;
+#[path = "../../src/dlog.rs"]
+mod dlog;
 #[path = "../../src/csvlog.rs"]
 mod csvlog;
 #[path = "../../src/gallery.rs"]
@@ -225,7 +227,7 @@ fn dir_order(img: &Img) -> Vec<String> {
         let base = String::from_utf8_lossy(&e[..8]).trim_end().to_string();
         let ext = String::from_utf8_lossy(&e[8..11]).trim_end().to_string();
         let n = format!("{base}.{ext}");
-        if (n.starts_with('S') && ext == "BMP") || (n.starts_with("LOG") && ext == "CSV") {
+        if (n.starts_with('S') && ext == "BMP") || (n.starts_with("LOG") && (ext == "CSV" || ext == "DLG")) {
             v.push(n);
         }
     }
@@ -544,9 +546,9 @@ fn ui(out: &str, data: &str, imgs: &str) -> bool {
     {
         let mut img = load("fmt");
         for name in dir_order(&img) {
-            let keep = matches!(name.as_str(), "S003.BMP" | "LOG001.CSV" | "S012.BMP" | "LOG004.CSV" | "LOG002.CSV");
+            let keep = matches!(name.as_str(), "S003.BMP" | "LOG001.CSV" | "S012.BMP" | "LOG004.CSV" | "LOG002.CSV" | "LOG201.DLG");
             let g = view(&mut img, &name);
-            scene(&mut ck, &format!("view-{name}"), keep && name.ends_with("CSV"));
+            scene(&mut ck, &format!("view-{name}"), keep && (name.ends_with("CSV") || name.ends_with("DLG")));
             if name.ends_with("BMP") {
                 tap(g, 240, 200); // overlay on
                 run(g, &mut img);
@@ -851,6 +853,56 @@ fn csvlog_busy(t: &mut dyn FnMut(&str, bool)) {
     msc::HOST_WRITING.store(false, Relaxed);
 }
 
+/// A csvlog-format CSV re-coded as a compact binary log (dlog.rs), as
+/// csvlog.rs would have recorded the same readings (chunks of 600 rows).
+fn dlg(inp: &str, out: &str) -> bool {
+    let t = std::fs::read(inp).unwrap();
+    let txt = String::from_utf8(t).unwrap();
+    let hl = txt.find("time_s,value,unit,flags\r\n").unwrap() + 25;
+    let (hdr, body) = txt.split_at(hl);
+    let mut unit = String::new();
+    let mut rows = vec![];
+    for l in body.split("\r\n").filter(|l| !l.is_empty()) {
+        let f: Vec<&str> = l.split(',').collect();
+        let (s, ms) = f[0].split_once('.').unwrap();
+        let tm: u64 = s.parse::<u64>().unwrap() * 1000 + ms.parse::<u64>().unwrap();
+        let v: f32 = f[1].parse().unwrap_or(f32::NAN);
+        unit = f[2].to_string();
+        let mut fl = 0u8;
+        for (k, n) in ["OL", "REL", "HOLD", "HI", "LO", "GAP"].iter().enumerate() {
+            if f[3].split(' ').any(|x| x == *n) {
+                fl |= 1 << k;
+            }
+        }
+        rows.push((tm, v, fl));
+    }
+    let mut d = vec![0u8; dlog::FHDR + hdr.len()];
+    dlog::file_header(dlog::KIND_DMM, unit.as_bytes(), hdr.as_bytes(), &mut d);
+    let mut e = dlog::Enc::new(hdr.len());
+    for ch in rows.chunks(600) {
+        let h0 = d.len();
+        d.extend_from_slice(&[0u8; dlog::CHDR]);
+        for &(tm, v, fl) in ch {
+            let val = dlog::dec6(v);
+            let mut r = [0u8; dlog::ROW_MAX];
+            let n = dlog::fmt_row(tm, val, unit.as_bytes(), fl, &mut r);
+            let mut b = [0u8; dlog::ROW_BYTES];
+            let k = e.row(tm as u32, val, fl, n as u32, &mut b);
+            d.extend_from_slice(&b[..k]);
+        }
+        let mut b = [0u8; 1];
+        let k = e.close(&mut b);
+        d.extend_from_slice(&b[..k]);
+        let mut h = e.header();
+        let c = !dlog::crc32_upd(dlog::crc32_upd(!0, &h[8..]), &d[h0 + dlog::CHDR..]);
+        h[4..8].copy_from_slice(&c.to_le_bytes());
+        d[h0..h0 + dlog::CHDR].copy_from_slice(&h);
+    }
+    std::fs::write(out, &d).unwrap();
+    println!("{inp} -> {out}: {} rows, {} -> {} bytes", rows.len(), txt.len(), d.len());
+    true
+}
+
 fn main() {
     host::map_flash();
     println!("size_of Gallery = {} bytes", std::mem::size_of::<gallery::Gallery>());
@@ -859,7 +911,8 @@ fn main() {
         "ui" => ui(&a[2], &a[3], &a[4]),
         "decode" => decode(&a[2], &a[3]),
         "lock" => lock(&a[2], &a[3]),
-        _ => panic!("ui | decode | lock"),
+        "dlg" => dlg(&a[2], &a[3]),
+        _ => panic!("ui | decode | lock | dlg"),
     };
     std::process::exit(if ok { 0 } else { 1 });
 }
