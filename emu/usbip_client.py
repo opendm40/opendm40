@@ -36,6 +36,18 @@ OP_REQ_IMPORT = 0x8003
 CMD_SUBMIT = 1
 RET_SUBMIT = 3
 DIR_OUT, DIR_IN = 0, 1
+HANDSHAKE_S = float(os.environ.get('USBIP_TIMEOUT', 5))  # DEVLIST / IMPORT answer deadline, s
+# Renode's DEVLIST / IMPORT read the device descriptor over EP0 and wait for the firmware to answer.
+# A request that timed out does not wedge the server: once the firmware answers, the next one works
+# (checked with fw-rs paused / resumed). The stock firmware never answers in the emulator, not even after
+# Settings > Other > USB Connect (its USB does not enumerate here; fw-rs enables USB at boot).
+NO_ANSWER = ('no answer from the USB/IP server on %s:%d within %g s: the firmware has not enabled USB yet - '
+             'the stock firmware needs Settings > Other > USB Connect (and even then does not enumerate in the '
+             'emulator; fw-rs enables USB at boot); restart the emulator if the server stays stuck')
+
+
+class NoAnswer(IOError):
+    pass
 
 
 def recvn(s, n):
@@ -52,10 +64,22 @@ def op_header(code):
     return struct.pack('>HHI', VERSION, code, 0)
 
 
+def handshake_reply(s):
+    """The 8-byte op reply header, or NoAnswer after HANDSHAKE_S."""
+    s.settimeout(HANDSHAKE_S)
+    try:
+        h = recvn(s, 8)
+    except (TimeoutError, socket.timeout):
+        s.close()
+        raise NoAnswer(NO_ANSWER % (HOST, PORT, HANDSHAKE_S))
+    s.settimeout(20)
+    return h
+
+
 def devlist():
     s = socket.create_connection((HOST, PORT), timeout=20)
     s.sendall(op_header(OP_REQ_DEVLIST))
-    _, _, status = struct.unpack('>HHI', recvn(s, 8))
+    _, _, status = struct.unpack('>HHI', handshake_reply(s))
     if status != 0:
         raise IOError('DEVLIST status %d' % status)
     (ndev,) = struct.unpack('>I', recvn(s, 4))
@@ -76,7 +100,7 @@ class Dev:
         self.busid = busid
         self.s = socket.create_connection((HOST, PORT), timeout=20)
         self.s.sendall(op_header(OP_REQ_IMPORT) + busid.encode('latin1').ljust(32, b'\0'))
-        _, _, status = struct.unpack('>HHI', recvn(self.s, 8))
+        _, _, status = struct.unpack('>HHI', handshake_reply(self.s))
         if status != 0:
             raise IOError('IMPORT refused, status %d' % status)
         d = recvn(self.s, 0x138)
@@ -475,6 +499,15 @@ def msc_dump(d, lun, out):
 
 
 def main():
+    try:
+        main1()
+    except NoAnswer as e:
+        sys.exit(str(e))
+    except ConnectionRefusedError:
+        sys.exit('no USB/IP server on %s:%d (live.py --no-usbip? another port: USBIP_PORT=...)' % (HOST, PORT))
+
+
+def main1():
     a = sys.argv[1:]
     if not a or a[0] == 'list':
         for d in devlist():

@@ -103,10 +103,16 @@ tiles are at (46,52) Multimeter, (244,52) Oscilloscope, (46,166) Signal,
 /usr/bin/python3 emu/live.py stock --fast        # or fwrs | chain, plus any run.py option
 ```
 
-A GTK4/libadwaita window drawn like the device (user manual figure 2.1.1):
-the display in its black glass with the MENU / RUN / AUTO / MF touch strip
-on its left, the power button on the left edge, USB-C / charge LED / MCX
-generator / MCX scope on the top edge, the V-Ohm / COM / A jacks on the right
+A GTK4/libadwaita window drawn like the device (user manual figure 2.1.1 and
+product photos): the display in its black glass with the MENU / RUN / AUTO /
+MF touch strip on its left, the power button on the left edge, the V-Ohm /
+COM / A jacks with their legends on the right, and above the front view a
+top view of the top edge (USB-C with the charge LED, MCX OUT, MCX OSC). The
+device sits top-left at the largest integer scale that leaves a 340 px card
+column; the input cards fill the rest of the window: DMM jacks and the
+front-end schematic on the right, scope input / generator+USB / monitor under
+the device when they fit there (1440x900, the default), else at the end of
+the right column (1280x800; it scrolls)
 (Wayland-native, follows the system style; `--tk` or a missing PyGObject falls
 back to a plain Tk window). The LCD is the ILI9488 model's framebuffer,
 exported to a memory-mapped file 30 times a second and shown at an integer
@@ -115,17 +121,20 @@ Renode's monitor TCP port (`renode -P`), so the GUI never blocks the emulation.
 
 * Display: mouse press / drag / release = touch; Ctrl+drag = two-finger pinch
   around the click point. Strip keys: press-and-hold (held = long press),
-  pressed keys light up. Power button = PD6. Jacks / MCX / USB open the matching
-  page of the inputs sidebar (DMM function picker + value fields -> the
-  HY3131 model's `SetInput`, scope feeder waveform, generator/USB notes, a
-  free monitor command line).
+  pressed keys light up. Power button = PD6. Jacks / MCX / USB focus the
+  matching input card (what is connected to the jacks -> the HY3131 model's
+  `SetInput`, scope feeder waveform, generator/USB notes, a free monitor
+  command line).
 * Keyboard: `m r a f` = MENU RUN AUTO MF, `p` = power, `F2` / `F3` = 2-/3-finger
   swipe down (power-off confirm / screenshot gestures), `space` = pause/resume,
-  `s` = screenshot to `emu/out/live-*.png`, `F9` = sidebar, `Esc` / Ctrl-C /
-  close = quit (Renode is stopped, nothing is left running).
+  `s` = screenshot to `emu/out/live-*.png`, `Esc` / Ctrl-C / SIGHUP / close =
+  quit (Renode's process group is stopped, also when the window closes while
+  Renode is still starting). A watchdog process next to Renode stops it when
+  live.py dies without cleaning up (SIGKILL, crash), and a starting live.py
+  stops leftover Renodes running `out/live.resc` that no live.py owns.
 * Header bar: firmware (stock / fwrs / chain, restarts the machine), Fast
   (PerformanceInMips 50, roughly real time on this host), pause, restart,
-  screenshot, sidebar; the subtitle shows the virtual time and the speed ratio.
+  screenshot; the subtitle shows the virtual time and the speed ratio.
 * Logs: `emu/out/live-renode.out` (Renode), `emu/out/live-monitor.log` (every
   monitor command and reply).
 
@@ -162,7 +171,14 @@ enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk
 over MSC (a 4 KiB block = 64 bulk URBs, each a main-loop turn of fw-rs: a
 few seconds in `--fast` mode). Attaching the device to the host kernel
 (`usbip attach`, then `dm40dbg.py` / mounting the disk) needs vhci-hcd and
-root and was not run. The stock's "USB Connect" MSC was not tried yet. Fixed 2026-10-21: "after a few dozen bulk
+root and was not run. Stock firmware: the device exists only after Settings >
+Other > USB Connect; until then Renode's DEVLIST / IMPORT wait for the
+descriptor read forever, so `usbip_client.py` gives up after 5 s
+(`USBIP_TIMEOUT`) with a "no answer" message. Checked 2026-10-21: even after
+USB Connect the stock never answers the descriptor read in the emulator (90 s
+wait; its USB does not enumerate here - not investigated); a request that timed
+out does not wedge the server (fw-rs paused during a `list`, resumed: the next
+`list` answers at once). Fixed 2026-10-21: "after a few dozen bulk
 transfers the emulated DWC2 stops answering URBs (EP0 too)" was a race in the
 model: the USB/IP server thread cleared DIEPCTL.EPENA while the CPU polled
 that register, the clear was lost, the driver saw its IN endpoint busy
