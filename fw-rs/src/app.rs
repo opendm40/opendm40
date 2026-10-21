@@ -1520,7 +1520,9 @@ impl App {
         let hv_level = if v >= 100.0 { 2 } else if v >= 30.0 { 1 } else { 0 };
         let hv_changed = hv_level != self.hv_level;
         self.hv_level = hv_level;
-        if dmm_view && (u.show.is_some() || (hv_changed && self.view == View::DmmScope)) {
+        // DMM page: the stock >= 30 V red value (ui-review #13).
+        self.dmm_view.hv_red = hv_level >= 1;
+        if dmm_view && (u.show.is_some() || hv_changed) {
             self.draw_reading();
             self.hold_shown = self.shown_state();
         }

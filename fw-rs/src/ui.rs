@@ -21,6 +21,9 @@ pub const SEL: Color = 0x0419; // (0, 128, 200) selected button
 /// stock layout table gui_v2_6.h:330-339 uses it). Owner request: back to
 /// the stock colour (an earlier fw-rs build drew the reading red).
 pub const VALUE: Color = 0xFC40;
+/// Stock value colour in the V functions from 30 V (gui_v2_6.h:157/175,
+/// GUI_C_VALUE_HV); the lightning glyph comes on at 100 V.
+pub const VALUE_HV: Color = 0xC9A0;
 
 pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items after the logo (4 + LOGO + 3).
@@ -196,6 +199,10 @@ pub struct DmmView {
     /// None = labels to draw; and the overload marker as last drawn.
     bar_scale: Option<(u32, &'static str, bool)>,
     bar_ol: Option<bool>,
+    /// ui-review #13: draw the value in the stock >= 30 V red (set by the
+    /// app before `reading`); as last drawn.
+    pub hv_red: bool,
+    last_red: bool,
 }
 
 /// Bargraph geometry in the history row's place (rows 150..172 between the
@@ -311,6 +318,8 @@ impl DmmView {
             bar: crate::bargraph::Bar::new(BAR_RECT.0, BAR_RECT.1, BAR_RECT.2, BAR_RECT.3, false),
             bar_scale: None,
             bar_ol: None,
+            hv_red: false,
+            last_red: false,
         }
     }
 
@@ -431,8 +440,14 @@ impl DmmView {
         let (s, f, ext) = fmt7(&mut buf, &r.main, true);
         let mut ub = [0u8; 16];
         let unit = sf::unit_text(r.main.unit, &mut ub);
+        // ui-review #13: the stock >= 30 V cue, the value in VALUE_HV (V
+        // functions, set by the app from the live reading). A colour change
+        // repaints every digit.
+        let color = if self.hv_red { VALUE_HV } else { VALUE };
+        let recolor = self.last_red != self.hv_red;
+        self.last_red = self.hv_red;
         // Only the changed digits are redrawn (cell layout unchanged).
-        let same_layout = self.last_fmt == f && (self.last_ext != 0) == ext.is_some();
+        let same_layout = self.last_fmt == f && (self.last_ext != 0) == ext.is_some() && !recolor;
         let prev_txt = self.last_txt;
         let prev = if same_layout { core::str::from_utf8(&prev_txt[..7]).unwrap_or("") } else { "" };
         let n = s.len().min(7);
@@ -453,11 +468,11 @@ impl DmmView {
             Some(_) => (XT_X - 40, &CELLS_X[f & 3]),
             None => (360, &CELLS[f]),
         };
-        sf::cells_diff(sf::F78, rect(40, 68, w as i16, 80), s, prev, cells, VALUE, BG);
+        sf::cells_diff(sf::F78, rect(40, 68, w as i16, 80), s, prev, cells, color, BG);
         if let Some(e) = ext {
             if !same_layout || last_ext != e {
                 let r = rect(XT_X as i16, 68, XT_W as i16, 80);
-                sf::label_half(sf::F78, r, e as char, VALUE_BASE as i16, VALUE, BG);
+                sf::label_half(sf::F78, r, e as char, VALUE_BASE as i16, color, BG);
             }
         } else if last_ext != 0 {
             // The full cells end at 400: the rest of the +1 digit cell.

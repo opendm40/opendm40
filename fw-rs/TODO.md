@@ -166,7 +166,8 @@ Code work (in this order):
         still have none (the scope page has its own press_fx).
       - #12 backlight / volume -/+ steppers, clamped (1f19f05 drawing, 7e2abce logic).
       - #13 already in: DMM lightning >= 100 V (stock), combined strip HV badge >= 30 V and red
-        ring >= 100 V. The >= 30 V tint on the DMM page itself: not done (the value is red anyway).
+        ring >= 100 V. DMM page >= 30 V: done 2026-10-21 as the stock cue itself (value 0xC9A0 red in V
+        functions from 30 V, gui_v2_6.h:175; the value is orange otherwise).
       - #14 won't do: the preview is the stock geometry (4,85,239,231; stock UI is the baseline);
         the bar now carries the status (#9).
       - #15 the duplicate Keypad/ScopeMenu arms are gone (ScopeMenu removed by the scope port).
@@ -553,3 +554,6 @@ Emulator (emu/):
       Rows 147..172 (3 px from the F78 ink and the chart frame), probed for the ui-render ink check;
       incremental update repaints only the changed segments (98..150 bus words / update; bargraph-test:
       every update equals a fresh draw).
+- [x] ui-review #13 remainder: the DMM page value turns the stock red (0xC9A0) in the V functions from 30 V
+      (live reading, also while HOLD; the stock cue, gui_v2_6.h:157/175), lightning still from 100 V. No bar
+      tint: the stock has none. (verify on device: 30 V on the calibrator)
