@@ -473,6 +473,11 @@ Firmware:
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
       V/mV/A on the isolated jacks (current waveforms). Scope UI reused ("Wave" from DMM, MCX|DMM source badge),
       software trigger. Needs one ISR (owner decision; fw-rs is ISR-free) + HY3131 on hardware SPI2; ~2.5-3 weeks.
+- [ ] Device 2026-10-21 (docs/device-check-2026-10-21.md): stack 37468/46048 B (81 %) on 16b3eb9 — the stack
+      region shrank 59152 -> 46048; re-check on 24f7080 and restore headroom (>= 16 KB).
+- [ ] Scope 32 ms loop passes ~3/s: measurement maths (11.4 ms) + 4 measurement cells redraw (12.3 ms) in one
+      pass; split across passes and redraw only changed cells (3-4 % of touch/USB wait up to 33 ms).
+- [ ] Scope ~9 fps at 1 ms/div 2 V/div after AUTO vs 36 fps before at the same timebase — investigate.
 Emulator (emu/):
 - [ ] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
       at the same time); the firmware's mux/relay choices route it through a modelled DM40 front-end (dividers, shunts, relays,
