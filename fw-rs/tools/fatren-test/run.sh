@@ -581,11 +581,21 @@ mcopy -n -i $IMG7 ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.
 mdir -i $IMG7 ::
 echo "--- scope record CSV (scope_csv.rs through the screenshot job, UF-13)"
 "$W/t" $IMG7 scopecsv | tee $W/sc1
-grep -q "csv=Saved(0) len=692253 .*shot_refused=true shot_result=None" $W/sc1 && echo "ok: SCOP000.CSV, 26624 rows, a screenshot meanwhile refused" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "csv=Saved(0) len=53325 .*shot_refused=true shot_result=None" $W/sc1 && echo "ok: SCOP000.DLG (26624 samples, 53325 bytes; the CSV is 692253), a screenshot meanwhile refused" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG7
-"$W/t" $IMG7 scopecsv 300 | grep -q "csv=Saved(1) len=7829 " && echo "ok: then SCOP001.CSV (300 rows)" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMG7 scopecsv 300 | grep -q "csv=Saved(1) len=677 " && echo "ok: then SCOP001.DLG (300 samples)" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG7
-mcopy -n -i $IMG7 ::SCOP000.CSV $W/s.csv
+# The CSV generated from the DLG (tools/dlog.py) == the pre-DLG writer's
+# SCOP000.CSV / SCOP001.CSV for the same records (c8db910 scope_csv.rs; md5).
+mcopy -n -i $IMG7 ::SCOP000.DLG $W/s.dlg
+python3 -I ../dlog.py $W/s.dlg -o $W/s.csv
+mcopy -n -i $IMG7 ::SCOP001.DLG $W/s1.dlg
+python3 -I ../dlog.py $W/s1.dlg -o $W/s1.csv
+[ "$(md5sum < $W/s.csv | cut -c1-32)" = 4921f54425a8f14d910a25e65a4fc3c6 ] && [ "$(md5sum < $W/s1.csv | cut -c1-32)" = cdc42f159193ea1a1cc7b2b2b4f44dd2 ] && echo "ok: decoded SCOP000.CSV / SCOP001.CSV == the old CSV writer's files, byte for byte" || { echo "FAIL at line $LINENO"; exit 1; }
+cp $IMG7 $W/scop.img
+vdisk $W/f1m_native $VD logs $W/scop.img
+grep -q "logs taken=2 " $W/vd.out || { echo "FAIL at line $LINENO"; exit 1; }
+mcopy -n -i $VD ::SCOP000.CSV - | cmp - $W/s.csv && mcopy -n -i $VD ::SCOP001.CSV - | cmp - $W/s1.csv && echo "ok: LUN 1 serves SCOP000.CSV / SCOP001.CSV (== dlog.py)" || { echo "FAIL at line $LINENO"; exit 1; }
 python3 -I - $W/s.csv <<'PY' || { echo "FAIL: SCOP000.CSV content"; exit 1; }
 import math, sys
 L = open(sys.argv[1], 'rb').read().split(b'\r\n')

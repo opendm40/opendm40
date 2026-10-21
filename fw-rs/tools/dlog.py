@@ -173,16 +173,18 @@ def decode(d, errors):
     off = FHDR + hl
     if kind == 2:
         a, b, dt = struct.unpack_from('<fff', d, off)
-        t0, n = struct.unpack_from('<II', d, off + 12)
+        t0, n, crc = struct.unpack_from('<III', d, off + 12)
+        if zlib.crc32(d[off:off + 20]) != crc:
+            raise ValueError('bad scope parameters')
         f = lambda x: struct.unpack('<f', struct.pack('<f', x))[0]
-        p = off + 20
+        p = off + 24
         for i in range(n):
             if p + 2 > len(d):
                 errors.append('torn at sample %d' % i)
                 break
             c = struct.unpack_from('<H', d, p)[0] & 0x3FF
             p += 2
-            t = f(f(i - t0) * dt)
+            t = f(f(i - t0 if i >= t0 else -(t0 - i)) * dt)
             out.append(sci(t, 5) + ',' + sci(f(a + f(b * c)), 4) + '\r\n')
         return ''.join(out), {'rows': n, 'chunks': 0}
     rows = chunks = 0

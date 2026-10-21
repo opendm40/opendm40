@@ -1,7 +1,8 @@
 //! Screenshot to the SPI-flash USB disk (docs/user-feedback.md UF-17, stock
 //! "PriScr": 3-finger swipe down, gui_v2_6.h "Screenshot"). The same job
-//! writes the scope record CSV (UF-13, `start_csv`, content from
-//! scope_csv.rs: SCOP%03u.CSV, no capture phase, length from scope_csv).
+//! writes the scope record (UF-13, `start_csv`, content from scope_csv.rs:
+//! SCOP%03u.DLG, the compact binary form of the CSV, which LUN 1 / MMEM:DATA?
+//! serve as SCOP%03u.CSV; no capture phase, length from scope_csv).
 //!
 //! File: the next free `S%03u.BMP` in the root (lowest unused number, as the
 //! stock "s%.3d.bmp" / first free number, spiflash_v2_6.h), byte-compatible
@@ -127,11 +128,13 @@ const HDR: [u8; HDR_LEN as usize] = [
     0x00, 0xF8, 0x00, 0x00, 0xE0, 0x07, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00, // R G B masks
 ];
 const _: () = assert!(FILE_LEN == 307_266 && NBLK == 76);
-/// Blocks of the largest file (a scope CSV, scope_csv.rs) and the cluster
-/// list size (1 cluster = 1 block on this disk; a bigger cluster only needs
-/// fewer entries).
-const MAX_NBLK: u32 = crate::scope_csv::MAX_LEN.div_ceil(BLK as u32);
-const _: () = assert!(MAX_NBLK >= NBLK);
+/// Blocks of the largest file (the screenshot; a scope record, scope_csv.rs,
+/// is ~53 KB) and the cluster list size (1 cluster = 1 block on this disk;
+/// a bigger cluster only needs fewer entries).
+const MAX_NBLK: u32 = {
+    let s = crate::scope_csv::MAX_LEN.div_ceil(BLK as u32);
+    if s > NBLK { s } else { NBLK }
+};
 /// File kinds: the screenshot, a scope record CSV (UF-13).
 const K_BMP: u8 = 0;
 const K_CSV: u8 = 1;
@@ -310,8 +313,8 @@ pub fn start() -> bool {
     true
 }
 
-/// Request a scope-record CSV (scope_csv.rs, set up by the caller first):
-/// the next free SCOP%03u.CSV, written like a screenshot (no screen
+/// Request a scope-record file (scope_csv.rs, set up by the caller first):
+/// the next free SCOP%03u.DLG, written like a screenshot (no screen
 /// capture, nothing frozen). Its result comes from `take_csv_result`, not
 /// `take_result`. False: a disk job is in flight, a PC has the disk mounted.
 pub fn start_csv() -> bool {
@@ -349,7 +352,7 @@ pub fn take_csv_result() -> Option<Shot> {
 
 /// (prefix, extension) of the job's file name.
 fn name_of(kind: u8) -> (&'static [u8], &'static [u8; 3]) {
-    if kind == K_CSV { (b"SCOP", b"CSV") } else { (b"S", b"BMP") }
+    if kind == K_CSV { (b"SCOP", b"DLG") } else { (b"S", b"BMP") }
 }
 
 /// A screenshot is in flight (host disk writes are refused meanwhile).
@@ -560,7 +563,9 @@ impl Job {
                 continue;
             }
             let n = (e[d] - b'0') as u16 * 100 + (e[d + 1] - b'0') as u16 * 10 + (e[d + 2] - b'0') as u16;
-            if sfn_is(e, &calbackup::numbered_name(pre, n, ext)) {
+            // (A legacy SCOP%03u.CSV keeps its number too: LUN 1 shows the
+            // DLG as SCOP%03u.CSV.)
+            if sfn_is(e, &calbackup::numbered_name(pre, n, ext)) || (self.kind == K_CSV && sfn_is(e, &calbackup::numbered_name(pre, n, b"CSV"))) {
                 self.taken[(n / 32) as usize] |= 1 << (n % 32);
             }
         }

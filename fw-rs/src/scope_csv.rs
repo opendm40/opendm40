@@ -1,35 +1,40 @@
-//! Scope record as CSV on the SPI-flash USB disk (UF-13, the stock MF
-//! Settings "Save CSV"): the stored record of a STOPPED scope, written as
-//! the next free `SCOP%03u.CSV` by the screenshot writer (screenshot.rs,
-//! kind Csv: non-blocking slices, data -> FAT -> directory -> CRC verify,
-//! the same disk-sharing rules: refused while a PC has the disk mounted,
-//! host writes refused while it runs, one disk job at a time).
+//! Scope record on the SPI-flash USB disk (UF-13, the stock MF Settings
+//! "Save CSV"): the stored record of a STOPPED scope, written as the next
+//! free `SCOP%03u.DLG` by the screenshot writer (screenshot.rs, kind Csv:
+//! non-blocking slices, data -> FAT -> directory -> CRC verify, the same
+//! disk-sharing rules: refused while a PC has the disk mounted, host writes
+//! refused while it runs, one disk job at a time).
 //!
-//! Content (CRLF, ASCII, '.' decimals):
+//! The file is the compact binary form (dlog.rs kind 2, docs/
+//! compact-log-format.md): the CSV header text, the code -> volts map and
+//! the sample time, then the raw 10-bit codes as u16: 53 KB for the full
+//! 26624-sample record instead of the CSV's 692 KB. The CSV exists on read
+//! (SCOP%03u.CSV on the read-only LUN 1, MMEM:DATA?, tools/dlog.py), byte
+//! for byte what this module wrote as text before:
 //!   # Alientek DM40A, fw-rs 0.0.1, scope record (no real-time clock)
 //!   # timebase 200us/div, 1V/div, probe x1, coupling DC, sample rate 12.5MS/s, samples 26624
 //!   # trigger Edge rising 993mV, mode Auto, triggered
 //!   # time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip
 //!   time_s,volts
 //!   -1.06496e-03,+1.2345e+00
-//! Rows are fixed width (26 bytes), so the file length is known before the
-//! first block is written (screenshot.rs allocates the whole chain first)
-//! and any block can be filled on its own (`fill`). The whole record (up to
-//! scope::CAP samples, ~690 KB, ~10 s) is written, not only the screen.
+//! (fixed-width 26-byte rows, dlog::scope_row). The file length is known
+//! before the first block is written (screenshot.rs allocates the whole
+//! chain first) and any block can be filled on its own (`fill`). The whole
+//! record (up to scope::CAP samples, ~10 s) is written, not only the screen.
 //!
-//! The record lives in the scope buffer: while a CSV is written the scope
-//! is held stopped (`Scope::hold`; RUN / AUTO / SCPI RUN do not restart it)
+//! The record lives in the scope buffer: while it is written the scope is
+//! held stopped (`Scope::hold`; RUN / AUTO / SCPI RUN do not restart it)
 //! and the code -> volts map is the one taken at `start` (a probe or V/div
 //! change meanwhile does not change the file).
 
 #![allow(dead_code)]
 
-/// Fixed row: "+d.ddddde+xx,+d.dddde+xx\r\n".
-pub const ROW: usize = 26;
+/// CSV row width (the generated CSV, dlog::scope_row).
+pub const ROW: usize = crate::dlog::SCOPE_ROW;
 const HDR_MAX: usize = 512;
 /// Largest record (scope::CAP, asserted in scope_page.rs) and file.
 pub const REC_MAX: usize = 26 * 1024;
-pub const MAX_LEN: u32 = (HDR_MAX + REC_MAX * ROW) as u32;
+pub const MAX_LEN: u32 = (crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR + REC_MAX * 2) as u32;
 
 struct Snap {
     rec: &'static [u16],
@@ -94,89 +99,35 @@ pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr) {
     s.hdr_n = n;
 }
 
-/// File length in bytes.
+/// File length in bytes (the DLG file).
 pub fn len() -> u32 {
     let s = snap();
-    (s.hdr_n + s.rec.len() * ROW) as u32
+    (crate::dlog::FHDR + s.hdr_n + crate::dlog::SCOPE_PAR + s.rec.len() * 2) as u32
 }
 
-/// "+d.dd..de+xx" with `dig` decimals into `out` (2 + dig + 4 bytes).
-fn sci(out: &mut [u8], v: f32, dig: usize) {
-    let mut v = if v.is_finite() { v } else { 0.0 };
-    out[0] = if v < 0.0 { b'-' } else { b'+' };
-    v = v.abs();
-    let mut e = 0i32;
-    if v != 0.0 {
-        while v >= 10.0 {
-            v *= 0.1;
-            e += 1;
-        }
-        while v < 1.0 {
-            v *= 10.0;
-            e -= 1;
-        }
-    }
-    let mut scale = 1u32;
-    for _ in 0..dig {
-        scale *= 10;
-    }
-    let mut m = (v * scale as f32 + 0.5) as u32;
-    if m >= 10 * scale {
-        m /= 10;
-        e += 1;
-    }
-    let ip = m / scale;
-    let mut fp = m % scale;
-    out[1] = b'0' + ip as u8;
-    out[2] = b'.';
-    for i in (0..dig).rev() {
-        out[3 + i] = b'0' + (fp % 10) as u8;
-        fp /= 10;
-    }
-    let k = 3 + dig;
-    out[k] = b'e';
-    out[k + 1] = if e < 0 { b'-' } else { b'+' };
-    let ea = e.unsigned_abs().min(99);
-    out[k + 2] = b'0' + (ea / 10) as u8;
-    out[k + 3] = b'0' + (ea % 10) as u8;
-}
-
-/// Row `i` of the record.
-fn row(i: usize, out: &mut [u8; ROW]) {
-    let s = snap();
-    let t = (i as i32 - s.t0 as i32) as f32 * s.dt;
-    sci(&mut out[0..12], t, 5);
-    out[12] = b',';
-    sci(&mut out[13..24], s.a + s.b * (s.rec[i] & 0x3FF) as f32, 4);
-    out[24] = b'\r';
-    out[25] = b'\n';
-}
-
-/// File bytes `off .. off + buf.len()`.
+/// File bytes `off .. off + buf.len()`: the DLG header + parameters, then
+/// the codes (u16 LE, 10 bits).
 pub fn fill(off: u32, buf: &mut [u8]) {
     let s = snap();
     let mut off = off as usize;
     let mut i = 0;
-    while i < buf.len() && off < s.hdr_n {
-        buf[i] = s.hdr[off];
-        i += 1;
-        off += 1;
+    let head = crate::dlog::FHDR + s.hdr_n + crate::dlog::SCOPE_PAR;
+    if off < head {
+        let mut h = [0u8; crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR];
+        let n = crate::dlog::scope_header(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, s.rec.len() as u32, &mut h);
+        while i < buf.len() && off < n {
+            buf[i] = h[off];
+            i += 1;
+            off += 1;
+        }
     }
-    let mut r = [0u8; ROW];
-    let mut cur = usize::MAX;
     while i < buf.len() {
-        let k = (off - s.hdr_n) / ROW;
+        let k = (off - head) / 2;
         if k >= s.rec.len() {
             break;
         }
-        if k != cur {
-            row(k, &mut r);
-            cur = k;
-        }
-        let o = (off - s.hdr_n) % ROW;
-        let n = (ROW - o).min(buf.len() - i);
-        buf[i..i + n].copy_from_slice(&r[o..o + n]);
-        i += n;
-        off += n;
+        buf[i] = ((s.rec[k] & 0x3FF) >> (8 * ((off - head) % 2))) as u8;
+        i += 1;
+        off += 1;
     }
 }
