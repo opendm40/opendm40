@@ -544,7 +544,9 @@ settings page at 18 states, 0 violations; renders p01..p08, c12):
   function) -> the wiring dialog: source / load boxes, the + wire with V/ohm
   on it, the return conductor broken through A (load side) and COM (source
   side), current arrows, "COM carries the load current; P > 0: I into A",
-  the limit; Cancel / OK. Any function button leaves. MF in the power meter
+  the limit; Cancel / OK. Any function button leaves: A to DC A on the
+  power meter's current range (its shunt kept), the others as the stock (the
+  47.5 ohm resting shunt; a current still flowing then trips A-JACK). MF in the power meter
   -> Power Settings: V ranges + AUTO, I ranges + AUTO, P + PF / VA only
   (the fallback), Burden ON / OFF, Reset Wh, Wiring (the dialog again), OK.
 

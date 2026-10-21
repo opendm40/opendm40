@@ -1383,8 +1383,11 @@ impl Dmm {
     ///   cap: from elsewhere r0 auto; again does nothing.
     ///   cont/diode: diode first, then 11 <-> 12. Hz/temp: 14 first, 14 <-> 15.
     pub fn press(&mut self, clk: &mut Clock, b: Button) {
-        // Power meter: any function button leaves it (A: DC A as from elsewhere).
-        let same = self.button() == b && !self.pw.on;
+        // Power meter: any function button leaves it; A to the DC A mode of
+        // the power meter's current range (a load current may still flow:
+        // not the mA shunt of the usual A entry).
+        let from_pw = self.pw.on.then(|| pw::iu_ir(self.pw.ik));
+        let same = self.button() == b && from_pw.is_none();
         let m = self.mode;
         if same && matches!(b, Button::Volt | Button::Amp) {
             // DC -> AC -> AC+DC -> DC (the stock skips AC+DC for model 0).
@@ -1402,8 +1405,13 @@ impl Dmm {
             }
             Button::Amp => {
                 self.manual = false;
-                let r = self.range.max(0) % 2;
-                self.set(clk, 8, r, 650);
+                match from_pw {
+                    Some((iu, ir)) => self.set(clk, 7 + iu, ir as i8, 650),
+                    None => {
+                        let r = self.range.max(0) % 2;
+                        self.set(clk, 8, r, 650);
+                    }
+                }
             }
             Button::Ohm => {
                 if same {
