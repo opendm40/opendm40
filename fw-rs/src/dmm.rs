@@ -2097,7 +2097,10 @@ impl Dmm {
     fn poll_cont(&mut self) -> Option<Reading> {
         let ad1 = self.ad1()?;
         self.osr(ad1, 0x206, 0x14, false);
-        let ohm = -(ad1 as f32) * cal(0x15C, 1.0) / 0.9 / (AD1_DIV / 1000.0) - cal(0x160, 0.0);
+        // Negative results (a source, a diode the wrong way or a charged
+        // capacitor on the jacks) clamp to 0 as the stock (dmm_v2_6.h m+0x18:
+        // only its raw mode skips the clamp); emulator cross table.
+        let ohm = (-(ad1 as f32) * cal(0x15C, 1.0) / 0.9 / (AD1_DIV / 1000.0) - cal(0x160, 0.0)).max(0.0);
         let ol = ohm > 1000.0;
         Some(self.reading(if ol { Val::ol(2, "\u{3a9}") } else { Val::new(ohm, 2, "\u{3a9}") }, ohm))
     }
