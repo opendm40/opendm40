@@ -489,6 +489,24 @@ pub(crate) fn counter_vals(ctc: u32, ctb: u32, cta: u32) -> (f32, f32) {
     (ctb as f32 / n * 4915.28, ctc as f32 / n * 100.0)
 }
 
+/// A counter result that cannot be a clean measurement: input periods
+/// counted (f > 0) but the input never seen low during the gate (duty
+/// shown as 100.0 %, >= 99.95). (The low side is not rejected: real narrow
+/// pulse trains below 0.5 % duty exist.) Device 2026-10-21 (40 Hz square, AC+DC
+/// -> Hz): for ~11 s one counter source read 1/3 and 2/3 of the frequency
+/// with duty 100 % (edges missed while the input path settles); its results
+/// must neither win the source choice nor reach the readout / MIN / AVG.
+pub(crate) fn freq_glitch(f_khz: f32, duty: f32) -> bool {
+    f_khz > 0.0 && duty >= 99.95
+}
+
+/// Frequency mode source choice (FUN_08013450's two counter sources): the
+/// one whose result changed least since its previous one. A glitch result
+/// (`freq_glitch`) or no signal counts as a change of 1e6.
+pub(crate) fn freq_change(f_khz: f32, duty: f32, last: f32) -> f32 {
+    if f_khz == 0.0 || freq_glitch(f_khz, duty) { 1e6 } else { (f_khz - last).abs() }
+}
+
 /// Frequency auto range for `f` kHz; x = factor * over (6.18 kHz at 60000
 /// counts): range r spans up to x * 10^(r-2). Above 10000 x: `prev`.
 pub(crate) fn freq_range_for(f: f32, x: f32, prev: u8) -> u8 {
@@ -1074,6 +1092,12 @@ impl Dmm {
         self.freq.f_khz = 0.0;
         self.freq.duty = 0.0;
         self.freq.range = 0;
+        // No source history from another function (AC+DC's secondary
+        // counter, an earlier frequency session): the first two results
+        // of each source decide afresh.
+        self.freq.last = [0.0; 2];
+        self.freq.change = [1e6; 2];
+        self.freq.src_alt = false;
         self.ramp.first = true;
     }
 
@@ -2228,11 +2252,18 @@ impl Dmm {
         let i = self.freq.src_alt as usize;
         let next_src = if self.freq.src_alt { 0xF0 } else { 0x08 };
         let (f, d) = self.read_counters(next_src);
-        let ch = if f == 0.0 { 1e6 } else { (f - self.freq.last[i]).abs() };
-        self.freq.change[i] = ch;
-        self.freq.last[i] = f;
+        let glitch = freq_glitch(f, d);
+        self.freq.change[i] = freq_change(f, d, self.freq.last[i]);
+        // A glitch result is not kept as the source's last value either.
+        if !glitch {
+            self.freq.last[i] = f;
+        }
         self.freq.src_alt = !self.freq.src_alt;
         let best = if self.freq.change[0] <= self.freq.change[1] { 0 } else { 1 };
+        if glitch && best == i {
+            // Neither source has a clean result: no reading this gate.
+            return None;
+        }
         self.freq.f_khz = self.freq.last[best];
         if best == i {
             self.freq.duty = d;
@@ -2569,6 +2600,24 @@ pub fn format(buf: &mut [u8; 16], v: f32, dec: u8) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn freq_glitch_source_loses() {
+        // Clean 40 Hz on one source, 13.334 / 26.668 Hz at 100 % duty on the
+        // other (device, AC+DC -> Hz): the clean source wins every time.
+        let f = 0.040002;
+        assert!(!freq_glitch(f, 50.0));
+        assert!(freq_glitch(0.013334, 100.0) && freq_glitch(0.026668, 99.96) && !freq_glitch(0.04, 0.2) && !freq_glitch(0.04, 99.9));
+        assert!(!freq_glitch(0.0, 100.0)); // no signal: 0 Hz, not a glitch
+        let clean = freq_change(f, 50.0, f);
+        for (g, d) in [(0.013334f32, 100.0f32), (0.026668, 100.0)] {
+            assert!(freq_change(g, d, g) > clean);
+            assert!(freq_change(g, d, 0.0) > clean);
+        }
+        // No history after a function change: a clean first result (change
+        // from 0) still beats a glitch.
+        assert!(freq_change(f, 50.0, 0.0) < freq_change(0.013334, 100.0, 0.013334));
+    }
 
     #[test]
     fn code_window_per_rate() {

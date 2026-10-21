@@ -557,3 +557,12 @@ Emulator (emu/):
 - [x] ui-review #13 remainder: the DMM page value turns the stock red (0xC9A0) in the V functions from 30 V
       (live reading, also while HOLD; the stock cue, gui_v2_6.h:157/175), lightning still from 100 V. No bar
       tint: the stock has none. (verify on device: 30 V on the calibrator)
+- [x] Device bug (16b3eb9, 40 Hz square 0..10.4 V): CONF:VOLT:ACDC then CONF:FREQ read 40.002 / 13.334 /
+      26.668 Hz with duty 100.0 % for ~11 s (MIN / AVG polluted); DC V -> Hz clean. Not reproduced in the
+      emulator (its counter model has no settling input path: clean 40.0007 Hz at once). Firmware side:
+      the frequency mode's two-source choice kept its history across functions (last / change / source
+      phase never reset) and accepted results with duty 100 % (periods counted while the input is never
+      seen low = edges missed). Now: source history reset on every function change; a result with f > 0
+      and duty >= 99.95 % neither wins the choice nor reaches the readout / MIN / AVG (no reading that gate).
+      Cause of the missed edges (input path settling after the AC+DC relay pulses?) still open: retest on
+      the device; if the wrong readings persist, compare the stock's AC+DC -> Hz entry (R20 / relay order).
