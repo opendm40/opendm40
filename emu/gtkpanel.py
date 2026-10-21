@@ -57,7 +57,9 @@ JACKS = {'v': (126.1, 22.4), 'com': (126.1, 41.1), 'a': (126.1, 60.5)}
 JACK_R = 4.5                          # black collar
 FONT = 'Liberation Sans'              # all printed legends (Helvetica-like, as on the case)
 KEY_NAMES = ['MENU', 'RUN', 'AUTO', 'MF']
-WIN_W, SIDEBAR_W = 1440, 480       # default window width, default sidebar width (drag the handle; the panel needs >= 916 px)
+WIN_W, WIN_H = 1440, 900            # default window size: device (k = 1: 915 x 687 px) + input cards beside / under it
+SIDE_MIN_W = 340                     # the right-hand card column is never narrower
+PANEL_MARGIN, CARD_GAP = 6, 12       # px around the device picture, between cards
 KEY_CHARS = {'m': 0, 'r': 1, 'a': 2, 'f': 3}
 PX_PER_MM_1X = W / DISP[2]           # 6.53 px/mm at k = 1
 
@@ -98,8 +100,11 @@ class FrontPanel(Gtk.Widget):
         self.pinch = None
         self.last_move = 0.0
         self.ink = None               # list -> draw_panel records ink boxes (overlap check)
-        self.set_hexpand(True)
-        self.set_vexpand(True)
+        self.want_k = 1               # integer scale the window picked (GtkApp.on_body_tick)
+        self.set_margin_start(PANEL_MARGIN)
+        self.set_margin_end(PANEL_MARGIN)
+        self.set_margin_top(PANEL_MARGIN)
+        self.set_margin_bottom(PANEL_MARGIN)
         drag = Gtk.GestureDrag()
         drag.connect('drag-begin', self.on_begin)
         drag.connect('drag-update', self.on_update)
@@ -123,10 +128,8 @@ class FrontPanel(Gtk.Widget):
         return k, s, ox, oy
 
     def do_measure(self, orientation, for_size):
-        if orientation == Gtk.Orientation.HORIZONTAL:
-            n = int(DEV_W * PX_PER_MM_1X) + 1
-        else:
-            n = int(PANEL_H * PX_PER_MM_1X) + 1
+        s = PX_PER_MM_1X * self.want_k / self.get_scale_factor()
+        n = int((DEV_W if orientation == Gtk.Orientation.HORIZONTAL else PANEL_H) * s) + 1
         return n, n, -1, -1
 
     def to_mm(self, x, y):
@@ -671,7 +674,7 @@ class FrontendView(Gtk.DrawingArea):
     """Schematic of the DM40 front end: jacks -> relays -> divider / shunt / ohm network -> HY3131,
     with the route the firmware selected highlighted, then the HY3131 blocks and registers.
 
-    All text uses the widget's own font (the same as the rest of the sidebar) times `zoom`; the
+    All text uses the widget's own font (the same as the input cards) times `zoom`; the
     layout follows the width and the widget asks for the height its content needs."""
 
     def __init__(self, zoom=1.0, fit=False):
@@ -887,6 +890,32 @@ class FrontendWindow(Adw.Window):
         self.view.update(st)
 
 
+class Field:
+    """A compact 'label  widget' row of an input card; delegates to the widget (get_text, get_selected,
+    get_active ...), set_title / set_visible act on the whole row."""
+
+    def __init__(self, title, widget, sizegroup):
+        self.widget = widget
+        self.label = Gtk.Label(label=title, xalign=0)
+        sizegroup.add_widget(self.label)
+        if not isinstance(widget, Gtk.Switch):
+            widget.set_hexpand(True)
+        self.row = Gtk.Box(spacing=8)
+        self.row.append(self.label)
+        if isinstance(widget, Gtk.Switch):
+            self.row.append(Gtk.Box(hexpand=True))
+        self.row.append(widget)
+
+    def set_title(self, t):
+        self.label.set_label(t)
+
+    def set_visible(self, v):
+        self.row.set_visible(v)
+
+    def __getattr__(self, name):
+        return getattr(self.widget, name)
+
+
 class GtkApp(Adw.Application):
     def __init__(self, args, extra, emulator_cls):
         super().__init__(application_id='win.xcvb.dm40emu')
@@ -905,18 +934,10 @@ class GtkApp(Adw.Application):
             self.fe_big.connect('close-request', lambda *a: setattr(self, 'fe_big', None) or False)
         self.fe_big.present()
 
-    def on_split_sized(self, split, _clock):
-        # first frame: place the handle so the sidebar is SIDEBAR_W wide (the window may differ from WIN_W)
-        w = split.get_width()
-        if w <= 0:
-            return True
-        split.set_position(max(0, w - SIDEBAR_W))
-        return False
-
     # ---- window ----
     def on_activate(self, app):
         self.win = Adw.ApplicationWindow(application=self, title='DM40 emulator')
-        self.win.set_default_size(WIN_W, 760)
+        self.win.set_default_size(WIN_W, WIN_H)
         self.title = Adw.WindowTitle(title='DM40 emulator', subtitle='starting…')
         header = Adw.HeaderBar()
         header.set_title_widget(self.title)
@@ -944,29 +965,44 @@ class GtkApp(Adw.Application):
         shot.set_tooltip_text('screenshot to emu/out/ (s)')
         shot.connect('clicked', lambda *a: self.screenshot())
         header.pack_end(shot)
-        self.side_btn = Gtk.ToggleButton(icon_name='sidebar-show-right-symbolic')
-        self.side_btn.set_tooltip_text('inputs sidebar (F9)')
-        header.pack_end(self.side_btn)
 
         self.panel = FrontPanel(self.on_panel_event)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         content.append(header)
-        # a Paned, not an Adw.OverlaySplitView: the sidebar width is dragged with the handle; resizing the
-        # window resizes the panel and keeps the sidebar width
-        self.split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, wide_handle=True, vexpand=True)
-        self.split.set_start_child(self.panel)
-        self.split.set_resize_start_child(True)
-        self.split.set_shrink_start_child(False)
-        self.sidebar = self.build_sidebar()
-        self.sidebar.set_size_request(340, -1)
-        self.split.set_end_child(self.sidebar)
-        self.split.set_resize_end_child(False)
-        self.split.set_shrink_end_child(False)
-        self.split.set_position(WIN_W - SIDEBAR_W)
-        self.split.add_tick_callback(self.on_split_sized)
-        self.side_btn.set_active(True)
-        self.side_btn.connect('toggled', lambda b: self.sidebar.set_visible(b.get_active()))
-        content.append(self.split)
+        # The device picture at an integer scale top-left; the input cards fill the rest: DMM jacks and
+        # the front-end schematic in the right column, scope / generator+USB / monitor under the device
+        # when there is room there (else at the end of the right column, which scrolls).
+        body = Gtk.Box(vexpand=True)
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.START)
+        left.set_hexpand(False)               # not inherited from the cards under the device
+        left.append(self.panel)
+        self.bottom = Gtk.Box(spacing=CARD_GAP, margin_start=PANEL_MARGIN,
+                              margin_end=PANEL_MARGIN, margin_bottom=CARD_GAP)
+        # a non-scrolling ScrolledWindow: natural width = minimum width, so the cards never widen the
+        # column beyond the device picture
+        self.bottom_wrap = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                              vscrollbar_policy=Gtk.PolicyType.NEVER, propagate_natural_height=True)
+        self.bottom_wrap.set_child(self.bottom)
+        left.append(self.bottom_wrap)
+        body.append(left)
+        self.right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=CARD_GAP, margin_start=CARD_GAP // 2,
+                             margin_end=CARD_GAP, margin_top=CARD_GAP, margin_bottom=CARD_GAP)
+        scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroll.set_size_request(SIDE_MIN_W, -1)
+        scroll.set_child(self.right)
+        body.append(scroll)
+        self.cards = self.build_cards()
+        self.right.append(self.cards['dmm'])
+        self.right.append(self.cards['fe'])
+        self.bottom_cards = [self.cards['scope'], self.cards['gen'], self.cards['mon']]
+        for c in self.bottom_cards:
+            c.set_hexpand(True)
+            self.right.append(c)
+        self.cards_below = False
+        self.bottom_wrap.set_visible(False)
+        self.body_size = None
+        body.add_tick_callback(self.on_body_tick)
+        content.append(body)
         self.win.set_content(content)
 
         keys = Gtk.EventControllerKey()
@@ -979,134 +1015,6 @@ class GtkApp(Adw.Application):
         self.win.present()
         self.start_emulator()
         GLib.timeout_add(33, self.refresh)
-
-    def build_sidebar(self):
-        page = Adw.PreferencesPage()
-        # DMM jacks: what is connected to V-ohm / COM / A (DM40 front-end model, emu/hy3131/README.md).
-        # The firmware's relays and HY3131 switches route it; the schematic below shows the route.
-        g = Adw.PreferencesGroup(title='DMM jacks', description='what is connected to V Ω / COM / A (Enter applies)')
-        self.v_kind = Adw.ComboRow(title='V Ω / COM')
-        self.v_kinds = ['nothing', 'DC voltage source', 'AC voltage source', 'resistor', 'capacitor', 'diode',
-                        'thermocouple (type K)', 'short', 'current source (wrong jack)']
-        self.v_kind.set_model(Gtk.StringList.new(self.v_kinds))
-        self.v_kind.set_selected(1)
-        self.v_kind.connect('notify::selected', lambda *a: self.dmm_fields_changed())
-        g.add(self.v_kind)
-        self.v_val = self.entry(g, 'Value', '1.234')
-        self.v_ac = self.entry(g, 'AC, V rms', '0')
-        self.v_f = self.entry(g, 'Frequency, Hz', '50')
-        self.v_shape = Adw.ComboRow(title='Shape')
-        self.v_shape.set_model(Gtk.StringList.new(['sine', 'square', 'triangle']))
-        self.v_shape.connect('notify::selected', lambda *a: self.apply_dmm())
-        g.add(self.v_shape)
-        self.v_duty = self.entry(g, 'Duty 0..1', '0.5')
-        self.v_rs = self.entry(g, 'Source resistance, ohm', '0')
-        self.v_rev = Adw.SwitchRow(title='Reversed (cathode at V)')
-        self.v_rev.connect('notify::active', lambda *a: self.apply_dmm())
-        g.add(self.v_rev)
-        self.a_kind = Adw.ComboRow(title='A / COM')
-        self.a_kinds = ['nothing', 'DC current source', 'AC current source', 'voltage source (wrong jack)']
-        self.a_kind.set_model(Gtk.StringList.new(self.a_kinds))
-        self.a_kind.connect('notify::selected', lambda *a: self.dmm_fields_changed())
-        g.add(self.a_kind)
-        self.a_val = self.entry(g, 'Value', '0.0123')
-        self.a_ac = self.entry(g, 'AC, A rms', '0')
-        self.a_f = self.entry(g, 'Frequency, Hz', '50')
-        self.a_compl = self.entry(g, 'Compliance, V', '10')
-        self.cj = self.entry(g, 'Cold junction (jacks), C', '25')
-        self.die = self.entry(g, 'HY3131 die temperature, C', '25')
-        self.die_follows = Adw.SwitchRow(title='Die temperature = cold junction')
-        self.die_follows.set_active(True)
-        self.die_follows.connect('notify::active', lambda *a: self.dmm_fields_changed())
-        g.add(self.die_follows)
-        row = Adw.ActionRow(title='Connection')
-        self.dmm_spec = row
-        b = Gtk.Button(label='Apply', valign=Gtk.Align.CENTER)
-        b.connect('clicked', lambda *a: self.apply_dmm())
-        row.add_suffix(b)
-        g.add(row)
-        self.dmm_cmd = Adw.EntryRow(title='HY3131 monitor command')
-        self.dmm_cmd.set_text('sysbus.hy3131 SetInput "vsrc:1.234"')
-        self.dmm_cmd.connect('entry-activated', lambda r: self.send(r.get_text()))
-        g.add(self.dmm_cmd)
-        page.add(g)
-        self.group_dmm = g
-        # Front end: the route the firmware selected (relays, HY3131 switches), live from the state file
-        g = Adw.PreferencesGroup(title='Front end', description='relays and HY3131 route chosen by the firmware')
-        self.fe_view = FrontendView()
-        g.add(self.fe_view)
-        big = Gtk.Button(icon_name='view-fullscreen-symbolic', valign=Gtk.Align.CENTER)
-        big.set_tooltip_text('open the schematic in its own resizable window')
-        big.add_css_class('flat')
-        big.connect('clicked', lambda *a: self.open_frontend_window())
-        g.set_header_suffix(big)
-        click = Gtk.GestureClick()
-        click.connect('released', lambda *a: self.open_frontend_window())
-        self.fe_view.add_controller(click)
-        self.fe_big = None
-        self.fe_row = Adw.ActionRow(title='state', subtitle='-')
-        self.fe_row.set_subtitle_lines(4)
-        g.add(self.fe_row)
-        page.add(g)
-        self.fe_state_path = os.path.join(run.OUT, 'live-frontend-%d.txt' % os.getpid())
-        self.fe_state_sent = None
-        self.fe_last = ''
-        self.dmm_fields_changed()
-        # Scope input
-        g = Adw.PreferencesGroup(title='Scope input', description='MCX scope jack, ScopeFeeder')
-        self.wave = Adw.ComboRow(title='Waveform')
-        self.wave.set_model(Gtk.StringList.new(['sine', 'square', 'triangle', 'ramp', 'dc', 'noise']))
-        g.add(self.wave)
-        self.freq = Adw.SpinRow.new_with_range(0.1, 20e6, 1)
-        self.freq.set_title('Frequency')
-        self.freq.set_subtitle('Hz')
-        self.freq.set_digits(1)
-        self.freq.set_value(1000)
-        g.add(self.freq)
-        self.vpp = Adw.SpinRow.new_with_range(0, 100, 0.01)
-        self.vpp.set_title('Amplitude')
-        self.vpp.set_subtitle('V peak-to-peak')
-        self.vpp.set_digits(3)
-        self.vpp.set_value(1.0)
-        g.add(self.vpp)
-        self.voff = Adw.SpinRow.new_with_range(-50, 50, 0.01)
-        self.voff.set_title('Offset')
-        self.voff.set_subtitle('V')
-        self.voff.set_digits(3)
-        self.voff.set_value(0.0)
-        g.add(self.voff)
-        row = Adw.ActionRow(title='Apply waveform')
-        b = Gtk.Button(label='Apply', valign=Gtk.Align.CENTER)
-        b.connect('clicked', lambda *a: self.apply_wave())
-        row.add_suffix(b)
-        g.add(row)
-        page.add(g)
-        self.group_scope = g
-        # Generator / USB
-        g = Adw.PreferencesGroup(title='Generator and USB', description='MCX generator jack, USB-C')
-        r = Adw.ActionRow(title='Generator output', subtitle='DAC/TIM6/TIM12 registers run; no analog output is modelled yet')
-        g.add(r)
-        port = getattr(self.args, 'usbip', None)
-        if port:
-            env = '' if port == 3240 else 'USBIP_PORT=%d ' % port
-            sub = ('USB/IP on 127.0.0.1:%d, busid 1-0: %semu/usbip_client.py list | usbtmc 1-0 "*IDN?" | '
-                   'scpi-tcp 1-0 5025; or sudo usbip attach -r 127.0.0.1 -b 1-0' % (port, env))
-        else:
-            sub = 'not exported (live.py --no-usbip)'
-        r = Adw.ActionRow(title='USB', subtitle=sub)
-        r.set_subtitle_selectable(True)
-        g.add(r)
-        page.add(g)
-        self.group_gen = g
-        # Monitor
-        g = Adw.PreferencesGroup(title='Renode monitor')
-        self.mon = Adw.EntryRow(title='command')
-        self.mon.connect('entry-activated', lambda r: self.send(r.get_text()))
-        g.add(self.mon)
-        self.reply = Adw.ActionRow(title='last reply')
-        g.add(self.reply)
-        page.add(g)
-        return page
 
     # ---- emulator ----
     def extra_args(self):
@@ -1194,7 +1102,7 @@ class GtkApp(Adw.Application):
         state = 'paused' if self.play.get_active() else '%.2fx real time' % ratio
         self.title.set_subtitle('%s · virtual %.2f s · %s' % (mode, vus / 1e6, state))
         if self.emu.last_reply:
-            self.reply.set_subtitle(self.emu.last_reply)
+            self.reply.set_label('last reply: ' + self.emu.last_reply)
         self.fe_poll()
         return True
 
@@ -1224,18 +1132,228 @@ class GtkApp(Adw.Application):
         elif kind == 'power':
             self.send('sysbus.gpioPortD OnGPIO 6 %s' % ('true' if data else 'false'))
         elif kind == 'jack':
-            self.side_btn.set_active(True)
-            target = {'v': self.group_dmm, 'com': self.group_dmm, 'a': self.group_dmm,
-                      'scope': self.group_scope, 'gen': self.group_gen, 'usb': self.group_gen,
-                      'led': self.group_gen}[data]
+            # focus the card's first control: the scrolled column brings it into view
+            target = {'v': self.focus_dmm, 'com': self.focus_dmm, 'a': self.focus_dmm,
+                      'scope': self.focus_scope, 'gen': self.focus_gen, 'usb': self.focus_gen,
+                      'led': self.focus_gen}[data]
             target.grab_focus()
 
-    def entry(self, group, title, text):
-        e = Adw.EntryRow(title=title)
-        e.set_text(text)
-        e.connect('entry-activated', lambda r: self.apply_dmm())
-        group.add(e)
-        return e
+    # ---- input cards (DMM jacks, front end, scope, generator / USB, monitor) ----
+    @staticmethod
+    def card(title, suffix=None):
+        """A titled card: -> (outer widget, content box)."""
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.add_css_class('card')
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=12, margin_end=12,
+                      margin_top=8, margin_bottom=10)
+        head = Gtk.Box(spacing=6)
+        lbl = Gtk.Label(label=title, xalign=0, hexpand=True)
+        lbl.add_css_class('heading')
+        head.append(lbl)
+        if suffix:
+            head.append(suffix)
+        box.append(head)
+        outer.append(box)
+        return outer, box
+
+    @staticmethod
+    def note(text='', lines=0):
+        lbl = Gtk.Label(label=text, xalign=0, wrap=True, selectable=True, max_width_chars=34)
+        lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        lbl.add_css_class('dim-label')
+        lbl.add_css_class('caption')
+        if lines:
+            lbl.set_lines(lines)
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        return lbl
+
+    def field(self, box, sg, title, widget):
+        f = Field(title, widget, sg)
+        box.append(f.row)
+        return f
+
+    def entry(self, box, sg, title, text):
+        e = Gtk.Entry(text=text, width_chars=7, max_width_chars=12)
+        e.connect('activate', lambda *a: self.apply_dmm())
+        return self.field(box, sg, title, e)
+
+    @staticmethod
+    def make_dropdown(items):
+        """A DropDown whose button ellipsizes the selected item (narrow columns); the popup shows it whole."""
+        d = Gtk.DropDown.new_from_strings(items)
+
+        def setup(_f, item, ellipsize):
+            item.set_child(Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END if ellipsize else Pango.EllipsizeMode.NONE))
+
+        def bind(_f, item):
+            item.get_child().set_label(item.get_item().get_string())
+        for setter, ell in ((d.set_factory, True), (d.set_list_factory, False)):
+            f = Gtk.SignalListItemFactory()
+            f.connect('setup', setup, ell)
+            f.connect('bind', bind)
+            setter(f)
+        return d
+
+    def dropdown(self, box, sg, title, items, on_change):
+        d = self.make_dropdown(items)
+        d.connect('notify::selected', lambda *a: on_change())
+        return self.field(box, sg, title, d)
+
+    def switch(self, box, sg, title, on_change, active=False):
+        s = Gtk.Switch(active=active, halign=Gtk.Align.END, valign=Gtk.Align.CENTER, hexpand=False)
+        s.connect('notify::active', lambda *a: on_change())
+        return self.field(box, sg, title, s)
+
+    def build_cards(self):
+        """-> {name: card}; the window lays them out next to / under the device."""
+        cards = {}
+        # DMM jacks: what is connected to V-ohm / COM / A (DM40 front-end model, emu/hy3131/README.md).
+        # The firmware's relays and HY3131 switches route it; the schematic shows the route.
+        outer, box = self.card('DMM jacks')
+        cols = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=2, min_children_per_line=1,
+                           homogeneous=True, column_spacing=18, row_spacing=6)
+        vcol = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        acol = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        cols.append(vcol)
+        cols.append(acol)
+        for ch in (cols.get_child_at_index(0), cols.get_child_at_index(1)):
+            ch.set_focusable(False)
+            ch.set_valign(Gtk.Align.START)
+        box.append(cols)
+        sv = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        self.v_kinds = ['nothing', 'DC voltage source', 'AC voltage source', 'resistor', 'capacitor', 'diode',
+                        'thermocouple (type K)', 'short', 'current source (wrong jack)']
+        self.v_kind = self.dropdown(vcol, sv, 'V Ω / COM', self.v_kinds, self.dmm_fields_changed)
+        self.v_kind.set_selected(1)
+        self.v_val = self.entry(vcol, sv, 'Value', '1.234')
+        self.v_ac = self.entry(vcol, sv, 'AC, V rms', '0')
+        self.v_f = self.entry(vcol, sv, 'Frequency, Hz', '50')
+        self.v_shape = self.dropdown(vcol, sv, 'Shape', ['sine', 'square', 'triangle'], self.dmm_fields_changed)
+        self.v_duty = self.entry(vcol, sv, 'Duty 0..1', '0.5')
+        self.v_rs = self.entry(vcol, sv, 'Source R, Ω', '0')
+        self.v_rev = self.switch(vcol, sv, 'Cathode at V', self.apply_dmm)
+        sa = sv                       # one label column width for both jack columns
+        self.a_kinds = ['nothing', 'DC current source', 'AC current source', 'voltage source (wrong jack)']
+        self.a_kind = self.dropdown(acol, sa, 'A / COM', self.a_kinds, self.dmm_fields_changed)
+        self.a_val = self.entry(acol, sa, 'Value', '0.0123')
+        self.a_ac = self.entry(acol, sa, 'AC, A rms', '0')
+        self.a_f = self.entry(acol, sa, 'Frequency, Hz', '50')
+        self.a_compl = self.entry(acol, sa, 'Compliance, V', '10')
+        self.cj = self.entry(acol, sa, 'Cold junction, °C', '25')
+        self.die_follows = self.switch(acol, sa, 'Die = cold junction', self.dmm_fields_changed, active=True)
+        self.die = self.entry(acol, sa, 'HY3131 die, °C', '25')
+        row = Gtk.Box(spacing=10)
+        b = Gtk.Button(label='Apply', valign=Gtk.Align.START)
+        b.set_tooltip_text('send the connection (Enter in a field does the same)')
+        b.connect('clicked', lambda *a: self.apply_dmm())
+        row.append(b)
+        self.dmm_spec = self.note()
+        self.dmm_spec.set_hexpand(True)
+        row.append(self.dmm_spec)
+        box.append(row)
+        cards['dmm'] = outer
+        self.focus_dmm = self.v_kind.widget
+        # Front end: the route the firmware selected (relays, HY3131 switches), live from the state file
+        big = Gtk.Button(icon_name='view-fullscreen-symbolic', valign=Gtk.Align.CENTER)
+        big.set_tooltip_text('open the schematic in its own resizable window')
+        big.add_css_class('flat')
+        big.connect('clicked', lambda *a: self.open_frontend_window())
+        outer, box = self.card('Front end', big)
+        box.append(self.note('relays and HY3131 route chosen by the firmware (click: own window)'))
+        self.fe_view = FrontendView()
+        click = Gtk.GestureClick()
+        click.connect('released', lambda *a: self.open_frontend_window())
+        self.fe_view.add_controller(click)
+        box.append(self.fe_view)
+        self.fe_big = None
+        self.fe_row = self.note('-', lines=3)
+        box.append(self.fe_row)
+        cards['fe'] = outer
+        self.fe_state_path = os.path.join(run.OUT, 'live-frontend-%d.txt' % os.getpid())
+        self.fe_state_sent = None
+        self.fe_last = ''
+        # Scope input
+        b = Gtk.Button(label='Apply', valign=Gtk.Align.CENTER)
+        b.connect('clicked', lambda *a: self.apply_wave())
+        outer, box = self.card('Scope input', b)
+        grid = Gtk.Grid(column_spacing=6, row_spacing=4)
+        self.wave = self.make_dropdown(['sine', 'square', 'triangle', 'ramp', 'dc', 'noise'])
+        self.freq, self.vpp, self.voff = (Gtk.Entry(text=t, width_chars=6, max_width_chars=7, tooltip_text=tip)
+                                          for t, tip in (('1000', 'frequency, Hz'), ('1.0', 'amplitude, V peak-to-peak'),
+                                                         ('0', 'offset, V')))
+        for e in (self.freq, self.vpp, self.voff):
+            e.connect('activate', lambda *a: self.apply_wave())
+        # [sine]        [1000.0] Hz
+        # [1.000] Vpp   [0.000]  V offset
+        for col, row, wdg in ((0, 0, self.wave), (2, 0, self.freq), (3, 0, 'Hz'),
+                              (0, 1, self.vpp), (1, 1, 'Vpp'), (2, 1, self.voff), (3, 1, 'V offset')):
+            if isinstance(wdg, str):
+                wdg = Gtk.Label(label=wdg, xalign=0)
+            else:
+                wdg.set_hexpand(True)
+            grid.attach(wdg, col, row, 2 if wdg is self.wave else 1, 1)
+        box.append(grid)
+        cards['scope'] = outer
+        self.focus_scope = self.wave
+        # Generator / USB
+        outer, box = self.card('Generator, USB')
+        box.append(self.note('Generator: DAC / TIM6 / TIM12 registers run; no analog output is modelled yet.'))
+        port = getattr(self.args, 'usbip', None)
+        if port:
+            env = '' if port == 3240 else 'USBIP_PORT=%d ' % port
+            sub = ('USB/IP on 127.0.0.1:%d, busid 1-0: %semu/usbip_client.py list | usbtmc 1-0 "*IDN?" | '
+                   'scpi-tcp 1-0 5025; or sudo usbip attach -r 127.0.0.1 -b 1-0' % (port, env))
+        else:
+            sub = 'not exported (live.py --no-usbip)'
+        self.usb_note = self.note('USB: ' + sub)
+        box.append(self.usb_note)
+        cards['gen'] = outer
+        self.focus_gen = self.usb_note
+        # Monitor
+        outer, box = self.card('Renode monitor')
+        self.mon = Gtk.Entry(placeholder_text='command, e.g. sysbus.hy3131 Frontend', hexpand=True)
+        self.mon.connect('activate', lambda e: self.send(e.get_text()))
+        box.append(self.mon)
+        self.reply = self.note('last reply: -', lines=3)
+        box.append(self.reply)
+        cards['mon'] = outer
+        self.cards_ready = True
+        self.dmm_fields_changed()
+        return cards
+
+    def on_body_tick(self, body, _clock):
+        """Window size changed: the device's integer scale, and where the small cards go."""
+        W, H = body.get_width(), body.get_height()
+        if W <= 0 or (W, H) == self.body_size:
+            return True
+        self.body_size = (W, H)
+        sf = self.win.get_scale_factor()
+        pw1 = DEV_W * PX_PER_MM_1X / sf + 2 * PANEL_MARGIN
+        ph1 = PANEL_H * PX_PER_MM_1X / sf + 2 * PANEL_MARGIN
+        k = max(1, int(min((W - SIDE_MIN_W) / pw1, H / ph1)))
+        if k != self.panel.want_k:
+            self.panel.want_k = k
+            self.panel.queue_resize()
+        # the small cards go under the device when they fit there, else into the right column
+        pw = DEV_W * PX_PER_MM_1X * k / sf
+        each = (pw - 2 * CARD_GAP) / len(self.bottom_cards)
+        need_h = max(c.measure(Gtk.Orientation.VERTICAL, int(each))[1] for c in self.bottom_cards)
+        need_w = sum(c.measure(Gtk.Orientation.HORIZONTAL, -1)[0] for c in self.bottom_cards)
+        below = H - PANEL_H * PX_PER_MM_1X * k / sf - 2 * PANEL_MARGIN - CARD_GAP
+        want = below >= need_h and pw >= need_w + 2 * CARD_GAP
+        if want != self.cards_below:
+            self.cards_below = want
+            GLib.idle_add(self.reflow_cards)
+        return True
+
+    def reflow_cards(self):
+        target = self.bottom if self.cards_below else self.right
+        for c in self.bottom_cards:
+            if c.get_parent() is not target:
+                c.get_parent().remove(c)
+                target.append(c)
+        self.bottom_wrap.set_visible(self.cards_below)
+        return False
 
     V_DEFAULTS = {'DC voltage source': '1.234', 'AC voltage source': '0', 'resistor': '4700', 'capacitor': '100e-9',
                   'diode': '0.65', 'thermocouple (type K)': '100', 'current source (wrong jack)': '0.001'}
@@ -1243,6 +1361,8 @@ class GtkApp(Adw.Application):
 
     def dmm_fields_changed(self):
         """Show only the fields of the chosen sources (with a typical value when the kind changes), then apply."""
+        if not getattr(self, 'cards_ready', False):
+            return
         vk = self.v_kinds[self.v_kind.get_selected()]
         ak = self.a_kinds[self.a_kind.get_selected()]
         if vk != getattr(self, 'last_vk', vk) and vk in self.V_DEFAULTS:
@@ -1316,7 +1436,7 @@ class GtkApp(Adw.Application):
 
     def apply_dmm(self):
         spec = self.dmm_spec_text()
-        self.dmm_spec.set_subtitle(spec)
+        self.dmm_spec.set_label(spec)
         self.send('sysbus.hy3131 SetInput "%s"' % spec)
 
     def fe_poll(self):
@@ -1339,7 +1459,7 @@ class GtkApp(Adw.Application):
             self.fe_view.update(st)
             if self.fe_big:
                 self.fe_big.update(st)
-            self.fe_row.set_subtitle('%s  shunt %s  PC7 %s · %s mode %s range %s · AD1 %s AD2 %s AD3 %s LPF %s RMS %s CTR %s · '
+            self.fe_row.set_label('%s  shunt %s  PC7 %s · %s mode %s range %s · AD1 %s AD2 %s AD3 %s LPF %s RMS %s CTR %s · '
                                      'Vjack %s V  Ijack %s A%s' % (
                                          'V/A path' if st.get('pa') == '0' else 'Ω/mV network', st.get('shunt'), st.get('pc7'),
                                          st.get('role'), st.get('mode'), st.get('range'), st.get('ad1'), st.get('ad2'), st.get('ad3'),
@@ -1349,7 +1469,7 @@ class GtkApp(Adw.Application):
     def apply_wave(self):
         shape = self.wave.get_selected_item().get_string()
         self.send('sysbus.scopefeed SetWave "%s" %g %g %g' % (
-            shape, self.freq.get_value(), self.vpp.get_value(), self.voff.get_value()))
+            shape, float(self.num(self.freq, '1000')), float(self.num(self.vpp, '1')), float(self.num(self.voff, '0'))))
 
     def on_key_pressed(self, ctrl, keyval, keycode, state):
         name = Gdk.keyval_name(keyval) or ''
@@ -1358,7 +1478,7 @@ class GtkApp(Adw.Application):
             self.on_close()
             return True
         if isinstance(self.win.get_focus(), (Gtk.Text, Gtk.Entry)):
-            return False  # typing in the sidebar
+            return False  # typing in a card
         if low in KEY_CHARS:
             code = KEY_CHARS[low]
             if not self.key_down.get(code):
@@ -1379,9 +1499,6 @@ class GtkApp(Adw.Application):
             return True
         if low == 'f3':
             self.send('sysbus.i2c3.touch MultiSwipe 3 240 80 0 120 300')
-            return True
-        if low == 'f9':
-            self.side_btn.set_active(not self.side_btn.get_active())
             return True
         if low == 'space':
             self.play.set_active(not self.play.get_active())
