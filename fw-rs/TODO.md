@@ -185,11 +185,13 @@ Code work (in this order):
         point); only where a single tap does nothing (Corners: the graph middle; Off: anywhere;
         never in Halves, every tap steps there). (2c47fa5; verify on device)
 - [x] CSV-to-disk recording on the DMM screen, swipe-triggered (user). (a1a7e74; verify on device)
+      decided: see docs/decisions-2026-10-22.md #1 (Record page: intervals, mean per row, duration, estimate)
       src/csvlog.rs: one-finger swipe down on the DMM page = start / stop,
       toasts, red REC in the status blocks, LOG:CSV ON|OFF / LOG:CSV?, power-off / reset commit the tail.
       (Since the USB storage redesign the PC cannot write or mount the SPI disk: no "Disk in use"
       refusals any more; files in LOGS/ on the SPI flash.)
 - [x] Compact binary logs, CSV only on read (owner 2026-10-21: "not CSV on the disk, RLE or a
+      decided: see docs/decisions-2026-10-22.md #2 (timestamps stay real main-loop time, no grid snap)
       standard compressed format; CSV only for export"). docs/compact-log-format.md: own DLG format
       (adaptive Rice of delta-of-delta time + 6-digit value deltas, CRC chunk per commit) chosen over
       gzip / sigrok / FLAC on measured data: 0.9..1.9 B per DMM reading vs ~21 B CSV (11..26x; 13 MB of
@@ -481,6 +483,7 @@ Firmware:
       HY3131 timing + measured noise (not ad hoc); the +1 digit always drawn small at the end.
       (24f7080: FAST/MED/SLOW with a counts / rate toast; verified on device 9dd1222)
 - [x] Power-meter mode: HY3131 can measure V and I at once (AD2/AD3 + MUL → active power in RMSDATA); Vrms, Irms, P (and
+      decided: see docs/decisions-2026-10-22.md #4 (energy counter resets on boot)
       energy) by switching internal modes — check feasibility with the DM40 front-end wiring first.
       Researched: GO, docs/power-meter-and-misconnect.md §3 (I on the stock OP1 path, V via OP2→AD3 DC-coupled,
       signed 38-bit X·Y RMS read, ~10-12 days). Gate: device test T1 (OP2 on SENSE). Owner: fuse/CAT/10 A limits.
@@ -513,6 +516,7 @@ Firmware:
   - [ ] Not done: RESistive phase cal (flat optimum), BT protocol slot (BT reports the AC A byte), limits (W) in
         Hold & Limits, tap on P to cycle the main readout (P / S / PF / E).
 - [x] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
+      decided: see docs/decisions-2026-10-22.md #5 (A-JACK / LIVE? alternate with HOLD in the status slot)
       Researched: GO for current-in-A-jack in non-current modes (idle comparator on PB1, 47.5 Ω shunt, trips ~0.44 mA),
       partial for "V leads while in A mode"; blown fuse not detectable (fuse-check dialog instead). Doc §4, ~4-5 days.
       Done (sentinel.rs, doc §4.6): A-JACK by the comparator on PB1 (DC V / mV / ohm / temp) and the AD1 peak
@@ -539,6 +543,7 @@ Firmware:
       lost_before), `ad2 torn|noise`; emulator AD2 grid + noise model. Hooks: DBG:AD2:TORN? / NOISE? / DRAW.
       Emulator only so far (50 MIPS: ~2 kS/s readout, not the device's): docs/dmm-input-scope-feasibility.md 7.
 - [ ] (B) device session (30 min, feasibility doc 7.3): torn reads per OSR, loss per rate with / without redraw,
+      decided: see docs/decisions-2026-10-22.md #3 (one TIMER ISR, exclusive bus hand-off, gated on SPI2)
       shorted-input ENOB, a waveform; then decide the rate cap and the ISR (E2-E4).
       Partly done on device 9dd1222 (docs/device-check-2026-10-21.md "9dd1222" 1): torn reads none at any rung;
       waveforms AC V / AC mV ok; converter floor ENOB 16-17.6 (AC A open). FOUND: the chop-ON rungs give AD2F
@@ -572,6 +577,7 @@ Firmware:
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
+      decided: see docs/decisions-2026-10-22.md #3 (one TIMER ISR, exclusive bus hand-off, gated on SPI2)
       V/mV/A on the isolated jacks (current waveforms). Scope UI reused ("Wave" from DMM, MCX|DMM source badge),
       software trigger. Needs one ISR (owner decision; fw-rs is ISR-free); HY3131 on hardware SPI2 done (E2); ~2-2.5 weeks.
 - [x] Device 2026-10-21 (docs/device-check-2026-10-21.md "Fixes"): stack 37468/46048 B (81 %) on 16b3eb9.
