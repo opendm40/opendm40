@@ -19,6 +19,8 @@
 mod host;
 pub use host::mmio;
 
+#[path = "../../src/bargraph.rs"]
+mod bargraph;
 #[path = "../../src/clock.rs"]
 mod clock;
 #[path = "../../src/dialog.rs"]

@@ -2,6 +2,7 @@
 #![no_main]
 
 mod app;
+mod bargraph;
 mod bt;
 mod clock;
 mod dmm;

@@ -189,7 +189,17 @@ pub struct DmmView {
     /// leaves a part unchanged does not repaint it.
     aux_val: [Option<([u8; 16], u8)>; 2],
     aux_unit: [Option<(&'static str, bool)>; 2],
+    /// UF-30: the fast bargraph in the history row's place (Settings 2/2
+    /// "DMM row": Bargraph, the default / History). Set by the app before
+    /// `draw_static`.
+    pub bar_on: bool,
+    bar: crate::bargraph::Bar,
 }
+
+/// Bargraph area = the history row (5 boxes 5..473 x 153..171): track
+/// 8..471 x 154..167, ticks 168..171. The F78 digits' ink ends at 146
+/// (>= 3 px above), the chart frame starts at 176.
+pub const BAR_RECT: (u16, u16, u16, u16) = (8, 154, 464, 18);
 
 /// Bottom button `i` (0..5) with its stock glyphs, in the box (x, y, 76, 40)
 /// (DMM page: stock (2 + 80 i, BTN_Y); combined view: the function band).
@@ -302,7 +312,20 @@ impl DmmView {
             last_f: [0; 12],
             aux_val: [None; 2],
             aux_unit: [None; 2],
+            bar_on: true,
+            bar: crate::bargraph::Bar::new(BAR_RECT.0, BAR_RECT.1, BAR_RECT.2, BAR_RECT.3, false),
         }
+    }
+
+    /// UF-30: feed the bargraph with a raw (un-smoothed, pre-REL) reading;
+    /// bipolar in DC V / mV / A (not AC+DC), unipolar elsewhere, empty in
+    /// temperature (no meaningful full scale). No-op in history mode.
+    pub fn bar_update(&mut self, r: &Reading) {
+        if !self.bar_on {
+            return;
+        }
+        let f = if r.mode == 15 { Some(0.0) } else { crate::bargraph::frac(r.main.v, r.main.dec, r.main.ol) };
+        self.bar.update(f);
     }
 
     /// Static part of the standalone DMM page.
@@ -310,8 +333,13 @@ impl DmmView {
         lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
         lcd::fill_rect(0, 0, lcd::W, BAR_H, BAR);
         sf::logo(4, 7, BAR);
-        for i in 0..5i16 {
-            sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
+        if self.bar_on {
+            self.bar.bipolar = matches!(mode, 1 | 3 | 7..=9) && !acdc;
+            self.bar.draw_static(BG);
+        } else {
+            for i in 0..5i16 {
+                sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
+            }
         }
         let sel = button_index(button);
         // 36 px tall (rows 280..315) and from x 4: 4 px off the screen edges.
@@ -1652,7 +1680,8 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
 
 /// System settings (subset of the stock sections that this firmware has),
 /// two pages of at most SET_ROWS rows. Page 1: the last row "More" opens
-/// page 2 (SETTINGS2): the DMM rate / smoothing (FR-05) and "Device", the
+/// page 2 (SETTINGS2): the DMM rate / smoothing (FR-05), the DMM page's
+/// bargraph / history row (UF-30) and "Device", the
 /// stock §6 Device/About page. "Back" is the tappable title bar (stock
 /// settings have a title-bar back, not a list row), handled by
 /// `title_back_hit` (page 2 -> page 1 -> menu), so the lists hold only
@@ -1661,7 +1690,7 @@ pub const SETTINGS: [&str; 9] = [
     "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
     "Scope drag", "More",
 ];
-pub const SETTINGS2: [&str; 7] = ["DMM rate", "Smoothing", "Scope swipe", "Scope press", "Scope tap step", "Device", "Help"];
+pub const SETTINGS2: [&str; 8] = ["DMM rate", "Smoothing", "DMM row", "Scope swipe", "Scope press", "Scope tap step", "Device", "Help"];
 
 /// Settings/menu-page title bar: 40 px, bg 0x2966 (stock gui_v2_6.h:101).
 pub const PAGE_BAR_H: i16 = 40;

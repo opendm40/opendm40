@@ -347,6 +347,15 @@ const SHOW_MIN_MS: u64 = 80;
 //   bit 8      UF-21: the V autorange stored in p[2] is a choice made under
 //              an AUTO+-default build. Without it the stored value is the old
 //              AUTO default, and restores as AUTO+.
+//   bit 9      temperatures in deg F (0 = deg C), EXT_TEMP_F
+//   bit 10     DMM page shows the history row instead of the UF-30
+//              bargraph (0 = bargraph), EXT_HISTORY_ROW
+// (bits 9.. are set / read by app.rs next to ext_word / ext_settings.)
+
+/// p[38] bit 9: temperature unit deg F.
+pub const EXT_TEMP_F: u32 = 1 << 9;
+/// p[38] bit 10: history row instead of the bargraph.
+pub const EXT_HISTORY_ROW: u32 = 1 << 10;
 
 /// Settings decoded from p[38].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
