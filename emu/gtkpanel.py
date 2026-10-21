@@ -19,8 +19,10 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 gi.require_version('Gsk', '4.0')
 gi.require_version('Graphene', '1.0')
+gi.require_version('Pango', '1.0')
+gi.require_version('PangoCairo', '1.0')
 import cairo  # noqa: E402
-from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk, Pango, PangoCairo  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -386,15 +388,18 @@ def parse_state(line):
 
 class FrontendView(Gtk.DrawingArea):
     """Schematic of the DM40 front end: jacks -> relays -> divider / shunt / ohm network -> HY3131,
-    with the route the firmware selected highlighted."""
+    with the route the firmware selected highlighted, then the HY3131 blocks and registers.
 
-    # the schematic is laid out on a fixed canvas and scaled to the widget (the pop-out window is resizable)
-    DW, DH = 540, 250
+    All text uses the widget's own font (the same as the rest of the sidebar) times `zoom`; the
+    layout follows the width and the widget asks for the height its content needs."""
 
-    def __init__(self, height=250):
+    def __init__(self, zoom=1.0, fit=False):
         super().__init__()
         self.st = {}
-        self.set_content_height(height)
+        self.zoom = zoom
+        self.fit = fit            # pop-out window: zoom so the content fills the height
+        self.want_h = 0
+        self.set_content_height(120)
         self.set_draw_func(self.draw)
 
     def update(self, st):
@@ -402,134 +407,196 @@ class FrontendView(Gtk.DrawingArea):
         self.queue_draw()
 
     def draw(self, area, cr, w, h):
-        st = self.st
-        on = rgb('#3584E4')
-        off = rgb('#6E6E6E')
-        hot = rgb('#F3B51E')
-        txt = rgb('#E8E8E8')
         cr.set_source_rgb(*rgb('#1E1F22'))
         cr.rectangle(0, 0, w, h)
         cr.fill()
-        k = min(w / self.DW, h / self.DH)
-        cr.translate((w - self.DW * k) / 2, (h - self.DH * k) / 2)
-        cr.scale(k, k)
-        w, h = self.DW, self.DH
+        z = self.zoom
+        if self.fit:
+            # content height at a given zoom is about proportional to zoom at width w / zoom
+            z = 1.0
+            for _ in range(4):
+                need = self.layout(None, w / z)
+                z = max(1.0, min(3.0, z * h / max(1.0, need * z)))
+        cr.scale(z, z)
+        need = self.layout(cr, w / z)
+        if not self.fit:
+            hh = int(need * z) + 1
+            if hh != self.want_h:
+                self.want_h = hh
+                GLib.idle_add(lambda: self.set_content_height(self.want_h) or False)
+
+    def layout(self, cr, w):
+        """Draw (cr) or only measure (cr None) at width w; returns the height used."""
+        st = self.st
+        on, off, hot, txt = rgb('#3584E4'), rgb('#6E6E6E'), rgb('#F3B51E'), rgb('#E8E8E8')
+        pl = self.create_pango_layout('Ag')
+        L = pl.get_pixel_size()[1]          # line height of the widget font
+        pad = L * 0.4
+
+        def tw(s):
+            pl.set_text(s, -1)
+            return pl.get_pixel_size()[0]
+
+        def label(x, y, s, color=txt, width=None):
+            """text with its top-left at x, y; wraps at width; returns its height"""
+            pl.set_text(s, -1)
+            pl.set_width(int(width * Pango.SCALE) if width else -1)
+            pl.set_wrap(Pango.WrapMode.WORD_CHAR)
+            hgt = pl.get_pixel_size()[1]
+            if cr:
+                cr.set_source_rgb(*color)
+                cr.move_to(x, y)
+                PangoCairo.show_layout(cr, pl)
+            pl.set_width(-1)
+            return hgt
+
+        def line(x0, y0, x1, y1, active):
+            if cr:
+                cr.set_source_rgb(*(on if active else off))
+                cr.move_to(x0, y0)
+                cr.line_to(x1, y1)
+                cr.stroke()
+
+        def box(x, yc, bw, s, active):
+            bh = L + pad * 1.5
+            if cr:
+                cr.set_source_rgb(*(on if active else off))
+                cr.rectangle(x, yc - bh / 2, bw, bh)
+                cr.stroke()
+            label(x + (bw - tw(s)) / 2, yc - L / 2, s, txt if active else off)
+
+        if cr:
+            cr.set_line_width(max(1.5, L / 9))
         if not st:
-            cr.set_source_rgb(*txt)
-            cr.move_to(12, h / 2)
-            cr.show_text('waiting for the HY3131 state …')
-            return
+            return label(pad, pad, 'waiting for the HY3131 state …', txt, w - 2 * pad) + 2 * pad
+
         pa = st.get('pa', '0')
         role = st.get('role', 'None')
         shunt = st.get('shunt', 'uA')
-        mode = st.get('mode', '-1')
         rng = st.get('range', '0')
         rv = role in ('DcV', 'AcV')
         rmv = role in ('DcMv', 'AcMv', 'Freq', 'Temp')
         rohm = role in ('Ohm', 'Cont', 'Diode', 'CapOsc', 'CapRamp', 'CapDischarge')
         ra = role in ('DcA', 'AcA')
-        cr.set_line_width(2)
-        cr.select_font_face('Cantarell')
-        cr.set_font_size(11)
-
-        def line(x0, y0, x1, y1, active):
-            cr.set_source_rgb(*(on if active else off))
-            cr.move_to(x0, y0)
-            cr.line_to(x1, y1)
-            cr.stroke()
-
-        def label(x, y, s, active=True, color=None):
-            cr.set_source_rgb(*(color or (txt if active else off)))
-            cr.move_to(x, y)
-            cr.show_text(s)
-
-        def box(x, y, bw, bh, s, active, fill=False):
-            cr.set_source_rgb(*(on if active else off))
-            cr.rectangle(x, y, bw, bh)
-            if fill:
-                cr.fill()
-            else:
-                cr.stroke()
-            cr.set_source_rgb(*(txt if active else off))
-            ext = cr.text_extents(s)
-            cr.move_to(x + (bw - ext.width) / 2, y + bh / 2 + 4)
-            cr.show_text(s)
-
-        yv, ycom, ya = 40, 140, 200
-        # jacks
-        for y, name, col in ((yv, 'V Ω', rgb('#C8102E')), (ycom, 'COM', rgb('#111111')), (ya, 'A', rgb('#C8102E'))):
-            cr.set_source_rgb(*col)
-            cr.arc(22, y, 9, 0, 6.3)
-            cr.fill()
-            cr.set_source_rgb(*txt)
-            cr.arc(22, y, 4, 0, 6.3)
-            cr.fill()
-            label(4, y + 24, name)
-        vj = st.get('vjack', '0')
-        ij = st.get('ijack', '0')
-        label(36, yv - 14, '%s V' % vj, True, hot)
-        label(36, ya - 14, '%s A' % ij, True, hot)
-        # V path: relay PA
-        line(31, yv, 70, yv, True)
         va = pa == '0'
-        box(70, yv - 12, 54, 24, 'PA: V/A' if va else 'PA: Ω/mV', True, fill=False)
-        # two routes out of the relay
-        line(124, yv, 150, yv, va)
-        line(124, yv, 150, yv + 32, not va)
         divs = {'0': '/10', '1': '/100', '2': '/1000', '3': '/10000'}
-        box(150, yv - 12, 78, 24, 'divider ' + (divs.get(rng, '') if rv else ''), va and rv)
-        box(150, yv + 20, 78, 24, 'Ω/mV network', (not va) and (rmv or rohm))
-        line(228, yv, 290, yv, va and rv)
-        line(228, yv + 32, 290, yv + 32, (not va) and (rmv or rohm))
-        # ohm source
+        shunts = {'A': '10 mΩ', 'mA': '0.5 Ω', 'uA': '47.5 Ω'}
+
+        # columns from the text widths; spare width goes into the wires
+        r = L * 0.5
+        c_name = pad + 2 * r + pad
+        name_w = max(tw(n) for n in ('V Ω', 'COM', 'A'))
+        relay_w = max(tw('PA: V/A'), tw('PA: Ω/mV')) + 2 * pad
+        net_w = max(tw('divider /10000'), tw('Ω/mV network')) + 2 * pad
+        chip_w = tw('HY3131') + 2 * pad
+        base = c_name + name_w + relay_w + net_w + chip_w + pad
+        gap = max(pad * 2, (w - base) / 3)
+        x_relay = c_name + name_w + gap
+        x_net = x_relay + relay_w + gap
+        x_chip = w - chip_w - pad
+        row_h = 2 * L + pad * 2
+
+        yv = pad + L * 2                             # room for the HY3131 title above the chip box
+        rows = [('V Ω', C_RED), ('COM', C_BLACK), ('A', C_RED)]
+        y_net = yv + row_h * 0.75
+        extra = []
         if rohm:
-            label(150, yv + 62, 'source %s V' % st.get('vsrc', '?'), True, hot)
-            label(150, yv + 76, 'Rref %s Ω' % st.get('rref', '?'), True, hot)
+            extra = ['source %s V' % st.get('vsrc', '?'), 'Rref %s Ω' % st.get('rref', '?')]
             if 'vx' in st:
-                label(150, yv + 90, 'node %s V' % st['vx'], True, hot)
-        # A path: shunt
-        line(31, ya, 70, ya, True)
-        box(70, ya - 12, 112, 24, 'shunt %s (%s)' % (shunt, {'A': '10 mΩ', 'mA': '0.5 Ω', 'uA': '47.5 Ω'}.get(shunt, '')), ra)
-        line(182, ya, 290, ya, ra)
-        label(70, ya + 30, 'Vshunt %s V' % st.get('vshunt', '0'), ra, hot if ra else None)
+                extra.append('node %s V' % st['vx'])
+        ycom = y_net + L + pad * 2 + len(extra) * L + pad
+        ya = ycom + row_h
+        y_end = ya + L + pad
+        # chip bar spans the three rows
+        if cr:
+            cr.set_source_rgb(*on)
+            cr.rectangle(x_chip, yv - L, chip_w, y_end - yv)
+            cr.stroke()
+        label(x_chip + pad, yv - L * 2 - pad / 2, 'HY3131', txt)
+        for (name, col), yy in zip(rows, (yv, ycom, ya)):
+            if cr:
+                cr.new_path()
+                cr.set_source_rgb(*col)
+                cr.arc(pad + r, yy, r, 0, 6.3)
+                cr.fill()
+                cr.set_source_rgb(*txt)
+                cr.arc(pad + r, yy, r * 0.45, 0, 6.3)
+                cr.fill()
+            label(c_name, yy - L / 2, name, txt)
+        x_wire = c_name + name_w + pad / 2
+        # V row: relay, then divider or the ohm / mV network
+        line(x_wire, yv, x_relay, yv, True)
+        box(x_relay, yv, relay_w, 'PA: V/A' if va else 'PA: Ω/mV', True)
+        line(x_relay + relay_w, yv, x_net, yv, va)
+        line(x_relay + relay_w, yv, x_net, y_net, not va)
+        box(x_net, yv, net_w, 'divider ' + (divs.get(rng, '') if rv else ''), va and rv)
+        box(x_net, y_net, net_w, 'Ω/mV network', (not va) and (rmv or rohm))
+        line(x_net + net_w, yv, x_chip, yv, va and rv)
+        line(x_net + net_w, y_net, x_chip, y_net, (not va) and (rmv or rohm))
+        yy = y_net + L / 2 + pad * 1.5
+        for s in extra:
+            label(x_net, yy, s, hot)
+            yy += L
         # COM
-        line(31, ycom, 290, ycom, True)
-        label(40, ycom - 6, 'COM / AGND', True)
-        # HY3131 box
-        x0 = 290
-        cr.set_source_rgb(*on)
-        cr.rectangle(x0, 14, max(60, w - x0 - 8), h - 28)
-        cr.stroke()
-        label(x0 + 8, 30, 'HY3131  %s  m%s r%s' % (role, mode, rng))
-        y = 48
+        line(x_wire, ycom, x_chip, ycom, True)
+        label(x_wire, ycom - L - pad, 'COM / AGND', txt)
+        # A row: shunt
+        sh = 'shunt %s (%s)' % (shunt, shunts.get(shunt, ''))
+        sh_w = tw(sh) + 2 * pad
+        line(x_wire, ya, x_relay, ya, True)
+        box(x_relay, ya, sh_w, sh, ra)
+        line(x_relay + sh_w, ya, x_chip, ya, ra)
+        # what the jacks see, under the schematic (not on the wires: no room at narrow widths)
+        y = y_end + pad
+        y += label(pad, y, 'V\u00a0jack\u00a0%s\u00a0V    I\u00a0jack\u00a0%s\u00a0A    V\u00a0shunt\u00a0%s\u00a0V' % (
+            st.get('vjack', '0'), st.get('ijack', '0'), st.get('vshunt', '0')), hot, w - 2 * pad)
+
+        # HY3131 blocks: two columns when they fit
+        y += pad * 2
+        label(pad, y, 'HY3131  %s  mode %s  range %s' % (role, st.get('mode', '-1'), rng), txt)
+        y += L + pad
+        items = []
         for key, name in (('ad1', 'AD1 (24 bit)'), ('ad2', 'AD2'), ('ad3', 'AD3'), ('lpf', 'LPF'), ('rms', 'RMS'),
                           ('ctr', 'counter'), ('cmp', 'comparator'), ('op1', 'OP1'), ('op2', 'OP2')):
             active = st.get(key) == '1'
-            cr.set_source_rgb(*(on if active else off))
-            cr.rectangle(x0 + 8, y - 8, 8, 8)
-            cr.fill()
-            extra = ''
+            ex = ''
             if key == 'ad1' and active:
-                extra = '  OSR %s%s' % (st.get('osr1', ''), ' chop' if st.get('chop') == '1' else '')
+                ex = '  OSR %s%s' % (st.get('osr1', ''), ' chop' if st.get('chop') == '1' else '')
             if key == 'op1' and active:
-                extra = '  + %s' % st.get('sop1p', '')
+                ex = '  + %s' % st.get('sop1p', '')
             if key == 'cmp' and active:
-                extra = '  in %s%s' % (st.get('scmpi', ''), '  pin HIGH' if st.get('cmppin') == '1' else '')
-            label(x0 + 22, y, name + extra, active)
-            y += 15
-        label(x0 + 8, y + 2, 'AD1 in %s-%s ref %s-%s' % (st.get('sad1fp', ''), st.get('sad1fn', ''), st.get('sad1rh', ''), st.get('sad1rl', '')), True)
-        label(x0 + 8, y + 16, 'SAD1I %s  SDIO %s  SMODE %s' % (st.get('sad1i', ''), st.get('sdio', ''), st.get('smode', '')), True)
-        label(x0 + 8, y + 30, 'SFUVR %s  PC7 %s' % (st.get('sfuvr', ''), st.get('pc7', '')), True)
-        label(x0 + 8, y + 44, 'AD1 %s  period %s s  die %s C' % (st.get('ad1code', ''), st.get('period', ''), st.get('die', '')), True)
+                ex = '  in %s%s' % (st.get('scmpi', ''), '  pin HIGH' if st.get('cmppin') == '1' else '')
+            items.append((name + ex, active))
+        sq = L * 0.55
+        col_w = max(tw(s) for s, _ in items) + sq + pad * 3
+        ncol = 2 if 2 * col_w <= w - 2 * pad else 1
+        nrow = (len(items) + ncol - 1) // ncol
+        for i, (s, active) in enumerate(items):
+            cx = pad + (i // nrow) * col_w
+            cy = y + (i % nrow) * L
+            if cr:
+                cr.set_source_rgb(*(on if active else off))
+                cr.rectangle(cx, cy + (L - sq) / 2, sq, sq)
+                cr.fill()
+            label(cx + sq + pad, cy, s, txt if active else off)
+        y += nrow * L + pad
+        for s in ('AD1 in %s-%s  ref %s-%s' % (st.get('sad1fp', ''), st.get('sad1fn', ''), st.get('sad1rh', ''),
+                                               st.get('sad1rl', '')),
+                  'SAD1I %s  SDIO %s  SMODE %s  SFUVR %s  PC7 %s' % (
+                      st.get('sad1i', ''), st.get('sdio', ''), st.get('smode', ''), st.get('sfuvr', ''),
+                      st.get('pc7', '')),
+                  'AD1 %s  period %s s  die %s °C' % (st.get('ad1code', ''), st.get('period', ''), st.get('die', ''))):
+            y += label(pad, y, s, txt, w - 2 * pad)
+        return y + pad
 
 
 class FrontendWindow(Adw.Window):
     def __init__(self, parent, st):
         super().__init__(title='DM40 front end', transient_for=parent)
-        self.set_default_size(1180, 660)
+        self.set_default_size(900, 820)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(Adw.HeaderBar())
-        self.view = FrontendView(height=600)
+        self.view = FrontendView(fit=True)
         self.view.set_vexpand(True)
         self.view.update(st)
         box.append(self.view)
