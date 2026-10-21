@@ -628,8 +628,15 @@ fn hit_tests(ck: &mut Ck) {
     ck.t("settings stepper: '-' key and label step down", ui::settings_step(237) == -1 && ui::settings_step(20) == -1);
     ck.t("settings stepper: '+' key steps up", ui::settings_step(437) == 1 && ui::settings_step(463) == 1);
     host::reset(0);
-    ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &["ON"; 8]);
-    page(ck, "limits", &|_, y| o(ui::list_hit(y, ui::LIMIT_ROWS.len())), &|b| b.y0 >= 40, &(0..8).collect::<Vec<u32>>());
+    ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &["ON"; 9]);
+    page(ck, "limits", &|_, y| o(ui::list_hit(y, ui::LIMIT_ROWS.len())), &|b| b.y0 >= 40, &(0..9).collect::<Vec<u32>>());
+    // Record page (decision 2026-10-22 #1): four rows (the stepper keys
+    // nest in their rows), its steppers' "-" key at x 150..203.
+    host::reset(0);
+    ui::record_page(["Every reading", "Until stopped"], "about 62 h left", false);
+    page(ck, "record", &|_, y| o(ui::list_hit(y, ui::RECORD_ROWS.len())), &|b| b.y0 >= 40, &[0, 1, 2, 3]);
+    ck.t("record stepper: '-' key and label step down", ui::record_step(177) == -1 && ui::record_step(20) == -1);
+    ck.t("record stepper: '+' key steps up", ui::record_step(437) == 1 && ui::record_step(463) == 1);
     // Range pages and the temperature page.
     for b in [dmm::Button::Volt, dmm::Button::Amp, dmm::Button::Ohm, dmm::Button::Cap] {
         host::reset(0);

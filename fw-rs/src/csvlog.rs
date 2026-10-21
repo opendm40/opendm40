@@ -27,6 +27,18 @@
 //! header): a log of a moving average would hide the spread and lag steps,
 //! and the time column would no longer be the time of the value.
 //!
+//! Interval mode (Record page, docs/decisions-2026-10-22.md #1; `set_next`
+//! before `start`, also for the swipe-down REC and LOG:CSV ON): one row per
+//! interval I (1 s / 10 s / 1 min) instead of per reading. Interval k covers
+//! readings at [(k-1) I, k I) from the start; its row has time_s = k I (the
+//! END), value = the mean of its non-OL readings, flags = the OR of its
+//! readings' flags. An OL reading makes it an OL row, which carries no value
+//! (the DLG / CSV format: an OL row prints none). An interval without a
+//! reading writes no row; `stop` writes the open, partial interval at its
+//! nominal end. A duration (10 min .. 24 h) ends the recording by itself
+//! (`push` / `poll`) with the usual result. Interval files have one more
+//! header line ("# interval N s: ..."); every-reading files are unchanged.
+//!
 //! Non-blocking, like screenshot.rs: `start` / `push` / `stop` only touch RAM;
 //! `poll` (every main-loop pass) does one bounded slice of a flush (one block
 //! read, one Alloc FAT block, one `write_step` slice of <= ~2 ms of a data

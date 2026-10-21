@@ -75,7 +75,7 @@ fn alert_mask_name(b: &mut [u8; 16], m: u8) -> &str {
 
 /// Menu-like pages (not instrument views): no view swipe, MENU steps back.
 fn is_page(v: View) -> bool {
-    matches!(v, View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Gallery | View::Help)
+    matches!(v, View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help)
 }
 
 /// Keypad targets of the temperature page (after the generator 0..2 / 5
@@ -257,6 +257,9 @@ pub struct App {
     /// change ends it), and whether REC is drawn in the status block.
     rec_func: u8,
     rec_shown: bool,
+    /// Record page: free bytes on the disk as scanned on page entry
+    /// (csvlog::free_bytes; Err = busy / no disk), for the estimate.
+    rec_free: Result<u32, crate::csvlog::GErr>,
 }
 
 fn backlight(pct: u8) {
@@ -451,6 +454,7 @@ impl App {
             set_page: 0,
             rec_func: 255,
             rec_shown: false,
+            rec_free: Err(crate::csvlog::GErr::NoDisk),
         };
         crate::persist::init();
         if let Some(rec) = crate::persist::load() {
@@ -570,6 +574,7 @@ impl App {
                 ui::keypad(self.kp_kind(), title, t, unit, self.kp_sel);
             }
             View::Limits => self.limits_page(),
+            View::Record => self.record_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(|p| ui::temp_page(p)),
             View::Range if self.dmm.pw.on => {
@@ -921,7 +926,7 @@ impl App {
         let hn = fmt(&mut hb, l.hi);
         let ln = fmt(&mut lb, l.lo);
         let onoff = |b: bool| if b { "ON" } else { "OFF" };
-        let vals: [&str; 8] = [
+        let vals: [&str; 9] = [
             onoff(self.meter.ahold),
             onoff(l.on),
             core::str::from_utf8(&hb[..hn]).unwrap_or(""),
@@ -930,6 +935,7 @@ impl App {
             "",
             "",
             onoff(self.meter.lim_beep),
+            ui::REC_INTERVALS[crate::csvlog::next().0 as usize],
         ];
         let mut t = [0u8; 32];
         let pre = b"Hold & Limits: ";
@@ -938,6 +944,57 @@ impl App {
         t[pre.len()..pre.len() + name.len()].copy_from_slice(name);
         let title = core::str::from_utf8(&t[..pre.len() + name.len()]).unwrap_or("");
         ui::list_page(title, &ui::LIMIT_ROWS, &vals);
+    }
+
+    /// View::Record (decision 2026-10-22 #1): interval / duration of the
+    /// next recording, the free-time estimate from the scan on page entry
+    /// (free bytes x 2 B/row at the interval, or at the measured reading
+    /// period in every-reading mode), Start / Stop.
+    fn record_page(&self) {
+        let (ii, di) = crate::csvlog::next();
+        let row_ms = match crate::csvlog::INTERVALS_S[ii as usize] {
+            0 => match self.dmm.reading_period_ms() {
+                0 => 100,
+                p => p,
+            },
+            s => s * 1000,
+        };
+        let mut b = [0u8; 32];
+        let free = match self.rec_free {
+            Ok(f) => {
+                let h = crate::csvlog::est_hours(f, row_ms);
+                let mut n = 0;
+                let mut put = |p: &[u8]| {
+                    let k = p.len().min(32 - n);
+                    b[n..n + k].copy_from_slice(&p[..k]);
+                    n += k;
+                };
+                if h == 0 {
+                    put(b"< 1 h");
+                } else {
+                    let mut d = [0u8; 10];
+                    let mut i = d.len();
+                    let mut v = h;
+                    loop {
+                        i -= 1;
+                        d[i] = b'0' + (v % 10) as u8;
+                        v /= 10;
+                        if v == 0 {
+                            break;
+                        }
+                    }
+                    put(b"about ");
+                    put(&d[i..]);
+                    put(b" h");
+                }
+                // The cap: one recording ends after 49.7 days (u32 ms).
+                put(if h >= crate::csvlog::EST_CAP_H { b" (limit)" } else { b" left" });
+                core::str::from_utf8(&b[..n]).unwrap_or("")
+            }
+            Err(crate::csvlog::GErr::Busy) => "-- (disk busy)",
+            Err(_) => "-- (no disk)",
+        };
+        ui::record_page([ui::REC_INTERVALS[ii as usize], ui::REC_DURATIONS[di as usize]], free, crate::csvlog::active());
     }
 
     /// Keypad kind for the current target (ui::KP_*).
@@ -1024,7 +1081,9 @@ impl App {
         // No idle shutdown during a MIN/MAX/AVG recording session (FR-02;
         // started explicitly, see Stats::rec). Dimming still applies.
         // Nor while the power meter integrates energy with a current flowing.
-        if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] && !self.meter.stats.rec && !self.dmm.pw.integrating() {
+        // Nor during a CSV recording (Record page: a 24 h log on battery;
+        // decisions-2026-10-22.md #1).
+        if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
             power_off();
         }
         self.off_warn(now, idle);
@@ -1456,6 +1515,8 @@ impl App {
             | if self.dmm_view.bar_on { 0 } else { crate::meter::EXT_HISTORY_ROW }
             | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 }
             | ((!self.dmm.alert_mask() & crate::sentinel::M_ALL) as u32) << crate::meter::EXT_ALERT_OFF_SHIFT;
+        let (ri, rd) = crate::csvlog::next();
+        p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
         p
     }
 
@@ -1510,6 +1571,9 @@ impl App {
         let off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_ALL;
         self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
         self.pw_restore(&p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS]);
+        // v8: Record page interval / duration (0 = the defaults; csvlog
+        // maps an unknown index to the default).
+        crate::csvlog::set_next((p[crate::persist::W_REC] & 0xF) as u8, (p[crate::persist::W_REC] >> 4 & 0xF) as u8);
         let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
         self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
         let mode = if same_session { restore_func(rec.version, p[2] as u8) } else { 1 };
@@ -1595,7 +1659,8 @@ impl App {
         let now = self.now;
         let u = self.meter.update(&raw, now);
         // CSV recording: the unsmoothed reading (REL applied; csvlog.rs
-        // header), one row per reading; a function change ends it.
+        // header), one row per reading or per interval (the Record page's
+        // setting, csvlog.rs); a function change ends it.
         if crate::csvlog::active() {
             let l = &u.raw;
             if crate::meter::func_of(l) != self.rec_func {
@@ -2018,7 +2083,7 @@ impl App {
     /// goes on unless the user touches the screen or a key.
     fn off_warn(&mut self, now: u64, idle: u64) {
         let off = OFF_MS[self.off_idx];
-        if off == 0 || self.meter.stats.rec || self.dmm.pw.integrating() || idle + OFF_WARN_MS <= off {
+        if off == 0 || self.meter.stats.rec || self.dmm.pw.integrating() || crate::csvlog::active() || idle + OFF_WARN_MS <= off {
             self.off_warned = 0;
             return;
         }
@@ -2190,6 +2255,7 @@ impl App {
                     }
                     View::Settings => View::Menu,
                     View::Keypad if self.kp_dmm() => self.kp_back(),
+                    View::Record => View::Limits,
                     View::Menu | View::Range | View::Keypad | View::Limits => self.back_view,
                     _ => View::Menu,
                 };
@@ -2228,7 +2294,7 @@ impl App {
                 // No range page (continuity / diode, frequency): the Hold &
                 // Limits page.
                 View::Dmm | View::DmmScope => self.show(View::Limits, clk),
-                View::Range | View::Limits => {
+                View::Range | View::Limits | View::Record => {
                     let v = self.back_view;
                     self.show(v, clk)
                 }
@@ -2551,9 +2617,54 @@ impl App {
                         l.lo = None;
                     }
                     Some(7) => self.meter.lim_beep = !self.meter.lim_beep,
+                    Some(8) => {
+                        // The estimate's disk scan: on entry only, never
+                        // while a commit holds the disk (Busy then).
+                        self.rec_free = crate::csvlog::free_bytes();
+                        self.show(View::Record, clk);
+                        return;
+                    }
                     _ => return,
                 }
                 self.meter.recheck();
+                self.redraw = true;
+            }
+            View::Record => {
+                if ui::title_back_hit(y) {
+                    self.show(View::Limits, clk);
+                    return;
+                }
+                let now = clk.now_ms();
+                match ui::list_hit(y, ui::RECORD_ROWS.len()) {
+                    Some(k) if ui::REC_STEP_ROWS.contains(&k) => {
+                        // A running recording keeps its settings.
+                        if crate::csvlog::active() {
+                            self.beep(now, 300);
+                            self.toast(now, "Stop the recording first", false);
+                            return;
+                        }
+                        let (mut ii, mut di) = crate::csvlog::next();
+                        let d = ui::record_step(x) as i16;
+                        let step = |v: u8, n: usize| (v as i16 + d).clamp(0, n as i16 - 1) as u8;
+                        if k == 0 {
+                            ii = step(ii, ui::REC_INTERVALS.len());
+                        } else {
+                            di = step(di, ui::REC_DURATIONS.len());
+                        }
+                        crate::csvlog::set_next(ii, di);
+                    }
+                    Some(ui::REC_START_ROW) => {
+                        let was = crate::csvlog::active();
+                        self.rec_toggle(now);
+                        // Start returns to the DMM page it came from.
+                        if !was && crate::csvlog::active() {
+                            let v = self.back_view;
+                            self.show(v, clk);
+                            return;
+                        }
+                    }
+                    _ => return,
+                }
                 self.redraw = true;
             }
             View::Settings if self.set_page == 1 => {
