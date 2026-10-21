@@ -283,6 +283,8 @@ pub(super) struct Sp {
     /// Pinch bubble shown / to be (re)drawn.
     bubble: bool,
     bubble_dirty: bool,
+    /// New measurement results not all drawn yet (`sp_cells_step`).
+    pub cells_due: bool,
     /// Settings "Scope tap step" (scope_ui::TAP_*).
     pub tap_mode: u8,
     /// Halves: tabs shown until (after a step, on an intro page entry).
@@ -346,6 +348,7 @@ impl Sp {
             sampling: false,
             bubble: false,
             bubble_dirty: false,
+            cells_due: false,
             tap_mode: su::TAP_DEFAULT,
             tabs_until: 0,
             step_until: 0,
@@ -594,6 +597,19 @@ impl App {
 
     /// Measurement bar from the selection and the latest results.
     pub(super) fn sp_cells(&mut self) {
+        self.sp.cells_due = false;
+        self.sp_cells_with(false);
+    }
+
+    /// One changed measurement cell per call (scope_poll, a pass without a
+    /// new frame): `cells_due` stays set until all four are current.
+    pub(super) fn sp_cells_step(&mut self) {
+        self.sp.cells_due = self.sp_cells_with(true);
+    }
+
+    /// Cell texts from the selection and results; `one`: draw at most one
+    /// changed cell and return whether one was drawn.
+    fn sp_cells_with(&mut self, one: bool) -> bool {
         let m = self.sp_model(self.now);
         let mut b: [[u8; 24]; 4] = [[0; 24]; 4];
         let mut n = [0usize; 4];
@@ -613,7 +629,11 @@ impl App {
         }
         let txt = |i: usize| core::str::from_utf8(&b[i][..n[i]]).unwrap_or("--");
         let t: [&str; 4] = [txt(0), txt(1), txt(2), txt(3)];
+        if one {
+            return su::cells_step(&m, &t[..self.meas_n.min(4)]);
+        }
         su::cells(&m, &t[..self.meas_n.min(4)]);
+        false
     }
 
     /// A new frame from the engine: column rows (cached for previews),

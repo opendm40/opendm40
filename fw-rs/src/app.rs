@@ -1621,19 +1621,31 @@ impl App {
                 let t2 = cyc();
                 crate::prof::enter(crate::prof::FRAME);
                 self.sp_frame(&f, now);
-                self.sp_tick(now);
+                // With a measurement in this pass the screen update (the
+                // graph diff) waits for the next pass's sp_tick (below), so
+                // no pass does maths + frame + paint (device check
+                // 2026-10-21).
+                if !fresh {
+                    self.sp_tick(now);
+                }
                 crate::prof::exit(crate::prof::FRAME);
                 crate::prof::drawn();
                 self.prof[2] = self.prof[2].max(cyc().wrapping_sub(t2) / 200);
+                // The cells follow on the next passes, one changed cell
+                // each (device check 2026-10-21: measurement + frame + four
+                // cells in one pass was ~32 ms).
                 if fresh {
-                    crate::prof::enter(crate::prof::MTXT);
-                    self.sp_cells();
-                    crate::prof::exit(crate::prof::MTXT);
+                    self.sp.cells_due = true;
                 }
                 return;
             }
         } else if page {
             self.sp_tick(now);
+            if self.sp.cells_due && !covered {
+                crate::prof::enter(crate::prof::MTXT);
+                self.sp_cells_step();
+                crate::prof::exit(crate::prof::MTXT);
+            }
         }
     }
 

@@ -1633,6 +1633,14 @@ pub fn fmt_hz125(out: &mut Buf, hz: f32) {
 /// Measurement bar texts (<= 4, "--" for unused cells); only changed cells
 /// are repainted.
 pub fn cells(m: &Model, texts: &[&str]) {
+    while cells_step(m, texts) {}
+}
+
+/// At most one changed cell of `cells` (~3 ms on the device per cell): true
+/// if it drew one (more may follow), false when all four show `texts`. The
+/// scope page spreads a measurement update over passes with it (device
+/// check 2026-10-21: four cells in one pass took 12.3 ms).
+pub fn cells_step(m: &Model, texts: &[&str]) -> bool {
     let s = shown();
     for i in 0..4 {
         let t = texts.get(i).copied().unwrap_or("--");
@@ -1644,7 +1652,9 @@ pub fn cells(m: &Model, texts: &[&str]) {
         meas_cell(m, i, t);
         s.cells[i][..n].copy_from_slice(&b[..n]);
         s.cells_n[i] = n as u8;
+        return true;
     }
+    false
 }
 
 // ------------------------------------------------------------------ tap step
