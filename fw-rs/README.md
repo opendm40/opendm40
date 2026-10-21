@@ -4,7 +4,8 @@ Replacement firmware for the Alientek DM40 (GD32F427, Cortex-M4F @ 200 MHz):
 multimeter, scope and generator running at the same time, stock-like GUI with
 the main colour red, menus, touch, Bluetooth app protocol, USBTMC/SCPI.
 Calibration and the vendor boot data are read from their stock locations, never
-rewritten (a backup copy goes to the SPI disk).
+rewritten (served read-only on a second USB disk, plus one write-once
+safety copy of the calibration on the SPI disk).
 
 fw-rs is installed like a stock update: `dm40-fw-native.bin` is a vendor-format
 update file that the vendor FS-loader flashes to `0x08004000`; a small shim in
@@ -17,7 +18,9 @@ kept only for the T1/T2 test images (see "Legacy RAM loader").
 fw-rs enumerates as a composite USBTMC + mass storage device (`1209:0001`) on
 USBFS. Debug commands are SCPI `DBG:...` over USBTMC (`src/scpi.rs`); the host
 tool `tools/dm40dbg.py` (PIL for screenshots) needs read/write access to
-`/dev/usbtmc*` (udev rule). The disk is the stock SPI flash FAT volume.
+`/dev/usbtmc*` (udev rule). Mass storage has two LUNs (two removable disks
+on the PC): LUN 0 "DM40 disk" = the stock SPI flash FAT volume, LUN 1 "DM40
+info" = a read-only volume `DM40-INFO` generated from the MCU memory.
 
 ```
 python3 tools/dm40dbg.py ping
@@ -71,7 +74,16 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   (tools/dm40dbg.py). Mass storage: the stock FAT16 volume on the W25Q128 SPI
   flash (4096-byte sectors), always attached; `DBG:FLASH?` = JEDEC id, blocks,
   write error flag. A block write that needs an erase stalls the main loop for
-  ~50 ms (up to 400 ms).
+  ~50 ms (up to 400 ms). Second LUN (`src/vdisk.rs`, native builds):
+  read-only FAT16 volume `DM40-INFO` synthesized on the fly — `CALIB.BIN`,
+  `BOOTDATA.BIN`, `UID.BIN`, `OPTBYTES.BIN`, `OTP.BIN`, `ROMBOOT.BIN`,
+  `LOADER.BIN` (raw copies of their regions), `BACKUP.TXT` (sizes, CRC-32s,
+  UID, version, restore notes) and `FIRMWARE.BIN` (the running firmware as a
+  vendor update file; copy it to the DM40 disk as `dm40fw.bin` to reinstall).
+  Always current, nothing written. The SPI disk keeps only a write-once
+  safety copy of `CALIB.BIN` / `BOOTDATA.BIN` / `UID.BIN` (made when missing,
+  never overwritten: it survives an SWD mass erase of the MCU; delete it to
+  have it made again). docs/native-boot.md "Unit data".
 - **Touch**: CST2xx controller, gestures (tap, long press, swipes, drag),
   side keys MENU / RUN / AUTO / MF. Power key: hold 1.5 s = off, double
   press = key/touch lock.

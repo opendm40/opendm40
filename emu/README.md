@@ -142,6 +142,12 @@ emu/usbip_client.py usbtmc 1-0 "*IDN?"   # -> Alientek,DM40A,0,dm40-fw 0.1
 emu/usbip_client.py scpi-tcp 1-0 5025    # SCPI lines on TCP 5025 <-> USBTMC, e.g. for
                                          # sigrok-cli -d scpi-dmm:conn=tcp-raw/127.0.0.1/5025
 emu/usbip_client.py msc    1-0 0         # INQUIRY, READ CAPACITY (4096 x 4096 B), READ(10) LBA 0 (FAT boot sector)
+emu/usbip_client.py msc    1-0 0 1       # the same on LUN 1 (fw-rs read-only info volume, 512 B sectors)
+emu/usbip_client.py luns   1-0           # GET MAX LUN + per-LUN INQUIRY / TUR / capacity / MODE SENSE WP /
+                                         # WRITE to the read-only LUN -> 07/27/00 / PREVENT-ALLOW
+emu/usbip_client.py mscdump 1-0 1 out.img  # FAT volume of a LUN (metadata + used clusters) for
+                                         # fsck.fat / mtools; resumable (exit 2: restart the emulator, rerun)
+USBIP_PORT=3251 emu/usbip_client.py ...  # a server on another port (CreateUSBIPServer 3251)
 emu/usbip_client.py read   1-0 0x1FFF7A10 12    # usbrw image: vendor EP0 read (the UID)
 emu/usbip_client.py write  1-0 0x20028FC0 02    # usbrw image: vendor EP0 write + read-back
 ```
@@ -155,7 +161,11 @@ enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk
 over MSC (a 4 KiB block = 64 bulk URBs, each a main-loop turn of fw-rs: a
 few seconds in `--fast` mode). Attaching the device to the host kernel
 (`usbip attach`, then `dm40dbg.py` / mounting the disk) needs vhci-hcd and
-root and was not run. The stock's "USB Connect" MSC was not tried yet.
+root and was not run. The stock's "USB Connect" MSC was not tried yet. Known model issue (2026-10-21): after a few dozen
+bulk transfers the emulated DWC2 sometimes stops answering URBs (EP0 too),
+with the current and the previous fw-rs alike; restart the emulator
+(`mscdump` resumes). OUT data is sent one URB per 64-byte packet (the model
+holds only one packet while the device NAKs).
 
 ### GDB
 

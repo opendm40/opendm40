@@ -78,10 +78,10 @@ include the padding; the loader flashes it like any body byte):
   `info` / `unpack` warn about a hazardous input (`tail_hazard`);
 - `build.sh native` packs with `--pad` and fails unless the file is a multiple
   of 128; `firmware/patch/patcher.py` builds with `pad=True`;
-- `_DM40PRV.BIN` (`calbackup::FwFile`) is 12 + `word1` bytes, so it is whole
-  blocks for every image built that way; for an installed image whose file
-  would end in a hazardous block, `FwFile::from_flash` returns None (no
-  firmware file is written);
+- `FIRMWARE.BIN` on the information volume (`calbackup::FwFile`) is 12 +
+  `word1` bytes, so it is whole blocks for every image built that way; for an
+  installed image whose file would end in a hazardous block,
+  `FwFile::from_flash` returns None (no firmware file);
 - `tools/dm40dbg.py image` prints the last-block length and rejects a
   hazardous file; `tools/reload.sh` refuses to stage it;
 - host test: `tools/fatren-test/run.sh` ("short last 128-byte block").
@@ -406,9 +406,9 @@ This section supersedes §2–§10 where they differ. By user decision:
   non-default features.
 - **The installed `dm40*.bin` is renamed** to `_DM40PRV.BIN` after a cold
   normal boot. It is not deleted. (Observed on T3: the loader itself deletes
-  the installed file, so fatren usually finds nothing; calbackup now
-  regenerates `_DM40PRV.BIN` from flash instead, see "Calibration / boot-data
-  backup".)
+  the installed file, so fatren usually finds nothing; the running firmware's
+  update file is `FIRMWARE.BIN` on the read-only information volume, see
+  "Unit data".)
 - **Device-authenticity check** (`src/genuine.rs`, docs/genuine-check.md):
   informational only (`DBG:GENUINE?`). By user decision it is NOT in the boot
   path: the shim never reads it and nothing changes behaviour on its result.
@@ -876,9 +876,9 @@ from the stock boot FUN_0800af34:
     `pd6_input`; in T1 (`test_initcore_start` does not run the shim) it is the
     one `board::init` sets (`board.rs`, PD6 input + pull-down), on top of the
     stock's own. Expected `PD6,0,2,0` with the key released;
-  - `STAGED`, `n`, `CALBK`, `status`, `written`, `conflict`, `freed`,
-    `STACK`, `used`, `size` (`native::put_extra`, see "Stack depth" and the
-    calibration backup section).
+  - `STAGED`, `n`, `CALBK`, `status`, `written`, `conflict`, `differs`,
+    `STACK`, `used`, `size`, `CALMS`, `ms` (`native::put_extra`, see "Stack
+    depth" and "Unit data": calibration safety copy).
   
   `last_trigger` codes: `0x54520010` = marker zeroed, `0x54520011` = zeroing
   failed. With `recovery-file`, `0x5452000n`, n = 0 Created, 1 AlreadyThere,
@@ -996,154 +996,200 @@ the DM40 geometry: 4096 B sectors, 2 FATs, 512 root entries, 4087 clusters.
 - **Not exercised:** a long name that matches while its 8.3 name does not.
   mtools derives the 8.3 name from the long one, so this case cannot be built.
 
-## Calibration / boot-data backup (`src/calbackup.rs`)
+## Unit data: information volume (USB LUN 1, `src/vdisk.rs`) and calibration safety copy (`src/calbackup.rs`)
 
-Copies of the unit's irreplaceable data as plain files in the root of the
-SPI-flash FAT (the USB disk), so the owner can archive them from the PC
-(UF-20), enough for a full restore after an SWD mass erase (`ROMBOOT.BIN` at
-0x08000000, `LOADER.BIN` at 0x080A0000, `CALIB.BIN` at 0x080C0000, then any
-firmware), plus the running firmware's own update file. Internal flash and
-the system areas are only read. ~430 KiB (~107 clusters) of the 16 MiB
-volume.
+Owner decision 2026-10-21 (TODO "Virtual backup files"). The unit's
+irreplaceable data (UF-20) is offered two ways:
 
-| File | Source | Bytes | Why this size |
+1. **Information volume** — a second, read-only USB mass-storage LUN, a FAT16
+   volume generated on the fly from the MCU memory (DAPLink-style virtual
+   FAT). Always current, nothing written anywhere, no boot-time disk work.
+2. **Calibration safety copy** — ONE write-once copy of `CALIB.BIN`,
+   `BOOTDATA.BIN` and `UID.BIN` on the SPI-flash disk (LUN 0).
+
+Earlier builds (up to d341570) instead wrote nine files to the SPI disk at
+every boot (compare-first, rewritten on change: `CALIB`, `BOOTDATA`, `UID`,
+`OPTBYTES`, `OTP`, `ROMBOOT`, `LOADER` .BIN, `BACKUP.TXT`, `_DM40PRV.BIN`;
+~107 clusters, ~10 s on an empty disk, ~6 s after every firmware update).
+That writer is gone; **files those builds left on users' disks are not
+touched** (not updated, not deleted — the owner's files; they go stale when
+the flash changes). fatren still renames an installed `dm40*.bin` to
+`_DM40PRV.BIN` (loader re-install protection, not a backup).
+
+### Information volume (LUN 1)
+
+GET MAX LUN = 1 in normal mode (`Msc::new(.., 2)`, feature `vdisk`, implied
+by `native`; recovery keeps one LUN). Volume label `DM40-INFO`, serial number
+= CRC-32 of the UID (stable per unit). Geometry: 512-byte sectors, 4 sectors
+(2 KiB) per cluster, 1 reserved sector, 2 FATs of 129 sectors, 128 root
+entries, 32768 clusters (FAT16 by the cluster-count rule), 131339 sectors =
+64.1 MiB; media 0xF8. The size is fixed and mostly free space, so generated
+files of other modules fit later (`set_extra`, below).
+
+Files (root, 8.3, attribute read-only, date 2026-10-13, each on consecutive
+clusters; the FAT is a pure function of the file table):
+
+| File | Source | Bytes | Notes |
 |---|---|---|---|
-| `CALIB.BIN` | `0x080C0000` | 4096 | Settings + calibration record: 800 B (u16 crc, u16 ~crc, u32 version 1, data; calibration struct at +0x168, `hy3131_v2_6.h`). This unit's 1 MiB dump has nothing but 0xFF in the 128 KiB sector beyond 0x31F. 4 KiB = one cluster = one flash block, with room for a longer record. |
-| `BOOTDATA.BIN` | `0x080A4000` | 16384 | UID-bound FS-loader data. The device-specific block starts at `0x080A4000` (`dumps/dump_boot_data_uid.bin`, 2 KiB; the 16 KiB `dump_boot_data.bin` is in fact the loader at `0x080A0000`). The whole device-specific non-0xFF run is `0x080A4000..0x080AE6D3`; 16 KiB covers its start (the data words and the version bytes BT command 02 reports). A subset of `LOADER.BIN` (+0x4000..+0x8000), kept for compatibility: earlier builds wrote it and calbackup never deletes a file, so a dropped name would go stale. |
+| `CALIB.BIN` | `0x080C0000` | 4096 | Settings + calibration record: 800 B (u16 crc, u16 ~crc, u32 version 1, data; calibration struct at +0x168, `hy3131_v2_6.h`); 0xFF beyond 0x31F on this unit. |
+| `BOOTDATA.BIN` | `0x080A4000` | 16384 | UID-bound FS-loader data (device-specific run `0x080A4000..0x080AE6D3`; = `LOADER.BIN` +0x4000..+0x8000). |
 | `UID.BIN` | `0x1FFF7A10` | 12 | 96-bit unique ID. |
 | `OPTBYTES.BIN` | `0x1FFFC000` | 16 | Option bytes. |
-| `OTP.BIN` | `0x1FFF7800` | 528 | OTP + lock bytes (all 0xFF on this unit; cheap). |
+| `OTP.BIN` | `0x1FFF7800` | 528 | OTP + lock bytes. |
 | `ROMBOOT.BIN` | `0x08000000` | 16384 | Primary bootloader (sector 0). |
-| `LOADER.BIN` | `0x080A0000` | 131072 | The whole update-loader sector 9, including all of the UID-bound data. |
-| `BACKUP.TXT` | — | ~1000 | Name, address, size and CRC-32 (zlib) of each file + a restore note. Deterministic (no time, no counters), so it does not defeat the wear check. Also the index of the CRC-first check (below). |
-| `_DM40PRV.BIN` | `0x08004000` | 12 + body length | The running firmware's **update file**, regenerated from flash (only when the marker at `0x08008000` is a valid update header and the file's last 128-byte block is not one the FS-loader mis-decodes, `FwFile::tail_hazard`; whole blocks for every `pack --pad` image). Byte-identical to the `dm40*.bin` the loader installed (and then deleted): decoded file = the 12-byte marker (it is that file's decoded header) ‖ flash `0x08004000..+length` (length = marker word 1) with body bytes `0x4000..0x400B` (the marker itself) as 0xFF, encoded in 128-byte blocks like `dm40fw.py pack`. To reinstall: rename it to `DM40PRV.BIN` and power-cycle (or `DBG:UPDATE`). ~61 clusters for fw-rs, 121 for stock V2.6. |
+| `LOADER.BIN` | `0x080A0000` | 131072 | The whole update-loader sector 9. |
+| `BACKUP.TXT` | generated | ~1350 | Name, address, size, CRC-32 (zlib) of each file, the UID, `dm40-fw <version>`, the loader record at `0x08008000`, restore notes. Fixed width: its size is known up front. |
+| `FIRMWARE.BIN` | `0x08004000` | 12 + body length | The running firmware as its vendor **update file** (`calbackup::FwFile`): byte-identical to the `dm40*.bin` the loader installed (decoded file = the 12-byte loader record ‖ flash `0x08004000..+length` with the 12 marker bytes as 0xFF, encoded in 128-byte blocks; whole blocks for every `pack --pad` image). Only when the record at `0x08008000` is a valid header and the last block is not one the FS-loader mis-decodes (`FwFile::tail_hazard`); else absent and `BACKUP.TXT` says why. Reinstall: copy it to the DM40 disk as `dm40fw.bin`, power-cycle (or `DBG:UPDATE`). The name does not match the loader's `dm40*.bin`, so a copy dropped on the SPI disk as is stays inert. |
 
-None of the names matches the loader's `dm40*.bin` (`_DM40PRV.BIN` starts with
-an underscore). fatren's rename of an installed `dm40*.bin` to `_DM40PRV.BIN`
-(kept; it runs first) cannot fight with it: fatren only replaces
-`_DM40PRV.BIN` with the file whose header equals the marker, i.e. the same
-firmware; calbackup then finds it equal and only gives the entry its write
-stamp once (one root block). If that file had non-0xFF bytes in the 12-byte
-marker gap (excluded from the loader's body CRC), calbackup rewrites it once
-with 0xFF there. Host test: both cases.
+Sector generation (`VDisk::read_block`): boot sector from constants; FAT
+sector = 256 entries computed from the table (chains are contiguous, EOC
+0xFFFF, free 0); root sector = label entry + one entry per file; data sector
+→ the owning file at that offset (memory regions read by byte loads,
+`BACKUP.TXT` rendered through a windowed text writer, `FIRMWARE.BIN` encoded
+per 128-byte block), zeros elsewhere. The sources cannot change while fw-rs
+runs (fw-rs only ever programs the recovery marker, followed by a reset), so
+the CRC-32s are computed once in `pre_main` (`vdisk::init`, ~570 KiB of
+nibble-table CRC; the time is part of the boot, estimated ~0.1 s, not yet
+measured on the device). The table (~2 KiB) lives in NOLOAD SRAM (`.dmabuf`).
 
-**When:** every normal boot, before USB exists: native from `pre_main`
-(after board init and fatren), the RAM build from `rust_start` before
-`main()`. Cargo feature `calbackup`: implied by `native`; off in the RAM
-images for CODE space (~6.5 KB; as of 2026-10-13 the default image has
-~250 B of CODE left, so `--features calbackup` overflows by ~6.3 KB). The T1
-`test-initcore` image links again since `link-test.x` gives CODE all of
-SRAM0+SRAM1 (128 KiB) and moves `.dmabuf` to SRAM2 (`0x20020000`, 64 KiB), but
-without calbackup: the 128 KiB flash sector 8 the RAM images load from is the
-real ceiling (T1 image 130 316 B on 2026-10-13 evening, ~0.75 KB left and
-shrinking with UI work), and calbackup does not fit.
-So calbackup's first run on hardware is still T3 step 1 (review R1).
+**Generic hook for generated files** (`vdisk::set_extra(&[Extra])`): after
+the built-ins, up to `MAX_EXTRA` = 64 more files, each `Extra { name: [u8;
+11], size: u32, read: fn(arg, off, buf), arg: u32 }` — the size must be known
+up front and fixed until the next call, `read` fills at most one 512-byte
+sector per call with the bytes at `off` (deterministic). Intended for CSV
+views of the binary DMM logs on the SPI disk (rendered on read; not
+implemented). A call re-allocates the extras' clusters (the built-ins keep
+theirs), returns how many fit (a prefix: by count and by the 64 MiB data
+area), and raises a one-shot media change for LUN 1: its next command (not
+INQUIRY / REQUEST SENSE, not mid-transfer) fails with UNIT ATTENTION
+06/28/00 so the host drops its cached FAT / directory. Like LUN 0's, it is
+held back while the host has LUN 1 locked (PREVENT = mounted on Linux,
+where a UNIT ATTENTION fails I/O on a mounted removable disk) and goes out
+after the unmount — so a host that keeps the volume mounted sees new log
+files only after a remount / replug. Call it from the main loop.
 
-**CRC-first check (boot time):** the sources' CRC-32s are computed from
-internal flash (fast) and `BACKUP.TXT` on the disk is read once (one block). A
-file is **trusted without reading it** when the disk `BACKUP.TXT` has exactly
-the line this boot would write for it (name, address, size, CRC of the source
-now; `BACKUP.TXT` itself with our stamp and a well-formed chain), and its
-directory entry has that size, our write stamp (time 0, date 2026-10-13, what
-calbackup always writes; a host modification sets the host's clock) and a
-well-formed chain in FAT 1 (FAT reads only, normally one cached block). An
-unchanged boot therefore reads 4 blocks: boot sector, root, FAT 1 block 0,
-`BACKUP.TXT` (host test asserts it; ~4 × 13 ms + ~30 ms CRC of ~420 KiB ≈
-0.1 s, was ~0.65 s; the actual figure is `DBG:BOOT?` `CALMS`). Any other file
-(missing, source changed, size / stamp / chain different) gets the full
-compare below. **Decision: data blocks are not sampled** (first/last block of
-each file would cost 8-12 more reads ≈ 0.1-0.16 s and miss the same cases a
-stamp misses anyway): a data block changed in place without a size, chain or
-stamp change (flash bit rot, a raw sector writer) is **not detected** until
-its source changes. Delete `BACKUP.TXT` to force the full compare of every
-file on the next boot (host test: an in-place LOADER.BIN change is missed,
-then found after deleting it). A file found equal but with a foreign stamp
-(a host copy, fatren's rename) is re-stamped once (root block only).
+### SCSI per LUN (`src/msc.rs`)
 
-**Wear:** a file not trusted above is compared with its source by reading it:
-the root entry (size), the whole cluster chain through FAT 1 (exact length,
-valid links, EOC) and the contents. Equal → nothing written (except the
-one-time re-stamp). Measured on the host image: a second run writes no block.
-Only a missing or different file (calibration changed, firmware updated, a
-corrupted or foreign copy) is rewritten, always under the same name (no
-versions).
+Commands are dispatched by the CBW LUN (`devs[lun]`); a LUN above GET MAX LUN
+gets INQUIRY peripheral qualifier 3 and sense 05/25/00. Per LUN:
+- **INQUIRY**: both removable (RMB = 1), SPC-2, vendor `ALIENTEK`, product
+  `DM40 disk` (LUN 0, unchanged) / `DM40 info` (LUN 1).
+- **TEST UNIT READY / READ CAPACITY(10) / READ FORMAT CAPACITIES**: each its
+  own medium and geometry (LUN 0: 4096 × 4096 B; LUN 1: 131339 × 512 B).
+- **MODE SENSE(6/10)**: header only; the device-specific byte's WP bit (bit
+  7) is set for LUN 1, so Linux logs "Write Protect is on" and mounts it
+  read-only, Windows / macOS likewise treat it as write-protected media.
+- **WRITE(10)** to LUN 1: CHECK CONDITION, sense DATA PROTECT / WRITE
+  PROTECTED (07/27/00), nothing touched. Any refused WRITE (also LUN 0's
+  write inhibit, LBA range, no medium) now takes its whole data phase (data
+  dropped) and only then fails: failing at once left the data to
+  usbd-storage's drain path, which never sent the CSW in the emulator.
+- **REQUEST SENSE**: sense data per LUN.
+- **PREVENT ALLOW MEDIUM REMOVAL**: tracked per LUN (the CBW is matched by
+  its LUN byte). Only LUN 0's lock is `msc::host_mounted()` (the on-device
+  writers' "Disk in use" guard); mounting the read-only volume never blocks a
+  screenshot or a CSV recording. LUN 1's lock only holds back its own UNIT
+  ATTENTION.
+- **One-shot UNIT ATTENTION**: the SPI disk's (`screenshot::MEDIUM_CHANGED`,
+  after an on-device write) is only taken by a LUN-0 command — a host polls
+  both LUNs, and a LUN-1 TEST UNIT READY must not swallow it.
 
-**Write order** (copy-on-write; a power loss anywhere leaves at worst lost
-clusters, never a live entry on free or half-written clusters, never two
-entries with the same name):
-1. allocate new clusters first-fit from FAT 1 (the old chain stays intact and
-   referenced);
-2. write the data blocks (read, overlay, write, read back);
-3. link the new chains (EOC at the end) in every FAT copy — one write per
-   touched FAT block and copy for all files together (0x0000 → link needs an
-   erase, so this is batched);
-4. directory entries: new start cluster and size (new entries: attr 0x20,
-   date 2026-10-13, no LFN) — one write per touched root block for all files,
-   the block with `BACKUP.TXT`'s entry last (so a power loss between root
-   blocks cannot pair new CRC lines with an old same-size entry);
-5. free the old chains in every FAT copy (`fatren::free_chain`; only clears
-   bits, so no erase) — only chains that were well formed, so a broken old
-   chain is left as lost clusters rather than risk freeing another file's;
-6. re-read every written file through its new chain and compare.
+**Host OS handling of a 2-LUN removable device.**
+- *Linux* (usb-storage): reads GET MAX LUN, scans LUNs 0..1 sequentially
+  (usb-storage sets `no_report_luns`, so no REPORT LUNS), one `sd` device per
+  LUN (e.g. `sdb` = disk, `sdc` = info), polls each with TEST UNIT READY;
+  `sd_read_write_protect_flag` reads the MODE SENSE WP bit → `sdc` read-only,
+  udisks mounts it `ro`. Checked in the emulator over USB/IP with the
+  userspace client (no root for vhci, so no kernel attach): GET MAX LUN 1,
+  per-LUN INQUIRY / TUR / capacity / WP bit, WRITE → 07/27/00 with LBA 0
+  unchanged, PREVENT/ALLOW on LUN 1, LUN 0 TUR still ok; the whole LUN 1
+  volume dumped over USB is fsck-clean and every file equals its source
+  (below). A real kernel attach is in the device test plan.
+- *Windows* (usbstor.sys): enumerates every LUN up to GET MAX LUN as its own
+  disk (card-reader style), each removable volume gets a drive letter;
+  MODE SENSE WP → the volume is read-only (Explorer refuses writes, no
+  "System Volume Information" written). Distinct product names keep the two
+  disks apart in Device Manager. FAT16 with 2 KiB clusters and a standard
+  BPB is mounted by every Windows version.
+- *macOS*: IOUSBMassStorageDriver also handles multi-LUN devices (card
+  readers); each LUN is a separate disk, the WP bit → mounted read-only
+  (no `.fseventsd` / `.Spotlight-V100` writes attempted to succeed). Not
+  verified on a Mac.
+- Known 2-LUN pitfalls avoided: no REPORT LUNS dependency; LUN 1 never
+  reports NOT READY; INQUIRY never fails for a valid LUN; sense kept per LUN.
 
-Every block write is verified by read-back. The volume is only touched if
-`fatren::parse_bpb` accepts it. A name taken by a directory or volume label is
-skipped (`conflict`). The residual risk is the erase window of a FAT or root
-block itself (no copy-on-write below the FAT layer on this NOR disk; host
-writes have the same window): at most FAT 1, FAT 2 (one after the other) and
-one root block per boot that changes something.
+### Calibration safety copy (SPI disk, LUN 0)
 
-**Time:** unchanged: 4 block reads (~13 ms each at the 3.125 MHz polled SPI
-clock) + CRC-32 over ~165 KiB of sources + the ~250 KiB firmware file (nibble
-table; the firmware file is encoded on the fly) ≈ 0.1 s, target < 0.2 s, not
-yet measured on the device (`CALMS`). Before: ~0.65 s (45 data blocks read).
-Writes (user-visible, dark screen, **do not power-cycle**): the first boot on
-an empty disk writes 46 + ~61 blocks (fw-rs) ≈ 10 s; the first boot of this
-build on a disk that already has the other backups writes `_DM40PRV.BIN` +
-`BACKUP.TXT` (~62 blocks, ~6 s); **every firmware update** rewrites them once
-again (~6 s; 121 blocks ≈ 12 s if the running firmware were stock-sized); a
-loader update rewrites LOADER.BIN + BACKUP.TXT (~3 s once). The FWDGT is fed
-between blocks (and by spiflash during erases). (These times are for the
-stock /16 SPI prescaler, 3.125 MHz; `spiflash.rs` now runs SPI1 at /4 =
-12.5 MHz, 4x below the W25Q128 `READ` (03h) limit of 50 MHz, so the block
-reads are ~4x faster; erases dominate the writes. /2 = 25 MHz would still be
-in spec but has not been tried on this board.)
+**Why it still exists:** the information volume is generated from the
+internal flash. The one recovery path for a unit whose internal flash is
+unusable — an SWD / BOOT0 session with read protection level 1 — can only
+lift RDP by a **mass erase of the whole internal flash**, the calibration
+(`0x080C0000`) and the UID-bound loader data (`0x080A4000`) included. The
+W25Q128 is a separate chip and survives that, so one copy of the calibration
+must already be there before it is needed.
+
+**What:** `CALIB.BIN` (4096 B from `0x080C0000`), `BOOTDATA.BIN` (16384 B
+from `0x080A4000`), `UID.BIN` (12 B; says which unit the loader data belongs
+to) — `calbackup::FILES[..SAFE]`.
+
+**Rule: write-once.** Each file is written only when the root has **no entry
+of that name**; a present one is never overwritten (even when it differs, so
+a later boot cannot replace the factory copy with a corrupted or foreign
+record) and never deleted. The owner deletes a file to have it made again
+from the flash as it is then. Present files are compared with the flash
+(boot sector, root, FAT 1, 6 data blocks read; nothing written) only to
+report `differs`.
+
+**When:** every normal boot in `pre_main` (after board init and fatren,
+before USB). First boot: 6 data blocks + FAT 1 + FAT 2 + 1 root block written
+(~1 s); later boots: reads only.
+
+**Write order** (unchanged writer, `run_inner`): allocate first-fit from FAT
+1 → data blocks (read-back verified) → chains in every FAT copy → directory
+entries → re-read every written file and compare. A power loss leaves at
+worst lost clusters. The volume is only touched if `fatren::parse_bpb`
+accepts it; a name taken by a directory or volume label is skipped
+(`conflict`); not enough free clusters / root slots → `NOSPACE`, nothing
+written.
 
 **Status** (`calbackup::result()`), appended to `DBG:BOOT?` by
-`native::put_extra` (see below): `CALBK,<status>,<written>,<conflict>,<freed>`
-with status `NOTRUN|NOMEDIUM|BADBPB|UNCHANGED|WRITTEN|NOSPACE|ERROR` (suffix
-`_NOFW`, e.g. `WRITTEN_NOFW`: the run with `_DM40PRV.BIN` was `NOSPACE`, so it
-was retried without the firmware file and BACKUP.TXT has no firmware line; the
-other backups still get written on a nearly full disk, review M1), written
-/ conflict decimal bit masks (u16: bit 0 CALIB, 1 BOOTDATA, 2 UID, 3 OPTBYTES,
-4 OTP, 5 ROMBOOT, 6 LOADER, 7 BACKUP.TXT, 8 `_DM40PRV.BIN`; new files are
-appended so old bits keep their meaning; `written` includes a one-time
-re-stamp), freed = old clusters freed; and the last field `CALMS,<ms>` =
-`calbackup::boot` duration (DWT cycles at 200 MHz).
+`native::put_extra`: `CALBK,<status>,<written>,<conflict>,<differs>`, status
+`NOTRUN|NOMEDIUM|BADBPB|SAFECOPY_PRESENT|SAFECOPY_WRITTEN|NOSPACE|ERROR`;
+written / conflict / differs = decimal bit masks (bit 0 CALIB, 1 BOOTDATA,
+2 UID); `differs` = a kept copy no longer equals the flash. Then
+`CALMS,<ms>` = `calbackup::boot` duration. `tools/dm40dbg.py boot` decodes it
+(and recognises the old `UNCHANGED` / `WRITTEN` / `_NOFW` statuses of earlier
+builds).
 
-**Host test** (`tools/fatren-test/run.sh`, every check fatal): first run
-writes all eight files (ROMBOOT/LOADER/BOOTDATA sliced from the 1 MiB dump;
-45 data blocks, FAT 1 + FAT 2 once each, root once),
-fsck.fat clean, every file equal to its source, BACKUP.TXT CRCs match zlib;
-second run `UNCHANGED` with no block written; one changed calibration byte →
-`CALIB.BIN` + `BACKUP.TXT` rewritten, 2 old clusters freed, fsck clean,
-contents equal, then unchanged again; a 100000-byte foreign `UID.BIN` is
-replaced and its 25 clusters freed; a directory `OTP.BIN` is a conflict and
-the rest is written; fatren + calbackup on one volume, fsck clean; one byte
-changed deep in `LOADER.BIN` → `LOADER.BIN` + `BACKUP.TXT` rewritten, 33 old
-clusters freed, fsck clean, contents equal, then unchanged. CRC-first: an
-unchanged run reads exactly 4 blocks, the only data block being
-`BACKUP.TXT`. Firmware file (flash images built from the packed file with the
-decoded header at +0x4000): stock `dm40_v_2_6.bin` on an empty disk (all 9
-files, 121-cluster firmware file), the current `dm40-fw-native.bin`, and a
-random 480010-byte body (22-byte stored-as-is tail) are each regenerated
-**byte-identical** to the packed file, and `dm40fw.py info` + a body-CRC
-check accept them; firmware change → `_DM40PRV.BIN` + `BACKUP.TXT` rewritten,
-old chain freed; a host re-copy (foreign stamp) → re-stamped, only root block
-written, then 4-read unchanged again; an in-place LOADER.BIN byte change is
-not seen (documented), deleting `BACKUP.TXT` makes the next run find and fix
-it; fatren renaming the installed file over `_DM40PRV.BIN` → calbackup only
-re-stamps it, then both clean.
+### Host tests (`tools/fatren-test/run.sh`, every check fatal)
+
+Safety copy: first boot writes exactly the three files (nothing else); second
+boot `PRESENT`, no block written (11 reads); a changed calibration is kept
+(`differs=0x001`); a deleted `CALIB.BIN` is made again; a foreign `UID.BIN`
+is kept (`differs=0x004`); a disk of an earlier build with all nine files →
+nothing written or deleted, directory identical; a directory `UID.BIN` =
+conflict; fatren on the same volume; nearly full disk → `NOSPACE`, nothing
+written. Information volume (every sector read through `read_block` twice and
+compared, from a 1 MiB flash image = the device dump + the installed
+firmware): fsck.fat clean, label, FAT16 geometry, the 7 region files equal
+their sources, `BACKUP.TXT` sizes and CRC-32s match zlib, read-only
+attribute, `write_block` refused; `FIRMWARE.BIN` byte-identical to the packed
+file for the native build, stock `dm40_v_2_6.bin`, an unpadded 480010-byte
+body and a `pack --pad` image, `dm40fw.py info` + body CRC ok; no valid
+loader record or a hazardous last block → no `FIRMWARE.BIN`; `set_extra` with
+40 generated files (contents checked) and an overflowing list (prefix taken,
+fsck clean).
+
+Emulator (2026-10-21, `emu/usbip_client.py luns` / `mscdump`, port override
+`USBIP_PORT`): first boot wrote the three files to the SPI disk (equal to the
+flash image), second boot left the disk byte-identical; LUN checks as above;
+LUN 1 dumped over USB/IP: fsck clean, 9 files, `CALIB` / `BOOTDATA` /
+`ROMBOOT` / `LOADER` equal the flash image, `UID.BIN` the emulator's UID,
+`FIRMWARE.BIN` byte-identical to the running `dm40-fw-native.bin`, all
+`BACKUP.TXT` CRCs match. (The emulated DWC2 sometimes stops answering bulk
+URBs after a few dozen transfers — also with the previous single-LUN
+firmware — so `mscdump` saves progress and resumes after an emulator
+restart.)
 
 ## Stack depth (review 2026-10-13 B1)
 
@@ -1161,7 +1207,9 @@ popped first. Prologues in the native ELF (2026-10-13):
 | `native::normal` | 8 |
 | `native::pre_main` (board init inlined) | 120 |
 | `fatren::run` | 10 768 |
-| `calbackup::boot` / `calbackup::run` | 212 / 14 260 (with ROMBOOT/LOADER) |
+| `calbackup::boot` / `calbackup::run` | 212 / 14 260 (with ROMBOOT/LOADER); since 2026-10-21 `boot` (safety copy, writer inlined) 1 376, `run` gone |
+| `vdisk::init` (2026-10-21, before main) | 3 952 |
+| `VDisk::read_block` + `describe` (main loop, under `Msc::poll`) | 104 + 80 |
 | `main` | 26 720 |
 | `app::App::tick` | 1 096 |
 | `ui::ScopeView::draw_static` | 2 360 |
@@ -1326,7 +1374,9 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
      - fatren `RENAMED` `DM40_F~1BIN`;
      - `PD6,0,2,0`;
      - `CALBK,WRITTEN` (with this build: bits 7+8 at least = 384, BACKUP.TXT +
-       `_DM40PRV.BIN`); the next boot `CALBK,UNCHANGED` and a small `CALMS`;
+       `_DM40PRV.BIN`); the next boot `CALBK,UNCHANGED` and a small `CALMS`
+       (builds since 2026-10-21: `CALBK,SAFECOPY_WRITTEN` / `SAFECOPY_PRESENT`,
+       see "Unit data" and its device test plan);
      - `STACK,<used>,39000`; after using the scope view, `used` should be
        ≤ about 34 000.
    - The disk now holds `_DM40PRV.BIN` and the backup files.

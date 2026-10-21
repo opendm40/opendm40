@@ -455,10 +455,11 @@ Emulator (emu/):
 - [ ] Cold-junction temperature and the HY3131 die temperature are separate inputs (die temp always set; default equal).
 - [ ] GUI: Apply on Enter in the HY3131 input fields; show only the fields relevant to the chosen source (no freq/DC offset
       for plain DC etc.).
-- [ ] Virtual backup files (owner 2026-10-21): serve BACKUP.TXT, BOOTDATA.BIN, CALIB.BIN, LOADER.BIN, OTP.BIN, ROMBOOT.BIN
-      (+ OPTBYTES, UID, the running firmware as an update file) as VIRTUAL read-only files generated on the fly from the MCU
-      flash instead of writing them to the SPI disk — e.g. a second USB MSC LUN with a synthesized read-only FAT volume
-      (DAPLink-style). Benefits: always current, no SPI wear, no 8 s first-boot write, drop most of calbackup's writer.
-      Caveat: the SPI-disk copy is the only copy that survives an SWD/BOOT0 recovery (RDP1 → mass erase of the MCU flash
-      incl. calibration) — proposal: keep ONE write-once safety copy of CALIB/BOOTDATA/UID on the SPI disk (written only if
-      missing), everything else virtual. Check Linux/Windows/macOS handling of a 2-LUN device and read-only media.
+- [x] Virtual backup files (owner 2026-10-21): second USB MSC LUN = read-only FAT16 volume DM40-INFO
+      generated from the MCU memory (src/vdisk.rs: CALIB / BOOTDATA / UID / OPTBYTES / OTP / ROMBOOT / LOADER .BIN,
+      BACKUP.TXT, FIRMWARE.BIN = running firmware as update file); per-LUN SCSI in msc.rs (INQUIRY names, WP bit,
+      WRITE -> 07/27/00, PREVENT / UNIT ATTENTION per LUN). SPI disk: only a write-once safety copy of
+      CALIB/BOOTDATA/UID (DBG:BOOT? CALBK SAFECOPY_PRESENT/WRITTEN + differs). Host-tested (fatren-test) and
+      emulator-tested over USB/IP (userspace client). docs/native-boot.md "Unit data".
+      Open: device test (Linux kernel attach + mount ro, Windows, macOS); vdisk::init time on the device;
+      generated CSV files from the binary logs via vdisk::set_extra (hook ready, no caller).
