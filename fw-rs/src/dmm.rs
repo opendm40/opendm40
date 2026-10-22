@@ -2643,6 +2643,7 @@ impl Dmm {
             (self.dc_val, dm)
         };
         self.auto_total_si = t * si_k;
+        self.am.n_rd = self.am.n_rd.wrapping_add(1);
         let ol = v.abs() / lim > self.over();
         let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, v * si_k);
         rd.mode = mode;

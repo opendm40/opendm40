@@ -663,7 +663,9 @@ SCPI (`src/scpi.rs` DBG list): `DBG:ACDC:METH A|B|C` / `?` (a change
 restarts AC+DC / AUTO), `DBG:ACDC:STAT?` (meth, step 0 ref / 1 meas / 2
 run, mode, range, AC, DC, n_ac, n_dc, n_rd, Hz, the slot's correction, C V
 per_code, offset, LPF codes, sqrt(RMS) codes), `DBG:ACDC:ZERO k,v|AUTO` /
-`?` (slots 0..3 V ranges, 4..9 A unit * 2 + range), `DBG:ACDC:R0 1|2`,
+`?` (slots 0..3 V ranges, 4..9 A unit * 2 + range; B's zeros and C A's
+offsets: C V keeps E7's self-cal, which has one slot, so a range visited
+again is self-calibrated again), `DBG:ACDC:R0 1|2`,
 `DBG:ACDC:RANG <MF item>|AUTO`.
 
 Cost (against 87f2c20, the commit below these): region B 82 472 -> 78 168
@@ -695,38 +697,44 @@ state, .sram_bss), static stack unchanged (headroom 21 228 B).
 
 One run per method, the same timed input (12 s per phase), error of the
 shown total against hypot(AC, DC) of the source over 4.5 s of each phase
-(its 6th to 1.5th last second), rate = readings / s (B / C: n_rd; A: FETCh?
-value changes, a lower bound), settle = from the phase start until the
-total stays within 0.1 % + 2 digits (nan: never inside that band in the
-phase, e.g. a 0.3 % p-p ripple). Note 7 on (the device's offsets); B~ = B
-with `n7g:0.002`. Runs of 4539aea (A, B, B~) and 17dcff2 (C) (a rerun of all four on
-d6f5e96 with the GD32_SPI timing of 166237c: the same picture within
-0.05 %):
+(its 6th to 1.5th last second), rate = AC+DC readings / s (`DBG:ACDC:STAT?`
+n_rd, every method; A recomputes the total on every result of either
+phase), settle = from the phase start until the total stays within 0.1 % +
+2 digits (- : never inside that band in the phase, e.g. with a 0.3 % p-p
+ripple, or a sample of the phase before inside the window). Note 7 on (the
+device's offsets); B~ = B with `n7g:0.002` (a random draw per AD1 enable:
+its errors are the draw's). The last V phase returns to the 6 V range
+after the 60 V one (a range visited again: C re-runs its self-cal there,
+E7's cal has one slot). Run of the commit after d6f5e96 (see the report):
 
 | phase | A err % / p-p % / rd/s / settle s | B | C | B~ |
 |---|---|---|---|---|
-| V DC 5 | +0.000 / 0.004 / 1.3 / 3.1 | -0.009 / 0.035 / 8.9 / 3.4 | -0.005 / 0.000 / 9.3 / 4.1 | -0.012 / 0.028 / 9.3 / 3.2 |
-| V AC 2 @50 | +0.000 / 0.002 / 1.3 / 3.8 | +0.000 / 0.003 / 9.1 / - | -0.003 / 0.004 / 9.1 / - | -0.000 / 0.003 / 9.1 / 2.2 |
-| V AC 1 + DC 1 @50 | +0.001 / 0.021 / 3.3 / 1.5 | -0.020 / 0.077 / 9.3 / 0.8 | -0.001 / 0.303 / 9.1 / 0.1 | +0.068 / 0.062 / 9.3 / 0.9 |
-| V DC 12 + 0.5 @50 | -0.002 / 0.030 / 2.7 / 3.1 | +0.008 / 0.009 / 9.3 / 0.7 | +0.000 / 0.028 / 9.3 / 1.0 | -0.118 / 0.011 / 9.3 / 11.9 |
-| V DC 12 + 0.5 @45 | +0.002 / 0.047 / 1.8 / 0.0 | +0.007 / 0.030 / 9.3 / - | +0.001 / 0.016 / 9.3 / 0.0 | -0.121 / 0.031 / 9.3 / - |
-| A DC 0.3 | -0.001 / 0.007 / 1.3 / 0.4 | +0.005 / 0.009 / 9.3 / - | +0.000 / 0.000 / 9.3 / 0.4 | -0.003 / 0.010 / 9.3 / 0.4 |
-| A AC 0.2 @50 | +0.001 / 0.002 / 0.7 / 1.6 | -0.001 / 0.006 / 9.6 / 0.1 | +0.000 / 0.005 / 9.6 / 0.2 | +0.001 / 0.005 / 9.6 / 0.1 |
-| A AC 0.2 + DC 0.2 @50 | +0.003 / 0.012 / 2.7 / 0.1 | +0.004 / 0.007 / 9.3 / - | -0.001 / 0.322 / 9.3 / - | -0.002 / 0.008 / 9.3 / 0.1 |
-| A DC 0.3 + 0.05 @45 | +0.012 / 0.318 / 2.2 / 4.5 | -0.006 / 0.297 / 9.4 / 0.1 | +0.002 / 0.062 / 9.6 / 0.0 | -0.000 / 0.289 / 9.4 / 0.2 |
+| V DC 5 | -0.001 / 0.004 / 3.8 / 3.4 | +0.011 / 0.029 / 9.3 / 3.3 | -0.005 / 0.000 / 9.1 / - | -0.016 / 0.031 / 9.3 / 3.3 |
+| V AC 2 @50 | +0.002 / 0.004 / 3.8 / 2.5 | +0.000 / 0.004 / 9.3 / 2.3 | -0.004 / 0.005 / 9.1 / 0.1 | -0.000 / 0.003 / 9.4 / - |
+| V AC 1 + DC 1 @50 | -0.003 / 0.015 / 4.0 / 2.4 | +0.016 / 0.061 / 9.1 / 0.8 | -0.005 / 0.298 / 9.3 / 0.1 | +0.032 / 0.082 / 9.3 / 0.8 |
+| V DC 12 + 0.5 @50 | +0.003 / 0.027 / 3.6 / 3.9 | +0.001 / 0.016 / 9.6 / 1.0 | +0.012 / 0.028 / 9.3 / 0.9 | +0.093 / 0.015 / 9.1 / 1.5 |
+| V DC 12 + 0.5 @45 | +0.016 / 0.067 / 3.1 / 0.0 | +0.001 / 0.012 / 8.9 / - | +0.010 / 0.016 / 9.3 / 0.0 | +0.096 / 0.015 / 9.1 / 0.0 |
+| V DC 5 again (60 V -> 6 V) | +0.001 / 0.006 / 3.6 / 2.5 | +0.007 / 0.025 / 9.1 / - | +0.010 / 0.000 / 9.3 / - | +0.111 / 0.016 / 9.4 / 1.5 |
+| A DC 0.3 | +0.002 / 0.010 / 2.7 / 0.4 | +0.001 / 0.008 / 9.3 / - | -0.002 / 0.000 / 9.3 / - | +0.006 / 0.013 / 9.6 / 0.4 |
+| A AC 0.2 @50 | -0.001 / 0.002 / 2.9 / - | +0.001 / 0.004 / 9.6 / 0.1 | +0.000 / 0.004 / 9.6 / - | -0.000 / 0.005 / 9.3 / 0.1 |
+| A AC 0.2 + DC 0.2 @50 | -0.002 / 0.009 / 2.7 / - | +0.001 / 0.009 / 9.3 / - | -0.000 / 0.324 / 9.3 / - | +0.005 / 0.006 / 9.6 / - |
+| A DC 0.3 + 0.05 @45 | +0.010 / 0.323 / 2.7 / 0.9 | -0.007 / 0.334 / 9.6 / 9.4 | +0.001 / 0.065 / 9.6 / 0.0 | +0.004 / 0.142 / 9.3 / 0.0 |
+
+Earlier runs of the same code (4539aea / 17dcff2, before the 166237c
+GD32_SPI timing) gave the same picture within 0.05 %; one of them drew a
+B~ gain of -0.12 % at 12 V.
 
 Reading of it (all within the model; the LPF window and AD1's off-notch
 response are INFERRED, the note-7 numbers are the device's):
 
-* **Rate**: B and C ~9.3 readings / s against A's 1.3..3.3 visible changes
-  (its cycle 1.9 s); C settles in 0.0..1 s after a signal change
-  (V DC 5: 4.1 s includes the range change r1 -> r0 with its self-cal),
-  B 0.1..3.4 s (PB4's recharge after the entry and the 5-result mean).
+* **Rate**: B and C ~9.3 readings / s against A's 2.7..4 (each of A's
+  totals carries a part up to ~1.9 s old); C settles in 0.0..1 s after a
+  signal change, B 0.1..3.3 s (PB4's recharge after the entry and the
+  5-result mean).
 * **Accuracy**: every method within 0.02 % on mean where the model has no
   gain error; B~ shows what B cannot fix: a gain shift drawn per AD1
-  enable stays (-0.12 % at 12 V on 60 V in this run; a rerun on d6f5e96
-  drew +0.01 %: the error is the draw's) - the device's 60 V gain jump
-  would look like that.
+  enable stays (+0.09..+0.11 % on 60 V and 6 V in this run, -0.12 % in
+  an earlier one) - the device's 60 V gain jump would look like that.
 * **Ripple at 50 Hz on the DC part**: AD1 (A, B) sits on a notch; C's LPF
   leaks (0.30 / 0.32 % p-p of the total with AC = DC at 50 Hz, the INFERRED
   -51 dB). At **45 Hz** AD1 leaks (A 0.047 %, B 0.030 % p-p with the
@@ -734,7 +742,8 @@ response are INFERRED, the note-7 numbers are the device's):
   better (0.016 / 0.062 %). Which one wins on the device is test 3 (needs
   a generator).
 * AUTO coupling: couptest `v`, `i`, `tap`, `band` pass with `--meth A`,
-  `B` and `C` (17dcff2, d6f5e96). Also passing on 17dcff2 / 4539aea: senttest (26),
+  `B` and `C` (17dcff2, d6f5e96 and the commit after it). Also passing on
+  17dcff2 / 4539aea: senttest (26),
   powtest (15; `ereset` failed once under a load average of ~45 and passed
   alone), modetest `--fast` 35 of 36 (stock `cap-big` 0.105 mF fails the
   same way on 5f9b5a0 without this change; without `--fast` every fw-rs

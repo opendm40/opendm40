@@ -112,7 +112,9 @@ class Run:
         return sum(v) / n
 
     def enter(self, meth, item=None, wait=4.0):
-        """AC+DC with method `meth` (re-entry: the zero / self-cal again)."""
+        """AC+DC with method `meth` (re-entry: the zero / self-cal again);
+        returns once the method runs (step 2) with 3 new readings, or after
+        30 s, then `wait` - 2 s more (at least 1 s)."""
         self.w('DBG:ACDC:METH %s' % meth)
         self.w('CONF:VOLT:DC')
         time.sleep(0.3)
@@ -120,7 +122,15 @@ class Run:
         if item is not None:
             time.sleep(0.3)
             self.w('DBG:ACDC:RANG %d' % item)
-        time.sleep(wait)
+        time.sleep(0.5)
+        n0 = self.stat()['n_rd']
+        t0 = time.time()
+        while time.time() - t0 < 30:
+            s = self.stat()
+            if s['step'] == 2 and s['n_rd'] >= n0 + 3:
+                break
+            time.sleep(0.2)
+        time.sleep(max(1.0, wait - 2.0))
 
     def mean_parts(self, secs=3.0):
         t0, ac, dc, tot = time.time(), [], [], []
@@ -192,24 +202,34 @@ def e5(R):
             time.sleep(max(0.0, R.a.period - 12))
 
 
-def settle_time(R, final_tol, secs=12.0):
-    """Poll FETCh? for `secs`; (first reading s, settled s, final value)."""
-    t0 = time.time()
+def settle_time(R, final_tol, secs=12.0, t0=None, n0=None):
+    """Poll FETCh? and DBG:ACDC:STAT? for `secs` from `t0`; (first AC+DC
+    reading s = n_rd above `n0`, or the first FETCh? change without `n0`;
+    settled s; final value; FETCh? changes / s over the last half)."""
+    t0 = t0 or time.time()
     xs = []
+    first = float('nan')
+    v0 = R.fetch() if n0 is None else None
     while time.time() - t0 < secs:
-        xs.append((time.time() - t0, R.fetch()))
+        v = R.fetch()
+        t = time.time() - t0
+        if math.isnan(first) and (R.stat()['n_rd'] > n0 if n0 is not None else v != v0):
+            first = t
+        xs.append((t, v))
     fin = [v for _, v in xs[-10:] if not math.isnan(v)]
     if not fin:
         return float('nan'), float('nan'), float('nan')
     f = sum(fin) / len(fin)
-    first = next((t for t, v in xs if not math.isnan(v)), float('nan'))
     tol = final_tol(f)
     st = float('nan')
     for i, (t, _v) in enumerate(xs):
         if all(not math.isnan(v) and abs(v - f) <= tol for _, v in xs[i:]):
             st = t
             break
-    return first, st, f
+    half = [x for x in xs if x[0] >= secs / 2]
+    ch = sum(1 for a, b in zip(half, half[1:]) if a[1] != b[1])
+    rate = ch / max(1e-3, half[-1][0] - half[0][0]) if len(half) > 1 else float('nan')
+    return first, st, f, rate
 
 
 def e6(R):
@@ -219,17 +239,21 @@ def e6(R):
         R.w('DBG:ACDC:METH %s' % meth)
         R.w('CONF:VOLT:DC')
         time.sleep(3.0)
+        n0 = R.stat()['n_rd']
+        t0 = time.time()
         R.w('VOLT:COUP ACDC')
-        first, st, f = settle_time(R, tol)
+        first, st, f, rate = settle_time(R, tol, t0=t0, n0=n0)
         s0 = R.stat()
         time.sleep(3.0)
         s1 = R.stat()
-        R.log(exp='e6', meth=meth, step='entry 3V', first_s=first, settle_s=st, value=f, rate=(s1['n_rd'] - s0['n_rd']) / 3.0)
+        R.log(exp='e6', meth=meth, step='entry 3V', first_s=first, settle_s=st, value=f, fetch_changes=rate,
+              n_rd_rate=(s1['n_rd'] - s0['n_rd']) / 3.0)
         for v in (30.0, 3.0):
+            t0 = time.time()
             if R.cal:
                 R.cal.set_output('voltage', v, enable=True)
-            first, st, f = settle_time(R, tol)
-            R.log(exp='e6', meth=meth, step='to %gV' % v, first_s=first, settle_s=st, value=f)
+            first, st, f, rate = settle_time(R, tol, t0=t0)
+            R.log(exp='e6', meth=meth, step='to %gV' % v, first_s=first, settle_s=st, value=f, fetch_changes=rate)
 
 
 def e7(R):

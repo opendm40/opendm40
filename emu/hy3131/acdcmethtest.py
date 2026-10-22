@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """fw-rs AC+DC methods A / B / C (fw-rs/src/acdcm.rs, DBG:ACDC:METH) in the
 emulator: one run per method, the same timed signals (V then A: DC, AC,
-mixed, DC with 50 Hz ripple, DC with off-notch 45 Hz ripple), SCPI over
+mixed, DC with 50 Hz ripple, DC with off-notch 45 Hz ripple, V DC again
+on the 6 V range after the 60 V one: a range visited again), SCPI over
 USB/IP (DBG:PING?, FETCh?, DBG:ACDC:STAT? in a loop). Per phase it reports
 the error of the shown total against hypot(AC, DC) of the source (mean and
-peak-to-peak over the phase's last 5 s), the reading rate (DBG:ACDC:STAT?
-n_rd for B / C, FETCh? changes for A) and the settle time (first sample from
-which the total stays within 0.1 % + 2 digits... of the truth).
+peak-to-peak over the phase's 6th to 1.5th last second), the reading rate
+(DBG:ACDC:STAT? n_rd: AC+DC readings / s) and the settle time (first sample
+from which the total stays within 0.1 % + 2 digits of the truth; nan:
+never in the phase).
 
 The HY3131 model's note 7 (AD1 shifted while AD2 / AD3 convert, the device's
 per-range offsets, feasibility 13.2) is on in every run; `B~` adds a
@@ -50,6 +52,7 @@ SIG = [
     ('open;acv:1@50,dc=1', 1.0, 1.0, 'V', 'V AC 1 + DC 1'),
     ('open;acv:0.5@50,dc=12', 12.0, 0.5, 'V', 'V DC 12 + 0.5 @50'),
     ('open;acv:0.5@45,dc=12', 12.0, 0.5, 'V', 'V DC 12 + 0.5 @45'),
+    ('open;dcv:5', 5.0, 0.0, 'V', 'V DC 5 again (r1 -> r0)'),
     ('open;dca:0.3', 0.3, 0.0, 'A', 'A DC 0.3'),
     ('open;aca:0.2@50', 0.0, 0.2, 'A', 'A AC 0.2 @50'),
     ('open;aca:0.2@50,dc=0.2', 0.2, 0.2, 'A', 'A AC 0.2 + DC 0.2'),
@@ -60,7 +63,7 @@ SIG = [
 # 5 V -> 2 V AC step at 12 s came at uptime 10.66 / 10.68 s; the boot is
 # deterministic in virtual time).
 LAG = 1.34
-T_A = 5 * PH  # the A phases start here (CURR:COUP ACDC)
+T_A = 6 * PH  # the A phases start here (CURR:COUP ACDC)
 RUN_FOR = len(SIG) * PH + 2
 # Accuracy bound per phase (|mean error| %, p-p %) every method must meet.
 CHECK = (0.3, 1.0)
@@ -142,13 +145,9 @@ def analyse(meth, d):
         e = [(r['v'] - truth) / truth * 100 for r in win]
         mean = sum(e) / len(e)
         pp = max(e) - min(e)
-        # reading rate: n_rd (B / C) or distinct FETC values (A) per s
-        if meth[0] != 'A':
-            n = [int(r['st'][8]) for r in win]
-            rate = (n[-1] - n[0]) / max(1e-3, win[-1]['t'] - win[0]['t'])
-        else:
-            ch = sum(1 for a, b in zip(win, win[1:]) if a['v'] != b['v'])
-            rate = ch / max(1e-3, win[-1]['t'] - win[0]['t'])
+        # reading rate: DBG:ACDC:STAT? n_rd (AC+DC readings, every method)
+        n = [int(r['st'][8]) for r in win]
+        rate = (n[-1] - n[0]) / max(1e-3, win[-1]['t'] - win[0]['t'])
         tol = 0.001 * truth + 0.002 * (1 if unit == 'V' else 0.1)
         settle = float('nan')
         for k, r in enumerate(ph):
