@@ -43,10 +43,20 @@ Code work (in this order):
 - [x] Device: screenshot with the scope FFT on (40 KiB CAP while the FFT holds the tail): a239aa6
       SHOTS/S007.BMP 307 266 B holds the spectrum, the FFT keeps updating after the shot (11.11).
 - [ ] Device: a shot of a big screen (AC+DC / power view) then the FFT: the spectrum resumes after the shot.
-- [ ] `.cold` (region C, not zero-wait) watch: the per-pass entry points of cold modules
-      (boot::mark_healthy, upload::poll, dlog::gen / stale, screenshot::poll) are inlined into hot
-      callers today (map checked 2026-10-22), but fatdir (C) runs in every csvlog commit while a CSV
-      log records: fine unless a CSV log runs together with an AD2 stream (then: fatdir to B).
+- [x] `.cold` (region C, not zero-wait) audit 2026-10-22, emulator hooks on every function of C (a Renode
+      AddHook per symbol from t = 6 s, hit counts logged at powers of 2; DMM idle, swipe-down CSV recording
+      16 s, combined view, settings pages, generator page): vwrite::poll (B) called upload::disk,
+      vdisk::entries and vdisk's generic `[VF; 400][..n]` index on EVERY main-loop pass (~24k calls/s in
+      idle) -> inline(always) / a plain slice; the DLG row coder (Enc::row, BitW, Ad, fmt_row's CSV length,
+      crc32_upd, ~1.4 KB) ran per reading while recording -> `.text.dlog_row` (B); app_press's guard runs on
+      every touch report (scope drags) -> inlined into App::gesture, the body (press_track, taps only)
+      stays in C. fatdir runs ONCE per recording start (csvlog bpb), not per commit (the earlier note was
+      wrong): stays in C. After: no C function runs in idle / combined view / while recording; C runs at a
+      recording start / stop (fatdir, the vdisk refresh), on taps and boot. Not covered by the run: MSC reads
+      by a host (vdisk read_block in C per sector: host-driven I/O, fine) and the scope FFT / AD2 stream
+      (the budget run of b21756f: none in C). Region B: -3 KB for decision #6 + the audit (20.0 KB free on 090f845).
+- [ ] Device: DBG:PROF? / lat_pc while recording a CSV and with the USB volume mounted (Files live: a
+      vdisk refresh per commit, ~60 s) to confirm no stall from region C.
 ## Remaining work
 
 - [x] `tools/dm40dbg.py` ported from CDC/pyserial to `/dev/usbtmc` + `DBG:` commands (a3427d4).
