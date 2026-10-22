@@ -70,6 +70,8 @@
 
 #![allow(dead_code)]
 
+use core::sync::atomic::{AtomicU32, Ordering};
+
 use crate::fatren::{free_chain, le16, le32, parse_bpb, sfn_is, verify, Vol};
 use crate::msc::BlockDevice;
 
@@ -138,20 +140,91 @@ pub struct Result {
 
 static mut RESULT: Result = Result { status: Status::NotRun, written: 0, conflict: 0, differs: 0, freed: 0, ms: 0 };
 
-/// Work buffers of run_inner (buf, tmp, fat) and free_number, 3 x 4 KiB, kept
-/// off the TCM stack: a screenshot calls the writer from deep in the main
-/// loop, whose frames (main ~26 KiB) leave too little of the ~38 KiB stack
-/// for three more blocks. NOLOAD SRAM (.dmabuf, as the scope record): the
-/// contents are undefined at reset and always written before they are read.
-/// One user at a time: the boot safety copy before main(), then the on-device
-/// writers (screenshot.rs, csvlog.rs, gallery.rs), which keep blocks in it
-/// across main-loop passes while a job is in flight (no interrupts; nothing
-/// else uses it then).
+/// The disk scratch arena (docs/ram-budget.md): 3 x 4 KiB block buffers,
+/// kept off the TCM stack (the writers run deep in the main loop). NOLOAD
+/// SRAM (.dmabuf): undefined at reset, always written before it is read.
+///
+/// Not calbackup's own: every on-device disk user takes its block buffers
+/// from here (`scratch`): the boot safety copy before main(), then
+/// screenshot.rs (shots, scope records), csvlog.rs commits and its
+/// catalog / delete / free-space helpers, fastlog.rs Prep / Stop, upload.rs,
+/// vwrite.rs, gallery.rs, fatdir.rs. One disk user at a time (the disk
+/// lock: each waits / refuses while another's job is in flight, see those
+/// modules); a job keeps blocks here across main-loop passes.
+///
+/// Second tenant: the scope FFT's work buffer (`fft_work`, 2048 f32 = the
+/// first 8 KiB), needed only while a spectrum job is in flight. Ownership
+/// with runtime checks, no aliasing by hope:
+///   * a disk user never waits for the FFT: `scratch` is the disk side's
+///     only accessor and bumps `GEN` on every call;
+///   * the FFT gets the buffer only from `fft_work`, which returns None
+///     while a disk job that keeps data here across passes is in flight
+///     (`disk_job`), and, for a job already loaded (`fresh` false), when
+///     `GEN` moved since the FFT's load (a disk user wrote here in between,
+///     e.g. a gallery read inside one pass): the FFT then drops its job and
+///     asks for the frame again (scope_page.rs);
+///   * both sides take the reference inside one call and keep none across
+///     passes (main loop only; no ISR touches the arena).
+#[repr(C, align(4))]
+pub(crate) struct Arena(pub(crate) [[u8; BLK]; 3]);
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
-static mut SCRATCH: [[u8; BLK]; 3] = [[0; BLK]; 3];
+static mut SCRATCH: Arena = Arena([[0; BLK]; 3]);
+/// Disk-side uses of the arena (`scratch` calls); FFT_GEN = GEN at the FFT's
+/// `fft_work(true)` (its load).
+static GEN: AtomicU32 = AtomicU32::new(0);
+static FFT_GEN: AtomicU32 = AtomicU32::new(0);
+/// f32 entries of the FFT work buffer (= fft::N, checked in scope_page.rs;
+/// this file is also built without fft.rs by the host tests).
+pub const FFT_WORK: usize = 2048;
+const _: () = assert!(FFT_WORK * 4 <= 3 * BLK);
 
+/// The disk side's block buffers (see `SCRATCH`). Takes the arena from the
+/// FFT (a spectrum job in flight is dropped at its next step).
+#[inline(always)]
 pub(crate) fn scratch() -> &'static mut [[u8; BLK]; 3] {
-    unsafe { &mut *core::ptr::addr_of_mut!(SCRATCH) }
+    GEN.store(GEN.load(Ordering::Relaxed).wrapping_add(1), Ordering::Relaxed);
+    unsafe { &mut (*core::ptr::addr_of_mut!(SCRATCH)).0 }
+}
+
+/// A disk job that keeps data in the arena across main-loop passes is in
+/// flight: a screenshot / scope record, a csvlog commit, a fast-log session
+/// (Prep .. Stop; conservative, only Prep / Stop use the arena), an upload
+/// or a firmware file staged from the USB volume. Single-pass users
+/// (gallery reads, csvlog catalog / delete, vwrite commit) are caught by
+/// `GEN` instead.
+#[cfg(target_os = "none")]
+#[inline(always)]
+fn disk_job() -> bool {
+    crate::screenshot::busy() || crate::csvlog::writing() || crate::fastlog::holds_disk() || crate::upload::busy()
+}
+#[cfg(not(target_os = "none"))]
+fn disk_job() -> bool {
+    false
+}
+
+/// The FFT work buffer (see `SCRATCH`), or None: a disk job holds the arena,
+/// or (`fresh` false: a job already loaded) a disk user wrote it since the
+/// load. `fresh` true = a new job that fills every entry it uses (fft.rs
+/// `load`). Main loop only; the caller keeps no reference across passes.
+#[inline(always)]
+pub fn fft_work(fresh: bool) -> Option<&'static mut [f32; FFT_WORK]> {
+    if disk_job() {
+        return None;
+    }
+    let g = GEN.load(Ordering::Relaxed);
+    if fresh {
+        FFT_GEN.store(g, Ordering::Relaxed);
+    } else if FFT_GEN.load(Ordering::Relaxed) != g {
+        return None;
+    }
+    let p = core::ptr::addr_of_mut!(SCRATCH).cast::<[f32; FFT_WORK]>();
+    Some(unsafe { &mut *p })
+}
+
+/// No disk job holds the arena (the FFT may load a new job).
+#[inline(always)]
+pub fn fft_free() -> bool {
+    !disk_job()
 }
 
 pub fn result() -> Result {

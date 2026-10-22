@@ -83,23 +83,28 @@ static mut UP: Up = Up { active: false, size: 0, crc: 0, got: 0, run: 0, cl: [0;
 #[cfg(target_os = "none")]
 static mut DISK: Option<crate::spiflash::SpiFlash> = None;
 
+#[inline(always)]
 fn up() -> &'static mut Up {
     unsafe { &mut *core::ptr::addr_of_mut!(UP) }
 }
 
 /// An upload owns the SPI disk (and calbackup::scratch()): this one over
 /// SCPI, or a firmware file being copied onto the USB volume (vwrite.rs
-/// staging).
+/// staging). Inlined: calbackup::fft_work (the scope FFT, every pass) asks
+/// it, and this module is .cold.
+#[inline(always)]
 pub fn busy() -> bool {
     up().active || staging()
 }
 
 #[cfg(feature = "vdisk")]
+#[inline(always)]
 fn staging() -> bool {
     crate::vwrite::staging()
 }
 
 #[cfg(not(feature = "vdisk"))]
+#[inline(always)]
 fn staging() -> bool {
     false
 }

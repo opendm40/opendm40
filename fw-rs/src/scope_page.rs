@@ -237,22 +237,25 @@ impl Math {
 }
 
 /// The spectrum job and result: 4 KB, TCM .bss (all-zero `Fft::new`). Its
-/// 8 KiB work buffer is lent by the screenshot arena (`fft_work`).
+/// 8 KiB work buffer is lent by the disk scratch arena (calbackup.rs
+/// `fft_work`).
 static mut FFT: crate::fft::Fft = crate::fft::Fft::new();
-/// A frame was dropped because a screenshot held the work buffer: ask for it
+/// A frame was dropped because a disk job held the work buffer: ask for it
 /// again (a stopped scope re-emits its record) once the buffer is back.
 static mut FFT_RETRY: bool = false;
-const _: () = assert!(crate::screenshot::FFT_WORK == crate::fft::N);
+const _: () = assert!(crate::calbackup::FFT_WORK == crate::fft::N);
 
 fn fft() -> &'static mut crate::fft::Fft {
     unsafe { &mut *core::ptr::addr_of_mut!(FFT) }
 }
 
-/// The FFT work buffer (screenshot.rs `fft_work`: the tail of the screenshot
-/// capture buffer). None while a screenshot holds it: the job in flight, if
-/// any, is dropped (the last result stays) and the frame is asked again.
-fn fft_work() -> Option<&'static mut crate::fft::Work> {
-    let w = crate::screenshot::fft_work();
+/// The FFT work buffer (calbackup.rs `fft_work`: the disk scratch arena;
+/// `fresh` = a new job's load). None while a disk job holds it, or a disk
+/// user wrote it since the load: the job in flight, if any, is dropped (the
+/// last result stays) and the frame is asked again.
+#[inline(always)]
+fn fft_work(fresh: bool) -> Option<&'static mut crate::fft::Work> {
+    let w = crate::calbackup::fft_work(fresh);
     if w.is_none() {
         fft().abort();
         unsafe { FFT_RETRY = true };
@@ -911,7 +914,7 @@ impl App {
             }
             crate::screenshot::Shot::NoDisk => ("No disk", false),
             crate::screenshot::Shot::Full => ("Disk full", false),
-            crate::screenshot::Shot::Error => ("Save CSV Error", false),
+            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => ("Save CSV Error", false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
@@ -972,7 +975,7 @@ impl App {
         };
         let a = self.scope.volts(0.0);
         let b = self.scope.volts(1.0) - a;
-        let Some(w) = fft_work() else {
+        let Some(w) = fft_work(true) else {
             return;
         };
         crate::prof::enter(crate::prof::FFT);
@@ -983,14 +986,14 @@ impl App {
     /// One slice of the spectrum job (every pass on the page): a finished
     /// spectrum is drawn.
     fn sp_math_step(&mut self) {
-        if unsafe { FFT_RETRY } && crate::screenshot::fft_free() {
+        if unsafe { FFT_RETRY } && crate::calbackup::fft_free() {
             unsafe { FFT_RETRY = false };
             self.scope_invalidate();
         }
         if !(self.sp.math.on && self.sp.math.mode == 5 && fft().busy()) {
             return;
         }
-        let Some(w) = fft_work() else {
+        let Some(w) = fft_work(false) else {
             return;
         };
         crate::prof::enter(crate::prof::FFT);
