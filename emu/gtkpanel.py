@@ -103,6 +103,7 @@ class FrontPanel(Gtk.Widget):
         self.pinch = None
         self.last_move = 0.0
         self.ink = None               # list -> draw_panel records ink boxes (overlap check)
+        self.model = 'A'              # printed model letter (the header's model dropdown)
         self.want_k = 1.0             # scale the window picked (GtkApp.on_body_tick; fractional)
         self.set_margin_start(PANEL_MARGIN)
         self.set_margin_end(PANEL_MARGIN)
@@ -331,7 +332,7 @@ class FrontPanel(Gtk.Widget):
         cr.fill()
         self.draw_logo(cr, 24.0, 11.6)
         self.text(cr, 26.3, 12.85, '正点原子', 3.1, C_STRIP_TEXT, bold=True, face='Noto Sans CJK SC')
-        self.text(cr, GLASS[0] + GLASS[2] - 2.5, 12.85, 'DM40C', 2.6, C_STRIP_TEXT, align='right', bold=True)
+        self.text(cr, GLASS[0] + GLASS[2] - 2.5, 12.85, 'DM40' + self.model, 2.6, C_STRIP_TEXT, align='right', bold=True)
         cell = STRIP[3] / 4
         for i, name in enumerate(KEY_NAMES):
             x, y = STRIP[0], STRIP[1] + i * cell
@@ -1650,6 +1651,18 @@ class GtkApp(Adw.Application):
         self.fw.set_tooltip_text('firmware to run')
         self.fw.connect('notify::selected', lambda *a: self.restart())
         header.pack_start(self.fw)
+        # DM40 model (run.py --model: calibration model byte, both firmwares;
+        # default = the dump's own, or --model given to live.py).
+        m = self.extra.index('--model') if '--model' in self.extra else -1
+        b = self.extra.index('--base') + 1 if '--base' in self.extra else -1
+        base = self.extra[b] if 0 < b < len(self.extra) else run.DUMP
+        model = self.extra[m + 1].upper() if 0 <= m < len(self.extra) - 1 else run.flash_model(run.read(base))
+        self.extra = self.extra[:m] + self.extra[m + 2:] if m >= 0 else self.extra
+        self.model_dd = Gtk.DropDown.new_from_strings(['DM40A', 'DM40B', 'DM40C'])
+        self.model_dd.set_selected('ABC'.index(model))
+        self.model_dd.set_tooltip_text('model byte of the calibration record (40000 / 50000 / 60000 counts in the stock)')
+        self.model_dd.connect('notify::selected', lambda *a: self.restart())
+        header.pack_start(self.model_dd)
         self.fast = Gtk.ToggleButton(label='Fast')
         self.fast.set_tooltip_text('PerformanceInMips 50: about 2x faster, UI work takes longer in virtual time')
         self.fast.set_active(self.args.fast)
@@ -1739,7 +1752,9 @@ class GtkApp(Adw.Application):
 
     # ---- emulator ----
     def extra_args(self):
-        extra = list(self.extra)
+        extra = list(self.extra) + ['--model', 'ABC'[self.model_dd.get_selected()]]
+        self.panel.model = 'ABC'[self.model_dd.get_selected()]
+        self.panel.queue_draw()
         if self.args.app:
             extra += ['--app', self.args.app]
         if self.fast.get_active():

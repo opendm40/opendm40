@@ -62,6 +62,12 @@ None of these inputs are committed; generated images are git-ignored.
 ### Options (`emu/run.py --help`)
 
 * `--flash IMG` use a 1 MiB image as-is; `--base IMG` another dump to compose from.
+* `--model A|B|C` DM40 model: patches the calibration model byte (flash
+  0x080C0168) and the record CRC in the composed image (with `--flash`: in a
+  copy). Default: the dump's byte (this unit: DM40A). The stock then shows the
+  4000/5000/6000-count range sets and AC+DC only on B/C; fw-rs reports it in
+  `*IDN?` / `SYST:MOD?` (fw-rs/docs/model-variants.md). GTK panel: the DM40A/B/C
+  dropdown in the header bar (restarts the emulator; also the printed label).
 * `--disk IMG`, `--disk-add FILE[::NAME]` (mtools copy into a private copy of the
   disk), `--save-disk OUT`, `--save-flash OUT` (write the images back at the end).
 * `--run-for S` virtual seconds (default 3). Events take `@T` (virtual seconds):
