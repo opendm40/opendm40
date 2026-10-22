@@ -931,3 +931,18 @@ The device 1h froze on 3bae462 with a rail that toggles with the link (seen here
 
 - **Device:** DMM page, DC V, 1.0008 V, `SYST:RAIL:STATe?` 1,0,10,0,0, `DBG:AD2:DMA?` 1, LOG:STAT 0, no error. Five new files LOGS/FAST000..004.DLG on the disk (≈ 6 MB). Bluetooth ON.
 - **Calibrator:** 1 V DC, enabled.
+
+## DMM rail wake re-check (ea29bc4)
+
+ea29bc4 (on 2828108: AC settle 2 s after a wake, the Wave view's MENU keeps the DMM rail), installed by the owner, 2026-10-22 ~12:30. Same wiring; AC on the calibrator's 40 Hz 0..10.4 V square (DMM AC V 4.7670 V on the DMM page).
+
+| # | Check | Result |
+|---|---|---|
+| 1 | AC V, Scope page, the READ? that wakes the rail (USB, then BT) | **PASS.** First answer after ~2.0 s: 4.7271 V (USB) / 4.7273 V (BT), -0.8 %; the next ones 4.775 V (+0.17 %). 036cc55 answered +8 % at 0.5 s. wakes +1 each |
+| 2 | Wave view in AC V (MF → Wave: ISR active, FUNC VOLT:AC), MENU, READ? | **PASS.** ISR stops, rail stays `1,0` (no wake: counter unchanged), READ? 4.76747 V at once, no error |
+| 3 | 1g / 1h in DC V | **PASS.** BT link on Scope, 1 → 2 V: BT FETC? 1.99934 V; 3 link cycles (wakes +1 each, `0,1` after each close); DMM page, 3 V: 2.99860 V. lost / silent 0 |
+
+### State at the end
+
+- **Device:** DMM page, DC V, 1.00028 V, `SYST:RAIL:STATe?` 1,0,8,0,0, no error. Bluetooth ON.
+- **Calibrator:** 1 V DC, enabled.
