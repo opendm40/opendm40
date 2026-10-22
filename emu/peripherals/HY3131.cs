@@ -1031,8 +1031,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 // the R2C / R2D taps), instantaneous
                 // (the DC V calibration of that tap folded in, as the DC V rows: the fw-rs DC-coupled
                 // V row's self-cal reads AD1 here and scales it with that calibration)
+                // instantaneous at the sentinel's OSR 256; a long conversion (OSR >= 2048, the self-cal's
+                // 4096) integrates: the DC part (no AC ripple sampled at 4 points)
                 var kt = Math.Max(roleRange, 1);
-                code = ig * DcQ(VTapVolts(t, AcvK[kt]) * AcvK[kt], 0x04 + 4 * kt, 0x14 + 4 * kt) / AcvK[kt] / (rg * Vref) * fs;
+                double vdc, vac, vhz, vduty; string vsh;
+                Fe.VJack(0, out vdc, out vac, out vhz, out vsh, out vduty);
+                var vt = Osr1 >= 2048 ? vdc / AcvK[kt] : VTapVolts(t, AcvK[kt]);
+                code = ig * DcQ(vt * AcvK[kt], 0x04 + 4 * kt, 0x14 + 4 * kt) / AcvK[kt] / (rg * Vref) * fs;
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
             }

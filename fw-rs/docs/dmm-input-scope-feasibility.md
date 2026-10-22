@@ -95,7 +95,7 @@ S/s have similar effective resolution (14-16 vs 15.9); AD2 buys rate, not bits.
 | V (4 .. 1000 V) | f0 AC V r0..r3: R27 0x9d, R32 0x38 | PB4 - AGND, PB4 fed from OP1O (OP1+ = SENSE tap) through an external capacitor | **AC**, tau ~0.3 s (fc ~0.5 Hz) | acdc 5 / 6a transient; RESEARCH 7; power doc 2 |
 | mV (40 / 400 mV) | f2 AC mV: R27 0x5d, R32 0xaa | OP2O - AGND, OP1+ = OP2+ = RLU | **DC** (the LPF reports the full DC: 6a "LPF = 495 mV") | acdc 6a |
 | A / mA / uA | f4, f5_6 AC A: R27 0x2d, R32 0x3e / 0x3d | OP1O - PB3, OP1+ = PB2 (10 mohm) / PB1 (0.5 ohm, 47.5 ohm), x10 / x1 | **DC** (6b: LPF = 8.8 uA constant offset on the open uA range) | acdc 6b |
-| V, DC-coupled | none in the stock | **register-only new row**: a DC V / AC V row's switch bytes (tap PA7 /10, PA6 /100, PA5 /1000, PA4+PA5 /10000) + ENOP1, OP1+ = SENSE (R32 0x38, which the stock itself writes in the AC+DC DC phase) + SAD2IP = 00 (OP1O) instead of PB4, SAD2IN = AGND or RLU, IG 1.0 | DC | mux table VERIFIED; OP1 on SENSE at those taps VERIFIED (f0 r1..r3, AC+DC); that AD2 reads OP1O cleanly there: INFERRED, test 6.5 (power doc 3.1 proposes the same node for AD3) |
+| V, DC-coupled | none in the stock | **register-only new row**: a DC V / AC V row's switch bytes (tap PA7 /10, PA6 /100, PA5 /1000, PA4+PA5 /10000) + ENOP1, OP1+ = SENSE (R32 0x38, which the stock itself writes in the AC+DC DC phase) + SAD2IP = 00 (OP1O) instead of PB4, SAD2IN = AGND or RLU, IG 1.0 | DC | VERIFIED, device test 6.5 (section 13): the AC V row of the range with SAD2IP = OP1O, linear to 0.003 % of the range, 3..10 codes sd at 4800 S/s; implemented (E7, ad2exp.rs `dcv_row`) |
 
 So current waveforms (through the A shunt, DC included) and mV waveforms need
 no new row: the stock AC A / AC mV rows already put the DC-coupled signal on
@@ -507,7 +507,7 @@ HY3131 ----SPI2 (PC10/11/12, 3.125 MHz) + CS PD2----> hy3131 bus owner (ISR or m
 | E4 the ISR (policy decision), ring, loss statistics | 1-2 days | E3 |
 | E5 `WaveSource` + scope.rs source abstraction + trigger generalisation | 3 days | E4 |
 | E6 UI: Wave view / source badge, range-as-V/div, coupling pill, mockups + overlap check | 3 days | E5 |
-| E7 DC-coupled V row + AD1 self-cal + autorange handling | 1-2 days + device | E0 (6.5) |
+| E7 DC-coupled V row + AD1 self-cal + autorange handling | 1-2 days + device | E0 (6.5) - **done**, section 13 |
 | total | ~2.5-3 weeks for (A) incl. (B); (B) alone E0-E1 2 days (E2-E4 upgrade it later) | |
 
 ### 5.4 Risks
@@ -559,6 +559,7 @@ jacks; log with `dm40scpi.py`.
    variants: AD2IN = AGND, = RLU), 10 V DC and 5 V 50 Hz: mean of AD2 vs the
    DC V reading (AD1 in the same row, r1 = SENSE - PB5), ripple, and the AD1
    reading with AD2 on vs off (note 7). Settles 1.3 last row and E7.
+   **Done** (section 13.1): the row works; AD1 shifts while AD2 converts.
 6. **Waveform sanity**: AC A r0 with a 40 Hz PWM load (the calibrator used in
    acdc doc 10): record 1 s at 4.8 kS/s to the host, plot: edges, duty,
    amplitude vs the DMM AC A reading.
@@ -579,7 +580,7 @@ on the device yet; every number in 7.2 is from the Renode emulator.
 |---|---|---|
 | rate ladder | `hy3131::ad2_r26_for`, `ad2_period_ns` | requested S/s -> R26 low bits. Chop ON (default, `LOG:CHOP`): 600 = /4 OSR 1024, 1200 / 2400 / 4800 / 9600 = /2 OSR 1024 / 512 / 256 / 128, all with ENCHOPAD2. Chop OFF: 1200 = /4 OSR 1024, 2400..9600 = /2 OSR 1024..256 (600 needs the chopper). Nearest rung in log scale; the achieved rung is reported, never silently another rate. Tested against the 1.1 table (meter-test). |
 | stream setup | `hy3131::set_ad2_stream` | after the full stock row (dmm.start): ENAD1 cleared if set (the misconnect sentinel runs AD1 in AC V / mV; off first, so note 7 cannot apply), R34 = 0 (AD3 off: the row starts it before AD2, so with both on AD2F would come twice per period on two skewed grids), R29 = 0 (RMS / LPF off), R26 = ENAD2 \| rung, INTF cleared. ENAD2 never toggled. LOG:STATe OFF rewrites the row, sentinel included (unchanged path). |
-| rows | `Logger::mode_ok` | AD2: AC mV (2) and AC A / mA / uA (4..6) **DC-coupled** (OP2O / OP1O, stock rows unchanged), AC V (0) **AC-coupled** (PB4, ~0.5 Hz; preamble `coupling` = 1). AC+DC (16/17) refused (alternating rows). The DC-coupled V row (1.3 last row) is **not implemented: needs device test 6.5**. |
+| rows | `Logger::mode_ok` | AD2: AC mV (2) and AC A / mA / uA (4..6) **DC-coupled** (OP2O / OP1O, stock rows unchanged), AC V (0) **AC-coupled** (PB4, ~0.5 Hz; preamble `coupling` = 1). AC+DC (16/17) refused (alternating rows). DC V (1) and DC mV (3) since E7 (section 13): the DC-coupled V row / the AC mV row. |
 | sampling | `Logger::poll` | AD2F-gated (INTF read, then R03..R05), P/2 gate from the last sample, timestamp at the flag observation. Since one sample costs ~122 us bit-banged and the period is 104..1667 us, a call keeps sampling while the next result is due within `AD2_BURST_US` = 500 us of the call. A read whose bits 23:19 are not a copy of bit 18 is dropped and counted (`bad`, a torn read for sure). |
 | honesty | LOG:COUNt?, LOG:GAPs?, LOG:PREamble?, panel | `lost` = round(span / nominal period) + 1 - captured (counts the steady "slightly late" losses of a rate the link cannot sustain, which the per-gap `missed` cannot); gap histogram in periods (2, 3-4, 5-16, 17-128, >128) + max gap; preamble `...,source,req_hz,nominal_mhz,r26,coupling` (requested vs chip rate; measured_hz in field 5); the on-screen panel shows "AD2 measured/nominal Sa/s", samples and "lost N (x.x%)" (ui-render checked, no overlaps). |
 | ring | `logger.rs` | unchanged: 2048 records of 8 B (seq implicit, d957027), 16 KiB of SRAM (+40 B of stats). Only 213 ms at 9600/s: the host must drain `LOG:DATA?` (511 records per block) at least ~5x/s, else `overwritten` counts the loss; a bigger ring does not fit (SRAM free ~4.5 KB). Wire format unchanged (12-byte {seq, ts_us, raw}). |
@@ -946,7 +947,7 @@ Everything below is emulator evidence; the device plan is 10.6.
 | holes | `logger::wave::dropped` = ring full + ISR `missed` | a hole restarts the record at the newest sample (no triggered frame spans it); roll goes on with a short gap |
 | timebases | `scope::WAVE_TB_MIN` = 17, `wave_fs_for` | 5 ms/div .. 50 s/div; AD2 rate per band: 5 ms 9600 S/s (decision #3's opt-in rate), 10 / 20 ms 4800, 50 / 100 ms 2400, >= 200 ms 1200 (>= 400 samples per screen up to 20 ms/div); a band change restarts the stream (~1 pass). Roll from 200 ms/div as the MCX scope (per-column min / max accumulated while draining, so 50 s/div = 600 k samples needs no buffer); YT up to 1 s/div (12 000 samples at 1200 S/s) |
 | vertical | `dmm::ad2_scale_of`, `scope::WaveScale`, `wave_vdiv` | SI = the DMM's own LPF formula of `poll_ac` with its calibration gain / offset (the DC mean of AD2, feasibility 3.3); V/div = the smallest 1-2-5 step with 4 div >= the range (6 V -> 2 V/div, 600 mV -> 200 mV, 1000 V -> 500 V, 10 A -> 5 A, 60 mA -> 20 mA, 600 uA -> 200 uA). V/div + / - (panel magnifiers) step the DMM range (the MF list: V 600 mV .. 1000 V, A 600 uA .. 10 A; 600 mV is the AC mV row, DC-coupled). Pinch V off, AUTO refused (toast) |
-| coupling | the V/div badge glyph, the CH1 button / V/div badge tap: a note | AC V AC-coupled (~0.5 Hz, the row's capacitor); AC mV, AC A / mA / uA DC-coupled. One AD2 row per function: nothing to switch; "DC V" says it has no DC row (1.3: needs device test 6.5) |
+| coupling | the V/div badge glyph, the CH1 button / V/div badge tap: a note | AC V AC-coupled (~0.5 Hz, the row's capacitor); AC mV, AC A / mA / uA DC-coupled. Since E7 (section 13): DC V / DC mV stream their DC rows, and the coupling key switches V between DC and AC at the same range |
 | labels | `Model::{src, amps, wvdiv, ch1_txt}` | CH1 button "AC V" / "AC mA", V/div "2V" / "200uA", trigger badge and cells in A for the current rows ("Ip-p", "Irms": `scope_meas::format_unit`), CSV header "source DMM AC mA (AD2, isolated jacks)" and the value column's unit |
 | SCPI | `App::scpi` | TIM:SCAL, TRIG:LEV / SLOP / SWE, RUN / STOP / SING, SCOP:MEAS:*?, WAV:DATA? / PRE?, CHAN1:SCAL? act on the wave view (V/div = the DMM range's); the MCX-only setters close it |
 | budgets | build.sh | stack headroom 16 888 B (feature build, >= 16 384; f4df76f: 17 608; the wave state's ~300 B come out of the TCM stack), 17 620 B without the feature; SRAM +80 B (`.dmabuf`: the ring's trigger words), ~2.3 KB free below 0x20030000 (f4df76f: ~2.4 KB) |
@@ -1032,7 +1033,7 @@ SRC_NONE).
 
 ### 10.4 Limits (v1)
 
-* DC-coupled V: no row (1.3, device test 6.5); the V function is AC-coupled.
+* DC-coupled V: since E7, section 13 (before: none, V was AC-coupled).
 * The record is 10-bit (10.1). The DMM reading pauses while the view is
   open (decision #3: exclusive bus); the last reading is not shown on the
   scope page (the stock page has no DMM either).
@@ -1665,3 +1666,132 @@ The AC A row of the 10 A range (1.3: OP1 x1 on the 10 mohm shunt,
 DC-coupled, +-125 A) streamed at 9600 S/s by the section 11 ISR feeds a
 step detector and a 2 s trace in the scope's BUF: Irms over the first
 100 ms, the peak, a FASTnnn.DLG of the trace. docs/inrush-current.md.
+
+## 13. E7: DC-coupled V on AD2 (2026-10-22)
+
+### 13.1 Device test 6.5 (4ff95f7, tools/ad2dcv.py)
+
+`DBG:AD2:DCV? range,r26,n,flags` (src/ad2exp.rs `dcv_test`) writes the row
+of 1.3 last row: the stock AC V row of the range (CFG_F0: its tap, OP1 on
+SENSE, R32 0x38; 6 V = the /100 tap with OP1 x10) with SAD2IP = OP1O
+instead of PB4 (the coupling capacitor), AD2IN AGND (or RLU), AD3 / RMS /
+LPF off, AD1 on SENSE - PB5 (R22 0x14). The relays are DC V's = AC V's
+(dmm.rs write_config: PA 0, PE 2 for both): the row is register only. Four
+phases: A = AD1 alone, B = AD1 + AD2 (the AD2 mean over the same AD1
+conversions), C = AD2 alone (the stream's state), D = C with OP1+ on AGND
+(the zero). MR9270 calibrator on V/COM, 0..24 V (30 V requested: the
+calibrator gives 23.97 V), READ? (the DMM's DC V row) as the reference;
+4800 S/s chopped (R26 0x24), n = 8; the 6 V points above 6 V are over the
+DMM range (no reference, dropped from the fits).
+
+| range | gain fit / nominal | 0 V code (fit) vs zero D | max residual | sd (codes) | sd at the jack | ENOB |
+|---|---|---|---|---|---|---|
+| 6 V (/100, OP1 x10) | +0.84 % | 906 / 903 | 0.0013 % FS | 9.5 (6 at <= 2 V) | 0.46 mV | 15.8 |
+| 60 V (/100) | +1.79 % | 164 / 171 | 0.0029 % FS | 3.6 | 1.8 mV | 17.1 |
+| 600 V (/1000) | +0.53 % (to 24 V) | 164 / 174 | 0.0016 % FS | 3.0 | 14 mV | 17.4 |
+| 1000 V (/10000) | +0.27 % (to 24 V: +-0.5 %) | 169 / 174 | 0.008 % FS | 3.1 | 0.15 V | 17.4 |
+
+(OP1 AGND chop off: the firmware's row.) Variants: AD2IN = RLU moves the
+zero by ~90 codes, nothing else; OP2 x1 instead of OP1 (the power meter's
+path) is as linear and as quiet, with a smaller zero (~70 codes). OP1's
+stock 2 kHz chopper (OP1CHOP 10) puts a +-280 code square (6 V; 28 at
+60 V+) on AD2 while AD1 converts and holds still when AD1 is off, at the
+same mean as the chopper held off (`sentinel.rs`'s finding): the row holds
+it off (R33 OP1CHOP 00).
+
+**AD1 while AD2 converts.** AD1 in this row (SENSE - PB5) with AD2 off (A)
+matches the DMM's READ? within 0.3 mV at 6 V, 2 mV at 60 V (0.01 % of the
+range; the DC V calibration of the tap applied). With AD2 converting (B) it
+reads lower: 6 V -310 .. -365 counts at every level 0..10 V (steady: the
+sd of a mean is ~9); 60 V -160 .. -240 at 0 V growing to -850 at 24 V
+(an offset plus ~-0.05 % of reading); 600 V -150 .. -235 steady; 1000 V
+-50 .. -130 with two +282 outliers. Mostly a steady offset that could be
+calibrated per range, not on 60 V (level-dependent) or 1000 V (jumps).
+The self-cal does not need it: it reads AD1 alone first.
+
+### 13.2 Datasheet note 7 in the stock DC rows (1ad2943, tools/ad2n7.py)
+
+The owner's question: could the DC V "AC?" hint run on AD2 + RMS, enabled
+once with the DC V row and left on, instead of the comparator alternating
+PB1 / SENSE? `DBG:AD2:N7? item,state,n` writes the stock DC row (CFG_F1 /
+CFG_F3, no sentinel) with AD1 enabled last, the converters never toggled
+while AD1 converts, in state 0 (stock: AD2 / AD3 off), 1 (AD2 on OP1O -
+AGND, OP1 on SENSE where the row has it off, R26 0x80 = 76.8 kS/s), 2 (1 +
+AD3 on OP1O and RMS / LPF on, R29 0xF8 / R34 0x88 as the AC rows), and
+averages 20 AD1 conversions at the row's R22 (0x15: 100 ms, chopped) after
+3 dropped; per range at 0 V and one level, states 0, 1, 2, 0; two runs
+minutes apart. Counts are AD1 codes (6 V: 1.66 uV, 60 V: 16.6 uV, 600 V:
+166 uV, 1000 V: 1.66 mV, 600 mV: 0.17 uV per count at the jack).
+
+| range | offset, AD2 on (run 1 / 2) | offset, AD2 + AD3 + RMS | gain, AD2 on | gain, + RMS | sd of one conversion | 0 -> 0 drift |
+|---|---|---|---|---|---|---|
+| 600 mV (DC mV) | -597 / -646 (-0.10 mV) | -2344 / -2430 (-0.40 mV) | -2270 / -1531 ppm | -1309 / -4735 ppm | 107 .. 880 (the 0.3 V level was noisy) | -92 .. +1841 |
+| 6 V (AD1 on OP1O) | +899 / +898 (+1.5 mV) | -1750 / -1754 (-2.9 mV) | -3201 / -3261 ppm | -47 / -107 ppm | 25 .. 90 | -22 .. +137 |
+| 60 V | +158 / -221 (+-3 mV) | +997 / +1008 (+16.7 mV) | -833 / -555 ppm | -1774 / -1023 ppm | 19 .. 30 | -8 .. +46 |
+| 600 V | -236 / -222 (-38 mV) | +989 / +1000 (+0.165 V) | (24 V = 4 % of the range: not measurable) | | 19 .. 23 | -7 .. +19 |
+| 1000 V | -152 / -129 (-0.23 V) | -961 / -948 (-1.6 V) | (2.4 % of the range) | | 25 .. 33 | -5 .. +4 |
+
+So **(a)** AD2 + AD3 + RMS left on for the whole DC V row shift AD1 by
+30 .. 90 x its noise: an offset of -2.9 mV (6 V) / +17 mV (60 V) / +0.17 V
+(600 V) / -1.6 V (1000 V), i.e. 0.03 .. 0.16 % of the range = 15 .. 100
+display counts at 60 000, beyond the DC V spec, plus gain shifts that on 60
+V did not repeat (-1774 vs -1023 ppm). The offsets repeated within ~1 %
+between the two runs (the AD2-only offset on 60 V did not: +158 vs -221,
+OP1's chopper running on SENSE with AD1 is the suspect), so a per-range
+correction is conceivable but would need its own calibration and a
+stability study (temperature, time); the DC reading is cleanest with
+AD2 / AD3 off, as the stock and fw-rs run it. **(b)** the 6.5 shift (AD1
+with AD2 converting in the AC V row) is likewise mostly a steady offset;
+on 6 V it is constant across 0 .. 10 V (+-25 counts), on 60 V it grows
+with the level, on 1000 V it jumps. The supply current was not measured:
+the meter has no readout of it.
+
+### 13.3 What exists (1ad2943)
+
+| piece | where | what |
+|---|---|---|
+| the row | ad2exp.rs `dcv_row` | as 13.1, AD2IN AGND, OP1's chopper held, AD3 / RMS / LPF off |
+| entry self-cal | ad2exp.rs `dc_enter` (cold, before the stream ISR takes the bus) | at every AD2 start in DC V (logger.rs `start`): 1. AD1 alone on SENSE - PB5, 4 x 50 ms after 2 dropped, in volts with the DC V calibration of the tap (`dmm::dcv_volts`); 2. AD1 off, AD2 on, OP1+ on AGND: the zero z over 100 ms; 3. OP1+ on SENSE: the signal c over 100 ms (whole 50 / 60 Hz periods; z and c time-weighted means: a loop pause during a rippled input does not bias them - the emulator's 2 V + 0.3 V rms case was 0.6 % off without). per_code = V / (c - z) when the two points are >= 10 000 codes apart and within 3 % of the 6.5 table (`dmm::DCV_AD2_GAIN`: +0.84 / +1.79 / +0.53 / +0.27 %), else the table's; offset = c x per_code - V (the AD1 anchor). ~0.45 s. No cal (the nominal scale) if a step timed out or AD2 clipped |
+| DC mV | `dc_enter` | streams the stock AC mV row (OP2O - AGND, DC-coupled; relays as DC mV), the AC mV LPF calibration |
+| scale | dmm.rs `ad2_scale_of(1 / 3, r)`, `Dmm::ad2_scale`, `dc_cal` | the wave view, the fast logger's header, LOG:SCALe? |
+| sources | logger.rs `mode_ok`, `ad1_first` | LOG:SOURce AD2 accepts DC V / mV (and the fast logger with it); the Record page's implicit source stays AD1 there (24 bit) |
+| fast logger | logger.rs `dc_prepare`, main.rs `fast_start` | the cal before the file header (its a / b), the DMM row back for the disk preparation, the session's `start` rewrites the row and keeps the cal |
+| LOG:SCALe? | scpi.rs, main.rs `log_scale` | a,b of the AD2 session (value = a + b raw); dm40scpi.py `log --source ad2` writes calibrated values with it |
+| wave view | app_wave.rs | DC V / mV enter their DC rows (no switch to AC V); the coupling key (CH1 / the V/div badge) switches V DC <-> AC at the same range item (`WaveReq::Coupling`); autorange: entered in AUTO and no range picked since, a clip (\|code\| > 257 000) steps the range up (the DMM's autorange chose by DC; AC on top clips); V/div - from 6 V DC goes to 600 mV (DC mV, the AC mV row) |
+| tests | emu/hy3131/dcvtest.py, wavetest.py `--case dcv`, the model (HY3131.cs: OP1O = g (SENSE + Vos), the chopper, `op1vos:`, `ad2dcg:`) | |
+
+### 13.4 Device check of 1ad2943 (E7)
+
+Calibrator on V/COM, DC V AUTO, LOG:SOURce AD2 4800 S/s host sessions of
+3 s (~14 400 records, 0 lost), the mean of a + b raw vs READ? before and
+after, two sessions per level:
+
+| level | range | b (V/code) | mean - READ? | sd |
+|---|---|---|---|---|
+| 0 V | 6 V | 4.808e-5 (the table: < 10 000 codes) | +0.06 / -0.37 mV | 0.9 mV |
+| 1 V | 6 V | 4.817 / 4.819e-5 (two-point) | -0.36 / +0.03 mV | 0.3 mV |
+| 3 V | 6 V | 4.812 / 4.811e-5 | -0.30 / +0.06 mV | 0.3 mV |
+| 5 V | 6 V | 4.809 / 4.810e-5 | -0.93 / -0.45 mV | 0.5 mV |
+| 10 V | 60 V | 4.866e-4 | -1.08 / -1.03 mV | 1.6 mV |
+| 24 V | 60 V | 4.859e-4 | -1.54 / -2.98 mV | 2.3 mV |
+
+i.e. within 0.02 % of the range. LOG:STATe ON takes 0.77 s (the cal). The
+fast logger (`dm40scpi.py fast --source ad2 --rate 9600 --dur 10`, DC V 5
+V): 96 002 samples, 0 lost, mean 4.99750 V vs READ? 4.99786 V. Wave view
+(MF -> Wave in DC V AUTO at 0.3 V, the calibrator then raised): 2 V/div,
+VAVG 0.290 / 2.998 / 4.992 V (the display's 80 mV per pixel); the coupling
+key: AC V, VAVG 0.012 V, and back; V/div -: 200 mV/div, the DC mV row (5
+V clips at 1.2 V, 0.3 V reads 0.294 V); MENU: DC V reads again. Not seen
+on the device: the clip autorange (the DMM's AUTO stayed on 6 V at 0.3 V;
+the emulator's `--case dcv` covers it).
+
+### 13.5 Limits
+
+* Gain without a big enough input (the two points < 10 000 codes: < 0.48 /
+  4.8 / 48 / 480 V on 6 / 60 / 600 / 1000 V) is the 6.5 table of this
+  unit; r2 / r3 measured to 24 V only.
+* AD2 noise: 6 V 0.3 .. 0.9 mV sd per sample at 4800 S/s; the DC V
+  autorange does not run while streaming (logger sessions keep the range
+  in force; the wave view steps up on a clip only when entered in AUTO).
+* Offset drift during a long session is not tracked (re-cal at each start).
+

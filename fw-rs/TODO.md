@@ -956,7 +956,18 @@ Firmware:
       5. Wave view 1 ms/div and 2 ms/div on the square: the trace, Vpp, no "Wave stopped", DBG:ISR? lost 0,
          overwritten (ring) 0 for 30 s; 5 ms/div and slower as before.
       6. After the streams: DC V 1 V within 0.05 %, `DBG:HYSPI:SELF? 2000` all 0.
-- [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
+- [x] (B) DC-coupled V on AD2 (E7, feasibility 1.3 last row / section 13): device test 6.5 (4ff95f7,
+      DBG:AD2:DCV?, tools/ad2dcv.py): the AC V row with SAD2IP = OP1O is linear to 0.003 % of the
+      range, 3..10 codes sd, gain +0.84 / +1.79 / +0.53 / +0.27 % vs nominal; AD1 reads 0.3..0.9 k
+      counts low while AD2 converts. Implemented (1ad2943): LOG:SOURce AD2 / the fast logger / the
+      wave view in DC V (and DC mV = the AC mV row), a sequential entry self-cal (AD1 alone, then the
+      AD2 zero and signal: two-point gain above 10 000 codes, else the table; offset at the AD1
+      point), LOG:SCALe?, the wave's coupling key DC <-> AC and an up-range on a clip when entered in
+      AUTO. Device: host sessions within 0.02 % of the range of READ? (6 / 60 V), fast logger 0 lost.
+      Note 7 in the stock DC rows (DBG:AD2:N7?, tools/ad2n7.py, section 13.2): AD2 + AD3 + RMS left
+      on shift AD1 by 0.03..0.16 % of the range: no AD2-based "AC?" hint in DC V without its own cal.
+  - [ ] E7 open: 600 / 1000 V gain table from >= 100 V (the calibrator stops at 24 V); the clip
+        autorange on the device (emulator only); offset drift over long sessions (no re-cal).
 - [x] (B) AD2 samples to the SPI disk (.DLG): the fast logger (LOG:DEST DISK, above / docs/compact-log-format.md
       "Fast stream"). Over BT: the ~870 records/s link ceiling (docs/bt-scpi.md) is below AD2's slowest rung
       (1200 S/s): LOG:STATe ON from BT is refused for AD2 / > 800 S/s ("Rate too high for Bluetooth"), AD1

@@ -302,6 +302,8 @@ pub fn dcv_row(r: u8, r26: u8, opt: u8, op1chop: u8, ad2: bool) -> [u8; hy::CFG_
 /// soft-float routines would land in region B).
 #[derive(Clone, Copy)]
 struct Acc {
+    /// Time-weighted mean, 1/1000 code (`sample`'s window mode), else 0.
+    tw_m: i64,
     n: u32,
     v0: i32,
     sum: i64,
@@ -312,7 +314,7 @@ struct Acc {
 
 impl Acc {
     const fn new() -> Self {
-        Acc { n: 0, v0: 0, sum: 0, sq: 0, lo: i32::MAX, hi: i32::MIN }
+        Acc { tw_m: 0, n: 0, v0: 0, sum: 0, sq: 0, lo: i32::MAX, hi: i32::MIN }
     }
     fn add(&mut self, v: i32) {
         if self.n == 0 {
@@ -325,9 +327,15 @@ impl Acc {
         self.lo = self.lo.min(v);
         self.hi = self.hi.max(v);
     }
-    /// Mean in 1/1000 code.
+    /// Mean in 1/1000 code (time-weighted in the window mode).
     fn m(&self) -> i64 {
-        if self.n == 0 { 0 } else { self.v0 as i64 * 1000 + self.sum * 1000 / self.n as i64 }
+        if self.tw_m != 0 {
+            self.tw_m
+        } else if self.n == 0 {
+            0
+        } else {
+            self.v0 as i64 * 1000 + self.sum * 1000 / self.n as i64
+        }
     }
     fn mean(&self) -> i32 {
         (self.m() / 1000) as i32
@@ -348,18 +356,23 @@ impl Acc {
 /// the first and the last of them: the AD2 mean over the same AD1
 /// conversions), or, with `ad1_n` = 0, `ad2_n` AD2 results, or (`win_us`
 /// > 0) the AD2 results of that window (a whole number of 50 / 60 Hz
-/// periods: mains ripple averages out whatever the main loop misses).
+/// periods) with a time-weighted mean (each sample weighs half the time
+/// to its neighbours: a pause of the loop - an interrupt - does not bias
+/// the mean of a rippled input towards the samples around it).
 /// Bounded by a deadline; watchdog kicked. Returns (ad1, ad2, timed out).
 fn sample(ad1_n: u32, skip: u32, ad2_n: u32, ad2_period_ns: u32, win_us: u32) -> (Acc, Acc, bool) {
     let (mut a1, mut a2) = (Acc::new(), Acc::new());
     let lim_us = if win_us > 0 {
         win_us
     } else if ad1_n > 0 {
-        (ad1_n + skip + 2) * hy::ad1_period_us_r22(DCV_R22) * 3 / 2
+        (ad1_n + skip + 2) * hy::ad1_period_us_r22(DCV_R22) * 3 / 2 + 100_000
     } else {
-        ad2_n * (ad2_period_ns / 1000 + 1) * 3 + 50_000
-    } + 100_000;
+        ad2_n * (ad2_period_ns / 1000 + 1) * 3 + 150_000
+    };
     let t0 = cyc();
+    // Window mode: the previous sample, its time, its predecessor's (us),
+    // the weighted sum and the weights.
+    let (mut pv, mut pt, mut ppt, mut tws, mut tww) = (0i64, 0i64, 0i64, 0i64, 0i64);
     let mut seen1 = 0u32;
     let mut k = 0u32;
     loop {
@@ -367,13 +380,35 @@ fn sample(ad1_n: u32, skip: u32, ad2_n: u32, ad2_period_ns: u32, win_us: u32) ->
         if k % 64 == 0 {
             crate::wdt::kick_if_feeding();
         }
-        if cyc().wrapping_sub(t0) / CYC_PER_US > lim_us {
+        let now = cyc().wrapping_sub(t0) / CYC_PER_US;
+        if now > lim_us {
+            if win_us > 0 && a2.n > 0 {
+                let w = 2 * lim_us as i64 - pt - ppt; // the last: mirrored at the end
+                tws += pv * w;
+                tww += w;
+                a2.tw_m = if tww > 0 { tws * 1000 / tww } else { 0 };
+            }
             return (a1, a2, win_us == 0 || a2.n == 0);
         }
         let f = hy::read1(hy::R_INTF);
         if f & hy::INTF_AD2 != 0 && (ad1_n == 0 || (seen1 >= skip && seen1 < skip + ad1_n)) {
             let (v, ok) = hy::read_ad2();
             if ok {
+                if win_us > 0 {
+                    // Trapezoid weights x 2: sample i weighs t(i+1) - t(i-1),
+                    // the first t(1) + t(0) (mirrored at the window's start).
+                    let t = now as i64;
+                    if a2.n > 0 {
+                        let w = t - ppt;
+                        tws += pv * w;
+                        tww += w;
+                        ppt = pt;
+                    } else {
+                        ppt = -t;
+                    }
+                    pt = t;
+                    pv = v as i64;
+                }
                 a2.add(v);
             }
             if ad1_n == 0 && win_us == 0 && a2.n >= ad2_n {

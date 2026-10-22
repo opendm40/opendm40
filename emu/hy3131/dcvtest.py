@@ -133,6 +133,7 @@ try:
     d = [int(x) for x in p[4].split(',')]
     zero = 0.37e-3 * 10 * DCG / 1.25 * 262144
     check(len(p) == 7 and d[0] > 0 and abs(d[1] / 1000 - zero) < 20, 'DCV? phases answer, zero D %.1f ~ %.1f codes' % (d[1] / 1000, zero))
+    q('CONF:VOLT:AC')  # DCV? left the range manual: AUTO again (CONF of the function in force is a no-op)
     q('CONF:VOLT:DC')
     wait_ms(3000)
     ref = read_v()
