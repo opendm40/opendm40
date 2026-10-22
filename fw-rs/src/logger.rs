@@ -588,7 +588,15 @@ impl Logger {
         self.mode = mode;
         self.range = range;
         let period_ns = if self.ad2 {
-            self.r26 = hy::ad2_r26_for(self.req_hz(), self.chop());
+            // The stream ISR's read divider first: it caps the rung.
+            #[cfg(feature = "ad2-isr")]
+            let req = {
+                let div = hy::stream::pick_div();
+                self.req_hz().min(hy::stream::max_rate_hz(div, hy::stream::use_dma(self.req_hz())))
+            };
+            #[cfg(not(feature = "ad2-isr"))]
+            let req = self.req_hz();
+            self.r26 = hy::ad2_r26_for(req, self.chop());
             hy::ad2_period_ns(self.r26)
         } else {
             self.r26 = 0;
@@ -844,6 +852,30 @@ pub mod isr {
             _ => 1300,  // 26 us
         }
     }
+    /// The DMA frame in flight (hy3131 `stream::dma_*`): started by A, ended
+    /// by the next entry. `on`: this session uses DMA frames.
+    struct Dma {
+        on: bool,
+        pending: bool,
+        ts: u32,
+    }
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut DMA: Dma = Dma { on: false, pending: false, ts: 0 };
+    /// The frame's bytes (SRAM: DMA0 cannot reach the TCM): the command
+    /// (R03, read) + 4 x 0xFF out, the 5 replies in.
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut TXB: [u8; 5] = [0; 5];
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut RXB: [u8; 5] = [0; 5];
+    /// DMA frame (5 bytes + CS / start), timer counts, per divider.
+    const fn dma_frame_counts(div: u8) -> u32 {
+        match div {
+            8 => 360,   // 7.2 us
+            16 => 680,  // 13.6 us
+            _ => 1320,  // 26.4 us
+        }
+    }
+
     /// A probe B whose entry came later than this (counts) is not used.
     const B_LATE: u32 = 100;
     /// The stacked PC of the entry with the largest latency (DBG:ISR?):
@@ -902,18 +934,31 @@ pub mod isr {
     }
 
     /// Main loop, after the session's chip set-up (the last bus access but
-    /// the edge search here): pick the read divider, find one conversion
+    /// the edge search here; the read divider is set): find one conversion
     /// edge by polling INTF (bounded: 3 periods), start the timer so that
     /// the first A comes `P - beta` after it, hand the bus over.
     pub(super) fn start(prod: &Producer, ring: *const Ring, rate_mhz: u32) {
-        let div = hy::stream::pick_div();
+        let div = hy::stream::div_used(); // Logger::start picked it
         unsafe {
             (*core::ptr::addr_of_mut!(TRG)).gen = 0;
             let p = &mut *core::ptr::addr_of_mut!(PROD);
             p.begin(prod.period_ns);
             *core::ptr::addr_of_mut!(RINGP) = ring;
             let pll = &mut *core::ptr::addr_of_mut!(PLL);
-            *pll = Pll::new(rate_mhz, *core::ptr::addr_of!(REL), frame_counts(div));
+            let dma = hy::stream::use_dma(rate_mhz / 1000);
+            *core::ptr::addr_of_mut!(DMA) = Dma { on: dma, pending: false, ts: 0 };
+            if dma {
+                *core::ptr::addr_of_mut!(TXB) = [(hy::R_AD2 << 1) | 1, 0xFF, 0xFF, 0xFF, 0xFF];
+                let fc = dma_frame_counts(div);
+                *pll = Pll::new(rate_mhz, *core::ptr::addr_of!(REL), fc);
+                pll.late_read = true;
+                pll.c_off = fc + 50;
+                pll.np = 8;
+                pll.gate = true;
+                hy::stream::dma_setup(true);
+            } else {
+                *pll = Pll::new(rate_mhz, *core::ptr::addr_of!(REL), frame_counts(div));
+            }
         }
         LAT_PC.store(0, Relaxed);
         SLIPS.store(0, Relaxed);
@@ -975,8 +1020,9 @@ pub mod isr {
     /// (+ = the chip's conversions come later than nominal in MCU time),
     /// slips, the PC of the worst entry latency, conversion periods, the
     /// handler's CPU share in 1/1000 of the session's periods - the
-    /// exception entry and exit, ~30 cycles each, not included).
-    pub fn lock_stats() -> [u32; 10] {
+    /// exception entry and exit, ~30 cycles each, not included - and whether
+    /// the session uses DMA frames).
+    pub fn lock_stats() -> [u32; 11] {
         let p = unsafe { &*core::ptr::addr_of!(PLL) };
         let ppm10 = ((p.f_mean() as i64 - p.f_nom as i64) * 10_000_000 / (p.f_nom.max(1) as i64)) as i32;
         [
@@ -988,12 +1034,15 @@ pub mod isr {
             ppm10 as u32,
             SLIPS.load(Relaxed),
             LAT_PC.load(Relaxed),
-            p.periods,
+            // A DMA frame still in flight (the last one of a stopped session
+            // is never stored) is not a lost conversion.
+            p.periods.wrapping_sub(unsafe { (*core::ptr::addr_of!(DMA)).pending } as u32),
             {
                 let busy = BUSY16.load(Relaxed) as u64 * 16;
                 let total = p.periods as u64 * (p.f_mean() as u64 >> 16) * (crate::clock::HCLK_HZ / COUNT_HZ) as u64;
                 if total == 0 { 0 } else { (busy * 1000 / total) as u32 }
             },
+            unsafe { (*core::ptr::addr_of!(DMA)).on } as u32,
         ]
     }
 
@@ -1009,18 +1058,27 @@ pub mod isr {
         let t0 = r32(DWT_CYCCNT);
         let ring = &*RINGP;
         let pll = &mut *core::ptr::addr_of_mut!(PLL);
-        if pll.next_b {
+        let p = &mut *core::ptr::addr_of_mut!(PROD);
+        let d = &mut *core::ptr::addr_of_mut!(DMA);
+        if pll.next_b || pll.next_c {
+            let c = pll.next_c;
             let ok = lat <= B_LATE;
-            let iv = pll.on_b(ok);
+            let iv = if c { pll.on_c() } else { pll.on_b(ok) };
             let over = hy::stream::set_interval(iv, lat);
             if over != 0 {
                 pll.overshoot(over);
                 inc(&SLIPS);
             }
-            if ok {
+            if d.pending {
+                dma_done(d, p, ring);
+            }
+            if c || ok {
                 let mut f = [0u8];
                 if !hy::isr_read(hy::R_INTF, &mut f) {
                     inc(&ring.timeouts);
+                } else if c {
+                    pll.result(f[0] & hy::INTF_AD2 != 0);
+                    inc(&ring.probes);
                 }
             }
         } else {
@@ -1030,23 +1088,23 @@ pub mod isr {
                 pll.overshoot(over);
                 inc(&SLIPS);
             }
-            let p = &mut *core::ptr::addr_of_mut!(PROD);
             p.tick_at(t0);
-            if lat > pll.late_max() {
+            if d.pending {
+                dma_done(d, p, ring);
+            }
+            if !pll.take() {
+                // Acquiring (DMA frames: until locked): no sample.
+            } else if lat > pll.late_max() {
                 inc(&ring.late);
+            } else if d.on {
+                d.ts = p.now_us as u32;
+                d.pending = true;
+                hy::stream::dma_kick(core::ptr::addr_of!(TXB) as *const u8, core::ptr::addr_of_mut!(RXB) as *mut u8, 5);
             } else {
                 let ts = p.now_us as u32;
                 let mut b = [0u8; 3];
                 if hy::isr_read(hy::R_AD2, &mut b) {
-                    let v = hy::s24(&b);
-                    if hy::ad2_sign_ok(v) {
-                        let idx = ring.head.load(Relaxed);
-                        if p.push(ring, ts, v) {
-                            trig(ring, idx, v);
-                        }
-                    } else {
-                        inc(&ring.bad);
-                    }
+                    store(p, ring, ts, hy::s24(&b));
                 } else {
                     inc(&ring.timeouts);
                 }
@@ -1075,6 +1133,40 @@ pub mod isr {
             inc(&ring.overruns);
         }
     }
+
+    /// A sample into the ring (sign-copy check) and the wave trigger.
+    #[inline(always)]
+    unsafe fn store(p: &mut Producer, ring: &Ring, ts: u32, v: i32) {
+        if hy::ad2_sign_ok(v) {
+            let idx = ring.head.load(Relaxed);
+            if p.push(ring, ts, v) {
+                trig(ring, idx, v);
+            }
+        } else {
+            inc(&ring.bad);
+        }
+    }
+
+    /// The DMA frame started at the last A is over (the next entry): CS up,
+    /// decode the shift-framed reply, store it with A's stamp.
+    #[inline(always)]
+    unsafe fn dma_done(d: &mut Dma, p: &mut Producer, ring: &Ring) {
+        d.pending = false;
+        if !hy::stream::dma_finish() {
+            inc(&ring.timeouts);
+            return;
+        }
+        store(p, ring, d.ts, decode_shift(&*core::ptr::addr_of!(RXB)));
+    }
+}
+
+/// R03..R05 from a shift-framed 5-byte reply (hy3131 `spi::dma_kick`): byte
+/// 0 answers the command; bytes 1..4 carry the read-period bit, then R03,
+/// R04, R05 (each MSB first), then 7 bits of R06.
+pub fn decode_shift(rx: &[u8; 5]) -> i32 {
+    let w = u32::from_be_bytes([rx[1], rx[2], rx[3], rx[4]]);
+    let b = [(w >> 23) as u8, (w >> 15) as u8, (w >> 7) as u8];
+    hy::s24(&b)
 }
 
 #[cfg(test)]

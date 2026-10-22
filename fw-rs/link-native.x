@@ -17,7 +17,10 @@
  *   C  0x08080000..0x080A0000  128 KiB .cold (boot-only / rarely run code:
  *                                      calibration backup, fatren, the
  *                                      gallery, screenshots, the DLG writer,
- *                                      FAT / vdisk generation, uploads) and
+ *                                      FAT / vdisk generation, uploads, the
+ *                                      bus self-tests / AD2 experiments (DBG),
+ *                                      scope CSV, boot / DBG:BOOT?, settings
+ *                                      persistence) and
  *                                      the .data load image. Must end below
  *                                      0x080A0000 (FS-loader, UID data,
  *                                      calibration above).
@@ -82,6 +85,11 @@ SECTIONS
         *(.text.*7dm40_fw6fatdir*);
         *(.text.*7dm40_fw5vdisk*);
         *(.text.*7dm40_fw6upload*);
+        *(.text.*7dm40_fw5hyspi*);
+        *(.text.*7dm40_fw6ad2exp*);
+        *(.text.*7dm40_fw9scope_csv*);
+        *(.text.*7dm40_fw4boot*);
+        *(.text.*7dm40_fw7persist*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C

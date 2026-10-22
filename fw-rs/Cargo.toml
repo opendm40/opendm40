@@ -20,15 +20,16 @@ opt-level = "z"
 panic = "abort"
 
 [features]
-default = ["vdisk"]
+default = ["vdisk", "ad2-isr"]
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []
 # AD2 logger stream on ONE timer interrupt (TIMER6 = STM32 TIM7, IRQ 55) with
-# the HY3131 bus handed to the ISR exclusively while a LOG:SOURce AD2 session
-# runs (docs/decisions-2026-10-22.md #3; src/hy3131.rs `stream`, src/logger.rs
-# `isr`). Off by default until the device acceptance (LOG:COUNt? lost = 0 at
-# 4800 S/s for 60 s with DBG:AD2:DRAW 2); without it the build has no
+# the HY3131 bus handed to the ISR exclusively while an AD2 session runs
+# (docs/decisions-2026-10-22.md #3; src/hy3131.rs `stream`, src/logger.rs
+# `isr`, src/ad2pll.rs). DEFAULT since the device check of 4b98128 (lost 0 at
+# 4800 / 9600 / 19200 S/s, 60 s each; docs/dmm-input-scope-feasibility.md 11).
+# Without it (--no-default-features --features vdisk) the build has no
 # interrupt at all and the AD2 logger is the main-loop sampler.
 ad2-isr = []
 # USB mass-storage LUN = the read-only information volume generated from the
@@ -48,7 +49,10 @@ recovery-file = []
 recovery-usb = []
 
 [dependencies]
-cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
+cortex-m = "0.7.7"
+# critical_section::with (synopsys-usb-otg's endpoint buffers) WITHOUT masking
+# interrupts: src/main.rs `NoMask` (the AD2 stream ISR shares no state with it).
+critical-section = "1.2.0"
 synopsys-usb-otg = { version = "0.5.0", features = ["fs"] }
 usb-device = "0.3.2"
 usbd-storage = { version = "3.0.0", features = ["bbb", "scsi"] }

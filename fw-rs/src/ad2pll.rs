@@ -89,6 +89,19 @@ pub struct Pll {
     rest: u32,
     /// The next entry is B.
     pub next_b: bool,
+    /// The next entry is C (`late_read`).
+    pub next_c: bool,
+    /// The probe's INTF read-back is a separate entry C, `c_off` after the
+    /// A of the period after B (after A's data frame), instead of a read
+    /// at A itself: for data frames that A only starts (the DMA frame of
+    /// hy3131 `stream::dma`), so the bus is free at A.
+    pub late_read: bool,
+    pub c_off: u32,
+    /// Probe every `np`-th period once locked.
+    pub np: u8,
+    /// Samples count (and are taken) only once locked (`take`): where the
+    /// edge search's error (~ an INTF frame) exceeds the margin.
+    pub gate: bool,
     /// B read INTF: the next A completes the probe.
     probing: bool,
     last_s: i8,
@@ -121,6 +134,11 @@ impl Pll {
             left: 0,
             rest: 0,
             next_b: false,
+            next_c: false,
+            late_read: false,
+            c_off: 0,
+            np: NP,
+            gate: false,
             probing: false,
             last_s: 0,
             run: 0,
@@ -183,17 +201,27 @@ impl Pll {
 
     /// Entry A (at the timer update that ends the previous interval): the
     /// length of the interval starting now, counts, and whether this A
-    /// completes a probe (read INTF after the data frame).
+    /// completes a probe (read INTF after the data frame; never with
+    /// `late_read`: then a C entry follows instead).
     pub fn on_a(&mut self) -> (u32, bool) {
         let probe = self.probing;
         self.probing = false;
-        self.periods = self.periods.wrapping_add(1);
+        if self.locked || !self.gate {
+            self.periods = self.periods.wrapping_add(1);
+        }
         let s = self.acc + self.f;
         self.acc = s & 0xFFFF;
         let len = ((s >> 16) as i32 + self.kick).max(2 * self.kp_min as i32 + 4) as u32;
         self.kick = 0;
+        if self.late_read && probe && len > self.c_off + 4 {
+            // This period carries the read-back C, the B waits.
+            self.left = self.left.saturating_sub(1);
+            self.rest = len - self.c_off;
+            self.next_c = true;
+            return (self.c_off, false);
+        }
         if self.left == 0 && len > self.beta + 4 {
-            self.left = if self.kp > self.kp_min { 0 } else { NP - 1 };
+            self.left = if self.kp > self.kp_min { 0 } else { self.np - 1 };
             self.rest = len - self.beta;
             self.next_b = true;
             (self.beta, probe)
@@ -208,6 +236,18 @@ impl Pll {
     pub fn on_b(&mut self, valid: bool) -> u32 {
         self.next_b = false;
         self.probing = valid;
+        self.rest
+    }
+
+    /// This period's sample is taken (`gate`: only once locked).
+    pub fn take(&self) -> bool {
+        self.locked || !self.gate
+    }
+
+    /// Entry C (`late_read`): the interval to the next A; the ISR reads INTF
+    /// here and passes it to `result`.
+    pub fn on_c(&mut self) -> u32 {
+        self.next_c = false;
         self.rest
     }
 
@@ -268,7 +308,7 @@ mod tests {
     /// bad = a data frame overlapping an edge, or a period with no / two new
     /// conversions between consecutive data reads.
     fn run(rate_mhz: u32, ppm: f64, periods: u32, frame: f64, lat: &dyn Fn(u64) -> f64, w: f64) -> (u32, u32, Pll) {
-        let (s, bad, _, pll) = run2(rate_mhz, ppm, periods, frame, lat, w, 0.37);
+        let (s, bad, _, pll) = run2(rate_mhz, ppm, periods, frame, lat, w, 0.37, false);
         (s, bad, pll)
     }
 
@@ -280,8 +320,15 @@ mod tests {
         lat: &dyn Fn(u64) -> f64,
         w: f64,
         ph: f64,
+        dma: bool,
     ) -> (u32, u32, u32, Pll) {
         let mut pll = Pll::new(rate_mhz, 0, frame as u32);
+        if dma {
+            pll.late_read = true;
+            pll.c_off = frame as u32 + 50;
+            pll.np = 8;
+            pll.gate = true;
+        }
         let p_chip = (COUNT_HZ as f64 * 1000.0 / rate_mhz as f64) / (1.0 + ppm * 1e-6);
         let phase0 = ph * p_chip; // the first edge, relative to the first A
         let edge = |k: i64| phase0 + k as f64 * p_chip;
@@ -299,8 +346,17 @@ mod tests {
                 let iv = pll.on_b(valid);
                 b_read = t + l + 40.0; // the INTF byte inside the frame
                 t += iv as f64;
+            } else if pll.next_c {
+                let iv = pll.on_c();
+                let c_read = t + l + 40.0;
+                pll.result(edge_index(c_read) > edge_index(b_read));
+                t += iv as f64;
             } else {
                 let (iv, probe) = pll.on_a();
+                if !pll.take() {
+                    t += iv as f64;
+                    continue;
+                }
                 if l > pll.late_max() as f64 {
                     // The ISR skips a late data read (counted, a stamp gap).
                     last_data_k = last_data_k.map(|k| k + 1);
@@ -362,7 +418,7 @@ mod tests {
             let j = ((n.wrapping_mul(2654435761) >> 7) % 140) as f64 + 10.0;
             if n % 1000 == 999 { 1000.0 } else { j }
         };
-        let (s, bad, skipped, pll) = run2(19_200_000, 80.0, 200_000, 700.0, &lat, 35.0, 0.37);
+        let (s, bad, skipped, pll) = run2(19_200_000, 80.0, 200_000, 700.0, &lat, 35.0, 0.37, false);
         assert_eq!(bad, 0, "{bad} of {s}");
         assert!(pll.locked);
         assert!(skipped > 0 && skipped <= 200_000 / 600, "the 20 us spikes are skipped, not misread: {skipped}");
@@ -374,9 +430,29 @@ mod tests {
         // locked a read may straddle; after 2000 periods none does.
         for k in 0..20 {
             let ph = k as f64 / 20.0;
-            let (_, bad, _, pll) = run2(9_600_000, -100.0, 30_000, 700.0, &|_| 20.0, 35.0, ph);
+            let (_, bad, _, pll) = run2(9_600_000, -100.0, 30_000, 700.0, &|_| 20.0, 35.0, ph, false);
             assert!(pll.locked, "phase {ph}");
             assert!(bad <= 40, "phase {ph}: {bad}");
+        }
+    }
+
+    #[test]
+    fn dma_frames_with_a_late_read_back() {
+        // hy3131 stream::dma: the data frame (5 bytes, /16: 13.3 us; /8:
+        // 7.2 us) only started at A, the probe read back by C after it.
+        for &(rate, frame) in &[(19_200_000u32, 665.0), (38_400_000, 665.0), (76_800_000, 360.0)] {
+            for &ppm in &[-100.0, 0.0, 100.0] {
+                let jit = |n: u64| ((n.wrapping_mul(2654435761) >> 7) % 40) as f64 + 10.0;
+                // Start where hy3131 / logger `isr::start` puts the first A:
+                // P - beta after an edge (+ 3 us of edge-search error).
+                let p0 = Pll::new(rate, 0, frame as u32);
+                let ph = (p0.beta as f64 + 150.0) / (p0.f >> 16) as f64;
+                let (s, bad, skipped, pll) = run2(rate, ppm, 200_000, frame, &jit, 35.0, ph, true);
+                assert_eq!((bad, skipped), (0, 0), "rate {rate} ppm {ppm}: of {s}");
+                assert!(pll.locked, "rate {rate} ppm {ppm}");
+                let got = (pll.rate_mhz() as f64 / rate as f64 - 1.0) * 1e6;
+                assert!((got - ppm).abs() < 10.0, "rate {rate} ppm {ppm}: {got:.1}");
+            }
         }
     }
 

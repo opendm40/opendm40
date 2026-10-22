@@ -17,6 +17,24 @@ mod lcd;
 mod logger;
 mod ad2exp;
 mod ad2pll;
+
+/// The critical-section implementation: compiler fences only, no PRIMASK.
+/// fw-rs runs with interrupts masked except while the AD2 stream ISR runs
+/// (decision #3), and that ISR touches nothing a `critical_section::with`
+/// protects (synopsys-usb-otg's endpoint buffers and register RMWs, the
+/// only users): masking it there only delayed it (device 4b98128: max_lat
+/// 4.7 us, every worst case inside Endpoint<Out>::read). Main-loop code
+/// shares state with the ISR through atomics only (logger.rs RING).
+struct NoMask;
+critical_section::set_impl!(NoMask);
+unsafe impl critical_section::Impl for NoMask {
+    unsafe fn acquire() -> critical_section::RawRestoreState {
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    }
+    unsafe fn release(_: critical_section::RawRestoreState) {
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    }
+}
 mod meter;
 mod mmio;
 mod persist;
@@ -593,6 +611,10 @@ fn main() -> ! {
                             false
                         }
                     }
+                    scpi::Dbg::HySpiWr(m, _) if m & 0x80 != 0 => {
+                        hy3131::set_write_bitbang(m & 1 == 0);
+                        false
+                    }
                     scpi::Dbg::HySpiWr(mode, div) => {
                         if logger.active() {
                             scpi.set_err("Settings conflict");
@@ -613,7 +635,7 @@ fn main() -> ! {
                         #[cfg(feature = "ad2-isr")]
                         let (l, div) = (logger::isr::lock_stats(), hy3131::stream::div_used() as u32);
                         #[cfg(not(feature = "ad2-isr"))]
-                        let (l, div) = ([0u32; 10], 0u32);
+                        let (l, div) = ([0u32; 11], 0u32);
                         let vals = [
                             cfg!(feature = "ad2-isr") as u32,
                             logger.on_isr() as u32,
@@ -653,12 +675,20 @@ fn main() -> ! {
                         for k in (0..8).rev() {
                             scpi.put_bytes(&[b"0123456789abcdef"[(l[7] >> (4 * k)) as usize & 15]]);
                         }
+                        scpi.put_bytes(b",");
+                        put_u32(&mut scpi, l[10]);
                         true
                     }
-                    scpi::Dbg::Ad2(3, div, _, _) => {
+                    scpi::Dbg::Ad2(4, m, _, _) => {
                         #[cfg(feature = "ad2-isr")]
-                        hy3131::stream::set_div_req(div);
-                        let _ = div;
+                        hy3131::stream::set_dma_req(m);
+                        let _ = m;
+                        false
+                    }
+                    scpi::Dbg::Ad2(3, div, _, cpha) => {
+                        #[cfg(feature = "ad2-isr")]
+                        hy3131::stream::set_div_req(div, cpha != 0);
+                        let _ = (div, cpha);
                         false
                     }
                     scpi::Dbg::Ad2(2, level, _, _) => {

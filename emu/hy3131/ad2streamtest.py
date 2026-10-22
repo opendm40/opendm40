@@ -40,7 +40,7 @@ ap.add_argument('--secs', type=float, default=1.0, help='scale of the session le
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
 ap.add_argument('--race-us', type=float, default=None, help='INTF read-clears-flag race window, us (model default 0.7)')
 ap.add_argument('--sessions', default='4800:2:20,9600:1:15,1200:2:10',
-                help='rate:draw:secs,... (secs scaled by --secs)')
+                help='rate:draw:secs[:dma],... (secs scaled by --secs; dma = DBG:AD2:DMA 0 / 1 / 2, default 2)')
 A = ap.parse_args()
 SCRIPT = os.path.join(EMU, 'out', 'ad2stream-%d.script' % A.port)
 with open(SCRIPT, 'w') as f:
@@ -104,9 +104,10 @@ try:
         v = read_v()
     check(abs(v - 0.5) < 0.005, 'AC V reads 0.5 V before streaming (%.5f)' % v)
 
-    for rate, draw, secs in [tuple(float(x) if i == 2 else int(x) for i, x in enumerate(v.split(':')))
-                             for v in A.sessions.split(',')]:
-        print('session %d S/s, DBG:AD2:DRAW %d, %g s' % (rate, draw, secs * A.secs))
+    for rate, draw, secs, dma in [tuple(float(x) if i == 2 else int(x) for i, x in enumerate((v + ':2').split(':')[:4]))
+                                  for v in A.sessions.split(',')]:
+        print('session %d S/s, DBG:AD2:DRAW %d, DBG:AD2:DMA %d, %g s' % (rate, draw, dma, secs * A.secs))
+        q('DBG:AD2:DMA %d' % dma)
         q('LOG:STATe OFF')
         q('*CLS')
         q('DBG:AD2:DRAW %d' % draw)
@@ -158,8 +159,14 @@ try:
               % (isr[14], isr[17], isr[18], isr[5]))
         check(isr[4] == 0 and isr[16] == 0, 'no late entry, no slip (late %d, slips %d)' % (isr[4], isr[16]))
         bents = isr[2] - isr[3] - isr[4] - isr[7]
-        check(isr[5] > isr[3] / 8 and 0 <= bents - isr[5] <= 2 + isr[5] // 20,
-              'probes ~ 1 in 4 periods, entries = A + B (%d probes, %d B entries)' % (isr[5], bents))
+        if isr[22]:
+            # DMA frames: B and C per probe, 1 in 8 periods; acquisition
+            # periods (no sample) are A entries too.
+            check(isr[5] > isr[3] / 40, 'DMA frames: probes ~ 1 in 8 periods (%d probes, %d samples)' % (isr[5], isr[3]))
+        else:
+            check(isr[5] > isr[3] / 8 and 0 <= bents - isr[5] <= 2 + isr[5] // 20,
+                  'probes ~ 1 in 4 periods, entries = A + B (%d probes, %d B entries)' % (isr[5], bents))
+        check(isr[22] == (1 if dma == 1 or (dma == 2 and rate > 19200) else 0), 'DMA frames %d (DBG:AD2:DMA %d)' % (isr[22], dma))
         check(abs(isr[15] + 10 * A.ppm) <= 250, 'locked period vs nominal %+.1f ppm (chip %+g ppm)' % (isr[15] / 10, A.ppm))
         check(isr[12] > 0 and abs(isr[12] / 1000 / rate - 1 - A.ppm * 1e-6) < 2.5e-5, 'locked rate %.3f S/s' % (isr[12] / 1000))
         check(max(idn or [9]) < 0.5, '*IDN? answered while streaming (max %.3f s)' % max(idn or [9]))

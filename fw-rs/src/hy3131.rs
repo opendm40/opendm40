@@ -108,23 +108,57 @@ pub fn set_div(div: u8) {
     spi::set_div(div);
 }
 
-/// Write `data` to `reg`, `reg + 1`, .. (bit-banged, see the module notes).
+/// Write `data` to `reg`, `reg + 1`, ..: over SPI2, one frame per register
+/// with an LSB-matched cut dummy (`write_spi` mode 1, at `DIV`), or
+/// bit-banged after DBG:HYSPI:WMODE 0 (the fallback; see the module notes).
 pub fn write(reg: u8, data: &[u8]) {
     guard();
-    spi::to_gpio();
-    bb::write(reg, data);
-    spi::to_af();
+    if WRITE_BB.load(Relaxed) {
+        spi::to_gpio();
+        bb::write(reg, data);
+        spi::to_af();
+    } else {
+        for (i, &d) in data.iter().enumerate() {
+            let _ = spi::write_cont(reg.wrapping_add(i as u8), &[d], true);
+        }
+    }
+}
+
+/// Writes bit-banged (DBG:HYSPI:WMODE 0) instead of over SPI2 (1, default).
+static WRITE_BB: AtomicBool = AtomicBool::new(false);
+
+pub fn set_write_bitbang(on: bool) {
+    WRITE_BB.store(on, Relaxed);
+}
+
+pub fn write_bitbang() -> bool {
+    WRITE_BB.load(Relaxed)
+}
+
+/// Sample the data phase of SPI2 reads with CKPH = 1 (the master samples
+/// at the falling edge, a full SCK period after the chip changed DO at the
+/// previous one, instead of half a period: the /8 DO-path margin of
+/// feasibility 8.2). The command byte stays mode 0 (the chip samples DI on
+/// the rising edge). Experiment: DBG:HYSPI:SELF? n,div,1 / DBG:AD2:DIV d,1.
+static DATA_CPHA: AtomicBool = AtomicBool::new(false);
+
+pub fn set_data_cpha(on: bool) {
+    DATA_CPHA.store(on, Relaxed);
 }
 
 /// SPI2 write experiment (DBG:HYSPI:WR?, src/hyspi.rs): `mode` 1 = one
 /// frame per register, each [cmd, d, 0x00 cut after its first bits]; 2 = one
 /// continuous frame [cmd, d0 .. dn, 0x00 cut]; 3 = byte by byte with gaps and
 /// no dummy (8e5efa6's write, the corrupting one). At divider `div` (reads
-/// stay at `DIV`). The cut dummy: the GD32 keeps shifting the next byte
-/// while CS goes high right after the last data byte's RBNE, so MOSI holds
-/// the dummy's MSB (0) - not a level the peripheral picks - when the chip
-/// takes the last data bit; the incomplete dummy byte is dropped by the
-/// chip at CS high (a completed one would write reg + n + 1).
+/// stay at `DIV`). Device 4b98128: the chip takes each byte's LSB late, at
+/// the MOSI level that follows it (a gap: the GD32 drives the byte's MSB
+/// again, 1xxxxxx0 -> bit 0 set; continuous: the next byte's MSB). The cut
+/// dummy: the GD32 keeps shifting a dummy byte whose MSB = the last data
+/// byte's LSB (0x00 / 0xFF) while CS goes high right after the last data
+/// byte's RBNE, so that late sample sees the right level; the incomplete
+/// dummy byte is dropped by the chip at CS high (a completed one would write
+/// reg + n + 1). Mode 1 (one register per frame) was 0 / 512 bad at /32 with
+/// a 0x00 dummy and 1..6 / 512 at /16 (LSB 1 read as 0) - hence the match.
 pub fn write_spi(reg: u8, data: &[u8], mode: u8, div: u8) -> bool {
     guard();
     spi::set_div(div);
@@ -242,13 +276,14 @@ pub mod stream {
     const IRQ_BIT: u32 = 1 << (IRQN % 32);
     const IRQ_REG: u32 = 4 * (IRQN / 32);
 
-    /// Read divider of the stream frames: 0 = automatic (`pick_div`), else
-    /// 8 / 16 / 32 (DBG:AD2:DIV).
+    /// Read divider of the stream frames: 0 = `DIV`, else 8 / 16 / 32
+    /// (DBG:AD2:DIV d[,cpha]).
     static DIV_REQ: AtomicU32 = AtomicU32::new(0);
     static DIV_USED: AtomicU32 = AtomicU32::new(0);
 
-    pub fn set_div_req(div: u8) {
+    pub fn set_div_req(div: u8, cpha: bool) {
         DIV_REQ.store(if matches!(div, 8 | 16 | 32) { div as u32 } else { 0 }, Relaxed);
+        super::set_data_cpha(cpha);
     }
 
     /// The divider of the running / last stream (0 = none yet).
@@ -256,36 +291,62 @@ pub mod stream {
         DIV_USED.load(Relaxed) as u8
     }
 
-    /// Main loop, before the hand-off: the read divider for the stream and
-    /// switch to it. Automatic: /8 (6.25 MHz; reads clean on the device,
-    /// feasibility 8.6, though the DO-path margin of 8.2 is ~0 on paper)
-    /// when the 22 configuration bytes R20..R35 read at /8 four times equal
-    /// the /16 reading (bytes that differ between two /16 readings are not
-    /// compared); else /16. `stop` puts `DIV` back.
+    /// Main loop, before the chip set-up of a stream: the read divider for
+    /// its frames, and switch to it: `DIV` (/16) unless DBG:AD2:DIV forced
+    /// another. /8 is not the default: on the device (4b98128) a start-up
+    /// check of 6 x 22 bytes passed at /8 in two of four sessions, which then
+    /// read 61 / 100 sign-copy errors in 1.15 M / 2.36 M samples (feasibility
+    /// 11.3). `stop` puts `DIV` back.
     pub fn pick_div() -> u8 {
         let req = DIV_REQ.load(Relaxed) as u8;
-        let div = if req != 0 {
-            req
-        } else {
-            let mut a = [0u8; CFG_LEN];
-            let mut b = [0u8; CFG_LEN];
-            let mut c = [0u8; CFG_LEN];
-            spi::set_div(16);
-            let _ = spi::read(R_CFG, &mut a);
-            let _ = spi::read(R_CFG, &mut b);
-            spi::set_div(8);
-            let mut ok = true;
-            for _ in 0..4 {
-                ok &= spi::read(R_CFG, &mut c);
-                for i in 0..CFG_LEN {
-                    ok &= a[i] != b[i] || c[i] == a[i];
-                }
-            }
-            if ok { 8 } else { 16 }
-        };
+        let div = if req != 0 { req } else { DIV };
         spi::set_div(div);
         DIV_USED.store(div as u32, Relaxed);
         div
+    }
+
+    /// The fastest AD2 rung (S/s) the stream ISR can read at `div`: with one
+    /// CPU frame per sample the frame (~13.5 us at /16) plus a probe frame
+    /// must fit the period with the lock's margins (38.4 kS/s at /16 ran the
+    /// CPU at 80 % and lost the lock on the device); with DMA frames (5
+    /// bytes, 12.8 us at /16) the CPU only starts them.
+    pub const fn max_rate_hz(div: u8, dma: bool) -> u32 {
+        match (div, dma) {
+            (8, false) | (16, true) => 38_400,
+            (8, true) => 76_800,
+            (16, false) | (32, true) => 19_200,
+            _ => 9_600,
+        }
+    }
+
+    /// DMA frames for the stream: 0 = CPU frames, 1 = DMA frames, 2 =
+    /// automatic (DMA above the CPU frames' rate cap). DBG:AD2:DMA.
+    static DMA_REQ: AtomicU32 = AtomicU32::new(2);
+
+    pub fn set_dma_req(m: u8) {
+        DMA_REQ.store(m.min(2) as u32, Relaxed);
+    }
+
+    /// Whether a stream at `req_hz` uses DMA frames at the picked divider.
+    pub fn use_dma(req_hz: u32) -> bool {
+        match DMA_REQ.load(Relaxed) {
+            0 => false,
+            1 => true,
+            _ => req_hz > max_rate_hz(div_used(), false),
+        }
+    }
+
+    /// DMA frame primitives (`spi`), for logger.rs `isr`.
+    pub fn dma_setup(on: bool) {
+        spi::dma_setup(on);
+    }
+    #[inline(always)]
+    pub fn dma_kick(tx: *const u8, rx: *mut u8, n: u32) {
+        spi::dma_kick(tx, rx, n);
+    }
+    #[inline(always)]
+    pub fn dma_finish() -> bool {
+        spi::dma_finish()
     }
 
     fn barrier() {
@@ -369,6 +430,8 @@ pub mod stream {
             barrier();
         }
         HANDED.store(false, Relaxed);
+        spi::dma_setup(false);
+        set(GPIOD, CS, true);
         spi::set_div(DIV);
     }
 
@@ -548,6 +611,9 @@ mod spi {
             set(GPIOC, SCK, false);
             spin(PULSE_LO);
             modify32(GPIOC + MODER, 3 << (2 * SCK), 2 << (2 * SCK));
+            if DATA_CPHA.load(Relaxed) {
+                cpha(true);
+            }
         }
         // MOSI 1 during the data phase, as on the bit-banged bus (the R bit).
         for b in buf.iter_mut() {
@@ -578,6 +644,9 @@ mod spi {
             set(GPIOC, SCK, false);
             spin(PULSE_LO);
             modify32(GPIOC + MODER, 3 << (2 * SCK), 2 << (2 * SCK));
+            if DATA_CPHA.load(Relaxed) {
+                cpha(true);
+            }
             let n = buf.len();
             if n == 0 {
                 return end(true);
@@ -618,7 +687,9 @@ mod spi {
                 // bytes: cmd, data.., dummy; the RBNE of byte k is read
                 // after byte k + 1 went into DATA.
                 let n = data.len() + 1;
-                let byte = |k: usize| if k == 0 { reg << 1 } else if k < n { data[k - 1] } else { 0x00 };
+                let last = data.last().copied().unwrap_or(0);
+                let dummy = if last & 1 != 0 { 0xFF } else { 0x00 };
+                let byte = |k: usize| if k == 0 { reg << 1 } else if k < n { data[k - 1] } else { dummy };
                 w16(SPI_DATA, byte(0) as u16);
                 let mut ok = true;
                 for k in 1..=n {
@@ -643,7 +714,101 @@ mod spi {
         end(ok)
     }
 
+    // ---- DMA frames (the AD2 stream ISR, `stream`) ----
+    //
+    // GD32 DMA0 (STM32 DMA1; register layout as bt.rs / gen.rs), SPI2 =
+    // STM32 SPI3 requests: RX on channel (stream) 0, TX on channel 7, both
+    // peripheral request 0 (the STM32F4-compatible map; bt.rs uses 2 / 4,
+    // gen.rs 5). The frame uses the shift framing (feasibility 8.1): the
+    // command byte, then n bytes that also clock the read period, so the
+    // data arrive one bit late (decoded by the caller). CS is the GPIO: the
+    // ISR drops it, starts both channels and returns; the next entry checks
+    // the channel finished and raises CS.
+    const DMA0: u32 = 0x4002_6000;
+    const DMA_INTC0: u32 = DMA0 + 0x08;
+    const DMA_INTC1: u32 = DMA0 + 0x0C;
+    const fn dch(ch: u32, off: u32) -> u32 {
+        DMA0 + 0x10 + 0x18 * ch + off
+    }
+    const RXC: u32 = 0;
+    const TXC: u32 = 7;
+    const SPI_CTL1: u32 = SPI2 + 0x04;
+    /// CTL: peripheral request 0, byte / byte, memory increment, P->M (RX)
+    /// or M->P (TX, DIR bit 6), high priority (bits 17:16 = 10), enable.
+    const DMA_RX_CTL: u32 = (2 << 16) | (1 << 10) | 1;
+    const DMA_TX_CTL: u32 = (2 << 16) | (1 << 10) | (1 << 6) | 1;
+
+    /// Session start / end (main loop): the channels' peripheral address and
+    /// SPI2's DMA request enables (DMAREN | DMATEN: with a channel disabled a
+    /// request does nothing, so the CPU-polled frames are unaffected).
+    pub(super) fn dma_setup(on: bool) {
+        unsafe {
+            w32(dch(RXC, 0), 0);
+            w32(dch(TXC, 0), 0);
+            w32(DMA_INTC0, 0x3D);
+            w32(DMA_INTC1, 0x3D << 22);
+            if on {
+                modify32(0x4002_3830, 0, 1 << 21); // RCU_AHB1EN DMA0EN
+                w32(dch(RXC, 0x08), SPI_DATA);
+                w32(dch(TXC, 0x08), SPI_DATA);
+                w32(SPI_CTL1, 0x3);
+            } else {
+                w32(SPI_CTL1, 0);
+                let _ = r32(SPI_DATA);
+            }
+        }
+    }
+
+    /// Start a DMA frame: CS low, `n` bytes of `tx` out, the replies to `rx`.
+    #[inline(always)]
+    pub(super) fn dma_kick(tx: *const u8, rx: *mut u8, n: u32) {
+        set(GPIOD, CS, false);
+        unsafe {
+            w32(DMA_INTC0, 0x3D);
+            w32(DMA_INTC1, 0x3D << 22);
+            w32(dch(RXC, 0x04), n);
+            w32(dch(RXC, 0x0C), rx as u32);
+            w32(dch(TXC, 0x04), n);
+            w32(dch(TXC, 0x0C), tx as u32);
+            spin(CS_SETUP);
+            w32(dch(RXC, 0), DMA_RX_CTL);
+            w32(dch(TXC, 0), DMA_TX_CTL);
+        }
+    }
+
+    /// End the running DMA frame: true when every byte came back (else the
+    /// channels are stopped); CS high either way.
+    #[inline(always)]
+    pub(super) fn dma_finish() -> bool {
+        let ok = unsafe { r32(dch(RXC, 0x04)) == 0 } && idle();
+        unsafe {
+            if !ok {
+                w32(dch(RXC, 0), 0);
+                w32(dch(TXC, 0), 0);
+                let _ = r32(SPI_DATA);
+            }
+        }
+        spin(CS_HOLD);
+        set(GPIOD, CS, true);
+        spin(CS_SETUP); // CS high before any next frame
+        ok
+    }
+
+    /// CKPH for the next bytes (SPI2 idle; SCK idle low in both: no edge).
+    #[inline(always)]
+    fn cpha(on: bool) {
+        unsafe {
+            let c = r32(SPI_CTL0);
+            let c = if on { c | 1 } else { c & !1 };
+            w32(SPI_CTL0, c & !CTL0_SPIEN);
+            w32(SPI_CTL0, c | CTL0_SPIEN);
+        }
+    }
+
     fn end(ok: bool) -> bool {
+        if unsafe { r32(SPI_CTL0) } & 1 != 0 {
+            cpha(false);
+        }
         spin(CS_HOLD);
         set(GPIOD, CS, true);
         spin(CS_IDLE);
