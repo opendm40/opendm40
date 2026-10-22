@@ -84,11 +84,12 @@ def parse(lines):
         elif re.match(r'(bl|blx|b)(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)?(\.w)?$', op):
             # bl / b and their conditional forms (an IT block's `bllo`, a
             # conditional tail call `bne.w`).
+            # A call / tail call targets a function's first instruction;
+            # a target inside another function (`<foo+0x34a>`) is not one:
+            # it is a disassembled literal / padding after a return.
             t = re.search(r'<(.*)>', args)
-            if t:
-                base = re.sub(r'\+0x[0-9a-f]+$', '', t.group(1))
-                if base != cur:
-                    f['calls'].add(base)
+            if t and not re.search(r'\+0x[0-9a-f]+$', t.group(1)) and t.group(1) != cur:
+                f['calls'].add(t.group(1))
     return funcs
 
 

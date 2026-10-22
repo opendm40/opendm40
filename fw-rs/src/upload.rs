@@ -326,7 +326,7 @@ fn end_inner(dev: &mut dyn BlockDevice) -> R<(u32, u32)> {
     if !c != u.crc {
         return Err("Verify failed");
     }
-    link_and_enter(dev, &v, &u.cl[..u.ncl], u.size)?;
+    link_and_enter(dev, &v, &u.cl[..u.ncl], u.size, &NAME, 0x20)?;
     #[cfg(feature = "vdisk")]
     crate::dlog::set_stale();
     Ok((u.size, u.crc))
@@ -351,16 +351,31 @@ pub fn commit_on(dev: &mut dyn BlockDevice, cl: &[u16], size: u32) -> R<()> {
     if v.spc != 1 {
         return Err(E_IO); // one 4 KiB block per cluster (the stock disk)
     }
-    let r = link_and_enter(dev, &v, cl, size);
+    let r = link_and_enter(dev, &v, cl, size, &NAME, 0x20);
     #[cfg(feature = "vdisk")]
     crate::dlog::set_stale();
     r
 }
 
+/// A file of the free clusters `cl` (already written, any order) in the
+/// root: the chain, then the entry `name` (`attr`). vwrite.rs parks a host
+/// session's data this way (hidden system temp files).
+pub(crate) fn link_named(dev: &mut dyn BlockDevice, cl: &[u16], size: u32, name: &[u8; 11], attr: u8) -> R<()> {
+    let tmp = &mut calbackup::scratch()[2];
+    if !dev.read_block(0, tmp) {
+        return Err(E_IO);
+    }
+    let v = parse_bpb(&tmp[..], dev.block_count()).ok_or(E_IO)?;
+    if v.spc != 1 || cl.is_empty() {
+        return Err(E_IO);
+    }
+    link_and_enter(dev, &v, cl, size, name, attr)
+}
+
 /// The chain `cl` in every FAT copy (FAT 1 first; per copy one write per
 /// touched block, fewer when the clusters ascend), then the root entry
-/// DM40FW.BIN of `size` bytes.
-fn link_and_enter(dev: &mut dyn BlockDevice, v: &crate::fatren::Vol, cl: &[u16], size: u32) -> R<()> {
+/// `name` (`attr`) of `size` bytes.
+fn link_and_enter(dev: &mut dyn BlockDevice, v: &crate::fatren::Vol, cl: &[u16], size: u32, name: &[u8; 11], attr: u8) -> R<()> {
     let [buf, fat, tmp] = calbackup::scratch();
     for k in 0..v.nfats {
         let mut i = 0;
@@ -393,8 +408,8 @@ fn link_and_enter(dev: &mut dyn BlockDevice, v: &crate::fatren::Vol, cl: &[u16],
     let o = ((slot % (BLK as u32 / 32)) * 32) as usize;
     let e = &mut buf[o..o + 32];
     e.fill(0);
-    e[..11].copy_from_slice(&NAME);
-    e[11] = 0x20; // archive
+    e[..11].copy_from_slice(name);
+    e[11] = attr;
     for d in [0x10, 0x12, 0x18] {
         e[d..d + 2].copy_from_slice(&DATE.to_le_bytes());
     }
