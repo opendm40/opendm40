@@ -110,7 +110,7 @@ Stock: `bt_meas_v2_6.h`. fw-rs: `bt.rs` (+ `power.rs` for the status it should r
 | cmd 09 measurement reply (fmt + values) | PARTIAL | Encoding in `encode()` `bt.rs:183` matches format-byte rules incl. continuity 0xFFF0 bit 7 and diode value-3. BUT see flags row. |
 | **Flags byte (bit0-2 battery, bit3 charge, bit6 lock)** | PARTIAL | `bt.rs:285` hardcodes `... | 5` (battery always level 5) and never sets charging (bit 3) or key-lock (bit 6). `power.rs` computes real `bars`/`charging()` and `app.rs` tracks `locked`, but none is passed into `Bt::serve`. Reports HOLD (bit7) and REL (bit5) correctly. |
 | **Startup AT init (SBNDM40A/SLED0/RESET)** | MISSING | Stock configures the module name/LED on first BT-on (`bt_meas_v2_6.h` §"AT commands sent without a request"). fw-rs only handles set/get-name requests; it assumes the module is already configured. |
-| PC14 "connected" / PC0 power control | PARTIAL | `power.rs:115` reads PC14; stock also pulses PC0 (module power/reset). fw-rs does not manage PC0. |
+| PC14 "connected" / PC0 power control | MATCH | `power.rs` reads PC14; `Bt::power` drives PC0 low (module on) while Bluetooth is ON and high when OFF, plus the stock's 100 ms high pulse after a successful cmd 07. Until 2026-10-22 native fw-rs left PC0 high from `board::init` (the stock boot level): the module stayed off and the meter was unreachable over BT. Deviation: stock powers the module only on its meter page, fw-rs on every view (UF-36). |
 | Temperature F in reply = 1.82 (stock bug) | DEVIATION | fw-rs uses 1.8 for the LCD; if the BT path reuses that, the phone app will read a slightly different F than stock. Confirm the BT value matches whatever the app expects. |
 
 ---

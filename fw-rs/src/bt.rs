@@ -37,6 +37,16 @@ const GPIOA: u32 = 0x4002_0000;
 /// `power::Power::bt_connected`, repeated here because main.rs does not pass
 /// `Power` to `init_module`).
 const GPIOC_IDR: u32 = 0x4002_0800 + 0x10;
+/// GPIOC bit set/reset register: PC0 = BT module power (bt_meas_v2_6.h
+/// section 1: low at the stock BT UART init, high when the meter page is
+/// left; high = off). board::init leaves it high (as the stock boot); `power`
+/// drives it.
+const GPIOC_BOP: u32 = 0x4002_0800 + 0x18;
+/// After the module is powered: no AT init until then (it needs a module
+/// that takes AT; no host can be connected before it is up).
+const BOOT_MS: u64 = 1000;
+/// Stock: PC0 high 100 ms after a successful cmd 07 (module restart).
+const PULSE_MS: u64 = 100;
 const RCU_APB1EN: u32 = 0x4002_3840;
 const UART4: u32 = 0x4000_4C00;
 const STAT: u32 = UART4 + 0x00;
@@ -189,6 +199,11 @@ pub struct Bt {
     pub tx_dropped: u32,
     /// One-shot module AT init done this power-on (bt_meas_v2_6.h, FUN_0800d848).
     inited: bool,
+    /// PC0 low (module powered), and since when (own ms).
+    powered: bool,
+    on_at: u64,
+    /// cmd 07 restart pulse: PC0 high from `.0` to `.1` (own ms).
+    pulse: Option<(u64, u64)>,
 }
 
 const CYC_PER_MS: u32 = HCLK_HZ / 1000;
@@ -256,6 +271,30 @@ impl Bt {
             t_ms: 0,
             tx_dropped: 0,
             inited: false,
+            powered: false,
+            on_at: 0,
+            pulse: None,
+        }
+    }
+
+    /// Module power from the Bluetooth setting (call every main-loop pass;
+    /// writes PC0 only on a change). The stock powers the module only while
+    /// BT is on (and only on its meter page; fw-rs serves BT on every view).
+    /// Native fw-rs left PC0 high from board::init: the module stayed off and
+    /// the meter was unreachable (Host is down, no inquiry / advertising).
+    pub fn power(&mut self, on: bool) {
+        let now = self.ms();
+        if self.pulse.is_some_and(|(_, end)| now >= end) {
+            self.pulse = None;
+        }
+        let on = on && !self.pulse.is_some_and(|(start, _)| now >= start);
+        if on == self.powered {
+            return;
+        }
+        self.powered = on;
+        unsafe { w32(GPIOC_BOP, if on { 1 << 16 } else { 1 }) };
+        if on {
+            self.on_at = now;
         }
     }
 
@@ -371,7 +410,8 @@ impl Bt {
     pub fn poll(&mut self) -> Option<Frame> {
         self.pump();
         let now = self.ms();
-        let up = unsafe { r32(GPIOC_IDR) } & (1 << 14) != 0;
+        // PC14 means nothing while the module is off.
+        let up = self.powered && unsafe { r32(GPIOC_IDR) } & (1 << 14) != 0;
         if up != self.link {
             // New connection or a drop: no partial request survives it.
             self.link = up;
@@ -507,9 +547,9 @@ impl Bt {
     /// "DM40A"/"B"/"C" by model, and on an "OK" answer set the LED mode and
     /// reset the module. The stock persists a "done" flag (settings 0x115 bit 7)
     /// so it runs once ever; we have no such store, so `inited` runs it once per
-    /// power-on. The small startup delay keeps the first tick from consuming the
-    /// attempt before the module is ready to take AT (judgment call, not from
-    /// the header).
+    /// power-on. It waits BOOT_MS after the module is powered (`power`), so the
+    /// attempt is not spent before the module is ready to take AT (judgment
+    /// call, not from the header).
     ///
     /// Not while a phone is connected (PC14 high): the module is then in
     /// transparent mode, so the AT text would reach the phone app as data,
@@ -518,7 +558,7 @@ impl Bt {
     /// caller must also not call this during a data-logger session (it blocks
     /// the main loop for ~150 ms).
     pub fn init_module(&mut self, clk: &mut Clock, model: u8) {
-        if self.inited || clk.now_ms() < 1000 {
+        if self.inited || !self.powered || self.ms() < self.on_at + BOOT_MS {
             return;
         }
         if unsafe { r32(GPIOC_IDR) } & (1 << 14) != 0 {
@@ -595,6 +635,13 @@ impl Bt {
                 let n = self.at_answer(clk, 300, &mut a);
                 let ok = a[..n].windows(2).any(|w| w == b"OK");
                 self.reply(7, &[!ok as u8], false);
+                if ok {
+                    // Stock: PC0 high 100 ms after the reply (module restart,
+                    // the new name takes effect). `power` runs the pulse; the
+                    // reply (7 bytes, < 1 ms) is on the wire long before.
+                    let t = self.ms() + 20;
+                    self.pulse = Some((t, t + PULSE_MS));
+                }
             }
             0x08 => {
                 self.at(b"AT+CBN\r\n");

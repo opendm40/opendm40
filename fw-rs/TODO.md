@@ -748,7 +748,17 @@ Firmware:
       Emulator ad2streamtest +-100 ppm (default, no :dma) + wavetest PASS.
 - [ ] Device: decision #7 sharing matrix, BT part: 38400 for 15 min with BT connected (phone or host SPP),
       lost / bad 0, BT answers after the stream. Not run on a239aa6: the host got "Host is down" from the
-      meter's SPP address for the whole session (11.11).
+      meter's SPP address for the whole session (11.11). Cause: the next item.
+- [x] BT module power (PC0): native fw-rs (since e3a457d) left PC0 high from board::init, the stock boot
+      level = module off, and never lowered it (the stock does at its BT UART init); the RAM-loaded builds
+      had inherited a powered module from the stock app. bt.rs `Bt::power` now follows the Bluetooth setting
+      (low = on, high = off), waits 1 s after power-on before the AT init, pulses PC0 high
+      100 ms after a successful cmd 07 (stock); the status-bar BT glyph needs Bluetooth ON (PC14 is
+      meaningless with the module off). Emulator BtModule models PC0 (on only while driven low; a host
+      connect waits for power, else refused): powtest bt FAIL on the old image, OK fixed; modetest fwrs dcv/acv OK; stock dcv
+      OK (the stock's PC0 handling passes the model). (verify on device: BT glyph off with no host; the
+      classic XX:XX:XX:XX:XX:XX answers `dm40scpi.py --bt info`; then the pending BT checks: doc 3.13 power
+      meter list, decision #7 BT part, phone app (BLE "DM40A"))
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
       decided: see docs/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
       revisit with decision #3's request queue)
