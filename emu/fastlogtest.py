@@ -8,9 +8,9 @@ times, virtual time): the sustainable rate into the flash per rung.
 
 Per flash profile (--profiles: typ = tPP 0.4 ms, tSE 45 ms, tBE64 150 ms;
 max = 3 ms, 400 ms, 2 s; datasheet W25Q128JV) and per session (--sessions:
-AD2 rates in AC V, AD1 rates in DC V: 640 = OSR 0 chop off, 320 / 160 /
-80 / 40 = OSR 0 / 1 / 2 / 3 chopped; AD1 160 .. 640 S/s run on the stream
-ISR and must lose nothing, with the INTF race applied to AD1F too):
+AD2 rates in AC V, AD1 rates in DC V: 640 / 320 / 160 = OSR 0 / 1 / 2
+unchopped (the stream ISR: must lose nothing), 80 / 40 = OSR 2 / 3 chopped
+(the main-loop sampler); the INTF race applied to AD1F too):
   LOG:DEST DISK, LOG:DURation, LOG:STATe ON; LOG:DISK? polled until the
   session ends; the Prep time (DBG:PING? uptime), LOG:COUNt? (overwritten =
   the ring was full: the disk did not keep up), the file over MMEM:DATA?
@@ -185,10 +185,11 @@ def session(q, src, rate, profile):
     else:
         q('CONF:VOLT:DC')
         q('LOG:SOURce AD1')
-        # 640: OSR 256 unchopped; 320 / 160 / 80 / 40: OSR 256 << k chopped.
-        osr = {640: 0, 320: 0, 160: 1, 80: 2, 40: 3}[rate]
+        # 640 / 320 / 160: OSR 256 / 512 / 1024 unchopped (the stream ISR);
+        # 80 / 40: OSR 1024 / 2048 chopped (the main-loop sampler).
+        osr, chop = {640: (0, 'OFF'), 320: (1, 'OFF'), 160: (2, 'OFF'), 80: (2, 'ON'), 40: (3, 'ON')}[rate]
         q('LOG:OSR %d' % osr)
-        q('LOG:CHOP %s' % ('OFF' if rate == 640 else 'ON'))
+        q('LOG:CHOP %s' % chop)
     time.sleep(3)
     q('LOG:DEST DISK')
     q('LOG:DURation %d' % A.dur)

@@ -229,7 +229,7 @@ pub fn isr_read(reg: u8, buf: &mut [u8]) -> bool {
 /// (20 ns), the 16-bit ARR up to 1.31 ms: the ISR sets every interval
 /// itself (ARPE = 0, `set_interval`), phase-locked to the chip's conversion
 /// grid (src/ad2pll.rs; 1200 .. 38400 S/s, intervals 4 .. 833 us). The
-/// AD1 stream (160 .. 640 S/s, logger.rs `isr`) runs the same tick with
+/// AD1 stream (unchopped 160 .. 640 S/s, logger.rs `isr`) runs the same tick with
 /// PSC 4 k - 1 (k = 2 / 4 / 8: 40 / 80 / 160 ns counts, a 1.56 / 3.1 / 6.25
 /// ms period = 39 062 counts).
 #[cfg(feature = "ad2-isr")]

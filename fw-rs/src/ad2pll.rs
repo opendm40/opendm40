@@ -47,6 +47,9 @@ pub const NP: u8 = 4;
 /// Typical entry latency, counts (1 us): part of the data frame's slot.
 pub const LAT0: u32 = 50;
 
+/// Probes after which a phase step of kp_max / 4 counts as locked (`result`).
+const LOCK_PROBES: u32 = 64;
+
 /// Consecutive probe results of one sign after which the phase step doubles
 /// again (a large frequency error, or a phase jump: re-acquisition).
 const RUN_GEAR_UP: u32 = 8;
@@ -267,7 +270,15 @@ impl Pll {
         } else {
             if self.last_s != 0 {
                 self.kp = (self.kp / 2).max(self.kp_min);
-                if self.kp == self.kp_min {
+                // Locked: the phase step at its minimum, or (after
+                // LOCK_PROBES probes) at most kp_max / 4 = P / 256: a dither
+                // far inside the data frame's margin. Where the B entry's
+                // jitter exceeds kp_min, the results are a coin toss around
+                // the edge and runs of RUN_GEAR_UP double the step now and
+                // then: kp_min alone was a race the gated (DMA) stream
+                // could lose for good (emulator, 19200 S/s: 3 of 9 sessions
+                // never locked, so never took a sample).
+                if self.kp == self.kp_min || (self.probes >= LOCK_PROBES && self.kp <= self.kp_max / 4) {
                     self.locked = true;
                 }
             }

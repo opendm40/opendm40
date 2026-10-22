@@ -667,6 +667,18 @@ fn at_cluster(t: &Tab, c: u32) -> Option<&VF> {
 /// The CSV generator of the last DLG read (key: SPI start, size), ~0.7 KiB
 /// of .bss; a BMP's chain cursor likewise.
 static mut CSV_CUR: dlog::Slot<(u16, u32)> = dlog::Slot::new();
+
+#[inline(always)]
+fn rd_cyc() -> u32 {
+    #[cfg(target_os = "none")]
+    return unsafe { crate::mmio::r32(0xE000_1004) };
+    #[cfg(not(target_os = "none"))]
+    return 0;
+}
+
+/// Read-path statistics (DBG:VDISK:RD?): read_block calls, their cycles
+/// (total / 1024, max), CSV generator opens.
+pub static RD: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic::AtomicU32::new(0) }; 4];
 static mut BMP_KEY: (u16, u32) = (0, 0);
 static mut BMP_CUR: core::mem::MaybeUninit<FatFile<FnRaw>> = core::mem::MaybeUninit::uninit();
 
@@ -696,6 +708,7 @@ fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
     }
     let cur = unsafe { &mut *core::ptr::addr_of_mut!(CSV_CUR) };
     let open = || {
+        RD[3].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let (d, g) = geo()?;
         Gen::open(FatFile::new(d, g, e.src as u32, e.ssize), e.ssize)
     };
@@ -710,32 +723,66 @@ fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
 pub struct VDisk;
 
 impl BlockDevice for VDisk {
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn present(&self) -> bool {
         state().is_some()
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn block_size(&self) -> u32 {
         BS as u32
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn block_count(&self) -> u32 {
         TOTAL
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn read_only(&self) -> bool {
         crate::vwrite::read_only()
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn gates_writes(&self) -> bool {
         true
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn write_error(&self) -> u8 {
         crate::vwrite::last_error()
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn product(&self) -> &'static [u8; 16] {
         b"DM40 files      "
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn media_change_immediate(&self) -> bool {
         true
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool {
+        let t0 = rd_cyc();
+        let ok = self.read_block_in(lba, buf);
+        let dt = rd_cyc().wrapping_sub(t0);
+        use core::sync::atomic::Ordering::Relaxed;
+        RD[0].fetch_add(1, Relaxed);
+        RD[1].fetch_add(dt >> 10, Relaxed);
+        RD[2].fetch_max(dt, Relaxed);
+        ok
+    }
+    #[inline(never)] // .cold (link-native.x): host writes only, not inlined into run
+    fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool {
+        if state().is_none() || lba >= TOTAL || buf.len() < BS {
+            return false;
+        }
+        crate::vwrite::write(lba, &buf[..BS])
+    }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+    fn take_media_changed(&mut self) -> bool {
+        CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl VDisk {
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+    #[inline(always)]
+    fn read_block_in(&mut self, lba: u32, buf: &mut [u8]) -> bool {
         let Some(st) = state() else {
             return false;
         };
@@ -754,16 +801,6 @@ impl BlockDevice for VDisk {
             data_sector(st, lba - DATA_START, buf);
         }
         true
-    }
-    #[inline(never)] // .cold (link-native.x): host writes only, not inlined into run
-    fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool {
-        if state().is_none() || lba >= TOTAL || buf.len() < BS {
-            return false;
-        }
-        crate::vwrite::write(lba, &buf[..BS])
-    }
-    fn take_media_changed(&mut self) -> bool {
-        CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -843,6 +880,7 @@ fn fat_sector(st: &State, s: u32, b: &mut [u8]) {
 }
 
 /// A short directory entry.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn dirent(e: &mut [u8], name: &[u8; 11], attr: u8, start: u32, size: u32) {
     e[..11].copy_from_slice(name);
     e[11] = attr;
@@ -854,6 +892,7 @@ fn dirent(e: &mut [u8], name: &[u8; 11], attr: u8, start: u32, size: u32) {
 }
 
 /// Root entry `i` (0 = label).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn root_entry(i: usize, e: &mut [u8]) {
     match i {
         0 => {
@@ -868,6 +907,8 @@ fn root_entry(i: usize, e: &mut [u8]) {
         _ => {}
     }
 }
+
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 
 fn root_sector(s: u32, b: &mut [u8]) {
     let per = (BS / 32) as u32;
@@ -885,6 +926,7 @@ fn root_sector(s: u32, b: &mut [u8]) {
 /// Sector `s` of a one-cluster subdirectory at cluster `c`: "." / "..",
 /// then its files by slot (a slot below the high-water mark without a file
 /// = a deleted entry, 0xE5).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn dir_sector(st: &State, c: u32, s: u32, b: &mut [u8]) {
     let per = (BS / 32) as u32;
     let (lo, hi) = (s * per, s * per + per);

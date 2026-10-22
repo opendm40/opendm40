@@ -381,6 +381,7 @@ pub fn write_file(dev: &mut dyn BlockDevice, name: [u8; 11], src: &dyn Source) -
 
 /// 8.3 name `<prefix>NNN.<ext>` (prefix 1..5 upper-case chars, NNN = `n` with
 /// three digits), e.g. ("S", 7, "BMP") -> "S007    BMP" = S007.BMP.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn numbered_name(prefix: &[u8], n: u16, ext: &[u8; 3]) -> [u8; 11] {
     let mut name = [b' '; 11];
     let k = prefix.len().min(5);
