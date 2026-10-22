@@ -58,7 +58,8 @@ def main():
                     print('%-7s %5.2f V state %d: n %d mean %12.1f sd %7.1f%s' % (
                         NAMES[item], v, st, d['n'], d['mean'], d['sd'], ' TIMEOUT' if d['timeout'] else ''), flush=True)
     finally:
-        try:
+        try:  # the range back to AUTO: CONF of the function in force is a no-op
+            link.query('CONF:VOLT:AC')
             link.query('CONF:VOLT:DC')
         except Exception:
             pass

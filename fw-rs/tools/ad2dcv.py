@@ -168,7 +168,8 @@ def main():
                               d['b_ad2_n'], d['c_ad2'], d['c_sd'], d['c_n'], d['d_ad2'], d['d_sd'], d['timeouts'], dt),
                           flush=True)
     finally:
-        try:
+        try:  # the range back to AUTO: CONF of the function in force is a no-op
+            link.query('CONF:VOLT:AC')
             link.query('CONF:VOLT:DC')
         except Exception:
             pass
