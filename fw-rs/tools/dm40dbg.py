@@ -472,7 +472,10 @@ def cmd_update(ln, wait, expect):
                  '"Flash error" = the marker did not read back as zero (nothing changed);\n'
                  '"Undefined header" = an fw-rs build without DBG:UPDATE.'
                  % (r.decode(errors='replace').strip() if r else err))
-    os.close(ln.fd)
+    try:
+        os.close(ln.fd)
+    except OSError:
+        pass  # usbtmc's flush on close fails with ENODEV once the device is gone
     print('DBG:UPDATE: marker zeroed, device reset; the vendor loader installs the dm40*.bin.')
     if not wait:
         print('Wait for fw-rs to re-enumerate (1209:0001), then: dm40dbg.py boot --expect FILE')
