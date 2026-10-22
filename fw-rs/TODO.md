@@ -971,6 +971,15 @@ Firmware:
             and a CSV recording during a cp (staging waits / busy retries); Windows Explorer (System
             Volume Information, delete, copy) and macOS Finder (.fseventsd, .Trashes, ._ files): untested,
             expected per docs/native-boot.md "Host OS notes".
+- [ ] A-jack protection hybrid (owner 2026-10-22): non-current modes keep the stock resting shunt state (PE0 = PE1 = 0,
+      ~48 ohm A-COM: sensitive A-JACK from ~0.44 mA); when the sentinel measures a current that would overheat the
+      47.5 ohm resistor (owner: package looks like 2512 / ~2506 -> assume 1 W, derate to 0.5 W continuous: > ~100 mA for
+      > 0.5 s, or > ~300 mA (4.3 W) at once) switch to the 10 mohm shunt (PE0 = 1): a weak source then flows harmlessly,
+      a stiff one blows the 10 A fuse instead of burning the resistor / MOSFETs (30 V parts). Latch with a red alert +
+      beep until the user picks a function/range and the current is gone; measure the current on the 10 mohm path
+      while latched (AD1/AD2 on PB2) to know when it is safe to return. >30 V on A-COM (mains) cannot be protected by
+      switching (MOSFET breakdown first); document. Doc: power-meter-and-misconnect.md section 4 (update the old
+      "do not auto-switch MOSFETs in V modes" note).
 Emulator (emu/):
 - [ ] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
       use per function (from the rows / mux selections: e.g. which PA tap, SENSE, PB0..PB7, FB/RLU), not "the
