@@ -943,6 +943,12 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
         }
     }
     ok_and_limits_buttons();
+    if b == Button::Amp {
+        // Fuse check (doc 4.3): the free slot between Hold/Limits and OK.
+        let r = rect(162, 240, 153, 38);
+        sf::rbox(r, 6, 0x2966, BG);
+        sf::glyphs(sf::TEXT22, r, "Fuse check", STATUS_FG, 0x2966, 8, 0);
+    }
 }
 
 /// Range page note line (`range_page`): rows 142..177, under the second
@@ -982,7 +988,8 @@ pub fn wave_hit(x: u16, y: u16) -> bool {
 pub const OHM_VARS: [&str; 2] = ["Normal", "Low current ON"];
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
-/// Hold/Limits); ohm: Err(0 / 1) = the OHM_VARS buttons.
+/// Hold/Limits, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
+/// buttons.
 pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
@@ -1003,6 +1010,9 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     }
     if (240..278).contains(&y) && (8..158).contains(&x) {
         return Some(Err(4));
+    }
+    if (240..278).contains(&y) && (162..315).contains(&x) && b == Button::Amp {
+        return Some(Err(5));
     }
     None
 }
@@ -2158,8 +2168,8 @@ pub const HELP: [(&str, [(&str, &str); 8]); 5] = [
             ("Swipe down (DMM)", "Same settings"),
             ("While recording", "No auto power-off"),
             ("Backlight", "Still dims (battery)"),
-            ("A-JACK / LIVE?", "Alternate with HOLD"),
-            ("V-JACK?", "Hint, below HOLD"),
+            ("A-JACK LIVE? OVLD", "Alternate with HOLD"),
+            ("V-JACK? DC? AC?", "Hints, below HOLD"),
             ("Jack alerts", "Settings 3/3"),
         ],
     ),

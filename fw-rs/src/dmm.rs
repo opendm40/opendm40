@@ -654,15 +654,38 @@ pub struct Dmm {
     pub sent: Sentinel,
     sent_mode: u8,
     r29: u8,
+    /// Last peak-hold harvest in `poll` (frequency, AD2 kinds), ms.
+    pk_t: u64,
+    /// AC V with the DC? alternation: ENPKH back on at this time (ms; 0 =
+    /// none pending): the AD1 conversion in flight at an input switch must
+    /// not reach the hold.
+    pkh_due: u64,
     live: bool,
     /// OVERLOAD latch (doc 4.3 / 4.7, sentinel::overload_trips): None = not
     /// in force.
     ovl: Option<Ovl>,
     /// Time of the last timed OVERLOAD release (None: none yet).
     ovl_rel_t: Option<u64>,
+    /// Fuse check in progress (`fuse_start`) and the last result.
+    fuse_job: Option<FuseJob>,
+    fuse_res: sentinel::FuseRes,
     /// Power meter state and settings (powermeter.rs).
     pub pw: &'static mut Pw,
 }
+
+/// Fuse check (`Dmm::fuse_start`): what to go back to, start time, ohm
+/// readings seen.
+#[derive(Clone, Copy)]
+struct FuseJob {
+    func: u8,
+    back: Option<(u8, i8)>,
+    t0: u64,
+    n: u8,
+}
+
+/// Fuse check: ohm readings taken (the last one decides) and the time limit.
+const FUSE_READINGS: u8 = 3;
+const FUSE_TIMEOUT_MS: u64 = 8000;
 
 /// OVERLOAD latch: the uA / mA shunt overloaded and the meter went to the
 /// 10 A shunt. Shunts `barred` and above (sentinel::shunt_of numbering: 1
@@ -834,9 +857,13 @@ impl Dmm {
             sent: Sentinel::new(),
             sent_mode: 255,
             r29: 0,
+            pk_t: 0,
+            pkh_due: 0,
             live: false,
             ovl: None,
             ovl_rel_t: None,
+            fuse_job: None,
+            fuse_res: sentinel::FuseRes::Idle,
             pw: pw::pw_static(),
         }
     }
@@ -1018,13 +1045,33 @@ impl Dmm {
         pc7(m == 14);
         // Misconnect sentinel: the stock row with the idle comparator / AD1
         // pointed at the A-jack shunt (or the V tap in DC A), sentinel.rs.
-        let (row, kind) = sentinel::sentinel_row(m, r as u8, self.acdc, self.sent.mask, cfg);
-        hy::configure(&row);
+        let mask = if self.fuse_job.is_some() { 0 } else { self.sent.mask };
+        let (row, kind) = sentinel::sentinel_row(m, r as u8, self.acdc, mask, cfg);
+        if sentinel::ad1_last(kind, &row) {
+            let mut c = row;
+            c[3] &= !0x80;
+            hy::configure(&c);
+            hy::write(0x23, &[row[3]]);
+        } else {
+            hy::configure(&row);
+        }
         self.r22 = row[2];
         self.r29 = row[9];
-        let fresh = self.sent_mode != (m | (self.acdc as u8) << 7);
-        self.sent_mode = m | (self.acdc as u8) << 7;
+        // The sentinel's history belongs to the function (AC+DC: both
+        // phases, `func`), so a phase switch or a range change keeps it.
+        let key = self.func();
+        let fresh = self.sent_mode != key;
+        self.sent_mode = key;
+        self.pk_t = clk.now_ms();
+        self.pkh_due = 0;
         self.sent.configured(kind, clk.now_ms(), fresh);
+        // DC? / AC? hints (doc 4.4): AC V alternates AD1 between PB1 - PB3
+        // and the V tap, DC V 6 V alternates the comparator between PB1 and
+        // SENSE, one 100 ms window each (`poll`, `poll_ac`).
+        self.sent.alt = self.sent.mask & sentinel::M_HINTS != 0
+            && sentinel::variant() & sentinel::VAR_HINTS_OFF == 0
+            && !self.acdc
+            && matches!((m, kind, r), (0, Kind::PeakA, _) | (1, Kind::CmpA, 0));
         if m == 15 && self.t_sensor != 0 {
             // Resistive sensor: the stock in-range ohm OSR (32768) for a quiet
             // reading; the range is fixed, so no fast open-circuit switching.
@@ -1420,6 +1467,77 @@ impl Dmm {
     ///   ohm: again toggles m+8 (range and manual kept); from elsewhere r6 auto.
     ///   cap: from elsewhere r0 auto; again does nothing.
     ///   cont/diode: diode first, then 11 <-> 12. Hz/temp: 14 first, 14 <-> 15.
+    // ---------------------------------------------------------- fuse check
+
+    /// Start the fuse check (doc 4.3 / 4.7; SYST:FUSE:TEST, the Current
+    /// Settings page): ohm on the 600 ohm range, manual, the stock row (no
+    /// sentinel: the check drives the ohm current through the A-jack shunt
+    /// on purpose), PE = 2 as every ohm row. The function before comes back
+    /// after FUSE_READINGS readings (the power meter: re-entered, its energy
+    /// restarts; a manual DMM range: kept).
+    pub fn fuse_start(&mut self, clk: &mut Clock) {
+        let now = clk.now_ms();
+        let prev = self.fuse_job.take();
+        self.ovl_clear(now);
+        let job = match prev {
+            Some(j) => FuseJob { t0: now, n: 0, ..j },
+            None => FuseJob {
+                func: self.func(),
+                back: (self.manual && !self.acdc && !self.pw.on).then_some((self.mode, self.range)),
+                t0: now,
+                n: 0,
+            },
+        };
+        self.acdc = false;
+        self.fuse_job = Some(job);
+        self.fuse_res = sentinel::FuseRes::Busy;
+        self.manual = true;
+        self.set(clk, 10, 1, 600);
+    }
+
+    /// Abort a running check (the dialog's Cancel / a key): back to the
+    /// function before, the result Idle.
+    pub fn fuse_cancel(&mut self, clk: &mut Clock) {
+        if let Some(j) = self.fuse_job.take() {
+            self.fuse_res = sentinel::FuseRes::Idle;
+            self.fuse_restore(clk, j);
+        }
+    }
+
+    pub fn fuse_state(&self) -> sentinel::FuseRes {
+        self.fuse_res
+    }
+
+    fn fuse_restore(&mut self, clk: &mut Clock, j: FuseJob) {
+        self.select(clk, j.func);
+        if let Some((m, r)) = j.back {
+            self.manual = true;
+            self.set(clk, m, r, 450);
+        }
+    }
+
+    /// Per poll while the check runs: count the ohm readings, decide on the
+    /// last one, or give up after FUSE_TIMEOUT_MS.
+    fn fuse_step(&mut self, clk: &mut Clock, now: u64, rd: Option<&Reading>) {
+        let Some(mut j) = self.fuse_job else { return };
+        let res = match rd {
+            Some(r) if self.mode == 10 => {
+                j.n += 1;
+                (j.n >= FUSE_READINGS).then(|| sentinel::fuse_verdict(r.si, r.main.ol))
+            }
+            _ => None,
+        };
+        let res = res.or_else(|| (now.saturating_sub(j.t0) > FUSE_TIMEOUT_MS).then_some(sentinel::FuseRes::NoReading));
+        match res {
+            Some(v) => {
+                self.fuse_job = None;
+                self.fuse_res = v;
+                self.fuse_restore(clk, j);
+            }
+            None => self.fuse_job = Some(j),
+        }
+    }
+
     // ------------------------------------------------------------ OVERLOAD
 
     /// The OVERLOAD latch is in force (`Ovl`).
@@ -1433,10 +1551,14 @@ impl Dmm {
     }
 
     /// A user range / function / AUTO choice ends the latch (the caller
-    /// applies the new choice).
+    /// applies the new choice) and drops a running fuse check (no restore:
+    /// the user chose something else).
     fn ovl_clear(&mut self, now: u64) {
         if self.ovl.take().is_some() {
             self.sent.set_overload(now, false);
+        }
+        if self.fuse_job.take().is_some() {
+            self.fuse_res = sentinel::FuseRes::Idle;
         }
     }
 
@@ -1840,18 +1962,47 @@ impl Dmm {
         // DCV / DCmV / DCA cases, before its settle check (ACDC_FREQ_RESTART;
         // the ACA phase does it after each result, see poll_ac).
         if ACDC_FREQ_RESTART && self.acdc && matches!(self.mode, 0 | 1 | 3 | 7..=9) {
-            self.freq_secondary(now, 0xF0);
+            let src = self.acdc_src();
+            self.freq_secondary(now, src);
         }
+        let cmp = matches!(self.sent.kind, Kind::CmpA | Kind::CmpV);
         if now < self.deadline {
+            // AC+DC: the comparator watches through the phase settles too
+            // (600..900 ms each; A-JACK clears 1 s after the last hit).
+            if cmp && self.acdc && !self.suspended {
+                self.sent.sample_cmp(now, hy::read1(0x14));
+            }
             return None;
         }
         self.t_poll = now;
         self.avg_n = 0;
-        if matches!(self.sent.kind, Kind::CmpA | Kind::CmpV) {
+        if cmp {
             // One byte (CTSTA): CMPHO / CMPLO of the comparator on PB1 /
             // the V tap, on every poll so an AC current is caught whatever
             // the poll rhythm (OR over 100 ms windows).
-            self.sent.sample_cmp(now, hy::read1(0x14));
+            if self.sent.sample_cmp(now, hy::read1(0x14)) && self.sent.alt {
+                // AC? alternation: the next window's node; the first CTSTA
+                // after the switch is dropped (a bit of the other node).
+                hy::write(0x20, &[if self.sent.alt_v { sentinel::R20_SENSE } else { sentinel::R20_PB1 }]);
+                let _ = hy::read1(0x14);
+            }
+        }
+        if self.pkh_due != 0 && now >= self.pkh_due {
+            self.pkh_due = 0;
+            hy::write(0x29, &[self.r29]);
+        }
+        if self.peak_in_poll() && now.saturating_sub(self.pk_t) >= sentinel::WIN_MS {
+            // Frequency / the AD2 kinds: no AC result to bring PKHMIN /
+            // PKHMAX along; read them (6 bytes) every window and restart
+            // the hold as poll_ac does.
+            self.pk_t = now;
+            let mut b = [0u8; 6];
+            hy::read(0x0E, &mut b);
+            self.sent.sample_peak(now, hy::s24(&b[0..3]), hy::s24(&b[3..6]));
+            if PKH_RESTART {
+                hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
+                hy::write(0x29, &[self.r29]);
+            }
         }
         if self.pw.on {
             self.pw_service(clk);
@@ -1873,20 +2024,22 @@ impl Dmm {
             ema_ms(&mut self.period_ms, &mut self.t_rd, now);
             self.rd_avg_n = self.avg_n;
             match self.mode {
-                7..=9 if self.sent.kind == Kind::CmpV => {
-                    // V-JACK? precondition: |I| < 0.5 % of the range.
-                    let fs = match (self.mode, self.range) {
-                        (7, 0) => 6.0,
-                        (7, _) => 10.0,
-                        (8, 0) => 0.06,
-                        (8, _) => 0.6,
-                        (_, 0) => 600e-6,
-                        _ => 6000e-6,
-                    };
-                    self.sent.current_small(now, !rd.main.ol && rd.si.abs() < 0.005 * fs);
+                4..=9 if self.sent.kind.family() == 2 && !self.pw.on => {
+                    // V-JACK? precondition: |I| < 0.5 % of the range (AC A, AC+DC:
+                    // 5 %, above the RMS floor of the uA path: ~8.7 uA = 1.5 %
+                    // of 600 uA on the device, acdc doc 6b).
+                    let fs = sentinel::current_fs(sentinel::shunt_of(self.mode).unwrap_or(0), self.range.max(0) as u8);
+                    let k = if self.mode <= 6 || self.acdc { sentinel::AC_FLOOR_FRAC } else { 0.005 };
+                    self.sent.current_small(now, !rd.main.ol && rd.si.abs() < k * fs);
                 }
-                10..=12 if !self.acdc => self.sent.live_reading(now, self.live),
+                10..=12 if !self.acdc && self.fuse_job.is_none() => self.sent.live_reading(now, self.live),
                 _ => {}
+            }
+            if matches!(self.mode, 4..=9) && !self.pw.on {
+                // FUSE? hint: an A function at zero (doc 4.3).
+                let fs = sentinel::current_fs(sentinel::shunt_of(self.mode).unwrap_or(0), self.range.max(0) as u8);
+                let k = if self.mode <= 6 || self.acdc { sentinel::AC_FLOOR_FRAC } else { sentinel::FUSE_FRAC };
+                self.sent.fuse_reading(now, !rd.main.ol && rd.si.abs() < k * fs);
             }
             if self.ovl.is_some() {
                 let (i, ol) = match &rd.power {
@@ -1895,6 +2048,9 @@ impl Dmm {
                 };
                 self.ovl_release(clk, now, i, ol);
             }
+        }
+        if self.fuse_job.is_some() {
+            self.fuse_step(clk, now, r.as_ref());
         }
         r.map(|mut r| {
             self.seq = self.seq.wrapping_add(1);
@@ -2184,11 +2340,14 @@ impl Dmm {
         }
         let mut b = [0u8; 20];
         hy::read(hy::R_AD1, &mut b);
-        if self.sent.kind == Kind::PeakA {
-            // A-JACK on AD1's peak hold (PB1 - PB3): PKHMIN / PKHMAX came
-            // with this read; restart the hold for the next result.
+        if matches!(self.sent.kind, Kind::PeakA | Kind::PeakV) {
+            // A-JACK on AD1's peak hold (PB1 - PB3; V-JACK? in AC A: SENSE
+            // - PB5): PKHMIN / PKHMAX came with this read; restart the hold
+            // for the next result.
             self.sent.sample_peak(now, hy::s24(&b[14..17]), hy::s24(&b[17..20]));
-            if PKH_RESTART {
+            if self.sent.alt {
+                self.dc_hint_window(now);
+            } else if PKH_RESTART {
                 hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
                 hy::write(0x29, &[self.r29]);
             }
@@ -2514,6 +2673,44 @@ impl Dmm {
 
     fn freq_range(&mut self) {
         self.freq.range = freq_range_for(self.freq.f_khz, self.factor() * self.over(), self.freq.range);
+    }
+
+    /// AC V with the DC? alternation, after a harvest: a V-tap window just
+    /// ended -> the DC? condition; then AD1 to the next window's input with
+    /// the hold off, back on ~3 ms later (`pkh_due`: one 1.6 ms conversion
+    /// of mixed inputs passes unheld).
+    fn dc_hint_window(&mut self, now: u64) {
+        if let Some((mn, mx)) = self.sent.pk_v.take() {
+            // The V tap of AC V r0 / r1 is DC V r1's (K 100), r2 / r3 their
+            // own; AD1<23:5> at IG 3.6 against 1.25 V.
+            let r = self.range.clamp(0, 3) as usize;
+            let k = K_ACV[r.max(1)];
+            let vdc = (mn as f32 + mx as f32) * 0.5 * 32.0 * 1.25 / (3.6 * AD1_DIV) * k;
+            let fs = (self.factor() * DEC4[r]).min(1000.0);
+            let on = vdc.abs() > sentinel::DC_HINT_V.max(0.02 * fs) && self.f_ac < sentinel::DC_HINT_AC * vdc.abs();
+            self.sent.dc_hint(now, on);
+        }
+        hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
+        hy::write(0x24, &[if self.sent.alt_v { sentinel::R24_SENSE_PB5 } else { sentinel::R24_PB1_PB3 }]);
+        self.pkh_due = now + 3;
+    }
+
+    /// The peak-hold sentinel is harvested in `poll` (no AC result carries
+    /// it): frequency (AD1 peak) and the AD2 kinds.
+    fn peak_in_poll(&self) -> bool {
+        self.sent.kind == Kind::Ad2A || (self.sent.kind == Kind::PeakA && self.mode == 14)
+    }
+
+    /// AC+DC: R20 for the frequency counter restart of a DC phase - the
+    /// comparator stays on the sentinel's node (PB1 / SENSE; the counter
+    /// then counts that node, AC+DC shows no frequency), else the stock's
+    /// PB4 (0xF0).
+    fn acdc_src(&self) -> u8 {
+        match self.sent.kind {
+            Kind::CmpA => sentinel::R20_PB1,
+            Kind::CmpV => sentinel::R20_SENSE,
+            _ => 0xF0,
+        }
     }
 
     /// FUN_08013450 as the secondary readout in V/A modes, every 350 ms.

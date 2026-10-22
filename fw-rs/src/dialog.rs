@@ -54,12 +54,20 @@ pub enum Overlay {
     /// (`fw_install`, the power-off confirm's box and buttons); No at
     /// `until` (ms).
     FwInstall { until: u64 },
+    /// Fuse check (`fuse_check`; the Current Settings page): `stage` 0
+    /// instructions, 1 measuring, 2 the verdict; closed at `until` (ms).
+    FuseCheck { until: u64, stage: u8 },
 }
 
 impl Overlay {
     pub fn until(&self) -> u64 {
         match *self {
-            Overlay::PowerOff { until } | Overlay::Toast { until } | Overlay::PowerEntry { until } | Overlay::EnergyReset { until } | Overlay::FwInstall { until } => until,
+            Overlay::PowerOff { until }
+            | Overlay::Toast { until }
+            | Overlay::PowerEntry { until }
+            | Overlay::EnergyReset { until }
+            | Overlay::FwInstall { until }
+            | Overlay::FuseCheck { until, .. } => until,
         }
     }
 }
@@ -137,6 +145,73 @@ pub fn power_off_hit(x: u16, y: u16) -> Option<bool> {
     if inside(YES, x, y) {
         Some(true)
     } else if inside(NO, x, y) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Fuse-check dialog box (wider than the confirm: two body lines of up to
+/// ~30 characters): title bar 40, lines at +40 / +80, buttons at +130.
+pub const FBOX: (u16, u16, u16, u16) = (40, 56, 400, 192);
+pub const FLEFT: (u16, u16, u16, u16) = (56, 186, 160, 48);
+pub const FRIGHT: (u16, u16, u16, u16) = (264, 186, 160, 48);
+/// Title colours of the fuse verdicts.
+pub const FUSE_OK_BG: Color = OK_BG;
+pub const FUSE_BAD_BG: Color = ERR_BG;
+pub const FUSE_ODD_BG: Color = 0xA3C0;
+
+/// Draw the fuse-check dialog: a title on `title_bg`, two lines, the left /
+/// right buttons when given (hit test `fuse_hit`).
+pub fn fuse_check(title: &str, title_bg: Color, l1: &str, l2: &str, left: Option<&str>, right: Option<&str>) {
+    // Glyph spacing 2 as the toasts (ASCII26 letters touch at 0).
+    let b = FBOX;
+    centred_sp((b.0, b.1, b.2, 40), title, FG, title_bg, 2);
+    centred_sp((b.0, b.1 + 40, b.2, 40), l1, FG, BODY_BG, 2);
+    centred_sp((b.0, b.1 + 80, b.2, 40), l2, FG, BODY_BG, 2);
+    lcd::fill_rect(b.0, b.1 + 120, b.2, b.3 - 120, BODY_BG);
+    frame(b, FRAME);
+    for (r, t) in [(FLEFT, left), (FRIGHT, right)] {
+        if let Some(t) = t {
+            centred_sp(r, t, FG, BTN, 2);
+            frame(r, FRAME);
+        }
+    }
+}
+
+/// The fuse-check dialog of `stage` (0 instructions, 1 measuring, 2 the
+/// verdict `res`); `buf` holds the formatted resistance.
+pub fn fuse_screen(stage: u8, res: crate::sentinel::FuseRes, buf: &mut [u8; 32]) {
+    use crate::sentinel::FuseRes as F;
+    let ohm = match res {
+        F::Ok(r) | F::Odd(r) => {
+            let mut t = [0u8; 16];
+            let v = crate::dmm::format(&mut t, r, if r < 100.0 { 2 } else { 1 });
+            let mut n = 0;
+            for part in [v, " ohm, expect ~48"] {
+                let k = part.len().min(buf.len() - n);
+                buf[n..n + k].copy_from_slice(&part.as_bytes()[..k]);
+                n += k;
+            }
+            core::str::from_utf8(&buf[..n]).unwrap_or("")
+        }
+        _ => "",
+    };
+    match (stage, res) {
+        (0, _) => fuse_check("Fuse check", TITLE_BG, "Lead from V/ohm jack to A", "nothing else connected", Some("Cancel"), Some("Start")),
+        (1, _) | (_, F::Busy | F::Idle) => fuse_check("Fuse check", TITLE_BG, "Measuring ...", "expect ~48 ohm", Some("Cancel"), None),
+        (_, F::Ok(_)) => fuse_check("FUSE OK", FUSE_OK_BG, ohm, "A input path intact", Some("Again"), Some("OK")),
+        (_, F::Open) => fuse_check("FUSE OPEN", FUSE_BAD_BG, "OL: no path from V to A", "Replace: 10 A ceramic fuse", Some("Again"), Some("OK")),
+        (_, F::Odd(_)) => fuse_check("Check leads", FUSE_ODD_BG, ohm, "One lead V/ohm to A only", Some("Again"), Some("OK")),
+        (_, F::NoReading) => fuse_check("Check leads", FUSE_ODD_BG, "No ohm reading", "One lead V/ohm to A only", Some("Again"), Some("OK")),
+    }
+}
+
+/// Fuse-check hit test: Some(false) = left, Some(true) = right.
+pub fn fuse_hit(x: u16, y: u16) -> Option<bool> {
+    if inside(FRIGHT, x, y) {
+        Some(true)
+    } else if inside(FLEFT, x, y) {
         Some(false)
     } else {
         None
