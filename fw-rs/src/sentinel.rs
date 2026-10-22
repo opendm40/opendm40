@@ -783,6 +783,16 @@ impl Sentinel {
         self.decide(now);
     }
 
+    /// Power meter coupling hints (doc 3.16), per reading: `dc` = no AC
+    /// part (AC+DC: DC? "No AC: DC mode is more precise"), `ac` = an AC part
+    /// on V in DC (AC? "AC present: use AC+DC"); the DC? / AC? timing and
+    /// the hints mask.
+    pub fn pw_hints(&mut self, now: u64, dc: bool, ac: bool) {
+        self.dc.feed(now, dc, HINT_CLEAR_MS);
+        self.ac.feed(now, ac, HINT_CLEAR_MS);
+        self.decide(now);
+    }
+
     /// FUSE? condition: an A-function reading at zero (`on`) or not.
     pub fn fuse_reading(&mut self, now: u64, zero: bool) {
         self.fuse.feed(now, zero, 500);

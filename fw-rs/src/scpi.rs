@@ -132,6 +132,13 @@
 //!   POWer:BURDen <ohm>|DEFault / ?   (power meter section, 3.9) the R_path
 //!     used by both: in a DMM A function that function's shunt, else the
 //!     power meter's current range's
+//!   POWer:BURDen:STATe ON|OFF / ?   the power meter's "At load" (V - I R,
+//!     P - I^2 R; the "@load" marks): default OFF since doc 3.16 (records
+//!     from older builds load OFF too)
+//!   POWer:COUPling DC|AC|ACDC / ?   the power meter's coupling; CONF:POW
+//!     from another function starts in DC (doc 3.16): set it after CONF:POW.
+//!     FETCh:POWer:ALL? "no value" fields are +9.91E37: PF / S / Q / F in AC
+//!     below the AC floors, F whenever no frequency is measured (also DC)
 //!   STATus:QUEStionable:CONDition?   bit 9 while a red alert (AJACK,
 //!     OVERLOAD) is on, bit 1 while OVERLOAD is (SCPI CURRent)
 //!   STATus:QUEStionable[:EVENt]?   the same bits latched since the last
@@ -661,7 +668,8 @@ pub enum Pow {
     IRange(Option<Option<u8>>),
     EnergyReset,
     EnergyState(Option<bool>),
-    /// :BURDen <ohm>|DEFault (NaN) / ?, :BURDen:STATe ON|OFF / ?
+    /// :BURDen <ohm>|DEFault (NaN) / ?, :BURDen:STATe ON|OFF / ? ("At
+    /// load", default OFF, doc 3.16)
     Burden(Option<f32>),
     BurdenState(Option<bool>),
     Phase(Option<i8>),

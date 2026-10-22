@@ -30,6 +30,7 @@ ap.add_argument('names', nargs='*')
 ap.add_argument('--app', help='fw-rs native image (default: run.py builds HEAD)')
 ap.add_argument('--port', type=int, default=3381, help='USB/IP port (default 3381)')
 ap.add_argument('--list', action='store_true')
+ap.add_argument('--bt-offset', type=int, default=1000, help='BT port = --port + this (default 1000)')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
@@ -71,44 +72,44 @@ def both(*fs):
 # its samples from the next phase's start - 4.5 s to that start - 1.5 s (the
 # fw uptime lags the virtual time by ~0.5 s or more).
 SC = {
-    'mains': (['CONF:POW', 'POW:BURD:STAT OFF'], 58, [
+    'mains': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 58, [
         (0, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), ranges('6.000000E+02', '1.000000E+01')), 'resistive 230 V 1 A: PF 1, 50 Hz, 600 V / 10 A'),
         (14, 'open;pow:230@50,i=1,pf=0.5', pw(115, 0.5, 230, 1), 'PF 0.5'),
         (28, 'open;pow:230@50,i=1,ph=90', reactive(230, 1), 'reactive (90 deg): PF 0'),
         (43, 'open;pow:230@50,i=1,pf=-1', pw(-230, -1, 230, 1), 'reversed current: P < 0'),
     ]),
-    'dc': (['CONF:POW', 'POW:BURD:STAT OFF'], 50, [
+    'dc': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 50, [
         (0, 'open;vsrc:12;isrc:2', both(pw(24, 1, 12, 2), lambda d: near(d['Vdc'], 12, 0.01) and near(d['Idc'], 2, 0.01)), 'DC 12 V 2 A: 24 W (LPFs)'),
         (16, 'open;vsrc:12;isrc:-2', pw(-24, -1, 12, 2), 'DC source: -24 W'),
         (32, 'open;vsrc:5;isrc:0.4', both(pw(2.0, 1, 5, 0.4), ranges('6.000000E+00', '6.000000E-01')), 'DC 5 V 0.4 A: autorange 6 V / 600 mA'),
     ]),
-    'small': (['CONF:POW', 'POW:BURD:STAT OFF'], 44, [
+    'small': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 44, [
         (0, 'open;pow:5@50,i=0.01,pf=1', both(pw(0.05, 1, 5, 0.01), ranges('6.000000E+00', '6.000000E-02')), '5 V 10 mA: 6 V / 60 mA'),
         (22, 'open;pow:5@50,i=0.002,pf=0.8', both(pw(0.008, 0.8, 5, 0.002, rel=0.015), ranges('6.000000E+00', '6.000000E-03')), '5 V 2 mA PF 0.8: 6 mA (uA shunt)'),
     ]),
-    'burden': (['CONF:POW', 'POW:BURD 0.5'], 40, [
+    'burden': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD 0.5', 'POW:BURD:STAT ON'], 40, [
         # 5 V, 0.4 A on the mA shunt; the model's V jack is ideal, so with
         # R_path 0.5 ohm the load values are P = 2 - 0.08, V = sqrt(25 - 2 + 0.04).
         (0, 'open;vsrc:5;isrc:0.4', both(pw(1.92, 1, math.sqrt(25 - 2 * 0.5 * 2 + 0.04), 0.4, rel=0.01), lambda d: near(d['Vb'], 0.2, 0.01)), 'burden compensation 0.5 ohm'),
     ]),
-    'manual': (['CONF:POW 60,6', 'POW:BURD:STAT OFF'], 24, [
+    'manual': (['CONF:POW 60,6', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 24, [
         (0, 'open;pow:5@50,i=0.1,pf=1', both(pw(0.5, 1, 5, 0.1, rel=0.02), ranges('6.000000E+01', '6.000000E+00')), 'manual 60 V / 6 A held'),
     ]),
-    'alt': (['CONF:POW', 'POW:METH ALT'], 40, [
+    'alt': (['CONF:POW', 'POW:COUP ACDC', 'POW:METH ALT'], 40, [
         (0, 'open;pow:230@50,i=1,pf=0.5', alt(230, 1), 'fallback: S 230 VA, PF n/a'),
     ]),
-    'phasecal': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:PHAS 40'], 60, [
+    'phasecal': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF', 'POW:PHAS 40'], 60, [
         # 1 kHz, current lagging 90 deg: SPHACAL 40 makes P visible (6 deg);
         # POW:PHAS:CAL at 20 s nulls it.
         (0, 'open;pow:10@1000,i=0.1,ph=90', lambda d: abs(d['PF']) > 0.05, 'SPHACAL 40 at 1 kHz: PF off zero'),
         (20, None, lambda d: abs(d['PF']) < 0.02 and abs(d['PH']) <= 3, 'after POW:PHAS:CAL: PF ~0, SPHACAL ~0'),
     ]),
-    'energy': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:ENER:RES'], 40, [
+    'energy': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF', 'POW:ENER:RES'], 40, [
         (0, 'open;vsrc:10;isrc:1', lambda d: d['secs'] > 5 and near(d['Wh'] * 3600 / d['secs'], 10, 0.05) and near(d['VAh'] * 3600 / d['secs'], 10, 0.05), 'energy: 10 W x t'),
     ]),
     # The reset confirm answered 13 s after the long press on the energy box
     # (device check 5f14d38: the 10 s auto-cancel ate that Yes).
-    'ereset': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:ENER:RES'], 40, [
+    'ereset': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF', 'POW:ENER:RES'], 40, [
         (0, 'open;vsrc:10;isrc:1', lambda d: d['secs'] > 8, 'energy runs, the confirm up from 8 s'),
         (22, None, lambda d: d['secs'] < 20, 'Yes at 21 s (13 s after the long press) reset the energy'),
     ]),
@@ -125,10 +126,10 @@ def ring(stats, disc):
 
 
 SC.update({
-    't1-yy': (['CONF:POW', 'DBG:POW:STAT YY'], 20, [
+    't1-yy': (['CONF:POW', 'POW:COUP ACDC', 'DBG:POW:STAT YY'], 20, [
         (0, 'open;pow:230@50,i=1,pf=1', lambda d: ring({'YY'}, '0')(d) and d['ROW'].split()[20] == '8C', 'T1 hook: R34 frozen at YY, ring all YY'),
     ]),
-    't3-cycle': (['CONF:POW', 'DBG:POW:DISC 0'], 20, [
+    't3-cycle': (['CONF:POW', 'POW:COUP ACDC', 'DBG:POW:DISC 0'], 20, [
         # d = 0: every result after an R34 switch is taken; with the model's
         # mid-block mixing (powmix) the values are then off, which is what
         # the discards are for (on the device T3 measures the real cost).
@@ -154,13 +155,13 @@ def zeros(want):
 
 
 SC.update({
-    'zero': (['CONF:POW', 'POW:BURD:STAT OFF'], 66, [
+    'zero': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 66, [
         (0, 'open;powz:1', lambda d: d['V'] > 0.04 and d['I'] > 5e-6, 'device zeros, no POW:ZERO: phantom V / I'),
         (16, None, lambda d: d['V'] < 0.003 and d['I'] < 1e-6 and zeros([1080, 888, 155, 888, 155, 888, 155] + [300] * 6)(d), 'after POW:ZERO: V, I ~0'),
         (34, 'open;powz:1;vsrc:5;isrc:0.4', both(pw(2.0, 1, 5, 0.4), lambda d: near(d['Vdc'], 5, 0.002)), 'DC 5 V 0.4 A with the zeros subtracted'),
         (50, 'open;powz:1;vsrc:-5;isrc:0.4', both(pw(-2.0, -1, 5, 0.4), lambda d: near(d['Vdc'], -5, 0.002) and near(d['Idc'], 0.4, 0.002)), 'negative DC: LPF polarity, P < 0'),
     ]),
-    'vcal': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:VOLT:RANG 60'], 64, [
+    'vcal': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF', 'POW:VOLT:RANG 60'], 64, [
         (0, 'open;powvg:0.99;pow:30@50,i=0.1', lambda d: near(d['V'], 29.7, 0.002), 'Y gain 1 % low: V 29.7'),
         (12, None, lambda d: near(d['V'], 30, 0.002) and d['X']['POW:VOLT:CAL?'].startswith('OK,+6.0'), 'after POW:VOLT:CAL (AC V reference): V 30.00'),
         (26, 'open;powvg:0.98;vsrc:20', lambda d: near(d['Vdc'], 20 * 0.98 / 0.99, 0.002), 'DC, Y gain 2 % low (the AC cal of 1 % kept)'),
@@ -169,21 +170,21 @@ SC.update({
     ]),
     # Device f3aea2f: a 0..9.6 V 40 Hz square on 6 V was calibrated by its 4.8 V DC part (DC kind)
     # though its peak clips the range; the peak guard refuses it (BIG), the gain stays.
-    'vcal-clip': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:VOLT:RANG 6'], 30, [
+    'vcal-clip': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF', 'POW:VOLT:RANG 6'], 30, [
         (0, 'open;vsrc:4.8,ac=4.8,f=40,shape=square', lambda d: True, 'square 0..9.6 V on 6 V'),
         (16, None, lambda d: d['X']['POW:VOLT:CAL?'].startswith('BIG'), 'POW:VOLT:CAL refused: BIG (the peak clips 6 V)'),
     ]),
-    'freq': (['CONF:POW', 'POW:BURD:STAT OFF'], 36, [
+    'freq': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 36, [
         (0, 'open;vsrc:4.8,ac=4.8,f=40,shape=square', lambda d: near(d['F'], 40, 0.01), 'unipolar 40 Hz square (T1): f 40 Hz'),
         (18, 'open;vsrc:12;isrc:0,ac=3,f=50', lambda d: near(d['F'], 50, 0.01), 'DC voltage, AC current: f of the current (PB4)'),
     ]),
     'dcad1': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:COUP DC'], 64, [
-        (0, 'open;vsrc:12;isrc:2', both(pw(24, 1, 12, 2, rel=0.001), lambda d: d['F'] == 0 and x('POW:COUP?', 'DC')(d)), 'AD1 method: 12 V 2 A = 24.00 W'),
+        (0, 'open;vsrc:12;isrc:2', both(pw(24, 1, 12, 2, rel=0.001), lambda d: math.isnan(d['F']) and x('POW:COUP?', 'DC')(d)), 'AD1 method: 12 V 2 A = 24.00 W'),
         (16, 'open;vsrc:12;isrc:-2', pw(-24, -1, 12, 2, rel=0.001), 'reversed: -24.00 W'),
         (32, 'open;vsrc:5;isrc:0.004', both(pw(0.02, 1, 5, 0.004, rel=0.002), ranges('6.000000E+00', '6.000000E-03')), '5 V 4 mA on 6 mA'),
         (48, 'open;vsrc:5;isrc:200e-6', both(pw(1e-3, 1, 5, 200e-6, rel=0.003), ranges('6.000000E+00', '6.000000E-04')), '5 V 200 uA on 600 uA'),
     ]),
-    'dcburden': (['CONF:POW', 'POW:BURD 0.5', 'POW:COUP DC'], 30, [
+    'dcburden': (['CONF:POW', 'POW:BURD 0.5', 'POW:BURD:STAT ON', 'POW:COUP DC'], 30, [
         (0, 'open;vsrc:5;isrc:0.4', both(pw(1.92, 1, math.sqrt(25 - 2 * 0.5 * 2 + 0.04), 0.4, rel=0.002), lambda d: near(d['Vb'], 0.2, 0.01)), 'AD1 method: burden compensation 0.5 ohm'),
     ]),
     # The former AUTO coupling: POW:COUP AUTO is accepted as AC+DC (doc 3.14).
@@ -202,35 +203,67 @@ SC.update({
     ]),
     # Owner: ~3 A through A showed OVLD. I AUTO walks up across the shunts
     # with no alert (SYST:ALER? NONE in every checked sample).
-    'istep': (['CONF:POW', 'POW:BURD:STAT OFF'], 64, [
+    'istep': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 64, [
         (0, 'open;pow:230@50,i=0.01,pf=1', both(pw(2.3, 1, 230, 0.01), ranges('6.000000E+02', '6.000000E-02'), x('SYST:ALER?', 'NONE')), '10 mA: 60 mA range'),
         (16, 'open;pow:230@50,i=0.1,pf=1', both(pw(23, 1, 230, 0.1), ranges('6.000000E+02', '6.000000E-01'), x('SYST:ALER?', 'NONE')), '0.1 A: 600 mA'),
         (32, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1), ranges('6.000000E+02', '6.000000E+00'), x('SYST:ALER?', 'NONE')), '1 A: 6 A (mA shunt -> A shunt, no OVLD)'),
         (48, 'open;pow:230@50,i=3,pf=1', both(pw(690, 1, 230, 3), ranges('6.000000E+02', '6.000000E+00'), x('SYST:ALER?', 'NONE')), '3 A: 6 A, no OVLD'),
     ]),
     # From the uA shunt straight to 3 A: one hop to the A shunt, no alert.
-    'istep-ua': (['CONF:POW', 'POW:BURD:STAT OFF'], 40, [
+    'istep-ua': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 40, [
         (0, 'open;pow:230@50,i=0.0002,pf=1', both(pw(0.046, 1, 230, 0.0002, rel=0.02), ranges('6.000000E+02', '6.000000E-04'), x('SYST:ALER?', 'NONE')), '200 uA: 600 uA range'),
         (22, 'open;pow:230@50,i=3,pf=1', both(pw(690, 1, 230, 3), ranges('6.000000E+02', '6.000000E+00'), x('SYST:ALER?', 'NONE')), '3 A: 6 A, no OVLD'),
     ]),
     # Manual 600 mA: 3 A is an OVERLOAD (red, latched on 10 A).
-    'iman-ovl': (['CONF:POW AUTO,0.6', 'POW:BURD:STAT OFF'], 34, [
+    'iman-ovl': (['CONF:POW AUTO,0.6', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 34, [
         (0, 'open;pow:230@50,i=0.1,pf=1', both(pw(23, 1, 230, 0.1), x('SYST:ALER?', 'NONE')), 'manual 600 mA: 0.1 A'),
         (16, 'open;pow:230@50,i=3,pf=1', both(pw(690, 1, 230, 3), ranges('6.000000E+02', '1.000000E+01'), x('SYST:ALER?', 'OVERLOAD')), 'manual: 3 A -> OVERLOAD, 10 A'),
     ]),
 })
-SC['scpi'] = (['MEAS:POW?', 'POW:LIM 2.5,12', 'POW:BURD:STAT OFF'], 24, [
+# Doc 3.16. Entering W starts in DC with "At load" off (V, P at the jacks:
+# 1.234 V reads 1.234, not 1.234 - 1 A x 10 mohm); an AC part on V in DC is
+# the AC? hint; the AC floors (pure DC in AC: V, I 0, PF / S / Q / f n/a;
+# in AC+DC: Q 0 and the DC? hint); Q of a real PF < 1 survives the noise rule.
+def isnan(*k):
+    return lambda d: all(math.isnan(d[x]) for x in k)
+
+
+SC.update({
+    'entry': (['CONF:POW'], 44, [
+        (0, 'open;vsrc:1.234;isrc:1', both(pw(1.234, 1, 1.234, 1, rel=0.002), x('POW:COUP?', 'DC'), x('POW:BURD:STAT?', '0'), x('SYST:ALER?', 'NONE'), isnan('F')),
+         'CONF:POW: DC, At load off: V 1.234 at 1 A'),
+        (16, 'open;vsrc:12,ac=2,f=50;isrc:0.4', both(x('POW:COUP?', 'DC'), x('SYST:ALER?', 'AC')), 'DC with 2 V AC on V: AC? hint'),
+        (30, 'open;vsrc:12;isrc:0.4', both(pw(4.8, 1, 12, 0.4, rel=0.003), x('SYST:ALER?', 'NONE')), 'pure DC again: no hint'),
+    ]),
+    'ac-floor': (['CONF:POW', 'POW:COUP AC'], 30, [
+        (0, 'open;vsrc:1.234;isrc:1', both(lambda d: d['V'] == 0 and d['I'] == 0 and d['P'] == 0, isnan('PF', 'S', 'Q', 'F', 'Vdc', 'Idc'), x('SYST:ALER?', 'NONE')),
+         'AC, pure DC in: V, I, P 0; PF, S, Q, f n/a'),
+        (16, 'open;pow:230@50,i=1,pf=0.95', both(pw(218.5, 0.95, 230, 1), lambda d: near(d['Q'], 230 * math.sqrt(1 - 0.95 ** 2), 0.03)), 'AC mains PF 0.95: Q 71.8 var'),
+    ]),
+    'acdc-floor': (['CONF:POW', 'POW:COUP ACDC'], 58, [
+        (0, 'open;vsrc:1.234;isrc:1', both(pw(1.234, 1, 1.234, 1, rel=0.003), lambda d: d['Q'] == 0 and near(d['S'], 1.234, 0.003), x('SYST:ALER?', 'DC')),
+         'AC+DC, pure DC in: Q 0, PF 1; DC? hint'),
+        (16, 'open;pow:230@50,i=1,pf=0.98', both(pw(225.4, 0.98, 230, 1), lambda d: near(d['Q'], 230 * math.sqrt(1 - 0.98 ** 2), 0.05), x('SYST:ALER?', 'NONE')),
+         'AC+DC mains PF 0.98: Q 45.8 var, no hint'),
+        (30, 'open;pow:230@50,i=1,pf=1', lambda d: d['Q'] < 0.01 * 230, 'AC+DC mains PF 1: Q at most noise'),
+        # The owner's case: At load on (POW:BURD:STAT ON at 44 s), 10 mohm:
+        # V 1.224, P 1.224 W, Vb 0.010.
+        (44, 'open;vsrc:1.234;isrc:1', both(pw(1.224, 1, 1.224, 1, rel=0.003), lambda d: near(d['Vb'], 0.01, 0.02)), 'At load on: V 1.224 at 1 A'),
+    ]),
+})
+
+SC['scpi'] = (['MEAS:POW?', 'POW:COUP ACDC', 'POW:LIM 2.5,12', 'POW:BURD:STAT OFF'], 24, [
     (0, 'open;pow:100@60,i=0.5,pf=0.6', lambda d: near(num(d['X']['MEAS:POW:PFAC?']), 0.6, 0, 0.01) and near(num(d['X']['READ?']), 30, 0.01)
      and d['X']['CONF?'] == '"POW AUTO,AUTO"' and d['X']['POW:LIM?'] == '+2.500000E+00,12' and d['X']['POW:CYC?'] == '2,642,1284'
      and d['X']['FUNC?'] == '"POW"', 'MEAS:POW:PFAC?, READ?, CONF?, POW:LIM?, POW:CYC?, FUNC?'),
 ])
 # W limits (CALC:LIM in the power meter, the slot of its own; the fail
 # beep / badge as the other functions), the phase cal's refusals.
-SC['limits'] = (['CONF:POW', 'POW:BURD:STAT OFF', 'CALC:LIM:UPP 100', 'CALC:LIM:LOW 10'], 34, [
+SC['limits'] = (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF', 'CALC:LIM:UPP 100', 'CALC:LIM:LOW 10'], 34, [
     (0, 'open;pow:230@50,i=1,pf=1', lambda d: d['X']['CALC:LIM:FAIL?'] == '1' and d['X']['CALC:LIM:STAT?'] == '1' and near(num(d['X']['CALC:LIM:UPP?']), 100, 1e-6), 'P 230 W > 100 W: FAIL 1'),
     (16, 'open;pow:50@50,i=1,pf=1', lambda d: d['X']['CALC:LIM:FAIL?'] == '0' and near(d['P'], 50, 0.01), 'P 50 W in 10..100 W: FAIL 0'),
 ])
-SC['phasecal-ref'] = (['CONF:POW', 'POW:BURD:STAT OFF'], 50, [
+SC['phasecal-ref'] = (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 50, [
     # RESistive: refused with the reason whatever the load; REACtive on a
     # resistive load: NOTREACTIVE, SPHACAL kept.
     (0, 'open;pow:230@50,i=1,pf=1', lambda d: 'flat' in d['X']['POW:PHAS:CAL RES|SYST:ERR?'] and d['X']['POW:PHAS:CAL?'] in ('NONE,0', 'RUN,0'), 'RES refused with the reason'),
@@ -240,17 +273,17 @@ SC['phasecal-ref'] = (['CONF:POW', 'POW:BURD:STAT OFF'], 50, [
 # Bluetooth (run.py --bt-port): the stock phone protocol (cmd 09 = the DC V
 # byte with P as a V-group value, cmd 06 echoing it keeps the power meter)
 # and BT SCPI (FETC:POW:ALL?, POW:VOLT:RANG?) next to USBTMC.
-SC['bt'] = (['CONF:POW', 'POW:BURD:STAT OFF'], 40, [
+SC['bt'] = (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 40, [
     (0, 'open;pow:230@50,i=1,pf=0.5', lambda d: bt_ok(d, 115, 0x28) and d['X']['FUNC?'] == '"POW"', 'BT cmd 09: DC V byte 0x28, P 115 (as V); BT SCPI'),
     (18, 'open;vsrc:12;isrc:-2', lambda d: bt_ok(d, -24, 0x28) and d['X']['FUNC?'] == '"POW"', 'after cmd 06 0x28 (echo): still POW, P -24'),
 ])
 EXTRA = {'t1-yy': ['DBG:POW:RAW?', 'DBG:POW:ROW?'], 't3-cycle': ['DBG:POW:RAW?'],
          'zero': ['POW:ZERO?'], 'vcal': ['POW:VOLT:CAL?'], 'vcal-clip': ['POW:VOLT:CAL?'], 'dcad1': ['POW:COUP?'], 'auto': ['POW:COUP?'], 'ac': ['POW:COUP?'],
-         'istep': ['SYST:ALER?'], 'istep-ua': ['SYST:ALER?'], 'iman-ovl': ['SYST:ALER?'],
+         'istep': ['SYST:ALER?'], 'entry': ['POW:COUP?', 'POW:BURD:STAT?', 'SYST:ALER?'], 'ac-floor': ['SYST:ALER?'], 'acdc-floor': ['SYST:ALER?'], 'istep-ua': ['SYST:ALER?'], 'iman-ovl': ['SYST:ALER?'],
          'scpi': ['MEAS:POW:PFAC?', 'READ?', 'CONF?', 'POW:LIM?', 'POW:CYC?', 'FUNC?'],
          'limits': ['CALC:LIM:FAIL?', 'CALC:LIM:STAT?', 'CALC:LIM:UPP?'],
          'phasecal-ref': ['POW:PHAS:CAL RES|SYST:ERR?', 'POW:PHAS:CAL?'], 'bt': ['FUNC?']}
-ACTIONS = {'ac': {46: 'POW:COUP ACDC'}, 'ereset': {8: 'DBG:DRAG 58,160,58,160,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'},
+ACTIONS = {'ac': {46: 'POW:COUP ACDC'}, 'acdc-floor': {44: 'POW:BURD:STAT ON'}, 'ereset': {8: 'DBG:DRAG 58,160,58,160,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'},
            'vcal-clip': {6: 'POW:VOLT:CAL'}}
 
 
@@ -309,7 +342,7 @@ def run(name):
     with open(sp, 'w') as f:
         for t, spec in script:
             f.write('%g dmm %s\n' % (t, spec))
-    bt_port = A.port + 1000 if name == 'bt' else 0
+    bt_port = A.port + A.bt_offset if name == 'bt' else 0
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', rtag,
            '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else []) \

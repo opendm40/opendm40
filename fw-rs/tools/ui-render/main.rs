@@ -596,7 +596,10 @@ fn pw_rd(pv: dmm::pw::PowerVals) -> Reading {
 /// Power-meter worst cases: (name, values).
 fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
     use dmm::pw::PowerVals as P;
-    let z = P::ZERO;
+    // "At load" on (the "@load" marks; off by default since doc 3.16) in
+    // every case but "worst" / "dc-ua" / "ac-floor" (off): the matrix and
+    // the update pairs see both states.
+    let z = P { comp: true, ..P::ZERO };
     let base = P { p: 229.43, s: 229.9, q: 14.7, pf: 0.998, v: 229.98, i: 0.99962, f_hz: 50.0, burden_v: 0.02, e_wh: 0.1234, vah: 0.1236, secs: 754, p_avg: 0.58918, vr: 2, ik: 4, ..z };
     vec![
         ("mains", base),
@@ -617,7 +620,10 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
         // No current: values that round to zero (never "-0.0000").
         ("zero", P { p: -2.0e-8, s: 1.0e-8, q: -1.0e-8, pf: -0.0001, v: 6.738, i: -1.0e-9, f_hz: 40.0, e_wh: -1.66e-9, vah: 1.0e-9, secs: 55, p_avg: -1.0e-9, vr: 1, ik: 0, ..z }),
         ("main-zero", P { main: dmm::pw::MAIN_WH, p: -2.0e-8, v: 6.738, i: -1.0e-9, f_hz: 40.0, e_wh: -1.27e-10, secs: 70, p_avg: -1.0e-9, vr: 1, ik: 0, ..z }),
-        ("dc-ua", P { p: 5.9999e-3, s: 5.9999e-3, pf: 1.0, v: 9.9999, i: 599.99e-6, vdc: 9.9999, idc: 599.99e-6, vr: 1, ik: 0, dc: true, coup: dmm::pw::COUP_DC, ..z }),
+        ("dc-ua", P { p: 5.9999e-3, s: 5.9999e-3, pf: 1.0, v: 9.9999, i: 599.99e-6, vdc: 9.9999, idc: 599.99e-6, vr: 1, ik: 0, dc: true, coup: dmm::pw::COUP_DC, comp: false, ..z }),
+        // AC coupling, pure DC in (doc 3.16): V / I below their floors read
+        // 0, PF / S / Q / f "--" (NaN).
+        ("ac-floor", P { p: 0.0, s: f32::NAN, q: f32::NAN, pf: f32::NAN, v: 0.0, i: 0.0, vdc: f32::NAN, idc: f32::NAN, f_hz: f32::NAN, vr: 0, ik: 5, coup: dmm::pw::COUP_AC, comp: false, ..z }),
     ]
 }
 
@@ -1836,6 +1842,9 @@ fn main() {
         (sentinel::Alert::Dc.toast(), false),
         (sentinel::Alert::Ac.toast(), false),
         (sentinel::Alert::Fuse.toast(), false),
+        // The power meter's coupling hints (doc 3.16).
+        (dmm::pw::HINT_TOASTS[0], false),
+        (dmm::pw::HINT_TOASTS[1], false),
         // Wave view (app_wave.rs) and the power meter (app_power.rs).
         ("DC V: wave is AC-coupled", true),
         ("Wave: AC A row (DC-coupled)", true),
@@ -2248,6 +2257,14 @@ fn main() {
             power_page(pcs[k].1, hold, sentinel::Alert::None, rc);
             save(&out, file);
         }
+        // "At load" off (the default): no "@load" marks; the AC floor case;
+        // a coupling hint in the status slot.
+        host::reset(0);
+        power_page(dmm::pw::PowerVals { comp: false, ..pcs[0].1 }, 0, sentinel::Alert::None, rc);
+        save(&out, "p24-power-atload-off");
+        host::reset(0);
+        power_page(pcs.iter().find(|c| c.0 == "ac-floor").unwrap().1, 0, sentinel::Alert::Dc, rc);
+        save(&out, "p25-power-ac-floor-hint");
         host::reset(0);
         power_page(pcs[0].1, 0, sentinel::Alert::None, rc);
         ui::pw::entry_dialog(5.0, 30);

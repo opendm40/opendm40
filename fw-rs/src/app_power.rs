@@ -7,7 +7,11 @@ use crate::dmm::pw::{self, PowerVals};
 use crate::scpi::Pow;
 
 /// Persisted words (persist::W_POWER..+10): p0 = SPHACAL (i8) | method << 8 |
-/// burden comp OFF << 9 | (discards + 1) << 12 (0 = default) | I limit in
+/// burden comp OFF << 9 (written for older builds, ignored on load) | "At
+/// load" ON << 10 (doc 3.16: opt-in; a record without bit 10, i.e. every
+/// older one, loads OFF: their bit 9 = 0 meant "ON" and "never touched"
+/// alike, so an explicit ON cannot be told from the old default) |
+/// (discards + 1) << 12 (0 = default) | I limit in
 /// 0.1 A << 16 (0 = default) | time limit s << 24 (0 = default, 255 = none);
 /// p1..p3 = R_path per unit (f32 bits, 0 = the shunt value); p4 / p5 = the
 /// V gains of 6 / 60 and 600 / 1000 V, u16 each (0 = factory-derived, else
@@ -186,7 +190,7 @@ impl App {
         let ic = ((p.i_cont * 10.0 + 0.5) as u32).clamp(1, 100);
         let tl = if p.t_lim == 0 { 255 } else { p.t_lim.min(254) as u32 };
         let mut w = [0u32; PW_WORDS];
-        w[0] = p.sph as u8 as u32 | (p.alt as u32) << 8 | (!p.comp as u32) << 9 | ((p.disc as u32 + 1) & 0xF) << 12 | ic << 16 | tl << 24;
+        w[0] = p.sph as u8 as u32 | (p.alt as u32) << 8 | (!p.comp as u32) << 9 | (p.comp as u32) << 10 | ((p.disc as u32 + 1) & 0xF) << 12 | ic << 16 | tl << 24;
         for i in 0..3 {
             w[1 + i] = if p.r_path[i] == pw::SHUNT_OHM[i] { 0 } else { p.r_path[i].to_bits() };
         }
@@ -216,7 +220,7 @@ impl App {
         let p = &mut self.dmm.pw;
         p.sph = (w[0] & 0xFF) as u8 as i8;
         p.alt = w[0] >> 8 & 1 != 0;
-        p.comp = w[0] >> 9 & 1 == 0;
+        p.comp = w[0] >> 10 & 1 != 0;
         let d = (w[0] >> 12 & 0xF) as u8;
         p.disc = if d == 0 { pw::DISC_DEFAULT } else { (d - 1).min(8) };
         let ic = (w[0] >> 16 & 0xFF) as f32 / 10.0;

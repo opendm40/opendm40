@@ -511,11 +511,11 @@ Against the plan of 3.10:
 | 3 dmm.rs | function code **18** (16 / 17 were AC+DC already); internally the HY mode stays the AC A mode of the current range (`hy_mode` 4..6) with `pw.on`, so the button, relay and catch-all code paths stay AC A; any `set` (a function button, BT cmd 06, SCPI CONF of another function) leaves. Cycle P -> V -> P -> I, **2 results discarded** per R34 switch (`DISC_DEFAULT`, DBG:POW:DISC), each accepted part through the stock EMAs (V: AC V windows, I: AC A windows, P: 5 % relative jump, a 0.25); P = P_ac + V_dc I_dc etc. as 3.3. Calibration: I channel the stock AC A RMS gain (0xC4 + 4 ci) and LPF gain (0xF4 + 4 ci), no offsets; V channel gain 1.0 (no stock cal applies to OP2 / AD3). Readings once P, V and I were measured; every accepted result gives one. The state (`Pw`, ~0.6 KB with the T3 ring) lives in SRAM (.sram_bss), not in the App on the TCM stack |
 | autorange | per channel after its own result, stock thresholds (up > 1.03 x limit, down < 0.1 x limit / 1.03); V from 600 V, I from 10 A (least burden); the I floor follows the A key's AUTO / AUTO+ (AUTO+ never enters the 47.5 ohm shunt). A range change rewrites the row, settles 550 ms, restarts the cycle; manual ranges per channel (page / SCPI), AUTO key = both auto |
 | energy | Wh and VAh from the totals of the previous reading over the time since it (a range-change gap holds the last P), i64 mJ + f32 remainder (host test: 1 mW s steps on top of 1 kWh); RUN / PAUSE (energy box tap, POW:ENER:STAT), reset (long press on the side column, page, POW:ENER:RES); average P = E / t |
-| burden | R_path per shunt (default the shunt: 10 mohm / 0.5 ohm / 47.5 ohm; POW:BURD sets the current range's; in a DMM A function that function's shunt, 3.15), compensation ON by default: P_L = P - I^2 R, V_L^2 = V^2 - 2 R P + R^2 I^2 (exact for any waveform: v_L = v - R i), S_L = V_L I, Q, PF from those; the burden voltage I R in its own box (amber when the compensation is off and it exceeds 1 % of V) |
+| burden | R_path per shunt (default the shunt: 10 mohm / 0.5 ohm / 47.5 ohm; POW:BURD sets the current range's; in a DMM A function that function's shunt, 3.15), compensation ON by default (**OFF since 3.16**, "At load" opt-in): P_L = P - I^2 R, V_L^2 = V^2 - 2 R P + R^2 I^2 (exact for any waveform: v_L = v - R i), S_L = V_L I, Q, PF from those; the burden voltage I R in its own box (amber when the compensation is off and it exceeds 1 % of V) |
 | limit | continuous-current limit (default 5 A / 30 s, POW:LIM <A>,<s>, persisted; the owner should set the manual's numbers): above it a countdown in the side column, at expiry a toast and the A-JACK beep pattern while it stays above; the auto power-off (and its warning) is held while the energy integrates with I > 50 uA, the DMM rail stays on in every view |
 | 4 SCPI | `CONFigure:POWer [<V>|AUTO[,<A>|AUTO]]`, `MEASure:POWer?` (P; waits through the range hunt, at most 15 s), `READ?` / `FETCh?` = P, `FETCh:POWer:ALL?` = `P,S,Q,PF,Vrms,Irms,F,E_Wh,seconds,Vdc,Idc,VAh,burden_V` (NaN = +9.91E37: the fallback's P / Q / PF / Vdc), `MEASure:POWer:APParent? / :PFACtor? / :ENERgy? / :REACtive? / :VOLTage? / :CURRent?` (latest values), `[SENSe:]POWer:VOLTage:RANGe` / `:CURRent:RANGe <value>|AUTO` / `?` (`AUTO,+6.000000E+02`), `:ENERgy:RESet`, `:ENERgy:STATe`, `:BURDen <ohm>|DEFault` / `?`, `:BURDen:STATe`, `:PHASe <-127..127>` / `?`, `:PHASe:CALibrate [REACtive]` (RESistive: refused with the reason, see 3.5 / 3.13: the cos optimum is flat; `:PHASe:CALibrate?` = the outcome since 3.13), `:CYCle?` (`d,P period ms,full set ms`), `:METHod SIMultaneous|ALTernate` / `?`, `:LIMit <A>[,<s>]` / `?`; `CONFigure?` = `"POW AUTO,AUTO"` / `"POW +6.0E+01,+6.0E+00"`, `FUNCtion?` = `"POW"`. BT keeps the stock protocol (cmd 06 / 09 reported the AC A byte and P as the value; since 3.13 the DC V byte with P) |
 | 5 UI | see below |
-| 6 settings | p[48..52]: SPHACAL, method, compensation, discards, I limit, time limit, R_path x 3 (0 = default); the function itself is **not** restored: a restart after a power session comes up in DC A on the 10 A shunt (a load current may still flow) |
+| 6 settings | p[48..52]: SPHACAL, method, compensation (bit 9 = OFF; since 3.16 bit 10 = ON, older records load OFF), discards, I limit, time limit, R_path x 3 (0 = default); the function itself is **not** restored: a restart after a power session comes up in DC A on the 10 A shunt (a load current may still flow) |
 | 7 emulator | Power role in `emu/hy3131/HY3131.cs` (both copies; X = I x shunt x OP1 gain, Y = V / k, signed XY with the phase, SPHACAL on the cross term, mid-block R34 mixing, LPF and the counter as the hardware): 88 host checks; `emu/hy3131/powtest.py` end to end over USB/IP |
 | phase cal | `POW:PHAS:CAL` on a reactive load: P / S averaged over 8 results at the current SPHACAL and 48 steps away, then the Newton step that nulls it (works for C and L loads; the sign of the slope comes from the measurement) |
 
@@ -1142,7 +1142,8 @@ deprecated**: still accepted, it selects ACDC (the old `AC` alias of ACDC is
 now the real AC). Persist: the 2-bit field keeps its values (0 = AC+DC, 1 =
 DC), the former AUTO (2) loads as AC+DC, AC takes the free value 3
 (`pw::coup_of`): no layout change, no version bump. An older build reading
-3 would take it as its AUTO. BT cmd 09 unchanged (P as the V-group value).
+3 would take it as its AUTO. BT cmd 09 unchanged (P as the V-group value). Entry: since 3.16 every entry from another function starts
+in DC (as V / A); a restart in W keeps the persisted coupling.
 
 **Power Settings page made readable (owner: "WHAT IS BURDEN HERE?").**
 
@@ -1278,6 +1279,147 @@ Bench supply with a series resistor into A (or mA / uA), a second meter
 6. REL on: the main value zeroes, the burden does not. Toggle OFF: the
    duty cycle comes back in AC A, aux1 empty in DC A, no stale caption.
 7. Phone app in AC A with the readout on: value 3 empty, no mV shown as mA.
+
+### 3.16 Owner round 5 (fw-rs, 2026-10-22): "At load" opt-in and marked, DC at entry, AC floors, coupling hints
+
+**"At load" was invisible (owner).** With 1.234 V on V-COM the top V read
+1.2240 V at 1 A and 1.2140 V at 2 A: the readout was V - I R_path (3.11,
+R_path 10 mohm), and nothing on screen said so.
+
+* **Off by default.** `Pw::comp` / `PowerVals::ZERO.comp` = false: V and P
+  are what the jacks measure. `POW:BURD:STAT?` answers 0 after a fresh
+  start. With it off the side column's Vb turns amber above 1 % of V
+  (3.11): that is the designed cue that the meter's drop is inside P.
+* **Migration.** The settings word kept "compensation OFF" in bit 9, so 0
+  meant both "the user chose ON" and "never touched" (the old default): an
+  explicit ON cannot be told apart. New bit 10 = "At load ON" (opt-in);
+  bit 9 is still written (= !ON) so an older build reading a newer record
+  behaves as before. Every older record has bit 10 = 0 and loads **OFF**:
+  an old explicit OFF stays OFF, an old ON (default or chosen) becomes OFF;
+  the user turns it on again where wanted. No record version bump (bit 10
+  was 0 in every record).
+* **"@load" marks** (F14, the value colour) while it is on: after the top
+  V's unit ("229.98 V @load", inside the aux1 unit box, keyed with the
+  unit) and at the main readout's top left (x 4..39, y 66..79) for P and
+  whatever the main readout shows (Wh / VAh are integrals of the
+  compensated P / S). The right column next to the coupling glyph
+  (403..436) was the first choice; F14 "@load" needs 36 px at the letter
+  spacing the overlap check demands, 3 px more than that column has. The
+  other compensated values (S, Q, PF of the lower row; AVG; the energy box)
+  carry no mark of their own; the help line and Help 7/7 say what the
+  switch touches: V_L = V - I R, P_L = P - I^2 R, and S, Q, PF, Wh, VAh,
+  AVG from those. The combined view strip and BT (cmd 09 P as V) are not
+  marked (no room / no field).
+* **When to turn it on**, the Power Settings help line after a tap on "At
+  load": ON "At load ON: V at source, so load sees V - I*R", OFF "OFF: V,
+  P at the jacks. ON if V leads at source" (V/ohm on the source side of the
+  broken conductor and the meter in series, wiring 1 of 3.6). Help 7/7:
+  "MF: At load (off)" / "@load: V - I*R".
+
+**DC at entry (owner: as V / A).** Entering W from another function
+(the W button, the wiring dialog's OK, `CONF:POW`, `MEAS:POW?`, BT cmd 06)
+starts in DC, as the stock V / A start in DC; the tap cycle on the active
+W button stays DC -> AC -> AC+DC -> DC. A restart while in W comes back in
+its coupling (`App::restore` re-applies the persisted one after `select`),
+as V / A come back in theirs through the function code in p[2]. The
+persisted 2-bit field is unchanged (0 = AC+DC, 1 = DC, 3 = AC). SCPI:
+`POW:COUP` still works anywhere, but `CONF:POW` from another function
+resets it to DC, so set the coupling after `CONF:POW` (powtest does).
+
+**AC floors (owner: AC coupling on pure DC showed V 0.0015 V, I 0.014 A,
+PF -0.092, S 0.02 mVA, Q 0.02 mvar).** The stock AC V / AC A only clamp a
+negative RMS (after the offset calibration) to 0; fw-rs's existing "no AC
+here" level is the AUTO coupling's "to DC" floor (dmm.rs AUTO_FLOOR_V / _A
+[1], acdc doc 9: V 0.5 %, A 2 % of the range; the uA path's RMS floor is
+~1.5 %). `pw::FLOOR_V` / `FLOOR_I` reuse those, so the power meter calls a
+part "no AC" exactly where AUTO coupling switches to DC. Applied in
+`pw_vals` (method B only; the raw parts and the autorange are untouched):
+
+| coupling | V_ac or I_ac below its floor |
+|---|---|
+| AC | that part reads 0 (V, I), P 0 (no P_ac without both), PF / S / Q "--" (NaN; SCPI +9.91E37 as every "no value" of FETC:POW:ALL?), f "--" when the counter's channel (V tap, or the current on PB4) is below its floor |
+| AC+DC | the part leaves the totals (V = hypot(0, V_dc)), P_ac 0, Q 0; S, PF of the totals stay; f as AC |
+
+f is now NaN (9.91E37) whenever no frequency is measured, also in DC
+coupling (was 0).
+
+**Q of noise (owner: AC+DC on pure DC showed Q 0.017 var).** Uncorrelated
+noise on the RMS of V and I adds to S but not to P. First order:
+S^2 - P^2 = (V_n I)^2 + (V I_n)^2, so a resistive load shows Q_noise =
+hypot(V_n I, V I_n) (the owner's 1.234 V / 1 A with the emulator residues
+V_n 1.5 mV, I_n 14 mA: 0.0173 var, the observed 0.017). The coordinator's
+sqrt(2 S (V_n I + V I_n)) is the first-order upper bound of the same; with
+the floors as V_n / I_n either form zeroes real Q up to PF ~0.99 (230 V /
+1 A on 600 V / 6 A: 28 var). So V_n / I_n are a separate noise estimate,
+`pw::NOISE_V` 0.1 % / `NOISE_I` 0.5 % of the range (~4 x the emulator's
+pure-DC residues 0.025 % / 0.14 %; the device's are a check item), and Q
+below hypot(V_n I, V I_n) reads 0 in AC and AC+DC. At 230 V / 1 A on
+600 V / 6 A that is 6.9 var: Q reads 0 above PF ~0.9995 there, at full
+scale (600 V x 6 A, 18 var) above PF ~0.99999.
+
+**Coupling hints** (doc 4.4 style: grey badge DC? / AC?, silent, a toast
+once, assert after 2 s, clear 1 s after, the hints bit of
+SYST:ALER:ENAB / Settings 3/3; SYST:ALER? DC / AC):
+
+* **AC+DC with no AC part**: V_ac and I_ac both below their floors and a
+  DC part above one (`HINT_NO_AC`) -> DC? "No AC: DC is more precise" (DC
+  reads I on AD1 with the factory DC A calibration, AC+DC through the AD2
+  LPF).
+* **DC with an AC part on V** (`HINT_AC`) -> AC? "AC present: use AC+DC".
+  The register question: the DC row is the power row frozen at R34 = YY
+  with the RMS / LPF on (`dc_row`), and `pw_poll_dc` already reads that
+  RMS (sum Y^2 after the HPF = V_ac) on every INTF_RMS and used to drop it.
+  So V_ac costs no register write: no note-7 exposure (AD2 / AD3 never
+  switch while AD1 converts). I_ac would need R34 at XX, a write while AD1
+  converts: not done. V_ac is the right condition anyway: the AC power DC
+  misses is mean(v_ac i_ac), zero without v_ac. A ripple on V with a pure
+  DC current (P exact in DC) still raises the hint (it cannot be told
+  apart without I_ac).
+* The power meter's row writes reset the hint timers (`sent.configured`
+  with reset): a range change restarts the 2 s. The toasts are the power
+  meter's own (`pw::hint_toast`); the badges and SYST:ALER? names are the
+  DC V / AC V hints'.
+
+Code: `pw::FLOOR_*`, `NOISE_*`, `HINT_*`, `hint_toast`, `Pw::vac_dc`,
+`PowerVals::hint` (powermeter.rs, `pw_vals` / `pw_poll_dc` per reading in
+region B); `Sentinel::pw_hints`; `ui::LOAD_CAP`, `ui::pw::LOAD_MARK`
+(the mark in `coupling`, cleared with the mode glyph); app_power.rs word
+bit 10; `App::restore` coupling; ui_power.rs help lines, no units next to
+"--".
+
+**Tests.** ui-render: the power cases with "At load" on (all but worst /
+dc-ua / ac-floor, so every update pair crosses on <-> off), the ac-floor
+case, both hint toasts; 0 violations; renders p01 (marks on), p24 (off),
+p25 (AC floor + DC? badge), p20 (the help line). powtest (every old
+scenario now sets `POW:COUP ACDC` after `CONF:POW`, burden / dcburden
+`POW:BURD:STAT ON`, dcad1 F = 9.91E37) plus `entry`, `ac-floor`,
+`acdc-floor` (results below); senttest ovl-pow / -auto-ma / -auto-ua set
+`POW:COUP ACDC`.
+
+#### Device check list (round 5)
+
+1. After the update (an older record): W comes up with "At load" off
+   (`POW:BURD:STAT?` 0), no "@load" on the page. A bench supply 1.234 V
+   through A at 1 A / 2 A: the top V stays 1.234 V (the drop is in Vb,
+   amber above 1 % of V).
+2. Power Settings: tap "At load": selected, help line "At load ON: V at
+   source, so load sees V - I*R"; the page shows "@load" after the V unit
+   and at the main readout's top left; V reads 1.224 / 1.214 V. Tap again:
+   marks gone, "OFF: V, P at the jacks. ON if V leads at source". Reboot
+   keeps the choice.
+3. From V (or any function) press W: DC glyph, `POW:COUP?` DC. Tap W:
+   AC, AC+DC, DC. Reboot while in AC+DC: comes back in AC+DC.
+4. AC coupling, pure DC source + load: V 0, I 0, P 0, PF / S / Q / f
+   "--" with no units; `FETC:POW:ALL?` 9.91E37 in those fields. Note the
+   raw residues first (AC+DC: `FETC:POW:ALL?` V vs Vdc, I vs Idc) against
+   the floors 0.5 % / 2 % of the ranges and NOISE 0.1 % / 0.5 %.
+5. AC+DC, the same DC: Q 0, PF 1.000; after ~2 s the grey "DC?" badge and
+   the toast "No AC: DC is more precise"; `SYST:ALER?` DC. Mains through a
+   resistive load: Q small but not forced to 0 above the noise; with a
+   motor / capacitor (PF < 0.98): Q as before.
+6. DC with a rippled V (a supply with a transformer-like ripple, or the
+   generator AC-coupled onto a DC): "AC?" badge, toast "AC present: use
+   AC+DC", `SYST:ALER?` AC; Settings 3/3 hints off: none.
 
 ---------------------------------------------------------------------------
 

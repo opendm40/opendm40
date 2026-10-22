@@ -121,13 +121,13 @@ SC = {
                                  (10, 'isrc:0,ac=2,f=50', {'OVERLOAD'}, (1.95, 2.05))]),
     'ovl-acdc': ('CURR:ACDC', 30, [(0, 'open;isrc:0.01', {'NONE'}), (12, 'isrc:2', {'OVERLOAD'})]),
     # Power meter, I fixed on 600 mA (CONF:POW AUTO,0.6): 2 A -> ik 5.
-    'ovl-pow':  ('POW AUTO,0.6', 30, [(0, 'open;pow:230,i=0.1,f=50', {'NONE'}), (12, 'pow:230,i=2,f=50', {'OVERLOAD'})]),
+    'ovl-pow':  ('POW AUTO,0.6', 30, [(0, 'open;pow:230,i=0.1,f=50', {'NONE'}), (12, 'pow:230,i=2,f=50', {'OVERLOAD'})], ['POW:COUP ACDC']),
     # Power meter, I AUTO (owner: 3 A through A showed OVLD): an over range on the mA / uA
     # shunt is the normal up-range to the next shunt, no alert in any sample (READ? = P).
     'ovl-pow-auto-ma': ('POW', 30, [(0, 'open;pow:230,i=0.01,f=50', {'NONE'}, (2.25, 2.35)),
-                                    (12, 'pow:230,i=3,f=50', {'NONE'}, (680, 700))]),
+                                    (12, 'pow:230,i=3,f=50', {'NONE'}, (680, 700))], ['POW:COUP ACDC']),
     'ovl-pow-auto-ua': ('POW', 34, [(0, 'open;pow:230,i=0.0002,f=50', {'NONE'}, (0.044, 0.048)),
-                                    (16, 'pow:230,i=3,f=50', {'NONE'}, (680, 700))]),
+                                    (16, 'pow:230,i=3,f=50', {'NONE'}, (680, 700))], ['POW:COUP ACDC']),
     'ovl-pow-auto-dc': ('POW', 30, [(0, 'open;vsrc:12;isrc:0.01', {'NONE'}, (0.118, 0.122)),
                                     (12, 'vsrc:12;isrc:3', {'NONE'}, (35.6, 36.4))], ['POW:COUP DC']),
     # A-jack protection (doc 4.8): a source across A-COM in DC V / ohm / temperature. 5 V (104 mA
