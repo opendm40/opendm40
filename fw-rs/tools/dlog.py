@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decode a DM40 fw-rs binary log (LOGnnn.DLG / SCOPnnn.DLG) to CSV.
+"""Decode a DM40 fw-rs binary log (LOGnnn.DLG / SCOPnnn.DLG / FASTnnn.DLG) to CSV.
 
 Standalone (stdlib only). The output is byte-identical to the CSV the device
 serves for the same file (virtual LOGnnn.CSV on the "DM40 info" USB volume,
@@ -194,6 +194,61 @@ def sci(v, dig):
     return '%s%d.%0*de%s%02d' % (s, ip, dig, fp, '-' if e < 0 else '+', min(abs(e), 99))
 
 
+def fast_row(t, raw, lost, a, b, scaled):
+    """dlog.rs fast_row(): fixed-width kind-3 row."""
+    f = lambda x: struct.unpack('<f', struct.pack('<f', x))[0]
+    s = '%7d.%06d,%8d,' % (min(t // 1000000, 9999999), t % 1000000, raw)
+    if scaled:
+        s += sci(f(a + f(b * f(raw))), 5) + ','
+    return s + '%7d\r\n' % min(lost, 9999999)
+
+
+def fast_decode(d, off, out, errors):
+    """Kind 3 (fast logger): parameters at `off`, then chunks."""
+    if zlib.crc32(d[off:off + 28]) != struct.unpack_from('<I', d, off + 28)[0]:
+        raise ValueError('bad fast-log parameters')
+    a, b, rate = struct.unpack_from('<ffI', d, off)
+    scaled = d[off + 12] & 1
+    p_us = (1000000000 + rate // 2) // rate
+    off += 32
+    rows = chunks = 0
+    while off < len(d):
+        if off + CHDR > len(d) or d[off:off + 2] != b'DC':
+            if d[off:].strip(b'\xff'):
+                errors.append('torn / unknown bytes at %d (%d bytes)' % (off, len(d) - off))
+            break
+        pl, crc, row0, t0lo, t0hi, nr, dt0, v0 = struct.unpack_from('<HIIIHHIi', d, off + 2)
+        end = off + CHDR + pl
+        if nr == 0 or end > len(d) or zlib.crc32(d[off + 8:off + CHDR], zlib.crc32(d[off + CHDR:end])) != crc:
+            errors.append('chunk at %d: %s' % (off, 'torn' if end > len(d) else 'CRC error'))
+            break
+        if row0 != rows:
+            errors.append('chunk at %d: out of sequence' % off)
+            break
+        t, v, dt = t0lo | t0hi << 32, v0, p_us
+        bits = Bits(d, off + CHDR, end)
+        at, av = Ad(4), Ad(16)
+        out.append(fast_row(t, v, max(round_half_up(dt0, rate) - 1, 0) if dt0 else 0, a, b, scaled))
+        for _ in range(nr - 1):
+            x = bits.rice(at.k())
+            at.upd(x)
+            dt = (dt + unzz(x)) & 0xFFFFFFFF
+            t += dt
+            u = bits.rice(av.k())
+            av.upd(u)
+            v = ((v + unzz(u) + 0x80000000) & 0xFFFFFFFF) - 0x80000000
+            out.append(fast_row(t, v, max(round_half_up(dt, rate) - 1, 0), a, b, scaled))
+        rows += nr
+        chunks += 1
+        off = end
+    return rows, chunks
+
+
+def round_half_up(dt_us, rate_mhz):
+    """dlog.rs fast_lost(): round(dt * rate / 1e9), half up."""
+    return (dt_us * rate_mhz + 500000000) // 1000000000
+
+
 def decode(d, errors):
     """CSV text of DLG bytes `d`; torn / bad chunks reported in `errors`."""
     if len(d) < FHDR or d[:4] != b'DLG1':
@@ -204,6 +259,9 @@ def decode(d, errors):
     unit = d[12:12 + ul].decode('ascii')
     out = [d[FHDR:FHDR + hl].decode('ascii')]
     off = FHDR + hl
+    if kind == 3:
+        rows, chunks = fast_decode(d, off, out, errors)
+        return ''.join(out), {'rows': rows, 'chunks': chunks}
     if kind == 2:
         a, b, dt = struct.unpack_from('<fff', d, off)
         t0, n, crc = struct.unpack_from('<III', d, off + 12)

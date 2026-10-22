@@ -1,5 +1,6 @@
 #!/bin/bash
-# Host test of src/dlog.rs (compact binary DMM logs, DLG): CSV round trip
+# Host test of src/dlog.rs (compact binary DMM logs, DLG) and src/fastenc.rs
+# (the fast logger's kind-3 coder + pager, tools/dlog-test/fast.rs): CSV round trip
 # bit-exact vs the pre-DLG csvlog writer, random access, power cut at every
 # byte, bit flips, bytes per row; then tools/dlog.py on the same file.
 #   tools/dlog-test/run.sh
@@ -21,6 +22,11 @@ if [ -f ../dlog.py ]; then
         cmp "$B/py.csv" "$B/s$i.csv" || { echo "FAIL: dlog.py scope record $i"; exit 1; }
     done
     echo "ok: tools/dlog.py scope records == reference CSV (8 records)"
+    for i in 0 1 2 3 4 5; do
+        python3 -I ../dlog.py "$B/f$i.dlg" -o "$B/py.csv"
+        cmp "$B/py.csv" "$B/f$i.csv" || { echo "FAIL: dlog.py fast log $i"; exit 1; }
+    done
+    echo "ok: tools/dlog.py fast logs (kind 3) == the generated CSV (6 sets)"
     head -c $(( $(stat -c%s "$B/t6.dlg") / 2 )) "$B/t6.dlg" > "$B/torn.dlg"
     python3 -I ../dlog.py --check "$B/torn.dlg"
 fi

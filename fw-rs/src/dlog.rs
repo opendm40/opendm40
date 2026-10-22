@@ -9,7 +9,8 @@
 //! row number, its CSV byte offset and its CSV length, so a power cut loses
 //! only the chunk being written and the CSV export can seek without decoding.
 //!
-//!   file header (24 + hl bytes): "DLG1", kind (1 DMM, 2 scope record), unit
+//!   file header (24 + hl bytes): "DLG1", kind (1 DMM, 2 scope record, 3 fast
+//!       logger stream: section "fast log" below), unit
 //!       length, u16 hl, u32 CRC-32 of bytes 12.., unit[12], the CSV header text
 //!   chunk (28 + pl bytes): "DC", u16 pl, u32 CRC-32 of bytes 8.., u32 first
 //!       row, u32 CSV offset, u32 CSV bytes, u32 t0 ms, u16 rows, u8 flags at
@@ -1213,6 +1214,13 @@ pub struct Gen<S: Src> {
     sd_b: u32,
     sd_ok: bool,
     sd_code: u16,
+    /// Kind 3: parameters, first chunk's offset, the cursor's chunk and
+    /// decoder, the row index held in `row` (u32::MAX: none).
+    fp: FPar,
+    fstart: u32,
+    fc: Option<FChunk>,
+    fd: FDec,
+    fk: u32,
     // cursor
     cur: Option<Chunk>,
     rd: RowDec,
@@ -1227,7 +1235,7 @@ impl<S: Src> Gen<S> {
     /// a DLG file of a known kind.
     pub fn open(mut s: S, size: u32) -> Option<Gen<S>> {
         let (kind, hl, ul, unit) = parse_file(&mut s, size)?;
-        if kind != KIND_DMM && kind != KIND_SCOPE {
+        if kind != KIND_DMM && kind != KIND_SCOPE && kind != KIND_FAST {
             return None;
         }
         let mut g = Gen {
@@ -1243,6 +1251,11 @@ impl<S: Src> Gen<S> {
             sd_b: 0,
             sd_ok: false,
             sd_code: 0,
+            fp: FPar::default(),
+            fstart: 0,
+            fc: None,
+            fd: FDec::IDLE,
+            fk: u32::MAX,
             cur: None,
             rd: RowDec::new(&Chunk { off: 0, pl: 0, row0: 0, csv_base: 0, csv_len: 0, t0: 0, nrows: 0, flags0: 0 }),
             rpos: 0,
@@ -1296,6 +1309,36 @@ impl<S: Src> Gen<S> {
             g.info.csv = hl + rows * SCOPE_ROW as u32;
             g.info.valid = o;
             g.size = g.info.valid;
+            return Some(g);
+        }
+        if kind == KIND_FAST {
+            let mut p = [0u8; FAST_PAR];
+            let at = FHDR as u32 + hl;
+            if !g.s.read(at, &mut p) {
+                return None;
+            }
+            g.fp = FPar::parse(&p)?;
+            g.fstart = at + FAST_PAR as u32;
+            let mut off = g.fstart;
+            let mut last = None;
+            while let Some(c) = fchunk_at(&mut g.s, &mut g.win, off, size, true) {
+                if c.row0 != g.info.rows {
+                    break;
+                }
+                g.info.rows += c.nrows;
+                g.info.chunks += 1;
+                off = c.end();
+                last = Some(c);
+            }
+            g.info.valid = off;
+            g.info.csv = hl + g.info.rows * g.fp.row_len();
+            if let Some(c) = last {
+                let fp = g.fp;
+                let mut t_last = 0;
+                fast_rows(&mut g.s, &mut g.win, &c, &fp, &mut |t, _, _| t_last = t);
+                g.info.t_last = (t_last / 1000).min(u32::MAX as u64) as u32;
+            }
+            g.size = off;
             return Some(g);
         }
         let mut off = g.info.valid;
@@ -1404,6 +1447,52 @@ impl<S: Src> Gen<S> {
         Some(self.sd_code)
     }
 
+    /// Kind 3: decode row `k` into `row` (forward in the cursor's chunk
+    /// when it is ahead, else from the chunk holding it).
+    fn fast_seek(&mut self, k: u32) -> bool {
+        let fwd = self.fc.is_some_and(|c| self.fk != u32::MAX && k > self.fk && k < c.row0 + c.nrows);
+        if !fwd {
+            let mut at = match self.fc {
+                Some(c) if k >= c.row0 => c.off,
+                _ => self.fstart,
+            };
+            loop {
+                let Some(c) = fchunk_at(&mut self.s, &mut self.win, at, self.size, false) else {
+                    self.fc = None;
+                    self.fk = u32::MAX;
+                    return false;
+                };
+                if k < c.row0 + c.nrows {
+                    self.fc = Some(c);
+                    self.fd = FDec::new(&c, self.fp.p_us());
+                    self.fk = c.row0.wrapping_sub(1);
+                    break;
+                }
+                at = c.end();
+            }
+        }
+        while self.fk != k {
+            let Some((t, v, dt)) = self.fd.next(&mut self.s, &mut self.win) else {
+                self.fc = None;
+                self.fk = u32::MAX;
+                return false;
+            };
+            self.fk = self.fk.wrapping_add(1);
+            if self.fk == k {
+                let fp = self.fp;
+                let mut r = [0u8; ROW_MAX];
+                fast_row(t, v, fast_lost(dt, fp.rate_mhz), &fp, &mut r);
+                self.row = r;
+            }
+        }
+        true
+    }
+
+    /// Kind 3: parameters (gallery).
+    pub fn fast_par(&self) -> FPar {
+        self.fp
+    }
+
     /// CSV bytes `off .. off + buf.len()` (zeros past the end).
     pub fn read(&mut self, mut off: u32, buf: &mut [u8]) {
         let mut i = 0;
@@ -1414,6 +1503,19 @@ impl<S: Src> Gen<S> {
                 if !self.header_text(off, &mut buf[i..i + n]) {
                     return;
                 }
+                i += n;
+                off += n as u32;
+                continue;
+            }
+            if self.info.kind == KIND_FAST {
+                let wd = self.fp.row_len();
+                let k = (off - self.info.hl) / wd;
+                if self.fk != k && !self.fast_seek(k) {
+                    return;
+                }
+                let o = ((off - self.info.hl) % wd) as usize;
+                let n = (wd as usize - o).min(buf.len() - i);
+                buf[i..i + n].copy_from_slice(&self.row[o..o + n]);
                 i += n;
                 off += n as u32;
                 continue;
@@ -1461,6 +1563,271 @@ impl<S: Src> Gen<S> {
             off += n as u32;
         }
     }
+}
+
+// ------------------------------------------------------------- fast log (kind 3)
+
+/// Kind 3 (the fast logger's stream, fastlog.rs; docs/compact-log-format.md
+/// "Fast stream"): after the header text FAST_PAR bytes of parameters
+/// (f32 a, f32 b: value = a + b * raw; u32 nominal rate in mHz; u8 flags
+/// (FP_SCALED: the value column exists), u8 source (1 AD1, 2 AD2), u8 DMM
+/// mode, i8 range, 12 bytes 0, u32 CRC-32 of the 28 bytes before it), then
+/// chunks:
+///   0 "DC", 2 u16 payload bytes pl, 4 u32 CRC-32 of the payload FOLLOWED by
+///   bytes 8..28 (the writer patches the header in after the payload went
+///   out), 8 u32 first row, 12 u32 t0 low / 16 u16 t0 high (us of the first
+///   row, 48 bit), 18 u16 rows, 20 u32 dt0 (us from the previous row, 0 for
+///   the file's first), 24 i32 v0 (raw value of the first row), 28 payload.
+/// Rows 1.. of a chunk: Rice(zz(dt - dt_prev)) then Rice(zz(raw - raw_prev)),
+/// adaptive as kind 1 (time A0 4, value A0 16), dt_prev starting at the
+/// nominal period (`FPar::p_us`).
+/// CSV (fixed width, so its size is hl + rows * `row_len` and a seek is a
+/// division): `t_s,raw,value_<unit>,lost_before` (AD2, scaled) or
+/// `t_s,raw,lost_before` (AD1, raw counts): t_s = the device us clock /
+/// 1e6, 6 decimals (dm40scpi.py `log`'s column), lost_before = conversions
+/// missing before the row: round(dt / nominal period) - 1 (a stall, the ring
+/// full, the disk too slow: all show as a stamp gap).
+pub const KIND_FAST: u8 = 3;
+pub const FAST_PAR: usize = 32;
+/// FPar::flags: the value column (a, b valid).
+pub const FP_SCALED: u8 = 1;
+/// Row widths: t_s 14, raw 8, value 12, lost_before 7, CR LF.
+pub const FROW_SCALED: u32 = 14 + 1 + 8 + 1 + 12 + 1 + 7 + 2;
+pub const FROW_RAW: u32 = 14 + 1 + 8 + 1 + 7 + 2;
+const FLOST_MAX: u32 = 9_999_999;
+const AF_T0: u32 = 4;
+const AF_V0: u32 = 16;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FPar {
+    pub a: f32,
+    pub b: f32,
+    pub rate_mhz: u32,
+    pub flags: u8,
+    pub src: u8,
+    pub mode: u8,
+    pub range: i8,
+}
+
+impl FPar {
+    pub fn row_len(&self) -> u32 {
+        if self.flags & FP_SCALED != 0 { FROW_SCALED } else { FROW_RAW }
+    }
+    /// Nominal period, us (rounded): the time coder's first dt_prev.
+    pub fn p_us(&self) -> u32 {
+        let r = self.rate_mhz.max(1) as u64;
+        ((1_000_000_000 + r / 2) / r) as u32
+    }
+    pub fn bytes(&self) -> [u8; FAST_PAR] {
+        let mut p = [0u8; FAST_PAR];
+        p[0..4].copy_from_slice(&self.a.to_le_bytes());
+        p[4..8].copy_from_slice(&self.b.to_le_bytes());
+        p[8..12].copy_from_slice(&self.rate_mhz.to_le_bytes());
+        p[12] = self.flags;
+        p[13] = self.src;
+        p[14] = self.mode;
+        p[15] = self.range as u8;
+        let c = !crc32_upd(!0, &p[..28]);
+        p[28..32].copy_from_slice(&c.to_le_bytes());
+        p
+    }
+    pub fn parse(p: &[u8]) -> Option<FPar> {
+        if p.len() < FAST_PAR || !crc32_upd(!0, &p[..28]) != le32(p, 28) {
+            return None;
+        }
+        let f = |o: usize| f32::from_le_bytes([p[o], p[o + 1], p[o + 2], p[o + 3]]);
+        let fp = FPar { a: f(0), b: f(4), rate_mhz: le32(p, 8), flags: p[12], src: p[13], mode: p[14], range: p[15] as i8 };
+        (fp.rate_mhz != 0).then_some(fp)
+    }
+}
+
+/// Conversions missing before a row `dt_us` after the previous one.
+pub fn fast_lost(dt_us: u32, rate_mhz: u32) -> u32 {
+    let n = (dt_us as u64 * rate_mhz as u64 + 500_000_000) / 1_000_000_000;
+    (n.saturating_sub(1)).min(FLOST_MAX as u64) as u32
+}
+
+/// `v` right-aligned in `out` (spaces before), "-" for negatives.
+fn rjust(out: &mut [u8], v: i64) {
+    let mut x = v.unsigned_abs();
+    let mut i = out.len();
+    loop {
+        i -= 1;
+        out[i] = b'0' + (x % 10) as u8;
+        x /= 10;
+        if x == 0 || i == 0 {
+            break;
+        }
+    }
+    if v < 0 && i > 0 {
+        i -= 1;
+        out[i] = b'-';
+    }
+    out[..i].fill(b' ');
+}
+
+/// One kind-3 CSV row into `out` (`row_len` bytes, returned).
+pub fn fast_row(t_us: u64, raw: i32, lost: u32, p: &FPar, out: &mut [u8]) -> usize {
+    // t_s: 7 integer digits (2^48 us would need 9: capped, never reached)
+    let s = (t_us / 1_000_000).min(9_999_999);
+    rjust(&mut out[0..7], s as i64);
+    out[7] = b'.';
+    let mut f = (t_us % 1_000_000) as u32;
+    for i in (8..14).rev() {
+        out[i] = b'0' + (f % 10) as u8;
+        f /= 10;
+    }
+    out[14] = b',';
+    rjust(&mut out[15..23], raw as i64);
+    out[23] = b',';
+    let mut k = 24;
+    if p.flags & FP_SCALED != 0 {
+        sci(&mut out[24..36], p.a + p.b * raw as f32, 5);
+        out[36] = b',';
+        k = 37;
+    }
+    rjust(&mut out[k..k + 7], lost.min(FLOST_MAX) as i64);
+    out[k + 7] = b'\r';
+    out[k + 8] = b'\n';
+    k + 9
+}
+
+/// A kind-3 chunk header.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FChunk {
+    pub off: u32,
+    pub pl: u32,
+    pub row0: u32,
+    pub t0: u64,
+    pub nrows: u32,
+    pub dt0: u32,
+    pub v0: i32,
+}
+
+impl FChunk {
+    pub fn end(&self) -> u32 {
+        self.off + CHDR as u32 + self.pl
+    }
+}
+
+/// The kind-3 chunk header at `off` if whole within `size` (with `check`:
+/// its CRC over the payload, then header bytes 8..28, matches).
+pub fn fchunk_at<S: Src>(s: &mut S, w: &mut Win, off: u32, size: u32, check: bool) -> Option<FChunk> {
+    let mut h = [0u8; CHDR];
+    if off.checked_add(CHDR as u32)? > size || !s.read(off, &mut h) || h[0] != b'D' || h[1] != b'C' {
+        return None;
+    }
+    let c = FChunk {
+        off,
+        pl: le16(&h, 2),
+        row0: le32(&h, 8),
+        t0: le32(&h, 12) as u64 | (le16(&h, 16) as u64) << 32,
+        nrows: le16(&h, 18),
+        dt0: le32(&h, 20),
+        v0: le32(&h, 24) as i32,
+    };
+    if c.nrows == 0 || c.end() > size {
+        return None;
+    }
+    if check {
+        let mut crc = !0u32;
+        let mut o = off + CHDR as u32;
+        while o < c.end() {
+            let b = w.byte(s, o, c.end())?;
+            crc = crc32_upd(crc, &[b]);
+            o += 1;
+        }
+        crc = crc32_upd(crc, &h[8..]);
+        if !crc != le32(&h, 4) {
+            return None;
+        }
+    }
+    Some(c)
+}
+
+/// Row decoder of one kind-3 chunk.
+#[derive(Clone, Copy)]
+struct FDec {
+    pos: u32,
+    bit: u32,
+    end: u32,
+    left: u32,
+    first: bool,
+    t: u64,
+    dt: u32,
+    dt0: u32,
+    v: i32,
+    at: Ad,
+    av: Ad,
+}
+
+impl FDec {
+    const IDLE: FDec = FDec { pos: 0, bit: 0, end: 0, left: 0, first: false, t: 0, dt: 0, dt0: 0, v: 0, at: Ad::new(AF_T0), av: Ad::new(AF_V0) };
+
+    fn new(c: &FChunk, p_us: u32) -> FDec {
+        FDec { pos: c.off + CHDR as u32, end: c.end(), left: c.nrows, first: true, t: c.t0, dt: p_us, dt0: c.dt0, v: c.v0, ..FDec::IDLE }
+    }
+
+    fn get<S: Src>(&mut self, s: &mut S, w: &mut Win, mut bits: u32) -> Option<u32> {
+        let mut v = 0u32;
+        while bits > 0 {
+            let b = w.byte(s, self.pos, self.end)?;
+            let take = (8 - self.bit).min(bits);
+            let x = (b >> (8 - self.bit - take)) as u32 & ((1u32 << take) - 1);
+            v = if take == 32 { x } else { (v << take) | x };
+            self.bit += take;
+            bits -= take;
+            if self.bit == 8 {
+                self.bit = 0;
+                self.pos += 1;
+            }
+        }
+        Some(v)
+    }
+
+    fn rice<S: Src>(&mut self, s: &mut S, w: &mut Win, k: u32) -> Option<u32> {
+        let mut q = 0;
+        while q < QMAX && self.get(s, w, 1)? == 1 {
+            q += 1;
+        }
+        if q == QMAX {
+            return self.get(s, w, 32);
+        }
+        Some((q << k) | self.get(s, w, k)?)
+    }
+
+    /// The next row: (t us, raw, us since the previous row).
+    fn next<S: Src>(&mut self, s: &mut S, w: &mut Win) -> Option<(u64, i32, u32)> {
+        if self.left == 0 {
+            return None;
+        }
+        self.left -= 1;
+        if self.first {
+            self.first = false;
+            return Some((self.t, self.v, self.dt0));
+        }
+        let x = self.rice(s, w, self.at.k())?;
+        self.at.upd(x);
+        self.dt = self.dt.wrapping_add(unzz(x) as u32);
+        self.t += self.dt as u64;
+        let u = self.rice(s, w, self.av.k())?;
+        self.av.upd(u);
+        self.v = self.v.wrapping_add(unzz(u));
+        Some((self.t, self.v, self.dt))
+    }
+}
+
+/// Rows of kind-3 chunk `c` to `f(t_us, raw, dt_us)` (gallery). False on a
+/// decode error.
+pub fn fast_rows<S: Src>(s: &mut S, w: &mut Win, c: &FChunk, p: &FPar, f: &mut dyn FnMut(u64, i32, u32)) -> bool {
+    let mut d = FDec::new(c, p.p_us());
+    for _ in 0..c.nrows {
+        match d.next(s, w) {
+            Some((t, v, dt)) => f(t, v, dt),
+            None => return false,
+        }
+    }
+    true
 }
 
 // ------------------------------------------------------------- FAT16 files
@@ -1570,20 +1937,31 @@ pub struct Ent {
     pub size: u32,
 }
 
-/// `<prefix>NNN.DLG` (prefix LOG or SCOP): Some(prefix length).
+/// `<prefix>NNN.DLG` (prefix LOG, SCOP or FAST): Some(prefix length).
+/// SCOP and FAST are both 4 long: `dlg_prefix` tells them apart.
 pub fn dlg_name(n: &[u8]) -> Option<usize> {
+    dlg_prefix(n).map(|p| p.len())
+}
+
+/// The prefix of a `<prefix>NNN.DLG` name: b"LOG" (DMM recordings,
+/// LOGS/), b"SCOP" (scope records, SCOPE/), b"FAST" (the fast logger,
+/// LOGS/); None for any other name.
+pub fn dlg_prefix(n: &[u8]) -> Option<&'static [u8]> {
     let up = |c: u8| c.to_ascii_uppercase();
     if up(n[8]) != b'D' || up(n[9]) != b'L' || up(n[10]) != b'G' {
         return None;
     }
-    let p = if n[..3].eq_ignore_ascii_case(b"LOG") {
-        3
+    let p: &'static [u8] = if n[..3].eq_ignore_ascii_case(b"LOG") {
+        b"LOG"
     } else if n[..4].eq_ignore_ascii_case(b"SCOP") {
-        4
+        b"SCOP"
+    } else if n[..4].eq_ignore_ascii_case(b"FAST") {
+        b"FAST"
     } else {
         return None;
     };
-    (n[p..p + 3].iter().all(|c| c.is_ascii_digit()) && n[p + 3..8].iter().all(|&c| c == b' ')).then_some(p)
+    let k = p.len();
+    (n[k..k + 3].iter().all(|c| c.is_ascii_digit()) && n[k + 3..8].iter().all(|&c| c == b' ')).then_some(p)
 }
 
 /// Directory of the DMM logs / scope records on the SPI disk (fatdir.rs;
@@ -1654,7 +2032,7 @@ fn file_entry(e: &[u8; 32]) -> Option<Ent> {
     Some(Ent { name, start: le16(e, 0x1A), size: le32(e, 0x1C) })
 }
 
-/// Files `LOGnnn.DLG` / `SCOPnnn.DLG` to `f`: the root's (earlier builds),
+/// Files `LOGnnn.DLG` / `FASTnnn.DLG` / `SCOPnnn.DLG` to `f`: the root's (earlier builds),
 /// then LOGS/, then SCOPE/, each in directory order.
 pub fn scan(raw: &mut dyn Raw, g: &Geo, f: &mut dyn FnMut(&Ent)) -> bool {
     let dirs = [None, dir_start(raw, g, &DIR_LOGS), dir_start(raw, g, &DIR_SCOPE)];
@@ -1763,9 +2141,9 @@ pub fn open(name: &[u8; 11]) -> Option<DiskGen> {
 /// The directory a file of ours lives in (fatdir.rs `dir_of`).
 pub fn dir_of(n: &[u8; 11]) -> Option<[u8; 11]> {
     let up = |c: u8| c.to_ascii_uppercase();
-    match (dlg_name(n), [up(n[8]), up(n[9]), up(n[10])]) {
-        (Some(3), _) => Some(DIR_LOGS),
-        (Some(_), _) => Some(DIR_SCOPE),
+    match (dlg_prefix(n), [up(n[8]), up(n[9]), up(n[10])]) {
+        (Some(b"SCOP"), _) => Some(DIR_SCOPE),
+        (Some(_), _) => Some(DIR_LOGS),
         (None, x) if &x == b"BMP" && up(n[0]) == b'S' => Some(DIR_SHOTS),
         _ => None,
     }
