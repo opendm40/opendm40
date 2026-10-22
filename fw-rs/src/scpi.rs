@@ -102,8 +102,11 @@
 //!     continuity / diode) | DC (hint: DC on V/ohm in AC V) | AC (hint: AC in
 //!     DC V 6 V) | FUSE (hint: an A function at zero for 60 s)
 //!   SYSTem:ALERt:ENABle <mask> | ON | OFF / ?   alerts enabled, bit 0 AJACK,
-//!     1 VJACK and the DC / AC / FUSE hints, 2 LIVE (default 7 = ON; Settings
-//!     3/3 "Jack alerts", persisted)
+//!     1 VJACK and the DC / AC / FUSE hints, 2 LIVE (Settings 3/3 "Jack
+//!     alerts"), 3 the "Leads in A?" reminder (a toast + beep on a change from
+//!     a current function to a non-current one, doc 4.9; Settings 3/3 "A-lead
+//!     reminder"); default 15 = ON, persisted. A host script that switches
+//!     between A and V functions with leads in both jacks clears bit 3
 //!     OVERLOAD (the uA / mA shunt over range: the meter moved to the 10 A
 //!     shunt, latched; doc 4.7) is not maskable
 //!   SYSTem:FUSE:TEST   start the fuse check (doc 4.3: one lead from V/ohm to
@@ -401,6 +404,9 @@ pub enum Log {
 ///   DBG:SENTinel?           misconnect sentinel (sentinel.rs): kind,alert,mask,
 ///                           ctsta,pkhmin,pkhmax,streak,hit_windows,samples,
 ///                           probe_mA,aprot_ms (A-jack protection, doc 4.8)
+///   DBG:LEADs?              "Leads in A?" reminders since power-on: n,from,to
+///                           (Dmm::func codes of the last change that fired;
+///                           255 = none yet; doc 4.9)
 ///   DBG:SENTinel:VARiant <0..31> / ?
 ///                           device-check row variants, RAM only (sentinel.rs
 ///                           VAR_*): +1 AC V keeps OP1's chopper (9dd1222 row),
@@ -595,10 +601,12 @@ pub enum Cmd {
     /// SYSTem:FUSE:TEST (true) / SYSTem:FUSE? (false).
     SysFuse(bool),
     /// SYSTem:ALERt:ENABle <mask> | ON | OFF / ?: alerts enabled (bit 0
-    /// A-JACK, 1 V-JACK?, 2 LIVE?).
+    /// A-JACK, 1 V-JACK?, 2 LIVE?, 3 the "Leads in A?" reminder).
     SysAlertEnable(Option<u8>),
     /// DBG:SENTinel?: sentinel raw state (Sentinel::diag_text).
     DbgSent,
+    /// DBG:LEADs?: the "Leads in A?" reminder count and last change.
+    DbgLeads,
     /// DBG:SENTinel:VARiant <0..31> / ?: device-check row variants
     /// (sentinel::VAR_*, RAM only).
     DbgSentVar(Option<u8>),
@@ -1201,7 +1209,7 @@ impl Scpi {
                         match on_off(a) {
                             Some(on) => Cmd::SysAlertEnable(Some(if on { crate::sentinel::M_ALL } else { 0 })),
                             None => match parse_num(a) {
-                                Some(v) if (0.0..=7.0).contains(&v) && v == (v as u8) as f32 => Cmd::SysAlertEnable(Some(v as u8)),
+                                Some(v) if (0.0..=15.0).contains(&v) && v == (v as u8) as f32 => Cmd::SysAlertEnable(Some(v as u8)),
                                 _ => {
                                     self.err = Some("Illegal parameter value");
                                     continue;
@@ -1353,6 +1361,7 @@ impl Scpi {
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
+                _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "LEADs") => out = Out::Instr(Cmd::DbgLeads),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {
                     let c = match (parts.get(2).copied(), parts.get(3).copied(), query) {
                         (None, _, true) => Some(Cmd::DbgHwTrig(0, false)),

@@ -132,6 +132,10 @@ SECTIONS
         *(.text.*7dm40_fw3app*3App11burden_scpi*);
         *(.text.*7dm40_fw3app*3App12burden_shunt*);
         *(.text.*7dm40_fw3dmm*3Dmm9burden_of*);
+        /* "Leads in A?" reminder's beep / toast (once per function change;
+         * the per-pass check App::leads_tick stays in B). */
+        *(.text.*7dm40_fw3app*3App12leads_remind*);
+        *(.text.*7dm40_fw3app*3App11leads_toast*);
         /* NOT persist: its crc runs on every main-loop pass (device
          * f5f8e96: lat_pc in persist::crc, 9..18 us stalls). */
         /* ... and their named read-only data (tables, strings in statics). */

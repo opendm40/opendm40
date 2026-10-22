@@ -36,7 +36,12 @@ use crate::hy3131::CFG_LEN;
 pub const M_AJACK: u8 = 1;
 pub const M_VJACK: u8 = 2;
 pub const M_LIVE: u8 = 4;
-pub const M_ALL: u8 = 7;
+/// The "Leads in A?" reminder (`Leads`): no sentinel, no row change; its
+/// own Settings 3/3 row "A-lead reminder".
+pub const M_LEADS: u8 = 8;
+/// The sentinel alerts ("Jack alerts" ON = all three).
+pub const M_JACK: u8 = 7;
+pub const M_ALL: u8 = 15;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Alert {
@@ -923,10 +928,116 @@ fn itoa(b: &mut [u8; 12], v: i32) -> &[u8] {
     &b[i..]
 }
 
+/// "Leads in A?" reminder (TODO, the closest stand-in for the UNI-T UT197
+/// "InErr": doc 4.9). The DM40 has no jack sense, so a test lead left in the
+/// A jack is invisible until a current flows (then A-JACK, 4.6). The moment
+/// the UT197 warns is the function change away from a current one, so this
+/// fires on every change from a current function (DC / AC / AC+DC A, the
+/// power meter: their leads use the A jack) to a non-current one: one toast
+/// (`LEADS_TOAST`) and one beep, no repeat, no tap to dismiss - the firmware
+/// cannot tell whether the lead was moved, so it reminds once and the A-JACK
+/// sentinel takes over if a current does flow. (The TODO's "Leads in the A
+/// jack? Move to V" leaves 1 px to the toast frame: ui-render margin rule.)
+pub const LEADS_TOAST: &str = "Leads in A jack? Move to V";
+
+/// The HY3131 modes whose leads use the A jack (DC / AC A 4..=9, also as
+/// the phases of A AC+DC); the power meter counts as one too (`Dmm::
+/// uses_a_jack`). None: no mode in force (a row change in progress, 255).
+pub fn mode_uses_a(mode: u8) -> Option<bool> {
+    match mode {
+        4..=9 => Some(true),
+        0..=3 | 10..=15 => Some(false),
+        _ => None,
+    }
+}
+
+/// State of the reminder: the A-use of the function last seen.
+pub struct Leads {
+    prev: Option<bool>,
+    /// Reminders so far and the last change (from, to) that fired one
+    /// (DBG:LEADs?).
+    pub n: u32,
+    pub last: (u8, u8),
+    prev_f: u8,
+}
+
+impl Leads {
+    pub const fn new() -> Self {
+        Leads { prev: None, n: 0, last: (255, 255), prev_f: 255 }
+    }
+
+    /// Per main-loop pass: `a` the A-jack use of the function in force
+    /// (`Dmm::uses_a_jack`), `f` its code (`Dmm::func`, for DBG:LEADs?);
+    /// `hold`: a fuse check runs (it puts a lead in the A jack on purpose
+    /// and comes back to the function it left): nothing changes. `on`:
+    /// M_LEADS is set. True = remind now.
+    pub fn feed(&mut self, a: Option<bool>, f: u8, hold: bool, on: bool) -> bool {
+        let Some(a) = a else { return false };
+        if hold {
+            return false;
+        }
+        let fire = on && self.prev == Some(true) && !a;
+        if fire {
+            self.n = self.n.wrapping_add(1);
+            self.last = (self.prev_f, f);
+        }
+        self.prev = Some(a);
+        self.prev_f = f;
+        fire
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hy3131_tables::*;
+
+    #[test]
+    fn leads_reminder() {
+        // (A-jack use, code) of the functions: Dmm::func codes.
+        let f = |c: u8| -> (Option<bool>, u8) {
+            match c {
+                17 | 18 => (Some(true), c),
+                16 => (Some(false), c),
+                _ => (mode_uses_a(c), c),
+            }
+        };
+        let mut l = Leads::new();
+        let mut feed = |c: u8, hold: bool, on: bool| {
+            let (a, c) = f(c);
+            l.feed(a, c, hold, on)
+        };
+        // The first function seen (boot, restore) never fires.
+        assert!(!feed(7, false, true));
+        assert!(!feed(7, false, true));
+        // DC A -> DC V: once.
+        assert!(feed(1, false, true));
+        assert!(!feed(1, false, true));
+        // V -> A, A -> A (AC A, A AC+DC, the power meter): never.
+        for c in [8, 4, 17, 18, 9] {
+            assert!(!feed(c, false, true));
+        }
+        // A row change in progress (255) is no function.
+        assert!(!feed(255, false, true));
+        // Power meter / DC A -> ohm.
+        assert!(feed(10, false, true));
+        // V -> V: never; masked: no reminder, but the state follows.
+        assert!(!feed(16, false, true));
+        assert!(!feed(4, false, true));
+        assert!(!feed(0, false, false));
+        assert!(!feed(4, false, false));
+        // Fuse check from AC A (ohm while it runs) back to AC A: nothing.
+        assert!(!feed(10, true, true));
+        assert!(!feed(4, false, true));
+        // The check aborted by a V choice: the change A -> V counts.
+        assert!(!feed(10, true, true));
+        assert!(feed(1, false, true));
+        assert_eq!((l.n, l.last), (3, (4, 1)));
+        for m in 0..=15u8 {
+            assert_eq!(mode_uses_a(m), Some(matches!(m, 4..=9)), "mode {m}");
+        }
+        assert_eq!(mode_uses_a(255), None);
+    }
 
     /// Bytes of `got` that differ from `stock`, as (index, stock, got).
     fn diff(stock: &[u8; CFG_LEN], got: &[u8; CFG_LEN]) -> Vec<(usize, u8, u8)> {
@@ -1607,6 +1718,6 @@ mod tests {
         s.sample_peak(100, -5, 7);
         let mut b = [0u8; 96];
         let n = s.diag_text(&mut b);
-        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,7,0,-5,7,0,0,1,0,0");
+        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,15,0,-5,7,0,0,1,0,0");
     }
 }
