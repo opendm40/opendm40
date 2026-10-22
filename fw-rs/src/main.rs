@@ -966,6 +966,14 @@ fn main() -> ! {
         // once nothing changed for 1 s and no on-device writer holds the disk.
         #[cfg(feature = "vdisk")]
         {
+            // Host writes on the volume (vwrite.rs): a delete's SPI part, a
+            // firmware file's check + commit; Yes in its dialog = DBG:UPDATE.
+            vwrite::poll(now, logger.disk_writes_blocked());
+            if vwrite::take_install() && reset_at.is_none() {
+                if boot::enter_loader_update() {
+                    reset_at = Some(now + 50);
+                }
+            }
             if dlog::gen() != vd_gen {
                 vd_gen = dlog::gen();
                 vd_t = now;
@@ -1198,6 +1206,8 @@ mod fatren;
 mod calbackup;
 #[cfg(feature = "vdisk")]
 mod vdisk;
+#[cfg(feature = "vdisk")]
+mod vwrite;
 mod dialog;
 mod screenshot;
 mod scope_csv;

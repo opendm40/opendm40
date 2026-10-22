@@ -74,17 +74,17 @@ use crate::msc::BlockDevice;
 
 pub const BS: usize = 512;
 /// Sectors per cluster, and bytes per cluster.
-const SPC: u32 = 64;
-const CB: u32 = SPC * BS as u32;
+pub(crate) const SPC: u32 = 64;
+pub(crate) const CB: u32 = SPC * BS as u32;
 const RSVD: u32 = 1;
 const NFATS: u32 = 2;
 const ROOT_ENTRIES: u32 = 512;
 const ROOT_SECS: u32 = ROOT_ENTRIES * 32 / BS as u32;
 pub const CLUSTERS: u32 = 65_000;
-const FAT_SECS: u32 = ((CLUSTERS + 2) * 2).div_ceil(BS as u32);
-const FAT_START: u32 = RSVD;
-const ROOT_START: u32 = RSVD + NFATS * FAT_SECS;
-const DATA_START: u32 = ROOT_START + ROOT_SECS;
+pub(crate) const FAT_SECS: u32 = ((CLUSTERS + 2) * 2).div_ceil(BS as u32);
+pub(crate) const FAT_START: u32 = RSVD;
+pub(crate) const ROOT_START: u32 = RSVD + NFATS * FAT_SECS;
+pub(crate) const DATA_START: u32 = ROOT_START + ROOT_SECS;
 pub const TOTAL: u32 = DATA_START + CLUSTERS * SPC;
 const _: () = assert!(CLUSTERS >= 4085 + 16 && CLUSTERS < 65525 - 16, "FAT16 by the cluster count, with a margin");
 pub const LABEL: [u8; 11] = *b"DM40       ";
@@ -113,7 +113,7 @@ const C_FILES: u32 = 8;
 /// DEBUG/SPIFLASH.BIN: the W25Q128, 16 MiB.
 pub const SPI_BYTES: u32 = 16 << 20;
 /// Root entries after the label: README.TXT, INFO, DEBUG, LOGS, SCOPE, SHOTS.
-const ROOT_N: usize = 6;
+pub(crate) const ROOT_N: usize = 6;
 /// Generated directories, file kinds: (name, file prefix, file extension).
 const VDIRS: [([u8; 11], &[u8], [u8; 3]); 3] = [
     (*b"LOGS       ", b"LOG", *b"CSV"),
@@ -154,21 +154,39 @@ struct State {
     dyn0: u32,
 }
 
-/// One generated file of LOGS / SCOPE / SHOTS. `id` = kind << 10 | number
-/// (the name), `slot` its directory slot, `vstart` its first cluster here,
+/// One generated file of LOGS / SCOPE / SHOTS. `id` = flags | kind << 10 |
+/// number (kind + number = the name, `ID`; flags `T_*`: a host delete in
+/// progress, vwrite.rs), `slot` its directory slot, `vstart` its first cluster here,
 /// `src` / `ssize` the SPI file (first cluster, bytes), `vsize` its size
 /// here (the CSV's for a DLG).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct VF {
-    id: u16,
-    slot: u16,
-    vstart: u16,
-    src: u16,
-    ssize: u32,
-    vsize: u32,
+pub(crate) struct VF {
+    pub id: u16,
+    pub slot: u16,
+    pub vstart: u16,
+    pub src: u16,
+    pub ssize: u32,
+    pub vsize: u32,
 }
 
 const VF0: VF = VF { id: 0, slot: 0, vstart: 0, src: 0, ssize: 0, vsize: 0 };
+/// `VF::id`: kind + number (the name).
+pub(crate) const ID: u16 = 0x0FFF;
+/// The host marked its directory entry deleted (0xE5): the slot shows the
+/// entry with 0xE5 (vwrite.rs).
+pub(crate) const T_DIR: u16 = 1 << 12;
+/// The host freed its chain in the FAT: shown free, data reads zeros.
+pub(crate) const T_FAT: u16 = 1 << 13;
+/// The SPI file is gone (deleted while the layout is frozen, by the host's
+/// delete or on the meter): data reads zeros, the entry stays until the
+/// session ends.
+pub(crate) const T_SRC: u16 = 1 << 14;
+/// Every flag.
+pub(crate) const T_ALL: u16 = T_DIR | T_FAT | T_SRC;
+
+fn kind(id: u16) -> usize {
+    ((id >> 10) & 3) as usize
+}
 
 /// The dynamic table, ascending `vstart` (allocation is append-only, a
 /// compaction keeps the order), so the FAT and data lookups bisect it.
@@ -297,18 +315,24 @@ fn ours(n: &[u8; 11]) -> Option<(usize, u16)> {
 }
 
 /// 8.3 name of table id `id` on this volume ("LOG007  CSV").
-fn vname(id: u16) -> [u8; 11] {
-    let (pre, ext) = (VDIRS[(id >> 10) as usize].1, &VDIRS[(id >> 10) as usize].2);
+pub(crate) fn vname(id: u16) -> [u8; 11] {
+    let (pre, ext) = (VDIRS[kind(id)].1, &VDIRS[kind(id)].2);
     crate::calbackup::numbered_name(pre, id & 0x3FF, ext)
 }
 
-fn nclus(size: u32) -> u32 {
+/// 8.3 name of table id `id` on the SPI disk ("LOG007  DLG").
+pub(crate) fn spi_name(id: u16) -> [u8; 11] {
+    let ext: &[u8; 3] = if kind(id) == 2 { b"BMP" } else { b"DLG" };
+    crate::calbackup::numbered_name(VDIRS[kind(id)].1, id & 0x3FF, ext)
+}
+
+pub(crate) fn nclus(size: u32) -> u32 {
     size.div_ceil(CB)
 }
 
 /// Every SPI file of ours (root, LOGS/, SCOPE/, SHOTS/) to `f(id, start,
 /// size)`, except `exclude` (8.3 SPI name). False: no disk / a read failed.
-fn scan_spi(exclude: Option<[u8; 11]>, f: &mut dyn FnMut(u16, u16, u32)) -> bool {
+pub(crate) fn scan_spi(exclude: Option<[u8; 11]>, f: &mut dyn FnMut(u16, u16, u32)) -> bool {
     let mut d = dlog::disk();
     let Some(g) = dlog::geometry(&mut d) else {
         return false;
@@ -344,7 +368,7 @@ fn scan_spi(exclude: Option<[u8; 11]>, f: &mut dyn FnMut(u16, u16, u32)) -> bool
 /// Size on this volume of SPI file `id` (start, size): the generated CSV's
 /// for a DLG (None: not a valid DLG), the file's own for a BMP.
 fn vsize_of(id: u16, src: u16, ssize: u32) -> Option<u32> {
-    if id >> 10 == 2 {
+    if kind(id) == 2 {
         return (ssize > 0).then_some(ssize);
     }
     let mut d = dlog::disk();
@@ -368,7 +392,7 @@ fn compact(t: &mut Tab) -> bool {
     let mut sl = [2u16; 3];
     let mut moved = false;
     for e in t.e[..t.n].iter_mut() {
-        let k = (e.id >> 10) as usize;
+        let k = kind(e.id);
         moved |= e.slot != sl[k] || e.vstart as u32 != c;
         e.slot = sl[k];
         e.vstart = c as u16;
@@ -387,11 +411,11 @@ fn compact(t: &mut Tab) -> bool {
 fn add_new(t: &mut Tab, exclude: Option<[u8; 11]>) -> (u32, u32, u32) {
     let (mut added, mut out, mut full) = (0u32, 0u32, 0u32);
     scan_spi(exclude, &mut |id, src, ssize| {
-        if t.e[..t.n].iter().any(|e| e.id == id) {
+        if t.e[..t.n].iter().any(|e| e.id & ID == id) {
             return; // present (or a duplicate number: the first one stays)
         }
         let Some(vsize) = vsize_of(id, src, ssize) else { return };
-        let k = (id >> 10) as usize;
+        let k = kind(id);
         let need = nclus(vsize);
         if t.n == MAX_VF {
             full += 1;
@@ -418,13 +442,19 @@ pub fn refresh(exclude: Option<[u8; 11]>) -> usize {
     if state().is_none() {
         return 0;
     }
+    // A host that can write holds the volume (vwrite.rs): its cached FAT /
+    // directories must stay what it wrote; the change waits (stale stays
+    // set) for the session's end.
+    if crate::vwrite::frozen() {
+        return tab().n;
+    }
     dlog::clear_stale();
     let t = tab();
     // 1. Keep the files that are still there unchanged (same first cluster
     //    and size), drop the others.
     let mut seen = [0u32; MAX_VF.div_ceil(32)];
     let ok = scan_spi(exclude, &mut |id, src, ssize| {
-        if let Some(i) = t.e[..t.n].iter().position(|e| e.id == id && e.src == src && e.ssize == ssize) {
+        if let Some(i) = t.e[..t.n].iter().position(|e| e.id & ID == id && e.src == src && e.ssize == ssize) {
             seen[i / 32] |= 1 << (i % 32);
         }
     });
@@ -482,15 +512,88 @@ pub fn forget(name: &[u8; 11]) {
     let Some((k, num)) = ours(name) else { return };
     let t = tab();
     let id = (k as u16) << 10 | num;
-    if let Some(i) = t.e[..t.n].iter().position(|e| e.id == id) {
-        remove(t, i);
-        CHANGED.store(true, core::sync::atomic::Ordering::Relaxed);
+    if let Some(i) = t.e[..t.n].iter().position(|e| e.id & ID == id) {
+        if crate::vwrite::frozen() || t.e[i].id & T_ALL != 0 {
+            // The host may hold it (or is deleting it): the entry stays as
+            // the host knows it, its data reads zeros from now on.
+            t.e[i].id |= T_SRC;
+        } else {
+            remove(t, i);
+            CHANGED.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
     }
+}
+
+/// The table (vwrite.rs).
+pub(crate) fn entries() -> &'static mut [VF] {
+    if state().is_none() {
+        return &mut [];
+    }
+    let t = tab();
+    &mut t.e[..t.n]
+}
+
+/// The host session ended (vwrite.rs `release`): every tomb flag cleared (a
+/// file still on the SPI disk is live again, the next `refresh` drops the
+/// deleted ones).
+pub(crate) fn clear_flags() {
+    for e in entries() {
+        e.id &= ID;
+    }
+}
+
+/// Who owns cluster `c` in the generated layout (overlays not counted).
+pub(crate) enum Owner {
+    /// Media / reserved entries 0 and 1, or past the last cluster.
+    Reserved,
+    /// A directory, README.TXT, an INFO/ file, SPIFLASH.BIN.
+    Fixed,
+    /// Table entry `i`.
+    Dyn(usize),
+    Free,
+}
+
+pub(crate) fn owner(c: u32) -> Owner {
+    if c < 2 || c >= CLUSTERS + 2 || state().is_none() {
+        return Owner::Reserved;
+    }
+    if c < st_dyn0() {
+        return Owner::Fixed;
+    }
+    let t = tab();
+    let i = t.e[..t.n].partition_point(|e| e.vstart as u32 <= c);
+    match i.checked_sub(1) {
+        Some(j) if c < t.e[j].vstart as u32 + nclus(t.e[j].vsize) => Owner::Dyn(j),
+        _ => Owner::Free,
+    }
+}
+
+/// The generated directory entry of table entry `e` (vwrite.rs compares
+/// host writes with it).
+pub(crate) fn dyn_entry(e: &VF, out: &mut [u8]) {
+    out[..32].fill(0);
+    dirent(out, &vname(e.id), 0x01, e.vstart as u32, e.vsize);
+}
+
+/// Which generated directory cluster `c` is: Some(kind) for LOGS / SCOPE /
+/// SHOTS, Some(3) for INFO / DEBUG, None otherwise.
+pub(crate) fn dir_kind(c: u32) -> Option<usize> {
+    match c {
+        C_INFO | C_DEBUG => Some(3),
+        C_VDIR..=6 => Some((c - C_VDIR) as usize),
+        _ => None,
+    }
+}
+
+/// The generated sector `lba` (overlays included), as read_block.
+pub(crate) fn gen_sector(lba: u32, buf: &mut [u8]) -> bool {
+    VDisk.read_block(lba, buf)
 }
 
 /// USB bus reset (msc.rs): a new session, compact at the next refresh.
 pub fn on_bus_reset() {
     if state().is_some() {
+        crate::vwrite::release_all(true);
         tab().want_compact = true;
         dlog::set_stale();
     }
@@ -529,7 +632,7 @@ fn geo() -> Option<(FnRaw, Geo)> {
 /// Bytes `off..` of table file `e` into `buf` (zeros on a read error).
 fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
     let key = (e.src, e.ssize);
-    if e.id >> 10 == 2 {
+    if kind(e.id) == 2 {
         let cur = unsafe { &mut *core::ptr::addr_of_mut!(BMP_CUR) };
         let k = unsafe { &mut *core::ptr::addr_of_mut!(BMP_KEY) };
         if *k != key || k.1 == 0 {
@@ -569,7 +672,13 @@ impl BlockDevice for VDisk {
         TOTAL
     }
     fn read_only(&self) -> bool {
+        crate::vwrite::read_only()
+    }
+    fn gates_writes(&self) -> bool {
         true
+    }
+    fn write_error(&self) -> u8 {
+        crate::vwrite::last_error()
     }
     fn product(&self) -> &'static [u8; 16] {
         b"DM40 files      "
@@ -597,8 +706,11 @@ impl BlockDevice for VDisk {
         }
         true
     }
-    fn write_block(&mut self, _: u32, _: &[u8]) -> bool {
-        false
+    fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool {
+        if state().is_none() || lba >= TOTAL || buf.len() < BS {
+            return false;
+        }
+        crate::vwrite::write(lba, &buf[..BS])
     }
     fn take_media_changed(&mut self) -> bool {
         CHANGED.swap(false, core::sync::atomic::Ordering::Relaxed)
@@ -631,6 +743,7 @@ fn boot_sector(st: &State, b: &mut [u8]) {
     put16(b, 0x18, 63); // sectors per track
     put16(b, 0x1A, 255); // heads
     b[0x24] = 0x80; // drive number
+    b[0x25] = crate::vwrite::boot_state(); // the host's dirty flag (Linux)
     b[0x26] = 0x29; // extended boot signature
     // Volume serial: from the UID (stable per unit, differs between units;
     // hosts remember volumes by it).
@@ -653,11 +766,14 @@ fn fat_entry(st: &State, c: u32) -> u16 {
     };
     match c {
         0 => 0xFFF8,
-        1 => 0xFFFF,
+        1 => crate::vwrite::fat1(),
         C_INFO..=C_README => 0xFFFF,
         _ if c < st.spi_start => st.files[..st.n].iter().find_map(|f| chain(f.start, f.size)).unwrap_or(0),
         _ if c < st.dyn0 => chain(st.spi_start, SPI_BYTES).unwrap_or(0),
-        _ => at_cluster(tab(), c).and_then(|e| chain(e.vstart as u32, e.vsize)).unwrap_or(0),
+        _ => match crate::vwrite::pair(c) {
+            Some(v) => v,
+            None => at_cluster(tab(), c).filter(|e| e.id & T_FAT == 0).and_then(|e| chain(e.vstart as u32, e.vsize)).unwrap_or(0),
+        },
     }
 }
 
@@ -699,8 +815,11 @@ fn root_sector(s: u32, b: &mut [u8]) {
     let per = (BS / 32) as u32;
     for i in 0..per {
         let idx = (s * per + i) as usize;
+        let e = &mut b[(i * 32) as usize..(i * 32 + 32) as usize];
         if idx <= ROOT_N {
-            root_entry(idx, &mut b[(i * 32) as usize..(i * 32 + 32) as usize]);
+            root_entry(idx, e);
+        } else if let Some(r) = crate::vwrite::root_rec(idx) {
+            e.copy_from_slice(&r);
         }
     }
 }
@@ -743,10 +862,13 @@ fn dir_sector(st: &State, c: u32, s: u32, b: &mut [u8]) {
                 let r = ent(slot);
                 b[r.start] = 0xE5;
             }
-            for e in t.e[..t.n].iter().filter(|e| (e.id >> 10) as usize == k && (lo..hi).contains(&(e.slot as u32))) {
+            for e in t.e[..t.n].iter().filter(|e| kind(e.id) == k && (lo..hi).contains(&(e.slot as u32))) {
                 let r = ent(e.slot as u32);
-                b[r.clone()].fill(0);
-                dirent(&mut b[r], &vname(e.id), 0x01, e.vstart as u32, e.vsize);
+                let o = r.start;
+                dyn_entry(e, &mut b[r]);
+                if e.id & T_DIR != 0 {
+                    b[o] = 0xE5; // the host deleted it: as it wrote it
+                }
             }
         }
     }
@@ -792,7 +914,13 @@ fn data_sector(st: &State, s: u32, b: &mut [u8]) {
             }
         }
         _ => {
+            if crate::vwrite::staged_read(c, s % SPC, b) {
+                return; // a host file's data (vwrite.rs)
+            }
             let Some(e) = at_cluster(tab(), c).copied() else { return };
+            if e.id & (T_FAT | T_SRC) != 0 {
+                return; // freed by the host / gone: zeros
+            }
             if let Some((off, len)) = span(e.vstart as u32, e.vsize) {
                 file_read(&e, off, &mut b[..len]);
             }
@@ -939,7 +1067,9 @@ fn describe(st: &State, base: usize, out: &mut [u8]) -> usize {
 /// The host released the volume (Allow): a compaction it held back can run
 /// now (msc.rs).
 pub fn on_unlock() {
-    if state().is_some() && tab().want_compact {
-        dlog::set_stale();
+    if state().is_some() {
+        if crate::vwrite::release() || tab().want_compact {
+            dlog::set_stale();
+        }
     }
 }

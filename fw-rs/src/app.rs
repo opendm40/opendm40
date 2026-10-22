@@ -1156,7 +1156,28 @@ impl App {
                 self.beep(now, 150);
             }
         }
+        // A firmware file arrived on the USB disk (vwrite.rs): ask, unless
+        // another confirm is up (then at its end).
+        #[cfg(feature = "vdisk")]
+        if !matches!(self.overlay, Some(o) if !matches!(o, crate::dialog::Overlay::Toast { .. })) {
+            match crate::vwrite::take_dialog() {
+                Some(true) => {
+                    self.last_input = now;
+                    self.sp_end_hold(now);
+                    self.overlay = Some(crate::dialog::Overlay::FwInstall { until: now + crate::dialog::FW_MS });
+                    self.redraw = true;
+                    crate::dialog::fw_install();
+                    self.beep(now, 150);
+                }
+                Some(false) => self.toast(now, crate::dialog::FW_BAD, false),
+                None => {}
+            }
+        }
         if self.overlay.is_some_and(|o| now >= o.until()) {
+            #[cfg(feature = "vdisk")]
+            if matches!(self.overlay, Some(crate::dialog::Overlay::FwInstall { .. })) {
+                crate::vwrite::answer(false);
+            }
             self.overlay = None; // power-off confirm auto-cancel / toast end
             self.redraw = true;
         }
@@ -1928,6 +1949,21 @@ impl App {
                     Some(false) => self.overlay_close(),
                     None => {}
                 },
+                #[cfg(feature = "vdisk")]
+                (crate::dialog::Overlay::FwInstall { .. }, Gesture::Tap(p)) => {
+                    if let Some(yes) = crate::dialog::power_off_hit(p.x, p.y) {
+                        crate::vwrite::answer(yes);
+                        self.overlay_close();
+                        if yes {
+                            self.toast(now, "Installing firmware...", true);
+                        }
+                    }
+                }
+                #[cfg(feature = "vdisk")]
+                (crate::dialog::Overlay::FwInstall { .. }, Gesture::KeyDown(_)) => {
+                    crate::vwrite::answer(false);
+                    self.overlay_close();
+                }
                 (crate::dialog::Overlay::EnergyReset { .. }, Gesture::Tap(p)) => match crate::dialog::power_off_hit(p.x, p.y) {
                     Some(true) => {
                         self.overlay_close();
