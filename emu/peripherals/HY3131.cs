@@ -846,6 +846,20 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 code *= (ig / rowIg) / (rg / rowRg);
                 break;
             }
+            case Role.Power:
+            {
+                // fw-rs DC coupling (powermeter.rs dc_row): AD1 = OP1O - PB3 on the shunt, as the
+                // stock DC A row (its calibration folded in); "powz:1" adds an AD1 zero of 300 codes
+                var iu = PowIu; var ir = PowIr; var i = iu * 2 + ir;
+                if((regs[0x24] >> 4) != 3) { code = 0; break; }
+                Fe.ACurrent(out jdc, out jac, out hz, out shape, out duty);
+                var unit = AUnit[iu];
+                var q = DcQ(jdc * unit, 0x94 + 4 * i, 0xac + 4 * i) / unit;
+                code = q * Fe.ShuntR * MvDiv[ir] * 0.9 / 1.25 * 8388606.0;
+                code *= (ig / rowIg) / (rg / rowRg);
+                if(PowZeros) code += 300;
+                break;
+            }
             case Role.DcA:
             {
                 // The mA and uA rows are the same bytes (f8_9): the shunt relays (PE) tell the
@@ -1074,20 +1088,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var scmpi = regs[0x20] >> 5;
             switch(role)
             {
-            case Role.DcV:
-                // fw-rs power meter, DC method (AUTO coupling): SENSE = the V tap; its swing
-                // across the window tells AC from DC.
-                if(scmpi == 0)
-                {
-                    double dc, ac, hz, duty; string shape;
-                    Fe.VJack(0, out dc, out ac, out hz, out shape, out duty);
-                    v = Wave(t, dc, ac, hz, shape, duty) * NodeRatioAc();
-                    return true;
-                }
-                if(scmpi != 4) return false;
-                v = Pb1Volts(t);
-                return true;
-            case Role.DcMv: case Role.Ohm: case Role.Temp: case Role.None:
+            case Role.DcV: case Role.DcMv: case Role.Ohm: case Role.Temp: case Role.None:
                 if(scmpi != 4) return false;
                 v = Pb1Volts(t);
                 return true;

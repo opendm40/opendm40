@@ -13,8 +13,10 @@ use crate::scpi::Pow;
 /// V gains of 6 / 60 and 600 / 1000 V, u16 each (0 = factory-derived, else
 /// 0.5 + n / 65536); p6 = the Y zero (i16) | zeros valid << 16 | wiring
 /// dialog seen << 17 | coupling (pw::COUP_*) << 18; p7..p9 = the X zeros
-/// of the 6 current ranges (i16).
+/// of the 6 current ranges (i16). The DC row's AD1 zeros: persist::W_POWER_ZD
+/// (`pw_zd_words`).
 pub const PW_WORDS: usize = 10;
+pub const PW_ZD_WORDS: usize = 3;
 
 fn gain_bits(g: f32) -> u32 {
     if g > 0.0 { ((g - 0.5) * 65536.0 + 0.5).clamp(1.0, 65535.0) as u32 } else { 0 }
@@ -178,6 +180,19 @@ impl App {
             w[7 + i] = p.zx[2 * i] as u16 as u32 | (p.zx[2 * i + 1] as u16 as u32) << 16;
         }
         w
+    }
+
+    /// The DC row's AD1 zeros (persist::W_POWER_ZD): 2 x i16 per word.
+    pub(super) fn pw_zd_words(&self) -> [u32; PW_ZD_WORDS] {
+        let z = &self.dmm.pw.zd;
+        [0, 1, 2].map(|i| z[2 * i] as u16 as u32 | (z[2 * i + 1] as u16 as u32) << 16)
+    }
+
+    pub(super) fn pw_zd_restore(&mut self, w: &[u32]) {
+        for i in 0..PW_ZD_WORDS {
+            self.dmm.pw.zd[2 * i] = w[i] as u16 as i16;
+            self.dmm.pw.zd[2 * i + 1] = (w[i] >> 16) as u16 as i16;
+        }
     }
 
     pub(super) fn pw_restore(&mut self, w: &[u32]) {
@@ -374,18 +389,20 @@ impl App {
                 let p = &mut self.dmm.pw;
                 p.zero_ok = false;
                 p.zx = [0; 6];
+                p.zd = [0; 6];
                 p.zy = 0;
                 false
             }
             Pow::Zero(_) => {
-                // <last job result>,<SET|NONE>,<Y zero>,<X zeros 600 uA..10 A>
+                // <last job result>,<SET|NONE>,<Y zero>,<X zeros 600 uA..10 A>,
+                // <DC-row AD1 zeros 600 uA..10 A>
                 let p = &self.dmm.pw;
                 out.put_bytes(job_text(if p.job_last == pw::JOB_ZERO { p.job_res } else { pw::JR_NONE }).as_bytes());
                 out.put_bytes(if p.zero_ok { b",SET," } else { b",NONE," });
                 put_i(out, &mut t, p.zy as i64);
-                for z in p.zx {
+                for z in p.zx.iter().chain(p.zd.iter()) {
                     out.put_bytes(b",");
-                    put_i(out, &mut t, z as i64);
+                    put_i(out, &mut t, *z as i64);
                 }
                 true
             }

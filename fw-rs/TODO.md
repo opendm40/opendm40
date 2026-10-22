@@ -529,8 +529,9 @@ Firmware:
         around the tap's DC, PB4 = the current as fallback; cause: the unipolar T1 square); V shown + "I ranging"
         on entry, per-channel parts kept, own statistic first (~0.9 s per autorange step); I_dc with the AC A RMS
         gain while the LPF gain is uncalibrated; DISC 2 kept (XY / XX with current untested).
-  - [x] DC power (owner): POW:COUP AC|DC|AUTO, AD1 method (stock DC V / DC A rows alternately, no relay click,
-        factory DC cal, P = V I, burden comp), AUTO by the B set's AC/DC ratio and the comparator on the tap.
+  - [x] DC power (owner): POW:COUP DC|ACDC|AUTO; DC = one fixed row (I on AD1 with the DC A path / factory gain
+        and its own POW:ZERO zero, V on OP2 -> AD3 LPF at the same time, AD1 enabled last: note 7), a reading per
+        100 ms, burden comp; AUTO by the AC/DC ratio (B) and the Y ripple (DC row). Persist v9.
   - [x] 7th DMM function button "W" (64 px buttons, 68 px pitch, DMM page + combined band); the wiring dialog
         only until confirmed once; restored after a reboot; "Power W" on the Current page removed. Persist v7.
   - [x] Power page rounds 2 / 3 (doc §3.12): real W glyphs (stockfont_w.rs); coupling the stock way (active W

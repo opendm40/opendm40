@@ -137,17 +137,19 @@ def x(q, want):
 
 
 def zeros(want):
-    # POW:ZERO? = result,SET,<Y>,<X 600 uA .. 10 A> within 3 codes (noise).
+    # POW:ZERO? = result,SET,<Y>,<X 600 uA .. 10 A> within 3 codes (noise),
+    # <the DC row's AD1 zeros>: powz's 300 + the folded factory DC A offsets
+    # (-80..+40 codes) + AD1 noise.
     def chk(d):
         z = d['X'].get('POW:ZERO?', '').split(',')
-        return len(z) == 9 and z[:2] == ['OK', 'SET'] and all(abs(int(a) - b) <= 3 for a, b in zip(z[2:], want))
+        return len(z) == 2 + len(want) and z[:2] == ['OK', 'SET'] and all(abs(int(a) - b) <= tol for a, b, tol in zip(z[2:], want, [3] * 7 + [130] * 6))
     return chk
 
 
 SC.update({
     'zero': (['CONF:POW', 'POW:BURD:STAT OFF'], 66, [
         (0, 'open;powz:1', lambda d: d['V'] > 0.04 and d['I'] > 5e-6, 'device zeros, no POW:ZERO: phantom V / I'),
-        (16, None, lambda d: d['V'] < 0.003 and d['I'] < 1e-6 and zeros([1080, 888, 155, 888, 155, 888, 155])(d), 'after POW:ZERO: V, I ~0'),
+        (16, None, lambda d: d['V'] < 0.003 and d['I'] < 1e-6 and zeros([1080, 888, 155, 888, 155, 888, 155] + [300] * 6)(d), 'after POW:ZERO: V, I ~0'),
         (34, 'open;powz:1;vsrc:5;isrc:0.4', both(pw(2.0, 1, 5, 0.4), lambda d: near(d['Vdc'], 5, 0.002)), 'DC 5 V 0.4 A with the zeros subtracted'),
         (50, 'open;powz:1;vsrc:-5;isrc:0.4', both(pw(-2.0, -1, 5, 0.4), lambda d: near(d['Vdc'], -5, 0.002) and near(d['Idc'], 0.4, 0.002)), 'negative DC: LPF polarity, P < 0'),
     ]),

@@ -482,7 +482,7 @@ pub fn settings_status(p: &pw::Pw, key: u32) -> u32 {
     let res = if p.job != 0 { pw::JR_RUN } else { p.job_res };
     let warn = match (p.job_last, res) {
         (pw::JOB_ZERO, pw::JR_RUN) => {
-            t.push("Zeroing: leads open, nothing in A (6 s)");
+            t.push("Zeroing: leads open, nothing in A (12 s)");
             false
         }
         (pw::JOB_VCAL, pw::JR_RUN) => {

@@ -539,6 +539,20 @@ namespace Hy3131Tests
                     Near(Lpf(PowerStat(m, 0x80)), 155, 1, "powz:1 X LPF zero (x1)");
                     m.Chip.SetInput("powz:0");
                 }
+                // fw-rs DC row (powermeter.rs dc_row(1, 5)): a power role with AD1 = OP1O - PB3 on
+                // the shunt: 2 A on 10 A x1 -> AD1 = 2 * 0.01 * 0.9 / 1.25 * 2^23; Y LPF = 12 V / 100.
+                {
+                    var m = NewChip();
+                    m.Chip.SetInput("open;vsrc:12;isrc:2");
+                    var row = Master.Row("12 dd 15 83 35 40 80 2d 31 f8 20 00 00 09 28 a0 80 c7 8e ac 8c 54");
+                    PowerConfigure(m, row, 0);
+                    Check(m.Chip.Role == "Power vr1 iu0 ir1", "DC row recognised as the power row", m.Chip.Role);
+                    m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                    var a = m.Read(0x00, 3);
+                    var code = (a[0] | a[1] << 8 | a[2] << 16) << 8 >> 8;
+                    Near(code, 2 * 0.01 * 0.9 / 1.25 * 8388606, 200, "DC row AD1 = the current");
+                    Near(Lpf(PowerStat(m, 0x8c)), 0.12 / 1.25 * 262144, 30, "DC row Y LPF = the voltage");
+                }
                 // powvg: the Y gain deviation.
                 {
                     var m = NewChip();
