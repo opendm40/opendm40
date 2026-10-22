@@ -395,6 +395,27 @@ else a version bump) and keep "Files live" the factory default. If users ask for
 *and* deletes at once, the forced re-enumeration (usb.rs SE0, refused during a host session)
 is the next step, not (D).
 
+**Implemented (2026-10-22).** As above, with these points fixed in the code (vwrite.rs header):
+- The mode has two values: **in force** (`read_only`, MODE SENSE WP, WRITE refused) and **asked
+  for** (`read_only_pending`, the Settings row / `DBG:VDISK:RO`). The one asked for is copied at
+  the USB bus reset (`vwrite::on_bus_reset`, from `vdisk::on_bus_reset` after the session's
+  `release_all`), so the mode never changes under a host, in either direction: asking for "Files
+  live" during a writable session keeps it frozen and writable until the re-plug (no host write is
+  cut off by a sudden WP), then its records are dropped as at any session end (fatren-test vwrite
+  "rw-ro"). The state lives in .sram_bss (zeroed at start-up), stored as "writable" so that zero =
+  read-only at every boot.
+- The row shows the mode asked for, with " (re-plug)" while it differs from the one in force
+  ("PC can edit (re-plug)" fits the value column); the toast "Re-plug USB to apply" comes only
+  when it differs (setting the row back before a re-plug cancels silently). The page repaints
+  when a bus reset applies the mode while it is shown.
+- `DBG:VDISK:RO?` answers `<in force>,<asked for>` (`1,1` after a boot).
+- Help: there is no "Settings" help page; a sixth page "USB disk" (8 rows: the two modes, refresh,
+  where, when it applies, power-on, delete on the meter) instead of one line.
+- README.TXT rewritten (both modes, "In any mode": gallery / MMEM:DEL, tools/reload.sh), still 2048
+  bytes: the kernel captures replay unchanged (they never write README.TXT), no new kcapture.sh run;
+  `usbip_msc.py --ro` serves the read-only volume for a future capture.
+- Without the `vdisk` feature (the writable SPI disk) the row shows "PC can edit" and does nothing.
+
 ---
 
 ## #7 AD2 stream frames: CPU frames at /8 + CKPH or DMA frames at /16 as the default
