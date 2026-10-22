@@ -27,6 +27,12 @@ reply checked byte-exactly where it is deterministic:
   abortout a multi-packet command cut after its first packet,
            INITIATE_ABORT_BULK_OUT / CHECK_ABORT_BULK_OUT_STATUS / CLEAR_FEATURE
   read     READ? (a DMM reading; any number)
+  compound one message mixing commands the main loop runs later (OUTP,
+           SOUR:FUNC, POW:PHAS:CAL, MMEM:DATA?) with text queries, a
+           reading wait (READ?) and SYST:ERR?: every query answered in
+           order, ';'-joined, in one response (fw-rs scpi_msg.rs); a block
+           query (MMEM:DATA?) beside other queries is refused ("Query
+           error"), alone with a missing file it answers empty
 
 Random delays (0..30 ms) go between the stages. Renode's USB/IP server
 handles URBs strictly in order and an IN URB blocks it until the device
@@ -306,7 +312,9 @@ class Stress:
         # REQUEST is forgotten by the device all the same).
 
     def c_clear(self):
-        self.t.write('*IDN?')
+        # Also a compound message cleared while its READ? waits (no late
+        # reply of its rest after the clear).
+        self.t.write(self.r.choice(['*IDN?', '*IDN?', '*IDN?;READ?;*OPC?']))
         if self.r.random() < 0.7:
             tag, req = self.t.req_msg(self.r.choice([4096, 20, 5]))
             self.t.bulk_out(req, 'REQUEST before clear')
@@ -361,13 +369,50 @@ class Stress:
         rep = self.t.query('READ?', delay=self.d())
         float(rep)
 
+    def c_compound(self):
+        k = self.r.randint(0, 6)
+        if k == 0:
+            on = self.r.random() < 0.5
+            rep = self.t.query('OUTP %s;:OUTP?;*OPC?;:SYST:ERR?' % ('ON' if on else 'OFF'), delay=self.d())
+            expect(rep, b'%d;1;0,"No error"' % on, 'OUTP;OUTP?;*OPC?;SYST:ERR?')
+            if on:
+                self.t.write('OUTP OFF')
+        elif k == 1:
+            w = self.r.choice([b'SIN', b'SQU', b'TRI', b'RAMP'])
+            rep = self.t.query('SOUR:FUNC %s;:SOUR:FUNC?;*IDN?' % w.decode(), delay=self.d())
+            expect(rep, w + b';' + self.idn(), 'SOUR:FUNC;SOUR:FUNC?;*IDN?')
+        elif k == 2:
+            # The reading wait pauses the message; the rest runs after it.
+            rep = self.t.query('*IDN?;READ?;*OPC?;:SYST:ERR?', delay=self.d())
+            p = rep.split(b';')
+            if len(p) != 4 or p[0] != self.idn() or p[2] != b'1' or not p[3].endswith(b'"'):
+                raise IOError('*IDN?;READ?;*OPC?;SYST:ERR?: %r' % rep)
+            float(p[1])
+        elif k == 3:
+            # The reported hang: a command the app runs, then a query.
+            rep = self.t.query('*CLS;POW:PHAS:CAL RES;:SYST:ERR?;*OPC?', delay=self.d())
+            p = rep.rsplit(b';', 1)  # the error text may hold a ';'
+            if len(p) != 2 or not (p[0].startswith(b'-') or p[0] == b'0,"No error"') or p[1] != b'1':
+                raise IOError('POW:PHAS:CAL RES;SYST:ERR?: %r' % rep)
+        elif k == 4:
+            rep = self.t.query('*CLS;MMEM:DATA? "NOPE.DLG";:SYST:ERR?', delay=self.d())
+            expect(rep, b'-100,"Query error"', 'MMEM:DATA?;SYST:ERR?')
+        elif k == 5:
+            # A failed block query alone: an empty response, the error queued.
+            expect(self.t.query('*CLS;MMEM:DATA? "NOPE.DLG"', delay=self.d()), b'', 'MMEM:DATA? missing file')
+            expect(self.t.query('SYST:ERR?'), b'-100,"File name not found"', 'SYST:ERR? after MMEM:DATA?')
+        else:
+            rep = self.t.query('*OPC?;WAV:DATA?;*IDN?', delay=self.d())
+            if len(rep) != 2 + 405 + 1 + len(self.idn()) or not rep.startswith(b'1;#3400') or not rep.endswith(b';' + self.idn()):
+                raise IOError('*OPC?;WAV:DATA?;*IDN?: %d bytes %r' % (len(rep), rep[:12]))
+
     def drain_errors(self):
         for _ in range(30):
             if self.t.query('SYST:ERR?').startswith(b'+0,') or self.t.query('SYST:ERR?').startswith(b'0,'):
                 return
 
 
-CASES = dict(pair=8, combo=3, split=2, big=3, small=3, pipe=3, stale=2, clear=2, abortin=2, abortout=1, read=1)
+CASES = dict(pair=8, combo=3, split=2, big=3, small=3, pipe=3, stale=2, clear=2, abortin=2, abortout=1, read=1, compound=3)
 
 
 def monitor_dump(port):

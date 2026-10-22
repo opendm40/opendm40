@@ -420,6 +420,16 @@ Code work (in this order):
 - [x] SCPI over Bluetooth serial: the same parser as USBTMC (session per transport, DBG:* refused on BT),
       stock binary frames (0xAF) dispatched alongside, DMA TX ring. docs/bt-scpi.md,
       tools/dm40bt_scpi.py.  (74b8890, 4c2f0a6; verify on device incl. READ? / WAV:DATA? throughput)
+- [x] Compound SCPI messages (`POW:PHAS:CAL RES;:SYST:ERR?` hung the USBTMC read): Scpi::handle kept only
+      the last command the main loop runs (Instr / POW / LOG / MMEM / DBG / READ?) and main.rs cleared the
+      text replies before it. Now scpi_msg.rs runs a message one command at a time (USBTMC and BT alike):
+      replies in order, ';'-joined, one response; READ? / MEAS? / FETC? pause the rest until the reading;
+      a message with a query always gets a response (empty if none could answer, reason in SYST:ERR?; also
+      a lone MMEM:DATA? / MMEM:CAT? that failed, which hung before); block replies (MMEM:DATA? / CAT?,
+      LOG:DATA?, DBG:LCD? / PROF? / TOUCH? / HYSPI? / AD2?) only as the sole query ("Query error" next to
+      others); joined reply <= 512 B ("Out of memory"). tools/scpi-msg-test, usbtmc_stress.py compound.
+      Open (pre-existing): headers after ';' are absolute (no IEEE 488.2 relative-path rule); a ';' inside
+      a quoted argument splits; a BT line refused as DBG:* that holds a query gets no response.
 - [ ] Auto AC/DC for V and I (as UNI-T UT197 "Auto AC/DC Voltage"): an AUTO coupling next to DC / AC /
       AC+DC that picks DC or AC by itself from the signal (DC part vs AC RMS) and shows which one it chose,
       as the power meter's AUTO does (7c431e5, powermeter.rs). Open: the decision rule and its

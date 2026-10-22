@@ -1,7 +1,8 @@
 //! Minimal SCPI command layer for the USBTMC interface (DMM subset).
 //!
 //! Commands are case-insensitive, long or short form (MEASure -> MEAS), several
-//! per message separated by ';'. Supported:
+//! per message separated by ';' (main.rs runs them one at a time through
+//! scpi_msg.rs: replies in order, ';'-joined, one response). Supported:
 //!   *IDN?  *RST  *CLS  *OPC?  *ESR?  *STB?  SYSTem:ERRor?
 //!   CONFigure:<f>  MEASure:<f>?  READ?  FETCh?  [SENSe:]FUNCtion?
 //!   [SENSe:]FUNCtion "<f>"   CONFigure?   INITiate  ABORt  SYSTem:LOCal|REMote

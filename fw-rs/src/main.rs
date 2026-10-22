@@ -48,6 +48,7 @@ mod fft;
 mod sinc;
 mod trigsoft;
 mod scpi;
+mod scpi_msg;
 mod sentinel;
 mod stockfont;
 mod touch;
@@ -210,6 +211,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     // READ?/MEAS? wait): [USB] = USBTMC, [BT] = Bluetooth serial (bt.rs;
     // untrusted, DBG:* refused). Replies go out through bt::ScpiPort.
     let mut scpis = [scpi::Scpi::new(), scpi::Scpi::new()];
+    // The message each transport is running, command by command, and its
+    // joined reply (scpi_msg.rs: compound messages, IEEE 488.2 order).
+    let mut msgs = [scpi_msg::Msg::new(), scpi_msg::Msg::new()];
     // SCPI READ?/MEASure?/FETCh? waiting for a DMM reading: (min seq, settle,
     // start ms, expiry ms). The reply is the first reading with seq >= min,
     // at whatever averaging it has (READ?: the next conversion, ~0.1-0.4 s).
@@ -320,6 +324,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if tmc.take_cleared() {
             // USBTMC INITIATE_CLEAR / bus reset: no reply to a pending query.
             scpi_wait[USB] = None;
+            msgs[USB].reset();
         }
         if (app.dmm.func(), app.dmm.t_sensor()) != func_key {
             // Changed on the meter (or by DBG:KEY's deferred key-up): no host
@@ -332,9 +337,20 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             }
         }
         let mut msg = [0u8; 256];
-        let mut msg_n = 0usize;
+        let mut msg_n: usize;
         let mut src = USB;
-        if let Some(cmd) = tmc.take_command() {
+        // The rest of a message that waited for a reading runs first (its
+        // reply is due before the next message's).
+        let resume = if msgs[USB].ready() {
+            Some(USB)
+        } else if msgs[BT].ready() {
+            Some(BT)
+        } else {
+            None
+        };
+        if let Some(s) = resume {
+            src = s;
+        } else if let Some(cmd) = tmc.take_command() {
             // H1: a host session counts as activity for idle dim / power-off.
             app.note_host_activity(now);
             msg_n = cmd.len().min(256);
@@ -352,9 +368,14 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             if scpi_wait[USB].take().is_some() {
                 scpis[USB].set_err("Query INTERRUPTED");
             }
+            if msg_n > 0 {
+                msgs[USB].start(&msg[..msg_n]);
+            } else {
+                msgs[USB].reset();
+            }
             // Any host traffic keeps the debug-build watchdog fed.
             deadline = deadline.max(now + KEEPALIVE_MS);
-        } else if scpi_wait[BT].is_none() {
+        } else if scpi_wait[BT].is_none() && !msgs[BT].active() {
             // SCPI over Bluetooth: one line at a time, the next only after
             // the previous query was answered (serial-instrument order).
             // DBG:* lines come back as Err (refused, nothing runs).
@@ -364,19 +385,32 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     msg_n = l.len().min(256);
                     msg[..msg_n].copy_from_slice(&l[..msg_n]);
                     src = BT;
+                    msgs[BT].start(&msg[..msg_n]);
                 }
                 Some(Err(e)) if app.bt_on => scpis[BT].set_err(e),
                 _ => {}
             }
         }
-        if msg_n > 0 {
+        // One command of the message per pass of this loop (scpi_msg.rs);
+        // a READ? / MEAS? / FETC? that waits pauses it until its reading.
+        while let Some(msg_n) = msgs[src].next(&mut msg) {
             let dbg_ctl = tmc.dbg_ctl;
             let bt_tx = (bt.tx_dma_ok, bt.tx_dropped);
             let (mut scpi, port): (&mut scpi::Scpi, &mut dyn bt::ScpiPort) =
                 if src == BT { (&mut scpis[BT], &mut bt) } else { (&mut scpis[USB], &mut tmc) };
+            // Replies sent from the port's own buffer (block data) are seen
+            // here: they are the message's response.
+            let mut sp = SentPort { inner: port, sent: false };
+            let port: &mut dyn bt::ScpiPort = &mut sp;
             // dmm.func(): the stock mode, 16 / 17 = V / A AC+DC (stable while
             // AC+DC alternates the HY3131 mode).
-            let out = scpi.handle(&msg[..msg_n], app.dmm.func());
+            let mut out = scpi.handle(&msg[..msg_n], app.dmm.func());
+            if msgs[src].multi() && block_reply(&out) {
+                // Block data cannot be joined with other replies.
+                scpi.len = 0;
+                scpi.set_err("Query error");
+                out = scpi::Out::Text;
+            }
             // DBG:TAP / KEY / DRAG stand in for the user: a change they make
             // is not the host's (READ? cap).
             let by_host = !matches!(out, scpi::Out::Dbg(_));
@@ -981,8 +1015,14 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     }
                 },
             };
-            if reply {
-                port.respond(&scpi.buf[..scpi.len]);
+            if sp.sent {
+                msgs[src].raw_sent();
+            }
+            if reply && !msgs[src].reply(&scpi.buf[..scpi.len]) {
+                scpi.set_err("Out of memory");
+            }
+            if scpi_wait[src].is_some() {
+                msgs[src].pause();
             }
             let key = (app.dmm.func(), app.dmm.t_sensor());
             if key != func_key {
@@ -1001,6 +1041,13 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 }
             }
             prof::lap(prof::SCPI);
+            if scpi_wait[src].is_some() {
+                break;
+            }
+        }
+        if let Some(r) = msgs[src].finish() {
+            let port: &mut dyn bt::ScpiPort = if src == BT { &mut bt } else { &mut tmc };
+            port.respond(r);
         }
 
         // Any path that reconfigures the DMM (a host CONFigure, a touch/key
@@ -1151,8 +1198,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     scpi.set_err("Data stale");
                 }
             }
-            let port: &mut dyn bt::ScpiPort = if src == BT { &mut bt } else { &mut tmc };
-            port.respond(&scpi.buf[..scpi.len]);
+            msgs[src].reply(&scpi.buf[..scpi.len]); // the rest of the message runs next pass
         }
         if let Some((c, _)) = dbg_key_up.filter(|k| now >= k.1) {
             dbg_key_up = None;
@@ -1242,8 +1288,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                                 let scpi = &mut scpis[src];
                                 scpi.len = 0;
                                 scpi.put_reading(&r);
-                                let port: &mut dyn bt::ScpiPort = if src == BT { &mut bt } else { &mut tmc };
-                                port.respond(&scpi.buf[..scpi.len]);
+                                msgs[src].reply(&scpi.buf[..scpi.len]);
                             }
                         }
                         }
@@ -1253,6 +1298,51 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             prof::exit(prof::DMM);
             mark(5, &mut ts);
         }
+    }
+}
+
+/// A command whose reply is built in the transport's own buffer (block
+/// data; not joinable with other replies of a message, scpi_msg.rs).
+fn block_reply(o: &scpi::Out) -> bool {
+    use scpi::{Dbg, Log, Mmem, Out};
+    matches!(
+        o,
+        Out::Mmem(Mmem::Cat | Mmem::Data(..))
+            | Out::Log(Log::Data)
+            | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
+            | Out::Dbg(Dbg::Ad2(0 | 1, ..))
+    )
+}
+
+/// A ScpiPort that notes whether a reply was queued from its buffer.
+struct SentPort<'a> {
+    inner: &'a mut dyn bt::ScpiPort,
+    sent: bool,
+}
+
+impl bt::ScpiPort for SentPort<'_> {
+    fn respond(&mut self, data: &[u8]) {
+        self.sent = true;
+        self.inner.respond(data)
+    }
+    fn rsp_buf(&mut self) -> &mut [u8] {
+        self.inner.rsp_buf()
+    }
+    fn respond_len(&mut self, n: usize) {
+        self.sent = true;
+        self.inner.respond_len(n)
+    }
+    fn respond_with(&mut self, f: &mut dyn FnMut(&mut [u8]) -> Option<usize>) {
+        let mut ok = false;
+        self.inner.respond_with(&mut |b| {
+            let r = f(b);
+            ok = r.is_some();
+            r
+        });
+        self.sent |= ok;
+    }
+    fn trusted(&self) -> bool {
+        self.inner.trusted()
     }
 }
 
