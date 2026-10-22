@@ -31,7 +31,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             switch(off)
             {
             case 0x0: return ctrl | 0x40000000; // NOCYCCNT = 0 (bit 25), NUMCOMP etc. 0
-            case 0x4: return (uint)(Cycles() + offset);
+            case 0x4:
+                var v = (uint)(Cycles() + offset);
+                // CpuCost.cs: a handler's modelled extra cost after its
+                // first read (realized by the next time sync: inside the
+                // busy window fw-rs measures, logger.rs BUSY16).
+                CpuCost.Instance?.OnCycRead();
+                return v;
             default: return 0;
             }
         }

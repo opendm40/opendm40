@@ -296,6 +296,9 @@ rng: Miscellaneous.STM32_RNG @ sysbus 0x50060800
 
 memtool: Miscellaneous.MemTool @ sysbus 0x7FFF0000
 
+// CPU cost model (peripherals/CpuCost.cs): IsrFactor 1.0 = off.
+cpucost: Miscellaneous.CpuCost @ sysbus 0x7FFF4000
+
 // 3PA1030 scope ADC + comparator: feeds DMA2 stream 4 at the TIM1 rate, drives PA15.
 scopefeed: Miscellaneous.ScopeFeeder @ sysbus 0x7FFF3000
     dma: dma2
