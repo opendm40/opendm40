@@ -193,6 +193,13 @@ acceptance. Acceptance on the device: `LOG:COUNt?` lost = 0 at 4800 S/s for 60 s
 (count, max DWT cycles in the handler, overruns) added for that. Emulator: the same run over
 USB/IP; host test for the ring.
 
+**Status (2026-10-22).** Implemented behind the Cargo feature `ad2-isr` (off by default until
+the device acceptance), docs/dmm-input-scope-feasibility.md section 9. Two deviations, both
+measured: the tick runs at 4 x the AD2 rate with a 7/8-period read gate instead of ~1.05 x
+(at 1.05 x the observation stamps jitter by ~P and the host saw 5 % false gaps; 9.2), and
+the "debug assertion" is a runtime guard in every build that stops the stream before any
+main-loop bus frame (a function change while logging legitimately reaches the bus; 9.1).
+
 **Revisit.** A second ISR, or sharing the bus while streaming, needs a new decision with its
 own shared-state analysis; "it would be convenient" is not a reason. If the exclusive hand-off
 turns out to hurt (users want the DMM digits live under the waveform), the request queue (B)
