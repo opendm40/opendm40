@@ -102,6 +102,10 @@ pub struct Step {
 /// A host WRITE(10) is in progress (between its first and last block), so an
 /// on-device writer (screenshot.rs) waits before reading the FAT.
 pub static HOST_WRITING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// Bumped by every program / erase command sent to the SPI flash
+/// (spiflash.rs `write_enable`): screenshot.rs `prep_poll` sees from it that
+/// another writer changed the disk since its last step and starts over.
+pub static FLASH_WRITES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 /// A CSV recording session is active (csvlog.rs): host writes are refused
 /// for the whole session (its cached FAT / directory state must not go stale).

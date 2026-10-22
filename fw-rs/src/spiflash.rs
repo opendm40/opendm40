@@ -366,6 +366,8 @@ impl SpiFlash {
     }
 
     fn write_enable() {
+        let w = &crate::msc::FLASH_WRITES;
+        w.store(w.load(core::sync::atomic::Ordering::Relaxed).wrapping_add(1), core::sync::atomic::Ordering::Relaxed);
         cs(true);
         xfer(CMD_WREN);
         cs(false);

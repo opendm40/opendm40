@@ -411,6 +411,8 @@ pub fn finish_disk_writes(now: u64) {
     crate::csvlog::finish_blocking(now);
     crate::screenshot::finish_blocking(8000);
     crate::csvlog::finish_blocking(now);
+    // An idle-time erase of a free sector (screenshot.rs `prep_finish`).
+    crate::screenshot::prep_finish();
 }
 
 /// Power off as the stock: both analog rails / power hold low.

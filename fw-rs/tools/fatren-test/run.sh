@@ -82,6 +82,12 @@
 #   12b. power cut / screenshot::abort_on after every slice of a shot on a NOR
 #      model of write_step: no FAT / root / SHOTS/ page ever erased, fsck at
 #      worst the shot's lost clusters / FAT 1 ahead.
+#   12c. idle-time preparation (screenshot.rs prep_on): the first 76 free
+#      clusters erased, nothing else written; the shot after it erases no
+#      data block; power cuts before its erases (fsck clean, the next boot
+#      completes); a sector that reads blank but does not program (the
+#      shot's retry with an erase); another writer taking a cluster at every
+#      step (also behind the write counter); a nearly full disk.
 # Untracked inputs (device dumps, dm40_v_2_6.bin, a native build) are used when
 # present, else synthetic stand-ins of the same sizes (noted in the log).
 # csvlog (src/csvlog.rs non-blocking recorder of compact binary logs, DLG,
@@ -800,6 +806,71 @@ echo "ok: $((NS + 1)) cut points x (cut, abort): no FAT / root page ever erased,
 cp $W/cutbase.img $W/cut.img
 "$W/t" $W/cut.img shotcut $((NS - 1)) abort > /dev/null
 "$W/t" $W/cut.img shot | grep -q "shot=Saved(" && echo "ok: the next shot after an abort succeeds" || { echo "FAIL at line $LINENO"; exit 1; }
+
+echo "--- screenshot: idle-time preparation of the next shot's clusters (screenshot.rs prep_on)"
+# The first 76 free clusters (first fit = what the next shot takes) erased
+# in idle time; FAT / root / directories / allocated clusters never written.
+# The image: the boot step's LOGS/ SHOTS/ SCOPE/, a file, a deleted file
+# (its clusters free with data in them), the rest of the free clusters
+# zeros (mkimg): every free cluster needs an erase.
+IMGP=$W/prep.img
+mkimg $IMGP
+"$W/t" $IMGP fatdir boot > /dev/null
+mcopy -i $IMGP $W/old.bin ::OLD.BIN
+mcopy -i $IMGP $W/keep.bin ::KEEP.BIN
+mdel -i $IMGP ::OLD.BIN
+cp $IMGP $W/prepbase.img
+"$W/t" $IMGP prep run | tee $W/p1
+grep -q "state=2 found=76 erases=76 .* meta_same=true used_same=true changed_free=76 blank_first=76/76 " $W/p1 && echo "ok: ready: 76 erases, the first 76 free clusters blank, FAT / root / directories / allocated clusters unchanged" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGP
+"$W/t" $IMGP prep run | grep -q "state=2 found=76 erases=0 .* changed_free=0 " && echo "ok: again (a reboot): all blank, nothing erased" || { echo "FAIL at line $LINENO"; exit 1; }
+cp $W/prepbase.img $IMGP
+"$W/t" $IMGP prep shot | tee $W/p2
+grep -q "state=2 erases=76 shot=Saved(0) shot_erased=0 no_compare=76 next_blank_before=0 state2=2 found2=76 erases2=76 next_blank_after=76" $W/p2 && echo "ok: the shot after it erased no data block (76 programmed without the compare); the next 76 prepared afterwards" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGP
+bmpok $IMGP SHOTS/S000.BMP
+cp $W/prepbase.img $IMGP
+"$W/t" $IMGP prep shot stale | tee $W/p2s
+grep -q "shot=Saved(0) shot_erased=1 no_compare=76 " $W/p2s && echo "ok: a prepared cluster changed behind the counter: its read back fails, rewritten with an erase, Saved" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGP
+bmpok $IMGP SHOTS/S000.BMP
+# Power cut before the k-th erase: nothing but free clusters touched (fsck
+# clean: no lost clusters, FATs equal), the next boot completes the rest.
+for k in 0 1 2 38 75; do
+    cp $W/prepbase.img $W/pcut.img
+    "$W/t" $W/pcut.img prep run cut $k > $W/pc
+    grep -q "meta_same=true used_same=true .* dead=true" $W/pc || { cat $W/pc; echo "FAIL: prep cut $k"; exit 1; }
+    fsckok $W/pcut.img > /dev/null
+    "$W/t" $W/pcut.img prep run | grep -q "state=2 found=76 erases=$((76 - k)) .* blank_first=76/76 " || { echo "FAIL: prep after cut $k"; exit 1; }
+done
+echo "ok: power cut before erase 0 / 1 / 2 / 38 / 75: fsck clean, metadata and files unchanged; the next boot erases the rest"
+# A sector whose erase a power cut interrupted may read blank and still not
+# take a program: the shot's read back fails, the block is written again
+# with an erase (once per shot).
+cp $W/prepbase.img $IMGP
+"$W/t" $IMGP prep weak | tee $W/p3
+grep -q "prep weak shot=Saved(0) shot_erased=76 weak_left=0" $W/p3 && echo "ok: a blank-reading sector that does not program: rewritten with an erase, Saved" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGP
+bmpok $IMGP SHOTS/S000.BMP
+# Another writer takes the first free cluster after every step of a
+# preparation (FAT entry + data 0xA5): its data survives; also behind the
+# write counter's back (the FAT re-read right before each erase).
+cp $W/prepbase.img $IMGP
+for v in "" nobump; do
+    "$W/t" $IMGP prep race $v | tee $W/p4
+    C=$(grep -oE "cases=[0-9]+" $W/p4 | cut -d= -f2)
+    grep -q "intact=$C " $W/p4 && echo "ok: race${v:+ ($v)}: the other writer's cluster intact in all $C cases" || { echo "FAIL at line $LINENO"; exit 1; }
+done
+# Disk full: 20 free clusters: all of them prepared; the shot itself is
+# refused (Full) as before, nothing written.
+cp $W/prepbase.img $IMGP
+FREE=$(fsck.fat -n $IMGP | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}')
+head -c $(( (FREE - 20) * 4096 )) /dev/zero > $W/fill
+mcopy -i $IMGP $W/fill ::FILL.DAT
+"$W/t" $IMGP prep run | tee $W/p5
+grep -q "state=2 found=20 erases=20 .* used_same=true changed_free=20 blank_first=20/20 free=20 " $W/p5 && echo "ok: 20 free clusters: all 20 prepared, nothing else touched" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGP shot | grep -q "shot=Full" && echo "ok: the shot is still refused (Disk full)" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGP
 
 echo "=== csvlog"
 # csvok <img> <name> <rows> <full|prefix|gap>: the binary log <name>

@@ -116,6 +116,12 @@ mod msc {
     pub static HOST_WRITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     pub static LOG_SESSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     pub static LOG_FLUSHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    /// Bumped by the Img model's every changing write / program / erase (as
+    /// spiflash.rs `write_enable`): screenshot.rs `prep_on` restarts on it.
+    pub static FLASH_WRITES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    pub fn flash_wrote() {
+        FLASH_WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
     /// Test knob for msc.rs `host_mounted()` (a host sent PREVENT MEDIUM REMOVAL).
     pub static HOST_MOUNTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     pub fn host_mounted() -> bool {
@@ -585,6 +591,12 @@ struct Img {
     fbusy: u32,
     nor_progs: u32,
     nor_erases: u32,
+    /// Blocks that read blank but do not take a program until erased (a
+    /// sector whose erase a power cut interrupted): `write_step` leaves them
+    /// 0xFF, so its read back fails.
+    weak: Vec<u32>,
+    /// `write_step` calls that started at phase 1 (no compare).
+    blind: u32,
 }
 
 impl Img {
@@ -605,6 +617,8 @@ impl Img {
             fbusy: 0,
             nor_progs: 0,
             nor_erases: 0,
+            weak: vec![],
+            blind: 0,
         }
     }
     /// One fast-logger operation: false = the power is gone.
@@ -635,6 +649,7 @@ impl fastenc::Nor for Img {
         if !self.fop() {
             return;
         }
+        msc::flash_wrote();
         for (i, &b) in d.iter().enumerate() {
             self.d[addr as usize + i] &= b;
         }
@@ -645,9 +660,11 @@ impl fastenc::Nor for Img {
         if !self.fop() {
             return;
         }
+        msc::flash_wrote();
         let n = if big { 0x1_0000 } else { 0x1000 };
         let a = addr as usize & !(n - 1);
         self.d[a..a + n].fill(0xFF);
+        self.weak.retain(|&l| (l as usize * 4096) < a || l as usize * 4096 >= a + n);
         self.nor_erases += 1;
         self.fbusy = 3;
     }
@@ -682,6 +699,7 @@ impl msc::BlockDevice for Img {
             if self.fcut.is_some() && !self.fop() {
                 return false;
             }
+            msc::flash_wrote();
             let erase = self.d[o..o + 4096].iter().zip(&buf[..4096]).any(|(&a, &b)| a & b != b);
             if self.cut == Some(self.writes.len()) {
                 self.dead = true;
@@ -713,8 +731,11 @@ impl msc::BlockDevice for Img {
                 if self.d[o..o + 4096] == buf[..4096] {
                     return Some(true);
                 }
-                st.erase = self.d[o..o + 4096].iter().zip(&buf[..4096]).any(|(&a, &b)| a & b != b);
+                // `|=`: a forced erase (screenshot.rs `data`, the retry) stays.
+                st.erase |= self.d[o..o + 4096].iter().zip(&buf[..4096]).any(|(&a, &b)| a & b != b);
+                msc::flash_wrote();
                 if st.erase {
+                    self.weak.retain(|&l| l != lba);
                     self.d[o..o + 4096].fill(0xFF);
                     *self.erases.entry(lba).or_insert(0) += 1;
                 } else {
@@ -725,7 +746,26 @@ impl msc::BlockDevice for Img {
                 st.page = 0;
                 None
             }
+            1 => {
+                // Programs without the compare (screenshot.rs: a cluster
+                // the preparation found blank).
+                msc::flash_wrote();
+                self.programs += 1;
+                self.writes.push(lba);
+                self.blind += 1;
+                st.started = true;
+                st.phase = 2;
+                st.page = 0;
+                None
+            }
             2 => {
+                if self.weak.contains(&lba) {
+                    st.page += 4; // the program does not take
+                    if st.page == 16 {
+                        st.phase = 3;
+                    }
+                    return None;
+                }
                 for p in st.page as usize..st.page as usize + 4 {
                     for i in o + p * 256..o + p * 256 + 256 {
                         self.d[i] &= buf[i - o];
@@ -787,6 +827,190 @@ fn shotcut(a: &[String], img: &mut Img) {
     let meta: Vec<String> = fat_ops.iter().filter(|&&(_, l)| (l as usize) < data || dirs.contains(&l)).map(|(n, l)| format!("{n}:{l}")).collect();
     println!("shotcut slices={} result={:?} busy={} erased_meta_pages={:?}", n, res, screenshot::busy(), erased);
     println!("  metadata writes (slice:lba) {:?}", meta);
+}
+
+/// Volume geometry of an image for the prep checks: (FAT 1 byte offset,
+/// data start LBA, clusters).
+fn geo(b: &[u8]) -> (usize, u32, u32) {
+    let le16 = |o: usize| b[o] as u32 | (b[o + 1] as u32) << 8;
+    let rsvd = le16(0x0E);
+    let data = rsvd + b[0x10] as u32 * le16(0x16) + le16(0x11) * 32 / 4096;
+    let tot = if le16(0x13) != 0 { le16(0x13) } else { le16(0x20) | le16(0x22) << 16 };
+    (rsvd as usize * 4096, data, tot - data)
+}
+
+/// Free clusters of an image, first fit.
+fn free_clusters(b: &[u8]) -> Vec<u32> {
+    let (fat, _, n) = geo(b);
+    (2..n + 2).filter(|&c| b[fat + 2 * c as usize] == 0 && b[fat + 2 * c as usize + 1] == 0).collect()
+}
+
+fn cluster_blank(b: &[u8], c: u32) -> bool {
+    let (_, data, _) = geo(b);
+    let o = (data + c - 2) as usize * 4096;
+    b[o..o + 4096].iter().all(|&x| x == 0xFF)
+}
+
+/// Drive screenshot.rs's idle-time preparation (`prep_on`, 5 ms per main-
+/// loop pass, everything allowed) until it is Ready / Off, the power is
+/// gone, or `max` steps. Returns (state, steps).
+fn prep_drive(img: &mut Img, now: &mut u64, max: usize) -> (u32, usize) {
+    let mut n = 0;
+    loop {
+        *now += 5;
+        let st = screenshot::prep_on(img, *now, true);
+        n += 1;
+        if st >= 2 || img.dead || n >= max {
+            return (st, n);
+        }
+    }
+}
+
+/// `main <img> prep run [cut <k>] | shot | race [nobump] | weak`: the idle-
+/// time preparation of the next screenshot's clusters (screenshot.rs
+/// `prep_on`) on the NOR model.
+///   run: to Ready; FAT / root / every allocated cluster unchanged, only
+///        free clusters written, the first 76 free ones (all if fewer)
+///        blank; `cut k` = power cut before the k-th program / erase;
+///   shot [stale]: prepared, then a shot slice by slice: no data block
+///        erased in the shot, every one programmed without the compare;
+///        then prepared again (the next 76); `stale`: the 4th prepared
+///        cluster overwritten behind the write counter before the shot;
+///   race: for every step k of a preparation, another writer links the
+///        first free cluster (FAT 1 + 2 entry EOC, data 0xA5) after k steps
+///        (`nobump`: behind the write counter's back, i.e. only the FAT
+///        re-read before an erase protects it); its data must survive;
+///   weak: the first free cluster reads blank but does not take a program
+///        (an erase cut short): the shot's read back fails once, the block
+///        is written again with an erase, Saved.
+fn prep_cmd(a: &[String], img: &mut Img) {
+    let mut now = 0u64;
+    let blk_of = |b: &[u8], c: u32| (geo(b).1 + c - 2) as usize * 4096;
+    match a[3].as_str() {
+        "run" => {
+            if a.get(4).is_some_and(|x| x == "cut") {
+                img.fcut = Some(a[5].parse().unwrap());
+            }
+            let before = img.d.clone();
+            let free = free_clusters(&before);
+            let (fat, data, _) = geo(&before);
+            let _ = fat;
+            let (st, steps) = prep_drive(img, &mut now, 1_000_000);
+            let meta_same = img.d[..data as usize * 4096] == before[..data as usize * 4096];
+            let mut used_same = true;
+            let mut changed_free = 0;
+            for blk in data as usize..img.d.len() / 4096 {
+                let c = blk as u32 - data + 2;
+                let o = blk * 4096;
+                if img.d[o..o + 4096] != before[o..o + 4096] {
+                    if free.contains(&c) {
+                        changed_free += 1;
+                    } else {
+                        used_same = false;
+                    }
+                }
+            }
+            let want = free.len().min(76);
+            let blank = free[..want].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
+            let p = screenshot::prep_stats();
+            println!(
+                "prep state={} found={} erases={} steps={} meta_same={} used_same={} changed_free={} blank_first={}/{} free={} dead={}",
+                st, p[1], p[2], steps, meta_same, used_same, changed_free, blank, want, free.len(), img.dead
+            );
+        }
+        "shot" => {
+            let (st, _) = prep_drive(img, &mut now, 1_000_000);
+            let e0 = screenshot::prep_stats()[2];
+            if a.get(4).is_some_and(|x| x == "stale") {
+                // A prepared cluster written behind the write counter's
+                // back: the shot programs it without the compare, the read
+                // back fails, the retry erases it.
+                let c = free_clusters(&img.d)[3];
+                let o = blk_of(&img.d, c);
+                img.d[o..o + 4096].fill(0);
+            }
+            img.nor_step = true;
+            assert!(screenshot::start());
+            let r = loop {
+                if let Some(r) = screenshot::poll_on(img) {
+                    break r;
+                }
+            };
+            screenshot::take_result();
+            let s = screenshot::stats();
+            let free = free_clusters(&img.d);
+            let ready_before = free[..free.len().min(76)].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
+            let (st2, _) = prep_drive(img, &mut now, 1_000_000);
+            let ready_after = free[..free.len().min(76)].iter().filter(|&&c| cluster_blank(&img.d, c)).count();
+            let p = screenshot::prep_stats();
+            println!(
+                "prep state={} erases={} shot={:?} shot_erased={} no_compare={} next_blank_before={} state2={} found2={} erases2={} next_blank_after={}",
+                st, e0, r, s[3], img.blind, ready_before, st2, p[1], p[2] - e0, ready_after
+            );
+        }
+        "race" => {
+            let nobump = a.get(4).is_some_and(|x| x == "nobump");
+            let base = img.d.clone();
+            screenshot::prep_reset();
+            let mut probe = Img::new(base.clone());
+            let mut t = 0u64;
+            let (_, total) = prep_drive(&mut probe, &mut t, 1_000_000);
+            let (mut ok, mut erased_any) = (0, 0);
+            // Every step of the first 3000 (the scan, the first clusters'
+            // checks and erases), then every 7th.
+            let ks: Vec<usize> = (0..total.min(3000)).chain((3000..total).step_by(7)).collect();
+            for &k in &ks {
+                screenshot::prep_reset();
+                let mut m = Img::new(base.clone());
+                let mut t = 0u64;
+                prep_drive(&mut m, &mut t, k);
+                // The other writer: the first free cluster now.
+                let c = free_clusters(&m.d)[0];
+                let (fat, _, _) = geo(&m.d);
+                let o = blk_of(&m.d, c);
+                let nf = m.d[0x10] as usize;
+                let fsz = (m.d[0x16] as usize | (m.d[0x17] as usize) << 8) * 4096;
+                if nobump {
+                    m.d[o..o + 4096].fill(0xA5);
+                    for f in 0..nf {
+                        m.d[fat + f * fsz + 2 * c as usize..fat + f * fsz + 2 * c as usize + 2].copy_from_slice(&[0xFF, 0xFF]);
+                    }
+                } else {
+                    let mut b = vec![0xA5u8; 4096];
+                    msc::BlockDevice::write_block(&mut m, o as u32 / 4096, &b);
+                    for f in 0..nf {
+                        let lba = ((fat + f * fsz + 2 * c as usize) / 4096) as u32;
+                        msc::BlockDevice::read_block(&mut m, lba, &mut b);
+                        let i = (fat + f * fsz + 2 * c as usize) % 4096;
+                        b[i..i + 2].copy_from_slice(&[0xFF, 0xFF]);
+                        msc::BlockDevice::write_block(&mut m, lba, &b);
+                    }
+                }
+                let (st, _) = prep_drive(&mut m, &mut t, 1_000_000);
+                if m.d[o..o + 4096].iter().all(|&x| x == 0xA5) && st == 2 {
+                    ok += 1;
+                }
+                erased_any += screenshot::prep_stats()[2].min(1) as usize;
+            }
+            println!("prep race{} steps={} cases={} intact={} (with erases {})", if nobump { " nobump" } else { "" }, total, ks.len(), ok, erased_any);
+        }
+        "weak" => {
+            let c = free_clusters(&img.d)[0];
+            let o = blk_of(&img.d, c);
+            img.d[o..o + 4096].fill(0xFF);
+            img.weak.push(o as u32 / 4096);
+            img.nor_step = true;
+            assert!(screenshot::start());
+            let r = loop {
+                if let Some(r) = screenshot::poll_on(img) {
+                    break r;
+                }
+            };
+            screenshot::take_result();
+            println!("prep weak shot={:?} shot_erased={} weak_left={}", r, screenshot::stats()[3], img.weak.len());
+        }
+        x => panic!("prep {x}?"),
+    }
 }
 
 fn unhex(s: &str) -> Vec<u8> {
@@ -932,6 +1156,11 @@ fn main() {
     }
     if a[2] == "upload" {
         upload_cmd(&a, &mut img);
+        save(&a[1], &img.d);
+        return;
+    }
+    if a[2] == "prep" {
+        prep_cmd(&a, &mut img);
         save(&a[1], &img.d);
         return;
     }

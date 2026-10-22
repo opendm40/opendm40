@@ -22,6 +22,17 @@ scope view, scope STOPped):
   * --out: the BMPs and the reference frames are kept there (<name>.bmp,
     <name>.lcd565), so two builds can be compared byte for byte
     (cmp DIR1/x.bmp DIR2/x.bmp).
+The SPI flash has the W25Q128JV's timing (emu/peripherals/W25Q128.cs busy
+model; default tPP 0.7 ms per page program, tSE 45 ms per 4 KiB erase,
+--tpp / --tse), so the screen-frozen time of a shot is realistic. Per shot
+the firmware's own figures are printed (DBG:FLASH? fields 4..7,
+screenshot.rs `stats`): frozen ms, total ms, slices while frozen, data blocks
+that needed an erase; --max-freeze MS fails a shot frozen longer.
+Builds with the idle-time preparation (screenshot.rs `prep`, DBG:FLASH?
+fields 8..) are first waited for (at most 60 s virtual) until the next
+shot's clusters are erased, unless --no-prep-wait; the screen "again" is a
+second shot of the last screen right after the previous one (nothing
+prepared: the unprepared freeze).
 The emulator runs on a private copy of the SPI disk image (per process:
 port + pid). Exit status 0 = all passed.
 """
@@ -40,7 +51,11 @@ ap.add_argument('--app', required=True, help='fw-rs native ELF')
 ap.add_argument('--port', type=int, default=17310, help='USB/IP port (default 17310)')
 ap.add_argument('--out', help='keep the BMPs and reference frames here')
 ap.add_argument('--mips', default='200')
-ap.add_argument('--screens', default='dmm,menu,scope')
+ap.add_argument('--screens', default='dmm,menu,scope', help='dmm, menu, scope, again (comma-separated)')
+ap.add_argument('--tpp', type=int, default=700, help='flash page program time, us (default 700)')
+ap.add_argument('--tse', type=int, default=45000, help='flash 4 KiB erase time, us (default 45000)')
+ap.add_argument('--max-freeze', type=int, default=0, metavar='MS', help='fail a shot frozen longer (0: report only)')
+ap.add_argument('--no-prep-wait', action='store_true', help='do not wait for the idle-time preparation')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, HERE)
@@ -61,9 +76,15 @@ tag = 'shot-%d-%d' % (A.port, os.getpid())
 disk = os.path.join(OUT, '%s.disk.bin' % tag)
 shutil.copy(os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
 log = os.path.join(OUT, '%s.log' % tag)
+script = os.path.join(OUT, '%s.script' % tag)
+with open(script, 'w') as f:
+    f.write('0 monitor sysbus.spi2.spiflash ProgramUs %d\n' % A.tpp)
+    f.write('0 monitor sysbus.spi2.spiflash Erase4kUs %d\n' % A.tse)
+    f.write('0 monitor sysbus.spi2.spiflash Erase32kUs %d\n' % (A.tse * 120 // 45))
+    f.write('0 monitor sysbus.spi2.spiflash Erase64kUs %d\n' % (A.tse * 150 // 45))
 cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--mips', A.mips, '--app', A.app,
        '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', tag, '--log', log,
-       '--disk', disk]
+       '--disk', disk, '--script', script]
 if A.out:
     os.makedirs(A.out, exist_ok=True)
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
@@ -156,9 +177,29 @@ try:
             q('STOP')  # the scope trace stops (the DMM HOLD is still on)
             wait_ms(1500)
 
+    def flash():
+        return [int(float(x)) for x in q('DBG:FLASH?').split(',')[1:]]
+
+    def prep_wait():
+        f = flash()
+        if len(f) < 8 or A.no_prep_wait:
+            return
+        t0 = up()
+        while up() - t0 < 60000:
+            f = flash()
+            if f[6] == 2:
+                break
+            time.sleep(0.5)
+        print('  prep: state %d, %d clusters ready, %d erases so far (waited %.1f s virtual)'
+              % (f[6], f[7], f[8], (up() - t0) / 1000), flush=True)
+
+    print('flash timing: tPP %d us, tSE %d us' % (A.tpp, A.tse), flush=True)
+    FREEZE = []
     for name in A.screens.split(','):
         print('--- %s' % name, flush=True)
-        setup(name)
+        if name != 'again':
+            setup(name)
+            prep_wait()
         before = shots()
         ref0 = lcd565()
         t0 = up()
@@ -174,6 +215,11 @@ try:
             continue
         fn = new.pop()
         wait_ms(1500)  # the verify pass
+        f = flash()
+        print('  frozen %d ms, shot %d ms, %d slices frozen, %d of 76 data blocks erased' % tuple(f[2:6]), flush=True)
+        FREEZE.append((name, f[2], f[5]))
+        if A.max_freeze:
+            check(f[2] <= A.max_freeze, '%s: frozen %d ms <= %d ms' % (name, f[2], A.max_freeze))
         ref1 = lcd565()
         bmp = fetch(fn, 307266)
         check(len(bmp) == 307266 and bmp[:66] == HDR, '%s: 307266 bytes, the stock header' % fn)
@@ -185,9 +231,10 @@ try:
         diff = sum(a != b for a, b in zip(pix, ref0))
         check(diff == 0, '%s: pixels = the panel read before the gesture (%d differ; the panel changed by %d px after the shot)'
               % (fn, diff, d1))
-        if A.out:
+        if A.out and name != 'again':
             open(os.path.join(A.out, name + '.bmp'), 'wb').write(bmp)
             open(os.path.join(A.out, name + '.lcd565'), 'wb').write(struct.pack('<%dH' % len(ref0), *ref0))
+    print('freeze: ' + ', '.join('%s %d ms (%d erased)' % x for x in FREEZE), flush=True)
     err = q('SYST:ERR?')
     print('  SYST:ERR? %s' % err, flush=True)
 finally:
