@@ -124,6 +124,10 @@ const LOOP_CAP: &str = "4-20mA";
 /// Caption of the burden voltage readout (A functions, Settings 3/3
 /// "Burden voltage"; doc 3.15): DC A aux1, AC A aux2.
 const BURDEN_CAP: &str = "Burden";
+/// Power meter, "At load" on (doc 3.16): the mark after the compensated V's
+/// unit (aux1) and at the main readout's top left (P / its energy; ui::pw
+/// `coupling`).
+pub const LOAD_CAP: &str = "@load";
 
 /// The aux readouts as shown. UF-26: the DC mA loop percentage (aux2 "%",
 /// dmm.rs: (|mA| - 4) x 6.25, OL above 125 %) is hidden outside -25..125 %
@@ -207,7 +211,7 @@ pub struct DmmView {
     /// part (unit, AC+DC) as last drawn; None = repaint. A reading that
     /// leaves a part unchanged does not repaint it.
     aux_val: [Option<([u8; 16], u8)>; 2],
-    aux_unit: [Option<(&'static str, bool)>; 2],
+    aux_unit: [Option<(&'static str, u8)>; 2],
     /// UF-30: the fast bargraph in the history row's place (Settings 2/2
     /// "DMM row": Bargraph, the default / History). Set by the app before
     /// `draw_static`.
@@ -619,6 +623,10 @@ impl DmmView {
                 _ => mode_glyph(r.mode, r.acdc || r.power.is_some()),
             };
             sf::label(sf::MODE, rect(437, 76, 35, 32), g, VALUE, BG, 7, 0);
+            // The power meter's "@load" mark slot (ui::pw `coupling` redraws
+            // it with the next reading; no other function paints there).
+            let m = pw::LOAD_MARK;
+            lcd::fill_rect(m.x as u16, m.y as u16, m.w as u16, m.h as u16, BG);
             self.pwc.coup_invalidate();
             // The AUTO-coupling label shares the limit badge's slot.
             self.last_lim = 255;
@@ -632,6 +640,7 @@ impl DmmView {
         // Aux readouts (stock: value right-aligned cells at y 40, unit after).
         let (aux, lp, bd) = aux_shown(r);
         let temp = r.mode == 15 && self.label.is_some();
+        let load = r.power.is_some_and(|p| p.comp) && self.power;
         for (i, a) in aux.iter().enumerate() {
             let bdi = bd == Some(i);
             // Value boxes end 4 px before the unit (separate items: >= 3 px).
@@ -707,7 +716,10 @@ impl DmmView {
                     self.aux_val[i] = vkey;
                     // AC+DC: the aux1 unit box (V..uA, <= 48 px) ends at 231,
                     // the aux2 tag slot starts at 232; else full width (kHz 57 px).
-                    let ukey = Some((v.unit, r.parts()));
+                    // Power meter, "At load" on: "@load" after the V unit
+                    // (doc 3.16), in the unit box's own columns.
+                    let lm = i == 0 && load;
+                    let ukey = Some((v.unit, r.parts() as u8 | (lm as u8) << 1));
                     if self.aux_unit[i] != ukey {
                         self.aux_unit[i] = ukey;
                         let uw = if i == 0 && r.parts() { 54 } else { 76 };
@@ -720,6 +732,10 @@ impl DmmView {
                         let sp = if hh == 1 && sf::text_width(sf::LETTERS, ut, 2) <= uw - 3 { 2 } else { 0 };
                         lcd::fill_rect((ux + 3) as u16, 36, (uw - 3) as u16, 1, BG);
                         sf::label(sf::LETTERS, rect(ux + 3, 36 + hh, uw - 3, 30 - hh), ut, VALUE, BG, 1, sp);
+                        if lm {
+                            let mx = ux + 3 + sf::text_width(sf::LETTERS, ut, sp) + 6;
+                            sf::label(sf::F14, rect(mx, 36, ux + uw - mx, 30), LOAD_CAP, VALUE, BG, 1, 1);
+                        }
                     }
                     self.last_aux[i] = true;
                 }
@@ -2486,7 +2502,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
             ("DC", "P = Vdc x Idc"),
             ("AC", "Only the AC parts"),
             ("AC+DC", "Pac + Vdc x Idc"),
-            ("MF: At load", "Minus meter's drop"),
+            ("MF: At load (off)", "@load: V - I*R"),
             ("MF: Zero", "Leads open, 12 s"),
             ("Tap the value", "P > Wh > VAh"),
             ("Hold energy box", "Reset Wh (confirm)"),

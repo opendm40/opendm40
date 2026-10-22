@@ -52,9 +52,16 @@ impl PwCache {
 /// switched by the active W button (DC -> AC -> AC+DC, as V / A) or the
 /// Power Settings row.
 const BADGE: sf::Rect = rect(403, 72, 31, 17);
+/// "At load" mark of the main readout (doc 3.16): top left, left of the F78
+/// cells (40..; the power main has at most its sign in the first cell,
+/// mid-height), under the aux row (..65), above the HV lightning's box
+/// (0, 80, 40, 64; V functions only); cleared by `DmmView::reading` on a
+/// mode change. The right column (403..436 between the limit badge and the
+/// unit) is 3 px too narrow for it at the F14 letter spacing.
+pub const LOAD_MARK: sf::Rect = rect(4, 66, 36, 14);
 
-fn coupling(c: &mut PwCache, _pv: &PowerVals, lim: u8) {
-    let k = 1 + ((lim as u32) << 2);
+fn coupling(c: &mut PwCache, pv: &PowerVals, lim: u8) {
+    let k = 1 + ((lim as u32) << 2) + ((pv.comp as u32) << 12);
     if c.coup == k {
         return;
     }
@@ -64,6 +71,7 @@ fn coupling(c: &mut PwCache, _pv: &PowerVals, lim: u8) {
     } else {
         sf::label(sf::F14, BADGE, "", VALUE, BG, 8, 1);
     }
+    sf::label(sf::F14, LOAD_MARK, if pv.comp { crate::ui::LOAD_CAP } else { "" }, VALUE, BG, 4, 1);
 }
 
 /// Small text buffer.
@@ -191,7 +199,11 @@ impl DmmView {
             }
             et.push(crate::dmm::format(&mut b, pw::no_neg_zero(ev.v, d), d));
         }
-        let (su, qu, fu) = if pv.dc { ("", "", "") } else { (su, qu, fu) };
+        // No value ("--": the DC method, or AC coupling below the AC floors,
+        // doc 3.16): no unit either.
+        let su = if pv.dc || !pv.s.is_finite() { "" } else { su };
+        let qu = if pv.dc || !pv.q.is_finite() { "" } else { qu };
+        let fu = if pv.dc || !(pv.f_hz > 0.0) { "" } else { fu };
         let items: [(&str, &T, &str); 5] = [(etag, &et, ev.unit), ("PF", &pft, ""), ("S", &st, su), ("Q", &qt, qu), ("f", &ft, fu)];
         for (i, (tag, t, u)) in items.iter().enumerate() {
             let mut k = T::new();
@@ -593,8 +605,10 @@ pub fn settings_status(p: &pw::Pw, key: u32, help: u8) -> u32 {
         }
     };
     let hl = match help {
-        HELP_LOAD if p.comp => "At load ON: P, V at the load (meter drop off)",
-        HELP_LOAD => "At load OFF: P, V at the jacks, meter drop in",
+        // When to turn it on (doc 3.16): V leads at the source, the meter in
+        // series, so the load gets V - I R_path; ON marks V / P "@load".
+        HELP_LOAD if p.comp => "At load ON: V at source, so load sees V - I*R",
+        HELP_LOAD => "OFF: V, P at the jacks. ON if V leads at source",
         _ => coup_help(p.coup),
     };
     let mut k = T::new();

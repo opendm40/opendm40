@@ -678,6 +678,16 @@ Firmware:
         Help 7/7 "Power meter". powtest istep / istep-ua / iman-ovl / ac, senttest ovl-pow-auto-*.
         (verify on device: the check list of doc §3.14) Device f3aea2f: items 3 and 5 PASS (docs/device-check-2026-10-21.md "f3aea2f" 1);
         1, 2, 4 need current through A; 6 not run.
+  - [x] Owner round 5 (doc §3.16): "At load" OFF by default (persist bit 10 = ON opt-in; every older record
+        loads OFF: an old explicit ON is indistinguishable from the old default), "@load" marks after the V unit
+        and at the main readout's top left while on, the help line says when (V leads at the source, meter in
+        series); entering W starts in DC as V / A (a restart in W keeps its coupling); AC floors (dmm AUTO_FLOOR
+        "to DC": V 0.5 %, A 2 % of range): AC coupling below them V / I 0, PF / S / Q / f "--" (SCPI 9.91E37),
+        AC+DC Q 0; Q of noise hypot(Vn I, V In) with Vn / In 0.1 % / 0.5 % of range reads 0; coupling hints DC?
+        (AC+DC, no AC part) / AC? (DC with V_ac from the DC row's own YY RMS: no register write, no note-7
+        risk; I_ac not available without an R34 switch). powtest entry / ac-floor / acdc-floor.
+        - [ ] Verify on device: the check list of doc §3.16 (the pure-DC residues of V_ac / I_ac against the
+              floors and NOISE_V / NOISE_I).
   - [ ] Verify on device: the re-check list of doc §3.12 (zero, V cal, f on the square, W entry, DC method /
         AUTO, then T2 / T3 / T4 with current through A).
         Device 5f14d38 (device-check "5f14d38" 5): PASS for W entry (dialog once, then direct), tap-W coupling

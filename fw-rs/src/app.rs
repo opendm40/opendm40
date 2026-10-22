@@ -1882,7 +1882,13 @@ impl App {
         let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
         self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
         let mode = if same_session { restore_func(rec.version, p[2] as u8) } else { 1 };
+        // Entering the power meter starts in DC (as V / A); a restart in it
+        // keeps its coupling, as V / A keep theirs in the function code.
+        let coup = self.dmm.pw.coup;
         self.dmm.select(clk, mode);
+        if self.dmm.pw.on {
+            self.dmm.pw_set_coupling(clk, coup);
+        }
         let mut g = self.gen.s;
         g.wave = Wave::ALL[(p[3] & 3) as usize];
         g.duty = ((p[3] >> 8) & 0xFFFF).min(10000) as u16;
@@ -2522,7 +2528,7 @@ impl App {
             self.alert_seq = seq;
             if a != Alert::None {
                 if !is_page(self.view) || self.view == View::Menu {
-                    self.toast(now, a.toast(), false);
+                    self.toast(now, crate::dmm::pw::hint_toast(a, self.dmm.pw.on), false);
                 }
                 match a {
                     Alert::AJack | Alert::AProt => self.alert_beep_t0 = Some(now),

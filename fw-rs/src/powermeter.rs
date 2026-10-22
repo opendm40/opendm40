@@ -115,6 +115,24 @@ const I_FLOOR: f32 = 50e-6;
 /// DBG:POW:RAW? ring.
 pub const RING_N: usize = 16;
 
+/// The AC floors (doc 3.16), fractions of the channel's range: an AC part
+/// (V_ac, I_ac) below its floor is noise, not a reading. The values are the
+/// AUTO coupling's "to DC" floors of the V / A functions (dmm.rs
+/// AUTO_FLOOR_V / _A [1]: V 0.5 %, A 2 %; acdc doc 9), so the power meter
+/// calls a part "no AC" exactly where AUTO coupling would switch to DC.
+/// AC coupling: a part below its floor reads 0 and PF / S / Q are "--"
+/// (NaN, SCPI 9.91E37); f also "--" when the channel the counter watches is
+/// below. AC+DC: the part is left out of the totals (Q 0 when either is).
+pub const FLOOR_V: f32 = AUTO_FLOOR_V[1];
+pub const FLOOR_I: f32 = AUTO_FLOOR_A[1];
+/// RMS noise assumed on an AC part above its floor, fractions of the range
+/// (doc 3.16; the emulator's pure-DC residues are 0.025 % / 0.14 %, ~4 x
+/// margin, the device's to be confirmed): uncorrelated noise adds to S but
+/// not to P, so a resistive load shows Q = hypot(Vn I, V In) of pure noise
+/// (first order of S^2 - P^2). AC+DC Q below that reads 0.
+pub const NOISE_V: f32 = 0.001;
+pub const NOISE_I: f32 = 0.005;
+
 /// Coupling setting (`Pw::coup`, POW:COUP, persisted in 2 bits; doc 3.14),
 /// the stock V / A trio:
 /// * DC = one fixed row (`dc_row`): the current on AD1 (the stock DC A
@@ -417,7 +435,25 @@ pub struct PowerVals {
     pub sph: i8,
     /// The main readout (MAIN_*: P, Wh, VAh; a tap on it cycles).
     pub main: u8,
+    /// Coupling hint (HINT_*, doc 3.16): fed to the sentinel per reading.
+    pub hint: u8,
 }
+
+/// The toast of an alert; in the power meter the DC? / AC? hints are the
+/// coupling hints (doc 3.16).
+pub fn hint_toast(a: Alert, pw_on: bool) -> &'static str {
+    match a {
+        Alert::Dc if pw_on => HINT_TOASTS[0],
+        Alert::Ac if pw_on => HINT_TOASTS[1],
+        _ => a.toast(),
+    }
+}
+pub const HINT_TOASTS: [&str; 2] = ["No AC: DC is more precise", "AC present: use AC+DC"];
+
+/// AC+DC with no AC part on V and I (and a DC signal): DC is more precise.
+pub const HINT_NO_AC: u8 = 1;
+/// DC with an AC part on V: P = V_dc I_dc misses the AC power.
+pub const HINT_AC: u8 = 2;
 
 impl PowerVals {
     pub const ZERO: PowerVals = PowerVals {
@@ -441,8 +477,8 @@ impl PowerVals {
         i_auto: true,
         alt: false,
         dc: false,
-        coup: COUP_ACDC,
-        comp: true,
+        coup: COUP_DC,
+        comp: false,
         run: true,
         v_ol: false,
         i_ol: false,
@@ -450,6 +486,7 @@ impl PowerVals {
         over_left: 0,
         sph: 0,
         main: MAIN_P,
+        hint: 0,
     };
 }
 
@@ -515,6 +552,9 @@ pub struct Pw {
     v_dc: f32,
     i_ac: f32,
     i_dc: f32,
+    /// DC coupling: the V channel's AC part (the DC row's R34 YY RMS, read
+    /// anyway; no register write) for the "AC present" hint only.
+    vac_dc: f32,
     /// P of the latest accepted result (unfiltered, for the energy).
     p_last: f32,
     /// Totals of the latest reading: P, S for the next energy interval.
@@ -530,6 +570,7 @@ pub struct Pw {
     /// continuous-current limit (A, s; t_lim 0 = none).
     pub sph: i8,
     pub r_path: [f32; 3],
+    /// "At load" (doc 3.16): off by default, V and P as at the jacks.
     pub comp: bool,
     pub i_cont: f32,
     pub t_lim: u16,
@@ -608,7 +649,7 @@ impl Pw {
         Pw {
             on: false,
             alt: false,
-            coup: COUP_ACDC,
+            coup: COUP_DC,
             dc: false,
             skip_y: 0,
             vr: 3,
@@ -626,6 +667,7 @@ impl Pw {
             v_dc: 0.0,
             i_ac: 0.0,
             i_dc: 0.0,
+            vac_dc: 0.0,
             p_last: 0.0,
             p_tot: 0.0,
             s_last: 0.0,
@@ -636,7 +678,7 @@ impl Pw {
             t_last: None,
             sph: 0,
             r_path: SHUNT_OHM,
-            comp: true,
+            comp: false,
             i_cont: I_CONT_DEFAULT,
             t_lim: T_LIM_DEFAULT,
             over_t0: None,
@@ -826,7 +868,10 @@ impl Dmm {
         pw.cal_req = false;
         pw.keep = 0;
         pw.cmp_vr = 255;
-        pw.dc = pw.coup == COUP_DC;
+        // Entering starts in DC, as V / A (doc 3.16); a restart in the
+        // power meter restores its coupling afterwards (`App::restore`).
+        pw.coup = COUP_DC;
+        pw.dc = true;
         self.mode = 255;
         self.reset_values();
         self.entry = clk.now_ms();
@@ -1087,11 +1132,43 @@ impl Dmm {
         // AC: the DC parts are not used (doc 3.14).
         let ac = pw.coup == COUP_AC && !pw.dc;
         let (vd, id) = if ac { (0.0, 0.0) } else { (pw.v_dc, pw.i_dc) };
-        let (p, s, q, pf, v, i) = if pw.alt && !pw.dc {
+        // The AC floors (doc 3.16; method B: the DC row has no AC parts).
+        let b = !pw.alt && !pw.dc;
+        let (fv, fi) = (FLOOR_V * V_LIM[pw.vr.min(3) as usize], FLOOR_I * I_LIM[pw.ik.min(5) as usize]);
+        let (v_ok, i_ok) = (pw.v_ac >= fv, pw.i_ac >= fi);
+        let mut hint = 0;
+        if b && pw.coup == COUP_ACDC && !v_ok && !i_ok && (pw.v_dc.abs() >= fv || pw.i_dc.abs() >= fi) {
+            hint = HINT_NO_AC;
+        } else if pw.dc && pw.seen & 2 != 0 && pw.vac_dc >= fv {
+            hint = HINT_AC;
+        }
+        let (p, mut s, mut q, mut pf, v, i) = if pw.alt && !pw.dc {
             let (v, i) = (pw.v_ac, hypot(pw.i_ac, id));
             (f32::NAN, v * i, f32::NAN, f32::NAN, v, i)
+        } else if b {
+            let va = if v_ok { pw.v_ac } else { 0.0 };
+            let ia = if i_ok { pw.i_ac } else { 0.0 };
+            totals(if v_ok && i_ok { pw.p_ac } else { 0.0 }, va, vd, ia, id, r)
         } else {
             totals(pw.p_ac, pw.v_ac, vd, pw.i_ac, id, r)
+        };
+        if b {
+            let qn = hypot(NOISE_V * V_LIM[pw.vr.min(3) as usize] * i, v * NOISE_I * I_LIM[pw.ik.min(5) as usize]);
+            if ac && !(v_ok && i_ok) {
+                // AC: no AC part on V or I: no phase relation.
+                (s, q, pf) = (f32::NAN, f32::NAN, f32::NAN);
+            } else if !(v_ok && i_ok) || q < qn {
+                q = 0.0;
+            }
+        }
+        // The counter watches the V tap, or the current (PB4) when the tap
+        // has no window: "--" when that channel's AC part is below its floor.
+        let f_ok = if pw.dc {
+            false
+        } else if b {
+            pw.f_ok && if pw.r20 == R20_PB4 { i_ok } else { v_ok }
+        } else {
+            pw.alt || pw.f_ok
         };
         let ov = self.over();
         let (over, over_left) = match pw.over_t0 {
@@ -1111,7 +1188,7 @@ impl Dmm {
             i,
             vdc: if (pw.alt && !pw.dc) || ac { f32::NAN } else { pw.v_dc },
             idc: if ac { f32::NAN } else { pw.i_dc },
-            f_hz: if pw.dc { 0.0 } else if pw.alt || pw.f_ok { self.freq.f_khz * 1000.0 } else { 0.0 },
+            f_hz: if f_ok { self.freq.f_khz * 1000.0 } else { f32::NAN },
             burden_v: i * pw.r_path[iu as usize],
             e_wh: pw.e.wh(),
             vah: pw.va.wh(),
@@ -1132,6 +1209,7 @@ impl Dmm {
             over_left,
             sph: pw.sph,
             main: pw.main,
+            hint,
         })
     }
 
@@ -1286,10 +1364,16 @@ impl Dmm {
                 let s_v = CODE * KV[r] * pw.v_gain(pw.vr);
                 let zy = if pw.zero_ok { pw.zy as i32 } else { 0 };
                 let d = (lpf - zy) as f32 * s_v;
+                // The row's RMS is sum(Y^2) after the HPF: V's AC part, for
+                // the "AC present" hint (doc 3.16; P = V_dc I_dc misses
+                // mean(v_ac i_ac), which needs v_ac).
+                let a = sqrt(rms.max(0) as f32) * s_v;
                 if pw.seen & 2 == 0 {
                     pw.v_dc = d;
+                    pw.vac_dc = a;
                 } else {
                     ema(ACV_WIN[r], 0.5, d, &mut pw.v_dc);
+                    ema(ACV_WIN[r], 0.25, a, &mut pw.vac_dc);
                 }
                 pw.v_ac = 0.0;
                 pw.seen |= 2;
@@ -1550,6 +1634,7 @@ impl Dmm {
     /// previous reading, so a gap holds the last P), the current limit and
     /// the phase calibration.
     fn pw_account(&mut self, now: u64, pv: &PowerVals) {
+        self.sent.pw_hints(now, pv.hint == HINT_NO_AC, pv.hint == HINT_AC);
         let pw = &mut *self.pw;
         if pw.run {
             if let Some(t) = pw.t_last {
