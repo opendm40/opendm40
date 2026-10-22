@@ -251,7 +251,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     let mut log_dur_s = 60u32;
     let mut fast_prev = false;
     let mut fast_tap_armed = false;
-    let mut fast_file: Option<u16> = None;
     let mut bt = bt::Bt::new();
     let mut gestures = gesture::Tracker::new();
     let mut touch_events = 0u32;
@@ -331,39 +330,22 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // it asks for the logger session to start / stop.
         {
             let lon = logger.host_active();
-            match fastlog::poll(lon, &mut |b| logger.drain(b)) {
-                fastlog::Ev::None => {}
-                fastlog::Ev::Start => {
-                    if !fast_start(app, &mut clk, logger) {
-                        for s in scpis.iter_mut() {
-                            s.set_err("Settings conflict");
-                        }
+            let ev = fastlog::poll(lon, &mut |b| logger.drain(b));
+            let fa = fastlog::active();
+            // The rare part (a start / stop / end / Record page request)
+            // in one cold call.
+            if ev != fastlog::Ev::None || fa != fast_prev || app.fast_req_pending() {
+                if fast_events(app, &mut clk, logger, ev, fa, fast_prev, now) {
+                    for s in scpis.iter_mut() {
+                        s.set_err("Settings conflict");
                     }
+                }
+                if ev == fastlog::Ev::Start {
                     fast_tap_armed = false;
                 }
-                fastlog::Ev::Stop => {
-                    if logger.host_active() {
-                        logger.stop();
-                    }
-                }
-            }
-            let fa = fastlog::active();
-            if fa {
-                fast_file = fastlog::status().file;
-            }
-            if fast_prev && !fa {
-                if let Some(st) = fastlog::ended() {
-                    app.fast_ended(now, st, fast_file);
-                }
-                fast_file = None;
-                dialog::log_panel_reset();
-                app.invalidate();
             }
             fast_prev = fa;
-            fastlog::set_rates(fast_next_hz(logger, false), fast_next_hz(logger, true));
-            if let Some(r) = app.take_fast_req() {
-                fast_req(app, logger, r, now);
-            }
+            fastlog::set_cfg(logger.osr(), logger.chop(), logger.req_hz());
         }
         bt.pump(); // BT TX DMA: next segment of a long reply
         prof::lap(prof::USB);
@@ -927,24 +909,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                     },
                     scpi::Log::State(Some(on)) => {
-                        let m = app.dmm.mode();
-                        let hz = fast_next_hz(logger, logger.ad2());
-                        if on && ((logger.wave() && logger.active()) || fastlog::active()) {
-                            // The DMM wave view owns the AD2 stream / a disk
-                            // session runs or prepares.
-                            scpi.set_err("Settings conflict");
-                        } else if on && log_disk && !port.trusted() {
-                            // Disk writes over an open radio link: USB only
-                            // (as LOG:CSV ON).
-                            scpi.set_err(bt::proto::REFUSED);
-                        } else if on && !log_disk && !port.trusted() && (logger.ad2() || hz > BT_MAX_HZ) {
-                            // 115200 baud = ~960 records/s at 12 bytes,
-                            // ~870 with the query turnaround (docs/bt-scpi.md).
-                            scpi.set_err("Rate too high for Bluetooth");
-                        } else if on && log_disk {
-                            if logger.active() || !logger::Logger::mode_ok(logger.ad2(), m) || matches!(app.dmm.func(), 16 | 17) {
-                                scpi.set_err("Settings conflict");
-                            } else if let Err(e) = fastlog::begin(fastlog::plan_bytes(log_dur_s, hz, logger.ad2()), log_dur_s) {
+                        if let Some(e) = on.then(|| log_on_check(app, logger, log_disk, log_dur_s, port.trusted())).flatten() {
+                            // Refused, or a disk session began (Err("")).
+                            if !e.is_empty() {
                                 scpi.set_err(e);
                             }
                         } else if on {
@@ -974,31 +941,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         scpi.put_bytes(if logger.host_active() || fastlog::active() { b"1" } else { b"0" });
                         true
                     }
-                    scpi::Log::Dest(Some(d)) => {
-                        if fastlog::active() || logger.host_active() {
-                            scpi.set_err("Settings conflict");
-                        } else {
-                            log_disk = d;
-                        }
-                        false
-                    }
-                    scpi::Log::Dest(None) => {
-                        scpi.len = 0;
-                        scpi.put_bytes(if log_disk { b"DISK" } else { b"HOST" });
-                        true
-                    }
-                    scpi::Log::Dur(Some(s)) => {
-                        log_dur_s = s;
-                        false
-                    }
-                    scpi::Log::Dur(None) => {
-                        scpi.len = 0;
-                        put_u32(&mut scpi, log_dur_s);
-                        true
-                    }
-                    scpi::Log::Disk => {
-                        fast_status(scpi);
-                        true
+                    scpi::Log::Dest(_) | scpi::Log::Dur(_) | scpi::Log::Disk => {
+                        fast_scpi(scpi, l, &mut log_disk, &mut log_dur_s, logger.host_active())
                     }
                     scpi::Log::Source(Some(ad2)) => {
                         // The source also selects what poll() reads: not
@@ -1241,10 +1185,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     nominal_hz: (logger.nominal_mhz() + 500) / 1000,
                     ad2: logger.ad2(),
                     lost: logger.lost(),
-                    disk: fastlog::active().then(|| {
-                        let st = fastlog::status();
-                        dialog::LogDisk { prep: fastlog::preparing(), pct: st.pct, file: st.file.unwrap_or(0), kb: st.bytes / 1024 }
-                    }),
+                    disk: fastlog::panel(),
                 },
             );
         }
@@ -1482,6 +1423,34 @@ fn fast_next_hz(l: &logger::Logger, ad2: bool) -> u32 {
     }
 }
 
+/// The fast logger's rare events of this pass: Ev::Start (the logger
+/// session), Ev::Stop, the session's end (toast, repaint), a Record page
+/// request. True: an SCPI "Settings conflict" for both transports.
+#[inline(never)] // .cold (link-native.x): not per pass
+fn fast_events(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger, ev: fastlog::Ev, fa: bool, was: bool, now: u64) -> bool {
+    let mut conflict = false;
+    match ev {
+        fastlog::Ev::Start => conflict = !fast_start(app, clk, logger),
+        fastlog::Ev::Stop => {
+            if logger.host_active() {
+                logger.stop();
+            }
+        }
+        fastlog::Ev::None => {}
+    }
+    if was && !fa {
+        if let Some(st) = fastlog::ended() {
+            app.fast_ended(now, st, fastlog::status().file);
+        }
+        dialog::log_panel_reset();
+        app.invalidate();
+    }
+    if let Some(r) = app.take_fast_req() {
+        fast_req(app, logger, r, now);
+    }
+    conflict
+}
+
 /// `fastlog::Ev::Start`: start the logger session of a disk session in the
 /// current function and give fastlog its header; false (the function no
 /// longer fits the source): the session is abandoned.
@@ -1523,8 +1492,69 @@ fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, no
     }
 }
 
-/// LOG:DISK? reply: state,file,alloc,bytes,rows,prep_pct.
+/// LOG:STATe ON: why not (Some(error text)), Some("") = a disk session
+/// began (LOG:DEST DISK), None = start the host session (the caller).
+#[inline(never)] // .cold (link-native.x): once per session
+fn log_on_check(app: &mut app::App, logger: &mut logger::Logger, disk: bool, dur_s: u32, trusted: bool) -> Option<&'static str> {
+    let hz = fast_next_hz(logger, logger.ad2());
+    if (logger.wave() && logger.active()) || fastlog::active() {
+        // The DMM wave view owns the AD2 stream / a disk session runs.
+        return Some("Settings conflict");
+    }
+    if disk && !trusted {
+        // Disk writes over an open radio link: USB only (as LOG:CSV ON).
+        return Some(bt::proto::REFUSED);
+    }
+    if !disk && !trusted && (logger.ad2() || hz > BT_MAX_HZ) {
+        // 115200 baud = ~960 records/s at 12 bytes, ~870 with the query
+        // turnaround (docs/bt-scpi.md).
+        return Some("Rate too high for Bluetooth");
+    }
+    if !disk {
+        return None;
+    }
+    if logger.active() || !logger::Logger::mode_ok(logger.ad2(), app.dmm.mode()) || matches!(app.dmm.func(), 16 | 17) {
+        return Some("Settings conflict");
+    }
+    Some(match fastlog::begin(fastlog::plan_bytes(dur_s, hz, logger.ad2()), dur_s) {
+        Ok(()) => "",
+        Err(e) => e,
+    })
+}
+
+/// LOG:DEST / LOG:DURation / LOG:DISK? (true: a reply).
 #[inline(never)] // .cold (link-native.x)
+fn fast_scpi(scpi: &mut scpi::Scpi, l: scpi::Log, disk: &mut bool, dur: &mut u32, host_session: bool) -> bool {
+    scpi.len = 0;
+    match l {
+        scpi::Log::Dest(Some(d)) => {
+            if fastlog::active() || host_session {
+                scpi.set_err("Settings conflict");
+            } else {
+                *disk = d;
+            }
+            false
+        }
+        scpi::Log::Dest(None) => {
+            scpi.put_bytes(if *disk { b"DISK" } else { b"HOST" });
+            true
+        }
+        scpi::Log::Dur(Some(s)) => {
+            *dur = s;
+            false
+        }
+        scpi::Log::Dur(None) => {
+            put_u32(scpi, *dur);
+            true
+        }
+        _ => {
+            fast_status(scpi);
+            true
+        }
+    }
+}
+
+/// LOG:DISK? reply: state,file,alloc,bytes,rows,prep_pct.
 fn fast_status(scpi: &mut scpi::Scpi) {
     scpi.len = 0;
     let st = fastlog::status();

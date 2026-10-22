@@ -305,7 +305,8 @@ impl FastEnc {
         self.flush_req = true;
     }
 
-    #[inline(always)]
+    /// Not inlined (region B): ~4 calls per row.
+    #[inline(never)]
     fn put(&mut self, fifo: &mut [u8], v: u32, bits: u32) {
         if bits == 0 {
             return;
@@ -321,22 +322,15 @@ impl FastEnc {
         self.acc &= (1u64 << self.nb) - 1;
     }
 
-    /// Not inlined: two calls per row, ~1 KB of B each when inlined.
-    #[inline(never)]
+    #[inline(always)]
     fn rice(&mut self, fifo: &mut [u8], x: u32, k: u32) {
         let q = x >> k;
         if q < QMAX {
-            let mut r = q;
-            while r > 0 {
-                let n = r.min(16);
-                self.put(fifo, (1 << n) - 1, n);
-                r -= n;
-            }
-            self.put(fifo, 0, 1);
+            // q ones and the stop zero (<= 24 bits), then k low bits
+            self.put(fifo, ((1u32 << q) - 1) << 1, q + 1);
             self.put(fifo, x, k);
         } else {
-            self.put(fifo, 0xFFFF, 16);
-            self.put(fifo, (1 << (QMAX - 16)) - 1, QMAX - 16);
+            self.put(fifo, (1 << QMAX) - 1, QMAX);
             self.put(fifo, x, 32);
         }
     }

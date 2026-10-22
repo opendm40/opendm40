@@ -102,6 +102,17 @@ SECTIONS
         *(.text.*7dm40_fw10fast_start*);
         *(.text.*7dm40_fw8fast_req*);
         *(.text.*7dm40_fw11fast_status*);
+        *(.text.*7dm40_fw12log_on_check*);
+        *(.text.*7dm40_fw9fast_scpi*);
+        *(.text.*7dm40_fw12fast_next_hz*);
+        *(.text.*7dm40_fw7fastlog5begin*);
+        *(.text.*7dm40_fw7fastlog6status*);
+        *(.text.*7dm40_fw7fastlog10plan_bytes*);
+        *(.text.*7dm40_fw11fast_events*);
+        *(.text.*7dm40_fw2ui11record_page*);
+        *(.text.*7dm40_fw3app*3App11record_page*);
+        *(.text.*7dm40_fw3app*3App9fast_rate*);
+        *(.text.*7dm40_fw3app*3App15record_fast_tap*);
         *(.text.*7dm40_fw3app*3App16record_page_fast*);
         *(.text.*7dm40_fw3app*3App10fast_ended*);
         /* NOT persist: its crc runs on every main-loop pass (device

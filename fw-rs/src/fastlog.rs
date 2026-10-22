@@ -293,19 +293,21 @@ pub fn preparing() -> bool {
     matches!(job().state, State::Prep | State::Ready)
 }
 
-static AD1_HZ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(40);
-static AD2_HZ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(4800);
+/// The logger's next-session settings (main.rs, every pass: LOG:OSR,
+/// LOG:CHOP, LOG:SRATe) for the Record page's estimate: osr | chop << 8.
+static CFG: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(3 | 1 << 8);
+static REQ_HZ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(4800);
 
-/// The logger's next-session rates, S/s (main.rs: from LOG:OSR / CHOP /
-/// SRATe), for the Record page's estimate.
-pub fn set_rates(ad1: u32, ad2: u32) {
-    AD1_HZ.store(ad1, core::sync::atomic::Ordering::Relaxed);
-    AD2_HZ.store(ad2, core::sync::atomic::Ordering::Relaxed);
+#[inline(always)]
+pub fn set_cfg(osr: u8, chop: bool, req_hz: u32) {
+    CFG.store(osr as u32 | (chop as u32) << 8, core::sync::atomic::Ordering::Relaxed);
+    REQ_HZ.store(req_hz, core::sync::atomic::Ordering::Relaxed);
 }
 
-/// (AD1, AD2) rates of `set_rates`.
-pub fn rates() -> (u32, u32) {
-    (AD1_HZ.load(core::sync::atomic::Ordering::Relaxed), AD2_HZ.load(core::sync::atomic::Ordering::Relaxed))
+/// (osr, chop, requested AD2 S/s) of `set_cfg`.
+pub fn cfg() -> (u8, bool, u32) {
+    let c = CFG.load(core::sync::atomic::Ordering::Relaxed);
+    (c as u8, c & 1 << 8 != 0, REQ_HZ.load(core::sync::atomic::Ordering::Relaxed))
 }
 
 /// Bytes the next session would plan for `dur_s` at `hz` (0 = all free).
@@ -363,6 +365,18 @@ pub struct Status {
     pub hw: u32,
     pub programs: u32,
     pub chunks: u32,
+}
+
+/// The logger panel's disk rows (main.rs, while logging).
+#[cfg(target_os = "none")]
+pub fn panel() -> Option<crate::dialog::LogDisk> {
+    let j = job();
+    active().then(|| crate::dialog::LogDisk {
+        prep: preparing(),
+        pct: j.pct,
+        file: if j.has_file { j.n } else { 0 },
+        kb: j.enc.wr / 1024,
+    })
 }
 
 pub fn status() -> Status {
