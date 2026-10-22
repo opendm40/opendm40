@@ -797,7 +797,9 @@ Firmware:
       the deadline moves at once so READ? waits for the fresh reading); a stall watchdog (no reading for 2 s
       past the deadline -> R2A..R31 read back, all 0x00 / 0xFF = the row is lost -> restart; no reading for
       max(10 s, 8 x period), not in capacitance -> restart). Counters in SYST:RAIL:STATe? (wakes, lost,
-      silent). emu/hy3131/btwaketest.py: 3bae462 fails 1g / 1h / a chip POR, the fix passes.
+      silent). emu/hy3131/btwaketest.py: 3bae462 fails 1g / 1h / a chip POR, the fix passes. The device 1h
+      (no READ?, the rail toggling, the page switch's 10 ms pause) is not fully explained by the model: the
+      counters on the device re-check discriminate (wakes per link cycle; lost / silent).
       (verify on device: the §1 repro, 1g and 1h; SYST:RAIL:STATe? counters)
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
       decided: see docs/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
