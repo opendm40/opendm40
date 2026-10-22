@@ -1153,6 +1153,11 @@ pub fn func_label(code: u8) -> &'static str {
         14 => "Frequency",
         16 => "AC+DC V",
         17 => "AC+DC A",
+        // dmm::FUNC_V_AUTO / FUNC_A_AUTO (literal: host tests build this
+        // module without dmm.rs). Not used for a recording: one of AUTO's
+        // parts is recorded, as DC or AC (app.rs rec_start).
+        19 => "AUTO V",
+        20 => "AUTO A",
         18 => "Power",
         _ => "Temperature",
     }

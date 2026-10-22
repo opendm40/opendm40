@@ -390,6 +390,12 @@ pub struct Reading {
     /// AC+DC sub-mode: main = sqrt(AC^2 + DC^2), aux1 = AC part, aux2 = DC
     /// part; `mode` is then always the DC mode (1, 3, 7..9).
     pub acdc: bool,
+    /// AUTO coupling (sub-mode 3, `Dmm::cpl_auto`): main = the part AUTO
+    /// picked (the DC part, signed, or the AC part's RMS), `mode` = the DC
+    /// or the AC mode of that part (so `meter::func_of`, the limits slot,
+    /// smoothing and the glyph above the unit follow it), aux1 / aux2 = the
+    /// AC / DC parts as in AC+DC; `acdc` is false.
+    pub cpl_auto: bool,
     pub seq: u32,
     /// Conversions in the moving average behind `main` / `si` (0 = not an
     /// averaged range); `AVG_FULL` or more = full +1-digit resolution.
@@ -406,7 +412,7 @@ impl Reading {
     /// aux slot (0 / 1) and value. Recognised by its unit: no other aux
     /// value of a plain A function is in V (aux1 Hz, aux2 % duty / loop).
     pub fn burden(&self) -> Option<(usize, Val)> {
-        if !matches!(self.mode, 4..=9) || self.acdc || self.power.is_some() {
+        if !matches!(self.mode, 4..=9) || self.parts() || self.power.is_some() {
             return None;
         }
         for (i, v) in [self.aux1, self.aux2].into_iter().enumerate() {
@@ -417,6 +423,10 @@ impl Reading {
         None
     }
 
+    /// aux1 / aux2 are the AC / DC parts (AC+DC or AUTO coupling).
+    pub fn parts(&self) -> bool {
+        self.acdc || self.cpl_auto
+    }
     pub fn button(&self) -> Button {
         if self.power.is_some() { Button::Power } else { button_of(self.mode) }
     }
@@ -469,6 +479,20 @@ fn hypot(a: f32, b: f32) -> f32 {
 }
 
 /// AC+DC part readout: "0L" when |part / full scale| > 1.04 (dmm_v2_6.h:231).
+/// The DC mode of a V / A mode (AC+DC reports its readings with it).
+fn dc_mode_of(m: u8) -> u8 {
+    match m {
+        0 | 2 => m + 1,
+        4..=6 => m + 3,
+        _ => m,
+    }
+}
+
+/// The AC mode of a DC V / A mode (1 -> 0, 3 -> 2, 7..9 -> 4..6).
+fn ac_mode_of(dm: u8) -> u8 {
+    if dm <= 3 { dm - 1 } else { dm - 3 }
+}
+
 fn part(x: f32, lim: f32, dec: u8, unit: &'static str) -> Val {
     // The value is kept with the OL flag: BT still sends it (bt_meas_v2_6.h:170).
     Val { v: x, dec, unit, ol: x.abs() / lim > 1.04, ext: false }
@@ -597,6 +621,17 @@ pub struct Dmm {
     /// reading until both are, so the first value (and a SCPI MEAS) is never
     /// |DC| or |AC| alone (the stock shows hypot(0, DC) at first).
     acdc_seen: u8,
+    /// AUTO coupling (sub-mode 3; `acdc` is set too: the AC+DC alternation
+    /// measures both parts): `auto_ac` the part shown (true = AC), `auto_n`
+    /// cycles evaluated since the last reset (0: none yet, each reading then
+    /// takes the plain rule), `auto_votes` consecutive cycles that wanted the
+    /// other part (`auto_eval`), `auto_total_si` |total| of the last reading
+    /// in SI (the sentinel / OVERLOAD checks look at the whole signal).
+    cpl_auto: bool,
+    auto_ac: bool,
+    auto_n: u8,
+    auto_votes: u8,
+    auto_total_si: f32,
     range: i8,
     manual: bool,
     /// m+6: V autorange (bit0 mV->V, bit1 V->mV); m+7: A (1 mA..A, 3 uA..A).
@@ -801,6 +836,33 @@ const ACDC_FREQ_RESTART: bool = true;
 /// AC+DC diagnostic ring: AC phases kept (`acdc_diag`).
 const ACDC_DIAG_N: usize = 4;
 
+// AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-fwrs.md
+// section 11). The AC+DC alternation measures both parts; AUTO shows one of
+// them: the AC part's RMS when it dominates the DC part, else the DC part.
+//   to AC: AC > AUTO_TO_AC x |DC| and AC > the range's floor (on)
+//   to DC: AC < AUTO_TO_DC x |DC| or  AC < the range's floor (off)
+// In between nothing changes (hysteresis: a factor 2 band around AC ~ |DC|;
+// a half-wave rectified sine, AC / DC = 1.21, stays on whatever it showed).
+// The floor is a fraction of the range's full scale (`lim`): V 1 % on /
+// 0.5 % off, A 3 % / 2 % (the uA path's RMS floor is ~1.5 %, acdc doc 6b),
+// so open leads / no current read DC. Hum on open 10 Mohm V leads is a real
+// AC signal and reads as AC above the floor (no LoZ here, feature HW-6).
+// Evaluated once per AC+DC cycle (~1.9 s, at the end of the AC phase, both
+// parts fresh); a change needs AUTO_VOTES cycles in a row (2: ~2..4 s after
+// the signal changed). The first cycle after a reset decides at once (no
+// votes), and before it the plain comparison AC > |DC| (above the floor)
+// picks the part of each reading.
+const AUTO_TO_AC: f32 = 1.5;
+const AUTO_TO_DC: f32 = 0.75;
+const AUTO_FLOOR_V: [f32; 2] = [0.01, 0.005];
+const AUTO_FLOOR_A: [f32; 2] = [0.03, 0.02];
+const AUTO_VOTES: u8 = 2;
+
+/// SCPI / persisted function codes of the AUTO coupling (`Dmm::func`), next
+/// to 16 / 17 (AC+DC) and pw::FUNC (18).
+pub const FUNC_V_AUTO: u8 = 19;
+pub const FUNC_A_AUTO: u8 = 20;
+
 /// AC+DC diagnostic: the RMS results of one AC phase (up to 4, the stock V
 /// phase length), and when the first one came after the settle deadline.
 #[derive(Clone, Copy)]
@@ -844,6 +906,11 @@ impl Dmm {
             dc_val: 0.0,
             ac_raw: 0.0,
             acdc_seen: 0,
+            cpl_auto: false,
+            auto_ac: false,
+            auto_n: 0,
+            auto_votes: 0,
+            auto_total_si: 0.0,
             range: 0,
             manual: false,
             // UF-21: AUTO+ (V first, up-only) by default; the stock default
@@ -1284,6 +1351,9 @@ impl Dmm {
 
     fn reset_values(&mut self) {
         self.acdc_seen = 0;
+        self.auto_n = 0;
+        self.auto_votes = 0;
+        self.auto_ac = false;
         self.dc_val = 0.0;
         self.ac_raw = 0.0;
         self.f_ac = 0.0;
@@ -1317,31 +1387,67 @@ impl Dmm {
         self.deadline = clk.now_ms() + settle;
     }
 
-    /// SCPI function code: the stock mode, or 16 = V AC+DC, 17 = A AC+DC.
+    /// SCPI function code: the stock mode, or 16 = V AC+DC, 17 = A AC+DC,
+    /// FUNC_V_AUTO / FUNC_A_AUTO = the AUTO coupling (the setting: it does
+    /// not change when AUTO switches between DC and AC, `func_shown`).
     pub fn func(&self) -> u8 {
         if self.pw.on {
             return pw::FUNC;
         }
-        match (self.acdc, self.mode) {
-            (true, 0..=3) => 16,
-            (true, _) => 17,
-            (false, m) => m,
+        match (self.cpl_auto, self.acdc, self.mode) {
+            (true, _, 0..=3) => FUNC_V_AUTO,
+            (true, _, _) => FUNC_A_AUTO,
+            (_, true, 0..=3) => 16,
+            (_, true, _) => 17,
+            (_, false, m) => m,
         }
     }
 
-    /// V / A sub-mode (stock m+5): 0 DC, 1 AC, 2 AC+DC.
+    /// The function of what is shown: `func`, but in AUTO the plain DC or AC
+    /// mode of the part shown (= `meter::func_of` of its readings; the
+    /// limits slot, the Limits page).
+    pub fn func_shown(&self) -> u8 {
+        if self.cpl_auto && !self.pw.on { self.shown_mode() } else { self.func() }
+    }
+
+    /// The HY3131 mode to draw the function's glyphs / bargraph with: the
+    /// configured one, in AUTO the DC or AC mode of the part shown (the
+    /// alternation's phase does not matter).
+    pub fn shown_mode(&self) -> u8 {
+        if !self.cpl_auto {
+            return self.mode;
+        }
+        let dm = dc_mode_of(self.mode);
+        if self.auto_ac { ac_mode_of(dm) } else { dm }
+    }
+
+    /// AUTO coupling (sub-mode 3) in force.
+    pub fn cpl_auto(&self) -> bool {
+        self.cpl_auto && !self.pw.on
+    }
+
+    /// V / A sub-mode (stock m+5): 0 DC, 1 AC, 2 AC+DC; fw-rs 3 = AUTO.
     pub fn sub(&self) -> u8 {
-        if self.acdc {
+        if self.cpl_auto {
+            3
+        } else if self.acdc {
             2
         } else {
             matches!(self.mode, 0 | 2 | 4..=6) as u8
         }
     }
 
+    /// The sub-mode for the Bluetooth mode byte (2 bits, the stock app knows
+    /// 0..2): AUTO reports the part it shows (0 DC / 1 AC).
+    fn bt_sub(&self) -> u8 {
+        if self.cpl_auto { self.auto_ac as u8 } else { self.sub() }
+    }
+
     /// Set the V / A sub-mode (FUN_08013262 / FUN_08013134 cycle step, range
     /// page DC / AC / AC+DC buttons, BT command 06): auto range, V keeps the
     /// range (mV: r1), A keeps range % 2, values cleared (FUN_0803aad6).
-    /// AC+DC starts in the DC phase, as the stock.
+    /// AC+DC starts in the DC phase, as the stock. 3 = AUTO coupling: the
+    /// AC+DC alternation, showing the part it picks (`auto_eval`).
     pub fn set_sub(&mut self, clk: &mut Clock, sub: u8) {
         self.ovl_clear(clk.now_ms());
         let m = self.mode;
@@ -1352,7 +1458,8 @@ impl Dmm {
         };
         let ac = if dc <= 3 { dc - 1 } else { dc - 3 };
         self.manual = false;
-        self.acdc = sub == 2;
+        self.acdc = sub >= 2;
+        self.cpl_auto = sub == 3;
         self.phase_n = 0;
         // The stock enters AC+DC from a steady DC reading with its OSR flag
         // set (doc section 1), so its DC phase never writes 0x17.
@@ -1378,12 +1485,18 @@ impl Dmm {
             self.select(clk, 15);
             return;
         }
+        if mode == FUNC_V_AUTO || mode == FUNC_A_AUTO {
+            self.select(clk, if mode == FUNC_V_AUTO { 1 } else { 8 });
+            self.set_sub(clk, 3);
+            return;
+        }
         if mode >= 16 {
             self.select(clk, if mode == 16 { 1 } else { 8 });
             self.set_sub(clk, 2);
             return;
         }
         self.acdc = false;
+        self.cpl_auto = false;
         self.manual = false;
         let (r, settle) = match mode {
             10 => (6, 2500),
@@ -1593,6 +1706,7 @@ impl Dmm {
             },
         };
         self.acdc = false;
+        self.cpl_auto = false;
         self.fuse_job = Some(job);
         self.fuse_res = sentinel::FuseRes::Busy;
         self.manual = true;
@@ -1745,13 +1859,15 @@ impl Dmm {
         let same = self.button() == b && from_pw.is_none();
         let m = self.mode;
         if same && matches!(b, Button::Volt | Button::Amp) {
-            // DC -> AC -> AC+DC -> DC (the stock skips AC+DC for model 0).
-            let next = (self.sub() + 1) % 3;
+            // DC -> AC -> AC+DC -> AUTO -> DC (the stock: DC -> AC ->
+            // AC+DC, skipping AC+DC for model 0; AUTO is fw-rs).
+            let next = (self.sub() + 1) % 4;
             self.set_sub(clk, next);
             return;
         }
         if !same {
             self.acdc = false;
+            self.cpl_auto = false;
         }
         match b {
             Button::Volt => {
@@ -1906,7 +2022,7 @@ impl Dmm {
         let m = self.mode;
         match m {
             0..=3 => {
-                let sub = self.sub();
+                let sub = self.bt_sub();
                 let r = if self.manual {
                     if m >= 2 { 0 } else { self.range as u8 + 1 }
                 } else if self.v_auto == 1 {
@@ -1917,7 +2033,7 @@ impl Dmm {
                 sub << 6 | r << 3
             }
             4..=9 => {
-                let sub = self.sub();
+                let sub = self.bt_sub();
                 let unit = (m - 4) % 3; // 0 A, 1 mA, 2 uA
                 let r = if self.manual {
                     [4, 2, 0][unit as usize] + self.range as u8
@@ -1947,6 +2063,11 @@ impl Dmm {
         // The power meter's own byte (the phone echoing what cmd 09
         // reported) keeps it; any other byte leaves it (`select`).
         if self.pw.on && b == self.mode_byte() {
+            return false;
+        }
+        // AUTO coupling: the byte it reports (the part shown as DC / AC)
+        // echoed back keeps AUTO; any other byte sets what it says.
+        if self.cpl_auto && b == self.mode_byte() {
             return false;
         }
         self.ovl_clear(clk.now_ms());
@@ -2038,6 +2159,9 @@ impl Dmm {
         if s != 2 {
             self.diag_on = false;
         }
+        // The stock byte has no AUTO: a byte that is not AUTO's own echo
+        // (apply_mode_byte) ends it.
+        self.cpl_auto = false;
         if (s == 2) != self.acdc {
             self.acdc = s == 2;
             self.phase_n = 0;
@@ -2193,6 +2317,9 @@ impl Dmm {
             _ => self.poll_temp(now),
         } };
         if let Some(rd) = &r {
+            // AUTO coupling: the checks below look at the whole signal (the
+            // shown part may be the small one of the two).
+            let si_abs = if self.cpl_auto && !self.pw.on { self.auto_total_si } else { rd.si.abs() };
             self.wd_t = now;
             ema_ms(&mut self.period_ms, &mut self.t_rd, now);
             self.rd_avg_n = self.avg_n;
@@ -2203,7 +2330,7 @@ impl Dmm {
                     // of 600 uA on the device, acdc doc 6b).
                     let fs = sentinel::current_fs(sentinel::shunt_of(self.mode).unwrap_or(0), self.range.max(0) as u8);
                     let k = if self.mode <= 6 || self.acdc { sentinel::AC_FLOOR_FRAC } else { 0.005 };
-                    self.sent.current_small(now, !rd.main.ol && rd.si.abs() < k * fs);
+                    self.sent.current_small(now, !rd.main.ol && si_abs < k * fs);
                 }
                 10..=12 if !self.acdc && self.fuse_job.is_none() => self.sent.live_reading(now, self.live),
                 _ => {}
@@ -2212,12 +2339,12 @@ impl Dmm {
                 // FUSE? hint: an A function at zero (doc 4.3).
                 let fs = sentinel::current_fs(sentinel::shunt_of(self.mode).unwrap_or(0), self.range.max(0) as u8);
                 let k = if self.mode <= 6 || self.acdc { sentinel::AC_FLOOR_FRAC } else { sentinel::FUSE_FRAC };
-                self.sent.fuse_reading(now, !rd.main.ol && rd.si.abs() < k * fs);
+                self.sent.fuse_reading(now, !rd.main.ol && si_abs < k * fs);
             }
             if self.ovl.is_some() {
                 let (i, ol) = match &rd.power {
                     Some(pv) => (pv.i, pv.i_ol),
-                    None => (rd.si.abs(), rd.main.ol),
+                    None => (si_abs, rd.main.ol),
                 };
                 self.ovl_release(clk, now, i, ol);
             }
@@ -2231,7 +2358,8 @@ impl Dmm {
             r.auto = !self.manual;
             r.auto_plus = (self.button() == Button::Volt && self.v_auto == 1)
                 || (self.button() == Button::Amp && self.a_auto == 1 && !self.pw.on);
-            r.acdc = self.acdc;
+            r.cpl_auto = self.cpl_auto && !self.pw.on;
+            r.acdc = self.acdc && !r.cpl_auto;
             r.avg_n = self.avg_n;
             r.alert = self.sent.alert;
             r
@@ -2249,6 +2377,7 @@ impl Dmm {
             auto: true,
             auto_plus: false,
             acdc: false,
+            cpl_auto: false,
             seq: 0,
             avg_n: 0,
             alert: Alert::None,
@@ -2407,11 +2536,7 @@ impl Dmm {
         }
         self.dc_val = x;
         self.acdc_seen |= 2;
-        let t = hypot(self.f_ac, x);
-        let ol = t / lim > ov;
-        let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(t, dec, unit) }, t * si_k);
-        rd.aux1 = Some(part(self.f_ac, lim, dec, unit));
-        rd.aux2 = Some(part(x, lim, dec, unit));
+        let rd = self.acdc_reading(lim, dec, unit, si_k);
         if self.phase_n == 0 {
             let (to, settle, n) = match self.mode {
                 1 => (0, 800, 3),
@@ -2491,21 +2616,62 @@ impl Dmm {
         Some(rd)
     }
 
-    /// AC+DC reading during the AC phase: hypot(AC filtered, DC part), parts
-    /// in aux1 / aux2, reported with the DC mode; none before both parts
-    /// were measured.
-    fn acdc_ac_reading(&self, lim: f32, dec: u8, unit: &'static str, si_k: f32) -> Option<Reading> {
-        if self.acdc_seen != 3 {
-            return None;
-        }
-        let m = self.mode;
+    /// AC+DC reading (either phase): hypot(AC filtered, DC part), parts in
+    /// aux1 / aux2, reported with the DC mode. AUTO coupling: main = the
+    /// part it shows (`auto_shows_ac`), reported with that part's mode.
+    fn acdc_reading(&mut self, lim: f32, dec: u8, unit: &'static str, si_k: f32) -> Reading {
+        let dm = dc_mode_of(self.mode);
         let t = hypot(self.f_ac, self.dc_val);
-        let ol = t / lim > self.over();
-        let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(t, dec, unit) }, t * si_k);
-        rd.mode = if m <= 2 { m + 1 } else { m + 3 };
+        let (v, mode) = if !self.cpl_auto {
+            (t, dm)
+        } else if self.auto_shows_ac(lim) {
+            (self.f_ac, ac_mode_of(dm))
+        } else {
+            (self.dc_val, dm)
+        };
+        self.auto_total_si = t * si_k;
+        let ol = v.abs() / lim > self.over();
+        let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, v * si_k);
+        rd.mode = mode;
         rd.aux1 = Some(part(self.f_ac, lim, dec, unit));
         rd.aux2 = Some(part(self.dc_val, lim, dec, unit));
-        Some(rd)
+        rd
+    }
+
+    /// AUTO: the part to show now (true = AC) for range full scale `lim`:
+    /// the decided one, or before the first evaluation of this session the
+    /// plain comparison (AC > |DC| and above the floor). Sets `auto_ac`.
+    fn auto_shows_ac(&mut self, lim: f32) -> bool {
+        if self.auto_n == 0 {
+            let fl = if self.mode <= 3 { AUTO_FLOOR_V[0] } else { AUTO_FLOOR_A[0] };
+            self.auto_ac = self.f_ac > fl * lim && self.f_ac > self.dc_val.abs();
+        }
+        self.auto_ac
+    }
+
+    /// AUTO: one evaluation per AC+DC cycle (end of the AC phase, both parts
+    /// fresh; constants AUTO_*): the first decides, later ones switch the
+    /// part after AUTO_VOTES cycles in a row wanted the other one.
+    fn auto_eval(&mut self, lim: f32) {
+        let fl = if self.mode <= 3 { AUTO_FLOOR_V } else { AUTO_FLOOR_A };
+        let (a, d) = (self.f_ac, self.dc_val.abs());
+        if self.auto_n == 0 {
+            self.auto_shows_ac(lim);
+            self.auto_n = 1;
+            self.auto_votes = 0;
+            return;
+        }
+        self.auto_n = self.auto_n.saturating_add(1);
+        let want = if self.auto_ac { a >= fl[1] * lim && a >= AUTO_TO_DC * d } else { a > fl[0] * lim && a > AUTO_TO_AC * d };
+        if want == self.auto_ac {
+            self.auto_votes = 0;
+        } else {
+            self.auto_votes += 1;
+            if self.auto_votes >= AUTO_VOTES {
+                self.auto_ac = want;
+                self.auto_votes = 0;
+            }
+        }
     }
 
     fn poll_ac(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
@@ -2666,7 +2832,12 @@ impl Dmm {
                 return None;
             }
             self.acdc_seen |= 1;
-            let rd = self.acdc_ac_reading(lim, dec, unit, si_k);
+            if self.acdc_seen != 3 {
+                // No reading before both parts were measured.
+            } else if self.cpl_auto && self.phase_n == 0 {
+                self.auto_eval(lim);
+            }
+            let rd = (self.acdc_seen == 3).then(|| self.acdc_reading(lim, dec, unit, si_k));
             if ACDC_FREQ_RESTART && m >= 4 {
                 self.freq_secondary(now, 0xF0);
             }

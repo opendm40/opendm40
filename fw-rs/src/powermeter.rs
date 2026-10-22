@@ -803,6 +803,7 @@ impl Dmm {
         }
         self.probe = false;
         self.acdc = false;
+        self.cpl_auto = false;
         self.manual = false;
         let pw = &mut *self.pw;
         pw.on = true;

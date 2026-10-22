@@ -462,13 +462,36 @@ Code work (in this order):
       a quoted argument splits; a BT line refused as DBG:* that holds a query gets no response.
       Device 0667175 over BT and USB: `POW:PHAS:CAL RES;:SYST:ERR?;*OPC?` -> `-100,"Settings conflict; RES:
       ..."; 1` in one line, `*IDN?;SYST:ERR?` -> `...;0,"No error"`.
-- [ ] Auto AC/DC for V and I (as UNI-T UT197 "Auto AC/DC Voltage"): an AUTO coupling next to DC / AC /
-      AC+DC that picks DC or AC by itself from the signal (DC part vs AC RMS) and shows which one it chose,
-      as the power meter's AUTO does (7c431e5, powermeter.rs). Open: the decision rule and its
-      hysteresis, the switch time (AC+DC alternates phases), what goes in the aux row, SCPI
-      (e.g. VOLT:COUP / CURR:COUP AUTO), persisted per function. Note: on the UT197 this is "Auto-V LoZ",
-      the auto selection comes with a ~2 kohm input load (no LoZ hardware here, feature-request HW-6), so
-      ours is the 10 Mohm variant: ghost voltages still read.
+- [x] Auto AC/DC for V and I (as UNI-T UT197 "Auto AC/DC Voltage"): an AUTO coupling next to DC / AC /
+      AC+DC that picks DC or AC by itself from the signal and shows which one it chose. Decisions
+      (docs/acdc-stock-vs-fwrs.md section 11; dmm.rs AUTO_*):
+      - measurement: AUTO runs the AC+DC alternation (the only place both parts are seen: AC V is
+        AC-coupled) and shows one part, the DC part (signed) or the AC part's RMS; autorange on the total.
+      - rule / hysteresis (once per ~1.9 s cycle, both parts fresh): to AC when AC > 1.5 x |DC| and above
+        the floor (V 1 %, A 3 % of the range), to DC when AC < 0.75 x |DC| or below the off floor (V 0.5 %,
+        A 2 %); between: unchanged (factor-2 band; a half-wave rectified sine keeps what it showed).
+      - switch time: 2 evaluations in a row (a probe moved between two DC-dominant sources must not flash
+        AC for the one cycle that mixes old and new parts): the switch shows 2..6 s after the change
+        (emulator: 2.2..4.5 s); the first evaluation after entry decides at once (~2 s, as AC+DC's first
+        reading).
+      - display: the glyph above the unit and on the V / A button = the part shown, "AUTO" in the limit
+        badge's slot (a verdict wins); aux row = AC part / DC part tagged, as AC+DC (it does not move on a
+        switch); strip badge AutoDC / AutoAC. A switch restarts REL, statistics, the AutoHold window (HOLD
+        and a capture stay); limits use the slot of the part shown; a CSV recording ends on a switch.
+      - touch: V / A button cycle DC -> AC -> AC+DC -> AUTO -> DC; range page coupling row DC / AC / AC+DC
+        / "AC/DC" (4 buttons on the range grid).
+      - SCPI: [SENS:]VOLT:COUP / CURR:COUP DC|AC|ACDC|AUTO (select the function), ? -> DC / AC / ACDC /
+        AUTO,DC / AUTO,AC; CONF / MEAS / FUNC VOLT:AUTO / CURR:AUTO, FUNC? "VOLT:AUTO" (codes 19 / 20).
+        BT: the mode byte reports the part shown (the app echoing it keeps AUTO). LOG / wave view refuse it
+        as AC+DC.
+      - persistence: the function code (19 / 20) in p[2], no layout change; V / A keep no coupling of
+        their own (entry from another function = DC, stock).
+      Tests: emu/hy3131/couptest.py v / i / tap (DC -> AC -> mixed both ways through the band), ui-render
+      auto_* cases (d02b..d02d, c19 / c20, m03c), touch-test coupling row.
+      Not on the UT197 model: there it is "Auto-V LoZ", the auto selection comes with a ~2 kohm input
+      load (no LoZ hardware here, feature-request HW-6), so ours is the 10 Mohm variant: ghost voltages
+      (hum on open leads) still read, as AC above the floor.
+  - [ ] Device check (AUTO coupling): see docs/acdc-stock-vs-fwrs.md section 11 "Device check".
 
 ## Found in the screenshot session 2026-10-13 (native db679a3)
 - [x] READ?/MEAS? take ~8 s (wait for a full averaging window that never fills -> 20 conversions).

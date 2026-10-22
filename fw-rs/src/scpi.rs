@@ -13,7 +13,17 @@
 //! CURRent:AC | CURRent:ACDC | RESistance | CONTinuity | DIODe | CAPacitance |
 //! FREQuency | TEMPerature. Functions are stock DMM mode numbers (see dmm.rs),
 //! 16 / 17 = V / A AC+DC (true RMS of AC+DC = sqrt(AC^2 + DC^2), the stock
-//! DM40B/C sub-mode; FUNCtion? answers "VOLT:ACDC" / "CURR:ACDC").
+//! DM40B/C sub-mode; FUNCtion? answers "VOLT:ACDC" / "CURR:ACDC"),
+//! 19 / 20 = V / A with the AUTO coupling (fw-rs: VOLTage:AUTO /
+//! CURRent:AUTO; the reading is the DC or the AC part, whichever AUTO picks,
+//! dmm.rs AUTO_*; FUNCtion? answers "VOLT:AUTO" / "CURR:AUTO").
+//!
+//! Coupling of V / A (fw-rs; the same switch as the V / A button):
+//!   [SENSe:]VOLTage:COUPling DC|AC|ACDC|AUTO   select V with that coupling
+//!   [SENSe:]CURRent:COUPling DC|AC|ACDC|AUTO   (= CONF:VOLT[:AC|:ACDC|:AUTO])
+//!   [SENSe:]VOLTage:COUPling? / CURRent:COUPling?   DC / AC / ACDC, or
+//!     AUTO,DC / AUTO,AC (the part AUTO shows now); DC while the function
+//!     is not the current one (V / A start in DC, as the stock)
 //!
 //! Reply timing of READ? / MEASure:<f>? / FETCh? (main.rs, scpi_wait):
 //!   - a reading of the current function already flowing (READ?, MEAS:<f>?
@@ -568,6 +578,8 @@ pub enum Cmd {
     /// (1 LOW = FAST / MED, 2 HIGH = SLOW).
     SensRate(Option<u8>),
     SensRatePer,
+    /// [SENSe:]VOLTage:COUPling? (false) / CURRent:COUPling? (true).
+    Coup(bool),
     CalcSmoState(Option<bool>),
     CalcSmoResp(Option<u8>),
     /// DBG:GRAB <ms> / ?: hold-to-grab time of scope drags (0 = direct).
@@ -943,15 +955,32 @@ fn kw(tok: &[u8], mnem: &str) -> bool {
     eq(short) || eq(full)
 }
 
+/// [SENSe:]VOLTage:COUPling (Some(false)) / [SENSe:]CURRent:COUPling
+/// (Some(true)); None for any other header.
+fn coup_cmd(parts: &[&[u8]]) -> Option<bool> {
+    let r = if parts.first().is_some_and(|p| kw(p, "SENSe")) { &parts[1..] } else { parts };
+    if r.len() != 2 || !kw(r[1], "COUPling") {
+        return None;
+    }
+    if kw(r[0], "VOLTage") {
+        Some(false)
+    } else if kw(r[0], "CURRent") {
+        Some(true)
+    } else {
+        None
+    }
+}
+
 fn parse_func(parts: &[&[u8]]) -> Option<u8> {
     let p0 = *parts.first()?;
     let ac = parts.get(1).map(|p| kw(p, "AC")).unwrap_or(false);
     let acdc = parts.get(1).map(|p| kw(p, "ACDC")).unwrap_or(false);
+    let auto = parts.get(1).map(|p| kw(p, "AUTO")).unwrap_or(false);
     let dc_or_none = parts.get(1).map(|p| kw(p, "DC")).unwrap_or(true);
     if kw(p0, "VOLTage") {
-        if ac { Some(0) } else if acdc { Some(16) } else if dc_or_none { Some(1) } else { None }
+        if ac { Some(0) } else if acdc { Some(16) } else if auto { Some(crate::dmm::FUNC_V_AUTO) } else if dc_or_none { Some(1) } else { None }
     } else if kw(p0, "CURRent") {
-        if ac { Some(5) } else if acdc { Some(17) } else if dc_or_none { Some(8) } else { None }
+        if ac { Some(5) } else if acdc { Some(17) } else if auto { Some(crate::dmm::FUNC_A_AUTO) } else if dc_or_none { Some(8) } else { None }
     } else if kw(p0, "RESistance") || kw(p0, "FRESistance") {
         Some(10)
     } else if kw(p0, "CONTinuity") {
@@ -998,6 +1027,8 @@ fn func_name(mode: u8) -> &'static str {
         7..=9 => "\"CURR\"",
         16 => "\"VOLT:ACDC\"",
         17 => "\"CURR:ACDC\"",
+        crate::dmm::FUNC_V_AUTO => "\"VOLT:AUTO\"",
+        crate::dmm::FUNC_A_AUTO => "\"CURR:AUTO\"",
         crate::dmm::pw::FUNC => "\"POW\"",
         10 => "\"RES\"",
         11 => "\"CONT\"",
@@ -1657,6 +1688,31 @@ impl Scpi {
                     }));
                 }
                 _ if kw(p0, "FETCh") && query => out = Out::Fetch,
+                // [SENSe:]VOLTage:COUPling / CURRent:COUPling (fw-rs).
+                _ if coup_cmd(parts).is_some() => {
+                    let amp = coup_cmd(parts) == Some(true);
+                    if query {
+                        out = Out::Instr(Cmd::Coup(amp));
+                        continue;
+                    }
+                    let a = trim(arg);
+                    let f = |v, i| if amp { i } else { v };
+                    let m = if a == b"DC" {
+                        Some(f(1, 8))
+                    } else if a == b"AC" {
+                        Some(f(0, 5))
+                    } else if a == b"ACDC" {
+                        Some(f(16, 17))
+                    } else if kw(a, "AUTO") {
+                        Some(f(crate::dmm::FUNC_V_AUTO, crate::dmm::FUNC_A_AUTO))
+                    } else {
+                        None
+                    };
+                    match m {
+                        Some(m) => out = Out::Configure(m),
+                        None => self.err = Some("Illegal parameter value"),
+                    }
+                }
                 _ if kw(p0, "SENSe") || kw(p0, "FUNCtion") || kw(p0, "TEMPerature") || kw(p0, "RATE") => {
                     let rest = if kw(p0, "SENSe") { &parts[1..] } else { parts };
                     if rest.first().map(|p| kw(p, "RATE")).unwrap_or(false) {

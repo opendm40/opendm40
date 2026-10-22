@@ -63,7 +63,9 @@ fn p10(d: u8) -> f32 {
 }
 
 /// SCPI-style function code of a reading (dmm.rs `Dmm::func`): the HY3131
-/// mode, 16 / 17 = V / A AC+DC.
+/// mode, 16 / 17 = V / A AC+DC. An AUTO-coupling reading has the plain DC
+/// or AC mode of the part it shows (`Dmm::func_shown`, not FUNC_*_AUTO), so
+/// limits, smoothing, AutoHold and a CSV recording follow that part.
 pub fn func_of(r: &Reading) -> u8 {
     if r.power.is_some() {
         return crate::dmm::pw::FUNC;
@@ -101,6 +103,10 @@ pub fn lim_slot(func: u8) -> usize {
         0 | 2 | 16 => 1,
         7..=9 => 2,
         4..=6 | 17 => 3,
+        // AUTO coupling as a setting (callers pass Dmm::func_shown: the
+        // slot of the part shown); the DC slots as a fallback.
+        crate::dmm::FUNC_V_AUTO => 0,
+        crate::dmm::FUNC_A_AUTO => 2,
         10 | 11 => 4,
         12 => 5,
         13 => 6,
@@ -680,6 +686,15 @@ impl Meter {
 
     /// Feed a new reading.
     pub fn update(&mut self, r: &Reading, now: u64) -> Update {
+        if r.cpl_auto && self.live.is_some_and(|l| l.cpl_auto && l.is_ac() != r.is_ac()) {
+            // AUTO coupling switched DC <-> AC: another quantity in the same
+            // unit. REL (and a capture it made), the statistics and the
+            // AutoHold window restart; HOLD and an AutoHold capture stay
+            // (lifting the probes off is what they are for); smoothing
+            // restarts by itself (keyed by func_of).
+            self.rel_off();
+            self.win = Win::EMPTY;
+        }
         if r.main.unit != self.unit {
             // Another quantity (V -> A ...): statistics and the AutoHold
             // capture no longer apply. A prefix step of the auto range (mV ->
@@ -886,6 +901,7 @@ mod tests {
             auto: true,
             auto_plus: true,
             acdc: false,
+            cpl_auto: false,
             seq: 0,
             avg_n: 0,
             alert: crate::sentinel::Alert::None,
@@ -906,6 +922,41 @@ mod tests {
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 2e-6
+    }
+
+    /// AUTO coupling: a switch between the DC and the AC part ends REL and
+    /// restarts the statistics; an autorange step V -> mV of the same part
+    /// does not touch the statistics; HOLD stays.
+    #[test]
+    fn auto_coupling_switch() {
+        let auto = |mode: u8, v: f32, dec: u8, unit: &'static str, k: f32| Reading { cpl_auto: true, ..rd(mode, v, dec, unit, k) };
+        let mut m = Meter::new();
+        m.set_smoothing(Smooth::Off);
+        let mut t = 0u64;
+        for _ in 0..3 {
+            t += 500;
+            m.update(&auto(1, 1.0, 4, "V", 1.0), t);
+        }
+        assert!(m.rel_on(m.live().copied().as_ref()));
+        assert!(m.rel_active());
+        t += 500;
+        m.update(&auto(1, 1.0, 4, "V", 1.0), t);
+        assert!(m.rel_active() && m.stats.n > 0);
+        // DC -> AC: REL off, statistics restarted with the AC value.
+        t += 500;
+        let u = m.update(&auto(0, 2.0, 4, "V", 1.0), t);
+        assert!(!m.rel_active());
+        assert!(close(u.live.main.v, 2.0));
+        assert_eq!(m.stats.n, 1);
+        // AC 2 V -> AC 200 mV (the range steps to mV, same part): kept.
+        t += 500;
+        m.update(&auto(2, 200.0, 2, "mV", 1e-3), t);
+        assert_eq!(m.stats.n, 2);
+        // HOLD survives a switch.
+        m.hold = true;
+        t += 500;
+        m.update(&auto(3, 1.0, 2, "mV", 1e-3), t);
+        assert!(m.hold);
     }
 
     #[test]

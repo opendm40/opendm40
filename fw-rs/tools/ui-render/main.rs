@@ -417,9 +417,16 @@ const ALERTS: [sentinel::Alert; 9] = [
     sentinel::Alert::Fuse,
 ];
 
+/// AUTO coupling (V / A sub-mode 3): `r` with the part shown as main and
+/// the AC / DC parts as aux (dmm.rs `acdc_reading`).
+fn cpl_auto(mut r: Reading) -> Reading {
+    r.cpl_auto = true;
+    r
+}
+
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
-    Reading { mode, range: 0, main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None }
+    Reading { mode, range: 0, main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None }
 }
 
 /// Meter-strip worst cases: (name, reading, temperature label).
@@ -442,6 +449,14 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("acdc_v", rd(1, val(-6.6666, 4, "V"), Some(val(4.4444, 4, "V")), Some(val(-4.4444, 4, "V")), true), None),
         ("acdc_ua", rd(7, val(-444.44, 2, "\u{b5}A"), Some(val(444.44, 2, "\u{b5}A")), Some(val(-444.44, 2, "\u{b5}A")), true), None),
         ("acdc_ol", rd(3, ol(2, "mV"), Some(ol(2, "mV")), Some(val(-444.44, 2, "mV")), true), None),
+        // AUTO coupling: DC part shown (DC glyph, "AUTO" badge), AC part
+        // shown (AC glyph), the widest values / units, OL.
+        ("auto_dcv", cpl_auto(rd(1, val(-6.6666, 4, "V"), Some(val(0.4444, 4, "V")), Some(val(-6.6666, 4, "V")), false)), None),
+        ("auto_acv", cpl_auto(rd(0, val(230.12, 2, "V"), Some(val(230.12, 2, "V")), Some(val(-4.44, 2, "V")), false)), None),
+        ("auto_acmv", cpl_auto(rd(2, val(444.44, 2, "mV"), Some(val(444.44, 2, "mV")), Some(val(-44.44, 2, "mV")), false)), None),
+        ("auto_dcua", cpl_auto(rd(9, val(-4444.4, 1, "\u{b5}A"), Some(val(444.4, 1, "\u{b5}A")), Some(val(-4444.4, 1, "\u{b5}A")), false)), None),
+        ("auto_aca", cpl_auto(rd(4, val(9.9999, 4, "A"), Some(val(9.9999, 4, "A")), Some(val(-0.4444, 4, "A")), false)), None),
+        ("auto_ol", cpl_auto(rd(3, ol(2, "mV"), Some(val(44.44, 2, "mV")), Some(ol(2, "mV")), false)), None),
         ("dca", rd(9, val(-9.9999, 4, "A"), None, None, false), None),
         // OVERLOAD latch: the 10 A range after the mA shunt overloaded.
         ("dca10", rd(7, val(2.345, 3, "A"), None, None, false), None),
@@ -1688,7 +1703,7 @@ fn main() {
     }
     for b in [Button::Volt, Button::Amp, Button::Ohm] {
         for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: it never steps to mV", false))] {
-            for sub in 0..3u8 {
+            for sub in 0..4u8 {
                 host::reset(0);
                 let n = ui::range_items(b).len();
                 ui::range_page(b, Some(n - 1), sub, note);
@@ -1941,7 +1956,7 @@ fn main() {
     g.freq_hz = 1000;
     w.gen.apply(g);
     let find = |n: &str| cases.iter().find(|c| c.0 == n).map(|c| (c.1, c.2)).unwrap();
-    let scenes: [(&str, &str, u8, u8, bool, bool); 13] = [
+    let scenes: [(&str, &str, u8, u8, bool, bool); 15] = [
         ("c01-dcv", "dcv", 0, 0, false, false),
         ("c02-acdc-hold-rel", "acdc_600mv", 1, 0, true, false),
         ("c03-acdc-worst", "acdc_mv", 3, meter::V_HI, true, true),
@@ -1955,6 +1970,8 @@ fn main() {
         ("c16-strip-burden-dc", "dcua_bd", 0, 0, false, false),
         ("c17-strip-burden-loop", "dcma_bd_loop", 0, 0, false, false),
         ("c18-strip-burden-ac", "aca_bd", 0, 0, false, false),
+        ("c19-auto-dcv", "auto_dcv", 0, 0, false, false),
+        ("c20-auto-aca", "auto_aca", 0, meter::V_HI, false, false),
     ];
     for (file, case, hold, lim, rel, alt) in scenes {
         let (r, l) = find(case);
@@ -1988,6 +2005,19 @@ fn main() {
         let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
         ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, Some(&side), "mV", ui::RateChip { rate: 0, period_ms: 430, applies: false });
         save(&out, "d02-dmm-acdc");
+        // AUTO coupling: the DC part (DC glyph on the V button and above
+        // the unit, "AUTO" left of it), the AC part, and a limit verdict
+        // in the badge slot instead of "AUTO".
+        for (file, case, lim) in [("d02b-dmm-auto-dc", "auto_dcv", meter::V_NONE), ("d02c-dmm-auto-ac", "auto_acv", meter::V_NONE), ("d02d-dmm-auto-ac-lim", "auto_aca", meter::V_PASS)] {
+            host::reset(0);
+            let (r, _) = find(case);
+            dv.label = None;
+            dv.draw_static(dmm::button_of(r.mode), r.mode, false, false);
+            ui::history(&[(r.main.v, r.main.dec, r.main.unit); 5], 5, 4);
+            dv.reading(&r, 0, lim);
+            ui::status_right(&status(0));
+            save(&out, file);
+        }
         host::reset(0);
         let (r, _) = find("dcma_420mid");
         dv.label = None;
@@ -2097,6 +2127,11 @@ fn main() {
         ui::wave_button();
         ui::inrush_button();
         save(&out, "m03b-range-a-wave");
+        // AUTO coupling selected (the fourth coupling button, "AC/DC").
+        host::reset(0);
+        ui::range_page(Button::Volt, Some(5), 3, Some(("AUTO+ recommended: it never steps to mV", false)));
+        ui::wave_button();
+        save(&out, "m03c-range-v-auto");
         // Second ohm mode ("ON" low current): Resistor Settings with it
         // selected, the DMM page with the tag on the ohm button.
         host::reset(0);

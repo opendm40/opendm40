@@ -691,9 +691,10 @@ impl Bt {
                 let shown = shown.as_ref().filter(|_| pwr.is_none());
                 let main = pwr.map(|p| crate::dmm::pw::bt_main(&p)).or(shown.map(|r| r.main));
                 let (fm, vm) = encode(if pwr.is_some() { 1 } else { mode }, main.as_ref(), None);
-                // AC+DC (sub 2): value 2 = AC part, value 3 = DC part, sent
-                // even when over range (only the LCD shows "0L" for them).
-                let acdc = shown.map(|r| r.acdc).unwrap_or(false);
+                // AC+DC (sub 2) / AUTO coupling: value 2 = AC part, value 3 =
+                // DC part, sent even when over range (only the LCD shows "0L"
+                // for them).
+                let acdc = shown.map(|r| r.parts()).unwrap_or(false);
                 let unol = |v: crate::dmm::Val| crate::dmm::Val { ol: v.ol && !acdc, ..v };
                 // Temperature: value 2 is the cold junction (C) for the stock
                 // app; a resistive sensor puts its resistance in aux1 instead,
