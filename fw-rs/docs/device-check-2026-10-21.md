@@ -672,7 +672,7 @@ AC V, 6 V range, the 40 Hz square (READ? 4.8063 V). Host `dm40scpi.py log --sour
   - after an `empty` read, shift the next read by a fraction of a tick, so the phase cannot stay on the edge;
   - or round ARR so that the tick is always slower than 4x the chip;
   - or detect a swallowed conversion from the data registers instead of INTF.
-- **max_lat_ns 21.8 us** with the DMM page drawing (DRAW 1 / 2), and 4.6 us with DRAW 0. The doc expects < ~5 us, so something on the draw path delays the ISR entry by ~20 us. That delay is not what causes the loss, because the loss is the same with DRAW 0.
+- **max_lat_ns 18.8-21.8 us whenever DRAW is 1 or 2**, including the undrained 4800 run in which no DMM frame was painted (DBG:PROF? frames 0, dmm max 22 us); 4.6 us at DRAW 0. The doc expects < ~5 us. The source is not isolated. It is not what causes the loss, because the loss is the same with DRAW 0.
 - **9600 S/s:** a 26 us tick with a 22.3 us ISR gives overruns (1845 in 30 s, 13 in 10 s undrained). The 2.64 % loss matches the race model alone (11.4 ms every 0.411 s = 2.8 %).
 
 **While streaming, undrained, 10 s** (`prof-stream-4800.txt`, `-9600.txt`): 40 x `*IDN?` gave p50 0.34 / 0.37 ms and max 0.90 / 1.03 ms. DBG:PROF? showed a loop max of 3.26 / 3.55 ms, no pass over 5 ms, and the usb lap max at 43 us. LOG:COUNt? showed `2048,52173,50125,772,772` at 4800 (overwritten > 0 is expected, because nothing drained). The ISR loss is still there.
@@ -840,6 +840,7 @@ Crash count 0 all the way, no unexpected reset. The build-time worst path is 30 
   - LOG:CSV:INT 0 and DUR 0 (defaults).
   - Power meter coupling AUTO, the POW:ZERO zeros stored.
   - Volume, backlight, Dim and Shutdown were not touched.
+  - Scope left at 1 ms/div, 20 mV/div, Auto, level 0 V (set by SCPI for the combined-view check; it was 50 ms/div, 2 V/div, level 4.88 V).
   - The first READ? after the calibrator's switch from the square to 1 V was OL (the calibrator's output settling; the chart shows ~0.75 V, then OL); it was 0.99969 V a few seconds later.
 - **Calibrator:** 1 V DC, enabled (func 1 mode 0 value 1000).
 - **Files on the SPI disk added by this run:** LOGS/LOG000.DLG, LOGS/LOG001.DLG.

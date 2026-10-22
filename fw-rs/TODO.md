@@ -665,8 +665,8 @@ Firmware:
       2.64 %, 1200 lost 1. Bursts of ~11.5 ms every ~3948 conversions at every rate; every tick serviced, empty
       = 4 x lost: the read phase drifts onto the conversion edge (tick +63 ppm vs the chip; -32 ppm at 1200 =
       no loss) and the INTF read-to-clear swallows AD2F (inferred). Fix candidates: shift the phase after an
-      empty read / tick slower than 4 x the chip / detect from the data. Also max_lat 21.8 us with the DMM
-      drawing (4.6 us DRAW 0). PASS: *IDN? max 1 ms, PROF loop max 3.5 ms, DMM / SELF? clean after, forced stop.
+      empty read / tick slower than 4 x the chip / detect from the data. Also max_lat 18.8-21.8 us with
+      DRAW 1 / 2, even with no frame painted (4.6 us DRAW 0; source not isolated). PASS: *IDN? max 1 ms, PROF loop max 3.5 ms, DMM / SELF? clean after, forced stop.
       Stays non-default.
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
