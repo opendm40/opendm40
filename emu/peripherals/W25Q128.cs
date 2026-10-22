@@ -11,12 +11,14 @@
 // page program / erase, in virtual time (datasheet W25Q128JV: tPP 0.4 ms
 // typ / 3 ms max, tSE 45 / 400 ms, tBE1 120 / 1600 ms, tBE2 150 / 2000 ms).
 // A command other than RDSR while busy is counted (BusyViolations) and
-// still executed. The SPI byte time is not modelled (the bus is instant).
+// still executed. The SPI byte time is the controller's (dm40.repl spi2 =
+// GD32_SPI: 0.64 us per byte at fw-rs's 12.5 MHz).
 //
 using System;
 using System.IO;
 using Antmicro.Renode.Core;
 using Antmicro.Renode.Logging;
+using Antmicro.Renode.Peripherals.CPU;
 using Antmicro.Renode.Peripherals.SPI;
 
 namespace Antmicro.Renode.Peripherals.SPI
@@ -170,7 +172,15 @@ namespace Antmicro.Renode.Peripherals.SPI
         public ulong Writes { get; private set; }
         public ulong Erases { get; private set; }
 
-        private double Now => machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds * 1e6;
+        private double Now
+        {
+            get
+            {
+                // The CPU's progress inside its quantum (RDSR polls see BUSY end on time).
+                if(machine.SystemBus.TryGetCurrentCPU(out var cpu)) cpu.SyncTime();
+                return machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds * 1e6;
+            }
+        }
 
         private void Busy(double us)
         {

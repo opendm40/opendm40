@@ -5,6 +5,7 @@
 //
 using Antmicro.Renode.Core;
 using Antmicro.Renode.Peripherals.Bus;
+using Antmicro.Renode.Peripherals.CPU;
 using Antmicro.Renode.Time;
 
 namespace Antmicro.Renode.Peripherals.Miscellaneous
@@ -46,6 +47,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         private ulong Cycles()
         {
+            // The CPU's progress inside its quantum first (else CYCCNT stands
+            // still for a whole quantum: stamps and the ISR's busy time).
+            if(machine.SystemBus.TryGetCurrentCPU(out var cpu)) cpu.SyncTime();
             var t = machine.ElapsedVirtualTime.TimeElapsed;
             return (ulong)(t.TotalSeconds * frequency);
         }

@@ -20,11 +20,15 @@ Bluetooth (--bt-port passthrough): LOG:STATe ON refused for AD2 ("Rate too
 high for Bluetooth") and with LOG:DEST DISK ("Command protected"); an AD1
 40 S/s session drains over BT LOG:DATA?.
 
-Caveats: the emulator's SPI bus is instant (the 12.5 MHz byte time, ~0.2 ms
-per 256-byte page on the device, is CPU time the model does not charge) and
-its main loop runs at 200 MIPS without flash wait states; the chip timing
-(busy) is modelled. Exit status 0 = every check passed; the rate table is
-printed (docs/compact-log-format.md "Fast stream: rate limits").
+Timing: the disk's SPI bus has its byte time (GD32_SPI on spi2, 12.5 MHz:
+~0.2 ms of polled CPU per 256-byte page, charged since 2026-10-22), the
+chip's busy time is the profile's, the HY3131 bus and its DMA are timed as
+on the device; the main loop runs at 200 MIPS without flash / APB wait
+states (the stream ISR costs the device ~1.7x the emulator's CPU share).
+--noise raises the AD2 noise (more bytes per sample, the coder's worst
+case). Exit status 0 = every check passed; the rate table is printed
+(docs/compact-log-format.md "Fast stream: rate limits"; fifo_hw = the
+LOG:DISK? FIFO high water, bytes of 8192 coded but not yet programmed).
 """
 import argparse
 import os
@@ -48,6 +52,9 @@ ap.add_argument('--no-bt', action='store_true')
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
 ap.add_argument('--vol-read', action='store_true', help='after each session read LOGS/FASTnnn.CSV off the USB volume (MSC READ(10), 64 sectors each): == tools/dlog.py of the DLG; the virtual-time rate')
 ap.add_argument('--no-ad1-race', action='store_true', help='AD1F without the INTF read-clears race (model IntfRaceAd1)')
+ap.add_argument('--noise', type=float, default=None, help='HY3131 model noise scale (SetNoise; AD2: 30 codes rms x scale at OSR 32): a '
+                'noisier signal codes to more bytes per sample (the model\'s 0.5 V sine + 1x noise is ~1.4 B; real '
+                'inputs 1.9..2.9 B, docs/compact-log-format.md)')
 A = ap.parse_args()
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
 os.environ['USBIP_PORT'] = str(A.port)
@@ -73,6 +80,8 @@ def run_emu(profile):
         f.write('0 monitor sysbus.spi2.spiflash Erase32kUs %d\n' % p[2])
         f.write('0 monitor sysbus.spi2.spiflash Erase64kUs %d\n' % p[3])
         f.write('0 monitor sysbus.hy3131 ClockPpm %g\n' % A.ppm)
+        if A.noise is not None:
+            f.write('0 monitor sysbus.hy3131 SetNoise %g\n' % A.noise)
         if not A.no_ad1_race:
             f.write('0 monitor sysbus.hy3131 IntfRaceAd1 true\n')
         if A.extra_script:
@@ -231,9 +240,10 @@ def session(q, src, rate, profile):
     run_s = (up1 - (t_run or up1)) / 1000
     span = rows / nominal if nominal else 0
     bps = len(dlg) / max(span, 1e-9)
-    TABLE.append((profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1)))
-    print('  %s %s %d: prep %.1f s, rows %d, lost %d (ring overwritten %d), %.0f B/s, %.0f pages/s, %.2f B/sample'
-          % (profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1)), flush=True)
+    hw = st[6] if len(st) > 6 else -1  # FIFO high water (bytes of 8192 not yet programmed)
+    TABLE.append((profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1), hw, int(isr[20]) / 10))
+    print('  %s %s %d: prep %.1f s, rows %d, lost %d (ring overwritten %d), %.0f B/s, %.0f pages/s, %.2f B/sample, FIFO high water %d B, ISR CPU %.1f %%'
+          % (profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1), hw, int(isr[20]) / 10), flush=True)
     return lost
 
 
@@ -340,9 +350,9 @@ for profile in A.profiles.split(','):
     finally:
         stop_emu(emu)
 
-print('\nprofile  src  rate   prep_s   rows   lost  ring_ovw   B/s   pages/s  B/sample')
+print('\nprofile  src  rate   prep_s   rows   lost  ring_ovw   B/s   pages/s  B/sample fifo_hw isr_cpu%')
 for r in TABLE:
-    print('%-7s %-4s %6d %7.1f %7d %6d %8d %7.0f %7.0f %8.2f' % r)
+    print('%-7s %-4s %6d %7.1f %7d %6d %8d %7.0f %7.0f %8.2f %7d %7.1f' % r)
 for v in VOL:
     print('volume %-16s %9d bytes %6.2f s device %7.0f KB/s %6.1f s wall' % v)
 print('FAIL: %d checks' % len(FAIL) if FAIL else 'PASS')

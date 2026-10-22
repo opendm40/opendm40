@@ -22,11 +22,17 @@
 // the command, then MISO is sampled with SCK low before each pulse; registers
 // auto-increment. With CS high, DO carries the IRQ (INTF & INTE).
 // Hardware SPI (fw-rs hy3131.rs: SPI2 is the bus): HY3131SpiPort, registered
-// on the GD32 SPI2 controller (Renode's STM32SPI "spi3" @ 0x40003C00), hands
-// each byte to HY3131.SpiByte, which runs the same bit engine for 8 mode-0
-// clocks (sample DO, rising, falling). CS stays the GPIO; the read-period
-// pulse fw-rs makes on the PC10 GPIO between SPI bytes lands in the same
-// engine (so would the extra clocks of a shifted framing).
+// on the GD32 SPI2 controller (emu/peripherals/GD32_SPI.cs "spi3" @
+// 0x40003C00), hands each byte to HY3131.SpiByteTimed when it has completed
+// on the bus (2026-10-22: the controller times its bytes, /8 = 1.28 us): the
+// same bit engine, clock edge by clock edge at their own times (the chip's
+// conversions, INTF and its race at those times), with the master's sampling
+// per CKPH (mode 0 at /8: the marginal DO path, MisoErrRate; CKPH 1: a full
+// period late) and TornAd2 for a data frame across an AD2 edge. SpiByte (no
+// time) is the untimed path. CS stays the GPIO; the read-period pulse fw-rs
+// makes on the PC10 GPIO between SPI bytes lands in the same engine (so would
+// the extra clocks of a shifted framing); before such a pin event the
+// controller delivers the bytes that completed before it (SpiCatchUp).
 //
 using System;
 using System.Collections.Generic;
@@ -35,6 +41,7 @@ using Antmicro.Renode.Core;
 using Antmicro.Renode.Logging;
 using Antmicro.Renode.Peripherals;
 using Antmicro.Renode.Peripherals.Bus;
+using Antmicro.Renode.Peripherals.CPU;
 
 namespace Antmicro.Renode.Peripherals.Miscellaneous
 {
@@ -290,6 +297,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public int ForcedAd2 = int.MinValue;
         public ulong Rewrites;                 // configuration writes (R20..R35)
         public long Ad2Conversions;            // AD2 results produced so far (tests)
+        public double Ad2LastEdge => ad2LastT; // chip time of the last AD2 result (tests)
         /// INTF read-clears-flag race window, s (Read 0x1E): 0 = an ideal flag. The
         /// Renode peripheral sets the device-like default (HY3131.IntfRaceUs).
         public double IntfRaceWindow;
@@ -556,9 +564,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// One AD2 result per conversion period on the grid from the last (re)start (as AD1):
         /// AD2F set once per result, R03..R05 = the input at the grid point plus the
         /// per-sample noise (Ad2NoiseCodes). A register that is not read is overwritten
-        /// (no FIFO). The chip advances only at CS low (the Renode peripheral calls Update
-        /// there), so a read is never torn here; whether the device latches R03..R05 during
-        /// a read is device test 6.2 (docs/dmm-input-scope-feasibility.md 1.4, DBG:AD2:TORN?).
+        /// (no FIFO). The chip advances at CS low (the Renode peripheral calls Update
+        /// there) and, in a read frame from R03, at each of its bytes (the timed SPI path,
+        /// HY3131.OnFalling): such a frame across a conversion edge is torn (TornAd2), the
+        /// pessimistic reading of device test 6.2 (docs/dmm-input-scope-feasibility.md 1.4,
+        /// DBG:AD2:TORN?: whether the device latches R03..R05 during a read is untested).
         private void UpdateAd2(double now)
         {
             if(!EnAd2) return;
@@ -1822,7 +1832,22 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// offset from the MCU's (ClockPpm, + = the chip runs fast). Every conversion
         /// grid, the counter and the input model run on it. Set it before the
         /// firmware starts (a change moves the chip's clock by ppm x elapsed).
-        private double Now => machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds * (1.0 + ClockPpm * 1e-6);
+        private double Now => (tAt >= 0 ? tAt : MachineTime) * (1.0 + ClockPpm * 1e-6);
+
+        /// The machine's time at this access, the CPU's progress inside its
+        /// quantum included (ICPU.SyncTime).
+        private double MachineTime
+        {
+            get
+            {
+                if(machine.SystemBus.TryGetCurrentCPU(out var cpu)) cpu.SyncTime();
+                return machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds;
+            }
+        }
+
+        /// MCU time (s) of the clock edge being processed by a timed SPI byte
+        /// (SpiByteTimed), else -1 (the machine's current time).
+        private double tAt = -1;
 
         /// HY3131 crystal offset vs the MCU, ppm (monitor: hy3131 ClockPpm -63).
         public double ClockPpm { get; set; }
@@ -1844,7 +1869,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// period), then the swallowed count; cleared by the read.
         public string IntfPhaseHist()
         {
-            var r = string.Join(",", Core.IntfPhase) + " swallowed " + Core.Swallowed;
+            var r = string.Join(",", Core.IntfPhase) + " swallowed " + Core.Swallowed + " torn " + TornAd2 + " misoerr " + MisoErrors;
             Array.Clear(Core.IntfPhase, 0, Core.IntfPhase.Length);
             this.Log(LogLevel.Info, "INTF phase: {0}", r);
             return r;
@@ -1853,6 +1878,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // ---- GPIO bit-bang ----
         public void OnGPIO(int number, bool value)
         {
+            // A timed hardware SPI master delivers its bytes lazily: bytes that
+            // completed before this pin event (CS, the read-period pulse) reach
+            // the chip first, with their own times.
+            if(number <= 2 && tAt < 0) SpiCatchUp?.Invoke();
             switch(number)
             {
             case 0: // SCK
@@ -1874,6 +1903,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 {
                     selected = true;
                     rising = 0; falling = 0; shift = 0; cmdDone = false; wbyte = 0;
+                    ad2FrameSeq = -1; ad2FrameTorn = false;
                     if(Core == null) return; // pin level reported by Connect() in the constructor
                     deaf = !Powered;
                     if(deaf) { DeafFrames++; return; }
@@ -2018,7 +2048,25 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 if(byteIdx != readIdx)
                 {
                     readIdx = byteIdx;
-                    curByte = Core.Read((reg + byteIdx) & 0x3F, Now);
+                    var r = (reg + byteIdx) & 0x3F;
+                    if(reg == 0x03 && r <= 0x05)
+                    {
+                        // AD2 data: the chip's state at THIS byte (not latched
+                        // at CS low): a frame across a conversion edge reads
+                        // bytes of two results (TornAd2). Pessimistic on
+                        // purpose: whether the device latches R03..R05 during
+                        // a read is untested (feasibility 1.4, test 6.2), and
+                        // fw-rs places its reads between edges anyway.
+                        Core.Update(Now);
+                        var seq = Core.Ad2Conversions;
+                        if(ad2FrameSeq >= 0 && seq != ad2FrameSeq && !ad2FrameTorn)
+                        {
+                            ad2FrameTorn = true;
+                            TornAd2++;
+                        }
+                        ad2FrameSeq = seq;
+                    }
+                    curByte = Core.Read(r, Now);
                     this.Log(LogLevel.Noisy, "  R{0:X2} => 0x{1:X2}", (reg + byteIdx) & 0x3F, curByte);
                 }
                 DriveMiso(((curByte >> bitIdx) & 1) != 0);
@@ -2027,6 +2075,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         private void DriveMiso(bool b)
         {
+            doPrev = doLevel;
             doLevel = b;
             ((IGPIOReceiver)portC).OnGPIO(misoPin, b);
         }
@@ -2057,6 +2106,96 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// Bytes clocked through SpiByte (hardware SPI back end).
         public ulong SpiBytes { get; private set; }
+
+        /// One byte from a timed hardware SPI master (GD32_SPI), delivered when
+        /// it has completed: `t0` = MCU time (s) the byte started shifting,
+        /// `bit` = SCK period (s), `ckph` = CTL0 CKPH (CPOL 0 in both). Edge i
+        /// (bit 7 - i): rising at t0 + (i + 0.5) bit, falling at t0 + (i + 1)
+        /// bit; the chip's state (conversions, INTF, the race window) is taken
+        /// at those times.
+        ///   CKPH 0 (mode 0): the master samples DO at the rising edge, half a
+        ///   period after the chip changed it at the previous falling edge.
+        ///   With the DO path delay (TDODL 60 ns + the isolator, DoDelayNs)
+        ///   above that half period (/8: 80 ns) a bit that just changed may be
+        ///   sampled at its old level (MisoErrRate per such bit): device
+        ///   4b98128 / b81abf2, plain /8 reads (feasibility 11.3).
+        ///   CKPH 1: the master samples at the falling edge, a full period after
+        ///   the change (clean at /8), and changes MOSI at the rising edge,
+        ///   where the chip samples DI: the chip sees the previous bit (a
+        ///   command or write byte in CKPH 1 is garbage; fw-rs sends them in
+        ///   mode 0 and switches only the data phase of a read).
+        public byte SpiByteTimed(byte tx, double t0, double bit, bool ckph)
+        {
+            SpiBytes++;
+            TimedBytes++;
+            if(!selected || Core == null) return doLevel ? (byte)0xFF : (byte)0x00;
+            if(deaf) return 0x00;
+            var gpioMosi = mosi;
+            var marginal = !ckph && bit > 0 && bit / 2 < DoDelayNs * 1e-9;
+            var rx = 0;
+            try
+            {
+                for(var i = 7; i >= 0; i--)
+                {
+                    var k = 7 - i;
+                    var nb = ((tx >> i) & 1) != 0;
+                    bool v;
+                    if(!ckph)
+                    {
+                        v = doLevel;
+                        if(marginal && doLevel != doPrev && MisoErrRate > 0 && spiRng.NextDouble() < MisoErrRate)
+                        {
+                            v = doPrev;
+                            MisoErrors++;
+                        }
+                        mosi = nb;
+                        tAt = t0 + (k + 0.5) * bit;
+                        OnRising();
+                    }
+                    else
+                    {
+                        // DI changes at this rising edge: the chip takes the old level.
+                        tAt = t0 + (k + 0.5) * bit;
+                        OnRising();
+                        mosi = nb;
+                        v = doLevel;
+                    }
+                    rx = (rx << 1) | (v ? 1 : 0);
+                    tAt = t0 + (k + 1) * bit;
+                    OnFalling();
+                }
+            }
+            finally
+            {
+                tAt = -1;
+            }
+            mosi = gpioMosi;
+            return (byte)rx;
+        }
+
+        /// Set by the timed SPI master (GD32_SPI via HY3131SpiPort): deliver
+        /// the bytes that completed so far, before a CS / SCK / MOSI pin event.
+        public Action SpiCatchUp;
+
+        /// DO path delay, ns (TDODL 60 + the isolator; device: /8 mode 0 reads
+        /// are marginal, /16 clean): mode-0 sampling with a half SCK period
+        /// below it is marginal (MisoErrRate).
+        public double DoDelayNs { get; set; } = 85;
+        /// Probability that a marginal mode-0 bit that just changed is sampled
+        /// at its old level (per such bit; 0 = off).
+        public double MisoErrRate { get; set; } = 1e-3;
+        /// Bits so sampled wrong so far.
+        public long MisoErrors { get; private set; }
+        /// Read frames from R03 whose R03..R05 bytes came from two AD2 results
+        /// (a frame across a conversion edge, see OnFalling; the AD2 stream's
+        /// data frames; the DMM's long reads from R00 cross edges harmlessly).
+        public long TornAd2 { get; private set; }
+        /// Bytes through SpiByteTimed.
+        public ulong TimedBytes { get; private set; }
+
+        private readonly Random spiRng = new Random(4242);
+        private bool doPrev, ad2FrameTorn;
+        private long ad2FrameSeq = -1;
 
         /// The meter's calibration record in flash (0x080C0000: crc, ~crc, version 1, data;
         /// DMM calibration at +0x168) is loaded once, on the first SPI transfer.
@@ -2102,7 +2241,16 @@ namespace Antmicro.Renode.Peripherals.SPI
     // The HY3131 as the slave of a hardware SPI controller (dm40.repl: on spi3 =
     // GD32 SPI2, PC10/11/12 AF6). Only the byte path: chip select, the IRQ level
     // and the bit-banged frames stay with the HY3131 peripheral itself.
-    public class HY3131SpiPort : ISPIPeripheral
+    /// A slave of a timed SPI master (GD32_SPI): bytes are delivered when they
+    /// have completed, with their start time, SCK period and CKPH; the master
+    /// registers its catch-up for the slave's own pin events.
+    public interface ITimedSpiPeripheral
+    {
+        byte TransmitTimed(byte data, double t0, double bit, bool ckph);
+        void SetCatchUp(Action catchUp);
+    }
+
+    public class HY3131SpiPort : ISPIPeripheral, ITimedSpiPeripheral
     {
         public HY3131SpiPort(Antmicro.Renode.Peripherals.Miscellaneous.HY3131 chip)
         {
@@ -2110,6 +2258,8 @@ namespace Antmicro.Renode.Peripherals.SPI
         }
 
         public byte Transmit(byte data) => chip.SpiByte(data);
+        public byte TransmitTimed(byte data, double t0, double bit, bool ckph) => chip.SpiByteTimed(data, t0, bit, ckph);
+        public void SetCatchUp(Action catchUp) { chip.SpiCatchUp = catchUp; }
         public void FinishTransmission() { }
         public void Reset() { }
 

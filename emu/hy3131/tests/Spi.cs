@@ -113,6 +113,30 @@ namespace Hy3131Tests
         private Antmicro.Renode.Peripherals.SPI.HY3131SpiPort port;
         public byte SpiX(byte b) => (port ??= new Antmicro.Renode.Peripherals.SPI.HY3131SpiPort(Chip)).Transmit(b);
 
+        /// A timed hardware-SPI byte (GD32_SPI's delivery): `bit` = SCK period,
+        /// the byte starts now and ends 8 bits later.
+        public byte TimedX(byte b, double bit, bool ckph)
+        {
+            var t0 = Now;
+            Advance(8 * bit);
+            return Chip.SpiByteTimed(b, t0, bit, ckph);
+        }
+
+        /// fw-rs's 76.8 kS/s data frame (hy3131.rs `spi::hybrid_start`): the
+        /// command byte in mode 0, the read-period pulse on the PC10 GPIO, the
+        /// data bytes with CKPH `dataCkph`; `cmdCkph` sends the command in CKPH 1
+        /// (wrong: the chip takes DI at the edge the master changes it).
+        public byte[] TimedRead(int reg, int n, double bit, bool dataCkph, bool cmdCkph = false)
+        {
+            PortD.Drive(2, false); Advance(0.2e-6);
+            TimedX((byte)((reg << 1) | 1), bit, cmdCkph);
+            PortC.Drive(10, true); Advance(0.1e-6); PortC.Drive(10, false); Advance(0.1e-6);
+            var r = new byte[n];
+            for(var i = 0; i < n; i++) r[i] = TimedX(0xFF, bit, dataCkph);
+            Advance(0.1e-6); PortD.Drive(2, true);
+            return r;
+        }
+
         public void HwWrite(int reg, params byte[] data)
         {
             PortD.Drive(2, false);

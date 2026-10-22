@@ -73,6 +73,7 @@ namespace Hy3131Tests
             System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
             System.Threading.Thread.CurrentThread.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
             if(Array.IndexOf(args, "-d") >= 0) { Debug(); return 0; }
+            if(Array.IndexOf(args, "-t") >= 0) { TimedSpi(); Console.WriteLine("{0} passed, {1} failed", passes, failures); return failures == 0 ? 0 : 1; }
             Registers();
             Timing();
             DcVoltage();
@@ -93,6 +94,7 @@ namespace Hy3131Tests
             SentinelLater();
             Power();
             HwSpi();
+            TimedSpi();
             Rail();
             Console.WriteLine("{0} passed, {1} failed", passes, failures);
             return failures == 0 ? 0 : 1;
@@ -940,6 +942,60 @@ namespace Hy3131Tests
             Check(Hex(m.Read(0x20, 22)) == Hex(F0R0), "row intact after the CS-high byte");
         }
 
+        /// The timed byte path (GD32_SPI -> HY3131SpiPort.TransmitTimed): CKPH,
+        /// the mode-0 DO margin at /8, a read across an AD2 edge (fw-rs TODO
+        /// "76.8 kS/s").
+        private static void TimedSpi()
+        {
+            Console.WriteLine("Timed SPI bytes (GD32_SPI): CKPH, /8 DO margin, torn AD2 reads");
+            const double B8 = 160e-9, B16 = 320e-9;
+            var m = NewChip();
+            m.Configure(F0R0, 0);
+            m.Chip.SetAd2(0x2A5A5); // alternating bits: every bit a transition
+            m.Write(0x34, 0); m.Write(0x29, 0); m.Write(0x26, 0x80); // 76.8 kS/s
+            m.Advance(0.01);
+            var want = Hex(m.Read(0x03, 3));
+            m.Chip.MisoErrRate = 1.0;
+            var e0 = m.Chip.MisoErrors;
+            Check(Hex(m.TimedRead(0x03, 3, B8, true)) == want && m.Chip.MisoErrors == e0,
+                "/8, data phase CKPH 1: R03..R05 = BB, no DO-margin error (MisoErrRate 1)", want);
+            Check(Hex(m.TimedRead(0x03, 3, B16, false)) == want && m.Chip.MisoErrors == e0,
+                "/16 mode 0: clean (half period 160 ns > DoDelayNs)");
+            var got = Hex(m.TimedRead(0x03, 3, B8, false));
+            Check(got != want && m.Chip.MisoErrors > e0, "/8 mode 0: changed bits read at their old level (marginal DO path)", got + " vs " + want);
+            m.Chip.MisoErrRate = 0;
+            Check(Hex(m.TimedRead(0x03, 3, B8, false)) == want, "/8 mode 0 with MisoErrRate 0: clean");
+            Check(Hex(m.TimedRead(0x03, 3, B8, true, true)) != want, "command byte in CKPH 1: the chip sees the previous DI bit (garbage)");
+            m.Chip.MisoErrRate = 1e-3;
+            // Torn: a 3-byte frame at /8 (3.84 us of data) across a 13 us grid.
+            m.Chip.ClearAd1();
+            m.Chip.Core.ForcedAd2 = int.MinValue;
+            m.Chip.SetInput("vsrc:0,ac=0.5,f=1000");
+            // (the CKPH-1 command above may have written anywhere: a fresh row)
+            m.Configure(F0R0, 0);
+            m.Write(0x34, 0); m.Write(0x29, 0); m.Write(0x26, 0x80); m.Write(0x1E, 0);
+            m.Chip.MisoErrRate = 0;
+            var p = m.Chip.Core.Ad2Period;
+            var tw = m.Chip.TornAd2;
+            // Frames placed from the model's own grid (the stub's clock has
+            // 100 ns ticks: an INTF poll cannot place them closer).
+            Func<double, double> nextEdge = t => { m.Chip.Core.Update(t); return m.Chip.Core.Ad2LastEdge + p; };
+            for(var k = 0; k < 200; k++)
+            {
+                m.Now = nextEdge(m.Now) + 1e-6; // 1 us after an edge
+                m.TimedRead(0x03, 3, B8, true); // ~6 us: inside the period
+            }
+            Check(m.Chip.TornAd2 == tw, "200 frames placed between edges: none torn", (m.Chip.TornAd2 - tw).ToString());
+            int across = 0;
+            for(var k = 0; k < 200; k++)
+            {
+                m.Now = nextEdge(m.Now) + p - 3e-6; // data bytes from ~p - 1.3 us: across the next edge
+                m.TimedRead(0x03, 3, B8, true);
+                across++;
+            }
+            Check(m.Chip.TornAd2 - tw > 150, "frames across an edge: counted torn (TornAd2)", (m.Chip.TornAd2 - tw) + " of " + across);
+        }
+
         private static void Rail()
         {
             Console.WriteLine("DMM rail (PE2) power gate");
@@ -1006,6 +1062,7 @@ namespace Hy3131Tests
             foreach(var t in new[] { new { r26 = (byte)0x80, sd = 30.0 }, new { r26 = (byte)0xA3, sd = 30.0 / Math.Sqrt(8) } })
             {
                 var n = NewChip(noise: true);
+                n.BitTime = 0.02e-6; // a frame well inside the 13 us period (TornAd2)
                 n.Chip.SetInput("dca:0.0");
                 n.Configure(F5R0, 5);
                 n.Write(0x34, 0); n.Write(0x29, 0); n.Write(0x26, t.r26);
