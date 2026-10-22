@@ -782,3 +782,72 @@ Decision rule: C becomes the AC+DC default when e2 shows its AC part
 within the AC V spec of A's (0.5 % class) and e5 its DC part within
 0.05 % + 5 digits over the warm-up; B is dropped if e1's zero spread or the
 level dependence exceeds 2 digits on any range.
+
+### 10.5 Device results (7409b92, 2026-10-23 01:06-01:56, docs/device-check-2026-10-21.md "7409b92" 3)
+
+`DM40_USBTMC=real tools/acdcmeth.py e6 e1 e7 e2 e5`, calibrator on V/COM. The calibrator's "30 V" is
+**23.99 V** (DC V READ? 23.986): every 30 V point below is ~24 V.
+
+**e6** (entry from DC V at 3 V; then 3 -> 24 -> 3 V):
+
+| | first reading s | settled s | readings / s (n_rd) | FETCh? changes / s | to 24 V settle s | back to 3 V settle s |
+|---|---|---|---|---|---|---|
+| A | 1.28 | 1.28 | 3.7 | 3.0 | 3.49 | 2.66 |
+| B | 1.48 | 1.48 | 9.3 | 9.2 | 2.55 | 2.24 |
+| C | 1.02 | 1.31 | 9.0 | 7.5 | 1.64 | 1.99 |
+
+The 24 V value: A 23.9860, B 23.9790, C 24.0077 V (C +0.09 %, see e5).
+
+**e1** (B's zero, 5 entries per level; zero_pp in digits of the range):
+
+| range | level | zeros (V) | zero p-p digits | B's DC part - READ?, digits |
+|---|---|---|---|---|
+| 6 V | 0 | +0.0127 x4, -0.0283 | 411 | +1.5 -2.4 +4.1 -0.4 +1.7 |
+| 6 V | 3 V | -0.0304, +0.0125, +0.0125, +0.0120, -0.0306 | 431 | +5.4 -0.6 0.0 +3.7 +4.2 |
+| 60 V | 0 | -0.0192, +0.0173, +0.0176, +0.0173, +0.0161 | 37 | +0.6 +0.1 -0.3 +0.1 +1.1 |
+| 60 V | 24 V | +0.0171, -0.0302, +0.0203, -0.0302, +0.0207 | 51 | -4.2 +2.4 -7.4 +2.1 -7.5 |
+| 600 V | 0 | +0.171, +0.169, +0.170, -0.169, +0.169 | 34 | 0.0 +0.1 -0.2 +0.3 +0.1 |
+| 600 V | 24 V | -0.194, +0.235, +0.239, -0.197, -0.194 | 44 | +1.8 -6.8 -7.2 +2.0 +1.5 |
+| 1000 V | 0 | +1.884, +1.981, +1.966, +1.916, +1.945 | 6 | +1.8 -5.3 -3.6 +0.1 -2.9 |
+| 1000 V | 24 V | -1.492, -1.497, -1.447, +2.217, -1.480 | 223 | -2.7 -1.7 -5.8 -16.6 -2.6 |
+
+The zero takes one of two values per entry, about the same size with opposite sign on 600 V (the AD1 chopper
+phase at the merge? not investigated). The per-entry zero absorbs most of it, but the residual is up to 7.5
+digits at 24 V on 60 V and 16.6 on 1000 V. **B fails the 2-digit rule** on every range.
+
+**e7** (B's 6 V row candidates, zero per entry): (i) R0 1: err -0.22 / +0.44 / -0.82 mV at 1 / 3 / 5 V,
+gain 0.99985; (ii) R0 2: err -0.09 / -0.11 / +0.03 mV, gain 1.00003, its zero 0.052 / 0.083 / 0.111 V grows
+with the level (~1.5 % raw gain taken up by the per-entry zero). AC part on the square: (i) 4.7758, (ii)
+4.7765 V; A's 4.7761.
+
+**e2** (40 Hz square 0..9.55 V; DC V READ? 4.7765 V on 6 V, 4.7763 on 60 V):
+
+| range | method | AC part V | vs A | DC part - DC V | readings / s |
+|---|---|---|---|---|---|
+| 6 V | A | 4.77609 | - | +0.24 mV | 3.8 |
+| 6 V | B | 4.77610 | +0.000 % | -0.13 mV | 9.0 |
+| 6 V | C | 4.78217 | **+0.127 %** | +0.88 mV | 9.3 |
+| 60 V | A | 4.77129 | - | -0.70 mV | 3.8 |
+| 60 V | B | 4.77074 | -0.012 % | -1.04 mV | 8.7 |
+| 60 V | C | 4.78204 | **+0.225 %** | **+13.6 mV (+0.28 %)** | 9.0 |
+
+B's AD1 does not move the RMS (6 V: identical). C's AC part rides the self-cal's DC gain and reads
+0.13-0.23 % high against the factory AC V calibration: within the 0.5 % class.
+
+**e5** (C re-entered every 60 s, 20 min per level; err = C's DC part - DC V READ?):
+
+| range | level | entries | err | limit 0.05 % + 5 dig | per_code vs first | offset |
+|---|---|---|---|---|---|---|
+| 60 V | 24 V | 21 | **+20.9..+24.9 mV** (mean +22.7, +0.087..0.104 %) | 17 mV: **FAIL** | -132..+31 ppm | 0.0991..0.1038 V |
+| 6 V | 3 V | 21 | -0.34..+1.38 mV (mean +0.45) | 2.0 mV: PASS | -88..+321 ppm | 0.0480..0.0486 V |
+
+No warm-up trend: the 60 V error is constant over the 20 min, a calibration error, not drift. With e2's
++13.6 mV at 4.78 V it fits ~+11 mV offset + ~+0.05 % gain in C's 60 V self-cal.
+
+**By hand, C in AUTO / AC+DC:** on the square, AUTO picks AC (4.772 V, DC 4.777 V). **With >= 5 V DC on the
+6 V range the AC part is wrong** (2.11 V on 6 V, 3.83 V on 60 V for a DC input) and the range hunts
+6 <-> 60 V every ~3 s, ~0.7 readings / s; in AUTO after the square the page stays on AC ("~4.056 V" for 5 V
+DC). 4.0 and 4.5 V are fine (AC part ~1 mV). A in the same sequence settles on DC 4.998 V.
+
+**Decision rule: not met** (e5 60 V fails; the >= 5 V AC-part fault on top). The default stays A; the owner
+decides. B: drop, by the rule (e1).

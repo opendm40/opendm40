@@ -1693,3 +1693,22 @@ Emulator (emu/):
 - [ ] Wave view: `LOG:CSV ON` is accepted but records no rows (READ? 9.9E37); ram-budget.md says csvlog is
       refused there. Refuse it (Settings conflict) or fix the doc.
 - [ ] AUTO OVERLOAD on AC 1 A (1bffde2, couptest iac repro): blocked, the A jack is not wired.
+
+## Device check 7409b92: shot fix, 76.8 kS/s, AC+DC methods (2026-10-23; docs/device-check-2026-10-21.md "7409b92")
+
+- [x] Shot fix re-check: PASS (items above). 76.8 kS/s: host / Wave view / DIV 8,1 PASS, the disk FAIL (items
+      under "76.8 kS/s").
+- [x] AC+DC methods session (acdc-approaches.md §10.5): e6 / e1 / e7 / e2 / e5 run. The decision rule for C as
+      the default is **not met**: the AC part is within 0.5 % of A's (+0.13 % on 6 V, +0.23 % on 60 V), but
+      the DC part on 60 V is +0.09..0.10 % at 24 V (e5, 21 of 21 entries over 17 mV) and +0.28 % at 4.78 V
+      (e2): C's 60 V self-cal is ~+11 mV + ~0.05 % off. 6 V passes (max 1.38 of 2.0 mV). B fails e1: the zero
+      is bimodal per entry (6 V +12.6 / -30.5 mV, 1000 V +1.9 / -1.5 V), residuals up to 7.5 digits (60 V) and
+      16.6 (1000 V). Default left at A (owner's decision).
+- [ ] Method C at >= 5 V DC on the 6 V range (AC+DC and AUTO): the AC part reads 2.11 V (6 V range) / 3.83 V
+      (60 V range) on a DC input and the range hunts 6 <-> 60 V every ~3 s (~0.7 readings / s; AUTO after the
+      square stays on AC, "~4.056 V" for 5 V DC). Fine at 4.0 / 4.5 V. A in the same sequence: PASS.
+- [ ] C's 60 V DC part: +11 mV offset / +0.05 % gain against DC V (above): check the self-cal's 60 V path
+      (AD1 on SENSE - PB5 vs the AD2 node) before C can be the default.
+- [ ] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
+      3 V reference moved -160 ppm during e5). Calibrator or meter? Recheck with a cold calibrator.
+- [ ] acdcmeth.py: the calibrator's "30 V" is 23.99 V (MR9270 limit?): the e1 / e5 / e6 30 V points are 24 V.

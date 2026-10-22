@@ -1457,7 +1457,7 @@ Steps: `LOG:DEST DISK`, `LOG:DUR 20`, `LOG:STAT ON` (AD1, 38 S/s, FAST013). Once
   - The file list under SHOTS / SCOPE / LOGS on the volume is the same as at the start.
 - **Calibrator:** 1 V DC, enabled.
 
-## 7409b92: the shot fix re-check, 76.8 kS/s, AC+DC methods (2026-10-23 00:36 - ~02:30)
+## 7409b92: the shot fix re-check, 76.8 kS/s, AC+DC methods (2026-10-23 00:36 - 02:20)
 
 The owner had installed 7409b92 (it contains rust-fw-poc up to a4dadc7). `DBG:BOOT?` showed marker 0xC3AA3C55 / 0x000962F4 / 0x000120BD, VALID, crash count 0, HEALTHY. No reset during the session: the boot block stayed the same.
 - **Wiring:** the calibrator (`/dev/ttyACM1`) on V/COM: 1 V DC, 3 / 5 / 30 V DC and the 40 Hz square (`set_output('frequency', 40.0)`). The A jack and the MCX probe were not wired.
@@ -1534,3 +1534,32 @@ From AC V: MF key 3, tap (210, 260) opens the Wave view (10 ms/div, 4800 S/s, 40
 **2.6:** DC V 1 V: 0.999951 V (10 READ?, -0.005 %). `DBG:HYSPI:SELF? 2000`: `16,2000,0,0,0,0,7.92,21.61,69.14,9.89,23,...`: all error counts 0.
 
 Part 2's FAST files were deleted. `MMEM:CAT?` was back to 10 829 824 / 5 910 528.
+
+### 3. AC+DC methods (docs/acdc-approaches.md §10.4)
+
+`DBG:ACDC:METH?` was A at the start (the default) and is A at the end. `DM40_USBTMC=real /usr/bin/python3 tools/acdcmeth.py e6 e1 e7 e2 e5 -o acdcmeth.jsonl` ran 01:06-01:56. It ended by itself with method A, DC V and the calibrator at 1 V DC. The numbers are in `acdcmeth.jsonl`; the detailed results are in acdc-approaches.md §10.5. In short:
+
+| exp | result |
+|---|---|
+| e6 entry / range | Entry at 3 V: first reading A 1.28 s, B 1.48 s, C 1.02 s (C settled 1.31 s). Readings/s (n_rd): A 3.7, B 9.3, C 9.0. 3 -> "30" -> 3 V: settle A 3.5 / 2.7 s, B 2.5 / 2.2 s, C 1.6 / 2.0 s. **The calibrator gives 23.99 V for 30 V** (DC V READ? 23.986), so every "30 V" point is ~24 V |
+| e1 B's zero | **B fails** (rule: <= 2 digits). The zero is bimodal per entry, not a spread around one value: 6 V +12.6 or -30.5 mV; 60 V +17 or -30 mV; 600 V +-0.17..0.24 V; 1000 V +1.9 or -1.5 V. B's DC part after its zero is still off by up to 5.4 / 7.5 / 7.2 / 16.6 digits on 6 / 60 / 600 / 1000 V |
+| e7 B's 6 V row | (i) R0 1: gain 0.99985, err -0.22 / +0.44 / -0.82 mV at 1 / 3 / 5 V. (ii) R0 2: gain 1.00003, err -0.09 / -0.11 / +0.03 mV, but its zero grows with the level (0.052 / 0.083 / 0.111 V: a ~1.5 % raw gain that the per-entry zero takes up). AC part on the square: 4.7758 / 4.7765 V |
+| e2 square | 6 V AC part: A 4.77609, B 4.77610, **C 4.78217 (+0.127 % vs A)**. 60 V: A 4.77129, B 4.77074, **C 4.78204 (+0.225 %)**. DC part vs DC V (4.7765): 6 V A +0.24 mV, B -0.13, C +0.88; 60 V A -0.70, B -1.04, **C +13.6 mV (+0.28 %)** |
+| e5 C over 2 x 20 min | 6 V at 3 V: C's DC part -0.34..+1.38 mV vs READ? (limit 0.05 % + 5 digits = 2.0 mV): **PASS**. 60 V at 24 V: **+20.9..+24.9 mV (+0.087..+0.104 %)**, limit 12 + 5 = 17 mV: **FAIL** in all 21 entries. It is a constant error, not a drift: per_code moved -132..+31 ppm, offset 0.0991..0.1038 V. 6 V per_code scattered -88..+321 ppm between entries, but the DC part stayed within the limit |
+
+**Decision rule (C becomes the default when e2's AC part is within the AC V spec and e5's DC part within 0.05 % + 5 digits): not met.** The AC part is within the 0.5 % class (+0.13 / +0.23 % vs A). The DC part fails on 60 V: +0.09..0.10 % at 24 V in e5, and +0.28 % at 4.78 V in e2. The two points fit an offset of ~+11 mV plus a gain error of ~+0.05 % in C's 60 V self-cal. The default was not changed.
+
+**By hand: AUTO coupling with C (3 taps on V), `p3.py`, `p3b.py`**
+- **The square:** AUTO picks AC. AC 4.772 V, DC 4.777 V, 60 V range (`autoC-square.png`). Freq 40.00 Hz in the STAT. PASS.
+- **5 V DC: FAIL.** C hunts between the 6 V and 60 V ranges every ~3 s. The AC part reads **2.11 V** on 6 V and **3.83 V** on 60 V with a DC input, and the readings drop to ~0.7/s. In AUTO, after the square, the page stayed on AC with "~4.056 V" (`autoC-5V.png`). Entered fresh at 5 V, AUTO shows the DC part (5.0098 V, +0.2 % on 6 V), but the hunting and the bogus AC part are the same.
+- **Not AUTO-specific:** AC+DC (2 taps) with C at 5 V and 5.5 V hunts the same way (total 6.45 V for 5 V DC). At 4.0 V and 4.5 V it is fine: 6 V range, AC part 1.0-1.6 mV, ~9 readings/s.
+- **Cause (not investigated):** the AC part (sqrt(RMS)) is wrong from somewhere between 4.5 and 5 V on the 6 V range. The up-range rule (|LPF| + 1.414 x AC > 90 % of AD2's span) then fires, and on 60 V the down-range rule brings it back. Each range visit re-runs the self-cal.
+- **Method A as a control:** the same square -> 5 V sequence in AUTO shows AC 4.761 V, then DC 4.998 V after ~6 s, AC part 5-10 mV, 6 V range. PASS.
+
+### State at the end
+
+- **Device:** DMM page, DC V, method A, `LOG:DEST HOST`, `LOG:STAT 0`; LOG source / rate / chop back to AD1 / 4800 / ON. `LOG:DUR` is 20 (it was not read at the start; the previous session's chk4 had set 20). Scope timebase 2 ms/div as found. Generator `OUTP?` 0 (never switched on). Settings not touched (volume 0 %, backlight 10 %, Dim / Shutdown Never).
+- **Files:** S012, S013, FAST013, FAST014 deleted (Part 1, then again for Part 2's FAST013 / FAST014 / the profiling session's FAST013). `MMEM:CAT?` used / free 10 829 824 / 5 910 528, the same as at the start.
+- **Health:** `DBG:BOOT?` unchanged: crash count 0, HEALTHY, no reset. `DBG:HYSPI:SELF? 2000` all 0 at the end too.
+- **Open: 1 V after Part 3.** DC V at the calibrator's 1 V read **0.99897-0.99949 V** after Part 3 (0.99919 V at the very end, -0.08 %). After Part 2 it read 0.999951 V. Over e5 the 3 V reference also moved 2.99796 -> 2.99749 V (-160 ppm). The calibrator had given ~24 V for 25 min before this. I did not find out whether the calibrator or the meter moved; there was no third reference.
+- **Calibrator:** 1 V DC, enabled.
