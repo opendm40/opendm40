@@ -14,6 +14,9 @@
 
 #[path = "../../src/dlog.rs"]
 mod dlog;
+#[path = "../../src/fastenc.rs"]
+mod fastenc;
+mod fast;
 
 use dlog::*;
 
@@ -491,6 +494,7 @@ fn scope_tests(dir: Option<String>) -> u32 {
 
 fn main() {
     let mut fails = scope_tests(std::env::args().nth(1));
+    fails += fast::tests(std::env::args().nth(1));
     let n = 6000;
     println!("{:<30} {:>6} {:>8} {:>8} {:>7}", "set", "rows", "CSV B/r", "DLG B/r", "ratio");
     for si in 0..9 {
