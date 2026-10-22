@@ -133,11 +133,13 @@ const VDIRS: [([u8; 11], &[u8], [u8; 3]); 4] = [
 ];
 
 /// The directory (0 LOGS, 1 SCOPE, 2 SHOTS) of file kind `k`.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn dir(k: usize) -> usize {
     if k == 3 { 0 } else { k }
 }
 
 /// The directory (as `dir_kind`) of table id `id`.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub(crate) fn id_dir(id: u16) -> usize {
     dir(kind(id))
 }
@@ -208,6 +210,7 @@ pub(crate) const T_MOVED: u16 = 1 << 15;
 /// Every flag.
 pub(crate) const T_ALL: u16 = T_DIR | T_FAT | T_SRC | T_MOVED;
 
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn kind(id: u16) -> usize {
     ((id >> 10) & 3) as usize
 }
@@ -236,6 +239,7 @@ static READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::n
 /// One-shot media change, taken by msc.rs.
 static CHANGED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn state() -> Option<&'static State> {
     if READY.load(core::sync::atomic::Ordering::Acquire) {
         Some(unsafe { (*core::ptr::addr_of!(STATE)).assume_init_ref() })
@@ -244,6 +248,7 @@ fn state() -> Option<&'static State> {
     }
 }
 
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn tab() -> &'static mut Tab {
     unsafe { (*core::ptr::addr_of_mut!(TAB)).assume_init_mut() }
 }
@@ -352,6 +357,7 @@ pub(crate) fn spi_name(id: u16) -> [u8; 11] {
     crate::calbackup::numbered_name(VDIRS[kind(id)].1, id & 0x3FF, ext)
 }
 
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub(crate) fn nclus(size: u32) -> u32 {
     size.div_ceil(CB)
 }
@@ -634,10 +640,25 @@ pub fn stats() -> (usize, u32, u16) {
     (t.n, t.hw, t.left_out)
 }
 
+/// The table's live entries / the fixed files, for the per-sector read
+/// path (region B, `.text.vdisk_rd`): not `&t.e[..t.n]`, whose range index
+/// is a generic of this module, placed in .cold and not always inlined (as
+/// `entries`).
+#[inline(always)]
+fn live(t: &Tab) -> &[VF] {
+    unsafe { core::slice::from_raw_parts(t.e.as_ptr(), t.n.min(t.e.len())) }
+}
+#[inline(always)]
+fn fixed(st: &State) -> &[VFile] {
+    unsafe { core::slice::from_raw_parts(st.files.as_ptr(), st.n.min(st.files.len())) }
+}
+
 /// The entry holding cluster `c` (>= dyn0): bisect on `vstart`.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn at_cluster(t: &Tab, c: u32) -> Option<&VF> {
-    let i = t.e[..t.n].partition_point(|e| e.vstart as u32 <= c);
-    let e = t.e[..t.n].get(i.checked_sub(1)?)?;
+    let l = live(t);
+    let i = l.partition_point(|e| e.vstart as u32 <= c);
+    let e = l.get(i.checked_sub(1)?)?;
     (c < e.vstart as u32 + nclus(e.vsize)).then_some(e)
 }
 
@@ -656,6 +677,7 @@ fn geo() -> Option<(FnRaw, Geo)> {
 }
 
 /// Bytes `off..` of table file `e` into `buf` (zeros on a read error).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
     let key = (e.src, e.ssize);
     if kind(e.id) == 2 {
@@ -712,6 +734,7 @@ impl BlockDevice for VDisk {
     fn media_change_immediate(&self) -> bool {
         true
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool {
         let Some(st) = state() else {
             return false;
@@ -744,10 +767,12 @@ impl BlockDevice for VDisk {
     }
 }
 
+#[inline(always)]
 fn put16(b: &mut [u8], o: usize, v: u16) {
     b[o..o + 2].copy_from_slice(&v.to_le_bytes());
 }
 
+#[inline(always)]
 fn put32(b: &mut [u8], o: usize, v: u32) {
     b[o..o + 4].copy_from_slice(&v.to_le_bytes());
 }
@@ -786,24 +811,30 @@ fn boot_sector(st: &State, b: &mut [u8]) {
 /// FAT entry of cluster `c`: media / EOC marks, one-cluster directories and
 /// README, the contiguous chains of the INFO / DEBUG files and of every
 /// table file, 0 = free.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn fat_entry(st: &State, c: u32) -> u16 {
-    let chain = |start: u32, size: u32| -> Option<u16> {
-        let end = start + nclus(size);
-        (start != 0 && c >= start && c < end).then(|| if c + 1 == end { 0xFFFF } else { (c + 1) as u16 })
-    };
     match c {
         0 => 0xFFF8,
         1 => crate::vwrite::fat1(),
         C_INFO..=C_README => 0xFFFF,
-        _ if c < st.spi_start => st.files[..st.n].iter().find_map(|f| chain(f.start, f.size)).unwrap_or(0),
-        _ if c < st.dyn0 => chain(st.spi_start, SPI_BYTES).unwrap_or(0),
+        _ if c < st.spi_start => fixed(st).iter().find_map(|f| chain(c, f.start, f.size)).unwrap_or(0),
+        _ if c < st.dyn0 => chain(c, st.spi_start, SPI_BYTES).unwrap_or(0),
         _ => match crate::vwrite::pair(c) {
             Some(v) => v,
-            None => at_cluster(tab(), c).filter(|e| e.id & T_FAT == 0).and_then(|e| chain(e.vstart as u32, e.vsize)).unwrap_or(0),
+            None => at_cluster(tab(), c).filter(|e| e.id & T_FAT == 0).and_then(|e| chain(c, e.vstart as u32, e.vsize)).unwrap_or(0),
         },
     }
 }
 
+/// FAT entry of cluster `c` in a contiguous chain from `start` (`size`
+/// bytes); None: not in it.
+#[inline(always)]
+fn chain(c: u32, start: u32, size: u32) -> Option<u16> {
+    let end = start + nclus(size);
+    (start != 0 && c >= start && c < end).then_some(if c + 1 == end { 0xFFFF } else { (c + 1) as u16 })
+}
+
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn fat_sector(st: &State, s: u32, b: &mut [u8]) {
     let per = (BS / 2) as u32;
     for i in 0..per {
@@ -868,7 +899,7 @@ fn dir_sector(st: &State, c: u32, s: u32, b: &mut [u8]) {
     }
     match c {
         C_INFO => {
-            for (i, f) in st.files[..st.n].iter().enumerate() {
+            for (i, f) in fixed(st).iter().enumerate() {
                 let slot = i as u32 + 2;
                 if (lo..hi).contains(&slot) {
                     let r = ent(slot);
@@ -889,7 +920,7 @@ fn dir_sector(st: &State, c: u32, s: u32, b: &mut [u8]) {
                 let r = ent(slot);
                 b[r.start] = 0xE5;
             }
-            for e in t.e[..t.n].iter().filter(|e| dir(kind(e.id)) == k && (lo..hi).contains(&(e.slot as u32))) {
+            for e in live(t).iter().filter(|e| dir(kind(e.id)) == k && (lo..hi).contains(&(e.slot as u32))) {
                 let r = ent(e.slot as u32);
                 let o = r.start;
                 dyn_entry(e, &mut b[r]);
@@ -902,6 +933,7 @@ fn dir_sector(st: &State, c: u32, s: u32, b: &mut [u8]) {
 }
 
 /// Data sector `s` (0 = the first sector of cluster 2).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn data_sector(st: &State, s: u32, b: &mut [u8]) {
     let c = s / SPC + 2;
     let within = (s % SPC) * BS as u32;
@@ -918,7 +950,7 @@ fn data_sector(st: &State, s: u32, b: &mut [u8]) {
             }
         }
         _ if c < st.spi_start => {
-            let Some(f) = st.files[..st.n].iter().find(|f| f.start != 0 && c >= f.start && c < f.start + nclus(f.size)) else { return };
+            let Some(f) = fixed(st).iter().find(|f| f.start != 0 && c >= f.start && c < f.start + nclus(f.size)) else { return };
             let Some((off, len)) = span(f.start, f.size) else { return };
             let d = &mut b[..len];
             match f.kind {

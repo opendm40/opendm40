@@ -392,7 +392,8 @@ over cluster chains, `dir_start`) and keeps a table of the generated files
 (docs/native-boot.md "Unit data": existing files keep their slot and
 clusters, new ones are appended, a compaction only while unmounted); a new
 DLG's CSV size comes from `Gen::open` (every chunk header + CRC; once per
-file, not per refresh), `exclude` = the file being recorded (it appears when
+file, not per refresh; kind 3: the chunk headers and the CRCs of the last 4
+chunks only, see below), `exclude` = the file being recorded (it appears when
 it ends). Reads go through one cached `Gen` (sequential 512-byte sector reads
 O(1), a seek walks the chunk headers); it reads the SPI flash itself
 (spiflash.rs `read_at`, through `dlog::FnRaw`; no 4 KiB block buffer, no
@@ -405,6 +406,27 @@ screenshot job runs: `vdisk::refresh(csvlog::recording_name())`. Cost: the
 directory scan plus `Gen::open` of the new DLGs, ~0.1 s per 100 KB of new
 logs at the 12.5 MHz SPI clock. The volume is 1.98 GiB (32 KiB clusters):
 CSVs are ~10-20x their DLG, so a full 16 MB SPI disk of logs fits.
+
+Large FAST files (2026-10-22, device 036cc55: 26 / 53 MB CSVs too slow to
+read over the volume). Causes and fixes, measured on the host by
+tools/fatren-test `vread` (1.1 M AD2 rows: a 2.2 MB DLG, a 50.6 MB CSV, read
+sector by sector as a host does; the SPI time estimated at 0.64 us per byte
++ ~6 us per read):
+
+| | before | after |
+|---|---|---|
+| `Gen::open` at the volume refresh (CSV size) | CRC of every chunk: 2.2 MB read, ~1.5 s main-loop stall | headers + the last 4 chunks' CRCs: 34 KB, ~0.04 s |
+| the same again at the first read of the file | ~1.5 s | ~0.04 s |
+| SPI reads for the whole CSV | 171 k (153 k 2-byte FAT reads: every chunk step re-read the current chunk's header, a step back that walked the FAT chain from the start, quadratic in the size) | 13 k (`fast_seek` / `seek` go on from the next chunk) |
+| SPI time for the whole CSV | ~4.1 s | ~1.5 s (~32 MB/s SPI-bound) |
+| code | the generator, the vdisk sector path in region C (slow flash) | `.text.vdisk_rd` in region B (~6 KB) |
+| USB | usbd-storage sends one 64-byte packet per poll: ~2 per main-loop pass | main.rs polls on while a READ's data phase runs, 2 ms per pass (0.5 ms in a logger session) |
+
+Host CPU for the 50 MB CSV: 0.2 s (x86). The device throughput is to be
+measured (TODO "Fast logger device check" 8). A chunk corrupted inside the
+file (not the torn tail) is no longer detected by the volume / MMEM:DATA?
+(its rows decode as garbage, their count right); tools/dlog.py still
+checks every CRC.
 
 Tested: tools/fatren-test (the USB volume over a SPI image with logs, scope
 records and screenshots: dumped, fsck, mtools, LOGS/LOG000.CSV == the old

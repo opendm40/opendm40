@@ -281,6 +281,13 @@ impl<'a, B: UsbBus> Msc<'a, B> {
         HOST_WRITING.store(matches!(self.xfer, Xfer::Write { .. }), core::sync::atomic::Ordering::Relaxed);
     }
 
+    /// A host READ's data phase is under way: main.rs polls again within the
+    /// pass (usbd-storage moves one 64-byte packet per poll, ~2 per main-loop
+    /// pass otherwise: ~0.1 MB/s at a 1 ms pass).
+    pub fn reading(&self) -> bool {
+        matches!(self.xfer, Xfer::Read { .. })
+    }
+
     /// Block (true) or allow host writes; a write already in progress finishes.
     pub fn set_write_inhibit(&mut self, on: bool) {
         self.write_inhibit = on;

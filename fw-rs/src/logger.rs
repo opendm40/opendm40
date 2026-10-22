@@ -3,9 +3,11 @@
 //! A main-loop-polled, conversion-paced sampler for the HY3131 AD1 (DC) channel.
 //! fw-rs runs with interrupts masked (`cpsid i`): this is a cooperative sampler
 //! driven from the main loop, timestamped and paced by the DWT cycle counter
-//! (clock.rs enables CYCCNT; HCLK = 200 MHz). The one exception is the AD2
-//! source with the `ad2-isr` feature (module `isr` below, decisions-2026-10-22
-//! #3): a timer ISR is then the producer and the main loop only drains. FR-38 trades resolution for speed: the HY3131 AD1OSR is
+//! (clock.rs enables CYCCNT; HCLK = 200 MHz). The exceptions, with the
+//! `ad2-isr` feature (module `isr` below, decisions-2026-10-22 #3): the AD2
+//! source, and AD1 at 160 .. 640 S/s (`ad1_on_isr`, 2026-10-22: the
+//! main-loop sampler lost 1.8 % at 640 S/s to long passes on the device):
+//! a timer ISR is then the producer and the main loop only drains. FR-38 trades resolution for speed: the HY3131 AD1OSR is
 //! dropped to its fast setting (see `hy3131::set_ad1_osr`) and we stream the raw
 //! signed 24-bit AD1 counts.
 //!
@@ -108,6 +110,14 @@ const _: () = assert!(CAP.is_power_of_two());
 /// 0x13, 25 ms, 40/s) is the stock's fastest setting; faster ones are opt-in
 /// (LOG:OSR, LOG:CHOP OFF; table above).
 pub const DEFAULT_OSR: u8 = hy::AD1OSR_STREAM;
+
+/// AD1 sessions with a conversion period up to this (us) run on the stream
+/// ISR (`Logger::ad1_on_isr`): OSR 256 / 512 unchopped, OSR 256 chopped
+/// (640 / 320 / 160 S/s).
+pub const AD1_ISR_MAX_US: u32 = 6250;
+
+/// Main-loop AD1 sampler: blind reads in a row after a swallowed AD1F.
+const RESCUE_MAX: u8 = 4;
 
 /// AD2 rate when LOG:SRATe was never set, S/s: 4800 with the stream ISR
 /// (decisions #3: ~10 % of the CPU at 3.125 MHz), 2400 for the main-loop
@@ -297,6 +307,9 @@ struct Producer {
     /// No flag read within this many us of `last_sample_us`: P/2 (the
     /// main-loop sampler; the stream ISR does not poll the flag).
     gate_us: u32,
+    /// Blind AD1 reads after a swallowed flag in a row (`sample`: at most
+    /// RESCUE_MAX).
+    rescued: u8,
 }
 
 impl Producer {
@@ -312,6 +325,7 @@ impl Producer {
             have_last: false,
             last_sample_us: 0,
             gate_us: 0,
+            rescued: 0,
         }
     }
 
@@ -380,6 +394,10 @@ pub struct Logger {
     ad2: bool,
     /// The running session's producer is the stream ISR.
     isr: bool,
+    /// The running / last session's producer was the stream ISR (`lost`).
+    isr_sess: bool,
+    /// `plan` ran for the next session (`r26` holds its rung).
+    planned: bool,
     /// LOG:SRATe (AD2), S/s; 0 = DEFAULT_AD2_HZ.
     req_hz: u32,
     /// R26 low bits of the running AD2 session (preamble).
@@ -429,6 +447,8 @@ impl Logger {
             nochop: false,
             ad2: false,
             isr: false,
+            isr_sess: false,
+            planned: false,
             req_hz: 0,
             r26: 0,
             mode: 0,
@@ -497,7 +517,7 @@ impl Logger {
     }
     /// R26 low bits the next / running AD2 session uses.
     pub fn r26(&self) -> u8 {
-        if self.active && self.ad2 { self.r26 } else { hy::ad2_r26_for(self.req_hz(), self.chop()) }
+        if (self.active || self.planned) && self.ad2 { self.r26 } else { hy::ad2_r26_for(self.req_hz(), self.chop()) }
     }
     pub fn mode(&self) -> u8 {
         self.mode
@@ -554,7 +574,7 @@ impl Logger {
         // A each, phase-locked to the chip): lost = periods - captured,
         // exact, whatever the crystal offset.
         #[cfg(feature = "ad2-isr")]
-        if self.ad2 && isr::lock_stats()[8] != 0 {
+        if self.isr_sess && isr::lock_stats()[8] != 0 {
             return isr::lock_stats()[8].saturating_sub(captured);
         }
         let p = self.prod.period_ns;
@@ -577,22 +597,23 @@ impl Logger {
         (((captured as u64 - 1) * 1_000_000) / span) as u32
     }
 
-    /// Begin a session: configure the HY3131 (AD1: R22 OSR / chopper; AD2:
-    /// R26 rung, AD3 / RMS / LPF off), reset all state and, for AD2 with the
-    /// `ad2-isr` feature, hand the bus to the stream ISR. `mode`/`range` are
-    /// the current DMM function (for the preamble); the caller must have
-    /// selected a mode `mode_ok` for the source, written its full row
-    /// (dmm.start) and powered the analog side.
-    pub fn start(&mut self, mode: u8, range: i8) {
-        self.stop();
+    /// The next session's settings, without a bus access: mode / range (the
+    /// preamble), the AD2 rung (capped by the stream ISR's read divider),
+    /// the period (ns, returned; `nominal_mhz` / `r26` report them). `start`
+    /// runs it first; the fast logger's session start (main.rs
+    /// `fast_start`, region C) runs it alone to write the file header
+    /// before `start` hands the bus to the stream ISR (no `.cold` code may
+    /// run while it streams: a region C fetch stalls the ISR's entry,
+    /// link-native.x). Not during a session.
+    pub fn plan(&mut self, mode: u8, range: i8) -> u32 {
         self.mode = mode;
         self.range = range;
         let period_ns = if self.ad2 {
-            // The stream ISR's read divider first: it caps the rung.
+            // The stream ISR's read divider caps the rung.
             #[cfg(feature = "ad2-isr")]
             let req = {
                 let dma = hy::stream::use_dma();
-                let div = hy::stream::pick_div(dma);
+                let (div, _) = hy::stream::choose_div(dma);
                 self.req_hz().min(hy::stream::max_rate_hz(div, dma))
             };
             #[cfg(not(feature = "ad2-isr"))]
@@ -603,6 +624,38 @@ impl Logger {
             self.r26 = 0;
             hy::ad1_period_us(self.osr, self.chop()) * 1000
         };
+        self.prod.period_ns = period_ns;
+        self.planned = true;
+        period_ns
+    }
+
+    /// The next AD1 session runs on the stream ISR (feature `ad2-isr`): the
+    /// fast AD1 settings (160 .. 640 S/s, period <= AD1_ISR_MAX_US), where a
+    /// main-loop pass (a panel redraw, a page program, USB) can outlast the
+    /// period (device 036cc55: 1.8 % lost at 640 S/s with the main-loop
+    /// sampler). The slower ones keep the main-loop sampler (a period of
+    /// 12.5 ms or more; no lock-in time before the first sample).
+    pub fn ad1_on_isr(&self) -> bool {
+        cfg!(feature = "ad2-isr") && !self.ad2 && hy::ad1_period_us(self.osr, self.chop()) <= AD1_ISR_MAX_US
+    }
+
+    /// Begin a session: configure the HY3131 (AD1: R22 OSR / chopper; AD2:
+    /// R26 rung, AD3 / RMS / LPF off), reset all state and, for AD2 with the
+    /// `ad2-isr` feature (and the fast AD1 settings, `ad1_on_isr`), hand the
+    /// bus to the stream ISR. `mode`/`range` are the current DMM function
+    /// (for the preamble); the caller must have selected a mode `mode_ok`
+    /// for the source, written its full row (dmm.start) and powered the
+    /// analog side.
+    pub fn start(&mut self, mode: u8, range: i8) {
+        self.stop();
+        let period_ns = self.plan(mode, range);
+        let on_isr = self.ad2 || self.ad1_on_isr();
+        #[cfg(feature = "ad2-isr")]
+        if self.ad2 {
+            let _ = hy::stream::pick_div(hy::stream::use_dma());
+        } else if on_isr {
+            hy::stream::use_div(hy::DIV, false);
+        }
         self.ring().reset();
         // The chip set-up is the last main-loop bus access of an ISR session.
         if self.ad2 {
@@ -612,11 +665,16 @@ impl Logger {
         }
         self.prod.begin(period_ns);
         self.active = true;
+        self.isr_sess = false;
         #[cfg(feature = "ad2-isr")]
-        if self.ad2 {
-            isr::start(&self.prod, self.ring, hy::ad2_rate_mhz(self.r26));
+        if on_isr {
+            let rate = if self.ad2 { hy::ad2_rate_mhz(self.r26) } else { hy::ad1_rate_mhz(self.osr, self.chop()) };
+            isr::start(&self.prod, self.ring, rate, !self.ad2);
             self.isr = true;
+            self.isr_sess = true;
         }
+        #[cfg(not(feature = "ad2-isr"))]
+        let _ = on_isr;
     }
 
     /// End the session (records stay readable). With the stream ISR: the
@@ -630,6 +688,7 @@ impl Logger {
         }
         self.isr = false;
         self.active = false;
+        self.planned = false;
         self.end_wave();
     }
 
@@ -733,7 +792,26 @@ impl Logger {
                 }
             }
             let ready = if self.ad2 { hy::ad2_ready() } else { hy::ad1_ready() };
-            if ready {
+            let p = self.prod.nominal_us as u64;
+            let since = self.prod.now_us.wrapping_sub(self.prod.last_sample_us);
+            if !ready && !self.ad2 && self.prod.have_last && self.prod.rescued < RESCUE_MAX && since >= p + p / 4 && since < p + 3 * p / 4 {
+                // No AD1F a quarter period past the conversion's due time:
+                // an INTF read raced the conversion and cleared its flag
+                // unreported (the register clears on read, as for AD2F,
+                // feasibility 9.5; emulator IntfRaceAd1). R00..R02 still hold
+                // the result for the rest of the period: read it blind,
+                // stamped at its due time (one period after the last
+                // sample's observation); not near the next conversion
+                // (a read across its update could tear). At most RESCUE_MAX
+                // in a row (a converter that stopped is not read as a
+                // stream of copies; a tight polling loop, the emulator's,
+                // loses one flag in ~4 at 40 S/s); counted in DBG:ISR? `late`.
+                self.prod.rescued += 1;
+                self.prod.last_sample_us += p;
+                inc(&ring.late);
+                let _ = self.prod.push(ring, self.prod.last_sample_us as u32, hy::read_ad1());
+            } else if ready {
+                self.prod.rescued = 0;
                 self.prod.tick(); // the flag-observed moment
                 self.prod.last_sample_us = self.prod.now_us;
                 let ts = self.prod.now_us as u32;
@@ -800,7 +878,9 @@ impl Logger {
     }
 }
 
-/// The AD2 stream ISR (feature `ad2-isr`; docs/decisions-2026-10-22.md #3,
+/// The stream ISR (feature `ad2-isr`; AD2, and AD1 at 160 .. 640 S/s with
+/// R00..R02 / AD1F in place of R03..R05 / AD2F, CPU frames at /16, the
+/// timer at 20 ns << KSH per count; docs/decisions-2026-10-22.md #3,
 /// docs/dmm-input-scope-feasibility.md 10): TIMER6 (STM32 TIM7, IRQ 55, the
 /// only interrupt fw-rs ever enables), phase-locked to the HY3131's
 /// conversion grid by src/ad2pll.rs. Entry A, once per conversion period,
@@ -840,8 +920,18 @@ pub mod isr {
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
     static mut PLL: Pll = Pll::idle();
     static mut RINGP: *const Ring = core::ptr::null();
+    /// The session's source: AD1 (R00..R02, INTF.AD1F; CPU frames) or AD2
+    /// (R03..R05, AD2F), and the timer's count scale: one count = 20 ns <<
+    /// KSH (PSC 4 << KSH - 1), so that an AD1 period (1.56 .. 6.25 ms) fits
+    /// the 16-bit ARR; the Pll runs in those counts (`Pll::new` at the rate
+    /// << KSH), the statistics (`max_lat`, `lock_stats`) in 20 ns / mHz.
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut AD1: bool = false;
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut KSH: u32 = 0;
     /// The last session's frequency word offset (Pll::rel_q24): the next
-    /// session starts on it, so it locks at once.
+    /// session starts on it, so it locks at once (AD1 and AD2 share it: both
+    /// rates derive from the chip's crystal).
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
     static mut REL: i32 = 0;
     /// Data frame (CS low .. CS high) + ISR entry, timer counts, per divider
@@ -948,16 +1038,22 @@ pub mod isr {
     /// the edge search here; the read divider is set): find one conversion
     /// edge by polling INTF (bounded: 3 periods), start the timer so that
     /// the first A comes `P - beta` after it, hand the bus over.
-    pub(super) fn start(prod: &Producer, ring: *const Ring, rate_mhz: u32) {
+    pub(super) fn start(prod: &Producer, ring: *const Ring, rate_mhz: u32, ad1: bool) {
         let div = hy::stream::div_used(); // Logger::start picked it
+        let mut ksh = 0u32;
+        while (prod.period_ns / 20) >> ksh > 60_000 {
+            ksh += 1;
+        }
+        let flag = if ad1 { hy::INTF_AD1 } else { hy::INTF_AD2 };
         unsafe {
+            *core::ptr::addr_of_mut!(AD1) = ad1;
+            *core::ptr::addr_of_mut!(KSH) = ksh;
             (*core::ptr::addr_of_mut!(TRG)).gen = 0;
             let p = &mut *core::ptr::addr_of_mut!(PROD);
             p.begin(prod.period_ns);
             *core::ptr::addr_of_mut!(RINGP) = ring;
             let pll = &mut *core::ptr::addr_of_mut!(PLL);
-            let dma = hy::stream::use_dma();
-            let _ = rate_mhz;
+            let dma = !ad1 && hy::stream::use_dma();
             *core::ptr::addr_of_mut!(DMA) = Dma { on: dma, pending: false, kind: DATA, ts: 0 };
             if dma {
                 *core::ptr::addr_of_mut!(TXB) = [(hy::R_AD2 << 1) | 1, 0xFF, 0xFF, 0xFF, 0xFF];
@@ -970,7 +1066,7 @@ pub mod isr {
                 pll.gate = true;
                 hy::stream::dma_setup(true);
             } else {
-                *pll = Pll::new(rate_mhz, *core::ptr::addr_of!(REL), frame_counts(div));
+                *pll = Pll::new(rate_mhz << ksh, *core::ptr::addr_of!(REL), frame_counts(div) >> ksh);
             }
         }
         LAT_PC.store(0, Relaxed);
@@ -981,7 +1077,7 @@ pub mod isr {
         // Edge search: AD2F seen by read j and not by read j - 1 = the edge
         // between their sampling points (~ the start + the command byte +
         // the read period; CS setup .. the INTF bit ~ 2.5 us at /16).
-        let cyc_per_count = crate::clock::HCLK_HZ / COUNT_HZ; // 4
+        let cyc_per_count = (crate::clock::HCLK_HZ / COUNT_HZ) << ksh; // 4 << KSH
         let mut f = [0u8];
         let _ = hy::isr_read(hy::R_INTF, &mut f);
         let t_begin = unsafe { r32(DWT_CYCCNT) };
@@ -992,7 +1088,7 @@ pub mod isr {
             if !hy::isr_read(hy::R_INTF, &mut f) {
                 break;
             }
-            if f[0] & hy::INTF_AD2 != 0 {
+            if f[0] & flag != 0 {
                 edge = Some(prev.wrapping_add(t.wrapping_sub(prev) / 2));
                 break;
             }
@@ -1015,7 +1111,12 @@ pub mod isr {
             }
             None => pc,
         };
-        hy::stream::start(first.saturating_sub(4));
+        if ad1 && edge.is_none() {
+            // No edge seen: blind reads only once locked (a read across the
+            // update would tear the 24-bit result; AD1 has no sign copy).
+            unsafe { (*core::ptr::addr_of_mut!(PLL)).gate = true };
+        }
+        hy::stream::start(first.saturating_sub(4), (4 << ksh) - 1);
     }
 
     /// Main loop, after `hy::stream::stop`: keep the lock for the next one.
@@ -1037,13 +1138,14 @@ pub mod isr {
     /// the session uses DMA frames).
     pub fn lock_stats() -> [u32; 11] {
         let p = unsafe { &*core::ptr::addr_of!(PLL) };
+        let ksh = unsafe { *core::ptr::addr_of!(KSH) };
         let ppm10 = ((p.f_mean() as i64 - p.f_nom as i64) * 10_000_000 / (p.f_nom.max(1) as i64)) as i32;
         [
             p.probes,
             p.late_edges,
             p.max_run,
             p.locked as u32,
-            p.rate_mhz(),
+            p.rate_mhz() >> ksh,
             ppm10 as u32,
             SLIPS.load(Relaxed),
             LAT_PC.load(Relaxed),
@@ -1052,7 +1154,7 @@ pub mod isr {
             p.periods.wrapping_sub(unsafe { (*core::ptr::addr_of!(DMA)).pending } as u32),
             {
                 let busy = BUSY16.load(Relaxed) as u64 * 16;
-                let total = p.periods as u64 * (p.f_mean() as u64 >> 16) * (crate::clock::HCLK_HZ / COUNT_HZ) as u64;
+                let total = p.periods as u64 * (p.f_mean() as u64 >> 16) * ((crate::clock::HCLK_HZ / COUNT_HZ) << ksh) as u64;
                 if total == 0 { 0 } else { (busy * 1000 / total) as u32 }
             },
             unsafe { (*core::ptr::addr_of!(DMA)).on } as u32,
@@ -1069,6 +1171,8 @@ pub mod isr {
             return;
         }
         let t0 = r32(DWT_CYCCNT);
+        let ad1 = AD1;
+        let flag = if ad1 { hy::INTF_AD1 } else { hy::INTF_AD2 };
         let ring = &*RINGP;
         let pll = &mut *core::ptr::addr_of_mut!(PLL);
         let p = &mut *core::ptr::addr_of_mut!(PROD);
@@ -1096,7 +1200,7 @@ pub mod isr {
                 if !hy::isr_read(hy::R_INTF, &mut f) {
                     inc(&ring.timeouts);
                 } else if c {
-                    pll.result(f[0] & hy::INTF_AD2 != 0);
+                    pll.result(f[0] & flag != 0);
                     inc(&ring.probes);
                 }
             }
@@ -1123,15 +1227,18 @@ pub mod isr {
             } else {
                 let ts = p.now_us as u32;
                 let mut b = [0u8; 3];
-                if hy::isr_read(hy::R_AD2, &mut b) {
-                    store(p, ring, ts, hy::s24(&b));
-                } else {
+                if !hy::isr_read(if ad1 { hy::R_AD1 } else { hy::R_AD2 }, &mut b) {
                     inc(&ring.timeouts);
+                } else if ad1 {
+                    // 24-bit two's complement, no sign copy to check.
+                    let _ = p.push(ring, ts, hy::s24(&b));
+                } else {
+                    store(p, ring, ts, hy::s24(&b));
                 }
                 if probe {
                     let mut f = [0u8];
                     if hy::isr_read(hy::R_INTF, &mut f) {
-                        pll.result(f[0] & hy::INTF_AD2 != 0);
+                        pll.result(f[0] & flag != 0);
                         inc(&ring.probes);
                     } else {
                         inc(&ring.timeouts);
@@ -1145,8 +1252,9 @@ pub mod isr {
         if dt > ring.max_isr_cyc.load(Relaxed) {
             ring.max_isr_cyc.store(dt, Relaxed);
         }
-        if lat > ring.max_lat.load(Relaxed) {
-            ring.max_lat.store(lat, Relaxed);
+        let lat20 = lat << KSH; // 20 ns units
+        if lat20 > ring.max_lat.load(Relaxed) {
+            ring.max_lat.store(lat20, Relaxed);
             LAT_PC.store(*frame.add(6), Relaxed);
         }
         if hy::stream::overrun() {

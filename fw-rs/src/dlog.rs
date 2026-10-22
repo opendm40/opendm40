@@ -83,9 +83,12 @@ pub fn crc32_upd(mut c: u32, d: &[u8]) -> u32 {
     c
 }
 
+// inline(always): the kind-3 read path (`.text.vdisk_rd`, region B) uses them.
+#[inline(always)]
 fn le16(b: &[u8], o: usize) -> u32 {
     b[o] as u32 | (b[o + 1] as u32) << 8
 }
+#[inline(always)]
 fn le32(b: &[u8], o: usize) -> u32 {
     le16(b, o) | le16(b, o + 2) << 16
 }
@@ -323,6 +326,7 @@ fn from_scale(n: i32, k: i32) -> Val {
 fn zz(x: i32) -> u32 {
     ((x << 1) ^ (x >> 31)) as u32
 }
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn unzz(u: u32) -> i32 {
     ((u >> 1) as i32) ^ -((u & 1) as i32)
 }
@@ -862,6 +866,7 @@ pub fn scope_header(text: &[u8], a: f32, b: f32, dt: f32, t0: u32, n: u32, out: 
 }
 
 /// "+d.dd..de+xx" with `dig` decimals into `out` (2 + dig + 4 bytes).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn sci(out: &mut [u8], v: f32, dig: usize) {
     let mut v = if v.is_finite() { v } else { 0.0 };
     out[0] = if v < 0.0 { b'-' } else { b'+' };
@@ -945,6 +950,7 @@ impl Win {
         Win { base: 0, n: 0, b: [0; WIN] }
     }
     /// Byte `off` (< `end`, the readable limit).
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn byte<S: Src>(&mut self, s: &mut S, off: u32, end: u32) -> Option<u8> {
         if off < self.base || off >= self.base + self.n {
             if off >= end {
@@ -1319,15 +1325,47 @@ impl<S: Src> Gen<S> {
             }
             g.fp = FPar::parse(&p)?;
             g.fstart = at + FAST_PAR as u32;
+            // The chunk headers only (28 bytes each, ~1 per 4 KiB: a 3 MB
+            // file in ~0.1 s on the device, where a CRC of every chunk read
+            // the whole file, ~2 s per MB at 12.5 MHz, at every refresh of
+            // the USB volume and every open of its CSV); then the CRCs of
+            // the last FAST_TAIL chunks, where a cut leaves a torn one (the
+            // writer has at most ~2 chunks not yet fully programmed: the 8
+            // KiB FIFO): the file ends before the first bad one. A chunk
+            // corrupted further in decodes as garbage rows (its header
+            // still gives their count, so the CSV's size and the later rows
+            // stay right); tools/dlog.py checks every CRC.
             let mut off = g.fstart;
-            let mut last = None;
-            while let Some(c) = fchunk_at(&mut g.s, &mut g.win, off, size, true) {
+            // The last FAST_TAIL + 1 headers (the one before the checked
+            // ones: the last row's time when they are all torn).
+            const R: usize = FAST_TAIL + 1;
+            let mut tail = [None::<FChunk>; R];
+            let mut n = 0usize;
+            while let Some(c) = fchunk_at(&mut g.s, &mut g.win, off, size, false) {
                 if c.row0 != g.info.rows {
                     break;
                 }
                 g.info.rows += c.nrows;
                 g.info.chunks += 1;
                 off = c.end();
+                tail[n % R] = Some(c);
+                n += 1;
+            }
+            let k0 = n.saturating_sub(FAST_TAIL);
+            let mut last = if k0 > 0 { tail[(k0 - 1) % R] } else { None };
+            for k in k0..n {
+                let Some(c) = tail[k % R] else { break };
+                if fchunk_at(&mut g.s, &mut g.win, c.off, size, true).is_none() {
+                    // Torn: the file ends before this chunk.
+                    for j in k..n {
+                        if let Some(x) = tail[j % R] {
+                            g.info.rows -= x.nrows;
+                            g.info.chunks -= 1;
+                        }
+                    }
+                    off = c.off;
+                    break;
+                }
                 last = Some(c);
             }
             g.info.valid = off;
@@ -1383,6 +1421,7 @@ impl<S: Src> Gen<S> {
     }
 
     /// The CSV header text bytes `off..` (into `buf`).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn header_text(&mut self, off: u32, buf: &mut [u8]) -> bool {
         self.s.read(FHDR as u32 + off, buf)
     }
@@ -1406,7 +1445,10 @@ impl<S: Src> Gen<S> {
     fn seek(&mut self, off: u32) -> bool {
         let mut at = FHDR as u32 + self.info.hl;
         if let Some(c) = self.cur {
-            if off >= c.csv_base {
+            // (the next chunk: as `fast_seek`)
+            if off >= c.csv_base + c.csv_len {
+                at = c.end();
+            } else if off >= c.csv_base {
                 at = c.off;
             }
         }
@@ -1449,10 +1491,16 @@ impl<S: Src> Gen<S> {
 
     /// Kind 3: decode row `k` into `row` (forward in the cursor's chunk
     /// when it is ahead, else from the chunk holding it).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn fast_seek(&mut self, k: u32) -> bool {
         let fwd = self.fc.is_some_and(|c| self.fk != u32::MAX && k > self.fk && k < c.row0 + c.nrows);
         if !fwd {
+            // From the next chunk when `k` is past the cursor's one: its
+            // header is behind the reader, and a step back in the file
+            // walks the FAT chain from the start again (FatFile::read; once
+            // per chunk = quadratic in the file's size).
             let mut at = match self.fc {
+                Some(c) if k >= c.row0 + c.nrows => c.end(),
                 Some(c) if k >= c.row0 => c.off,
                 _ => self.fstart,
             };
@@ -1494,6 +1542,7 @@ impl<S: Src> Gen<S> {
     }
 
     /// CSV bytes `off .. off + buf.len()` (zeros past the end).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     pub fn read(&mut self, mut off: u32, buf: &mut [u8]) {
         let mut i = 0;
         buf.fill(0);
@@ -1588,6 +1637,8 @@ impl<S: Src> Gen<S> {
 /// missing before the row: round(dt / nominal period) - 1 (a stall, the ring
 /// full, the disk too slow: all show as a stamp gap).
 pub const KIND_FAST: u8 = 3;
+/// Kind 3: the chunks at the end whose CRC `Gen::open` checks.
+const FAST_TAIL: usize = 4;
 pub const FAST_PAR: usize = 32;
 /// FPar::flags: the value column (a, b valid).
 pub const FP_SCALED: u8 = 1;
@@ -1642,12 +1693,14 @@ impl FPar {
 }
 
 /// Conversions missing before a row `dt_us` after the previous one.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn fast_lost(dt_us: u32, rate_mhz: u32) -> u32 {
     let n = (dt_us as u64 * rate_mhz as u64 + 500_000_000) / 1_000_000_000;
     (n.saturating_sub(1)).min(FLOST_MAX as u64) as u32
 }
 
 /// `v` right-aligned in `out` (spaces before), "-" for negatives.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn rjust(out: &mut [u8], v: i64) {
     let mut x = v.unsigned_abs();
     let mut i = out.len();
@@ -1667,6 +1720,7 @@ fn rjust(out: &mut [u8], v: i64) {
 }
 
 /// One kind-3 CSV row into `out` (`row_len` bytes, returned).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn fast_row(t_us: u64, raw: i32, lost: u32, p: &FPar, out: &mut [u8]) -> usize {
     // t_s: 7 integer digits (2^48 us would need 9: capped, never reached)
     let s = (t_us / 1_000_000).min(9_999_999);
@@ -1712,6 +1766,7 @@ impl FChunk {
 
 /// The kind-3 chunk header at `off` if whole within `size` (with `check`:
 /// its CRC over the payload, then header bytes 8..28, matches).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn fchunk_at<S: Src>(s: &mut S, w: &mut Win, off: u32, size: u32, check: bool) -> Option<FChunk> {
     let mut h = [0u8; CHDR];
     if off.checked_add(CHDR as u32)? > size || !s.read(off, &mut h) || h[0] != b'D' || h[1] != b'C' {
@@ -1764,10 +1819,12 @@ struct FDec {
 impl FDec {
     const IDLE: FDec = FDec { pos: 0, bit: 0, end: 0, left: 0, first: false, t: 0, dt: 0, dt0: 0, v: 0, at: Ad::new(AF_T0), av: Ad::new(AF_V0) };
 
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn new(c: &FChunk, p_us: u32) -> FDec {
         FDec { pos: c.off + CHDR as u32, end: c.end(), left: c.nrows, first: true, t: c.t0, dt: p_us, dt0: c.dt0, v: c.v0, ..FDec::IDLE }
     }
 
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn get<S: Src>(&mut self, s: &mut S, w: &mut Win, mut bits: u32) -> Option<u32> {
         let mut v = 0u32;
         while bits > 0 {
@@ -1785,6 +1842,7 @@ impl FDec {
         Some(v)
     }
 
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn rice<S: Src>(&mut self, s: &mut S, w: &mut Win, k: u32) -> Option<u32> {
         let mut q = 0;
         while q < QMAX && self.get(s, w, 1)? == 1 {
@@ -1797,6 +1855,7 @@ impl FDec {
     }
 
     /// The next row: (t us, raw, us since the previous row).
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn next<S: Src>(&mut self, s: &mut S, w: &mut Win) -> Option<(u64, i32, u32)> {
         if self.left == 0 {
             return None;
@@ -1883,6 +1942,7 @@ impl<R: Raw> FatFile<R> {
     pub fn new(raw: R, g: Geo, start: u32, size: u32) -> Self {
         FatFile { raw, g, start, size, ci: 0, cl: start }
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn next(&mut self, c: u32) -> Option<u32> {
         let mut b = [0u8; 2];
         if c < 2 || c > self.g.clusters + 1 || !self.raw.read_at(self.g.fat + c * 2, &mut b) {
@@ -1894,6 +1954,7 @@ impl<R: Raw> FatFile<R> {
 }
 
 impl<R: Raw> Src for FatFile<R> {
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn read(&mut self, mut off: u32, buf: &mut [u8]) -> bool {
         if off as u64 + buf.len() as u64 > self.size as u64 {
             return false;
@@ -2068,6 +2129,7 @@ pub fn csv_name(n: &[u8; 11]) -> [u8; 11] {
 pub struct FnRaw(pub fn(u32, &mut [u8]) -> bool);
 
 impl Raw for FnRaw {
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn read_at(&mut self, addr: u32, buf: &mut [u8]) -> bool {
         (self.0)(addr, buf)
     }
@@ -2080,6 +2142,7 @@ static mut FLASH: Option<crate::spiflash::SpiFlash> = None;
 
 /// The SPI flash, raw (waits for a running erase / program first).
 #[cfg(target_os = "none")]
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn flash_read(addr: u32, buf: &mut [u8]) -> bool {
     let f = unsafe { &mut *core::ptr::addr_of_mut!(FLASH) };
     f.get_or_insert_with(crate::spiflash::SpiFlash::new).read_at(addr, buf)
@@ -2108,6 +2171,7 @@ impl<K: Copy + PartialEq> Slot<K> {
         self.ok = false;
     }
     /// The generator for `key`, opened with `open` when it is not the cached one.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     pub fn get(&mut self, key: K, open: impl FnOnce() -> Option<DiskGen>) -> Option<&mut DiskGen> {
         if !(self.ok && unsafe { self.key.assume_init() } == key) {
             self.ok = false;

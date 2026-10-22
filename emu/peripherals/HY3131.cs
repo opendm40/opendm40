@@ -132,6 +132,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     v = (byte)(v & ~0x02);
                     Swallowed++;
                 }
+                if(IntfRaceAd1 && IntfRaceWindow > 0 && (v & 0x04) != 0 && now - ad1Last < IntfRaceWindow)
+                {
+                    v = (byte)(v & ~0x04);
+                    SwallowedAd1++;
+                }
                 intf = 0;
                 return v;
             }
@@ -293,6 +298,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public readonly long[] IntfPhase = new long[20];
         /// AD2 flags lost to the race (tests, HY3131.Swallowed).
         public long Swallowed;
+        /// The same race for AD1F (opt-in: HY3131.IntfRaceAd1; the device's
+        /// AD1F is unmeasured, the read clears the whole register alike);
+        /// AD1 flags lost to it.
+        public bool IntfRaceAd1;
+        public long SwallowedAd1;
         private double ad2LastT = double.NegativeInfinity;
         public void ForceIntf(byte bits) { intf |= bits; }
         public int Intf => intf;
@@ -1824,6 +1834,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// AD2 flags lost to the INTF race so far.
         public long Swallowed => Core.Swallowed;
+
+        /// Apply the INTF race window to AD1F too (default off; monitor:
+        /// hy3131 IntfRaceAd1 true), and the AD1 flags lost to it.
+        public bool IntfRaceAd1 { get => Core.IntfRaceAd1; set => Core.IntfRaceAd1 = value; }
+        public long SwallowedAd1 => Core.SwallowedAd1;
 
         /// INTF reads by phase after the last AD2 result (20 bins of 1/20
         /// period), then the swallowed count; cleared by the read.

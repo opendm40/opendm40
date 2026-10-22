@@ -8,7 +8,9 @@ times, virtual time): the sustainable rate into the flash per rung.
 
 Per flash profile (--profiles: typ = tPP 0.4 ms, tSE 45 ms, tBE64 150 ms;
 max = 3 ms, 400 ms, 2 s; datasheet W25Q128JV) and per session (--sessions:
-AD2 rates in AC V, AD1 OSR 0 chop off = 640 S/s in DC V):
+AD2 rates in AC V, AD1 rates in DC V: 640 = OSR 0 chop off, 320 / 160 /
+80 / 40 = OSR 0 / 1 / 2 / 3 chopped; AD1 160 .. 640 S/s run on the stream
+ISR and must lose nothing, with the INTF race applied to AD1F too):
   LOG:DEST DISK, LOG:DURation, LOG:STATe ON; LOG:DISK? polled until the
   session ends; the Prep time (DBG:PING? uptime), LOG:COUNt? (overwritten =
   the ring was full: the disk did not keep up), the file over MMEM:DATA?
@@ -27,6 +29,7 @@ printed (docs/compact-log-format.md "Fast stream: rate limits").
 import argparse
 import os
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -42,6 +45,9 @@ ap.add_argument('--profiles', default='typ,max')
 ap.add_argument('--sessions', default='ad1:640,ad2:4800,ad2:9600,ad2:19200,ad2:38400')
 ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (fw-rs region C audit)')
 ap.add_argument('--no-bt', action='store_true')
+ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
+ap.add_argument('--vol-read', action='store_true', help='after each session read LOGS/FASTnnn.CSV off the USB volume (MSC READ(10), 64 sectors each): == tools/dlog.py of the DLG; the virtual-time rate')
+ap.add_argument('--no-ad1-race', action='store_true', help='AD1F without the INTF read-clears race (model IntfRaceAd1)')
 A = ap.parse_args()
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
 os.environ['USBIP_PORT'] = str(A.port)
@@ -49,6 +55,7 @@ sys.path.insert(0, HERE)
 import usbip_client as uc  # noqa: E402
 
 FAIL = []
+T = []
 
 
 def check(ok, what):
@@ -65,6 +72,9 @@ def run_emu(profile):
         f.write('0 monitor sysbus.spi2.spiflash Erase4kUs %d\n' % p[1])
         f.write('0 monitor sysbus.spi2.spiflash Erase32kUs %d\n' % p[2])
         f.write('0 monitor sysbus.spi2.spiflash Erase64kUs %d\n' % p[3])
+        f.write('0 monitor sysbus.hy3131 ClockPpm %g\n' % A.ppm)
+        if not A.no_ad1_race:
+            f.write('0 monitor sysbus.hy3131 IntfRaceAd1 true\n')
         if A.extra_script:
             f.write(open(A.extra_script).read())
     cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--mips', '200', '--app', A.app,
@@ -104,6 +114,64 @@ def decode(dlg, tag):
 
 
 TABLE = []
+VOL = []
+
+
+def vol_read(q, n, tag):
+    """LOGS/FASTnnn.CSV over the MSC interface (the generated volume,
+    vdisk.rs): read as a host does, 64 sectors per READ(10); compared with
+    tools/dlog.py of the DLG; KB per second of device (virtual) time."""
+    ref = os.path.join(HERE, 'out', 'fastlog-%d-%s.dlg' % (A.port, tag))
+    r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'fw-rs/tools/dlog.py'), ref, '-o', ref + '.csv'], capture_output=True)
+    want = open(ref + '.csv', 'rb').read() if r.returncode == 0 else None
+    m = uc.Msc(T[0].d)
+    name = b'FAST%03d CSV' % n
+    for _ in range(40):  # the volume refresh: 1 s after the disk went quiet
+        time.sleep(1)
+        try:
+            m.cmd(0, bytes(6))  # TEST UNIT READY (a media change: UNIT ATTENTION once)
+            b = m.read(0, 0, 1, 512)
+        except IOError:
+            continue
+        bps, spc, rsvd, nfat, nroot = struct.unpack_from('<HBHBH', b, 11)
+        fatsz = struct.unpack_from('<H', b, 22)[0]
+        root = rsvd + nfat * fatsz
+        data = root + nroot * 32 // 512
+        lba = lambda c: data + (c - 2) * spc
+        def find(secs, nm):
+            for s_ in secs:
+                d = m.read(0, s_, 1, 512)
+                for k in range(16):
+                    e = d[k * 32:k * 32 + 32]
+                    if e[0] == 0:
+                        return None
+                    if e[:11] == nm:
+                        return struct.unpack_from('<H', e, 26)[0], struct.unpack_from('<I', e, 28)[0]
+            return None
+        logs = find(range(root, data), b'LOGS       ')
+        try:
+            f = logs and find(range(lba(logs[0]), lba(logs[0]) + spc), name)
+        except IOError:
+            f = None
+        if f:
+            break
+    else:
+        check(False, 'volume: %s not listed' % name.decode())
+        return
+    start, size = f
+    # The generated files are contiguous (vdisk.rs).
+    t0 = int(q('DBG:PING?').split(',')[0])
+    got = b''
+    w0 = time.time()
+    while len(got) < size:
+        k = min(64, (size - len(got) + 511) // 512)
+        got += m.read(0, lba(start) + len(got) // 512, k, 512, retries=2)
+    t1 = int(q('DBG:PING?').split(',')[0])
+    got = got[:size]
+    kbs = size / 1024 / max((t1 - t0) / 1000, 1e-3)
+    VOL.append((tag, size, (t1 - t0) / 1000, kbs, time.time() - w0))
+    check(want is not None and got == want, 'volume: %s (%d bytes) == dlog.py of the DLG' % (name.decode(), size))
+    print('  volume read %s: %d bytes in %.2f s device time (%.0f KB/s), %.1f s wall' % (name.decode(), size, (t1 - t0) / 1000, kbs, time.time() - w0), flush=True)
 
 
 def session(q, src, rate, profile):
@@ -117,7 +185,9 @@ def session(q, src, rate, profile):
     else:
         q('CONF:VOLT:DC')
         q('LOG:SOURce AD1')
-        q('LOG:OSR 0')
+        # 640: OSR 256 unchopped; 320 / 160 / 80 / 40: OSR 256 << k chopped.
+        osr = {640: 0, 320: 0, 160: 1, 80: 2, 40: 3}[rate]
+        q('LOG:OSR %d' % osr)
         q('LOG:CHOP %s' % ('OFF' if rate == 640 else 'ON'))
     time.sleep(3)
     q('LOG:DEST DISK')
@@ -137,6 +207,10 @@ def session(q, src, rate, profile):
         time.sleep(0.5)
     up1 = int(q('DBG:PING?').split(',')[0])
     cnt = [int(x) for x in q('LOG:COUNt?').split(',')]
+    isr = q('DBG:ISR?').split(',')
+    print('  LOG:COUNt? %s  DBG:ISR? %s' % (','.join(map(str, cnt)), ','.join(isr)), flush=True)
+    if src == 'ad1' and rate >= 160:
+        check(isr[1] == '1' or isr[2] != '0', '%s %d: AD1 on the stream ISR (DBG:ISR? ticks %s)' % (src, rate, isr[2]))
     pre = q('LOG:PREamble?').split(',')
     nominal = int(pre[8]) / 1000 if len(pre) > 8 else rate
     check(st[0] in (5, 6), '%s %d: the session ended (LOG:DISK? %s)' % (src, rate, st))
@@ -149,6 +223,8 @@ def session(q, src, rate, profile):
         if n < 6000:
             break
     rows, lost, ok = decode(dlg, '%s-%s-%d' % (profile, src, rate))
+    if A.vol_read:
+        vol_read(q, st[1], '%s-%s-%d' % (profile, src, rate))
     check(ok and rows == st[4] and len(dlg) == st[3], '%s %d: %s decodes: %d rows, %d bytes' % (src, rate, name, rows, len(dlg)))
     prep_s = ((t_run or up1) - up0) / 1000
     run_s = (up1 - (t_run or up1)) / 1000
@@ -236,6 +312,7 @@ for profile in A.profiles.split(','):
     emu = run_emu(profile)
     try:
         t = connect()
+        T[:] = [t]
 
         def q(line, raw=False, timeout=120):
             t.write(line)
@@ -248,10 +325,13 @@ for profile in A.profiles.split(','):
         for sv in A.sessions.split(','):
             src, rate = sv.split(':')
             lost = session(q, src, int(rate), profile)
-            if src == 'ad1':
+            if src == 'ad1' and int(rate) < 160:
                 # The AD1 main-loop sampler drops a conversion on an
                 # occasional long pass (logger.rs; LOG:GAPs?), disk or not.
                 check(lost <= 3, '%s %s %s: at most an occasional main-loop gap (%d)' % (profile, src, rate, lost))
+            elif src == 'ad1':
+                # 160 .. 640 S/s: the stream ISR (logger.rs `isr`, AD1).
+                check(lost == 0, '%s %s %s: no sample lost (AD1 stream ISR)' % (profile, src, rate))
             elif profile == 'typ' and int(rate) <= 9600:
                 check(lost == 0, '%s %s %s: no sample lost' % (profile, src, rate))
         if not A.no_bt and profile == A.profiles.split(',')[0]:
@@ -262,5 +342,7 @@ for profile in A.profiles.split(','):
 print('\nprofile  src  rate   prep_s   rows   lost  ring_ovw   B/s   pages/s  B/sample')
 for r in TABLE:
     print('%-7s %-4s %6d %7.1f %7d %6d %8d %7.0f %7.0f %8.2f' % r)
+for v in VOL:
+    print('volume %-16s %9d bytes %6.2f s device %7.0f KB/s %6.1f s wall' % v)
 print('FAIL: %d checks' % len(FAIL) if FAIL else 'PASS')
 sys.exit(1 if FAIL else 0)

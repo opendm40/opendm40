@@ -216,7 +216,13 @@ fn mem_read(addr: u32, buf: &mut [u8]) {
 /// between the refresh steps.
 static SPI: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
 
+/// Raw SPI reads by dlog's reader (`vread`: calls, bytes).
+static SPI_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static SPI_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn spi_read(addr: u32, buf: &mut [u8]) -> bool {
+    SPI_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    SPI_BYTES.fetch_add(buf.len() as u64, std::sync::atomic::Ordering::Relaxed);
     let d = SPI.lock().unwrap();
     let o = addr as usize;
     if o + buf.len() > d.len() {
@@ -758,8 +764,115 @@ fn unhex(s: &str) -> Vec<u8> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
 }
 
+/// `main <out> vread <flash> <uid> <otp> <optbytes> <spi.img> <DIR> <NAME.EXT>`:
+/// the USB volume over <spi.img>; file DIR/NAME.EXT read the way a host
+/// does (its clusters in order, sector by sector through read_block) into
+/// <out>, with the raw SPI reads behind it (calls, bytes) and a device
+/// estimate: the W25Q128 at 12.5 MHz (0.64 us per byte, ~6 us per read
+/// for RDSR + command + address + CS), CPU time not included.
+fn vread(a: &[String]) {
+    use msc::BlockDevice;
+    use std::sync::atomic::Ordering::Relaxed;
+    let flash = fs::read(&a[3]).unwrap();
+    let body: &'static [u8] = Vec::leak(flash[0x4000..0x4000 + calbackup::FW_MAX_BODY].to_vec());
+    MEM.set(vec![
+        (0x0800_0000, flash),
+        (0x1FFF_7A10, fs::read(&a[4]).unwrap()),
+        (0x1FFF_7800, fs::read(&a[5]).unwrap()),
+        (0x1FFF_C000, fs::read(&a[6]).unwrap()),
+    ])
+    .unwrap();
+    dlog::set_disk(spi_read);
+    *SPI.lock().unwrap() = fs::read(&a[7]).unwrap();
+    let mut d = vdisk::VDisk;
+    vdisk::init(mem_read, body);
+    let t0 = std::time::Instant::now();
+    vdisk::refresh(None);
+    let t_refresh = t0.elapsed();
+    let (rc, rb) = (SPI_CALLS.swap(0, Relaxed), SPI_BYTES.swap(0, Relaxed));
+    let mut b = vec![0u8; 512];
+    assert!(d.read_block(0, &mut b));
+    let le16 = |b: &[u8], o: usize| u16::from_le_bytes([b[o], b[o + 1]]) as u32;
+    let le32 = |b: &[u8], o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
+    let (bps, spc, rsvd, nfat, nroot, fatsz) = (le16(&b, 11), b[13] as u32, le16(&b, 14), b[16] as u32, le16(&b, 17), le16(&b, 22));
+    assert_eq!(bps, 512);
+    let root = rsvd + nfat * fatsz;
+    let data = root + nroot * 32 / 512;
+    let name = |s: &str| {
+        let (n, e) = s.split_once('.').unwrap_or((s, ""));
+        let mut x = [b' '; 11];
+        x[..n.len()].copy_from_slice(n.as_bytes());
+        x[8..8 + e.len()].copy_from_slice(e.as_bytes());
+        x
+    };
+    let fat = |d: &mut vdisk::VDisk, c: u32| {
+        let mut f = vec![0u8; 512];
+        assert!(d.read_block(rsvd + c * 2 / 512, &mut f));
+        le16(&f, (c * 2 % 512) as usize)
+    };
+    // The entry `n` in the directory at `start` (None: the root).
+    let find = |d: &mut vdisk::VDisk, start: Option<u32>, n: [u8; 11]| -> Option<(u32, u32)> {
+        let secs: Vec<u32> = match start {
+            None => (root..data).collect(),
+            Some(mut c) => {
+                let mut v = vec![];
+                while (2..0xFFF0).contains(&c) {
+                    v.extend((0..spc).map(|k| data + (c - 2) * spc + k));
+                    c = fat(d, c);
+                }
+                v
+            }
+        };
+        let mut e = vec![0u8; 512];
+        for s in secs {
+            assert!(d.read_block(s, &mut e));
+            for k in 0..16 {
+                let x = &e[k * 32..k * 32 + 32];
+                if x[0] == 0 {
+                    return None;
+                }
+                if x[..11] == n {
+                    return Some((le16(x, 26), le32(x, 28)));
+                }
+            }
+        }
+        None
+    };
+    let (dc, _) = find(&mut d, None, name(&a[8])).expect("directory");
+    let (mut c, size) = find(&mut d, Some(dc), name(&a[9])).expect("file");
+    let t1 = std::time::Instant::now();
+    let mut out = Vec::with_capacity(size as usize);
+    let mut sectors = 0u32;
+    while (out.len() as u32) < size && (2..0xFFF0).contains(&c) {
+        for k in 0..spc {
+            if out.len() as u32 >= size {
+                break;
+            }
+            assert!(d.read_block(data + (c - 2) * spc + k, &mut b));
+            sectors += 1;
+            let n = (size as usize - out.len()).min(512);
+            out.extend_from_slice(&b[..n]);
+        }
+        c = fat(&mut d, c);
+    }
+    let t_read = t1.elapsed();
+    assert_eq!(out.len() as u32, size, "the cluster chain ends early");
+    fs::write(&a[1], &out).unwrap();
+    let (c2, b2) = (SPI_CALLS.load(Relaxed), SPI_BYTES.load(Relaxed));
+    let est = |calls: u64, bytes: u64| (calls as f64 * 6.0 + bytes as f64 * 0.64) / 1e6;
+    let spi_s = est(c2, b2);
+    println!(
+        "vread {}/{}: {} bytes, {} sectors; refresh: spi {} reads {} B (~{:.2} s on the device), host {:.3} s; read: spi {} reads {} B ({:.3} B per CSV byte, ~{:.2} s on the device = {:.0} KB/s SPI-bound), host {:.3} s",
+        a[8], a[9], size, sectors, rc, rb, est(rc, rb), t_refresh.as_secs_f64(), c2, b2, b2 as f64 / size.max(1) as f64, spi_s, size as f64 / 1024.0 / spi_s.max(1e-9), t_read.as_secs_f64()
+    );
+}
+
 fn main() {
     let a: Vec<String> = env::args().collect();
+    if a[2] == "vread" {
+        vread(&a);
+        return;
+    }
     if a[2] == "vdisk" {
         vdisk_dump(&a);
         return;
