@@ -590,6 +590,12 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
 
 /// The DMM page in the power meter with `pv` (status, rows, chart, side).
 fn power_page(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: ui::RateChip) -> Reading {
+    power_page_lim(pv, hold, alert, rc, 0)
+}
+
+/// `power_page` with a limit verdict (meter::V_*: the W limits' badge in
+/// the AUTO label's slot).
+fn power_page_lim(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: ui::RateChip, lim: u8) -> Reading {
     let mut r = pw_rd(pv);
     r.alert = alert;
     let mut dv = ui::DmmView::new();
@@ -600,7 +606,7 @@ fn power_page(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: ui::
     dv.draw_static(Button::Power, r.mode, true, false);
     let mut pc = ui::pw::PwCache::new();
     ui::pw::side_clear(&mut pc);
-    dv.reading(&r, hold, 0);
+    dv.reading(&r, hold, lim);
     ui::status_right(&status(0));
     let v = if r.main.ol { 1.0 } else { r.main.v };
     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
@@ -1500,6 +1506,52 @@ fn main() {
                 ck.same_as(&format!("power-update/{na}->{nb}"), &want);
             }
         }
+        // The W limits' badge (OK / HI / LO) in the AUTO label's slot,
+        // in every case and coupling; then every verdict change as an
+        // update (badge <-> AUTO label) equal to its fresh draw.
+        let lims = [meter::V_NONE, meter::V_PASS, meter::V_HI, meter::V_LO];
+        for (name, pv) in &pcs {
+            for coup in [dmm::pw::COUP_AC, dmm::pw::COUP_AUTO] {
+                for lim in &lims[1..] {
+                    host::reset(0);
+                    power_page_lim(dmm::pw::PowerVals { coup, ..*pv }, 0, sentinel::Alert::None, rc, *lim);
+                    ck.check(&format!("power-lim/{name}/c{coup}/v{lim}"), &dmm_page_regions);
+                }
+                for la in lims {
+                    for lb in lims {
+                        let pv = dmm::pw::PowerVals { coup, ..*pv };
+                        let r = pw_rd(pv);
+                        host::reset(0);
+                        let mut dv = ui::DmmView::new();
+                        dv.power = true;
+                        ui::set_power_dc(pv.dc);
+                        dv.draw_static(Button::Power, r.mode, true, false);
+                        dv.reading(&r, 0, la);
+                        dv.reading(&r, 0, lb);
+                        let inc = emu().fb.clone();
+                        host::reset(0);
+                        let mut dv = ui::DmmView::new();
+                        dv.power = true;
+                        ui::set_power_dc(pv.dc);
+                        dv.draw_static(Button::Power, r.mode, true, false);
+                        dv.reading(&r, 0, lb);
+                        let want = emu().fb.clone();
+                        emu().fb.copy_from_slice(&inc);
+                        ck.same_as(&format!("power-lim-update/{name}/c{coup}/{la}->{lb}"), &want);
+                    }
+                }
+            }
+        }
+        host::reset(0);
+        power_page_lim(dmm::pw::PowerVals { coup: dmm::pw::COUP_AUTO, ..pcs[0].1 }, 0, sentinel::Alert::None, rc, meter::V_HI);
+        save(&out, "p17-power-limit-hi");
+        // Hold & Limits of the power meter (the W limits; widest values).
+        for (hi, lo) in [("10600 W", "-10600 W"), ("-9999.99 mW", "-63.650 W")] {
+            host::reset(0);
+            ui::list_page("Hold & Limits: Power", &ui::LIMIT_ROWS, &["ON", "ON", hi, lo, "", "", "", "ON", "Every reading"]);
+            ck.check_opts(&format!("limits-power/{hi}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))], false);
+        }
+        save(&out, "p18-power-limits-page");
         for (ic, tl) in [(5.0f32, 30u16), (10.0, 0), (0.5, 3600)] {
             host::reset(0);
             ui::pw::entry_dialog(ic, tl);

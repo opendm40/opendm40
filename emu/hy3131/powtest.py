@@ -189,10 +189,67 @@ SC['scpi'] = (['MEAS:POW?', 'POW:LIM 2.5,12', 'POW:BURD:STAT OFF'], 24, [
      and d['X']['CONF?'] == '"POW AUTO,AUTO"' and d['X']['POW:LIM?'] == '+2.500000E+00,12' and d['X']['POW:CYC?'] == '2,642,1284'
      and d['X']['FUNC?'] == '"POW"', 'MEAS:POW:PFAC?, READ?, CONF?, POW:LIM?, POW:CYC?, FUNC?'),
 ])
+# W limits (CALC:LIM in the power meter, the slot of its own; the fail
+# beep / badge as the other functions), the phase cal's refusals.
+SC['limits'] = (['CONF:POW', 'POW:BURD:STAT OFF', 'CALC:LIM:UPP 100', 'CALC:LIM:LOW 10'], 34, [
+    (0, 'open;pow:230@50,i=1,pf=1', lambda d: d['X']['CALC:LIM:FAIL?'] == '1' and d['X']['CALC:LIM:STAT?'] == '1' and near(num(d['X']['CALC:LIM:UPP?']), 100, 1e-6), 'P 230 W > 100 W: FAIL 1'),
+    (16, 'open;pow:50@50,i=1,pf=1', lambda d: d['X']['CALC:LIM:FAIL?'] == '0' and near(d['P'], 50, 0.01), 'P 50 W in 10..100 W: FAIL 0'),
+])
+SC['phasecal-ref'] = (['CONF:POW', 'POW:BURD:STAT OFF'], 50, [
+    # RESistive: refused with the reason whatever the load; REACtive on a
+    # resistive load: NOTREACTIVE, SPHACAL kept.
+    (0, 'open;pow:230@50,i=1,pf=1', lambda d: 'flat' in d['X']['POW:PHAS:CAL RES|SYST:ERR?'] and d['X']['POW:PHAS:CAL?'] in ('NONE,0', 'RUN,0'), 'RES refused with the reason'),
+    (12, None, lambda d: d['X']['POW:PHAS:CAL?'] == 'NOTREACTIVE,0' and d['PH'] == 0, 'REAC on a resistive load: NOTREACTIVE, SPHACAL 0'),
+    (26, 'open;pow:10@1000,i=0.1,ph=90', lambda d: d['X']['POW:PHAS:CAL?'].startswith('OK,') and abs(d['PF']) < 0.02, 'REAC on a reactive load: OK'),
+])
+# Bluetooth (run.py --bt-port): the stock phone protocol (cmd 09 = the DC V
+# byte with P as a V-group value, cmd 06 echoing it keeps the power meter)
+# and BT SCPI (FETC:POW:ALL?, POW:VOLT:RANG?) next to USBTMC.
+SC['bt'] = (['CONF:POW', 'POW:BURD:STAT OFF'], 40, [
+    (0, 'open;pow:230@50,i=1,pf=0.5', lambda d: bt_ok(d, 115, 0x28) and d['X']['FUNC?'] == '"POW"', 'BT cmd 09: DC V byte 0x28, P 115 (as V); BT SCPI'),
+    (18, 'open;vsrc:12;isrc:-2', lambda d: bt_ok(d, -24, 0x28) and d['X']['FUNC?'] == '"POW"', 'after cmd 06 0x28 (echo): still POW, P -24'),
+])
 EXTRA = {'t1-yy': ['DBG:POW:RAW?', 'DBG:POW:ROW?'], 't3-cycle': ['DBG:POW:RAW?'],
          'zero': ['POW:ZERO?'], 'vcal': ['POW:VOLT:CAL?'], 'dcad1': ['POW:COUP?'], 'auto': ['POW:COUP?'],
-         'scpi': ['MEAS:POW:PFAC?', 'READ?', 'CONF?', 'POW:LIM?', 'POW:CYC?', 'FUNC?']}
-ACTIONS = {'ereset': {8: 'DBG:DRAG 58,160,58,160,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'}}
+         'scpi': ['MEAS:POW:PFAC?', 'READ?', 'CONF?', 'POW:LIM?', 'POW:CYC?', 'FUNC?'],
+         'limits': ['CALC:LIM:FAIL?', 'CALC:LIM:STAT?', 'CALC:LIM:UPP?'],
+         'phasecal-ref': ['POW:PHAS:CAL RES|SYST:ERR?', 'POW:PHAS:CAL?'], 'bt': ['FUNC?']}
+ACTIONS = {'ereset': {8: 'DBG:DRAG 58,160,58,160,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'}}
+
+
+def bt_frame(cmd, data=b''):
+    d = bytes([0xAF, 0x05, 0x03, cmd, len(data)]) + bytes(data)
+    return d + bytes([(0x100 - sum(d)) & 0xFF])
+
+
+def bt_meas(buf):
+    """The last cmd 09 reply in buf: (mode byte, main value in the V group's
+    base units scaled to V, raw fmt) or None."""
+    out = None
+    i = 0
+    while i + 17 <= len(buf):
+        if buf[i:i + 5] == b'\xdf\x05\x03\x09\x0b' and sum(buf[i:i + 17]) & 0xFF == 0:
+            d = buf[i + 5:i + 16]
+            raw = d[9] | d[10] << 8
+            fmt = d[4]
+            v = None if raw == 0xFFFF else raw * 10.0 ** (3 * ((fmt >> 4) & 3) - ((fmt >> 1) & 7)) * 1e-3
+            out = [d[0], None if v is None else (-v if fmt & 1 else v), fmt, bytes(d[5:9]).hex()]
+            i += 17
+            continue
+        i += 1
+    return out
+
+
+def bt_ok(d, p, mode):
+    m = d.get('BT09')
+    f = d['X'].get('BT FETC:POW:ALL?', '').split(',')
+    try:
+        bp = num(f[0])
+    except (ValueError, IndexError):
+        return False
+    # value 2 / 3 "no value" as in a stock DC V frame.
+    return m is not None and m[0] == mode and m[1] is not None and near(m[1], p, 0.01, 0.05) and m[3] == 'ffffffff' and near(bp, p, 0.01, 0.05) \
+        and d['X'].get('BT POW:VOLT:RANG?', '').startswith('AUTO')
 
 
 def num(s):
@@ -209,9 +266,11 @@ def run(name):
     with open(sp, 'w') as f:
         for t, spec in script:
             f.write('%g dmm %s\n' % (t, spec))
+    bt_port = A.port + 1000 if name == 'bt' else 0
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', tag,
-           '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else [])
+           '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else []) \
+        + (['--bt-port', str(bt_port)] if bt_port else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     rows = []
     t_wall = time.time()
@@ -223,6 +282,32 @@ def run(name):
             print('attach:', type(e).__name__, e, flush=True)
             time.sleep(1)
     acts = dict(ACTIONS.get(name, {}))
+    bt = None
+    if bt_port:
+        import socket
+        for _ in range(300):
+            try:
+                bt = socket.create_connection(('127.0.0.1', bt_port), timeout=1)
+                break
+            except OSError:
+                time.sleep(0.2)
+
+    def bt_xfer(msg, want, timeout=8.0):
+        """Send msg on the BT link, collect until want(buf) or the timeout."""
+        bt.sendall(msg)
+        buf = b''
+        t_end = time.time() + timeout
+        bt.settimeout(0.2)
+        while time.time() < t_end and not want(buf):
+            try:
+                c = bt.recv(4096)
+                if not c:
+                    break
+                buf += c
+            except OSError:
+                pass
+        return buf
+    bt_acts = {14: bt_frame(0x06, b'\x28')} if bt else {}
     if tm is not None:
         try:
             for c in setup:
@@ -232,10 +317,21 @@ def run(name):
             while p.poll() is None:
                 row = {}
                 for q in ['DBG:PING?', 'FETC:POW:ALL?', 'POW:VOLT:RANG?', 'POW:CURR:RANG?', 'POW:PHAS?'] + EXTRA.get(name, []):
-                    tm.write(q)
+                    # 'command|query': the command written first (no reply).
+                    for c in q.split('|')[:-1]:
+                        tm.write(c)
+                    tm.write(q.split('|')[-1])
                     row[q] = tm.read(timeout=60).decode(errors='replace').strip()
                 t = int(row['DBG:PING?'].split(',')[0]) / 1000.0
-                d = {'t': t, 'VR': row['POW:VOLT:RANG?'], 'IR': row['POW:CURR:RANG?'], 'PH': int(row['POW:PHAS?'] or 0),
+                bt09 = None
+                if bt is not None:
+                    bt09 = bt_meas(bt_xfer(bt_frame(0x09), lambda b: bt_meas(b) is not None))
+                    for q in ['FETC:POW:ALL?', 'POW:VOLT:RANG?']:
+                        row['BT ' + q] = bt_xfer((q + '\n').encode(), lambda b: b.endswith(b'\n')).decode(errors='replace').strip()
+                    for ta in sorted(bt_acts):
+                        if t >= ta:
+                            bt_xfer(bt_acts.pop(ta), lambda b: len(b) >= 7, 2.0)
+                d = {'t': t, 'BT09': bt09, 'VR': row['POW:VOLT:RANG?'], 'IR': row['POW:CURR:RANG?'], 'PH': int(row['POW:PHAS?'] or 0),
                      'RAW': row.get('DBG:POW:RAW?', ''), 'ROW': row.get('DBG:POW:ROW?', ''), 'X': row}
                 try:
                     d.update(zip(F, [num(x) for x in row['FETC:POW:ALL?'].split(',')]))

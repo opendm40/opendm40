@@ -99,6 +99,15 @@ Bits 6-7   Sub-mode (e.g. DC / AC / AC+DC)
 The exact meaning of groups 3-5 (continuity, diode, capacitance, frequency)
 and of the range values was not verified on a device.
 
+The protocol has no unit field (the unit follows from the group and the
+format byte's prefix) and no group for a power function. fw-rs's power meter
+therefore reports the DC V byte (`0x28` auto, range field = the V channel's
+range) with P (W) as the main value in the V group's units: the app shows
+"230.02 V" for 230.02 W, mW as mV, a source negative; value 2 / 3 are
+`FF FF`. Command 06 with that byte keeps the power meter, any other byte
+leaves it. The full power readings are on BT SCPI (`FETC:POW:ALL?`); see
+fw-rs/docs/power-meter-and-misconnect.md 3.13.
+
 ### Measurement Response (17 bytes)
 ```
 Byte    Description

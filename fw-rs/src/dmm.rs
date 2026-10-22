@@ -1791,6 +1791,9 @@ impl Dmm {
     /// BT mode byte (bt_meas_v2_6.h section 2, forward FUN_0803c842):
     /// bits 0-2 group, 3-5 range field, 6-7 sub-mode.
     pub fn mode_byte(&self) -> u8 {
+        if self.pw.on {
+            return pw::bt_mode_byte(self.pw.v_auto, self.pw.vr);
+        }
         let m = self.mode;
         match m {
             0..=3 => {
@@ -1832,6 +1835,11 @@ impl Dmm {
     /// BT command 06 (reverse, FUN_0803c6a8 + FUN_0803c3b4). Returns true if
     /// the function or sub-mode changed (the caller then clears HOLD/REL).
     pub fn apply_mode_byte(&mut self, clk: &mut Clock, b: u8) -> bool {
+        // The power meter's own byte (the phone echoing what cmd 09
+        // reported) keeps it; any other byte leaves it (`select`).
+        if self.pw.on && b == self.mode_byte() {
+            return false;
+        }
         self.ovl_clear(clk.now_ms());
         let (g, r, s) = (b & 7, (b >> 3) & 7, b >> 6);
         let before = (self.button(), self.mode_byte() & 0xC0);

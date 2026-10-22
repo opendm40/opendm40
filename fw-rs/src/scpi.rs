@@ -523,7 +523,8 @@ pub enum Pow {
     Burden(Option<f32>),
     BurdenState(Option<bool>),
     Phase(Option<i8>),
-    PhaseCal(bool),
+    /// Some(true) REACtive, Some(false) RESistive (refused), None = the query.
+    PhaseCal(Option<bool>),
     Cycle,
     Method(Option<bool>),
     /// :LIMit <A>,<s> / ? (continuous current, countdown; s 0 = none).
@@ -709,11 +710,12 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
     }
     if kw(l0, "PHASe") {
         return match l1 {
-            Some(p) if kw(p, "CALibrate") && !query => {
+            Some(p) if kw(p, "CALibrate") && query => Ok(Pow::PhaseCal(None)),
+            Some(p) if kw(p, "CALibrate") => {
                 if a.is_empty() || kw(a, "REACtive") {
-                    Ok(Pow::PhaseCal(true))
+                    Ok(Pow::PhaseCal(Some(true)))
                 } else if kw(a, "RESistive") {
-                    Ok(Pow::PhaseCal(false))
+                    Ok(Pow::PhaseCal(Some(false)))
                 } else {
                     Err(BAD)
                 }

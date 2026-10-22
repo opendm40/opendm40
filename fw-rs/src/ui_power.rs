@@ -47,18 +47,24 @@ impl PwCache {
 
 /// The coupling on the page: the stock mode glyph above the unit (DC /
 /// AC+DC = the method in use, ui.rs `reading`) and, with AUTO, "AUTO" in
-/// the limit-badge slot left of it (the power meter has no limit slot).
-/// The coupling itself is switched by the active W button (DC -> AC+DC ->
-/// AUTO, as V / A) or the Power Settings row.
+/// the limit-badge slot left of it. A limit verdict (the W limits,
+/// meter::V_*) takes the slot instead: OK / HI / LO matter more than the
+/// coupling setting, whose method glyph stays above the unit. The coupling
+/// itself is switched by the active W button (DC -> AC+DC -> AUTO, as V /
+/// A) or the Power Settings row.
 const AUTO_LBL: sf::Rect = rect(403, 72, 31, 17);
 
-fn coupling(c: &mut PwCache, pv: &PowerVals) {
-    let k = 1 + (pv.coup == pw::COUP_AUTO) as u32;
+fn coupling(c: &mut PwCache, pv: &PowerVals, lim: u8) {
+    let k = 1 + (pv.coup == pw::COUP_AUTO) as u32 + ((lim as u32) << 2);
     if c.coup == k {
         return;
     }
     c.coup = k;
-    sf::label(sf::F14, AUTO_LBL, if pv.coup == pw::COUP_AUTO { "AUTO" } else { "" }, VALUE, BG, 8, 1);
+    if lim != crate::meter::V_NONE {
+        crate::ui::lim_badge(lim);
+    } else {
+        sf::label(sf::F14, AUTO_LBL, if pv.coup == pw::COUP_AUTO { "AUTO" } else { "" }, VALUE, BG, 8, 1);
+    }
 }
 
 /// Small text buffer.
@@ -152,8 +158,8 @@ fn power_box(i: usize, tag: &str, val: &str, unit: &str, warn: bool) {
 impl DmmView {
     /// The power boxes in the history row's place (redrawn per box when its
     /// text changed). PF, Q are "--" in the fallback (no phase relation).
-    pub fn power_row(&mut self, pv: &PowerVals) {
-        coupling(&mut self.pwc, pv);
+    pub fn power_row(&mut self, pv: &PowerVals, lim: u8) {
+        coupling(&mut self.pwc, pv, lim);
         let mut b = [0u8; 16];
         // DC method: no phase relation, no AC: PF / S / Q / f blank ("--").
         let pf = if pv.pf.is_finite() && !pv.dc { crate::dmm::format(&mut b, pw::no_neg_zero(pv.pf, 3), 3) } else { "--" };
@@ -396,6 +402,16 @@ pub const PS_COUP: u8 = 28;
 /// AUTO (B until DC-like, then the AD1 method).
 pub const PS_COUPS: [(u8, &str); 3] = [(pw::COUP_DC, "DC"), (pw::COUP_AC, "AC+DC"), (pw::COUP_AUTO, "AUTO")];
 pub const PS_VCAL: u8 = 27;
+/// Hold & Limits (View::Limits: the W limits), as the other settings pages'
+/// "Hold/Limits".
+pub const PS_LIMITS: u8 = 31;
+/// The bottom row, left to right: Reset Wh, Wiring, Limits, OK (110 px
+/// buttons at 118 px pitch, 8..472).
+const PS_ROW5: [(u8, &str); 4] = [(PS_RESET, "Reset Wh"), (PS_WIRING, "Wiring"), (PS_LIMITS, "Limits"), (PS_OK, "OK")];
+
+fn ps_row5(i: usize) -> sf::Rect {
+    rect(8 + 118 * i as i16, 240, 110, 38)
+}
 
 /// Grid: label column 8..40, five 83 px columns from 44 (87 px pitch).
 fn ps_cell(row: i16, col: i16) -> sf::Rect {
@@ -413,7 +429,7 @@ fn ps_button(r: sf::Rect, t: &str, sel: bool) {
 /// The page: V ranges + AUTO, I ranges + AUTO (two rows), burden
 /// compensation, Zero, V cal; the coupling row (DC / AC+DC / AUTO, the
 /// Current Settings page's DC / AC / AC+DC style); Reset energy / Wiring /
-/// OK. The VA-only fallback (POW:METH ALT) is SCPI only (status line).
+/// Limits / OK. The VA-only fallback (POW:METH ALT) is SCPI only (status line).
 pub fn settings_page(pv: &PowerVals) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
@@ -437,8 +453,8 @@ pub fn settings_page(pv: &PowerVals) {
     for (i, (c, t)) in PS_COUPS.iter().enumerate() {
         ps_button(rect(PS_ROW4[i], 182, 150, 38), t, pv.coup == *c);
     }
-    for (i, t) in ["Reset Wh", "Wiring", "OK"].iter().enumerate() {
-        ps_button(rect(PS_ROW4[i], 240, 150, 38), t, false);
+    for (i, (_, t)) in PS_ROW5.iter().enumerate() {
+        ps_button(ps_row5(i), t, false);
     }
 }
 
@@ -465,8 +481,12 @@ pub fn settings_hit(x: u16, y: u16) -> Option<u8> {
         if hit(rect(bx, 182, 150, 38), x, y) {
             return Some(PS_COUP + i as u8);
         }
-        if hit(rect(bx, 240, 150, 38), x, y) {
-            return Some(PS_RESET + i as u8);
+    }
+    for (i, (c, _)) in PS_ROW5.iter().enumerate() {
+        let r = ps_row5(i);
+        // Touch boxes up to the 8 px gaps' middle.
+        if hit(rect(r.x - 4, r.y, r.w + 8, r.h), x, y) {
+            return Some(*c);
         }
     }
     None

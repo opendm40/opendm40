@@ -103,6 +103,10 @@ impl App {
                         self.pw_open_entry(now);
                         return true;
                     }
+                    Some(ui::pw::PS_LIMITS) => {
+                        self.show(View::Limits, clk);
+                        return true;
+                    }
                     Some(ui::pw::PS_OK) => {
                         let v = self.back_view;
                         self.show(v, clk);
@@ -325,13 +329,25 @@ impl App {
                 put_i(out, &mut t, self.dmm.pw.sph as i64);
                 true
             }
-            Pow::PhaseCal(reactive) => {
-                // The resistive optimum is flat (cos): at 50 Hz one SPHACAL
-                // step moves PF 1 by 1e-8; only the reactive null works.
-                if !reactive || !self.dmm.pw_cal_start() {
-                    out.set_err("Settings conflict");
+            // RESistive is refused with the reason (pw::CAL_RES_REFUSAL,
+            // doc 3.13); REACtive needs the power meter in method B.
+            Pow::PhaseCal(Some(false)) => {
+                out.set_err(pw::CAL_RES_REFUSAL);
+                false
+            }
+            Pow::PhaseCal(Some(true)) => {
+                if !self.dmm.pw_cal_start() {
+                    out.set_err("Settings conflict; phase cal needs CONF:POW with AC+DC coupling (P + PF method)");
                 }
                 false
+            }
+            // POW:PHAS:CAL?: the last outcome and SPHACAL ("OK,-3", "RUN,0",
+            // "NOTREACTIVE,0").
+            Pow::PhaseCal(None) => {
+                out.put_bytes(pw::CAL_NAMES[self.dmm.pw.cal_res.min(5) as usize].as_bytes());
+                out.put_bytes(b",");
+                put_i(out, &mut t, self.dmm.pw.sph as i64);
+                true
             }
             Pow::Cycle => {
                 let (d, p, f) = self.dmm.pw_cycle();
