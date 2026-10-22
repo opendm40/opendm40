@@ -558,7 +558,9 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
     scope_ui::meter_strip(&d);
     if band {
         // Ohm cases with the "ON" variant tag (worst case for the button).
+        ui::set_cpl_auto(r.cpl_auto);
         ui::func_band(r_button(r), r.mode, r.acdc, r.mode == 10);
+        ui::set_cpl_auto(false);
     }
 }
 
@@ -1074,7 +1076,9 @@ fn main() {
         combined(r, *label, 0, 0, false, false, false, "");
         let before = owner_counts();
         let boxes: std::collections::HashMap<u32, Bx> = items().into_iter().map(|i| (i.id, i.b)).collect();
+        ui::set_cpl_auto(r.cpl_auto);
         ui::func_band(r_button(r), r.mode, r.acdc, r.mode == 10);
+        ui::set_cpl_auto(false);
         let after = owner_counts();
         ck.cases += 1;
         for (id, n) in &before {
@@ -1216,7 +1220,9 @@ fn main() {
                     // instead of the history row.
                     dv.bar_on = k % 2 == 0;
                     dv.hv_red = hv_of(&r) >= 1;
+                    ui::set_cpl_auto(r.cpl_auto);
                     dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, r.mode == 10);
+                    ui::set_cpl_auto(false);
                     // History / chart / statistics: the case's own value (an
                     // OL case: 1.0 in its unit and resolution).
                     let v = if r.main.ol { 1.0 } else { r.main.v };
@@ -1961,7 +1967,7 @@ fn main() {
     g.freq_hz = 1000;
     w.gen.apply(g);
     let find = |n: &str| cases.iter().find(|c| c.0 == n).map(|c| (c.1, c.2)).unwrap();
-    let scenes: [(&str, &str, u8, u8, bool, bool); 15] = [
+    let scenes: [(&str, &str, u8, u8, bool, bool); 16] = [
         ("c01-dcv", "dcv", 0, 0, false, false),
         ("c02-acdc-hold-rel", "acdc_600mv", 1, 0, true, false),
         ("c03-acdc-worst", "acdc_mv", 3, meter::V_HI, true, true),
@@ -1977,6 +1983,7 @@ fn main() {
         ("c18-strip-burden-ac", "aca_bd", 0, 0, false, false),
         ("c19-auto-dcv", "auto_dcv", 0, 0, false, false),
         ("c20-auto-aca", "auto_aca", 0, meter::V_HI, false, false),
+        ("c21-auto-band", "auto_acv", 0, 0, false, false),
     ];
     for (file, case, hold, lim, rel, alt) in scenes {
         let (r, l) = find(case);
@@ -1984,7 +1991,7 @@ fn main() {
         if case == "hz_mhz" {
             r.auto_plus = true;
         }
-        combined(&r, l, hold, lim, rel, alt, file == "c10-band", if file == "c01-dcv" { "1.00kHz" } else { "" });
+        combined(&r, l, hold, lim, rel, alt, matches!(file, "c10-band" | "c21-auto-band"), if file == "c01-dcv" { "1.00kHz" } else { "" });
         save(&out, file);
     }
     {
@@ -2017,7 +2024,9 @@ fn main() {
             host::reset(0);
             let (r, _) = find(case);
             dv.label = None;
+            ui::set_cpl_auto(true);
             dv.draw_static(dmm::button_of(r.mode), r.mode, false, false);
+            ui::set_cpl_auto(false);
             ui::history(&[(r.main.v, r.main.dec, r.main.unit); 5], 5, 4);
             dv.reading(&r, 0, lim);
             ui::status_right(&status(0));
