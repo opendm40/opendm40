@@ -229,6 +229,26 @@ try:
     q('TIM:SCAL 5')
     wait_ms(4000)
     shot('w06-roll-5s')
+    # Roll speed (WAV:DATA? keeps the last triggered frame in roll: read
+    # the screen). 5 s/div = 8 px/s; before the fix the roll took `screen`
+    # (clamped to the record) and moved as at 2 s/div (20 px/s).
+    def roll_left():
+        b = q('DBG:LCD? 0,160,480,1,721', raw=True)
+        nd = int(b[1:2])
+        d = b[2 + nd:2 + nd + int(b[2:2 + nd])]
+        w = [d[i] | d[i + 1] << 8 for i in range(2, len(d), 2)]
+        bs = bytearray()
+        for v in w:
+            bs += bytes([v >> 8, v & 0xFF])
+        xs = [x for x in range(14, 412) if bs[3 * x] > 200 and bs[3 * x + 1] > 200 and bs[3 * x + 2] < 100]
+        return min(xs) if xs else 412
+    x1 = roll_left()
+    t1 = up()
+    wait_ms(4000)
+    x2 = roll_left()
+    v = (x1 - x2) * 1000.0 / (up() - t1)
+    print('  roll 5 s/div: left edge %d -> %d, %.1f px/s' % (x1, x2, v))
+    check(5 <= v <= 12, 'roll 5 s/div moves ~8 px/s (got %.1f)' % v)
     q('TIM:SCAL 0.01')
     wait_ms(1500)
 

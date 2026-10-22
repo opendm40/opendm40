@@ -909,7 +909,7 @@ Everything below is emulator evidence; the device plan is 10.6.
 
 | piece | where | what |
 |---|---|---|
-| entry | `ui::wave_button` (MF range page, V / A: "Wave" between Hold/Limits and OK, the AC button's column), the scope page's source badge "MCX \| DMM" (`scope_ui::src_badge`, left of the record bar, which is 70 px instead of 137 then) | from DC V / DC A the AC row is selected first (toast "DC V: no DC row on AD2, AC-coupled"); refused (toast) in AC+DC, the power meter, ohm / cap / ..., during a CSV recording; a host LOG session closes it ("Data logger running") |
+| entry | `ui::wave_button` (MF range page, V / A: "Wave" between Hold/Limits and OK, the AC button's column), the scope page's source badge "MCX \| DMM" (`scope_ui::src_badge`, left of the record bar, which is 70 px instead of 137 then) | from DC V / DC A the AC row is selected first (toast "DC V: wave is AC-coupled"); refused (toast) in AC+DC, the power meter, ohm / cap / ..., during a CSV recording; a host LOG session closes it ("Data logger running") |
 | exit | the badge, MENU, any view change (`App::show`), a host scope setting that is MCX-only (`CHAN1:SCAL`, `CHAN1:COUP`, `DBG:HWTRIG`) | MCX settings restored (`Scope::mcx_settings` is what is persisted), the DMM autorange restored (AUTO / AUTO+), the DMM row rewritten by main.rs (the logger's ON -> OFF edge: `dmm.start`) |
 | ownership | `app_wave.rs` `WaveReq` -> main.rs, `Logger::start_wave` | the stream is a logger session flagged `wave` (the host's LOG:SOURce / SRATe kept; LOG:STATe ON refused "Settings conflict", LOG:STATe? 0, LOG:DATA? an empty block). main.rs `busy` (logger active: no DMM poll, no BT serve / AT init) vs `logging` (a host session: GUI frozen, no touch, no scope poll). A range step is stop -> `dmm.set_range` -> start in one pass, so the bus guard never fires for it; anything else that touches the bus (a host CONF, the locked power key's sub-mode cycle) stops the stream (forced) and the view closes ("Wave stopped: DMM changed") |
 | record | `scope.rs` "source DMM (wave)" | every poll drains the ring (`logger::wave::drain`) into BUF as a continuous circular record of 10-bit codes (`trigsoft::ad2_code10`: the full AD2 window +-1.25 V / IG over 0..1023); frames are linear windows (BUF rotated so the oldest sample is at 0), so the renderer, measurements, cursors, STOP / zoom / pan, Save CSV and FFT work unchanged: the MCX record buffer and roll columns are reused (the MCX acquisition is idle). The wave state (`Wave`, ~300 B incl. the saved MCX / wave settings) is a TCM static |
@@ -1027,7 +1027,7 @@ the meter on USB (`tools/dm40scpi.py`). Record each result here.
 
 | min | step | how | pass |
 |---|---|---|---|
-| 0-2 | entry | DMM DC V, 1 V rms 50 Hz on V/COM: MF -> Wave | toast "DC V: no DC row on AD2, AC-coupled"; AC V row; T'D; 2 V/div; cells Freq 50.0 Hz, Vrms within 1 % of the DMM's AC V reading taken before; `scpi "DBG:ISR?"` active 1 |
+| 0-2 | entry | DMM DC V, 1 V rms 50 Hz on V/COM: MF -> Wave | toast "DC V: wave is AC-coupled"; AC V row; T'D; 2 V/div; cells Freq 50.0 Hz, Vrms within 1 % of the DMM's AC V reading taken before; `scpi "DBG:ISR?"` active 1 |
 | 2-4 | timebases | tap the corner tabs 5 ms .. 50 s/div | a trace at every step, Freq 50 Hz up to 100 ms/div, roll from 200 ms/div; no stuck frame at a band change (5 -> 10, 20 -> 50, 100 -> 200 ms) |
 | 4-6 | trigger | Normal, level drag to +1 V / -1 V, rising / falling; Single | the crossing at the T marker on every frame (+-1 sample); Single: one frame, STOP |
 | 6-7 | glitch | generator: 50 Hz with a single 2 ms pulse burst (or a manual 5 V step on a 1 V sine), Normal, level above the sine | each event shown (no dead time); `scpi "LOG:COUNt?"` irrelevant here |
@@ -1039,6 +1039,15 @@ the meter on USB (`tools/dm40scpi.py`). Record each result here.
 
 Also note `DBG:PROF?` loop max while the view runs at 5 ms/div (9600 S/s,
 22 % CPU in the ISR) and any visible hole (10.4) per minute.
+
+**Device f3aea2f** (device-check-2026-10-21.md "f3aea2f" 8; the calibrator's
+40 Hz 0..9.6 V square instead of a sine, no A jack): entry, trigger, range,
+STOP / Save CSV, exit and conflicts as the table says. Found: roll from
+5 s/div moved at the 2 s/div speed (fixed: samples per column from the
+timebase), the DC V entry toast was clipped (fixed: "DC V: wave is
+AC-coupled"), 5 ms/div shows no Freq with two periods on screen, a Save CSV
+refreshes the volume in region C under the stream (max_lat 21.7 us, 15
+overruns). The current step (9-11 min) was not run.
 
 ## 11. The stream ISR phase-locked to the chip; slow flash; SPI2 writes; DMA frames (2026-10-22)
 
