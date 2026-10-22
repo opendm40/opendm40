@@ -311,6 +311,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// AD1 flags lost to it.
         public bool IntfRaceAd1;
         public long SwallowedAd1;
+        /// AD2 start-up (opt-in, codes; 0 = none): the first Ad2StartResults
+        /// results after an AD2 (re)start read this much off, as a decimation
+        /// filter that does not start from the input (device f3aea2f: the
+        /// A-jack probe's first peak-hold window tripped A-PROT with the A
+        /// jack open). Monitor: hy3131 Ad2StartGlitch 3000.
+        public int Ad2StartGlitch;
+        public const int Ad2StartResults = 4;
         private double ad2LastT = double.NegativeInfinity;
         public void ForceIntf(byte bits) { intf |= bits; }
         public int Intf => intf;
@@ -580,14 +587,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 // the peak hold sees every AD2 result, also those between two bus accesses
                 // (the last 256 of them)
+                // (the start-up results, Ad2StartGlitch, also when they are older than that)
+                for(var k = ad2Done + 1; Ad2StartGlitch != 0 && k <= Ad2StartResults && k < n - 255; k++)
+                    PeakHold(Clamp19(Ad2Sample(ad2Start + k * p) + Ad2StartGlitch));
                 for(var k = Math.Max(ad2Done + 1, n - 255); k < n; k++)
-                    PeakHold(Clamp19(Ad2Sample(ad2Start + k * p) + (int)Math.Round(Gauss() * Ad2NoiseCodes)));
+                    PeakHold(Clamp19(Ad2Sample(ad2Start + k * p) + (int)Math.Round(Gauss() * Ad2NoiseCodes) + (k <= Ad2StartResults ? Ad2StartGlitch : 0)));
             }
             ad2Done = n;
             var t = ad2Start + n * p;
             ad2LastT = t;
             intf |= 0x02;
-            var x = ForcedAd2 != int.MinValue ? ForcedAd2 : Ad2Sample(t) + (int)Math.Round(Gauss() * Ad2NoiseCodes);
+            var x = ForcedAd2 != int.MinValue ? ForcedAd2 : Ad2Sample(t) + (int)Math.Round(Gauss() * Ad2NoiseCodes) + (n <= Ad2StartResults ? Ad2StartGlitch : 0);
             ad2Code = Clamp19(x);
             if(EnPkh && (regs[0x29] & 3) == 0) PeakHold(ad2Code);
         }
@@ -1864,6 +1874,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// hy3131 IntfRaceAd1 true), and the AD1 flags lost to it.
         public bool IntfRaceAd1 { get => Core.IntfRaceAd1; set => Core.IntfRaceAd1 = value; }
         public long SwallowedAd1 => Core.SwallowedAd1;
+
+        /// AD2 start-up error, codes on the first results after a (re)start
+        /// (Hy3131Core.Ad2StartGlitch; default 0; monitor: hy3131 Ad2StartGlitch 3000).
+        public int Ad2StartGlitch { get => Core.Ad2StartGlitch; set => Core.Ad2StartGlitch = value; }
 
         /// INTF reads by phase after the last AD2 result (20 bins of 1/20
         /// period), then the swallowed count; cleared by the read.

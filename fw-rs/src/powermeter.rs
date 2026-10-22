@@ -219,6 +219,12 @@ const ZERO_MAX_LPF: i32 = 4000;
 const VCAL_MIN: f32 = 0.1;
 const VCAL_MAX_AC: f32 = 0.7;
 const VCAL_MAX_DC: f32 = 1.0;
+/// POW:VOLT:CAL peak guard (fraction of the V range), whatever the kind:
+/// |DC| + sqrt(2) x the AC RMS (>= the peak of a sine or a square) must not
+/// pass it, or the V channel clipped and the ratio is wrong (device
+/// f3aea2f: a 0..9.6 V square on 6 V, DC kind by its 4.8 V DC part, was
+/// accepted, gain 1.021410).
+const VCAL_PEAK_MAX: f32 = 1.0;
 /// V cal, AC reference: the stock AC V node is AC-coupled (tau ~0.3 s) and
 /// starts from the power row's OP1O level: 2 s (> 6 tau) before its results
 /// (the emulator: +0.46 % with the fallback's 0.6 s).
@@ -1800,9 +1806,10 @@ impl Dmm {
                 let lim = V_LIM[r];
                 let max = if pw.job_dc { VCAL_MAX_DC } else { VCAL_MAX_AC };
                 pw.job_raw[(step / 2) as usize] = m;
+                let peak = b.abs() + core::f32::consts::SQRT_2 * a.abs();
                 if m.abs() < VCAL_MIN * lim {
                     Some(JR_SMALL)
-                } else if m.abs() > max * lim {
+                } else if m.abs() > max * lim || peak > VCAL_PEAK_MAX * lim {
                     Some(JR_BIG)
                 } else {
                     None

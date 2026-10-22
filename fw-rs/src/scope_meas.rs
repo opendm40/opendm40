@@ -146,6 +146,12 @@ pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
         let mut state: Option<bool> = None;
         let mut rises = [0usize; 2]; // first, last rising 50 % crossing
         let mut nrise = 0u32;
+        // ... and falling: a frame of two periods triggered on a rising
+        // edge has one whole rise inside (the other two sit on its ends)
+        // but two falls (the DMM wave view at 5 ms/div with 40 Hz showed
+        // "Freq: --").
+        let mut falls = [0usize; 2];
+        let mut nfall = 0u32;
         let (mut hp, mut lp) = (0u32, 0u32);
         let mut prev_hi = d[0] >= h50;
         let mut cross50: Option<usize> = None;
@@ -175,21 +181,35 @@ pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
                 }
                 Some(true) if c <= f10 => {
                     state = Some(false);
+                    let at = cross50.unwrap_or(i);
+                    if nfall == 0 {
+                        falls[0] = at;
+                    }
+                    falls[1] = at;
+                    nfall += 1;
                     hp += 1;
                 }
                 _ => {}
             }
         }
-        if nrise >= 2 && rises[1] > rises[0] {
-            let cycles = (nrise - 1) as f32;
-            let samples = (rises[1] - rises[0]) as f32;
+        // Whole cycles between the first and the last rise, else fall.
+        let edges = if nrise >= 2 && rises[1] > rises[0] {
+            Some((nrise, rises))
+        } else if nfall >= 2 && falls[1] > falls[0] {
+            Some((nfall, falls))
+        } else {
+            None
+        };
+        if let Some((ne, e)) = edges {
+            let cycles = (ne - 1) as f32;
+            let samples = (e[1] - e[0]) as f32;
             let f = fs * cycles / samples;
             r.v[0] = f;
             r.v[9] = 1.0 / f;
             // Duty / widths over whole cycles.
             let mut hn = 0u32;
             let (mut c1, mut c2) = (0u64, 0u64);
-            let w = &d[rises[0]..rises[1]];
+            let w = &d[e[0]..e[1]];
             for &c in w {
                 hn += (c >= h50) as u32;
                 c1 += c as u64;

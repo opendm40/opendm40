@@ -70,7 +70,9 @@ SC = {
     'aca-v':    ('CURR:AC', 28, [(0, 'open;vsrc:1', {'NONE'}), (10, 'vsrc:5', {'VJACK'}), (19, 'vsrc:none', {'NONE'})]),
     'aca-vac':  ('CURR:AC', 20, [(0, 'open', {'NONE'}), (10, 'vsrc:0,ac=230,f=50', {'VJACK'})]),
     'aca-vi':   ('CURR:AC', 18, [(0, 'open;vsrc:24;isrc:0,ac=0.01,f=50', {'NONE'})]),
-    'freq-a':   ('FREQ', 24, [(0, 'open;vsrc:0,ac=1,f=1000', {'NONE'}), (10, 'isrc:0.001', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
+    # Frequency carries no sentinel (device f3aea2f: PB1 - PB3 stands at ~54 mV in its row, a
+    # false A-JACK; doc 4.7 gaps): a current in A shows nothing there.
+    'freq-gap': ('FREQ', 24, [(0, 'open;vsrc:0,ac=1,f=1000', {'NONE'}), (10, 'isrc:0.001', {'NONE'})]),
     'cont-a':   ('CONT', 24, [(0, 'open;r:10', {'NONE'}), (10, 'isrc:0.002', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
     'diode-a':  ('DIOD', 24, [(0, 'open;diode:0.65', {'NONE'}), (10, 'isrc:0,ac=0.005,f=50', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
     'cap-a':    ('CAP', 26, [(0, 'open;c:100e-9', {'NONE'}), (12, 'isrc:0.002', {'AJACK'})]),
@@ -141,6 +143,11 @@ SC = {
     # the latch ends 1 s after that (the act counts).
     'aprot-ack-early': ('VOLT:DC', 34, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (16, 'avsrc:12', {'APROT'}),
                                         (22, 'open', {'APROT', 'NONE'}), (26, 'open', {'NONE'})], [], {'acts': {14: 'CONF:RES'}}),
+    # Device f3aea2f: A-PROT latched with the A jack open on the probe's first window (AD2 just
+    # restarted). The model's AD2 reads 3000 codes (0.72 A) off for its first results after a
+    # start: a small current (1 V across A-COM, 21 mA) brings the probe in; A-JACK only.
+    'aprot-glitch': ('VOLT:DC', 22, [(0, 'open', {'NONE'}), (8, 'avsrc:1', {'AJACK'})], [],
+                     {'monitor': ['sysbus.hy3131 Ad2StartGlitch 3000']}),
     # A current function ends the latch (its own shunt switching takes over).
     'aprot-to-dca': ('VOLT:DC', 30, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (18, 'avsrc:12', {'NONE', 'OVERLOAD'})],
                      [], {'acts': {16: 'CONF:CURR:DC'}}),
@@ -161,6 +168,8 @@ def run(name):
     os.makedirs(OUT, exist_ok=True)
     sp = os.path.join(OUT, tag + '.script')
     with open(sp, 'w') as f:
+        for m in xtra.get('monitor', []):
+            f.write('0 monitor %s\n' % m)
         for t, spec in script:
             f.write('%g dmm %s\n' % (t, spec))
     # USB/IP from 3 s: an attach before fw-rs enumerated can leave the server stuck

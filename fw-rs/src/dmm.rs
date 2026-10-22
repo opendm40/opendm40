@@ -742,6 +742,9 @@ pub struct Dmm {
     /// A-jack protection (doc 4.8): the probe (OP2 / AD2 peak on PB2) is
     /// in the row; the latch (the A jack on the 10 mohm shunt).
     probe: bool,
+    /// The probe's row was just written: the AD2 peak hold is cleared once
+    /// it settled (sentinel::PROBE_SETTLE_MS) before its first window counts.
+    probe_settle: bool,
     aprot: Option<AProt>,
     /// Fuse check in progress (`fuse_start`) and the last result.
     fuse_job: Option<FuseJob>,
@@ -993,6 +996,7 @@ impl Dmm {
             live: false,
             ovl: None,
             probe: false,
+            probe_settle: false,
             aprot: None,
             ovl_rel_t: None,
             fuse_job: None,
@@ -1218,6 +1222,7 @@ impl Dmm {
         self.sent_mode = key;
         self.pk_t = clk.now_ms();
         self.pkh_due = 0;
+        self.probe_settle = self.probe;
         self.sent.configured(kind, clk.now_ms(), fresh);
         // DC? / AC? hints (doc 4.4): AC V alternates AD1 between PB1 - PB3
         // and the V tap, DC V 6 V alternates the comparator between PB1 and
@@ -3111,6 +3116,20 @@ impl Dmm {
             self.deadline = clk.now_ms() + 120;
             return;
         }
+        // The row was just written: AD2 restarts (its first results, and a
+        // hold the rewrite did not clear, are not the A-jack current: device
+        // f3aea2f latched A-PROT with the A jack open, 15 mA after it, on
+        // the first window's peak). Clear the hold once it settled; the
+        // first window counts from there.
+        if self.probe_settle {
+            if now.saturating_sub(self.pk_t) >= sentinel::PROBE_SETTLE_MS {
+                self.probe_settle = false;
+                self.pk_t = now;
+                hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
+                hy::write(0x29, &[self.r29]);
+            }
+            return;
+        }
         if now.saturating_sub(self.pk_t) < sentinel::WIN_MS {
             return;
         }
@@ -3133,7 +3152,10 @@ impl Dmm {
                     self.deadline = clk.now_ms() + 250;
                 }
             }
-            None => {
+            // Only while the comparator still sees the current: a real one
+            // through the 47.5 ohm chain is far above its window (5 mA =
+            // 0.24 V at PB1), so a probe reading without hits is not one.
+            None if run.is_some() => {
                 let hot = run.map_or(0, |t| now.saturating_sub(t));
                 if sentinel::aprot_trips(amps, hot) {
                     relay_pe(0);
@@ -3142,6 +3164,7 @@ impl Dmm {
                     self.sent.set_aprot(now, true);
                 }
             }
+            None => {}
         }
     }
 
