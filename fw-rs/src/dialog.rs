@@ -244,6 +244,19 @@ pub struct LogInfo {
     pub ad2: bool,
     /// Conversions not captured (Logger::lost); 0 = the "Display paused" hint.
     pub lost: u32,
+    /// A fast-logger session to the disk (fastlog.rs): its file / progress.
+    pub disk: Option<LogDisk>,
+}
+
+/// The disk part of the logger panel.
+#[derive(Clone, Copy)]
+pub struct LogDisk {
+    /// Allocating / erasing (no samples yet): `pct` done.
+    pub prep: bool,
+    pub pct: u8,
+    /// FASTnnn.DLG, KiB written.
+    pub file: u16,
+    pub kb: u32,
 }
 
 /// The three text rows of the logger panel (rate, count, hint / loss).
@@ -256,6 +269,18 @@ pub fn log_panel_text(i: &LogInfo, row: usize, t: &mut [u8; 32]) -> usize {
         k += n;
     };
     let mut d = [0u8; 10];
+    if let Some(dk) = i.disk.filter(|x| x.prep) {
+        match row {
+            0 => put(t, b"Preparing disk"),
+            1 => {
+                let n = dec(&mut d, dk.pct as u32);
+                put(t, &d[..n]);
+                put(t, b" %");
+            }
+            _ => put(t, b"Tap to cancel"),
+        }
+        return k;
+    }
     match row {
         0 => {
             if i.ad2 {
@@ -282,7 +307,16 @@ pub fn log_panel_text(i: &LogInfo, row: usize, t: &mut [u8; 32]) -> usize {
             put(t, b" samples");
         }
         _ => {
-            if i.lost == 0 {
+            if let Some(dk) = i.disk.filter(|_| i.lost == 0) {
+                // "FAST003 1234 KB" (tap stops: the first row's job)
+                put(t, b"FAST");
+                let n = dec(&mut d, 1000 + dk.file as u32);
+                put(t, &d[1..n]);
+                put(t, b" ");
+                let n = dec(&mut d, dk.kb);
+                put(t, &d[..n]);
+                put(t, b" KB");
+            } else if i.lost == 0 {
                 put(t, b"Display paused");
             } else {
                 put(t, b"lost ");

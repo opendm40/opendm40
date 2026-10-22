@@ -165,7 +165,7 @@ pub fn begin(size: u32, crc: u32, now_ms: u64) -> R<()> {
 
 pub fn begin_on(dev: &mut dyn BlockDevice, size: u32, crc: u32, now_ms: u64) -> R<()> {
     abort();
-    if crate::screenshot::busy() || crate::csvlog::writing() || staging() {
+    if crate::screenshot::busy() || crate::csvlog::writing() || staging() || crate::fastlog::holds_disk() {
         return Err("Mass storage busy");
     }
     if !(128..=MAX).contains(&size) {

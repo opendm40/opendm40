@@ -290,6 +290,19 @@ pub struct App {
     /// Record page: free bytes on the disk as scanned on page entry
     /// (csvlog::free_bytes; Err = busy / no disk), for the estimate.
     rec_free: Result<u32, crate::csvlog::GErr>,
+    /// Record page interval "Fast" (the fast logger, fastlog.rs; volatile:
+    /// not persisted) and the session request for main.rs, which owns the
+    /// logger (`take_fast_req`).
+    pub rec_fast: bool,
+    fast_req: Option<FastReq>,
+}
+
+/// A fast-logger request from the Record page (main.rs `take_fast_req`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FastReq {
+    /// Start a session of this many seconds (0 = until stopped / full).
+    Start(u32),
+    Stop,
 }
 
 fn backlight(pct: u8) {
@@ -356,6 +369,9 @@ pub fn finish_disk_writes(now: u64) {
     // An update-file upload holds the disk (the others wait for it): drop it
     // first, nothing of it is linked yet (upload.rs).
     crate::upload::abort();
+    // A fast-logger session (fastlog.rs): its last pages, the size, the
+    // trim (the logger stops with the power; the ring's rest is dropped).
+    crate::fastlog::finish_blocking(5000);
     crate::csvlog::finish_blocking(now);
     crate::screenshot::finish_blocking(8000);
     crate::csvlog::finish_blocking(now);
@@ -490,6 +506,8 @@ impl App {
             rec_func: 255,
             rec_shown: false,
             rec_free: Err(crate::csvlog::GErr::NoDisk),
+            rec_fast: false,
+            fast_req: None,
         };
         crate::persist::init();
         if let Some(rec) = crate::persist::load() {
@@ -986,7 +1004,7 @@ impl App {
             "",
             "",
             onoff(self.meter.lim_beep),
-            ui::REC_INTERVALS[crate::csvlog::next().0 as usize],
+            ui::REC_INTERVALS[self.rec_ival()],
         ];
         let mut t = [0u8; 32];
         let pre = b"Hold & Limits: ";
@@ -1003,6 +1021,9 @@ impl App {
     /// period in every-reading mode), Start / Stop.
     fn record_page(&self) {
         let (ii, di) = crate::csvlog::next();
+        if self.rec_fast {
+            return self.record_page_fast(di);
+        }
         let row_ms = match crate::csvlog::INTERVALS_S[ii as usize] {
             0 => match self.dmm.reading_period_ms() {
                 0 => 100,
@@ -1046,6 +1067,101 @@ impl App {
             Err(_) => "-- (no disk)",
         };
         ui::record_page([ui::REC_INTERVALS[ii as usize], ui::REC_DURATIONS[di as usize]], free, crate::csvlog::active());
+    }
+
+    /// The Record page's interval index (REC_FAST for the fast logger).
+    fn rec_ival(&self) -> usize {
+        if self.rec_fast { ui::REC_FAST } else { crate::csvlog::next().0 as usize }
+    }
+
+    /// The Record page with "Fast": the estimate at the fast logger's rate
+    /// for this function (fastlog::rate_for: AD1 in DC V / mV / A, AD2 in
+    /// the AC rows; none elsewhere) and its ~3 bytes per sample.
+    fn record_page_fast(&self, di: u8) {
+        let mut b = [0u8; 32];
+        let mut n = 0;
+        let mut put = |p: &[u8]| {
+            let k = p.len().min(32 - n);
+            b[n..n + k].copy_from_slice(&p[..k]);
+            n += k;
+        };
+        let num = |v: u32, put: &mut dyn FnMut(&[u8])| {
+            let mut d = [0u8; 10];
+            let mut i = d.len();
+            let mut x = v;
+            loop {
+                i -= 1;
+                d[i] = b'0' + (x % 10) as u8;
+                x /= 10;
+                if x == 0 {
+                    break;
+                }
+            }
+            put(&d[i..]);
+        };
+        let txt = match (self.fast_rate(), self.rec_free) {
+            (None, _) => "-- (DC/AC V or A only)",
+            (Some(_), Err(crate::csvlog::GErr::Busy)) => "-- (disk busy)",
+            (Some(_), Err(_)) => "-- (no disk)",
+            (Some((hz, ad2)), Ok(f)) => {
+                let s = f as u64 / (hz.max(1) as u64 * if ad2 { crate::fastlog::BPS_AD2 } else { crate::fastlog::BPS_AD1 } as u64);
+                num(hz, &mut put);
+                put(b"/s, ");
+                if s >= 7200 {
+                    num((s / 3600) as u32, &mut put);
+                    put(b" h left");
+                } else {
+                    num((s / 60) as u32, &mut put);
+                    put(b" min left");
+                }
+                core::str::from_utf8(&b[..n]).unwrap_or("")
+            }
+        };
+        ui::record_page([ui::REC_INTERVALS[ui::REC_FAST], ui::REC_DURATIONS[di as usize]], txt, crate::fastlog::active());
+    }
+
+    /// The fast logger's (rate S/s, AD2) for the current function: AD2 in
+    /// the stock AC rows, AD1 in DC V / mV / A (logger.rs `mode_ok`), at
+    /// the logger's LOG:SRATe / LOG:OSR + CHOP rate (main.rs keeps
+    /// fastlog::rates current); None elsewhere.
+    pub fn fast_rate(&self) -> Option<(u32, bool)> {
+        let m = self.dmm.mode();
+        let (ad1, ad2) = crate::fastlog::rates();
+        if matches!(self.dmm.func(), 16 | 17) || self.dmm.pw.on {
+            None
+        } else if crate::logger::Logger::mode_ok(true, m) {
+            Some((ad2, true))
+        } else if crate::logger::Logger::mode_ok(false, m) {
+            Some((ad1, false))
+        } else {
+            None
+        }
+    }
+
+    /// main.rs: the Record page's fast-logger request, once.
+    pub fn take_fast_req(&mut self) -> Option<FastReq> {
+        self.fast_req.take()
+    }
+
+    /// main.rs: a fast-logger session ended (`fastlog::ended`).
+    pub fn fast_ended(&mut self, now: u64, st: crate::fastlog::State, file: Option<u16>) {
+        use crate::fastlog::State;
+        let mut t = *b"Saved FAST000.DLG";
+        let (txt, ok) = match (st, file) {
+            (State::Done | State::Full, Some(n)) => {
+                t[10] = b'0' + (n / 100 % 10) as u8;
+                t[11] = b'0' + (n / 10 % 10) as u8;
+                t[12] = b'0' + (n % 10) as u8;
+                (core::str::from_utf8(&t).unwrap_or("Saved"), true)
+            }
+            (State::Done, None) => ("Fast log cancelled", true),
+            (State::Full, None) => ("Disk full", false),
+            (State::NoDisk, _) => ("No disk", false),
+            _ => ("Fast log failed", false),
+        };
+        self.toast(now, txt, ok);
+        self.beep(now, if ok { 100 } else { 500 });
+        self.invalidate();
     }
 
     /// Keypad kind for the current target (ui::KP_*).
@@ -2852,7 +2968,13 @@ impl App {
                             self.toast(now, "Stop the recording first", false);
                             return;
                         }
-                        let (mut ii, mut di) = crate::csvlog::next();
+                        if crate::fastlog::active() {
+                            self.beep(now, 300);
+                            self.toast(now, "Stop the recording first", false);
+                            return;
+                        }
+                        let (_, mut di) = crate::csvlog::next();
+                        let mut ii = self.rec_ival() as u8;
                         let d = ui::record_step(x) as i16;
                         let step = |v: u8, n: usize| (v as i16 + d).clamp(0, n as i16 - 1) as u8;
                         if k == 0 {
@@ -2860,7 +2982,27 @@ impl App {
                         } else {
                             di = step(di, ui::REC_DURATIONS.len());
                         }
+                        self.rec_fast = ii as usize == ui::REC_FAST;
+                        let ii = if self.rec_fast { crate::csvlog::next().0 } else { ii };
                         crate::csvlog::set_next(ii, di);
+                    }
+                    Some(ui::REC_START_ROW) if self.rec_fast || crate::fastlog::active() => {
+                        // The fast logger (main.rs runs it: it owns the
+                        // logger); its panel takes over the screen.
+                        if crate::fastlog::active() {
+                            self.fast_req = Some(FastReq::Stop);
+                        } else if self.fast_rate().is_none() {
+                            self.beep(now, 300);
+                            self.toast(now, "Fast: DC/AC V or A only", false);
+                            return;
+                        } else {
+                            let di = crate::csvlog::next().1 as usize;
+                            self.fast_req = Some(FastReq::Start(crate::csvlog::DURATIONS_S[di]));
+                            self.beep(now, 60);
+                            let v = self.back_view;
+                            self.show(v, clk);
+                            return;
+                        }
                     }
                     Some(ui::REC_START_ROW) => {
                         let was = crate::csvlog::active();

@@ -2228,8 +2228,12 @@ pub const LIMIT_ROWS: [&str; 9] = [
 pub const RECORD_ROWS: [&str; 4] = ["Interval", "Duration", "Free", ""];
 /// Rows with a stepper on the Record page.
 pub const REC_STEP_ROWS: [usize; 2] = [0, 1];
-/// Value texts of csvlog::INTERVALS_S / DURATIONS_S.
-pub const REC_INTERVALS: [&str; 4] = ["Every reading", "1 s", "10 s", "1 min"];
+/// Value texts of csvlog::INTERVALS_S / DURATIONS_S; the last interval,
+/// "Fast", is the fast logger (fastlog.rs: raw AD1 / AD2 samples to
+/// LOGS/FASTnnn.DLG at the LOG:OSR / LOG:SRATe rate; App::rec_fast).
+pub const REC_INTERVALS: [&str; 5] = ["Every reading", "1 s", "10 s", "1 min", "Fast"];
+/// Index of "Fast" in REC_INTERVALS.
+pub const REC_FAST: usize = 4;
 pub const REC_DURATIONS: [&str; 5] = ["Until stopped", "10 min", "1 h", "8 h", "24 h"];
 /// Record page row of the Start / Stop button.
 pub const REC_START_ROW: usize = 3;

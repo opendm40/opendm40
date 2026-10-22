@@ -94,6 +94,16 @@ SECTIONS
          * vdisk::entries are inline(always) (vwrite::poll, every pass);
          * app_press's guard is inlined into App::gesture. Audit with
          * emulator hooks on every function of C, 2026-10-22 (TODO). */
+        /* The fast logger's Prep / Stop (fastlog::prep: before / after the
+         * logger session, never while the AD2 ISR streams); its Run and
+         * fastenc.rs stay in B. */
+        *(.text.*7dm40_fw7fastlog4prep*);
+        *(.text.*7dm40_fw9fast_head*);
+        *(.text.*7dm40_fw10fast_start*);
+        *(.text.*7dm40_fw8fast_req*);
+        *(.text.*7dm40_fw11fast_status*);
+        *(.text.*7dm40_fw3app*3App16record_page_fast*);
+        *(.text.*7dm40_fw3app*3App10fast_ended*);
         /* NOT persist: its crc runs on every main-loop pass (device
          * f5f8e96: lat_pc in persist::crc, 9..18 us stalls). */
         /* ... and their named read-only data (tables, strings in statics). */
@@ -113,6 +123,7 @@ SECTIONS
         *(.rodata.*7dm40_fw9scope_csv*);
         *(.rodata.*7dm40_fw4boot*);
         *(.rodata.*7dm40_fw3app9app_press*);
+        *(.rodata.*7dm40_fw7fastlog4prep*);
         /* Single functions (and their closures) that run only at start-up or
          * on a user's settings / page action, never per pass nor in the ISR:
          * the App construction (main.rs new_app, App::new and the sub-struct
