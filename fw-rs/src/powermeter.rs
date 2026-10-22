@@ -911,6 +911,7 @@ impl Dmm {
         }
         self.r22 = row[2];
         self.r29 = row[9];
+        self.chk.copy_from_slice(&row[super::CHK_AT..super::CHK_AT + 8]);
         self.sent_mode = 255;
         self.sent.configured(Kind::Off, clk.now_ms(), true);
         self.diag_on = false;

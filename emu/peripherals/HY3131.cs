@@ -1644,7 +1644,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             portC.Connections[7].Connect(this, 7);
             if(portA != null) { portA.Connections[9].Connect(this, 3); portA.Connections[10].Connect(this, 4); }
             else this.Log(LogLevel.Warning, "gpioPortA not found: the V/A relay is not tracked (ohm / mV paths always connected)");
-            if(portE != null) { portE.Connections[0].Connect(this, 5); portE.Connections[1].Connect(this, 6); }
+            if(portE != null) { portE.Connections[0].Connect(this, 5); portE.Connections[1].Connect(this, 6); portE.Connections[2].Connect(this, 8); }
             else this.Log(LogLevel.Warning, "gpioPortE not found: the shunt relays are not tracked");
             relayTracked = portA != null;
         }
@@ -1746,12 +1746,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case 5: Pin("PE0", value); break;
             case 6: Pin("PE1", value); break;
             case 7: Pin("PC7", value); break;
+            case 8: Rail(value); break;
             case 2: // CS (active low)
                 if(!value && !selected)
                 {
                     selected = true;
                     rising = 0; falling = 0; shift = 0; cmdDone = false; wbyte = 0;
                     if(Core == null) return; // pin level reported by Connect() in the constructor
+                    deaf = !Powered;
+                    if(deaf) { DeafFrames++; return; }
                     Transfers++;
                     LoadCal();
                     Core.Update(Now);
@@ -1759,12 +1762,52 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 else if(value && selected)
                 {
                     selected = false;
-                    DriveMiso(Core.Irq); // DO = IRQ while CS is high
+                    DriveMiso(Powered && Core.Irq); // DO = IRQ while CS is high
                     MaybeWriteState();
                 }
                 break;
             }
         }
+
+        // ---- DMM analog rail (PE2) ----
+        /// Model the PE2 supply (default on): with PE2 low the chip is unpowered
+        /// (writes ignored, DO low), a rising PE2 is a power-on reset (registers
+        /// cleared, BORF) and the chip ignores the bus for PowerUpMs. Until the
+        /// firmware first raises PE2 the chip counts as powered (a PE2 the
+        /// ROM / an earlier boot stage left high; the unit tests).
+        public bool RailModel { get; set; } = true;
+        /// Power-up time after PE2 rises, ms (the stock waits 10 ms, FUN_0800b384).
+        public double PowerUpMs { get; set; } = 2.0;
+        public bool Powered => !RailModel || !railKnown || (railOn && Now >= railReadyAt);
+        /// Rail power-ups seen, frames the chip ignored (unpowered / powering up).
+        public long RailUps { get; private set; }
+        public long DeafFrames { get; private set; }
+
+        private void Rail(bool on)
+        {
+            if(Core == null) return;
+            if(on && !railOn)
+            {
+                if(railKnown)
+                {
+                    Core.Reset(Now);
+                    Core.ForceIntf(0x80); // BORF
+                    railReadyAt = Now + PowerUpMs * 1e-3;
+                    RailUps++;
+                }
+                this.Log(LogLevel.Debug, "PE2 rail on");
+            }
+            else if(!on && railOn)
+            {
+                this.Log(LogLevel.Debug, "PE2 rail off");
+            }
+            if(on) railKnown = true;
+            railOn = on;
+            if(!Powered) DriveMiso(false);
+        }
+
+        private bool railOn, railKnown, deaf;
+        private double railReadyAt;
 
         private void Pin(string name, bool level)
         {
@@ -1808,7 +1851,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         private void OnRising()
         {
-            if(!selected || Core == null) return;
+            if(!selected || Core == null || deaf) return;
             rising++;
             if(!cmdDone)
             {
@@ -1840,6 +1883,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private void OnFalling()
         {
             if(!selected || Core == null) return;
+            if(deaf) { DriveMiso(false); return; }
             falling++;
             if(cmdDone && rd && falling >= 9)
             {
@@ -1870,6 +1914,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         {
             SpiBytes++;
             if(!selected || Core == null) return doLevel ? (byte)0xFF : (byte)0x00;
+            if(deaf) return 0x00;
             // DI comes from the SPI here, not from the PC12 GPIO level: keep the
             // GPIO's view of the line (OnGPIO only reports changes of it).
             var gpioMosi = mosi;

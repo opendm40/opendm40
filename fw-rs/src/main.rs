@@ -478,7 +478,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         // meter.live() is reset on every function change.
                         // *IDN? emulation (scpi::idn_emul): the host does not
                         // wait after CONF, never hold a reply past its 1 s.
-                        let expire = if app.meter.live().is_some() || scpi::idn_emul() != 0 || !host_settle {
+                        // A rail wake (the DMM rail was off: Scope / Gen
+                        // page) waits for its first reading, not the stale one.
+                        let fresh = app.meter.live().is_some() && !app.dmm.waking();
+                        let expire = if fresh || scpi::idn_emul() != 0 || !host_settle {
                             now + SCPI_QUICK_MS
                         } else {
                             now.max(app.dmm.deadline()) + SCPI_WAIT_MS
@@ -758,6 +761,15 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         scpi.put_bytes(b",");
                         put_u32(&mut scpi, l[10]);
+                        true
+                    }
+                    scpi::Dbg::Ad2(4, 255, _, _) => {
+                        #[cfg(feature = "ad2-isr")]
+                        let on = hy3131::stream::use_dma();
+                        #[cfg(not(feature = "ad2-isr"))]
+                        let on = false;
+                        scpi.len = 0;
+                        scpi.put_bytes(if on { b"1" } else { b"0" });
                         true
                     }
                     scpi::Dbg::Ad2(4, m, _, _) => {

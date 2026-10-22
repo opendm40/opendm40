@@ -165,6 +165,17 @@ impl Rate {
 
 /// AD1OSR codes: the stock steady (32768) and moving (8192) settings.
 const OSR_SLOW: u8 = 0x17;
+/// DMM rail (PE2) up -> the row is written this much later (`set_suspended`).
+/// The stock waits 10 ms after raising PE2 before it drops PC4 and sets the
+/// DMM up (FUN_0800b384); a wake that left PC4 on wrote the row at once,
+/// into a chip still powering up (device check 2026-10-21, Bluetooth 1g).
+pub const RAIL_SETTLE_MS: u64 = 50;
+/// Stall watchdog (`Dmm::watchdog`): row read-back period with no reading,
+/// and the shortest silence that restarts the row anyway.
+const WD_CHECK_MS: u64 = 2_000;
+const WD_IDLE_MS: u64 = 10_000;
+/// Row index of R2A (the first of the 8 read-back bytes R2A..R31).
+const CHK_AT: usize = 10;
 const OSR_FAST: u8 = 0x15;
 
 /// UF-21: text for the UI when the mV-first AUTO is selected for V
@@ -606,6 +617,18 @@ pub struct Dmm {
     pa_now: Option<u8>,
     /// Analog DMM rail (PE2) off: no polling (App::update_rails).
     suspended: bool,
+    /// Rail wake: `start` once the rail has settled (0 = none pending).
+    wake_at: u64,
+    /// Stall watchdog (`watchdog`): last reading / (re)start, last poll,
+    /// next check (ms); restarts after a lost row / a long silence.
+    wd_t: u64,
+    wd_poll: u64,
+    wd_chk: u64,
+    /// R2A..R31 of the row last written (`write_config`, `pw_write_config`):
+    /// the bytes nothing rewrites while a row runs.
+    chk: [u8; 8],
+    /// SYST:RAIL:STATe? counters: rail wakes, lost-row and silence restarts.
+    pub wd_n: [u16; 3],
     /// Temperature sensor (T_NAMES index), per-sensor offsets (0.1 C; the
     /// TC one is applied to the cold junction), user NTC R25 (ohm) / Beta.
     t_sensor: u8,
@@ -830,6 +853,12 @@ impl Dmm {
             seq: 0,
             pa_now: None,
             suspended: false,
+            wake_at: 0,
+            wd_t: 0,
+            wd_poll: 0,
+            wd_chk: 0,
+            chk: [0; 8],
+            wd_n: [0; 3],
             t_sensor: 0,
             t_offs: [0; 7],
             t_f: false,
@@ -1057,6 +1086,7 @@ impl Dmm {
         }
         self.r22 = row[2];
         self.r29 = row[9];
+        self.chk.copy_from_slice(&row[CHK_AT..CHK_AT + 8]);
         // The sentinel's history belongs to the function (AC+DC: both
         // phases, `func`), so a phase switch or a range change keeps it.
         let key = self.func();
@@ -1413,14 +1443,23 @@ impl Dmm {
     }
 
     /// DMM analog rail off (true) / back on (false: the HY3131 configuration
-    /// is rewritten, it may have lost power).
+    /// is rewritten RAIL_SETTLE_MS later, by `poll`: the chip lost power and
+    /// ignores writes until its supply is up). The deadline moves at once,
+    /// so a host READ? waits for the first reading after the wake.
     pub fn set_suspended(&mut self, clk: &mut Clock, off: bool) {
         if off != self.suspended {
             self.suspended = off;
+            self.wake_at = 0;
             if !off {
-                self.start(clk);
+                self.wake_at = clk.now_ms() + RAIL_SETTLE_MS;
+                self.deadline = self.wake_at + 450;
             }
         }
+    }
+
+    /// The rail came up and the row is not rewritten yet.
+    pub fn waking(&self) -> bool {
+        self.wake_at != 0
     }
 
     pub fn suspended(&self) -> bool {
@@ -1949,6 +1988,8 @@ impl Dmm {
 
     /// (Re)start measuring in the current mode.
     pub fn start(&mut self, clk: &mut Clock) {
+        self.wake_at = 0;
+        self.wd_t = clk.now_ms();
         if self.pw.on {
             return self.pw_restart(clk);
         }
@@ -1959,10 +2000,57 @@ impl Dmm {
 
     // ----------------------------------------------------------------- poll
 
+    /// The rail wake and the stall watchdog, before each poll; true = it
+    /// (re)started the row (no reading this poll). With no reading for
+    /// WD_CHECK_MS past the deadline it reads R2A..R31 back (every
+    /// WD_CHECK_MS): all 0x00 / 0xFF where the row has other bytes = the chip
+    /// lost power (a POR) after the row went out -> rewrite it. No reading
+    /// for 8 x the reading period (WD_IDLE_MS at least; not in capacitance,
+    /// whose ramp may wait on a discharge) -> restart too. A gap in the polls
+    /// (the logger owns the chip; it restarts the row) restarts the timer.
+    #[inline(always)]
+    fn watchdog(&mut self, clk: &mut Clock, now: u64) -> bool {
+        if self.wake_at != 0 {
+            return self.wd_slow(clk, now, 0);
+        }
+        if now.saturating_sub(self.wd_poll) > 500 {
+            self.wd_t = now;
+        }
+        self.wd_poll = now;
+        let idle = now.saturating_sub(self.wd_t.max(self.deadline()));
+        idle >= WD_CHECK_MS && now >= self.wd_chk && self.wd_slow(clk, now, idle)
+    }
+
+    /// `watchdog`'s rare part (.cold, link-native.x): the wake (`idle` 0)
+    /// and the read-back.
+    #[inline(never)]
+    fn wd_slow(&mut self, clk: &mut Clock, now: u64, idle: u64) -> bool {
+        if self.wake_at != 0 {
+            if now < self.wake_at {
+                return true;
+            }
+            self.wd_n[0] = self.wd_n[0].wrapping_add(1);
+            self.start(clk);
+            return true;
+        }
+        self.wd_chk = now + WD_CHECK_MS;
+        let mut b = [0u8; 8];
+        hy::read(CHK_AT as u8 + hy::R_CFG, &mut b);
+        let lost = b != self.chk && (b == [0; 8] || b == [0xFF; 8]);
+        let silent = self.mode != 13 && idle > WD_IDLE_MS.max(8 * self.period_ms as u64);
+        if !(lost || silent) {
+            return false;
+        }
+        let k = if lost { 1 } else { 2 };
+        self.wd_n[k] = self.wd_n[k].wrapping_add(1);
+        self.start(clk);
+        true
+    }
+
     /// Poll the converter (every ~10 ms). Returns a reading when one is ready.
     pub fn poll(&mut self, clk: &mut Clock) -> Option<Reading> {
         let now = clk.now_ms();
-        if self.suspended {
+        if self.suspended || self.watchdog(clk, now) {
             return None;
         }
         self.diode_beep(now);
@@ -2029,6 +2117,7 @@ impl Dmm {
             _ => self.poll_temp(now),
         } };
         if let Some(rd) = &r {
+            self.wd_t = now;
             ema_ms(&mut self.period_ms, &mut self.t_rd, now);
             self.rd_avg_n = self.avg_n;
             match self.mode {
