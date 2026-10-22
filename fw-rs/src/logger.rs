@@ -159,9 +159,12 @@ pub struct Ring {
     span_lo: AtomicU32,
     span_hi: AtomicU32,
     // Stream ISR only (DBG:ISR?).
+    /// Entries (A and B).
     ticks: AtomicU32,
-    empty: AtomicU32,
-    gated: AtomicU32,
+    /// A entries too late for their data frame (skipped, a stamp gap).
+    late: AtomicU32,
+    /// Probes completed (B + the INTF read of the next A).
+    probes: AtomicU32,
     overruns: AtomicU32,
     timeouts: AtomicU32,
     max_isr_cyc: AtomicU32,
@@ -203,8 +206,8 @@ impl Ring {
             span_lo: Z,
             span_hi: Z,
             ticks: Z,
-            empty: Z,
-            gated: Z,
+            late: Z,
+            probes: Z,
             overruns: Z,
             timeouts: Z,
             max_isr_cyc: Z,
@@ -222,7 +225,7 @@ impl Ring {
     fn reset(&self) {
         for a in [
             &self.head, &self.tail, &self.captured, &self.dropped, &self.missed, &self.bad, &self.max_gap_us,
-            &self.span_lo, &self.span_hi, &self.ticks, &self.empty, &self.gated, &self.overruns, &self.timeouts,
+            &self.span_lo, &self.span_hi, &self.ticks, &self.late, &self.probes, &self.overruns, &self.timeouts,
             &self.max_isr_cyc, &self.max_lat, &self.trg_gen, &self.trg_ev_n, &self.trg_first_at, &self.trg_first_gen,
         ] {
             a.store(0, Relaxed);
@@ -291,8 +294,8 @@ struct Producer {
     /// `now_us` when the last conversion was seen (the gate runs from it;
     /// bad reads included).
     last_sample_us: u64,
-    /// No flag read within this many us of `last_sample_us`: P/2 for the
-    /// main-loop sampler, 7/8 P for the stream ISR (`isr`).
+    /// No flag read within this many us of `last_sample_us`: P/2 (the
+    /// main-loop sampler; the stream ISR does not poll the flag).
     gate_us: u32,
 }
 
@@ -310,14 +313,6 @@ impl Producer {
             last_sample_us: 0,
             gate_us: 0,
         }
-    }
-
-    /// The gate: this soon after the last seen conversion no new one can be
-    /// due, so the flag is not read.
-    #[inline(always)]
-    #[cfg_attr(not(feature = "ad2-isr"), allow(dead_code))]
-    fn gate_closed(&self) -> bool {
-        self.have_last && self.now_us < self.last_sample_us + self.gate_us as u64
     }
 
     /// New session; gate = P/2 (the main-loop sampler).
@@ -550,10 +545,19 @@ impl Logger {
     /// last captured sample; `captured` of them were taken. Unlike `missed`
     /// (per gap, > 1.5 periods) it also counts the many slightly-late
     /// samples of a rate the loop cannot sustain (9600/s: a 104 us period vs
-    /// ~122 us per bit-banged sample). Depends on the nominal period: a chip
-    /// clock off by x % shows as x % lost (or as 0).
+    /// ~122 us per bit-banged sample). The main-loop sampler counts against
+    /// the nominal period (a chip clock off by x % shows as x % lost, or as
+    /// 0); the stream ISR counts the periods (its A entries).
     pub fn lost(&self) -> u32 {
-        let (captured, span, p) = (self.captured(), self.ring().span_us(), self.prod.period_ns);
+        let (captured, span) = (self.captured(), self.ring().span_us());
+        // The stream ISR counts the conversion periods themselves (one entry
+        // A each, phase-locked to the chip): lost = periods - captured,
+        // exact, whatever the crystal offset.
+        #[cfg(feature = "ad2-isr")]
+        if self.ad2 && isr::lock_stats()[8] != 0 {
+            return isr::lock_stats()[8].saturating_sub(captured);
+        }
+        let p = self.prod.period_ns;
         if captured < 2 || p == 0 {
             return 0;
         }
@@ -601,7 +605,7 @@ impl Logger {
         self.active = true;
         #[cfg(feature = "ad2-isr")]
         if self.ad2 {
-            isr::start(&self.prod, self.ring);
+            isr::start(&self.prod, self.ring, hy::ad2_rate_mhz(self.r26));
             self.isr = true;
         }
     }
@@ -613,6 +617,7 @@ impl Logger {
         #[cfg(feature = "ad2-isr")]
         if self.isr {
             hy::stream::stop();
+            isr::stopped();
         }
         self.isr = false;
         self.active = false;
@@ -653,13 +658,13 @@ impl Logger {
         self.isr
     }
 
-    /// DBG:ISR? numbers of the last / running ISR session: ticks, empty
-    /// (INTF read, no AD2F), gated (no bus access: within P/2 of the last
-    /// sample), overruns (a tick already pending at exit), frame timeouts,
-    /// max cycles in the handler, max entry latency in timer counts (20 ns).
+    /// DBG:ISR? numbers of the last / running ISR session: ticks (entries),
+    /// late (A entries that skipped their read), probes, overruns (a tick
+    /// already pending at exit), frame timeouts, max cycles in the handler,
+    /// max entry latency in timer counts (20 ns).
     pub fn isr_stats(&self) -> [u32; 7] {
         let r = self.ring();
-        [&r.ticks, &r.empty, &r.gated, &r.overruns, &r.timeouts, &r.max_isr_cyc, &r.max_lat].map(|a| a.load(Relaxed))
+        [&r.ticks, &r.late, &r.probes, &r.overruns, &r.timeouts, &r.max_isr_cyc, &r.max_lat].map(|a| a.load(Relaxed))
     }
 
     /// Main-loop entry. With the stream ISR: no bus access; returns true
@@ -786,51 +791,71 @@ impl Logger {
     }
 }
 
-/// The AD2 stream ISR (feature `ad2-isr`; docs/decisions-2026-10-22.md #3):
-/// TIMER6 (STM32 TIM7, IRQ 55, the only interrupt fw-rs ever enables)
-/// ticking at `TICKS` x the AD2 rate (period T = P / 4) with a read gate of
-/// 7/8 P after the last seen conversion. Each tick: inside the gate nothing
-/// (`gated`, no bus access); else INTF (one SPI2 frame, ~8 us at 3.125 MHz);
-/// on AD2F the result R03..R05 (~13.5 us), the sign-copy check, the ring.
-/// After a hit at tick t the ticks t + T .. t + 3T are gated and t + 4T = t +
-/// P reads, so the read stays locked one period after the previous one: it
-/// sees the next conversion (P after the previous) with the same delay d < T,
-/// the stamps (the observation time, decision #2) are as regular as the two
-/// crystals plus the ISR entry latency. The timer / chip clock mismatch
-/// (ARR rounding + crystals, ~100 ppm) slowly walks d to 0; then one read
-/// comes just before the conversion (`empty`) and the next tick (T later)
-/// takes it: a stamp step of at most T + latency, < P / 2 at < P / 4 latency,
-/// so a gap of k periods is round(gap / P) exactly (the host's lost_before,
-/// LOG:GAPs?) - no false gaps. A conversion is lost only when an entry is
-/// delayed by more than P - d > 3/4 P (156 us at 4.8 kS/s, 78 at 9.6).
-/// CPU: one hit (~21.5 us) + three bus-free entries (~0.5 us) per sample:
-/// ~11 % at 4.8 kS/s, ~22 % at 9.6 kS/s (decision #3 invariant 5).
-/// DEVIATION from decision #3 invariant 2 ("~1.05 x the AD2 rate"): at 1.05 x
-/// the delay d walks through the whole period (T = 0.95 P), so the stamps
-/// jitter by ~P and every phase wrap (one empty tick in 21) made a 2-period
-/// stamp gap that neither firmware nor host can tell from a real miss
-/// (emulator, 4800 S/s: 1622 false lost_before in 32464 samples while
-/// LOG:COUNt? lost was 0), and the latency margin was P - T = 10 / 5 us. A
-/// 2.1 x tick with a P/2 gate still showed 190 false gaps in 139493 at 9.6
-/// kS/s (jitter T + latency > P / 2). Revert = TICKS / GATE below.
-/// Reading INTF clears every flag: harmless, the DMM is paused. Bounded: two
-/// frames with capped status waits (hy3131 `spi::wait`), no loops otherwise,
-/// no allocation, no float, no flash / LCD / watchdog, never a register
-/// write (HY3131) and never a call into dmm.rs. Shared with the main loop:
-/// `RING` only.
+/// The AD2 stream ISR (feature `ad2-isr`; docs/decisions-2026-10-22.md #3,
+/// docs/dmm-input-scope-feasibility.md 10): TIMER6 (STM32 TIM7, IRQ 55, the
+/// only interrupt fw-rs ever enables), phase-locked to the HY3131's
+/// conversion grid by src/ad2pll.rs. Entry A, once per conversion period,
+/// half way between two conversion edges: R03..R05 blind (one 3-byte SPI2
+/// frame, the flag is not needed: the register holds the result for a whole
+/// period), the sign-copy check, the ring. Every 4th period an entry B where
+/// the edge should be: one INTF read (clears AD2F); the next A reads INTF
+/// once more after its data frame, and AD2F there says on which side of B the
+/// edge came (`Pll::result`). Reading INTF clears AD2F and loses a
+/// conversion that completes during the frame (device 5f14d38: the old 4 x
+/// tick lost ~1.4 % in bursts while its read phase sat on the edge): here
+/// that race can only blur a probe, never cost a sample.
+///
+/// Stamps: the DWT time of entry A (decision #2, the observation time), one
+/// period apart to within the entry latency. A late A (latency above
+/// `Pll::late_max`, where the frame could reach the next edge) skips its read
+/// (`late`; the host sees a stamp gap of 2 periods); an interval whose end
+/// had passed before the ISR set it is stretched and the next one shortened
+/// by as much (`slips`), so the grid keeps its phase.
+///
+/// Bounded: at most two frames with capped status waits (hy3131
+/// `spi::wait`), no loops otherwise, no allocation, no float, no flash / LCD
+/// / watchdog, never a register write (HY3131) and never a call into dmm.rs.
+/// Shared with the main loop: `RING`, plus the statistics words below (each
+/// written by the ISR only, read by DBG:ISR?).
 #[cfg(feature = "ad2-isr")]
 pub mod isr {
     use super::*;
+    use crate::ad2pll::{Pll, COUNT_HZ};
 
-    /// Ticks per AD2 period, and the read gate after a seen conversion in
-    /// 1/8 periods (module notes).
-    const TICKS: u32 = 4;
-    const GATE_EIGHTHS: u64 = 7;
-
-    /// The ISR's producer state. Written by `start` (main loop) before the
-    /// hand-off, by the ISR alone after it; nobody else reads it.
+    /// The ISR's producer state and the lock (SRAM .sram_bss, all zero at
+    /// reset: off the TCM stack's budget). Written by `start` (main loop)
+    /// before the hand-off, by the ISR alone after it; the main loop reads
+    /// the Pll's statistics words (DBG:ISR?, u32 loads) only.
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
     static mut PROD: Producer = Producer::new();
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut PLL: Pll = Pll::idle();
     static mut RINGP: *const Ring = core::ptr::null();
+    /// The last session's frequency word offset (Pll::rel_q24): the next
+    /// session starts on it, so it locks at once.
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut REL: i32 = 0;
+    /// Data frame (CS low .. CS high) + ISR entry, timer counts, per divider
+    /// (device SELF? 8.6: us_r6 13.4 / 21.8 at /8 / 16, ~1.3 / 2.8 us per byte).
+    const fn frame_counts(div: u8) -> u32 {
+        match div {
+            8 => 400,   // 8 us
+            16 => 700,  // 14 us
+            _ => 1300,  // 26 us
+        }
+    }
+    /// A probe B whose entry came later than this (counts) is not used.
+    const B_LATE: u32 = 100;
+    /// The stacked PC of the entry with the largest latency (DBG:ISR?):
+    /// where the main loop was when the ISR was held off longest.
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static LAT_PC: AtomicU32 = AtomicU32::new(0);
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static SLIPS: AtomicU32 = AtomicU32::new(0);
+    /// Cycles spent in the handler (body, from the CNT read to the exit
+    /// checks), / 16 (wraps after ~340 s): the CPU share (DBG:ISR?).
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static BUSY16: AtomicU32 = AtomicU32::new(0);
 
     /// The ISR's copy of the wave trigger (`trig`): configuration of
     /// generation `gen`, the detector state, the first event at or after
@@ -876,21 +901,106 @@ pub mod isr {
         }
     }
 
-    /// Main loop, after the last bus access of the session start.
-    pub(super) fn start(prod: &Producer, ring: *const Ring) {
+    /// Main loop, after the session's chip set-up (the last bus access but
+    /// the edge search here): pick the read divider, find one conversion
+    /// edge by polling INTF (bounded: 3 periods), start the timer so that
+    /// the first A comes `P - beta` after it, hand the bus over.
+    pub(super) fn start(prod: &Producer, ring: *const Ring, rate_mhz: u32) {
+        let div = hy::stream::pick_div();
         unsafe {
             (*core::ptr::addr_of_mut!(TRG)).gen = 0;
             let p = &mut *core::ptr::addr_of_mut!(PROD);
             p.begin(prod.period_ns);
-            p.gate_us = ((prod.period_ns as u64 * GATE_EIGHTHS / 8 + 500) / 1000) as u32;
             *core::ptr::addr_of_mut!(RINGP) = ring;
+            let pll = &mut *core::ptr::addr_of_mut!(PLL);
+            *pll = Pll::new(rate_mhz, *core::ptr::addr_of!(REL), frame_counts(div));
         }
-        hy::stream::start(prod.period_ns / TICKS);
+        LAT_PC.store(0, Relaxed);
+        SLIPS.store(0, Relaxed);
+        BUSY16.store(0, Relaxed);
+        let pll = unsafe { &*core::ptr::addr_of!(PLL) };
+        let pc = pll.f >> 16; // period, counts
+        // Edge search: AD2F seen by read j and not by read j - 1 = the edge
+        // between their sampling points (~ the start + the command byte +
+        // the read period; CS setup .. the INTF bit ~ 2.5 us at /16).
+        let cyc_per_count = crate::clock::HCLK_HZ / COUNT_HZ; // 4
+        let mut f = [0u8];
+        let _ = hy::isr_read(hy::R_INTF, &mut f);
+        let t_begin = unsafe { r32(DWT_CYCCNT) };
+        let mut prev = t_begin;
+        let mut edge: Option<u32> = None;
+        loop {
+            let t = unsafe { r32(DWT_CYCCNT) };
+            if !hy::isr_read(hy::R_INTF, &mut f) {
+                break;
+            }
+            if f[0] & hy::INTF_AD2 != 0 {
+                edge = Some(prev.wrapping_add(t.wrapping_sub(prev) / 2));
+                break;
+            }
+            prev = t;
+            if t.wrapping_sub(t_begin) > 3 * pc * cyc_per_count {
+                break;
+            }
+        }
+        // First A: P - beta after the edge (the next edge then beta after
+        // A); without an edge anywhere (the loop finds it, ad2pll tests).
+        let lead = (pc - pll.beta) * cyc_per_count;
+        let now = unsafe { r32(DWT_CYCCNT) };
+        let first = match edge {
+            Some(e) => {
+                let mut due = e.wrapping_add(lead);
+                while due.wrapping_sub(now) as i32 <= (50 * cyc_per_count) as i32 {
+                    due = due.wrapping_add(pc * cyc_per_count);
+                }
+                due.wrapping_sub(now) / cyc_per_count
+            }
+            None => pc,
+        };
+        hy::stream::start(first.saturating_sub(4));
     }
 
-    /// IRQ 55 (src/shim.rs vector table).
+    /// Main loop, after `hy::stream::stop`: keep the lock for the next one.
+    pub(super) fn stopped() {
+        unsafe {
+            let pll = &*core::ptr::addr_of!(PLL);
+            if pll.locked {
+                *core::ptr::addr_of_mut!(REL) = pll.rel_q24();
+            }
+        }
+    }
+
+    /// The lock's numbers for DBG:ISR?: (probes, edges after B, max run,
+    /// locked, locked rate mHz, period offset ppm x 10 vs the nominal rung
+    /// (+ = the chip's conversions come later than nominal in MCU time),
+    /// slips, the PC of the worst entry latency, conversion periods, the
+    /// handler's CPU share in 1/1000 of the session's periods - the
+    /// exception entry and exit, ~30 cycles each, not included).
+    pub fn lock_stats() -> [u32; 10] {
+        let p = unsafe { &*core::ptr::addr_of!(PLL) };
+        let ppm10 = ((p.f_mean() as i64 - p.f_nom as i64) * 10_000_000 / (p.f_nom.max(1) as i64)) as i32;
+        [
+            p.probes,
+            p.late_edges,
+            p.max_run,
+            p.locked as u32,
+            p.rate_mhz(),
+            ppm10 as u32,
+            SLIPS.load(Relaxed),
+            LAT_PC.load(Relaxed),
+            p.periods,
+            {
+                let busy = BUSY16.load(Relaxed) as u64 * 16;
+                let total = p.periods as u64 * (p.f_mean() as u64 >> 16) * (crate::clock::HCLK_HZ / COUNT_HZ) as u64;
+                if total == 0 { 0 } else { (busy * 1000 / total) as u32 }
+            },
+        ]
+    }
+
+    /// IRQ 55 through the shim's `ad2_irq_entry` (src/shim.rs), which passes
+    /// the exception frame (MSP at entry: r0 r1 r2 r3 r12 lr pc xpsr).
     #[no_mangle]
-    pub unsafe extern "C" fn ad2_stream_irq() {
+    pub unsafe extern "C" fn ad2_stream_irq(frame: *const u32) {
         let lat = hy::stream::ack();
         if !hy::streaming() || RINGP.is_null() {
             hy::stream::disarm();
@@ -898,40 +1008,68 @@ pub mod isr {
         }
         let t0 = r32(DWT_CYCCNT);
         let ring = &*RINGP;
-        let p = &mut *core::ptr::addr_of_mut!(PROD);
-        p.tick_at(t0);
-        let mut f = [0u8];
-        if p.gate_closed() {
-            inc(&ring.gated);
-        } else if !hy::isr_read(hy::R_INTF, &mut f) {
-            inc(&ring.timeouts);
-        } else if f[0] & hy::INTF_AD2 != 0 {
-            p.last_sample_us = p.now_us;
-            let ts = p.now_us as u32;
-            let mut b = [0u8; 3];
-            if hy::isr_read(hy::R_AD2, &mut b) {
-                let v = hy::s24(&b);
-                if hy::ad2_sign_ok(v) {
-                    let idx = ring.head.load(Relaxed);
-                    if p.push(ring, ts, v) {
-                        trig(ring, idx, v);
-                    }
-                } else {
-                    inc(&ring.bad);
+        let pll = &mut *core::ptr::addr_of_mut!(PLL);
+        if pll.next_b {
+            let ok = lat <= B_LATE;
+            let iv = pll.on_b(ok);
+            let over = hy::stream::set_interval(iv, lat);
+            if over != 0 {
+                pll.overshoot(over);
+                inc(&SLIPS);
+            }
+            if ok {
+                let mut f = [0u8];
+                if !hy::isr_read(hy::R_INTF, &mut f) {
+                    inc(&ring.timeouts);
                 }
-            } else {
-                inc(&ring.timeouts);
             }
         } else {
-            inc(&ring.empty);
+            let (iv, probe) = pll.on_a();
+            let over = hy::stream::set_interval(iv, lat);
+            if over != 0 {
+                pll.overshoot(over);
+                inc(&SLIPS);
+            }
+            let p = &mut *core::ptr::addr_of_mut!(PROD);
+            p.tick_at(t0);
+            if lat > pll.late_max() {
+                inc(&ring.late);
+            } else {
+                let ts = p.now_us as u32;
+                let mut b = [0u8; 3];
+                if hy::isr_read(hy::R_AD2, &mut b) {
+                    let v = hy::s24(&b);
+                    if hy::ad2_sign_ok(v) {
+                        let idx = ring.head.load(Relaxed);
+                        if p.push(ring, ts, v) {
+                            trig(ring, idx, v);
+                        }
+                    } else {
+                        inc(&ring.bad);
+                    }
+                } else {
+                    inc(&ring.timeouts);
+                }
+                if probe {
+                    let mut f = [0u8];
+                    if hy::isr_read(hy::R_INTF, &mut f) {
+                        pll.result(f[0] & hy::INTF_AD2 != 0);
+                        inc(&ring.probes);
+                    } else {
+                        inc(&ring.timeouts);
+                    }
+                }
+            }
         }
         inc(&ring.ticks);
         let dt = r32(DWT_CYCCNT).wrapping_sub(t0);
+        BUSY16.store(BUSY16.load(Relaxed).wrapping_add(dt >> 4), Relaxed);
         if dt > ring.max_isr_cyc.load(Relaxed) {
             ring.max_isr_cyc.store(dt, Relaxed);
         }
         if lat > ring.max_lat.load(Relaxed) {
             ring.max_lat.store(lat, Relaxed);
+            LAT_PC.store(*frame.add(6), Relaxed);
         }
         if hy::stream::overrun() {
             inc(&ring.overruns);

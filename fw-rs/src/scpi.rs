@@ -223,7 +223,7 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///                           ("Settings conflict" while a session runs)
 ///   LOG:SOURce?             AD1 / AD2
 ///   LOG:SRATe <S/s>         requested AD2 rate; the nearest rung of 1200,
-///                           2400, 4800, 9600 is used (chop on or off: the
+///                           2400, 4800, 9600, 19200, 38400 is used (chop on or off: the
 ///                           chopper does not slow AD2) (default 2400, 4800
 ///                           with the ad2-isr stream ISR); takes effect at START
 ///   LOG:SRATe?              the requested rate
@@ -340,10 +340,19 @@ pub enum Log {
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
 ///   DBG:HYSPI:SELF? n[,div]  HY3131 bus self-test (src/hyspi.rs)
+///   DBG:HYSPI:WR? mode[,div] SPI2 write experiment (src/hyspi.rs write_test):
+///                           mode 0 bit-bang, 1 SPI2 one byte per frame + a cut
+///                           dummy, 2 SPI2 continuous + a cut dummy, 3 SPI2 as
+///                           8e5efa6 (byte by byte, no dummy)
 ///   DBG:ISR?                AD2 stream ISR (logger.rs `isr`): feature,active,ticks,
-///                           captured,empty,gated,dropped,bad,timeouts,overruns,
-///                           max_isr_ns,max_lat_ns,tick_mhz,forced (feature 0: no ISR
-///                           in the build; timeouts = all HY3131 frames since boot)
+///                           captured,late,probes,dropped,bad,timeouts,overruns,
+///                           max_isr_ns,max_lat_ns,rate_mhz,forced,locked,ppm_x10,
+///                           slips,max_run,edges_after_b,div,cpu_permille,lat_pc
+///                           (feature 0: no ISR in the build; timeouts = all
+///                           HY3131 frames since boot; rate_mhz = the locked
+///                           conversion rate in MCU time, ppm_x10 = its period vs
+///                           the nominal rung, signed; lat_pc = the PC (0x hex)
+///                           the worst-latency entry interrupted)
 ///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
 ///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
 ///                           as a crash (1st: fw-rs reboots; 2nd without 60 s
@@ -369,12 +378,15 @@ pub enum Dbg {
     Reset,
     /// DBG:PROF? (false) / DBG:PROF:RESET (true).
     Prof(bool),
-    /// DBG:AD2:TORN? r26,n[,SYNC] / NOISE? r26,n[,op1chop] / DRAW 0|1|2
+    /// DBG:AD2:TORN? r26,n[,SYNC] / NOISE? r26,n[,op1chop] / DRAW 0|1|2 /
+    /// DIV 0|8|16|32 (the stream ISR's read divider, 0 = automatic)
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level).
     Ad2(u8, u8, u16, u8),
     /// DBG:HYSPI:SELF? n[,div] (src/hyspi.rs): (n, div; 0 = hy3131::DIV).
     HySpi(u16, u8),
+    /// DBG:HYSPI:WR? mode[,div] (src/hyspi.rs `write_test`).
+    HySpiWr(u8, u8),
     /// DBG:ISR? (logger.rs `isr`).
     Isr,
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
@@ -1204,6 +1216,7 @@ impl Scpi {
                             let n = parse_num(first).map_or(100, |v| v as u32).clamp(1, crate::hyspi::N_MAX);
                             Some(Dbg::HySpi(n as u16, div))
                         }
+                        (Some(b"WR"), true) => Some(Dbg::HySpiWr(parse_num(first).map_or(1, |v| v as u32).min(3) as u8, div)),
                         _ => None,
                     };
                     match d {
@@ -1224,6 +1237,7 @@ impl Scpi {
                             Some(Dbg::Ad2(1, r26, n, third.and_then(parse_num).map_or(255, |c| (c as u8).min(3))))
                         }
                         (Some(b"DRAW"), false) => Some(Dbg::Ad2(2, (v[0].min(2)) as u8, 0, 0)),
+                        (Some(b"DIV"), false) => Some(Dbg::Ad2(3, (v[0].min(255)) as u8, 0, 0)),
                         _ => None,
                     };
                     match d {

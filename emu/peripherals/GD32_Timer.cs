@@ -293,15 +293,22 @@ namespace Antmicro.Renode.Peripherals.Timers
         private void Recount(double now, Action change = null)
         {
             var cnt = Counter(now);
+            // A running counter keeps its count phase (an ARR write mid-count
+            // does not restart the prescaler): the new segment starts at the
+            // last count edge, not at `now` (else every write lost up to one
+            // count: the fw-rs AD2 stream ISR rewrites ARR every interval).
+            var wasCounting = counting;
+            var edge = wasCounting ? segStart + (Abs(now) - absAtSegStart) * SecondsPerCount : now;
             CloseSegment(now);
             change?.Invoke();
             counting = cen && gate;
-            segStart = now;
+            var start = wasCounting && counting ? edge : now;
+            segStart = start;
             absAtSegStart = cnt;
             evalAbs = cnt;
             if(counting)
             {
-                segments.Add(new Segment { Start = now, AbsStart = cnt, Period = Period, SecondsPerCount = SecondsPerCount, UpdatesBefore = updatesBeforeSeg });
+                segments.Add(new Segment { Start = start, AbsStart = cnt, Period = Period, SecondsPerCount = SecondsPerCount, UpdatesBefore = updatesBeforeSeg });
             }
             generation++;
             UpdateTrgo(now);

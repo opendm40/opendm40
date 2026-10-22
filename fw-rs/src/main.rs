@@ -16,6 +16,7 @@ mod hyspi;
 mod lcd;
 mod logger;
 mod ad2exp;
+mod ad2pll;
 mod meter;
 mod mmio;
 mod persist;
@@ -592,13 +593,27 @@ fn main() -> ! {
                             false
                         }
                     }
+                    scpi::Dbg::HySpiWr(mode, div) => {
+                        if logger.active() {
+                            scpi.set_err("Settings conflict");
+                            false
+                        } else {
+                            app.dmm_power(&mut clk);
+                            let len = hyspi::write_test(mode, div, port.rsp_buf());
+                            port.respond_len(len);
+                            app.dmm.start(&mut clk);
+                            app.meter.reset();
+                            app.last_raw = None;
+                            false
+                        }
+                    }
                     scpi::Dbg::Isr => {
                         let i = logger.isr_stats();
                         let cyc_ns = |c: u32| (c as u64 * 1_000_000_000 / clock::HCLK_HZ as u64) as u32;
                         #[cfg(feature = "ad2-isr")]
-                        let tick_mhz = hy3131::stream::tick_mhz();
+                        let (l, div) = (logger::isr::lock_stats(), hy3131::stream::div_used() as u32);
                         #[cfg(not(feature = "ad2-isr"))]
-                        let tick_mhz = 0;
+                        let (l, div) = ([0u32; 10], 0u32);
                         let vals = [
                             cfg!(feature = "ad2-isr") as u32,
                             logger.on_isr() as u32,
@@ -612,17 +627,39 @@ fn main() -> ! {
                             i[3],
                             cyc_ns(i[5]),
                             i[6] * 20, // timer counts at 50 MHz
-                            tick_mhz,
+                            l[4],
                             hy3131::forced_stops(),
+                            l[3],
+                            l[5], // signed
+                            l[6],
+                            l[2],
+                            l[1],
+                            div,
+                            l[9],
                         ];
                         scpi.len = 0;
                         for (k, v) in vals.iter().enumerate() {
                             if k > 0 {
                                 scpi.put_bytes(b",");
                             }
-                            put_u32(&mut scpi, *v);
+                            if k == 15 && (*v as i32) < 0 {
+                                scpi.put_bytes(b"-");
+                                put_u32(&mut scpi, (*v as i32).unsigned_abs());
+                            } else {
+                                put_u32(&mut scpi, *v);
+                            }
+                        }
+                        scpi.put_bytes(b",0x");
+                        for k in (0..8).rev() {
+                            scpi.put_bytes(&[b"0123456789abcdef"[(l[7] >> (4 * k)) as usize & 15]]);
                         }
                         true
+                    }
+                    scpi::Dbg::Ad2(3, div, _, _) => {
+                        #[cfg(feature = "ad2-isr")]
+                        hy3131::stream::set_div_req(div);
+                        let _ = div;
+                        false
                     }
                     scpi::Dbg::Ad2(2, level, _, _) => {
                         log_draw = level;

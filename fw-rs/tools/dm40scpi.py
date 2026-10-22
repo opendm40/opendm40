@@ -518,7 +518,7 @@ def main():
     s = sub.add_parser('log', help='log readings (or, with --source, the FR-38 fast stream) to a CSV file')
     s.add_argument('out')
     s.add_argument('--source', choices=['ad1', 'ad2'], help='FR-38 fast stream from this converter (LOG:SOURce)')
-    s.add_argument('--rate', type=int, default=2400, help='(ad2) requested S/s: 1200, 2400, 4800, 9600 (nearest rung; ~6.5 kS/s link limit)')
+    s.add_argument('--rate', type=int, default=2400, help='(ad2) requested S/s: 1200, 2400, 4800, 9600, 19200, 38400 (nearest rung; 19200 / 38400 with the ad2-isr stream ISR)')
     s.add_argument('--chop', choices=['on', 'off'], help='(stream) converter chopper (default on; ad2: same rungs either way)')
     s.add_argument('--osr', type=int, help='(ad1) AD1OSR code 0..7')
     s.add_argument('-i', '--interval', type=float, default=1.0)

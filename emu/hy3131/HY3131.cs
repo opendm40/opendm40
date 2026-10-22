@@ -60,6 +60,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             intf = 0; ctbov = false; acpo = false;
             ad1Start = now; ad1Done = 0; ad1Code = 0; ad1Last = now;
             ad2Start = now; ad2Done = 0; lpfStart = now; lpfDone = 0;
+            ad2LastT = double.NegativeInfinity;
             lpfCode = 0; rmsVal = 0; ad2Code = 0;
             pkhMin = 0x3FFFF; pkhMax = -0x40000;
             ctEnabled = false; ctStart = double.NaN; ctStop = double.NaN;
@@ -111,7 +112,26 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case 0x1D: return (byte)(CtaNow(now) >> 16);
             case 0x1E:
             {
+                // The read-clears-flag race (device 5f14d38, feasibility 9.5 /
+                // 10): a conversion that completes while the INTF frame is under
+                // way sets AD2F after the bit was sampled, and the clear of the
+                // same read removes it: the flag is lost, the data (R03..R05)
+                // stays readable until the next conversion. Modelled as: an AD2
+                // result that completed within IntfRaceWindow before this read is
+                // cleared and not reported (Swallowed counts them).
+                Update(now);
+                if(EnAd2)
+                {
+                    var ph = (now - ad2LastT) / Ad2Period;
+                    var bin = (int)Math.Floor(Math.Max(0, Math.Min(0.999, ph)) * IntfPhase.Length);
+                    IntfPhase[bin]++;
+                }
                 var v = intf;
+                if(IntfRaceWindow > 0 && (v & 0x02) != 0 && now - ad2LastT < IntfRaceWindow)
+                {
+                    v = (byte)(v & ~0x02);
+                    Swallowed++;
+                }
                 intf = 0;
                 return v;
             }
@@ -265,6 +285,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public int ForcedAd2 = int.MinValue;
         public ulong Rewrites;                 // configuration writes (R20..R35)
         public long Ad2Conversions;            // AD2 results produced so far (tests)
+        /// INTF read-clears-flag race window, s (Read 0x1E): 0 = an ideal flag. The
+        /// Renode peripheral sets the device-like default (HY3131.IntfRaceUs).
+        public double IntfRaceWindow;
+        /// INTF reads by their phase after the last AD2 result, 1/20 periods
+        /// (diagnostics: HY3131.IntfPhaseHist).
+        public readonly long[] IntfPhase = new long[20];
+        /// AD2 flags lost to the race (tests, HY3131.Swallowed).
+        public long Swallowed;
+        private double ad2LastT = double.NegativeInfinity;
         public void ForceIntf(byte bits) { intf |= bits; }
         public int Intf => intf;
         public int Ad1Code => ad1Code;
@@ -458,6 +487,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             ad2Done = n;
             var t = ad2Start + n * p;
+            ad2LastT = t;
             intf |= 0x02;
             var x = ForcedAd2 != int.MinValue ? ForcedAd2 : Ad2Sample(t) + (int)Math.Round(Gauss() * Ad2NoiseCodes);
             ad2Code = Clamp19(x);
@@ -1600,6 +1630,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             this.portC = portC;
             this.misoPin = miso;
             Core = new Hy3131Core();
+            Core.IntfRaceWindow = 0.7e-6;
             Reset();
             // Connect() reports the current pin levels at once (CS is low before the
             // firmware drives it): the state is initialised before the handlers run.
@@ -1670,7 +1701,32 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public string Status => string.Format("{0} ad1={1} lpf={2} rms={3} intf=0x{4:X2} cmp={5} period={6:F4}s",
             Core.RoleName, Core.Ad1Code, Core.LpfCode, Core.RmsValue, Core.Intf, Core.CmpPin, Core.Ad1Period);
 
-        private double Now => machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds;
+        /// The chip's time: the machine's virtual time scaled by the HY3131 crystal's
+        /// offset from the MCU's (ClockPpm, + = the chip runs fast). Every conversion
+        /// grid, the counter and the input model run on it. Set it before the
+        /// firmware starts (a change moves the chip's clock by ppm x elapsed).
+        private double Now => machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds * (1.0 + ClockPpm * 1e-6);
+
+        /// HY3131 crystal offset vs the MCU, ppm (monitor: hy3131 ClockPpm -63).
+        public double ClockPpm { get; set; }
+
+        /// INTF read-clears-flag race window, us (Hy3131Core.IntfRaceWindow). Default
+        /// 0.7 us: what the device's loss bursts imply (5f14d38 check: ~11.5 ms per
+        /// burst at a 63 ppm tick / chip walk = 0.72 us). 0 = an ideal flag.
+        public double IntfRaceUs { get => Core.IntfRaceWindow * 1e6; set => Core.IntfRaceWindow = value * 1e-6; }
+
+        /// AD2 flags lost to the INTF race so far.
+        public long Swallowed => Core.Swallowed;
+
+        /// INTF reads by phase after the last AD2 result (20 bins of 1/20
+        /// period), then the swallowed count; cleared by the read.
+        public string IntfPhaseHist()
+        {
+            var r = string.Join(",", Core.IntfPhase) + " swallowed " + Core.Swallowed;
+            Array.Clear(Core.IntfPhase, 0, Core.IntfPhase.Length);
+            this.Log(LogLevel.Info, "INTF phase: {0}", r);
+            return r;
+        }
 
         // ---- GPIO bit-bang ----
         public void OnGPIO(int number, bool value)

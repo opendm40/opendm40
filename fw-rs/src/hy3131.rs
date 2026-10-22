@@ -116,6 +116,27 @@ pub fn write(reg: u8, data: &[u8]) {
     spi::to_af();
 }
 
+/// SPI2 write experiment (DBG:HYSPI:WR?, src/hyspi.rs): `mode` 1 = one
+/// frame per register, each [cmd, d, 0x00 cut after its first bits]; 2 = one
+/// continuous frame [cmd, d0 .. dn, 0x00 cut]; 3 = byte by byte with gaps and
+/// no dummy (8e5efa6's write, the corrupting one). At divider `div` (reads
+/// stay at `DIV`). The cut dummy: the GD32 keeps shifting the next byte
+/// while CS goes high right after the last data byte's RBNE, so MOSI holds
+/// the dummy's MSB (0) - not a level the peripheral picks - when the chip
+/// takes the last data bit; the incomplete dummy byte is dropped by the
+/// chip at CS high (a completed one would write reg + n + 1).
+pub fn write_spi(reg: u8, data: &[u8], mode: u8, div: u8) -> bool {
+    guard();
+    spi::set_div(div);
+    let ok = match mode {
+        1 => data.iter().enumerate().all(|(i, &d)| spi::write_cont(reg + i as u8, &[d], true)),
+        2 => spi::write_cont(reg, data, true),
+        _ => spi::write_cont(reg, data, false),
+    };
+    spi::set_div(DIV);
+    ok
+}
+
 /// Read `buf.len()` registers from `reg`.
 pub fn read(reg: u8, buf: &mut [u8]) {
     guard();
@@ -176,19 +197,21 @@ fn guard() {
 /// check. False when the frame timed out (`buf` then holds garbage). Only
 /// from the ISR while `streaming()`: the main loop does not touch the bus
 /// then, so the frame cannot interleave with another one. Bounded: a frame
-/// gives up after ~100 us per byte.
+/// gives up after ~100 us per byte. The data bytes are pipelined (the next
+/// byte is loaded while one shifts: no gap between them, `spi::read_fast`).
 #[cfg_attr(not(feature = "ad2-isr"), allow(dead_code))]
 pub fn isr_read(reg: u8, buf: &mut [u8]) -> bool {
-    spi::read(reg, buf)
+    spi::read_fast(reg, buf)
 }
 
 /// TIMER6 (STM32 name TIM7, 0x4000_1400, APB1, IRQ 55): the AD2 stream tick
 /// (decisions #3: a timer, not EXTI11 on PC11, which is also SPI2 MISO).
 /// Free in fw-rs: TIM1/2/3/5/8 hwtrig + scope, TIM6/12 generator, TIM13/14
 /// backlight / buzzer; only the stock firmware's key scan used it.
-/// Kernel clock 200 MHz (APB1 x4, TIMPRE, clock.rs); PSC 3 -> 50 MHz count,
-/// so the 16-bit ARR spans 763 Hz .. 50 MHz (4800 .. 38400 Hz used: 4 x
-/// the 1200 .. 9600 S/s AD2 rungs, logger.rs `isr`).
+/// Kernel clock 200 MHz (APB1 x4, TIMPRE, clock.rs); PSC 3 -> 50 MHz count
+/// (20 ns), the 16-bit ARR up to 1.31 ms: the ISR sets every interval
+/// itself (ARPE = 0, `set_interval`), phase-locked to the chip's conversion
+/// grid (src/ad2pll.rs; 1200 .. 38400 S/s, intervals 4 .. 833 us).
 #[cfg(feature = "ad2-isr")]
 pub mod stream {
     use super::*;
@@ -207,8 +230,6 @@ pub mod stream {
     /// URS: only an overflow sets UIF (not the UG below).
     const CR1_URS: u32 = 1 << 2;
     const UIF: u32 = 1;
-    /// Timer count rate after PSC = 3.
-    pub const COUNT_HZ: u32 = 50_000_000;
     pub const IRQN: u32 = 55;
     const NVIC_ISER: u32 = 0xE000_E100;
     const NVIC_ICER: u32 = 0xE000_E180;
@@ -221,18 +242,50 @@ pub mod stream {
     const IRQ_BIT: u32 = 1 << (IRQN % 32);
     const IRQ_REG: u32 = 4 * (IRQN / 32);
 
-    static ARR_V: AtomicU32 = AtomicU32::new(0);
+    /// Read divider of the stream frames: 0 = automatic (`pick_div`), else
+    /// 8 / 16 / 32 (DBG:AD2:DIV).
+    static DIV_REQ: AtomicU32 = AtomicU32::new(0);
+    static DIV_USED: AtomicU32 = AtomicU32::new(0);
 
-    /// Timer reload (ARR + 1) for a tick period in ns, clamped to 16 bit.
-    pub const fn reload_for(tick_ns: u32) -> u32 {
-        let n = (tick_ns as u64 * COUNT_HZ as u64 + 500_000_000) / 1_000_000_000;
-        if n < 100 { 100 } else if n > 65_536 { 65_536 } else { n as u32 }
+    pub fn set_div_req(div: u8) {
+        DIV_REQ.store(if matches!(div, 8 | 16 | 32) { div as u32 } else { 0 }, Relaxed);
     }
 
-    /// The running tick rate, mHz (0 when never started).
-    pub fn tick_mhz() -> u32 {
-        let r = ARR_V.load(Relaxed);
-        if r == 0 { 0 } else { (COUNT_HZ as u64 * 1000 / r as u64) as u32 }
+    /// The divider of the running / last stream (0 = none yet).
+    pub fn div_used() -> u8 {
+        DIV_USED.load(Relaxed) as u8
+    }
+
+    /// Main loop, before the hand-off: the read divider for the stream and
+    /// switch to it. Automatic: /8 (6.25 MHz; reads clean on the device,
+    /// feasibility 8.6, though the DO-path margin of 8.2 is ~0 on paper)
+    /// when the 22 configuration bytes R20..R35 read at /8 four times equal
+    /// the /16 reading (bytes that differ between two /16 readings are not
+    /// compared); else /16. `stop` puts `DIV` back.
+    pub fn pick_div() -> u8 {
+        let req = DIV_REQ.load(Relaxed) as u8;
+        let div = if req != 0 {
+            req
+        } else {
+            let mut a = [0u8; CFG_LEN];
+            let mut b = [0u8; CFG_LEN];
+            let mut c = [0u8; CFG_LEN];
+            spi::set_div(16);
+            let _ = spi::read(R_CFG, &mut a);
+            let _ = spi::read(R_CFG, &mut b);
+            spi::set_div(8);
+            let mut ok = true;
+            for _ in 0..4 {
+                ok &= spi::read(R_CFG, &mut c);
+                for i in 0..CFG_LEN {
+                    ok &= a[i] != b[i] || c[i] == a[i];
+                }
+            }
+            if ok { 8 } else { 16 }
+        };
+        spi::set_div(div);
+        DIV_USED.store(div as u32, Relaxed);
+        div
     }
 
     fn barrier() {
@@ -242,23 +295,26 @@ pub mod stream {
         }
     }
 
-    /// Hand the bus to the ISR and start ticking every `tick_ns`. The caller
-    /// has made its last bus access (set_ad2_stream) and set up the ISR's
-    /// state. The only place PRIMASK is cleared: before that, every
+    /// Hand the bus to the ISR; the first timer update (the first entry)
+    /// comes `first` counts (20 ns) from now, every later interval is set by
+    /// the ISR itself (`set_interval`, logger.rs `isr`). The caller has made
+    /// its last bus access (the chip set-up and the edge search) and set up
+    /// the ISR's state. The only place PRIMASK is cleared: before that, every
     /// interrupt line and SysTick / PendSV is disabled and its pending bit
     /// cleared (the FS-loader may have left some on), and TIM7 is the only
     /// line enabled, at priority 0: exactly one interrupt in the NVIC.
-    pub fn start(tick_ns: u32) {
-        let reload = reload_for(tick_ns);
-        ARR_V.store(reload, Relaxed);
+    pub fn start(first: u32) {
+        let first = first.clamp(100, 65_536);
         unsafe {
             modify32(RCU_APB1EN, 0, RCU_TIM7EN);
             let _ = r32(RCU_APB1EN);
             w32(DIER, 0);
+            // ARPE = 0: an ARR write applies to the running interval (the
+            // ISR writes it at the start of each one).
             w32(CR1, CR1_URS);
             w32(PSC, 3);
-            w32(ARR, reload - 1);
-            w32(EGR, 1); // UG: load PSC / ARR now (no UIF: URS)
+            w32(ARR, first - 1);
+            w32(EGR, 1); // UG: load PSC now (no UIF: URS)
             w32(CNT, 0);
             w32(SR, 0);
             w32(DIER, 1); // UIE
@@ -277,6 +333,19 @@ pub mod stream {
             core::arch::asm!("cpsie i", options(nomem, nostack, preserves_flags));
             w32(CR1, CR1_URS | CR1_CEN);
         }
+    }
+
+    /// ISR, at the start of an interval (`cnt` = CNT read by `ack`): make
+    /// this interval `len` counts long. Returns the counts it had to be
+    /// stretched by when its end had already passed or was too close (the
+    /// entry came that late): the caller takes them off the next one.
+    #[inline(always)]
+    pub fn set_interval(len: u32, cnt: u32) -> u32 {
+        // CNT moves on while this runs: a margin of 16 counts (64 cycles).
+        let now = unsafe { r32(CNT) }.max(cnt);
+        let (arr, over) = if now + 16 < len { (len - 1, 0) } else { (now + 16, now + 17 - len) };
+        unsafe { w32(ARR, arr.min(0xFFFF)) };
+        over
     }
 
     /// Stop ticking and take the bus back (main loop only). No ISR can be
@@ -300,6 +369,7 @@ pub mod stream {
             barrier();
         }
         HANDED.store(false, Relaxed);
+        spi::set_div(DIV);
     }
 
     /// ISR entry: clear UIF (rc_w0), return the timer count since the update
@@ -487,6 +557,89 @@ mod spi {
             }
         }
         let ok = idle();
+        end(ok)
+    }
+
+    /// `read` with the data bytes pipelined: the next 0xFF goes into DATA as
+    /// soon as TBE says the previous one moved to the shift register, so the
+    /// bytes follow each other without a gap (one RBNE read per byte, well
+    /// inside the next byte's 1.28 us at /8: no overrun). The stream ISR's
+    /// frames only (3-byte AD2 result, 1-byte INTF).
+    pub(super) fn read_fast(reg: u8, buf: &mut [u8]) -> bool {
+        set(GPIOD, CS, false);
+        spin(CS_SETUP);
+        if xfer((reg << 1) | 1).is_none() || !idle() {
+            return end(false);
+        }
+        unsafe {
+            modify32(GPIOC + MODER, 3 << (2 * SCK), 1 << (2 * SCK));
+            set(GPIOC, SCK, true);
+            spin(PULSE_HI);
+            set(GPIOC, SCK, false);
+            spin(PULSE_LO);
+            modify32(GPIOC + MODER, 3 << (2 * SCK), 2 << (2 * SCK));
+            let n = buf.len();
+            if n == 0 {
+                return end(true);
+            }
+            w16(SPI_DATA, 0xFF);
+            for i in 0..n {
+                if i + 1 < n {
+                    if !wait(STAT_TBE, STAT_TBE) {
+                        return end(false);
+                    }
+                    w16(SPI_DATA, 0xFF);
+                }
+                if !wait(STAT_RBNE, STAT_RBNE) {
+                    return end(false);
+                }
+                buf[i] = r32(SPI_DATA) as u8;
+            }
+        }
+        let ok = idle();
+        end(ok)
+    }
+
+    /// SPI2 write frame (see `super::write_spi`). `cut`: continuous TX of
+    /// cmd + data + a 0x00 dummy, CS high at the last data byte's RBNE (the
+    /// dummy's first bit in flight), then the dummy drained. Else byte by
+    /// byte: each one sent and received before the next is loaded.
+    pub(super) fn write_cont(reg: u8, data: &[u8], cut: bool) -> bool {
+        set(GPIOD, CS, false);
+        spin(CS_SETUP);
+        let ok = unsafe {
+            if !cut {
+                let mut ok = xfer(reg << 1).is_some();
+                for &d in data {
+                    ok = ok && xfer(d).is_some();
+                }
+                ok && idle()
+            } else {
+                // bytes: cmd, data.., dummy; the RBNE of byte k is read
+                // after byte k + 1 went into DATA.
+                let n = data.len() + 1;
+                let byte = |k: usize| if k == 0 { reg << 1 } else if k < n { data[k - 1] } else { 0x00 };
+                w16(SPI_DATA, byte(0) as u16);
+                let mut ok = true;
+                for k in 1..=n {
+                    ok = ok && wait(STAT_TBE, STAT_TBE);
+                    if !ok {
+                        break;
+                    }
+                    w16(SPI_DATA, byte(k) as u16);
+                    ok = wait(STAT_RBNE, STAT_RBNE);
+                    let _ = r32(SPI_DATA);
+                    if ok && k == n {
+                        // byte n - 1 (the last data byte) is in: CS up now,
+                        // the dummy has just started.
+                        set(GPIOD, CS, true);
+                    }
+                }
+                ok = ok && wait(STAT_RBNE, STAT_RBNE);
+                let _ = r32(SPI_DATA);
+                ok && idle()
+            }
+        };
         end(ok)
     }
 
@@ -735,7 +888,9 @@ pub const fn ad2_rate_mhz(r26: u8) -> u32 {
 
 /// The data logger's AD2 rate ladder: R26 low bits for a requested rate in
 /// S/s. Prefers the /2 clock (more modulator samples per result) and the
-/// largest OSR that gives the rate: 1200 .. 9600 S/s, the same rungs with
+/// largest OSR that gives the rate: 1200 .. 38400 S/s (19200 and 38400 for
+/// the phase-locked stream ISR, feasibility 10; the stock rows' 76.8 kS/s is
+/// beyond a CPU read per sample), the same rungs with
 /// `chop` (ENCHOPAD2, offset cancelled, the logger default) and without
 /// (ENCHOPAD2 does not slow AD2 down, see above; /4, OSR 1024 = 1200 S/s is
 /// the slowest the chip has). A request between two rungs takes the nearest
@@ -745,7 +900,7 @@ pub const fn ad2_rate_mhz(r26: u8) -> u32 {
 /// what the bus in use misses.
 pub const fn ad2_r26_for(req_hz: u32, chop: bool) -> u8 {
     // (rate S/s, R26 low bits without ENCHOPAD2)
-    const T: [(u32, u8); 4] = [(1200, R26_CLK4 | 5), (2400, 5), (4800, 4), (9600, 3)];
+    const T: [(u32, u8); 6] = [(1200, R26_CLK4 | 5), (2400, 5), (4800, 4), (9600, 3), (19200, 2), (38400, 1)];
     let c = if chop { R26_CHOP } else { 0 };
     let t = &T;
     let mut i = 0;
@@ -808,7 +963,7 @@ mod tests {
         // The stock AC rows: /2, OSR 32, unchopped: 76.8 kS/s.
         assert_eq!(ad2_rate_mhz(0x80), 76_800_000);
         assert_eq!(ad2_period_ns(0x80), 13_021);
-        for hz in [1200u32, 2400, 4800, 9600] {
+        for hz in [1200u32, 2400, 4800, 9600, 19200, 38400] {
             let r = ad2_r26_for(hz, true);
             assert_eq!(ad2_rate_mhz(r), hz * 1000, "chop {hz}");
             assert!(r & R26_CHOP != 0);
@@ -826,7 +981,8 @@ mod tests {
         assert_eq!(ad2_rate_mhz(ad2_r26_for(1, true)), 1_200_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(600, true)), 1_200_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(600, false)), 1_200_000);
-        assert_eq!(ad2_rate_mhz(ad2_r26_for(50_000, true)), 9_600_000);
+        assert_eq!(ad2_rate_mhz(ad2_r26_for(50_000, true)), 38_400_000);
+        assert_eq!(ad2_rate_mhz(ad2_r26_for(12_000, true)), 9_600_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(3000, true)), 2_400_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(3500, true)), 4_800_000);
         // 9600 S/s: 104.167 us; 1200 S/s: 833.3 us.

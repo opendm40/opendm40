@@ -87,6 +87,7 @@ namespace Hy3131Tests
             Temperature();
             Beat();
             Ad2Stream();
+            Ad2Race();
             CrossCases();
             Sentinel();
             SentinelLater();
@@ -959,7 +960,9 @@ namespace Hy3131Tests
             }
             var made = m.Chip.Core.Ad2Conversions - c0;
             Near(made, 960, 2, "conversions in 100 ms of virtual time");
-            Check(seen == made || seen == made - 1, "one AD2F per conversion (polled faster than the period)", string.Format("seen {0}, made {1}", seen, made));
+            var lost = m.Chip.Swallowed;
+            Check(seen + lost == made || seen + lost == made - 1, "one AD2F per conversion (polled faster than the period), less the ones the INTF race swallowed", string.Format("seen {0}, swallowed {1}, made {2}", seen, lost, made));
+            Check(lost > 0 && lost < made / 20, "  the default 0.7 us window swallows a few % at a ~38 us poll", lost.ToString());
             m.BitTime = 0.05e-6; // short frames: the check is about the grid, not the link
             m.WaitFlag(0x02, 0.01, 1e-6); // just after a grid point
             m.Advance(30e-6);
@@ -995,6 +998,50 @@ namespace Hy3131Tests
                 }
                 var sd = Math.Sqrt(s2 / k - (s1 / k) * (s1 / k));
                 Near(sd, t.sd, t.sd * 0.1, string.Format("R26 0x{0:X2}: per-result noise model", t.r26));
+            }
+        }
+
+        /// The INTF read-clears-flag race and the chip-clock offset (fw-rs AD2 stream
+        /// ISR, docs/dmm-input-scope-feasibility.md 10): an AD2 result completing
+        /// within IntfRaceWindow before an INTF read is cleared unreported, its data
+        /// stays; ClockPpm moves every conversion grid.
+        private static void Ad2Race()
+        {
+            Console.WriteLine("AD2 flag race and chip clock offset");
+            var m = NewChip();
+            Check(Math.Abs(m.Chip.IntfRaceUs - 0.7) < 1e-9, "Renode peripheral default race window 0.7 us", m.Chip.IntfRaceUs.ToString());
+            var c = m.Chip.Core;
+            c.SetInput("dca:0.0123");
+            m.Configure(F5R0, 5);
+            m.Write(0x34, 0); m.Write(0x29, 0);
+            const double t0 = 10.0;
+            c.Write(0x26, 0xA3, t0); // 9600/s; the grid starts at t0
+            var p = c.Ad2Period;
+            c.Read(0x1E, t0 + 0.5 * p); // clear
+            var s0 = c.Swallowed;
+            var f = c.Read(0x1E, t0 + p + 0.3e-6) & 0x02;
+            Check(f == 0 && c.Swallowed == s0 + 1, "INTF read 0.3 us after a conversion: AD2F swallowed", "flag " + f);
+            Check((c.Read(0x1E, t0 + 1.5 * p) & 0x02) == 0, "  ... and not reported by the next read either");
+            var d1 = c.Read(0x03, t0 + 1.6 * p) | c.Read(0x04, t0 + 1.6 * p) << 8;
+            Check(d1 != 0, "  the conversion's data is still in R03..R05", d1.ToString());
+            Check((c.Read(0x1E, t0 + 2 * p + 0.9e-6) & 0x02) != 0, "INTF read 0.9 us after a conversion: AD2F reported");
+            c.Read(0x1E, t0 + 2.5 * p);
+            Check((c.Read(0x1E, t0 + 2.99 * p) & 0x02) == 0 && (c.Read(0x1E, t0 + 3 * p + 1e-6) & 0x02) != 0, "a read just before the conversion leaves the flag for the next one");
+            c.IntfRaceWindow = 0;
+            c.Read(0x1E, t0 + 3.5 * p);
+            Check((c.Read(0x1E, t0 + 4 * p + 0.1e-6) & 0x02) != 0, "IntfRaceWindow 0: an ideal flag");
+            foreach(var ppm in new[] { -100.0, 100.0 })
+            {
+                var n = NewChip();
+                n.Chip.ClockPpm = ppm;
+                n.Chip.SetInput("dca:0.0");
+                n.Configure(F5R0, 5);
+                n.Write(0x34, 0); n.Write(0x29, 0); n.Write(0x26, 0xA3);
+                var k0 = n.Chip.Core.Ad2Conversions;
+                n.Advance(10.0);
+                n.Read1(0x1E);
+                var k = n.Chip.Core.Ad2Conversions - k0;
+                Near(k, 96000 * (1 + ppm * 1e-6), 2, string.Format("ClockPpm {0:+0;-0}: conversions in 10 s of MCU time", ppm));
             }
         }
 

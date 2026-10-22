@@ -10,8 +10,24 @@
  *                                      at 0x08008000..0x0800800B (excluded from
  *                                      the update body CRC by dm40fw.py); the
  *                                      next 4 bytes are padding.
- *   B  0x08008010..0x080A0000          .text, .rodata, .data load image.
- *      Must end below 0x080A0000 (FS-loader, UID data, calibration above).
+ *   B  0x08008010..0x08080000  480 KiB .text, .rodata: everything that may
+ *                                      run or be read while the AD2 stream
+ *                                      ISR runs. The linker fails when it
+ *                                      does not fit.
+ *   C  0x08080000..0x080A0000  128 KiB .cold (boot-only / rarely run code:
+ *                                      calibration backup, fatren, the
+ *                                      gallery, screenshots, the DLG writer,
+ *                                      FAT / vdisk generation, uploads) and
+ *                                      the .data load image. Must end below
+ *                                      0x080A0000 (FS-loader, UID data,
+ *                                      calibration above).
+ *   Why the split: flash from 0x08080000 up is NOT zero-wait on the GD32F4
+ *   (only the low 512 KiB are). A read there stalls the bus for ~20 us, and
+ *   with it the AD2 stream ISR's entry (device 5f14d38: max_lat 18.8-21.8
+ *   us whenever the logger panel drew ASCII26 glyphs, which had grown past
+ *   0x08080000; 4.6 us without the panel; docs/dmm-input-scope-feasibility.md
+ *   10.3). Code in C costs that per call: only what never runs while a
+ *   stream does (or seldom, outside the main loop's every-pass path).
  *
  * RAM:
  *   TCM     0x10000000  64 KiB  .data, .bss, stack (top 0x10010000)
@@ -21,7 +37,8 @@
 MEMORY
 {
     FLASH_A (rx) : ORIGIN = 0x08004000, LENGTH = 0x4000
-    FLASH_B (rx) : ORIGIN = 0x08008010, LENGTH = 0x080A0000 - 0x08008010
+    FLASH_B (rx) : ORIGIN = 0x08008010, LENGTH = 0x08080000 - 0x08008010
+    FLASH_C (rx) : ORIGIN = 0x08080000, LENGTH = 0x080A0000 - 0x08080000
     TCM (rw)     : ORIGIN = 0x10000000, LENGTH = 64K
     SRAM (rw)    : ORIGIN = 0x20000000, LENGTH = 192K
 }
@@ -48,6 +65,27 @@ SECTIONS
         __region_a_end = .;
     } > FLASH_A
 
+    /* Claimed before .text (the first matching rule wins), placed in C by
+     * its region. Module paths in the v0-mangled section names:
+     * <len><name> after the crate (7dm40_fw). */
+    .cold ORIGIN(FLASH_C) :
+    {
+        __cold_start = .;
+        *(.text.*7dm40_fw9calbackup*);
+        *(.text.*7dm40_fw6fatren*);
+        *(.text.*7dm40_fw6native*);
+        *(.text.*7dm40_fw8recovery*);
+        *(.text.*7dm40_fw7genuine*);
+        *(.text.*7dm40_fw7gallery*);
+        *(.text.*7dm40_fw10screenshot*);
+        *(.text.*7dm40_fw4dlog*);
+        *(.text.*7dm40_fw6fatdir*);
+        *(.text.*7dm40_fw5vdisk*);
+        *(.text.*7dm40_fw6upload*);
+        . = ALIGN(4);
+        __cold_end = .;
+    } > FLASH_C
+
     .text ORIGIN(FLASH_B) :
     {
         __stext = .;
@@ -64,7 +102,7 @@ SECTIONS
         *(.data .data.*);
         . = ALIGN(4);
         __edata = .;
-    } > TCM AT > FLASH_B
+    } > TCM AT > FLASH_C
     __sidata = LOADADDR(.data);
 
     .bss (NOLOAD) :

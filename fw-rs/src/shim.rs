@@ -22,7 +22,7 @@ use core::arch::global_asm;
 #[cfg(feature = "ad2-isr")]
 macro_rules! irq55 {
     () => {
-        "ad2_stream_irq"
+        "ad2_irq_entry"
     };
 }
 #[cfg(not(feature = "ad2-isr"))]
@@ -105,6 +105,22 @@ default_handler:
     b     .
 "#
 ));
+
+// IRQ 55 entry (feature ad2-isr): the exception frame's address (MSP at
+// entry: r0 r1 r2 r3 r12 lr pc xpsr) to the Rust handler, which records
+// the interrupted PC of its worst-latency entry (DBG:ISR? lat_pc). A tail
+// call: LR keeps EXC_RETURN.
+#[cfg(feature = "ad2-isr")]
+global_asm!(
+    r#"
+    .section .text.ad2_irq_entry, "ax", %progbits
+    .thumb_func
+    .global ad2_irq_entry
+ad2_irq_entry:
+    mov   r0, sp
+    b.w   ad2_stream_irq
+"#
+);
 
 /// Rust part of the shim: decide, then hand over (never returns).
 #[no_mangle]

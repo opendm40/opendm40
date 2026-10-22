@@ -141,3 +141,87 @@ pub fn self_test(n: u32, div: u8, out: &mut [u8]) -> usize {
     }
     o.n
 }
+
+/// DBG:HYSPI:WR? mode[,div]: the SPI2 write experiment (hy3131 `write_spi`;
+/// feasibility 8.6: 8e5efa6's SPI2 writes set bit 0 of every byte 1xxxxxx0).
+/// Mode 0 = the bit-banged write (reference), 1 / 2 / 3 = `write_spi` modes,
+/// at `div` (default 16). 256 single-byte writes of R36 (SPHACAL) = 0..255,
+/// each read back (SPI2 at `hy3131::DIV`); then 256 two-byte writes of
+/// R35..R36 (the row's last byte, bits 7 / 0 toggled, + SPHACAL: a byte
+/// interior to the frame), both read back against the same bytes written
+/// bit-banged (R35 has read-only bits); R35 / R36 restored bit-banged; R37
+/// (test mode) read before / after.
+/// Reply: mode,div,bad_1byte,bad_2byte,us_per_1byte_write,r37_before,
+/// r37_after,first mismatches as written>read (hex, up to 6).
+pub fn write_test(mode: u8, div: u8, out: &mut [u8]) -> usize {
+    let div = if matches!(div, 8 | 16 | 32) { div } else { 16 };
+    let mut keep = [0u8; 2];
+    hy::read(0x35, &mut keep);
+    let r37a = hy::read1(0x37);
+    let wr = |reg: u8, d: &[u8]| {
+        if mode == 0 {
+            hy::write(reg, d);
+        } else {
+            hy::write_spi(reg, d, mode, div);
+        }
+    };
+    let (mut bad1, mut bad2, mut cw) = (0u64, 0u64, 0u64);
+    let mut miss = [(0u8, 0u8); 6];
+    let mut nmiss = 0;
+    for v in 0..=255u8 {
+        let t = cyc();
+        wr(R_SPHACAL, &[v]);
+        cw += cyc().wrapping_sub(t) as u64;
+        let g = hy::read1(R_SPHACAL);
+        if g != v {
+            bad1 += 1;
+            if nmiss < miss.len() {
+                miss[nmiss] = (v, g);
+                nmiss += 1;
+            }
+        }
+        if v & 63 == 0 {
+            crate::wdt::kick_if_feeding();
+        }
+    }
+    for i in 0..=255u8 {
+        // Reference = the same bytes written bit-banged and read back (R35
+        // has read-only bits), then the mode's write over a different value.
+        let d = [keep[0] ^ (i & 0x81), i.wrapping_mul(37) ^ 0x5A];
+        hy::write(0x35, &d);
+        let mut want = [0u8; 2];
+        hy::read(0x35, &mut want);
+        hy::write(0x35, &[d[0] ^ 0x81, !d[1]]);
+        wr(0x35, &d);
+        let mut g = [0u8; 2];
+        hy::read(0x35, &mut g);
+        if g != want {
+            bad2 += 1;
+        }
+        hy::write(0x35, &keep[..1]);
+        if i & 63 == 0 {
+            crate::wdt::kick_if_feeding();
+        }
+    }
+    hy::write(0x35, &keep);
+    let r37b = hy::read1(0x37);
+    let mut o = Out { b: out, n: 0 };
+    o.u(mode as u64);
+    for v in [div as u64, bad1, bad2] {
+        o.s(b",");
+        o.u(v);
+    }
+    o.s(b",");
+    o.us(cw, 256);
+    o.s(b",");
+    o.x(r37a);
+    o.s(b",");
+    o.x(r37b);
+    for &(w, g) in &miss[..nmiss] {
+        o.s(b",");
+        o.x(w);
+        o.s(b">");
+        o.x(g);
+    }
+    o.n
+}
