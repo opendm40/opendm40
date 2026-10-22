@@ -525,6 +525,12 @@ Code work (in this order):
       (5fd7871, e3fe548; verify: loop max in DBG:DIAG? during a shot, SCPI READ? keeps answering, S00x.BMP correct)
 - [x] Data logger (LOG:STAT ON) has no on-screen indicator: "DATA LOGGING" panel (dialog::log_panel,
       rate + sample count, 1 s refresh), view repainted on stop.  (5fd7871; verify on device)
+- [ ] Browser client (owner 2026-10-22: later, not now): one local HTML page (fw-rs/tools/web/dm40.html) over WebUSB
+      (Chrome/Edge) on the USBTMC interface (class 0xFE; the MSC interface stays the OS's): big DMM reading, trend +
+      CSV, scope via WAV:PRE? / WAV:DATA? (timebase, trigger, RUN/STOP), generator, SCPI console. Linux needs a udev
+      rule that unbinds the usbtmc kernel driver from 1209:0001 and grants access (Chrome cannot claim a
+      kernel-bound interface); Windows needs WinUSB (Zadig). Option: Web Bluetooth over the BLE "DM40A" link
+      (stock app protocol, no SCPI) for cable-free use. A claude.ai artifact sandbox likely blocks WebUSB.
 - [ ] sigrok/SmuView (merged from three items): libsigrok scpi-dmm DM40 profile exists as
       ../libsigrok-dm40/0001-scpi-dmm-add-support-for-Alientek-DM40A-B-C-dm40-fw-.patch (command set
       like the 34401A: CONF:<f>, READ?, FUNC?; 3 s delay after RES/CAP/TEMP/FREQ/CONT/DIOD). DC V works
