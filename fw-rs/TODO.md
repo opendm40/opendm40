@@ -998,7 +998,8 @@ Firmware:
             an invalid CBW, it called our callback with the old command and `set_status` panicked -> FWDGT.
             Fixed: usbd-storage vendored with fixes (fw-rs/vendor, "dm40 patch"), msc.rs / usb::abort_in.
             Emulator: emu/fastendtest.py (a60f8ce 2 of 6 pass, fix 3 of 3), emu/mscresettest.py.
-            (verify on device: the f3aea2f 6b repro once with the fix image, then a Linux reset recovery)
+            Device 1eb4d7e: the 6b repro PASS (0 lost, the reader went on after the UNIT ATTENTION, MMEM:DATA?
+            of the new 26.5 MB CSV complete, no usb-storage reset), a port reset during a volume read PASS.
 - [x] (A) DMM-input "slow floating scope" via AD2 = the Wave view (E5/E6; docs/dmm-input-scope-feasibility.md 10,
       src/app_wave.rs; feature `ad2-isr` only, hidden without it): MF range page "Wave" (V / A) and the scope page's
       "MCX | DMM" source badge; the AD2 stream drained into the scope record (continuous, 10-bit codes), the stock
@@ -1161,6 +1162,11 @@ Firmware:
             every probe row write, the first window from there, and a trip needs the comparator run going
             (senttest aprot-glitch with the model's Ad2StartGlitch: a60f8ce A-PROT, fix A-JACK only).
             Still open: log the trip's function / time.
+            Device 1eb4d7e: A-PROT again in TEMP with the square on V-COM: in ohm / temperature the probe
+            follows the V input (~0.34 A per volt; 5 V DC read 1.7 A). Fixed: the probe in DC V / mV only,
+            ohm / temperature A-JACK only (doc 4.8).
+      - [ ] False A-JACK in ohm / temperature with a voltage on V-COM (5 / 10 V DC, the square; A jack open):
+            the comparator on PB1 hits there; LIVE? is the right alert (device 1eb4d7e).
       - [x] **False A-JACK in Hz** (A jack open, reproducible): FREQ with 1 V DC or the 40 Hz square on V-COM
             -> SYST:ALER? AJACK (kind AD1PK_PB1), DMM page and combined view. Also an "AC" hint in DC V on
             the calibrator's 5 V DC (not at 1 / 10 V).

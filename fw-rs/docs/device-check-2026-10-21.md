@@ -1077,3 +1077,19 @@ Also found on the way: a reply longer than the host's allocation length went out
 ### Budgets (fix image)
 
 Stack headroom 21 148 B (>= 20 KiB), region B 11 460 B free (>= 8 KiB), SRAM 10 904 B free (>= 8 KiB). usbd-storage stays in region B (0x08027f20..), `usb::abort_in` too.
+
+### Device results (1eb4d7e, 2026-10-22 19:49-20:10)
+
+Installed by the owner (sha256 968ed018…97ae, crash count 0). Same wiring (calibrator on V-COM, A jack open, the volume mounted read-only). Scripts and logs: `wdt/dev/` in the session scratchpad.
+
+| # | Check | Result |
+|---|---|---|
+| 6b | The hang repro: `dm40scpi.py fast out.csv --source ad2 --rate 19200 --dur 30 --conf acv` with a host reading FAST003.CSV (52 MB) over the volume in 64 KiB reads (reopening on EIO) | **PASS.** 576 002 samples, 0 lost (`LOG:COUNt?` 0,576014,0,0,0), the session's UNIT ATTENTION failed the reader twice (EIO, kernel "device offline or changed"), it reopened and went on (27.8 MB in 75 s); `MMEM:DATA?` of the new FAST007.CSV (26.5 MB) right after the session complete; no usb-storage reset in the kernel log, `DBG:BOOT?` reason NONE |
+| 6b' | A port reset during a volume read (`usbreset 1209:0001` 6 s into a 30 s read of FAST002.CSV) | **PASS.** The reader saw 0 errors (17.5 MB at 578 KB/s), the meter kept running (no reboot, `READ?` answers) |
+| Hz | FREQ with 1 V DC and the 40 Hz square, A jack open | **PASS.** `SYST:ALER?` NONE, `DBG:SENT?` kind OFF; FREQ 40.0017 Hz |
+| V cal | Power meter, 6 V range, AC coupling, the 0..9.6 V square: `POW:VOLT:CAL` | **PASS.** `BIG,+6.000000E+00,+1.020659E+00,FACT`, the four gains unchanged (factory); coupling AC+DC and V range AUTO restored |
+| Wave | Wave view from DC V, `TIM:SCAL 0.005`, NORM rising at 1 V | **PASS.** `SCOP:MEAS:FREQ?` 40.000 Hz at 5 ms/div (was "--"), Vrms 4.767 V; 10 ms/div 40.000 Hz |
+| A-PROT | 6 rounds of FREQ -> DC V -> AC V -> DC V -> RES -> TEMP -> DC V, the square then 1 V on V-COM | **FAIL -> fixed after.** A-PROT in TEMP with the square (probe 1 747 mA, 135 ms). Traced: in ohm and temperature the probe follows the V input, ~0.34 A per volt (`ap3.txt`: 5 V DC on V-COM read 1.7 A in TEMP and RES, 10 V 3.1 A, the square up to 37.8 A; DC V with the same inputs: nothing). That, not the AD2 start-up alone, is the likely f3aea2f latch (the run had the calibrator on in ohm / temperature). Fix (next commit): the probe only in DC V / DC mV; ohm / temperature A-JACK only (doc 4.8); senttest aprot-ohm-12 / aprot-temp-12 now expect A-JACK, aprot-dcv-12 / aprot-ack-early act with the AUTO key |
+| alerts | Also seen: with 5 / 10 V DC or the square on V-COM, ohm and temperature raise A-JACK (comparator hits on PB1, A jack open) | **Open** (a false A-JACK where LIVE? is the right alert; not changed) |
+
+End state: DMM page, DC V, logging off (`LOG:DEST HOST`, `LOG:STAT 0`), `SYST:RAIL AUTO`, power meter coupling AC+DC / V range AUTO, V gains factory, calibrator 1 V DC; volume 0 %, backlight 10 %, Dim / Shutdown Never untouched. No crash during the checks.
