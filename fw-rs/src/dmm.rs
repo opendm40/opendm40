@@ -1030,6 +1030,10 @@ impl Dmm {
     pub fn range(&self) -> i8 {
         self.range
     }
+    /// The frequency counter's range (60 Hz .. 60 MHz, `freq_range_for`).
+    pub fn counter_range(&self) -> u8 {
+        self.freq.range
+    }
     pub fn button(&self) -> Button {
         if self.pw.on { Button::Power } else { button_of(self.mode) }
     }

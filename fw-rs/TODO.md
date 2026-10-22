@@ -35,7 +35,8 @@ Code work (in this order):
 1. Faster DMM value + chart redraw (~6 ms target).
 2. (done 2026-10-21: UF-11 FFT, UF-13 scope CSV + pulse / runt trigger, UF-08/09/10, UF-41 wired.)
 3. Wire src/bargraph.rs into DmmView (UF-30).
-6. libsigrok DM40 profile: device retest over USBTMC (all functions passed in the emulator), send upstream.
+6. libsigrok DM40 profile: device retest over USBTMC (all functions passed in the emulator; Range /
+   Digits added 2026-10-23, emulator only), send upstream.
 
 ## Memory budget (2026-10-22 rework, docs/native-boot.md "Memory budget")
 
@@ -589,6 +590,23 @@ Code work (in this order):
       AC / ACDC / AUTO, A DC / AC / ACDC / AUTO, POW, V DC; BT = "the other transport", like a tap):
       911 READ?, 880 samples, 31 NaN skipped, max READ? 0.853 s, no error, every change followed
       (POW read as W).
+      2026-10-23 Range + Digits (SmuView showed both greyed out: the profile had neither): fw-rs
+      CONF:<f> <range>[,<res>] (CONF without one = autorange, also on the current function),
+      [SENS:]<f>:RANG <v>|AUTO|MIN|MAX|DEF / ?, :RANG:AUTO ON|OFF|ONCE / ?, :RES <v>|MIN|MAX|DEF / ?
+      (scpi.rs header "Ranges and resolution"; RANG = the MF page's items, AUTO = the AUTO key,
+      AUTO+ / AUTO kept; RES = the FR-05 rate FAST / MED); CONF? now names the real range (was 6E+03
+      on 1000 V: derived from the readout). Profile: SR_CONF_RANGE (labels 600mV .. 1000V, 600uA ..
+      10A, 60R .. 60MR, "Auto"; CAP / FREQ Auto only) and SR_CONF_DIGITS ("5" = RATE FAST 60000
+      counts, "6" = RATE MED, +1 digit where the range has it), per-sample digits from CONF?
+      (replaces FUNC? before each READ?). Digits is not a fake: the rate is the meter's real
+      resolution switch (no 6000-count mode exists, see the FAST/MED/SLOW item). Emulator: every
+      function selected + a range set from sigrok-cli acquires (bt-scpi.md "Range and digits").
+      Device retest (USBTMC, libsigrok-dm40/install): --show lists the ranges per function; -c
+      range=<each> in DC V (1 V in: 6V 1.0000, 60V 1.000, 1000V 1.0), A, ohm; the meter's range page
+      highlights the set item, MANU in the status bar; range=Auto keeps AUTO+; digits=5 / 6 toggles
+      the rate chip FAST / MED and the +1 digit; SmuView Range / Digits combos follow; AC+DC / AUTO
+      coupling with a manual V range (emulator: an AC-part transient of ~2-5 s after the change, the
+      MF page path too); CONF? on 1000 V / 10 A.
 - [x] Scope touch: pinch = scale (timebase / V/div, 1-2-5 snap, value bubble), one-finger drag =
       offset, draggable trigger level, no clash with view swipes.  (c470be7, 419fd96, ebff9b4, 81c9dd8;
       verify on device, two-finger report rate first)
