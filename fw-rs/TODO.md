@@ -204,6 +204,11 @@ Code work (in this order):
         fatren-test md5). SCPI LOG:CSV:INTerval / DURation (discrete values; Settings conflict while
         recording) / FREE?. Persist v8 word W_REC. The idle auto power-off is held while recording (it was not). Swipe REC uses the same settings. Help page 5.
         fatren-test "interval recording". (verify on device: checklist in the decisions doc #1)
+        Device 5f14d38 (docs/device-check-2026-10-21.md "5f14d38" 3): Hold & Limits 9th row, Record page, 1 s via
+        the page 131 s -> LOG000.CSV 132 rows t = 1..132 on the USB volume == MMEM:DATA?; 10 s / 10 min stopped
+        itself, 60 rows t = 10..600; INT / DUR / FREE? and Settings conflict OK; settings survive DBG:RESET.
+        Not verified: swipe REC with the interval, the estimate within 2x, the power-off hold (no DBG field,
+        Shutdown Never on the unit).
       src/csvlog.rs: one-finger swipe down on the DMM page = start / stop,
       toasts, red REC in the status blocks, LOG:CSV ON|OFF / LOG:CSV?, power-off / reset commit the tail.
       (Since the USB storage redesign the PC cannot write or mount the SPI disk: no "Disk in use"
@@ -242,6 +247,8 @@ Code work (in this order):
             Emulator on e832a86 (new layout): scope STOP -> MF -> Settings -> Save CSV -> SCOPE/SCOP000.CSV on
             LUN 0 at the next read (UNIT ATTENTION 06/28 first, then the listing has it; screenshot.rs finish()
             calls set_stale since 4a484f7); LOG:CSV ON/OFF -> LOGS/LOG000.CSV likewise. Device re-check pending.
+            Device 5f14d38 (Linux): SCOPE/SCOP000-002.CSV and LOGS/LOG000-001.CSV on the mounted volume right after
+            the recordings, no remount, == MMEM:DATA?. Open: Windows, gallery .DLG tile, PROF csv lap, STACK.
       - [x] Owner 2026-10-21: drop legacy text LOG*.CSV / SCOP*.CSV support on the SPI disk (gallery parser,
             numbering, list/delete): only .DLG is written and read; CSV exists only as the generated export.
             (4544d4e)
@@ -540,6 +547,10 @@ Firmware:
         confirm; the energy is not persisted over a power cycle (owner's call).
   - [ ] Verify on device: the re-check list of doc §3.12 (zero, V cal, f on the square, W entry, DC method /
         AUTO, then T2 / T3 / T4 with current through A).
+        Device 5f14d38 (device-check "5f14d38" 5): PASS for W entry (dialog once, then direct), tap-W coupling
+        cycle + glyphs, POW:ZERO (Y 1072, X ~890 / ~160), V vs DC V <= 0.063 % on 6 / 60 V in DC and AC+DC, f 40.0018
+        Hz on the square (R21 0xBF), P / Wh / VAh tap, "Reset energy?" (1st Yes did not reset, 2nd did), reboot in W.
+        Open: POW:VOLT:CAL, T2-T4 with current through A.
   - [ ] Not done: RESistive phase cal (flat optimum), BT protocol slot (BT reports the AC A byte), limits (W) in
         Hold & Limits, tap on P to cycle the main readout (P / S / PF / E).
 - [x] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
@@ -549,6 +560,8 @@ Firmware:
       and an alert change under HOLD repaints at once (shown_state); strip_data the same rule. ui-render:
       both phases over the DMM page / strip matrices + a phase-flip stale-pixel check (0 violations).
       (verify on device: HOLD then current into A in DC V -> HOLD / A-JACK alternate 1 s each)
+      Device 5f14d38: LIVE? / HOLD alternate ~1 s in continuity with 1 V, slot clean (A-JACK needs the A jack
+      wired; Ω with a positive source never shows LIVE?: by design, needs a negative result).
       Researched: GO for current-in-A-jack in non-current modes (idle comparator on PB1, 47.5 Ω shunt, trips ~0.44 mA),
       partial for "V leads while in A mode"; blown fuse not detectable (fuse-check dialog instead). Doc §4, ~4-5 days.
       Done (sentinel.rs, doc §4.6): A-JACK by the comparator on PB1 (DC V / mV / ohm / temp) and the AD1 peak
@@ -565,6 +578,9 @@ Firmware:
       carry no comparator sentinel (those rows drive the power bus from OP3; r0 keeps it, and leads in A/COM
       leave V-COM open = r0). DBG:SENTinel:VARiant 0..7 restores the 9dd1222 rows per bit for the re-check.
       Host tests + senttest dcv-step. (verify on device: re-check list of that section)
+      Verified on device 5f14d38: AC V ON == OFF within 0.04 mV (VAR 1 brings back 37.15 mV: the chopper was the
+      cause); DC V 1 <-> 10 V soak 5 min +0 hits, kind OFF at 10 V; VAR 4 on 60 V trips again; 10 V on manual 6 V
+      no trip.
   - [ ] Not done: sentinels in AC+DC / diode / continuity / cap / Hz / AC A, DC? / AC? / FUSE? hints, OVERLOAD
         shunt rule, fuse-check dialog, STAT:QUES bit 9 (doc §4.6).
   Compared with UNI-T UT197 (2026-10-22, its manual §16.2 + the A / mA fuse notes): the UT197 senses a PLUG in
@@ -574,6 +590,7 @@ Firmware:
   unconnected plug is electrically invisible. Follow-ups, in order:
   - [ ] Device T9 / T10 with the A jack wired (never run), plus the 9dd1222 re-check list (AC V floor with
         alerts ON, DC V 1 <-> 10 V soak without A-JACK). Gate for everything below.
+        (re-check list PASS on 5f14d38; T9 / T10, AC mV / TC soaks still open)
   - [ ] "Leads in A?" reminder (closest firmware stand-in for InErr): on a change from a current function to
         a non-current one, toast "Leads in the A jack? Move to V" + a beep, at the moment the UT197 would warn.
         Fires also when the lead was already moved: own option in Settings 3/3 "Jack alerts" (and in the
@@ -607,6 +624,7 @@ Firmware:
       1200 / 2400 / 4800 / 9600 S/s with or without chop (600 does not exist: /4 OSR 1024 = 1200), so nominal /
       lost are right; the bit-banged link topped out at ~6.5 kS/s (9600 showed ~32 % lost; SPI2 (E2) should lift that). Emulator model
       and tests follow. (verify on device: log 1200 / 2400 / 4800 measured == nominal, lost 0; 9600 lost vs the bus build)
+      Device 5f14d38 (ad2-isr): ladder right, captured + lost = nominal at 1200 / 2400 / 4800 / 9600, chop on / off.
 - [x] (E2) HY3131 on the hardware SPI2 (src/hy3131.rs; feasibility doc 8): SPI2 @ 0x4000_3C00, PC10/11/12 AF6
       (VERIFIED: GD32F450xx DS table 5, UM V2.2), mode 0, /16 = 3.125 MHz, CS PD2 GPIO, the read-period clock as
       one GPIO pulse on PC10 between SPI bytes (exact datasheet frame). It is THE bus (no runtime switch); the old
@@ -643,6 +661,13 @@ Firmware:
       for 60 s with DBG:AD2:DRAW 2, 9600 S/s loss, DBG:ISR? max_isr_ns ~22000 / max_lat_ns (< ~5000 expected;
       larger = something masks interrupts), DBG:PROF? loop max while streaming, DMM / SELF? clean after a
       stream, *IDN? responsive. On a pass: make `ad2-isr` the default (then the Wave view, E5/E6).
+      Device 5f14d38 FAILS (device-check "5f14d38" 1): 4800 DRAW 2 60 s lost 1.43 % (DRAW 0 / 1 the same), 9600
+      2.64 %, 1200 lost 1. Bursts of ~11.5 ms every ~3948 conversions at every rate; every tick serviced, empty
+      = 4 x lost: the read phase drifts onto the conversion edge (tick +63 ppm vs the chip; -32 ppm at 1200 =
+      no loss) and the INTF read-to-clear swallows AD2F (inferred). Fix candidates: shift the phase after an
+      empty read / tick slower than 4 x the chip / detect from the data. Also max_lat 21.8 us with the DMM
+      drawing (4.6 us DRAW 0). PASS: *IDN? max 1 ms, PROF loop max 3.5 ms, DMM / SELF? clean after, forced stop.
+      Stays non-default.
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
@@ -666,6 +691,8 @@ Firmware:
       Fix: flush slice 1.5 ms, the paint starts on the pass after the frame (frames in back-to-back passes still
       paint at once), DBG:PROF? "s.paint" (was x1) times it. Not measurable in the emulator (it does not reach
       that frame rate at 1 ms/div). (verify on device: combined view, open input, 1 ms/div: ping p50 <= 2 ms)
+      Device 5f14d38: 56.6 fps, s.paint max 1.68 ms, loop max 12.3 ms, ping p50 3.3 / p99 18.1 ms (was 11.8 /
+      16.5): better, p50 still above 2 ms.
 - [x] Scope ~9 fps at 1 ms/div after AUTO: three comparator misses (AUTO's fast-timebase sweep) disabled
       the hardware trigger for good; 53bdb9d suspends it until the next range / timebase / coupling /
       edge / mode / type change. The emulator's comparator model barely fires (ScopeFeeder TIM2 gate

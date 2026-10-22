@@ -598,3 +598,248 @@ The emulator does not reach that frame rate at 1 ms/div, so this is not measured
 4. AD2: `log --rate 1200 / 2400 / 4800`, chop on and off: measured ≈ nominal, lost 0 (DRAW 0/1). 9600: the loss on the SPI2 bus.
 5. Combined view, open input, 1 ms/div, noise-triggered: 400 × DBG:PING? p50 ≤ 2 ms, DBG:PROF? s.paint max ≤ 2 ms, fps.
 6. Save CSV and swipe-REC on the USB volume (the emulator result above), DBG:BOOT? stack.
+
+## 5f14d38 (+ad2-isr)
+
+**Build.** The owner installed **5f14d38** built with `--features ad2-isr` before the run (2026-10-22 03:39-04:40). At the start it was healthy: `DBG:ISR?` field 1 = 1, stack 26 408 / 48 088 B, crash count 0, DMM page DC V AUTO+ 0.9998 V. No firmware was installed and no code was changed. Two reboots were made on purpose (`DBG:RESET`, items 3 and 5).
+Screenshots, CSVs and profiles are in the session scratchpad (`dev-5f14d38/`), not in git.
+
+**Wiring** as in the 9dd1222 run: the calibrator (`/dev/ttyACM1`) drives the scope probe and the DMM V/COM jacks in parallel; the A jack is not wired.
+- The 40 Hz square is func 2 mode 0 value 40000: 0..9.6 V, 4.806 V in AC V, 4.77-4.81 V in DC V (the calibrator's level drifts by ~1 % over the session, as seen on 9dd1222).
+- **Func 2 mode 1 is not a small square.** It gives **9.585 V DC** (DC V) with ~2.5 mV AC on it; the 9dd1222 note "mode 1 = about 10 mVpp" is wrong. The calibrator has no small AC signal and no negative output (a -1 V request gives 0 V).
+
+### Summary
+
+| # | Check | Result |
+|---|---|---|
+| 1a | AD2 ISR, 4800 S/s, DRAW 2, 60 s | **FAIL.** lost 4113 of 288 202 (**1.43 %**), max gap 12.6 ms, bad 0, overwritten 0. DBG:ISR? overruns 0, timeouts 0, forced 0, max_isr 22.3 us, **max_lat 21.8 us** (> 5 us) |
+| 1b | 9600 S/s, 30 s | lost 2.64 %, overruns 1845, max gap 9.1 ms |
+| 1c | Cause of the loss (1a/1b) | **Not the main loop.** Every ~3948 conversions at every rate, the ISR reads INTF for ~11.5 ms and sees no AD2F. The phase of the 4x tick walks onto the conversion edge, and the INTF read-to-clear appears to swallow AD2F there (details below). 1200 S/s: lost 1 |
+| 1d | *IDN? while streaming (undrained, 4800 / 9600) | **PASS.** p50 0.34 / 0.37 ms, max 0.90 / 1.03 ms; PROF loop max 3.3 / 3.5 ms |
+| 1e | DMM and SELF? 2000 after the streams | **PASS.** AC V 4.8070 (4.8063 before), DC V 1.00043, SELF? all error counts 0 |
+| 1f | Function change mid-stream | **PASS.** STATe? 0, "Settings conflict", forced 1, DC V reading at once, no reset |
+| 1g | AC mV small square | not possible (no small AC from the calibrator). Mode 1 (9.6 V DC, overload): 1.35 % / 2.37 % lost at 4800 / 9600, the same mechanism |
+| 2a | AC V floor with Jack alerts ON, VAR 0 / 1 / 0 | **PASS.** VAR 0: ON - OFF within 0.04 mV (0.13-0.44 mV); VAR 1 brings back **37.15-37.17 mV**: the OP1 chopper was the cause |
+| 2b | DC V 1 ↔ 10 V autorange soak, 5 min, A open | **PASS.** hits +0, streak 0, NONE; kind OFF at 10 V. VAR 4 on manual 60 V trips again (AJACK); 10 V on manual 6 V (OL, r0 sentinel) does not trip |
+| 2c | Combined view, open input, 1 ms/div | **Marginal.** 56.6 fps, s.paint max 1.68 ms (PASS ≤ 2), loop max 12.3 ms, **ping p50 3.3 ms** (target ≤ 2; 11.8 on 9dd1222), p99 18.1 ms |
+| 2d | AD2 rate ladder | **PASS.** captured + lost = nominal at 1200 / 2400 / 4800 / 9600, chop on and off (r26 0x0D / 0x05 / 0x24 / 0x03) |
+| 2e | Scope Save CSV on the USB volume (9dd1222 FAIL) | **PASS.** SCOPE/SCOP000-002.CSV are on the mounted volume |
+| 3a | Record page via Hold & Limits | **PASS.** 9th row "Record", page with steppers, "Free: about 1193 h (limit)" |
+| 3b | 1 s interval, Start / Stop on the page | **PASS.** LOGS/LOG000.CSV on the mounted volume right after the stop, byte-identical to MMEM:DATA?, **132 rows, t = 1, 2, … 132** for a 131.05 s recording |
+| 3c | LOG:CSV:INT / DUR / FREE?, settings conflict | **PASS.** INT 10 and DUR 600 accepted, INT 5 / DUR 7 "Illegal parameter value", INT while recording "Settings conflict", FREE? 14 880 768 |
+| 3d | 10 s / 10 min stops itself | **PASS.** LOG001.CSV: 60 rows, t = 10 … 600, state 3 after ~605 s |
+| 3e | Settings over a reboot | **PASS.** INT 10 / DUR 600 kept after DBG:RESET |
+| 3f | Auto power-off held while recording | **not observable**: no DBG field exposes it, and Shutdown is "Never" on this unit (see below) |
+| 4 | LIVE? vs HOLD | **PASS in continuity**: LIVE? / HOLD alternate ~1 s, the slot is clean. **In Ω, +1 V gives no LIVE?** (50.2 MΩ, NONE): by design, Ω LIVE? needs a negative result |
+| 5a | W button: wiring dialog once, then direct | **PASS** |
+| 5b | Tap W cycles the coupling, glyphs | **PASS.** ACDC → AUTO,DC → DC → ACDC; glyph on the button and above the unit; "AUTO" small text above the glyph |
+| 5c | POW:ZERO (calibrator disabled) | **PASS.** OK,SET,Y 1072, X 891/160/892/162/875/152, AD1 547/2806/256/-2934/2599/-2763; V phantom 51.8 mV → Vdc -0.1 mV |
+| 5d | V vs DC V after the zero | **PASS.** 5 V on 6 V: -0.021 % (DC) / -0.023 % (ACDC); 5 V on 60 V: -0.013 / -0.028 %; 10 V on 60 V: -0.052 / -0.063 % |
+| 5e | f on the square, AC+DC | **PASS.** 40.0018 Hz, R21 0xBF; V 6.7369 V vs DMM AC+DC 6.7387 V (-0.03 %) |
+| 5f | Energy: tap P → Wh → VAh, long-press reset | **PASS** (the box shows P while the main readout shows energy). The first "Yes" did not reset, the second did (see below) |
+| 5g | Reboot returns to W | **PASS.** CONF? POW, coupling AUTO and the zeros kept, energy and time from 0 |
+| 6 | DBG:BOOT? stack | **PASS.** High-water **29 996 / 48 088 B (62 %)** after items 1-3 (first reboot); 26 408 after items 3-5 and at the end; crash count 0 |
+
+### 1. AD2 stream ISR (feasibility doc 9.5)
+
+AC V, 6 V range, the 40 Hz square (READ? 4.8063 V). Host `dm40scpi.py log --source ad2`, then `DBG:ISR?` (fields: feature, active, ticks, captured, empty, gated, dropped, bad, timeouts, overruns, max_isr_ns, max_lat_ns, tick_mHz, forced).
+
+| run | captured | lost | gaps 2 / 3-4 / 5-16 / 17-128 / >128, max | DBG:ISR? |
+|---|---|---|---|---|
+| 4800, DRAW 2, 60 s (`a48.csv`) | 284 089 | 4113 (1.43 %) | 11/16/64/97/0, 12.55 ms | 1,0,1152883,284089,16527,852267,0,0,0,0,22315,21760,19201228,0 |
+| 4800, DRAW 1, 30 s | 142 020 | 2035 (1.41 %) | 27/7/63/50/0, 12.34 ms | lat 21 620 |
+| 4800, DRAW 0, 30 s | 141 997 | 2016 (1.40 %) | 10/14/99/49/0, 7.76 ms | lat 4620 |
+| 4800, chop off / 1 V DC in / calibrator off / alerts OFF, 15 s each | | 1.38 / 1.37 / 1.38 / 1.39 % | max 11.9-12.3 ms | |
+| 9600, DRAW 1, 30 s (`a96.csv`) | 280 472 | 7617 (2.64 %) | 33/35/296/191/0, 9.06 ms | 1,0,1152432,280472,30545,841415,0,0,0,1845,22315,21760,38402457,0 |
+| 2400, 15 s | 35 780 | 245 (0.68 %) | 0/4/16/5/0, 12.6 ms | lat 13 260 |
+| 1200, 15 s | 18 013 | 1 (0.01 %) | 0/0/0/0/0, 0.84 ms | lat 5660 |
+
+**FAIL: lost ≠ 0 at 4800 S/s.** The loss is the same with DRAW 0, 1 and 2, with chop on or off, with any input, and with alerts off.
+- The losses come in bursts, **one every ~3948 conversions at every rate**: every 0.822 s at 4800, every 1.645 s at 2400, and every 0.411 s at 9600.
+- Each burst lasts **~11.5 ms**: 57 conversions at 4800, 27 at 2400, 109 at 9600.
+- The ISR itself ran on time:
+  - ticks = the tick rate x the span exactly, so no tick was missed;
+  - gated = 3 x captured exactly;
+  - **empty ≈ 4 x lost**: through a burst, the ISR read INTF on every tick and saw no AD2F.
+- Interrupt masking cannot explain a 12 ms hole with every tick serviced. The bus did not time out (timeouts 0, SELF? clean).
+- **Likely mechanism (inference):** the INTF read clears AD2F. If AD2F is set during the INTF frame, after the bit was sampled, the conversion is lost.
+  - The tick is exactly 4x the rate, so every 4th read lands at the same phase of the conversion, and it keeps swallowing AD2F until the slow timer / chip drift carries it past.
+  - The tick runs **+62.5 .. +64 ppm fast** against the chip at 2400 / 4800 / 9600 (DBG:ISR? tick_mHz 9600614 / 19201228 / 38402457). That drift brings the read phase to the edge once every 1 / (4 x 63 ppm) ≈ 3950 conversions, which is exactly the burst period.
+  - It then stays there for w / 63 ppm. With w ≈ 0.73 us (about one INTF frame), that is ~11.5 ms whatever the rate, again as measured.
+  - At 1200 S/s the tick is **-32 ppm** (4799846 mHz), so the phase drifts the other way, and the run lost 1 conversion.
+  - The emulator cannot show this: its INTF read has no race.
+- **Fix candidates (not tried):**
+  - after an `empty` read, shift the next read by a fraction of a tick, so the phase cannot stay on the edge;
+  - or round ARR so that the tick is always slower than 4x the chip;
+  - or detect a swallowed conversion from the data registers instead of INTF.
+- **max_lat_ns 21.8 us** with the DMM page drawing (DRAW 1 / 2), and 4.6 us with DRAW 0. The doc expects < ~5 us, so something on the draw path delays the ISR entry by ~20 us. That delay is not what causes the loss, because the loss is the same with DRAW 0.
+- **9600 S/s:** a 26 us tick with a 22.3 us ISR gives overruns (1845 in 30 s, 13 in 10 s undrained). The 2.64 % loss matches the race model alone (11.4 ms every 0.411 s = 2.8 %).
+
+**While streaming, undrained, 10 s** (`prof-stream-4800.txt`, `-9600.txt`): 40 x `*IDN?` gave p50 0.34 / 0.37 ms and max 0.90 / 1.03 ms. DBG:PROF? showed a loop max of 3.26 / 3.55 ms, no pass over 5 ms, and the usb lap max at 43 us. LOG:COUNt? showed `2048,52173,50125,772,772` at 4800 (overwritten > 0 is expected, because nothing drained). The ISR loss is still there.
+
+**After the streams** (`after-stream.txt`):
+- DRAW 1; AC V 4.80696 / 4.80695 / 4.80694 V;
+- DC V on 1 V: 1.000435 / 1.000426 / 1.000399 V;
+- `DBG:HYSPI:SELF? 2000`: `16,2000,0,0,0,0,7.84,21.55,68.65,57.48,23,…`, all error counts 0.
+
+**Function change mid-stream** (`forced.txt`): AC V, `LOG:SOUR AD2`, `LOG:SRAT 4800`, `LOG:STAT ON`, 3 s, then `CONF:VOLT:DC`. The results:
+- `LOG:STATe?` 0;
+- `SYST:ERR?` -100,"Settings conflict";
+- DBG:ISR? forced = 1 (`1,0,58621,14436,878,43307,12388,0,0,0,22315,21560,19201228,1`);
+- READ? 4.81089 V (DC V of the square);
+- uptime continuous, no reset.
+
+**AC mV.** Calibrator mode 1 is 9.585 V DC, a 16x overload of the 600 mV range. The DC-coupled AD2 stream read code ~249 950 (1.192 V at the stock scale). It lost 1.35 % at 4800 and 2.37 % at 9600 (overruns 1162), the same bursts. A small AC mV signal needs another source.
+
+### 2. Fixes after 9dd1222: the re-check list
+
+**1. AC V floor** (`t7var.txt`: AC V 6 V, 8 READ? per state, alerts 7 / OFF / 7)
+
+| VAR | 0 V DC | 1 V DC | 5 V DC |
+|---|---|---|---|
+| 0 | 0.418 / 0.411 / 0.405 mV | 0.160 / 0.124 / 0.128 mV | 0.156 / 0.141 / 0.135 mV |
+| 1 (9dd1222 row: OP1 chopper kept) | **37.149** / 0.412 / **37.135** mV | **37.172** / 0.164 / **37.148** mV | **37.172** / 0.167 / **37.172** mV |
+| 0 again | 0.443 / 0.417 / 0.423 mV | 0.139 / 0.158 / 0.154 mV | 0.163 / 0.150 / 0.153 mV |
+
+The floor is gone, and VAR 1 brings it back. This confirms the inferred cause, OP1's chopper running with AD1. VAR 2 was not needed. VAR was left at 0.
+
+**2. A-JACK in DC V** (`soak-dcv.txt`, `dcv10.txt`)
+- **Autorange soak:** 1 ↔ 10 V every 10 s for 302 s gave hits 184 → 184 (+0), max streak 0, alerts NONE. At 10 V the meter sits on the 60 V range with `DBG:SENT?` kind **OFF**.
+- **Manual 60 V, 10 V in**, 15 s each:
+
+  | VAR | hits | max streak | alert |
+  |---|---|---|---|
+  | 0 | +0 | 0 | NONE |
+  | 4 (the 9dd1222 comparator row) | +150 | 178 | **AJACK** |
+
+  The mechanism is confirmed.
+- **Manual 6 V, 10 V in** (OL, r0 sentinel CMP_PB1, VAR 0): +0, NONE. Nothing above 6 V trips on r0.
+- `CONF:VOLT:DC 6` with 10 V on the input selected the 60 V range, not 6 V, so the 6 V range was set on the range page.
+
+**3.** Not run: the AC mV and TC soaks, and T9 with a source in A (the A jack is not wired).
+
+**4. AD2 rate ladder.** Every session's `captured + lost` over its span equals the nominal rate (1200.7, 2402, 4800.0, 9600.0 /s). Chop off uses r26 0x0D / 0x05 / 0x03, chop on 0x24 at 4800. The ladder is right. The only loss is the ISR race in 1.
+
+**5. Combined view** (DMM page, `DBG:SWIPE L`; calibrator off; `TIM:SCAL 0.001`, `CHAN1:SCAL 0.02`, `TRIG:SWE AUTO`, `TRIG:LEV 0`; noise-triggered T'D; `06-combined-1ms-open.png`, `prof-combined-open-1ms.txt`)
+- **Profile:** 56.6 fps; loop max 12.27 ms (628 passes 5-10 ms, 33 passes 10-20 ms per 10 s).
+- **Sections:**
+  - **s.paint max 1.68 ms** (avg 1.27 ms, 63 % CPU);
+  - s.frame 2.27 ms;
+  - s.meas 6.99 ms;
+  - s.mtxt 4.06 ms.
+- **400 x DBG:PING?:** **p50 3.3 ms**, p90 7.0, p99 18.1, max 18.1 ms, 4 over 15 ms.
+
+  That is much better than 9dd1222 (p50 11.8 ms), but above the ≤ 2 ms target: almost every pass paints a 1.3 ms slice at ~57 fps. The p99 / max come from the s.meas passes (7 ms) plus a slice.
+
+**6.**
+- **Scope CSVs:** SCOPE/SCOP000-002.CSV (692 550-692 553 B) are on the mounted USB volume (`/run/media/$USER/DM40`), which fixes the 9dd1222 FAIL.
+- **Recordings:** see 3.
+- **Stack:** see 6.
+
+### 3. Record page (decision #1)
+
+Navigation: MF → Hold/Limits (83,260) → "Record" (the 9th row, y 297), with DBG:TAP.
+- **Hold & Limits** (`10-hold-limits.png`) shows the 9 rows with no overlap; the last is "Record  Every reading".
+- **The Record page** (`11-`, `12-record-1s.png`) has Interval / Duration steppers, "Free  about 1193 h (limit)" and "Start recording".
+  - Free is 14.88 MB at 2 B/row and 1 s, i.e. 2067 h. It is capped at the 49.7-day limit, which is consistent.
+  - A tap on Interval "+" gave "1 s" (LOG:CSV:INT? 1).
+
+**1 s interval for ~2 min**
+- **Start** on the page at 04:06:08.46. It returned to the DMM page with the red REC badge (`13-rec-started.png`).
+  - `LOG:CSV?` read `1,0,1,402,369,0`.
+  - `LOG:CSV:INT 10` during the recording gave -100,"Settings conflict".
+- **Stop** on the page at 04:08:19.51 (131.05 s). It showed the toast "Saved LOG000.DLG" (`16-rec-stopped.png`); `LOG:CSV?` read `3,0,132,750,750,0`. The page stays open after Stop.
+- **The CSV:** **LOGS/LOG000.CSV appeared on the mounted volume right after the stop** (3009 B, no remount). It is byte-identical to `MMEM:DATA?` (`dm40scpi.py get`).
+  - The header carries the third "# interval 1 s: …" line.
+  - **132 rows, time_s 1.000, 2.000 … 132.000** (every step exactly 1 s; the last is the partial interval at its nominal end).
+  - Values 0.999218-0.999975 V.
+- The LOG000.DLG is 750 B for 132 rows.
+
+**SCPI**
+- `LOG:CSV:INT 5` and `LOG:CSV:DUR 7` gave -100,"Illegal parameter value"; the old value was kept.
+- `LOG:CSV:INT 10` and `LOG:CSV:DUR 600` were accepted.
+- `LOG:CSV:FREE?` 14 880 768.
+- The page then showed "10 s" / "10 min" (`17-record-10s-10min.png`).
+
+**Reboot** (DBG:RESET): `LOG:CSV:INT?` 10 and `LOG:CSV:DUR?` 600 survived. The meter came back on DMM DC V AUTO+.
+
+**Duration expiry:** `LOG:CSV ON` at 04:09:47. By 04:19:52 it had ended itself: `LOG:CSV?` `3,1,60,915,915,0`. LOG001.CSV has 60 rows, t = 10 … 600 s, and LUN = MMEM. INT / DUR were then set back to 0 / 0.
+
+**Auto power-off hold:** no DBG field exposes it.
+- In the code (app.rs tick / `off_warn`), the idle `power_off()` and the countdown are gated on `!csvlog::active()`, which is `LOG:CSV?` state 1 during both recordings.
+- Shutdown is "Never" on this unit, so a missing power-off would prove nothing anyway. **Not verified on the device.**
+
+Not checked:
+- swipe REC with the chosen interval;
+- the gallery tile of a .DLG;
+- Windows;
+- the estimate "within 2x" (the page shows the cap).
+
+### 4. Alerts vs HOLD (decision #5)
+
+- **Ω (`CONF:RES`) with +1 V on V/COM:** 50.2 MΩ, `SYST:ALER?` NONE, `DBG:SENT?` `CMP_PB1,NONE,…`.
+  - Ω's LIVE? needs a negative result (ohm AD1 code < -20 000, doc §4.6), and the calibrator cannot output a negative voltage (-1 V gives 0 V: 434.6 kΩ, NONE).
+  - With HOLD (DBG:KEY 1) the slot shows only HOLD (`20-hold-live-*.png`).
+  - **A positive source in Ω is not flagged.** That is a design limit, not a regression.
+- **Continuity with +1 V:** 0.00 Ω, LIVE.
+  - **HOLD on:** six screenshots ~1.1 s apart alternate exactly, LIVE? (amber) / HOLD / LIVE? / … (status-slot md5 A B A B A B; `22-cont-hold-1.png`, `22-cont-hold-2.png`).
+  - The box is cleared fully in each phase, and the readout stays frozen at 0.00 Ω.
+- A-JACK under HOLD was not run (A jack not wired).
+
+### 5. Power meter (doc §3.12 re-check)
+
+1. **W button** (444,297) from DC V:
+   - The first tap opened "Power meter: wiring" (`30-W-tap1.png`). OK entered the page with V 1.0563 V and "I ranging..." (`31-`); P followed within ~10 s (`32-`).
+   - Back on V, a second tap on W entered directly with no dialog (`33-`).
+2. **Coupling:** a tap on the active W button cycles ACDC → AUTO,DC → DC → ACDC (`POW:COUP?`; `34-W-cycle-sheet.png`).
+   - The glyph above the unit and on the button: DC = the DC glyph; AUTO = the DC glyph with "AUTO" in small text above; AC+DC = the AC+DC glyph.
+   - In DC the PF / S / Q / f boxes show "--".
+3. **POW:ZERO** with the calibrator output disabled: `OK,SET,1072,891,160,892,162,875,152,547,2806,256,-2934,2599,-2763`. Y and X are as the doc expects (~1080, ~880 / ~155).
+   - Before the zero: V 51.8 mV, Vdc 52.2 mV, I 9.2 uA.
+   - After it: V 2.5 mV (rms noise), Vdc -0.095 mV, I 0.48 uA.
+4. **V vs DC V** (`powv.txt`; 6 x FETC:POW:ALL? field 5 vs the DC V function's mean before / after)
+
+   | input | range | DC | AC+DC |
+   |---|---|---|---|
+   | 5 V (DC V 4.99811) | 6 V | 4.99705 (-0.021 %) | 4.99697 (-0.023 %) |
+   | 5 V | 60 V | 4.99748 (-0.013 %) | 4.99673 (-0.028 %) |
+   | 10 V (DC V 9.99721) | 60 V | 9.99199 (-0.052 %) | 9.99093 (-0.063 %) |
+
+   Everything is within 0.07 % before any V cal, against the ~0.2 % target. POW:VOLT:CAL was not run.
+5. **The square, AC+DC, 60 V:**
+   - f 40.0018 Hz (field 7), `DBG:POW:ROW?` R21 = **0xBF**.
+   - V 6.7369 V vs the DMM AC+DC function 6.7387 V (-0.03 %); Vdc 4.7620 vs DC V 4.7668 V (-0.10 %).
+   - `POW:VOLT:RANG AUTO` stays on 60 V. `POW:COUP AUTO` gives AUTO,ACDC (the ripple).
+6. **Energy** (`37-W-valtap-sheet.png`):
+   - **Value tap:** the main readout cycles mW → mWh → VAh → mW, and the E box shows P while the main readout shows energy. READ? stays P.
+   - **Long press on the E box** (`DBG:DRAG 58,160,58,160,20,1500`) opens "Reset energy?" No / Yes (`38-`).
+     - The first "Yes" tap left the time running (00:00:55 → 00:01:10; `39-`).
+     - A second long press + Yes reset it (time 00:00:46 → 00:00:01, MEAS:POW:ENER? -1.66e-9 → -1.27e-10; `41-42-sheet.png`).
+
+     Either the first tap was lost (it came ~0.7 s after a DBG:LCD? read) or the reset did not take. This is not settled; one retry worked.
+   - **Cosmetic:** with ~0 current the readouts show "-0.0000 mWh" / "-0.000 mW" (a negative zero).
+7. **Reboot** (DBG:RESET) in W: the meter came back in W (`40-`) with CONF? "POW AUTO,AUTO", POW:COUP? AUTO,ACDC, the zeros kept (`POW:ZERO?` `NONE,SET,…`) and E time 00:00:10 (from 0).
+
+Not run: T2-T4 with current through A, the XY / XX switch cost with current, POW:VOLT:CAL, and the MF > Power Settings page.
+
+### 6. Stack
+
+DBG:BOOT? STACK (high-water since boot / size):
+- start of the run: 26 408 / 48 088;
+- **29 996 / 48 088 (62 %, 18 092 free) before the first reboot**, after items 1, 2 and 3a-3c;
+- 26 408 before the second reboot, after items 3d-5;
+- 26 408 at the end.
+
+Crash count 0 all the way, no unexpected reset. The build-time worst path is 30 632 B.
+
+### State at the end
+
+- **Device**
+  - DMM page, DC V AUTO+, 0.9997 V (`51-final.png`).
+  - Jack alerts 7, DBG:SENT:VAR 0, DBG:AD2:DRAW 1, LOG:STATe 0.
+  - LOG:CSV:INT 0 and DUR 0 (defaults).
+  - Power meter coupling AUTO, the POW:ZERO zeros stored.
+  - Volume, backlight, Dim and Shutdown were not touched.
+  - The first READ? after the calibrator's switch from the square to 1 V was OL (the calibrator's output settling; the chart shows ~0.75 V, then OL); it was 0.99969 V a few seconds later.
+- **Calibrator:** 1 V DC, enabled (func 1 mode 0 value 1000).
+- **Files on the SPI disk added by this run:** LOGS/LOG000.DLG, LOGS/LOG001.DLG.
