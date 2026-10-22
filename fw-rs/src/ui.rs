@@ -951,6 +951,34 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     }
 }
 
+/// The fuse-check dialog (dialog::fuse_check) of `stage` (0 instructions, 1 measuring, 2 the
+/// verdict `res`); `buf` holds the formatted resistance.
+pub fn fuse_screen(stage: u8, res: crate::sentinel::FuseRes, buf: &mut [u8; 32]) {
+    use crate::sentinel::FuseRes as F;
+    let ohm = match res {
+        F::Ok(r) | F::Odd(r) => {
+            let mut t = [0u8; 16];
+            let v = crate::dmm::format(&mut t, r, if r < 100.0 { 2 } else { 1 });
+            let mut n = 0;
+            for part in [v, " ohm, expect ~48"] {
+                let k = part.len().min(buf.len() - n);
+                buf[n..n + k].copy_from_slice(&part.as_bytes()[..k]);
+                n += k;
+            }
+            core::str::from_utf8(&buf[..n]).unwrap_or("")
+        }
+        _ => "",
+    };
+    match (stage, res) {
+        (0, _) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Lead from V/ohm jack to A", "nothing else connected", Some("Cancel"), Some("Start")),
+        (1, _) | (_, F::Busy | F::Idle) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Measuring ...", "expect ~48 ohm", Some("Cancel"), None),
+        (_, F::Ok(_)) => crate::dialog::fuse_check("FUSE OK", crate::dialog::FUSE_OK_BG, ohm, "A input path intact", Some("Again"), Some("OK")),
+        (_, F::Open) => crate::dialog::fuse_check("FUSE OPEN", crate::dialog::FUSE_BAD_BG, "OL: no path from V to A", "Replace: 10 A ceramic fuse", Some("Again"), Some("OK")),
+        (_, F::Odd(_)) => crate::dialog::fuse_check("Check leads", crate::dialog::FUSE_ODD_BG, ohm, "One lead V/ohm to A only", Some("Again"), Some("OK")),
+        (_, F::NoReading) => crate::dialog::fuse_check("Check leads", crate::dialog::FUSE_ODD_BG, "No ohm reading", "One lead V/ohm to A only", Some("Again"), Some("OK")),
+    }
+}
+
 /// Range page note line (`range_page`): rows 142..177, under the second
 /// button row (ends 136), above the DC / AC buttons (182); spacing 1 (TEXT22
 /// glyphs touch at spacing 0).

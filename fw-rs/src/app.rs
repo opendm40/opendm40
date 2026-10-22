@@ -2257,7 +2257,7 @@ impl App {
         self.redraw = true;
         self.last_input = now;
         let mut b = [0u8; 32];
-        d::fuse_screen(stage, self.dmm.fuse_state(), &mut b);
+        ui::fuse_screen(stage, self.dmm.fuse_state(), &mut b);
     }
 
     /// Per tick: a fuse check that ended (dialog or SYST:FUSE:TEST) -> the
