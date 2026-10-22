@@ -86,6 +86,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public CurrentSource ISrc;        // between A and COM
         public VoltageSource VSrcA;       // voltage source between A and COM (wrong jack)
         public double RLoadA = double.PositiveInfinity; // resistor between A and COM
+        public bool LeadVA;               // a test lead from V/ohm to A (the fw-rs fuse check)
+        public bool FuseOpen;             // the A-jack fuse is blown (a meter property: kept by "open")
 
         public double Die => DieFollowsCj ? CjTemp : DieTemp;
 
@@ -94,6 +96,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             VSrc = null; ISrcV = null; R = double.PositiveInfinity; C = 0; DiodeVf = double.NaN; DiodeRev = false;
             Tc = false; TcOpen = false; TcMvOverride = double.NaN;
             ISrc = null; VSrcA = null; RLoadA = double.PositiveInfinity;
+            LeadVA = false;
             vcap = 0;
         }
 
@@ -161,12 +164,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(!double.IsInfinity(R)) { var r = Math.Max(R + LeadOhm, 1e-3); g += 1 / r; }
             if(Tc && !TcOpen) { g += 1 / TcRs; i += TcEmf() / 1000.0 / TcRs; }
             if(ISrcV != null) i += ISrcV.Dc;
+            // lead V -> A: V/ohm sees the A jack's fuse + the relay-selected shunt chain to COM
+            if(LeadVA && !FuseOpen) g += 1 / (ShuntR + RFuse);
         }
 
         /// Current through the A jack shunt chain (A), DC and AC RMS.
         public void ACurrent(out double dc, out double ac, out double hz, out string shape, out double duty)
         {
             dc = 0; ac = 0; hz = 50; shape = "sine"; duty = 0.5;
+            if(FuseOpen) return; // nothing reaches the shunts
             var rsh = ShuntR + RFuse;
             if(ISrc != null)
             {
@@ -259,6 +265,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         ///   pow:V@Hz,i=I[,pf=PF|ph=DEG,dc=VDC,idc=IDC,f=,shape=]          V source + current source at the same frequency
         ///   r:OHM | c:F | diode:VF[,rev=1] | tc:C | cj:C | die:C | short | open
         ///   avsrc:V[,rs=] (voltage source in the A jack) | aload:OHM | isrcv:A (current source in V-COM)
+        ///   valead (a lead from V/ohm to A: the fuse check) | fuseopen (the A fuse blown; "open" keeps it)
         ///   vsrc:none, isrc:none, r:none ... remove one element
         /// Aliases of the older per-function form: dcv:V, acv:RMS@Hz[,dc=,shape=,duty=], hz:F[,duty=,amp=],
         ///   dca:A, aca:RMS@Hz[,dc=], ohm:OHM, cap:F, temp:C[,cj=], tcmv:MV, tcopen, chip:C.
@@ -351,6 +358,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     VSrcA = new VoltageSource { Dc = v, Ac = Opt(opts, "ac", 0), Rs = Opt(opts, "rs", 0) };
                     if(!double.IsNaN(hz)) VSrcA.Hz = hz;
                     break;
+                case "valead":
+                    LeadVA = !none;
+                    break;
+                case "fuseopen":
+                    FuseOpen = !none;
+                    break;
                 case "aload":
                     RLoadA = none ? double.PositiveInfinity : v;
                     break;
@@ -413,6 +426,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(ISrc != null) sb.AppendFormat(ci, "isrc:{0:G6},ac={1:G6},f={2:G6}{3};", ISrc.Dc, ISrc.Ac, ISrc.Hz, ISrc.Ph != 0 ? string.Format(ci, ",ph={0:G6}", ISrc.Ph) : "");
             if(VSrcA != null) sb.AppendFormat(ci, "avsrc:{0:G6};", VSrcA.Dc);
             if(!double.IsInfinity(RLoadA)) sb.AppendFormat(ci, "aload:{0:G6};", RLoadA);
+            if(LeadVA) sb.Append("valead;");
+            if(FuseOpen) sb.Append("fuseopen;");
             return sb.ToString();
         }
 

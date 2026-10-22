@@ -89,6 +89,7 @@ namespace Hy3131Tests
             Ad2Stream();
             CrossCases();
             Sentinel();
+            SentinelLater();
             Power();
             HwSpi();
             Console.WriteLine("{0} passed, {1} failed", passes, failures);
@@ -180,8 +181,141 @@ namespace Hy3131Tests
             case 1: case 3: case 10: case 15: c[0] = 0x90; break;
             case 0: case 2: c[2] = 0; c[3] |= 0x80; c[4] = 0x95; c[5] |= 0x30; c[9] = (byte)((c[9] & 0xF8) | 5); break;
             case 7: case 8: case 9: c[0] = 0x10; c[12] |= 0x10; break;
+            // later ones: frequency (AD1 PB1 - PB3 peak), AC A (AD1 SENSE - PB5 peak with SS5,
+            // OP1 chopper off), continuity / diode / cap r0..4 (OP2 x1 on PB1, AD2 = OP2O - PB3
+            // at IG 2.0, OSR 256, peak hold on AD2)
+            case 14: c[2] = 0; c[3] |= 0x80; c[4] = 0x95; c[5] |= 0x30; c[9] = (byte)((c[9] & 0xF8) | 5); break;
+            case 4: case 5: case 6: c[2] = 0; c[3] |= 0x80; c[4] = 0x07; c[5] |= 0x30; c[9] = (byte)((c[9] & 0xF8) | 5); c[12] |= 0x10; c[19] &= 0x3F; break;
+            case 11: case 12: case 13:
+                c[5] = (byte)((c[5] & 0x3D) | 0xC0); c[6] = 0x83; c[7] = 0x6D; c[9] = (byte)((c[9] & 0xF8) | 4); c[18] = (byte)(0xD0 | (c[18] & 0x0F)); break;
             }
             return c;
+        }
+
+        /// PKHMIN / PKHMAX after restarting the hold and waiting `dt`.
+        private static int[] Peak(Master m, byte r29, double dt)
+        {
+            m.Write(0x29, (byte)(r29 & 0xFB)); m.Write(0x29, r29);
+            m.Advance(dt);
+            var b = m.Read(0x0E, 6);
+            return new[] { S24(b, 0), S24(b, 3) };
+        }
+
+        private static void SentinelLater()
+        {
+            Console.WriteLine("fw-rs sentinels added after 9dd1222 (frequency, AC A, continuity, diode, cap r0..4)");
+            foreach(var (row, mode, name) in new[] { (F14, 14, "Freq m14 r0"), (F4R1, 4, "AcA m4 r1"), (F5R0, 5, "AcA m5 r0"), (F11, 11, "Cont m11 r0"),
+                                                     (F12, 12, "Diode m12 r0"), (F13R2, 13, "CapOsc m13 r2") })
+            {
+                var m = NewChip();
+                m.Configure(Sent(row, mode), mode);
+                Check(m.Chip.Role == name, "sentinel row keeps its role: " + name, m.Chip.Role);
+            }
+            {
+                // Frequency: AD1 peak on PB1 - PB3
+                var m = NewChip(true);
+                m.Chip.SetInput("vsrc:0,ac=1,f=1000");
+                var r = Sent(F14, 14);
+                m.Configure(r, 14);
+                var p = Peak(m, r[9], 0.1);
+                Check(p[1] < 2000 && p[0] > -2000, "Hz, A jack open: AD1 peak near 0", p[0] + ".." + p[1]);
+                m.Chip.SetInput("isrc:0,ac=0.001,f=50");
+                p = Peak(m, r[9], 0.1);
+                Near(p[1], 50700, 1500, "  1 mA AC into A: PKHMAX ~ +50.7 k");
+            }
+            {
+                // AC A (mA): AD1 peak on SENSE through the /1000 tap
+                var m = NewChip(true);
+                m.Chip.SetInput("open");
+                var r = Sent(F5R0, 5);
+                m.Configure(r, 5);
+                var p = Peak(m, r[9], 0.1);
+                Check(p[1] < 300 && p[0] > -300, "AC mA, V jack open: AD1 SENSE peak near 0", p[0] + ".." + p[1]);
+                m.Chip.SetInput("vsrc:5");
+                p = Peak(m, r[9], 0.1);
+                // 5 mV at the tap: 3.6 * 0.005 / 1.25 * 2^18 = 3775
+                Near(p[1], 3775, 150, "  5 V DC on V-COM: PKHMAX ~ 3.8 k (fw-rs threshold 1.51 k = 2 V)");
+                m.Chip.SetInput("vsrc:0,ac=230,f=50");
+                p = Peak(m, r[9], 0.1);
+                Check(p[1] > 200000 && p[0] < -200000, "  230 V AC: both signs far over", p[0] + ".." + p[1]);
+                m.Chip.SetInput("open;isrc:0,ac=0.01,f=50");
+                m.Configure(r, 5); m.Advance(1.0);
+                var b = ReadAfter(m, 0x10, 1);
+                var ms = NewChip(true);
+                ms.Chip.SetInput("open;isrc:0,ac=0.01,f=50");
+                ms.Configure(F5R0, 5); ms.Advance(1.0);
+                var bs = ReadAfter(ms, 0x10, 1);
+                Near(SqrtRms(b), SqrtRms(bs), 0.002 * SqrtRms(bs), "  the AC mA RMS is that of the stock row with AD1 on");
+            }
+            foreach(var (row, mode, what) in new[] { (F11, 11, "continuity"), (F12, 12, "diode"), (F13R2, 13, "cap r2") })
+            {
+                // AD2 peak on OP2 <- PB1: 0.5 mA * 47.5 ohm = 23.75 mV -> 2.0 * 0.02375 / 1.25 * 2^18 = 9 961
+                var m = NewChip(true);
+                m.Chip.SetInput(mode == 12 ? "diode:0.65" : mode == 11 ? "r:10" : "cap:100e-9");
+                var r = Sent(row, mode);
+                m.Configure(r, mode);
+                var p = Peak(m, r[9], 0.1);
+                Check(p[1] < 200 && p[0] > -200, what + ", A jack open: AD2 peak near 0", p[0] + ".." + p[1]);
+                m.Chip.SetInput("isrc:0.001");
+                p = Peak(m, r[9], 0.1);
+                Near(p[1], 19900, 500, "  1 mA DC into A: PKHMAX ~ 19.9 k (fw-rs threshold 9.9 k)");
+                m.Chip.SetInput("isrc:0,ac=0.002,f=50");
+                p = Peak(m, r[9], 0.1);
+                Check(p[1] > 30000 && p[0] < -30000, "  2 mA AC: both signs", p[0] + ".." + p[1]);
+            }
+            {
+                // DC? hint (AC V): AD1 on SENSE - PB5 = the V jack through the range's tap (r1: /100)
+                var m = NewChip();
+                m.Chip.SetInput("vsrc:5");
+                var r = Sent(F0R1, 0);
+                r[4] = 0x07;
+                m.Configure(r, 0);
+                var p = Peak(m, r[9], 0.1);
+                // 5 V / 100 = 50 mV: 3.6 * 0.05 / 1.25 * 2^18 = 37 749
+                Near(p[1], 37749, 100, "AC V r1, AD1 on the V tap: 5 V DC -> PKH ~ 37.7 k");
+                Check(m.Chip.Role == "AcV m0 r1", "  still the AC V role", m.Chip.Role);
+            }
+            {
+                // AC? hint (DC V 6 V): the comparator on SENSE = V / 10
+                var m = NewChip();
+                m.Chip.SetInput("vsrc:0,ac=2,f=50");
+                var r = Sent(F1R0, 1);
+                r[0] = 0x10;
+                m.Configure(r, 1);
+                var q = CmpScan(m, 100, 0.0037);
+                Check(q[0] > 20 && q[1] > 20, "DC V r0, comparator on SENSE, 2 V AC: both bits", string.Join(",", q));
+                m.Chip.SetInput("vsrc:1");
+                q = CmpScan(m, 20, 0.0071);
+                Check(q[0] == 20 && q[1] == 0, "  1 V DC: CMPHO only (0.1 V > 20.8 mV)", string.Join(",", q));
+                m.Chip.SetInput("vsrc:0.1");
+                q = CmpScan(m, 20, 0.0071);
+                Check(q[2] == 0, "  0.1 V DC: below the window (10 mV)", string.Join(",", q));
+            }
+            {
+                // fuse check: a lead V -> A; ohm r1 reads the fuse + the 47.5 ohm chain, OL when blown
+                var m = NewChip();
+                m.Chip.SetInput("open;valead");
+                m.Configure(F10R1, 10);
+                m.WaitFlag(0x04, 1);
+                Near(Ohm(m, 1), 47.55, 0.1, "fuse check, lead V -> A: ohm r1 ~ 47.55");
+                m.Chip.SetInput("fuseopen");
+                m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Check(Ohm(m, 1) > 620, "  fuse blown: OL", Ohm(m, 1).ToString("F1"));
+                m.Chip.SetInput("open;isrc:0.01");
+                m.Configure(F8R0, 8); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Ma(m, 8, 0), 0, 0.01, "  blown fuse in DC mA: 10 mA reads 0 (\"open\" keeps the fuse blown)");
+                m.Chip.SetInput("fuseopen:none");
+                m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(Ma(m, 8, 0), 10, 0.01, "  fuse back: 10 mA");
+            }
+            {
+                // the diode reading with AD2 / OP2 running (the model has no note-7 offset: T8 decides)
+                var m = NewChip();
+                m.Chip.SetInput("diode:0.65");
+                m.Configure(Sent(F12, 12), 12);
+                m.WaitFlag(0x04, 1);
+                Near(m.ReadS24(0) * 1.25 * 10 / 0.9 / 8388606.0, 0.65, 2e-4, "  diode 0.65 V unchanged with the AD2 sentinel");
+            }
         }
 
         /// CMPHO / CMPLO seen in n CTSTA reads dt apart: (any high, any low, reads with either).

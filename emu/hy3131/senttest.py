@@ -59,6 +59,38 @@ SC = {
     'cont-live': ('CONT', 18, [(0, 'open;r:10', {'NONE'}), (8, 'open;vsrc:1.234', {'LIVE'})]),
     'diode-live': ('DIOD', 18, [(0, 'open;diode:0.65', {'NONE'}), (8, 'open;vsrc:-1.0,rs=100', {'LIVE'})]),
     'masked':   ('VOLT:DC', 18, [(0, 'open;vsrc:1.234;isrc:0.001', {'NONE'})]),
+    # Sentinels added after 9dd1222 (doc 4.7): AC+DC (both phases), AC A (AD1 on the V tap),
+    # frequency (AD1 peak on PB1), continuity / diode / cap r0..4 (AD2 + OP2 on PB1); cap r5..7
+    # (the ramp) has none: the gap is asserted.
+    'acdc-v':   ('VOLT:ACDC', 30, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0.001', {'AJACK'}), (21, 'isrc:none', {'NONE'})]),
+    'acdc-vac': ('VOLT:ACDC', 22, [(0, 'open;vsrc:0,ac=1.0,f=50', {'NONE'}), (10, 'isrc:0,ac=0.005,f=50', {'AJACK'})]),
+    'acdc-a':   ('CURR:ACDC', 30, [(0, 'open', {'NONE'}), (10, 'vsrc:24', {'VJACK'}), (21, 'vsrc:none', {'NONE'})]),
+    'aca-v':    ('CURR:AC', 28, [(0, 'open;vsrc:1', {'NONE'}), (10, 'vsrc:5', {'VJACK'}), (19, 'vsrc:none', {'NONE'})]),
+    'aca-vac':  ('CURR:AC', 20, [(0, 'open', {'NONE'}), (10, 'vsrc:0,ac=230,f=50', {'VJACK'})]),
+    'aca-vi':   ('CURR:AC', 18, [(0, 'open;vsrc:24;isrc:0,ac=0.01,f=50', {'NONE'})]),
+    'freq-a':   ('FREQ', 24, [(0, 'open;vsrc:0,ac=1,f=1000', {'NONE'}), (10, 'isrc:0.001', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
+    'cont-a':   ('CONT', 24, [(0, 'open;r:10', {'NONE'}), (10, 'isrc:0.002', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
+    'diode-a':  ('DIOD', 24, [(0, 'open;diode:0.65', {'NONE'}), (10, 'isrc:0,ac=0.005,f=50', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
+    'cap-a':    ('CAP', 26, [(0, 'open;c:100e-9', {'NONE'}), (12, 'isrc:0.002', {'AJACK'})]),
+    'cap-ramp-gap': ('CAP', 30, [(0, 'open;c:100e-6', {'NONE'}), (14, 'isrc:0.002', {'NONE'})]),
+    # Hints (doc 4.7): DC? in AC V (AD1 alternates PB1 / the V tap), AC? in DC V 6 V (the
+    # comparator alternates PB1 / SENSE), FUSE? after 60 s at zero in an A function.
+    'acv-dchint': ('VOLT:AC', 32, [(0, 'open;vsrc:0,ac=1,f=50', {'NONE'}), (10, 'vsrc:5', {'NONE', 'DC'}),
+                                   (16, 'vsrc:5', {'DC'}), (23, 'vsrc:0,ac=1,f=50', {'NONE'})]),
+    'acv-dc-ac': ('VOLT:AC', 20, [(0, 'open;vsrc:5,ac=1,f=50', {'NONE'})]),
+    'acv-dc-ajack': ('VOLT:AC', 26, [(0, 'open;vsrc:5', {'NONE', 'DC'}), (10, 'isrc:0.001', {'AJACK'}), (18, 'isrc:none', {'NONE', 'DC'})]),
+    'dcv-achint': ('VOLT:DC', 32, [(0, 'open;vsrc:1', {'NONE'}), (10, 'vsrc:0,ac=2,f=50', {'NONE', 'AC'}),
+                                   (15, 'vsrc:0,ac=2,f=50', {'AC'}), (23, 'vsrc:1', {'NONE'})]),
+    'dcv-ac-ajack': ('VOLT:DC', 24, [(0, 'open;vsrc:0,ac=2,f=50', {'NONE', 'AC'}), (10, 'isrc:0.001', {'AJACK'})]),
+    'fuse-hint': ('CURR:DC', 76, [(0, 'open;fuseopen', {'NONE'}), (62, 'open;fuseopen', {'NONE', 'FUSE'}),
+                                  (66, 'open;fuseopen', {'FUSE'})]),
+    # Fuse check (SYST:FUSE:TEST, doc 4.7): a lead V -> A, the fuse intact / blown, a short V-COM.
+    'fuse-ok':   ('CURR:DC', 20, [(0, 'open;valead', {'NONE'})], ['SYST:FUSE:TEST'],
+                  {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OK', 'ohm': (44, 54)}),
+    'fuse-open': ('CURR:DC', 20, [(0, 'open;valead;fuseopen', {'NONE'})], ['SYST:FUSE:TEST'],
+                  {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OPEN'}),
+    'fuse-odd':  ('CURR:DC', 20, [(0, 'open;r:0.5', {'NONE'})], ['SYST:FUSE:TEST'],
+                  {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'FAIL', 'ohm': (0, 2)}),
     # OVERLOAD (doc 4.7): the uA / mA shunt over range -> the 10 A shunt at once, latched; a
     # phase may carry a READ? window (lo, hi) in A. AUTO: from mA r0 through r1 to 10 A, the
     # floor keeps the mA shunt out until 50 mA < 0.3 A held 5 s, then back to mA.
@@ -87,6 +119,7 @@ SC = {
 def run(name):
     func, run_for, phases = SC[name][:3]
     setup = SC[name][3] if len(SC[name]) > 3 else []
+    xtra = SC[name][4] if len(SC[name]) > 4 else {}
     script = [(ph[0], ph[1]) for ph in phases]
     expect = []
     for i, ph in enumerate(phases):
@@ -124,12 +157,13 @@ def run(name):
                 tm.write(c)
             while p.poll() is None:
                 row = {}
-                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:SENT?', 'STAT:QUES:COND?', 'READ?']:
+                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:SENT?', 'STAT:QUES:COND?', 'READ?'] + xtra.get('queries', []):
                     tm.write(q)
                     row[q] = tm.read(timeout=60).decode(errors='replace').strip()
                 row['t'] = int(row['DBG:PING?'].split(',')[0]) / 1000.0
                 rows.append(row)
-                print('%s %6.2f %-6s %-40s %s' % (name, row['t'], row['SYST:ALER?'], row['DBG:SENT?'], row['READ?']), flush=True)
+                print('%s %6.2f %-6s %-40s %s %s' % (name, row['t'], row['SYST:ALER?'], row['DBG:SENT?'], row['READ?'],
+                                                   ' '.join(row[q] for q in xtra.get('queries', []))), flush=True)
         except Exception as e:
             print(name, 'link ended:', e, flush=True)
     out, _ = p.communicate()
@@ -165,6 +199,24 @@ def run(name):
             if name == 'dcv-step' and 7.0 < v < 1e6 and not r['DBG:SENT?'].startswith('OFF'):
                 ok = False
                 bad.append('%.2f %g V: sentinel %s on the 60 V range' % (r['t'], v, r['DBG:SENT?'].split(',')[0]))
+    if 'fuse' in xtra:
+        # the verdict came, the function came back (CURR), the ohm value in its window
+        fz = [r['SYST:FUSE?'] for r in rows if 'SYST:FUSE?' in r]
+        done = [f for f in fz if f not in ('BUSY', 'IDLE')]
+        if not done or not done[-1].startswith(xtra['fuse']):
+            ok = False
+            bad.append('SYST:FUSE? %s, want %s' % (fz[-6:], xtra['fuse']))
+        elif 'ohm' in xtra:
+            v = float(done[-1].split(',')[1])
+            if not (xtra['ohm'][0] <= v <= xtra['ohm'][1]):
+                ok = False
+                bad.append('fuse ohm %g outside %s' % (v, xtra['ohm']))
+        if 'BUSY' not in fz:
+            ok = False
+            bad.append('never BUSY')
+        if not rows or rows[-1].get('FUNC?') != '"CURR"':
+            ok = False
+            bad.append('function after the check: %s' % (rows[-1].get('FUNC?') if rows else None))
     res = {'name': name, 'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-600:] if p.returncode else ''}
     with open(os.path.join(OUT, tag + '.json'), 'w') as f:
         json.dump(res, f, indent=1)
