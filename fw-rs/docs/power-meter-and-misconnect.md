@@ -1398,7 +1398,7 @@ p25 (AC floor + DC? badge), p20 (the help line). powtest (every old
 scenario now sets `POW:COUP ACDC` after `CONF:POW`, burden / dcburden
 `POW:BURD:STAT ON`, dcad1 F = 9.91E37) plus `entry`, `ac-floor`,
 `acdc-floor`; senttest ovl-pow / -auto-ma / -auto-ua set `POW:COUP
-ACDC`. All 32 powtest scenarios and the 4 senttest ovl-pow* pass (with
+ACDC`. All 29 powtest scenarios and the 4 senttest ovl-pow* pass (with
 3.17 in the image; ereset long-presses the parts layout's lower row).
 New ones (FETC:POW:ALL?): `entry` CONF:POW -> DC, BURD:STAT 0, 1.234 V /
 1 A: P 1.2345 W, V 1.234, F 9.91E37; 12 V + 2 V AC in DC: SYST:ALER? AC,
