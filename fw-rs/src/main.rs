@@ -611,10 +611,6 @@ fn main() -> ! {
                             false
                         }
                     }
-                    scpi::Dbg::HySpiWr(m, _) if m & 0x80 != 0 => {
-                        hy3131::set_write_bitbang(m & 1 == 0);
-                        false
-                    }
                     scpi::Dbg::HySpiWr(mode, div) => {
                         if logger.active() {
                             scpi.set_err("Settings conflict");

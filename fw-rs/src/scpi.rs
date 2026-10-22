@@ -341,9 +341,8 @@ pub enum Log {
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
 ///   DBG:HYSPI:SELF? n[,div[,cpha]]  HY3131 bus self-test (src/hyspi.rs; cpha 1 =
 ///                           the data phase sampled with CKPH = 1)
-///   DBG:HYSPI:WMODE 0|1     HY3131 writes bit-banged (0) / over SPI2 (1, default)
 ///   DBG:HYSPI:WR? mode[,div] SPI2 write experiment (src/hyspi.rs write_test):
-///                           mode 0 bit-bang, 1 SPI2 one byte per frame + a cut
+///                           mode 0 hy3131::write, 1 SPI2 one byte per frame + a cut
 ///                           dummy, 2 SPI2 continuous + a cut dummy, 3 SPI2 as
 ///                           8e5efa6 (byte by byte, no dummy)
 ///   DBG:ISR?                AD2 stream ISR (logger.rs `isr`): feature,active,ticks,
@@ -390,8 +389,7 @@ pub enum Dbg {
     /// DBG:HYSPI:SELF? n[,div[,cpha]] (src/hyspi.rs): (n, div | cpha << 7;
     /// div 0 = hy3131::DIV).
     HySpi(u16, u8),
-    /// DBG:HYSPI:WR? mode[,div] (src/hyspi.rs `write_test`); 0x80 | m =
-    /// DBG:HYSPI:WMODE m.
+    /// DBG:HYSPI:WR? mode[,div] (src/hyspi.rs `write_test`).
     HySpiWr(u8, u8),
     /// DBG:ISR? (logger.rs `isr`).
     Isr,
@@ -1224,7 +1222,6 @@ impl Scpi {
                             Some(Dbg::HySpi(n as u16, div | (cpha as u8) << 7))
                         }
                         (Some(b"WR"), true) => Some(Dbg::HySpiWr(parse_num(first).map_or(1, |v| v as u32).min(3) as u8, div)),
-                        (Some(b"WMODE"), false) => Some(Dbg::HySpiWr(0x80 | parse_num(first).map_or(1, |v| v as u32).min(1) as u8, 0)),
                         _ => None,
                     };
                     match d {

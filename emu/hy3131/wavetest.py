@@ -158,7 +158,10 @@ try:
         current_case()
         raise Done
     q('CONF:VOLT:DC')
-    wait_ms(1500)
+    # The AC sine on DC V raises the sentinel's "AC voltage here: use AC V?"
+    # hint toast (~1.5 s after the switch, shown 1.5 s, sentinel.rs) and a
+    # toast takes the next key (app.rs overlay): MF only after it went.
+    wait_ms(4500)
     shot('w00-dmm')
     # MF -> the V range page -> Wave.
     q('DBG:KEY 3')
