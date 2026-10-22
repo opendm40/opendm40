@@ -21,8 +21,8 @@ One byte: **calibration struct byte 0 = internal flash `0x080C0168`**
 |---|---|
 | Record | `0x080C0000`, 800 bytes: `u16 crc`, `u16 ~crc`, `u32 version = 1`, data |
 | CRC | CRC-16 poly 0x8005, init 0xFFFF, MSB-first, no final XOR (`firmware/dm40fw.py crc16`), over record bytes 4..0x31F, stored little-endian at +0 with the complement at +2. This unit: `c7 8a 38 75` = 0x8AC7 / 0x7538 (checked) |
-| Model | byte `+0x168`: 0 DM40A, 1 DM40B, 2 DM40C; the stock clamps it to 2 (bt_meas_v2_6.h cmd 00) |
-| Bad CRC / version | the stock loads the calibration defaults (flash `0x0804C45C`, byte 0 = `00`) -> DM40A |
+| Model | byte `+0x168`: 0 DM40A, 1 DM40B, 2 DM40C; BT cmd 00 clamps it to 2 (bt_meas_v2_6.h); a clamp for the FACTOR / OVER tables is not traced |
+| Bad CRC / version | the stock uses the calibration defaults (flash `0x0804C45C`, byte 0 = `00`) -> DM40A. Emulator check: byte set to 2 without fixing the CRC -> the stock shows the DM40A ranges |
 | Writer | only the factory menu "import factor.bin" (whole 800-byte record from the USB disk, CRC and version checked). Nothing else in the firmware writes it |
 
 Not involved (checked):
