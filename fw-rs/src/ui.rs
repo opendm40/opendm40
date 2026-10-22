@@ -129,14 +129,19 @@ const BURDEN_CAP: &str = "Burden";
 /// `coupling`).
 pub const LOAD_CAP: &str = "@load";
 
+/// Lowest loop percentage shown: 3.6 mA, the NAMUR NE 43 failure limit
+/// (below it a loop is broken or absent, not a signal: 0 mA read -25 %).
+const LOOP_MIN_PCT: f32 = -2.5;
+
 /// The aux readouts as shown. UF-26: the DC mA loop percentage (aux2 "%",
-/// dmm.rs: (|mA| - 4) x 6.25, OL above 125 %) is hidden outside -25..125 %
-/// (a current that is not a 4-20 mA loop signal); the bool says it is that
-/// percentage (drawn with the LOOP_CAP caption). The last item: the aux slot
-/// holding the burden voltage (`Reading::burden`, drawn with BURDEN_CAP).
+/// dmm.rs: (|mA| - 4) x 6.25, OL above 125 %) is hidden outside
+/// LOOP_MIN_PCT..125 % (a current that is not a 4-20 mA loop signal); the
+/// bool says it is that percentage (drawn with the LOOP_CAP caption). The
+/// last item: the aux slot holding the burden voltage (`Reading::burden`,
+/// drawn with BURDEN_CAP).
 fn aux_shown(r: &Reading) -> ([Option<crate::dmm::Val>; 2], bool, Option<usize>) {
     let lp = r.mode == 8 && !r.parts() && r.aux2.is_some_and(|v| v.unit == "%");
-    let a2 = r.aux2.filter(|v| !lp || (!v.ol && (-25.0..=125.0).contains(&v.v)));
+    let a2 = r.aux2.filter(|v| !lp || (!v.ol && (LOOP_MIN_PCT..=125.0).contains(&v.v)));
     ([r.aux1, a2], lp && a2.is_some(), r.burden().map(|b| b.0))
 }
 
