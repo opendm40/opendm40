@@ -16,7 +16,10 @@ for r in $RUNS; do
     S=$(mktemp)
     sed "s|@OUT@|$OUT|g" "$HERE/emu-seq/$r.txt" > "$S"
     T=$(awk 'END { print $1 + 0.3 }' "$S")
-    (cd "$ROOT" && /usr/bin/python3 emu/run.py stock --name "s9-$r" --run-for "$T" --script "$S" | tail -1)
-    rm -f "$S"
+    # Per-process emulator name (emu/out/<name>.resc / .log, flash-<name>.bin):
+    # parallel captures share no file.
+    N="s9-$r-$$"
+    (cd "$ROOT" && /usr/bin/python3 emu/run.py stock --name "$N" --run-for "$T" --script "$S" | tail -1)
+    rm -f "$S" "$ROOT/emu/out/$N.resc" "$ROOT/emu/out/flash-$N.bin"
 done
 ls "$OUT"

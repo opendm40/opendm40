@@ -10,7 +10,8 @@ must match its expectation.
   emu/hy3131/powtest.py --list
 
 FETC:POW:ALL? fields: P,S,Q,PF,Vrms,Irms,F,E_Wh,seconds,Vdc,Idc,VAh,burden_V.
-Results: emu/out/pow-<name>.json (+ .png of the end). One emulator per port.
+Results: emu/out/pow-<name>.json (+ .png of the end; Renode log
+emu/out/pow-<name>-<port>-<pid>.log). One emulator per port; a busy port is refused.
 """
 import argparse
 import json
@@ -296,15 +297,21 @@ def num(s):
 def run(name):
     setup, run_for, phases = SC[name]
     script = [(t, spec) for t, spec, _, _ in phases if spec]
+    if uc.port_busy(A.port):
+        print('RESULT %s FAIL port %d in use (another emulator?): pass a free --port' % (name, A.port), flush=True)
+        return False
     tag = 'pow-' + name
+    # The run's own files (event script, Renode log, flash image, .resc) per
+    # process: parallel runs (distinct --port) share none; results under tag.
+    rtag = '%s-%d-%d' % (tag, A.port, os.getpid())
     os.makedirs(OUT, exist_ok=True)
-    sp = os.path.join(OUT, tag + '.script')
+    sp = os.path.join(OUT, rtag + '.script')
     with open(sp, 'w') as f:
         for t, spec in script:
             f.write('%g dmm %s\n' % (t, spec))
     bt_port = A.port + 1000 if name == 'bt' else 0
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
-           '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', tag,
+           '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', rtag,
            '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else []) \
         + (['--bt-port', str(bt_port)] if bt_port else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -381,6 +388,9 @@ def run(name):
         except Exception as e:
             print(name, 'link ended:', e, flush=True)
     out, _ = p.communicate()
+    for x in (sp, os.path.join(OUT, 'flash-%s.bin' % rtag), os.path.join(OUT, rtag + '.resc')):
+        if os.path.exists(x):
+            os.remove(x)
     ok = True
     bad = []
     for i, (t, _, chk, label) in enumerate(phases):

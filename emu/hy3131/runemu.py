@@ -40,8 +40,10 @@ def merge_models():
     text = '\n'.join(usings) + '\n' + '\n'.join(bodies) + '\n'
     os.makedirs(os.path.dirname(out), exist_ok=True)
     if not os.path.exists(out) or open(out).read() != text:
-        with open(out, 'w') as f:
+        tmp = '%s.%d.tmp' % (out, os.getpid())  # then rename: parallel runs never see half a file
+        with open(tmp, 'w') as f:
             f.write(text)
+        os.replace(tmp, out)
     return out
 
 

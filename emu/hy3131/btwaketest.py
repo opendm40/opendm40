@@ -35,7 +35,14 @@ ap.add_argument('rest', nargs=argparse.REMAINDER, help='-- further emu/run.py ar
 A = ap.parse_args()
 rest = A.rest[1:] if A.rest[:1] == ['--'] else A.rest
 
+sys.path.insert(0, EMU)
+import usbip_client as uc  # noqa: E402
+if uc.port_busy(A.port):
+    sys.exit('btwaketest: port %d is in use (another emulator?): pass a free --port' % A.port)
 mk = tempfile.mkdtemp(prefix='btwake-')
+# Per-process emulator name (flash image, .resc in emu/out/) and the Renode
+# log in the temp dir: parallel runs (a distinct --port each) share nothing.
+TAG = 'btwake-%d-%d' % (A.port, os.getpid())
 shot = lambda t, n: '%s shot %s/%s.png' % (t, mk, n)
 script = ['0 dmm dcv:1.0', '3.0 key menu', '3.6 tap 339 105', shot(4.5, 'A'),
           '6.0 dmm dcv:2.0', shot(6.0, 'B'), shot(9.0, 'C'),
@@ -48,7 +55,8 @@ script = ['0 dmm dcv:1.0', '3.0 key menu', '3.6 tap 339 105', shot(4.5, 'A'),
 sp = os.path.join(mk, 'script.txt')
 open(sp, 'w').write('\n'.join(script) + '\n')
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--app', A.app, '--script', sp, '--run-for', '31',
-       '--bt-port', str(A.port), '--name', 'btwake'] + rest
+       '--bt-port', str(A.port), '--name', TAG,
+       '--log', os.path.join(mk, 'renode.log')] + rest
 p = subprocess.Popen(cmd, stdout=open(os.path.join(mk, 'run.out'), 'w'), stderr=subprocess.STDOUT)
 
 
@@ -114,6 +122,9 @@ res['ac'] = link.q('READ?')
 print('AC V wake on Scope, 1 V rms: READ', res['ac'], 'RAIL', link.q('SYST:RAIL:STAT?'), flush=True)
 link.close()
 p.wait()
+for x in ('flash-%s.bin' % TAG, TAG + '.resc'):
+    if os.path.exists(os.path.join(EMU, 'out', x)):
+        os.remove(os.path.join(EMU, 'out', x))
 # AC: 3 % (the model's AC node is still -1 % at the 2 s settle; without the
 # settle the first answer is +120 % in the model, +8 % on the device).
 ok = all(res[k] and abs(float(res[k]) - v) < tol for k, v, tol in

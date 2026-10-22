@@ -10,8 +10,9 @@ every phase must match its expectation.
   emu/hy3131/couptest.py --app fw-rs/dm40-fw-native.bin --port 3391 v
   emu/hy3131/couptest.py --list
 
-Results: emu/out/coup-<name>.json (+ .png of the end, .log = the Renode log of
-that run: run.py --name, capped by DM40_EMU_LOG_MAX_MB). One emulator per port.
+Results: emu/out/coup-<name>.json (+ .png of the end); the Renode log of that
+run: emu/out/coup-<name>-<port>-<pid>.log (capped by DM40_EMU_LOG_MAX_MB).
+One emulator per port; a busy port is refused.
 """
 import argparse
 import json
@@ -98,14 +99,20 @@ def run(name):
     setup, cq, run_for, phases, acts = SC[name]
     acts = dict(acts)
     script = [(t, spec) for t, spec, _, _ in phases if spec]
+    if uc.port_busy(A.port):
+        print('RESULT %s FAIL port %d in use (another emulator?): pass a free --port' % (name, A.port), flush=True)
+        return False
     tag = 'coup-' + name
+    # The run's own files (event script, Renode log, flash image, .resc) per
+    # process: parallel runs (distinct --port) share none; results under tag.
+    rtag = '%s-%d-%d' % (tag, A.port, os.getpid())
     os.makedirs(OUT, exist_ok=True)
-    sp = os.path.join(OUT, tag + '.script')
+    sp = os.path.join(OUT, rtag + '.script')
     with open(sp, 'w') as f:
         for t, spec in script:
             f.write('%g dmm %s\n' % (t, spec))
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
-           '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', tag,
+           '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', rtag,
            '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     rows = []
@@ -136,6 +143,9 @@ def run(name):
         except Exception as e:
             print(name, 'link ended:', e, flush=True)
     out, _ = p.communicate()
+    for x in (sp, os.path.join(OUT, 'flash-%s.bin' % rtag), os.path.join(OUT, rtag + '.resc')):
+        if os.path.exists(x):
+            os.remove(x)
     ok = True
     bad = []
     for i, (t, _, chk, label) in enumerate(phases):

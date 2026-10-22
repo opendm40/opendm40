@@ -52,6 +52,22 @@ class NoAnswer(IOError):
     pass
 
 
+def port_busy(port, host=HOST):
+    """True when a TCP port is already taken (another emulator's USB/IP or BT
+    server): a test that started its emulator there would talk to the other
+    run's device, or find none ("no USB/IP device"). Parallel runs need
+    distinct ports."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind((host, port))
+        return False
+    except OSError:
+        return True
+    finally:
+        s.close()
+
+
 def recvn(s, n):
     b = b''
     while len(b) < n:
