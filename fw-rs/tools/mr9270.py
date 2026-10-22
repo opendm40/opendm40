@@ -39,7 +39,9 @@ SCALE = {
     "current_passive":(0,  0,  1000.0,  "mA"),   # i32 = microamps   (assumed, untested)
     "current_active": (0,  1,  1000.0,  "mA"),   # i32 = microamps   (assumed, untested)
     "resistance":     (3,  1,    10.0,  "ohm"),  # i32 = deci-ohms, max 4000 (CONFIRMED 2026-10-13 vs DM40)
-    "frequency":      (2,  0,     1.0,  "Hz"),   # i32 = hertz       (CONFIRMED, see doc)
+    "frequency":      (2,  0,  1000.0,  "Hz"),   # i32 = millihertz  (CONFIRMED 2026-10-22: 40000 = 40.0017 Hz on
+                                                 # the DM40 FREQ; 50 = a 0.05 Hz 0 / 9.52 V square, ~10 s low:
+                                                 # the "1.0 = hertz" scale gave 50 Hz requests that, device-check doc)
     "pwm":            (2,  5,   100.0,  "%"),    # i32 = centi-percent (CONFIRMED, see doc)
     "speed_rps":      (2,  2,     1.0,  "rps"),  # untested
     "pwm_pct":        (2,  5,   100.0,  "%"),    # alias

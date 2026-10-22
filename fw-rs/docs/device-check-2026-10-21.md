@@ -1097,3 +1097,139 @@ End state: DMM page, DC V, logging off (`LOG:DEST HOST`, `LOG:STAT 0`), `SYST:RA
 ### Device re-check (973df07, 2026-10-22 ~20:25)
 
 Installed by the owner (sha256 2605779d…5a8d, crash count 0). TEMP and RES after DC V, with the square, 5 V, 10 V and 1 V DC on V-COM, 5 s each (`ap3-973.txt`): **no A-PROT**, the probe is not in (field 10 = 0 mA); A-JACK still comes with the square / 5 V / 10 V (the open item above), none at 1 V. Five rounds of FREQ -> DC V -> AC V -> DC V -> RES -> TEMP -> DC V with the square: alerts NONE except A-JACK in TEMP. End: DC V, `SYST:ALER?` NONE, 0.9994 V, logging off, calibrator 1 V DC, `DBG:BOOT?` reason NONE.
+
+## a0985e4: region B audit #3, AUTO coupling, "Leads in A?", burden, E7, the calibrator's 50 Hz (2026-10-22 22:13-23:10)
+
+The image was already installed by the owner. `DBG:BOOT?` matched the header of `dm40-fw-native-a0985e4.bin`: marker 0x0518FAE7 / 0x0009A0F4 / 0x00017E82, crash count 0, HEALTHY, reset reason SW at ~22:00.
+- **USB:** at the start, usbtmc was not bound to interface 0, so there was no `/dev/usbtmc*`. A libusb client (sigrok) had detached it. pyusb `dev.attach_kernel_driver(0)` brought it back; `usbreset` alone does not.
+- **Wiring:** the calibrator on V/COM, the A jack open, the volume mounted read-only at `/run/media/$USER/DM40`.
+- **Input:** UI input came from DBG:TAP / DBG:KEY / DBG:SWIPE; screenshots are DBG:LCD? reads.
+- **Files:** scripts and screenshots are in the session scratchpad `devchk-a0985e4/` (not in git).
+- **Crashes:** none, two SW resets (the reboot checks).
+
+### Summary
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1a | AD2 38400 S/s to disk (`LOG:DEST DISK`, 20 s, AC V), a host reading FAST003.CSV over the volume all the time | **PASS**: 768 003 samples, 0 lost, max_lat 0.28 us, lat_pc 0x08046ef6 (not C); the reader got 2 EIO at the session end (the known UNIT ATTENTION) and went on, 369 KB/s | `fastrun.py`, `f38400b.csv` |
+| 1b | DBG:PROF? during that run | **FAIL (debug only)**: `prof::report` is in region C (0x08096000): max_lat 12.2 us, lat_pc 0x08096000, **1 sample lost** at the moment of the query (row t = 2.928 s, `lost_before` 1). Without the query: clean (1a) | `f38400.csv`, `f38400.csv.prof.txt` |
+| 1c | Wave view 4800 S/s (20 ms/div) and 38400 S/s (2 ms/div): STOP + Save CSV, RUN, a screenshot (3-finger swipe) while running | **PASS**: overruns 0, max_lat 0.24-0.30 us at both rates; the stream pauses for the disk job (`active` 0 for ~2 s for a screenshot) and restarts by itself; `dropped` stays constant while running (the ring is drained) and grows only while STOPped (by design); SCOP007.CSV (38.4 kS/s, 2 ms/div) and SCOP008 / 009 appeared after leaving the view, S008-S010.BMP | `wave.py`, `stale.py`, `w*.png` |
+| 1c' | One stale save | **open, not reproduced**: SCOP006.CSV (saved in a mis-sequenced run at 2 ms/div) has the header "2ms/div ... 4.80kS/s" and the same data as SCOP005 (4800). The same sequence afterwards (`stale.py 0.02 shot save1 tb2 0.002`) saved correct 38.4 kS/s data | SCOP005 / 006.CSV |
+| 1d | A host copying SCOP / LOG / FAST CSVs (14 files, 11 MB) while the Wave view streams at 38400 | **FAIL -> fixed**: 0 overruns, but max_lat **21.4 us**, `late` 1, lat_pc 0x08087f50 = `dlog::FPar::parse` (region C), called by `Gen::open` of a FAST CSV. Copy at 96 KB/s, 0 errors. Fix below | `hostcopy.py`, `copy-wave.txt` |
+| 1e | Leaving the Wave view (MENU) at 38400 | **minor**: `App::show` (C since audit #3) runs before the stream stops: max_lat 11.6 / 18.0 us, `late` 2 or 1 overrun, lat_pc 0x08099bc0 / 0x08099ae8. The samples belong to a view that is closing; not changed | `DBG:ISR?` after exit |
+| 1f | Tap latency on pages whose handlers are in C | **PASS**: loop max1s after a tap (the handler + the page draw): range page 28-38 ms, Hold & Limits 37-51 ms, keypad keys ~1 ms, Record page 23-37 ms, Power Settings 31 ms, menu 37-51 ms, Settings 1/2/3 25-39 ms, generator wave cycle 26 ms, Wave view entry 190 ms (the DC V self-cal) | `taplat.py` |
+| – | Inrush page taps while armed | not run (not on the list) | – |
+| 2 | AUTO coupling, V side | **PASS** with the notes below; the REL / range-hold bug was fixed | `a*.png` |
+| 3 | "Leads in A?" reminder | **PASS**; one cosmetic issue | `l-*.png`, `b1-leads-toast-dcv.png` |
+| 4 | Burden readout without current | **PASS** | `c*.png`, `m5-settings3-changed.png` |
+| 5 | E7 DC V on AD2 | **PASS**; the clip autorange was seen on the device for the first time. Bug fixed: Wave view `CONF?` in DC V | `e*.png`, `e7-*.csv` |
+| 6 | The calibrator's "50 Hz" | **calibrator / tool, not the meter**: `mr9270.py` frequency scale fixed | below |
+
+### 2. AUTO coupling (doc acdc-stock-vs-fwrs.md §11, voltage side)
+
+- **Glyph:** 16f5b0f (the "~/⎓" button) **is** in a0985e4 (`git merge-base --is-ancestor`).
+- **Taps:** four taps on V from DC V: FUNC? `VOLT:AC` -> `VOLT:ACDC` -> `VOLT:AUTO` (`AUTO,DC`) -> `VOLT`. The button glyph is DC / AC / AC+DC / the AC/DC mark; "AUTO" (F14) sits left of the glyph above the unit. Zoomed: no overlap with the digits, the glyph or the button edges (`a1-sheet.png`, `a1-zoom.png`).
+- **Range page:** the 4-button row DC / AC / AC+DC / AC/DC, with AC/DC selected in AUTO; a tap on each selects it (VOLT:COUP? DC / AC / ACDC / AUTO,DC) (`a2-range.png`).
+- **DC 5 V in AUTO:** `AUTO,DC` throughout (14 s), aux AC ~0.
+- **40 Hz square (0..9.5 V)**: DC part 4.766 V, AC part 4.763 V, ratio 0.999. That is inside the 0.75..1.5 band, so:
+  - **From DC (5 V or 1 V DC) to the square: stays DC** (20 s watched). This is the band, as designed.
+  - **Entering AUTO afresh on the square: AC, 5 of 5 times**, decided 3.2 s after `VOLT:COUP AUTO`.
+    - The cause is the first evaluation: the first AC-phase results after the entry (and the autorange step 6 V -> 60 V, the total is 6.7 V) are high: 5.93, then 5.11 V, then 4.96, then 4.766 V by ~5 s.
+    - The doc's "its AC part can still be settling (-1 %, emulator)" is **+7 %** on the device, so on entry a near-tie up to AC ~ 0.93 x DC picks AC, and the band then keeps it.
+    - Harmless for the band's purpose (either part is inside it), but the doc's claim is too optimistic. Possible change: skip the first evaluation after an entry / unit change (the first decision ~1.9 s later). Not changed.
+  - **Square (AUTO,AC) -> 1 V DC: DC after 5.4 s and 5.1 s** (two runs; doc 2..6 s). Within the 2..6 s window.
+  - An AC-dominant signal (DC -> AC switch) cannot be made with this calibrator (only DC and the 0-based square).
+- **REL:** REL on in AUTO,AC (the main value 0.000, REL 4.763), then the source -> 1 V DC: REL went off at the switch (PASS). **But the status bar went from AUTO+ to MANU, and the range stayed on 60 V** (1.000 V shown with 3 decimals) (`a67.png`).
+  - Cause: `Meter::update` drops REL on the AUTO switch (`rel_off`), but only `App::rel_toggle` releases the range hold that REL took.
+  - **Fixed** (app.rs `reading`): REL ended by a reading releases the hold, as `rel_toggle` does.
+- **HOLD:** HOLD on AUTO,AC 4.765 V, the source -> 1 V DC: the held value and its AC glyph stay (PASS); READ? gives the live 0.9998 V. RUN releases it: AUTO,DC 0.9998 V (`a8-10.png`).
+  - Cosmetic: during the HOLD, the switch's static redraw changed the bargraph scale to -6..+6 (bipolar, DC) under the held AC value. Not changed.
+- **SCPI:** `VOLT:COUP AUTO`; `VOLT:COUP?` AUTO,DC; `FUNC?` "VOLT:AUTO"; `READ?` 0.99954; `CURR:COUP?` DC; `CONF?` "VOLT:AUTO +6,+1E-04". `LOG:STAT ON` is refused (`-100,"Settings conflict"`), `LOG:STAT?` 0. `CONF:VOLT:AUTO`, `FUNC "VOLT:AUTO"` and `MEAS:VOLT:AUTO?` work, with no error.
+- **Reboot in AUTO** (`DBG:RESET` 10 s after the change): it comes back in "VOLT:AUTO" `AUTO,DC` (PASS).
+
+### 3. "Leads in A?" (doc power-meter-and-misconnect.md §4.9)
+
+`DBG:LEADs?` gives the count and from/to. The toast was caught with 100-row LCD reads 0.3 s apart (a tight read loop holds the repaint; with the pauses it does not).
+
+| change | path | reminder | toast |
+|---|---|---|---|
+| DC A -> V | tap on V | **yes** (n+1, 9 -> 1) | 0.9 .. 2.05 s after the tap, gone by itself (~1.5 s) |
+| AC A -> ohm | `CONF:RES` | **yes** (5 -> 10) | yes |
+| power -> Hz | `CONF:FREQ` | **yes** (18 -> 14) | yes |
+| A AC+DC -> V AC+DC | `CONF:VOLT:ACDC` | **yes** (17 -> 16) | yes |
+| DC A -> AC A | `CONF:CURR:AC` | no (PASS) | only the V-JACK alert's own toast "Voltage on V jack, no current" (1 V on V/COM in AC A: correct) |
+| V -> A, A -> power | tap / `CONF:POW` | no (PASS) | – |
+| `SYST:ALER:ENAB 7`, DC A -> V | SCPI | no (PASS) | – |
+| `SYST:ALER:ENAB ON` (15) | SCPI | yes again | yes |
+
+- **Settings 3/3 "A-lead reminder" OFF:** `SYST:ALER:ENAB?` 7. "Jack alerts" cycled ON -> A-JACK only -> OFF -> ON gave 1 / 0 / 7: the reminder bit stays off (PASS). DC A -> V with it OFF: no reminder.
+- **Persistence:** OFF survived a `DBG:RESET` (7 after the reboot). It is restored to ON (15).
+- **Volume:** the key / alert volume is 0 % (Settings 1/1, `m2-settings1.png`), so the toast shows with no beep. The beep itself cannot be heard by the agent; volume 0 = `buzzer(true, 0)` = silent by design.
+- **Toast position:** the toast sits over the DC V reading (`b1-leads-toast-dcv.png`), with no overlap with the frame.
+- **Cosmetic (open):** while the toast is up, the rest of the new page is not repainted. The chart labels still read "0.50uA / 0.00uA / -0.50uA", the REL box "uA", and MAX / AVG / MIN are empty, under a DC V main value. This lasts ~1.5 s, until the toast goes. The toast is due at the first reading (`leads_tick`: `meter.live().is_some()`), before the chart / stats pass has run. A fix would wait for one full DMM draw after the first reading.
+
+### 4. Burden readout (doc §3.15, the steps without current)
+
+- **Setting:** Settings 3/3 "Burden voltage" OFF (stock) -> ON (A, mA, uA); `DISP:BURD?` 0 -> 1. It survived the reboot (`DISP:BURD?` 1 afterwards). It is restored to OFF.
+- **FETC:BURD?:**
+  - DC V: `+9.90000000E+37` (PASS).
+  - DC A (uA range, 2.95 nA): 1.4026E-07 V = 47.50 ohm x I.
+  - AC A: 1.1694E-07 = 47.50 x 2.462 nA.
+  - `POW:BURD?` 47.5 (the default R_path).
+- **Off:** `DISP:BURD OFF` makes the duty come back in AC A, while `FETC:BURD?` still answers (3.2E-08).
+- **Screens:** DC A aux1 "Burden 0.00mV"; AC A aux1 Hz / aux2 "Burden 0.00 mV"; with OFF the duty "0.0 %" is back. No overlap, no stale caption (`c-sheet.png`).
+
+### 5. E7 DC V on AD2 (feasibility §13)
+
+- **Wave view from DC V AUTO, 1 V:** "DC V 2V", 2 V/div, Vrms 1.00 V, `SCOP:MEAS:VAVG?` 1.0022 / 5.0042 / 10.019 V at 1 / 5 / 10 V.
+- **Clip autorange (first time on the device):** at 15 V it stepped up to 20 V/div (the 60 V range; `CHAN1:SCAL?` 20): PASS. VAVG at 15 / 20 V was 14.938 / 19.910 V (one pixel = 0.8 V at 20 V/div). This ticks the TODO's "clip autorange on the device (emulator only)" (`e3-wave-dcv-20v.png`).
+- **Bug: `CONF?` in the Wave view in DC V answered `"VOLT +6.000000E-04,+1.000000E-08"`.** The streamed row's format match (2b8a124) knew AC V / AC mV / A only, so DC V (mode 1) and DC mV (3) fell into the uA branch. **Fixed**: `0 | 1 => V`, `2 | 3 => mV` (DC V 6 V range -> "VOLT +6,+1E-04").
+- **Trigger level:** the trigger level badge reads "0.00uV" at 0 V (`fmt_v`: < 1e-6 -> u); cosmetic, all Wave views.
+- **`LOG:SOURce AD2` host sessions, DC V, 4800 S/s, 3 s, 0 lost:**
+
+  | level | mean | READ? | difference |
+  |---|---|---|---|
+  | 1 V | 0.99906 | 0.99971 | -0.6 mV, sd 0.32 mV |
+  | 5 V | 4.99695 | 4.99785 | -0.9 mV, sd 0.44 mV |
+  | 20 V (60 V range) | 19.99680 | 19.9983 | -1.5 mV, sd 2.1 mV |
+
+  This is within 0.02 % of the range, as in 13.4.
+- **Tool note:** the first session failed in `dm40scpi.py` with `LOG settings: -100,"Data stale"`, an error another query had left in the queue. **Fixed**: `log --source` sends `*CLS` first.
+
+### 6. The calibrator's "50 Hz" and the millivolts in sigrok
+
+`tools/mr9270.py` had `"frequency": (2, 0, 1.0, "Hz")`, so `set_output("frequency", 50)` wrote i32 50. In func 2 mode 0 the unit is **milli-Hz** (40000 = 40.0017 Hz on the DM40 FREQ, as the header of this doc says), so 50 = **0.05 Hz**: a 20 s square.
+- **Measured** (`poll.py`, DC V READ? every 0.3 s for 45 s): 9.5175 V (drooping slowly to 9.5166 V), then 7.73 (an edge), then 1.39 mV for 9.6 s, then 9.5172 V again.
+- **The first high phase after the value was written lasted ~31 s.** The calibrator starts the period at the write.
+- **The meter reads both levels right:**
+  - DC 9.5 V from the calibrator reads 9.4961 V.
+  - DC 10.48 V reads 10.4744 V.
+  - The square's low level is the calibrator's own 1.4 mV.
+- So sigrok sampled a low phase ("millivolts"). The **+10.48 V seen later over BT** is not this mode's high level (9.52 V into 10 Mohm here). It is not reproducible from the calibrator's frequency output; my guess is that it came from another calibrator setting at the time.
+- **Fixed:** the SCALE entry is 1000.0 (milli-Hz), so `set_output("frequency", 40)` = 40 Hz.
+
+### Fixes (on rust-fw-poc after a0985e4; image below, not on the device)
+
+1. **app.rs `reading`:** REL ended by a reading (the AUTO coupling switch) releases the range hold REL took (`dmm.hold_range(false)`, as `rel_toggle`).
+2. **app.rs `CONF?` in the Wave view:** DC V / DC mV (modes 1 / 3) are formatted as V / mV.
+3. **dlog.rs `FPar::parse`:** moved to region B (`.text.vdisk_rd`; the closure removed so that no symbol stays in C).
+4. **tools:** `mr9270.py` frequency in milli-Hz; `dm40scpi.py log` sends `*CLS` first.
+
+Not changed (described above):
+- `prof::report` in C (1b): a DBG reply; a host polling DBG:PROF? during a 38400 session loses samples. Move it to B (~1 KB) or document "no DBG:PROF? during fast sessions".
+- `App::show` / `App::key` in C at the Wave view exit (1e).
+- The leads toast over the unrepainted page (3).
+- The AUTO entry bias (2).
+- The bargraph under HOLD (2).
+- The unexplained stale SCOP006 (1c').
+
+### State at the end
+
+- **Device:** DMM page, DC V, 1 V.
+- **Settings:**
+  - unchanged: volume 0 %, backlight 10 %, Dim / Shutdown Never, Bluetooth ON;
+  - restored: A-lead reminder ON (`SYST:ALER:ENAB?` 15), Jack alerts ON, Burden voltage OFF;
+  - power meter coupling DC (as found).
+- **Logging:** `LOG:DEST HOST`, `LOG:STAT 0`. The generator output is off (STOP; it was switched on by mistake for ~20 s at 2 MHz / 3 Vpp with nothing on its jack).
+- **Files added on the SPI disk:** LOGS/FAST009 / FAST010.DLG (two 20 s 38400 sessions), SCOPE/SCOP005..009, SHOTS/S008..S010.BMP.
+- **Calibrator:** 1 V DC, enabled.

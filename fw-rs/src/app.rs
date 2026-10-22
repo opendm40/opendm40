@@ -1973,7 +1973,14 @@ impl App {
         }
         self.dmm_view.label = self.t_label();
         let now = self.now;
+        let rel_was = self.meter.rel_active();
         let u = self.meter.update(&raw, now);
+        if rel_was && !self.meter.rel_active() {
+            // REL ended by the reading (an AUTO coupling switch): release
+            // the range hold it took, as rel_toggle does (device check
+            // a0985e4: the range stayed MANU after the switch).
+            self.dmm.hold_range(false);
+        }
         // CSV recording: the unsmoothed reading (REL applied; csvlog.rs
         // header), one row per reading or per interval (the Record page's
         // setting, csvlog.rs); a function change ends it.
@@ -3669,9 +3676,11 @@ impl App {
                 // 200 mV/div = AC mV 600 mV). The streamed row's format
                 // instead (dmm.rs poll_ac's unit / decimals).
                 let r = self.dmm.range().max(0) as u8;
+                // DC V / DC mV (1 / 3) stream since E7: their DC rows' format
+                // (dmm.rs poll_dcv; a0985e4 answered "VOLT +6E-04" = uA).
                 let (unit, dec) = match self.dmm.hy_mode() {
-                    0 => ("V", 4 - r.min(3)),
-                    2 => ("mV", 3 - r.min(1)),
+                    0 | 1 => ("V", 4 - r.min(3)),
+                    2 | 3 => ("mV", 3 - r.min(1)),
                     4 => ("A", 4 - r.min(1)),
                     5 => ("mA", 3 - r.min(1)),
                     _ => ("\u{b5}A", 2 - r.min(1)),

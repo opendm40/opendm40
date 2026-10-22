@@ -1752,12 +1752,16 @@ impl FPar {
         p[28..32].copy_from_slice(&c.to_le_bytes());
         p
     }
+    // Region B: Gen::open of a FAST CSV calls it while a host reads the
+    // volume, also during the Wave view's stream (device check a0985e4:
+    // max_lat 21.4 us at 38400 S/s with lat_pc in this fn, region C). No
+    // closure: it would get a symbol of its own in C.
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     pub fn parse(p: &[u8]) -> Option<FPar> {
         if p.len() < FAST_PAR || !crc32_upd(!0, &p[..28]) != le32(p, 28) {
             return None;
         }
-        let f = |o: usize| f32::from_le_bytes([p[o], p[o + 1], p[o + 2], p[o + 3]]);
-        let fp = FPar { a: f(0), b: f(4), rate_mhz: le32(p, 8), flags: p[12], src: p[13], mode: p[14], range: p[15] as i8 };
+        let fp = FPar { a: f32::from_bits(le32(p, 0)), b: f32::from_bits(le32(p, 4)), rate_mhz: le32(p, 8), flags: p[12], src: p[13], mode: p[14], range: p[15] as i8 };
         (fp.rate_mhz != 0).then_some(fp)
     }
 }

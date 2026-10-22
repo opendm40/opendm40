@@ -488,6 +488,10 @@ Code work (in this order):
         AUTO,DC / AUTO,AC; CONF / MEAS / FUNC VOLT:AUTO / CURR:AUTO, FUNC? "VOLT:AUTO" (codes 19 / 20).
         BT: the mode byte reports the part shown (the app echoing it keeps AUTO). LOG / wave view refuse it
         as AC+DC.
+      Device a0985e4 (V side; device-check doc): taps, glyph, range row, DC 5 V, SCPI, reboot PASS; square
+      (AC 0.999 x DC) -> 1 V DC switched in 5.1 / 5.4 s. Fixed: REL dropped by a switch kept the range hold
+      (MANU). Open: entering AUTO on a near tie picks AC (first AC results +7 % high on the device, the doc
+      says -1 %); HOLD across a switch redraws the bargraph scale under the held value.
       - persistence: the function code (19 / 20) in p[2], no layout change; V / A keep no coupling of
         their own (entry from another function = DC, stock).
       Tests: emu/hy3131/couptest.py v / i / tap (DC -> AC -> mixed both ways through the band), band
@@ -796,7 +800,10 @@ Firmware:
         A-JACK takes over when a current flows); no alert state, so decision #5's HOLD alternation is
         untouched. Fuse check exempt. Settings 3/3 row "A-lead reminder" ON / OFF (default ON, p[38] bit 15),
         SYST:ALER:ENAB bit 3 (ON = 15), DBG:LEADs?. Host test leads_reminder, emu/hy3131/leadstest.py, ui-render.
-        (verify on device: doc 4.9 device check list)
+        (verify on device: doc 4.9 device check list) Device a0985e4: steps 1, 2, 4 (volume 0: toast, no
+        beep), 5 (OFF / ENAB 7 / Jack alerts cycle / reboot) PASS; 3, 6, 7 not run. Open (cosmetic): the
+        toast comes at the first reading, before the page's chart / stats repaint: ~1.5 s of the old A
+        page's chart labels / REL unit under it.
   - [x] Fuse check (UT197's procedure, our doc §4.3 design): guided dialog in ohm mode (600 ohm, PE = 2),
         lead V/ohm -> A, ~48 ohm = OK, OL = FUSE OPEN, else "Check leads"; the 0.05 ohm (PE0) step left out
         (it tests the MOSFET, not the fuse). FUSE? hint: 60 s below 0.1 % of the range (AC 5 %). Doc §4.7.
@@ -961,6 +968,15 @@ Firmware:
       mounted and read; Wave view: STOP + Save CSV and a screenshot (max_lat, overruns 0, the trace and the
       stream back after), a host copying SCOPnnn.CSV / LOGnnn.CSV during the Wave view; taps on the inrush
       page while armed; tap latency on the range / power settings / keypad / menu / generator pages.
+      Device a0985e4 (device-check doc "a0985e4"): AD2 38400 to disk + volume reader 0 lost, max_lat 0.28 us
+      (not C); Wave view 4800 / 38400 STOP + Save CSV, screenshot: overruns 0, max_lat <= 0.3 us, stream back,
+      SCOPnnn.CSV after leaving; tap latency 23..51 ms (loop max1s) on every page. Found: a host copying CSVs
+      during the Wave view ran `dlog::FPar::parse` in C (21.4 us, fixed: region B); DBG:PROF? is in C (12 us,
+      1 sample lost at 38400: debug only, open); App::show at the Wave view exit (11..18 us, 1 overrun or
+      2 late, open). Left: inrush taps while armed; re-check of the FPar fix.
+      - [ ] DBG:PROF? (`prof::report`, C) during a fast session loses samples: region B (~1 KB) or a note.
+      - [ ] Wave view exit: App::key / App::show (C) run before the stream stops (1 overrun at 38400).
+      - [ ] SCOP006.CSV once saved the previous 4800 S/s record under a 2 ms/div header (not reproduced).
 - [x] 76.8 kS/s (emulator; device check below): hybrid frames (feasibility 11.12, decision 2026-10-22 #9): the CPU
       sends the command byte (mode 0, /8) and switches CKPH = 1 after the read-period pulse, DMA reads R03..R05;
       probe frames 2-byte DMA at /8 mode 0 (a marginal bit only blurs a probe), every 16th period; the probe
@@ -999,8 +1015,9 @@ Firmware:
       AUTO. Device: host sessions within 0.02 % of the range of READ? (6 / 60 V), fast logger 0 lost.
       Note 7 in the stock DC rows (DBG:AD2:N7?, tools/ad2n7.py, section 13.2): AD2 + AD3 + RMS left
       on shift AD1 by 0.03..0.16 % of the range: no AD2-based "AC?" hint in DC V without its own cal.
-  - [ ] E7 open: 600 / 1000 V gain table from >= 100 V (the calibrator stops at 24 V); the clip
-        autorange on the device (emulator only); offset drift over long sessions (no re-cal).
+  - [ ] E7 open: 600 / 1000 V gain table from >= 100 V (the calibrator stops at 24 V); offset drift over
+        long sessions (no re-cal). The clip autorange: device a0985e4, 15 V on 2 V/div -> 20 V/div (PASS);
+        Wave view CONF? in DC V / DC mV answered the uA format (fixed).
 - [x] (B) AD2 samples to the SPI disk (.DLG): the fast logger (LOG:DEST DISK, above / docs/compact-log-format.md
       "Fast stream"). Over BT: the ~870 records/s link ceiling (docs/bt-scpi.md) is below AD2's slowest rung
       (1200 S/s): LOG:STATe ON from BT is refused for AD2 / > 800 S/s ("Rate too high for Bluetooth"), AD1
@@ -1322,7 +1339,9 @@ Firmware:
       the shunt of the DMM A function in use. Settings 3/3 "Burden voltage" (persisted p[38] bit 14,
       default OFF = stock look), DISPlay:BURDen ON|OFF / ?, FETCh:BURDen? (V, pre-REL, works with the
       readout off). Not sent over BT. Emulator emu/hy3131/burdentest.py, ui-render d21..d24 / c16..c18
-      (docs/power-meter-and-misconnect.md 3.15). Left: the device check (3.15 list: a second meter across
+      (docs/power-meter-and-misconnect.md 3.15). Device a0985e4 (no current): the setting, its reboot
+      persistence, DISP:BURD, FETC:BURD? (DC V 9.9E37, uA 47.5 ohm x I), the aux rows PASS.
+      Left: the device check (3.15 list: a second meter across
       A-COM per range, then POW:BURD the measured R_path); the guided "measure R_path" step is not built
       (own ohm function reaches only the uA chain: the fuse check value could seed it later).
 - [x] Inrush current (as the Fluke 376 / 323 clamps, owner 2026-10-22): arm in the 10 A range (autorange
