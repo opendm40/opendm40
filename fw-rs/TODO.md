@@ -1570,3 +1570,23 @@ Emulator (emu/):
 - [ ] Wave view entry from DC V: DBG:ISR? `dropped` +7087 (~185 ms, the DC V self-cal at entry) before
       the view drains; AC V entry 0. Harmless (the view starts after), note in feasibility 13 or skip the count.
 
+
+## Device check ffa16ef, the RAM round (2026-10-23; docs/device-check-2026-10-21.md "ffa16ef")
+
+- [x] Screenshot streamed from the panel: BMP = the frozen panel, 0 px, on a menu, AC+DC, a running
+      Wave-view trace and the CHA colour picker (exact PALETTE values; GRAM R/B low bits 0, so 666 -> 565
+      is lossless; no dummy-word slip). READ? and the DMM run through a shot (a 1 -> 2 -> 1 V step
+      followed); data-phase passes <= 4.5 ms; 3 passes of 50-78 ms = the FAT x2 + dir block writes (since
+      0d165e4). FFT in the arena: stops for a shot, resumes with the same peak; CSV commits pause it
+      < 0.2 s; MMEM:CAT? bursts barely. calbackup SAFECOPY_PRESENT, CALIB / BOOTDATA / UID unchanged.
+- [ ] Freeze is ~5.4 s (touch back) and the toast ~6.1 s, not 4-5 s; with steady DBG:LCD? traffic the
+      same job ends in 2.3-4 s (why?). Pre-erasing the next shot's clusters in idle (ram-budget.md
+      follow-up) would cut it to the page programs.
+- [x] A shot during a fast-log session wrote nothing at once but ran after the session, on a half-repainted
+      page (S023); the same after a host LOG:STAT session (S027). Fixed in 7409b92 (App::shot_request:
+      "Disk busy" at the gesture; a shot waits 1 s after a full repaint). Verify on device: the swipe
+      during `LOG:DEST DISK` + `LOG:STAT ON` shows "Disk busy" at once and no S*.BMP appears after; during
+      a host LOG:STAT session, the shot after LOG:STAT OFF holds the reading and the chart.
+- [ ] Wave view: `LOG:CSV ON` is accepted but records no rows (READ? 9.9E37); ram-budget.md says csvlog is
+      refused there. Refuse it (Settings conflict) or fix the doc.
+- [ ] AUTO OVERLOAD on AC 1 A (1bffde2, couptest iac repro): blocked, the A jack is not wired.

@@ -1312,3 +1312,147 @@ Sequence: AUTO coupling on the square (`AUTO,AC`, 60 V), REL on (REL 4.765), cal
 - **Logging and generator:** `LOG:DEST HOST`, `LOG:STAT 0`; generator `OUTP?` 0 (never switched on).
 - **Files added on the SPI disk:** LOGS/FAST011 and FAST012 (two 20 s 38400 sessions).
 - **Calibrator:** 1 V DC, enabled.
+
+## ffa16ef: the RAM round (screenshot streamed from the panel, FFT work buffer in the disk arena) (2026-10-22 23:43 - 2026-10-23 00:25)
+
+The owner had installed ffa16ef (it contains 290ebce..f06f046). `DBG:BOOT?` showed marker 0x03A8FC57 / 0x000976F4 / 0x000164D9, crash count 0, HEALTHY; no reset during the run (uptime continuous).
+- **Checks:** docs/ram-budget.md "Device checks still open" 1-6, plus the AUTO OVERLOAD item.
+- **Wiring:** the calibrator (`/dev/ttyACM1`) on V/COM: 1 V DC, a 1 -> 2 -> 1 V step, and the 40 Hz square (func 2 mode 0, 40000 mHz). The A jack and the MCX probe were not wired.
+- **Input:** UI input came from DBG:TAP / DBG:KEY / DBG:SWIPE D,3 (the 3-finger swipe).
+- **Panel reads:** these were DBG:LCD? reads, decoded as `dm40dbg.py shot` does (RGB666, dummy word dropped).
+- **BMPs:** pulled with `MMEM:DATA? "Snnn.BMP"`.
+- **Files:** scripts, BMPs and PNGs are in the session scratchpad `devchk-ram/` (not in git).
+- **USB:** at ~23:51 one write got ENODEV. Another agent's PulseView scan had opened the meter over libusb, which re-bound usbtmc. The device did not reset. A 1209:0001 emulator on vhci_hcd was attached at the same time, so the scripts pinned `DM40_USBTMC=real`.
+
+### Summary
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1a | Shot of a menu = the frozen panel | **PASS**: 0 px differ (BMP vs the panel read before the gesture, during the freeze and after) | `s1-menu.bmp` |
+| 1b | Shot of AC+DC (did not fit the old CAP) | **PASS**: BMP = the panel at the gesture, 0 px | `s2-acdc.bmp` |
+| 1c | Shot of a running scope trace (Wave view, 40 Hz square, triggered) | **PASS**: BMP = the panel at the gesture, 0 px | `s3-scope.bmp` |
+| 1d | Colour-rich: the scope's CHA colour picker; RGB666 -> 565, the dummy word | **PASS**: 0 px against all three panel reads; the five colour names hold the exact `scope_ui::PALETTE` values | `s4-colour.bmp` |
+| 2 | Freeze time on the real panel | **PASS, a bit longer than estimated**: touch works again after **5.3-5.5 s**, toast at **~6.1-6.5 s** (estimate 4-5 s) | `freeze2.py` |
+| 3 | READ? / DMM / loop max during a shot | **PASS**: READ? answers all through and follows a 1 -> 2 -> 1 V step; data-phase passes <= 4.5 ms; 3 passes of 50-78 ms = the FAT x2 + directory block writes, unchanged since 0d165e4 | `chk3.py`, `c3-*-prof.txt` |
+| 4 | Shot during a fast-log session | **FAIL -> fixed (7409b92)**: no "Disk busy". The request waited for the session's end, then wrote S023 of a half-repainted page | `chk4.py`, `c4-busy.png`, `c4-S023.png` |
+| 5 | Scope FFT during CSV commits and during a shot | **PASS**: the FFT stops during the shot and resumes; the peak readout is identical before and after; the commits stall it < 0.2 s; no garbage | `chk5a.py`, `chk5b.py`, `c5a-sheet.png` |
+| 6 | calbackup, CALIB / BOOTDATA / UID | **PASS**: `CALBK SAFECOPY_PRESENT` (written 0, conflict 0, differs 0); the three SHA-256 equal before and after (after a re-mount) | `hash-*.txt` |
+| - | f06f046's own item: a toast / the auto power-off warning / the firmware-file dialog due during a shot are not drawn | **covered only in part**: the shot's own toast came after the freeze in every run. The power-off warning and the fw-file dialog were not run | - |
+| 7 | AUTO OVERLOAD on AC 1 A (TODO 1bffde2, couptest iac repro) | **blocked**: needs current through the A jack, which is not wired | - |
+
+### 1. The BMP vs the panel
+
+`shotcmp.py` reads the panel right before the gesture, sends `DBG:SWIPE D,3`, waits for the job (`LOG:CSV:FREE?` answers "Mass storage busy" while `screenshot::busy()`), reads the panel twice more, then reads it after the job. It compares at 565 with `rgb666_to_565`'s truncation.
+
+All BMPs have the stock layout:
+- 307 266 B, 66-byte header;
+- BI_BITFIELDS with masks F800 / 07E0 / 001F;
+- 480 x 320, bottom-up.
+
+| screen | file | BMP vs before the gesture | vs during the freeze | vs after |
+|---|---|---|---|---|
+| Menu | S019 | 0 | 0 | 0 |
+| AC+DC (DMM page, 1 V DC) | S023 | **0** | 244 (chart, rate, T counter) | 616 (new readings) |
+| Scope, Wave view, 40 Hz square | S021 | **0** | 22 427 (the "Saved" toast) | 22 427 |
+| CHA colour picker | S022 | 0 | 0 | 0 |
+
+- **"During" read:** with a shot running, an 80-query full-panel read takes 2.9-7 s, longer than the data phase under that load. Its lower rows were read after the freeze had ended: the toast was caught in the scope run, newer DMM readings in the AC+DC run. For a moving screen, the read before the gesture is therefore the reference. It is the frozen screen:
+  - DBG:LCD? holds drawing for 300 ms;
+  - the shot starts at the first tick that may draw (`shot_req`);
+  - the freeze then begins at once.
+
+  The BMP equals that read pixel for pixel on all four screens.
+- **Freeze without load:** a separate run (`tstrip.py`) read only two 4-row strips (the T counter and the reading) at 1.4 / 1.9 / 2.9 / 3.4 / 4.4 / 4.9 s. The strips were unchanged while busy and changed at 6.0 s after the job.
+- **Colours:** the GRAM's R and B low bits (bit 0 of the 6-bit values) are 0 on every pixel. So the panel stores exactly the 565 that was drawn, and the truncating 666 -> 565 is lossless.
+- **Palette:** in the picker, the boxes "red / orange / yellow / green / blue" hold 80 / 168 / 170 / 140 / 113 pixels of exactly F800 / FD20 / FFE0 / 0400 / 001F (two values per box: the ink and the background).
+- **Dummy word:** a dummy-word slip would rotate R -> G -> B or shift every pixel. Both checks exclude it.
+
+### 2. Freeze time (`freeze2.py`, AC+DC page, 3 runs)
+
+| event | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| busy (from `DBG:SWIPE D,3`) | 0.00 s | 0.01 | 0.00 |
+| tap on "A" at 2.0 s (during the freeze) | ignored: FUNC? "VOLT:ACDC" | ignored | ignored |
+| first tap that took effect (taps every ~0.15 s from 3 s) | 5.47 s | 5.50 | 5.49 |
+| job end (`busy()` false) | 6.12 s | 6.15 | 6.07 |
+| toast on the panel ("Saved", green) | by 6.47 s | by 6.50 | by 6.42 |
+
+- **Freeze:** ~5.4 s, toast at ~6.1 s. The estimate was 4-5 s, so this is a little longer.
+- **Without host traffic:** two shots were busy for 6.01 and 5.98 s.
+- **Faster with traffic:** with continuous DBG:LCD? traffic the same job ended in 2.3-4 s. Not investigated.
+- **Shot start:** the shot starts 0.2-0.35 s after the gesture when a DBG:LCD? read came just before it (the 300 ms draw hold), else at once.
+
+### 3. DMM and loop during a shot (`chk3.py`, DC V)
+
+| | 10 s without a shot | 10 s with a shot (busy 0-5.1 s) |
+|---|---|---|
+| READ? every ~0.4 s | 0.99987-0.99994 V | answered every time: 1.0001, then **1.498 -> 1.9992** after the calibrator's 2 V step at 1.8 s, then 1.50 / 0.405 (settling) -> 1.00005 after the 1 V step at 3.7 s |
+| DBG:DIAG? loop max1s | 1.2-5.2 ms | 28.5 ms (first second), **4.5 ms** (data phase), >= 65.5 ms (u16 saturated, the end), then 13-25 ms for ~5 s |
+| DBG:PROF? loop max | 5.2 ms | 78.5 ms (`tick` 74.5 ms) |
+| loop hist | none >= 10 ms | 2-5 ms: 2733; 10-20: 16; 20-50: 2; >= 50: **3** |
+
+- **First second:** the 28.5 ms pass is not attributed. It is probably the Root / Alloc scan, which reads several blocks in one pass.
+- **Data phase:** passes stay at <= 4.5 ms (a ~2 ms write slice plus ~1.3 ms panel read).
+- **The three >= 50 ms passes:** these are `fat()` x 2 copies and `dir()`, which write their block "whole in one call (H1)": a sector erase plus 16 programs. They are the same as the 74 ms csvlog commit pass of f3aea2f. This code has been unchanged since 0d165e4, so the RAM round did not add it.
+- **After the shot:** the 13-25 ms passes are the full repaint after the freeze (measured separately: 22-24 ms for the DMM page and the menu) and the volume refresh.
+- **Before vs after:** there is no device number for the old build's shot. The old path ran the same FAT / directory writes, so "about the same as before" holds for the maximum.
+
+### 4. A shot during a fast-log session (`chk4.py`): FAIL, fixed
+
+Steps: `LOG:DEST DISK`, `LOG:DUR 20`, `LOG:STAT ON` (AD1, 38 S/s, FAST013). Once it was running (`LOG:DISK?` state 3), `DBG:SWIPE D,3`.
+
+- **During the session:** no toast. The panel showed the DATA LOGGING panel (`c4-busy.png`), and no BMP was written.
+- **After the session:** a shot S023 was written. It is the DMM page right after `draw_static`: no reading, no chart, no statistics, half a status bar (`c4-S023.png`).
+- **Cause:**
+  - `App::gesture` only sets `shot_req`.
+  - `App::tick` serves it only when `can_draw`, and `can_draw` is false for the whole session (`logging`).
+  - So `screenshot::start` never ran during the session, and the `Shot::Busy` path of screenshot.rs (`fastlog::holds_disk()` at Bpb) could not be reached.
+  - At the session's end, the full repaint (`redraw`) and the shot ran in the same tick. The panel was read before the next passes drew the reading, chart and status.
+- **Same after a host session:** the same happens after a host `LOG:STAT ON` session (`DBG:SWIPE D,3` during it, `LOG:STAT OFF`). S027 is a bare page.
+- **Not affected:** the scope's MF "PriScr" (S025, a full page). A second swipe while the first shot's toast was up did not start a shot (S026 only).
+- **Fix (7409b92, branch `devchk-ram-ffa16ef`; on the device: not yet):**
+  - `App::shot_request` answers "Disk busy" at the gesture when `fastlog::holds_disk() || upload::busy()`, for the swipe and for PriScr.
+  - A requested shot waits `SHOT_SETTLE_MS` (1 s) after a full repaint (`App::repaint_at`).
+  - **Build:** stack headroom 21 228 B, region B 71 748 B free, region C 23 916, SRAM 60 544.
+  - **Tests:** touch-test 892 cases, 0 failures.
+  - **Image:** `dm40-fw-native-7409b92.bin`, header 0xC3AA3C55 / 0x000962F4 / 0x000120BD. It is built on rust-fw-poc 3028923, so it also carries the commits after ffa16ef.
+- **Re-check after the fix:**
+  - the swipe during a fast-log session shows "Disk busy" at once, and no S*.BMP appears after the session. The toast draws over the DATA LOGGING panel, which repaints one part per pass, so the panel covers it again within ~1 s: that is expected;
+  - the swipe during a host LOG:STAT session: the shot after `LOG:STAT OFF` holds the reading and the chart.
+- **Limits of the fix:**
+  - it is verified by the build and touch-test only, not on the device or in the emulator;
+  - the 1 s settle was not timed against the DMM's first reading after `LOG:STAT OFF`. If the re-check still shows a bare page, the condition should be "a reading drawn since the repaint", not a longer timer.
+
+### 5. FFT in the disk arena (`chk5a.py`, `chk5b.py`)
+
+- **During a shot:** Wave view (DMM source, DC V, 40 Hz square, 10 ms/div), math FFT on, ~7 spectra/s, peak readout "40.0Hz 12.7dBV".
+  - `s.fft` calls stayed at 32 463 from the gesture to 5.9 s; the job was busy until 6.7 s.
+  - The count was 32 465 at 7.9 s and grew 7 per ~1 s after that.
+  - The peak readout box was byte-identical before and after the shot.
+  - The spectrum was the same harmonic comb (`c5a-sheet.png`).
+- **MMEM:CAT? bursts:** these are single-pass disk users that move `GEN`. During 20 of them in 4.3 s the FFT ran 6.5 /s (7.0 /s after), and the readout stayed identical (`c5a-after-cat.png`).
+- **During CSV commits:** MCX source (open input), 2 ms/div, ~33 spectra/s, `LOG:CSV ON` from DC V 1 V.
+  - The commits came at 60 s and 120 s (committed 233 -> 497 -> 769 B).
+  - In the 0.2 s windows holding the commits the rate was 33.3 and 22.6 /s, against a median of 33.3. The pause is < 0.2 s, and the FFT was not stopped otherwise.
+  - The open input's spectrum is a floor (-166 dBV), so "no garbage" here only means that no peaks appeared.
+- **Side finding:** in the Wave view, `LOG:CSV ON` was refused once ("Settings conflict", no reading yet) and accepted later (LOG006, state 1). That recording got no rows in 135 s (rows 0, `READ?` 9.9E37): the AD2 stream owns the DMM there. docs/ram-budget.md says csvlog is refused by the Wave view. Either that line or the guard is wrong. Not changed.
+
+### 6. calbackup and the calibration files
+
+- **`DBG:BOOT?`:** `calbackup: status=SAFECOPY_PRESENT written=0 conflict=0 differs=0 ms=45`; crash count 0, HEALTHY.
+- **Stack:** the high-water mark after the session was 23 120 / 45 512 B (51 %); it was 20 616 at the start.
+- **Hashes:** SHA-256 of INFO/CALIB.BIN 1103b821..., BOOTDATA.BIN b141bc95..., UID.BIN 18b55482... are equal before and after the session. The "after" hash was taken after `udisksctl unmount` + `mount`, so the page cache could not answer.
+- **Copies:** the files were hashed on the mount and not copied anywhere.
+
+### State at the end
+
+- **Device:** DMM page, DC V, 1 V.
+  - The scope is back to MCX, 2 ms/div, 20 mV/div, DC, math / FFT off, trigger level 0 (AUTO had set 38 mV).
+  - CH1 colour unchanged (yellow).
+  - The CH1 offset is not restored: AUTO moved it, and the "A" marker sits at about row 228 instead of about 245 at the start (`scope-end.png`).
+- **Settings:** not touched (volume 0 %, backlight 10 %, Dim / Shutdown Never as found).
+- **Logging and generator:** `LOG:DEST HOST`, `LOG:STAT 0`, no CSV recording. Generator `OUTP?` 0 (never switched on).
+- **Files:** my S012-S027, LOG005-LOG008 and FAST013 were deleted (`MMEM:DEL`).
+  - `MMEM:CAT?` used / free = 10 829 824 / 5 910 528, the same as at the start.
+  - The file list under SHOTS / SCOPE / LOGS on the volume is the same as at the start.
+- **Calibrator:** 1 V DC, enabled.
