@@ -222,6 +222,7 @@ fn wait_until(ms: u32, mut done: impl FnMut() -> bool) -> bool {
 }
 
 impl Bt {
+    #[inline(never)] // .cold (link-native.x): start-up
     pub fn new() -> Self {
         unsafe {
             modify32(RCU_APB1EN, 0, 1 << 19); // UART4

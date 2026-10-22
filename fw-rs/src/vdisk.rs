@@ -254,6 +254,7 @@ fn tab() -> &'static mut Tab {
 }
 
 /// Target memory reader: byte loads (the OTP / option-byte areas included).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn mem_read(addr: u32, buf: &mut [u8]) {
     for (i, b) in buf.iter_mut().enumerate() {
         *b = unsafe { core::ptr::read_volatile((addr as usize + i) as *const u8) };
@@ -690,6 +691,7 @@ pub static RD: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic:
 static mut BMP_KEY: (u16, u32) = (0, 0);
 static mut BMP_CUR: core::mem::MaybeUninit<FatFile<FnRaw>> = core::mem::MaybeUninit::uninit();
 
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn geo() -> Option<(FnRaw, Geo)> {
     let mut d = dlog::disk();
     let g = dlog::geometry(&mut d)?;
@@ -1073,6 +1075,7 @@ const README_LEN: usize = 2048;
 
 /// README.TXT bytes `base .. base + out.len()` into `out`; returns its
 /// whole length (README_LEN).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn readme(base: usize, out: &mut [u8]) -> u32 {
     let mut w = W { b: out, base, n: 0 };
     w.s(b"DM40 (dm40-fw ");
@@ -1129,24 +1132,30 @@ struct W<'a> {
     n: usize,
 }
 
+// Region B (`.text.vdisk_rd`): README.TXT (`readme`) is sized on every root
+// directory read, maybe while a stream runs.
 impl W<'_> {
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn c(&mut self, ch: u8) {
         if let Some(d) = self.n.checked_sub(self.base).and_then(|i| self.b.get_mut(i)) {
             *d = ch;
         }
         self.n += 1;
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn s(&mut self, t: &[u8]) {
         for &ch in t {
             self.c(ch);
         }
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn hex(&mut self, v: u32) {
         for i in (0..8).rev() {
             self.c(b"0123456789ABCDEF"[(v >> (4 * i)) as usize & 15]);
         }
     }
     /// Right-aligned in 7 columns.
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn dec(&mut self, mut v: u32) {
         let mut t = [b' '; 7];
         for i in (0..7).rev() {

@@ -2521,6 +2521,7 @@ pub const FW_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// versions, panel 0x08074a10 as left-aligned "label:value" lines). Rendered
 /// in the fw-rs settings style (title bar + rows) so it matches the other
 /// menu pages. `lines` are (label, value) pairs built by the caller.
+#[inline(never)] // .cold (link-native.x): page draw
 pub fn device_page(lines: &[(&str, &str)]) {
     page_title("Device");
     lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);

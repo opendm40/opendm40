@@ -201,6 +201,73 @@ SECTIONS
          * (App::sp_save_csv, with scope_csv::set and the DLG block plan). */
         *(.text.*7dm40_fw3app*3App14with_temp_page*);
         *(.text.*7dm40_fw3app*3App11sp_save_csv*);
+        /* Region B audit #3 (2026-10-22, 11.9 KB free on c58ae48):
+         * `#[inline(never)]` event / start-up code that sat inlined in hot
+         * callers. Taps and keys (App::tap with pw_tap / kp_apply / range
+         * hits, App::key, App::show = a view change, App::wave_open) run at
+         * event rate. Touch is suspended only while the logger runs; the
+         * Wave view's taps go to sp_gesture (B), so App::tap meets a stream
+         * only on the inrush page (inrush_tap was already in C): one tap =
+         * a burst of slow fetches, each <= ~20 us of ISR entry latency,
+         * within ad2pll's tolerated spike. Start of a recording /
+         * logger session (App::rec_start with csvlog::start, Logger::start,
+         * logger::isr::start: before the ISR runs, or after it stopped on a
+         * retry). Page / dialog draws on a view change (power
+         * settings page (not its per-tick settings_status), device page,
+         * fuse dialog). DBG / calibration replies (DBG:ACDC?, DBG:SENT?,
+         * SCOP:CAL with HwTrig::calibrate). Start-up only: Touch::new,
+         * Bt::new (not init_module: polled every pass), SpiFlash::new,
+         * usb::init_hw. */
+        *(.text.*7dm40_fw3app*3App3tap*);
+        *(.text.*7dm40_fw3app*3App3key*);
+        *(.text.*7dm40_fw3app*3App4show*);
+        *(.text.*7dm40_fw3app*3App9wave_open*);
+        *(.text.*7dm40_fw3app*3App9rec_start*);
+        *(.text.*7dm40_fw6logger*6Logger5start*);
+        *(.text.*7dm40_fw6logger3isr5start*);
+        *(.text.*7dm40_fw2ui2pw13settings_page*);
+        *(.text.*7dm40_fw2ui11device_page*);
+        *(.text.*7dm40_fw6dialog10fuse_check*);
+        *(.text.*7dm40_fw3dmm*3Dmm14acdc_diag_text*);
+        *(.text.*7dm40_fw8sentinel*8Sentinel9diag_text*);
+        *(.text.*7dm40_fw5scope*5Scope12hw_calibrate*);
+        *(.text.*7dm40_fw6hwtrig*6HwTrig9calibrate*);
+        *(.text.*7dm40_fw5touch*5Touch3new*);
+        *(.text.*7dm40_fw2bt*2Bt3new*);
+        *(.text.*7dm40_fw8spiflash*8SpiFlash3new*);
+        *(.text.*7dm40_fw3usb7init_hw*);
+        /* Menu / list / keypad page helpers (already their own symbols):
+         * drawn or hit-tested only on the Menu, Settings, Record, Limits,
+         * Keypad, Help and Device pages, where no stream runs (leaving the
+         * Wave view or the inrush page stops theirs; touch is off while
+         * the logger runs). */
+        *(.text.*7dm40_fw2ui9menu_item*);
+        *(.text.*7dm40_fw2ui13main_menu_hit*);
+        *(.text.*7dm40_fw2ui9list_page*);
+        *(.text.*7dm40_fw2ui10page_title*);
+        *(.text.*7dm40_fw2ui11set_stepper*);
+        *(.text.*7dm40_fw2ui12keypad_input*);
+        *(.text.*7dm40_fw2ui10keypad_key*);
+        *(.text.*7dm40_fw2ui10keypad_hit*);
+        *(.text.*7dm40_fw3app*3App9kp_labels*);
+        *(.text.*7dm40_fw3app*3App8lim_unit*);
+        /* The generator page's boxes and its 1 s status (Gen / Keypad page
+         * only: no stream runs there) and vwrite's temp-file purge (the
+         * first pass after a start, a host write session's purge). */
+        *(.text.*7dm40_fw2ui7gen_box*);
+        *(.text.*7dm40_fw2ui10gen_status*);
+        *(.text.*7dm40_fw2ui13gen_box_frame*);
+        *(.text.*7dm40_fw2ui16gen_box_value_bg*);
+        *(.text.*7dm40_fw2ui12gen_wave_box*);
+        *(.text.*7dm40_fw2ui12gen_box_note*);
+        *(.text.*7dm40_fw6vwrite9purge_tmp*);
+        /* ... and its post-write steps (a host wrote a file on the volume;
+         * MSC writes are refused while a logger session runs): the update
+         * file's park / check / finalize / commit. */
+        *(.text.*7dm40_fw6vwrite4park*);
+        *(.text.*7dm40_fw6vwrite5check*);
+        *(.text.*7dm40_fw6vwrite8finalize*);
+        *(.text.*7dm40_fw6vwrite6commit*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C
@@ -283,7 +350,9 @@ ASSERT(__image_end <= 0x080A0000, "image reaches the FS-loader at 0x080A0000");
  *   region B audit #2 (2026-10-22: cold-module code that had been inlined
  *   into hot callers, Gallery::poll into App::tick above all, and the
  *   f32 quicksort of poll_cap) brought it to 30 368 / 37 840 B; region C
- *   then has 31 700 / 31 764 B left below 0x080A0000 (was 48 364 / 48 428). */
+ *   then has 31 700 / 31 764 B left below 0x080A0000 (was 48 364 / 48 428).
+ *   Audit #3 (on c58ae48: 11 928 / 20 672 B): 26 160 / 32 808 B; region
+ *   C 10 256 / 12 352 B left (docs/native-boot.md "Region B audit #3"). */
 ASSERT(_stack_top - __bss_end >= 42K, "TCM stack below 42 KiB (worst path ~21.5 KiB + 20 KiB headroom): move CPU-only statics to .sram_bss");
 ASSERT(ORIGIN(SRAM) + LENGTH(SRAM) - __sram_bss_end >= 8K, "less than 8 KiB of SRAM free: overlay or shrink a buffer (docs/native-boot.md memory map)");
 ASSERT(0x08080000 - __etext >= 8K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");

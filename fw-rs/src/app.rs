@@ -566,6 +566,7 @@ impl App {
         }
     }
 
+    #[inline(never)] // .cold (link-native.x): on a view change
     fn show(&mut self, v: View, clk: &mut Clock) {
         if v != self.view {
             self.band_until = 0;
@@ -2649,6 +2650,7 @@ impl App {
     /// Start a CSV recording of the current DMM function (DMM page swipe
     /// down, SCPI LOG:CSV ON). False: no reading of the function yet, a
     /// recording is already running.
+    #[inline(never)] // .cold (link-native.x): once per recording
     pub fn rec_start(&mut self, now: u64) -> bool {
         let Some(r) = self.meter.live().copied() else { return false };
         let func = crate::meter::func_of(&r);
@@ -2713,6 +2715,7 @@ impl App {
         self.beep(now, if ok { 100 } else { 500 });
     }
 
+    #[inline(never)] // .cold (link-native.x): on a key press
     fn key(&mut self, clk: &mut Clock, code: u8) {
         let now = clk.now_ms();
         match code {
@@ -2789,6 +2792,7 @@ impl App {
         }
     }
 
+    #[inline(never)] // .cold (link-native.x): on a tap
     fn tap(&mut self, clk: &mut Clock, x: u16, y: u16) {
         let now = clk.now_ms();
         if self.dmm.pw.on && self.pw_tap(clk, x, y) {

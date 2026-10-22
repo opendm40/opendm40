@@ -975,6 +975,7 @@ pub fn poll(now: u64, blocked: bool) {
 /// Link every written, not yet linked block of the staging as the hidden
 /// system file _VHOSTnn.TMP in the SPI root (any order: the volume keeps
 /// its own map; deleted at the session's end, `purge_tmp`). True: parked.
+#[inline(never)] // .cold (link-native.x): after a host write session
 fn park(dev: &mut dyn BlockDevice) -> bool {
     let w = w();
     let mut cl = [0u16; NST * BPC];
@@ -1013,6 +1014,7 @@ fn park(dev: &mut dyn BlockDevice) -> bool {
 
 /// Delete every _VHOST*.TMP of the SPI root: the entries first (0xE5),
 /// then their chains (a power cut: lost clusters at worst).
+#[inline(never)] // .cold (link-native.x): once per session start / purge request
 fn purge_tmp(dev: &mut dyn BlockDevice) -> bool {
     let [buf, fat1, tmp] = crate::calbackup::scratch();
     if !dev.read_block(0, tmp) {
@@ -1143,6 +1145,7 @@ fn crc16_upd(mut c: u16, data: &[u8]) -> u16 {
 /// Check the staged file (decoded: the loader's header test, word1 = size -
 /// 12, the body CRC-16 = word2's low half with the 12 marker bytes at body
 /// 0x4000 excluded, no hazardous last block).
+#[inline(never)] // .cold (link-native.x): after a host write session
 fn check(chain: &[u8], size: u32) -> bool {
     let mut h = [0u8; 12];
     let mut crc = 0xFFFFu16;
@@ -1179,6 +1182,7 @@ fn check(chain: &[u8], size: u32) -> bool {
 }
 
 /// Check, then link the staged SPI clusters as DM40FW.BIN (upload.rs).
+#[inline(never)] // .cold (link-native.x): after a host write session
 fn finalize(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) {
     let w = w();
     let ok = check(chain, size) && commit(dev, chain, size);
@@ -1202,6 +1206,7 @@ fn finalize(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) {
     w.staging = w.st.iter().any(|x| x.c != 0 && x.blk.iter().enumerate().any(|(j, &b)| b != 0 && x.ro & (1 << j) == 0));
 }
 
+#[inline(never)] // .cold (link-native.x): after a host write session
 fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
     let w = w();
     let nb = (size as usize).div_ceil(BLK);

@@ -239,6 +239,9 @@ pub fn latch_off() {
 
 /// Backup SRAM access (as persist::init): PMU clock, BKPWEN, BKPSRAM clock,
 /// backup regulator on.
+/// Region B (not the boot module's .cold): `mark_healthy` calls it once,
+/// 60 s after the start, maybe while a stream runs.
+#[cfg_attr(target_os = "none", link_section = ".text.bkp_enable")]
 pub fn bkp_enable() {
     unsafe {
         modify32(RCU_APB1EN, 0, 1 << 28);

@@ -63,6 +63,7 @@ pub struct HwStatus {
 /// Bring up the 48 MHz clock, PA11/PA12 and a freshly reset USBFS block. The
 /// reset also drops the D+ pull-up, so a host that had the stock device
 /// enumerated sees a disconnect before we attach.
+#[inline(never)] // .cold (link-native.x): start-up
 pub fn init_hw(clk: &mut Clock) -> HwStatus {
     unsafe {
         // PLLSAI: N=288, P=6 (field 0b10); keep the other fields (R) as they are.

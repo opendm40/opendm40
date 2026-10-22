@@ -1294,6 +1294,7 @@ impl Dmm {
     /// previous result), e.g. `41;2:9926/183/0.0891/802/1a,...`. Plain AC V
     /// logs every 4 results as one entry. Returns the length used; the
     /// oldest phases are left out when `buf` is too small.
+    #[inline(never)] // .cold (link-native.x): DBG reply
     pub fn acdc_diag_text(&self, buf: &mut [u8]) -> usize {
         fn put(buf: &mut [u8], at: &mut usize, b: &[u8]) -> bool {
             let ok = *at + b.len() <= buf.len();
