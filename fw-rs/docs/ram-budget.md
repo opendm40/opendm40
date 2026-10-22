@@ -1,0 +1,167 @@
+# RAM budget: who is live when (2026-10-22)
+
+The owner's question: do all big RAM users have to be live at the same
+time? This note lists every static of 1 KB or more on the native build,
+when it is live, what else is live then, and whether it can be overlaid
+or shrunk. The memory map and the link checks are in
+docs/native-boot.md "Memory budget". RAM is 64 KiB TCM (.data / .bss and
+the stack) plus 192 KiB SRAM (.dmabuf, .sram_bss).
+
+## Result of this round
+
+| | before (16f5b0f) | after |
+|---|---|---|
+| SRAM free (above .sram_bss, link check >= 8 KiB) | 10 856 B | 60 656 B |
+| SRAM statics | 185 745 B | 135 941 B |
+| TCM stack / static worst path / headroom | 45 656 / 24 220 / 21 436 B | 45 648 / 24 212 / 21 436 B |
+| region B free (zero-wait flash) | 25 672 B | 26 328 B |
+| region C free (.cold, below 0x080A0000) | 10 112 B | 10 592 B |
+
+What changed:
+
+1. **`screenshot::CAP` (48 KiB) is gone.** The screenshot streams the
+   panel straight into the block it programs (below).
+2. **The scope FFT work buffer (8 KiB) moved into the disk scratch arena**
+   (`calbackup::SCRATCH`, 12 KiB), with an explicit ownership check. It used
+   to be the tail of CAP.
+3. `screenshot::JOB` lost its 642-byte row offset table (1 088 -> 436 B).
+
+## The screenshot: streamed from the panel
+
+How it worked: there was never a frame buffer. The image has always been
+read back from the ILI9488's GRAM (RAMRD 0x2E, `lcd::read_span`: a dummy
+word, then RGB666 packed two pixels per three words, converted to RGB565).
+CAP was only a run-length coded copy of the rows so that the screen could
+unfreeze after ~0.1 s. Screens that did not fit in CAP were already read
+from the GRAM while the file was written, with the screen frozen for the
+whole write. So the streaming path is not new. It is the old fallback,
+and it is now the only path:
+
+- Data phase, per 4 KiB block: fill it with the header bytes and the
+  pixels read from the panel (`read_span`, ~2 000 pixels, ~1.3 ms), into
+  `scratch()[0]`, then `write_step` it (compare, erase, 16 page programs,
+  read back), in slices of <= ~2 ms of CPU per main-loop pass as before.
+- Consistent frame: `frozen()` is true from the gesture until the last data
+  block has been filled. main.rs passes `can_draw = false` and App::gesture
+  drops input in that time, so nothing draws over rows that are not read
+  yet. The main loop keeps running: DMM, USB, BT and the watchdog. The
+  verify pass compares CRCs and does not need the panel.
+- Cost: the screen stays frozen for the write, ~4-5 s on the device. That
+  is 76 blocks, each a 4 KiB sector erase (~45 ms typ.) plus 16 page
+  programs. It is shorter when the free clusters are already erased (the
+  compare skips the erase). Before, it was ~0.1 s for the 91 % of screens
+  whose RLE fitted, and the same 4-5 s for the AC+DC and power views and
+  noisy scope traces, which did not fit.
+- Disk held: a fast-log session or an upload holds the disk for an
+  unbounded time. A shot can no longer wait for them with the screen
+  frozen, so it is refused at once with the toast "Disk busy" (new
+  `Shot::Busy`). It used to be captured and written after the session. A
+  csvlog commit (a few blocks) is still waited for, frozen.
+- Bytes: identical to the old path. Both read the same GRAM through the
+  same `read_span`, and the RLE was lossless. Checked on the host
+  (tools/fatren-test: the BMP equals the stub screen pixel for pixel,
+  bottom-up, with the stock header) and in the emulator (emu/shottest.py:
+  the BMP equals the panel at the gesture; old build vs new build
+  byte-identical, see "Tests").
+
+Why not a smaller CAP: the RLE size of the 148 host renders of
+tools/ui-render was measured, both as coded now and with an extra
+"row = previous row" token (the anti-aliased fonts and traces make rows
+differ):
+
+| CAP size | renders that fit (plain RLE) | with a row-repeat token |
+|---|---|---|
+| 8 KiB | 0 / 148 | 2 |
+| 12 KiB | 4 | 5 |
+| 16 KiB | 9 | 9 |
+| 24 KiB | 24 | 30 |
+| 32 KiB | 75 | 94 |
+| 48 KiB | 134 | 135 |
+
+The median is ~30 KiB and the largest is 68 KiB (d02-dmm-acdc). A small
+buffer buys nearly nothing. It is all (48 KiB) or nothing.
+
+Re-render in strips was not attempted. The drawing code paints straight to
+the panel with diff state (scope_ui `d_*`, the page caches), not a region
+renderer, so a strip could not be reproduced deterministically. Strips
+captured one at a time without the freeze would be consistent within a
+strip but not across the frame.
+
+Possible follow-up (not done): keep the next shot's clusters pre-erased in
+idle time (as fastlog's Prep does for its session). The frozen time would
+then be the page programs only, ~1-1.5 s.
+
+Gallery (screenshot viewer): it needs no big buffer. `Gallery` is 0.7 KiB
+of TCM, and it decodes a BMP row by row from `scratch()[0]` (data) and
+`[1]` (FAT) inside one `poll` while the disk is free.
+
+## The disk scratch arena (`calbackup::SCRATCH`, 12 KiB)
+
+The owner asked to overlay it, on the premise that it is calbackup's and
+only used at boot. **The premise does not hold.** SCRATCH is the shared
+block buffer of every on-device disk user, not calbackup's own:
+
+| user | uses it | across main-loop passes? |
+|---|---|---|
+| calbackup boot safety copy (pre_main) | buf, tmp, FAT | no (before main) |
+| screenshot.rs (shot, scope record) | [0] block being written, [1] FAT cache | yes, Bpb .. Verify |
+| csvlog.rs commit | [0], [1] | yes, while `writing()` |
+| csvlog catalog / delete / free space (MMEM:CAT?, gallery, vwrite) | [0..2] | no |
+| fastlog.rs Prep / Stop | [0..2] | yes (`holds_disk()`) |
+| upload.rs (SCPI upload, USB-volume firmware staging) | [0] collects the block | yes (`busy()`) |
+| vwrite.rs (host deletes, purge, commit) | [0..2] | no |
+| gallery.rs | [0] data, [1] FAT | no (inside one poll) |
+| fatdir.rs (SHOTS / LOGS / SCOPE created) | [0..2] | no |
+
+A csvlog commit runs every 60 s while a recording is on, so the arena is
+in use regularly, and while the scope's DMA writes `scope::BUF`. Overlaying
+it on `scope::BUF` or on CAP (the screenshot used both at once) was not
+safe.
+
+What was done instead: the arena takes a second tenant that really is idle
+most of the time, the scope FFT's 8 KiB work buffer. It is needed only
+while a spectrum job is in flight (a few passes), and the job can be
+dropped and redone at any time. Ownership has runtime checks
+(calbackup.rs):
+
+- `scratch()` is the disk side's only accessor. Every call bumps a
+  generation counter (`GEN`). A disk user never waits for the FFT.
+- `fft_work(fresh)` is the FFT's only accessor. It returns None while a
+  disk job that keeps data in the arena across passes is in flight
+  (`disk_job()`: `screenshot::busy() || csvlog::writing() ||
+  fastlog::holds_disk() || upload::busy()`, the same flags the disk lock
+  uses). For a job already loaded (`fresh` false), it also returns None
+  when `GEN` moved since the load: a single-pass disk user (a gallery read,
+  MMEM:CAT?) wrote the arena in between. On None, scope_page.rs drops the
+  job, keeps the last spectrum and asks for the frame again once
+  `fft_free()`. This is the same retry the CAP lease had.
+- Neither side keeps a reference across passes. The arena is main-loop
+  only (no ISR touches it).
+
+Visible cost: the spectrum is not updated during a disk job (a commit,
+~0.1-0.5 s every 60 s while recording; a shot; a whole fast-log session).
+
+## Every big static (after this round)
+
+Sizes from `llvm-nm -S` of the native ELF (ad2-isr default build).
+
+| static | size | live when | live at the same time | overlay / shrink? |
+|---|---|---|---|---|
+| scope::BUF (SRAM) | 52 KiB | always: the scope acquires in the background in every view (measurements, SCPI); the stored record while stopped | everything | Lent to inrush (`lend_buf`) while the inrush page is open. Nothing else can take it while the scope runs. Keep. |
+| logger::RING (SRAM) | 16.2 KiB | LOG:STAT ON sessions (AD1 / AD2 stream), the Wave view, inrush, fast-log sessions | csvlog is refused by the Wave view, inrush and fastlog::begin, but not by an SCPI LOG:STAT ON session | Idle in plain DMM / scope use. A 12 KiB csvlog overlay (FIFO + TAIL) would need csvlog::start and LOG:STAT ON to refuse each other too, plus an owner token. Not done: a wrong assumption silently corrupts a recording. |
+| calbackup::SCRATCH (SRAM) | 12 KiB | any disk job (table above) + the FFT | see above | Now also hosts the FFT work (8 KiB saved). |
+| csvlog::FIFO_BUF + TAIL (SRAM) | 8 + 4 KiB | a CSV recording (FIFO also lent to fastlog: `lend_fifo`, never together) | DMM, scope, BT, USB | See logger::RING. Already shared with fastlog. |
+| scope_ui::GRAPH (SRAM) | 9.7 KiB | the scope pages (Scope, combined DMM+scope, Wave view): trace / persistence / math rows, and their on-screen diff copies | the scope record, the FFT | Idle on pure DMM pages, but the combined view and the "everything at once" goal rule out an overlay with anything scope-side. Could shrink: the math rows (2 x 1.6 KiB) are only used with math on. Not done. |
+| bt::TX + RX (SRAM) | 8 + 1 KiB | TX: while BT is connected (the reply, up to RSP_MAX 6 KiB + LF, plus stock frames, queued for DMA); RX: the DMA ring, always while BT is powered | everything | TX could shrink to ~6.2 KiB if a reply and stock frames are never queued together. Not checked. Keep. |
+| vdisk::TAB + STATE + CSV_CUR x2 (SRAM / TCM) | 6.3 + 0.3 + 1.9 KiB | always while USB exports the generated volume (the table regenerates every sector read) | everything | Keep. |
+| APP (TCM) | 6.2 KiB | always (the App) | | Keep. |
+| scope_page::CACHE (SRAM) | 4.7 KiB | the scope page (persistence a/b, overlays) | GRAPH | Same as GRAPH. |
+| scope_page::FFT (TCM) | 4.0 KiB | the last spectrum (`db`) | | The result must survive a dropped job. Keep. |
+| gen::WAVE (SRAM) | 3.9 KiB | while the generator outputs (DAC DMA, circular) | everything ("DMM + scope + gen") | Keep. |
+| touch::LOG (TCM) | 1.9 KiB | always (DBG:TOUCH?) | | Debug aid; could go to 0.5 KiB. |
+| scope::ROLL_COLS (SRAM) | 1.6 KiB | roll mode | | Keep. |
+| vwrite::W0 (SRAM) | 1.3 KiB | the writable USB volume session | | Keep. |
+
+Never live together, so worth an owner token if RAM gets tight again:
+logger::RING with the csvlog buffers (12 KiB, see above). Everything else
+over 4 KiB is either always live or live with the scope.

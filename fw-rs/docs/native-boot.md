@@ -462,8 +462,8 @@ date for its layout and traps.
 0x08080000  .cold (rarely run code) + the .data load image          region C (NOT zero-wait)
             end of image below 0x080A0000 (FS-loader above)
 RAM: TCM  0x10000000 .data/.bss, then the stack down from 0x10010000;
-     SRAM 0x20000000 .dmabuf (DMA buffers, the scope record, the screenshot
-          arena, the logger ring, ...), then .sram_bss (CPU-only, zeroed)
+     SRAM 0x20000000 .dmabuf (DMA buffers, the scope record, the disk
+          scratch arena, the logger ring, ...), then .sram_bss (CPU-only, zeroed)
 ```
 
 ### Memory budget (2026-10-22 rework)
@@ -497,7 +497,11 @@ the FFT / screenshot sharing below):
   local of `Bt::respond_with` (never inlined): that path, run -> respond_with
   -> builder (~21.4 KB), is shallower than the drawing paths that set the
   worst case. stackdepth.py follows the dyn calls (its `INDIRECT` list).
-- **FFT work buffer** (8 KiB of the 12 KB `scope_page::FFT` in TCM): an
+- **FFT work buffer** (superseded the same day, docs/ram-budget.md: the
+  screenshot capture buffer CAP is gone, the screenshot streams from the
+  panel, and the FFT work buffer lives in the disk scratch arena
+  `calbackup::SCRATCH` with an ownership check; SRAM free 10.9 -> 60.7 KB.
+  As it was before that:) (8 KiB of the 12 KB `scope_page::FFT` in TCM): an
   arena with an explicit owner, the last 8 KiB of the screenshot capture
   buffer (`screenshot::CAP`, 48 KiB). The FFT renews a lease every time it
   uses the buffer (a few main-loop passes); a screenshot started during a
