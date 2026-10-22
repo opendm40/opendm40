@@ -186,6 +186,23 @@ impl Checker {
 
     /// Check the emulator screen. `regions`: (name, box) screen areas that
     /// contain items (the screen itself is always one, margin 4).
+    /// UIR_HASH=<file>: append "<case> <scene> <FNV-1a 64 of the screen>"
+    /// per checked case (a byte-for-byte framebuffer comparison of every
+    /// case between two trees, e.g. a font storage change: docs/fonts.md).
+    fn hash(&self, scene: &str) {
+        if let Ok(p) = std::env::var("UIR_HASH") {
+            use std::io::Write;
+            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+            for &v in emu().fb.iter() {
+                for b in v.to_le_bytes() {
+                    h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
+                }
+            }
+            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(p).unwrap();
+            writeln!(f, "{} {} {:016x}", self.cases, scene, h).unwrap();
+        }
+    }
+
     fn check(&mut self, scene: &str, regions: &[(&str, Bx)]) {
         self.check_opts(scene, regions, true)
     }
@@ -201,6 +218,7 @@ impl Checker {
     /// stock-replica page: the combined view's meter strip).
     fn check_area(&mut self, scene: &str, regions: &[(&str, Bx)], glyph_rule: bool, area: Option<Bx>) {
         self.cases += 1;
+        self.hash(scene);
         let its: Vec<Item> = items().into_iter().filter(|i| area.map_or(true, |a| a.contains(&i.b))).collect();
         let screen = Bx::new(0, 0, W as i32, H as i32);
         let desc = |i: &Item| format!("{} #{} {:?}", kind_name(i.kind), i.id, i.b);
@@ -296,6 +314,7 @@ impl Checker {
     /// without one containing the other).
     fn check_replica(&mut self, scene: &str) {
         self.cases += 1;
+        self.hash(scene);
         let its = items();
         let texts: Vec<&Item> = its.iter().filter(|i| i.kind == probe::TEXT).collect();
         for a in 0..texts.len() {
@@ -321,6 +340,7 @@ impl Checker {
     /// stay exempt).
     fn check_add(&mut self, scene: &str, regions: &[(&str, Bx)], add: &[Bx], against: Bx) {
         self.cases += 1;
+        self.hash(scene);
         let its: Vec<Item> = items().into_iter().filter(|i| against.contains(&i.b) || add.iter().any(|a| a.contains(&i.b))).collect();
         let is_add: Vec<bool> = its.iter().map(|i| add.iter().any(|a| a.contains(&i.b))).collect();
         let desc = |i: &Item| format!("{} #{} {:?}", kind_name(i.kind), i.id, i.b);
@@ -386,6 +406,7 @@ impl Checker {
     /// The screen equals `want` (an incremental update left no stale pixel).
     fn same_as(&mut self, scene: &str, want: &[u16]) {
         self.cases += 1;
+        self.hash(scene);
         let fb = &emu().fb;
         let bad: Vec<usize> = (0..fb.len()).filter(|&i| fb[i] != want[i]).collect();
         if let Some(&i) = bad.first() {
