@@ -493,7 +493,8 @@ pub enum Dbg {
     /// (stream frames by the CPU / by DMA, the default: decision 2026-10-22 #7;
     /// DMA? = Ad2(4, 255): the setting, 0|1)
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
-    /// = the row's), 2 draw (r26 = level).
+    /// = the row's), 2 draw (r26 = level), 5 DCV? range,r26,n[,flags] (the
+    /// DC-coupled V row, device test 6.5: n | range << 8, flags).
     Ad2(u8, u8, u16, u8),
     /// DBG:HYSPI:SELF? n[,div[,cpha]] (src/hyspi.rs): (n, div | cpha << 7;
     /// div 0 = hy3131::DIV).
@@ -505,6 +506,14 @@ pub enum Dbg {
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
+}
+
+/// DBG:AD2:DCV? range,r26,n[,flags] -> Dbg::Ad2(5, r26, n | range << 8,
+/// flags) (main.rs `dbg_dcv`).
+#[inline(never)] // .cold (link-native.x)
+fn dcv_arg(a: &[u8]) -> Dbg {
+    let w = nums::<4>(a);
+    Dbg::Ad2(5, (w[1] & 0x3F) as u8, (w[2].clamp(1, 16) | w[0].min(3) << 8) as u16, (w[3] & 0x0F) as u8)
 }
 
 fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
@@ -1413,6 +1422,8 @@ impl Scpi {
                         (Some(b"DIV"), false) => Some(Dbg::Ad2(3, (v[0].min(255)) as u8, 0, (v[1] != 0) as u8)),
                         (Some(b"DMA"), false) => Some(Dbg::Ad2(4, (v[0].min(1)) as u8, 0, 0)),
                         (Some(b"DMA"), true) => Some(Dbg::Ad2(4, 255, 0, 0)),
+                        // DCV? range,r26,n[,flags]: (5, r26, n | range << 8, flags).
+                        (Some(b"DCV"), true) => Some(dcv_arg(a)),
                         _ => None,
                     };
                     match d {

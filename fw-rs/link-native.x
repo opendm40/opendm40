@@ -186,6 +186,8 @@ SECTIONS
          * MMEM:DEL (and the modules above: DBG:HYSPI, DBG:AD2:TORN / NOISE,
          * DBG:UPLOAD, MMEM:DATA?, DBG:GENUINE?). */
         *(.text.*7dm40_fw4prof6report*);
+        *(.text.*7dm40_fw7dbg_dcv*);
+        *(.text.*7dm40_fw4scpi7dcv_arg*);
         *(.text.*7dm40_fw5touch8log_text*);
         *(.text.*7dm40_fw10touch_diag*);
         *(.text.*7dm40_fw6csvlog6delete*);

@@ -823,6 +823,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         log_draw = level;
                         false
                     }
+                    scpi::Dbg::Ad2(5, r26, nr, flags) => {
+                        dbg_dcv(app, &mut clk, logger, &mut scpi, port, r26, nr, flags);
+                        false
+                    }
                     scpi::Dbg::Ad2(kind, r26, n, b) => {
                         // Synchronous AD2 experiment in the current stock AC
                         // row; the row is rewritten afterwards.
@@ -1462,6 +1466,53 @@ fn block_reply(o: &scpi::Out) -> bool {
             | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
             | Out::Dbg(Dbg::Ad2(0 | 1, ..))
     )
+}
+
+/// DBG:AD2:DCV? range,r26,n[,flags] (device test 6.5, src/ad2exp.rs
+/// `dcv_test`): in plain DC V, not while logging; sets the manual DC V
+/// range, runs the test, appends the AD1 means in uV (the DC V calibration
+/// of the tap AD1 reads: r0 = the /100 tap of AC V 6 V, or /10 with OP2)
+/// and restores the DMM row (the range stays manual: CONF:VOLT:DC = AUTO).
+#[inline(never)] // .cold (link-native.x)
+#[allow(clippy::too_many_arguments)]
+fn dbg_dcv(app: &mut app::App, clk: &mut Clock, logger: &logger::Logger, scpi: &mut scpi::Scpi, port: &mut dyn bt::ScpiPort, r26: u8, nr: u16, flags: u8) {
+    if logger.active() || app.dmm.func() != 1 {
+        scpi.set_err("Settings conflict");
+        return;
+    }
+    let r = (nr >> 8) as u8;
+    app.dmm_power(clk);
+    app.dmm.set_range(clk, Some(r + 1));
+    let buf = port.rsp_buf();
+    let (mut n, ad1) = ad2exp::dcv_test(r, r26, (nr & 0xFF) as u32, flags, buf);
+    let k = if flags & ad2exp::DCV_OP2 != 0 && r == 0 { 0 } else { r.max(1) };
+    for (i, c) in ad1.iter().enumerate() {
+        let uv = (dmm::dcv_volts(*c as f32, k as usize) * 1e6) as i64;
+        let mut t = [0u8; 24];
+        let mut j = t.len();
+        let mut v = uv.unsigned_abs();
+        loop {
+            j -= 1;
+            t[j] = b'0' + (v % 10) as u8;
+            v /= 10;
+            if v == 0 {
+                break;
+            }
+        }
+        if uv < 0 {
+            j -= 1;
+            t[j] = b'-';
+        }
+        j -= 1;
+        t[j] = if i == 0 { b';' } else { b',' };
+        let m = (t.len() - j).min(buf.len() - n);
+        buf[n..n + m].copy_from_slice(&t[j..j + m]);
+        n += m;
+    }
+    port.respond_len(n);
+    app.dmm.start(clk);
+    app.meter.reset();
+    app.last_raw = None;
 }
 
 /// A ScpiPort that notes whether a reply was queued from its buffer.
