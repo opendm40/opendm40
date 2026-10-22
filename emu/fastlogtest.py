@@ -60,10 +60,10 @@ def run_emu(profile):
     p = PROF[profile]
     script = os.path.join(HERE, 'out', 'fastlog-%d.script' % A.port)
     with open(script, 'w') as f:
-        f.write('0 monitor sysbus.spiflash ProgramUs %d\n' % p[0])
-        f.write('0 monitor sysbus.spiflash Erase4kUs %d\n' % p[1])
-        f.write('0 monitor sysbus.spiflash Erase32kUs %d\n' % p[2])
-        f.write('0 monitor sysbus.spiflash Erase64kUs %d\n' % p[3])
+        f.write('0 monitor sysbus.spi2.spiflash ProgramUs %d\n' % p[0])
+        f.write('0 monitor sysbus.spi2.spiflash Erase4kUs %d\n' % p[1])
+        f.write('0 monitor sysbus.spi2.spiflash Erase32kUs %d\n' % p[2])
+        f.write('0 monitor sysbus.spi2.spiflash Erase64kUs %d\n' % p[3])
     cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--mips', '200', '--app', A.app,
            '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '5000', '--name', 'fastlog-%d' % A.port,
            '--dmm', 'vsrc:0.2,ac=0.5,f=50', '--script', script]
@@ -89,9 +89,9 @@ def connect():
     sys.exit('fastlogtest: no USB/IP device on port %d' % A.port)
 
 
-def decode(dlg):
+def decode(dlg, tag):
     """tools/dlog.py of the bytes: (rows, sum lost_before, header ok)."""
-    path = os.path.join(HERE, 'out', 'fastlog-%d.dlg' % A.port)
+    path = os.path.join(HERE, 'out', 'fastlog-%d-%s.dlg' % (A.port, tag))
     open(path, 'wb').write(dlg)
     r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'fw-rs/tools/dlog.py'), path], capture_output=True, text=True)
     if r.returncode:
@@ -145,7 +145,7 @@ def session(q, src, rate, profile):
         dlg += bytes(b[6:6 + n])
         if n < 6000:
             break
-    rows, lost, ok = decode(dlg)
+    rows, lost, ok = decode(dlg, '%s-%s-%d' % (profile, src, rate))
     check(ok and rows == st[4] and len(dlg) == st[3], '%s %d: %s decodes: %d rows, %d bytes' % (src, rate, name, rows, len(dlg)))
     prep_s = ((t_run or up1) - up0) / 1000
     run_s = (up1 - (t_run or up1)) / 1000
@@ -245,7 +245,11 @@ for profile in A.profiles.split(','):
         for sv in A.sessions.split(','):
             src, rate = sv.split(':')
             lost = session(q, src, int(rate), profile)
-            if profile == 'typ' and int(rate) <= 9600:
+            if src == 'ad1':
+                # The AD1 main-loop sampler drops a conversion on an
+                # occasional long pass (logger.rs; LOG:GAPs?), disk or not.
+                check(lost <= 3, '%s %s %s: at most an occasional main-loop gap (%d)' % (profile, src, rate, lost))
+            elif profile == 'typ' and int(rate) <= 9600:
                 check(lost == 0, '%s %s %s: no sample lost' % (profile, src, rate))
         if not A.no_bt and profile == A.profiles.split(',')[0]:
             bt_checks()

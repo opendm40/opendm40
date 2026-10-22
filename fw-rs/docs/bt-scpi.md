@@ -84,7 +84,24 @@ loop. RX goes to a 1 KiB circular DMA ring (89 ms of input).
 | `READ?` | 15 B | 1.3 ms | 0.1-0.4 s, set by the DMM conversion, not the link |
 | `MEAS:<f>?` after a function change | 15 B | 1.3 ms | ~3 s (settling, as on USBTMC) |
 | `WAV:DATA?` | 406 B | 35 ms | ~50-100 ms |
-| `LOG:DATA?` | <= 6145 B | 0.53 s | ~0.6 s |
+| `LOG:DATA?` | <= 6145 B | 0.53 s | ~0.6 s (AD1 <= 640 S/s only, see below) |
+
+The data logger over Bluetooth (`LOG:STATe ON`, `LOG:DATA?`; 2026-10-22):
+12-byte records at 11.5 kB/s are 960 records/s with the link 100 % busy;
+each block also waits for the query's round trip (RFCOMM ~20-60 ms per
+511-record block of 0.53 s), so ~870 records/s is the realistic ceiling.
+fw-rs therefore refuses `LOG:STATe ON` from Bluetooth when the session's
+nominal rate is above 800 S/s or the source is AD2 (whose slowest rung is
+1200 S/s): `SYST:ERR?` = "Rate too high for Bluetooth"; every AD1 setting
+(LOG:OSR / LOG:CHOP, 2.5 .. 640 S/s) works (640 S/s = 7.7 kB/s, 67 % of
+the link; the 2048-record ring covers 3.2 s of host stalls). `LOG:DATA?`
+from Bluetooth while a faster session runs (started over USB) answers an
+empty block and the same error, so it never steals the USB host's
+records. `LOG:DEST DISK` sessions are USB only ("Command protected", as
+`LOG:CSV ON`). For AD2 rates use USBTMC or the disk (LOG:DEST DISK,
+docs/compact-log-format.md "Fast stream"). Host: `tools/dm40scpi.py --bt
+log --source ad1 --osr 0` (it warns about the ceiling). Emulator check:
+emu/fastlogtest.py (the refusals, an AD1 session drained over BT).
 
 The module has no RTS/CTS wiring. Classic SPP keeps up with 115200. Over BLE
 (20-byte notifications at the connection interval) the module may not keep up
