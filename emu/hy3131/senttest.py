@@ -89,6 +89,9 @@ SC = {
     # Fuse check (SYST:FUSE:TEST, doc 4.7): a lead V -> A, the fuse intact / blown, a short V-COM.
     'fuse-ok':   ('CURR:DC', 20, [(0, 'open;valead', {'NONE'})], ['SYST:FUSE:TEST'],
                   {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OK', 'ohm': (44, 54)}),
+    # the same through the UI: MF -> Current Settings -> Fuse check -> Start
+    'fuse-ui':   ('CURR:DC', 22, [(0, 'open;valead', {'NONE'})], ['DBG:KEY 3', 'DBG:TAP 237,159', 'DBG:TAP 344,210'],
+                  {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OK', 'ohm': (44, 54)}),
     'fuse-open': ('CURR:DC', 20, [(0, 'open;valead;fuseopen', {'NONE'})], ['SYST:FUSE:TEST'],
                   {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OPEN'}),
     'fuse-odd':  ('CURR:DC', 20, [(0, 'open;r:0.5', {'NONE'})], ['SYST:FUSE:TEST'],

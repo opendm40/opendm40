@@ -586,7 +586,7 @@ Firmware:
         the /1000 V tap), Hz (AD1 peak on PB1), continuity / diode / cap r0..4 (AD2 + OP2 on PB1); cap r5..7 and
         DC V 60 V+ stay uncovered (documented gaps); DC? (AC V) / AC? (DC V 6 V) / FUSE? hints; fuse check
         (Current Settings "Fuse check", SYST:FUSE:TEST / SYST:FUSE?); STATus:QUEStionable bit 9 (+ bit 1
-        OVERLOAD). Emulator: model + 26 new senttest scenarios, 362 model checks; host tests; ui-render 0.
+        OVERLOAD). Emulator: model + 27 new senttest scenarios, 362 model checks; host tests; ui-render 0.
         (verify on device: doc §4.7 device test plan T8, T11..T16; DBG:SENTinel:VARiant +8 / +16 back out the
         new rows / the alternation if a reading moves)
   Compared with UNI-T UT197 (2026-10-22, its manual §16.2 + the A / mA fuse notes): the UT197 senses a PLUG in

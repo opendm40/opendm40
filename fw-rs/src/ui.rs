@@ -943,9 +943,11 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
         }
     }
     ok_and_limits_buttons();
-    if b == Button::Amp {
-        // Fuse check (doc 4.3): the free slot between Hold/Limits and OK.
-        let r = rect(162, 240, 153, 38);
+    if b == Button::Amp && note.is_none() {
+        // Fuse check (doc 4.3): the A page has no note line, so the button
+        // sits there, the middle column (the bottom middle slot is the wave
+        // view's "Wave" in ad2-isr builds).
+        let r = FUSE_BTN;
         sf::rbox(r, 6, 0x2966, BG);
         sf::glyphs(sf::TEXT22, r, "Fuse check", STATUS_FG, 0x2966, 8, 0);
     }
@@ -1001,6 +1003,10 @@ fn ok_and_limits_buttons() {
 /// stock DC / AC / AC+DC column grid (x 162, the AC button's column).
 pub const WAVE_BTN: sf::Rect = rect(162, 240, 150, 38);
 
+/// "Fuse check" on the Current Settings page (`range_page`): rows 141..177
+/// between the range buttons (to 136) and DC / AC / AC+DC (from 182).
+pub const FUSE_BTN: sf::Rect = rect(162, 141, 150, 36);
+
 pub fn wave_button() {
     sf::rbox(WAVE_BTN, 6, 0x2966, BG);
     sf::glyphs(sf::TEXT22, WAVE_BTN, "Wave", STATUS_FG, 0x2966, 8, 0);
@@ -1039,7 +1045,7 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     if (240..278).contains(&y) && (8..158).contains(&x) {
         return Some(Err(4));
     }
-    if (240..278).contains(&y) && (162..315).contains(&x) && b == Button::Amp {
+    if (139..180).contains(&y) && (160..315).contains(&x) && b == Button::Amp {
         return Some(Err(5));
     }
     None
