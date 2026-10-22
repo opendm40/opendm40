@@ -764,7 +764,7 @@ fn unhex(s: &str) -> Vec<u8> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
 }
 
-/// `main <out> vread <flash> <uid> <otp> <optbytes> <spi.img> <DIR> <NAME.EXT>`:
+/// `main <out> vread <flash> <uid> <otp> <optbytes> <spi.img> <DIR> <NAME.EXT> [head]`:
 /// the USB volume over <spi.img>; file DIR/NAME.EXT read the way a host
 /// does (its clusters in order, sector by sector through read_block) into
 /// <out>, with the raw SPI reads behind it (calls, bytes) and a device
@@ -843,6 +843,11 @@ fn vread(a: &[String]) {
     let t1 = std::time::Instant::now();
     let mut out = Vec::with_capacity(size as usize);
     let mut sectors = 0u32;
+    // `head` (an extra argument): every 16th sector also re-read the file's
+    // first sector (an indexer at its head while a copy runs), compared.
+    let head = a.get(10).is_some_and(|x| x == "head");
+    let first = c;
+    let mut hb = vec![0u8; 512];
     while (out.len() as u32) < size && (2..0xFFF0).contains(&c) {
         for k in 0..spc {
             if out.len() as u32 >= size {
@@ -852,6 +857,10 @@ fn vread(a: &[String]) {
             sectors += 1;
             let n = (size as usize - out.len()).min(512);
             out.extend_from_slice(&b[..n]);
+            if head && sectors % 16 == 0 {
+                assert!(d.read_block(data + (first - 2) * spc, &mut hb));
+                assert!(hb[..512.min(size as usize)] == out[..512.min(size as usize)], "head re-read differs");
+            }
         }
         c = fat(&mut d, c);
     }

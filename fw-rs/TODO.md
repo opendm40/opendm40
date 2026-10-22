@@ -878,6 +878,16 @@ Firmware:
         6.1 us, lat_pc VDisk::block_size (region C: the desktop polls the mounted volume) -> every
         VDisk BlockDevice method and the directory sectors in region B. Volume read of FAST006.CSV
         (53 MB): ~39 KB/s, the main loop's USB section ~15 ms per pass -> DBG:VDISK:RD? to see where.
+        Device 046e4b9: AD1 640 / 320 / 160 (chop off) to disk 60 s: 38402 / 19201 / 9602 samples,
+        0 lost, gaps 0, locked, -0.9 ppm, max_lat 0.24 us. AD1 40 host 60 s: gaps 0, 76 rescues,
+        stamps 26 ms apart (LOG:COUNt? still says 73 lost: the span vs the nominal 25 ms). AD2 38400
+        / 19200 to disk with the volume mounted: 0 lost, max_lat 0.28 us. CSV read still ~40 KB/s,
+        also with strictly sequential 64 KiB reads (FADV_RANDOM): DBG:VDISK:RD? 6.4 ms per
+        read_block, ~44 SPI reads of ~28 bytes (header-sized) per sector, 1 open; a host replay of
+        the device's own SPI image (fatren-test vread) reads 0.07 per sector: not reproduced. ->
+        two CSV cursors + seek checkpoints (a head-reading indexer no longer drags one cursor), a
+        lock timeout (re-acquire after 2 s unlocked with nothing captured, then end the session),
+        DBG:VDISK:RD? also counts non-cursor seeks, headers read, rows decoded: to be measured.
       - Emulator: the AD2 19200 DMA lock never converged in 3 of 9 sessions (5394b21; 0 of 9 on
         f66af0d): a coin-toss probe around the edge geared kp up before it reached kp_min ->
         ad2pll `result`: locked also at kp <= kp_max / 4 after 64 probes (9 of 9 pass).

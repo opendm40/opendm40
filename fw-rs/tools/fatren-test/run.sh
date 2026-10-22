@@ -1255,6 +1255,16 @@ rs = float(re.search(r'refresh: .*?~([0-9.]+) s on the device', t).group(1))
 reads = int(re.search(r'read: spi ([0-9]+) reads', t).group(1))
 assert amp < 0.06 and kbs > 10000 and rs < 0.2 and reads < 20000, (amp, kbs, rs, reads)
 PY
+# The same while "an indexer" re-reads the file's head every 16 sectors
+# (device 5394b21: ~2.2 SPI bytes per CSV byte, ~6 ms per sector, with one
+# cursor dragged back and forth): two cursors + seek checkpoints.
+"$W/t" $W/vlh.csv vread $W/f1m_native $W/src/UID.BIN $W/src/OTP.BIN $W/src/OPTBYTES.BIN $IMGL LOGS FAST000.CSV head | tee $W/vlh.out
+cmp -s $W/vlh.csv $IMGL.ref.csv && python3 -I - $W/vlh.out <<'PY' && echo "ok: interleaved head reads: the copy == the reference, SPI reads bounded" || { echo "FAIL at line $LINENO"; exit 1; }
+import re, sys
+t = open(sys.argv[1]).read()
+amp = float(re.search(r'\(([0-9.]+) B per CSV byte', t).group(1))
+assert amp < 0.08, amp
+PY
 "$W/t" $IMGQ fast 5000 4800 abandon | tee $W/q3
 grep -qE "^fast=Done file=None .* started=false" $W/q3 && ! mdir -i $IMGQ ::LOGS | grep -q FAST002 && echo "ok: stopped while preparing: no file, nothing linked" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGQ
