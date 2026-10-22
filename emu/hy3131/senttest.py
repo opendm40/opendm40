@@ -64,6 +64,8 @@ SC = {
     # (the ramp) has none: the gap is asserted.
     'acdc-v':   ('VOLT:ACDC', 30, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0.001', {'AJACK'}), (21, 'isrc:none', {'NONE'})]),
     'acdc-vac': ('VOLT:ACDC', 22, [(0, 'open;vsrc:0,ac=1.0,f=50', {'NONE'}), (10, 'isrc:0,ac=0.005,f=50', {'AJACK'})]),
+    # AC+DC V above 6 V: both phases without a sentinel (the DC V 60 V+ gap), no flapping
+    'acdc-v-hi-gap': ('VOLT:ACDC', 26, [(0, 'open;vsrc:30', {'NONE'}), (10, 'isrc:0.001', {'NONE'})]),
     'acdc-a':   ('CURR:ACDC', 30, [(0, 'open', {'NONE'}), (10, 'vsrc:24', {'VJACK'}), (21, 'vsrc:none', {'NONE'})]),
     'aca-v':    ('CURR:AC', 28, [(0, 'open;vsrc:1', {'NONE'}), (10, 'vsrc:5', {'VJACK'}), (19, 'vsrc:none', {'NONE'})]),
     'aca-vac':  ('CURR:AC', 20, [(0, 'open', {'NONE'}), (10, 'vsrc:0,ac=230,f=50', {'VJACK'})]),

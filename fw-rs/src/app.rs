@@ -2267,7 +2267,11 @@ impl App {
         let busy = self.dmm.fuse_state() == crate::sentinel::FuseRes::Busy;
         if self.fuse_busy && !busy {
             self.func_changed();
-            if let Some(crate::dialog::Overlay::FuseCheck { stage: 1, .. }) = self.overlay {
+            let aborted = self.dmm.fuse_state() == crate::sentinel::FuseRes::Idle;
+            if aborted && matches!(self.overlay, Some(crate::dialog::Overlay::FuseCheck { .. })) {
+                // Ended by another choice (a SCPI CONF:, the BT mode byte).
+                self.overlay_close();
+            } else if let Some(crate::dialog::Overlay::FuseCheck { stage: 1, .. }) = self.overlay {
                 let ok = matches!(self.dmm.fuse_state(), crate::sentinel::FuseRes::Ok(_));
                 buzzer(true, self.volume);
                 self.beep_until = now + if ok { 100 } else { 300 };

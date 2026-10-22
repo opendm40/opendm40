@@ -1245,8 +1245,11 @@ comparison):
 | continuity (11), diode (12), cap r0..4 (13, RC oscillator) | AD2 + OP2 (unused there): OP2 x1 (OPS2 0) on PB1, AD2 = OP2O - PB3, refs PB6 / AGND, IG 2.0, OSR 256, peak hold on AD2 (PKHSEL 00); continuity / diode have AD1 on: the row goes out with AD1 off and ENAD1 last (note 7: AD2 never starts while AD1 converts) | R25 AD2IG 11 + OPS2 0, R26 83, R27 6D, R29 ENPKH, R32 D0 \| OP1 | 9 900 codes = 0.5 mA |
 
 Gaps (no fake coverage): capacitance r5..7 (the ramp: both op amps on PB0,
-AD1 and the comparator busy; asserted by the `cap-ramp-gap` scenario) and DC
-V 60 / 600 / 1000 V (the 9dd1222 false trip, 4.6). In the temperature
+AD1 and the comparator busy; asserted by the `cap-ramp-gap` scenario), DC
+V 60 / 600 / 1000 V (the 9dd1222 false trip, 4.6) and therefore AC+DC V
+above 6 V in both phases (an AC-phase-only A-JACK would be wiped by every
+phase switch and re-asserted: a toast and beeps each cycle; asserted by
+`acdc-v-hi-gap`). In the temperature
 function the comparator is still sampled only ~1.4 times a second (4.6).
 
 **Hints (doc 4.4, grey in the status slot, silent, one toast; on with Jack
@@ -1283,7 +1286,9 @@ decides: 44..54 ohm FUSE OK (green), OL FUSE OPEN (red, "Replace: 10 A
 ceramic fuse"), anything else "Check leads" (amber; a short V-COM, the lead
 in COM); no reading in 8 s: "No ohm reading". Then the function before comes
 back (a manual DMM range too; from the power meter the energy restarts);
-Cancel / a key aborts and restores; "Again" repeats. The 0.05 ohm step with
+Cancel / a key aborts and restores; "Again" repeats; a function choice
+from SCPI / BT while it runs ends it without a restore and closes the
+dialog. The 0.05 ohm step with
 PE0 = 1 of 4.3 is left out: it tests the MOSFET, not the fuse. `SYST:FUSE?`:
 IDLE | BUSY | OK,<ohm> | OPEN | FAIL,<ohm> | FAIL,NONE; ~1 s in the emulator.
 
@@ -1302,8 +1307,8 @@ AD2 result between two bus accesses), the comparator on SENSE (V / 10) in
 DC V r0; row matching frees exactly those fields; front-end keys `valead`
 (a lead V/ohm -> A: fuse + shunt chain in parallel with V-COM) and
 `fuseopen` (no current reaches the shunts; kept by `open`). Model checks:
-362 pass. `emu/hy3131/senttest.py` 44 scenarios (25 new: ovl-dcma, ovl-dcua-man,
-ovl-acma, ovl-acdc, ovl-pow, acdc-v, acdc-vac, acdc-a, aca-v, aca-vac,
+362 pass. `emu/hy3131/senttest.py` 45 scenarios (26 new: ovl-dcma, ovl-dcua-man,
+ovl-acma, ovl-acdc, ovl-pow, acdc-v, acdc-vac, acdc-v-hi-gap, acdc-a, aca-v, aca-vac,
 aca-vi, freq-a, cont-a, diode-a, cap-a, cap-ramp-gap, acv-dchint, acv-dc-ac,
 acv-dc-ajack, dcv-achint, dcv-ac-ajack, fuse-hint, fuse-ok, fuse-open,
 fuse-odd); every row also checks `STAT:QUES:COND?` against `SYST:ALER?`.

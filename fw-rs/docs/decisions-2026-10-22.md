@@ -298,6 +298,10 @@ HOLD" (Settings 3/3 keeps its value text: no room in the row). Device check: HOL
 current through A -> HOLD / A-JACK alternate 1 s each, beep continues; V-JACK? under HOLD shows
 HOLD only.
 
+**Extended (2026-10-22, misconnect 4.7).** OVERLOAD (red, the protective
+10 A switch) joins the alternating set (A-JACK / LIVE? / OVLD); the grey hints
+DC? / AC? / FUSE? take V-JACK?'s place below HOLD (never alternating).
+
 **Revisit.** If the device check of the sentinel re-check list (A-JACK false trips) shows the
 alert is too noisy to blink over HOLD, go back to A for the slot and keep the beep, rather than
 weakening the beep.
