@@ -37,6 +37,7 @@ Code work (in this order):
 3. Wire src/bargraph.rs into DmmView (UF-30).
 6. libsigrok DM40 profile: device retest over USBTMC (all functions passed in the emulator; Range /
    Digits added 2026-10-23, emulator only), send upstream.
+7. Scope full-record readout + ngscopeclient driver: device retest (item below).
 
 ## Memory budget (2026-10-22 rework, docs/native-boot.md "Memory budget")
 
@@ -547,6 +548,30 @@ Code work (in this order):
       rule that unbinds the usbtmc kernel driver from 1209:0001 and grants access (Chrome cannot claim a
       kernel-bound interface); Windows needs WinUSB (Zadig). Option: Web Bluetooth over the BLE "DM40A" link
       (stock app protocol, no SCPI) for cable-free use. A claude.ai artifact sandbox likely blocks WebUSB.
+- [ ] Scope in ngscopeclient (owner-approved 2026-10-22: a libscopehal driver + a full-record readout).
+      Done in the emulator (branch scope-full-record): fw-rs WAV:POINts SCReen|MAXimum|<n>, WAV:FORMat BYTE|WORD,
+      WAV:SOURce CHAN1, 10-field Keysight/Rigol WAV:PREamble? (was 4 fields), DIGitize, TRIGger:STATus?,
+      CHANnel1:OFFSet, ACQuire:SRATe? (src/scope_wav.rs, docs/bt-scpi.md "Scope waveform readout"); the
+      default WAV:DATA? is unchanged. The 53 KB record streams over USBTMC from the scope buffer
+      (usbtmc::respond_stream, packets polled within the disk-READ budget per pass; scope held stopped
+      until the last packet); refused while running and, when longer than 6 KiB, over Bluetooth.
+      emu/wavtest.py passes (USBTMC multi-round + 64 KiB rounds, BYTE / WORD / decimated, the sine's
+      frequency / Vpp / trigger point, abandoned stream, BT refusal). libscopehal driver DM40Oscilloscope
+      ("alientek_dm40", usbtmc / lan / uart; generator as a FunctionGenerator) in
+      ../../ngscopeclient-dm40 (scopehal-apps/lib branch alientek-dm40, README.md there); ngscopeclient
+      showed the emulator's 1 kHz sine for 10 min (2557 records), test/dm40cli passes over lan and uart.
+      Emulator finding: with the comparator trigger on, the scope sometimes never completes a frame after a
+      start / restart (TRIG:STAT? WAIT for good; also on 0fd0379); wavtest and run-emulator.sh use
+      DBG:HWTRIG:ENABLE 0. Model or firmware? Check on the device (retest 3).
+      Device retest: (1) wavtest's sequence by hand with tools/dm40scpi.py or pyvisa: WAV:POIN MAX + WAV:FORM
+      WORD after DIG -> 53 256-byte block, Linux usbtmc read in one call, time it; DBG:DIAG? loop max during the
+      read; (2) WAV:DATA? while running -> "#10" + Settings conflict; RUN pressed on the meter during a long
+      read waits; (3) DIG in a loop (100x) at 1 ms/div with the comparator on (the default), Auto and Normal,
+      on a 1 kHz generator loopback: every DIG ends in STOP; (4) CHAN1:OFFS 0.5 then DIG: the record's volts
+      unchanged (the offset PWM shifts the codes; the emulator does not model that); (5) ngscopeclient-dm40 on
+      /dev/usbtmcN: Run / Single / Stop, sample rate 50 MS/s .. 2.5 kS/s, V/div, offset, trigger level /
+      slope, generator on / shape / frequency; (6) Bluetooth: WAV:POIN MAX -> "Too much data", the driver
+      over rfcomm (--uart) gets 1902-point records.
 - [ ] sigrok/SmuView (merged from three items): libsigrok scpi-dmm DM40 profile exists as
       ../libsigrok-dm40/0001-scpi-dmm-add-support-for-Alientek-DM40A-B-C-dm40-fw-.patch (command set
       like the 34401A: CONF:<f>, READ?, FUNC?; 3 s delay after RES/CAP/TEMP/FREQ/CONT/DIOD). DC V works
