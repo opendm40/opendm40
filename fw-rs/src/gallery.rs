@@ -932,6 +932,7 @@ impl Tb {
     const fn new() -> Tb {
         Tb { b: [0; 48], n: 0 }
     }
+    #[inline(never)] // one copy: was inlined 9 times next to its own symbol (region C audit #1)
     fn c(&mut self, c: u8) {
         if self.n < self.b.len() {
             self.b[self.n] = if c.is_ascii_graphic() || c == b' ' { c } else { b'?' };

@@ -281,6 +281,13 @@ round trip). A Bulk-IN URB for which the device never sends data stays
 pending on its own endpoint only (with Renode's server it blocked every
 later URB).
 
+`gallerytest.py --app <ELF> [--port P] [--shots DIR]` drives the fw-rs
+gallery (src/gallery.rs) like a user over USB/IP (DBG:KEY / TAP / SWIPE) on
+a private copy of the MSC dump with 8 screenshots (S003..S007 added): grid
+pages and swipes, the viewer (the whole screen read back with DBG:LCD? must
+equal the BMP), Delete -> Cancel, Delete -> Delete (MMEM:CAT? 8 -> 7),
+MENU back out (~8 min).
+
 ### GDB
 
 ```sh
