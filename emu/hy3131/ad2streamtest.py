@@ -40,7 +40,8 @@ ap.add_argument('--secs', type=float, default=1.0, help='scale of the session le
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
 ap.add_argument('--race-us', type=float, default=None, help='INTF read-clears-flag race window, us (model default 0.7)')
 ap.add_argument('--sessions', default='4800:2:20,9600:1:15,1200:2:10',
-                help='rate:draw:secs[:dma],... (secs scaled by --secs; dma = DBG:AD2:DMA 0 / 1, default 0)')
+                help='rate:draw:secs[:dma],... (secs scaled by --secs; dma = DBG:AD2:DMA 0 / 1 sent before the '
+                     'session; without it nothing is sent: the firmware default (DMA frames) or the last one sent)')
 A = ap.parse_args()
 SCRIPT = os.path.join(EMU, 'out', 'ad2stream-%d.script' % A.port)
 with open(SCRIPT, 'w') as f:
@@ -104,10 +105,15 @@ try:
         v = read_v()
     check(abs(v - 0.5) < 0.005, 'AC V reads 0.5 V before streaming (%.5f)' % v)
 
-    for rate, draw, secs, dma in [tuple(float(x) if i == 2 else int(x) for i, x in enumerate((v + ':0').split(':')[:4]))
+    dma_cur = 1  # the firmware default (decision 2026-10-22 #7: DMA frames)
+    for rate, draw, secs, dma in [tuple(float(x) if i == 2 else int(x) for i, x in enumerate((v + ':-1').split(':')[:4]))
                                   for v in A.sessions.split(',')]:
-        print('session %d S/s, DBG:AD2:DRAW %d, DBG:AD2:DMA %d, %g s' % (rate, draw, dma, secs * A.secs))
-        q('DBG:AD2:DMA %d' % dma)
+        if dma >= 0:
+            q('DBG:AD2:DMA %d' % dma)
+            dma_cur = dma
+        print('session %d S/s, DBG:AD2:DRAW %d, DBG:AD2:DMA %d%s, %g s'
+              % (rate, draw, dma_cur, '' if dma >= 0 else ' (not sent)', secs * A.secs))
+        dma = dma_cur
         q('LOG:STATe OFF')
         q('*CLS')
         q('DBG:AD2:DRAW %d' % draw)

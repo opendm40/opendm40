@@ -316,17 +316,17 @@ pub mod stream {
         }
     }
 
-    /// DMA frames for the stream: 1 = DMA frames, else CPU frames
-    /// (DBG:AD2:DMA 0|1).
-    static DMA_REQ: AtomicU32 = AtomicU32::new(0);
+    /// DMA frames for the stream: 1 = DMA frames (the default, decision
+    /// 2026-10-22 #7), else CPU frames (DBG:AD2:DMA 0|1).
+    static DMA_REQ: AtomicU32 = AtomicU32::new(1);
 
     pub fn set_dma_req(m: u8) {
         DMA_REQ.store(m.min(1) as u32, Relaxed);
     }
 
-    /// Whether the next stream uses DMA frames (DBG:AD2:DMA 1). The CPU
-    /// frames at /8 + CKPH reach the top rung (38.4 kS/s at ~14 % CPU on the
-    /// device), so the default is CPU frames.
+    /// Whether the next stream uses DMA frames (the default; DBG:AD2:DMA 0
+    /// = CPU frames at /8 + CKPH, the fallback). Device a0cdb4e: 38.4 kS/s
+    /// at 17.5 % CPU with DMA frames against 51 % with CPU frames.
     pub fn use_dma() -> bool {
         DMA_REQ.load(Relaxed) == 1
     }
