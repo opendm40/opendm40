@@ -1093,3 +1093,7 @@ Installed by the owner (sha256 968ed018…97ae, crash count 0). Same wiring (cal
 | alerts | Also seen: with 5 / 10 V DC or the square on V-COM, ohm and temperature raise A-JACK (comparator hits on PB1, A jack open) | **Open** (a false A-JACK where LIVE? is the right alert; not changed) |
 
 End state: DMM page, DC V, logging off (`LOG:DEST HOST`, `LOG:STAT 0`), `SYST:RAIL AUTO`, power meter coupling AC+DC / V range AUTO, V gains factory, calibrator 1 V DC; volume 0 %, backlight 10 %, Dim / Shutdown Never untouched. No crash during the checks.
+
+### Device re-check (973df07, 2026-10-22 ~20:25)
+
+Installed by the owner (sha256 2605779d…5a8d, crash count 0). TEMP and RES after DC V, with the square, 5 V, 10 V and 1 V DC on V-COM, 5 s each (`ap3-973.txt`): **no A-PROT**, the probe is not in (field 10 = 0 mA); A-JACK still comes with the square / 5 V / 10 V (the open item above), none at 1 V. Five rounds of FREQ -> DC V -> AC V -> DC V -> RES -> TEMP -> DC V with the square: alerts NONE except A-JACK in TEMP. End: DC V, `SYST:ALER?` NONE, 0.9994 V, logging off, calibrator 1 V DC, `DBG:BOOT?` reason NONE.
