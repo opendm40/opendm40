@@ -21,7 +21,10 @@ Device needed (in this order):
 2. Both-rails crosstalk: DMM accuracy with the scope running; combined-view FREQ (13.3 Hz on 40 Hz);
    AC V of a 0.5 V DC source decaying. Device f3aea2f (docs/device-check-2026-10-21.md "f3aea2f" 7): DC 1 / 5 / 10 V within 0.04 %, FREQ
    40.0017 Hz, AC V of 0.5 V DC 0.3-0.5 mV; **the 40 Hz 0..9.6 V square reads +0.19 % with the scope rail on**
-   (DC V / AC V / AC+DC, reproducible): to explain (ground return / PC4 rail noise?).
+   (DC V / AC V / AC+DC, reproducible). Explained (device-check doc "f3aea2f follow-up"): analog. The DMM page,
+   same row, only SYST:RAIL AUTO <-> BOTH: +9.3 mV (+0.195 %) at 40 Hz, +14.1 mV at 400 Hz, DC 0 / 5 V +-0.03 mV;
+   needs edges, grows with the edge rate: the powered scope front end loads / couples into V / COM. No firmware
+   fix; AUTO (default) keeps the scope rail off on the DMM page.
 3. T3 recovery triggers on the native image (power-key hold, DBG:RELEASE x2), scope stack high-water.
 4. DBG:PROF? numbers: scope drag freeze (touch -> frame), DMM redraw time.
 5. Pinch on the device, two-finger report rate / stability first (DBG:TOUCH?).
@@ -660,8 +663,9 @@ Firmware:
         1.0209), 60 V with 10 V: 1.016612 (doc 1.0170; over-corrects 0.06 %); 60 V with 5 V = SMALL (the list
         above is wrong: 8 % < the 10 % window); AC reference blocked (calibrator: 4.77 V AC max). Gains set
         back to factory. Still open: T2-T4 with current through A.
-        - [ ] V cal on 6 V AC-coupled with the 0..9.6 V square returned OK (1.021410) although the peak clips
-              the 6 V range: the DC-kind path has no clipping guard. The dialog says 10-70 %, DC takes 100 %.
+        - [x] V cal on 6 V AC-coupled with the 0..9.6 V square returned OK (1.021410) although the peak clips
+              the 6 V range: the DC-kind path has no clipping guard. Fixed: BIG when |DC| + sqrt(2) x AC RMS
+              exceeds the range, either kind (powtest vcal-clip). (The dialog's "10-70 %" vs DC's 100 %: open.)
         Fixed after 5f14d38: the 1st Yes came ~13 s after the long press (screenshot 38 -> 39: 12.9 s; the
         2nd try 2.4 s) and the confirm auto-cancelled at 10 s, so the tap hit the bare page: now 60 s
         (dialog::ENERGY_MS, as the wiring / firmware questions). Emulator: powtest.py ereset (Yes 13 s
@@ -980,7 +984,7 @@ Firmware:
       `*7dm40_fw5vdisk*` .cold rule) -> a fn in .text.vdisk_rd (fixed, to re-check). Still in region C on
       the volume read path: the DMM-log / scope CSV generators (Gen::advance, RowDec::*, SDec::*, chunk_at,
       Gen::open): a host reading LOG*.CSV / SCOP*.CSV during a stream runs C per row.
-      - [ ] **Device hang + watchdog reset (once)**: `dm40scpi.py fast --source ad2 --rate 19200 --dur 30`
+      - [x] **Device hang + watchdog reset (once)**: `dm40scpi.py fast --source ad2 --rate 19200 --dur 30`
             with a host reading FAST003.CSV over the volume: the session completed (FAST005.DLG intact),
             the volume's UNIT ATTENTION at the end failed the host's reads, the tool's MMEM:DATA? of
             FAST005.CSV timed out, usb-storage reset the device 33 s later, then FWDGT (DBG:BOOT? WDT_RETRY).
@@ -988,6 +992,13 @@ Firmware:
             end with a volume read but no MMEM:DATA?. Suspect the overlap of the session end, the volume
             refresh, the host's revalidation reads and Gen::open of the new FAST file over USBTMC; repro in
             the emulator (fastlogtest --vol-read + MMEM:DATA? right after done).
+            Root cause (device-check doc "f3aea2f follow-up" 6b): the USB disk. usbd-storage's unstall after
+            every CSW (a DIEPCTL read-modify-write, the stream ISR widening it) re-armed the IN endpoint with
+            XFRSIZ 0: a spurious ZLP broke the host's next command; Linux's reset recovery then gave usbd-storage
+            an invalid CBW, it called our callback with the old command and `set_status` panicked -> FWDGT.
+            Fixed: usbd-storage vendored with fixes (fw-rs/vendor, "dm40 patch"), msc.rs / usb::abort_in.
+            Emulator: emu/fastendtest.py (a60f8ce 2 of 6 pass, fix 3 of 3), emu/mscresettest.py.
+            (verify on device: the f3aea2f 6b repro once with the fix image, then a Linux reset recovery)
 - [x] (A) DMM-input "slow floating scope" via AD2 = the Wave view (E5/E6; docs/dmm-input-scope-feasibility.md 10,
       src/app_wave.rs; feature `ad2-isr` only, hidden without it): MF range page "Wave" (V / A) and the scope page's
       "MCX | DMM" source badge; the AD2 stream drained into the scope record (continuous, 10-bit codes), the stock
@@ -1002,7 +1013,8 @@ Firmware:
       Normal / Single, range 2 / 20 V/div / 200 mV/div, STOP + Save CSV, MENU exit, conflicts PASS. Fixed:
       roll at 5..50 s/div moved at the 2 s/div speed (w.per from the clamped `screen`), the DC V entry toast
       and two more toasts were wider than the box. Current steps blocked (A not wired).
-      - [ ] 5 ms/div: Freq / Cycl "--" with two periods on screen; Vrms -1.6 % from 50 ms/div (1200-2400 S/s).
+      - [x] 5 ms/div: Freq / Cycl "--" with two periods on screen: fixed (the falls when fewer than two whole
+            rises are inside; meter-test meas). Open: Vrms -1.6 % from 50 ms/div (1200-2400 S/s).
       - [ ] A volume refresh (Save CSV, a screenshot) runs region C (vdisk::ours / refresh / scan_spi) under
             the Wave view's stream: max_lat 21.7 us, 15 overruns at 4800 S/s. Defer the refresh while the
             wave streams, or move the refresh path to region B (~3 KB).
@@ -1140,14 +1152,21 @@ Firmware:
       AC V / Hz / cont / diode / cap (no free pair). Emulator: PB2 node + AD2 probe; senttest aprot-* (12 V:
       409 ms, 24 V: 105 ms, ohm / temp ~0.41 s, 5 V: A-JACK only).
       (verify on device: the A-jack protection check list of doc §4.8)
-      - [ ] Device f3aea2f (docs/device-check-2026-10-21.md "f3aea2f" alerts): **A-PROT found latched with the
+      - [x] Device f3aea2f (docs/device-check-2026-10-21.md "f3aea2f" alerts): **A-PROT found latched with the
             A jack open** at the end of the run (DBG:SENT? field 11 = 105 ms: the ">= 300 mA at once" rule
             in the first probe window; probe 15 mA afterwards; CONF:VOLT:DC over SCPI did not release it,
             DC A did). When / which function is unknown (DC V 1 / 5 / 10 V and the square on the DMM page,
             combined view and Scope page did not trip it again). Log the trip (function, probe mA, time).
-      - [ ] **False A-JACK in Hz** (A jack open, reproducible): FREQ with 1 V DC or the 40 Hz square on V-COM
+            Fixed: the peak hold caught AD2's start-up after the probe's row write; now cleared 30 ms after
+            every probe row write, the first window from there, and a trip needs the comparator run going
+            (senttest aprot-glitch with the model's Ad2StartGlitch: a60f8ce A-PROT, fix A-JACK only).
+            Still open: log the trip's function / time.
+      - [x] **False A-JACK in Hz** (A jack open, reproducible): FREQ with 1 V DC or the 40 Hz square on V-COM
             -> SYST:ALER? AJACK (kind AD1PK_PB1), DMM page and combined view. Also an "AC" hint in DC V on
             the calibrator's 5 V DC (not at 1 / 10 V).
+            Cause: the frequency row leaves its divider open, PB1 - PB3 stands at ~54 mV (+41 100 codes) with
+            0..2 V or nothing on V-COM, ~3 100 at 5 V, -850 at 10 V. Fixed: no sentinel in Hz (doc 4.7 gap;
+            senttest freq-gap). Open: the AC hint in DC V on 5 V DC.
 - [x] Burden voltage in the A / mA / uA modes (as the EEVblog 121GW, owner 2026-10-22): I * R_path of the
       shunt in use in the aux row, "Burden" caption: DC A aux1 (signed), AC A aux2 instead of the duty
       (RMS); none in AC+DC (both rows hold the parts) and in the power meter (its own At-load line). R_path

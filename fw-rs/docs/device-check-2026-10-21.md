@@ -1036,3 +1036,44 @@ Host / emulator checks of the fixes: emu/hy3131/wavetest.py all PASS, roll 5 s/d
 - **Device:** DMM page, DC V; Settings unchanged (volume 0 %, backlight 10 %, Dim / Shutdown Never, Bluetooth ON, USB disk "Files live", ro mount); scope FFT off again; power meter coupling AC+DC, V gains factory, zeros from this run's `POW:ZERO`; LOG:CSV:INT / DUR back to 0 / 0; LOG:DEST HOST, LOG:DUR 0, LOG:SRAT 4800, LOG:SOUR AD1, LOG:STAT 0 (the repro had left DISK / 10 / 19200 / AD2). One watchdog reset during the run (6b); crash count 0 and HEALTHY afterwards.
 - **Files added on the SPI disk:** LOGS/LOG004.DLG, LOGS/FAST005.DLG, LOGS/FAST006.DLG, SCOPE/SCOP004.DLG (scope record); S008 / S009.BMP deleted again (3b).
 - **Calibrator:** 1 V DC, enabled.
+
+## f3aea2f follow-up: the watchdog hang, A-PROT / Hz alerts, V cal guard, Wave Freq, both rails (7a00f62, 8124fb5)
+
+Code reading, emulator reproductions and two read-only device measurements (the f3aea2f build, A jack open, calibrator on V-COM; logs `wdt/dev/` in the session scratchpad). Image: see "Device results" below.
+
+### 6b. The watchdog hang: the USB disk, not the logger
+
+**Cause, in two steps** (emulator; 7a00f62):
+
+1. **A spurious zero-length packet on the disk's Bulk-IN.** usbd-storage 3.0.0 unstalls both bulk endpoints at the end of every command (`enter_state_command_transfer`), a read-modify-write of DIEPCTL in synopsys-usb-otg (`set_stalled`, a critical section that does not mask interrupts here). It runs right after the CSW went into the IN endpoint; when the host takes that packet between the read and the write, the core has cleared EPENA and the write sets it again with XFRSIZ 0: the endpoint sends a ZLP in front of the next command's data. An interrupt between the read and the write widens the window: the AD2 stream ISR during a disk session, when a host reading the volume issues hundreds of commands a second. The host's transfer then breaks (Linux: the command never completes; usb-storage's 30 s timeout at 17:01:24 in the kernel log).
+2. **Linux's reset recovery then panicked the firmware.** usb-storage sends a Bulk-Only Mass Storage Reset (a class control OUT; the crate looked for it in `control_in`, so usb-device stalled it: review L5 of 2026-10-13) and resets the port. The transport kept the interrupted data in its IO buffer, the next CBW was parsed from those bytes and was invalid (Command Transfer Invalid: both endpoints stalled), and the crate still called our SCSI callback with the previous, finished command. Its `pass` / `fail` hit `set_status`'s state assertion: a panic (the magenta bar), no more feeding, FWDGT ~19 s later (WDT_RETRY, re-enumerated at 17:01:46). The emulator shows the second step directly: 31 bytes that are no CBW halt the meter (PC in `mmio::spin` called from `wait_for_watchdog`: the panic handler) and the watchdog resets it.
+
+Also found on the way: a reply longer than the host's allocation length went out whole (babble), a command with no data phase that we answer with data (REQUEST SENSE of length 0) never got a CSW, the fill of a failed READ (UNIT ATTENTION on a 120 KB READ(10)) went out one packet per main-loop pass, and after a bus reset in a data phase the IN endpoint stayed armed and never sent again.
+
+**Fix** (7a00f62): usbd-storage vendored (`fw-rs/vendor/usbd-storage`, `[patch.crates-io]`, each change marked "dm40 patch"): unstall only after our own stall (no read-modify-write after a CSW), no callback outside the data states, the IO buffer cleared at every reset, the Bulk-Only reset handled on control OUT, never more IN data than asked for, `Scsi::sending` / `in_address`. msc.rs: short replies via `write_data` + `pass(count)`, a data phase the host cut short = phase error, the Bulk-Only reset drops our transfer, the read pump also runs while the transport sends fill or the CSW, `usb::abort_in` (NAK, EPDIS, Tx FIFO flush) at a bus reset and a Bulk-Only reset. Not the logger, the vdisk cursors or the FAT commit: those ran to completion in every repro.
+
+**Tests** (emulator; the DWC2 model now handles EPDIS):
+
+| test | a60f8ce | fix |
+|---|---|---|
+| `emu/fastendtest.py --dur1 20 --dur 20` (two AD2 19200 disk sessions, a host thread reading FAST000.CSV over the volume all the time and doing Linux's revalidation at the UNIT ATTENTION, then MMEM:DATA? of the new FAST001.CSV while the reader switches to it) | 2 of 6 runs pass; 4 fail: a ZLP as a READ(10)'s first data, the reader's next CSW gets data (-EOVERFLOW), then the meter stops answering | 3 of 3 pass (51-53 MB read over the volume, 1 UNIT ATTENTION, MMEM:DATA? == the volume's bytes, no reboot) |
+| `emu/mscresettest.py` invalid-cbw | watchdog reset (no answer to the Bulk-Only reset) | stall, reset recovery, healthy |
+| read-bot / read-port / ua-port (a READ cut by a Bulk-Only reset / a port reset / a port reset with a UNIT ATTENTION pending) | Bulk-Only reset stalled; after a port reset no CSW ever | healthy |
+| alloc-small (INQUIRY, 5 bytes asked) | 36 bytes sent (-EOVERFLOW) | 5 bytes |
+| zero-alloc (REQUEST SENSE, no data phase) | no CSW | CSW |
+| ZLP hunt (300 x REQUEST SENSE of length 0 + `*IDN?`, same connection) | (no CSW at all) | 0 short CSWs (5 of 300 with the other fixes but the unguarded unstall) |
+
+### Alerts with the A jack open
+
+- **A-PROT (first-window rule, 105 ms).** Not a stale reading of another function (the comparator rows the probe joins have the peak hold off, so it starts empty with the probe) and not the scale (4 194 codes per A, the probe's own path). The probe's row write restarts AD2; the peak hold catches its first results, and 1 258 codes (0.3 A) is 0.5 % of AD2's full scale. Fix (8124fb5): after every row write with the probe the hold is cleared 30 ms later (`PROBE_SETTLE_MS`) and the first window counts from there; a trip also needs the comparator run still going. What brought the probe in with nothing on A: comparator hit windows in DC V (`DBG:SENT?` counted 498 hits by the start of this follow-up); a likely source is the frequency row's ~54 mV on PB1 (below) still decaying after a switch to DC V, and the run's FREQ checks came before the latch was seen. Emulator: the HY3131 model's `Ad2StartGlitch` (the first 4 AD2 results after a start off by N codes, default 0); senttest `aprot-glitch` (1 V across A-COM, 3 000 codes = 0.72 A): a60f8ce A-PROT, fix A-JACK only; `aprot-dcv-24` 154 ms, `aprot-dcv-12` 454 ms.
+- **False A-JACK in Hz.** Measured (`DBG:SENT?` in FREQ, A jack open): PB1 - PB3 stands at +41 100 codes (~54 mV; the threshold is 17 900 = 0.5 mA) with the calibrator at 0 / 0.1 / 0.5 / 1 / 2 / -1 V or disabled, ~3 100 at 5 V, -850 at 10 V; the 40 Hz square swings between 3 900 and 41 200 (peak-to-peak of a DC input: ~50 codes). The frequency row leaves its input divider open (R2C / R2D 0) and PB1 follows the input path: no fixed threshold or offset tells a current from it. Fix (8124fb5): no sentinel in the frequency function (a gap, as DC V 60 V+; doc 4.7); senttest `freq-gap`.
+
+### Smaller items
+
+- **V cal clipping guard** (8124fb5): `POW:VOLT:CAL` refuses with BIG when |DC| + sqrt(2) x AC RMS (>= the peak of a sine or a square) exceeds the range, whatever the kind; powtest `vcal-clip` (the 0..9.6 V square on 6 V).
+- **Wave view 5 ms/div "Freq: --"** (8124fb5): 2 periods of 40 Hz in 480 samples, triggered on a rising edge at the centre: the rises at the frame's ends are not whole, one rise is inside, `compute_codes` needed two. It now takes the falls when there are fewer than two rises (frequency, period, duty over whole cycles from them). meter-test `meas` (fails on a60f8ce).
+- **+0.19 % on the square with the scope rail on: analog, not firmware.** On the DMM page, same row, only `SYST:RAIL AUTO` <-> `BOTH` toggled (`xr.txt`): the 40 Hz 0..9.6 V square reads 4.76629 V (scope rail off) vs 4.77559 V (on), +9.3 mV = +0.195 %, alternated twice, 2e-6..3e-5 V sd; 400 Hz: +14.1 mV (+0.295 %); 20 Hz on the pages: ~+0.17 %; DC 5 V +0.01 mV, DC 0 V -0.03 mV. The DMM's row, timing and readout are the same in both states; the shift needs edges and grows with the edge rate, so it is the powered scope front end loading or coupling into the V input / COM. Nothing to fix in firmware; the default `SYST:RAIL AUTO` keeps the scope rail off on the DMM page, so only the combined view and the Scope page carry it (help / doc note). `SYST:RAIL` back to AUTO after the test.
+
+### Budgets (fix image)
+
+Stack headroom 21 148 B (>= 20 KiB), region B 11 460 B free (>= 8 KiB), SRAM 10 904 B free (>= 8 KiB). usbd-storage stays in region B (0x08027f20..), `usb::abort_in` too.
