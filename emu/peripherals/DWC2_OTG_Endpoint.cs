@@ -100,7 +100,18 @@ public partial class DWC2_OTG
                 }, name: "Set NAK (SNAK)")
                 .WithTaggedFlag("Set DATA0 PID/Set even frame (SD0PID/SEVNFRM)", 28)
                 .WithTaggedFlag("Set odd frame (SODDFRM)", 29)
-                .WithTaggedFlag("Endpoint disable (EPDIS)", 30)
+                // EPDIS on an enabled endpoint: the transfer is dropped, EPENA
+                // clears and EPD (DxEPINT bit 1) is raised (the firmware's
+                // reset recovery, usb.rs abort_in); a no-op otherwise.
+                .WithFlag(30, mode: FieldMode.Write, writeCallback: (_, value) =>
+                {
+                    if(value && endpointEnabledFlag.Value)
+                    {
+                        endpointEnabledFlag.Value = false;
+                        endpointDisabledInterruptFlag.Value = true;
+                        parent.UpdateInterrupts();
+                    }
+                }, name: "Endpoint disable (EPDIS)")
                 .WithFlag(31, out endpointEnabledFlag, mode: FieldMode.Read | FieldMode.Set, valueProviderCallback: !isIn && isEp0 ? alwaysTrue : null, changeCallback: (_, value) =>
                 {
                     if(value)

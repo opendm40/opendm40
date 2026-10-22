@@ -1,0 +1,40 @@
+[package]
+name = "usbd-storage"
+description = "USB Mass Storage class for usb-device."
+version = "3.0.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/apohrebniak/usbd-storage"
+homepage = "https://github.com/apohrebniak/usbd-storage"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# USB stack
+[dependencies.usb-device]
+version = "0.3"
+
+# Logging
+[dependencies.defmt]
+version = "1"
+optional = true
+
+[dependencies.num_enum]
+version = "0.6"
+default-features = false
+
+[features]
+default = []
+defmt = ["dep:defmt", "usb-device/defmt"]
+bbb = []
+ufi = []
+scsi = []
+extended_addressing = []
+
+[[test]]
+name = "scsi_bbb"
+required-features = ["scsi", "bbb", "extended_addressing"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+

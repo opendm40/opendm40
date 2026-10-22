@@ -134,6 +134,45 @@ pub fn reset_toggle(addr: u8) {
     unsafe { modify32(ctl, DXEPCTL_EPENA | DXEPCTL_EPDIS, DXEPCTL_SD0PID) };
 }
 
+/// Drop a Bulk-IN packet the host has not taken (USB mass storage reset
+/// recovery, a bus reset in a data phase): NAK, disable the endpoint (EPENA
+/// set by the driver's write; a bus reset leaves it: synopsys-usb-otg's
+/// configure writes EPENA as 0, which does nothing, so every later write of
+/// the endpoint would return WouldBlock), flush its Tx FIFO, NAK off. Every
+/// wait bounded (a few us on the core).
+pub fn abort_in(addr: u8) {
+    let n = (addr & 0x0F) as u32;
+    if n == 0 || n >= 4 || addr & 0x80 == 0 {
+        return;
+    }
+    let ctl = USBFS + 0x900 + 0x20 * n;
+    let int = ctl + 0x08;
+    const SNAK: u32 = 1 << 27;
+    const CNAK: u32 = 1 << 26;
+    const INEPNE: u32 = 1 << 6;
+    const EPDISD: u32 = 1 << 1;
+    const TXFFLSH: u32 = 1 << 5;
+    let wait = |a: u32, m: u32, set: bool| {
+        for _ in 0..20_000 {
+            if (unsafe { r32(a) } & m != 0) == set {
+                break;
+            }
+        }
+    };
+    unsafe {
+        if r32(ctl) & DXEPCTL_EPENA != 0 {
+            modify32(ctl, DXEPCTL_EPENA | DXEPCTL_EPDIS, SNAK);
+            wait(int, INEPNE, true);
+            modify32(ctl, DXEPCTL_EPENA, DXEPCTL_EPDIS | SNAK);
+            wait(int, EPDISD, true);
+            w32(int, EPDISD | INEPNE);
+        }
+        w32(GRSTCTL, (n << 6) | TXFFLSH);
+        wait(GRSTCTL, TXFFLSH, false);
+        modify32(ctl, DXEPCTL_EPENA | DXEPCTL_EPDIS, CNAK);
+    }
+}
+
 /// True while a Bulk-IN packet written to non-control endpoint `addr` has
 /// not been taken by the host yet (DIEPCTLn EPENA: set by the driver's
 /// write, cleared by the core when the transfer completes). USBTMC
