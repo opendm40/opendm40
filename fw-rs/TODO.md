@@ -495,6 +495,9 @@ Code work (in this order):
       load (no LoZ hardware here, feature-request HW-6), so ours is the 10 Mohm variant: ghost voltages
       (hum on open leads) still read, as AC above the floor.
   - [ ] Device check (AUTO coupling): see docs/acdc-stock-vs-fwrs.md section 11 "Device check".
+  - [x] FETC:BURD? in AUTO used the part shown (understated a mixed current): now the total RMS (AC+DC,
+        what drops across the shunt), OL by the total; the aux burden readout is not shown in AUTO (aux
+        rows = the parts, as AC+DC). burdentest AC+DC / AUTO phases (200 mA DC + 100 mA AC).
 
 ## Found in the screenshot session 2026-10-13 (native db679a3)
 - [x] READ?/MEAS? take ~8 s (wait for a full averaging window that never fills -> 20 conversions).
@@ -989,7 +992,10 @@ Firmware:
         (53 MB): ~39 KB/s, the main loop's USB section ~15 ms per pass -> DBG:VDISK:RD? to see where.
         Device 046e4b9: AD1 640 / 320 / 160 (chop off) to disk 60 s: 38402 / 19201 / 9602 samples,
         0 lost, gaps 0, locked, -0.9 ppm, max_lat 0.24 us. AD1 40 host 60 s: gaps 0, 76 rescues,
-        stamps 26 ms apart (LOG:COUNt? still says 73 lost: the span vs the nominal 25 ms). AD2 38400
+        stamps 26 ms apart (LOG:COUNt? still says 73 lost: the span vs the nominal 25 ms -> fixed: the
+        main-loop AD1 sampler's `lost` divides the span by the mean of the measured flag-to-flag
+        periods (the rescue's p_meas, >= 8 of them; else the nominal); meter-test logger lost; verify
+        on device: AD1 40 host 60 s, LOG:COUNt? lost 0 (or the real holes)). AD2 38400
         / 19200 to disk with the volume mounted: 0 lost, max_lat 0.28 us. CSV read still ~40 KB/s,
         also with strictly sequential 64 KiB reads (FADV_RANDOM): DBG:VDISK:RD? 6.4 ms per
         read_block, ~44 SPI reads of ~28 bytes (header-sized) per sector, 1 open; a host replay of
@@ -1079,7 +1085,14 @@ Firmware:
       roll at 5..50 s/div moved at the 2 s/div speed (w.per from the clamped `screen`), the DC V entry toast
       and two more toasts were wider than the box. Current steps blocked (A not wired).
       - [x] 5 ms/div: Freq / Cycl "--" with two periods on screen: fixed (the falls when fewer than two whole
-            rises are inside; meter-test meas). Open: Vrms -1.6 % from 50 ms/div (1200-2400 S/s).
+            rises are inside; meter-test meas).
+      - [x] Vrms -1.6 % from 50 ms/div (1200-2400 S/s): the chip's sinc^3 AD2 decimator, not the window
+            (the logger CSVs' RMS, no scope_meas, showed it too; a square's |x| is constant but at the
+            edges). Each sample averages ~3 periods: a 40 Hz square's RMS reads -0.47 / -0.95 / -1.9 /
+            -3.8 % at 9600 / 4800 / 2400 / 1200 S/s (sines below ~0.1 fs: < 0.25 %). Band-limited data:
+            not fixable after the fact; documented (dmm-input-scope-feasibility.md 3.2, scope.rs
+            wave_fs_for). A 9600 S/s band up to 100 ms/div would quarter it (open, not done: the 213 ms
+            drain deadline on every YT timebase; the emulator's AD2 has no comb to test it).
       - [x] A volume refresh (Save CSV, a screenshot) runs region C (vdisk::ours / refresh / scan_spi) under
             the Wave view's stream: max_lat 21.7 us, 15 overruns at 4800 S/s. Defer the refresh while the
             wave streams, or move the refresh path to region B (~3 KB).
@@ -1089,7 +1102,10 @@ Firmware:
             write itself in C under the stream too. emu/hy3131/wavetest.py checks it (hooks on every C function
             flagged when entered with hy3131::HANDED set): a60f8ce ran Gen::open, vdisk::refresh / scan_spi
             under the stream at the save; now only the tap's sp_save_csv. Device re-check: below.
-      - [ ] CONF? in the wave view on 200 mV/div (AC mV) still answers VOLT:AC +6.
+      - [x] CONF? in the wave view on 200 mV/div (AC mV) still answers VOLT:AC +6: it built the range
+            from `meter.live()`, the last reading before the view (the DMM poll is paused). Now from the
+            streamed row (mode / range): "VOLT:AC +6.000000E-01,+1.000000E-05"; wavetest checks 20 V/div,
+            200 mV/div and back. (verify on device: CONF? at 2 V / 20 V / 200 mV/div in the Wave view)
 - [ ] (A) device test of the Wave view (feasibility 10.6, 15 min) - after the ISR loss fix (E3/E4 device item:
       its holes restart the wave record, 10.4). Follow-ups: 16-bit record, DMM reading alongside (request
       queue), DC-coupled V row (E7). Done: the timebase list starts at 5 ms/div in the wave view

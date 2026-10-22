@@ -347,7 +347,11 @@ pub const WAVE_TB_MIN: usize = 15;
 /// AD2 rate (a hy3131::ad2_r26_for rung) for a wave timebase: >= 400
 /// samples per screen up to 20 ms/div: 76800 S/s at 1 ms/div and 38400 at
 /// 2 ms/div (768 samples on the 10 divisions; the hybrid / plain DMA
-/// frames, feasibility 11.12 / 11.11), 9600 S/s at 5 ms/div.
+/// frames, feasibility 11.12 / 11.11), 9600 S/s at 5 ms/div. The chip's
+/// sinc^3 decimator band-limits each rung (~0.25 x the rate): the RMS of a
+/// square's samples reads 0.5 / 1 / 1.9 / 3.8 % low at 9600 / 4800 / 2400 /
+/// 1200 S/s (device f3aea2f: Vrms -1.6 % from 50 ms/div;
+/// docs/dmm-input-scope-feasibility.md 3.2).
 pub const fn wave_fs_for(tb: usize) -> u32 {
     match tb {
         0..=15 => 76800,

@@ -122,6 +122,9 @@ const LOCK_WAIT_MS: u32 = 2000;
 
 /// Main-loop AD1 sampler: blind reads in a row after a swallowed AD1F.
 const RESCUE_MAX: u8 = 4;
+/// AD1 intervals before `lost` uses their mean instead of the nominal
+/// period (`Producer::span_period_ns`).
+const P_MEAN_MIN: u32 = 8;
 
 /// AD2 rate when LOG:SRATe was never set, S/s: 4800 with the stream ISR
 /// (decisions #3: ~10 % of the CPU at 3.125 MHz), 2400 for the main-loop
@@ -318,6 +321,12 @@ struct Producer {
     /// real period (device 5394b21: 26.3 ms at the 25 ms OSR 2048 chopped
     /// setting), for a rescued sample's stamp and window.
     p_meas: u32,
+    /// AD1: sum (us) and count of those intervals: their mean is the
+    /// chip's period (the observation delay is on both ends of each, it
+    /// cancels in the mean; a single one is off by up to a loop pass),
+    /// which `lost` counts the span in.
+    p_sum: u64,
+    p_n: u32,
 }
 
 impl Producer {
@@ -335,6 +344,28 @@ impl Producer {
             gate_us: 0,
             rescued: 0,
             p_meas: 0,
+            p_sum: 0,
+            p_n: 0,
+        }
+    }
+
+    /// AD1: one flag-to-flag interval of `d` us (one period, no rescue
+    /// in between): the last one for the rescue, the mean for `lost`.
+    fn note_period(&mut self, d: u32) {
+        self.p_meas = d;
+        self.p_sum += d as u64;
+        self.p_n += 1;
+    }
+
+    /// The period `lost` divides the span by (ns): AD1 the measured mean
+    /// once there are a few intervals (device 046e4b9: 26.3 ms at the
+    /// nominal 25 ms OSR 2048 chopped setting, 73 "lost" of a 60 s session
+    /// against the nominal, none really), else the nominal.
+    fn span_period_ns(&self, ad1: bool) -> u32 {
+        if ad1 && self.p_n >= P_MEAN_MIN {
+            ((self.p_sum * 1000 + self.p_n as u64 / 2) / self.p_n as u64).min(u32::MAX as u64) as u32
+        } else {
+            self.period_ns
         }
     }
 
@@ -587,9 +618,11 @@ impl Logger {
     /// last captured sample; `captured` of them were taken. Unlike `missed`
     /// (per gap, > 1.5 periods) it also counts the many slightly-late
     /// samples of a rate the loop cannot sustain (9600/s: a 104 us period vs
-    /// ~122 us per bit-banged sample). The main-loop sampler counts against
-    /// the nominal period (a chip clock off by x % shows as x % lost, or as
-    /// 0); the stream ISR counts the periods (its A entries).
+    /// ~122 us per bit-banged sample). The main-loop sampler counts AD1
+    /// against the measured mean period (`span_period_ns`: the chopped
+    /// settings run ~5 % slower than nominal), AD2 against the nominal (a
+    /// chip clock off by x % shows as x % lost, or as 0); the stream ISR
+    /// counts the periods (its A entries).
     pub fn lost(&self) -> u32 {
         let (captured, span) = (self.captured(), self.ring().span_us());
         // The stream ISR counts the conversion periods themselves (one entry
@@ -599,7 +632,7 @@ impl Logger {
         if self.isr_sess && isr::lock_stats()[8] != 0 {
             return isr::lock_stats()[8].saturating_sub(captured);
         }
-        let p = self.prod.period_ns;
+        let p = self.prod.span_period_ns(!self.ad2);
         if captured < 2 || p == 0 {
             return 0;
         }
@@ -884,7 +917,7 @@ impl Logger {
                 let d = self.prod.now_us.wrapping_sub(self.prod.last_sample_us);
                 let nom = self.prod.nominal_us as u64;
                 if !self.ad2 && self.prod.have_last && self.prod.rescued == 0 && d > nom / 2 && d < nom * 3 / 2 {
-                    self.prod.p_meas = d as u32;
+                    self.prod.note_period(d as u32);
                 }
                 self.prod.rescued = 0;
                 self.prod.last_sample_us = self.prod.now_us;
@@ -1562,6 +1595,26 @@ mod tests {
             feed(&mut l, i * 25_000, 0);
         }
         assert_eq!((l.lost(), l.missed(), l.gaps()), (0, 0, [0; GAP_BUCKETS]));
+        // AD1 at a chip period of 26.3 ms against the nominal 25 ms (device
+        // 046e4b9, OSR 2048 chopped): nothing lost by the measured mean
+        // (the nominal would say ~5 of 100), one real hole still counts.
+        let mut l = session(false, 25_000_000);
+        for i in 0..100u64 {
+            feed(&mut l, i * 26_300, 0);
+            if i > 0 {
+                l.prod.note_period(26_300 + if i % 2 == 0 { 900 } else { 0 } - 450);
+            }
+        }
+        assert_eq!(l.lost(), 0);
+        feed(&mut l, 101 * 26_300, 0);
+        assert_eq!(l.lost(), 1);
+        // Too few intervals: the nominal.
+        let mut l = session(false, 25_000_000);
+        for i in 0..100u64 {
+            feed(&mut l, i * 26_300, 0);
+        }
+        l.prod.note_period(26_300);
+        assert_eq!(l.lost(), (99 * 26_300 + 12_500) / 25_000 + 1 - 100);
         // A span past 2^32 us (71.6 min) keeps the 64-bit maths.
         let mut l = session(false, 25_000_000);
         feed(&mut l, 0, 0);

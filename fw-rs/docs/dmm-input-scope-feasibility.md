@@ -312,6 +312,36 @@ the low end of the AC V path at ~0.5 Hz. The real scope channel: 10 MHz, 50
 MS/s, 10 bit, 1 Mohm (manual 1.2). The DMM scope is three to four decades
 slower and 5-9 bits finer.
 
+**The comb's droop in the measurements (device f3aea2f, 2026-10-22).** The
+Wave view's Vrms of a 40 Hz square read 4.74 V up to 20 ms/div and 4.69 V
+(-1.0 % more) from 50 ms/div (2400 S/s); the logger's own CSVs of the same
+square gave -1.6 % at 2400 and -1.2 % at 4800 against the DMM's AC V (which
+converts at 76.8 kS/s). Not the window: the RMS of the logger CSVs never went
+through `scope_meas`, and |x| of a square is constant except at its edges, so
+a partial period cannot move its RMS. It is the sinc^3 decimator: each sample
+is a weighted mean over 3 output periods, so every edge becomes a ~3/fs ramp
+and the harmonics above ~0.25 fs drop out. A 40 Hz square through it, RMS of
+the samples (host model, same as the device within its calibrator drift):
+
+| AD2 rate | 40 Hz square | 50 Hz sine | 400 Hz sine |
+|---|---|---|---|
+| 76 800 (stock AC rows) | -0.06 % | 0 | -0.01 % |
+| 9 600 | -0.47 % | -0.01 % | -0.85 % |
+| 4 800 | -0.95 % | -0.05 % | -3.4 % |
+| 2 400 | -1.9 % | -0.21 % | -12.9 % |
+| 1 200 | -3.8 % | -0.85 % | -43 % |
+
+So it cannot be fixed after the fact: the samples are already band-limited
+(the edge content is gone or aliased; an inverse-sinc FIR would only lift the
+passband and amplify the noise). The rate is the lever: a band at 9600 S/s
+up to 100 ms/div (4 800 / 9 600 samples per screen, in the record) would
+halve-to-quarter the loss on edges, at 9600 S/s's main-loop drain deadline
+(213 ms, the ring) for every YT timebase; not done (the bands stay as in 10,
+TODO "Wave view Vrms"). The Wave view's RMS is the RMS of the band-limited
+waveform it shows; the DMM's AC reading is the reference for a true RMS of
+signals with fast edges. The emulator's AD2 model samples the input point-wise
+(no comb), so wavetest's sine passes at every rate and cannot show this.
+
 ### 3.3 Vertical ranges, scaling, accuracy
 
 Full scale at the AD2 node is +-1.25 V / IG (1.1). With the stock rows (IG 1.0,

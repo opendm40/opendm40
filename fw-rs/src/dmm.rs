@@ -2911,11 +2911,24 @@ impl Dmm {
 
     /// FETC:BURD?: the burden voltage (V) of a reading of a current function
     /// (DC signed, AC / AC+DC the RMS) with the R_path of its shunt; None
-    /// outside the A functions, in the power meter or over range.
+    /// outside the A functions, in the power meter or over range. AUTO
+    /// coupling: the total RMS (AC+DC) as in AC+DC, not the part shown
+    /// (that is what drops across the shunt; a mixed signal's shown part
+    /// understated it), over range by the total; `auto_total_si` belongs
+    /// to the latest reading, which `r` is (app.rs `last_raw`).
     #[inline(never)] // .cold (link-native.x): SCPI only
     pub fn burden_of(&self, r: &Reading) -> Option<f32> {
         let u = sentinel::shunt_of(r.mode).filter(|_| r.power.is_none() && !r.main.ol)?;
-        Some(r.si * self.pw.r_path[u as usize])
+        let i = if r.cpl_auto {
+            let t = self.auto_total_si;
+            if t > sentinel::current_fs(u, r.range.max(0) as u8) * self.over() {
+                return None;
+            }
+            t
+        } else {
+            r.si
+        };
+        Some(i * self.pw.r_path[u as usize])
     }
 
     fn poll_ohm(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {

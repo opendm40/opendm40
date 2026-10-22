@@ -39,6 +39,12 @@ import usbip_client as uc  # noqa: E402
 # modes 7..9, AC A over 4..6) or None = any, expected SYST:ALER:ENAB?). A phase is checked
 # from t + 2.5 s to the next t - 1 s (fw uptime; SCPI goes out at t + 0.5).
 TAP_T = 10.0
+# Virtual-time events (connections, the tap) go into the run.py script this
+# much later than their phase's t: the fw uptime the windows and the SCPI use
+# lags the virtual time by ~1.3-2 s since c2709aa (the tap at virtual 10 s
+# counted at uptime 8.7, inside the previous phase's window); 1.5 s puts them
+# within -0.5..+1.5 s of t for a lag of 0..2 s.
+VLAG = 1.5
 PHASES = [
     (0, 'open', ['CONF:CURR:DC'], 0, None, '15'),
     # The DMM page's V button (DBG-free: a real touch, virtual time TAP_T).
@@ -68,12 +74,12 @@ def main():
     with open(sp, 'w') as f:
         for t, conn, _, _, _, _ in PHASES:
             if conn:
-                f.write('%g dmm %s\n' % (t, conn))
+                f.write('%g dmm %s\n' % (t + VLAG, conn))
         # V button: btn_x(0) = 4, 64 px wide, BTN_Y = 280.
-        f.write('%g tap 36 300\n' % TAP_T)
-    shots = ['--shot', os.path.join(OUT, 'leads-before.png@%g' % (TAP_T - 0.5)),
-             '--shot', os.path.join(OUT, 'leads-toast.png@%g' % (TAP_T + 1.3)),
-             '--shot', os.path.join(OUT, 'leads-after.png@%g' % (TAP_T + 3.5))]
+        f.write('%g tap 36 300\n' % (TAP_T + VLAG))
+    shots = ['--shot', os.path.join(OUT, 'leads-before.png@%g' % (TAP_T + VLAG - 0.5)),
+             '--shot', os.path.join(OUT, 'leads-toast.png@%g' % (TAP_T + VLAG + 1.3)),
+             '--shot', os.path.join(OUT, 'leads-after.png@%g' % (TAP_T + VLAG + 3.5))]
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(RUN_FOR), '--script', sp, '--name', 'leads.%d' % os.getpid()] \
         + shots + (['--app', os.path.abspath(A.app)] if A.app else [])

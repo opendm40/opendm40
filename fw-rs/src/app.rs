@@ -3648,6 +3648,22 @@ impl App {
                 self.pw_conf(out);
                 true
             }
+            C::ConfQuery if self.scope.wave_on() => {
+                // The Wave view pauses the DMM poll: `meter.live()` is the
+                // reading from before it (device f3aea2f: "VOLT:AC +6" on
+                // 200 mV/div = AC mV 600 mV). The streamed row's format
+                // instead (dmm.rs poll_ac's unit / decimals).
+                let r = self.dmm.range().max(0) as u8;
+                let (unit, dec) = match self.dmm.hy_mode() {
+                    0 => ("V", 4 - r.min(3)),
+                    2 => ("mV", 3 - r.min(1)),
+                    4 => ("A", 4 - r.min(1)),
+                    5 => ("mA", 3 - r.min(1)),
+                    _ => ("\u{b5}A", 2 - r.min(1)),
+                };
+                out.put_conf_fmt(self.dmm.func(), Some((unit, dec, false)));
+                true
+            }
             C::ConfQuery => {
                 out.put_conf(self.dmm.func(), self.meter.live());
                 true
