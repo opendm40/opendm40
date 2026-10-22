@@ -463,6 +463,9 @@ pub struct Logger {
     wave: bool,
     saved_ad2: bool,
     saved_hz: u32,
+    /// `dc_prepare` ran for the planned session: the next `start` keeps
+    /// its DC V self-cal (writes the row only).
+    dc_keep: bool,
 }
 
 /// Gap bucket of a gap of `k` periods (k >= 2).
@@ -511,6 +514,7 @@ impl Logger {
             wave: false,
             saved_ad2: false,
             saved_hz: 0,
+            dc_keep: false,
         }
     }
 
@@ -556,9 +560,34 @@ impl Logger {
     }
     /// The DMM modes a source can stream from: AD1 = DC V / mV / A (1, 3,
     /// 7..9); AD2 = the stock AC rows (0 AC V, AC-coupled; 2 AC mV and 4..6
-    /// AC A / mA / uA, DC-coupled). AC+DC (16 / 17) alternates rows: neither.
+    /// AC A / mA / uA, DC-coupled) and DC V / DC mV (1: the DC-coupled V
+    /// row with its self-cal, 3: the AC mV row; feasibility E7,
+    /// ad2exp.rs `dc_enter`). AC+DC (16 / 17) alternates rows: neither.
+    /// DC V / mV fit both: where the source is implicit (the Record page)
+    /// AD1 is taken there (`ad1_first`).
     pub fn mode_ok(ad2: bool, mode: u8) -> bool {
-        if ad2 { matches!(mode, 0 | 2 | 4..=6) } else { matches!(mode, 1 | 3 | 7..=9) }
+        if ad2 { matches!(mode, 0..=6) } else { matches!(mode, 1 | 3 | 7..=9) }
+    }
+    /// The implicit source of `mode` (the Record page's fast logger): AD1
+    /// where it can (24 bit), else AD2; None where neither streams.
+    pub fn ad1_first(mode: u8) -> Option<bool> {
+        if Self::mode_ok(false, mode) {
+            Some(false)
+        } else if Self::mode_ok(true, mode) {
+            Some(true)
+        } else {
+            None
+        }
+    }
+    /// The DC rows' AD2 row and self-cal (ad2exp.rs `dc_enter`) for the
+    /// planned session now, not at `start`: the fast logger's file header
+    /// needs the scale before the disk preparation (main.rs `fast_start`).
+    /// The next `start` keeps the cal (rewrites the row only).
+    pub fn dc_prepare(&mut self) {
+        if self.planned && self.ad2 && matches!(self.mode, 1 | 3) {
+            crate::ad2exp::dc_enter(self.mode, self.range.max(0) as u8, self.r26, true);
+            self.dc_keep = true;
+        }
     }
     /// LOG:SRATe: requested AD2 rate, S/s (the nearest rung of the ladder is
     /// used, hy3131::ad2_r26_for). Takes effect at the next `start`.
@@ -705,6 +734,7 @@ impl Logger {
     /// for the source, written its full row (dmm.start) and powered the
     /// analog side.
     pub fn start(&mut self, mode: u8, range: i8) {
+        let keep = core::mem::take(&mut self.dc_keep) && (mode, range) == (self.mode, self.range);
         self.stop();
         let period_ns = self.plan(mode, range);
         let on_isr = self.ad2 || self.ad1_on_isr();
@@ -717,6 +747,10 @@ impl Logger {
         self.ring().reset();
         // The chip set-up is the last main-loop bus access of an ISR session.
         if self.ad2 {
+            if matches!(mode, 1 | 3) {
+                // DC V / mV: their AD2 row (and the DC V self-cal) first.
+                crate::ad2exp::dc_enter(mode, range.max(0) as u8, self.r26, !keep);
+            }
             hy::set_ad2_stream(self.r26);
         } else {
             hy::set_ad1_osr(self.osr, self.chop());
@@ -750,6 +784,7 @@ impl Logger {
         self.isr = false;
         self.active = false;
         self.planned = false;
+        self.dc_keep = false;
         self.end_wave();
     }
 
@@ -1642,7 +1677,11 @@ mod tests {
     fn source_gates_the_modes() {
         assert!(Logger::mode_ok(false, 1) && Logger::mode_ok(false, 9) && !Logger::mode_ok(false, 2));
         assert!(Logger::mode_ok(true, 0) && Logger::mode_ok(true, 2) && Logger::mode_ok(true, 6));
-        assert!(!Logger::mode_ok(true, 1) && !Logger::mode_ok(true, 16) && !Logger::mode_ok(true, 17));
+        assert!(Logger::mode_ok(true, 1) && Logger::mode_ok(true, 3) && !Logger::mode_ok(true, 7));
+        assert!(!Logger::mode_ok(true, 16) && !Logger::mode_ok(true, 17) && !Logger::mode_ok(true, 10));
+        assert_eq!(Logger::ad1_first(1), Some(false));
+        assert_eq!(Logger::ad1_first(0), Some(true));
+        assert_eq!(Logger::ad1_first(10), None);
         let mut l = Logger::new();
         assert_eq!(l.req_hz(), DEFAULT_AD2_HZ);
         l.set_req_hz(9600);

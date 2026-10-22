@@ -1029,7 +1029,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 // fw-rs DC? hint (AC V): AD1 on SENSE - PB5, SENSE = the V jack through the AC V
                 // range's divider tap (r0 / r1: DC V r1's /100, r2 /1000, r3 /10000; INFERRED from
                 // the R2C / R2D taps), instantaneous
-                code = ig * VTapVolts(t, AcvK[Math.Max(roleRange, 1)]) / (rg * Vref) * fs;
+                // (the DC V calibration of that tap folded in, as the DC V rows: the fw-rs DC-coupled
+                // V row's self-cal reads AD1 here and scales it with that calibration)
+                var kt = Math.Max(roleRange, 1);
+                code = ig * DcQ(VTapVolts(t, AcvK[kt]) * AcvK[kt], 0x04 + 4 * kt, 0x14 + 4 * kt) / AcvK[kt] / (rg * Vref) * fs;
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
             }

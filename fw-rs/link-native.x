@@ -188,7 +188,10 @@ SECTIONS
          * DBG:UPLOAD, MMEM:DATA?, DBG:GENUINE?). */
         *(.text.*7dm40_fw4prof6report*);
         *(.text.*7dm40_fw7dbg_dcv*);
+        *(.text.*7dm40_fw9log_scale*);
         *(.text.*7dm40_fw4scpi7dcv_arg*);
+        *(.text.*7dm40_fw4scpi6n7_arg*);
+        *(.text.*7dm40_fw6dbg_n7*);
         *(.text.*7dm40_fw5touch8log_text*);
         *(.text.*7dm40_fw10touch_diag*);
         *(.text.*7dm40_fw6csvlog6delete*);

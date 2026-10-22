@@ -8,8 +8,8 @@ DBG:TAP) and checked over SCPI on one USB/IP connection.
 
 Input: --dmm (default a 1 V rms 50 Hz sine on V/COM; the DMM model's AD2
 path is AC-coupled in AC V like the meter). Checks:
-  * MF -> "Wave" from DC V: the AC V row (AC-coupled note), the stream ISR
-    runs (DBG:ISR? active), CHAN1:SCAL? = the DMM range's V/div;
+  * MF -> "Wave" from AC V: the AC V row, the stream ISR runs (DBG:ISR?
+    active), CHAN1:SCAL? = the DMM range's V/div;
   * per timebase 5 ms .. 100 ms/div (4 rate bands: 9600 / 4800 / 2400 S/s):
     SCOP:MEAS:FREQ? 50 Hz, VRMS? 1.0 V, VPP? 2.83 V (+-3 %), the rate
     restarts on a band change;
@@ -53,12 +53,17 @@ ap.add_argument('--dmm', default='vsrc:0,ac=1.0,f=50', help='DMM jack input (emu
 ap.add_argument('--shots', help='directory for PNG screenshots')
 ap.add_argument('--mips', default='200')
 ap.add_argument('--no-region-c', action='store_true', help='without the region C hooks')
-ap.add_argument('--case', choices=['volt', 'current'], default='volt',
+ap.add_argument('--case', choices=['volt', 'current', 'dcv'], default='volt',
                 help='current: --dmm defaults to a 10 mA DC + 40 Hz square on A-COM; the AC A row is '
-                     'DC-coupled: FREQ? 40 Hz, VAVG? = the DC part, values in A')
+                     'DC-coupled: FREQ? 40 Hz, VAVG? = the DC part, values in A. dcv: 0.2 V DC + 1 V rms '
+                     '50 Hz; MF -> Wave from DC V AUTO (DC mV, the AC mV row) clips and autoranges to 6 V '
+                     '(the DC-coupled V row, feasibility E7): VAVG? = the DC part; the coupling key '
+                     'switches to AC V (VAVG? ~0) and back; MENU: DC V AUTO again')
 A = ap.parse_args()
 if A.case == 'current' and A.dmm == ap.get_default('dmm'):
     A.dmm = 'isrc:0.010,ac=0.02,f=40,shape=square'
+if A.case == 'dcv' and A.dmm == ap.get_default('dmm'):
+    A.dmm = 'vsrc:0.2,ac=1.0,f=50'
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
@@ -296,16 +301,59 @@ try:
         wait_ms(2500)
         check(ints(q('DBG:ISR?'))[1] == 0, 'MENU: the stream stopped')
 
+    def dcv_case():
+        q('CONF:VOLT:DC')
+        # The AC sine on DC V raises the sentinel's "AC voltage here: use
+        # AC V?" hint toast (~1.5 s after the switch, shown 1.5 s,
+        # sentinel.rs); a toast takes the next key: MF only after it went.
+        wait_ms(4500)
+        print('  DC V AUTO before: FUNC? %s READ? %s CONF? %s' % (q('FUNC?'), q('READ?'), q('CONF?')))
+        q('DBG:KEY 3')
+        wait_ms(600)
+        q('DBG:TAP 237,259')
+        wait_ms(6000)  # entry, the clip, the range step (a self-cal each)
+        shot('d01-wave-dcv')
+        check(ints(q('DBG:ISR?'))[1] == 1, 'the stream runs (DC V)')
+        check(q('FUNC?').strip('"').upper() == 'VOLT', 'the DMM stays in DC V (%s)' % q('FUNC?'))
+        vd = f('CHAN1:SCAL?')
+        check(vd == 2.0, 'autorange on the clip: the 6 V range, 2 V/div (%g)' % vd)
+        q('TIM:SCAL 0.02')
+        wait_ms(2500)
+        fr, avg, rms = f('SCOP:MEAS:FREQ?'), f('SCOP:MEAS:VAVG?'), f('SCOP:MEAS:VRMS?')
+        print('  DC V wave: FREQ %.3f AVG %.4f RMS %.4f WAV:PRE? %s' % (fr, avg, rms, q('WAV:PRE?')))
+        check(near(fr, 50.0, 0.03), 'DC row: 50 Hz (%.3f)' % fr)
+        check(abs(avg - 0.2) < 0.02, 'DC-coupled: the mean = the 0.2 V DC (%.4f)' % avg)
+        check(near(rms, (0.04 + 1.0) ** 0.5, 0.03), 'RMS of DC + AC (%.4f)' % rms)
+        q('DBG:TAP 447,81')  # CH1 / coupling key: AC
+        wait_ms(4000)
+        shot('d02-wave-acv')
+        avg = f('SCOP:MEAS:VAVG?')
+        check(q('FUNC?').strip('"').upper() == 'VOLT:AC' and abs(avg) < 0.05,
+              'coupling key: AC V, the mean ~0 (%s, %.4f)' % (q('FUNC?'), avg))
+        check(f('CHAN1:SCAL?') == 2.0, 'AC at the same range (%g V/div)' % f('CHAN1:SCAL?'))
+        q('DBG:TAP 447,81')  # back to DC
+        wait_ms(4000)
+        avg = f('SCOP:MEAS:VAVG?')
+        check(q('FUNC?').strip('"').upper() == 'VOLT' and abs(avg - 0.2) < 0.02,
+              'coupling key again: DC V, the mean 0.2 V (%s, %.4f)' % (q('FUNC?'), avg))
+        q('DBG:KEY 0')
+        wait_ms(3000)
+        check(ints(q('DBG:ISR?'))[1] == 0, 'MENU: the stream stopped')
+        v = f('READ?')
+        conf = q('CONF?')
+        print('  after: READ? %.4f CONF? %s' % (v, conf))
+        check(abs(v - 0.2) < 0.01, 'DMM resumed in DC V: READ? %.4f' % v)
+
     print('*IDN?', q('*IDN?'))
     isr0 = ints(q('DBG:ISR?'))
     check(isr0[0] == 1, 'DBG:ISR? feature = 1 (an ad2-isr build)')
     if A.case == 'current':
         current_case()
         raise Done
-    q('CONF:VOLT:DC')
-    # The AC sine on DC V raises the sentinel's "AC voltage here: use AC V?"
-    # hint toast (~1.5 s after the switch, shown 1.5 s, sentinel.rs) and a
-    # toast takes the next key (app.rs overlay): MF only after it went.
+    if A.case == 'dcv':
+        dcv_case()
+        raise Done
+    q('CONF:VOLT:AC')
     wait_ms(4500)
     shot('w00-dmm')
     # A short DMM recording: LOGS/LOGnnn.DLG for the volume read below.

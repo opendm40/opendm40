@@ -17,9 +17,12 @@
 //! Vertical: V/div = the DMM range (`scope::wave_vdiv`: the range fills
 //! the half screen); the V/div buttons step the DMM range (the MF list
 //! items). Coupling is the row's: AC V is AC-coupled (~0.5 Hz, the stock
-//! row's coupling capacitor), AC mV and AC A / mA / uA are DC-coupled; a
-//! DC-coupled V row does not exist yet (feasibility 1.3, needs device test
-//! 6.5): the coupling pill says so instead of switching.
+//! row's coupling capacitor), AC mV and AC A / mA / uA are DC-coupled, DC
+//! V streams the DC-coupled V row (feasibility 1.3 last row / E7,
+//! ad2exp.rs `dc_enter`: the AC V row with AD2 on OP1O, its offset
+//! self-calibrated against AD1 at every start) and DC mV the AC mV row.
+//! In V the coupling pill switches DC <-> AC (the DMM's DC / AC V at the
+//! same range); in A it says the AC A row is DC-coupled.
 
 use super::*;
 use crate::scope::{WaveScale, WaveSource};
@@ -34,6 +37,9 @@ pub enum WaveReq {
     Range(u8),
     /// Stop (the view closed); main.rs restores the DMM.
     Stop,
+    /// V: stop, the other coupling (DC <-> AC V, dmm.set_sub) at this MF
+    /// range item, start again.
+    Coupling(u8),
 }
 
 /// The wave view exists in this build (the stream ISR is compiled in).
@@ -42,9 +48,22 @@ pub const WAVE_BUILD: bool = cfg!(feature = "ad2-isr");
 /// src/logger.rs `wave` as the scope's source.
 struct RingSrc;
 
+/// A sample within 2 % of AD2's full scale since the stream's start: the
+/// view's autorange steps the range up (`wave_poll`).
+static CLIP: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+const CLIP_CODE: i32 = 257_000;
+
 impl WaveSource for RingSrc {
     fn drain(&mut self, f: &mut dyn FnMut(i32)) -> u32 {
-        crate::logger::wave::drain(f)
+        let mut clip = false;
+        let n = crate::logger::wave::drain(&mut |v| {
+            clip |= v.unsigned_abs() > CLIP_CODE as u32;
+            f(v)
+        });
+        if clip {
+            CLIP.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
+        n
     }
     fn dropped(&self) -> u32 {
         crate::logger::wave::dropped()
@@ -87,6 +106,17 @@ impl App {
         if let Some(_) = self.scope.take_wave_restart() {
             self.wave_req = Some(WaveReq::Start);
         }
+        // Autorange (the DMM was in AUTO at the entry, no range picked
+        // since): AD2 clipped -> the next range up. The DMM's autorange
+        // chose by the DC (or RMS) reading; a DC V entry with AC on top
+        // (AUTO on DC mV, say) clips at once.
+        if self.wave_auto.is_some() && self.wave_req.is_none() && CLIP.swap(false, core::sync::atomic::Ordering::Relaxed) {
+            if let Some(a) = self.dmm.ad2_scale() {
+                if a.item + 1 < items(self.dmm.button()) {
+                    self.wave_req = Some(WaveReq::Range(a.item + 1));
+                }
+            }
+        }
         self.scope.poll_src(now, Some(&mut RingSrc))
     }
 
@@ -113,12 +143,12 @@ impl App {
             self.toast(now, t, false);
             return;
         }
-        // The AC row of the function: DC V / mV / A have no AD2 path (AD1
-        // only); AC V is AC-coupled, AC mV / A DC-coupled.
-        let note = if self.dmm.sub() == 0 {
+        // DC A has no AD2 path (AD1 only): the AC A row (DC-coupled). DC V
+        // / mV stream their DC rows (E7); AC V is AC-coupled.
+        let note = if self.dmm.sub() == 0 && b == Button::Amp {
             self.dmm.set_sub(clk, 1);
             self.func_changed();
-            Some(if b == Button::Volt { "DC V: wave is AC-coupled" } else { "Wave: AC A row (DC-coupled)" })
+            Some("Wave: AC A row (DC-coupled)")
         } else {
             None
         };
@@ -180,6 +210,7 @@ impl App {
 
     /// main.rs: the stream runs at `scope.wave_fs()` on the current row.
     pub fn wave_live(&mut self) {
+        CLIP.store(false, core::sync::atomic::Ordering::Relaxed);
         if let Some(a) = self.dmm.ad2_scale() {
             let s = scale_of(a);
             if s != self.scope.wave_scale_now() {
@@ -221,18 +252,37 @@ impl App {
         }
     }
 
-    /// The coupling pill / CH1 label in the wave view: what the row does
-    /// (there is no choice: one AD2 row per function).
+    /// The coupling pill / CH1 label in the wave view: V switches DC <->
+    /// AC (main.rs restarts the stream in the other row at the same range
+    /// item); A has one row (the AC A row, DC-coupled): a note.
     pub(super) fn wave_coupling_note(&mut self, now: u64) {
-        let ac = self.scope.wave_scale_now().ac;
-        self.toast(now, if ac { "AC-coupled (no DC row)" } else { "DC-coupled AC row" }, true);
+        if self.dmm.button() == Button::Volt {
+            let Some(a) = self.dmm.ad2_scale() else { return };
+            let ac = self.dmm.sub() == 1;
+            self.wave_req = Some(WaveReq::Coupling(a.item));
+            self.toast(now, if ac { "DC coupling (DC V row)" } else { "AC coupling (AC V row)" }, true);
+        } else {
+            self.toast(now, "DC-coupled AC row", true);
+        }
+    }
+
+    /// main.rs, WaveReq::Coupling (the stream stopped): V DC <-> AC at
+    /// MF range item `item`.
+    pub fn wave_coupling(&mut self, clk: &mut Clock, item: u8) {
+        let sub = self.dmm.sub();
+        self.dmm.set_sub(clk, if sub == 1 { 0 } else { 1 });
+        self.func_changed();
+        self.dmm.set_range(clk, Some(item));
+        self.redraw = true;
     }
 
     /// Function / range label of the wave view ("AC V", "AC mA").
     pub(super) fn wave_func_label(&self) -> &'static str {
         match self.dmm.hy_mode() {
             0 => "AC V",
+            1 => "DC V",
             2 => "AC mV",
+            3 => "DC mV",
             4 => "AC A",
             5 => "AC mA",
             6 => "AC uA",

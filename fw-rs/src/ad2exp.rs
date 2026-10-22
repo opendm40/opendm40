@@ -43,6 +43,18 @@
 //!       1 1 kHz, 2 2 kHz (the stock AC V row), 3 DC); bit 3 OP2 instead
 //!       of OP1 (OP2 x1 on SENSE, AD2 = OP2O; the power meter's V path,
 //!       6 V on the DC V r0 /10 tap). C / D take 50 x n AD2 samples.
+//!   DBG:AD2:N7? item,state,n
+//!       Datasheet 13.1 note 7 in the stock DC rows (could a DC V "AC?" hint
+//!       run on AD2 + RMS, left on with the row?): main.rs sets the DC V /
+//!       mV range of MF `item` (0 = DC mV 600 mV, 1..4 = DC V 6..1000 V),
+//!       then this writes the stock DC row (CFG_F1 / CFG_F3, no sentinel)
+//!       with AD1 enabled LAST (the converters enabled once with the row,
+//!       never toggled while AD1 converts) in `state`: 0 AD2 / AD3 off (the
+//!       stock row); 1 AD2 on OP1O - AGND (OP1 on SENSE where the row has it
+//!       off), R26 0x80 (the AC rows' 76.8 kS/s); 2 = 1 + AD3 on OP1O and
+//!       RMS / LPF on (R29 0xF8, R34 0x88: the AC rows' statistic), and
+//!       takes n (<= 40) AD1 conversions at the row's R22 after 3 dropped:
+//!       item,state,n,ad1_n,mean_m,sd_m,min,max,timeouts.
 //!   DBG:AD2:DRAW 0|1|2  (main.rs) loss-per-rate experiment knob for a
 //!       logger session: 0 = no panel (display frozen), 1 = the logger panel
 //!       (default), 2 = the panel plus a full DMM-view redraw every 100 ms
@@ -334,11 +346,15 @@ impl Acc {
 /// Sample AD1 and / or AD2 on one INTF read per pass (it clears both
 /// flags): until `ad1_n` AD1 results after `skip` (AD2 counted only between
 /// the first and the last of them: the AD2 mean over the same AD1
-/// conversions), or, with `ad1_n` = 0, `ad2_n` AD2 results. Bounded by a
-/// deadline; watchdog kicked. Returns (ad1, ad2, timed out).
-fn sample(ad1_n: u32, skip: u32, ad2_n: u32, ad2_period_ns: u32) -> (Acc, Acc, bool) {
+/// conversions), or, with `ad1_n` = 0, `ad2_n` AD2 results, or (`win_us`
+/// > 0) the AD2 results of that window (a whole number of 50 / 60 Hz
+/// periods: mains ripple averages out whatever the main loop misses).
+/// Bounded by a deadline; watchdog kicked. Returns (ad1, ad2, timed out).
+fn sample(ad1_n: u32, skip: u32, ad2_n: u32, ad2_period_ns: u32, win_us: u32) -> (Acc, Acc, bool) {
     let (mut a1, mut a2) = (Acc::new(), Acc::new());
-    let lim_us = if ad1_n > 0 {
+    let lim_us = if win_us > 0 {
+        win_us
+    } else if ad1_n > 0 {
         (ad1_n + skip + 2) * hy::ad1_period_us_r22(DCV_R22) * 3 / 2
     } else {
         ad2_n * (ad2_period_ns / 1000 + 1) * 3 + 50_000
@@ -352,7 +368,7 @@ fn sample(ad1_n: u32, skip: u32, ad2_n: u32, ad2_period_ns: u32) -> (Acc, Acc, b
             crate::wdt::kick_if_feeding();
         }
         if cyc().wrapping_sub(t0) / CYC_PER_US > lim_us {
-            return (a1, a2, true);
+            return (a1, a2, win_us == 0 || a2.n == 0);
         }
         let f = hy::read1(hy::R_INTF);
         if f & hy::INTF_AD2 != 0 && (ad1_n == 0 || (seen1 >= skip && seen1 < skip + ad1_n)) {
@@ -360,7 +376,7 @@ fn sample(ad1_n: u32, skip: u32, ad2_n: u32, ad2_period_ns: u32) -> (Acc, Acc, b
             if ok {
                 a2.add(v);
             }
-            if ad1_n == 0 && a2.n >= ad2_n {
+            if ad1_n == 0 && win_us == 0 && a2.n >= ad2_n {
                 return (a1, a2, false);
             }
         }
@@ -387,6 +403,74 @@ fn put_row(row: &[u8; hy::CFG_LEN], ad1: bool) {
     }
 }
 
+/// AD1 conversions of the entry self-cal (after 2 dropped): 4 x 50 ms.
+const CAL_AD1_N: u32 = 4;
+/// AD2 window of the zero and of the signal: 100 ms (5 / 6 mains periods).
+const CAL_WIN_US: u32 = 100_000;
+/// |signal - zero| (codes) above which the self-cal also takes the gain.
+const CAL_GAIN_CODES: f32 = 10_000.0;
+/// The self-cal's gain must be within this of the table's (else: table).
+const CAL_GAIN_TOL: f32 = 0.03;
+
+/// An AD2 session (logger.rs `start`) in a DC function (feasibility E7):
+/// the AD2 row of DMM mode `mode` / range `r` at `r26`, before
+/// set_ad2_stream (which keeps R27 / R32 / R33 and switches AD1 / AD3 /
+/// RMS off). DC mV (3): the stock AC mV row (OP2O - AGND, DC-coupled; the
+/// relays are DC mV's). DC V (1): `dcv_row` (AD2IN AGND, OP1's chopper
+/// held: it stops at a random phase with AD1 off; 6.5: the held offset is
+/// the chopped mean's within a few codes) and, with `measure`, the one-shot
+/// self-cal, sequential (device test 6.5: AD1 reads 0.3 .. 0.9 k codes low
+/// while AD2 converts, i.e. -5.5 mV at 6 V; alone it matches the DMM's DC
+/// V reading within 0.01 % of the range):
+///   1. AD1 alone on SENSE - PB5 (ENAD2 off): 4 x 50 ms after 2 dropped,
+///      volts with the DC V calibration of the tap (dmm::dcv_volts);
+///   2. AD1 off, AD2 on (note 7), OP1+ on AGND: the zero z (OP1 + AD2
+///      offset; 6.5: the fitted 0 V code within 3 .. 10 codes);
+///   3. OP1+ on SENSE (the stream's row): the mean c; z and c over 100 ms
+///      each, AD1 over 200 ms: whole 50 / 60 Hz periods.
+/// per_code = V / (c - z) when |c - z| >= CAL_GAIN_CODES and within
+/// CAL_GAIN_TOL of the table, else the table's (dmm::DCV_AD2_GAIN);
+/// offset = c * per_code - V (dmm::set_dc_cal; `Dmm::ad2_scale`). No cal
+/// (the nominal scale) when a step timed out or AD2 clipped. Without
+/// `measure` the stored cal is kept (the fast logger measured it for its
+/// file header before the disk preparation). ~0.45 s with.
+#[inline(never)] // .cold (link-native.x): once per session, before the ISR
+pub fn dc_enter(mode: u8, r: u8, r26: u8, measure: bool) {
+    if mode == 3 {
+        hy::configure(&crate::hy3131_tables::CFG_F2[r.min(1) as usize]);
+        return;
+    }
+    let r = r.min(3);
+    let row = dcv_row(r, r26, 0, 0, true);
+    if !measure {
+        put_row(&row, false);
+        return;
+    }
+    let p = hy::ad2_period_ns(r26);
+    let mut c0 = row;
+    c0[6] &= 0x7F;
+    put_row(&c0, true);
+    let (a1, _, t1) = sample(CAL_AD1_N, 2, 0, p, 0);
+    hy::write(0x23, &[row[3] & 0x7F]);
+    hy::write(0x26, &[row[6]]);
+    hy::write(0x32, &[(row[18] & 0xF0) | R32_OP1_AGND]);
+    let _ = sample(0, 0, 8, p, 0);
+    let (_, z, t2) = sample(0, 0, 0, p, CAL_WIN_US);
+    hy::write(0x32, &[row[18]]);
+    let _ = sample(0, 0, 8, p, 0);
+    let (_, c, t3) = sample(0, 0, 0, p, CAL_WIN_US);
+    let ok = !(t1 || t2 || t3) && a1.n == CAL_AD1_N && z.n > 0 && c.n > 0 && c.lo > -249_000 && c.hi < 249_000;
+    let cal = ok.then(|| {
+        let v = crate::dmm::dcv_volts(a1.mean() as f32, r.max(1) as usize);
+        let (cm, zm) = (c.m() as f32 / 1000.0, z.m() as f32 / 1000.0);
+        let tab = crate::dmm::ad2_scale_of(1, r as i8).map_or(0.0, |a| a.per_code);
+        let g = if (cm - zm).abs() >= CAL_GAIN_CODES { v / (cm - zm) } else { tab };
+        let pc = if (g / tab - 1.0).abs() <= CAL_GAIN_TOL { g } else { tab };
+        (pc, cm * pc - v)
+    });
+    crate::dmm::set_dc_cal(r, cal);
+}
+
 /// DBG:AD2:DCV? (module header): the AD2 / AD1 numbers of the DC-coupled
 /// V row at the current DC V range `r`. Reply length; the caller appends
 /// the AD1 volts and restores the DMM row (dmm.start).
@@ -400,24 +484,24 @@ pub fn dcv_test(r: u8, r26: u8, n: u32, flags: u8, out: &mut [u8]) -> (usize, [i
     // A: AD1 alone (the row with ENAD2 off).
     let row = dcv_row(r, r26, opt, chop, false);
     put_row(&row, true);
-    let (a1, _, t) = sample(n, 2, 0, p);
+    let (a1, _, t) = sample(n, 2, 0, p, 0);
     to += t as i64;
     // B: AD2 on (AD1 off around the switch), then AD1 again.
     hy::write(0x23, &[row[3] & 0x7F]);
     hy::write(0x26, &[0x80 | (r26 & 0x3F)]);
     hy::write(0x23, &[row[3] | 0x80]);
-    let (b1, b2, t) = sample(n, 2, 0, p);
+    let (b1, b2, t) = sample(n, 2, 0, p, 0);
     to += t as i64;
     // C: AD1 off: AD2 as the stream sees it (OP1's chopper stops with AD1).
     hy::write(0x23, &[row[3] & 0x7F]);
-    let _ = sample(0, 0, 4, p);
-    let (_, c2, t) = sample(0, 0, 50 * n, p);
+    let _ = sample(0, 0, 4, p, 0);
+    let (_, c2, t) = sample(0, 0, 50 * n, p, 0);
     to += t as i64;
     // D: the zero, OP1+ (or OP2+) on AGND.
     let r32 = if opt & DCV_OP2 != 0 { 0xB0 | (row[18] & 0x0F) } else { (row[18] & 0xF0) | R32_OP1_AGND };
     hy::write(0x32, &[r32]);
-    let _ = sample(0, 0, 4, p);
-    let (_, d2, t) = sample(0, 0, 50 * n, p);
+    let _ = sample(0, 0, 4, p, 0);
+    let (_, d2, t) = sample(0, 0, 50 * n, p, 0);
     to += t as i64;
     let mut o = Out { b: out, n: 0 };
     o.list(&[r as i64, (r26 & 0x3F) as i64, flags as i64, n as i64], b',');
@@ -432,6 +516,53 @@ pub fn dcv_test(r: u8, r26: u8, n: u32, flags: u8, out: &mut [u8]) -> (usize, [i
     o.s(b";");
     o.i(to);
     (o.n, [a1.mean(), b1.mean()])
+}
+
+/// DBG:AD2:N7? (module header). `mode` 1 / 3, `r` the DMM range.
+#[inline(never)] // .cold (link-native.x)
+pub fn n7_test(item: u8, mode: u8, r: u8, state: u8, n: u32, out: &mut [u8]) -> usize {
+    use crate::hy3131_tables::{CFG_F1, CFG_F3};
+    let n = n.clamp(1, 40);
+    let mut c = if mode == 3 { CFG_F3[r.min(1) as usize] } else { CFG_F1[r.min(3) as usize] };
+    if state >= 1 {
+        c[7] = 0x10 | (c[7] & 0x0F); // SAD2IP OP1O, SAD2IN AGND, the row's references
+        if c[18] & 0x08 == 0 {
+            c[18] = (c[18] & 0xF0) | 0x08; // ENOP1, SOP1P SENSE
+        }
+        c[6] = 0x80;
+    }
+    if state >= 2 {
+        c[9] = 0xF8;
+        c[20] = 0x88;
+        c[21] = 0x14 | (c[21] & 0x03); // AD3 = OP1O - AGND, AD3IG 1.0
+    }
+    // The row with AD1 off, AD3 before AD2 (configure), AD1 last.
+    put_row(&c, true);
+    let p = hy::ad1_period_us_r22(c[2]);
+    let (mut a, mut to) = (Acc::new(), false);
+    let t0 = cyc();
+    let mut seen = 0u32;
+    let mut k = 0u32;
+    while a.n < n {
+        k += 1;
+        if k % 64 == 0 {
+            crate::wdt::kick_if_feeding();
+        }
+        if cyc().wrapping_sub(t0) / CYC_PER_US > (n + 5) * p * 3 / 2 {
+            to = true;
+            break;
+        }
+        if hy::read1(hy::R_INTF) & hy::INTF_AD1 != 0 {
+            let v = hy::read_ad1();
+            seen += 1;
+            if seen > 3 {
+                a.add(v);
+            }
+        }
+    }
+    let mut o = Out { b: out, n: 0 };
+    o.list(&[item as i64, state as i64, n as i64, a.n as i64, a.m(), a.sd_m(), a.lo as i64, a.hi as i64, to as i64], b',');
+    o.n
 }
 
 /// Newton square root (no libm).

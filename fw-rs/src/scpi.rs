@@ -335,6 +335,12 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///                           1.0), times the stock range factor (mV: /x10 or
 ///                           x1 op gain; A: / (shunt * op gain); AC V: the
 ///                           divider); calibration gain/offset NOT applied
+///   LOG:SCALe?              a,b: the AD2 session's value = a + b * raw in V
+///                           or A, the scale the device uses (the wave view,
+///                           the fast logger's file): the stock calibration
+///                           (mV, A: LPF gain / offset) or, in DC V, the
+///                           nominal gain and the entry self-cal's offset
+///                           (feasibility E7); 0,0 for AD1 / no AD2 row
 ///   LOG:DATA?               definite-length #4nnnn block of 12-byte LE records
 ///                           {u32 seq, u32 ts_us, i32 raw}, oldest first
 ///   LOG:CSV ON|OFF          CSV recording of the DMM readings to the USB disk
@@ -396,6 +402,8 @@ pub enum Log {
     Rate,
     Count,
     Preamble,
+    /// LOG:SCALe? (main.rs `log_scale`).
+    Scale,
     Data,
     Csv(Option<bool>),
     /// LOG:CSV:INTerval / DURation: Some(index into csvlog::INTERVALS_S /
@@ -537,6 +545,13 @@ pub enum Dbg {
 fn dcv_arg(a: &[u8]) -> Dbg {
     let w = nums::<4>(a);
     Dbg::Ad2(5, (w[1] & 0x3F) as u8, (w[2].clamp(1, 16) | w[0].min(3) << 8) as u16, (w[3] & 0x0F) as u8)
+}
+
+/// DBG:AD2:N7? item,state,n -> Dbg::Ad2(6, state, n, item) (main.rs).
+#[inline(never)] // .cold (link-native.x)
+fn n7_arg(a: &[u8]) -> Dbg {
+    let w = nums::<3>(a);
+    Dbg::Ad2(6, w[1].min(2) as u8, w[2].clamp(1, 40) as u16, w[0].min(4) as u8)
 }
 
 fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
@@ -1489,6 +1504,8 @@ impl Scpi {
                         (Some(b"DMA"), true) => Some(Dbg::Ad2(4, 255, 0, 0)),
                         // DCV? range,r26,n[,flags]: (5, r26, n | range << 8, flags).
                         (Some(b"DCV"), true) => Some(dcv_arg(a)),
+                        // N7? item,state,n: (6, state, n, item).
+                        (Some(b"N7"), true) => Some(n7_arg(a)),
                         _ => None,
                     };
                     match d {
@@ -1665,6 +1682,8 @@ impl Scpi {
                         Out::Log(Log::Count)
                     } else if kw(sub, "PREamble") && query {
                         Out::Log(Log::Preamble)
+                    } else if kw(sub, "SCALe") && query {
+                        Out::Log(Log::Scale)
                     } else if kw(sub, "DATA") && query {
                         Out::Log(Log::Data)
                     } else if kw(sub, "CSV") && parts.len() > 2 {

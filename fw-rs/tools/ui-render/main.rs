@@ -1846,9 +1846,10 @@ fn main() {
         (dmm::pw::HINT_TOASTS[0], false),
         (dmm::pw::HINT_TOASTS[1], false),
         // Wave view (app_wave.rs) and the power meter (app_power.rs).
-        ("DC V: wave is AC-coupled", true),
         ("Wave: AC A row (DC-coupled)", true),
-        ("AC-coupled (no DC row)", true),
+        ("DC coupling (DC V row)", true),
+        ("AC coupling (AC V row)", true),
+        ("DC-coupled AC row", true),
         ("Current too high: reduce it", false),
         // "Leads in A?" reminder (doc 4.9), on leaving a current function.
         (sentinel::LEADS_TOAST, false),
