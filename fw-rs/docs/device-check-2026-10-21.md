@@ -1233,3 +1233,82 @@ Not changed (described above):
 - **Logging:** `LOG:DEST HOST`, `LOG:STAT 0`. The generator output is off (STOP; it was switched on by mistake for ~20 s at 2 MHz / 3 Vpp with nothing on its jack).
 - **Files added on the SPI disk:** LOGS/FAST009 / FAST010.DLG (two 20 s 38400 sessions), SCOPE/SCOP005..009, SHOTS/S008..S010.BMP.
 - **Calibrator:** 1 V DC, enabled.
+
+## 5e52761: fonts compacted, region A2, power meter round 5 + V2, UF-26, the a0985e4 fixes (2026-10-22 23:05-23:40)
+
+The owner installed the image. `DBG:BOOT?` matched the header of `dm40-fw-5e52761.bin` (marker 0x1653E9AC / 0x00097874 / 0x00019A78, VALID), crash count 0, reset reason SW.
+- **Wiring:** the calibrator on V/COM (1 V DC, the 40 Hz square for two steps), the A jack open, the volume mounted read-only.
+- **Input:** DBG:TAP / KEY; screenshots are DBG:LCD? reads (rgb666). Pixel comparisons use the a0985e4 device shots (`devchk-a0985e4/`) or ui-render (2x, downsampled).
+- **Files:** scripts and screenshots are in the session scratchpad `devchk-5e52761/` (not in git).
+- **Crashes:** none, two SW resets (the reboot checks).
+
+### Summary
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1a | Region A2: the install | **PASS**: marker VALID = the image header; `INFO/FIRMWARE.BIN` = the installed file (sha1 5e826c88…, 620 672 B). The file is read back from flash, so the update body's sector 1 (A2) is intact | `dm40dbg.py boot --expect` |
+| 1b | Region A2: logger panel text, AD2 38400 to disk (AC V, 20 s) with the panel up | **PASS**: "DATA LOGGING / AD2 38399/38400 Sa/s / 206329 samples / FAST012 215 KB" (ASCII26) correct; max_lat 0.28 us (no screenshot) and 0.30 us (a screenshot mid-run), 768 003 samples, 0 lost | `l1-panel.png`, `f2.log` |
+| 2a | Fonts: menu, Settings 1/2/3, Hold & Limits, keypad, Record, Power Settings, generator | **PASS**: pixel-identical to the a0985e4 device shots (0 px; the generator differs only in the uptime) | `pdiff.py` |
+| 2b | Fonts: Help 1-7 | **PASS**: pixel-identical to the ui-render renders | `h1..h7.png` |
+| 2c | Fonts: DMM (V, A, ohm, cap, diode, continuity, Hz, temperature), power DC / AC / AC+DC, the keypad, gallery + image view, scope, combined view, Wave view (AC V, DC V) | **PASS** (looked at each, zoomed where dense): no glyph damage. Layout findings below (none from the fonts) | `sh*.png` |
+| 2d | Draw times | **PASS**: tap -> draw (loop max1s) range page 18 ms (a0985e4: 28-38), Hold & Limits 25 (37-51), Record 29 (23-37), menu 22 (37-51), Settings 25 (25-39), Power Settings 23 (31). Page switch (`tick` max, 2 runs): power -> DMM 21.0 / 21.2 ms, DMM -> power 14.2 / 14.2 ms (emulator 15.7 / 10.5: flash wait states). Steady DMM DC V (10 s): d.read avg 800 / max 5098 us, d.chart avg 256 / max 1388 us | `taplat1.txt`, `prof-*.txt` |
+| 3 | Power meter round 5 + V2 (no current) | **PASS** for every step without current; 2 cosmetic notes | below |
+| 4a | Re-check: a host copying CSVs during the Wave view at 38400 | **PASS**: 17 files (SCOP000-009, LOG000-004, FAST000, FAST008; 12.0 MB, 95 KB/s, 0 errors): max_lat 0.30 us, overruns 0 (a0985e4: 21.4 us). `dropped` +831 once, near the end of the copy (the view's ring) | `copy1.txt` |
+| 4b | Re-check: AUTO + REL, then a switch | **FAIL -> fixed**: REL went off and the range was released (60 V -> 6 V, 4 decimals), but the status bar stayed **MANU** until a static redraw (range page and back: AUTO+). Cause below | `r2-rel-on.png`, `r3-after-switch.png`, `r6-redrawn.png` |
+| 4c | Re-check: Wave view `CONF?` in DC V | **PASS**: `"VOLT +6.000000E+00,+1.000000E-04"`; VAVG 1.0021 V, 2 V/div | `w5-wave-dcv.png` |
+| 5 | UF-26: DC mA, 60 mA range, A jack open | **PASS**: 0.001 mA, no 4-20 mA percentage. Showing it above 3.6 mA: blocked (no current through A) | `m3-60ma.png` |
+| 6 | Combined view, power function | **FAIL (layout, open)**: the strip's unit box clips "mW" to "mV" plus a sliver | `g7-combined.png`, `z-comb.png` |
+
+### 3. Power meter (doc §3.16 / §3.17 device lists, the steps without current)
+
+- **Entry:** V -> W button: `FUNC?` POW, `POW:COUP?` DC, "I ranging..." for the first seconds (the uA hunt with the A jack open), then the DC page.
+- **Tap cycle:** DC -> AC -> AC+DC -> DC, glyphs on the button and by the value (`p3..p5`, `p8`).
+- **Reboot in AC+DC** (`DBG:RESET`): back in POW, `POW:COUP?` ACDC (PASS).
+- **"At load":** `POW:BURD:STAT?` 0 after the update; Power Settings "At load" -> 1, help line "At load ON: V at source, so load sees V - I*R", the page shows "@load" after the V unit and at the main readout's top left (`q2-page-atload.png`). It survived a reboot (1). Off again -> 0, help line "OFF: V, P at the jacks. ON if V leads at source", no "@load" left (diff vs the earlier page: only the digits and the chart). Help 7/7 has "MF: At load (off)" / "@load: V - I*R".
+- **AC on 1 V DC:** `FETC:POW:ALL?` P 0, S / Q / PF 9.91E37, V 0, I 0, F 9.91E37; the page shows 0.0000 V / 0.00 uA / 0.0000 mW and "--" with no units (`p4-ac.png`).
+- **AC+DC on 1 V DC:** Q 0 (`0.00 mvar`), V = V_dc 1.0001 V, V_ac 0.0000; PF -1.000 (I is the open jack's -0.08 uA, so the sign is noise). "DC?" badge after ~6 s, `SYST:ALER?` DC, toast "No AC: DC is more precise" (`tn-03.png`).
+- **DC on the 40 Hz square** (0..9.5 V): V 4.765 V, "AC?" badge, `SYST:ALER?` AC, toast "AC present: use AC+DC" (`tq-02.png`).
+- **Sub-lines (V2):** "DC 1.0001 V AC 0.0000 V", "DC -0.13 uA AC 0.00 uA", "DC -0.0001 mW + AC 0.0000 mW" in place, no overlap at 2x zoom (`z-acdc.png`). A tap on the value -> Wh: the P sub-line empties, V / I stay; -> VAh; -> W, the P line back (`sh3.png`).
+- **Back to DC:** the DC layout (VAh row, chart from 176) with no leftover pixels: the diff against the first DC shot is only the uptime and the chart trace / chips.
+- **Cosmetic:** a coupling switch keeps the old layout and values until the first reading of the new coupling, up to ~4 s. `POW:COUP ACDC` from DC: the DC layout with the DC glyph by the value under an AC+DC W button for ~4 s (the "No AC" toast came inside that time); AC+DC -> DC: one frame of the AC+DC totals without sub-lines.
+- **Blocked (A jack not wired):** every step with current (V at 1 / 2 A with "At load", residues against the floors, mains / motor PF, ripple with current, the parts with a load).
+
+### 4b. The status bar after a range release
+
+Sequence: AUTO coupling on the square (`AUTO,AC`, 60 V), REL on (REL 4.765), calibrator -> 1 V DC. After ~5 s `AUTO,DC`, REL 0.0000, `CONF?` "VOLT:AUTO +6,+1E-04" (6 V, so the 5e52761 fix released the hold), but the status bar showed "MANU" for > 20 s.
+- **Cause:** `DmmView`'s status key was `(r.auto && !r.auto_plus, hold, r.auto_plus, ...)`. Under a manual range `v_auto` stays 1, so `auto_plus` is set and MANU gives `(false, .., true)`, the same key as AUTO+. MANU -> AUTO+ never repainted the label. Paths that invalidate the view (REL tap, page switch) hid it.
+- **Fixed** (ui.rs): the key holds `r.auto`.
+
+### 6. Combined view strip: power units clipped
+
+- **Symptom:** in the power function, the strip reads "-0.0001m" plus a cut "W" that looks like "V" (`z-comb.png`).
+- **Cause:** `ST_UNIT` is 40 px and `st_text` clips without a warning. ui-render's `c12-strip-power` render has the same cut, and no rule checks the value / unit boxes.
+- **Widths (SC_DIGITS):** "mW" 59 px, "kWh" 63, "mWh" 75; values up to 103 px ("-3.7799").
+- **Space:** value + gap + unit = 88..250 (162 px). 103 + 4 + 75 does not fit, so shifting the unit box left is not enough. This needs a layout decision: draw the unit in a smaller font when it does not fit, or move the sub column. A draft ui-render rule found 5 cases (mw, main-wh, main-mwh x2, main-zero). Not changed.
+
+### Other findings (cosmetic, not from the fonts)
+
+- **Help 5/7:** the title "Help 5/7: Record + alerts" runs into "< Back" (one space). Help 2/7 "Power key held 1.5 s" touches its value column. Both are the same in ui-render.
+- **Chart axis labels:** in a function that reads OL with no earlier value, the labels keep the previous function's unit: cap "0.050MΩ", diode "MΩ", temperature "Hz".
+- **Wave view entry from DC V:** `DBG:ISR?` `dropped` +7087 (~185 ms, the DC V self-cal at the entry), 0 from AC V. Exit at 38400: max_lat 4.0 / 5.8 us, late 1 (the known App::show item).
+- **A range switch spike:** a manual 600 uA -> 60 mA switch with the A jack open drew a 0.315 mA spike in the chart (MAX 0.265 mA) for one reading.
+- **`CONF?` resolution follows the display:** "+1E-05" while the DMM shows the extra digit, "+1E-04" without it.
+
+### Fix (branch `devchk-5e52761`, on rust-fw-poc d6f5e96; not on the device)
+
+1. ui.rs `DmmView`: the status-bar key holds `r.auto` (4b).
+- **Build:** region B 78 192 B free, C 17 420, stack headroom 21 228.
+- **Tests:** ui-render 51 495 cases, 0 violations.
+- **Device re-check:** 4b (expect AUTO+ right after the switch).
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+, 1 V.
+- **Settings:**
+  - unchanged: volume 0 %, backlight 10 %, Dim / Shutdown Never, Bluetooth ON.
+  - restored: "DMM row" back to Bargraph (I changed it to History by mistake in Settings 2/3).
+  - checked: Settings 1/2/3 pixel-identical to the start; `SYST:ALER:ENAB?` 15, `DISP:BURD?` 0.
+  - couplings: V DC, A DC with AUTO range, W DC, "At load" OFF.
+- **Logging and generator:** `LOG:DEST HOST`, `LOG:STAT 0`; generator `OUTP?` 0 (never switched on).
+- **Files added on the SPI disk:** LOGS/FAST011 and FAST012 (two 20 s 38400 sessions).
+- **Calibrator:** 1 V DC, enabled.
