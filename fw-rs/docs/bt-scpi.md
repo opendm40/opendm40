@@ -172,3 +172,9 @@ sigrok-cli -d scpi-dmm:conn=/dev/rfcomm0:serialcomm=115200/8n1 --samples 10
 libsigrok's serial SCPI transport ends commands with CR LF, which works here
 because CR ends the line and the LF is ignored. scpi-dmm needs the DM40
 profile from the libsigrok branch in TODO.md to recognise the `*IDN?` string.
+
+A function changed on the meter during an acquisition does not end it: the
+`READ?` waiting at that moment, and every `READ?` until the new function has
+a reading, answers within 0.85 s with `+9.91E37` (SCPI NaN, "Data stale";
+`+9.9E37` stays the overload). The DM40 profile skips those samples and
+labels the next ones from `FUNC?`; other hosts see +inf for them.

@@ -41,16 +41,22 @@
 //!     with a timeout of 5 s or more (pyvisa, a human); the 2 s PyVISA
 //!     default is too short for resistance, and libsigrok waits after a
 //!     function change itself.
-//!   - +9.9E37 and "Data stale" in SYST:ERR? only if the current function
-//!     has no reading at all SCPI_WAIT_MS (1.9 s) after that deadline.
+//!   - +9.91E37 (SCPI NaN, "no reading"; +9.9E37 stays the overload) and
+//!     "Data stale" in SYST:ERR? only if the current function has no
+//!     reading at all SCPI_WAIT_MS (1.9 s) after that deadline.
 //!   - the settle wait is only for a change this host asked for (CONF,
 //!     MEAS:<f>?, FUNC, TEMP:TRAN on the same transport, or READ? powering
 //!     the DMM up). After a change made on the meter (touch, keys, the phone
 //!     app, DBG:TAP / KEY, the other transport) READ? and MEAS:<f>? naming
 //!     the current function answer within SCPI_QUICK_MS: the latest reading
-//!     of the current function, else +9.9E37 and "Data stale" (libsigrok
-//!     would otherwise time out after 1 s and end the acquisition). Such a
-//!     change also cuts a READ? already waiting down to that budget.
+//!     of the current function, else +9.91E37 and "Data stale" (libsigrok
+//!     would otherwise time out after 1 s and end the acquisition; its DM40
+//!     profile skips the NaN, other hosts see +inf as for an overload). A
+//!     READ? already waiting when such a change comes answers at once with
+//!     +9.91E37 and "Data stale": the host asked FUNCtion? before it, and a
+//!     reading of the new function would be filed under the old one. An
+//!     autorange step (V <-> mV, the uA / mA / A shunts) is no function
+//!     change (func_id: FUNCtion? names the same function).
 //!   - no late reply to a query the host gave up on: USBTMC
 //!     INITIATE_ABORT_BULK_IN / INITIATE_CLEAR, or a new command ("Query
 //!     INTERRUPTED").
@@ -66,7 +72,8 @@
 //! 34401A, *IDN? answers "HEWLETT-PACKARD,34401A,0,dm40-fw 0.1" so that hosts
 //! with a 34401A profile only (libsigrok >= 0.5.2 / SmuView without the DM40
 //! profile) take the meter; READ? then never waits longer than the quick
-//! budget (+9.9E37 until the first reading after a function change).
+//! budget (+9.91E37, read as +inf there, until the first reading after a
+//! function change).
 //! Caveats: that profile knows DC / AC V and A, RES (and FRES = RES here),
 //! CONT, DIOD, FREQ (and PER, which the DM40 lacks): in CAP, TEMP and AC+DC
 //! the host stops with "unknown measurement quantity"; no ranges or
@@ -191,7 +198,7 @@ pub const IDN_34401A: &[u8] = b"HEWLETT-PACKARD,34401A,0,dm40-fw 0.1";
 /// SmuView builds without the Alientek DM40 scpi-dmm profile: their "HP
 /// 34401A" profile (since libsigrok 0.5.2) sends CONF:<f>, CONF?, INIT,
 /// READ?, *OPC?, ABORT. With it on, READ? / MEAS:<f>? never wait for a
-/// first reading longer than the quick budget (main.rs: +9.9E37 for the
+/// first reading longer than the quick budget (main.rs: +9.91E37 for the
 /// first ~1..3 s after a function change), since such hosts do not wait
 /// after CONF and time out after 1 s (USBTMC) / 1.5 s.
 static IDN_EMUL: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
@@ -969,7 +976,12 @@ pub struct Scpi {
     pub buf: [u8; 512],
     pub len: usize,
     err: Option<&'static str>,
+    /// `func_id` of the function the last FUNCtion? / CONFigure? named, until
+    /// the next READ? / FETCh? takes it (`take_asked`); NO_FUNC = none.
+    asked: u8,
 }
+
+const NO_FUNC: u8 = 0xFF;
 
 /// Match `tok` (upper case) against a mnemonic written as e.g. "MEASure":
 /// accepted are the short form (upper-case letters) and the full word.
@@ -1045,6 +1057,42 @@ fn parse_func_arg(parts: &[&[u8]], arg: &[u8]) -> Option<u8> {
     Some(f)
 }
 
+/// SCPI "not a number" (SCPI-99 7.2.1.5): no reading to give (READ? /
+/// MEAS? / FETCh? "Data stale", FETC:POW:ALL? parts). +9.9E37 is the
+/// overload.
+pub const NAN: &[u8] = b"+9.91000000E+37";
+
+/// The FUNCtion? identity of a `Dmm::func` code: the modes one function
+/// autoranges through (V DC 1 / mV 3, V AC 0 / 2, A AC 4..6, A DC 7..9)
+/// are one function (`func_name` gives them one name).
+pub fn func_id(mode: u8) -> u8 {
+    match mode {
+        2 => 0,
+        3 => 1,
+        5 | 6 => 4,
+        8 | 9 => 7,
+        m => m,
+    }
+}
+
+/// READ? / FETCh?: the function the host's last FUNCtion? / CONFigure?
+/// named, if it asked one since its last READ? / FETCh? (libsigrok asks
+/// FUNCtion? before every READ?). main.rs answers +9.91E37 when the function
+/// changed on the meter in between (`forget_asked` when this host changed
+/// it): the reading would be filed under the old function. Once per
+/// question, so a host that asked FUNCtion? once and then only reads gets
+/// one NaN per change at most.
+pub fn take_asked(s: &mut Scpi) -> Option<u8> {
+    let a = core::mem::replace(&mut s.asked, NO_FUNC);
+    (a != NO_FUNC).then_some(a)
+}
+
+/// The host changed the function itself (CONF, MEAS:<f>?, FUNC, INR:STAT,
+/// ...) after its FUNCtion? / CONFigure?: it knows, no NaN for its READ?.
+pub fn forget_asked(s: &mut Scpi) {
+    s.asked = NO_FUNC;
+}
+
 fn func_name(mode: u8) -> &'static str {
     match mode {
         0 | 2 => "\"VOLT:AC\"",
@@ -1067,7 +1115,7 @@ fn func_name(mode: u8) -> &'static str {
 
 impl Scpi {
     pub const fn new() -> Self {
-        Scpi { buf: [0; 512], len: 0, err: None }
+        Scpi { buf: [0; 512], len: 0, err: None, asked: NO_FUNC }
     }
 
     fn put(&mut self, s: &[u8]) {
@@ -1792,6 +1840,7 @@ impl Scpi {
                     if rest.first().map(|p| kw(p, "FUNCtion")).unwrap_or(false) {
                         if query {
                             self.put(func_name(cur).as_bytes());
+                            self.asked = func_id(cur);
                         } else {
                             let a = trim(arg);
                             let a = a.strip_prefix(b"\"").unwrap_or(a);
@@ -1899,6 +1948,7 @@ impl Scpi {
     /// latest reading of it: "\"VOLT +6.000000E+00,+1.000000E-04\"". Exact
     /// powers of ten (hosts take the resolution's exponent as the digits).
     pub fn put_conf(&mut self, mode: u8, r: Option<&Reading>) {
+        self.asked = func_id(mode);
         let name = func_name(mode).as_bytes();
         self.put(&name[..name.len() - 1]);
         if matches!(mode, 11 | 12) {
