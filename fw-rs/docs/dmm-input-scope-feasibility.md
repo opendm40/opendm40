@@ -1785,6 +1785,18 @@ V clips at 1.2 V, 0.3 V reads 0.294 V); MENU: DC V reads again. Not seen
 on the device: the clip autorange (the DMM's AUTO stayed on 6 V at 0.3 V;
 the emulator's `--case dcv` covers it).
 
+a0985e4 (the 100 ms trapezoid-weighted AD2 windows): 0 V +0.06 / -0.17 mV,
+1 V -0.51 / -0.92 mV, 5 V -0.99 / -0.58 mV, 24 V (60 V) -1.8 / -2.1 mV;
+LOG:STATe ON 0.56 s.
+
+Emulator suite (a0985e4 / ec22925): dcvtest, wavetest (volt, current,
+dcv), ad2streamtest, inrush, btwake, leads, burden, couptest, the model
+tests, senttest 1/2 pass; fastlogtest's typ profile passes, its max profile
+never enumerates USB, nor does the base e054fc8; senttest ovl-dcma /
+ovl-dcua-man / aprot-to-dca and powtest manual / acdc-floor fail on the
+base e054fc8 too (ovl-pow-auto-ua / -dc and acdc-floor are flaky under
+load: pass alone).
+
 ### 13.5 Limits
 
 * Gain without a big enough input (the two points < 10 000 codes: < 0.48 /
