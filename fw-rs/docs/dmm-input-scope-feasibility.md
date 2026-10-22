@@ -1420,7 +1420,7 @@ bytes. It also needs probe frames that fit the 13 us period.
 ### 11.11 Device check of a239aa6 (2026-10-22): DMA frames as the default
 
 a239aa6 = b21756f (the memory rework) + `set_dma_req` default 1 (decision
-2026-10-22 #7). Installed by the owner: healthy, crash count 0. No
+2026-10-22 #7); the same change is 36cc441 on rust-fw-poc (after 090f845). Installed by the owner: healthy, crash count 0. No
 `DBG:AD2:DMA` sent in the default runs. Calibrator 40 Hz square on V/COM
 (the 50 Hz sine of the decision's item 3 is not on this bench), AC V.
 
