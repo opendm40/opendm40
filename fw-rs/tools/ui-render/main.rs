@@ -574,11 +574,13 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
         ("ol", P { p: 0.0, v_ol: true, i_ol: true, pf: 0.0, f_hz: 0.0, e_wh: 12345.6, vah: 99999.9, vr: 3, ik: 1, ..z }),
         ("alt", P { p: f32::NAN, q: f32::NAN, pf: f32::NAN, vdc: f32::NAN, s: 1234.5, v: 230.0, i: 5.367, f_hz: 60.0, alt: true, vah: 1.5, secs: 3600, vr: 2, ik: 4, ..z }),
         ("dc", P { p: -24.012, s: 24.012, q: 0.0, pf: -1.0, v: 12.006, i: 2.0, vdc: 12.006, idc: -2.0, f_hz: 0.0, burden_v: 0.02, e_wh: -1.25, vah: 1.25, secs: 187, p_avg: -24.064, vr: 1, ik: 4, ..z }),
-        // The DC (AD1) method: PF / S / Q / f blank, the DC glyph; AUTO.
-        ("dc-ad1", P { p: -24.012, s: 24.012, q: 0.0, pf: -1.0, v: -12.006, i: 2.0, vdc: -12.006, idc: 2.0, f_hz: 0.0, burden_v: 0.02, e_wh: -1.25, vah: 1.25, secs: 187, p_avg: -24.064, vr: 1, ik: 4, dc: true, coup: dmm::pw::COUP_AUTO, ..z }),
+        // The DC (AD1) method: PF / S / Q / f blank, the DC glyph.
+        ("dc-ad1", P { p: -24.012, s: 24.012, q: 0.0, pf: -1.0, v: -12.006, i: 2.0, vdc: -12.006, idc: 2.0, f_hz: 0.0, burden_v: 0.02, e_wh: -1.25, vah: 1.25, secs: 187, p_avg: -24.064, vr: 1, ik: 4, dc: true, coup: dmm::pw::COUP_DC, ..z }),
+        // AC coupling: the AC parts only (Vdc / Idc not used: NaN), the AC glyph.
+        ("ac", P { vdc: f32::NAN, idc: f32::NAN, coup: dmm::pw::COUP_AC, ..base }),
         // Main readout cycled to the energy (Wh: kWh worst; VAh) and the
-        // coupling chip in its states.
-        ("main-wh", P { main: dmm::pw::MAIN_WH, e_wh: -99999.0, coup: dmm::pw::COUP_AUTO, ..base }),
+        // coupling glyph in its states.
+        ("main-wh", P { main: dmm::pw::MAIN_WH, e_wh: -99999.0, coup: dmm::pw::COUP_AC, ..base }),
         ("main-vah", P { main: dmm::pw::MAIN_VAH, vah: 0.12345, coup: dmm::pw::COUP_DC, dc: true, ..base }),
         ("main-mwh", P { main: dmm::pw::MAIN_WH, e_wh: -0.99999, ..base }),
         // No current: values that round to zero (never "-0.0000").
@@ -602,7 +604,7 @@ fn power_page_lim(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: 
     dv.power = true;
     dv.hv_red = pv.v.abs() >= 30.0;
     // The W button's glyph: the method in use (the app's pw_btn_glyph).
-    ui::set_power_dc(pv.dc);
+    ui::set_power_coup(pv.coup);
     dv.draw_static(Button::Power, r.mode, true, false);
     let mut pc = ui::pw::PwCache::new();
     ui::pw::side_clear(&mut pc);
@@ -1483,7 +1485,7 @@ fn main() {
                 let mut dv = ui::DmmView::new();
                 dv.power = true;
                 // (A method change redraws the page in the app: pw_tick.)
-                ui::set_power_dc(b.dc);
+                ui::set_power_coup(b.coup);
                 dv.draw_static(Button::Power, ra.mode, true, false);
                 let mut pc = ui::pw::PwCache::new();
                 ui::pw::side_clear(&mut pc);
@@ -1495,7 +1497,7 @@ fn main() {
                 host::reset(0);
                 let mut dv = ui::DmmView::new();
                 dv.power = true;
-                ui::set_power_dc(b.dc);
+                ui::set_power_coup(b.coup);
                 dv.draw_static(Button::Power, rb.mode, true, false);
                 let mut pc = ui::pw::PwCache::new();
                 ui::pw::side_clear(&mut pc);
@@ -1511,7 +1513,7 @@ fn main() {
         // update (badge <-> AUTO label) equal to its fresh draw.
         let lims = [meter::V_NONE, meter::V_PASS, meter::V_HI, meter::V_LO];
         for (name, pv) in &pcs {
-            for coup in [dmm::pw::COUP_AC, dmm::pw::COUP_AUTO] {
+            for coup in [dmm::pw::COUP_DC, dmm::pw::COUP_AC, dmm::pw::COUP_ACDC] {
                 for lim in &lims[1..] {
                     host::reset(0);
                     power_page_lim(dmm::pw::PowerVals { coup, ..*pv }, 0, sentinel::Alert::None, rc, *lim);
@@ -1524,7 +1526,7 @@ fn main() {
                         host::reset(0);
                         let mut dv = ui::DmmView::new();
                         dv.power = true;
-                        ui::set_power_dc(pv.dc);
+                        ui::set_power_coup(pv.coup);
                         dv.draw_static(Button::Power, r.mode, true, false);
                         dv.reading(&r, 0, la);
                         dv.reading(&r, 0, lb);
@@ -1532,7 +1534,7 @@ fn main() {
                         host::reset(0);
                         let mut dv = ui::DmmView::new();
                         dv.power = true;
-                        ui::set_power_dc(pv.dc);
+                        ui::set_power_coup(pv.coup);
                         dv.draw_static(Button::Power, r.mode, true, false);
                         dv.reading(&r, 0, lb);
                         let want = emu().fb.clone();
@@ -1543,7 +1545,7 @@ fn main() {
             }
         }
         host::reset(0);
-        power_page_lim(dmm::pw::PowerVals { coup: dmm::pw::COUP_AUTO, ..pcs[0].1 }, 0, sentinel::Alert::None, rc, meter::V_HI);
+        power_page_lim(dmm::pw::PowerVals { coup: dmm::pw::COUP_AC, ..pcs[0].1 }, 0, sentinel::Alert::None, rc, meter::V_HI);
         save(&out, "p17-power-limit-hi");
         // Hold & Limits of the power meter (the W limits; widest values).
         for (hi, lo) in [("10600 W", "-10600 W"), ("-9999.99 mW", "-63.650 W")] {
@@ -1570,8 +1572,32 @@ fn main() {
         for (k, (job, last, res)) in pw_status_cases().iter().enumerate() {
             host::reset(0);
             ui::pw::settings_page(&pcs[0].1);
-            ui::pw::settings_status(&pw_status_pw(*job, *last, *res), 0);
+            ui::pw::settings_status(&pw_status_pw(*job, *last, *res), 0, ui::pw::HELP_COUP);
             ck.check_opts(&format!("power-settings-status/{k}"), &page_regions_pw(), false);
+        }
+        // The help line: every coupling's meaning, "At load" on / off
+        // (sf::label lays out at most 48 glyphs: longer lines are cut).
+        for coup in [dmm::pw::COUP_DC, dmm::pw::COUP_AC, dmm::pw::COUP_ACDC] {
+            ck.cases += 1;
+            if ui::pw::coup_help(coup).len() > 47 {
+                ck.fail("power-settings-help", format!("help line over 47 glyphs: {}", ui::pw::coup_help(coup)));
+            }
+            for (help, comp) in [(ui::pw::HELP_COUP, true), (ui::pw::HELP_LOAD, true), (ui::pw::HELP_LOAD, false)] {
+                host::reset(0);
+                let mut p = pw_status_pw(0, 0, dmm::pw::JR_NONE);
+                p.coup = coup;
+                p.comp = comp;
+                ui::pw::settings_page(&dmm::pw::PowerVals { coup, comp, ..pcs[0].1 });
+                ui::pw::settings_status(&p, 0, help);
+                ck.check_opts(&format!("power-settings-help/c{coup}/h{help}/{comp}"), &page_regions_pw(), false);
+            }
+        }
+        // The Zero... / V cal... dialogs over the settings page.
+        for job in [dmm::pw::JOB_ZERO, dmm::pw::JOB_VCAL] {
+            host::reset(0);
+            ui::pw::job_dialog(job);
+            let (x, y, w2, h2) = crate::dialog::FBOX;
+            ck.check(&format!("power-job-dialog/{job}"), &[("screen", Bx::new(0, 0, 480, 320)), ("dialog", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))]);
         }
         // Before the first full reading: V + "I ranging..." (and the job
         // texts) over the power page's static parts.
@@ -2143,8 +2169,30 @@ fn main() {
         save(&out, "p14-power-energy-reset");
         host::reset(0);
         ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pcs[0].1 });
-        ui::pw::settings_status(&pw_status_pw(0, dmm::pw::JOB_VCAL, dmm::pw::JR_OK), 0);
+        ui::pw::settings_status(&pw_status_pw(0, dmm::pw::JOB_VCAL, dmm::pw::JR_OK), 0, ui::pw::HELP_COUP);
         save(&out, "p07-power-settings");
+        // The idle status line, AC selected, then "At load" tapped.
+        host::reset(0);
+        {
+            let mut p = pw_status_pw(0, 0, dmm::pw::JR_NONE);
+            p.coup = dmm::pw::COUP_AC;
+            ui::pw::settings_page(&dmm::pw::PowerVals { coup: dmm::pw::COUP_AC, ..pcs[0].1 });
+            ui::pw::settings_status(&p, 0, ui::pw::HELP_COUP);
+            save(&out, "p19-power-settings-ac");
+            ui::pw::settings_status(&p, 0, ui::pw::HELP_LOAD);
+            save(&out, "p20-power-settings-atload");
+        }
+        host::reset(0);
+        ui::pw::settings_page(&pcs[0].1);
+        ui::pw::job_dialog(dmm::pw::JOB_ZERO);
+        save(&out, "p21-power-zero-dialog");
+        host::reset(0);
+        ui::pw::settings_page(&pcs[0].1);
+        ui::pw::job_dialog(dmm::pw::JOB_VCAL);
+        save(&out, "p22-power-vcal-dialog");
+        host::reset(0);
+        ui::help_page(ui::HELP.len() - 1);
+        save(&out, "p23-help-power");
         host::reset(0);
         let mut dv = ui::DmmView::new();
         dv.power = true;
@@ -2153,7 +2201,7 @@ fn main() {
         save(&out, "p09-power-ranging");
         host::reset(0);
         ui::pw::settings_page(&pcs[0].1);
-        ui::pw::settings_status(&pw_status_pw(0, dmm::pw::JOB_VCAL, dmm::pw::JR_BIG), 0);
+        ui::pw::settings_status(&pw_status_pw(0, dmm::pw::JOB_VCAL, dmm::pw::JR_BIG), 0, ui::pw::HELP_COUP);
         save(&out, "p10-power-settings-refused");
         host::reset(0);
         ui::range_page(Button::Amp, Some(7), 0, None);

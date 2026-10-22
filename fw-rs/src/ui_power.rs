@@ -10,8 +10,9 @@
 //!               cells; unit in the stock UNIT face (our W of that face,
 //!               stockfont_w.rs), LETTERS for the energy units (UNIT has no h;
 //!               our k of that face: "kWh")
-//!   chip        the coupling above the unit: AC / DC / AUTO over the method
-//!               in use; tap = AC -> DC -> AUTO (`coupling`)
+//!   glyph       the coupling above the unit: the stock DC / AC / AC+DC mode
+//!               glyph (ui.rs `pw_glyph`); a tap on the active W button steps
+//!               DC -> AC -> AC+DC; the limit badge left of it (`coupling`)
 //!   history row the five 88 x 19 boxes: I, PF, S, Q, f (F14 tag + HIST
 //!               value; units the HIST face lacks in F14)
 //!   chart       the main readout, as every function
@@ -39,23 +40,21 @@ impl PwCache {
         PwCache { rows: [0; 5], side: [0; 5], coup: 0 }
     }
 
-    /// Redraw the coupling chip with the next reading.
+    /// Redraw the limit-badge slot with the next reading.
     pub fn coup_invalidate(&mut self) {
         self.coup = 0;
     }
 }
 
-/// The coupling on the page: the stock mode glyph above the unit (DC /
-/// AC+DC = the method in use, ui.rs `reading`) and, with AUTO, "AUTO" in
-/// the limit-badge slot left of it. A limit verdict (the W limits,
-/// meter::V_*) takes the slot instead: OK / HI / LO matter more than the
-/// coupling setting, whose method glyph stays above the unit. The coupling
-/// itself is switched by the active W button (DC -> AC+DC -> AUTO, as V /
-/// A) or the Power Settings row.
-const AUTO_LBL: sf::Rect = rect(403, 72, 31, 17);
+/// The coupling on the page is the stock mode glyph above the unit (DC /
+/// AC / AC+DC, ui.rs `reading`); the slot left of it carries the limit
+/// verdict (the W limits, meter::V_*) or nothing. The coupling itself is
+/// switched by the active W button (DC -> AC -> AC+DC, as V / A) or the
+/// Power Settings row.
+const BADGE: sf::Rect = rect(403, 72, 31, 17);
 
-fn coupling(c: &mut PwCache, pv: &PowerVals, lim: u8) {
-    let k = 1 + (pv.coup == pw::COUP_AUTO) as u32 + ((lim as u32) << 2);
+fn coupling(c: &mut PwCache, _pv: &PowerVals, lim: u8) {
+    let k = 1 + ((lim as u32) << 2);
     if c.coup == k {
         return;
     }
@@ -63,7 +62,7 @@ fn coupling(c: &mut PwCache, pv: &PowerVals, lim: u8) {
     if lim != crate::meter::V_NONE {
         crate::ui::lim_badge(lim);
     } else {
-        sf::label(sf::F14, AUTO_LBL, if pv.coup == pw::COUP_AUTO { "AUTO" } else { "" }, VALUE, BG, 8, 1);
+        sf::label(sf::F14, BADGE, "", VALUE, BG, 8, 1);
     }
 }
 
@@ -390,17 +389,32 @@ pub fn entry_dialog(i_cont: f32, t_lim: u16) {
 /// Power Settings page touch codes (besides range items).
 pub const PS_V: u8 = 0; // + 0..3 = V range, 4 = V AUTO
 pub const PS_I: u8 = 8; // + 0..5 = I range, 6 = I AUTO
+/// "At load": the burden compensation (P / V at the load, the meter's own
+/// drop I^2 R_path / I R_path taken off).
 pub const PS_BURDEN: u8 = 22;
 pub const PS_RESET: u8 = 23;
 pub const PS_WIRING: u8 = 24;
 pub const PS_OK: u8 = 25;
 pub const PS_ZERO: u8 = 26;
-/// + 0..2 = the coupling row DC / AC+DC / AUTO (`PS_COUPS`).
+/// + 0..2 = the coupling row DC / AC / AC+DC (`PS_COUPS`).
 pub const PS_COUP: u8 = 28;
 /// The coupling row, left to right, as the Current Settings page's DC / AC /
-/// AC+DC row: DC (the AD1 method), AC+DC (method B: RMS of AC and DC),
-/// AUTO (B until DC-like, then the AD1 method).
-pub const PS_COUPS: [(u8, &str); 3] = [(pw::COUP_DC, "DC"), (pw::COUP_AC, "AC+DC"), (pw::COUP_AUTO, "AUTO")];
+/// AC+DC row (doc 3.14; the meaning of the selected one in the help line).
+pub const PS_COUPS: [u8; 3] = [pw::COUP_DC, pw::COUP_AC, pw::COUP_ACDC];
+
+/// The help line's topic (`settings_status`): the selected coupling (the
+/// default, after a coupling tap) or the "At load" switch (after its tap).
+pub const HELP_COUP: u8 = 0;
+pub const HELP_LOAD: u8 = 1;
+
+/// One line per coupling (the Power Settings help line, the Help page).
+pub fn coup_help(c: u8) -> &'static str {
+    match c {
+        pw::COUP_DC => "DC: P = Vdc x Idc; no f, PF, S, Q",
+        pw::COUP_AC => "AC: AC parts only (DC removed); P, PF, S, Q, f",
+        _ => "AC+DC: total; P = Pac + Vdc x Idc, rms of both",
+    }
+}
 pub const PS_VCAL: u8 = 27;
 /// Hold & Limits (View::Limits: the W limits), as the other settings pages'
 /// "Hold/Limits".
@@ -426,10 +440,12 @@ fn ps_button(r: sf::Rect, t: &str, sel: bool) {
     sf::glyphs(sf::TEXT22, r, t, STATUS_FG, c, 8, 0);
 }
 
-/// The page: V ranges + AUTO, I ranges + AUTO (two rows), burden
-/// compensation, Zero, V cal; the coupling row (DC / AC+DC / AUTO, the
-/// Current Settings page's DC / AC / AC+DC style); Reset energy / Wiring /
-/// Limits / OK. The VA-only fallback (POW:METH ALT) is SCPI only (status line).
+/// The page: V ranges + AUTO, I ranges + AUTO (two rows), "At load" (the
+/// burden compensation), Zero and V cal (each a dialog that says what
+/// it needs first); the coupling row (DC / AC / AC+DC, the Current Settings
+/// page's style); Reset energy / Wiring / Limits / OK; the status and help
+/// lines under it (`settings_status`). The VA-only fallback (POW:METH ALT)
+/// is SCPI only (status line).
 pub fn settings_page(pv: &PowerVals) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
@@ -447,15 +463,26 @@ pub fn settings_page(pv: &PowerVals) {
     ps_button(ps_cell(2, 1), "AUTO", pv.i_auto);
     // Burden compensation (selected = on), self-zero, V self-calibration
     // (doc 3.12); the status line under the last row (`settings_status`).
-    ps_button(ps_cell(2, 2), "Burden", pv.comp);
+    ps_button(ps_cell(2, 2), "At load", pv.comp);
     ps_button(ps_cell(2, 3), "Zero", false);
     ps_button(ps_cell(2, 4), "V cal", false);
-    for (i, (c, t)) in PS_COUPS.iter().enumerate() {
-        ps_button(rect(PS_ROW4[i], 182, 150, 38), t, pv.coup == *c);
+    for (i, c) in PS_COUPS.iter().enumerate() {
+        ps_button(rect(PS_ROW4[i], 182, 150, 38), pw::coup_name(*c), pv.coup == *c);
     }
     for (i, (_, t)) in PS_ROW5.iter().enumerate() {
         ps_button(ps_row5(i), t, false);
     }
+}
+
+/// The Zero... / V cal... dialog (dialog.rs fuse-check box, Cancel / Start;
+/// lines of <= 30 characters).
+pub fn job_dialog(job: u8) {
+    let (title, l1, l2) = if job == pw::JOB_ZERO {
+        ("Zero the power meter", "Leads open, nothing in A", "Takes about 12 s")
+    } else {
+        ("V cal of this V range", "Steady V, 10-70 % of range", "Gain vs DC V / AC V, 8 s")
+    };
+    crate::dialog::fuse_check(title, crate::dialog::TITLE_BG, l1, l2, Some("Cancel"), Some("Start"));
 }
 
 /// Settings page hit (PS_* codes).
@@ -494,9 +521,10 @@ pub fn settings_hit(x: u16, y: u16) -> Option<u8> {
 
 /// Status and help lines of the Power Settings page (under the last button
 /// row, 282..318): the running job, the last result, else the gain and zero
-/// in force. Redrawn when the text differs from `key` (its FNV); returns
-/// the new key.
-pub fn settings_status(p: &pw::Pw, key: u32) -> u32 {
+/// in force; under it the meaning of the selected coupling or of "At load"
+/// (`help`: HELP_*). Redrawn when the text differs from `key` (its FNV);
+/// returns the new key.
+pub fn settings_status(p: &pw::Pw, key: u32, help: u8) -> u32 {
     let mut t = T::new();
     let mut b = [0u8; 16];
     let vr = if p.job_last == pw::JOB_VCAL && p.job == 0 { p.job_vr } else { p.vr } as usize;
@@ -548,26 +576,32 @@ pub fn settings_status(p: &pw::Pw, key: u32) -> u32 {
             true
         }
         _ => {
-            t.push(rn)
-                .push(" gain ")
-                .push(crate::dmm::format(&mut b, p.v_gain(vr as u8), 5))
-                .push(if p.vgain[vr] > 0.0 { " (V cal)" } else { " (factory)" })
-                .push(if p.zero_ok { ", zero set" } else { ", no zero" })
-                .push(match (p.coup, p.dc) {
-                    (pw::COUP_AUTO, true) => ", auto: DC",
-                    (pw::COUP_AUTO, false) => ", auto: AC+DC",
-                    _ => "",
-                })
-                .push(if p.alt { ", VA only" } else { "" });
+            // "V gain 6 V: 1.0207 factory, zero: not set"
+            t.push("V gain ")
+                .push(rn.trim_end_matches('V'))
+                .push(" V: ")
+                .push(crate::dmm::format(&mut b, p.v_gain(vr as u8), 4))
+                .push(if p.vgain[vr] > 0.0 { " V cal" } else { " factory" })
+                .push(match (p.alt, p.zero_ok) {
+                    // The VA-only fallback (SCPI): no room for the zero.
+                    (true, _) => ", VA only",
+                    (false, true) => ", zero: set",
+                    (false, false) => ", zero: not set",
+                });
             false
         }
     };
+    let hl = match help {
+        HELP_LOAD if p.comp => "At load ON: P, V at the load (meter drop off)",
+        HELP_LOAD => "At load OFF: P, V at the jacks, meter drop in",
+        _ => coup_help(p.coup),
+    };
     let mut k = T::new();
-    k.push(t.s()).push(if warn { "w" } else { "" });
+    k.push(t.s()).push(if warn { "w" } else { "" }).push(hl);
     let nk = k.key();
     if nk != key {
         sf::label(sf::F14, rect(8, 284, 464, 14), t.s(), if warn { VALUE } else { STATUS_FG }, BG, 1, 1);
-        sf::label(sf::F14, rect(8, 302, 464, 14), "Zero: leads open; V cal: steady V, 10-70 %", DIM, BG, 1, 1);
+        sf::label(sf::F14, rect(8, 302, 464, 14), hl, DIM, BG, 1, 1);
     }
     nk
 }

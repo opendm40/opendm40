@@ -235,14 +235,24 @@ pub const BTN_N: usize = 7;
 pub const BTN_W: i16 = 64;
 pub const BTN_PITCH: i16 = 68;
 
-/// The W button's coupling glyph: the DC one (the AD1 method / coupling DC)
-/// or AC+DC (method B), as the V / A buttons show theirs (`set_power_dc`).
-static POWER_DC: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// The W button's coupling (pw::COUP_*): its glyph DC / AC / AC+DC as the
+/// V / A buttons show theirs (`set_power_coup`).
+static POWER_COUP: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
-/// The W button's glyph for the next button draw (the app: the method in
-/// use in the power meter, else the stored coupling).
-pub fn set_power_dc(dc: bool) {
-    POWER_DC.store(dc, core::sync::atomic::Ordering::Relaxed);
+/// The W button's coupling for the next button draw (the app: the stored
+/// coupling, the one in force in the power meter).
+pub fn set_power_coup(c: u8) {
+    POWER_COUP.store(c, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// The stock MODE / BTN_GLYPH glyph of a power-meter coupling: DC, AC or
+/// AC+DC, as `mode_glyph` gives V / A theirs.
+pub fn pw_glyph(c: u8) -> &'static str {
+    match c {
+        crate::dmm::pw::COUP_DC => "\u{4}",
+        crate::dmm::pw::COUP_AC => "\u{5}",
+        _ => "\u{6}",
+    }
 }
 
 /// Left edge of function button `i`.
@@ -294,7 +304,7 @@ fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, 
         4 => btn_pair(x, y, h, c, (sf::BTN_GLYPH, "\u{8}", -1), (sf::BTN_GLYPH, "\u{7}", 0), 3),
         5 => btn_pair(x, y, h, c, (sf::BTN_GLYPH, "\u{10}", -2), (sf::BTN_GLYPH, "\u{2103}", 0), 3),
         _ => {
-            let g = if POWER_DC.load(core::sync::atomic::Ordering::Relaxed) { "\u{4}" } else { "\u{6}" };
+            let g = pw_glyph(POWER_COUP.load(core::sync::atomic::Ordering::Relaxed));
             btn_pair(x, y, h, c, (sf::LETTERS, "W", 0), (sf::BTN_GLYPH, g, 0), 3)
         }
     }
@@ -518,7 +528,13 @@ impl DmmView {
         self.last_fmt = f;
         let last_ext = self.last_ext;
         self.last_ext = ext.unwrap_or(0);
-        let mkey = r.mode | (r.acdc as u8) << 7 | (r.power.is_some_and(|p| p.dc) as u8) << 6 | (r.power.is_some_and(|p| p.coup == crate::dmm::pw::COUP_AUTO) as u8) << 5;
+        // Bits 5..6: the power coupling (1 DC, 2 AC, 3 AC+DC), 7: AC+DC.
+        let pk = |c: u8| match c {
+            crate::dmm::pw::COUP_DC => 1u8,
+            crate::dmm::pw::COUP_AC => 2,
+            _ => 3,
+        };
+        let mkey = r.mode | (r.acdc as u8) << 7 | r.power.map_or(0, |p| pk(p.coup) << 5);
         // Extra digit: the main cells narrow to CELLS_X (40..372) and the
         // digit is the F78 glyph at half size (~38 px vs ~76) in
         // XT_X..XT_X + XT_W (375..402), on the F78 baseline (VALUE_BASE),
@@ -564,12 +580,10 @@ impl DmmView {
             // Stock box (437,76,32,32) align 7, widened 3 px right so the
             // 35 px AC glyph is not clipped (ends at 471, 3 px after the
             // limit badge 403..433).
-            // Power meter: the coupling chip in this slot (ui::pw::coupling).
-            // Power meter: the glyph of the method in use (DC: the AD1
-            // method, AC+DC: method B), as V / A show their coupling; AUTO is
-            // the label left of it (ui::pw::coupling).
+            // Power meter: the glyph of the coupling (DC / AC / AC+DC), as
+            // V / A show theirs; the limit badge left of it (ui::pw::coupling).
             let g = match r.power {
-                Some(p) if self.power => if p.dc { "\u{4}" } else { "\u{6}" },
+                Some(p) if self.power => pw_glyph(p.coup),
                 _ => mode_glyph(r.mode, r.acdc || r.power.is_some()),
             };
             sf::label(sf::MODE, rect(437, 76, 35, 32), g, VALUE, BG, 7, 0);
@@ -2283,7 +2297,7 @@ pub fn view_name(v: View) -> &'static str {
 /// MENU goes back. Only behaviour of this firmware (app.rs, gesture.rs) and
 /// limits the repo documents (genplan.rs, docs/user-feedback.md section
 /// 6.3 / 7 / 3) - no input ratings that are not sourced.
-pub const HELP: [(&str, [(&str, &str); 8]); 6] = [
+pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
     (
         "Gestures",
         [
@@ -2360,6 +2374,19 @@ pub const HELP: [(&str, [(&str, &str); 8]); 6] = [
             ("Takes effect", "At next USB plug"),
             ("At power-on", "Files live again"),
             ("Delete on meter", "Gallery, MMEM:DEL"),
+        ],
+    ),
+    (
+        "Power meter",
+        [
+            ("Tap W again", "DC > AC > AC+DC"),
+            ("DC", "P = Vdc x Idc"),
+            ("AC", "Only the AC parts"),
+            ("AC+DC", "Pac + Vdc x Idc"),
+            ("MF: At load", "Minus meter's drop"),
+            ("MF: Zero", "Leads open, 12 s"),
+            ("Tap the value", "P > Wh > VAh"),
+            ("Hold energy box", "Reset Wh (confirm)"),
         ],
     ),
 ];

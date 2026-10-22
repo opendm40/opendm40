@@ -909,7 +909,8 @@ renders p07 (settings + status), p09 (I ranging), p10 (refused V cal), p11
   the fallback for other fonts.
 * **Coupling, the stock way** (owner, round 3): a tap on the active W
   button steps the coupling as a tap on the active V / A button steps DC ->
-  AC -> AC+DC: **DC -> AC+DC -> AUTO -> DC** (`pw::next_coupling`; also
+  AC -> AC+DC: **DC -> AC+DC -> AUTO -> DC** (superseded by 3.14: DC -> AC
+  -> AC+DC, AUTO gone) (`pw::next_coupling`; also
   the locked-key path and the combined band). "AC+DC" is method B (the RMS
   of AC and DC; the old name "AC" stays a `POW:COUP` alias), "DC" the DC
   method, AUTO the last state. The page shows the stock glyph of the method
@@ -1086,6 +1087,104 @@ arms LLVM folded its ~10 KB into main.rs `run`), SRAM free 12.9 KB.
 4. Over BT SCPI (tools/dm40bt_scpi.py): `CONF:POW`, `FETC:POW:ALL?`,
    `CALC:LIM:UPP 100`, `CALC:LIM:FAIL?`.
 
+### 3.14 Owner round 4 (fw-rs, 2026-10-22): no false OVERLOAD, DC / AC / AC+DC, a readable settings page
+
+**False OVERLOAD with ~3 A (owner).** The I channel autoranges across all
+three shunts (it enters on 10 A and walks down), but the doc 4.3 OVERLOAD
+rule (`sentinel::overload_trips`: the uA / mA shunt over range, manual or
+the shunt's top range in auto) also ran on it: after a low current had left
+the channel on the mA shunt, 3 A on 600 mA tripped the red OVLD + beep +
+"Overload: 10 A shunt selected" instead of the normal step up. Reproduced in
+the emulator (senttest `ovl-pow-auto-ma`: OVERLOAD from 14 s on the old
+build). Now (`pw_autorange`):
+
+| I range | over range on the uA / mA shunt (\|I\| > 1.03 x the range) |
+|---|---|
+| AUTO | a normal up-range: **one hop to the A shunt's 6 A range** (ik 4) at the first over-range result, from any uA / mA range (also r0: the 47.5 ohm / 0.5 ohm parts have no fuse of their own, so no intermediate step on them); no latch, no alert, no beep; the walk down follows as usual (> 6.18 A: one more normal step to 10 A) |
+| manual | OVERLOAD as before (red, latched on 10 A manual, released by a user choice or 5 s below half the manual range) |
+
+Timing: in method B the I channel is judged on its XX result, so the hop
+comes at most one P V P I set (1.28 s) after the current step, then the
+550 ms settle; in DC coupling every AD1 result (100 ms) is judged. The
+same latency as the 4.7 rule accepted (thermal protection). Measured in the
+emulator (`istep-ua`, 200 uA -> 3 A scripted at 22 s): the range read 6 A at
+fw uptime 21.96 s and 3 A at 22.93 s (the fw clock lags the script clock by
+0.5 s or more, so the hop came <= ~1.5 s after the step, the first full
+reading ~1 s after the hop). Emulator: powtest `istep` (10 mA -> 0.1 -> 1 ->
+3 A: 60 mA, 600 mA, 6 A, 6 A, SYST:ALER? NONE in every checked sample), `istep-ua` (200 uA on 600 uA -> 3 A: 6 A, NONE), `iman-ovl`
+(manual 600 mA, 3 A: OVERLOAD on 10 A); senttest `ovl-pow-auto-ma` /
+`-ua` / `-dc` (NONE in every sample, READ? = P of 3 A) next to `ovl-pow`
+(manual: OVERLOAD).
+
+**Coupling: DC, AC, AC+DC (owner: "why only DC and AC+DC? what is AC+DC
+there?").** The stock V / A trio, a tap on the active W button steps DC ->
+AC -> AC+DC (`pw::next_coupling`); AUTO is gone:
+
+| | DC | AC | AC+DC |
+|---|---|---|---|
+| row | the DC row (`dc_row`, 3.12) | method B (power row, R34 P V P I) | method B |
+| P | V_dc I_dc | P_ac (sum X Y after the HPF) | P_ac + V_dc I_dc |
+| V / I | V_dc / I_dc | Vrms / Irms of the AC parts | hypot(AC, DC) |
+| S / PF / Q / f | "--" | V I, P / S, sqrt(S^2 - P^2), f | as AC, of the totals |
+| Vdc / Idc (FETC:POW:ALL?) | measured | NaN (9.91E37): not used | measured |
+| glyph above W / on the button | stock DC | stock AC | stock AC+DC |
+
+AC drops the DC parts entirely, so it does not depend on the LPF zeros
+(POW:ZERO) at all; a DC source reads ~0 (powtest `ac`: 12 V 0.4 A -> P 7e-9
+W, V 0.015 V; the 2 V ripple on 12 V -> V 2.000, P ~0 with a DC current).
+AC <-> AC+DC switch without a row write (the same method B row); only DC
+<-> the others rewrite. The burden compensation uses the parts shown (AC:
+I_ac^2 R). Energy integrates the P shown. Phase cal works in AC and AC+DC.
+SCPI `POW:COUP DC|AC|ACDC`, `POW:COUP?` = `DC` / `AC` / `ACDC`; **`AUTO` is
+deprecated**: still accepted, it selects ACDC (the old `AC` alias of ACDC is
+now the real AC). Persist: the 2-bit field keeps its values (0 = AC+DC, 1 =
+DC), the former AUTO (2) loads as AC+DC, AC takes the free value 3
+(`pw::coup_of`): no layout change, no version bump. An older build reading
+3 would take it as its AUTO. BT cmd 09 unchanged (P as the V-group value).
+
+**Power Settings page made readable (owner: "WHAT IS BURDEN HERE?").**
+
+* "Burden" -> **"At load"** (selected = on): P and V of the load, the
+  meter's own drop (I^2 R_path, I R_path) taken off; off = at the jacks. A
+  tap shows its meaning in the help line: "At load ON: P, V at the load
+  (meter drop off)" / "At load OFF: P, V at the jacks, meter drop in".
+* **Zero** and **V cal** open a dialog first (the fuse-check box, Cancel /
+  Start; `Overlay::PowJob`): "Zero the power meter / Leads open, nothing in
+  A / Takes about 12 s"; "V cal of this V range / Steady V, 10-70 % of range
+  / Gain vs DC V / AC V, 8 s". `POW:ZERO` / `POW:VOLT:CAL` start directly.
+* The coupling row **DC / AC / AC+DC**; the help line (y 302) says what the
+  selected one does ("DC: P = Vdc x Idc; no f, PF, S, Q", "AC: AC parts only
+  (DC removed); P, PF, S, Q, f", "AC+DC: total; P = Pac + Vdc x Idc, rms of
+  both") until "At load" is tapped.
+* The status line: "V gain 6 V: 1.0207 factory, zero: not set" (was "6V
+  gain 1.02066 (factory), no zero"); jobs and refusals unchanged.
+* Help 7/7 "Power meter": the W tap cycle, the three couplings, At load,
+  Zero, the value tap, the energy reset.
+
+`sf::label` lays out at most 48 glyphs: the help lines are <= 47 (ui-render
+guard). Renders p19 (AC selected), p20 (At load help), p21 / p22 (the
+dialogs), p23 (help page); ui-render 0 violations.
+
+#### Device check list (this build)
+
+1. W with a load on the mA shunt (e.g. 10..50 mA, I AUTO): the I range
+   settles on 60 mA / 600 mA; then ~3 A through A: no red OVLD, no beep,
+   `SYST:ALER?` NONE, `POW:CURR:RANG?` 6 A within ~2 s, P = V x 3 A. Same
+   from 200 uA (600 uA range) straight to 3 A.
+2. Manual I 600 mA (Power Settings), > 0.62 A: red OVLD + beep + 10 A
+   (unchanged); back to AUTO ends it.
+3. Tap the active W button: DC -> AC -> AC+DC, glyph above the unit and on
+   the button each time; `POW:COUP?` DC / AC / ACDC; `POW:COUP AUTO` ->
+   ACDC.
+4. AC on mains (resistive / PF < 1): P, PF, S, Q, f as AC+DC within the
+   noise; `FETC:POW:ALL?` Vdc / Idc 9.91E37. AC with a DC supply + load:
+   P ~0, V ~0 (with POW:ZERO not run too).
+5. Power Settings: "At load" tap -> help line text toggles; Zero -> dialog
+   -> Start runs the 12 s zero; V cal -> dialog -> Cancel leaves; the
+   status line text; Settings > Help 7/7.
+6. A reboot keeps the coupling (AC persists as 3; a unit last in AUTO comes
+   back in AC+DC).
+
 ---------------------------------------------------------------------------
 
 ## 4. Wrong-connection detection: what the signals allow
@@ -1168,7 +1267,11 @@ fields differ from the stock row).
   only moves the reading up a range. In V modes the sentinel of 4.2 cannot
   quantify the current (comparator) - do **not** auto-switch the MOSFETs there
   (a voltage source on A-COM would then see 10 mohm and blow the fuse where 48
-  ohm might have survived); warn loudly instead.
+  ohm might have survived); warn loudly instead. **Superseded by 4.8** (owner
+  2026-10-22): the probe on PB2 quantifies the current, and a source that
+  would burn the 47.5 ohm resistor is moved onto the 10 mohm shunt (a weak
+  one then flows harmlessly, a stiff one blows the 10 A fuse instead of the
+  resistor / the 30 V MOSFETs).
 * **Live circuit in ohm / diode / continuity / cap**: the ohm input node PB0
   sits at the OP3 source voltage when open, so a positive external voltage
   cannot be told from "open" by level; a negative one (CMPLO on PB0 below
@@ -1260,7 +1363,8 @@ Not done in this step (all done since, section 4.7): AC+DC, diode /
 continuity / capacitance / frequency / AC A sentinels, the DC? / AC? / FUSE?
 hints, the OVERLOAD shunt rule, the fuse-check dialog, STAT:QUES bit 9. The
 MOSFETs are never switched by the sentinel (only the OVERLOAD rule does, in
-the current functions).
+the current functions) - until 4.8 (A-jack protection: PE0 = 1 on a current
+that would overheat the 47.5 ohm resistor).
 
 UI (stock visual language, `tools/ui-render` ink / overlap check over every
 alert x hold x verdict x rate-chip case, renders d12-d14, c11, t03, m10):
@@ -1337,7 +1441,7 @@ button), `scpi.rs`.
 
 | | |
 |---|---|
-| where | DC A / AC A / AC+DC A on the mA (0.5 ohm) or uA (47.5 ohm) shunt; the power meter's I channel on ik 0..3. Never in V / ohm / continuity / diode / cap / Hz / temperature (no shunt switching there: host test `overload_rule`) |
+| where | DC A / AC A / AC+DC A on the mA (0.5 ohm) or uA (47.5 ohm) shunt; the power meter's I channel on ik 0..3 with a MANUAL I range only (I AUTO: the normal one-hop up-range to 6 A, no alert, 3.14). Never in V / ohm / continuity / diode / cap / Hz / temperature (no shunt switching there: host test `overload_rule`) |
 | trigger | a reading over its range (\|I\| > 1.03 x the range, i.e. what shows OL; AC+DC: the total) when the range is manual (any of the shunt's two) or the shunt's top range in auto (6000 uA / 600 mA). In auto at r0 the stock step to r1 (same shunt, 10x) comes first, so a gross overload reaches 10 A two conversions after the A entry |
 | action | the 10 A range at once (DC: mode 7 r1, settle 250 ms; AC: mode 4 r1, 650 ms; AC+DC: its DC phase; power: ik 5, the V parts kept) whatever AUTO / AUTO+ / manual says; `relay_pe(0)` through the normal `write_config` |
 | latch | manual before: 10 A stays manual. Auto before: auto continues with the overloaded shunt (and the ones below it) barred, so 50 mA after a uA overload steps 10 A -> 6 A -> 600 mA and stops there |

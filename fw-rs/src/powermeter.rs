@@ -115,35 +115,54 @@ const I_FLOOR: f32 = 50e-6;
 /// DBG:POW:RAW? ring.
 pub const RING_N: usize = 16;
 
-/// Coupling setting (`Pw::coup`, POW:COUP, persisted): AC (shown "AC+DC") =
-/// method B (the RMS / LPF row, P V P I on R34; DC parts from the LPFs),
-/// DC = one fixed row (`dc_row`): the current on AD1 (the stock DC A input,
-/// 24 bit, factory DC A calibration) and at the same time the voltage on
-/// OP2 <- SENSE -> AD3 (the power row's V channel, R34 frozen at YY: its LPF
-/// = V_dc, its RMS = the ripple), no row writes while measuring. AUTO = B
-/// until a full set is DC-like (`pw_dc_like`), then DC until the ripple
-/// exceeds DC_AC_ON.
-pub const COUP_AC: u8 = 0;
+/// Coupling setting (`Pw::coup`, POW:COUP, persisted in 2 bits; doc 3.14),
+/// the stock V / A trio:
+/// * DC = one fixed row (`dc_row`): the current on AD1 (the stock DC A
+///   input, 24 bit, factory DC A calibration) and at the same time the
+///   voltage on OP2 <- SENSE -> AD3 (the power row's V channel, R34 frozen
+///   at YY: its LPF = V_dc), no row writes while measuring. P = V I; PF / S /
+///   Q / f not shown.
+/// * AC = method B (the RMS / LPF row, P V P I on R34) with the AC parts
+///   only: P = P_ac (sum X Y after the HPF), Vrms / Irms of the AC parts, S,
+///   PF, Q, f; the DC parts (LPFs, their zeros) are not used.
+/// * AC+DC = method B, the total: P = P_ac + V_dc I_dc, Vrms / Irms =
+///   hypot(AC, DC).
+/// The values are the persisted ones: 0 was "AC" (= AC+DC) and 2 the former
+/// AUTO, which loads as AC+DC (`coup_of`); AC took the free value 3.
+pub const COUP_ACDC: u8 = 0;
 pub const COUP_DC: u8 = 1;
-pub const COUP_AUTO: u8 = 2;
+pub const COUP_AC: u8 = 3;
+
+/// A stored / requested coupling value: 2 (the former AUTO) -> AC+DC.
+pub fn coup_of(c: u32) -> u8 {
+    match c & 3 {
+        1 => COUP_DC,
+        3 => COUP_AC,
+        _ => COUP_ACDC,
+    }
+}
 
 /// The next coupling of a tap on the active W button, as a tap on the active
-/// V / A button steps DC -> AC -> AC+DC (`Dmm::press`): DC -> AC+DC (method
-/// B, the RMS of AC and DC) -> AUTO -> DC.
+/// V / A button steps DC -> AC -> AC+DC (`Dmm::press`).
 pub fn next_coupling(c: u8) -> u8 {
     match c {
         COUP_DC => COUP_AC,
-        COUP_AC => COUP_AUTO,
+        COUP_AC => COUP_ACDC,
         _ => COUP_DC,
+    }
+}
+
+/// The coupling's name (the settings row, the help line).
+pub fn coup_name(c: u8) -> &'static str {
+    match c {
+        COUP_DC => "DC",
+        COUP_AC => "AC",
+        _ => "AC+DC",
     }
 }
 /// DC row: AD1 results dropped after a row write (its first chopped
 /// conversion), Y (LPF / RMS) results dropped (the block in progress).
 const DC_SKIP: u8 = 1;
-/// AUTO in the DC row: back to method B when the voltage's AC part (the YY
-/// RMS) exceeds 3 % of its DC part plus ~100 codes (B -> DC at 1 %: a
-/// hysteresis).
-const DC_AC_ON: f32 = 0.03;
 /// The DC row's AD1 zero (POW:ZERO) may not differ more than this from the
 /// stored one (codes; a current is flowing).
 const ZERO_MAX_AD1: i32 = 20_000;
@@ -416,7 +435,7 @@ impl PowerVals {
         i_auto: true,
         alt: false,
         dc: false,
-        coup: COUP_AC,
+        coup: COUP_ACDC,
         comp: true,
         run: true,
         v_ol: false,
@@ -465,14 +484,11 @@ pub struct Pw {
     pub on: bool,
     /// Method: false = simultaneous (P, PF), true = fallback (VA only).
     pub alt: bool,
-    /// Coupling setting (COUP_*) and the DC method in force (`coup` DC, or
-    /// AUTO after a DC-like set); CTSTA bits seen in the DC V phase.
+    /// Coupling setting (COUP_*) and the DC method in force (= coup DC).
     pub coup: u8,
     pub dc: bool,
-    /// DC row: Y results still to drop; the voltage's AC part (YY RMS, for
-    /// AUTO; not part of the DC values).
+    /// DC row: Y results still to drop.
     skip_y: u8,
-    dc_vac: f32,
     pub vr: u8,
     pub ik: u8,
     pub v_auto: bool,
@@ -586,10 +602,9 @@ impl Pw {
         Pw {
             on: false,
             alt: false,
-            coup: COUP_AC,
+            coup: COUP_ACDC,
             dc: false,
             skip_y: 0,
-            dc_vac: 0.0,
             vr: 3,
             ik: 5,
             v_auto: true,
@@ -798,7 +813,6 @@ impl Dmm {
         pw.cal_req = false;
         pw.keep = 0;
         pw.cmp_vr = 255;
-        // DC: the AD1 method at once; AUTO starts with B (a full set tells).
         pw.dc = pw.coup == COUP_DC;
         self.mode = 255;
         self.reset_values();
@@ -993,14 +1007,15 @@ impl Dmm {
         true
     }
 
-    /// Coupling (POW:COUP, the settings page): AC, DC or AUTO; the method
-    /// follows at once (AUTO: from B).
+    /// Coupling (POW:COUP, the settings page, the W button): DC, AC or
+    /// AC+DC; the row follows at once (AC <-> AC+DC: the same row, only the
+    /// shown values change).
     pub fn pw_set_coupling(&mut self, clk: &mut Clock, coup: u8) {
         if self.pw.job != 0 {
             self.pw_job_end(JR_ABORT);
         }
         let pw = &mut *self.pw;
-        pw.coup = coup.min(COUP_AUTO);
+        pw.coup = coup_of(coup as u32);
         let dc = pw.coup == COUP_DC;
         if pw.on && (dc != pw.dc || pw.job_res == JR_ABORT) {
             pw.dc = dc;
@@ -1056,11 +1071,14 @@ impl Dmm {
         }
         let (iu, _) = iu_ir(pw.ik);
         let r = if pw.comp { pw.r_path[iu as usize] } else { 0.0 };
+        // AC: the DC parts are not used (doc 3.14).
+        let ac = pw.coup == COUP_AC && !pw.dc;
+        let (vd, id) = if ac { (0.0, 0.0) } else { (pw.v_dc, pw.i_dc) };
         let (p, s, q, pf, v, i) = if pw.alt && !pw.dc {
-            let (v, i) = (pw.v_ac, hypot(pw.i_ac, pw.i_dc));
+            let (v, i) = (pw.v_ac, hypot(pw.i_ac, id));
             (f32::NAN, v * i, f32::NAN, f32::NAN, v, i)
         } else {
-            totals(pw.p_ac, pw.v_ac, pw.v_dc, pw.i_ac, pw.i_dc, r)
+            totals(pw.p_ac, pw.v_ac, vd, pw.i_ac, id, r)
         };
         let ov = self.over();
         let (over, over_left) = match pw.over_t0 {
@@ -1078,8 +1096,8 @@ impl Dmm {
             pf,
             v,
             i,
-            vdc: if pw.alt && !pw.dc { f32::NAN } else { pw.v_dc },
-            idc: pw.i_dc,
+            vdc: if (pw.alt && !pw.dc) || ac { f32::NAN } else { pw.v_dc },
+            idc: if ac { f32::NAN } else { pw.i_dc },
             f_hz: if pw.dc { 0.0 } else if pw.alt || pw.f_ok { self.freq.f_khz * 1000.0 } else { 0.0 },
             burden_v: i * pw.r_path[iu as usize],
             e_wh: pw.e.wh(),
@@ -1226,23 +1244,7 @@ impl Dmm {
         let pv = self.pw_vals()?;
         self.pw_account(now, &pv);
         let pv = self.pw_vals()?;
-        // AUTO coupling: a DC-like set after the I phase -> the DC method.
-        if self.pw.coup == COUP_AUTO && !self.pw.alt && self.pw.stat == CYCLE[0] && self.pw.phase == 0 && self.pw_dc_like() {
-            self.pw.dc = true;
-            self.pw.keep = 6;
-            self.pw_apply(clk);
-        }
         Some(self.pw_reading(&pv))
-    }
-
-    /// Method B's parts are DC-like: each channel's AC part below 1 % of its
-    /// DC part plus the noise floor (~100 codes of its converter).
-    fn pw_dc_like(&self) -> bool {
-        let pw = &*self.pw;
-        let (iu, ir) = iu_ir(pw.ik);
-        let fv = 100.0 * CODE * KV[pw.vr as usize];
-        let fi = 100.0 * CODE / (SHUNT_OHM[iu as usize] * MV_DIV[ir as usize]);
-        pw.seen & 6 == 6 && pw.v_ac < 0.01 * pw.v_dc.abs() + fv && pw.i_ac < 0.01 * pw.i_dc.abs() + fi
     }
 
     /// The DC row (`Pw::dc`, `dc_row`): the current from each AD1 result
@@ -1271,23 +1273,13 @@ impl Dmm {
                 let s_v = CODE * KV[r] * pw.v_gain(pw.vr);
                 let zy = if pw.zero_ok { pw.zy as i32 } else { 0 };
                 let d = (lpf - zy) as f32 * s_v;
-                let a = sqrt(rms.max(0) as f32) * s_v;
                 if pw.seen & 2 == 0 {
                     pw.v_dc = d;
-                    pw.dc_vac = a;
                 } else {
                     ema(ACV_WIN[r], 0.5, d, &mut pw.v_dc);
-                    ema(ACV_WIN[r], 0.5, a, &mut pw.dc_vac);
                 }
                 pw.v_ac = 0.0;
                 pw.seen |= 2;
-                // AUTO: a voltage with ripple -> method B.
-                if pw.coup == COUP_AUTO && pw.dc_vac > DC_AC_ON * pw.v_dc.abs() + 100.0 * s_v {
-                    pw.dc = false;
-                    pw.keep = 0;
-                    self.pw_apply(clk);
-                    return None;
-                }
                 if self.pw_autorange(clk, true) {
                     return None;
                 }
@@ -1462,11 +1454,23 @@ impl Dmm {
     fn pw_autorange(&mut self, clk: &mut Clock, v: bool) -> bool {
         let ov = self.over();
         if !v {
-            // OVERLOAD (doc 4.3): the uA / mA shunt over range -> 10 A.
             let (iu, ir) = iu_ir(self.pw.ik);
             let over = hypot(self.pw.i_ac, self.pw.i_dc) > ov * I_LIM[self.pw.ik.min(5) as usize];
-            if sentinel::overload_trips(iu, ir, !self.pw.i_auto, over) {
-                return self.pw_ovl_trip(clk);
+            if !self.pw.i_auto {
+                // OVERLOAD (doc 4.3): a MANUAL range on the uA / mA shunt
+                // over range -> 10 A, latched, red alert.
+                if sentinel::overload_trips(iu, ir, true, over) {
+                    return self.pw_ovl_trip(clk);
+                }
+            } else if over && iu >= 1 {
+                // I AUTO (doc 3.14): over range on the uA / mA shunt is the
+                // normal up-range, in one hop to the A shunt (6 A; the shunts
+                // without a fuse of their own leave at this first result),
+                // no latch / alert; the walk down follows as usual.
+                self.pw.ik = 4;
+                self.pw.keep = 2;
+                self.pw_apply(clk);
+                return true;
             }
         }
         // The OVERLOAD latch's shunt floor (ik 0, 1 uA; 2, 3 mA).

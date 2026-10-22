@@ -63,6 +63,9 @@ pub enum Overlay {
     /// Fuse check (`fuse_check`; the Current Settings page): `stage` 0
     /// instructions, 1 measuring, 2 the verdict; closed at `until` (ms).
     FuseCheck { until: u64, stage: u8 },
+    /// Power Settings Zero... / V cal... (`ui::pw::job_dialog`, the fuse
+    /// check's box): what the job needs, Cancel / Start; `job` pw::JOB_*.
+    PowJob { until: u64, job: u8 },
 }
 
 impl Overlay {
@@ -73,7 +76,8 @@ impl Overlay {
             | Overlay::PowerEntry { until }
             | Overlay::EnergyReset { until }
             | Overlay::FwInstall { until }
-            | Overlay::FuseCheck { until, .. } => until,
+            | Overlay::FuseCheck { until, .. }
+            | Overlay::PowJob { until, .. } => until,
         }
     }
 }

@@ -609,6 +609,13 @@ Firmware:
         button: DC -> AC+DC -> AUTO, glyph on the button / above the unit, Settings row DC / AC+DC / AUTO); V / I
         on top, the energy box below (E | PF | S | Q | f), tap on the main value cycles P / Wh / VAh, reset with a
         confirm; the energy is not persisted over a power cycle (owner's call).
+  - [x] Owner round 4 (doc §3.14): no false OVERLOAD in the power meter with I AUTO (an over range on the uA / mA
+        shunt is a one-hop up-range to 6 A, no alert; the red OVERLOAD stays for a manual I range); coupling DC /
+        AC / AC+DC (AC = the AC parts only, DC parts and zeros not used; AUTO dropped, POW:COUP AUTO = ACDC,
+        deprecated; persist value 3 = AC, the former AUTO loads as AC+DC); stock DC / AC / AC+DC glyphs; Power
+        Settings readable ("At load" with its help line, Zero / V cal dialogs, coupling meaning, status text);
+        Help 7/7 "Power meter". powtest istep / istep-ua / iman-ovl / ac, senttest ovl-pow-auto-*.
+        (verify on device: the check list of doc §3.14)
   - [ ] Verify on device: the re-check list of doc §3.12 (zero, V cal, f on the square, W entry, DC method /
         AUTO, then T2 / T3 / T4 with current through A).
         Device 5f14d38 (device-check "5f14d38" 5): PASS for W entry (dialog once, then direct), tap-W coupling
