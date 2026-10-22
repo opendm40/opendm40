@@ -1083,9 +1083,15 @@ Firmware:
       (A mode sub-function vs Record page), SCPI (arm / fetch RMS, peak, trace), emulator scenario (a stepped
       current into A), device check with a lamp / motor and a second meter or the scope + shunt.
 Emulator (emu/):
-- [ ] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
+- [x] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
       use per function (from the rows / mux selections: e.g. which PA tap, SENSE, PB0..PB7, FB/RLU), not "the
-      datasheet's typical circuit" (owner 2026-10-21).
+      datasheet's typical circuit" (owner 2026-10-21). (0487584 first cut; done in the gtkpanel commit of
+      2026-10-22 "jack-wire pins from the registers only": no role table left - the pins the enabled blocks
+      select (ENCMP alone for the comparator, SAD1I for AD1, SDIO) put on a jack by a per-pin board table,
+      PB4 follows OP1's input, RLD on the Ω net, every closed PA switch with its P / D / F / S letters, the
+      divider ratio from the SS taps (power meter /1000 etc.), the test-source band names the node by its
+      pins and derives its AD1 / comparator chain; columns reserved so nothing moves between functions.
+      Checked on 24 fw-rs emulator states + all 47 table rows at 700 / 1000 / 1400 px)
 - [x] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
       at the same time); the firmware's mux/relay choices route it through a modelled DM40 front-end (dividers, shunts, relays,
       switches) — no per-mode magic inputs. (0b464bd DM40 front-end model + connection editor, 213fc83 cross table)
