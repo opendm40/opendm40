@@ -477,8 +477,9 @@ Code work (in this order):
         AC for the one cycle that mixes old and new parts): the switch shows 2..6 s after the change
         (emulator: 2.2..4.5 s); the first evaluation after entry decides at once (~2 s, as AC+DC's first
         reading).
-      - display: the glyph above the unit and on the V / A button = the part shown, "AUTO" in the limit
-        badge's slot (a verdict wins); aux row = AC part / DC part tagged, as AC+DC (it does not move on a
+      - display: the V / A button = the setting: the AC/DC mark `~/⎓` (our BTN_GLYPH 0x09; with the
+        part's glyph a tap into AUTO looked like no switch, owner 2026-10-22); the glyph above the unit =
+        the part shown, "AUTO" in the limit badge's slot (a verdict wins); aux row = AC part / DC part tagged, as AC+DC (it does not move on a
         switch); strip badge AutoDC / AutoAC. A switch restarts REL, statistics, the AutoHold window (HOLD
         and a capture stay); limits use the slot of the part shown; a CSV recording ends on a switch.
       - touch: V / A button cycle DC -> AC -> AC+DC -> AUTO -> DC; range page coupling row DC / AC / AC+DC
@@ -489,8 +490,9 @@ Code work (in this order):
         as AC+DC.
       - persistence: the function code (19 / 20) in p[2], no layout change; V / A keep no coupling of
         their own (entry from another function = DC, stock).
-      Tests: emu/hy3131/couptest.py v / i / tap (DC -> AC -> mixed both ways through the band), ui-render
-      auto_* cases (d02b..d02d, c19 / c20, m03c), touch-test coupling row.
+      Tests: emu/hy3131/couptest.py v / i / tap (DC -> AC -> mixed both ways through the band), band
+      (entry inside the band: the larger part, a tie stays put), ui-render auto_* cases (d02b..d02d,
+      c19 / c20 / c21, m03c), touch-test coupling row.
       Not on the UT197 model: there it is "Auto-V LoZ", the auto selection comes with a ~2 kohm input
       load (no LoZ hardware here, feature-request HW-6), so ours is the 10 Mohm variant: ghost voltages
       (hum on open leads) still read, as AC above the floor.

@@ -91,6 +91,21 @@ SC = {
         (28, None, both(shows('ACDC', 2.0), func('VOLT:ACDC')), 'VOLT:COUP ACDC'),
         (40, None, both(lambda d: d['C'] == 'AUTO,AC', func('VOLT:AUTO'), lambda d: d['X'].get('CURR:COUP?') == 'DC'), 'FUNC "VOLT:AUTO"; CURR:COUP? outside A = DC'),
     ], {5: 'DBG:TAP 36,297', 7: 'DBG:TAP 36,297', 9: 'DBG:TAP 36,297', 18: 'DBG:TAP 36,297', 28: 'VOLT:COUP ACDC', 40: 'FUNC "VOLT:AUTO"'}),
+    # The first decision after entering AUTO with a signal inside the band
+    # (0.75 |DC| <= AC <= 1.5 |DC|): no hysteresis state yet, the larger
+    # part wins (AC 1.2 + DC 1 -> AC; AC 0.8 + DC 1 -> DC) and then stays.
+    # Each phase enters AUTO afresh (VOLT:COUP DC, then AUTO, 2 s after the
+    # signal changed); a tie (AC 1 + DC 1): either part, but no flapping
+    # (one part through the whole window); near ties (+-5 %) the larger.
+    'band': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 76, [
+        (0, 'open;acv:1.2@50,dc=1', shows('AUTO,AC', 1.2), 'enter in band, AC 1.2 + DC 1: AC (larger)'),
+        (14, 'open;acv:0.8@50,dc=1', shows('AUTO,DC', 1.0), 're-enter in band, AC 0.8 + DC 1: DC (larger)'),
+        (28, 'open;acv:1.2@50,dc=-1', shows('AUTO,AC', 1.2), 're-enter in band, AC 1.2 + DC -1: AC (larger)'),
+        (40, 'open;acv:1@50,dc=1', lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 1.0, 0.02), 're-enter, tie AC 1 + DC 1: either part'),
+        (52, 'open;acv:1.05@50,dc=1', shows('AUTO,AC', 1.05), 're-enter, near tie AC 1.05 + DC 1: AC (larger)'),
+        (64, 'open;acv:0.95@50,dc=1', shows('AUTO,DC', 1.0), 're-enter, near tie AC 0.95 + DC 1: DC (larger)'),
+    ], {15: 'VOLT:COUP DC', 16: 'VOLT:COUP AUTO', 29: 'VOLT:COUP DC', 30: 'VOLT:COUP AUTO', 41: 'VOLT:COUP DC', 42: 'VOLT:COUP AUTO',
+        53: 'VOLT:COUP DC', 54: 'VOLT:COUP AUTO', 65: 'VOLT:COUP DC', 66: 'VOLT:COUP AUTO'}),
 }
 EXTRA = {'tap': ['CURR:COUP?']}
 

@@ -260,7 +260,7 @@ pub struct App {
     beep_until: u64,
     pub last_raw: Option<Reading>,
     /// AUTO coupling: the mode (DC / AC part) the static view was drawn
-    /// with (the V / A button's glyph, the bargraph's polarity); 255 = not
+    /// with (the bargraph's polarity; the V / A button shows the AUTO mark); 255 = not
     /// AUTO. A reading of the other part redraws it (`reading`).
     auto_drawn: u8,
     redraw: bool,
@@ -643,6 +643,7 @@ impl App {
     fn draw_static(&mut self) {
         self.dmm_view.label = self.t_label();
         self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
+        ui::set_cpl_auto(self.dmm.cpl_auto());
         match self.view {
             View::Dmm => {
                 self.dmm_view.power = self.dmm.pw.on;
@@ -879,6 +880,7 @@ impl App {
     fn band_open(&mut self, now: u64) {
         if self.band_until == 0 {
             self.pw_btn_glyph();
+            ui::set_cpl_auto(self.dmm.cpl_auto());
             ui::func_band(self.dmm.button(), self.dmm.shown_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
         }
         self.band_until = now + BAND_MS;
@@ -1959,10 +1961,10 @@ impl App {
     pub fn reading(&mut self, raw: Reading, can_draw: bool) -> Option<Reading> {
         self.last_raw = Some(raw);
         if raw.cpl_auto && self.auto_drawn != 255 && matches!(self.auto_drawn, 0 | 2 | 4..=6) != raw.is_ac() && self.view == View::Dmm {
-            // AUTO coupling switched the part shown: the V / A button's
-            // glyph and the bargraph follow (static redraw of the DMM page;
-            // the combined view's band draws the part shown when it opens);
-            // REL and the statistics restart in Meter::update.
+            // AUTO coupling switched the part shown: the bargraph's
+            // polarity follows (static redraw of the DMM page; the V / A
+            // button keeps the AUTO glyph, the glyph above the unit is the
+            // reading's); REL and the statistics restart in Meter::update.
             self.redraw = true;
         }
         self.dmm_view.label = self.t_label();

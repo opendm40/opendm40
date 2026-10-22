@@ -265,6 +265,24 @@ pub fn pw_glyph(c: u8) -> &'static str {
     }
 }
 
+/// AUTO coupling (V / A sub-mode 3) in force, for the next button draw:
+/// the V / A button shows the AUTO glyph (`auto_pair`), the setting, not
+/// the part AUTO shows (that is the glyph above the unit, "AUTO" beside it).
+static CPL_AUTO: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// The AUTO coupling for the next button draw (the app: `Dmm::cpl_auto`).
+pub fn set_cpl_auto(on: bool) {
+    CPL_AUTO.store(on, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// The V / A button in the AUTO coupling: the letter and our "AC/DC" mark
+/// (BTN_GLYPH 0x09, stockfont_w.rs from tools/mkwglyph.py: the stock AC and
+/// DC button glyphs scaled down, side by side with a slash), distinct from
+/// the AC+DC glyph (the two stacked) and the plain DC / AC ones.
+fn auto_pair(x: i16, y: i16, h: i16, c: Color, letter: &str) {
+    btn_pair(x, y, h, c, (sf::LETTERS, letter, 0), (sf::BTN_GLYPH, "\u{9}", 0), 3);
+}
+
 /// Left edge of function button `i`.
 pub const fn btn_x(i: usize) -> i16 {
     4 + BTN_PITCH * i as i16
@@ -297,7 +315,10 @@ fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, 
     sf::rbox(rect(x, y, BTN_W, h), 8, c, outside);
     let ac = matches!(mode, 0 | 2 | 4..=6);
     let sub = if acdc { "\u{6}" } else if ac { "\u{5}" } else { "\u{4}" };
+    let auto = CPL_AUTO.load(core::sync::atomic::Ordering::Relaxed);
     match i {
+        0 if auto && mode <= 3 => auto_pair(x, y, h, c, "V"),
+        1 if auto && (4..=9).contains(&mode) => auto_pair(x, y, h, c, "A"),
         0 => btn_pair(x, y, h, c, (sf::LETTERS, "V", 0), (sf::BTN_GLYPH, if mode <= 3 { sub } else { "\u{4}" }, 0), 3),
         1 => btn_pair(x, y, h, c, (sf::LETTERS, "A", 0), (sf::BTN_GLYPH, if (4..=9).contains(&mode) { sub } else { "\u{4}" }, 0), 3),
         2 => {
