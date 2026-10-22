@@ -309,6 +309,11 @@ pub struct App {
     pw_status_key: u32,
     /// The W button's coupling as last drawn, `pw_btn_glyph`.
     pw_btn_coup: u8,
+    /// Power meter coupling as last seen by `pw_tick` (255: not in the
+    /// power meter) and the pending page after a change (0 none, 1 to
+    /// draw, 2 drawn; app_power.rs).
+    pw_coup_seen: u8,
+    pw_pending: u8,
     /// Power Settings help line topic (ui::pw::HELP_*): the last tapped of
     /// the coupling row / "At load".
     pw_help: u8,
@@ -550,6 +555,8 @@ impl App {
             pw_rng_key: 0,
             pw_status_key: 0,
             pw_btn_coup: 0,
+            pw_coup_seen: 255,
+            pw_pending: 0,
             pw_help: 0,
             strip_alt: false,
             gest_log: [(0, 0, 0, 0); GEST_N],
@@ -673,6 +680,10 @@ impl App {
                 self.pw_rng_key = 0;
                 if self.dmm.pw.on {
                     ui::pw::side_clear(&mut self.dmm_view.pwc);
+                    // A drawn pending page is gone: draw it again.
+                    if self.pw_pending == 2 {
+                        self.pw_pending = 1;
+                    }
                 } else if !self.dmm_view.bar_on {
                     ui::history(&self.hist, self.hist_n, self.hist_new);
                 }
@@ -714,7 +725,7 @@ impl App {
                 // UF-21: AUTO+ (never steps down to mV) is the recommended V
                 // autorange; warn while the mV-first AUTO is in use.
                 let note = (b == Button::Volt).then(|| {
-                    if self.dmm.mv_auto_warn() { (dmm::MV_AUTO_WARN, true) } else { ("AUTO+ recommended: it never steps to mV", false) }
+                    if self.dmm.mv_auto_warn() { (dmm::MV_AUTO_WARN, true) } else { ("AUTO+ recommended: never steps to mV", false) }
                 });
                 let sub = if b == Button::Ohm { self.dmm.ohm_var() } else { self.dmm.sub() };
                 ui::range_page(b, sel, sub, note);
@@ -1311,6 +1322,9 @@ impl App {
     /// session), so it holds off the idle dim / shutdown: a log that runs
     /// longer than the shutdown time cannot power the unit off the moment it
     /// stops, with unread records in the ring.
+    // Not inlined into main.rs `run`: its frame would add to the worst
+    // stack path (it was inlined once DmmView::reading got a second caller).
+    #[inline(never)]
     pub fn tick(&mut self, clk: &mut Clock, can_draw: bool) {
         let now = clk.now_ms();
         self.now = now;
@@ -1546,6 +1560,15 @@ impl App {
         if now >= self.chart_next {
             self.chart_next = now + self.chart_rate as u64 * 10;
             if let Some(r) = self.meter.live().copied() {
+                // An empty chart takes the unit / digits of the reading
+                // even while it reads OL: the axis labels name the
+                // function shown, not the previous one (device check
+                // 5e52761: cap "0.050MOhm", diode "MOhm", temperature "Hz").
+                if self.chart_n == 0 && (r.main.unit != self.chart_unit || r.main.dec != self.chart_dec) {
+                    self.chart_unit = r.main.unit;
+                    self.chart_dec = r.main.dec;
+                    self.chart_dirty = true;
+                }
                 if !self.meter.hold && !r.main.ol {
                     if r.main.unit != self.chart_unit {
                         self.chart_unit = r.main.unit;
@@ -3405,6 +3428,9 @@ impl App {
     fn func_changed(&mut self) {
         self.meter.reset();
         self.chart_n = 0;
+        // No unit until the new function's first reading (the labels are
+        // numbers only, never the previous function's unit).
+        self.chart_unit = "";
         self.chart_dirty = true;
         self.redraw = true;
     }

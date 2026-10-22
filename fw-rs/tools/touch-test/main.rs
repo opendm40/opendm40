@@ -70,6 +70,8 @@ mod inrush;
 
 /// Probe hooks called by the drawing code under cfg(test).
 pub mod probe {
+    /// ui-render's clip rule (stockfont probe_fit): not checked here.
+    pub fn fit(_r: (i32, i32, i32, i32), _ink: (i32, i32, i32, i32), _text: &str) {}
     pub fn open(kind: u8, bg: u16) -> u32 {
         crate::host::open(kind, bg)
     }

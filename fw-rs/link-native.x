@@ -204,6 +204,10 @@ SECTIONS
         *(.text.*7dm40_fw3app*3App11limits_page*);
         *(.text.*7dm40_fw3app*3App7kp_open*);
         *(.text.*7dm40_fw3app9app_power*3App13pw_open_entry*);
+        /* The power page after a coupling change (once per change). */
+        *(.text.*7dm40_fw3app9app_power*3App15pw_coup_changed*);
+        *(.text.*7dm40_fw3app9app_power*3App15pw_pending_draw*);
+        *(.text.*7dm40_fw3dmm2pw*3Dmm10pw_pending);
         *(.text.*7dm40_fw2ui8settings*);
         *(.text.*7dm40_fw2ui9temp_page*);
         *(.text.*7dm40_fw2ui8temp_key*);

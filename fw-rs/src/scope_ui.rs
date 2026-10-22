@@ -378,6 +378,11 @@ impl Buf {
 /// into [1, 1000) over u m - k M with "%1.2f" (< 9.995), "%2.1f" (< 99.95)
 /// or "%3.0f".
 pub fn fmt_v(out: &mut Buf, v: f32, unit: &str) {
+    fmt_v_cut(out, v, unit, 0)
+}
+
+/// `fmt_v` with `cut` decimals fewer (a box too narrow for the full text).
+fn fmt_v_cut(out: &mut Buf, v: f32, unit: &str, cut: u8) {
     if !v.is_finite() {
         out.push(" -- ");
         return;
@@ -404,8 +409,8 @@ pub fn fmt_v(out: &mut Buf, v: f32, unit: &str) {
         out.push(" --");
         return;
     }
-    let dec = if x.abs() < 9.995 { 2 } else if x.abs() < 99.95 { 1 } else { 0 };
-    out.push(crate::dmm::format(&mut t, x, dec)).push(P[i]).push(unit);
+    let dec = if x.abs() < 9.995 { 2u8 } else if x.abs() < 99.95 { 1 } else { 0 };
+    out.push(crate::dmm::format(&mut t, x, dec.saturating_sub(cut))).push(P[i]).push(unit);
 }
 
 /// A 1-2-5 per-division value with its prefix and unit ("2V", "200mV",
@@ -507,8 +512,15 @@ pub fn record_bar(m: &Model) {
         let x0 = if start < 0.0 { 4 } else { (start * sw + 4.0) as i16 };
         let len = (((end.min(1.0) - start.max(0.0)) * sw) as i16).max(0);
         line = Some((x0s + x0, len));
+        // The stock brackets: 4 px boxes that cut the 6 px glyphs (the
+        // stock geometry, stock-diff exact; exempt from ui-render's clip
+        // rule).
+        #[cfg(test)]
+        sf::fit_exempt(true);
         lb = if (0.0..1.0).contains(&start) { Ink::new(sf::SC_F12, rect(x0s + x0 - 2, 2, 4, 17), "[", 1, 0) } else { Ink::none() };
         rb = if end <= 1.0 { Ink::new(sf::SC_F12, rect(x0s + (end * sw + 4.0) as i16 - 4, 2, 4, 17), "]", 1, 0) } else { Ink::none() };
+        #[cfg(test)]
+        sf::fit_exempt(false);
     }
     let layers = [(K_SHAPE, C_BAR), (K_SHAPE, C_FRAME), (K_TEXT, C_FILL), (K_SHAPE, C_FILL), (K_ICON, C_FILL), (K_ICON, C_FILL)];
     paint(r, &layers, |x, y| {
@@ -601,6 +613,12 @@ pub fn vdiv_badge(m: &Model) {
 pub fn trig_badge(m: &Model) {
     let mut b = Buf::new();
     fmt_v(&mut b, m.trig_v, m.unit());
+    // The wave view's "-1.23mA" is wider than the stock box: a decimal
+    // fewer ("-1.2mA").
+    if sf::text_width(sf::SC_F12, b.as_str(), 0) > 49 {
+        b = Buf::new();
+        fmt_v_cut(&mut b, m.trig_v, m.unit(), 1);
+    }
     let e = Ink::icon(sf::SC_EDGE, rect(352, 1, 12, 17), if m.rising { 0x20 } else { 0x21 }, 4);
     let t = Ink::new(sf::SC_F12, rect(364, 1, 50, 17), b.as_str(), 8, 0);
     badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, m.pal()), (&t, m.pal())]);
@@ -2782,14 +2800,26 @@ pub const STRIP: Rect = rect(13, 21, 401, 54);
 const ST_INNER: Rect = rect(14, 22, 399, 52);
 const ST_FUNC: Rect = rect(19, 25, 62, 17);
 const ST_BADGE: Rect = rect(19, 46, 62, 17);
-const ST_VALUE: Rect = rect(88, 24, 118, 30);
-const ST_UNIT: Rect = rect(210, 24, 40, 30);
-/// Sub rows: left-aligned from 4 px after the unit box, to 4 px before the
-/// GEN column while it shows, else to 4 px inside the strip (`st_sub`).
-pub const ST_SUB: [Rect; 2] = [rect(254, 25, 86, 14), rect(254, 43, 86, 14)];
+/// Reading: right-aligned, ends 4 px before the unit (the widest values,
+/// "-444.44" / "1562.00", are 105 / 107 px of ink in SC_DIGITS); from 3 px
+/// after the badge column.
+const ST_VALUE: Rect = rect(84, 24, 108, 30);
+/// Unit: from x 196, as wide as its text (`st_unit`): SC_DIGITS up to
+/// ST_UNIT_W px ("mW", "MHz", "VAh" 54..59), else SC_F20, the panel
+/// buttons' 20 px face (device check 5e52761: a 40 px box cut "mW" to "mV";
+/// "mWh" is 76 px in SC_DIGITS, 32 in SC_F20).
+const ST_UNIT_X: i16 = 196;
+const ST_UNIT_W: i16 = 59;
+const ST_UNIT_Y: i16 = 24;
+const ST_UNIT_H: i16 = 30;
+/// Sub rows: left-aligned from 4 px after the unit's box, to 4 px before
+/// the GEN column while it shows, else to 4 px inside the strip (`st_sub`).
+pub const ST_SUB_Y: [i16; 2] = [25, 43];
+const ST_SUB_H: i16 = 14;
 const ST_SUB_END: i16 = 409;
-const ST_GEN: Rect = rect(348, 25, 60, 17);
-const ST_GEN_T: Rect = rect(348, 46, 60, 17);
+/// GEN column: 64 px, the widest frequency ("10.00MHz", "999.9kHz").
+const ST_GEN: Rect = rect(344, 25, 64, 17);
+const ST_GEN_T: Rect = rect(344, 46, 64, 17);
 const C_HV: Color = 0xc9a0;
 const C_GEN: Color = 0x0400;
 
@@ -2800,11 +2830,36 @@ pub fn strip_invalidate() {
     unsafe { *core::ptr::addr_of_mut!(STRIP_SHOWN) = None };
 }
 
-/// A text field on the strip's dark box.
-/// Sub row `i`'s box with / without the GEN column (see ST_SUB).
-pub fn st_sub(i: usize, gen: bool) -> Rect {
-    let r = ST_SUB[i & 1];
-    rect(r.x, r.y, if gen { ST_GEN.x - 4 - r.x } else { ST_SUB_END - r.x }, r.h)
+/// Sub row `i`'s box from x `x0` (`st_unit`'s end) with / without the GEN
+/// column (see ST_SUB_Y). With GEN it ends 15 px before the column: 1.5
+/// SC_F12 word spaces, so a sub row and the GEN frequency do not read as
+/// one line.
+pub fn st_sub(i: usize, gen: bool, x0: i16) -> Rect {
+    rect(x0, ST_SUB_Y[i & 1], if gen { ST_GEN.x - 15 - x0 } else { ST_SUB_END - x0 }, ST_SUB_H)
+}
+
+/// The unit's font, spacing and box: SC_DIGITS (LETTERS for a unit it
+/// lacks, deg C / F, uA) when it fits ST_UNIT_W, else SC_F20, else SC_F16,
+/// on the digits' baseline; the box is the text's width (>= 1).
+pub fn st_unit(unit: &str, letters: bool) -> (Font, Rect, u8) {
+    let big = if letters { sf::LETTERS } else { sf::SC_DIGITS };
+    let mut f = big;
+    for c in [big, sf::SC_F20, sf::SC_F16] {
+        f = c;
+        if sf::has_all(c, unit) && sf::text_width(c, unit, 1) <= ST_UNIT_W {
+            break;
+        }
+    }
+    let w = sf::text_width(f, unit, 1).clamp(1, ST_UNIT_W);
+    // Smaller fonts: bottom-aligned 4 px above the box end, near the
+    // digits' baseline.
+    let (h, align) = if f.0 == big.0 { (ST_UNIT_H, 1) } else { (ST_UNIT_H - 4, 2) };
+    (f, rect(ST_UNIT_X, ST_UNIT_Y, w, h), align)
+}
+
+/// x of the sub rows for a unit box `u` (4 px after it).
+pub fn st_sub_x(u: Rect) -> i16 {
+    u.x + u.w + 4
 }
 
 fn st_text(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8) {
@@ -2858,29 +2913,32 @@ pub fn meter_strip(d: &StripData) {
     if changed(ol.value == d.value) {
         st_text(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), C_YELLOW, 4, 1);
     }
-    if changed(ol.unit == d.unit && ol.unit_letters == d.unit_letters) {
-        let f = if d.unit_letters { sf::LETTERS } else { sf::SC_DIGITS };
-        st_text(ST_UNIT, f, d.unit.as_str(), C_YELLOW, 1, 1);
-    }
-    // The sub rows' width follows the GEN column: on a change of it, clear
-    // both columns first, then GEN, then the subs (left-aligned, so a long
-    // text is not clipped at its start next to the unit as before).
+    // The unit's box follows its text and the sub rows follow the unit: on
+    // a change of their x (or of the GEN column) clear from the unit to
+    // the strip's inner edge first, then the unit, GEN and the subs.
+    let (uf, ur, ua) = st_unit(d.unit.as_str(), d.unit_letters);
+    let sx = st_sub_x(ur);
     let gen_on = d.gen.n > 0;
-    let gen_moved = changed((ol.gen.n > 0) == gen_on);
-    if gen_moved && o.is_some() {
-        lcd::fill_rect(ST_SUB[0].x as u16, ST_SUB[0].y as u16, (ST_SUB_END + 1 - ST_SUB[0].x) as u16, (ST_GEN_T.y + ST_GEN_T.h - ST_SUB[0].y) as u16, C_FILL);
+    let moved = changed((ol.gen.n > 0) == gen_on && ol.unit == d.unit && ol.unit_letters == d.unit_letters);
+    if moved {
+        if o.is_some() {
+            lcd::fill_rect(ST_UNIT_X as u16, ST_UNIT_Y as u16, (ST_SUB_END + 1 - ST_UNIT_X) as u16, (ST_GEN_T.y + ST_GEN_T.h - ST_UNIT_Y) as u16, C_FILL);
+        }
+        st_text(ur, uf, d.unit.as_str(), C_YELLOW, ua, 1);
     }
-    if changed(ol.gen == d.gen) || gen_moved {
+    if changed(ol.gen == d.gen) || moved {
         st_badge(ST_GEN, if gen_on { "GEN" } else { "" }, C_GEN);
         st_text(ST_GEN_T, sf::SC_F12, d.gen.as_str(), C_GREEN, 8, 1);
     }
     for i in 0..2 {
-        if changed(ol.sub[i] == d.sub[i]) || gen_moved {
-            let r = st_sub(i, gen_on);
+        if changed(ol.sub[i] == d.sub[i]) || moved {
+            let r = st_sub(i, gen_on, sx);
             let t = d.sub[i].as_str();
-            // Narrow (GEN shown): the text without its spaces if it is too wide.
+            // Narrow (GEN shown): the text without its spaces if it is too
+            // wide, then at the stock spacing 0 (as the scope's cells).
             let mut b = [0u8; 24];
-            let t = if sf::text_width(sf::SC_F12, t, 1) > r.w {
+            let wide = sf::text_width(sf::SC_F12, t, 1) > r.w;
+            let t = if wide {
                 let mut n = 0;
                 for &c in t.as_bytes().iter().filter(|&&c| c != b' ') {
                     if n < b.len() {
@@ -2892,7 +2950,8 @@ pub fn meter_strip(d: &StripData) {
             } else {
                 t
             };
-            st_text(r, sf::SC_F12, t, C_WHITE, 1, 1);
+            let sp = if wide && sf::text_width(sf::SC_F12, t, 1) > r.w { 0 } else { 1 };
+            st_text(r, sf::SC_F12, t, C_WHITE, 1, sp);
         }
     }
     *shown = Some(*d);

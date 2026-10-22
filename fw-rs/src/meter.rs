@@ -880,9 +880,16 @@ impl Meter {
     }
 }
 
-/// Display text for a value ("0L" when over range).
+/// Display text for a value ("0L" when over range, "--" for no value:
+/// NaN, the power meter's pending reading).
 pub fn text<'a>(buf: &'a mut [u8; 16], v: &Val) -> &'a str {
-    if v.ol { "0L" } else { crate::dmm::format(buf, v.v, v.dec) }
+    if v.ol {
+        "0L"
+    } else if v.v.is_nan() {
+        "--"
+    } else {
+        crate::dmm::format(buf, v.v, v.dec)
+    }
 }
 
 // Host tests: tools/meter-test/run.sh (rustc --test with dmm.rs and its

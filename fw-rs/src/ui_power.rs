@@ -199,11 +199,16 @@ fn part_text<'a>(t: &'a mut T, v: &crate::dmm::Val) -> &'a str {
 fn pieces_right(slot: sf::Rect, end: i16, items: &[(&str, Color)]) {
     lcd::fill_rect(slot.x as u16, slot.y as u16, slot.w as u16, slot.h as u16, BG);
     let mut x = end;
+    // One phrase drawn piece by piece: one text for ui-render's rules.
+    #[cfg(test)]
+    crate::probe::group(true);
     for (t, fg) in items.iter().rev() {
         let w = sf::text_width(sf::F14, t, 1);
         sf::label(sf::F14, rect(x - w - 1, slot.y, w + 1, slot.h), t, *fg, BG, 4, 1);
         x -= w + 1 + PART_GAP;
     }
+    #[cfg(test)]
+    crate::probe::group(false);
 }
 
 /// The parts sub-lines (per reading, redrawn on a text change): DC / AC of
@@ -359,7 +364,12 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
     // Average P over the integration time.
     let mut t3 = T::new();
     let mut b3 = [0u8; 16];
-    t3.push(sig_text(&mut b3, pv.p_avg, 5));
+    // Fewer significant digits when wider than the box ("-24.064").
+    let mut sg = 5;
+    while sg > 2 && sf::text_width(sf::F14, sig_text(&mut b3, pv.p_avg, sg), 1) > SIDE_R - SIDE_X - 26 {
+        sg -= 1;
+    }
+    t3.push(sig_text(&mut b3, pv.p_avg, sg));
     if c.side[3] != t3.key() {
         c.side[3] = t3.key();
         sf::label(sf::F14, rect(SIDE_X, g.avg, 24, 14), "AVG", DIM, BG, 0, 1);
