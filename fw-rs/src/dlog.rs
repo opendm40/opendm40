@@ -1227,6 +1227,14 @@ pub struct Gen<S: Src> {
     fc: Option<FChunk>,
     fd: FDec,
     fk: u32,
+    /// Kind 3: seek checkpoints (first row, chunk offset) of every
+    /// `ck_step`-th chunk, from the open's header walk (`fast_seek`
+    /// starts at the nearest one: a host that reads two places of a file in
+    /// turn, e.g. an indexer at its head while a copy runs, no longer walks
+    /// the chunk headers from the start, ~1300 of them, for each sector).
+    ck: [(u32, u32); FCK],
+    nck: u8,
+    ck_step: u32,
     // cursor
     cur: Option<Chunk>,
     rd: RowDec,
@@ -1262,6 +1270,9 @@ impl<S: Src> Gen<S> {
             fc: None,
             fd: FDec::IDLE,
             fk: u32::MAX,
+            ck: [(0, 0); FCK],
+            nck: 0,
+            ck_step: 1,
             cur: None,
             rd: RowDec::new(&Chunk { off: 0, pl: 0, row0: 0, csv_base: 0, csv_len: 0, t0: 0, nrows: 0, flags0: 0 }),
             rpos: 0,
@@ -1349,6 +1360,20 @@ impl<S: Src> Gen<S> {
                 g.info.chunks += 1;
                 off = c.end();
                 tail[n % R] = Some(c);
+                if n as u32 % g.ck_step == 0 {
+                    if g.nck as usize == FCK {
+                        // Full: keep every other one, twice the spacing.
+                        for i in 0..FCK / 2 {
+                            g.ck[i] = g.ck[2 * i];
+                        }
+                        g.nck = (FCK / 2) as u8;
+                        g.ck_step *= 2;
+                    }
+                    if n as u32 % g.ck_step == 0 {
+                        g.ck[g.nck as usize] = (c.row0, c.off);
+                        g.nck += 1;
+                    }
+                }
                 n += 1;
             }
             let k0 = n.saturating_sub(FAST_TAIL);
@@ -1495,15 +1520,23 @@ impl<S: Src> Gen<S> {
     fn fast_seek(&mut self, k: u32) -> bool {
         let fwd = self.fc.is_some_and(|c| self.fk != u32::MAX && k > self.fk && k < c.row0 + c.nrows);
         if !fwd {
+            FR[2].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
             // From the next chunk when `k` is past the cursor's one: its
             // header is behind the reader, and a step back in the file
             // walks the FAT chain from the start again (FatFile::read; once
             // per chunk = quadratic in the file's size).
-            let mut at = match self.fc {
-                Some(c) if k >= c.row0 + c.nrows => c.end(),
-                Some(c) if k >= c.row0 => c.off,
-                _ => self.fstart,
+            let (mut r0, mut at) = match self.fc {
+                Some(c) if k >= c.row0 + c.nrows => (c.row0 + c.nrows, c.end()),
+                Some(c) if k >= c.row0 => (c.row0, c.off),
+                _ => (0, self.fstart),
             };
+            // A checkpoint nearer to `k` (chunks past the torn tail are
+            // not in the table: the walk stops at the last whole one).
+            for &(cr, co) in &self.ck[..(self.nck as usize).min(FCK)] {
+                if cr <= k && cr > r0 {
+                    (r0, at) = (cr, co);
+                }
+            }
             loop {
                 let Some(c) = fchunk_at(&mut self.s, &mut self.win, at, self.size, false) else {
                     self.fc = None;
@@ -1526,6 +1559,7 @@ impl<S: Src> Gen<S> {
                 return false;
             };
             self.fk = self.fk.wrapping_add(1);
+            FR[4].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
             if self.fk == k {
                 let fp = self.fp;
                 let mut r = [0u8; ROW_MAX];
@@ -1534,6 +1568,17 @@ impl<S: Src> Gen<S> {
             }
         }
         true
+    }
+
+    /// The CSV offset the cursor is at (the start of the row it holds; 0
+    /// with none): the next sequential read continues from here cheaply.
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+    pub fn pos(&self) -> u32 {
+        if self.info.kind == KIND_FAST {
+            if self.fk == u32::MAX { 0 } else { self.info.hl + self.fk * self.fp.row_len() }
+        } else {
+            self.rpos
+        }
     }
 
     /// Kind 3: parameters (gallery).
@@ -1637,6 +1682,8 @@ impl<S: Src> Gen<S> {
 /// missing before the row: round(dt / nominal period) - 1 (a stall, the ring
 /// full, the disk too slow: all show as a stamp gap).
 pub const KIND_FAST: u8 = 3;
+/// Kind 3: seek checkpoints per generator (`Gen::ck`).
+const FCK: usize = 16;
 /// Kind 3: the chunks at the end whose CRC `Gen::open` checks.
 const FAST_TAIL: usize = 4;
 pub const FAST_PAR: usize = 32;
@@ -1768,6 +1815,7 @@ impl FChunk {
 /// its CRC over the payload, then header bytes 8..28, matches).
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn fchunk_at<S: Src>(s: &mut S, w: &mut Win, off: u32, size: u32, check: bool) -> Option<FChunk> {
+    FR[3].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     let mut h = [0u8; CHDR];
     if off.checked_add(CHDR as u32)? > size || !s.read(off, &mut h) || h[0] != b'D' || h[1] != b'C' {
         return None;
@@ -2140,8 +2188,9 @@ pub type DiskGen = Gen<FatFile<FnRaw>>;
 #[cfg(target_os = "none")]
 static mut FLASH: Option<crate::spiflash::SpiFlash> = None;
 
-/// flash_read calls, bytes (DBG:VDISK:RD?).
-pub static FR: [core::sync::atomic::AtomicU32; 2] = [const { core::sync::atomic::AtomicU32::new(0) }; 2];
+/// flash_read calls, bytes; kind-3 seeks that did not go on from the
+/// cursor, chunk headers read, rows decoded (DBG:VDISK:RD?).
+pub static FR: [core::sync::atomic::AtomicU32; 5] = [const { core::sync::atomic::AtomicU32::new(0) }; 5];
 
 /// The SPI flash, raw (waits for a running erase / program first).
 #[cfg(target_os = "none")]
@@ -2171,6 +2220,11 @@ pub struct Slot<K: Copy + PartialEq> {
 impl<K: Copy + PartialEq> Slot<K> {
     pub const fn new() -> Self {
         Slot { ok: false, key: core::mem::MaybeUninit::uninit(), gen: core::mem::MaybeUninit::uninit() }
+    }
+    /// The cached generator's key and CSV cursor (`Gen::pos`), if any.
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+    pub fn peek(&self) -> Option<(K, u32)> {
+        self.ok.then(|| unsafe { (self.key.assume_init(), self.gen.assume_init_ref().pos()) })
     }
     pub fn clear(&mut self) {
         self.ok = false;

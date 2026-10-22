@@ -116,6 +116,10 @@ pub const DEFAULT_OSR: u8 = hy::AD1OSR_STREAM;
 /// / 160 S/s).
 pub const AD1_ISR_MAX_US: u32 = 6250;
 
+/// A stream ISR session not locked this long after its start is
+/// re-acquired, then ended (`Logger::lock_watch`).
+const LOCK_WAIT_MS: u32 = 2000;
+
 /// Main-loop AD1 sampler: blind reads in a row after a swallowed AD1F.
 const RESCUE_MAX: u8 = 4;
 
@@ -403,6 +407,11 @@ pub struct Logger {
     isr_sess: bool,
     /// `plan` ran for the next session (`r26` holds its rung).
     planned: bool,
+    /// The stream ISR session's lock watch (`poll`): its rate (mHz), the
+    /// DWT count of its (re)start, and whether it was re-acquired once.
+    isr_rate: u32,
+    isr_t0: u32,
+    isr_retried: bool,
     /// LOG:SRATe (AD2), S/s; 0 = DEFAULT_AD2_HZ.
     req_hz: u32,
     /// R26 low bits of the running AD2 session (preamble).
@@ -454,6 +463,9 @@ impl Logger {
             isr: false,
             isr_sess: false,
             planned: false,
+            isr_rate: 0,
+            isr_t0: 0,
+            isr_retried: false,
             req_hz: 0,
             r26: 0,
             mode: 0,
@@ -680,6 +692,9 @@ impl Logger {
             isr::start(&self.prod, self.ring, rate, !self.ad2);
             self.isr = true;
             self.isr_sess = true;
+            self.isr_rate = rate;
+            self.isr_t0 = unsafe { r32(DWT_CYCCNT) };
+            self.isr_retried = false;
         }
         #[cfg(not(feature = "ad2-isr"))]
         let _ = on_isr;
@@ -759,9 +774,50 @@ impl Logger {
                 self.end_wave();
                 return true;
             }
+            #[cfg(feature = "ad2-isr")]
+            if self.lock_watch() {
+                // Never locked: the session ends as a bus conflict does.
+                hy::stream::stop();
+                isr::stopped();
+                self.isr = false;
+                self.active = false;
+                self.end_wave();
+                return true;
+            }
             return false;
         }
         self.sample();
+        false
+    }
+
+    /// A gated stream (DMA frames, or AD1 without an edge from the search)
+    /// takes no sample until its Pll locks; one that has not locked
+    /// LOCK_WAIT_MS after its start is acquired again (the edge search, a
+    /// fresh Pll; nothing was captured, so the time base may restart), and
+    /// once more not locked ends the session (true). (Emulator 5394b21: an
+    /// AD2 19200 DMA stream never locked and the disk session never ended.)
+    #[cfg(feature = "ad2-isr")]
+    fn lock_watch(&mut self) -> bool {
+        if isr::lock_stats()[3] != 0 || self.captured() != 0 {
+            return false;
+        }
+        let now = unsafe { r32(DWT_CYCCNT) };
+        if now.wrapping_sub(self.isr_t0) < LOCK_WAIT_MS * (crate::clock::HCLK_HZ / 1000) {
+            return false;
+        }
+        if self.isr_retried {
+            return true;
+        }
+        self.isr_retried = true;
+        self.isr_t0 = now;
+        hy::stream::stop();
+        isr::stopped();
+        if self.ad2 {
+            let _ = hy::stream::pick_div(hy::stream::use_dma());
+        } else {
+            hy::stream::use_div(hy::DIV, false);
+        }
+        isr::start(&self.prod, self.ring, self.isr_rate, !self.ad2);
         false
     }
 

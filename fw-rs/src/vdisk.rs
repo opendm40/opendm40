@@ -676,6 +676,14 @@ fn rd_cyc() -> u32 {
     return 0;
 }
 
+/// The second CSV cursor (`file_read`; SRAM, all zero = empty) and the
+/// least recently used one; a cursor at most this far before a read goes on
+/// from there.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut CSV_CUR2: dlog::Slot<(u16, u32)> = dlog::Slot::new();
+static mut CSV_LRU: u8 = 0;
+const CUR_NEAR: u32 = 1 << 20;
+
 /// Read-path statistics (DBG:VDISK:RD?): read_block calls, their cycles
 /// (total / 1024, max), CSV generator opens.
 pub static RD: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic::AtomicU32::new(0) }; 4];
@@ -706,7 +714,22 @@ fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
         }
         return;
     }
-    let cur = unsafe { &mut *core::ptr::addr_of_mut!(CSV_CUR) };
+    // Two cursors: a host that reads two places in turn (an indexer at a
+    // file's head while a copy runs further on) keeps one each. The one
+    // just behind `off` (within CUR_NEAR) of this file, else the one used
+    // least recently (reopened for another file).
+    let slots = unsafe { [&mut *core::ptr::addr_of_mut!(CSV_CUR), &mut *core::ptr::addr_of_mut!(CSV_CUR2)] };
+    let lru = unsafe { &mut *core::ptr::addr_of_mut!(CSV_LRU) };
+    let near = |i: usize| slots[i].peek().filter(|&(k, p)| k == key && p <= off && off - p < CUR_NEAR).map(|(_, p)| off - p);
+    let i = match (near(0), near(1)) {
+        (Some(a), Some(b)) => (b < a) as usize,
+        (Some(_), None) => 0,
+        (None, Some(_)) => 1,
+        (None, None) => *lru as usize,
+    };
+    *lru = (i == 0) as u8; // the other one is now the least recent
+    let [c0, c1] = slots;
+    let cur = if i == 0 { c0 } else { c1 };
     let open = || {
         RD[3].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let (d, g) = geo()?;
