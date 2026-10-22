@@ -953,7 +953,8 @@ the DM40 geometry: 4096 B sectors, 2 FATs, 512 root entries, 4087 clusters.
 
 USB storage redesign (owner 2026-10-21, replaces the two-LUN layout of the
 same day). The SPI flash is **internal storage only**; USB exports **one
-read-only volume generated on the fly** (DAPLink-style virtual FAT): the
+volume generated on the fly** (DAPLink-style virtual FAT; writable since
+2026-10-22 only for deletes and a firmware file, "Host writes" below): the
 unit's irreplaceable data (UF-20), the recordings / screenshots / scope
 records converted to PC formats, and a raw image of the SPI flash. No host
 can write the SPI disk or keep a stale copy of its FAT any more, so the
@@ -1006,8 +1007,10 @@ both in its `LOGS/` / `SHOTS/` / `SCOPE/`.
 
 One LUN (`Msc::new(.., 1)`, feature `vdisk`, implied by `native`; builds
 without it still export the writable SPI disk; recovery-usb keeps its own).
-INQUIRY product `DM40 files`, MODE SENSE WP bit, WRITE → DATA PROTECT
-07/27/00. Volume label `DM40`, serial = CRC-32 of the UID. Geometry: 512-byte
+INQUIRY product `DM40 files`; no WP bit (`DBG:VDISK:RO 1` sets it: the
+read-only volume of before, read by a host at its next mount); a WRITE is
+judged sector by sector (`src/vwrite.rs`, "Host writes" below), anything
+not accepted fails DATA PROTECT 07/27/00. Volume label `DM40`, serial = CRC-32 of the UID. Geometry: 512-byte
 sectors, 64 per cluster (32 KiB), 1 reserved sector, 2 FATs of 254 sectors,
 512 root entries, 65000 clusters (FAT16), 4160541 sectors = 1.98 GiB (room
 for SPIFLASH.BIN, the CSV expansion of a full SPI disk of logs, ~10-20x, and
@@ -1015,7 +1018,7 @@ the append-only allocation below).
 
 | Path | Content |
 |---|---|
-| `README.TXT` | What is where; firmware update (reload.sh / DBG:UPLOAD, or the loader's own disk). |
+| `README.TXT` | What is where; delete from the PC; firmware update (copy dm40*.bin here, reload.sh / DBG:UPLOAD, or the loader's own disk). |
 | `INFO/CALIB.BIN` … `LOADER.BIN` | Raw MCU regions, as the old LUN 1 (table below). |
 | `INFO/BACKUP.TXT` | Addresses, sizes, CRC-32s (zlib), UID, firmware version, loader record, restore notes. |
 | `INFO/FIRMWARE.BIN` | The running firmware as its vendor update file (`calbackup::FwFile`); only with a valid loader record and no hazardous last block. Reinstall: `tools/reload.sh --image FIRMWARE.BIN`, or copy it as `dm40fw.bin` to the loader's own disk. |
@@ -1065,13 +1068,16 @@ SPI directories and:
   only while no host holds the medium locked (PREVENT = mounted on Linux);
   otherwise the new file waits for the Allow (unmount: `vdisk::on_unlock`).
 
-Any change raises a one-shot UNIT ATTENTION 06/28/00, **sent at once, also
-while the volume is mounted and locked** (the 2026-10-21 experiment: Linux
-then re-reads the mounted read-only volume and shows new files at once, a
-file manager after F5; holding it back while locked hid them until the
-unmount). Emulator: a screenshot taken while a PREVENT was active gave the
-UNIT ATTENTION 4 s later, the new `SHOTS/S003.BMP` appended at a new slot
-and cluster, the other files unchanged.
+Any change raises a one-shot UNIT ATTENTION 06/28/00, sent at once, also
+while a host holds the volume **read-only** (`DBG:VDISK:RO 1`: the
+2026-10-21 experiment: Linux then re-reads the mounted read-only volume and
+shows new files at once, a file manager after F5). With the writable
+volume (the default since 2026-10-22) no change is made while a host has it
+mounted (`vwrite::frozen`, "Host writes"): the change and its UNIT
+ATTENTION wait for the eject / re-plug. Emulator (read-only, 2026-10-21): a
+screenshot taken while a PREVENT was active gave the UNIT ATTENTION 4 s
+later, the new `SHOTS/S003.BMP` appended at a new slot and cluster, the
+other files unchanged.
 
 Sector generation (`VDisk::read_block`): boot sector from constants; FAT
 entries from the fixed layout and, past it, a bisection of `TAB` (sorted by
@@ -1088,7 +1094,11 @@ then a UNIT ATTENTION (the earlier ADD / FORCE experiment hooks are gone).
 
 Per LUN as before (INQUIRY name from the device, removable; READ CAPACITY
 / FORMAT CAPACITIES; MODE SENSE WP; WRITE to a read-only device takes its
-data phase and fails 07/27/00; sense per LUN; PREVENT / ALLOW tracked per
+data phase and fails 07/27/00; the generated volume answers each block
+itself (`gates_writes`: no global write inhibit; a refused block fails the
+command with the device's sense, 07/27/00 refused / 02/04/01 busy, retried
+by the host / 03/0C/00, after the rest of the data phase is drained);
+sense per LUN; PREVENT / ALLOW tracked per
 LUN, `msc::host_mounted()` = LUN 0's lock). UNIT ATTENTION: a device with
 `media_change_immediate` (the generated volume) gets it at the next command
 (not INQUIRY / REQUEST SENSE, never mid-transfer) whatever the lock; the
@@ -1096,6 +1106,120 @@ writable SPI disk of the builds without `vdisk` keeps the old rule (held
 back while locked). A bus reset or unconfigure clears the locks and asks the
 volume for a compaction at its next refresh. `MAX_BLOCK` = 512 in the native
 build (the volume's sector), 4096 where the SPI disk is exported.
+
+### Host writes (`src/vwrite.rs`): delete from the PC, drag-and-drop update
+
+The volume is writable but stores nothing a host writes as sectors: each
+512-byte WRITE is compared with the sector the volume generates and accepted
+only as one of the changes below, kept as small records (~1.4 KiB SRAM,
+.sram_bss) from which the volume regenerates **exactly what the host
+wrote** (a host that re-reads a sector after evicting it from its cache
+sees its own data); anything else fails DATA PROTECT 07/27/00.
+
+| Write | Accepted as |
+|---|---|
+| boot sector byte 0x25 | Linux's dirty flag on a rw mount (written at mount and umount) |
+| FAT[1] bits 15 / 14 | the Windows / macOS clean / error flags |
+| dates / times of an existing entry | access date (relatime), the parent's mtime: accepted and dropped (a re-read shows the old date) |
+| a LOGS / SCOPE / SHOTS entry → 0xE5 (rest unchanged) | `T_DIR` on its table entry: shown 0xE5 + the rest |
+| its whole chain → 0 in a FAT sector | `T_FAT`: shown free, data zeros |
+| FAT entries of free clusters | the host's allocations (`pair`, 40) |
+| free root slots: 0xE5 / long-name entries; an 8.3 `DM40*.BIN` file (≤ upload::MAX); a directory / file of the hosts' own (`.Trash*`, `._*`, `.DS_Store`, `.fseventsd`, `.Spotlight-V100`, `.TemporaryItems`, `.metadata_never_index*`, `.com.apple.*`, `System Volume Information`, `$RECYCLE.BIN`, by long name) | raw 32-byte records (10) |
+| data in free clusters | staged in free SPI clusters (`stage`, 28 volume clusters) |
+
+Refused: writing into README.TXT, INFO/, DEBUG/ or our files, an INFO
+delete, entries created in our directories, a rename, a truncation, other
+names / directories in the root, the volume label, past the capacities.
+On Linux a refused write-back shows as one `Buffer I/O error ... lost async
+page write` (the mount stays rw; the buffer is re-read later); the host's
+in-memory view of that item stays inconsistent until the re-plug (a copied
+`notes.txt` seems to be there until then). That is why the hosts' own
+housekeeping is **accepted** for the session: when the trash directory's
+root entry was refused (first capture), vfat kept the directory's inode
+keyed by the slot position and a later `cp ... dm40fw.bin` into that slot
+failed with "Is a directory".
+
+**Delete.** When both marks of a file are seen (any order; Linux `rm`:
+FAT 1, FAT 2, then the directory sector, at once), the main loop
+(`vwrite::poll`, under the gallery lock) deletes the SPI file
+(`csvlog::delete_on`) if its SPI entry is still the same file (start +
+size); a delete on the meter meanwhile (`vdisk::forget` while frozen: the
+entry stays, data zeros) is never repeated on a new file of the same name.
+The 0xE5 alone is a move (Nautilus / gio "Move to Trash": the file's start
++ size written as an entry into a host directory, `T_MOVED`, noted when
+that data is staged or when the 0xE5 comes later): the file is deleted at
+the session's end if the trash still holds it; emptying the trash frees the
+chain = a whole delete at once; a file taken out of the trash again (its
+new entry in our directory is refused) stays. A refused rename keeps the
+file (it is back after the re-plug).
+
+**Firmware file.** Data in free clusters is staged whatever the order
+(Linux writes the data, FAT and directory in separate write-backs; the
+entry may come first with size 0): per volume cluster up to 8 SPI clusters
+(first fit, SPI FAT untouched: the staging owns the SPI disk like
+DBG:UPLOAD, `upload::busy`; screenshot / csvlog commits wait). A root
+record `DM40*.BIN` whose chain is complete in `pair` with every sector up to
+its size staged, quiet for 300 ms, is decoded (128-byte blocks as the
+loader) and checked: the loader's header test, word1 = size - 12, the body
+CRC-16 (word2, the 12 marker bytes excluded), no hazardous short last block.
+Then `upload::commit_on`: every other dm40*.bin in the SPI root deleted,
+the staged clusters linked as `DM40FW.BIN` (data → FAT → directory). The
+meter asks **"Firmware received / Install it now?"** (dialog.rs; ui-render
+`t04-confirm-fw-install`): Yes = `DBG:UPDATE` (zero the loader marker,
+reset; the loader installs it), No, a side key or 60 s = `DM40FW.BIN`
+deleted. A complete `DM40*.BIN` that is no update file: toast "Not a DM40
+update file", nothing on the SPI disk. An overwrite (`cp` again) copies the
+committed blocks first (copy-on-write) and commits again. The host's view
+of its file stays exact (its reads come from the staged / committed
+clusters; after No, zeros).
+
+**Session.** While the host has the volume locked (PREVENT: Linux and
+macOS mount) the layout is **frozen**: `vdisk::refresh` waits, no UNIT
+ATTENTION is sent (on a removable disk Linux fails the I/O after a UNIT
+ATTENTION and the dirty buffers written back later would carry the old
+FAT / directories), so recordings / screenshots made meanwhile appear at
+the eject / re-plug. That is the cost of the writable volume
+(`DBG:VDISK:RO 1` keeps the live updates of the read-only volume, without
+delete / update from the PC). A host that never locks: frozen while it has
+written in the last 60 s. The session ends at the Allow (umount / eject)
+or a bus reset: every record dropped, the flags cleared (except a delete in
+progress), `refresh` regenerates the volume and raises the UNIT ATTENTION.
+Staged data idle for 5 s is **parked**: its SPI clusters linked as a
+hidden system file `_VHOSTnn.TMP` in the SPI root (the SPI disk is free for
+the on-device writers again; a later write to a parked block copies it
+first; at most 100 temp files a session, then a later burst's data is
+dropped: reads zeros); all `_VHOST*.TMP` are deleted at the session's end
+and at the first main-loop pass after a boot (a power cut / unplug in a
+session). Staging writes answer "busy" (02/04/01, the host retries) while
+a screenshot / CSV commit / DBG:UPLOAD writes the SPI disk or the
+constant-interval logger runs (LOG:STATe ON). Power cuts:
+the staging never writes the SPI FAT; a commit / park is data → FAT →
+directory, a purge directory → FAT: at worst lost clusters.
+
+`DBG:VDISK:WR?` → `<accepted>,<refused>,<busy>,<last refused LBA>,<SPI
+files deleted>,<firmware files committed>,<rejected>,<root records>,<FAT
+pairs>,<staged clusters>,<frozen>,<staging>,<firmware state>`;
+`DBG:VDISK:RO 0|1` / `RO?`.
+
+Captured on Linux (kernel 7.0, GNOME automount: `rw, relatime, flush,
+shortname=mixed, errors=remount-ro`; `tools/fatren-test/usbip_msc.py` = a
+USB/IP mass-storage device running the volume code at host speed,
+`kcapture.sh`, captures replayed by run.sh): mount = PREVENT + boot sector;
+`rm` = FAT 1, FAT 2, directory sector at once; the parent's mtime / access
+dates ~60 s later (root / directory sector, dates only); `gio trash` =
+`.Trash-1000` (LFN + 8.3, 3 directory clusters zeroed + the trashinfo),
+the 0xE5 in SHOTS and the entry in `files/`; `cp` of 500 KB = one
+write-back burst at close (`flush`), FAT + root + 980 data sectors; umount =
+boot sector, ALLOW, then a UNIT ATTENTION and udisks' re-probe (no
+re-mount). The captures hold the volume's layout (README.TXT is padded to
+a fixed 2048 bytes for that): a change of the generated CSV text or the
+INFO files needs a new capture (`kcapture.sh`). Emulator (real firmware, kernel attach, 2026-10-22): `rm` of 2
+files → deleted on the SPI disk; `cp` of a 500 KB update file (47 s at the
+emulator's speed) → committed, the dialog declined at 60 s → DM40FW.BIN
+gone (SPIFLASH.BIN fsck clean); `cp` again → committed, `DBG:TAP` on Yes →
+reset into the loader. USBTMC queries during a staging can time out (the
+main loop is busy with SPI writes; one SPI block read-modify-write per
+512-byte sector).
 
 ### Firmware update without the writable disk (`src/upload.rs`)
 
@@ -1119,12 +1243,28 @@ update screen exposes its own USB disk).
 
 ### Host OS notes
 
-The single read-only removable volume avoids the two-LUN questions (one
-`sd` device on Linux, one drive letter on Windows). FAT16 with 32 KiB
-clusters on a 2 GiB volume is the standard large-FAT16 format (Windows,
-macOS, Linux mount it). Not verified on the device yet: Linux kernel attach
-+ udisks read-only mount, the UNIT ATTENTION while mounted on Windows and
-macOS (the experiment was Linux-only), Explorer / Finder behaviour after it.
+The single removable volume avoids the two-LUN questions (one `sd` device
+on Linux, one drive letter on Windows). FAT16 with 32 KiB clusters on a 2
+GiB volume is the standard large-FAT16 format (Windows, macOS, Linux mount
+it). Linux: captured (above). **Windows and macOS are untested** (no
+capture possible here); designed for:
+- Windows: writes `System Volume Information\IndexerVolumeGuid` /
+  `WPSettings.dat` on the first rw mount (accepted for the session, gone at
+  the re-plug, written again next time), may set FAT[1] dirty bits
+  (accepted). Explorer's Delete on a removable drive deletes at once (no
+  recycle bin): both marks. Quick-removal policy = write-through, so its
+  writes come in operation order. Probably no PREVENT: frozen for 60 s
+  after its last write, then released with a UNIT ATTENTION (Windows then
+  re-reads the volume; whether Explorer shows new files: open).
+- macOS: `.fseventsd`, `.Spotlight-V100` (many files: the 28 staged
+  clusters may run out, then its writes are refused), `.Trashes`, `._*`
+  AppleDouble files, `.DS_Store` in the root (accepted), `.DS_Store` in
+  LOGS / SHOTS / SCOPE (refused: one write error, harmless). Finder's
+  "Move to Trash" = `.Trashes/501/` move (deleted at the eject, as Linux).
+  `fsck_msdos` at mount only when the volume is dirty.
+Not verified on the device yet: Linux kernel attach + udisks mount of the
+real meter, the UNIT ATTENTION after the eject on Windows and macOS,
+Explorer / Finder behaviour.
 
 ### Calibration safety copy (SPI disk root)
 
@@ -1198,6 +1338,24 @@ clean), foreign / unnumbered files not shown, media change once per change;
 then a new file (appended, everything else at the same slot / cluster), a
 deleted one (slot shown deleted), a lock + bus reset (no compaction), unlock
 (compacted: slots without holes), `forget` (gone at once).
+
+Host writes (`vwrite_test.py`, run.sh "vwrite", every scenario through
+`main ... vserve` = vdisk.rs + vwrite.rs over a SPI image; host operations
+made by mtools on the volume dump, their sector diffs written in five
+orders): deletes of LOGS / SHOTS / SCOPE and root legacy files (only those
+SPI files gone, fsck clean, the volume = the host image until the Allow,
+then regenerated with a UNIT ATTENTION); one mark only (nothing deleted,
+back after the session); a delete on the meter while frozen; firmware
+copies (`dm40fw.bin`, `DM40FW.BIN`, long names; data-first / metadata-first
+/ random), Yes / No, into freed clusters (a non-contiguous chain), an
+overwrite, a non-update `DM40*.BIN`; refusals (new file / directory in the
+root or LOGS, README, INFO delete, rename, label: SPI files unchanged, the
+volume after a bus reset = the original); trash (move: deleted at the
+Allow; emptied: at once; unrelated file; taken back out); a temp file left
+by a power cut deleted at boot; a lockless host; power cuts before every
+SPI write of a firmware commit (81 of 1042: every commit cut + every 25th
+staging write) and of a trash session + the next boot (402); the four
+kernel captures replayed with the same accept / refuse answers.
 
 Emulator (2026-10-21, `emu/usbip_client.py luns` / `mscdump` / `upload`,
 `USBIP_PORT`): one LUN `DM40 files`, 4160541 × 512 B, WP, WRITE → 07/27/00,

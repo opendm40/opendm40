@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Host test of src/vwrite.rs (host writes on the generated USB volume):
-    vwrite_test.py <t> <flash1m> <srcdir> <spi.img> <fw.bin> <fw2.bin> <work> [captures...]
+    vwrite_test.py <t> <flash1m> <flash1m-nofw> <srcdir> <spi.img> <fw.bin> <fw2.bin> <work> [captures...]
 <t> = the fatren-test binary (vserve), <spi.img> = a SPI disk with logs,
 scope records and screenshots, <fw.bin> / <fw2.bin> = two update files.
 
@@ -33,8 +33,8 @@ import os, random, shutil, struct, subprocess, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from vserve import VServe, diff, sectors, Geo, SECTOR, W_OK, W_REFUSED, W_BUSY
 
-T, FLASH, SRC, SPI0, FW1, FW2, WORK = sys.argv[1:8]
-CAPS = sys.argv[8:]
+T, FLASH, FLASH0, SRC, SPI0, FW1, FW2, WORK = sys.argv[1:9]
+CAPS = sys.argv[9:]
 os.environ['MTOOLS_SKIP_CHECK'] = '1'
 os.makedirs(WORK, exist_ok=True)
 NOK = 0
@@ -104,7 +104,7 @@ def ls(img, d='::'):
 
 def tree(img):
     """{path: md5} of every file of a FAT image (mcopy -s / mdir -/ -b)."""
-    out = run('mdir', '-/', '-b', '-i', img, '::').decode(errors='replace').split()
+    out = run('mdir', '-a', '-/', '-b', '-i', img, '::').decode(errors='replace').split()
     res = {}
     for p in out:
         if p.endswith('/'):
@@ -203,7 +203,16 @@ def apply(v, host_before, host_after, order='asc', expect=W_OK, seed=1):
     return res
 
 
+def cleanup():
+    """The previous scenario's images (each volume dump holds ~20 MB of
+    data: SPIFLASH.BIN)."""
+    for f in os.listdir(WORK):
+        if any(k in f for k in ('.vol', '.host', '.spi', '.boot')):
+            os.remove(os.path.join(WORK, f))
+
+
 def fresh(name, cut=None):
+    cleanup()
     spi = spi_copy(name + '.spi')
     v = VServe(T, spi, FLASH, SRC, cut=cut)
     v.tick(100)
@@ -459,13 +468,21 @@ for tag, ops in (
     res = apply(v, base, host, 'asc', expect=None)
     if not any(r == W_REFUSED for _, _, r in res):
         fail('%s: nothing refused: %s' % (tag, res))
-    v.idle(50000)  # staging idle timeout
+    v.idle(7000)  # the staging is parked (a temp file at most)
     sp = v.save()
-    fsck_clean(sp, tag)
-    same_tree(SPI0, sp, tag)
+    fsck_clean(sp, tag + ' parked')
+    t = tree(sp)
+    extra = [p for p in t if p.startswith('::/_VHOST')]
+    for p in extra:
+        t.pop(p)
+    if t != tree(SPI0):
+        fail('%s: SPI files changed' % tag)
     if v.stats()['staging'] != 'false':
         fail('%s: staging still active' % tag)
     release(v, 'reset')
+    sp = v.save()
+    fsck_clean(sp, tag)
+    same_tree(SPI0, sp, tag)
     after = v.dump(2)
     g = Geo(base)
     skip = spiflash_range(base)
@@ -473,7 +490,74 @@ for tag, ops in (
     if d:
         fail('%s: volume after the bus reset differs from the original at %s' % (tag, d[:5]))
     v.close()
-    ok('%s refused (%d of %d writes), SPI disk unchanged, volume regenerated as before' % (tag, sum(r == W_REFUSED for _, _, r in res), len(res)))
+    ok('%s refused (%d of %d writes), SPI files unchanged (%d temp file(s) until the session ends), volume regenerated as before' % (tag, sum(r == W_REFUSED for _, _, r in res), len(res), len(extra)))
+
+print('--- the hosts\' own directories: a trash (accepted for the session, parked, gone after it)')
+def trash_case(tag, ops, gone, expect_deleted_now):
+    v, spi, base, host = fresh(tag)
+    v.lock(True)
+    for op in ops:
+        run(op[0], '-i', host, *op[1:])
+    apply(v, base, host, 'random', seed=3)
+    v.idle(7000)
+    st = v.stats()
+    if st['refused'] != '0':
+        fail('%s: refused: %s' % (tag, st))
+    vol = v.dump(1)
+    host_view_ok(host, vol, tag)
+    sp = v.save()
+    fsck_clean(sp, tag + ' parked')
+    if st['deleted'] != expect_deleted_now:
+        fail('%s: deleted %s during the session' % (tag, st['deleted']))
+    release(v)
+    sp = v.save()
+    fsck_clean(sp, tag + ' released')
+    same_tree(SPI0, sp, tag, gone=gone)
+    vol2 = v.dump(2)
+    fsck_clean(vol2, tag + ' regenerated')
+    if any(n.lower().startswith('.trash') for n in ls(vol2)):
+        fail('%s: the trash survived the session' % tag)
+    v.close()
+    return st
+
+trash_case('trash-move', [('mmd', '::.Trash-1000'), ('mmd', '::.Trash-1000/files'), ('mmd', '::.Trash-1000/info'),
+                          ('mcopy', junk, '::.Trash-1000/info/S001.BMP.trashinfo'),
+                          ('mmove', '::SHOTS/S001.BMP', '::.Trash-1000/files/S001.BMP')], ['::/SHOTS/S001.BMP'], '0')
+ok('a move to .Trash-1000: the trash kept for the session (temp file), S001 deleted from the SPI disk at the Allow, nothing else')
+trash_case('trash-empty', [('mmd', '::.Trash-1000'), ('mmd', '::.Trash-1000/files'),
+                           ('mmove', '::LOGS/LOG001.CSV', '::.Trash-1000/files/LOG001.CSV'), ('mdel', '::.Trash-1000/files/LOG001.CSV')], ['::/LOGS/LOG001.DLG'], '1')
+ok('a move to the trash, then the trash emptied: deleted at once')
+trash_case('trash-unrelated', [('mmd', '::.Trash-1000'), ('mmd', '::.Trash-1000/files'), ('mcopy', junk, '::.Trash-1000/files/OTHER.BIN')], [], '0')
+ok('a trash with an unrelated file: nothing of ours deleted')
+v, spi, base, host = fresh('trash-restored')
+v.lock(True)
+mtools(host, ('mmd', '::.Trash-1000'), ('mmd', '::.Trash-1000/files'), ('mmove', '::LOGS/LOG001.CSV', '::.Trash-1000/files/LOG001.CSV'))
+apply(v, base, host)
+h2 = host + '2'
+run('cp', '--sparse=always', host, h2)
+mtools(h2, ('mdel', '::.Trash-1000/files/LOG001.CSV'))
+# Restored by the host = its entry back in LOGS (refused) and gone from the
+# trash: only the trash part of it reaches us here.
+g = Geo(base)
+for lba, x in diff(host, h2):
+    if g.kind(lba) == 'data':
+        v.write(lba, x)
+v.idle(7000)
+release(v)
+sp = v.save()
+same_tree(SPI0, sp, 'trash-restored')
+v.close()
+ok('a file taken out of the trash again (the entry in files/ deleted, chain kept): not deleted')
+v, spi, base, host = fresh('boot-purge')
+v.close()
+mtools(spi, ('mcopy', junk, '::_VHOST05.TMP'))
+v = VServe(T, spi, FLASH, SRC)
+v.idle(500)
+sp = v.save()
+fsck_clean(sp, 'boot purge')
+same_tree(SPI0, sp, 'boot purge')
+v.close()
+ok('a temp file left by an earlier session (power cut) deleted at the first main-loop pass')
 
 print('--- a lockless host (no PREVENT): frozen while it writes, released QUIET_MS later')
 v, spi, base, host = fresh('lockless')
@@ -526,10 +610,52 @@ for k in pts:
     vv.close()
 ok('%d of %d cut points: fsck at worst lost clusters / FAT 1 ahead, DM40FW.BIN absent or whole, every other file intact' % (len(pts), nw))
 
+print('--- power cuts: a trash session (staging, park, purge, the delete at the Allow), then a boot')
+tops = [('mmd', '::.Trash-1000'), ('mmd', '::.Trash-1000/files'), ('mcopy', junk, '::.Trash-1000/files/x.trashinfo'),
+        ('mmove', '::SHOTS/S001.BMP', '::.Trash-1000/files/S001.BMP')]
+v, spi, base, host = fresh('tcut-probe')
+v.close()
+for op in tops:
+    run(op[0], '-i', host, *op[1:])
+tw = diff(base, host)
+def trash_session(cut):
+    vv = VServe(T, spi_copy('tcut.spi'), FLASH, SRC, cut=cut)
+    vv.lock(True)
+    vv.idle(300)
+    for lba, x in tw:
+        vv.write(lba, x)
+        vv.tick()
+    vv.idle(7000)
+    vv.lock(False)
+    vv.idle(3000)
+    n = int(vv.stats()['spi_writes'])
+    sp = vv.save()
+    vv.close()
+    return sp, n
+sp, nt = trash_session(None)
+same_tree(SPI0, sp, 'trash session', gone=['::/SHOTS/S001.BMP'])
+for k in range(nt):
+    sp, _ = trash_session(k)
+    fsck_cut(sp, 'trash cut %d' % k)
+    shutil.copy(sp, sp + '.boot')
+    vb = VServe(T, sp + '.boot', FLASH, SRC)
+    vb.idle(1000)
+    sb = vb.save()
+    vb.close()
+    fsck_cut(sb, 'trash cut %d + boot' % k)
+    t, t0 = tree(sb), tree(SPI0)
+    if any(p.startswith('::/_VHOST') for p in t):
+        fail('trash cut %d: a temp file survived the next boot' % k)
+    t.pop('::/SHOTS/S001.BMP', None)
+    t0.pop('::/SHOTS/S001.BMP', None)
+    if t != t0:
+        fail('trash cut %d: other files changed' % k)
+ok('%d cut points of a trash session: fsck at worst lost clusters / FAT 1 ahead; after the next boot no temp file is left, S001 deleted or whole, nothing else changed' % nt)
+
 for cap in CAPS:
     print('--- replay', cap)
     import vreplay
-    vreplay.replay(cap, T, FLASH, SRC, SPI0, WORK, FW1)
+    vreplay.replay(cap, T, FLASH0, SRC, SPI0, WORK, FW1)
     ok('replay %s' % os.path.basename(cap))
 
 print('vwrite: %d checks PASS' % NOK)

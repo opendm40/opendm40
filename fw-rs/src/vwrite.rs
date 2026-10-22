@@ -60,14 +60,16 @@
 
 use crate::dlog::{self, Raw as _};
 use crate::msc::BlockDevice;
-use crate::vdisk::{self, Owner, BS, CB, DATA_START, FAT_SECS, FAT_START, ID, ROOT_N, ROOT_START, SPC, T_DIR, T_FAT, T_SRC};
+use crate::vdisk::{self, Owner, BS, CB, DATA_START, FAT_SECS, FAT_START, ID, ROOT_N, ROOT_START, SPC, T_DIR, T_FAT, T_MOVED, T_SRC};
 
-/// Host records in the root (raw 32-byte entries).
-const NREC: usize = 6;
+/// Host records in the root (raw 32-byte entries: a firmware file and the
+/// hosts' own directories with their long names).
+const NREC: usize = 10;
 /// Host FAT entries (cluster -> value).
-const NPAIR: usize = 32;
-/// Staged clusters: one firmware file (upload::MAX) and one spare.
-const NST: usize = 21;
+const NPAIR: usize = 40;
+/// Staged clusters: one firmware file (upload::MAX, 20) and the hosts' own
+/// directories / files (a Linux trash: 3 + 1 per file moved there).
+const NST: usize = 28;
 const BLK: usize = 4096;
 /// Volume sectors per SPI block, SPI blocks per volume cluster.
 const SPB: u32 = (BLK / BS) as u32;
@@ -76,9 +78,16 @@ const _: () = assert!((NST as u32 - 1) * CB >= crate::upload::MAX && SPC <= 64);
 /// A lockless host: the session ends this long after its last write.
 pub const QUIET_MS: u64 = 60_000;
 /// A staging with no new data for this long and no complete file is
-/// dropped (the SPI disk is free for the on-device writers again; Linux
-/// writes back dirty pages within ~35 s).
-pub const STAGE_IDLE_MS: u64 = 45_000;
+/// parked: its SPI clusters linked as a hidden temp file (_VHOSTnn.TMP,
+/// deleted at the session's end), the SPI disk free for the on-device
+/// writers again.
+pub const PARK_MS: u64 = 5_000;
+/// A complete firmware file is checked once no data came for this long (a
+/// host writes a file back in one burst).
+const SETTLE_MS: u64 = 300;
+/// Temp files of a session at most.
+const MAX_PARKS: u8 = 100;
+const TMP_PRE: &[u8; 6] = b"_VHOST";
 
 /// `last_error` codes (msc.rs write_error).
 const E_IO: u8 = 0;
@@ -99,13 +108,17 @@ struct Pair {
     v: u16,
 }
 
-/// One staged volume cluster.
+/// One staged volume cluster (28 bytes: packed to 4-byte alignment).
 #[derive(Clone, Copy)]
+#[repr(C, packed(4))]
 struct St {
     /// Volume cluster (0 = unused).
     c: u16,
-    /// Linked into DM40FW.BIN on the SPI disk (read-only from then on).
+    /// Linked into DM40FW.BIN on the SPI disk.
     sealed: bool,
+    /// Blocks linked into a file (DM40FW.BIN or a temp file): read-only, a
+    /// write copies the block first (bit = block).
+    ro: u8,
     /// Sectors written (bit = sector of the cluster).
     map: u64,
     /// SPI cluster of each 4 KiB block (0 = none yet: its written sectors
@@ -115,7 +128,7 @@ struct St {
 
 const REC0: Rec = Rec { slot: 0, e: [0; 32] };
 const PAIR0: Pair = Pair { c: 0, v: 0 };
-const ST0: St = St { c: 0, sealed: false, map: 0, blk: [0; BPC] };
+const ST0: St = St { c: 0, sealed: false, ro: 0, map: 0, blk: [0; BPC] };
 
 /// The firmware file.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -169,8 +182,16 @@ struct W {
     hint: u32,
     err: u8,
     fw: Fw,
-    /// The last candidate decided (slot, start, size): not tried again.
-    done: (u16, u16, u32),
+    /// The last candidate decided (slot, start, size, `ver`): not tried
+    /// again until new data arrives.
+    done: (u16, u16, u32, u32),
+    /// Staged writes so far.
+    ver: u32,
+    /// Temp files made this session; the leftover ones were deleted (boot);
+    /// a delete of the temp files is due (session end).
+    parks: u8,
+    purged: bool,
+    purge: bool,
     n: Stats,
 }
 
@@ -191,7 +212,11 @@ static mut W0: W = W {
     hint: 0,
     err: 0,
     fw: Fw::None,
-    done: (0, 0, 0),
+    done: (0, 0, 0, 0),
+    ver: 0,
+    parks: 0,
+    purged: false,
+    purge: false,
     n: Stats { ok: 0, refused: 0, busy: 0, last_refused: 0, deleted: 0, fw_ok: 0, fw_bad: 0 },
 };
 /// The logger needs a constant interval (main.rs `disk_writes_blocked`):
@@ -518,19 +543,103 @@ fn host_cluster(c: u32) -> bool {
     }
 }
 
-/// A host record we accept in a free root slot.
-fn rec_ok(h: &[u8]) -> bool {
+/// The hosts' own root entries, by long name (lower case, prefix): Linux's
+/// trash, macOS's trash / event log / index / AppleDouble / Finder files,
+/// Windows's indexer and recycle bin. Kept for the session (`park`), never
+/// on the SPI disk.
+const HOUSEKEEPING: [&[u8]; 10] = [
+    b".trash",
+    b"._",
+    b".ds_store",
+    b".fseventsd",
+    b".spotlight-v100",
+    b".temporaryitems",
+    b".metadata_never_index",
+    b".com.apple.",
+    b"system volume information",
+    b"$recycle.bin",
+];
+
+/// The long name of the 8.3 entry at root slot `idx`, lower-case ASCII, its
+/// first 32 characters: from its long-name entries before it (in the
+/// sector being written, `d` = slots `base..`, or the stored records), else
+/// its 8.3 name as "name.ext".
+fn long_name(idx: usize, d: &[u8], base: usize, out: &mut [u8; 32]) -> usize {
+    let mut n = 0;
+    let mut k = idx;
+    let mut seq = 1u8;
+    'lfn: while k > ROOT_N + 1 && seq <= 3 {
+        k -= 1;
+        let e = if (base..base + BS / 32).contains(&k) {
+            let mut x = [0u8; 32];
+            x.copy_from_slice(&d[(k - base) * 32..(k - base) * 32 + 32]);
+            x
+        } else {
+            match root_rec(k) {
+                Some(x) => x,
+                None => break,
+            }
+        };
+        if e[11] & 0x3F != 0x0F || e[0] & 0x1F != seq {
+            break;
+        }
+        for o in [1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30] {
+            let ch = le16o(&e, o);
+            if ch == 0 || ch == 0xFFFF {
+                break 'lfn;
+            }
+            if n < out.len() {
+                out[n] = if ch < 0x80 { (ch as u8).to_ascii_lowercase() } else { b'?' };
+                n += 1;
+            }
+        }
+        if e[0] & 0x40 != 0 {
+            break;
+        }
+        seq += 1;
+    }
+    if n > 0 {
+        return n;
+    }
+    let h = &d[(idx - base) * 32..(idx - base) * 32 + 11];
+    for (i, &c) in h.iter().enumerate() {
+        if i == 8 {
+            if h[8] == b' ' {
+                break;
+            }
+            out[n] = b'.';
+            n += 1;
+        }
+        if c != b' ' {
+            out[n] = c.to_ascii_lowercase();
+            n += 1;
+        }
+    }
+    n
+}
+
+fn housekeeping(name: &[u8]) -> bool {
+    HOUSEKEEPING.iter().any(|p| name.len() >= p.len() && &name[..p.len()] == *p)
+}
+
+/// A host record we accept in free root slot `idx` (`d` = the sector being
+/// written, slots `base..`): a deleted entry, a long-name entry, a firmware
+/// file DM40*.BIN, a directory / file of the hosts' own (HOUSEKEEPING).
+fn rec_ok(idx: usize, d: &[u8], base: usize) -> bool {
+    let h = &d[(idx - base) * 32..(idx - base) * 32 + 32];
     if h[0] == 0 {
         return false;
     }
     if h[0] == 0xE5 || h[11] & 0x3F == 0x0F {
-        return true; // a deleted entry, a long-name entry
-    }
-    if h[11] & 0x18 != 0 || !update_name(h) {
-        return false; // directory / label / another name
+        return true;
     }
     let start = le16o(h, 0x1A) as u32;
-    le32o(h, 0x1C) <= crate::upload::MAX && le16o(h, 0x14) == 0 && (start == 0 || host_cluster(start))
+    if h[11] & 0x08 != 0 || le16o(h, 0x14) != 0 || !(start == 0 || host_cluster(start)) {
+        return false; // a label, FAT32 high cluster, a cluster of ours
+    }
+    let mut nm = [0u8; 32];
+    let n = long_name(idx, d, base, &mut nm);
+    housekeeping(&nm[..n]) || (h[11] & 0x10 == 0 && update_name(h) && le32o(h, 0x1C) <= crate::upload::MAX)
 }
 
 fn root(s: u32, d: &[u8], g: &[u8]) -> R {
@@ -550,7 +659,7 @@ fn root(s: u32, d: &[u8], g: &[u8]) -> R {
             }
             continue; // dropped
         }
-        if !rec_ok(he) {
+        if !rec_ok(idx, d, (s * per) as usize) {
             return Err(E_REFUSED);
         }
         if root_rec(idx).is_none() {
@@ -608,9 +717,47 @@ fn dir(k: usize, s: u32, d: &[u8], g: &[u8]) -> R {
     let mut changed = false;
     for &j in marks.iter().filter(|&&j| j != usize::MAX) {
         ents[j].id |= T_DIR;
+        if moved_ref(ents[j].vstart, ents[j].vsize) {
+            ents[j].id |= T_MOVED; // its new entry came first
+        }
         changed = true;
     }
     Ok(changed)
+}
+
+/// Entries of ours whose start cluster + size appear as a live file entry
+/// in the 512 bytes `d` (a host directory being written): moved there.
+fn note_moves(d: &[u8]) {
+    for e in vdisk::entries() {
+        if e.id & T_DIR != 0 && e.id & T_MOVED == 0 && refers(d, e.vstart, e.vsize) {
+            e.id |= T_MOVED;
+        }
+    }
+}
+
+fn refers(d: &[u8], start: u16, size: u32) -> bool {
+    d[..BS].chunks(32).any(|r| r[0] != 0 && r[0] != 0xE5 && r[11] & 0x3F != 0x0F && r[11] & 0x18 == 0 && le16o(r, 0x1A) == start && le32o(r, 0x1C) == size)
+}
+
+/// Is (start, size) a live file entry in any staged sector (a host
+/// directory)? SPI reads of the written blocks only.
+fn moved_ref(start: u16, size: u32) -> bool {
+    let mut b = [0u8; BS];
+    for i in 0..NST {
+        let x = w().st[i];
+        if x.c == 0 {
+            continue;
+        }
+        for s in 0..SPC {
+            if x.map & (1u64 << s) != 0 && x.blk[(s / SPB) as usize] != 0 {
+                staged_read(x.c as u32, s, &mut b);
+                if refers(&b, start, size) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn data(c: u32, s: u32, d: &[u8]) -> R {
@@ -635,38 +782,34 @@ fn stage(c: u32, s: u32, d: &[u8]) -> R {
         return Err(E_BUSY);
     }
     let w = w();
-    if let Some(i) = slot_of(c).filter(|&i| w.st[i].sealed) {
-        // The committed file: the same bytes again (a page rewritten, the
-        // zeros past its end) change nothing.
-        let mut cur = [0u8; BS];
-        staged_read(c, s, &mut cur);
-        if cur[..] == d[..BS] {
-            return Ok(false);
-        }
-        let _ = i;
-    }
+    let j = (s / SPB) as usize;
     let i = match slot_of(c) {
-        Some(i) if !w.st[i].sealed => i,
-        found => {
-            // A sealed cluster rewritten: the host overwrites its file, the
-            // committed DM40FW.BIN keeps the old data; a new staging.
-            if let Some(i) = found {
-                w.st[i] = ST0;
-            }
+        Some(i) => i,
+        None => {
             let Some(i) = w.st.iter().position(|x| x.c == 0) else { return Err(E_REFUSED) };
             w.st[i] = St { c: c as u16, ..ST0 };
             i
         }
     };
+    if w.st[i].ro & (1 << j) != 0 {
+        // A block linked into a file (DM40FW.BIN, a temp file): the same
+        // bytes again (a page rewritten, the zeros past the end) change
+        // nothing; else it is copied first (the file keeps its data).
+        let mut cur = [0u8; BS];
+        staged_read(c, s, &mut cur);
+        if cur[..] == d[..BS] {
+            return Ok(false);
+        }
+    }
     if !w.staging {
         w.staging = true;
         w.hint = 2;
     }
     w.stage_t = w.now;
-    let j = (s / SPB) as usize;
     let zero = d[..BS].iter().all(|&b| b == 0);
     if w.st[i].blk[j] == 0 && zero {
         w.st[i].map |= 1u64 << s;
+        w.ver = w.ver.wrapping_add(1);
         return Ok(true);
     }
     let dev = dev().ok_or(E_IO)?;
@@ -678,16 +821,17 @@ fn stage(c: u32, s: u32, d: &[u8]) -> R {
     if v.spc != 1 {
         return Err(E_IO);
     }
-    let mut sc = w.st[i].blk[j];
-    if sc == 0 {
-        sc = crate::upload::next_free(dev, &v, &mut w.hint, fat).map_err(|_| E_REFUSED)?;
+    let old = w.st[i].blk[j];
+    let ro = w.st[i].ro & (1 << j) != 0;
+    let sc = if old == 0 || ro { crate::upload::next_free(dev, &v, &mut w.hint, fat).map_err(|_| E_REFUSED)? } else { old };
+    if old == 0 {
         // Sectors written so far in this block were zeros, the rest 0xFF
         // (unwritten: read as zeros through `map`).
         for q in 0..SPB {
             let o = (q as usize) * BS;
             buf[o..o + BS].fill(if w.st[i].map & (1u64 << (j as u32 * SPB + q)) != 0 { 0 } else { 0xFF });
         }
-    } else if !dev.read_block(v.clba(sc as u32), buf) {
+    } else if !dev.read_block(v.clba(old as u32), buf) {
         return Err(E_IO);
     }
     let o = (s % SPB) as usize * BS;
@@ -697,7 +841,12 @@ fn stage(c: u32, s: u32, d: &[u8]) -> R {
         return Err(E_IO);
     }
     w.st[i].blk[j] = sc;
+    w.st[i].ro &= !(1 << j);
     w.st[i].map |= 1u64 << s;
+    w.ver = w.ver.wrapping_add(1); // new data: a file decided before is checked again
+    if !zero {
+        note_moves(d);
+    }
     Ok(true)
 }
 
@@ -722,9 +871,19 @@ pub fn poll(now: u64, blocked: bool) {
         return;
     }
     let Some(dev) = dev() else { return };
-    // 1. A host delete seen whole (entry 0xE5 and chain freed).
+    // 0. Temp files of an earlier session (or of before a reset / power
+    //    cut) deleted first: no new one is made before.
+    if !w.purged || w.purge {
+        if purge_tmp(dev) {
+            w.purged = true;
+            w.purge = false;
+        }
+        return;
+    }
+    // 1. A host delete seen whole (entry 0xE5 and chain freed); after a
+    //    staging (it owns the SPI disk: csvlog's gallery lock).
     let both = T_DIR | T_FAT;
-    if let Some(e) = vdisk::entries().iter().find(|e| e.id & both == both && e.id & T_SRC == 0).copied() {
+    if let Some(e) = vdisk::entries().iter().find(|e| e.id & both == both && e.id & T_SRC == 0 && !w.staging).copied() {
         let id = e.id & ID;
         let mut same = false;
         let ok = vdisk::scan_spi(None, &mut |i, s, z| same |= i == id && s == e.src && z == e.ssize);
@@ -755,8 +914,9 @@ pub fn poll(now: u64, blocked: bool) {
         w.fw = Fw::None;
         return;
     }
-    // 3. A firmware file complete?
-    if w.st.iter().any(|x| x.c != 0 && !x.sealed) {
+    // 3. A firmware file complete? (Once the data has settled; each
+    //    candidate once until new data arrives.)
+    if w.st.iter().any(|x| x.c != 0) && now.saturating_sub(w.stage_t) >= SETTLE_MS {
         for k in 0..NREC {
             let r = w.rec[k];
             let e = &r.e;
@@ -764,25 +924,118 @@ pub fn poll(now: u64, blocked: bool) {
                 continue;
             }
             let (start, size) = (le16o(e, 0x1A), le32o(e, 0x1C));
-            if start == 0 || size < 128 || (r.slot, start, size) == w.done {
+            if start == 0 || size < 128 || (r.slot, start, size, w.ver) == w.done {
                 continue;
             }
             let Some((chain, n)) = complete(start as u32, size) else { continue };
-            w.done = (r.slot, start, size);
+            w.done = (r.slot, start, size, w.ver);
             finalize(dev, &chain[..n], size);
             return;
         }
     }
-    // 4. An idle staging that never completed: the SPI disk is free again.
-    if w.staging && now.saturating_sub(w.stage_t) >= STAGE_IDLE_MS {
+    // 4. An idle staging: parked in a temp file, the SPI disk free again.
+    if w.staging && now.saturating_sub(w.stage_t) >= PARK_MS && !park(dev) {
         drop_unsealed();
     }
 }
 
+/// Link every written, not yet linked block of the staging as the hidden
+/// system file _VHOSTnn.TMP in the SPI root (any order: the volume keeps
+/// its own map; deleted at the session's end, `purge_tmp`). True: parked.
+fn park(dev: &mut dyn BlockDevice) -> bool {
+    let w = w();
+    let mut cl = [0u16; NST * BPC];
+    let mut n = 0;
+    for x in w.st.iter().filter(|x| x.c != 0) {
+        for j in 0..BPC {
+            if x.blk[j] != 0 && x.ro & (1 << j) == 0 {
+                cl[n] = x.blk[j];
+                n += 1;
+            }
+        }
+    }
+    if n > 0 {
+        if w.parks >= MAX_PARKS {
+            return false;
+        }
+        let mut name = *b"_VHOST00TMP";
+        name[6] = b'0' + w.parks / 10;
+        name[7] = b'0' + w.parks % 10;
+        if crate::upload::link_named(dev, &cl[..n], (n * BLK) as u32, &name, 0x06).is_err() {
+            return false;
+        }
+        w.parks += 1;
+        for x in w.st.iter_mut().filter(|x| x.c != 0) {
+            for j in 0..BPC {
+                if x.blk[j] != 0 {
+                    x.ro |= 1 << j;
+                }
+            }
+        }
+        dlog::set_stale(); // SPIFLASH.BIN changed
+    }
+    w.staging = false;
+    true
+}
+
+/// Delete every _VHOST*.TMP of the SPI root: the entries first (0xE5),
+/// then their chains (a power cut: lost clusters at worst).
+fn purge_tmp(dev: &mut dyn BlockDevice) -> bool {
+    let [buf, fat1, tmp] = crate::calbackup::scratch();
+    if !dev.read_block(0, tmp) {
+        return false;
+    }
+    let Some(v) = crate::fatren::parse_bpb(&tmp[..], dev.block_count()) else { return true };
+    let per = (BLK / 32) as u32;
+    let mut starts = [0u16; MAX_PARKS as usize];
+    let mut n = 0;
+    'blocks: for b in 0..v.root_blocks {
+        let lba = v.root_start + b;
+        if !dev.read_block(lba, buf) {
+            return false;
+        }
+        let mut hit = false;
+        for k in 0..per as usize {
+            let e = &mut buf[k * 32..k * 32 + 32];
+            if e[0] == 0 {
+                if hit && !(dev.write_block(lba, buf) && crate::fatren::verify(dev, lba, buf, tmp)) {
+                    return false;
+                }
+                break 'blocks;
+            }
+            if e[0] != 0xE5 && e[11] & 0x18 == 0 && e[11] & 0x3F != 0x0F && &e[..6] == TMP_PRE && &e[8..11] == b"TMP" && n < starts.len() {
+                starts[n] = le16o(e, 0x1A);
+                n += 1;
+                e[0] = 0xE5;
+                hit = true;
+            }
+        }
+        if hit && !(dev.write_block(lba, buf) && crate::fatren::verify(dev, lba, buf, tmp)) {
+            return false;
+        }
+    }
+    for &st in &starts[..n] {
+        if !crate::fatren::free_chain(dev, &v, st as u32, fat1, buf, tmp).0 {
+            return false;
+        }
+    }
+    if n > 0 {
+        dlog::set_stale();
+    }
+    true
+}
+
+/// The staging could not be parked: its unlinked blocks are dropped (read
+/// as zeros from now on), the SPI disk is free again.
 fn drop_unsealed() {
     let w = w();
-    for x in w.st.iter_mut().filter(|x| !x.sealed) {
-        *x = ST0;
+    for x in w.st.iter_mut().filter(|x| x.c != 0) {
+        for j in 0..BPC {
+            if x.blk[j] != 0 && x.ro & (1 << j) == 0 {
+                x.blk[j] = 0;
+                x.map &= !(0xFFu64 << (j as u32 * SPB));
+            }
+        }
     }
     w.staging = false;
 }
@@ -801,7 +1054,7 @@ fn complete(start: u32, size: u32) -> Option<([u8; NST], usize)> {
         let next = pair(c)?;
         let i = slot_of(c)?;
         let st = w().st[i];
-        if st.sealed || chain[..k].contains(&(i as u8)) {
+        if chain[..k].contains(&(i as u8)) {
             return None;
         }
         let left = size - (k as u32) * CB;
@@ -901,6 +1154,7 @@ fn finalize(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) {
         for (i, x) in w.st.iter_mut().enumerate() {
             if chain.contains(&(i as u8)) {
                 x.sealed = true;
+                x.ro = 0xFF;
             } else if x.sealed {
                 *x = ST0;
             }
@@ -908,13 +1162,11 @@ fn finalize(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) {
         w.fw = Fw::Ask;
         w.n.fw_ok += 1;
     } else {
-        for &i in chain {
-            w.st[i as usize] = ST0;
-        }
+        // Kept for the host (it reads back what it wrote), parked later.
         w.fw = Fw::Bad;
         w.n.fw_bad += 1;
     }
-    w.staging = w.st.iter().any(|x| x.c != 0 && !x.sealed);
+    w.staging = w.st.iter().any(|x| x.c != 0 && x.blk.iter().enumerate().any(|(j, &b)| b != 0 && x.ro & (1 << j) == 0));
 }
 
 fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
@@ -932,7 +1184,27 @@ fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
     for b in 0..nb {
         let i = chain[b / BPC] as usize;
         let j = b % BPC;
-        if w.st[i].blk[j] == 0 {
+        if w.st[i].blk[j] != 0 && w.st[i].ro & (1 << j) != 0 {
+            // Parked in a temp file: copied into a free cluster.
+            let lba = v.clba(w.st[i].blk[j] as u32);
+            if !dev.read_block(lba, buf) {
+                return false;
+            }
+            let Ok(sc) = crate::upload::next_free(dev, &v, &mut w.hint, fat) else { return false };
+            let first = j as u32 * SPB;
+            for q in 0..SPB {
+                if (w.st[i].map >> (first + q)) & 1 == 0 {
+                    buf[q as usize * BS..(q as usize + 1) * BS].fill(0);
+                }
+            }
+            let lba = v.clba(sc as u32);
+            if !(dev.write_block(lba, buf) && crate::fatren::verify(dev, lba, buf, tmp)) {
+                return false;
+            }
+            w.st[i].blk[j] = sc;
+            w.st[i].ro &= !(1 << j);
+            w.st[i].map |= 0xFF << first;
+        } else if w.st[i].blk[j] == 0 {
             // Every sector of it read as zeros: a zero block.
             let Ok(sc) = crate::upload::next_free(dev, &v, &mut w.hint, fat) else { return false };
             buf.fill(0);
@@ -974,6 +1246,19 @@ fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
 pub fn release_all(reset: bool) -> bool {
     let w = w();
     let had = w.session || w.boot != 0 || w.fat1 != 0 || w.rec.iter().any(|r| r.slot != 0) || w.pair.iter().any(|p| p.c != 0) || w.st.iter().any(|x| x.c != 0);
+    // A file moved into a host directory (the trash) that is still there:
+    // the host deleted it (poll deletes it, as a whole delete); every other
+    // flag is cleared (a rename that was refused: the file is back).
+    for k in 0..vdisk::entries().len() {
+        let e = vdisk::entries()[k];
+        let f = e.id;
+        let del = f & T_DIR != 0 && f & T_SRC == 0 && (f & T_FAT != 0 || (f & T_MOVED != 0 && moved_ref(e.vstart, e.vsize)));
+        vdisk::entries()[k].id = if del { (f & ID) | T_DIR | T_FAT } else { f & ID };
+    }
+    if w.parks > 0 {
+        w.purge = true;
+    }
+    w.parks = 0;
     w.boot = 0;
     w.fat1 = 0;
     w.rec = [REC0; NREC];
@@ -982,11 +1267,10 @@ pub fn release_all(reset: bool) -> bool {
     w.staging = false;
     w.session = false;
     w.last = 0;
-    w.done = (0, 0, 0);
+    w.done = (0, 0, 0, 0);
     if reset {
         w.locks = false;
     }
-    vdisk::clear_flags();
     had
 }
 
@@ -1046,7 +1330,8 @@ pub fn debug_text() -> std::string::String {
         s += &std::format!("pair {} -> {:#x}\n", p.c, p.v);
     }
     for x in w.st.iter().filter(|x| x.c != 0) {
-        s += &std::format!("st c={} sealed={} map={:#x} blk={:?}\n", x.c, x.sealed, x.map, x.blk);
+        let (c, sealed, map, blk) = (x.c, x.sealed, x.map, x.blk);
+        s += &std::format!("st c={c} sealed={sealed} map={map:#x} blk={blk:?}\n");
     }
     s += &std::format!("done={:?} fw={} staging={}\n", w.done, w.fw as u8, w.staging);
     s

@@ -18,10 +18,13 @@ loaded over Bluetooth into the stock firmware was removed (2026-10-22).
 fw-rs enumerates as a composite USBTMC + mass storage device (`1209:0001`) on
 USBFS. Debug commands are SCPI `DBG:...` over USBTMC (`src/scpi.rs`); the host
 tool `tools/dm40dbg.py` (PIL for screenshots) needs read/write access to
-`/dev/usbtmc*` (udev rule). Mass storage is ONE read-only removable disk
-"DM40" generated on the fly (`src/vdisk.rs`): `LOGS/*.CSV`, `SCOPE/*.CSV`,
+`/dev/usbtmc*` (udev rule). Mass storage is ONE removable disk "DM40"
+generated on the fly (`src/vdisk.rs`): `LOGS/*.CSV`, `SCOPE/*.CSV`,
 `SHOTS/*.BMP`, `INFO/` (calibration, boot data, firmware image),
 `DEBUG/SPIFLASH.BIN`, `README.TXT`. The SPI flash itself is internal storage.
+Deleting a LOGS / SCOPE / SHOTS file on the PC deletes it on the meter, and
+copying an update file (`dm40*.bin`) onto the disk offers to install it
+(`src/vwrite.rs`); nothing else written is kept.
 
 ```
 python3 tools/dm40dbg.py ping
@@ -73,7 +76,7 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   running on every page (state shown on the scope bar).
 - **Bluetooth**: stock phone-app protocol (commands 00..09) on UART4.
 - **USB**: USBTMC/USB488 interface + SCPI, debug commands as `DBG:` SCPI
-  (tools/dm40dbg.py). Mass storage (native builds): ONE read-only FAT16
+  (tools/dm40dbg.py). Mass storage (native builds): ONE FAT16
   volume "DM40" (2 GiB, 32 KiB clusters) synthesized on the fly
   (`src/vdisk.rs`): `LOGS/LOGnnn.CSV` and `SCOPE/SCOPnnn.CSV` (generated from
   the compact DLG logs), `SHOTS/Snnn.BMP`, `INFO/` (`CALIB.BIN`,
@@ -81,8 +84,14 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   `LOADER.BIN` raw region copies, `BACKUP.TXT` with CRC-32s and restore notes,
   `FIRMWARE.BIN` = the running firmware as a vendor update file),
   `DEBUG/SPIFLASH.BIN` (raw 16 MiB SPI flash image) and `README.TXT`. New
-  files appear by themselves (UNIT ATTENTION at once, also while mounted;
-  existing files keep their place). The W25Q128 SPI flash (stock FAT16,
+  files appear at the next mount (eject / re-plug; existing files keep their
+  place). Writable for two things only (`src/vwrite.rs`, docs/native-boot.md
+  "Host writes"): a delete of a LOGS / SCOPE / SHOTS file (also through the
+  trash: at the eject) deletes the SPI file; a `dm40*.bin` copied into the
+  root is checked as the loader does and the meter asks "Install it now?"
+  (Yes = DBG:UPDATE). Other writes fail (the hosts' own trash / indexer
+  files are kept for the session only). `DBG:VDISK:RO 1` = the read-only
+  volume (live updates while mounted, UNIT ATTENTION at once). The W25Q128 SPI flash (stock FAT16,
   4096-byte sectors) is internal storage: our files in `LOGS/`, `SHOTS/`,
   `SCOPE/` (`src/fatdir.rs`; files of earlier builds stay in its root and are
   shown too), the vendor loader's `dm40*.bin` and a write-once safety copy of

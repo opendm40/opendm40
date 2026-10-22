@@ -758,12 +758,25 @@ Firmware:
             directories (dm40scpi.py get LOGS/LOG000.CSV).
             If Explorer does not show new files after the UA: try a volume serial that changes with every
             refresh (Windows may key "same medium" on it).
-      - [ ] Follow-up: delete from the PC (a 0xE5 directory-entry write on the volume for a LOGS / SHOTS /
-            SCOPE file deletes the source; everything else refused), experimental. Not done: it needs the WP
-            bit cleared (with WP set Linux mounts ro and never writes), and then every host writes its own
-            files (.Trash-1000, System Volume Information, .fseventsd) into a volume that cannot store them:
-            the refusals must be per write, and the host's view of a refused write is an I/O error. Delete
-            on the meter (gallery) or with MMEM:DEL meanwhile.
+      - [x] Follow-ups (2026-10-22, src/vwrite.rs; docs/native-boot.md "Host writes"): the volume is
+            writable (no WP bit; DBG:VDISK:RO 1 = the read-only volume as before). Every 512-byte WRITE is
+            diffed against the generated sector: a LOGS / SCOPE / SHOTS delete (entry 0xE5 + chain freed ->
+            the SPI file deleted; a move to the trash = deleted at the eject), a DM40*.BIN in the root
+            (staged in free SPI clusters by content, any write order; checked as the loader does, linked as
+            DM40FW.BIN, dialog "Firmware received / Install it now?" Yes = DBG:UPDATE, No / 60 s =
+            deleted), the hosts' own trash / indexer / Finder files (kept for the session in hidden
+            _VHOSTnn.TMP files, deleted at the eject / next boot), dirty flags and dates; everything else
+            DATA PROTECT. Layout frozen while the host has it mounted (new recordings / screenshots appear
+            at the eject / re-plug: the cost of writability; a UNIT ATTENTION would make Linux drop writes).
+            Linux sequences captured with a real kernel (usbip_msc.py: rm, cp of 500 KB, trash + cp,
+            trash + empty) and replayed in run.sh; fsck after every scenario, power cuts in staging,
+            commit, park, purge. Emulator (real firmware, kernel attach): rm 2 files, cp 500 KB (47 s in
+            the emulator), dialog Yes -> reset into the loader.
+      - [ ] Device: Linux rm / Nautilus Delete (trash) / cp dm40fw.bin + Yes -> installed + No ->
+            DM40FW.BIN gone; DBG:VDISK:WR? after each; DBG:BOOT? STACK after a cp; SPIFLASH.BIN fsck; DMM
+            and a CSV recording during a cp (staging waits / busy retries); Windows Explorer (System
+            Volume Information, delete, copy) and macOS Finder (.fseventsd, .Trashes, ._ files): untested,
+            expected per docs/native-boot.md "Host OS notes".
 Emulator (emu/):
 - [ ] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
       use per function (from the rows / mux selections: e.g. which PA tap, SENSE, PB0..PB7, FB/RLU), not "the
