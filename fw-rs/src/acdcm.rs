@@ -92,7 +92,8 @@ pub struct Am {
     refd: u16,
     /// Parts refreshed since the last AUTO evaluation (bit 0 AC, 1 DC).
     fresh: u8,
-    /// Counters (DBG:ACDC:STAT?): AC results, DC results, readings.
+    /// Counters (DBG:ACDC:STAT?): AC results, DC results, AC+DC readings
+    /// (every method: dmm.rs `acdc_reading`).
     pub n_ac: u32,
     pub n_dc: u32,
     pub n_rd: u32,
@@ -289,7 +290,10 @@ impl Dmm {
         if self.am.meth == METH_C {
             if m == 0 {
                 let s = slot(m, self.range);
-                if self.am.ok & (1 << s) == 0 {
+                // E7's cal has one slot (dmm::dc_cal): a range visited
+                // before keeps its `ok` bit but lost the cal to another
+                // range, so it is measured again (~0.45 s).
+                if self.am.ok & (1 << s) == 0 || dc_cal(self.range).is_none() {
                     crate::ad2exp::dc_enter(1, r as u8, 0, true);
                     self.am.ok |= 1 << s;
                 }
@@ -341,9 +345,6 @@ impl Dmm {
             // The method row: MEAS (`am_mode`: a reference taken).
             self.switch_phase(clk, m, r, if m == 0 { 450 } else { 550 });
             self.avg.reset();
-        }
-        if rd.is_some() {
-            self.am.n_rd += 1;
         }
         rd
     }
@@ -491,7 +492,6 @@ impl Dmm {
         if !v {
             self.freq_secondary(now, 0xF0);
         }
-        self.am.n_rd += 1;
         Some(self.acdc_reading(lim, dec, unit, si_k))
     }
 
