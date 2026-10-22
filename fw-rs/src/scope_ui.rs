@@ -204,7 +204,27 @@ pub struct Model {
     pub runt_row: Option<i16>,
     /// fw-rs cursor tab (UF-08): 0 hidden, else CUR_OFF / CUR_X / CUR_Y.
     pub cur_tab: u8,
+    /// Source badge (fw-rs, the DMM wave view, src/app_wave.rs): SRC_NONE
+    /// (the stock page: no badge, builds without the AD2 stream ISR),
+    /// SRC_MCX or SRC_DMM (the active half filled).
+    pub src: u8,
+    /// Source DMM: the unit of the vertical values is A (current rows).
+    pub amps: bool,
+    /// Source DMM: the V/div value (SI, `fmt_div`: "2V", "200uA") and the
+    /// CH1 label ("AC mA"); 0 / "" = the stock texts from `vdiv` / "CHA".
+    pub wvdiv: f32,
+    pub ch1_txt: &'static str,
 }
+
+/// `Model::src` values.
+pub const SRC_NONE: u8 = 0;
+pub const SRC_MCX: u8 = 1;
+pub const SRC_DMM: u8 = 2;
+/// The source badge (left part of the record-bar slot when shown) and the
+/// record bar then (fw-rs: the stock bar is 145..282).
+pub const SRC_BADGE: Rect = rect(145, 1, 64, 17);
+const REC_BAR: Rect = rect(145, 1, 137, 17);
+const REC_BAR_SRC: Rect = rect(212, 1, 70, 17);
 
 /// Cursor tab states (`Model::cur_tab`).
 pub const CUR_OFF: u8 = 1;
@@ -265,6 +285,10 @@ impl Model {
         fft: None,
         runt_row: None,
         cur_tab: 0,
+        src: SRC_NONE,
+        amps: false,
+        wvdiv: 0.0,
+        ch1_txt: "",
     };
 
     pub fn pal(&self) -> Color {
@@ -296,6 +320,18 @@ impl Model {
     /// Coupling / probe glyph of font 0x08054fc0.
     pub fn probe_glyph(&self) -> u32 {
         (if self.ac { 0x2c } else { 0x2d }) + 2 * self.probe as u32
+    }
+    /// The V/div text (`vtxt`, else the stock label).
+    pub fn vdiv_str(&self, out: &mut Buf) {
+        if self.wvdiv > 0.0 {
+            fmt_div(out, self.wvdiv, self.unit());
+        } else {
+            vdiv_text(out, self.vdiv);
+        }
+    }
+    /// Unit of the vertical values ("V", source DMM current rows "A").
+    pub fn unit(&self) -> &'static str {
+        if self.amps { "A" } else { "V" }
     }
 }
 
@@ -372,6 +408,23 @@ pub fn fmt_v(out: &mut Buf, v: f32, unit: &str) {
     out.push(crate::dmm::format(&mut t, x, dec)).push(P[i]).push(unit);
 }
 
+/// A 1-2-5 per-division value with its prefix and unit ("2V", "200mV",
+/// "200uA", "5A"; the DMM wave view's V/div).
+pub fn fmt_div(out: &mut Buf, v: f32, unit: &str) {
+    const P: [&str; 5] = ["u", "m", "", "k", "M"];
+    let (mut x, mut i) = (v * 1.000_01, 2usize);
+    while x >= 1000.0 && i < 4 {
+        x /= 1000.0;
+        i += 1;
+    }
+    while x < 1.0 && i > 0 {
+        x *= 1000.0;
+        i -= 1;
+    }
+    let mut t = [0u8; 16];
+    out.push(crate::dmm::format(&mut t, (x as u32) as f32, 0)).push(P[i]).push(unit);
+}
+
 /// "1V", "200mV": the V/div label and unit.
 pub fn vdiv_text(out: &mut Buf, vdiv: u8) {
     out.push(VDIV_LABELS[vdiv.min(21) as usize]).push("V");
@@ -427,9 +480,16 @@ pub fn tb_badge(m: &Model) {
 /// 2.3 record-position bar; while running (record = screen) it shows the
 /// generator frequency instead of the constant full-record line when the
 /// generator is on (fw-rs addition, 12 px grey like "ROLL").
+/// The record bar's box (shorter beside the source badge).
+pub fn record_bar_rect(m: &Model) -> Rect {
+    if m.src == SRC_NONE { REC_BAR } else { REC_BAR_SRC }
+}
+
 pub fn record_bar(m: &Model) {
-    let r = rect(145, 1, 137, 17);
-    let inner = rect(146, 2, 135, 15);
+    let r = record_bar_rect(m);
+    let inner = rect(r.x + 1, 2, r.w - 2, 15);
+    // Bar scale (px of the full record) and its left inset: the stock 129 / 4.
+    let (sw, x0s) = (r.w as f32 - 8.0, r.x);
     let running = m.status != ST_STOP;
     let mut b = Buf::new();
     let (txt, line, lb, rb);
@@ -444,11 +504,11 @@ pub fn record_bar(m: &Model) {
     } else {
         txt = Ink::none();
         let (start, end) = if running { (0.0, 1.0) } else { m.record };
-        let x0 = if start < 0.0 { 4 } else { (start * 129.0 + 4.0) as i16 };
-        let len = (((end.min(1.0) - start.max(0.0)) * 129.0) as i16).max(0);
-        line = Some((145 + x0, len));
-        lb = if (0.0..1.0).contains(&start) { Ink::new(sf::SC_F12, rect(145 + x0 - 2, 2, 4, 17), "[", 1, 0) } else { Ink::none() };
-        rb = if end <= 1.0 { Ink::new(sf::SC_F12, rect(145 + (end * 129.0 + 4.0) as i16 - 4, 2, 4, 17), "]", 1, 0) } else { Ink::none() };
+        let x0 = if start < 0.0 { 4 } else { (start * sw + 4.0) as i16 };
+        let len = (((end.min(1.0) - start.max(0.0)) * sw) as i16).max(0);
+        line = Some((x0s + x0, len));
+        lb = if (0.0..1.0).contains(&start) { Ink::new(sf::SC_F12, rect(x0s + x0 - 2, 2, 4, 17), "[", 1, 0) } else { Ink::none() };
+        rb = if end <= 1.0 { Ink::new(sf::SC_F12, rect(x0s + (end * sw + 4.0) as i16 - 4, 2, 4, 17), "]", 1, 0) } else { Ink::none() };
     }
     let layers = [(K_SHAPE, C_BAR), (K_SHAPE, C_FRAME), (K_TEXT, C_FILL), (K_SHAPE, C_FILL), (K_ICON, C_FILL), (K_ICON, C_FILL)];
     paint(r, &layers, |x, y| {
@@ -476,6 +536,42 @@ pub fn record_bar(m: &Model) {
     });
 }
 
+/// Source badge (`Model::src` != SRC_NONE): "MCX | DMM", the active half
+/// in the CH1 colour with dark text, the other dark with grey text.
+pub fn src_badge(m: &Model) {
+    if m.src == SRC_NONE {
+        return;
+    }
+    let r = SRC_BADGE;
+    let half = r.w / 2;
+    let a = Ink::new(sf::SC_F12, rect(r.x, 1, half, 17), "MCX", 8, 0);
+    let b = Ink::new(sf::SC_F12, rect(r.x + half, 1, r.w - half, 17), "DMM", 8, 0);
+    let dmm = m.src == SRC_DMM;
+    let on = m.pal();
+    let (fa, fb) = if dmm { (C_FILL, on) } else { (on, C_FILL) };
+    let (ta, tb) = if dmm { (C_FRAME, C_FILL) } else { (C_FILL, C_FRAME) };
+    paint(r, &[(K_SHAPE, C_BAR), (K_SHAPE, fa), (K_SHAPE, fb), (K_TEXT, fa), (K_TEXT, fb)], |x, y| {
+        let left = x < r.x + half;
+        if let Some(g) = a.at(x, y) {
+            return (ta, tag(4, g));
+        }
+        if let Some(g) = b.at(x, y) {
+            return (tb, tag(5, g));
+        }
+        if in_rbox(r, 5, 0x0f, x, y) {
+            if on_ring(r, 5, 0x0f, x, y) || x == r.x + half {
+                (C_FRAME, tag(1, 0))
+            } else if left {
+                (fa, tag(2, 0))
+            } else {
+                (fb, tag(3, 0))
+            }
+        } else {
+            (C_BAR, 0)
+        }
+    });
+}
+
 /// "1.00kHz" (FUN_08032fa4 style, Hz .. MHz).
 pub fn fmt_hz(out: &mut Buf, hz: f32) {
     let (x, p) = if hz >= 1e6 {
@@ -495,7 +591,7 @@ pub fn fmt_hz(out: &mut Buf, hz: f32) {
 /// 2.4 CH1 V/div badge.
 pub fn vdiv_badge(m: &Model) {
     let mut b = Buf::new();
-    vdiv_text(&mut b, m.vdiv);
+    m.vdiv_str(&mut b);
     let p = Ink::icon(sf::SC_PROBE, rect(286, 1, 18, 17), m.probe_glyph(), 4);
     let t = Ink::new(sf::SC_F12, rect(304, 1, 44, 17), b.as_str(), 8, 0);
     badge(rect(286, 1, 62, 17), m.pal(), C_BAR, None, &[(&p, C_FILL), (&t, C_FILL)]);
@@ -504,7 +600,7 @@ pub fn vdiv_badge(m: &Model) {
 /// 2.5 trigger badge: edge glyph and level.
 pub fn trig_badge(m: &Model) {
     let mut b = Buf::new();
-    fmt_v(&mut b, m.trig_v, "V");
+    fmt_v(&mut b, m.trig_v, m.unit());
     let e = Ink::icon(sf::SC_EDGE, rect(352, 1, 12, 17), if m.rising { 0x20 } else { 0x21 }, 4);
     let t = Ink::new(sf::SC_F12, rect(364, 1, 50, 17), b.as_str(), 8, 0);
     badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, m.pal()), (&t, m.pal())]);
@@ -536,7 +632,7 @@ pub fn panel_button(m: &Model, k: usize) {
     let pal = m.pal();
     let mc = if m.math_on { m.math_pal() } else { C_FRAME };
     let mut b = Buf::new();
-    vdiv_text(&mut b, m.vdiv);
+    m.vdiv_str(&mut b);
     let pressed = m.pressed as usize == k + 1;
     let (fill, radius, mask, fg) = match k {
         0 => (pal, 8, 0x3, C_FILL),
@@ -559,7 +655,10 @@ pub fn panel_button(m: &Model, k: usize) {
         0 | 2 => (Ink::none(), Ink::none()),
         3 => (Ink::new(sf::SC_F20, r, "+", 8, 0), Ink::none()),
         5 => (Ink::new(sf::SC_F20, r, "-", 8, 0), Ink::none()),
-        1 => (Ink::new(sf::SC_F20, rect(417, 61, 60, 24), "CHA", 8, 0), Ink::new(sf::SC_F12, rect(417, 85, 60, 16), b.as_str(), 8, 0)),
+        1 => {
+            let (f, t) = if m.ch1_txt.is_empty() { (sf::SC_F20, "CHA") } else { (sf::SC_F16, m.ch1_txt) };
+            (Ink::new(f, rect(417, 61, 60, 24), t, 8, 0), Ink::new(sf::SC_F12, rect(417, 85, 60, 16), b.as_str(), 8, 0))
+        }
         4 => {
             // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
             // math_scale shows the stock defaults.
@@ -628,6 +727,7 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
 pub fn top_bar(m: &Model) {
     status_badge(m);
     tb_badge(m);
+    src_badge(m);
     record_bar(m);
     vdiv_badge(m);
     trig_badge(m);
@@ -1498,14 +1598,21 @@ pub fn update(m: &Model) {
     if d(ol.tb != m.tb || ol.tb_flash != m.tb_flash) {
         tb_badge(m);
     }
-    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz) {
+    let pal = ol.colour != m.colour;
+    if o.is_some_and(|o| o.src != m.src) {
+        // The record bar moves (beside the badge or not): clear the slot.
+        lcd::fill_rect(REC_BAR.x as u16, 0, REC_BAR.w as u16, 20, C_BAR);
+    }
+    if d(ol.src != m.src || (m.src != SRC_NONE && pal)) {
+        src_badge(m);
+    }
+    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.src != m.src) {
         record_bar(m);
     }
-    let pal = ol.colour != m.colour;
-    if d(pal || ol.vdiv != m.vdiv || ol.probe != m.probe || ol.ac != m.ac) {
+    if d(pal || ol.vdiv != m.vdiv || ol.probe != m.probe || ol.ac != m.ac || ol.wvdiv != m.wvdiv) {
         vdiv_badge(m);
     }
-    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising) {
+    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps) {
         trig_badge(m);
     }
     if d(ol.battery != m.battery || ol.charging != m.charging) {
@@ -1515,9 +1622,9 @@ pub fn update(m: &Model) {
         let was = |mm: &Model| mm.pressed as usize == k + 1;
         let dep = match k {
             0 | 2 => pal,
-            1 => pal || ol.vdiv != m.vdiv || ol.ch1_open != m.ch1_open,
+            1 => pal || ol.vdiv != m.vdiv || ol.ch1_open != m.ch1_open || ol.wvdiv != m.wvdiv || ol.ch1_txt != m.ch1_txt,
             3 | 5 => ol.math_on != m.math_on || ol.math_colour != m.math_colour,
-            4 => ol.vdiv != m.vdiv || ol.math_open != m.math_open || ol.math_mode != m.math_mode || ol.math_on != m.math_on || ol.math_colour != m.math_colour || ol.math_scale != m.math_scale,
+            4 => ol.vdiv != m.vdiv || ol.wvdiv != m.wvdiv || ol.math_open != m.math_open || ol.math_mode != m.math_mode || ol.math_on != m.math_on || ol.math_colour != m.math_colour || ol.math_scale != m.math_scale,
             _ => false,
         };
         if d(dep || was(&ol) != was(m)) {
@@ -1861,7 +1968,14 @@ pub fn top_badge(x: u16, y: u16) -> Option<u8> {
         return None;
     }
     let x = x as i16;
+    // (The source badge: `src_hit`, the app knows whether it is shown.)
     [RUN_BADGE, TB_BADGE, VDIV_BADGE, TRIG_BADGE].iter().position(|r| x >= r.x && x < r.x + r.w).map(|k| k as u8)
+}
+
+/// The source badge (when shown) was hit.
+pub fn src_hit(x: u16, y: u16) -> bool {
+    let r = SRC_BADGE;
+    y < 20 && (x as i16) >= r.x && (x as i16) < r.x + r.w
 }
 
 /// Corners hold repeat: the `done`-th repeat (0-based) of a press at `t0`

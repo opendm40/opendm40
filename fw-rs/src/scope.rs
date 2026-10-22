@@ -304,6 +304,169 @@ pub struct Scope {
     /// The stored record is being read (scope CSV, scope_csv.rs): `apply`
     /// keeps the scope stopped, so BUF is not overwritten.
     pub hold: bool,
+    /// Source DMM (the wave view, `wave_enter`): the record is the HY3131
+    /// AD2 stream drained from the logger ring (`WaveSource`), not the MCX
+    /// DMA; `wv` its state, `mcx` the MCX settings to restore on exit.
+    wave: bool,
+    /// Code -> SI of the stored record (wave: `stored_ab`, the scale it
+    /// was captured with).
+    stored_ab: (f32, f32),
+}
+
+/// The DMM-input source of the scope page (docs/dmm-input-scope-
+/// feasibility.md 5.2 point 3): what the record needs from the AD2 stream.
+/// Implemented over src/logger.rs `wave` (the ring the stream ISR fills
+/// and the ISR's trigger, trigsoft::Stream on every sample) in app.rs; a
+/// host test can feed synthetic samples.
+pub trait WaveSource {
+    /// Pop every buffered AD2 sample (19-bit signed, oldest first).
+    fn drain(&mut self, f: &mut dyn FnMut(i32)) -> u32;
+    /// Holes in the stream so far (ring full, conversions the ISR missed):
+    /// a change restarts the record after the hole.
+    fn dropped(&self) -> u32;
+    /// Trigger configuration for the ISR (`min`: the first sample index
+    /// `first` reports); its generation.
+    fn set_trigger(&mut self, c: &crate::trigsoft::StreamCfg, min: u32) -> u32;
+    fn trigger_off(&mut self);
+    /// Events (sample indices) since `*seen`, oldest first.
+    fn events(&mut self, seen: &mut u32, f: &mut dyn FnMut(u32));
+    fn event_count(&self) -> u32;
+    /// The first event at or after the minimum of generation `gen`.
+    fn first(&self, gen: u32) -> Option<u32>;
+}
+
+/// The DMM wave view's timebases: 5 ms/div (index 17) .. 50 s/div, roll
+/// from 200 ms/div as the MCX scope (docs/dmm-input-scope-feasibility.md
+/// 3.1: the AD2 band is ~0.25 x the rate, nothing faster to show).
+pub const WAVE_TB_MIN: usize = 17;
+
+/// AD2 rate (a hy3131::ad2_r26_for rung) for a wave timebase: >= 400
+/// samples per screen up to 20 ms/div, 9600 S/s (~22 % CPU, decision #3's
+/// opt-in rate) only at 5 ms/div.
+pub const fn wave_fs_for(tb: usize) -> u32 {
+    match tb {
+        0..=17 => 9600,
+        18 | 19 => 4800,
+        20 | 21 => 2400,
+        _ => 1200,
+    }
+}
+
+/// Smallest 1-2-5 step with 4 divisions >= `full` (the DMM range full
+/// scale fills the half screen): 6 V -> 2 V/div, 600 mV -> 200 mV/div,
+/// 1000 V -> 500 V/div, 10 A -> 5 A/div, 600 uA -> 200 uA/div.
+pub fn wave_vdiv(full: f32) -> f32 {
+    let mut d = 1e-9f32;
+    while d < 1e6 {
+        for k in [1.0f32, 2.0, 5.0] {
+            if 4.0 * d * k >= full * 0.999 {
+                return d * k;
+            }
+        }
+        d *= 10.0;
+    }
+    full / 4.0
+}
+
+/// Minimum interval between two triggered wave frames (ms): the drawing,
+/// not the trigger, is the limit (25 frames/s).
+const WAVE_FRAME_MS: u64 = 40;
+
+/// Scale of a wave record: SI = a + b * code (10-bit code, trigsoft::
+/// ad2_code10), the V/div, unit and coupling (dmm::Ad2Scale).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct WaveScale {
+    pub a: f32,
+    pub b: f32,
+    pub vdiv: f32,
+    pub amps: bool,
+    pub ac: bool,
+}
+
+impl WaveScale {
+    /// From the raw-code scale (SI = raw * per_code - offset): a code
+    /// stands for the centre of its 512 raw codes.
+    pub fn of(per_code: f32, offset: f32, full: f32, amps: bool, ac: bool) -> WaveScale {
+        let b = 512.0 * per_code;
+        WaveScale { a: (256.0 - 512.0 * 512.0) * per_code - offset, b, vdiv: wave_vdiv(full), amps, ac }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Wave {
+    sc: WaveScale,
+    /// Rate of the stream the record is taken at; `restart`: the app must
+    /// (re)start the stream at `fs` (`take_wave_restart`); `live`: it runs
+    /// at `fs` and the record follows it (`wave_live`).
+    fs: u32,
+    restart: bool,
+    live: bool,
+    /// Samples drained this stream (= the ring / ISR sample index, u64),
+    /// the index stored at BUF[0] (slot of n = (n - slot0) % CAP), the
+    /// first index of the current record (after a resync), the ring's drop
+    /// count seen.
+    tot: u64,
+    slot0: u64,
+    first: u64,
+    dropped: u32,
+    /// Discard the backlog at the next arm (after STOP, a drop).
+    stale: bool,
+    /// Trigger: ISR generation, events seen, the earliest index the next
+    /// frame may trigger at, an incomplete candidate (post part not in),
+    /// a complete one waiting for the frame interval.
+    gen: u32,
+    seen: u32,
+    next_min: u64,
+    pend: Option<u64>,
+    ready: Option<u64>,
+    last_emit: u64,
+    /// The last frame shown: its centre index and trigger (STOP keeps it).
+    shown: Option<(u64, Option<u64>)>,
+    /// Roll: samples per column, the current column's min / max and count.
+    per: u32,
+    racc: (u16, u16),
+    rn: u32,
+    /// Settings of the wave view (kept across entries, `wave_exit`) and
+    /// the MCX settings to restore.
+    s: Settings,
+    mcx: Settings,
+}
+
+/// The wave state: a static (TCM .bss: it shortens the stack by its size,
+/// as a field of `Scope` in the App on the main stack would; SRAM has less
+/// room left). `Scope::new` initialises it.
+static mut WAVE: Wave = Wave::NEW;
+
+fn wv() -> &'static mut Wave {
+    // SAFETY: main loop only (the ISR never sees it), no reference kept
+    // across a call that takes another.
+    unsafe { &mut *core::ptr::addr_of_mut!(WAVE) }
+}
+
+impl Wave {
+    const NEW: Wave = Wave {
+        sc: WaveScale { a: 0.0, b: 1.0, vdiv: 1.0, amps: false, ac: false },
+        fs: 4800,
+        restart: false,
+        live: false,
+        tot: 0,
+        slot0: 0,
+        first: 0,
+        dropped: 0,
+        stale: true,
+        gen: 0,
+        seen: 0,
+        next_min: 0,
+        pend: None,
+        ready: None,
+        last_emit: 0,
+        shown: None,
+        per: 1,
+        racc: (u16::MAX, 0),
+        rn: 0,
+        s: Settings { tb: 18, trig_row: 140, ..Settings::DEFAULT },
+        mcx: Settings::DEFAULT,
+    };
 }
 
 impl Scope {
@@ -372,7 +535,10 @@ impl Scope {
             status_new: true,
             last_frame: 0,
             hold: false,
+            wave: false,
+            stored_ab: (0.0, 1.0),
         };
+        *wv() = Wave::NEW;
         sc.hw.init();
         // Comparator trigger on by default (the stock always uses it): the
         // software search of a linear record only covers CAP - screen = 1624
@@ -463,6 +629,10 @@ impl Scope {
     /// sample map and the displayed V/div only"), so a probe change while
     /// stopped relabels the stored trace without moving it.
     pub fn volts(&self, code: f32) -> f32 {
+        if self.wave {
+            let (a, b) = if !self.s.run && self.stored_valid { self.stored_ab } else { (wv().sc.a, wv().sc.b) };
+            return a + b * code;
+        }
         let r = self.code_range();
         let (g0, g1) = self.gain(r);
         self.v_centre() + (code - g1) * XR[r] / (g0 - g1) * self.s.probe
@@ -470,7 +640,12 @@ impl Scope {
 
     /// Volts -> screen row (FUN_08030146): 140 + pos - 141 v / (4 V/div).
     pub fn row_of_volts(&self, v: f32) -> f32 {
-        140.0 + self.s.pos as f32 - 141.0 * v / (4.0 * VDIV[self.s.range] * self.s.probe)
+        140.0 + self.s.pos as f32 - 141.0 * v / (4.0 * self.vdiv())
+    }
+
+    /// Volts (wave: SI, V or A) per division at the probe tip / the jacks.
+    pub fn vdiv(&self) -> f32 {
+        if self.wave { wv().sc.vdiv } else { VDIV[self.s.range] * self.s.probe }
     }
 
     pub fn row_of_code(&self, code: f32) -> f32 {
@@ -478,7 +653,7 @@ impl Scope {
     }
 
     pub fn trig_volts(&self) -> f32 {
-        (140.0 + self.s.pos as f32 - self.s.trig_row as f32) * 4.0 * VDIV[self.s.range] * self.s.probe / 141.0
+        (140.0 + self.s.pos as f32 - self.s.trig_row as f32) * 4.0 * self.vdiv() / 141.0
     }
 
     /// Trigger level in ADC codes of the live range: relative to the centre
@@ -493,6 +668,12 @@ impl Scope {
 
     /// ADC code of a level row (trig_code; the runt's second level).
     fn code_of_row(&self, row: i32) -> i32 {
+        if self.wave {
+            // The wave codes are not shifted by the position (no offset
+            // PWM): the level row's SI value through the live scale.
+            let c = (self.row_volts(row) - wv().sc.a) / wv().sc.b;
+            return if c.is_finite() { c.clamp(-100.0, 1124.0) as i32 } else { 512 };
+        }
         let r = self.s.range;
         let (g0, g1) = self.gain(r);
         let dv = (140.0 - row as f32) * 4.0 * VDIV[r] / 141.0;
@@ -501,7 +682,7 @@ impl Scope {
 
     /// Volts of a level row (the runt's second level).
     pub fn row_volts(&self, row: i32) -> f32 {
-        (140.0 + self.s.pos as f32 - row as f32) * 4.0 * VDIV[self.s.range] * self.s.probe / 141.0
+        (140.0 + self.s.pos as f32 - row as f32) * 4.0 * self.vdiv() / 141.0
     }
 
     /// Software trigger of a pulse / runt type in a linear record: the
@@ -564,7 +745,7 @@ impl Scope {
         // the YT maximum too: at 2..50 s/div a full linear record would take
         // 21..532 s with nothing drawn until it completes.
         let top = if self.roll && s.mode != TrigMode::Single { TB_MAX } else { TB_YT_MAX };
-        s.tb = s.tb.clamp(TB_MIN, top);
+        s.tb = s.tb.clamp(if self.wave { WAVE_TB_MIN } else { TB_MIN }, top);
         // Stop-and-zoom: while stopped any change re-renders the stored record
         // at the new settings. The timebase is never clamped to the captured
         // extent: zooming out past it shows the record at the true scale with
@@ -590,6 +771,24 @@ impl Scope {
         let o = &self.s;
         if s.range != o.range || s.tb != o.tb || s.ac != o.ac || s.rising != o.rising || s.mode != o.mode || s.ttype != o.ttype {
             self.hw.resume();
+        }
+        if self.wave {
+            // No MCX hardware: the record's scale and coupling are the DMM
+            // row's, the probe does not apply; a timebase in another rate
+            // band restarts the stream (the app, `take_wave_restart`).
+            s.ac = wv().sc.ac;
+            s.probe = 1.0;
+            self.s = s;
+            let fs = wave_fs_for(s.tb);
+            if fs != wv().fs {
+                wv().fs = fs;
+                wv().restart = true;
+                wv().live = false;
+            }
+            self.screen = ((25_000u64 * fs as u64 / TB[s.tb].0.max(1) as u64) as usize).clamp(2, CAP - 2600);
+            self.rec = CAP;
+            self.deadline = 0;
+            return;
         }
         self.s = s;
         let g = GPIO_ROW[s.range];
@@ -656,6 +855,9 @@ impl Scope {
     ///    coordinator 2026-10-21): with Auto and no trigger event, nearly
     ///    every STOP lands mid-acquisition.
     fn freeze(&mut self, now: u64) -> bool {
+        if self.wave {
+            return self.wave_freeze();
+        }
         let was_busy = self.busy;
         let was_rolling = self.rolling;
         let was_hw = self.hw_mode;
@@ -711,6 +913,7 @@ impl Scope {
         self.stored_roll = roll;
         self.stored_anchor = anchor.min(len - 1);
         self.stored_trig = trig;
+        self.stored_ab = (wv().sc.a, wv().sc.b);
         self.stored_valid = true;
     }
 
@@ -1002,12 +1205,12 @@ impl Scope {
     }
 
     pub fn sample_rate(&self) -> u32 {
-        TB[self.s.tb].0
+        if self.wave { wv().fs } else { TB[self.s.tb].0 }
     }
 
     /// Display points per sample (> 1 below 1 us/div).
     pub fn ppp(&self) -> u32 {
-        TB[self.s.tb].3
+        if self.wave { 1 } else { TB[self.s.tb].3 }
     }
 
     /// Zoom anchor of the stored record (sample index at the screen centre),
@@ -1120,8 +1323,14 @@ impl Scope {
     /// roll); Normal / Single fall back to WAIT when nothing triggered for a
     /// timeout plus a screen (stock Normal expiry: status WAIT).
     pub fn poll(&mut self, now: u64) -> Option<Frame<'static>> {
+        self.poll_src(now, None)
+    }
+
+    /// `poll` with the wave source (source DMM: the record comes from
+    /// `src`; None there = nothing new).
+    pub fn poll_src(&mut self, now: u64, src: Option<&mut dyn WaveSource>) -> Option<Frame<'static>> {
         let live = self.s.run;
-        let f = self.poll_frame(now);
+        let f = self.poll_frame(now, src);
         if live {
             match &f {
                 Some(fr) => {
@@ -1141,7 +1350,7 @@ impl Scope {
         f
     }
 
-    fn poll_frame(&mut self, now: u64) -> Option<Frame<'static>> {
+    fn poll_frame(&mut self, now: u64, src: Option<&mut dyn WaveSource>) -> Option<Frame<'static>> {
         if !self.s.run {
             // Stopped: re-render the stored record (stock STOP "keeps redrawing
             // the stored record", §4) once per change (zoom_pending: a settings
@@ -1152,6 +1361,9 @@ impl Scope {
                 return self.zoom_frame();
             }
             return None;
+        }
+        if self.wave {
+            return src.and_then(|s| self.wave_frame(now, s));
         }
         if !self.powered || now < self.relay_until {
             return None;
@@ -1456,6 +1668,361 @@ impl Scope {
             }
         }
         None
+    }
+}
+
+// ------------------------------------------------------- source DMM (wave)
+//
+// The wave view (docs/dmm-input-scope-feasibility.md 5.2, TODO (A)): the
+// record is the HY3131 AD2 stream of the DMM's AC row, drained every poll
+// from the logger ring into BUF as a continuous circular record (10-bit
+// codes, trigsoft::ad2_code10), so the pre-trigger history is always there
+// and nothing is lost between frames (the ring holds 2048 samples, 213 ms
+// at 9600 S/s, against main-loop passes of <= 25 ms). The trigger is
+// detected per sample in the stream ISR (trigsoft::Stream, the same edge /
+// pulse / runt rules as the MCX software search) and reported as sample
+// indices: no dead time. Frames are linear windows of BUF (rotated so the
+// oldest sample is at 0), so the renderer, the measurements, the stored
+// record (STOP, zoom, CSV) and roll work as for the MCX record.
+impl Scope {
+    /// Source DMM on (the MCX acquisition stops; its settings are kept for
+    /// `wave_exit`); the wave view's own settings come back.
+    pub fn wave_enter(&mut self, sc: WaveScale, now: u64) {
+        if self.wave {
+            self.wave_scale(sc);
+            return;
+        }
+        self.halt();
+        let ws = wv().s;
+        *wv() = Wave::NEW;
+        wv().s = ws;
+        wv().mcx = self.s;
+        self.stored_valid = false;
+        self.wave = true;
+        wv().sc = sc;
+        wv().fs = 0; // apply: restart at the timebase's rate
+        let mut s = ws;
+        s.run = true;
+        s.range = wv().mcx.range;
+        self.apply(s, now);
+    }
+
+    /// Back to the MCX source with its settings (the stored wave record is
+    /// dropped: BUF belongs to the MCX acquisition again).
+    pub fn wave_exit(&mut self, now: u64) {
+        if !self.wave {
+            return;
+        }
+        self.halt();
+        wv().s = self.s;
+        self.wave = false;
+        self.stored_valid = false;
+        self.hold = false;
+        let m = wv().mcx;
+        self.apply(m, now);
+    }
+
+    pub fn wave_on(&self) -> bool {
+        self.wave
+    }
+
+    /// The settings to persist: the MCX ones while the wave view runs.
+    pub fn mcx_settings(&self) -> Settings {
+        if self.wave { wv().mcx } else { self.s }
+    }
+
+    pub fn wave_scale_now(&self) -> WaveScale {
+        wv().sc
+    }
+
+    /// New DMM range / function scale: the record restarts (the app
+    /// restarts the stream on the new row, then `wave_live`).
+    pub fn wave_scale(&mut self, sc: WaveScale) {
+        wv().sc = sc;
+        self.s.ac = sc.ac;
+        wv().live = false;
+        self.busy = false;
+        // Stopped: the stored record stays (its own scale, `stored_ab`),
+        // drawn at the new V/div.
+        if self.s.run {
+            self.stored_valid = false;
+        }
+    }
+
+    /// The stream has to be (re)started at this rate (once).
+    pub fn take_wave_restart(&mut self) -> Option<u32> {
+        if self.wave && wv().restart {
+            wv().restart = false;
+            return Some(wv().fs);
+        }
+        None
+    }
+
+    /// Rate the wave view wants (0 = none).
+    pub fn wave_fs(&self) -> u32 {
+        if self.wave { wv().fs } else { 0 }
+    }
+
+    /// The stream was (re)started at `wave_fs` with a fresh ring (index 0).
+    pub fn wave_live(&mut self) {
+        let w = wv();
+        // A new ring: every index (record, trigger) starts again at 0.
+        (w.tot, w.slot0, w.first, w.dropped, w.seen, w.next_min) = (0, 0, 0, 0, 0, 0);
+        (w.pend, w.ready, w.gen) = (None, None, 0);
+        w.stale = false;
+        w.live = true;
+        w.shown = None;
+        self.busy = false;
+        if self.s.run {
+            self.stored_valid = false;
+        }
+    }
+
+    /// The stream is not running (stopped behind the view's back).
+    pub fn wave_dead(&mut self) {
+        wv().live = false;
+        self.busy = false;
+    }
+
+    /// Arm a wave acquisition: the record resynchronised when stale (the
+    /// backlog thrown away), roll set up, the ISR trigger configured.
+    fn wave_start(&mut self, now: u64, src: &mut dyn WaveSource) {
+        if wv().stale {
+            let n = src.drain(&mut |_| {});
+            let w = wv();
+            w.tot += n as u64;
+            w.slot0 = w.tot;
+            w.first = w.tot;
+            w.dropped = src.dropped();
+            w.stale = false;
+            w.shown = None;
+            self.stored_valid = false;
+        }
+        self.rolling = self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single;
+        let (pre, _) = self.hw_split();
+        let w = wv();
+        w.pend = None;
+        w.ready = None;
+        w.next_min = w.next_min.max(w.first + pre as u64);
+        if self.rolling {
+            w.per = (self.screen / COLS).max(1) as u32;
+            w.racc = (u16::MAX, 0);
+            w.rn = 0;
+            unsafe { (*core::ptr::addr_of_mut!(ROLL_COLS)).fill((u16::MAX, u16::MAX)) };
+            self.roll_next = now;
+            src.trigger_off();
+            w.gen = 0;
+        } else {
+            let st = self.s;
+            let (wlo, whi) = crate::trigsoft::pulse_window(st.pcond, st.pwidth * w.fs as f32);
+            let c = crate::trigsoft::StreamCfg {
+                ttype: st.ttype,
+                rising: st.rising,
+                l: self.trig_code(),
+                l2: self.code_of_row(st.runt_row),
+                wlo,
+                whi,
+            };
+            // Single: the first event after the pre-trigger history; the
+            // others pick from the event list (`wave_frame`).
+            let min = if st.mode == TrigMode::Single { wv().first + pre as u64 } else { 0 };
+            wv().gen = src.set_trigger(&c, min as u32);
+            wv().seen = src.event_count();
+        }
+        self.deadline = now + self.auto_timeout();
+        self.busy = true;
+    }
+
+    /// Ring -> BUF (and the roll columns).
+    fn wave_drain(&mut self, src: &mut dyn WaveSource) {
+        let buf = unsafe { &mut *core::ptr::addr_of_mut!(BUF) };
+        let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
+        let w = wv();
+        let (slot0, mut tot) = (w.slot0, w.tot);
+        let roll = self.rolling;
+        let (per, mut acc, mut rn) = (w.per, w.racc, w.rn);
+        src.drain(&mut |raw| {
+            let c = crate::trigsoft::ad2_code10(raw) as u16;
+            buf[(tot.wrapping_sub(slot0) % CAP as u64) as usize] = c;
+            tot += 1;
+            if roll {
+                acc = (acc.0.min(c), acc.1.max(c));
+                rn += 1;
+                if rn >= per {
+                    cols.copy_within(1.., 0);
+                    cols[COLS - 1] = acc;
+                    acc = (u16::MAX, 0);
+                    rn = 0;
+                }
+            }
+        });
+        (w.tot, w.racc, w.rn) = (tot, acc, rn);
+    }
+
+    /// Oldest index in BUF.
+    fn wave_oldest(&self) -> u64 {
+        wv().first.max(wv().tot.saturating_sub(CAP as u64))
+    }
+
+    /// Rotate BUF so the record runs oldest -> newest from 0; its length.
+    fn wave_linear(&mut self) -> usize {
+        let oldest = self.wave_oldest();
+        let r = (oldest.wrapping_sub(wv().slot0) % CAP as u64) as usize;
+        if r != 0 {
+            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(r) };
+        }
+        wv().slot0 = oldest;
+        (wv().tot - oldest) as usize
+    }
+
+    /// Show the screen around trigger index `t` (None: the newest screen,
+    /// untriggered) as the stored record's window.
+    fn wave_emit(&mut self, now: u64, t: Option<u64>) -> Option<Frame<'static>> {
+        let len = self.wave_linear();
+        let base = wv().slot0;
+        let (pre, _) = self.hw_split();
+        if len < self.screen {
+            return None;
+        }
+        let start = match t {
+            Some(t) => (t - pre as u64 - base) as usize,
+            None => len - self.screen,
+        };
+        let trig = t.map(|_| start + pre);
+        self.snapshot_mark(len, start + self.screen / 2, trig, false);
+        wv().shown = Some((base + (start + self.screen / 2) as u64, t));
+        wv().last_emit = now;
+        self.deadline = now + self.auto_timeout();
+        if let Some(t) = t {
+            wv().next_min = t + 1;
+            if self.s.mode == TrigMode::Single {
+                self.s.run = false;
+                self.busy = false;
+                wv().stale = true;
+            }
+        }
+        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
+        self.seq = self.seq.wrapping_add(1);
+        Some(Frame { data, cols: None, trig, fs: wv().fs, seq: self.seq })
+    }
+
+    fn wave_frame(&mut self, now: u64, src: &mut dyn WaveSource) -> Option<Frame<'static>> {
+        if !wv().live {
+            // Waiting for the (re)start: whatever the old stream left.
+            src.drain(&mut |_| {});
+            return None;
+        }
+        if !self.busy {
+            self.wave_start(now, src);
+        }
+        self.wave_drain(src);
+        let holes = src.dropped();
+        if holes != wv().dropped {
+            // A hole: the ring overflowed (a main-loop stall > 213 ms at
+            // 9600 S/s) or the ISR missed conversions. No triggered frame
+            // spans it: the record starts again at the newest sample (and
+            // the trigger re-arms); roll just goes on (a short gap in the
+            // trace, as the timestamps say).
+            wv().dropped = holes;
+            if !self.rolling {
+                let w = wv();
+                w.first = w.tot;
+                (w.pend, w.ready, w.shown) = (None, None, None);
+                self.busy = false;
+                return None;
+            }
+        }
+        if self.rolling {
+            if now < self.roll_next {
+                return None;
+            }
+            self.roll_next = now + 100;
+            self.seq = self.seq.wrapping_add(1);
+            return Some(Frame { data: &[], cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs: wv().fs, seq: self.seq });
+        }
+        let (pre, post) = self.hw_split();
+        let (tot, oldest) = (wv().tot, self.wave_oldest());
+        let tail = tot as u32;
+        // ISR index (u32, the ring's) -> record index; an event of a sample
+        // pushed after the drain is ahead of `tot`.
+        let abs = |i: u32| (tot as i64 - tail.wrapping_sub(i) as i32 as i64).max(0) as u64;
+        let ok = |t: u64, nm: u64| t >= nm && t >= oldest + pre as u64;
+        if self.s.mode == TrigMode::Single {
+            if let Some(t) = src.first(wv().gen).map(abs) {
+                if t + post as u64 <= tot {
+                    if ok(t, 0) {
+                        return self.wave_emit(now, Some(t));
+                    }
+                    // Its pre-trigger part is gone (cannot happen: the
+                    // minimum is first + pre): arm again.
+                    self.busy = false;
+                }
+            }
+            return None;
+        }
+        // Normal / Auto: the newest event whose post-trigger part is in;
+        // else wait for the earliest incomplete one.
+        let w = wv();
+        let nm = w.next_min;
+        if let Some(p) = w.pend {
+            if p + post as u64 <= tot {
+                w.ready = Some(p);
+                w.pend = None;
+            }
+        }
+        let (mut ready, mut pend) = (w.ready, w.pend);
+        let mut seen = w.seen;
+        src.events(&mut seen, &mut |i| {
+            let t = abs(i);
+            if !ok(t, nm) {
+                return;
+            }
+            if t + post as u64 <= tot {
+                ready = Some(t);
+                pend = None;
+            } else if pend.is_none() {
+                pend = Some(t);
+            }
+        });
+        let w = wv();
+        (w.ready, w.pend, w.seen) = (ready, pend, seen);
+        if let Some(t) = ready {
+            if now >= w.last_emit + WAVE_FRAME_MS && ok(t, 0) {
+                w.ready = None;
+                return self.wave_emit(now, Some(t));
+            }
+            return None;
+        }
+        if self.s.mode == TrigMode::Auto && now >= self.deadline && tot - oldest >= self.screen as u64 {
+            return self.wave_emit(now, None);
+        }
+        None
+    }
+
+    /// STOP in the wave view: the record linearised and kept, anchored on
+    /// the frame on screen (roll: the newest sample at the right edge).
+    fn wave_freeze(&mut self) -> bool {
+        let (was_busy, was_rolling) = (self.busy, self.rolling);
+        self.busy = false;
+        self.rolling = false;
+        wv().stale = true;
+        if !was_busy || !wv().live {
+            return true;
+        }
+        let len = self.wave_linear();
+        let base = wv().slot0;
+        if was_rolling {
+            self.snapshot_mark(len, len.saturating_sub(1), None, true);
+            return true;
+        }
+        match wv().shown {
+            Some((c, t)) if c >= base && c < base + len as u64 => {
+                let trig = t.filter(|&t| t >= base && t < base + len as u64).map(|t| (t - base) as usize);
+                self.snapshot_mark(len, (c - base) as usize, trig, false);
+            }
+            _ => self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false),
+        }
+        true
     }
 }
 

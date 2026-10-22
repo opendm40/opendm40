@@ -438,7 +438,12 @@ impl App {
         // a pinch took over), else the side just stepped.
         let armed = sp.touch.filter(|_| sp.pinch.is_none()).and_then(|t| t.arm.armed(t.still()));
         let pressed = armed.or(if now < sp.step_until { Some(sp.step_side) } else { None });
-        let tabs = su::tabs_of(sp.tap_mode, s.tb as u8, self.tb_top(), now < sp.tabs_until, pressed);
+        let mut tabs = su::tabs_of(sp.tap_mode, s.tb as u8, self.tb_top(), now < sp.tabs_until, pressed);
+        let wave = self.scope.wave_on();
+        if wave && s.tb <= scope::WAVE_TB_MIN {
+            tabs &= !(su::TAB_SHOW_R | su::TAB_PRESS_R); // no faster wave timebase
+        }
+        let amps = wave && self.scope.wave_scale_now().amps;
         Model {
             status,
             tb: s.tb as u8,
@@ -479,6 +484,18 @@ impl App {
             fft: sp.fft_view,
             runt_row: (s.ttype == crate::trigsoft::RUNT).then_some(s.runt_row as i16),
             cur_tab: self.sp_cur_state(),
+            // The source badge on the Scope page of builds with the stream
+            // ISR (none in the combined view, none without: the stock page).
+            src: if !app_wave::WAVE_BUILD || self.view != View::Scope {
+                su::SRC_NONE
+            } else if wave {
+                su::SRC_DMM
+            } else {
+                su::SRC_MCX
+            },
+            amps,
+            wvdiv: if wave { self.scope.vdiv() } else { 0.0 },
+            ch1_txt: if wave { self.wave_func_label() } else { "" },
         }
     }
 
@@ -622,10 +639,11 @@ impl App {
             let id = self.meas_sel[i];
             // Stock label "Vp-p:" (ours: "Vpp:").
             let mut t = [0u8; 24];
-            let f = crate::scope_meas::format(&mut t, id, self.meas_res.v[id as usize]);
-            let (pre, rest): (&[u8], &[u8]) = match f.strip_prefix("Vpp") {
-                Some(r) => (b"Vp-p", r.as_bytes()),
-                None => (b"", f.as_bytes()),
+            let f = crate::scope_meas::format_unit(&mut t, id, self.meas_res.v[id as usize], m.amps);
+            let (pre, rest): (&[u8], &[u8]) = match (f.strip_prefix("Vpp"), f.strip_prefix("Ipp")) {
+                (Some(r), _) => (b"Vp-p", r.as_bytes()),
+                (_, Some(r)) => (b"Ip-p", r.as_bytes()),
+                _ => (b"", f.as_bytes()),
             };
             let k = (pre.len() + rest.len()).min(24);
             b[i][..pre.len()].copy_from_slice(pre);
@@ -786,16 +804,29 @@ impl App {
         let mut h = crate::scope_csv::Hdr::new();
         let mut t = [0u8; 16];
         h.s("# Alientek DM40A, fw-rs ").s(option_env!("CARGO_PKG_VERSION").unwrap_or("dev")).s(", scope record (no real-time clock)\r\n");
+        let wave = self.scope.wave_on();
+        let amps = wave && self.scope.wave_scale_now().amps;
+        let unit = if amps { "A" } else { "V" };
         let mut v = su::Buf::new();
-        su::vdiv_text(&mut v, vdiv_idx(s.range, s.probe));
+        if wave {
+            su::fmt_div(&mut v, self.scope.vdiv(), unit);
+        } else {
+            su::vdiv_text(&mut v, vdiv_idx(s.range, s.probe));
+        }
         let mut sr = su::Buf::new();
         su::fmt_hz(&mut sr, fs as f32);
         let sr = sr.as_str();
-        h.s("# timebase ").s(su::TB_LABELS[s.tb.min(29)]).s("/div, ").s(v.as_str()).s("/div, probe ").s(scope::PROBE_NAMES[probe_idx(s.probe)]);
+        h.s("# timebase ").s(su::TB_LABELS[s.tb.min(29)]).s("/div, ").s(v.as_str()).s("/div, ");
+        if wave {
+            // Source DMM: the HY3131 AD2 stream of the DMM row (app_wave.rs).
+            h.s("source DMM ").s(self.wave_func_label()).s(" (AD2, isolated jacks)");
+        } else {
+            h.s("probe ").s(scope::PROBE_NAMES[probe_idx(s.probe)]);
+        }
         h.s(", coupling ").s(if s.ac { "AC" } else { "DC" }).s(", sample rate ").s(sr.strip_suffix("Hz").unwrap_or(sr)).s("S/s, samples ");
         h.s(crate::dmm::format(&mut t, rec.len() as f32, 0)).s("\r\n");
         let mut tv = su::Buf::new();
-        su::fmt_v(&mut tv, self.scope.trig_volts(), "V");
+        su::fmt_v(&mut tv, self.scope.trig_volts(), unit);
         h.s("# trigger ");
         self.sp_trig_desc(&mut h);
         h.s(" ").s(if s.rising { "rising" } else { "falling" }).s(" ").s(tv.as_str());
@@ -805,7 +836,15 @@ impl App {
             scope::TrigMode::Single => "Single",
         });
         h.s(if trig { ", triggered\r\n" } else { ", untriggered\r\n" });
-        h.s("# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n");
+        h.s(if wave {
+            if amps {
+                "# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n"
+            } else {
+                "# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n"
+            }
+        } else {
+            "# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n"
+        });
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h);
         if !crate::screenshot::start_csv() {
             self.toast(now, "Save CSV Error", false);
@@ -826,7 +865,8 @@ impl App {
             }
             crate::trigsoft::RUNT => {
                 let mut b = su::Buf::new();
-                su::fmt_v(&mut b, self.scope.row_volts(s.runt_row), "V");
+                let unit = if self.scope.wave_on() && self.scope.wave_scale_now().amps { "A" } else { "V" };
+                su::fmt_v(&mut b, self.scope.row_volts(s.runt_row), unit);
                 h.s("Runt, 2nd level ").s(b.as_str()).s(" (software),");
             }
             _ => {
@@ -971,7 +1011,7 @@ impl App {
             // the settings they were drawn with).
             let c = cache();
             let mv = su::VDIV_VAL[m.vdiv.min(21) as usize];
-            let vr = 4.0 * scope::VDIV[c.range.min(9)] * self.scope.s.probe / 141.0;
+            let vr = if self.scope.wave_on() { 4.0 * self.scope.vdiv() / 141.0 } else { 4.0 * scope::VDIV[c.range.min(9)] * self.scope.s.probe / 141.0 };
             // (The CH1 columns are already widened: the bars touch.)
             for j in 0..399 {
                 let (lo, hi) = c.seg[j];
@@ -1222,6 +1262,7 @@ impl App {
             // A top-bar badge (before the graph area: INNER starts at y 15):
             // not captured, its release is the Tap below.
             Gesture::Down(p) if su::top_badge(p.x, p.y).is_some() => Some(false),
+            Gesture::Down(p) if app_wave::WAVE_BUILD && self.view == View::Scope && su::src_hit(p.x, p.y) => Some(false),
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
                 let (hit, side) = self.sp_select(p);
                 let s = self.scope.s;
@@ -1323,7 +1364,17 @@ impl App {
                 // fw-rs additions (the stock top bar is not tappable): the
                 // status badge = RUN/STOP, the timebase badge = timebase
                 // list, the V/div badge = CH1 popup (as B2), the trigger
-                // badge = Trigger tab.
+                // badge = Trigger tab; with the stream ISR the source badge
+                // (MCX | DMM: the DMM wave view, app_wave.rs).
+                if app_wave::WAVE_BUILD && self.view == View::Scope && su::src_hit(p.x, p.y) {
+                    self.beep(now, 30);
+                    if self.scope.wave_on() {
+                        self.wave_close(clk);
+                    } else {
+                        self.wave_open(clk);
+                    }
+                    return Some(false);
+                }
                 match su::top_badge(p.x, p.y) {
                     Some(0) => {
                         self.beep(now, 30);
@@ -1332,6 +1383,10 @@ impl App {
                     Some(1) => {
                         self.beep(now, 30);
                         self.sp_popup_open(su::Popup::Tb(self.scope.s.tb as u8));
+                    }
+                    Some(2) if self.scope.wave_on() => {
+                        self.beep(now, 30);
+                        self.wave_coupling_note(now);
                     }
                     Some(2) => {
                         self.beep(now, 30);
@@ -1724,7 +1779,8 @@ impl App {
     fn sp_tb_step(&mut self, slower: bool, now: u64) -> bool {
         let mut st = self.scope.s;
         let top = self.tb_top() as usize;
-        let tb = if slower { (st.tb + 1).min(top) } else { st.tb.saturating_sub(1).max(scope::TB_MIN) };
+        let lo = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
+        let tb = if slower { (st.tb + 1).min(top) } else { st.tb.saturating_sub(1).max(lo) };
         if tb == st.tb {
             return false;
         }
@@ -1772,11 +1828,15 @@ impl App {
         if self.sp.touch.is_some() {
             self.sp.touch = None;
         }
+        if axis == Axis::V && self.scope.wave_on() {
+            return; // the wave view's V/div is the DMM range (panel + / -)
+        }
         let st = self.scope.s;
         let h = axis == Axis::H;
         let prev = self.sp.pinch.map(|p| su::PinchState { horizontal: p.axis == Axis::H, i0: p.i0, i: p.i });
         let tb_max = if self.scope.roll { scope::TB_MAX } else { scope::TB_YT_MAX };
-        let n = su::pinch_step(prev, h, s0, s, st.tb, st.range, scope::TB_MIN, tb_max);
+        let tb_min = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
+        let n = su::pinch_step(prev, h, s0, s, st.tb, st.range, tb_min, tb_max);
         let p = Pinch { axis, i0: n.i0, i: n.i };
         let changed = prev.map_or(true, |q| q != n);
         if changed || !self.sp.bubble {
@@ -1832,6 +1892,14 @@ impl App {
 
     fn sp_panel(&mut self, _clk: &mut Clock, k: usize, now: u64) {
         let mut st = self.scope.s;
+        if self.scope.wave_on() && k <= 2 {
+            // The wave view: V/div = the DMM range; CH1 = the coupling note.
+            match k {
+                1 => self.wave_coupling_note(now),
+                _ => self.wave_range_step(k == 0, now),
+            }
+            return;
+        }
         match k {
             // UF-10: B1 = zoom in (smaller V/div), B3 = zoom out.
             0 => st.range = st.range.saturating_sub(1),
@@ -2293,6 +2361,10 @@ impl App {
     ///    from a 10 V/div record is off by up to ~1 V).
     /// Each record's decision is logged (DBG:GEST? after "|AUTO", `autoset_log`).
     pub(super) fn autoset_start(&mut self, now: u64) {
+        if self.scope.wave_on() {
+            self.toast(now, "AUTO: MCX scope only", false);
+            return;
+        }
         self.sp_end_hold(now);
         let saved = self.scope.s;
         let mut st = saved;
@@ -2506,7 +2578,8 @@ impl App {
         p[2] = m.ctr.to_bits();
         // [3] trigger type / pulse condition / runt row - default; [4] the
         // pulse width (f32 bits, 0 = default 1 ms).
-        let s = &self.scope.s;
+        // The MCX settings (the wave view's trigger is not persisted).
+        let s = &self.scope.mcx_settings();
         let dr = scope::Settings::DEFAULT.runt_row;
         p[3] = (s.ttype as u32 & 3) | (s.pcond as u32 & 3) << 2 | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };

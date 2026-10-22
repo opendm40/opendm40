@@ -670,10 +670,19 @@ Firmware:
       Stays non-default.
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
-- [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
-      decided: see docs/decisions-2026-10-22.md #3 (one TIMER ISR, exclusive bus hand-off, gated on SPI2)
-      V/mV/A on the isolated jacks (current waveforms). Scope UI reused ("Wave" from DMM, MCX|DMM source badge),
-      software trigger. Needs one ISR (owner decision; fw-rs is ISR-free); HY3131 on hardware SPI2 done (E2); ~2-2.5 weeks.
+- [x] (A) DMM-input "slow floating scope" via AD2 = the Wave view (E5/E6; docs/dmm-input-scope-feasibility.md 10,
+      src/app_wave.rs; feature `ad2-isr` only, hidden without it): MF range page "Wave" (V / A) and the scope page's
+      "MCX | DMM" source badge; the AD2 stream drained into the scope record (continuous, 10-bit codes), the stock
+      page unchanged around it: 5 ms..50 s/div (9600 / 4800 / 2400 / 1200 S/s per band, roll from 200 ms/div),
+      V/div = the DMM range (+ / - step it), coupling = the row's (AC V AC-coupled, mV / A DC-coupled, no DC V
+      row: says so), units V / A, measurements / cursors / STOP / zoom / Save CSV / FFT as the MCX scope; trigger
+      (edge / pulse / runt) detected per sample IN the stream ISR (trigsoft::Stream; no dead time; decision #3
+      amended: config words + event ring), HY3131 comparator evaluated, not used (10.2). DMM paused while open,
+      row rewritten on exit; a host CONF closes it. Emulator: emu/hy3131/wavetest.py (sine V, square A, trigger,
+      roll, range steps, exit, conflicts) PASS; ui-render wave scenes 0 violations; stock pixel diff unchanged.
+- [ ] (A) device test of the Wave view (feasibility 10.6, 15 min) - after the ISR loss fix (E3/E4 device item:
+      its holes restart the wave record, 10.4). Follow-ups: 16-bit record, DMM reading alongside (request
+      queue), DC-coupled V row (E7), the timebase list without the < 5 ms/div entries in the Wave view.
 - [x] Device 2026-10-21 (docs/device-check-2026-10-21.md "Fixes"): stack 37468/46048 B (81 %) on 16b3eb9.
       d957027: no USBTMC tx copy, 8-byte logger records, .sram_bss (EP_MEMORY, MSC_IO, MSC block, touch
       log, dlog TAB); build.sh native checks the static worst path (tools/stack-depth) >= 16 KiB headroom,

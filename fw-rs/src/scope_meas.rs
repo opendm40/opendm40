@@ -211,15 +211,28 @@ pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
 }
 
 /// "label value unit" in the stock style (<= 15 chars).
+#[allow(dead_code)] // tools (ui-render); the app uses format_unit
 pub fn format<'a>(buf: &'a mut [u8; 24], id: u8, v: f32) -> &'a str {
+    format_unit(buf, id, v, false)
+}
+
+/// `format`; `amps`: the vertical items are currents (the DMM wave view's
+/// A rows): "Irms: 12.3mA" instead of "Vrms: 12.3mV".
+pub fn format_unit<'a>(buf: &'a mut [u8; 24], id: u8, v: f32, amps: bool) -> &'a str {
     let (name, unit) = ITEMS.iter().find(|i| i.0 == id).map(|i| (i.1, i.2)).unwrap_or(("?", Unit::V));
+    let amps = amps && unit == Unit::V;
     let mut n = 0;
     let mut put = |b: &mut [u8; 24], s: &[u8]| {
         let k = s.len().min(24 - n);
         b[n..n + k].copy_from_slice(&s[..k]);
         n += k;
     };
-    put(buf, name.as_bytes());
+    if amps && name.starts_with('V') {
+        put(buf, b"I");
+        put(buf, &name.as_bytes()[1..]);
+    } else {
+        put(buf, name.as_bytes());
+    }
     put(buf, b":");
     if !v.is_finite() || (v < 0.0 && unit != Unit::V) {
         put(buf, b" --");
@@ -278,6 +291,12 @@ pub fn format<'a>(buf: &'a mut [u8; 24], id: u8, v: f32) -> &'a str {
     let mut t = [0u8; 16];
     let s = crate::dmm::format(&mut t, scaled, dec);
     put(buf, s.as_bytes());
-    put(buf, pre.as_bytes());
+    if amps {
+        // The prefix only, then the unit (pre = "kV" / "V" / "mV" / "uV").
+        put(buf, &pre.as_bytes()[..pre.len() - 1]);
+        put(buf, b"A");
+    } else {
+        put(buf, pre.as_bytes());
+    }
     core::str::from_utf8(&buf[..n]).unwrap_or("")
 }

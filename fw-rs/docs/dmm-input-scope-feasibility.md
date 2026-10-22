@@ -894,3 +894,148 @@ AC mV). Record every reply in this section.
 On a pass: `ad2-isr` becomes a default feature (TODO), then the Wave view
 (E5 / E6). A hang or a reset during a stream: report DBG:BOOT? (the shim's
 crash counter) and the last DBG:ISR?.
+
+## 10. (A) implemented: the DMM wave view (E5 / E6, 2026-10-22)
+
+TODO (A), decision #3 (C: one timer ISR, exclusive bus hand-off). The
+stock-replica scope page with a second source: the HY3131 AD2 stream of the
+DMM's AC row, i.e. a slow, floating, isolated scope on the DMM jacks (V, mV,
+A, mA, uA). It exists only in builds with the stream ISR (`--features
+ad2-isr`, still off by default: 9.5 / the 5f14d38 device check); without it
+the entries are not drawn and the code is dead (no interrupt, no change).
+Everything below is emulator evidence; the device plan is 10.6.
+
+### 10.1 What exists
+
+| piece | where | what |
+|---|---|---|
+| entry | `ui::wave_button` (MF range page, V / A: "Wave" between Hold/Limits and OK, the AC button's column), the scope page's source badge "MCX \| DMM" (`scope_ui::src_badge`, left of the record bar, which is 70 px instead of 137 then) | from DC V / DC A the AC row is selected first (toast "DC V: no DC row on AD2, AC-coupled"); refused (toast) in AC+DC, the power meter, ohm / cap / ..., during a CSV recording; a host LOG session closes it ("Data logger running") |
+| exit | the badge, MENU, any view change (`App::show`), a host scope setting that is MCX-only (`CHAN1:SCAL`, `CHAN1:COUP`, `DBG:HWTRIG`) | MCX settings restored (`Scope::mcx_settings` is what is persisted), the DMM autorange restored (AUTO / AUTO+), the DMM row rewritten by main.rs (the logger's ON -> OFF edge: `dmm.start`) |
+| ownership | `app_wave.rs` `WaveReq` -> main.rs, `Logger::start_wave` | the stream is a logger session flagged `wave` (the host's LOG:SOURce / SRATe kept; LOG:STATe ON refused "Settings conflict", LOG:STATe? 0, LOG:DATA? an empty block). main.rs `busy` (logger active: no DMM poll, no BT serve / AT init) vs `logging` (a host session: GUI frozen, no touch, no scope poll). A range step is stop -> `dmm.set_range` -> start in one pass, so the bus guard never fires for it; anything else that touches the bus (a host CONF, the locked power key's sub-mode cycle) stops the stream (forced) and the view closes ("Wave stopped: DMM changed") |
+| record | `scope.rs` "source DMM (wave)" | every poll drains the ring (`logger::wave::drain`) into BUF as a continuous circular record of 10-bit codes (`trigsoft::ad2_code10`: the full AD2 window +-1.25 V / IG over 0..1023); frames are linear windows (BUF rotated so the oldest sample is at 0), so the renderer, measurements, cursors, STOP / zoom / pan, Save CSV and FFT work unchanged: the MCX record buffer and roll columns are reused (the MCX acquisition is idle). The wave state (`Wave`, ~300 B incl. the saved MCX / wave settings) is a TCM static |
+| holes | `logger::wave::dropped` = ring full + ISR `missed` | a hole restarts the record at the newest sample (no triggered frame spans it); roll goes on with a short gap |
+| timebases | `scope::WAVE_TB_MIN` = 17, `wave_fs_for` | 5 ms/div .. 50 s/div; AD2 rate per band: 5 ms 9600 S/s (decision #3's opt-in rate), 10 / 20 ms 4800, 50 / 100 ms 2400, >= 200 ms 1200 (>= 400 samples per screen up to 20 ms/div); a band change restarts the stream (~1 pass). Roll from 200 ms/div as the MCX scope (per-column min / max accumulated while draining, so 50 s/div = 600 k samples needs no buffer); YT up to 1 s/div (12 000 samples at 1200 S/s) |
+| vertical | `dmm::ad2_scale_of`, `scope::WaveScale`, `wave_vdiv` | SI = the DMM's own LPF formula of `poll_ac` with its calibration gain / offset (the DC mean of AD2, feasibility 3.3); V/div = the smallest 1-2-5 step with 4 div >= the range (6 V -> 2 V/div, 600 mV -> 200 mV, 1000 V -> 500 V, 10 A -> 5 A, 60 mA -> 20 mA, 600 uA -> 200 uA). V/div + / - (panel magnifiers) step the DMM range (the MF list: V 600 mV .. 1000 V, A 600 uA .. 10 A; 600 mV is the AC mV row, DC-coupled). Pinch V off, AUTO refused (toast) |
+| coupling | the V/div badge glyph, the CH1 button / V/div badge tap: a note | AC V AC-coupled (~0.5 Hz, the row's capacitor); AC mV, AC A / mA / uA DC-coupled. One AD2 row per function: nothing to switch; "DC V" says it has no DC row (1.3: needs device test 6.5) |
+| labels | `Model::{src, amps, wvdiv, ch1_txt}` | CH1 button "AC V" / "AC mA", V/div "2V" / "200uA", trigger badge and cells in A for the current rows ("Ip-p", "Irms": `scope_meas::format_unit`), CSV header "source DMM AC mA (AD2, isolated jacks)" and the value column's unit |
+| SCPI | `App::scpi` | TIM:SCAL, TRIG:LEV / SLOP / SWE, RUN / STOP / SING, SCOP:MEAS:*?, WAV:DATA? / PRE?, CHAN1:SCAL? act on the wave view (V/div = the DMM range's); the MCX-only setters close it |
+| budgets | build.sh | stack headroom 16 888 B (feature build, >= 16 384; f4df76f: 17 608; the wave state's ~300 B come out of the TCM stack), 17 620 B without the feature; SRAM +80 B (`.dmabuf`: the ring's trigger words), ~2.3 KB free below 0x20030000 (f4df76f: ~2.4 KB) |
+
+Deviation from 5.2 point 3 ("19 bit -> u16 >> 3"): the record holds 10-bit
+codes, as the MCX record, because the whole display / measurement / trigger
+stack is 10-bit (histogram of 1024 codes, the +-2 code hysteresis, `& 0x3FF`
+masks) and the V/div is a DMM range step, not a digital zoom. Cost: 1 code =
+512 AD2 codes = 0.2 % of the AD2 window (e.g. 24.4 mV in the 6 V range,
+whose screen is +-8 V = 656 codes over 280 rows), so Vrms / Vpp of a
+full-scale signal are good to ~0.1-0.3 % (noise dithers the mean), small
+signals (< 10 % of the range) are coarse. A 16-bit record is a follow-up
+that parametrises the code width.
+
+### 10.2 Trigger in the ISR (no dead time)
+
+The coordinator's question (2026-10-22: "can't we use the interrupt or the
+comparator?"): the trigger is detected **per sample in the stream ISR**
+(`logger::isr::trig`, `trigsoft::Stream`): the same edge (armed beyond the
++-2 code band, then across the level), pulse-width (> / < / = within 5 %,
+whole samples: `trigsoft::pulse_window`) and runt rules as the MCX software
+search, on the record's 10-bit code, integers only. Host-tested against the
+slice functions (tools/trig-test: the first event at or after a minimum is
+the same, 78 cases). The ISR reports events, the main loop picks frames:
+
+* config words (`Ring::trg_w`, then `trg_gen`, Release; main loop) -> the ISR
+  reloads its private copy and resets the detector on a new generation;
+* every event's sample index into an 8-slot event ring (`trg_ev`, `trg_ev_n`
+  Release; the main loop reads the 7 newest safely) and the first event at
+  or after a minimum index (`trg_first_*`: Single's exact "first event after
+  arming");
+* Normal / Auto show the newest event whose post-trigger part is in (or wait
+  for the earliest incomplete one), at most 25 frames/s; Single the first
+  event after the pre-trigger history, then STOP.
+
+Because the record is continuous (10.1) and the detector sees every sample,
+there is no dead time: an isolated event (a glitch, a single pulse) is
+always caught, unlike the MCX scope's search of each finished record.
+Timing: the trigger point is a sample: jitter = 1 sample = 104 / 208 / 417 /
+833 us at 9600 / 4800 / 2400 / 1200 S/s (5 ms/div: 0.8 px; 10 ms/div: 0.8
+px). Cost: a few loads and compares per stored sample, no loop, no float;
+the ISR's stack (176 B) unchanged (the detector inlines into the handler's
+frame), negligible against the ~21.5 us of SPI per sample. Decision #3
+invariant 4 is amended for this (the status there).
+
+The HY3131 comparator as an alternative / assist: **not used**. SCMPI
+(R20 bits 7:5) can select OP1O or PB4, the AD2 nodes of the V / A rows,
+but its thresholds SCMPRH / SCMPRL (R21) are fixed ladder taps (VDSC*,
+AGNDP* / AGNDN*), not a programmable level, so it cannot implement a
+trigger level; its outputs are CMPHO / CMPLO in CTSTA (R14) and the event /
+period counters (R15..R1D, the frequency path): no edge timestamp, each
+read is an SPI frame (~8 us, or the 9-byte counter frame) the ISR would add
+to every tick; and R20 / R21 / the counters belong to the frequency mode
+and the misconnect sentinel (dmm.rs, sentinel.rs). Events faster than the
+AD2 band (~0.25 x the rate) would not be on the trace anyway. It could
+count such events (a glitch counter) in a later feature, not trigger.
+
+### 10.3 Emulator results (plumbing only, not the device)
+
+`emu/hy3131/wavetest.py` (200 MIPS, the feature build), driven like a user
+(DBG:KEY MF, DBG:TAP the Wave button / the panel / the source badge),
+checked over SCPI, screenshots via DBG:LCD?:
+
+| case | result |
+|---|---|
+| V/COM 1 V rms 50 Hz sine, MF -> Wave from DC V | AC V row, DBG:ISR? active, 2 V/div (6 V range); 5 / 10 / 20 / 50 / 100 ms/div: FREQ 50.00 (49.98-50.04) Hz, VRMS 1.003-1.004 V, VPP 2.836 V |
+| NORM +0.5 V rising / -0.8 V falling | the WAV:DATA? frame crosses the level at the trigger column (0.505 V / -0.875 V at column 200: within a sample) on consecutive frames; SINGle: one frame then STOP |
+| roll 500 ms / 5 s per div | data from the right edge, RUN chip, ROLL bar |
+| V/div + / - | 6 V -> 60 V range (20 V/div): VRMS 0.995 V, VPP 2.71 V (coarser codes), back to 2 V/div |
+| STOP / RUN, MENU | record kept / 50 Hz again; the ISR stops, no forced stop, READ? 1.000 V AC (DMM resumed), SYST:ERR? empty |
+| source badge, then CONF:VOLT:DC mid-wave | the badge reopens the view; CONF: forced stop + 1, the view closes, DC V reads 0 |
+| A-COM 10 mA DC + 20 mA rms 40 Hz square (`--case current`) | AC mA row (DC-coupled), 20 mA/div, FREQ 40.00 Hz, mean 10.01 mA = the DC A reading 10.00 mA, Ip-p 40.0 mA, cells / badges in A |
+
+`emu/hy3131/ad2streamtest.py` (the logger sessions) still passes on the same
+image. Host: tools/trig-test (Stream = the slice rules), tools/ui-render
+(the badge, the shortened record bar, the DMM V/div / CH1 / trigger texts
+no wider than the stock texts in the same boxes, current cells, updates
+between MCX / DMM / stopped / roll equal fresh draws: 44 scenes, 0
+violations; the Wave button on the V / A range pages), the stock pixel diff
+(tools/ui-render/stock-diff.sh) and every other render identical to the
+parent commit f4df76f (the stock page draws no badge: `Model::src` =
+SRC_NONE).
+
+### 10.4 Limits (v1)
+
+* DC-coupled V: no row (1.3, device test 6.5); the V function is AC-coupled.
+* The record is 10-bit (10.1). The DMM reading pauses while the view is
+  open (decision #3: exclusive bus); the last reading is not shown on the
+  scope page (the stock page has no DMM either).
+* Roll above ~20 s/div: STOP keeps the newest 26 624 samples (22 s at 1200
+  S/s) as the stored record (zoom / CSV), not the whole screen.
+* The timebase list still offers 100 ns .. 2 ms/div (picked: clamped to 5
+  ms/div); the faster corner tab is hidden at 5 ms/div.
+* The probe glyph of the V/div badge shows x1 (no probe on the DMM jacks).
+* Holes (the 5f14d38 device check: ~11.5 ms bursts every ~3950 conversions)
+  restart the record: at 4800 S/s a triggered frame every ~0.8 s can be
+  late by a screen; roll shows the gap. The ISR fix (9.5 TODO) removes them.
+
+### 10.5 Not done / next
+
+16-bit record; the DMM reading alongside (decision #3's request queue);
+DC-coupled V row (E7); a glitch counter on the HY3131 comparator.
+
+### 10.6 Device test plan (15 minutes, after the ISR fix)
+
+Image: `./build.sh --features ad2-isr`. A signal generator and a DC source;
+the meter on USB (`tools/dm40scpi.py`). Record each result here.
+
+| min | step | how | pass |
+|---|---|---|---|
+| 0-2 | entry | DMM DC V, 1 V rms 50 Hz on V/COM: MF -> Wave | toast "DC V: no DC row on AD2, AC-coupled"; AC V row; T'D; 2 V/div; cells Freq 50.0 Hz, Vrms within 1 % of the DMM's AC V reading taken before; `scpi "DBG:ISR?"` active 1 |
+| 2-4 | timebases | tap the corner tabs 5 ms .. 50 s/div | a trace at every step, Freq 50 Hz up to 100 ms/div, roll from 200 ms/div; no stuck frame at a band change (5 -> 10, 20 -> 50, 100 -> 200 ms) |
+| 4-6 | trigger | Normal, level drag to +1 V / -1 V, rising / falling; Single | the crossing at the T marker on every frame (+-1 sample); Single: one frame, STOP |
+| 6-7 | glitch | generator: 50 Hz with a single 2 ms pulse burst (or a manual 5 V step on a 1 V sine), Normal, level above the sine | each event shown (no dead time); `scpi "LOG:COUNt?"` irrelevant here |
+| 7-9 | range | V/div + / - | 6 -> 60 -> 600 V range and back, the trace the same in volts; 600 mV (AC mV, DC-coupled): toast-free, coupling "DC" |
+| 9-11 | current | A jack, 0.5 A DC + a load switching at 10-100 Hz (or the 40 Hz PWM calibrator of acdc doc 10): A -> MF -> Wave | AC A row, DC-coupled: the mean = the DC A reading (1 %), edges of the PWM visible, cells in A |
+| 11-12 | STOP / Save CSV | RUN key STOP; MF Settings Save CSV | SCOPnnn.CSV with "source DMM AC A", values in A matching the screen |
+| 12-13 | exit | MENU; DMM page | the reading of the function returns within ~1 s (the row rewritten), `scpi "DBG:ISR?"` active 0, forced unchanged |
+| 13-15 | conflicts | in the wave view: `scpi "CONF:VOLT:DC"`; `scpi "LOG:STATe ON"` | CONF: the view closes with "Wave stopped: DMM changed", DC V reads; LOG:STATe ON: "Settings conflict", the view stays |
+
+Also note `DBG:PROF?` loop max while the view runs at 5 ms/div (9600 S/s,
+22 % CPU in the ISR) and any visible hole (10.4) per minute.
