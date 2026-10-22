@@ -385,9 +385,11 @@ Code work (in this order):
         followed by a release frame. Device check first: DBG:TOUCH? log of stylus taps.
   - [x] UF-36 BT on every view: by design (bt.poll every 5 ms in all views, DMM rail kept on while
         linked); check tool `tools/dm40scpi.py --bt btpoll -p 50` (890047b). Not during an FR-38
-        logger session (BT frames are not served then, by design).  (verify on device)
+        logger session (BT frames are not served then, by design).  Device 0667175 (docs/device-check-2026-10-21.md "Bluetooth (0667175)"): 400 / 400
+        replies at 50 ms on DMM, DMM+Scope, Scope, Gen (median 37 ms). Caveat: a link opened while on Scope /
+        Gen does not wake the DMM (stale value; see the open item below).
   - [x] UF-38 tools/dm40scpi.py: info / conf / read / log CSV / scpi / btpoll, USBTMC or --bt (890047b).
-        (verify on device)
+        Device 0667175: --bt info / read -n 20 / btpoll OK.
   - [x] UF-41 sin(x)/x: src/sinc.rs (Lanczos-3) + tools/sinc-test (44f035c), wired (553e7a4): the
         "fewer samples than columns" branch (100..500 ns/div). Emulator: frame ~5.2 ms avg at 100 ns/div
         vs ~3.3 ms at 1 us/div (linear path). (verify on device)
@@ -428,7 +430,8 @@ Code work (in this order):
 ## Backlog (user ideas)
 - [x] SCPI over Bluetooth serial: the same parser as USBTMC (session per transport, DBG:* refused on BT),
       stock binary frames (0xAF) dispatched alongside, DMA TX ring. docs/bt-scpi.md,
-      tools/dm40bt_scpi.py.  (74b8890, 4c2f0a6; verify on device incl. READ? / WAV:DATA? throughput)
+      tools/dm40bt_scpi.py.  (74b8890, 4c2f0a6; device 0667175: SCPI, POW / CALC:LIM, LOG:DATA? over BT OK;
+      LOG:DATA? drains ~918 records/s = ~11 KB/s; WAV:DATA? throughput not measured)
 - [x] Compound SCPI messages (`POW:PHAS:CAL RES;:SYST:ERR?` hung the USBTMC read): Scpi::handle kept only
       the last command the main loop runs (Instr / POW / LOG / MMEM / DBG / READ?) and main.rs cleared the
       text replies before it. Now scpi_msg.rs runs a message one command at a time (USBTMC and BT alike):
@@ -439,6 +442,8 @@ Code work (in this order):
       others); joined reply <= 512 B ("Out of memory"). tools/scpi-msg-test, usbtmc_stress.py compound.
       Open (pre-existing): headers after ';' are absolute (no IEEE 488.2 relative-path rule); a ';' inside
       a quoted argument splits; a BT line refused as DBG:* that holds a query gets no response.
+      Device 0667175 over BT and USB: `POW:PHAS:CAL RES;:SYST:ERR?;*OPC?` -> `-100,"Settings conflict; RES:
+      ..."; 1` in one line, `*IDN?;SYST:ERR?` -> `...;0,"No error"`.
 - [ ] Auto AC/DC for V and I (as UNI-T UT197 "Auto AC/DC Voltage"): an AUTO coupling next to DC / AC /
       AC+DC that picks DC or AC by itself from the signal (DC part vs AC RMS) and shows which one it chose,
       as the power meter's AUTO does (7c431e5, powermeter.rs). Open: the decision rule and its
@@ -621,6 +626,10 @@ Firmware:
         POW:PHAS:CAL? = outcome,SPHACAL; "tap cycles P / S / PF / E" superseded by the owner's P / Wh / VAh.
         powtest limits / phasecal-ref / bt (all 21 OK); ui-render badge matrix + p17 / p18 (0 violations).
         (verify on device: the check list of doc §3.13 - phone app, W limits + beep, cal refusals, BT SCPI)
+        Device 0667175 without current (docs/device-check-2026-10-21.md "Bluetooth (0667175)"): cmd 09 = 0x28, "0.0000 mV" for 0 mW, value 2 / 3
+        FFFF; cmd 06 0x28 keeps POW; BT CONF:POW / FETC:POW:ALL? / CALC:LIM:UPP 100 (FAIL? 0) / UPP -1 (FAIL?
+        1, HI badge) OK; RES refusal text OK. Left: the phone app itself, limits / beep with a real load,
+        persist v10 over a reboot, REAC cal on a capacitor.
 - [x] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
       decided: see docs/decisions-2026-10-22.md #5 (A-JACK / LIVE? alternate with HOLD in the status slot)
       Done (decision #5): ui::slot_alert / alert_alternates; DmmView.alt = the app's 1 s strip_alt (now
@@ -755,9 +764,12 @@ Firmware:
       DAC at 10 MS/s lost 0 of 34.56 M at 17.6 %; Wave view 5 ms..1 s/div bad 0, the same measurements as
       CPU frames, first sample 14..51 ms after a band change (CPU 10..22 ms); DC V / SELF? clean after.
       Emulator ad2streamtest +-100 ppm (default, no :dma) + wavetest PASS.
-- [ ] Device: decision #7 sharing matrix, BT part: 38400 for 15 min with BT connected (phone or host SPP),
+- [x] Device: decision #7 sharing matrix, BT part: 38400 for 15 min with BT connected (phone or host SPP),
       lost / bad 0, BT answers after the stream. Not run on a239aa6: the host got "Host is down" from the
       meter's SPP address for the whole session (11.11). Cause: the next item.
+      Done on 0667175 (docs/device-check-2026-10-21.md "Bluetooth (0667175)"): 900 s 38400 DMA frames with a host btpoll (50 ms) linked the whole time:
+      34 560 269 records, lost 0, bad 0, seq / stamp gaps 0, max gap 27 us, CPU 17.5 %; BT cmd 09 replies
+      during the stream 0 (by design, UF-36), BT answered right after.
 - [x] BT module power (PC0): native fw-rs (since e3a457d) left PC0 high from board::init, the stock boot
       level = module off, and never lowered it (the stock does at its BT UART init); the RAM-loaded builds
       had inherited a powered module from the stock app. bt.rs `Bt::power` now follows the Bluetooth setting
@@ -768,6 +780,15 @@ Firmware:
       OK (the stock's PC0 handling passes the model). (verify on device: BT glyph off with no host; the
       classic XX:XX:XX:XX:XX:XX answers `dm40scpi.py --bt info`; then the pending BT checks: doc 3.13 power
       meter list, decision #7 BT part, phone app (BLE "DM40A"))
+      Device 0667175 (docs/device-check-2026-10-21.md "Bluetooth (0667175)"): glyph off with no host, on while linked, off after; --bt info OK;
+      reconnect 0.7-1.3 s; Settings Bluetooth OFF -> not discoverable, connect times out; ON -> discoverable,
+      answers. Phone app (BLE) not run.
+- [ ] BT link opened while the DMM rail is off (Scope / Gen page) does not wake the DMM: cmd 09, BT FETC? /
+      READ? and USB READ? return the reading from before the rail went off and ignore a 1 -> 2 V step (3/3).
+      After >= 3 such connect / disconnect cycles the DMM stays frozen even back on the DMM page (> 9 min,
+      PROF d.read 0, "AC?" hint; 2/2), until `DBG:HYSPI:SELF?` (its `app.dmm.start`). A link held while
+      leaving the DMM keeps it live. Suspect: `Dmm::start` from `set_suspended(false)` right after PE2 goes on.
+      Repro: docs/device-check-2026-10-21.md "Bluetooth (0667175)" §1.
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
       decided: see docs/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
       revisit with decision #3's request queue)
