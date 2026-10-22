@@ -64,7 +64,8 @@ def func(name):
 
 # name: (setup SCPI, coupling query, run_for, [(t, spec, check, label)], {t: command});
 # a phase is checked on its samples from the next phase's start - 4.5 s to
-# that start - 1.5 s (the fw uptime lags the virtual time by ~0.5 s or more).
+# that start - 2.5 s (the last phase: the run end - 4.5 .. - 1.5 s; the fw uptime lags the virtual time by the boot: ~1.8 s
+# since the disk's SPI bytes take their time, emu GD32_SPI 2026-10-22).
 # AUTO rule (dmm.rs): to AC when AC > 1.5 |DC| (and above the floor), to DC
 # when AC < 0.75 |DC|; in between the part shown stays (AC = |DC| below).
 SC = {
@@ -165,7 +166,8 @@ def run(name):
     bad = []
     for i, (t, _, chk, label) in enumerate(phases):
         t1 = phases[i + 1][0] if i + 1 < len(phases) else run_for
-        seen = [r for r in rows if t1 - 4.5 <= r['t'] <= t1 - 1.5]
+        m = 2.5 if i + 1 < len(phases) else 1.5  # the run's end: no next step to keep clear of
+        seen = [r for r in rows if t1 - 4.5 <= r['t'] <= t1 - m]
         if not seen:
             ok = False
             bad.append('%s: no samples' % label)
