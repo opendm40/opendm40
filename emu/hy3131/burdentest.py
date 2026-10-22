@@ -4,7 +4,9 @@
 the A jack through the DC / AC current functions, SCPI over USB/IP. Each
 phase checks FETC:BURD? against READ? x the R_path of the shunt in use
 (default the bare shunt: 10 mohm / 0.5 ohm / 47.5 ohm; POW:BURD sets it),
-DISP:BURD on / off, and +9.9E37 outside the A functions. Screenshots of the
+DISP:BURD on / off, and +9.9E37 outside the A functions. AC+DC and AUTO
+coupling on 200 mA DC + 100 mA AC: FETC:BURD? = the total RMS x R_path
+(POW:BURD?) in both, although AUTO shows the DC part. Screenshots of the
 DMM page with the readout at the end of the DC / AC phases.
 
   emu/hy3131/burdentest.py                       # fw-rs built from HEAD
@@ -34,8 +36,11 @@ import usbip_client as uc  # noqa: E402
 
 OL = 9.9e37
 # (t, connection, SCPI at the start, expected FETC:BURD? / READ? ratio (ohm)
-# or 'OL' = +9.9E37, expected DISP:BURD?, screenshot name). A phase is
-# checked from t + 5 s (settle, autorange) to the next t - 1 s.
+# or 'OL' = +9.9E37, or ('TOT', I) = I (the total RMS, A) x POW:BURD?, not
+# READ? x it, expected DISP:BURD?, screenshot name). A phase is
+# checked from t + 5 s (settle, autorange) to the next t - 3 s (the source
+# steps at virtual time t, the fw uptime lags it by ~2 s under load: a 1 s
+# margin caught the next phase's source at the window's end, base 1eb4d7e too).
 PHASES = [
     (0, 'open;isrc:0.05', ['CONF:CURR:DC', 'DISP:BURD ON'], 0.5, '1', 'dc-ma'),
     # AUTO moves -2 mA to the uA shunt (6000 uA range).
@@ -45,9 +50,14 @@ PHASES = [
     (54, 'isrc:0,ac=0.1,f=50', ['POW:BURD 0.6'], 0.6, '1', None),
     # The readout off: FETC:BURD? still answers.
     (64, 'isrc:0,ac=0.1,f=50', ['POW:BURD DEF', 'DISP:BURD OFF'], 0.5, '0', 'ac-off'),
-    (74, 'open;vsrc:1', ['CONF:VOLT:DC'], 'OL', '0', None),
+    # Mixed DC 200 + AC 100 mA rms: AC+DC shows the total, AUTO the DC part
+    # (AC < 0.75 DC); the burden is the total's in both (f864be8 used the
+    # shown part in AUTO: 0.2 instead of 0.2236 A).
+    (74, 'isrc:0.2,ac=0.1,f=60', ['CONF:CURR:DC', 'CURR:COUP ACDC'], ('TOT', (0.2 ** 2 + 0.1 ** 2) ** 0.5), '0', None),
+    (90, 'isrc:0.2,ac=0.1,f=60', ['CURR:COUP AUTO'], ('TOT', (0.2 ** 2 + 0.1 ** 2) ** 0.5), '0', None),
+    (106, 'open;vsrc:1', ['CONF:VOLT:DC'], 'OL', '0', None),
 ]
-RUN_FOR = 86
+RUN_FOR = 118
 
 
 def main():
@@ -97,7 +107,7 @@ def main():
     bad = []
     for i, (t, _, _, want, disp, _) in enumerate(PHASES):
         t0 = t + 5.0
-        t1 = (PHASES[i + 1][0] if i + 1 < len(PHASES) else RUN_FOR) - 1.0
+        t1 = (PHASES[i + 1][0] if i + 1 < len(PHASES) else RUN_FOR) - 3.0
         seen = [r for r in rows if t0 <= r['t'] <= t1]
         if not seen:
             ok = False
@@ -112,6 +122,15 @@ def main():
             if r['DISP:BURD?'] != disp:
                 ok = False
                 bad.append('%.2f DISP:BURD? %s, want %s' % (r['t'], r['DISP:BURD?'], disp))
+            if isinstance(want, tuple):
+                # The total x R_path within 2 % (the model's AC part), and
+                # not the shown part's burden when that is smaller.
+                rp = float(r['POW:BURD?'])
+                tot = want[1] * rp
+                if abs(bd - tot) > 0.02 * tot:
+                    ok = False
+                    bad.append('%.2f FETC:BURD? %g != total %g x %g (READ? %g)' % (r['t'], bd, want[1], rp, rd))
+                continue
             if want == 'OL':
                 if bd != OL:
                     ok = False

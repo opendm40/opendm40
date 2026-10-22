@@ -1948,6 +1948,13 @@ impl Scpi {
     /// latest reading of it: "\"VOLT +6.000000E+00,+1.000000E-04\"". Exact
     /// powers of ten (hosts take the resolution's exponent as the digits).
     pub fn put_conf(&mut self, mode: u8, r: Option<&Reading>) {
+        self.put_conf_fmt(mode, r.map(|r| (r.main.unit, r.main.dec, r.main.ext)));
+    }
+
+    /// `put_conf` from the readout format (unit, decimals, extra digit)
+    /// instead of a reading: the Wave view, where the DMM poll is paused
+    /// and the last reading is the one from before it (another range).
+    pub fn put_conf_fmt(&mut self, mode: u8, f: Option<(&str, u8, bool)>) {
         self.asked = func_id(mode);
         let name = func_name(mode).as_bytes();
         self.put(&name[..name.len() - 1]);
@@ -1956,9 +1963,9 @@ impl Scpi {
             return;
         }
         // Resolution exponent of the readout: -decimals + the unit prefix.
-        let (exp, ext) = match r {
-            Some(r) => {
-                let pfx = match r.main.unit.chars().next() {
+        let (exp, ext) = match f {
+            Some((unit, dec, ext)) => {
+                let pfx = match unit.chars().next() {
                     Some('m') => -3,
                     Some('\u{b5}') | Some('u') => -6,
                     Some('n') => -9,
@@ -1966,8 +1973,8 @@ impl Scpi {
                     Some('M') => 6,
                     _ => 0,
                 };
-                let pfx = if r.main.unit.chars().count() > 1 { pfx } else { 0 };
-                (pfx - r.main.dec as i32, r.main.ext as i32)
+                let pfx = if unit.chars().count() > 1 { pfx } else { 0 };
+                (pfx - dec as i32, ext as i32)
             }
             None => (-4, 0),
         };

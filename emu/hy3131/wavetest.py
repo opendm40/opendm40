@@ -439,10 +439,24 @@ try:
     print('  V/div %g -> %g, FREQ %.3f VRMS %.4f VPP %.4f' % (vd0, vd1, fr, rms, vpp))
     check(vd1 > vd0, 'V/div + steps the DMM range up (%g -> %g)' % (vd0, vd1))
     check(near(rms, 1.0, 0.05) and near(fr, 50.0, 0.03), 'the same signal in volts on the next range')
+    # CONF? = the streamed row's range, not the reading from before the view
+    # (device f3aea2f: "VOLT:AC +6" on 200 mV/div).
+    c = q('CONF?')
+    check(c == '"VOLT:AC +6.000000E+01,+1.000000E-03"', 'CONF? on 20 V/div = AC V 60 V (%s)' % c)
     shot('w07-range-up')
     q('DBG:TAP 447,40')
     wait_ms(2500)
     check(f('CHAN1:SCAL?') == vd0, 'V/div - back (%g)' % f('CHAN1:SCAL?'))
+    q('DBG:TAP 447,40')
+    wait_ms(2500)
+    c = q('CONF?')
+    check(f('CHAN1:SCAL?') == 0.2 and c == '"VOLT:AC +6.000000E-01,+1.000000E-05"',
+          'V/div - again: 200 mV/div, CONF? = AC mV 600 mV (%s)' % c)
+    q('DBG:TAP 447,122')
+    wait_ms(2500)
+    c = q('CONF?')
+    check(f('CHAN1:SCAL?') == vd0 and c == '"VOLT:AC +6.000000E+00,+1.000000E-04"',
+          'V/div + back: CONF? = AC V 6 V (%s)' % c)
 
     print('STOP / RUN')
     q('STOP')

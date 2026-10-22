@@ -1212,7 +1212,11 @@ sees the error a current measurement adds to a low-voltage circuit (uA:
   caption "Burden" right before it, as the 4-20 mA percentage's caption.
   **AC+DC:** both aux rows hold the AC / DC parts, so no readout there
   (FETC:BURD? still answers: the true RMS x R_path). Power meter: none (it
-  has its own "At load" burden line, 3.12).
+  has its own "At load" burden line, 3.12). **AUTO coupling** (f864be8)
+  runs the AC+DC alternation with the parts in the aux rows: no readout
+  either; FETC:BURD? answers the total RMS x R_path as in AC+DC, not the
+  part shown (a 200 mA DC + 100 mA AC current shows 200 mA DC but drops
+  223.6 mA x R_path; emu/hy3131/burdentest.py checks both couplings).
 * **Value.** DC keeps the sign (current into A = positive, as the
   reading); AC is the RMS. From the raw current: REL and the display
   smoothing do not change it (HOLD freezes it with the reading). The unit /
