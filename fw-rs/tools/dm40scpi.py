@@ -283,7 +283,7 @@ def log_records(raw):
 
 def do_stream(link, args):
     if args.bt:
-        print('dm40scpi: warning: Bluetooth carries ~1 kS/s at best; the ring overflows (seq gaps)', file=sys.stderr)
+        print('dm40scpi: warning: Bluetooth carries ~1 kS/s at best; the ring overflows (dropped: timestamp gaps, LOG:COUNt? overwritten)', file=sys.stderr)
     if args.conf:
         switch(link, args.conf)
     ad2 = args.source == 'ad2'

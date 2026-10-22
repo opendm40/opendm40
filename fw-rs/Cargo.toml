@@ -24,6 +24,13 @@ default = ["vdisk"]
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []
+# AD2 logger stream on ONE timer interrupt (TIMER6 = STM32 TIM7, IRQ 55) with
+# the HY3131 bus handed to the ISR exclusively while a LOG:SOURce AD2 session
+# runs (docs/decisions-2026-10-22.md #3; src/hy3131.rs `stream`, src/logger.rs
+# `isr`). Off by default until the device acceptance (LOG:COUNt? lost = 0 at
+# 4800 S/s for 60 s with DBG:AD2:DRAW 2); without it the build has no
+# interrupt at all and the AD2 logger is the main-loop sampler.
+ad2-isr = []
 # USB mass-storage LUN = the read-only information volume generated from the
 # MCU memory and the SPI-disk files (src/vdisk.rs: LOGS / SCOPE / SHOTS /
 # INFO / DEBUG). Default; without it the LUN is the writable SPI disk.

@@ -1,10 +1,11 @@
 //! Data-logger fast-stream mode (FR-38).
 //!
 //! A main-loop-polled, conversion-paced sampler for the HY3131 AD1 (DC) channel.
-//! fw-rs runs with interrupts masked (`cpsid i`), so there are NO ISRs: this is
-//! deliberately a cooperative sampler driven from the main loop, timestamped and
-//! paced by the DWT cycle counter (clock.rs enables CYCCNT; HCLK = 200 MHz), not
-//! by an interrupt. FR-38 trades resolution for speed: the HY3131 AD1OSR is
+//! fw-rs runs with interrupts masked (`cpsid i`): this is a cooperative sampler
+//! driven from the main loop, timestamped and paced by the DWT cycle counter
+//! (clock.rs enables CYCCNT; HCLK = 200 MHz). The one exception is the AD2
+//! source with the `ad2-isr` feature (module `isr` below, decisions-2026-10-22
+//! #3): a timer ISR is then the producer and the main loop only drains. FR-38 trades resolution for speed: the HY3131 AD1OSR is
 //! dropped to its fast setting (see `hy3131::set_ad1_osr`) and we stream the raw
 //! signed 24-bit AD1 counts.
 //!
@@ -33,8 +34,12 @@
 //!
 //! Each record carries a monotonic sequence number and a device microsecond
 //! timestamp, so loss is always detectable, never silently skipped:
-//!   * ring overflow (host draining `LOG:DATA?` too slowly) -> the oldest record
-//!     is overwritten and `overwritten` counts it; the host sees a SEQUENCE gap.
+//!   * ring overflow (host draining `LOG:DATA?` too slowly) -> the NEWEST sample
+//!     is dropped (single-producer / single-consumer ring: the producer, which
+//!     may be the stream ISR, never moves the consumer's tail) and `overwritten`
+//!     counts it; the seqs stay consecutive, the host sees a TIMESTAMP gap.
+//!     (Before the SPSC ring, 2026-10-22, the oldest record was overwritten and
+//!     the host saw a sequence gap; dm40scpi.py's lost_before handles both.)
 //!   * a stalled main loop (a slow redraw, a relay pulse, an SPI-flash write)
 //!     -> fewer samples captured than the conversion grid; the host sees a
 //!     TIMESTAMP gap between consecutive seqs, and `missed` estimates it.
@@ -66,10 +71,13 @@
 //! pacing as AD1 (INTF.AD2F, a P/2 gate), but since a bit-banged flag check
 //! + 3-byte read cost ~122 us and the period is 104 .. 1667 us, one main-loop
 //! pass may take several samples: `poll` keeps sampling for up to
-//! `AD2_BURST_US` while the next result is due within that budget. Still no
-//! ISR (owner decision pending): every main-loop stall longer than a period
-//! drops samples, which the timestamps, `missed`, the span-based `lost()` and
-//! the gap histogram (`gaps()`, LOG:GAPs?) report. A read whose bits 23:19
+//! `AD2_BURST_US` while the next result is due within that budget. Without the
+//! `ad2-isr` feature every main-loop stall longer than a period drops samples
+//! (device 7889e6c, SPI2: 8 % lost at 4800, 11 % at 9600), which the
+//! timestamps, `missed`, the span-based `lost()` and the gap histogram
+//! (`gaps()`, LOG:GAPs?) report. With it, the timer ISR (`isr`) takes every
+//! sample while the main loop redraws; the same counters report what it
+//! still misses, DBG:ISR? its own numbers. A read whose bits 23:19
 //! are not a copy of bit 18 (a torn read, feasibility 1.4) is dropped and
 //! counted (`bad`); it shows up as a gap. Records: the same 12-byte wire
 //! format; `raw` = signed AD2 code (+-262143 = +-1.25 V / IG at the AD2 input,
@@ -77,32 +85,41 @@
 
 use crate::hy3131 as hy;
 use crate::mmio::r32;
+use core::cell::UnsafeCell;
+use core::sync::atomic::{
+    AtomicU32,
+    Ordering::{Acquire, Relaxed, Release},
+};
 
 const DWT_CYCCNT: u32 = 0xE000_1004;
-const CYC_PER_US: u64 = (crate::clock::HCLK_HZ / 1_000_000) as u64; // 200
+const CYC_PER_US: u32 = crate::clock::HCLK_HZ / 1_000_000; // 200
 
-/// Ring capacity in records. 2048 * 8 B = 16 KiB (`Rec`); ~51 s at the default
-/// 40/s, ~3.2 s at AD1's fastest 640/s, 213 ms at AD2's 9600/s (the host must
-/// drain LOG:DATA? at least ~5x/s there, else `overwritten`). Held in a
-/// `static mut` (see main.rs) so it does not sit on the main stack next to
-/// the USBTMC response buffer.
+/// Ring capacity in records (a power of two). 2048 * 8 B = 16 KiB (`Ring`);
+/// ~51 s at the default 40/s, ~3.2 s at AD1's fastest 640/s, 427 ms at
+/// AD2's 4800/s, 213 ms at 9600/s (the host must drain LOG:DATA? at least
+/// ~5x/s there, else `overwritten`). A static in SRAM (`RING`), not on the
+/// main stack and not inside `Logger` (the stream ISR writes it).
 pub const CAP: usize = 2048;
+const _: () = assert!(CAP.is_power_of_two());
 
 /// Default AD1OSR code, applied at startup (main.rs). OSR 2048 chopped (R22 =
 /// 0x13, 25 ms, 40/s) is the stock's fastest setting; faster ones are opt-in
 /// (LOG:OSR, LOG:CHOP OFF; table above).
 pub const DEFAULT_OSR: u8 = hy::AD1OSR_STREAM;
 
-/// AD2 rate when LOG:SRATe was never set, S/s.
-pub const DEFAULT_AD2_HZ: u32 = 2400;
+/// AD2 rate when LOG:SRATe was never set, S/s: 4800 with the stream ISR
+/// (decisions #3: ~10 % of the CPU at 3.125 MHz), 2400 for the main-loop
+/// sampler.
+pub const DEFAULT_AD2_HZ: u32 = if cfg!(feature = "ad2-isr") { 4800 } else { 2400 };
 
 /// Longest a single `poll` keeps taking AD2 samples, us (USB and the rest of
-/// the loop wait that long at most).
+/// the loop wait that long at most). Main-loop sampler only.
 pub const AD2_BURST_US: u64 = 500;
 
 /// One sample in the ring: 8 bytes. On the wire 12, little-endian (seq,
-/// ts_us, raw); the seq is not stored: the ring holds consecutive seqs (only
-/// the oldest is ever dropped), so the one at `tail` is `seq - (len - 1)`.
+/// ts_us, raw); the seq is not stored: record number k (from 0) of the
+/// session is seq k + 1, and the ring holds consecutive ones (a full ring
+/// drops the NEWEST sample, so nothing ever leaves except by `drain`).
 #[derive(Clone, Copy)]
 struct Rec {
     ts_us: u32,
@@ -115,6 +132,226 @@ const REC_BYTES: usize = 12;
 /// 2, 3..4, 5..16, 17..128, > 128.
 pub const GAP_BUCKETS: usize = 5;
 
+/// The single-producer / single-consumer ring and the producer's counters:
+/// the only state shared with the stream ISR (decisions #3, invariant 4).
+/// Producer = the stream ISR (AD2 with `ad2-isr`) or the main loop (AD1,
+/// main-loop AD2), never both in one session; consumer = the main loop
+/// (`drain`). Each atomic has one writer: `head` and every counter the
+/// producer, `tail` the consumer; Release on `head` / Acquire on the other
+/// side order the record slots. All-zero = empty (`new`, `reset`).
+pub struct Ring {
+    buf: UnsafeCell<[Rec; CAP]>,
+    /// Records pushed this session (slot = head % CAP).
+    head: AtomicU32,
+    /// Records drained this session.
+    tail: AtomicU32,
+    captured: AtomicU32,
+    /// Captured but dropped: the ring was full (LOG:COUNt? `overwritten`).
+    dropped: AtomicU32,
+    missed: AtomicU32,
+    bad: AtomicU32,
+    gaps: [AtomicU32; GAP_BUCKETS],
+    max_gap_us: AtomicU32,
+    /// First -> last captured sample, us, 64 bit as two words (main reads
+    /// hi, lo, hi and retries on a change: the ISR may update between).
+    span_lo: AtomicU32,
+    span_hi: AtomicU32,
+    // Stream ISR only (DBG:ISR?).
+    ticks: AtomicU32,
+    empty: AtomicU32,
+    gated: AtomicU32,
+    overruns: AtomicU32,
+    timeouts: AtomicU32,
+    max_isr_cyc: AtomicU32,
+    max_lat: AtomicU32,
+}
+
+// SAFETY: the slots are written only by the producer at `head` and read
+// only by the consumer below `head` (Acquire); every other field is atomic.
+unsafe impl Sync for Ring {}
+
+const Z: AtomicU32 = AtomicU32::new(0);
+
+impl Ring {
+    pub const fn new() -> Self {
+        Ring {
+            buf: UnsafeCell::new([Rec { ts_us: 0, raw: 0 }; CAP]),
+            head: Z,
+            tail: Z,
+            captured: Z,
+            dropped: Z,
+            missed: Z,
+            bad: Z,
+            gaps: [Z; GAP_BUCKETS],
+            max_gap_us: Z,
+            span_lo: Z,
+            span_hi: Z,
+            ticks: Z,
+            empty: Z,
+            gated: Z,
+            overruns: Z,
+            timeouts: Z,
+            max_isr_cyc: Z,
+            max_lat: Z,
+        }
+    }
+
+    /// New session (main loop, no producer running).
+    fn reset(&self) {
+        for a in [
+            &self.head, &self.tail, &self.captured, &self.dropped, &self.missed, &self.bad, &self.max_gap_us,
+            &self.span_lo, &self.span_hi, &self.ticks, &self.empty, &self.gated, &self.overruns, &self.timeouts,
+            &self.max_isr_cyc, &self.max_lat,
+        ] {
+            a.store(0, Relaxed);
+        }
+        for g in &self.gaps {
+            g.store(0, Relaxed);
+        }
+    }
+
+    fn len(&self) -> u32 {
+        self.head.load(Acquire).wrapping_sub(self.tail.load(Relaxed))
+    }
+
+    fn span_us(&self) -> u64 {
+        loop {
+            let h = self.span_hi.load(Relaxed);
+            let l = self.span_lo.load(Relaxed);
+            if self.span_hi.load(Relaxed) == h {
+                return (h as u64) << 32 | l as u64;
+            }
+        }
+    }
+
+    /// Producer: append, or drop the sample when full (newest dropped, so
+    /// the consumer's `tail` is never written here).
+    fn push(&self, ts_us: u32, raw: i32) {
+        let h = self.head.load(Relaxed);
+        if h.wrapping_sub(self.tail.load(Acquire)) as usize >= CAP {
+            inc(&self.dropped);
+            return;
+        }
+        // SAFETY: slot h is outside [tail, head): the consumer does not read
+        // it until the Release store below publishes it.
+        unsafe { (self.buf.get() as *mut Rec).add(h as usize & (CAP - 1)).write_volatile(Rec { ts_us, raw }) };
+        self.head.store(h.wrapping_add(1), Release);
+    }
+}
+
+/// `a += 1` for a counter with a single writer (no RMW needed).
+#[inline(always)]
+fn inc(a: &AtomicU32) {
+    a.store(a.load(Relaxed).wrapping_add(1), Relaxed);
+}
+
+/// The ring of the firmware (SRAM .dmabuf, NOLOAD: `Logger::init_in_place`
+/// resets it; the slots' contents do not matter).
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+pub static RING: Ring = Ring::new();
+
+/// The producer side's clock and per-sample statistics: the main loop's in
+/// `Logger` (AD1, main-loop AD2), the stream ISR's own copy in `isr::PROD`
+/// (set up by the main loop before the hand-off, the ISR's alone after it).
+#[derive(Clone, Copy)]
+struct Producer {
+    period_ns: u32,
+    nominal_us: u32,
+    // DWT-derived monotonic microsecond clock from the session start (own
+    // wrap tracking; CYCCNT wraps every 21.5 s).
+    last_cyc: u32,
+    acc: u32,
+    now_us: u64,
+    first_us: u64,
+    last_ts_us: u32,
+    have_last: bool,
+    /// `now_us` when the last conversion was seen (the gate runs from it;
+    /// bad reads included).
+    last_sample_us: u64,
+    /// No flag read within this many us of `last_sample_us`: P/2 for the
+    /// main-loop sampler, 7/8 P for the stream ISR (`isr`).
+    gate_us: u32,
+}
+
+impl Producer {
+    const fn new() -> Self {
+        Producer {
+            period_ns: 0,
+            nominal_us: 0,
+            last_cyc: 0,
+            acc: 0,
+            now_us: 0,
+            first_us: 0,
+            last_ts_us: 0,
+            have_last: false,
+            last_sample_us: 0,
+            gate_us: 0,
+        }
+    }
+
+    /// The gate: this soon after the last seen conversion no new one can be
+    /// due, so the flag is not read.
+    #[inline(always)]
+    #[cfg_attr(not(feature = "ad2-isr"), allow(dead_code))]
+    fn gate_closed(&self) -> bool {
+        self.have_last && self.now_us < self.last_sample_us + self.gate_us as u64
+    }
+
+    /// New session; gate = P/2 (the main-loop sampler).
+    fn begin(&mut self, period_ns: u32) {
+        *self = Producer::new();
+        self.period_ns = period_ns;
+        self.nominal_us = (period_ns + 500) / 1000;
+        self.gate_us = self.nominal_us / 2;
+        self.last_cyc = unsafe { r32(DWT_CYCCNT) };
+    }
+
+    /// Advance the microsecond clock to cycle count `c` (u32 maths only:
+    /// called at least every few ms, far below the 21 s CYCCNT wrap).
+    #[inline(always)]
+    fn tick_at(&mut self, c: u32) {
+        let d = c.wrapping_sub(self.last_cyc);
+        self.last_cyc = c;
+        let r = d % CYC_PER_US + self.acc;
+        self.now_us += (d / CYC_PER_US + r / CYC_PER_US) as u64;
+        self.acc = r % CYC_PER_US;
+    }
+
+    fn tick(&mut self) {
+        self.tick_at(unsafe { r32(DWT_CYCCNT) });
+    }
+
+    /// One captured sample at `now_us` (wire stamp `ts_us`): statistics,
+    /// then the ring.
+    fn push(&mut self, ring: &Ring, ts_us: u32, raw: i32) {
+        inc(&ring.captured);
+        // Timestamp-gap estimate of samples the producer was too late for.
+        if self.have_last {
+            let gap = ts_us.wrapping_sub(self.last_ts_us);
+            let nom = self.nominal_us.max(1);
+            if gap > nom * 3 / 2 {
+                ring.missed.store(ring.missed.load(Relaxed).wrapping_add((gap / nom).saturating_sub(1)), Relaxed);
+            }
+            let pns = self.period_ns.max(1) as u64;
+            let k = (gap as u64 * 1000 + pns / 2) / pns;
+            if k >= 2 {
+                inc(&ring.gaps[gap_bucket(k)]);
+            }
+            if gap > ring.max_gap_us.load(Relaxed) {
+                ring.max_gap_us.store(gap, Relaxed);
+            }
+        } else {
+            self.first_us = self.now_us;
+            self.have_last = true;
+        }
+        self.last_ts_us = ts_us;
+        let span = self.now_us - self.first_us;
+        ring.span_hi.store((span >> 32) as u32, Relaxed);
+        ring.span_lo.store(span as u32, Relaxed);
+        ring.push(ts_us, raw);
+    }
+}
+
 pub struct Logger {
     active: bool,
     osr: u8,
@@ -123,42 +360,17 @@ pub struct Logger {
     nochop: bool,
     /// LOG:SOURce AD2 (false = AD1, the all-zero default).
     ad2: bool,
+    /// The running session's producer is the stream ISR.
+    isr: bool,
     /// LOG:SRATe (AD2), S/s; 0 = DEFAULT_AD2_HZ.
     req_hz: u32,
     /// R26 low bits of the running AD2 session (preamble).
     r26: u8,
-    nominal_us: u32,
-    period_ns: u32,
     mode: u8,
     range: i8,
-
-    // DWT-derived monotonic microsecond clock (own wrap tracking; the Clock in
-    // clock.rs keeps its accumulator private).
-    last_cyc: u32,
-    acc: u64,
-    now_us: u64,
-    /// `now_us` of the last captured sample (the pacing gate runs from it).
-    last_sample_us: u64,
-
-    // Ring buffer (oldest at `tail`, next write at `head`).
-    buf: [Rec; CAP],
-    head: usize,
-    tail: usize,
-    len: usize,
-
-    // Monotonic stats over the session.
-    seq: u32,
-    captured: u32,
-    overwritten: u32,
-    missed: u32,
-    /// AD2 reads dropped by the sign-copy check (torn reads).
-    bad: u32,
-    gaps: [u32; GAP_BUCKETS],
-    max_gap_us: u32,
-    first_us: u64,
-    last_us: u64,
-    last_ts_us: u32,
-    have_last: bool,
+    /// Main-loop producer (AD1, main-loop AD2).
+    prod: Producer,
+    ring: *const Ring,
 }
 
 /// Gap bucket of a gap of `k` periods (k >= 2).
@@ -174,16 +386,17 @@ fn gap_bucket(k: u64) -> usize {
 
 impl Logger {
     /// `new()` in place for an instance in NOLOAD RAM (main.rs LOGGER is in
-    /// .dmabuf, not zeroed at reset), without a ~24 KiB temporary on the
-    /// stack: `new()` is all zero bits (false / 0 / zeroed records), and all
-    /// zero bits is a valid Logger. Keep `new()` all-zero.
-    pub fn init_in_place(this: *mut Logger) {
-        unsafe { core::ptr::write_bytes(this, 0, 1) };
+    /// .dmabuf, not zeroed at reset): `new()` is all zero bits (false / 0 /
+    /// null), and all zero bits is a valid Logger; then the ring.
+    pub fn init_in_place(this: *mut Logger, ring: &'static Ring) {
+        unsafe {
+            core::ptr::write_bytes(this, 0, 1);
+            (*this).ring = ring;
+        }
+        ring.reset();
     }
 
-    /// All-zero so the ~24 KiB instance lands in `.bss`, not `.data` (the RAM
-    /// image has no room for 24 KiB of initialised data), and so that
-    /// `init_in_place` equals it. Runtime defaults (OSR) are applied in
+    /// All-zero (see `init_in_place`). Runtime defaults (OSR) are applied in
     /// main.rs via `set_osr(DEFAULT_OSR)`.
     pub const fn new() -> Self {
         Logger {
@@ -191,32 +404,18 @@ impl Logger {
             osr: 0,
             nochop: false,
             ad2: false,
+            isr: false,
             req_hz: 0,
             r26: 0,
-            nominal_us: 0,
-            period_ns: 0,
             mode: 0,
             range: 0,
-            last_cyc: 0,
-            acc: 0,
-            now_us: 0,
-            last_sample_us: 0,
-            buf: [Rec { ts_us: 0, raw: 0 }; CAP],
-            head: 0,
-            tail: 0,
-            len: 0,
-            seq: 0,
-            captured: 0,
-            overwritten: 0,
-            missed: 0,
-            bad: 0,
-            gaps: [0; GAP_BUCKETS],
-            max_gap_us: 0,
-            first_us: 0,
-            last_us: 0,
-            last_ts_us: 0,
-            have_last: false,
+            prod: Producer::new(),
+            ring: core::ptr::null(),
         }
+    }
+
+    fn ring(&self) -> &Ring {
+        unsafe { &*self.ring }
     }
 
     pub fn active(&self) -> bool {
@@ -280,32 +479,38 @@ impl Logger {
         self.range
     }
     pub fn nominal_us(&self) -> u32 {
-        self.nominal_us
+        self.prod.nominal_us
     }
     /// Nominal (chip) rate of the session in mHz.
     pub fn nominal_mhz(&self) -> u32 {
-        if self.period_ns == 0 { 0 } else { (1_000_000_000_000u64 / self.period_ns as u64) as u32 }
+        let p = self.prod.period_ns;
+        if p == 0 { 0 } else { (1_000_000_000_000u64 / p as u64) as u32 }
     }
     pub fn buffered(&self) -> u32 {
-        self.len as u32
+        self.ring().len()
     }
     pub fn captured(&self) -> u32 {
-        self.captured
+        self.ring().captured.load(Relaxed)
     }
+    /// Captured samples dropped because the ring was full (the host did not
+    /// drain LOG:DATA? fast enough). The ring keeps the OLDEST records (the
+    /// stream ISR cannot move the consumer's tail), so the host sees the
+    /// loss as a timestamp gap, the seqs stay consecutive.
     pub fn overwritten(&self) -> u32 {
-        self.overwritten
+        self.ring().dropped.load(Relaxed)
     }
     pub fn missed(&self) -> u32 {
-        self.missed
+        self.ring().missed.load(Relaxed)
     }
     pub fn bad(&self) -> u32 {
-        self.bad
+        self.ring().bad.load(Relaxed)
     }
     pub fn gaps(&self) -> [u32; GAP_BUCKETS] {
-        self.gaps
+        let g = &self.ring().gaps;
+        [0, 1, 2, 3, 4].map(|i| g[i].load(Relaxed))
     }
     pub fn max_gap_us(&self) -> u32 {
-        self.max_gap_us
+        self.ring().max_gap_us.load(Relaxed)
     }
 
     /// Conversions the session did not capture, from the span: the chip
@@ -316,12 +521,12 @@ impl Logger {
     /// ~122 us per bit-banged sample). Depends on the nominal period: a chip
     /// clock off by x % shows as x % lost (or as 0).
     pub fn lost(&self) -> u32 {
-        if self.captured < 2 || self.period_ns == 0 {
+        let (captured, span, p) = (self.captured(), self.ring().span_us(), self.prod.period_ns);
+        if captured < 2 || p == 0 {
             return 0;
         }
-        let span_ns = (self.last_us - self.first_us) * 1000;
-        let due = (span_ns + self.period_ns as u64 / 2) / self.period_ns as u64 + 1;
-        due.saturating_sub(self.captured as u64).min(u32::MAX as u64) as u32
+        let due = (span * 1000 + p as u64 / 2) / p as u64 + 1;
+        due.saturating_sub(captured as u64).min(u32::MAX as u64) as u32
     }
 
     /// Measured mean sample rate in Hz over the current session, from the first
@@ -329,78 +534,94 @@ impl Logger {
     /// (the real number, off the device, not the nominal rate). 0 until at
     /// least two samples.
     pub fn measured_hz(&self) -> u32 {
-        if self.captured < 2 {
+        let (captured, span) = (self.captured(), self.ring().span_us());
+        if captured < 2 || span == 0 {
             return 0;
         }
-        let span = self.last_us - self.first_us;
-        if span == 0 {
-            return 0;
-        }
-        (((self.captured as u64 - 1) * 1_000_000) / span) as u32
+        (((captured as u64 - 1) * 1_000_000) / span) as u32
     }
 
     /// Begin a session: configure the HY3131 (AD1: R22 OSR / chopper; AD2:
-    /// R26 rung, AD3 / RMS / LPF off) and reset all state. `mode`/`range` are
+    /// R26 rung, AD3 / RMS / LPF off), reset all state and, for AD2 with the
+    /// `ad2-isr` feature, hand the bus to the stream ISR. `mode`/`range` are
     /// the current DMM function (for the preamble); the caller must have
     /// selected a mode `mode_ok` for the source, written its full row
     /// (dmm.start) and powered the analog side.
     pub fn start(&mut self, mode: u8, range: i8) {
+        self.stop();
         self.mode = mode;
         self.range = range;
-        if self.ad2 {
+        let period_ns = if self.ad2 {
             self.r26 = hy::ad2_r26_for(self.req_hz(), self.chop());
-            self.period_ns = hy::ad2_period_ns(self.r26);
+            hy::ad2_period_ns(self.r26)
         } else {
             self.r26 = 0;
-            self.period_ns = hy::ad1_period_us(self.osr, self.chop()) * 1000;
-        }
-        self.nominal_us = (self.period_ns + 500) / 1000;
-        self.reset_stats();
-        self.last_cyc = unsafe { r32(DWT_CYCCNT) };
+            hy::ad1_period_us(self.osr, self.chop()) * 1000
+        };
+        self.ring().reset();
+        // The chip set-up is the last main-loop bus access of an ISR session.
         if self.ad2 {
             hy::set_ad2_stream(self.r26);
         } else {
             hy::set_ad1_osr(self.osr, self.chop());
         }
+        self.prod.begin(period_ns);
         self.active = true;
+        #[cfg(feature = "ad2-isr")]
+        if self.ad2 {
+            isr::start(&self.prod, self.ring);
+            self.isr = true;
+        }
     }
 
-    fn reset_stats(&mut self) {
-        self.head = 0;
-        self.tail = 0;
-        self.len = 0;
-        self.seq = 0;
-        self.captured = 0;
-        self.overwritten = 0;
-        self.missed = 0;
-        self.bad = 0;
-        self.gaps = [0; GAP_BUCKETS];
-        self.max_gap_us = 0;
-        self.have_last = false;
-        self.acc = 0;
-        self.now_us = 0;
-        self.last_sample_us = 0;
-        self.first_us = 0;
-        self.last_us = 0;
-    }
-
+    /// End the session (records stay readable). With the stream ISR: the
+    /// timer is stopped and the bus is the main loop's again on return; the
+    /// caller restores the HY3131 (app.dmm.start).
     pub fn stop(&mut self) {
+        #[cfg(feature = "ad2-isr")]
+        if self.isr {
+            hy::stream::stop();
+        }
+        self.isr = false;
         self.active = false;
-        // The caller restores the HY3131 (app.dmm.start) so the DMM resumes with
-        // a clean config; nothing to undo here.
     }
 
-    /// Advance the microsecond clock from the DWT cycle counter. Safe to call
-    /// often; handles the ~21 s CYCCNT wrap via wrapping_sub.
-    fn tick(&mut self) {
-        let c = unsafe { r32(DWT_CYCCNT) };
-        self.acc += c.wrapping_sub(self.last_cyc) as u64;
-        self.last_cyc = c;
-        self.now_us += self.acc / CYC_PER_US;
-        self.acc %= CYC_PER_US;
+    /// The running session's producer is the stream ISR.
+    pub fn on_isr(&self) -> bool {
+        self.isr
     }
 
-    /// Main-loop entry: capture fresh conversions. Cheap when idle (one DWT
+    /// DBG:ISR? numbers of the last / running ISR session: ticks, empty
+    /// (INTF read, no AD2F), gated (no bus access: within P/2 of the last
+    /// sample), overruns (a tick already pending at exit), frame timeouts,
+    /// max cycles in the handler, max entry latency in timer counts (20 ns).
+    pub fn isr_stats(&self) -> [u32; 7] {
+        let r = self.ring();
+        [&r.ticks, &r.empty, &r.gated, &r.overruns, &r.timeouts, &r.max_isr_cyc, &r.max_lat].map(|a| a.load(Relaxed))
+    }
+
+    /// Main-loop entry. With the stream ISR: no bus access; returns true
+    /// once when the stream was stopped behind the logger's back (a
+    /// main-loop bus access, hy3131 `guard`): the session is ended then and
+    /// main.rs reports "Settings conflict". Otherwise the main-loop sampler
+    /// (below); returns false.
+    pub fn poll(&mut self) -> bool {
+        if !self.active {
+            return false;
+        }
+        if self.isr {
+            if !hy::streaming() {
+                self.isr = false;
+                self.active = false;
+                return true;
+            }
+            return false;
+        }
+        self.sample();
+        false
+    }
+
+    /// The main-loop sampler: capture fresh conversions. Cheap when idle (one DWT
     /// read and an early return). The HY3131 AD1F / AD2F flag paces this at
     /// the conversion rate. For half a conversion period after the last
     /// captured sample no new conversion can be due, so INTF is not read
@@ -418,79 +639,42 @@ impl Logger {
     /// steady L < P, so the delay between a conversion and its observation
     /// stays under L and no conversion is lost while the loop is faster than
     /// the conversion rate (a gate of 0.8 P would not guarantee that).
-    pub fn poll(&mut self) {
-        if !self.active {
-            return;
-        }
-        self.tick();
-        let end = self.now_us + if self.ad2 { AD2_BURST_US } else { 0 };
-        let half = self.nominal_us as u64 / 2;
+    fn sample(&mut self) {
+        let ring: &Ring = unsafe { &*self.ring };
+        self.prod.tick();
+        let end = self.prod.now_us + if self.ad2 { AD2_BURST_US } else { 0 };
+        let half = self.prod.gate_us as u64;
         loop {
-            let open = if self.have_last { self.last_sample_us + half } else { 0 };
-            if self.now_us < open {
+            let open = if self.prod.have_last { self.prod.last_sample_us + half } else { 0 };
+            if self.prod.now_us < open {
                 // Gate closed: wait here only if it opens within the burst.
                 if open > end {
                     return;
                 }
-                while self.now_us < open {
-                    self.tick();
+                while self.prod.now_us < open {
+                    self.prod.tick();
                 }
             }
             let ready = if self.ad2 { hy::ad2_ready() } else { hy::ad1_ready() };
             if ready {
-                self.tick(); // the flag-observed moment
-                self.last_sample_us = self.now_us;
-                let ts = self.now_us as u32;
+                self.prod.tick(); // the flag-observed moment
+                self.prod.last_sample_us = self.prod.now_us;
+                let ts = self.prod.now_us as u32;
                 if self.ad2 {
                     let (raw, ok) = hy::read_ad2();
                     if ok {
-                        self.push(ts, raw);
+                        self.prod.push(ring, ts, raw);
                     } else {
-                        self.bad = self.bad.wrapping_add(1);
+                        inc(&ring.bad);
                     }
                 } else {
-                    self.push(ts, hy::read_ad1());
+                    self.prod.push(ring, ts, hy::read_ad1());
                 }
             }
-            self.tick();
-            if self.now_us >= end {
+            self.prod.tick();
+            if self.prod.now_us >= end {
                 return;
             }
-        }
-    }
-
-    fn push(&mut self, ts_us: u32, raw: i32) {
-        self.seq = self.seq.wrapping_add(1);
-        self.captured = self.captured.wrapping_add(1);
-
-        // Timestamp-gap estimate of samples the loop was too busy to take.
-        if self.have_last {
-            let gap = ts_us.wrapping_sub(self.last_ts_us) as u64;
-            let pns = self.period_ns.max(1) as u64;
-            let nom = self.nominal_us.max(1) as u64;
-            if gap > nom * 3 / 2 {
-                self.missed = self.missed.wrapping_add((gap / nom).saturating_sub(1) as u32);
-            }
-            let k = (gap * 1000 + pns / 2) / pns;
-            if k >= 2 {
-                self.gaps[gap_bucket(k)] = self.gaps[gap_bucket(k)].wrapping_add(1);
-            }
-            self.max_gap_us = self.max_gap_us.max(gap.min(u32::MAX as u64) as u32);
-        } else {
-            self.first_us = self.now_us;
-            self.have_last = true;
-        }
-        self.last_ts_us = ts_us;
-        self.last_us = self.now_us;
-
-        self.buf[self.head] = Rec { ts_us, raw };
-        self.head = (self.head + 1) % CAP;
-        if self.len == CAP {
-            // Overflow: drop the oldest. The host sees a sequence jump.
-            self.tail = (self.tail + 1) % CAP;
-            self.overwritten = self.overwritten.wrapping_add(1);
-        } else {
-            self.len += 1;
         }
     }
 
@@ -498,19 +682,22 @@ impl Logger {
     /// Returns the number of bytes written. Transport-agnostic: USBTMC today,
     /// BT later.
     pub fn drain(&mut self, out: &mut [u8]) -> usize {
-        let room = out.len() / REC_BYTES;
-        let n = self.len.min(room);
+        let ring = self.ring();
+        let t = ring.tail.load(Relaxed);
+        let n = (ring.head.load(Acquire).wrapping_sub(t) as usize).min(out.len() / REC_BYTES);
+        let base = ring.buf.get() as *const Rec;
         for i in 0..n {
-            // The ring holds consecutive seqs ending at `self.seq`.
-            let seq = self.seq.wrapping_sub(self.len as u32 - 1);
-            let r = self.buf[self.tail];
-            self.tail = (self.tail + 1) % CAP;
-            self.len -= 1;
+            let k = t.wrapping_add(i as u32);
+            // SAFETY: k is below the Acquire-loaded head: published, and the
+            // producer does not write it again before `tail` passes it.
+            let r = unsafe { base.add(k as usize & (CAP - 1)).read_volatile() };
+            let seq = k.wrapping_add(1);
             let o = i * REC_BYTES;
             out[o..o + 4].copy_from_slice(&seq.to_le_bytes());
             out[o + 4..o + 8].copy_from_slice(&r.ts_us.to_le_bytes());
             out[o + 8..o + 12].copy_from_slice(&r.raw.to_le_bytes());
         }
+        ring.tail.store(t.wrapping_add(n as u32), Release);
         n * REC_BYTES
     }
 
@@ -522,7 +709,7 @@ impl Logger {
     pub fn encode(&mut self, out: &mut [u8]) -> usize {
         const HDR: usize = 6; // "#4nnnn"
         let maxrec = out.len().saturating_sub(HDR) / REC_BYTES;
-        let nrec = self.len.min(maxrec).min(9999 / REC_BYTES);
+        let nrec = (self.ring().len() as usize).min(maxrec).min(9999 / REC_BYTES);
         let bytes = nrec * REC_BYTES;
         out[0] = b'#';
         out[1] = b'4';
@@ -534,22 +721,130 @@ impl Logger {
     }
 }
 
+/// The AD2 stream ISR (feature `ad2-isr`; docs/decisions-2026-10-22.md #3):
+/// TIMER6 (STM32 TIM7, IRQ 55, the only interrupt fw-rs ever enables)
+/// ticking at `TICKS` x the AD2 rate (period T = P / 4) with a read gate of
+/// 7/8 P after the last seen conversion. Each tick: inside the gate nothing
+/// (`gated`, no bus access); else INTF (one SPI2 frame, ~8 us at 3.125 MHz);
+/// on AD2F the result R03..R05 (~13.5 us), the sign-copy check, the ring.
+/// After a hit at tick t the ticks t + T .. t + 3T are gated and t + 4T = t +
+/// P reads, so the read stays locked one period after the previous one: it
+/// sees the next conversion (P after the previous) with the same delay d < T,
+/// the stamps (the observation time, decision #2) are as regular as the two
+/// crystals plus the ISR entry latency. The timer / chip clock mismatch
+/// (ARR rounding + crystals, ~100 ppm) slowly walks d to 0; then one read
+/// comes just before the conversion (`empty`) and the next tick (T later)
+/// takes it: a stamp step of at most T + latency, < P / 2 at < P / 4 latency,
+/// so a gap of k periods is round(gap / P) exactly (the host's lost_before,
+/// LOG:GAPs?) - no false gaps. A conversion is lost only when an entry is
+/// delayed by more than P - d > 3/4 P (156 us at 4.8 kS/s, 78 at 9.6).
+/// CPU: one hit (~21.5 us) + three bus-free entries (~0.5 us) per sample:
+/// ~11 % at 4.8 kS/s, ~22 % at 9.6 kS/s (decision #3 invariant 5).
+/// DEVIATION from decision #3 invariant 2 ("~1.05 x the AD2 rate"): at 1.05 x
+/// the delay d walks through the whole period (T = 0.95 P), so the stamps
+/// jitter by ~P and every phase wrap (one empty tick in 21) made a 2-period
+/// stamp gap that neither firmware nor host can tell from a real miss
+/// (emulator, 4800 S/s: 1622 false lost_before in 32464 samples while
+/// LOG:COUNt? lost was 0), and the latency margin was P - T = 10 / 5 us. A
+/// 2.1 x tick with a P/2 gate still showed 190 false gaps in 139493 at 9.6
+/// kS/s (jitter T + latency > P / 2). Revert = TICKS / GATE below.
+/// Reading INTF clears every flag: harmless, the DMM is paused. Bounded: two
+/// frames with capped status waits (hy3131 `spi::wait`), no loops otherwise,
+/// no allocation, no float, no flash / LCD / watchdog, never a register
+/// write (HY3131) and never a call into dmm.rs. Shared with the main loop:
+/// `RING` only.
+#[cfg(feature = "ad2-isr")]
+pub mod isr {
+    use super::*;
+
+    /// Ticks per AD2 period, and the read gate after a seen conversion in
+    /// 1/8 periods (module notes).
+    const TICKS: u32 = 4;
+    const GATE_EIGHTHS: u64 = 7;
+
+    /// The ISR's producer state. Written by `start` (main loop) before the
+    /// hand-off, by the ISR alone after it; nobody else reads it.
+    static mut PROD: Producer = Producer::new();
+    static mut RINGP: *const Ring = core::ptr::null();
+
+    /// Main loop, after the last bus access of the session start.
+    pub(super) fn start(prod: &Producer, ring: *const Ring) {
+        unsafe {
+            let p = &mut *core::ptr::addr_of_mut!(PROD);
+            p.begin(prod.period_ns);
+            p.gate_us = ((prod.period_ns as u64 * GATE_EIGHTHS / 8 + 500) / 1000) as u32;
+            *core::ptr::addr_of_mut!(RINGP) = ring;
+        }
+        hy::stream::start(prod.period_ns / TICKS);
+    }
+
+    /// IRQ 55 (src/shim.rs vector table).
+    #[no_mangle]
+    pub unsafe extern "C" fn ad2_stream_irq() {
+        let lat = hy::stream::ack();
+        if !hy::streaming() || RINGP.is_null() {
+            hy::stream::disarm();
+            return;
+        }
+        let t0 = r32(DWT_CYCCNT);
+        let ring = &*RINGP;
+        let p = &mut *core::ptr::addr_of_mut!(PROD);
+        p.tick_at(t0);
+        let mut f = [0u8];
+        if p.gate_closed() {
+            inc(&ring.gated);
+        } else if !hy::isr_read(hy::R_INTF, &mut f) {
+            inc(&ring.timeouts);
+        } else if f[0] & hy::INTF_AD2 != 0 {
+            p.last_sample_us = p.now_us;
+            let ts = p.now_us as u32;
+            let mut b = [0u8; 3];
+            if hy::isr_read(hy::R_AD2, &mut b) {
+                let v = hy::s24(&b);
+                if hy::ad2_sign_ok(v) {
+                    p.push(ring, ts, v);
+                } else {
+                    inc(&ring.bad);
+                }
+            } else {
+                inc(&ring.timeouts);
+            }
+        } else {
+            inc(&ring.empty);
+        }
+        inc(&ring.ticks);
+        let dt = r32(DWT_CYCCNT).wrapping_sub(t0);
+        if dt > ring.max_isr_cyc.load(Relaxed) {
+            ring.max_isr_cyc.store(dt, Relaxed);
+        }
+        if lat > ring.max_lat.load(Relaxed) {
+            ring.max_lat.store(lat, Relaxed);
+        }
+        if hy::stream::overrun() {
+            inc(&ring.overruns);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn session(ad2: bool, period_ns: u32) -> std::boxed::Box<Logger> {
+        let ring: &'static Ring = std::boxed::Box::leak(std::boxed::Box::new(Ring::new()));
         let mut l = std::boxed::Box::new(Logger::new());
+        l.ring = ring;
         l.ad2 = ad2;
-        l.period_ns = period_ns;
-        l.nominal_us = (period_ns + 500) / 1000;
+        l.prod.period_ns = period_ns;
+        l.prod.nominal_us = (period_ns + 500) / 1000;
         l.active = true;
         l
     }
 
     fn feed(l: &mut Logger, ts: u64, raw: i32) {
-        l.now_us = ts;
-        l.push(ts as u32, raw);
+        l.prod.now_us = ts;
+        let ring: &Ring = unsafe { &*l.ring };
+        l.prod.push(ring, ts as u32, raw);
     }
 
     fn recs(l: &mut Logger) -> std::vec::Vec<(u32, u32, i32)> {
@@ -565,26 +860,49 @@ mod tests {
     }
 
     #[test]
-    fn seq_is_implicit_and_consecutive_across_overflow() {
+    fn full_ring_drops_the_newest_and_seqs_stay_consecutive() {
         let mut l = session(true, 104_167);
         for i in 0..(CAP as u64 + 10) {
             feed(&mut l, 1000 + i * 104, i as i32 - 5);
         }
         assert_eq!(l.overwritten(), 10);
+        assert_eq!(l.captured(), CAP as u32 + 10);
+        assert_eq!(l.buffered(), CAP as u32);
         let r = recs(&mut l);
         assert_eq!(r.len(), CAP);
-        assert_eq!(r[0].0, 11); // seqs 1..10 were dropped
-        assert_eq!(r[0].2, 5);
+        assert_eq!(r[0].0, 1); // the oldest kept; the 10 newest were dropped
+        assert_eq!(r[0].2, -5);
         assert!(r.windows(2).all(|w| w[1].0 == w[0].0 + 1));
-        assert_eq!(r.last().unwrap().0, CAP as u32 + 10);
+        assert_eq!(r.last().unwrap().0, CAP as u32);
         assert_eq!(l.buffered(), 0);
-        // Partial drains keep the numbering.
+        // After the drain the ring takes samples again; the gap shows in
+        // the timestamps, the seqs go on.
         feed(&mut l, 1_000_000, -7);
         feed(&mut l, 1_000_104, -8);
         let mut b = [0u8; 12];
         assert_eq!(l.drain(&mut b), 12);
-        assert_eq!(u32::from_le_bytes([b[0], b[1], b[2], b[3]]), CAP as u32 + 11);
-        assert_eq!(recs(&mut l)[0].0, CAP as u32 + 12);
+        assert_eq!(u32::from_le_bytes([b[0], b[1], b[2], b[3]]), CAP as u32 + 1);
+        assert_eq!(i32::from_le_bytes([b[8], b[9], b[10], b[11]]), -7);
+        assert_eq!(recs(&mut l)[0].0, CAP as u32 + 2);
+    }
+
+    #[test]
+    fn ring_wraps_many_times() {
+        let mut l = session(true, 104_167);
+        let mut next = 1u32;
+        for round in 0..20u64 {
+            for i in 0..1500u64 {
+                feed(&mut l, (round * 1500 + i) * 104, (round * 1500 + i) as i32);
+            }
+            let r = recs(&mut l);
+            assert_eq!(r.len(), 1500);
+            for (k, x) in r.iter().enumerate() {
+                assert_eq!(x.0, next + k as u32);
+                assert_eq!(x.2 as u32, next + k as u32 - 1);
+            }
+            next += 1500;
+        }
+        assert_eq!(l.overwritten(), 0);
     }
 
     #[test]
@@ -615,6 +933,27 @@ mod tests {
             feed(&mut l, i * 25_000, 0);
         }
         assert_eq!((l.lost(), l.missed(), l.gaps()), (0, 0, [0; GAP_BUCKETS]));
+        // A span past 2^32 us (71.6 min) keeps the 64-bit maths.
+        let mut l = session(false, 25_000_000);
+        feed(&mut l, 0, 0);
+        feed(&mut l, 5_000_000_000, 0);
+        assert_eq!(l.ring().span_us(), 5_000_000_000);
+    }
+
+    #[test]
+    fn producer_clock_counts_cycles() {
+        let mut p = Producer::new();
+        p.last_cyc = u32::MAX - 99;
+        p.tick_at(100); // 200 cycles across the wrap
+        assert_eq!((p.now_us, p.acc), (1, 0));
+        for _ in 0..3 {
+            let c = p.last_cyc.wrapping_add(150);
+            p.tick_at(c);
+        }
+        assert_eq!((p.now_us, p.acc), (3, 50));
+        let c = p.last_cyc.wrapping_add(4_000_000_000);
+        p.tick_at(c);
+        assert_eq!(p.now_us, 3 + 20_000_000);
     }
 
     #[test]

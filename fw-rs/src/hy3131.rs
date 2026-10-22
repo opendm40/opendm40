@@ -38,6 +38,7 @@
 //! the read-SPI2 / write-bit-bang bus passed on the device (7889e6c).
 
 use crate::mmio::{modify32, r32, spin, w16, w32};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
 const GPIOC: u32 = 0x4002_0800;
 const GPIOD: u32 = 0x4002_0C00;
@@ -103,11 +104,13 @@ pub const DIV: u8 = 16;
 /// Read divider for the next frames (DBG:HYSPI:SELF? only; the caller
 /// restores `DIV`).
 pub fn set_div(div: u8) {
+    guard();
     spi::set_div(div);
 }
 
 /// Write `data` to `reg`, `reg + 1`, .. (bit-banged, see the module notes).
 pub fn write(reg: u8, data: &[u8]) {
+    guard();
     spi::to_gpio();
     bb::write(reg, data);
     spi::to_af();
@@ -115,7 +118,217 @@ pub fn write(reg: u8, data: &[u8]) {
 
 /// Read `buf.len()` registers from `reg`.
 pub fn read(reg: u8, buf: &mut [u8]) {
-    spi::read(reg, buf);
+    guard();
+    let _ = spi::read(reg, buf);
+}
+
+// ------------------------------------------------- bus hand-off (AD2 stream ISR)
+//
+// docs/decisions-2026-10-22.md #3: while an AD2 stream runs on the timer ISR
+// (feature `ad2-isr`, src/logger.rs `isr`), the ISR owns the HY3131 bus
+// EXCLUSIVELY: the session's chip set-up (set_ad2_stream) is the last
+// main-loop bus access before `stream::start` hands it over, `stream::stop`
+// takes it back. `read` / `write` / `set_div` (every main-loop path: dmm.rs,
+// the power meter, the sentinel, hyspi, ad2exp, the logger's own AD1 /
+// main-loop AD2 path) check the hand-off first, and a call while handed off
+// stops the stream BEFORE its frame, so a main-loop frame can never
+// interleave with the ISR's. That is the enforcement of "the main loop
+// touches nothing on the bus while streaming" (decision #3 asked for a debug
+// assertion; this is a runtime guard in every build instead, because one
+// main-loop path legitimately gets here: a function / range change while
+// logging - touch, key, CONF - whose dmm.start the logger's auto-stop used to
+// catch only after the fact). `forced_stops` counts it (DBG:ISR?) and the
+// logger reports the stopped session as "Settings conflict" (logger.rs
+// `poll`, main.rs). The ISR reads through `isr_read` only and never writes a
+// register.
+
+static HANDED: AtomicBool = AtomicBool::new(false);
+static FORCED: AtomicU32 = AtomicU32::new(0);
+static TIMEOUTS: AtomicU32 = AtomicU32::new(0);
+
+/// True while the bus belongs to the stream ISR.
+pub fn streaming() -> bool {
+    HANDED.load(Relaxed)
+}
+
+/// Main-loop bus calls that found the bus handed off (each stopped the
+/// stream first): a function change while streaming, else a bug.
+pub fn forced_stops() -> u32 {
+    FORCED.load(Relaxed)
+}
+
+/// SPI2 frames abandoned because a status flag never came (bounded waits,
+/// `spi::wait`); 0 on a healthy bus.
+pub fn timeouts() -> u32 {
+    TIMEOUTS.load(Relaxed)
+}
+
+#[inline(always)]
+fn guard() {
+    if HANDED.load(Relaxed) {
+        FORCED.store(FORCED.load(Relaxed).wrapping_add(1), Relaxed);
+        #[cfg(feature = "ad2-isr")]
+        stream::stop();
+    }
+}
+
+/// The stream ISR's read (logger.rs `isr`): `read` without the hand-off
+/// check. False when the frame timed out (`buf` then holds garbage). Only
+/// from the ISR while `streaming()`: the main loop does not touch the bus
+/// then, so the frame cannot interleave with another one. Bounded: a frame
+/// gives up after ~100 us per byte.
+#[cfg_attr(not(feature = "ad2-isr"), allow(dead_code))]
+pub fn isr_read(reg: u8, buf: &mut [u8]) -> bool {
+    spi::read(reg, buf)
+}
+
+/// TIMER6 (STM32 name TIM7, 0x4000_1400, APB1, IRQ 55): the AD2 stream tick
+/// (decisions #3: a timer, not EXTI11 on PC11, which is also SPI2 MISO).
+/// Free in fw-rs: TIM1/2/3/5/8 hwtrig + scope, TIM6/12 generator, TIM13/14
+/// backlight / buzzer; only the stock firmware's key scan used it.
+/// Kernel clock 200 MHz (APB1 x4, TIMPRE, clock.rs); PSC 3 -> 50 MHz count,
+/// so the 16-bit ARR spans 763 Hz .. 50 MHz (4800 .. 38400 Hz used: 4 x
+/// the 1200 .. 9600 S/s AD2 rungs, logger.rs `isr`).
+#[cfg(feature = "ad2-isr")]
+pub mod stream {
+    use super::*;
+
+    const RCU_APB1EN: u32 = 0x4002_3840;
+    const RCU_TIM7EN: u32 = 1 << 5;
+    const TIM7: u32 = 0x4000_1400;
+    const CR1: u32 = TIM7;
+    const DIER: u32 = TIM7 + 0x0C;
+    const SR: u32 = TIM7 + 0x10;
+    const EGR: u32 = TIM7 + 0x14;
+    const CNT: u32 = TIM7 + 0x24;
+    const PSC: u32 = TIM7 + 0x28;
+    const ARR: u32 = TIM7 + 0x2C;
+    const CR1_CEN: u32 = 1 << 0;
+    /// URS: only an overflow sets UIF (not the UG below).
+    const CR1_URS: u32 = 1 << 2;
+    const UIF: u32 = 1;
+    /// Timer count rate after PSC = 3.
+    pub const COUNT_HZ: u32 = 50_000_000;
+    pub const IRQN: u32 = 55;
+    const NVIC_ISER: u32 = 0xE000_E100;
+    const NVIC_ICER: u32 = 0xE000_E180;
+    const NVIC_ICPR: u32 = 0xE000_E280;
+    const NVIC_IPR: u32 = 0xE000_E400;
+    const SYST_CSR: u32 = 0xE000_E010;
+    const SCB_ICSR: u32 = 0xE000_ED04;
+    const ICSR_PENDSTCLR: u32 = 1 << 25;
+    const ICSR_PENDSVCLR: u32 = 1 << 27;
+    const IRQ_BIT: u32 = 1 << (IRQN % 32);
+    const IRQ_REG: u32 = 4 * (IRQN / 32);
+
+    static ARR_V: AtomicU32 = AtomicU32::new(0);
+
+    /// Timer reload (ARR + 1) for a tick period in ns, clamped to 16 bit.
+    pub const fn reload_for(tick_ns: u32) -> u32 {
+        let n = (tick_ns as u64 * COUNT_HZ as u64 + 500_000_000) / 1_000_000_000;
+        if n < 100 { 100 } else if n > 65_536 { 65_536 } else { n as u32 }
+    }
+
+    /// The running tick rate, mHz (0 when never started).
+    pub fn tick_mhz() -> u32 {
+        let r = ARR_V.load(Relaxed);
+        if r == 0 { 0 } else { (COUNT_HZ as u64 * 1000 / r as u64) as u32 }
+    }
+
+    fn barrier() {
+        #[cfg(target_os = "none")]
+        unsafe {
+            core::arch::asm!("dsb", "isb", options(nostack, preserves_flags));
+        }
+    }
+
+    /// Hand the bus to the ISR and start ticking every `tick_ns`. The caller
+    /// has made its last bus access (set_ad2_stream) and set up the ISR's
+    /// state. The only place PRIMASK is cleared: before that, every
+    /// interrupt line and SysTick / PendSV is disabled and its pending bit
+    /// cleared (the FS-loader may have left some on), and TIM7 is the only
+    /// line enabled, at priority 0: exactly one interrupt in the NVIC.
+    pub fn start(tick_ns: u32) {
+        let reload = reload_for(tick_ns);
+        ARR_V.store(reload, Relaxed);
+        unsafe {
+            modify32(RCU_APB1EN, 0, RCU_TIM7EN);
+            let _ = r32(RCU_APB1EN);
+            w32(DIER, 0);
+            w32(CR1, CR1_URS);
+            w32(PSC, 3);
+            w32(ARR, reload - 1);
+            w32(EGR, 1); // UG: load PSC / ARR now (no UIF: URS)
+            w32(CNT, 0);
+            w32(SR, 0);
+            w32(DIER, 1); // UIE
+            w32(SYST_CSR, 0);
+            w32(SCB_ICSR, ICSR_PENDSTCLR | ICSR_PENDSVCLR);
+            for k in 0..8 {
+                w32(NVIC_ICER + 4 * k, !0);
+                w32(NVIC_ICPR + 4 * k, !0);
+            }
+            core::ptr::write_volatile((NVIC_IPR + IRQN) as *mut u8, 0);
+            HANDED.store(true, Relaxed);
+            barrier();
+            w32(NVIC_ISER + IRQ_REG, IRQ_BIT);
+            barrier();
+            #[cfg(target_os = "none")]
+            core::arch::asm!("cpsie i", options(nomem, nostack, preserves_flags));
+            w32(CR1, CR1_URS | CR1_CEN);
+        }
+    }
+
+    /// Stop ticking and take the bus back (main loop only). No ISR can be
+    /// half-way through a frame here: on one core the main loop runs only
+    /// when the ISR has returned, and the ISR always finishes its frame (CS
+    /// high, SPI2 idle). After the NVIC line is off and PRIMASK set again,
+    /// no further entry is possible; then the bus is the main loop's.
+    pub fn stop() {
+        if !HANDED.load(Relaxed) {
+            return;
+        }
+        unsafe {
+            w32(CR1, 0);
+            w32(DIER, 0);
+            w32(NVIC_ICER + IRQ_REG, IRQ_BIT);
+            barrier();
+            #[cfg(target_os = "none")]
+            core::arch::asm!("cpsid i", options(nomem, nostack, preserves_flags));
+            w32(SR, 0);
+            w32(NVIC_ICPR + IRQ_REG, IRQ_BIT);
+            barrier();
+        }
+        HANDED.store(false, Relaxed);
+    }
+
+    /// ISR entry: clear UIF (rc_w0), return the timer count since the update
+    /// event (the entry latency in 20 ns counts).
+    #[inline(always)]
+    pub fn ack() -> u32 {
+        unsafe {
+            let c = r32(CNT);
+            w32(SR, 0);
+            c
+        }
+    }
+
+    /// ISR exit: a new update already pending = this entry took (or was
+    /// delayed) longer than a tick.
+    #[inline(always)]
+    pub fn overrun() -> bool {
+        unsafe { r32(SR) & UIF != 0 }
+    }
+
+    /// ISR entered while not streaming (cannot happen: stop() disables the
+    /// line first): silence the timer without touching the bus.
+    pub fn disarm() {
+        unsafe {
+            w32(DIER, 0);
+            w32(CR1, 0);
+            w32(SR, 0);
+        }
+    }
 }
 
 mod spi {
@@ -190,14 +403,14 @@ mod spi {
 
     /// Between frames only (SPI2 idle, SCK low, CS high).
     pub(super) fn set_div(div: u8) {
-        idle();
+        let _ = idle();
         config(div);
     }
 
     /// Pins to GPIO for a bit-banged frame: SCK output low (= the SPI idle
     /// level), MOSI output, MISO input. SPI2 stays enabled and idle.
     pub(super) fn to_gpio() {
-        idle();
+        let _ = idle();
         set(GPIOC, SCK, false);
         unsafe { modify32(GPIOC + MODER, PINS2, MODER_GPIO) };
     }
@@ -208,29 +421,56 @@ mod spi {
         unsafe { modify32(GPIOC + MODER, PINS2, MODER_AF) };
     }
 
-    fn idle() {
-        unsafe { while r32(SPI_STAT) & STAT_TRANS != 0 {} }
+    /// Wait until `SPI_STAT & mask == want`, at most `WAIT_MAX` polls
+    /// (~100 us at APB1 50 MHz, a byte takes 2.56 us): a stuck peripheral
+    /// ends the frame instead of hanging the loop / the stream ISR (an ISR
+    /// hang is a watchdog reset, counted as a crash by boot.rs).
+    #[inline(always)]
+    fn wait(mask: u32, want: u32) -> bool {
+        let mut n = 0u32;
+        while unsafe { r32(SPI_STAT) } & mask != want {
+            n += 1;
+            if n >= WAIT_MAX {
+                TIMEOUTS.store(TIMEOUTS.load(Relaxed).wrapping_add(1), Relaxed);
+                return false;
+            }
+        }
+        true
+    }
+    const WAIT_MAX: u32 = 2000;
+
+    fn idle() -> bool {
+        wait(STAT_TRANS, 0)
     }
 
     #[inline(always)]
-    fn xfer(b: u8) -> u8 {
-        unsafe {
-            while r32(SPI_STAT) & STAT_TBE == 0 {}
-            w16(SPI_DATA, b as u16);
-            while r32(SPI_STAT) & STAT_RBNE == 0 {}
-            r32(SPI_DATA) as u8
+    fn xfer(b: u8) -> Option<u8> {
+        if !wait(STAT_TBE, STAT_TBE) {
+            return None;
         }
+        unsafe { w16(SPI_DATA, b as u16) };
+        if !wait(STAT_RBNE, STAT_RBNE) {
+            return None;
+        }
+        Some(unsafe { r32(SPI_DATA) } as u8)
     }
 
     /// Read `buf.len()` registers from `reg`. The command byte has bit 7 = 0,
     /// so the late-LSB effect of SPI2 writes (module notes) cannot touch it.
-    pub(super) fn read(reg: u8, buf: &mut [u8]) {
+    /// False when a status wait timed out (the frame is ended, CS high,
+    /// `buf` partly stale). The PC10 MODER read-modify-write below may
+    /// preempt a main-loop RMW of GPIOC MODER when this runs in the stream
+    /// ISR; it puts back exactly the value it read (PC10 AF again), so the
+    /// main loop's write-back is unaffected, and nothing in the main loop
+    /// changes the mode of PC10..12 while the bus is handed off (`guard`).
+    pub(super) fn read(reg: u8, buf: &mut [u8]) -> bool {
         set(GPIOD, CS, false);
         spin(CS_SETUP);
-        xfer((reg << 1) | 1);
+        if xfer((reg << 1) | 1).is_none() || !idle() {
+            return end(false);
+        }
         // Read period: SPI2 idle (SCK low after the 8th clock), PC10 to GPIO
         // output (ODR 0: stays low), one pulse, back to AF.
-        idle();
         unsafe {
             modify32(GPIOC + MODER, 3 << (2 * SCK), 1 << (2 * SCK));
             set(GPIOC, SCK, true);
@@ -241,12 +481,20 @@ mod spi {
         }
         // MOSI 1 during the data phase, as on the bit-banged bus (the R bit).
         for b in buf.iter_mut() {
-            *b = xfer(0xFF);
+            match xfer(0xFF) {
+                Some(v) => *b = v,
+                None => return end(false),
+            }
         }
-        idle();
+        let ok = idle();
+        end(ok)
+    }
+
+    fn end(ok: bool) -> bool {
         spin(CS_HOLD);
         set(GPIOD, CS, true);
         spin(CS_IDLE);
+        ok
     }
 }
 
