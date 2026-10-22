@@ -483,7 +483,9 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("dca10", rd(7, val(2.345, 3, "A"), None, None, false), None),
         ("dcma_420", rd(8, val(24.444, 3, "mA"), None, Some(val(125.0, 1, "%")), false), None),
         ("dcma_420ol", rd(8, val(44.444, 3, "mA"), None, Some(ol(1, "%")), false), None),
-        ("dcma_420lo", rd(8, val(0.0, 3, "mA"), None, Some(val(-25.0, 1, "%")), false), None),
+        // The low edge (3.6 mA, NAMUR NE 43) shows; 0 mA hides the %.
+        ("dcma_420lo", rd(8, val(3.6, 3, "mA"), None, Some(val(-2.5, 1, "%")), false), None),
+        ("dcma_420zero", rd(8, val(0.0, 3, "mA"), None, Some(val(-25.0, 1, "%")), false), None),
         ("dcma_420mid", rd(8, val(12.0, 3, "mA"), None, Some(val(50.0, 1, "%")), false), None),
         ("aca", rd(6, val(4.4444, 4, "A"), Some(val(99.999, 3, "kHz")), Some(val(100.0, 1, "%")), false), None),
         // Burden voltage (Settings 3/3, doc 3.15): DC aux1 (signed), AC aux2
