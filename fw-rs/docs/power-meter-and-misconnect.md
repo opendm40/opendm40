@@ -1276,8 +1276,9 @@ every alert, never alternating with HOLD):**
   with the fuse intact and nothing connected the meter reads the same zero.
 * `DBG:SENTinel:VARiant +16` turns the two alternations off (the 4.6 rows).
 
-**Fuse check** (Current Settings page, the "Fuse check" button between
-Hold/Limits and OK; `SYST:FUSE:TEST`, `SYST:FUSE?`): a dialog "Lead from
+**Fuse check** (Current Settings page, the "Fuse check" button in the
+middle column above DC / AC / AC+DC, where the V page has its note line;
+`SYST:FUSE:TEST`, `SYST:FUSE?`): a dialog "Lead from
 V/ohm jack to A, nothing else connected" -> Start -> ohm 600 ohm, manual,
 the stock row with every sentinel off (the check drives the ohm current
 through the A shunt on purpose), PE = 2 as every ohm row: V/ohm -> lead -> A
@@ -1307,10 +1308,10 @@ AD2 result between two bus accesses), the comparator on SENSE (V / 10) in
 DC V r0; row matching frees exactly those fields; front-end keys `valead`
 (a lead V/ohm -> A: fuse + shunt chain in parallel with V-COM) and
 `fuseopen` (no current reaches the shunts; kept by `open`). Model checks:
-362 pass. `emu/hy3131/senttest.py` 45 scenarios (26 new: ovl-dcma, ovl-dcua-man,
+362 pass. `emu/hy3131/senttest.py` 46 scenarios (27 new: ovl-dcma, ovl-dcua-man,
 ovl-acma, ovl-acdc, ovl-pow, acdc-v, acdc-vac, acdc-v-hi-gap, acdc-a, aca-v, aca-vac,
 aca-vi, freq-a, cont-a, diode-a, cap-a, cap-ramp-gap, acv-dchint, acv-dc-ac,
-acv-dc-ajack, dcv-achint, dcv-ac-ajack, fuse-hint, fuse-ok, fuse-open,
+acv-dc-ajack, dcv-achint, dcv-ac-ajack, fuse-hint, fuse-ok, fuse-ui, fuse-open,
 fuse-odd); every row also checks `STAT:QUES:COND?` against `SYST:ALER?`.
 OVERLOAD reached 10 A ~0.5 s after 2 A appeared on the 60 mA AUTO range;
 the fuse check read 47.50 ohm.
