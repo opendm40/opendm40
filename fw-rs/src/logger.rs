@@ -5,7 +5,7 @@
 //! driven from the main loop, timestamped and paced by the DWT cycle counter
 //! (clock.rs enables CYCCNT; HCLK = 200 MHz). The exceptions, with the
 //! `ad2-isr` feature (module `isr` below, decisions-2026-10-22 #3): the AD2
-//! source, and AD1 at 160 .. 640 S/s (`ad1_on_isr`, 2026-10-22: the
+//! source, and AD1 unchopped at 160 .. 640 S/s (`ad1_on_isr`, 2026-10-22: the
 //! main-loop sampler lost 1.8 % at 640 S/s to long passes on the device):
 //! a timer ISR is then the producer and the main loop only drains. FR-38 trades resolution for speed: the HY3131 AD1OSR is
 //! dropped to its fast setting (see `hy3131::set_ad1_osr`) and we stream the raw
@@ -112,8 +112,8 @@ const _: () = assert!(CAP.is_power_of_two());
 pub const DEFAULT_OSR: u8 = hy::AD1OSR_STREAM;
 
 /// AD1 sessions with a conversion period up to this (us) run on the stream
-/// ISR (`Logger::ad1_on_isr`): OSR 256 / 512 unchopped, OSR 256 chopped
-/// (640 / 320 / 160 S/s).
+/// ISR (`Logger::ad1_on_isr`), unchopped: OSR 256 / 512 / 1024 (640 / 320
+/// / 160 S/s).
 pub const AD1_ISR_MAX_US: u32 = 6250;
 
 /// Main-loop AD1 sampler: blind reads in a row after a swallowed AD1F.
@@ -310,6 +310,10 @@ struct Producer {
     /// Blind AD1 reads after a swallowed flag in a row (`sample`: at most
     /// RESCUE_MAX).
     rescued: u8,
+    /// AD1: the last flag-to-flag interval (us, 0 = none yet): the chip's
+    /// real period (device 5394b21: 26.3 ms at the 25 ms OSR 2048 chopped
+    /// setting), for a rescued sample's stamp and window.
+    p_meas: u32,
 }
 
 impl Producer {
@@ -326,6 +330,7 @@ impl Producer {
             last_sample_us: 0,
             gate_us: 0,
             rescued: 0,
+            p_meas: 0,
         }
     }
 
@@ -630,13 +635,16 @@ impl Logger {
     }
 
     /// The next AD1 session runs on the stream ISR (feature `ad2-isr`): the
-    /// fast AD1 settings (160 .. 640 S/s, period <= AD1_ISR_MAX_US), where a
+    /// fast unchopped AD1 settings (160 .. 640 S/s, period <= AD1_ISR_MAX_US), where a
     /// main-loop pass (a panel redraw, a page program, USB) can outlast the
     /// period (device 036cc55: 1.8 % lost at 640 S/s with the main-loop
     /// sampler). The slower ones keep the main-loop sampler (a period of
     /// 12.5 ms or more; no lock-in time before the first sample).
+    /// Unchopped only: the chopped settings run ~5 % slower than their
+    /// nominal (device 5394b21: 26.3 ms at OSR 2048 chopped, nominal 25),
+    /// beyond the Pll's +-1000 ppm, which locks to the nominal rate.
     pub fn ad1_on_isr(&self) -> bool {
-        cfg!(feature = "ad2-isr") && !self.ad2 && hy::ad1_period_us(self.osr, self.chop()) <= AD1_ISR_MAX_US
+        cfg!(feature = "ad2-isr") && !self.ad2 && !self.chop() && hy::ad1_period_us(self.osr, false) <= AD1_ISR_MAX_US
     }
 
     /// Begin a session: configure the HY3131 (AD1: R22 OSR / chopper; AD2:
@@ -792,7 +800,7 @@ impl Logger {
                 }
             }
             let ready = if self.ad2 { hy::ad2_ready() } else { hy::ad1_ready() };
-            let p = self.prod.nominal_us as u64;
+            let p = if self.prod.p_meas != 0 { self.prod.p_meas } else { self.prod.nominal_us } as u64;
             let since = self.prod.now_us.wrapping_sub(self.prod.last_sample_us);
             if !ready && !self.ad2 && self.prod.have_last && self.prod.rescued < RESCUE_MAX && since >= p + p / 4 && since < p + 3 * p / 4 {
                 // No AD1F a quarter period past the conversion's due time:
@@ -801,7 +809,7 @@ impl Logger {
                 // feasibility 9.5; emulator IntfRaceAd1). R00..R02 still hold
                 // the result for the rest of the period: read it blind,
                 // stamped at its due time (one period after the last
-                // sample's observation); not near the next conversion
+                // sample's observation, the measured period); not near the next conversion
                 // (a read across its update could tear). At most RESCUE_MAX
                 // in a row (a converter that stopped is not read as a
                 // stream of copies; a tight polling loop, the emulator's,
@@ -811,8 +819,13 @@ impl Logger {
                 inc(&ring.late);
                 let _ = self.prod.push(ring, self.prod.last_sample_us as u32, hy::read_ad1());
             } else if ready {
-                self.prod.rescued = 0;
                 self.prod.tick(); // the flag-observed moment
+                let d = self.prod.now_us.wrapping_sub(self.prod.last_sample_us);
+                let nom = self.prod.nominal_us as u64;
+                if !self.ad2 && self.prod.have_last && self.prod.rescued == 0 && d > nom / 2 && d < nom * 3 / 2 {
+                    self.prod.p_meas = d as u32;
+                }
+                self.prod.rescued = 0;
                 self.prod.last_sample_us = self.prod.now_us;
                 let ts = self.prod.now_us as u32;
                 if self.ad2 {
@@ -878,7 +891,7 @@ impl Logger {
     }
 }
 
-/// The stream ISR (feature `ad2-isr`; AD2, and AD1 at 160 .. 640 S/s with
+/// The stream ISR (feature `ad2-isr`; AD2, and AD1 unchopped at 160 .. 640 S/s with
 /// R00..R02 / AD1F in place of R03..R05 / AD2F, CPU frames at /16, the
 /// timer at 20 ns << KSH per count; docs/decisions-2026-10-22.md #3,
 /// docs/dmm-input-scope-feasibility.md 10): TIMER6 (STM32 TIM7, IRQ 55, the
@@ -1093,7 +1106,9 @@ pub mod isr {
                 break;
             }
             prev = t;
-            if t.wrapping_sub(t_begin) > 3 * pc * cyc_per_count {
+            // 3 periods (AD2); AD1: 8 (its first result after the R22
+            // write may take longer: device 5394b21 found no edge in 3).
+            if t.wrapping_sub(t_begin) > if ad1 { 8 } else { 3 } * pc * cyc_per_count {
                 break;
             }
         }
@@ -1216,7 +1231,19 @@ pub mod isr {
                 dma_done(d, p, ring, pll);
             }
             if !pll.take() {
-                // Acquiring (DMA frames: until locked): no sample.
+                // Acquiring (DMA frames, or AD1 without an edge from the
+                // search: until locked): no sample. A CPU-frame probe still
+                // completes here (else a gated CPU stream never locks:
+                // device 5394b21, AD1 640 S/s, probes 0 for 700 s).
+                if probe && !d.on {
+                    let mut f = [0u8];
+                    if hy::isr_read(hy::R_INTF, &mut f) {
+                        pll.result(f[0] & flag != 0);
+                        inc(&ring.probes);
+                    } else {
+                        inc(&ring.timeouts);
+                    }
+                }
             } else if lat > pll.late_max() {
                 inc(&ring.late);
             } else if d.on {

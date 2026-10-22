@@ -1186,7 +1186,9 @@ subdirectory sector = `.` / `..` + the files of that directory by slot; data
 through a windowed text writer, `FIRMWARE.BIN` encoded per 128-byte block,
 SPIFLASH by raw SPI reads, a CSV through the cached `dlog::Gen`, a BMP
 through a cached FAT chain cursor). `DBG:VDISK:STAT?` → `<files>,<next free
-cluster>,<files left out>`; `DBG:VDISK:EJECT n` = "no medium" for n commands,
+cluster>,<files left out>`; `DBG:VDISK:RD?` → `<read_block calls>,<their
+total ms>,<max us>,<CSV generator opens>,<SPI flash reads>,<their bytes>`
+(cumulative since boot; diff two readings around a copy); `DBG:VDISK:EJECT n` = "no medium" for n commands,
 then a UNIT ATTENTION (the earlier ADD / FORCE experiment hooks are gone).
 
 ### SCSI (`src/msc.rs`)

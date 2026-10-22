@@ -2140,10 +2140,15 @@ pub type DiskGen = Gen<FatFile<FnRaw>>;
 #[cfg(target_os = "none")]
 static mut FLASH: Option<crate::spiflash::SpiFlash> = None;
 
+/// flash_read calls, bytes (DBG:VDISK:RD?).
+pub static FR: [core::sync::atomic::AtomicU32; 2] = [const { core::sync::atomic::AtomicU32::new(0) }; 2];
+
 /// The SPI flash, raw (waits for a running erase / program first).
 #[cfg(target_os = "none")]
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn flash_read(addr: u32, buf: &mut [u8]) -> bool {
+    FR[0].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    FR[1].fetch_add(buf.len() as u32, core::sync::atomic::Ordering::Relaxed);
     let f = unsafe { &mut *core::ptr::addr_of_mut!(FLASH) };
     f.get_or_insert_with(crate::spiflash::SpiFlash::new).read_at(addr, buf)
 }

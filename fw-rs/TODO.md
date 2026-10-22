@@ -861,12 +861,26 @@ Firmware:
       (2) AD2 4800 / 19200: 0 lost; 38400: 1 lost; max_lat 1.6-12 us (not ~0.24). Host stop mid-run: clean
       (done, decodes to the last row). 3-7 not run.
       Fixes (2026-10-22, emulator / host; device re-check = items 8-11 below):
-      - (1) AD1 160 .. 640 S/s runs on the stream ISR (logger.rs `ad1_on_isr`): R00..R02 read blind
+      - (1) AD1 unchopped 160 .. 640 S/s runs on the stream ISR (logger.rs `ad1_on_isr`): R00..R02 read blind
         mid-period, phase-locked by INTF.AD1F probes (ad2pll.rs, the timer at 40 / 80 / 160 ns per
         count, PSC 4 << KSH - 1, so a 1.56 .. 6.25 ms period fits the 16-bit ARR; CPU frames at /16).
         The slower AD1 settings keep the main-loop sampler, which now reads R00..R02 blind once when
         AD1F does not come 1.25 periods after the last sample (the read-clear race; DBG:ISR? `late`).
         Emulator (AD1F race on, `IntfRaceAd1`): AD1 640 / 160 to disk 0 lost.
+        Device 5394b21 (2026-10-22): AD1 640 to disk FAILED: no AD1 edge in the 3-period search, the
+        gated CPU stream then never probed (probes 0, captured 0 for 700 s) -> probes while gated, an
+        8-period AD1 search. AD1 40 (OSR 3 chopped, main loop) host session 60 s: 2320 samples, LOG:GAPs?
+        all 0, 83 blind rescues (`late`; 3 / 91 equal to the previous value, as elsewhere): the device
+        DOES lose ~4 % of AD1F flags to the read-clear race at a tight poll; the chip's real period
+        there is 26.3 ms (nominal 25: the 3 % "lost" is the span vs the nominal) -> rescue stamps /
+        window from the measured period; the ISR only for the unchopped settings (the Pll locks to
+        the nominal within +-1000 ppm). AD2 38400 / 19200 to disk 30 s: 0 lost (was 1); max_lat 6.8 /
+        6.1 us, lat_pc VDisk::block_size (region C: the desktop polls the mounted volume) -> every
+        VDisk BlockDevice method and the directory sectors in region B. Volume read of FAST006.CSV
+        (53 MB): ~39 KB/s, the main loop's USB section ~15 ms per pass -> DBG:VDISK:RD? to see where.
+      - Emulator: the AD2 19200 DMA lock never converged in 3 of 9 sessions (5394b21; 0 of 9 on
+        f66af0d): a coin-toss probe around the edge geared kp up before it reached kp_min ->
+        ad2pll `result`: locked also at kp <= kp_max / 4 after 64 probes (9 of 9 pass).
       - (2) max_lat 12 us at the disk session's start / stop: region C code ran while the ISR streamed
         (`fast_events` / `fast_start` (.cold) started the logger and went on in C: `fast_head`,
         `prep::run_begin`; at the end `fast_events` ran before it stopped the logger). Now
@@ -889,11 +903,12 @@ Firmware:
       never ended; two reruns of the same sequence passed, as did f66af0d's once. AD2 path untouched by
       this change. Wants: a lock timeout (restart / error after N s unlocked) and a repro with --ppm.
       8. Device: AD1 640 S/s to disk 60 s (as 1): LOG:COUNt? lost 0, LOG:GAPs? all 0; DBG:ISR? active 1
-         during it, rate_mhz ~640 000, locked 1, late 0, max_lat < 2 us; also 320 (OSR 0 chop on) and 160.
-         AD1 40 (OSR 3) host session over USB 60 s: lost 0 (DBG:ISR? late = blind rescues, expect 0..few).
+         during it, rate_mhz ~640 000, locked 1, late 0, max_lat < 2 us; also 320 / 160 (OSR 1 / 2, chop
+         off). AD1 40 (OSR 3) host session over USB 60 s: gaps 0, rescue stamps ~26.3 ms apart.
       9. Device: AD2 38400 / 19200 to disk 60 s: max_lat < 2 us (lat_pc if not), 0 lost; also with the
          USB volume read meanwhile (cp a big CSV): max_lat still < 2 us.
-      10. Device: copy a ~50 MB FAST CSV off the volume (`time cp`): >= 500 KB/s; also a small one
+      10. Device: copy a ~50 MB FAST CSV off the volume (`time cp`): >= 500 KB/s, DBG:VDISK:RD? before
+          / after (read_block calls, ms, max us, opens, flash reads / bytes); also a small one
           and LOG000.CSV; `cmp` with `dm40scpi.py get` / dlog.py of the DLG. The volume refresh after a
           large session: no visible stall (was ~1.5 s per 2 MB of DLG).
       11. Device: DMM page while a host copies: the reading keeps updating (2 ms of USB per pass).
