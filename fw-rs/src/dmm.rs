@@ -655,8 +655,30 @@ pub struct Dmm {
     sent_mode: u8,
     r29: u8,
     live: bool,
+    /// OVERLOAD latch (doc 4.3 / 4.7, sentinel::overload_trips): None = not
+    /// in force.
+    ovl: Option<Ovl>,
+    /// Time of the last timed OVERLOAD release (None: none yet).
+    ovl_rel_t: Option<u64>,
     /// Power meter state and settings (powermeter.rs).
     pub pw: &'static mut Pw,
+}
+
+/// OVERLOAD latch: the uA / mA shunt overloaded and the meter went to the
+/// 10 A shunt. Shunts `barred` and above (sentinel::shunt_of numbering: 1
+/// mA, 2 uA) stay out of the autorange until the user picks a range /
+/// function / AUTO, or the current stays below `thr` for
+/// sentinel::OVL_RELEASE_MS; then `back` (the manual range it left: DMM
+/// mode / range, or the power meter's I index) is restored, or (auto) the
+/// autorange may use the barred shunt again.
+#[derive(Clone, Copy)]
+struct Ovl {
+    barred: u8,
+    back: Option<(u8, i8)>,
+    thr: f32,
+    low_since: Option<u64>,
+    /// No timed release (tripped again within OVL_RETRIP_MS of one).
+    sticky: bool,
 }
 
 /// Mean interval: first sample taken as is, then an EMA (1/4).
@@ -813,6 +835,8 @@ impl Dmm {
             sent_mode: 255,
             r29: 0,
             live: false,
+            ovl: None,
+            ovl_rel_t: None,
             pw: pw::pw_static(),
         }
     }
@@ -1185,6 +1209,7 @@ impl Dmm {
     /// range (mV: r1), A keeps range % 2, values cleared (FUN_0803aad6).
     /// AC+DC starts in the DC phase, as the stock.
     pub fn set_sub(&mut self, clk: &mut Clock, sub: u8) {
+        self.ovl_clear(clk.now_ms());
         let m = self.mode;
         let (dc, r, t) = match m {
             0..=3 => (m | 1, if m >= 2 { 1 } else { self.range }, 450),
@@ -1205,6 +1230,7 @@ impl Dmm {
     /// Enter a stock mode directly (SCPI, BT command 06). Auto range.
     /// 16 / 17 = V / A AC+DC (see `func`).
     pub fn select(&mut self, clk: &mut Clock, mode: u8) {
+        self.ovl_clear(clk.now_ms());
         if mode == pw::FUNC {
             if !self.pw.on {
                 self.pw_enter(clk);
@@ -1394,7 +1420,93 @@ impl Dmm {
     ///   ohm: again toggles m+8 (range and manual kept); from elsewhere r6 auto.
     ///   cap: from elsewhere r0 auto; again does nothing.
     ///   cont/diode: diode first, then 11 <-> 12. Hz/temp: 14 first, 14 <-> 15.
+    // ------------------------------------------------------------ OVERLOAD
+
+    /// The OVERLOAD latch is in force (`Ovl`).
+    pub fn overloaded(&self) -> bool {
+        self.ovl.is_some()
+    }
+
+    /// The latch lets the autorange use shunt `unit` (sentinel::shunt_of).
+    fn ovl_allows(&self, unit: u8) -> bool {
+        self.ovl.map_or(true, |o| unit < o.barred)
+    }
+
+    /// A user range / function / AUTO choice ends the latch (the caller
+    /// applies the new choice).
+    fn ovl_clear(&mut self, now: u64) {
+        if self.ovl.take().is_some() {
+            self.sent.set_overload(now, false);
+        }
+    }
+
+    /// The OVERLOAD rule (sentinel::overload_trips) after a reading on shunt
+    /// `unit` of the current DMM mode, `over` = above 1.03 x the range: the
+    /// 10 A range at once, whatever AUTO / AUTO+ / manual says. True = the
+    /// row was rewritten (the caller drops the reading).
+    fn ovl_trip(&mut self, clk: &mut Clock, unit: u8, over: bool) -> bool {
+        if !sentinel::overload_trips(unit, self.range.max(0) as u8, self.manual, over) {
+            return false;
+        }
+        let back = match self.ovl {
+            Some(o) => o.back,
+            None => self.manual.then_some((self.mode, self.range)),
+        };
+        let barred = self.ovl.map_or(unit, |o| o.barred.min(unit));
+        let bu = back.and_then(|(m, r)| sentinel::shunt_of(m).map(|u| (u, r.max(0) as u8)));
+        let sticky = self.ovl_sticky(clk.now_ms());
+        self.ovl = Some(Ovl { barred, back, thr: sentinel::overload_release_thr(barred, bu), low_since: None, sticky });
+        // The 10 A range: manual when the user had a manual range (it comes
+        // back on release), else auto with the shunt floor (`ovl_allows`).
+        self.manual = back.is_some();
+        if matches!(self.mode, 4..=6) && !self.acdc {
+            self.set(clk, 4, 1, 650);
+        } else {
+            // DC, and AC+DC from either phase (its DC phase first).
+            self.set(clk, 7, 1, 250);
+        }
+        self.sent.set_overload(clk.now_ms(), true);
+        true
+    }
+
+    /// A new / renewed latch is sticky: tripped again soon after a timed
+    /// release, or an existing latch already was.
+    fn ovl_sticky(&self, now: u64) -> bool {
+        self.ovl.map_or(false, |o| o.sticky) || self.ovl_rel_t.is_some_and(|t| now.saturating_sub(t) < sentinel::OVL_RETRIP_MS)
+    }
+
+    /// Latch release: `i` (A, the reading's magnitude; `ol` = over range)
+    /// below the threshold for OVL_RELEASE_MS -> back to the manual range
+    /// it left, or (auto) the floor goes.
+    fn ovl_release(&mut self, clk: &mut Clock, now: u64, i: f32, ol: bool) {
+        let Some(mut o) = self.ovl else { return };
+        if o.sticky || ol || !(i < o.thr) {
+            o.low_since = None;
+            self.ovl = Some(o);
+            return;
+        }
+        let t0 = *o.low_since.get_or_insert(now);
+        if now.saturating_sub(t0) < sentinel::OVL_RELEASE_MS {
+            self.ovl = Some(o);
+            return;
+        }
+        self.ovl = None;
+        self.ovl_rel_t = Some(now);
+        self.sent.set_overload(now, false);
+        if let Some((m, r)) = o.back {
+            if self.pw.on {
+                self.pw.ik = m.min(5);
+                self.pw.keep = 2;
+                self.pw_apply(clk);
+            } else {
+                self.manual = true;
+                self.set(clk, m, r, if matches!(m, 4..=6) { 650 } else { 250 });
+            }
+        }
+    }
+
     pub fn press(&mut self, clk: &mut Clock, b: Button) {
+        self.ovl_clear(clk.now_ms());
         // Power meter: any function button leaves it; A to the DC A mode of
         // the power meter's current range (a load current may still flow:
         // not the mA shunt of the usual A entry).
@@ -1468,6 +1580,7 @@ impl Dmm {
     /// range; only when the range was fixed (manual or REL, m+3 != 0): V in mV
     /// with AUTO (m+6 == 1) -> V r0, A with AUTO (m+7 == 1) -> mA r0.
     pub fn auto_key(&mut self, clk: &mut Clock) {
+        self.ovl_clear(clk.now_ms());
         if self.pw.on {
             return self.pw_set_ranges(clk, Some(None), Some(None));
         }
@@ -1505,6 +1618,7 @@ impl Dmm {
     /// (DM40C labels, COUNTS_MODEL), ohm 0 = the manual-only 60 ohm range.
     /// `None` = AUTO, `Some(255)` = AUTO+ (V/A only).
     pub fn set_range(&mut self, clk: &mut Clock, item: Option<u8>) {
+        self.ovl_clear(clk.now_ms());
         match (self.button(), item) {
             (Button::Volt, None) => {
                 self.manual = false;
@@ -1596,6 +1710,7 @@ impl Dmm {
     /// BT command 06 (reverse, FUN_0803c6a8 + FUN_0803c3b4). Returns true if
     /// the function or sub-mode changed (the caller then clears HOLD/REL).
     pub fn apply_mode_byte(&mut self, clk: &mut Clock, b: u8) -> bool {
+        self.ovl_clear(clk.now_ms());
         let (g, r, s) = (b & 7, (b >> 3) & 7, b >> 6);
         let before = (self.button(), self.mode_byte() & 0xC0);
         match g {
@@ -1772,6 +1887,13 @@ impl Dmm {
                 }
                 10..=12 if !self.acdc => self.sent.live_reading(now, self.live),
                 _ => {}
+            }
+            if self.ovl.is_some() {
+                let (i, ol) = match &rd.power {
+                    Some(pv) => (pv.i, pv.i_ol),
+                    None => (rd.si.abs(), rd.main.ol),
+                };
+                self.ovl_release(clk, now, i, ol);
             }
         }
         r.map(|mut r| {
@@ -2002,7 +2124,12 @@ impl Dmm {
         let lim = (self.factor() * DEC4[u + r]).min(if m == 7 { 10.0 } else { f32::MAX });
         let ov = self.over();
         let mag = if self.acdc { hypot(self.ac_raw, raw) } else { a.abs() };
+        // OVERLOAD (doc 4.3): the uA / mA shunt over range -> 10 A at once.
+        if self.ovl_trip(clk, u as u8, mag > ov * lim) {
+            return None;
+        }
         if !self.manual {
+            let lowest = if self.a_auto == 3 { 9 } else { 8 };
             if mag > ov * lim {
                 if r == 0 {
                     self.set(clk, m, 1, 250);
@@ -2012,7 +2139,7 @@ impl Dmm {
             } else if mag < 0.1 * lim / ov {
                 if r == 1 {
                     self.set(clk, m, 0, 250);
-                } else if m < if self.a_auto == 3 { 9 } else { 8 } {
+                } else if m < lowest && self.ovl_allows(m + 1 - 7) {
                     self.set(clk, m + 1, 0, 350);
                 }
             }
@@ -2145,6 +2272,10 @@ impl Dmm {
             sqrt(ac * ac + 0.25 * dcp * dcp)
         };
         let before = (m, self.range);
+        // OVERLOAD (doc 4.3): the uA / mA shunt over range -> 10 A at once.
+        if m >= 4 && self.ovl_trip(clk, m - 4, mag > ov * lim) {
+            return None;
+        }
         if !self.manual {
             let up = mag > ov * lim;
             let down = mag < 0.1 * lim / ov;
@@ -2183,7 +2314,7 @@ impl Dmm {
                         self.set(clk, m - 1, 0, 650);
                     } else if down && r == 1 {
                         self.set(clk, m, 0, 550);
-                    } else if down && r == 0 && m < if self.a_auto == 3 { 6 } else { 5 } {
+                    } else if down && r == 0 && m < if self.a_auto == 3 { 6 } else { 5 } && self.ovl_allows(m + 1 - 4) {
                         self.set(clk, m + 1, 1, 650);
                     }
                 }

@@ -2131,6 +2131,13 @@ impl App {
                 match a {
                     Alert::AJack => self.alert_beep_t0 = Some(now),
                     Alert::Live => self.beep(now, 100),
+                    // OVERLOAD: one 300 ms beep (doc 4.4) at the key / alert
+                    // volume also with the key beep off (a safety cue, as
+                    // A-JACK's pattern); the toast says why the range changed.
+                    Alert::Overload => {
+                        buzzer(true, self.volume);
+                        self.beep_until = now + 300;
+                    }
                     _ => {}
                 }
             }
@@ -3222,6 +3229,10 @@ impl App {
                 // The last AUTO-set's decisions (scope_page.rs autoset_log).
                 out.put_bytes(b"|AUTO");
                 scope_page::autoset_log(out);
+                true
+            }
+            C::StatQuesCond => {
+                out.put_u32(crate::sentinel::ques_bits(self.dmm.sent.alert) as u32);
                 true
             }
             C::SysAlert => {

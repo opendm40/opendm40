@@ -808,7 +808,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
 /// display is hidden; V-JACK? (a silent hint) stays below HOLD.
 pub fn alert_alternates(hold: u8, alert: crate::sentinel::Alert) -> bool {
     use crate::sentinel::Alert;
-    hold != 0 && matches!(alert, Alert::AJack | Alert::Live)
+    hold != 0 && matches!(alert, Alert::AJack | Alert::Live | Alert::Overload)
 }
 
 /// The alternating slot shows the alert in this phase (`alt` true).
@@ -833,7 +833,7 @@ fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
     use crate::sentinel::Alert;
     let r = rect(119, 1, 71, 32);
     if (hold == 0 && alert != Alert::None) || slot_alert(hold, alert, alt) {
-        let (fg, bg) = if alert == Alert::AJack { (0xFFFF, alert.color()) } else { (alert.color(), BAR) };
+        let (fg, bg) = if alert.red() { (0xFFFF, alert.color()) } else { (alert.color(), BAR) };
         lcd::fill_rect(119, 1, 83, 4, BAR);
         lcd::fill_rect(119, 29, 83, 4, BAR);
         sf::label(sf::TEXT22, rect(119, 5, 83, 24), alert.badge(), fg, bg, 8, 1);
