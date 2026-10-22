@@ -618,7 +618,7 @@ fn hit_tests(ck: &mut Ck) {
     let vals = ["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto", "Hold 300 ms", "", "", ""];
     for p in 0..3u8 {
         host::reset(0);
-        ui::settings(p, &vals[..[9, 9, 2][p as usize]]);
+        ui::settings(p, &vals[..[ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize]]);
         let n = [ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize];
         let want: Vec<u32> = (0..n as u32).collect();
         page(ck, &format!("settings {}", p + 1), &|_, y| o(ui::settings_hit(p, y)), &|b| b.y0 >= 40, &want);
