@@ -9,10 +9,12 @@ SPI2 reads through HY3131SpiPort; SCPI over USB/IP on one connection.
 Checks (AC V, 0.5 V 50 Hz on V/COM; 200 MIPS = the device's instruction
 rate, so DBG:AD2:DRAW 2 costs the main loop what it does on the meter):
   * DBG:ISR? feature = 1;
-  * per session (4800 S/s DRAW 2, 9600 S/s DRAW 1, 1200 S/s DRAW 2): every
-    record drained, seqs consecutive, no stamp gap (round(dt / P) == 1),
-    LOG:COUNt? overwritten = missed = lost = 0, LOG:GAPs? all 0, DBG:ISR?
-    overruns = timeouts = forced = 0, ticks = 4 x captured within 1 %,
+  * per session (--sessions, default 4800 S/s DRAW 2, 9600 S/s DRAW 1, 1200
+    S/s DRAW 2): every record drained, seqs consecutive, no stamp gap
+    (round(dt / P) == 1), LOG:COUNt? overwritten = missed = lost = 0,
+    LOG:GAPs? all 0, DBG:ISR? overruns = timeouts = forced = late = slips =
+    0, locked, ~1 probe in 4 periods, the locked rate = the chip's (--ppm:
+    the HY3131 crystal offset of the model; --race-us its INTF race),
     *IDN? answered within 0.5 s while streaming, no SYST:ERR?, READ? back to
     0.5 V after LOG:STATe OFF;
   * a function change mid-stream (CONF:VOLT:DC): the stream stops first
@@ -35,7 +37,18 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument('--app', required=True, help='fw-rs native ELF / image built with --features ad2-isr')
 ap.add_argument('--port', type=int, default=3378, help='USB/IP port (default 3378)')
 ap.add_argument('--secs', type=float, default=1.0, help='scale of the session lengths (wall clock)')
+ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
+ap.add_argument('--race-us', type=float, default=None, help='INTF read-clears-flag race window, us (model default 0.7)')
+ap.add_argument('--sessions', default='4800:2:20,9600:1:15,1200:2:10',
+                help='rate:draw:secs,... (secs scaled by --secs)')
 A = ap.parse_args()
+SCRIPT = os.path.join(EMU, 'out', 'ad2stream-%d.script' % A.port)
+with open(SCRIPT, 'w') as f:
+    f.write('0 monitor sysbus.hy3131 ClockPpm %g\n' % A.ppm)
+    for k in range(1, 40):
+        f.write('%d monitor sysbus.hy3131 IntfPhaseHist\n' % (k * 3))
+    if A.race_us is not None:
+        f.write('0 monitor sysbus.hy3131 IntfRaceUs %g\n' % A.race_us)
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
@@ -51,7 +64,7 @@ def check(ok, what):
 
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', '200', '--app', A.app,
        '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', 'ad2stream',
-       '--dmm', 'vsrc:0,ac=0.5,f=50']
+       '--dmm', 'vsrc:0,ac=0.5,f=50', '--script', SCRIPT]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
 try:
     t = None
@@ -72,7 +85,7 @@ try:
         return b if raw else b.decode(errors='replace').strip()
 
     def ints(s):
-        return [int(x) for x in s.split(',')]
+        return [int(x, 0) for x in s.split(',')]
 
     def read_v(n=3):
         v = None
@@ -84,10 +97,15 @@ try:
     isr0 = ints(q('DBG:ISR?'))
     check(isr0[0] == 1, 'DBG:ISR? feature = 1 (an ad2-isr build)')
     q('CONF:VOLT:AC')
-    time.sleep(2)
-    check(abs(read_v() - 0.5) < 0.005, 'AC V reads 0.5 V before streaming')
+    t_ac = time.time()
+    v = read_v()
+    while abs(v - 0.5) >= 0.005 and time.time() - t_ac < 20:  # the AC node settles (tau 0.3 s virtual)
+        time.sleep(1)
+        v = read_v()
+    check(abs(v - 0.5) < 0.005, 'AC V reads 0.5 V before streaming (%.5f)' % v)
 
-    for rate, draw, secs in [(4800, 2, 20), (9600, 1, 15), (1200, 2, 10)]:
+    for rate, draw, secs in [tuple(float(x) if i == 2 else int(x) for i, x in enumerate(v.split(':')))
+                             for v in A.sessions.split(',')]:
         print('session %d S/s, DBG:AD2:DRAW %d, %g s' % (rate, draw, secs * A.secs))
         q('LOG:STATe OFF')
         q('*CLS')
@@ -136,12 +154,19 @@ try:
         check(cnt[2:] == [0, 0, 0], 'overwritten / missed / lost = 0')
         check(gaps[0] == 0 and gaps[2:] == [0] * 5, 'LOG:GAPs? bad and every bucket 0')
         check(isr[1] == 0 and isr[8:10] == [0, 0] and isr[13] == isr0[13], 'ISR stopped, timeouts / overruns 0, no forced stop')
-        check(abs(isr[2] - 4 * isr[3]) <= 0.01 * isr[2] + 8, 'ticks = 4 x captured (%d / %d)' % (isr[2], isr[3]))
-        check(isr[2] == isr[3] + isr[4] + isr[5] + isr[7], 'ticks = captured + empty + gated + bad')
+        check(isr[14] == 1, 'phase lock reached (locked %d, max run %d, edges after B %d of %d probes)'
+              % (isr[14], isr[17], isr[18], isr[5]))
+        check(isr[4] == 0 and isr[16] == 0, 'no late entry, no slip (late %d, slips %d)' % (isr[4], isr[16]))
+        bents = isr[2] - isr[3] - isr[4] - isr[7]
+        check(isr[5] > isr[3] / 8 and 0 <= bents - isr[5] <= 2 + isr[5] // 20,
+              'probes ~ 1 in 4 periods, entries = A + B (%d probes, %d B entries)' % (isr[5], bents))
+        check(abs(isr[15] + 10 * A.ppm) <= 250, 'locked period vs nominal %+.1f ppm (chip %+g ppm)' % (isr[15] / 10, A.ppm))
+        check(isr[12] > 0 and abs(isr[12] / 1000 / rate - 1 - A.ppm * 1e-6) < 2.5e-5, 'locked rate %.3f S/s' % (isr[12] / 1000))
         check(max(idn or [9]) < 0.5, '*IDN? answered while streaming (max %.3f s)' % max(idn or [9]))
         check(err.startswith('0,'), 'SYST:ERR? empty (%s)' % err)
         time.sleep(1.5)
-        check(abs(read_v() - 0.5) < 0.005, 'DMM reads 0.5 V AC again after the stream')
+        v = read_v()
+        check(abs(v - 0.5) < 0.005, 'DMM reads 0.5 V AC again after the stream (%.5f)' % v)
 
     print('function change mid-stream')
     q('DBG:AD2:DRAW 1')
@@ -162,6 +187,10 @@ try:
     check(abs(read_v() - 0.5) < 0.005, 'AC V reads 0.5 V again')
     self_ = q('DBG:HYSPI:SELF? 200').split(',')
     check(self_[2:6] == ['0', '0', '0', '0'], 'DBG:HYSPI:SELF? 200 clean (%s)' % ','.join(self_[:6]))
+    for mode in range(4):
+        wr = q('DBG:HYSPI:WR? %d' % mode).split(',')
+        check(len(wr) >= 7 and wr[2:4] == ['0', '0'] and wr[5] == wr[6],
+              'DBG:HYSPI:WR? %d (the model takes every write path; the device tells them apart): %s' % (mode, ','.join(wr[:8])))
 finally:
     os.killpg(emu.pid, 15)
     emu.wait()

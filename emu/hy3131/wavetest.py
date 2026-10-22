@@ -84,7 +84,7 @@ try:
         return b if raw else b.decode(errors='replace').strip()
 
     def ints(s):
-        return [int(x) for x in s.split(',')]
+        return [int(x, 0) for x in s.split(",")]
 
     def f(line):
         return float(q(line))

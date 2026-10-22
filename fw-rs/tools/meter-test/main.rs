@@ -22,6 +22,9 @@ mod logger;
 // The wave view's streaming trigger (logger.rs `wave`).
 #[path = "../../src/trigsoft.rs"]
 mod trigsoft;
+// The AD2 stream ISR's phase lock (pure; its model-chip tests).
+#[path = "../../src/ad2pll.rs"]
+mod ad2pll;
 
 fn main() {}
 
