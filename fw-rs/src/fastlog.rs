@@ -477,13 +477,18 @@ impl Job {
             if self.ended || self.stop_req || !logger_on {
                 break;
             }
-            if !self.enc.room(BATCH as u32) {
+            // A batch, or one record at a time near the file's end.
+            let per = if self.enc.room(BATCH as u32) {
+                BATCH
+            } else if self.enc.room(1) {
+                1
+            } else {
                 if self.enc.full() {
                     stop = Some(State::Full);
                 }
-                break;
-            }
-            let n = drain(&mut buf) / 12;
+                break; // else: the FIFO is full, the pages go out first
+            };
+            let n = drain(&mut buf[..per * 12]) / 12;
             if n == 0 {
                 break;
             }
@@ -599,10 +604,11 @@ mod prep {
                 let mut buf = [0u8; BATCH * 12];
                 let mut empty = false;
                 for _ in 0..64 {
-                    if j.ended || j.enc.full() || !j.enc.room(BATCH as u32) {
+                    let per = if j.enc.room(BATCH as u32) { BATCH } else { 1 };
+                    if j.ended || j.enc.full() || !j.enc.room(1) {
                         break;
                     }
-                    let n = drain(&mut buf) / 12;
+                    let n = drain(&mut buf[..per * 12]) / 12;
                     if n == 0 {
                         empty = true;
                         break;

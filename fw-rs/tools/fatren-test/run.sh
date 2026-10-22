@@ -1172,6 +1172,102 @@ grep -q "^step 6: free .*media_changed=true" $W/vd.out && places $VD.5 $VD.6 com
 volok $VD.6 $W/vs3.img || exit 1
 grep -q "^step 7: forget LOG000.DLG media_changed=true" $W/vd.out && ! mdir -b -i $VD.7 ::LOGS | grep -q LOG000 && echo "ok: step 7: forget (device delete): gone at once, media change" || { echo "FAIL at line $LINENO"; exit 1; }
 
+echo "=== fastlog: the fast logger to the SPI disk (src/fastlog.rs, LOGS/FASTnnn.DLG, kind 3)"
+# fastok <img> <file>: the DLG decodes (dlog.py) to exactly <img>.ref.csv
+# (the records the session drained); `prefix`: a prefix of it.
+fastok() {
+    mcopy -n -i $1 ::LOGS/$2 $W/fx.dlg || { echo "FAIL: no LOGS/$2"; exit 1; }
+    # A cut between the entry and the header's first page program (one
+    # main-loop pass after the logger starts): the file is all 0xFF, not a
+    # DLG (vdisk / MMEM:DATA? leave it out; it can be deleted).
+    if [ "$3" = prefix ] && ! tr -d '\377' < $W/fx.dlg | head -c1 | grep -q .; then
+        nblank=$((nblank + 1))
+        return 0
+    fi
+    python3 -I ../dlog.py $W/fx.dlg -o $W/fx.csv 2>$W/fx.err || { cat $W/fx.err; echo "FAIL: dlog.py $2"; exit 1; }
+    if [ "$3" = prefix ]; then
+        python3 -I - $W/fx.csv $1.ref.csv <<'PY' || { echo "FAIL: $2 not a prefix of the reference ${CUTK:-}"; exit 1; }
+import sys
+a, b = open(sys.argv[1], 'rb').read(), open(sys.argv[2], 'rb').read()
+sys.exit(0 if b.startswith(a) and a.count(b'\n') >= 2 else 1)
+PY
+    else
+        cmp -s $W/fx.csv $1.ref.csv || { echo "FAIL: $2 CSV != reference"; exit 1; }
+    fi
+}
+# fastcut <img>: fsck findings a cut may leave (lost clusters, FAT copies
+# differing, a chain longer than the file), nothing else.
+fastcut() {
+    local rc=0
+    fsck.fat -n $1 > $W/fsck.out 2>&1 || rc=$?
+    [ $rc -le 1 ] || { cat $W/fsck.out; echo "FAIL: fsck rc=$rc ${CUTK:-}"; exit 1; }
+    if grep -vE "^fsck.fat|files, .*clusters|^$|Leaving filesystem unchanged|FATs differ but appear to be intact|Using first FAT|Reclaimed [0-9]+ unused clusters? in [0-9]+ chains?\.?|Reclaimed [0-9]+ unused clusters?|^/LOGS/FAST[0-9]{3}\.DLG$|File size is [0-9]+ bytes, cluster chain length is > [0-9]+ bytes|Truncating file to [0-9]+ bytes" $W/fsck.out | grep -q .; then
+        cat $W/fsck.out; echo "FAIL: unexpected fsck finding ${CUTK:-}"; exit 1
+    fi
+}
+IMGQ=$W/diskq.img
+mkimg $IMGQ
+mcopy -i $IMGQ $W/keep.bin ::CONFIG.BIN
+"$W/t" $IMGQ fatdir boot >/dev/null
+cp $IMGQ $W/fastbase.img
+"$W/t" $IMGQ fast 40000 9600 | tee $W/q1
+grep -qE "^fast=Done file=Some\(0\) .* rows=40000 drained=40000 ring_drops=0 " $W/q1 && echo "ok: 40000 AD2 samples at 9600 S/s -> LOGS/FAST000.DLG" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGQ
+fastok $IMGQ FAST000.DLG
+cp $IMGQ.ref.csv $W/q1ref.csv
+B=$(grep -oE " bytes=[0-9]+" $W/q1 | cut -d= -f2)
+[ "$(mdir -i $IMGQ ::LOGS | grep FAST000 | awk '{print $3}')" = $B ] && echo "ok: directory size = the bytes written ($B), the surplus clusters freed (fsck clean)" || { echo "FAIL at line $LINENO"; exit 1; }
+mcopy -n -i $IMGQ ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.BIN untouched" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGQ fast 20000 4800 ringdrop | tee $W/q2
+grep -qE "^fast=Done file=Some\(1\) " $W/q2 && ! grep -q "ring_drops=0 " $W/q2 && echo "ok: FAST001.DLG with ring-overflow holes" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGQ
+fastok $IMGQ FAST001.DLG
+python3 -I - $W/fx.csv <<'PY' && echo "ok: the holes show as lost_before > 0 rows" || { echo "FAIL at line $LINENO"; exit 1; }
+import sys
+rows = [l.split(',') for l in open(sys.argv[1]).read().splitlines() if l[:1] in ' 0123456789']
+lost = [int(r[-1]) for r in rows]
+assert sum(1 for x in lost if x > 0) >= 1 and sum(lost) > 1000, (sum(lost))
+PY
+# The USB volume (vdisk.rs): LOGS/FAST000.CSV / FAST001.CSV next to the LOGs.
+"$W/t" $W/vq.img vdisk $W/f1m_native $W/src/UID.BIN $W/src/OTP.BIN $W/src/OPTBYTES.BIN spi $IMGQ > $W/vq.out
+mtype -i $W/vq.img.1 ::LOGS/FAST000.CSV > $W/vq.csv && cmp $W/vq.csv $W/q1ref.csv && mdir -i $W/vq.img.1 ::LOGS | grep -q "^FAST001 *CSV" && echo "ok: the USB volume serves LOGS/FAST000.CSV (== the reference, $(stat -c%s $W/vq.csv) bytes) and FAST001.CSV" || { cat $W/vq.out; mdir -i $W/vq.img.1 ::LOGS; echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $IMGQ fast 5000 4800 abandon | tee $W/q3
+grep -qE "^fast=Done file=None .* started=false" $W/q3 && ! mdir -i $IMGQ ::LOGS | grep -q FAST002 && echo "ok: stopped while preparing: no file, nothing linked" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGQ
+# disk nearly full: the allocation is the free space; the session ends Full
+IMGR=$W/diskr.img
+cp $W/fastbase.img $IMGR
+FREE=$(fsck.fat -n $IMGR | grep -o "[0-9]*/[0-9]* clusters" | awk -F'[/ ]' '{print $2 - $1}')
+head -c $(( (FREE - 12) * 4096 )) /dev/zero > $W/fill
+mcopy -i $IMGR $W/fill ::FILL.DAT
+"$W/t" $IMGR fast 100000 9600 | tee $W/q4
+grep -qE "^fast=Full file=Some\(0\) alloc=49152 " $W/q4 && echo "ok: 12 free clusters: allocated all, the session ended Full" || { echo "FAIL at line $LINENO"; exit 1; }
+fsckok $IMGR
+fastok $IMGR FAST000.DLG prefix
+echo "ok: the full file decodes to a prefix of the samples"
+# power cut before every operation (block write / page program / erase)
+cp $W/fastbase.img $W/fcut0.img
+NOPS=$("$W/t" $W/fcut0.img fast 6000 4800 | grep -oE " ops=[0-9]+" | cut -d= -f2)
+cp $W/fcut0.img.ref.csv $W/fref.csv
+echo "uncut: $NOPS operations"
+nfile=0
+nblank=0
+for k in $(seq 0 $NOPS); do
+    CUTK="(cut $k)"
+    cp $W/fastbase.img $W/fcut.img
+    "$W/t" $W/fcut.img fast 6000 4800 cut $k > $W/fr
+    cp $W/fref.csv $W/fcut.img.ref.csv
+    fastcut $W/fcut.img
+    if mdir -i $W/fcut.img ::LOGS 2>/dev/null | grep -q FAST000; then
+        fastok $W/fcut.img FAST000.DLG prefix
+        nfile=$((nfile + 1))
+    fi
+    mcopy -n -i $W/fcut.img ::CONFIG.BIN $W/o && cmp -s $W/o $W/keep.bin || { echo "FAIL: cut $k: CONFIG.BIN"; exit 1; }
+done
+CUTK=
+[ $nblank -le 1 ] || { echo "FAIL: $nblank cuts left an all-0xFF FAST000.DLG (expected: the one before the header page)"; exit 1; }
+echo "ok: $((NOPS + 1)) cut points: fsck only lost clusters / FAT 1 ahead / a chain longer than the file; FAST000.DLG ($nfile cuts) decodes to a prefix of the samples ($nblank: all 0xFF, the cut right after the entry)"
+
 echo "=== vwrite: host writes on the USB volume (delete from the PC, drag-and-drop firmware update)"
 # vwrite_test.py: mtools-made sector diffs written through vserve (main.rs)
 # in several orders, fsck + file checks of the SPI disk after each scenario,
