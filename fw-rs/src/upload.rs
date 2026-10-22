@@ -109,7 +109,10 @@ pub fn scpi_busy() -> bool {
     up().active
 }
 
+/// Inlined: vwrite::poll reaches it on every main-loop pass (through
+/// `spi`) and this module is in .cold (region C, link-native.x).
 #[cfg(target_os = "none")]
+#[inline(always)]
 fn disk() -> &'static mut crate::spiflash::SpiFlash {
     let d = unsafe { &mut *core::ptr::addr_of_mut!(DISK) };
     d.get_or_insert_with(crate::spiflash::SpiFlash::new)
@@ -117,6 +120,7 @@ fn disk() -> &'static mut crate::spiflash::SpiFlash {
 
 /// The SPI flash as a block device (vwrite.rs).
 #[cfg(target_os = "none")]
+#[inline(always)]
 pub fn spi() -> &'static mut dyn BlockDevice {
     disk()
 }

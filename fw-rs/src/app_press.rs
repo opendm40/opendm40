@@ -8,22 +8,30 @@ use super::*;
 
 impl App {
     /// Track the pressed item through gesture `g` (before the tap handlers).
-    #[inline(never)]
+    /// The guard is inlined into App::gesture (region B): every touch
+    /// report of a drag on an instrument view (scope trigger / cursor drags
+    /// while a stream runs) passes here and must not fetch from region C.
+    #[inline(always)]
     pub(super) fn press_gesture(&mut self, g: &Gesture) {
         if self.pressed.is_some() || matches!(self.view, View::Menu | View::Gen | View::Settings | View::Limits | View::Record) {
-            match g {
-                Gesture::Down(p) => {
-                    self.press_end();
-                    if let Some(t) = self.press_hit(p.x, p.y) {
-                        self.pressed = Some((self.view, t));
-                        self.press_draw(t);
-                    }
+            self.press_track(g);
+        }
+    }
+
+    #[inline(never)]
+    fn press_track(&mut self, g: &Gesture) {
+        match g {
+            Gesture::Down(p) => {
+                self.press_end();
+                if let Some(t) = self.press_hit(p.x, p.y) {
+                    self.pressed = Some((self.view, t));
+                    self.press_draw(t);
                 }
-                Gesture::Drag(_, p, _) | Gesture::Move(_, p) if self.pressed.map(|q| q.1) == self.press_hit(p.x, p.y) => {}
-                // A long press with no action of its own still taps on release.
-                Gesture::Grab(_) | Gesture::LongPress(_) => {}
-                _ => self.press_end(),
             }
+            Gesture::Drag(_, p, _) | Gesture::Move(_, p) if self.pressed.map(|q| q.1) == self.press_hit(p.x, p.y) => {}
+            // A long press with no action of its own still taps on release.
+            Gesture::Grab(_) | Gesture::LongPress(_) => {}
+            _ => self.press_end(),
         }
     }
 
