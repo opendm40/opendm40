@@ -654,7 +654,7 @@ fn hit_tests(ck: &mut Ck) {
         let mut want: Vec<u32> = (0..n as u32).collect();
         want.extend([102, 104]);
         if matches!(b, dmm::Button::Volt | dmm::Button::Amp) {
-            want.extend([100, 101, 103]);
+            want.extend([100, 101, 103, 106]); // DC / AC / AC+DC / AUTO (AC/DC)
         }
         if b == dmm::Button::Ohm {
             want.extend([100, 101]); // Normal / Low current ON

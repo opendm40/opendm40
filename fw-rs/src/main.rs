@@ -1560,7 +1560,7 @@ fn fast_events(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger,
 #[inline(never)] // .cold (link-native.x): once per session
 fn fast_start(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger) -> bool {
     let m = app.dmm.mode();
-    if logger.active() || !logger::Logger::mode_ok(logger.ad2(), m) || matches!(app.dmm.func(), 16 | 17) || app.dmm.pw.on {
+    if logger.active() || !logger::Logger::mode_ok(logger.ad2(), m) || matches!(app.dmm.func(), 16 | 17 | dmm::FUNC_V_AUTO | dmm::FUNC_A_AUTO) || app.dmm.pw.on {
         fastlog::not_started();
         return false;
     }
@@ -1620,7 +1620,7 @@ fn log_on_check(app: &mut app::App, logger: &mut logger::Logger, disk: bool, dur
     if !disk {
         return None;
     }
-    if logger.active() || !logger::Logger::mode_ok(logger.ad2(), app.dmm.mode()) || matches!(app.dmm.func(), 16 | 17) {
+    if logger.active() || !logger::Logger::mode_ok(logger.ad2(), app.dmm.mode()) || matches!(app.dmm.func(), 16 | 17 | dmm::FUNC_V_AUTO | dmm::FUNC_A_AUTO) {
         return Some("Settings conflict");
     }
     Some(match fastlog::begin(fastlog::plan_bytes(dur_s, hz, logger.ad2()), dur_s) {

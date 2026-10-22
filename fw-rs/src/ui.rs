@@ -131,7 +131,7 @@ const BURDEN_CAP: &str = "Burden";
 /// percentage (drawn with the LOOP_CAP caption). The last item: the aux slot
 /// holding the burden voltage (`Reading::burden`, drawn with BURDEN_CAP).
 fn aux_shown(r: &Reading) -> ([Option<crate::dmm::Val>; 2], bool, Option<usize>) {
-    let lp = r.mode == 8 && !r.acdc && r.aux2.is_some_and(|v| v.unit == "%");
+    let lp = r.mode == 8 && !r.parts() && r.aux2.is_some_and(|v| v.unit == "%");
     let a2 = r.aux2.filter(|v| !lp || (!v.ol && (-25.0..=125.0).contains(&v.v)));
     ([r.aux1, a2], lp && a2.is_some(), r.burden().map(|b| b.0))
 }
@@ -538,13 +538,14 @@ impl DmmView {
         self.last_fmt = f;
         let last_ext = self.last_ext;
         self.last_ext = ext.unwrap_or(0);
-        // Bits 5..6: the power coupling (1 DC, 2 AC, 3 AC+DC), 7: AC+DC.
+        // Bit 4: AUTO coupling (the mode is the part shown), bits 5..6: the
+        // power coupling (1 DC, 2 AC, 3 AC+DC), 7: AC+DC.
         let pk = |c: u8| match c {
             crate::dmm::pw::COUP_DC => 1u8,
             crate::dmm::pw::COUP_AC => 2,
             _ => 3,
         };
-        let mkey = r.mode | (r.acdc as u8) << 7 | r.power.map_or(0, |p| pk(p.coup) << 5);
+        let mkey = r.mode | (r.cpl_auto as u8) << 4 | (r.acdc as u8) << 7 | r.power.map_or(0, |p| pk(p.coup) << 5);
         // Extra digit: the main cells narrow to CELLS_X (40..372) and the
         // digit is the F78 glyph at half size (~38 px vs ~76) in
         // XT_X..XT_X + XT_W (375..402), on the F78 baseline (VALUE_BASE),
@@ -598,8 +599,10 @@ impl DmmView {
             };
             sf::label(sf::MODE, rect(437, 76, 35, 32), g, VALUE, BG, 7, 0);
             self.pwc.coup_invalidate();
-            if !r.acdc {
-                // Leaving AC+DC: the tag slots left of the aux values.
+            // The AUTO-coupling label shares the limit badge's slot.
+            self.last_lim = 255;
+            if !r.parts() {
+                // Leaving AC+DC / AUTO: the tag slots left of the aux values.
                 for i in 0..2 {
                     lcd::fill_rect(AUX_TAG_X[i] as u16, 36, (AUX_VX[i] - AUX_TAG_X[i]) as u16, 30, BG);
                 }
@@ -647,7 +650,7 @@ impl DmmView {
                     let mut key = [0u8; 16];
                     let kn = txt.len().min(16);
                     key[..kn].copy_from_slice(&txt.as_bytes()[..kn]);
-                    let vkey = Some((key, (i == 1 && lp) as u8 | (r.acdc as u8) << 1 | (bdi as u8) << 2));
+                    let vkey = Some((key, (i == 1 && lp) as u8 | (r.parts() as u8) << 1 | (bdi as u8) << 2));
                     if self.aux_val[i] == vkey {
                         // Value part unchanged.
                     } else if bdi {
@@ -668,8 +671,8 @@ impl DmmView {
                         // 256..396, so an older text leaves nothing behind.
                         sf::label(sf::LETTERS, rect(316, 36, 81, 30), txt, VALUE, BG, 4, 0);
                         sf::label(sf::F14, rect(256, 36, 60, 30), LOOP_CAP, VALUE, BG, 4, 1);
-                    } else if r.acdc {
-                        // AC+DC: the part's tag (AC for aux1, DC for aux2)
+                    } else if r.parts() {
+                        // AC+DC / AUTO: the part's tag (AC for aux1, DC for aux2)
                         // right before its value, which stays right-aligned
                         // in its box: tag box from AUX_TAG_X to 4 px left
                         // of the text (both labels repaint their bg).
@@ -683,10 +686,10 @@ impl DmmView {
                     self.aux_val[i] = vkey;
                     // AC+DC: the aux1 unit box (V..uA, <= 48 px) ends at 231,
                     // the aux2 tag slot starts at 232; else full width (kHz 57 px).
-                    let ukey = Some((v.unit, r.acdc));
+                    let ukey = Some((v.unit, r.parts()));
                     if self.aux_unit[i] != ukey {
                         self.aux_unit[i] = ukey;
-                        let uw = if i == 0 && r.acdc { 54 } else { 76 };
+                        let uw = if i == 0 && r.parts() { 54 } else { 76 };
                         lcd::fill_rect((ux - 1) as u16, 36, 4, 30, BG);
                         // Energy units (Wh, VAh: power meter): the 'h'
                         // ascender is above the caps; 1 px lower, its glyphs
@@ -732,10 +735,18 @@ impl DmmView {
         }
         // Power meter: the badge shares its slot with the AUTO coupling
         // label (ui::pw `coupling` draws whichever applies).
+        // AUTO coupling (V / A sub-mode 3): "AUTO" in the badge slot left
+        // of the glyph (DC / AC = the part it shows), as the power meter's
+        // former AUTO; a limit verdict takes the slot (OK / HI / LO matter
+        // more; the glyph still says DC / AC). The status bar's AUTO is
+        // the range.
         let pwr = r.power.filter(|_| self.power);
-        if self.last_lim != lim {
-            self.last_lim = lim;
-            if pwr.is_none() {
+        let lk = if r.cpl_auto && lim == crate::meter::V_NONE { 254 } else { lim };
+        if self.last_lim != lk {
+            self.last_lim = lk;
+            if lk == 254 {
+                auto_cpl_label();
+            } else if pwr.is_none() {
                 lim_badge(lim);
             }
         }
@@ -787,6 +798,11 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         crate::dmm::pw::FUNC => "POWER",
         _ => "TEMP",
     };
+    if r.cpl_auto {
+        // AUTO coupling: the part it shows, marked Auto (6 characters fit
+        // the 62 px badge; V / A is the unit's, as for "AC+DC").
+        d.func = if r.is_ac() { "AutoAC" } else { "AutoDC" };
+    }
     let mut buf = [0u8; 16];
     let (v, _, _) = fmt7(&mut buf, &r.main, false);
     d.value = Txt::new(v.trim());
@@ -801,7 +817,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         if temp && i == 1 {
             t.push(label.unwrap_or(""));
         } else if let Some(v) = a {
-            if r.acdc {
+            if r.parts() {
                 t.push(["AC ", "DC "][i]);
             } else if bd == Some(i) {
                 t.push("Bd ");
@@ -900,6 +916,12 @@ fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
 /// when no limit applies. 31 px is all the room there is (>= 3 px to the
 /// last digit and to the mode glyph): "PASS" / "FAIL HI" do not fit at a
 /// legible size. The digits keep the value colour.
+/// "AUTO" (AUTO coupling) in the limit badge's slot (`DmmView::reading`).
+#[inline(never)] // .cold (link-native.x): drawn on a change only
+fn auto_cpl_label() {
+    sf::label(sf::F14, rect(403, 72, 31, 17), "AUTO", VALUE, BG, 8, 1);
+}
+
 pub(crate) fn lim_badge(v: u8) {
     let r = rect(403, 72, 31, 17);
     let (t, bg) = match v {
@@ -944,9 +966,19 @@ fn range_rect(i: usize) -> sf::Rect {
     rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
 }
 
+/// The V / A range page's coupling row: DC, AC, AC+DC, AUTO (= Dmm::sub
+/// 0..3).
+const CPL_NAMES: [&str; 4] = ["DC", "AC", "AC+DC", "AC/DC"];
+
+/// Coupling button `i` (CPL_NAMES): the range grid's columns, row 182.
+fn cpl_rect(i: usize) -> sf::Rect {
+    rect(8 + i as i16 * 117, 182, 112, 38)
+}
+
 /// `note`: a line under the range buttons (UF-21: the V page says AUTO+ is
 /// the recommended auto range, or warns in orange while the mV-first AUTO
 /// is in use), true = warning.
+#[inline(never)] // .cold (link-native.x): the MF page, drawn on a tap
 pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bool)>) {
     let title = match b {
         Button::Volt => "Voltage Settings",
@@ -978,10 +1010,12 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
         }
     }
     if matches!(b, Button::Volt | Button::Amp) {
-        // Stock: DC (8,182), AC (162,182), AC+DC (319,182), 150x38 each.
-        for (i, name) in ["DC", "AC", "AC+DC"].iter().enumerate() {
+        // Stock: DC (8,182), AC (162,182), AC+DC (319,182), 150x38 each;
+        // fw-rs adds the AUTO coupling ("AC/DC": AUTO is the range button
+        // above), so four on the range grid's columns (`cpl_rect`).
+        for (i, name) in CPL_NAMES.iter().enumerate() {
             let c = if i as u8 == sub { SEL } else { 0x2966 };
-            let r = rect([8, 162, 319][i], 182, 150, 38);
+            let r = cpl_rect(i);
             sf::rbox(r, 6, c, BG);
             sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
         }
@@ -1096,8 +1130,11 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
     if (179..223).contains(&y) && b == Button::Ohm {
         return Some(Err(if x < 240 { 0 } else { 1 }));
     }
-    if (182..220).contains(&y) && matches!(b, Button::Volt | Button::Amp) {
-        return Some(Err(if x < 158 { 0 } else if x < 316 { 1 } else { 3 }));
+    if (179..223).contains(&y) && matches!(b, Button::Volt | Button::Amp) {
+        // Coupling row (cpl_rect): DC / AC / AC+DC / AUTO -> Err 0 / 1 / 3 /
+        // 6 (Err 2 is OK), the 5 px gaps split between the buttons.
+        let i = ((x.max(8) - 8 + 2) / 117).min(3);
+        return Some(Err([0, 1, 3, 6][i as usize]));
     }
     if (240..278).contains(&y) && x >= 319 {
         return Some(Err(2));

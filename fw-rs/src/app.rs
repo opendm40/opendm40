@@ -251,6 +251,10 @@ pub struct App {
     pub meas: [f32; 4],
     beep_until: u64,
     pub last_raw: Option<Reading>,
+    /// AUTO coupling: the mode (DC / AC part) the static view was drawn
+    /// with (the V / A button's glyph, the bargraph's polarity); 255 = not
+    /// AUTO. A reading of the other part redraws it (`reading`).
+    auto_drawn: u8,
     redraw: bool,
     meas_next: u64,
     pub power: Power,
@@ -402,13 +406,18 @@ fn power_off() -> ! {
 /// anything unknown). v2 stored the HY3131 mode (0..15, no AC+DC then); v3
 /// stores `Dmm::func()`: 0..15, 16 / 17 = V / A AC+DC. Both number 0..15 the
 /// same way. The mV modes (2, 3) restart as AC / DC V: AUTO steps down to mV
-/// again by itself, AUTO+ stays on V (UF-21).
+/// again by itself, AUTO+ stays on V (UF-21). The AUTO coupling (19 / 20,
+/// dmm::FUNC_*_AUTO) restarts in AUTO: the setting is the function code, in
+/// the same byte, so no layout change (an older fw-rs build loads it as DC
+/// V). V and A keep no coupling of their own beyond this: a tap on V / A
+/// from another function starts in DC, as the stock.
 fn restore_func(version: u32, code: u8) -> u8 {
     let max = if version >= 3 { 17 } else { 15 };
     match code {
         // The power meter restarts as itself (owner 2026-10-22: a full
         // function); `pw_enter` resets the energy integrator.
         dmm::pw::FUNC => dmm::pw::FUNC,
+        dmm::FUNC_V_AUTO | dmm::FUNC_A_AUTO => code,
         2 | 3 => code - 2,
         c if c <= max => c,
         _ => 1,
@@ -492,6 +501,7 @@ impl App {
             tp_pressed: None,
             ntc_reenter: false,
             last_raw: None,
+            auto_drawn: 255,
             redraw: true,
             meas_next: 0,
             power: Power::new(),
@@ -621,11 +631,12 @@ impl App {
 
     fn draw_static(&mut self) {
         self.dmm_view.label = self.t_label();
+        self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
         match self.view {
             View::Dmm => {
                 self.dmm_view.power = self.dmm.pw.on;
                 self.pw_btn_glyph();
-                self.dmm_view.draw_static(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2 || self.dmm.pw.on, self.dmm.ohm_var() == 1);
+                self.dmm_view.draw_static(self.dmm.button(), self.dmm.shown_mode(), self.dmm.sub() == 2 || self.dmm.pw.on, self.dmm.ohm_var() == 1);
                 self.pw_rng_key = 0;
                 if self.dmm.pw.on {
                     ui::pw::side_clear(&mut self.dmm_view.pwc);
@@ -856,7 +867,7 @@ impl App {
     fn band_open(&mut self, now: u64) {
         if self.band_until == 0 {
             self.pw_btn_glyph();
-            ui::func_band(self.dmm.button(), self.dmm.hy_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
+            ui::func_band(self.dmm.button(), self.dmm.shown_mode(), self.dmm.sub() == 2, self.dmm.ohm_var() == 1);
         }
         self.band_until = now + BAND_MS;
     }
@@ -975,7 +986,7 @@ impl App {
     /// The display unit for limits of the current function: the live
     /// reading's (if it is this function), else the base unit.
     fn lim_unit(&self) -> &'static str {
-        let f = self.dmm.func();
+        let f = self.dmm.func_shown();
         match self.last_raw {
             // Power: the unit of P (the readout may show Wh / VAh).
             Some(r) if crate::meter::func_of(&r) == f => match r.power {
@@ -996,7 +1007,7 @@ impl App {
 
     /// View::Limits: AutoHold and the limits of the current function.
     fn limits_page(&self) {
-        let slot = crate::meter::lim_slot(self.dmm.func());
+        let slot = crate::meter::lim_slot(self.dmm.func_shown());
         let l = self.meter.lim[slot];
         let unit = self.lim_unit();
         let dec = match self.last_raw {
@@ -1158,7 +1169,7 @@ impl App {
         let (osr, chop, req) = crate::fastlog::cfg();
         let ad1 = 1_000_000 / crate::hy3131::ad1_period_us(osr, chop).max(1);
         let ad2 = crate::hy3131::ad2_rate_mhz(crate::hy3131::ad2_r26_for(req, chop)) / 1000;
-        if matches!(self.dmm.func(), 16 | 17) || self.dmm.pw.on {
+        if matches!(self.dmm.func(), 16 | 17 | dmm::FUNC_V_AUTO | dmm::FUNC_A_AUTO) || self.dmm.pw.on {
             None
         } else if crate::logger::Logger::mode_ok(true, m) {
             Some((ad2, true))
@@ -1676,7 +1687,7 @@ impl App {
             // DMM limit, typed in the unit shown on the keypad; stored SI.
             // Setting a limit turns the check on.
             let si = v * crate::meter::unit_scale(self.kp_unit);
-            let l = &mut self.meter.lim[crate::meter::lim_slot(self.dmm.func())];
+            let l = &mut self.meter.lim[crate::meter::lim_slot(self.dmm.func_shown())];
             if self.kp_target == 3 {
                 l.hi = Some(si);
             } else {
@@ -1927,6 +1938,13 @@ impl App {
     /// AutoHold freeze the readout (before, a HOLD made READ? wait forever).
     pub fn reading(&mut self, raw: Reading, can_draw: bool) -> Option<Reading> {
         self.last_raw = Some(raw);
+        if raw.cpl_auto && self.auto_drawn != 255 && matches!(self.auto_drawn, 0 | 2 | 4..=6) != raw.is_ac() && self.view == View::Dmm {
+            // AUTO coupling switched the part shown: the V / A button's
+            // glyph and the bargraph follow (static redraw of the DMM page;
+            // the combined view's band draws the part shown when it opens);
+            // REL and the statistics restart in Meter::update.
+            self.redraw = true;
+        }
         self.dmm_view.label = self.t_label();
         let now = self.now;
         let u = self.meter.update(&raw, now);
@@ -2903,16 +2921,21 @@ impl App {
                         }
                         self.redraw = true;
                     }
-                    Some(Err(k)) => {
-                        // DC / AC / AC+DC buttons (Err 0 / 1 / 3) -> sub-mode 0 / 1 / 2.
-                        let sub = if k == 3 { 2 } else { k };
+                    Some(Err(k @ (0 | 1 | 3 | 6))) => {
+                        // DC / AC / AC+DC / AUTO buttons (Err 0 / 1 / 3 / 6)
+                        // -> sub-mode 0 / 1 / 2 / 3.
+                        let sub = match k {
+                            3 => 2,
+                            6 => 3,
+                            k => k,
+                        };
                         if sub != self.dmm.sub() {
                             self.dmm.set_sub(clk, sub);
                             self.func_changed();
                         }
                         self.redraw = true;
                     }
-                    None => {}
+                    Some(Err(_)) | None => {}
                 }
             }
             View::Dmm => {
@@ -2998,8 +3021,8 @@ impl App {
                     self.show(v, clk);
                     return;
                 }
-                let slot = crate::meter::lim_slot(self.dmm.func());
-                let live = self.meter.live().copied().filter(|r| !r.main.ol && crate::meter::func_of(r) == self.dmm.func());
+                let slot = crate::meter::lim_slot(self.dmm.func_shown());
+                let live = self.meter.live().copied().filter(|r| !r.main.ol && crate::meter::func_of(r) == self.dmm.func_shown());
                 let l = &mut self.meter.lim[slot];
                 match ui::list_hit(y, ui::LIMIT_ROWS.len()) {
                     Some(0) => {
@@ -3389,7 +3412,7 @@ impl App {
     /// CALC:LIM:UPP / LOW <v> (SI) for the current function; None clears
     /// it. Setting a limit turns the check on (as on the touch page).
     pub fn set_limit(&mut self, upper: bool, v: Option<f32>) {
-        let l = &mut self.meter.lim[crate::meter::lim_slot(self.dmm.func())];
+        let l = &mut self.meter.lim[crate::meter::lim_slot(self.dmm.func_shown())];
         let v = v.filter(|x| x.is_finite());
         if upper {
             l.hi = v;
@@ -3403,19 +3426,19 @@ impl App {
 
     /// CALC:LIM:UPP? / LOW? (None: not set).
     pub fn limit(&self, upper: bool) -> Option<f32> {
-        let l = &self.meter.lim[crate::meter::lim_slot(self.dmm.func())];
+        let l = &self.meter.lim[crate::meter::lim_slot(self.dmm.func_shown())];
         if upper { l.hi } else { l.lo }
     }
 
     /// CALC:LIM:STATe ON|OFF / ?
     pub fn set_limit_state(&mut self, on: bool) {
-        self.meter.lim[crate::meter::lim_slot(self.dmm.func())].on = on;
+        self.meter.lim[crate::meter::lim_slot(self.dmm.func_shown())].on = on;
         self.meter.recheck();
         self.redraw |= self.view == View::Limits;
     }
 
     pub fn limit_state(&self) -> bool {
-        self.meter.lim[crate::meter::lim_slot(self.dmm.func())].on
+        self.meter.lim[crate::meter::lim_slot(self.dmm.func_shown())].on
     }
 
     /// CALC:LIM:FAIL?: 1 = the displayed value is outside the limits, 0
@@ -3643,6 +3666,22 @@ impl App {
             }
             C::SensRate(None) => {
                 out.put_bytes(dmm::RATE_NAMES[self.dmm.rate() as usize].as_bytes());
+                true
+            }
+            C::Coup(amp) => {
+                let b = if amp { Button::Amp } else { Button::Volt };
+                let t: &[u8] = if self.dmm.button() != b {
+                    b"DC"
+                } else {
+                    match self.dmm.sub() {
+                        0 => b"DC",
+                        1 => b"AC",
+                        2 => b"ACDC",
+                        _ if matches!(self.dmm.shown_mode(), 0 | 2 | 4..=6) => b"AUTO,AC",
+                        _ => b"AUTO,DC",
+                    }
+                };
+                out.put_bytes(t);
                 true
             }
             C::SensRatePer => {

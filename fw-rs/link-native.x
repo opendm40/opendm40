@@ -175,6 +175,8 @@ SECTIONS
         *(.text.*7dm40_fw2ui10gen_values*);
         *(.text.*7dm40_fw2ui11gen_preview*);
         *(.text.*7dm40_fw2ui10gen_static*);
+        *(.text.*7dm40_fw2ui14auto_cpl_label*);
+        *(.text.*7dm40_fw2ui10range_page*);
         /* Debug / file replies, `#[inline(never)]` so they do not land in
          * main.rs `run` (hot): DBG:PROF?, DBG:TOUCH?, DBG:DIAG?, MMEM:CAT?,
          * MMEM:DEL (and the modules above: DBG:HYSPI, DBG:AD2:TORN / NOISE,

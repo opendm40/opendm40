@@ -100,8 +100,9 @@ impl App {
         let b = self.dmm.button();
         let why = if !matches!(b, Button::Volt | Button::Amp) || self.dmm.pw.on {
             Some("Wave: V or A function")
-        } else if self.dmm.sub() == 2 {
-            Some("Wave: not in AC+DC")
+        } else if self.dmm.sub() >= 2 {
+            // AC+DC / AUTO coupling: the HY3131 row alternates.
+            Some("Wave: not in AC+DC/AUTO")
         } else if crate::csvlog::active() {
             Some("Wave: recording runs")
         } else {
