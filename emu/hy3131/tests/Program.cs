@@ -93,6 +93,7 @@ namespace Hy3131Tests
             SentinelLater();
             Power();
             HwSpi();
+            Rail();
             Console.WriteLine("{0} passed, {1} failed", passes, failures);
             return failures == 0 ? 0 : 1;
         }
@@ -937,6 +938,26 @@ namespace Hy3131Tests
             var t = m.Chip.Transfers;
             Check(m.SpiX(0x41) == 0x00 && m.Chip.Transfers == t, "byte with CS high: IRQ level (0), no frame");
             Check(Hex(m.Read(0x20, 22)) == Hex(F0R0), "row intact after the CS-high byte");
+        }
+
+        private static void Rail()
+        {
+            Console.WriteLine("DMM rail (PE2) power gate");
+            var m = NewChip();
+            m.Configure(F0R0, 0);
+            Check(Hex(m.Read(0x20, 22)) == Hex(F0R0), "PE2 never driven: powered (unit tests, a ROM-raised rail)");
+            m.PortE.Drive(2, true);
+            Check(Hex(m.Read(0x20, 22)) == Hex(F0R0) && m.Chip.RailUps == 0, "first PE2 rise: no reset (the chip was up)");
+            m.PortE.Drive(2, false);
+            var t = m.Chip.Transfers;
+            Check(m.Read1(0x20) == 0 && m.Chip.Transfers == t && m.Chip.DeafFrames > 0, "PE2 low: reads 0, no frame");
+            m.PortE.Drive(2, true);
+            m.Write(0x20, F0R0);
+            Check(m.Chip.RailUps == 1 && (m.Chip.Core.Intf & 0x80) != 0, "PE2 rise: power-on reset, BORF");
+            m.Advance(m.Chip.PowerUpMs * 1e-3);
+            Check(Hex(m.Read(0x20, 22)) == Hex(new byte[22]), "row written right at the rise (within PowerUpMs): lost");
+            m.Configure(F0R0, 0);
+            Check(Hex(m.Read(0x20, 22)) == Hex(F0R0), "row written after PowerUpMs: kept");
         }
 
         private static void Ad2Stream()

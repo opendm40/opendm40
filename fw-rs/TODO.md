@@ -789,6 +789,16 @@ Firmware:
       PROF d.read 0, "AC?" hint; 2/2), until `DBG:HYSPI:SELF?` (its `app.dmm.start`). A link held while
       leaving the DMM keeps it live. Suspect: `Dmm::start` from `set_suspended(false)` right after PE2 goes on.
       Repro: docs/device-check-2026-10-21.md "Bluetooth (0667175)" §1.
+      Cause (emulator, PE2 now power-gates the HY3131 model): a wake that leaves PC4 on (BT link / host query
+      on Scope / Gen) wrote the row in the same pass as the PE2 rise (the page switch has the 10 ms
+      make-before-break pause, the wake had none): the chip powered up with its POR row, nothing ever
+      rewrote it; with the rail then kept on (host_dmm after a READ?, the link) the DMM page did not restart
+      it either. Fix (dmm.rs): the row goes out RAIL_SETTLE_MS = 50 ms after any rail rise (`wake_at`,
+      the deadline moves at once so READ? waits for the fresh reading); a stall watchdog (no reading for 2 s
+      past the deadline -> R2A..R31 read back, all 0x00 / 0xFF = the row is lost -> restart; no reading for
+      max(10 s, 8 x period), not in capacitance -> restart). Counters in SYST:RAIL:STATe? (wakes, lost,
+      silent). emu/hy3131/btwaketest.py: 3bae462 fails 1g / 1h / a chip POR, the fix passes.
+      (verify on device: the §1 repro, 1g and 1h; SYST:RAIL:STATe? counters)
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
       decided: see docs/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
       revisit with decision #3's request queue)

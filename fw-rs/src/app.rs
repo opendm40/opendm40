@@ -566,7 +566,9 @@ impl App {
     /// or after a host scope / generator command. "Both always" keeps both on.
     /// With its rail off the scope is paused (Scope::poll returns nothing) and
     /// the DMM is suspended (Dmm::poll returns nothing): the screen, FETCh?
-    /// and BT keep the last reading taken while the rail was on.
+    /// and BT keep the last reading taken while the rail was on. When the DMM
+    /// rail comes back its row is rewritten dmm::RAIL_SETTLE_MS later (any
+    /// view, any reason: a page, a BT link, a host query).
     fn update_rails(&mut self, clk: &mut Clock) {
         let (mut d, mut s) = match self.view {
             View::Dmm => (true, false),
@@ -3472,6 +3474,10 @@ impl App {
             C::SysRailState => {
                 out.put_bytes(if self.scope.dmm_rail() { b"1," } else { b"0," });
                 out.put_bytes(if self.scope.powered() { b"1" } else { b"0" });
+                for n in self.dmm.wd_n {
+                    out.put_bytes(b",");
+                    out.put_u32(n as u32);
+                }
                 true
             }
             C::CalcAhold(Some(on)) => {

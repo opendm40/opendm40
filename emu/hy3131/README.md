@@ -14,6 +14,7 @@ emu/hy3131/modetest.py    stock + fw-rs through every DMM mode in the emulator, 
 emu/hy3131/powtest.py     fw-rs power meter end to end over USB/IP (fw-rs/docs/power-meter-and-misconnect.md 3.11)
 emu/hy3131/ad2streamtest.py fw-rs AD2 stream ISR (feature ad2-isr: TIM7 -> IRQ 55 -> SPI2 reads) end to end (fw-rs/docs/dmm-input-scope-feasibility.md 9)
 emu/hy3131/wavetest.py    fw-rs DMM wave view (scope page, source DMM; feature ad2-isr) driven by DBG:KEY / TAP, checked over SCPI, --case current, --shots DIR (feasibility 10)
+emu/hy3131/btwaketest.py  fw-rs DMM rail (PE2) wake: BT link on the Scope page, link cycles, a chip POR (device check 2026-10-21 Bluetooth 1g / 1h)
 emu/hy3131/runemu.py      emu/run.py with this directory's HY3131.cs compiled in (development)
 emu/hy3131/RESEARCH.md    sources, facts, open points
 emu/hy3131/ref/           transcribed register map and mux tables
@@ -199,6 +200,7 @@ spec) gives the ideal chain instead (the stock then shows 1.234 V as 1.2488 V).
 | `SetNoise scale` | converter noise scale, 0 = off |
 | `SetCntPin true/false` | level of the CNT pin (when the firmware selects it) |
 | `BrownOut` | chip reset with BORF set |
+| `RailModel true/false`, `PowerUpMs ms` | PE2 power gate (default on, 2 ms): PE2 low = unpowered (writes ignored, DO low); a PE2 rise = power-on reset (registers cleared, BORF) and the bus ignored for `PowerUpMs`. Until the firmware first raises PE2 the chip counts as powered (a ROM-raised rail, the unit tests). `RailUps`, `DeafFrames`: rises seen, frames ignored |
 | `Status`, `Role`, `Mode`, `Range`, `Intf`, `Ad1`, `CmpPin`, `Transfers` | state for scripts and tests |
 
 Connection spec (`emu/run.py --dmm SPEC[@T]`, script lines `T dmm SPEC` or

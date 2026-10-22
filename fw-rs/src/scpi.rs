@@ -80,7 +80,8 @@
 //!     +9.9E37 and an error.
 //!   SYSTem:TEMPerature?   MCU (GD32) internal sensor, C (typical constants)
 //!   SYSTem:RAIL AUTO|BOTH / ?   analog rail policy (default AUTO, persisted)
-//!   SYSTem:RAIL:STATe?   dmm_rail,scope_rail (1/0)
+//!   SYSTem:RAIL:STATe?   dmm_rail,scope_rail (1/0),wakes,lost_row,silent (DMM
+//!                        rail wakes and stall-watchdog restarts, dmm.rs)
 //!   SYSTem:ALERt?   wrong-connection alert in force (sentinel.rs, docs/
 //!     power-meter-and-misconnect.md 4): NONE | OVERLOAD (the uA / mA shunt
 //!     over range: moved to 10 A, latched) | AJACK (current in the A jack
@@ -410,7 +411,8 @@ pub enum Dbg {
     /// DBG:AD2:TORN? r26,n[,SYNC] / NOISE? r26,n[,op1chop] / DRAW 0|1|2 /
     /// DIV 0|8|16|32[,cpha] (the stream ISR's read divider, 0 = automatic:
     /// /8 + CKPH = 1 data phase for CPU frames, /16 for DMA frames) / DMA 0|1
-    /// (stream frames by the CPU / by DMA, the default: decision 2026-10-22 #7)
+    /// (stream frames by the CPU / by DMA, the default: decision 2026-10-22 #7;
+    /// DMA? = Ad2(4, 255): the setting, 0|1)
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level).
     Ad2(u8, u8, u16, u8),
@@ -1274,6 +1276,7 @@ impl Scpi {
                         (Some(b"DRAW"), false) => Some(Dbg::Ad2(2, (v[0].min(2)) as u8, 0, 0)),
                         (Some(b"DIV"), false) => Some(Dbg::Ad2(3, (v[0].min(255)) as u8, 0, (v[1] != 0) as u8)),
                         (Some(b"DMA"), false) => Some(Dbg::Ad2(4, (v[0].min(1)) as u8, 0, 0)),
+                        (Some(b"DMA"), true) => Some(Dbg::Ad2(4, 255, 0, 0)),
                         _ => None,
                     };
                     match d {

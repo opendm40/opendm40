@@ -115,6 +115,7 @@ SECTIONS
         *(.text.*7dm40_fw3app*3App15record_fast_tap*);
         *(.text.*7dm40_fw3app*3App16record_page_fast*);
         *(.text.*7dm40_fw3app*3App10fast_ended*);
+        *(.text.*7dm40_fw3dmm*3Dmm7wd_slow*);
         /* NOT persist: its crc runs on every main-loop pass (device
          * f5f8e96: lat_pc in persist::crc, 9..18 us stalls). */
         /* ... and their named read-only data (tables, strings in statics). */
