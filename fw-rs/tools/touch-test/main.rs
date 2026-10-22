@@ -708,6 +708,49 @@ fn hit_tests(ck: &mut Ck) {
     };
     page(ck, "dmm function row", &dmm_hit, &|b| b.y0 >= ui::BTN_Y as i32 - 4, &[0, 1, 2, 3, 4, 5, 6]);
     page(ck, "dmm REL + rate chip", &dmm_hit, &|b| b.y0 >= 175 && b.y1 < 279, &[100, 103]);
+    // Power meter, AC+DC parts layout (doc 3.17: lower row 170.., chart
+    // 192.., side column without VAh): the App::tap order for the power
+    // page (pw_tap: energy side box, value, side column / lower row
+    // swallowed; the long press on the energy row = energy_hit; then the
+    // rate chip, the chart's left column, the function row).
+    for parts in [false, true] {
+        host::reset(0);
+        ui::set_pw_parts(parts);
+        let mut dv = ui::DmmView::new();
+        dv.power = true;
+        dv.draw_static(dmm::Button::Power, 4, true, false);
+        let mut pv = dmm::pw::PowerVals { coup: dmm::pw::COUP_ACDC, v: 12.0, i: 2.0, p: 24.0, s: 24.0, pf: 1.0, vr: 1, ik: 4, ..dmm::pw::PowerVals::ZERO };
+        pv.vp = [12.0, 0.0];
+        pv.ip = [2.0, 0.0];
+        pv.pp = [24.0, 0.0];
+        let (main, v, i, si) = dmm::pw::reading_vals(&pv);
+        let r = dmm::Reading { mode: 4, range: 0, main, aux1: Some(v), aux2: Some(i), si, auto: true, auto_plus: false, acdc: false, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: Some(pv) };
+        dv.reading(&r, 0, 0);
+        let mut pc = ui::pw::PwCache::new();
+        ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, None, "W", ui::RateChip { rate: 1, period_ms: 100, applies: true });
+        ui::pw::side(&mut pc, &pv);
+        let pw_hit = |x: u16, y: u16| -> Option<u32> {
+            if ui::pw::side_box_hit(x, y) {
+                Some(110) // energy run / pause
+            } else if ui::value_hit(x, y) {
+                Some(105)
+            } else if ui::pw::energy_hit(x, y) {
+                Some(107) // energy box (long press: reset)
+            } else if (x >= 402 && (175..279).contains(&y)) || ui::pw::row_hit(y) {
+                None // swallowed
+            } else if ui::rate_chip_hit(x, y) {
+                Some(103)
+            } else if x < ui::CHART_X && ui::chart_rows().contains(&y) {
+                Some(104)
+            } else {
+                o(ui::button_hit(x, y))
+            }
+        };
+        let y0 = if parts { 165 } else { 148 };
+        page(ck, &format!("power page parts {parts}"), &pw_hit, &move |b| b.y0 >= y0 && b.y1 < 279 && (b.x0 < 124 || b.x0 >= 402), &[103, 104, 107, 110]);
+        page(ck, &format!("power page parts {parts} function row"), &pw_hit, &|b| b.y0 >= ui::BTN_Y as i32 - 4, &[0, 1, 2, 3, 4, 5, 6]);
+    }
+    ui::set_pw_parts(false);
     // Combined view: the DMM function band over the replica page.
     host::reset(0);
     let mut cm = scope_ui::Model::DEFAULT;

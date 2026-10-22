@@ -690,13 +690,18 @@ Firmware:
   - [x] Owner round 5 (doc §3.16): "At load" OFF by default (persist bit 10 = ON opt-in; every older record
         loads OFF: an old explicit ON is indistinguishable from the old default), "@load" marks after the V unit
         and at the main readout's top left while on, the help line says when (V leads at the source, meter in
-        series); entering W starts in DC as V / A (a restart in W keeps its coupling); AC floors (dmm AUTO_FLOOR
-        "to DC": V 0.5 %, A 2 % of range): AC coupling below them V / I 0, PF / S / Q / f "--" (SCPI 9.91E37),
-        AC+DC Q 0; Q of noise hypot(Vn I, V In) with Vn / In 0.1 % / 0.5 % of range reads 0; coupling hints DC?
+        series); entering W starts in DC as V / A (a restart in W keeps its coupling); AC floors (V 0.5 % of range = dmm
+        AUTO_FLOOR_V "to DC"; I 0.5 %, not AUTO's 2 %, which blanked 0.1 A on 6 A): AC coupling below them V / I 0, PF / S / Q / f "--" (SCPI 9.91E37),
+        AC+DC Q 0; Q of noise hypot(Vn I, V In) with Vn / In 0.1 % / 0.25 % of range reads 0; coupling hints DC?
         (AC+DC, no AC part) / AC? (DC with V_ac from the DC row's own YY RMS: no register write, no note-7
         risk; I_ac not available without an R34 switch). powtest entry / ac-floor / acdc-floor.
         - [ ] Verify on device: the check list of doc §3.16 (the pure-DC residues of V_ac / I_ac against the
               floors and NOISE_V / NOISE_I).
+  - [x] AC+DC parts on the page (doc §3.17, the owner's V2): "DC x / AC y" sub-lines under V and I, "DC x W +
+        AC y W" under P, from the measured LPF / RMS / X*Y parts with the AC floors and "@load" per part; main
+        readout +7 px, lower row +17, chart 81 px from 192, side column without VAh, in AC+DC only (every other
+        page pixel-identical). ui-render p26..p29, touch-test both layouts.
+        - [ ] Verify on device: the check list of doc §3.17.
   - [ ] Verify on device: the re-check list of doc §3.12 (zero, V cal, f on the square, W entry, DC method /
         AUTO, then T2 / T3 / T4 with current through A).
         Device 5f14d38 (device-check "5f14d38" 5): PASS for W entry (dialog once, then direct), tap-W coupling

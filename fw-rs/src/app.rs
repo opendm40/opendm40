@@ -644,6 +644,8 @@ impl App {
         self.dmm_view.label = self.t_label();
         self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
         ui::set_cpl_auto(self.dmm.cpl_auto());
+        // The power meter's AC+DC parts layout (doc 3.17): this page only.
+        ui::set_pw_parts(self.view == View::Dmm && self.pw_parts_want());
         match self.view {
             View::Dmm => {
                 self.dmm_view.power = self.dmm.pw.on;
@@ -2038,6 +2040,10 @@ impl App {
             if hv != self.hv_shown {
                 self.hv_shown = hv;
                 ui::hv_warning(hv);
+                // Its box (0, 80, 40, 64) may hold the power meter's
+                // "@load" mark in the parts layout: redrawn with the next
+                // reading.
+                self.dmm_view.pwc.coup_invalidate();
             }
         }
         self.alert(now, raw.alert);
@@ -3016,7 +3022,7 @@ impl App {
                     self.resolution_cycle(now);
                 } else if ui::rate_chip_hit(x, y) {
                     self.rate_cycle(now);
-                } else if x < ui::CHART_X && (176..280).contains(&y) {
+                } else if x < ui::CHART_X && ui::chart_rows().contains(&y) {
                     self.chart_rate = match self.chart_rate {
                         1 => 2,
                         2 => 4,

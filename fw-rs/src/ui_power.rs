@@ -33,11 +33,19 @@ pub struct PwCache {
     rows: [u32; 5],
     side: [u32; 5],
     coup: u32,
+    /// The parts sub-lines (V, I, P) as last drawn.
+    sub: [u32; 3],
 }
 
 impl PwCache {
     pub const fn new() -> Self {
-        PwCache { rows: [0; 5], side: [0; 5], coup: 0 }
+        PwCache { rows: [0; 5], side: [0; 5], coup: 0, sub: [0; 3] }
+    }
+
+    /// Redraw sub-line `i` (0 V, 1 I) with the next reading: the aux row's
+    /// value / unit boxes (y 36..65) overlap its slot's top rows.
+    pub fn sub_invalidate(&mut self, i: usize) {
+        self.sub[i] = 0;
     }
 
     /// Redraw the limit-badge slot with the next reading.
@@ -66,12 +74,14 @@ fn coupling(c: &mut PwCache, pv: &PowerVals, lim: u8) {
         return;
     }
     c.coup = k;
+    let md = crate::ui::main_dy();
     if lim != crate::meter::V_NONE {
         crate::ui::lim_badge(lim);
     } else {
-        sf::label(sf::F14, BADGE, "", VALUE, BG, 8, 1);
+        sf::label(sf::F14, rect(BADGE.x, BADGE.y + md, BADGE.w, BADGE.h), "", VALUE, BG, 8, 1);
     }
-    sf::label(sf::F14, LOAD_MARK, if pv.comp { crate::ui::LOAD_CAP } else { "" }, VALUE, BG, 4, 1);
+    let m = LOAD_MARK;
+    sf::label(sf::F14, rect(m.x, m.y + md, m.w, m.h), if pv.comp { crate::ui::LOAD_CAP } else { "" }, VALUE, BG, 4, 1);
 }
 
 /// Small text buffer.
@@ -135,8 +145,13 @@ pub fn sig_text(buf: &mut [u8; 16], v: f32, sig: u8) -> &str {
 const ROW_X: [i16; 5] = [5, 124, 205, 298, 391];
 const ROW_W: [i16; 5] = [116, 78, 90, 90, 84];
 
+/// The lower row's top: 153, PARTS_ROW_DY lower in the parts layout.
+fn row_y() -> i16 {
+    153 + if crate::ui::pw_parts() { crate::ui::PARTS_ROW_DY } else { 0 }
+}
+
 fn row_rect(i: usize) -> sf::Rect {
-    rect(ROW_X[i], 153, ROW_W[i], 19)
+    rect(ROW_X[i], row_y(), ROW_W[i], 19)
 }
 
 /// Every character of `s` in the HIST face.
@@ -162,11 +177,78 @@ fn power_box(i: usize, tag: &str, val: &str, unit: &str, warn: bool) {
     sf::glyphs(sf::HIST, rect(r.x + 4, r.y, ve - r.x - 4, r.h), val, fg, BAR, 4, 0);
 }
 
+/// The parts sub-lines' slots (doc 3.17): under V (right-aligned to the V
+/// unit's end, 201) and I (423) at y 61, under P (to 394, under the F78
+/// cells) at 155; F14, "DC" / "AC" / "+" dim, the values in the status
+/// colour, PART_GAP px between the pieces.
+const SUB_V: sf::Rect = rect(4, 61, 224, 14);
+const SUB_I: sf::Rect = rect(232, 61, 244, 14);
+const SUB_P: sf::Rect = rect(40, 155, 360, 14);
+const SUB_END: [i16; 3] = [201, 423, 394];
+const PART_GAP: i16 = 5;
+
+/// "<value> <unit>" of a part in the readout's format of the range.
+fn part_text<'a>(t: &'a mut T, v: &crate::dmm::Val) -> &'a str {
+    let mut b = [0u8; 16];
+    let mut u = [0u8; 16];
+    t.push(crate::meter::text(&mut b, v)).push(" ").push(sf::unit_text(v.unit, &mut u));
+    t.s()
+}
+
+/// One sub-line: the slot cleared, then the pieces right-aligned at `end`.
+fn pieces_right(slot: sf::Rect, end: i16, items: &[(&str, Color)]) {
+    lcd::fill_rect(slot.x as u16, slot.y as u16, slot.w as u16, slot.h as u16, BG);
+    let mut x = end;
+    for (t, fg) in items.iter().rev() {
+        let w = sf::text_width(sf::F14, t, 1);
+        sf::label(sf::F14, rect(x - w - 1, slot.y, w + 1, slot.h), t, *fg, BG, 4, 1);
+        x -= w + 1 + PART_GAP;
+    }
+}
+
+/// The parts sub-lines (per reading, redrawn on a text change): DC / AC of
+/// V and I under the top line, DC + AC of P under the main readout (only
+/// while it shows P). `pv.vp` / `ip` / `pp` (powermeter.rs).
+fn sublines(c: &mut PwCache, pv: &PowerVals) {
+    let part = |k: usize| pw::reading_vals(&PowerVals { v: pv.vp[k], i: pv.ip[k], p: pv.pp[k], main: pw::MAIN_P, ..*pv });
+    let (pd, vd, id, _) = part(0);
+    let (pa, va, ia, _) = part(1);
+    let mut ts = [T::new(), T::new(), T::new(), T::new(), T::new(), T::new()];
+    let [t0, t1, t2, t3, t4, t5] = &mut ts;
+    let lines: [[(&str, Color); 5]; 3] = [
+        [("DC", DIM), (part_text(t0, &vd), STATUS_FG), ("AC", DIM), (part_text(t1, &va), STATUS_FG), ("", 0)],
+        [("DC", DIM), (part_text(t2, &id), STATUS_FG), ("AC", DIM), (part_text(t3, &ia), STATUS_FG), ("", 0)],
+        [("DC", DIM), (part_text(t4, &pd), STATUS_FG), ("+", DIM), ("AC", DIM), (part_text(t5, &pa), STATUS_FG)],
+    ];
+    for (i, l) in lines.iter().enumerate() {
+        let show = i < 2 || pv.main == pw::MAIN_P;
+        let mut k = T::new();
+        if show {
+            for (t, _) in l {
+                k.push(t).push("|");
+            }
+        }
+        let key = k.key();
+        if c.sub[i] == key {
+            continue;
+        }
+        c.sub[i] = key;
+        let slot = [SUB_V, SUB_I, SUB_P][i];
+        let n = if i == 2 { 5 } else { 4 };
+        pieces_right(slot, SUB_END[i], if show { &l[..n] } else { &[] });
+    }
+}
+
 impl DmmView {
     /// The power boxes in the history row's place (redrawn per box when its
     /// text changed). PF, Q are "--" in the fallback (no phase relation).
     pub fn power_row(&mut self, pv: &PowerVals, lim: u8) {
         coupling(&mut self.pwc, pv, lim);
+        // AC+DC: the parts sub-lines (doc 3.17; the page layout follows
+        // `ui::pw_parts`, set with the static draw).
+        if crate::ui::pw_parts() && pv.coup == pw::COUP_ACDC && !pv.dc && !pv.alt {
+            sublines(&mut self.pwc, pv);
+        }
         let mut b = [0u8; 16];
         // DC method: no phase relation, no AC: PF / S / Q / f blank ("--").
         let pf = if pv.pf.is_finite() && !pv.dc { crate::dmm::format(&mut b, pw::no_neg_zero(pv.pf, 3), 3) } else { "--" };
@@ -219,7 +301,27 @@ impl DmmView {
 
 /// The side column in the power meter (replaces MAX / AVG / REL / MIN /
 /// time; same rows, same F14 face, the REL box is the energy box).
+/// Side column rows: Vb, VAh (None: not shown), the energy box's top, AVG,
+/// the ranges. The parts layout (chart from 192) drops VAh (a tap on the
+/// main value still cycles P / Wh / VAh).
+struct SideGeom {
+    vb: i16,
+    vah: Option<i16>,
+    box_y: i16,
+    avg: i16,
+    rng: i16,
+}
+
+fn side_geom() -> SideGeom {
+    if crate::ui::pw_parts() {
+        SideGeom { vb: 192, vah: None, box_y: 208, avg: 249, rng: 263 }
+    } else {
+        SideGeom { vb: SIDE_Y[0], vah: Some(SIDE_Y[1]), box_y: 205, avg: SIDE_Y[2], rng: SIDE_Y[3] }
+    }
+}
+
 pub fn side(c: &mut PwCache, pv: &PowerVals) {
+    let g = side_geom();
     let mut b = [0u8; 16];
     // Burden voltage (amber with the compensation off and the drop above 1 %
     // of the V reading: it is inside P then) and VAh; label dim left, value
@@ -230,14 +332,15 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
     let mut b1 = [0u8; 16];
     let mut t1 = T::new();
     t1.push(sig_text(&mut b1, pv.vah, 5));
-    for (i, (lbl, t, fg)) in [("Vb", &t0, if warn { VALUE } else { STATUS_FG }), ("VAh", &t1, STATUS_FG)].iter().enumerate() {
+    for (i, (lbl, t, fg, y)) in [("Vb", &t0, if warn { VALUE } else { STATUS_FG }, Some(g.vb)), ("VAh", &t1, STATUS_FG, g.vah)].iter().enumerate() {
+        let Some(y) = *y else { continue };
         let mut kk = T::new();
         kk.push(t.s()).push(if *fg == VALUE { "w" } else { "" });
         let k = kk.key();
         if c.side[i] != k {
             c.side[i] = k;
-            sf::label(sf::F14, rect(SIDE_X, SIDE_Y[i], 24, 14), lbl, DIM, BG, 0, 1);
-            sf::label(sf::F14, rect(SIDE_X + 26, SIDE_Y[i], SIDE_R - SIDE_X - 26, 14), t.s(), *fg, BG, 3, 1);
+            sf::label(sf::F14, rect(SIDE_X, y, 24, 14), lbl, DIM, BG, 0, 1);
+            sf::label(sf::F14, rect(SIDE_X + 26, y, SIDE_R - SIDE_X - 26, 14), t.s(), *fg, BG, 3, 1);
         }
     }
     // Energy box (405, 205, 71, 38): "E" + RUN / PAUSE, the time below.
@@ -246,11 +349,12 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
     k2.push(if pv.run { "RUN" } else { "PAUSE" }).push(hms(&mut tb, pv.secs));
     if c.side[2] != k2.key() {
         c.side[2] = k2.key();
-        let r = rect(405, 205, 71, 38);
+        let y = g.box_y;
+        let r = rect(405, y, 71, 38);
         sf::rbox(r, 6, BTN, BG);
-        sf::glyphs(sf::F14, rect(409, 209, 14, 14), "E", STATUS_FG, BTN, 0, 1);
-        sf::glyphs(sf::F14, rect(426, 209, 46, 14), if pv.run { "RUN" } else { "PAUSE" }, if pv.run { 0x07E0 } else { VALUE }, BTN, 3, 1);
-        sf::glyphs(sf::F14, rect(409, 225, 63, 14), hms(&mut tb, pv.secs), STATUS_FG, BTN, 3, 1);
+        sf::glyphs(sf::F14, rect(409, y + 4, 14, 14), "E", STATUS_FG, BTN, 0, 1);
+        sf::glyphs(sf::F14, rect(426, y + 4, 46, 14), if pv.run { "RUN" } else { "PAUSE" }, if pv.run { 0x07E0 } else { VALUE }, BTN, 3, 1);
+        sf::glyphs(sf::F14, rect(409, y + 20, 63, 14), hms(&mut tb, pv.secs), STATUS_FG, BTN, 3, 1);
     }
     // Average P over the integration time.
     let mut t3 = T::new();
@@ -258,8 +362,8 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
     t3.push(sig_text(&mut b3, pv.p_avg, 5));
     if c.side[3] != t3.key() {
         c.side[3] = t3.key();
-        sf::label(sf::F14, rect(SIDE_X, SIDE_Y[2], 24, 14), "AVG", DIM, BG, 0, 1);
-        sf::label(sf::F14, rect(SIDE_X + 26, SIDE_Y[2], SIDE_R - SIDE_X - 26, 14), t3.s(), STATUS_FG, BG, 3, 1);
+        sf::label(sf::F14, rect(SIDE_X, g.avg, 24, 14), "AVG", DIM, BG, 0, 1);
+        sf::label(sf::F14, rect(SIDE_X + 26, g.avg, SIDE_R - SIDE_X - 26, 14), t3.s(), STATUS_FG, BG, 3, 1);
     }
     // Ranges, or the continuous-current countdown / alarm.
     let mut t4 = T::new();
@@ -282,7 +386,7 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
     k4.push(t4.s()).push(if fg == DIM { "d" } else if fg == VALUE { "v" } else { "r" });
     if c.side[4] != k4.key() {
         c.side[4] = k4.key();
-        sf::label(sf::F14, rect(SIDE_X, SIDE_Y[3], SIDE_R - SIDE_X, 14), t4.s(), fg, BG, 3, 1);
+        sf::label(sf::F14, rect(SIDE_X, g.rng, SIDE_R - SIDE_X, 14), t4.s(), fg, BG, 3, 1);
     }
 }
 
@@ -295,12 +399,21 @@ pub fn side_clear(c: &mut PwCache) {
 /// The energy box (the lower row's first, `pw::energy_val`): long press =
 /// reset.
 pub fn energy_hit(x: u16, y: u16) -> bool {
-    x < (ROW_X[1] - 2) as u16 && (150..175).contains(&y)
+    let y0 = row_y() as u16;
+    x < (ROW_X[1] - 2) as u16 && (y0 - 3..y0 + 22).contains(&y)
 }
 
-/// Energy box tap target (the stock REL box).
+/// The lower row's band (the power page swallows taps there: no MIN / MAX
+/// session, no history slot).
+pub fn row_hit(y: u16) -> bool {
+    let y0 = row_y() as u16;
+    (y0..y0 + 19).contains(&y)
+}
+
+/// Energy box tap target (the stock REL box; the parts layout: SIDE_P).
 pub fn side_box_hit(x: u16, y: u16) -> bool {
-    x >= 402 && (205..243).contains(&y)
+    let y0 = side_geom().box_y as u16;
+    x >= 402 && (y0..y0 + 38).contains(&y)
 }
 
 // ------------------------------------------------------------ entry dialog

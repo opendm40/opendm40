@@ -599,11 +599,11 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
     // "At load" on (the "@load" marks; off by default since doc 3.16) in
     // every case but "worst" / "dc-ua" / "ac-floor" (off): the matrix and
     // the update pairs see both states.
-    let z = P { comp: true, ..P::ZERO };
-    let base = P { p: 229.43, s: 229.9, q: 14.7, pf: 0.998, v: 229.98, i: 0.99962, f_hz: 50.0, burden_v: 0.02, e_wh: 0.1234, vah: 0.1236, secs: 754, p_avg: 0.58918, vr: 2, ik: 4, ..z };
+    let z = P { comp: true, coup: dmm::pw::COUP_ACDC, ..P::ZERO };
+    let base = P { p: 229.43, s: 229.9, q: 14.7, pf: 0.998, v: 229.98, i: 0.99962, f_hz: 50.0, burden_v: 0.02, e_wh: 0.1234, vah: 0.1236, secs: 754, p_avg: 0.58918, vr: 2, ik: 4, vp: [0.0, 229.98], ip: [0.0, 0.99962], pp: [0.0, 229.43], ..z };
     vec![
         ("mains", base),
-        ("worst", P { p: -10499.9, s: 10499.9, q: 10499.9, pf: -0.999, v: -1049.99, i: 10.4999, vdc: -1049.0, idc: -10.4, f_hz: 99999.0, burden_v: 0.2851, e_wh: -99999.0, vah: 99999.0, secs: 99 * 3600 + 59 * 60 + 59, p_avg: -9999.9, vr: 3, ik: 5, v_auto: false, i_auto: false, run: false, over: 1, over_left: 3600, comp: false, ..z }),
+        ("worst", P { p: -10499.9, s: 10499.9, q: 10499.9, pf: -0.999, v: -1049.99, i: 10.4999, vdc: -1049.0, idc: -10.4, f_hz: 99999.0, burden_v: 0.2851, e_wh: -99999.0, vah: 99999.0, secs: 99 * 3600 + 59 * 60 + 59, p_avg: -9999.9, vr: 3, ik: 5, v_auto: false, i_auto: false, run: false, over: 1, over_left: 3600, comp: false, vp: [-1049.99, 1049.99], ip: [-10.4999, 10.4999], pp: [-10499.9, -10499.9], ..z }),
         ("mw", P { p: -3.7799e-3, s: 3.78e-3, q: 1.2e-3, pf: -0.5, v: 6.2999, i: 599.99e-6, f_hz: 999.99, burden_v: 0.285, e_wh: 0.00001, vah: 0.0, secs: 1, p_avg: -0.036, vr: 0, ik: 0, over: 2, ..z }),
         ("ol", P { p: 0.0, v_ol: true, i_ol: true, pf: 0.0, f_hz: 0.0, e_wh: 12345.6, vah: 99999.9, vr: 3, ik: 1, ..z }),
         ("alt", P { p: f32::NAN, q: f32::NAN, pf: f32::NAN, vdc: f32::NAN, s: 1234.5, v: 230.0, i: 5.367, f_hz: 60.0, alt: true, vah: 1.5, secs: 3600, vr: 2, ik: 4, ..z }),
@@ -621,6 +621,12 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
         ("zero", P { p: -2.0e-8, s: 1.0e-8, q: -1.0e-8, pf: -0.0001, v: 6.738, i: -1.0e-9, f_hz: 40.0, e_wh: -1.66e-9, vah: 1.0e-9, secs: 55, p_avg: -1.0e-9, vr: 1, ik: 0, ..z }),
         ("main-zero", P { main: dmm::pw::MAIN_WH, p: -2.0e-8, v: 6.738, i: -1.0e-9, f_hz: 40.0, e_wh: -1.27e-10, secs: 70, p_avg: -1.0e-9, vr: 1, ik: 0, ..z }),
         ("dc-ua", P { p: 5.9999e-3, s: 5.9999e-3, pf: 1.0, v: 9.9999, i: 599.99e-6, vdc: 9.9999, idc: 599.99e-6, vr: 1, ik: 0, dc: true, coup: dmm::pw::COUP_DC, comp: false, ..z }),
+        // AC+DC parts layout (doc 3.17): 12 V + 1 V ripple, 2 A + 0.3 A in
+        // phase (the owner's mock); pure DC (no AC part: the DC? hint);
+        // the mW ranges with negative parts.
+        ("parts-mixed", P { p: 24.3, s: 24.35, q: 1.6, pf: 0.998, v: 12.042, i: 2.0224, vdc: 12.0, idc: 2.0, f_hz: 100.0, burden_v: 0.04, e_wh: 5.063, vah: 5.074, secs: 750, p_avg: 24.29, vr: 1, ik: 4, vp: [12.0, 1.0], ip: [2.0, 0.3], pp: [24.0, 0.3], ..z }),
+        ("parts-dc", P { p: 1.234, s: 1.234, q: 0.0, pf: 1.0, v: 1.234, i: 1.0, vdc: 1.234, idc: 1.0, f_hz: f32::NAN, burden_v: 0.01, vr: 0, ik: 4, vp: [1.234, 0.0], ip: [1.0, 0.0], pp: [1.234, 0.0], comp: false, ..z }),
+        ("parts-mw", P { p: -3.7799e-3, s: 3.78e-3, q: 1.2e-3, pf: -0.5, v: 6.2999, i: 599.99e-6, f_hz: 999.99, burden_v: 0.285, vr: 0, ik: 0, vp: [-6.2999, 6.2999], ip: [-599.99e-6, 599.99e-6], pp: [-3.7799e-3, -3.7799e-3], ..z }),
         // AC coupling, pure DC in (doc 3.16): V / I below their floors read
         // 0, PF / S / Q / f "--" (NaN).
         ("ac-floor", P { p: 0.0, s: f32::NAN, q: f32::NAN, pf: f32::NAN, v: 0.0, i: 0.0, vdc: f32::NAN, idc: f32::NAN, f_hz: f32::NAN, vr: 0, ik: 5, coup: dmm::pw::COUP_AC, comp: false, ..z }),
@@ -634,7 +640,38 @@ fn power_page(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: ui::
 
 /// `power_page` with a limit verdict (meter::V_*: the W limits' badge in
 /// the AUTO label's slot).
+/// The AC+DC parts layout applies to `pv` (the app's pw_parts_want).
+fn pw_parts(pv: &dmm::pw::PowerVals) -> bool {
+    pv.coup == dmm::pw::COUP_ACDC && !pv.dc && !pv.alt
+}
+
+/// The DMM page regions of the power meter (the parts layout moves the
+/// lower row and the chart down).
+fn pw_regions(pv: &dmm::pw::PowerVals) -> Vec<(&'static str, Bx)> {
+    if !pw_parts(pv) {
+        return vec![
+            ("screen", Bx::new(0, 0, 480, 320)),
+            ("bar", Bx::new(0, 0, 480, ui::BAR_H as i32)),
+            ("top", Bx::new(0, 34, 480, 118)),
+            ("history", Bx::new(0, 144, 480, 32)),
+            ("axis", Bx::new(0, 174, 80, 106)),
+            ("side", Bx::new(402, 174, 78, 106)),
+            ("buttons", Bx::new(0, 277, 480, 43)),
+        ];
+    }
+    vec![
+        ("screen", Bx::new(0, 0, 480, 320)),
+        ("bar", Bx::new(0, 0, 480, ui::BAR_H as i32)),
+        ("top", Bx::new(0, 34, 480, 135)),
+        ("history", Bx::new(0, 165, 480, 27)),
+        ("axis", Bx::new(0, 190, 80, 90)),
+        ("side", Bx::new(402, 190, 78, 90)),
+        ("buttons", Bx::new(0, 277, 480, 43)),
+    ]
+}
+
 fn power_page_lim(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: ui::RateChip, lim: u8) -> Reading {
+    ui::set_pw_parts(pw_parts(&pv));
     let mut r = pw_rd(pv);
     r.alert = alert;
     let mut dv = ui::DmmView::new();
@@ -1514,12 +1551,18 @@ fn main() {
                 for a in ALERTS {
                     host::reset(0);
                     power_page(*pv, hold, a, rc);
-                    ck.check(&format!("power/{name}/h{hold}/a{}", a.name()), &dmm_page_regions);
+                    ck.check(&format!("power/{name}/h{hold}/a{}", a.name()), &pw_regions(pv));
                 }
             }
         }
         for (na, a) in &pcs {
             for (nb, b) in &pcs {
+                // A layout change (AC+DC parts <-> not) redraws the page in
+                // the app (pw_tick): no update across it.
+                if pw_parts(a) != pw_parts(b) {
+                    continue;
+                }
+                ui::set_pw_parts(pw_parts(b));
                 host::reset(0);
                 let ra = pw_rd(*a);
                 let rb = pw_rd(*b);
@@ -1557,13 +1600,15 @@ fn main() {
             for coup in [dmm::pw::COUP_DC, dmm::pw::COUP_AC, dmm::pw::COUP_ACDC] {
                 for lim in &lims[1..] {
                     host::reset(0);
-                    power_page_lim(dmm::pw::PowerVals { coup, ..*pv }, 0, sentinel::Alert::None, rc, *lim);
-                    ck.check(&format!("power-lim/{name}/c{coup}/v{lim}"), &dmm_page_regions);
+                    let pvc = dmm::pw::PowerVals { coup, ..*pv };
+                    power_page_lim(pvc, 0, sentinel::Alert::None, rc, *lim);
+                    ck.check(&format!("power-lim/{name}/c{coup}/v{lim}"), &pw_regions(&pvc));
                 }
                 for la in lims {
                     for lb in lims {
                         let pv = dmm::pw::PowerVals { coup, ..*pv };
                         let r = pw_rd(pv);
+                        ui::set_pw_parts(pw_parts(&pv));
                         host::reset(0);
                         let mut dv = ui::DmmView::new();
                         dv.power = true;
@@ -1588,6 +1633,7 @@ fn main() {
         host::reset(0);
         power_page_lim(dmm::pw::PowerVals { coup: dmm::pw::COUP_AC, ..pcs[0].1 }, 0, sentinel::Alert::None, rc, meter::V_HI);
         save(&out, "p17-power-limit-hi");
+        ui::set_pw_parts(false);
         // Hold & Limits of the power meter (the W limits; widest values).
         for (hi, lo) in [("10600 W", "-10600 W"), ("-9999.99 mW", "-63.650 W")] {
             host::reset(0);
@@ -2266,6 +2312,21 @@ fn main() {
         host::reset(0);
         power_page(pcs.iter().find(|c| c.0 == "ac-floor").unwrap().1, 0, sentinel::Alert::Dc, rc);
         save(&out, "p25-power-ac-floor-hint");
+        // AC+DC parts layout (doc 3.17): mixed, the 1 kV / 10 A widest
+        // texts (p02 too), pure DC with the DC? hint, the energy in the
+        // main readout (no P sub-line), the limit badge.
+        let pc = |n: &str| pcs.iter().find(|c| c.0 == n).unwrap().1;
+        for (file, pv, a, lim) in [
+            ("p26-power-parts-mixed", pc("parts-mixed"), sentinel::Alert::None, 0),
+            ("p27-power-parts-dc-hint", pc("parts-dc"), sentinel::Alert::Dc, 0),
+            ("p28-power-parts-mw-lim", pc("parts-mw"), sentinel::Alert::None, meter::V_HI),
+            ("p29-power-parts-main-wh", dmm::pw::PowerVals { main: dmm::pw::MAIN_WH, ..pc("parts-mixed") }, sentinel::Alert::None, 0),
+        ] {
+            host::reset(0);
+            power_page_lim(pv, 0, a, rc, lim);
+            save(&out, file);
+        }
+        ui::set_pw_parts(false);
         host::reset(0);
         power_page(pcs[0].1, 0, sentinel::Alert::None, rc);
         ui::pw::entry_dialog(5.0, 30);

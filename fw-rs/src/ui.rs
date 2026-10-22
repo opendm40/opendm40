@@ -259,6 +259,29 @@ pub fn set_power_coup(c: u8) {
     POWER_COUP.store(c, core::sync::atomic::Ordering::Relaxed);
 }
 
+/// Power meter in AC+DC: the parts layout (doc 3.17, the owner's V2): the
+/// DC / AC sub-lines under V and I (y 61) and under P, the main readout
+/// PARTS_DY lower, the lower row ROW_DY lower, the chart 81 px from y 192,
+/// the side column without VAh. Set by the app with the static draw (a
+/// coupling change redraws the page); every other page and function keeps
+/// the stock geometry (the flag is false there).
+static PW_PARTS: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+pub const PARTS_DY: i16 = 7;
+pub const PARTS_ROW_DY: i16 = 17;
+
+pub fn set_pw_parts(on: bool) {
+    PW_PARTS.store(on, core::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn pw_parts() -> bool {
+    PW_PARTS.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// The main readout's offset (0 outside the parts layout).
+pub fn main_dy() -> i16 {
+    if pw_parts() { PARTS_DY } else { 0 }
+}
+
 /// The stock MODE / BTN_GLYPH glyph of a power-meter coupling: DC, AC or
 /// AC+DC, as `mode_glyph` gives V / A theirs.
 pub fn pw_glyph(c: u8) -> &'static str {
@@ -583,15 +606,17 @@ impl DmmView {
             Some(_) => (XT_X - 40, &CELLS_X[f & 3]),
             None => (360, &CELLS[f]),
         };
-        sf::cells_diff(sf::F78, rect(40, 68, w as i16, 80), s, prev, cells, color, BG);
+        // The power meter's parts layout: PARTS_DY lower (0 elsewhere).
+        let md = main_dy();
+        sf::cells_diff(sf::F78, rect(40, 68 + md, w as i16, 80), s, prev, cells, color, BG);
         if let Some(e) = ext {
             if !same_layout || last_ext != e {
-                let r = rect(XT_X as i16, 68, XT_W as i16, 80);
-                sf::label_half(sf::F78, r, e as char, VALUE_BASE as i16, color, BG);
+                let r = rect(XT_X as i16, 68 + md, XT_W as i16, 80);
+                sf::label_half(sf::F78, r, e as char, VALUE_BASE as i16 + md, color, BG);
             }
         } else if last_ext != 0 {
             // The full cells end at 400: the rest of the +1 digit cell.
-            lcd::fill_rect(400, 68, XT_X + XT_W - 400, 80, BG);
+            lcd::fill_rect(400, (68 + md) as u16, XT_X + XT_W - 400, 80, BG);
         }
         if self.last_unit != r.main.unit || self.last_mode != mkey {
             self.last_unit = r.main.unit;
@@ -612,7 +637,7 @@ impl DmmView {
             } else {
                 -1
             };
-            sf::label(uf, rect(404, 114, 72, 32), unit, VALUE, BG, 4, sp);
+            sf::label(uf, rect(404, 114 + md, 72, 32), unit, VALUE, BG, 4, sp);
             // Stock box (437,76,32,32) align 7, widened 3 px right so the
             // 35 px AC glyph is not clipped (ends at 471, 3 px after the
             // limit badge 403..433).
@@ -622,11 +647,11 @@ impl DmmView {
                 Some(p) if self.power => pw_glyph(p.coup),
                 _ => mode_glyph(r.mode, r.acdc || r.power.is_some()),
             };
-            sf::label(sf::MODE, rect(437, 76, 35, 32), g, VALUE, BG, 7, 0);
+            sf::label(sf::MODE, rect(437, 76 + md, 35, 32), g, VALUE, BG, 7, 0);
             // The power meter's "@load" mark slot (ui::pw `coupling` redraws
             // it with the next reading; no other function paints there).
             let m = pw::LOAD_MARK;
-            lcd::fill_rect(m.x as u16, m.y as u16, m.w as u16, m.h as u16, BG);
+            lcd::fill_rect(m.x as u16, (m.y + md) as u16, m.w as u16, m.h as u16, BG);
             self.pwc.coup_invalidate();
             // The AUTO-coupling label shares the limit badge's slot.
             self.last_lim = 255;
@@ -713,6 +738,10 @@ impl DmmView {
                     } else {
                         sf::label(sf::LETTERS, rect(vx - 30, 36, 137, 30), txt, VALUE, BG, 4, 0);
                     }
+                    if self.aux_val[i] != vkey {
+                        // The power meter's parts sub-line under it.
+                        self.pwc.sub_invalidate(i);
+                    }
                     self.aux_val[i] = vkey;
                     // AC+DC: the aux1 unit box (V..uA, <= 48 px) ends at 231,
                     // the aux2 tag slot starts at 232; else full width (kHz 57 px).
@@ -722,6 +751,7 @@ impl DmmView {
                     let ukey = Some((v.unit, r.parts() as u8 | (lm as u8) << 1));
                     if self.aux_unit[i] != ukey {
                         self.aux_unit[i] = ukey;
+                        self.pwc.sub_invalidate(i);
                         let uw = if i == 0 && r.parts() { 54 } else { 76 };
                         lcd::fill_rect((ux - 1) as u16, 36, 4, 30, BG);
                         // Energy units (Wh, VAh: power meter): the 'h'
@@ -960,7 +990,7 @@ fn auto_cpl_label() {
 }
 
 pub(crate) fn lim_badge(v: u8) {
-    let r = rect(403, 72, 31, 17);
+    let r = rect(403, 72 + main_dy(), 31, 17);
     let (t, bg) = match v {
         crate::meter::V_PASS => ("OK", 0x04A9),
         crate::meter::V_HI => ("HI", 0xF800),
@@ -1398,6 +1428,34 @@ pub const CHART_X: u16 = 80;
 pub const CHART_W: u16 = 321;
 const CHART_Y: u16 = 176;
 const CHART_H: u16 = 97;
+/// The power meter's parts layout (`pw_parts`): the chart from y 192, 81
+/// rows (the lower row moved PARTS_ROW_DY down).
+const PARTS_CHART_Y: u16 = 192;
+const PARTS_CHART_H: u16 = 81;
+
+/// Chart geometry: (frame top, rows, the left axis labels' line tops, the
+/// timebase chip's and the rate chip's tops).
+struct ChartGeom {
+    y: u16,
+    h: u16,
+    axis: [i16; 3],
+    tb: i16,
+    rate: i16,
+}
+
+fn chart_geom() -> ChartGeom {
+    if pw_parts() {
+        ChartGeom { y: PARTS_CHART_Y, h: PARTS_CHART_H, axis: [192, 227, 262], tb: 208, rate: 243 }
+    } else {
+        ChartGeom { y: CHART_Y, h: CHART_H, axis: AXIS_Y, tb: 192, rate: RATE_CHIP_Y }
+    }
+}
+
+/// The chart's left column (the timebase tap; App): the frame's rows.
+pub fn chart_rows() -> core::ops::Range<u16> {
+    let g = chart_geom();
+    g.y..280
+}
 
 /// "value unit" of the chart axis labels and the history boxes; a value
 /// that rounds to zero at `dec` is +0 (no "-0.000mW", pw::no_neg_zero).
@@ -1464,13 +1522,16 @@ const RATE_CHIP_H: i16 = 17;
 /// A tap on the DMM page's rate chip (3 px of slop above and below).
 pub fn rate_chip_hit(x: u16, y: u16) -> bool {
     let y = y as i16;
-    x < CHART_X && y >= RATE_CHIP_Y - 3 && y < RATE_CHIP_Y + RATE_CHIP_H + 3
+    let r = chart_geom().rate;
+    x < CHART_X && y >= r - 3 && y < r + RATE_CHIP_H + 3
 }
 
 /// A tap on the DMM page's main value (the F78 cells 40..400 x 68..148,
-/// the +1 digit cell, 4 px around): resolution / rate step (App).
+/// the +1 digit cell, 4 px around): resolution / rate step (App). The
+/// power meter's parts layout: down to its P sub-line (..168).
 pub fn value_hit(x: u16, y: u16) -> bool {
-    (36..402).contains(&x) && (64..151).contains(&y)
+    let y1 = if pw_parts() { 168 } else { 151 };
+    (36..402).contains(&x) && (64..y1).contains(&y)
 }
 
 /// Readings per second from a reading period: "9.4/s", "37/s", "--/s"
@@ -1552,18 +1613,20 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
     let span = (hi - lo).max(1e-12);
     let mut b = [0u8; 32];
     let key = (hi.to_bits(), lo.to_bits(), dec, unit);
+    let g = chart_geom();
+    let (cy, ch) = (g.y, g.h);
     if c.scale != Some(key) {
         c.scale = Some(key);
         // Axis labels right-aligned to x 76 (3 px left of the frame), caps on
         // the frame's top row, its middle and its bottom row; 1 px spacing.
-        for (y, v) in [(AXIS_Y[0], hi), (AXIS_Y[1], (hi + lo) / 2.0), (AXIS_Y[2], lo)] {
+        for (y, v) in [(g.axis[0], hi), (g.axis[1], (hi + lo) / 2.0), (g.axis[2], lo)] {
             sf::label(sf::F14, rect(4, y, 73, 14), num_unit(&mut b, v, dec, unit), STATUS_FG, BG, 4, 1);
         }
     }
     // Column templates: plain / dotted column / vertical grid line / frame.
     let mut tpl = [[0u16; CHART_H as usize]; 4];
-    for y in 0..CHART_H as usize {
-        let edge = y == 0 || y == CHART_H as usize - 1;
+    for y in 0..ch as usize {
+        let edge = y == 0 || y == ch as usize - 1;
         let hline = y % 16 == 0;
         tpl[0][y] = if edge { DIM } else { BG };
         tpl[1][y] = if edge || hline { DIM } else { BG };
@@ -1571,7 +1634,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         tpl[3][y] = DIM;
     }
     let row = |v: f32| -> u16 {
-        (((hi - v) / span) * (CHART_H - 3) as f32 + 1.0).clamp(1.0, (CHART_H - 2) as f32) as u16
+        (((hi - v) / span) * (ch - 3) as f32 + 1.0).clamp(1.0, (ch - 2) as f32) as u16
     };
     let n = pts.len();
     let first = CHART_W as usize - n.min(CHART_W as usize);
@@ -1596,7 +1659,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         // Rows to rewrite: the whole column on a full draw, else the union
         // of the old and the new trace span (the rest is unchanged).
         let (y0, y1) = if full {
-            (0, CHART_H - 1)
+            (0, ch - 1)
         } else if old == span {
             continue;
         } else if old == NO_SPAN {
@@ -1608,7 +1671,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         };
         let k = if x == 0 || x == CHART_W - 1 { 3 } else if x % 16 == 0 { 2 } else if x % 4 == 0 { 1 } else { 0 };
         let t = &tpl[k];
-        lcd::set_window(CHART_X + x, CHART_Y + y0, CHART_X + x, CHART_Y + y1);
+        lcd::set_window(CHART_X + x, cy + y0, CHART_X + x, cy + y1);
         // Template above the trace, trace, template below (NO_SPAN: the
         // first loop covers the column).
         let (a, b2) = (span.0 as u16, span.1 as u16);
@@ -1632,7 +1695,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         l[..k].copy_from_slice(s.as_bytes());
         l[k..k + 6].copy_from_slice(b"ms/div");
         // Timebase chip (tap: next rate), between the top and middle labels.
-        let r = rect(4, 192, 73, 17);
+        let r = rect(4, g.tb, 73, 17);
         sf::rbox(r, 4, BTN, BG);
         sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 1);
     }
@@ -1644,7 +1707,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         let mut b = [0u8; 24];
         let name = if rc.applies { crate::dmm::RATE_NAMES[rc.rate as usize % 3] } else { "n/a" };
         let txt = join(&mut b, &[name, " ", rps_text(&mut rb, rc.period_ms)]);
-        let r = rect(4, RATE_CHIP_Y, 73, RATE_CHIP_H);
+        let r = rect(4, g.rate, 73, RATE_CHIP_H);
         sf::rbox(r, 4, BTN, BG);
         sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, if rc.applies { STATUS_FG } else { DIM }, BTN, 8, 1);
     }

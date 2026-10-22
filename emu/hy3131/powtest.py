@@ -108,7 +108,8 @@ SC = {
         (0, 'open;vsrc:10;isrc:1', lambda d: d['secs'] > 5 and near(d['Wh'] * 3600 / d['secs'], 10, 0.05) and near(d['VAh'] * 3600 / d['secs'], 10, 0.05), 'energy: 10 W x t'),
     ]),
     # The reset confirm answered 13 s after the long press on the energy box
-    # (device check 5f14d38: the 10 s auto-cancel ate that Yes).
+    # (device check 5f14d38: the 10 s auto-cancel ate that Yes). AC+DC: the
+    # parts layout's lower row (170..188, doc 3.17): the long press at y 179.
     'ereset': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF', 'POW:ENER:RES'], 40, [
         (0, 'open;vsrc:10;isrc:1', lambda d: d['secs'] > 8, 'energy runs, the confirm up from 8 s'),
         (22, None, lambda d: d['secs'] < 20, 'Yes at 21 s (13 s after the long press) reset the energy'),
@@ -228,6 +229,12 @@ def isnan(*k):
     return lambda d: all(math.isnan(d[x]) for x in k)
 
 
+# Q kept by the noise rule: sqrt(S^2 - P^2) of the reported values, and near
+# the load's (Q amplifies the model's PF error: 0.953 for 0.95 is -3.5 % in Q).
+def qreal(q):
+    return lambda d: d['Q'] > 0 and near(d['Q'], math.sqrt(max(d['S'] ** 2 - d['P'] ** 2, 0)), 0.02) and near(d['Q'], q, 0.1)
+
+
 SC.update({
     'entry': (['CONF:POW'], 44, [
         (0, 'open;vsrc:1.234;isrc:1', both(pw(1.234, 1, 1.234, 1, rel=0.002), x('POW:COUP?', 'DC'), x('POW:BURD:STAT?', '0'), x('SYST:ALER?', 'NONE'), isnan('F')),
@@ -238,12 +245,12 @@ SC.update({
     'ac-floor': (['CONF:POW', 'POW:COUP AC'], 30, [
         (0, 'open;vsrc:1.234;isrc:1', both(lambda d: d['V'] == 0 and d['I'] == 0 and d['P'] == 0, isnan('PF', 'S', 'Q', 'F', 'Vdc', 'Idc'), x('SYST:ALER?', 'NONE')),
          'AC, pure DC in: V, I, P 0; PF, S, Q, f n/a'),
-        (16, 'open;pow:230@50,i=1,pf=0.95', both(pw(218.5, 0.95, 230, 1), lambda d: near(d['Q'], 230 * math.sqrt(1 - 0.95 ** 2), 0.03)), 'AC mains PF 0.95: Q 71.8 var'),
+        (16, 'open;pow:230@50,i=1,pf=0.95', both(pw(218.5, 0.95, 230, 1), qreal(230 * math.sqrt(1 - 0.95 ** 2))), 'AC mains PF 0.95: Q 71.8 var'),
     ]),
     'acdc-floor': (['CONF:POW', 'POW:COUP ACDC'], 58, [
         (0, 'open;vsrc:1.234;isrc:1', both(pw(1.234, 1, 1.234, 1, rel=0.003), lambda d: d['Q'] == 0 and near(d['S'], 1.234, 0.003), x('SYST:ALER?', 'DC')),
          'AC+DC, pure DC in: Q 0, PF 1; DC? hint'),
-        (16, 'open;pow:230@50,i=1,pf=0.98', both(pw(225.4, 0.98, 230, 1), lambda d: near(d['Q'], 230 * math.sqrt(1 - 0.98 ** 2), 0.05), x('SYST:ALER?', 'NONE')),
+        (16, 'open;pow:230@50,i=1,pf=0.98', both(pw(225.4, 0.98, 230, 1), qreal(230 * math.sqrt(1 - 0.98 ** 2)), x('SYST:ALER?', 'NONE')),
          'AC+DC mains PF 0.98: Q 45.8 var, no hint'),
         (30, 'open;pow:230@50,i=1,pf=1', lambda d: d['Q'] < 0.01 * 230, 'AC+DC mains PF 1: Q at most noise'),
         # The owner's case: At load on (POW:BURD:STAT ON at 44 s), 10 mohm:
@@ -283,7 +290,7 @@ EXTRA = {'t1-yy': ['DBG:POW:RAW?', 'DBG:POW:ROW?'], 't3-cycle': ['DBG:POW:RAW?']
          'scpi': ['MEAS:POW:PFAC?', 'READ?', 'CONF?', 'POW:LIM?', 'POW:CYC?', 'FUNC?'],
          'limits': ['CALC:LIM:FAIL?', 'CALC:LIM:STAT?', 'CALC:LIM:UPP?'],
          'phasecal-ref': ['POW:PHAS:CAL RES|SYST:ERR?', 'POW:PHAS:CAL?'], 'bt': ['FUNC?']}
-ACTIONS = {'ac': {46: 'POW:COUP ACDC'}, 'acdc-floor': {44: 'POW:BURD:STAT ON'}, 'ereset': {8: 'DBG:DRAG 58,160,58,160,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'},
+ACTIONS = {'ac': {46: 'POW:COUP ACDC'}, 'acdc-floor': {44: 'POW:BURD:STAT ON'}, 'ereset': {8: 'DBG:DRAG 58,179,58,179,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'},
            'vcal-clip': {6: 'POW:VOLT:CAL'}}
 
 

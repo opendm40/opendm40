@@ -73,7 +73,7 @@ impl App {
             }
             // The side column and the power boxes have no other tap action
             // (no MIN / MAX session, no history slot).
-            View::Dmm if (x >= 402 && (175..279).contains(&y)) || (153..172).contains(&y) => true,
+            View::Dmm if (x >= 402 && (175..279).contains(&y)) || ui::pw::row_hit(y) => true,
             View::Range => {
                 let pv = self.dmm.pw_state();
                 match ui::pw::settings_hit(x, y) {
@@ -147,8 +147,9 @@ impl App {
             return;
         }
         self.pw_settings_status();
-        // The coupling changed (SCPI, the W button): its glyph (a redraw).
-        if self.dmm.pw.coup != self.pw_btn_coup && matches!(self.view, View::Dmm) {
+        // The coupling changed (SCPI, the W button): its glyph and the page
+        // layout (AC+DC parts, doc 3.17; also the fallback method) redraw.
+        if (self.dmm.pw.coup != self.pw_btn_coup || self.pw_parts_want() != ui::pw_parts()) && matches!(self.view, View::Dmm) {
             self.redraw = true;
         }
         // DMM page before the first full reading: V and "I ranging..."
@@ -165,6 +166,13 @@ impl App {
         if self.alert_beep_t0.is_some() && self.dmm.pw_state().over != 2 && self.dmm.sent.alert == crate::sentinel::Alert::None {
             self.alert_beep_t0 = None;
         }
+    }
+
+    /// The AC+DC parts layout applies (doc 3.17): the power meter in AC+DC
+    /// with method B (the fallback has no parts).
+    pub(super) fn pw_parts_want(&self) -> bool {
+        let p = &self.dmm.pw;
+        p.on && p.coup == pw::COUP_ACDC && !p.alt
     }
 
     /// The W button's coupling glyph for the next button draw.
