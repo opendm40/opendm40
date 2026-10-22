@@ -1013,11 +1013,14 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             }
                         } else if on {
                             // AD1 needs a DC mode (1 DCV, 3 DCmV, 7/8/9 DCA),
-                            // AD2 a stock AC row (0 ACV, 2 ACmV, 4/5/6 ACA);
-                            // never AC+DC (16/17, alternating rows), ohm, cap,
-                            // freq, temp (logger::Logger::mode_ok).
+                            // AD2 a stock AC row (0 ACV, 2 ACmV, 4/5/6 ACA) or
+                            // DC V / mV (their AD2 rows, E7); never AC+DC or
+                            // AUTO coupling (16/17/19/20: alternating rows,
+                            // whose current phase is a plain mode), the power
+                            // meter, ohm, cap, freq, temp (logger::Logger::mode_ok).
                             let m = app.dmm.mode();
-                            if logger::Logger::mode_ok(logger.ad2(), m) {
+                            let alt = matches!(app.dmm.func(), 16 | 17 | dmm::FUNC_V_AUTO | dmm::FUNC_A_AUTO) || app.dmm.pw.on;
+                            if !alt && logger::Logger::mode_ok(logger.ad2(), m) {
                                 app.dmm_power(&mut clk);
                                 // Guarantee the full row is applied before the
                                 // logger overrides R22 (AD1OSR) / R26 (AD2).
