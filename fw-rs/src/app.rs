@@ -274,8 +274,11 @@ pub struct App {
     /// last drew (text keys, 0 = nothing; app_power.rs).
     pw_rng_key: u32,
     pw_status_key: u32,
-    /// The W button's glyph as last drawn (DC method), `pw_btn_glyph`.
-    pw_btn_dc: bool,
+    /// The W button's coupling as last drawn, `pw_btn_glyph`.
+    pw_btn_coup: u8,
+    /// Power Settings help line topic (ui::pw::HELP_*): the last tapped of
+    /// the coupling row / "At load".
+    pw_help: u8,
     strip_alt: bool,
     /// The last scope drags (target code, axis 0 H / 1 V, travel px, ms) for
     /// DBG:GEST?, oldest first once full (scope_page.rs).
@@ -499,7 +502,8 @@ impl App {
             hv_level: 0,
             pw_rng_key: 0,
             pw_status_key: 0,
-            pw_btn_dc: false,
+            pw_btn_coup: 0,
+            pw_help: 0,
             strip_alt: false,
             gest_log: [(0, 0, 0, 0); GEST_N],
             gest_n: 0,
@@ -642,7 +646,7 @@ impl App {
             View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(|p| ui::temp_page(p)),
             View::Range if self.dmm.pw.on => {
                 ui::pw::settings_page(&self.dmm.pw_state());
-                self.pw_status_key = ui::pw::settings_status(&self.dmm.pw, 0);
+                self.pw_status_key = ui::pw::settings_status(&self.dmm.pw, 0, self.pw_help);
             }
             View::Range => {
                 let b = self.dmm.button();
@@ -2242,12 +2246,25 @@ impl App {
                     (0, Some(false)) | (2, Some(true)) => self.overlay_close(),
                     _ => {}
                 },
+                // Zero... / V cal... (Power Settings): Start runs the job.
+                (crate::dialog::Overlay::PowJob { job, .. }, Gesture::Tap(p)) => match crate::dialog::fuse_hit(p.x, p.y) {
+                    Some(true) => {
+                        self.overlay_close();
+                        if job == crate::dmm::pw::JOB_ZERO {
+                            self.dmm.pw_zero_start(clk);
+                        } else {
+                            self.dmm.pw_vcal_start(clk);
+                        }
+                    }
+                    Some(false) => self.overlay_close(),
+                    None => {}
+                },
                 (crate::dialog::Overlay::FuseCheck { .. }, Gesture::KeyDown(_)) => {
                     self.dmm.fuse_cancel(clk);
                     self.func_changed();
                     self.overlay_close();
                 }
-                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. }, Gesture::KeyDown(_))
+                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. } | crate::dialog::Overlay::PowJob { .. }, Gesture::KeyDown(_))
                 | (crate::dialog::Overlay::Toast { .. }, Gesture::Tap(_) | Gesture::KeyDown(_)) => {
                     self.overlay_close()
                 }

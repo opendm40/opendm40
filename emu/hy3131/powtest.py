@@ -179,9 +179,37 @@ SC.update({
     'dcburden': (['CONF:POW', 'POW:BURD 0.5', 'POW:COUP DC'], 30, [
         (0, 'open;vsrc:5;isrc:0.4', both(pw(1.92, 1, math.sqrt(25 - 2 * 0.5 * 2 + 0.04), 0.4, rel=0.002), lambda d: near(d['Vb'], 0.2, 0.01)), 'AD1 method: burden compensation 0.5 ohm'),
     ]),
-    'auto': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:COUP AUTO'], 50, [
-        (0, 'open;vsrc:12;isrc:2', both(pw(24, 1, 12, 2, rel=0.002), x('POW:COUP?', 'AUTO,DC')), 'AUTO: DC source -> the AD1 method'),
-        (22, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), x('POW:COUP?', 'AUTO,ACDC')), 'AUTO: mains -> method B'),
+    # The former AUTO coupling: POW:COUP AUTO is accepted as AC+DC (doc 3.14).
+    'auto': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:COUP AUTO'], 36, [
+        (0, 'open;vsrc:12;isrc:2', both(pw(24, 1, 12, 2, rel=0.005), x('POW:COUP?', 'ACDC')), 'AUTO -> AC+DC: DC 24 W'),
+        (18, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), x('POW:COUP?', 'ACDC')), 'AC+DC: mains 230 W'),
+    ]),
+    # AC coupling (doc 3.14): the AC parts only. Mains as AC+DC; a DC source
+    # reads ~0 (the DC parts and their zeros are not used); POW:COUP ACDC at
+    # 46 s: the same DC source 24 W.
+    'ac': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:COUP AC'], 62, [
+        (0, 'open;pow:230@50,i=0.5,pf=0.5', both(pw(57.5, 0.5, 230, 0.5, f=50), x('POW:COUP?', 'AC'), lambda d: math.isnan(d['Vdc']) and math.isnan(d['Idc'])), 'AC: mains PF 0.5, Vdc / Idc n/a'),
+        (16, 'open;vsrc:12;isrc:0.4', lambda d: abs(d['P']) < 0.05 and d['V'] < 0.2 and d['I'] < 0.01, 'AC: DC 12 V 0.4 A reads ~0'),
+        (32, 'open;vsrc:12,ac=2,f=50;isrc:0.4', lambda d: near(d['V'], 2, 0.03) and abs(d['P']) < 0.1, 'AC: the ripple only (DC current: P ~0)'),
+        (46, None, both(pw(4.8, 4.8 / (math.hypot(12, 2) * 0.4), math.hypot(12, 2), 0.4, rel=0.01), x('POW:COUP?', 'ACDC')), 'POW:COUP ACDC: the total'),
+    ]),
+    # Owner: ~3 A through A showed OVLD. I AUTO walks up across the shunts
+    # with no alert (SYST:ALER? NONE in every checked sample).
+    'istep': (['CONF:POW', 'POW:BURD:STAT OFF'], 64, [
+        (0, 'open;pow:230@50,i=0.01,pf=1', both(pw(2.3, 1, 230, 0.01), ranges('6.000000E+02', '6.000000E-02'), x('SYST:ALER?', 'NONE')), '10 mA: 60 mA range'),
+        (16, 'open;pow:230@50,i=0.1,pf=1', both(pw(23, 1, 230, 0.1), ranges('6.000000E+02', '6.000000E-01'), x('SYST:ALER?', 'NONE')), '0.1 A: 600 mA'),
+        (32, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1), ranges('6.000000E+02', '6.000000E+00'), x('SYST:ALER?', 'NONE')), '1 A: 6 A (mA shunt -> A shunt, no OVLD)'),
+        (48, 'open;pow:230@50,i=3,pf=1', both(pw(690, 1, 230, 3), ranges('6.000000E+02', '6.000000E+00'), x('SYST:ALER?', 'NONE')), '3 A: 6 A, no OVLD'),
+    ]),
+    # From the uA shunt straight to 3 A: one hop to the A shunt, no alert.
+    'istep-ua': (['CONF:POW', 'POW:BURD:STAT OFF'], 40, [
+        (0, 'open;pow:230@50,i=0.0002,pf=1', both(pw(0.046, 1, 230, 0.0002, rel=0.02), ranges('6.000000E+02', '6.000000E-04'), x('SYST:ALER?', 'NONE')), '200 uA: 600 uA range'),
+        (22, 'open;pow:230@50,i=3,pf=1', both(pw(690, 1, 230, 3), ranges('6.000000E+02', '6.000000E+00'), x('SYST:ALER?', 'NONE')), '3 A: 6 A, no OVLD'),
+    ]),
+    # Manual 600 mA: 3 A is an OVERLOAD (red, latched on 10 A).
+    'iman-ovl': (['CONF:POW AUTO,0.6', 'POW:BURD:STAT OFF'], 34, [
+        (0, 'open;pow:230@50,i=0.1,pf=1', both(pw(23, 1, 230, 0.1), x('SYST:ALER?', 'NONE')), 'manual 600 mA: 0.1 A'),
+        (16, 'open;pow:230@50,i=3,pf=1', both(pw(690, 1, 230, 3), ranges('6.000000E+02', '1.000000E+01'), x('SYST:ALER?', 'OVERLOAD')), 'manual: 3 A -> OVERLOAD, 10 A'),
     ]),
 })
 SC['scpi'] = (['MEAS:POW?', 'POW:LIM 2.5,12', 'POW:BURD:STAT OFF'], 24, [
@@ -210,11 +238,12 @@ SC['bt'] = (['CONF:POW', 'POW:BURD:STAT OFF'], 40, [
     (18, 'open;vsrc:12;isrc:-2', lambda d: bt_ok(d, -24, 0x28) and d['X']['FUNC?'] == '"POW"', 'after cmd 06 0x28 (echo): still POW, P -24'),
 ])
 EXTRA = {'t1-yy': ['DBG:POW:RAW?', 'DBG:POW:ROW?'], 't3-cycle': ['DBG:POW:RAW?'],
-         'zero': ['POW:ZERO?'], 'vcal': ['POW:VOLT:CAL?'], 'dcad1': ['POW:COUP?'], 'auto': ['POW:COUP?'],
+         'zero': ['POW:ZERO?'], 'vcal': ['POW:VOLT:CAL?'], 'dcad1': ['POW:COUP?'], 'auto': ['POW:COUP?'], 'ac': ['POW:COUP?'],
+         'istep': ['SYST:ALER?'], 'istep-ua': ['SYST:ALER?'], 'iman-ovl': ['SYST:ALER?'],
          'scpi': ['MEAS:POW:PFAC?', 'READ?', 'CONF?', 'POW:LIM?', 'POW:CYC?', 'FUNC?'],
          'limits': ['CALC:LIM:FAIL?', 'CALC:LIM:STAT?', 'CALC:LIM:UPP?'],
          'phasecal-ref': ['POW:PHAS:CAL RES|SYST:ERR?', 'POW:PHAS:CAL?'], 'bt': ['FUNC?']}
-ACTIONS = {'ereset': {8: 'DBG:DRAG 58,160,58,160,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'}}
+ACTIONS = {'ac': {46: 'POW:COUP ACDC'}, 'ereset': {8: 'DBG:DRAG 58,160,58,160,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'}}
 
 
 def bt_frame(cmd, data=b''):

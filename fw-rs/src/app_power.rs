@@ -82,16 +82,21 @@ impl App {
                         let i = if i == 6 { None } else { Some(i) };
                         self.dmm.pw_set_ranges(clk, None, Some(i));
                     }
-                    Some(ui::pw::PS_BURDEN) => self.dmm.pw.comp = !pv.comp,
+                    Some(ui::pw::PS_BURDEN) => {
+                        self.dmm.pw.comp = !pv.comp;
+                        self.pw_help = ui::pw::HELP_LOAD;
+                    }
                     Some(c @ ui::pw::PS_COUP..=30) => {
-                        self.dmm.pw_set_coupling(clk, ui::pw::PS_COUPS[(c - ui::pw::PS_COUP) as usize].0);
+                        self.dmm.pw_set_coupling(clk, ui::pw::PS_COUPS[(c - ui::pw::PS_COUP) as usize]);
+                        self.pw_help = ui::pw::HELP_COUP;
                     }
-                    Some(ui::pw::PS_ZERO) => {
-                        self.dmm.pw_zero_start(clk);
-                        return true;
-                    }
-                    Some(ui::pw::PS_VCAL) => {
-                        self.dmm.pw_vcal_start(clk);
+                    // Zero... / V cal...: a dialog says what the job needs
+                    // first; Start runs it (app.rs, Overlay::PowJob).
+                    Some(c @ (ui::pw::PS_ZERO | ui::pw::PS_VCAL)) => {
+                        let job = if c == ui::pw::PS_ZERO { pw::JOB_ZERO } else { pw::JOB_VCAL };
+                        self.overlay = Some(crate::dialog::Overlay::PowJob { until: now + crate::dialog::ENERGY_MS, job });
+                        self.redraw = true;
+                        ui::pw::job_dialog(job);
                         return true;
                     }
                     Some(ui::pw::PS_RESET) => {
@@ -138,8 +143,8 @@ impl App {
             return;
         }
         self.pw_settings_status();
-        // AUTO switched the method: the W button's glyph (a page redraw).
-        if self.dmm.pw.dc != self.pw_btn_dc && matches!(self.view, View::Dmm) {
+        // The coupling changed (SCPI, the W button): its glyph (a redraw).
+        if self.dmm.pw.coup != self.pw_btn_coup && matches!(self.view, View::Dmm) {
             self.redraw = true;
         }
         // DMM page before the first full reading: V and "I ranging..."
@@ -158,13 +163,10 @@ impl App {
         }
     }
 
-    /// The W button's coupling glyph for the next button draw: the method in
-    /// use in the power meter, else the stored coupling (DC = the DC glyph).
+    /// The W button's coupling glyph for the next button draw.
     pub(super) fn pw_btn_glyph(&mut self) {
-        let p = &self.dmm.pw;
-        let dc = if p.on { p.dc } else { p.coup == crate::dmm::pw::COUP_DC };
-        self.pw_btn_dc = dc;
-        ui::set_power_dc(dc);
+        self.pw_btn_coup = self.dmm.pw.coup;
+        ui::set_power_coup(self.pw_btn_coup);
     }
 
     /// Settings words (persist).
@@ -221,7 +223,8 @@ impl App {
         p.zy = w[6] as u16 as i16;
         p.zero_ok = w[6] >> 16 & 1 != 0;
         p.wired = w[6] >> 17 & 1 != 0;
-        p.coup = (w[6] >> 18 & 3).min(2) as u8;
+        // 2 (the former AUTO) loads as AC+DC (pw::coup_of).
+        p.coup = pw::coup_of(w[6] >> 18);
         for i in 0..3 {
             p.zx[2 * i] = w[7 + i] as u16 as i16;
             p.zx[2 * i + 1] = (w[7 + i] >> 16) as u16 as i16;
@@ -337,7 +340,7 @@ impl App {
             }
             Pow::PhaseCal(Some(true)) => {
                 if !self.dmm.pw_cal_start() {
-                    out.set_err("Settings conflict; phase cal needs CONF:POW with AC+DC coupling (P + PF method)");
+                    out.set_err("Settings conflict; phase cal needs CONF:POW with AC or AC+DC coupling (P + PF method)");
                 }
                 false
             }
@@ -384,12 +387,9 @@ impl App {
                 false
             }
             Pow::Coupling(None) => {
-                // The setting, and with AUTO the method in force.
-                let p = &self.dmm.pw;
-                out.put_bytes(match p.coup {
+                out.put_bytes(match self.dmm.pw.coup {
                     pw::COUP_DC => b"DC",
-                    pw::COUP_AUTO if p.dc => b"AUTO,DC",
-                    pw::COUP_AUTO => b"AUTO,ACDC",
+                    pw::COUP_AC => b"AC",
                     _ => b"ACDC",
                 });
                 true
@@ -500,7 +500,7 @@ impl App {
         if self.view != View::Range || !self.dmm.pw.on || self.redraw {
             return;
         }
-        let k = ui::pw::settings_status(&self.dmm.pw, self.pw_status_key);
+        let k = ui::pw::settings_status(&self.dmm.pw, self.pw_status_key, self.pw_help);
         self.pw_status_key = k;
     }
 

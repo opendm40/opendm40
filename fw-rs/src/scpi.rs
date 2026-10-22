@@ -577,7 +577,7 @@ pub enum Pow {
     Method(Option<bool>),
     /// :LIMit <A>,<s> / ? (continuous current, countdown; s 0 = none).
     Limit(Option<(f32, u16)>),
-    /// :COUPling DC|ACDC|AUTO / ? (pw::COUP_*; AC = ACDC, the old name).
+    /// :COUPling DC|AC|ACDC / ? (pw::COUP_*; AUTO = ACDC, deprecated).
     Coupling(Option<u8>),
     /// :ZERO (0: start the self-zero, leads open), :ZERO CLEar (1), :ZERO? (2).
     Zero(u8),
@@ -710,12 +710,13 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
     if kw(l0, "COUPling") && l1.is_none() {
         return if query {
             Ok(Pow::Coupling(None))
-        } else if a == b"AC" || a == b"ACDC" {
+        } else if a == b"ACDC" || kw(a, "AUTO") {
+            // AUTO (deprecated, doc 3.14): the former auto choice is AC+DC.
+            Ok(Pow::Coupling(Some(crate::dmm::pw::COUP_ACDC)))
+        } else if a == b"AC" {
             Ok(Pow::Coupling(Some(crate::dmm::pw::COUP_AC)))
         } else if a == b"DC" {
             Ok(Pow::Coupling(Some(crate::dmm::pw::COUP_DC)))
-        } else if kw(a, "AUTO") {
-            Ok(Pow::Coupling(Some(crate::dmm::pw::COUP_AUTO)))
         } else {
             Err(BAD)
         };
