@@ -8,8 +8,8 @@ words, as the real panel; the device itself must still be checked).
   cd fw-rs && ./build.sh
   emu/shottest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw [--out DIR]
 
-Per screen (DMM DC V with HOLD on; the Settings menu; the scope page,
-stopped):
+Per screen (DMM DC V with HOLD on; the Settings menu; the combined DMM +
+scope view, scope STOPped):
   * the panel read over DBG:LCD? before the gesture (RGB666 -> RGB565 as
     lcd.rs rgb666_to_565) is the reference (HOLD / a menu / a stopped
     scope keep it still until the gesture); it is read again after the
@@ -151,9 +151,9 @@ try:
         elif name == 'scope':
             q('DBG:KEY 0')  # MENU closed
             wait_ms(800)
-            q('DBG:SWIPE L')
+            q('DBG:SWIPE L')  # the combined DMM + scope view
             wait_ms(1500)
-            q('DBG:KEY 1')  # RUN = stop the scope
+            q('STOP')  # the scope trace stops (the DMM HOLD is still on)
             wait_ms(1500)
 
     for name in A.screens.split(','):
