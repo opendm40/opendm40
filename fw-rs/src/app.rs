@@ -538,8 +538,9 @@ impl App {
             self.band_until = 0;
             self.sp_leave(clk.now_ms());
             if self.view == View::Scope && self.scope.wave_on() {
-                // Leaving the wave view: MCX again, the DMM resumes.
-                self.wave_close(clk);
+                // Leaving the wave view: MCX again, the DMM resumes; the
+                // rails follow `v` below.
+                self.wave_close(clk, false);
             }
             if matches!(v, View::Scope | View::DmmScope) {
                 self.sp_enter(clk.now_ms());
@@ -3688,7 +3689,7 @@ impl App {
             // MCX-only settings (front-end range, coupling, comparator):
             // leave the wave view. Timebase, trigger, RUN / STOP and the
             // queries (:MEAS?, :WAV:DATA?) act on the wave view.
-            self.wave_close(clk);
+            self.wave_close(clk, true);
             sc = self.scope.s;
         }
         if scope_cmd && !self.scope.powered() {

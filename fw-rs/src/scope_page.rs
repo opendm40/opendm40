@@ -1401,7 +1401,7 @@ impl App {
                 if app_wave::WAVE_BUILD && self.view == View::Scope && su::src_hit(p.x, p.y) {
                     self.beep(now, 30);
                     if self.scope.wave_on() {
-                        self.wave_close(clk);
+                        self.wave_close(clk, true);
                     } else {
                         self.wave_open(clk);
                     }

@@ -152,8 +152,12 @@ impl App {
     }
 
     /// Close the wave view (MCX again; the stream stops in main.rs, which
-    /// then restores the DMM row). The autorange comes back.
-    pub(super) fn wave_close(&mut self, clk: &mut Clock) {
+    /// then restores the DMM row). The autorange comes back. `rails` false:
+    /// the caller (`show`, leaving the Scope view) sets the rails for the
+    /// view it shows; the wave view's DMM rail must not drop in between (a
+    /// MENU from the wave view keeps the DMM measuring, as the menu keeps
+    /// whatever rail is on; a drop + wake started the DMM's AC node over).
+    pub(super) fn wave_close(&mut self, clk: &mut Clock, rails: bool) {
         if !self.scope.wave_on() {
             return;
         }
@@ -166,7 +170,9 @@ impl App {
             self.dmm.set_range(clk, if v == 1 { Some(255) } else { None });
         }
         self.meter.reset();
-        self.update_rails(clk);
+        if rails {
+            self.update_rails(clk);
+        }
         self.redraw = true;
     }
 
@@ -192,7 +198,7 @@ impl App {
             return;
         }
         self.scope.wave_dead();
-        self.wave_close(clk);
+        self.wave_close(clk, true);
         self.wave_req = None; // main.rs already stopped it
         let now = clk.now_ms();
         self.toast(now, why, false);
