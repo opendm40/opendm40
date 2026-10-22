@@ -239,7 +239,9 @@ def bt_checks(t):
         st = line('TRIG:STAT?')
         check(held == b'STOP' and st != b'STOP', 'stalled stream: RUN held while streaming (%s), runs after the timeout (%s)'
               % (held.decode(), st.decode()))
-        line('STOP', False)
+        # A full record again (a STOP cuts the acquisition in flight short).
+        t.w('DIG')
+        check(t.wait_stop(), 'DIG after the stalled stream ends in STOP')
         line('*CLS', False)
         line('WAV:POIN MAX', False)
         line('WAV:FORM WORD', False)
