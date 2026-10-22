@@ -1016,7 +1016,10 @@ Firmware:
       timeouts / bad / torn 0, locked to the chip within 0.1 ppm; ISR CPU 29.5 % in the emulator, **~43 %
       estimated on the device** (40..46 %); DRAW 2 (full DMM repaint) overflows the 26.7 ms ring (7.8-9.3 %
       overwritten, lost 0); Wave view 1 ms/div: no overflow; disk typ flash keeps up to 196 KB/s (767 pages/s,
-      FIFO high water 460 B), max flash (tPP 3 ms) lost 28-54 % ungated -> the probe gate.
+      FIFO high water 460 B), max flash (tPP 3 ms) lost 28-54 % ungated -> the probe gate; gated (c58ae48): typ
+      probe 400 / 400 us -> 76800, 153 601 rows lost 0; max probe 3000 / 3000 us -> 38400, lost 0, FIFO 468 B
+      (`emu/fastlogtest.py --app <elf> --sessions ad2:38400,ad2:76800`, ~15 min wall with the max profile).
+      Forced hybrid (`DBG:AD2:DIV 8,1`, ad2streamtest session field 5) at 4800 / 38400: lost 0, div 1008.
       Device check (image and steps: feasibility 11.12 / the hand-over):
       1. `scpi "LOG:SOURce AD2" "LOG:SRATe 76800"`, AC V on the 40 Hz square, `log a768.csv --source ad2
          --rate 76800 -d 60` (raw drain): DBG:ISR? div 1008, dma 1, lost 0 (LOG:COUNt?), late / slips /

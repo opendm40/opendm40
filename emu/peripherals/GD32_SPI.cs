@@ -32,6 +32,7 @@ using Antmicro.Renode.Logging;
 using Antmicro.Renode.Peripherals.Bus;
 using Antmicro.Renode.Peripherals.CPU;
 using Antmicro.Renode.Peripherals.DMA;
+using Antmicro.Renode.Time;
 
 namespace Antmicro.Renode.Peripherals.SPI
 {
@@ -73,7 +74,9 @@ namespace Antmicro.Renode.Peripherals.SPI
             case 0x08:
                 CatchUp();
                 if(!Timed && !rbne) FinishNow();
-                return (bufFull ? 0u : 0x02u) | (rbne ? 1u : 0u) | (shifting || bufFull ? 0x80u : 0u);
+                var st = (bufFull ? 0u : 0x02u) | (rbne ? 1u : 0u) | (shifting || bufFull ? 0x80u : 0u);
+                if(Timed && PollStall && shifting && !rbne) StallToByteEnd();
+                return st;
             case 0x0C:
                 CatchUp();
                 if(!Timed && !rbne) FinishNow();
@@ -117,6 +120,25 @@ namespace Antmicro.Renode.Peripherals.SPI
         public void WriteWord(long offset, ushort value) => WriteDoubleWord(offset, value);
         public byte ReadByte(long offset) => (byte)ReadDoubleWord(offset);
         public void WriteByte(long offset, byte value) => WriteDoubleWord(offset, value);
+
+        /// A STAT read that finds a byte shifting and RBNE clear (a polling
+        /// loop waits for it) stalls the CPU until that byte ends (BaseCPU
+        /// SkipTime), as if it had spun: the loop's next read sees it done.
+        /// Same virtual time as the spin, ~100x fewer register accesses (each
+        /// one leaves the translated code; with SyncTime this made the whole
+        /// emulator ~2x slower). Costs: an interrupt waits for the stall's end
+        /// (at most one byte: 0.64 us on the disk at /4, 2.56 us on the
+        /// HY3131 bus at /16, where only the main loop polls; the stream ISR's
+        /// own frames run on DMA or its own waits).
+        public bool PollStall { get; set; } = true;
+
+        private void StallToByteEnd()
+        {
+            if(!machine.SystemBus.TryGetCurrentCPU(out var cpu)) return;
+            var ns = (shEnd - MachineNow) * 1e9;
+            if(ns < 20 || ns > 20000) return;
+            if(cpu is BaseCPU b) b.SkipTime(TimeInterval.FromNanoseconds((ulong)Math.Ceiling(ns)));
+        }
 
         /// Bytes exchanged; bytes written while the buffer was full (lost);
         /// bytes abandoned by SPIEN off (diagnostics).

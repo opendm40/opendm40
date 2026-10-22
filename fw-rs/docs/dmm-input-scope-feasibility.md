@@ -1597,8 +1597,13 @@ counts **TornAd2** when it crosses a conversion edge (ad2streamtest checks
 0); mode 0 at /8 samples a changed bit at its old level (MisoErrRate,
 default 1e-3), CKPH 1 samples a full period late and garbles a command
 byte; the timer interrupt is scheduled to the ns; DWT / TIMER / the flash
-read the synced time. The old firmware passes every stream / wave / inrush
-/ disk test under it. The ISR's CPU share is still ~0.57x the device's
+read the synced time; a STAT read that finds a byte shifting stalls the
+CPU to the byte's end (BaseCPU.SkipTime, the same virtual time as the
+spin; without it the emulator ran ~2.2x slower and modetest's BT link
+timed out). The old firmware passes every stream / wave / inrush / disk
+test under it (the boot is ~0.7 s longer now that the disk's bytes take
+their time: burdentest's phase windows needed more than 1 s before the next
+input step; b79b895 made it 3 s). The ISR's CPU share is still ~0.57x the device's
 (no APB / AHB wait states): DMA /16 4800 1.1 % vs 1.9 %, 38400 9.8 % vs
 17.5 %.
 
@@ -1612,7 +1617,8 @@ read the synced time. The old firmware passes every stream / wave / inrush
 | 4800 DRAW 2 .. 38400 DMA, 1200, CPU 19200 / 38400 | -100 / +100 | | 0 | as before | |
 | Wave view 1 ms/div (76800), 4 s | 0 | 500 313 | 0, ring overwritten 0 | 30.2 % | 3.9 us |
 
-The locked rate is the chip's within 0.1 ppm. DRAW 2 at 76.8 kS/s: the
+Also `DBG:AD2:DIV 8,1` (hybrid frames forced) at 4800 and 38400: lost 0, div
+1008. The locked rate is the chip's within 0.1 ppm. DRAW 2 at 76.8 kS/s: the
 repaint (~22 ms of main loop at 200 MIPS, more with the ISR's share) is
 longer than the ring (2048 samples = 26.7 ms at this rate); the stream
 loses nothing, the host sees the drops as stamp gaps (`overwritten`).
@@ -1646,7 +1652,15 @@ a disk session above 38.4 kS/s programs 4 pages of zeros in its last
 cluster at the end of Prep, times each to BUSY clear, erases the cluster
 again; mean <= 800 us and max <= 1.5 ms -> 76800, else the session runs at
 38400 (LOG:SRATe? / LOG:PREamble? say so; LOG:DISK? fields 9 / 10 = the
-probe's mean / max us). Emulator: see the TODO item for the gated runs.
+probe's mean / max us). Emulator, gated (c58ae48, fastlogtest LOG:DUR 2):
+
+| flash | probe tPP mean / max | rung | rows | lost / ring overwritten | FIFO high water |
+|---|---|---|---|---|---|
+| typ | 400 / 400 us | 76800 | 153 601 | 0 / 0 | 319 B |
+| max | 3000 / 3000 us | 38400 (capped) | 76 802 | 0 / 0 | 468 B |
+
+`emu/fastlogtest.py --app <elf> --sessions ad2:38400,ad2:76800 [--noise 30 |
+2500]` reproduces the tables (the max profile takes ~15 min of wall time).
 
 **Wave view**: 1 ms/div = 76800, 2 ms/div = 38400 (768 samples on the 10
 divisions), 5 ms/div and slower as before (`WAVE_TB_MIN` 15). With CPU
