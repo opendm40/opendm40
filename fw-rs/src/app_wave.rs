@@ -116,7 +116,7 @@ impl App {
         let note = if self.dmm.sub() == 0 {
             self.dmm.set_sub(clk, 1);
             self.func_changed();
-            Some(if b == Button::Volt { "DC V: no DC row on AD2, AC-coupled" } else { "Wave: AC A row (DC-coupled)" })
+            Some(if b == Button::Volt { "DC V: wave is AC-coupled" } else { "Wave: AC A row (DC-coupled)" })
         } else {
             None
         };
@@ -223,7 +223,7 @@ impl App {
     /// (there is no choice: one AD2 row per function).
     pub(super) fn wave_coupling_note(&mut self, now: u64) {
         let ac = self.scope.wave_scale_now().ac;
-        self.toast(now, if ac { "AC-coupled (no DC V row on AD2)" } else { "DC-coupled AC row" }, true);
+        self.toast(now, if ac { "AC-coupled (no DC row)" } else { "DC-coupled AC row" }, true);
     }
 
     /// Function / range label of the wave view ("AC V", "AC mA").

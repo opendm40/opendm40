@@ -1815,6 +1815,11 @@ fn main() {
         (sentinel::Alert::Dc.toast(), false),
         (sentinel::Alert::Ac.toast(), false),
         (sentinel::Alert::Fuse.toast(), false),
+        // Wave view (app_wave.rs) and the power meter (app_power.rs).
+        ("DC V: wave is AC-coupled", true),
+        ("Wave: AC A row (DC-coupled)", true),
+        ("AC-coupled (no DC row)", true),
+        ("Current too high: reduce it", false),
     ]
     .iter()
     .enumerate()

@@ -1837,7 +1837,12 @@ impl Scope {
         w.ready = None;
         w.next_min = w.next_min.max(w.first + pre as u64);
         if self.rolling {
-            w.per = (self.screen / COLS).max(1) as u32;
+            // Samples per column from the timebase, not `screen`: that is
+            // clamped to the record (CAP), so from 5 s/div (1200 S/s) every
+            // slower timebase rolled at the 2 s/div speed (device f3aea2f:
+            // ~20 px/s at 2, 20 and 50 s/div). Roll keeps no record.
+            let full = 25_000u64 * w.fs as u64 / TB[self.s.tb].0.max(1) as u64;
+            w.per = (full / COLS as u64).clamp(1, u32::MAX as u64) as u32;
             w.racc = (u16::MAX, 0);
             w.rn = 0;
             unsafe { (*core::ptr::addr_of_mut!(ROLL_COLS)).fill((u16::MAX, u16::MAX)) };

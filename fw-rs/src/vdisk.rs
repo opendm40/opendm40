@@ -696,6 +696,19 @@ fn geo() -> Option<(FnRaw, Geo)> {
     Some((d, g))
 }
 
+/// How far cursor `c` is behind `off` when it holds file `key` (within
+/// CUR_NEAR). A fn, not a closure in `file_read`: a closure's section name
+/// carries this module's path, so the .cold rule put it in region C (device
+/// f3aea2f: DBG:ISR? lat_pc = `file_read::{closure#0}`, max_lat 9 us while a
+/// host read the volume during an AD2 19200 stream).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+fn near(c: &dlog::Slot<(u16, u32)>, key: (u16, u32), off: u32) -> Option<u32> {
+    match c.peek() {
+        Some((k, p)) if k == key && p <= off && off - p < CUR_NEAR => Some(off - p),
+        _ => None,
+    }
+}
+
 /// Bytes `off..` of table file `e` into `buf` (zeros on a read error).
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
@@ -720,8 +733,7 @@ fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
     // least recently (reopened for another file).
     let slots = unsafe { [&mut *core::ptr::addr_of_mut!(CSV_CUR), &mut *core::ptr::addr_of_mut!(CSV_CUR2)] };
     let lru = unsafe { &mut *core::ptr::addr_of_mut!(CSV_LRU) };
-    let near = |i: usize| slots[i].peek().filter(|&(k, p)| k == key && p <= off && off - p < CUR_NEAR).map(|(_, p)| off - p);
-    let i = match (near(0), near(1)) {
+    let i = match (near(slots[0], key, off), near(slots[1], key, off)) {
         (Some(a), Some(b)) => (b < a) as usize,
         (Some(_), None) => 0,
         (None, Some(_)) => 1,
