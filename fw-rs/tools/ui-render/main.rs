@@ -447,6 +447,16 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("dcma_420lo", rd(8, val(0.0, 3, "mA"), None, Some(val(-25.0, 1, "%")), false), None),
         ("dcma_420mid", rd(8, val(12.0, 3, "mA"), None, Some(val(50.0, 1, "%")), false), None),
         ("aca", rd(6, val(4.4444, 4, "A"), Some(val(99.999, 3, "kHz")), Some(val(100.0, 1, "%")), false), None),
+        // Burden voltage (Settings 3/3, doc 3.15): DC aux1 (signed), AC aux2
+        // instead of the duty; widest texts of each decimals class.
+        ("dca_bd", rd(7, val(-9.9999, 4, "A"), Some(val(-100.0, 1, "mV")), None, false), None),
+        ("dcua_bd", rd(9, val(-4444.4, 1, "\u{b5}A"), Some(val(-999.9, 1, "mV")), None, false), None),
+        ("dcua_bd_v", rd(9, val(-4444.4, 1, "\u{b5}A"), Some(val(-9.999, 3, "V")), None, false), None),
+        ("dcma_bd_ol", rd(8, ol(3, "mA"), Some(ol(2, "mV")), None, false), None),
+        ("dcma_bd_loop", rd(8, val(-24.0, 3, "mA"), Some(val(-12.00, 2, "mV")), Some(val(125.0, 1, "%")), false), None),
+        ("aca_bd", rd(4, val(9.9999, 4, "A"), Some(val(99.999, 3, "kHz")), Some(val(999.9, 1, "mV")), false), None),
+        ("acua_bd_v", rd(6, val(4444.4, 1, "\u{b5}A"), Some(val(99.999, 3, "kHz")), Some(val(99.99, 2, "V")), false), None),
+        ("acma_bd_ol", rd(5, ol(3, "mA"), Some(val(50.000, 3, "Hz")), Some(ol(2, "mV")), false), None),
         ("ohm_mohm", rd(10, val(44.444, 3, "M\u{3a9}"), None, None, false), None),
         ("ohm_ol", rd(10, ol(3, "M\u{3a9}"), None, None, false), None),
         ("ohm_k", rd(10, val(444.44, 2, "k\u{3a9}"), None, None, false), None),
@@ -1623,10 +1633,10 @@ fn main() {
         (1, vec!["FAST  37/s", "LOW", "History", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]),
         (1, vec!["MED  --/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Off", "", ""]),
         // Page 3 with each "USB disk" value (decision 2026-10-22 #6).
-        (2, vec!["A-JACK only", ui::usb_disk_name(true, false), ""]),
-        (2, vec!["ON", ui::usb_disk_name(false, true), ""]),
-        (2, vec!["Mask 5", ui::usb_disk_name(false, false), ""]),
-        (2, vec!["OFF", ui::usb_disk_name(true, true), ""]),
+        (2, vec!["A-JACK only", ui::usb_disk_name(true, false), "OFF (stock)", ""]),
+        (2, vec!["ON", ui::usb_disk_name(false, true), "ON (A, mA, uA)", ""]),
+        (2, vec!["Mask 5", ui::usb_disk_name(false, false), "ON (A, mA, uA)", ""]),
+        (2, vec!["OFF", ui::usb_disk_name(true, true), "OFF (stock)", ""]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -1917,7 +1927,7 @@ fn main() {
     g.freq_hz = 1000;
     w.gen.apply(g);
     let find = |n: &str| cases.iter().find(|c| c.0 == n).map(|c| (c.1, c.2)).unwrap();
-    let scenes: [(&str, &str, u8, u8, bool, bool); 10] = [
+    let scenes: [(&str, &str, u8, u8, bool, bool); 13] = [
         ("c01-dcv", "dcv", 0, 0, false, false),
         ("c02-acdc-hold-rel", "acdc_600mv", 1, 0, true, false),
         ("c03-acdc-worst", "acdc_mv", 3, meter::V_HI, true, true),
@@ -1928,6 +1938,9 @@ fn main() {
         ("c08-ohm-ol", "ohm_ol", 0, 0, false, false),
         ("c09-cap-nf", "cap_nf", 0, 0, false, false),
         ("c10-band", "dcma_420mid", 0, 0, false, false),
+        ("c16-strip-burden-dc", "dcua_bd", 0, 0, false, false),
+        ("c17-strip-burden-loop", "dcma_bd_loop", 0, 0, false, false),
+        ("c18-strip-burden-ac", "aca_bd", 0, 0, false, false),
     ];
     for (file, case, hold, lim, rel, alt) in scenes {
         let (r, l) = find(case);
@@ -1968,6 +1981,16 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d03-dmm-420ma");
+        // Burden voltage (doc 3.15): DC aux1, with the loop percentage, AC aux2.
+        for (case, file) in [("dcua_bd", "d21-dmm-burden-dc"), ("dcma_bd_loop", "d22-dmm-burden-loop"), ("aca_bd", "d23-dmm-burden-ac"), ("acua_bd_v", "d24-dmm-burden-ac-v")] {
+            host::reset(0);
+            let (r, _) = find(case);
+            dv.label = None;
+            dv.draw_static(Button::Amp, r.mode, false, false);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            save(&out, file);
+        }
         for (case, file) in [("temp_ntc", "d04-dmm-temp-ntc"), ("temp_tc", "d05-dmm-temp-tc"), ("temp_pt_f", "d10-dmm-temp-f")] {
             host::reset(0);
             let (r, l) = find(case);
@@ -1988,7 +2011,7 @@ fn main() {
         ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
-        ui::settings(2, &["A-JACK only", ui::usb_disk_name(true, false), ""]);
+        ui::settings(2, &["A-JACK only", ui::usb_disk_name(true, false), "ON (A, mA, uA)", ""]);
         save(&out, "m10-settings3");
         // Pressed feedback (ui-review #11): the item drawn pressed from
         // touch-down (one item redrawn), then released = the page as drawn.
@@ -2004,7 +2027,7 @@ fn main() {
             let d_menu = || ui::main_menu(combo);
             let d_set = || ui::settings(0, &s0);
             let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
-            let d_set3 = || ui::settings(2, &["A-JACK only", ui::usb_disk_name(false, false), ""]);
+            let d_set3 = || ui::settings(2, &["A-JACK only", ui::usb_disk_name(false, false), "OFF (stock)", ""]);
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
             let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
             let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);

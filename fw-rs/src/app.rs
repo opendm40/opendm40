@@ -693,6 +693,7 @@ impl App {
                 let vals = [
                     alert_mask_name(&mut b, self.dmm.alert_mask()),
                     ui::usb_disk_name(self.usb_ro_drawn.0, self.usb_ro_drawn.1),
+                    if self.dmm.burden_show { "ON (A, mA, uA)" } else { "OFF (stock)" },
                     "", // Device row: opens the About page, no inline value
                 ];
                 ui::settings(2, &vals);
@@ -1757,7 +1758,8 @@ impl App {
         p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing())
             | if self.dmm_view.bar_on { 0 } else { crate::meter::EXT_HISTORY_ROW }
             | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 }
-            | ((!self.dmm.alert_mask() & crate::sentinel::M_ALL) as u32) << crate::meter::EXT_ALERT_OFF_SHIFT;
+            | ((!self.dmm.alert_mask() & crate::sentinel::M_ALL) as u32) << crate::meter::EXT_ALERT_OFF_SHIFT
+            | if self.dmm.burden_show { crate::meter::EXT_BURDEN } else { 0 };
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
         p
@@ -1814,6 +1816,7 @@ impl App {
         // Before the first row is written (select below).
         let off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_ALL;
         self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
+        self.dmm.burden_show = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_BURDEN != 0;
         self.pw_restore(&p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS]);
         self.pw_zd_restore(&p[crate::persist::W_POWER_ZD..crate::persist::W_POWER_ZD + app_power::PW_ZD_WORDS]);
         // v8: Record page interval / duration (0 = the defaults; csvlog
@@ -3130,6 +3133,11 @@ impl App {
                         }
                     }
                     Some(2) => {
+                        // Burden voltage in the A functions (doc 3.15):
+                        // from the next reading on.
+                        self.dmm.burden_show = !self.dmm.burden_show;
+                    }
+                    Some(3) => {
                         self.show(View::Device, clk);
                         return;
                     }
@@ -3390,6 +3398,37 @@ impl App {
     /// Cmd::Temp* / Sys* / Calc*); None for the scope / generator commands
     /// (every DMM-side variant needs an arm here: the scope path would power
     /// the scope rail for it).
+    /// FETC:BURD? / DISP:BURD (doc 3.15); true = a reply was written.
+    #[inline(never)] // .cold (link-native.x): SCPI only
+    fn burden_scpi(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
+        use crate::scpi::Cmd as C;
+        match cmd {
+            C::DispBurden(Some(b)) => {
+                self.dmm.burden_show = b;
+                self.redraw |= self.view == View::Settings;
+                false
+            }
+            C::DispBurden(None) => {
+                out.put_bytes(if self.dmm.burden_show { b"1" } else { b"0" });
+                true
+            }
+            _ => {
+                // The latest pre-REL reading of a current function.
+                match self.last_raw.as_ref().filter(|r| crate::sentinel::shunt_of(r.mode).is_some() && r.power.is_none()) {
+                    Some(r) => match self.dmm.burden_of(r) {
+                        Some(v) => out.put_f32(v),
+                        None => out.put_bytes(b"+9.90000000E+37"),
+                    },
+                    None => {
+                        out.set_err("Data stale");
+                        out.put_bytes(b"+9.90000000E+37");
+                    }
+                }
+                true
+            }
+        }
+    }
+
     fn scpi_dmm(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> Option<bool> {
         use crate::scpi::Cmd as C;
         let k = self.dmm.t_sensor();
@@ -3695,6 +3734,9 @@ impl App {
     #[inline(never)]
     pub fn scpi(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
+        if matches!(cmd, C::FetchBurden | C::DispBurden(_)) {
+            return self.burden_scpi(cmd, out);
+        }
         if let Some(r) = self.scpi_dmm(clk, cmd, out) {
             return r;
         }

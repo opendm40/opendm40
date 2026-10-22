@@ -1185,6 +1185,94 @@ dialogs), p23 (help page); ui-render 0 violations.
 6. A reboot keeps the coupling (AC persists as 3; a unit last in AUTO comes
    back in AC+DC).
 
+### 3.15 Burden voltage in the A functions (fw-rs, 2026-10-22)
+
+As the EEVblog 121GW: the DMM page shows how much the meter drops in the
+circuit it measures, `I x R_path` of the shunt in use (3.6), so the user
+sees the error a current measurement adds to a low-voltage circuit (uA:
+47.5 ohm, 0.19 V at 4 mA; mA: 0.5 ohm and up, 0.3 V at 600 mA; 10 A:
+10 mohm and up, 0.1 V at 10 A).
+
+**Decisions** (the open points of the TODO item):
+
+* **One R_path setting.** The power meter's per-shunt `r_path`
+  (powermeter.rs, persisted in its words, default `SHUNT_OHM` = the bare
+  shunt) is used; no second setting. `POW:BURDen <ohm>|DEFault` / `?` now
+  acts on the shunt of the DMM A function in use when one is (DC / AC /
+  AC+DC A: its own shunt, followed through the autorange), else (power
+  meter, any other function) on the power meter's current range's shunt as
+  before. The default (the shunt alone) is a **lower bound**: fuse, MOSFET
+  and traces are UNKNOWN until measured (3.6).
+* **Slots.** DC A (A, mA, uA): aux1 (empty there in the stock; the DC mA
+  loop percentage keeps aux2). AC A: aux2, instead of the duty cycle (the
+  frequency stays in aux1 where the stock has it; a duty cycle of a current
+  is the least useful readout of the two). Each value carries an F14
+  caption "Burden" right before it, as the 4-20 mA percentage's caption.
+  **AC+DC:** both aux rows hold the AC / DC parts, so no readout there
+  (FETC:BURD? still answers: the true RMS x R_path). Power meter: none (it
+  has its own "At load" burden line, 3.12).
+* **Value.** DC keeps the sign (current into A = positive, as the
+  reading); AC is the RMS. From the raw current: REL and the display
+  smoothing do not change it (HOLD freezes it with the reading). The unit /
+  decimals follow the range's burden at the OL limit (fixed while the
+  reading moves, <= 4 digits): < 0.1 V mV x.xx, < 1 V mV x.x, < 10 V
+  V x.xxx, < 100 V V x.xx. Defaults: 6 A 61.80 mV max, 10 A 103.0 mV, 60 mA
+  30.90 mV, 600 mA 309.0 mV, 600 uA 29.36 mV, 6000 uA 293.6 mV. An OL
+  reading shows "0L" there too.
+* **Toggle.** Settings 3/3 "Burden voltage": OFF (stock) / ON (A, mA, uA),
+  persisted (p[38] bit 14, `meter::EXT_BURDEN`; 0 in every older record =
+  off). Default OFF: the stock has no such readout and keeps the duty cycle
+  in AC A (stock-look baseline).
+* **SCPI.** `FETCh:BURDen?`: V of the latest reading of a current function
+  (pre-REL), whether the readout is on or not; +9.9E37 when over range;
+  +9.9E37 and "Data stale" outside the A functions. `DISPlay:BURDen ON|OFF`
+  / `?`: the readout (the Settings row). Not `POW:BURD:STAT`, which is the
+  power meter's compensation switch.
+* **Bluetooth.** The burden is not sent to the phone app (it would read it
+  in the function's unit: mA, A); with the readout on, AC A sends no value 3
+  (the duty cycle) either.
+* **The guided R_path step (3.6) is not built.** With the DM40's own ohm
+  function only the uA chain is reachable (one lead V/ohm -> A, the resting
+  PE state: the fuse check, `SYST:FUSE?` = OK,<ohm>, ~48 ohm); the mA and
+  10 A paths need a known current and a second meter across A-COM (R_path =
+  V / I). So: measure as in the device check below and enter it with
+  `POW:BURD` in that A range (or in the power meter's Settings). A later
+  step could take the uA value from the fuse check.
+
+Code: `Dmm::burden_val` (dmm.rs; per reading, region B), `Reading::burden`
+(the slot, recognised by the V / mV unit), `ui::aux_shown` / `BURDEN_CAP`,
+the strip prefix "Bd ", `App::burden_scpi` / `burden_shunt` / `Dmm::
+burden_of` (.cold). Region B 20 328 -> 19 376 bytes free (on f3aea2f),
+stack headroom 21 460 -> 21 404 bytes, SRAM unchanged (10 904 free).
+
+**Tests.** ui-render: 8 burden cases in the DMM page / strip matrix
+(widest texts per decimals class, OL, with the loop percentage, AC with V)
+incl. every A -> B update, 0 violations; renders d21..d24, c16..c18, m10.
+Emulator `emu/hy3131/burdentest.py` (one run, isrc in A): DC 50 mA ->
+25.00 mV (0.5 ohm), -2 mA (AUTO: 6000 uA) -> -95.0 mV (47.5 ohm), 3 A ->
+30 mV (10 mohm), AC 100 mA -> 50.0 mV, `POW:BURD 0.6` -> 60.0 mV (the mA
+shunt), `POW:BURD DEF` + `DISP:BURD OFF` -> FETC:BURD? still 50 mV, DC V
+-> +9.9E37; FETC:BURD? = READ? x R_path within 0.2 % in every phase.
+
+#### Device check list (burden voltage)
+
+Bench supply with a series resistor into A (or mA / uA), a second meter
+(DC mV) across A-COM; never more than 30 V across A-COM (3.6).
+1. Settings > More > More > "Burden voltage" ON. DC 4 mA (uA range): aux1
+   "Burden" ~190 mV; the second meter reads the real drop (shunt + fuse +
+   MOSFET). Note the ratio: that is R_path / 47.5.
+2. 400 mA (mA range) and 3..5 A (10 A range): the same comparison; expect
+   the meter's value low by the fuse / MOSFET / trace part.
+3. Enter R_path = V_second / I in each range (`POW:BURD <ohm>` while in
+   that A range; `POW:BURD?` reads it back): the aux value now matches the
+   second meter; a reboot keeps both the toggle and the R_paths.
+4. Reverse the current: the DC burden turns negative.
+5. AC A (a transformer or the generator through a resistor): aux1 Hz,
+   aux2 "Burden" = RMS x R_path; the second meter in AC mV agrees.
+6. REL on: the main value zeroes, the burden does not. Toggle OFF: the
+   duty cycle comes back in AC A, aux1 empty in DC A, no stale caption.
+7. Phone app in AC A with the readout on: value 3 empty, no mV shown as mA.
+
 ---------------------------------------------------------------------------
 
 ## 4. Wrong-connection detection: what the signals allow

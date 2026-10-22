@@ -402,6 +402,21 @@ pub struct Reading {
 }
 
 impl Reading {
+    /// The burden voltage readout (`Dmm::burden_val`) in this reading: its
+    /// aux slot (0 / 1) and value. Recognised by its unit: no other aux
+    /// value of a plain A function is in V (aux1 Hz, aux2 % duty / loop).
+    pub fn burden(&self) -> Option<(usize, Val)> {
+        if !matches!(self.mode, 4..=9) || self.acdc || self.power.is_some() {
+            return None;
+        }
+        for (i, v) in [self.aux1, self.aux2].into_iter().enumerate() {
+            if let Some(v) = v.filter(|v| v.unit.as_bytes().last() == Some(&b'V')) {
+                return Some((i, v));
+            }
+        }
+        None
+    }
+
     pub fn button(&self) -> Button {
         if self.power.is_some() { Button::Power } else { button_of(self.mode) }
     }
@@ -698,6 +713,10 @@ pub struct Dmm {
     fuse_res: sentinel::FuseRes,
     /// Power meter state and settings (powermeter.rs).
     pub pw: &'static mut Pw,
+    /// Burden voltage readout in the A functions (Settings 3/3 "Burden
+    /// voltage", SCPI DISP:BURD; `burden_val`): I x the shunt's R_path in
+    /// aux1 (DC) / aux2 (AC, instead of the duty cycle).
+    pub burden_show: bool,
 }
 
 /// Fuse check (`Dmm::fuse_start`): what to go back to, start time, ohm
@@ -912,6 +931,7 @@ impl Dmm {
             fuse_job: None,
             fuse_res: sentinel::FuseRes::Idle,
             pw: pw::pw_static(),
+            burden_show: false,
         }
     }
 
@@ -2459,6 +2479,10 @@ impl Dmm {
             _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
         let mut rd = self.dc_out(clk, a, lim, dec, unit, si_k, before, false)?;
+        if self.burden_show && !self.acdc {
+            // Burden voltage, signed (doc 3.15): aux1 is free in DC A.
+            rd.aux1 = Some(self.burden_val(u, r, a * si_k, rd.main.ol));
+        }
         if m == 8 && !self.acdc {
             // 4-20 mA loop percentage.
             let p = (a.abs() - 4.0) * 6.25;
@@ -2668,8 +2692,41 @@ impl Dmm {
         self.freq_secondary(now, 0xF0);
         let (fv, dv) = self.freq_vals(true);
         rd.aux1 = Some(fv);
-        rd.aux2 = Some(dv);
+        // AC A: the burden voltage (RMS, doc 3.15) instead of the duty cycle.
+        rd.aux2 = Some(if m >= 4 && self.burden_show { self.burden_val((m - 4) as usize, r, v * si_k, ol) } else { dv });
         Some(rd)
+    }
+
+    /// Burden voltage readout (doc 3.15): `amps` (signed DC / RMS) x the
+    /// R_path of shunt `u` (0 A, 1 mA, 2 uA; the power meter's setting,
+    /// POW:BURD, default the bare shunt) on range `r`. The unit and decimals
+    /// follow the range's burden at the OL limit (stable while the reading
+    /// moves, at most 4 digits: the AC slot's box holds 5 characters):
+    /// < 0.1 V mV x.xx, < 1 V mV x.x, < 10 V V x.xxx, < 100 V V x.xx.
+    fn burden_val(&self, u: usize, r: usize, amps: f32, ol: bool) -> Val {
+        let rp = self.pw.r_path[u.min(2)];
+        let fs = sentinel::current_fs(u as u8, r as u8) * rp * self.over();
+        let (k, dec, unit) = if fs < 0.1 {
+            (1000.0, 2, "mV")
+        } else if fs < 1.0 {
+            (1000.0, 1, "mV")
+        } else if fs < 10.0 {
+            (1.0, 3, "V")
+        } else if fs < 100.0 {
+            (1.0, 2, "V")
+        } else {
+            (1.0, 1, "V")
+        };
+        if ol { Val::ol(dec, unit) } else { Val::new(amps * rp * k, dec, unit) }
+    }
+
+    /// FETC:BURD?: the burden voltage (V) of a reading of a current function
+    /// (DC signed, AC / AC+DC the RMS) with the R_path of its shunt; None
+    /// outside the A functions, in the power meter or over range.
+    #[inline(never)] // .cold (link-native.x): SCPI only
+    pub fn burden_of(&self, r: &Reading) -> Option<f32> {
+        let u = sentinel::shunt_of(r.mode).filter(|_| r.power.is_none() && !r.main.ol)?;
+        Some(r.si * self.pw.r_path[u as usize])
     }
 
     fn poll_ohm(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {

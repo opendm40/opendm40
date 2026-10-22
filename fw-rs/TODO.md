@@ -1062,13 +1062,16 @@ Firmware:
       AC V / Hz / cont / diode / cap (no free pair). Emulator: PB2 node + AD2 probe; senttest aprot-* (12 V:
       409 ms, 24 V: 105 ms, ohm / temp ~0.41 s, 5 V: A-JACK only).
       (verify on device: the A-jack protection check list of doc §4.8)
-- [ ] Burden voltage in the A / mA / uA modes (as the EEVblog 121GW, owner 2026-10-22): show I * R_path of the
-      shunt in use (10 A / mA / uA) in the aux row, so the user sees how much the meter drops in the circuit
-      (uA range: 48 ohm, 0.19 V at 4 mA; mA: 0.24..0.6 V at 400 mA). Reuse the power meter's per-shunt R_path
-      (powermeter.rs `r_path`, default SHUNT_OHM; POW:BURDen sets it) instead of a second setting; DC and AC
-      (sign / RMS as the reading). Open: which aux slot it replaces, a toggle (121GW: setup item), SCPI
-      (e.g. a FETC:BURD? query), the guided "measure R_path with the ohm function" step from doc §3.6 (fuse +
-      MOSFET + traces are UNKNOWN until measured), device check against a second meter across A-COM.
+- [x] Burden voltage in the A / mA / uA modes (as the EEVblog 121GW, owner 2026-10-22): I * R_path of the
+      shunt in use in the aux row, "Burden" caption: DC A aux1 (signed), AC A aux2 instead of the duty
+      (RMS); none in AC+DC (both rows hold the parts) and in the power meter (its own At-load line). R_path
+      = the power meter's per-shunt setting (default the bare shunt = a lower bound), POW:BURDen now sets
+      the shunt of the DMM A function in use. Settings 3/3 "Burden voltage" (persisted p[38] bit 14,
+      default OFF = stock look), DISPlay:BURDen ON|OFF / ?, FETCh:BURDen? (V, pre-REL, works with the
+      readout off). Not sent over BT. Emulator emu/hy3131/burdentest.py, ui-render d21..d24 / c16..c18
+      (docs/power-meter-and-misconnect.md 3.15). Left: the device check (3.15 list: a second meter across
+      A-COM per range, then POW:BURD the measured R_path); the guided "measure R_path" step is not built
+      (own ohm function reaches only the uA chain: the fuse check value could seed it later).
 - [ ] Inrush current (as the Fluke 376 / 323 clamps, owner 2026-10-22): arm in the 10 A range (autorange
       off), wait for the current to step up from ~0 past a threshold, then show the RMS over the first 100 ms
       after the trigger (Fluke's window) plus the peak, and keep the captured trace (a short chart / scope-like

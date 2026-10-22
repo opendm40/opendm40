@@ -698,8 +698,11 @@ impl Bt {
                 // Temperature: value 2 is the cold junction (C) for the stock
                 // app; a resistive sensor puts its resistance in aux1 instead,
                 // which is not sent (0xFFFF) so the app does not show ohms as C.
-                let a1 = shown.and_then(|r| r.aux1).map(unol).filter(|v| mode != 15 || v.unit == "\u{b0}C");
-                let a2 = shown.and_then(|r| r.aux2).map(unol);
+                // The burden voltage (A functions, doc 3.15) is not sent:
+                // the app would show it in the function's unit (mA, A).
+                let bd = shown.and_then(|r| r.burden()).map(|b| b.0);
+                let a1 = shown.and_then(|r| r.aux1).filter(|_| bd != Some(0)).map(unol).filter(|v| mode != 15 || v.unit == "\u{b0}C");
+                let a2 = shown.and_then(|r| r.aux2).filter(|_| bd != Some(1)).map(unol);
                 let d3 = match mode {
                     8 if !acdc => Some(2),
                     12 => Some(1),

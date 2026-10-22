@@ -101,6 +101,17 @@
 //!     (the power meter restarts its energy); non-blocking
 //!   SYSTem:FUSE?   IDLE | BUSY | OK,<ohm> (~48 ohm) | OPEN (OL: fuse or lead)
 //!     | FAIL,<ohm> (another resistance) | FAIL,NONE (no reading)
+//!   FETCh:BURDen?   burden voltage (V) of the latest reading of a current
+//!     function: I x R_path of the shunt in use (POW:BURDen; default the bare
+//!     shunt 10 mohm / 0.5 ohm / 47.5 ohm), DC signed, AC and AC+DC the RMS,
+//!     REL ignored; outside the A functions / no reading: +9.9E37 and "Data
+//!     stale"; over range: +9.9E37 (doc 3.15). Works with the readout off.
+//!   DISPlay:BURDen ON|OFF / ?   the burden voltage readout on the DMM page
+//!     (DC A aux1, AC A aux2 instead of the duty cycle; not in AC+DC);
+//!     Settings 3/3 "Burden voltage", persisted, default OFF
+//!   POWer:BURDen <ohm>|DEFault / ?   (power meter section, 3.9) the R_path
+//!     used by both: in a DMM A function that function's shunt, else the
+//!     power meter's current range's
 //!   STATus:QUEStionable:CONDition?   bit 9 while a red alert (AJACK,
 //!     OVERLOAD) is on, bit 1 while OVERLOAD is (SCPI CURRent)
 //!   STATus:QUEStionable[:EVENt]?   the same bits latched since the last
@@ -553,6 +564,10 @@ pub enum Cmd {
     DbgHwTrig(u8, bool),
     /// Power meter (dmm::pw): CONF:POW, FETC:POW:ALL?, [SENS:]POW:..., DBG:POW:...
     Pow(Pow),
+    /// FETCh:BURDen?: burden voltage of the latest A-function reading (doc 3.15).
+    FetchBurden,
+    /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings 3/3).
+    DispBurden(Option<bool>),
 }
 
 /// ON | 1 -> true, OFF | 0 -> false.
@@ -1558,6 +1573,22 @@ impl Scpi {
                 _ if kw(p0, "WAVeform") && query => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     out = Out::Instr(if kw(sub, "PREamble") { Cmd::WavPre } else { Cmd::WavData });
+                }
+                _ if kw(p0, "FETCh") && query && parts.len() == 2 && kw(parts[1], "BURDen") => {
+                    out = Out::Instr(Cmd::FetchBurden)
+                }
+                _ if kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "BURDen") => {
+                    out = Out::Instr(Cmd::DispBurden(if query {
+                        None
+                    } else {
+                        match on_off(trim(arg)) {
+                            Some(b) => Some(b),
+                            None => {
+                                self.err = Some("Illegal parameter value");
+                                continue;
+                            }
+                        }
+                    }));
                 }
                 _ if kw(p0, "FETCh") && query => out = Out::Fetch,
                 _ if kw(p0, "SENSe") || kw(p0, "FUNCtion") || kw(p0, "TEMPerature") || kw(p0, "RATE") => {

@@ -116,14 +116,19 @@ const AUX_VX: [i16; 2] = [38, 260];
 /// UF-26: caption of the 4-20 mA loop percentage (DC mA, aux2 "%").
 const LOOP_CAP: &str = "4-20mA";
 
+/// Caption of the burden voltage readout (A functions, Settings 3/3
+/// "Burden voltage"; doc 3.15): DC A aux1, AC A aux2.
+const BURDEN_CAP: &str = "Burden";
+
 /// The aux readouts as shown. UF-26: the DC mA loop percentage (aux2 "%",
 /// dmm.rs: (|mA| - 4) x 6.25, OL above 125 %) is hidden outside -25..125 %
 /// (a current that is not a 4-20 mA loop signal); the bool says it is that
-/// percentage (drawn with the LOOP_CAP caption).
-fn aux_shown(r: &Reading) -> ([Option<crate::dmm::Val>; 2], bool) {
+/// percentage (drawn with the LOOP_CAP caption). The last item: the aux slot
+/// holding the burden voltage (`Reading::burden`, drawn with BURDEN_CAP).
+fn aux_shown(r: &Reading) -> ([Option<crate::dmm::Val>; 2], bool, Option<usize>) {
     let lp = r.mode == 8 && !r.acdc && r.aux2.is_some_and(|v| v.unit == "%");
     let a2 = r.aux2.filter(|v| !lp || (!v.ol && (-25.0..=125.0).contains(&v.v)));
-    ([r.aux1, a2], lp && a2.is_some())
+    ([r.aux1, a2], lp && a2.is_some(), r.burden().map(|b| b.0))
 }
 
 /// Mode glyph above the unit: 0x04 DC, 0x05 AC, 0x07 continuity, 0x08 diode.
@@ -596,9 +601,10 @@ impl DmmView {
             }
         }
         // Aux readouts (stock: value right-aligned cells at y 40, unit after).
-        let (aux, lp) = aux_shown(r);
+        let (aux, lp, bd) = aux_shown(r);
         let temp = r.mode == 15 && self.label.is_some();
         for (i, a) in aux.iter().enumerate() {
+            let bdi = bd == Some(i);
             // Value boxes end 4 px before the unit (separate items: >= 3 px).
             let (vx, ux) = (AUX_VX[i] + 30, if i == 0 { 178 } else { 400 });
             if i == 1 && temp {
@@ -636,9 +642,18 @@ impl DmmView {
                     let mut key = [0u8; 16];
                     let kn = txt.len().min(16);
                     key[..kn].copy_from_slice(&txt.as_bytes()[..kn]);
-                    let vkey = Some((key, (i == 1 && lp) as u8 | (r.acdc as u8) << 1));
+                    let vkey = Some((key, (i == 1 && lp) as u8 | (r.acdc as u8) << 1 | (bdi as u8) << 2));
                     if self.aux_val[i] == vkey {
                         // Value part unchanged.
+                    } else if bdi {
+                        // Burden voltage (doc 3.15): the F14 caption right-
+                        // aligned before the value, boxes tiling the slot as
+                        // the loop percentage's (aux2: 256..396; aux1:
+                        // 8..175, the value's box ending where the plain
+                        // one does), so no older text stays behind.
+                        let (cx, vx0, vw) = if i == 0 { (8, 68, 107) } else { (256, 316, 81) };
+                        sf::label(sf::LETTERS, rect(vx0, 36, vw, 30), txt, VALUE, BG, 4, 0);
+                        sf::label(sf::F14, rect(cx, 36, 60, 30), BURDEN_CAP, VALUE, BG, 4, 1);
                     } else if i == 1 && lp {
                         // UF-26: "-25.0".."125.0" (<= 78 px: ink from 319)
                         // right-aligned in 316..396, the F14 caption
@@ -680,7 +695,10 @@ impl DmmView {
                     self.last_aux[i] = true;
                 }
                 None if self.last_aux[i] => {
-                    lcd::fill_rect((vx - 30) as u16, 36, (ux + 76 - vx + 30) as u16, 30, BG);
+                    // aux1 from the burden caption's left edge (8; empty
+                    // otherwise outside AC+DC, which never clears aux1).
+                    let x0 = if i == 0 { AUX_TAG_X[0] } else { vx - 30 };
+                    lcd::fill_rect(x0 as u16, 36, (ux + 76 - x0) as u16, 30, BG);
                     self.last_aux[i] = false;
                     self.aux_val[i] = None;
                     self.aux_unit[i] = None;
@@ -771,7 +789,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
     let unit = sf::unit_text(r.main.unit, &mut ub);
     d.unit = Txt::new(unit);
     d.unit_letters = !unit.chars().all(|c| sf::SC_DIGITS.glyph(c as u32).is_some());
-    let (aux, lp) = aux_shown(r);
+    let (aux, lp, bd) = aux_shown(r);
     let temp = r.mode == 15 && label.is_some();
     for (i, a) in aux.iter().enumerate() {
         let mut t = Txt::EMPTY;
@@ -780,6 +798,8 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         } else if let Some(v) = a {
             if r.acdc {
                 t.push(["AC ", "DC "][i]);
+            } else if bd == Some(i) {
+                t.push("Bd ");
             } else if lp && i == 1 {
                 // The strip's sub box is 86 px: "4-20mA 50.0%" did not fit
                 // (its "4" was clipped next to the value's unit).
@@ -2034,8 +2054,10 @@ pub const SETTINGS: [&str; 9] = [
 pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit", "Scope swipe", "Scope press", "Scope tap step", "Help", "More"];
 /// Page 3: the wrong-connection alerts (sentinel.rs; ON = all, A-JACK only,
 /// OFF), the USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
-/// applies at the next USB plug) and the Device / About page.
-pub const SETTINGS3: [&str; 3] = ["Jack alerts", "USB disk", "Device"];
+/// applies at the next USB plug), the burden voltage readout of the A
+/// functions (doc 3.15; persisted, default OFF = the stock aux row) and the
+/// Device / About page.
+pub const SETTINGS3: [&str; 4] = ["Jack alerts", "USB disk", "Burden voltage", "Device"];
 
 /// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).
