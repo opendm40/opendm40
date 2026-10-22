@@ -538,7 +538,8 @@ fn step(disk: &mut dyn BlockDevice) -> Option<Shot> {
         // A csvlog commit holds the disk (and calbackup::scratch): wait. It
         // is bounded (a few blocks) and never starts while we are busy. An
         // update-file upload (upload.rs) likewise, until it ends / times out.
-        Phase::Bpb if crate::msc::LOG_FLUSHING.load(Ordering::Relaxed) || crate::upload::busy() => None,
+        // The fast logger (fastlog.rs) holds the disk for its whole session.
+        Phase::Bpb if crate::msc::LOG_FLUSHING.load(Ordering::Relaxed) || crate::upload::busy() || crate::fastlog::holds_disk() => None,
         Phase::Bpb => j.bpb(disk),
         Phase::Root => j.root(disk),
         Phase::Alloc => j.alloc(disk),

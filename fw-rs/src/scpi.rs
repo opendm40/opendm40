@@ -266,6 +266,27 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///                           (default), 600, 3600, 28800, 86400; as INTerval
 ///   LOG:CSV:FREE?           free bytes on the USB disk ("Mass storage busy"
 ///                           while a commit / screenshot / upload holds it)
+///   LOG:DEST DISK|HOST      where LOG:STATe ON sends the samples (default
+///                           HOST = LOG:DATA?). DISK: the fast logger
+///                           (fastlog.rs) writes LOGS/FASTnnn.DLG (served as
+///                           FASTnnn.CSV): LOG:STATe ON pre-allocates and
+///                           pre-erases LOG:DURation's worth (bounded by the
+///                           free space; LOG:DISK? shows the progress), then
+///                           starts the session; it ends at LOG:STATe OFF, at
+///                           the duration or when the file is full. LOG:DATA?
+///                           answers an empty block meanwhile. USB only (as
+///                           LOG:CSV ON: "Command protected" over Bluetooth)
+///   LOG:DEST?               DISK / HOST
+///   LOG:DURation <s> / ?    length of a DISK session in device time, 0 =
+///                           until stopped / the disk is full (default 60)
+///   LOG:DISK?               state,file,alloc,bytes,rows,prep_pct (state 0 idle,
+///                           1 preparing, 2 ready, 3 running, 4 stopping, 5
+///                           done, 6 full, 7 no disk, 8 error; file -1 until
+///                           the entry exists; bytes = file bytes written)
+/// Bluetooth (an untrusted ~11.5 kB/s link): LOG:STATe ON is refused above
+/// BT_MAX_HZ ("Rate too high for Bluetooth", every AD2 rate; AD1 up to
+/// 640 S/s works) and with LOG:DEST DISK ("Command protected"); LOG:DATA?
+/// from Bluetooth of a faster session (started over USB) is refused too.
 #[derive(Clone, Copy)]
 pub enum Log {
     State(Option<bool>),
@@ -286,6 +307,12 @@ pub enum Log {
     CsvInt(Option<u8>),
     CsvDur(Option<u8>),
     CsvFree,
+    /// LOG:DEST DISK (true) | HOST (false) | ? (None).
+    Dest(Option<bool>),
+    /// LOG:DURation <s> | ?.
+    Dur(Option<u32>),
+    /// LOG:DISK?
+    Disk,
 }
 
 /// Debug commands over USBTMC (development aids, not SCPI standard):
@@ -1414,6 +1441,27 @@ impl Scpi {
                         }
                     } else if kw(sub, "CSV") {
                         Out::Log(Log::Csv(if query { None } else { Some(a == b"ON" || a == b"1") }))
+                    } else if kw(sub, "DEST") {
+                        match (query, a) {
+                            (true, _) => Out::Log(Log::Dest(None)),
+                            (false, x) if x.eq_ignore_ascii_case(b"DISK") => Out::Log(Log::Dest(Some(true))),
+                            (false, x) if x.eq_ignore_ascii_case(b"HOST") => Out::Log(Log::Dest(Some(false))),
+                            _ => {
+                                self.err = Some("Illegal parameter value");
+                                continue;
+                            }
+                        }
+                    } else if kw(sub, "DURation") {
+                        match (query, parse_num(a)) {
+                            (true, _) => Out::Log(Log::Dur(None)),
+                            (false, Some(v)) if (0.0..=1.0e6).contains(&v) => Out::Log(Log::Dur(Some(v as u32))),
+                            _ => {
+                                self.err = Some("Illegal parameter value");
+                                continue;
+                            }
+                        }
+                    } else if kw(sub, "DISK") && query {
+                        Out::Log(Log::Disk)
                     } else {
                         self.err = Some("Undefined header");
                         continue;

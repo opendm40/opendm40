@@ -1818,12 +1818,15 @@ fn main() {
 
     // 6d. Data-logger panel (FR-38, dialog::log_panel) over the DMM page:
     //     the widest rows (AD2 measured / nominal, a big loss), AD1 and the
-    //     nominal-only start.
+    //     nominal-only start; the fast logger's disk rows (prep, file).
     for (k, info) in [
-        dialog::LogInfo { hz: 0, n: 0, nominal_hz: 40, ad2: false, lost: 0 },
-        dialog::LogInfo { hz: 9599, n: 4_294_967_295, nominal_hz: 9600, ad2: true, lost: 4_000_000_000 },
-        dialog::LogInfo { hz: 0, n: 0, nominal_hz: 600, ad2: true, lost: 0 },
-        dialog::LogInfo { hz: 638, n: 123_456, nominal_hz: 640, ad2: false, lost: 17 },
+        dialog::LogInfo { hz: 0, n: 0, nominal_hz: 40, ad2: false, lost: 0, disk: None },
+        dialog::LogInfo { hz: 9599, n: 4_294_967_295, nominal_hz: 9600, ad2: true, lost: 4_000_000_000, disk: None },
+        dialog::LogInfo { hz: 0, n: 0, nominal_hz: 600, ad2: true, lost: 0, disk: None },
+        dialog::LogInfo { hz: 638, n: 123_456, nominal_hz: 640, ad2: false, lost: 17, disk: None },
+        // fast logger to the disk: preparing, running (the widest file row)
+        dialog::LogInfo { hz: 0, n: 0, nominal_hz: 0, ad2: true, lost: 0, disk: Some(dialog::LogDisk { prep: true, pct: 100, file: 0, kb: 0 }) },
+        dialog::LogInfo { hz: 38399, n: 4_294_967_295, nominal_hz: 38400, ad2: true, lost: 0, disk: Some(dialog::LogDisk { prep: false, pct: 100, file: 999, kb: 16_384 }) },
     ]
     .iter()
     .enumerate()

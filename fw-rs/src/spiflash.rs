@@ -401,6 +401,40 @@ impl SpiFlash {
     }
 }
 
+/// Raw page programs / erases for the fast logger (fastlog.rs, fastenc.rs):
+/// never a wait, never a compare or read-back (the chunk CRCs check the
+/// data), never a FAT / directory block (those go through `write_block`).
+/// BE64 = 64 KiB block erase (D8h, tBE1 150 ms typ / 2 s max).
+const CMD_BE64: u8 = 0xD8;
+
+impl crate::fastenc::Nor for SpiFlash {
+    #[inline(always)]
+    fn busy(&mut self) -> bool {
+        Self::busy()
+    }
+    fn program(&mut self, addr: u32, d: &[u8]) {
+        if !self.failed && (addr as u64 + d.len() as u64) <= self.blocks as u64 * SECTOR as u64 {
+            Self::start_program(addr, d);
+        }
+    }
+    fn erase(&mut self, addr: u32, big: bool) {
+        if self.failed || addr >= self.blocks * SECTOR as u32 {
+            return;
+        }
+        if big {
+            Self::write_enable();
+            cs(true);
+            cmd_addr(CMD_BE64, addr);
+            cs(false);
+        } else {
+            Self::start_erase(addr);
+        }
+    }
+    fn read(&mut self, addr: u32, b: &mut [u8]) -> bool {
+        self.read_at(addr, b)
+    }
+}
+
 impl BlockDevice for SpiFlash {
     fn present(&self) -> bool {
         self.blocks != 0

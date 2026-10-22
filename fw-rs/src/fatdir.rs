@@ -5,6 +5,7 @@
 //! (dm40*.bin update files, _DM40PRV.BIN, calbackup.rs's write-once
 //! CALIB / BOOTDATA / UID .BIN safety copy); our own files go to
 //!   LOGS/   LOGnnn.DLG   DMM recordings (csvlog.rs)
+//!           FASTnnn.DLG  fast logger streams (fastlog.rs)
 //!   SHOTS/  Snnn.BMP     screenshots (screenshot.rs)
 //!   SCOPE/  SCOPnnn.DLG  scope records (screenshot.rs `start_csv`)
 //! (`dir_of`: the directory follows from the name). Files of ours that
@@ -70,13 +71,14 @@ pub enum Err {
 }
 
 /// The directory of one of our files, from its 8.3 name: S*.BMP -> SHOTS,
-/// LOG*.DLG -> LOGS, SCOP*.DLG -> SCOPE (case-insensitive). None: not ours.
+/// LOG*.DLG / FAST*.DLG -> LOGS, SCOP*.DLG -> SCOPE (case-insensitive).
+/// None: not ours.
 pub fn dir_of(n: &[u8]) -> Option<&'static [u8; 11]> {
     let up = |c: u8| c.to_ascii_uppercase();
     let ext = [up(n[8]), up(n[9]), up(n[10])];
     if &ext == b"BMP" && up(n[0]) == b'S' {
         Some(&SHOTS)
-    } else if &ext == b"DLG" && n[..3].iter().map(|&c| up(c)).eq(*b"LOG") {
+    } else if &ext == b"DLG" && (n[..3].iter().map(|&c| up(c)).eq(*b"LOG") || n[..4].iter().map(|&c| up(c)).eq(*b"FAST")) {
         Some(&LOGS)
     } else if &ext == b"DLG" && n[..4].iter().map(|&c| up(c)).eq(*b"SCOP") {
         Some(&SCOPE)

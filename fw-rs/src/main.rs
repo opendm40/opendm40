@@ -244,6 +244,14 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     // 2 panel + a full DMM-view redraw every 100 ms; next forced redraw, ms.
     let mut log_draw = 1u8;
     let mut log_redraw_at = 0u64;
+    // Fast logger to the disk (fastlog.rs): LOG:DEST DISK, LOG:DURation
+    // (s, 0 = until stopped / full), a session was running last pass, the
+    // tap-to-stop state (a release seen since the session began).
+    let mut log_disk = false;
+    let mut log_dur_s = 60u32;
+    let mut fast_prev = false;
+    let mut fast_tap_armed = false;
+    let mut fast_file: Option<u16> = None;
     let mut bt = bt::Bt::new();
     let mut gestures = gesture::Tracker::new();
     let mut touch_events = 0u32;
@@ -317,6 +325,44 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 for s in scpis.iter_mut() {
                     s.set_err("Settings conflict");
                 }
+            }
+        }
+        // The fast logger to the disk (fastlog.rs): Prep / Run / Stop slices;
+        // it asks for the logger session to start / stop.
+        {
+            let lon = logger.host_active();
+            match fastlog::poll(lon, &mut |b| logger.drain(b)) {
+                fastlog::Ev::None => {}
+                fastlog::Ev::Start => {
+                    if !fast_start(app, &mut clk, logger) {
+                        for s in scpis.iter_mut() {
+                            s.set_err("Settings conflict");
+                        }
+                    }
+                    fast_tap_armed = false;
+                }
+                fastlog::Ev::Stop => {
+                    if logger.host_active() {
+                        logger.stop();
+                    }
+                }
+            }
+            let fa = fastlog::active();
+            if fa {
+                fast_file = fastlog::status().file;
+            }
+            if fast_prev && !fa {
+                if let Some(st) = fastlog::ended() {
+                    app.fast_ended(now, st, fast_file);
+                }
+                fast_file = None;
+                dialog::log_panel_reset();
+                app.invalidate();
+            }
+            fast_prev = fa;
+            fastlog::set_rates(fast_next_hz(logger, false), fast_next_hz(logger, true));
+            if let Some(r) = app.take_fast_req() {
+                fast_req(app, logger, r, now);
             }
         }
         bt.pump(); // BT TX DMA: next segment of a long reply
@@ -881,9 +927,26 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                     },
                     scpi::Log::State(Some(on)) => {
-                        if on && logger.wave() && logger.active() {
-                            // The DMM wave view owns the AD2 stream.
+                        let m = app.dmm.mode();
+                        let hz = fast_next_hz(logger, logger.ad2());
+                        if on && ((logger.wave() && logger.active()) || fastlog::active()) {
+                            // The DMM wave view owns the AD2 stream / a disk
+                            // session runs or prepares.
                             scpi.set_err("Settings conflict");
+                        } else if on && log_disk && !port.trusted() {
+                            // Disk writes over an open radio link: USB only
+                            // (as LOG:CSV ON).
+                            scpi.set_err(bt::proto::REFUSED);
+                        } else if on && !log_disk && !port.trusted() && (logger.ad2() || hz > BT_MAX_HZ) {
+                            // 115200 baud = ~960 records/s at 12 bytes,
+                            // ~870 with the query turnaround (docs/bt-scpi.md).
+                            scpi.set_err("Rate too high for Bluetooth");
+                        } else if on && log_disk {
+                            if logger.active() || !logger::Logger::mode_ok(logger.ad2(), m) || matches!(app.dmm.func(), 16 | 17) {
+                                scpi.set_err("Settings conflict");
+                            } else if let Err(e) = fastlog::begin(fastlog::plan_bytes(log_dur_s, hz, logger.ad2()), log_dur_s) {
+                                scpi.set_err(e);
+                            }
                         } else if on {
                             // AD1 needs a DC mode (1 DCV, 3 DCmV, 7/8/9 DCA),
                             // AD2 a stock AC row (0 ACV, 2 ACmV, 4/5/6 ACA);
@@ -899,6 +962,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             } else {
                                 scpi.set_err("Settings conflict");
                             }
+                        } else if fastlog::active() {
+                            fastlog::request_stop();
                         } else if !logger.wave() {
                             logger.stop();
                         }
@@ -906,13 +971,39 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     }
                     scpi::Log::State(None) => {
                         scpi.len = 0;
-                        scpi.put_bytes(if logger.host_active() { b"1" } else { b"0" });
+                        scpi.put_bytes(if logger.host_active() || fastlog::active() { b"1" } else { b"0" });
+                        true
+                    }
+                    scpi::Log::Dest(Some(d)) => {
+                        if fastlog::active() || logger.host_active() {
+                            scpi.set_err("Settings conflict");
+                        } else {
+                            log_disk = d;
+                        }
+                        false
+                    }
+                    scpi::Log::Dest(None) => {
+                        scpi.len = 0;
+                        scpi.put_bytes(if log_disk { b"DISK" } else { b"HOST" });
+                        true
+                    }
+                    scpi::Log::Dur(Some(s)) => {
+                        log_dur_s = s;
+                        false
+                    }
+                    scpi::Log::Dur(None) => {
+                        scpi.len = 0;
+                        put_u32(&mut scpi, log_dur_s);
+                        true
+                    }
+                    scpi::Log::Disk => {
+                        fast_status(scpi);
                         true
                     }
                     scpi::Log::Source(Some(ad2)) => {
                         // The source also selects what poll() reads: not
                         // switched under a running session.
-                        if logger.host_active() && ad2 != logger.ad2() {
+                        if (logger.host_active() || fastlog::active()) && ad2 != logger.ad2() {
                             scpi.set_err("Settings conflict");
                         } else {
                             logger.set_ad2(ad2);
@@ -1010,7 +1101,15 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         // Definite-length #4nnnn block straight into the USBTMC
                         // response buffer (6144 B), like Dbg::Lcd. scpi.buf is
                         // only 512 B and #3 caps at 999 bytes, so neither fits.
-                        port.respond_with(&mut |buf| Some(logger.encode(buf)));
+                        if fastlog::owns_ring() {
+                            // The disk session drains the ring.
+                            port.respond(b"#40000");
+                        } else if !port.trusted() && logger.host_active() && (logger.ad2() || logger.nominal_mhz() > BT_MAX_HZ * 1000) {
+                            port.respond(b"#40000");
+                            scpi.set_err("Rate too high for Bluetooth");
+                        } else {
+                            port.respond_with(&mut |buf| Some(logger.encode(buf)));
+                        }
                         false
                     }
                 },
@@ -1105,7 +1204,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // view: no DMM poll, no BT serve); `logging`: a host session, which
         // also freezes the GUI (the wave view is a live scope page).
         let busy = logger.active();
-        let logging = logger.host_active();
+        // A disk session (fastlog.rs) freezes the GUI from its Prep to its
+        // last FAT write; tap to stop (below).
+        let logging = logger.host_active() || fastlog::active();
         if logging_prev && !busy {
             app.dmm.start(&mut clk);
             app.meter.reset();
@@ -1140,6 +1241,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     nominal_hz: (logger.nominal_mhz() + 500) / 1000,
                     ad2: logger.ad2(),
                     lost: logger.lost(),
+                    disk: fastlog::active().then(|| {
+                        let st = fastlog::status();
+                        dialog::LogDisk { prep: fastlog::preparing(), pct: st.pct, file: st.file.unwrap_or(0), kb: st.bytes / 1024 }
+                    }),
                 },
             );
         }
@@ -1155,7 +1260,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         {
             // Host writes on the volume (vwrite.rs): a delete's SPI part, a
             // firmware file's check + commit; Yes in its dialog = DBG:UPDATE.
-            vwrite::poll(now, logger.disk_writes_blocked());
+            vwrite::poll(now, logger.disk_writes_blocked() || fastlog::holds_disk());
             if vwrite::take_install() && reset_at.is_none() {
                 if boot::enter_loader_update() {
                     reset_at = Some(now + 50);
@@ -1164,7 +1269,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             if dlog::gen() != vd_gen {
                 vd_gen = dlog::gen();
                 vd_t = now;
-            } else if dlog::stale() && now.saturating_sub(vd_t) >= 1000 && !csvlog::writing() && !screenshot::busy() {
+            } else if dlog::stale() && now.saturating_sub(vd_t) >= 1000 && !csvlog::writing() && !screenshot::busy() && !fastlog::holds_disk() {
                 vdisk::refresh(csvlog::recording_name());
             }
         }
@@ -1211,12 +1316,26 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // EXTI-latched INT edge (touch.rs): read the fresh report now, not on
         // the tick.
         let touch_irq = tp.as_ref().map_or(false, |t| t.irq_pending());
-        if (now >= next_touch || touch_irq) && !logging {
-            next_touch = now + 10;
+        // A disk session (fastlog.rs) keeps a coarse touch read (10/s; the
+        // AD2 stream ISR does not care, AD1 at 640/s has 1.56 ms per
+        // conversion): any new press after a release stops / cancels it.
+        let fast_touch = logging && fastlog::active();
+        if (now >= next_touch || touch_irq) && (!logging || fast_touch) {
+            next_touch = now + if fast_touch { 100 } else { 10 };
             let t_rd = prof::cyc();
             prof::enter(prof::TOUCH);
             let mut reported = false;
             let g = match tp.as_mut().and_then(|t| t.poll(now)) {
+                Some(ev) if fast_touch => {
+                    if ev.points == 0 {
+                        fast_tap_armed = true;
+                    } else if fast_tap_armed {
+                        fastlog::request_stop();
+                        fast_tap_armed = false;
+                    }
+                    None
+                }
+                None if fast_touch => None,
                 Some(ev) => {
                     touch_events = touch_events.wrapping_add(1);
                     reported = true;
@@ -1348,6 +1467,152 @@ impl bt::ScpiPort for SentPort<'_> {
     }
 }
 
+/// Bluetooth carries the LOG:DATA? stream up to this rate, S/s (115200
+/// baud: 11.5 kB/s = 960 twelve-byte records/s, ~870 with the query
+/// turnaround; docs/bt-scpi.md): every AD1 setting (<= 640/s), no AD2 rate.
+const BT_MAX_HZ: u32 = 800;
+
+/// The nominal rate (S/s) of the logger's next session from `ad2` / AD1
+/// (LOG:SRATe, LOG:OSR + CHOP; the stream ISR may cap AD2 lower).
+fn fast_next_hz(l: &logger::Logger, ad2: bool) -> u32 {
+    if ad2 {
+        hy3131::ad2_rate_mhz(hy3131::ad2_r26_for(l.req_hz(), l.chop())) / 1000
+    } else {
+        1_000_000 / hy3131::ad1_period_us(l.osr(), l.chop()).max(1)
+    }
+}
+
+/// `fastlog::Ev::Start`: start the logger session of a disk session in the
+/// current function and give fastlog its header; false (the function no
+/// longer fits the source): the session is abandoned.
+#[inline(never)] // .cold (link-native.x): once per session
+fn fast_start(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger) -> bool {
+    let m = app.dmm.mode();
+    if logger.active() || !logger::Logger::mode_ok(logger.ad2(), m) || matches!(app.dmm.func(), 16 | 17) || app.dmm.pw.on {
+        fastlog::not_started();
+        return false;
+    }
+    app.dmm_power(clk);
+    app.dmm.start(clk);
+    logger.start(m, app.dmm.range());
+    let mut txt = [0u8; 512];
+    let (n, par, unit) = fast_head(logger, app.dmm.ad2_scale(), &mut txt);
+    fastlog::run(&fastlog::Head { par, unit, text: &txt[..n] });
+    true
+}
+
+/// The Record page's fast-logger request (app.rs `FastReq`).
+#[inline(never)] // .cold (link-native.x): on a tap
+fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, now: u64) {
+    match r {
+        app::FastReq::Stop => fastlog::request_stop(),
+        app::FastReq::Start(dur) => {
+            // The source follows the function (AD2 in the AC rows, AD1 in
+            // DC V / mV / A); it stays the logger's LOG:SOURce afterwards.
+            let ad2 = logger::Logger::mode_ok(true, app.dmm.mode());
+            if logger.active() {
+                app.fast_ended(now, fastlog::State::Error, None);
+                return;
+            }
+            logger.set_ad2(ad2);
+            let b = fastlog::plan_bytes(dur, fast_next_hz(logger, ad2), ad2);
+            if fastlog::begin(b, dur).is_err() {
+                app.fast_ended(now, fastlog::State::Error, None);
+            }
+        }
+    }
+}
+
+/// LOG:DISK? reply: state,file,alloc,bytes,rows,prep_pct.
+#[inline(never)] // .cold (link-native.x)
+fn fast_status(scpi: &mut scpi::Scpi) {
+    scpi.len = 0;
+    let st = fastlog::status();
+    let code = match st.state {
+        fastlog::State::Idle => 0,
+        fastlog::State::Prep => 1,
+        fastlog::State::Ready => 2,
+        fastlog::State::Run => 3,
+        fastlog::State::Stop => 4,
+        fastlog::State::Done => 5,
+        fastlog::State::Full => 6,
+        fastlog::State::NoDisk => 7,
+        fastlog::State::Error => 8,
+    };
+    put_u32(scpi, code);
+    scpi.put_bytes(b",");
+    match st.file {
+        Some(n) => put_u32(scpi, n as u32),
+        None => scpi.put_bytes(b"-1"),
+    }
+    for v in [st.alloc, st.bytes, st.rows, st.pct as u32] {
+        scpi.put_bytes(b",");
+        put_u32(scpi, v);
+    }
+}
+
+/// The fast logger's file header (fastlog.rs; kind 3, docs/compact-log-
+/// format.md) of the session just started: (text length, parameters, unit).
+/// AD2: value = the DMM's AD2 calibration (dmm::ad2_scale, as the wave
+/// view); AD1: raw counts only.
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
+fn fast_head(l: &logger::Logger, sc: Option<dmm::Ad2Scale>, out: &mut [u8; 512]) -> (usize, dlog::FPar, &'static [u8]) {
+    let ad2 = l.ad2();
+    let sc = sc.filter(|_| ad2);
+    let par = dlog::FPar {
+        a: sc.map_or(0.0, |s| -s.offset),
+        b: sc.map_or(0.0, |s| s.per_code),
+        rate_mhz: l.nominal_mhz().max(1),
+        flags: if sc.is_some() { dlog::FP_SCALED } else { 0 },
+        src: if ad2 { 2 } else { 1 },
+        mode: l.mode(),
+        range: l.range(),
+    };
+    let unit: &'static [u8] = match sc {
+        Some(s) if s.amps => b"A",
+        Some(_) => b"V",
+        None => b"cts",
+    };
+    let mut w = dlog::Txt { b: &mut out[..], n: 0 };
+    w.s("# Alientek DM40A, fw-rs ");
+    w.s(match option_env!("CARGO_PKG_VERSION") {
+        Some(v) => v,
+        None => "dev",
+    });
+    w.s(", fast log, source ");
+    w.s(if ad2 { "AD2" } else { "AD1" });
+    w.s(", mode ");
+    w.u(l.mode() as u64);
+    w.s(", range ");
+    w.u(l.range().max(0) as u64);
+    w.s(", nominal ");
+    w.u(l.nominal_mhz() as u64 / 1000);
+    w.c(b'.');
+    let f = l.nominal_mhz() % 1000;
+    w.c(b'0' + (f / 100) as u8);
+    w.c(b'0' + (f / 10 % 10) as u8);
+    w.c(b'0' + (f % 10) as u8);
+    w.s(" S/s, chop ");
+    w.u(l.chop() as u64);
+    if ad2 {
+        w.s(", r26 ");
+        w.u(l.r26() as u64);
+        w.s(if l.mode() == 0 { ", AC-coupled" } else { ", DC-coupled" });
+    } else {
+        w.s(", osr ");
+        w.u(l.osr() as u64);
+    }
+    w.s("\r\n# t_s = device clock, s; raw = ");
+    w.s(if ad2 { "AD2 code (+-262143 = +-1.25 V at the AD2 input); value = the DMM's AD2 calibration" } else { "AD1 counts (1.389 V / 8388607 * range decade, uncalibrated)" });
+    w.s("; lost_before = conversions missing before the row\r\n");
+    w.s(if sc.is_some() { "t_s,raw,value_" } else { "t_s,raw,lost_before\r\n" });
+    if sc.is_some() {
+        w.bytes(unit);
+        w.s(",lost_before\r\n");
+    }
+    (w.n, par, unit)
+}
+
 /// Append a u32 as decimal to a SCPI reply (exact; no f32 rounding).
 fn put_u32(scpi: &mut scpi::Scpi, mut v: u32) {
     let mut t = [0u8; 10];
@@ -1446,6 +1711,8 @@ mod screenshot;
 mod scope_csv;
 mod csvlog;
 mod dlog;
+mod fastenc;
+mod fastlog;
 mod gallery;
 mod fatdir;
 mod upload;

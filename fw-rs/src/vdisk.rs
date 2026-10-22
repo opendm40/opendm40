@@ -124,11 +124,23 @@ pub const SPI_BYTES: u32 = 16 << 20;
 /// Root entries after the label: README.TXT, INFO, DEBUG, LOGS, SCOPE, SHOTS.
 pub(crate) const ROOT_N: usize = 6;
 /// Generated directories, file kinds: (name, file prefix, file extension).
-const VDIRS: [([u8; 11], &[u8], [u8; 3]); 3] = [
+/// Kind 3 (FASTnnn.CSV, the fast logger) lives in LOGS (`dir`).
+const VDIRS: [([u8; 11], &[u8], [u8; 3]); 4] = [
     (*b"LOGS       ", b"LOG", *b"CSV"),
     (*b"SCOPE      ", b"SCOP", *b"CSV"),
     (*b"SHOTS      ", b"S", *b"BMP"),
+    (*b"LOGS       ", b"FAST", *b"CSV"),
 ];
+
+/// The directory (0 LOGS, 1 SCOPE, 2 SHOTS) of file kind `k`.
+fn dir(k: usize) -> usize {
+    if k == 3 { 0 } else { k }
+}
+
+/// The directory (as `dir_kind`) of table id `id`.
+pub(crate) fn id_dir(id: u16) -> usize {
+    dir(kind(id))
+}
 /// Slots of a one-cluster directory.
 const SLOTS: u32 = CB / 32;
 /// Files of LOGS / SCOPE / SHOTS at most (16 bytes of SRAM each).
@@ -307,12 +319,14 @@ fn st_dyn0() -> u32 {
 // --- the dynamic files -----------------------------------------------------------
 
 /// (kind, number) of an SPI file of ours with a numbered name (LOGnnn.DLG,
-/// SCOPnnn.DLG, Snnn.BMP), else None.
+/// SCOPnnn.DLG, Snnn.BMP, FASTnnn.DLG), else None.
 fn ours(n: &[u8; 11]) -> Option<(usize, u16)> {
-    let k = if dlog::dlg_name(n) == Some(3) {
+    let k = if dlog::dlg_prefix(n) == Some(b"LOG") {
         0
-    } else if dlog::dlg_name(n).is_some() {
+    } else if dlog::dlg_prefix(n) == Some(b"SCOP") {
         1
+    } else if dlog::dlg_prefix(n) == Some(b"FAST") {
+        3
     } else if n[8..].eq_ignore_ascii_case(b"BMP") && n[0].eq_ignore_ascii_case(&b'S') {
         2
     } else {
@@ -404,7 +418,7 @@ fn compact(t: &mut Tab) -> bool {
     let mut sl = [2u16; 3];
     let mut moved = false;
     for e in t.e[..t.n].iter_mut() {
-        let k = kind(e.id);
+        let k = dir(kind(e.id));
         moved |= e.slot != sl[k] || e.vstart as u32 != c;
         e.slot = sl[k];
         e.vstart = c as u16;
@@ -427,7 +441,7 @@ fn add_new(t: &mut Tab, exclude: Option<[u8; 11]>) -> (u32, u32, u32) {
             return; // present (or a duplicate number: the first one stays)
         }
         let Some(vsize) = vsize_of(id, src, ssize) else { return };
-        let k = kind(id);
+        let k = dir(kind(id));
         let need = nclus(vsize);
         if t.n == MAX_VF {
             full += 1;
@@ -874,7 +888,7 @@ fn dir_sector(st: &State, c: u32, s: u32, b: &mut [u8]) {
                 let r = ent(slot);
                 b[r.start] = 0xE5;
             }
-            for e in t.e[..t.n].iter().filter(|e| kind(e.id) == k && (lo..hi).contains(&(e.slot as u32))) {
+            for e in t.e[..t.n].iter().filter(|e| dir(kind(e.id)) == k && (lo..hi).contains(&(e.slot as u32))) {
                 let r = ent(e.slot as u32);
                 let o = r.start;
                 dyn_entry(e, &mut b[r]);

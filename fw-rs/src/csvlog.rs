@@ -158,6 +158,15 @@ static mut TAIL: [u8; BLK] = [0; BLK];
 fn fifo() -> &'static mut [u8; FIFO] {
     unsafe { &mut *core::ptr::addr_of_mut!(FIFO_BUF) }
 }
+
+/// The row FIFO lent to the fast logger (fastlog.rs: its coded bytes on
+/// the way to the flash pages). The two never run together: fastlog::begin
+/// refuses while a recording is active, `start` refuses while a fast
+/// session holds the disk; nothing of a finished recording is left in it.
+#[inline(always)]
+pub(crate) fn lend_fifo() -> &'static mut [u8; FIFO] {
+    fifo()
+}
 fn tail() -> &'static mut [u8; BLK] {
     unsafe { &mut *core::ptr::addr_of_mut!(TAIL) }
 }
@@ -387,7 +396,8 @@ fn set_flags(session: bool, flushing: bool) {
 /// volume, vdisk.rs).
 pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     let j = job();
-    if active() {
+    // The fast logger holds the disk and this FIFO (fastlog.rs).
+    if active() || crate::fastlog::holds_disk() {
         return false;
     }
     *j = JOB0;
@@ -1189,7 +1199,11 @@ pub enum GErr {
 
 /// The disk is free for a synchronous gallery operation.
 fn gallery_free() -> bool {
-    !crate::screenshot::busy() && !writing() && !crate::upload::busy() && !crate::msc::HOST_WRITING.load(Ordering::Relaxed)
+    !crate::screenshot::busy()
+        && !writing()
+        && !crate::upload::busy()
+        && !crate::fastlog::holds_disk()
+        && !crate::msc::HOST_WRITING.load(Ordering::Relaxed)
 }
 
 fn gallery_vol(disk: &mut dyn BlockDevice) -> Result<Vol, GErr> {
@@ -1218,9 +1232,14 @@ fn kind_of_name(e: &[u8]) -> Option<Kind> {
     let ext = [up(e[8]), up(e[9]), up(e[10])];
     if up(e[0]) == b'S' && &ext == b"BMP" {
         Some(Kind::Bmp)
-    } else if &ext == b"DLG" && ((up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G') || e[..4].iter().map(|&c| up(c)).eq(*b"SCOP")) {
-        // LOG*.DLG (DMM recordings) and SCOP*.DLG (scope records, UF-13),
-        // compact binary logs (dlog.rs); their CSV is generated on read.
+    } else if &ext == b"DLG"
+        && ((up(e[0]) == b'L' && up(e[1]) == b'O' && up(e[2]) == b'G')
+            || e[..4].iter().map(|&c| up(c)).eq(*b"SCOP")
+            || e[..4].iter().map(|&c| up(c)).eq(*b"FAST"))
+    {
+        // LOG*.DLG (DMM recordings), FAST*.DLG (the fast logger,
+        // fastlog.rs) and SCOP*.DLG (scope records, UF-13), compact binary
+        // logs (dlog.rs); their CSV is generated on read.
         Some(Kind::Csv)
     } else {
         None

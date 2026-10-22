@@ -733,7 +733,7 @@ fn dir(k: usize, s: u32, d: &[u8], g: &[u8]) -> R {
         }
         let ents = vdisk::entries();
         let hit = (k < 3)
-            .then(|| ents.iter().position(|e| ((e.id >> 10) & 3) as usize == k && e.slot as u32 == slot && e.id & T_DIR == 0))
+            .then(|| ents.iter().position(|e| vdisk::id_dir(e.id) == k && e.slot as u32 == slot && e.id & T_DIR == 0))
             .flatten();
         if let Some(j) = hit {
             let mut x = [0u8; 32];
