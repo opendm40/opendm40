@@ -9,6 +9,7 @@ MCX generator OUT, MCX scope OSC) is drawn as a separate top view above the
 front view, like an engineering drawing (y < 0 in the same mm frame). The display is rendered at an integer device-pixel
 scale k (nearest neighbour), the rest with Cairo at 480k/73.5 px per mm.
 """
+import itertools
 import os
 import re
 import signal
@@ -694,6 +695,7 @@ class FrontendView(Gtk.DrawingArea):
         self.fit = fit            # pop-out window: zoom so the content fills the height
         self.want_h = 0
         self.ink = None               # list -> layout() records label boxes (overlap check)
+        self.segs = None              # list -> layout() records wire segments (wiring check)
         self.inside_h = 0
         self.set_content_height(120)
         self.set_draw_func(self.draw)
@@ -851,14 +853,35 @@ class FrontendView(Gtk.DrawingArea):
             pl.set_width(-1)
             return h_
 
-        def wire(pts, active, width=None):
+        segs = self.segs if cr is not None and self.segs is not None else None
+        wire_n = [0]
+
+        def wire(pts, active, width=None, net=None):
+            """orthogonal polyline; segments recorded (net id) for the wiring check"""
+            q = [pts[0]]
+            for p_ in pts[1:]:
+                if abs(p_[0] - q[-1][0]) > 0.01 or abs(p_[1] - q[-1][1]) > 0.01:
+                    q.append(p_)
+            if len(q) < 2:
+                return
+            wire_n[0] += 1
+            if segs is not None:
+                for a_, b_ in zip(q, q[1:]):
+                    segs.append((net if net is not None else 'w%d' % wire_n[0], a_[0], a_[1], b_[0], b_[1]))
             if cr:
                 cr.set_source_rgb(*(on if active else off))
                 cr.set_line_width(width or lw)
-                cr.move_to(*pts[0])
-                for p in pts[1:]:
-                    cr.line_to(*p)
+                cr.move_to(*q[0])
+                for p_ in q[1:]:
+                    cr.line_to(*p_)
                 cr.stroke()
+
+        def dot(x_, y_, active):
+            if cr:
+                cr.new_path()
+                cr.set_source_rgb(*(on if active else off))
+                cr.arc(x_, y_, lw * 1.6, 0, 6.3)
+                cr.fill()
 
         def arrow(x, y, active):
             """arrowhead pointing right, tip at x"""
@@ -897,7 +920,9 @@ class FrontendView(Gtk.DrawingArea):
         def opamp(x, yc, active, name, gain):
             """triangle opamp symbol (width ~2.2 L), name inside, gain under it; -> (x_in, x_out)"""
             h_ = L * 2.0
-            w_ = max(L * 2.4, tw(name) + L)
+            if gain:
+                name = name + ' ' + gain
+            w_ = max(L * 2.4, tw(name) + L * 1.4)
             if cr:
                 cr.set_source_rgb(*bg)
                 cr.move_to(x, yc - h_ / 2)
@@ -911,8 +936,6 @@ class FrontendView(Gtk.DrawingArea):
             label(x + pad * 0.6, yc - L / 2, name, txt if active else off, mark=False)
             if ink is not None:
                 ink.append(('op ' + name, x - 1, yc - h_ / 2 - 1, x + w_ + 1, yc + h_ / 2 + 1))
-            if gain:
-                label(x + pad * 0.6, yc + h_ / 2 + pad * 0.7, gain, dim if active else off)
             return x, x + w_
 
         def flag(k):
@@ -1026,11 +1049,12 @@ class FrontendView(Gtk.DrawingArea):
         lpf_lines = ['LPF (mean)', '%s, OSR %s' % ('Y' if lpf_y else 'X', st.get('osr4', ''))]
         lpf_w = box_w(lpf_lines)
         res_w = max([tw(s) for s in res1] + [tw(rms_res or ''), tw(lpf_res), tw('f %s' % si(num('ctf'), 'Hz'))]) + pad
-        lanes_n = 6
-        laneA = (lanes_n + 1) * pad * 1.3
-        op_w = L * 2.6
+        step = max(9.0, pad * 1.4)                    # routing track pitch (>= 8 px between wires)
+        netsA_n = len({v for v in src.values() if v in pv + pn + pc + pa_})
+        laneA = (netsA_n + 1) * step + pad
+        op_w = max(L * 2.4, tw('OP1 ×10') + L * 1.4)
         stubs = [v for k, v in src.items() if v and v not in ('OP1O', 'OP2O') and v not in (pv + pn + pc + pa_)]
-        laneB = max(4 * pad * 1.3, max([tw(v_) for v_ in stubs] + [0]) + pad * 3)
+        laneB = max(3 * step + pad, max([tw(v_) for v_ in stubs] + [0]) + pad * 3)
         chip_w = (pins_w + laneA + op_w + laneB + conv_w + pad * 4 + hpf_w + pad * 3 + mul_r * 2 + pad * 3 + rms_w
                   + pad * 2 + res_w + pad)
         side = board_w + chip_w + pad * 2 <= w
@@ -1046,6 +1070,12 @@ class FrontendView(Gtk.DrawingArea):
         chip_bottom = y_cmp + RH * 0.7 + L
 
         # board rows (side by side: aligned with the chip rows; stacked: own band above)
+        row_of = {'AD1': 0, 'OP1': 1, 'AD2': 2, 'OP2': 3, 'AD3': 4, 'CMP': 6}
+
+        def feeds(p):
+            return min([row_of[k] for k, v in src.items() if v == p] + [99])
+        pv, pn, pc, pa_ = (sorted(g_, key=feeds) for g_ in (pv, pn, pc, pa_))
+
         def pin_rows(y_top):
             """y of every pin, grouped by jack row: V pins, network pins, COM pins, A pins"""
             ys = {}
@@ -1118,13 +1148,21 @@ class FrontendView(Gtk.DrawingArea):
                 cr.fill()
             label(x + 2 * r + pad * 0.6, yy - L / 2, name, txt)
 
-        def fan(x_from, y_from, pins, active):
-            """wire from a box output to each of its pins (one orthogonal leg per pin)"""
+        def fan(x_from, y_from, pins, active, net):
+            """a box output to each of its pins: one vertical track, a dot where it branches"""
             xm = x_pin - pad * 1.5
-            for p, py in pins:
-                if p == '–':
-                    continue
-                wire([(x_from, y_from), (xm, y_from), (xm, py + L / 2), (x_pin - pad * 0.3, py + L / 2)], active)
+            ys_ = [py + L / 2 for p, py in pins if p != '–']
+            if not ys_:
+                return
+            wire([(x_from, y_from), (xm, y_from)], active, net=net)
+            lo, hi = min(ys_ + [y_from]), max(ys_ + [y_from])
+            wire([(xm, lo), (xm, hi)], active, net=net)
+            for yq in ys_:
+                wire([(xm, yq), (x_pin - pad * 0.3, yq)], active, net=net)
+            for yq in set(ys_ + [y_from]):
+                deg = 1 + (yq > lo + 0.01) + (yq < hi - 0.01) + (1 if yq in ys_ and abs(yq - y_from) < 0.01 else 0)
+                if deg >= 3:
+                    dot(xm, yq, active)
         # V row
         wire([(x + 2 * r + pad * 0.6 + name_w + pad * 0.5, jy['v']), (x_relay, jy['v'])], True)
         bx = box(x_relay, jy['v'], relay_lines, True)
@@ -1132,24 +1170,24 @@ class FrontendView(Gtk.DrawingArea):
             v_on = bool(pv)
             nb = box(x_net, jy['v'], net_v, v_on)
             wire([(bx[2], jy['v']), (nb[0], jy['v'])], v_on)
-            fan(nb[2], jy['v'], pys['v'], v_on)
+            fan(nb[2], jy['v'], pys['v'], v_on, 'jv')
         else:
             n_on = bool(pn)
             yn = jack_y['n']
             wire([(bx[2], jy['v']), (bx[2] + pad * 1.5, jy['v']), (bx[2] + pad * 1.5, yn), (x_net, yn)], n_on)
             nb = box(x_net, yn, net_n, n_on)
-            fan(nb[2], yn, pys['n'], n_on)
+            fan(nb[2], yn, pys['n'], n_on, 'jv')
             extra = []
             if 'rd_r' in st or 'vsrc' in st:
                 extra.append('source %s V (%s)' % (st.get('vsrc', '?'), st.get('vrefsel', '?')))
         # COM
-        wire([(x + 2 * r + pad * 0.6 + name_w + pad * 0.5, jy['c']), (x_pin - pad * 1.5, jy['c'])], True)
-        fan(x_pin - pad * 1.5, jy['c'], pys['c'], True)
+        wire([(x + 2 * r + pad * 0.6 + name_w + pad * 0.5, jy['c']), (x_pin - pad * 1.5, jy['c'])], True, net='jc')
+        fan(x_pin - pad * 1.5, jy['c'], pys['c'], True, 'jc')
         # A
         a_on = bool(pa_)
         wire([(x + 2 * r + pad * 0.6 + name_w + pad * 0.5, jy['a']), (x_relay, jy['a'])], True)
         sb = box(x_relay, jy['a'], sh_lines, a_on)
-        fan(sb[2], jy['a'], pys['a'], a_on)
+        fan(sb[2], jy['a'], pys['a'], a_on, 'ja')
         # pin names (inside the chip edge)
         pin_y = {}
         for g in ('v', 'n', 'c', 'a'):
@@ -1161,7 +1199,7 @@ class FrontendView(Gtk.DrawingArea):
         if not side:
             # the chip's own pin column: the pins its consumers select, one per line
             used = []
-            for k_ in ('OP1', 'OP2', 'AD1', 'AD2', 'AD3', 'CMP'):
+            for k_ in ('AD1', 'OP1', 'AD2', 'OP2', 'AD3', 'CMP'):
                 if src[k_] in pin_y and src[k_] not in used:
                     used.append(src[k_])
             pin_y = {}
@@ -1186,43 +1224,84 @@ class FrontendView(Gtk.DrawingArea):
         c3 = box(x_conv, y_ad3, b_ad3, ad3, minw=conv_w - pad * 2)
         cmpb = box(x_conv, y_cmp, b_cmp, cmp_used)
         cbox = {'AD1': c1, 'AD2': c2, 'AD3': c3, 'CMP': cmpb}
-        # lanes A: pins -> OP inputs and pin-fed converter inputs; lanes B: OP outputs -> converters
-        laneA_x = [cx0 + pins_w + pad * 1.3 * (i + 1) for i in range(lanes_n)]
-        laneB_x = [xc + op_w + pad * 1.3 * (i + 1) for i in range(3)]
-        ia = 0
-        ib = 0
-        unrouted = []
+        # Channel routing: every net (a pin, or an op-amp output) gets its own vertical track; the
+        # source runs horizontally into the track, each consumer leaves it horizontally at its input's
+        # height; tracks ordered for the fewest crossings; a dot where a track branches.
+        nets_a, nets_b, unrouted = {}, {}, []
         for name in ('OP1', 'OP2', 'AD1', 'AD2', 'AD3', 'CMP'):
             s_ = src[name]
             a_ = act[name]
-            if name.startswith('OP'):
-                x_in = (o1 if name == 'OP1' else o2)[0]
-            else:
-                x_in = cbox[name][0]
+            x_in = (o1 if name == 'OP1' else o2)[0] if name.startswith('OP') else cbox[name][0]
             y_in = cons_y[name]
             if s_ in op_out and not name.startswith('OP'):
                 xo, yo, oa = op_out[s_]
-                lx = laneB_x[min(ib, len(laneB_x) - 1)]
-                ib += 1
-                wire([(xo, yo), (lx, yo), (lx, y_in), (x_in, y_in)], a_ and oa)
-                arrow(x_in, y_in, a_ and oa)
+                nets_b.setdefault(s_, {'src': (xo, yo), 'dst': [], 'on': oa})['dst'].append((x_in, y_in, a_ and oa))
             elif s_ in pin_y:
-                lx = laneA_x[min(ia, len(laneA_x) - 1)]
-                ia += 1
-                yp = pin_y[s_]
-                x_from = x_pin + tw(s_) + pad * 0.4
-                wire([(x_from, yp), (lx, yp), (lx, y_in), (x_in, y_in)], a_)
-                arrow(x_in, y_in, a_)
+                nets_a.setdefault(s_, {'src': (x_pin + tw(s_) + pad * 0.4, pin_y[s_]), 'dst': [], 'on': True})[
+                    'dst'].append((x_in, y_in, a_))
             elif s_:
                 # an internal node or a pin no jack net uses (PB6 ref, VDDA, TS): a stub label
                 sw = tw(s_)
                 lx0 = x_in - pad * 1.2 - sw
-                if name.startswith('OP') or lx0 > (xc + op_w if not name.startswith('OP') else cx0 + pins_w):
+                if lx0 > (cx0 + pins_w if name.startswith('OP') else xc + op_w):
                     label(lx0 - pad * 0.3, y_in - L - pad * 0.2, s_, dim if a_ else off)
                     wire([(lx0, y_in), (x_in, y_in)], a_)
                     arrow(x_in, y_in, a_)
                 else:
                     unrouted.append(s_)
+
+        def route(nets, x_first):
+            names = list(nets)
+            best = None
+            for perm in itertools.permutations(range(len(names))):
+                xs = {names[i]: x_first + step * perm[k] for k, i in enumerate(range(len(names)))}
+                cost = 0
+                for n1 in names:
+                    for n2 in names:
+                        if n1 == n2:
+                            continue
+                        x2 = xs[n2]
+                        ys2 = [nets[n2]['src'][1]] + [d[1] for d in nets[n2]['dst']]
+                        lo2, hi2 = min(ys2), max(ys2)
+                        # n1's horizontals crossing n2's track
+                        hs = [(nets[n1]['src'][0], xs[n1], nets[n1]['src'][1])] + \
+                             [(xs[n1], d[0], d[1]) for d in nets[n1]['dst']]
+                        for xa, xb, yh in hs:
+                            if min(xa, xb) < x2 < max(xa, xb) and lo2 - 0.5 <= yh <= hi2 + 0.5:
+                                cost += 1
+                if best is None or cost < best[0]:
+                    best = (cost, xs)
+            return best[1] if best else {}
+
+        def draw_nets(nets, xs):
+            for n, d_ in nets.items():
+                xt = xs[n]
+                xs0, ys0 = d_['src']
+                any_on = any(dd[2] for dd in d_['dst'])
+                wire([(xs0, ys0), (xt, ys0)], any_on, net=n)
+                ys_ = [dd[1] for dd in d_['dst']]
+                lo, hi = min(ys_ + [ys0]), max(ys_ + [ys0])
+                # the track: blue between the source and the farthest active consumer
+                act_ys = [dd[1] for dd in d_['dst'] if dd[2]]
+                if act_ys:
+                    alo, ahi = min(act_ys + [ys0]), max(act_ys + [ys0])
+                    if lo < alo:
+                        wire([(xt, lo), (xt, alo)], False, net=n)
+                    if alo < ahi:
+                        wire([(xt, alo), (xt, ahi)], True, net=n)
+                    if ahi < hi:
+                        wire([(xt, ahi), (xt, hi)], False, net=n)
+                else:
+                    wire([(xt, lo), (xt, hi)], False, net=n)
+                for x_in, y_in, a_ in d_['dst']:
+                    wire([(xt, y_in), (x_in, y_in)], a_, net=n)
+                    arrow(x_in, y_in, a_)
+                for yq in set(ys_ + [ys0]):
+                    deg = 1 + (yq > lo + 0.01) + (yq < hi - 0.01) + sum(1 for v_ in ys_ + [ys0] if abs(v_ - yq) < 0.01) - 1
+                    if deg >= 3:
+                        dot(xt, yq, any_on)
+        draw_nets(nets_a, route(nets_a, cx0 + pins_w + pad + step))
+        draw_nets(nets_b, route(nets_b, xc + op_w + step))
 
         # ---------- processing ----------
         xp = x_conv + conv_w + pad * 4               # after the converters
@@ -1235,7 +1314,7 @@ class FrontendView(Gtk.DrawingArea):
             yy += L + pad / 2
         if stream:
             # AD2 results go straight to the MCU (R03..R05 stream, DMA)
-            wire([(c2[2], y_ad2), (x_res - pad, y_ad2)], True)
+            wire([(c2[2], y_ad2), (x_res - pad, y_ad2)], True, net='X')
             arrow(x_res - pad, y_ad2, True)
             label(x_res, y_ad2 - L / 2, 'stream → MCU  %s S/s' % si(num('ad2rate'), '').strip(), hot)
         # HPF on X (AD2) and Y (AD3)
@@ -1243,8 +1322,8 @@ class FrontendView(Gtk.DrawingArea):
         h2 = box(xp, y_ad2, ['HPF'], ad2 and rms_on) if not stream else (xp, 0, xp + box_w(['HPF']), 0)
         h3 = box(xp, y_ad3, ['HPF'], ad3 and rms_on)
         if not stream:
-            wire([(c2[2], y_ad2), (h2[0], y_ad2)], ad2 and rms_on)
-        wire([(c3[2], y_ad3), (h3[0], y_ad3)], ad3 and rms_on)
+            wire([(c2[2], y_ad2), (h2[0], y_ad2)], ad2 and rms_on, net='X')
+        wire([(c3[2], y_ad3), (h3[0], y_ad3)], ad3 and rms_on, net='Y')
         label(h2[2] + pad * 0.8, y_ad2 - L - pad * 0.5, 'X', txt if ad2 else off)
         label(h3[2] + pad * 0.8, y_ad3 - L - pad * 0.5, 'Y', txt if ad3 else off)
         # multiplier
@@ -1252,7 +1331,8 @@ class FrontendView(Gtk.DrawingArea):
         my = y_op2
         x_used = stat in (0, 1)
         y_used = stat in (1, 2)
-        wire([(h2[2], y_ad2), (mx, y_ad2), (mx, my - mul_r)], rms_on and x_used)
+        if not stream:
+            wire([(h2[2], y_ad2), (mx, y_ad2), (mx, my - mul_r)], rms_on and x_used)
         wire([(h3[2], y_ad3), (mx, y_ad3), (mx, my + mul_r)], rms_on and y_used)
         if cr:
             cr.new_path()
@@ -1284,8 +1364,10 @@ class FrontendView(Gtk.DrawingArea):
         lpf_on = flag('lpf')
         tap2, tap3 = c2[2] + pad * 1.5, c3[2] + pad * 2.8
         lb = box(xp, y_lpf, lpf_lines, lpf_on)
-        wire([(tap2, y_ad2), (tap2, y_lpf - L * 0.3), (lb[0], y_lpf - L * 0.3)], lpf_on and not lpf_y)
-        wire([(tap3, y_ad3), (tap3, y_lpf + L * 0.3), (lb[0], y_lpf + L * 0.3)], lpf_on and lpf_y)
+        wire([(tap2, y_ad2), (tap2, y_lpf - L * 0.3), (lb[0], y_lpf - L * 0.3)], lpf_on and not lpf_y, net='X')
+        wire([(tap3, y_ad3), (tap3, y_lpf + L * 0.3), (lb[0], y_lpf + L * 0.3)], lpf_on and lpf_y, net='Y')
+        dot(tap2, y_ad2, lpf_on and not lpf_y)       # the LPF taps branch off the converter outputs
+        dot(tap3, y_ad3, lpf_on and lpf_y)
         wire([(lb[2], y_lpf), (x_res - pad, y_lpf)], lpf_on)
         pk = flag('pkh')
         label(x_res, y_lpf - (L + pad / 4 if pk else L / 2), lpf_res if lpf_on else 'LPF off', hot if lpf_on else off)
