@@ -793,7 +793,7 @@ Firmware:
       Device 0667175 (docs/device-check-2026-10-21.md "Bluetooth (0667175)"): glyph off with no host, on while linked, off after; --bt info OK;
       reconnect 0.7-1.3 s; Settings Bluetooth OFF -> not discoverable, connect times out; ON -> discoverable,
       answers. Phone app (BLE) not run.
-- [ ] BT link opened while the DMM rail is off (Scope / Gen page) does not wake the DMM: cmd 09, BT FETC? /
+- [x] BT link opened while the DMM rail is off (Scope / Gen page) does not wake the DMM: cmd 09, BT FETC? /
       READ? and USB READ? return the reading from before the rail went off and ignore a 1 -> 2 V step (3/3).
       After >= 3 such connect / disconnect cycles the DMM stays frozen even back on the DMM page (> 9 min,
       PROF d.read 0, "AC?" hint; 2/2), until `DBG:HYSPI:SELF?` (its `app.dmm.start`). A link held while
@@ -814,7 +814,8 @@ Firmware:
       link (the rail follows PC14), lost / silent 0 everywhere incl. 35 s idle in Hz / temp / ohm / power /
       diode / cap. AC V: the first reading after a wake was +8 % -> ea29bc4: 2 s settle after a wake in the AC
       functions, and leaving the Wave view no longer drops the DMM rail (wavetest "DMM resumed" regression).
-      (verify on device: ea29bc4, AC V wake READ?; Wave view in AC V, MENU, READ?)
+      Device ea29bc4: AC V wake READ? -0.8 % (first answer after 2 s), Wave view MENU -> READ? correct with no
+      rail drop, 1g / 1h PASS again.
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
       decided: see docs/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
       revisit with decision #3's request queue)
