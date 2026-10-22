@@ -890,3 +890,44 @@ Cause and fix (emulator; the device re-check is below when done):
 
 - **Device:** DMM page, DC V AUTO+, 0.9994 V (`50-after.png`), DMM live. Bluetooth ON. Backlight 10 %, volume 0 % (seen on the Settings page; Bluetooth toggled OFF and back ON, nothing else touched). Power meter coupling AUTO, its limits cleared as before (STAT 0). `DBG:AD2:DMA 1`, `DRAW 1`, `DIV 0,0` (defaults; drain.py sets DMA 0 on exit, set back), `LOG:SOUR AD1`, `LOG:SRAT 4800`, `LOG:STAT 0`. Crash count 0, no reset; stack high-water 23 252 / 46 588 B.
 - **Calibrator:** 1 V DC, enabled (func 1 mode 0 value 1000).
+
+## DMM rail wake and fast logger (036cc55)
+
+**Build.** 036cc55 (DMM rail wake fix, stall watchdog, `SYST:RAIL:STATe?` counters, `DBG:AD2:DMA?`; it also contains the fast logger of 5d5dba0), installed by the owner, 2026-10-22 ~11:15-12:10; no reboot during the checks. USBTMC for SCPI and DBG:KEY / TAP, BT classic XX:XX:XX:XX:XX:XX (`/usr/bin/python3`, `dm40bt_scpi.Link`), the calibrator (`/dev/ttyACM1`) on V/COM. Scripts in the session scratchpad (`btwake/dev/chk.py`, `btwake/fast/`).
+
+### Rail wake (the 1g / 1h repro)
+
+`SYST:RAIL:STATe?` = dmm,scope,wakes,lost,silent.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Baseline (DMM page) | `1,0,0,0,0`, FETC? 0.99962 V |
+| 2 | **1g**: Scope page (`0,1,0,0,0`), BT link opened there, 1 → 2 V | **PASS.** Rail on at the link (`1,1,1,0,0`, wakes +1); BT FETC? 1.99886, BT READ? 1.99883 V |
+| 2b | USB READ? on the Scope page (host wake, 2 → 1 V) | **PASS.** 0.99964 V, wakes +1 |
+| 3 | Link cycles on the Scope page, no READ? (4 cycles, the input stepped 1 ↔ 2 V while linked) | **PASS.** Each link: rail on, wakes +1 (3, 4, 5, 6), BT FETC? follows the step (1.99898 / 0.99956 / 1.99864 / 0.99957); each close: `0,1` (PC14 drops: the rail follows the link) |
+| 4 | **1h**: then MENU → Multimeter, 2 → 3 V | **PASS.** FETC? 2.99790 V, still live 10 s later, 1 V again 0.99976. lost 0, silent 0 (and 0 after 3 cycles that kept the rail on through a BT READ?: 2.99808 V) |
+| 5 | Watchdog false restarts: calibrator off, 35 s each in Hz, temperature, ohm, power meter, diode, capacitance | **PASS.** lost 0, silent 0 throughout (FETC? 0 Hz, 212 °C open TC, 443 kΩ, ~0 W, OL, 65 µF open) |
+| 6 | `DBG:AD2:DMA?` | **PASS.** `1` |
+| 7 | AC V wake (40 Hz 0..10.4 V square, DMM AC V 4.7672 V): Scope page, USB READ? × 8 | **The first answer after the wake is +8 %** (5.145 / 5.187 V), then 4.90, 4.99, 4.92, 4.87, 4.84, 4.80, 4.785 V (1.1 s): the AC node starts over after the rail was off. Fixed in ea29bc4 (2 s settle after a wake in the AC functions); to re-check |
+
+The device 1h froze on 3bae462 with a rail that toggles with the link (seen here: wakes +1 per link, `0,1` after each close), so the lingering-PC14 theory is out. What remains is a row written microseconds after the PE2 rise, which the 50 ms settle now prevents. The lost / silent counters stayed 0 in every check, so the watchdog never had to step in.
+
+### Fast logger (disk sessions, `dm40scpi.py fast`)
+
+| Session | Result |
+|---|---|
+| AD1, DC V 1 V, OSR 0, chop off, 60 s | 37 302 samples (622/s of the nominal 639.8), **1 122 lost** (`LOG:COUNt?` 0,37302,0,508,1088; `LOG:GAPs?` g2 1088, g3_4 17, max gap 4.7 ms): **FAIL vs "lost_before all 0"**. Prep 0 → 64 → 93 % → running; 99 575 B. `LOGS/FAST000.CSV` on the USB volume == the tool's CSV (cmp) |
+| AD2, AC V on the 40 Hz square, 4800 S/s, 30 s | 144 002 samples, 0 lost, 0 overwritten; DBG:ISR? late 0, max_isr 3.66 us, max_lat 1.64 us, CPU 1.9 %. FAST001.CSV on the volume == the tool's CSV |
+| AD2, 19 200 S/s, 30 s | 576 002 samples, 0 lost, 0 overwritten; max_lat 12.1 us, CPU 7.8 % |
+| AD2, 38 400 S/s, 30 s | 1 152 002 samples, **1 lost** (late 1, one g2 gap), 0 overwritten; max_lat 11.9 us, CPU 17.5 %; 1.23 MB on the disk (3.47 MB allocated) |
+| AD2 4800, LOG:DUR 60, stopped by the host (Ctrl-C → LOG:STAT OFF) at 23.8 s | **PASS.** LOG:DISK? 5 (done), 114 032 rows, 248 783 B of 872 448 allocated, LOG:STAT? 0, no error; the CSV decodes to the last row, 0 lost |
+
+- `LOG:DISK?` went 1 (prep %) → 3 → 5 in every session; the AD2 sessions' wall time (61 / 131 / 221 s for 30 s of data) includes the prep (erase of the allocation) and the CSV transfer.
+- max_lat while pages program: 1.6-12 us, not the ~0.24 us the plan expected (the SPI1 page writes do delay the stream ISR); no sample was lost to it up to 19 200 S/s.
+- FAST002 / FAST003 were not compared over the USB volume (26 / 53 MB CSVs generated on the fly; too slow over MSC); their CSVs came through MMEM:DATA?.
+- Not run: the Record page UI (3), LOG:DUR 0 to a full disk (4), the battery pull (5), BT (6), the prep time of 7 MB (7).
+
+### State at the end
+
+- **Device:** DMM page, DC V, 1.0008 V, `SYST:RAIL:STATe?` 1,0,10,0,0, `DBG:AD2:DMA?` 1, LOG:STAT 0, no error. Five new files LOGS/FAST000..004.DLG on the disk (≈ 6 MB). Bluetooth ON.
+- **Calibrator:** 1 V DC, enabled.
