@@ -295,6 +295,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     // Loop timing (debug): longest iteration in the last second, us.
     let mut loop_t0 = unsafe { mmio::r32(0xE000_1004) };
     let mut loop_max = 0u32;
+    // Last pass with host disk I/O (a READ data phase, a WRITE): the
+    // screenshot preparation's sector erases wait ~0.5 s after it.
+    #[cfg(feature = "vdisk")]
+    let mut host_io_t = 0u64;
     let mut loop_max_shown = 0u32;
     let mut loop_win = 0u64;
     // Section profile (debug): max us per section in the last second:
@@ -357,6 +361,14 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 #[cfg(not(feature = "vdisk"))]
                 msc.poll(&mut [&mut disk]);
             }
+            #[cfg(feature = "vdisk")]
+            {
+                host_io_t = now;
+            }
+        }
+        #[cfg(feature = "vdisk")]
+        if msc::HOST_WRITING.load(core::sync::atomic::Ordering::Relaxed) {
+            host_io_t = now;
         }
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
@@ -728,7 +740,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             t[i] = b"0123456789ABCDEF"[(disk.id >> (20 - 4 * i) & 0xF) as usize];
                         }
                         scpi.put_bytes(&t[..6]);
-                        for v in [msc::BlockDevice::block_count(&disk), disk.failed() as u32] {
+                        let (st, pp) = (screenshot::stats(), screenshot::prep_stats());
+                        for v in [msc::BlockDevice::block_count(&disk), disk.failed() as u32, st[0], st[1], st[2], st[3], pp[0], pp[1], pp[2]] {
                             scpi.put_bytes(b",");
                             let s = dmm::format(&mut t, v as f32, 0);
                             scpi.put_bytes(s.as_bytes());
@@ -1364,6 +1377,24 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         prof::lap_skip();
         csvlog::poll(now);
         upload::poll(now);
+        // The next screenshot's clusters erased in idle time (screenshot.rs
+        // "idle-time preparation"): not while a disk job keeps data in free
+        // clusters (csvlog commit, fast-log session, upload / staging; a
+        // shot is checked inside), a logger session runs (constant interval;
+        // the AD2 stream ISR: the step is region C), or the host used the
+        // disk in the last 0.5 s. Only with the generated volume: a host
+        // that writes the SPI disk itself (no `vdisk`) could be filling a
+        // free cluster.
+        #[cfg(feature = "vdisk")]
+        screenshot::prep_poll(
+            now,
+            !csvlog::writing()
+                && !fastlog::active()
+                && !upload::busy()
+                && !logger.disk_writes_blocked()
+                && !hy3131::streaming()
+                && now.saturating_sub(host_io_t) >= 500,
+        );
         // The generated USB volume (vdisk.rs): rebuilt when the SPI files
         // changed (a recording ended, a screenshot / scope record, a delete),
         // once nothing changed for 1 s and no on-device writer holds the disk.

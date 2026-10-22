@@ -211,8 +211,17 @@ struct Job {
     /// Verify: current cluster, and its link from the previous one checked.
     vc: u32,
     linked: bool,
-    /// `start` time (DWT cycles), for the Start timeout.
+    /// `start` time (DWT cycles), for the Start timeout and `stats`.
     t0: u32,
+    /// `stats`: `step` calls while frozen, data blocks that needed an erase.
+    polls: u32,
+    erases: u32,
+    /// Clusters `cl[..pre]` are known blank (`prep_blank` at the end of
+    /// Alloc): their blocks are programmed without the compare.
+    pre: u32,
+    /// The current data block's read back failed once and it is being
+    /// written again with a forced erase (`data`).
+    retried: bool,
 }
 
 /// The idle job (`init`; `start` sets the non-zero fields).
@@ -243,6 +252,10 @@ const JOB0: Job = Job {
     vc: 0,
     linked: false,
     t0: 0,
+    polls: 0,
+    erases: 0,
+    pre: 0,
+    retried: false,
 };
 
 /// In .dmabuf, not TCM .bss (review 258c833 B1: 1.7 KB of stack margin, and
@@ -255,6 +268,9 @@ static mut JOB: Job = JOB0;
 /// CSV (`take_csv_result`).
 static mut RESULT: Option<Shot> = None;
 static mut CSV_RESULT: Option<Shot> = None;
+/// The last screenshot (`stats`, DBG:FLASH?): frozen ms, start .. result
+/// ms, `step` calls while frozen, data blocks that needed an erase.
+static mut STATS: [u32; 4] = [0; 4];
 /// The device's own SpiFlash handle (created on the first shot).
 static mut DISK: Option<crate::spiflash::SpiFlash> = None;
 
@@ -349,6 +365,16 @@ pub fn frozen() -> bool {
     job().frozen
 }
 
+/// The last screenshot's [frozen ms, total ms, slices while frozen, data
+/// blocks erased] (DBG:FLASH?; emu/shottest.py).
+pub fn stats() -> [u32; 4] {
+    unsafe { *core::ptr::addr_of!(STATS) }
+}
+
+fn ms_since(t0: u32) -> u32 {
+    cyc().wrapping_sub(t0) / (crate::clock::HCLK_HZ / 1000)
+}
+
 /// The result of the last finished shot, once.
 pub fn take_result() -> Option<Shot> {
     unsafe { (*core::ptr::addr_of_mut!(RESULT)).take() }
@@ -428,6 +454,9 @@ pub fn poll_on(disk: &mut dyn BlockDevice) -> Option<Shot> {
 
 fn step(disk: &mut dyn BlockDevice) -> Option<Shot> {
     let j = job();
+    if j.frozen {
+        j.polls += 1;
+    }
     let r = match j.phase {
         Phase::Idle => return None,
         Phase::Start => {
@@ -464,11 +493,20 @@ fn step(disk: &mut dyn BlockDevice) -> Option<Shot> {
 
 fn finish(j: &mut Job, r: Shot) {
     j.phase = Phase::Idle;
-    j.frozen = false;
+    if j.frozen {
+        j.frozen = false;
+        unsafe { (*core::ptr::addr_of_mut!(STATS))[0] = ms_since(j.t0) };
+    }
     if j.kind == K_CSV {
         unsafe { *core::ptr::addr_of_mut!(CSV_RESULT) = Some(r) };
     } else {
-        unsafe { *core::ptr::addr_of_mut!(RESULT) = Some(r) };
+        unsafe {
+            *core::ptr::addr_of_mut!(RESULT) = Some(r);
+            let s = &mut *core::ptr::addr_of_mut!(STATS);
+            s[1] = ms_since(j.t0);
+            s[2] = j.polls;
+            s[3] = j.erases;
+        }
     }
     if j.wrote {
         MEDIUM_CHANGED.store(true, Ordering::Relaxed);
@@ -605,6 +643,7 @@ impl Job {
         if self.got == self.ncl {
             self.i = 0;
             self.filled = false;
+            self.pre = prep_blank().min(self.ncl);
             self.phase = Phase::Data;
         } else if self.i > v.clusters + 1 {
             return Some(Shot::Full);
@@ -664,16 +703,31 @@ impl Job {
             self.lba = v.data_start + (c - 2) * v.spc + self.i % v.spc;
             self.filled = true;
             self.wrote = true;
-            self.st = STEP0;
-            if self.i + 1 == self.nblk {
+            // A cluster the preparation found blank (nothing written since):
+            // straight to the page programs (write_step phase 1, as after an
+            // erase), no compare. Should it not be blank after all, the read
+            // back fails and the retry below compares and erases.
+            self.st = if self.i / v.spc < self.pre { Step { phase: 1, ..STEP0 } } else { STEP0 };
+            if self.i + 1 == self.nblk && self.frozen {
                 self.frozen = false; // every row has been read
+                unsafe { (*core::ptr::addr_of_mut!(STATS))[0] = ms_since(self.t0) };
             }
         }
         let buf = &calbackup::scratch()[0];
         match disk.write_step(self.lba, &buf[..], &mut self.st)? {
+            // A block that read blank but did not take the program (a
+            // sector whose erase a power cut interrupted, `prep_step`):
+            // once more, erased first. scratch[0] still holds the block.
+            false if !self.retried => {
+                self.retried = true;
+                self.st = Step { erase: true, ..STEP0 };
+                None
+            }
             false => Some(Shot::Error),
             true => {
                 self.filled = false;
+                self.retried = false;
+                self.erases += self.st.erase as u32;
                 self.i += 1;
                 if self.i == self.nblk {
                     self.fat_k = 0;
@@ -806,4 +860,307 @@ impl Job {
         let eoc = self.fat_get(disk, self.vc).is_some_and(|n| n >= 0xFFF8);
         Some(if eoc && self.vcrc == self.crc { Shot::Saved(self.n) } else { Shot::Error })
     }
+}
+
+// ------------------------------------------------- idle-time preparation
+//
+// The next shot's clusters erased ahead of time (docs/ram-budget.md "The
+// screenshot: streamed from the panel"; the owner's option 3). A shot takes
+// the first free clusters of FAT 1 (first fit, `alloc`), and `write_step`
+// skips the erase of a block that is already blank, so keeping the first
+// `ncl` free clusters blank takes the 76 x ~45 ms of sector erases out of the
+// frozen time. Nothing is reserved or linked: the prepared clusters are
+// ordinary free clusters that happen to read 0xFF. Consequences:
+//   * FAT / directory never written: a power cut mid-prepare leaves at worst
+//     a half-erased free sector (no lost clusters, nothing for fatren /
+//     fsck); the USB volume does not show free clusters (vdisk.rs; the raw
+//     DEBUG/SPIFLASH.BIN shows them as they are, 0xFF);
+//   * any other writer may take them (a csvlog commit, a fast-log session,
+//     a firmware file staged from the PC): it then writes faster, and the
+//     preparation tops the set up again afterwards;
+//   * purely a speed-up: the shot's `write_step` still compares every block
+//     and erases what is not blank (a cluster taken / freed meanwhile, a
+//     sector whose erase a power cut interrupted), and a block whose read
+//     back fails is written once more with a forced erase (`data`).
+// Steps (`prep_poll`, main loop, at most ~1 ms of SPI each): boot sector;
+// FAT 1 entries in 64-entry reads up to the next free cluster; that
+// cluster's blocks checked blank 1 KiB per step; a dirty block erased (the
+// FAT entry re-read in the same step first: still free) and, once the chip
+// is idle, checked again. Ready after `ncl` blank free clusters (fewer on a
+// nearly full disk: then all the free ones). Any program / erase by another
+// writer (msc::FLASH_WRITES moved since our last step) restarts the scan,
+// once the disk has been quiet for PREP_QUIET_MS. The caller (main.rs) runs
+// it only when nothing else may be disturbed: no disk job in flight (shot,
+// csvlog commit, fast-log session, upload / staging: their data sits in
+// free clusters until linked), no AD2 stream (this module is region C),
+// no logger session, no host USB disk I/O in the last ~0.5 s.
+
+use core::sync::atomic::AtomicU32;
+
+/// No flash write by another writer for this long before (re)starting.
+const PREP_QUIET_MS: u64 = 2000;
+/// `Off` (no disk, a read failed, an erase timed out) is retried after this.
+const PREP_RETRY_MS: u64 = 60_000;
+/// FAT entries read per step.
+const PREP_FAT_RD: usize = 64;
+/// Blank check: bytes read per step (~0.7 ms at 12.5 MHz).
+const PREP_CHK: u32 = 1024;
+/// Longest wait for one of our erases (cycles, 1 s; tSE max 400 ms).
+const PREP_OP_CYC: u32 = crate::clock::HCLK_HZ;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pp {
+    /// Waiting for the quiet time; then the boot sector.
+    Start,
+    /// FAT 1 from cluster `c` on.
+    Scan,
+    /// Blank check of cluster `c`, block `b`, from byte `off`.
+    Check,
+    /// Our erase of that block was started (`Check` again once the chip
+    /// is idle).
+    Erase,
+    /// `found` clusters are blank (all a shot needs, or every free one).
+    Ready,
+    /// No usable disk / a read failed / an erase timed out: idle until
+    /// another writer changes the disk, or PREP_RETRY_MS.
+    Off,
+}
+
+struct Prep {
+    st: Pp,
+    /// msc::FLASH_WRITES after our last step / when last seen moving.
+    gen: u32,
+    t_gen: u64,
+    fat_start: u32,
+    data_start: u32,
+    spc: u32,
+    last: u32,
+    /// Clusters a screenshot takes.
+    ncl: u32,
+    c: u32,
+    b: u32,
+    off: u32,
+    /// Blank free clusters found so far (in first-fit order).
+    found: u32,
+    /// The block in `Check` has been erased by us once already.
+    erased: bool,
+    t_op: u32,
+}
+
+const PREP0: Prep = Prep {
+    st: Pp::Start,
+    gen: 0,
+    t_gen: 0,
+    fat_start: 0,
+    data_start: 0,
+    spc: 1,
+    last: 0,
+    ncl: 0,
+    c: 2,
+    b: 0,
+    off: 0,
+    found: 0,
+    erased: false,
+    t_op: 0,
+};
+static mut PREP: Prep = PREP0;
+/// Sector erases the preparation started since boot (DBG:FLASH?).
+static PREP_ERASES: AtomicU32 = AtomicU32::new(0);
+
+#[inline(always)]
+fn prep() -> &'static mut Prep {
+    unsafe { &mut *core::ptr::addr_of_mut!(PREP) }
+}
+
+/// Free clusters known blank right now: the first `found` of FAT 1 in first-
+/// fit order (= the ones a shot's `alloc` takes first) while the preparation
+/// is Ready and nothing has written the flash since its last step; else 0.
+fn prep_blank() -> u32 {
+    let p = prep();
+    if p.st == Pp::Ready && p.gen == crate::msc::FLASH_WRITES.load(Ordering::Relaxed) {
+        p.found
+    } else {
+        0
+    }
+}
+
+/// (state: 0 waiting / 1 working / 2 ready / 3 off, blank clusters found,
+/// erases since boot) for DBG:FLASH?.
+pub fn prep_stats() -> [u32; 3] {
+    let p = prep();
+    let st = match p.st {
+        Pp::Start => 0,
+        Pp::Scan | Pp::Check | Pp::Erase => 1,
+        Pp::Ready => 2,
+        Pp::Off => 3,
+    };
+    [st, p.found, PREP_ERASES.load(Ordering::Relaxed)]
+}
+
+/// Main loop, every pass (hot: inlined, region B; only a pass with work to
+/// do reaches the cold step). `ok` = the caller's conditions (see above).
+#[cfg(target_os = "none")]
+#[inline(always)]
+pub fn prep_poll(now: u64, ok: bool) {
+    if prep_due(now, ok) {
+        prep_step(disk());
+        prep().gen = crate::msc::FLASH_WRITES.load(Ordering::Relaxed); // our own erase
+    }
+}
+
+/// `prep_poll`'s bookkeeping: a step is due now.
+#[inline(always)]
+fn prep_due(now: u64, ok: bool) -> bool {
+    let p = prep();
+    let g = crate::msc::FLASH_WRITES.load(Ordering::Relaxed);
+    if g != p.gen {
+        // Another writer: start over once it has been quiet.
+        p.gen = g;
+        p.t_gen = now;
+        p.st = Pp::Start;
+    } else if p.st == Pp::Off && now.saturating_sub(p.t_gen) >= PREP_RETRY_MS {
+        p.t_gen = now.saturating_sub(PREP_QUIET_MS);
+        p.st = Pp::Start;
+    }
+    !matches!(p.st, Pp::Ready | Pp::Off) && ok && !busy() && now.saturating_sub(p.t_gen) >= PREP_QUIET_MS
+}
+
+/// Power-off / reset paths: let an erase of ours finish (<= ~0.4 s) so the
+/// power never cuts it (harmless anyway: a free sector).
+#[cfg(target_os = "none")]
+pub fn prep_finish() {
+    if prep().st == Pp::Erase {
+        let _ = crate::fastenc::Nor::read(disk(), 0, &mut [0u8; 1]); // waits for BUSY
+        prep().st = Pp::Start;
+    }
+}
+
+/// One preparation step on any disk (host test: tools/fatren-test "prep";
+/// the device uses `prep_poll`). The caller keeps `FLASH_WRITES` (host:
+/// `prep_on` below does it).
+#[inline(never)]
+fn prep_step(d: &mut dyn crate::fastlog::Disk) {
+    let p = prep();
+    let blk = BLK as u32;
+    // An erase (ours, or another writer's) still running: never wait for it
+    // here (every read below would, spiflash.rs `read_at`).
+    if d.nor().busy() {
+        if p.st == Pp::Erase && cyc().wrapping_sub(p.t_op) > PREP_OP_CYC {
+            p.st = Pp::Off;
+        }
+        return;
+    }
+    match p.st {
+        Pp::Ready | Pp::Off => {}
+        Pp::Start => {
+            let mut b = [0u8; 512];
+            let n = d.bd().block_count();
+            let v = if d.bd().present() && d.bd().block_size() == blk && d.nor().read(0, &mut b) { parse_bpb(&b, n) } else { None };
+            let Some(v) = v else {
+                p.st = Pp::Off;
+                return;
+            };
+            p.fat_start = v.fat_start;
+            p.data_start = v.data_start;
+            p.spc = v.spc;
+            p.last = v.clusters + 1;
+            p.ncl = FILE_LEN.div_ceil(v.spc * blk);
+            p.c = 2;
+            p.found = 0;
+            p.st = Pp::Scan;
+        }
+        Pp::Scan => {
+            if p.found >= p.ncl || p.c > p.last {
+                p.st = Pp::Ready;
+                return;
+            }
+            let mut e = [0u8; 2 * PREP_FAT_RD];
+            let n = ((p.last + 1 - p.c) as usize).min(PREP_FAT_RD);
+            if !d.nor().read(p.fat_start * blk + p.c * 2, &mut e[..2 * n]) {
+                p.st = Pp::Off;
+                return;
+            }
+            for k in 0..n {
+                if le16(&e, 2 * k) == 0 {
+                    p.b = 0;
+                    p.off = 0;
+                    p.erased = false;
+                    p.st = Pp::Check;
+                    return;
+                }
+                p.c += 1;
+            }
+        }
+        Pp::Check => {
+            let a = (p.data_start + (p.c - 2) * p.spc + p.b) * blk;
+            let mut buf = [0u8; 256];
+            let end = p.off + PREP_CHK;
+            while p.off < end {
+                if !d.nor().read(a + p.off, &mut buf) {
+                    p.st = Pp::Off;
+                    return;
+                }
+                if buf.iter().any(|&x| x != 0xFF) {
+                    // Still free? (FAT 1 re-read in this step: nothing ran
+                    // since, so the erase can only hit a free cluster.)
+                    let mut e = [0u8; 2];
+                    if !d.nor().read(p.fat_start * blk + p.c * 2, &mut e) {
+                        p.st = Pp::Off;
+                        return;
+                    }
+                    if le16(&e, 0) != 0 {
+                        p.st = Pp::Start;
+                        return;
+                    }
+                    if p.erased {
+                        // Erased and still not blank: skip the cluster (a
+                        // shot that takes it erases it again itself).
+                        p.c += 1;
+                        p.st = Pp::Scan;
+                        return;
+                    }
+                    d.nor().erase(a, false);
+                    PREP_ERASES.fetch_add(1, Ordering::Relaxed);
+                    p.t_op = cyc();
+                    p.st = Pp::Erase;
+                    return;
+                }
+                p.off += buf.len() as u32;
+            }
+            if p.off < blk {
+                return;
+            }
+            p.off = 0;
+            p.erased = false;
+            p.b += 1;
+            if p.b == p.spc {
+                p.found += 1;
+                p.c += 1;
+                p.st = Pp::Scan;
+            }
+        }
+        Pp::Erase => {
+            // Done: check the block again.
+            p.off = 0;
+            p.erased = true;
+            p.st = Pp::Check;
+        }
+    }
+}
+
+/// Host test: back to the boot state.
+#[allow(dead_code)]
+pub fn prep_reset() {
+    *prep() = PREP0;
+}
+
+/// Host test: one step, with the hot wrapper's bookkeeping (`now` in ms;
+/// `ok` as main.rs passes it). Returns the state code of `prep_stats`.
+#[allow(dead_code)]
+pub fn prep_on(d: &mut dyn crate::fastlog::Disk, now: u64, ok: bool) -> u32 {
+    if prep_due(now, ok) {
+        prep_step(d);
+        prep().gen = crate::msc::FLASH_WRITES.load(Ordering::Relaxed);
+    }
+    prep_stats()[0]
 }

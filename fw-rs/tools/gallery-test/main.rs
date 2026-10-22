@@ -87,6 +87,7 @@ pub mod msc {
     pub static HOST_WRITING: AtomicBool = AtomicBool::new(false);
     pub static LOG_SESSION: AtomicBool = AtomicBool::new(false);
     pub static LOG_FLUSHING: AtomicBool = AtomicBool::new(false);
+    pub static FLASH_WRITES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     /// Test control of `host_mounted`.
     pub static MOUNTED: AtomicBool = AtomicBool::new(false);
     pub fn host_mounted() -> bool {

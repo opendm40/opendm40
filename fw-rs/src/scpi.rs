@@ -503,7 +503,12 @@ pub enum Log {
 ///                           unchopped at 160 .. 640 S/s run on it too; in a main-loop
 ///                           AD1 session `late` = samples read blind after an
 ///                           AD1F lost to the INTF read-clear race)
-///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
+///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed, then the last
+///                           screenshot (screenshot.rs `stats`): frozen_ms,
+///                           total_ms,slices_frozen,blocks_erased, then the
+///                           idle-time preparation (`prep_stats`): state (0
+///                           waiting, 1 working, 2 ready, 3 off),
+///                           clusters_ready,erases_since_boot
 ///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
 ///                           as a crash (1st: fw-rs reboots; 2nd without 60 s
 ///                           healthy: recovery = marker zeroed, DESTRUCTIVE)
