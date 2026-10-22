@@ -39,7 +39,9 @@ pub const MAX_LEN: u32 = (crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR +
 const _: () = assert!(REC_MAX <= crate::dlog::SBLK * crate::dlog::SBLK_MAX);
 
 struct Snap {
-    rec: &'static [u16],
+    /// None until the first `set` (an Option so SNAP is all zero: .bss, not
+    /// 548 B of the .data load image in region C; region C audit #1).
+    rec: Option<&'static [u16]>,
     /// Volts = a + b * code; seconds per sample; trigger / centre index.
     a: f32,
     b: f32,
@@ -53,7 +55,7 @@ struct Snap {
     cur_ok: bool,
 }
 
-static mut SNAP: Snap = Snap { rec: &[], a: 0.0, b: 0.0, dt: 0.0, t0: 0, hdr: [0; HDR_MAX], hdr_n: 0, nb: 0, cur_ok: false };
+static mut SNAP: Snap = Snap { rec: None, a: 0.0, b: 0.0, dt: 0.0, t0: 0, hdr: [0; HDR_MAX], hdr_n: 0, nb: 0, cur_ok: false };
 
 /// Per block: mode (fixed predictor order / raw), coded bytes, CRC-32.
 /// Written by `set` before any use: SRAM (.dmabuf, not zeroed at reset),
@@ -115,7 +117,7 @@ impl Hdr {
 #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
 pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr) {
     let s = snap();
-    s.rec = rec;
+    s.rec = Some(rec);
     s.a = a;
     s.b = b;
     s.dt = if fs > 0.0 { 1.0 / fs } else { 0.0 };
@@ -163,15 +165,16 @@ pub fn fill(off: u32, buf: &mut [u8]) {
     let p = plan();
     let off = off as usize;
     let head = head_len(s);
+    let rec = s.rec.unwrap_or(&[]);
     let mut i = 0;
     if off < head {
         let mut h = [0u8; crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR + 8 * crate::dlog::SBLK_MAX + 4];
-        let k = crate::dlog::scope_header(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, s.rec.len() as u32, &mut h);
+        let k = crate::dlog::scope_header(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, rec.len() as u32, &mut h);
         crate::dlog::scope_table(&p.len[..s.nb], &p.crc[..s.nb], &mut h[k..]);
         i = (head - off).min(buf.len());
         buf[..i].copy_from_slice(&h[off..off + i]);
     }
-    let codes = |b: usize| &s.rec[b * crate::dlog::SBLK..((b + 1) * crate::dlog::SBLK).min(s.rec.len())];
+    let codes = |b: usize| &rec[b * crate::dlog::SBLK..((b + 1) * crate::dlog::SBLK).min(rec.len())];
     while i < buf.len() {
         let at = (off + i) as u32;
         if !s.cur_ok || p.enc.pos != at {

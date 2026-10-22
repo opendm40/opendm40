@@ -201,7 +201,7 @@ SECTIONS
         *(.text.*7dm40_fw6csvlog15catalog_scpi_on*);
         /* Tap / page-only code that sat inlined in hot callers (region B
          * audit 2026-10-22 #2): the temperature page's draw / key helper
-         * (App::with_temp_page, all its instances), the scope's Save CSV
+         * (App::with_temp_page), the scope's Save CSV
          * (App::sp_save_csv, with scope_csv::set and the DLG block plan). */
         *(.text.*7dm40_fw3app*3App14with_temp_page*);
         *(.text.*7dm40_fw3app*3App11sp_save_csv*);

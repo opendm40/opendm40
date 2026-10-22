@@ -371,7 +371,11 @@ pub fn next() -> (u8, u8) {
     unsafe { *core::ptr::addr_of!(NEXT) }
 }
 
-static mut JOB: Job = JOB0;
+/// Before the first `start` (which sets JOB0) only `state` = Idle is read:
+/// the sentinels JOB0 sets (slot / cur = NONE, hint 2, ik 1, the coder's
+/// start state) are zero here, so JOB is .bss, not 512 B of the .data load image in region C (region C
+/// audit #1).
+static mut JOB: Job = Job { slot: 0, hint: 0, cur: 0, ik: 0, enc: dlog::ENC_ZERO, ..JOB0 };
 /// The last finished recording, not yet shown (`take_result`).
 static mut RESULT: Option<Status> = None;
 /// The device's own SpiFlash handle (created on first use).

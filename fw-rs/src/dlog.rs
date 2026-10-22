@@ -468,6 +468,9 @@ pub const ENC0: Enc = Enc {
     rows: 0,
     csv: 0,
 };
+/// All zero bits: the placeholder of a zero-initialised (.bss) static that
+/// is set to ENC0 before use (csvlog.rs JOB).
+pub const ENC_ZERO: Enc = Enc { at: Ad { a: 0, n: 0 }, av: Ad { a: 0, n: 0 }, ..ENC0 };
 
 impl Enc {
     /// A new file whose CSV header text is `hl` bytes.

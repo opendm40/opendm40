@@ -669,7 +669,7 @@ impl App {
                 if matches!(self.kp_target, 3 | 4) {
                     self.limits_page();
                 } else if self.kp_dmm() {
-                    self.with_temp_page(|p| ui::temp_page(p));
+                    self.with_temp_page(None);
                 } else {
                     ui::gen_static(&self.gen);
                 }
@@ -682,7 +682,7 @@ impl App {
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
-            View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(|p| ui::temp_page(p)),
+            View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(None),
             View::Range if self.dmm.pw.on => {
                 ui::pw::settings_page(&self.dmm.pw_state());
                 self.pw_status_key = ui::pw::settings_status(&self.dmm.pw, 0, self.pw_help);
@@ -2354,18 +2354,18 @@ impl App {
             match g {
                 Gesture::Down(p) => {
                     if let Some(c) = self.tp_pressed.take() {
-                        self.with_temp_page(|tp| ui::temp_key(tp, c, false));
+                        self.with_temp_page(Some((c, false)));
                     }
                     self.tp_pressed = ui::temp_hit(k, p.x, p.y);
                     if let Some(c) = self.tp_pressed {
-                        self.with_temp_page(|tp| ui::temp_key(tp, c, true));
+                        self.with_temp_page(Some((c, true)));
                     }
                 }
                 Gesture::Drag(_, p, _) | Gesture::Move(_, p) if ui::temp_hit(k, p.x, p.y) == self.tp_pressed => {}
                 Gesture::Grab(_) => {}
                 _ => {
                     if let Some(c) = self.tp_pressed.take() {
-                        self.with_temp_page(|tp| ui::temp_key(tp, c, false));
+                        self.with_temp_page(Some((c, false)));
                     }
                 }
             }
@@ -3360,9 +3360,11 @@ impl App {
     }
 
     /// The temperature page's state (sensor, offset, unit, NTC user
-    /// parameters, info line) for drawing it or one of its keys.
+    /// parameters, info line), then draw the page (None) or one of its keys
+    /// (Some((code, pressed))). One function, not a closure parameter: four
+    /// monomorphized copies of ~330 B each before (region C audit #1).
     #[inline(never)] // .cold (link-native.x): temperature page draw / taps
-    fn with_temp_page(&self, f: impl FnOnce(&ui::TempPage)) {
+    fn with_temp_page(&self, key: Option<(u8, bool)>) {
         let k = self.dmm.t_sensor();
         let mut b = [0u8; 64];
         let mut n = 0;
@@ -3392,7 +3394,10 @@ impl App {
             beta,
             info: core::str::from_utf8(&b[..n]).unwrap_or(""),
         };
-        f(&p);
+        match key {
+            None => ui::temp_page(&p),
+            Some((c, pressed)) => ui::temp_key(&p, c, pressed),
+        }
     }
 
     /// Temperature page: the current sensor's offset (C, clamped to
@@ -3401,7 +3406,7 @@ impl App {
         let k = self.dmm.t_sensor();
         self.dmm.set_t_offs(k, c);
         if self.view == View::Range && self.dmm.hy_mode() == 15 {
-            self.with_temp_page(|p| ui::temp_key(p, ui::TK_OFFS, false));
+            self.with_temp_page(Some((ui::TK_OFFS, false)));
         }
     }
 
