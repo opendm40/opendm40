@@ -1164,8 +1164,10 @@ link-native.x now splits region B:
   may run while a stream does. The linker fails when it does not fit.
 - **C = 0x08080000..0x080A0000, `.cold`** holds modules matched by path in
   the section names: calbackup, fatren, native, recovery, genuine, gallery,
-  screenshot, dlog, fatdir, vdisk, upload, hyspi, ad2exp, scope_csv, boot,
-  persist. It also holds the `.data` load image, which is read once at boot.
+  screenshot, dlog, fatdir, vdisk, upload, hyspi, ad2exp, scope_csv, boot
+  (code and named rodata). It also holds the `.data` load image, which is
+  read once at boot. persist was there in f5f8e96 and went back to B: its
+  crc runs on every main-loop pass (lat_pc in persist::crc, 9..18 us).
 
 Calls from hot code into C are conditional (the gallery page, a recording's
 rows, host disk reads, uploads, boot, DBG tests), and each costs a stall
@@ -1352,3 +1354,28 @@ switched inside a DMA frame without the CPU. The ENOB trade-off
 - The 38.4 k DMA failure is fixed in a4907d0 (probes as DMA frames,
   emulator PASS); it needs a device run.
 - 38.4 kS/s needs a host drain without CSV, e.g. a raw LOG:DATA? counter.
+
+**f5f8e96** (raw drain `LOG:DATA?` without CSV, 60 s; calibrator square):
+
+| run | frames | lost (LOG:COUNt?) | stamp gaps | CPU | max_lat, lat_pc |
+|---|---|---|---|---|---|
+| 4800, DRAW 2 | CPU /8 + CKPH | 0 of 288 193 | 0 | 6.4 % | 0.24 us |
+| 19200, DRAW 2 | CPU /8 + CKPH | 0 of 1 153 105 | 0 | 25.6 % | 0.24 us |
+| 38400 | CPU /8 + CKPH | 1 (`late` 1) of 2 304 885; 60 676 overwritten (the host drained ~37 kS/s) | 2573 (ring full) | 51 % | 9.3 us, persist::crc |
+| 9600 | DMA /16 | 0 of 191 999 (20 s) | 0 | 3.6 % | 0.24 us |
+| 19200 / 38400 | DMA /16 | FAIL: bad ~all, the lock ran to the clamp | | | 18.2 / 5.4 us, persist::crc |
+
+Two faults:
+- `persist` was in `.cold`, but its crc runs on every pass: a 9..18 us stall
+  under a stream.
+- A DMA frame still running at the next entry (here: an A delayed by that
+  stall) was aborted. Its last byte stayed in flight, and every later frame
+  read one byte shifted: bad samples and garbage probes.
+
+Fixed after f5f8e96:
+- persist is back in B.
+- `dma_finish` waits for the frame (bounded), ends the shift, and empties
+  the receive register.
+- `dma_kick` empties it too.
+
+Emulator PASS (DMA 19200 / 38400, CPU 4800 DRAW 2, -63 ppm).
