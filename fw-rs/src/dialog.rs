@@ -50,12 +50,16 @@ pub enum Overlay {
     /// Power-meter energy reset confirm (`energy_reset`, the power-off
     /// confirm's box and buttons), cancelled at `until` (ms).
     EnergyReset { until: u64 },
+    /// A firmware file was copied onto the USB disk (vwrite.rs): install?
+    /// (`fw_install`, the power-off confirm's box and buttons); No at
+    /// `until` (ms).
+    FwInstall { until: u64 },
 }
 
 impl Overlay {
     pub fn until(&self) -> u64 {
         match *self {
-            Overlay::PowerOff { until } | Overlay::Toast { until } | Overlay::PowerEntry { until } | Overlay::EnergyReset { until } => until,
+            Overlay::PowerOff { until } | Overlay::Toast { until } | Overlay::PowerEntry { until } | Overlay::EnergyReset { until } | Overlay::FwInstall { until } => until,
         }
     }
 }
@@ -102,6 +106,25 @@ pub fn energy_reset() {
     let b = BOX;
     centred((b.0, b.1, b.2, 40), "Reset energy?", FG, TITLE_BG);
     centred((b.0, b.1 + 40, b.2, 60), "Wh, VAh and the time", FG, BODY_BG);
+    lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
+    frame(b, FRAME);
+    button(NO, "No", BTN);
+    button(YES, "Yes", BTN_RED);
+}
+
+/// The firmware install question (vwrite.rs: a valid update file copied
+/// onto the USB disk is staged as DM40FW.BIN); hit test = `power_off_hit`.
+pub const FW_TITLE: &str = "Firmware received";
+pub const FW_BODY: &str = "Install it now?";
+/// Auto-answer No, ms.
+pub const FW_MS: u64 = 60_000;
+/// The toast for a DM40*.BIN that is no valid update file.
+pub const FW_BAD: &str = "Not a DM40 update file";
+
+pub fn fw_install() {
+    let b = BOX;
+    centred((b.0, b.1, b.2, 40), FW_TITLE, FG, TITLE_BG);
+    centred((b.0, b.1 + 40, b.2, 60), FW_BODY, FG, BODY_BG);
     lcd::fill_rect(b.0, b.1 + 100, b.2, b.3 - 100, BODY_BG);
     frame(b, FRAME);
     button(NO, "No", BTN);

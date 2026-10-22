@@ -1626,6 +1626,20 @@ fn main() {
         save(&out, &format!("m05-help{page}"));
     }
 
+    // 6e. Confirm dialogs (dialog.rs, one box and Yes / No): power off,
+    // energy reset, the firmware install question (vwrite.rs).
+    for (k, f) in [("power-off", dialog::power_off as fn()), ("energy-reset", dialog::energy_reset), ("fw-install", dialog::fw_install)] {
+        host::reset(0);
+        f();
+        let (x, y, w2, h2) = dialog::BOX;
+        // The stock confirm draws ASCII26 at spacing 0, where its glyphs
+        // touch by design (as the menu rows): gaps and margins checked.
+        ck.check_opts(&format!("confirm/{k}"), &[("screen", Bx::new(0, 0, 480, 320)), ("dialog", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))], false);
+        if k == "fw-install" {
+            save(&out, "t04-confirm-fw-install");
+        }
+    }
+
     // 6d. Main menu (gallery row on top, four tiles, combined-view row).
     for combo in [ui::View::DmmScope, ui::View::Dmm] {
         host::reset(0);
@@ -1655,6 +1669,9 @@ fn main() {
         (sentinel::Alert::VJack.toast(), false),
         (sentinel::Alert::Live.toast(), false),
         (sentinel::Alert::Overload.toast(), false),
+        // Firmware file on the USB disk (vwrite.rs, app.rs).
+        (dialog::FW_BAD, false),
+        ("Installing firmware...", true),
     ]
     .iter()
     .enumerate()

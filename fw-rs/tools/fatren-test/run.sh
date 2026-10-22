@@ -44,6 +44,15 @@
 #      DEBUG/SPIFLASH.BIN == the image; refresh steps: a new file appended,
 #      a deleted one (slot 0xE5), lock + bus reset (no compaction), unlock
 #      (compacted), forget.
+#   20. vwrite (src/vwrite.rs, host writes on that volume; vwrite_test.py):
+#      deletes of LOGS / SHOTS / SCOPE files in five write orders (SPI files
+#      deleted after both marks, nothing else, fsck clean, the volume = the
+#      host's image until the Allow, then regenerated), one mark only (a
+#      move: nothing deleted), a delete on the meter while frozen; firmware
+#      copies (names, orders, Yes / No, into freed clusters, overwrite, a
+#      non-update DM40*.BIN); refusals (new file / dir, README, INFO, rename,
+#      label); a lockless host; power cuts in the staging + commit; the
+#      captured kernel sequences (captures/*.vcap.gz, vreplay.py).
 # upload (src/upload.rs, DBG:UPLOAD): DM40FW.BIN byte-identical, staged
 #   dm40*.bin removed, _DM40PRV.BIN kept, chunk sizes, wrong CRC / repeated
 #   chunk / not an update file refused, power cut before every block write.
@@ -106,7 +115,8 @@ set -e
 cd "$(dirname "$0")"
 RUSTUP_HOME="$(cd ../../../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../../../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
 W=$(mktemp -d)
-trap 'rm -rf "$W"' EXIT
+# KEEP=<dir>: keep the work directory there (debugging).
+trap '[ -n "$KEEP" ] && rm -rf "$KEEP" && cp -r "$W" "$KEEP"; rm -rf "$W"' EXIT
 rustc --edition 2021 -O --cfg 'feature="recovery-file"' --cfg 'feature="vdisk"' main.rs -o "$W/t"
 export MTOOLS_SKIP_CHECK=1
 mkimg() {
@@ -418,7 +428,7 @@ vdisk() {
     local fl=$1 img=$2; shift 2
     "$W/t" $img vdisk $fl $W/src/UID.BIN $W/src/OTP.BIN $W/src/OPTBYTES.BIN "$@" | tee $W/vd.out
     grep -q "present_before_init=false" $W/vd.out && grep -q "media_changed_after_init=false" $W/vd.out || { echo "FAIL: init"; exit 1; }
-    grep -q "read_only=true write_block=false read_past_end=false" $W/vd.out && echo "ok: read-only (write_block refused, nothing past the end)" || { echo "FAIL: read-only"; exit 1; }
+    grep -q "read_only=false write_block=false read_past_end=false" $W/vd.out && echo "ok: writable, a zeroed boot sector refused, nothing past the end" || { echo "FAIL: write_block"; exit 1; }
 }
 # vdok <img> <flash1m>: fsck clean, label, geometry, every region file equal
 # to its source, BACKUP.TXT CRC-32s, read-only attributes.
@@ -1161,4 +1171,12 @@ grep -q "^step 4: locked .*media_changed=false" $W/vd.out && grep -q "^step 5: r
 grep -q "^step 6: free .*media_changed=true" $W/vd.out && places $VD.5 $VD.6 compact && echo "ok: step 6: unlocked: compacted, media change" || { echo "FAIL at line $LINENO"; exit 1; }
 volok $VD.6 $W/vs3.img || exit 1
 grep -q "^step 7: forget LOG000.DLG media_changed=true" $W/vd.out && ! mdir -b -i $VD.7 ::LOGS | grep -q LOG000 && echo "ok: step 7: forget (device delete): gone at once, media change" || { echo "FAIL at line $LINENO"; exit 1; }
+
+echo "=== vwrite: host writes on the USB volume (delete from the PC, drag-and-drop firmware update)"
+# vwrite_test.py: mtools-made sector diffs written through vserve (main.rs)
+# in several orders, fsck + file checks of the SPI disk after each scenario,
+# power cuts in the firmware staging / commit, and the captured kernel
+# sequences in captures/ (usbip_msc.py --capture; vreplay.py).
+CAPS=$(ls captures/*.vcap.gz 2>/dev/null || true)
+python3 -I vwrite_test.py "$W/t" $W/f1m_native $W/src $VS $NATIVE $W/a.bin $W/vw $CAPS || { echo "FAIL: vwrite"; exit 1; }
 echo PASS

@@ -1285,9 +1285,15 @@ impl Scpi {
                         }
                         // The generated USB volume: EJECT n ("no medium" for n
                         // commands, then UNIT ATTENTION) | STAT? -> <files>,<next free
-                        // cluster>,<files left out>.
+                        // cluster>,<files left out> | RO 0|1 (write-protect it: hosts
+                        // mount it read-only, live updates while mounted; read at
+                        // the host's next mount), RO? | WR? -> host writes (vwrite.rs):
+                        // <accepted>,<refused>,<busy>,<last refused LBA>,<SPI files
+                        // deleted>,<firmware files committed>,<rejected>,<root
+                        // records>,<FAT pairs>,<staged clusters>,<frozen>,<staging>,
+                        // <firmware state 0 none 1 ask 2 asked 3 declined 4 install 5 bad>.
                         #[cfg(feature = "vdisk")]
-                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, core::sync::atomic::Ordering::Relaxed); self.put(b"OK") } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err = Some("Undefined header") } continue; }
+                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, core::sync::atomic::Ordering::Relaxed); self.put(b"OK") } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err = Some("Undefined header") } continue; }
                         b"RECOVER" | b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err = Some("Flash error"); continue; } Dbg::Reset }
                         _ => {
                             self.err = Some("Undefined header");

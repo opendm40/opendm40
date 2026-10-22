@@ -87,8 +87,25 @@ fn up() -> &'static mut Up {
     unsafe { &mut *core::ptr::addr_of_mut!(UP) }
 }
 
-/// An upload owns the SPI disk (and calbackup::scratch()).
+/// An upload owns the SPI disk (and calbackup::scratch()): this one over
+/// SCPI, or a firmware file being copied onto the USB volume (vwrite.rs
+/// staging).
 pub fn busy() -> bool {
+    up().active || staging()
+}
+
+#[cfg(feature = "vdisk")]
+fn staging() -> bool {
+    crate::vwrite::staging()
+}
+
+#[cfg(not(feature = "vdisk"))]
+fn staging() -> bool {
+    false
+}
+
+/// The SCPI upload (not the USB volume's staging) is active.
+pub fn scpi_busy() -> bool {
     up().active
 }
 
@@ -96,6 +113,12 @@ pub fn busy() -> bool {
 fn disk() -> &'static mut crate::spiflash::SpiFlash {
     let d = unsafe { &mut *core::ptr::addr_of_mut!(DISK) };
     d.get_or_insert_with(crate::spiflash::SpiFlash::new)
+}
+
+/// The SPI flash as a block device (vwrite.rs).
+#[cfg(target_os = "none")]
+pub fn spi() -> &'static mut dyn BlockDevice {
+    disk()
 }
 
 /// Drop the upload (nothing on the disk to undo).
@@ -137,7 +160,7 @@ pub fn begin(size: u32, crc: u32, now_ms: u64) -> R<()> {
 
 pub fn begin_on(dev: &mut dyn BlockDevice, size: u32, crc: u32, now_ms: u64) -> R<()> {
     abort();
-    if crate::screenshot::busy() || crate::csvlog::writing() {
+    if crate::screenshot::busy() || crate::csvlog::writing() || staging() {
         return Err("Mass storage busy");
     }
     if !(128..=MAX).contains(&size) {
@@ -213,28 +236,8 @@ fn flush(dev: &mut dyn BlockDevice, u: &mut Up) -> R<()> {
         if u.ncl == MAXCL {
             return Err("Data past the size");
         }
-        // Next free cluster after the last one taken (FAT 1 unchanged until
-        // END, so never one of ours).
-        let mut cur = u32::MAX;
-        loop {
-            if u.hint > v.clusters + 1 {
-                return Err("Mass storage full");
-            }
-            let fb = u.hint / FPER;
-            if fb != cur {
-                if !dev.read_block(v.fat_start + fb, fat) {
-                    return Err(E_IO);
-                }
-                cur = fb;
-            }
-            let free = le16(&fat[..], ((u.hint % FPER) * 2) as usize) == 0;
-            u.hint += 1;
-            if free {
-                u.cl[u.ncl] = (u.hint - 1) as u16;
-                u.ncl += 1;
-                break;
-            }
-        }
+        u.cl[u.ncl] = next_free(dev, &v, &mut u.hint, fat)?;
+        u.ncl += 1;
     }
     let lba = v.clba(u.cl[u.ncl - 1] as u32) + u.blocks % v.spc;
     if !(dev.write_block(lba, buf) && verify(dev, lba, buf, tmp)) {
@@ -243,6 +246,33 @@ fn flush(dev: &mut dyn BlockDevice, u: &mut Up) -> R<()> {
     u.blocks += 1;
     u.fill = 0;
     Ok(())
+}
+
+/// The next free cluster from `hint` on (FAT 1 unchanged while an upload /
+/// a staging owns the disk, so the clusters taken since are never handed
+/// out again: `hint` only grows). `fat` = a block buffer.
+pub(crate) fn next_free(dev: &mut dyn BlockDevice, v: &crate::fatren::Vol, hint: &mut u32, fat: &mut [u8; BLK]) -> R<u16> {
+    let mut cur = u32::MAX;
+    loop {
+        if *hint < 2 {
+            *hint = 2;
+        }
+        if *hint > v.clusters + 1 {
+            return Err("Mass storage full");
+        }
+        let fb = *hint / FPER;
+        if fb != cur {
+            if !dev.read_block(v.fat_start + fb, fat) {
+                return Err(E_IO);
+            }
+            cur = fb;
+        }
+        let free = le16(&fat[..], ((*hint % FPER) * 2) as usize) == 0;
+        *hint += 1;
+        if free {
+            return Ok((*hint - 1) as u16);
+        }
+    }
 }
 
 /// DBG:UPLoad:END? on the device's SPI flash: (size, crc).
@@ -275,7 +305,7 @@ fn end_inner(dev: &mut dyn BlockDevice) -> R<(u32, u32)> {
     if u.fill > 0 {
         flush(dev, u)?;
     }
-    let [buf, fat, tmp] = calbackup::scratch();
+    let [buf, _, tmp] = calbackup::scratch();
     if !dev.read_block(0, tmp) {
         return Err(E_IO);
     }
@@ -296,9 +326,42 @@ fn end_inner(dev: &mut dyn BlockDevice) -> R<(u32, u32)> {
     if !c != u.crc {
         return Err("Verify failed");
     }
-    // The chain in every FAT copy, FAT 1 first; per copy one write per
-    // touched block (the clusters ascend).
-    let cl = &u.cl[..u.ncl];
+    link_and_enter(dev, &v, &u.cl[..u.ncl], u.size)?;
+    #[cfg(feature = "vdisk")]
+    crate::dlog::set_stale();
+    Ok((u.size, u.crc))
+}
+
+/// A firmware file copied onto the USB volume (vwrite.rs): its data is
+/// already in the free clusters `cl` (file order, verified by the caller);
+/// every other dm40*.bin in the root is deleted (fatren::delete_updates),
+/// then the chain and the entry DM40FW.BIN as at END.
+pub fn commit_on(dev: &mut dyn BlockDevice, cl: &[u16], size: u32) -> R<()> {
+    if cl.is_empty() || cl.len() > MAXCL || !(128..=MAX).contains(&size) || (size as usize).div_ceil(BLK) != cl.len() {
+        return Err("Illegal parameter value");
+    }
+    let [buf, tmp, _] = calbackup::scratch();
+    if fatren::delete_updates(dev, buf, tmp).is_none() {
+        return Err(E_IO);
+    }
+    if !dev.read_block(0, tmp) {
+        return Err(E_IO);
+    }
+    let v = parse_bpb(&tmp[..], dev.block_count()).ok_or(E_IO)?;
+    if v.spc != 1 {
+        return Err(E_IO); // one 4 KiB block per cluster (the stock disk)
+    }
+    let r = link_and_enter(dev, &v, cl, size);
+    #[cfg(feature = "vdisk")]
+    crate::dlog::set_stale();
+    r
+}
+
+/// The chain `cl` in every FAT copy (FAT 1 first; per copy one write per
+/// touched block, fewer when the clusters ascend), then the root entry
+/// DM40FW.BIN of `size` bytes.
+fn link_and_enter(dev: &mut dyn BlockDevice, v: &crate::fatren::Vol, cl: &[u16], size: u32) -> R<()> {
+    let [buf, fat, tmp] = calbackup::scratch();
     for k in 0..v.nfats {
         let mut i = 0;
         while i < cl.len() {
@@ -322,7 +385,7 @@ fn end_inner(dev: &mut dyn BlockDevice) -> R<(u32, u32)> {
         }
     }
     // The root entry.
-    let slot = fatren::free_root_slot(dev, &v, buf).ok_or(E_IO)?.ok_or("Mass storage full")?;
+    let slot = fatren::free_root_slot(dev, v, buf).ok_or(E_IO)?.ok_or("Mass storage full")?;
     let lba = v.root_start + slot / (BLK as u32 / 32);
     if !dev.read_block(lba, buf) {
         return Err(E_IO);
@@ -336,11 +399,9 @@ fn end_inner(dev: &mut dyn BlockDevice) -> R<(u32, u32)> {
         e[d..d + 2].copy_from_slice(&DATE.to_le_bytes());
     }
     e[0x1A..0x1C].copy_from_slice(&cl[0].to_le_bytes());
-    e[0x1C..0x20].copy_from_slice(&u.size.to_le_bytes());
+    e[0x1C..0x20].copy_from_slice(&size.to_le_bytes());
     if !(dev.write_block(lba, buf) && verify(dev, lba, buf, tmp)) {
         return Err(E_IO);
     }
-    #[cfg(feature = "vdisk")]
-    crate::dlog::set_stale();
-    Ok((u.size, u.crc))
+    Ok(())
 }

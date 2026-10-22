@@ -64,6 +64,12 @@ mod msc {
         fn product(&self) -> &'static [u8; 16] {
             b"DM40 disk       "
         }
+        fn gates_writes(&self) -> bool {
+            false
+        }
+        fn write_error(&self) -> u8 {
+            0
+        }
         fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
             let _ = st;
             Some(self.write_block(lba, buf))
@@ -183,6 +189,8 @@ mod calbackup;
 
 #[path = "../../src/vdisk.rs"]
 mod vdisk;
+#[path = "../../src/vwrite.rs"]
+mod vwrite;
 
 /// Memory map for vdisk's reader: (address, bytes).
 static MEM: std::sync::OnceLock<Vec<(u32, Vec<u8>)>> = std::sync::OnceLock::new();
@@ -300,6 +308,197 @@ fn vdisk_dump(a: &[String]) {
         let n2 = vdisk::refresh(None);
         println!("  again: files={n2} media_changed={}", d.take_media_changed());
         vdisk_write(&mut d, &format!("{}.{step}", a[1]));
+    }
+}
+
+/// The SPI disk of `vserve` as a block device (4 KiB blocks) over `SPI`
+/// (the same bytes dlog's reader sees): vwrite.rs stages into it,
+/// csvlog::delete_on / upload::commit_on write it. `cut`: a power cut
+/// before changing write number `cut` (nothing written from then on).
+struct SpiDev {
+    writes: usize,
+    cut: Option<usize>,
+    dead: bool,
+}
+
+impl msc::BlockDevice for SpiDev {
+    fn present(&self) -> bool {
+        true
+    }
+    fn block_size(&self) -> u32 {
+        4096
+    }
+    fn block_count(&self) -> u32 {
+        (SPI.lock().unwrap().len() / 4096) as u32
+    }
+    fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool {
+        let d = SPI.lock().unwrap();
+        let o = lba as usize * 4096;
+        buf[..4096].copy_from_slice(&d[o..o + 4096]);
+        true
+    }
+    fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool {
+        let mut d = SPI.lock().unwrap();
+        let o = lba as usize * 4096;
+        if self.dead {
+            return false;
+        }
+        if d[o..o + 4096] != buf[..4096] {
+            if self.cut == Some(self.writes) {
+                self.dead = true;
+                return false;
+            }
+            self.writes += 1;
+        }
+        d[o..o + 4096].copy_from_slice(&buf[..4096]);
+        true
+    }
+}
+
+/// `main <spi.img> vserve <flash> <uid> <otp> <optbytes> [cut <k>]`: the USB
+/// volume (vdisk.rs + vwrite.rs) over the SPI image, served on stdin /
+/// stdout for tools/fatren-test/usbip_msc.py (a USB/IP mass-storage device
+/// for a real kernel) and vreplay.py (captured write sequences). Requests:
+/// one op byte + a u32 LE argument, replies one status byte unless noted:
+///   R lba        -> status, 512 bytes (status 0 ok)
+///   W lba + 512  -> 0 accepted, 1 + vwrite::last_error() refused
+///   T ms         the main loop at time ms: vwrite::poll, the install /
+///                dialog state, vdisk::refresh when dlog is stale
+///   L 0|1        PREVENT (1) / ALLOW (0) MEDIUM REMOVAL (vdisk::on_unlock)
+///   B            USB bus reset (vdisk::on_bus_reset)
+///   U            -> 1 if a UNIT ATTENTION is due (one-shot)
+///   P            -> 1 if the volume is write-protected (MODE SENSE WP)
+///   D            -> the meter's dialog: 0 none, 1 "install?", 2 "not an
+///                update file" (vwrite::take_dialog)
+///   A 0|1        answer the dialog (No / Yes)
+///   I            -> 1 if Yes was answered (install: zero marker + reset)
+///   S            save the SPI image to <spi.img>.out
+///   V n          dump the volume (sparse) to <spi.img>.vol<n>
+///   Q            -> u16 length + text: DBG:VDISK:WR? and STAT? fields
+///   G + 11 bytes a delete on the meter (csvlog::delete_on, 8.3 SPI name)
+///   X            exit
+fn vserve(a: &[String]) {
+    use msc::BlockDevice;
+    use std::io::{Read, Write};
+    use std::sync::atomic::Ordering::Relaxed;
+    let flash = fs::read(&a[3]).unwrap();
+    assert_eq!(flash.len(), 1 << 20, "1 MiB flash image");
+    let body: &'static [u8] = Vec::leak(flash[0x4000..0x4000 + calbackup::FW_MAX_BODY].to_vec());
+    MEM.set(vec![
+        (0x0800_0000, flash),
+        (0x1FFF_7A10, fs::read(&a[4]).unwrap()),
+        (0x1FFF_7800, fs::read(&a[5]).unwrap()),
+        (0x1FFF_C000, fs::read(&a[6]).unwrap()),
+    ])
+    .unwrap();
+    *SPI.lock().unwrap() = fs::read(&a[1]).unwrap();
+    dlog::set_disk(spi_read);
+    let cut = a.iter().position(|x| x == "cut").map(|i| a[i + 1].parse::<usize>().unwrap());
+    let dev: &'static mut SpiDev = Box::leak(Box::new(SpiDev { writes: 0, cut, dead: false }));
+    let devp: *mut SpiDev = dev;
+    vwrite::set_dev(dev);
+    vdisk::init(mem_read, body);
+    vdisk::boot_refresh();
+    let mut d = vdisk::VDisk;
+    let mut inp = std::io::stdin().lock();
+    let mut out = std::io::stdout().lock();
+    let mut hdr = [0u8; 5];
+    let mut sec = vec![0u8; 512];
+    let (mut gen, mut gen_t, mut now) = (dlog::gen(), 0u64, 0u64);
+    while inp.read_exact(&mut hdr).is_ok() {
+        let arg = u32::from_le_bytes([hdr[1], hdr[2], hdr[3], hdr[4]]);
+        let mut reply: Vec<u8> = vec![0];
+        match hdr[0] {
+            b'R' => {
+                let ok = d.read_block(arg, &mut sec);
+                reply[0] = !ok as u8;
+                reply.extend_from_slice(&sec);
+            }
+            b'W' => {
+                inp.read_exact(&mut sec).unwrap();
+                msc::HOST_WRITING.store(true, Relaxed);
+                reply[0] = if d.write_block(arg, &sec) { 0 } else { 1 + d.write_error() };
+                msc::HOST_WRITING.store(false, Relaxed);
+            }
+            b'T' => {
+                now = arg as u64;
+                vwrite::poll(now, false);
+                // main.rs: refresh once dlog::gen() has not moved for 1 s.
+                if dlog::gen() != gen {
+                    gen = dlog::gen();
+                    gen_t = now;
+                } else if dlog::stale() && now.saturating_sub(gen_t) >= 1000 {
+                    vdisk::refresh(None);
+                }
+            }
+            b'L' => {
+                msc::HOST_MOUNTED.store(arg != 0, Relaxed);
+                if arg == 0 {
+                    vdisk::on_unlock();
+                }
+            }
+            b'B' => {
+                msc::HOST_MOUNTED.store(false, Relaxed);
+                vdisk::on_bus_reset();
+            }
+            b'U' => reply[0] = d.take_media_changed() as u8,
+            b'P' => reply[0] = d.read_only() as u8,
+            b'D' => reply[0] = match vwrite::take_dialog() {
+                None => 0,
+                Some(true) => 1,
+                Some(false) => 2,
+            },
+            b'A' => vwrite::answer(arg != 0),
+            b'I' => reply[0] = vwrite::take_install() as u8,
+            b'S' => fs::write(format!("{}.out", a[1]), &*SPI.lock().unwrap()).unwrap(),
+            b'V' => {
+                vdisk_write_quiet(&mut d, &format!("{}.vol{arg}", a[1]));
+            }
+            b'Q' => {
+                let n = vwrite::stats();
+                let (rec, pairs, st, fz, stg, fw) = vwrite::state();
+                let (files, hw, left) = vdisk::stats();
+                let cutn = unsafe { (*devp).writes };
+                let t = format!(
+                    "ok={} refused={} busy={} last_refused={} deleted={} fw_ok={} fw_bad={} rec={rec} pairs={pairs} staged={st} frozen={fz} staging={stg} fw={fw} files={files} hw={hw} left_out={left} spi_writes={cutn} cut_dead={} now={now}",
+                    n.ok, n.refused, n.busy, n.last_refused, n.deleted, n.fw_ok, n.fw_bad, unsafe { (*devp).dead }
+                );
+                reply = (t.len() as u16).to_le_bytes().to_vec();
+                reply.extend_from_slice(t.as_bytes());
+            }
+            b'G' => {
+                // A delete on the meter (gallery / MMEM:DEL): 11-byte 8.3 name.
+                let mut n = [0u8; 11];
+                inp.read_exact(&mut n).unwrap();
+                reply[0] = csvlog::delete_on(unsafe { &mut *devp }, &n).is_err() as u8;
+            }
+            b'Z' => {
+                let t = vwrite::debug_text();
+                reply = (t.len() as u16).to_le_bytes().to_vec();
+                reply.extend_from_slice(t.as_bytes());
+            }
+            b'X' => break,
+            x => panic!("vserve: op {x}"),
+        }
+        out.write_all(&reply).unwrap();
+        out.flush().unwrap();
+    }
+}
+
+/// `vdisk_write` without the log line (vserve's stdout is the protocol).
+fn vdisk_write_quiet(d: &mut vdisk::VDisk, out: &str) {
+    use msc::BlockDevice;
+    use std::io::{Seek, SeekFrom, Write};
+    let n = d.block_count();
+    let mut f = fs::File::create(out).unwrap();
+    f.set_len(n as u64 * 512).unwrap();
+    let mut b = vec![0u8; 512];
+    for lba in 0..n {
+        assert!(d.read_block(lba, &mut b), "read {lba}");
+        if b.iter().any(|&x| x != 0) {
+            f.seek(SeekFrom::Start(lba as u64 * 512)).unwrap();
+            f.write_all(&b).unwrap();
+        }
     }
 }
 
@@ -466,6 +665,10 @@ fn main() {
     let a: Vec<String> = env::args().collect();
     if a[2] == "vdisk" {
         vdisk_dump(&a);
+        return;
+    }
+    if a[2] == "vserve" {
+        vserve(&a);
         return;
     }
     let mut img = Img::new(fs::read(&a[1]).unwrap());

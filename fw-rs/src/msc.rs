@@ -60,6 +60,20 @@ pub trait BlockDevice {
     fn product(&self) -> &'static [u8; 16] {
         b"DM40 disk       "
     }
+    /// The device decides about every written block itself (vdisk.rs /
+    /// vwrite.rs: most host writes only change its model; it answers "busy"
+    /// for the ones that need the SPI flash while an on-device writer holds
+    /// it), so the global write inhibits (screenshot, CSV session, logger)
+    /// do not apply.
+    fn gates_writes(&self) -> bool {
+        false
+    }
+    /// Why the last `write_block` failed: 0 a medium error (03/0C/00), 1
+    /// refused (DATA PROTECT, WRITE PROTECTED 07/27/00), 2 busy, retry
+    /// (NOT READY, BECOMING READY 02/04/01).
+    fn write_error(&self) -> u8 {
+        0
+    }
     /// `write_block` spread over several calls, for a caller that must not
     /// stall the main loop (screenshot.rs). Call again with the same `lba`,
     /// `buf` and `st` (starting from `Step::default()`) until it returns
@@ -115,6 +129,8 @@ const SENSE_NO_MEDIUM: Sense = Sense(0x02, 0x3A, 0x00);
 const SENSE_INVALID: Sense = Sense(0x05, 0x20, 0x00);
 const SENSE_LBA_RANGE: Sense = Sense(0x05, 0x21, 0x00);
 const SENSE_MEDIUM_ERROR: Sense = Sense(0x03, 0x11, 0x00);
+/// MEDIUM ERROR, WRITE ERROR (a failed block write).
+const SENSE_WRITE_ERROR: Sense = Sense(0x03, 0x0C, 0x00);
 /// NOT READY, LOGICAL UNIT IS IN PROCESS OF BECOMING READY (writes
 /// inhibited). ASCQ 01, not 00 ("cause not reportable"): Linux
 /// (scsi_io_completion_action) delays and retries 04/01 but fails 04/00 at
@@ -455,7 +471,7 @@ fn handle<B: UsbBus>(
                     Some(SENSE_NO_MEDIUM)
                 } else if dev.read_only() {
                     Some(SENSE_WRITE_PROTECTED)
-                } else if write_inhibit {
+                } else if write_inhibit && !dev.gates_writes() {
                     Some(SENSE_BECOMING_READY)
                 } else if lba + len as u32 > dev.block_count() {
                     Some(SENSE_LBA_RANGE)
@@ -486,9 +502,21 @@ fn handle<B: UsbBus>(
                 let done = done + n as u32;
                 if off >= bs as usize {
                     if !dev.write_block(lba, &blk[..bs as usize]) {
-                        *xfer = Xfer::None;
-                        *sense = SENSE_MEDIUM_ERROR;
-                        cmd.fail(done);
+                        *sense = match dev.write_error() {
+                            1 => SENSE_WRITE_PROTECTED,
+                            2 => SENSE_BECOMING_READY,
+                            _ => SENSE_WRITE_ERROR,
+                        };
+                        // The rest of the data phase is taken and dropped,
+                        // then the command fails (as a refused WRITE: the
+                        // CSW must follow the whole data phase).
+                        let rest = (left - 1) * bs;
+                        if rest == 0 {
+                            *xfer = Xfer::None;
+                            cmd.fail(0);
+                        } else {
+                            *xfer = Xfer::Discard { left: rest };
+                        }
                         return Ok(());
                     }
                     if left <= 1 {
