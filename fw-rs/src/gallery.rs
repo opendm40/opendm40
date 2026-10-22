@@ -1332,11 +1332,23 @@ pub struct Gallery {
     job: Job,
 }
 
-static mut G: Gallery = Gallery::new();
+/// Zero-initialised (.bss), set to `Gallery::new()` on the first `get`: as a
+/// const initialiser it was 672 B of the .data load image in region C
+/// (sentinels such as NONE are not zero; region C audit #1).
+static mut G: core::mem::MaybeUninit<Gallery> = core::mem::MaybeUninit::uninit();
+static mut G_INIT: bool = false;
 
 /// The gallery state (one, static: no room on the main stack).
+#[inline(never)] // .cold (link-native.x): the callers are the gallery's own paths
 pub fn get() -> &'static mut Gallery {
-    unsafe { &mut *core::ptr::addr_of_mut!(G) }
+    unsafe {
+        let g = &mut *core::ptr::addr_of_mut!(G);
+        if !G_INIT {
+            G_INIT = true;
+            g.write(Gallery::new());
+        }
+        g.assume_init_mut()
+    }
 }
 
 impl Gallery {
