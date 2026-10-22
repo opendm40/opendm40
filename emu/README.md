@@ -160,7 +160,8 @@ emu/usbip_client.py usbtmc 1-0 "*IDN?"   # -> Alientek,DM40A,0,dm40-fw 0.1
 emu/usbip_client.py scpi-tcp 1-0 5025    # SCPI lines on TCP 5025 <-> USBTMC, e.g. for
                                          # sigrok-cli -d scpi-dmm:conn=tcp-raw/127.0.0.1/5025
 emu/usbip_client.py msc    1-0 0         # INQUIRY, READ CAPACITY, READ(10) LBA 0 (FAT boot sector); fw-rs native:
-                                         # ONE LUN, the read-only generated volume (4160541 x 512 B, src/vdisk.rs)
+                                         # ONE LUN, the generated volume (4160541 x 512 B, src/vdisk.rs; read-only
+                                         # by default, writable after Settings 3/3 USB disk = PC can edit + re-attach)
 emu/usbip_client.py luns   1-0           # GET MAX LUN + per-LUN INQUIRY / TUR / capacity / MODE SENSE WP /
                                          # WRITE to the read-only LUN -> 07/27/00 / PREVENT-ALLOW
 emu/usbip_client.py mscdump 1-0 0 out.img  # FAT volume of a LUN (metadata + used clusters, incl. the 16 MiB

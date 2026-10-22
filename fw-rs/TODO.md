@@ -844,6 +844,11 @@ Firmware:
             at the eject / re-plug: the cost of writability; a UNIT ATTENTION would make Linux drop writes).
             decided: see docs/decisions-2026-10-22.md #6 (read-only "Files live" by default; Settings 3/3
             "USB disk" = "PC can edit" -> the writable volume, volatile, applied at the next USB plug)
+            IMPLEMENTED 2026-10-22: vwrite.rs mode in force / asked for (applied at the bus reset), Settings 3/3
+            row + toast "Re-plug USB to apply", Help 6/6 "USB disk", README.TXT, DBG:VDISK:RO? = in force,
+            asked for; fatren-test vwrite "mode" + "rw-ro" scenarios (captures unchanged, they run writable).
+            Emulator + kernel attach: RO mount, LOG:CSV while mounted -> listed at once; row tapped, re-attach
+            -> Write Protect off, rm 2 files -> deleted on the SPI disk, cp dm40fw.bin -> install dialog, No.
             Linux sequences captured with a real kernel (usbip_msc.py: rm, cp of 500 KB, trash + cp,
             trash + empty) and replayed in run.sh; fsck after every scenario, power cuts in staging,
             commit, park, purge. Emulator (real firmware, kernel attach): rm 2 files, cp 500 KB (47 s in

@@ -83,15 +83,18 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   `BOOTDATA.BIN`, `UID.BIN`, `OPTBYTES.BIN`, `OTP.BIN`, `ROMBOOT.BIN`,
   `LOADER.BIN` raw region copies, `BACKUP.TXT` with CRC-32s and restore notes,
   `FIRMWARE.BIN` = the running firmware as a vendor update file),
-  `DEBUG/SPIFLASH.BIN` (raw 16 MiB SPI flash image) and `README.TXT`. New
-  files appear at the next mount (eject / re-plug; existing files keep their
-  place). Writable for two things only (`src/vwrite.rs`, docs/native-boot.md
-  "Host writes"): a delete of a LOGS / SCOPE / SHOTS file (also through the
-  trash: at the eject) deletes the SPI file; a `dm40*.bin` copied into the
-  root is checked as the loader does and the meter asks "Install it now?"
-  (Yes = DBG:UPDATE). Other writes fail (the hosts' own trash / indexer
-  files are kept for the session only). `DBG:VDISK:RO 1` = the read-only
-  volume (live updates while mounted, UNIT ATTENTION at once). The W25Q128 SPI flash (stock FAT16,
+  `DEBUG/SPIFLASH.BIN` (raw 16 MiB SPI flash image) and `README.TXT`.
+  Read-only by default, "Files live" (docs/decisions-2026-10-22.md #6): new
+  recordings / screenshots appear while the volume is mounted (UNIT
+  ATTENTION at once; existing files keep their place). Settings 3/3 "USB
+  disk" = "PC can edit" (volatile, in force from the next USB plug;
+  `DBG:VDISK:RO 0|1`, `RO?` = in force, asked for) makes it writable for two
+  things only (`src/vwrite.rs`, docs/native-boot.md "Host writes"): a
+  delete of a LOGS / SCOPE / SHOTS file (also through the trash: at the
+  eject) deletes the SPI file; a `dm40*.bin` copied into the root is checked
+  as the loader does and the meter asks "Install it now?" (Yes =
+  DBG:UPDATE). Other writes fail (the hosts' own trash / indexer files are
+  kept for the session only); new files then appear at the eject / re-plug. The W25Q128 SPI flash (stock FAT16,
   4096-byte sectors) is internal storage: our files in `LOGS/`, `SHOTS/`,
   `SCOPE/` (`src/fatdir.rs`; files of earlier builds stay in its root and are
   shown too), the vendor loader's `dm40*.bin` and a write-once safety copy of

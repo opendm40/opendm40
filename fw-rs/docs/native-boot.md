@@ -1076,10 +1076,15 @@ both in its `LOGS/` / `SHOTS/` / `SCOPE/`.
 
 One LUN (`Msc::new(.., 1)`, feature `vdisk`, implied by `native`; builds
 without it still export the writable SPI disk; recovery-usb keeps its own).
-INQUIRY product `DM40 files`; no WP bit (`DBG:VDISK:RO 1` sets it: the
-read-only volume of before, read by a host at its next mount); a WRITE is
-judged sector by sector (`src/vwrite.rs`, "Host writes" below), anything
-not accepted fails DATA PROTECT 07/27/00. Volume label `DM40`, serial = CRC-32 of the UID. Geometry: 512-byte
+INQUIRY product `DM40 files`. **Read-only by default** ("Files live",
+decisions-2026-10-22 #6): the WP bit set, every WRITE fails DATA PROTECT
+07/27/00, a change goes out as a UNIT ATTENTION at once. Settings 3/3
+"USB disk" = "PC can edit" (or `DBG:VDISK:RO 0`) asks for the writable
+volume: volatile (read-only again at every boot) and in force from the next
+USB bus reset (a re-plug; a host reads the WP bit when it mounts, so the
+mode never changes under a host); then a WRITE is judged sector by sector
+(`src/vwrite.rs`, "Host writes" below), anything not accepted fails DATA
+PROTECT 07/27/00. Volume label `DM40`, serial = CRC-32 of the UID. Geometry: 512-byte
 sectors, 64 per cluster (32 KiB), 1 reserved sector, 2 FATs of 254 sectors,
 512 root entries, 65000 clusters (FAT16), 4160541 sectors = 1.98 GiB (room
 for SPIFLASH.BIN, the CSV expansion of a full SPI disk of logs, ~10-20x, and
@@ -1087,7 +1092,7 @@ the append-only allocation below).
 
 | Path | Content |
 |---|---|
-| `README.TXT` | What is where; delete from the PC; firmware update (copy dm40*.bin here, reload.sh / DBG:UPLOAD, or the loader's own disk). |
+| `README.TXT` | What is where; the two modes (Files live: new files while mounted, refresh; PC can edit + re-plug: delete / update from the PC); delete on the meter / MMEM:DEL; firmware update (copy dm40*.bin here in PC can edit, reload.sh / DBG:UPLOAD in any mode, or the loader's own disk). |
 | `INFO/CALIB.BIN` … `LOADER.BIN` | Raw MCU regions, as the old LUN 1 (table below). |
 | `INFO/BACKUP.TXT` | Addresses, sizes, CRC-32s (zlib), UID, firmware version, loader record, restore notes. |
 | `INFO/FIRMWARE.BIN` | The running firmware as its vendor update file (`calbackup::FwFile`); only with a valid loader record and no hazardous last block. Reinstall: `tools/reload.sh --image FIRMWARE.BIN`, or copy it as `dm40fw.bin` to the loader's own disk. |
@@ -1138,12 +1143,13 @@ SPI directories and:
   otherwise the new file waits for the Allow (unmount: `vdisk::on_unlock`).
 
 Any change raises a one-shot UNIT ATTENTION 06/28/00, sent at once, also
-while a host holds the volume **read-only** (`DBG:VDISK:RO 1`: the
+while a host holds the volume **read-only** (the default, "Files live": the
 2026-10-21 experiment: Linux then re-reads the mounted read-only volume and
-shows new files at once, a file manager after F5). With the writable
-volume (the default since 2026-10-22) no change is made while a host has it
-mounted (`vwrite::frozen`, "Host writes"): the change and its UNIT
-ATTENTION wait for the eject / re-plug. Emulator (read-only, 2026-10-21): a
+shows new files at once, a file manager after F5; emulator + kernel attach
+2026-10-22: a `LOG:CSV ON` / `OFF` while mounted, `LOGS/LOG000.CSV` listed
+by `ls` within 2 s). With the writable volume ("PC can edit") no change is
+made while a host has it mounted (`vwrite::frozen`, "Host writes"): the
+change and its UNIT ATTENTION wait for the eject / re-plug. Emulator (read-only, 2026-10-21): a
 screenshot taken while a PREVENT was active gave the UNIT ATTENTION 4 s
 later, the new `SHOTS/S003.BMP` appended at a new slot and cluster, the
 other files unchanged.
@@ -1247,9 +1253,13 @@ macOS mount) the layout is **frozen**: `vdisk::refresh` waits, no UNIT
 ATTENTION is sent (on a removable disk Linux fails the I/O after a UNIT
 ATTENTION and the dirty buffers written back later would carry the old
 FAT / directories), so recordings / screenshots made meanwhile appear at
-the eject / re-plug. That is the cost of the writable volume
-(`DBG:VDISK:RO 1` keeps the live updates of the read-only volume, without
-delete / update from the PC). A host that never locks: frozen while it has
+the eject / re-plug. That is the cost of the writable volume, and why it
+is not the default (decisions-2026-10-22 #6: the read-only "Files live"
+volume keeps the live updates, without delete / update from the PC; the
+mode changes only at a bus reset, so a writable session is never cut short
+by it: asked for "Files live" while a writable session runs, the volume
+stays frozen and writable until the re-plug, then the session's records are
+dropped as at any session end, tools/fatren-test vwrite "rw-ro"). A host that never locks: frozen while it has
 written in the last 60 s. The session ends at the Allow (umount / eject)
 or a bus reset: every record dropped, the flags cleared (except a delete in
 progress), `refresh` regenerates the volume and raises the UNIT ATTENTION.
@@ -1268,7 +1278,8 @@ directory, a purge directory → FAT: at worst lost clusters.
 `DBG:VDISK:WR?` → `<accepted>,<refused>,<busy>,<last refused LBA>,<SPI
 files deleted>,<firmware files committed>,<rejected>,<root records>,<FAT
 pairs>,<staged clusters>,<frozen>,<staging>,<firmware state>`;
-`DBG:VDISK:RO 0|1` / `RO?`.
+`DBG:VDISK:RO 0|1` = the Settings row (applies at the next bus reset) /
+`RO?` → `<in force>,<asked for>` (1 = read-only; `1,1` after a boot).
 
 Captured on Linux (kernel 7.0, GNOME automount: `rw, relatime, flush,
 shortname=mixed, errors=remount-ro`; `tools/fatren-test/usbip_msc.py` = a
@@ -1282,7 +1293,12 @@ write-back burst at close (`flush`), FAT + root + 980 data sectors; umount =
 boot sector, ALLOW, then a UNIT ATTENTION and udisks' re-probe (no
 re-mount). The captures hold the volume's layout (README.TXT is padded to
 a fixed 2048 bytes for that): a change of the generated CSV text or the
-INFO files needs a new capture (`kcapture.sh`). Emulator (real firmware, kernel attach, 2026-10-22): `rm` of 2
+INFO files needs a new capture (`kcapture.sh`; the captures run writable:
+`usbip_msc.py` serves "PC can edit" unless `--ro`; the README text of
+decision #6 kept 2048 bytes and the replays passed unchanged). Emulator
+(real firmware, kernel attach, read-only by default since decision #6:
+Settings 3/3 tapped to "PC can edit", detach + attach = re-plug, `Write
+Protect is off`, `RO?` `0,0`; 2026-10-22): `rm` of 2
 files → deleted on the SPI disk; `cp` of a 500 KB update file (47 s at the
 emulator's speed) → committed, the dialog declined at 60 s → DM40FW.BIN
 gone (SPIFLASH.BIN fsck clean); `cp` again → committed, `DBG:TAP` on Yes →
@@ -1315,8 +1331,14 @@ update screen exposes its own USB disk).
 The single removable volume avoids the two-LUN questions (one `sd` device
 on Linux, one drive letter on Windows). FAT16 with 32 KiB clusters on a 2
 GiB volume is the standard large-FAT16 format (Windows, macOS, Linux mount
-it). Linux: captured (above). **Windows and macOS are untested** (no
-capture possible here); designed for:
+it). Default mode "Files live" (read-only, decision 2026-10-22 #6): the
+host writes nothing at all (Windows / macOS housekeeping files included),
+the UNIT ATTENTION goes out at once on every change; whether Explorer and
+Finder show new files then (with or without a refresh) is open (device
+check; if Explorer does not refresh, try a volume serial that changes per
+refresh, TODO). The notes below are about "PC can edit". Linux: captured
+(above). **Windows and macOS are untested** (no capture possible here);
+designed for:
 - Windows: writes `System Volume Information\IndexerVolumeGuid` /
   `WPSettings.dat` on the first rw mount (accepted for the session, gone at
   the re-plug, written again next time), may set FAT[1] dirty bits
