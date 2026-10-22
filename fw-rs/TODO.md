@@ -782,6 +782,32 @@ Firmware:
         OVERLOAD). Emulator: model + 27 new senttest scenarios, 362 model checks; host tests; ui-render 0.
         (verify on device: doc §4.7 device test plan T8, T11..T16; DBG:SENTinel:VARiant +8 / +16 back out the
         new rows / the alternation if a reading moves)
+  - [ ] BUG (owner 2026-10-22): A AUTO coupling (and AC+DC A, plain AC / DC A AUTO), AC 1 A applied ->
+        OVERLOAD at once, though an AUTO up-range is normal operation. Emulator: couptest `iac` (enter
+        CURR:COUP AUTO with aca:1@60) has SYST:ALER? OVERLOAD from fw uptime 2 s on HEAD 194caf6. Cause: A
+        enters on DC mA r0 (stock, `select`: FUNC_A_AUTO -> 8); `overload_trips` treats the mA / uA shunt's
+        top range in AUTO like a manual range (red latch, beep, toast), only the power meter got the quiet
+        rule (doc 3.14). Proposed: in AUTO a quiet one-hop up-range to the A shunt's 6 A range (DC 7 r0, AC 4
+        r0, AC+DC its DC phase), no latch / alert; OVERLOAD only for a manual range. Update senttest
+        `ovl-dcma` / `ovl-acma` / `ovl-acdc` (they expect OVERLOAD in AUTO), doc 4.7 table. Open: enter A on
+        the A shunt instead (user-feedback §5.4 note), so 1 A never flows through 0.5 ohm for the ~1-2 s of
+        the walk up. WIP patch (not applied, both items; temporary): <scratchpad>
+  - [ ] BUG (code reading, same session): AC+DC / AUTO down-range on one part. After `reset_values`
+        (entry, every unit change) `ac_raw` = 0, and the DC phase autoranges on hypot(ac_raw, DC): a pure
+        AC signal reads ~0 there and walks down. A: mA -> uA (a_auto 3) with 1 A AC flowing (47.5 ohm!),
+        then the AC phase trips; V: 230 V AC -> 6 V, with AUTO+ into mV (by the code, not run). The AC phase
+        after a unit change has dc_val = 0 likewise. Proposed: a down-range needs the other part measured
+        since the reset (`acdc_seen` bit: DC phase needs AC, AC phase needs DC); up-ranges never wait. The
+        stock's S+0x60 hypot likely has the same gap (INFERRED). Test: couptest `iac` phase 2 (AC 300 mA ->
+        mA shunt, NONE) and a V scenario entering AUTO on AC 230 V (range stays >= 600 V, no mV).
+  - [ ] OVERLOAD badge stays after the overload is gone (owner 2026-10-22): the latch shows red OVLD while
+        the meter measures fine on 10 A. Release = 5 s below max(half the scale it returns to, 2 mA), so
+        e.g. manual 60 mA with 40 mA now never returns; AUTO after a uA overload keeps the badge for any
+        current > 3 mA; a re-trip within 30 s makes it sticky. Proposed: red only at the trip (beep, toast,
+        a few s), then a grey / amber "10A^" info badge (tap = back); return when the reading fits the old
+        range with margin (~0.8-0.9 x FS; re-trip is at 1.03 x, the 30 s sticky rule covers flapping).
+        Mostly moot in AUTO if the quiet hop above lands.
+  - [x] 4-20 mA % hidden below 3.6 mA (NAMUR NE 43; 0 mA read -25 %): 194caf6.
   Compared with UNI-T UT197 (2026-10-22, its manual §16.2 + the A / mA fuse notes): the UT197 senses a PLUG in
   the mA/uA or A jack (no signal needed) and flashes "InErr" + beeps in any non-current position, i.e. before
   the probe touches a circuit; the sense path runs through the fuse, so "InErr shows" doubles as the fuse
