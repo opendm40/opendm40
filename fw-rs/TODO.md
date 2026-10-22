@@ -554,7 +554,8 @@ Code work (in this order):
       CHANnel1:OFFSet, ACQuire:SRATe? (src/scope_wav.rs, docs/bt-scpi.md "Scope waveform readout"); the
       default WAV:DATA? is unchanged. The 53 KB record streams over USBTMC from the scope buffer
       (usbtmc::respond_stream, packets polled within the disk-READ budget per pass; scope held stopped
-      until the last packet); refused while running and, when longer than 6 KiB, over Bluetooth.
+      until the last packet; given up after 2 s without progress); refused while running and, when longer
+      than 6 KiB, over Bluetooth.
       emu/wavtest.py passes (USBTMC multi-round + 64 KiB rounds, BYTE / WORD / decimated, the sine's
       frequency / Vpp / trigger point, abandoned stream, BT refusal). libscopehal driver DM40Oscilloscope
       ("alientek_dm40", usbtmc / lan / uart; generator as a FunctionGenerator) in
@@ -571,7 +572,11 @@ Code work (in this order):
       unchanged (the offset PWM shifts the codes; the emulator does not model that); (5) ngscopeclient-dm40 on
       /dev/usbtmcN: Run / Single / Stop, sample rate 50 MS/s .. 2.5 kS/s, V/div, offset, trigger level /
       slope, generator on / shape / frequency; (6) Bluetooth: WAV:POIN MAX -> "Too much data", the driver
-      over rfcomm (--uart) gets 1902-point records.
+      over rfcomm (--uart) gets 1902-point records; (7) kill the host mid-read (python: read one 4096-byte
+      round, exit): front-panel RUN works again after ~2 s (the stall timeout); (8) the wave view (Source
+      DMM, e.g. DC V on a 50 Hz signal): STOP, WAV:POIN MAX -> the record in V at the jacks (yinc / yorig
+      from the DMM scale), compare with the screen; (9) the 50 MS/s rates (100 ns .. 50 us/div share the
+      50 MS/s record) on the generator's 1 MHz square.
 - [ ] sigrok/SmuView (merged from three items): libsigrok scpi-dmm DM40 profile exists as
       ../libsigrok-dm40/0001-scpi-dmm-add-support-for-Alientek-DM40A-B-C-dm40-fw-.patch (command set
       like the 34401A: CONF:<f>, READ?, FUNC?; 3 s delay after RES/CAP/TEMP/FREQ/CONT/DIOD). DC V works
