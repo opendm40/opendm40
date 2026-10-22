@@ -946,3 +946,93 @@ ea29bc4 (on 2828108: AC settle 2 s after a wake, the Wave view's MENU keeps the 
 
 - **Device:** DMM page, DC V, 1.00028 V, `SYST:RAIL:STATe?` 1,0,8,0,0, no error. Bluetooth ON.
 - **Calibrator:** 1 V DC, enabled.
+
+## f3aea2f: open "Device" items without current through A
+
+**Build.** f3aea2f (installed by the owner before the run), 2026-10-22 16:35-, no firmware installed by this run. Same wiring: the calibrator (`/dev/ttyACM1`) on V/COM only (DC, and the 40 Hz square func 2 mode 0 value 40000: 0..9.6 V, AC V 4.767 V); the A jack and the scope probe are not wired (the scope sees an open input). Host Linux, the volume auto-mounted read-only by udisks at `/run/media/$USER/DM40`. Screenshots (`dm40dbg.py shot` GRAM reads and the device's own SHOTS/Snnn.BMP), scripts and logs are in the session scratchpad (`dev-f3a/`), not in git.
+
+### Summary
+
+| # | Check | Result |
+|---|---|---|
+| 1a | W entry | **PASS** (direct, no dialog: `wired` is persisted, so the first-entry dialog is not re-testable on this unit; the same wiring picture opens from Power Settings > Wiring and has no overlaps). V after ~2 s, "I ranging..." until P (~10 s) |
+| 1b | Coupling by a tap on the active W button | **PASS.** DC → AC → AC+DC → DC (`POW:COUP?` DC / AC / ACDC), the DC / AC / AC+DC glyphs on the button and above the unit; PF / S / Q / f "--" in DC. AC on the square: V 4.7672 V vs AC V 4.7667 (+0.01 %), Vdc / Idc 9.91E37 |
+| 1c | Power Settings dialogs | **PASS.** At load toggles its help line (ON / OFF texts); Zero → dialog → Start: "Zeroing ... (12 s)" then "Zero stored", `POW:ZERO?` OK,SET,Y 1066, X 901/175/904/172/887/166; V cal → dialog → Cancel: nothing run; Wiring dialog; Limits → Hold & Limits: Power; Reset energy? |
+| 1d | V cal (`POW:VOLT:CAL`) | **PASS on 6 V and 60 V (DC reference).** 5 V on 6 V: gain 1.020998 (doc 1.0209; factory 1.020659), Vdc vs DC V -0.022 % → +0.011 %, AC+DC -0.023 → +0.005 %. 10 V on 60 V: 1.016612 (doc 1.0170), -0.034 → +0.028 % (over-corrects by 0.06 %). 5 V on 60 V = SMALL (8 % < the 10 % window: the §3.12 list's "60 V with 5 V" is a doc error). AC reference: **blocked** (the calibrator's square has 4.77 V AC = 8 % of 60 V, SMALL; on 6 V it clips). All V gains set back to factory (`POW:VOLT:CAL DEF` per range; `POW:VOLT:GAIN?` 1.020659, 1.016145, 1.004528, 0.998148 as before) |
+| 1e | f on the square | **PASS.** 40.0018 Hz, `DBG:POW:ROW?` R21 0xBF, V 6.7429 V (AC+DC, 60 V) vs √(AC V² + DC V²) 6.7408 V (+0.03 %) |
+| 1f | Energy | **PASS.** Tap P → Wh → VAh → P; long press on the E box → "Reset energy?", **Yes 13 s later resets** (t 94 s → 1 s; the 5f14d38 failure is fixed); no "-0" readouts at ~0 W |
+| 2a | Help 7/7 "Power meter" and pages 1-6 | **PASS.** Round-4 text (DC > AC > AC+DC, MF: Zero, hold energy box); every label / value ≥ 10 px apart, ≥ 4 px inside the row boxes (measured). Cosmetic: Help 5/7's long title leaves 9 px between "Back" and "Help" (30-50 px on the other pages) |
+| 2b | `SYST:MOD?` | **PASS.** `DM40A,0,60000` |
+| 2c | Record page | **PASS.** Hold & Limits 9th row "Record" → Interval / Duration steppers (Every reading / Until stopped → 1 s / 10 min), "Free: about 1193 h (limit)", Start recording |
+| 3a | "Files live": new files without a re-plug (Linux, udisks ro mount) | **PASS.** A device screenshot (`DBG:SWIPE D,3`) appeared as SHOTS/S008.BMP 8.8-10 s after the gesture (the kernel re-read the volume on the UNIT ATTENTION); a 1 s CSV recording appeared as LOGS/LOG004.CSV within 2 s of its stop, byte-identical to `MMEM:DATA?` (152 rows, t = 1 … 152). A recording in progress is not listed (it appears at the stop: `finish` → `set_stale`) |
+| 3b | "PC can edit" after a re-plug | **PASS.** Settings 3/3 row → "PC can edit (re-plug)" + toast "Re-plug USB to apply", `DBG:VDISK:RO?` 1,0. Re-plug = `usbreset 1209:0001` (bus reset: RO? 0,0) + `DBG:VDISK:EJECT 3` (the kernel only re-reads the WP bit at a medium change: "Write Protect is off"), udisks mount rw. `rm` S008.BMP: deleted on the SPI disk at once (WR? deleted 1); `gio trash` S009.BMP (Nautilus): deleted at the eject; `cp dm40fw.bin` (an f3aea2f image, 601 472 B in 29.8 s): "Firmware received / Install it now?" → **No**: no dm40*.bin left on the SPI disk (mdir of DEBUG/SPIFLASH.BIN), no _VHOST files, fsck clean (dirty bit / label notes only). WR? refused 0 throughout. Stack 23 376 / 45 912 after the cp. Restored "Files live" (RO? 1,1, ro mount) |
+| 4 | Shot of a big screen, then the FFT | **PASS.** Scope FFT on, W page (AC+DC, f 40 Hz) shot as SHOTS/S009.BMP (correct image), back on the Scope page: `s.fft` calls 5012 → 5866 in 3 s, frames advance |
+| 5 | `DBG:PROF?` while recording a CSV with the volume mounted | **PASS (no region C stall).** DMM page, 1 s interval, 152 s: loop max1s 1.1-2.5 ms (the DMM reading) except **one 74 ms pass per commit (60 s) and 84 ms at the start, all in the `csv` section**: the documented blocking FAT / directory `write_block` (sector erase, csvlog.rs header), not region C; `tick` 27.7 ms once at the start (bpb / fatdir). A host read of FAST002.CSV (26.5 MB) meanwhile: 584 KB/s, `usb` max 2.9 ms, `READ?` every 0.40 s (MED 2.5/s) without a gap, values 0.99925-0.99963 V |
+| 6a | AD2 19200 to disk with a host volume read (TODO fast logger item 9) | **FAIL: max_lat 8.98 us** (target < 2 us), lat_pc `vdisk::file_read::{closure#0}` = region C (0x0808a8d2): the `near` closure of the two-cursor code got its own symbol, matched by the `.cold` rule. Fixed (below). 0 lost (`LOG:COUNt?` 2,192011,0,0,0) |
+| 6b | Device hang at the end of a disk session | **FAIL (once, not reproduced).** `dm40scpi.py fast --source ad2 --rate 19200 --dur 30` with a host reading FAST003.CSV over the volume: the session completed (575 320 samples, FAST005.DLG intact), then the meter stopped answering and the **watchdog reset it** (`DBG:BOOT?` reason WDT_RETRY, FWDGT, crash count 1, healthy again after 60 s). Details below |
+| 6c | Wave view + Save CSV | **FAIL (latency).** After a Save CSV in the Wave view (4800 S/s) `DBG:ISR?` max_lat 21.7 us, 15 overruns, lat_pc `vdisk::ours` (0x0808adb4, region C): the volume refresh after the save runs region C while the stream ISR runs. Also lat_pc `prof::report` (4.7 us) for a `DBG:PROF?` during the stream (debug only). Not fixed (below) |
+| 6d | DMM page while a host copies (fast logger item 11) | **PASS** (5: `READ?` every 0.40 s during a 45 s copy) |
+| 7 | DMM accuracy with the scope running (both rails) | **Partial FAIL.** DC 1 / 5 / 10 V: DMM page vs combined view vs Scope page within 0.04 % (5 / 10 V: ≤ 0.003 %). **The 40 Hz 0..9.6 V square reads +0.19 % higher whenever the scope rail is on** (DC V 4.7670 → 4.7760 V, AC V 4.7682 → 4.7745, AC+DC 6.7390 → 6.7501; alternated DMM / Scope / DMM / combined / DMM / Scope, reproducible to 0.01 %). Combined-view FREQ 40.0017 Hz (the 13.3 Hz bug is gone). AC V of a 0.5 V DC source: 0.3-0.5 mV on all three views (decays to the floor) |
+| 8 | Wave view (feasibility 10.6) | **PASS with two bugs, fixed.** Entry from AC V: 2 V/div, T'D, Freq 40.0 Hz, Vrms 4.74 V vs AC V 4.7675 (-0.6 %), `DBG:ISR?` active 1. Trigger Normal ±1 V rising / falling at the T marker, Single → STOP. Range 2 → 20 V/div (60 V) → 2 → 200 mV/div (AC mV, DC-coupled), trace the same in volts. STOP + Save CSV: SCOPE/SCOP004.CSV "source DMM AC V (AD2)", volts, the last 2 s rms 4.780 V. MENU: ISR active 0, `READ?` 4.729 then 4.777 V. `LOG:STAT ON` → "Settings conflict", the view stays; `CONF:VOLT:DC` → "Wave stopped: DMM changed", DC V reads. **Bugs: (1) roll at 5 / 10 / 20 / 50 s/div moves at the 2 s/div speed (~20 px/s measured at 2, 20 and 50 s/div); (2) the entry toast from DC V is clipped ("V: no DC row on AD2, AC-coup")**. Current steps blocked (A jack not wired) |
+| 9 | Alerts with the A jack open (seen along the way) | **FAIL.** A-PROT found latched at the end of the run; false A-JACK in Hz (reproducible). See "Alerts" |
+
+### 1. Power meter
+
+- Screens: `13-` .. `25-` (entry, coupling cycle `s-coup.png`, Power Settings `16-` .. `22-`, the square `s-Wsq.png`, reset `s-reset.png`). No overlaps found; the chart's axis labels end 3 px before the frame (also in mWh / VAh).
+- V cal transcript (`vcal.txt`, `vcal2.txt`, `sq.txt`, `sq2.txt`): see 1d. The 6 V AC-coupled cal on the square (`POW:COUP AC`, range 6) **returned OK, gain 1.021410**, though the square's 9.6 V peak exceeds the 6 V range: the kind followed the DC part (DC reference, 100 % window), so nothing checks the peak. Flag for the owner (a clipping guard on the DC-kind path, or refuse when the AC part is large). The dialog says "10-70 % of range"; the DC kind accepts up to 100 % (cosmetic). The gains were reset to factory afterwards.
+- `POW:ZERO` from the dialog changed the DC-row AD1 zeros of 600 mA / 6 A / 10 A a lot (256 / 2599 / -2763 → 522 / 1168 / 2560 codes) with the A jack open; X / Y moved by ≤ 15 codes. Not judged (needs current through A, T4).
+
+### 3. USB volume
+
+- Re-plug without touching the cable: `usbreset` (plugdev may write `/dev/bus/usb/...`) gives the bus reset the mode needs (vwrite `on_bus_reset`), but the kernel keeps the SCSI disk and its cached WP bit. `DBG:VDISK:EJECT 3` ("no medium" for 3 commands, then a UNIT ATTENTION) makes it revalidate the disk: `Write Protect is off` / `on`. `udisksctl unmount` before, `udisksctl mount` after.
+- A host read in flight when the layout changes (a session end, a screenshot) fails with EIO (the UNIT ATTENTION: "medium may have changed"); a reader that reopens the file goes on. The known cost of "Files live".
+
+### 6. Region C and the hang
+
+**6a.** `DBG:ISR?` after the 10 s AD2 19200 disk session (repro below) with a host reading FAST003.CSV through the volume: `1,0,240176,192011,0,24059,0,0,0,0,3705,8980,19200017,0,1,-9,0,7,12029,16,79,0x0808a8d2,1` → max_lat 8 980 ns, lat_pc 0x0808a8d2 = `dm40_fw::vdisk::file_read::{closure#0}` (llvm-nm of the f3aea2f ELF, built reproducibly from the commit). The read path is `.text.vdisk_rd` (region B), but `file_read`'s `near` closure is a separate symbol whose name carries `5vdisk`, so link-native.x's `*7dm40_fw5vdisk*` rule put it in region C. **Fix:** `near` is a fn in `.text.vdisk_rd` (now at 0x08009434, region B).
+
+Still in region C on that path (not fixed, for the next audit): the DMM-log and scope-record CSV generators (`Gen::advance`, `RowDec::get / next / rice`, `SDec::get / next`, `chunk_at`, `Gen::open`): a host reading LOG*.CSV or SCOP*.CSV while a stream runs executes region C per row (FAST*.CSV is fine).
+
+**6b. The hang.** Timeline (`hang-kernel.log`):
+1. `dm40scpi.py fast out --source ad2 --rate 19200 --dur 30 --conf acv` started; 8 s later a host reader started on FAST003.CSV (`volread.py`, 64 KiB reads, cache dropped).
+2. The session ran to "done" (575 320 samples). At **17:00:51** the volume's UNIT ATTENTION failed the reader's READ(10)s (EIO) and the kernel re-read the partition table; the tool went on to `LOG:DEST HOST`, `LOG:COUN?` and `MMEM:DATA? "LOGS/FAST005.CSV"`.
+3. The tool's USBTMC read timed out; at **17:01:24** usb-storage reset the device (its 30 s SCSI timeout: a command issued at ~17:00:54 was never completed), again at 17:01:30; at 17:01:44 the device no longer answered (descriptor read -32, address -71); at 17:01:46 it enumerated again after the **watchdog reset**.
+
+Not reproduced: `MMEM:DATA?` of FAST005.CSV alone (26.5 MB in 50 s), with a volume read of FAST003.CSV meanwhile (75.6 s, the reader at 379 KB/s), and with both reading FAST005.CSV (76.9 s): all complete, the CSV identical. One repro of the session end alone (AD2 19200, `LOG:DUR 10`, the host reading FAST003.CSV, `LOG:DISK?` polled every 0.2 s, no `MMEM:DATA?`): done at 17:12:00.5, UNIT ATTENTION at 17:12:01, the reader got EIO for 2 s then went on, `DBG:PING?` answered 25 s later: no hang. So the hang needs the session end + the volume refresh + the host's revalidation reads + an `MMEM:DATA?` of the new FAST file starting at the same time; not repeated further (a second crash within 60 s of a crash reboot would zero the loader marker). The SPI disk was clean afterwards (fsck of DEBUG/SPIFLASH.BIN: 67 files, dirty bit only).
+
+**6c.** The Wave view streams continuously, so any volume refresh while it runs (Save CSV here; a screenshot or a recording stop likewise) executes `vdisk::refresh` / `ours` / `scan_spi` in region C under the stream ISR: max_lat 21.7 us, 15 overruns (4800 S/s). The `.cold` audit assumed a refresh never overlaps a stream (true for disk sessions, not for the Wave view). Options: defer the refresh while the Wave view streams (it is only needed by a host), or move the refresh path to region B (~3 KB of the 13.6 KB left).
+
+### 7. Both rails
+
+`xtalk.txt`, `xt2.txt`, `xt3.txt` (`SYST:RAIL:STATe?` confirms the rails: `1,0` DMM page, `1,1` Scope / combined). The scope probe is not connected; the shift is the same with the probe input open. Only the square shows it (DC 5 / 10 V: none; 1 V: -0.02..-0.04 %, within the calibrator's drift of the run). The first `READ?`s after a `CONF:` change of function are unsettled on every view (AC V +13 % for ~1 s, AC+DC 9.9E37 then +10 %): a host should wait ~2 s, as the stock.
+
+### 8. Wave view
+
+- Timebase steps need a press (`DBG:DRAG x,y,x,y,10,80` on the corner zones); `DBG:TAP` gives a Tap gesture without the press tracker's arm, so the zones ignore it (a test-tool limit, not a bug).
+- 5 ms/div shows "Freq: --" / "Cycl: --" with two periods on screen (10 ms .. 100 ms/div: 40.0 Hz). Vrms 4.74 V up to 20 ms/div, 4.69 V (-1.6 %) from 50 ms/div (1200-2400 S/s, under-sampled edges).
+- Roll speed (`rollm.py`, the left edge of the trace every 2.8 s): 2 s/div 20 px/s (right), 20 s/div 20 px/s (should be 2), 50 s/div 20 px/s (should be 0.8). Cause: `w.per = screen / COLS`, and `screen` is clamped to the record (CAP - 2600 = 24 024 samples), reached at 2 s/div with 1200 S/s. **Fix** (scope.rs `wave_start`): samples per column from the timebase (25 000 x fs / TB.0 / COLS), not from `screen`. emu/hy3131/wavetest.py now checks the column count at 5 s/div.
+- The DC V entry toast (and the coupling-pill note) were wider than the 400 px toast: "DC V: wave is AC-coupled", "AC-coupled (no DC row)"; the power meter's "Current above the limit: reduce it" was clipped as well → "Current too high: reduce it". tools/ui-render checks all four now (41 941 cases, 0 violations).
+- `CONF?` in the Wave view on 200 mV/div (AC mV) still says `VOLT:AC +6`.
+- `DBG:ISR?` after the session: dropped 255 488 of 277 801 captured (STOP / Single / the MF menu: the record is frozen and the ring is not drained; by design?).
+
+### Alerts (A jack open all the time)
+
+- **A-PROT latched.** The last DMM-page screenshot (`93-final.png`) had the red A-PROT badge; `SYST:ALER?` APROT, `DBG:SENT?` `CMP_PB1,APROT,7,0,744,72248,0,381,196510,15,105` (field 10: probe 15 mA now; field 11: 105 ms = the ">= 300 mA in the first probe window" rule). No earlier DMM-page shot after the reboot had it, so it tripped between ~17:15 and 17:45 in a probe function (DC V / mV / ohm / temperature). `CONF:VOLT:DC` over SCPI and a tap on V (to AC V / AC+DC) did not release it; DC A did (NONE). A sweep afterwards (DC V with 1 / 5 / 10 V and the square, on the DMM page, the combined view and the Scope page, after AC V / AC+DC / FREQ) did not trip it again (`aprot.txt`, `aprot2.txt`).
+- **False A-JACK in Hz**, reproducible: FREQ with 1 V DC or the 40 Hz square on V-COM → `SYST:ALER?` AJACK, sentinel kind AD1PK_PB1, field 7 = 20 (DMM page and combined view; not at 10 V). DC V on the calibrator's 5 V DC showed the "AC" hint (not at 1 / 10 V).
+
+### Fixes (0ec2093 on rust-fw-poc, not on the device yet)
+
+Image built from the committed tree 0ec2093 (it also carries the burden-voltage and inrush work committed since f3aea2f): `dm40-fw-0ec2093.bin` in the session scratchpad, 609 792 B, sha256 6963016c…f428b; region B 13 596 B free (the build's < 16 KiB warning came with the inrush commit b1c6a27).
+
+
+1. vdisk.rs: `file_read`'s cursor choice as a region B fn (6a).
+2. scope.rs: Wave view roll speed from the timebase (8).
+3. app_wave.rs, app_power.rs: three toasts that did not fit (8); ui-render checks them.
+
+Host / emulator checks of the fixes: emu/hy3131/wavetest.py all PASS, roll 5 s/div 8.1 px/s (f3aea2f: 19.9 px/s, FAIL with the new check); tools/fatren-test PASS (vdisk / vwrite, 40 vwrite checks); tools/ui-render 41 941 cases, 0 violations (3 with the old toast texts); `near` links at 0x08009434 (region B).
+
+### State at the end
+
+- **Device:** DMM page, DC V; Settings unchanged (volume 0 %, backlight 10 %, Dim / Shutdown Never, Bluetooth ON, USB disk "Files live", ro mount); scope FFT off again; power meter coupling AC+DC, V gains factory, zeros from this run's `POW:ZERO`; LOG:CSV:INT / DUR back to 0 / 0. One watchdog reset during the run (6b); crash count 0 and HEALTHY afterwards.
+- **Files added on the SPI disk:** LOGS/LOG004.DLG, LOGS/FAST005.DLG, LOGS/FAST006.DLG, SCOPE/SCOP004.DLG (scope record); S008 / S009.BMP deleted again (3b).
+- **Calibrator:** 1 V DC, enabled.
