@@ -681,6 +681,12 @@ e5dd09b: only these four symbols left it.
 | stack headroom (static worst path) | 21 436 / 21 888 B | unchanged |
 | SRAM free | 10 856 / 11 080 B | unchanged |
 
+Rebased onto 98bb57f (the power meter's AC+DC parts and region C audit
+#1 (1/3) landed meanwhile), the landed tree 737cdcf: A2 2 652 B, B 21 996
+/ 28 660 -> 26 360 / 33 112 B, C 10 436 / 12 572 -> 18 220 / 20 276 B,
+stack headroom 21 236 / 21 672 B and SRAM free 10 848 / 11 072 B
+unchanged.
+
 **Budget**: the link fails when `.a2` reaches the marker (`FLASH_A` is
 `0x08004000..0x08008000`, plus an assert with the message naming
 `A2_FONTS`); `build.sh` prints `region A2 free` and ends with a banner
