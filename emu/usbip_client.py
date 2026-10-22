@@ -264,8 +264,23 @@ class Usbtmc:
         hdr = struct.pack('<BBBBIB3x', 1, t, 0xFF ^ t, 0, len(msg), 1)  # DEV_DEP_MSG_OUT, EOM
         self.d.bulk_out(self.ep_out, hdr + msg + b'\0' * ((-len(msg)) % 4))
 
-    def read(self, maxlen=4096, timeout=5.0):
-        """One reply; OSError (socket.timeout) after `timeout` s without one."""
+    def read(self, maxlen=4096, timeout=5.0, rounds=None):
+        """One reply; OSError (socket.timeout) after `timeout` s without one.
+        A reply longer than `maxlen` (the TransferSize of each
+        REQUEST_DEV_DEP_MSG_IN) comes in several transfers, the last with
+        EOM set (fw-rs: a streamed WAV:DATA? block); they are joined.
+        `rounds`: a list that gets each transfer's payload length."""
+        maxlen &= ~3
+        out = b''
+        while True:
+            part, eom = self._read1(maxlen, timeout)
+            out += part
+            if rounds is not None:
+                rounds.append(len(part))
+            if eom:
+                return out
+
+    def _read1(self, maxlen, timeout):
         t = self._next_tag()
         self.d.bulk_out(self.ep_out, struct.pack('<BBBBIBB2x', 2, t, 0xFF ^ t, 0, maxlen, 0, 0))
         resp = b''
@@ -285,7 +300,7 @@ class Usbtmc:
                 raise IOError('bulk_in status %d' % st)
             resp += data
             if len(resp) >= 12 and len(resp) >= 12 + struct.unpack_from('<I', resp, 4)[0]:
-                return resp[12:12 + struct.unpack_from('<I', resp, 4)[0]]
+                return resp[12:12 + struct.unpack_from('<I', resp, 4)[0]], resp[8] & 1
 
 
 def upload(d, path, chunk=232):
@@ -324,7 +339,9 @@ def upload(d, path, chunk=232):
 def scpi_tcp(busid, port):
     """Serve SCPI lines on TCP `port` (one client at a time) and forward each
     line as one USBTMC message; a line with a '?' gets the device's reply
-    plus '\n'. Empty lines are dropped. Every exchange is logged with its wall
+    plus '\n' (a definite-length block reply, e.g. WAV:DATA?, byte for byte,
+    then '\n', as an instrument on a raw socket sends it: libscopehal's
+    "lan" transport, pyvisa SOCKET). Empty lines are dropped. Every exchange is logged with its wall
     time; a reply later than 1 s (libsigrok's hard USBTMC Bulk-IN timeout) is
     flagged with '!!'. Virtual time runs at or below wall speed (0.7x with
     --fast on a loaded host, 0.9x with --mips 25), so the flag is
@@ -363,11 +380,16 @@ def scpi_tcp(busid, port):
                 tmc.write(cmd)
                 if '?' in cmd:
                     try:
-                        rep = tmc.read().decode(errors='replace').strip()
+                        raw = tmc.read(maxlen=65536)
                     except socket.timeout:  # no reply (unknown query): nothing to the client
                         print('         !! no reply within 5 s', flush=True)
                         continue
                     dt = time.monotonic() - t0
+                    if raw[:1] == b'#' and raw[1:2].isdigit():
+                        print('         >> block, %d bytes (%.0f ms)' % (len(raw), dt * 1e3), flush=True)
+                        c.sendall(raw + b'\n')
+                        continue
+                    rep = raw.decode(errors='replace').strip()
                     print('         >> %s (%.0f ms)%s' % (rep, dt * 1e3, '  !! > 1 s' if dt > 1.0 else ''), flush=True)
                     c.sendall(rep.encode() + b'\n')
         c.close()

@@ -370,6 +370,18 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if msc::HOST_WRITING.load(core::sync::atomic::Ordering::Relaxed) {
             host_io_t = now;
         }
+        // A streamed USBTMC reply (WAV:DATA? of the scope record,
+        // scope_wav.rs): its packets go out as the host takes them, polled
+        // like a disk READ above, within the same budget per pass. The scope
+        // keeps its record (no RUN) until the last packet left.
+        if tmc.streaming() {
+            let budget = if logger.active() || fastlog::active() { MSC_PUMP_LOG_CYC } else { MSC_PUMP_CYC };
+            let t0 = cyc();
+            while tmc.streaming() && cyc().wrapping_sub(t0) < budget {
+                dev.poll(&mut [&mut tmc, &mut msc]);
+            }
+        }
+        app.scope.host_read = tmc.streaming() && scope_wav::reads_record();
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
         let was_wave = logger.wave();
@@ -511,7 +523,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             // dmm.func(): the stock mode, 16 / 17 = V / A AC+DC (stable while
             // AC+DC alternates the HY3131 mode).
             let mut out = scpi.handle(&msg[..msg_n], app.dmm.func());
-            if msgs[src].multi() && block_reply(&out) {
+            let wav_block = matches!(out, scpi::Out::Instr(scpi::Cmd::WavData)) && scope_wav::is_block(app);
+            if msgs[src].multi() && (block_reply(&out) || wav_block) {
                 // Block data cannot be joined with other replies.
                 scpi.len = 0;
                 scpi.set_err("Query error");
@@ -583,6 +596,13 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 }
                 scpi::Out::Instr(scpi::Cmd::Range(_, op)) if logger.active() && !op.is_query() => {
                     scpi.set_err("Settings conflict");
+                    false
+                }
+                // WAV:DATA? other than SCReen + BYTE: a block of up to
+                // scope::CAP words, streamed over USBTMC (scope_wav.rs).
+                scpi::Out::Instr(_) if wav_block => {
+                    scpi.len = 0;
+                    scope_wav::data(app, port, scpi);
                     false
                 }
                 scpi::Out::Instr(c) => {
@@ -1699,6 +1719,11 @@ impl bt::ScpiPort for SentPort<'_> {
         });
         self.sent |= ok;
     }
+    fn respond_stream(&mut self, head: &[u8], len: usize, fill: fn(usize, &mut [u8])) -> bool {
+        let ok = self.inner.respond_stream(head, len, fill);
+        self.sent |= ok;
+        ok
+    }
     fn trusted(&self) -> bool {
         self.inner.trusted()
     }
@@ -2107,6 +2132,7 @@ mod vwrite;
 mod dialog;
 mod screenshot;
 mod scope_csv;
+mod scope_wav;
 mod csvlog;
 mod dlog;
 mod fastenc;

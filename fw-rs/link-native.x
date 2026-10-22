@@ -114,6 +114,10 @@ SECTIONS
          * region B since region C audit #1 (relocated, 3.8 KB, while B had
          * ~80 KB free; on-demand DBG replies, zero-wait is no cost). */
         *(.text.*7dm40_fw9scope_csv*);
+        /* Scope WAVeform:* replies (src/scope_wav.rs; its per-packet
+         * `fill` is `.text.scope_wav_fill`, region B). */
+        *(.text.*7dm40_fw9scope_wav*);
+        *(.text.*7dm40_fw4scpi7wav_cmd*);
         *(.text.*7dm40_fw4boot*);
         *(.text.*7dm40_fw3app9app_press*);
         /* Inrush current: open / arm / close / results / save glue and the
@@ -180,6 +184,7 @@ SECTIONS
         *(.rodata.*7dm40_fw6upload*);
         *(.rodata.*7dm40_fw5hyspi*);
         *(.rodata.*7dm40_fw9scope_csv*);
+        *(.rodata.*7dm40_fw9scope_wav*);
         *(.rodata.*7dm40_fw4boot*);
         *(.rodata.*7dm40_fw3app9app_press*);
         *(.rodata.*7dm40_fw7fastlog4prep*);

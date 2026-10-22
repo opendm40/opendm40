@@ -595,6 +595,51 @@ fn dcv_arg(a: &[u8]) -> Dbg {
     Dbg::Ad2(5, (w[1] & 0x3F) as u8, (w[2].clamp(1, 16) | w[0].min(3) << 8) as u16, (w[3] & 0x0F) as u8)
 }
 
+/// WAVeform:<sub> (scope_wav.rs): Ok(None) = WAV:SOURce (CHANnel1 only;
+/// the query's reply is put by the caller).
+#[inline(never)] // .cold (link-native.x)
+fn wav_cmd(sub: &[u8], a: &[u8], query: bool) -> Result<Option<Cmd>, &'static str> {
+    const BAD: &str = "Illegal parameter value";
+    if kw(sub, "PREamble") && query {
+        Ok(Some(Cmd::WavPre))
+    } else if (kw(sub, "DATA") || sub.is_empty()) && query {
+        Ok(Some(Cmd::WavData))
+    } else if kw(sub, "POINts") {
+        if query {
+            return Ok(Some(Cmd::WavPoints(None)));
+        }
+        let n = if kw(a, "MAXimum") || kw(a, "RAW") {
+            u32::MAX
+        } else if kw(a, "SCReen") || kw(a, "NORMal") || kw(a, "DEFault") {
+            0
+        } else {
+            match parse_num(a) {
+                Some(v) if v >= 1.0 => v.min(u32::MAX as f32 - 1.0) as u32,
+                _ => return Err(BAD),
+            }
+        };
+        Ok(Some(Cmd::WavPoints(Some(n))))
+    } else if kw(sub, "FORMat") {
+        if query {
+            Ok(Some(Cmd::WavFormat(None)))
+        } else if kw(a, "WORD") {
+            Ok(Some(Cmd::WavFormat(Some(true))))
+        } else if kw(a, "BYTE") {
+            Ok(Some(Cmd::WavFormat(Some(false))))
+        } else {
+            Err(BAD)
+        }
+    } else if kw(sub, "SOURce") {
+        if query || kw(a.strip_suffix(b"1").unwrap_or(&[]), "CHANnel") {
+            Ok(None)
+        } else {
+            Err(BAD)
+        }
+    } else {
+        Err("Undefined header")
+    }
+}
+
 /// DBG:AD2:N7? item,state,n -> Dbg::Ad2(6, state, n, item) (main.rs).
 #[inline(never)] // .cold (link-native.x)
 fn n7_arg(a: &[u8]) -> Dbg {
@@ -619,8 +664,18 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   effective duty, VOLT? / OFFS? the set values (OFFS? with AUTO: Vpp/2)
 ///   TIMebase:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
 ///   TRIGger:LEVel <V>   TRIGger:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
-///   RUN  STOP  SINGle   SCOPe:MEASure:VPP|VAVG|VRMS|FREQ?
-///   WAVeform:DATA? (#3400 + 400 bytes, 0..255)   WAVeform:PREamble?
+///   CHANnel1:OFFSet <V> (the vertical position as a voltage added to the
+///   signal: positive moves the trace up)   ACQuire:SRATe? (S/s)
+///   RUN  STOP  SINGle   DIGitize (one acquisition with the current sweep,
+///   then STOP)   TRIGger:STATus? (STOP|WAIT|AUTO|TD|RUN)
+///   SCOPe:MEASure:VPP|VAVG|VRMS|FREQ?
+///   WAVeform:POINts SCReen|MAXimum|<n> (default SCReen: 400 screen columns;
+///   MAX: the whole acquisition record; n: the record decimated to at most n
+///   points)   WAVeform:FORMat BYTE|WORD (code >> 2 | the 10-bit ADC code as
+///   16-bit little endian)   WAVeform:SOURce CHANnel1
+///   WAVeform:DATA? (SCReen + BYTE: #3400 + 400 bytes, as before; else a
+///   block from src/scope_wav.rs)   WAVeform:PREamble? (Keysight / Rigol
+///   layout: format,type,points,count,xinc,xorig,xref,yinc,yorig,yref)
 ///   Volts (CHAN1:SCAL, TRIG:LEV, measurements, WAV:PRE) are at the probe
 ///   tip: the probe factor of the scope settings window (x0.1..x1000) is
 ///   applied; there is no SCPI probe command.
@@ -645,6 +700,14 @@ pub enum Cmd {
     Meas(u8),
     WavData,
     WavPre,
+    /// WAV:POINts: Some(0) SCReen, Some(u32::MAX) MAXimum, Some(n); None = ?
+    WavPoints(Option<u32>),
+    /// WAV:FORMat: Some(true) WORD, Some(false) BYTE; None = ?
+    WavFormat(Option<bool>),
+    TrigStatus,
+    Digitize,
+    ChOffs(Option<f32>),
+    AcqSrate,
     /// Debug: sample the DAC output pin PA4 with the MCU ADC.
     DiagDac,
     /// Debug: count PB14 (PWM output) rising edges for 2 ms.
@@ -1640,6 +1703,8 @@ impl Scpi {
                     let a = trim(arg);
                     out = Out::Instr(if kw(sub, "COUPling") {
                         Cmd::ChCoup(if query { None } else { Some(a == b"AC") })
+                    } else if kw(sub, "OFFSet") {
+                        Cmd::ChOffs(if query { None } else { parse_num(a) })
                     } else {
                         Cmd::ChScale(if query { None } else { parse_num(a) })
                     });
@@ -1647,7 +1712,9 @@ impl Scpi {
                 _ if kw(p0, "TRIGger") => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     let a = trim(arg);
-                    out = Out::Instr(if kw(sub, "SLOPe") {
+                    out = Out::Instr(if kw(sub, "STATus") && query {
+                        Cmd::TrigStatus
+                    } else if kw(sub, "SLOPe") {
                         Cmd::TrigSlope(if query { None } else { Some(!kw(a, "NEGative")) })
                     } else if kw(sub, "SWEep") {
                         Cmd::TrigSweep(if query {
@@ -1666,6 +1733,8 @@ impl Scpi {
                 (b"RUN", false) => out = Out::Instr(Cmd::Run),
                 (b"STOP", false) => out = Out::Instr(Cmd::Stop),
                 _ if kw(p0, "SINGle") && !query => out = Out::Instr(Cmd::Single),
+                _ if kw(p0, "DIGitize") && !query => out = Out::Instr(Cmd::Digitize),
+                _ if kw(p0, "ACQuire") && query && parts.len() == 2 && kw(parts[1], "SRATe") => out = Out::Instr(Cmd::AcqSrate),
                 _ if kw(p0, "SCOPe") && query => {
                     let m = parts.last().copied().unwrap_or(&[]);
                     let k = if kw(m, "VPP") {
@@ -2051,10 +2120,15 @@ impl Scpi {
                         continue;
                     };
                 }
-                _ if kw(p0, "WAVeform") && query => {
-                    let sub = parts.get(1).copied().unwrap_or(&[]);
-                    out = Out::Instr(if kw(sub, "PREamble") { Cmd::WavPre } else { Cmd::WavData });
-                }
+                _ if kw(p0, "WAVeform") => match wav_cmd(parts.get(1).copied().unwrap_or(&[]), trim(arg), query) {
+                    Ok(Some(c)) => out = Out::Instr(c),
+                    Ok(None) => {
+                        if query {
+                            self.put(b"CHAN1");
+                        }
+                    }
+                    Err(e) => self.err = Some(e),
+                },
                 _ if kw(p0, "FETCh") && query && parts.len() == 2 && kw(parts[1], "BURDen") => {
                     out = Out::Instr(Cmd::FetchBurden)
                 }
