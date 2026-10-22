@@ -23,6 +23,7 @@ import signal
 import shutil
 import struct
 import subprocess
+import time
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -78,9 +79,17 @@ def elf_body(path):
         r = subprocess.run(['sh', '-c', 'find %s/toolchain/rustup -name llvm-objcopy | head -1' % ROOT],
                            capture_output=True, text=True)
         objcopy = r.stdout.strip()
-    tmp = os.path.join(OUT, 'app-from-elf.body.bin')
-    subprocess.check_call([objcopy, '-O', 'binary', '--gap-fill=0xff', path, tmp])
-    return read(tmp)
+    # Per process: parallel runs (test harnesses, several agents) shared one
+    # app-from-elf.body.bin, and a run could read another's half-written body.
+    tmp = os.path.join(OUT, 'app-from-elf.%d.body.bin' % os.getpid())
+    try:
+        subprocess.check_call([objcopy, '-O', 'binary', '--gap-fill=0xff', path, tmp])
+        return read(tmp)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def compose_flash(mode, app, out_path, base=DUMP, zero_marker=False):
@@ -483,6 +492,11 @@ def main(argv=None):
     return rc
 
 
+# Renode log cap (run_renode): env DM40_EMU_LOG_MAX_MB, default 512.
+LOG_MAX_MB = int(os.environ.get('DM40_EMU_LOG_MAX_MB', '512'))
+LOG_KEEP_MB = 16
+
+
 def kill_group(p, grace=2.0):
     """Terminate Renode's whole process group (Renode + its .NET children)."""
     if p.poll() is not None:
@@ -516,11 +530,40 @@ def run_renode(cmd, quiet=True, log=None):
 
     def on_signal(signum, _frame):
         raise KeyboardInterrupt
+
+    # Log size cap: a run that logs in a loop (an exception per tick, a
+    # peripheral warning per access) once wrote a 44 GB emu/out/*.log and
+    # filled the disk (2026-10-22). Over LOG_MAX_MB the whole Renode group is
+    # stopped and the log truncated to its first LOG_KEEP_MB.
+    capped = []
+    if log:
+        import threading
+        lim = LOG_MAX_MB << 20
+
+        def watch():
+            while p.poll() is None:
+                try:
+                    big = os.path.getsize(log) > lim
+                except OSError:
+                    big = False
+                if big:
+                    capped.append(1)
+                    print('run.py: %s over %d MiB: stopping Renode (log spam?)' % (rel(log), LOG_MAX_MB), file=sys.stderr)
+                    kill_group(p, 0.5)
+                    try:
+                        os.truncate(log, LOG_KEEP_MB << 20)
+                    except OSError:
+                        pass
+                    return
+                time.sleep(1.0)
+        threading.Thread(target=watch, daemon=True).start()
     old = signal.signal(signal.SIGTERM, on_signal)
     old_int = signal.signal(signal.SIGINT, on_signal)  # also when started with SIGINT ignored
     try:
         out = p.stdout.read() if quiet else ''
         rc = p.wait()
+        if capped:
+            rc = rc or 3
     except KeyboardInterrupt:
         print('\ninterrupted: stopping Renode', file=sys.stderr)
         kill_group(p)
