@@ -947,6 +947,16 @@ Firmware:
       the volume = the installed file), then the logger panel / DMM view / Wave view text (ASCII26 / F14 from
       A2) drawn correctly and DBG:ISR? max_lat at AD2 38400 with the logger panel no worse than before; taps on
       the inrush page while armed (App::tap now in B).
+- [x] Font storage 2026-10-22 (docs/fonts.md): the stock fonts were 104 KB of data in region B (90.9 KB
+      bitmaps + 13.2 KB tables). CJK / full-width glyphs dropped (232, never drawn), 4 bpp glyphs as row-major
+      nibble runs (RLE4, decoded straight into the LCD writes), 1 bpp glyphs cropped to their ink rows,
+      10-byte entries, named sections `.rodata.fonts.*` (region B; ASCII26 / F14 stay in A2): 41.1 KB. On 5f9b5a0:
+      region B free 26.4 -> 82.2 KB, A2 free 2.7 -> 7.9 KB (+61.1 KB together).
+      Pixel-identical (tools/font-matrix 178k glyph cases, ui-render per-case screen hashes UIR_HASH, stock-diff);
+      emulator draw time down (DMM page 17.1 -> 15.7 ms, power page 11.3 -> 10.5 ms, d.read avg 646 -> 484 us).
+      Lossy / vector-font options evaluated (doc sec. 4): <= 6 KB more for a visible change, not done.
+- [ ] Device check of the font storage: DBG:PROF? d.read / d.chart and a page switch's draw time vs the
+      previous image; DBG:ISR? max_lat with the logger panel drawing while AD2 streams (unchanged expected).
 - [ ] Device check of audit #3: DBG:PROF? lat_pc / DBG:ISR? max_lat at AD2 38400 to disk with the volume
       mounted and read; Wave view: STOP + Save CSV and a screenshot (max_lat, overruns 0, the trace and the
       stream back after), a host copying SCOPnnn.CSV / LOGnnn.CSV during the Wave view; taps on the inrush

@@ -1,15 +1,13 @@
 //! Text with the stock firmware's bitmap fonts: our own copy of the glyph
 //! tables + bitmaps, embedded from stockfont_data.rs (extracted by
 //! tools/mkstockfont.py), so no stock app in flash is needed.
-//! Format and placement rules: firmware/re/analysis/gui_v2_6.h section 5.
+//! Stock format and placement rules: firmware/re/analysis/gui_v2_6.h sec. 5;
+//! our storage (docs/fonts.md): CJK glyphs dropped, 4 bpp glyphs as
+//! row-major nibble runs (RLE4), 1 bpp glyphs cropped to their ink rows;
+//! the drawn pixels are the stock ones (tools/font-matrix).
 //!
-//! Font object F = { D*, vtable*, u16 line_h, i16 descent }.
-//!   class A: D = { u8 *bits, entry *tab, u32 n, u8 fmt }, entry 12 B =
-//!            { u32 code, u32 offset, i8 yoff, u8 w, u8 h, u8 adv }
-//!   class B: entry 8 B = { u32 code, u32 off << 8 | w }, h = line_h, adv = w
-//! fmt 4 = 4 bpp, else 1 bpp; bitmap is one bit stream, column-major
-//! (pixel p -> x = p / h, y = p % h), MSB first.
-//! glyph top = line_top + line_h - descent - h - yoff; pen += adv + spacing.
+//! Placement: glyph top = line_top + line_h - descent - h - yoff;
+//! pen += adv + spacing.
 
 use crate::lcd::{self, Color};
 
@@ -21,26 +19,50 @@ pub struct Font(pub u32);
 // descent/glyph and Glyph::alpha) live in `mod data`; its `Glyph` is
 // re-exported below.
 pub use data::Glyph;
+use data::{Cur, MAXW};
 
 // ---- Our embedded copy of the stock fonts ----
 mod data {
     use super::Font;
 
+    /// Glyph bitmap formats. BIT1: 1 bpp, column-major MSB-first, only the
+    /// glyph's ink rows t .. t + ih stored (ih per column). RAW4: 4 bpp
+    /// column-major, high nibble first (our own glyphs, stockfont_w.rs).
+    /// RLE4: 4 bpp row-major nibble runs (tools/mkstockfont.py rle_glyph):
+    /// 1..14 = one pixel; 0|15, n: n + 1 pixels of 0|15 (n <= 13), n = 14:
+    /// 15 + the next two nibbles; 0, 15, k at a row start: the last literal
+    /// row k + 1 more times. No run crosses a row end. docs/fonts.md.
+    pub const BIT1: u8 = 0;
+    pub const RAW4: u8 = 1;
+    pub const RLE4: u8 = 2;
+
+    /// Widest glyph (F78 'O' = 64; the generator asserts it): row buffer size.
+    pub const MAXW: usize = 64;
+
+    /// 10 bytes per glyph: code, byte offset into the font's blob, box w x h,
+    /// advance, yoff, first ink row t and ink rows ih (BIT1; RLE4: 0, h).
     #[derive(Clone, Copy)]
     pub struct Entry {
-        pub code: u32,
-        pub off: u32,
+        pub code: u16,
+        pub off: u16,
         pub w: u8,
         pub h: u8,
         pub adv: u8,
         pub yoff: i8,
+        pub t: u8,
+        pub ih: u8,
+    }
+
+    #[allow(non_snake_case, clippy::too_many_arguments)]
+    const fn E(code: u16, off: u16, w: u8, h: u8, adv: u8, yoff: i8, t: u8, ih: u8) -> Entry {
+        Entry { code, off, w, h, adv, yoff, t, ih }
     }
 
     #[derive(Clone, Copy)]
     pub struct FontData {
         pub line_h: u16,
         pub descent: i16,
-        pub four: bool,
+        pub fmt: u8,
         pub entries: &'static [Entry],
         pub blob: &'static [u8],
     }
@@ -54,41 +76,235 @@ mod data {
     #[derive(Clone, Copy)]
     pub struct Glyph {
         /// The font's blob from the glyph's first byte on (the entry's
-        /// offset folded in: 16 bytes per Glyph instead of 20, and every
-        /// `Ink` holds 24 of them).
+        /// offset folded in: 16 bytes per Glyph, and every `Ink` holds 24).
         blob: &'static [u8],
-        four: bool,
+        fmt: u8,
         pub w: u8,
         pub h: u8,
         pub adv: u8,
         pub yoff: i8,
+        t: u8,
+        ih: u8,
+    }
+
+    /// Row cursor of one RLE4 glyph: rows are decoded in order (a label
+    /// draws top to bottom), so no per-row index is stored. `next` = the row
+    /// the next token starts, `src` = nibble index of the last literal row,
+    /// `rep` = repeats of it still pending.
+    #[derive(Clone, Copy, Default)]
+    pub struct Cur {
+        pos: u16,
+        src: u16,
+        rep: u8,
+        next: u8,
     }
 
     impl Glyph {
-        pub const EMPTY: Glyph = Glyph { blob: &[], four: false, w: 0, h: 0, adv: 0, yoff: 0 };
+        pub const EMPTY: Glyph = Glyph { blob: &[], fmt: BIT1, w: 0, h: 0, adv: 0, yoff: 0, t: 0, ih: 0 };
 
-        /// A glyph of our own (stockfont_w.rs), same packing as the stock's.
+        /// A glyph of our own (stockfont_w.rs): column-major, uncropped.
         pub fn own(b: &'static [u8], four: bool, w: u8, h: u8, adv: u8, yoff: i8) -> Glyph {
-            Glyph { blob: b, four, w, h, adv, yoff }
+            Glyph { blob: b, fmt: if four { RAW4 } else { BIT1 }, w, h, adv, yoff, t: 0, ih: h }
         }
 
-        /// Coverage 0..15 of pixel (x, y) inside the glyph box. Column-major,
-        /// MSB-first; 4 bpp packs two pixels per byte (high nibble first).
+        /// Coverage 0..15 of pixel (x, y) inside the glyph box, random access
+        /// (Ink::at, the scope markers: 1 bpp fonts). An RLE4 glyph decodes
+        /// its rows up to y (slow; the drawing paths use `row`).
         pub fn alpha(&self, x: u32, y: u32) -> u8 {
-            self.alpha_at(x * self.h as u32 + y)
+            match self.fmt {
+                BIT1 => {
+                    let (t, ih) = (self.t as u32, self.ih as u32);
+                    if y < t || y >= t + ih {
+                        return 0;
+                    }
+                    let p = x * ih + y - t;
+                    match self.blob.get((p / 8) as usize) {
+                        Some(b) if b & (0x80 >> (p & 7)) != 0 => 15,
+                        _ => 0,
+                    }
+                }
+                RAW4 => self.nib(x * self.h as u32 + y),
+                _ => {
+                    if x >= self.w as u32 || y >= self.h as u32 {
+                        return 0;
+                    }
+                    let mut buf = [0u8; MAXW];
+                    let mut c = Cur::default();
+                    self.row(&mut c, y, &mut buf);
+                    buf.get(x as usize).copied().unwrap_or(0)
+                }
+            }
         }
 
-        /// Coverage of pixel index `p` = x * h + y (column-major), so a row
-        /// walk steps `p` by `h` instead of multiplying per pixel.
+        /// Column walk of row `y` for the formats with random access (not
+        /// RLE4): Some((index of column 0, step per column)) for `at`, None
+        /// when the row has no ink (BIT1 rows outside t .. t + ih).
         #[inline(always)]
-        pub fn alpha_at(&self, p: u32) -> u8 {
-            if self.four {
-                let b = self.blob[(p / 2) as usize];
-                if p & 1 == 0 { b >> 4 } else { b & 0xF }
-            } else {
-                let b = self.blob[(p / 8) as usize];
-                if b & (0x80 >> (p & 7)) != 0 { 15 } else { 0 }
+        pub fn col_walk(&self, y: u32) -> Option<Option<(u32, u32)>> {
+            match self.fmt {
+                BIT1 => {
+                    let (t, ih) = (self.t as u32, self.ih as u32);
+                    Some(if y < t || y >= t + ih { None } else { Some((y - t, ih)) })
+                }
+                RAW4 => Some(Some((y, self.h as u32))),
+                _ => None,
             }
+        }
+
+        /// Coverage at index `p` of a `col_walk`.
+        #[inline(always)]
+        pub fn at(&self, p: u32) -> u8 {
+            if self.fmt == BIT1 {
+                match self.blob.get((p / 8) as usize) {
+                    Some(b) if b & (0x80 >> (p & 7)) != 0 => 15,
+                    _ => 0,
+                }
+            } else {
+                self.nib(p)
+            }
+        }
+
+        #[inline(always)]
+        fn nib(&self, p: u32) -> u8 {
+            let b = self.blob.get((p / 2) as usize).copied().unwrap_or(0);
+            if p & 1 == 0 { b >> 4 } else { b & 0xF }
+        }
+
+        /// Coverage of row `y` (0..h) into buf[..w]. RLE4 walks forward from
+        /// `c` (asking the same row again or any later row is cheap, an
+        /// earlier one restarts from the top); the other formats ignore it.
+        pub fn row(&self, c: &mut Cur, y: u32, buf: &mut [u8; MAXW]) {
+            let w = (self.w as usize).min(MAXW);
+            match self.fmt {
+                BIT1 => {
+                    let (t, ih) = (self.t as u32, self.ih as u32);
+                    if y < t || y >= t + ih {
+                        buf[..w].fill(0);
+                        return;
+                    }
+                    let mut p = y - t;
+                    for v in buf[..w].iter_mut() {
+                        *v = match self.blob.get((p / 8) as usize) {
+                            Some(b) if b & (0x80 >> (p & 7)) != 0 => 15,
+                            _ => 0,
+                        };
+                        p += ih;
+                    }
+                }
+                RAW4 => {
+                    let h = self.h as u32;
+                    let mut p = y;
+                    for v in buf[..w].iter_mut() {
+                        *v = self.nib(p);
+                        p += h;
+                    }
+                }
+                _ => {
+                    let (s, lit) = self.seek(c, y, w);
+                    let e = self.runs::<true>(s, w, buf);
+                    if lit {
+                        c.pos = e as u16;
+                    }
+                }
+            }
+        }
+
+        /// RLE4 only: hand the coverage of columns x0 .. x1 of row `y` to
+        /// `f`, decoded straight from the runs (no row buffer). Same cursor
+        /// rules as `row`.
+        #[inline(always)]
+        pub fn row_emit<F: FnMut(u8)>(&self, c: &mut Cur, y: u32, x0: usize, x1: usize, mut f: F) {
+            let w = (self.w as usize).min(MAXW);
+            let (mut p, lit) = self.seek(c, y, w);
+            let mut x = 0usize;
+            while x < w {
+                let (v, l) = self.token(&mut p);
+                let e = (x + l).min(w);
+                for _ in x.max(x0)..e.min(x1) {
+                    f(v);
+                }
+                x = e;
+            }
+            if lit {
+                c.pos = p as u16;
+            }
+        }
+
+        /// Move the cursor to row `y`: (nibble index where row y's runs
+        /// start, true if that is a new literal row whose end the caller
+        /// stores in c.pos). Same row again: its start; a later row: skips
+        /// the rows between; an earlier row: from the top.
+        fn seek(&self, c: &mut Cur, y: u32, w: usize) -> (u32, bool) {
+            let y = y.min(255);
+            if y + 1 == c.next as u32 {
+                return (c.src as u32, false);
+            }
+            if y < c.next as u32 {
+                *c = Cur::default();
+            }
+            while (c.next as u32) < y {
+                let (s, lit) = self.begin(c);
+                if lit {
+                    c.pos = self.runs::<false>(s, w, &mut [0; MAXW]) as u16;
+                }
+            }
+            self.begin(c)
+        }
+
+        /// Start the next row: a pending or new repeat of the last literal
+        /// row (its start, false), else a literal row at c.pos (true).
+        fn begin(&self, c: &mut Cur) -> (u32, bool) {
+            c.next = c.next.wrapping_add(1);
+            if c.rep > 0 {
+                c.rep -= 1;
+                return (c.src as u32, false);
+            }
+            let p = c.pos as u32;
+            if self.nib(p) == 0 && self.nib(p + 1) == 15 {
+                c.rep = self.nib(p + 2);
+                c.pos += 3;
+                return (c.src as u32, false);
+            }
+            c.src = c.pos;
+            (p, true)
+        }
+
+        /// One run token at nibble `p` (advanced past it): (coverage, pixels).
+        #[inline(always)]
+        fn token(&self, p: &mut u32) -> (u8, usize) {
+            let v = self.nib(*p);
+            *p += 1;
+            if v != 0 && v != 15 {
+                return (v, 1);
+            }
+            let n = self.nib(*p) as usize;
+            *p += 1;
+            if n == 14 {
+                let l = 15 + ((self.nib(*p) as usize) << 4 | self.nib(*p + 1) as usize);
+                *p += 2;
+                (v, l)
+            } else {
+                (v, n + 1)
+            }
+        }
+
+        /// One row of runs from nibble `p` into o[..w] (if PUT); returns the
+        /// nibble index after the row.
+        #[inline(always)]
+        fn runs<const PUT: bool>(&self, mut p: u32, w: usize, o: &mut [u8; MAXW]) -> u32 {
+            let w = w.min(MAXW);
+            let mut x = 0usize;
+            while x < w {
+                let (v, l) = self.token(&mut p);
+                let e = (x + l).min(w);
+                if PUT {
+                    for d in &mut o[x..e] {
+                        *d = v;
+                    }
+                }
+                x = e;
+            }
+            p
         }
     }
 
@@ -108,6 +324,7 @@ mod data {
 
         pub fn glyph(&self, code: u32) -> Option<Glyph> {
             let fd = font_data(self.0)?;
+            let code = u16::try_from(code).ok()?;
             let e = fd.entries;
             let (mut lo, mut hi) = (0usize, e.len());
             while lo < hi {
@@ -117,11 +334,13 @@ mod data {
                     let g = &e[mid];
                     return Some(Glyph {
                         blob: fd.blob.get(g.off as usize..).unwrap_or(&[]),
-                        four: fd.four,
+                        fmt: fd.fmt,
                         w: g.w,
                         h: g.h,
                         adv: g.adv,
                         yoff: g.yoff,
+                        t: g.t,
+                        ih: g.ih,
                     });
                 } else if c < code {
                     lo = mid + 1;
@@ -175,6 +394,8 @@ struct Placed {
     /// Synthesised glyph (`glyph_or_twin`): the bitmap drawn a second time
     /// `twin` px to the right (max coverage of the two); 0 = plain.
     twin: i16,
+    /// Row cursor (RLE4 glyphs decode their rows in order).
+    cur: Cur,
 }
 
 /// Every character of `s` has a glyph in `font` (W, k: ours where missing).
@@ -199,6 +420,16 @@ fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
         None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
         None => None,
     }
+}
+
+/// Coverage at column `gx` (0 .. w + twin) of a glyph row decoded into
+/// `buf` (`Glyph::row`), the synthesised twin included.
+#[inline(always)]
+fn twin_buf(buf: &[u8; MAXW], w: u8, twin: i16, gx: usize) -> u8 {
+    let w = (w as usize).min(MAXW);
+    let a = if gx < w { buf[gx] } else { 0 };
+    let t = twin as usize;
+    if t > 0 && gx >= t && gx - t < w { a.max(buf[gx - t]) } else { a }
 }
 
 /// Coverage of a placed glyph at column `gx` (0.. w + twin) and row `gy`.
@@ -260,6 +491,7 @@ fn layout(font: Font, r: Rect, text: &str, align: u8, spacing: i8, out: &mut [Op
             x: (r.x as i32 + ox + xs[i]) as i16,
             y: (r.y as i32 + oy + lh - desc - g.h as i32 - g.yoff as i32) as i16,
             twin,
+            cur: Cur::default(),
         });
     }
     n
@@ -315,10 +547,13 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
     #[cfg(test)]
     crate::probe::begin(crate::probe::TEXT, bg);
     lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
+    // One glyph row at a time (`Glyph::row`): `bi` = the glyph whose row y
+    // is in `buf`.
+    let mut buf = [0u8; MAXW];
     for y in y0..=y1 {
         // Runs of columns with the same covering glyph: background runs are
-        // a plain fill, glyph runs step the bitmap index by the glyph height
-        // (column-major bitmaps, row-major window).
+        // a plain fill, glyph runs read the glyph's row y.
+        let mut bi = u8::MAX;
         let mut x = x0;
         while x <= x1 {
             let gi = cover[x as usize];
@@ -328,22 +563,41 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
             }
             #[cfg(test)]
             crate::probe::sub(gi);
-            let hit = match pl.get(gi as usize) {
+            let hit = match pl.get_mut(gi as usize) {
                 Some(Some(p)) if y >= p.y && y - p.y < p.g.h as i16 => Some(p),
                 _ => None,
             };
             match hit {
-                Some(p) if p.twin != 0 => {
-                    for c in x..e {
-                        lcd::data(lut[twin_alpha(&p.g, p.twin, (c - p.x) as u32, (y - p.y) as u32) as usize]);
+                // 1 bpp / raw 4 bpp: straight from the bitmap, a column step
+                // per pixel (column-major bitmap, row-major window).
+                Some(p) if p.twin == 0 && p.g.col_walk(0).is_some() => match p.g.col_walk((y - p.y) as u32).flatten() {
+                    Some((i0, st)) => {
+                        let mut i = i0 + (x - p.x) as u32 * st;
+                        for _ in x..e {
+                            lcd::data(lut[p.g.at(i) as usize]);
+                            i += st;
+                        }
                     }
+                    None => {
+                        for _ in x..e {
+                            lcd::data(lut[0]);
+                        }
+                    }
+                },
+                // RLE4: the glyph's row y straight from its runs; a twin W
+                // through the row buffer.
+                Some(p) if p.twin == 0 => {
+                    let gx = (x - p.x) as usize;
+                    p.g.row_emit(&mut p.cur, (y - p.y) as u32, gx, gx + (e - x) as usize, |a| lcd::data(lut[a as usize]));
                 }
                 Some(p) => {
-                    let h = p.g.h as u32;
-                    let mut i = (x - p.x) as u32 * h + (y - p.y) as u32;
-                    for _ in x..e {
-                        lcd::data(lut[p.g.alpha_at(i) as usize]);
-                        i += h;
+                    if bi != gi {
+                        p.g.row(&mut p.cur, (y - p.y) as u32, &mut buf);
+                        bi = gi;
+                    }
+                    let gx = (x - p.x) as usize;
+                    for (k, _) in (x..e).enumerate() {
+                        lcd::data(lut[twin_buf(&buf, p.g.w, p.twin, gx + k) as usize]);
                     }
                 }
                 None => {
@@ -386,6 +640,8 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
     crate::probe::begin(crate::probe::TEXT, bg);
     lcd::set_window(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
     let (x0, x1) = (x0 as i32, x1 as i32);
+    let mut rows = [[0u8; MAXW]; 2];
+    let mut cur = Cur::default();
     for y in y0..=y1 {
         let gy = 2 * (y as i32 - base as i32) - top;
         // Columns of this row inside the glyph (gx = 2 (x - ox) in 0..w):
@@ -399,13 +655,22 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
         }
         if let Some(g) = &g {
             let (w, h) = (g.w as i32, g.h as i32);
+            // Glyph rows gy, gy + 1 (zero outside the glyph).
+            for (k, b) in rows.iter_mut().enumerate() {
+                let py = gy + k as i32;
+                if xa <= xb && py >= 0 && py < h {
+                    g.row(&mut cur, py as u32, b);
+                } else {
+                    b.fill(0);
+                }
+            }
             for x in xa..=xb {
                 let gx = 2 * (x - ox);
                 let mut s = 0u32;
-                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                    let (px, py) = (gx + dx, gy + dy);
-                    if px < w && py >= 0 && py < h {
-                        s += g.alpha(px as u32, py as u32) as u32;
+                for dx in 0..2 {
+                    let px = gx + dx;
+                    if px < w {
+                        s += rows[0][px as usize] as u32 + rows[1][px as usize] as u32;
                     }
                 }
                 lcd::data(lut[((s + 2) / 4) as usize]);
@@ -521,9 +786,29 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
         let lut = ramp(fg, bg);
         let w = p.g.w as u16 + p.twin as u16;
         lcd::set_window(x, y, x + w - 1, y + p.g.h as u16 - 1);
+        let mut buf = [0u8; MAXW];
+        let mut cur = Cur::default();
         for gy in 0..p.g.h as u32 {
-            for gx in 0..w as u32 {
-                lcd::data(lut[twin_alpha(&p.g, p.twin, gx, gy) as usize]);
+            if p.twin == 0 {
+                match p.g.col_walk(gy) {
+                    None => p.g.row_emit(&mut cur, gy, 0, w as usize, |a| lcd::data(lut[a as usize])),
+                    Some(Some((mut i, st))) => {
+                        for _ in 0..w {
+                            lcd::data(lut[p.g.at(i) as usize]);
+                            i += st;
+                        }
+                    }
+                    Some(None) => {
+                        for _ in 0..w {
+                            lcd::data(lut[0]);
+                        }
+                    }
+                }
+                continue;
+            }
+            p.g.row(&mut cur, gy, &mut buf);
+            for gx in 0..w as usize {
+                lcd::data(lut[twin_buf(&buf, p.g.w, p.twin, gx) as usize]);
             }
         }
     }

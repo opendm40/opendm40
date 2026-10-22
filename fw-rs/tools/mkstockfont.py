@@ -17,8 +17,12 @@ i16 descent }; D = { u8 *bits, entry *tab, u32 n, u8 fmt }; class A entry (12 B)
 = { u32 code, u32 off<<8|w }, h = line_h, adv = w, yoff = 0; fmt 4 = 4 bpp else
 1 bpp; bitmap is a column-major MSB-first bit stream.
 
-The per-glyph byte spans are concatenated into one blob per font and the glyph
-offsets re-based into it, so the emitted data is self-contained.
+Emitted storage (docs/fonts.md; the drawn pixels stay the stock ones, checked
+here by decoding every glyph back and by tools/font-matrix): glyphs from
+U+2E80 up (CJK, full-width) are dropped; a 4 bpp glyph becomes row-major
+nibble runs (rle_glyph), a 1 bpp glyph keeps only its ink rows (crop_glyph);
+one blob per font as a named array in section .rodata.fonts.<NAME>_B, 10-byte
+entries E(code, off, w, h, adv, yoff, t, ih) in .rodata.fonts.<NAME>_E.
 """
 import os
 import struct
@@ -59,11 +63,119 @@ FONTS = [
 # Fonts whose bitmap blob is a named static in its own section
 # `.rodata.a2.<NAME>`, which link-native.x places in region A2 (zero-wait
 # flash between the shim and the loader marker, 0x0800460c..0x08008000;
-# docs/native-boot.md "Region A2"). The other blobs stay anonymous rodata in
-# region B. A2 holds ~14.8 KB; build.sh warns below 2 KiB free. ASCII26 is
+# docs/native-boot.md "Region A2"). The other blobs are named statics in
+# `.rodata.fonts.<NAME>_B`, region B. A2 holds ~14.8 KB; build.sh warns below 2 KiB free. ASCII26 is
 # the logger panel's font (read per draw while the AD2 stream runs; device
 # 5f14d38 showed it in slow flash stalling the ISR), F14 the small texts.
 A2_FONTS = ('ASCII26', 'F14')
+
+
+# Codes from here up (CJK, full-width punctuation) are dropped: fw-rs draws
+# English text only (no string in src/ has one; docs/fonts.md).
+CJK_FROM = 0x2E80
+# Widest glyph (F78 'O' = 64): the row buffer of stockfont.rs (MAXW there).
+MAXW = 64
+
+
+def pixels(data, w, h, four):
+    """Coverage 0..15 per pixel of a stock bitmap, column-major (x * h + y)."""
+    if four:
+        return [(data[p >> 1] >> 4) if p % 2 == 0 else (data[p >> 1] & 15) for p in range(w * h)]
+    return [15 if data[p >> 3] & (0x80 >> (p & 7)) else 0 for p in range(w * h)]
+
+
+def pack_nibbles(nib):
+    if len(nib) % 2:
+        nib = nib + [0]
+    return bytes((nib[i] << 4) | nib[i + 1] for i in range(0, len(nib), 2))
+
+
+def rle_glyph(px, w, h):
+    """4 bpp glyph -> row-major nibble RLE (stockfont.rs `Cur`), MSB nibble
+    first, byte-aligned per glyph. Tokens: 1..14 = one pixel of that
+    coverage; 0|15 then n: n = 0..13 -> n + 1 pixels of 0|15, n = 14 -> two
+    more nibbles L: 15 + L pixels (15..270); 0 then 15, k (at a row start
+    only): the previous literal row again k + 1 times. No run crosses a row."""
+    rows = [[px[x * h + y] for x in range(w)] for y in range(h)]
+    out = []
+    prev = None
+    y = 0
+    while y < h:
+        r = rows[y]
+        if prev is not None and r == prev:
+            k = 0
+            while y + k + 1 < h and rows[y + k + 1] == prev and k < 15:
+                k += 1
+            out += [0, 15, k]
+            y += k + 1
+            continue
+        i = 0
+        while i < w:
+            v = r[i]
+            if v in (0, 15):
+                j = i
+                while j < w and r[j] == v and j - i < 270:
+                    j += 1
+                L = j - i
+                out += [v, L - 1] if L <= 14 else [v, 14, (L - 15) >> 4, (L - 15) & 15]
+                i = j
+            else:
+                out.append(v)
+                i += 1
+        prev = r
+        y += 1
+    return pack_nibbles(out)
+
+
+def unrle_glyph(b, w, h):
+    nib = [(c >> 4, c & 15)[k] for c in b for k in (0, 1)]
+    pos = 0
+    rows = []
+    src = None
+    while len(rows) < h:
+        if nib[pos] == 0 and nib[pos + 1] == 15:
+            rows += [rows[src]] * (nib[pos + 2] + 1)
+            pos += 3
+            continue
+        r = []
+        while len(r) < w:
+            v = nib[pos]
+            if v in (0, 15):
+                n = nib[pos + 1]
+                if n == 14:
+                    L = 15 + (nib[pos + 2] << 4 | nib[pos + 3])
+                    pos += 4
+                else:
+                    L = n + 1
+                    pos += 2
+                r += [v] * L
+            else:
+                r.append(v)
+                pos += 1
+        src = len(rows)
+        rows.append(r)
+    assert len(rows) == h
+    return [rows[y][x] for x in range(w) for y in range(h)]
+
+
+def crop_glyph(px, w, h):
+    """1 bpp glyph -> its ink rows t .. t + ih only (same column-major
+    MSB-first bit stream, ih rows per column). An inkless glyph: ih = 0."""
+    ink = [y for y in range(h) if any(px[x * h + y] for x in range(w))]
+    if not ink:
+        return b'', 0, 0
+    t, ih = ink[0], ink[-1] - ink[0] + 1
+    bits = [px[x * h + y] for x in range(w) for y in range(t, t + ih)]
+    out = bytearray((len(bits) + 7) // 8)
+    for p, v in enumerate(bits):
+        if v:
+            out[p >> 3] |= 0x80 >> (p & 7)
+    return bytes(out), t, ih
+
+
+def uncrop_glyph(b, w, h, t, ih):
+    return [15 if t <= y < t + ih and b[(x * ih + y - t) >> 3] & (0x80 >> ((x * ih + y - t) & 7)) else 0
+            for x in range(w) for y in range(h)]
 
 
 def main():
@@ -158,6 +270,8 @@ def main():
 
     total_blob = 0
     total_glyphs = 0
+    dropped = [0, 0]
+    raw_total = [0]
     summary = []
     fonts = [(name, a, (lambda a=a: load(a))) for name, a in FONTS]
     fonts += [(name, key, src) for name, key, src in [
@@ -178,8 +292,22 @@ def main():
         blob = bytearray()
         entries = []
         for (code, gw, gh, adv, yoff, data) in gl:
-            entries.append((code, len(blob), gw, gh, adv, yoff))
-            blob += data
+            if code >= CJK_FROM:
+                dropped[0] += 1
+                dropped[1] += len(data)
+                continue
+            px = pixels(data, gw, gh, four)
+            if four:
+                enc = rle_glyph(px, gw, gh)
+                assert unrle_glyph(enc, gw, gh) == px, (name, code)
+                t, ih = 0, gh
+            else:
+                enc, t, ih = crop_glyph(px, gw, gh)
+                assert uncrop_glyph(enc, gw, gh, t, ih) == px, (name, code)
+            assert len(blob) < 0x10000 and code < 0x10000 and gw <= MAXW, (name, code)
+            entries.append((code, len(blob), gw, gh, adv, yoff, t, ih))
+            blob += enc
+            raw_total[0] += len(data)
         n = len(entries)
 
         total_blob += len(blob)
@@ -187,10 +315,11 @@ def main():
         summary.append((name, cls, bpp, line_h, descent, n, len(blob)))
 
         # Emit the glyph entry table.
+        out.append('#[link_section = ".rodata.fonts.%s_E"]' % name)
         out.append('pub static %s_E: [Entry; %d] = [' % (name, n))
         line = '    '
-        for (code, noff, gw, gh, adv, yoff) in entries:
-            cell = 'Entry{code:0x%X,off:%d,w:%d,h:%d,adv:%d,yoff:%d},' % (code, noff, gw, gh, adv, yoff)
+        for (code, noff, gw, gh, adv, yoff, t, ih) in entries:
+            cell = 'E(0x%X,%d,%d,%d,%d,%d,%d,%d),' % (code, noff, gw, gh, adv, yoff, t, ih)
             if len(line) + len(cell) > 116:
                 out.append(line)
                 line = '    '
@@ -198,26 +327,26 @@ def main():
         if line.strip():
             out.append(line)
         out.append('];')
-        # Emit the bitmap blob as a wrapped byte-string literal.
-        # A2 fonts: a named [u8; N] in `.rodata.a2.<NAME>` (link-native.x
-        # routes it to region A2); the others: an anonymous byte string.
-        a2 = name in A2_FONTS and len(blob) > 0
-        if a2:
+        # Emit the bitmap blob as a wrapped byte-string literal, a named
+        # [u8; N] in its own section: A2 fonts `.rodata.a2.<NAME>`
+        # (link-native.x routes it to region A2), the others
+        # `.rodata.fonts.<NAME>_B` (region B).
+        if name in A2_FONTS and len(blob) > 0:
             out.append('#[link_section = ".rodata.a2.%s"]' % name)
-            out.append('pub static %s_B: [u8; %d] = *b"\\' % (name, len(blob)))
         else:
-            out.append('pub static %s_B: &[u8] = b"\\' % name)
+            out.append('#[link_section = ".rodata.fonts.%s_B"]' % name)
+        out.append('pub static %s_B: [u8; %d] = *b"\\' % (name, len(blob)))
         esc = ''.join('\\x%02x' % b for b in blob)
         for j in range(0, len(esc), 128):
             cont = '\\' if j + 128 < len(esc) else '"'
             out.append(esc[j:j + 128] + cont)
         if len(esc) == 0:
-            out[-1] = 'pub static %s_B: &[u8] = b"";' % name
+            out[-1] = 'pub static %s_B: [u8; 0] = *b"";' % name
         else:
             out.append(';')
         # Emit the FontData.
-        out.append('pub static %s_FD: FontData = FontData{line_h:%d,descent:%d,four:%s,entries:&%s_E,blob:%s%s_B};'
-                   % (name, line_h, descent, 'true' if four else 'false', name, '&' if a2 else '', name))
+        out.append('pub static %s_FD: FontData = FontData{line_h:%d,descent:%d,fmt:%s,entries:&%s_E,blob:&%s_B};'
+                   % (name, line_h, descent, 'RLE4' if four else 'BIT1', name, name))
         out.append('')
 
     # Address -> embedded FontData dispatch, so stockfont::Font can stay keyed
@@ -235,7 +364,8 @@ def main():
     open(os.path.join(FW, 'src', 'stockfont_data.rs'), 'w').write('\n'.join(out) + '\n')
 
     # Self-check report.
-    print('fonts: %d  glyphs: %d  blob bytes: %d' % (len(fonts), total_glyphs, total_blob))
+    print('fonts: %d  glyphs: %d  blob bytes: %d (raw %d; dropped %d CJK glyphs, %d raw bytes)'
+          % (len(fonts), total_glyphs, total_blob, raw_total[0], dropped[0], dropped[1]))
     for (name, cls, bpp, lh, desc, n, nb) in summary:
         print('  %-9s class %-2s %dbpp line_h=%-3d descent=%-2d glyphs=%-4d blob=%d'
               % (name, cls, bpp, lh, desc, n, nb))
