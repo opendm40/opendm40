@@ -59,16 +59,40 @@ SC = {
     'cont-live': ('CONT', 18, [(0, 'open;r:10', {'NONE'}), (8, 'open;vsrc:1.234', {'LIVE'})]),
     'diode-live': ('DIOD', 18, [(0, 'open;diode:0.65', {'NONE'}), (8, 'open;vsrc:-1.0,rs=100', {'LIVE'})]),
     'masked':   ('VOLT:DC', 18, [(0, 'open;vsrc:1.234;isrc:0.001', {'NONE'})]),
+    # OVERLOAD (doc 4.7): the uA / mA shunt over range -> the 10 A shunt at once, latched; a
+    # phase may carry a READ? window (lo, hi) in A. AUTO: from mA r0 through r1 to 10 A, the
+    # floor keeps the mA shunt out until 50 mA < 0.3 A held 5 s, then back to mA.
+    'ovl-dcma': ('CURR:DC', 40, [(0, 'open;isrc:0.01', {'NONE'}, (0.0099, 0.0101)),
+                                 (10, 'isrc:2', {'OVERLOAD'}, (1.98, 2.02)),
+                                 (20, 'isrc:0.05', {'OVERLOAD', 'NONE'}),
+                                 (32, 'isrc:0.05', {'NONE'}, (0.0499, 0.0501))]),
+    # Manual 600 uA (Current Settings page): 10 mA -> 10 A (manual); 0 A for 5 s -> back to
+    # 600 uA manual (100 uA reads with uA resolution again); 1 mA within 30 s of that release
+    # trips again and the latch is sticky (0 A no longer releases it).
+    'ovl-dcua-man': ('CURR:DC', 56, [(0, 'open;isrc:0.0001', {'NONE'}, (99e-6, 101e-6)),
+                                     (12, 'isrc:0.01', {'OVERLOAD'}, (0.008, 0.012)),
+                                     (22, 'isrc:none', {'OVERLOAD', 'NONE'}),
+                                     (30, 'isrc:0.0001', {'NONE'}, (99.5e-6, 100.5e-6)),
+                                     (38, 'isrc:0.001', {'OVERLOAD'}),
+                                     (44, 'isrc:none', {'OVERLOAD'})],
+                     ['DBG:KEY 3', 'DBG:TAP 64,70', 'DBG:KEY 3']),
+    'ovl-acma': ('CURR:AC', 26, [(0, 'open;isrc:0,ac=0.01,f=50', {'NONE'}, (0.0098, 0.0102)),
+                                 (10, 'isrc:0,ac=2,f=50', {'OVERLOAD'}, (1.95, 2.05))]),
+    'ovl-acdc': ('CURR:ACDC', 30, [(0, 'open;isrc:0.01', {'NONE'}), (12, 'isrc:2', {'OVERLOAD'})]),
+    # Power meter, I fixed on 600 mA (CONF:POW AUTO,0.6): 2 A -> ik 5.
+    'ovl-pow':  ('POW AUTO,0.6', 30, [(0, 'open;pow:230,i=0.1,f=50', {'NONE'}), (12, 'pow:230,i=2,f=50', {'OVERLOAD'})]),
 }
 
 
 def run(name):
-    func, run_for, phases = SC[name]
-    script = [(t, spec) for t, spec, _ in phases]
+    func, run_for, phases = SC[name][:3]
+    setup = SC[name][3] if len(SC[name]) > 3 else []
+    script = [(ph[0], ph[1]) for ph in phases]
     expect = []
-    for i, (t, _, allowed) in enumerate(phases):
+    for i, ph in enumerate(phases):
+        t = ph[0]
         t1 = phases[i + 1][0] - 1.5 if i + 1 < len(phases) else run_for
-        expect.append((t + 2.0 if t > 0 else 5.0, t1, allowed))
+        expect.append((t + 2.0 if t > 0 else 5.0, t1, ph[2], ph[3] if len(ph) > 3 else None))
     tag = 'sent-' + name
     os.makedirs(OUT, exist_ok=True)
     sp = os.path.join(OUT, tag + '.script')
@@ -95,9 +119,12 @@ def run(name):
             if name == 'masked':
                 tm.write('SYST:ALER:ENAB 6')
             tm.write('CONF:' + func)
+            for c in setup:
+                time.sleep(1.0)
+                tm.write(c)
             while p.poll() is None:
                 row = {}
-                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:SENT?', 'READ?']:
+                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:SENT?', 'STAT:QUES:COND?', 'READ?']:
                     tm.write(q)
                     row[q] = tm.read(timeout=60).decode(errors='replace').strip()
                 row['t'] = int(row['DBG:PING?'].split(',')[0]) / 1000.0
@@ -108,7 +135,7 @@ def run(name):
     out, _ = p.communicate()
     ok = True
     bad = []
-    for t0, t1, allowed in expect:
+    for t0, t1, allowed, win in expect:
         seen = [r for r in rows if t0 <= r['t'] <= t1]
         if not seen:
             ok = False
@@ -117,6 +144,19 @@ def run(name):
             if r['SYST:ALER?'] not in allowed:
                 ok = False
                 bad.append('%.2f %s not in %s' % (r['t'], r['SYST:ALER?'], sorted(allowed)))
+            # STAT:QUES:COND? bit 9 = a red alert, bit 1 = OVERLOAD
+            want = (512 if r['SYST:ALER?'] in ('AJACK', 'OVERLOAD') else 0) | (2 if r['SYST:ALER?'] == 'OVERLOAD' else 0)
+            if len(allowed) == 1 and r.get('STAT:QUES:COND?') != str(want):
+                ok = False
+                bad.append('%.2f QUES %s for %s' % (r['t'], r.get('STAT:QUES:COND?'), r['SYST:ALER?']))
+            if win:
+                try:
+                    v = float(r['READ?'])
+                except ValueError:
+                    v = float('nan')
+                if not (win[0] <= abs(v) <= win[1]):
+                    ok = False
+                    bad.append('%.2f READ? %s outside %g..%g' % (r['t'], r['READ?'], win[0], win[1]))
             # DC V 60 V+ carries no comparator sentinel (9dd1222 device check)
             try:
                 v = float(r['READ?'])
@@ -134,8 +174,8 @@ def run(name):
 
 if __name__ == '__main__':
     if A.list:
-        for n, (f, rf, ph) in SC.items():
-            print('%-11s %-8s %s' % (n, f, ' | '.join('%g %s -> %s' % (t, sp, '/'.join(sorted(al))) for t, sp, al in ph)))
+        for n, v in SC.items():
+            print('%-11s %-8s %s' % (n, v[0], ' | '.join('%g %s -> %s' % (x[0], x[1], '/'.join(sorted(x[2]))) for x in v[2])))
         sys.exit(0)
     allok = True
     for n in A.names or list(SC):

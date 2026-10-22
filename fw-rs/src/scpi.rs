@@ -86,6 +86,13 @@
 //!     in DC A) | LIVE (a source on the circuit in ohm / continuity / diode)
 //!   SYSTem:ALERt:ENABle <mask> | ON | OFF / ?   alerts enabled, bit 0 AJACK,
 //!     1 VJACK, 2 LIVE (default 7 = ON; Settings 3/3 "Jack alerts", persisted)
+//!     OVERLOAD (the uA / mA shunt over range: the meter moved to the 10 A
+//!     shunt, latched; doc 4.7) is not maskable
+//!   STATus:QUEStionable:CONDition?   bit 9 while a red alert (AJACK,
+//!     OVERLOAD) is on, bit 1 while OVERLOAD is (SCPI CURRent)
+//!   STATus:QUEStionable[:EVENt]?   the same bits latched since the last
+//!     read / *CLS (cleared by the read); no enable / transition registers,
+//!     *STB? stays 0
 //!
 //! Statistics / limits of the CURRENT DMM function (FR-01 / 02 / 06; values
 //! in SI units of the function, as READ?):
@@ -450,6 +457,8 @@ pub enum Cmd {
     DbgAcdc,
     /// SYSTem:ALERt?: the wrong-connection alert in force (sentinel.rs).
     SysAlert,
+    /// STATus:QUEStionable:CONDition? (sentinel::ques_bits of the alert).
+    StatQuesCond,
     /// SYSTem:ALERt:ENABle <mask> | ON | OFF / ?: alerts enabled (bit 0
     /// A-JACK, 1 V-JACK?, 2 LIVE?).
     SysAlertEnable(Option<u8>),
@@ -949,7 +958,20 @@ impl Scpi {
                 // meter measures continuously, READ? takes the next reading.
                 _ if (kw(p0, "INITiate") || kw(p0, "ABORt")) && !query => {}
                 _ if kw(p0, "SYSTem") && parts.len() == 2 && (kw(parts[1], "LOCal") || kw(parts[1], "REMote")) && !query => {}
-                (b"*RST", false) | (b"*CLS", false) => self.err = None,
+                (b"*RST", false) | (b"*CLS", false) => {
+                    self.err = None;
+                    crate::sentinel::QUES_EVENT.store(0, core::sync::atomic::Ordering::Relaxed);
+                }
+                _ if kw(p0, "STATus") && parts.len() > 1 && kw(parts[1], "QUEStionable") && query => {
+                    if parts.len() == 3 && kw(parts[2], "CONDition") {
+                        out = Out::Instr(Cmd::StatQuesCond);
+                    } else if parts.len() == 2 || (parts.len() == 3 && kw(parts[2], "EVENt")) {
+                        let v = crate::sentinel::QUES_EVENT.swap(0, core::sync::atomic::Ordering::Relaxed);
+                        self.put_u32(v as u32);
+                    } else {
+                        self.err = Some("Undefined header");
+                    }
+                }
                 (b"*OPC", true) => self.put(b"1"),
                 (b"*ESR", true) | (b"*STB", true) => self.put(b"0"),
                 _ if kw(p0, "SYSTem") && parts.len() > 1 && kw(parts[1], "TEMPerature") && query => {

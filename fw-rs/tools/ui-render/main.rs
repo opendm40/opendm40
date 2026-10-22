@@ -402,7 +402,7 @@ fn ol(dec: u8, unit: &'static str) -> Val {
 }
 
 /// Wrong-connection alerts (sentinel.rs) cycled through the page / strip matrices.
-const ALERTS: [sentinel::Alert; 4] = [sentinel::Alert::None, sentinel::Alert::AJack, sentinel::Alert::VJack, sentinel::Alert::Live];
+const ALERTS: [sentinel::Alert; 5] = [sentinel::Alert::None, sentinel::Alert::AJack, sentinel::Alert::VJack, sentinel::Alert::Live, sentinel::Alert::Overload];
 
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
@@ -430,6 +430,8 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("acdc_ua", rd(7, val(-444.44, 2, "\u{b5}A"), Some(val(444.44, 2, "\u{b5}A")), Some(val(-444.44, 2, "\u{b5}A")), true), None),
         ("acdc_ol", rd(3, ol(2, "mV"), Some(ol(2, "mV")), Some(val(-444.44, 2, "mV")), true), None),
         ("dca", rd(9, val(-9.9999, 4, "A"), None, None, false), None),
+        // OVERLOAD latch: the 10 A range after the mA shunt overloaded.
+        ("dca10", rd(7, val(2.345, 3, "A"), None, None, false), None),
         ("dcma_420", rd(8, val(24.444, 3, "mA"), None, Some(val(125.0, 1, "%")), false), None),
         ("dcma_420ol", rd(8, val(44.444, 3, "mA"), None, Some(ol(1, "%")), false), None),
         ("dcma_420lo", rd(8, val(0.0, 3, "mA"), None, Some(val(-25.0, 1, "%")), false), None),
@@ -960,7 +962,7 @@ fn main() {
                           for alt in [false, true] {
                             let mut r = *r;
                             if !(hold == 0 && lim == 0 && !rel) {
-                                r.alert = ALERTS[(j + hold as usize + rel as usize) % 4];
+                                r.alert = ALERTS[(j + hold as usize + rel as usize) % ALERTS.len()];
                             }
                             let r = &r;
                             let mut d = ui::strip_data(r, hold, lim, rel, hv, alt, *label, rec);
@@ -1136,7 +1138,7 @@ fn main() {
                     let mut r = *r;
                     r.main.ext = ext && !r.main.ol;
                     // Every alert badge in the status slot, against every hold state.
-                    r.alert = ALERTS[(k + hold as usize) % 4];
+                    r.alert = ALERTS[(k + hold as usize) % ALERTS.len()];
                     // The alert phase of A-JACK / LIVE? with HOLD (decision
                     // 2026-10-22 #5); the other cases look the same in both.
                     if alt && !ui::alert_alternates(hold, r.alert) {
@@ -1214,6 +1216,16 @@ fn main() {
         }
     }
 
+    // 5c0. Every alert badge fits the status slot box (119..201, TEXT22,
+    //      spacing 1): sf::label clips silently.
+    for a in ALERTS {
+        ck.cases += 1;
+        let w = stockfont::text_width(stockfont::TEXT22, a.badge(), 1);
+        if w > 83 {
+            ck.fail(&format!("slot badge {}", a.name()), format!("{w} px > 83"));
+        }
+    }
+
     // 5c'. Status slot alternation (decision 2026-10-22 #5): HOLD / A-HOLD
     //     with A-JACK / LIVE? flipped phase by phase (and from / to RUN
     //     with an alert, and a V-JACK? that must not alternate) equals a
@@ -1222,7 +1234,7 @@ fn main() {
         use sentinel::Alert;
         let (r0, l0) = cases.iter().find(|c| c.0 == "dcv").map(|c| (c.1, c.2)).unwrap();
         for hold in 0..4u8 {
-            for a in [Alert::AJack, Alert::Live, Alert::VJack, Alert::None] {
+            for a in [Alert::AJack, Alert::Live, Alert::VJack, Alert::Overload, Alert::None] {
                 for seq in [&[false, true][..], &[true, false], &[false, true, false], &[true, false, true]] {
                     let mut r = r0;
                     r.alert = a;
@@ -1263,7 +1275,7 @@ fn main() {
                     }
                     // The phase shows what slot_alert says.
                     let alerting = ui::slot_alert(hold, a, last.1);
-                    if alerting != (hold != 0 && last.1 && matches!(a, Alert::AJack | Alert::Live)) {
+                    if alerting != (hold != 0 && last.1 && matches!(a, Alert::AJack | Alert::Live | Alert::Overload)) {
                         ck.fail(&format!("slot_alert h{hold} {}", a.name()), "rule".into());
                     }
                 }
@@ -1642,6 +1654,7 @@ fn main() {
         (sentinel::Alert::AJack.toast(), false),
         (sentinel::Alert::VJack.toast(), false),
         (sentinel::Alert::Live.toast(), false),
+        (sentinel::Alert::Overload.toast(), false),
     ]
     .iter()
     .enumerate()
@@ -1833,6 +1846,7 @@ fn main() {
             ("dcv", "d12-dmm-ajack", Button::Volt, sentinel::Alert::AJack),
             ("dcma_420lo", "d13-dmm-vjack", Button::Amp, sentinel::Alert::VJack),
             ("ohm_k", "d14-dmm-live", Button::Ohm, sentinel::Alert::Live),
+            ("dca10", "d17-dmm-overload", Button::Amp, sentinel::Alert::Overload),
         ] {
             host::reset(0);
             let (mut r, _) = find(case);
@@ -1854,6 +1868,10 @@ fn main() {
             save(&out, "c13-strip-hold-ajack-p1");
             combined(&r, l, 1, 0, false, false, false, "");
             save(&out, "c14-strip-hold-ajack-p0");
+            let (mut r, l) = find("dca10");
+            r.alert = sentinel::Alert::Overload;
+            combined(&r, l, 0, 0, false, false, false, "");
+            save(&out, "c15-strip-overload");
         }
         // DMM status slot: HOLD / A-HOLD with A-JACK / LIVE?, both phases.
         for (case, file, b, a, hold) in [

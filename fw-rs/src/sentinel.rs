@@ -36,6 +36,9 @@ pub const M_ALL: u8 = 7;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Alert {
     None,
+    /// The uA / mA shunt overloaded: the meter moved to the 10 A shunt
+    /// (`dmm.rs` OVERLOAD latch, doc 4.3); red, not maskable.
+    Overload,
     /// Current in the A jack while not in a current mode (red).
     AJack,
     /// Voltage on V/ohm, no current, in a current mode (amber).
@@ -49,6 +52,7 @@ impl Alert {
     pub fn name(self) -> &'static str {
         match self {
             Alert::None => "NONE",
+            Alert::Overload => "OVERLOAD",
             Alert::AJack => "AJACK",
             Alert::VJack => "VJACK",
             Alert::Live => "LIVE",
@@ -58,6 +62,8 @@ impl Alert {
     pub fn badge(self) -> &'static str {
         match self {
             Alert::None => "",
+            // "OVERLOAD" does not fit the 83 px slot in TEXT22.
+            Alert::Overload => "OVLD",
             Alert::AJack => "A-JACK",
             Alert::VJack => "V-JACK?",
             Alert::Live => "LIVE?",
@@ -71,23 +77,40 @@ impl Alert {
             a => a.badge(),
         }
     }
-    /// Badge colour: red for A-JACK, the stock amber for the hints.
+    /// Badge colour: red for A-JACK / OVERLOAD, the stock amber for the
+    /// hints.
     pub fn color(self) -> u16 {
         match self {
-            Alert::AJack => 0xF800,
+            Alert::AJack | Alert::Overload => 0xF800,
             _ => 0xFC40,
         }
+    }
+    /// A red (safety) alert: white on red in the status slot, alternates
+    /// with HOLD (decision #5), STAT:QUES bit 9.
+    pub fn red(self) -> bool {
+        matches!(self, Alert::AJack | Alert::Overload)
     }
     /// Toast shown once per assertion.
     pub fn toast(self) -> &'static str {
         match self {
             Alert::None => "",
+            Alert::Overload => "Overload: 10 A shunt selected",
             Alert::AJack => "Current in A jack: check leads",
             Alert::VJack => "Voltage on V jack, no current",
             Alert::Live => "Voltage on circuit - power off",
         }
     }
 }
+
+/// STATus:QUEStionable bits of an alert (doc 4.4): bit 9 (SCPI-99: free
+/// for the instrument) while a red alert (A-JACK, OVERLOAD) is on, plus bit
+/// 1 (SCPI CURRent / the 34401A "current overload") for OVERLOAD.
+pub fn ques_bits(a: Alert) -> u16 {
+    (if a.red() { 1 << 9 } else { 0 }) | (if a == Alert::Overload { 1 << 1 } else { 0 })
+}
+
+/// STATus:QUEStionable:EVENt: the bits seen since the last read / *CLS.
+pub static QUES_EVENT: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
 
 /// Which sentinel the current row carries.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -102,6 +125,14 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// What the kind detects: 0 nothing, 1 A-JACK, 2 V-JACK?.
+    pub fn family(self) -> u8 {
+        match self {
+            Kind::Off => 0,
+            Kind::CmpA | Kind::PeakA => 1,
+            Kind::CmpV => 2,
+        }
+    }
     pub fn name(self) -> &'static str {
         match self {
             Kind::Off => "OFF",
@@ -224,6 +255,73 @@ pub const VJACK_CLEAR_MS: u64 = 500;
 pub const LIVE_ASSERT_MS: u64 = 300;
 pub const LIVE_CLEAR_MS: u64 = 1000;
 
+// ------------------------------------------------------------- OVERLOAD
+//
+// Doc 4.3 / 4.7 and the manual (one 10 A ceramic fuse in front of all
+// shunts: the 47.5 ohm uA resistor and the 0.5 ohm mA shunt have no fuse of
+// their own). `dmm.rs` applies the rule; the pure parts are here.
+
+/// Shunt of a current mode: 0 = A (10 mohm), 1 = mA (0.5 ohm), 2 = uA
+/// (47.5 ohm chain); None outside the current modes (V / ohm / ... never
+/// switch the shunt MOSFETs, doc 4.3).
+pub fn shunt_of(mode: u8) -> Option<u8> {
+    match mode {
+        4 | 7 => Some(0),
+        5 | 8 => Some(1),
+        6 | 9 => Some(2),
+        _ => None,
+    }
+}
+
+/// Full scale (A) of a current range: unit (`shunt_of`) and range 0 / 1
+/// (DM40C: 6 / 10 A, 60 / 600 mA, 600 / 6000 uA).
+pub fn current_fs(unit: u8, range: u8) -> f32 {
+    match (unit, range) {
+        (0, 0) => 6.0,
+        (0, _) => 10.0,
+        (1, 0) => 0.06,
+        (1, _) => 0.6,
+        (_, 0) => 600e-6,
+        _ => 6000e-6,
+    }
+}
+
+/// The rule: on the uA / mA shunt (`unit` 2 / 1) a reading over its range
+/// (`over`: |I| above 1.03 x the range, i.e. OL) moves the meter to the
+/// 10 A shunt when the range is manual or the top range of that shunt
+/// (r1). In auto at r0 the stock range step (r0 -> r1, the same shunt, 10x)
+/// comes first; if r1 is over too the rule trips there. Never on the A
+/// shunt, never outside the current modes.
+pub fn overload_trips(unit: u8, range: u8, manual: bool, over: bool) -> bool {
+    unit >= 1 && unit <= 2 && over && (manual || range >= 1)
+}
+
+/// The latch lets go after the current stayed below the release threshold
+/// for this long (on whatever range the latch left the meter on).
+pub const OVL_RELEASE_MS: u64 = 5000;
+
+/// The 10 A range cannot tell less than this from zero (1 mA digits, a few
+/// counts of noise): the release threshold is never below it.
+pub const OVL_ZERO_A: f32 = 2e-3;
+
+/// A trip this soon after a timed release makes the new latch sticky (no
+/// timed release: only a user choice ends it). Covers the one case where
+/// the threshold exceeds the range it returns to (manual 600 uA: 0.6..2 mA
+/// would otherwise cycle trip / release every ~5 s).
+pub const OVL_RETRIP_MS: u64 = 30_000;
+
+/// Release threshold (A): half the full scale the meter goes back to - the
+/// manual range it came from (`back`: unit, range), else (auto) the top
+/// range of the barred shunt - so the return does not overload again at
+/// once; at least OVL_ZERO_A.
+pub fn overload_release_thr(barred: u8, back: Option<(u8, u8)>) -> f32 {
+    let t = match back {
+        Some((u, r)) => 0.5 * current_fs(u, r),
+        None => 0.5 * current_fs(barred, 1),
+    };
+    t.max(OVL_ZERO_A)
+}
+
 pub struct Sentinel {
     pub kind: Kind,
     pub mask: u8,
@@ -247,6 +345,8 @@ pub struct Sentinel {
     pub pk: (i32, i32),
     pub hits: u32,
     pub samples: u32,
+    /// OVERLOAD latch in force (set by `dmm.rs`, `set_overload`).
+    pub ovl: bool,
 }
 
 impl Sentinel {
@@ -268,24 +368,37 @@ impl Sentinel {
             pk: (0, 0),
             hits: 0,
             samples: 0,
+            ovl: false,
         }
     }
 
     /// A new row was written (`write_config`). Another kind or a function
     /// change (`reset`) drops the hit history and the alert; a range change
     /// of the same kind keeps it (an autoranging DC V must not restart it).
+    ///
+    /// Kinds of one family (the A-jack ones: comparator and AD1 peak) keep
+    /// the history too: AC+DC alternates them every phase. OVERLOAD is the
+    /// latch's (`set_overload`) and survives a row change (the latch steps
+    /// through ranges of its own).
     pub fn configured(&mut self, kind: Kind, now: u64, reset: bool) {
-        if kind != self.kind || reset {
+        if kind.family() != self.kind.family() || reset {
             self.streak = 0;
             self.low_since = None;
             self.live_t0 = None;
-            if !matches!(self.alert, Alert::None) {
+            if !matches!(self.alert, Alert::None | Alert::Overload) {
                 self.alert = Alert::None;
             }
         }
         self.kind = kind;
         self.win_t0 = now;
         self.win_hit = false;
+    }
+
+    /// OVERLOAD latch on / off (`dmm.rs`; not maskable: it reports a
+    /// protective range change, not a guess).
+    pub fn set_overload(&mut self, now: u64, on: bool) {
+        self.ovl = on;
+        self.decide(now);
     }
 
     /// Alerts masked off by the user are dropped at once.
@@ -295,7 +408,7 @@ impl Sentinel {
             Alert::AJack => M_AJACK,
             Alert::VJack => M_VJACK,
             Alert::Live => M_LIVE,
-            Alert::None => 0,
+            Alert::None | Alert::Overload => 0,
         };
         if bit != 0 && self.mask & bit == 0 {
             self.alert = Alert::None;
@@ -365,7 +478,8 @@ impl Sentinel {
         self.decide(now);
     }
 
-    /// The alert from the hit history (priority A-JACK > V-JACK? > LIVE?).
+    /// The alert from the hit history (priority OVERLOAD > A-JACK > V-JACK?
+    /// > LIVE?).
     fn decide(&mut self, now: u64) {
         let ajack = match self.kind {
             Kind::CmpA | Kind::PeakA => {
@@ -395,7 +509,9 @@ impl Sentinel {
                 None => false,
             }
         };
-        let a = if ajack {
+        let a = if self.ovl {
+            Alert::Overload
+        } else if ajack {
             Alert::AJack
         } else if vjack {
             Alert::VJack
@@ -409,6 +525,7 @@ impl Sentinel {
                 self.seq = self.seq.wrapping_add(1);
             }
             self.alert = a;
+            QUES_EVENT.fetch_or(ques_bits(a), core::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -719,6 +836,91 @@ mod tests {
             s.sample_cmp(t, 0x10);
         }
         assert_eq!(s.alert, Alert::AJack);
+    }
+
+    #[test]
+    fn overload_rule() {
+        // Only the current modes have a shunt; V / ohm / cont / diode / cap /
+        // Hz / temperature never trip (doc 4.3: no MOSFET switching there).
+        for m in (0..=3).chain(10..=17) {
+            assert_eq!(shunt_of(m), None, "mode {m}");
+        }
+        assert_eq!([4, 5, 6, 7, 8, 9].map(shunt_of), [Some(0), Some(1), Some(2), Some(0), Some(1), Some(2)]);
+        // A shunt: never.
+        for (r, man) in [(0, false), (1, false), (0, true), (1, true)] {
+            assert!(!overload_trips(0, r, man, true));
+        }
+        for u in [1, 2] {
+            // Auto r0 over: the range step first; r1 over: trip.
+            assert!(!overload_trips(u, 0, false, true));
+            assert!(overload_trips(u, 1, false, true));
+            // Manual: any OL.
+            assert!(overload_trips(u, 0, true, true));
+            assert!(overload_trips(u, 1, true, true));
+            // In range: never.
+            assert!(!overload_trips(u, 1, true, false));
+        }
+        assert!(!overload_trips(3, 1, true, true));
+        // Release below half the scale it returns to.
+        assert_eq!(overload_release_thr(2, None), 3e-3);
+        assert_eq!(overload_release_thr(1, None), 0.3);
+        assert_eq!(overload_release_thr(1, Some((2, 0))), OVL_ZERO_A);
+        assert_eq!(overload_release_thr(2, Some((2, 1))), 3e-3);
+        assert_eq!(overload_release_thr(2, Some((1, 1))), 0.3);
+        // Below the range it returns to, except manual 600 uA (OVL_RETRIP_MS).
+        for u in 0..3 {
+            for r in 0..2 {
+                let t = overload_release_thr(u, Some((u, r)));
+                assert_eq!(t < current_fs(u, r) / 1.03, (u, r) != (2, 0), "{u} {r}");
+            }
+        }
+    }
+
+    #[test]
+    fn overload_alert_latch() {
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpV, 0, true);
+        s.set_overload(10, true);
+        assert_eq!((s.alert, s.seq), (Alert::Overload, 1));
+        // A range / shunt change of the latch (a new row, also a function
+        // reset) keeps it and does not count a new assertion.
+        s.configured(Kind::CmpV, 20, true);
+        s.configured(Kind::Off, 30, true);
+        s.sample_cmp(140, 0x20);
+        assert_eq!((s.alert, s.seq), (Alert::Overload, 1));
+        // Not maskable.
+        s.set_mask(0);
+        assert_eq!(s.alert, Alert::Overload);
+        s.set_mask(M_ALL);
+        // Over V-JACK?.
+        s.configured(Kind::CmpV, 200, true);
+        for t in (200..2000).step_by(10) {
+            s.sample_cmp(t, 0x20);
+            s.current_small(t, true);
+        }
+        assert_eq!(s.alert, Alert::Overload);
+        s.set_overload(2000, false);
+        assert_eq!((s.alert, s.seq), (Alert::VJack, 2));
+        assert!(Alert::Overload.red() && Alert::AJack.red() && !Alert::VJack.red() && !Alert::Live.red());
+    }
+
+    #[test]
+    fn family_keeps_history_across_ajack_kinds() {
+        // AC+DC alternates the comparator (DC phase) and the AD1 peak (AC
+        // phase) sentinels: an asserted A-JACK survives the phase switch.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        for t in (0..300).step_by(10) {
+            s.sample_cmp(t, 0x20);
+        }
+        assert_eq!(s.alert, Alert::AJack);
+        s.configured(Kind::PeakA, 300, false);
+        assert_eq!(s.alert, Alert::AJack);
+        s.sample_peak(400, -50_000, 50_000);
+        assert_eq!(s.alert, Alert::AJack);
+        // Another family: dropped.
+        s.configured(Kind::CmpV, 500, false);
+        assert_eq!(s.alert, Alert::None);
     }
 
     #[test]

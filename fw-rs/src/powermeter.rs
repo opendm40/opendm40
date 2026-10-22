@@ -539,7 +539,7 @@ pub struct Pw {
     pub main: u8,
     /// Parts kept over the next `pw_apply` (2 V, 4 I: the other channel's
     /// range changed, its scale did not).
-    keep: u8,
+    pub(super) keep: u8,
     /// V channel gain per range (raw x gain = V), 0 = `v_gain_factory`;
     /// set by POW:VOLT:CAL, persisted.
     pub vgain: [f32; 4],
@@ -779,6 +779,7 @@ impl Dmm {
     /// channels auto, V from 600 V (mains in range at once; the stock AC V
     /// starts at 6 V), I from 10 A (the 10 mohm shunt: the least burden).
     pub fn pw_enter(&mut self, clk: &mut Clock) {
+        self.ovl_clear(clk.now_ms());
         self.acdc = false;
         self.manual = false;
         let pw = &mut *self.pw;
@@ -923,6 +924,9 @@ impl Dmm {
     /// Ranges: `v` / `i` None = keep, Some(None) = AUTO, Some(Some(r)) =
     /// that range (V 0..3, I index 0..5).
     pub fn pw_set_ranges(&mut self, clk: &mut Clock, v: Option<Option<u8>>, i: Option<Option<u8>>) {
+        if i.is_some() {
+            self.ovl_clear(clk.now_ms());
+        }
         if self.pw.job != 0 {
             self.pw_job_end(JR_ABORT);
         }
@@ -1454,6 +1458,16 @@ impl Dmm {
     /// 0.1 x limit / 1.03). True = a range changed (row rewritten).
     fn pw_autorange(&mut self, clk: &mut Clock, v: bool) -> bool {
         let ov = self.over();
+        if !v {
+            // OVERLOAD (doc 4.3): the uA / mA shunt over range -> 10 A.
+            let (iu, ir) = iu_ir(self.pw.ik);
+            let over = hypot(self.pw.i_ac, self.pw.i_dc) > ov * I_LIM[self.pw.ik.min(5) as usize];
+            if sentinel::overload_trips(iu, ir, !self.pw.i_auto, over) {
+                return self.pw_ovl_trip(clk);
+            }
+        }
+        // The OVERLOAD latch's shunt floor (ik 0, 1 uA; 2, 3 mA).
+        let floor = self.ovl.map_or(0, |o| 2 * (3 - o.barred.min(3) as usize));
         let pw = &mut *self.pw;
         let changed = if v {
             let m = hypot(pw.v_ac, pw.v_dc);
@@ -1473,7 +1487,7 @@ impl Dmm {
             let m = hypot(pw.i_ac, pw.i_dc);
             let k = pw.ik as usize;
             // AUTO+ (stock m+7 = 1) never steps into the uA shunt.
-            let kmin = if self.a_auto == 1 { 2 } else { 0 };
+            let kmin = (if self.a_auto == 1 { 2 } else { 0 }).max(floor);
             if !pw.i_auto {
                 false
             } else if m > ov * I_LIM[k] && k < 5 {
@@ -1491,6 +1505,25 @@ impl Dmm {
             self.pw_apply(clk);
         }
         changed
+    }
+
+    /// The OVERLOAD rule in the power meter (`Dmm::ovl_trip`): the I
+    /// channel to the 10 A range (ik 5), the V parts kept.
+    fn pw_ovl_trip(&mut self, clk: &mut Clock) -> bool {
+        let (iu, _) = iu_ir(self.pw.ik);
+        let back = match self.ovl {
+            Some(o) => o.back,
+            None => (!self.pw.i_auto).then_some((self.pw.ik, 0)),
+        };
+        let barred = self.ovl.map_or(iu, |o| o.barred.min(iu));
+        let bu = back.map(|(k, _)| iu_ir(k));
+        let sticky = self.ovl_sticky(clk.now_ms());
+        self.ovl = Some(super::Ovl { barred, back, thr: sentinel::overload_release_thr(barred, bu), low_since: None, sticky });
+        self.pw.ik = 5;
+        self.pw.keep = 2;
+        self.pw_apply(clk);
+        self.sent.set_overload(clk.now_ms(), true);
+        true
     }
 
     /// Per accepted reading: energy (the previous P over the time since the
