@@ -633,7 +633,10 @@ fn main() -> ! {
                         let i = logger.isr_stats();
                         let cyc_ns = |c: u32| (c as u64 * 1_000_000_000 / clock::HCLK_HZ as u64) as u32;
                         #[cfg(feature = "ad2-isr")]
-                        let (l, div) = (logger::isr::lock_stats(), hy3131::stream::div_used() as u32);
+                        let (l, div) = (
+                            logger::isr::lock_stats(),
+                            hy3131::stream::div_used() as u32 + 1000 * hy3131::stream::cpha_used() as u32,
+                        );
                         #[cfg(not(feature = "ad2-isr"))]
                         let (l, div) = ([0u32; 11], 0u32);
                         let vals = [

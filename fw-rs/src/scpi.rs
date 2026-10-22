@@ -381,9 +381,9 @@ pub enum Dbg {
     /// DBG:PROF? (false) / DBG:PROF:RESET (true).
     Prof(bool),
     /// DBG:AD2:TORN? r26,n[,SYNC] / NOISE? r26,n[,op1chop] / DRAW 0|1|2 /
-    /// DIV 0|8|16|32[,cpha] (the stream ISR's read divider, 0 = hy3131::DIV;
-    /// cpha 1 = data phase sampled with CKPH = 1) / DMA 0|1|2 (stream frames
-    /// by the CPU / by DMA / DMA above the CPU frames' rate cap, default)
+    /// DIV 0|8|16|32[,cpha] (the stream ISR's read divider, 0 = automatic:
+    /// /8 + CKPH = 1 data phase for CPU frames, /16 for DMA frames) / DMA 0|1
+    /// (stream frames by the CPU, default / by DMA)
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level).
     Ad2(u8, u8, u16, u8),
@@ -1246,7 +1246,7 @@ impl Scpi {
                         }
                         (Some(b"DRAW"), false) => Some(Dbg::Ad2(2, (v[0].min(2)) as u8, 0, 0)),
                         (Some(b"DIV"), false) => Some(Dbg::Ad2(3, (v[0].min(255)) as u8, 0, (v[1] != 0) as u8)),
-                        (Some(b"DMA"), false) => Some(Dbg::Ad2(4, (v[0].min(2)) as u8, 0, 0)),
+                        (Some(b"DMA"), false) => Some(Dbg::Ad2(4, (v[0].min(1)) as u8, 0, 0)),
                         _ => None,
                     };
                     match d {

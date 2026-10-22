@@ -276,14 +276,15 @@ pub mod stream {
     const IRQ_BIT: u32 = 1 << (IRQN % 32);
     const IRQ_REG: u32 = 4 * (IRQN / 32);
 
-    /// Read divider of the stream frames: 0 = `DIV`, else 8 / 16 / 32
-    /// (DBG:AD2:DIV d[,cpha]).
+    /// Read divider of the stream frames: 0 = automatic (below), else 8 /
+    /// 16 / 32 with or without the CKPH = 1 data phase (DBG:AD2:DIV d[,cpha]).
     static DIV_REQ: AtomicU32 = AtomicU32::new(0);
+    static CPHA_REQ: AtomicBool = AtomicBool::new(false);
     static DIV_USED: AtomicU32 = AtomicU32::new(0);
 
     pub fn set_div_req(div: u8, cpha: bool) {
         DIV_REQ.store(if matches!(div, 8 | 16 | 32) { div as u32 } else { 0 }, Relaxed);
-        super::set_data_cpha(cpha);
+        CPHA_REQ.store(cpha, Relaxed);
     }
 
     /// The divider of the running / last stream (0 = none yet).
@@ -291,17 +292,30 @@ pub mod stream {
         DIV_USED.load(Relaxed) as u8
     }
 
+    /// The running / last stream sampled the data phase at CKPH = 1.
+    pub fn cpha_used() -> bool {
+        DIV_USED.load(Relaxed) & 0x100 != 0
+    }
+
     /// Main loop, before the chip set-up of a stream: the read divider for
-    /// its frames, and switch to it: `DIV` (/16) unless DBG:AD2:DIV forced
-    /// another. /8 is not the default: on the device (4b98128) a start-up
-    /// check of 6 x 22 bytes passed at /8 in two of four sessions, which then
-    /// read 61 / 100 sign-copy errors in 1.15 M / 2.36 M samples (feasibility
-    /// 11.3). `stop` puts `DIV` back.
-    pub fn pick_div() -> u8 {
+    /// its frames, and switch to it (`stop` puts `DIV` and mode 0 back).
+    /// Automatic: CPU frames at /8 with the data phase sampled at CKPH = 1
+    /// (device b81abf2: SELF? 4000 x clean, 35.8 M samples at 38.4 kS/s with
+    /// 0 sign errors, where plain /8 reads had 193 / 2000 bad single-byte
+    /// reads); DMA frames at /16 (the CKPH switch inside a frame needs the
+    /// CPU; plain /8: 61 / 100 sign errors in 1.15 M / 2.36 M samples, device
+    /// 4b98128). Returns the divider; the CKPH choice is applied too.
+    pub fn pick_div(dma: bool) -> u8 {
         let req = DIV_REQ.load(Relaxed) as u8;
-        let div = if req != 0 { req } else { DIV };
+        let (div, cpha) = match (req, dma) {
+            (0, false) => (8, true),
+            (0, true) => (DIV, false),
+            (d, false) => (d, CPHA_REQ.load(Relaxed)),
+            (d, true) => (d, false),
+        };
         spi::set_div(div);
-        DIV_USED.store(div as u32, Relaxed);
+        super::set_data_cpha(cpha);
+        DIV_USED.store(div as u32 | (cpha as u32) << 8, Relaxed);
         div
     }
 
@@ -319,21 +333,19 @@ pub mod stream {
         }
     }
 
-    /// DMA frames for the stream: 0 = CPU frames, 1 = DMA frames, 2 =
-    /// automatic (DMA above the CPU frames' rate cap). DBG:AD2:DMA.
-    static DMA_REQ: AtomicU32 = AtomicU32::new(2);
+    /// DMA frames for the stream: 1 = DMA frames, else CPU frames
+    /// (DBG:AD2:DMA 0|1).
+    static DMA_REQ: AtomicU32 = AtomicU32::new(0);
 
     pub fn set_dma_req(m: u8) {
-        DMA_REQ.store(m.min(2) as u32, Relaxed);
+        DMA_REQ.store(m.min(1) as u32, Relaxed);
     }
 
-    /// Whether a stream at `req_hz` uses DMA frames at the picked divider.
-    pub fn use_dma(req_hz: u32) -> bool {
-        match DMA_REQ.load(Relaxed) {
-            0 => false,
-            1 => true,
-            _ => req_hz > max_rate_hz(div_used(), false),
-        }
+    /// Whether the next stream uses DMA frames (DBG:AD2:DMA 1). The CPU
+    /// frames at /8 + CKPH reach the top rung (38.4 kS/s at ~14 % CPU on the
+    /// device), so the default is CPU frames.
+    pub fn use_dma() -> bool {
+        DMA_REQ.load(Relaxed) == 1
     }
 
     /// DMA frame primitives (`spi`), for logger.rs `isr`.
@@ -433,6 +445,7 @@ pub mod stream {
         spi::dma_setup(false);
         set(GPIOD, CS, true);
         spi::set_div(DIV);
+        super::set_data_cpha(false);
     }
 
     /// ISR entry: clear UIF (rc_w0), return the timer count since the update

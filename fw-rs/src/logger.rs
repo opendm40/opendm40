@@ -591,8 +591,9 @@ impl Logger {
             // The stream ISR's read divider first: it caps the rung.
             #[cfg(feature = "ad2-isr")]
             let req = {
-                let div = hy::stream::pick_div();
-                self.req_hz().min(hy::stream::max_rate_hz(div, hy::stream::use_dma(self.req_hz())))
+                let dma = hy::stream::use_dma();
+                let div = hy::stream::pick_div(dma);
+                self.req_hz().min(hy::stream::max_rate_hz(div, dma))
             };
             #[cfg(not(feature = "ad2-isr"))]
             let req = self.req_hz();
@@ -857,10 +858,20 @@ pub mod isr {
     struct Dma {
         on: bool,
         pending: bool,
+        /// The frame in flight: DATA (R03..R05, `ts` = A's stamp), CLEAR
+        /// (B's INTF read) or PROBE (C's INTF read: the probe result).
+        kind: u8,
         ts: u32,
     }
+    const DATA: u8 = 0;
+    const CLEAR: u8 = 1;
+    const PROBE: u8 = 2;
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-    static mut DMA: Dma = Dma { on: false, pending: false, ts: 0 };
+    static mut DMA: Dma = Dma { on: false, pending: false, kind: 0, ts: 0 };
+    /// The INTF frame: command (R1E, read) + one byte (the read period and
+    /// INTF bits 7..1: AD2F = bit 0 of the reply's byte 1).
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut TXI: [u8; 2] = [0; 2];
     /// The frame's bytes (SRAM: DMA0 cannot reach the TCM): the command
     /// (R03, read) + 4 x 0xFF out, the 5 replies in.
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -945,10 +956,12 @@ pub mod isr {
             p.begin(prod.period_ns);
             *core::ptr::addr_of_mut!(RINGP) = ring;
             let pll = &mut *core::ptr::addr_of_mut!(PLL);
-            let dma = hy::stream::use_dma(rate_mhz / 1000);
-            *core::ptr::addr_of_mut!(DMA) = Dma { on: dma, pending: false, ts: 0 };
+            let dma = hy::stream::use_dma();
+            let _ = rate_mhz;
+            *core::ptr::addr_of_mut!(DMA) = Dma { on: dma, pending: false, kind: DATA, ts: 0 };
             if dma {
                 *core::ptr::addr_of_mut!(TXB) = [(hy::R_AD2 << 1) | 1, 0xFF, 0xFF, 0xFF, 0xFF];
+                *core::ptr::addr_of_mut!(TXI) = [(hy::R_INTF << 1) | 1, 0xFF];
                 let fc = dma_frame_counts(div);
                 *pll = Pll::new(rate_mhz, *core::ptr::addr_of!(REL), fc);
                 pll.late_read = true;
@@ -1070,9 +1083,15 @@ pub mod isr {
                 inc(&SLIPS);
             }
             if d.pending {
-                dma_done(d, p, ring);
+                dma_done(d, p, ring, pll);
             }
-            if c || ok {
+            if d.on && (c || ok) {
+                // The INTF read as a DMA frame (2 bytes: 5.1 us at /16 - a CPU
+                // frame, ~8 us, overran the B -> A interval at 38.4 kS/s).
+                d.kind = if c { PROBE } else { CLEAR };
+                d.pending = true;
+                hy::stream::dma_kick(core::ptr::addr_of!(TXI) as *const u8, core::ptr::addr_of_mut!(RXB) as *mut u8, 2);
+            } else if c || ok {
                 let mut f = [0u8];
                 if !hy::isr_read(hy::R_INTF, &mut f) {
                     inc(&ring.timeouts);
@@ -1090,7 +1109,7 @@ pub mod isr {
             }
             p.tick_at(t0);
             if d.pending {
-                dma_done(d, p, ring);
+                dma_done(d, p, ring, pll);
             }
             if !pll.take() {
                 // Acquiring (DMA frames: until locked): no sample.
@@ -1098,6 +1117,7 @@ pub mod isr {
                 inc(&ring.late);
             } else if d.on {
                 d.ts = p.now_us as u32;
+                d.kind = DATA;
                 d.pending = true;
                 hy::stream::dma_kick(core::ptr::addr_of!(TXB) as *const u8, core::ptr::addr_of_mut!(RXB) as *mut u8, 5);
             } else {
@@ -1147,16 +1167,24 @@ pub mod isr {
         }
     }
 
-    /// The DMA frame started at the last A is over (the next entry): CS up,
-    /// decode the shift-framed reply, store it with A's stamp.
+    /// The DMA frame started at the last entry is over (this entry): CS up,
+    /// then the data (decoded, stored with A's stamp) or the probe result.
     #[inline(always)]
-    unsafe fn dma_done(d: &mut Dma, p: &mut Producer, ring: &Ring) {
+    unsafe fn dma_done(d: &mut Dma, p: &mut Producer, ring: &Ring, pll: &mut Pll) {
         d.pending = false;
         if !hy::stream::dma_finish() {
             inc(&ring.timeouts);
             return;
         }
-        store(p, ring, d.ts, decode_shift(&*core::ptr::addr_of!(RXB)));
+        let rx = &*core::ptr::addr_of!(RXB);
+        match d.kind {
+            DATA => store(p, ring, d.ts, decode_shift(rx)),
+            PROBE => {
+                pll.result(rx[1] & 1 != 0); // AD2F (INTF bit 1) one bit late
+                inc(&ring.probes);
+            }
+            _ => {}
+        }
     }
 }
 
