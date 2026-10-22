@@ -1379,3 +1379,38 @@ Fixed after f5f8e96:
 - `dma_kick` empties it too.
 
 Emulator PASS (DMA 19200 / 38400, CPU 4800 DRAW 2, -63 ppm).
+
+### 11.10 Device check of a0cdb4e (2026-10-22): passed
+
+Calibrator 40 Hz square on V/COM, AC V. Raw `LOG:DATA?` drain (a small
+Python loop, no CSV), 60 s each:
+
+| run | frames | lost (LOG:COUNt?) | late / slips / overruns / timeouts | CPU | max_lat |
+|---|---|---|---|---|---|
+| 38400 | DMA /16 | **0 of 2 304 149** | 0 / 0 / 0 / 0 | **17.5 %** | 5.9 us (boot::bkp_enable, once) |
+| 19200, DRAW 2 | DMA /16 | **0 of 1 152 855** | 0 | 7.8 % | 0.26 us |
+| 38400 | CPU /8 + CKPH | **0 of 2 304 471** (host overwrote 50 168: the Python drain tops out at ~37 kS/s) | 0 | 51 % | 0.24 us |
+| 4800, DRAW 2 | CPU /8 + CKPH | 0 of 288 190 | 0 | 6.4 % | 0.24 us |
+| 9600 | CPU /8 + CKPH | 0 of 576 050 | 0 | 12.8 % | 0.24 us |
+
+- The chip's crystal sits at -0.6..-1.2 ppm against the MCU's.
+- One 38.4 k DMA stamp gap was 41 us (1.6 P): entry jitter, not a loss.
+- The only codes beyond the square's ~+-107 k are the first one or two
+  samples of a CPU-frame session, in every read mode (/16 included). They
+  are the transient after the R26 rewrite. DMA sessions skip them (samples
+  only once locked).
+- After the streams: DC V 0.99961 V on the 1 V calibrator; SELF? 2000 had
+  every count 0.
+
+**What the CPU numbers mean**:
+- 19.2 kS/s costs 26 % of the CPU with CPU frames (/8 + CKPH) and 8 % with
+  DMA frames.
+- 38.4 kS/s costs 51 % with CPU frames and 17.5 % with DMA frames.
+
+**Defaults**: CPU frames (DBG:AD2:DMA 0). Switching to DMA frames
+(`set_dma_req` default 1) is one line, and the wave view would gain the
+most from it; left to the owner.
+
+**76.8 kS/s is not done.** It needs the DMA data phase at /8 + CKPH: the
+CPU sends the command byte and switches CKPH, then DMA takes the 3 data
+bytes. It also needs probe frames that fit the 13 us period.

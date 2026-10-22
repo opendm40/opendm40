@@ -692,10 +692,9 @@ Firmware:
       CPU /16 4800 DRAW 2 / 9600 / 19200 DRAW 2 lost 0; DMA frames 9600 lost 0 at 5 % CPU; /8 + CKPH = 1 data phase
       clean (SELF?, 19200 lost 0, 38400 35.8 M samples 0 bad at 14 % CPU) -> the stream default (CPU frames).
       DMA at 38400 lost the lock (CPU probe frames overran): probes as DMA frames since a4907d0.
-- [ ] Device: DMA frames at 19200 / 38400 (DBG:AD2:DMA 1) after the dma_finish fix (f5f8e96 failed there:
-      an aborted frame shifted every later one; persist::crc in .cold stalled 9..18 us); 38400 CPU frames
-      with persist hot (f5f8e96: late 1, CPU 51 %). Host: raw drain (fw-rs drain at 38.4 k ~37 kS/s in
-      Python: ring overwritten; dm40scpi.py log with CSV cannot keep up at all).
+- [x] Device a0cdb4e (feasibility 11.10): DMA /16 38400 lost 0 of 2.3 M at 17.5 % CPU, 19200 DRAW 2 lost 0 at
+      7.8 %; CPU /8 + CKPH 38400 lost 0 at 51 %, 4800 DRAW 2 / 9600 lost 0. Host: a raw drain tops out at ~37 kS/s.
+- [ ] Decide: DMA frames as the stream default (DBG:AD2:DMA 1 today); the wave view gains the most.
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
 - [ ] B (zero-wait flash) is FULL: the branch overflowed by 4 bytes at a4907d0; the cold modules' named
       .rodata moved to `.cold` (28 bytes left), the bit-banged write removed. A real reclaim is needed; never put
