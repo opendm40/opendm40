@@ -62,6 +62,7 @@ mod trigsoft;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
 mod scope_add;
+mod readme;
 mod stock;
 #[path = "../../src/stockfont.rs"]
 mod stockfont;
@@ -758,6 +759,10 @@ fn main() {
     host::map_flash();
     // `main <out> --stock <dir>`: only the replica scope scenes, 1x, for the
     // pixel diff against tools/stock-ui (stock-diff.sh).
+    // `main <out> --readme`: only the README screens (readme.rs), 1x.
+    if std::env::args().nth(2).as_deref() == Some("--readme") {
+        std::process::exit(if readme::run(&out) == 0 { 0 } else { 1 });
+    }
     if std::env::args().nth(2).as_deref() == Some("--stock") {
         let dir = std::env::args().nth(3).unwrap_or_else(|| out.clone());
         std::fs::create_dir_all(&dir).unwrap();

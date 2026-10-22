@@ -1,5 +1,7 @@
 # fw-rs developer notes (the former README)
 
+Paths in this file are relative to `fw-rs/`, and the commands run there.
+
 Replacement firmware for the Alientek DM40 (GD32F427, Cortex-M4F @ 200 MHz):
 multimeter, scope and generator running at the same time, stock-like GUI with
 the main colour red, menus, touch, Bluetooth app protocol, USBTMC/SCPI.
@@ -10,7 +12,7 @@ of the calibration on the SPI flash).
 fw-rs is installed like a stock update: `dm40-fw-native.bin` is a vendor-format
 update file that the vendor FS-loader flashes to `0x08004000`; a small shim in
 front of it handles the power key, the watchdog and recovery
-(docs/native-boot.md). This is the only build: the older RAM/sector-8 image
+([native-boot.md](native-boot.md)). This is the only build: the older RAM/sector-8 image
 loaded over Bluetooth into the stock firmware was removed (2026-10-22).
 
 ## USB debug link
@@ -84,12 +86,12 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   `LOADER.BIN` raw region copies, `BACKUP.TXT` with CRC-32s and restore notes,
   `FIRMWARE.BIN` = the running firmware as a vendor update file),
   `DEBUG/SPIFLASH.BIN` (raw 16 MiB SPI flash image) and `README.TXT`.
-  Read-only by default, "Files live" (docs/decisions-2026-10-22.md #6): new
+  Read-only by default, "Files live" ([decisions-2026-10-22.md](decisions-2026-10-22.md) #6): new
   recordings / screenshots appear while the volume is mounted (UNIT
   ATTENTION at once; existing files keep their place). Settings 3/3 "USB
   disk" = "PC can edit" (volatile, in force from the next USB plug;
   `DBG:VDISK:RO 0|1`, `RO?` = in force, asked for) makes it writable for two
-  things only (`src/vwrite.rs`, docs/native-boot.md "Host writes"): a
+  things only (`src/vwrite.rs`, [native-boot.md](native-boot.md) "Host writes"): a
   delete of a LOGS / SCOPE / SHOTS file (also through the trash: at the
   eject) deletes the SPI file; a `dm40*.bin` copied into the root is checked
   as the loader does and the meter asks "Install it now?" (Yes =
@@ -103,7 +105,7 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   `DBG:FLASH?` = JEDEC id, blocks, write error flag. A block write that needs
   an erase stalls the main loop for ~50 ms (up to 400 ms). Firmware files
   reach the SPI root over USBTMC (`DBG:UPLOAD`, `tools/dm40dbg.py upload`).
-  docs/native-boot.md "Unit data".
+  [native-boot.md](native-boot.md) "Unit data".
 - **Touch**: CST2xx controller, gestures (tap, long press, swipes, drag),
   side keys MENU / RUN / AUTO / MF. Power key: hold 1.5 s = off, double
   press = key/touch lock.
@@ -178,7 +180,7 @@ Goal and remaining work: see [TODO.md](../TODO.md).
    rendering with the stock fonts.
 3. **(done)** HY3131 driver and measurement loop, calibration read from the
    stock settings record at 0x080C0000.
-4. **(done)** Multimeter GUI matching `firmware/re/analysis/` notes, main value
+4. **(done)** Multimeter GUI matching `../firmware/re/analysis/` notes, main value
    in red; scope and generator pages, menus, touch.
 5. **(done)** USBTMC + SCPI over USBFS, composite with a mass-storage disk on
    the SPI flash.
@@ -213,15 +215,20 @@ loader marker must equal the header of the new file ("installed OK", ~1 min).
 power-cycle (the stock update procedure), then waits for fw-rs. By hand: copy
 `dm40-fw-native.bin` onto that disk (or the vendor loader's update-screen
 disk, same id) as `dm40_fwrs.bin` (the only `dm40*.bin`), eject, power-cycle
-or press "update".
+or press "update". The stock path has not been run on the device: the logged
+installs went through a running fw-rs (`DBG:UPDATE`) or the loader's update
+screen, and the stock app's own updater (it flashes a `dm40*.bin` when USB is
+unplugged) is unverified for a non-stock image length (native-review L7).
 
 **Recovery** (fw-rs hangs or does not start): the loader update screen and its
-USB disk appear by themselves after two watchdog resets in a row. By hand:
+USB disk appear by themselves after a second watchdog reset within 60 s of
+the first (not yet checked on the device). By hand:
 from off, hold the power key ~4 s until the beep, keep holding 0.5 s more (let
-go within 0.5 s to abort: normal boot); or `python3 tools/dm40dbg.py update` while
-fw-rs still answers. Then copy an image (e.g. `dm40-fw-native.bin` or the
-`_DM40PRV.BIN` backup of the previous one, renamed `dm40_fwrs.bin`) onto the
-loader's disk and press "update".
+go within 0.5 s to abort: normal boot; not yet checked on the device); or
+`python3 tools/dm40dbg.py update` while fw-rs still answers. Then copy an image
+(e.g. `dm40-fw-native.bin`, or `INFO/FIRMWARE.BIN` from the USB volume = the
+image that was running), renamed `dm40_fwrs.bin`, onto the loader's disk and
+press "update".
 
 **Back to stock:** `tools/reload.sh --stock ../firmware/patch/build-memrw/dm40_patched.bin`
 (patched stock with Bluetooth memrw, built by `../firmware/patch/kit/mkkit.sh`)
@@ -229,4 +236,4 @@ or `--stock ../dm40_v_2_6.bin` (official, not in git: see the top-level README).
 From the loader screen: copy the stock file onto its disk, press "update".
 Back to fw-rs from stock: `tools/reload.sh --from-stock`.
 
-Native image, shim, recovery and boot info fields: docs/native-boot.md.
+Native image, shim, recovery and boot info fields: [native-boot.md](native-boot.md).
