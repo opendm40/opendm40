@@ -82,6 +82,15 @@ fn alert_mask_name(b: &mut [u8; 16], m: u8) -> &str {
     }
 }
 
+/// The USB volume (in force, asked for) read-only (vwrite.rs, decision
+/// 2026-10-22 #6); a build without `vdisk` serves the writable SPI disk.
+fn usb_ro() -> (bool, bool) {
+    #[cfg(feature = "vdisk")]
+    return (crate::vwrite::read_only(), crate::vwrite::read_only_pending());
+    #[cfg(not(feature = "vdisk"))]
+    return (false, false);
+}
+
 /// Menu-like pages (not instrument views): no view swipe, MENU steps back.
 fn is_page(v: View) -> bool {
     matches!(v, View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help)
@@ -139,6 +148,9 @@ pub struct App {
     ntc_reenter: bool,
     /// Help page shown (UF-29, ui::HELP index).
     help_page: usize,
+    /// Settings 3/3 "USB disk" as drawn (in force, asked for): a bus reset
+    /// that applies the mode repaints the page.
+    usb_ro_drawn: (bool, bool),
     /// Idle power-off warnings given since the last input (UF-28).
     off_warned: u64,
     dimmed: bool,
@@ -448,6 +460,7 @@ impl App {
             beep_until: 0,
             off_warned: 0,
             help_page: 0,
+            usb_ro_drawn: (true, true),
             tp_pressed: None,
             ntc_reenter: false,
             last_raw: None,
@@ -650,9 +663,10 @@ impl App {
             }
             View::Settings if self.set_page == 2 => {
                 let mut b = [0u8; 16];
+                self.usb_ro_drawn = usb_ro();
                 let vals = [
                     alert_mask_name(&mut b, self.dmm.alert_mask()),
-                    ui::usb_disk_name(crate::vwrite::read_only(), crate::vwrite::read_only_pending()),
+                    ui::usb_disk_name(self.usb_ro_drawn.0, self.usb_ro_drawn.1),
                     "", // Device row: opens the About page, no inline value
                 ];
                 ui::settings(2, &vals);
@@ -1209,6 +1223,9 @@ impl App {
                 Some(false) => self.toast(now, crate::dialog::FW_BAD, false),
                 None => {}
             }
+        }
+        if self.view == View::Settings && self.set_page == 2 && self.usb_ro_drawn != usb_ro() {
+            self.redraw = true;
         }
         self.fuse_tick(clk, now);
         if self.overlay.is_some_and(|o| now >= o.until()) {
@@ -2921,9 +2938,13 @@ impl App {
                         // USB disk (decision 2026-10-22 #6): Files live <->
                         // PC can edit, volatile; in force at the next bus
                         // reset (the host reads the WP bit when it mounts).
-                        let ro = !crate::vwrite::read_only_pending();
+                        let ro = !usb_ro().1;
+                        #[cfg(feature = "vdisk")]
                         crate::vwrite::set_read_only(ro);
-                        if ro != crate::vwrite::read_only() {
+                        if ro != usb_ro().0 {
+                            // The row's new value first: a toast holds the
+                            // page's repaint until it ends.
+                            self.draw_static();
                             self.toast(clk.now_ms(), "Re-plug USB to apply", true);
                         }
                     }
