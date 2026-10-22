@@ -105,6 +105,12 @@ SC = {
     'energy': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:ENER:RES'], 40, [
         (0, 'open;vsrc:10;isrc:1', lambda d: d['secs'] > 5 and near(d['Wh'] * 3600 / d['secs'], 10, 0.05) and near(d['VAh'] * 3600 / d['secs'], 10, 0.05), 'energy: 10 W x t'),
     ]),
+    # The reset confirm answered 13 s after the long press on the energy box
+    # (device check 5f14d38: the 10 s auto-cancel ate that Yes).
+    'ereset': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:ENER:RES'], 40, [
+        (0, 'open;vsrc:10;isrc:1', lambda d: d['secs'] > 8, 'energy runs, the confirm up from 8 s'),
+        (22, None, lambda d: d['secs'] < 20, 'Yes at 21 s (13 s after the long press) reset the energy'),
+    ]),
 }
 
 # Device-test hooks (doc 3.11, T1..T3): the raw ring with R34 frozen at YY
@@ -186,7 +192,7 @@ SC['scpi'] = (['MEAS:POW?', 'POW:LIM 2.5,12', 'POW:BURD:STAT OFF'], 24, [
 EXTRA = {'t1-yy': ['DBG:POW:RAW?', 'DBG:POW:ROW?'], 't3-cycle': ['DBG:POW:RAW?'],
          'zero': ['POW:ZERO?'], 'vcal': ['POW:VOLT:CAL?'], 'dcad1': ['POW:COUP?'], 'auto': ['POW:COUP?'],
          'scpi': ['MEAS:POW:PFAC?', 'READ?', 'CONF?', 'POW:LIM?', 'POW:CYC?', 'FUNC?']}
-ACTIONS = {'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'}}
+ACTIONS = {'ereset': {8: 'DBG:DRAG 58,160,58,160,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'}}
 
 
 def num(s):

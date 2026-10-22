@@ -1865,16 +1865,27 @@ impl Dmm {
 /// The readouts of a power reading: main = P (fallback: S) in the
 /// `p_format` of the range pair, V in the AC V format of its range, I in the
 /// AC A format (A / mA / uA) of its range, and the main value in SI.
+/// `x` as shown with `dec` decimals: a value that rounds to zero is +0, so
+/// the readouts never show a negative zero ("-0.0000 mWh" / "-0.000 mW"
+/// with no current, device check 5f14d38).
+pub fn no_neg_zero(x: f32, dec: u8) -> f32 {
+    let mut s = 1.0f32;
+    for _ in 0..dec {
+        s *= 10.0;
+    }
+    if (x * s).abs() < 0.5 { 0.0 } else { x }
+}
+
 pub fn reading_vals(pv: &PowerVals) -> (Val, Val, Val, f32) {
     let (iu, ir) = iu_ir(pv.ik);
     let vd = 4 - pv.vr.min(3);
-    let v = if pv.v_ol { Val::ol(vd, "V") } else { Val::new(pv.v, vd, "V") };
+    let v = if pv.v_ol { Val::ol(vd, "V") } else { Val::new(no_neg_zero(pv.v, vd), vd, "V") };
     let (us, unit, idec) = match iu {
         0 => (1.0, "A", 4 - ir),
         1 => (1e3, "mA", 3 - ir),
         _ => (1e6, "\u{b5}A", 2 - ir),
     };
-    let i = if pv.i_ol { Val::ol(idec, unit) } else { Val::new(pv.i * us, idec, unit) };
+    let i = if pv.i_ol { Val::ol(idec, unit) } else { Val::new(no_neg_zero(pv.i * us, idec), idec, unit) };
     let (main_si, w) = if pv.alt { (pv.s, false) } else { (pv.p, true) };
     let ol = pv.v_ol || pv.i_ol;
     let main = match pv.main {
@@ -1882,11 +1893,11 @@ pub fn reading_vals(pv: &PowerVals) -> (Val, Val, Val, f32) {
         MAIN_WH | MAIN_VAH => {
             let va = pv.main == MAIN_VAH || pv.alt;
             let (x, dec, u) = energy_format(if va { pv.vah } else { pv.e_wh }, va);
-            Val::new(x, dec, u)
+            Val::new(no_neg_zero(x, dec), dec, u)
         }
         _ => {
             let (x, dec, u) = p_format(V_LIM[pv.vr.min(3) as usize] * I_LIM[pv.ik.min(5) as usize], main_si, w);
-            if ol { Val::ol(dec, u) } else { Val::new(x, dec, u) }
+            if ol { Val::ol(dec, u) } else { Val::new(no_neg_zero(x, dec), dec, u) }
         }
     };
     (main, v, i, if ol { 0.0 } else { main_si })
@@ -1898,7 +1909,7 @@ pub fn reading_vals(pv: &PowerVals) -> (Val, Val, Val, f32) {
 pub fn energy_val(pv: &PowerVals) -> Val {
     if pv.main == MAIN_P {
         let (x, dec, u) = energy_format(if pv.alt { pv.vah } else { pv.e_wh }, pv.alt);
-        Val::new(x, dec, u)
+        Val::new(no_neg_zero(x, dec), dec, u)
     } else {
         reading_vals(&PowerVals { main: MAIN_P, ..*pv }).0
     }
@@ -2111,6 +2122,20 @@ mod tests {
         assert_eq!(energy_format(123.45, true).2, "VAh");
         assert_eq!(energy_format(-2500.0, false), (-2.5, 4, "kWh"));
         assert_eq!(energy_format(0.0, false), (0.0, 4, "mWh"));
+    }
+
+    /// No negative zero on the readouts (device check 5f14d38).
+    #[test]
+    fn no_negative_zero() {
+        let mut b = [0u8; 16];
+        let (x, d, _) = energy_format(-1.66e-9, false);
+        assert_eq!(crate::dmm::format(&mut b, no_neg_zero(x, d), d), "0.0000");
+        assert_eq!(crate::dmm::format(&mut b, no_neg_zero(-0.00004, 4), 4), "0.0000");
+        assert_eq!(crate::dmm::format(&mut b, no_neg_zero(-0.00006, 4), 4), "-0.0001");
+        let pv = PowerVals { e_wh: -1.27e-10, p: -1e-7, ..PowerVals::ZERO };
+        let (m, _, _, _) = reading_vals(&pv);
+        assert!(!m.v.is_sign_negative());
+        assert!(!energy_val(&pv).v.is_sign_negative());
     }
 
     #[test]

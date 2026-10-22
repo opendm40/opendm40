@@ -111,7 +111,8 @@ pub fn sig_text(buf: &mut [u8; 16], v: f32, sig: u8) -> &str {
     if dec > 0 && a * p + 0.5 >= x * 10.0 * p {
         dec -= 1;
     }
-    crate::dmm::format(buf, v, dec.clamp(0, 4) as u8)
+    let dec = dec.clamp(0, 4) as u8;
+    crate::dmm::format(buf, pw::no_neg_zero(v, dec), dec)
 }
 
 /// History-row box `i` (stock 5 + 95 i, 153, 88 x 19).
@@ -154,7 +155,7 @@ impl DmmView {
         coupling(&mut self.pwc, pv);
         let mut b = [0u8; 16];
         // DC method: no phase relation, no AC: PF / S / Q / f blank ("--").
-        let pf = if pv.pf.is_finite() && !pv.dc { crate::dmm::format(&mut b, pv.pf, 3) } else { "--" };
+        let pf = if pv.pf.is_finite() && !pv.dc { crate::dmm::format(&mut b, pw::no_neg_zero(pv.pf, 3), 3) } else { "--" };
         let mut pft = T::new();
         pft.push(pf);
         // Below 1 VA: mVA / mvar (the mW ranges).
@@ -179,10 +180,10 @@ impl DmmView {
             et.push("0L");
         } else {
             let mut d = ev.dec;
-            while d > 0 && sf::text_width(sf::HIST, crate::dmm::format(&mut b, ev.v, d), 0) > room {
+            while d > 0 && sf::text_width(sf::HIST, crate::dmm::format(&mut b, pw::no_neg_zero(ev.v, d), d), 0) > room {
                 d -= 1;
             }
-            et.push(crate::dmm::format(&mut b, ev.v, d));
+            et.push(crate::dmm::format(&mut b, pw::no_neg_zero(ev.v, d), d));
         }
         let (su, qu, fu) = if pv.dc { ("", "", "") } else { (su, qu, fu) };
         let items: [(&str, &T, &str); 5] = [(etag, &et, ev.unit), ("PF", &pft, ""), ("S", &st, su), ("Q", &qt, qu), ("f", &ft, fu)];

@@ -120,7 +120,7 @@ impl App {
     /// Long press on the energy readout / the side column in the power
     /// meter: the reset confirm (dialog.rs; Yes resets Wh, VAh, the time).
     pub(super) fn pw_long_side(&mut self, now: u64) {
-        self.overlay = Some(crate::dialog::Overlay::EnergyReset { until: now + 10_000 });
+        self.overlay = Some(crate::dialog::Overlay::EnergyReset { until: now + crate::dialog::ENERGY_MS });
         self.redraw = true;
         crate::dialog::energy_reset();
         self.beep(now, 50);
