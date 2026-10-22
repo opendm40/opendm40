@@ -253,6 +253,10 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
     }
     let kind = match mode {
         1 if range > 0 && var & VAR_DCV_HI == 0 => Kind::Off,
+        // AC+DC V above 6 V: its DC phase has no sentinel (DC V 60 V+), so an
+        // AC-phase A-JACK would be wiped every phase switch (family change)
+        // and re-asserted - a toast and beeps every cycle. Both phases quiet.
+        0 if acdc && range > 0 && var & VAR_DCV_HI == 0 => Kind::Off,
         1 | 3 | 10 | 15 if mask & M_AJACK != 0 => {
             c[0] = R20_PB1;
             Kind::CmpA
@@ -963,7 +967,7 @@ mod tests {
         for (m, r, row, k) in [
             (1u8, 0u8, &CFG_F1[0], Kind::CmpA),
             (3, 1, &CFG_F3[1], Kind::CmpA),
-            (0, 1, &CFG_F0[1], Kind::PeakA),
+            (0, 0, &CFG_F0[0], Kind::PeakA),
             (2, 0, &CFG_F2[0], Kind::PeakA),
             (7, 1, &CFG_F7[1], Kind::CmpV),
             (8, 0, &CFG_F8_9[0], Kind::CmpV),
@@ -973,6 +977,30 @@ mod tests {
         ] {
             assert_eq!(row_for(m, r, true, M_ALL, 0, row), row_for(m, r, false, M_ALL, 0, row), "mode {m}");
             assert_eq!(row_for(m, r, true, M_ALL, 0, row).1, k, "mode {m}");
+        }
+        // Above 6 V both phases are quiet (the DC phase has none): the same
+        // family in both phases, never Off <-> PeakA every switch.
+        for r in 1..4u8 {
+            assert_eq!(row_for(0, r, true, M_ALL, 0, &CFG_F0[r as usize]), (CFG_F0[r as usize], Kind::Off));
+            assert_eq!(row_for(1, r, true, M_ALL, 0, &CFG_F1[r as usize]).1, Kind::Off);
+            assert_eq!(row_for(0, r, false, M_ALL, 0, &CFG_F0[r as usize]).1, Kind::PeakA, "plain AC V keeps it");
+        }
+        // Every AC+DC phase pair shares one family.
+        for (dc, ac, r) in [(1u8, 0u8, 0u8), (3, 2, 1), (7, 4, 1), (8, 5, 0), (9, 6, 1)] {
+            let rows = |m: u8| -> &[u8; CFG_LEN] {
+                match m {
+                    0 => &CFG_F0[r as usize],
+                    1 => &CFG_F1[r as usize],
+                    2 => &CFG_F2[r as usize],
+                    3 => &CFG_F3[r as usize],
+                    4 => &CFG_F4[r as usize],
+                    5 | 6 => &CFG_F5_6[r as usize],
+                    7 => &CFG_F7[r as usize],
+                    _ => &CFG_F8_9[r as usize],
+                }
+            };
+            let (a, b) = (row_for(dc, r, true, M_ALL, 0, rows(dc)).1, row_for(ac, r, true, M_ALL, 0, rows(ac)).1);
+            assert_eq!(a.family(), b.family(), "{dc}/{ac} r{r}");
         }
         assert_eq!(Kind::CmpA.family(), Kind::PeakA.family());
         assert_eq!(Kind::CmpV.family(), Kind::PeakV.family());
