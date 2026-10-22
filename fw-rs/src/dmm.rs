@@ -1452,9 +1452,17 @@ impl Dmm {
             self.wake_at = 0;
             if !off {
                 self.wake_at = clk.now_ms() + RAIL_SETTLE_MS;
-                self.deadline = self.wake_at + 450;
+                self.deadline = self.wake_at + self.wake_settle();
             }
         }
+    }
+
+    /// Settle after a rail wake: the AC node (the AC rows, AC+DC, the power
+    /// meter) starts over from a powered-down front end; device 036cc55, AC V
+    /// on a 4.77 V rms square: the first reading +8 %, +0.4 % after 1.1 s.
+    /// A host READ? waits for this.
+    fn wake_settle(&self) -> u64 {
+        if self.pw.on || self.acdc || matches!(self.mode, 0 | 2 | 4..=6) { 2_000 } else { 450 }
     }
 
     /// The rail came up and the row is not rewritten yet.
@@ -2031,6 +2039,7 @@ impl Dmm {
             }
             self.wd_n[0] = self.wd_n[0].wrapping_add(1);
             self.start(clk);
+            self.deadline = self.deadline.max(now + self.wake_settle());
             return true;
         }
         self.wd_chk = now + WD_CHECK_MS;
