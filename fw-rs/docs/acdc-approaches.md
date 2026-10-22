@@ -699,7 +699,9 @@ shown total against hypot(AC, DC) of the source over 4.5 s of each phase
 value changes, a lower bound), settle = from the phase start until the
 total stays within 0.1 % + 2 digits (nan: never inside that band in the
 phase, e.g. a 0.3 % p-p ripple). Note 7 on (the device's offsets); B~ = B
-with `n7g:0.002`. Runs 35098ee (A, B, B~) and 1a6c1bd (C):
+with `n7g:0.002`. Runs of 4539aea (A, B, B~) and 17dcff2 (C) (a rerun of all four on
+d6f5e96 with the GD32_SPI timing of 166237c: the same picture within
+0.05 %):
 
 | phase | A err % / p-p % / rd/s / settle s | B | C | B~ |
 |---|---|---|---|---|
@@ -722,7 +724,7 @@ response are INFERRED, the note-7 numbers are the device's):
   B 0.1..3.4 s (PB4's recharge after the entry and the 5-result mean).
 * **Accuracy**: every method within 0.02 % on mean where the model has no
   gain error; B~ shows what B cannot fix: a gain shift drawn per AD1
-  enable stays (-0.12 % at 12 V on 60 V in this run; a rerun on 3e6af3e
+  enable stays (-0.12 % at 12 V on 60 V in this run; a rerun on d6f5e96
   drew +0.01 %: the error is the draw's) - the device's 60 V gain jump
   would look like that.
 * **Ripple at 50 Hz on the DC part**: AD1 (A, B) sits on a notch; C's LPF
@@ -732,7 +734,7 @@ response are INFERRED, the note-7 numbers are the device's):
   better (0.016 / 0.062 %). Which one wins on the device is test 3 (needs
   a generator).
 * AUTO coupling: couptest `v`, `i`, `tap`, `band` pass with `--meth A`,
-  `B` and `C` (1a6c1bd). Also passing on 1a6c1bd / 35098ee: senttest (26),
+  `B` and `C` (17dcff2, d6f5e96). Also passing on 17dcff2 / 4539aea: senttest (26),
   powtest (15; `ereset` failed once under a load average of ~45 and passed
   alone), modetest `--fast` 35 of 36 (stock `cap-big` 0.105 mF fails the
   same way on 5f9b5a0 without this change; without `--fast` every fw-rs
