@@ -752,6 +752,7 @@ mod spi {
     pub(super) fn dma_kick(tx: *const u8, rx: *mut u8, n: u32) {
         set(GPIOD, CS, false);
         unsafe {
+            drain_rx();
             w32(DMA_INTC0, 0x3D);
             w32(DMA_INTC1, 0x3D << 22);
             w32(dch(RXC, 0x04), n);
@@ -764,22 +765,47 @@ mod spi {
         }
     }
 
-    /// End the running DMA frame: true when every byte came back (else the
-    /// channels are stopped); CS high either way.
+    /// End the running DMA frame: wait (bounded, ~100 us) until every byte
+    /// came back, then CS high. A frame may still run when the next entry
+    /// comes (the entry that started it was late, device f5f8e96: aborting it
+    /// there left its last byte in flight, every later frame read one byte
+    /// shifted - bad samples, a runaway lock). On a timeout the channels stop,
+    /// the shift ends, and the receive register is emptied. True = complete.
     #[inline(always)]
     pub(super) fn dma_finish() -> bool {
-        let ok = unsafe { r32(dch(RXC, 0x04)) == 0 } && idle();
+        let mut n = 0u32;
+        let mut ok = true;
+        while unsafe { r32(dch(RXC, 0x04)) } != 0 {
+            n += 1;
+            if n >= WAIT_MAX {
+                TIMEOUTS.store(TIMEOUTS.load(Relaxed).wrapping_add(1), Relaxed);
+                ok = false;
+                break;
+            }
+        }
         unsafe {
             if !ok {
                 w32(dch(RXC, 0), 0);
                 w32(dch(TXC, 0), 0);
-                let _ = r32(SPI_DATA);
             }
+            let _ = idle();
+            drain_rx();
         }
         spin(CS_HOLD);
         set(GPIOD, CS, true);
         spin(CS_SETUP); // CS high before any next frame
         ok
+    }
+
+    /// Empty the receive register (a stale byte would shift the next DMA
+    /// frame by one).
+    #[inline(always)]
+    unsafe fn drain_rx() {
+        let mut k = 0;
+        while r32(SPI_STAT) & STAT_RBNE != 0 && k < 4 {
+            let _ = r32(SPI_DATA);
+            k += 1;
+        }
     }
 
     /// CKPH for the next bytes (SPI2 idle; SCK idle low in both: no edge).

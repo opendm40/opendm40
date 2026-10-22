@@ -19,8 +19,7 @@
  *                                      gallery, screenshots, the DLG writer,
  *                                      FAT / vdisk generation, uploads, the
  *                                      bus self-tests / AD2 experiments (DBG),
- *                                      scope CSV, boot / DBG:BOOT?, settings
- *                                      persistence) and
+ *                                      scope CSV, boot / DBG:BOOT?) and
  *                                      the .data load image. Must end below
  *                                      0x080A0000 (FS-loader, UID data,
  *                                      calibration above).
@@ -89,8 +88,9 @@ SECTIONS
         *(.text.*7dm40_fw6ad2exp*);
         *(.text.*7dm40_fw9scope_csv*);
         *(.text.*7dm40_fw4boot*);
-        *(.text.*7dm40_fw7persist*);
         *(.text.*7dm40_fw3app9app_press*);
+        /* NOT persist: its crc runs on every main-loop pass (device
+         * f5f8e96: lat_pc in persist::crc, 9..18 us stalls). */
         /* ... and their named read-only data (tables, strings in statics). */
         *(.rodata.*7dm40_fw9calbackup*);
         *(.rodata.*7dm40_fw6fatren*);
@@ -107,7 +107,6 @@ SECTIONS
         *(.rodata.*7dm40_fw6ad2exp*);
         *(.rodata.*7dm40_fw9scope_csv*);
         *(.rodata.*7dm40_fw4boot*);
-        *(.rodata.*7dm40_fw7persist*);
         *(.rodata.*7dm40_fw3app9app_press*);
         . = ALIGN(4);
         __cold_end = .;
