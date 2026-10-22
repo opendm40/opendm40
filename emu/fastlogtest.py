@@ -23,8 +23,10 @@ high for Bluetooth") and with LOG:DEST DISK ("Command protected"); an AD1
 Timing: the disk's SPI bus has its byte time (GD32_SPI on spi2, 12.5 MHz:
 ~0.2 ms of polled CPU per 256-byte page, charged since 2026-10-22), the
 chip's busy time is the profile's, the HY3131 bus and its DMA are timed as
-on the device; the main loop runs at 200 MIPS without flash / APB wait
-states (the stream ISR costs the device ~1.7x the emulator's CPU share).
+on the device; the CPU runs at --mips (default 200 = one instruction per
+cycle, no flash / APB wait states). The device's speed: --mips 110
+--isr-stall-ns 700 (peripherals/CpuCost.cs; the 76.8 kS/s device check of
+7409b92: Run pass, passes/s and the stream ISR's cpu_permille).
 --noise raises the AD2 noise (more bytes per sample, the coder's worst
 case). Exit status 0 = every check passed; the rate table is printed
 (docs/compact-log-format.md "Fast stream: rate limits"; fifo_hw = the
@@ -55,6 +57,11 @@ ap.add_argument('--no-ad1-race', action='store_true', help='AD1F without the INT
 ap.add_argument('--noise', type=float, default=None, help='HY3131 model noise scale (SetNoise; AD2: 30 codes rms x scale at OSR 32): a '
                 'noisier signal codes to more bytes per sample (the model\'s 0.5 V sine + 1x noise is ~1.4 B; real '
                 'inputs 1.9..2.9 B, docs/compact-log-format.md)')
+ap.add_argument('--mips', type=int, default=200, help='CPU PerformanceInMips (all code; 200 = one instruction per cycle; '
+                '110 = the device\'s speed, peripherals/CpuCost.cs)')
+ap.add_argument('--isr-stall-ns', type=int, default=0, help='a stall per stream ISR entry, ns (peripherals/CpuCost.cs IsrStallNs; '
+                'with --mips 110, 700 gives the device\'s cpu_permille ~520 at 76800)')
+ap.add_argument('--prof', action='store_true', help='DBG:PROF:RESET when the run starts, DBG:PROF? at its end (printed)')
 A = ap.parse_args()
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
 os.environ['USBIP_PORT'] = str(A.port)
@@ -80,13 +87,15 @@ def run_emu(profile):
         f.write('0 monitor sysbus.spi2.spiflash Erase32kUs %d\n' % p[2])
         f.write('0 monitor sysbus.spi2.spiflash Erase64kUs %d\n' % p[3])
         f.write('0 monitor sysbus.hy3131 ClockPpm %g\n' % A.ppm)
+        if A.isr_stall_ns:
+            f.write('0 monitor sysbus.cpucost IsrStallNs %d\n' % A.isr_stall_ns)
         if A.noise is not None:
             f.write('0 monitor sysbus.hy3131 SetNoise %g\n' % A.noise)
         if not A.no_ad1_race:
             f.write('0 monitor sysbus.hy3131 IntfRaceAd1 true\n')
         if A.extra_script:
             f.write(open(A.extra_script).read())
-    cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--mips', '200', '--app', A.app,
+    cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--mips', str(A.mips), '--app', A.app,
            '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '5000', '--name', 'fastlog-%d' % A.port,
            '--dmm', 'vsrc:0.2,ac=0.5,f=50', '--script', script]
     if not A.no_bt:
@@ -212,10 +221,14 @@ def session(q, src, rate, profile):
         st = [int(x) for x in q('LOG:DISK?').split(',')]
         if st[0] == 3 and t_run is None:
             t_run = int(q('DBG:PING?').split(',')[0])
+            if A.prof:
+                q('DBG:PROF:RESET')
         if st[0] >= 5:
             break
         time.sleep(0.5)
     up1 = int(q('DBG:PING?').split(',')[0])
+    if A.prof:
+        print(q('DBG:PROF?'), flush=True)
     cnt = [int(x) for x in q('LOG:COUNt?').split(',')]
     isr = q('DBG:ISR?').split(',')
     print('  LOG:COUNt? %s  DBG:ISR? %s' % (','.join(map(str, cnt)), ','.join(isr)), flush=True)
