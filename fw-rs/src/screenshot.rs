@@ -21,10 +21,8 @@
 //! disk), the DMM, the scope and the watchdog keep running during the ~5 s
 //! write. One shot at a time (`start` refuses while `busy`). Slices:
 //!   Start    wait for a host WRITE(10) in progress to finish (msc.rs;
-//!            at most 2 s, then "failed");
-//!   Capture  GRAM -> RAM, file rows (bottom-up) in order, each row
-//!            run-length coded into CAP (native: 48 KiB) while it fits;
-//!            rows per pass until ~2 ms are spent (~0.3 ms per row);
+//!            at most 2 s, then "failed"); a shot is refused ("Disk busy")
+//!            while a fast-log session or an upload holds the disk;
 //!   Bpb      boot sector (1 block read); first waits while a csvlog.rs
 //!            commit holds the disk (msc.rs LOG_FLUSHING);
 //!   Bpb      also opens SHOTS/ / SCOPE/ (fatdir::ensure: created here only
@@ -32,7 +30,8 @@
 //!   Root     one directory block per pass (the root, then SHOTS/ or SCOPE/:
 //!            used numbers in either, the first free slot of the directory);
 //!   Alloc    one FAT 1 block per pass: first-fit free clusters;
-//!   Data     per 4 KiB block: fill (header / pixels from CAP or GRAM, CRC),
+//!   Data     per 4 KiB block: fill (header / pixels read from the panel,
+//!            lcd::read_span, ~1.3 ms per block; CRC),
 //!            then `BlockDevice::write_step` (spiflash.rs: compare, erase,
 //!            16 page programs, read back; <= ~2 ms of CPU per pass, the
 //!            erase and the programs run in the chip between passes);
@@ -57,17 +56,22 @@
 //! Every block write is read back; nothing is written unless the boot sector
 //! is the expected FAT16 volume.
 //!
-//! Frozen image: there is no frame buffer, so the rows must be read from the
-//! panel while nothing draws over them. `frozen()` is true from `start` until
-//! every row has been read (main.rs then passes can_draw = false; App::gesture
-//! drops input): normally until the Capture slices are done (all 320 rows fit
-//! in CAP: ~0.1 s of GRAM reads spread over ~50 passes; mostly flat UI screens
-//! code to a fraction of the 300 KiB raw frame). If CAP fills up first (a busy
-//! scope trace), the remaining
-//! rows are read from the GRAM when their data block is filled, and the
-//! screen stays frozen until the last data block (~4-5 s), as before but with
-//! the main loop running. The verify pass compares CRCs, so it does not need
-//! the panel again.
+//! Frozen image, streamed from the panel: there is no frame buffer and no
+//! capture buffer; each data block's pixels are read from the panel's GRAM
+//! (RAMRD, lcd::read_span) when the block is filled, straight into the block
+//! buffer (calbackup::scratch()[0]) that is then programmed. So nothing may
+//! draw over the panel until the last row is read: `frozen()` is true from
+//! `start` until the last data block is filled (main.rs then passes
+//! can_draw = false; App::gesture drops input), i.e. for the Start .. Data
+//! phases, ~4-5 s on the device (76 blocks, each a 4 KiB erase + 16 page
+//! programs; less when the free clusters are already erased). The main loop
+//! runs meanwhile (DMM, USB, the watchdog); only drawing and touch input
+//! wait. The verify pass compares CRCs, so it does not need the panel again.
+//! (Until 2026-10-22 the rows were first run-length coded into a 48 KiB
+//! SRAM buffer, CAP, to unfreeze after ~0.1 s on the screens that fit (91 %
+//! of the host renders; the AC+DC / power views did not); dropped for the
+//! RAM, docs/ram-budget.md. The BMP bytes are the same: both read the same
+//! GRAM through the same read_span.)
 //!
 //! The native build does not export this disk over USB (the PC sees the
 //! read-only generated volume of vdisk.rs, rebuilt after a shot: dlog.rs
@@ -76,7 +80,7 @@
 //! `vdisk`) refuse host writes while busy (NOT READY, msc.rs) and set
 //! `MEDIUM_CHANGED` after a write (UNIT ATTENTION, msc.rs).
 
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::calbackup::{self, crc32_upd};
 use crate::fatdir;
@@ -102,9 +106,6 @@ const PER: u32 = (BLK / 32) as u32;
 const FPER: u32 = (BLK / 2) as u32;
 /// Write / create date 2026-10-13, time 0 (no RTC), as calbackup.
 const DATE: u16 = (46 << 9) | (10 << 5) | 13;
-/// CPU time per `poll` slice (cycles; 2 ms at 200 MHz). A slice may run over
-/// by one block read (~2.7 ms at the 12.5 MHz SPI clock) or one row.
-const STEP_CYC: u32 = crate::clock::HCLK_HZ / 500;
 const NONE: u32 = u32::MAX;
 /// Longest wait for a host WRITE(10) in progress before giving up (cycles,
 /// 2 s): a host that died mid-transfer must not freeze the screen for good.
@@ -140,78 +141,6 @@ const K_CSV: u8 = 1;
 const CSV_PIECE: usize = 512;
 const _: () = assert!(HDR_LEN % 2 == 0 && BLK % 2 == 0, "block edges fall between pixels");
 
-/// Captured rows, run-length coded (u16 words, per row: tokens until W
-/// pixels; `n` < 0x8000 = a run of n pixels of the next word's colour,
-/// 0x8000 | n = n literal pixels follow). Worst case W + 1 words per row.
-/// Native: 48 KiB (was 96 KiB; SRAM for the logger ring, csvlog, BT). The
-/// host renders of the fw-rs screens (tools/ui-render, 105 renders,
-/// 2026-10-22) code to 9..68 KiB; 96 of them (all the scope ones, the main
-/// DMM view at 47.8 KiB) fit and are captured at once; a busier screen (the
-/// AC+DC and power views, a noisy scope trace) fills CAP part way and its
-/// remaining rows are read from the GRAM while writing.
-/// The RAM image has no SRAM to spare (its .dmabuf is full): 0 there, every
-/// row is then read from the GRAM while writing.
-///
-/// Shared with the scope FFT (an arena with an explicit owner): the LAST
-/// `FFT_WORDS` of CAP are the FFT's work buffer (fft::Work, 2048 f32 =
-/// 8 KiB; fft.rs needs it only while a job is in flight, the result `db`
-/// stays in scope_page::FFT), lent by `fft_work`:
-///   * the FFT renews a lease (`FFT_LEASE`, a few main-loop passes) every
-///     time it uses the buffer (load / step);
-///   * a screenshot that starts while the lease runs captures into CAP below
-///     the tail only (`Job::lim`; the rows past it come from the GRAM while
-///     writing, as when CAP is full) and leaves the FFT alone;
-///   * one that starts without a lease takes the whole CAP (`Job::tail`)
-///     from the capture to the end of the Data phase (the last CAP read);
-///     `fft_work` is None meanwhile (scope_page drops a job in flight and
-///     asks for the frame again afterwards). If its rows fit below the tail
-///     it gives the tail back as soon as the capture is done (~0.1 s, the
-///     screen is frozen then anyway).
-/// The FFT never reads what it did not write in the same job (fft.rs
-/// `load` fills every entry the job uses), so a shot that wrote over the
-/// tail leaves nothing stale behind. Scope-record jobs (K_CSV) never use CAP.
-const CAP_WORDS: usize = 24 * 1024;
-/// f32 entries of the FFT work buffer (= fft::N, checked in scope_page.rs;
-/// this file is also built without fft.rs by the host tests).
-pub const FFT_WORK: usize = 2048;
-const FFT_WORDS: usize = 2 * FFT_WORK;
-const _: () = assert!(FFT_WORDS < CAP_WORDS && CAP_WORDS <= u16::MAX as usize, "Job::off is u16 word offsets");
-/// Main-loop passes an FFT use keeps the tail (screenshot `poll` counts it
-/// down once per pass; the scope page steps a job every pass).
-const LEASE_PASSES: u8 = 8;
-
-#[repr(C, align(4))]
-struct Arena([u16; CAP_WORDS]);
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
-static mut CAP: Arena = Arena([0; CAP_WORDS]);
-static FFT_LEASE: AtomicU8 = AtomicU8::new(0);
-
-/// CAP words `0 .. lim` (`Job::lim`).
-fn cap(lim: u32) -> &'static mut [u16] {
-    let lim = (lim as usize).min(CAP_WORDS);
-    unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(CAP).cast::<u16>(), lim) }
-}
-
-/// The scope FFT's work buffer (the tail of CAP, see there), or None while a
-/// screenshot holds it. Renews the FFT's lease. Single-threaded (main loop):
-/// the caller uses it within its own call and keeps no reference.
-#[inline(always)]
-pub fn fft_work() -> Option<&'static mut [f32; FFT_WORK]> {
-    if !fft_free() {
-        return None;
-    }
-    FFT_LEASE.store(LEASE_PASSES, Ordering::Relaxed);
-    let p = unsafe { core::ptr::addr_of_mut!(CAP).cast::<u16>().add(CAP_WORDS - FFT_WORDS) };
-    Some(unsafe { &mut *p.cast::<[f32; FFT_WORK]>() })
-}
-
-/// No screenshot holds the FFT work buffer.
-#[inline(always)]
-pub fn fft_free() -> bool {
-    let j = job();
-    !(j.tail && matches!(j.phase, Phase::Capture | Phase::Bpb | Phase::Root | Phase::Alloc | Phase::Data))
-}
-
 /// Result of a screenshot.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Shot {
@@ -223,13 +152,16 @@ pub enum Shot {
     Full,
     /// A read, write or the verify failed (at worst lost clusters).
     Error,
+    /// Screenshot only: the disk is held by a fast-log session or an upload
+    /// (unbounded): refused at once, nothing written. The screen is read
+    /// from the panel while writing, so it cannot wait frozen that long.
+    Busy,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Idle,
     Start,
-    Capture,
     Bpb,
     Root,
     Alloc,
@@ -246,14 +178,6 @@ struct Job {
     frozen: bool,
     /// A block write was started (the disk may have changed).
     wrote: bool,
-    /// File rows 0..rows are in CAP; row r at CAP[off[r]..off[r + 1]]
-    /// (words; CAP_WORDS fits u16).
-    rows: u32,
-    off: [u16; H as usize + 1],
-    /// CAP words this shot may use (CAP_WORDS, or up to the FFT's tail), and
-    /// whether it holds the tail (`fft_free`); set when the capture starts.
-    lim: u32,
-    tail: bool,
     v: Option<Vol>,
     /// Phase cursor: root block, FAT entry, data / verify block.
     i: u32,
@@ -296,10 +220,6 @@ const JOB0: Job = Job {
     phase: Phase::Idle,
     frozen: false,
     wrote: false,
-    rows: 0,
-    off: [0; H as usize + 1],
-    lim: 0,
-    tail: false,
     v: None,
     i: 0,
     taken: [0; 32],
@@ -440,16 +360,12 @@ fn disk() -> &'static mut crate::spiflash::SpiFlash {
 }
 
 /// One bounded slice of the job in flight (main loop, every pass).
-/// `inline(always)` (as `busy`, `frozen`, `fft_work`, `fft_free`, `job`):
+/// `inline(always)` (as `busy`, `frozen`, `job`):
 /// this module is `.cold` (link-native.x, flash above 0x08080000 is not
 /// zero-wait), so what runs on every pass is inlined into the hot caller and
 /// only a shot in flight reaches the cold code.
 #[inline(always)]
 pub fn poll() {
-    // The FFT's lease on the tail of CAP runs out after LEASE_PASSES passes
-    // without a use.
-    let l = FFT_LEASE.load(Ordering::Relaxed);
-    FFT_LEASE.store(l.saturating_sub(1), Ordering::Relaxed);
     if !busy() {
         return;
     }
@@ -520,20 +436,12 @@ fn step(disk: &mut dyn BlockDevice) -> Option<Shot> {
             } else if !disk.present() || disk.block_size() as usize != BLK {
                 Some(Shot::NoDisk)
             } else {
-                if j.kind == K_CSV {
-                    j.phase = Phase::Bpb;
-                } else {
-                    // CAP: all of it, unless the FFT is using its tail now.
-                    j.tail = FFT_LEASE.load(Ordering::Relaxed) == 0;
-                    j.lim = if j.tail { CAP_WORDS } else { CAP_WORDS - FFT_WORDS } as u32;
-                    j.phase = Phase::Capture;
-                }
-                None
+                j.phase = Phase::Bpb;
+                // A shot cannot wait frozen for the end of a fast-log
+                // session or an upload (unbounded); a csvlog commit (a few
+                // blocks) it waits for at Bpb, frozen.
+                (j.kind == K_BMP && (crate::fastlog::holds_disk() || crate::upload::busy())).then_some(Shot::Busy)
             }
-        }
-        Phase::Capture => {
-            j.capture();
-            None
         }
         // A csvlog commit holds the disk (and calbackup::scratch): wait. It
         // is bounded (a few blocks) and never starts while we are busy. An
@@ -574,38 +482,6 @@ fn finish(j: &mut Job, r: Shot) {
 impl Job {
     fn vol(&self) -> Vol {
         self.v.unwrap_or_else(|| unreachable!())
-    }
-
-    /// GRAM rows into CAP (file row r = screen row H - 1 - r).
-    fn capture(&mut self) {
-        let t = cyc();
-        let cap = cap(self.lim);
-        let mut px = [0u16; W as usize];
-        while self.rows < H {
-            let mut k = 0usize;
-            lcd::read_span(0, (H - 1 - self.rows) as u16, W as u16, |c| {
-                px[k] = c;
-                k += 1;
-            });
-            let o = self.off[self.rows as usize] as usize;
-            let Some(n) = encode(&px, &mut cap[o..]) else {
-                break; // CAP full: the rest from the GRAM while writing
-            };
-            self.rows += 1;
-            self.off[self.rows as usize] = (o + n) as u16;
-            if self.rows < H && cyc().wrapping_sub(t) >= STEP_CYC {
-                return;
-            }
-        }
-        if self.rows == H {
-            self.frozen = false;
-        }
-        // All rows below the FFT's tail: give it back now.
-        if self.tail && self.off[self.rows as usize] as usize <= CAP_WORDS - FFT_WORDS {
-            self.tail = false;
-            self.lim = (CAP_WORDS - FFT_WORDS) as u32;
-        }
-        self.phase = Phase::Bpb;
     }
 
     fn bpb(&mut self, disk: &mut dyn BlockDevice) -> Option<Shot> {
@@ -736,7 +612,8 @@ impl Job {
         None
     }
 
-    /// File bytes `off .. off + buf.len()` (whole pixels).
+    /// File bytes `off .. off + buf.len()` (whole pixels): the header, then
+    /// the pixels read from the panel (file row r = screen row H - 1 - r).
     fn fill(&self, off: u32, buf: &mut [u8]) {
         let mut i = 0usize;
         let mut off = off;
@@ -745,7 +622,6 @@ impl Job {
             i += 1;
             off += 1;
         }
-        let cap = cap(self.lim);
         while i + 1 < buf.len() {
             let px = (off - HDR_LEN) / 2;
             let (r, x) = (px / W, px % W);
@@ -754,11 +630,7 @@ impl Job {
                 buf[i..i + 2].copy_from_slice(&c.to_le_bytes());
                 i += 2;
             };
-            if r < self.rows {
-                decode(&cap[self.off[r as usize] as usize..], x, n, put);
-            } else {
-                lcd::read_span(x as u16, (H - 1 - r) as u16, n as u16, put);
-            }
+            lcd::read_span(x as u16, (H - 1 - r) as u16, n as u16, put);
             off += 2 * n;
         }
     }
@@ -933,59 +805,5 @@ impl Job {
         }
         let eoc = self.fat_get(disk, self.vc).is_some_and(|n| n >= 0xFFF8);
         Some(if eoc && self.vcrc == self.crc { Shot::Saved(self.n) } else { Shot::Error })
-    }
-}
-
-/// Run-length code one row into `out`; None = does not fit.
-fn encode(px: &[u16], out: &mut [u16]) -> Option<usize> {
-    let mut o = 0usize;
-    let mut lit = 0usize;
-    let mut i = 0usize;
-    while i < px.len() {
-        let mut j = i + 1;
-        while j < px.len() && px[j] == px[i] {
-            j += 1;
-        }
-        if j - i >= 3 {
-            o = literal(&px[lit..i], out, o)?;
-            out.get_mut(o..o + 2)?.copy_from_slice(&[(j - i) as u16, px[i]]);
-            o += 2;
-            lit = j;
-        }
-        i = j;
-    }
-    literal(&px[lit..], out, o)
-}
-
-fn literal(px: &[u16], out: &mut [u16], o: usize) -> Option<usize> {
-    if px.is_empty() {
-        return Some(o);
-    }
-    let d = out.get_mut(o..o + 1 + px.len())?;
-    d[0] = 0x8000 | px.len() as u16;
-    d[1..].copy_from_slice(px);
-    Some(o + 1 + px.len())
-}
-
-/// Pixels `x0 .. x0 + n` of a row coded at the start of `cap`.
-fn decode(cap: &[u16], x0: u32, n: u32, mut out: impl FnMut(u16)) {
-    let end = x0 + n;
-    let (mut x, mut p) = (0u32, 0usize);
-    while x < end {
-        let h = cap[p] as u32;
-        let k = h & 0x7FFF;
-        let (lo, hi) = (x.max(x0), (x + k).min(end));
-        if h & 0x8000 != 0 {
-            for q in lo..hi {
-                out(cap[p + 1 + (q - x) as usize]);
-            }
-            p += 1 + k as usize;
-        } else {
-            for _ in lo..hi {
-                out(cap[p + 1]);
-            }
-            p += 2;
-        }
-        x += k;
     }
 }

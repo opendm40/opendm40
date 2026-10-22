@@ -2484,7 +2484,7 @@ impl App {
     }
 
     /// UF-17: start writing the screen to the disk (screenshot.rs, in slices
-    /// from tick(), ~5 s; the screen is frozen only while it is captured):
+    /// from tick(), ~5 s; the screen is frozen until its last row is read):
     /// a chirp now, a toast + beep when done (`shot_toast`). A swipe while one
     /// is in flight is ignored with a low beep.
     fn screenshot(&mut self, now: u64) {
@@ -2727,6 +2727,7 @@ impl App {
             Shot::NoDisk => ("No disk", false),
             Shot::Full => ("Disk full", false),
             Shot::Error => ("Screenshot failed", false),
+            Shot::Busy => ("Disk busy", false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
