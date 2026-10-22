@@ -1707,7 +1707,7 @@ fn main() {
         }
     }
 
-    // 6c'. Fuse-check dialog (dialog::fuse_screen): every stage and verdict,
+    // 6c'. Fuse-check dialog (ui::fuse_screen): every stage and verdict,
     //      the widest resistance texts; each line fits the box.
     {
         use sentinel::FuseRes as F;
@@ -1725,7 +1725,7 @@ fn main() {
         {
             host::reset(0);
             let mut b = [0u8; 32];
-            dialog::fuse_screen(*stage, *res, &mut b);
+            ui::fuse_screen(*stage, *res, &mut b);
             let (x, y, w2, h2) = dialog::FBOX;
             ck.check(&format!("fuse/{k}"), &[("screen", Bx::new(0, 0, 480, 320)), ("box", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))]);
             save(&out, &format!("f0{k}-fuse-check"));
