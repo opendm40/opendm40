@@ -844,3 +844,44 @@ Crash count 0 all the way, no unexpected reset. The build-time worst path is 30 
   - The first READ? after the calibrator's switch from the square to 1 V was OL (the calibrator's output settling; the chart shows ~0.75 V, then OL); it was 0.99969 V a few seconds later.
 - **Calibrator:** 1 V DC, enabled (func 1 mode 0 value 1000).
 - **Files on the SPI disk added by this run:** LOGS/LOG000.DLG, LOGS/LOG001.DLG.
+
+## Bluetooth (0667175)
+
+**Build.** The device ran **3bae462** (= 0667175 on rust-fw-poc: the BT module powered via PC0) for the whole run (2026-10-22 09:35-10:35). No firmware was installed and no code was changed; no reboot. Host: BlueZ, classic SPP XX:XX:XX:XX:XX:XX (name "C-1-ATK-DM40-CALI"), `/usr/bin/python3`. Wiring as before: the calibrator (`/dev/ttyACM1`) on the DMM V/COM jacks (1 V DC, a 2 V step for the freeze checks); the A jack is not wired. Screenshots, frame logs and scripts are in the session scratchpad (`bt0667/`), not in git.
+
+### Summary
+
+| # | Check | Result |
+|---|---|---|
+| 1a | Status-bar BT glyph | **PASS.** Off with no host (`01-nohost.png`), on while a host is linked (DMM `02-`, Gen `25-`), off again after the disconnect (`03b-`). The Scope page bar has no BT glyph (stock scope bar layout; `12-scope-conn.png`) |
+| 1b | `--bt info`, `--bt read -n 20` | **PASS.** IDN / FUNC? / CONF? answer; 20 readings 0.99950-0.99976 V at ~2.5/s |
+| 1c | `--bt btpoll -p 50 -d 20` (UF-36) | **PASS on all four pages: 400 / 400 replies (100 %)** on DMM, DMM+Scope, Scope, Gen; latency median 36.6-37.2 ms, max 43.9-62.9 ms. But see 1g: on Scope / Gen the value can be stale |
+| 1d | Reconnect after a disconnect | **PASS.** 5 cycles: connected again 0.7-1.3 s after the previous close (the first try right after a close gets EBUSY from the host, the next one 0.5 s later connects) |
+| 1e | Settings > Bluetooth OFF / ON (DBG:TAP 240,178) | **PASS.** OFF: connect times out, a 12 s `bluetoothctl scan` does not see 63:14:… (`31-bt-off.png`). ON: seen in the scan at once (RSSI -47), `--bt info` answers (`32-bt-on.png`). Left ON |
+| 1f | DMM kept on while linked (UF-36 rail rule), link opened **before** leaving the DMM | **PASS.** cmd 09 followed a 1 → 2 V step made on the Scope page (999.5 → 1998.5 "mV" frames) |
+| 1g | Link opened **while on Scope / Gen** (DMM rail off) | **FAIL.** The DMM does not resume: cmd 09, BT `FETC?` / `READ?` and even USB `READ?` on the Scope page return the last reading taken before the rail went off, at once, and do not follow a 1 → 2 V step (3 of 3 tries) |
+| 1h | Several such links, then back to the DMM page | **FAIL (DMM frozen).** After 3 connect / disconnect cycles on the Scope page (and in the first session, several btpoll / cmd 09 links on Scope / Gen), the DMM page stays frozen: `FETC?` +1.998914E+00 at a 1 V input for > 9 min, `DBG:PROF?` d.read 0 in 5 s, an "AC?" hint in the status bar (`23-stuck2.png`). 2 of 2 tries with ≥ 3 cycles; 0 of 2 with one cycle. `DBG:HYSPI:SELF?` (it runs `app.dmm.start`) brings the DMM back at once |
+| 2 | Compound SCPI over BT (f52b239) | **PASS.** `POW:PHAS:CAL RES;:SYST:ERR?;*OPC?` → `-100,"Settings conflict; RES: PF 1 optimum is flat, use REACtive (C or L load, PF ~0)";1` in one line; `*IDN?;SYST:ERR?` → `Alientek,DM40A,0,dm40-fw 0.1;0,"No error"`. The same over USB |
+| 3a | cmd 09 in the power meter (doc §3.13 item 1, without current) | **PASS.** Mode byte **0x28**, format 0x08, main 0x0000 = "0.0000 mV" (the readout 0.0000 mW, P -1.5e-8 W; no sign bit, no negative zero), value 2 / 3 FF FF. In DC V AUTO+ the byte is 0x30 (format 0x18: 0.9993 V) |
+| 3b | cmd 06 0x28 in the power meter | **PASS.** Reply `DF 05 03 06 01 00 12`; FUNC? "POW", CONF? "POW AUTO,AUTO" after it |
+| 3c | BT SCPI in the power meter (§3.13 item 4) | **PASS.** `CONF:POW` → FUNC? "POW"; `FETC:POW:ALL?` 13 fields (P -1.5e-8, Vrms 0.99932, PF -1, t 34 s, …); `MEAS:POW?` / `READ?` answer; `CALC:LIM:UPP 100` → UPP? 1.0E+02, STAT? 1, FAIL? 0; `CALC:LIM:UPP -1` → FAIL? 1 and the red **HI** badge (`41-pow-hi.png`); restored with `CALC:LIM:CLE` + `STAT OFF` (UPP? / LOW? 9.9E37, STAT? 0 as before) |
+| 4 | Decision #7 BT part: AD2 38 400 S/s, 900 s, DMA frames, BT client polling all the time | **PASS (stream).** 34 560 269 records, seq gaps 0, stamp gaps 0, `LOG:COUNt?` 0,34560269,0,0,0 (lost 0), `LOG:GAPs?` bad 0, max gap 27 us; `DBG:ISR?` late 0, dropped 0, bad 0, timeouts 0, overruns 0, max_isr 5.4 us, max_lat 0.28 us, CPU 17.5 %, dma 1. **BT reply rate during the stream: 0** (by design, TODO UF-36: cmd 09 frames are not served during an FR-38 session); btpoll overall 698 / 2496 (the replies before and after the stream); BT answered again right after (`--bt info`) |
+| 5 | Fast logger over BT (`LOG:DATA?` on the BT link) | **Present, partial.** BT SCPI is served during the session: AC V, `LOG:SOUR AD2`, `LOG:SRAT 1200` (600 is taken as 1200), `LOG:STAT ON` over BT, 30 s of `LOG:DATA?` over BT: 27 777 records at **918 /s**, no timeouts, seq gaps 0, lost 0, but **6 593 overwritten** (ring full: BT drains ~918 records/s = ~11 KB/s, under the 1 200 S/s floor). In DC V `LOG:STAT ON` is refused ("Settings conflict", the DC row has no AD2 stream) |
+
+### 1. The DMM freeze (1g / 1h)
+
+Repro (the 1 V / 2 V calibrator on V/COM; no USB `READ?` in between, it would set host_dmm):
+1. DMM page, no BT link. MENU → Oscilloscope (the DMM rail goes off).
+2. Open a BT link (cmd 09 polls, `dm40scpi.py --bt btpoll` or any SCPI) and change the input: the frames and `FETC?` keep the old value.
+3. Close it; repeat 2-3 two more times; MENU → Multimeter.
+4. `FETC?` stays at the value of step 1 for minutes; the readout does not move, the bargraph is empty, the status bar shows "AC?".
+
+Observations:
+- A link held while leaving the DMM page keeps the DMM measuring (1f). Only a link that **starts** while the rail is off fails to wake it, though `update_rails` runs every pass with `d |= bt_on && bt_connected()`.
+- A single connect / disconnect on the Scope page, then back to the DMM page: the DMM resumes normally (2 of 2). With ≥ 3 cycles it stays frozen (2 of 2: the first one recovered after `DBG:HYSPI:SELF?` too, ~5 min in; the second was still frozen after 9 min).
+- `DBG:HYSPI:SELF?` (main.rs: `dmm_power`, the bus test, then `app.dmm.start`, `meter.reset`, `last_raw = None`) brings it back at once; the bus test itself reports 0 errors, so the HY3131 bus is fine and the DMM state machine is what is stuck. A suspect: `Dmm::start` from `set_suspended(false)` right after `Scope::rails` switches PE2 on (no settling time), repeated on every BT-driven rail toggle.
+
+### State at the end
+
+- **Device:** DMM page, DC V AUTO+, 0.9994 V (`50-after.png`), DMM live. Bluetooth ON. Backlight 10 %, volume 0 % (seen on the Settings page; Bluetooth toggled OFF and back ON, nothing else touched). Power meter coupling AUTO, its limits cleared as before (STAT 0). `DBG:AD2:DMA 1`, `DRAW 1`, `DIV 0,0` (defaults; drain.py sets DMA 0 on exit, set back), `LOG:SOUR AD1`, `LOG:SRAT 4800`, `LOG:STAT 0`. Crash count 0, no reset; stack high-water 23 252 / 46 588 B.
+- **Calibrator:** 1 V DC, enabled (func 1 mode 0 value 1000).
