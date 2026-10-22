@@ -74,15 +74,15 @@ print("  region A2 free   = %d bytes (0x%08x..0x%08x used, zero-wait below the m
       % (a2free, syms['__a2_start'], syms['__a2_end']))
 if a2free < 2048:
     open('target/native/regiona2.warn', 'w').write('%d\n' % a2free)
-bfree = 0x08080000 - syms['__etext']
+bfree = 0x08080000 - syms['__b_end']
 print("  region B free    = %d bytes (zero-wait flash below 0x08080000; link fails below 8 KiB)" % bfree)
 if bfree < 16384:
     # Repeated as a banner at the very end of build.sh (target/native/regionb.warn).
     open('target/native/regionb.warn', 'w').write('%d\n' % bfree)
-# Region C (.cold + the .data load image, slow flash) ends at the FS-loader:
+# Region C (.cold, slow flash; the .data load image is in B) ends at the FS-loader:
 # the update file cannot reach above 0x080A0000 (docs/native-boot.md "Memory budget").
 cfree = END - syms['__image_end']
-print("  region C free    = %d bytes (.cold + .data image below 0x080A0000; link fails below 4 KiB)" % cfree)
+print("  region C free    = %d bytes (.cold below 0x080A0000; link fails below 4 KiB)" % cfree)
 if cfree < 8192:
     open('target/native/regionc.warn', 'w').write('%d\n' % cfree)
 print("  SRAM free        = %d bytes (above .sram_bss; >= 8 KiB)" % (0x20030000 - syms['__sram_bss_end']))

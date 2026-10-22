@@ -28,10 +28,12 @@
  *                                      gallery, screenshots, the DLG writer,
  *                                      FAT / vdisk generation, uploads, the
  *                                      bus self-tests / AD2 experiments (DBG),
- *                                      scope CSV, boot / DBG:BOOT?) and
- *                                      the .data load image. Must end below
- *                                      0x080A0000 (FS-loader, UID data,
- *                                      calibration above).
+ *                                      scope CSV, boot / DBG:BOOT?). Must
+ *                                      end below 0x080A0000 (FS-loader, UID
+ *                                      data, calibration above). The .data
+ *                                      load image follows .text in B (read
+ *                                      once by the reset copy; in C until
+ *                                      region C audit #1).
  *   Why the split: flash from 0x08080000 up is NOT zero-wait on the GD32F4
  *   (only the low 512 KiB are). A read there stalls the bus for ~20 us, and
  *   with it the AD2 stream ISR's entry (device 5f14d38: max_lat 18.8-21.8
@@ -320,8 +322,10 @@ SECTIONS
         *(.data .data.*);
         . = ALIGN(4);
         __edata = .;
-    } > TCM AT > FLASH_C
+    } > TCM AT > FLASH_B
     __sidata = LOADADDR(.data);
+    /* End of region B's content: .text / .rodata, then the .data image. */
+    __b_end = LOADADDR(.data) + SIZEOF(.data);
 
     .bss (NOLOAD) :
     {
@@ -351,7 +355,7 @@ SECTIONS
         __sram_bss_end = .;
     } > SRAM
 
-    __image_end = LOADADDR(.data) + SIZEOF(.data);
+    __image_end = __cold_end;
 
     /DISCARD/ :
     {
@@ -367,9 +371,9 @@ ASSERT(__a2_end <= _marker_start, "region A2 (.rodata.a2.*) overlaps the loader 
 ASSERT(ADDR(.text) >= _marker_end, "code placed in the loader marker at 0x08008000..0x0800800B");
 ASSERT(__image_end <= 0x080A0000, "image reaches the FS-loader at 0x080A0000");
 /* Region C budget: >= 4 KiB free below 0x080A0000 (build.sh warns below
- * 8 KiB). C grows by whole moved functions (0.3..5 KB each) and with .data;
+ * 8 KiB). C grows by whole moved functions (0.3..5 KB each);
  * 4 KiB still takes one more small move after the warning. */
-ASSERT(0x080A0000 - __image_end >= 4K, "less than 4 KiB of region C (.cold + .data image) free below 0x080A0000: cut code or move .cold code back to region B");
+ASSERT(0x080A0000 - __image_end >= 4K, "less than 4 KiB of region C (.cold) free below 0x080A0000: cut code or move .cold code back to region B");
 /* Memory budgets (2026-10-22 memory rework; the numbers then, ad2-isr (the
  * default) / without it: static worst stack path 21 760 / 21 396 B, stack
  * 46 620 / 46 688 B, SRAM free 12 856 / 13 040 B, region B free 24 508 /
@@ -400,4 +404,4 @@ ASSERT(0x080A0000 - __image_end >= 4K, "less than 4 KiB of region C (.cold + .da
  *   (docs/native-boot.md "Region A2"). */
 ASSERT(_stack_top - __bss_end >= 42K, "TCM stack below 42 KiB (worst path ~21.5 KiB + 20 KiB headroom): move CPU-only statics to .sram_bss");
 ASSERT(ORIGIN(SRAM) + LENGTH(SRAM) - __sram_bss_end >= 8K, "less than 8 KiB of SRAM free: overlay or shrink a buffer (docs/native-boot.md memory map)");
-ASSERT(0x08080000 - __etext >= 8K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");
+ASSERT(0x08080000 - __b_end >= 8K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");
