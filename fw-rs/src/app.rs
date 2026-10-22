@@ -31,6 +31,12 @@ mod app_power;
 mod app_wave;
 #[path = "app_press.rs"]
 mod app_press;
+/// Inrush current: open / arm / close / results / save (region C) and the
+/// part that runs while the AD2 stream does (region B).
+#[path = "app_inrush.rs"]
+mod app_inrush;
+#[path = "app_inrush_live.rs"]
+mod app_inrush_live;
 pub use app_wave::WaveReq;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
@@ -93,7 +99,7 @@ fn usb_ro() -> (bool, bool) {
 
 /// Menu-like pages (not instrument views): no view swipe, MENU steps back.
 fn is_page(v: View) -> bool {
-    matches!(v, View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help)
+    matches!(v, View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush)
 }
 
 /// Keypad targets of the temperature page (after the generator 0..2 / 5
@@ -306,6 +312,8 @@ pub enum FastReq {
     /// Start a session of this many seconds (0 = until stopped / full).
     Start(u32),
     Stop,
+    /// Save the inrush capture (app_inrush.rs: a session fed from the trace).
+    Inrush,
 }
 
 fn backlight(pct: u8) {
@@ -547,6 +555,11 @@ impl App {
                 // rails follow `v` below.
                 self.wave_close(clk, false);
             }
+            if self.view == View::Inrush {
+                // Leaving the inrush page: the capture stops, the A
+                // function's settings come back (app_inrush.rs).
+                self.inrush_close(clk);
+            }
             if matches!(v, View::Scope | View::DmmScope) {
                 self.sp_enter(clk.now_ms());
             }
@@ -583,6 +596,8 @@ impl App {
             View::Keypad if self.kp_dmm() => (self.scope.dmm_rail(), self.scope.powered()),
             // The wave view: the DMM side only (the MCX acquisition is idle).
             View::Scope if self.scope.wave_on() => (true, false),
+            // The inrush page: the DMM side (the AD2 stream, then the DMM).
+            View::Inrush => (true, false),
             View::Scope | View::Gen | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
@@ -642,6 +657,7 @@ impl App {
             }
             View::Limits => self.limits_page(),
             View::Record => self.record_page(),
+            View::Inrush => self.inrush_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(|p| ui::temp_page(p)),
             View::Range if self.dmm.pw.on => {
@@ -660,6 +676,9 @@ impl App {
                 ui::range_page(b, sel, sub, note);
                 if app_wave::WAVE_BUILD && matches!(b, Button::Volt | Button::Amp) {
                     ui::wave_button();
+                }
+                if app_wave::WAVE_BUILD && b == Button::Amp {
+                    ui::inrush_button();
                 }
             }
             View::Settings if self.set_page == 1 => {
@@ -1433,6 +1452,11 @@ impl App {
         // Gallery (FR-16): one bounded disk / drawing slice per pass.
         if self.view == View::Gallery {
             crate::gallery::get().poll();
+            return;
+        }
+        // The inrush page: its state line / button (app_inrush_live.rs).
+        if self.view == View::Inrush {
+            self.inrush_tick(now);
             return;
         }
         // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
@@ -2631,12 +2655,14 @@ impl App {
                     View::Settings => View::Menu,
                     View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Record => View::Limits,
-                    View::Menu | View::Range | View::Keypad | View::Limits => self.back_view,
+                    View::Menu | View::Range | View::Keypad | View::Limits | View::Inrush => self.back_view,
                     _ => View::Menu,
                 };
                 self.show(v, clk);
             }
             1 => match self.view {
+                // The inrush page: RUN = Arm / Cancel.
+                View::Inrush => self.inrush_button(clk),
                 View::Gen => {
                     let mut st = self.gen.s;
                     st.on = !st.on;
@@ -2652,6 +2678,8 @@ impl App {
                     }
                 }
             },
+            // The inrush page holds the 10 A range: no autorange.
+            2 if self.view == View::Inrush => self.beep(now, 300),
             2 => {
                 self.meter.rel_off();
                 self.meter.set_hold(false);
@@ -2669,7 +2697,7 @@ impl App {
                 // No range page (continuity / diode, frequency): the Hold &
                 // Limits page.
                 View::Dmm | View::DmmScope => self.show(View::Limits, clk),
-                View::Range | View::Limits | View::Record => {
+                View::Range | View::Limits | View::Record | View::Inrush => {
                     let v = self.back_view;
                     self.show(v, clk)
                 }
@@ -2712,6 +2740,7 @@ impl App {
                 }
             }
             View::Gallery => {} // gestures go to gallery::touch (App::gesture)
+            View::Inrush => self.inrush_tap(clk, x, y),
             View::Device => {
                 // Any tap dismisses back to Settings (its parent), the same
                 // step the MENU key takes from Device (see key()).
@@ -2848,6 +2877,10 @@ impl App {
                 let b = self.dmm.button();
                 if app_wave::WAVE_BUILD && matches!(b, Button::Volt | Button::Amp) && ui::wave_hit(x, y) {
                     self.wave_open(clk);
+                    return;
+                }
+                if app_wave::WAVE_BUILD && b == Button::Amp && ui::inrush_hit(x, y) {
+                    let _ = self.inrush_open(clk);
                     return;
                 }
                 match ui::range_hit(b, x, y) {

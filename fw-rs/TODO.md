@@ -1072,7 +1072,7 @@ Firmware:
       (docs/power-meter-and-misconnect.md 3.15). Left: the device check (3.15 list: a second meter across
       A-COM per range, then POW:BURD the measured R_path); the guided "measure R_path" step is not built
       (own ohm function reaches only the uA chain: the fuse check value could seed it later).
-- [ ] Inrush current (as the Fluke 376 / 323 clamps, owner 2026-10-22): arm in the 10 A range (autorange
+- [x] Inrush current (as the Fluke 376 / 323 clamps, owner 2026-10-22): arm in the 10 A range (autorange
       off), wait for the current to step up from ~0 past a threshold, then show the RMS over the first 100 ms
       after the trigger (Fluke's window) plus the peak, and keep the captured trace (a short chart / scope-like
       view, saved like the FAST*.DLG records). Data path: AD2 on the 10 mohm shunt at x1 (+-125 A window,
@@ -1082,6 +1082,26 @@ Firmware:
       a motor start can be 5-10x the run current), AD2 bandwidth and offset at x1 vs the DMM reading, UI entry
       (A mode sub-function vs Record page), SCPI (arm / fetch RMS, peak, trace), emulator scenario (a stepped
       current into A), device check with a lamp / motor and a second meter or the scope + shunt.
+      Done (docs/inrush-current.md): MF in A -> Current Settings -> "Inrush" (A sub-function, as the Fluke
+      clamps; not the Record page) opens the Inrush Current page: AC A row of the 10 A range (manual), the
+      AD2 stream (wave-view style session, 9600 S/s, the section 11 ISR), the DMM paused while armed.
+      Trigger: the ~1 ms mean of |I| exceeds the largest such mean of the previous ~100 ms by the step
+      (default 1 A, stepper 0.2..10 A, INR:THR 0.1..50 A): an absolute threshold from ~0, a rise by the
+      step on a running load (a running 2 A rms AC load does not trigger 1 A); either polarity; t = 0 = the
+      window's first sample (<= ~1 ms early). Trace: 200 ms pre + 1.8 s post as 16-bit codes (raw >> 3,
+      3.8 mA) in the scope's BUF (lent: the MCX acquisition idles, the stored scope record dropped; no new
+      SRAM). Results: Irms over 100 ms from t = 0 (AC + DC rms), the signed peak (OL at the AD2 rail),
+      idle rms, lost samples. Saved through the fast logger as LOGS/FASTnnn.DLG (kind 3: header with the
+      results, t_s from the first sample, t0 = 0.2 s; FASTnnn.CSV on the USB volume / MMEM:DATA?), the GUI
+      live meanwhile. SCPI INRush[:STATe] / :ARM / :THReshold / :CONDition? / :FETCh? / :FILE? /
+      :PREamble? / :DATA? (setters refused over BT). Closing restores the A sub-mode / autorange and BUF.
+      Emulator emu/hy3131/inrushtest.py PASS: DC 12 A 20 ms / 6 A 80 ms / 3 A step -> Irms 7.568 A (exact
+      window 7.589), peak 12.012 A, idle 0.050 A, CSV 19 200 rows, t0 0.200000 s; 2 A rms AC running 6 s no
+      trigger, 5 A rms step -> Irms 5.104 A (the DMM's AC A 5.000 A: the model's raw AD2 sine is 2.2 % above
+      its DC scale, an emulator artefact, doc section 8), host CONF stops it. Host tests (tools/meter-test inrush), ui-render i01..i07.
+      Budgets (on 6dfffec): region B 13.9 KB free (19.4 before: +5.4 KB), SRAM unchanged (10.9 KB free),
+      stack headroom 21.2 KB (21.4 before).
+      (verify on device: docs/inrush-current.md section 9: lamp, motor, a second meter / clamp)
 Emulator (emu/):
 - [x] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
       use per function (from the rows / mux selections: e.g. which PA tap, SENSE, PB0..PB7, FB/RLU), not "the

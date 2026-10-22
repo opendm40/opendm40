@@ -308,6 +308,9 @@ pub struct Scope {
     /// AD2 stream drained from the logger ring (`WaveSource`), not the MCX
     /// DMA; `wv` its state, `mcx` the MCX settings to restore on exit.
     wave: bool,
+    /// BUF is lent to the inrush capture (src/inrush.rs, `lend_buf`): no
+    /// acquisition, no stored record, until `return_buf`.
+    lent: bool,
     /// Code -> SI of the stored record (wave: `stored_ab`, the scale it
     /// was captured with).
     stored_ab: (f32, f32),
@@ -536,6 +539,7 @@ impl Scope {
             last_frame: 0,
             hold: false,
             wave: false,
+            lent: false,
             stored_ab: (0.0, 1.0),
         };
         *wv() = Wave::NEW;
@@ -1351,6 +1355,9 @@ impl Scope {
     }
 
     fn poll_frame(&mut self, now: u64, src: Option<&mut dyn WaveSource>) -> Option<Frame<'static>> {
+        if self.lent {
+            return None;
+        }
         if !self.s.run {
             // Stopped: re-render the stored record (stock STOP "keeps redrawing
             // the stored record", §4) once per change (zoom_pending: a settings
@@ -1724,6 +1731,31 @@ impl Scope {
 
     pub fn wave_on(&self) -> bool {
         self.wave
+    }
+
+    /// Lend BUF to the inrush capture (src/app_inrush.rs): the MCX
+    /// acquisition stops (its DMA writes BUF) and stays idle, the stored
+    /// record is dropped, until `return_buf`. Not with the wave view on.
+    pub fn lend_buf(&mut self) {
+        self.halt();
+        self.stored_valid = false;
+        self.lent = true;
+    }
+
+    /// BUF while lent (the inrush ring / trace), else None.
+    #[inline(always)]
+    pub fn lent_buf(&self) -> Option<&'static mut [u16]> {
+        // SAFETY: main loop only; while lent nothing else in scope.rs
+        // touches BUF (poll_frame returns at once, no DMA runs).
+        self.lent.then(|| unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..] })
+    }
+
+    /// BUF back to the scope: the next poll starts an acquisition.
+    pub fn return_buf(&mut self) {
+        if self.lent {
+            self.lent = false;
+            self.busy = false;
+        }
     }
 
     /// The settings to persist: the MCX ones while the wave view runs.

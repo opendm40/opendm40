@@ -15,6 +15,7 @@ mod hy3131_tables;
 mod hyspi;
 mod lcd;
 mod logger;
+mod inrush;
 mod ad2exp;
 mod ad2pll;
 
@@ -336,6 +337,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             // wave view: it closes with a note).
             if was_wave {
                 app.wave_lost(&mut clk, "Wave stopped: DMM changed");
+                app.inrush_lost(&mut clk, "Stopped: DMM changed");
             } else {
                 for s in scpis.iter_mut() {
                     s.set_err("Settings conflict");
@@ -346,7 +348,13 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // it asks for the logger session to start / stop.
         {
             let lon = logger.host_active();
-            let ev = fastlog::poll(lon, &mut |b| logger.drain(b));
+            // The inrush save (app_inrush.rs): a session whose records are
+            // the captured trace, not the logger ring (no logger runs).
+            let ev = if app.inrush_saving() {
+                fastlog::poll(false, &mut |b| app.inrush_drain(b))
+            } else {
+                fastlog::poll(lon, &mut |b| logger.drain(b))
+            };
             let fa = fastlog::active();
             // The rare part (a start / stop / end / Record page request)
             // in one cold call.
@@ -837,6 +845,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                     }
                 },
+                scpi::Out::Inr(scpi::Inr::Data(start, count)) => {
+                    port.respond_with(&mut |b| Some(app.inrush_data(start, count, b)));
+                    false
+                }
+                scpi::Out::Inr(c) => app.inrush_query(&mut clk, c, &mut scpi),
                 scpi::Out::Mmem(scpi::Mmem::Cat) => {
                     let mut err = None;
                     port.respond_with(&mut |b| csvlog::catalog_scpi(b).map_err(|e| err = Some(e)).ok());
@@ -1174,11 +1187,39 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 }
             }
         }
+        // The inrush capture (app_inrush_live.rs): the ring into the
+        // capture; its stream starts on the page's arm and stops when the
+        // capture is complete, cancelled or the page closed.
+        app.inrush_poll();
+        if let Some(r) = app.take_inrush_req() {
+            if logger.host_active() {
+                app.inrush_lost(&mut clk, "Stopped: data logger running");
+            } else {
+                let fresh = !logger.active();
+                if logger.active() {
+                    logger.stop();
+                }
+                if r == inrush::Req::Start {
+                    if fresh {
+                        app.dmm.start(&mut clk);
+                    }
+                    if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                        logger.start_wave(app.dmm.mode(), app.dmm.range(), inrush::RATE_HZ);
+                        app.inrush_live(logger.nominal_mhz());
+                    } else {
+                        app.inrush_lost(&mut clk, "Stopped: no AD2 row");
+                    }
+                } else {
+                    app.inrush_stopped(&mut clk);
+                }
+            }
+        }
         if logger.active() && (app.dmm.mode() != logger.mode() || app.dmm.range() != logger.range()) {
             let wave = logger.wave();
             logger.stop();
             if wave {
                 app.wave_lost(&mut clk, "Wave stopped: DMM changed");
+                app.inrush_lost(&mut clk, "Stopped: DMM changed");
             } else {
                 for s in scpis.iter_mut() {
                     s.set_err("Settings conflict");
@@ -1195,7 +1236,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         let busy = logger.active();
         // A disk session (fastlog.rs) freezes the GUI from its Prep to its
         // last FAT write; tap to stop (below).
-        let logging = logger.host_active() || fastlog::active();
+        // (Not the inrush save: no logger runs, the page stays live.)
+        let logging = logger.host_active() || (fastlog::active() && !app.inrush_saving());
         if logging_prev && !busy {
             app.dmm.start(&mut clk);
             app.meter.reset();
@@ -1416,6 +1458,7 @@ fn block_reply(o: &scpi::Out) -> bool {
         o,
         Out::Mmem(Mmem::Cat | Mmem::Data(..))
             | Out::Log(Log::Data)
+            | Out::Inr(scpi::Inr::Data(..))
             | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
             | Out::Dbg(Dbg::Ad2(0 | 1, ..))
     )
@@ -1482,13 +1525,22 @@ fn fast_next_hz(l: &logger::Logger, ad2: bool) -> u32 {
 fn fast_events(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger, ev: fastlog::Ev, fa: bool, was: bool, now: u64) -> (bool, bool) {
     let mut conflict = false;
     let mut go = false;
-    if ev == fastlog::Ev::Start {
+    if ev == fastlog::Ev::Start && app.inrush_saving() {
+        // The inrush save: the header, then the trace drains (no logger).
+        let mut txt = [0u8; 512];
+        let (n, par) = app.inrush_head(&mut txt);
+        fastlog::run(&fastlog::Head { par, unit: b"A", text: &txt[..n] });
+    } else if ev == fastlog::Ev::Start {
         go = fast_start(app, clk, logger);
         conflict = !go;
     }
     if was && !fa {
         if let Some(st) = fastlog::ended() {
-            app.fast_ended(now, st, fastlog::status().file);
+            if app.inrush_saving() {
+                app.inrush_saved(now, st, fastlog::status().file);
+            } else {
+                app.fast_ended(now, st, fastlog::status().file);
+            }
         }
         dialog::log_panel_reset();
         app.invalidate();
@@ -1526,6 +1578,10 @@ fn fast_start(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger) 
 fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, now: u64) {
     match r {
         app::FastReq::Stop => fastlog::request_stop(),
+        app::FastReq::Inrush => {
+            let ok = !logger.active() && fastlog::begin(app::App::inrush_save_bytes(), 0).is_ok();
+            app.inrush_save_begun(ok, now);
+        }
         app::FastReq::Start(dur) => {
             // The source follows the function (AD2 in the AC rows, AD1 in
             // DC V / mV / A); it stays the logger's LOG:SOURce afterwards.

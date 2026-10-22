@@ -62,6 +62,9 @@ mod stockfont;
 mod touch;
 #[path = "../../src/ui.rs"]
 mod ui;
+// The inrush page's trace geometry (ui_inrush.rs, a ui submodule).
+#[path = "../../src/inrush.rs"]
+mod inrush;
 
 /// Probe hooks called by the drawing code under cfg(test).
 pub mod probe {
@@ -1693,6 +1696,12 @@ fn main() {
                 if b != Button::Ohm {
                     ui::wave_button();
                 }
+                // The inrush page's entry (Current Settings, same builds;
+                // the note row's right column, so not with a note: the app
+                // draws a note on the Voltage page only).
+                if b == Button::Amp && note.is_none() {
+                    ui::inrush_button();
+                }
                 ck.check_opts(&format!("range/{}/{}/{sub}", n, note.map_or("-", |x| x.0)), &page_regions, false);
                 // The note itself (spacing 1) keeps the glyph rule: only it.
                 if let Some((t, warn)) = note {
@@ -2081,6 +2090,7 @@ fn main() {
         host::reset(0);
         ui::range_page(Button::Amp, Some(7), 1, None);
         ui::wave_button();
+        ui::inrush_button();
         save(&out, "m03b-range-a-wave");
         // Second ohm mode ("ON" low current): Resistor Settings with it
         // selected, the DMM page with the tag on the ohm button.
@@ -2238,6 +2248,67 @@ fn main() {
     for (msg, (n, scene)) in &ck.seen {
         println!("{n:6} x  {msg}   [first: {scene}]");
     }
+    // 6z. The Inrush Current page (src/ui_inrush.rs): armed (empty grid),
+    //     a captured DC inrush (lamp-like decay), an AC motor start, a
+    //     sample at the AD2 rail (OL) with the longest texts, the stopped /
+    //     idle lines; the live parts (state line, button, values, the
+    //     threshold) drawn over a page equal a fresh page with those texts.
+    {
+        use inrush::{LEN, PRE};
+        use ui::inr::{Vals, C_ARMED, C_OK, C_PLAIN, C_WARN};
+        let b = 125.0f32 / 262_144.0 * 8.0;
+        let mk = |f: &dyn Fn(usize) -> f32| -> Vec<u16> { (0..LEN).map(|k| inrush::code_of((f(k) / b * 8.0) as i32) as u16).collect() };
+        let dc = mk(&|k| if k < PRE { 0.05 } else { 0.8 + 11.0 * (-((k - PRE) as f32) / 900.0).exp() });
+        let ac = mk(&|k| {
+            let a = if k < PRE { 0.0 } else { 6.0 + 40.0 * (-((k - PRE) as f32) / 2000.0).exp() };
+            a * (2.0 * std::f32::consts::PI * 50.0 * k as f32 / 9600.0).sin()
+        });
+        let ol = mk(&|k| if k < PRE { 0.0 } else if k < PRE + 50 { -130.0 } else { -20.0 });
+        let v = |thr: &'static str, rms: &'static str, peak: &'static str, info: &'static str, fg: u16, idle: &'static str, file: &'static str, btn: (&'static str, u16, bool)| Vals {
+            thr,
+            rms,
+            peak,
+            info,
+            info_fg: fg,
+            idle,
+            file,
+            btn: btn.0,
+            btn_bg: btn.1,
+            enabled: btn.2,
+        };
+        let arm = ("Arm", ui::SEL, true);
+        let cancel = ("Cancel", 0xF800u16, true);
+        let saving = ("Saving ...", ui::BTN, false);
+        let cases: Vec<(&str, Vals, Option<&Vec<u16>>)> = vec![
+            ("i01-inrush-armed", v("+1.0 A", "", "", "Armed: 0.123 A now", C_ARMED, "", "", cancel), None),
+            ("i02-inrush-dc", v("+1.0 A", "7.912", "11.786", "Saved LOGS/FAST003.DLG", C_OK, "0.050", "FAST003", arm), Some(&dc)),
+            ("i03-inrush-ac", v("+0.20 A", "31.25", "-45.31", "Captured: saving ..., lost 12345", C_OK, "0.000", "", saving), Some(&ac)),
+            ("i04-inrush-ol", v("+10.0 A", "124.99", "OL", "Captured, not saved: disk error", C_WARN, "88.888", "FAST999", arm), Some(&ol)),
+            ("i05-inrush-lost", v("+0.50 A", "", "", "Stopped: data logger running", C_WARN, "", "", arm), None),
+            ("i06-inrush-idle", v("+2.0 A", "", "", "Press Arm, then switch the load on", C_PLAIN, "", "", arm), None),
+            ("i07-inrush-trig", v("+5.0 A", "", "", "Triggered: recording 2 s ...", ui::inr::C_TRIG, "", "", cancel), None),
+        ];
+        for (name, vals, t) in cases.iter() {
+            host::reset(0);
+            ui::inr::page(vals);
+            ui::inr::trace(t.map(|t| &t[..]), 0.0, b);
+            ck.check_opts(&format!("inrush/{name}"), &page_regions, false);
+            save(&out, name);
+            let want = emu().fb.clone();
+            // The same page reached through the live updates from another.
+            host::reset(0);
+            let (_, o, _) = &cases[(cases.iter().position(|c| c.0 == *name).unwrap() + 1) % cases.len()];
+            ui::inr::page(o);
+            ui::inr::trace(t.map(|t| &t[..]), 0.0, b);
+            ui::inr::thr(vals.thr);
+            ui::inr::values(vals.rms, vals.peak);
+            ui::inr::info(vals.info, vals.info_fg);
+            ui::inr::side(vals.idle, vals.file);
+            ui::inr::button(vals.btn, vals.btn_bg, vals.enabled);
+            ck.same_as(&format!("inrush-live/{name}"), &want);
+        }
+    }
+
     println!("cases {}, violations {}", ck.cases, ck.violations);
     std::process::exit(if ck.violations == 0 { 0 } else { 1 });
 }
