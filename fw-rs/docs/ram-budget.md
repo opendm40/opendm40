@@ -9,13 +9,16 @@ the stack) plus 192 KiB SRAM (.dmabuf, .sram_bss).
 
 ## Result of this round
 
-| | before (16f5b0f) | after |
+| | before (367b933) | after |
 |---|---|---|
-| SRAM free (above .sram_bss, link check >= 8 KiB) | 10 856 B | 60 656 B |
-| SRAM statics | 185 745 B | 135 941 B |
-| TCM stack / static worst path / headroom | 45 656 / 24 220 / 21 436 B | 45 648 / 24 212 / 21 436 B |
-| region B free (zero-wait flash) | 25 672 B | 26 328 B |
-| region C free (.cold, below 0x080A0000) | 10 112 B | 10 592 B |
+| SRAM free (above .sram_bss, link check >= 8 KiB) | 10 848 B | 60 648 B |
+| SRAM statics (`screenshot::CAP` 49 152, `screenshot::JOB` 1 088 -> 436) | | -49 804 B |
+| TCM stack / static worst path / headroom | 45 640 / 24 236 / 21 404 B | 45 632 / 24 236 / 21 396 B |
+| region B free (zero-wait flash) | 23 536 B | 24 248 B |
+| region C free (.cold, below 0x080A0000) | 7 984 B | 8 456 B |
+
+(The capture / RLE code left region C; `scratch()` is now inline, with its
+generation bump, in its ~60 callers.)
 
 What changed:
 
@@ -165,3 +168,49 @@ Sizes from `llvm-nm -S` of the native ELF (ad2-isr default build).
 Never live together, so worth an owner token if RAM gets tight again:
 logger::RING with the csvlog buffers (12 KiB, see above). Everything else
 over 4 KiB is either always live or live with the scope.
+
+## Tests (2026-10-22, on 34a5a6e rebased onto 367b933)
+
+- Host: every fw-rs/tools/*/run.sh passes (fatren-test includes the
+  screenshot writer on the stub screen: BMP = the stub pattern byte for
+  byte, the stock header, power cut / abort after every slice, shots
+  interleaved with csvlog commits; and the calbackup boot cases 6-9).
+  fft-test, gallery-test, ui-render (148 renders, 0 violations) pass.
+- emu/shottest.py (new): DMM with HOLD, the Settings menu, the combined
+  view with the scope STOPped. Each BMP equals the panel read over DBG:LCD?
+  before the gesture, 0 pixels different, for the new build and for the
+  old one (CAP path, 367b933). The menu BMP is byte-identical between the
+  two builds. The DMM and scope screens differ between the two runs
+  themselves (reading, trace phase), so for those only "BMP = own panel"
+  can be compared.
+- FFT in the arena (emulator, combined view, math FFT on): the spectrum
+  runs (DBG:PROF? s.fft), pauses during a shot and goes on after it and
+  after MMEM:CAT? bursts (each one a single-pass disk user that moves
+  `GEN`); the peak stays 992-993 Hz, -9.9 dBV.
+- calbackup boot (emulator, private disk copy): first boot DBG:BOOT?
+  `CALBK,SAFECOPY_WRITTEN,7,0,0`; after DBG:RESET `SAFECOPY_PRESENT,0,0,0`.
+- emu/hy3131/tests/run.sh (385 passed, 0 failed), inrushtest PASS,
+  fastlogtest --profiles typ PASS (no sample lost up to AD2 38400),
+  wavetest PASS, ad2streamtest PASS.
+- emu/shottest.py's first version read the combined view with the scope
+  running: the trace moved while the reference was read (80 DBG:LCD?
+  queries), 204 px differed, in the trace area only. The scope is STOPped
+  now; with that, both builds pass.
+
+Device checks still open (the emulator's ILI9488 models RAMRD from its
+datasheet; the read-back itself has been in use on the device since
+5fd7871 for DBG:LCD? and for the rows CAP could not hold):
+1. Shot of a static screen (a menu) and a busy one (AC+DC, a running
+   scope trace): the BMP opens, equals `dm40dbg.py shot` of the same
+   frozen screen; the screen stays frozen until the write ends (~4-5 s),
+   nothing draws or reacts to touch meanwhile, then the toast.
+2. Read-back colours: a colour test screen (the scope's colour picker) in
+   the BMP vs the panel: RGB666 -> 565, the dummy word.
+3. During a shot: SCPI READ? keeps answering, DBG:DIAG? loop max stays
+   about as before, the DMM keeps measuring (the screen just does not
+   update).
+4. A shot during a fast-log session: "Disk busy" at once, nothing written.
+5. FFT on the scope page while a CSV recording commits (60 s) and during a
+   shot: the spectrum pauses and comes back, no garbage spectrum.
+6. calbackup boot: DBG:BOOT? CALBK `SAFECOPY_PRESENT` (the copy is already
+   on this unit's disk), CALIB.BIN / BOOTDATA.BIN / UID.BIN unchanged.
