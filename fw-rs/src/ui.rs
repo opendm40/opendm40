@@ -827,7 +827,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
 /// display is hidden; V-JACK? (a silent hint) stays below HOLD.
 pub fn alert_alternates(hold: u8, alert: crate::sentinel::Alert) -> bool {
     use crate::sentinel::Alert;
-    hold != 0 && matches!(alert, Alert::AJack | Alert::Live | Alert::Overload)
+    hold != 0 && matches!(alert, Alert::AJack | Alert::AProt | Alert::Live | Alert::Overload)
 }
 
 /// The alternating slot shows the alert in this phase (`alt` true).

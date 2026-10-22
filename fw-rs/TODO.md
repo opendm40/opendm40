@@ -978,7 +978,7 @@ Firmware:
             and a CSV recording during a cp (staging waits / busy retries); Windows Explorer (System
             Volume Information, delete, copy) and macOS Finder (.fseventsd, .Trashes, ._ files): untested,
             expected per docs/native-boot.md "Host OS notes".
-- [ ] A-jack protection hybrid (owner 2026-10-22): non-current modes keep the stock resting shunt state (PE0 = PE1 = 0,
+- [x] A-jack protection hybrid (owner 2026-10-22): non-current modes keep the stock resting shunt state (PE0 = PE1 = 0,
       ~48 ohm A-COM: sensitive A-JACK from ~0.44 mA); when the sentinel measures a current that would overheat the
       47.5 ohm resistor (owner: package looks like 2512 / ~2506 -> assume 1 W, derate to 0.5 W continuous: > ~100 mA for
       > 0.5 s, or > ~300 mA (4.3 W) at once) switch to the 10 mohm shunt (PE0 = 1): a weak source then flows harmlessly,
@@ -987,6 +987,14 @@ Firmware:
       while latched (AD1/AD2 on PB2) to know when it is safe to return. >30 V on A-COM (mains) cannot be protected by
       switching (MOSFET breakdown first); document. Doc: power-meter-and-misconnect.md section 4 (update the old
       "do not auto-switch MOSFETs in V modes" note).
+      Done (doc §4.8): the probe (OP2 x1 on PB2 = the 10 mohm element, AD2 peak, 4 194 codes / A) enters the
+      DC V / mV / ohm / temperature row at the first comparator hit; >= 300 mA at once or >= 125 mA for 400 ms
+      from the first hit (~0.5 s from the onset; 125 mA keeps 5 V = 104 mA a warning) -> PE0 = 1, red A-PROT
+      (badge / toast / beep, SYST:ALER? APROT, QUES bit 9), latched until the user acted AND the probe read
+      < 50 mA for 1 s; a current function / the power meter ends it. Gaps: > 30 V (MOSFETs), Jack alerts OFF,
+      AC V / Hz / cont / diode / cap (no free pair). Emulator: PB2 node + AD2 probe; senttest aprot-* (12 V:
+      409 ms, 24 V: 105 ms, ohm / temp ~0.41 s, 5 V: A-JACK only).
+      (verify on device: the A-jack protection check list of doc §4.8)
 - [ ] Burden voltage in the A / mA / uA modes (as the EEVblog 121GW, owner 2026-10-22): show I * R_path of the
       shunt in use (10 A / mA / uA) in the aux row, so the user sees how much the meter drops in the circuit
       (uA range: 48 ohm, 0.19 V at 4 mA; mA: 0.24..0.6 V at 400 mA). Reuse the power meter's per-shunt R_path

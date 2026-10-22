@@ -796,6 +796,12 @@ impl Dmm {
     /// starts at 6 V), I from 10 A (the 10 mohm shunt: the least burden).
     pub fn pw_enter(&mut self, clk: &mut Clock) {
         self.ovl_clear(clk.now_ms());
+        // The A-jack protection latch ends: the meter measures through A
+        // on purpose now (its own ranging / OVERLOAD, doc 4.8).
+        if self.aprot.take().is_some() {
+            self.sent.set_aprot(clk.now_ms(), false);
+        }
+        self.probe = false;
         self.acdc = false;
         self.manual = false;
         let pw = &mut *self.pw;

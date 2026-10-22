@@ -1575,6 +1575,104 @@ the fuse check read 47.50 ohm.
 
 ---------------------------------------------------------------------------
 
+### 4.8 A-jack protection (fw-rs, 2026-10-22): the hybrid
+
+Owner decision (TODO "A-jack protection hybrid"): keep the resting state of
+4.1 in every non-current function (PE0 = PE1 = 0, ~48 ohm A-COM: the
+sensitive A-JACK from ~0.44 mA), but when a current through A would
+overheat the 47.5 ohm resistor, move the A jack to the 10 mohm shunt (PE0 =
+1): a weak source then flows harmlessly, a stiff one blows the 10 A fuse
+instead of burning the resistor. This replaces the "never switch the
+MOSFETs in V modes" rule of 4.3 / 4.6: that rule assumed the current could
+not be quantified there; the probe below does it.
+
+**What it costs the resistor** (owner: a ~2512 package, assume 1 W, derate
+to 0.5 W): I^2 x 47.5 ohm. 5 V across A-COM = 104 mA = 0.52 W, 12 V = 250 mA
+= 3 W, 24 V = 0.5 A = 12 W.
+
+**The probe** (`sentinel::probe_row`, `probe_amps`). PB1 (the resistor's
+top, what the comparator watches) is far outside any converter range at
+these currents (100 mA = 4.75 V). PB2 is the top of the 10 mohm element,
+which every A-jack current passes in every PE state (INFERRED from the
+shunt chain 10 mohm + 0.5 ohm + 47.5 ohm): I x 10 mohm, 0.25 A = 2.5 mV.
+OP2 (x1, unused in DC V / DC mV / ohm / temperature) on PB2, AD2 = OP2O -
+PB3, IG 2.0, OSR 256, the AD2 peak hold read every 100 ms: 4 194 codes per
+A, the larger of |PKHMAX| / |PKHMIN| (DC either sign; AC: the peak, >= the
+RMS, so conservative). The probe goes into the row at the first comparator
+hit window (one rewrite, AD1 last: note 7; the DC V reading skips ~120 ms)
+and leaves when the run of hits ended and nothing is latched. Normal
+measuring (no A-jack current) never has AD2 on: the stock DC V calibration
+conditions stay untouched.
+
+**The rule** (`sentinel::aprot_trips`): >= 300 mA (4.3 W) at the first
+probe window, or >= 125 mA for 400 ms counted from the first hit window
+(which lags the onset by <= one 100 ms window, so ~0.5 s from the onset).
+125 mA instead of the owner's ~100 mA (0.5 W): 5 V across A-COM (104 mA,
+0.52 W) is to stay a warning (A-JACK only, owner), and 125 mA = 0.74 W is
+still below the assumed 1 W rating; 12 V (250 mA) is well above it.
+
+**Action and latch** (`Dmm::aprot_poll`): PE0 = 1 at once (a GPIO write, no
+row rewrite), red **A-PROT** alert (badge "A-PROT", toast "A jack current:
+10 A shunt on", the A-JACK beep pattern, `SYST:ALER?` APROT, STAT:QUES bit
+9; above A-JACK, below OVERLOAD; not maskable). While latched every
+function keeps PE0 = 1 (`write_config`) and DC V (all ranges, also 60 V+
+which has no comparator) / DC mV / ohm / temperature keep the probe in the
+row, now measuring on the 10 mohm path. The latch ends when **both** the
+user acted (any function / range / AUTO choice: the `ovl_clear` hooks) and
+the probe read < 50 mA for 1 s (in either order); then the row is written
+again with the resting PE state. A current function (DC / AC A, AC+DC A)
+or the power meter ends it at once: their own shunt selection and the
+OVERLOAD rule take over. In a function without the probe (AC V / mV, Hz,
+continuity, diode, cap) the latch holds (the A jack stays on 10 mohm) until
+the user goes back to one with it or to a current function.
+
+**Limits (not protectable by switching).**
+* **> 30 V on A-COM** (mains, a battery pack): the MOSFETs are 30 V parts
+  (RUH30J51M, 3.6); the drain-source voltage of the off MOSFETs at rest is
+  the source voltage minus nothing, so they may break down before (or
+  while) PE0 switches. The fuse (10 A ceramic) is the only protection; the
+  firmware can only warn and switch as fast as it can.
+* **Jack alerts OFF** (or A-JACK masked) turns this off too: the comparator
+  hit is the probe's trigger.
+* **AC+DC** (its phases rewrite the row every cycle) carries no probe:
+  A-JACK only.
+* **AC V / mV, frequency, continuity, diode, capacitance** have no free
+  op amp / converter pair for the probe (AD1 peak on PB1 saturates at ~7 mA,
+  OP2 / AD2 are busy or the AD2 sentinel watches PB1): A-JACK only there.
+* The probe's numbers are INFERRED (PB2 node, OP2 x1 path); the model's
+  peak-hold noise is ~30 mA. Device check below.
+
+**Emulator** (both HY3131.cs copies): `Pb2Volts` = I x 10 mohm, AD2 on PB2
+when R32's OP2 nibble is 0xE (`Ad2OnPb2Probe`) in the DC V / mV / ohm /
+temperature roles; the role matcher frees AD2IG / R26 / R27 / OP2 there.
+senttest (A-PROT latency = DBG:SENT? field 11, ms from the first hit window):
+
+| scenario | result |
+|---|---|
+| aprot-dcv-5 (avsrc 5 V, DC V) | A-JACK only (never A-PROT) |
+| aprot-dcv-12 | A-PROT after 409 ms; the source removed: stays latched; CONF:RES (a user choice) -> released, NONE |
+| aprot-dcv-24 | A-PROT after 105 ms (the first probe window) |
+| aprot-ohm-12, aprot-temp-12 | A-PROT after 409 / 406 ms |
+| aprot-ack-early | the user acts while the source is still there: latched until 1 s after it went |
+| aprot-to-dca | CONF:CURR:DC ends the latch (DC A's own shunt / OVERLOAD) |
+
+After PE0 = 1 the model has no fuse to blow: a stiff `avsrc` drives
+V / 60 mohm (the probe clips at 62.5 A).
+
+#### Device check list (A-jack protection)
+
+Bench supply with current limit, leads V-COM open, the supply across A-COM:
+1. DC V, 5 V / 1 A limit: A-JACK (red, beeps), never A-PROT; `DBG:SENT?`
+   field 10 (probe mA) ~100.
+2. DC V, 12 V: A-PROT within ~0.5 s, the supply goes into its current limit
+   (10 mohm path); `DBG:SENT?` field 11 ~400 ms. Supply off: still A-PROT;
+   tap another function: released, A-JACK gone.
+3. The same in ohm and in temperature (thermocouple).
+4. DC V reading with nothing on A: unchanged vs the previous build (the
+   probe is not in the row); with the probe in (a small current in A),
+   compare the DC V offset of a known source (note 7).
+5. Do **not** test above 30 V across A-COM.
+
 ## 5. Open points for the owner
 
 1. The DM40 manual's A-input fuse rating(s), CAT rating and 10 A time limit

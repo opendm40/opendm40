@@ -2458,7 +2458,7 @@ impl App {
                     self.toast(now, a.toast(), false);
                 }
                 match a {
-                    Alert::AJack => self.alert_beep_t0 = Some(now),
+                    Alert::AJack | Alert::AProt => self.alert_beep_t0 = Some(now),
                     Alert::Live => self.beep(now, 100),
                     // OVERLOAD: one 300 ms beep (doc 4.4) at the key / alert
                     // volume also with the key beep off (a safety cue, as
@@ -2472,7 +2472,7 @@ impl App {
             }
         }
         // (The power meter's expired current limit keeps the same pattern.)
-        if a != Alert::AJack && !(self.dmm.pw.on && self.dmm.pw_state().over == 2) {
+        if !matches!(a, Alert::AJack | Alert::AProt) && !(self.dmm.pw.on && self.dmm.pw_state().over == 2) {
             self.alert_beep_t0 = None;
         }
     }
