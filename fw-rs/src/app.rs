@@ -3198,6 +3198,7 @@ impl App {
 
     /// The temperature page's state (sensor, offset, unit, NTC user
     /// parameters, info line) for drawing it or one of its keys.
+    #[inline(never)] // .cold (link-native.x): temperature page draw / taps
     fn with_temp_page(&self, f: impl FnOnce(&ui::TempPage)) {
         let k = self.dmm.t_sensor();
         let mut b = [0u8; 64];

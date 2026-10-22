@@ -40,6 +40,7 @@ ap.add_argument('--bt-port', type=int, default=4818, help='BT passthrough port (
 ap.add_argument('--dur', type=int, default=2, help='LOG:DURation per session, s (device time)')
 ap.add_argument('--profiles', default='typ,max')
 ap.add_argument('--sessions', default='ad1:640,ad2:4800,ad2:9600,ad2:19200,ad2:38400')
+ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (fw-rs region C audit)')
 ap.add_argument('--no-bt', action='store_true')
 A = ap.parse_args()
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
@@ -64,6 +65,8 @@ def run_emu(profile):
         f.write('0 monitor sysbus.spi2.spiflash Erase4kUs %d\n' % p[1])
         f.write('0 monitor sysbus.spi2.spiflash Erase32kUs %d\n' % p[2])
         f.write('0 monitor sysbus.spi2.spiflash Erase64kUs %d\n' % p[3])
+        if A.extra_script:
+            f.write(open(A.extra_script).read())
     cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--mips', '200', '--app', A.app,
            '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '5000', '--name', 'fastlog-%d' % A.port,
            '--dmm', 'vsrc:0.2,ac=0.5,f=50', '--script', script]

@@ -2368,6 +2368,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 6] = [
 /// the settings list (wider topic column: HELP_COL), the last row says
 /// what a tap does.
 pub const HELP_COL: i16 = 228;
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn help_page(page: usize) {
     let (topic, rows) = &HELP[page % HELP.len()];
     let mut t = [0u8; 40];

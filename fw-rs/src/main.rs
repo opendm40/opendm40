@@ -953,7 +953,13 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         scpi.put_bytes(if logger.host_active() || fastlog::active() { b"1" } else { b"0" });
                         true
                     }
-                    scpi::Log::Dest(_) | scpi::Log::Dur(_) | scpi::Log::Disk => {
+                    // LOG:DISK? is polled by a host during a disk session
+                    // (the AD2 ISR streaming): region B, not fast_scpi.
+                    scpi::Log::Disk => {
+                        fast_status(scpi);
+                        true
+                    }
+                    scpi::Log::Dest(_) | scpi::Log::Dur(_) => {
                         fast_scpi(scpi, l, &mut log_disk, &mut log_dur_s, logger.host_active())
                     }
                     scpi::Log::Source(Some(ad2)) => {
@@ -1566,7 +1572,9 @@ fn fast_scpi(scpi: &mut scpi::Scpi, l: scpi::Log, disk: &mut bool, dur: &mut u32
     }
 }
 
-/// LOG:DISK? reply: state,file,alloc,bytes,rows,prep_pct.
+/// LOG:DISK? reply: state,file,alloc,bytes,rows,prep_pct. Region B: a
+/// host polls it while the session runs (emu/fastlogtest.py).
+#[inline(never)]
 fn fast_status(scpi: &mut scpi::Scpi) {
     scpi.len = 0;
     let st = fastlog::status();

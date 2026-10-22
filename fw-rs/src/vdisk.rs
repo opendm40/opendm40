@@ -732,6 +732,7 @@ impl BlockDevice for VDisk {
         }
         true
     }
+    #[inline(never)] // .cold (link-native.x): host writes only, not inlined into run
     fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool {
         if state().is_none() || lba >= TOTAL || buf.len() < BS {
             return false;

@@ -525,12 +525,36 @@ the FFT / screenshot sharing below):
   screenshot module (`poll`, `busy`, `frozen`, `fft_work`, `fft_free`) are
   `inline(always)` so a pass without a shot never reaches region C.
 
+**Region B audit #2 (2026-10-22, after the fast logger)**: 9 304 / 16 568 B
+free (ad2-isr / without) -> 30 368 / 37 840 B, no change in function. A map
+of region B by inlined callee (addr2line -i over every address of `.text`
+below 0x08080000) showed ~20 KB of `.cold` modules' code inlined into hot
+callers, where the module patterns cannot reach it: `Gallery::poll` (with
+the DLG decoders) in `App::tick`, `Gallery::touch` / `open` / `back`,
+`VDisk::write_block` (host MSC writes) in `run`, `boot::put_info`
+(DBG:BOOT?) in `Scpi::handle`, `upload::end`, `ui::help_page` and the
+temperature page (`App::with_temp_page`) in `draw_static` / `gesture`,
+the scope's Save CSV (`App::sp_save_csv` with `scope_csv::set`) in
+`sp_gesture`, and `csvlog::delete_on` / `catalog_scpi_on` (patterns
+without the `_on`): now `#[inline(never)]` (and a pattern where the module
+is hot). `Dmm::poll_cap`'s two `sort_unstable_by` (5 and <= 35 values)
+instantiated the core quicksort (~3.3 KB): an insertion sort (same order).
+Stack and SRAM unchanged (headroom 22 328 B, SRAM free 11 872 B); region C
+(`.cold`) grew by 16.7 KB, 31 700 B are left below 0x080A0000. Emulator
+hooks on every function of C (from t = 3-6 s, per-second hit counts): DMM
+idle, swipe-down CSV recording, combined view, an AD2 stream at 38400 S/s
+(DMA frames, DRAW 1, ad2streamtest) and fast-logger disk sessions
+(fastlogtest typ): C ran only at a recording / session start or stop and
+for the DBG:HYSPI self-test after the stream, except LOG:DISK? (`fast_scpi`,
+`.cold` since 5d5dba0), which a host polls while a disk session streams:
+its reply (`fast_status`) is in region B again.
+
 **Link-time asserts** (`link-native.x`):
 - region A ends at or below `0x08008000`;
 - `.text` starts at or above `0x0800800C`;
 - the image ends at or below `0x080A0000`;
 - region B (`.text`, hot) fits below `0x08080000` and leaves >= 8 KiB free
-  (`build.sh` warns below 16 KiB);
+  (`build.sh` ends with a warning banner on stderr below 16 KiB);
 - TCM stack (64 KiB - .data/.bss) >= 42 KiB;
 - SRAM >= 8 KiB free above `.sram_bss`.
 

@@ -608,6 +608,7 @@ fn dec(s: &mut crate::scpi::Scpi, mut v: u32) {
 /// PD6,moder,pupd,idr (power key pin read live: MODER[13:12] 0 = input,
 /// PUPD[13:12] 2 = pull-down, IDR bit 6 1 = pressed), then
 /// native::put_extra: STAGED,n,CALBK,status,written,conflict,freed,STACK,used,size.
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn put_info(s: &mut crate::scpi::Scpi) {
     s.len = 0;
     let Some(i) = (unsafe { INFO }) else {

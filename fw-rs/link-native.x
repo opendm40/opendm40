@@ -101,12 +101,10 @@ SECTIONS
         *(.text.*7dm40_fw9fast_head*);
         *(.text.*7dm40_fw10fast_start*);
         *(.text.*7dm40_fw8fast_req*);
-        *(.text.*7dm40_fw11fast_status*);
         *(.text.*7dm40_fw12log_on_check*);
         *(.text.*7dm40_fw9fast_scpi*);
         *(.text.*7dm40_fw12fast_next_hz*);
         *(.text.*7dm40_fw7fastlog5begin*);
-        *(.text.*7dm40_fw7fastlog6status*);
         *(.text.*7dm40_fw7fastlog10plan_bytes*);
         *(.text.*7dm40_fw11fast_events*);
         *(.text.*7dm40_fw2ui11record_page*);
@@ -168,6 +166,15 @@ SECTIONS
         *(.text.*7dm40_fw10touch_diag*);
         *(.text.*7dm40_fw6csvlog6delete*);
         *(.text.*7dm40_fw6csvlog12catalog_scpi*);
+        /* ... their disk bodies (the `_on` variants and their closures). */
+        *(.text.*7dm40_fw6csvlog9delete_on*);
+        *(.text.*7dm40_fw6csvlog15catalog_scpi_on*);
+        /* Tap / page-only code that sat inlined in hot callers (region B
+         * audit 2026-10-22 #2): the temperature page's draw / key helper
+         * (App::with_temp_page, all its instances), the scope's Save CSV
+         * (App::sp_save_csv, with scope_csv::set and the DLG block plan). */
+        *(.text.*7dm40_fw3app*3App14with_temp_page*);
+        *(.text.*7dm40_fw3app*3App11sp_save_csv*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C
@@ -244,8 +251,13 @@ ASSERT(__image_end <= 0x080A0000, "image reaches the FS-loader at 0x080A0000");
  *   emulator 2026-10-21, + 16 KiB.)
  *   SRAM: >= 8 KiB free above .sram_bss (the last SRAM section) for DMA
  *   descriptors / buffers still to come.
- *   Region B: >= 8 KiB free below 0x08080000 (build.sh warns below 16 KiB;
- *   hot code / fonts only, rarely run code goes to .cold above). */
+ *   Region B: >= 8 KiB free below 0x08080000 (build.sh ends with a warning
+ *   banner below 16 KiB; hot code / fonts only, rarely run code goes to
+ *   .cold above). After the fast logger 9 304 / 16 568 B were left; the
+ *   region B audit #2 (2026-10-22: cold-module code that had been inlined
+ *   into hot callers, Gallery::poll into App::tick above all, and the
+ *   f32 quicksort of poll_cap) brought it to 30 368 / 37 840 B; region C
+ *   then has 31 700 / 31 764 B left below 0x080A0000 (was 48 364 / 48 428). */
 ASSERT(_stack_top - __bss_end >= 42K, "TCM stack below 42 KiB (worst path ~21.5 KiB + 20 KiB headroom): move CPU-only statics to .sram_bss");
 ASSERT(ORIGIN(SRAM) + LENGTH(SRAM) - __sram_bss_end >= 8K, "less than 8 KiB of SRAM free: overlay or shrink a buffer (docs/native-boot.md memory map)");
 ASSERT(0x08080000 - __etext >= 8K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");

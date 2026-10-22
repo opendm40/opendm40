@@ -57,6 +57,16 @@ Code work (in this order):
       (the budget run of b21756f: none in C). Region B: -3 KB for decision #6 + the audit (20.0 KB free on 090f845).
 - [ ] Device: DBG:PROF? / lat_pc while recording a CSV and with the USB volume mounted (Files live: a
       vdisk refresh per commit, ~60 s) to confirm no stall from region C.
+- [x] Region B audit #2 2026-10-22 (after the fast logger: 9.4 KB free): 30.4 KB free (ad2-isr; 37.8 KB
+      without), no change in function (docs/native-boot.md "Region B audit #2"). ~20 KB of `.cold` modules'
+      code was inlined into hot callers (Gallery::poll + DLG decoders in App::tick, VDisk::write_block in run,
+      boot::put_info in Scpi::handle, help / temperature pages, scope Save CSV, csvlog delete_on /
+      catalog_scpi_on) -> `#[inline(never)]` / patterns; poll_cap's f32 quicksort -> insertion sort. Region C
+      31.7 KB left. Hooks on every C function (per-second counts): idle, CSV recording, combined view, AD2
+      stream 38400 (DMA), fastlogtest typ: C only at a start / stop, but LOG:DISK? (polled during a disk session) ran
+      fast_scpi in C (5d5dba0) -> its reply fast_status in B. `Logger::drain` has one copy (no
+      duplicate to drop). build.sh: a banner at the end below 16 KiB. emu/hy3131/ad2streamtest.py and
+      emu/fastlogtest.py take `--extra-script FILE` (e.g. the hook lines).
 ## Remaining work
 
 - [x] `tools/dm40dbg.py` ported from CDC/pyserial to `/dev/usbtmc` + `DBG:` commands (a3427d4).

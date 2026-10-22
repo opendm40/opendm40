@@ -38,6 +38,7 @@ ap.add_argument('--app', required=True, help='fw-rs native ELF / image built wit
 ap.add_argument('--port', type=int, default=3378, help='USB/IP port (default 3378)')
 ap.add_argument('--secs', type=float, default=1.0, help='scale of the session lengths (wall clock)')
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
+ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (fw-rs region C audit)')
 ap.add_argument('--race-us', type=float, default=None, help='INTF read-clears-flag race window, us (model default 0.7)')
 ap.add_argument('--sessions', default='4800:2:20,9600:1:15,1200:2:10',
                 help='rate:draw:secs[:dma],... (secs scaled by --secs; dma = DBG:AD2:DMA 0 / 1 sent before the '
@@ -50,6 +51,8 @@ with open(SCRIPT, 'w') as f:
         f.write('%d monitor sysbus.hy3131 IntfPhaseHist\n' % (k * 3))
     if A.race_us is not None:
         f.write('0 monitor sysbus.hy3131 IntfRaceUs %g\n' % A.race_us)
+    if A.extra_script:
+        f.write(open(A.extra_script).read())
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402

@@ -1368,6 +1368,7 @@ impl Gallery {
 
     /// Enter the gallery: first page, catalog re-read. The app then calls
     /// `draw` (its full redraw) and `poll` every pass.
+    #[inline(never)] // .cold (link-native.x): not inlined into the hot caller
     pub fn open(&mut self) {
         *self = Gallery::new();
         self.need = N_LIST | N_PAGE;
@@ -1387,6 +1388,7 @@ impl Gallery {
     }
 
     /// MENU key: close the dialog / the viewer, or leave.
+    #[inline(never)] // .cold (link-native.x): not inlined into the hot caller
     pub fn back(&mut self) -> Out {
         match self.mode {
             Mode::Dialog if self.dlg != Dlg::Deleting => self.close_dialog(),
@@ -1398,6 +1400,7 @@ impl Gallery {
     }
 
     /// A gesture (taps and swipes; the rest is ignored).
+    #[inline(never)] // .cold (link-native.x): not inlined into the hot caller
     pub fn touch(&mut self, g: Gesture) -> Out {
         match (self.mode, g) {
             (Mode::Dialog, Gesture::Tap(p)) => match self.dlg {
@@ -1463,6 +1466,7 @@ impl Gallery {
 
     /// One bounded slice (main loop, every pass while the gallery is shown
     /// and drawing is allowed).
+    #[inline(never)] // .cold (link-native.x): only while the gallery is shown
     pub fn poll(&mut self) {
         self.poll_on(disk());
     }

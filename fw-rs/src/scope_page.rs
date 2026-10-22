@@ -808,6 +808,7 @@ impl App {
     /// MF Settings "Save CSV" (UF-13): the stored record of the stopped
     /// scope as SCOP%03u.CSV (scope_csv.rs, written by the screenshot job).
     /// Stock rule: refused while sampling ("Please stop sample").
+    #[inline(never)] // .cold (link-native.x): a tap (MF Settings Save CSV)
     pub(super) fn sp_save_csv(&mut self, now: u64) {
         let rec = self.scope.record();
         if self.scope.s.run || rec.is_empty() {
