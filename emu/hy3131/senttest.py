@@ -38,6 +38,11 @@ import usbip_client as uc  # noqa: E402
 # name: (SCPI function, run_for, [(t, spec, allowed alerts in this phase)]); a phase is checked
 # from its start + 2 s to the next start - 1.5 s (fw uptime lags the virtual time by ~0.5 s;
 # A-JACK clears 1 s after the last hit, V-JACK? needs 1 s + the settle).
+# The fw uptime lags the virtual time by ~1.7 s now (present on 1eb4d7e, not
+# bisected; the ovl-* scenarios saw the next phase's source inside a window):
+# the connection changes go into the script VLAG later, which restores the
+# ~0.5 s lag the windows were written for.
+VLAG = 1.2
 SC = {
     'dcv-adc':  ('VOLT:DC', 26, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0.001', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
     'dcv-neg':  ('VOLT:DC', 18, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:-0.001', {'AJACK'})]),
@@ -181,7 +186,7 @@ def run(name):
         for m in xtra.get('monitor', []):
             f.write('0 monitor %s\n' % m)
         for t, spec in script:
-            f.write('%g dmm %s\n' % (t, spec))
+            f.write('%g dmm %s\n' % (t + VLAG if t > 0 else t, spec))
     # USB/IP from 3 s: an attach before fw-rs enumerated can leave the server stuck
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', rtag,
