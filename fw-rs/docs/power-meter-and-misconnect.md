@@ -457,7 +457,7 @@ MEASure:POWer:APParent? | :PFACtor? | :ENERgy?
 ```
 
 CONFigure? answers `"POW <vrange>,<irange>"`. The BT cmd 06/09 protocol has no
-slot for a 16th mode; leave BT at the stock set (power only over SCPI/USBTMC and
+slot for a 16th mode (superseded by 3.13: the DC V byte with P); leave BT at the stock set (power only over SCPI/USBTMC and
 BT SCPI).
 
 ### 3.10 Implementation plan (idea 1)
@@ -1014,7 +1014,9 @@ glyph above the unit still shows DC / AC+DC). Persist v10: the slot's two
 values at p[62..64] (`persist::W_LIM_W`), its bits next to the others' in
 p[18] / p[19]. Energy limits (Wh) are not offered: the energy only grows
 in a session, so a "limit" there is a one-shot budget alarm rather than a
-pass / fail band; worth a separate setting if the owner wants it.
+pass / fail band; worth a separate setting if the owner wants it. A
+channel over range counts as OL for the limits (HI with an upper limit)
+also while the readout shows Wh / VAh.
 
 **Phase calibration on a resistive load: stays refused.** With PF = 1, P /
 S = cos(phi) and the residual phase to find is phi ~ 0, where the slope of
@@ -1070,7 +1072,9 @@ arms LLVM folded its ~10 KB into main.rs `run`), SRAM free 12.9 KB.
 1. Phone app (stock DM40 app) in the power meter: the main value shows P
    with a "V" unit (sign for a source, mW as mV); value 2 / 3 empty; the
    app does not leave the power meter by itself (if it does: it sends a
-   cmd 06 other than 0x28 - capture the byte). HOLD freezes it.
+   cmd 06 other than the reported byte - capture it; also try with a manual
+   V range on the meter first: the byte is then 0x08..0x20, and an app that
+   re-sends an older 0x28 would leave the power meter). HOLD freezes it.
 2. MF > Power Settings > Limits: Upper 100 W with a ~200 W load (or 1 W
    with a small one): HI badge (in place of "AUTO" with AUTO coupling),
    the fail beep once, `CALC:LIM:FAIL?` 1; the load below: OK / 0; the

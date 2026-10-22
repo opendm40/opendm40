@@ -133,7 +133,9 @@ impl Limit {
         if !self.on || (self.lo.is_none() && self.hi.is_none()) {
             return V_NONE;
         }
-        if r.main.ol {
+        // Power: a channel over range is OL for the limits also while the
+        // readout shows the energy (never OL itself; si 0 then).
+        if r.main.ol || r.power.is_some_and(|p| p.v_ol || p.i_ol) {
             return if self.hi.is_some() { V_HI } else { V_PASS };
         }
         let v = r.si;
@@ -1230,6 +1232,12 @@ mod tests {
         let u = m.update(&r, 1000);
         assert!(u.fail_edge);
         assert_eq!(m.verdict(), V_HI);
+        // A channel over range with the energy shown: OL (HI with an upper
+        // limit) although the readout itself is not.
+        r.power = Some(crate::dmm::pw::PowerVals { i_ol: true, ..pv });
+        r.si = 0.0;
+        assert_eq!(band.check(&r), V_HI);
+        assert_eq!(lo.check(&r), V_PASS);
         // AC A keeps its own slot.
         assert_eq!(lim_slot(4), 3);
     }
