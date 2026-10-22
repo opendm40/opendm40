@@ -35,6 +35,12 @@ pub const TOAST: (u16, u16, u16, u16) = (40, 132, 400, 56);
 pub const CONFIRM_MS: u64 = 3000;
 /// Toast duration, ms.
 pub const TOAST_MS: u64 = 1500;
+/// Auto-cancel of the energy reset confirm, ms. It was 10 s: on the device
+/// (5f14d38) a Yes that came ~13 s after the long press (a screenshot read in
+/// between) landed on the bare power page and reset nothing; a question
+/// that answers itself while it is being read is worse than one that stays
+/// (the wiring dialog / the firmware question: 60 s).
+pub const ENERGY_MS: u64 = 60_000;
 /// Scope AUTO-set fell back from AC to DC coupling (UF-04, app.rs autoset).
 pub const AUTO_DC: &str = "AUTO: DC (no AC signal)";
 
