@@ -382,7 +382,12 @@ ASSERT(0x080A0000 - __image_end >= 4K, "less than 4 KiB of region C (.cold + .da
  *   f32 quicksort of poll_cap) brought it to 30 368 / 37 840 B; region C
  *   then has 31 700 / 31 764 B left below 0x080A0000 (was 48 364 / 48 428).
  *   Audit #3 (on c58ae48: 11 928 / 20 672 B): 26 160 / 32 808 B; region
- *   C 10 256 / 12 352 B left (docs/native-boot.md "Region B audit #3"). */
+ *   C 10 256 / 12 352 B left (docs/native-boot.md "Region B audit #3").
+ *   Region A2 (2026-10-22, on e5dd09b: B 26 136 / 33 320, C 10 120 /
+ *   12 240 B): ASCII26 + F14 blobs in A2 (2 652 B left; the link fails at
+ *   the marker, build.sh warns below 2 KiB), App::tap / key / show and
+ *   vdisk::describe back in B: B 30 572 / 37 836, C 17 840 / 19 880 B
+ *   (docs/native-boot.md "Region A2"). */
 ASSERT(_stack_top - __bss_end >= 42K, "TCM stack below 42 KiB (worst path ~21.5 KiB + 20 KiB headroom): move CPU-only statics to .sram_bss");
 ASSERT(ORIGIN(SRAM) + LENGTH(SRAM) - __sram_bss_end >= 8K, "less than 8 KiB of SRAM free: overlay or shrink a buffer (docs/native-boot.md memory map)");
 ASSERT(0x08080000 - __etext >= 8K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");

@@ -938,6 +938,15 @@ Firmware:
       CSV generators of the volume -> B. Fonts stay in B (anonymous rodata read per draw while streaming; the
       emulator has no wait-state model to measure it). Region C now has 10.3 KB left (was 25.3 KB): the next
       reclaim needs room there.
+      Region A2 2026-10-22 (docs/native-boot.md "Region A2"): the zero-wait flash after the shim, below the
+      loader marker (0x0800460c..0x08008000, 14.8 KB, in the update body) holds the ASCII26 + F14 font blobs
+      (tools/mkstockfont.py A2_FONTS, `.rodata.a2.*`; 2.65 KB left, build.sh warns below 2 KiB, the link fails
+      at the marker); App::tap / key / show and vdisk::describe back from C to B. B 26.1 -> 30.6 KB free
+      (33.3 -> 37.8 without ad2-isr), C 10.1 -> 17.8 KB (12.2 -> 19.9).
+- [ ] Device check of region A2: install with reload.sh (the marker valid after the install, FIRMWARE.BIN on
+      the volume = the installed file), then the logger panel / DMM view / Wave view text (ASCII26 / F14 from
+      A2) drawn correctly and DBG:ISR? max_lat at AD2 38400 with the logger panel no worse than before; taps on
+      the inrush page while armed (App::tap now in B).
 - [ ] Device check of audit #3: DBG:PROF? lat_pc / DBG:ISR? max_lat at AD2 38400 to disk with the volume
       mounted and read; Wave view: STOP + Save CSV and a screenshot (max_lat, overruns 0, the trace and the
       stream back after), a host copying SCOPnnn.CSV / LOGnnn.CSV during the Wave view; taps on the inrush
