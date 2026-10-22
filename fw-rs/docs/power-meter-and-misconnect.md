@@ -746,7 +746,9 @@ settle: the AC-coupled node starts from the power row's OP1O level, the
 emulator showed +0.46 % with 0.6 s) vs V_ac. gain = mean(ref / raw) of the
 two rounds, stored per range (persisted). Refusals (`POW:VOLT:CAL?` =
 `<result>,<range V>,<gain in force>,SELF|FACT`): SMALL (< 10 % of the range),
-BIG (> 70 % AC: the 6 V tap clips at +0.7 V; > 100 % DC), UNSTABLE (the two
+BIG (> 70 % AC: the 6 V tap clips at +0.7 V; > 100 % DC; or, either kind,
+|DC| + sqrt(2) x AC RMS above the range: the peak clipped, device f3aea2f
+calibrated a 0..9.6 V square on 6 V by its DC part), UNSTABLE (the two
 rounds' ratios or raw levels differ > 0.3 %), RANGE (gain outside 0.9..1.1),
 METHOD (the VA-only fallback), ABORT (a range / function change).
 `POW:VOLT:CAL DEF` returns the range to the factory-derived gain,
@@ -1551,10 +1553,11 @@ comparison):
 |---|---|---|---|
 | AC+DC V / A | the plain DC and AC phases' own sentinels (comparator PB1 / SENSE in the DC phase, AD1 peak in the AC phase); the DC phase's R20 goes through `acdc_src` because `freq_secondary` rewrites it every 350 ms (the counter then counts that node; AC+DC shows no frequency). The history belongs to the function and the sentinel family (A-JACK: comparator + AD1 / AD2 peak; V-JACK?: comparator + AD1 peak), so a phase switch keeps an alert; the comparator is also read during the phase settles | as the plain modes | as the plain modes; V-JACK?'s "no current" = < 5 % of the range (the total carries the AC floor) |
 | AC A (4..6), V-JACK? | AD1 (off in the row) on SENSE - PB5 with the /1000 tap (SS5 only, as DC A), IG 3.6, OSR 256 unchopped, peak hold; OP1's chopper held off (AD1 on starts it: the 9dd1222 AC V floor) | R22 00, R23 \|= ENAD1, R24 07, R25 \|= 30, R29 PKH AD1, R2C \|= 10, R33 OP1CHOP 00 | 1 510 codes = 2 V on V/ohm; "no current" = < 5 % of the range (the uA path's RMS floor is ~1.5 % of 600 uA, acdc doc 6b) |
-| frequency (14) | AD1 runs a zero reading (PB5 - PB5) nobody reads: it takes PB1 - PB3 with the AC rows' peak settings; harvested in `poll` every 100 ms (6 bytes R0E..R13), hold restarted | R22 00, R24 95, R25 \|= 30, R29 PKH AD1 | 17 900 (0.5 mA), as AC V |
+| frequency (14) | **none since the f3aea2f check** (was: AD1's zero reading PB5 - PB5 moved to PB1 - PB3 with the AC rows' peak settings). The frequency row leaves its input divider open (R2C / R2D 0) and PB1 - PB3 stands at +41 100 codes (~54 mV) with 0..2 V or nothing on V-COM, ~3 100 at 5 V, -850 at 10 V: a false A-JACK, and no fixed threshold or offset tells a current from it | stock row | - |
 | continuity (11), diode (12), cap r0..4 (13, RC oscillator) | AD2 + OP2 (unused there): OP2 x1 (OPS2 0) on PB1, AD2 = OP2O - PB3, refs PB6 / AGND, IG 2.0, OSR 256, peak hold on AD2 (PKHSEL 00); continuity / diode have AD1 on: the row goes out with AD1 off and ENAD1 last (note 7: AD2 never starts while AD1 converts) | R25 AD2IG 11 + OPS2 0, R26 83, R27 6D, R29 ENPKH, R32 D0 \| OP1 | 9 900 codes = 0.5 mA |
 
-Gaps (no fake coverage): capacitance r5..7 (the ramp: both op amps on PB0,
+Gaps (no fake coverage): frequency (the row's PB1 level follows the input,
+above), capacitance r5..7 (the ramp: both op amps on PB0,
 AD1 and the comparator busy; asserted by the `cap-ramp-gap` scenario), DC
 V 60 / 600 / 1000 V (the 9dd1222 false trip, 4.6) and therefore AC+DC V
 above 6 V in both phases (an AC-phase-only A-JACK would be wiped by every
@@ -1688,12 +1691,19 @@ PB3, IG 2.0, OSR 256, the AD2 peak hold read every 100 ms: 4 194 codes per
 A, the larger of |PKHMAX| / |PKHMIN| (DC either sign; AC: the peak, >= the
 RMS, so conservative). The probe goes into the row at the first comparator
 hit window (one rewrite, AD1 last: note 7; the DC V reading skips ~120 ms)
-and leaves when the run of hits ended and nothing is latched. Normal
+and leaves when the run of hits ended and nothing is latched. After every
+row write with the probe in (its entry, a range / function change while it
+stays) the peak hold is cleared `PROBE_SETTLE_MS` (30 ms) later and the
+first window counts from there: AD2 restarts with the row and its first
+results are not the input (device f3aea2f: A-PROT latched with the A jack
+open on the first window, the probe read 15 mA afterwards). Normal
 measuring (no A-jack current) never has AD2 on: the stock DC V calibration
 conditions stay untouched.
 
-**The rule** (`sentinel::aprot_trips`): >= 300 mA (4.3 W) at the first
-probe window, or >= 125 mA for 400 ms counted from the first hit window
+**The rule** (`sentinel::aprot_trips`), only while the comparator run is
+still going (a real current through the 47.5 ohm chain is far above its
+window): >= 300 mA (4.3 W) at the first probe window (~130 ms after the
+first hit window), or >= 125 mA for 400 ms counted from the first hit window
 (which lags the onset by <= one 100 ms window, so ~0.5 s from the onset).
 125 mA instead of the owner's ~100 mA (0.5 W): 5 V across A-COM (104 mA,
 0.52 W) is to stay a warning (A-JACK only, owner), and 125 mA = 0.74 W is
@@ -1738,8 +1748,9 @@ senttest (A-PROT latency = DBG:SENT? field 11, ms from the first hit window):
 | scenario | result |
 |---|---|
 | aprot-dcv-5 (avsrc 5 V, DC V) | A-JACK only (never A-PROT) |
-| aprot-dcv-12 | A-PROT after 409 ms; the source removed: stays latched; CONF:RES (a user choice) -> released, NONE |
-| aprot-dcv-24 | A-PROT after 105 ms (the first probe window) |
+| aprot-dcv-12 | A-PROT after 409 ms (454 ms with the settle); the source removed: stays latched; CONF:RES (a user choice) -> released, NONE |
+| aprot-dcv-24 | A-PROT after 154 ms (the first probe window after the 30 ms settle; 105 ms before it) |
+| aprot-glitch | the model's AD2 start-up off by 3000 codes (0.72 A, `Ad2StartGlitch`), 1 V across A-COM (21 mA): A-JACK only (a60f8ce: A-PROT) |
 | aprot-ohm-12, aprot-temp-12 | A-PROT after 409 / 406 ms |
 | aprot-ack-early | the user acts while the source is still there: latched until 1 s after it went |
 | aprot-to-dca | CONF:CURR:DC ends the latch (DC A's own shunt / OVERLOAD) |
