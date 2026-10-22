@@ -110,7 +110,9 @@ SECTIONS
         *(.text.*7dm40_fw5vdisk*);
         *(.text.*7dm40_fw6upload*);
         *(.text.*7dm40_fw5hyspi*);
-        *(.text.*7dm40_fw6ad2exp*);
+        /* ad2exp (DBG:AD2:TORN? / NOISE? / DCV?) and main.rs dbg_dcv: in
+         * region B since region C audit #1 (relocated, 3.8 KB, while B had
+         * ~80 KB free; on-demand DBG replies, zero-wait is no cost). */
         *(.text.*7dm40_fw9scope_csv*);
         *(.text.*7dm40_fw4boot*);
         *(.text.*7dm40_fw3app9app_press*);
@@ -177,7 +179,6 @@ SECTIONS
         *(.rodata.*7dm40_fw5vdisk*);
         *(.rodata.*7dm40_fw6upload*);
         *(.rodata.*7dm40_fw5hyspi*);
-        *(.rodata.*7dm40_fw6ad2exp*);
         *(.rodata.*7dm40_fw9scope_csv*);
         *(.rodata.*7dm40_fw4boot*);
         *(.rodata.*7dm40_fw3app9app_press*);
@@ -209,10 +210,9 @@ SECTIONS
         *(.text.*7dm40_fw2ui10range_page*);
         /* Debug / file replies, `#[inline(never)]` so they do not land in
          * main.rs `run` (hot): DBG:PROF?, DBG:TOUCH?, DBG:DIAG?, MMEM:CAT?,
-         * MMEM:DEL (and the modules above: DBG:HYSPI, DBG:AD2:TORN / NOISE,
-         * DBG:UPLOAD, MMEM:DATA?, DBG:GENUINE?). */
+         * MMEM:DEL (and the modules above: DBG:HYSPI, DBG:UPLOAD,
+         * MMEM:DATA?, DBG:GENUINE?). */
         *(.text.*7dm40_fw4prof6report*);
-        *(.text.*7dm40_fw7dbg_dcv*);
         *(.text.*7dm40_fw9log_scale*);
         *(.text.*7dm40_fw4scpi7dcv_arg*);
         *(.text.*7dm40_fw4scpi6n7_arg*);
