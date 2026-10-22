@@ -810,7 +810,11 @@ Firmware:
       silent). emu/hy3131/btwaketest.py: 3bae462 fails 1g / 1h / a chip POR, the fix passes. The device 1h
       (no READ?, the rail toggling, the page switch's 10 ms pause) is not fully explained by the model: the
       counters on the device re-check discriminate (wakes per link cycle; lost / silent).
-      (verify on device: the §1 repro, 1g and 1h; SYST:RAIL:STATe? counters)
+      Device 036cc55 (device-check-2026-10-21.md "DMM rail wake and fast logger"): 1g / 1h PASS, wakes +1 per
+      link (the rail follows PC14), lost / silent 0 everywhere incl. 35 s idle in Hz / temp / ohm / power /
+      diode / cap. AC V: the first reading after a wake was +8 % -> ea29bc4: 2 s settle after a wake in the AC
+      functions, and leaving the Wave view no longer drops the DMM rail (wavetest "DMM resumed" regression).
+      (verify on device: ea29bc4, AC V wake READ?; Wave view in AC V, MENU, READ?)
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
       decided: see docs/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
       revisit with decision #3's request queue)
@@ -844,6 +848,10 @@ Firmware:
          dm40scpi.py --bt log --source ad1 --osr 0 --chop off for 60 s, LOG:COUNt? overwritten 0 (the
          870/s ceiling: 640/s should hold), then OSR 0 chop on (320/s).
       7. Prep time on the real chip for LOG:DUR 60 at 38400 (~7 MB): erase time vs the emulator's model.
+      Device 036cc55 (device-check-2026-10-21.md "DMM rail wake and fast logger"): (1) AD1 640/s: 1 122 of
+      ~38 400 lost (1.8 %, g2 gaps, max 4.7 ms) - FAIL, to investigate; CSV on the volume == the tool's.
+      (2) AD2 4800 / 19200: 0 lost; 38400: 1 lost; max_lat 1.6-12 us (not ~0.24). Host stop mid-run: clean
+      (done, decodes to the last row). 3-7 not run.
 - [x] (A) DMM-input "slow floating scope" via AD2 = the Wave view (E5/E6; docs/dmm-input-scope-feasibility.md 10,
       src/app_wave.rs; feature `ad2-isr` only, hidden without it): MF range page "Wave" (V / A) and the scope page's
       "MCX | DMM" source badge; the AD2 stream drained into the scope record (continuous, 10-bit codes), the stock
