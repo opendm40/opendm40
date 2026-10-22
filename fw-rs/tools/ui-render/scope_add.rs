@@ -165,5 +165,110 @@ pub fn run(ck: &mut Checker, out: &str) {
     stock::draw(&sc);
     ck.check_replica("runt-marker");
     save(out, "s03-runt-marker");
-    println!("scope additions: {n} FFT scenes, {nt} trigger-tab scenes");
+    // The DMM wave view (src/app_wave.rs): the source badge "MCX | DMM"
+    // (both states), the shortened record bar beside it (running, stopped
+    // with its brackets, roll), the DMM V/div texts (widest: "500V",
+    // "200uA", "200mV", "5A"), the CH1 label ("AC uA"), the current cells
+    // ("Ip-p" / "Irms"), the trigger badge in A; updates between them and
+    // to / from the stock page equal fresh draws.
+    let mut nw = 0;
+    let wave_scene = |src: u8, k: usize, status: u8, roll: bool, tabs: u8| {
+        let mut m = base.m;
+        m.src = src;
+        m.status = status;
+        m.roll = roll;
+        m.tabs = tabs;
+        m.record = if status == scope_ui::ST_STOP { (0.15, 0.85) } else { (0.0, 1.0) };
+        let cells: Vec<&'static str> = if src == scope_ui::SRC_DMM {
+            let (vd, amps, ch1, tv) = [(500.0f32, false, "AC V", -999.0f32), (200e-6, true, "AC uA", -1.23e-3), (0.2, false, "AC mV", 0.444), (5.0, true, "AC A", 9.99)][k % 4];
+            m.wvdiv = vd;
+            m.amps = amps;
+            m.ch1_txt = ch1;
+            m.ac = !amps && ch1 == "AC V";
+            m.trig_v = tv;
+            if amps {
+                vec!["Freq:50.0Hz", "Ip-p:999.9mA", "Cycl:20.0ms", "Irms:-12.3uA"]
+            } else {
+                vec!["Freq:50.0Hz", "Vp-p:999.9mV", "Cycl:20.0ms", "Vrms:-12.3uV"]
+            }
+        } else {
+            base.cells.clone()
+        };
+        stock::Scene { name: "wave", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells }
+    };
+    let top = Bx::new(0, 0, 480, 20);
+    for src in [scope_ui::SRC_MCX, scope_ui::SRC_DMM] {
+        for k in 0..4 {
+            for (status, roll) in [(scope_ui::ST_TD, false), (scope_ui::ST_STOP, false), (scope_ui::ST_RUN, true)] {
+                let sc = wave_scene(src, k, status, roll, 3);
+                stock::draw(&sc);
+                let name = format!("wave/{src}/{k}/{status}/{}", roll as u8);
+                ck.check_replica(&name);
+                // The badge (a new item: the full rules, the badge row's
+                // vertical inset as the stock badges, y 1..17) against the
+                // timebase badge and the shortened record bar (the stock
+                // widget, its insides exempt as the replica's).
+                ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+                nw += 1;
+                if src == scope_ui::SRC_DMM && status == scope_ui::ST_TD && k < 2 {
+                    save(out, &format!("s05-wave-{}", ["v", "ua"][k]));
+                }
+                if src == scope_ui::SRC_DMM && status == scope_ui::ST_STOP && k == 2 {
+                    save(out, "s05-wave-stopped");
+                }
+                if src == scope_ui::SRC_DMM && roll && k == 3 {
+                    save(out, "s05-wave-roll-a");
+                }
+                if src == scope_ui::SRC_MCX && status == scope_ui::ST_TD && k == 0 {
+                    save(out, "s05-mcx-badge");
+                }
+            }
+        }
+    }
+    // The texts the wave view changes are no wider than what the stock
+    // page already shows in the same box (cells: "Vp-p:" vs "Ip-p:", "mV"
+    // vs "mA"; the V/div badge text box 44 px; the CH1 label in 60 px; the
+    // trigger badge: the widest MCX level text, e.g. "-1.23kV").
+    let wmax = |f: stockfont::Font, ts: &[&str]| ts.iter().map(|t| stockfont::text_width(f, t, 0)).max().unwrap_or(0);
+    let pairs: [(&str, stockfont::Font, &[&str], &[&str]); 4] = [
+        ("cells", stockfont::SC_F12, &["Ip-p:999.9mA", "Irms:-12.3mA", "Imax:-999.9mA", "Iavg:-12.3uA", "Ivpp:999kA"], &["Vp-p:999.9mV", "Vrms:-12.3mV", "Vmax:-999.9mV", "Vavg:-12.3uV"]),
+        ("vdiv", stockfont::SC_F12, &["500V", "200uA", "200mA", "200mV", "20mV", "5A", "2mA"], &["10kV", "500mV"]),
+        ("trig", stockfont::SC_F12, &["-1.23mA", "-999uA", "-99.9A", "-12.3kV"], &["-1.23kV", "-12.3kV", "-999mV"]),
+        ("ch1", stockfont::SC_F16, &["AC V", "AC mV", "AC A", "AC mA", "AC uA"], &[]),
+    ];
+    for (what, f, wave_t, stock_t) in pairs {
+        ck.cases += 1;
+        let (ww, sw) = (wmax(f, wave_t), wmax(f, stock_t));
+        let lim = match what {
+            "vdiv" => 44 - 2,
+            "ch1" => 60 - 6,
+            _ => sw,
+        };
+        if ww > lim {
+            ck.fail("wave/text", format!("{what}: wave texts {ww} px > {lim} (stock {sw})"));
+        }
+    }
+    let states = [
+        stock::Scene { name: "wave", m: base.m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() },
+        wave_scene(scope_ui::SRC_MCX, 0, scope_ui::ST_TD, false, 3),
+        wave_scene(scope_ui::SRC_DMM, 0, scope_ui::ST_TD, false, 3),
+        wave_scene(scope_ui::SRC_DMM, 1, scope_ui::ST_STOP, false, 0),
+        wave_scene(scope_ui::SRC_DMM, 3, scope_ui::ST_RUN, true, 3),
+    ];
+    for (i, a) in states.iter().enumerate() {
+        for (j, b) in states.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            stock::draw(b);
+            let want = emu().fb.clone();
+            stock::draw(a);
+            stock::load(b);
+            scope_ui::update(&b.m);
+            scope_ui::cells(&b.m, &b.cells);
+            ck.same_as(&format!("wave/update/{i}->{j}"), &want);
+            nw += 1;
+        }
+    }
+    println!("scope additions: {n} FFT scenes, {nt} trigger-tab scenes, {nw} wave-view scenes");
 }

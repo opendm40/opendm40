@@ -2889,6 +2889,68 @@ pub fn format(buf: &mut [u8; 16], v: f32, dec: u8) -> &str {
     core::str::from_utf8(&buf[..o]).unwrap_or("")
 }
 
+/// Scale of one raw AD2 code in a stock AC row, for the DMM wave view
+/// (scope page, source DMM; docs/dmm-input-scope-feasibility.md 3.3): the
+/// DMM's own LPF formula of `poll_ac` (the DC mean of the AD2 stream) with
+/// its calibration gain / offset, so the trace and the DMM agree.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Ad2Scale {
+    /// SI (V or A) of raw code c: c * per_code - offset.
+    pub per_code: f32,
+    pub offset: f32,
+    /// 0 V, 1 A.
+    pub amps: bool,
+    /// AC-coupled (AC V: PB4 through the coupling capacitor); else DC.
+    pub ac: bool,
+    /// Full scale of the DMM range (DM40C labels), SI: 6 V, 600 mV, 10 A, ...
+    pub full: f32,
+    /// Index in the MF range list (`ui::range_items`) of this range.
+    pub item: u8,
+}
+
+/// `Ad2Scale` of stock AC mode `m` (0 AC V, 2 AC mV, 4..6 AC A / mA / uA)
+/// at range `r`; None for every other mode.
+pub fn ad2_scale_of(m: u8, r: i8) -> Option<Ad2Scale> {
+    let ri = r.max(0) as usize;
+    let (s, ci, g, o, si, amps, full, item) = match m {
+        0 => {
+            let r = ri.min(3);
+            (K_ACV[r] * 1.25 / 262_144.0, r, 0x64, 0x74, 1.0, false, [6.0, 60.0, 600.0, 1000.0][r], r as u8 + 1)
+        }
+        2 => {
+            let r = ri.min(1);
+            (1.25 / MV_DIV[r] / 262.144, r, 0x84, 0x8C, 1e-3, false, [0.06, 0.6][r], 0)
+        }
+        4..=6 => {
+            let u = (m - 4) as usize;
+            let r = ri.min(1);
+            let full = [[6.0, 10.0], [0.06, 0.6], [600e-6, 6000e-6]][u][r];
+            (1.25 / (SHUNT[u] * MV_DIV[r]) / 262_144.0, u * 2 + r, 0xF4, 0x10C, [1.0, 1e-3, 1e-6][u], true, full, ((2 - u) * 2 + r) as u8)
+        }
+        _ => return None,
+    };
+    let ci = ci as u32;
+    Some(Ad2Scale {
+        per_code: s * cal(g + 4 * ci, 1.0) * si,
+        offset: cal(o + 4 * ci, 0.0) * si,
+        amps,
+        ac: m == 0,
+        full,
+        item,
+    })
+}
+
+impl Dmm {
+    /// `ad2_scale_of` the configured mode / range (None: not a stock AC
+    /// row, or AC+DC / the power meter, whose rows alternate).
+    pub fn ad2_scale(&self) -> Option<Ad2Scale> {
+        if self.acdc || self.pw.on {
+            return None;
+        }
+        ad2_scale_of(self.mode, self.range)
+    }
+}
+
 // Host tests: tools/meter-test/run.sh (pure logic only; no register access).
 #[cfg(test)]
 mod tests {

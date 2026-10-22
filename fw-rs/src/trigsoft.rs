@@ -16,6 +16,7 @@
 //!  * roll mode has no trigger (as the edge trigger).
 
 /// Trigger types (Settings::ttype).
+#[allow(dead_code)] // the match default; the stream ISR's StreamCfg::OFF
 pub const EDGE: u8 = 0;
 pub const PULSE: u8 = 1;
 pub const RUNT: u8 = 2;
@@ -154,4 +155,176 @@ pub fn width_step(w: f32, up: bool) -> f32 {
         dec *= 10.0;
     }
     if up { W_MAX } else { prev }
+}
+
+/// Per-sample trigger configuration of the streaming detector (`Stream`):
+/// integers only (it runs in the AD2 stream ISR, which uses no float).
+/// `l` / `l2`: levels in the same 10-bit codes as the record; `wlo..=whi`:
+/// the accepted pulse widths in samples (`pulse_window`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct StreamCfg {
+    pub ttype: u8,
+    pub rising: bool,
+    pub l: i32,
+    pub l2: i32,
+    pub wlo: u32,
+    pub whi: u32,
+}
+
+#[cfg_attr(not(feature = "ad2-isr"), allow(dead_code))] // the stream ISR's
+impl StreamCfg {
+    pub const OFF: StreamCfg = StreamCfg { ttype: EDGE, rising: true, l: i32::MIN, l2: 0, wlo: 0, whi: 0 };
+}
+
+/// Accepted widths (samples, inclusive) of `cond` against `w` samples,
+/// the integer equivalent of `pulse`'s float rule on whole-sample widths:
+/// GT width > w, LT width < w, EQ |width - w| <= max(5 % of w, 1).
+pub fn pulse_window(cond: u8, w: f32) -> (u32, u32) {
+    let w = if w.is_finite() { w.clamp(0.0, 4.0e9) } else { 0.0 };
+    let fl = |x: f32| if x <= 0.0 { 0 } else { x as u32 };
+    let ce = |x: f32| {
+        let f = fl(x);
+        if (f as f32) < x { f + 1 } else { f }
+    };
+    match cond {
+        GT => (fl(w) + 1, u32::MAX),
+        LT => {
+            let c = ce(w);
+            if c == 0 { (1, 0) } else { (0, c - 1) }
+        }
+        _ => {
+            let tol = (w * 0.05).max(1.0);
+            (ce(w - tol), fl(w + tol))
+        }
+    }
+}
+
+/// The edge / pulse / runt rules of `find_trigger` (scope.rs), `pulse` and
+/// `runt`, one sample at a time, for a continuous stream (the DMM wave
+/// view: the AD2 stream ISR runs it on every sample, src/logger.rs `isr`).
+/// `step` returns true when sample `i` completes an event (an edge, a
+/// pulse's trailing edge, a runt's return); the state then re-arms as the
+/// slice functions do after a rejected candidate, so the next event needs
+/// the arming condition again (an edge: the far side of the hysteresis
+/// band). A few compares per sample; no loop, no float.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(not(feature = "ad2-isr"), allow(dead_code))] // the stream ISR's
+pub struct Stream {
+    armed: bool,
+    inside: bool,
+    deep: bool,
+    reached: bool,
+    start: u32,
+}
+
+#[cfg_attr(not(feature = "ad2-isr"), allow(dead_code))]
+impl Stream {
+    pub const NEW: Stream = Stream { armed: false, inside: false, deep: false, reached: false, start: 0 };
+
+    #[inline(always)]
+    pub fn step(&mut self, c: &StreamCfg, i: u32, v: i32) -> bool {
+        let l = c.l;
+        match c.ttype {
+            PULSE => {
+                let (pre, past, back) = if c.rising { (v < l - HYS, v > l, v < l) } else { (v > l + HYS, v < l, v > l) };
+                let deep_now = if c.rising { v > l + HYS } else { v < l - HYS };
+                if !self.inside {
+                    if pre {
+                        self.armed = true;
+                    } else if self.armed && past {
+                        self.inside = true;
+                        self.deep = deep_now;
+                        self.start = i;
+                    }
+                    false
+                } else {
+                    self.deep |= deep_now;
+                    if self.deep && back {
+                        let w = i.wrapping_sub(self.start);
+                        self.inside = false;
+                        self.armed = pre;
+                        w >= c.wlo && w <= c.whi
+                    } else {
+                        false
+                    }
+                }
+            }
+            RUNT => {
+                let (a, b) = (l.min(c.l2), l.max(c.l2));
+                if b - a <= 2 * HYS {
+                    return false;
+                }
+                if c.rising {
+                    if !self.inside {
+                        if v < a - HYS {
+                            self.armed = true;
+                        } else if self.armed && v > a {
+                            self.inside = true;
+                            self.reached = v > b;
+                            self.deep = v > a + HYS;
+                        }
+                        false
+                    } else {
+                        self.reached |= v > b;
+                        self.deep |= v > a + HYS;
+                        if self.deep && v < a {
+                            self.inside = false;
+                            self.armed = v < a - HYS;
+                            !self.reached
+                        } else {
+                            false
+                        }
+                    }
+                } else if !self.inside {
+                    if v > b + HYS {
+                        self.armed = true;
+                    } else if self.armed && v < b {
+                        self.inside = true;
+                        self.reached = v < a;
+                        self.deep = v < b - HYS;
+                    }
+                    false
+                } else {
+                    self.reached |= v < a;
+                    self.deep |= v < b - HYS;
+                    if self.deep && v > b {
+                        self.inside = false;
+                        self.armed = v > b + HYS;
+                        !self.reached
+                    } else {
+                        false
+                    }
+                }
+            }
+            _ => {
+                let hit = if c.rising {
+                    if v < l - HYS {
+                        self.armed = true;
+                        false
+                    } else {
+                        self.armed && v > l
+                    }
+                } else if v > l + HYS {
+                    self.armed = true;
+                    false
+                } else {
+                    self.armed && v < l
+                };
+                if hit {
+                    self.armed = false;
+                }
+                hit
+            }
+        }
+    }
+}
+
+/// AD2 code (19-bit signed, src/hy3131.rs) -> the 10-bit offset-binary code
+/// of a scope record (the DMM wave view): the full AD2 window (+-1.25 V /
+/// IG at the AD2 input) over 0..1023, 2^18 / 512 = 512 AD2 codes per step.
+/// The stream ISR's trigger and the record use the same code.
+#[inline(always)]
+pub const fn ad2_code10(v: i32) -> i32 {
+    let c = (v >> 9) + 512;
+    if c < 0 { 0 } else if c > 1023 { 1023 } else { c }
 }

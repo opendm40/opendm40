@@ -26,6 +26,10 @@ mod scope_page;
 /// Power meter: entry dialog, page taps, settings, SCPI (dmm::pw).
 #[path = "app_power.rs"]
 mod app_power;
+/// The DMM wave view (scope page, source DMM: the AD2 stream).
+#[path = "app_wave.rs"]
+mod app_wave;
+pub use app_wave::WaveReq;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
 /// Offered stock options: dim 5/10/30 min/never, shutdown 10/30/60 min/never.
@@ -182,6 +186,10 @@ pub struct App {
     roll: bool,
     /// Stock-replica scope page state (scope_page.rs), incl. AUTO-set.
     sp: scope_page::Sp,
+    /// The wave view's next stream request for main.rs (app_wave.rs), and
+    /// the DMM autorange to restore on exit (v_auto / a_auto code).
+    wave_req: Option<WaveReq>,
+    wave_auto: Option<u8>,
     pub locked: bool,
     /// PD6 click timer (stock DMM key widget timer +0x48, 500 ms one-shot):
     /// a second release before it expires toggles the lock; on expiry the
@@ -405,6 +413,8 @@ impl App {
             meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
             roll: true,
             sp: scope_page::Sp::new(),
+            wave_req: None,
+            wave_auto: None,
             locked: false,
             pd6_click: None,
             hist: [(0.0, 0, ""); 5],
@@ -484,6 +494,10 @@ impl App {
         if v != self.view {
             self.band_until = 0;
             self.sp_leave(clk.now_ms());
+            if self.view == View::Scope && self.scope.wave_on() {
+                // Leaving the wave view: MCX again, the DMM resumes.
+                self.wave_close(clk);
+            }
             if matches!(v, View::Scope | View::DmmScope) {
                 self.sp_enter(clk.now_ms());
             }
@@ -516,6 +530,8 @@ impl App {
             View::DmmScope => (true, true),
             // The limits keypad is a DMM page: keep the rails as they are.
             View::Keypad if self.kp_dmm() => (self.scope.dmm_rail(), self.scope.powered()),
+            // The wave view: the DMM side only (the MCX acquisition is idle).
+            View::Scope if self.scope.wave_on() => (true, false),
             View::Scope | View::Gen | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
@@ -591,6 +607,9 @@ impl App {
                 });
                 let sub = if b == Button::Ohm { self.dmm.ohm_var() } else { self.dmm.sub() };
                 ui::range_page(b, sel, sub, note);
+                if app_wave::WAVE_BUILD && matches!(b, Button::Volt | Button::Amp) {
+                    ui::wave_button();
+                }
             }
             View::Settings if self.set_page == 1 => {
                 // FR-05: rate setting and the measured readings/s.
@@ -1331,7 +1350,7 @@ impl App {
         let dx = (self.cur.x[1] as f32 - self.cur.x[0] as f32) * t_px;
         self.meas_res.v[7] = if self.cur.x_on { dx.abs() } else { f32::NAN };
         self.meas_res.v[8] = if self.cur.x_on && dx.abs() > 0.0 { 1.0 / dx.abs() } else { f32::NAN };
-        let dy = -(self.cur.y[1] - self.cur.y[0]) as f32 * 4.0 * scope::VDIV[sc.range] * sc.probe / 141.0;
+        let dy = -(self.cur.y[1] - self.cur.y[0]) as f32 * 4.0 * self.scope.vdiv() / 141.0;
         self.meas_res.v[17] = if self.cur.y_on { dy } else { f32::NAN };
     }
 
@@ -1467,7 +1486,8 @@ impl App {
     /// Settings -> backup SRAM words.
     fn persist_words(&self) -> [u32; crate::persist::WORDS] {
         let g = &self.gen.s;
-        let sc = &self.scope.s;
+        // The MCX settings (the wave view's are not persisted).
+        let sc = &self.scope.mcx_settings();
         let mut p = [0u32; crate::persist::WORDS];
         p[0] = self.dim_idx as u32
             | (self.off_idx as u32) << 4
@@ -1790,7 +1810,7 @@ impl App {
         }
         let t0 = cyc();
         crate::prof::enter(crate::prof::ACQ);
-        let polled = self.scope.poll(now);
+        let polled = if self.scope.wave_on() { self.wave_poll(now) } else { self.scope.poll(now) };
         crate::prof::exit(crate::prof::ACQ);
         self.prof[0] = self.prof[0].max(cyc().wrapping_sub(t0) / 200);
         if let Some(f) = polled {
@@ -2517,6 +2537,10 @@ impl App {
             }
             View::Range => {
                 let b = self.dmm.button();
+                if app_wave::WAVE_BUILD && matches!(b, Button::Volt | Button::Amp) && ui::wave_hit(x, y) {
+                    self.wave_open(clk);
+                    return;
+                }
                 match ui::range_hit(b, x, y) {
                     Some(Ok(i)) => {
                         let item = ui::range_items(b)[i].1;
@@ -3320,6 +3344,13 @@ impl App {
         let mut sc = self.scope.s;
         let scope_cmd =
             !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenOffs(_) | C::GenDuty(_) | C::GenOut(_) | C::DiagDac | C::DiagPwm);
+        if self.scope.wave_on() && matches!(cmd, C::ChScale(Some(_)) | C::ChCoup(Some(_)) | C::DbgHwTrig(..)) {
+            // MCX-only settings (front-end range, coupling, comparator):
+            // leave the wave view. Timebase, trigger, RUN / STOP and the
+            // queries (:MEAS?, :WAV:DATA?) act on the wave view.
+            self.wave_close(clk);
+            sc = self.scope.s;
+        }
         if scope_cmd && !self.scope.powered() {
             self.host_scope = true;
             self.update_rails(clk);
@@ -3401,7 +3432,7 @@ impl App {
                 None
             }
             C::ChScale(None) => {
-                out.put_f32(scope::VDIV[sc.range] * sc.probe);
+                out.put_f32(self.scope.vdiv());
                 Some(())
             }
             C::ChCoup(Some(ac)) => {
@@ -3414,7 +3445,7 @@ impl App {
             }
             C::TrigLevel(Some(v)) => {
                 // Volts at the probe tip, as TRIG:LEV? answers (probe applied).
-                let r = scope::VDIV[sc.range] * sc.probe;
+                let r = self.scope.vdiv();
                 sc.trig_row = (140.0 + sc.pos as f32 - v * 141.0 / (4.0 * r)) as i32;
                 None
             }

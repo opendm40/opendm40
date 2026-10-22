@@ -200,6 +200,16 @@ measured: the tick runs at 4 x the AD2 rate with a 7/8-period read gate instead 
 the "debug assertion" is a runtime guard in every build that stops the stream before any
 main-loop bus frame (a function change while logging legitimately reaches the bus; 9.1).
 
+**Amendment (2026-10-22, coordinator-directed: the Wave view's trigger).** The Wave view
+(feasibility 10, TODO (A); behind the same feature) runs its trigger detector in the ISR,
+per sample (edge / pulse width / runt, integers only, a few compares: no dead time between
+frames). Invariant 4's shared state grows by: the trigger configuration words (written by the
+main loop, generation word last with Release; the ISR copies them on a new generation) and
+an 8-slot event ring plus a "first event after index N" pair (written by the ISR, Release on
+the count / generation). Still one writer per word, no lock, nothing else; the ISR still
+writes no register and touches no other module. The HY3131 comparator was evaluated and not
+used (fixed ladder thresholds, no timestamp, owned by the frequency mode / sentinel; 10.2).
+
 **Revisit.** A second ISR, or sharing the bus while streaming, needs a new decision with its
 own shared-state analysis; "it would be convenient" is not a reason. If the exclusive hand-off
 turns out to hurt (users want the DMM digits live under the waveform), the request queue (B)

@@ -262,12 +262,18 @@ fn main() -> ! {
         msc.poll(&mut [&mut disk]);
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
+        let was_wave = logger.wave();
         if logger.poll() {
             // The AD2 stream ISR lost the bus to a main-loop access (hy3131
             // `guard`; a function change is caught by the auto-stop below
-            // first): the session ended; say so like the auto-stop.
-            for s in scpis.iter_mut() {
-                s.set_err("Settings conflict");
+            // first): the session ended; say so like the auto-stop (the
+            // wave view: it closes with a note).
+            if was_wave {
+                app.wave_lost(&mut clk, "Wave stopped: DMM changed");
+            } else {
+                for s in scpis.iter_mut() {
+                    s.set_err("Settings conflict");
+                }
             }
         }
         bt.pump(); // BT TX DMA: next segment of a long reply
@@ -748,7 +754,10 @@ fn main() -> ! {
                         }
                     },
                     scpi::Log::State(Some(on)) => {
-                        if on {
+                        if on && logger.wave() && logger.active() {
+                            // The DMM wave view owns the AD2 stream.
+                            scpi.set_err("Settings conflict");
+                        } else if on {
                             // AD1 needs a DC mode (1 DCV, 3 DCmV, 7/8/9 DCA),
                             // AD2 a stock AC row (0 ACV, 2 ACmV, 4/5/6 ACA);
                             // never AC+DC (16/17, alternating rows), ohm, cap,
@@ -763,20 +772,20 @@ fn main() -> ! {
                             } else {
                                 scpi.set_err("Settings conflict");
                             }
-                        } else {
+                        } else if !logger.wave() {
                             logger.stop();
                         }
                         false
                     }
                     scpi::Log::State(None) => {
                         scpi.len = 0;
-                        scpi.put_bytes(if logger.active() { b"1" } else { b"0" });
+                        scpi.put_bytes(if logger.host_active() { b"1" } else { b"0" });
                         true
                     }
                     scpi::Log::Source(Some(ad2)) => {
                         // The source also selects what poll() reads: not
                         // switched under a running session.
-                        if logger.active() && ad2 != logger.ad2() {
+                        if logger.host_active() && ad2 != logger.ad2() {
                             scpi.set_err("Settings conflict");
                         } else {
                             logger.set_ad2(ad2);
@@ -908,18 +917,58 @@ fn main() -> ! {
         // and R22 behind the logger's back. Detect that and auto-stop so the
         // host sees STATe?=0 + a SYST:ERR? rather than silently corrupted
         // samples (FR-38 forbids silent loss). Captured data stays readable.
+        // The DMM wave view (scope page, source DMM): its stream starts,
+        // restarts (a timebase in another rate band, a range step: the row
+        // is rewritten between stop and start, so the bus guard never
+        // fires for it) and stops here, where the logger lives.
+        if let Some(r) = app.take_wave_req() {
+            if logger.host_active() {
+                app.wave_lost(&mut clk, "Data logger running");
+            } else {
+                // A fresh entry (no stream yet): the full row first, as
+                // LOG:STATe ON does (the DMM rail may just have come up, the
+                // sentinel may have AD1 / the peak hold running).
+                let fresh = !logger.active();
+                if logger.active() {
+                    logger.stop();
+                }
+                if fresh && r == app::WaveReq::Start {
+                    app.dmm.start(&mut clk);
+                }
+                if let app::WaveReq::Range(item) = r {
+                    app.dmm.set_range(&mut clk, Some(item));
+                }
+                if r != app::WaveReq::Stop {
+                    if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                        logger.start_wave(app.dmm.mode(), app.dmm.range(), app.scope.wave_fs());
+                        app.wave_live();
+                    } else {
+                        app.wave_lost(&mut clk, "Wave: no AD2 row here");
+                    }
+                }
+            }
+        }
         if logger.active() && (app.dmm.mode() != logger.mode() || app.dmm.range() != logger.range()) {
+            let wave = logger.wave();
             logger.stop();
-            for s in scpis.iter_mut() {
-                s.set_err("Settings conflict");
+            if wave {
+                app.wave_lost(&mut clk, "Wave stopped: DMM changed");
+            } else {
+                for s in scpis.iter_mut() {
+                    s.set_err("Settings conflict");
+                }
             }
         }
 
         // While logging, the HY3131 belongs to the logger and the GUI is frozen
         // (FR-38: minimal on-screen change, constant sample interval). On the
         // ON->OFF edge, hand the chip back to the DMM with a clean reconfigure.
-        let logging = logger.active();
-        if logging_prev && !logging {
+        // `busy`: the logger owns the HY3131 (a host session or the wave
+        // view: no DMM poll, no BT serve); `logging`: a host session, which
+        // also freezes the GUI (the wave view is a live scope page).
+        let busy = logger.active();
+        let logging = logger.host_active();
+        if logging_prev && !busy {
             app.dmm.start(&mut clk);
             app.meter.reset();
             app.last_raw = None;
@@ -927,7 +976,7 @@ fn main() -> ! {
             dialog::log_panel_reset();
             app.invalidate();
         }
-        logging_prev = logging;
+        logging_prev = busy;
 
         // No drawing until USB has enumerated (or 3 s passed): a long first
         // draw must not starve the enumeration; nor right after a GRAM
@@ -1061,7 +1110,7 @@ fn main() -> ! {
             next_poll = now + 5;
             prof::enter(prof::BT);
             // The BT module AT init blocks; not while the logger samples.
-            if app.bt_on && !logging {
+            if app.bt_on && !busy {
                 bt.init_module(&mut clk, app.dmm.model());
             }
             if let Some(f) = bt.poll() {
@@ -1070,7 +1119,7 @@ fn main() -> ! {
                 }
                 // Don't let a BT mode-byte (cmd 06) reconfigure the HY3131 while
                 // the logger owns it; the auto-stop guard above is the backstop.
-                if app.bt_on && !logging {
+                if app.bt_on && !busy {
                     let raw = app.last_raw;
                     if bt.serve(&f, &mut clk, &mut app.dmm, &mut app.meter, raw.as_ref(), &app.power, app.locked) {
                         // Phone app changed the function (cmd 06): the same
@@ -1082,7 +1131,7 @@ fn main() -> ! {
             prof::exit(prof::BT);
             mark(4, &mut ts);
             prof::enter(prof::DMM);
-            if !logging {
+            if !busy {
                 if let Some(raw) = app.dmm.poll(&mut clk) {
                     if let Some(r) = app.reading(raw, can_draw) {
                         for src in [USB, BT] {

@@ -63,6 +63,53 @@ fn main() {
     t("step down 1us -> 500ns", (width_step(1e-6, false) - 5e-7).abs() < 1e-13);
     t("step clamps", width_step(10.0, true) == W_MAX && (width_step(20e-9, false) - W_MIN).abs() < 1e-15);
     t("step from off-grid 3us up -> 5us", (width_step(3e-6, true) - 5e-6).abs() < 1e-12);
+    // Streaming detector (Stream, the DMM wave view's ISR trigger): the
+    // first event at or after lo equals the slice functions'.
+    let first = |d: &[u16], c: StreamCfg, lo: usize| -> Option<usize> {
+        let mut st = Stream::NEW;
+        for (i, &v) in d.iter().enumerate() {
+            if st.step(&c, i as u32, v as i32) && i >= lo {
+                return Some(i);
+            }
+        }
+        None
+    };
+    let pc = |cond: u8, w: f32, rising: bool| {
+        let (wlo, whi) = pulse_window(cond, w);
+        StreamCfg { ttype: PULSE, rising, l: 500, l2: 0, wlo, whi }
+    };
+    for (cond, w) in [(GT, 40.0f32), (GT, 60.0), (LT, 20.0), (EQ, 50.0), (EQ, 49.0), (GT, 50.0), (LT, 50.0), (LT, 10.5), (EQ, 10.0)] {
+        for lo in [0usize, 120, 360, 900] {
+            t(&format!("stream pulse {cond} {w} lo {lo}"), first(&d, pc(cond, w, true), lo) == pulse(&d, lo, 1000, 500, true, cond, w));
+        }
+    }
+    t("stream pulse no leading edge", first(&s, pc(GT, 30.0, true), 0) == Some(240));
+    let rc = |l: i32, l2: i32, rising: bool| StreamCfg { ttype: RUNT, rising, l, l2, wlo: 0, whi: 0 };
+    for lo in [0usize, 200, 460, 800] {
+        t(&format!("stream runt + lo {lo}"), first(&r, rc(300, 700, true), lo) == runt(&r, lo, 1200, 300, 700, true));
+        t(&format!("stream runt - lo {lo}"), first(&rn, rc(300, 700, false), lo) == runt(&rn, lo, 1200, 300, 700, false));
+    }
+    t("stream runt reaches upper", first(&r, rc(300, 480, true), 0).is_none());
+    t("stream runt too close", first(&r, rc(300, 303, true), 0).is_none());
+    // Edge: armed beyond the +-2 band, then across the level; re-arms
+    // after each hit (one event per crossing, not one per sample above).
+    let sq = rec(1000, 200, &[(100, 50, 800), (300, 50, 800)]);
+    let ec = |rising: bool| StreamCfg { ttype: EDGE, rising, l: 500, l2: 0, wlo: 0, whi: 0 };
+    let hits = |c: StreamCfg| {
+        let mut st = Stream::NEW;
+        (0..sq.len()).filter(|&i| st.step(&c, i as u32, sq[i] as i32)).collect::<Vec<_>>()
+    };
+    t("stream edge rising: one hit per edge", hits(ec(true)) == vec![100, 300]);
+    t("stream edge falling", hits(ec(false)) == vec![150, 350]);
+    let mut st = Stream::NEW;
+    let noisy: Vec<u16> = (0..200).map(|i| if i < 50 { 400 } else { 500 + (i % 2) as u16 * 3 }).collect();
+    let n = (0..noisy.len()).filter(|&i| st.step(&ec(true), i as u32, noisy[i] as i32)).count();
+    t("stream edge: noise inside the band does not re-trigger", n == 1);
+    t("pulse window GT 40 -> 41..", pulse_window(GT, 40.0) == (41, u32::MAX));
+    t("pulse window LT 20 -> ..19", pulse_window(LT, 20.0) == (0, 19));
+    t("pulse window LT 0.5 -> ..0", pulse_window(LT, 0.5) == (0, 0));
+    t("pulse window EQ 50 -> 48..52", pulse_window(EQ, 50.0) == (48, 52));
+    t("pulse window EQ 10 -> 9..11", pulse_window(EQ, 10.0) == (9, 11));
     let (n, bad) = unsafe { (N, BAD) };
     println!("cases {n}, failures {bad}");
     std::process::exit(if bad == 0 { 0 } else { 1 });

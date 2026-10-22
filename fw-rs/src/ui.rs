@@ -962,6 +962,22 @@ fn ok_and_limits_buttons() {
     }
 }
 
+/// "Wave" on the V / A range pages (the DMM wave view, app_wave.rs; builds
+/// with the AD2 stream ISR only): between Hold/Limits and OK, in the
+/// stock DC / AC / AC+DC column grid (x 162, the AC button's column).
+pub const WAVE_BTN: sf::Rect = rect(162, 240, 150, 38);
+
+pub fn wave_button() {
+    sf::rbox(WAVE_BTN, 6, 0x2966, BG);
+    sf::glyphs(sf::TEXT22, WAVE_BTN, "Wave", STATUS_FG, 0x2966, 8, 0);
+}
+
+/// The Wave button was hit (the gaps to its neighbours split as theirs).
+pub fn wave_hit(x: u16, y: u16) -> bool {
+    let (x, y) = (x as i16, y as i16);
+    (240..278).contains(&y) && (160..316).contains(&x)
+}
+
 /// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
 pub const OHM_VARS: [&str; 2] = ["Normal", "Low current ON"];
 

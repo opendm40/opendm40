@@ -1564,6 +1564,10 @@ fn main() {
                 host::reset(0);
                 let n = ui::range_items(b).len();
                 ui::range_page(b, Some(n - 1), sub, note);
+                // The wave view's entry (builds with the AD2 stream ISR).
+                if b != Button::Ohm {
+                    ui::wave_button();
+                }
                 ck.check_opts(&format!("range/{}/{}/{sub}", n, note.map_or("-", |x| x.0)), &page_regions, false);
                 // The note itself (spacing 1) keeps the glyph rule: only it.
                 if let Some((t, warn)) = note {
@@ -1834,6 +1838,10 @@ fn main() {
         host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));
         save(&out, "m03-range-v-warn");
+        host::reset(0);
+        ui::range_page(Button::Amp, Some(7), 1, None);
+        ui::wave_button();
+        save(&out, "m03b-range-a-wave");
         // Second ohm mode ("ON" low current): Resistor Settings with it
         // selected, the DMM page with the tag on the ohm button.
         host::reset(0);

@@ -85,6 +85,8 @@
 
 use crate::hy3131 as hy;
 use crate::mmio::r32;
+#[cfg_attr(not(feature = "ad2-isr"), allow(unused_imports))]
+use crate::trigsoft::{Stream, StreamCfg};
 use core::cell::UnsafeCell;
 use core::sync::atomic::{
     AtomicU32,
@@ -164,7 +166,21 @@ pub struct Ring {
     timeouts: AtomicU32,
     max_isr_cyc: AtomicU32,
     max_lat: AtomicU32,
+    // The DMM wave view's trigger (`wave`, the stream ISR's `trig`): the
+    // configuration words (main loop; `trg_gen` last, Release), the event
+    // ring (ISR: `trg_ev` slots, then `trg_ev_n`, Release) and the first
+    // event at or after the configured minimum index (ISR).
+    trg_gen: AtomicU32,
+    trg_w: [AtomicU32; 6],
+    trg_ev: [AtomicU32; TRG_EV],
+    trg_ev_n: AtomicU32,
+    trg_first_at: AtomicU32,
+    trg_first_gen: AtomicU32,
 }
+
+/// Trigger events the ISR keeps (the newest TRG_EV - 1 are safe to read
+/// while it runs, `wave::events`).
+const TRG_EV: usize = 8;
 
 // SAFETY: the slots are written only by the producer at `head` and read
 // only by the consumer below `head` (Acquire); every other field is atomic.
@@ -193,6 +209,12 @@ impl Ring {
             timeouts: Z,
             max_isr_cyc: Z,
             max_lat: Z,
+            trg_gen: Z,
+            trg_w: [Z; 6],
+            trg_ev: [Z; TRG_EV],
+            trg_ev_n: Z,
+            trg_first_at: Z,
+            trg_first_gen: Z,
         }
     }
 
@@ -201,7 +223,7 @@ impl Ring {
         for a in [
             &self.head, &self.tail, &self.captured, &self.dropped, &self.missed, &self.bad, &self.max_gap_us,
             &self.span_lo, &self.span_hi, &self.ticks, &self.empty, &self.gated, &self.overruns, &self.timeouts,
-            &self.max_isr_cyc, &self.max_lat,
+            &self.max_isr_cyc, &self.max_lat, &self.trg_gen, &self.trg_ev_n, &self.trg_first_at, &self.trg_first_gen,
         ] {
             a.store(0, Relaxed);
         }
@@ -225,17 +247,18 @@ impl Ring {
     }
 
     /// Producer: append, or drop the sample when full (newest dropped, so
-    /// the consumer's `tail` is never written here).
-    fn push(&self, ts_us: u32, raw: i32) {
+    /// the consumer's `tail` is never written here). True when stored.
+    fn push(&self, ts_us: u32, raw: i32) -> bool {
         let h = self.head.load(Relaxed);
         if h.wrapping_sub(self.tail.load(Acquire)) as usize >= CAP {
             inc(&self.dropped);
-            return;
+            return false;
         }
         // SAFETY: slot h is outside [tail, head): the consumer does not read
         // it until the Release store below publishes it.
         unsafe { (self.buf.get() as *mut Rec).add(h as usize & (CAP - 1)).write_volatile(Rec { ts_us, raw }) };
         self.head.store(h.wrapping_add(1), Release);
+        true
     }
 }
 
@@ -322,8 +345,8 @@ impl Producer {
     }
 
     /// One captured sample at `now_us` (wire stamp `ts_us`): statistics,
-    /// then the ring.
-    fn push(&mut self, ring: &Ring, ts_us: u32, raw: i32) {
+    /// then the ring. True when the ring took it (not full).
+    fn push(&mut self, ring: &Ring, ts_us: u32, raw: i32) -> bool {
         inc(&ring.captured);
         // Timestamp-gap estimate of samples the producer was too late for.
         if self.have_last {
@@ -348,7 +371,7 @@ impl Producer {
         let span = self.now_us - self.first_us;
         ring.span_hi.store((span >> 32) as u32, Relaxed);
         ring.span_lo.store(span as u32, Relaxed);
-        ring.push(ts_us, raw);
+        ring.push(ts_us, raw)
     }
 }
 
@@ -371,6 +394,12 @@ pub struct Logger {
     /// Main-loop producer (AD1, main-loop AD2).
     prod: Producer,
     ring: *const Ring,
+    /// The running session belongs to the DMM wave view (`start_wave`):
+    /// the ring is its, not the host's (no LOG:DATA?, LOG:STATe? 0, the GUI
+    /// runs). The host's LOG:SOURce / LOG:SRATe saved for the stop.
+    wave: bool,
+    saved_ad2: bool,
+    saved_hz: u32,
 }
 
 /// Gap bucket of a gap of `k` periods (k >= 2).
@@ -411,6 +440,9 @@ impl Logger {
             range: 0,
             prod: Producer::new(),
             ring: core::ptr::null(),
+            wave: false,
+            saved_ad2: false,
+            saved_hz: 0,
         }
     }
 
@@ -449,7 +481,7 @@ impl Logger {
     /// LOG:SOURce: false = AD1 (DC rows), true = AD2 (AC rows). Takes effect
     /// at the next `start`.
     pub fn set_ad2(&mut self, on: bool) {
-        self.ad2 = on;
+        if self.wave { self.saved_ad2 = on } else { self.ad2 = on }
     }
     pub fn ad2(&self) -> bool {
         self.ad2
@@ -463,7 +495,7 @@ impl Logger {
     /// LOG:SRATe: requested AD2 rate, S/s (the nearest rung of the ladder is
     /// used, hy3131::ad2_r26_for). Takes effect at the next `start`.
     pub fn set_req_hz(&mut self, hz: u32) {
-        self.req_hz = hz;
+        if self.wave { self.saved_hz = hz } else { self.req_hz = hz }
     }
     pub fn req_hz(&self) -> u32 {
         if self.req_hz == 0 { DEFAULT_AD2_HZ } else { self.req_hz }
@@ -584,6 +616,36 @@ impl Logger {
         }
         self.isr = false;
         self.active = false;
+        self.end_wave();
+    }
+
+    /// A session for the DMM wave view (scope page, source DMM): AD2 at
+    /// `hz` (a ladder rung) in the current AC row, the host's LOG:SOURce /
+    /// LOG:SRATe untouched. Same chip set-up and ISR hand-off as `start`.
+    pub fn start_wave(&mut self, mode: u8, range: i8, hz: u32) {
+        self.stop();
+        (self.saved_ad2, self.saved_hz) = (self.ad2, self.req_hz);
+        self.ad2 = true;
+        self.req_hz = hz;
+        self.start(mode, range);
+        self.wave = true;
+    }
+
+    fn end_wave(&mut self) {
+        if self.wave {
+            self.wave = false;
+            (self.ad2, self.req_hz) = (self.saved_ad2, self.saved_hz);
+        }
+    }
+
+    /// The running (or last) session is the wave view's.
+    pub fn wave(&self) -> bool {
+        self.wave
+    }
+
+    /// A host (LOG:STATe ON) session runs: the GUI is frozen for it.
+    pub fn host_active(&self) -> bool {
+        self.active && !self.wave
     }
 
     /// The running session's producer is the stream ISR.
@@ -613,6 +675,7 @@ impl Logger {
             if !hy::streaming() {
                 self.isr = false;
                 self.active = false;
+                self.end_wave();
                 return true;
             }
             return false;
@@ -663,12 +726,12 @@ impl Logger {
                 if self.ad2 {
                     let (raw, ok) = hy::read_ad2();
                     if ok {
-                        self.prod.push(ring, ts, raw);
+                        let _ = self.prod.push(ring, ts, raw);
                     } else {
                         inc(&ring.bad);
                     }
                 } else {
-                    self.prod.push(ring, ts, hy::read_ad1());
+                    let _ = self.prod.push(ring, ts, hy::read_ad1());
                 }
             }
             self.prod.tick();
@@ -709,7 +772,9 @@ impl Logger {
     pub fn encode(&mut self, out: &mut [u8]) -> usize {
         const HDR: usize = 6; // "#4nnnn"
         let maxrec = out.len().saturating_sub(HDR) / REC_BYTES;
-        let nrec = (self.ring().len() as usize).min(maxrec).min(9999 / REC_BYTES);
+        // The wave view's ring is the scope's, not the host's: an empty block.
+        let avail = if self.active && self.wave { 0 } else { self.ring().len() as usize };
+        let nrec = avail.min(maxrec).min(9999 / REC_BYTES);
         let bytes = nrec * REC_BYTES;
         out[0] = b'#';
         out[1] = b'4';
@@ -767,9 +832,54 @@ pub mod isr {
     static mut PROD: Producer = Producer::new();
     static mut RINGP: *const Ring = core::ptr::null();
 
+    /// The ISR's copy of the wave trigger (`trig`): configuration of
+    /// generation `gen`, the detector state, the first event at or after
+    /// `min` reported.
+    struct Trg {
+        gen: u32,
+        cfg: StreamCfg,
+        min: u32,
+        st: Stream,
+        first: bool,
+    }
+    static mut TRG: Trg = Trg { gen: 0, cfg: StreamCfg::OFF, min: 0, st: Stream::NEW, first: false };
+
+    /// Per stored sample `idx` (the ring index = the wave record's sample
+    /// number) with AD2 code `v`: the wave trigger (trigsoft::Stream on the
+    /// record's 10-bit code; generation 0 = off). A few loads and compares;
+    /// an event goes to the event ring, the first one at or after the
+    /// configured minimum also to `trg_first_*`.
+    #[inline(always)]
+    unsafe fn trig(ring: &Ring, idx: u32, v: i32) {
+        let g = ring.trg_gen.load(Acquire);
+        if g == 0 {
+            return;
+        }
+        let t = &mut *core::ptr::addr_of_mut!(TRG);
+        if g != t.gen {
+            let w = |k: usize| ring.trg_w[k].load(Relaxed);
+            t.gen = g;
+            t.cfg = StreamCfg { ttype: w(0) as u8, rising: w(0) & 0x100 != 0, l: w(1) as i32, l2: w(2) as i32, wlo: w(3), whi: w(4) };
+            t.min = w(5);
+            t.st = Stream::NEW;
+            t.first = false;
+        }
+        if t.st.step(&t.cfg, idx, crate::trigsoft::ad2_code10(v)) {
+            let n = ring.trg_ev_n.load(Relaxed);
+            ring.trg_ev[n as usize % TRG_EV].store(idx, Relaxed);
+            ring.trg_ev_n.store(n.wrapping_add(1), Release);
+            if !t.first && idx.wrapping_sub(t.min) < 0x8000_0000 {
+                t.first = true;
+                ring.trg_first_at.store(idx, Relaxed);
+                ring.trg_first_gen.store(g, Release);
+            }
+        }
+    }
+
     /// Main loop, after the last bus access of the session start.
     pub(super) fn start(prod: &Producer, ring: *const Ring) {
         unsafe {
+            (*core::ptr::addr_of_mut!(TRG)).gen = 0;
             let p = &mut *core::ptr::addr_of_mut!(PROD);
             p.begin(prod.period_ns);
             p.gate_us = ((prod.period_ns as u64 * GATE_EIGHTHS / 8 + 500) / 1000) as u32;
@@ -802,7 +912,10 @@ pub mod isr {
             if hy::isr_read(hy::R_AD2, &mut b) {
                 let v = hy::s24(&b);
                 if hy::ad2_sign_ok(v) {
-                    p.push(ring, ts, v);
+                    let idx = ring.head.load(Relaxed);
+                    if p.push(ring, ts, v) {
+                        trig(ring, idx, v);
+                    }
                 } else {
                     inc(&ring.bad);
                 }
@@ -968,5 +1081,79 @@ mod tests {
         l.set_chop(false);
         l.set_req_hz(600);
         assert_eq!(hy::ad2_rate_mhz(l.r26()), 1_200_000);
+    }
+}
+
+/// The DMM wave view's side of the ring (main loop; consumer + trigger
+/// configuration). The ring is `RING`; the session is a `Logger::start_wave`
+/// one, so the stream ISR is the producer.
+pub mod wave {
+    use super::*;
+
+    /// Pop every buffered sample (oldest first) into `f`; the count.
+    pub fn drain(f: &mut dyn FnMut(i32)) -> u32 {
+        let ring = &RING;
+        let t = ring.tail.load(Relaxed);
+        let n = ring.head.load(Acquire).wrapping_sub(t);
+        let base = ring.buf.get() as *const Rec;
+        for i in 0..n {
+            // SAFETY: below the Acquire-loaded head (Logger::drain).
+            let r = unsafe { base.add(t.wrapping_add(i) as usize & (CAP - 1)).read_volatile() };
+            f(r.raw);
+        }
+        ring.tail.store(t.wrapping_add(n), Release);
+        n
+    }
+
+    /// Holes in the stream so far: samples dropped because the ring was
+    /// full, plus conversions the ISR missed (`missed`, from the stamps: a
+    /// gap > 1.5 periods; the device check of 5f14d38 found ~11.5 ms bursts
+    /// every ~3950 conversions). The wave record restarts after a hole
+    /// instead of splicing across it.
+    pub fn dropped() -> u32 {
+        RING.dropped.load(Relaxed).wrapping_add(RING.missed.load(Relaxed))
+    }
+
+    /// New trigger configuration (`min`: the first sample index whose
+    /// event `first` reports); returns its generation (never 0).
+    pub fn set_trigger(c: &StreamCfg, min: u32) -> u32 {
+        let r = &RING;
+        let w = [c.ttype as u32 | (c.rising as u32) << 8, c.l as u32, c.l2 as u32, c.wlo, c.whi, min];
+        for (a, v) in r.trg_w.iter().zip(w) {
+            a.store(v, Relaxed);
+        }
+        let g = r.trg_gen.load(Relaxed).wrapping_add(1).max(1);
+        r.trg_gen.store(g, Release);
+        g
+    }
+
+    /// No trigger search in the ISR.
+    pub fn trigger_off() {
+        RING.trg_gen.store(0, Release);
+    }
+
+    /// Events since `*seen` (sample indices, oldest first; at most the
+    /// TRG_EV - 1 newest: older ones are gone); `*seen` advances.
+    pub fn events(seen: &mut u32, f: &mut dyn FnMut(u32)) {
+        let r = &RING;
+        let n = r.trg_ev_n.load(Acquire);
+        let from = if n.wrapping_sub(*seen) > TRG_EV as u32 - 1 { n.wrapping_sub(TRG_EV as u32 - 1) } else { *seen };
+        let mut k = from;
+        while k != n {
+            f(r.trg_ev[k as usize % TRG_EV].load(Relaxed));
+            k = k.wrapping_add(1);
+        }
+        *seen = n;
+    }
+
+    /// Event count so far (for `events`).
+    pub fn event_count() -> u32 {
+        RING.trg_ev_n.load(Acquire)
+    }
+
+    /// The first event at or after the minimum of generation `gen`.
+    pub fn first(gen: u32) -> Option<u32> {
+        let r = &RING;
+        (gen != 0 && r.trg_first_gen.load(Acquire) == gen).then(|| r.trg_first_at.load(Relaxed))
     }
 }
