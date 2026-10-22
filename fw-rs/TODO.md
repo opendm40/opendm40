@@ -282,8 +282,17 @@ Code work (in this order):
       - [x] Owner 2026-10-21: drop legacy text LOG*.CSV / SCOP*.CSV support on the SPI disk (gallery parser,
             numbering, list/delete): only .DLG is written and read; CSV exists only as the generated export.
             (4544d4e)
-      - [ ] FR-38 logger to disk (DLG kind 3 reserved): needs pre-allocated clusters (commit stalls
-            lose ~290 samples at 640/s); see the doc section 3.
+      - [x] FR-38 logger to disk: src/fastlog.rs + src/fastenc.rs, DLG kind 3 (docs/compact-log-format.md
+            "Fast stream (kind 3)"): LOGS/FASTnnn.DLG pre-allocated (duration x rate x 3 B, bounded by the free
+            space) and pre-erased (blank sectors skipped, BE64 where a 64 KiB block is all ours) before the
+            logger starts; the run only programs pages (<= 300 us + one page per pass, no erase / FAT / dir
+            write, region B); entry size + FAT trim at stop. LOG:DEST DISK|HOST, LOG:DURation, LOG:DISK?;
+            Record page interval "Fast" (AD2 in AC rows, AD1 in DC V/mV/A, LOG:SRATe / OSR rate; tap to
+            stop / cancel). CSV on the USB volume (LOGS/FASTnnn.CSV, fixed width: t_s,raw,value,lost_before),
+            MMEM:DATA?, dlog.py. Host: dlog-test fast sets (round trip, truncation, power cut per chip op),
+            fatren-test fastlog (sessions, ring holes, Full, abandon, the USB volume's CSV, a cut before
+            every block write / program / erase). Emulator: emu/fastlogtest.py (W25Q128 busy model).
+            Device test plan: "Fast logger device check" below.
 
 ## Feature requests to add (from ../docs/dm40-feature-request.md; user: add autohold + useful ones)
 - [x] **FR-01 AutoHold (P0, critical).** Auto-freeze the reading when it stabilises, re-arm on a new
@@ -769,7 +778,27 @@ Firmware:
       (5.8 us at /8): needs a DMA data phase started after the CPU command byte + CKPH switch, and DMA probe
       frames at /8 mode 0 (probe noise tolerated). Not done.
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
-- [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
+- [x] (B) AD2 samples to the SPI disk (.DLG): the fast logger (LOG:DEST DISK, above / docs/compact-log-format.md
+      "Fast stream"). Over BT: the ~870 records/s link ceiling (docs/bt-scpi.md) is below AD2's slowest rung
+      (1200 S/s): LOG:STATe ON from BT is refused for AD2 / > 800 S/s ("Rate too high for Bluetooth"), AD1
+      (<= 640 S/s) streams over BT LOG:DATA?; BT LOG:DATA? of a faster USB session: empty block + the error.
+- [ ] Fast logger device check (fastlog.rs; ~30 min; emulator results in docs/compact-log-format.md):
+      1. DC V, LOG:SOUR AD1, LOG:OSR 0, LOG:CHOP OFF, LOG:DEST DISK, LOG:DUR 60, LOG:STAT ON: LOG:DISK? goes
+         1 (prep, note the seconds) -> 3 -> 5; LOGS/FAST000.CSV on the USB volume == dlog.py of MMEM:DATA?
+         "FAST000.DLG"; lost_before all 0 (640 S/s), LOG:COUNt? overwritten 0; DBG:PROF? loop max.
+      2. AC V 0.5 V 50 Hz, LOG:SOUR AD2, LOG:SRAT 4800 / 9600 / 19200 / 38400, LOG:DUR 30 each: sum of
+         lost_before and LOG:COUNt? overwritten per rate (expect 0 up to 19200; 38400 = the chip's tPP);
+         DBG:ISR? max_lat while pages program (SPI1 is not the HY3131 bus: expect unchanged ~0.24 us).
+      3. Record page: interval "Fast", Duration 10 min, Start in DC V: the panel shows "Preparing disk" /
+         %, then rate / samples / FASTnnn KB; a tap stops it; toast "Saved FASTnnn.DLG"; a tap during
+         Prep cancels (no file).
+      4. LOG:DUR 0 on a disk with ~1 MB free: Prep allocates all, the session ends Full (LOG:DISK? 6).
+      5. Power: pull the battery mid-run once; after boot fsck the SPI image (DEBUG/SPIFLASH.BIN):
+         FAST file with the allocation's size, decodes up to the cut.
+      6. BT (dm40bt_scpi.py): AD2 LOG:STAT ON -> "Rate too high for Bluetooth"; AD1 OSR 0 CHOP OFF over BT:
+         dm40scpi.py --bt log --source ad1 --osr 0 --chop off for 60 s, LOG:COUNt? overwritten 0 (the
+         870/s ceiling: 640/s should hold), then OSR 0 chop on (320/s).
+      7. Prep time on the real chip for LOG:DUR 60 at 38400 (~7 MB): erase time vs the emulator's model.
 - [x] (A) DMM-input "slow floating scope" via AD2 = the Wave view (E5/E6; docs/dmm-input-scope-feasibility.md 10,
       src/app_wave.rs; feature `ad2-isr` only, hidden without it): MF range page "Wave" (V / A) and the scope page's
       "MCX | DMM" source badge; the AD2 stream drained into the scope record (continuous, 10-bit codes), the stock
