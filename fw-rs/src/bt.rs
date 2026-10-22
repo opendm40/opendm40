@@ -104,6 +104,13 @@ pub trait ScpiPort {
     /// fills the buffer (usbtmc::RSP_MAX bytes) and returns the reply's
     /// length, which is then queued (None: no reply).
     fn respond_with(&mut self, f: &mut dyn FnMut(&mut [u8]) -> Option<usize>);
+    /// A block reply of any length: `head`, then `len` bytes from `fill`,
+    /// read while it goes out (usbtmc `respond_stream`). False: the
+    /// transport cannot (Bluetooth: its replies are copied into the TX ring
+    /// at once), nothing was queued.
+    fn respond_stream(&mut self, _head: &[u8], _len: usize, _fill: fn(usize, &mut [u8])) -> bool {
+        false
+    }
     /// False: DBG:* (reflash / reset / watchdog release / input injection /
     /// debug reads) must never run from this transport. Bt::take_line
     /// already refuses such lines; main.rs checks this again before acting
@@ -126,6 +133,10 @@ impl<'a, B: usb_device::bus::UsbBus> ScpiPort for crate::usbtmc::Usbtmc<'a, B> {
         if let Some(n) = f(&mut crate::usbtmc::Usbtmc::rsp_buf(self)[..]) {
             crate::usbtmc::Usbtmc::respond_len(self, n);
         }
+    }
+    fn respond_stream(&mut self, head: &[u8], len: usize, fill: fn(usize, &mut [u8])) -> bool {
+        crate::usbtmc::Usbtmc::respond_stream(self, head, len, fill);
+        true
     }
     fn trusted(&self) -> bool {
         true

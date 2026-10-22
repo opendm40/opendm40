@@ -50,8 +50,8 @@ impl App {
             Some("Inrush: not in the power meter")
         } else if crate::csvlog::active() || (crate::fastlog::active() && !s.saving()) {
             Some("Inrush: recording runs")
-        } else if self.scope.hold {
-            Some("Inrush: scope CSV in progress")
+        } else if self.scope.held() {
+            Some("Inrush: scope record in use")
         } else if s.saving() {
             Some("Inrush: still saving")
         } else {

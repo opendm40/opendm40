@@ -74,7 +74,14 @@ pub struct Usbtmc<'a, B: UsbBus> {
     req_tag: Option<u8>, // REQUEST_DEV_DEP_MSG_IN waiting
     req_max: u32,
     rsp: [u8; RSP_MAX],
+    /// Length of the whole response: `rsp[..rsp_len]`, or with `ext` the
+    /// head `rsp[..head]` followed by `rsp_len - head` bytes from `ext`.
     rsp_len: usize,
+    /// A streamed block reply (`respond_stream`): the payload after the
+    /// head is read from `ext` packet by packet as it goes out, so it can
+    /// be longer than RSP_MAX (the scope record, WAV:DATA?).
+    ext: Option<fn(usize, &mut [u8])>,
+    head: usize,
     /// Bytes of `rsp` already sent (a response longer than the host's
     /// TransferSize goes out in several REQUEST_DEV_DEP_MSG_IN rounds).
     rsp_off: usize,
@@ -118,6 +125,8 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
             req_max: 0,
             rsp: [0; RSP_MAX],
             rsp_len: 0,
+            ext: None,
+            head: 0,
             rsp_off: 0,
             rsp_ready: false,
             tx_hdr: [0; 12],
@@ -175,6 +184,7 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
 
     /// Queue the first `n` bytes of `rsp_buf()` as the response.
     pub fn respond_len(&mut self, n: usize) {
+        self.ext = None;
         self.rsp_len = n.min(RSP_MAX);
         self.rsp_off = 0;
         self.rsp_ready = true;
@@ -186,10 +196,48 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         let n = data.len().min(RSP_MAX);
         self.cut_unsent();
         self.rsp[..n].copy_from_slice(&data[..n]);
+        self.ext = None;
         self.rsp_len = n;
         self.rsp_off = 0;
         self.rsp_ready = true;
         self.try_start_in();
+    }
+
+    /// Queue a response of `head` (at most RSP_MAX bytes) followed by `len`
+    /// bytes that `fill(offset, out)` produces while the response goes out
+    /// (`pump_in`, a packet at a time; any offset order the host's
+    /// TransferSize rounds give). The source must stay unchanged until
+    /// `streaming` is false.
+    pub fn respond_stream(&mut self, head: &[u8], len: usize, fill: fn(usize, &mut [u8])) {
+        let h = head.len().min(RSP_MAX);
+        self.cut_unsent();
+        self.rsp[..h].copy_from_slice(&head[..h]);
+        self.ext = Some(fill);
+        self.head = h;
+        self.rsp_len = h + len;
+        self.rsp_off = 0;
+        self.rsp_ready = true;
+        self.try_start_in();
+    }
+
+    /// A streamed response (`respond_stream`) still has data to send: its
+    /// source must not change. False once its last packet left, and as soon
+    /// as the host gave it up (a new command, a clear, an abort, a reset).
+    pub fn streaming(&self) -> bool {
+        self.ext.is_some() && (self.rsp_ready || self.tx_len != 0)
+    }
+
+    /// Response bytes `a..a + dst.len()` (the head from `rsp`, the rest of
+    /// a streamed response from its source).
+    fn payload(&self, a: usize, dst: &mut [u8]) {
+        let h = if self.ext.is_some() { self.head } else { RSP_MAX };
+        let n1 = h.saturating_sub(a).min(dst.len());
+        if n1 > 0 {
+            dst[..n1].copy_from_slice(&self.rsp[a..a + n1]);
+        }
+        if let (Some(f), true) = (self.ext, n1 < dst.len()) {
+            f(a + n1 - h, &mut dst[n1..]);
+        }
     }
 
     /// Device clear (INITIATE_CLEAR): input and output buffers emptied, a
@@ -354,7 +402,7 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
                     k = e;
                 } else if k < 12 + self.tx_n {
                     let e = end.min(12 + self.tx_n);
-                    p[o..o + e - k].copy_from_slice(&self.rsp[self.tx_base + k - 12..self.tx_base + e - 12]);
+                    self.payload(self.tx_base + k - 12, &mut p[o..o + e - k]);
                     k = e;
                 } else {
                     break; // padding: already zero

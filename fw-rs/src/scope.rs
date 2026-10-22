@@ -302,6 +302,13 @@ pub struct Scope {
     /// The stored record is being read (scope CSV, scope_csv.rs): `apply`
     /// keeps the scope stopped, so BUF is not overwritten.
     pub hold: bool,
+    /// A host reads the stored record (WAV:DATA?, scope_wav.rs, streamed
+    /// over USBTMC): kept stopped like `hold`; set by the main loop.
+    pub host_read: bool,
+    /// DIGitize (SCPI): stop after the next frame (triggered or, in Auto,
+    /// the untriggered one), whatever the sweep; no roll meanwhile. Cleared
+    /// by any run / stop change (`apply`).
+    pub one_shot: bool,
     /// Source DMM (the wave view, `wave_enter`): the record is the HY3131
     /// AD2 stream drained from the logger ring (`WaveSource`), not the MCX
     /// DMA; `wv` its state, `mcx` the MCX settings to restore on exit.
@@ -543,6 +550,8 @@ impl Scope {
             status: 0,
             last_frame: 0,
             hold: false,
+            host_read: false,
+            one_shot: false,
             wave: false,
             lent: false,
             stored_ab: (0.0, 1.0),
@@ -722,8 +731,11 @@ impl Scope {
 
     pub fn apply(&mut self, s: Settings, now: u64) {
         let mut s = s;
-        if self.hold && !self.s.run {
+        if self.held() && !self.s.run {
             s.run = false;
+        }
+        if s.run != self.s.run {
+            self.one_shot = false;
         }
         // A new trigger mode or a RUN press waits for its first frame (WAIT).
         // So does leaving the roll range: the roll chip (RUN) and the roll
@@ -1011,7 +1023,7 @@ impl Scope {
             w32(S4 + 0x0C, buf);
             // Roll from 200 ms/div (TB_ROLL) when Roll is on, except in Single,
             // which captures a full linear record like the stock Single mode.
-            self.rolling = self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single;
+            self.rolling = self.roll_ok();
             // BUF is about to be overwritten: the previous stored record is gone
             // until this acquisition completes (or is snapshotted in stop()).
             self.stored_valid = false;
@@ -1281,9 +1293,22 @@ impl Scope {
         self.s.hpos = s.hpos.clamp(0, COLS as i32);
     }
 
+    /// The stored record must stay as it is (scope CSV being written, a
+    /// host reading it): RUN does not restart the acquisition.
+    pub fn held(&self) -> bool {
+        self.hold || self.host_read
+    }
+
+    /// Roll mode applies to the next acquisition: Roll on, a roll timebase,
+    /// and no single record wanted (Single sweep, DIGitize), which captures
+    /// a full linear record like the stock Single mode.
+    fn roll_ok(&self) -> bool {
+        self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single && !self.one_shot
+    }
+
     /// Roll display active (running, timebase in the roll range).
     pub fn rolling(&self) -> bool {
-        self.s.run && self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single
+        self.s.run && self.roll_ok()
     }
 
     /// Record bar (stock 2.3, FUN_0802d1c6) while stopped: the stored
@@ -1328,6 +1353,12 @@ impl Scope {
     pub fn poll_src(&mut self, now: u64, src: Option<&mut dyn WaveSource>) -> Option<Frame<'static>> {
         let live = self.s.run;
         let f = self.poll_frame(now, src);
+        // DIGitize: the first record frame ends the run (as Single does on
+        // its trigger; the frame is the stored record, the DMA is idle).
+        if live && self.one_shot && f.as_ref().is_some_and(|fr| fr.cols.is_none() && !fr.data.is_empty()) {
+            self.one_shot = false;
+            self.s.run = false;
+        }
         if live {
             match &f {
                 Some(fr) => {
@@ -1823,7 +1854,7 @@ impl Scope {
             w.shown = None;
             self.stored_valid = false;
         }
-        self.rolling = self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single;
+        self.rolling = self.roll_ok();
         let (pre, _) = self.hw_split();
         let w = wv();
         w.pend = None;

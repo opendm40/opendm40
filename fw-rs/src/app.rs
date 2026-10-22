@@ -183,8 +183,10 @@ pub struct App {
     pd6_off: bool,
     /// Debounce: raw level, time it last changed, accepted level.
     pd6_raw: (bool, u64, bool),
-    /// Last scope frame for SCPI: 400 columns (ADC code / 4) and measurements.
-    pub wave: [u8; 400],
+    /// WAV:POINts (0 SCReen, u32::MAX MAXimum, else n) and WAV:FORMat WORD
+    /// (scope_wav.rs; RAM only, as the other host settings).
+    pub wav_points: u32,
+    pub wav_word: bool,
     /// Debug: max duration (us) of scope poll / measurements / draw.
     pub prof: [u32; 3],
     persist_next: u64,
@@ -474,7 +476,8 @@ impl App {
             dimmed: false,
             wake_gate: None,
             pd6_since: None,
-            wave: [0; 400],
+            wav_points: 0,
+            wav_word: false,
             prof: [0; 3],
             persist_next: 0,
             kp_target: 0,
@@ -2121,11 +2124,12 @@ impl App {
         self.prof[0] = self.prof[0].max(cyc().wrapping_sub(t0) / 200);
         if let Some(f) = polled {
             let n = f.data.len();
-            for (i, w) in self.wave.iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
+            // The screen columns for WAV:DATA? (scope_wav.rs, SRAM).
+            for (i, w) in crate::scope_wav::screen().iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
                 let a = i * n / 400;
                 let b = ((i + 1) * n / 400).max(a + 1).min(n);
                 let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
-                *w = ((sum / (b - a) as u32) >> 2) as u8;
+                *w = (sum / (b - a) as u32) as u16;
             }
             if self.sp.autoset.is_some() {
                 self.autoset_step(&f, now);
@@ -4261,10 +4265,37 @@ impl App {
                 Some(())
             }
             C::WavData => {
+                // SCReen + BYTE (the default); the other forms are blocks
+                // built by main.rs (scope_wav::data).
                 out.put_bytes(b"#3400");
-                let w = self.wave;
+                let mut w = [0u8; 400];
+                for (b, c) in w.iter_mut().zip(crate::scope_wav::screen().iter()) {
+                    *b = (*c >> 2) as u8;
+                }
                 out.put_bytes(&w);
                 Some(())
+            }
+            C::WavPoints(Some(n)) => {
+                self.wav_points = n;
+                None
+            }
+            C::WavFormat(Some(w)) => {
+                self.wav_word = w;
+                None
+            }
+            C::WavPoints(None) | C::WavFormat(None) | C::TrigStatus | C::AcqSrate | C::ChOffs(None) => {
+                crate::scope_wav::query(self, cmd, out);
+                Some(())
+            }
+            C::ChOffs(Some(v)) => {
+                // Volts added to the signal (Rigol / libscopehal): the
+                // centre row shows -v (Scope::v_centre = pos * 4 V/div / 141).
+                sc.pos = crate::scope_wav::offset_pos(v, self.scope.vdiv());
+                None
+            }
+            C::Digitize => {
+                sc.run = true;
+                None
             }
             C::DiagDac => {
                 // min,max (V, 3.0 V reference), mid crossings, window (s)
@@ -4374,13 +4405,7 @@ impl App {
                 }
             }
             C::WavPre => {
-                // points, x increment (s), y: volts = (byte*4 - zero) * k.
-                out.put_bytes(b"400,");
-                out.put_f32(scope::SDIV[sc.tb] * 10.0 / 400.0);
-                out.put_bytes(b",");
-                out.put_f32(self.scope.volts(4.0) - self.scope.volts(0.0));
-                out.put_bytes(b",");
-                out.put_f32(self.scope.volts(0.0));
+                crate::scope_wav::preamble(self, out);
                 Some(())
             }
             _ => None, // DMM / system commands: scpi_dmm
@@ -4388,8 +4413,15 @@ impl App {
         if matches!(cmd, C::DiagDac | C::DiagPwm) {
         } else if !scope_cmd {
             self.gen_set(g);
-        } else if !matches!(cmd, C::Meas(_) | C::WavData | C::WavPre | C::DbgHwTrig(..)) && reply.is_none() {
+        } else if !matches!(cmd, C::Meas(_) | C::WavData | C::WavPre | C::DbgHwTrig(..) | C::WavPoints(_) | C::WavFormat(_))
+            && reply.is_none()
+        {
             self.scope_set(sc, now);
+            if matches!(cmd, C::Digitize) {
+                // After apply (a run change clears it): the acquisition it
+                // restarted is the one that ends the run.
+                self.scope.one_shot = true;
+            }
         }
         reply.is_some()
     }
