@@ -888,6 +888,11 @@ Firmware:
         two CSV cursors + seek checkpoints (a head-reading indexer no longer drags one cursor), a
         lock timeout (re-acquire after 2 s unlocked with nothing captured, then end the session),
         DBG:VDISK:RD? also counts non-cursor seeks, headers read, rows decoded: to be measured.
+        Device f3aea2f: FAST003.CSV sequential 64 KiB reads 571 KB/s (was ~40), RD? delta per sector
+        0.21 ms, 0.1 SPI reads, 200 non-cursor seeks / 842 headers in 68 k sectors; `dd bs=1M` of
+        FAST002.CSV (26 MB) 1.4 MB/s. The 046e4b9 slowness (one cursor walked headers per sector)
+        matches the indexer interleave the second cursor + checkpoints address; not proven which.
+        Sanity: AD1 640 and AD2 19200 to disk 30 s, 0 lost, locked, max_lat 0.24 / 0.28 us.
       - Emulator: the AD2 19200 DMA lock never converged in 3 of 9 sessions (5394b21; 0 of 9 on
         f66af0d): a coin-toss probe around the edge geared kp up before it reached kp_min ->
         ad2pll `result`: locked also at kp <= kp_max / 4 after 64 probes (9 of 9 pass).
