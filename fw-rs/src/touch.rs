@@ -1109,6 +1109,7 @@ fn decode(b: &[u8]) -> (bool, bool, Point) {
 
 impl Touch {
     /// Reset and initialise the controller. None if it does not answer.
+    #[inline(never)] // .cold (link-native.x): start-up
     pub fn new(clk: &mut Clock) -> Option<Self> {
         od_pin(GPIOA, SCL);
         od_pin(GPIOC, SDA);

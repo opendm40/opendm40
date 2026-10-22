@@ -110,6 +110,9 @@ impl Hdr {
 /// sample rate `fs`, `t0` = sample index of time 0, the header lines
 /// (without the column line). The writer is started separately
 /// (screenshot::start_csv) and reads it through `fill`.
+/// Region B (not this module's .cold): it runs in the Save CSV tap, while
+/// the Wave view's stream may run (the stream pauses only for the write).
+#[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
 pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr) {
     let s = snap();
     s.rec = rec;

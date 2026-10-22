@@ -23,7 +23,17 @@ path is AC-coupled in AC V like the meter). Checks:
   * V/div + (panel B3): the next DMM range, the trace the same in volts;
   * MENU: the view closes, the ISR stops, READ? = 1.0 V AC again (DMM
     resumed), no SYST:ERR?;
-  * a host CONF mid-wave: the view closes (forced stop), DC V then reads ~0.
+  * a host CONF mid-wave: the view closes (forced stop), DC V then reads ~0;
+  * region C (flash above 0x08080000, not zero-wait: ~20 us ISR entry
+    stalls on the device, fw-rs/link-native.x) while the stream ISR owns the
+    bus: a Renode hook on every function of C logs the first call made
+    while hy3131::HANDED is set. STOP + MF Settings "Save CSV" in the wave
+    view (the DLG write pauses the stream, the USB volume refresh waits
+    until the stream stops; device f3aea2f: max_lat 21.7 us in vdisk::ours),
+    then a host reading SCOPE/SCOPnnn.CSV and LOGS/LOGnnn.CSV off the USB
+    volume and MMEM:DATA? of their DLGs while the wave view streams: no C
+    function but the Save CSV tap's own handler; the stream runs again
+    after the save. --no-region-c: without the hooks.
 --shots DIR: PNG screenshots (DBG:LCD?) of each stage for a look.
 Exit status 0 = all passed.
 """
@@ -42,6 +52,7 @@ ap.add_argument('--port', type=int, default=3591, help='USB/IP port (default 359
 ap.add_argument('--dmm', default='vsrc:0,ac=1.0,f=50', help='DMM jack input (emu/run.py --dmm)')
 ap.add_argument('--shots', help='directory for PNG screenshots')
 ap.add_argument('--mips', default='200')
+ap.add_argument('--no-region-c', action='store_true', help='without the region C hooks')
 ap.add_argument('--case', choices=['volt', 'current'], default='volt',
                 help='current: --dmm defaults to a 10 mA DC + 40 Hz square on A-COM; the AC A row is '
                      'DC-coupled: FREQ? 40 Hz, VAVG? = the DC part, values in A')
@@ -65,9 +76,57 @@ def check(ok, what):
         FAIL.append(what)
 
 
+# Region C hooks (see the docstring): every function symbol in
+# 0x08080000..0x080A0000 of the ELF; a call while the ISR owns the bus
+# (hy3131::HANDED != 0) is counted, the count written at 1, 2, 4, ... to a
+# per-process file.
+OUT = os.path.join(EMU, 'out')
+os.makedirs(OUT, exist_ok=True)
+TAG = 'wavetest-%d-%d' % (A.port, os.getpid())
+CHITS = os.path.join(OUT, TAG + '.chits')
+CSYMS = {}
+
+
+def c_hooks():
+    import glob
+    nm = sorted(glob.glob(os.path.join(ROOT, 'toolchain/rustup/toolchains/*/lib/rustlib/*/bin/llvm-nm')))
+    if not nm:
+        return None
+    r = subprocess.run([nm[0], '-C', A.app], capture_output=True, text=True)
+    handed = None
+    for l in r.stdout.splitlines():
+        p = l.split(None, 2)
+        if len(p) < 3:
+            continue
+        a = int(p[0], 16)
+        if p[1] in 'tT' and 0x08080000 <= a < 0x080A0000:
+            CSYMS[a & ~1] = p[2]
+        elif p[2].startswith('dm40_fw::hy3131::HANDED'):
+            handed = a
+    if handed is None or not CSYMS:
+        return None
+    # The first call while handed is logged and the hook removed (a Python
+    # hook per call of a busy function slows the emulator to a crawl).
+    code = ("(machine.SystemBus.ReadByte(0x%x)!=0) and (open('%s','a').write('%%x 1'%%pc+chr(10)), self.RemoveHooksAt(pc))"
+            % (handed, CHITS))
+    path = os.path.join(OUT, TAG + '.script')
+    with open(path, 'w') as f:
+        for a in sorted(CSYMS):
+            f.write('1 monitor sysbus.cpu AddHook 0x%08x "%s"\n' % (a, code))
+    return path
+
+
+HOOKS = None if A.no_region_c else c_hooks()
+# A private copy of the SPI disk (the test records a CSV and saves a scope
+# record): parallel runs share nothing (port + pid in every name).
+DISK = os.path.join(OUT, TAG + '.disk.bin')
+import shutil  # noqa: E402
+shutil.copy(os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), DISK)
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', A.mips, '--app', A.app,
-       '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', 'wavetest-%d' % A.port,
-       '--dmm', A.dmm]
+       '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', TAG,
+       '--log', os.path.join(OUT, TAG + '.log'), '--disk', DISK, '--dmm', A.dmm] + (['--script', HOOKS] if HOOKS else [])
+if not HOOKS:
+    print('(no llvm-nm / symbols: the region C checks are skipped)')
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
 try:
     t = None
@@ -132,6 +191,88 @@ try:
     def near(v, want, tol):
         return abs(v - want) <= tol * abs(want)
 
+    def c_reset():
+        open(CHITS, 'w').close()
+
+    def c_calls():
+        """{function of region C: calls (at least)} while the ISR owned the bus."""
+        got = {}
+        if os.path.exists(CHITS):
+            for l in open(CHITS):
+                p = l.strip('\0').split()
+                if len(p) == 2:
+                    n = CSYMS.get(int(p[0], 16), p[0])
+                    got[n] = max(got.get(n, 0), int(p[1]))
+        return got
+
+    def cat_names():
+        return [x.strip('"').split(',')[0] for x in q('MMEM:CAT?').split(',"')[1:]]
+
+    def get_file(name):
+        data = b''
+        while True:
+            r = q('MMEM:DATA? "%s",%d' % (name, len(data)), raw=True)
+            nd = int(r[1:2])
+            n = int(r[2:2 + nd])
+            data += r[2 + nd:2 + nd + n]
+            if n < 6000:
+                return data
+
+    def vol_csv(dirname, dlg):
+        """<dirname>/<dlg stem>.CSV read off the USB volume (MSC READ(10),
+        64 sectors each, as a host) == tools/dlog.py of the DLG (MMEM:DATA?)."""
+        import struct
+        ref = os.path.join(OUT, '%s-%s' % (TAG, os.path.basename(dlg)))
+        open(ref, 'wb').write(get_file(dlg))
+        r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'fw-rs/tools/dlog.py'), ref, '-o', ref + '.csv'],
+                           capture_output=True)
+        want = open(ref + '.csv', 'rb').read() if r.returncode == 0 else None
+        m = uc.Msc(t.d)
+        stem = os.path.basename(dlg).split('.')[0].upper().encode()
+        name = stem + b' ' * (8 - len(stem)) + b'CSV'
+        for _ in range(3):
+            try:
+                m.cmd(0, bytes(6))  # TEST UNIT READY (a media change: UNIT ATTENTION once)
+            except IOError:
+                pass
+        b = m.read(0, 0, 1, 512)
+        spc = b[13]
+        rsvd, nfat, nroot = struct.unpack_from('<HBH', b, 14)
+        fatsz = struct.unpack_from('<H', b, 22)[0]
+        root = rsvd + nfat * fatsz
+        data = root + nroot * 32 // 512
+        lba = lambda c: data + (c - 2) * spc
+
+        def find(secs, nm_):
+            for s_ in secs:
+                d = m.read(0, s_, 1, 512)
+                for k in range(16):
+                    e = d[k * 32:k * 32 + 32]
+                    if e[0] == 0:
+                        return None
+                    if e[:11] == nm_:
+                        return struct.unpack_from('<H', e, 26)[0], struct.unpack_from('<I', e, 28)[0]
+            return None
+        dirent = find(range(root, data), dirname.encode().ljust(11))
+        fe = dirent and find(range(lba(dirent[0]), lba(dirent[0]) + spc), name)
+        if not fe:
+            return None, want
+        start, size = fe
+        got = b''
+        while len(got) < size:
+            k = min(64, (size - len(got) + 511) // 512)
+            got += m.read(0, lba(start) + len(got) // 512, k, 512, retries=2)
+        return got[:size], want
+
+    def c_check(what, allowed=()):
+        if not HOOKS:
+            return
+        got = c_calls()
+        bad = {k: v for k, v in got.items() if not any(a in k for a in allowed)}
+        print('  region C functions called while streaming: %s' % (', '.join(sorted(got)) or 'none'))
+        check(not bad, '%s: no region C code while the stream ISR owns the bus%s'
+              % (what, '' if not bad else ' (%s)' % ', '.join(sorted(bad))))
+
     def current_case():
         q('CONF:CURR:DC')
         wait_ms(2500)
@@ -167,6 +308,13 @@ try:
     # toast takes the next key (app.rs overlay): MF only after it went.
     wait_ms(4500)
     shot('w00-dmm')
+    # A short DMM recording: LOGS/LOGnnn.DLG for the volume read below.
+    q('LOG:CSV ON')
+    wait_ms(4000)
+    q('LOG:CSV OFF')
+    wait_ms(2500)
+    logs = sorted(n for n in cat_names() if n.upper().startswith('LOG') and n.upper().endswith('.DLG'))
+    check(bool(logs), 'a DMM recording to read back later (%s)' % (logs[-1:] or 'none'))
     # MF -> the V range page -> Wave.
     q('DBG:KEY 3')
     wait_ms(600)
@@ -305,6 +453,33 @@ try:
     fr, rms, vpp = meas()
     check(near(fr, 50.0, 0.03), 'RUN again: 50 Hz (%.3f)' % fr)
 
+    print('Save CSV in the wave view (region C while the stream ISR runs)')
+    q('STOP')
+    wait_ms(800)
+    before = set(cat_names())
+    c_reset()
+    q('DBG:KEY 3')  # MF
+    wait_ms(800)
+    q('DBG:TAP 367,40')  # Settings
+    wait_ms(800)
+    shot('w08b-mf-settings')
+    q('DBG:TAP 154,93')  # Save CSV
+    new = []
+    for _ in range(30):
+        wait_ms(1000)
+        new = sorted(n for n in set(cat_names()) - before if n.upper().startswith('SCOP') and n.upper().endswith('.DLG'))
+        if new:
+            break
+    check(bool(new), 'Save CSV wrote %s' % (new or 'nothing'))
+    wait_ms(3000)  # the volume refresh would run 1 s after the disk went quiet
+    check(ints(q('DBG:ISR?'))[1] == 1, 'the stream still runs after the save')
+    # Only the tap's own one-shot (the Save CSV handler, scope_csv::set, the
+    # MF popup's press feedback): the DLG write (screenshot.rs job) runs with
+    # the stream paused, the volume refresh after the stream stops (main.rs).
+    c_check('STOP + Save CSV', ('sp_save_csv', 'scope_csv::', 'press_track', 'sp_popup'))
+    q('RUN')
+    wait_ms(1500)
+
     print('exit (MENU)')
     q('DBG:KEY 0')
     wait_ms(2500)
@@ -329,6 +504,17 @@ try:
     print('  after the badge: FREQ %.3f VRMS %.4f VPP %.4f' % (fr, rms, vpp))
     check(near(fr, 50.0, 0.03) and near(rms, 1.0, 0.03), 'the badge path shows the signal (50 Hz, 1 V rms)')
     shot('w09b-badge-wave')
+    print('host reads CSVs off the USB volume while the wave view streams')
+    for dirname, dlg in [('SCOPE', new[-1] if new else None), ('LOGS', logs[-1] if logs else None)]:
+        if not dlg:
+            continue
+        c_reset()
+        got, want = vol_csv(dirname, dlg)
+        stem = os.path.basename(dlg).split('.')[0]
+        check(got is not None and got == want, '%s/%s.CSV off the volume == tools/dlog.py (%s bytes)'
+              % (dirname, stem, len(got) if got else None))
+        check(ints(q('DBG:ISR?'))[1] == 1, 'the stream runs during the read')
+        c_check('a host reading %s/%s.CSV' % (dirname, stem))
     f0 = ints(q('DBG:ISR?'))[13]
     q('CONF:VOLT:DC')
     wait_ms(1500)
@@ -343,6 +529,9 @@ except Done:
 finally:
     os.killpg(emu.pid, 15)
     emu.wait()
+    for p in (DISK, HOOKS, CHITS):
+        if p and os.path.exists(p):
+            os.remove(p)
 
 print('wavetest: %s' % ('PASS' if not FAIL else 'FAIL: ' + '; '.join(FAIL)))
 sys.exit(1 if FAIL else 0)

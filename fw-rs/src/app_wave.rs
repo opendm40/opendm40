@@ -92,6 +92,7 @@ impl App {
 
     /// Open the wave view on the current DMM function (MF "Wave", the
     /// source badge). Refused (toast) where there is no AD2 waveform.
+    #[inline(never)] // .cold (link-native.x): on a tap
     pub(super) fn wave_open(&mut self, clk: &mut Clock) {
         let now = clk.now_ms();
         if !WAVE_BUILD {

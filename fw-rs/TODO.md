@@ -877,9 +877,20 @@ Firmware:
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
       decided: see docs/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
       revisit with decision #3's request queue)
-- [ ] B (zero-wait flash) is FULL: the branch overflowed by 4 bytes at a4907d0; the cold modules' named
+- [x] B (zero-wait flash) is FULL: the branch overflowed by 4 bytes at a4907d0; the cold modules' named
       .rodata moved to `.cold` (28 bytes left), the bit-banged write removed. A real reclaim is needed; never put
       per-pass code in `.cold` (feasibility 11.4 rule).
+      Region B audit #3 2026-10-22 (on c58ae48: 11.9 KB free): 26.2 KB free (ad2-isr; 32.8 KB without), no
+      change in function but the Wave view items below (docs/native-boot.md "Region B audit #3"):
+      App::tap / key / show / wave_open, rec_start, Logger::start, page / dialog / menu / keypad / generator
+      page draws, DBG / calibration replies, start-up constructors, vwrite's post-write steps -> `.cold`; the
+      CSV generators of the volume -> B. Fonts stay in B (anonymous rodata read per draw while streaming; the
+      emulator has no wait-state model to measure it). Region C now has 10.3 KB left (was 25.3 KB): the next
+      reclaim needs room there.
+- [ ] Device check of audit #3: DBG:PROF? lat_pc / DBG:ISR? max_lat at AD2 38400 to disk with the volume
+      mounted and read; Wave view: STOP + Save CSV and a screenshot (max_lat, overruns 0, the trace and the
+      stream back after), a host copying SCOPnnn.CSV / LOGnnn.CSV during the Wave view; taps on the inrush
+      page while armed; tap latency on the range / power settings / keypad / menu / generator pages.
 - [x] 76.8 kS/s (emulator; device check below): hybrid frames (feasibility 11.12, decision 2026-10-22 #9): the CPU
       sends the command byte (mode 0, /8) and switches CKPH = 1 after the read-period pulse, DMA reads R03..R05;
       probe frames 2-byte DMA at /8 mode 0 (a marginal bit only blurs a probe), every 16th period; the probe
@@ -1009,6 +1020,12 @@ Firmware:
       `*7dm40_fw5vdisk*` .cold rule) -> a fn in .text.vdisk_rd (fixed, to re-check). Still in region C on
       the volume read path: the DMM-log / scope CSV generators (Gen::advance, RowDec::*, SDec::*, chunk_at,
       Gen::open): a host reading LOG*.CSV / SCOP*.CSV during a stream runs C per row.
+      Region B audit #3: in `.text.vdisk_rd` (B) now, with dlog::open / find / geometry / each_entry (generic,
+      inline(always): no closure symbol in C) / parse_file / from_scale / s_pred, dlog::data (MMEM:DATA?),
+      vdisk::readme (root directory reads) and calbackup::crc32_upd (LTO merged dlog's identical CRC into it).
+      wavetest: a host reading SCOPE/SCOP000.CSV and LOGS/LOG000.CSV off the volume, and MMEM:DATA? of
+      their DLGs, during the Wave view's stream: no region C call (a60f8ce: SDec::get, dlog::data,
+      vdisk::readme).
       - [x] **Device hang + watchdog reset (once)**: `dm40scpi.py fast --source ad2 --rate 19200 --dur 30`
             with a host reading FAST003.CSV over the volume: the session completed (FAST005.DLG intact),
             the volume's UNIT ATTENTION at the end failed the host's reads, the tool's MMEM:DATA? of
@@ -1041,9 +1058,15 @@ Firmware:
       and two more toasts were wider than the box. Current steps blocked (A not wired).
       - [x] 5 ms/div: Freq / Cycl "--" with two periods on screen: fixed (the falls when fewer than two whole
             rises are inside; meter-test meas). Open: Vrms -1.6 % from 50 ms/div (1200-2400 S/s).
-      - [ ] A volume refresh (Save CSV, a screenshot) runs region C (vdisk::ours / refresh / scan_spi) under
+      - [x] A volume refresh (Save CSV, a screenshot) runs region C (vdisk::ours / refresh / scan_spi) under
             the Wave view's stream: max_lat 21.7 us, 15 overruns at 4800 S/s. Defer the refresh while the
             wave streams, or move the refresh path to region B (~3 KB).
+            Region B audit #3: the refresh waits while the stream ISR owns the bus (main.rs, hy3131::streaming;
+            a host sees a Wave-view save once the view closes), and the Wave view's stream pauses while a disk
+            job (Save CSV, a screenshot: screenshot.rs, region C every pass) runs: the emulator showed the DLG
+            write itself in C under the stream too. emu/hy3131/wavetest.py checks it (hooks on every C function
+            flagged when entered with hy3131::HANDED set): a60f8ce ran Gen::open, vdisk::refresh / scan_spi
+            under the stream at the save; now only the tap's sp_save_csv. Device re-check: below.
       - [ ] CONF? in the wave view on 200 mV/div (AC mV) still answers VOLT:AC +6.
 - [ ] (A) device test of the Wave view (feasibility 10.6, 15 min) - after the ISR loss fix (E3/E4 device item:
       its holes restart the wave record, 10.4). Follow-ups: 16-bit record, DMM reading alongside (request

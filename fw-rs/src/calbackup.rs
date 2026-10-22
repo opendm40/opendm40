@@ -444,7 +444,11 @@ pub fn crc32(d: &[u8]) -> u32 {
     !crc32_upd(!0, d)
 }
 
-/// CRC-32 register update (no pre / post inversion).
+/// CRC-32 register update (no pre / post inversion). Region B: the same
+/// code as dlog::crc32_upd, and LTO merged the two into this symbol, so
+/// dlog's callers (a host reading a CSV off the volume while a stream runs)
+/// called it in region C (wavetest's region C check).
+#[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
 pub(crate) fn crc32_upd(mut c: u32, d: &[u8]) -> u32 {
     const T: [u32; 16] = {
         let mut t = [0u32; 16];

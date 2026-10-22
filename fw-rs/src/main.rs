@@ -252,6 +252,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     let mut log_dur_s = 60u32;
     let mut fast_prev = false;
     let mut fast_tap_armed = false;
+    // The Wave view's stream paused for a disk job (below).
+    let mut wave_paused = false;
     let mut bt = bt::Bt::new();
     let mut gestures = gesture::Tracker::new();
     let mut touch_events = 0u32;
@@ -1164,6 +1166,25 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // restarts (a timebase in another rate band, a range step: the row
         // is rewritten between stop and start, so the bus guard never
         // fires for it) and stops here, where the logger lives.
+        // A disk job (Save CSV, a screenshot: screenshot.rs, region C) in the
+        // Wave view pauses its stream until the job is done: the job runs
+        // region C code every pass (~20 us ISR entry stalls each; device
+        // f3aea2f: Save CSV in the Wave view, max_lat 21.7 us, 15 overruns).
+        // The screen is STOPped (Save CSV) or frozen (a shot) meanwhile.
+        if app.scope.wave_on() && (logger.wave() || wave_paused) {
+            if logger.active() && screenshot::busy() {
+                logger.stop();
+                wave_paused = true;
+            } else if wave_paused && !screenshot::busy() {
+                wave_paused = false;
+                if !logger.active() && app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                    logger.start_wave(app.dmm.mode(), app.dmm.range(), app.scope.wave_fs());
+                    app.wave_live();
+                }
+            }
+        } else {
+            wave_paused = false;
+        }
         if let Some(r) = app.take_wave_req() {
             if logger.host_active() {
                 app.wave_lost(&mut clk, "Data logger running");
@@ -1309,7 +1330,15 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             if dlog::gen() != vd_gen {
                 vd_gen = dlog::gen();
                 vd_t = now;
-            } else if dlog::stale() && now.saturating_sub(vd_t) >= 1000 && !csvlog::writing() && !screenshot::busy() && !fastlog::holds_disk() {
+            } else if dlog::stale() && now.saturating_sub(vd_t) >= 1000 && !csvlog::writing() && !screenshot::busy() && !fastlog::holds_disk()
+                // Not while the AD2 stream ISR owns the bus (the Wave view,
+                // an armed inrush capture): the refresh is region C code
+                // (vdisk refresh / ours / scan_spi, dlog's directory scan),
+                // ~20 us ISR entry stalls (device f3aea2f: Save CSV in the
+                // Wave view, max_lat 21.7 us, 15 overruns). It runs once the
+                // stream stops; only a host sees the volume.
+                && !hy3131::streaming()
+            {
                 vdisk::refresh(csvlog::recording_name());
             }
         }

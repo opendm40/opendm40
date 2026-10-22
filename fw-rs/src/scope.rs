@@ -1196,6 +1196,7 @@ impl Scope {
     /// Wire-free comparator calibration (hwtrig::calibrate) at range 6 / DC
     /// with the scope's own offset points; the current settings are restored
     /// (acquisition restarts from poll). Needs PC4 on and nothing on the MCX.
+    #[inline(never)] // .cold (link-native.x): SCPI calibration
     pub fn hw_calibrate(&mut self, now: u64, clk: &mut crate::clock::Clock) -> Result<hwtrig::CalResult, hwtrig::CalError> {
         if !self.powered {
             return Err(hwtrig::CalError::NoComparator);

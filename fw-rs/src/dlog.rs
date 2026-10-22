@@ -300,6 +300,7 @@ fn at_scale(m: u32, e: i32, neg: bool, k: i32) -> Option<i32> {
     Some(if neg { -n } else { n })
 }
 
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn from_scale(n: i32, k: i32) -> Val {
     if n == 0 {
         return Val::Num { neg: false, m: 0, e: 0 };
@@ -644,6 +645,7 @@ const AS0: u32 = 16;
 
 /// Fixed predictor of `order` from the previous codes h[0] = x[-1],
 /// h[1] = x[-2], h[2] = x[-3] (`j` = index in the block).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn s_pred(order: u32, j: usize, h: &[i32; 3]) -> i32 {
     match order.min(j as u32) {
         0 => 512,
@@ -654,6 +656,7 @@ fn s_pred(order: u32, j: usize, h: &[i32; 3]) -> i32 {
 }
 
 /// The fixed order (0..3) with the least sum of |residual| over `codes`.
+#[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
 pub fn scope_order(codes: &[u16]) -> u32 {
     let mut sum = [0u64; 4];
     let mut h = [0i32; 3];
@@ -692,6 +695,7 @@ impl SEnc {
         e.nb = 3;
         e
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
     fn put(&mut self, v: u32, bits: u32) {
         if bits == 0 {
             return;
@@ -707,6 +711,7 @@ impl SEnc {
         self.acc &= (1u64 << self.nb) - 1;
     }
     /// The next byte of the block coding `codes`; None at its end.
+    #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
     pub fn next(&mut self, codes: &[u16]) -> Option<u8> {
         loop {
             if self.qh != self.qt {
@@ -758,7 +763,12 @@ impl SEnc {
 
 /// Code one block (`codes`, at most SBLK) in `mode` (0..3 order, 4 raw)
 /// into `sink`; returns the byte count.
-pub fn scope_block(codes: &[u16], mode: u32, sink: &mut dyn FnMut(u8)) -> usize {
+///
+/// Generic and inline(always), `scope_plan` (with SEnc, `.text.scope_plan`,
+/// region B) runs at the Save CSV tap, while the Wave view's stream may run:
+/// a dyn sink closure would be a symbol of its own in region C.
+#[inline(always)]
+pub fn scope_block<F: FnMut(u8)>(codes: &[u16], mode: u32, sink: &mut F) -> usize {
     let mut e = SEnc::new(mode, 0);
     while let Some(b) = e.next(codes) {
         sink(b);
@@ -768,6 +778,7 @@ pub fn scope_block(codes: &[u16], mode: u32, sink: &mut dyn FnMut(u8)) -> usize 
 
 /// Choose and size a block's coding: (mode, bytes, CRC-32 of the bytes).
 /// The fixed order with the least |residual|, or raw when that is smaller.
+#[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
 pub fn scope_plan(codes: &[u16]) -> (u32, u32, u32) {
     let o = scope_order(codes);
     let mut crc = !0u32;
@@ -813,6 +824,7 @@ impl SDec {
         d.mode = d.get(s, w, 3)?;
         (d.mode <= S_RAW).then_some(d)
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn get<S: Src>(&mut self, s: &mut S, w: &mut Win, mut bits: u32) -> Option<u32> {
         let mut v = 0u32;
         while bits > 0 {
@@ -829,6 +841,7 @@ impl SDec {
         }
         Some(v)
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn next<S: Src>(&mut self, s: &mut S, w: &mut Win) -> Option<u16> {
         let x = if self.mode == S_RAW {
             self.get(s, w, 10)? as i32
@@ -1024,6 +1037,7 @@ impl RowDec {
         }
     }
 
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn get<S: Src>(&mut self, s: &mut S, w: &mut Win, mut bits: u32) -> Option<u32> {
         let mut v = 0u32;
         while bits > 0 {
@@ -1041,6 +1055,7 @@ impl RowDec {
         Some(v)
     }
 
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn rice<S: Src>(&mut self, s: &mut S, w: &mut Win, k: u32) -> Option<u32> {
         let mut q = 0;
         while q < QMAX && self.get(s, w, 1)? == 1 {
@@ -1053,6 +1068,7 @@ impl RowDec {
     }
 
     /// The next row: (t ms, value, flags).
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn next<S: Src>(&mut self, s: &mut S, w: &mut Win) -> Option<(u32, Val, u8)> {
         if self.left == 0 {
             return None;
@@ -1110,6 +1126,7 @@ impl RowDec {
 }
 
 /// Parse the file header: (kind, hl, unit length, unit).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn parse_file<S: Src>(s: &mut S, size: u32) -> Option<(u8, u32, usize, [u8; UNIT_MAX])> {
     let mut h = [0u8; FHDR];
     if size < FHDR as u32 || !s.read(0, &mut h) || h[..4] != MAGIC {
@@ -1141,6 +1158,7 @@ pub fn parse_file<S: Src>(s: &mut S, size: u32) -> Option<(u8, u32, usize, [u8; 
 
 /// The chunk header at `off` if it is whole within `size` (and, with
 /// `check`, its CRC matches).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn chunk_at<S: Src>(s: &mut S, w: &mut Win, off: u32, size: u32, check: bool) -> Option<Chunk> {
     let mut h = [0u8; CHDR];
     if off.checked_add(CHDR as u32)? > size || !s.read(off, &mut h) || h[0] != b'D' || h[1] != b'C' {
@@ -1247,6 +1265,7 @@ pub struct Gen<S: Src> {
 impl<S: Src> Gen<S> {
     /// Check the header and every chunk (CRC): the exact CSV size. None: not
     /// a DLG file of a known kind.
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     pub fn open(mut s: S, size: u32) -> Option<Gen<S>> {
         let (kind, hl, ul, unit) = parse_file(&mut s, size)?;
         if kind != KIND_DMM && kind != KIND_SCOPE && kind != KIND_FAST {
@@ -1452,6 +1471,7 @@ impl<S: Src> Gen<S> {
     }
 
     /// Decode the next row of the cursor into `row`; false at the chunk end.
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn advance(&mut self) -> bool {
         match self.rd.next(&mut self.s, &mut self.win) {
             Some((t, v, fl)) => {
@@ -1955,6 +1975,7 @@ pub struct Geo {
     pub clusters: u32,
 }
 
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn geometry(raw: &mut dyn Raw) -> Option<Geo> {
     let mut b = [0u8; 64];
     if !raw.read_at(0, &mut b) {
@@ -2055,6 +2076,7 @@ pub fn dlg_name(n: &[u8]) -> Option<usize> {
 /// The prefix of a `<prefix>NNN.DLG` name: b"LOG" (DMM recordings,
 /// LOGS/), b"SCOP" (scope records, SCOPE/), b"FAST" (the fast logger,
 /// LOGS/); None for any other name.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn dlg_prefix(n: &[u8]) -> Option<&'static [u8]> {
     let up = |c: u8| c.to_ascii_uppercase();
     if up(n[8]) != b'D' || up(n[9]) != b'L' || up(n[10]) != b'G' {
@@ -2083,7 +2105,14 @@ pub const DIR_SHOTS: [u8; 11] = *b"SHOTS      ";
 /// until the end marker: the root (`start` None) or the subdirectory whose
 /// chain starts at cluster `start` (followed in FAT 1, at most 64 clusters).
 /// False: a read failed.
-pub fn each_entry(raw: &mut dyn Raw, g: &Geo, start: Option<u32>, f: &mut dyn FnMut(&[u8; 32]) -> bool) -> bool {
+///
+/// Generic and inline(always) (region B audit #3): `f` is then a static call,
+/// inlined, and no closure of a caller gets its own symbol. A closure's
+/// section carries this module's path, so the .cold rule would put it in
+/// region C even when its caller (`find`, `dir_start`: a host opening a CSV
+/// of the volume, maybe while a stream runs) is in region B.
+#[inline(always)]
+pub fn each_entry<F: FnMut(&[u8; 32]) -> bool>(raw: &mut dyn Raw, g: &Geo, start: Option<u32>, f: &mut F) -> bool {
     let mut e = [0u8; 32];
     let (mut base, mut n, mut cl) = match start {
         None => (g.root, g.root_entries, 0),
@@ -2119,6 +2148,7 @@ pub fn each_entry(raw: &mut dyn Raw, g: &Geo, start: Option<u32>, f: &mut dyn Fn
 }
 
 /// Start cluster of root subdirectory `name` (None: there is none).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn dir_start(raw: &mut dyn Raw, g: &Geo, name: &[u8; 11]) -> Option<u32> {
     let mut hit = None;
     each_entry(raw, g, None, &mut |e| {
@@ -2132,6 +2162,7 @@ pub fn dir_start(raw: &mut dyn Raw, g: &Geo, name: &[u8; 11]) -> Option<u32> {
 }
 
 /// A live plain-file 8.3 entry (not deleted, long-name, label, directory).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn file_entry(e: &[u8; 32]) -> Option<Ent> {
     if e[0] == 0xE5 || e[11] & 0x18 != 0 || e[11] & 0x3F == 0x0F {
         return None;
@@ -2254,6 +2285,7 @@ pub fn disk() -> FnRaw {
 
 /// Open file `name` (8.3, a .DLG; in its directory or the root) of the
 /// SPI disk.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn open(name: &[u8; 11]) -> Option<DiskGen> {
     let mut d = disk();
     let g = geometry(&mut d)?;
@@ -2262,6 +2294,7 @@ pub fn open(name: &[u8; 11]) -> Option<DiskGen> {
 }
 
 /// The directory a file of ours lives in (fatdir.rs `dir_of`).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn dir_of(n: &[u8; 11]) -> Option<[u8; 11]> {
     let up = |c: u8| c.to_ascii_uppercase();
     match (dlg_prefix(n), [up(n[8]), up(n[9]), up(n[10])]) {
@@ -2274,8 +2307,11 @@ pub fn dir_of(n: &[u8; 11]) -> Option<[u8; 11]> {
 
 /// Entry `name` (8.3, case-insensitive; any file, not a directory): in its
 /// directory (`dir_of`), else in the root.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn find(raw: &mut dyn Raw, g: &Geo, name: &[u8; 11]) -> Option<Ent> {
-    let look = |raw: &mut dyn Raw, start: Option<u32>| {
+    // A fn, not a closure (its own symbol would be region C: each_entry).
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+    fn look(raw: &mut dyn Raw, g: &Geo, name: &[u8; 11], start: Option<u32>) -> Option<Ent> {
         let mut hit = None;
         each_entry(raw, g, start, &mut |e| {
             if let Some(x) = file_entry(e).filter(|x| x.name.eq_ignore_ascii_case(name)) {
@@ -2285,13 +2321,13 @@ pub fn find(raw: &mut dyn Raw, g: &Geo, name: &[u8; 11]) -> Option<Ent> {
             true
         });
         hit
-    };
+    }
     if let Some(d) = dir_of(name).and_then(|d| dir_start(raw, g, &d)) {
-        if let Some(x) = look(raw, Some(d)) {
+        if let Some(x) = look(raw, g, name, Some(d)) {
             return Some(x);
         }
     }
-    look(raw, None)
+    look(raw, g, name, None)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -2309,6 +2345,7 @@ static mut SCPI_GEN: Slot<Ent> = Slot::new();
 /// returned, 0 at the end). "LOGnnn.CSV" with a LOGnnn.DLG next to it =
 /// the CSV generated from the DLG; else the file's raw bytes.
 #[inline(never)] // .cold (link-native.x): not inlined into the hot caller
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 pub fn data(name: &[u8; 11], off: u32, out: &mut [u8]) -> Result<usize, DataErr> {
     let mut d = disk();
     let g = geometry(&mut d).ok_or(DataErr::NoDisk)?;

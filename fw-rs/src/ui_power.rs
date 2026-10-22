@@ -446,6 +446,7 @@ fn ps_button(r: sf::Rect, t: &str, sel: bool) {
 /// page's style); Reset energy / Wiring / Limits / OK; the status and help
 /// lines under it (`settings_status`). The VA-only fallback (POW:METH ALT)
 /// is SCPI only (status line).
+#[inline(never)] // .cold (link-native.x): page draw
 pub fn settings_page(pv: &PowerVals) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);

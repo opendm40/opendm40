@@ -451,6 +451,7 @@ impl HwTrig {
     /// halted and `disarm`ed, range 6 (1 V/div) set, DC coupling, nothing on
     /// the MCX. Blocks for about 0.5 s. Afterwards re-apply the scope settings
     /// (CCR3 is left at 11636).
+    #[inline(never)] // .cold (link-native.x): SCPI calibration
     pub fn calibrate(&mut self, range: usize, codes: Option<(f32, f32)>) -> Result<CalResult, CalError> {
         let (lo_code, hi_code) = match codes {
             Some(c) => c,

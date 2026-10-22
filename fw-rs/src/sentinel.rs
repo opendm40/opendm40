@@ -891,6 +891,7 @@ impl Sentinel {
     }
 
     /// DBG:SENT? text: kind,alert,mask,ctsta,pkmin,pkmax,streak,hits,samples.
+    #[inline(never)] // .cold (link-native.x): DBG reply
     pub fn diag_text(&self, buf: &mut [u8]) -> usize {
         let mut n = 0;
         let mut put = |s: &[u8]| {

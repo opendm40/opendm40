@@ -549,6 +549,92 @@ for the DBG:HYSPI self-test after the stream, except LOG:DISK? (`fast_scpi`,
 `.cold` since 5d5dba0), which a host polls while a disk session streams:
 its reply (`fast_status`) is in region B again.
 
+**Region B audit #3 (2026-10-22, on c58ae48)**: 11 928 / 20 672 B free
+(ad2-isr / without) -> 26 160 / 32 808 B; region C (`.cold`) 25 328 /
+25 768 -> 10 256 / 12 352 B left below 0x080A0000 (C is now the tighter
+one: the next reclaim from B needs room there or a cut). Stack / SRAM
+unchanged (headroom 21 132 -> 21 452 B, SRAM free 10 888 B). Same method
+(addr2line -i over region B, then `#[inline(never)]` + a link-native.x
+pattern per function, an nm diff of C against the old image: only the
+intended symbols moved). To C:
+- event code inlined into `App::gesture`: `App::tap` (5.3 KB with
+  `pw_tap`, `kp_apply`, `resolution_cycle`, the range hits), `App::key`;
+  `App::show` (view change), `App::wave_open`;
+- one-shot starts: `App::rec_start` (with `csvlog::start`); the outlined
+  `Logger::start` / `logger::isr::start` (the Wave view's `start_wave`; the
+  copies LTO inlined into `run` for LOG:STATe stay in B);
+- page / dialog draws on a view change: `ui::pw::settings_page` (not
+  `settings_status`: per tick on that page), `ui::device_page`,
+  `dialog::fuse_check`; the menu / list / keypad helpers (`menu_item`,
+  `main_menu_hit`, `list_page`, `page_title`, `set_stepper`,
+  `keypad_input` / `_key` / `_hit`, `App::kp_labels` / `lim_unit`) and the
+  generator page's boxes and 1 s status: no stream runs on those pages
+  (leaving the Wave view or the inrush page stops theirs; touch and drawing
+  are off while the logger runs);
+- DBG / calibration replies: `Dmm::acdc_diag_text`, `Sentinel::diag_text`,
+  `Scope::hw_calibrate` + `HwTrig::calibrate`;
+- start-up, inlined into `run`: `Touch::new`, `Bt::new`, `SpiFlash::new`,
+  `usb::init_hw` (not `Bt::init_module`: called every pass, returns early);
+- vwrite's temp purge and post-write steps (`purge_tmp`, `park`, `check`,
+  `finalize`, `commit`: after a host write session; MSC writes are refused
+  while a logger session runs).
+To B (the device check of f3aea2f, docs/device-check-2026-10-21.md 6a / 6c):
+- the DMM-log and scope CSV generators of the USB volume (`Gen::open` /
+  `advance`, `RowDec::*`, `SDec::*`, `chunk_at`, `parse_file`,
+  `from_scale`, `s_pred`, `dlog::open` / `find` / `geometry` / `dir_start`
+  / `dir_of` / `dlg_prefix`) in `.text.vdisk_rd`; `each_entry` is generic
+  and inline(always), so no caller's closure gets a symbol of its own in C
+  (the `near` bug of 0ec2093); `dlog::data` (MMEM:DATA?),
+  `vdisk::readme` with its text writer `W` (sized on every root directory
+  read), `vdisk::geo`, `vdisk::mem_read`,
+  `calbackup::crc32_upd` (LTO merged dlog's identical CRC-32 into it) and
+  `boot::bkp_enable` (`mark_healthy` at 60 s of uptime);
+- the Save CSV tap's block plan (`scope_csv::set`, `dlog::scope_plan` /
+  `scope_order`, `SEnc`; `scope_block` generic and inline(always)) in
+  `.text.scope_plan`: it codes every block once (~1 ms each) in the tap,
+  before the job starts and the stream pauses (wavetest with the emulator's
+  SPI byte timing of c2709aa caught `scope_block` in C there).
+Two Wave view changes (main.rs): the volume refresh waits while the stream
+ISR owns the bus (`hy3131::streaming`; a host sees a save made in the Wave
+view once the view closes), and the Wave view's stream pauses while a disk
+job (Save CSV, a screenshot: screenshot.rs, region C every pass) runs and
+restarts after it (the stopped record is kept, as on a range step): the
+emulator showed the DLG write itself in C under the stream, not only the
+refresh the device's lat_pc named.
+Left in B on purpose: `scpi::parse_pow` / `App::pw_scpi` (FETC:POW:ALL? is
+polled), the scope page's gestures (the Wave view's taps and drags, per
+touch report while it streams), the logger panel, `persist`,
+`autoset_step`. Taps: in the Wave view the scope page takes them
+(`sp_gesture`, B), so `App::tap` meets a stream only on the inrush page
+(whose `inrush_tap` was already in C): one tap = a burst of slow fetches,
+each <= ~20 us of ISR entry latency (11.4), within the 20 us spike ad2pll
+tolerates.
+**Fonts stay in B.** The glyph blobs are anonymous rodata (`.Lanon.*` after
+the small named `*_E` descriptors: F21 25 KB, SC_F20 16 KB, own glyphs
+11.5 KB, ...), not routable by a pattern without named statics, and they
+are read per draw on the screens a stream shows (the logger panel, the
+DMM view, the Wave view). The emulator has no flash wait-state model (200
+MIPS, no slow region), so it cannot measure the draw cost; the device did
+(feasibility 11.4: ASCII26 / TEXT22 above 0x08080000 gave max_lat
+18.8-21.8 us vs 4.6 us). The other ~55 KB of anonymous rodata (merged
+strings, constants, panic locations) cannot be routed either.
+**Check**: `emu/hy3131/wavetest.py` hooks every function of C and fails on
+one entered while `hy3131::HANDED` is set (first call logged, then the hook
+removed: a Python hook per call slows a busy function to a crawl): STOP +
+Save CSV in the Wave view, then a host reading SCOPE/SCOP000.CSV and
+LOGS/LOG000.CSV off the volume plus MMEM:DATA? of their DLGs while it
+streams. a60f8ce and 4692aa9 fail it (`Gen::open`, `vdisk::refresh`, `scan_spi`'s
+closure at the save; `SDec::get`, `dlog::data`, `vdisk::readme` at the
+read); now only the Save CSV tap's own `sp_save_csv` runs. The same hooks
+(a scratch script, `--extra-script`) in ad2streamtest (4800 DRAW 2, 9600
+DRAW 1, 1200 DRAW 2; 38400 DMA DRAW 1 and 2), fastlogtest typ with
+`--vol-read` and inrushtest: no region C call with the bus handed over,
+except in inrushtest `App::inrush_live` once at the capture's start and
+`inrush_scpi` for the test's own INR: setters / FETCh? while armed (by
+design, app_inrush_live.rs: the polled INR:STATe? / CONDition? are in B).
+Still in C on the volume's read path: BACKUP.TXT (`describe`) and the
+firmware image file (`FwFile`), read only when a host opens them.
+
 **Link-time asserts** (`link-native.x`):
 - region A ends at or below `0x08008000`;
 - `.text` starts at or above `0x0800800C`;

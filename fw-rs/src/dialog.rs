@@ -173,6 +173,7 @@ pub const FUSE_ODD_BG: Color = 0xA3C0;
 
 /// Draw the fuse-check dialog: a title on `title_bg`, two lines, the left /
 /// right buttons when given (hit test `fuse_hit`).
+#[inline(never)] // .cold (link-native.x): dialog draw
 pub fn fuse_check(title: &str, title_bg: Color, l1: &str, l2: &str, left: Option<&str>, right: Option<&str>) {
     // Glyph spacing 2 as the toasts (ASCII26 letters touch at 0).
     let b = FBOX;
