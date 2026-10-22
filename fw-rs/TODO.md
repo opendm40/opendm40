@@ -522,8 +522,30 @@ Code work (in this order):
       INIT/ABORT no-ops, SYST:IDN:EMUL OFF|34401A (persisted, default OFF) for unpatched
       libsigrok >= 0.5.2 / SmuView (verified with the distro libsigrok 0.5.2 in the emulator).
       Remaining: device retest over USBTMC (sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<addr>, SmuView),
-      send upstream. Open: a function change on the meter during a native-profile acquisition makes
-      READ? wait for the settle (up to ~3 s, past the 1 s USBTMC timeout) and sigrok stops.
+      send upstream (owner's approval).
+      2026-10-22 function change on the meter mid-acquisition (was open): the 1 s stop itself was
+      already gone with a87f4de (READ? capped at 0.85 s after a change not made by this host); left
+      were the samples around it. Chosen fix = both sides, since libsigrok's USBTMC Bulk-IN timeout
+      is a hard 1000 ms in the transport (no profile setting reaches it) and only the meter knows a
+      reading is missing: fw-rs answers "no reading" with +9.91E37 (SCPI NaN) instead of the overload
+      +9.9E37 (READ? / MEAS? / FETCh? "Data stale"); a READ? waiting when the function changes on the
+      meter answers at once with NaN, and so does a READ? / FETCh? whose preceding FUNC? / CONF?
+      named another function and the host made no change since (scpi::take_asked / forget_asked:
+      no reading filed under the old function); an
+      autorange step V <-> mV or between the A shunts is no function change any more (scpi::func_id;
+      it used to drop the host's settle wait). The profile keeps 9.9E37 = +inf and skips 9.91E37
+      (model infinity_limit 9.95e37, now honoured by scpi_dmm_get_meas_agilent; receive_data no longer
+      ends the acquisition on a skipped sample, which it did for every +1). Also in the profile:
+      VOLT:AUTO / CURR:AUTO = "voltage" / "current" without a coupling flag (each sample DC or AC from
+      VOLT:COUP? / CURR:COUP?; before, "VOLT:AUTO" matched the "VOLT" prefix = DC), POW read as
+      power in W (before: unknown FUNC? = acquisition stopped) but not selectable (range hunt of up
+      to 15 s; CONF:POW + READ? took 3.2 s after sigrok's 3 s delay), TEMP in F when UNIT:TEMP F.
+      Emulator (sigrok-cli, tcp-raw, READ? bracketed by DBG:PING? = device time): every function
+      selected from sigrok gives 6 samples, max READ? 0.85 s; one acquisition across 17 changes on the
+      meter (Ohm, Cap, diode, continuity, Hz, temp, V DC/AC/AC+DC/AUTO, A DC/AC/AC+DC/AUTO, W via the
+      wiring dialog, V) ran 1583 samples with no stop and no sample under the wrong function (29 NaN
+      skipped, max READ? 0.851 s); a change injected between FUNC? and READ? (DC V -> AC V, Ohm -> DC
+      V, DC V -> temp) gives NaN, then the new function.
 - [x] Scope touch: pinch = scale (timebase / V/div, 1-2-5 snap, value bubble), one-finger drag =
       offset, draggable trigger level, no clash with view swipes.  (c470be7, 419fd96, ebff9b4, 81c9dd8;
       verify on device, two-finger report rate first)

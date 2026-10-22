@@ -116,6 +116,7 @@ SECTIONS
         *(.text.*7dm40_fw10fast_start*);
         *(.text.*7dm40_fw8fast_req*);
         *(.text.*7dm40_fw12log_on_check*);
+        *(.text.*7dm40_fw10stale_read*);
         *(.text.*7dm40_fw9fast_scpi*);
         *(.text.*7dm40_fw12fast_next_hz*);
         *(.text.*7dm40_fw7fastlog5begin*);

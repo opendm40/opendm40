@@ -101,6 +101,32 @@ const SCPI_WAIT_MS: u64 = 1900;
 const SCPI_QUICK_MS: u64 = 850;
 // The next fresh steady reading: at most one conversion away + poll / loop.
 const _: () = assert!(SCPI_QUICK_MS >= hy3131::ad1_period_us_r22(0x17) as u64 / 1000 + 300);
+/// scpi_wait expiry of a READ? / MEAS? / FETCh? whose function changed under
+/// it, not by its own host (touch, keys, phone app, DBG:TAP / KEY, the other
+/// transport): it answers at once with +9.91E37 (SCPI NaN) and "Data stale".
+/// The host asked FUNCtion? before it and would file a reading of the new
+/// function under the old one; nothing of the old function will come.
+const WAIT_ORPHAN: u64 = 0;
+
+/// READ? / FETCh?: true (the reply +9.91E37 and "Data stale" put) when the
+/// host's FUNCtion? / CONFigure? since its last READ? named another function
+/// than `func` (scpi::take_asked). Region C (link-native.x): once per READ?.
+#[inline(never)]
+fn stale_read(scpi: &mut scpi::Scpi, func: u8) -> bool {
+    if !scpi::take_asked(scpi).is_some_and(|a| a != scpi::func_id(func)) {
+        return false;
+    }
+    scpi.len = 0;
+    scpi.put_bytes(scpi::NAN);
+    scpi.set_err("Data stale");
+    true
+}
+
+/// The DMM function as FUNCtion? names it, with the temperature sensor: the
+/// key of a function change for the READ? cap (`func_key`, `host_key`).
+fn scpi_func_key(d: &dmm::Dmm) -> (u8, u8) {
+    (scpi::func_id(d.func()), d.t_sensor())
+}
 
 /// pid.codes test VID/PID, for the debug build only.
 const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
@@ -230,12 +256,15 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     // Per transport ([USB], [BT]); a BT line is taken only while [BT] is None.
     let mut scpi_wait: [Option<(u32, bool, u64, u64)>; 2] = [None, None];
     // Who made the DMM's last function change, for the READ? cap: func_key =
-    // (function, temperature sensor) as last seen; host_key[src] = that key
+    // (function as FUNCtion? names it, temperature sensor) as last seen
+    // (`scpi_func_key`: an autorange step V <-> mV or between the A shunts
+    // is no change); host_key[src] = that key
     // when transport src's SCPI made the change (CONF, MEAS:<f>?, FUNC,
     // TEMP:TRAN), None after any other change (touch / keys / phone app /
     // DBG:TAP / the other transport). Only then may READ? / MEAS? wait for
-    // the settle; otherwise SCPI_QUICK_MS at most (scpi.rs header).
-    let mut func_key = (app.dmm.func(), app.dmm.t_sensor());
+    // the settle; otherwise SCPI_QUICK_MS at most (scpi.rs header). A wait
+    // that such a change overtakes answers at once (WAIT_ORPHAN).
+    let mut func_key = scpi_func_key(&app.dmm);
     let mut host_key: [Option<(u8, u8)>; 2] = [None, None];
     // Data logger (FR-38): owns the HY3131 AD1 fast stream while active.
     let logger = unsafe { &mut *core::ptr::addr_of_mut!(LOGGER) };
@@ -391,14 +420,14 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             scpi_wait[USB] = None;
             msgs[USB].reset();
         }
-        if (app.dmm.func(), app.dmm.t_sensor()) != func_key {
+        if scpi_func_key(&app.dmm) != func_key {
             // Changed on the meter (or by DBG:KEY's deferred key-up): no host
-            // waits for its settle; a READ? already waiting is cut short.
-            func_key = (app.dmm.func(), app.dmm.t_sensor());
+            // waits for its settle; a READ? already waiting answers now.
+            func_key = scpi_func_key(&app.dmm);
             host_key = [None, None];
             for w in scpi_wait.iter_mut().flatten() {
                 w.1 = false;
-                w.3 = w.3.min(w.2 + SCPI_QUICK_MS);
+                w.3 = WAIT_ORPHAN;
             }
         }
         let mut msg = [0u8; 256];
@@ -476,6 +505,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 scpi.set_err("Query error");
                 out = scpi::Out::Text;
             }
+            // READ? / FETCh? right after a FUNCtion? / CONFigure? that named
+            // another function (changed on the meter in between): no reading
+            // to file under the function the host was told (scpi::take_asked).
+            if matches!(out, scpi::Out::Measure(None) | scpi::Out::Fetch) && stale_read(scpi, app.dmm.func()) {
+                out = scpi::Out::Text;
+            }
             // DBG:TAP / KEY / DRAG stand in for the user: a change they make
             // is not the host's (READ? cap).
             let by_host = !matches!(out, scpi::Out::Dbg(_));
@@ -511,7 +546,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         // times out after 1 s.
                         let host_settle = changed
                             || app.dmm.deadline() != d0
-                            || host_key[src] == Some((app.dmm.func(), app.dmm.t_sensor()));
+                            || host_key[src] == Some(scpi_func_key(&app.dmm));
                         // meter.live() is reset on every function change.
                         // *IDN? emulation (scpi::idn_emul): the host does not
                         // wait after CONF, never hold a reply past its 1 s.
@@ -1131,19 +1166,20 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             if scpi_wait[src].is_some() {
                 msgs[src].pause();
             }
-            let key = (app.dmm.func(), app.dmm.t_sensor());
+            let key = scpi_func_key(&app.dmm);
             if key != func_key {
                 func_key = key;
                 host_key = [None, None];
                 if by_host {
                     host_key[src] = Some(key);
+                    scpi::forget_asked(&mut scpis[src]);
                 }
                 // A wait of the other transport (or any, after DBG:TAP / KEY)
-                // was not for this change: cut it to the quick budget.
+                // was not for this change: it answers now (WAIT_ORPHAN).
                 for (i, w) in scpi_wait.iter_mut().enumerate() {
                     if let Some(w) = w.as_mut().filter(|_| !by_host || i != src) {
                         w.1 = false;
-                        w.3 = w.3.min(w.2 + SCPI_QUICK_MS);
+                        w.3 = WAIT_ORPHAN;
                     }
                 }
             }
@@ -1362,13 +1398,17 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             // range, a range hunt, a stalled converter): answer now rather
             // than after the host's timeout, with the latest reading of the
             // current function if there is one.
+            // A wait the function changed under (WAIT_ORPHAN) or no reading
+            // of the current function: SCPI NaN, not the overload value, so
+            // that a host (libsigrok's DM40 profile) can skip it.
+            let orphan = scpi_wait[src].is_some_and(|w| w.3 == WAIT_ORPHAN);
             scpi_wait[src] = None;
             let scpi = &mut scpis[src];
             scpi.len = 0;
-            match app.meter.live().copied() {
+            match app.meter.live().copied().filter(|_| !orphan) {
                 Some(r) => scpi.put_reading(&r),
                 None => {
-                    scpi.put_bytes(b"+9.90000000E+37");
+                    scpi.put_bytes(scpi::NAN);
                     scpi.set_err("Data stale");
                 }
             }
@@ -1461,8 +1501,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             if !busy {
                 if let Some(raw) = app.dmm.poll(&mut clk) {
                     if let Some(r) = app.reading(raw, can_draw) {
+                        // A function change this pass (touch, phone app) is
+                        // seen at the next loop top: no reading for a wait it
+                        // overtook until then (WAIT_ORPHAN).
+                        let same_func = scpi_func_key(&app.dmm) == func_key;
                         for src in [USB, BT] {
-                        if let Some((_, settle, t0, _)) = scpi_wait[src].filter(|w| r.seq.wrapping_sub(w.0) < 0x8000_0000) {
+                        if let Some((_, settle, t0, _)) = scpi_wait[src].filter(|w| same_func && r.seq.wrapping_sub(w.0) < 0x8000_0000) {
                             // MEASure:<f>? after a function change: prefer a
                             // value at the full (+1 digit) resolution (the
                             // moving average holds AVG_FULL conversions; avg_n
