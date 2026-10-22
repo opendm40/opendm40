@@ -365,6 +365,8 @@ const SHOW_MIN_MS: u64 = 80;
 //              bargraph (0 = bargraph), EXT_HISTORY_ROW
 //   bits 11..13 wrong-connection alerts switched OFF (A-JACK, V-JACK?,
 //              LIVE?; 0 = on), EXT_ALERT_OFF_SHIFT
+//   bit 14     burden voltage readout in the A functions (0 = off, the
+//              stock aux row), EXT_BURDEN
 // (bits 9.. are set / read by app.rs next to ext_word / ext_settings.)
 
 /// p[38] bit 9: temperature unit deg F.
@@ -374,6 +376,8 @@ pub const EXT_HISTORY_ROW: u32 = 1 << 10;
 /// p[38] bits 11..13: wrong-connection alerts DISABLED (sentinel::M_* << 11;
 /// 0 = all on, the default of every older record).
 pub const EXT_ALERT_OFF_SHIFT: u32 = 11;
+/// p[38] bit 14: burden voltage readout on (DC A aux1 / AC A aux2).
+pub const EXT_BURDEN: u32 = 1 << 14;
 
 /// Settings decoded from p[38].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

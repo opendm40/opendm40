@@ -169,6 +169,17 @@ impl App {
         ui::set_power_coup(self.pw_btn_coup);
     }
 
+    /// The shunt (0 A, 1 mA, 2 uA) whose R_path POW:BURDen sets / reads: in
+    /// a DMM A function its own (the burden readout, doc 3.15), else the
+    /// power meter's current range's (`ik`).
+    #[inline(never)] // .cold (link-native.x): SCPI only
+    fn burden_shunt(&self, ik: u8) -> u8 {
+        match crate::sentinel::shunt_of(self.dmm.hy_mode()) {
+            Some(u) if !self.dmm.pw.on => u,
+            _ => pw::iu_ir(ik).0,
+        }
+    }
+
     /// Settings words (persist).
     pub(super) fn pw_words(&self) -> [u32; PW_WORDS] {
         let p = &self.dmm.pw;
@@ -307,12 +318,12 @@ impl App {
                 true
             }
             Pow::Burden(Some(r)) => {
-                let (iu, _) = pw::iu_ir(pv.ik);
+                let iu = self.burden_shunt(pv.ik);
                 self.dmm.pw.r_path[iu as usize] = if r.is_nan() { pw::SHUNT_OHM[iu as usize] } else { r };
                 false
             }
             Pow::Burden(None) => {
-                let (iu, _) = pw::iu_ir(pv.ik);
+                let iu = self.burden_shunt(pv.ik);
                 out.put_f32(self.dmm.pw.r_path[iu as usize]);
                 true
             }
