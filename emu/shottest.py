@@ -31,8 +31,9 @@ that needed an erase; --max-freeze MS fails a shot frozen longer.
 Builds with the idle-time preparation (screenshot.rs `prep`, DBG:FLASH?
 fields 8..) are first waited for (at most 60 s virtual) until the next
 shot's clusters are erased, unless --no-prep-wait; the screen "again" is a
-second shot of the last screen right after the previous one (nothing
-prepared: the unprepared freeze).
+second shot of the last screen right after the previous one (the erased
+count shows how much of the preparation had happened by then; with this
+test's ~10 s of verify wait and panel read-back, usually all of it).
 The emulator runs on a private copy of the SPI disk image (per process:
 port + pid). Exit status 0 = all passed.
 """
