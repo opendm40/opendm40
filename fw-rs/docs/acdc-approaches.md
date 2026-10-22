@@ -1,0 +1,629 @@
+# AC+DC on the DM40: how other meters and DMM chips do it, and what fits the HY3131
+
+Date 2026-10-22. Research only: no device access, no firmware change. Evidence
+tags as in the sibling docs: **VERIFIED** = a datasheet / manual page, a stock
+row byte, fw-rs code or a device measurement already written up
+(`acdc-stock-vs-fwrs.md` = "acdc", `dmm-input-scope-feasibility.md` =
+"feasibility", `power-meter-and-misconnect.md` = "power"); **INFERRED** = follows
+from those; **UNKNOWN** = needs the device. Nothing under `firmware/re/history/`
+was used. Web sources are listed in section 9; the PDFs were read with
+`pdftotext` (the Fluke, Keysight, Hioki, Brymen and 121GW manuals) or are the
+HYCON documents in `docs/`.
+
+Question from the owner: AC+DC (true-RMS of the DC-coupled signal) today
+alternates whole HY3131 rows (AC phase: AD2 + RMS after the HPF on the
+AC-coupled PB4 node; DC phase: AD1), ~1.9 s per cycle, total = hypot(AC, DC).
+DC through AD1 (24-bit, factory-calibrated) and DC through AD2/AD3 (19-bit,
+LPF or a software mean) differ in accuracy. What do others do, and what is the
+best approach here?
+
+## 0. Summary
+
+* **Two camps in the industry.** (1) *Separate AC and DC measurements combined
+  as sqrt(AC^2 + DC^2)*: Fluke 187/189 and 287/289 ("AC+DC is defined as
+  sqrt(ac^2 + dc^2)", the two parts are also shown as a dual display), Hioki
+  DT4281/4282 (DC+ACV at half the display rate, autorange "depending on the
+  DC+AC calculation result", the DC part keeps the DCV spec plus a published
+  2 % penalty for ripple under 45 Hz), Keysight U1281A/U1282A (the AC+DC spec
+  is the AC spec plus ~0.05 % and 5..10 counts, i.e. the DC path's error
+  added), and Keysight's own application tip (measure DC with >= 10 PLC and
+  AC separately, combine by the formula: "better than the built-in AC+DC
+  function"). (2) *A DC-coupled RMS converter*: Brymen BM869s (one "DC AC &
+  AC+DC" accuracy table, 0.7 % + 80 d even for pure DC against 0.03 % + 2 d in
+  the DC function), the EEVblog 121GW (HY3131 **plus an external AD8436 RMS
+  chip**: AC+DC 1.0 % + 10 vs AC 0.3 % + 10 and DC 0.05 % + 5), the Keysight
+  3458A in its DC-coupled sampling mode (an extra 0.15 % of reading + 0.25 %
+  of range when DC > 10 % of AC). The DC-coupled camp pays with DC accuracy;
+  the separate-path camp pays with update rate and a ripple-leak term on the
+  DC part. Fluke 87V and Owon XDM1041 have no AC+DC at all (AC is
+  AC-coupled); for the Keysight 3446xA none is listed either, but its data
+  sheet was not retrievable here. Keysight U1272A and Cyrustek ES51968 (both
+  on the question's list) were not covered: no primary document was found
+  in the time spent; the U1272A belongs to the same U1270 family whose
+  U1280 sibling is in the table. "DTA0660" was read as the Dream Tech
+  **DTM0660**; if a different part was meant, that row is open.
+* **No DMM chip surveyed has a native AC+DC mode.** The HY3131's RMS block is
+  defined after a high-pass filter (datasheet 13.2), no reserved bit bypasses
+  it (device probe, power doc "HPF bypass probe"), and HYCON gives no AC+DC
+  recipe anywhere: APD-DMM003 configures ACV and DCV separately, and HYCON's
+  own ENOB tool runs its ACV reference row with **AD1 off** (R23 = 0x03).
+  DTM0660 (DSP RMS, 1 kHz) lists no AC+DC mode; FS9922-DMM4 is an
+  average-responding rectifier; Cyrustek ES51966 needs an external ES636 RMS
+  converter (which is what gives the Brymen its DC-coupled AC+DC). The 121GW
+  is the only HY3131 meter found with AC+DC, and it does not use the HY3131
+  RMS block for it. So the DM40's alternation is not an odd choice: every
+  HY3131 design must build AC+DC in software from the two converters.
+* **What matters for accuracy is the combination formula.** With
+  T = sqrt(AC^2 + DC^2):
+  `dT/T = (AC^2 * (dAC/AC) + DC^2 * (dDC/DC)) / (AC^2 + DC^2)`. The DC part's
+  relative error counts only by its share of the power. On an AC-dominant
+  signal the DC path's 0.03 % vs 0.1 % is irrelevant; on the ripple-on-a-supply
+  case (the reason AC+DC exists, Fluke's own example) the DC error dominates
+  and a 0.1 % DC path costs ~0.07 % of the total against AD1.
+* **Recommendation (section 7).** V: one fixed row with AD1 for the DC part
+  (factory DC V calibration kept) and AD2 + AD3 + RMS for the AC part, option
+  (b), **conditional** on the note-7 measurement running now: the AD1 offset
+  shift with AD2 on must be a stable per-range constant; then it is removed by
+  a zero taken in the row's enable order. If it is not stable, option (c): the
+  DC part from the DC-coupled AD2 row of test 6.5 with a per-range gain
+  self-calibrated against AD1 at entry (the `POW:VOLT:CAL` pattern), the AD1
+  row kept only for that calibration. Either way the cycle goes from 1.9 s to
+  a reading every ~107 ms, and the DC part's ripple rejection is the
+  chosen converter's, not the stock's "last of three unfiltered". Keep (a) as
+  the stock-parity mode. A: the power meter's DC row (power 3.12) is already a
+  working single-row AD1 + AD2 + AD3 precedent on the shunt; the shunt node is
+  DC-coupled, so even the LPF gives I_dc with the AC A RMS gain. (d),
+  software RMS of the DC-coupled stream, is an experiment for low frequencies
+  and arbitrary waveforms, not the main reading: its limit is the DC x AC
+  cross term over a non-integer number of cycles, not CPU.
+
+## 1. How bench and handheld meters do AC+DC
+
+Accuracies are +-(% of reading + counts), the band 45 Hz .. ~1 kHz unless
+said otherwise. "Dual display" = the meter shows AC and DC as two readings.
+
+| meter | AC+DC method (evidence) | DC spec | AC spec | AC+DC spec | update / notes |
+|---|---|---|---|---|---|
+| Fluke 87V | **none**: "AC conversions are ac coupled, true rms responding" (83V/87V spec, note 2) | 0.05 % + 1 | 0.7 % + 2 (45-65 Hz) | - | - |
+| Fluke 187/189 | separate parts: "AC+DC: for dc volts and dc amps functions, reading represents the rms total of ac and dc measurements"; AC over DC / DC over AC dual displays (users manual, display symbols table, rotary switch table) | 0.025 % | - | in the 187/189 extended spec (not retrieved as text) | dual display; bar graph off in ac+dc |
+| Fluke 287/289 | separate parts: "AC+DC is defined as sqrt(ac^2 + dc^2)" (calibration manual p. 5); autoranging "controlled by the underlying values of the ac and dc signals and not by the sum" (users manual p. 26-27) | 0.025 % + 2 (5 / 50 V) | 0.3 % + 25 (45-65 Hz), 0.4-0.6 % + 25 (65 Hz-10 kHz) | **0.5 % + 80** (45 Hz-1 kHz), 2 % + 80 (20-45 Hz), 1.5 % + 40 (1-20 kHz), 5 % + 40 (20-35 kHz); + 20 counts in dual display; specified 2..140 % of range | bar graph, Hz, peak, duty not available in AC+DC; forum reports ~1 reading/s logging |
+| Keysight U1281A/U1282A | the AC+DC spec = AC spec + 0.05 % + 5..10 counts in every band and range (data sheet 5992-0847EN p. 11-12), i.e. the DC path's error added on top of the AC path's: separate parts (INFERRED from the spec structure) | 0.025 % + 5 | 0.3 % + 25 (45 Hz-1 kHz) | **0.35 % + 30** (6 V..1000 V), 0.35 % + 35 (60 mV); current 0.65-0.95 % + 30..45 vs AC 0.6 % + 25 | 100 kHz bandwidth (U1282A) |
+| Keysight 3446xA (34461A) | no AC+DC function is listed (AC-coupled ACV; the Truevolt data sheet itself could not be retrieved as text, so this rests on the product listings and the forum); Keysight's tip for its DMMs: take a DC reading with >= 10 PLC (rejects the AC) and an AC reading, combine as sqrt(AC^2 + DC^2); "will yield a better result [than a built-in AC+DC function], particularly when the dc and ac values are of different magnitudes" | 35 ppm (34461A) | - | - | - |
+| Keysight 3458A | native ACDCV in all three AC methods; in synchronous sub-sampling "the input signal is DC-coupled for both the ACV and ACDCV function; in ACV the DC components are mathematically subtracted"; the data sheet adds an ACDCV error to the ACV accuracy: 0.0 % + 0.02 % of range when DC < 10 % of AC, **0.15 % of reading + 0.25 % of range when DC > 10 % of AC** (100 mV-1000 V, SYNC); analog mode 0.008 % of range (DC < 10 % AC) | - | - | - | reading rates ACV vs ACDCV nearly equal (data sheet "Second / reading" table) |
+| Brymen BM869s | DC-coupled RMS converter (the manual file is named `...-ES636-...`; the function table is headed "DC AC & AC+DC AC Voltage" and has a "DC, 45 Hz ~ 300 Hz" column: the same spec for a DC input); forum: "DCV range has two paths: directly DC volt and True-RMS volt, they will not show exactly the same value" | 0.03 % + 2 d (5 / 50 V), 0.02 % + 2 d (500 mV) | 0.3 % + 20 d (5 / 50 V, 45-300 Hz) | **0.7 % + 80 d** (5 / 50 V), 0.45 % + 40 d (500 mV), 0.7 % + 40 d (500 / 1000 V); 1.5 % + 40 d (20-45 Hz) | mV AC+DC "signal peak including DC bias < 1000 mV peak" (the converter's input window) |
+| EEVblog 121GW (**HY3131** + STM32L152) | AC+DC via an **external AD8436** true-RMS chip ("RMS Sensing: True RMS sensing (AD8436)"), i.e. a DC-coupled analog RMS path, not the HY3131 RMS block; modes DC / AC / DC+AC on the V position only (not mV) | 0.05 % + 5 (5-500 V) | 0.3 % + 10 (45-400 Hz), 1.5 % + 10 (0.4-5 kHz) | **1.0 % + 10** (45-1000 Hz, 5 V..600 V) | 5 readings/s; manual caution: "ACV autoranging should not be used with large DC offsets in the presence of AC voltages" |
+| Hioki DT4281/DT4282 | separate parts: SHIFT during DC+ACV shows "DCV (main display) ... the accuracy of the 45 Hz to 65 Hz [DC+AC] table is applied; **2 % rdg. should be added when there is AC voltage superimposition less than 45 Hz**", "ACV (sub display): according to the accuracy table"; "Auto range: the range moves depending on the DC+AC calculation result" (manual p. 86-89) | 0.025 % + 2 (6 / 60 V) | 0.2 % + 25 (6 V..1000 V, 45-65 Hz) | **0.3 % + 30** (45-65 Hz), 0.4 % + 30 (65 Hz-10 kHz), 1.2 % + 65 (20-45 Hz, 6 V only); 6 V..1000 V only (no mV) | **DC+ACV 2.5 readings/s vs 5/s** for everything else; 1 MOhm AC input; crest factor 3 |
+| UNI-T UT61E+ | mode exists; retailer spec (secondary) DC+AC 1.8 % + 70 (2.2..220 V), 4 % + 70 (1000 V) vs DC 0.05 % + 5, AC 0.8..1.2 % + 10..50 | 0.05 % + 5 | 0.8-1.2 % | 1.8 % + 70 (retailer) | chip not confirmed (forum: ES51997 family; datasheet download blocked) |
+| UNI-T UT171B/C | "AC+DC measurement" listed; forum: HY3131 inside; mechanism UNKNOWN | 0.025 % + 5 | 0.4 % + 40 | not found | - |
+| Owon XDM1041 | none (AC and DC are separate functions) | - | - | - | - |
+
+Reading of the table:
+
+1. Every maker that publishes an AC+DC spec makes it **worse than both the DC
+   and the AC spec**, by 0.05 % + 5 counts (Keysight: separate parts, just the
+   DC error added) up to 0.7 % + 80 d (Brymen: the DC-coupled RMS converter
+   measures DC with the AC path's accuracy). The 121GW, the only HY3131 meter
+   with AC+DC, is 3x worse than its AC spec because the AD8436 path is not the
+   calibrated AD1 path.
+2. The separate-path meters **halve the update rate** (Hioki 2.5/s vs 5/s;
+   Fluke 289 ~1/s) and **publish a ripple-leak term on the DC part** (Hioki's
+   +2 % rdg below 45 Hz; Fluke's 2 % + 80 in the 20-45 Hz band of the AC+DC
+   column vs 1.5 % + 60 in the plain AC column). The DC part is a DC
+   integrating converter whose notches sit at the mains frequency; off-notch
+   ripple leaks into the DC reading. That is exactly the AD1 situation here
+   (section 4).
+3. Autorange practice differs: Fluke ranges on the **underlying parts** (up
+   when either part exceeds the range, down when both fall below 10 %), Hioki
+   on the **calculated total**. The stock DM40 ranges on hypot(AC raw, DC)
+   (acdc 2.3, S+0x60) = the Hioki way. Either is defensible; Fluke's protects
+   the AC part from clipping when a large DC offset rides on it (the 121GW
+   warns about exactly this failure), which the total alone does not see when
+   both parts are moderate but their sum of peaks is not. For the DM40 the
+   peak criterion is the AD2 window (+-1.25 V / IG at the node, feasibility
+   1.1): |DC| + sqrt(2) x AC_rms must stay inside it, the same rule
+   `POW:VOLT:CAL` already applies (power 3.12 "BIG").
+4. Nobody shows frequency, bar graph or peak in AC+DC (Fluke) or shows it at
+   full rate (Hioki). The stock DM40 shows no frequency in AC+DC either (power
+   4.2 "AC+DC shows no frequency").
+
+## 2. DMM chips
+
+| chip | AC method | AC+DC | source |
+|---|---|---|---|
+| HYCON HY3131 / HY3130 | digital: AD2 (19-bit, 76.8 kS/s) -> **HPF** -> RMS = sum(X^2)/N (or sum(X*Y)/N with AD3, HY3131 only), LPF = DC mean of the same stream; AD1 24-bit for DC | **none**. X and Y are "the data that passed High Pass Filter" (DS 13.2 RMS Converter (3)); no control bit for the HPF in the register map; the reserved bits of R26 / R34 / R35 were poked on the device and none bypasses it (power doc "HPF bypass probe", 7889e6c). APD-DMM003 has separate DCV (sec. 3) and ACV (sec. 4) configurations and nothing combined; APN-HY3131001 is about SPI timing only; the "DemoCode" zips in `docs/` contain only a "website under construction" readme. HYCON's ENOB tool (`docs/HY3131-ENOB.zip`, `Config/ACV/HYCONFIG-0.txt`) sets R23 = 0x03 (**ENAD1 = 0**), R26 = 0x80, R29 = 0xF8 for ACV, R22 = 0x14 / R23 = 0x8B / R26 = 0x00 for DCV: HYCON's own reference rows run one converter family at a time | DS-HY3131 p. 29-34; APD-DMM003 p. 11-17 |
+| HYCON HY3132 | nothing found on the web (no datasheet, no mention) | UNKNOWN | - |
+| Dream Tech DTM0660 | "built-in DSP, it can measure true RMS up to 1 kHz without any additional components", "AC Rectification: built-in true RMS processor ... 1 kHz bandwidth, error < 0.5 %", 14-bit sigma-delta, 3 readings/s | not in the feature list; function table has DC/AC only | DTM0660 datasheet p. 1-2 (shaddack mirror) |
+| Fortune FS9922-DMM4 | "AC rectifier OPAMP" (average responding, no RMS) | none (DC/AC mode bit per function) | FS9922-DMM4 DS rev 1.3, sec. 12.10, function table |
+| Cyrustek ES51966 | dual-slope ADC + "on chip OP amp for AC/DC conversion" (average responding); "RMS-to-DC converter chip will be needed to obtain the correct true RMS value", application with the **ES636** analog RMS converter | none native; an external ES636 is DC-coupled or AC-coupled by the board = how the Brymen gets AC+DC | ES51966 DS p. 1, sec. 4.2 |
+| Cyrustek ES51997 (UT61E+ family) | 60 000-count dual-slope "SADC", 630 mV full scale (alldatasheet summary); the PDF itself could not be downloaded (403) | UNKNOWN; the UT61E+ has a DC+AC mode, so the chip or the meter firmware combines two readings | alldatasheet listing only |
+| analog RMS converters (AD536A, AD636, AD737, AD8436, ES636) | compute the RMS of whatever is at the input; DC-coupled -> AC+DC, with a series capacitor -> AC only | the "camp 2" building block | AD536A/AD8436 datasheets (web) |
+
+So: a **true DC-coupled RMS** needs either an analog converter in front
+(121GW, Brymen) or a digitizer whose RMS is computed without a high-pass
+(3458A SYNC). The HY3131 can only give the second kind if the MCU computes the
+RMS from the raw AD2 stream (option (d)); its own RMS block is AC-only by
+construction. Everyone building on an HY3131 with its own blocks is in camp 1.
+
+## 3. HY3131 facts that bound the options (VERIFIED unless marked)
+
+* **AD1 rate.** AD1CLK = SYSCLK/30 = 4.9152 MHz / 30 = 163.84 kHz; output
+  rate = AD1CLK / OSR1 (DS 13.1 (10), (11)). OSR 8192 -> 20 S/s; AD1CHOP = 1x
+  halves it ("ADC output rate will be one time slower", DS 13.1 (2)) -> **10
+  S/s, 100 ms per result**, which is what the stock's DC phase shows (3
+  results in 120..320 ms after the deadline, acdc 3). OSR 32768 chopped ->
+  2.5 S/s (400 ms), the plain DC V setting of the stock.
+* **AD1 ripple rejection.** Datasheet "Normal Mode Rejection: offset 500 mV,
+  AC 50 mV, 50 Hz / 60 Hz +-1 Hz: 120 dB at 5 sps, **75 dB at 10 sps**" (DS
+  p. 12). The block diagram labels the AD1 decimator "Comb Filter 2" and the
+  AD2/AD3 one "Comb Filter 3" (DS p. 29, 31) - a sinc^2 and a sinc^3. Nothing
+  else about the response is published. INFERRED envelope for frequencies
+  off the mains notches at 10 S/s chopped (sinc^2 at 20 S/s times the
+  two-sample chop average): ~-33 dB at 25 Hz, -45 dB at 37 Hz, -43 dB at
+  45 Hz, -58 dB at 105 Hz, notches at every multiple of 10 Hz (so 40 Hz, the
+  calibrator PWM of the acdc doc, is a notch: that is why the stock's DC part
+  was flat to 0.25 mV there). The datasheet's 75 dB at 50/60 +-1 Hz is
+  better than this envelope predicts, so the model is pessimistic; **the
+  off-notch leak is a device measurement (section 8, test 3)**. At OSR 32768
+  chopped (2.5 S/s) all of this improves by ~24 dB but costs 400 ms per
+  result.
+* **AD1 noise.** sd 25 counts (4.2 uV) at OSR 32768 chopped on DC mV (acdc
+  6c); white scaling to OSR 8192 gives ~50 counts (INFERRED). One AD1 count
+  at the jack: 1.67 uV on the 6 V range, 16.7 uV on 60 V, 167 uV on 600 V
+  (acdc 4: 288676 counts = 4.8155 V at r1), so the noise is < 1 display digit
+  (0.1 mV on 6 V) at either OSR.
+* **AD1 offset with AD2/AD3 on (note 7).** "When AD1 and AD2/AD3 is on, users
+  must not turn on/off AD to avoid different AD1 Offset problem" (DS 13.1
+  note 7, p. 29). Device: AD1 reads **0.3..0.9 k counts low while AD2
+  converts** (owner-reported 2026-10-22 from the test 6.5 runs; not yet in a
+  committed doc) = 0.5..1.5 mV on 6 V (5..15 digits), 5..15 mV on 60 V
+  (5..15 digits), 0.05..0.15 V on 600 V. Whether the shift is a constant of
+  the configuration (removable by a zero) or wanders is **being measured
+  now**; it decides between (b) and (c).
+* **AD2 / AD3.** 19-bit, 76.8 kS/s at OSR2 = 32; full scale +-1.25 V / IG at
+  the input node; 4.77 uV per code at IG 1.0; no noise / linearity /
+  bandwidth figure in the datasheet; gain drift **10 typ / 30 max ppm/C
+  against 2.5 ppm/C for AD1** (DS p. 11). Device floor in the stock AC V 4 V
+  row: 31..33 sqrt(RMS) counts ~ 14 ENOB per sample (feasibility 1.2).
+* **AD2 as a DC converter (test 6.5, owner-reported results of
+  `fw-rs/tools/ad2dcv.py`, not yet written up in a doc).** The register-only
+  DC-coupled V row (feasibility 1.3 last row: the DC V tap, OP1 x1 on SENSE,
+  SAD2IP = OP1O, IG 1.0) is **linear to <= 0.003 % of range**, noise **3..10
+  codes** (over the ~100 ms of one AD1 conversion), gain vs the nominal
+  K x 1.25 / 2^18: **+0.84 / +1.79 / +0.53 / +0.27 %** on the 6 / 60 / 600 /
+  1000 V ranges. One code at the jack = 4.77 uV x K: 47.7 uV on 6 V (0.48
+  digit), 0.48 mV on 60 V, 4.8 mV on 600 V, 48 mV on 1000 V. So the AD2 DC
+  path is good to ~0.005 % after a per-range gain and offset calibration and
+  resolves 1.5..5 digits of noise, against AD1's < 1 digit. The factory
+  record has no gain for this row (the AC V LPF gains at 0x64/0x74 belong to
+  the AC-coupled PB4 node, feasibility 3.3), so the gain must be self-measured
+  against the DC V function.
+* **LPF ripple rejection.** Not in the datasheet. Upper bound from the stock
+  capture: with 4.8 V rms of 40 Hz on the input the LPF of the AC-coupled node
+  read 0.073..0.096 V in all 796 samples (acdc 4); the 20 mV spread includes
+  the real DC creep of the node, so the 40 Hz leak is **<= 0.5 % of the AC
+  amplitude** (INFERRED, one frequency). The RMS and LPF results come every
+  106.7 ms at LPFBW = 111 where the datasheet formula gives 213 ms
+  (feasibility 1.1), so the window shape is not known either.
+* **HPF corner.** Not published. The analog part is the PB4 coupling
+  capacitor: tau ~0.3 s, fc ~0.5 Hz (acdc 5 / 6a); the digital HPF inside the
+  RMS block is unspecified. The stock's AC V reads 40 Hz flat to 1 count
+  (acdc 4); the only HY3131 meter with a published AC spec, the 121GW,
+  specifies AC from **45 Hz** up (and 20 Hz-45 Hz is where every meter in
+  section 1 degrades to 1-2 %).
+* **Two converters on one node.** Done already: the misconnect sentinel runs
+  AD1 inside the AC V / AC mV rows (feasibility 7.1, power 4.6-4.7), and the
+  power meter's DC row runs AD1 (on OP1O - PB3) with AD2 and AD3 in one row,
+  written "with all three converters off, then AD3, AD2 and AD1 last, so AD2 /
+  AD3 never switch while AD1 converts" (power 3.12). Note 8 (AD2IN != AD3IN or
+  both AGND) is met by the stock AC V row (both AGND).
+* **Row differences at r0 (6 V)** (`fw-rs/src/hy3131_tables.rs` CFG_F0 /
+  CFG_F1, switch bytes R2C..R2E decoded with `emu/hy3131/ref/registers.md`:
+  R2D = PS7 DS7 FS7 SS7 | PS6 DS6 FS6 SS6). f0 AC V r0: R2D 0x09 = **tap PA6
+  (/100)** with R25 0x43 = OPS1 = OPS2 = 1 (OP1 through the external x10
+  network), so the PB4 node sees x0.1 of the input; f0 r1 is the same PA6 tap
+  with OP1 x1 (x0.01). f1 DC V r0: R2D 0x90 = **tap PA7 (/10)**, R25 0x40
+  (OP1 x1), AD1 = OP1O - RLU (x0.1 as well, but through a different divider
+  and no gain network); f1 r1: PA6, AD1 = SENSE - PB5 with the input buffers
+  (R24 0x07). r2 / r3 (R2C 0x90 / 0x99: PA5, PA4+PA5) are identical taps in
+  both functions with OP1 x1 and AD1 = SENSE - PB5. So a merged row at r1..r3
+  is the AC V row plus the DC V row's AD1 bytes (what the stock's AC+DC DC
+  phase already writes: R32 = 0x38 after the f1 row, acdc 2.5). At **r0 the
+  two functions use different taps and OP1 gains**, so a merged r0 row has
+  two candidates, neither of which is the stock DC V r0 path: (i) the AC V r0
+  row (PA6, OP1 x10 to PB4) plus AD1 = SENSE - PB5 on the PA6 tap, which is
+  exactly the DC V **r1** AD1 configuration and can use its factory gain, at
+  10x less signal (1 AD1 count = 16.7 uV at the jack, ~50 counts of noise =
+  0.8 mV = 8 digits of the 6 V display per 100 ms conversion, so it needs
+  averaging or OSR 32768); (ii) AD1 = OP1O - RLU after the x10 network, full
+  resolution but a per-unit gain to self-calibrate against the DC V function.
+  Section 8 test 7 compares them.
+
+## 4. Error propagation for a combined reading
+
+Total T = sqrt(AC^2 + DC^2). With independent relative errors eAC = dAC/AC
+and eDC = dDC/DC:
+
+```
+dT/T = (AC^2 * eAC + DC^2 * eDC) / (AC^2 + DC^2)
+```
+
+| signal | AC^2 share | example: eAC = 0.5 %, eDC = 0.03 % (AD1) | eDC = 0.1 % (AD2 after gain cal) | eDC = 0.7 % (DC-coupled analog RMS, Brymen) |
+|---|---|---|---|---|
+| mains, DC offset 10 % of AC | 0.99 | 0.50 % | 0.50 % | 0.50 % |
+| AC = DC (the acdc-doc PWM) | 0.5 | 0.27 % | 0.30 % | 0.60 % |
+| supply with 10 % ripple (DC dominant) | 0.01 | 0.035 % | 0.10 % | 0.70 % |
+
+Counts add the same way: a DC-part offset of n digits shifts T by
+n x DC / T digits. The HY3131 has no DC-coupled RMS converter, so the Brymen
+column is only what option (d) without a precise DC calibration would look
+like; the real choice on the DM40 is between the AD1 column and the AD2
+column, and the table says the difference is **0..0.07 % of the total**, at
+most 7 digits on 10 000, and only when DC dominates. That is the whole
+accuracy argument for keeping AD1 in the loop - real, but small against the
+AC spec; it does not justify a 1.9 s cycle on its own.
+
+The second error term that only the separate-path method has: **ripple
+leaking into the DC part**. A ripple of amplitude A_r at an off-notch
+frequency reaches the DC reading attenuated by H(f) (section 3); the DC part
+then wobbles by +-A_r x H(f), which the total sees weighted by DC / T. With
+H = -40 dB and AC = DC: +-1 % of the DC part, +-0.5 % of the total, as flicker
+between readings, unless the readings are averaged. Hioki publishes this as
+"+2 % rdg below 45 Hz" and Fluke as 2 % + 80 in the 20-45 Hz AC+DC band.
+
+The third term, only for a software RMS of a DC-coupled stream (option (d)):
+over a window T_w that does not hold an integer number of cycles, the mean
+square of D + A sin(wt) carries a cross term 2DA x mean(sin) with
+|mean(sin)| <= 1 / (pi f T_w). Relative to D^2 + A^2 / 2 at D = A that is
+**0.42 / (f T_w)** on the mean square: 8 % (4 % on the RMS) at 50 Hz over
+106.7 ms, 0.85 % (0.42 %) over 1 s, 0 when the window is an integer number of
+cycles. The hardware path has no such term because the HPF removes D before
+squaring; its own residual, (A^2/2) x sinc(2 f T_w), is 1/(6 pi f T_w) ~ 1 %
+of the mean square at 50 Hz over 106.7 ms - yet the device shows the hardware
+RMS flat to one count at 40 Hz (acdc 4), so the RMS block's window is longer
+or shaped; a plain box in the MCU would not match it without synchronisation.
+
+## 5. The options on the DM40
+
+Notation: d = display digit (60 000 counts: 0.1 mV on 6 V, 1 mV on 60 V);
+"cycle" = time until both parts have been refreshed. Accuracies are the
+expected contribution of the method, **not** a spec for the meter; the AC
+part's accuracy is the stock AC V path's in every option but (d).
+
+### (a) The stock alternation (what fw-rs does today, acdc 2-3, 8)
+
+* Rows: AC phase = f0 AC V row (AD2 + AD3 sum(X*Y), RMS/LPF, AC-coupled PB4),
+  800 ms settle + 4 RMS results; DC phase = f1 DC V row + R32 = 0x38, AD1 at
+  OSR 8192 chopped, 600 ms settle + 3 results, the last shown unfiltered.
+  Cycle 1.8..2.2 s, mean 1.91 s.
+* DC accuracy: the DC V function's (factory gain and offset, AD1 alone in the
+  row: note 7 does not apply) minus the averaging: one 100 ms conversion, no
+  filter -> the full ripple leak H(f) of section 3 and ~50 counts of noise
+  (< 1 d). 50/60 Hz: -75 dB, negligible. Off-notch LF ripple: up to a few %
+  of its amplitude (INFERRED), as reading-to-reading flicker of the DC part.
+* AC accuracy: the AC V function's. The AC-coupled node is left charged by
+  the DC phase so no re-settle transient (acdc 5, 10.3 after the AD3-first
+  fix).
+* Low-frequency limit: the AC path's (HPF unknown, ~45 Hz by the 121GW
+  analogy; 20 Hz at reduced accuracy) and the DC path's leak.
+* Update: **~1.9 s** for a complete cycle; the shown total is recomputed on
+  every result (acdc 2.6), so the display moves ~7 times per cycle but each
+  part is ~1 s old. A step on the input needs up to two cycles (~4 s) to
+  settle both parts; the AUTO coupling (acdc 11) votes over 2 cycles (2-6 s).
+* Calibration: none beyond the factory record.
+* Costs: a relay pulse and a 22-byte row write every ~1 s (acdc 7 items 1-3),
+  no frequency display, the fast logger / wave view refuse AC+DC (feasibility
+  7.1), a range change restarts the phase (600-800 ms).
+* Industry match: the Fluke / Hioki camp, but ~4x slower than Hioki's 2.5/s
+  because the DM40 re-settles the analog path at every switch.
+
+### (b) One fixed row: AD1 (DC) + AD2/AD3 + RMS (AC), both on continuously
+
+* Row: the f0 AC V row with the f1 DC V row's AD1 bytes merged (R22 OSR /
+  chop, R23 ENAD1 + buffers, R24 AD1 mux SENSE - PB5 at r1..r3, R28
+  references), written with all converters off, then AD3, AD2, AD1 last
+  (the power DC row's order, power 3.12), ENAD2 / ENAD3 never toggled while
+  AD1 is on (note 7). Legal by note 8 (AD2IN = AD3IN = AGND). At r0 the AC V
+  row sits on the PA6 tap with OP1 x10 while DC V r0 uses PA7: the merged r0
+  row reads AD1 either as DC V r1 does (SENSE - PB5 on PA6, factory r1 gain,
+  10x less signal) or after the x10 network (own gain) - section 3 last
+  bullet, section 8 test 7.
+* DC accuracy: AD1 with the factory DC V gain, **plus the note-7 offset**
+  (0.3..0.9 k counts observed = 5..15 d at 6 V and 60 V). If the shift is a
+  stable constant of (range, row) -> a per-range zero removes it to the
+  AD1 noise level (< 1 d): measure AD1 in the row with AD2/AD3 off, then
+  enable them in the row's order and measure again; the difference is the
+  zero. Two levels (0 V and ~half range) tell offset from gain. If it wanders
+  with time / temperature / input level -> (b) is not better than (c) and
+  costs a conversion family more. **UNKNOWN, being measured.** Ripple leak:
+  the same H(f) as (a), but now the DC readings come at 10 S/s continuously,
+  so they can be averaged (e.g. 5 results = 0.5 s, another sinc with notches
+  at multiples of 2 Hz: -14 dB more at 25 Hz, -10 dB at 37 Hz, INFERRED) or
+  the OSR raised to 32768 (2.5 S/s, -24 dB more) without lengthening a
+  "phase" - there is none.
+* AC accuracy: the AC V function's, if AD1 converting does not disturb AD2 on
+  PB4. Evidence it does not: the stock's DC phase (AD1 running, AD2 off) left
+  the PB4 node at 0.08 V (acdc 4); the sentinel's AD1 inside the AC V row did
+  not change the AC readings (power 4.6-4.7 device checks); the power DC row
+  reads AD1 and AD2 on **the same node** (power 3.12 device results). The
+  reverse direction (AD2 on -> AD1 offset) is the note-7 effect above.
+  UNKNOWN only in the specific merged V row: section 8 test 2.
+* Low-frequency limit: the AC path's, unchanged.
+* Update: AC every ~107 ms (RMS/LPF cadence), DC every 100 ms (OSR 8192
+  chopped) or 400 ms (OSR 32768); total recomputed on either -> **~10
+  readings/s raw, 5/s on the display**, the Hioki figure x2. No settle after
+  the first ~2 s (PB4 recharge, acdc 6a) except after a range change (one row
+  write, 550-800 ms, then AD1 last).
+* Calibration: the factory DC V and AC V records as today, plus the per-range
+  note-7 zero (self-measured at mode entry or stored once per unit, like the
+  POW:ZERO slots, power 3.12).
+* Extras it enables: frequency from the counter on PB4 in parallel (the stock
+  restarts it every 350 ms in AC+DC anyway, acdc 2.1), a bargraph of the
+  total, the logger at the AC cadence, no relay pulses.
+* Industry match: Keysight U1282A-like (DC path's error simply added), at the
+  Hioki update rate or better.
+
+### (c) DC from the AD2/AD3 path instead of AD1
+
+* Row: the test 6.5 row (DC V tap, OP1 x1, AD2 on OP1O, DC-coupled) for the
+  DC part, read either as the LPF (DC mean, SDO23 = 0) **or** as the mean of
+  single AD2 conversions in the MCU (what 6.5 measured). But the AC part
+  needs AD2 on the **AC-coupled PB4 node** with the HPF+RMS, and one AD2
+  cannot sit on two nodes: either AD3 takes the DC node (AD3 = OP1O - AGND
+  DC-coupled, AD2 = PB4 - AGND, SDO23 switching the single data/LPF register
+  between them, losing the sum(X*Y) noise cancellation and the LPF
+  simultaneity, like the power meter's P -> V -> I sequencing, power 3.4), or
+  the two statistics alternate on AD2 (a row write per switch, back to a
+  cycle). The tempting variant - AD3 on the DC-coupled node, AD2 on PB4, R34
+  frozen, LPF of AD3 for DC and RMS of AD2 for AC - does not exist in the
+  register map: SDO23 selects **both** the LPF source and the RMS statistic
+  (SDO23 = 1 -> LPF[AD3] and RMS = sum(Y^2), DS 13.2 table), so RMS (AC from
+  AD2) and LPF (DC from AD3) cannot be read in one configuration. The MCU
+  would take the DC part from single AD3 conversions (R03..R05 with SDO23 =
+  1) while the RMS block runs on AD2 (SDO23 = 0), toggling SDO23 between the
+  two reads - whether that disturbs the running RMS accumulation is UNKNOWN.
+  **The register plumbing of (c) is the open design question, not the
+  converter.** The variant that needs no plumbing is (c) as the *fallback DC
+  source* for (b)'s row, read as single AD2 conversions on the DC node only
+  when AD1 cannot be trusted - see section 7.
+* DC accuracy: 6.5 results: linear <= 0.003 % of range, noise 3..10 codes =
+  1.5..5 d on every range, gain +0.27..+1.79 % **before** calibration, 10-30
+  ppm/C gain drift (0.03-0.09 % over 30 C) against AD1's 2.5 ppm/C, offset
+  from OP1 (chopper 20 uV, DS p. 11) and the reference nodes (~150 codes
+  between RLU and PB5 seen on T1, power 3.12 "LPF zeros"). After a per-range
+  gain + offset self-cal against the DC V function at entry (~3 s, the
+  `POW:VOLT:CAL` DC kind): **~0.05..0.1 % + 2..5 d**, temperature-dependent.
+  Ripple leak: the LPF's (<= 0.5 % at 40 Hz observed, shape UNKNOWN) or, for a
+  software mean over a 100 ms box, sinc(f x 0.1 s): -26 dB at 50 Hz, -24 dB at
+  45 Hz - **worse than AD1 at the mains frequencies** unless the mean is taken
+  over an integer number of cycles (frequency counter) or over >= 1 s.
+* AC accuracy: the AC V function's (same node and block), minus the sum(X*Y)
+  cancellation if AD3 is taken away (sum(X^2) was 9919 vs sum(X*Y) 9921.5,
+  both stable to 1 count once the enable order was fixed, acdc 10.1 - so
+  nothing measurable is lost).
+* Low-frequency limit: the AC path's.
+* Update: 107 ms for both parts (if the plumbing allows both in one
+  configuration), else like the power meter's sequencing (0.9-1.3 s).
+* Calibration: a new per-range gain/offset for the DC node (self-cal against
+  AD1 at entry, or stored per unit), re-done with temperature.
+* Industry match: the 121GW / Brymen direction (DC through the AC
+  converter's family) with a far better converter (19-bit sigma-delta vs an
+  analog RMS chip), hence ~0.1 % instead of 0.7-1 %.
+
+### (d) DC-coupled RMS computed in the MCU from the AD2 stream (E7 row)
+
+* Row: the 6.5 DC-coupled V row, AD2 alone at 76.8 kS/s (or 9.6-19.2 kS/s),
+  the stream ISR of feasibility 11 (DMA frames, phase-locked) feeding a
+  running sum(x) and sum(x^2) in 64-bit: 19-bit codes squared over 76 800
+  samples fit in 2^54. CPU: one multiply-accumulate per 13 us is small
+  against the ISR's own ~20 us entry latency (feasibility 11.4); the region-B
+  flash budget is the constraint to check (memory notes), not the arithmetic.
+* What it gives: the **true** AC+DC rms in one number (no hypot, no two
+  paths) plus the mean (DC) and sqrt(ms - mean^2) (AC) from the same window;
+  any waveform, crest factor limited only by the +-1.25 V / IG window at the
+  node (6 V range at the /10 tap: +-12.5 V peak at the jack, so a 6 V rms sine
+  on a 3 V offset still fits). Resolution: 14 ENOB per sample, the noise
+  power (32 codes)^2 = 1024 code^2 adds to a mean square of ~10^10 at half
+  scale: 10^-7, nothing; the noise on the DC mean is 6.5's 3..10 codes.
+* DC accuracy: as (c) (same converter, same gain cal needed, same drift). AC
+  accuracy: as the hardware RMS **only if** the window handles the two
+  residual terms of section 4: the cross term 2 x DC x AC / (pi f T_w) (4 %
+  on the RMS at 50 Hz over 107 ms, 0.4 % over 1 s) and the double-frequency
+  term. Both vanish for an integer number of cycles: the frequency counter
+  (CTF, restarted every 350 ms by `freq_secondary`) gives the period, the
+  window is cut to N cycles. Without sync a 1 s box plus an EMA is a
+  0.4 %-class AC reading, worse than the hardware's.
+* Low-frequency limit: the best of all options once synced - down to a few Hz
+  with a long window (the 3458A's SYNC mode goes to 1 Hz the same way) - and
+  the only option with a DC-coupled AC part (no HPF, no 0.5 Hz node).
+* Ripple on the DC part: the mean over an integer number of cycles rejects
+  the fundamental and its harmonics exactly; off-sync the box sinc applies.
+* Update: per window: 100 ms .. 1 s, plus an EMA.
+* Calibration: the DC node's gain/offset (as (c)); the AC scale is the same
+  gain (one converter for both), which is the attraction: one calibration.
+* Costs: a new reading machine in the ISR, the autorange on peaks, the HPF /
+  RMS block unused for V (the stock's AC V path stays for the plain AC
+  function), and no stock reference to pixel-match. **Experiment first, main
+  path later if the synced window proves out.**
+
+### Options table
+
+| | (a) stock alternation | (b) fixed row, AD1 + AD2/AD3 RMS | (c) DC from the AD2/AD3 path | (d) MCU RMS of the DC-coupled AD2 stream |
+|---|---|---|---|---|
+| DC part accuracy | DC V function (factory), 1 unfiltered 100 ms conversion | DC V function + note-7 zero (UNKNOWN stability), averaging possible | ~0.05-0.1 % + 2-5 d after self-cal; 10-30 ppm/C | as (c) |
+| AC part accuracy | AC V function | AC V function (if AD1 does not disturb PB4: test 2) | AC V function (sum(X^2) instead of sum(X*Y) if AD3 moves) | hardware-class only with cycle-synced windows; else ~0.4 % |
+| 50/60 Hz ripple on the DC part | -75 dB (AD1 10 S/s, DS) | -75 dB, more with averaging / OSR 32768 | LPF: UNKNOWN (<= -46 dB at 40 Hz observed); 100 ms box: -26 dB | exact at sync; box sinc off-sync |
+| off-notch LF ripple on the DC part | up to -33..-45 dB (INFERRED), unfiltered | same, averaged (-10..-14 dB more) | as above | exact at sync |
+| low-frequency limit | AC path (~45 Hz spec-class, 20 Hz degraded) | same | same | lowest; set by the window length |
+| update | 1.9 s cycle; parts ~1 s old | ~10/s raw, 5/s display | 107 ms if the SDO23 plumbing allows, else ~1 s | per window 0.1-1 s |
+| settle after entry / range change | 600-800 ms every phase | ~2 s once (PB4), then 0.55-0.8 s per range change | as (b) | as (b) |
+| calibration beyond the factory record | none | per-range note-7 zero | per-range gain + offset of the DC node | same + nothing for AC |
+| new unknowns | none | note-7 stability; r0 OP1 gain; AD1 -> PB4 crosstalk | SDO23 register plumbing; LPF window shape; drift | window sync; ISR budget |
+| industry analogue | Fluke 289 / Hioki (slower) | Keysight U1282A at Hioki speed | 121GW / Brymen with a better converter | 3458A SYNC |
+
+## 6. What the stock parity costs and buys
+
+The stock alternation is the only one of the four that needs **no new
+calibration constant and no new row**, which is why it is right for the
+"replicate stock first" baseline. Its price is the 1.9 s cycle, the relay
+pulses, no frequency, no logger / wave in AC+DC, and a DC part that is a
+single unfiltered conversion. Every meter in section 1 that chose the
+separate-path method runs both paths **continuously** and halves the display
+rate at most; none re-settles its analog front end twice a second. The DM40
+does because the stock firmware had one AD2 node for AC (PB4, AC-coupled)
+and chose to switch rows rather than keep AD1 on next to it - plausibly
+because of note 7, which is exactly what the running measurement will
+quantify.
+
+## 7. Recommendation
+
+**V (6 V .. 1000 V).**
+
+1. Keep (a) as the stock-parity mode (pixel-diff baseline, the AUTO coupling
+   already built on it, acdc 11).
+2. Build **(b)** behind a constant: the AC V row with AD1 merged (r1..r3 from
+   the stock's own DC-phase bytes; r0 after the OP1-gain check of section 3),
+   enable order AD3, AD2, AD1 last, nothing toggled while measuring. Decision
+   rule from the note-7 test: if AD1(AD2 on) - AD1(AD2 off) is **constant per
+   range to within ~1-2 d over time, two input levels and a temperature
+   excursion**, store it as a per-range zero (POW:ZERO-style slots, or
+   measured at mode entry in ~1 s with AD1 alone then AD2/AD3 added) and ship
+   (b): DC part = factory DC V calibration minus the zero, averaged over
+   0.5 s (or OSR 32768), AC part = the stock RMS (sum(X*Y), unchanged),
+   total on every result, ~5 readings/s, frequency from PB4 in parallel.
+   Expected: DC part within the DC V spec (0.03 % + 5 d) plus the zero's
+   residual, AC part = AC V spec, total per section 4.
+3. If the shift wanders: **(c)** with the DC part from the DC-coupled node,
+   per-range gain/offset self-cal against the DC V row at entry (the
+   `POW:VOLT:CAL` DC kind, ~3 s, repeated on a temperature change or every N
+   minutes), after settling the SDO23 plumbing (AD3 on the DC node, single
+   conversions for DC, RMS on AD2). Expected DC part ~0.1 % + 5 d; the total
+   is within 0.07 % of the AD1 version even on a pure DC input (section 4).
+4. **(d)** as a DBG experiment on the existing stream (sum / sum-of-squares
+   in the ISR, window = N periods from the counter): if the AC part matches
+   the hardware RMS to < 0.1 % at 50 Hz and holds at 20 Hz, it becomes the
+   low-frequency / arbitrary-waveform AC+DC and the "true rms" the Fluke blog
+   describes; otherwise it stays a scope measurement.
+5. Autorange: on the total (stock, Hioki) **and** on the AD2 node's peak
+   window (|DC| + sqrt(2) x AC_rms <= 1.25 V / IG at the node): up-range when
+   either trips (Fluke's rule for the parts), down only when the total is
+   below 10 % of range. The 121GW's warning (AC autorange failing with a
+   large DC offset) is the failure this avoids.
+
+**A (600 uA .. 10 A).**
+
+* The shunt node is DC-coupled at AD2 already (AC A rows: AD2 = OP1O - PB3,
+  LPF = I_dc with a constant offset, acdc 6b, feasibility 1.3), and the power
+  meter's DC row runs **AD1 + AD2 + AD3 on this node in one row on the
+  device** (power 3.12, device-checked). So for A the fixed row exists:
+  AD1 = OP1O - PB3 for I_dc with the factory DC A gain (0x94) and the row's
+  own AD1 zero (POW:ZERO, note 7 again), AD2 + AD3 RMS for I_ac with the
+  AC A RMS gain. That is (b) with the hardware already proven. The cheaper
+  (c) is also available here at no plumbing cost: I_dc = LPF of the same AD2
+  (the RMS gain applies to the same path; the factory LPF gains are 1.0,
+  "never calibrated", power 3.12) with the open-input zero - ~0.1-0.2 %, fine
+  against the AC A spec, and it frees AD1 for the sentinels. Pick (b)-A if
+  the note-7 zero is stable (same test), else (c)-A.
+* (d) on A is the natural inrush / motor-current measurement (the inrush
+  feature already streams the 10 A AC row, `inrush-current.md`); a DC-coupled
+  rms over N cycles is a small addition there.
+
+**mV.** The AC mV row is DC-coupled on OP2O (acdc 6a: LPF = the full DC) and
+the stock has no AC+DC mV; the same (c)-style DC from the LPF applies if ever
+wanted. Hioki and the 121GW offer no AC+DC on mV either.
+
+## 8. Device experiments that settle it (in order)
+
+All through DBG SCPI on fw-rs, the MR9270S+ calibrator on V/COM (<= 30 V), the
+generator for AC; log with `dm40scpi.py`. Nothing here needs new firmware
+beyond DBG hooks of the kind `DBG:AD2:DCV?` already is.
+
+1. **Note-7 stability (running).** Per range r0..r3, input 0 V and ~half
+   range: AD1 alone; AD1 with AD2 (and AD3) enabled in the row's order; 60 s
+   each, then again after 10 min and after warming the meter (backlight on,
+   charger): the shift in counts, its sd, its dependence on level (offset vs
+   gain) and on OSR (8192 / 32768). Pass for (b): shift constant to <= 2 d of
+   the range over all of it.
+2. **AD1 inside the AC V row.** The merged row of (b) at r1 (60 V) and r2
+   (600 V): 10 V DC + 5 V rms 50 Hz. AD1 (zero applied) vs the DC V function;
+   sqrt(RMS) with AD1 on vs off (does AD1 converting move the PB4 node or the
+   RMS?). Pass: AD1 within 5 d of DC V, RMS within 1 count of AD1-off.
+3. **Ripple leak of the DC part.** DC 5 V + 1 V rms at 25, 37, 45, 50, 55,
+   100, 105, 400 Hz on the 60 V range: sd and p-p of (i) AD1 single results
+   at OSR 8192 chopped and 32768, (ii) the LPF of the DC-coupled AD3/AD2 node,
+   (iii) the MCU mean over 100 ms and over N cycles. Gives H(f) for the three
+   DC methods; the datasheet only has 50/60 Hz +-1 Hz. Decides the averaging
+   depth of (b) and whether (c)'s LPF is usable at mains frequencies.
+4. **Low-frequency AC part.** 20, 30, 45 Hz, 5 V rms with 0 and 5 V DC: the
+   hardware RMS result spread (window shape), the MCU box RMS over 107 ms
+   and 1 s, the MCU N-cycle RMS. Settles the HPF/RMS low-frequency behaviour
+   that the datasheet does not give and the (d) sync requirement.
+5. **(c) gain stability.** The 6.5 row's gain vs the DC V function once per
+   minute for 1 h with the meter warming: drift in ppm/C against the 10-30
+   ppm/C datasheet figure; how often a self-cal would be needed.
+6. **Entry and range change of the fixed row.** From DC V into (b): time to
+   the first RMS result within 1 count of steady state (PB4 recharge, expect
+   ~2 s); a range change r1 -> r2 with the row rewritten AD1-last: AD1 and RMS
+   settle times, and whether the note-7 zero of the new range holds (test 1
+   per range).
+7. **r0 row bytes.** The 6 V range on the AC V r0 row (PA6 tap, OP1 x10 to
+   PB4): (i) AD1 = SENSE - PB5 (the DC V r1 bytes, factory r1 gain) vs (ii)
+   AD1 = OP1O - RLU after the x10 network (self-calibrated gain), each on
+   1 / 3 / 5 V DC against the DC V function, with 2 V rms 50 Hz added to see
+   the AC part unchanged: which reads DC within the DC V spec and keeps the AC
+   V spec; one of them is the r0 row of (b). (The stock DC V r0 path, PA7 with
+   OP1 x1, cannot be merged: it needs a different tap than the AC V r0 row.)
+
+## 9. Sources
+
+Local (in `docs/`): `DS-HY3131_EN.pdf` (electrical table p. 11-12; 13.1 AD1
+p. 29-30 incl. note 7; 13.2 AD2/AD3, LPF, RMS p. 31-34), `APD-DMM003_EN.pdf`
+(3. DCV p. 11, 4. ACV p. 17 and the ACV block diagrams: AD2 -> HPF -> LPF /
+RMS), `APD-DMM001_EN.pdf` (ENOB definition eq. 2-3; SETDMM calibration of
+ADC1 or RMS), `APN-HY3131001_EN.pdf` (SPI MOSI timing only), `HY3131-ENOB.zip`
+(`Config/ACV/HYCONFIG-0.txt`, `Config/DCV/HYCONFIG-0.txt`), the three
+`*DemoCode.zip` (readme placeholders only). Sibling docs as cited.
+
+Web (retrieved 2026-10-22):
+
+* Fluke 287/289 Calibration Manual (AC+DC definition, AC and DC/AC+DC voltage
+  and current tables, footnotes): https://assets.fluke.com/manuals/287_289_cmeng0000.pdf
+* Fluke 287/289 Users Manual (Measuring AC and DC Signals, ranging in AC+DC):
+  https://assets.fluke.com/manuals/287_289_umeng0200.pdf
+* Fluke 187/189 Users Manual ("rms total of ac and dc measurements"):
+  https://assets.fluke.com/manuals/187_189_umeng0100.pdf
+* Fluke 83V/87V detailed specifications ("AC conversions are ac coupled"):
+  https://valuetronics.com/cdn/shop/files/Fluke_83V_87V_PRV240.pdf
+* Fluke, "Facts about true-rms measurement" (AC-coupled vs ac+dc, the 189,
+  the sqrt(AC^2 + DC^2) formula): https://www.fluke.com/en/learn/blog/digital-multimeters/facts-about-true-rms-measurement
+* Keysight, "Tip 2: Measuring an AC signal with a DC offset" (manual
+  combination with >= 10 PLC beats the built-in function):
+  https://www.keysight.com/mx/en/lib/resources/training-materials/tip-2-measuring-an-ac-signal-with-a-dc-offset-458371.html
+* Keysight U1280 Series data sheet 5992-0847EN (AC and AC+DC voltage p. 11,
+  current p. 12): https://rapid-tech.com.au/wp-content/uploads/2021/10/Keysight-U1282A-Datasheet.pdf
+  (mirror of https://www.mouser.com/datasheet/2/878/5992_0847EN-1143121.pdf)
+* Keysight 3458A data sheet (ACDCV additional error tables, reading rates):
+  https://assets.testequity.com/te1/Documents/pdf/keysight/3458A-ds.pdf ;
+  the DC-coupled synchronous sampling statement is from the Keysight
+  knowledge-centre / user's guide excerpts found via search
+  (https://www.keysight.com/us/en/assets/9018-01001/user-manuals/9018-01001.pdf,
+  not retrievable as text here).
+* Brymen BM867s/BM869s User's Manual (p. 18-20: DC Voltage, AC Voltage, "DC
+  AC & AC+DC AC Voltage" tables):
+  http://www.brymen.com/images/ProductsList/BM860s_List/BM860s-manual-2-033Ed2-ES636-Print1.pdf ;
+  lygte-info review (two DC paths): https://lygte-info.dk/review/DMMBrymen%20BM869s%20UK.html
+* EEVblog 121GW User Manual rev. 2025-03-03 (p. 15-17 specifications, p. 36
+  modes, autoranging caution): https://www.eevblog.com/files/EEVblog-121GW-Manual.pdf
+* Hioki DT4281/DT4282 Instruction Manual DT4281A981-12 (p. 85 display update
+  rate, p. 86-89 accuracy tables and DC+ACV notes):
+  https://www.hioki.com/download/30687
+* UNI-T UT61E+ retailer specification (secondary): https://toolboom.com/en/digital-multimeter-uni-t-ut61eplus/ ;
+  UT171B: https://toolboom.com/en/digital-multimeter-uni-t-ut171b/ ;
+  HY3131 in the UT171 series (forum): https://eevblog.com/forum/testgear/eevblog-121gw-discussion-thread/2025
+* Owon XDM1041 (functions list): https://www.elektor.com/products/owon-xdm1041-true-rms-multimeter
+* DTM0660 datasheet (mirror): https://shaddack.mauriceward.com/projects/reveng_multimeters/chips/DTM0660.pdf
+* Fortune FS9922-DMM4 datasheet rev 1.3: https://cdn.hackaday.io/files/21300911299200/FS9922-DMM4-DS-13_EN.pdf
+* Cyrustek ES51966 datasheet (ES636 for true RMS): https://shaddack.mauriceward.com/projects/reveng_multimeters/chips/ES51966.pdf
+* Cyrustek ES51997 (listing only, PDF blocked): https://www.alldatasheet.com/datasheet-pdf/pdf/456328/CYRUSTEK/ES51997.html
+* Alientek DM40 DC spec +-(0.03 % + 5 d) (forum; the official manual is a
+  220 MB RAR behind a JS button on en.alientek.com and was not fetched):
+  https://www.eevblog.com/forum/testgear/alientek-dm40c-multimeter-(dm40a-dm40b-dm40c)
