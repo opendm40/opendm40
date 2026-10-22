@@ -84,6 +84,8 @@ loop. RX goes to a 1 KiB circular DMA ring (89 ms of input).
 | `READ?` | 15 B | 1.3 ms | 0.1-0.4 s, set by the DMM conversion, not the link |
 | `MEAS:<f>?` after a function change | 15 B | 1.3 ms | ~3 s (settling, as on USBTMC) |
 | `WAV:DATA?` | 406 B | 35 ms | ~50-100 ms |
+| `WAV:DATA?` with `WAV:POIN 2000` (WORD) | ~3.8 kB | 0.33 s | ~0.4 s |
+| `WAV:DATA?` full record (`WAV:POIN MAX`) | 26.6 / 53.2 kB | refused | `#10` + "Too much data" |
 | `LOG:DATA?` | <= 6145 B | 0.53 s | ~0.6 s (AD1 <= 640 S/s only, see below) |
 
 The data logger over Bluetooth (`LOG:STATe ON`, `LOG:DATA?`; 2026-10-22):
@@ -107,6 +109,41 @@ The module has no RTS/CTS wiring. Classic SPP keeps up with 115200. Over BLE
 (20-byte notifications at the connection interval) the module may not keep up
 with a burst like `LOG:DATA?`. That is not measured yet. Standard software
 uses classic SPP anyway.
+
+## Scope waveform readout
+
+The same commands on USBTMC and Bluetooth (`src/scope_wav.rs`; the scope
+settings are the meter's, shared by both transports and the screen):
+
+| Command | |
+|---|---|
+| `WAVeform:POINts SCReen\|MAXimum\|<n>` / `?` | SCReen (default): the 400 screen columns (mean code of each). MAXimum: the whole acquisition record (26624 samples; fewer only after a STOP that cut an acquisition short). `<n>`: the record decimated to at most n points (every ceil(len/n)-th sample). `?` = the points the next `WAV:DATA?` holds. |
+| `WAVeform:FORMat BYTE\|WORD` / `?` | BYTE: code >> 2 (0..255). WORD: the 10-bit ADC code as 16-bit little endian (0..1023). |
+| `WAVeform:SOURce CHANnel1` / `?` | Accepted for drivers; one channel. |
+| `WAVeform:PREamble?` | `format,type,points,count,xinc,xorig,xref,yinc,yorig,yref` (Keysight / Rigol order): format 0 BYTE, 1 WORD; type 0 screen columns, 2 record (RAW); count 1. Point i: t = (i - xref) * xinc + xorig seconds from the trigger point (untriggered: the screen centre; screen columns: from the trigger column), volts = (d - yref) * yinc + yorig at the probe tip (wave view: the DMM jacks' V or A). **Changed** from the earlier 4-field `400,xinc,yinc,yorig`. |
+| `WAVeform:DATA?` | `#<d><len><data>`. SCReen + BYTE (the defaults) is the old `#3400` + 400 bytes and still joins other replies (`*OPC?;WAV:DATA?`); every other form is a block of its own. The record forms need the scope stopped: while it runs the reply is `#10` and `SYST:ERR?` = "Settings conflict". |
+| `DIGitize` | One acquisition with the current sweep (Auto: triggered or, after the timeout, untriggered; Normal: the next trigger), then STOP. The sweep setting stays (`SINGle` sets it to Single); roll mode is skipped for it. |
+| `TRIGger:STATus?` | `STOP` (stopped: the record is readable), `WAIT`, `AUTO` (untriggered frames), `TD` (triggered), `RUN` (roll). |
+| `CHANnel1:OFFSet <V>` / `?` | The vertical position as a voltage added to the signal (positive = the trace moves up; Rigol / libscopehal sign), steps of 4 div / 141. |
+| `ACQuire:SRATe?` | The ADC rate of the timebase, S/s (2.5 kS/s at 1 s/div .. 50 MS/s). |
+
+Reading a record: `STOP` (or `SINGle` / `DIGitize` and poll `TRIG:STAT?`
+for `STOP`), `WAV:POIN MAX`, `WAV:FORM WORD`, `WAV:PRE?`, `WAV:DATA?`.
+Over USBTMC a reply longer than the 6 KiB response buffer (the full WORD
+record is `#553248` + 53 248 bytes) is streamed from the scope buffer as
+the host reads it, over as many REQUEST_DEV_DEP_MSG_IN rounds as the
+host's TransferSize needs; the main loop polls USB for it within the
+disk-READ budget per pass (2 ms, 0.5 ms while logging), so the screen and
+the DMM keep running, and the scope stays stopped (front-panel RUN waits)
+until the last packet left or the host gave the read up (a new command,
+a clear). No `\n` follows a block on USBTMC (as every reply there).
+Over Bluetooth the reply has to fit the 6 KiB reply buffer: a longer one
+is refused with `#10` and "Too much data"; `WAV:POIN 2000` with WORD
+(3.8 kB, 0.33 s on the UART) is the practical full-width record there.
+
+Host: the libscopehal / ngscopeclient driver `alientek_dm40`
+(`../../ngscopeclient-dm40/README.md`) uses exactly this sequence, with
+`DIG` per record.
 
 ## Host side
 

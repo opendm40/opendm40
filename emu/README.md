@@ -288,6 +288,15 @@ pages and swipes, the viewer (the whole screen read back with DBG:LCD? must
 equal the BMP), Delete -> Cancel, Delete -> Delete (MMEM:CAT? 8 -> 7),
 MENU back out (~8 min).
 
+`wavtest.py --app <ELF> [--port P] [--bt-port P]` checks the scope waveform
+readout (fw-rs src/scope_wav.rs) against the scope feeder's sine: the
+default WAV:DATA?, WAV:POIN / FORM / PRE?, DIGitize / SINGle / TRIG:STAT?,
+the 53 KB WORD record streamed over USBTMC in 4096-byte rounds and in one
+64 KiB round, decimation, CHAN1:OFFS, an abandoned stream, and the
+Bluetooth refusal (~5 min; USB/IP 24140, BT 24141). It turns the
+comparator trigger off: the comparator path sometimes never completes a
+frame after a restart in the emulator.
+
 ### GDB
 
 ```sh

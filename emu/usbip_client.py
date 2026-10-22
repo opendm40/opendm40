@@ -364,35 +364,44 @@ def scpi_tcp(busid, port):
     t_start = time.monotonic()
     while True:
         c, _ = srv.accept()
-        buf = b''
-        while True:
-            data = c.recv(4096)
-            if not data:
-                break
-            buf += data
-            while b'\n' in buf:
-                line, buf = buf.split(b'\n', 1)
-                cmd = line.decode(errors='replace').strip()
-                if not cmd:
-                    continue
-                t0 = time.monotonic()
-                print('%8.3f << %s' % (t0 - t_start, cmd), flush=True)
-                tmc.write(cmd)
-                if '?' in cmd:
-                    try:
-                        raw = tmc.read(maxlen=65536)
-                    except socket.timeout:  # no reply (unknown query): nothing to the client
-                        print('         !! no reply within 5 s', flush=True)
-                        continue
-                    dt = time.monotonic() - t0
-                    if raw[:1] == b'#' and raw[1:2].isdigit():
-                        print('         >> block, %d bytes (%.0f ms)' % (len(raw), dt * 1e3), flush=True)
-                        c.sendall(raw + b'\n')
-                        continue
-                    rep = raw.decode(errors='replace').strip()
-                    print('         >> %s (%.0f ms)%s' % (rep, dt * 1e3, '  !! > 1 s' if dt > 1.0 else ''), flush=True)
-                    c.sendall(rep.encode() + b'\n')
+        try:
+            scpi_tcp_client(c, tmc, t_start)
+        except OSError as e:  # the client went away mid-exchange: serve the next one
+            print('         !! client: %s' % e, flush=True)
         c.close()
+
+
+def scpi_tcp_client(c, tmc, t_start):
+    """One scpi-tcp client until it closes."""
+    import time
+    buf = b''
+    while True:
+        data = c.recv(4096)
+        if not data:
+            break
+        buf += data
+        while b'\n' in buf:
+            line, buf = buf.split(b'\n', 1)
+            cmd = line.decode(errors='replace').strip()
+            if not cmd:
+                continue
+            t0 = time.monotonic()
+            print('%8.3f << %s' % (t0 - t_start, cmd), flush=True)
+            tmc.write(cmd)
+            if '?' in cmd:
+                try:
+                    raw = tmc.read(maxlen=65536)
+                except socket.timeout:  # no reply (unknown query): nothing to the client
+                    print('         !! no reply within 5 s', flush=True)
+                    continue
+                dt = time.monotonic() - t0
+                if raw[:1] == b'#' and raw[1:2].isdigit():
+                    print('         >> block, %d bytes (%.0f ms)' % (len(raw), dt * 1e3), flush=True)
+                    c.sendall(raw + b'\n')
+                    continue
+                rep = raw.decode(errors='replace').strip()
+                print('         >> %s (%.0f ms)%s' % (rep, dt * 1e3, '  !! > 1 s' if dt > 1.0 else ''), flush=True)
+                c.sendall(rep.encode() + b'\n')
 
 
 class Msc:
