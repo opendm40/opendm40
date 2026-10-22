@@ -800,7 +800,10 @@ impl AcPhaseDiag {
 impl Dmm {
     pub fn new() -> Self {
         hy::init_pins();
-        let model = unsafe { read_volatile(CAL as *const u8) }.min(2);
+        // Stock rule (docs/model-variants.md): calibration byte 0, clamped to
+        // 2; a record the stock would reject is replaced by its defaults
+        // (model 0 = DM40A). fw-rs checks the version word only (cal_ok).
+        let model = if cal_ok() { Self::model_raw().min(2) } else { 0 };
         Dmm {
             model,
             mode: 1,
@@ -897,8 +900,14 @@ impl Dmm {
         }
     }
 
+    /// 0 DM40A, 1 DM40B, 2 DM40C (identity only: counts are COUNTS_MODEL).
     pub fn model(&self) -> u8 {
         self.model
+    }
+
+    /// The calibration model byte as stored (record 0x080C0000 + 0x168).
+    pub fn model_raw() -> u8 {
+        unsafe { read_volatile(CAL as *const u8) }
     }
     /// Function code as seen from outside (= `func()`): the stock mode, or
     /// 16 / 17 in AC+DC. main.rs gates the data logger on this, so LOG:STATe ON

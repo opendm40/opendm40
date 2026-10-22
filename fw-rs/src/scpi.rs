@@ -6,7 +6,9 @@
 //!   *IDN?  *RST  *CLS  *OPC?  *ESR?  *STB?  SYSTem:ERRor?
 //!   CONFigure:<f>  MEASure:<f>?  READ?  FETCh?  [SENSe:]FUNCtion?
 //!   [SENSe:]FUNCtion "<f>"   CONFigure?   INITiate  ABORt  SYSTem:LOCal|REMote
-//!   (no-ops)   SYSTem:IDN:EMULation OFF|34401A / ?
+//!   (no-ops)   SYSTem:IDN:EMULation OFF|34401A / ?   SYSTem:MODel?
+//! (*IDN? and SYSTem:MODel? name the model of the calibration record,
+//! docs/model-variants.md; fw-rs uses the DM40C count limits on all models.)
 //! where <f> = VOLTage[:DC] | VOLTage:AC | VOLTage:ACDC | CURRent[:DC] |
 //! CURRent:AC | CURRent:ACDC | RESistance | CONTinuity | DIODe | CAPacitance |
 //! FREQuency | TEMPerature. Functions are stock DMM mode numbers (see dmm.rs),
@@ -137,7 +139,23 @@
 
 use crate::dmm::Reading;
 
+/// *IDN? (model letter at IDN_MODEL_AT = the calibration model byte, `model`).
 pub const IDN: &[u8] = b"Alientek,DM40A,0,dm40-fw 0.1";
+const IDN_MODEL_AT: usize = 13;
+
+/// Model index (0 DM40A, 1 DM40B, 2 DM40C) and the raw calibration byte
+/// (record 0x080C0000 + 0x168, docs/model-variants.md), set once by App::new
+/// from `Dmm::model()` / `Dmm::model_raw()`. *IDN? and SYSTem:MODel? report it.
+static MODEL: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
+
+pub fn set_model(index: u8, raw: u8) {
+    MODEL.store(index.min(2) as u16 | (raw as u16) << 8, core::sync::atomic::Ordering::Relaxed);
+}
+
+fn model() -> (u8, u8) {
+    let v = MODEL.load(core::sync::atomic::Ordering::Relaxed);
+    (v as u8, (v >> 8) as u8)
+}
 /// *IDN? while SYST:IDN:EMUL 34401A is on: the HP 34401A identity (vendor
 /// as the real meter's, libsigrok maps it to "HP"), our firmware in the
 /// version field.
@@ -1003,7 +1021,35 @@ impl Scpi {
                 self.put(b";");
             }
             match (p0, query) {
-                (b"*IDN", true) => self.put(if idn_emul() == 1 { IDN_34401A } else { IDN }),
+                (b"*IDN", true) if idn_emul() == 1 => self.put(IDN_34401A),
+                (b"*IDN", true) => {
+                    let mut t = [0u8; IDN.len()];
+                    t.copy_from_slice(IDN);
+                    t[IDN_MODEL_AT] = b'A' + model().0;
+                    self.put(&t);
+                }
+                // SYSTem:MODel?: "DM40A|B|C,<raw byte>,<counts>": the model the
+                // calibration record names (stock rule: record +0x168, a record
+                // without version 1 counts as DM40A) and the count limits
+                // fw-rs uses on every model (60000, dmm.rs COUNTS_MODEL).
+                _ if kw(p0, "SYSTem") && parts.len() == 2 && kw(parts[1], "MODel") && query => {
+                    let (i, raw) = model();
+                    self.put(b"DM40");
+                    self.put(&[b'A' + i, b',']);
+                    let mut nb = [0u8; 3];
+                    let mut n = 0;
+                    let mut v = raw;
+                    loop {
+                        nb[2 - n] = b'0' + v % 10;
+                        n += 1;
+                        v /= 10;
+                        if v == 0 {
+                            break;
+                        }
+                    }
+                    self.put(&nb[3 - n..]);
+                    self.put(b",60000");
+                }
                 _ if kw(p0, "SYSTem") && parts.len() > 2 && kw(parts[1], "IDN") && kw(parts[2], "EMULation") => {
                     if query {
                         self.put(if idn_emul() == 1 { b"34401A" } else { b"OFF" });

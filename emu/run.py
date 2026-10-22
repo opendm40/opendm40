@@ -13,6 +13,10 @@ Modes
           flash dump's own application.
 
 Images are composed in emu/out/ and never written back to the dumps.
+--model A|B|C sets the DM40 model byte of the calibration record (flash
+0x080C0168, record CRC rewritten) in the composed image; both the stock
+firmware and fw-rs read the model there (fw-rs/docs/model-variants.md).
+Default: the base dump's own byte (this unit: 0 = DM40A).
 Events (--tap/--key/--shot/--vin/--script) are scheduled in virtual time.
 """
 import argparse
@@ -92,9 +96,34 @@ def elf_body(path):
             pass
 
 
-def compose_flash(mode, app, out_path, base=DUMP, zero_marker=False):
+CAL_REC = 0x080C0000 - 0x08000000     # settings + calibration record (800 bytes)
+CAL_REC_LEN = 800
+MODEL_OFF = CAL_REC + 0x168           # calibration struct byte 0 = model
+MODELS = 'ABC'
+
+
+def flash_model(flash):
+    """-> 'A' / 'B' / 'C' as the stock reads it: record version 1 and CRC ok,
+    byte clamped to 2; otherwise the stock defaults (model 0 = 'A')."""
+    rec = flash[CAL_REC:CAL_REC + CAL_REC_LEN]
+    c = dm40fw.crc16(rec[4:])
+    ok = struct.unpack_from('<HHI', rec) == (c, c ^ 0xffff, 1)
+    return MODELS[min(flash[MODEL_OFF], 2)] if ok else 'A'
+
+
+def set_model(flash, letter):
+    """Patch the model byte and rewrite the record's CRC words (u16 crc16 of
+    bytes 4..799, u16 ~crc; hy3131_v2_6.h)."""
+    flash[MODEL_OFF] = MODELS.index(letter)
+    c = dm40fw.crc16(bytes(flash[CAL_REC + 4:CAL_REC + CAL_REC_LEN]))
+    struct.pack_into('<HH', flash, CAL_REC, c, c ^ 0xffff)
+
+
+def compose_flash(mode, app, out_path, base=DUMP, zero_marker=False, model=None):
     flash = bytearray(read(base))
     assert len(flash) == 0x100000, 'flash dump must be 1 MiB'
+    if model:
+        set_model(flash, model)
     if app == 'dump':
         pass
     else:
@@ -211,6 +240,8 @@ def main(argv=None):
     ap.add_argument('--disk', help='16 MiB SPI-flash image (default: working copy of the MSC dump in emu/out/)')
     ap.add_argument('--disk-add', action='append', default=[], metavar='FILE[::NAME]',
                     help='copy FILE into the working disk image (mtools), e.g. dm40-fw-native.bin::DM40_FW.BIN')
+    ap.add_argument('--model', type=str.upper, choices=list(MODELS),
+                    help='DM40 model A|B|C: patch the calibration model byte (default: the dump\'s own)')
     ap.add_argument('--zero-marker', action='store_true',
                     help='zero the 12-byte loader marker at 0x08008000 (chain: the FS-loader then installs dm40*.bin)')
     ap.add_argument('--save-disk', help='write the SPI-flash image here at the end')
@@ -276,6 +307,12 @@ def main(argv=None):
     # ---- flash image ----
     if a.flash:
         flash = a.flash
+        if a.model:  # patched copy; the given image is not changed
+            img = bytearray(read(a.flash))
+            set_model(img, a.model)
+            flash = os.path.join(OUT, 'flash-%s-model.bin' % (a.name or a.mode))
+            with open(flash, 'wb') as f:
+                f.write(img)
     else:
         if a.app == 'dump':
             app = 'dump'
@@ -285,8 +322,9 @@ def main(argv=None):
             app = app_from_file(build_fwrs(rev=a.rev))
         else:
             app = app_from_file(STOCK_DEC)
-        flash = compose_flash(a.mode, app, os.path.join(OUT, 'flash-%s.bin' % (a.name or a.mode)), a.base, a.zero_marker)
-    print('flash image:', rel(flash))
+        flash = compose_flash(a.mode, app, os.path.join(OUT, 'flash-%s.bin' % (a.name or a.mode)), a.base,
+                              a.zero_marker, a.model)
+    print('flash image:', rel(flash), '(model DM40%s)' % flash_model(read(flash)))
 
     # ---- SPI disk ----
     disk = a.disk or os.path.join(OUT, 'disk.bin')
