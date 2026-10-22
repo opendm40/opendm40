@@ -26,8 +26,13 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// LPF zeros, the wiring-dialog flag; 0 = defaults, v6 loads zero-extended).
 /// v8: 59 words; p[58] W_REC, the Record page's interval / duration
 /// (0 = every reading / until stopped, so v7 loads zero-extended).
-const VERSION: u32 = 8;
-pub const WORDS: usize = 59;
+/// v9: 62 words; p[59..62] W_POWER_ZD, the power meter DC row's AD1 zeros
+/// (app_power.rs; 0 = none, so v8 loads zero-extended).
+const VERSION: u32 = 9;
+pub const WORDS: usize = 62;
+const V8_WORDS: usize = 59;
+/// The power meter DC row's AD1 zeros (app_power::PW_ZD_WORDS words).
+pub const W_POWER_ZD: usize = 59;
 const V7_WORDS: usize = 58;
 /// Record page (decision 2026-10-22 #1): bits 0..3 the row interval
 /// (csvlog::INTERVALS_S index), bits 4..7 the duration (DURATIONS_S index).
@@ -91,6 +96,7 @@ pub fn load() -> Option<Record> {
     let version = rd(1);
     let n = match version {
         VERSION => WORDS,
+        8 => V8_WORDS,
         7 => V7_WORDS,
         6 => V6_WORDS,
         5 => V5_WORDS,

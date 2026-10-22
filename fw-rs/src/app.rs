@@ -1511,6 +1511,8 @@ impl App {
         // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
         let w = self.pw_words();
         p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS].copy_from_slice(&w);
+        let z = self.pw_zd_words();
+        p[crate::persist::W_POWER_ZD..crate::persist::W_POWER_ZD + app_power::PW_ZD_WORDS].copy_from_slice(&z);
         p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing())
             | if self.dmm_view.bar_on { 0 } else { crate::meter::EXT_HISTORY_ROW }
             | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 }
@@ -1571,6 +1573,7 @@ impl App {
         let off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_ALL;
         self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
         self.pw_restore(&p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS]);
+        self.pw_zd_restore(&p[crate::persist::W_POWER_ZD..crate::persist::W_POWER_ZD + app_power::PW_ZD_WORDS]);
         // v8: Record page interval / duration (0 = the defaults; csvlog
         // maps an unknown index to the default).
         crate::csvlog::set_next((p[crate::persist::W_REC] & 0xF) as u8, (p[crate::persist::W_REC] >> 4 & 0xF) as u8);

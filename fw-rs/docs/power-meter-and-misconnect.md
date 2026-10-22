@@ -810,29 +810,47 @@ open" / "V calibration..." during the jobs).
 at the floor needs 2). XY and XX switch costs with a real current are
 untested (T3 with a load, device list below).
 
-**DC method (owner: "DC power meter too").** `POW:COUP AC|DC|AUTO` /
-Power Settings coupling button (AC / DC / AC/DC = AUTO), persisted; the W
-button enters with the last coupling.
+**DC coupling (owner: "DC power meter too"; round 3: one fixed row).**
+`POW:COUP DC|ACDC|AUTO`, the Settings row, or the active W button; the W
+button enters with the last coupling. The first build alternated the stock
+DC V and DC A rows (AD1 for both); the owner asked why the row keeps being
+rewritten, so it was replaced (the alternating code is gone: the fixed row
+is faster, simultaneous and needs no relay or row writes; nothing it did
+better remains):
 
-| | AC (method B) | DC (AD1 method) |
+| | AC+DC (method B) | DC (`dc_row`) |
 |---|---|---|
-| rows | the power row (RMS / LPF, R34 P V P I) | stock DC V row of the V range / DC A row of the I range (f7 / f8_9), alternately |
-| relays | PA 0, PE = the I range's shunt | the same: DC V and DC A both use PA state 0 (`write_config`: modes 1 and 7..9), PE kept on the I range's shunt in both rows -> no relay click per phase |
-| V | OP2 -> AD3, 19-bit LPF, factory-derived gain, POW:ZERO | AD1 24 bit, OSR 8192 chopped, stock DC V cal (0x04 / 0x14, DCV_NEGK) |
-| I | OP1 -> AD2 LPF, AC A RMS gain, POW:ZERO | AD1, stock DC A cal (0x94 / 0xAC) |
-| P | P_ac + V_dc I_dc | V I (signed), the same `totals` (burden compensation, S = |P|, PF +-1, Q 0) |
-| cadence | full set 1.28 s | phase = 150 ms settle + 1 dropped + 2 taken (100 ms each) = ~0.45 s; a reading after each phase |
-| shown | PF / S / Q / f | PF / S / Q / f "--", the DC glyph above W, Vb |
-| expected accuracy (manual specs of the stock functions) | V: AC V +-(0.3 % + 15 d) class, gain residual ~0.1 %; I: AC A +-(0.5..0.75 % + 15 d); P ~+-1 % at PF >= 0.5; DC parts after POW:ZERO ~0.1..0.2 % (V), I_dc as AC A | V: DC V +-(0.03 % + 5 d); I: DC A +-(0.15..0.2 % + 5 d); P ~+-0.25 % + digits, no zero needed (factory offsets) |
+| row | the power row, R34 P V P I | **one row**: the power row frozen at YY plus AD1 as the stock DC A row of the current range sets it (R22 OSR 8192 chopped, R23 ENAD1, R24 AD1 = OP1O - PB3, R28 refs PB6 / AGND, R33 OP1 chopper / pre-filter); host test `dc_row_bytes`: every byte is the power row's or the DC A row's |
+| legality | - | AD2 = OP1O - PB3 (as in B), AD3 = OP2O - AGND: AD2IN != AD3IN (note 8); OP1 on the shunt is read by AD1 and AD2 at once (two converters on one node); written by `configure_dc` with all three converters off, then AD3, AD2 and **AD1 last**, so AD2 / AD3 never switch while AD1 converts (note 7); nothing is written while measuring (a range change rewrites the row, 550 ms settle) |
+| relays | PA 0, PE = the I range's shunt | the same (no relay moves at all) |
+| V | OP2 -> AD3, RMS (AC) + LPF (DC), factory-derived gain, POW:ZERO | the same channel: Y LPF = V_dc (gain, Y zero), Y RMS = the ripple (AUTO only) |
+| I | OP1 -> AD2 LPF, AC A gain, POW:ZERO | AD1 24 bit, the `poll_dca` scaling with the factory DC A gain (0x94); offset: the row's own AD1 zero of POW:ZERO (note 7: the stock's factory offset 0xAC was taken with AD2 / AD3 off; it is used only until POW:ZERO ran) |
+| P | P_ac + V_dc I_dc | V_dc I_dc (signed), `totals` (burden compensation, S = |P|, PF +-1, Q 0) |
+| cadence | full set 1.28 s | a reading per AD1 result (100 ms), V updated every 107 ms, simultaneous |
+| shown | PF / S / Q / f | PF / S / Q / f "--", the DC glyph above W and on the button |
 
-AUTO: starts in B; after a full set whose AC parts are both below 1 % of
-their DC parts plus ~100 codes of floor (`pw_dc_like`), the DC method.
-In the DC method the V row's comparator watches SENSE with a window +-3 mV
-(nearest taps) around the tap's DC; CMPHO and CMPLO both seen during one V
-phase (an AC swing of >= ~20 mV at the tap: 0.2 V on 6 V, 2 V on 60 V, 20 V
-on 600 V) -> back to B. Predictable: a DC source with less ripple than that
-stays DC; mains goes to B within one V phase. `POW:COUP?` answers `AUTO,DC`
-/ `AUTO,AC` in AUTO. The fallback (VA only) is ignored while DC is in force.
+Expected accuracy (DC; manual specs of the stock functions and the T1
+numbers): **I** = the stock DC A path: +-(0.15..0.2 % + 5 d), plus whatever
+offset note 7 adds (removed by POW:ZERO). **V via the AD3 LPF**: resolution
+1 LPF code = 1.25 V / 2^18 at the tap = 0.48 mV on 6 V, 4.8 mV on 60 V, 48
+mV on 600 V (the DC V function on AD1 resolves 0.1 mV / 1 mV / 10 mV); gain
+the factory-derived per-range gain (T1 residual <= 0.12 %) or a V cal (~0.05
+%); zero 1080 codes (0.5 V on 60 V) until POW:ZERO, then ~1 code; so ~+-(0.1
+.. 0.2 % + 2 LPF codes) against the DC V function's +-(0.03 % + 5 d) on AD1.
+P ~+-0.3 % + digits. The AD1 method of the first build had the DC V accuracy
+for V too, at the price of row writes every 0.45 s and V / I not at the
+same instant. AUTO: B until a full set is DC-like (AC parts < 1 % of the DC
+parts + ~100 codes); in the DC row back to B when the voltage's ripple (the
+Y RMS) exceeds 3 % of V_dc + ~100 codes (an AC current with a pure DC
+voltage is not seen in the DC row). `POW:COUP?` answers `AUTO,DC` /
+`AUTO,ACDC`. POW:ZERO now also takes the DC row's AD1 zero per current
+range (~12 s in all); persist v9 (62 words: p[59..62] the 6 AD1 zeros).
+
+Emulator: the DC row is a power row with AD1 on the current (the stock DC A
+calibration folded in; `powz:1` adds 300 codes of AD1 zero). powtest
+`dcad1`: 12 V 2 A 23.992 W, reversed -23.992 W, 5 V 4 mA on 6 mA 20.000 mW,
+5 V 200 uA on 600 uA 1.0000 mW; `dcburden` 1.9200 W, V_L 4.8000; `auto` DC
+-> AUTO,DC 23.994 W, mains -> AUTO,ACDC 230.00 W; `zero` with the AD1 zeros.
 
 **7th function button.** Owner request: the power meter as a full function.
 The DMM row (and the combined view's band) has 7 buttons of 64 px at a 68 px
@@ -857,8 +875,7 @@ no zeros, dialog not seen, AC).
 the factory-derived tap gain (inverse, so fw-rs reads true) x `powvg:`;
 `powz:1` = the device's LPF zeros (Y +1080, X +888 x10 / +155 x1); the
 power role's counter on SENSE (dc + AC against the window) and PB4 (the
-current); DC V rows with SCMPI = SENSE drive CMPHO / CMPLO from the tap
-waveform; the f8_9 DC A rows fold the uA calibration when PE selects the
+current); the DC row (round 3) has AD1 on the current; the f8_9 DC A rows fold the uA calibration when PE selects the
 47.5 ohm shunt (the stock mode 9; before: always mA, +3 % on the uA ranges).
 Host tests 306 OK (unipolar square f = 0 at 0xDD / 40 Hz at 0xBF, PB4 50 Hz,
 powz zeros, powvg). `emu/hy3131/powtest.py` 17 scenarios OK:
@@ -868,9 +885,9 @@ powz zeros, powvg). `emu/hy3131/powtest.py` 17 scenarios OK:
 | zero | no POW:ZERO: V 0.0526 V, I 8.92 uA (= the device's phantoms); after: V 0.0015 (noise), zeros 1080 / 888,155,... ; DC 5 V 0.4 A 1.99997 W; -5 V: P -1.99997 W, Vdc -4.9999 |
 | vcal | powvg 0.99: V 29.700 -> POW:VOLT:CAL (AC ref) -> 29.9999; powvg 0.98 DC 20 V -> POW:VOLT:CAL (DC ref) -> 19.9999; 0.2 V on 60 V: SMALL |
 | freq | unipolar 40 Hz square: F 40.0007; 12 V DC + 3 A AC 50 Hz: F 50.0008 (PB4) |
-| dcad1 | 12 V 2 A: 24.004 W; reversed -24.0025 W; 5 V 4 mA on 6 mA: 0.02000 W; 5 V 200 uA on 600 uA: 1.000 mW |
+| dcad1 | (first build, alternating rows) 12 V 2 A: 24.004 W; reversed -24.0025 W; 5 V 4 mA on 6 mA: 0.02000 W; 5 V 200 uA on 600 uA: 1.000 mW; the DC row: see "DC coupling" below |
 | dcburden | 5 V 0.4 A, R 0.5: P_L 1.92006 W, V_L 4.8001, Vb 0.200 |
-| auto | 12 V 2 A -> AUTO,DC 23.999 W; mains 230 V 1 A -> AUTO,AC 230.00 W 50 Hz |
+| auto | 12 V 2 A -> AUTO,DC 23.999 W; mains 230 V 1 A -> AUTO,AC(DC) 230.00 W 50 Hz |
 | the 11 of 3.11 | unchanged (mains, dc, small, burden, manual, alt, phasecal, energy, t1-yy, t3-cycle, scpi) |
 
 UI (ui-render: 0 violations over 22996 cases incl. the 7-button rows in
@@ -940,12 +957,12 @@ renders p07 (settings + status), p09 (I ranging), p10 (refused V cal), p11
    0). On the page: the W glyphs, a tap on the active W button cycles DC /
    AC+DC / AUTO (glyph on the button and above the unit), a tap on the value
    P / Wh / VAh, a long press on the E box asks "Reset energy?".
-5. `POW:COUP DC` with the calibrator's DC on V-COM: Vdc = DC V reading,
-   no relay clicks per phase, ~0.45 s per phase; compare at steady state
-   *and* the first readings after the alternation starts (DC_SETTLE_MS = 150
-   is a guess against the stock's 450 ms: raise it if the first V of each
-   phase is off); `POW:COUP AUTO` with the square: back to AC within a V
-   phase.
+5. `POW:COUP DC` with the calibrator's DC on V-COM (A open): Vdc vs DC V
+   (expect 0.1..0.2 % + 2 LPF codes after POW:ZERO), I ~0 after POW:ZERO
+   (`POW:ZERO?` fields 9..14 = the DC row's AD1 zeros: the note-7 offset);
+   `DBG:POW:ROW?` = the DC row, a reading every ~100 ms; `POW:COUP AUTO`
+   with the square: back to AC+DC (the ripple). With current: Idc vs the
+   DC A function on the same range (T4).
 6. With current through A (T2 / T3 / T4 of 3.11): Idc of B vs DC A (the
    RMS gain now applied to I_dc), the DC method's P vs V x I of the stock
    functions, XY / XX switch cost with a real current (DISC 2 kept), PB4 f

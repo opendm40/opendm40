@@ -131,10 +131,12 @@ Chip (datasheet DS-HY3131-V10):
   `powz:1` adds the device's LPF zeros (Y +1080 codes, X +888 with OP1 x10,
   +155 with x1; doc 3.11 T1 / T3). The comparator / counter: SCMPI = SENSE
   sees the V tap DC-coupled (dc + AC against VRH / VRL: a unipolar signal
-  never crosses a negative VRL), SCMPI = PB4 the current's AC at OP1O. DC V
-  rows with SCMPI = SENSE (the fw-rs DC power method's AC check) drive
-  CMPHO / CMPLO from the tap waveform. The f8_9 DC A rows fold the uA
-  calibration when PE selects the 47.5 ohm shunt (stock mode 9).
+  never crosses a negative VRL), SCMPI = PB4 the current's AC at OP1O. The
+  fw-rs DC row (powermeter.rs `dc_row`: the power row at YY plus AD1 = OP1O
+  - PB3 with the DC A row's AD1 bytes) is a power row with AD1 on the
+  current, the stock DC A calibration folded in (`powz:1`: +300 codes of
+  AD1 zero). The f8_9 DC A rows fold the uA calibration when PE selects the
+  47.5 ohm shunt (stock mode 9).
 * Comparator: VRHCMP / VRLCMP from the R21 mux tables and the reference divider
   (VDSC<n> = K1 * VDDA, AGNDP/N<n> = AGND +- K2 * REFO), latch -> ACPO, CMPO on
   the CMP pin when ENPCMPO = 1 (`CmpPin`: the continuity beeper).
