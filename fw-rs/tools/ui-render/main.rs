@@ -1623,6 +1623,10 @@ fn main() {
         ("10 s", "10 min", "-- (disk busy)", false),
         ("1 s", "8 h", "< 1 h left", true),
         ("Every reading", "1 h", "-- (no disk)", false),
+        // the fast logger (fastlog.rs): its estimate texts
+        ("Fast", "Until stopped", "-- (DC/AC V or A only)", false),
+        ("Fast", "10 min", "38400/s, 119 min left", true),
+        ("Fast", "24 h", "640/s, 1234 h left", false),
     ]
     .into_iter()
     .enumerate()

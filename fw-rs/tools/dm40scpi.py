@@ -39,6 +39,13 @@ transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:0001) or Bluetooth
                                               binary LOGnnn.DLG on the meter
                                               (or copy the .DLG and decode it
                                               with tools/dlog.py)
+    dm40scpi.py fast out.csv --source ad2 --rate 9600 --dur 30
+                                              the fast logger to the meter's
+                                              disk (LOG:DEST DISK; fw-rs
+                                              fastlog.rs): LOGS/FASTnnn.DLG,
+                                              then its generated CSV copied
+                                              (t_s,raw,value,lost_before);
+                                              USB only
     dm40scpi.py scpi 'CMD' ...                send commands / queries in order
     dm40scpi.py --bt btpoll [-p 50] [-d 10]   UF-36 check: poll the stock
                                               phone-app measurement frame (cmd
@@ -283,7 +290,7 @@ def log_records(raw):
 
 def do_stream(link, args):
     if args.bt:
-        print('dm40scpi: warning: Bluetooth carries ~1 kS/s at best; the ring overflows (dropped: timestamp gaps, LOG:COUNt? overwritten)', file=sys.stderr)
+        print('dm40scpi: warning: Bluetooth carries ~870 records/s at best; the meter refuses AD2 and > 800 S/s over BT ("Rate too high for Bluetooth")', file=sys.stderr)
     if args.conf:
         switch(link, args.conf)
     ad2 = args.source == 'ad2'
@@ -430,6 +437,56 @@ def do_get(link, args):
     return 0
 
 
+def do_fast(link, args):
+    """A LOG:DEST DISK session (fastlog.rs): prepare, run --dur seconds
+    (device time), copy LOGS/FASTnnn.CSV."""
+    if args.conf:
+        switch(link, args.conf)
+    ad2 = args.source == 'ad2'
+    link.query('LOG:STAT OFF')
+    link.query('LOG:SOUR %s' % ('AD2' if ad2 else 'AD1'))
+    if args.chop:
+        link.query('LOG:CHOP %s' % args.chop.upper())
+    if ad2:
+        link.query('LOG:SRAT %d' % args.rate)
+    elif args.osr is not None:
+        link.query('LOG:OSR %d' % args.osr)
+    link.query('LOG:DEST DISK')
+    link.query('LOG:DUR %d' % args.dur)
+    check_err(link, 'LOG settings')
+    t0 = time.monotonic()
+    link.query('LOG:STAT ON')
+    check_err(link, 'LOG:STAT ON (AD2: AC mV / AC A / AC V; AD1: DC V / mV / A; no CSV recording / disk job running)')
+    names = ['idle', 'preparing', 'ready', 'running', 'stopping', 'done', 'full', 'no disk', 'error']
+    st = []
+    try:
+        while True:
+            st = [int(x) for x in link.query('LOG:DISK?').split(',')]
+            if not args.quiet:
+                print('\r%-9s %3d %%  %d samples  %d bytes   ' % (names[st[0]], st[5], st[4], st[3]), end='', flush=True)
+            if st[0] >= 5:
+                break
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        link.query('LOG:STAT OFF')
+        while st and st[0] < 5:
+            time.sleep(0.5)
+            st = [int(x) for x in link.query('LOG:DISK?').split(',')]
+    if not args.quiet:
+        print()
+    link.query('LOG:DEST HOST')
+    cnt = (link.query('LOG:COUN?') or '').strip()
+    if st[0] not in (5, 6) or st[1] < 0:
+        raise IOError('session ended: %s (LOG:DISK? %s)' % (names[st[0]], st))
+    name = 'LOGS/FAST%03d.CSV' % st[1]
+    d = get_file(link, name, args.out)
+    rows = [l for l in d.decode('ascii', 'replace').splitlines() if l[:1] in ' 0123456789']
+    lost = sum(int(l.rsplit(',', 1)[1]) for l in rows)
+    print('%s (%s): %d samples, %d lost (lost_before), %d bytes on the disk, %.0f s; LOG:COUNt? %s'
+          % (args.out, name, len(rows), lost, st[3], time.monotonic() - t0, cnt))
+    return 0
+
+
 def do_scpi(link, args):
     for c in args.commands:
         r = link.query(c)
@@ -539,6 +596,16 @@ def main():
     s.add_argument('-o', '--out', help='output file (default: the name)')
     s.add_argument('-q', '--quiet', action='store_true')
     s.set_defaults(func_=do_get)
+    s = sub.add_parser('fast', help='the fast logger to the meter\'s disk (LOG:DEST DISK), then its CSV')
+    s.add_argument('out')
+    s.add_argument('--source', choices=['ad1', 'ad2'], default='ad2')
+    s.add_argument('--rate', type=int, default=4800, help='(ad2) requested S/s')
+    s.add_argument('--chop', choices=['on', 'off'])
+    s.add_argument('--osr', type=int, help='(ad1) AD1OSR code 0..7')
+    s.add_argument('--dur', type=int, default=60, help='seconds of device time (0 = until the disk is full / Ctrl-C)')
+    s.add_argument('--conf', help='switch to this function first')
+    s.add_argument('-q', '--quiet', action='store_true')
+    s.set_defaults(func_=do_fast)
     s = sub.add_parser('scpi', help='send commands / queries')
     s.add_argument('commands', nargs='+')
     s.set_defaults(func_=do_scpi)
