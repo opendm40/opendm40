@@ -1335,7 +1335,11 @@ impl App {
         if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
             power_off();
         }
-        self.off_warn(now, idle);
+        // Not while a screenshot reads the panel (its toast would land in the
+        // rows not read yet; screenshot.rs "Frozen image").
+        if !crate::screenshot::frozen() {
+            self.off_warn(now, idle);
+        }
         // RUN held in a DMM view: AutoHold on/off. The key-down already
         // toggled HOLD; set_ahold releases it again.
         if self.run_down.is_some_and(|t| now.saturating_sub(t) >= RUN_LONG_MS) {
@@ -1406,9 +1410,10 @@ impl App {
             }
         }
         // A firmware file arrived on the USB disk (vwrite.rs): ask, unless
-        // another confirm is up (then at its end).
+        // another confirm is up (then at its end), or a screenshot is reading
+        // the panel (then after it).
         #[cfg(feature = "vdisk")]
-        if !matches!(self.overlay, Some(o) if !matches!(o, crate::dialog::Overlay::Toast { .. })) {
+        if !crate::screenshot::frozen() && !matches!(self.overlay, Some(o) if !matches!(o, crate::dialog::Overlay::Toast { .. })) {
             match crate::vwrite::take_dialog() {
                 Some(true) => {
                     self.last_input = now;
@@ -2656,8 +2661,13 @@ impl App {
     }
 
     /// A toast over the view (dialog.rs); the view is redrawn when it goes.
+    /// Dropped while a screenshot reads the panel (it would land in the rows
+    /// not read yet; screenshot.rs "Frozen image"); the caller's beep stays.
     fn toast(&mut self, now: u64, txt: &str, ok: bool) {
         self.last_input = now;
+        if crate::screenshot::frozen() {
+            return;
+        }
         self.sp_end_hold(now);
         self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::TOAST_MS });
         self.redraw = true;
