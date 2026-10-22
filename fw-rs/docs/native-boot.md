@@ -454,7 +454,8 @@ date for its layout and traps.
 0x08004000  .vectors: word0 0x2002F7F8, word1 reset                region A, 16 KiB
             .shim:    reset, default_handler, boot::shim,
                       clock::init_core, wdt::start::fwdgt, shim_main
-            0xFF padding (objcopy --gap-fill=0xff)
+0x0800460c  .a2: hot named rodata (.rodata.a2.*: ASCII26, F14 blobs) region A2 (zero-wait)
+            0xFF padding (objcopy --gap-fill=0xff) up to the marker
 0x08008000  12-byte loader/ROM marker, 0xFF in our image             GAP
 0x0800800C  4 bytes 0xFF padding
 0x08008010  .text + .rodata (XIP): everything hot                   region B (zero-wait)
@@ -559,7 +560,8 @@ pattern per function, an nm diff of C against the old image: only the
 intended symbols moved). To C:
 - event code inlined into `App::gesture`: `App::tap` (5.3 KB with
   `pw_tap`, `kp_apply`, `resolution_cycle`, the range hits), `App::key`;
-  `App::show` (view change), `App::wave_open`;
+  `App::show` (view change), `App::wave_open` (`tap`, `key`, `show`: back
+  in B since region A2, below);
 - one-shot starts: `App::rec_start` (with `csvlog::start`); the outlined
   `Logger::start` / `logger::isr::start` (the Wave view's `start_wave`; the
   copies LTO inlined into `run` for LOG:STATe stay in B);
@@ -609,9 +611,11 @@ touch report while it streams), the logger panel, `persist`,
 (whose `inrush_tap` was already in C): one tap = a burst of slow fetches,
 each <= ~20 us of ISR entry latency (11.4), within the 20 us spike ad2pll
 tolerates.
-**Fonts stay in B.** The glyph blobs are anonymous rodata (`.Lanon.*` after
-the small named `*_E` descriptors: F21 25 KB, SC_F20 16 KB, own glyphs
-11.5 KB, ...), not routable by a pattern without named statics, and they
+**Fonts stay in B** (except ASCII26 and F14, in region A2 since
+2026-10-22, below). The glyph blobs are anonymous rodata (`.Lanon.*` after
+the small named `*_E` descriptors: F78 25.3 KB, TEXT22 16.2 KB, ASCII26
+11.5 KB, ...; 90.9 KB in all), not routable by a pattern without named
+statics, and they
 are read per draw on the screens a stream shows (the logger panel, the
 DMM view, the Wave view). The emulator has no flash wait-state model (200
 MIPS, no slow region), so it cannot measure the draw cost; the device did
@@ -632,11 +636,70 @@ DRAW 1, 1200 DRAW 2; 38400 DMA DRAW 1 and 2), fastlogtest typ with
 except in inrushtest `App::inrush_live` once at the capture's start and
 `inrush_scpi` for the test's own INR: setters / FETCh? while armed (by
 design, app_inrush_live.rs: the polled INR:STATe? / CONDition? are in B).
-Still in C on the volume's read path: BACKUP.TXT (`describe`) and the
-firmware image file (`FwFile`), read only when a host opens them.
+Still in C on the volume's read path: the firmware image file (`FwFile`),
+read only when a host opens it (its data is the installed image, region C
+included, so its code in B would gain little). BACKUP.TXT (`describe`) is
+in B since region A2 (`.text.vdisk_rd`).
+
+### Region A2 (2026-10-22)
+
+The zero-wait flash between the shim and the loader marker,
+`0x0800460c..0x08008000` (14 836 B; "Flash outside the image" below), is
+region A2: an output section `.a2` in `FLASH_A` right after `.vectors`
+(link-native.x), claimed before `.cold` / `.text` (first matching rule
+wins), taking `.rodata.a2.*` and `.text.a2.*`. It is part of the update
+body (flash sector 1, with the vectors and the shim), so the FS-loader
+writes it on every install like any other body byte; the body CRC `L2`
+covers it; nothing in the install path reads that range but the marker
+(`dm40fw.py` MARKER_OFFSET, reload.sh's 12-byte read at `0x08008000`,
+emu/run.py `--zero-marker`, `boot::zero_marker`), which stays 0xFF in
+the image. Only hot, region-B-class content belongs there; nothing the
+shim or recovery needs (they stay in `.vectors` / `.shim`).
+
+**What is in A2**: the ASCII26 (11 546 B) and F14 (638 B) font blobs,
+named statics `#[link_section = ".rodata.a2.<NAME>"] pub static <NAME>_B:
+[u8; N]` that `tools/mkstockfont.py` emits for the fonts in its
+`A2_FONTS` (the others stay anonymous byte strings in B; the regenerated
+`stockfont_data.rs` differs from the old one only in those two blobs'
+declarations). Data, not code: a fixed size, no inlining that a pattern
+could miss, and ASCII26 is the font with device evidence (the logger
+panel, read per draw while the AD2 stream runs; feasibility 11.4). A2 has
+2 652 B left; ASCII26 + F14 + HIST (484 B) would leave 2 168 B, just
+above the warning, so HIST stays in B to leave the shim room to grow.
+
+**What came back from C to B** with the 12.2 KB B gained: `App::tap`
+(5.8 KB), `App::key`, `App::show` (their audit #3 patterns removed: taps
+meet a stream on the inrush page, the slowest event code to have in C)
+and `vdisk::describe` (`.text.vdisk_rd`). An nm diff of C against
+e5dd09b: only these four symbols left it.
+
+| (ad2-isr / without) | before (e5dd09b) | after |
+|---|---|---|
+| region A2 free | 14 836 B (unused) | 2 652 / 2 652 B |
+| region B free | 26 136 / 33 320 B | 30 572 / 37 836 B |
+| region C free | 10 120 / 12 240 B | 17 840 / 19 880 B |
+| stack headroom (static worst path) | 21 436 / 21 888 B | unchanged |
+| SRAM free | 10 856 / 11 080 B | unchanged |
+
+**Budget**: the link fails when `.a2` reaches the marker (`FLASH_A` is
+`0x08004000..0x08008000`, plus an assert with the message naming
+`A2_FONTS`); `build.sh` prints `region A2 free` and ends with a banner
+below 2 KiB. Its 0xFF check of the gap now runs from the end of A2 to
+`0x08008010`. The shim grows into A2's room: a shim change that fails the
+A2 assert takes a font out of `A2_FONTS`.
+
+**Install-format check** (the image of this change): `dm40fw.py info` /
+`unpack` (the unpacked body equals the objcopy body + 0xFF padding, the
+12 bytes at body offset 0x4000 are 0xFF), `tools/dm40dbg.py image` (OK,
+whole 128-byte blocks), and the emulator's full chain (`emu/run.py chain
+--app dump --zero-marker --disk-add dm40-fw-native.bin::DM40_FW.BIN`):
+the real FS-loader installs the file, the flash at `0x08004000` equals
+the body, the marker holds the update header, and fw-rs boots from it.
 
 **Link-time asserts** (`link-native.x`):
 - region A ends at or below `0x08008000`;
+- region A2 starts right after region A and ends at or below `0x08008000`
+  (`build.sh` ends with a warning banner on stderr below 2 KiB free);
 - `.text` starts at or above `0x0800800C`;
 - the image ends at or below `0x080A0000`, with >= 4 KiB of region C free
   below it (`build.sh` ends with a warning banner on stderr below 8 KiB);
@@ -668,7 +731,7 @@ or a compressed copy in the body), not by the update file.
 | range | sector | 0xFF in the dump | usable? |
 |---|---|---|---|
 | `0x08000000..0x08004000` | 0 (ROM bootloader) | ~9.7 KB, scattered | no: the boot ROM's sector |
-| `0x0800460c..0x08008000` | 1 (region A tail) | 14.8 KB | inside the image, zero-wait: the cheapest headroom (shim / vectors end at `0x0800460c`, build.sh prints it); code there would need its own output section before the marker |
+| `0x0800460c..0x08008000` | 1 (region A tail) | 14.8 KB | inside the image, zero-wait: used since 2026-10-22 as region A2 (the `.a2` output section, "Region A2" above) |
 | `0x080AE700..0x080C0000` | 9 (FS-loader + boot data at `0x080A4000`) | ~70 KB | write-once: it can be programmed but never erased (the erase takes the FS-loader and the UID-bound data with it), so never updated |
 | `0x080C0400..0x080E0000` | 10 (calibration / settings) | ~127 KB | write-once likewise (an erase loses the calibration); whether the stock app rewrites this sector on a settings save is not known: a return to stock could wipe it |
 | `0x080E0000..0x080FF000` | 11 (`0x080FF000` boot word) | ~124 KB | erasable, but the FS-loader erases sector 11 at the start of every install (fsloader-install-trigger.md): fw-rs would re-program it after each update |
@@ -683,8 +746,9 @@ calibration; slow flash, so `.cold`-class code only; and the
 `0x080FF000` word (stock app's boot flag) shares the sector.
 
 **`build.sh`** checks the binary again:
-- the 16 bytes at `0x08008000`, and all padding from the end of region A to
+- the 16 bytes at `0x08008000`, and all padding from the end of region A2 to
   `0x08008010`, are 0xFF;
+- region A2 starts at the end of region A and ends at or below the marker;
 - the end is below `0x080A0000`;
 - word0 = `0x2002F7F8`;
 - the reset vector is a Thumb address in region A.
