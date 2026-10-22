@@ -37,9 +37,12 @@ Code work (in this order):
 - [x] Stack headroom 16.8 -> 24.9 KB (ad2-isr), SRAM free 1.8 -> 12.9 KB, region B free 0.3 -> 24.5 KB;
       build checks: stackdepth --check 20480, TCM stack >= 42 KiB, SRAM >= 8 KiB free, region B >= 8 KiB
       free (warning < 16 KiB).
-- [ ] Device: DBG:BOOT? STACK high-water after a scope walk + FFT + screenshot (static path 21.8 KB).
-- [ ] Device: screenshot with the scope FFT on (40 KiB CAP while the FFT holds the tail) and a shot of a
-      big screen (AC+DC / power view) then the FFT: the spectrum resumes after the shot.
+- [x] Device: DBG:BOOT? STACK high-water after a scope walk + FFT + screenshot (static path 21.8 KB):
+      a239aa6 21 616 / 46 620 B (46 %) after scope page, popups, FFT on, AUTO, Save CSV, 3-finger shot
+      (boot 18 328); docs/dmm-input-scope-feasibility.md 11.11.
+- [x] Device: screenshot with the scope FFT on (40 KiB CAP while the FFT holds the tail): a239aa6
+      SHOTS/S007.BMP 307 266 B holds the spectrum, the FFT keeps updating after the shot (11.11).
+- [ ] Device: a shot of a big screen (AC+DC / power view) then the FFT: the spectrum resumes after the shot.
 - [ ] `.cold` (region C, not zero-wait) watch: the per-pass entry points of cold modules
       (boot::mark_healthy, upload::poll, dlog::gen / stale, screenshot::poll) are inlined into hot
       callers today (map checked 2026-10-22), but fatdir (C) runs in every csvlog commit while a CSV
@@ -715,9 +718,17 @@ Firmware:
       DMA at 38400 lost the lock (CPU probe frames overran): probes as DMA frames since a4907d0.
 - [x] Device a0cdb4e (feasibility 11.10): DMA /16 38400 lost 0 of 2.3 M at 17.5 % CPU, 19200 DRAW 2 lost 0 at
       7.8 %; CPU /8 + CKPH 38400 lost 0 at 51 %, 4800 DRAW 2 / 9600 lost 0. Host: a raw drain tops out at ~37 kS/s.
-- [ ] Decide: DMA frames as the stream default (DBG:AD2:DMA 1 today); the wave view gains the most.
+- [x] Decide: DMA frames as the stream default; the wave view gains the most.
       decided: see docs/decisions-2026-10-22.md #7 (DMA frames default, gated on one device run with the
       default flipped: 60 s runs, a 15-min 38.4 k sharing matrix with gen DAC + BT, the wave bands)
+      done a239aa6 (`set_dma_req` default 1; DBG:AD2:DMA 0 = CPU frames). Device 11.11: 60 s 4800 DRAW 2 /
+      9600 / 19200 DRAW 2 / 38400 lost 0 at 1.9 / 3.9 / 7.8 / 17.5 % CPU; 900 s 38400 with the generator
+      DAC at 10 MS/s lost 0 of 34.56 M at 17.6 %; Wave view 5 ms..1 s/div bad 0, the same measurements as
+      CPU frames, first sample 14..51 ms after a band change (CPU 10..22 ms); DC V / SELF? clean after.
+      Emulator ad2streamtest +-100 ppm (default, no :dma) + wavetest PASS.
+- [ ] Device: decision #7 sharing matrix, BT part: 38400 for 15 min with BT connected (phone or host SPP),
+      lost / bad 0, BT answers after the stream. Not run on a239aa6: the host got "Host is down" from the
+      meter's SPP address for the whole session (11.11).
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
       decided: see docs/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
       revisit with decision #3's request queue)
@@ -748,6 +759,7 @@ Firmware:
       log, dlog TAB); build.sh native checks the static worst path (tools/stack-depth) >= 16 KiB headroom,
       link-native.x stack >= 28 KiB + 16 KiB. Emulator walk 38580/43448 -> 28532/48344 B.
       (verify on device: DBG:BOOT? STACK after the scope walk, expect ~28.5 K used of ~48.3 K)
+      device a239aa6 (after the 2026-10-22 rework): 21.6 K used of 46.6 K (feasibility 11.11)
 - [x] Scope 32 ms loop passes ~3/s (meas 11.4 + frame 5 + cells 12.3 ms in one pass): a33e3ad integer
       measurement maths, graph paint and cells on later passes (one changed cell per pass); fa3358d a
       trace-only graph flush stops after 4 ms. Emulator 1 ms/div loop max: noise 10.9 -> 5.7 ms, 40 Hz

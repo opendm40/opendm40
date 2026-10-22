@@ -1131,9 +1131,9 @@ us_r6 13.9, against 8.0 / 21.6 at /16).
 
 **Defaults** (`stream::pick_div`, at each stream start; `stop` restores
 /16 mode 0 for the DMM):
-- CPU frames at /8 + CKPH (DBG:ISR? div = 1008).
-- DMA frames at /16 (1016 is not possible: the CKPH switch inside a frame
-  needs the CPU).
+- DMA frames at /16, the stream default since a239aa6 (DBG:ISR? div = 16;
+  1016 is not possible: the CKPH switch inside a frame needs the CPU).
+- CPU frames (`DBG:AD2:DMA 0`) at /8 + CKPH (DBG:ISR? div = 1008).
 - `DBG:AD2:DIV 8|16|32[,cpha]` forces another setting.
 
 **Rate cap** (`max_rate_hz(div, dma)`):
@@ -1299,7 +1299,8 @@ is a separate entry C, `c_off` after the frame (`Pll::late_read`), because
 the bus is busy at A. Probes run every 8th period, and samples are taken
 only once locked: the edge search's error is ~ an INTF frame.
 
-**Selection**: `DBG:AD2:DMA 0|1` = CPU frames (default) / DMA frames. The
+**Selection**: `DBG:AD2:DMA 0|1` = CPU frames / DMA frames (the default since
+a239aa6, decision 2026-10-22 #7, device check 11.11). The
 CPU frames at /8 + CKPH already reach 38.4 kS/s at ~14 % CPU (11.9). DMA
 frames at /16 take ~1 us of CPU per sample; the B / C probe reads are
 2-byte DMA frames too (AD2F = bit 0 of reply byte 1). A CPU INTF frame,
@@ -1407,10 +1408,92 @@ Python loop, no CSV), 60 s each:
   DMA frames.
 - 38.4 kS/s costs 51 % with CPU frames and 17.5 % with DMA frames.
 
-**Defaults**: CPU frames (DBG:AD2:DMA 0). Switching to DMA frames
-(`set_dma_req` default 1) is one line, and the wave view would gain the
-most from it; left to the owner.
+**Defaults**: CPU frames (DBG:AD2:DMA 0) at a0cdb4e. Switching to DMA
+frames (`set_dma_req` default 1) is one line, and the wave view would gain
+the most from it: done in a239aa6 (decision 2026-10-22 #7), device check
+11.11.
 
 **76.8 kS/s is not done.** It needs the DMA data phase at /8 + CKPH: the
 CPU sends the command byte and switches CKPH, then DMA takes the 3 data
 bytes. It also needs probe frames that fit the 13 us period.
+
+### 11.11 Device check of a239aa6 (2026-10-22): DMA frames as the default
+
+a239aa6 = b21756f (the memory rework) + `set_dma_req` default 1 (decision
+2026-10-22 #7). Installed by the owner: healthy, crash count 0. No
+`DBG:AD2:DMA` sent in the default runs. Calibrator 40 Hz square on V/COM
+(the 50 Hz sine of the decision's item 3 is not on this bench), AC V.
+
+**Emulator** (gate "implement"): `ad2streamtest.py` with no `:dma` suffix
+(it sends nothing now and expects the default) at -100 and +100 ppm, 4800
+DRAW 2 / 9600 / 19200 / 38400: PASS (DMA 1, div 16 in every session).
+`wavetest.py`: PASS.
+
+**1. 60 s runs** (raw `LOG:DATA?` drain, DBG:AD2:DIV 0 = automatic):
+
+| run | lost (LOG:COUNt?) | seq / stamp gaps | late / slips / overruns / timeouts / bad | CPU | max_isr / max_lat | div |
+|---|---|---|---|---|---|---|
+| 4800, DRAW 2 | 0 of 288 137 | 0 / 0 | 0 | 1.9 % | 3.6 us / 0.26 us | 16 |
+| 9600 | 0 of 575 999 | 0 / 0 | 0 | 3.9 % | 3.6 us / 0.24 us | 16 |
+| 19200, DRAW 2 | 0 of 1 152 864 | 0 / 0 | 0 | 7.8 % | 3.6 us / 0.26 us | 16 |
+| 38400 | 0 of 2 304 171 | 0 / 0 | 0 | 17.5 % | 5.3 us / 0.28 us | 16 |
+
+CPU matches 11.10 (7.8 % / 17.5 %). Codes stay within -106 k..+108 k. No
+R26 transient samples (DMA sessions start after the lock).
+
+**2. Sharing matrix**, 38400 for 900 s with the generator ON in DAC mode at
+10 MS/s (sine 10 kHz, 2 Vpp: n = 1000, M = 20):
+- lost 0 of 34 560 690, seq / stamp gaps 0 / 0, bad / timeouts / overruns
+  / late / slips 0, CPU 17.6 %, max_isr 5.3 us, max_lat 0.28 us, locked
+  -1.7 ppm.
+- The generator stayed on: SOUR:FUNC? SIN, FREQ? 10000, OUTP? 1 after.
+- The scope page cannot check the generator's output on this bench: the
+  MCX input is not wired to the generator. The GEN badge reads 10.0 kHz.
+- **BT not exercised.** The host could not connect to the meter's SPP
+  address ("Host is down", not advertising) before, during and after the
+  streams; the cause was not found (the status bar shows the BT icon). The UART4 RX DMA was armed as usual, so the DMA controller
+  sharing with bt.rs was present but idle. The "BT connected + reconnects
+  after the stream" part is still open.
+
+**3. Wave view** (MF range page -> Wave, generator still on), every band
+5 ms .. 1 s/div. "First sample" = from `TIM:SCAL` to the first captured
+sample of the restarted session (DBG:ISR? polled over USBTMC, a few ms of
+host resolution):
+
+| tb/div | band S/s | first sample DMA / CPU | FREQ | VRMS | VPP | bad / timeouts / overruns / slips | CPU DMA / CPU frames |
+|---|---|---|---|---|---|---|---|
+| 5 ms | 9600 | 14 / 10 ms | 0 (2 periods on screen, both kinds) | 4.767 V | 10.01 V | 0 | 4.0 / 13.0 % |
+| 10 ms | 4800 | 20 / 12 ms | 40.000 Hz | 4.745 V | 9.99 V | 0 | 2.0 / 6.5 % |
+| 20 ms | 4800 | no restart | 40.000 Hz | 4.745 V | 9.96 V | 0 | |
+| 50 ms | 2400 | 27 / 10 ms | 40.000 Hz | 4.699 V | 9.91 V | 0 | 1.0 / 3.2 % |
+| 100 ms | 2400 | no restart | 40.000 Hz | 4.696 V | 9.89 V | 0 | |
+| 200 ms | 1200 | 51 / 22 ms | 40.000 Hz | 4.696 V | 9.89 V | 0 | 0.4 / 1.6 % |
+| 500 ms, 1 s | 1200 | no restart | 40.000 Hz | 4.696 V | 9.89 V | 0 | |
+
+- The DMA and CPU-frame measurements are the same to the last digit.
+- DMA sessions sample only once locked, so a band change takes longer
+  to show the first sample: 14..51 ms. That is still far under one screen
+  (50 ms .. 10 s).
+- No "Wave stopped", forced stops 0, SYST:ERR? empty.
+- Trigger NORM at 10 ms/div: +2 V rising and -2 V falling cross the level
+  at the trigger column on two frames each.
+- MENU closes the view (ISR stopped), READ? AC 4.775 V after.
+- The FREQ 0 at 5 ms/div is a 40 Hz square showing only two periods. Both
+  frame kinds give it.
+
+**4. After the streams**: DC V AUTO+ on the 1 V calibrator reads 1.00002 ..
+1.00021 V (within 0.05 %). `DBG:HYSPI:SELF? 2000` has every count 0.
+
+**Verdict**: items 1, 3 and 4 pass. Item 2 passes for the generator DAC.
+The BT part is open: it needs a BT link that this bench could not make. The
+default stays flipped (a239aa6), and the BT run is a TODO.
+
+**Memory rework on the device** (b21756f's numbers, a239aa6):
+- STACK at boot: 18 328 of 46 620 B.
+- After the scope walk (scope page, CH1 popup, MF menu tabs, trigger popup,
+  FFT on, STOP + Save CSV -> SCOPE/SCOP003.DLG, AUTO, 3-finger screenshot
+  with the FFT on -> SHOTS/S007.BMP 307 266 B): **21 616 / 46 620 B (46 %)**,
+  25.0 KB of headroom.
+- The static worst path is 21.8 KB, and the emulator walk gave 21.4 KB.
+- The screenshot holds the FFT spectrum (read back with MMEM:DATA?), and
+  the spectrum keeps updating after the shot.

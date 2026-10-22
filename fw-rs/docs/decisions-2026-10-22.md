@@ -467,6 +467,11 @@ sit below the point where the kinds differ in CPU, and above it DMA wins outrigh
   4. After the streams: DC V on the 1 V calibrator within 0.05 %, `DBG:HYSPI:SELF? 2000`
      all counts 0 (the DMM's /16 mode 0 restored by `stop`).
 
+**Gate result (a239aa6, feasibility 11.11).** Items 1, 3 and 4 pass. Item 2 passes for the
+generator DAC: 900 s at 38400 with a 10 kHz sine at 10 MS/s, lost 0 of 34.56 M, 17.6 % CPU. The
+BT part was not run because the host could not reach the meter's SPP address (TODO). The default
+stays flipped.
+
 **Revisit.** If the gate fails on the sharing matrix (bad > 0 only with the generator or BT
 active), the fix is DMA channel priorities (SPI2 RX above the DAC) or keeping CPU frames
 while the generator runs, decided then on the numbers; do not revert to (A) silently. 76.8
