@@ -108,6 +108,38 @@ SECTIONS
         *(.rodata.*7dm40_fw9scope_csv*);
         *(.rodata.*7dm40_fw4boot*);
         *(.rodata.*7dm40_fw3app9app_press*);
+        /* Single functions (and their closures) that run only at start-up or
+         * on a user's settings / page action, never per pass nor in the ISR:
+         * the App construction (main.rs new_app, App::new and the sub-struct
+         * constructors inlined there), the generator's plan (gen::plan, on a
+         * setting change) and Gen::apply, the settings / keypad / limits /
+         * temperature / help pages, the generator page's static parts (not its
+         * 1 s status), the fuse-check dialog, the power page's entry. A
+         * pattern that stops matching (a rename) leaves the function in B,
+         * the safe side. */
+        *(.text.*7dm40_fw7new_app*);
+        *(.text.*7dm40_fw3gen4plan*);
+        *(.text.*7dm40_fw3gen*3Gen5apply*);
+        *(.text.*7dm40_fw3app*3App11fuse_dialog*);
+        *(.text.*7dm40_fw3app*3App11limits_page*);
+        *(.text.*7dm40_fw3app*3App7kp_open*);
+        *(.text.*7dm40_fw3app9app_power*3App13pw_open_entry*);
+        *(.text.*7dm40_fw2ui8settings*);
+        *(.text.*7dm40_fw2ui9temp_page*);
+        *(.text.*7dm40_fw2ui8temp_key*);
+        *(.text.*7dm40_fw2ui9help_page*);
+        *(.text.*7dm40_fw2ui10gen_values*);
+        *(.text.*7dm40_fw2ui11gen_preview*);
+        *(.text.*7dm40_fw2ui10gen_static*);
+        /* Debug / file replies, `#[inline(never)]` so they do not land in
+         * main.rs `run` (hot): DBG:PROF?, DBG:TOUCH?, DBG:DIAG?, MMEM:CAT?,
+         * MMEM:DEL (and the modules above: DBG:HYSPI, DBG:AD2:TORN / NOISE,
+         * DBG:UPLOAD, MMEM:DATA?, DBG:GENUINE?). */
+        *(.text.*7dm40_fw4prof6report*);
+        *(.text.*7dm40_fw5touch8log_text*);
+        *(.text.*7dm40_fw10touch_diag*);
+        *(.text.*7dm40_fw6csvlog6delete*);
+        *(.text.*7dm40_fw6csvlog12catalog_scpi*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C
@@ -172,10 +204,20 @@ SECTIONS
 ASSERT(__region_a_end <= _marker_start, "region A (vectors + shim) overlaps the loader marker at 0x08008000");
 ASSERT(ADDR(.text) >= _marker_end, "code placed in the loader marker at 0x08008000..0x0800800B");
 ASSERT(__image_end <= 0x080A0000, "image reaches the FS-loader at 0x080A0000");
-/* Stack = TCM above .bss. Measured high-water 28 412 B (emulator, scope walk
- * of the device check 2026-10-21: TB list, CHA popup, MF tabs, corner step,
- * AUTO; DBG:BOOT? STACK) + the required 16 KiB headroom: .data/.bss may not
- * grow into that. build.sh native also checks the static worst call path
- * (tools/stack-depth/stackdepth.py --check 16384), which catches frame
- * growth this assert cannot see. */
-ASSERT(_stack_top - __bss_end >= 28K + 16K, "TCM stack below the measured high-water (28 KiB) + 16 KiB headroom: move statics to .sram_bss / .dmabuf");
+/* Memory budgets (2026-10-22 memory rework; the numbers then, ad2-isr (the
+ * default) / without it: static worst stack path 21 760 / 21 396 B, stack
+ * 46 620 / 46 688 B, SRAM free 12 856 / 13 040 B, region B free 24 508 /
+ * 31 884 B).
+ *   Stack = TCM above .bss. .data/.bss may not take it below 42 KiB (the
+ *   worst path + the 20 KiB build.sh requires, with ~4 KiB for statics);
+ *   build.sh also checks the static worst call path itself
+ *   (tools/stack-depth/stackdepth.py --check 20480), which catches frame
+ *   growth this assert cannot see. (Before: measured high-water 28 412 B,
+ *   emulator 2026-10-21, + 16 KiB.)
+ *   SRAM: >= 8 KiB free above .sram_bss (the last SRAM section) for DMA
+ *   descriptors / buffers still to come.
+ *   Region B: >= 8 KiB free below 0x08080000 (build.sh warns below 16 KiB;
+ *   hot code / fonts only, rarely run code goes to .cold above). */
+ASSERT(_stack_top - __bss_end >= 42K, "TCM stack below 42 KiB (worst path ~21.5 KiB + 20 KiB headroom): move CPU-only statics to .sram_bss");
+ASSERT(ORIGIN(SRAM) + LENGTH(SRAM) - __sram_bss_end >= 8K, "less than 8 KiB of SRAM free: overlay or shrink a buffer (docs/native-boot.md memory map)");
+ASSERT(0x08080000 - __etext >= 8K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");

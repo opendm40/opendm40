@@ -76,7 +76,7 @@
 //! `vdisk`) refuse host writes while busy (NOT READY, msc.rs) and set
 //! `MEDIUM_CHANGED` after a write (UNIT ATTENTION, msc.rs).
 
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use crate::calbackup::{self, crc32_upd};
 use crate::fatdir;
@@ -144,18 +144,72 @@ const _: () = assert!(HDR_LEN % 2 == 0 && BLK % 2 == 0, "block edges fall betwee
 /// pixels; `n` < 0x8000 = a run of n pixels of the next word's colour,
 /// 0x8000 | n = n literal pixels follow). Worst case W + 1 words per row.
 /// Native: 48 KiB (was 96 KiB; SRAM for the logger ring, csvlog, BT). The
-/// host renders of every fw-rs screen (tools/ui-render, 14 views incl. the
-/// scope and the worst-case DMM layouts) code to 27..45 KiB, so they are
-/// still captured at once; a busier screen (a noisy scope trace) fills CAP
-/// part way and its remaining rows are read from the GRAM while writing.
+/// host renders of the fw-rs screens (tools/ui-render, 105 renders,
+/// 2026-10-22) code to 9..68 KiB; 96 of them (all the scope ones, the main
+/// DMM view at 47.8 KiB) fit and are captured at once; a busier screen (the
+/// AC+DC and power views, a noisy scope trace) fills CAP part way and its
+/// remaining rows are read from the GRAM while writing.
 /// The RAM image has no SRAM to spare (its .dmabuf is full): 0 there, every
 /// row is then read from the GRAM while writing.
+///
+/// Shared with the scope FFT (an arena with an explicit owner): the LAST
+/// `FFT_WORDS` of CAP are the FFT's work buffer (fft::Work, 2048 f32 =
+/// 8 KiB; fft.rs needs it only while a job is in flight, the result `db`
+/// stays in scope_page::FFT), lent by `fft_work`:
+///   * the FFT renews a lease (`FFT_LEASE`, a few main-loop passes) every
+///     time it uses the buffer (load / step);
+///   * a screenshot that starts while the lease runs captures into CAP below
+///     the tail only (`Job::lim`; the rows past it come from the GRAM while
+///     writing, as when CAP is full) and leaves the FFT alone;
+///   * one that starts without a lease takes the whole CAP (`Job::tail`)
+///     from the capture to the end of the Data phase (the last CAP read);
+///     `fft_work` is None meanwhile (scope_page drops a job in flight and
+///     asks for the frame again afterwards). If its rows fit below the tail
+///     it gives the tail back as soon as the capture is done (~0.1 s, the
+///     screen is frozen then anyway).
+/// The FFT never reads what it did not write in the same job (fft.rs
+/// `load` fills every entry the job uses), so a shot that wrote over the
+/// tail leaves nothing stale behind. Scope-record jobs (K_CSV) never use CAP.
 const CAP_WORDS: usize = 24 * 1024;
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
-static mut CAP: [u16; CAP_WORDS] = [0; CAP_WORDS];
+/// f32 entries of the FFT work buffer (= fft::N, checked in scope_page.rs;
+/// this file is also built without fft.rs by the host tests).
+pub const FFT_WORK: usize = 2048;
+const FFT_WORDS: usize = 2 * FFT_WORK;
+const _: () = assert!(FFT_WORDS < CAP_WORDS && CAP_WORDS <= u16::MAX as usize, "Job::off is u16 word offsets");
+/// Main-loop passes an FFT use keeps the tail (screenshot `poll` counts it
+/// down once per pass; the scope page steps a job every pass).
+const LEASE_PASSES: u8 = 8;
 
-fn cap() -> &'static mut [u16; CAP_WORDS] {
-    unsafe { &mut *core::ptr::addr_of_mut!(CAP) }
+#[repr(C, align(4))]
+struct Arena([u16; CAP_WORDS]);
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+static mut CAP: Arena = Arena([0; CAP_WORDS]);
+static FFT_LEASE: AtomicU8 = AtomicU8::new(0);
+
+/// CAP words `0 .. lim` (`Job::lim`).
+fn cap(lim: u32) -> &'static mut [u16] {
+    let lim = (lim as usize).min(CAP_WORDS);
+    unsafe { core::slice::from_raw_parts_mut(core::ptr::addr_of_mut!(CAP).cast::<u16>(), lim) }
+}
+
+/// The scope FFT's work buffer (the tail of CAP, see there), or None while a
+/// screenshot holds it. Renews the FFT's lease. Single-threaded (main loop):
+/// the caller uses it within its own call and keeps no reference.
+#[inline(always)]
+pub fn fft_work() -> Option<&'static mut [f32; FFT_WORK]> {
+    if !fft_free() {
+        return None;
+    }
+    FFT_LEASE.store(LEASE_PASSES, Ordering::Relaxed);
+    let p = unsafe { core::ptr::addr_of_mut!(CAP).cast::<u16>().add(CAP_WORDS - FFT_WORDS) };
+    Some(unsafe { &mut *p.cast::<[f32; FFT_WORK]>() })
+}
+
+/// No screenshot holds the FFT work buffer.
+#[inline(always)]
+pub fn fft_free() -> bool {
+    let j = job();
+    !(j.tail && matches!(j.phase, Phase::Capture | Phase::Bpb | Phase::Root | Phase::Alloc | Phase::Data))
 }
 
 /// Result of a screenshot.
@@ -192,9 +246,14 @@ struct Job {
     frozen: bool,
     /// A block write was started (the disk may have changed).
     wrote: bool,
-    /// File rows 0..rows are in CAP; row r at CAP[off[r]..off[r + 1]].
+    /// File rows 0..rows are in CAP; row r at CAP[off[r]..off[r + 1]]
+    /// (words; CAP_WORDS fits u16).
     rows: u32,
-    off: [u32; H as usize + 1],
+    off: [u16; H as usize + 1],
+    /// CAP words this shot may use (CAP_WORDS, or up to the FFT's tail), and
+    /// whether it holds the tail (`fft_free`); set when the capture starts.
+    lim: u32,
+    tail: bool,
     v: Option<Vol>,
     /// Phase cursor: root block, FAT entry, data / verify block.
     i: u32,
@@ -239,6 +298,8 @@ const JOB0: Job = Job {
     wrote: false,
     rows: 0,
     off: [0; H as usize + 1],
+    lim: 0,
+    tail: false,
     v: None,
     i: 0,
     taken: [0; 32],
@@ -277,6 +338,7 @@ static mut CSV_RESULT: Option<Shot> = None;
 /// The device's own SpiFlash handle (created on the first shot).
 static mut DISK: Option<crate::spiflash::SpiFlash> = None;
 
+#[inline(always)]
 fn job() -> &'static mut Job {
     unsafe { &mut *core::ptr::addr_of_mut!(JOB) }
 }
@@ -339,6 +401,7 @@ pub fn start_csv() -> bool {
 }
 
 /// A scope CSV is being written.
+#[inline(always)]
 pub fn csv_busy() -> bool {
     let j = job();
     j.phase != Phase::Idle && j.kind == K_CSV
@@ -355,11 +418,13 @@ fn name_of(kind: u8) -> (&'static [u8], &'static [u8; 3]) {
 }
 
 /// A screenshot is in flight (host disk writes are refused meanwhile).
+#[inline(always)]
 pub fn busy() -> bool {
     job().phase != Phase::Idle
 }
 
 /// Rows still to be read from the panel: draw nothing.
+#[inline(always)]
 pub fn frozen() -> bool {
     job().frozen
 }
@@ -375,7 +440,16 @@ fn disk() -> &'static mut crate::spiflash::SpiFlash {
 }
 
 /// One bounded slice of the job in flight (main loop, every pass).
+/// `inline(always)` (as `busy`, `frozen`, `fft_work`, `fft_free`, `job`):
+/// this module is `.cold` (link-native.x, flash above 0x08080000 is not
+/// zero-wait), so what runs on every pass is inlined into the hot caller and
+/// only a shot in flight reaches the cold code.
+#[inline(always)]
 pub fn poll() {
+    // The FFT's lease on the tail of CAP runs out after LEASE_PASSES passes
+    // without a use.
+    let l = FFT_LEASE.load(Ordering::Relaxed);
+    FFT_LEASE.store(l.saturating_sub(1), Ordering::Relaxed);
     if !busy() {
         return;
     }
@@ -446,7 +520,14 @@ fn step(disk: &mut dyn BlockDevice) -> Option<Shot> {
             } else if !disk.present() || disk.block_size() as usize != BLK {
                 Some(Shot::NoDisk)
             } else {
-                j.phase = if j.kind == K_CSV { Phase::Bpb } else { Phase::Capture };
+                if j.kind == K_CSV {
+                    j.phase = Phase::Bpb;
+                } else {
+                    // CAP: all of it, unless the FFT is using its tail now.
+                    j.tail = FFT_LEASE.load(Ordering::Relaxed) == 0;
+                    j.lim = if j.tail { CAP_WORDS } else { CAP_WORDS - FFT_WORDS } as u32;
+                    j.phase = Phase::Capture;
+                }
                 None
             }
         }
@@ -497,7 +578,7 @@ impl Job {
     /// GRAM rows into CAP (file row r = screen row H - 1 - r).
     fn capture(&mut self) {
         let t = cyc();
-        let cap = cap();
+        let cap = cap(self.lim);
         let mut px = [0u16; W as usize];
         while self.rows < H {
             let mut k = 0usize;
@@ -510,13 +591,18 @@ impl Job {
                 break; // CAP full: the rest from the GRAM while writing
             };
             self.rows += 1;
-            self.off[self.rows as usize] = (o + n) as u32;
+            self.off[self.rows as usize] = (o + n) as u16;
             if self.rows < H && cyc().wrapping_sub(t) >= STEP_CYC {
                 return;
             }
         }
         if self.rows == H {
             self.frozen = false;
+        }
+        // All rows below the FFT's tail: give it back now.
+        if self.tail && self.off[self.rows as usize] as usize <= CAP_WORDS - FFT_WORDS {
+            self.tail = false;
+            self.lim = (CAP_WORDS - FFT_WORDS) as u32;
         }
         self.phase = Phase::Bpb;
     }
@@ -658,7 +744,7 @@ impl Job {
             i += 1;
             off += 1;
         }
-        let cap = cap();
+        let cap = cap(self.lim);
         while i + 1 < buf.len() {
             let px = (off - HDR_LEN) / 2;
             let (r, x) = (px / W, px % W);

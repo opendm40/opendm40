@@ -1343,6 +1343,7 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
     Ok(hn + body)
 }
 
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn catalog_scpi(out: &mut [u8]) -> Result<usize, GErr> {
     catalog_scpi_on(disk(), out)
 }
@@ -1489,6 +1490,7 @@ fn delete_in(disk: &mut dyn BlockDevice, v: &Vol, name: &[u8; 11], buf: &mut [u8
 pub fn list(out: &mut [FileInfo]) -> Result<Catalog, GErr> {
     list_on(disk(), out)
 }
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn delete(name: &[u8; 11]) -> Result<(), GErr> {
     delete_on(disk(), name)
 }

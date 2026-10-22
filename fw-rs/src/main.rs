@@ -103,14 +103,16 @@ const _: () = assert!(SCPI_QUICK_MS >= hy3131::ad1_period_us_r22(0x17) as u64 / 
 /// pid.codes test VID/PID, for the debug build only.
 const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
 
-// CPU-only buffers in SRAM (.sram_bss, zeroed at reset) rather than TCM,
-// which the stack shares (device check 2026-10-21: stack headroom).
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-static mut EP_MEMORY: [u32; 320] = [0; 320];
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+// CPU-only USB buffers in TCM .bss (2026-10-22 memory budget: the stack
+// has the headroom now, SRAM is the tighter one; they were .sram_bss).
+/// OUT-endpoint packet buffers of synopsys-usb-otg (`allocate_rx_buffer`:
+/// one max-packet buffer per OUT endpoint; the TX FIFOs live in the core).
+/// USBFS has 4 endpoints and a full-speed packet is at most 64 bytes, so 4 x
+/// 16 words is the most any configuration can take (today: EP0 + the USBTMC
+/// and MSC bulk OUT). Was 320 words.
+static mut EP_MEMORY: [u32; 64] = [0; 64];
 static mut MSC_IO: [u8; 512] = [0; 512];
 /// The MSC block buffer (was a 4 KiB field of `Msc` on the main stack).
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
 /// Data-logger state (FR-38; its 16 KiB ring is `logger::RING`, shared with
 /// the AD2 stream ISR). In SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in
@@ -144,7 +146,25 @@ fn main() -> ! {
     // Slow init (relays, touch reset ~220 ms) first: once USB is attached the
     // host expects answers within milliseconds, and a long pause here made it
     // give up on enumeration.
-    let mut app = app::App::new(&mut clk);
+    let app = new_app(&mut clk);
+    run(clk, app)
+}
+
+/// The App lives in a static (`APP`), built by its own never-inlined
+/// function: App::new's ~11 KiB of temporaries (the sub-structs before they
+/// move into the App) are popped before `run`'s frame is pushed, instead of
+/// sitting in main's frame under every main-loop call (stack headroom).
+static mut APP: core::mem::MaybeUninit<app::App> = core::mem::MaybeUninit::uninit();
+
+#[inline(never)]
+fn new_app(clk: &mut Clock) -> &'static mut app::App {
+    // Called once (main).
+    unsafe { (*core::ptr::addr_of_mut!(APP)).write(app::App::new(clk)) }
+}
+
+/// The rest of the start-up and the main loop (main's frame stays small).
+#[inline(never)]
+fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     let mut tp = touch::Touch::new(&mut clk);
     wdt::kick();
 
@@ -716,31 +736,38 @@ fn main() -> ! {
                         }
                     }
                 },
-                scpi::Out::Mmem(scpi::Mmem::Cat) => match csvlog::catalog_scpi(port.rsp_buf()) {
-                    Ok(n) => {
-                        port.respond_len(n);
-                        false
-                    }
-                    Err(e) => {
+                scpi::Out::Mmem(scpi::Mmem::Cat) => {
+                    let mut err = None;
+                    port.respond_with(&mut |b| csvlog::catalog_scpi(b).map_err(|e| err = Some(e)).ok());
+                    if let Some(e) = err {
                         scpi.set_err(if e == csvlog::GErr::Busy { "Mass storage busy" } else { "Mass storage error" });
-                        false
                     }
-                },
+                    false
+                }
                 scpi::Out::Mmem(scpi::Mmem::Data(name, off, len)) => {
                     // #4nnnn + up to 6000 bytes (dlog.rs: a LOGnnn.CSV is
                     // generated from its LOGnnn.DLG).
-                    let b = port.rsp_buf();
-                    let len = (len as usize).min(b.len().saturating_sub(6));
-                    match dlog::data(&name, off, &mut b[6..6 + len]) {
-                        Ok(n) => {
-                            b[..2].copy_from_slice(b"#4");
-                            for (i, d) in [1000usize, 100, 10, 1].iter().enumerate() {
-                                b[2 + i] = b'0' + (n / d % 10) as u8;
+                    let mut err = None;
+                    port.respond_with(&mut |b| {
+                        let len = (len as usize).min(b.len().saturating_sub(6));
+                        match dlog::data(&name, off, &mut b[6..6 + len]) {
+                            Ok(n) => {
+                                b[..2].copy_from_slice(b"#4");
+                                for (i, d) in [1000usize, 100, 10, 1].iter().enumerate() {
+                                    b[2 + i] = b'0' + (n / d % 10) as u8;
+                                }
+                                Some(6 + n)
                             }
-                            port.respond_len(6 + n);
+                            Err(e) => {
+                                err = Some(e);
+                                None
+                            }
                         }
-                        Err(dlog::DataErr::NotFound) => scpi.set_err("File name not found"),
-                        Err(_) => scpi.set_err("Mass storage error"),
+                    });
+                    match err {
+                        Some(dlog::DataErr::NotFound) => scpi.set_err("File name not found"),
+                        Some(_) => scpi.set_err("Mass storage error"),
+                        None => {}
                     }
                     false
                 }
@@ -949,9 +976,7 @@ fn main() -> ! {
                         // Definite-length #4nnnn block straight into the USBTMC
                         // response buffer (6144 B), like Dbg::Lcd. scpi.buf is
                         // only 512 B and #3 caps at 999 bytes, so neither fits.
-                        let buf = port.rsp_buf();
-                        let n = logger.encode(buf);
-                        port.respond_len(n);
+                        port.respond_with(&mut |buf| Some(logger.encode(buf)));
                         false
                     }
                 },
@@ -1246,6 +1271,7 @@ fn put_u32(scpi: &mut scpi::Scpi, mut v: u32) {
     scpi.put_bytes(&t[i..]);
 }
 
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 fn touch_diag(
     tp: &Option<touch::Touch>,
     events: u32,

@@ -114,6 +114,7 @@ fn bitlen(x: u32) -> usize {
 }
 
 /// DBG:AD2:TORN? (see the module header). Returns the reply length.
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn torn(r26: u8, n: u32, sync: bool, out: &mut [u8]) -> usize {
     let n = n.clamp(1, N_MAX);
     let p = setup(r26);
@@ -152,6 +153,7 @@ pub fn torn(r26: u8, n: u32, sync: bool, out: &mut [u8]) -> usize {
 }
 
 /// DBG:AD2:NOISE? (see the module header). `op1chop` > 3 = keep the row's.
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn noise(r26: u8, n: u32, op1chop: u8, out: &mut [u8]) -> usize {
     let n = n.clamp(2, N_MAX);
     if op1chop <= 3 {

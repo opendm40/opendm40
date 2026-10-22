@@ -38,8 +38,9 @@ RUSTFLAGS="-C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR
     cargo build --release "$@"
 ELF=$TDIR/thumbv7em-none-eabihf/release/dm40-fw
 
-# Static worst-case stack path vs the TCM stack (>= 16 KiB headroom).
-if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 16384 --top 0 > target/native/stackdepth.txt; then
+# Static worst-case stack path vs the TCM stack (>= 20 KiB headroom; the
+# SRAM-free and region-B checks are link-native.x asserts).
+if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 20480 --top 0 > target/native/stackdepth.txt; then
     cat target/native/stackdepth.txt >&2
     exit 1
 fi
@@ -65,6 +66,11 @@ gap = body[MARK - BASE:MARK - BASE + 16]
 pad = body[syms['__region_a_end'] - BASE:MARK + 16 - BASE]
 print("dm40-fw-native.bin: body %d bytes, 0x%08x..0x%08x (limit 0x%08x, %d bytes free)"
       % (len(body), BASE, end, END, END - end))
+bfree = 0x08080000 - syms['__etext']
+print("  region B free    = %d bytes (zero-wait flash below 0x08080000; link fails below 8 KiB)" % bfree)
+if bfree < 16384:
+    print("build.sh: WARNING: only %d bytes of region B (zero-wait flash) left (< 16 KiB): move rarely run code to .cold (link-native.x)" % bfree, file=sys.stderr)
+print("  SRAM free        = %d bytes (above .sram_bss; >= 8 KiB)" % (0x20030000 - syms['__sram_bss_end']))
 print("  word0 initial SP = 0x%08x (loader only; reset sets 0x10010000)" % sp)
 print("  word1 reset      = 0x%08x" % entry)
 print("  region A end     = 0x%08x (shim + vectors, limit 0x%08x)" % (syms['__region_a_end'], MARK))
