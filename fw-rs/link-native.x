@@ -215,6 +215,16 @@ SECTIONS
         *(.text.*7dm40_fw4prof6report*);
         *(.text.*7dm40_fw9log_scale*);
         *(.text.*7dm40_fw4scpi7dcv_arg*);
+        /* SCPI ranges / resolution: one command each. */
+        *(.text.*7dm40_fw4scpi9range_cmd*);
+        *(.text.*7dm40_fw4scpi8conf_cmd*);
+        *(.text.*7dm40_fw3app*3App10scpi_range*);
+        *(.text.*7dm40_fw3app*3App8range_si*);
+        *(.text.*7dm40_fw4scpi8range_si*);
+        *(.text.*7dm40_fw4scpi9range_arg*);
+        *(.text.*7dm40_fw4scpi7res_arg*);
+        *(.text.*7dm40_fw4scpi8step_exp*);
+        *(.text.*7dm40_fw4scpi6pow10f*);
         *(.text.*7dm40_fw4scpi6n7_arg*);
         *(.text.*7dm40_fw6dbg_n7*);
         *(.text.*7dm40_fw5touch8log_text*);

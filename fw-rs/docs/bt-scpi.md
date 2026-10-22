@@ -173,11 +173,42 @@ libsigrok's serial SCPI transport ends commands with CR LF, which works here
 because CR ends the line and the LF is ignored. scpi-dmm needs the DM40
 profile from the libsigrok branch in TODO.md to recognise the `*IDN?` string.
 
+Range and digits (the profile's SR_CONF_RANGE / SR_CONF_DIGITS, SmuView's
+"Range" and "Digits"; 2026-10-23): `--show` lists the ranges of the current
+function, `-c range=60V` / `Auto` sets one (`<f>:RANG <v>` /
+`<f>:RANG:AUTO ON`; scpi.rs header "Ranges and resolution"):
+
+```
+sigrok-cli -d scpi-dmm:conn=... -c measured_quantity=resistance --set
+sigrok-cli -d scpi-dmm:conn=... -c range=6kR --samples 10
+sigrok-cli -d scpi-dmm:conn=... -c digits=5 --samples 10     # RATE FAST
+```
+
+| Function | Ranges (settable) | Reported only |
+|---|---|---|
+| voltage DC / AC / AC+DC / AUTO | 600mV, 6V, 60V, 600V, 1000V | 60mV (mV-first autorange) |
+| current DC / AC / AC+DC / AUTO | 600uA, 6000uA, 60mA, 600mA, 6A, 10A | |
+| resistance | 60R, 600R, 6kR, 60kR, 600kR, 6MR, 60MR | |
+| capacitance, frequency | Auto only | 6nF .. 60mF, 60Hz .. 60MHz (when REL holds one) |
+| continuity, diode, temperature, power | none | |
+
+`Auto` returns to the autorange chosen on the meter (AUTO+ or AUTO; SCPI
+keeps that choice). The same ranges on DM40A / B / C (fw-rs uses the 60000
+counts limits on all models, docs/model-variants.md). Digits: `5` = RATE FAST
+(60000 counts, one conversion per reading), `6` = RATE MED (SLOW is kept):
+600000 counts once the moving average is full (~3.2 s after a change) in DC
+V 600 mV .. 600 V and ohm 600 ohm .. 60 kohm; elsewhere it stays 60000
+counts. The setting is the meter's global rate; each sample's digits come
+from `CONF?` (the readout's resolution), which the profile asks instead of
+`FUNC?` before each `READ?`. Ranges and the rate are safe over Bluetooth
+(no flash write, no reset): not in `UNTRUSTED_DENY`.
+
 A function changed on the meter during an acquisition does not end it: the
 `READ?` waiting at that moment, and every `READ?` until the new function has
 a reading, answers within 0.85 s with `+9.91E37` (SCPI NaN, "Data stale";
 `+9.9E37` stays the overload). The DM40 profile skips those samples and
-labels the next ones from `FUNC?`; other hosts see +inf for them. A function
+labels the next ones from `CONF?` (`FUNC?` before 2026-10-23; both name
+the function and arm the check); other hosts see +inf for them. A function
 changed over Bluetooth while sigrok reads over USBTMC counts as a change on
 the meter (device check 2026-10-22: 16 changes, 880 samples, no stop). `FUNC?`
 names of the fw-rs extras: `"VOLT:AUTO"` / `"CURR:AUTO"` (the profile's

@@ -3508,6 +3508,93 @@ impl App {
     }
 }
 
+/// SCPI ranges / resolution (scpi.rs Rng, Cmd::Range / Conf).
+impl App {
+    /// The present DMM range in SI (scpi::range_si); None outside V / A /
+    /// ohm / capacitance / frequency and in the power meter.
+    pub fn range_si(&self) -> Option<f32> {
+        if self.dmm.pw.on {
+            return None;
+        }
+        let m = self.dmm.hy_mode();
+        let r = if m == 14 { self.dmm.counter_range() as i8 } else { self.dmm.range() };
+        crate::scpi::range_si(m, r)
+    }
+
+    /// [SENSe:]<f>:RANGe / :RANGe:AUTO / :RESolution, and CONFigure:<f>'s
+    /// range part (`f`: the function the header names). There is one range
+    /// state, the current function's: naming another function is "Settings
+    /// conflict" (a query then answers +9.91E37). A set acts as the MF
+    /// range page (Dmm::set_range, REL off); AUTO as the AUTO key (the
+    /// meter's own AUTO / AUTO+ choice is kept). Capacitance / frequency:
+    /// AUTO or a hold of the present range only. The resolution is the
+    /// FR-05 rate: FAST = 60000 counts, MED / SLOW = the +1 digit where the
+    /// range has it (Dmm::rate_info). True: a reply.
+    #[inline(never)] // .cold (link-native.x): one SCPI command
+    fn scpi_range(&mut self, clk: &mut Clock, f: u8, op: crate::scpi::Rng, out: &mut crate::scpi::Scpi) -> bool {
+        use crate::scpi::{self as s, Rng};
+        let query = op.is_query();
+        let cur = self.dmm.func();
+        if matches!(f, 11 | 12 | 15) || f >= 32 {
+            out.set_err("Undefined header");
+            return false;
+        }
+        let range = self.range_si().filter(|_| s::func_id(f) == s::func_id(cur));
+        let Some(v) = range else {
+            out.set_err("Settings conflict");
+            if query {
+                out.put_bytes(s::NAN);
+            }
+            return query;
+        };
+        let cap = cur == 13;
+        let fine = self.dmm.rate() != dmm::Rate::Fast && self.dmm.rate_info(self.dmm.rate()).1;
+        match op {
+            Rng::Query => out.put_f32(v),
+            Rng::AutoQuery => out.put_bytes(if self.dmm.is_auto() { b"1" } else { b"0" }),
+            Rng::ResQuery => out.put_f32(s::pow10f(s::step_exp(v, cap) - fine as i32)),
+            Rng::Auto if self.dmm.is_auto() => {}
+            _ if self.scope.wave_on() => out.set_err("Settings conflict"),
+            Rng::Auto => {
+                self.dmm.auto_key(clk);
+                self.meter.rel_off();
+            }
+            Rng::Hold => self.dmm.hold_range(true),
+            Rng::Value(x) => {
+                // MAX: the top item; else the smallest that holds x.
+                let items = s::range_items(cur);
+                let i = if x.is_infinite() { items.len().checked_sub(1) } else { items.iter().position(|&it| it >= x * 0.9999) };
+                match i {
+                    _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
+                    Some(i) => {
+                        self.dmm.set_range(clk, Some(i as u8));
+                        self.meter.rel_off();
+                    }
+                    None => out.set_err("Data out of range"),
+                }
+            }
+            Rng::Res(x) => {
+                // MAX (inf) or at least the 60000-count step: FAST; MIN, DEF
+                // (NaN) or finer: the +1 digit rate.
+                let coarse = x >= s::pow10f(s::step_exp(v, cap)) * 0.999;
+                let r = if coarse {
+                    dmm::Rate::Fast
+                } else if self.dmm.rate() == dmm::Rate::Fast {
+                    dmm::Rate::Medium
+                } else {
+                    self.dmm.rate()
+                };
+                if r != self.dmm.rate() {
+                    self.dmm.set_rate(r);
+                    self.chart_dirty = true;
+                }
+            }
+        }
+        self.redraw |= !query;
+        query
+    }
+}
+
 /// FR-01 / FR-02 / FR-06 host interface for SCPI CALC:... (the command
 /// parsing lives in scpi.rs, the dispatch in scpi_dmm).
 impl App {
@@ -3707,6 +3794,7 @@ impl App {
                 true
             }
             C::ConfQuery if self.dmm.pw.on => {
+                out.note_asked(self.dmm.func());
                 self.pw_conf(out);
                 true
             }
@@ -3725,12 +3813,23 @@ impl App {
                     5 => ("mA", 3 - r.min(1)),
                     _ => ("\u{b5}A", 2 - r.min(1)),
                 };
-                out.put_conf_fmt(self.dmm.func(), Some((unit, dec, false)));
+                out.put_conf_fmt(self.dmm.func(), self.range_si(), Some((unit, dec, false)));
                 true
             }
             C::ConfQuery => {
-                out.put_conf(self.dmm.func(), self.meter.live());
+                out.put_conf(self.dmm.func(), self.range_si(), self.meter.live());
                 true
+            }
+            C::Range(f, op) => self.scpi_range(clk, f, op, out),
+            C::Conf(f, rng, res) => {
+                self.select_func(clk, f);
+                if !matches!(f, 11 | 12) {
+                    self.scpi_range(clk, f, rng, out);
+                }
+                if let Some(v) = res {
+                    self.scpi_range(clk, f, crate::scpi::Rng::Res(v), out);
+                }
+                false
             }
             C::Pow(c) => self.pw_scpi(clk, c, out),
             C::SysRail(Some(b)) => {

@@ -575,6 +575,16 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         false
                     }
                 }
+                // The data logger owns the HY3131: CONF selects the function
+                // as before, a range / resolution change is refused.
+                scpi::Out::Instr(scpi::Cmd::Conf(f, ..)) if logger.active() => {
+                    app.select_func(&mut clk, f);
+                    false
+                }
+                scpi::Out::Instr(scpi::Cmd::Range(_, op)) if logger.active() && !op.is_query() => {
+                    scpi.set_err("Settings conflict");
+                    false
+                }
                 scpi::Out::Instr(c) => {
                     scpi.len = 0;
                     app.scpi(&mut clk, c, &mut scpi)

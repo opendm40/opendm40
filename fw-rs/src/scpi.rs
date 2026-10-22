@@ -63,10 +63,42 @@
 //!
 //! CONFigure? answers as the Agilent / HP meters: "<func> <range>,<resolution>"
 //! with <func> as FUNCtion? ("VOLT", "VOLT:AC", "CURR:ACDC", "RES", "CAP",
-//! "FREQ", "TEMP", ...; "CONT" and "DIOD" bare), the resolution that of the
-//! readout (its decimals, one more with the +1 digit), the range 60000 counts
-//! of it (DM40 ranges are 6 / 60 / 600..., not the 34401A's 1 / 10 / 100...).
-//! No reading of the current function yet: +6.000000E+00,+1.000000E-04.
+//! "FREQ", "TEMP", ...; "CONT" and "DIOD" bare; the power meter "POW
+//! <V range>|AUTO,<A range>|AUTO"), the resolution that of the readout (its
+//! decimals, one more with the +1 digit), the range the meter's present one
+//! (`range_si`: 6 / 60 / 600..., 1000 V, 10 A; not the 34401A's 1 / 10 /
+//! 100...; temperature: 60000 counts of the readout). No reading of the
+//! current function yet: the range's 60000-count step as the resolution.
+//!
+//! Ranges and resolution (fw-rs, 34401A / 34465A style; App::scpi_range):
+//!   CONFigure:<f> [<range>|AUTO|MIN|MAX|DEF[,<res>|MIN|MAX|DEF]]   select
+//!     the function, then the range (none / AUTO / DEF = autorange, also on
+//!     the function already selected), then the resolution if given
+//!     (CONT / DIOD: no argument; CAP / FREQ: AUTO / DEF only)
+//!   [SENSe:]<f>:RANGe <v>|AUTO|MIN|MAX|DEF / ?   the smallest range that
+//!     holds <v>: V 600 mV, 6, 60, 600, 1000 V; A 600 uA, 6000 uA, 60 mA,
+//!     600 mA, 6 A, 10 A; ohm 60 ohm .. 60 Mohm (the MF range page's
+//!     items; above the top one: "Data out of range"). The query gives the
+//!     present range also while autoranging (V also 60 mV, which only the
+//!     mV-first autorange reaches; CAP 6 nF .. 60 mF, FREQ 60 Hz .. 60 MHz,
+//!     not settable)
+//!   [SENSe:]<f>:RANGe:AUTO ON|OFF|ONCE / ?   ON = the AUTO key: back to
+//!     the autorange chosen on the meter (AUTO+ or the mV- / uA-first AUTO;
+//!     SCPI does not change that choice); OFF / ONCE keep the present range
+//!     (also CAP / FREQ); ? 0 also while REL holds the range
+//!   [SENSe:]<f>:RESolution <v>|MIN|MAX|DEF / ?   the FR-05 rate (global,
+//!     not per function): <v> at least the range's 60000-count step (or
+//!     MAX) = FAST, finer (MIN, DEF) = MED unless SLOW is set (kept); ? the
+//!     resolution of the present range at the rate (one decimal more where
+//!     the range has the +1 digit: DC V 600 mV .. 600 V, ohm 600 ohm .. 60
+//!     kohm, not in AC+DC)
+//!   <f> as CONFigure's: VOLTage[:DC] | :AC | :ACDC | :AUTO, CURRent[...],
+//!   RESistance (FRESistance), CAPacitance, FREQuency. There is one range
+//!   state, the current function's: naming another one is "Settings
+//!   conflict" (a query answers +9.91E37); CONT / DIOD / TEMP have none
+//!   ("Undefined header"). A set acts as a tap on the MF range page (REL
+//!   off); refused while the data logger runs or the Wave view is open
+//!   ("Settings conflict"; CONF then only selects the function).
 //!
 //! *IDN? compatibility (SYSTem:IDN:EMULation, persisted, default OFF): with
 //! 34401A, *IDN? answers "HEWLETT-PACKARD,34401A,0,dm40-fw 0.1" so that hosts
@@ -76,9 +108,10 @@
 //! function change).
 //! Caveats: that profile knows DC / AC V and A, RES (and FRES = RES here),
 //! CONT, DIOD, FREQ (and PER, which the DM40 lacks): in CAP, TEMP and AC+DC
-//! the host stops with "unknown measurement quantity"; no ranges or
-//! resolution settings; the digits come from CONFigure?. PyVISA scripts
-//! written for a real 34401A get its command subset only.
+//! the host stops with "unknown measurement quantity"; that profile has no
+//! range or resolution settings (the DM40 profile has); the digits come
+//! from CONFigure?. PyVISA scripts written for a real 34401A get its
+//! command subset (CONF:<f> <range>,<res>, <f>:RANG, :RES work as above).
 //!
 //! Temperature / system (fw-rs extensions):
 //!   CONFigure:TEMPerature [<sensor>]   MEASure:TEMPerature? [<sensor>]
@@ -684,6 +717,187 @@ pub enum Cmd {
     FetchBurden,
     /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings 3/3).
     DispBurden(Option<bool>),
+    /// [SENSe:]<f>:RANGe[:AUTO] / <f>:RESolution (`range_cmd`): the
+    /// function the header names (`parse_func`) and the operation
+    /// (App::scpi_range).
+    Range(u8, Rng),
+    /// CONFigure:<f> [<range>|AUTO|MIN|MAX|DEF[,<res>|MIN|MAX|DEF]]
+    /// (`conf_cmd`): select the function, then the range (Rng::Auto without
+    /// one) and, when given, the resolution (Rng::Res's value).
+    Conf(u8, Rng, Option<f32>),
+}
+
+/// Range / resolution operation of a DMM function (Cmd::Range / Conf).
+/// One range state exists (the current function's): a header naming
+/// another function is "Settings conflict" (App::scpi_range).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Rng {
+    /// <f>:RANGe? (the present range, also while autoranging)
+    Query,
+    /// <f>:RANGe:AUTO? (1 = autorange, 0 = a fixed range: manual or REL)
+    AutoQuery,
+    /// RANG:AUTO ON, RANG AUTO|DEF, CONF:<f> [AUTO|DEF]: back to the
+    /// meter's autorange, the flavour chosen on the meter (V / A: AUTO+ or
+    /// the mV- / uA-first AUTO; Dmm::auto_key).
+    Auto,
+    /// RANG:AUTO OFF|ONCE: keep the present range (as REL does).
+    Hold,
+    /// RANG <v> | MIN (0) | MAX (inf): the smallest range that holds v
+    /// (34401A rule; the MF page's items).
+    Value(f32),
+    /// <f>:RESolution?
+    ResQuery,
+    /// RES <v> | MIN (0) | MAX (inf) | DEF (NaN): FAST (60000 counts) when
+    /// v is at least the range's 60000-count step, else MED (the +1 digit
+    /// where the range has it; SLOW is kept).
+    Res(f32),
+}
+
+impl Rng {
+    pub fn is_query(self) -> bool {
+        matches!(self, Rng::Query | Rng::AutoQuery | Rng::ResQuery)
+    }
+}
+
+/// Range value (SI) of a stock mode / range index, the full scale the
+/// meter labels it with (60000-count ranges 6 / 60 / 600..., 1000 V, 10 A,
+/// 60 mV = DC / AC mV r0, reached by the mV-first autorange only).
+/// `r` of frequency (14) is the counter range (Dmm::counter_range). None: no
+/// range (continuity, diode, temperature).
+pub fn range_si(mode: u8, r: i8) -> Option<f32> {
+    let r = r.max(0) as usize;
+    const P10: [f32; 8] = [1.0, 10.0, 100.0, 1e3, 1e4, 1e5, 1e6, 1e7];
+    let p = P10[r.min(7)];
+    Some(match mode {
+        0 | 1 if r >= 3 => 1000.0,
+        0 | 1 => 6.0 * p,
+        2 | 3 => [0.06, 0.6][r.min(1)],
+        4..=9 => [[6.0, 10.0], [0.06, 0.6], [6e-4, 6e-3]][((mode - 4) % 3) as usize][r.min(1)],
+        10 => 60.0 * p,
+        13 => 6e-9 * p,
+        14 => 60.0 * p,
+        _ => return None,
+    })
+}
+
+/// Decimal exponent of the 60000-count step of range `v` (the 6000-count
+/// step for capacitance, `cap`): floor(log10 v) - 4 (6 V -> -4, 1000 V ->
+/// -1, 10 A -> -3, 60 ohm -> -3, 6 nF -> -12), as the readout's decimals.
+pub fn step_exp(v: f32, cap: bool) -> i32 {
+    let mut e = -4 + cap as i32;
+    let mut x = v * 1.0001;
+    while x >= 10.0 {
+        x /= 10.0;
+        e += 1;
+    }
+    while x < 1.0 && e > -40 {
+        x *= 10.0;
+        e -= 1;
+    }
+    e
+}
+
+/// 10^e.
+pub fn pow10f(e: i32) -> f32 {
+    let mut v = 1.0f32;
+    for _ in 0..e.unsigned_abs() {
+        v = if e < 0 { v / 10.0 } else { v * 10.0 };
+    }
+    v
+}
+
+/// The settable ranges (the MF page's items in order, Dmm::set_range):
+/// V 600 mV .. 1000 V, A 600 uA .. 10 A, ohm 60 ohm .. 60 Mohm.
+pub fn range_items(func: u8) -> &'static [f32] {
+    match func {
+        0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.6, 6.0, 60.0, 600.0, 1000.0],
+        4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
+        10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6],
+        _ => &[],
+    }
+}
+
+/// RANG / CONF range argument.
+fn range_arg(a: &[u8]) -> Option<Rng> {
+    if kw(a, "AUTO") || kw(a, "DEFault") {
+        Some(Rng::Auto)
+    } else if kw(a, "MINimum") {
+        Some(Rng::Value(0.0))
+    } else if kw(a, "MAXimum") {
+        Some(Rng::Value(f32::INFINITY))
+    } else {
+        parse_num(a).filter(|v| *v >= 0.0).map(Rng::Value)
+    }
+}
+
+/// RES / CONF resolution argument (MIN 0, MAX inf, DEF NaN).
+fn res_arg(a: &[u8]) -> Option<f32> {
+    if kw(a, "DEFault") {
+        Some(f32::NAN)
+    } else if kw(a, "MINimum") {
+        Some(0.0)
+    } else if kw(a, "MAXimum") {
+        Some(f32::INFINITY)
+    } else {
+        parse_num(a).filter(|v| *v > 0.0)
+    }
+}
+
+/// [SENSe:]<f>:RANGe <v>|AUTO|MIN|MAX|DEF / ?, [SENSe:]<f>:RANGe:AUTO
+/// ON|OFF|ONCE / ?, [SENSe:]<f>:RESolution <v>|MIN|MAX|DEF / ? with <f> as
+/// CONFigure's (VOLTage[:DC] / :AC / :ACDC / :AUTO, CURRent..., RESistance,
+/// CAPacitance, FREQuency...). None: not such a header.
+#[inline(never)] // .cold (link-native.x)
+fn range_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Option<Result<Cmd, &'static str>> {
+    let r = if parts.first().is_some_and(|p| kw(p, "SENSe")) { &parts[1..] } else { parts };
+    // From 1: "RES" is also RESistance's short form.
+    let k = 1 + r.iter().skip(1).position(|p| kw(p, "RANGe") || kw(p, "RESolution"))?;
+    let f = parse_func(&r[..k])?;
+    let res = kw(r[k], "RESolution");
+    let auto = match r.len() - k {
+        1 => false,
+        2 if !res && kw(r[k + 1], "AUTO") => true,
+        _ => return None,
+    };
+    if k > 2 || f == crate::dmm::pw::FUNC {
+        return None;
+    }
+    let a = trim(arg);
+    const BAD: &str = "Illegal parameter value";
+    let op = match (res, auto, query) {
+        (false, false, true) => Some(Rng::Query),
+        (false, true, true) => Some(Rng::AutoQuery),
+        (true, _, true) => Some(Rng::ResQuery),
+        (false, true, false) if kw(a, "ONCE") => Some(Rng::Hold),
+        (false, true, false) => on_off(a).map(|on| if on { Rng::Auto } else { Rng::Hold }),
+        (false, false, false) => range_arg(a),
+        (true, _, false) => res_arg(a).map(Rng::Res),
+    };
+    Some(op.map(|o| Cmd::Range(f, o)).ok_or(BAD))
+}
+
+/// CONFigure:<f> <range>[,<res>] (`f` not temperature / power): Cmd::Conf.
+/// Continuity and diode take no argument; capacitance and frequency
+/// autorange only (AUTO / DEF).
+#[inline(never)] // .cold (link-native.x)
+fn conf_cmd(f: u8, arg: &[u8]) -> Result<Cmd, &'static str> {
+    const BAD: &str = "Illegal parameter value";
+    let a = trim(arg);
+    let mut it = a.splitn(2, |&b| b == b',').map(trim);
+    let ra = it.next().unwrap_or(&[]);
+    let rs = it.next();
+    if matches!(f, 11 | 12) && !a.is_empty() {
+        return Err(BAD);
+    }
+    let rng = if ra.is_empty() { Rng::Auto } else { range_arg(ra).ok_or(BAD)? };
+    let res = match rs {
+        Some(s) => Some(res_arg(s).ok_or(BAD)?),
+        None => None,
+    };
+    if matches!(f, 13 | 14) && (rng != Rng::Auto || res.is_some_and(|v| !v.is_nan())) {
+        return Err(BAD);
+    }
+    Ok(Cmd::Conf(f, rng, res))
 }
 
 /// ON | 1 -> true, OFF | 0 -> false.
@@ -1365,8 +1579,19 @@ impl Scpi {
                 },
                 _ if kw(p0, "CONFigure") && query && parts.len() == 1 => out = Out::Instr(Cmd::ConfQuery),
                 _ if kw(p0, "CONFigure") && !query => match parse_func_arg(&parts[1..], arg) {
-                    Some(f) => out = Out::Configure(f),
+                    // Temperature (its argument is the sensor).
+                    Some(f) if f == 15 || f >= 32 => out = Out::Configure(f),
+                    Some(f) => match conf_cmd(f, arg) {
+                        Ok(c) => out = Out::Instr(c),
+                        Err(e) => self.err = Some(e),
+                    },
                     None => self.err = Some("Command error"),
+                },
+                // [SENSe:]<f>:RANGe / RANGe:AUTO / RESolution (fw-rs).
+                _ if parts.len() > 1 && range_cmd(parts, arg, query).is_some() => match range_cmd(parts, arg, query) {
+                    Some(Ok(c)) => out = Out::Instr(c),
+                    Some(Err(e)) => self.err = Some(e),
+                    None => {}
                 },
                 (b"READ", true) => out = Out::Measure(None),
                 _ if kw(p0, "SOURce") || kw(p0, "OUTPut") => {
@@ -2026,17 +2251,25 @@ impl Scpi {
         self.put(&b[..n]);
     }
 
-    /// CONFigure? reply for stock mode `mode` (Scpi::handle `cur`) and the
-    /// latest reading of it: "\"VOLT +6.000000E+00,+1.000000E-04\"". Exact
-    /// powers of ten (hosts take the resolution's exponent as the digits).
-    pub fn put_conf(&mut self, mode: u8, r: Option<&Reading>) {
-        self.put_conf_fmt(mode, r.map(|r| (r.main.unit, r.main.dec, r.main.ext)));
+    /// CONFigure? reply for stock mode `mode` (Scpi::handle `cur`), its
+    /// range (`range_si`; None: from the readout, 60000 counts of it) and
+    /// the latest reading of it: "\"VOLT +6.000000E+00,+1.000000E-04\"".
+    /// The resolution is an exact power of ten (hosts take its exponent as
+    /// the digits): the readout's, one decimal more with the +1 digit.
+    pub fn put_conf(&mut self, mode: u8, range: Option<f32>, r: Option<&Reading>) {
+        self.put_conf_fmt(mode, range, r.map(|r| (r.main.unit, r.main.dec, r.main.ext)));
+    }
+
+    /// The function `mode` was named to the host (FUNCtion? / CONFigure?):
+    /// `take_asked`.
+    pub fn note_asked(&mut self, mode: u8) {
+        self.asked = func_id(mode);
     }
 
     /// `put_conf` from the readout format (unit, decimals, extra digit)
     /// instead of a reading: the Wave view, where the DMM poll is paused
     /// and the last reading is the one from before it (another range).
-    pub fn put_conf_fmt(&mut self, mode: u8, f: Option<(&str, u8, bool)>) {
+    pub fn put_conf_fmt(&mut self, mode: u8, range: Option<f32>, f: Option<(&str, u8, bool)>) {
         self.asked = func_id(mode);
         let name = func_name(mode).as_bytes();
         self.put(&name[..name.len() - 1]);
@@ -2058,7 +2291,7 @@ impl Scpi {
                 let pfx = if unit.chars().count() > 1 { pfx } else { 0 };
                 (pfx - dec as i32, ext as i32)
             }
-            None => (-4, 0),
+            None => (range.map_or(-4, |v| step_exp(v, mode == 13)), 0),
         };
         fn pow10(s: &mut Scpi, m: u8, e: i32) {
             s.put(&[b'+', m, b'.', b'0', b'0', b'0', b'0', b'0', b'0', b'E', if e < 0 { b'-' } else { b'+' }]);
@@ -2066,7 +2299,10 @@ impl Scpi {
             s.put(&[b'0' + (a / 10 % 10) as u8, b'0' + (a % 10) as u8]);
         }
         self.put(b" ");
-        pow10(self, b'6', exp + 4);
+        match range {
+            Some(v) => self.put_f32(v),
+            None => pow10(self, b'6', exp + 4),
+        }
         self.put(b",");
         pow10(self, b'1', exp - ext);
         self.put(b"\"");
