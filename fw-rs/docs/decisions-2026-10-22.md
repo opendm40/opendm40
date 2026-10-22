@@ -1,4 +1,4 @@
-# Decisions 2026-10-22 (five open product / engineering questions)
+# Decisions 2026-10-22 (eight open product / engineering questions)
 
 Taken on the owner's behalf, as delegated. Sources: TODO.md, docs/compact-log-format.md,
 docs/log-format-standards.md (section 3, 7), docs/dmm-input-scope-feasibility.md (2.3, 4, 5,
@@ -6,6 +6,14 @@ docs/log-format-standards.md (section 3, 7), docs/dmm-input-scope-feasibility.md
 src/logger.rs, src/powermeter.rs, src/persist.rs, src/ui.rs (`hold_label`, `strip_data`),
 docs/user-feedback.md, ../docs/dm40-feature-request.md (FR-01, FR-38). Nothing under
 firmware/re/history/ was read. No code was changed; this file and the TODO pointers only.
+
+#6..#8 (later the same day, a second delegation): docs/native-boot.md ("Unit data", "Host
+writes", "Host OS notes"), src/vwrite.rs (header, `frozen`, `set_read_only`), src/msc.rs
+(UNIT ATTENTION / `DBG_EJECT`), src/usb.rs (the SE0 disconnect), the 2026-10-21 UNIT
+ATTENTION experiment in TODO.md, docs/dmm-input-scope-feasibility.md 11 (11.3, 11.8, 11.9,
+11.10), src/hy3131.rs (`stream::pick_div`, `max_rate_hz`, `set_dma_req`, the DMA0 flag
+clears), src/bt.rs / src/gen.rs / src/scope.rs (DMA channels), src/sentinel.rs,
+src/hyspi.rs. Same rules: nothing under firmware/re/history/, no code changed.
 
 Design principles applied throughout: the stock DM40 UI and touch model stay the baseline and
 new features use its visual language; zero overlapping UI (ui-render check before any screen);
@@ -308,6 +316,236 @@ weakening the beep.
 
 ---
 
+## #6 USB volume mode: writable, read-only, or read-only with writes on demand
+
+**Question.** The generated USB volume (vdisk.rs) is writable since f4df76f / 96237b8 so the
+PC can delete LOGS / SHOTS / SCOPE files and drop a `dm40*.bin` for an update (install
+confirmed on the meter). The price (native-boot.md "Host writes", Session): while a host has
+it mounted the layout is **frozen**, no media-change UNIT ATTENTION is sent (a UA on a
+rw-mounted removable disk makes Linux fail the I/O and later write back dirty buffers that
+carry the old FAT / directories: our diff could read a stale FAT sector as "chain freed" of a
+new file), so a recording / screenshot made meanwhile appears only at the eject / re-plug.
+The read-only volume (`DBG:VDISK:RO 1`) sends the UA at once: the 2026-10-21 experiment
+showed Linux listing new files on the mounted volume immediately, Nautilus after F5.
+
+**Options.**
+- A. Always writable (today).
+- B. Always read-only: live files, no delete / update from the PC.
+- C. Read-only by default, writable on demand (a Settings item or a temporary mode entered
+  from the update / gallery flow).
+- D. Something cleverer: stay writable but recognise stale write-backs after a UA by a layout
+  generation and ignore them.
+
+**Decision: C.** The volume is **read-only by default** (`vwrite` `ro` = true at boot, the WP
+bit set, the UA at once also while mounted: exactly the `DBG:VDISK:RO 1` volume). A Settings
+3/3 row **"USB disk"** with the values **"Files live"** (default) / **"PC can edit"** switches
+to the writable volume of today (deletes, `dm40*.bin` + the install dialog, the frozen
+layout). Rules:
+
+| item | decision |
+|---|---|
+| state | **volatile**: not persisted, "Files live" again at every boot. An update reboots, so the update case clears itself; a delete session ends when the meter is switched off or the row is set back |
+| when it applies | **at the next USB plug**: a host reads the WP bit when it mounts (MODE SENSE), so a change while a host has the volume cannot be seen by it. Setting the row shows the toast "Re-plug USB to apply" and the row's value carries the pending state. No forced re-enumeration in v1 (usb.rs's SE0 disconnect exists, but it also drops the USBTMC interface and any host SCPI / LOG session; a follow-up may use it when no host session is active) |
+| `DBG:VDISK:RO` | the same flag (`vwrite::set_read_only`), `RO?` reports it; nothing else |
+| README.TXT | says: files appear while mounted (refresh the folder); to delete files or copy a firmware file from the PC set Settings > USB disk > PC can edit and re-plug; `tools/reload.sh` needs neither |
+| Help | one line on the Settings page of the help |
+| the Device page / gallery | unchanged; no second entry point (one place to look for the switch) |
+
+**Why.**
+- The composite USB device is always present: a meter on the bench is plugged in for
+  charging and SCPI, GNOME / Windows automount the volume, and with (A) every recording and
+  screenshot of the session is invisible until the cable is pulled. That is the frequent
+  case. A delete from the PC or a drag-and-drop update is the rare case, and both have
+  other paths that keep working in read-only mode: the gallery / `MMEM:DEL` / dm40scpi.py
+  for deletes, `tools/reload.sh` (`DBG:UPLOAD`) and the loader's own disk for updates.
+- (B) throws away a working, host-tested feature (vwrite.rs, the install dialog) that is the
+  only update path for an owner without Python.
+- (D) is the cleverness the file's principles rule out: it adds a new way for the one path
+  that must never lose data (a stale FAT sector misread as a delete) to go wrong, for the
+  benefit of not pressing one Settings row.
+- Volatile, not persisted: a persisted "PC can edit" is a mode the user forgets, and its
+  symptom ("my new files do not show up") is exactly what this decision removes; the row
+  shows the state while it lasts. No persist record change.
+- "At the next plug" rather than a forced re-enumeration: no new USB state machine, the
+  behaviour is the one already captured and host-tested for both volumes; the re-plug is
+  the same gesture the writable volume already needs to show new files.
+
+**Consequences / implement.**
+- vwrite.rs: `ro` default true (one line); the frozen / UA rules need no change (`frozen()`
+  is already false while `ro`).
+- ui.rs / app.rs: the row on Settings 3/3 (2 rows today: room), value text "Files live" /
+  "PC can edit"; the toast; Help text; README.TXT text (the fatren-test captures pad it to
+  2048 bytes: re-check the padding, and a changed README needs a new `kcapture.sh` capture
+  for the vwrite scenarios, which run in "PC can edit").
+- tools/fatren-test: the vwrite scenarios set RO 0 first; add a read-only scenario (a WRITE
+  fails 07/27/00, the UA is sent while locked).
+- Device checklist (the two open items in TODO under the USB storage redesign, re-ordered):
+  default "Files live" on Linux: mount, swipe REC / screenshot, the file is listed at once
+  (`ls`), Nautilus after F5; Windows Explorer and macOS Finder with the UA while mounted
+  (open since 2026-10-21; if Explorer does not refresh, try a volume serial that changes per
+  refresh, TODO note). Then "PC can edit" + re-plug: the 2026-10-22 vwrite checklist (rm /
+  trash / cp dm40fw.bin Yes + No / `DBG:VDISK:WR?` / fsck of SPIFLASH.BIN / a recording during
+  a cp). Reboot -> `DBG:VDISK:RO?` = 1.
+
+**Revisit.** After the Windows / macOS device checks. If Windows never sends PREVENT (the
+"Host OS notes" expectation), the writable volume's cost there is only a 60 s quiet window
+after its last write, and a persisted "PC can edit" for Windows-only users becomes
+reasonable: then persist the row (a spare bit of an existing persist word if one is free,
+else a version bump) and keep "Files live" the factory default. If users ask for live files
+*and* deletes at once, the forced re-enumeration (usb.rs SE0, refused during a host session)
+is the next step, not (D).
+
+---
+
+## #7 AD2 stream frames: CPU frames at /8 + CKPH or DMA frames at /16 as the default
+
+**Question.** Both frame kinds stream with 0 loss on the device (a0cdb4e, feasibility 11.10):
+CPU frames at /8 + CKPH = 1 (the default, `DBG:AD2:DMA 0`) cost 26 % CPU at 19.2 kS/s and
+51 % at 38.4 kS/s; DMA frames at /16 (opt-in, `DBG:AD2:DMA 1`) cost 8 % and 17.5 %. Make DMA
+the default? Robustness (the frame-shift bug fixed in a0cdb4e, bounded waits), the Wave
+view, DMA sharing with BT / generator / scope.
+
+**Options.**
+- A. Keep CPU frames (/8 + CKPH) as the default; DMA opt-in.
+- B. DMA frames (/16) as the default; CPU frames as the fallback (`DBG:AD2:DMA 0`).
+- C. DMA by rate: CPU frames up to 9.6 kS/s, DMA above.
+
+**Decision: B, gated on one more device run with the default flipped.** `set_dma_req`
+default 1; `DBG:AD2:DMA 0` and `DBG:AD2:DIV` stay as the fallback and the probe. The rate cap
+is unchanged (38 400 S/s either way: `max_rate_hz`). Not (C): two defaults are two
+behaviours to verify and explain; the Wave view's bands (9600 / 4800 / 2400 / 1200 S/s) all
+sit below the point where the kinds differ in CPU, and above it DMA wins outright.
+
+**Why.**
+- CPU: 26 -> 8 % at 19.2 kS/s and 51 -> 17.5 % at 38.4 kS/s. The CPU frames' 51 % leaves the
+  main loop (repaint, USB, the Wave view's drain + render) half the machine at the top rung;
+  the DMA frames leave it 80 %. The Wave view runs the stream *and* the scope renderer in
+  the same pass budget, so it gains the most.
+- max_isr: 10.8 us (DMA) against 16.8 us (CPU /8 + CKPH): the ISR holds the bus and the CPU
+  for less at every entry.
+- Correctness is equal on the device: a0cdb4e, 60 s each, lost 0 / bad 0 / timeouts 0 for
+  DMA at 19200 (DRAW 2) and 38400, the same for CPU frames at 4800 (DRAW 2) / 9600 / 38400.
+  The DMA path's one bug (an aborted frame leaving a byte in flight, f5f8e96) is fixed with a
+  bounded wait + a drained receive register, and a shifted frame would be caught by the
+  sign-copy check (`bad`) rather than pass silently.
+- DMA sessions take samples only once locked, so they skip the one or two R26-transient
+  samples the CPU-frame sessions deliver first (11.10): a cleaner first screen for the Wave
+  view and a cleaner first row for the logger.
+- Sharing: DMA0 channel 0 (SPI2 RX) and 7 (SPI2 TX) are used by nothing else; bt.rs holds
+  channels 2 / 4 (UART4), gen.rs 5 (DAC), the scope is on DMA1. The flag clears are
+  per-channel in every module (hy3131.rs INTC0 bits 0..5 / INTC1 bits 22..27, bt.rs `0x3D
+  << 16` / `0x3D`, gen.rs HIFCR `0x3D << 6`), so no module clears another's flags. One
+  controller is shared, so bus arbitration is the only interaction; a 5-byte SPI frame at
+  3.125 MHz is 13 us of 1-byte-per-2.5-us requests against the DAC's up-to-10 MS/s circular
+  table: that is the untested part, hence the gate below.
+- Decision #3's invariants hold: DMA frames add no NVIC line (the ISR polls the channel
+  count / flags at the next entry), the ISR still touches only its ring and counters, and
+  the exclusive bus hand-off is unchanged.
+- Against: the DMA path has one passing device run (a0cdb4e) where the CPU frames have
+  three (4b98128 /16, b81abf2 incl. a 15-min 35.8 M-sample soak, a0cdb4e); and every device
+  run so far streamed with the generator off and BT idle. That is a reason for the gate, not
+  for keeping a default that costs 3x the CPU.
+
+**Consequences / implement.**
+- hy3131.rs `set_dma_req` default 1 (the "one line" of 11.10); `pick_div` then selects /16
+  mode 0 for the default; docs (feasibility 11.3 "Defaults", 11.8 "Selection", bt-scpi.md
+  `DBG:AD2:DMA`) and `DBG:ISR?` div = 16 by default.
+- Emulator: ad2streamtest with the default (no `:dma` suffix needed) at -100 / +100 ppm, 4800
+  DRAW 2 / 9600 / 19200 / 38400; wavetest.py PASS (the Wave view now streams DMA frames).
+- **Acceptance on the device (the gate; CPU frames stay the default until it passes):**
+  1. 60 s each, raw `LOG:DATA?` drain: 4800 DRAW 2, 9600, 19200 DRAW 2, 38400: lost 0, bad 0,
+     late / slips / overruns / timeouts 0, CPU within 2 % of 11.10.
+  2. **Sharing matrix**, 38400 DMA for >= 15 min (the soak the CPU frames have): generator ON
+     in DAC mode at its top rate (a sine on the MCX output, checked on the scope page before
+     and after) **and** BT connected to a phone (idle: BT serve is paused while streaming,
+     but the UART4 RX DMA keeps running); lost 0, bad 0, timeouts 0, the generator's output
+     unchanged, BT reconnects after the stream.
+  3. Wave view: every band 5 ms .. 1 s/div on the 50 Hz 1 V rms sine (feasibility 10's
+     table): FREQ / VRMS / VPP as before, `DBG:ISR?` bad 0, no "Wave stopped"; note the time
+     from a band change to the first drawn sample (DMA waits for the lock) and compare with
+     CPU frames (`DBG:AD2:DMA 0`); it must stay under one screen at the band's rate.
+  4. After the streams: DC V on the 1 V calibrator within 0.05 %, `DBG:HYSPI:SELF? 2000`
+     all counts 0 (the DMM's /16 mode 0 restored by `stop`).
+
+**Revisit.** If the gate fails on the sharing matrix (bad > 0 only with the generator or BT
+active), the fix is DMA channel priorities (SPI2 RX above the DAC) or keeping CPU frames
+while the generator runs, decided then on the numbers; do not revert to (A) silently. 76.8
+kS/s (a DMA data phase after a CPU command byte + CKPH switch, 11.8) is a separate step and
+needs its own acceptance; it does not change this default.
+
+---
+
+## #8 DMM reads at /8 + CKPH = 1 (2.6x faster bus) or /16 mode 0
+
+**Question.** The stream reads at /8 + CKPH = 1 are clean on the device (11.3). Move all DMM
+traffic (dmm.rs polls, the sentinel's CTSTA read, the power meter's phase rows, BT `serve`,
+row writes) to /8 + CKPH too? Benefits: shorter main-loop passes, tighter sentinel / power
+meter phase timing. Cost: a full per-function device check.
+
+**Options.**
+- A. Keep the DMM at /16 mode 0 (today; `stream::stop` restores it).
+- B. /8 + CKPH for every DMM frame, after a per-function device check.
+- C. /8 + CKPH for reads only, writes stay /16.
+
+**Decision: A.** The DMM bus stays at /16 mode 0. Not now, and not for the reasons listed
+("loop time", "phase timing"); only decision #3's revisit (a request queue: DMM frames
+between ISR frames) can make a faster DMM bus necessary, and that is when this is re-opened.
+
+**Why.**
+- The gain is microseconds the loop cannot see. Per pass the DMM reads one byte (INTF or
+  CTSTA: ~8 us at /16, ~6 us at /8 + CKPH) and, only when a conversion completed, one frame
+  of 6..20 bytes (~20 / ~60 us at /16 against ~14 / ~23 us: SELF? us_r6 13.9 vs 21.6). Row
+  writes are ~11 us per register at /16 and happen at a function / range / phase change.
+  The main loop's passes are 2..25 ms (repaints, the scope page); the sentinel windows and
+  the power meter's phases are 350 ms. Nothing user-visible changes by 40 us.
+- During a stream the DMM never touches the bus (exclusive hand-off, decision #3), so a
+  faster DMM frame buys nothing for the Wave view or the logger either.
+- The DMM path has **no integrity check**: the stream's sign-copy test catches a torn
+  AD2 read, but a 24-bit AD1 result, a counter frame or CTSTA read wrong at /8 becomes a
+  wrong reading, a false A-JACK or a missed one, silently. The /8 margin was measured on
+  one unit at room temperature (11.3: ~80 ns of DO-path delay against a half period of 80
+  ns in mode 0; CKPH = 1 gives a full period). CKPH = 1 was proven for 1-, 3- and 6-byte
+  frames in the stream; the DMM's 20-byte AC poll and the 23 / 28-byte counter frames (FREQ,
+  the frequency sentinel) have not run at /8 + CKPH at all.
+- Region B (zero-wait flash) has 28 bytes left (TODO). The CKPH switch is per-frame hot code
+  (SPE off / CKPH / SPE on between the read-period pulse and the data) in `hy3131::read`,
+  which runs in every pass; it cannot go to `.cold`.
+- Writes at /8: `WR? 1` gave 0 / 0 at /8 on b81abf2, but the matched-dummy trick exists
+  because the chip takes each LSB late; halving the bit period halves that margin too, on
+  the one register path (rows, ranges, calibration-dependent mux bits) where a bad bit is a
+  wrong range or a wrong relay. (C) avoids that but keeps every other cost.
+
+**Consequences.** Nothing to implement. `stream::stop` keeps restoring /16 mode 0; `DBG:AD2:DIV`
+and `DBG:HYSPI:SELF? n,8,1` remain the probes. feasibility 11.3's "moving it to /8 + CKPH is a
+separate step (TODO)" becomes "decided against for now (decision #8)".
+
+**Acceptance check, defined now for the revisit** (all on the device, the calibrator and the
+generator as in the device-check docs; a /8 + CKPH build with `DBG:HYSPI:SELF?` reading the
+same way the DMM does):
+1. `SELF? 2000,8,1` in the row of **every** function (DC V, DC mV, AC V, AC mV, AC+DC, DC A /
+   mA / uA, AC A, ohm both modes, continuity, diode, capacitance, frequency, temperature TC
+   / RTD / NTC, power meter): every count 0, 3 sessions each, including a cold start (meter
+   at 0..5 C) and after 1 h on (the DO-path delay drifts with temperature).
+2. A long-frame test added to SELF? (read(R00, 20) and the 23 / 28-byte counter frame) with
+   a stable reference: 2000 x 0 bad at /8 + CKPH.
+3. `WR? 1` at /8: 0 / 0 in 10 runs, then the row writes themselves: every function's row
+   read back after the write equals the row table, 100 function changes.
+4. Readings vs /16 on the calibrator per function: equal within the last digit (DC V 1 V,
+   AC V 1 V 50 Hz, 1 kohm, 10 mA, FREQ 1 kHz, TC type K at room temperature, power meter
+   with the 40 Hz square); a 10-min DC V stability run at 1 V: no outlier beyond 2 counts.
+5. Sentinel: 1 h in DC V with the A jack shorted and open (no false A-JACK, `DBG:SENT?` hit
+   counts as at /16), the LIVE? and OVERLOAD cases of the sentinel checklist once each.
+6. Then a 15-min stream (decision #7's matrix item 2) with the DMM switched back and forth
+   10 times (`stop` -> `start`): the DMM reads right after each stop.
+
+**Revisit.** When decision #3's request queue (DMM live under the waveform) is on the table,
+the DMM frames must fit between ISR frames and the bus speed becomes a real constraint;
+then run the acceptance above and decide (B) or (C) on its results. Also if a second unit or
+a temperature run shows the /16 mode 0 margin itself to be thin: then the question is
+CKPH = 1 at /16, not /8.
+
+---
+
 ## Summary
 
 1. Record page (not "Logger"): one row on Hold & Limits; interval every reading / 1 s / 10 s /
@@ -320,3 +558,12 @@ weakening the beep.
 4. Energy resets on boot; cross-session energy = Record P and integrate on the host.
 5. A-JACK / LIVE? alternate with HOLD / A-HOLD in the status slot (1 s); V-JACK? stays below
    HOLD.
+6. USB volume read-only by default ("Files live": new files appear while mounted, UA at
+   once); Settings 3/3 "USB disk" = "PC can edit" switches to the writable volume (deletes,
+   drag-and-drop update), volatile, applied at the next USB plug.
+7. DMA frames (/16) become the AD2 stream default, gated on one device run with the default
+   flipped including a sharing matrix (generator DAC + BT during a 15-min 38.4 kS/s stream)
+   and the Wave view bands; CPU frames stay the fallback.
+8. The DMM bus stays at /16 mode 0: the gain is microseconds, the DMM path has no integrity
+   check, region B is full; acceptance check defined for the revisit (decision #3's request
+   queue).

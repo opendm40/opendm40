@@ -695,7 +695,11 @@ Firmware:
 - [x] Device a0cdb4e (feasibility 11.10): DMA /16 38400 lost 0 of 2.3 M at 17.5 % CPU, 19200 DRAW 2 lost 0 at
       7.8 %; CPU /8 + CKPH 38400 lost 0 at 51 %, 4800 DRAW 2 / 9600 lost 0. Host: a raw drain tops out at ~37 kS/s.
 - [ ] Decide: DMA frames as the stream default (DBG:AD2:DMA 1 today); the wave view gains the most.
+      decided: see docs/decisions-2026-10-22.md #7 (DMA frames default, gated on one device run with the
+      default flipped: 60 s runs, a 15-min 38.4 k sharing matrix with gen DAC + BT, the wave bands)
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
+      decided: see docs/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
+      revisit with decision #3's request queue)
 - [ ] B (zero-wait flash) is FULL: the branch overflowed by 4 bytes at a4907d0; the cold modules' named
       .rodata moved to `.cold` (28 bytes left), the bit-banged write removed. A real reclaim is needed; never put
       per-pass code in `.cold` (feasibility 11.4 rule).
@@ -787,7 +791,7 @@ Firmware:
             re-read, header checked, data -> FAT -> directory); tools/dm40dbg.py upload; tools/reload.sh uses it
             (falls back to the USB disk for an older fw-rs); emu/usbip_client.py upload (emulator: 480 KB in
             7.9 s). Recovery path (the loader's own disk) untouched.
-      - [ ] Device: Linux kernel attach + udisks ro mount of the 2 GiB volume; a recording / screenshot while
+      - [ ] Device: (the default "Files live" volume, decision #6) Linux kernel attach + udisks ro mount of the 2 GiB volume; a recording / screenshot while
             mounted -> new file visible after F5 (UA at once); Windows Explorer and macOS Finder with the UA
             while mounted; `fsck.fat -n` on a copied DEBUG/SPIFLASH.BIN; first boot after the update: FATDIR
             0x7 created 0x7 (~1 s extra boot, once), boot time of vdisk::boot_refresh with many logs;
@@ -805,11 +809,13 @@ Firmware:
             _VHOSTnn.TMP files, deleted at the eject / next boot), dirty flags and dates; everything else
             DATA PROTECT. Layout frozen while the host has it mounted (new recordings / screenshots appear
             at the eject / re-plug: the cost of writability; a UNIT ATTENTION would make Linux drop writes).
+            decided: see docs/decisions-2026-10-22.md #6 (read-only "Files live" by default; Settings 3/3
+            "USB disk" = "PC can edit" -> the writable volume, volatile, applied at the next USB plug)
             Linux sequences captured with a real kernel (usbip_msc.py: rm, cp of 500 KB, trash + cp,
             trash + empty) and replayed in run.sh; fsck after every scenario, power cuts in staging,
             commit, park, purge. Emulator (real firmware, kernel attach): rm 2 files, cp 500 KB (47 s in
             the emulator), dialog Yes -> reset into the loader.
-      - [ ] Device: Linux rm / Nautilus Delete (trash) / cp dm40fw.bin + Yes -> installed + No ->
+      - [ ] Device: (in "PC can edit" after a re-plug, decision #6) Linux rm / Nautilus Delete (trash) / cp dm40fw.bin + Yes -> installed + No ->
             DM40FW.BIN gone; DBG:VDISK:WR? after each; DBG:BOOT? STACK after a cp; SPIFLASH.BIN fsck; DMM
             and a CSV recording during a cp (staging waits / busy retries); Windows Explorer (System
             Volume Information, delete, copy) and macOS Finder (.fseventsd, .Trashes, ._ files): untested,
