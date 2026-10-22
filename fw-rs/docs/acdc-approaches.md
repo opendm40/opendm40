@@ -476,6 +476,9 @@ quantify.
 
 ## 7. Recommendation
 
+(Update 2026-10-22: B and C are prototyped behind `DBG:ACDC:METH`, and the
+device's note-7 result makes C the primary candidate - section 10.)
+
 **V (6 V .. 1000 V).**
 
 1. Keep (a) as the stock-parity mode (pixel-diff baseline, the AUTO coupling
@@ -627,3 +630,144 @@ Web (retrieved 2026-10-22):
 * Alientek DM40 DC spec +-(0.03 % + 5 d) (forum; the official manual is a
   220 MB RAR behind a JS button on en.alientek.com and was not fetched):
   https://www.eevblog.com/forum/testgear/alientek-dm40c-multimeter-(dm40a-dm40b-dm40c)
+
+## 10. Prototype: methods B and C in fw-rs (2026-10-22, `src/acdcm.rs`)
+
+Behind a RAM-only switch, default A (the stock alternation, unchanged), so
+one device session compares them. Device input since section 8 was
+written (feasibility 13.2, E7 commits 744f46f / a0985e4): with AD2 + AD3 +
+RMS on for the whole DC V row AD1 shifts by 30..90 x its noise, offsets
+-2.9 mV / +17 mV / +0.17 V / -1.6 V on 6 / 60 / 600 / 1000 V (0.03..0.16 %
+of the range, repeating to ~1 %), and a gain shift up to -0.18 % on 60 V
+that did **not** repeat. So **C is the primary candidate**; B stays for
+the comparison (its zero removes the repeating offset, not the gain).
+
+### 10.1 What runs
+
+| | V (6..1000 V) | A (600 uA..10 A) |
+|---|---|---|
+| A | stock alternation (dmm.rs, sections 2-3 of the stock doc) | same |
+| B | AC V row + the DC V row's AD1 bytes (R22 / R23 / R24 / R28, AD1IG), OP1's chopper held (AD1 converting starts its 2 kHz square at OP1O -> PB4 -> the RMS), written AD1 off, AD3, AD2, AD1 last; nothing toggled after. DC = mean of the last 5 AD1 results (0.5 s) through the DC V calibration, minus a per-range zero = (merged-row AD1) - (the stock DC V row's reading, AD1 alone, R32 0x38 as the stock DC phase), taken at the first visit of a range in the session or fixed with `DBG:ACDC:ZERO`. AC = the stock RMS (sum(X*Y) on PB4, factory AC V cal). 6 V: `DBG:ACDC:R0 1` = candidate (i) AD1 on SENSE - PB5 at the /100 tap (DC V 60 V's input and calibration), `2` = (ii) OP1O - RLU after the x10 network (DC V 6 V's calibration, gain nominal, offset in the zero) | AC A row + the DC A row's AD1 bytes (AD1 = OP1O - PB3), OP1's chopper held (AD2 sits on OP1O here), the AC row's pre-filter (R33) kept; zero against the stock DC A row as V |
+| C | E7's DC-coupled row (`ad2exp::dcv_row`: AD2 on OP1O, OP1's chopper held) with AD3 on the same node (R35 0x14), RMS / LPF on (R29 0xF8, R34 0x88): DC = LPF, AC = sqrt(RMS) (the RMS block's HPF takes the DC out), both x E7's self-cal per_code / offset (`ad2exp::dc_enter`, run at the first visit of a range: AD1 alone on SENSE - PB5, then the AD2 zero and signal over 100 ms, gain + offset). Both parts every LPF block (106.7 ms), no row switching, no AD1 while measuring. The AC part rides the self-cal's DC gain, not the factory AC V calibration (that belongs to the AC-coupled PB4 node): a difference the device session measures (test 2). Up-range also when \|LPF\| + 1.414 sqrt(RMS) > 90 % of AD2's span (one window for DC + AC, section 7 item 5) | the stock AC A row unchanged (AD2 on the DC-coupled shunt node): AC = RMS (factory AC A gain), DC = LPF x the same gain, corrected against the stock DC A row at entry: a gain factor when the current is >= 10 % of the range (within 5 %), else an offset. One point only: a zero-current session gets the offset, a loaded one the gain |
+
+Common: mV (modes 2 / 3) stays on A (no merged mV row); no misconnect
+sentinel in the method rows (the AC V one uses AD1, the DC V one takes R20
+which the frequency counter needs); one reading per RMS result (~9.3 / s);
+the frequency counter runs (Hz in `DBG:ACDC:STAT?`, not shown); a range
+change writes the new range's method row (B: and its reference first if
+the range has no zero yet; C V: the self-cal, ~0.45 s blocking); AUTO
+coupling (sub-mode 3) evaluates once both parts were refreshed since its
+last evaluation (~107 ms, AUTO_VOTES = 2 of them to switch).
+
+SCPI (`src/scpi.rs` DBG list): `DBG:ACDC:METH A|B|C` / `?` (a change
+restarts AC+DC / AUTO), `DBG:ACDC:STAT?` (meth, step 0 ref / 1 meas / 2
+run, mode, range, AC, DC, n_ac, n_dc, n_rd, Hz, the slot's correction, C V
+per_code, offset, LPF codes, sqrt(RMS) codes), `DBG:ACDC:ZERO k,v|AUTO` /
+`?` (slots 0..3 V ranges, 4..9 A unit * 2 + range), `DBG:ACDC:R0 1|2`,
+`DBG:ACDC:RANG <MF item>|AUTO`.
+
+Cost (against 87f2c20, the commit below these): region B 82 472 -> 78 168
+B free (poll_am in the poll path), region C 18 804 -> 17 428 B (entry /
+range / SCPI steps marked .cold in link-native.x: they run at a row write
+or a command, never per main-loop pass), SRAM 60 648 -> 60 544 B (the `Am`
+state, .sram_bss), static stack unchanged (headroom 21 228 B).
+
+### 10.2 Emulator model changes (HY3131.cs)
+
+* **Note 7**: AD1 on the V divider (DC V rows, the AC V rows' SENSE - PB5 /
+  OP1O - RLU) reads the device's per-range offsets while AD2 or AD3
+  converts (`N7Volts`, `n7:` scale, default on); `n7g:` a gain shift drawn
+  at every AD1 enable (the non-repeating 60 V gain); `n7a:` codes for the
+  A rows (default 0: not measured).
+* **AD1's window** at OSR >= 2048: a sinc^2 sub-conversion (triangle over
+  2T, T = OSR / AD1CLK) averaged with the previous one when chopped, i.e.
+  |H| = sinc^2(fT) |cos(pi f T)| (section 3, INFERRED): notches every
+  10 Hz at OSR 8192 chopped (40 / 50 / 60 Hz vanish), 45 Hz leaks
+  ~-43 dB. Applied in DC V, DC A and the AC rows' AD1 paths (the stock
+  AC+DC DC phase had no ripple leak at all before).
+* **LPF window**: sinc^2 over two LPF periods (213 ms at LPFBW 111),
+  INFERRED from the datasheet's 213 ms and the device bound <= 0.5 % at
+  40 Hz: -51 dB at 50 Hz. In AC A and the DC-coupled AC V row.
+* AC V row with AD3's inputs free (method C), AD1 = OP1O - RLU in AC V and
+  OP1O - PB3 in AC A modelled. Host tests `AcdcMethods` (396 pass).
+
+### 10.3 Emulator comparison (`emu/hy3131/acdcmethtest.py`)
+
+One run per method, the same timed input (12 s per phase), error of the
+shown total against hypot(AC, DC) of the source over 4.5 s of each phase
+(its 6th to 1.5th last second), rate = readings / s (B / C: n_rd; A: FETCh?
+value changes, a lower bound), settle = from the phase start until the
+total stays within 0.1 % + 2 digits (nan: never inside that band in the
+phase, e.g. a 0.3 % p-p ripple). Note 7 on (the device's offsets); B~ = B
+with `n7g:0.002`. Runs 35098ee (A, B, B~) and 1a6c1bd (C):
+
+| phase | A err % / p-p % / rd/s / settle s | B | C | B~ |
+|---|---|---|---|---|
+| V DC 5 | +0.000 / 0.004 / 1.3 / 3.1 | -0.009 / 0.035 / 8.9 / 3.4 | -0.005 / 0.000 / 9.3 / 4.1 | -0.012 / 0.028 / 9.3 / 3.2 |
+| V AC 2 @50 | +0.000 / 0.002 / 1.3 / 3.8 | +0.000 / 0.003 / 9.1 / - | -0.003 / 0.004 / 9.1 / - | -0.000 / 0.003 / 9.1 / 2.2 |
+| V AC 1 + DC 1 @50 | +0.001 / 0.021 / 3.3 / 1.5 | -0.020 / 0.077 / 9.3 / 0.8 | -0.001 / 0.303 / 9.1 / 0.1 | +0.068 / 0.062 / 9.3 / 0.9 |
+| V DC 12 + 0.5 @50 | -0.002 / 0.030 / 2.7 / 3.1 | +0.008 / 0.009 / 9.3 / 0.7 | +0.000 / 0.028 / 9.3 / 1.0 | -0.118 / 0.011 / 9.3 / 11.9 |
+| V DC 12 + 0.5 @45 | +0.002 / 0.047 / 1.8 / 0.0 | +0.007 / 0.030 / 9.3 / - | +0.001 / 0.016 / 9.3 / 0.0 | -0.121 / 0.031 / 9.3 / - |
+| A DC 0.3 | -0.001 / 0.007 / 1.3 / 0.4 | +0.005 / 0.009 / 9.3 / - | +0.000 / 0.000 / 9.3 / 0.4 | -0.003 / 0.010 / 9.3 / 0.4 |
+| A AC 0.2 @50 | +0.001 / 0.002 / 0.7 / 1.6 | -0.001 / 0.006 / 9.6 / 0.1 | +0.000 / 0.005 / 9.6 / 0.2 | +0.001 / 0.005 / 9.6 / 0.1 |
+| A AC 0.2 + DC 0.2 @50 | +0.003 / 0.012 / 2.7 / 0.1 | +0.004 / 0.007 / 9.3 / - | -0.001 / 0.322 / 9.3 / - | -0.002 / 0.008 / 9.3 / 0.1 |
+| A DC 0.3 + 0.05 @45 | +0.012 / 0.318 / 2.2 / 4.5 | -0.006 / 0.297 / 9.4 / 0.1 | +0.002 / 0.062 / 9.6 / 0.0 | -0.000 / 0.289 / 9.4 / 0.2 |
+
+Reading of it (all within the model; the LPF window and AD1's off-notch
+response are INFERRED, the note-7 numbers are the device's):
+
+* **Rate**: B and C ~9.3 readings / s against A's 1.3..3.3 visible changes
+  (its cycle 1.9 s); C settles in 0.0..1 s after a signal change
+  (V DC 5: 4.1 s includes the range change r1 -> r0 with its self-cal),
+  B 0.1..3.4 s (PB4's recharge after the entry and the 5-result mean).
+* **Accuracy**: every method within 0.02 % on mean where the model has no
+  gain error; B~ shows what B cannot fix: a gain shift drawn per AD1
+  enable stays (-0.12 % at 12 V on 60 V in this run; a rerun on 3e6af3e
+  drew +0.01 %: the error is the draw's) - the device's 60 V gain jump
+  would look like that.
+* **Ripple at 50 Hz on the DC part**: AD1 (A, B) sits on a notch; C's LPF
+  leaks (0.30 / 0.32 % p-p of the total with AC = DC at 50 Hz, the INFERRED
+  -51 dB). At **45 Hz** AD1 leaks (A 0.047 %, B 0.030 % p-p with the
+  5-result mean, A's 0.32 % on the A row's 45 Hz case) and C's LPF does
+  better (0.016 / 0.062 %). Which one wins on the device is test 3 (needs
+  a generator).
+* AUTO coupling: couptest `v`, `i`, `tap`, `band` pass with `--meth A`,
+  `B` and `C` (1a6c1bd). Also passing on 1a6c1bd / 35098ee: senttest (26),
+  powtest (15; `ereset` failed once under a load average of ~45 and passed
+  alone), modetest `--fast` 35 of 36 (stock `cap-big` 0.105 mF fails the
+  same way on 5f9b5a0 without this change; without `--fast` every fw-rs
+  scenario gets "BT host refused: module off" under load, also on
+  5f9b5a0), the emulator host tests (396), every fw-rs/tools/*/run.sh.
+
+### 10.4 Device session plan (`tools/acdcmeth.py`, calibrator on /dev/ttyACM1)
+
+Image: the build of the commit named in the report. The calibrator gives
+DC <= 30 V and a small 40 Hz square only; 40 Hz is an AD1 notch, so the
+ripple-leak and low-frequency tests (section 8 items 3, 4) need a
+generator and the script skips them.
+
+1. `tools/acdcmeth.py e6` (~3 min): entry from DC V into AC+DC per method
+   at 3 V, first reading and settle times, readings / s; 3 V -> 30 V -> 3 V
+   (range change). Expect A ~2 s / ~2 readings changes per s, B / C < 1 s
+   to the first reading after the reference and ~9 / s.
+2. `e1` (~15 min, `--repeats 5`): B's zero per range at 0 V and 3 / 30 V,
+   five entries each: zero spread in digits (section 8 test 1; pass for B
+   <= 2 digits), B's DC part vs DC V READ?. Expect the 13.2 offsets as
+   zeros; the 60 V gain jump as a level-dependent residual.
+3. `e7` (~5 min): B 6 V candidates (i) / (ii) at 1 / 3 / 5 V vs DC V, the
+   gain of each from the slope, the 40 Hz square with each (AC part).
+4. `e2` (~3 min): the 40 Hz square on 6 V and 60 V, AC / DC / total of A,
+   B and C: C's AC part (DC-coupled, self-cal gain) against A's (factory
+   AC V cal on PB4) is the open accuracy question of C; B's AC part
+   against A's shows whether AD1 converting moves the RMS.
+5. `e5` (~40 min, `--minutes 20`, warm the meter meanwhile): C's per_code
+   and offset re-measured every 60 s at 30 V / 60 V and 3 V / 6 V, C's DC
+   part vs READ?: drift in ppm, how often C needs its self-cal again
+   (section 8 test 5).
+6. By hand: AUTO coupling on the meter with `DBG:ACDC:METH C` (touch: three
+   taps on V), the 40 Hz square and 5 V DC; a screenshot of each.
+
+Decision rule: C becomes the AC+DC default when e2 shows its AC part
+within the AC V spec of A's (0.5 % class) and e5 its DC part within
+0.05 % + 5 digits over the warm-up; B is dropped if e1's zero spread or the
+level dependence exceeds 2 digits on any range.
