@@ -1029,10 +1029,10 @@ Image built from the committed tree 0ec2093 (it also carries the burden-voltage 
 2. scope.rs: Wave view roll speed from the timebase (8).
 3. app_wave.rs, app_power.rs: three toasts that did not fit (8); ui-render checks them.
 
-Host / emulator checks of the fixes: emu/hy3131/wavetest.py all PASS, roll 5 s/div 8.1 px/s (f3aea2f: 19.9 px/s, FAIL with the new check); tools/fatren-test PASS (vdisk / vwrite, 40 vwrite checks); tools/ui-render 41 941 cases, 0 violations (3 with the old toast texts); `near` links at 0x08009434 (region B).
+Host / emulator checks of the fixes: emu/hy3131/wavetest.py all PASS, roll 5 s/div 8.1 px/s (f3aea2f: 19.9 px/s, FAIL with the new check); tools/fatren-test PASS (vdisk / vwrite, 40 vwrite checks); tools/ui-render 41 941 cases, 0 violations (3 with the old toast texts); `near` links at 0x08009434 (region B) in a test build of f3aea2f + the patch.
 
 ### State at the end
 
-- **Device:** DMM page, DC V; Settings unchanged (volume 0 %, backlight 10 %, Dim / Shutdown Never, Bluetooth ON, USB disk "Files live", ro mount); scope FFT off again; power meter coupling AC+DC, V gains factory, zeros from this run's `POW:ZERO`; LOG:CSV:INT / DUR back to 0 / 0. One watchdog reset during the run (6b); crash count 0 and HEALTHY afterwards.
+- **Device:** DMM page, DC V; Settings unchanged (volume 0 %, backlight 10 %, Dim / Shutdown Never, Bluetooth ON, USB disk "Files live", ro mount); scope FFT off again; power meter coupling AC+DC, V gains factory, zeros from this run's `POW:ZERO`; LOG:CSV:INT / DUR back to 0 / 0; LOG:DEST HOST, LOG:DUR 0, LOG:SRAT 4800, LOG:SOUR AD1, LOG:STAT 0 (the repro had left DISK / 10 / 19200 / AD2). One watchdog reset during the run (6b); crash count 0 and HEALTHY afterwards.
 - **Files added on the SPI disk:** LOGS/LOG004.DLG, LOGS/FAST005.DLG, LOGS/FAST006.DLG, SCOPE/SCOP004.DLG (scope record); S008 / S009.BMP deleted again (3b).
 - **Calibrator:** 1 V DC, enabled.
