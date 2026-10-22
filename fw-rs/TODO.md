@@ -388,7 +388,8 @@ Code work (in this order):
 - [x] UF-23 (P2) PT100/PT1000/NTC temperature via the ohm path. §3  (device-verified on the calibrator, 19:10 run)
 - [x] UF-25/26/27/28/35 (P2) DMM small fixes: extra-digit option, 4-20mA% label, store-while-HOLD, volume semantics, MIN/MAX reset. §4-§5  (59614fa; verify on device)
       UF-25: no option (owner: the extra digit is always on). UF-26: DC mA loop % captioned "4-20mA", hidden
-      outside -25..125 % (OL). UF-27: a history tap stores the held value while HOLD / AutoHold. UF-28: row
+      outside -25..125 % (OL); 194caf6 hides it below 3.6 mA (device 5e52761: DC mA 60 mA range, A jack open,
+      0.001 mA: no %, PASS; the % above 3.6 mA needs current through A). UF-27: a history tap stores the held value while HOLD / AutoHold. UF-28: row
       renamed "Key/alert volume"; idle power-off announced 30/20/10 s before (toast + beep at >= 50 % even at
       volume 0). The continuity / diode beeper is the HY3131 CMPO pin (not TIM14): volume does not apply (check).
       UF-35: long-press on the MIN/MAX/AVG column = statistics reset, distinct from the history-row clear (existed).
@@ -492,6 +493,9 @@ Code work (in this order):
       (AC 0.999 x DC) -> 1 V DC switched in 5.1 / 5.4 s. Fixed: REL dropped by a switch kept the range hold
       (MANU). Open: entering AUTO on a near tie picks AC (first AC results +7 % high on the device, the doc
       says -1 %); HOLD across a switch redraws the bargraph scale under the held value.
+      Device 5e52761: the range is released (60 V -> 6 V, 4 decimals) but the status bar still said MANU
+      until the next static redraw: the status-bar cache key could not tell MANU from AUTO+ (both have
+      auto_plus). Fixed (ui.rs DmmView: the key holds r.auto).
       - persistence: the function code (19 / 20) in p[2], no layout change; V / A keep no coupling of
         their own (entry from another function = DC, stock).
       Tests: emu/hy3131/couptest.py v / i / tap (DC -> AC -> mixed both ways through the band), band
@@ -701,11 +705,20 @@ Firmware:
         risk; I_ac not available without an R34 switch). powtest entry / ac-floor / acdc-floor.
         - [ ] Verify on device: the check list of doc §3.16 (the pure-DC residues of V_ac / I_ac against the
               floors and NOISE_V / NOISE_I).
+              Device 5e52761 (device-check doc "5e52761" 3), no current through A: "At load" off after the
+              update (POW:BURD:STAT? 0), the toggle, help lines, "@load" marks, kept by a reboot; W entry in DC,
+              the tap cycle, a reboot in AC+DC keeps AC+DC; AC on 1 V DC: V / I / P 0, PF / S / Q / f "--" and
+              9.91E37; AC+DC: Q 0, "DC?" + toast "No AC: DC is more precise"; DC on the 40 Hz square: "AC?" +
+              toast "AC present: use AC+DC": PASS. Left (needs current): steps 1, 2 (V at 1 / 2 A), 4 / 5 with a
+              load (residues, mains PF), 6's Settings hints-off case.
   - [x] AC+DC parts on the page (doc §3.17, the owner's V2): "DC x / AC y" sub-lines under V and I, "DC x W +
         AC y W" under P, from the measured LPF / RMS / X*Y parts with the AC floors and "@load" per part; main
         readout +7 px, lower row +17, chart 81 px from 192, side column without VAh, in AC+DC only (every other
         page pixel-identical). ui-render p26..p29, touch-test both layouts.
         - [ ] Verify on device: the check list of doc §3.17.
+              Device 5e52761 (no current): sub-lines under V / I / P, tap to Wh / VAh empties the P line, back
+              to DC with no leftover pixels: PASS. Cosmetic: a coupling switch keeps the old layout / values for
+              up to ~4 s (until the first reading of the new coupling). Left: steps 2 and 4 (current).
   - [ ] Verify on device: the re-check list of doc §3.12 (zero, V cal, f on the square, W entry, DC method /
         AUTO, then T2 / T3 / T4 with current through A).
         Device 5f14d38 (device-check "5f14d38" 5): PASS for W entry (dialog once, then direct), tap-W coupling
@@ -976,7 +989,9 @@ Firmware:
       (tools/mkstockfont.py A2_FONTS, `.rodata.a2.*`; 2.65 KB left, build.sh warns below 2 KiB, the link fails
       at the marker); App::tap / key / show and vdisk::describe back from C to B. B 26.1 -> 30.6 KB free
       (33.3 -> 37.8 without ad2-isr), C 10.1 -> 17.8 KB (12.2 -> 19.9).
-- [ ] Device check of region A2: install with reload.sh (the marker valid after the install, FIRMWARE.BIN on
+- [x] Device check of region A2 (device 5e52761: marker VALID = the image header, INFO/FIRMWARE.BIN = the
+      installed file byte for byte, logger panel text correct, max_lat 0.28 / 0.30 us at AD2 38400 with the
+      panel, 0 lost; the inrush taps while armed not run): install with reload.sh (the marker valid after the install, FIRMWARE.BIN on
       the volume = the installed file), then the logger panel / DMM view / Wave view text (ASCII26 / F14 from
       A2) drawn correctly and DBG:ISR? max_lat at AD2 38400 with the logger panel no worse than before; taps on
       the inrush page while armed (App::tap now in B).
@@ -988,7 +1003,10 @@ Firmware:
       Pixel-identical (tools/font-matrix 178k glyph cases, ui-render per-case screen hashes UIR_HASH, stock-diff);
       emulator draw time down (DMM page 17.1 -> 15.7 ms, power page 11.3 -> 10.5 ms, d.read avg 646 -> 484 us).
       Lossy / vector-font options evaluated (doc sec. 4): <= 6 KB more for a visible change, not done.
-- [ ] Device check of the font storage: DBG:PROF? d.read / d.chart and a page switch's draw time vs the
+- [x] Device check of the font storage (device 5e52761, device-check doc "5e52761" 1-2: menu, Settings
+      1-3, Hold & Limits, keypad, Record, Power Settings pixel-identical to the a0985e4 device shots, Help
+      1-7 pixel-identical to ui-render, every other page looked at: no glyph damage; tap -> draw loop max1s
+      18-29 ms vs 23-51 ms on a0985e4; DMM page full draw 21.0 ms, power page 14.2 ms): DBG:PROF? d.read / d.chart and a page switch's draw time vs the
       previous image; DBG:ISR? max_lat with the logger panel drawing while AD2 streams (unchanged expected).
 - [ ] Device check of audit #3: DBG:PROF? lat_pc / DBG:ISR? max_lat at AD2 38400 to disk with the volume
       mounted and read; Wave view: STOP + Save CSV and a screenshot (max_lat, overruns 0, the trace and the
@@ -1000,6 +1018,9 @@ Firmware:
       during the Wave view ran `dlog::FPar::parse` in C (21.4 us, fixed: region B); DBG:PROF? is in C (12 us,
       1 sample lost at 38400: debug only, open); App::show at the Wave view exit (11..18 us, 1 overrun or
       2 late, open). Left: inrush taps while armed; re-check of the FPar fix.
+      Device 5e52761: the FPar fix holds: a host copying 17 CSVs (12 MB, 95 KB/s) during the Wave view at
+      38400: max_lat 0.30 us, overruns 0 (was 21.4 us); `dropped` +831 once, near the end of the copy (the
+      view's ring, not the ISR). Exit: 4.0 / 5.8 us, late 1 (the open item below).
       - [ ] DBG:PROF? (`prof::report`, C) during a fast session loses samples: region B (~1 KB) or a note.
       - [ ] Wave view exit: App::key / App::show (C) run before the stream stops (1 overrun at 38400).
       - [ ] SCOP006.CSV once saved the previous 4800 S/s record under a 2 ms/div header (not reproduced).
@@ -1046,7 +1067,7 @@ Firmware:
       on shift AD1 by 0.03..0.16 % of the range: no AD2-based "AC?" hint in DC V without its own cal.
   - [ ] E7 open: 600 / 1000 V gain table from >= 100 V (the calibrator stops at 24 V); offset drift over
         long sessions (no re-cal). The clip autorange: device a0985e4, 15 V on 2 V/div -> 20 V/div (PASS);
-        Wave view CONF? in DC V / DC mV answered the uA format (fixed).
+        Wave view CONF? in DC V / DC mV answered the uA format (fixed; device 5e52761: "VOLT +6,+1E-04", PASS).
 - [x] (B) AD2 samples to the SPI disk (.DLG): the fast logger (LOG:DEST DISK, above / docs/compact-log-format.md
       "Fast stream"). Over BT: the ~870 records/s link ceiling (docs/bt-scpi.md) is below AD2's slowest rung
       (1200 S/s): LOG:STATe ON from BT is refused for AD2 / > 800 S/s ("Rate too high for Bluetooth"), AD1
@@ -1509,3 +1530,25 @@ Emulator (emu/):
       (bargraph::mode_full_scale; ui-render d18 / d19, bargraph-test); Help 3/5 rows "Tap / hold history:
       Store / clear" + "History row shown: Settings: DMM row"; ui::list_page asserts one value per row on
       the host (ui-render / touch-test; touch-test passed 11 values to the 9-row pages, fixed).
+
+## Device check 5e52761 (2026-10-22; docs/device-check-2026-10-21.md "5e52761")
+
+- [x] Status bar kept "MANU" after a reading released the range hold (REL ended by an AUTO coupling switch):
+      DmmView's status key (auto && !auto_plus, .., auto_plus) was equal for MANU (v_auto 1 under a manual
+      range) and AUTO+. Key = r.auto now (ui.rs). Verify on device: AUTO + REL on the square -> 1 V DC: AUTO+.
+- [ ] Combined view strip: the unit box (ST_UNIT, 40 px, SC_DIGITS) clips power units: "-0.0001 mW" shows
+      "mV" plus a sliver (device g7-combined.png; ui-render c12-strip-power has it too: st_text clips
+      silently, no rule checks the value / unit). Widths: "mW" 59 px, "kWh" 63, "mWh" 75; values up to 103 px
+      ("-3.7799"); value 88..206 + unit 210..250 cannot hold 103 + 75 px. Needs a layout decision (unit in
+      SC_F12 / LETTERS when it does not fit, or the sub column moved right), then a ui-render rule for the
+      value / unit boxes (a draft rule found 5 cases: mw, main-wh, main-mwh x2, main-zero).
+- [ ] Power page coupling switch: the old layout and values stay up to ~4 s (until the first reading of
+      the new coupling): DC -> AC+DC keeps the DC layout and DC glyph by the value while the W button already
+      shows AC+DC; AC+DC -> DC briefly shows the AC+DC totals without sub-lines. Cosmetic.
+- [ ] Help 5/7 title "Help 5/7: Record + alerts" runs into "< Back" (one space); Help 2/7 "Power key held
+      1.5 s" touches its value column. Layout, not fonts (pixel-identical to ui-render). Shorten the texts.
+- [ ] DMM chart axis labels keep the previous function's unit while a function reads OL / no value (cap
+      "0.050MOhm", diode "MOhm", temperature "Hz"). Cosmetic, pre-existing.
+- [ ] Wave view entry from DC V: DBG:ISR? `dropped` +7087 (~185 ms, the DC V self-cal at entry) before
+      the view drains; AC V entry 0. Harmless (the view starts after), note in feasibility 13 or skip the count.
+

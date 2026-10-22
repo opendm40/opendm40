@@ -788,7 +788,12 @@ impl DmmView {
         }
         // The phase is part of the key only while it alternates: no
         // repaint every second otherwise.
-        let top = (r.auto && !r.auto_plus, hold, r.auto_plus, r.alert, self.alt && alert_alternates(hold, r.alert));
+        // The key holds `r.auto` itself: AUTO+ and MANU both have auto_plus
+        // set (v_auto stays 1 under a manual range), so the old key
+        // (auto && !auto_plus, .., auto_plus) was the same for both and a
+        // range released by a reading (REL ended by an AUTO coupling switch)
+        // left "MANU" on screen (device check 5e52761).
+        let top = (r.auto, hold, r.auto_plus, r.alert, self.alt && alert_alternates(hold, r.alert));
         // Temperature: the status-bar slot shows AUTO / MANU like the other
         // functions (the sensor name is the chip above; the deg F second
         // readout that used to sit here is gone: one global unit, owner).
