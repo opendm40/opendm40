@@ -288,6 +288,9 @@ pub(super) struct Sp {
     /// A frame was built and its paint not started yet (scope_poll: the
     /// paint follows in the next pass without a frame).
     pub paint_due: bool,
+    /// Combined view: no frame is painted before this time, ms
+    /// (App::sp_throttled).
+    pub frame_next: u64,
     /// Settings "Scope tap step" (scope_ui::TAP_*).
     pub tap_mode: u8,
     /// Halves: tabs shown until (after a step, on an intro page entry).
@@ -353,6 +356,7 @@ impl Sp {
             bubble_dirty: false,
             cells_due: false,
             paint_due: false,
+            frame_next: 0,
             tap_mode: su::TAP_DEFAULT,
             tabs_until: 0,
             step_until: 0,

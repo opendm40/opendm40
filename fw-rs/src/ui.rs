@@ -442,7 +442,7 @@ impl DmmView {
             return;
         }
         let temp = r.mode == 15;
-        let fs = crate::bargraph::full_scale(r.main.dec, r.main.unit);
+        let fs = crate::bargraph::mode_full_scale(r.mode, r.main.dec, r.main.unit);
         let key = if temp { (0, "", false) } else { (fs.to_bits(), r.main.unit, self.bar.bipolar) };
         if self.bar_scale != Some(key) {
             self.bar_scale = Some(key);
@@ -2016,6 +2016,11 @@ pub fn settings(page: u8, vals: &[&str]) {
 /// A settings-style page: title bar with "< Back", up to SET_ROWS rows of
 /// label + value (SET_* geometry; `settings_hit` / `list_hit` map touches).
 pub fn list_page(title: &str, names: &[&str], vals: &[&str]) {
+    // One value per row (the 1a3efbd row mis-mapping); host builds only
+    // (ui-render), compiled away on the device.
+    if cfg!(not(target_os = "none")) {
+        assert_eq!(vals.len(), names.len(), "list_page {title}: values vs rows");
+    }
     page_title(title);
     lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
     for (i, name) in names.iter().enumerate().take(SET_ROWS) {
@@ -2171,8 +2176,8 @@ pub const HELP: [(&str, [(&str, &str); 8]); 5] = [
     (
         "Multimeter",
         [
-            ("Tap history row", "Store the reading"),
-            ("Hold history row", "Clear the history"),
+            ("Tap / hold history", "Store / clear"),
+            ("History row shown", "Settings: DMM row"),
             ("Tap MIN/MAX column", "Session on / off"),
             ("Hold MIN/MAX column", "Reset MIN/MAX/AVG"),
             ("Tap REL", "Zero on / off"),

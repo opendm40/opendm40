@@ -581,6 +581,9 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
         ("main-wh", P { main: dmm::pw::MAIN_WH, e_wh: -99999.0, coup: dmm::pw::COUP_AUTO, ..base }),
         ("main-vah", P { main: dmm::pw::MAIN_VAH, vah: 0.12345, coup: dmm::pw::COUP_DC, dc: true, ..base }),
         ("main-mwh", P { main: dmm::pw::MAIN_WH, e_wh: -0.99999, ..base }),
+        // No current: values that round to zero (never "-0.0000").
+        ("zero", P { p: -2.0e-8, s: 1.0e-8, q: -1.0e-8, pf: -0.0001, v: 6.738, i: -1.0e-9, f_hz: 40.0, e_wh: -1.66e-9, vah: 1.0e-9, secs: 55, p_avg: -1.0e-9, vr: 1, ik: 0, ..z }),
+        ("main-zero", P { main: dmm::pw::MAIN_WH, p: -2.0e-8, v: 6.738, i: -1.0e-9, f_hz: 40.0, e_wh: -1.27e-10, secs: 70, p_avg: -1.0e-9, vr: 1, ik: 0, ..z }),
         ("dc-ua", P { p: 5.9999e-3, s: 5.9999e-3, pf: 1.0, v: 9.9999, i: 599.99e-6, vdc: 9.9999, idc: 599.99e-6, vr: 1, ik: 0, dc: true, coup: dmm::pw::COUP_DC, ..z }),
     ]
 }
@@ -939,6 +942,21 @@ fn main() {
                 }
             }
         }
+        // DMM wave view: the list starts at 5 ms/div (WAVE_TB_MIN).
+        scope_ui::set_tb_lo(scope::WAVE_TB_MIN);
+        for cur in scope::WAVE_TB_MIN as u8..=scope::WAVE_TB_MIN as u8 + 2 {
+            let mut m = base.m;
+            m.tb = cur;
+            let sc = stock::Scene { name: "tblist", m, popup: scope_ui::Popup::Tb(cur), trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+            stock::draw(&sc);
+            let name = format!("tb-list/wave/{cur}");
+            ck.check_area(&name, &[("screen", screen)], true, Some(box_b));
+            ck.check_add(&name, &[("screen", screen)], &[box_b], Bx::new(0, 0, 480, 20));
+            if cur == scope::WAVE_TB_MIN as u8 {
+                save(&out, "s01-tb-list-wave");
+            }
+        }
+        scope_ui::set_tb_lo(scope::TB_MIN);
     }
 
     // 0c. fw-rs additions on the replica page (FFT boxes / peak, ...).
@@ -1963,7 +1981,8 @@ fn main() {
             }
         }
         // UF-30 bargraph: bipolar DC V (negative), unipolar ohm, overload.
-        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt)] {
+        // Continuity / diode: their OL ceilings as full scale (1000 ohm, 3 V).
+        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode)] {
             host::reset(0);
             let (r, _) = find(case);
             let mut dv = ui::DmmView::new();
@@ -1981,7 +2000,7 @@ fn main() {
     {
         let pcs = pw_cases();
         let rc = ui::RateChip { rate: 1, period_ms: 430, applies: false };
-        for (file, k, hold) in [("p01-power-mains", 0usize, 0u8), ("p02-power-worst", 1, 1), ("p03-power-mw-over", 2, 0), ("p04-power-alt", 4, 0), ("p05-power-dc-source", 5, 0), ("p11-power-dc-ad1", 6, 0), ("p12-power-main-wh", 7, 0), ("p13-power-main-vah", 8, 0)] {
+        for (file, k, hold) in [("p01-power-mains", 0usize, 0u8), ("p02-power-worst", 1, 1), ("p03-power-mw-over", 2, 0), ("p04-power-alt", 4, 0), ("p05-power-dc-source", 5, 0), ("p11-power-dc-ad1", 6, 0), ("p12-power-main-wh", 7, 0), ("p13-power-main-vah", 8, 0), ("p15-power-zero", 10, 0), ("p16-power-main-zero", 11, 0)] {
             host::reset(0);
             power_page(pcs[k].1, hold, sentinel::Alert::None, rc);
             save(&out, file);

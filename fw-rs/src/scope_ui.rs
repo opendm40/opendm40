@@ -1206,6 +1206,22 @@ pub struct Graph {
 /// of 9dd1222, combined view). Host: no limit, every flush completes.
 #[cfg(target_os = "none")]
 const FLUSH_BUDGET: u32 = 300_000;
+/// The combined view's slice (0.8 ms, `set_flush_short`): its frames are
+/// capped (app.rs COMBO_FRAME_MS), so the extra passes cost no frame rate,
+/// and the meter's USB / SCPI wait less behind a slice (device check
+/// 5f14d38: DBG:PING? p50 3.3 ms there).
+#[cfg(target_os = "none")]
+const FLUSH_BUDGET_SHORT: u32 = 160_000;
+#[cfg(target_os = "none")]
+static FLUSH_SHORT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Use the short flush slice (the combined view) or the normal one.
+pub fn set_flush_short(on: bool) {
+    #[cfg(target_os = "none")]
+    FLUSH_SHORT.store(on, core::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(target_os = "none"))]
+    let _ = on;
+}
 
 #[cfg(target_os = "none")]
 fn cycles() -> u32 {
@@ -1392,10 +1408,12 @@ impl Graph {
         let start = if trace_only { self.next as usize % 399 } else { 0 };
         #[cfg(target_os = "none")]
         let t0 = cycles();
+        #[cfg(target_os = "none")]
+        let budget = if FLUSH_SHORT.load(core::sync::atomic::Ordering::Relaxed) { FLUSH_BUDGET_SHORT } else { FLUSH_BUDGET };
         for j in 0..399usize {
             let i = (start + j) % 399;
             #[cfg(target_os = "none")]
-            if trace_only && self.px > 0 && cycles().wrapping_sub(t0) > FLUSH_BUDGET {
+            if trace_only && self.px > 0 && cycles().wrapping_sub(t0) > budget {
                 self.next = i as u16;
                 return;
             }
@@ -2584,10 +2602,25 @@ const C_ROLL: Color = 0xfd20;
 /// Drag travel per list row, px.
 pub const TB_ROW_PX: i32 = 30;
 
+/// Fastest timebase the list offers (`set_tb_lo`): TB_MIN, or WAVE_TB_MIN
+/// while the DMM wave view runs (its 5 ms/div floor: the faster entries
+/// only clamped back to it).
+static TB_LO: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(crate::scope::TB_MIN as u8);
+
+/// The list's first entry (`TB_LO`); app_wave.rs sets it on the wave
+/// view's entry / exit.
+pub fn set_tb_lo(lo: usize) {
+    TB_LO.store(lo.clamp(crate::scope::TB_MIN, crate::scope::TB_MAX) as u8, core::sync::atomic::Ordering::Relaxed);
+}
+
+fn tb_lo() -> usize {
+    TB_LO.load(core::sync::atomic::Ordering::Relaxed) as usize
+}
+
 /// The timebase list popup with `cur` (timebase index) in the band. Items
-/// TB_MIN..=TB_MAX; roll-only entries (beyond TB_YT_MAX) in orange.
+/// `tb_lo()`..=TB_MAX; roll-only entries (beyond TB_YT_MAX) in orange.
 pub fn draw_tb(cur: u8) {
-    let (lo, hi) = (crate::scope::TB_MIN, crate::scope::TB_MAX);
+    let (lo, hi) = (tb_lo(), crate::scope::TB_MAX);
     let cur = (cur as usize).clamp(lo, hi);
     let screen = rect(0, 0, 480, 320);
     paint(TB_BOX, &[(K_SHAPE, C_BAR)], |x, y| if TB_HEAD.has(x, y) { (C_POP_TAB, tag(1, 0)) } else { (C_FRAME, tag(1, 0)) });
@@ -2647,7 +2680,7 @@ pub fn tb_hit(cur: u8, x: i16, y: i16) -> TbHit {
     if !TB_BOX.has(x, y) && !(y == 20 && x >= TB_BOX.x && x < TB_BOX.x + TB_BOX.w) {
         return TbHit::Close;
     }
-    let (lo, hi) = (crate::scope::TB_MIN as i16, crate::scope::TB_MAX as i16);
+    let (lo, hi) = (tb_lo() as i16, crate::scope::TB_MAX as i16);
     let cur = (cur as i16).clamp(lo, hi);
     if !TB_SPIN.has(x, y) {
         return TbHit::Inside;
@@ -2660,7 +2693,7 @@ pub fn tb_hit(cur: u8, x: i16, y: i16) -> TbHit {
 /// rows (down = earlier, faster entries come into the band). Returns the
 /// new centre index and the remainder (0 at either end of the list).
 pub fn tb_scroll(cur: u8, acc: i32) -> (u8, i32) {
-    let (lo, hi) = (crate::scope::TB_MIN as i32, crate::scope::TB_MAX as i32);
+    let (lo, hi) = (tb_lo() as i32, crate::scope::TB_MAX as i32);
     let rows = acc / TB_ROW_PX;
     let want = cur as i32 - rows;
     let i = want.clamp(lo, hi);
