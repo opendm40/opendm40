@@ -24,6 +24,8 @@ use crate::sentinel::{self, Alert, Kind, Sentinel};
 /// Power meter (function 18): docs/power-meter-and-misconnect.md section 3.
 #[path = "powermeter.rs"]
 pub mod pw;
+#[path = "acdcm.rs"]
+pub mod am;
 use pw::Pw;
 
 const GPIOA: u32 = 0x4002_0000;
@@ -751,6 +753,8 @@ pub struct Dmm {
     fuse_res: sentinel::FuseRes,
     /// Power meter state and settings (powermeter.rs).
     pub pw: &'static mut Pw,
+    /// AC+DC method (acdcm.rs; DBG:ACDC:METH, RAM only).
+    pub am: &'static mut am::Am,
     /// Burden voltage readout in the A functions (Settings 3/3 "Burden
     /// voltage", SCPI DISP:BURD; `burden_val`): I x the shunt's R_path in
     /// aux1 (DC) / aux2 (AC, instead of the duty cycle).
@@ -1002,6 +1006,7 @@ impl Dmm {
             fuse_job: None,
             fuse_res: sentinel::FuseRes::Idle,
             pw: pw::pw_static(),
+            am: am::am_static(),
             burden_show: false,
         }
     }
@@ -1145,6 +1150,11 @@ impl Dmm {
         if self.pw.on {
             return self.pw_write_config(clk);
         }
+        // AC+DC method B / C (acdcm.rs): the step's row, no sentinel.
+        let am = self.am_on();
+        if am {
+            self.am_mode();
+        }
         let m = self.mode;
         let r = self.range.max(0) as usize;
         let cfg: &[u8; hy::CFG_LEN] = match m {
@@ -1197,14 +1207,14 @@ impl Dmm {
         // Misconnect sentinel: the stock row with the idle comparator / AD1
         // pointed at the A-jack shunt (or the V tap in DC A), sentinel.rs.
         let mask = if self.fuse_job.is_some() { 0 } else { self.sent.mask };
-        let (row, kind) = sentinel::sentinel_row(m, r as u8, self.acdc, mask, cfg);
+        let (row, kind) = if am { (self.am_row(cfg), Kind::Off) } else { sentinel::sentinel_row(m, r as u8, self.acdc, mask, cfg) };
         // The probe (PB2) over the comparator rows after a hit, and while
         // latched in every DC V / mV / ohm / temperature row (OP2 / AD2 are
         // unused there; DC V 60 V+ has no comparator but the probe fits).
         let probe_ok = self.probe_ok();
         self.probe = probe_ok && ((self.probe && kind == Kind::CmpA) || self.aprot.is_some());
         let row = if self.probe { sentinel::probe_row(&row) } else { row };
-        if sentinel::ad1_last(kind, &row) || (self.probe && row[3] & 0x80 != 0) {
+        if sentinel::ad1_last(kind, &row) || ((self.probe || am) && row[3] & 0x80 != 0) {
             let mut c = row;
             c[3] &= !0x80;
             hy::configure(&c);
@@ -1471,6 +1481,7 @@ impl Dmm {
         // set (doc section 1), so its DC phase never writes 0x17.
         self.acdc_osr_once = true;
         self.reset_values();
+        self.am_enter();
         self.set(clk, if sub == 1 { ac } else { dc }, r, t);
     }
 
@@ -2323,6 +2334,7 @@ impl Dmm {
         }
         let r = if self.pw.on { self.poll_power(clk, now) } else { None };
         let r = if self.pw.on { r } else { match self.mode {
+            0 | 4..=6 if self.am_on() => self.poll_am(clk, now),
             0 | 2 | 4..=6 => self.poll_ac(clk, now),
             1 | 3 => self.poll_dcv(clk),
             7..=9 => self.poll_dca(clk),
@@ -2548,6 +2560,9 @@ impl Dmm {
             let ol = x.abs() / lim > ov;
             let v = if ol { Val::ol(dec, unit) } else { Val::new(x, dec, unit).with_ext(ext) };
             return Some(self.reading(v, x * si_k));
+        }
+        if self.am_on() {
+            return self.am_ref(clk, x, lim, dec, unit, si_k, before);
         }
         if (self.mode, self.range) != before {
             return None;

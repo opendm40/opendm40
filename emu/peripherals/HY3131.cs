@@ -198,6 +198,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 if(((old ^ masked) & 0x80) != 0)
                 {
                     if((masked & 0x80) == 0) ad1Code = 0;
+                    else n7GainNow = N7Gain * (2 * rng.NextDouble() - 1);
                     RestartAd1(now);
                 }
                 break;
@@ -539,6 +540,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "vnoise": vNoise = o.Value; break;
                 case "op1vos": Op1Vos = o.Value; break;
                 case "ad2dcg": Ad2DcGain = o.Value; break;
+                case "n7": N7Scale = o.Value; break;
+                case "n7g": N7Gain = o.Value; break;
+                case "n7a": N7ACodes = o.Value; break;
                 }
             }
         }
@@ -627,6 +631,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(role == Role.Power) { PowerBlock(t, p, n); return; }
             double dc, acRms;
             Ad2Window(t, p, out dc, out acRms);
+            if(role == Role.AcA || (role == Role.AcV && Ad2OnOp1Dc))
+            {
+                double ndc, nac;
+                NodeDcAc(t, out ndc, out nac);
+                dc += LpfRipple(t, p, nac * Ad2Scale());
+            }
             if(EnLpf)
             {
                 lpfCode = Clamp19((int)Math.Round(dc));
@@ -1036,8 +1046,36 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var kt = Math.Max(roleRange, 1);
                 double vdc, vac, vhz, vduty; string vsh;
                 Fe.VJack(0, out vdc, out vac, out vhz, out vsh, out vduty);
-                var vt = Osr1 >= 2048 ? vdc / AcvK[kt] : VTapVolts(t, AcvK[kt]);
+                var vt = Osr1 >= 2048 ? N7(vdc + Ad1Ripple(t, vac, vhz, vsh, vduty), roleRange) / AcvK[kt] : VTapVolts(t, AcvK[kt]);
                 code = ig * DcQ(vt * AcvK[kt], 0x04 + 4 * kt, 0x14 + 4 * kt) / AcvK[kt] / (rg * Vref) * fs;
+                if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
+                return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
+            }
+            if(role == Role.AcV && fp == 3 && fn_ == 1)
+            {
+                // fw-rs AC+DC method B, 6 V candidate (ii) (dmm.rs acdc_row): AD1 = OP1O - RLU in the
+                // AC V row, OP1O = (the /100 tap + Vos) x OP1's gain (x10 at r0), chopper held; the
+                // DC V 6 V calibration folded in (the same /10 overall ratio as DC V 6 V's PA7 tap)
+                double vdc, vac, vhz, vduty; string vsh;
+                Fe.VJack(0, out vdc, out vac, out vhz, out vsh, out vduty);
+                var g = (regs[0x25] & 1) != 0 ? 10.0 : 1.0;
+                var jq = DcQ(N7(vdc + Ad1Ripple(t, vac, vhz, vsh, vduty), roleRange), 0x04, 0x14);
+                var node = (jq / AcvK[Math.Max(roleRange, 1)] + Op1Vos) * g;
+                code = ig * node / (rg * Vref) * fs;
+                if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
+                return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
+            }
+            if(role == Role.AcA && fp == 3 && fn_ == 5)
+            {
+                // fw-rs AC+DC method B (dmm.rs acdc_row): AD1 = OP1O - PB3 in the AC A row, as the DC A
+                // row of the same shunt / OP1 gain (its calibration folded in), note 7 "n7a:" codes
+                var m = roleMode >= 5 ? (Fe.ShuntSel == 2 ? 6 : 5) : 4; var r = roleRange; var i = (m - 4) * 2 + r;
+                double adc, aac, ahz, aduty; string ash;
+                Fe.ACurrent(out adc, out aac, out ahz, out ash, out aduty);
+                var unit = AUnit[m - 4];
+                var q = DcQ((adc + Ad1Ripple(t, aac, ahz, ash, aduty)) * unit, 0x94 + 4 * i, 0xac + 4 * i) / unit;
+                code = q * Fe.ShuntR * MvDiv[r] * 0.9 / 1.25 * 8388606.0 * (ig / rowIg) / (rg / rowRg);
+                if(N7On) code += N7ACodes * N7Scale;
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
             }
@@ -1055,7 +1093,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 var r = roleRange;
                 Fe.VJack(0, out jdc, out jac, out hz, out shape, out duty);
-                var q = jdc + vNoise * Gauss();
+                var q = jdc + Ad1Ripple(t, jac, hz, shape, duty) + vNoise * Gauss();
+                q = N7(q, r);
                 // stock: V = AD1 * k * 1.38889 / 8388606 * gain - offs (+ negative-side gain, r0 correction)
                 if(q < 0) q /= DcvNegK[r];
                 if(r == 0 && Math.Abs(q) / 20000 > 3e-5) q -= 1e-4 - Math.Abs(q) / 20000;
@@ -1093,10 +1132,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var m = roleMode >= 8 ? (Fe.ShuntSel == 2 ? 9 : 8) : roleMode; var r = roleRange; var i = (m - 7) * 2 + r;
                 Fe.ACurrent(out jdc, out jac, out hz, out shape, out duty);
                 var unit = AUnit[m - 7];
-                var q = DcQ(jdc * unit, 0x94 + 4 * i, 0xac + 4 * i) / unit; // A, calibration folded in
+                var q = DcQ((jdc + Ad1Ripple(t, jac, hz, shape, duty)) * unit, 0x94 + 4 * i, 0xac + 4 * i) / unit; // A, calibration folded in
                 // drop across the relay-selected shunt through the row's OP1 gain: IG * V / VR * 2^23
                 code = q * Fe.ShuntR * MvDiv[r] * 0.9 / 1.25 * 8388606.0;
                 code *= (ig / rowIg) / (rg / rowRg);
+                if(N7On) code += N7ACodes * N7Scale;
                 break;
             }
             case Role.Ohm: case Role.Cont:
@@ -1160,6 +1200,58 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code)));
         }
+
+        /// AD1's response to the AC part of the input (amplitude `ac` RMS) for the conversion ending at t:
+        /// at OSR >= 2048 a sinc^2 decimator (datasheet "Comb Filter 2": a triangle over 2 T, T = OSR /
+        /// AD1CLK) and, chopped, the mean of two such sub-conversions T apart: |H| = sinc^2(f T) x
+        /// |cos(pi f T)| (INFERRED, docs/acdc-approaches.md 3: notches every 10 Hz at OSR 8192 chopped,
+        /// so 40 / 50 / 60 Hz vanish and off-notch ripple leaks). Below OSR 2048 the AD1 paths that use
+        /// this are instantaneous (the sentinels' OSR 256 peak hold) and it returns 0.
+        private double Ad1Ripple(double t, double ac, double hz, string shape, double duty)
+        {
+            if(ac <= 0 || hz <= 0 || Osr1 < 2048) return 0;
+            var T = Osr1 * 30.0 / SysClk;
+            const int N = 48;
+            double s = 0, ws = 0;
+            for(var sub = 0; sub < (Ad1Chop ? 2 : 1); sub++)
+                for(var i = 0; i < 2 * N; i++)
+                {
+                    var x = (i + 0.5) / N;
+                    var w = 1 - Math.Abs(x - 1);
+                    s += w * Wave(t - sub * T - x * T, 0, ac, hz, shape, duty);
+                    ws += w;
+                }
+            return s / ws;
+        }
+
+        /// The LPF's response to the AC part (`acCodes` RMS at the node) for the block ending at t:
+        /// INFERRED as a sinc^2 over two LPF periods (2 x 106.7 ms at LPFBW 111: the datasheet's 213 ms
+        /// window, results every 106.7 ms on the device), i.e. -51 dB at 50 Hz, consistent with the
+        /// device bound <= 0.5 % at 40 Hz (acdc-approaches.md 3 "LPF ripple rejection").
+        private double LpfRipple(double t, double p, double acCodes)
+        {
+            if(acCodes <= 0 || sigHz <= 0) return 0;
+            const int N = 64;
+            double s = 0, ws = 0;
+            for(var i = 0; i < 2 * N; i++)
+            {
+                var x = (i + 0.5) / N;
+                var w = 1 - Math.Abs(x - 1);
+                s += w * Wave(t - x * p, 0, acCodes, sigHz, sigShape, sigDuty);
+                ws += w;
+            }
+            return s / ws;
+        }
+
+        /// Datasheet 13.1 note 7 on the device (feasibility 13.2): AD1 on the V divider reads shifted
+        /// while AD2 / AD3 convert. N7Volts = the measured offsets at the jack per V range (repeat to
+        /// ~1 %), "n7:" scales them (0 = off); "n7g:" the amplitude of a gain shift that does not
+        /// repeat (device: up to -0.18 % on 60 V), drawn again at every AD1 enable. `q` jack volts.
+        private double N7(double q, int r) => N7On ? (q + N7Volts[Math.Max(0, Math.Min(3, r))] * N7Scale) * (1 + n7GainNow) : q;
+        private bool N7On => EnAd1 && (EnAd2 || EnAd3);
+        public double[] N7Volts = { -2.9e-3, 17e-3, 0.17, -1.6 };
+        public double N7Scale = 1.0, N7Gain = 0.0, N7ACodes = 0.0;
+        private double n7GainNow;
 
         /// Diode test: constant current source (the stock's 0.765 mA constant) with ~3.3 V compliance.
         public const double DiodeTestCurrent = 0.765e-3, DiodeCompliance = 3.3;
@@ -1621,6 +1713,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                         if(j == 7) mask = 0x0F;
                         if(j == 18) mask &= 0xF0;
                         if(j == 9 || j == 20) mask = 0;
+                        if(j == 21) mask = 0x0C; // AD3 inputs (fw-rs AC+DC method C: AD3 on OP1O)
                     }
                     // fw-rs power rows: R34 statistic select (SVXI / SDO23) and R35 AD3IN / AD3IG are
                     // run-time choices; the I row's power-bus bytes R2E / R2F = 08 81 are accepted too

@@ -397,6 +397,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     DieTemp = v; DieFollowsCj = false;
                     break;
                 case "noise": case "cal": case "beat": case "powmix": case "powvg": case "powz": case "op1vos": case "ad2dcg":
+                case "n7": case "n7g": case "n7a":
                     options.Add(new KeyValuePair<string, double>(key, v));
                     break;
                 default:

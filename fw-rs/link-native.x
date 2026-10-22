@@ -251,6 +251,16 @@ SECTIONS
         *(.text.*7dm40_fw2ui11device_page*);
         *(.text.*7dm40_fw6dialog10fuse_check*);
         *(.text.*7dm40_fw3dmm*3Dmm14acdc_diag_text*);
+        /* acdcm.rs: the AC+DC methods' entry / range-change / SCPI steps
+           (poll_am, the per-result path, stays in region B) */
+        *(.text.*7dm40_fw3dmm2am*8am_enter*);
+        *(.text.*7dm40_fw3dmm2am*11am_set_meth*);
+        *(.text.*7dm40_fw3dmm2am*11am_set_zero*);
+        *(.text.*7dm40_fw3dmm2am*7am_zero*);
+        *(.text.*7dm40_fw3dmm2am*7am_stat*);
+        *(.text.*7dm40_fw3dmm2am*7am_mode*);
+        *(.text.*7dm40_fw3dmm2am*6am_row*);
+        *(.text.*7dm40_fw3dmm2am*6am_ref*);
         *(.text.*7dm40_fw8sentinel*8Sentinel9diag_text*);
         *(.text.*7dm40_fw5scope*5Scope12hw_calibrate*);
         *(.text.*7dm40_fw6hwtrig*6HwTrig9calibrate*);

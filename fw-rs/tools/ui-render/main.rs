@@ -30,6 +30,13 @@ mod clock;
 mod dialog;
 #[path = "../../src/sentinel.rs"]
 mod sentinel;
+// dmm.rs acdcm.rs (AC+DC method C): chip access only.
+mod ad2exp {
+    pub fn dc_enter(_mode: u8, _r: u8, _r26: u8, _measure: bool) {}
+    pub fn dcv_row(_r: u8, _r26: u8, _opt: u8, _op1chop: u8, _ad2: bool) -> [u8; crate::hy3131::CFG_LEN] {
+        [0; crate::hy3131::CFG_LEN]
+    }
+}
 #[path = "../../src/dmm.rs"]
 mod dmm;
 #[path = "../../src/gen.rs"]
