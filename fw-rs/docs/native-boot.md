@@ -638,7 +638,8 @@ firmware image file (`FwFile`), read only when a host opens them.
 **Link-time asserts** (`link-native.x`):
 - region A ends at or below `0x08008000`;
 - `.text` starts at or above `0x0800800C`;
-- the image ends at or below `0x080A0000`;
+- the image ends at or below `0x080A0000`, with >= 4 KiB of region C free
+  below it (`build.sh` ends with a warning banner on stderr below 8 KiB);
 - region B (`.text`, hot) fits below `0x08080000` and leaves >= 8 KiB free
   (`build.sh` ends with a warning banner on stderr below 16 KiB);
 - TCM stack (64 KiB - .data/.bss) >= 42 KiB;
@@ -646,7 +647,40 @@ firmware image file (`FwFile`), read only when a host opens them.
 
 `build.sh` also requires >= 20 KiB between the TCM stack and the static
 worst call path (`tools/stack-depth/stackdepth.py --check 20480`, incl. the
-AD2 ISR and its exception frame), and prints region B / SRAM free.
+AD2 ISR and its exception frame), and prints region B / region C / SRAM
+free.
+
+Region C thresholds: C grows by whole functions moved out of B (0.3..5 KB
+each, audit #3) and with `.data`; 4 KiB still takes one more small move
+after the 8 KiB warning. Relief for C is a cut, or `.cold` code moved back
+to B while B's own budget allows: nothing above `0x080A0000` is reachable
+(next section).
+
+### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
+
+The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as
+emu/run.py models it): sectors 0-3 16 KiB, 4 64 KiB, 5-11 128 KiB, erase
+by whole sector. Only the low 512 KiB are zero-wait. The FS-loader writes
+an update body only to `0x08004000..0x080A0000`, so anything outside would
+have to be programmed by fw-rs itself (from a companion file on the SPI disk
+or a compressed copy in the body), not by the update file.
+
+| range | sector | 0xFF in the dump | usable? |
+|---|---|---|---|
+| `0x08000000..0x08004000` | 0 (ROM bootloader) | ~9.7 KB, scattered | no: the boot ROM's sector |
+| `0x0800460c..0x08008000` | 1 (region A tail) | 14.8 KB | inside the image, zero-wait: the cheapest headroom (shim / vectors end at `0x0800460c`, build.sh prints it); code there would need its own output section before the marker |
+| `0x080AE700..0x080C0000` | 9 (FS-loader + boot data at `0x080A4000`) | ~70 KB | write-once: it can be programmed but never erased (the erase takes the FS-loader and the UID-bound data with it), so never updated |
+| `0x080C0400..0x080E0000` | 10 (calibration / settings) | ~127 KB | write-once likewise (an erase loses the calibration); whether the stock app rewrites this sector on a settings save is not known: a return to stock could wipe it |
+| `0x080E0000..0x080FF000` | 11 (`0x080FF000` boot word) | ~124 KB | erasable, but the FS-loader erases sector 11 at the start of every install (fsloader-install-trigger.md): fw-rs would re-program it after each update |
+
+Sector 11 is the only candidate. Its risks: a version mismatch between the
+image and the overlay (needs a CRC / version check and a "not available"
+path, never a jump into stale code); ~124 KB programmed at boot under the
+watchdog; power loss mid-program (the check must catch a partial overlay);
+a wrong sector code in the erase (SN = code >> 3: 0x58 = 11, 0x50 = 10 =
+calibration, 0x48 = 9 = FS-loader) bricks the recovery path or loses the
+calibration; slow flash, so `.cold`-class code only; and the
+`0x080FF000` word (stock app's boot flag) shares the sector.
 
 **`build.sh`** checks the binary again:
 - the 16 bytes at `0x08008000`, and all padding from the end of region A to

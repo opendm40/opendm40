@@ -333,6 +333,10 @@ SECTIONS
 ASSERT(__region_a_end <= _marker_start, "region A (vectors + shim) overlaps the loader marker at 0x08008000");
 ASSERT(ADDR(.text) >= _marker_end, "code placed in the loader marker at 0x08008000..0x0800800B");
 ASSERT(__image_end <= 0x080A0000, "image reaches the FS-loader at 0x080A0000");
+/* Region C budget: >= 4 KiB free below 0x080A0000 (build.sh warns below
+ * 8 KiB). C grows by whole moved functions (0.3..5 KB each) and with .data;
+ * 4 KiB still takes one more small move after the warning. */
+ASSERT(0x080A0000 - __image_end >= 4K, "less than 4 KiB of region C (.cold + .data image) free below 0x080A0000: cut code or move .cold code back to region B");
 /* Memory budgets (2026-10-22 memory rework; the numbers then, ad2-isr (the
  * default) / without it: static worst stack path 21 760 / 21 396 B, stack
  * 46 620 / 46 688 B, SRAM free 12 856 / 13 040 B, region B free 24 508 /
@@ -345,6 +349,8 @@ ASSERT(__image_end <= 0x080A0000, "image reaches the FS-loader at 0x080A0000");
  *   emulator 2026-10-21, + 16 KiB.)
  *   SRAM: >= 8 KiB free above .sram_bss (the last SRAM section) for DMA
  *   descriptors / buffers still to come.
+ *   Region C: >= 4 KiB free below 0x080A0000 (build.sh warns below 8 KiB;
+ *   nothing above 0x080A0000 is within the update file's reach).
  *   Region B: >= 8 KiB free below 0x08080000 (build.sh ends with a warning
  *   banner below 16 KiB; hot code / fonts only, rarely run code goes to
  *   .cold above). After the fast logger 9 304 / 16 568 B were left; the
