@@ -581,6 +581,8 @@ fn power_page(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: ui::
     let mut dv = ui::DmmView::new();
     dv.power = true;
     dv.hv_red = pv.v.abs() >= 30.0;
+    // The W button's glyph: the method in use (the app's pw_btn_glyph).
+    ui::set_power_dc(pv.dc);
     dv.draw_static(Button::Power, r.mode, true, false);
     let mut pc = ui::pw::PwCache::new();
     ui::pw::side_clear(&mut pc);
@@ -1435,6 +1437,8 @@ fn main() {
                 let rb = pw_rd(*b);
                 let mut dv = ui::DmmView::new();
                 dv.power = true;
+                // (A method change redraws the page in the app: pw_tick.)
+                ui::set_power_dc(b.dc);
                 dv.draw_static(Button::Power, ra.mode, true, false);
                 let mut pc = ui::pw::PwCache::new();
                 ui::pw::side_clear(&mut pc);
@@ -1446,6 +1450,7 @@ fn main() {
                 host::reset(0);
                 let mut dv = ui::DmmView::new();
                 dv.power = true;
+                ui::set_power_dc(b.dc);
                 dv.draw_static(Button::Power, rb.mode, true, false);
                 let mut pc = ui::pw::PwCache::new();
                 ui::pw::side_clear(&mut pc);

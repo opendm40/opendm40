@@ -165,7 +165,7 @@ impl DmmView {
         qt.push(if pv.dc { "--" } else { sig_text(&mut b, pv.q * k, sg) });
         let (fv, fu) = if pv.f_hz >= 1000.0 { (pv.f_hz * 1e-3, "kHz") } else { (pv.f_hz, "Hz") };
         let mut ft = T::new();
-        ft.push(if pv.f_hz > 0.0 && !pv.dc { sig_text(&mut b, fv, if pv.f_hz >= 1000.0 { 3 } else { 4 }) } else { "--" });
+        ft.push(if pv.f_hz > 0.0 && !pv.dc { sig_text(&mut b, fv, 3) } else { "--" });
         // The energy (owner: V and I on top, the Wh counter below): Wh with
         // mWh / kWh, 5 digits; P instead while the main readout shows the
         // energy. Long press = reset (confirm).
