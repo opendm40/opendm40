@@ -28,6 +28,11 @@
 //! Device glue (the SPI reader, MMEM:DATA?, the refresh flag of vdisk.rs) at the end.
 //! Host tests: tools/dlog-test (round trip vs the old writer, truncation at
 //! every byte), tools/fatren-test (csvlog on a FAT image, fsck, dlog.py).
+//!
+//! Placement: the module is in .cold (region C, link-native.x) except the
+//! row coder that runs on every reading of a recording (`Enc::row`, BitW,
+//! Ad, fmt_row's CSV length, crc32_upd): `.text.dlog_row`, region B
+//! (emulator hooks 2026-10-22: the only dlog code that ran per reading).
 
 #![allow(dead_code)]
 
@@ -52,6 +57,7 @@ const QMAX: u32 = 24;
 
 // ------------------------------------------------------------- CRC-32 (zlib)
 
+#[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
 pub fn crc32_upd(mut c: u32, d: &[u8]) -> u32 {
     const T: [u32; 16] = {
         let mut t = [0u32; 16];
@@ -158,6 +164,7 @@ impl Txt<'_> {
             self.n += 1;
         }
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
     pub fn bytes(&mut self, s: &[u8]) {
         for &c in s {
             self.c(c);
@@ -166,6 +173,7 @@ impl Txt<'_> {
     pub fn s(&mut self, s: &str) {
         self.bytes(s.as_bytes());
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
     pub fn u(&mut self, v: u64) {
         let mut d = [0u8; 20];
         let mut k = 0;
@@ -248,6 +256,7 @@ impl Txt<'_> {
 
 /// One CSV row `time_s,value,unit,flags\r\n` (the csvlog format); returns
 /// its length. An OL row prints no value.
+#[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
 pub fn fmt_row(t_ms: u64, v: Val, unit: &[u8], flags: u8, out: &mut [u8]) -> usize {
     let mut w = Txt { b: out, n: 0 };
     w.ms(t_ms);
@@ -274,6 +283,7 @@ pub fn fmt_row(t_ms: u64, v: Val, unit: &[u8], flags: u8, out: &mut [u8]) -> usi
 
 /// `v` as an integer at decimal scale k (value = n * 10^k), when exact and
 /// at most one decade above the scale (|n| < 10^7).
+#[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
 fn at_scale(m: u32, e: i32, neg: bool, k: i32) -> Option<i32> {
     if m == 0 {
         return Some(0);
@@ -327,6 +337,7 @@ impl Ad {
     const fn new(a: u32) -> Ad {
         Ad { a, n: 1 }
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
     fn k(&self) -> u32 {
         let mut k = 0;
         while k < 30 && (self.n << k) < self.a {
@@ -334,6 +345,7 @@ impl Ad {
         }
         k
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
     fn upd(&mut self, x: u32) {
         self.a = self.a.saturating_add(x.min(1 << 24));
         self.n += 1;
@@ -358,6 +370,7 @@ struct BitW<'a> {
 }
 
 impl BitW<'_> {
+    #[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
     fn put(&mut self, v: u32, bits: u32) {
         if bits == 0 {
             return;
@@ -374,6 +387,7 @@ impl BitW<'_> {
         }
         self.acc &= (1u64 << self.nb) - 1;
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
     fn ones(&mut self, mut q: u32) {
         while q > 0 {
             let k = q.min(16);
@@ -381,6 +395,7 @@ impl BitW<'_> {
             q -= k;
         }
     }
+    #[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
     fn rice(&mut self, x: u32, k: u32) {
         let q = x >> k;
         if q < QMAX {
@@ -459,6 +474,7 @@ impl Enc {
     /// (returned count, <= ROW_BYTES); a chunk opens with its first row.
     /// The caller writes the CHDR-byte chunk header placeholder before the
     /// first row's bytes (`open` false before the call).
+    #[cfg_attr(target_os = "none", link_section = ".text.dlog_row")]
     pub fn row(&mut self, t_ms: u32, v: Val, flags: u8, csv_len: u32, out: &mut [u8]) -> usize {
         if !self.open {
             self.open = true;

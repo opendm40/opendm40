@@ -89,6 +89,11 @@ SECTIONS
         *(.text.*7dm40_fw9scope_csv*);
         *(.text.*7dm40_fw4boot*);
         *(.text.*7dm40_fw3app9app_press*);
+        /* dlog's per-reading row coder is `.text.dlog_row` (src/dlog.rs),
+         * not matched here: region B. upload::disk / spi and
+         * vdisk::entries are inline(always) (vwrite::poll, every pass);
+         * app_press's guard is inlined into App::gesture. Audit with
+         * emulator hooks on every function of C, 2026-10-22 (TODO). */
         /* NOT persist: its crc runs on every main-loop pass (device
          * f5f8e96: lat_pc in persist::crc, 9..18 us stalls). */
         /* ... and their named read-only data (tables, strings in statics). */

@@ -537,13 +537,19 @@ pub fn forget(name: &[u8; 11]) {
     }
 }
 
-/// The table (vwrite.rs).
+/// The table (vwrite.rs). Inlined: vwrite::poll (region B) calls it on
+/// every main-loop pass and this module is in .cold (region C).
+#[inline(always)]
 pub(crate) fn entries() -> &'static mut [VF] {
     if state().is_none() {
         return &mut [];
     }
     let t = tab();
-    &mut t.e[..t.n]
+    // Not `&mut t.e[..t.n]`: that range index is a generic of this module
+    // (placed in .cold) and was not inlined (emulator hooks: called on
+    // every pass).
+    let n = t.n.min(t.e.len());
+    unsafe { core::slice::from_raw_parts_mut(t.e.as_mut_ptr(), n) }
 }
 
 /// Who owns cluster `c` in the generated layout (overlays not counted).
