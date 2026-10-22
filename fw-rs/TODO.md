@@ -523,6 +523,21 @@ Code work (in this order):
       Now incremental (screenshot.rs state machine, <= ~3 ms per main-loop pass; frame captured
       run-length coded into 96 KiB SRAM, screen frozen only while captured); SPI1 /16 -> /4 (12.5 MHz).
       (5fd7871, e3fe548; verify: loop max in DBG:DIAG? during a shot, SCPI READ? keeps answering, S00x.BMP correct)
+- [x] Screen frozen ~4-5 s on every shot since the shot streams from the panel (CAP dropped, f06f046):
+      the next shot's first-fit free clusters erased in idle time, nothing reserved / linked
+      (screenshot.rs "idle-time preparation", docs/ram-budget.md). Emulator (W25Q128 timing):
+      frozen 5.0 s -> 1.4 s, 0 data blocks erased. (8f1d887; device check below)
+- [ ] Device: screenshot preparation (8f1d887). DBG:FLASH? fields 4.. = frozen_ms, total_ms,
+      slices_frozen, blocks_erased, prep state (2 ready), clusters ready, prep erases.
+      1. Boot, wait ~15 s: prep state 2, 76 ready. A shot of the DMM page and of AC+DC: frozen_ms
+         (expect ~1.1-1.6 s), blocks_erased 0; BMP equals `dm40dbg.py shot`; ~5-10 s later state 2 again.
+      2. A shot right after another: frozen ~3-5 s (unprepared), Saved.
+      3. Power cut (battery out) while prep state = 1 right after a shot: boot, MMEM:CAT? lists the files,
+         fsck of DEBUG/SPIFLASH.BIN clean (no lost clusters), prep reaches 2, the next shot Saved.
+      4. Disk filled to < 76 free clusters: prep state 2 with the free count, a shot says "Disk full".
+      5. CSV recording on: after each 60 s commit prep goes 1 -> 2; fast-log session: prep stays put
+         during it; "PC can edit" + a DM40*.BIN copied: prep pauses, the file installs.
+      6. DBG:DIAG? loop max while prep works (state 1): no worse than idle + ~1 ms.
 - [x] Data logger (LOG:STAT ON) has no on-screen indicator: "DATA LOGGING" panel (dialog::log_panel,
       rate + sample count, 1 s refresh), view repainted on stop.  (5fd7871; verify on device)
 - [ ] Browser client (owner 2026-10-22: later, not now): one local HTML page (fw-rs/tools/web/dm40.html) over WebUSB
