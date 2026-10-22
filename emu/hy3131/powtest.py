@@ -69,8 +69,9 @@ def both(*fs):
 
 
 # name: (setup SCPI, run_for, [(t, spec, check, label)]); a phase is checked on
-# its samples from the next phase's start - 4.5 s to that start - 1.5 s (the
-# fw uptime lags the virtual time by ~0.5 s or more).
+# its samples from the next phase's start - 4.5 s to that start - 2.5 s (the last phase: the run end - 4.5 .. - 1.5 s; the
+# fw uptime lags the virtual time by the boot: ~1.8 s since the disk's SPI
+# bytes take their time, emu GD32_SPI 2026-10-22).
 SC = {
     'mains': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 58, [
         (0, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), ranges('6.000000E+02', '1.000000E+01')), 'resistive 230 V 1 A: PF 1, 50 Hz, 600 V / 10 A'),
@@ -435,7 +436,8 @@ def run(name):
     bad = []
     for i, (t, _, chk, label) in enumerate(phases):
         t1 = phases[i + 1][0] if i + 1 < len(phases) else run_for
-        seen = [r for r in rows if t1 - 4.5 <= r['t'] <= t1 - 1.5 and ('P' in r or name.startswith('t1'))]
+        m = 2.5 if i + 1 < len(phases) else 1.5  # the run's end: no next step to keep clear of
+        seen = [r for r in rows if t1 - 4.5 <= r['t'] <= t1 - m and ('P' in r or name.startswith('t1'))]
         if not seen:
             ok = False
             bad.append('%s: no samples' % label)
