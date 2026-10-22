@@ -241,6 +241,74 @@ if v.wp():
 ok('volume writable (no WP bit), %s' % v.stats()['files'] + ' generated files')
 v.close()
 
+print('--- mode (decision 2026-10-22 #6): read-only "Files live" by default, "PC can edit" at the next bus reset')
+cleanup()
+spi = spi_copy('ro.spi')
+v = VServe(T, spi, FLASH, SRC, ro=True)
+v.tick(100)
+base = v.dump(0)
+host = os.path.join(WORK, 'ro.host')
+run('cp', '--sparse=always', base, host)
+if not v.wp():
+    fail('read-only: no WP bit')
+v.lock(True)
+mtools(host, ('mdel', '::LOGS/LOG001.CSV'))
+ws = diff(base, host)
+res = [v.write(lba, x) for lba, x in ws]
+if not ws or any(r != W_REFUSED for r in res):
+    fail('read-only: writes not all refused (07/27/00): %s' % res)
+settle(v)
+st = v.stats()
+if st['frozen'] != 'false' or st['deleted'] != '0' or st['rec'] != '0' or st['pairs'] != '0':
+    fail('read-only: %s' % st)
+same_tree(SPI0, v.save(), 'read-only writes')
+# A delete on the meter while the host holds the volume locked: the volume
+# changes and the UNIT ATTENTION goes out at once (not at the Allow).
+if not v.gallery_delete(b'LOG001  DLG'):
+    fail('read-only: gallery delete')
+v.idle(1500)
+if not v.ua() or 'LOG001.CSV' in ls(v.dump(1), '::LOGS'):
+    fail('read-only: no UNIT ATTENTION / LOG001 still listed while locked')
+# Asking for "PC can edit" while mounted changes nothing until the bus reset.
+v.mode(False)
+if not v.wp():
+    fail('mode changed under the host')
+v.bus_reset()
+settle(v)
+if v.wp():
+    fail('writable mode not in force after the bus reset')
+v.mode(True)
+v.bus_reset()
+if not v.wp():
+    fail('read-only mode not in force after the bus reset')
+v.close()
+ok('read-only: WP bit, %d writes of a delete refused, nothing staged, SPI unchanged; a meter-side delete while locked: UNIT ATTENTION at once; a mode asked for applies at the next bus reset only' % len(ws))
+
+# A writable session with a delete half done, then "Files live" asked for:
+# the session stays frozen and writable until the bus reset, then the
+# volume is read-only and regenerated (nothing of the session survives).
+v, spi, base, host = fresh('rw-ro')
+v.lock(True)
+mtools(host, ('mdel', '::LOGS/LOG001.CSV'))
+g = Geo(base)
+for lba, x in diff(base, host):
+    if g.kind(lba) == 'data':
+        if v.write(lba, x) != W_OK:
+            fail('rw-ro: dir write')
+v.mode(True)
+settle(v)
+if v.wp() or v.stats()['frozen'] != 'true' or v.ua():
+    fail('rw-ro: the session changed before the bus reset: %s' % v.stats())
+v.bus_reset()
+settle(v)
+if not v.wp() or v.stats()['rec'] != '0' or 'LOG001.CSV' not in ls(v.dump(1), '::LOGS'):
+    fail('rw-ro: after the bus reset: %s' % v.stats())
+sp = v.save()
+fsck_clean(sp, 'rw-ro')
+same_tree(SPI0, sp, 'rw-ro')
+v.close()
+ok('writable session + read-only asked: frozen and writable until the bus reset, then read-only, the half delete dropped, SPI unchanged')
+
 print('--- delete (mdel): LOGS / SHOTS / SCOPE files, every order')
 for order in ('asc', 'desc', 'random', 'data-first', 'meta-first'):
     v, spi, base, host = fresh('del-' + order)

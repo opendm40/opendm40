@@ -2019,8 +2019,20 @@ pub const SETTINGS: [&str; 9] = [
 ];
 pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit", "Scope swipe", "Scope press", "Scope tap step", "Help", "More"];
 /// Page 3: the wrong-connection alerts (sentinel.rs; ON = all, A-JACK only,
-/// OFF) and the Device / About page.
-pub const SETTINGS3: [&str; 2] = ["Jack alerts", "Device"];
+/// OFF), the USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
+/// applies at the next USB plug) and the Device / About page.
+pub const SETTINGS3: [&str; 3] = ["Jack alerts", "USB disk", "Device"];
+
+/// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
+/// one in force differs (a host reads the WP bit when it mounts).
+pub fn usb_disk_name(ro_now: bool, ro_want: bool) -> &'static str {
+    match (ro_want, ro_now == ro_want) {
+        (true, true) => "Files live",
+        (false, true) => "PC can edit",
+        (true, false) => "Files live (re-plug)",
+        (false, false) => "PC can edit (re-plug)",
+    }
+}
 
 /// Pressed feedback on the list pages (ui-review #11): `row`, `part` (0 the
 /// row, -1 / +1 its stepper's "-" / "+" key), `on` (pressed / released).
@@ -2267,7 +2279,7 @@ pub fn view_name(v: View) -> &'static str {
 /// MENU goes back. Only behaviour of this firmware (app.rs, gesture.rs) and
 /// limits the repo documents (genplan.rs, docs/user-feedback.md section
 /// 6.3 / 7 / 3) - no input ratings that are not sourced.
-pub const HELP: [(&str, [(&str, &str); 8]); 5] = [
+pub const HELP: [(&str, [(&str, &str); 8]); 6] = [
     (
         "Gestures",
         [
@@ -2331,6 +2343,19 @@ pub const HELP: [(&str, [(&str, &str); 8]); 5] = [
             ("A-JACK LIVE? OVLD", "Alternate with HOLD"),
             ("V-JACK? DC? AC?", "Hints, below HOLD"),
             ("Jack alerts", "Settings 3/3"),
+        ],
+    ),
+    (
+        "USB disk",
+        [
+            ("Files live", "Default, read-only"),
+            ("New files", "Show while mounted"),
+            ("File manager", "Refresh (F5)"),
+            ("PC can edit", "Delete, copy update"),
+            ("Change mode", "Settings 3/3"),
+            ("Takes effect", "At next USB plug"),
+            ("At power-on", "Files live again"),
+            ("Delete on meter", "Gallery, MMEM:DEL"),
         ],
     ),
 ];
