@@ -42,6 +42,19 @@
 //! Live runs rewrite the image.
 use std::{env, fs};
 
+/// println! that ignores a closed stdout. run.sh pipes the output into
+/// `grep -q`, which exits at its first match: std's println! then panics
+/// on EPIPE, and a panic before the `fs::write` of the image at the end of
+/// a command loses everything the command wrote (seen as random failures:
+/// a file still there after a delete, a missing SHOTS/S000.BMP, a rename
+/// not done), depending on whether grep had exited before the next line.
+macro_rules! println {
+    ($($t:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout(), $($t)*);
+    }};
+}
+
 #[allow(dead_code)]
 mod msc {
     /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 8 methods,

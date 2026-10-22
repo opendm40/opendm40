@@ -174,16 +174,29 @@ def apply(v, host_before, host_after, order='asc', expect=W_OK, seed=1):
     ws = diff(host_before, host_after)
     g = Geo(host_before)
     # A host writes every sector of the clusters it allocates (zeros too,
-    # which a sector diff of the images does not show).
+    # which a sector diff of the images does not show). Those zeros go into
+    # host_after as well: it is the host's image, which host_view_ok compares
+    # the volume with. mtools leaves the slack past the end of a file's last
+    # cluster as it was, so after a delete + copy into the freed clusters it
+    # still holds the deleted file's bytes there while the volume (rightly)
+    # has the zeros written here (a short DM40FW.BIN, e.g. run.sh's synthetic
+    # stand-in for a missing dm40-fw-native.bin: "holes" failed every time).
     fa, fb = g.fat(), Geo(host_after).fat()
     have = {l for l, _ in ws}
     z = bytes(SECTOR)
+    zl = []
     for c in range(2, len(fb)):
-        if fb[c] != 0 and fa[c] != fb[c] and (fa[c] == 0 or True) and fa[c] == 0:
+        if fb[c] != 0 and fa[c] == 0:
             for q in range(g.spc):
                 lba = g.data + (c - 2) * g.spc + q
                 if lba not in have:
                     ws.append((lba, z))
+                    zl.append(lba)
+    if zl:
+        with open(host_after, 'r+b') as f:
+            for lba in zl:
+                f.seek(lba * SECTOR)
+                f.write(z)
     ws.sort()
     if order == 'desc':
         ws = ws[::-1]
