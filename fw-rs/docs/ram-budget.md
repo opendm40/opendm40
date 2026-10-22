@@ -152,7 +152,7 @@ the firmware's own figures, DBG:FLASH? fields 4-7):
 | 87f2c20 + instrumentation (before) | DMM HOLD | 5 001 ms | 76 / 76 | 2 406 |
 | 87f2c20 + instrumentation (before) | menu | 5 001 ms | 76 / 76 | 2 406 |
 | 87f2c20 + instrumentation (before) | combined view | 4 374 ms | 61 / 76 | 2 098 |
-| 8f1d887 = 90bfeab before the rebase (after, prepared) | DMM HOLD | 1 403 ms | 0 | 681 |
+| 8f1d887 = e429dc9 before the rebase (after, prepared) | DMM HOLD | 1 403 ms | 0 | 681 |
 | 8f1d887 | menu | 1 403 ms | 0 | 681 |
 | 8f1d887 | combined view | 1 403 ms | 0 | 681 |
 | 8f1d887 | the same view again, ~10 s after the last shot | 1 403 ms | 0 | 681 |
