@@ -697,7 +697,6 @@ class FrontendView(Gtk.DrawingArea):
         self.want_h = 0
         self.ink = None               # list -> layout() records label boxes (overlap check)
         self.segs = None              # list -> layout() records wire segments (wiring check)
-        self.cmp_seen = {}            # configuration -> the comparator was seen in use (layout stability)
         self.inside_h = 0
         self.set_content_height(120)
         self.set_draw_func(self.draw)
@@ -772,21 +771,28 @@ class FrontendView(Gtk.DrawingArea):
             sm = int(st.get('smode', '0'), 16)
         except ValueError:
             sm = 0
-        closed = []
-        for part in st.get('pasw', '-').split(','):
-            if part and part[0].isdigit() and not part.startswith('8'):
-                closed.append('PA' + part[:len(part.rstrip('PDFS'))] + ' ' + part[len(part.rstrip('PDFS')):])
-        bus = self.SMODE.get(sm & 15, '?') + (', RLU' if sm & 0x10 else '') + (', cap array' if sm & 0x20 else '')
+        closed = [self.pa_label(n, sw) for n, sw in sorted(self.pa_switches(st).items(), reverse=True)]
+        # the pins that read the node (the V Ω jack's network pins the enabled blocks select)
+        vg = self.jack_pins(st)
+        node_pins = [p for p in vg[0] + vg[1] if not p.startswith('PA') and p != 'FB/RLU']
+        # the power bus (SMODE): with CMPO in the selection the comparator flips it between two sets (own line)
+        bus_a, _, bus_b = self.SMODE.get(sm & 15, '?').partition(' / ')
+        bus_b = bus_b.replace(' (CMPO)', '')
+        bus = ['bus: ' + bus_a + (', RLU' if sm & 0x10 else '') + (', cap array' if sm & 0x20 else '')]
+        if bus_b:
+            bus.append('⇄ %s (CMPO)' % bus_b)
         y += pad * 2
         y += label(pad, y, 'test source (OP3) and the part on the V Ω jack', txt) + pad
-        yc = y + L * 2.2
+        yc = y + L * 2.6                          # room for a three-line switch box (stable band height)
         x = pad * 2
         net = 'src'
         items_done = []
-        # 1. the source
+        # 1. the source (reserved widths: the blocks right of it keep their x in every function / range)
+        vref_w = tw('VREF AGNDN9')
+        src_w = vref_w + pad * 2 + pad * 2.5 + max(L * 2.4, tw('OP3') + L * 1.4)
         if role in ('Ohm', 'Cont', 'CapOsc'):
             b = box(x, yc, ['VREF ' + vsel, ('%s V' % st.get('vsrc', '?')) if 'vsrc' in st else
-                            ('± by CMPO' if role == 'CapOsc' else '')], True)
+                            ('± by CMPO' if role == 'CapOsc' else '')], True, minw=vref_w)
             x = b[2] + pad * 2.5
             wire([(b[2], yc), (x, yc)], True, net=net)
             arrow(x, yc, True)
@@ -795,12 +801,14 @@ class FrontendView(Gtk.DrawingArea):
         else:
             ival = num('itest')
             b = box(x, yc, ['OP3: current', si(ival, 'A') + ('  ≤ %s V' % st['compl'] if 'compl' in st else '')],
-                    role != 'CapDischarge', minw=tw('-999.9 mA  ≤ 3.3 V'))
+                    role != 'CapDischarge', minw=max(tw('-999.9 mA  ≤ 3.3 V'), src_w - pad * 2))
             x = b[2]
         # 2. switches: PA (D / F / P) and the power bus
         x2 = x + pad * 2.5
         wire([(x, yc), (x2, yc)], True, net=net)
-        sb = box(x2, yc, ['switches: ' + (', '.join(closed) or 'none'), 'bus: ' + bus], True)
+        sb = box(x2, yc, [', '.join(closed) or 'PA: none'] + bus, True,
+                 minw=max(tw('PA4 D F, PA3 D, PA2 D F'), tw('bus: SVSS+SVSO2+SCN, RLU, cap array'),
+                          tw('⇄ SVSS+SVSO2+SCN (CMPO)')))
         x = sb[2]
         # 3. Rref / R
         rval = None
@@ -811,7 +819,7 @@ class FrontendView(Gtk.DrawingArea):
         if rval:
             x3 = x + pad * 2.5
             wire([(x, yc), (x3, yc)], True, net=net)
-            rw, rh = max(L * 2.4, tw(rval) + pad * 2), L * 0.9
+            rw, rh = max(L * 2.4, tw('Rref 99.99 MΩ') + pad * 2, tw(rval) + pad * 2), L * 0.9
             if cr:
                 cr.set_source_rgb(*bg)
                 cr.rectangle(x3, yc - rh / 2, rw, rh)
@@ -824,15 +832,19 @@ class FrontendView(Gtk.DrawingArea):
                 ink.append(('box Rref', x3 - 1, yc - rh / 2 - 1, x3 + rw + 1, yc + rh / 2 + 1))
             label(x3 + (rw - tw(rval)) / 2, yc - rh / 2 - L - pad * 0.8, rval, txt)
             x = x3 + rw
-        # 4. the node
+        else:                                       # no resistor (current source): the node stays where it is
+            x1 = x + pad * 2.5 + max(L * 2.4, tw('Rref 99.99 MΩ') + pad * 2)
+            wire([(x, yc), (x1, yc)], True, net=net)
+            x = x1
+        # 4. the node, named by the pins that read it (reserved width: the jack does not move with them)
         xn = x + pad * 4
         wire([(x, yc), (xn, yc)], True, net=net)
         dot(xn, yc, True)
         vx = st.get('vx', st.get('vramp', ''))
-        if vx:
-            label(xn - tw('Vx') / 2, yc - L - pad * 0.6, 'Vx', txt)
+        nlab = 'Vx' + (' → ' + ', '.join(node_pins) if node_pins else '')
+        label(xn - tw('Vx') / 2, yc - L - pad * 0.6, nlab, txt)
         # 5. jack, part, COM
-        xj = xn + pad * 4
+        xj = xn + max(pad * 4, tw('Vx → SENSE, PB0, PB8') - tw('Vx') / 2 + pad * 2)
         wire([(xn, yc), (xj, yc)], True, net=net)
         r = L * 0.45
         if cr:
@@ -893,7 +905,7 @@ class FrontendView(Gtk.DrawingArea):
             ink.append(('com', xc_ - 1, yc - r - 1, xc_ + 2 * r + 1, yc + r + 1))
         label(xc_ + r - tw('COM') / 2, yc - r - pad * 0.8 - L, 'COM', txt)
         # values under the chain, in fixed places (left-aligned at the blocks they belong to)
-        yv = yc + L + pad * 1.5
+        yv = yc + (3 * L + pad * 1.2) / 2 + pad * 1.2
         vals = []
         if 'itest' in st:
             vals.append((x2, 'I test %s' % si(num('itest'), 'A')))
@@ -908,82 +920,138 @@ class FrontendView(Gtk.DrawingArea):
             label(xv, yv, s_, hot)
             last = xv + reserve
         y = yv + L + pad
-        how = {'Ohm': 'AD1 ratiometric: input = the node (PB0 → OP1 → OP1O − PB3), reference = the drop across '
-                      'Rref (FB − RLU): R = Rref × code / (0.9 × 2²³)',
-               'Cont': 'AD1 ratiometric as Ω with Rref 1 kΩ (reference order swapped: negative codes); the '
-                       'comparator on OP1O drives the CMP pin (beeper) below ~67 Ω',
-               'Diode': 'OP3 as a current source; AD1 reads Vf through the /10 divider (SDIO: PB0 / PB8)',
-               'CapOsc': 'RC oscillator: the comparator flips VREF (CMPO) at its thresholds; f = 1 / (2 ln2 R C) '
-                         'on the counter',
-               'CapRamp': 'constant current ramp: AD1 reads the node, dV/dt = I / C; ACPO reverses the ramp at the '
+        # the measurement chain from the registers (pins / op-amps / references), then what the role does
+        ad1c = ''
+        if st.get('ad1') == '1':
+            ad1c = 'AD1: ' + self.chain(st, st.get('sad1fp', '')) + ' − ' + st.get('sad1fn', '') + \
+                   ', reference ' + st.get('sad1rh', '') + ' − ' + st.get('sad1rl', '')
+        cmpc = ('comparator on ' + self.chain(st, st.get('scmpi', ''))) if st.get('cmp') == '1' else ''
+        how = {'Ohm': 'ratiometric (R = Rref × code / (0.9 × 2²³)); ' + ad1c,
+               'Cont': 'ratiometric as Ω with Rref 1 kΩ (reference order swapped: negative codes); ' + ad1c +
+                       ('; the %s drives the CMP pin (beeper) below ~67 Ω' % cmpc if cmpc else ''),
+               'Diode': 'OP3 as a current source; ' + ad1c +
+                        (' (SDIO: the /10 divider PB0 / PB8)' if st.get('sdio') == '1' else ''),
+               'CapOsc': 'RC oscillator: the %s flips VREF (CMPO) at its thresholds; f = 1 / (2 ln2 R C) on the '
+                         'counter' % (cmpc or 'comparator'),
+               'CapRamp': 'constant current ramp, dV/dt = I / C; ' + ad1c + '; ACPO reverses the ramp at the '
                           'R21 thresholds',
-               'CapDischarge': 'discharge row: the capacitor is grounded'}.get(role, '')
+               'CapDischarge': 'discharge row: the capacitor is grounded'}.get(role, ad1c)
         if how:
             y += label(pad * 2, y, how, dim, w - pad * 4) + pad
         return y
 
     @staticmethod
-    def jack_pins(st):
-        """Pins the current register row puts on each jack net -> (V Ω, Ω/mV network, COM, A) lists of
-        text lines. Only what the row selects: the muxes of the enabled blocks (SOP1P / SOP2P, SAD1FP..RL,
-        SAD2* / SAD3*, SCMPI, SDIO) and the closed PA switches (pasw). Board facts from the stock rows
-        (firmware/re/analysis/hy3131_v2_6.h; fw-rs/docs/power-meter-and-misconnect.md): the V divider
-        taps are PA4..PA7 (PS: /10 PA7, /100 PA6, /1000 PA5, /10000 PA4+PA5) onto SENSE, the AC V node is
-        PB4 (AC coupled from OP1O), DC V r1..r3 read SENSE - PB5; the Ω / mV / diode / cap / temperature
-        input is PB0 (mV: RLU), the OP3 source and the reference resistors switch on PA0..PA7 / PA9 (D, F,
-        P), the ratiometric reference is FB - RLU, the diode /10 divider PB0 / PB8; the shunts are PB2 (A)
-        and PB1 (mA, uA); PB3 is the low (COM) side every A / Ω row measures against; PA8 (P in most rows)
-        is not attributed."""
-        def on(k):
-            return st.get(k) == '1'
-        used = set()
-        for en, keys in (('op1', ('sop1p',)), ('op2', ('sop2p',)), ('ad1', ('sad1fp', 'sad1fn', 'sad1rh', 'sad1rl')),
-                         ('ad2', ('sad2ip', 'sad2in', 'sad2rh', 'sad2rl')), ('ad3', ('sad3ip', 'sad3in')),
-                         ('cmp', ('scmpi',))):
-            if en == 'cmp' and not (on('cmpcfg') if 'cmpcfg' in st else (on('ctr') or on('cmppin'))):
-                continue                       # comparator idle (stock R20 0xf0: SCMPI = PB4, nothing reads it)
-            if on(en):
-                used.update(st.get(k, '') for k in keys)
-        if on('sdio'):
-            used.update(('PB0', 'PB8'))
+    def chain(st, pin):
+        """a block input as the registers route it: 'PB0 → OP1 ×1 → OP1O' for an op-amp output"""
+        for o in ('1', '2'):
+            if pin == 'OP%sO' % o and st.get('op' + o) == '1':
+                return '%s → OP%s %s → %s' % (st.get('sop%sp' % o, '?'), o, '×10' if st.get('ops' + o) == '1' else '×1', pin)
+        if pin == 'PB4' and st.get('op1') == '1':
+            return '%s → OP1 → OP1O → AC coupling → PB4' % st.get('sop1p', '?')
+        return pin
+
+    # Board facts (pin -> jack net). The DM40 netlist is not known (emu/hy3131/README.md); what is used:
+    # the PA<9:0> switch network is the V Ω jack's resistor network (datasheet 12.2: the divider in V,
+    # the reference resistors / OP3 source in Ω), SENSE and PB5 its V-path nodes (DC V reads SENSE − PB5),
+    # PB0 / PB8 (SDIO /10 divider), RLU / RLD and FB the Ω / mV network's, PB2 the A shunt, PB1 the mA / uA
+    # shunt, PB3 and AGND COM. PB4 is the AC-coupled OP1 output, so it carries whatever OP1's input does.
+    # Which of them a frame shows is decided by the registers only (muxes of the enabled blocks, PA switches).
+    NET_VA = ('SENSE', 'PB5')                          # V jack via the divider (PA relay V/A)
+    NET_OHM = ('PB0', 'PB8', 'SENSE', 'RLU', 'RLD', 'FB')  # V jack via the Ω / mV network (PA relay Ω/mV)
+    NET_COM = ('AGND', 'PB3')
+    NET_A = ('PB2', 'PB1')
+    # divider taps with SS closed (the stock / fw-rs rows) -> the ratio at SENSE
+    TAPS = {(7,): '/10', (6,): '/100', (5,): '/1000', (4, 5): '/10000'}
+
+    @staticmethod
+    def pa_switches(st):
+        """closed PA switches from the state line's pasw ("9S,5F,4D") -> {pin number: 'PS'-style letters}"""
         closed = {}
         for part in st.get('pasw', '-').split(','):
             if part and part[0].isdigit():
                 n = int(part.rstrip('PDFS'))
                 closed[n] = part[len(str(n)):]
+        return closed
 
-        def lines(pins, maxc=8):
-            """pack 'PB0, PB3' style lines of at most maxc characters"""
-            out = []
-            for p in pins:
-                if out and len(out[-1]) + 2 + len(p) <= maxc:
-                    out[-1] += ', ' + p
-                else:
-                    out.append(p)
-            return out
+    @staticmethod
+    def pa_label(n, sw):
+        return 'PA%d %s' % (n, ' '.join(sw))
+
+    @classmethod
+    def divider_ratio(cls, st):
+        """V divider ratio from the taps the row connects to SENSE (SS closed), '' when not a known set"""
+        taps = tuple(sorted(n for n, sw in cls.pa_switches(st).items() if 'S' in sw and n in (4, 5, 6, 7)))
+        return cls.TAPS.get(taps, '')
+
+    @classmethod
+    def used_pins(cls, st):
+        """{pin: [consumers]} the enabled blocks select: OP1 / OP2 + inputs, AD1 (input by SAD1I, reference),
+        AD2 / AD3 inputs and references, the comparator input (ENCMP), SDIO (PB0 / PB8)"""
+        def on(k):
+            return st.get(k) == '1'
+        used = {}
+
+        def use(pin, who):
+            if pin and pin != '-':
+                used.setdefault(pin, []).append(who)
+        if on('op1'):
+            use(st.get('sop1p'), 'OP1')
+        if on('op2'):
+            use(st.get('sop2p'), 'OP2')
+        if on('ad1'):
+            si = st.get('sad1i', '0')
+            if si == '0':
+                use(st.get('sad1fp'), 'AD1')
+                use(st.get('sad1fn'), 'AD1-')
+            elif si == '1':
+                use('FB', 'AD1')
+                use('RLU', 'AD1-')
+            use(st.get('sad1rh'), 'AD1 ref')
+            use(st.get('sad1rl'), 'AD1 ref')
+        if on('ad2'):
+            for k in ('sad2ip', 'sad2in', 'sad2rh', 'sad2rl'):
+                use(st.get(k), 'AD2')
+        if on('ad3'):
+            for k in ('sad3ip', 'sad3in'):
+                use(st.get(k), 'AD3')
+        if on('cmp'):
+            use(st.get('scmpi'), 'CMP')
+        if on('sdio'):
+            use('PB0', 'SDIO')
+            use('PB8', 'SDIO')
+        return used
+
+    @classmethod
+    def jack_pins(cls, st):
+        """HY3131 pins on each jack wire, from the register state only -> (V path, Ω/mV network, COM, A)
+        lists of labels, one pin per label: the pins the enabled blocks select (used_pins) that the
+        board facts above put on that jack, and every closed PA switch ('PA6 P S': P power bus, D OP3
+        output, F FB, S SENSE) on the V Ω jack's network. The V Ω pins go to the V path or the Ω / mV
+        network by the PA relay (pa). FB and RLU both in the AD1 reference: one label 'FB/RLU'."""
+        used = cls.used_pins(st)
         va = st.get('pa', '0') == '0'
-        v, n = [], []
-        taps = ['PA%d' % k for k in (7, 6, 5, 4) if 'S' in closed.get(k, '')]
-        if va:
-            if 'SENSE' in used or taps:
-                v.append('SENSE')
-            v += taps
-            v += ['PB5'] if 'PB5' in used else []
-            # PB4: the AC node coupled from OP1O - the V signal in AC V, the shunt signal in AC A
-            if 'PB4' in used and st.get('role') not in ('DcA', 'AcA'):
-                v.append('PB4')
-        else:
-            n += [p for p in ('PB0', 'PB8', 'SENSE') if p in used]
-            if (on('op1') and st.get('sop1p') == 'RLU') or (on('op2') and st.get('sop2p') == 'RLU'):
-                n.append('RLU')
-            if on('ad1') and {st.get('sad1rh'), st.get('sad1rl')} == {'FB', 'RLU'}:
-                n.append('FB/RLU')
-            n += ['PA%d' % k for k in sorted(closed, reverse=True) if k != 8]
-        c = ['AGND'] + (['PB3'] if 'PB3' in used else [])
-        a = [p for p in ('PB2', 'PB1') if p in used]
-        if a and 'PB4' in used and st.get('role') == 'AcA':
-            a.append('PB4')
-        return lines(v), lines(n), lines(c), lines(a)
+        vnet = cls.NET_VA if va else cls.NET_OHM
+        net_of = {}
+        for p in vnet:
+            net_of[p] = 'v'
+        for p in cls.NET_COM:
+            net_of[p] = 'c'
+        for p in cls.NET_A:
+            net_of[p] = 'a'
+        if st.get('op1') == '1' and st.get('sop1p') in net_of:   # PB4 = OP1O through the AC coupling
+            net_of['PB4'] = net_of[st.get('sop1p')]
+        g = {'v': [], 'c': ['AGND'], 'a': []}
+        ref = {st.get('sad1rh'), st.get('sad1rl')} == {'FB', 'RLU'} and st.get('ad1') == '1'
+        for p in ('SENSE', 'PB0', 'PB8', 'RLU', 'RLD', 'FB', 'PB4', 'PB5', 'PB3', 'PB2', 'PB1'):
+            if p not in used or p not in net_of:
+                continue
+            if ref and p in ('FB', 'RLU') and all(w == 'AD1 ref' for w in used[p]):
+                if 'FB/RLU' not in g['v']:
+                    g['v'].append('FB/RLU')
+                continue
+            g[net_of[p]].append(p)
+        g['v'] += [cls.pa_label(n, sw) for n, sw in sorted(cls.pa_switches(st).items(), reverse=True)]
+        return (g['v'], [], g['c'], g['a']) if va else ([], g['v'], g['c'], g['a'])
 
     def layout(self, cr, w):
         """Signal-flow block diagram, drawn (cr) or only measured (cr None) at width w; returns the height.
@@ -1136,17 +1204,7 @@ class FrontendView(Gtk.DrawingArea):
         shunt = st.get('shunt', 'uA')
         power = role == 'Power'
         # The layout depends on the configuration only (function, range, relays, muxes, switches), never on
-        # readings or on the counter's ENCTR toggling: whether the comparator is used is sticky per
-        # configuration (it restarts its gate every few hundred ms).
-        cfg = tuple(st.get(k, '') for k in ('role', 'mode', 'range', 'pa', 'shunt', 'pc7', 'ad1', 'ad2', 'ad3', 'lpf',
-                                              'rms', 'cmp', 'op1', 'op2', 'sop1p', 'sop2p', 'sad1fp', 'sad1fn',
-                                              'sad1rh', 'sad1rl', 'sad2ip', 'sad2in', 'sad3ip', 'sad3in', 'scmpi',
-                                              'sdio', 'sad1i', 'smode', 'sfuvr', 'pasw'))
-        if cr is not None:
-            seen = self.cmp_seen.setdefault(cfg, False) or st.get('ctr') == '1' or st.get('cmppin') == '1'
-            self.cmp_seen[cfg] = seen
-        st = dict(st, cmpcfg='1' if self.cmp_seen.get(cfg) or st.get('ctr') == '1' or st.get('cmppin') == '1' else '0')
-        divs = {'0': '/10', '1': '/100', '2': '/1000', '3': '/10000'}
+        # readings or on the counter's ENCTR toggling: the comparator counts as used by ENCMP alone.
         shunts = {'A': '10 mΩ', 'mA': '0.5 Ω', 'uA': '47.5 Ω'}
         pin_v, pin_n, pin_c, pin_a = self.jack_pins(st)
 
@@ -1167,13 +1225,15 @@ class FrontendView(Gtk.DrawingArea):
         stream = flag('ad2') and not flag('rms') and not flag('lpf')
         ad1, ad2, ad3 = flag('ad1'), flag('ad2'), flag('ad3')
         op1, op2 = flag('op1'), flag('op2')
-        cmp_used = flag('cmp') and flag('cmpcfg')
+        cmp_used = flag('cmp')
 
         # consumers: (name, source, active)
         src = {'AD1': st.get('sad1fp', ''), 'AD2': st.get('sad2ip', ''), 'AD3': st.get('sad3ip', ''),
                'CMP': st.get('scmpi', ''), 'OP1': st.get('sop1p', ''), 'OP2': st.get('sop2p', '')}
         if st.get('sad1i', '0') == '2' or st.get('sad1i', '0') == '3':
             src['AD1'] = 'TS'
+        elif st.get('sad1i', '0') == '1':
+            src['AD1'] = 'FB'
         act = {'AD1': ad1, 'AD2': ad2, 'AD3': ad3, 'CMP': cmp_used, 'OP1': op1, 'OP2': op2}
 
         # text of the converter boxes
@@ -1185,7 +1245,11 @@ class FrontendView(Gtk.DrawingArea):
         b_ad3 = ['AD3  fast', 'OSR %s  IG %s' % (st.get('osr2', ''), st.get('ad3ig', '')),
                  '− %s' % st.get('sad3in', '')]
         b_cmp = ['CMP', st.get('scmpi', '')]
-        conv_w = max(box_w(b) for b in (b_ad1, b_ad2, b_ad3))
+        # column widths are reserved for the widest text any row can produce: no column moves between
+        # functions / ranges (the owner: nothing jumps horizontally between frames)
+        # (the widest texts of the stock / fw-rs rows; an unusual row may widen them, never the usual ones)
+        conv_w = max([box_w(b) for b in (b_ad1, b_ad2, b_ad3)] + [box_w([
+            'OSR 32768 chop  IG 0.9', '− VSSA  ref REFO/AGND', '− AGND  76.8 k S/s'])])
 
         # results
         res1 = []
@@ -1210,13 +1274,14 @@ class FrontendView(Gtk.DrawingArea):
         r = L * 0.45
         name_w = max(tw(n) for n in ('V Ω', 'COM', 'A'))
         relay_lines = ['PA: V/A' if va else 'PA: Ω/mV']
-        net_v = ['divider ' + (divs.get(rng, '') if role in ('DcV', 'AcV') or power else '')]
+        net_v = ['divider ' + self.divider_ratio(st)]
         net_n = ['Ω/mV net']
         sh_lines = ['shunt %s' % shunt, shunts.get(shunt, '')]
         relay_w = box_w(['PA: Ω/mV'])
         net_w = max(box_w(net_v), box_w(net_n))
-        sh_w = box_w(sh_lines)
-        pins_w = max([tw(p) for p in pv + pn + pc + pa_] + [tw('SENSE')]) + pad
+        sh_w = max(box_w(['shunt %s' % k, v]) for k, v in shunts.items())
+        net_w = max(net_w, box_w(['divider /10000']))
+        pins_w = max([tw(p) for p in pv + pn + pc + pa_] + [tw(p) for p in ('SENSE', 'FB/RLU', 'PA8 D F')]) + pad
         board_w = pad + 2 * r + pad + name_w + pad * 2 + relay_w + pad * 3 + max(net_w, sh_w) + pad * 3 + pins_w
 
         # ---------- chip part geometry (x relative to x0) ----------
@@ -1230,10 +1295,11 @@ class FrontendView(Gtk.DrawingArea):
         res_w = max(tw('V rms -999.9 mV'), tw('code -8388608'), tw('RMS 68719476735'), tw('stream → MCU 76.8 k S/s')) + pad
         step = max(9.0, pad * 1.4)                    # routing track pitch (>= 8 px between wires)
         netsA_n = len({v for v in src.values() if v in pv + pn + pc + pa_})
-        laneA = (netsA_n + 1) * step + pad
+        laneA = (max(netsA_n, 4) + 1) * step + pad
         op_w = max(L * 2.4, tw('OP1 ×10') + L * 1.4)
         stubs = [v for k, v in src.items() if v and v not in ('OP1O', 'OP2O') and v not in (pv + pn + pc + pa_)]
-        laneB = max(3 * step + pad, max([tw(v_) for v_ in stubs] + [0]) + pad * 3)
+        stub_names = set(self.MUX['sad1fp'] + self.MUX['sad2ip'] + self.MUX['scmpi'] + self.MUX['sop1p']) - {'OP1O', 'OP2O'}
+        laneB = max(3 * step + pad, max([tw(v_) for v_ in stubs + list(stub_names) + ['TS']]) + pad * 3)
         chip_w = (pins_w + laneA + op_w + laneB + conv_w + pad * 4 + hpf_w + pad * 3 + mul_r * 2 + pad * 3 + rms_w
                   + pad * 2 + res_w + pad)
         side = board_w + chip_w + pad * 2 <= w
@@ -1345,33 +1411,32 @@ class FrontendView(Gtk.DrawingArea):
         # V row
         wire([(x + 2 * r + pad * 0.6 + name_w + pad * 0.5, jy['v']), (x_relay, jy['v'])], True)
         bx = box(x_relay, jy['v'], relay_lines, True)
+        # a jack net is live when a block reads one of its pins (the PA switch labels alone do not make it)
+        v_on = any(not p.startswith('PA') for p in pv)
+        n_on = any(not p.startswith('PA') for p in pn)
         if va:
-            v_on = bool(pv)
-            nb = box(x_net, jy['v'], net_v, v_on)
+            nb = box(x_net, jy['v'], net_v, v_on, minw=net_w - pad * 2)
             wire([(bx[2], jy['v']), (nb[0], jy['v'])], v_on)
             fan(nb[2], jy['v'], pys['v'], v_on, 'jv')
         else:
-            n_on = bool(pn)
             yn = jack_y['n']
             wire([(bx[2], jy['v']), (bx[2] + pad * 1.5, jy['v']), (bx[2] + pad * 1.5, yn), (x_net, yn)], n_on)
-            nb = box(x_net, yn, net_n, n_on)
+            nb = box(x_net, yn, net_n, n_on, minw=net_w - pad * 2)
             fan(nb[2], yn, pys['n'], n_on, 'jv')
-            extra = []
-            if 'rd_r' in st or 'vsrc' in st:
-                extra.append('source %s V (%s)' % (st.get('vsrc', '?'), st.get('vrefsel', '?')))
         # COM
         wire([(x + 2 * r + pad * 0.6 + name_w + pad * 0.5, jy['c']), (x_pin - pad * 1.5, jy['c'])], True, net='jc')
         fan(x_pin - pad * 1.5, jy['c'], pys['c'], True, 'jc')
         # A
         a_on = bool(pa_)
         wire([(x + 2 * r + pad * 0.6 + name_w + pad * 0.5, jy['a']), (x_relay, jy['a'])], True)
-        sb = box(x_relay, jy['a'], sh_lines, a_on)
+        sb = box(x_relay, jy['a'], sh_lines, a_on, minw=sh_w - pad * 2)
         fan(sb[2], jy['a'], pys['a'], a_on, 'ja')
         # pin names (inside the chip edge)
         pin_y = {}
         for g in ('v', 'n', 'c', 'a'):
             for p, py in pys[g]:
-                act_ = p != '–' and ((g == 'v' and va) or (g == 'n' and not va) or g == 'c' or (g == 'a' and a_on))
+                act_ = p != '–' and ((g == 'v' and va and v_on) or (g == 'n' and not va and n_on) or g == 'c'
+                                     or (g == 'a' and a_on))
                 label(x_pin, py, p, txt if act_ else dim)
                 if p != '–':
                     pin_y[p] = py + L / 2
@@ -1572,6 +1637,10 @@ class FrontendView(Gtk.DrawingArea):
             y_end += label(pad, y_end, note, hot, w - 2 * pad)
         if unrouted:
             y_end += label(pad, y_end, 'other inputs: ' + ', '.join(unrouted), dim, w - 2 * pad)
+        if self.pa_switches(st):
+            y_end += pad
+            y_end += label(pad, y_end, 'PA<n> switches (R2A..R2E): P power bus (SMODE %s), D OP3 output, F FB, S SENSE'
+                           % self.SMODE.get(int(st.get('smode', '0'), 16) & 15, '?'), dim, w - 2 * pad)
         return y_end + pad
 
 
