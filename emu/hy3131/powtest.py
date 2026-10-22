@@ -166,6 +166,12 @@ SC.update({
         (36, None, lambda d: near(d['Vdc'], 20, 0.002) and d['X']['POW:VOLT:CAL?'].startswith('OK'), 'after POW:VOLT:CAL (DC V reference): 20.00 V'),
         (50, 'open;vsrc:0.2', lambda d: d['X']['POW:VOLT:CAL?'].startswith('SMALL'), 'refused: 0.2 V on 60 V'),
     ]),
+    # Device f3aea2f: a 0..9.6 V 40 Hz square on 6 V was calibrated by its 4.8 V DC part (DC kind)
+    # though its peak clips the range; the peak guard refuses it (BIG), the gain stays.
+    'vcal-clip': (['CONF:POW', 'POW:BURD:STAT OFF', 'POW:VOLT:RANG 6'], 30, [
+        (0, 'open;vsrc:4.8,ac=4.8,f=40,shape=square', lambda d: True, 'square 0..9.6 V on 6 V'),
+        (16, None, lambda d: d['X']['POW:VOLT:CAL?'].startswith('BIG'), 'POW:VOLT:CAL refused: BIG (the peak clips 6 V)'),
+    ]),
     'freq': (['CONF:POW', 'POW:BURD:STAT OFF'], 36, [
         (0, 'open;vsrc:4.8,ac=4.8,f=40,shape=square', lambda d: near(d['F'], 40, 0.01), 'unipolar 40 Hz square (T1): f 40 Hz'),
         (18, 'open;vsrc:12;isrc:0,ac=3,f=50', lambda d: near(d['F'], 50, 0.01), 'DC voltage, AC current: f of the current (PB4)'),
@@ -238,12 +244,13 @@ SC['bt'] = (['CONF:POW', 'POW:BURD:STAT OFF'], 40, [
     (18, 'open;vsrc:12;isrc:-2', lambda d: bt_ok(d, -24, 0x28) and d['X']['FUNC?'] == '"POW"', 'after cmd 06 0x28 (echo): still POW, P -24'),
 ])
 EXTRA = {'t1-yy': ['DBG:POW:RAW?', 'DBG:POW:ROW?'], 't3-cycle': ['DBG:POW:RAW?'],
-         'zero': ['POW:ZERO?'], 'vcal': ['POW:VOLT:CAL?'], 'dcad1': ['POW:COUP?'], 'auto': ['POW:COUP?'], 'ac': ['POW:COUP?'],
+         'zero': ['POW:ZERO?'], 'vcal': ['POW:VOLT:CAL?'], 'vcal-clip': ['POW:VOLT:CAL?'], 'dcad1': ['POW:COUP?'], 'auto': ['POW:COUP?'], 'ac': ['POW:COUP?'],
          'istep': ['SYST:ALER?'], 'istep-ua': ['SYST:ALER?'], 'iman-ovl': ['SYST:ALER?'],
          'scpi': ['MEAS:POW:PFAC?', 'READ?', 'CONF?', 'POW:LIM?', 'POW:CYC?', 'FUNC?'],
          'limits': ['CALC:LIM:FAIL?', 'CALC:LIM:STAT?', 'CALC:LIM:UPP?'],
          'phasecal-ref': ['POW:PHAS:CAL RES|SYST:ERR?', 'POW:PHAS:CAL?'], 'bt': ['FUNC?']}
-ACTIONS = {'ac': {46: 'POW:COUP ACDC'}, 'ereset': {8: 'DBG:DRAG 58,160,58,160,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'}}
+ACTIONS = {'ac': {46: 'POW:COUP ACDC'}, 'ereset': {8: 'DBG:DRAG 58,160,58,160,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'},
+           'vcal-clip': {6: 'POW:VOLT:CAL'}}
 
 
 def bt_frame(cmd, data=b''):

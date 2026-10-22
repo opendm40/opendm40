@@ -28,6 +28,52 @@ mod trigsoft;
 mod inrush;
 #[path = "../../src/ad2pll.rs"]
 mod ad2pll;
+// Scope / wave view measurements (src/scope_meas.rs; `compute` needs the
+// scope's volt map, the tests use `compute_codes`).
+#[path = "../../src/scope_meas.rs"]
+mod scope_meas;
+mod scope {
+    pub struct Scope;
+    impl Scope {
+        pub fn volts(&self, c: f32) -> f32 {
+            c
+        }
+    }
+}
+
+// Frequency / period from whole cycles (scope_meas::compute_codes). Device
+// f3aea2f: the DMM wave view at 5 ms/div (480 samples at 9600 S/s) showed
+// "Freq: --" for a 40 Hz square: two periods, triggered on a rising edge
+// at the centre, leave one whole rise inside the frame.
+#[cfg(test)]
+mod meas {
+    use crate::scope_meas::compute_codes;
+
+    fn square(n: usize, fs: f32, f: f32, ph: f32) -> Vec<u16> {
+        (0..n).map(|i| if ((i as f32 / fs * f + ph) % 1.0) < 0.5 { 800 } else { 200 }).collect()
+    }
+
+    #[test]
+    fn two_periods_rising_edge_at_the_ends() {
+        // A rise at sample 0 (no level before it) and one at 480 (past the
+        // end), one inside at 240: the falls (120, 360) give the period.
+        let d = square(480, 9600.0, 40.0, 0.0);
+        let r = compute_codes(&d, 9600.0, 0.0, 0.01);
+        assert!((r.v[0] - 40.0).abs() < 0.2, "Freq {}", r.v[0]);
+        assert!((r.v[9] - 0.025).abs() < 1e-4, "Cycl {}", r.v[9]);
+        assert!((r.v[1] - 50.0).abs() < 1.0, "duty {}", r.v[1]);
+    }
+
+    #[test]
+    fn rises_preferred_and_one_edge_is_none() {
+        let d = square(4800, 9600.0, 40.0, 0.25);
+        let r = compute_codes(&d, 9600.0, 0.0, 0.01);
+        assert!((r.v[0] - 40.0).abs() < 0.05, "Freq {}", r.v[0]);
+        // Less than a period with one rise and one fall: no frequency.
+        let d = square(200, 9600.0, 40.0, 0.25);
+        assert!(compute_codes(&d, 9600.0, 0.0, 0.01).v[0].is_nan());
+    }
+}
 
 fn main() {}
 

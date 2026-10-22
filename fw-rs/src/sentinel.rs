@@ -297,16 +297,13 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
             c[12] |= R2C_SS5;
             Kind::CmpV
         }
-        // Frequency: AD1 runs a zero reading (PB5 - PB5) nobody reads; it
-        // takes PB1 - PB3 with the AC rows' peak-hold settings instead.
-        14 if mask & M_AJACK != 0 => {
-            c[2] = 0x00;
-            c[3] |= 0x80;
-            c[4] = R24_PB1_PB3;
-            c[5] |= R25_AD1IG_36;
-            c[9] = (c[9] & 0xF8) | R29_PKH_AD1;
-            Kind::PeakA
-        }
+        // Frequency (14): no sentinel. The AD1 peak on PB1 - PB3 (the AC
+        // rows' settings) read a standing +41 100 codes (~54 mV, the A-JACK
+        // threshold is 17 900) with the A jack open and 0..2 V or the
+        // calibrator off on V-COM, ~3 100 at 5 V, -850 at 10 V (device
+        // f3aea2f): the frequency row leaves its input divider open (R2C /
+        // R2D 0) and PB1 follows the input path, so no fixed threshold or
+        // offset tells a current from it. A gap as DC V 60 V+.
         // AC A: AD1 (off in the row) on SENSE - PB5 with the /1000 tap
         // (SS5 only, as DC A), IG 3.6, the peak hold; OP1's chopper held off
         // as in the AC V sentinel row (AD1 on would start it: 9dd1222).
@@ -414,6 +411,12 @@ pub const APROT_HOT_A: f32 = 0.125;
 pub const APROT_HOT_MS: u64 = 400;
 /// At once (A): 300 mA = 4.3 W.
 pub const APROT_NOW_A: f32 = 0.3;
+/// After a row write with the probe (its entry, a range / function change
+/// while it stays): the AD2 peak hold is cleared this long after it (AD2
+/// restarted: its first results are not the input), and the first window
+/// counts from there (ms). Device f3aea2f: A-PROT latched on the first
+/// window with the A jack open (the probe read 15 mA afterwards).
+pub const PROBE_SETTLE_MS: u64 = 30;
 /// Latched: the current counts as gone below this (on the 10 mohm path;
 /// the probe's peak-hold noise floor is ~30 mA in the model) for
 /// APROT_GONE_MS. Any real source across A-COM drives amps into 10 mohm.
@@ -1274,17 +1277,12 @@ mod tests {
     }
 
     #[test]
-    fn freq_row_ad1_peak_on_pb1() {
+    fn freq_row_has_no_sentinel() {
+        // Device f3aea2f: PB1 - PB3 stands at ~54 mV in the frequency row
+        // (input divider open: R2C / R2D 0) -> false A-JACK; the stock row.
         let r = &CFG_F14[0];
-        let (c, k) = row_for(14, 0, false, M_ALL, 0, r);
-        assert_eq!(k, Kind::PeakA);
-        let idx: Vec<usize> = diff(r, &c).iter().map(|x| x.0).collect();
-        // R22 OSR 256 unchopped, R24 PB1 - PB3 (was PB5 - PB5), R25 AD1IG,
-        // R29 PKH; AD1 already on, OP1's chopper already off.
-        assert_eq!(idx, vec![2, 4, 5, 9]);
-        assert_eq!((r[3] & 0x80, r[4], r[19] & 0xC0), (0x80, 0xDF, 0));
-        assert_eq!((c[2], c[4], c[5] & 0x30, c[9] & 7), (0, 0x95, 0x30, 5));
-        assert_eq!(c[9] & 0xF8, r[9] & 0xF8, "RMS / LPF kept");
+        assert_eq!((r[12], r[13]), (0, 0));
+        assert_eq!(row_for(14, 0, false, M_ALL, 0, r), (*r, Kind::Off));
     }
 
     #[test]
