@@ -58,6 +58,13 @@ const START: [View; 4] = [View::Dmm, View::Scope, View::Gen, View::Menu];
 const OFF_WARN_MS: u64 = 30_000;
 const OFF_WARN_STEP_MS: u64 = 10_000;
 const ALERT_VOL: u8 = 50;
+/// A screenshot waits this long after a full repaint (`App::repaint_at`):
+/// the DMM reading / chart / statistics come with the next reading (SLOW
+/// 2.5/s; after a host LOG:STAT session the DMM restarts first), the status
+/// bar and the scope trace with the next passes / frame. Device 2026-10-23:
+/// a shot requested during a host session ran right after the repaint at
+/// LOG:STAT OFF and held the bare page (S027: no reading, no chart).
+const SHOT_SETTLE_MS: u64 = 1000;
 /// "Leads in A?" reminder: the toast waits for the new function's first
 /// reading at most this long (`leads_tick`).
 const LEADS_TOAST_WAIT_MS: u64 = 1000;
@@ -282,6 +289,12 @@ pub struct App {
     /// 3-finger swipe seen: take the screenshot in tick() once the view is
     /// drawn.
     shot_req: bool,
+    /// Time of the last full repaint (`draw_static`): a requested shot waits
+    /// SHOT_SETTLE_MS after it, so that the parts drawn by later passes (the
+    /// DMM chart / statistics / status bar, the scope trace) are on the panel
+    /// (device 2026-10-23: a shot deferred by a fast-log session was read
+    /// right after `draw_static`, with no chart and half a status bar).
+    repaint_at: u64,
     /// Combined view: the DMM function band is open until this time (0 =
     /// closed).
     band_until: u64,
@@ -526,6 +539,7 @@ impl App {
             chart_cache: ui::ChartCache::new(),
             overlay: None,
             shot_req: false,
+            repaint_at: 0,
             band_until: 0,
             hv_level: 0,
             pw_rng_key: 0,
@@ -1454,6 +1468,7 @@ impl App {
             self.scope_invalidate();
             self.chart_cache.invalidate();
             self.draw_static();
+            self.repaint_at = now;
             self.status_next = 0;
             self.chart_dirty = true;
             // draw_static() repaints the DMM reading (shown value + HOLD/RUN
@@ -1464,7 +1479,7 @@ impl App {
         if self.leads_tick(now) {
             return;
         }
-        if self.shot_req {
+        if self.shot_req && now >= self.repaint_at + SHOT_SETTLE_MS {
             self.shot_req = false;
             self.screenshot(now);
             return;
@@ -2417,9 +2432,7 @@ impl App {
         self.press_gesture(&g);
         match g {
             // Global gestures (UF-17 / UF-18), any view.
-            Gesture::MultiSwipeDown(3) => {
-                self.shot_req = true;
-            }
+            Gesture::MultiSwipeDown(3) => self.shot_request(now),
             // One finger down the DMM page: start / stop the CSV recording.
             Gesture::SwipeDown if self.view == View::Dmm => self.rec_toggle(now),
             Gesture::MultiSwipeDown(2) => {
@@ -2486,6 +2499,20 @@ impl App {
     fn overlay_close(&mut self) {
         self.overlay = None;
         self.redraw = true;
+    }
+
+    /// A screenshot gesture (3-finger swipe, the scope's Print screen). A
+    /// fast-log session or an upload holds the disk for an unbounded time:
+    /// "Disk busy" now, nothing written. The request used to wait in
+    /// `shot_req` for `can_draw`, which a fast-log session keeps false, so it
+    /// ran after the session (device 2026-10-23, S023) and never got the
+    /// Busy answer of screenshot.rs.
+    pub(crate) fn shot_request(&mut self, now: u64) {
+        if crate::fastlog::holds_disk() || crate::upload::busy() {
+            self.shot_toast(now, crate::screenshot::Shot::Busy);
+        } else {
+            self.shot_req = true;
+        }
     }
 
     /// UF-17: start writing the screen to the disk (screenshot.rs, in slices

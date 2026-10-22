@@ -2303,7 +2303,7 @@ impl App {
             su::MfHit::PriScr => {
                 // Close first: the screenshot shows the page (fw-rs).
                 self.sp_popup_close();
-                self.shot_req = true;
+                self.shot_request(now);
                 return;
             }
             su::MfHit::SaveCsv => {
