@@ -665,7 +665,10 @@ Firmware:
       ~6.5 kS/s); 4800 S/s -> 8.0 % lost (main-loop gaps: the ISR decision).
 - [x] Drop the `hyspi-bitbang` feature (bit-banged reads) now that 7889e6c passed: done (bit-banged WRITES stay,
       DBG:HYSPI:SELF? stays).
-- [ ] Optional later: pure-SPI2 writes (continuous TX + dummy byte).
+- [x] Pure-SPI2 writes (feasibility 11.6 / 11.7): device 4b98128 DBG:HYSPI:WR?: the chip takes each byte's LSB
+      late (the next MOSI level); b81abf2 writes one frame per register with a CS-cut dummy whose MSB = the LSB:
+      0 bad in 8 x 512 writes at /8, /16, /32, DC V 0.9997 V on 1 V, SELF? w1 9.9 us (bit-bang 57 us). The
+      bit-banged write is removed.
 - [x] (E3/E4) AD2 stream on ONE timer ISR, decision #3 (docs/dmm-input-scope-feasibility.md 9): Cargo feature
       `ad2-isr` (OFF by default until the device acceptance below), TIMER6 = TIM7 IRQ 55 the only NVIC line
       (shim.rs table to IRQ 55, everything else ICER'd + SysTick / PendSV cleared at the hand-off, PRIMASK
@@ -677,17 +680,27 @@ Firmware:
       sees IT-block `bl` now: main path +336 B, headroom 17456). Emulator (200 MIPS, DRAW 2): 4800 / 9600
       / 1200 S/s lost 0, no stamp gap (main-loop sampler: 23 % lost at 4800 DRAW 2);
       emu/hy3131/ad2streamtest.py PASS.
-- [ ] (E3/E4) device acceptance of the `ad2-isr` image (doc 9.5, 10 min): LOG:COUNt? lost = 0 at 4800 S/s
-      for 60 s with DBG:AD2:DRAW 2, 9600 S/s loss, DBG:ISR? max_isr_ns ~22000 / max_lat_ns (< ~5000 expected;
-      larger = something masks interrupts), DBG:PROF? loop max while streaming, DMM / SELF? clean after a
-      stream, *IDN? responsive. On a pass: make `ad2-isr` the default (then the Wave view, E5/E6).
-      Device 5f14d38 FAILS (device-check "5f14d38" 1): 4800 DRAW 2 60 s lost 1.43 % (DRAW 0 / 1 the same), 9600
-      2.64 %, 1200 lost 1. Bursts of ~11.5 ms every ~3948 conversions at every rate; every tick serviced, empty
-      = 4 x lost: the read phase drifts onto the conversion edge (tick +63 ppm vs the chip; -32 ppm at 1200 =
-      no loss) and the INTF read-to-clear swallows AD2F (inferred). Fix candidates: shift the phase after an
-      empty read / tick slower than 4 x the chip / detect from the data. Also max_lat 18.8-21.8 us with
-      DRAW 1 / 2, even with no frame painted (4.6 us DRAW 0; source not isolated). PASS: *IDN? max 1 ms, PROF loop max 3.5 ms, DMM / SELF? clean after, forced stop.
-      Stays non-default.
+- [x] (E3/E4) device acceptance of the `ad2-isr` image. 5f14d38 FAILED (1.4 % / 2.6 % lost in bursts: the INTF
+      read-clears race at a +63 ppm tick; max_lat ~20 us). Fixed in 4b98128 (feasibility 11): the ISR is
+      phase-locked to the conversion grid (src/ad2pll.rs: blind R03..R05 read half way between edges, INTF
+      probe every 4th period), hot code / data below 0x08080000 (link-native.x region B / .cold; the fonts had
+      grown into the non-zero-wait flash). Device 4b98128, 60 s each: lost 0 of 288 197 at 4800 DRAW 2, 0 of
+      576 092 at 9600, 0 of 1 153 647 at 19200 (/16, DRAW 2, CPU 35.6 %); max_lat 4.7 us (was 21.8); chip
+      crystal -1 ppm; *IDN? max 0.73 ms; READ? / SELF? clean after. /8 reads NOT clean (61 / 100 sign errors in
+      1.15 M / 2.36 M): stream stays /16. `ad2-isr` is DEFAULT since b81abf2.
+- [x] (E3/E4) device check of b81abf2 (feasibility 11.9): critical-section without masking -> max_lat 0.24 us;
+      CPU /16 4800 DRAW 2 / 9600 / 19200 DRAW 2 lost 0; DMA frames 9600 lost 0 at 5 % CPU; /8 + CKPH = 1 data phase
+      clean (SELF?, 19200 lost 0, 38400 35.8 M samples 0 bad at 14 % CPU) -> the stream default (CPU frames).
+      DMA at 38400 lost the lock (CPU probe frames overran): probes as DMA frames since a4907d0.
+- [ ] Device: 38400 S/s with DMA frames (DBG:AD2:DMA 1) after a4907d0, with a raw (non-CSV) host drain; the
+      host CSV logger cannot keep up at 38.4 k.
+- [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
+- [ ] B (zero-wait flash) is FULL: the branch overflowed by 4 bytes at a4907d0; the cold modules' named
+      .rodata moved to `.cold` (28 bytes left), the bit-banged write removed. A real reclaim is needed; never put
+      per-pass code in `.cold` (feasibility 11.4 rule).
+- [ ] 76.8 kS/s: /8 + CKPH works for CPU frames; the period (13 us) leaves no room for the CPU INTF probe
+      (5.8 us at /8): needs a DMA data phase started after the CPU command byte + CKPH switch, and DMA probe
+      frames at /8 mode 0 (probe noise tolerated). Not done.
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
 - [x] (A) DMM-input "slow floating scope" via AD2 = the Wave view (E5/E6; docs/dmm-input-scope-feasibility.md 10,

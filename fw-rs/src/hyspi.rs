@@ -152,12 +152,12 @@ pub fn self_test(n: u32, div: u8, out: &mut [u8]) -> usize {
 
 /// DBG:HYSPI:WR? mode[,div]: the SPI2 write experiment (hy3131 `write_spi`;
 /// feasibility 8.6: 8e5efa6's SPI2 writes set bit 0 of every byte 1xxxxxx0).
-/// Mode 0 = the bit-banged write (reference), 1 / 2 / 3 = `write_spi` modes,
+/// Mode 0 = `hy3131::write` (the bus's write), 1 / 2 / 3 = `write_spi` modes,
 /// at `div` (default 16). 256 single-byte writes of R36 (SPHACAL) = 0..255,
 /// each read back (SPI2 at `hy3131::DIV`); then 256 two-byte writes of
 /// R35..R36 (the row's last byte, bits 7 / 0 toggled, + SPHACAL: a byte
 /// interior to the frame), both read back against the same bytes written
-/// bit-banged (R35 has read-only bits); R35 / R36 restored bit-banged; R37
+/// by `hy3131::write` (R35 has read-only bits); R35 / R36 restored; R37
 /// (test mode) read before / after.
 /// Reply: mode,div,bad_1byte,bad_2byte,us_per_1byte_write,r37_before,
 /// r37_after,first mismatches as written>read (hex, up to 6).
@@ -193,7 +193,7 @@ pub fn write_test(mode: u8, div: u8, out: &mut [u8]) -> usize {
         }
     }
     for i in 0..=255u8 {
-        // Reference = the same bytes written bit-banged and read back (R35
+        // Reference = the same bytes written by hy3131::write and read back (R35
         // has read-only bits), then the mode's write over a different value.
         let d = [keep[0] ^ (i & 0x81), i.wrapping_mul(37) ^ 0x5A];
         hy::write(0x35, &d);

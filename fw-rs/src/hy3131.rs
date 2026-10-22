@@ -7,7 +7,7 @@
 //! byte (the datasheet's read period), then MISO is sampled with SCK low before
 //! each clock pulse.
 //!
-//! Reads go over the GD32's hardware SPI2, writes stay bit-banged
+//! Reads and writes go over the GD32's hardware SPI2
 //! (docs/dmm-input-scope-feasibility.md 2.2 and 8):
 //!
 //! SPI2 (reads): 0x4000_3C00 on APB1 (50 MHz), PC10 / PC11 / PC12 on AF6
@@ -24,18 +24,17 @@
 //! hand-made SCK pulse (ODR = 0 = the SPI idle level: no edge on either
 //! switch) and back to AF, then the data bytes: the exact datasheet frame.
 //!
-//! Writes: bit-banged, the pins switched to GPIO for the frame (SCK low on
-//! both sides of the switch, CS high). On the device every SPI2-written data
-//! byte with bit 7 = 1 and bit 0 = 0 arrived with bit 0 = 1 (all 64 such
-//! values of 256, every byte of a multi-byte write, at /16 and /32, CS
-//! setup / hold / idle 0.2 .. 5 us, pin speed 2 .. 200 MHz, both read
-//! framings alike; CPHA = 1 wrote nothing): the chip takes the LSB late, after
-//! the end of the byte, when the GD32 no longer holds it on MOSI. Commands
-//! (bit 7 = 0) and reads are unaffected. Writes are rare (mode changes,
-//! counter restarts, the power meter's R34 phases): ~25 us per byte.
+//! Writes: SPI2 too, one frame per register: [cmd, data, dummy], CS high
+//! while the dummy shifts (docs/dmm-input-scope-feasibility.md 11.6 / 11.7).
+//! The chip takes each byte's LSB late, at the MOSI level that follows it
+//! (8e5efa6's byte-by-byte SPI2 write: every 1xxxxxx0 arrived with bit 0 =
+//! 1, the GD32 driving the byte's MSB again after it; in a continuous frame
+//! the next byte's MSB): the dummy's MSB equals the LSB. ~10 us per register
+//! at /16 (bit-banged: ~57 us; that write is gone since b81abf2's device
+//! check).
 //!
-//! The all-bit-banged bus (the `hyspi-bitbang` fallback build) is gone since
-//! the read-SPI2 / write-bit-bang bus passed on the device (7889e6c).
+//! Reads at /8 sample the data phase at CKPH = 1 (`set_data_cpha`, the AD2
+//! stream; feasibility 11.3); the DMM reads at /16 mode 0.
 
 use crate::mmio::{modify32, r32, spin, w16, w32};
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
@@ -109,30 +108,14 @@ pub fn set_div(div: u8) {
 }
 
 /// Write `data` to `reg`, `reg + 1`, ..: over SPI2, one frame per register
-/// with an LSB-matched cut dummy (`write_spi` mode 1, at `DIV`), or
-/// bit-banged after DBG:HYSPI:WMODE 0 (the fallback; see the module notes).
+/// with an LSB-matched cut dummy (`write_spi` mode 1, at `DIV`; device
+/// b81abf2: 0 bad in 8 x 512 writes at /8, /16 and /32 - the bit-banged
+/// write it replaced is gone; see the module notes).
 pub fn write(reg: u8, data: &[u8]) {
     guard();
-    if WRITE_BB.load(Relaxed) {
-        spi::to_gpio();
-        bb::write(reg, data);
-        spi::to_af();
-    } else {
-        for (i, &d) in data.iter().enumerate() {
-            let _ = spi::write_cont(reg.wrapping_add(i as u8), &[d], true);
-        }
+    for (i, &d) in data.iter().enumerate() {
+        let _ = spi::write_cont(reg.wrapping_add(i as u8), &[d], true);
     }
-}
-
-/// Writes bit-banged (DBG:HYSPI:WMODE 0) instead of over SPI2 (1, default).
-static WRITE_BB: AtomicBool = AtomicBool::new(false);
-
-pub fn set_write_bitbang(on: bool) {
-    WRITE_BB.store(on, Relaxed);
-}
-
-pub fn write_bitbang() -> bool {
-    WRITE_BB.load(Relaxed)
 }
 
 /// Sample the data phase of SPI2 reads with CKPH = 1 (the master samples
@@ -553,14 +536,6 @@ mod spi {
         config(div);
     }
 
-    /// Pins to GPIO for a bit-banged frame: SCK output low (= the SPI idle
-    /// level), MOSI output, MISO input. SPI2 stays enabled and idle.
-    pub(super) fn to_gpio() {
-        let _ = idle();
-        set(GPIOC, SCK, false);
-        unsafe { modify32(GPIOC + MODER, PINS2, MODER_GPIO) };
-    }
-
     /// Pins back to SPI2 (SCK low on both sides of the switch).
     pub(super) fn to_af() {
         set(GPIOC, SCK, false);
@@ -826,52 +801,6 @@ mod spi {
         set(GPIOD, CS, true);
         spin(CS_IDLE);
         ok
-    }
-}
-
-/// The bit-banged bus (~1 us half period): every write.
-mod bb {
-    use super::*;
-
-    /// Half SCK period in spin iterations (~1 us at 200 MHz, well inside the
-    /// HY3131 SPI timing).
-    const HALF: u32 = 40;
-
-    fn clock() {
-        set(GPIOC, SCK, true);
-        spin(HALF);
-        set(GPIOC, SCK, false);
-        spin(HALF);
-    }
-
-    fn tx(b: u8) {
-        for i in (0..8).rev() {
-            set(GPIOC, MOSI, b & (1 << i) != 0);
-            spin(HALF);
-            clock();
-        }
-    }
-
-    fn begin() {
-        set(GPIOC, SCK, false);
-        set(GPIOD, CS, false);
-        spin(HALF);
-    }
-
-    fn end() {
-        spin(HALF);
-        set(GPIOD, CS, true);
-        set(GPIOC, SCK, false);
-        spin(HALF);
-    }
-
-    pub fn write(reg: u8, data: &[u8]) {
-        begin();
-        tx(reg << 1);
-        for &b in data {
-            tx(b);
-        }
-        end();
     }
 }
 

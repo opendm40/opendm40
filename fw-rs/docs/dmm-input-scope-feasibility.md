@@ -1039,3 +1039,316 @@ the meter on USB (`tools/dm40scpi.py`). Record each result here.
 
 Also note `DBG:PROF?` loop max while the view runs at 5 ms/div (9600 S/s,
 22 % CPU in the ISR) and any visible hole (10.4) per minute.
+
+## 11. The stream ISR phase-locked to the chip; slow flash; SPI2 writes; DMA frames (2026-10-22)
+
+Device check of 5f14d38 (device-check-2026-10-21.md "5f14d38 (+ad2-isr)"):
+1.4 % lost at 4800 S/s and 2.6 % at 9600, in ~11.5 ms bursts every ~3948
+conversions, and max_lat ~20 us whenever the logger panel drew. Both are
+fixed here (device 4b98128, 11.6). Section 9's design (a 4 x tick, a 7/8 P
+gate, a flag read per sample) is replaced. `ad2-isr` is a default feature
+since b81abf2.
+
+### 11.1 Why section 9 lost samples
+
+Reading INTF clears AD2F. A conversion that completes while the INTF frame
+is under way sets the flag after its bit was sampled, and the same read
+clears it. The flag is lost; the data is not, because R03..R05 hold it for
+a whole period. The 4 x tick ran +63 ppm against the chip (ARR rounding:
+50 MHz / 19200 = 2604.17 -> 2604). Its read phase walked onto the edge
+every 1 / (4 x 63 ppm) = 3950 conversions and stayed there for window /
+drift = 0.72 us / 63 ppm = 11.5 ms. After an empty read every tick read
+INTF, so the tick at that phase kept swallowing. In the emulator's race
+model (11.5) section 9's image loses 0.6 %.
+
+### 11.2 Design: a blind data read half way between edges (src/ad2pll.rs)
+
+- **Entry A**, once per conversion period: R03..R05, with no flag read. The
+  register holds one result for a whole period, so a read placed between
+  two edges takes each conversion exactly once.
+- **Where the edges are**: every 4th period there is an extra entry **B**,
+  `beta` after A, at the place the edge should be. B does one INTF read,
+  which clears AD2F. The next A reads INTF again, after its data frame:
+  AD2F set means the edge came after B's read; clear means it came before
+  (or B's read swallowed it, which is the same side). The race can only
+  blur that probe; it can never cost a sample.
+- **Loop**: a bang-bang, second-order loop.
+  - A result moves the next period by `kp` counts. The step starts at P/64,
+    halves on each sign change down to P/2048, and doubles after 8 equal
+    results.
+  - It also moves the period word `f` by `ki` = f / 2^18 (3.8 ppm). `f` is
+    in Q16 timer counts and the fraction is carried, so the mean period is
+    exact to 2^-16 counts. `f` is clamped to +-1000 ppm. The reported rate
+    is `f` averaged over ~64 probes.
+- **beta = (P + frame + 1 us) / 2**: the data frame sits in the middle of the
+  edge-free time, with a margin of (P - frame - 1 us) / 2 on each side:
+  ~97 us at 4.8 kS/s and 19 us at 19.2 kS/s (both at /16).
+- **Late entries**:
+  - An A whose entry latency exceeds `beta - frame - 1 us` (the frame could
+    reach the next edge) skips its read. It counts as `late`, the host sees
+    a 2-period stamp gap, and it counts as lost.
+  - A B later than 2 us drops its probe.
+  - The ISR writes ARR at the start of every interval (ARPE = 0). An
+    interval whose end had already passed is stretched and the next one
+    shortened by as much (`slips`), so the grid keeps its phase.
+- **Start**: the main loop picks the divider and caps the rung (11.3). It
+  then polls INTF for one edge (bounded: 3 periods) and starts TIM7 so the
+  first A comes P - beta after that edge. The frequency word starts on the
+  last session's lock. The ISR probes every period until the phase step is
+  at its minimum, then every 4th.
+- **Stamps** are the DWT time of A. For an ISR session, **lost**
+  (LOG:COUNt?) = A entries - captured, which is exact under a crystal
+  offset. The old span / nominal-period estimate reported a 100 ppm offset
+  as 100 ppm "lost".
+- **Ladder**: 19200 (OSR 128) and 38400 S/s (OSR 64) are new (R26 low bits 2
+  and 1).
+- **Wave view trigger** (10.2): unchanged, `trig` runs after each push.
+- **DBG:ISR?** fields: feature, active, ticks, captured, late, probes,
+  dropped, bad, timeouts, overruns, max_isr_ns, max_lat_ns, rate_mhz (the
+  locked rate), forced, locked, ppm_x10, slips, max_run, edges_after_b, div,
+  cpu_permille, lat_pc (the PC the worst-latency entry interrupted, passed
+  in by the shim's `ad2_irq_entry`), dma.
+
+### 11.3 Read divider, the CKPH = 1 data phase, rate cap
+
+8.6 found SPI2 reads clean at /8, but 8.2 put the DO-path margin at
+~0 ns. Device 4b98128 then showed /8 unreliable: a start-up check
+(R20..R35 at /8 against /16) passed in two of four sessions, and those
+read 61 / 100 sign-copy errors in 1.15 M / 2.36 M samples. On b81abf2 a
+plain /8 SELF? 2000 gave 193 bad single-byte reads.
+
+**The fix is in the sampling edge, not the clock.** In mode 0 the master
+samples MISO at the rising edge, half a period after the chip changed DO
+(at the falling edge): 80 ns at /8, against ~80-90 ns of isolator + TDODL.
+With CKPH = 1 for the data phase the master samples at the falling edge, a
+full period after the change, with the hold covered by the same delays.
+The command byte stays mode 0, because the chip takes DI on the rising
+edge. The switch is made between the hand-made read-period pulse and the
+data bytes (SPE off, CKPH, SPE on; SCK idles low in both modes) and undone
+at the frame end (`hy3131 set_data_cpha`, `spi::cpha`). Device b81abf2:
+`DBG:HYSPI:SELF? 2000,8,1` clean twice (all 22 stable bytes; us_r1 5.8,
+us_r6 13.9, against 8.0 / 21.6 at /16).
+
+**Defaults** (`stream::pick_div`, at each stream start; `stop` restores
+/16 mode 0 for the DMM):
+- CPU frames at /8 + CKPH (DBG:ISR? div = 1008).
+- DMA frames at /16 (1016 is not possible: the CKPH switch inside a frame
+  needs the CPU).
+- `DBG:AD2:DIV 8|16|32[,cpha]` forces another setting.
+
+**Rate cap** (`max_rate_hz(div, dma)`):
+
+| frames | divider | cap |
+|---|---|---|
+| CPU | /16 | 19200 S/s (38400 at /16 ran the CPU at 80 % and lost the lock on the device) |
+| CPU | /8 + CKPH | 38400 S/s |
+| DMA | /16 | 38400 S/s |
+
+The CPU frames pipeline the data bytes (`spi::read_fast`). The DMM itself
+still reads at /16 mode 0; moving it to /8 + CKPH is a separate step (TODO).
+
+### 11.4 The ~20 us entry latency: code and data above 0x08080000
+
+Only the low 512 KiB of the GD32F4 flash are zero-wait; native-boot.md
+already called sector 8 at 0x08080000 "slow". The 5f14d38 image ended at
+0x08083074, and the tail of `.text` was font data: TEXT22 at 0x080800ec,
+and ASCII26 (the logger panel's font) at 0x08080f98. A read there stalls
+the bus, and the interrupt cannot be taken during a stalled access. That
+gives max_lat ~20 us exactly when the panel (DRAW 1) or the DMM view
+(DRAW 2) drew, and 4.6 us with DRAW 0. The disassembly has no other
+PRIMASK / BASEPRI use: only the synopsys-usb-otg critical sections and
+`stream::stop`.
+
+link-native.x now splits region B:
+- **B = 0x08008010..0x08080000** holds all code and read-only data that
+  may run while a stream does. The linker fails when it does not fit.
+- **C = 0x08080000..0x080A0000, `.cold`** holds modules matched by path in
+  the section names: calbackup, fatren, native, recovery, genuine, gallery,
+  screenshot, dlog, fatdir, vdisk, upload, hyspi, ad2exp, scope_csv, boot,
+  persist. It also holds the `.data` load image, which is read once at boot.
+
+Calls from hot code into C are conditional (the gallery page, a recording's
+rows, host disk reads, uploads, boot, DBG tests), and each costs a stall
+when it runs. build.rs makes cargo relink when the script changes.
+
+**Rule for every change**: code that may run while a stream runs (the
+main-loop pass, USB / SCPI, drawing) stays in B. A module may go to `.cold`
+only if it never runs in a pass of a running stream. B has ~1.1 KiB left at
+b81abf2 (hot end 0x0807fbd0).
+
+The remaining ~4.7 us latency (4b98128: lat_pc in
+`Endpoint<Out>::read`) came from critical_section::with in
+synopsys-usb-otg. fw-rs now implements critical-section with compiler
+fences only (main.rs `NoMask`): the only ISR shares nothing those sections
+protect.
+
+### 11.5 Emulator: the race, a crystal offset, SPI2 with DMA
+
+- `emu/hy3131/HY3131.cs` (= `emu/peripherals/HY3131.cs`):
+  - An INTF read advances the chip to its own time. A conversion completed
+    within `IntfRaceWindow` before the read is cleared unreported
+    (`Swallowed`). The default is 0.7 us in the Renode peripheral
+    (`IntfRaceUs`); 0 = an ideal flag.
+  - `ClockPpm` scales the chip's time against the machine's.
+  - `IntfPhaseHist()` (monitor) gives the INTF reads by phase after the last
+    conversion.
+  - Host tests ("AD2 flag race and chip clock offset"): the flag is
+    swallowed at +0.3 us and reported at +0.9 us, the data is kept, and
+    +-100 ppm gives 96000 x (1 +- 1e-4) conversions in 10 s.
+- `emu/peripherals/GD32_Timer.cs`: an ARR write on a running counter keeps
+  the count phase. Before, each write lost up to one count, a +60 ppm bias
+  with this ISR.
+- `emu/peripherals/GD32_SPI.cs` (spi3 = SPI2): DATA, STAT and CTL1 DMA
+  requests to GD32_DMA, through a `StreamEnabled` hook for TBE as a level.
+  A CPU-written byte is "in flight" until the next DATA write, a STAT read
+  with RBNE clear, or a DATA read, so the cut dummy of a write (11.7) never
+  reaches the chip. Timing is not modelled.
+- `emu/hy3131/ad2streamtest.py --ppm P --race-us W --sessions
+  rate:draw:secs[:dma],..`.
+
+Results at 200 MIPS, race 0.7 us, AC V 0.5 V 50 Hz, LOG:DATA? drained:
+
+| image | chip ppm | sessions | lost / stamp gaps |
+|---|---|---|---|
+| 5f14d38 (section 9) | 0 | 4800 | 381 of 63526 (0.6 %) / 260 |
+| 4b98128 | -100 / 0 / +100 | 4800 (DRAW 2), 9600, 19200, 38400, 1200 | 0 / 0 in every session; locked rate within 2 ppm of the chip (38400: within 8) |
+| b81abf2 | -100 / +100 | DMA frames 9600, 38400, 4800 (DRAW 2); CPU 19200, 9600 | 0 / 0 |
+
+In every session late, slips, overruns and timeouts were 0. READ? read
+0.5 V after each stream, and a CONF mid-stream stopped the stream first.
+wavetest.py PASS (sine V and `--case current`).
+
+Host model (`src/ad2pll.rs` tests, also run by tools/meter-test):
+1200..38400 S/s x -100..+100 ppm over 200 000 periods, with no read across
+an edge and no conversion skipped or taken twice. Also covered: any start
+phase locks; jitter up to 3 us plus 20 us spikes (skipped, never misread);
+the rate within 3 ppm after 10 000 periods; DMA frames with the C read-back
+at 19.2k / 38.4k (/16) and 76.8k (a 7.2 us frame); a 3 % offset is caught
+by the model's own check.
+
+### 11.6 Device check of 4b98128 (2026-10-22)
+
+AC V, 6 V range, calibrator 40 Hz square 0..9.6 V (READ? 4.767 V).
+`dm40scpi.py log --source ad2`, 60 s each, LOG:DATA? drained.
+
+| run | div | lost | stamp gaps | DBG:ISR? late / slips / overruns | max_lat | max_isr | CPU | lock |
+|---|---|---|---|---|---|---|---|---|
+| 4800, DRAW 2 | 16 | **0 of 288 197** | 0 | 0 / 0 / 0 | 4.66 us | 22.9 us | 8.9 % | -0.9 ppm |
+| 9600, DRAW 1 | 16 | **0 of 576 092** | 0 | 0 / 0 / 0 | 4.66 us | 22.9 us | 17.7 % | -1.1 ppm |
+| 19200, DRAW 1 | 8 (auto) | 61 of 1 152 203 = the 61 `bad` | 61 x 2 P | 0 / 0 / 0 | 6.08 us | 15.5 us | 23.7 % | -0.8 ppm |
+| 38400, DRAW 1 | 8 (auto) | 100 = `bad`; host overwritten 337 | 100 | 0 / 0 / 0 | 5.96 us | 15.5 us | 47.6 % | -0.8 ppm |
+| 19200, DRAW 2 | 16 (forced) | **0 of 1 153 647** | 0 | 0 / 0 / 0 | 5.54 us | 22.9 us | 35.6 % | -1.2 ppm |
+| 38400 | 16 (forced) | overloaded: overruns 11 M, slips 2.2 M, ppm at the clamp | | | 23 us | | 80 % | lost |
+
+- **The loss is gone.** At /16, 0 lost at every rate up to 19200 S/s; the
+  only losses are the /8 sign-copy errors (`bad`).
+- **The latency is gone.** max_lat dropped from 21.8 to 4.7 us with DRAW 2.
+  The remaining worst case (lat_pc 0x0803d2b8) was inside
+  synopsys-usb-otg `Endpoint<Out>::read`; it is fixed in b81abf2 (11.4).
+- **The chip's crystal** is -0.8..-1.2 ppm against the MCU's.
+- ***IDN? while streaming** (undrained): p50 0.33 / 0.33 / 0.44 ms and max
+  0.58 / 0.73 / 0.63 ms at 4800 / 9600 / 19200.
+- **After the streams**: READ? 4.768 V, and DBG:HYSPI:SELF? 2000 had every
+  error count at 0.
+- **DBG:HYSPI:WR?** (256 single writes of R36 + 256 two-register writes of
+  R35..R36, bad counts):
+
+  | mode | /8 | /16 | /32 |
+  |---|---|---|---|
+  | 0 bit-bang | - | 0 / 0 | - |
+  | 3 byte by byte (8e5efa6) | - | 64 / 99 (1xxxxxx0 -> 1) | 65 / 65 |
+  | 1 frame per register, 0x00 dummy cut | 0 / 2 | 0..1 / 0..6 (LSB 1 -> 0), 9 runs | 0 / 0, 9 runs |
+  | 2 continuous, 0x00 dummy cut | 0 / 65 | 0 / 64 | 0 / 64 |
+
+  The chip takes each byte's LSB late and sees the MOSI level that follows
+  it: after a gap, the GD32 drives the same byte's MSB again; in a
+  continuous frame, the next byte's MSB; with a cut dummy, the dummy's MSB.
+  At /32 that is late enough not to matter.
+  b81abf2: one frame per register with the dummy's MSB = the LSB (0x00 /
+  0xFF) is the default write (11.7).
+
+### 11.7 SPI2 writes (b81abf2)
+
+`hy3131::write` writes over SPI2, one frame per register: [cmd, data,
+dummy]. The dummy is 0xFF when the data's bit 0 is 1 and 0x00 otherwise.
+CS goes high at the data byte's RBNE, with the dummy's first bit in
+flight. The chip drops the incomplete byte; a completed one would write
+reg + 1.
+
+The cost is ~11 us per register at /16, against ~57 us bit-banged.
+`DBG:HYSPI:WMODE 0` is the bit-banged fallback, kept until the device
+shows the matched dummy clean. `DBG:HYSPI:WR? mode[,div]` is the test.
+
+### 11.8 DMA frames (b81abf2)
+
+**Resources**:
+- DMA0 (STM32 DMA1): channel 0 = SPI2 RX, channel 7 = SPI2 TX, both
+  peripheral request 0 (the STM32F4 map: SPI3_RX S0/C0, SPI3_TX S7/C0).
+  bt.rs uses channels 2 and 4 (UART4), gen.rs 5 (DAC); DMA1 3 / 4 belong
+  to the scope.
+- Buffers in SRAM (`.sram_bss`), because DMA0 cannot reach the TCM.
+
+**The frame** uses the shift framing: the command (R03, read) + 4 x 0xFF.
+The 9th clock is the read period, so the data arrive one bit late:
+`decode_shift` takes bits 30..7 of bytes 1..4. A starts the frame (CS low,
+both channels enabled) and returns. The next entry checks the RX count and
+idle, raises CS, decodes, and stores with A's stamp. The probe read-back
+is a separate entry C, `c_off` after the frame (`Pll::late_read`), because
+the bus is busy at A. Probes run every 8th period, and samples are taken
+only once locked: the edge search's error is ~ an INTF frame.
+
+**Selection**: `DBG:AD2:DMA 0|1` = CPU frames (default) / DMA frames. The
+CPU frames at /8 + CKPH already reach 38.4 kS/s at ~14 % CPU (11.9). DMA
+frames at /16 take ~1 us of CPU per sample; the B / C probe reads are
+2-byte DMA frames too (AD2F = bit 0 of reply byte 1). A CPU INTF frame,
+~8 us at /16, overran the B -> A interval at 38.4 kS/s on b81abf2: the
+lock was lost (11.9).
+
+**Why not a CPU-free chain** (timer -> DMA -> GPIO / SPI):
+- CS is PD2, a GPIO, not SPI2's NSS.
+- The only free timer with DMA requests on DMA0 is TIM4 (UP on channel 6,
+  CH2 on channel 3; CH3 conflicts with SPI2 TX on channel 7). It has no
+  repetition counter, and the advanced timers with one (TIM1 / TIM8) belong
+  to the scope.
+- A frame of exactly 5 bytes then needs a DMA channel re-armed (CNT, then
+  EN) per sample. A DMA cannot write NDTR before CR with an incrementing
+  peripheral address.
+- A free-running SPI with CS edges by timer DMA would need CS to switch in
+  the 80..160 ns between two bytes.
+
+So the per-sample DMA start stays in the ISR (~1 us per sample).
+
+**76.8 kS/s** needs /8 (a 7.2 us frame); /16 (12.8 us) does not fit the
+13 us period. /8 is not clean in mode 0 (11.3). The CKPH = 1 data phase
+(11.3) would give the full period of setup margin, but it cannot be
+switched inside a DMA frame without the CPU. The ENOB trade-off
+(feasibility 1.2, white-noise scaling from 13.4 ENOB measured at 76.8 k):
+~13.9 at 38.4 k, ~14.4 at 19.2 k, ~14.9 at 9.6 k.
+
+### 11.9 Device check of b81abf2 (2026-10-22)
+
+**DMM and writes.**
+- With the calibrator at 1 V DC, DC V read 0.99971 / 0.99968 V.
+- `SELF? 2000`: every count 0, us_w1 9.87, against 57.5 for the bit-banged
+  write.
+- `WR? 1` (frame per register, matched dummy) gave 0 / 0 at /8, /16 and /32,
+  and 0 / 0 in 7 more runs at /16. `WR? 2` (continuous) gave 0 / 64 as
+  expected.
+- Ohm, AC V and FREQ answered (no input for them).
+
+**Streams**: AC V, 40 Hz square, 60 s each, `dm40scpi.py log`:
+
+| run | frames | lost | stamp gaps | late / slips / overruns / timeouts | max_lat | max_isr | CPU |
+|---|---|---|---|---|---|---|---|
+| 4800, DRAW 2 | CPU /16 | 0 of 288 200 | 0 | 0 / 0 / 0 / 0 | **0.24 us** | 23.5 us | 9.1 % |
+| 9600 | CPU /16 | 0 of 576 093 | 0 | 0 | 0.24 us | 23.4 us | 18.2 % |
+| 19200, DRAW 2 | CPU /16 | 0 of 1 153 197 | 0 | 0 | 0.24 us | 23.4 us | 36.4 % |
+| 9600 | DMA /16 | 0 of 575 866 | 0 | 0 | 0.24 us | 10.8 us | **5.1 %** |
+| 19200 | CPU /8 + CKPH | 0 of 1 152 209 | 0 | 0 | 0.24 us | 16.8 us | 25.6 % |
+| 38400 | CPU /8 + CKPH | 35.8 M captured in ~15 min, bad 0, timeouts 0, late 0 (ring overwritten: the host CSV writer cannot keep up at 38.4 k) | | 0 / 0 / 0 / 0 | 0.24 us | 16.8 us | 14.3 % |
+| 38400 | DMA /16 | FAIL: the lock was lost (CPU INTF probe frames overran the B -> A interval) | | | | | |
+
+- max_lat fell from 4.7 to 0.24 us with critical-section unmasked.
+- The 38.4 k DMA failure is fixed in a4907d0 (probes as DMA frames,
+  emulator PASS); it needs a device run.
+- 38.4 kS/s needs a host drain without CSV, e.g. a raw LOG:DATA? counter.

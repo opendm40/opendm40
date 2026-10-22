@@ -91,6 +91,24 @@ SECTIONS
         *(.text.*7dm40_fw4boot*);
         *(.text.*7dm40_fw7persist*);
         *(.text.*7dm40_fw3app9app_press*);
+        /* ... and their named read-only data (tables, strings in statics). */
+        *(.rodata.*7dm40_fw9calbackup*);
+        *(.rodata.*7dm40_fw6fatren*);
+        *(.rodata.*7dm40_fw6native*);
+        *(.rodata.*7dm40_fw8recovery*);
+        *(.rodata.*7dm40_fw7genuine*);
+        *(.rodata.*7dm40_fw7gallery*);
+        *(.rodata.*7dm40_fw10screenshot*);
+        *(.rodata.*7dm40_fw4dlog*);
+        *(.rodata.*7dm40_fw6fatdir*);
+        *(.rodata.*7dm40_fw5vdisk*);
+        *(.rodata.*7dm40_fw6upload*);
+        *(.rodata.*7dm40_fw5hyspi*);
+        *(.rodata.*7dm40_fw6ad2exp*);
+        *(.rodata.*7dm40_fw9scope_csv*);
+        *(.rodata.*7dm40_fw4boot*);
+        *(.rodata.*7dm40_fw7persist*);
+        *(.rodata.*7dm40_fw3app9app_press*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C
