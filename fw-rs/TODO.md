@@ -880,9 +880,34 @@ Firmware:
 - [ ] B (zero-wait flash) is FULL: the branch overflowed by 4 bytes at a4907d0; the cold modules' named
       .rodata moved to `.cold` (28 bytes left), the bit-banged write removed. A real reclaim is needed; never put
       per-pass code in `.cold` (feasibility 11.4 rule).
-- [ ] 76.8 kS/s: /8 + CKPH works for CPU frames; the period (13 us) leaves no room for the CPU INTF probe
-      (5.8 us at /8): needs a DMA data phase started after the CPU command byte + CKPH switch, and DMA probe
-      frames at /8 mode 0 (probe noise tolerated). Not done.
+- [x] 76.8 kS/s (emulator; device check below): hybrid frames (feasibility 11.12, decision 2026-10-22 #9): the CPU
+      sends the command byte (mode 0, /8) and switches CKPH = 1 after the read-period pulse, DMA reads R03..R05;
+      probe frames 2-byte DMA at /8 mode 0 (a marginal bit only blurs a probe), every 16th period; the probe
+      frame starts before the sample is stored; Pll geometry `Pll::hybrid` (beta 8.6 us, A ~1.2 us after an
+      edge on the device). Ladder rung 76800 (LOG:SRATe; DMA frames only: CPU frames / a forced /16 cap it),
+      Wave view 1 ms/div = 76800 and 2 ms/div = 38400, disk only after a page-program probe at the end of Prep
+      (mean <= 800 us, max <= 1.5 ms, else the session runs at 38400; LOG:DISK? +fifo_hw,programs,tpp,tpp_max).
+      Emulator made honest first (SPI byte time + DMA in time on both SPI buses, CPU-synced virtual time,
+      TornAd2, the /8 mode-0 DO margin, CKPH 1): the old firmware passes every test under it.
+      Emulator: 76800 at -100 / +100 ppm, also with 5 % probe bit errors: lost / late / slips / overruns /
+      timeouts / bad / torn 0, locked to the chip within 0.1 ppm; ISR CPU 29.5 % in the emulator, **~43 %
+      estimated on the device** (40..46 %); DRAW 2 (full DMM repaint) overflows the 26.7 ms ring (7.8-9.3 %
+      overwritten, lost 0); Wave view 1 ms/div: no overflow; disk typ flash keeps up to 196 KB/s (767 pages/s,
+      FIFO high water 460 B), max flash (tPP 3 ms) lost 28-54 % ungated -> the probe gate.
+      Device check (image and steps: feasibility 11.12 / the hand-over):
+      1. `scpi "LOG:SOURce AD2" "LOG:SRATe 76800"`, AC V on the 40 Hz square, `log a768.csv --source ad2
+         --rate 76800 -d 60` (raw drain): DBG:ISR? div 1008, dma 1, lost 0 (LOG:COUNt?), late / slips /
+         overruns / timeouts / bad 0, locked, cpu_permille (estimate ~430), max_isr, max_lat < 1 us;
+         overwritten = what the host could not drain (note the drain rate).
+      2. The same with `LOG:CHOP OFF` (the stock rows' unchopped OSR 32) and with CHOP ON (the default:
+         ENCHOPAD2 at OSR 32 never ran on the chip): codes within the square's +-107 k, no stuck samples.
+      3. `DBG:AD2:DIV 8,1` at 4800 / 38400 (hybrid frames at a slow rung): lost 0, bad 0.
+      4. Disk: LOG:DEST DISK, LOG:DUR 60 at 76800: LOG:DISK? fields 9 / 10 (the chip's tPP: expect ~0.4..0.7
+         ms), the rung LOG:PREamble? nominal, lost_before sum 0, fifo_hw (of 8192), pages/s = programs / 60;
+         with a noisy input (the calibrator's sine + the generator's noise, or V/COM open) once more.
+      5. Wave view 1 ms/div and 2 ms/div on the square: the trace, Vpp, no "Wave stopped", DBG:ISR? lost 0,
+         overwritten (ring) 0 for 30 s; 5 ms/div and slower as before.
+      6. After the streams: DC V 1 V within 0.05 %, `DBG:HYSPI:SELF? 2000` all 0.
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [x] (B) AD2 samples to the SPI disk (.DLG): the fast logger (LOG:DEST DISK, above / docs/compact-log-format.md
       "Fast stream"). Over BT: the ~870 records/s link ceiling (docs/bt-scpi.md) is below AD2's slowest rung

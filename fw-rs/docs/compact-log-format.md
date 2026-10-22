@@ -323,12 +323,22 @@ chunk header costs one more short program per 4 KiB chunk.
 
 | stream | file B/s (measured coder) | vs worst case | CPU for the pages | 13 MB lasts |
 |---|---|---|---|---|
+| AD2 76800 | ~146 KB/s (1.9 B) .. 225 KB/s (2.93 B) | 2-3x over: only after the tPP probe (below) | ~12-18 % | ~1.5 min |
 | AD2 38400 | ~74 KB/s (1.9 B) .. 113 KB/s (2.93 B) | at / over the limit | ~6 % | ~3 min |
 | AD2 19200 | ~37 KB/s | 2x margin | ~3 % | ~6 min |
 | AD2 9600 | ~10..28 KB/s | 3x+ | ~1.5 % | ~12 min+ |
 | AD2 4800 / 2400 / 1200 | <= 14 KB/s | large | < 1 % | 25 min .. 2 h |
 | AD1 640 | ~1.3 KB/s | large | | ~2.8 h |
 | AD1 40 | ~0.1 KB/s | large | | ~1.5 days |
+
+76800 S/s (2026-10-22, feasibility 11.12, decision 2026-10-22 #9): the
+emulator with the disk's SPI timed (GD32_SPI on SPI1: the ~0.2 ms per page
+is charged now) keeps up with a typical chip up to 196 KB/s (767 pages/s,
+~full-scale white noise, FIFO high water 460 of 8192 B) and loses 28-54 %
+with tPP 3 ms on every page. So a disk session above 38400 S/s first times
+4 page programs at the end of Prep (`fastlog::set_probe`, LOG:DISK? tpp
+fields) and runs at 76800 only when the mean is <= 800 us and the max <=
+1.5 ms, else at 38400.
 
 So: up to 19200 S/s the disk keeps up even at the datasheet's worst page
 time; 38400 S/s keeps up with typical parts (~5x margin) but not with a

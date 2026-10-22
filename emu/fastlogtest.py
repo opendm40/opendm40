@@ -241,6 +241,16 @@ def session(q, src, rate, profile):
     span = rows / nominal if nominal else 0
     bps = len(dlg) / max(span, 1e-9)
     hw = st[6] if len(st) > 6 else -1  # FIFO high water (bytes of 8192 not yet programmed)
+    if src == 'ad2' and rate > 38400:
+        # The page-program probe (decision 2026-10-22 #9): 76800 to the disk
+        # only when the chip programs a page in <= 800 us mean / 1.5 ms max,
+        # else the session runs at 38400; either way nothing is lost.
+        tpp, tpp_max = (st[8], st[9]) if len(st) > 9 else (0, 0)
+        fast = 0 < tpp <= 800 and tpp_max <= 1500
+        check(abs(nominal - (rate if fast else 38400)) < 2,
+              '%s %s %d: probe tPP %d / %d us -> rung %.0f S/s' % (profile, src, rate, tpp, tpp_max, nominal))
+        check(cnt[2] == 0 and cnt[4] == 0, '%s %s %d: the disk kept up at the rung (ring overwritten %d, lost %d)'
+              % (profile, src, rate, cnt[2], cnt[4]))
     TABLE.append((profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1), hw, int(isr[20]) / 10))
     print('  %s %s %d: prep %.1f s, rows %d, lost %d (ring overwritten %d), %.0f B/s, %.0f pages/s, %.2f B/sample, FIFO high water %d B, ISR CPU %.1f %%'
           % (profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1), hw, int(isr[20]) / 10), flush=True)

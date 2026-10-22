@@ -79,6 +79,11 @@ pub struct Pll {
     pub beta: u32,
     /// The data frame, counts (late_max).
     pub frame: u32,
+    /// Latest A entry latency that still reads (`late_max`), counts.
+    pub late_a: u32,
+    /// Latest C entry latency whose probe read still comes before the next
+    /// edge (`hybrid`; u32::MAX = no check, the /16 geometry), counts.
+    pub c_late: u32,
     kp: u32,
     kp_min: u32,
     kp_max: u32,
@@ -129,6 +134,8 @@ impl Pll {
             acc: 0,
             beta: 0,
             frame: 0,
+            late_a: 0,
+            c_late: u32::MAX,
             kp: 0,
             kp_min: 0,
             kp_max: 0,
@@ -173,6 +180,7 @@ impl Pll {
         p.f_avg = (p.f as u64) << 8;
         p.frame = frame_counts;
         p.beta = ((pc + frame_counts + LAT0) / 2).min(pc - 1);
+        p.late_a = p.beta.saturating_sub(frame_counts + LAT0);
         p.kp_min = kp_min;
         p.kp_max = (pc >> 6).max(kp_min);
         p.kp = p.kp_max;
@@ -295,9 +303,36 @@ impl Pll {
     }
 
     /// Latest entry latency (counts) at which a data frame of `frame` counts
-    /// still ends before the next edge, with 1 us to spare.
+    /// still ends before the next edge, with 1 us to spare (`new`; the
+    /// hybrid geometry: `hybrid`).
     pub fn late_max(&self) -> u32 {
-        self.beta.saturating_sub(self.frame + LAT0)
+        self.late_a
+    }
+
+    /// The geometry of the hybrid frames (hy3131 `stream::hybrid_kick`, 76.8
+    /// kS/s, feasibility 11.12), after `new` with `frame` = the A entry to
+    /// the data frame's last bit and `c_off` = `frame` (C right after it).
+    /// The probe frames (B, C) are 2-byte DMA frames whose INTF byte the
+    /// chip latches `delta` counts after the entry (the lock puts B's latch
+    /// on the edge); `delta_min` is its physical minimum (CS setup, the
+    /// command byte and one clock). With A at `a` after an edge the window
+    /// is: A's frame after B's tail (~a >= 0), C's latch before the next
+    /// edge (a <= P - c_off - delta): `beta` puts A in the middle of it,
+    /// `a = (P - c_off - delta) / 2`, so beta = (P + c_off - delta) / 2.
+    /// A late A still reads while its frame ends `margin` before the next
+    /// edge (that edge is at least beta + delta_min after A); a late C drops
+    /// its probe (`c_late`): its latch would come after the next edge.
+    pub fn hybrid(&mut self, delta: u32, delta_min: u32, margin: u32) {
+        let pc = self.f_nom >> 16;
+        self.beta = ((pc + self.c_off).saturating_sub(delta) / 2).min(pc - 8);
+        self.late_a = (self.beta + delta_min).saturating_sub(self.frame + margin);
+        self.c_late = self.beta.saturating_sub(self.c_off + margin);
+    }
+
+    /// The phase of the first A after an edge: P - beta, less the probe
+    /// latch delay `delta` (hybrid; 0 = the read at the entry).
+    pub fn lead(&self, delta: u32) -> u32 {
+        ((self.f >> 16) - self.beta).saturating_sub(delta)
     }
 
     /// The interval just set could not be met (the entry came after its end
@@ -465,6 +500,112 @@ mod tests {
                 assert!((got - ppm).abs() < 10.0, "rate {rate} ppm {ppm}: {got:.1}");
             }
         }
+    }
+
+    /// The hybrid frames' timing (hy3131 `stream::hybrid_kick`, logger.rs
+    /// `isr` HYB_*): A's command byte starts `pa` after its entry (+
+    /// latency), or after the last probe frame's last bit, and its data's
+    /// last bit comes `fa` later; a probe entry's CS goes low `pb` after it
+    /// (or after A's last bit: `dma_finish` waits), the chip latches INTF 72
+    /// counts later (CS setup, the command byte, one clock), the frame's
+    /// last bit 56 after that. Returns (samples, bad, skipped, c_wrong,
+    /// pll): bad = a data frame with an edge between its command and its
+    /// last bit, or not exactly the next conversion; c_wrong = a probe read
+    /// back after the edge that follows the probed one.
+    fn run_hyb(rate_mhz: u32, ppm: f64, periods: u32, pa: f64, fa: f64, pb: f64, lat: &dyn Fn(u64) -> f64) -> (u32, u32, u32, u32, Pll) {
+        let mut pll = Pll::new(rate_mhz, 0, 370);
+        pll.late_read = true;
+        pll.c_off = 370;
+        pll.np = 16;
+        pll.gate = true;
+        pll.hybrid(160, 82, 25);
+        let p_chip = (COUNT_HZ as f64 * 1000.0 / rate_mhz as f64) / (1.0 + ppm * 1e-6);
+        // Start as logger.rs `isr::start`: the first A at lead(160) after an
+        // edge (+ 3 us of edge-search error).
+        let phase0 = pll.lead(160) as f64 + 150.0;
+        let edge = |k: i64| phase0 + k as f64 * p_chip;
+        let edge_index = |t: f64| ((t - phase0) / p_chip).floor() as i64;
+        let (mut t, mut bus_free) = (0.0f64, 0.0f64);
+        let (mut samples, mut bad, mut skipped, mut c_wrong) = (0u32, 0u32, 0u32, 0u32);
+        let mut last_k: Option<i64> = None;
+        let mut b_latch = f64::NAN;
+        let mut n = 0u64;
+        while samples + skipped < periods {
+            let l = lat(n);
+            n += 1;
+            if pll.next_b || pll.next_c {
+                let c = pll.next_c;
+                let ok = l <= 100.0 && (!c || l <= pll.c_late as f64);
+                let iv = if c { pll.on_c() } else { pll.on_b(ok) };
+                if ok {
+                    let cs = (t + l + pb).max(bus_free + 10.0);
+                    let latch = cs + 72.0;
+                    bus_free = latch + 56.0;
+                    if c {
+                        if edge_index(latch) > edge_index(b_latch) + 1 {
+                            c_wrong += 1;
+                        }
+                        pll.result(edge_index(latch) > edge_index(b_latch));
+                    } else {
+                        b_latch = latch;
+                    }
+                }
+                t += iv as f64;
+            } else {
+                let (iv, _) = pll.on_a();
+                if pll.take() {
+                    if l > pll.late_max() as f64 {
+                        last_k = last_k.map(|k| k + 1);
+                        skipped += 1;
+                    } else {
+                        let start = (t + l + pa).max(bus_free + 10.0);
+                        let end = start + fa;
+                        bus_free = end;
+                        let k = edge_index(start);
+                        if edge_index(end) != k || edge(k + 1) - end < 0.0 {
+                            bad += 1;
+                        }
+                        if let Some(k0) = last_k {
+                            if k != k0 + 1 {
+                                bad += 1;
+                            }
+                        }
+                        last_k = Some(k);
+                        samples += 1;
+                    }
+                }
+                t += iv as f64;
+            }
+        }
+        (samples, bad, skipped, c_wrong, pll)
+    }
+
+    #[test]
+    fn hybrid_frames_at_76k8() {
+        // The device's estimate (pa 50, fa 300, pb 76: A's last bit ~7.3 us,
+        // a probe latch ~3.2 us after the entry) and the emulator's faster
+        // ISR (pa 15, fa 280, pb 20), 0.2..1 us of latency jitter, +-100 ppm.
+        let jit = |n: u64| ((n.wrapping_mul(2654435761) >> 7) % 40) as f64 + 10.0;
+        for &(pa, fa, pb) in &[(50.0, 300.0, 76.0), (15.0, 280.0, 20.0), (60.0, 320.0, 90.0)] {
+            for &ppm in &[-100.0, 0.0, 100.0] {
+                let (s, bad, skipped, c_wrong, pll) = run_hyb(76_800_000, ppm, 200_000, pa, fa, pb, &jit);
+                assert_eq!((bad, skipped, c_wrong), (0, 0, 0), "pa {pa} fa {fa} pb {pb} ppm {ppm}: of {s}");
+                assert!(pll.locked, "pa {pa} ppm {ppm}");
+                let got = (pll.rate_mhz() as f64 / 76_800_000.0 - 1.0) * 1e6;
+                assert!((got - ppm).abs() < 10.0, "pa {pa} ppm {ppm}: {got:.1}");
+            }
+        }
+        // The geometry: B 8.6 us after A, A ~1.2 us (device) after an edge.
+        let mut p = Pll::new(76_800_000, 0, 370);
+        p.c_off = 370;
+        p.hybrid(160, 82, 25);
+        assert_eq!((p.beta, p.late_max(), p.c_late), (430, 117, 35));
+        // A 2 us latency spike every 500 entries: the A still reads (late_max
+        // 2.3 us), its frame still ends before the edge; a late C drops its probe.
+        let spikes = |n: u64| if n % 500 == 499 { 100.0 } else { 12.0 };
+        let (s, bad, skipped, c_wrong, pll) = run_hyb(76_800_000, 50.0, 100_000, 50.0, 300.0, 76.0, &spikes);
+        assert_eq!((bad, skipped, c_wrong), (0, 0, 0), "spikes: of {s}");
+        assert!(pll.locked);
     }
 
     #[test]

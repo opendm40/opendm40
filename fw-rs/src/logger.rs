@@ -373,10 +373,15 @@ impl Producer {
             if gap > nom * 3 / 2 {
                 ring.missed.store(ring.missed.load(Relaxed).wrapping_add((gap / nom).saturating_sub(1)), Relaxed);
             }
-            let pns = self.period_ns.max(1) as u64;
-            let k = (gap as u64 * 1000 + pns / 2) / pns;
-            if k >= 2 {
-                inc(&ring.gaps[gap_bucket(k)]);
+            // k = round(gap / P) >= 2 needs gap >= 1.5 P: the 64-bit division
+            // (__aeabi_uldivmod, ~0.5 us on the device) only for a gap of
+            // more than 1.25 nominal periods, not for every sample (76.8 kS/s).
+            if gap as u64 * 4 > nom as u64 * 5 {
+                let pns = self.period_ns.max(1) as u64;
+                let k = (gap as u64 * 1000 + pns / 2) / pns;
+                if k >= 2 {
+                    inc(&ring.gaps[gap_bucket(k)]);
+                }
             }
             if gap > ring.max_gap_us.load(Relaxed) {
                 ring.max_gap_us.store(gap, Relaxed);
@@ -630,7 +635,7 @@ impl Logger {
             #[cfg(feature = "ad2-isr")]
             let req = {
                 let dma = hy::stream::use_dma();
-                let (div, _) = hy::stream::choose_div(dma);
+                let (div, _) = hy::stream::choose_div(dma, self.req_hz());
                 self.req_hz().min(hy::stream::max_rate_hz(div, dma))
             };
             #[cfg(not(feature = "ad2-isr"))]
@@ -672,7 +677,7 @@ impl Logger {
         let on_isr = self.ad2 || self.ad1_on_isr();
         #[cfg(feature = "ad2-isr")]
         if self.ad2 {
-            let _ = hy::stream::pick_div(hy::stream::use_dma());
+            let _ = hy::stream::pick_div(hy::stream::use_dma(), hy::ad2_rate_mhz(self.r26) / 1000);
         } else if on_isr {
             hy::stream::use_div(hy::DIV, false);
         }
@@ -813,7 +818,7 @@ impl Logger {
         hy::stream::stop();
         isr::stopped();
         if self.ad2 {
-            let _ = hy::stream::pick_div(hy::stream::use_dma());
+            let _ = hy::stream::pick_div(hy::stream::use_dma(), self.isr_rate / 1000);
         } else {
             hy::stream::use_div(hy::DIV, false);
         }
@@ -1013,30 +1018,40 @@ pub mod isr {
         }
     }
     /// The DMA frame in flight (hy3131 `stream::dma_*`): started by A, ended
-    /// by the next entry. `on`: this session uses DMA frames.
+    /// by the next entry. `on`: this session uses DMA frames; `hyb`: hybrid
+    /// data frames (76.8 kS/s: the CPU sends the command, DMA the data, at
+    /// /8 with the CKPH = 1 data phase; `stream::hybrid_kick`).
     struct Dma {
         on: bool,
+        hyb: bool,
         pending: bool,
         /// The frame in flight: DATA (R03..R05, `ts` = A's stamp), CLEAR
         /// (B's INTF read) or PROBE (C's INTF read: the probe result).
         kind: u8,
+        /// The RXB half of the DATA frame in flight.
+        buf: u8,
         ts: u32,
     }
     const DATA: u8 = 0;
     const CLEAR: u8 = 1;
     const PROBE: u8 = 2;
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-    static mut DMA: Dma = Dma { on: false, pending: false, kind: 0, ts: 0 };
+    static mut DMA: Dma = Dma { on: false, hyb: false, pending: false, kind: 0, buf: 0, ts: 0 };
     /// The INTF frame: command (R1E, read) + one byte (the read period and
-    /// INTF bits 7..1: AD2F = bit 0 of the reply's byte 1).
+    /// INTF bits 7..1: AD2F = bit 0 of the reply's byte 1); its replies.
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
     static mut TXI: [u8; 2] = [0; 2];
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut RXI: [u8; 2] = [0; 2];
     /// The frame's bytes (SRAM: DMA0 cannot reach the TCM): the command
-    /// (R03, read) + 4 x 0xFF out, the 5 replies in.
+    /// (R03, read) + 4 x 0xFF out (a hybrid frame sends bytes 1..3), the 5
+    /// replies in. Two halves: an entry starts the next frame before it
+    /// stores the last one (the probe / data frame goes out first, the
+    /// sample's ring push and trigger run while it shifts).
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
     static mut TXB: [u8; 5] = [0; 5];
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-    static mut RXB: [u8; 5] = [0; 5];
+    static mut RXB: [[u8; 5]; 2] = [[0; 5]; 2];
     /// DMA frame (5 bytes + CS / start), timer counts, per divider.
     const fn dma_frame_counts(div: u8) -> u32 {
         match div {
@@ -1045,6 +1060,18 @@ pub mod isr {
             _ => 1320,  // 26.4 us
         }
     }
+    /// The hybrid frame's geometry (feasibility 11.12; device estimates from
+    /// SELF? us_r1 / us_r6 at /8 + CKPH and the DMA entry cost of 11.11):
+    /// A entry to the data frame's last bit (latency 0.25 + finishing the
+    /// last frame ~1.0 + CS 0.2 + command 1.3 + pulse / CKPH / DMA start
+    /// ~0.6 + 3 x 1.28 us = ~7.3 us); a probe entry to the chip's INTF latch
+    /// (~3.2 us; at least 1.64: CS setup + command + one clock); the margin
+    /// to an edge. The emulator's ISR runs these in less (~5.8 / 1.9 us):
+    /// its A sits ~1.3 us later after the edge, inside the same window.
+    const HYB_FRAME: u32 = 370;
+    const HYB_DELTA: u32 = 160;
+    const HYB_DELTA_MIN: u32 = 82;
+    const HYB_MARGIN: u32 = 25;
 
     /// A probe B whose entry came later than this (counts) is not used.
     const B_LATE: u32 = 100;
@@ -1123,16 +1150,20 @@ pub mod isr {
             *core::ptr::addr_of_mut!(RINGP) = ring;
             let pll = &mut *core::ptr::addr_of_mut!(PLL);
             let dma = !ad1 && hy::stream::use_dma();
-            *core::ptr::addr_of_mut!(DMA) = Dma { on: dma, pending: false, kind: DATA, ts: 0 };
+            let hyb = !ad1 && hy::stream::hybrid(dma);
+            *core::ptr::addr_of_mut!(DMA) = Dma { on: dma, hyb, pending: false, kind: DATA, buf: 0, ts: 0 };
             if dma {
                 *core::ptr::addr_of_mut!(TXB) = [(hy::R_AD2 << 1) | 1, 0xFF, 0xFF, 0xFF, 0xFF];
                 *core::ptr::addr_of_mut!(TXI) = [(hy::R_INTF << 1) | 1, 0xFF];
-                let fc = dma_frame_counts(div);
+                let fc = if hyb { HYB_FRAME } else { dma_frame_counts(div) };
                 *pll = Pll::new(rate_mhz, *core::ptr::addr_of!(REL), fc);
                 pll.late_read = true;
-                pll.c_off = fc + 50;
-                pll.np = 8;
+                pll.c_off = if hyb { fc } else { fc + 50 };
+                pll.np = if hyb { 16 } else { 8 };
                 pll.gate = true;
+                if hyb {
+                    pll.hybrid(HYB_DELTA, HYB_DELTA_MIN, HYB_MARGIN);
+                }
                 hy::stream::dma_setup(true);
             } else {
                 *pll = Pll::new(rate_mhz << ksh, *core::ptr::addr_of!(REL), frame_counts(div) >> ksh);
@@ -1169,8 +1200,10 @@ pub mod isr {
             }
         }
         // First A: P - beta after the edge (the next edge then beta after
-        // A); without an edge anywhere (the loop finds it, ad2pll tests).
-        let lead = (pc - pll.beta) * cyc_per_count;
+        // A; hybrid: beta + the probe's latch delay); without an edge
+        // anywhere (the loop finds it, ad2pll tests).
+        let hyb = unsafe { (*core::ptr::addr_of!(DMA)).hyb };
+        let lead = pll.lead(if hyb { HYB_DELTA } else { 0 }) * cyc_per_count;
         let now = unsafe { r32(DWT_CYCCNT) };
         let first = match edge {
             Some(e) => {
@@ -1220,9 +1253,12 @@ pub mod isr {
             ppm10 as u32,
             SLIPS.load(Relaxed),
             LAT_PC.load(Relaxed),
-            // A DMA frame still in flight (the last one of a stopped session
-            // is never stored) is not a lost conversion.
-            p.periods.wrapping_sub(unsafe { (*core::ptr::addr_of!(DMA)).pending } as u32),
+            // A DMA data frame still in flight (the last one of a stopped
+            // session is never stored) is not a lost conversion.
+            p.periods.wrapping_sub(unsafe {
+                let d = &*core::ptr::addr_of!(DMA);
+                (d.pending && d.kind == DATA) as u32
+            }),
             {
                 let busy = BUSY16.load(Relaxed) as u64 * 16;
                 let total = p.periods as u64 * (p.f_mean() as u64 >> 16) * ((crate::clock::HCLK_HZ / COUNT_HZ) << ksh) as u64;
@@ -1250,23 +1286,28 @@ pub mod isr {
         let d = &mut *core::ptr::addr_of_mut!(DMA);
         if pll.next_b || pll.next_c {
             let c = pll.next_c;
-            let ok = lat <= B_LATE;
+            // A late B drops its probe; a late C too when its read could
+            // come after the next edge (the hybrid geometry; c_late = MAX
+            // otherwise: the C of a /16 session always reads, as before).
+            let ok = lat <= B_LATE && (!c || lat <= pll.c_late);
             let iv = if c { pll.on_c() } else { pll.on_b(ok) };
             let over = hy::stream::set_interval(iv, lat);
             if over != 0 {
                 pll.overshoot(over);
                 inc(&SLIPS);
             }
-            if d.pending {
-                dma_done(d, p, ring, pll);
-            }
-            if d.on && (c || ok) {
+            // The last frame (A's data: B and C follow an A) ends; the probe
+            // frame starts at once, the sample is stored while it shifts.
+            let prev = if d.pending { dma_end(d, ring, pll) } else { None };
+            if d.on && (if c { lat <= pll.c_late } else { ok }) {
                 // The INTF read as a DMA frame (2 bytes: 5.1 us at /16 - a CPU
-                // frame, ~8 us, overran the B -> A interval at 38.4 kS/s).
+                // frame, ~8 us, overran the B -> A interval at 38.4 kS/s; at
+                // /8 mode 0 in a hybrid session: 2.6 us, a marginal DO bit
+                // only blurs the probe).
                 d.kind = if c { PROBE } else { CLEAR };
                 d.pending = true;
-                hy::stream::dma_kick(core::ptr::addr_of!(TXI) as *const u8, core::ptr::addr_of_mut!(RXB) as *mut u8, 2);
-            } else if c || ok {
+                hy::stream::dma_kick(core::ptr::addr_of!(TXI) as *const u8, core::ptr::addr_of_mut!(RXI) as *mut u8, 2);
+            } else if !d.on && (c || ok) {
                 let mut f = [0u8];
                 if !hy::isr_read(hy::R_INTF, &mut f) {
                     inc(&ring.timeouts);
@@ -1274,6 +1315,9 @@ pub mod isr {
                     pll.result(f[0] & flag != 0);
                     inc(&ring.probes);
                 }
+            }
+            if let Some((buf, ts)) = prev {
+                dma_store(p, ring, d.hyb, buf, ts);
             }
         } else {
             let (iv, probe) = pll.on_a();
@@ -1283,9 +1327,9 @@ pub mod isr {
                 inc(&SLIPS);
             }
             p.tick_at(t0);
-            if d.pending {
-                dma_done(d, p, ring, pll);
-            }
+            // The last frame ends (a probe's result is taken now); its data,
+            // if any, is stored after this A's frame started.
+            let prev = if d.pending { dma_end(d, ring, pll) } else { None };
             if !pll.take() {
                 // Acquiring (DMA frames, or AD1 without an edge from the
                 // search: until locked): no sample. A CPU-frame probe still
@@ -1306,7 +1350,15 @@ pub mod isr {
                 d.ts = p.now_us as u32;
                 d.kind = DATA;
                 d.pending = true;
-                hy::stream::dma_kick(core::ptr::addr_of!(TXB) as *const u8, core::ptr::addr_of_mut!(RXB) as *mut u8, 5);
+                d.buf ^= 1;
+                let tx = core::ptr::addr_of!(TXB) as *const u8;
+                let rx = core::ptr::addr_of_mut!(RXB[d.buf as usize]) as *mut u8;
+                if !d.hyb {
+                    hy::stream::dma_kick(tx, rx, 5);
+                } else if !hy::stream::hybrid_kick(*tx, tx.add(1), rx, 3) {
+                    d.pending = false;
+                    inc(&ring.timeouts);
+                }
             } else {
                 let ts = p.now_us as u32;
                 let mut b = [0u8; 3];
@@ -1327,6 +1379,9 @@ pub mod isr {
                         inc(&ring.timeouts);
                     }
                 }
+            }
+            if let Some((buf, ts)) = prev {
+                dma_store(p, ring, d.hyb, buf, ts);
             }
         }
         inc(&ring.ticks);
@@ -1358,24 +1413,36 @@ pub mod isr {
         }
     }
 
-    /// The DMA frame started at the last entry is over (this entry): CS up,
-    /// then the data (decoded, stored with A's stamp) or the probe result.
+    /// The DMA frame started at the last entry is over (this entry): CS up
+    /// (and CKPH back to 0 after a hybrid frame), a probe's result taken.
+    /// A data frame's (RXB half, stamp) is returned: the caller stores it
+    /// after it started its own frame (`dma_store`).
     #[inline(always)]
-    unsafe fn dma_done(d: &mut Dma, p: &mut Producer, ring: &Ring, pll: &mut Pll) {
+    unsafe fn dma_end(d: &mut Dma, ring: &Ring, pll: &mut Pll) -> Option<(u8, u32)> {
         d.pending = false;
         if !hy::stream::dma_finish() {
             inc(&ring.timeouts);
-            return;
+            return None;
         }
-        let rx = &*core::ptr::addr_of!(RXB);
         match d.kind {
-            DATA => store(p, ring, d.ts, decode_shift(rx)),
+            DATA => Some((d.buf, d.ts)),
             PROBE => {
+                let rx = &*core::ptr::addr_of!(RXI);
                 pll.result(rx[1] & 1 != 0); // AD2F (INTF bit 1) one bit late
                 inc(&ring.probes);
+                None
             }
-            _ => {}
+            _ => None,
         }
+    }
+
+    /// A data frame's sample: R03..R05 as received (hybrid: no shift) or
+    /// from the shift framing, into the ring with A's stamp.
+    #[inline(always)]
+    unsafe fn dma_store(p: &mut Producer, ring: &Ring, hyb: bool, buf: u8, ts: u32) {
+        let rx = &*core::ptr::addr_of!(RXB[buf as usize]);
+        let v = if hyb { hy::s24(&rx[..3]) } else { decode_shift(rx) };
+        store(p, ring, ts, v);
     }
 }
 

@@ -283,30 +283,42 @@ pub mod stream {
         DIV_USED.load(Relaxed) & 0x100 != 0
     }
 
-    /// Main loop, before the chip set-up of a stream: the read divider for
-    /// its frames, and switch to it (`stop` puts `DIV` and mode 0 back).
-    /// Automatic: CPU frames at /8 with the data phase sampled at CKPH = 1
-    /// (device b81abf2: SELF? 4000 x clean, 35.8 M samples at 38.4 kS/s with
-    /// 0 sign errors, where plain /8 reads had 193 / 2000 bad single-byte
-    /// reads); DMA frames at /16 (the CKPH switch inside a frame needs the
-    /// CPU; plain /8: 61 / 100 sign errors in 1.15 M / 2.36 M samples, device
-    /// 4b98128). Returns the divider; the CKPH choice is applied too.
-    pub fn pick_div(dma: bool) -> u8 {
-        let (div, cpha) = choose_div(dma);
+    /// Main loop, before the chip set-up of a stream at `hz` S/s: the read
+    /// divider for its frames, and switch to it (`stop` puts `DIV` and mode
+    /// 0 back). Automatic: CPU frames at /8 with the data phase sampled at
+    /// CKPH = 1 (device b81abf2: SELF? 4000 x clean, 35.8 M samples at 38.4
+    /// kS/s with 0 sign errors, where plain /8 reads had 193 / 2000 bad
+    /// single-byte reads); DMA frames at /16 up to 38.4 kS/s (plain /8: 61 /
+    /// 100 sign errors in 1.15 M / 2.36 M samples, device 4b98128), and at
+    /// 76.8 kS/s the hybrid frame at /8 + CKPH (`hybrid`: the CPU sends the
+    /// command byte and switches CKPH, DMA reads the data; a /16 frame does
+    /// not fit the 13 us period). Returns the divider; the CKPH choice is
+    /// applied too.
+    pub fn pick_div(dma: bool, hz: u32) -> u8 {
+        let (div, cpha) = choose_div(dma, hz);
         use_div(div, cpha);
         div
     }
 
     /// The divider / CKPH choice of `pick_div`, without applying it (the
     /// logger's session plan caps the rung with it before any bus access).
-    pub fn choose_div(dma: bool) -> (u8, bool) {
+    /// DMA frames with /8 + CKPH (automatic above 38.4 kS/s, or forced with
+    /// DBG:AD2:DIV 8,1 at any rate) are the hybrid frames.
+    pub fn choose_div(dma: bool, hz: u32) -> (u8, bool) {
         let req = DIV_REQ.load(Relaxed) as u8;
         match (req, dma) {
             (0, false) => (8, true),
+            (0, true) if hz > 38_400 => (8, true),
             (0, true) => (DIV, false),
             (d, false) => (d, CPHA_REQ.load(Relaxed)),
-            (d, true) => (d, false),
+            (d, true) => (d, d == 8 && CPHA_REQ.load(Relaxed)),
         }
+    }
+
+    /// The running / last stream reads with hybrid frames (DMA frames at /8
+    /// with the CKPH = 1 data phase).
+    pub fn hybrid(dma: bool) -> bool {
+        dma && div_used() == 8 && cpha_used()
     }
 
     /// Main loop, before the chip set-up of a stream: switch the read bus to
@@ -323,7 +335,9 @@ pub mod stream {
     /// CPU frame per sample the frame (~13.5 us at /16) plus a probe frame
     /// must fit the period with the lock's margins (38.4 kS/s at /16 ran the
     /// CPU at 80 % and lost the lock on the device); with DMA frames (5
-    /// bytes, 12.8 us at /16) the CPU only starts them.
+    /// bytes, 12.8 us at /16) the CPU only starts them; at /8 (the hybrid
+    /// frame with CKPH, ~7.3 us from the entry, or a forced plain /8 DMA
+    /// frame, 7.2 us) 76.8 kS/s, the chip's fastest AD2 rate.
     pub const fn max_rate_hz(div: u8, dma: bool) -> u32 {
         match (div, dma) {
             (8, false) | (16, true) => 38_400,
@@ -359,6 +373,15 @@ pub mod stream {
     #[inline(always)]
     pub fn dma_finish() -> bool {
         spi::dma_finish()
+    }
+    /// The hybrid data frame (76.8 kS/s): command `cmd` by the CPU (mode 0),
+    /// the read-period pulse, CKPH = 1, then `n` bytes by DMA into `rx`
+    /// (MOSI 0xFF from `tx`). False: the command byte timed out (CS is up
+    /// again, nothing running). The next entry ends it (`dma_finish`, which
+    /// also puts CKPH back to 0 for the mode-0 probe frames).
+    #[inline(always)]
+    pub fn hybrid_kick(cmd: u8, tx: *const u8, rx: *mut u8, n: u32) -> bool {
+        spi::hybrid_kick(cmd, tx, rx, n)
     }
 
     fn barrier() {
@@ -771,17 +794,58 @@ mod spi {
     pub(super) fn dma_kick(tx: *const u8, rx: *mut u8, n: u32) {
         set(GPIOD, CS, false);
         unsafe {
-            drain_rx();
-            w32(DMA_INTC0, 0x3D);
-            w32(DMA_INTC1, 0x3D << 22);
-            w32(dch(RXC, 0x04), n);
-            w32(dch(RXC, 0x0C), rx as u32);
-            w32(dch(TXC, 0x04), n);
-            w32(dch(TXC, 0x0C), tx as u32);
+            dma_arm(tx, rx, n);
             spin(CS_SETUP);
             w32(dch(RXC, 0), DMA_RX_CTL);
             w32(dch(TXC, 0), DMA_TX_CTL);
         }
+    }
+
+    /// Both channels set up for `n` bytes (not enabled), RX emptied.
+    #[inline(always)]
+    unsafe fn dma_arm(tx: *const u8, rx: *mut u8, n: u32) {
+        drain_rx();
+        w32(DMA_INTC0, 0x3D);
+        w32(DMA_INTC1, 0x3D << 22);
+        w32(dch(RXC, 0x04), n);
+        w32(dch(RXC, 0x0C), rx as u32);
+        w32(dch(TXC, 0x04), n);
+        w32(dch(TXC, 0x0C), tx as u32);
+    }
+
+    /// The hybrid frame (`stream::hybrid_kick`): the CPU part of `read` (CS,
+    /// the command byte in mode 0, the read-period pulse, CKPH = 1), then the
+    /// data bytes by DMA (the channels armed before CS goes low).
+    /// CPU time ~2.5 us at /8 (the command byte's 1.28 us is waited for:
+    /// the CKPH switch must come after it and before the first data clock).
+    #[inline(always)]
+    pub(super) fn hybrid_kick(cmd: u8, tx: *const u8, rx: *mut u8, n: u32) -> bool {
+        unsafe {
+            dma_arm(tx, rx, n);
+            set(GPIOD, CS, false);
+            spin(CS_SETUP);
+            if !wait(STAT_TBE, STAT_TBE) {
+                return end(false);
+            }
+            w16(SPI_DATA, cmd as u16);
+            if !wait(STAT_RBNE, STAT_RBNE) {
+                return end(false);
+            }
+            let _ = r32(SPI_DATA);
+            if !idle() {
+                return end(false);
+            }
+            modify32(GPIOC + MODER, 3 << (2 * SCK), 1 << (2 * SCK));
+            set(GPIOC, SCK, true);
+            spin(PULSE_HI);
+            set(GPIOC, SCK, false);
+            spin(PULSE_LO);
+            modify32(GPIOC + MODER, 3 << (2 * SCK), 2 << (2 * SCK));
+            cpha(true);
+            w32(dch(RXC, 0), DMA_RX_CTL);
+            w32(dch(TXC, 0), DMA_TX_CTL);
+        }
+        true
     }
 
     /// End the running DMA frame: wait (bounded, ~100 us) until every byte
@@ -809,6 +873,9 @@ mod spi {
             }
             let _ = idle();
             drain_rx();
+            if r32(SPI_CTL0) & 1 != 0 {
+                cpha(false); // a hybrid frame: the probe frames are mode 0
+            }
         }
         spin(CS_HOLD);
         set(GPIOD, CS, true);
@@ -1047,9 +1114,10 @@ pub const fn ad2_rate_mhz(r26: u8) -> u32 {
 
 /// The data logger's AD2 rate ladder: R26 low bits for a requested rate in
 /// S/s. Prefers the /2 clock (more modulator samples per result) and the
-/// largest OSR that gives the rate: 1200 .. 38400 S/s (19200 and 38400 for
-/// the phase-locked stream ISR, feasibility 10; the stock rows' 76.8 kS/s is
-/// beyond a CPU read per sample), the same rungs with
+/// largest OSR that gives the rate: 1200 .. 76800 S/s (19200 .. 76800 for
+/// the phase-locked stream ISR, feasibility 11; 76.8 kS/s = OSR 32 at /2,
+/// the stock AC rows' own rate, only with the hybrid DMA frames, 11.12; the
+/// stream's read divider caps the rung, `stream::max_rate_hz`), the same rungs with
 /// `chop` (ENCHOPAD2, offset cancelled, the logger default) and without
 /// (ENCHOPAD2 does not slow AD2 down, see above; /4, OSR 1024 = 1200 S/s is
 /// the slowest the chip has). A request between two rungs takes the nearest
@@ -1059,7 +1127,8 @@ pub const fn ad2_rate_mhz(r26: u8) -> u32 {
 /// what the bus in use misses.
 pub const fn ad2_r26_for(req_hz: u32, chop: bool) -> u8 {
     // (rate S/s, R26 low bits without ENCHOPAD2)
-    const T: [(u32, u8); 6] = [(1200, R26_CLK4 | 5), (2400, 5), (4800, 4), (9600, 3), (19200, 2), (38400, 1)];
+    const T: [(u32, u8); 7] =
+        [(1200, R26_CLK4 | 5), (2400, 5), (4800, 4), (9600, 3), (19200, 2), (38400, 1), (76800, 0)];
     let c = if chop { R26_CHOP } else { 0 };
     let t = &T;
     let mut i = 0;
@@ -1122,7 +1191,7 @@ mod tests {
         // The stock AC rows: /2, OSR 32, unchopped: 76.8 kS/s.
         assert_eq!(ad2_rate_mhz(0x80), 76_800_000);
         assert_eq!(ad2_period_ns(0x80), 13_021);
-        for hz in [1200u32, 2400, 4800, 9600, 19200, 38400] {
+        for hz in [1200u32, 2400, 4800, 9600, 19200, 38400, 76800] {
             let r = ad2_r26_for(hz, true);
             assert_eq!(ad2_rate_mhz(r), hz * 1000, "chop {hz}");
             assert!(r & R26_CHOP != 0);
@@ -1141,6 +1210,9 @@ mod tests {
         assert_eq!(ad2_rate_mhz(ad2_r26_for(600, true)), 1_200_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(600, false)), 1_200_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(50_000, true)), 38_400_000);
+        assert_eq!(ad2_rate_mhz(ad2_r26_for(60_000, true)), 76_800_000);
+        assert_eq!(ad2_rate_mhz(ad2_r26_for(1_000_000, false)), 76_800_000);
+        assert_eq!(ad2_r26_for(76_800, false), 0); // the stock AC rows' AD2 setting (0x80 with ENAD2)
         assert_eq!(ad2_rate_mhz(ad2_r26_for(12_000, true)), 9_600_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(3000, true)), 2_400_000);
         assert_eq!(ad2_rate_mhz(ad2_r26_for(3500, true)), 4_800_000);

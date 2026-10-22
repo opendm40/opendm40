@@ -13,6 +13,10 @@ path is AC-coupled in AC V like the meter). Checks:
   * per timebase 5 ms .. 100 ms/div (4 rate bands: 9600 / 4800 / 2400 S/s):
     SCOP:MEAS:FREQ? 50 Hz, VRMS? 1.0 V, VPP? 2.83 V (+-3 %), the rate
     restarts on a band change;
+  * 2 ms/div (38400 S/s) and 1 ms/div (76800 S/s, the hybrid frames): the
+    stream's rate / divider, locked, no late / timeout / overrun / slip /
+    bad sample and no ring overflow over 4 s, the trace updates, 2 ms/div
+    1 V rms / 2.83 Vpp over its one period;
   * trigger: NORM at +0.5 V rising: WAV:DATA? frames cross the level at the
     trigger column (200) rising, the same on two frames; falling too;
   * roll 500 ms/div (WAV:DATA? fills from the right), 5 s/div;
@@ -62,7 +66,7 @@ def check(ok, what):
 
 
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', A.mips, '--app', A.app,
-       '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', 'wavetest',
+       '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', 'wavetest-%d' % A.port,
        '--dmm', A.dmm]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
 try:
@@ -187,6 +191,32 @@ try:
               '%s/div: 50 Hz, 1 V rms, 2.83 Vpp' % name)
         if tb in (0.005, 0.05):
             shot('w03-wave-%s' % name)
+
+    print('fast bands: 2 ms/div = 38400 S/s (DMA /16), 1 ms/div = 76800 S/s (hybrid frames, feasibility 11.12)')
+    for tb, name, rate in [(0.002, '2ms', 38400), (0.001, '1ms', 76800)]:
+        q('TIM:SCAL %g' % tb)
+        wait_ms(2500)
+        i0 = ints(q('DBG:ISR?'))
+        wait_ms(4000)
+        i1 = ints(q('DBG:ISR?'))
+        fr, rms, vpp = meas()
+        w1 = wave()
+        wait_ms(300)
+        w2 = wave()
+        print('  %s/div: FREQ %.3f Hz, VRMS %.4f V, VPP %.4f V; DBG:ISR? %s' % (name, fr, rms, vpp, i1))
+        check(abs(f('TIM:SCAL?') - tb) < tb * 0.01, 'TIM:SCAL? %s' % name)
+        check(i1[1] == 1 and i1[14] == 1 and abs(i1[12] / 1000 - rate) < 5 and i1[19] == (1008 if rate > 38400 else 16) and i1[22] == 1,
+              '%s/div: the stream at %d S/s, locked, div %d (DMA %d)' % (name, rate, i1[19], i1[22]))
+        check(i1[4] == i0[4] and i1[8] == i0[8] and i1[9] == i0[9] and i1[16] == i0[16] and i1[7] == i0[7],
+              '%s/div: no late entry, frame timeout, overrun, slip or bad sample in 4 s' % name)
+        check(i1[6] == i0[6], '%s/div: the view drained the ring in time (overwritten %d -> %d)' % (name, i0[6], i1[6]))
+        check(w1 != w2, '%s/div: the trace updates' % name)
+        if tb == 0.002:
+            # 20 ms on screen = one period of the 50 Hz sine.
+            check(near(rms, 1.0, 0.03) and near(vpp, 2.828, 0.04), '%s/div: 1 V rms, 2.83 Vpp over one period' % name)
+        else:
+            check(0.5 < vpp < 2.95, '%s/div: half a period on screen, VPP %.3f V <= 2.83' % (name, vpp))
+        shot('w03-wave-%s' % name)
 
     print('trigger')
     q('TIM:SCAL 0.01')

@@ -1152,6 +1152,7 @@ us_r6 13.9, against 8.0 / 21.6 at /16).
 | CPU | /16 | 19200 S/s (38400 at /16 ran the CPU at 80 % and lost the lock on the device) |
 | CPU | /8 + CKPH | 38400 S/s |
 | DMA | /16 | 38400 S/s |
+| DMA | /8 + CKPH (hybrid, 11.12; automatic above 38400) | 76800 S/s |
 
 The CPU frames pipeline the data bytes (`spi::read_fast`). The DMM itself
 still reads at /16 mode 0; moving it to /8 + CKPH is a separate step (TODO).
@@ -1422,7 +1423,7 @@ frames (`set_dma_req` default 1) is one line, and the wave view would gain
 the most from it: done in a239aa6 (decision 2026-10-22 #7), device check
 11.11.
 
-**76.8 kS/s is not done.** It needs the DMA data phase at /8 + CKPH: the
+**76.8 kS/s** (done since, 11.12, as described here) needs the DMA data phase at /8 + CKPH: the
 CPU sends the command byte and switches CKPH, then DMA takes the 3 data
 bytes. It also needs probe frames that fit the 13 us period.
 
@@ -1506,6 +1507,127 @@ default stays flipped (a239aa6), and the BT run is a TODO.
 - The static worst path is 21.8 KB, and the emulator walk gave 21.4 KB.
 - The screenshot holds the FFT spectrum (read back with MMEM:DATA?), and
   the spectrum keeps updating after the shot.
+
+### 11.12 76.8 kS/s: hybrid frames (2026-10-22)
+
+The chip's top AD2 rate (OSR 32 at /2, R26 low bits 0: the stock AC rows'
+own setting) is now a rung of the ladder (`ad2_r26_for`), with DMA frames
+only. Decision 2026-10-22 #9 has the choices; this section the design and
+the emulator results. Everything here is emulator plumbing until the device
+check in the TODO item.
+
+**The frame** (`hy3131 spi::hybrid_kick`, logger.rs `isr`, `Dma::hyb`):
+- /16 frames (13.6 us) do not fit the 13.02 us period; /8 mode 0 data is not
+  clean (11.3); CKPH cannot change inside a DMA frame. So the CPU does the
+  part around the switch, DMA the data: the channels are armed, CS low, the
+  command byte (R03, read) by the CPU in mode 0 (waited for: 1.28 us), the
+  read-period pulse on the PC10 GPIO, CKPH = 1, then RX / TX enabled for 3
+  bytes (MOSI 0xFF). No shift framing: R03..R05 arrive as they are (`s24`).
+- `dma_finish` (the next entry) puts CKPH back to 0 after the idle wait.
+- The probe frames (B: clear, C: read back) stay 2-byte DMA frames in the
+  shift framing, at /8 **mode 0**: a marginal DO bit only blurs a probe
+  (AD2F read as 0), never a sample. Emulator with MisoErrRate 0.05 (50x the
+  default) at +100 ppm: locked, lost 0.
+- Entries B and C finish the last data frame, start their probe frame and
+  only then store the sample (ring push + wave trigger); A does the same
+  with its own data frame. RXB has two halves (the next frame starts
+  before the last one is decoded), RXI holds the probe replies.
+- Probes every 16th period at this rate (np 16, 8 for /16 frames).
+- `Producer::push` no longer divides 64-bit per sample (only for a gap of
+  more than 1.25 periods): `__aeabi_uldivmod` was ~0.5 us on the device.
+
+**Geometry** (`Pll::hybrid`, logger.rs HYB_*; counts of 20 ns): A's entry to
+the data's last bit `frame` = 370 (device estimate 7.3 us: latency 0.25,
+finishing the last frame ~1.0, CS 0.2, command 1.3, pulse / CKPH / DMA start
+~0.6, 3 x 1.28); a probe entry to the chip's INTF latch `delta` = 160 (3.2
+us; at least 82 = CS setup + command + one clock); C right after A's frame
+(`c_off` = frame). The window for A after an edge runs from the probe
+frame's tail (~1.1 us after the edge) to `P - c_off - delta` (C's latch
+before the next edge); beta = (P + c_off - delta) / 2 = 430 (8.6 us)
+centres A in it: A ~1.2 us after an edge on the device (~2.5 us in the
+emulator, whose ISR is faster: the same window). late_max = beta + 82 -
+frame - 25 = 117 (2.3 us: a later A skips its read, `late`); a C later than
+beta - c_off - 25 = 35 counts after its slot drops its probe (`c_late`; the
+/16 sessions keep no check, as before). Margins on the device estimate:
+C's latch ~1.2 us before the next edge, A's command ~1.5 us after B's tail.
+Host model `ad2pll::tests::hybrid_frames_at_76k8`: 200 000 periods at -100
+/ 0 / +100 ppm with device-like, emulator-like and slower (A 7.6 us, probe
+3.6 us) timings, 0.2..1 us jitter: no frame across an edge, no conversion
+skipped or doubled, no probe read back after the following edge; 2 us
+latency spikes every 500 entries are absorbed (the A still reads); a 9.6 us
+frame is caught by the model.
+
+**Emulator honesty** (this change, emu/peripherals/GD32_SPI.cs, HY3131.cs):
+before, SPI bytes were instantaneous, the chip latched at CS low, and the
+virtual time stood still inside a CPU quantum (no `ICPU.SyncTime`), so no
+frame could ever be "too long". Now: bytes take their SCK time with a TX
+buffer and DMA in time; a frame from R03 updates the chip per byte and
+counts **TornAd2** when it crosses a conversion edge (ad2streamtest checks
+0); mode 0 at /8 samples a changed bit at its old level (MisoErrRate,
+default 1e-3), CKPH 1 samples a full period late and garbles a command
+byte; the timer interrupt is scheduled to the ns; DWT / TIMER / the flash
+read the synced time. The old firmware passes every stream / wave / inrush
+/ disk test under it. The ISR's CPU share is still ~0.57x the device's
+(no APB / AHB wait states): DMA /16 4800 1.1 % vs 1.9 %, 38400 9.8 % vs
+17.5 %.
+
+**Emulator results** (200 MIPS, AC V 0.5 V 50 Hz, LOG:DATA? drained):
+
+| session | chip ppm | captured | lost / late / slips / overruns / timeouts / bad / torn | ISR CPU (emu) | max_isr / max_lat |
+|---|---|---|---|---|---|
+| 76800 DRAW 1, 15 s | -100 | 78 312 | 0 | 29.5 % | 3.8 / 0.1 us |
+| 76800 DRAW 1, 15 s + 10 s, MisoErrRate 0.05 | +100 | 86 008 + 62 158 | 0 | 29.6 % | 3.8 / 0.1 us |
+| 76800 DRAW 2 (full DMM repaint every 100 ms), 8 s | -100 / +100 | 42 662 / 43 552 | lost 0; ring **overwritten 7.8 / 9.3 %** | 29.5 % | |
+| 4800 DRAW 2 .. 38400 DMA, 1200, CPU 19200 / 38400 | -100 / +100 | | 0 | as before | |
+| Wave view 1 ms/div (76800), 4 s | 0 | 500 313 | 0, ring overwritten 0 | 30.2 % | 3.9 us |
+
+The locked rate is the chip's within 0.1 ppm. DRAW 2 at 76.8 kS/s: the
+repaint (~22 ms of main loop at 200 MIPS, more with the ISR's share) is
+longer than the ring (2048 samples = 26.7 ms at this rate); the stream
+loses nothing, the host sees the drops as stamp gaps (`overwritten`).
+SRAM has 10.9 KB free on an 8 KB floor: the ring cannot double. The
+logger panel (DRAW 1), the Wave view and the disk logger keep up.
+
+**CPU on the device (estimate)**: the emulator's 3.84 us per period splits
+into ~1.45 us of real-time waits (the command byte, the pulse; the same on
+the device) and ~2.4 us of code and register accesses, which cost the
+device ~1.76x (the DMA /16 ratio above): ~5.6 us = **~43 % of the CPU at
+76.8 kS/s** (bottom-up from 11.11's ~3.4 us DMA A entry + 1.45 + 0.3 for
+the pulse / CKPH - 0.3 for the division + the probes' 0.4: 41 %). Range
+40..46 %; DBG:ISR? cpu_permille is the measurement. For comparison: CPU
+frames at 38.4 kS/s ran 51 % with 0 lost (11.10).
+
+**Disk** (fastlogtest, the disk's SPI timed too: ~0.2 ms of polled CPU per
+page):
+
+| flash | input | rung | B/sample | B/s | pages/s | FIFO high water | lost |
+|---|---|---|---|---|---|---|---|
+| typ (tPP 0.4 ms) | 0.5 V sine | 76800 | 1.19 | 91 KB/s | 356 | 308 B | 0 |
+| typ | + 900 codes noise | 76800 | 1.75 | 134 KB/s | 525 | 500 B | 0 |
+| typ | + 75 000 codes noise (~full-scale white) | 76800 | 2.56 | 196 KB/s | 767 | 460 B | 0 |
+| max (tPP 3 ms) | 0.5 V sine | 76800 (no gate) | 1.51 | | 453 | 8170 B | **28 %** |
+| max | + 900 codes noise | 76800 (no gate) | 2.38 | | 715 | 8174 B | **54 %** |
+| max | either | 38400 | 1.26 / 1.69 | 48 / 65 KB/s | 189 / 254 | 471 / 626 B | 0 |
+
+So a typical chip keeps up with room to spare and a worst-case one cannot:
+76.8 kS/s goes to the disk only after a **page-program probe** (decision #9):
+a disk session above 38.4 kS/s programs 4 pages of zeros in its last
+cluster at the end of Prep, times each to BUSY clear, erases the cluster
+again; mean <= 800 us and max <= 1.5 ms -> 76800, else the session runs at
+38400 (LOG:SRATe? / LOG:PREamble? say so; LOG:DISK? fields 9 / 10 = the
+probe's mean / max us). Emulator: see the TODO item for the gated runs.
+
+**Wave view**: 1 ms/div = 76800, 2 ms/div = 38400 (768 samples on the 10
+divisions), 5 ms/div and slower as before (`WAVE_TB_MIN` 15). With CPU
+frames (DBG:AD2:DMA 0) the rung is capped at 38400 and the view closes
+("Wave: rate needs DMA frames") rather than draw a wrong time base.
+
+**Not done / open**: the chopper (ENCHOPAD2, the logger's default) at OSR
+32 has never run on the chip (the stock rows are unchopped); the host
+drain over USB needs 921 KB/s at 12 B per record, above what the Python
+drain reached on the device (~37 kS/s, 11.10): LOG:DATA? at 76.8 kS/s will
+show `overwritten` unless the host is faster; the disk or the Wave view are
+the full-rate consumers.
 
 ## 12. Inrush current on the stream (2026-10-22)
 
