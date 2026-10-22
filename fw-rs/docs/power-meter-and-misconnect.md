@@ -1330,9 +1330,12 @@ resets it to DC, so set the coupling after `CONF:POW` (powtest does).
 PF -0.092, S 0.02 mVA, Q 0.02 mvar).** The stock AC V / AC A only clamp a
 negative RMS (after the offset calibration) to 0; fw-rs's existing "no AC
 here" level is the AUTO coupling's "to DC" floor (dmm.rs AUTO_FLOOR_V / _A
-[1], acdc doc 9: V 0.5 %, A 2 % of the range; the uA path's RMS floor is
-~1.5 %). `pw::FLOOR_V` / `FLOOR_I` reuse those, so the power meter calls a
-part "no AC" exactly where AUTO coupling switches to DC. Applied in
+[1], acdc doc 9: V 0.5 %, A 2 % of the range; A's 2 % is sized for the uA
+path's ~1.5 % RMS residue). `pw::FLOOR_V` reuses V's 0.5 %. `FLOOR_I` is
+0.5 % too, not 2 %: with 2 % the first test run blanked a real 0.1 A AC
+on the manual 6 A range (powtest `manual`, 1.7 % of the range); the
+10 mohm path's pure-DC residue is 0.14 % in the emulator, and on the uA
+range a residue above 0.5 % still shows, as in the stock AC A. Applied in
 `pw_vals` (method B only; the raw parts and the autorange are untouched):
 
 | coupling | V_ac or I_ac below its floor |
@@ -1350,12 +1353,13 @@ hypot(V_n I, V I_n) (the owner's 1.234 V / 1 A with the emulator residues
 V_n 1.5 mV, I_n 14 mA: 0.0173 var, the observed 0.017). The coordinator's
 sqrt(2 S (V_n I + V I_n)) is the first-order upper bound of the same; with
 the floors as V_n / I_n either form zeroes real Q up to PF ~0.99 (230 V /
-1 A on 600 V / 6 A: 28 var). So V_n / I_n are a separate noise estimate,
-`pw::NOISE_V` 0.1 % / `NOISE_I` 0.5 % of the range (~4 x the emulator's
-pure-DC residues 0.025 % / 0.14 %; the device's are a check item), and Q
-below hypot(V_n I, V I_n) reads 0 in AC and AC+DC. At 230 V / 1 A on
-600 V / 6 A that is 6.9 var: Q reads 0 above PF ~0.9995 there, at full
-scale (600 V x 6 A, 18 var) above PF ~0.99999.
+1 A on 600 V / 6 A with the 2 % I floor: 28 var). So V_n / I_n are a
+separate noise estimate, `pw::NOISE_V` 0.1 % / `NOISE_I` 0.25 % of the
+range (a few x the emulator's pure-DC residues 0.025 % / 0.14 %; the
+device's are a check item), and Q below hypot(V_n I, V I_n) reads 0 in AC
+and AC+DC. At 230 V / 1 A on 600 V / 6 A that is 3.5 var: Q reads 0 above
+PF ~0.9999 there; at full scale (600 V x 6 A, 9.7 var) above PF
+~0.999996.
 
 **Coupling hints** (doc 4.4 style: grey badge DC? / AC?, silent, a toast
 once, assert after 2 s, clear 1 s after, the hints bit of
@@ -1393,8 +1397,17 @@ case, both hint toasts; 0 violations; renders p01 (marks on), p24 (off),
 p25 (AC floor + DC? badge), p20 (the help line). powtest (every old
 scenario now sets `POW:COUP ACDC` after `CONF:POW`, burden / dcburden
 `POW:BURD:STAT ON`, dcad1 F = 9.91E37) plus `entry`, `ac-floor`,
-`acdc-floor` (results below); senttest ovl-pow / -auto-ma / -auto-ua set
-`POW:COUP ACDC`.
+`acdc-floor`; senttest ovl-pow / -auto-ma / -auto-ua set `POW:COUP
+ACDC`. All 32 powtest scenarios and the 4 senttest ovl-pow* pass (with
+3.17 in the image; ereset long-presses the parts layout's lower row).
+New ones (FETC:POW:ALL?): `entry` CONF:POW -> DC, BURD:STAT 0, 1.234 V /
+1 A: P 1.2345 W, V 1.234, F 9.91E37; 12 V + 2 V AC in DC: SYST:ALER? AC,
+gone 1 s after the ripple; `ac-floor` 1.234 V / 1 A in AC: V 0, I 0, P 0,
+PF / S / Q / F 9.91E37; mains PF 0.95: Q 69.3 var (model PF 0.953);
+`acdc-floor` the same DC in AC+DC: Q 0, PF 1, SYST:ALER? DC; PF 0.98: Q
+43.4 var, NONE; PF 1: Q 0; "At load" on: V 1.224, P 1.2240 W. `manual`
+(0.1 A AC on the manual 6 A range) failed with the 2 % I floor (I 0):
+hence 0.5 %.
 
 #### Device check list (round 5)
 
@@ -1412,7 +1425,7 @@ scenario now sets `POW:COUP ACDC` after `CONF:POW`, burden / dcburden
 4. AC coupling, pure DC source + load: V 0, I 0, P 0, PF / S / Q / f
    "--" with no units; `FETC:POW:ALL?` 9.91E37 in those fields. Note the
    raw residues first (AC+DC: `FETC:POW:ALL?` V vs Vdc, I vs Idc) against
-   the floors 0.5 % / 2 % of the ranges and NOISE 0.1 % / 0.5 %.
+   the floors 0.5 % / 0.5 % of the ranges and NOISE 0.1 % / 0.25 %.
 5. AC+DC, the same DC: Q 0, PF 1.000; after ~2 s the grey "DC?" badge and
    the toast "No AC: DC is more precise"; `SYST:ALER?` DC. Mains through a
    resistive load: Q small but not forced to 0 above the noise; with a
@@ -1420,6 +1433,77 @@ scenario now sets `POW:COUP ACDC` after `CONF:POW`, burden / dcburden
 6. DC with a rippled V (a supply with a transformer-like ripple, or the
    generator AC-coupled onto a DC): "AC?" badge, toast "AC present: use
    AC+DC", `SYST:ALER?` AC; Settings 3/3 hints off: none.
+
+### 3.17 AC+DC: the DC and AC parts on the page (fw-rs, 2026-10-22; owner's variant V2)
+
+The owner picked V2 of the mockups (scratchpad pwmock: V1 a table in the
+chart's place, V2 sub-lines, V3 a tap cycle total / DC / AC): in **AC+DC
+coupling only** small F14 sub-lines show the parts, "DC x V AC y V" under
+the top V, "DC x A AC y A" under I (y 61, right-aligned to the V unit's
+end 201 / to 423), "DC x W + AC y W" under the big P (y 155, to 394,
+only while the main readout shows P; with Wh / VAh there it is empty).
+"DC" / "AC" / "+" dim, the values in the status colour, each in the
+readout format of its range (`reading_vals`). DC and AC coupling keep the
+3.14 layout.
+
+**Values** (`PowerVals::vp` / `ip` / `pp`, [DC, AC], `pw_vals`, method B):
+V_dc / I_dc the LPFs, V_ac / I_ac the RMS statistics, P_dc = V_dc I_dc,
+P_ac the X*Y RMS statistic; none derived from the totals by hypot. The AC
+floors of 3.16 apply (a part below its floor reads 0; P_ac 0 unless both
+V_ac and I_ac are above). "At load" applies per part exactly as to the
+totals (v_L = v - R i): V_dc - R I_dc, sqrt(V_ac^2 - 2 R P_ac + R^2
+I_ac^2), P_dc - R I_dc^2, P_ac - R I_ac^2; so P = P_dc + P_ac and V^2 =
+V_dc^2 + V_ac^2 hold for what is shown, with or without "@load". I is
+never compensated. SCPI is unchanged: `FETC:POW:ALL?` Vdc / Idc stay the
+measured (uncompensated) DC parts.
+
+**Geometry** (`ui::pw_parts`, set with the static draw of the DMM page
+when the power meter is in AC+DC with method B; `App::pw_tick` redraws
+the page when that changes; false on every other page and function, so
+nothing else moves: ui-render's 135 non-power renders are pixel-identical
+to the previous commit's):
+
+| item | stock / DC / AC | AC+DC parts |
+|---|---|---|
+| main F78 cells, unit, coupling glyph, limit badge, "@load" mark | y 68 / 114 / 76 / 72 / 66 | +7 (`PARTS_DY`) |
+| lower row (E, PF, S, Q, f) | 153..171 | 170..188 (`PARTS_ROW_DY` 17) |
+| chart frame | 176, 97 rows | 192, 81 rows; axis labels 192 / 227 / 262, timebase chip 208, rate chip 243 |
+| side column | Vb 176, VAh 188, energy box 205, AVG 245, ranges 259 | Vb 192, no VAh (the main value tap still shows VAh), box 208, AVG 249, ranges 263 |
+| taps | value 64..150, row 153..171, box 205..242 | value 64..167, row 170..188, box 208..245, the chart column from 192 |
+
+The aux row's value / unit boxes (y 36..65) overlap the sub-lines' slots
+(61..74): a repaint of an aux box invalidates its sub-line
+(`PwCache::sub_invalidate`). The HV lightning's box (0, 80, 40, 64, V
+functions) can overlap the moved "@load" mark: its toggle invalidates the
+mark.
+
+Code: `ui::set_pw_parts` / `pw_parts` / `main_dy` / `chart_geom` /
+`chart_rows`, `ui::pw::sublines` / `side_geom` / `row_hit` (per reading:
+region B), `App::pw_parts_want`. Region B 23 852 -> 22 640 bytes free
+(with 3.16's I floor change), region C 9 936 -> 9 768, stack headroom
+21 396 -> 21 252, SRAM 10 848 (unchanged).
+
+**Tests.** ui-render: cases parts-mixed / parts-dc / parts-mw plus every
+AC+DC case (worst: the 1 kV / 10 A widest sub-lines) in the page x hold x
+alert matrix and the limit-badge matrix with the parts regions, every
+update pair within one layout (the app redraws across), 0 violations;
+renders p26 (mixed, "@load"), p27 (pure DC, DC? hint), p28 (mW ranges,
+negative parts, HI badge), p29 (Wh in the main readout: no P sub-line),
+p02 (1 kV / 10 A). touch-test: the power page's targets (energy box,
+lower row, rate chip, chart column, function row) in both layouts.
+
+#### Device check list (parts layout)
+
+1. W, tap to AC+DC: the page redraws, sub-lines under V, I and P; a DC
+   supply + load: "AC 0.0000 V", "AC 0.0000 A", "+ AC 0.000 W"; DC parts
+   = DC V / DC A of the same source.
+2. Mains through a resistive load: DC parts ~0 (the LPF zeros), AC parts =
+   the totals; a DC supply with ripple: both parts, P = DC + AC.
+3. Tap W to DC: the 3.14 layout back (VAh row in the side column, chart
+   from 176), no stale sub-line pixels. Tap the main value: Wh / VAh, the
+   P sub-line empties, V / I sub-lines stay.
+4. "At load" on in AC+DC: "@load" marks, the DC part of V drops by
+   R I_dc, P parts by R I^2 each.
 
 ---------------------------------------------------------------------------
 

@@ -116,22 +116,25 @@ const I_FLOOR: f32 = 50e-6;
 pub const RING_N: usize = 16;
 
 /// The AC floors (doc 3.16), fractions of the channel's range: an AC part
-/// (V_ac, I_ac) below its floor is noise, not a reading. The values are the
-/// AUTO coupling's "to DC" floors of the V / A functions (dmm.rs
-/// AUTO_FLOOR_V / _A [1]: V 0.5 %, A 2 %; acdc doc 9), so the power meter
-/// calls a part "no AC" exactly where AUTO coupling would switch to DC.
-/// AC coupling: a part below its floor reads 0 and PF / S / Q are "--"
-/// (NaN, SCPI 9.91E37); f also "--" when the channel the counter watches is
-/// below. AC+DC: the part is left out of the totals (Q 0 when either is).
+/// (V_ac, I_ac) below its floor is noise, not a reading. V: the AUTO
+/// coupling's "to DC" floor of the V functions (dmm.rs AUTO_FLOOR_V[1], 0.5
+/// %; acdc doc 9). I: 0.5 %, not AUTO's 2 % (AUTO_FLOOR_A[1], sized for the
+/// uA path's ~1.5 % RMS residue): 2 % blanked a real 0.1 A on the 6 A range
+/// (powtest manual); the 10 mohm path's pure-DC residue is ~0.14 % in the
+/// emulator; on the uA range a residue above 0.5 % still shows, as in the
+/// stock AC A. AC coupling: a part below its floor reads 0 and PF / S / Q
+/// are "--" (NaN, SCPI 9.91E37); f also "--" when the channel the counter
+/// watches is below. AC+DC: the part is left out of the totals (Q 0 when
+/// either is).
 pub const FLOOR_V: f32 = AUTO_FLOOR_V[1];
-pub const FLOOR_I: f32 = AUTO_FLOOR_A[1];
+pub const FLOOR_I: f32 = 0.005;
 /// RMS noise assumed on an AC part above its floor, fractions of the range
-/// (doc 3.16; the emulator's pure-DC residues are 0.025 % / 0.14 %, ~4 x
+/// (doc 3.16; the emulator's pure-DC residues are 0.025 % / 0.14 %, a few x
 /// margin, the device's to be confirmed): uncorrelated noise adds to S but
 /// not to P, so a resistive load shows Q = hypot(Vn I, V In) of pure noise
-/// (first order of S^2 - P^2). AC+DC Q below that reads 0.
+/// (first order of S^2 - P^2). Q below that reads 0.
 pub const NOISE_V: f32 = 0.001;
-pub const NOISE_I: f32 = 0.005;
+pub const NOISE_I: f32 = 0.0025;
 
 /// Coupling setting (`Pw::coup`, POW:COUP, persisted in 2 bits; doc 3.14),
 /// the stock V / A trio:
@@ -437,6 +440,16 @@ pub struct PowerVals {
     pub main: u8,
     /// Coupling hint (HINT_*, doc 3.16): fed to the sentinel per reading.
     pub hint: u8,
+    /// AC+DC parts (doc 3.17, the sub-lines): [DC, AC] of V, I, P as
+    /// measured (V_dc / I_dc the LPFs, V_ac / I_ac the RMS, P_dc = V_dc I_dc,
+    /// P_ac the X*Y RMS), the AC floors applied (a part below reads 0, P_ac 0
+    /// without both), "At load" applied to V and P as to the totals (v_L = v -
+    /// R i per part: V_dc - R I_dc, sqrt(V_ac^2 - 2 R P_ac + R^2 I_ac^2);
+    /// P - R I^2 per part), so the parts add up to the totals shown
+    /// (P = P_dc + P_ac, V^2 = V_dc^2 + V_ac^2). Zero outside AC+DC.
+    pub vp: [f32; 2],
+    pub ip: [f32; 2],
+    pub pp: [f32; 2],
 }
 
 /// The toast of an alert; in the power meter the DC? / AC? hints are the
@@ -487,6 +500,9 @@ impl PowerVals {
         sph: 0,
         main: MAIN_P,
         hint: 0,
+        vp: [0.0; 2],
+        ip: [0.0; 2],
+        pp: [0.0; 2],
     };
 }
 
@@ -1137,6 +1153,7 @@ impl Dmm {
         let (fv, fi) = (FLOOR_V * V_LIM[pw.vr.min(3) as usize], FLOOR_I * I_LIM[pw.ik.min(5) as usize]);
         let (v_ok, i_ok) = (pw.v_ac >= fv, pw.i_ac >= fi);
         let mut hint = 0;
+        let (mut vp, mut ip, mut pp) = ([0.0f32; 2], [0.0f32; 2], [0.0f32; 2]);
         if b && pw.coup == COUP_ACDC && !v_ok && !i_ok && (pw.v_dc.abs() >= fv || pw.i_dc.abs() >= fi) {
             hint = HINT_NO_AC;
         } else if pw.dc && pw.seen & 2 != 0 && pw.vac_dc >= fv {
@@ -1148,7 +1165,14 @@ impl Dmm {
         } else if b {
             let va = if v_ok { pw.v_ac } else { 0.0 };
             let ia = if i_ok { pw.i_ac } else { 0.0 };
-            totals(if v_ok && i_ok { pw.p_ac } else { 0.0 }, va, vd, ia, id, r)
+            let pa = if v_ok && i_ok { pw.p_ac } else { 0.0 };
+            if pw.coup == COUP_ACDC {
+                // The parts (doc 3.17), "At load" per part (r 0 = off).
+                vp = [vd - r * id, sqrt((va * va - 2.0 * r * pa + r * r * ia * ia).max(0.0))];
+                ip = [id, ia];
+                pp = [vd * id - r * id * id, pa - r * ia * ia];
+            }
+            totals(pa, va, vd, ia, id, r)
         } else {
             totals(pw.p_ac, pw.v_ac, vd, pw.i_ac, id, r)
         };
@@ -1210,6 +1234,9 @@ impl Dmm {
             sph: pw.sph,
             main: pw.main,
             hint,
+            vp,
+            ip,
+            pp,
         })
     }
 
