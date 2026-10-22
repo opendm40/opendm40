@@ -305,6 +305,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     // 0 usb+scpi, 1 tick, 2 touch, 3 scope, 4 bt, 5 dmm poll+draw.
     let mut sec = [0u32; 6];
     let mut sec_shown = [0u32; 6];
+    // Streamed USBTMC reply: last progress (usbtmc stream_pos) and its time.
+    let mut stream_seen = (usize::MAX, 0u64);
     let cyc = || unsafe { mmio::r32(0xE000_1004) };
 
     loop {
@@ -380,6 +382,17 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             while tmc.streaming() && cyc().wrapping_sub(t0) < budget {
                 dev.poll(&mut [&mut tmc, &mut msc]);
             }
+            // A host that stopped reading and sends nothing more would hold
+            // the scope (and this budget) for good: give the stream up after
+            // STREAM_STALL_MS without progress.
+            let p = tmc.stream_pos();
+            if p != stream_seen.0 {
+                stream_seen = (p, now);
+            } else if now >= stream_seen.1 + STREAM_STALL_MS {
+                tmc.cancel_stream();
+            }
+        } else {
+            stream_seen = (usize::MAX, now);
         }
         app.scope.host_read = tmc.streaming() && scope_wav::reads_record();
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
@@ -1733,6 +1746,10 @@ impl bt::ScpiPort for SentPort<'_> {
 /// baud: 11.5 kB/s = 960 twelve-byte records/s, ~870 with the query
 /// turnaround; docs/bt-scpi.md): every AD1 setting (<= 640/s), no AD2 rate.
 const BT_MAX_HZ: u32 = 800;
+
+/// A streamed USBTMC reply (WAV:DATA? of the scope record) that makes no
+/// progress this long is given up (the host stopped reading it).
+const STREAM_STALL_MS: u64 = 2000;
 
 /// The main loop's extra USB polling per pass while a host READ of the disk
 /// runs (cycles: 2 ms; 0.5 ms during a logger session).

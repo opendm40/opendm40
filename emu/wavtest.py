@@ -168,7 +168,7 @@ def connect():
     sys.exit('wavtest: no USB/IP device on port %d' % A.port)
 
 
-def bt_checks():
+def bt_checks(t):
     try:
         s = socket.create_connection(('127.0.0.1', A.bt_port), timeout=5)
     except OSError as e:
@@ -219,6 +219,27 @@ def bt_checks():
                 buf = b''
         s.settimeout(30)
         check(bool(idn) and idn.startswith(b'Alientek'), 'BT: *IDN? %r' % idn)
+
+        # A USB host that stops reading a streamed record and sends nothing
+        # more (its process died): the firmware drops the stream after 2 s
+        # without progress and the scope runs again (RUN over BT: no USBTMC
+        # traffic that would end the stream by itself).
+        t.w('WAV:POIN MAX')
+        t.w('WAV:FORM WORD')
+        t.w('DIG')
+        check(t.wait_stop(), 'stalled stream: DIG ends in STOP')
+        t.u.write('WAV:DATA?')
+        part, eom = t.u._read1(4096, 20)
+        check(not eom, 'stalled stream: first round only (%d bytes)' % len(part))
+        line('RUN', False)
+        held = line('TRIG:STAT?')
+        time.sleep(20)  # >= 2 s of device time even at 0.1x
+        line('RUN', False)
+        time.sleep(3)
+        st = line('TRIG:STAT?')
+        check(held == b'STOP' and st != b'STOP', 'stalled stream: RUN held while streaming (%s), runs after the timeout (%s)'
+              % (held.decode(), st.decode()))
+        line('STOP', False)
         line('*CLS', False)
         line('WAV:POIN MAX', False)
         line('WAV:FORM WORD', False)
@@ -269,6 +290,17 @@ try:
           'screen columns scaled: %.1f Hz, %.3f Vpp, mean %.3f V' % (f, vpp, mean))
     j = t.qraw('*OPC?;WAV:DATA?')
     check(j[:7] == b'1;#3400' and len(j) == 407, 'default WAV:DATA? still joins (*OPC?;WAV:DATA?: %d bytes)' % len(j))
+    t.w('WAV:FORM WORD')
+    pw = pre(t)
+    dw = block(t.qraw('WAV:DATA?'))
+    vw, cw = volts(pw, dw)
+    fw, vppw, _ = sine_fit(vw, pw['xinc'])
+    check(pw['fmt'] == 1 and pw['type'] == 0 and len(dw) == 800 and max(cw) <= 1023 and abs(fw - A.hz) < A.hz * 0.03
+          and abs(vppw - A.vpp) < A.vpp * 0.2, 'SCReen + WORD: 800-byte block, %.1f Hz, %.3f Vpp' % (fw, vppw))
+    j = t.qraw('*OPC?;WAV:DATA?')
+    e = t.err()
+    check(not j.startswith(b'1;#') and 'Query error' in e, 'SCReen + WORD is not joinable (%r..., %s)' % (j[:8], e))
+    t.w('WAV:FORM BYTE')
 
     # --- record while running: refused
     t.w('WAV:POIN MAX')
@@ -371,7 +403,7 @@ try:
     check(e.startswith('0,'), 'no error left (%s)' % e)
 
     t.w('STOP')
-    bt_checks()
+    bt_checks(t)
 finally:
     try:
         os.killpg(emu.pid, 15)

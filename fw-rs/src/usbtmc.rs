@@ -227,6 +227,24 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         self.ext.is_some() && (self.rsp_ready || self.tx_len != 0)
     }
 
+    /// Progress of a streamed response: bytes handed to the IN endpoint so
+    /// far (rises while the host reads; main.rs `STREAM_STALL_MS`).
+    pub fn stream_pos(&self) -> usize {
+        self.rsp_off + self.tx_off
+    }
+
+    /// Give a streamed response up (the host stopped reading it and sent
+    /// nothing since, e.g. its process died: Linux usbtmc sends no clear on
+    /// close): the transfer in flight ends after the packets already in the
+    /// FIFO, nothing more is read from the source, no further round starts.
+    pub fn cancel_stream(&mut self) {
+        if self.ext.is_some() {
+            self.rsp_ready = false;
+            self.stop_in();
+            self.ext = None;
+        }
+    }
+
     /// Response bytes `a..a + dst.len()` (the head from `rsp`, the rest of
     /// a streamed response from its source).
     fn payload(&self, a: usize, dst: &mut [u8]) {

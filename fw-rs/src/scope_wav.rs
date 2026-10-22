@@ -48,6 +48,7 @@ static mut SRC: Src = Src { rec: None, stride: 0, n: 0, word: false, screen: fal
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut SCREEN: [u16; scope::COLS] = [0; scope::COLS];
 
+#[inline(always)] // per USB packet (`fill`): never a call into region C
 fn src() -> &'static mut Src {
     // SAFETY: main loop only (SCPI dispatch and the USB polling it runs).
     unsafe { &mut *core::ptr::addr_of_mut!(SRC) }
@@ -180,12 +181,14 @@ pub fn preamble(app: &App, out: &mut Scpi) {
 
 /// The reply has to be a block of its own (not joined with other replies
 /// of a message): every WAV:DATA? except the 405-byte SCReen + BYTE one.
+#[inline(always)] // main.rs per SCPI command: no call into region C
 pub fn is_block(app: &App) -> bool {
     app.wav_points != 0 || app.wav_word
 }
 
 /// The reply in flight reads the scope buffer (`Scope::host_read` while it
 /// streams).
+#[inline(always)] // main.rs, every pass
 pub fn reads_record() -> bool {
     !src().screen
 }
@@ -194,7 +197,7 @@ pub fn reads_record() -> bool {
 /// does not fit the in-place buffer (USBTMC); refused over a transport
 /// that cannot stream (Bluetooth) beyond that.
 #[inline(never)] // .cold (link-native.x)
-pub fn data(app: &App, port: &mut dyn crate::bt::ScpiPort, scpi: &mut Scpi) {
+pub fn data(app: &mut App, port: &mut dyn crate::bt::ScpiPort, scpi: &mut Scpi) {
     let s = src();
     s.word = app.wav_word;
     if app.wav_points == 0 {
@@ -237,7 +240,10 @@ pub fn data(app: &App, port: &mut dyn crate::bt::ScpiPort, scpi: &mut Scpi) {
             fill(0, &mut b[hn..hn + len]);
             Some(hn + len)
         });
-    } else if !port.respond_stream(&h[..hn], len, fill) {
+    } else if port.respond_stream(&h[..hn], len, fill) {
+        // Held from now on (main.rs renews it per pass while it streams).
+        app.scope.host_read = !s.screen;
+    } else {
         scpi.set_err("Too much data");
         s.n = 0;
         port.respond(b"#10");
