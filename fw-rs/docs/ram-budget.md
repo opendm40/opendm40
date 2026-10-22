@@ -137,7 +137,10 @@ The owner's option 3. Design (screenshot.rs "idle-time preparation"):
   programs (write_step phase 1, no compare, no erase). Every other block is
   compared / erased as before. Any data block whose read back fails is
   written once more with a forced erase (an erase cut short by a power cut
-  that still reads blank, or a stale assumption), once per block.
+  that still reads blank, or a stale assumption), once per block. (A cluster the
+  preparation skipped because it stayed dirty after its erase is still
+  taken first fit by the shot within the "proven blank" count: that block
+  relies on this retry too. A failing-chip corner.)
 - Power-off / reset (`finish_disk_writes`): an erase in flight is waited
   for (`prep_finish`, <= 0.4 s).
 
