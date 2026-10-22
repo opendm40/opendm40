@@ -731,10 +731,17 @@ Firmware:
   - [ ] Device T9 / T10 with the A jack wired (never run), plus the 9dd1222 re-check list (AC V floor with
         alerts ON, DC V 1 <-> 10 V soak without A-JACK). Gate for everything below.
         (re-check list PASS on 5f14d38; T9 / T10, AC mV / TC soaks still open)
-  - [ ] "Leads in A?" reminder (closest firmware stand-in for InErr): on a change from a current function to
+  - [x] "Leads in A?" reminder (closest firmware stand-in for InErr): on a change from a current function to
         a non-current one, toast "Leads in the A jack? Move to V" + a beep, at the moment the UT197 would warn.
         Fires also when the lead was already moved: own option in Settings 3/3 "Jack alerts" (and in the
         SYST:ALER:ENAB mask); decide whether it repeats or needs a tap to dismiss.
+        Done (doc 4.9): any path A (DC / AC / AC+DC A, power meter) -> non-A; one 200 ms beep at once + one
+        toast "Leads in A jack? Move to V" (the TODO text leaves 1 px to the frame) after the new function's
+        first reading (<= 1 s). Decided: no repeat, no tap (the firmware cannot see whether the lead moved;
+        A-JACK takes over when a current flows); no alert state, so decision #5's HOLD alternation is
+        untouched. Fuse check exempt. Settings 3/3 row "A-lead reminder" ON / OFF (default ON, p[38] bit 15),
+        SYST:ALER:ENAB bit 3 (ON = 15), DBG:LEADs?. Host test leads_reminder, emu/hy3131/leadstest.py, ui-render.
+        (verify on device: doc 4.9 device check list)
   - [x] Fuse check (UT197's procedure, our doc §4.3 design): guided dialog in ohm mode (600 ohm, PE = 2),
         lead V/ohm -> A, ~48 ohm = OK, OL = FUSE OPEN, else "Check leads"; the 0.05 ohm (PE0) step left out
         (it tests the MOSFET, not the fuse). FUSE? hint: 60 s below 0.1 % of the range (AC 5 %). Doc §4.7.

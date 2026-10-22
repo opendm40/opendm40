@@ -1645,15 +1645,17 @@ impl Dmm {
     }
 
     /// Wrong-connection alerts enabled (sentinel::M_*; Settings, SCPI
-    /// SYST:ALER:ENAB). A change rewrites the row: a disabled sentinel
-    /// leaves the stock row untouched.
+    /// SYST:ALER:ENAB). A change of a sentinel bit rewrites the row: a
+    /// disabled sentinel leaves the stock row untouched (M_LEADS, the
+    /// "Leads in A?" reminder, is app.rs only: no rewrite).
     pub fn set_alert_mask(&mut self, clk: &mut Clock, mask: u8) {
         let mask = mask & sentinel::M_ALL;
         if mask == self.sent.mask {
             return;
         }
+        let rows = (mask ^ self.sent.mask) & sentinel::M_JACK != 0;
         self.sent.set_mask(mask);
-        if !self.suspended && self.mode != 255 {
+        if rows && !self.suspended && self.mode != 255 {
             self.write_config(clk);
             self.deadline = self.deadline.max(clk.now_ms() + 200);
         }
@@ -1661,6 +1663,16 @@ impl Dmm {
 
     pub fn alert_mask(&self) -> u8 {
         self.sent.mask
+    }
+
+    /// The function in force uses the A jack (DC / AC / AC+DC A, the power
+    /// meter); None while no mode is in force. The "Leads in A?" reminder
+    /// (sentinel::Leads, app.rs).
+    pub fn uses_a_jack(&self) -> Option<bool> {
+        if self.pw.on {
+            return Some(true);
+        }
+        sentinel::mode_uses_a(self.mode)
     }
 
     /// DBG:SENTinel:VARiant: a device-check variant of the sentinel rows

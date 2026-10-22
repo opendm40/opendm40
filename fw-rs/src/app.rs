@@ -58,6 +58,9 @@ const START: [View; 4] = [View::Dmm, View::Scope, View::Gen, View::Menu];
 const OFF_WARN_MS: u64 = 30_000;
 const OFF_WARN_STEP_MS: u64 = 10_000;
 const ALERT_VOL: u8 = 50;
+/// "Leads in A?" reminder: the toast waits for the new function's first
+/// reading at most this long (`leads_tick`).
+const LEADS_TOAST_WAIT_MS: u64 = 1000;
 const TIM14: u32 = 0x4000_2000;
 const BUZZER_ARR: u32 = 11200;
 /// RUN held this long in a DMM view toggles AutoHold (the short press keeps
@@ -74,9 +77,10 @@ const GEST_N: usize = 32;
 
 /// "Jack alerts" setting value (Settings 3/3) of an alert mask.
 fn alert_mask_name(b: &mut [u8; 16], m: u8) -> &str {
-    use crate::sentinel::{M_AJACK, M_ALL};
+    use crate::sentinel::{M_AJACK, M_JACK};
+    let m = m & M_JACK;
     match m {
-        M_ALL => "ON",
+        M_JACK => "ON",
         M_AJACK => "A-JACK only",
         0 => "OFF",
         _ => {
@@ -245,6 +249,10 @@ pub struct App {
     /// pattern has the buzzer on.
     alert_seq: u32,
     alert_beep_t0: Option<u64>,
+    /// "Leads in A?" reminder (sentinel::Leads, `leads_tick`).
+    leads: crate::sentinel::Leads,
+    /// The reminder's toast is due (by this time at the latest).
+    leads_toast_at: Option<u64>,
     alert_buzz: bool,
     /// A fuse check was running at the last tick (`fuse_tick`).
     fuse_busy: bool,
@@ -488,6 +496,8 @@ impl App {
             fail_beep_at: 0,
             alert_seq: 0,
             alert_beep_t0: None,
+            leads: crate::sentinel::Leads::new(),
+            leads_toast_at: None,
             alert_buzz: false,
             fuse_busy: false,
             meas: [0.0; 4],
@@ -722,6 +732,7 @@ impl App {
                 self.usb_ro_drawn = usb_ro();
                 let vals = [
                     alert_mask_name(&mut b, self.dmm.alert_mask()),
+                    if self.dmm.alert_mask() & crate::sentinel::M_LEADS != 0 { "ON" } else { "OFF" },
                     ui::usb_disk_name(self.usb_ro_drawn.0, self.usb_ro_drawn.1),
                     if self.dmm.burden_show { "ON (A, mA, uA)" } else { "OFF (stock)" },
                     "", // Device row: opens the About page, no inline value
@@ -1443,6 +1454,10 @@ impl App {
             // label) from the meter, so the label now matches.
             self.hold_shown = self.shown_state();
         }
+        // After the repaint: the new function's page is up under the toast.
+        if self.leads_tick(now) {
+            return;
+        }
         if self.shot_req {
             self.shot_req = false;
             self.screenshot(now);
@@ -1793,7 +1808,8 @@ impl App {
         p[crate::persist::W_DMM_EXT] = crate::meter::ext_word(self.dmm.rate(), self.meter.smoothing())
             | if self.dmm_view.bar_on { 0 } else { crate::meter::EXT_HISTORY_ROW }
             | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 }
-            | ((!self.dmm.alert_mask() & crate::sentinel::M_ALL) as u32) << crate::meter::EXT_ALERT_OFF_SHIFT
+            | ((!self.dmm.alert_mask() & crate::sentinel::M_JACK) as u32) << crate::meter::EXT_ALERT_OFF_SHIFT
+            | if self.dmm.alert_mask() & crate::sentinel::M_LEADS == 0 { crate::meter::EXT_LEADS_OFF } else { 0 }
             | if self.dmm.burden_show { crate::meter::EXT_BURDEN } else { 0 };
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
@@ -1849,7 +1865,10 @@ impl App {
         self.dmm_view.bar_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_HISTORY_ROW == 0;
         self.dmm.set_temp_f(p[crate::persist::W_DMM_EXT] & crate::meter::EXT_TEMP_F != 0);
         // Before the first row is written (select below).
-        let off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_ALL;
+        let mut off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_JACK;
+        if p[crate::persist::W_DMM_EXT] & crate::meter::EXT_LEADS_OFF != 0 {
+            off |= crate::sentinel::M_LEADS;
+        }
         self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
         self.dmm.burden_show = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_BURDEN != 0;
         self.pw_restore(&p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS]);
@@ -2522,6 +2541,52 @@ impl App {
         }
     }
 
+    /// "Leads in A?" reminder (doc 4.9): a change from a function that uses
+    /// the A jack to one that does not -> `leads_remind` (the beep at once);
+    /// the toast follows when the new function's page has its first reading
+    /// (else the toast, which holds the repaint, would sit over an empty
+    /// page), at the latest LEADS_TOAST_WAIT_MS after the change, and not
+    /// if the function went back to a current one meanwhile. Per drawing
+    /// pass (a change made while nothing can be drawn shows when drawing
+    /// resumes); a fuse check holds the state (its lead in A is wanted).
+    fn leads_tick(&mut self, now: u64) -> bool {
+        let hold = self.dmm.fuse_state() == crate::sentinel::FuseRes::Busy;
+        let on = self.dmm.alert_mask() & crate::sentinel::M_LEADS != 0;
+        let a = self.dmm.uses_a_jack();
+        if self.leads.feed(a, self.dmm.func(), hold, on) {
+            self.leads_remind(now);
+        }
+        match self.leads_toast_at {
+            Some(_) if a == Some(true) => self.leads_toast_at = None,
+            Some(t) if self.meter.live().is_some() || now >= t => return self.leads_toast(now),
+            _ => {}
+        }
+        false
+    }
+
+    /// The reminder's beep: one 200 ms at the key / alert volume, also with
+    /// the key beep off (a safety cue, as OVERLOAD's); the toast is due.
+    /// No repeat, no tap needed: the firmware cannot tell whether the lead
+    /// was moved (doc 4.9).
+    #[inline(never)] // .cold (link-native.x): once per function change
+    fn leads_remind(&mut self, now: u64) {
+        buzzer(true, self.volume);
+        self.beep_until = now + 200;
+        self.leads_toast_at = Some(now + LEADS_TOAST_WAIT_MS);
+    }
+
+    /// The reminder's toast (the alert toasts' views: not over a settings
+    /// page). True: it is up.
+    #[inline(never)] // .cold (link-native.x): once per function change
+    fn leads_toast(&mut self, now: u64) -> bool {
+        self.leads_toast_at = None;
+        if is_page(self.view) && self.view != View::Menu {
+            return false;
+        }
+        self.toast(now, crate::sentinel::LEADS_TOAST, false);
+        true
+    }
+
     /// A-JACK beep pattern: 3 x 50 ms (50 ms apart) every 2 s while the
     /// alert is on, at the key / alert volume (0 % = silent); never over
     /// another beep in progress.
@@ -3165,16 +3230,23 @@ impl App {
                 }
                 match ui::settings_hit(2, y) {
                     Some(0) => {
-                        // Jack alerts: ON (all) -> A-JACK only -> OFF -> ON.
-                        use crate::sentinel::{M_AJACK, M_ALL};
-                        let m = match self.dmm.alert_mask() {
-                            M_ALL => M_AJACK,
+                        // Jack alerts: ON (all) -> A-JACK only -> OFF -> ON;
+                        // the A-lead reminder bit stays.
+                        use crate::sentinel::{M_AJACK, M_JACK, M_LEADS};
+                        let m = self.dmm.alert_mask();
+                        let j = match m & M_JACK {
+                            M_JACK => M_AJACK,
                             M_AJACK => 0,
-                            _ => M_ALL,
+                            _ => M_JACK,
                         };
-                        self.dmm.set_alert_mask(clk, m);
+                        self.dmm.set_alert_mask(clk, j | m & M_LEADS);
                     }
                     Some(1) => {
+                        // A-lead reminder ("Leads in A?", doc 4.9): ON <-> OFF.
+                        let m = self.dmm.alert_mask() ^ crate::sentinel::M_LEADS;
+                        self.dmm.set_alert_mask(clk, m);
+                    }
+                    Some(2) => {
                         // USB disk (decision 2026-10-22 #6): Files live <->
                         // PC can edit, volatile; in force at the next bus
                         // reset (the host reads the WP bit when it mounts).
@@ -3188,12 +3260,12 @@ impl App {
                             self.toast(clk.now_ms(), "Re-plug USB to apply", true);
                         }
                     }
-                    Some(2) => {
+                    Some(3) => {
                         // Burden voltage in the A functions (doc 3.15):
                         // from the next reading on.
                         self.dmm.burden_show = !self.dmm.burden_show;
                     }
-                    Some(3) => {
+                    Some(4) => {
                         self.show(View::Device, clk);
                         return;
                     }
@@ -3771,7 +3843,7 @@ impl App {
                 false
             }
             C::SysAlertEnable(None) => {
-                out.put_bytes(&[b'0' + self.dmm.alert_mask()]);
+                out.put_u32(self.dmm.alert_mask() as u32);
                 true
             }
             C::DbgSentVar(Some(v)) => {
@@ -3780,6 +3852,15 @@ impl App {
             }
             C::DbgSentVar(None) => {
                 out.put_u32(crate::sentinel::variant() as u32);
+                true
+            }
+            C::DbgLeads => {
+                let l = &self.leads;
+                out.put_u32(l.n);
+                for v in [l.last.0, l.last.1] {
+                    out.put_bytes(b",");
+                    out.put_u32(v as u32);
+                }
                 true
             }
             C::DbgSent => {

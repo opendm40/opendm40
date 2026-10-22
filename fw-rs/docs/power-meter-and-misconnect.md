@@ -1465,7 +1465,7 @@ A jack: check leads" / "Voltage on V jack, no current" / "Voltage on circuit
 = silent), LIVE? once 100 ms, V-JACK? silent. Settings 3/3 "Jack alerts": ON
 (all) / A-JACK only / OFF, persisted in p[38] bits 11..13; a disabled
 sentinel writes the stock row. SCPI: `SYSTem:ALERt?` (NONE | AJACK | VJACK |
-LIVE), `SYSTem:ALERt:ENABle <0..7> | ON | OFF` / `?`, `DBG:SENTinel?`
+LIVE), `SYSTem:ALERt:ENABle <0..7> | ON | OFF` (0..15 since 4.9: bit 3 the "Leads in A?" reminder) / `?`, `DBG:SENTinel?`
 (kind,alert,mask,ctsta,pkhmin,pkhmax,streak,hit_windows,samples).
 
 Emulator: the HY3131 model got the sentinel nodes (comparator on PB1 = the
@@ -1760,6 +1760,59 @@ Bench supply with current limit, leads V-COM open, the supply across A-COM:
    probe is not in the row); with the probe in (a small current in A),
    compare the DC V offset of a known source (note 7).
 5. Do **not** test above 30 V across A-COM.
+
+### 4.9 "Leads in A?" reminder (fw-rs, 2026-10-22)
+
+TODO "Leads in A?" (after the UNI-T UT197 comparison in TODO.md): the UT197
+senses a plug in its current jacks and flashes "InErr" in any non-current
+position, before the probe touches a circuit. The DM40 has no jack sense
+(4.1), so an unconnected lead in the A jack is invisible; the closest
+firmware stand-in is to remind at the moment the UT197 would warn: the
+function change **away from a current function**.
+
+| | |
+|---|---|
+| fires on | a change from a function whose leads use the A jack (DC / AC / AC+DC A, any range or shunt; the power meter) to one that does not (V, mV, ohm, continuity, diode, cap, Hz, temperature, V AC+DC), by any path: the function buttons, the PD6 click, SCPI CONF / FUNC, the BT mode byte, the power meter's exit. `sentinel::Leads` (pure, host test `leads_reminder`) fed per drawing pass by `App::leads_tick` with `Dmm::uses_a_jack` (HY3131 mode 4..=9 or the power meter; mode 255 = a row change in progress, ignored) |
+| never on | V -> A, A -> A (DC <-> AC <-> AC+DC A, autorange / OVERLOAD shunt changes, A <-> power meter), the first function after power-on / restore, the fuse check (it moves a DC A meter to ohm with a lead in A on purpose and comes back: the state is held while `fuse_state()` is Busy; a check ended by a V choice counts as A -> V) |
+| what | one 200 ms beep at once (key / alert volume, also with the key beep off, as OVERLOAD's; 0 % = silent) and one toast "Leads in A jack? Move to V" (red, `TOAST_MS` = 1.5 s) when the new function's page has its first reading (the toast holds the repaint: over an empty page it looked broken in the emulator), at the latest 1 s after the change; dropped if the function went back to a current one meanwhile; not over the settings pages (the alert toasts' rule) |
+| repeat / dismiss | **neither**: one beep, one toast that goes by itself (a tap closes it early, as every toast). The firmware cannot tell whether the lead was moved, so a repeating or must-acknowledge reminder would nag every time a careful user already moved it; the A-JACK sentinel (4.6) takes over with its red badge and repeating beep the moment a current does flow through A. If owners find one toast too easy to miss, the next step is a second beep, not a modal |
+| HOLD / decision #5 | unaffected: the reminder is no alert state (`SYST:ALER?` stays NONE, no badge in the status slot, no STAT:QUES bit), so it never alternates with HOLD; a real A-JACK after it shows its own toast (replacing this one), badge and beeps |
+| option | Settings 3/3 row "A-lead reminder" ON (default) / OFF, separate from "Jack alerts" (whose ON / A-JACK only / OFF cycle keeps it); `SYST:ALER:ENAB` bit 3 (`sentinel::M_LEADS`; ON = 15, `?` answers 15 by default, 0..15 accepted); persisted in p[38] bit 15 `EXT_LEADS_OFF` (0 = on: older records get it on). Changing only bit 3 does not rewrite the HY3131 row |
+| host scripts | a script that alternates A and V functions with leads in both jacks (the power-meter wiring) gets a beep per change: `SYST:ALER:ENAB 7` |
+| SCPI debug | `DBG:LEADs?` -> `n,from,to` (reminders since power-on, `Dmm::func` codes of the last change that fired; 255 = none) |
+
+Toast text: the TODO's "Leads in the A jack? Move to V" leaves 1 px to the
+toast frame in TEXT22 with the toast's letter spacing (ui-render margin
+rule), so it reads "Leads in A jack? Move to V".
+
+Emulator: `emu/hy3131/leadstest.py` (DC A -> a tap on the DMM page's V
+button -> 1; DC A -> AC A no; AC A -> AC V 2; ENAB 7: DC A -> ohm silent;
+power meter -> DC V 3 from 18; fuse check from DC A (`valead`, OK 47.50
+ohm, back in DC A) no; A AC+DC -> V AC+DC 4 from 17 to 16; SYST:ALER? NONE
+and STAT:QUES:COND? 0 throughout); screenshots `emu/out/leads-before.png`,
+`leads-toast.png` (over the DC V page with its first reading),
+`leads-after.png` (gone by itself). ui-render: the toast (t05-toast-leads),
+Settings 3/3 with the new row (m10-settings3, all value combinations, the
+pressed rows), Help 5/7 "Jack/A-lead alerts".
+
+#### Device check list ("Leads in A?")
+
+1. DC A (any range) -> V button: one 200 ms beep at once, toast "Leads in A
+   jack? Move to V" over the DC V reading, gone after ~1.5 s with no tap.
+2. AC A -> ohm, A AC+DC -> V (the AC+DC cycle of the V key does not count:
+   only a change of the jack), power meter -> Hz: the same. DC A -> AC A,
+   V -> A, A -> power meter: nothing.
+3. PD6 click while locked (sub-mode cycle): nothing (V stays V, A stays A).
+4. Key / alert volume 0 %: no beep, the toast still shows; key beep OFF in
+   Settings: the reminder still beeps.
+5. Settings 3/3 "A-lead reminder" OFF: nothing on A -> V; the setting
+   survives a power cycle; "Jack alerts" cycling leaves it alone;
+   `SYST:ALER:ENAB?` 7 then, 15 after ON.
+6. Fuse check from DC A (Current Settings > Fuse check, lead V -> A): no
+   reminder during it or when it returns to DC A.
+7. With the lead really in A and a current flowing after A -> V (a 1 mA
+   source): the reminder, then A-JACK (red badge, its toast, 3-beep
+   pattern) within ~0.3 s: A-JACK wins.
 
 ## 5. Open points for the owner
 
