@@ -39,7 +39,7 @@ RUSTFLAGS="-C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR
 ELF=$TDIR/thumbv7em-none-eabihf/release/dm40-fw
 
 # Static worst-case stack path vs the TCM stack (>= 20 KiB headroom; the
-# SRAM-free, region-B and region-C checks are link-native.x asserts).
+# SRAM-free, region-A2, region-B and region-C checks are link-native.x asserts).
 if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 20480 --top 0 > target/native/stackdepth.txt; then
     cat target/native/stackdepth.txt >&2
     exit 1
@@ -47,7 +47,7 @@ fi
 head -1 target/native/stackdepth.txt
 
 BODY=target/native/dm40-fw-native.body.bin
-rm -f target/native/regionb.warn target/native/regionc.warn
+rm -f target/native/regiona2.warn target/native/regionb.warn target/native/regionc.warn
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
 python3 ../firmware/dm40fw.py pack --pad "$BODY" dm40-fw-native.bin
 python3 - "$BODY" "$ELF" <<'PY'
@@ -64,9 +64,16 @@ for line in subprocess.run([nm, sys.argv[2]], capture_output=True, text=True).st
     if len(p) == 3:
         syms[p[2]] = int(p[0], 16)
 gap = body[MARK - BASE:MARK - BASE + 16]
-pad = body[syms['__region_a_end'] - BASE:MARK + 16 - BASE]
+pad = body[syms['__a2_end'] - BASE:MARK + 16 - BASE]
 print("dm40-fw-native.bin: body %d bytes, 0x%08x..0x%08x (limit 0x%08x, %d bytes free)"
       % (len(body), BASE, end, END, END - end))
+# Region A2 (zero-wait, after the shim, below the loader marker): the link
+# fails when it reaches the marker (0 bytes free); warn below 2 KiB.
+a2free = MARK - syms['__a2_end']
+print("  region A2 free   = %d bytes (0x%08x..0x%08x used, zero-wait below the marker; link fails below 0)"
+      % (a2free, syms['__a2_start'], syms['__a2_end']))
+if a2free < 2048:
+    open('target/native/regiona2.warn', 'w').write('%d\n' % a2free)
 bfree = 0x08080000 - syms['__etext']
 print("  region B free    = %d bytes (zero-wait flash below 0x08080000; link fails below 8 KiB)" % bfree)
 if bfree < 16384:
@@ -84,12 +91,13 @@ print("  word1 reset      = 0x%08x" % entry)
 print("  region A end     = 0x%08x (shim + vectors, limit 0x%08x)" % (syms['__region_a_end'], MARK))
 print("  .text start      = 0x%08x" % syms['__stext'])
 print("  marker 0x08008000..0x0800800F = %s" % gap.hex())
-print("  0x%08x..0x08008010 (%d bytes after region A) all 0xFF: %s"
-      % (syms['__region_a_end'], len(pad), pad == b'\xff' * len(pad)))
+print("  0x%08x..0x08008010 (%d bytes after region A2) all 0xFF: %s"
+      % (syms['__a2_end'], len(pad), pad == b'\xff' * len(pad)))
 assert end < END, 'image reaches 0x080A0000'
 assert syms['__region_a_end'] <= MARK and syms['__stext'] >= MARK + 12
+assert syms['__a2_start'] == syms['__region_a_end'] and syms['__a2_end'] <= MARK, 'region A2 overlaps the marker'
 assert gap == b'\xff' * 16, 'marker gap is not 0xFF'
-assert pad == b'\xff' * len(pad), 'padding between region A and region B is not 0xFF'
+assert pad == b'\xff' * len(pad), 'padding between region A2 and region B is not 0xFF'
 assert body[:4] == struct.pack('<I', 0x2002F7F8)
 assert BASE <= entry - 1 < MARK and entry & 1, 'reset vector not in region A (thumb)'
 PY
@@ -107,6 +115,20 @@ if [ $((0x08004000 + n - 12)) -gt $((0x080A0000)) ]; then
     echo "build.sh: the padded body ends past 0x080A0000 (FS-loader)" >&2
     rm -f dm40-fw-native.bin
     exit 1
+fi
+# Region A2 (zero-wait, 0x0800460c..0x08008000) below 2 KiB free: a banner
+# (the link fails when A2 reaches the loader marker at 0x08008000).
+if [ -f target/native/regiona2.warn ]; then
+    a=$(cat target/native/regiona2.warn)
+    {
+        echo
+        echo "################################################################################"
+        echo "## build.sh: WARNING: region A2 (zero-wait, below the loader marker) has only"
+        echo "## $a bytes free (< 2 KiB). The link fails when A2 reaches 0x08008000. Take a"
+        echo "## font out of A2_FONTS (tools/mkstockfont.py) or a .rodata.a2 / .text.a2 item."
+        echo "################################################################################"
+        echo
+    } >&2
 fi
 # Region B (zero-wait flash) below 16 KiB free: a loud banner as the last
 # thing printed (the link itself fails below 8 KiB, link-native.x).
