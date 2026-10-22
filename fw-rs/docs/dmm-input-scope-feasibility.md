@@ -768,3 +768,129 @@ Device verification of this image (5 min, the meter on USB, 1 V DC on V/COM):
    well below the bit-banged ~6.5 kS/s ceiling; bad 0.
 Fail -> the fallback build `./build.sh native --features hyspi-bitbang`.
 (Passed on the device, TODO 2026-10-22; the fallback feature is removed.)
+
+## 9. E3/E4 implemented: the AD2 stream on one timer ISR (2026-10-22)
+
+Decision #3 of docs/decisions-2026-10-22.md, behind the Cargo feature
+`ad2-isr` (**off by default** until the device acceptance in 9.5: invariant 1,
+the default build has no interrupt and behaves as before, except the ring
+policy noted in 9.1). Image for the device: `./build.sh --features ad2-isr`.
+Everything below is emulator plumbing; the device numbers are 9.5's job.
+
+### 9.1 What exists
+
+| piece | where | what |
+|---|---|---|
+| vector | `src/shim.rs` | the table runs to IRQ 55 (72 words, region A still 0x0800460c); IRQ 55 = `ad2_stream_irq` with the feature, `default_handler` without (cfg'd in the asm, no weak symbol: LTO rejects a weak + strong pair in one module). |
+| timer | `hy3131::stream` | TIMER6 (STM32 TIM7, 0x4000_1400, APB1EN bit 5; free: TIM1/2/3/5/8 scope + hwtrig, TIM6/12 generator, TIM13/14 backlight / buzzer). 200 MHz kernel, PSC 3 = 50 MHz count, ARR for 4 x the AD2 rate (4800 .. 38400 Hz), URS so UG does not raise UIF, UIE. |
+| hand-off | `hy3131::stream::start` / `stop` | start (main loop, after the session's last bus access `set_ad2_stream`): TIM7 set up, SysTick off + PENDSTCLR / PENDSVCLR, ICER and ICPR on all 8 NVIC words (whatever the FS-loader left), IPR[55] = 0, `HANDED` = true, ISER bit 55, `cpsie i`, CEN. stop (main loop): CEN / UIE off, ICER bit 55, `cpsid i`, SR and ICPR bit 55 cleared, `HANDED` = false. PRIMASK is cleared nowhere else. "Wait for a running ISR": nothing to wait for on one core (the main loop runs only between ISR entries, and the ISR always ends its frame: CS high, SPI2 idle). |
+| guard | `hy3131::read` / `write` / `set_div` | every main-loop bus call checks `HANDED` and, if set, stops the stream BEFORE its frame: a main-loop frame can never interleave with the ISR's. The decision asked for a debug assertion; one main-loop path legitimately gets here (a function / range change while logging: touch, key, CONF -> dmm.start), which the logger's auto-stop used to catch only after the fact, so it is a runtime guard in every build. `forced_stops` counts (DBG:ISR? last field), `Logger::poll` ends the session and main.rs reports "Settings conflict". |
+| ring | `logger::RING` | the same 2048 x 8 B (+ counters, 16468 B in .dmabuf; `Logger` itself is 72 B now). Single producer (the ISR, or the main loop for AD1 / the main-loop AD2 sampler), single consumer (LOG:DATA?): `head` / `tail` u32 atomics, Release / Acquire; every counter has one writer; the 64-bit span is two words read hi-lo-hi. Full ring: the NEWEST sample is dropped (the producer must not move the consumer's tail), `overwritten` counts it, the seqs stay consecutive and the host sees a timestamp gap (before: oldest overwritten, a seq gap). This is the one behaviour change of the default build (AD1 and the main-loop sampler use the same ring). |
+| ISR | `logger::isr::ad2_stream_irq` | clear UIF (and read CNT = entry latency); inside the read gate (7/8 P after the last seen conversion) nothing else; else INTF (1-byte SPI2 frame), on AD2F R03..R05 (3 bytes), sign-copy check, `Producer::push` (stats + ring). Status waits capped (`spi::wait`, 2000 polls ~100 us; `timeouts`). No register write, no dmm.rs, no LCD / flash / watchdog, no float, no panic path (checked in the disassembly: callees `spi::read`, `spin`, `Producer::push`, `__aeabi_uldivmod`). |
+| counters | `DBG:ISR?` | `feature,active,ticks,captured,empty,gated,dropped,bad,timeouts,overruns,max_isr_ns,max_lat_ns,tick_mhz,forced`: ticks = captured + empty + gated + bad; overruns = a tick already pending at exit; max_isr_ns from DWT; max_lat_ns = TIM7 CNT at entry x 20 ns; timeouts = HY3131 frames abandoned since boot. LOG:COUNt? / GAPs? / PREamble? unchanged. |
+| default rate | `logger::DEFAULT_AD2_HZ` | 4800 S/s with the feature (2400 without). |
+| stack | `tools/stack-depth/stackdepth.py` | the ISR runs on the MSP on top of any main-loop frame: worst = main path + ISR path (176 B) + exception frame (26 words with the FPU's lazy-stacking space + 4 alignment = 108 B). The tool also follows IT-block calls (`bllo`) and conditional tail calls now, which it missed before: the main path grew by 336 B (a pre-existing undercount). Feature build: 30632 of 48088 B, headroom 17456 (>= 16384 checked by build.sh). |
+| SRAM | | +32 B in SRAM (0x2002f250, 3504 B free below 0x20030000), +72 B TCM .bss (the ISR's producer state). |
+| emulator | `emu/dm40.repl`, `emu/hy3131/ad2streamtest.py` | timer7 is a `GD32_Timer` (IRQ -> nvic@55) instead of Renode's STM32_Timer; the ISR's SPI2 frames go through `HY3131SpiPort` as the main loop's. The test boots the feature build at 200 MIPS and checks 9.4's sessions plus a function change mid-stream. |
+
+### 9.2 Tick rate and stamps (deviation from "~1.05 x")
+
+The record stamp is the observation time (decision #2: "when the firmware
+saw it"). With a tick period T the stamp is late by d in [0, T).
+
+- **1.05 x** (T = 0.95 P), measured first: d walks down by P - T per sample
+  and wraps every ~21 samples (one empty tick), so consecutive stamps differ
+  by T normally and by 2T = 1.9 P at each wrap. A genuine single miss gives
+  ~2 P: no rule on two stamps can tell them apart. Emulator 4800 S/s, 10 s:
+  LOG:COUNt? lost 0, but 1622 of 32464 records (5 %) in the "2 periods" gap
+  bucket and 1622 false `lost_before` in the host CSV. The latency margin is
+  only P - T (10 us at 4.8 kS/s, 5 us at 9.6).
+- **2.1 x + P/2 gate**: d < T = 0.476 P, but d + entry latency can pass P/2:
+  190 false gaps in 139493 at 9.6 kS/s.
+- **4 x + 7/8 P gate** (implemented): after a read that saw conversion k at
+  tick t, ticks t + T .. t + 3T are gated (bus-free) and t + 4T = t + P reads,
+  i.e. one period after the previous read, so it sees conversion k + 1 with the
+  same d: the stamps are as regular as the two crystals plus the entry
+  latency. The timer / chip mismatch (ARR rounding, at most ~65 ppm, plus the
+  crystals) walks d slowly to 0; then one read comes just before the
+  conversion (`empty`: 9 in 27345 samples at 4800) and the next tick takes it,
+  a stamp step of at most T + latency < P/2 for latency < P/4: round(gap / P)
+  is exact. A conversion is lost only when an entry is delayed by more than
+  P - d > 3/4 P (156 us at 4.8 kS/s, 78 us at 9.6). Cost per sample: one hit
+  (~21.5 us on the device: SELF? r1 7.65 + r6-per-3-bytes ~13.5) + 3 gated
+  entries (~0.5 us each): ~11 % CPU at 4.8 kS/s, ~22 % at 9.6, as
+  invariant 5 budgets. Revert = `TICKS` / `GATE_EIGHTHS` in logger.rs `isr`.
+
+### 9.3 Preemption and shared state
+
+- **One interrupt.** NVIC: every line ICER'd and its pending bit cleared at
+  each start, only IRQ 55 enabled; SysTick (SYST_CSR = 0) and PendSV can not
+  fire; faults go to `default_handler` (`b .`) as before: the FWDGT resets.
+  The ISR never kicks the watchdog: a main loop that stops kicking still
+  resets, an ISR hang (impossible with the capped waits) would too.
+- **What masks the ISR.** Only `critical_section::with` in synopsys-usb-otg
+  (endpoint buffer copies, a 64-byte packet: ~1 us) and the ~20 instructions
+  of `stream::stop`. fw-rs has no other `cpsid`. Measured entry latency in
+  the emulator at 200 MIPS: max 3.5 us in most sessions, 10 .. 27 us in some
+  4800 S/s DRAW 2 ones (most likely Renode's execution quantum: nothing in
+  the firmware masks that long); the device number is DBG:ISR? max_lat_ns.
+- **What the ISR preempts.** The main loop anywhere: LCD (FSMC), USB polling,
+  spin-delays (stretched by <= 22 us, all tolerate it), BT UART polling. DMA
+  users (BT UART4 TX, generator DAC / TIM6 and PWM / TIM12, scope DMA2 +
+  TIM1/5/8) share no register with SPI2 / TIM7 / PC10..12 and keep running;
+  the scope is not polled while logging anyway (main.rs).
+- **GPIOC MODER.** The ISR's read-period pulse is a read-modify-write of
+  GPIOC MODER (PC10 AF -> output -> AF). If it lands inside a main-loop RMW of
+  the same register, the main loop writes back the value it read, which has
+  PC10 = AF: the ISR restored exactly that, so nothing is lost. The main loop
+  never changes PC10..12 while handed off (only `hy3131::write` does, and the
+  guard stops the stream first).
+- **INTF.** Reading INTF clears AD1F / RMSF / LPFF too: harmless, the DMM
+  poll is paused while logging (as before) and restarts the row after.
+- **Shared state** = `RING` (atomics + slots published by `head`) and
+  `HANDED`; the ISR's clock / stats state (`isr::PROD`) is written by the
+  main loop only before the hand-off.
+
+### 9.4 Emulator results (plumbing only, not the device)
+
+`emu/run.py fwrs --mips 200` (the device's instruction rate; Renode's SPI is
+instantaneous, so the ISR's own time is CPU only), AC V, 0.5 V 50 Hz,
+host draining LOG:DATA? continuously on one USB/IP connection, *IDN? every
+second:
+
+| build | rate, DBG:AD2:DRAW | captured | lost | stamp gaps | DBG:ISR? empty / overruns / max_lat | *IDN? max |
+|---|---|---|---|---|---|---|
+| main-loop sampler (feature off) | 4800, 2 | 26339 | 7855 (23 %) | 361 (max 19 ms) | - | 23 ms |
+| main-loop sampler | 4800, 1 | 29907 | 110 (0.4 %) | 24 | - | 4 ms |
+| main-loop sampler | 9600, 1 | 57301 | 697 (1.2 %) | 2799 | - | 4 ms |
+| ad2-isr, 1.05 x (first try, 50 MIPS) | 4800, 1 | 32464 | 0 | 1622 (false) | 1622 / 0 / 68 us | - |
+| **ad2-isr, 4 x** | **4800, 2** | 27345 | **0** | **0** | 9 / 0 / 9.9 us (27 us in a rerun) | 15 ms |
+| **ad2-isr, 4 x** | **9600, 1** | 49928 | **0** | **0** | 13 / 0 / 3.6 us | < 1 ms |
+| **ad2-isr, 4 x** | **1200, 2** | 3588 | **0** | **0** | 3 / 0 / 3.5 us | 6 ms |
+
+ticks = 4.00 x captured in every session; dropped / bad / timeouts /
+forced 0; READ? 0.5000 V AC after each stream; a CONF:VOLT:DC mid-stream
+stopped the stream first (forced 0 -> 1, "Settings conflict", LOG:STATe? 0),
+DC V then ~0, AC V 0.5 V again, DBG:HYSPI:SELF? 200 clean. DBG:PROF? at
+9600 S/s with DRAW 2: loop max 22 ms (the repaint), USB section max 43 us.
+At 50 MIPS (`--fast`) 9600 S/s with DRAW 2 starves the main loop (the
+repaint alone exceeds its 100 ms period there): an emulator-speed artefact.
+
+### 9.5 Device check (10 minutes)
+
+Image: `./build.sh --features ad2-isr` (the path is in the hand-over). Meter
+on USB, `tools/dm40scpi.py`; AC V with a 50 Hz sine of a few V on V/COM (or
+AC mV). Record every reply in this section.
+
+| min | step | commands | pass |
+|---|---|---|---|
+| 0-1 | build | `scpi "DBG:ISR?"`, `scpi "READ?"` | first field 1; the reading as before |
+| 1-3 | 4800, full DMM repaint every 100 ms (the decision's acceptance) | `scpi "DBG:AD2:DRAW 2"`; `log a48.csv --source ad2 --rate 4800 -d 60`; `scpi "DBG:ISR?"` | trailer lost 0 (0.00 %), gaps all 0, bad 0, overwritten 0; DBG:ISR? overruns 0, timeouts 0, forced 0, max_isr_ns ~22000-26000, max_lat_ns < ~5000 (larger: something masks interrupts, report it) |
+| 3-4 | 9600 | `log a96.csv --source ad2 --rate 9600 -d 30`; `scpi "DBG:ISR?"` | lost 0 or a few (7889e6c main loop: 11 %) |
+| 4-6 | profile while streaming, USB alive | `scpi "LOG:SOURce AD2" "LOG:SRATe 9600" "DBG:PROF:RESET" "LOG:STATe ON"`, wait 10 s, `scpi "*IDN?" "DBG:PROF?" "DBG:ISR?" "LOG:COUNt?"`, `scpi "LOG:STATe OFF"` | *IDN? answers at once; PROF loop max ~ the repaint (no ISR-made stalls); COUNt? lost 0 (overwritten > 0 is expected: nobody drained) |
+| 6-8 | DMM after a stream | `scpi "DBG:AD2:DRAW 1" "READ?" "READ?"`, DC V on a 1 V source: `scpi "CONF:VOLT:DC" "READ?"`, `scpi "DBG:HYSPI:SELF? 2000"` | readings as before the streams; SELF? all error counts 0 |
+| 8-10 | function change mid-stream | AC V again; `scpi "LOG:SOURce AD2" "LOG:STATe ON"`, then press the V key (or `scpi "CONF:VOLT:DC"`); `scpi "LOG:STATe?" "SYST:ERR?" "DBG:ISR?" "READ?"` | STATe? 0, "Settings conflict", forced + 1, the reading of the new function |
+
+On a pass: `ad2-isr` becomes a default feature (TODO), then the Wave view
+(E5 / E6). A hang or a reset during a stream: report DBG:BOOT? (the shim's
+crash counter) and the last DBG:ISR?.

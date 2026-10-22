@@ -628,6 +628,21 @@ Firmware:
 - [x] Drop the `hyspi-bitbang` feature (bit-banged reads) now that 7889e6c passed: done (bit-banged WRITES stay,
       DBG:HYSPI:SELF? stays).
 - [ ] Optional later: pure-SPI2 writes (continuous TX + dummy byte).
+- [x] (E3/E4) AD2 stream on ONE timer ISR, decision #3 (docs/dmm-input-scope-feasibility.md 9): Cargo feature
+      `ad2-isr` (OFF by default until the device acceptance below), TIMER6 = TIM7 IRQ 55 the only NVIC line
+      (shim.rs table to IRQ 55, everything else ICER'd + SysTick / PendSV cleared at the hand-off, PRIMASK
+      cleared only while streaming), exclusive HY3131 bus hand-off (hy3131.rs `stream`, every main-loop
+      read / write stops the stream first: DBG:ISR? forced), SPSC ring (logger.rs `RING`, the same 16 KiB,
+      full = newest dropped), ISR = INTF + R03..R05 over SPI2 with capped waits, tick 4 x the rate + 7/8 P
+      read gate (DEVIATION from "~1.05 x": 1.05 x gave ~P stamp jitter and 5 % false gaps, doc 9.2), default
+      LOG:SRATe 4800 with the feature. DBG:ISR?. Stack check counts the ISR (+284 B; stackdepth.py also
+      sees IT-block `bl` now: main path +336 B, headroom 17456). Emulator (200 MIPS, DRAW 2): 4800 / 9600
+      / 1200 S/s lost 0, no stamp gap (main-loop sampler: 23 % lost at 4800 DRAW 2);
+      emu/hy3131/ad2streamtest.py PASS.
+- [ ] (E3/E4) device acceptance of the `ad2-isr` image (doc 9.5, 10 min): LOG:COUNt? lost = 0 at 4800 S/s
+      for 60 s with DBG:AD2:DRAW 2, 9600 S/s loss, DBG:ISR? max_isr_ns ~22000 / max_lat_ns (< ~5000 expected;
+      larger = something masks interrupts), DBG:PROF? loop max while streaming, DMM / SELF? clean after a
+      stream, *IDN? responsive. On a pass: make `ad2-isr` the default (then the Wave view, E5/E6).
 - [ ] (B) DC-coupled V on AD2 (new row, feasibility 1.3 last row): needs device test 6.5 first; not implemented.
 - [ ] (B) AD2 samples to the host over BT / to the SPI disk (.DLG): not done (USBTMC only).
 - [ ] (A) DMM-input "slow floating scope" via AD2 (after B): ~5-10 ms/div..50 s/div, 2.4-9.6 kS/s, BW ~1-2.5 kHz,
