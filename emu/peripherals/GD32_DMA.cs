@@ -80,6 +80,11 @@ namespace Antmicro.Renode.Peripherals.DMA
         /// before the stream is disabled).
         public Action<int> BeforeStreamRead;
 
+        /// Called with the stream number after a peripheral stream was enabled:
+        /// a peripheral whose DMA request is a level already high (an SPI's TBE)
+        /// requests then (GD32_SPI).
+        public Action<int> StreamEnabled;
+
         public uint ReadDoubleWord(long offset)
         {
             if(offset >= 0x10 && offset < 0x10 + 8 * 0x18 && BeforeStreamRead != null)
@@ -179,6 +184,7 @@ namespace Antmicro.Renode.Peripherals.DMA
                         if(en && !wasEnabled)
                         {
                             Enable();
+                            if(enabled) parent.StreamEnabled?.Invoke(id);
                         }
                         else if(!en && wasEnabled)
                         {

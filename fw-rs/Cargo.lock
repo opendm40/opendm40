@@ -60,6 +60,7 @@ name = "dm40-fw"
 version = "0.0.1"
 dependencies = [
  "cortex-m",
+ "critical-section",
  "synopsys-usb-otg",
  "usb-device",
  "usbd-storage",

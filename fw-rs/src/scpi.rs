@@ -339,7 +339,9 @@ pub enum Log {
 ///   DBG:DIAG?               diagnostic block (#3)
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
-///   DBG:HYSPI:SELF? n[,div]  HY3131 bus self-test (src/hyspi.rs)
+///   DBG:HYSPI:SELF? n[,div[,cpha]]  HY3131 bus self-test (src/hyspi.rs; cpha 1 =
+///                           the data phase sampled with CKPH = 1)
+///   DBG:HYSPI:WMODE 0|1     HY3131 writes bit-banged (0) / over SPI2 (1, default)
 ///   DBG:HYSPI:WR? mode[,div] SPI2 write experiment (src/hyspi.rs write_test):
 ///                           mode 0 bit-bang, 1 SPI2 one byte per frame + a cut
 ///                           dummy, 2 SPI2 continuous + a cut dummy, 3 SPI2 as
@@ -347,7 +349,7 @@ pub enum Log {
 ///   DBG:ISR?                AD2 stream ISR (logger.rs `isr`): feature,active,ticks,
 ///                           captured,late,probes,dropped,bad,timeouts,overruns,
 ///                           max_isr_ns,max_lat_ns,rate_mhz,forced,locked,ppm_x10,
-///                           slips,max_run,edges_after_b,div,cpu_permille,lat_pc
+///                           slips,max_run,edges_after_b,div,cpu_permille,lat_pc,dma
 ///                           (feature 0: no ISR in the build; timeouts = all
 ///                           HY3131 frames since boot; rate_mhz = the locked
 ///                           conversion rate in MCU time, ppm_x10 = its period vs
@@ -379,13 +381,17 @@ pub enum Dbg {
     /// DBG:PROF? (false) / DBG:PROF:RESET (true).
     Prof(bool),
     /// DBG:AD2:TORN? r26,n[,SYNC] / NOISE? r26,n[,op1chop] / DRAW 0|1|2 /
-    /// DIV 0|8|16|32 (the stream ISR's read divider, 0 = automatic)
+    /// DIV 0|8|16|32[,cpha] (the stream ISR's read divider, 0 = hy3131::DIV;
+    /// cpha 1 = data phase sampled with CKPH = 1) / DMA 0|1|2 (stream frames
+    /// by the CPU / by DMA / DMA above the CPU frames' rate cap, default)
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level).
     Ad2(u8, u8, u16, u8),
-    /// DBG:HYSPI:SELF? n[,div] (src/hyspi.rs): (n, div; 0 = hy3131::DIV).
+    /// DBG:HYSPI:SELF? n[,div[,cpha]] (src/hyspi.rs): (n, div | cpha << 7;
+    /// div 0 = hy3131::DIV).
     HySpi(u16, u8),
-    /// DBG:HYSPI:WR? mode[,div] (src/hyspi.rs `write_test`).
+    /// DBG:HYSPI:WR? mode[,div] (src/hyspi.rs `write_test`); 0x80 | m =
+    /// DBG:HYSPI:WMODE m.
     HySpiWr(u8, u8),
     /// DBG:ISR? (logger.rs `isr`).
     Isr,
@@ -1211,12 +1217,14 @@ impl Scpi {
                     let first = it.next().unwrap_or(&[]);
                     let div = it.next().and_then(parse_num).map_or(0, |d| d as u32);
                     let div = if matches!(div, 8 | 16 | 32) { div as u8 } else { 0 };
+                    let cpha = it.next().and_then(parse_num).is_some_and(|c| c != 0.0);
                     let d = match (parts.get(2).copied(), query) {
                         (Some(b"SELF"), true) => {
                             let n = parse_num(first).map_or(100, |v| v as u32).clamp(1, crate::hyspi::N_MAX);
-                            Some(Dbg::HySpi(n as u16, div))
+                            Some(Dbg::HySpi(n as u16, div | (cpha as u8) << 7))
                         }
                         (Some(b"WR"), true) => Some(Dbg::HySpiWr(parse_num(first).map_or(1, |v| v as u32).min(3) as u8, div)),
+                        (Some(b"WMODE"), false) => Some(Dbg::HySpiWr(0x80 | parse_num(first).map_or(1, |v| v as u32).min(1) as u8, 0)),
                         _ => None,
                     };
                     match d {
@@ -1237,7 +1245,8 @@ impl Scpi {
                             Some(Dbg::Ad2(1, r26, n, third.and_then(parse_num).map_or(255, |c| (c as u8).min(3))))
                         }
                         (Some(b"DRAW"), false) => Some(Dbg::Ad2(2, (v[0].min(2)) as u8, 0, 0)),
-                        (Some(b"DIV"), false) => Some(Dbg::Ad2(3, (v[0].min(255)) as u8, 0, 0)),
+                        (Some(b"DIV"), false) => Some(Dbg::Ad2(3, (v[0].min(255)) as u8, 0, (v[1] != 0) as u8)),
+                        (Some(b"DMA"), false) => Some(Dbg::Ad2(4, (v[0].min(2)) as u8, 0, 0)),
                         _ => None,
                     };
                     match d {

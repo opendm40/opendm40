@@ -1,7 +1,8 @@
 //! HY3131 bus self-test (DBG only; hy3131.rs has the bus,
 //! docs/dmm-input-scope-feasibility.md section 8).
 //!
-//!   DBG:HYSPI:SELF? n[,div]
+//!   DBG:HYSPI:SELF? n[,div[,cpha]]   (cpha 1: data phase with CKPH = 1,
+//!       the reply's div then reads e.g. "8c")
 //!       Synchronous (main loop blocked, watchdog kicked); main.rs pauses the
 //!       DMM and restarts its row afterwards, refused while logging. Reads at
 //!       `hy3131::DIV`, or at `div` 8 / 16 / 32 for this call. The HY3131 has
@@ -72,8 +73,11 @@ impl Out<'_> {
 /// DBG:HYSPI:SELF? (see the module header). Returns the reply length.
 pub fn self_test(n: u32, div: u8, out: &mut [u8]) -> usize {
     let n = n.clamp(1, N_MAX);
+    let cpha = div & 0x80 != 0;
+    let div = div & 0x7F;
     let div = if matches!(div, 8 | 16 | 32) { div } else { hy::DIV };
     hy::set_div(div);
+    hy::set_data_cpha(cpha);
     // Reference: 8 reads; live bytes masked out.
     let mut reff = [0u8; REF_LEN];
     let mut stable = [true; REF_LEN];
@@ -117,9 +121,13 @@ pub fn self_test(n: u32, div: u8, out: &mut [u8]) -> usize {
         }
     }
     hy::set_div(hy::DIV);
+    hy::set_data_cpha(false);
     hy::write(R_SPHACAL, &sph);
     let mut o = Out { b: out, n: 0 };
     o.u(div as u64);
+    if cpha {
+        o.s(b"c");
+    }
     for v in [n as u64, bad1, bad23, badw, signbad] {
         o.s(b",");
         o.u(v);

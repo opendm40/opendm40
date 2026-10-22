@@ -239,9 +239,12 @@ spi2: SPI.STM32SPI @ sysbus 0x40003800
     series: STM32Series.F4
     IRQ -> nvic@36
 
-spi3: SPI.STM32SPI @ sysbus 0x40003C00
-    series: STM32Series.F4
-    IRQ -> nvic@51
+// GD32 SPI2 = the HY3131 bus (fw-rs): GD32_SPI with DMA requests on DMA0
+// (dma1 here) stream 0 (RX) / stream 7 (TX), the AD2 stream's DMA frames.
+spi3: SPI.GD32_SPI @ sysbus 0x40003C00
+    dma: dma1
+    rxStream: 0
+    txStream: 7
 
 spiflash: SPI.W25Q128 @ spi2
     csPort: gpioPortE
