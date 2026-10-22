@@ -1019,6 +1019,7 @@ impl App {
     /// next recording, the free-time estimate from the scan on page entry
     /// (free bytes x 2 B/row at the interval, or at the measured reading
     /// period in every-reading mode), Start / Stop.
+    #[inline(never)] // .cold (link-native.x): a page draw
     fn record_page(&self) {
         let (ii, di) = crate::csvlog::next();
         if self.rec_fast {
@@ -1126,7 +1127,9 @@ impl App {
     /// fastlog::rates current); None elsewhere.
     pub fn fast_rate(&self) -> Option<(u32, bool)> {
         let m = self.dmm.mode();
-        let (ad1, ad2) = crate::fastlog::rates();
+        let (osr, chop, req) = crate::fastlog::cfg();
+        let ad1 = 1_000_000 / crate::hy3131::ad1_period_us(osr, chop).max(1);
+        let ad2 = crate::hy3131::ad2_rate_mhz(crate::hy3131::ad2_r26_for(req, chop)) / 1000;
         if matches!(self.dmm.func(), 16 | 17) || self.dmm.pw.on {
             None
         } else if crate::logger::Logger::mode_ok(true, m) {
@@ -1138,9 +1141,37 @@ impl App {
         }
     }
 
+    /// Record page Start / Stop with "Fast" (main.rs runs the fast logger:
+    /// it owns the logger; its panel takes over the screen). True: the
+    /// page was left / nothing more to draw.
+    #[inline(never)]
+    fn record_fast_tap(&mut self, now: u64, clk: &mut Clock) -> bool {
+        if crate::fastlog::active() {
+            self.fast_req = Some(FastReq::Stop);
+            return false;
+        }
+        if self.fast_rate().is_none() {
+            self.beep(now, 300);
+            self.toast(now, "Fast: DC/AC V or A only", false);
+            return true;
+        }
+        let di = crate::csvlog::next().1 as usize;
+        self.fast_req = Some(FastReq::Start(crate::csvlog::DURATIONS_S[di]));
+        self.beep(now, 60);
+        let v = self.back_view;
+        self.show(v, clk);
+        true
+    }
+
     /// main.rs: the Record page's fast-logger request, once.
     pub fn take_fast_req(&mut self) -> Option<FastReq> {
         self.fast_req.take()
+    }
+
+    /// A Record page request waits (`take_fast_req`).
+    #[inline(always)]
+    pub fn fast_req_pending(&self) -> bool {
+        self.fast_req.is_some()
     }
 
     /// main.rs: a fast-logger session ended (`fastlog::ended`).
@@ -2987,20 +3018,7 @@ impl App {
                         crate::csvlog::set_next(ii, di);
                     }
                     Some(ui::REC_START_ROW) if self.rec_fast || crate::fastlog::active() => {
-                        // The fast logger (main.rs runs it: it owns the
-                        // logger); its panel takes over the screen.
-                        if crate::fastlog::active() {
-                            self.fast_req = Some(FastReq::Stop);
-                        } else if self.fast_rate().is_none() {
-                            self.beep(now, 300);
-                            self.toast(now, "Fast: DC/AC V or A only", false);
-                            return;
-                        } else {
-                            let di = crate::csvlog::next().1 as usize;
-                            self.fast_req = Some(FastReq::Start(crate::csvlog::DURATIONS_S[di]));
-                            self.beep(now, 60);
-                            let v = self.back_view;
-                            self.show(v, clk);
+                        if self.record_fast_tap(now, clk) {
                             return;
                         }
                     }
