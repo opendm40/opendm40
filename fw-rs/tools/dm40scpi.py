@@ -294,6 +294,9 @@ def do_stream(link, args):
     if args.conf:
         switch(link, args.conf)
     ad2 = args.source == 'ad2'
+    # An error another client left in the queue (e.g. "Data stale") would
+    # fail the check below: clear it first.
+    link.query('*CLS')
     link.query('LOG:SOUR %s' % ('AD2' if ad2 else 'AD1'))
     if args.chop:
         link.query('LOG:CHOP %s' % args.chop.upper())
