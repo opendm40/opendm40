@@ -310,6 +310,22 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         msc.poll(&mut [&mut info]);
         #[cfg(not(feature = "vdisk"))]
         msc.poll(&mut [&mut disk]);
+        // A host READ of the disk: poll on while its data phase runs, up to
+        // a budget per pass (full-speed bulk: <= 19 packets of 64 bytes per
+        // 1 ms frame, one in flight at a time; the host takes one every
+        // ~50 us). Less while a logger session runs (the AD1 main-loop
+        // sampler, the fast logger's drain).
+        if msc.reading() {
+            let budget = if logger.active() || fastlog::active() { MSC_PUMP_LOG_CYC } else { MSC_PUMP_CYC };
+            let t0 = cyc();
+            while msc.reading() && cyc().wrapping_sub(t0) < budget {
+                dev.poll(&mut [&mut tmc, &mut msc]);
+                #[cfg(feature = "vdisk")]
+                msc.poll(&mut [&mut info]);
+                #[cfg(not(feature = "vdisk"))]
+                msc.poll(&mut [&mut disk]);
+            }
+        }
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
         let was_wave = logger.wave();
@@ -335,7 +351,18 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             // The rare part (a start / stop / end / Record page request)
             // in one cold call.
             if ev != fastlog::Ev::None || fa != fast_prev || app.fast_req_pending() {
-                if fast_events(app, &mut clk, logger, ev, fa, fast_prev, now) {
+                // No region C code while the stream ISR runs (a C fetch stalls
+                // its entry; device 036cc55: max_lat 12 us, 1 late sample at
+                // 38 400 S/s): the session's logger stops here, in B, before
+                // the cold call, and starts after it (`fast_events` prepares).
+                if ev == fastlog::Ev::Stop && logger.host_active() {
+                    logger.stop();
+                }
+                let (conflict, go) = fast_events(app, &mut clk, logger, ev, fa, fast_prev, now);
+                if go {
+                    logger.start(app.dmm.mode(), app.dmm.range());
+                }
+                if conflict {
                     for s in scpis.iter_mut() {
                         s.set_err("Settings conflict");
                     }
@@ -1431,6 +1458,11 @@ impl bt::ScpiPort for SentPort<'_> {
 /// turnaround; docs/bt-scpi.md): every AD1 setting (<= 640/s), no AD2 rate.
 const BT_MAX_HZ: u32 = 800;
 
+/// The main loop's extra USB polling per pass while a host READ of the disk
+/// runs (cycles: 2 ms; 0.5 ms during a logger session).
+const MSC_PUMP_CYC: u32 = clock::HCLK_HZ / 500;
+const MSC_PUMP_LOG_CYC: u32 = clock::HCLK_HZ / 2000;
+
 /// The nominal rate (S/s) of the logger's next session from `ad2` / AD1
 /// (LOG:SRATe, LOG:OSR + CHOP; the stream ISR may cap AD2 lower).
 fn fast_next_hz(l: &logger::Logger, ad2: bool) -> u32 {
@@ -1442,19 +1474,17 @@ fn fast_next_hz(l: &logger::Logger, ad2: bool) -> u32 {
 }
 
 /// The fast logger's rare events of this pass: Ev::Start (the logger
-/// session), Ev::Stop, the session's end (toast, repaint), a Record page
-/// request. True: an SCPI "Settings conflict" for both transports.
+/// session's preparation), the session's end (toast, repaint), a Record
+/// page request (Ev::Stop: the caller stopped the logger already). Returns
+/// (an SCPI "Settings conflict" for both transports, start the logger
+/// session now: the caller does, in region B, `fast_start`).
 #[inline(never)] // .cold (link-native.x): not per pass
-fn fast_events(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger, ev: fastlog::Ev, fa: bool, was: bool, now: u64) -> bool {
+fn fast_events(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger, ev: fastlog::Ev, fa: bool, was: bool, now: u64) -> (bool, bool) {
     let mut conflict = false;
-    match ev {
-        fastlog::Ev::Start => conflict = !fast_start(app, clk, logger),
-        fastlog::Ev::Stop => {
-            if logger.host_active() {
-                logger.stop();
-            }
-        }
-        fastlog::Ev::None => {}
+    let mut go = false;
+    if ev == fastlog::Ev::Start {
+        go = fast_start(app, clk, logger);
+        conflict = !go;
     }
     if was && !fa {
         if let Some(st) = fastlog::ended() {
@@ -1466,12 +1496,15 @@ fn fast_events(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger,
     if let Some(r) = app.take_fast_req() {
         fast_req(app, logger, r, now);
     }
-    conflict
+    (conflict, go)
 }
 
-/// `fastlog::Ev::Start`: start the logger session of a disk session in the
-/// current function and give fastlog its header; false (the function no
-/// longer fits the source): the session is abandoned.
+/// `fastlog::Ev::Start`: prepare the logger session of a disk session in
+/// the current function and give fastlog its header (from `Logger::plan`);
+/// true: the caller starts the logger (`Logger::start`, in region B: the
+/// stream ISR may take the bus there, and no region C code may run after
+/// that). False (the function no longer fits the source): the session is
+/// abandoned.
 #[inline(never)] // .cold (link-native.x): once per session
 fn fast_start(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger) -> bool {
     let m = app.dmm.mode();
@@ -1481,7 +1514,7 @@ fn fast_start(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger) 
     }
     app.dmm_power(clk);
     app.dmm.start(clk);
-    logger.start(m, app.dmm.range());
+    let _ = logger.plan(m, app.dmm.range());
     let mut txt = [0u8; 512];
     let (n, par, unit) = fast_head(logger, app.dmm.ad2_scale(), &mut txt);
     fastlog::run(&fastlog::Head { par, unit, text: &txt[..n] });

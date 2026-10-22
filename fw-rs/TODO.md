@@ -860,6 +860,43 @@ Firmware:
       ~38 400 lost (1.8 %, g2 gaps, max 4.7 ms) - FAIL, to investigate; CSV on the volume == the tool's.
       (2) AD2 4800 / 19200: 0 lost; 38400: 1 lost; max_lat 1.6-12 us (not ~0.24). Host stop mid-run: clean
       (done, decodes to the last row). 3-7 not run.
+      Fixes (2026-10-22, emulator / host; device re-check = items 8-11 below):
+      - (1) AD1 160 .. 640 S/s runs on the stream ISR (logger.rs `ad1_on_isr`): R00..R02 read blind
+        mid-period, phase-locked by INTF.AD1F probes (ad2pll.rs, the timer at 40 / 80 / 160 ns per
+        count, PSC 4 << KSH - 1, so a 1.56 .. 6.25 ms period fits the 16-bit ARR; CPU frames at /16).
+        The slower AD1 settings keep the main-loop sampler, which now reads R00..R02 blind once when
+        AD1F does not come 1.25 periods after the last sample (the read-clear race; DBG:ISR? `late`).
+        Emulator (AD1F race on, `IntfRaceAd1`): AD1 640 / 160 to disk 0 lost.
+      - (2) max_lat 12 us at the disk session's start / stop: region C code ran while the ISR streamed
+        (`fast_events` / `fast_start` (.cold) started the logger and went on in C: `fast_head`,
+        `prep::run_begin`; at the end `fast_events` ran before it stopped the logger). Now
+        `Logger::plan` + the header first (C), `logger.start` / `logger.stop` in main.rs (B). Emulator
+        hooks on every region C function, flagged when entered with the bus handed to the ISR (the
+        hy3131 HANDED byte): f66af0d `fast_events` at the stop of an AD2 38400 disk session; now none
+        in disk sessions AD1 640 / 160 / 40, AD2 38400 (fastlog::prep / fatren / fatdir left unhooked:
+        per-pass Prep code, too slow under hooks). Also the USB volume's read path is in B now
+        (a host reading the volume while a stream runs no longer stalls the ISR).
+      - (3) FAST CSV reads: no full CRC scan at the volume refresh / open (headers + the last 4
+        chunks), no FAT re-walk per chunk (quadratic), the read path in region B, several USB packets
+        per pass while a READ runs (docs/compact-log-format.md 5). Host (fatren-test `vread`, 50.6 MB
+        CSV): SPI reads 171 k -> 13 k, ~1.5 s of SPI time; refresh ~1.5 s -> 0.04 s. Emulator
+        (fastlogtest --vol-read, MSC READ(10) of FAST000.CSV, 3.5 MB): == dlog.py; ~2.1 MB/s of
+        virtual time before and after (its USB moves a whole URB per poll and its flash is all
+        zero-wait: the packet pumping and region C are the device's to measure, item 10).
+      Open (emulator, once in 4 runs of the max-flash profile, 25f3879, 4 emulators sharing the CPU):
+      an AD2 19200 disk session's DMA-frame lock never converged (DBG:ISR? locked 0, probes alternating,
+      max_run 7: the phase step geared up and down), so the gated stream took no sample and the session
+      never ended; two reruns of the same sequence passed, as did f66af0d's once. AD2 path untouched by
+      this change. Wants: a lock timeout (restart / error after N s unlocked) and a repro with --ppm.
+      8. Device: AD1 640 S/s to disk 60 s (as 1): LOG:COUNt? lost 0, LOG:GAPs? all 0; DBG:ISR? active 1
+         during it, rate_mhz ~640 000, locked 1, late 0, max_lat < 2 us; also 320 (OSR 0 chop on) and 160.
+         AD1 40 (OSR 3) host session over USB 60 s: lost 0 (DBG:ISR? late = blind rescues, expect 0..few).
+      9. Device: AD2 38400 / 19200 to disk 60 s: max_lat < 2 us (lat_pc if not), 0 lost; also with the
+         USB volume read meanwhile (cp a big CSV): max_lat still < 2 us.
+      10. Device: copy a ~50 MB FAST CSV off the volume (`time cp`): >= 500 KB/s; also a small one
+          and LOG000.CSV; `cmp` with `dm40scpi.py get` / dlog.py of the DLG. The volume refresh after a
+          large session: no visible stall (was ~1.5 s per 2 MB of DLG).
+      11. Device: DMM page while a host copies: the reading keeps updating (2 ms of USB per pass).
 - [x] (A) DMM-input "slow floating scope" via AD2 = the Wave view (E5/E6; docs/dmm-input-scope-feasibility.md 10,
       src/app_wave.rs; feature `ad2-isr` only, hidden without it): MF range page "Wave" (V / A) and the scope page's
       "MCX | DMM" source badge; the AD2 stream drained into the scope record (continuous, 10-bit codes), the stock

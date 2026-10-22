@@ -1231,6 +1231,30 @@ PY
 # The USB volume (vdisk.rs): LOGS/FAST000.CSV / FAST001.CSV next to the LOGs.
 "$W/t" $W/vq.img vdisk $W/f1m_native $W/src/UID.BIN $W/src/OTP.BIN $W/src/OPTBYTES.BIN spi $IMGQ > $W/vq.out
 mtype -i $W/vq.img.1 ::LOGS/FAST000.CSV > $W/vq.csv && cmp $W/vq.csv $W/q1ref.csv && mdir -i $W/vq.img.1 ::LOGS | grep -q "^FAST001 *CSV" && echo "ok: the USB volume serves LOGS/FAST000.CSV (== the reference, $(stat -c%s $W/vq.csv) bytes) and FAST001.CSV" || { cat $W/vq.out; mdir -i $W/vq.img.1 ::LOGS; echo "FAIL at line $LINENO"; exit 1; }
+# A large fast log (1.1 M AD2 samples at 38 400 S/s: ~2.9 MB DLG, a ~50 MB
+# CSV): the USB volume's LOGS/FAST000.CSV read sequentially through
+# read_block == the reference; the raw SPI reads behind it (vread's
+# numbers: SPI bytes per CSV byte, the device estimate of the SPI time).
+IMGL=$W/diskl.img
+cp $W/fastbase.img $IMGL
+"$W/t" $IMGL fast 1100000 38400 | tee $W/ql
+grep -qE "^fast=Done file=Some\(0\) .* rows=1100000 drained=1100000 ring_drops=0 " $W/ql && echo "ok: 1.1 M samples at 38400 S/s -> LOGS/FAST000.DLG" || { echo "FAIL at line $LINENO"; exit 1; }
+"$W/t" $W/vl.csv vread $W/f1m_native $W/src/UID.BIN $W/src/OTP.BIN $W/src/OPTBYTES.BIN $IMGL LOGS FAST000.CSV | tee $W/vl.out
+cmp -s $W/vl.csv $IMGL.ref.csv && echo "ok: the 50 MB-class FAST000.CSV over the volume == the reference ($(stat -c%s $W/vl.csv) bytes)" || { echo "FAIL at line $LINENO"; exit 1; }
+python3 -I - $W/vl.out <<'PY' && echo "ok: CSV read amplification and refresh cost bounded" || { echo "FAIL at line $LINENO"; exit 1; }
+import re, sys
+t = open(sys.argv[1]).read()
+amp = float(re.search(r'\(([0-9.]+) B per CSV byte', t).group(1))
+kbs = float(re.search(r'= ([0-9]+) KB/s SPI-bound', t).group(1))
+rs = float(re.search(r'refresh: .*?~([0-9.]+) s on the device', t).group(1))
+# The DLG is ~1/22 of the CSV: each DLG byte read about once (window
+# refills, chunk headers, FAT; 2c-era: 0.095 B and 171 k reads, a CRC scan
+# of the whole file at refresh and at the open, ~1.5 s each on the device,
+# and a walk of the FAT chain from the start at every chunk); no full-file
+# scan at refresh / open (headers + the last chunks' CRCs).
+reads = int(re.search(r'read: spi ([0-9]+) reads', t).group(1))
+assert amp < 0.06 and kbs > 10000 and rs < 0.2 and reads < 20000, (amp, kbs, rs, reads)
+PY
 "$W/t" $IMGQ fast 5000 4800 abandon | tee $W/q3
 grep -qE "^fast=Done file=None .* started=false" $W/q3 && ! mdir -i $IMGQ ::LOGS | grep -q FAST002 && echo "ok: stopped while preparing: no file, nothing linked" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGQ

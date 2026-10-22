@@ -90,7 +90,12 @@ SECTIONS
         *(.text.*7dm40_fw4boot*);
         *(.text.*7dm40_fw3app9app_press*);
         /* dlog's per-reading row coder is `.text.dlog_row` (src/dlog.rs),
-         * not matched here: region B. upload::disk / spi and
+         * not matched here: region B. So is `.text.vdisk_rd`: the USB
+         * volume's per-sector read path (VDisk::read_block, the FAT / data
+         * sectors, a FAST CSV's generator: Gen::read, the kind-3 decoder,
+         * FatFile, flash_read; 2026-10-22: per 512-byte sector, ~6 KB). A
+         * host reading the volume during a stream then costs the ISR
+         * nothing, and the CSV is not generated from slow flash. upload::disk / spi and
          * vdisk::entries are inline(always) (vwrite::poll, every pass);
          * app_press's guard is inlined into App::gesture. Audit with
          * emulator hooks on every function of C, 2026-10-22 (TODO). */

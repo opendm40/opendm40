@@ -228,7 +228,10 @@ pub fn isr_read(reg: u8, buf: &mut [u8]) -> bool {
 /// Kernel clock 200 MHz (APB1 x4, TIMPRE, clock.rs); PSC 3 -> 50 MHz count
 /// (20 ns), the 16-bit ARR up to 1.31 ms: the ISR sets every interval
 /// itself (ARPE = 0, `set_interval`), phase-locked to the chip's conversion
-/// grid (src/ad2pll.rs; 1200 .. 38400 S/s, intervals 4 .. 833 us).
+/// grid (src/ad2pll.rs; 1200 .. 38400 S/s, intervals 4 .. 833 us). The
+/// AD1 stream (160 .. 640 S/s, logger.rs `isr`) runs the same tick with
+/// PSC 4 k - 1 (k = 2 / 4 / 8: 40 / 80 / 160 ns counts, a 1.56 / 3.1 / 6.25
+/// ms period = 39 062 counts).
 #[cfg(feature = "ad2-isr")]
 pub mod stream {
     use super::*;
@@ -289,17 +292,31 @@ pub mod stream {
     /// CPU; plain /8: 61 / 100 sign errors in 1.15 M / 2.36 M samples, device
     /// 4b98128). Returns the divider; the CKPH choice is applied too.
     pub fn pick_div(dma: bool) -> u8 {
+        let (div, cpha) = choose_div(dma);
+        use_div(div, cpha);
+        div
+    }
+
+    /// The divider / CKPH choice of `pick_div`, without applying it (the
+    /// logger's session plan caps the rung with it before any bus access).
+    pub fn choose_div(dma: bool) -> (u8, bool) {
         let req = DIV_REQ.load(Relaxed) as u8;
-        let (div, cpha) = match (req, dma) {
+        match (req, dma) {
             (0, false) => (8, true),
             (0, true) => (DIV, false),
             (d, false) => (d, CPHA_REQ.load(Relaxed)),
             (d, true) => (d, false),
-        };
+        }
+    }
+
+    /// Main loop, before the chip set-up of a stream: switch the read bus to
+    /// `div` / CKPH (`stop` puts `DIV` and mode 0 back). The AD1 stream
+    /// uses the main loop's own setting (`DIV`, mode 0: one 3-byte frame
+    /// per 1.56 ms or slower, the DMM's reads of every function).
+    pub fn use_div(div: u8, cpha: bool) {
         spi::set_div(div);
         super::set_data_cpha(cpha);
         DIV_USED.store(div as u32 | (cpha as u32) << 8, Relaxed);
-        div
     }
 
     /// The fastest AD2 rung (S/s) the stream ISR can read at `div`: with one
@@ -359,7 +376,9 @@ pub mod stream {
     /// interrupt line and SysTick / PendSV is disabled and its pending bit
     /// cleared (the FS-loader may have left some on), and TIM7 is the only
     /// line enabled, at priority 0: exactly one interrupt in the NVIC.
-    pub fn start(first: u32) {
+    /// `psc`: the timer prescaler (3 = 20 ns counts, the AD2 stream; the
+    /// AD1 stream counts slower so that a period fits the 16-bit ARR).
+    pub fn start(first: u32, psc: u32) {
         let first = first.clamp(100, 65_536);
         unsafe {
             modify32(RCU_APB1EN, 0, RCU_TIM7EN);
@@ -368,7 +387,7 @@ pub mod stream {
             // ARPE = 0: an ARR write applies to the running interval (the
             // ISR writes it at the start of each one).
             w32(CR1, CR1_URS);
-            w32(PSC, 3);
+            w32(PSC, psc & 0xFFFF);
             w32(ARR, first - 1);
             w32(EGR, 1); // UG: load PSC now (no UIF: URS)
             w32(CNT, 0);
@@ -946,6 +965,13 @@ pub const R22_CHOP: u8 = 0x10;
 pub const fn ad1_period_us(osr_code: u8, chop: bool) -> u32 {
     let clocks = (256u64 << (osr_code & 7)) * AD1CLK_DIV as u64 * if chop { 2 } else { 1 };
     ((clocks * 1_000_000 + SYSCLK_HZ as u64 / 2) / SYSCLK_HZ as u64) as u32
+}
+
+/// AD1 conversion rate for an AD1OSR code and chopper, mHz (exact: 640 000
+/// at OSR 256 unchopped; `ad1_period_us` rounds the period to 1 us).
+pub const fn ad1_rate_mhz(osr_code: u8, chop: bool) -> u32 {
+    let clocks = (256u64 << (osr_code & 7)) * AD1CLK_DIV as u64 * if chop { 2 } else { 1 };
+    ((SYSCLK_HZ as u64 * 1000 + clocks / 2) / clocks) as u32
 }
 
 /// `ad1_period_us` of a raw R22 value (AD1OSR = bits 2..0, AD1CHOP bit 4).

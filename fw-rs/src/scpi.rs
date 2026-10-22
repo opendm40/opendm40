@@ -401,7 +401,10 @@ pub enum Log {
 ///                           HY3131 frames since boot; rate_mhz = the locked
 ///                           conversion rate in MCU time, ppm_x10 = its period vs
 ///                           the nominal rung, signed; lat_pc = the PC (0x hex)
-///                           the worst-latency entry interrupted)
+///                           the worst-latency entry interrupted; AD1 sessions
+///                           at 160 .. 640 S/s run on it too; in a main-loop
+///                           AD1 session `late` = samples read blind after an
+///                           AD1F lost to the INTF read-clear race)
 ///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
 ///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
 ///                           as a crash (1st: fw-rs reboots; 2nd without 60 s
