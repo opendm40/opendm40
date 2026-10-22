@@ -56,6 +56,16 @@ FONTS = [
 ]
 
 
+# Fonts whose bitmap blob is a named static in its own section
+# `.rodata.a2.<NAME>`, which link-native.x places in region A2 (zero-wait
+# flash between the shim and the loader marker, 0x0800460c..0x08008000;
+# docs/native-boot.md "Region A2"). The other blobs stay anonymous rodata in
+# region B. A2 holds ~14.8 KB; build.sh warns below 2 KiB free. ASCII26 is
+# the logger panel's font (read per draw while the AD2 stream runs; device
+# 5f14d38 showed it in slow flash stalling the ISR), F14 the small texts.
+A2_FONTS = ('ASCII26', 'F14')
+
+
 def main():
     src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'dm40_v_2_6.dec.bin')
     body = open(src, 'rb').read()[12:]
@@ -189,7 +199,14 @@ def main():
             out.append(line)
         out.append('];')
         # Emit the bitmap blob as a wrapped byte-string literal.
-        out.append('pub static %s_B: &[u8] = b"\\' % name)
+        # A2 fonts: a named [u8; N] in `.rodata.a2.<NAME>` (link-native.x
+        # routes it to region A2); the others: an anonymous byte string.
+        a2 = name in A2_FONTS and len(blob) > 0
+        if a2:
+            out.append('#[link_section = ".rodata.a2.%s"]' % name)
+            out.append('pub static %s_B: [u8; %d] = *b"\\' % (name, len(blob)))
+        else:
+            out.append('pub static %s_B: &[u8] = b"\\' % name)
         esc = ''.join('\\x%02x' % b for b in blob)
         for j in range(0, len(esc), 128):
             cont = '\\' if j + 128 < len(esc) else '"'
@@ -199,8 +216,8 @@ def main():
         else:
             out.append(';')
         # Emit the FontData.
-        out.append('pub static %s_FD: FontData = FontData{line_h:%d,descent:%d,four:%s,entries:&%s_E,blob:%s_B};'
-                   % (name, line_h, descent, 'true' if four else 'false', name, name))
+        out.append('pub static %s_FD: FontData = FontData{line_h:%d,descent:%d,four:%s,entries:&%s_E,blob:%s%s_B};'
+                   % (name, line_h, descent, 'true' if four else 'false', name, '&' if a2 else '', name))
         out.append('')
 
     # Address -> embedded FontData dispatch, so stockfont::Font can stay keyed

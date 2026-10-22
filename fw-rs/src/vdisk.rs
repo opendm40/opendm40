@@ -1180,7 +1180,10 @@ impl W<'_> {
 }
 
 /// BACKUP.TXT bytes `base .. base + out.len()` into `out`; returns the
-/// text's whole length (constant for a given file table).
+/// text's whole length (constant for a given file table). In region B with
+/// the rest of the volume's read path (`.text.vdisk_rd`, link-native.x): a
+/// host may read BACKUP.TXT while a stream runs.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn describe(st: &State, base: usize, out: &mut [u8]) -> usize {
     let mut w = W { b: out, base, n: 0 };
     w.s(b"DM40 INFO: generated on the fly by dm40-fw ");

@@ -4,7 +4,16 @@
  * the GD32F4 low 512 KiB of flash is zero-wait, so nothing is copied to SRAM).
  *
  * Flash (body offset = address - 0x08004000):
- *   A  0x08004000..0x08008000  16 KiB  vector table + shim (.vectors, .shim)
+ *   A  0x08004000..0x08008000  16 KiB  vector table + shim (.vectors, .shim),
+ *                                      then region A2 (.a2) up to the marker:
+ *                                      zero-wait flash in the update body's
+ *                                      sector 1 (FS-loader writes it like any
+ *                                      body byte), named hot read-only data
+ *                                      (`.rodata.a2.*`: the ASCII26 and F14
+ *                                      font blobs, tools/mkstockfont.py
+ *                                      A2_FONTS). ~14.8 KB; the link fails
+ *                                      when it reaches the marker, build.sh
+ *                                      warns below 2 KiB free.
  *      0x08008000..0x08008010  16 B    GAP, 0xFF in the binary. The ROM and the
  *                                      FS-loader read AND write a 12-byte record
  *                                      at 0x08008000..0x0800800B (excluded from
@@ -65,6 +74,20 @@ SECTIONS
         KEEP(*(.shim .shim.*));
         . = ALIGN(4);
         __region_a_end = .;
+    } > FLASH_A
+
+    /* Region A2: the rest of FLASH_A after the shim, below the loader marker
+     * (zero-wait, part of the update body). Claimed before .cold / .text
+     * (first matching rule wins). Only hot, B-class data or code may go
+     * here (it is as fast as B); nothing the shim / recovery needs (that
+     * stays in .vectors / .shim). */
+    .a2 :
+    {
+        __a2_start = .;
+        *(.rodata.a2 .rodata.a2.*);
+        *(.text.a2 .text.a2.*);
+        . = ALIGN(4);
+        __a2_end = .;
     } > FLASH_A
 
     /* Claimed before .text (the first matching rule wins), placed in C by
@@ -207,13 +230,11 @@ SECTIONS
         *(.text.*7dm40_fw3app*3App11sp_save_csv*);
         /* Region B audit #3 (2026-10-22, 11.9 KB free on c58ae48):
          * `#[inline(never)]` event / start-up code that sat inlined in hot
-         * callers. Taps and keys (App::tap with pw_tap / kp_apply / range
-         * hits, App::key, App::show = a view change, App::wave_open) run at
-         * event rate. Touch is suspended only while the logger runs; the
-         * Wave view's taps go to sp_gesture (B), so App::tap meets a stream
-         * only on the inrush page (inrush_tap was already in C): one tap =
-         * a burst of slow fetches, each <= ~20 us of ISR entry latency,
-         * within ad2pll's tolerated spike. Start of a recording /
+         * callers. App::wave_open runs at event rate. (App::tap with
+         * pw_tap / kp_apply / range hits, App::key and App::show were here
+         * too; back in B since region A2 took the ASCII26 / F14 font blobs
+         * out of B, 2026-10-22: App::tap meets a stream on the inrush
+         * page.) Start of a recording /
          * logger session (App::rec_start with csvlog::start, Logger::start,
          * logger::isr::start: before the ISR runs, or after it stopped on a
          * retry). Page / dialog draws on a view change (power
@@ -222,9 +243,6 @@ SECTIONS
          * SCOP:CAL with HwTrig::calibrate). Start-up only: Touch::new,
          * Bt::new (not init_module: polled every pass), SpiFlash::new,
          * usb::init_hw. */
-        *(.text.*7dm40_fw3app*3App3tap*);
-        *(.text.*7dm40_fw3app*3App3key*);
-        *(.text.*7dm40_fw3app*3App4show*);
         *(.text.*7dm40_fw3app*3App9wave_open*);
         *(.text.*7dm40_fw3app*3App9rec_start*);
         *(.text.*7dm40_fw6logger*6Logger5start*);
@@ -334,6 +352,8 @@ SECTIONS
 }
 
 ASSERT(__region_a_end <= _marker_start, "region A (vectors + shim) overlaps the loader marker at 0x08008000");
+ASSERT(__a2_start == __region_a_end, "region A2 does not start right after the shim");
+ASSERT(__a2_end <= _marker_start, "region A2 (.rodata.a2.*) overlaps the loader marker at 0x08008000: move a font out of A2_FONTS (tools/mkstockfont.py)");
 ASSERT(ADDR(.text) >= _marker_end, "code placed in the loader marker at 0x08008000..0x0800800B");
 ASSERT(__image_end <= 0x080A0000, "image reaches the FS-loader at 0x080A0000");
 /* Region C budget: >= 4 KiB free below 0x080A0000 (build.sh warns below
