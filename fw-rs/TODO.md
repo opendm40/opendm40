@@ -803,6 +803,8 @@ Firmware:
       "Fast stream"). Over BT: the ~870 records/s link ceiling (docs/bt-scpi.md) is below AD2's slowest rung
       (1200 S/s): LOG:STATe ON from BT is refused for AD2 / > 800 S/s ("Rate too high for Bluetooth"), AD1
       (<= 640 S/s) streams over BT LOG:DATA?; BT LOG:DATA? of a faster USB session: empty block + the error.
+      Device 0667175 (before this refusal existed): AD2 1200 S/s started and drained over BT gave 918 records/s,
+      lost 0, 6 593 of 36 418 overwritten (ring full): confirms the ceiling (device-check "Bluetooth (0667175)").
 - [ ] Fast logger device check (fastlog.rs; ~30 min; emulator results in docs/compact-log-format.md):
       1. DC V, LOG:SOUR AD1, LOG:OSR 0, LOG:CHOP OFF, LOG:DEST DISK, LOG:DUR 60, LOG:STAT ON: LOG:DISK? goes
          1 (prep, note the seconds) -> 3 -> 5; LOGS/FAST000.CSV on the USB volume == dlog.py of MMEM:DATA?
