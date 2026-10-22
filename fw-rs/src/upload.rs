@@ -283,6 +283,7 @@ pub(crate) fn next_free(dev: &mut dyn BlockDevice, v: &crate::fatren::Vol, hint:
 
 /// DBG:UPLoad:END? on the device's SPI flash: (size, crc).
 #[cfg(target_os = "none")]
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn end() -> R<(u32, u32)> {
     end_on(disk())
 }

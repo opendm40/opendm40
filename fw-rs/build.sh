@@ -47,6 +47,7 @@ fi
 head -1 target/native/stackdepth.txt
 
 BODY=target/native/dm40-fw-native.body.bin
+rm -f target/native/regionb.warn
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
 python3 ../firmware/dm40fw.py pack --pad "$BODY" dm40-fw-native.bin
 python3 - "$BODY" "$ELF" <<'PY'
@@ -69,7 +70,8 @@ print("dm40-fw-native.bin: body %d bytes, 0x%08x..0x%08x (limit 0x%08x, %d bytes
 bfree = 0x08080000 - syms['__etext']
 print("  region B free    = %d bytes (zero-wait flash below 0x08080000; link fails below 8 KiB)" % bfree)
 if bfree < 16384:
-    print("build.sh: WARNING: only %d bytes of region B (zero-wait flash) left (< 16 KiB): move rarely run code to .cold (link-native.x)" % bfree, file=sys.stderr)
+    # Repeated as a banner at the very end of build.sh (target/native/regionb.warn).
+    open('target/native/regionb.warn', 'w').write('%d\n' % bfree)
 print("  SRAM free        = %d bytes (above .sram_bss; >= 8 KiB)" % (0x20030000 - syms['__sram_bss_end']))
 print("  word0 initial SP = 0x%08x (loader only; reset sets 0x10010000)" % sp)
 print("  word1 reset      = 0x%08x" % entry)
@@ -99,4 +101,19 @@ if [ $((0x08004000 + n - 12)) -gt $((0x080A0000)) ]; then
     echo "build.sh: the padded body ends past 0x080A0000 (FS-loader)" >&2
     rm -f dm40-fw-native.bin
     exit 1
+fi
+# Region B (zero-wait flash) below 16 KiB free: a loud banner as the last
+# thing printed (the link itself fails below 8 KiB, link-native.x).
+if [ -f target/native/regionb.warn ]; then
+    b=$(cat target/native/regionb.warn)
+    {
+        echo
+        echo "################################################################################"
+        echo "## build.sh: WARNING: region B (zero-wait flash) has only $b bytes free (< 16 KiB)"
+        echo "## The link fails below 8 KiB. Move rarely run code (start / stop, taps, pages,"
+        echo "## debug replies) to .cold (link-native.x; #[inline(never)] where it is inlined"
+        echo "## into a hot caller), never per-pass or ISR / stream code (docs/native-boot.md)."
+        echo "################################################################################"
+        echo
+    } >&2
 fi

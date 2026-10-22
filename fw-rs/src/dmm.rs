@@ -3072,7 +3072,7 @@ impl Dmm {
         }
         self.ramp.med_i += 1;
         let mut s = self.ramp.med;
-        s.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+        sort_f32(&mut s);
         let dvm = s[2];
         let class = if dvm < 2.5 {
             1
@@ -3105,7 +3105,7 @@ impl Dmm {
                 self.ramp.buf[33]
             } else if n > 4 {
                 let mut b = self.ramp.buf;
-                b[..n].sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+                sort_f32(&mut b[..n]);
                 b[2..n - 2].iter().sum::<f32>() / (n - 4) as f32
             } else {
                 c
@@ -3242,6 +3242,22 @@ impl Dmm {
             return None;
         }
         ad2_scale_of(self.mode, self.range)
+    }
+}
+
+/// Ascending sort of a few (5 / <= 35) readings: insertion sort, the same
+/// order as `sort_unstable_by(partial_cmp)` for numbers (NaN compares as
+/// equal, so its place is not defined, as there). ~0.1 KB instead of the
+/// ~3.3 KB core quicksort instantiation (region B).
+fn sort_f32(v: &mut [f32]) {
+    for i in 1..v.len() {
+        let x = v[i];
+        let mut j = i;
+        while j > 0 && x < v[j - 1] {
+            v[j] = v[j - 1];
+            j -= 1;
+        }
+        v[j] = x;
     }
 }
 
