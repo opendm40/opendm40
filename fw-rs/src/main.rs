@@ -1246,6 +1246,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if now >= next_poll {
             next_poll = now + 5;
             prof::enter(prof::BT);
+            // Module power (PC0) follows the BT setting.
+            bt.power(app.bt_on);
             // The BT module AT init blocks; not while the logger samples.
             if app.bt_on && !busy {
                 bt.init_module(&mut clk, app.dmm.model());

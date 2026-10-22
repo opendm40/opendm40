@@ -103,6 +103,16 @@ uses classic SPP anyway.
 /usr/bin/python3 tools/dm40bt_scpi.py bench      # READ? / WAV:DATA? timing
 ```
 
+**Which address.** The module is dual-mode, so BlueZ lists the meter twice:
+the classic device with the Serial Port UUID, stock name
+"C-1-ATK-DM40-CALI" (this unit: XX:XX:XX:XX:XX:XX; "CALI" is the module's
+factory name, not a calibrator), and the BLE device "DM40A" / "B" / "C" for
+the phone app, whose address has the first byte one lower. RFCOMM channel 1
+of the classic address is the one to use. "Host is down" from it means the
+module does not answer pages at all: Bluetooth OFF in Settings, or a phone
+holding the module's one connection, or (fw-rs before 2026-10-22) the module
+left unpowered (PC0 high).
+
 The address is found like the memrw kit finds it (`bluetoothctl`, the classic
 device with the Serial Port UUID, cached in `~/.config/dm40-memrw/mac`).
 `--mac` or `DM40_MAC` set it directly, and `--dev /dev/rfcomm0` uses a bound

@@ -8,6 +8,16 @@
 // the stock measurement protocol (AF 05 03 ...) and fw-rs's SCPI can be used
 // from the host; AT lines are still answered locally.
 //
+// Module power (PC0, bt_meas_v2_6.h section 1: the stock drives it low at the
+// BT UART init on the meter page and high when the page is left; high = off is
+// the header's guess, confirmed by fw-rs native builds that left PC0 high and
+// were unreachable over BT): the module is on only while PC0 is an output
+// driven low (the stock boot drives it high first thing, so the reset state
+// counts as off). While off it answers no AT line and keeps PC14 low; a host
+// connection waits for power (a page attempt) and is refused when none comes
+// within PageTimeoutMs of wall time (the host's "Host is down"); a link is
+// dropped when the module loses power. PowerModel false = always on.
+//
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -46,6 +56,25 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public void WriteDoubleWord(long offset, uint value) { }
 
         public string Name { get; set; }
+        /// Model the PC0 power pin (default on).
+        public bool PowerModel { get; set; } = true;
+        /// Host connections refused or dropped because the module was off.
+        public ulong Refused { get; private set; }
+
+        /// Wall-clock wait of a host connection for module power.
+        public int PageTimeoutMs { get; set; } = 30000;
+
+        /// Module on = PC0 an output driven low (GPIOC MODER pin 0 = 01, ODR bit 0 = 0).
+        public bool Powered
+        {
+            get
+            {
+                if(!PowerModel) return true;
+                var moder = machine.SystemBus.ReadDoubleWord(GpiocBase);
+                var odr = machine.SystemBus.ReadDoubleWord(GpiocBase + 0x14);
+                return (moder & 3) == 1 && (odr & 1) == 0;
+            }
+        }
         public ulong AtCommands { get; private set; }
         public ulong Lines { get; private set; }
 
@@ -99,6 +128,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private void OnChar(byte b)
         {
             TxLog(b);
+            if(!Powered)
+            {
+                line.Clear();
+                DropIfOff();
+                return;
+            }
             // Pass through to the host first.
             var c = client;
             if(c != null)
@@ -148,6 +183,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             machine.ScheduleAction(TimeInterval.FromMilliseconds(5), _ => SendToUart(r));
         }
 
+        /// The module lost power: the link drops (PC14 low).
+        private void DropIfOff()
+        {
+            var c = client;
+            if(c == null) return;
+            Refused++;
+            client = null;
+            try { c.Close(); } catch(Exception) { }
+            connPort?.OnGPIO(connPin, false);
+        }
+
         private void TxLog(byte b)
         {
             if(b == (byte)'\n' || txLine.Count > 200)
@@ -168,6 +214,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 TcpClient c;
                 try { c = listener.AcceptTcpClient(); } catch(Exception) { return; }
+                var waited = 0;
+                while(!Powered && waited < PageTimeoutMs)
+                {
+                    Thread.Sleep(10);
+                    waited += 10;
+                }
+                if(!Powered)
+                {
+                    Refused++;
+                    this.Log(LogLevel.Info, "BT host refused: module off (PC0 not driven low)");
+                    try { c.Close(); } catch(Exception) { }
+                    continue;
+                }
                 this.Log(LogLevel.Info, "BT host connected");
                 client = c;
                 connPort?.OnGPIO(connPin, true);
@@ -178,6 +237,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     int n;
                     while((n = st.Read(buf, 0, buf.Length)) > 0)
                     {
+                        if(!Powered)
+                        {
+                            Refused++;
+                            this.Log(LogLevel.Info, "BT link dropped: module powered off");
+                            break;
+                        }
                         var copy = new byte[n];
                         Array.Copy(buf, copy, n);
                         SendToUart(copy); // delivered on the emulation thread
@@ -190,6 +255,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
         }
 
+        private const ulong GpiocBase = 0x40020800;
         private readonly IMachine machine;
         private readonly IUART uart;
         private readonly IGPIOReceiver connPort;

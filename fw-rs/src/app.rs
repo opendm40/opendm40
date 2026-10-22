@@ -796,7 +796,7 @@ impl App {
     fn status(&self, now: u64) -> ui::Status {
         ui::Status {
             uptime_s: (now / 1000) as u32,
-            bt: self.power.bt_connected(),
+            bt: self.bt_on && self.power.bt_connected(),
             bars: self.power.bars,
             charging: self.power.charging(),
             locked: self.locked,
