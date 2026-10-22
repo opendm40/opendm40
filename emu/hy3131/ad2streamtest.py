@@ -49,9 +49,10 @@ ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.
 ap.add_argument('--race-us', type=float, default=None, help='INTF read-clears-flag race window, us (model default 0.7)')
 ap.add_argument('--miso-err', type=float, default=None, help='probability that a marginal mode-0 /8 bit is read at its old '
                 'level (model MisoErrRate, default 1e-3): the 76.8 kS/s probe frames run /8 mode 0')
-ap.add_argument('--sessions', default='4800:2:20,9600:1:15,1200:2:10',
-                help='rate:draw:secs[:dma],... (secs scaled by --secs; dma = DBG:AD2:DMA 0 / 1 sent before the '
-                     'session; without it nothing is sent: the firmware default (DMA frames) or the last one sent)')
+ap.add_argument('--sessions', default='4800:2:20,9600:1:15,1200:2:10,76800:1:10',
+                help='rate:draw:secs[:dma[:hyb]],... (secs scaled by --secs; dma = DBG:AD2:DMA 0 / 1 sent before the '
+                     'session, -1 or none: nothing sent, the firmware default (DMA frames) or the last one sent; '
+                     'hyb 1 = DBG:AD2:DIV 8,1: the 76.8 kS/s hybrid frames forced at this rung)')
 A = ap.parse_args()
 OUT = os.path.join(EMU, 'out')
 os.makedirs(OUT, exist_ok=True)
@@ -128,8 +129,12 @@ try:
     check(abs(v - 0.5) < 0.005, 'AC V reads 0.5 V before streaming (%.5f)' % v)
 
     dma_cur = 1  # the firmware default (decision 2026-10-22 #7: DMA frames)
-    for rate, draw, secs, dma in [tuple(float(x) if i == 2 else int(x) for i, x in enumerate((v + ':-1').split(':')[:4]))
-                                  for v in A.sessions.split(',')]:
+    for rate, draw, secs, dma, hyb in [tuple(float(x) if i == 2 else int(x) for i, x in enumerate((v + ':-1:0').split(':')[:5]))
+                                       for v in A.sessions.split(',')]:
+        # hyb 1: DBG:AD2:DIV 8,1 (the hybrid frames forced at any rung,
+        # device check item 3 of the TODO "76.8 kS/s"), DIV 0 after.
+        hyb = hyb > 0
+        q('DBG:AD2:DIV %s' % ('8,1' if hyb else '0'))
         if dma >= 0:
             q('DBG:AD2:DMA %d' % dma)
             dma_cur = dma
@@ -196,7 +201,7 @@ try:
                   'probes ~ 1 in 4 periods, entries = A + B (%d probes, %d B entries)' % (isr[5], bents))
         # DMA frames: /16 up to 38400, the hybrid frame (/8 + CKPH data phase,
         # div 1008) at 76800; CPU frames /8 + CKPH (and capped at 38400).
-        want_div = 16 if dma == 1 and rate <= 38400 else 1008
+        want_div = 16 if dma == 1 and rate <= 38400 and not hyb else 1008
         check(isr[22] == (1 if dma == 1 else 0) and isr[19] == want_div,
               'DMA frames %d (DBG:AD2:DMA %d), div %d (1008 = /8 + CKPH data phase)' % (isr[22], dma, isr[19]))
         check(abs(int(pre[8]) / 1000 - min(rate, 76800 if dma == 1 else 38400)) < 2,
