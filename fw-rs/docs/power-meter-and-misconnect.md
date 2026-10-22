@@ -1138,12 +1138,11 @@ deadline only ~1.4 times a second (the sensor phases), so the comparator is
 sampled that rarely there: DC trips as elsewhere, an AC current trips and
 clears more slowly and may flicker.
 
-Not done (as allowed by 4.2-4.4): AC+DC (both phases keep the stock rows:
-`freq_secondary` rewrites R20), diode / continuity / capacitance /
-frequency / AC A A-jack or V-jack sentinels (their comparators / converters
-are busy; AD2 + OP2 variants need T8 first), the DC? / AC? / FUSE? hints, the
-OVERLOAD shunt rule, the fuse-check dialog, STAT:QUES bit 9. The MOSFETs are
-never switched by the sentinel.
+Not done in this step (all done since, section 4.7): AC+DC, diode /
+continuity / capacitance / frequency / AC A sentinels, the DC? / AC? / FUSE?
+hints, the OVERLOAD shunt rule, the fuse-check dialog, STAT:QUES bit 9. The
+MOSFETs are never switched by the sentinel (only the OVERLOAD rule does, in
+the current functions).
 
 UI (stock visual language, `tools/ui-render` ink / overlap check over every
 alert x hold x verdict x rate-chip case, renders d12-d14, c11, t03, m10):
@@ -1206,6 +1205,146 @@ Device test plan (sentinel build; commit the tree before flashing):
   cleared 0.5 s after removal; DC mA reading with SS5 closed unchanged
   (12.3 mA reference); no alert while a current flows.
 
+### 4.7 Implemented (fw-rs, 2026-10-22): OVERLOAD, the other sentinels, hints, fuse check
+
+What the rest of 4.2-4.5 became, with the manual's answers of section 5 (ONE
+10 A ceramic fuse in front of all shunts: the 0.5 ohm mA shunt and the 47.5
+ohm uA resistor have no protection of their own, so the OVERLOAD rule
+matters). Code: `sentinel.rs` (pure rules, row overrides, host tests),
+`dmm.rs` / `powermeter.rs` (the latch, the hooks, the fuse job), `app.rs` /
+`dialog.rs` / `ui.rs` (badge, beep, toast, dialog, the Current Settings
+button), `scpi.rs`.
+
+**OVERLOAD (doc 4.3 rule, red, not maskable).**
+
+| | |
+|---|---|
+| where | DC A / AC A / AC+DC A on the mA (0.5 ohm) or uA (47.5 ohm) shunt; the power meter's I channel on ik 0..3. Never in V / ohm / continuity / diode / cap / Hz / temperature (no shunt switching there: host test `overload_rule`) |
+| trigger | a reading over its range (\|I\| > 1.03 x the range, i.e. what shows OL; AC+DC: the total) when the range is manual (any of the shunt's two) or the shunt's top range in auto (6000 uA / 600 mA). In auto at r0 the stock step to r1 (same shunt, 10x) comes first, so a gross overload reaches 10 A two conversions after the A entry |
+| action | the 10 A range at once (DC: mode 7 r1, settle 250 ms; AC: mode 4 r1, 650 ms; AC+DC: its DC phase; power: ik 5, the V parts kept) whatever AUTO / AUTO+ / manual says; `relay_pe(0)` through the normal `write_config` |
+| latch | manual before: 10 A stays manual. Auto before: auto continues with the overloaded shunt (and the ones below it) barred, so 50 mA after a uA overload steps 10 A -> 6 A -> 600 mA and stops there |
+| release | any user range / function / AUTO choice (`press`, `set_range`, `auto_key`, `select`, `set_sub`, BT mode byte, `pw_set_ranges`, `pw_enter`), or \|I\| below `max(half the full scale it returns to, 2 mA)` for 5 s (OL readings never count): manual -> the range it left, auto -> the floor goes. 2 mA is what the 10 A range can tell from zero (1 mA digits; the model's noise ~0.5 mA). The one case where 2 mA exceeds the scale it returns to (manual 600 uA) could cycle trip / release every ~5.5 s with 0.6..2 mA flowing: a trip within 30 s of a timed release makes the new latch sticky (user choice only) |
+| timing | the first conversion after the settle: DC ~0.35 s after the overload (A entry: 650 ms settle first), AC ~0.75 s; one 300 ms beep (key / alert volume, also with the key beep off), toast "Overload: 10 A shunt selected", badge OVLD (TEXT22: "OVERLOAD" does not fit the 83 px slot) red, alternating with HOLD as A-JACK (decision #5), strip "OVLD" |
+| SCPI | `SYST:ALER?` OVERLOAD; `STAT:QUES:COND?` 514 (bit 9 + bit 1) |
+
+The protective value is thermal (the 47.5 ohm resistor and the 0.5 ohm shunt
+under amps for seconds), so detection after the settle is enough; reading AD1
+inside the settle would save ~0.3 s at most and was left out. It cannot help
+against a voltage source across A-COM in a current function (4.3: the fuse's
+business).
+
+**Sentinels added** (all A-JACK unless noted; host tests: byte diff vs the
+stock rows; `DBG:SENTinel:VARiant +8` writes the stock rows again for a device
+comparison):
+
+| mode | block (free in the stock row) | row override | threshold |
+|---|---|---|---|
+| AC+DC V / A | the plain DC and AC phases' own sentinels (comparator PB1 / SENSE in the DC phase, AD1 peak in the AC phase); the DC phase's R20 goes through `acdc_src` because `freq_secondary` rewrites it every 350 ms (the counter then counts that node; AC+DC shows no frequency). The history belongs to the function and the sentinel family (A-JACK: comparator + AD1 / AD2 peak; V-JACK?: comparator + AD1 peak), so a phase switch keeps an alert; the comparator is also read during the phase settles | as the plain modes | as the plain modes; V-JACK?'s "no current" = < 5 % of the range (the total carries the AC floor) |
+| AC A (4..6), V-JACK? | AD1 (off in the row) on SENSE - PB5 with the /1000 tap (SS5 only, as DC A), IG 3.6, OSR 256 unchopped, peak hold; OP1's chopper held off (AD1 on starts it: the 9dd1222 AC V floor) | R22 00, R23 \|= ENAD1, R24 07, R25 \|= 30, R29 PKH AD1, R2C \|= 10, R33 OP1CHOP 00 | 1 510 codes = 2 V on V/ohm; "no current" = < 5 % of the range (the uA path's RMS floor is ~1.5 % of 600 uA, acdc doc 6b) |
+| frequency (14) | AD1 runs a zero reading (PB5 - PB5) nobody reads: it takes PB1 - PB3 with the AC rows' peak settings; harvested in `poll` every 100 ms (6 bytes R0E..R13), hold restarted | R22 00, R24 95, R25 \|= 30, R29 PKH AD1 | 17 900 (0.5 mA), as AC V |
+| continuity (11), diode (12), cap r0..4 (13, RC oscillator) | AD2 + OP2 (unused there): OP2 x1 (OPS2 0) on PB1, AD2 = OP2O - PB3, refs PB6 / AGND, IG 2.0, OSR 256, peak hold on AD2 (PKHSEL 00); continuity / diode have AD1 on: the row goes out with AD1 off and ENAD1 last (note 7: AD2 never starts while AD1 converts) | R25 AD2IG 11 + OPS2 0, R26 83, R27 6D, R29 ENPKH, R32 D0 \| OP1 | 9 900 codes = 0.5 mA |
+
+Gaps (no fake coverage): capacitance r5..7 (the ramp: both op amps on PB0,
+AD1 and the comparator busy; asserted by the `cap-ramp-gap` scenario) and DC
+V 60 / 600 / 1000 V (the 9dd1222 false trip, 4.6). In the temperature
+function the comparator is still sampled only ~1.4 times a second (4.6).
+
+**Hints (doc 4.4, grey in the status slot, silent, one toast; on with Jack
+alerts ON, off with "A-JACK only" / OFF; `SYST:ALER?` DC / AC / FUSE; below
+every alert, never alternating with HOLD):**
+
+* **DC?** (AC V, not AC+DC): AD1 alternates per 100 ms window between PB1 -
+  PB3 (A-JACK) and SENSE - PB5 (the range's divider tap: AC V r0 / r1 use DC
+  V r1's /100 tap - INFERRED from R2C / R2D - r2 /1000, r3 /10000), IG 3.6
+  both. The V-tap window's (PKHMIN + PKHMAX) / 2 is the DC; hint when |DC| >
+  max(0.5 V, 2 % of the range) and the AC reading < 10 % of it, 2 s to
+  assert, 1 s to clear. ENPKH goes off with the input switch and back on 3 ms
+  later (`pkh_due`), so the one 1.6 ms conversion of mixed inputs never
+  reaches the hold (else a V-jack DC would be an A-JACK hit). A-JACK now sees
+  every other window: it still asserts on two PB1 windows in a row (~0.3 s).
+* **AC?** (DC V 6 V only: the other ranges have no sentinel): the comparator
+  alternates per window between PB1 and SENSE (V / 10, the model's and the
+  stock formula's ratio for r0); both CMPHO and CMPLO in one SENSE window =
+  the input swings both ways by > 0.21 V around zero; 2 s / 1 s. The first
+  CTSTA after each switch is dropped.
+* **FUSE?** (DC / AC / AC+DC A, not the power meter): 60 s with |I| below 0.1
+  % of the range (DC; 60 of 60000 counts) or 5 % (AC, AC+DC: their RMS
+  floor), not OL; any reading above clears it at once. It is a question:
+  with the fuse intact and nothing connected the meter reads the same zero.
+* `DBG:SENTinel:VARiant +16` turns the two alternations off (the 4.6 rows).
+
+**Fuse check** (Current Settings page, the "Fuse check" button between
+Hold/Limits and OK; `SYST:FUSE:TEST`, `SYST:FUSE?`): a dialog "Lead from
+V/ohm jack to A, nothing else connected" -> Start -> ohm 600 ohm, manual,
+the stock row with every sentinel off (the check drives the ohm current
+through the A shunt on purpose), PE = 2 as every ohm row: V/ohm -> lead -> A
+-> fuse -> 10 mohm + 0.5 + 47.5 ohm -> COM ~ 48 ohm. The third reading
+decides: 44..54 ohm FUSE OK (green), OL FUSE OPEN (red, "Replace: 10 A
+ceramic fuse"), anything else "Check leads" (amber; a short V-COM, the lead
+in COM); no reading in 8 s: "No ohm reading". Then the function before comes
+back (a manual DMM range too; from the power meter the energy restarts);
+Cancel / a key aborts and restores; "Again" repeats. The 0.05 ohm step with
+PE0 = 1 of 4.3 is left out: it tests the MOSFET, not the fuse. `SYST:FUSE?`:
+IDLE | BUSY | OK,<ohm> | OPEN | FAIL,<ohm> | FAIL,NONE; ~1 s in the emulator.
+
+**STATus:QUEStionable**: `:CONDition?` bit 9 while a red alert (A-JACK,
+OVERLOAD) is on, bit 1 while OVERLOAD (SCPI-99 CURRent; the 34401A's
+"current overload"; note: in the 34401A bit 9 means "ohms overload", hosts
+using SYST:IDN:EMUL 34401A may read it so); `[:EVENt]?` the bits latched
+since the last read / `*CLS`. No enable / transition registers; `*STB?`
+stays 0.
+
+**Emulator** (terminal-level model, `emu/hy3131`, both copies identical):
+the AD1 sentinel input in the Freq role, SENSE - PB5 through the /1000 tap
+in AC A and through the range's tap in AC V, AD2 = OP2(PB1) - PB3 in the
+continuity / diode / cap-oscillator roles (the peak hold now sees every
+AD2 result between two bus accesses), the comparator on SENSE (V / 10) in
+DC V r0; row matching frees exactly those fields; front-end keys `valead`
+(a lead V/ohm -> A: fuse + shunt chain in parallel with V-COM) and
+`fuseopen` (no current reaches the shunts; kept by `open`). Model checks:
+362 pass. `emu/hy3131/senttest.py` 44 scenarios (25 new: ovl-dcma, ovl-dcua-man,
+ovl-acma, ovl-acdc, ovl-pow, acdc-v, acdc-vac, acdc-a, aca-v, aca-vac,
+aca-vi, freq-a, cont-a, diode-a, cap-a, cap-ramp-gap, acv-dchint, acv-dc-ac,
+acv-dc-ajack, dcv-achint, dcv-ac-ajack, fuse-hint, fuse-ok, fuse-open,
+fuse-odd); every row also checks `STAT:QUES:COND?` against `SYST:ALER?`.
+OVERLOAD reached 10 A ~0.5 s after 2 A appeared on the 60 mA AUTO range;
+the fuse check read 47.50 ohm.
+
+**Device test plan (this build; commit the exact tree before flashing):**
+
+* **T8** first (gates the AD2 rows): diode 0.65 V (a 1N4148), continuity 10
+  ohm, cap 100 nF / 1 uF: readings with `DBG:SENT:VAR 0` vs `8` equal within
+  noise (note 7: AD2 running beside AD1). If the diode / continuity reading
+  moves, keep +8 behaviour for those modes (rows back to stock).
+* **T11 OVERLOAD** (current-limited bench supply in series with a load; the
+  10 A fuse protects nothing below 10 A, so start at 0.2 A): DC 60 mA manual
+  with 0.2 A -> OVLD + beep + toast within ~0.4 s, reads 0.200 A on 10 A;
+  remove the current -> back on 60 mA after ~5 s; 0.1 A again within 30 s ->
+  sticky (stays on 10 A at 0 A). DC AUTO: 1 A -> 10 A, then 50 mA -> 600 mA
+  (never the uA shunt) until 0 A for 5 s. AC mA 0.5 A 50 Hz, AC+DC, the power
+  meter with I fixed on 600 mA and 1.5 A: the same. `STAT:QUES:COND?` 514
+  while on, `STAT:QUES?` 514 once after. V modes with current in A: A-JACK,
+  never a shunt change (`DBG:SENT?`, PE stays 2).
+* **T12 AC A V-JACK?**: 5 V, 24 V DC and mains on V-COM, nothing in A, AC mA
+  / uA / A: amber V-JACK? after ~1 s; 10 mA AC flowing with 24 V on V-COM:
+  none; AC mA 10.000 mA reading with alerts ON vs OFF equal (AD1 on + OP1's
+  chopper held off must not move the RMS).
+* **T13 A-JACK** in AC+DC V (1 mA DC, 10 mA AC: no flicker over the phase
+  switches), Hz (1 kHz on V, 1 mA into A), continuity, diode, cap 100 nF (1
+  mA and 10 mA AC); cap 100 uF (ramp): no alert (gap). No false trips over 10
+  min with the A jack open in each, also while autoranging.
+* **T14 fuse check**: lead V/ohm -> A: FUSE OK ~48 ohm (note the value: it
+  is the real resting resistance, INFERRED so far); leads V-COM shorted:
+  Check leads; lead removed: FUSE OPEN; from AC+DC / the power meter / a
+  manual range: the function comes back.
+* **T15 hints**: AC V with 5 V DC -> DC? within ~3 s, 1 V AC -> none; 230 V
+  mains AC V reading with `VAR 0` vs `16` equal (the AD1 input switch every
+  100 ms must not move the RMS / LPF / Hz); DC V with 2 V AC -> AC?, 1 V DC
+  -> none, DC V zero / 1.0000 V with `VAR 0` vs `16` equal; DC A with
+  nothing connected for 60 s -> FUSE?.
+* **T16**: `SYST:ALER?` names, `STAT:QUES?` cleared by the read and by
+  `*CLS`, the Help 5/5 rows, the Settings 3/3 masks (A-JACK only: no hints).
+
 ---------------------------------------------------------------------------
 
 ## 5. Open points for the owner
@@ -1232,7 +1371,8 @@ Table 2.3.1; checked 2026-10-22):
 - Defaults chosen: hard limit 10 A (manual max), a 30 s countdown above 6 A (the top regular range;
   no vendor duty-cycle figure, so the common hand-held DMM practice of >= 30 s limits at the top
   range), the 47.5 ohm path protected only by the 10 A fuse -> the OVERLOAD rule of 4.3 matters
-  (a uA/mA-range overload heats the 47.5 ohm resistor long before the fuse opens).
+  (a uA/mA-range overload heats the 47.5 ohm resistor long before the fuse opens). Implemented with
+  these answers: section 4.7.
 
 ### HPF bypass probe (device 7889e6c, 2026-10-22)
 
