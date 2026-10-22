@@ -343,9 +343,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 double vx, vref;
                 Fe.OhmNode(vs, rref, out vx, out vref);
-                sb.AppendFormat(ci, " vsrc={0:G4} rref={1:G5} vx={2:G5}", vs, rref, vx);
+                // the test current through Rref into the node (GTK ohm-source block)
+                sb.AppendFormat(ci, " vsrc={0:G4} rref={1:G5} vx={2:G5} itest={3:G5}", vs, rref, vx, (vs - vx) / rref);
             }
             if(role == Role.Diode) sb.AppendFormat(ci, " vx={0:G5}", Fe.DiodeNode(DiodeTestCurrent, DiodeCompliance));
+            // diode = OP3 as a current source (compliance), cap = the RC oscillator's R or the ramp current
+            if(role == Role.Diode) sb.AppendFormat(ci, " itest={0:G5} compl={1:G3}", DiodeTestCurrent, DiodeCompliance);
+            if(role == Role.CapOsc) sb.AppendFormat(ci, " rcosc={0:G5}", CapOscR());
+            if(role == Role.CapRamp || role == Role.CapDischarge)
+                sb.AppendFormat(ci, " itest={0:G5} vramp={1:G5}", role == Role.CapRamp ? CapK[roleRange] * 1e-6 : 0, rampV);
             // converter / statistics settings and results for the GTK signal-flow diagram
             sb.AppendFormat(ci, " svxi={0} sdo23={1} osr2={2} osr4={3} ad1ig={4:G3} ad2ig={5:G3} ad3ig={6:G3} pkh={7} pkhsel={8} sphacal={9}",
                 Svxi ? 1 : 0, Sdo23 ? 1 : 0, Osr2, Osr4, Ad1Ig, Ad2Ig, Ad3Ig, EnPkh ? 1 : 0, regs[0x29] & 3, regs[0x36]);
