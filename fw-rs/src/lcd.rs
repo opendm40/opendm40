@@ -22,12 +22,8 @@ pub const H: u16 = 320;
 pub type Color = u16; // RGB565
 
 pub const BLACK: Color = 0x0000;
-pub const WHITE: Color = 0xFFFF;
 pub const RED: Color = 0xF800;
-pub const GREEN: Color = 0x07E0;
-pub const YELLOW: Color = 0xFFE0;
 pub const MAGENTA: Color = 0xF81F;
-pub const GREY: Color = 0x4208;
 
 #[inline(always)]
 pub fn cmd(c: u16) {

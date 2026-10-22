@@ -36,9 +36,8 @@ const HIFCR: u32 = DMA1 + 0x0C;
 /// Settings record (read only): scope calibration pairs.
 const REC: u32 = 0x080C_0000;
 
-/// Screen = 400 columns, 10 divisions; graph height 280 rows (8 x 35).
+/// Screen = 400 columns, 10 divisions (graph height 280 rows, 8 x 35).
 pub const COLS: usize = 400;
-pub const ROWS: i32 = 280;
 /// Trigger search window (samples), as the stock software refinement
 /// around the comparator estimate (hwtrig path only).
 const WIN: usize = 800;
@@ -214,6 +213,7 @@ pub struct Frame<'a> {
     pub cols: Option<&'a [(u16, u16); COLS]>,
     pub trig: Option<usize>,
     pub fs: u32,
+    #[allow(dead_code)] // frame counter, not read by the firmware
     pub seq: u32,
 }
 
@@ -296,10 +296,8 @@ pub struct Scope {
     st_found: Option<u64>,
     st_poll: u64,
     /// Run-state chip (stock status strings): 0 WAIT, 1 AUTO (untriggered
-    /// frame), 2 T'D (triggered frame), 3 RUN (roll). `status_new`: changed
-    /// since the app last drew it (take_status).
+    /// frame), 2 T'D (triggered frame), 3 RUN (roll).
     pub status: u8,
-    status_new: bool,
     last_frame: u64,
     /// The stored record is being read (scope CSV, scope_csv.rs): `apply`
     /// keeps the scope stopped, so BUF is not overwritten.
@@ -543,7 +541,6 @@ impl Scope {
             st_found: None,
             st_poll: 0,
             status: 0,
-            status_new: true,
             last_frame: 0,
             hold: false,
             wave: false,
@@ -719,16 +716,8 @@ impl Scope {
         }
     }
 
-    /// The run-state chip changed since the last call (the app redraws it).
-    pub fn take_status(&mut self) -> bool {
-        core::mem::replace(&mut self.status_new, false)
-    }
-
     fn set_status(&mut self, st: u8) {
-        if st != self.status {
-            self.status = st;
-            self.status_new = true;
-        }
+        self.status = st;
     }
 
     pub fn apply(&mut self, s: Settings, now: u64) {
@@ -1219,11 +1208,6 @@ impl Scope {
 
     pub fn sample_rate(&self) -> u32 {
         if self.wave { wv().fs } else { TB[self.s.tb].0 }
-    }
-
-    /// Display points per sample (> 1 below 1 us/div).
-    pub fn ppp(&self) -> u32 {
-        if self.wave { 1 } else { TB[self.s.tb].3 }
     }
 
     /// Zoom anchor of the stored record (sample index at the screen centre),

@@ -411,6 +411,7 @@ pub struct Status {
     /// FIFO high water, bytes; pages / partial programs; chunks.
     pub hw: u32,
     pub programs: u32,
+    #[allow(dead_code)] // not reported (LOG:DISK? has no chunk count)
     pub chunks: u32,
 }
 
@@ -439,13 +440,6 @@ pub fn status() -> Status {
         programs: j.enc.programs,
         chunks: j.enc.chunks,
     }
-}
-
-/// The 8.3 name of the session's file while it is being written (vdisk
-/// refresh leaves it out).
-pub fn recording_name() -> Option<[u8; 11]> {
-    let j = job();
-    (active() && j.has_file).then(|| crate::calbackup::numbered_name(b"FAST", j.n, b"DLG"))
 }
 
 #[cfg(target_os = "none")]

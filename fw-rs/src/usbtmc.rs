@@ -156,11 +156,6 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         core::mem::take(&mut self.cleared)
     }
 
-    /// True while a command is being processed and the response is not queued.
-    pub fn response_pending(&self) -> bool {
-        self.rsp_ready
-    }
-
     /// Response buffer to fill in place (then `respond_len`).
     pub fn rsp_buf(&mut self) -> &mut [u8; RSP_MAX] {
         self.cut_unsent();

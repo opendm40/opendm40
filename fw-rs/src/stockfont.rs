@@ -309,11 +309,6 @@ mod data {
     }
 
     impl Font {
-        /// True if this address has embedded font data.
-        pub fn valid(&self) -> bool {
-            font_data(self.0).is_some()
-        }
-
         pub fn line_h(&self) -> u16 {
             font_data(self.0).map_or(0, |f| f.line_h)
         }
@@ -732,22 +727,6 @@ pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg
     }
     #[cfg(test)]
     crate::probe::group(false);
-}
-
-/// Fixed-cell label: character i centred (align 8) in cell i, cells from r.x.
-pub fn cells(font: Font, r: Rect, text: &str, widths: &[u8], fg: Color, bg: Color) {
-    let mut x = r.x;
-    let mut it = text.chars();
-    for &w in widths {
-        let c = it.next().unwrap_or(' ');
-        let mut b = [0u8; 4];
-        label(font, rect(x, r.y, w as i16, r.h), c.encode_utf8(&mut b), fg, bg, 8, 0);
-        x += w as i16;
-    }
-    let end = r.x + r.w;
-    if x < end {
-        lcd::fill_rect(x as u16, r.y as u16, (end - x) as u16, r.h as u16, bg);
-    }
 }
 
 /// Rounded box (corners cut at `radius`, no anti-aliasing).

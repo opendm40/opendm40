@@ -615,6 +615,7 @@ impl Meter {
     }
 
     /// Readings in the current smoothing window (0 = not smoothed).
+    #[cfg_attr(not(test), allow(dead_code))] // the tests below
     pub fn smooth_n(&self) -> u8 {
         self.sm.n
     }
