@@ -638,9 +638,12 @@ impl Bt {
                     }
                     r
                 });
-                let shown = shown.as_ref();
-                let main = shown.map(|r| r.main);
-                let (fm, vm) = encode(mode, main.as_ref(), None);
+                // Power meter: the DC V frame with P as the value
+                // (powermeter.rs "Bluetooth"; no value 2 / 3).
+                let pwr = shown.and_then(|r| r.power);
+                let shown = shown.as_ref().filter(|_| pwr.is_none());
+                let main = pwr.map(|p| crate::dmm::pw::bt_main(&p)).or(shown.map(|r| r.main));
+                let (fm, vm) = encode(if pwr.is_some() { 1 } else { mode }, main.as_ref(), None);
                 // AC+DC (sub 2): value 2 = AC part, value 3 = DC part, sent
                 // even when over range (only the LCD shows "0L" for them).
                 let acdc = shown.map(|r| r.acdc).unwrap_or(false);

@@ -513,7 +513,7 @@ Against the plan of 3.10:
 | energy | Wh and VAh from the totals of the previous reading over the time since it (a range-change gap holds the last P), i64 mJ + f32 remainder (host test: 1 mW s steps on top of 1 kWh); RUN / PAUSE (energy box tap, POW:ENER:STAT), reset (long press on the side column, page, POW:ENER:RES); average P = E / t |
 | burden | R_path per shunt (default the shunt: 10 mohm / 0.5 ohm / 47.5 ohm; POW:BURD sets the current range's), compensation ON by default: P_L = P - I^2 R, V_L^2 = V^2 - 2 R P + R^2 I^2 (exact for any waveform: v_L = v - R i), S_L = V_L I, Q, PF from those; the burden voltage I R in its own box (amber when the compensation is off and it exceeds 1 % of V) |
 | limit | continuous-current limit (default 5 A / 30 s, POW:LIM <A>,<s>, persisted; the owner should set the manual's numbers): above it a countdown in the side column, at expiry a toast and the A-JACK beep pattern while it stays above; the auto power-off (and its warning) is held while the energy integrates with I > 50 uA, the DMM rail stays on in every view |
-| 4 SCPI | `CONFigure:POWer [<V>|AUTO[,<A>|AUTO]]`, `MEASure:POWer?` (P; waits through the range hunt, at most 15 s), `READ?` / `FETCh?` = P, `FETCh:POWer:ALL?` = `P,S,Q,PF,Vrms,Irms,F,E_Wh,seconds,Vdc,Idc,VAh,burden_V` (NaN = +9.91E37: the fallback's P / Q / PF / Vdc), `MEASure:POWer:APParent? / :PFACtor? / :ENERgy? / :REACtive? / :VOLTage? / :CURRent?` (latest values), `[SENSe:]POWer:VOLTage:RANGe` / `:CURRent:RANGe <value>|AUTO` / `?` (`AUTO,+6.000000E+02`), `:ENERgy:RESet`, `:ENERgy:STATe`, `:BURDen <ohm>|DEFault` / `?`, `:BURDen:STATe`, `:PHASe <-127..127>` / `?`, `:PHASe:CALibrate [REACtive]` (RESistive: "Settings conflict", see 3.5: the cos optimum is flat), `:CYCle?` (`d,P period ms,full set ms`), `:METHod SIMultaneous|ALTernate` / `?`, `:LIMit <A>[,<s>]` / `?`; `CONFigure?` = `"POW AUTO,AUTO"` / `"POW +6.0E+01,+6.0E+00"`, `FUNCtion?` = `"POW"`. BT keeps the stock protocol (cmd 06 / 09 report the AC A byte and P as the value) |
+| 4 SCPI | `CONFigure:POWer [<V>|AUTO[,<A>|AUTO]]`, `MEASure:POWer?` (P; waits through the range hunt, at most 15 s), `READ?` / `FETCh?` = P, `FETCh:POWer:ALL?` = `P,S,Q,PF,Vrms,Irms,F,E_Wh,seconds,Vdc,Idc,VAh,burden_V` (NaN = +9.91E37: the fallback's P / Q / PF / Vdc), `MEASure:POWer:APParent? / :PFACtor? / :ENERgy? / :REACtive? / :VOLTage? / :CURRent?` (latest values), `[SENSe:]POWer:VOLTage:RANGe` / `:CURRent:RANGe <value>|AUTO` / `?` (`AUTO,+6.000000E+02`), `:ENERgy:RESet`, `:ENERgy:STATe`, `:BURDen <ohm>|DEFault` / `?`, `:BURDen:STATe`, `:PHASe <-127..127>` / `?`, `:PHASe:CALibrate [REACtive]` (RESistive: refused with the reason, see 3.5 / 3.13: the cos optimum is flat; `:PHASe:CALibrate?` = the outcome since 3.13), `:CYCle?` (`d,P period ms,full set ms`), `:METHod SIMultaneous|ALTernate` / `?`, `:LIMit <A>[,<s>]` / `?`; `CONFigure?` = `"POW AUTO,AUTO"` / `"POW +6.0E+01,+6.0E+00"`, `FUNCtion?` = `"POW"`. BT keeps the stock protocol (cmd 06 / 09 reported the AC A byte and P as the value; since 3.13 the DC V byte with P) |
 | 5 UI | see below |
 | 6 settings | p[48..52]: SPHACAL, method, compensation, discards, I limit, time limit, R_path x 3 (0 = default); the function itself is **not** restored: a restart after a power session comes up in DC A on the 10 A shunt (a load current may still flow) |
 | 7 emulator | Power role in `emu/hy3131/HY3131.cs` (both copies; X = I x shunt x OP1 gain, Y = V / k, signed XY with the phase, SPHACAL on the cross term, mid-block R34 mixing, LPF and the counter as the hardware): 88 host checks; `emu/hy3131/powtest.py` end to end over USB/IP |
@@ -864,7 +864,8 @@ The W button opens the wiring dialog until it was confirmed once
 (persisted), then enters directly; Power Settings > Wiring shows it again,
 the long press on A stays as a shortcut, the "Power W" button of the Current
 Settings page is gone. A reboot in the power meter restarts it (energy
-reset, `pw_enter`); BT still reports the AC A byte with P as the value.
+reset, `pw_enter`); BT still reports the AC A byte with P as the value
+(3.13: now the DC V byte).
 
 **Persist v7** (58 words): the power block grows to 10 words (p[48..58]: the
 4 V gains as u16, the Y zero + flags (zeros valid, wiring dialog seen,
@@ -967,6 +968,119 @@ renders p07 (settings + status), p09 (I ranging), p10 (refused V cal), p11
    RMS gain now applied to I_dc), the DC method's P vs V x I of the stock
    functions, XY / XX switch cost with a real current (DISC 2 kept), PB4 f
    with a current-only AC signal.
+
+### 3.13 The TODO remainder (fw-rs, 2026-10-22): BT, W limits, phase cal
+
+**Bluetooth: the stock phone protocol.** The protocol (docs/bt-protocol.md,
+`firmware/re/analysis/bt_meas_v2_6.h`) has no unit field: the phone app
+derives the unit from the mode byte's group (V group: base mV, A group:
+base uA, ohm, nF, Hz, ...) and the format byte's x1000 prefix, and the mode
+byte has no free group for a 16th function (groups 6 / 7 are undefined: the
+stock runs cmd 06 with an uninitialised argument for them). Options:
+
+| mapping | what the app shows for 230.02 W | verdict |
+|---|---|---|
+| the AC A byte with P as the value (3.11..3.12) | P in uA ("230.02 uA": the A group's base, prefix 0 for "W"), V as uA too | wrong unit and wrong magnitude |
+| AC A with Irms (a right unit) | 1.0000 A; value 2 = f | no power at all: a phone log of a power session loses its point |
+| AC V with Vrms, value 3 = PF x 100 as "duty %" | 230.00 V, 50.00 Hz, 99.8 % | no P; PF disguised as duty |
+| **DC V byte, P as a V-group value** (chosen) | "230.02 V" | the digits, decimals, sign (a source reads negative) and the m / k scale of P are right; only the letter is V |
+
+Built: `Dmm::mode_byte` in the power meter = the DC V byte with the V
+channel's range field (5 = auto, 1..4 = manual 6 / 60 / 600 / 1000 V:
+0x28 auto); cmd 09's main value = `pw::bt_main` (P, S in the VA-only
+fallback; mW -> "mV", W -> "V", kW -> W with 0 decimals; at most 65534
+counts, a decimal dropped when it does not fit; OL -> 0xFFFF), value 2 / 3
+= 0xFFFF as in a stock DC V frame. The value follows HOLD (the shown
+reading) and stays P while the readout shows Wh / VAh. cmd 06 with that
+same byte (the app re-sending the mode it was told) keeps the power meter
+(`apply_mode_byte`); any other byte leaves it like a function button. BT
+SCPI (bt_scpi.rs) runs the full USBTMC command set except `DBG:*` (and the
+file / recording commands main.rs keeps USB only), so `CONF:POW`,
+`FETC:POW:ALL?`, `MEAS:POW...?`, `[SENS:]POW:...` (incl. `POW:PHAS:CAL`,
+`POW:ZERO`, `POW:VOLT:CAL`) and `CALC:LIM` work over BT unchanged; powtest
+`bt` checks FETC:POW:ALL? / POW:VOLT:RANG? over BT next to cmd 09 / 06.
+
+**Limits in W.** `meter::LIM_SLOTS` 9 -> 10: slot 9 "Power" (`LIM_POWER`,
+`lim_slot(18)`), compared with the Reading's SI value = P (S in the
+fallback), also while the main readout shows Wh / VAh. `CALC:LIM:UPP / LOW /
+STAT / CLE / FAIL?` work in the power meter (the "Settings conflict"
+refusal is gone); the Hold & Limits page opens from Power Settings
+("Limits", the bottom row is now Reset Wh / Wiring / Limits / OK at 110 px)
+and is titled "Hold & Limits: Power", values typed / shown in the unit of P
+(W / mW / kW), "Upper / Lower = reading" take P. The fail beep and the
+OK / HI / LO badge are the other functions'; the badge takes the slot left
+of the coupling glyph that shows "AUTO" with the AUTO coupling (the method
+glyph above the unit still shows DC / AC+DC). Persist v10: the slot's two
+values at p[62..64] (`persist::W_LIM_W`), its bits next to the others' in
+p[18] / p[19]. Energy limits (Wh) are not offered: the energy only grows
+in a session, so a "limit" there is a one-shot budget alarm rather than a
+pass / fail band; worth a separate setting if the owner wants it.
+
+**Phase calibration on a resistive load: stays refused.** With PF = 1, P /
+S = cos(phi) and the residual phase to find is phi ~ 0, where the slope of
+cos is ~0. One SPHACAL step is 0.407 us = 0.0073 deg at 50 Hz: at the
+optimum it moves P / S by ~1e-8, and the whole +-127 span (+-0.93 deg)
+moves it by ~3e-5 around the optimum. The alternatives of 3.5 / the TODO:
+
+* maximise P / S over the steps: the flat top above;
+* a symmetric two-point or least-squares fit over the steps (the linear
+  term of cos(phi0 + k s) is -k phi0 s): to resolve phi0 = 0.05 deg the
+  fit must see P / S differences of ~3e-5, but every 107 ms block carries
+  a ~1e-2 ripple (5.33 cycles per block, 3.5) and V, I, P come from
+  different blocks (the mains amplitude moves ~1e-3 between them):
+  ~1e5..1e6 results = hours. Not usable;
+* derive it from the AD2 / AD3 OSR group delay: both decimators run the
+  same OSR, so their group delays are equal and cancel; what SPHACAL
+  corrects is the analog paths (OP1 on the shunt vs OP2 on the divider and
+  its ACC compensation), which only a measurement shows;
+* a known PF = 1 load gives |phi| through 1 - PF = phi^2 / 2 = 4e-5 at 0.5
+  deg: below the channel gain errors (~1e-3).
+
+The reactive method stays: at PF ~ 0 the slope is the largest (d(P/S) /
+dphi = 1), 48 steps move P / S by 6e-3 at 50 Hz. `POW:PHAS:CAL RES` answers
+`-100,"Settings conflict; RES: PF 1 optimum is flat, use REACtive (C or L
+load, PF ~0)"` in SYST:ERR?. The reactive run now refuses instead of
+storing garbage: |P / S| > 0.32 at the start (sin 18.6 deg, the SPHACAL span
+at 1 kHz: a resistive or mixed load) -> NOTREACTIVE, a Newton null outside
++-127 -> RANGE, no slope -> FLAT, SPHACAL kept in each; it needs method B
+(the DC method / VA-only fallback refuse with "Settings conflict; phase
+cal needs ..."). New query `POW:PHAS:CAL?` = `<NONE|RUN|OK|FLAT|NOTREACTIVE|RANGE>,<SPHACAL>`.
+
+**The rest of the TODO block.** "Tap on P cycles P / S / PF / E" is
+superseded by the owner's round 3 (3.12: the tap cycles P / Wh / VAh; S,
+PF, Q, f are in the boxes below). Left, all needing a device: the re-check
+list of 3.12 (item 6: T2 / T3 / T4 with current through A), T5 / T6 of
+3.8, and the checks below.
+
+Emulator (`emu/hy3131/powtest.py`, new scenarios): `limits` (CALC:LIM:UPP
+100 / LOW 10: FAIL 1 at 230 W, 0 at 50 W), `phasecal-ref` (RES refused with
+the reason; REAC on a resistive load -> NOTREACTIVE, SPHACAL 0; then on a
+1 kHz reactive load -> OK), `bt` (run.py --bt-port: cmd 09 = 0x28 and P 115
+"V" at PF 0.5, value 2 / 3 FFFF, BT SCPI FETC:POW:ALL? = the same P;
+cmd 06 0x28 keeps FUNC? "POW", -24 W after it). ui-render: the badge in
+every power case x 2 couplings x 3 verdicts, every verdict change as an
+update equal to its fresh draw, Hold & Limits: Power (p17 / p18 renders),
+Power Settings with the new bottom row (p07); 0 violations. All 21 powtest
+scenarios OK (the 18 earlier ones unchanged). Build: stack headroom 24.8 KB,
+region B free 23.0 KB (`App::scpi` is now `#[inline(never)]`: with the new
+arms LLVM folded its ~10 KB into main.rs `run`), SRAM free 12.9 KB.
+
+#### Device check list (this build)
+
+1. Phone app (stock DM40 app) in the power meter: the main value shows P
+   with a "V" unit (sign for a source, mW as mV); value 2 / 3 empty; the
+   app does not leave the power meter by itself (if it does: it sends a
+   cmd 06 other than 0x28 - capture the byte). HOLD freezes it.
+2. MF > Power Settings > Limits: Upper 100 W with a ~200 W load (or 1 W
+   with a small one): HI badge (in place of "AUTO" with AUTO coupling),
+   the fail beep once, `CALC:LIM:FAIL?` 1; the load below: OK / 0; the
+   limit survives a reboot (persist v10) and the other functions' limits
+   are unchanged after the update from v9.
+3. `POW:PHAS:CAL RES` -> SYST:ERR? text; `POW:PHAS:CAL` on the resistive
+   T2 setup -> `POW:PHAS:CAL?` NOTREACTIVE, `POW:PHAS?` unchanged; on a
+   capacitor -> OK,<steps> (expected small at 50 Hz).
+4. Over BT SCPI (tools/dm40bt_scpi.py): `CONF:POW`, `FETC:POW:ALL?`,
+   `CALC:LIM:UPP 100`, `CALC:LIM:FAIL?`.
 
 ---------------------------------------------------------------------------
 

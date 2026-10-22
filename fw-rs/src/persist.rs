@@ -28,8 +28,14 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// (0 = every reading / until stopped, so v7 loads zero-extended).
 /// v9: 62 words; p[59..62] W_POWER_ZD, the power meter DC row's AD1 zeros
 /// (app_power.rs; 0 = none, so v8 loads zero-extended).
-const VERSION: u32 = 9;
-pub const WORDS: usize = 62;
+/// v10: 64 words; p[62..64] W_LIM_W, the power meter's W limits (lower /
+/// upper, f32 bits; their on / set bits are bit 17 of p[18] and bits 9 / 25
+/// of p[19], 0 in older records = off / unset).
+const VERSION: u32 = 10;
+pub const WORDS: usize = 64;
+const V9_WORDS: usize = 62;
+/// The power meter's limit slot (meter::LIM_POWER): lower, upper (2 words).
+pub const W_LIM_W: usize = 62;
 const V8_WORDS: usize = 59;
 /// The power meter DC row's AD1 zeros (app_power::PW_ZD_WORDS words).
 pub const W_POWER_ZD: usize = 59;
@@ -96,6 +102,7 @@ pub fn load() -> Option<Record> {
     let version = rd(1);
     let n = match version {
         VERSION => WORDS,
+        9 => V9_WORDS,
         8 => V8_WORDS,
         7 => V7_WORDS,
         6 => V6_WORDS,

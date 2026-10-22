@@ -77,15 +77,22 @@ pub fn func_of(r: &Reading) -> u8 {
 
 // ------------------------------------------------------------- limits
 //
-// FR-06: one upper / lower pair per measuring function. Nine slots (the
+// FR-06: one upper / lower pair per measuring function. Ten slots (the
 // functions that measure something different): DC V, AC V, DC A, AC A, ohm
-// (continuity shares it), diode, capacitance, frequency, temperature. AC+DC
-// shares the AC slot (it is an RMS value). Values are SI (V, A, ohm, V, F,
-// Hz, deg C) so a limit holds across auto ranges; it is compared with the
-// displayed (REL-applied) value.
+// (continuity shares it), diode, capacitance, frequency, temperature, power.
+// AC+DC shares the AC slot (it is an RMS value). Values are SI (V, A, ohm, V,
+// F, Hz, deg C, W) so a limit holds across auto ranges; it is compared with
+// the displayed (REL-applied) value. Power: the Reading's SI value is always
+// P (S in the VA-only fallback), also while the readout shows Wh / VAh, so
+// the W limits keep checking the power (an energy limit would be a one-shot
+// budget alarm, not a pass / fail band: not offered).
 
-pub const LIM_SLOTS: usize = 9;
-pub const LIM_NAMES: [&str; LIM_SLOTS] = ["DC V", "AC V", "DC A", "AC A", "\u{3a9}", "Diode", "Cap", "Hz", "Temp"];
+pub const LIM_SLOTS: usize = 10;
+pub const LIM_NAMES: [&str; LIM_SLOTS] = ["DC V", "AC V", "DC A", "AC A", "\u{3a9}", "Diode", "Cap", "Hz", "Temp", "Power"];
+/// The power meter's slot (persisted apart from the v4 block:
+/// persist::W_LIM_W).
+pub const LIM_POWER: usize = 9;
+const _: () = assert!(LIM_POWER == 9 && LIM_SLOTS == 10, "persist layout (app.rs): slots 0..8 at p[20..38], the power slot at W_LIM_W");
 
 /// Limit slot of a function code (`func_of` / `Dmm::func`).
 pub fn lim_slot(func: u8) -> usize {
@@ -98,6 +105,7 @@ pub fn lim_slot(func: u8) -> usize {
         12 => 5,
         13 => 6,
         14 => 7,
+        crate::dmm::pw::FUNC => LIM_POWER,
         _ => 8,
     }
 }
@@ -122,8 +130,7 @@ impl Limit {
     /// Verdict for a displayed reading. OL is above the range: a fail when
     /// an upper limit is set, a pass otherwise.
     pub fn check(&self, r: &Reading) -> u8 {
-        // The power meter has no limit slot (W): never checked.
-        if !self.on || (self.lo.is_none() && self.hi.is_none()) || r.power.is_some() {
+        if !self.on || (self.lo.is_none() && self.hi.is_none()) {
             return V_NONE;
         }
         if r.main.ol {
@@ -1198,5 +1205,32 @@ mod tests {
         }
         // Bits outside the fields are ignored.
         assert_eq!(ext_settings(ext_word(Rate::Slow, Smooth::Low) | 0xFFFF_0000).rate, Rate::Slow);
+    }
+
+    /// Power meter: its own W slot, checked on the SI value (P), also while
+    /// the readout shows the energy (main = Wh, si = P).
+    #[test]
+    fn power_limits_in_watts() {
+        let pv = crate::dmm::pw::PowerVals { p: 230.0, main: crate::dmm::pw::MAIN_WH, ..crate::dmm::pw::PowerVals::ZERO };
+        let mut r = rd(4, 0.1234, 4, "Wh", 230.0 / 0.1234);
+        r.power = Some(pv);
+        assert_eq!(func_of(&r), crate::dmm::pw::FUNC);
+        assert_eq!(lim_slot(func_of(&r)), LIM_POWER);
+        assert_eq!(LIM_NAMES[LIM_POWER], "Power");
+        let hi = Limit { on: true, lo: None, hi: Some(200.0) };
+        assert_eq!(hi.check(&r), V_HI);
+        let band = Limit { on: true, lo: Some(100.0), hi: Some(250.0) };
+        assert_eq!(band.check(&r), V_PASS);
+        let lo = Limit { on: true, lo: Some(300.0), hi: None };
+        assert_eq!(lo.check(&r), V_LO);
+        // Feeding the meter: a fail edge (the beep) on the first reading out
+        // of the band.
+        let mut m = Meter::new();
+        m.lim[LIM_POWER] = hi;
+        let u = m.update(&r, 1000);
+        assert!(u.fail_edge);
+        assert_eq!(m.verdict(), V_HI);
+        // AC A keeps its own slot.
+        assert_eq!(lim_slot(4), 3);
     }
 }

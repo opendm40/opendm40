@@ -134,7 +134,7 @@ CALC:AVER?  CALC:AVER:MIN?|MAX?|AVER?|COUN?  CALC:AVER:CLE  CALC:AVER:STAT ON|OF
 CALC:LIM:LOW|UPP <v>|?  CALC:LIM:STAT ON|OFF|?  CALC:LIM:CLE  CALC:LIM:FAIL?
 ```
 
-`CALC:` acts on the current DMM function, values in its SI unit. `CALC:AVER...?`
+`CALC:` acts on the current DMM function, values in its SI unit (power meter: W). `CALC:AVER...?`
 before the first sample and an unset `CALC:LIM:LOW|UPP?` answer `+9.9E37`
 (the former also queues "Data stale"); setting a limit turns the check on;
 `CALC:LIM:CLE` clears both limits; `CALC:AVER:STAT ON` starts a recording

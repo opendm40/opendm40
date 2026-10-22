@@ -916,8 +916,13 @@ impl App {
     fn lim_unit(&self) -> &'static str {
         let f = self.dmm.func();
         match self.last_raw {
-            Some(r) if crate::meter::func_of(&r) == f => r.main.unit,
+            // Power: the unit of P (the readout may show Wh / VAh).
+            Some(r) if crate::meter::func_of(&r) == f => match r.power {
+                Some(pv) => dmm::pw::reading_vals(&dmm::pw::PowerVals { main: dmm::pw::MAIN_P, ..pv }).0.unit,
+                None => r.main.unit,
+            },
             _ => match crate::meter::lim_slot(f) {
+                crate::meter::LIM_POWER => "W",
                 0 | 1 | 5 => "V",
                 2 | 3 => "A",
                 4 => "\u{3a9}",
@@ -1553,11 +1558,14 @@ impl App {
         // records); p[11] bits 16..31: scope drag hold-to-grab ms (0 = direct).
         let m = &self.meter;
         p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1;
+        // v10: the power slot's values at persist::W_LIM_W (its bits as the
+        // other slots': p[18] bit 17, p[19] bits 9 / 25).
         for (i, l) in m.lim.iter().enumerate() {
+            let w = if i == crate::meter::LIM_POWER { crate::persist::W_LIM_W } else { 20 + 2 * i };
             p[18] |= (l.on as u32) << (8 + i);
             p[19] |= (l.lo.is_some() as u32) << i | (l.hi.is_some() as u32) << (16 + i);
-            p[20 + 2 * i] = l.lo.unwrap_or(0.0).to_bits();
-            p[21 + 2 * i] = l.hi.unwrap_or(0.0).to_bits();
+            p[w] = l.lo.unwrap_or(0.0).to_bits();
+            p[w + 1] = l.hi.unwrap_or(0.0).to_bits();
         }
         p[6] |= (sc.hpos as u32 + 1) << 18;
         // Scope page: colour, brightness, tap-step mode (p[1] bits 17..29),
@@ -1615,9 +1623,10 @@ impl App {
         m.lim_beep = p[18] & 2 == 0;
         for (i, l) in m.lim.iter_mut().enumerate() {
             let f = |w: u32, set: bool| Some(f32::from_bits(w)).filter(|v| set && v.is_finite());
+            let w = if i == crate::meter::LIM_POWER { crate::persist::W_LIM_W } else { 20 + 2 * i };
             l.on = p[18] >> (8 + i) & 1 != 0;
-            l.lo = f(p[20 + 2 * i], p[19] >> i & 1 != 0);
-            l.hi = f(p[21 + 2 * i], p[19] >> (16 + i) & 1 != 0);
+            l.lo = f(p[w], p[19] >> i & 1 != 0);
+            l.hi = f(p[w + 1], p[19] >> (16 + i) & 1 != 0);
         }
         // Sensor and autorange flags before the mode, so a restored mode
         // enters with them.
@@ -3305,11 +3314,6 @@ impl App {
                 out.put_bytes(if self.stats_rec() { b"1" } else { b"0" });
                 true
             }
-            // The power meter has no limit slot (W).
-            C::CalcLim(..) | C::CalcLimState(_) | C::CalcLimClear if self.dmm.pw.on => {
-                out.set_err("Settings conflict");
-                false
-            }
             C::CalcLim(k, Some(v)) => {
                 self.set_limit(k == 1, Some(v));
                 false
@@ -3467,7 +3471,10 @@ impl App {
     }
 
     /// SCPI scope / generator command. Writes the reply (if any) to `out` and
-    /// returns true when there is one.
+    /// returns true when there is one. Never inlined into main.rs `run`
+    /// (one call site: LLVM may otherwise fold its ~10 KB into the hot loop's
+    /// function, region B).
+    #[inline(never)]
     pub fn scpi(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
         if let Some(r) = self.scpi_dmm(clk, cmd, out) {

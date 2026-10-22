@@ -520,7 +520,8 @@ pub struct Pw {
     cal_acc: f32,
     cal_s0: i8,
     cal_pa: f32,
-    pub cal_result: Option<bool>,
+    /// The last calibration's outcome (CAL_*; POW:PHAS:CAL?).
+    pub cal_res: u8,
     /// The calibration moved SPHACAL: rewrite the row (`pw_service`).
     cal_req: bool,
     /// DBG: R34 frozen (0 = cycle), row byte overrides, raw ring.
@@ -624,7 +625,7 @@ impl Pw {
             cal_acc: 0.0,
             cal_s0: 0,
             cal_pa: 0.0,
-            cal_result: None,
+            cal_res: CAL_NONE,
             cal_req: false,
             freeze: 0,
             poke: [(0, 0); 4],
@@ -976,17 +977,18 @@ impl Dmm {
 
     /// Phase self-calibration on a reactive load (PF ~ 0, any sign): P / S
     /// averaged at the current SPHACAL and 48 steps further, then the
-    /// Newton step that nulls it. Result in `pw.cal_result`.
+    /// Newton step that nulls it. Result in `pw.cal_res`. Needs method B
+    /// (the DC method and the VA-only fallback have no phase).
     pub fn pw_cal_start(&mut self) -> bool {
         let pw = &mut *self.pw;
-        if !pw.on || pw.alt {
+        if !pw.on || pw.alt || pw.dc {
             return false;
         }
         pw.cal = 1;
         pw.cal_n = 0;
         pw.cal_acc = 0.0;
         pw.cal_s0 = pw.sph;
-        pw.cal_result = None;
+        pw.cal_res = CAL_RUN;
         true
     }
 
@@ -1560,7 +1562,12 @@ impl Dmm {
             let m = pw.cal_acc / pw.cal_n as f32;
             pw.cal_n = 0;
             pw.cal_acc = 0.0;
-            if pw.cal == 1 {
+            if pw.cal == 1 && m.abs() > CAL_PF_MAX {
+                // Not a reactive load: the null is outside the SPHACAL
+                // span (+-18.6 deg even at 1 kHz); SPHACAL unchanged.
+                pw.cal = 0;
+                pw.cal_res = CAL_NOT_REACTIVE;
+            } else if pw.cal == 1 {
                 pw.cal_pa = m;
                 pw.cal = 2;
                 let d: i16 = if pw.cal_s0 > 79 { -48 } else { 48 };
@@ -1570,14 +1577,11 @@ impl Dmm {
                 let d = pw.sph as f32 - pw.cal_s0 as f32;
                 let slope = (m - pw.cal_pa) / d;
                 pw.cal = 0;
-                if slope.abs() > 1e-7 {
-                    let s = (pw.cal_s0 as f32 - pw.cal_pa / slope).clamp(-127.0, 127.0);
-                    pw.sph = (if s < 0.0 { s - 0.5 } else { s + 0.5 }) as i8;
-                    pw.cal_result = Some(true);
-                } else {
-                    pw.sph = pw.cal_s0;
-                    pw.cal_result = Some(false);
-                }
+                let s = if slope.abs() > 1e-7 { pw.cal_s0 as f32 - pw.cal_pa / slope } else { f32::NAN };
+                (pw.sph, pw.cal_res) = match cal_outcome(s) {
+                    Ok(v) => (v, CAL_OK),
+                    Err(e) => (pw.cal_s0, e),
+                };
                 pw.cal_req = true;
             }
         }
@@ -1860,6 +1864,97 @@ impl Dmm {
             _ => false,
         }
     }
+}
+
+// ------------------------------------------------------ phase calibration
+
+/// `Pw::cal_res`: none since boot, running, stored, the two P / S points
+/// gave no slope (no current, or a resistive load: d(P/S)/dstep ~ 0 near
+/// PF 1), |P / S| above CAL_PF_MAX at the start (not a reactive load), the
+/// null outside +-127 steps.
+pub const CAL_NONE: u8 = 0;
+pub const CAL_RUN: u8 = 1;
+pub const CAL_OK: u8 = 2;
+pub const CAL_FLAT: u8 = 3;
+pub const CAL_NOT_REACTIVE: u8 = 4;
+pub const CAL_RANGE: u8 = 5;
+pub const CAL_NAMES: [&str; 6] = ["NONE", "RUN", "OK", "FLAT", "NOTREACTIVE", "RANGE"];
+/// sin(18.6 deg) = the SPHACAL span at 1 kHz (127 x 0.407 us); at 50 Hz it
+/// is +-0.93 deg, so a load must be within that of PF 0 for a valid null.
+pub const CAL_PF_MAX: f32 = 0.32;
+
+/// The Newton null `s` (steps, NaN = no slope) -> SPHACAL or the refusal.
+pub fn cal_outcome(s: f32) -> Result<i8, u8> {
+    if !s.is_finite() {
+        Err(CAL_FLAT)
+    } else if !(-127.49..=127.49).contains(&s) {
+        Err(CAL_RANGE)
+    } else {
+        Ok((if s < 0.0 { s - 0.5 } else { s + 0.5 }) as i8)
+    }
+}
+
+/// Why `POW:PHAS:CAL RESistive` is refused (doc 3.13): on a resistive load
+/// P / S = cos(phi), and the error to find is phi ~ 0, where d cos / d phi
+/// = -sin(phi) ~ 0: one step (0.407 us = 0.0073 deg at 50 Hz) moves P / S by
+/// ~1e-8 at the optimum and the whole +-127 span by ~3e-5 around it, below
+/// the 107 ms blocks' ripple (non-integer cycles, ~1e-2 per result) and the
+/// V / I gain errors (~1e-3), so neither the maximum nor a symmetric
+/// two-point / least-squares fit over SPHACAL steps resolves 0.05 deg. The
+/// AD2 / AD3 decimators share OSR, so their group delays are equal and
+/// cancel: SPHACAL corrects the analog paths (OP1 on the shunt vs OP2 on
+/// the divider's ACC network), which only a measurement shows. A reactive
+/// load (PF ~ 0) puts the null where the slope is largest (dP/S = dphi).
+pub const CAL_RES_REFUSAL: &str = "Settings conflict; RES: PF 1 optimum is flat, use REACtive (C or L load, PF ~0)";
+
+// ------------------------------------------------- Bluetooth (stock app)
+//
+// The stock phone protocol (docs/bt-protocol.md, bt_meas_v2_6.h) has no
+// power function and no unit field: the unit follows from the mode byte's
+// group (V group: base mV, A group: base uA, ...) and the format byte's
+// x1000 prefix. Least bad mapping (doc 3.13): the power meter reports the
+// DC V mode byte (group 0, sub DC; range field = the V channel's: 5 auto,
+// 1..4 manual 6 / 60 / 600 / 1000 V) and P (S in the VA-only fallback) as
+// the main value with the digits, decimals, sign and prefix of W: the app
+// shows "230.02 V" for 230.02 W, "3.7800 mV" for 3.78 mW. The alternative,
+// the AC A byte the power meter ran under before, made the app show P in
+// uA (prefix 0 = the A group's uA base) and V as uA; reporting Irms (a
+// right unit, but no power) loses the one number a phone log of a power
+// session is for. Value 2 / 3 stay "no value" as in a stock DC V frame.
+// The phone sending this byte back (cmd 06) keeps the power meter
+// (`Dmm::apply_mode_byte`); any other byte leaves it as a function button.
+
+/// The BT mode byte of the power meter (DC V, the V channel's range).
+pub fn bt_mode_byte(v_auto: bool, vr: u8) -> u8 {
+    (if v_auto { 5 } else { vr.min(3) + 1 }) << 3
+}
+
+/// The BT main value of a power reading: P (S) as a V-group value (W ->
+/// "V", mW -> "mV", kW -> "V" with the decimals moved), at most 65534
+/// counts (0xFFFF = no value) with as many of its decimals as fit.
+pub fn bt_main(pv: &PowerVals) -> Val {
+    let si = if pv.alt { pv.s } else { pv.p };
+    let (x, dec, u) = p_format(V_LIM[pv.vr.min(3) as usize] * I_LIM[pv.ik.min(5) as usize], si, true);
+    let (mut x, mut dec, unit) = match u {
+        "mW" => (x, dec, "mV"),
+        "kW" => (x * 1e3, dec.saturating_sub(3), "V"),
+        _ => (x, dec, "V"),
+    };
+    if pv.v_ol || pv.i_ol || !x.is_finite() {
+        return Val::ol(dec, unit);
+    }
+    let mut k = 1.0f32;
+    for _ in 0..dec {
+        k *= 10.0;
+    }
+    while dec > 0 && x.abs() * k + 0.5 >= 65535.0 {
+        dec -= 1;
+        k *= 0.1;
+    }
+    if x.abs() * k + 0.5 >= 65535.0 {
+        x = x.signum() * 65534.0;
+    }
+    Val::new(no_neg_zero(x, dec), dec, unit)
 }
 
 /// The readouts of a power reading: main = P (fallback: S) in the
@@ -2146,5 +2241,55 @@ mod tests {
         let mut b = [0u8; 128];
         let n = pw.ring_text(&mut b);
         assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "1;XY,1,-12345678901,-7,107");
+    }
+
+    /// BT (stock phone protocol): the DC V byte and P in the V group's
+    /// digits, 16-bit counts.
+    #[test]
+    fn bt_mapping() {
+        assert_eq!(bt_mode_byte(true, 2), 0x28);
+        assert_eq!(bt_mode_byte(false, 0), 0x08);
+        assert_eq!(bt_mode_byte(false, 3), 0x20);
+        // 600 V x 10 A: 6000 W full scale, 1 decimal.
+        let pv = PowerVals { p: 230.02, vr: 2, ik: 5, ..PowerVals::ZERO };
+        let v = bt_main(&pv);
+        assert_eq!((v.unit, v.dec, v.ol), ("V", 1, false));
+        assert!((v.v - 230.02).abs() < 1e-4);
+        // Negative (a source): the sign survives.
+        assert!(bt_main(&PowerVals { p: -24.0, ..pv }).v < 0.0);
+        // 6 V x 600 uA: mW, 4 decimals.
+        let m = bt_main(&PowerVals { p: 3.2e-3, vr: 0, ik: 0, ..PowerVals::ZERO });
+        assert_eq!((m.unit, m.dec), ("mV", 4));
+        // 1000 V x 10 A: kW -> W with no decimals (10600 counts).
+        let k = bt_main(&PowerVals { p: 10600.0, vr: 3, ik: 5, ..PowerVals::ZERO });
+        assert_eq!((k.unit, k.dec), ("V", 0));
+        // 6 V x 10 A over range on both channels (63.65 W at 3 decimals =
+        // 63650 counts fits; 70 W drops to 2 decimals).
+        assert_eq!(bt_main(&PowerVals { p: 63.65, vr: 0, ik: 5, ..PowerVals::ZERO }).dec, 3);
+        assert_eq!(bt_main(&PowerVals { p: 70.0, vr: 0, ik: 5, ..PowerVals::ZERO }).dec, 2);
+        // Fallback: S.
+        assert!((bt_main(&PowerVals { s: 100.0, p: f32::NAN, alt: true, vr: 2, ik: 5, ..PowerVals::ZERO }).v - 100.0).abs() < 1e-3);
+        assert!(bt_main(&PowerVals { v_ol: true, ..pv }).ol);
+    }
+
+    /// Phase-cal outcome: the Newton null within +-127 steps or a reason.
+    #[test]
+    fn cal_outcomes() {
+        assert_eq!(cal_outcome(f32::NAN), Err(CAL_FLAT));
+        assert_eq!(cal_outcome(130.0), Err(CAL_RANGE));
+        assert_eq!(cal_outcome(-200.0), Err(CAL_RANGE));
+        assert_eq!(cal_outcome(126.6), Ok(127));
+        assert_eq!(cal_outcome(-3.4), Ok(-3));
+        assert_eq!(cal_outcome(0.2), Ok(0));
+        assert_eq!(CAL_NAMES[CAL_NOT_REACTIVE as usize], "NOTREACTIVE");
+        // 127 steps x 0.407 us at 1 kHz = 18.6 deg: CAL_PF_MAX = its sine.
+        let deg: f32 = 127.0 * 0.407e-6 * 1000.0 * 360.0;
+        assert!((sin_deg(deg) - CAL_PF_MAX).abs() < 0.005);
+    }
+
+    fn sin_deg(d: f32) -> f32 {
+        // Taylor to x^7 (no libm in the host test crate either way).
+        let x = d * core::f32::consts::PI / 180.0;
+        x - x * x * x / 6.0 + x.powi(5) / 120.0 - x.powi(7) / 5040.0
     }
 }

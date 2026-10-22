@@ -578,8 +578,17 @@ Firmware:
         FreeSans Bold k scaled by the stock h ink box, stockfont_w.rs OWN_GLYPHS); unit_text keeps 'k'
         only in the energy units (KΩ / KHz stay as the stock writes them). The chart axis labels and
         history boxes (ui::num_unit, all charts) show +0 too ("-0.000mW" on the power chart).
-  - [ ] Not done: RESistive phase cal (flat optimum), BT protocol slot (BT reports the AC A byte), limits (W) in
-        Hold & Limits, tap on P to cycle the main readout (P / S / PF / E).
+  - [x] TODO remainder (doc §3.13): BT cmd 09 / 06 = the DC V byte (0x28 auto) with P as a V-group value
+        ("230.02 V" = 230.02 W; mW as mV; value 2 / 3 FFFF; cmd 06 echoing the byte keeps the power meter),
+        BT SCPI runs every POW: / FETC:POW / CALC:LIM command (only DBG:* refused); limits in W: 10th slot
+        "Power" (CALC:LIM in the power meter, the "Settings conflict" refusal removed; Hold & Limits from
+        Power Settings > Limits; badge in the AUTO label's slot; fail beep; persist v10 p[62..64]); Wh limits
+        not offered (one-shot budget, not a band); RESistive phase cal stays refused, now with the reason
+        (flat cos optimum: the step fit needs ~3e-5 of P / S vs 1e-2 block ripple; OSR group delays cancel),
+        REAC refuses NOTREACTIVE (|P/S| > 0.32) / RANGE / FLAT instead of storing a clamped value,
+        POW:PHAS:CAL? = outcome,SPHACAL; "tap cycles P / S / PF / E" superseded by the owner's P / Wh / VAh.
+        powtest limits / phasecal-ref / bt (all 21 OK); ui-render badge matrix + p17 / p18 (0 violations).
+        (verify on device: the check list of doc §3.13 - phone app, W limits + beep, cal refusals, BT SCPI)
 - [x] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
       decided: see docs/decisions-2026-10-22.md #5 (A-JACK / LIVE? alternate with HOLD in the status slot)
       Done (decision #5): ui::slot_alert / alert_alternates; DmmView.alt = the app's 1 s strip_alt (now

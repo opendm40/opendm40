@@ -693,12 +693,17 @@ impl DmmView {
             }
             hold_label(hold, r.alert, self.alt);
         }
+        // Power meter: the badge shares its slot with the AUTO coupling
+        // label (ui::pw `coupling` draws whichever applies).
+        let pwr = r.power.filter(|_| self.power);
         if self.last_lim != lim {
             self.last_lim = lim;
-            lim_badge(lim);
+            if pwr.is_none() {
+                lim_badge(lim);
+            }
         }
-        if let Some(pv) = r.power.filter(|_| self.power) {
-            self.power_row(&pv);
+        if let Some(pv) = pwr {
+            self.power_row(&pv, lim);
         }
     }
 
@@ -856,7 +861,7 @@ fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
 /// when no limit applies. 31 px is all the room there is (>= 3 px to the
 /// last digit and to the mode glyph): "PASS" / "FAIL HI" do not fit at a
 /// legible size. The digits keep the value colour.
-fn lim_badge(v: u8) {
+pub(crate) fn lim_badge(v: u8) {
     let r = rect(403, 72, 31, 17);
     let (t, bg) = match v {
         crate::meter::V_PASS => ("OK", 0x04A9),
