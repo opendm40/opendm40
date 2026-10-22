@@ -445,6 +445,16 @@ pub enum Log {
 ///                           +8 none of the later sentinels (AC+DC, AC A,
 ///                           continuity, diode, cap r0..4, frequency), +16 no
 ///                           DC? / AC? input alternation
+///   DBG:ACDC:METH A|B|C / ? AC+DC method (acdcm.rs; RAM only, default A =
+///                           the stock alternation; a change restarts AC+DC)
+///   DBG:ACDC:STAT?          meth,step,mode,range,ac,dc,n_ac,n_dc,n_rd,hz,corr,
+///                           c_per_code,c_offset,lpf_codes,sqrt_rms_codes
+///   DBG:ACDC:ZERO k,v|AUTO / ?  fix slot k's correction (0..3 V ranges, 4..9 A
+///                           unit*2+range; B zero, C A offset) / measure again;
+///                           ? = valid,fixed;c0..c9
+///   DBG:ACDC:R0 1|2 / ?     B 6 V: (i) AD1 SENSE - PB5 / (ii) OP1O - RLU
+///   DBG:ACDC:RANG <item>|AUTO  the MF range item (V 0 = 600 mV, 1..4 = 6 ..
+///                           1000 V; A 0..5 = 600 uA .. 10 A; manual) / AUTO+
 ///   DBG:ACDC?               AC+DC phase diagnostic (Dmm::acdc_diag_text): phases
 ///                           started, then per recent AC phase (oldest first)
 ///                           ";late_ms:sq/lpf/dcp,..."; read-only
@@ -641,6 +651,10 @@ pub enum Cmd {
     DbgGest,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
     DbgAcdc,
+    /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs): op 0 METH <m>, 1 METH?,
+    /// 2 STAT?, 3 ZERO <slot>,<v> (NaN: measure again), 4 ZERO?, 5 R0 <1|2>,
+    /// 6 R0?, 7 RANG <item> (255 = AUTO+).
+    DbgAm(u8, u8, f32),
     /// SYSTem:ALERt?: the wrong-connection alert in force (sentinel.rs).
     SysAlert,
     /// STATus:QUEStionable:CONDition? (sentinel::ques_bits of the alert).
@@ -1441,6 +1455,42 @@ impl Scpi {
                     out = Out::Instr(Cmd::DbgGrab(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 5000.0) as u16) }))
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
+                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" => {
+                    let a = trim(arg);
+                    let mut it = a.split(|&c| c == b',');
+                    let a0 = trim(it.next().unwrap_or(&[]));
+                    let a1 = it.next().map(trim);
+                    let c = match (&parts[2][..], query) {
+                        (b"METH", true) => Some(Cmd::DbgAm(1, 0, 0.0)),
+                        (b"METH", false) => match a0 {
+                            b"A" | b"B" | b"C" => Some(Cmd::DbgAm(0, a0[0] - b'A', 0.0)),
+                            _ => None,
+                        },
+                        (b"STAT", true) => Some(Cmd::DbgAm(2, 0, 0.0)),
+                        (b"ZERO", true) => Some(Cmd::DbgAm(4, 0, 0.0)),
+                        (b"ZERO", false) => match (parse_num(a0), a1) {
+                            (Some(k), Some(v)) if (0.0..10.0).contains(&k) => {
+                                Some(Cmd::DbgAm(3, k as u8, if kw(v, "AUTO") { f32::NAN } else { parse_num(v).unwrap_or(f32::NAN) }))
+                            }
+                            _ => None,
+                        },
+                        (b"RANG", false) => match parse_num(a0) {
+                            _ if kw(a0, "AUTO") => Some(Cmd::DbgAm(7, 255, 0.0)),
+                            Some(v) if (0.0..=5.0).contains(&v) => Some(Cmd::DbgAm(7, v as u8, 0.0)),
+                            _ => None,
+                        },
+                        (b"R0", true) => Some(Cmd::DbgAm(6, 0, 0.0)),
+                        (b"R0", false) => match a0 {
+                            b"1" | b"2" => Some(Cmd::DbgAm(5, a0[0] - b'0', 0.0)),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    match c {
+                        Some(c) => out = Out::Instr(c),
+                        None => self.err = Some("Illegal parameter value"),
+                    }
+                }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"ACDC"[..]) => out = Out::Instr(Cmd::DbgAcdc),
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
                     match parse_num(arg) {

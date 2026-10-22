@@ -3924,6 +3924,39 @@ impl App {
                 out.put_bytes(&b[..n]);
                 true
             }
+            C::DbgAm(op, k, v) => {
+                match op {
+                    0 => self.dmm.am_set_meth(clk, k),
+                    1 => out.put_bytes(&[b'A' + self.dmm.am.meth]),
+                    2 => {
+                        for (i, x) in self.dmm.am_stat().iter().enumerate() {
+                            if i > 0 {
+                                out.put_bytes(b",");
+                            }
+                            if matches!(i, 0..=3 | 6..=8) {
+                                out.put_u32(*x as u32);
+                            } else {
+                                out.put_f32(*x);
+                            }
+                        }
+                    }
+                    3 => self.dmm.am_set_zero(k, v),
+                    4 => {
+                        let (ok, fixed, c) = self.dmm.am_zero();
+                        out.put_u32(ok as u32);
+                        out.put_bytes(b",");
+                        out.put_u32(fixed as u32);
+                        for (i, x) in c.iter().enumerate() {
+                            out.put_bytes(if i == 0 { b";" } else { b"," });
+                            out.put_f32(*x);
+                        }
+                    }
+                    5 => self.dmm.am.r0 = k,
+                    7 => self.dmm.set_range(clk, Some(k)),
+                    _ => out.put_u32(self.dmm.am.r0 as u32),
+                }
+                matches!(op, 1 | 2 | 4 | 6)
+            }
             C::DbgAcdc => {
                 let mut b = [0u8; 400];
                 let n = self.dmm.acdc_diag_text(&mut b);

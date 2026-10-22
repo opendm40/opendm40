@@ -3,6 +3,7 @@
 // The "stock" formulas below are those of firmware/re/analysis/dmm_v2_6.h.
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Antmicro.Renode.Logging;
 using Antmicro.Renode.Peripherals.Miscellaneous;
 
@@ -93,6 +94,7 @@ namespace Hy3131Tests
             Sentinel();
             SentinelLater();
             Power();
+            AcdcMethods();
             HwSpi();
             TimedSpi();
             Rail();
@@ -335,6 +337,55 @@ namespace Hy3131Tests
                 m.Advance(dt);
             }
             return r;
+        }
+
+        /// fw-rs AC+DC methods (dmm.rs acdc_row): the AD1 ripple window, note 7, the merged
+        /// and the DC-coupled rows.
+        private static void AcdcMethods()
+        {
+            Console.WriteLine("AC+DC methods: AD1 ripple window, note 7, method B / C rows");
+            var cal = Hy3131Core.DefaultCal();
+            Func<string, double[]> dcv = spec =>
+            {
+                var m = NewChip();
+                m.Chip.SetInput(spec);
+                m.Configure(F1R1, 1);
+                var v = new double[8];
+                for(var i = 0; i < v.Length; i++) { m.Read1(0x1E); m.WaitFlag(0x04, 1); v[i] = DcvDisplay(m.ReadS24(0), 1, cal); }
+                return v;
+            };
+            var a = dcv("acv:1@50,dc=10");
+            Check(a.Max() - a.Min() < 1e-4 && Math.Abs(a.Average() - 10) < 1e-4, "DC V 60 V, 10 V + 1 V 50 Hz: a notch (OSR 8192 chopped)", a.Min() + ".." + a.Max());
+            a = dcv("acv:1@45,dc=10");
+            Check(a.Max() - a.Min() > 2e-3 && a.Max() - a.Min() < 0.04 && Math.Abs(a.Average() - 10) < 0.02, "  1 V 45 Hz leaks (sinc^2 x chop: ~-43 dB)", a.Min() + ".." + a.Max());
+            // method B row: the AC V row with the DC V AD1 bytes, chopper held, AD1 last
+            var b = (byte[])F0R1.Clone();
+            b[2] = 0x15; b[3] = 0x03; b[4] = 0x07; b[19] = 0x2c;
+            foreach(var (opt, want) in new[] { ("", 10.017), ("n7:0;", 10.0) })
+            {
+                var m = NewChip();
+                m.Chip.SetInput(opt + "dcv:10");
+                m.Configure(b, 0);
+                m.Write(0x23, 0x83);
+                Check(m.Chip.Role == "AcV m0 r1", "B row keeps the AC V role", m.Chip.Role);
+                m.Read1(0x1E); m.WaitFlag(0x04, 1); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                Near(DcvDisplay(m.ReadS24(0), 1, cal), want, 1e-3, "  AD1 with AD2 / AD3 on, " + (opt == "" ? "note 7 (+17 mV at 60 V)" : "n7:0"));
+            }
+            {
+                // method C row: AD2 and AD3 on OP1O (DC-coupled), RMS / LPF on
+                var c = (byte[])F0R1.Clone();
+                c[7] = 0x1d; c[21] = 0x14;
+                var m = NewChip();
+                m.Chip.SetInput("acv:1@50,dc=10");
+                m.Configure(c, 0);
+                Check(m.Chip.Role == "AcV m0 r1", "C row keeps the AC V role", m.Chip.Role);
+                m.Write(0x34, 0x88); m.Write(0x26, 0x80);
+                ReadAfter(m, 0x18, 1);
+                var r = ReadAfter(m, 0x18, 1);
+                var per = 1.25 / 262144.0 * 100;
+                Near(Lpf(r) * per, 10.0 + 0.37e-3 * 100, 0.01, "  LPF = the DC part (+ OP1's offset)");
+                Near(SqrtRms(r) * per, 1.0, 0.01, "  sqrt(RMS) = the AC part");
+            }
         }
 
         private static void Sentinel()
