@@ -143,6 +143,14 @@ Chip (datasheet DS-HY3131-V10):
   current, the stock DC A calibration folded in (`powz:1`: +300 codes of
   AD1 zero). The f8_9 DC A rows fold the uA calibration when PE selects the
   47.5 ohm shunt (stock mode 9).
+* fw-rs DC-coupled V row (ad2exp.rs `dcv_row`, feasibility E7): an AC V row
+  with SAD2IP = OP1O is DC-coupled: OP1O = g (SENSE + Vos), SENSE = the V
+  jack through the row's tap (6 V: /100 with OP1 x10), OP1+ on AGND = Vos
+  alone; OP1's chopper (OP1CHOP 1 / 2) flips Vos only while AD1 converts.
+  Options `op1vos:V` (default 0.37 mV, the AC V sentinel row's device floor)
+  and `ad2dcg:` (AD2 gain deviation in that row, default 1). AD1 on SENSE -
+  PB5 in an AC V row carries the DC V calibration of the tap and integrates
+  (the DC part) at OSR >= 2048.
 * Comparator: VRHCMP / VRLCMP from the R21 mux tables and the reference divider
   (VDSC<n> = K1 * VDDA, AGNDP/N<n> = AGND +- K2 * REFO), latch -> ACPO, CMPO on
   the CMP pin when ENPCMPO = 1 (`CmpPin`: the continuity beeper).
