@@ -1714,15 +1714,25 @@ row rewrite), red **A-PROT** alert (badge "A-PROT", toast "A jack current:
 10 A shunt on", the A-JACK beep pattern, `SYST:ALER?` APROT, STAT:QUES bit
 9; above A-JACK, below OVERLOAD; not maskable). While latched every
 function keeps PE0 = 1 (`write_config`) and DC V (all ranges, also 60 V+
-which has no comparator) / DC mV / ohm / temperature keep the probe in the
+which has no comparator) / DC mV keep the probe in the
 row, now measuring on the 10 mohm path. The latch ends when **both** the
 user acted (any function / range / AUTO choice: the `ovl_clear` hooks) and
 the probe read < 50 mA for 1 s (in either order); then the row is written
 again with the resting PE state. A current function (DC / AC A, AC+DC A)
 or the power meter ends it at once: their own shunt selection and the
 OVERLOAD rule take over. In a function without the probe (AC V / mV, Hz,
-continuity, diode, cap) the latch holds (the A jack stays on 10 mohm) until
+ohm, temperature, continuity, diode, cap) the latch holds (the A jack stays on 10 mohm) until
 the user goes back to one with it or to a current function.
+
+**Not in ohm / temperature (device 1eb4d7e).** With the A jack open and the
+calibrator on V-COM, the probe read the V input in those rows: ~0.34 A per
+volt (5 V DC: 1.7 A, 10 V: 3.1 A, the 0..9.6 V 40 Hz square: up to 37 A)
+and latched A-PROT within ~140 ms (the f3aea2f latch was most likely this:
+the run had the calibrator on while it went through ohm / temperature).
+The ohm and temperature rows connect the V input to the node the probe
+reads (the PB2 inference holds for DC V / mV only), so the probe is in DC V
+and DC mV only; ohm / temperature keep the comparator's A-JACK (which a
+voltage on V-COM also trips there: open, see the device-check doc).
 
 **Limits (not protectable by switching).**
 * **> 30 V on A-COM** (mains, a battery pack): the MOSFETs are 30 V parts
@@ -1748,10 +1758,10 @@ senttest (A-PROT latency = DBG:SENT? field 11, ms from the first hit window):
 | scenario | result |
 |---|---|
 | aprot-dcv-5 (avsrc 5 V, DC V) | A-JACK only (never A-PROT) |
-| aprot-dcv-12 | A-PROT after 409 ms (454 ms with the settle); the source removed: stays latched; CONF:RES (a user choice) -> released, NONE |
+| aprot-dcv-12 | A-PROT after 409 ms (454 ms with the settle); the source removed: stays latched; the AUTO key (DBG:KEY 2, a user choice; was CONF:RES: ohm has no probe now) -> released, NONE |
 | aprot-dcv-24 | A-PROT after 154 ms (the first probe window after the 30 ms settle; 105 ms before it) |
 | aprot-glitch | the model's AD2 start-up off by 3000 codes (0.72 A, `Ad2StartGlitch`), 1 V across A-COM (21 mA): A-JACK only (a60f8ce: A-PROT) |
-| aprot-ohm-12, aprot-temp-12 | A-PROT after 409 / 406 ms |
+| aprot-ohm-12, aprot-temp-12 | A-JACK only (no probe in ohm / temperature since 1eb4d7e's device check; was A-PROT after 409 / 406 ms) |
 | aprot-ack-early | the user acts while the source is still there: latched until 1 s after it went |
 | aprot-to-dca | CONF:CURR:DC ends the latch (DC A's own shunt / OVERLOAD) |
 
@@ -1766,7 +1776,7 @@ Bench supply with current limit, leads V-COM open, the supply across A-COM:
 2. DC V, 12 V: A-PROT within ~0.5 s, the supply goes into its current limit
    (10 mohm path); `DBG:SENT?` field 11 ~400 ms. Supply off: still A-PROT;
    tap another function: released, A-JACK gone.
-3. The same in ohm and in temperature (thermocouple).
+3. Ohm and temperature: A-JACK only (no probe there, above).
 4. DC V reading with nothing on A: unchanged vs the previous build (the
    probe is not in the row); with the probe in (a small current in A),
    compare the DC V offset of a known source (note 7).

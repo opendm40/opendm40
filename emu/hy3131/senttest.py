@@ -135,14 +135,16 @@ SC = {
     # 'aprot_ms': the trip latency window (DBG:SENT? field 11, ms from the first hit window).
     'aprot-dcv-5': ('VOLT:DC', 24, [(0, 'open', {'NONE'}), (8, 'avsrc:5', {'AJACK'})]),
     'aprot-dcv-12': ('VOLT:DC', 32, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (16, 'open', {'APROT'}),
-                                     (22, 'open', {'NONE'})], [], {'acts': {19.5: 'CONF:RES'}, 'aprot_ms': (400, 560)}),
+                                     (22, 'open', {'NONE'})], [], {'acts': {19.5: 'DBG:KEY 2'}, 'aprot_ms': (400, 560)}),
     'aprot-dcv-24': ('VOLT:DC', 22, [(0, 'open', {'NONE'}), (8, 'avsrc:24', {'APROT'})], [], {'aprot_ms': (100, 450)}),
-    'aprot-ohm-12': ('RES', 24, [(0, 'open;r:4700', {'NONE'}), (10, 'avsrc:12', {'APROT'})], [], {'aprot_ms': (400, 560)}),
-    'aprot-temp-12': ('TEMP', 26, [(0, 'open;tc:100;cj:25', {'NONE'}), (12, 'avsrc:12', {'APROT'})], [], {'aprot_ms': (400, 560)}),
+    # Ohm / temperature carry no probe (device 1eb4d7e: there it follows the V input, 5 V on V-COM
+    # read 1.7 A and latched A-PROT): a source across A-COM is A-JACK only.
+    'aprot-ohm-12': ('RES', 24, [(0, 'open;r:4700', {'NONE'}), (10, 'avsrc:12', {'AJACK'})]),
+    'aprot-temp-12': ('TEMP', 26, [(0, 'open;tc:100;cj:25', {'NONE'}), (12, 'avsrc:12', {'AJACK'})]),
     # The user acts (another function) while the source is still there: the latch stays; the current goes later and
     # the latch ends 1 s after that (the act counts).
     'aprot-ack-early': ('VOLT:DC', 34, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (16, 'avsrc:12', {'APROT'}),
-                                        (22, 'open', {'APROT', 'NONE'}), (26, 'open', {'NONE'})], [], {'acts': {14: 'CONF:RES'}}),
+                                        (22, 'open', {'APROT', 'NONE'}), (26, 'open', {'NONE'})], [], {'acts': {14: 'DBG:KEY 2'}}),
     # Device f3aea2f: A-PROT latched with the A jack open on the probe's first window (AD2 just
     # restarted). The model's AD2 reads 3000 codes (0.72 A) off for its first results after a
     # start: a small current (1 V across A-COM, 21 mA) brings the probe in; A-JACK only.

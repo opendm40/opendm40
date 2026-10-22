@@ -3168,11 +3168,14 @@ impl Dmm {
         }
     }
 
-    /// The function can carry the A-jack probe: DC V / mV / ohm /
-    /// temperature, not AC+DC (its phases rewrite the row), not during the
-    /// fuse check.
+    /// The function can carry the A-jack probe: DC V / mV, not AC+DC (its
+    /// phases rewrite the row), not during the fuse check. Not ohm /
+    /// temperature (device 1eb4d7e, A jack open): there the probe follows
+    /// the V input, ~0.34 A per volt on V-COM (5 V DC read 1.7 A, 10 V 3.1 A,
+    /// the 0..9.6 V square up to 37 A) and latched A-PROT; those rows keep
+    /// the comparator's A-JACK only (doc 4.8).
     fn probe_ok(&self) -> bool {
-        matches!(self.mode, 1 | 3 | 10 | 15) && !self.acdc && self.fuse_job.is_none()
+        matches!(self.mode, 1 | 3) && !self.acdc && self.fuse_job.is_none()
     }
 
     /// The peak-hold sentinel is harvested in `poll` (no AC result carries
