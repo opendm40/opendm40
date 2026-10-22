@@ -93,9 +93,9 @@ static mut MSC_IO: [u8; 512] = [0; 512];
 /// The MSC block buffer (was a 4 KiB field of `Msc` on the main stack).
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
-/// Data-logger ring (FR-38). ~16 KiB; kept out of the main stack. Native: in
-/// SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in main()), not TCM .bss,
-/// which the stack shares.
+/// Data-logger state (FR-38; its 16 KiB ring is `logger::RING`, shared with
+/// the AD2 stream ISR). In SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in
+/// main()), not TCM .bss, which the stack shares.
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut LOGGER: logger::Logger = logger::Logger::new();
 
@@ -115,7 +115,7 @@ const ST_CORE: u16 = 1;
 fn main() -> ! {
     wdt::kick();
     screenshot::init(); // JOB and LOGGER are in NOLOAD .dmabuf
-    logger::Logger::init_in_place(unsafe { core::ptr::addr_of_mut!(LOGGER) });
+    logger::Logger::init_in_place(unsafe { core::ptr::addr_of_mut!(LOGGER) }, &logger::RING);
     let mut clk = Clock::new();
     lcd::set_madctl(lcd::MADCTL_LANDSCAPE);
     if !cfg!(feature = "keep-screen") {
@@ -262,7 +262,14 @@ fn main() -> ! {
         msc.poll(&mut [&mut disk]);
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
-        logger.poll();
+        if logger.poll() {
+            // The AD2 stream ISR lost the bus to a main-loop access (hy3131
+            // `guard`; a function change is caught by the auto-stop below
+            // first): the session ended; say so like the auto-stop.
+            for s in scpis.iter_mut() {
+                s.set_err("Settings conflict");
+            }
+        }
         bt.pump(); // BT TX DMA: next segment of a long reply
         prof::lap(prof::USB);
         if tmc.take_cleared() {
@@ -578,6 +585,38 @@ fn main() -> ! {
                             app.last_raw = None;
                             false
                         }
+                    }
+                    scpi::Dbg::Isr => {
+                        let i = logger.isr_stats();
+                        let cyc_ns = |c: u32| (c as u64 * 1_000_000_000 / clock::HCLK_HZ as u64) as u32;
+                        #[cfg(feature = "ad2-isr")]
+                        let tick_mhz = hy3131::stream::tick_mhz();
+                        #[cfg(not(feature = "ad2-isr"))]
+                        let tick_mhz = 0;
+                        let vals = [
+                            cfg!(feature = "ad2-isr") as u32,
+                            logger.on_isr() as u32,
+                            i[0],
+                            if logger.on_isr() || i[0] != 0 { logger.captured() } else { 0 },
+                            i[1],
+                            i[2],
+                            logger.overwritten(),
+                            logger.bad(),
+                            hy3131::timeouts(),
+                            i[3],
+                            cyc_ns(i[5]),
+                            i[6] * 20, // timer counts at 50 MHz
+                            tick_mhz,
+                            hy3131::forced_stops(),
+                        ];
+                        scpi.len = 0;
+                        for (k, v) in vals.iter().enumerate() {
+                            if k > 0 {
+                                scpi.put_bytes(b",");
+                            }
+                            put_u32(&mut scpi, *v);
+                        }
+                        true
                     }
                     scpi::Dbg::Ad2(2, level, _, _) => {
                         log_draw = level;

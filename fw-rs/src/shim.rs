@@ -12,11 +12,27 @@
 //!   VTOR = 0x08004000; then the Rust shim (src/boot.rs `shim`), which uses
 //!   stack only, then native::start (.data/.bss init, recovery or main).
 //! Exceptions all go to `default_handler` (`b .`): a fault hangs, the FWDGT
-//! (started by the shim) resets, and the shim chooses recovery.
+//! (started by the shim) resets, and the shim chooses recovery. The table runs
+//! to IRQ 55 (TIMER6 = STM32 TIM7), the AD2 stream ISR of the `ad2-isr`
+//! feature (docs/decisions-2026-10-22.md #3); PRIMASK stays set (`cpsid i`)
+//! except while that stream runs (hy3131.rs `stream`).
 
 use core::arch::global_asm;
 
-global_asm!(
+#[cfg(feature = "ad2-isr")]
+macro_rules! irq55 {
+    () => {
+        "ad2_stream_irq"
+    };
+}
+#[cfg(not(feature = "ad2-isr"))]
+macro_rules! irq55 {
+    () => {
+        "default_handler"
+    };
+}
+
+global_asm!(concat!(
     r#"
     .section .vectors, "a", %progbits
     .global __VECTORS
@@ -38,6 +54,16 @@ __VECTORS:
     .word 0
     .word default_handler      /* PendSV */
     .word default_handler      /* SysTick */
+    /* External interrupts 0..54: never enabled. */
+    .rept 55
+    .word default_handler
+    .endr
+    /* IRQ 55, TIMER6 (STM32 TIM7): the AD2 stream ISR (logger.rs `isr`,
+       feature ad2-isr, the only interrupt fw-rs enables); without the
+       feature default_handler, never enabled either. */
+    .word "#,
+    irq55!(),
+    r#"
 
     .section .shim, "ax", %progbits
     .thumb_func
@@ -78,7 +104,7 @@ reset:
 default_handler:
     b     .
 "#
-);
+));
 
 /// Rust part of the shim: decide, then hand over (never returns).
 #[no_mangle]

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-"""Static worst-case stack depth of the fw-rs native image (no ISRs: fw-rs
-runs with interrupts masked, so one call tree from the reset path covers it).
+"""Static worst-case stack depth of the fw-rs native image. fw-rs runs with
+interrupts masked, so one call tree from the reset path covers it, plus the
+one interrupt handler a build may have (ISRS below: the AD2 stream ISR of
+the `ad2-isr` feature, docs/decisions-2026-10-22.md #3): it runs on the same
+MSP on top of ANY main-loop frame, so its own worst path and the hardware
+exception frame (26 words with the FPU's lazy-stacking space, + 4 bytes of
+alignment) are added to the main worst path.
 
     tools/stack-depth/stackdepth.py ELF [--root SYM] [--top N] [--check BYTES]
 
@@ -76,13 +81,21 @@ def parse(lines):
             f['dyn'] = True
         elif op == 'blx' and not re.search(r'<', args):
             f['ind'] = True
-        elif op in ('bl', 'blx', 'b', 'b.w'):
+        elif re.match(r'(bl|blx|b)(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)?(\.w)?$', op):
+            # bl / b and their conditional forms (an IT block's `bllo`, a
+            # conditional tail call `bne.w`).
             t = re.search(r'<(.*)>', args)
             if t:
                 base = re.sub(r'\+0x[0-9a-f]+$', '', t.group(1))
                 if base != cur:
                     f['calls'].add(base)
     return funcs
+
+
+# Interrupt handlers (vector table symbols) whose stack adds to the main
+# path when present in the image.
+ISRS = ['ad2_stream_irq']
+EXC_FRAME = 26 * 4 + 4
 
 
 def main():
@@ -118,6 +131,16 @@ def main():
     if a.root not in funcs:
         sys.exit('stackdepth: root %s not in the disassembly' % a.root)
     worst, path = depth(a.root)
+    isr_txt, isr_paths = '', []
+    for isr in ISRS:
+        if isr in funcs:
+            d, ip = depth(isr)
+            isr_paths.append((isr, d, ip))
+    if isr_paths:
+        isr, d, ip = max(isr_paths, key=lambda t: t[1])
+        worst_main = worst
+        worst = worst_main + d + EXC_FRAME
+        isr_txt = ' (main %d + ISR %s %d + exception frame %d)' % (worst_main, isr, d, EXC_FRAME)
     syms = {}
     nm = subprocess.run([tool('llvm-nm'), a.elf], capture_output=True, text=True).stdout
     for line in nm.split('\n'):
@@ -125,14 +148,22 @@ def main():
         if len(p) == 3:
             syms[p[2]] = int(p[0], 16)
     size = syms['_stack_top'] - syms['__bss_end']
-    print('stack: %d bytes (_stack_top - __bss_end); static worst path from %s: %d bytes; headroom %d'
-          % (size, a.root, worst, size - worst))
+    print('stack: %d bytes (_stack_top - __bss_end); static worst path from %s: %d bytes%s; headroom %d'
+          % (size, a.root, worst, isr_txt, size - worst))
     acc = 0
     for p in path:
         f = funcs[p]
         acc += f['frame']
         flags = (' [indirect calls]' if f['ind'] else '') + (' [dynamic sp]' if f['dyn'] else '')
         print('  %6d %6d  %s%s' % (f['frame'], acc, p[:140], flags))
+    for isr, d, ip in isr_paths:
+        acc = 0
+        print('ISR %s (+%d exception frame):' % (isr, EXC_FRAME))
+        for p in ip:
+            f = funcs[p]
+            acc += f['frame']
+            flags = (' [indirect calls]' if f['ind'] else '') + (' [dynamic sp]' if f['dyn'] else '')
+            print('  %6d %6d  %s%s' % (f['frame'], acc, p[:140], flags))
     if rec:
         print('  (recursion cut at: %s)' % ', '.join(sorted(r[:60] for r in rec)[:5]))
     if a.top:

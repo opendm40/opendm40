@@ -208,13 +208,15 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///   LOG:SOURce?             AD1 / AD2
 ///   LOG:SRATe <S/s>         requested AD2 rate; the nearest rung of 1200,
 ///                           2400, 4800, 9600 is used (chop on or off: the
-///                           chopper does not slow AD2; ~6.5 kS/s link limit)
-///                           (default 2400); takes effect at START
+///                           chopper does not slow AD2) (default 2400, 4800
+///                           with the ad2-isr stream ISR); takes effect at START
 ///   LOG:SRATe?              the requested rate
 ///   LOG:RATE?               measured mean sample rate, Hz (0 until 2 samples)
 ///   LOG:COUNt?              buffered,captured,overwritten,missed,lost (lost =
 ///                           conversions not captured, from the span and the
-///                           nominal period; missed = the per-gap estimate)
+///                           nominal period; missed = the per-gap estimate;
+///                           overwritten = captured but dropped, ring full:
+///                           the newest are dropped, seqs stay consecutive)
 ///   LOG:GAPs?               bad,max_gap_us,g2,g3_4,g5_16,g17_128,g129 (bad =
 ///                           AD2 reads dropped as torn; gN = gaps of N periods)
 ///   LOG:PREamble?           mode,range,osr,nominal_us,measured_hz,chop,source,
@@ -319,6 +321,10 @@ pub enum Log {
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
 ///   DBG:HYSPI:SELF? n[,div]  HY3131 bus self-test (src/hyspi.rs)
+///   DBG:ISR?                AD2 stream ISR (logger.rs `isr`): feature,active,ticks,
+///                           captured,empty,gated,dropped,bad,timeouts,overruns,
+///                           max_isr_ns,max_lat_ns,tick_mhz,forced (feature 0: no ISR
+///                           in the build; timeouts = all HY3131 frames since boot)
 ///   DBG:FLASH?              SPI disk: jedec_id_hex,blocks,failed
 ///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
 ///                           as a crash (1st: fw-rs reboots; 2nd without 60 s
@@ -350,6 +356,8 @@ pub enum Dbg {
     Ad2(u8, u8, u16, u8),
     /// DBG:HYSPI:SELF? n[,div] (src/hyspi.rs): (n, div; 0 = hy3131::DIV).
     HySpi(u16, u8),
+    /// DBG:ISR? (logger.rs `isr`).
+    Isr,
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
@@ -1227,6 +1235,7 @@ impl Scpi {
                         }
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),
                         b"FLASH" => Dbg::Flash,
+                        b"ISR" => Dbg::Isr,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
                         // DBG:UPDATE = DBG:RECOVER: zero the 12-byte loader
