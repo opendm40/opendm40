@@ -581,8 +581,14 @@ Firmware:
       Verified on device 5f14d38: AC V ON == OFF within 0.04 mV (VAR 1 brings back 37.15 mV: the chopper was the
       cause); DC V 1 <-> 10 V soak 5 min +0 hits, kind OFF at 10 V; VAR 4 on 60 V trips again; 10 V on manual 6 V
       no trip.
-  - [ ] Not done: sentinels in AC+DC / diode / continuity / cap / Hz / AC A, DC? / AC? / FUSE? hints, OVERLOAD
-        shunt rule, fuse-check dialog, STAT:QUES bit 9 (doc §4.6).
+  - [x] The rest of §4 (doc §4.7, 2026-10-22): OVERLOAD shunt rule (uA / mA over range -> 10 A at once,
+        latched, OVLD badge + 300 ms beep + toast, not maskable), sentinels in AC+DC (both phases), AC A (AD1 on
+        the /1000 V tap), Hz (AD1 peak on PB1), continuity / diode / cap r0..4 (AD2 + OP2 on PB1); cap r5..7 and
+        DC V 60 V+ stay uncovered (documented gaps); DC? (AC V) / AC? (DC V 6 V) / FUSE? hints; fuse check
+        (Current Settings "Fuse check", SYST:FUSE:TEST / SYST:FUSE?); STATus:QUEStionable bit 9 (+ bit 1
+        OVERLOAD). Emulator: model + 25 new senttest scenarios, 362 model checks; host tests; ui-render 0.
+        (verify on device: doc §4.7 device test plan T8, T11..T16; DBG:SENTinel:VARiant +8 / +16 back out the
+        new rows / the alternation if a reading moves)
   Compared with UNI-T UT197 (2026-10-22, its manual §16.2 + the A / mA fuse notes): the UT197 senses a PLUG in
   the mA/uA or A jack (no signal needed) and flashes "InErr" + beeps in any non-current position, i.e. before
   the probe touches a circuit; the sense path runs through the fuse, so "InErr shows" doubles as the fuse
@@ -595,14 +601,13 @@ Firmware:
         a non-current one, toast "Leads in the A jack? Move to V" + a beep, at the moment the UT197 would warn.
         Fires also when the lead was already moved: own option in Settings 3/3 "Jack alerts" (and in the
         SYST:ALER:ENAB mask); decide whether it repeats or needs a tap to dismiss.
-  - [ ] Fuse check (UT197's procedure, our doc §4.3 design): guided dialog in ohm mode, lead V/ohm -> A,
-        expect ~48 ohm (PE = 2) or ~0.05 ohm (PE0 = 1), OL = blown; plus the FUSE? hint (exactly 0 A for 60 s
-        in an A mode -> "check the fuse").
-  - [ ] Sentinel coverage: UT197 warns in every non-current position; ours has none in AC+DC, diode,
-        continuity, capacitance, Hz, DC V 60 V+. First continuity and diode (probed on live boards most):
-        AD2 + OP2 on PB1, needs T8 (DC zero unchanged with AD2 on) first; then AC+DC (fold SCMPI PB1 into
-        freq_secondary's R20).
-  - [ ] OVERLOAD shunt rule (§4.3): uA / mA shunt and OL on the first conversion -> A shunt at once.
+  - [x] Fuse check (UT197's procedure, our doc §4.3 design): guided dialog in ohm mode (600 ohm, PE = 2),
+        lead V/ohm -> A, ~48 ohm = OK, OL = FUSE OPEN, else "Check leads"; the 0.05 ohm (PE0) step left out
+        (it tests the MOSFET, not the fuse). FUSE? hint: 60 s below 0.1 % of the range (AC 5 %). Doc §4.7.
+        (verify on device: T14, T15)
+  - [x] Sentinel coverage: AC+DC, AC A, Hz, continuity, diode, cap r0..4 done (doc §4.7); open: cap r5..7
+        (both op amps and AD1 busy: no path) and DC V 60 V+ (the 9dd1222 false trip). T8 gates the AD2 rows.
+  - [x] OVERLOAD shunt rule (§4.3 / §4.7). (verify on device: T11, with a current-limited supply first)
   - [ ] Hardware note (HW-1, for a board revision / mod): a sense contact in the A jack wired to a spare
         HY3131 input through a high-value resistor would give a real InErr and the fuse check with it.
 - [x] (B) AD2 fast data logger, main-loop (E1, no ISR): LOG:SOURce AD1|AD2, LOG:SRATe 600..9600 (R26 ladder,
