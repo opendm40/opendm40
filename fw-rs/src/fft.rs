@@ -155,10 +155,14 @@ enum Phase {
     Post,
 }
 
+/// Complex work buffer of a job (re, im interleaved, bit-reversed after
+/// `load`), owned by the caller and passed to `load` / `step`: it is needed
+/// only while a job is in flight, so the device lends it from a buffer that
+/// is idle meanwhile (screenshot.rs `fft_work`, the screenshot arena).
+pub type Work = [f32; N];
+
 /// One spectrum job and the last complete result.
 pub struct Fft {
-    /// Complex work buffer (re, im interleaved), bit-reversed after `load`.
-    buf: [f32; N],
     /// Result: dBV per bin 0 ..= bins - 1.
     pub db: [f32; BINS],
     /// Bins of the result (0 = none yet), Hz per bin, window used.
@@ -177,8 +181,8 @@ pub struct Fft {
 
 impl Fft {
     pub const fn new() -> Fft {
-        // All zero: .bss, not a 12 KB .data image (`bins` 0 = no result).
-        Fft { buf: [0.0; N], db: [0.0; BINS], bins: 0, bin_hz: 0.0, win: 0, seq: 0, len: 0, s1: 0.0, hz: 0.0, jwin: 0, phase: Phase::Idle }
+        // All zero: .bss, not a 4 KB .data image (`bins` 0 = no result).
+        Fft { db: [0.0; BINS], bins: 0, bin_hz: 0.0, win: 0, seq: 0, len: 0, s1: 0.0, hz: 0.0, jwin: 0, phase: Phase::Idle }
     }
 
     /// A job is in flight (`load` refuses).
@@ -197,7 +201,7 @@ impl Fft {
     /// mean of `src[j k .. j k + k]` as volts `a + b * code` (the scope's
     /// affine code -> volts map), sample rate `fs` of `src`, window `win`.
     /// False (nothing done): busy, or `src` too short / `len` invalid.
-    pub fn load(&mut self, src: &[u16], k: usize, len: usize, a: f32, b: f32, fs: f32, win: u8) -> bool {
+    pub fn load(&mut self, work: &mut Work, src: &[u16], k: usize, len: usize, a: f32, b: f32, fs: f32, win: u8) -> bool {
         if self.busy() || !len.is_power_of_two() || !(N_MIN..=N).contains(&len) || k == 0 || src.len() < len * k || !(fs > 0.0) {
             return false;
         }
@@ -217,7 +221,7 @@ impl Fft {
             let v = (a + sum as f32 * inv_k) * w;
             // z[n / 2] (re: even n, im: odd n) into its bit-reversed slot.
             let r = ((n / 2) as u32).reverse_bits() >> (32 - bits);
-            self.buf[2 * r as usize + (n & 1)] = v;
+            work[2 * r as usize + (n & 1)] = v;
         }
         self.len = len;
         self.s1 = if s1 > 0.0 { s1 } else { 1.0 };
@@ -229,7 +233,7 @@ impl Fft {
 
     /// One bounded slice of the job in flight. True when a new result is
     /// complete (in `db` / `bins` / `bin_hz`).
-    pub fn step(&mut self) -> bool {
+    pub fn step(&mut self, w: &mut Work) -> bool {
         match self.phase {
             Phase::Idle => false,
             Phase::Stages(s0) => {
@@ -237,13 +241,13 @@ impl Fft {
                 let total = m.trailing_zeros() as u8;
                 let s1 = (s0 + STAGES_PER_STEP).min(total);
                 for s in s0..s1 {
-                    self.stage(s as u32, m);
+                    Self::stage(w, s as u32, m);
                 }
                 self.phase = if s1 >= total { Phase::Post } else { Phase::Stages(s1) };
                 false
             }
             Phase::Post => {
-                self.post();
+                self.post(w);
                 self.phase = Phase::Idle;
                 true
             }
@@ -251,21 +255,26 @@ impl Fft {
     }
 
     /// Run the whole job now (host tests).
-    pub fn finish(&mut self) {
+    pub fn finish(&mut self, w: &mut Work) {
         while self.busy() {
-            self.step();
+            self.step(w);
         }
     }
 
+    /// Drop the job in flight, keep the last result (its work buffer was
+    /// taken back).
+    pub fn abort(&mut self) {
+        self.phase = Phase::Idle;
+    }
+
     /// Radix-2 DIT stage `s` (butterfly span 2^s) of the m-point transform.
-    fn stage(&mut self, s: u32, m: usize) {
+    fn stage(b: &mut Work, s: u32, m: usize) {
         let half = 1usize << s;
         let size = half * 2;
         // W_size^j = exp(-2 pi i j / size) = table index j * N / size... of
         // the m-point transform: the table is for N = 2 m_max, so index
         // j * (N / size).
         let step = N / size;
-        let b = &mut self.buf;
         for j in 0..half {
             let (wr, wi) = (cos_i(j * step), -sin_i(j * step));
             let mut a = j;
@@ -285,14 +294,13 @@ impl Fft {
     }
 
     /// Split of the packed transform into the real spectrum, power, dB.
-    fn post(&mut self) {
+    fn post(&mut self, b: &Work) {
         let len = self.len;
         let m = len / 2;
         let st = N / len;
         // Sine of a bin: |X| = A s1 / 2 -> Vrms = sqrt(2) |X| / s1; DC: X / s1.
         let k_ac = db10(2.0 / (self.s1 * self.s1));
         let k_dc = db10(1.0 / (self.s1 * self.s1));
-        let b = &self.buf;
         let (z0r, z0i) = (b[0], b[1]);
         let x0 = z0r + z0i;
         let xm = z0r - z0i;

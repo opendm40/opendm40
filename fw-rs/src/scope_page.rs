@@ -236,11 +236,28 @@ impl Math {
     }
 }
 
-/// The spectrum job and result: 12 KB, TCM .bss (all-zero `Fft::new`).
+/// The spectrum job and result: 4 KB, TCM .bss (all-zero `Fft::new`). Its
+/// 8 KiB work buffer is lent by the screenshot arena (`fft_work`).
 static mut FFT: crate::fft::Fft = crate::fft::Fft::new();
+/// A frame was dropped because a screenshot held the work buffer: ask for it
+/// again (a stopped scope re-emits its record) once the buffer is back.
+static mut FFT_RETRY: bool = false;
+const _: () = assert!(crate::screenshot::FFT_WORK == crate::fft::N);
 
 fn fft() -> &'static mut crate::fft::Fft {
     unsafe { &mut *core::ptr::addr_of_mut!(FFT) }
+}
+
+/// The FFT work buffer (screenshot.rs `fft_work`: the tail of the screenshot
+/// capture buffer). None while a screenshot holds it: the job in flight, if
+/// any, is dropped (the last result stays) and the frame is asked again.
+fn fft_work() -> Option<&'static mut crate::fft::Work> {
+    let w = crate::screenshot::fft_work();
+    if w.is_none() {
+        fft().abort();
+        unsafe { FFT_RETRY = true };
+    }
+    w
 }
 
 /// FFT Hz/div choices (ascending) for a spectrum up to `nyq` Hz: the widest
@@ -954,19 +971,29 @@ impl App {
         };
         let a = self.scope.volts(0.0);
         let b = self.scope.volts(1.0) - a;
+        let Some(w) = fft_work() else {
+            return;
+        };
         crate::prof::enter(crate::prof::FFT);
-        fft().load(&rec[start..], k, len, a, b, f.fs as f32, m.win);
+        fft().load(w, &rec[start..], k, len, a, b, f.fs as f32, m.win);
         crate::prof::exit(crate::prof::FFT);
     }
 
     /// One slice of the spectrum job (every pass on the page): a finished
     /// spectrum is drawn.
     fn sp_math_step(&mut self) {
+        if unsafe { FFT_RETRY } && crate::screenshot::fft_free() {
+            unsafe { FFT_RETRY = false };
+            self.scope_invalidate();
+        }
         if !(self.sp.math.on && self.sp.math.mode == 5 && fft().busy()) {
             return;
         }
+        let Some(w) = fft_work() else {
+            return;
+        };
         crate::prof::enter(crate::prof::FFT);
-        let done = fft().step();
+        let done = fft().step(w);
         crate::prof::exit(crate::prof::FFT);
         // (sp_math is its own FFT section, not nested.)
         if done {

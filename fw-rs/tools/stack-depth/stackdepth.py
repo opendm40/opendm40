@@ -16,7 +16,7 @@ deepest call path from the root (default dm40_fw::native::start, the native
 entry after the shim) plus the largest frames.
 
 Limits: indirect calls (blx rN: trait objects, fn pointers) are not
-followed; recursion is cut at the first repeat; a dynamic `sub sp, rN` is
+followed, except the known ones in INDIRECT below (added as calls); recursion is cut at the first repeat; a dynamic `sub sp, rN` is
 flagged. On 2026-10-21 the result matched the emulator's measured high-water
 (DBG:BOOT? STACK) to within 16 bytes, so these do not hide the worst path
 today; re-check against DBG:BOOT? after big changes.
@@ -98,6 +98,16 @@ def parse(lines):
 ISRS = ['ad2_stream_irq']
 EXC_FRAME = 26 * 4 + 4
 
+# Known indirect calls, (caller regex, callee regex): every function matching
+# the callee pattern is added as a call of every caller matching the first.
+# The SCPI reply port is a `&mut dyn bt::ScpiPort` in main.rs `run`; its
+# `respond_with` calls the reply builder, a `run` closure, through
+# `&mut dyn FnMut` (Bt's has a 6 KiB stack buffer, main.rs MMEM / LOG:DATA).
+INDIRECT = [
+    (r'^dm40_fw::run$', r' as dm40_fw::bt::ScpiPort>::'),
+    (r' as dm40_fw::bt::ScpiPort>::respond_with$', r'^dm40_fw::run::\{closure#\d+\}$'),
+]
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -109,6 +119,11 @@ def main():
     dis = subprocess.run([tool('llvm-objdump'), '-d', '--no-show-raw-insn', '-C', a.elf],
                          capture_output=True, text=True, check=True).stdout.split('\n')
     funcs = parse(dis)
+    for cpat, tpat in INDIRECT:
+        targets = [n for n in funcs if re.search(tpat, n)]
+        for n in funcs:
+            if re.search(cpat, n):
+                funcs[n]['calls'].update(t for t in targets if t != n)
     sys.setrecursionlimit(20000)
     memo, rec = {}, set()
 

@@ -451,23 +451,92 @@ date for its layout and traps.
 ## Native memory map and the loader marker
 
 ```
-0x08004000  .vectors: word0 0x2002F7F8, word1 reset (0x08004041)   region A, 16 KiB
-0x08004040  .shim:    reset, default_handler, boot::shim,
-                      clock::init_core, wdt::start::fwdgt, shim_main  (-> 0x080043D4)
-0x080043D4  0xFF padding (objcopy --gap-fill=0xff)
+0x08004000  .vectors: word0 0x2002F7F8, word1 reset                region A, 16 KiB
+            .shim:    reset, default_handler, boot::shim,
+                      clock::init_core, wdt::start::fwdgt, shim_main
+            0xFF padding (objcopy --gap-fill=0xff)
 0x08008000  12-byte loader/ROM marker, 0xFF in our image             GAP
 0x0800800C  4 bytes 0xFF padding
-0x08008010  .text + .rodata (XIP), then the .data load image         region B
-0x0803C4C4  end of image (limit 0x080A0000, 408380 bytes free)
-RAM: TCM 0x10000000 .data/.bss (~26.5 KB) + stack (top 0x10010000);
-     SRAM 0x20000000.. .dmabuf (59 KB; SRAM0 no longer holds a code copy)
+0x08008010  .text + .rodata (XIP): everything hot                   region B (zero-wait)
+0x08080000  .cold (rarely run code) + the .data load image          region C (NOT zero-wait)
+            end of image below 0x080A0000 (FS-loader above)
+RAM: TCM  0x10000000 .data/.bss, then the stack down from 0x10010000;
+     SRAM 0x20000000 .dmabuf (DMA buffers, the scope record, the screenshot
+          arena, the logger ring, ...), then .sram_bss (CPU-only, zeroed)
 ```
+
+### Memory budget (2026-10-22 rework)
+
+Numbers from `build.sh` (stackdepth.py and the link map) on the ad2-isr
+build (default since b81abf2) / without the feature
+(`--no-default-features --features vdisk`):
+
+| | before (f5f8e96) | after |
+|---|---|---|
+| static worst stack path | 31 040 / 30 676 B | 21 760 / 21 396 B |
+| TCM stack (64 KiB - .data/.bss) | 47 860 / 47 912 B | 46 620 / 46 688 B |
+| stack headroom | 16 820 / 17 236 B | 24 860 / 25 292 B |
+| emulator stack high-water (DBG:BOOT? STACK, scope + FFT + screenshot) | 30 700 B | 21 420 B |
+| SRAM free (above .sram_bss) | 1 840 / 2 024 B | 12 856 / 13 040 B |
+| region B free (zero-wait flash) | 348 / 8 188 B | 24 508 / 31 884 B |
+
+Where it came from (no change in function; the one timing difference is
+the FFT / screenshot sharing below):
+
+- **main's frame** (20.5 KB): `App::new` was inlined into `main`, and its
+  ~11 KB of temporaries (the sub-structs before they move into the App) sat
+  under every main-loop call. `main` now builds the App in a static (`APP`,
+  TCM .bss) through `new_app` (never inlined, `.cold`) and hands it to `run`
+  (the loop); the start-up frame is popped first. The large SCPI reply
+  builders (MMEM:CAT?, MMEM:DATA?, LOG:DATA?) run as closures through
+  `ScpiPort::respond_with` instead of inlined into `run`. `run`'s frame is
+  ~12.3 KB (the Usbtmc with its 6 KiB reply buffer is the largest local).
+- **BT reply buffer** (6 KiB `.dmabuf` BLK): only ever live inside one SCPI
+  dispatch (built, then copied into the TX ring at once), so it is now a
+  local of `Bt::respond_with` (never inlined): that path, run -> respond_with
+  -> builder (~21.4 KB), is shallower than the drawing paths that set the
+  worst case. stackdepth.py follows the dyn calls (its `INDIRECT` list).
+- **FFT work buffer** (8 KiB of the 12 KB `scope_page::FFT` in TCM): an
+  arena with an explicit owner, the last 8 KiB of the screenshot capture
+  buffer (`screenshot::CAP`, 48 KiB). The FFT renews a lease every time it
+  uses the buffer (a few main-loop passes); a screenshot started during a
+  lease captures into CAP below the tail only (40 KiB; rows past it are read
+  from the GRAM while writing, as for a full CAP); one started without a
+  lease takes the whole CAP until its Data phase ends (the FFT job in flight,
+  if any, is dropped and the frame asked again after), but gives the tail
+  back as soon as its rows fit below it (~0.1 s). Effect: a screenshot of a
+  screen over 40 KiB of RLE (the AC+DC and power views) taken while the
+  scope FFT runs keeps the panel frozen longer; a spectrum is not updated
+  while a screenshot of such a screen holds the tail. The FFT result (`db`,
+  4 KB) stays in TCM. The host renders of the scope FFT views code to
+  36-38 KiB.
+- **Ink / Glyph**: `Glyph` keeps its blob slice from the glyph's first byte
+  (no separate offset): 16 bytes instead of 20, ~1 KB off the drawing
+  frames (every `Ink` holds 24 glyphs).
+- **EP_MEMORY** 320 -> 64 words: USBFS has 4 endpoints with at most 64-byte
+  packets, so 64 words is the most synopsys-usb-otg's OUT buffers can take.
+- **screenshot `Job::off`** u32 -> u16 (word offsets into CAP): 642 B.
+- Rebalanced: the touch log (1.9 KB) and the USB EP / MSC buffers (1.3 KB)
+  moved from `.sram_bss` to TCM .bss (SRAM is the tighter one now).
+- **Region B**: start-up and settings / page / dialog code and the debug /
+  file replies moved to `.cold` (link-native.x lists them; see there), with
+  `#[inline(never)]` on the helpers that were inlined into hot callers
+  (`run`, `Scpi::handle`). The per-pass entry points of the `.cold`
+  screenshot module (`poll`, `busy`, `frozen`, `fft_work`, `fft_free`) are
+  `inline(always)` so a pass without a shot never reaches region C.
 
 **Link-time asserts** (`link-native.x`):
 - region A ends at or below `0x08008000`;
 - `.text` starts at or above `0x0800800C`;
 - the image ends at or below `0x080A0000`;
-- at least 16 KiB of TCM stack.
+- region B (`.text`, hot) fits below `0x08080000` and leaves >= 8 KiB free
+  (`build.sh` warns below 16 KiB);
+- TCM stack (64 KiB - .data/.bss) >= 42 KiB;
+- SRAM >= 8 KiB free above `.sram_bss`.
+
+`build.sh` also requires >= 20 KiB between the TCM stack and the static
+worst call path (`tools/stack-depth/stackdepth.py --check 20480`, incl. the
+AD2 ISR and its exception frame), and prints region B / SRAM free.
 
 **`build.sh`** checks the binary again:
 - the 16 bytes at `0x08008000`, and all padding from the end of region A to

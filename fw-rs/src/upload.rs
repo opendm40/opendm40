@@ -154,6 +154,7 @@ const E_IO: &str = "Mass storage error";
 
 /// DBG:UPLoad:BEGin on the device's SPI flash.
 #[cfg(target_os = "none")]
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn begin(size: u32, crc: u32, now_ms: u64) -> R<()> {
     begin_on(disk(), size, crc, now_ms)
 }
@@ -181,6 +182,7 @@ pub fn begin_on(dev: &mut dyn BlockDevice, size: u32, crc: u32, now_ms: u64) -> 
 
 /// The payload of a `DBG:UPLOAD:DATA ` message: `<offset>,<bytes>`.
 #[cfg(target_os = "none")]
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn data_msg(m: &[u8], now_ms: u64) -> R<()> {
     data_msg_on(disk(), m, now_ms)
 }

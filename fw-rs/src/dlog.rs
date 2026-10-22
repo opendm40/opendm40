@@ -1791,6 +1791,7 @@ static mut SCPI_GEN: Slot<Ent> = Slot::new();
 /// MMEM:DATA?: bytes `off..` of root file `name` into `out` (count
 /// returned, 0 at the end). "LOGnnn.CSV" with a LOGnnn.DLG next to it =
 /// the CSV generated from the DLG; else the file's raw bytes.
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn data(name: &[u8; 11], off: u32, out: &mut [u8]) -> Result<usize, DataErr> {
     let mut d = disk();
     let g = geometry(&mut d).ok_or(DataErr::NoDisk)?;

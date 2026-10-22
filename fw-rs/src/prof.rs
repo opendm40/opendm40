@@ -368,6 +368,7 @@ impl W<'_> {
 }
 
 /// DBG:PROF? text table into `buf` (ends with '\n'); returns its length.
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn report(buf: &mut [u8]) -> usize {
     let p = p();
     let mut w = W { b: buf, n: 0 };

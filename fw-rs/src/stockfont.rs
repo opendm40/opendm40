@@ -53,8 +53,10 @@ mod data {
 
     #[derive(Clone, Copy)]
     pub struct Glyph {
+        /// The font's blob from the glyph's first byte on (the entry's
+        /// offset folded in: 16 bytes per Glyph instead of 20, and every
+        /// `Ink` holds 24 of them).
         blob: &'static [u8],
-        off: u32,
         four: bool,
         pub w: u8,
         pub h: u8,
@@ -63,11 +65,11 @@ mod data {
     }
 
     impl Glyph {
-        pub const EMPTY: Glyph = Glyph { blob: &[], off: 0, four: false, w: 0, h: 0, adv: 0, yoff: 0 };
+        pub const EMPTY: Glyph = Glyph { blob: &[], four: false, w: 0, h: 0, adv: 0, yoff: 0 };
 
         /// A glyph of our own (stockfont_w.rs), same packing as the stock's.
         pub fn own(b: &'static [u8], four: bool, w: u8, h: u8, adv: u8, yoff: i8) -> Glyph {
-            Glyph { blob: b, off: 0, four, w, h, adv, yoff }
+            Glyph { blob: b, four, w, h, adv, yoff }
         }
 
         /// Coverage 0..15 of pixel (x, y) inside the glyph box. Column-major,
@@ -81,10 +83,10 @@ mod data {
         #[inline(always)]
         pub fn alpha_at(&self, p: u32) -> u8 {
             if self.four {
-                let b = self.blob[(self.off + p / 2) as usize];
+                let b = self.blob[(p / 2) as usize];
                 if p & 1 == 0 { b >> 4 } else { b & 0xF }
             } else {
-                let b = self.blob[(self.off + p / 8) as usize];
+                let b = self.blob[(p / 8) as usize];
                 if b & (0x80 >> (p & 7)) != 0 { 15 } else { 0 }
             }
         }
@@ -114,8 +116,7 @@ mod data {
                 if c == code {
                     let g = &e[mid];
                     return Some(Glyph {
-                        blob: fd.blob,
-                        off: g.off,
+                        blob: fd.blob.get(g.off as usize..).unwrap_or(&[]),
                         four: fd.four,
                         w: g.w,
                         h: g.h,

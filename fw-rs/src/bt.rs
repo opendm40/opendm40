@@ -68,6 +68,7 @@ const DMA_INTC1: u32 = DMA0 + 0x0C;
 const RX_LEN: usize = 1024;
 /// Holds the largest reply (RSP_MAX block + LF) plus stock frames.
 const TX_LEN: usize = 8192;
+/// Largest reply built in place (`ScpiPort::respond_with`), as USBTMC.
 const BLK_LEN: usize = crate::usbtmc::RSP_MAX;
 /// Lines that arrive this soon after an AT exchange are the module's late
 /// answer ("OK", "CBN+..."), not a host command.
@@ -77,9 +78,6 @@ const AT_QUIET_MS: u64 = 500;
 static mut RX: [u8; RX_LEN] = [0; RX_LEN];
 #[link_section = ".dmabuf"]
 static mut TX: [u8; TX_LEN] = [0; TX_LEN];
-/// In-place reply buffer (ScpiPort::rsp_buf: DBG:LCD?, LOG:DATA?).
-#[link_section = ".dmabuf"]
-static mut BLK: [u8; BLK_LEN] = [0; BLK_LEN];
 
 /// Where an SCPI reply goes: USBTMC (trusted: a cable to the user's own
 /// computer) or Bluetooth (untrusted). main.rs routes `scpi::Out` results
@@ -87,9 +85,15 @@ static mut BLK: [u8; BLK_LEN] = [0; BLK_LEN];
 pub trait ScpiPort {
     /// Queue a complete reply (the transport adds its terminator).
     fn respond(&mut self, data: &[u8]);
-    /// Buffer to build a large reply in place, then `respond_len`.
+    /// Buffer to build a large reply in place, then `respond_len`: USBTMC
+    /// only (the DBG:* replies). Bluetooth has none (empty): DBG:* never runs
+    /// from it (`trusted`); its large replies go through `respond_with`.
     fn rsp_buf(&mut self) -> &mut [u8];
     fn respond_len(&mut self, n: usize);
+    /// A large reply built in place (MMEM:CAT?, MMEM:DATA?, LOG:DATA?): `f`
+    /// fills the buffer (usbtmc::RSP_MAX bytes) and returns the reply's
+    /// length, which is then queued (None: no reply).
+    fn respond_with(&mut self, f: &mut dyn FnMut(&mut [u8]) -> Option<usize>);
     /// False: DBG:* (reflash / reset / watchdog release / input injection /
     /// debug reads) must never run from this transport. Bt::take_line
     /// already refuses such lines; main.rs checks this again before acting
@@ -108,6 +112,11 @@ impl<'a, B: usb_device::bus::UsbBus> ScpiPort for crate::usbtmc::Usbtmc<'a, B> {
     fn respond_len(&mut self, n: usize) {
         crate::usbtmc::Usbtmc::respond_len(self, n)
     }
+    fn respond_with(&mut self, f: &mut dyn FnMut(&mut [u8]) -> Option<usize>) {
+        if let Some(n) = f(&mut crate::usbtmc::Usbtmc::rsp_buf(self)[..]) {
+            crate::usbtmc::Usbtmc::respond_len(self, n);
+        }
+    }
     fn trusted(&self) -> bool {
         true
     }
@@ -118,11 +127,21 @@ impl ScpiPort for Bt {
         self.send(&[data, b"\n"]);
     }
     fn rsp_buf(&mut self) -> &mut [u8] {
-        unsafe { &mut *core::ptr::addr_of_mut!(BLK) }
+        &mut []
     }
-    fn respond_len(&mut self, n: usize) {
-        let blk = unsafe { &*core::ptr::addr_of!(BLK) };
-        self.send(&[&blk[..n.min(BLK_LEN)], b"\n"]);
+    fn respond_len(&mut self, _n: usize) {}
+    /// The reply is built on the stack, in this never-inlined frame, and
+    /// copied into the TX ring at once (`send`, all or nothing): a 6 KiB
+    /// static (was `.dmabuf` BLK) would hold SRAM for a buffer that lives
+    /// only during this call, and this path (main loop -> SCPI dispatch ->
+    /// here -> the builder) is far shallower than the drawing paths that
+    /// set the stack's worst case (tools/stack-depth).
+    #[inline(never)]
+    fn respond_with(&mut self, f: &mut dyn FnMut(&mut [u8]) -> Option<usize>) {
+        let mut blk = [0u8; BLK_LEN];
+        if let Some(n) = f(&mut blk) {
+            self.send(&[&blk[..n.min(BLK_LEN)], b"\n"]);
+        }
     }
     fn trusted(&self) -> bool {
         false

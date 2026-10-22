@@ -71,6 +71,7 @@ impl Out<'_> {
 }
 
 /// DBG:HYSPI:SELF? (see the module header). Returns the reply length.
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn self_test(n: u32, div: u8, out: &mut [u8]) -> usize {
     let n = n.clamp(1, N_MAX);
     let cpha = div & 0x80 != 0;
@@ -161,6 +162,7 @@ pub fn self_test(n: u32, div: u8, out: &mut [u8]) -> usize {
 /// (test mode) read before / after.
 /// Reply: mode,div,bad_1byte,bad_2byte,us_per_1byte_write,r37_before,
 /// r37_after,first mismatches as written>read (hex, up to 6).
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn write_test(mode: u8, div: u8, out: &mut [u8]) -> usize {
     let div = if matches!(div, 8 | 16 | 32) { div } else { 16 };
     let mut keep = [0u8; 2];

@@ -32,6 +32,18 @@ Code work (in this order):
 3. Wire src/bargraph.rs into DmmView (UF-30).
 6. libsigrok DM40 profile: device retest over USBTMC (all functions passed in the emulator), send upstream.
 
+## Memory budget (2026-10-22 rework, docs/native-boot.md "Memory budget")
+
+- [x] Stack headroom 16.8 -> 24.9 KB (ad2-isr), SRAM free 1.8 -> 12.9 KB, region B free 0.3 -> 24.5 KB;
+      build checks: stackdepth --check 20480, TCM stack >= 42 KiB, SRAM >= 8 KiB free, region B >= 8 KiB
+      free (warning < 16 KiB).
+- [ ] Device: DBG:BOOT? STACK high-water after a scope walk + FFT + screenshot (static path 21.8 KB).
+- [ ] Device: screenshot with the scope FFT on (40 KiB CAP while the FFT holds the tail) and a shot of a
+      big screen (AC+DC / power view) then the FFT: the spectrum resumes after the shot.
+- [ ] `.cold` (region C, not zero-wait) watch: the per-pass entry points of cold modules
+      (boot::mark_healthy, upload::poll, dlog::gen / stale, screenshot::poll) are inlined into hot
+      callers today (map checked 2026-10-22), but fatdir (C) runs in every csvlog commit while a CSV
+      log records: fine unless a CSV log runs together with an AD2 stream (then: fatdir to B).
 ## Remaining work
 
 - [x] `tools/dm40dbg.py` ported from CDC/pyserial to `/dev/usbtmc` + `DBG:` commands (a3427d4).

@@ -33,6 +33,7 @@ fn check(name: &str, ok: bool, msg: String) {
 
 fn main() {
     let mut f = Box::new(Fft::new());
+    let mut work: Box<fft::Work> = Box::new([0.0; fft::N]);
 
     // 1. Helpers.
     for &x in &[1e-6f32, 0.01, 0.5, 1.0, 1.5, 2.0, 10.0, 12345.0, 3.0e7] {
@@ -62,8 +63,8 @@ fn main() {
     for len in [256usize, 512, 1024, 2048] {
         let fs = 1.0e6;
         let src = codes(|t| 0.7 + 1.3 * (2.0 * std::f64::consts::PI * 12_345.0 * t).sin() + 0.4 * (2.0 * std::f64::consts::PI * 210_000.0 * t + 0.3).cos(), len, fs);
-        assert!(f.load(&src, 1, len, A, B, fs as f32, fft::W_RECT));
-        f.finish();
+        assert!(f.load(&mut work, &src, 1, len, A, B, fs as f32, fft::W_RECT));
+        f.finish(&mut work);
         check("bins", f.bins == len / 2 + 1, format!("{} bins", f.bins));
         let v: Vec<f64> = src.iter().map(|&c| (A + B * c as f32) as f64).collect();
         let mut worst = 0.0f64;
@@ -95,9 +96,9 @@ fn main() {
             let bin = fs / (k * n) as f64;
             let fsig = bin * (100.0 + frac);
             let src = codes(|t| 1.0 * (2.0 * std::f64::consts::PI * fsig * t).sin(), n * k, fs);
-            assert!(f.load(&src, k, n, A, B, fs as f32, w));
+            assert!(f.load(&mut work, &src, k, n, A, B, fs as f32, w));
             let mut steps = 0;
-            while !f.step() {
+            while !f.step(&mut work) {
                 steps += 1;
             }
             let (pf, pd) = f.peak(0.0, (fs / k as f64 / 2.0) as f32).expect("peak");
@@ -120,9 +121,9 @@ fn main() {
 
     // 4. Busy refuses a load; clear drops the result; col_max / db_at.
     let src = codes(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin(), 4096, 1.0e6);
-    assert!(f.load(&src, 2, 2048, A, B, 1.0e6, fft::W_HANN));
-    check("busy", !f.load(&src, 1, 2048, A, B, 1.0e6, fft::W_HANN), "load while busy accepted".into());
-    f.finish();
+    assert!(f.load(&mut work, &src, 2, 2048, A, B, 1.0e6, fft::W_HANN));
+    check("busy", !f.load(&mut work, &src, 1, 2048, A, B, 1.0e6, fft::W_HANN), "load while busy accepted".into());
+    f.finish(&mut work);
     let pk = f.peak(0.0, 250_000.0).unwrap();
     check("decim peak", (pk.0 - 1000.0).abs() < 30.0, format!("{pk:?}"));
     let cm = f.col_max(900.0, 1100.0).unwrap();

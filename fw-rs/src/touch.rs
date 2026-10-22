@@ -980,8 +980,7 @@ struct Log {
     n: u32,
 }
 
-// SRAM (.sram_bss, zeroed at reset), not TCM: the stack's memory.
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+// TCM .bss (was .sram_bss; 2026-10-22 memory budget: SRAM is the tighter).
 static mut LOG: Log = Log { e: [LogEntry { t: 0, kind: 0, a: 0, b: 0, c: 0, x: 0, y: 0 }; LOG_N], n: 0 };
 
 fn log_ref() -> &'static mut Log {
@@ -1011,6 +1010,7 @@ pub fn log_clear() {
 ///   `<t>,E,<points>,<keys>,<x>,<y>`                    debounced state change
 ///   `<t>,G,<code>,<arg>,<x>,<y>`                       gesture decision
 /// Lines that do not fit are left out (6 KB holds the whole ring).
+#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn log_text(out: &mut [u8], now: u64) -> usize {
     let l = log_ref();
     let shown = (l.n as usize).min(LOG_N);
