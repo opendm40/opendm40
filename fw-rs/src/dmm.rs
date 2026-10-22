@@ -689,6 +689,10 @@ pub struct Dmm {
     ovl: Option<Ovl>,
     /// Time of the last timed OVERLOAD release (None: none yet).
     ovl_rel_t: Option<u64>,
+    /// A-jack protection (doc 4.8): the probe (OP2 / AD2 peak on PB2) is
+    /// in the row; the latch (the A jack on the 10 mohm shunt).
+    probe: bool,
+    aprot: Option<AProt>,
     /// Fuse check in progress (`fuse_start`) and the last result.
     fuse_job: Option<FuseJob>,
     fuse_res: sentinel::FuseRes,
@@ -709,6 +713,15 @@ struct FuseJob {
 /// Fuse check: ohm readings taken (the last one decides) and the time limit.
 const FUSE_READINGS: u8 = 3;
 const FUSE_TIMEOUT_MS: u64 = 8000;
+
+/// A-jack protection latch (`aprot_poll`): `ack` = the user chose a
+/// function / range / AUTO since the trip; the probe below
+/// sentinel::APROT_GONE_A since `low_since`.
+#[derive(Clone, Copy)]
+struct AProt {
+    ack: bool,
+    low_since: Option<u64>,
+}
 
 /// OVERLOAD latch: the uA / mA shunt overloaded and the meter went to the
 /// 10 A shunt. Shunts `barred` and above (sentinel::shunt_of numbering: 1
@@ -893,6 +906,8 @@ impl Dmm {
             pkh_due: 0,
             live: false,
             ovl: None,
+            probe: false,
+            aprot: None,
             ovl_rel_t: None,
             fuse_job: None,
             fuse_res: sentinel::FuseRes::Idle,
@@ -1075,9 +1090,16 @@ impl Dmm {
             relay_pa(clk, pa);
             self.pa_now = Some(pa);
         }
+        // A-jack protection (doc 4.8): a current function ends the latch
+        // (its own shunt switching / OVERLOAD take over); while latched the
+        // other functions keep the A jack on the 10 mohm shunt.
+        if matches!(m, 4..=9) && self.aprot.take().is_some() {
+            self.sent.set_aprot(clk.now_ms(), false);
+        }
         relay_pe(match m {
             4 | 7 => 0,
             5 | 8 => 1,
+            _ if self.aprot.is_some() => 0,
             _ => 2,
         });
         pc7(m == 14);
@@ -1085,7 +1107,13 @@ impl Dmm {
         // pointed at the A-jack shunt (or the V tap in DC A), sentinel.rs.
         let mask = if self.fuse_job.is_some() { 0 } else { self.sent.mask };
         let (row, kind) = sentinel::sentinel_row(m, r as u8, self.acdc, mask, cfg);
-        if sentinel::ad1_last(kind, &row) {
+        // The probe (PB2) over the comparator rows after a hit, and while
+        // latched in every DC V / mV / ohm / temperature row (OP2 / AD2 are
+        // unused there; DC V 60 V+ has no comparator but the probe fits).
+        let probe_ok = self.probe_ok();
+        self.probe = probe_ok && ((self.probe && kind == Kind::CmpA) || self.aprot.is_some());
+        let row = if self.probe { sentinel::probe_row(&row) } else { row };
+        if sentinel::ad1_last(kind, &row) || (self.probe && row[3] & 0x80 != 0) {
             let mut c = row;
             c[3] &= !0x80;
             hy::configure(&c);
@@ -1613,6 +1641,11 @@ impl Dmm {
         if self.ovl.take().is_some() {
             self.sent.set_overload(now, false);
         }
+        // The A-jack protection latch: the user acted; it ends once the
+        // current is gone too (`aprot_poll`).
+        if let Some(a) = &mut self.aprot {
+            a.ack = true;
+        }
         if self.fuse_job.take().is_some() {
             self.fuse_res = sentinel::FuseRes::Idle;
         }
@@ -2080,6 +2113,11 @@ impl Dmm {
             self.freq_secondary(now, src);
         }
         let cmp = matches!(self.sent.kind, Kind::CmpA | Kind::CmpV);
+        // A-jack protection (doc 4.8): also through the settles (the
+        // temperature phases), so the probe windows keep their 100 ms.
+        if !self.pw.on && (self.probe || self.sent.kind == Kind::CmpA) {
+            self.aprot_poll(clk, now);
+        }
         if now < self.deadline {
             // AC+DC: the comparator watches through the phase settles too
             // (600..900 ms each; A-JACK clears 1 s after the last hit).
@@ -2808,6 +2846,70 @@ impl Dmm {
         hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
         hy::write(0x24, &[if self.sent.alt_v { sentinel::R24_SENSE_PB5 } else { sentinel::R24_PB1_PB3 }]);
         self.pkh_due = now + 3;
+    }
+
+    /// A-jack protection (doc 4.8, sentinel::aprot_trips), per poll in the
+    /// DC V / mV / ohm / temperature functions: the probe goes in with the
+    /// first comparator hit window (a row rewrite, AD1 last); every WIN_MS
+    /// its AD2 peak gives the A-jack current. Over the limit -> PE0 = 1 (the
+    /// 10 mohm shunt) at once and the latch (red A-PROT); latched, it ends
+    /// when the user acted and the current stayed below APROT_GONE_A for
+    /// APROT_GONE_MS. Without hits and without the latch the probe leaves.
+    fn aprot_poll(&mut self, clk: &mut Clock, now: u64) {
+        let run = self.sent.run_since();
+        if !self.probe {
+            if run.is_some() && self.sent.kind == Kind::CmpA && self.probe_ok() {
+                self.probe = true;
+                self.write_config(clk);
+                self.deadline = clk.now_ms() + 120;
+            }
+            return;
+        }
+        if self.aprot.is_none() && run.is_none() && !matches!(self.sent.alert, Alert::AJack) {
+            self.probe = false;
+            self.write_config(clk);
+            self.deadline = clk.now_ms() + 120;
+            return;
+        }
+        if now.saturating_sub(self.pk_t) < sentinel::WIN_MS {
+            return;
+        }
+        self.pk_t = now;
+        let mut b = [0u8; 6];
+        hy::read(0x0E, &mut b);
+        hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
+        hy::write(0x29, &[self.r29]);
+        let amps = sentinel::probe_amps(hy::s24(&b[0..3]), hy::s24(&b[3..6]));
+        self.sent.probe_a = amps;
+        match &mut self.aprot {
+            Some(a) => {
+                if amps >= sentinel::APROT_GONE_A {
+                    a.low_since = None;
+                } else if a.ack && now.saturating_sub(*a.low_since.get_or_insert(now)) >= sentinel::APROT_GONE_MS {
+                    self.aprot = None;
+                    self.sent.set_aprot(now, false);
+                    self.probe = false;
+                    self.write_config(clk);
+                    self.deadline = clk.now_ms() + 250;
+                }
+            }
+            None => {
+                let hot = run.map_or(0, |t| now.saturating_sub(t));
+                if sentinel::aprot_trips(amps, hot) {
+                    relay_pe(0);
+                    self.aprot = Some(AProt { ack: false, low_since: None });
+                    self.sent.aprot_ms = hot.min(u32::MAX as u64) as u32;
+                    self.sent.set_aprot(now, true);
+                }
+            }
+        }
+    }
+
+    /// The function can carry the A-jack probe: DC V / mV / ohm /
+    /// temperature, not AC+DC (its phases rewrite the row), not during the
+    /// fuse check.
+    fn probe_ok(&self) -> bool {
+        matches!(self.mode, 1 | 3 | 10 | 15) && !self.acdc && self.fuse_job.is_none()
     }
 
     /// The peak-hold sentinel is harvested in `poll` (no AC result carries

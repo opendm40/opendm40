@@ -802,6 +802,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private int Ad2Sample(double t)
         {
             if(role == Role.Power) return (int)Math.Round(PowerSample(t));
+            if(Ad2OnPb2Probe)
+            {
+                // fw-rs A-jack protection probe (DC V / mV / ohm / temperature): OP2 (x1) on
+                // PB2, AD2 = OP2O - PB3 = the 10 mohm element's drop, instantaneous
+                return (int)Math.Round(Pb2Volts(t) * Ad2Scale());
+            }
             if(Ad2OnPb1Sentinel)
             {
                 // fw-rs sentinel (continuity / diode / capacitance r0..4): OP2 (x1) on PB1, AD2 =
@@ -839,6 +845,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private bool Ad2OnPb1Sentinel =>
             (role == Role.Cont || role == Role.Diode || role == Role.CapOsc)
             && (regs[0x32] & 0xF0) == 0xD0 && (regs[0x27] >> 6) == 1 && ((regs[0x27] >> 4) & 3) == 2;
+
+        /// The fw-rs A-jack protection probe (sentinel.rs `probe_row`): ENOP2 with SOP2P = PB2,
+        /// SAD2IP = OP2O, SAD2IN = PB3, over a comparator role (OP2 / AD2 unused there).
+        private bool Ad2OnPb2Probe =>
+            (role == Role.DcV || role == Role.DcMv || role == Role.Ohm || role == Role.Temp)
+            && (regs[0x32] & 0xF0) == 0xE0 && (regs[0x27] >> 6) == 1 && ((regs[0x27] >> 4) & 3) == 2;
 
         /// Codes per volt at the AD2 input: IG / (RG * VR) * 2^18.
         private double Ad2Scale() => Ad2Ig / (Ad2Rg * Vref) * 262144.0;
@@ -1259,6 +1271,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             return Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR;
         }
 
+        /// PB2: drop across the 10 mohm element, in series with the A jack in every shunt state
+        /// (the uA chain is 10 mohm + 0.5 ohm + 47.5 ohm, INFERRED), instantaneous.
+        private double Pb2Volts(double t)
+        {
+            double dc, ac, hz, duty; string shape;
+            Fe.ACurrent(out dc, out ac, out hz, out shape, out duty);
+            return Wave(t, dc, ac, hz, shape, duty) * Dm40Frontend.ShuntOhm[0];
+        }
+
         /// SENSE in the V rows: the V jack (path 0) through a divider of ratio k, instantaneous.
         private double VTapVolts(double t, double k)
         {
@@ -1511,6 +1532,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     {
                         if(j == 5) mask &= 0x3D;
                         if(j == 7) mask = 0;
+                        if(j == 18) mask &= 0x0F;
+                    }
+                    // fw-rs A-jack protection probe (sentinel.rs probe_row): AD2 / OP2 are unused in
+                    // the comparator rows (DC V, DC mV, ohm, temperature): AD2IG, R26, R27, OP2 free.
+                    if(row.Role == Role.DcV || row.Role == Role.DcMv || row.Role == Role.Ohm || row.Role == Role.Temp)
+                    {
+                        if(j == 5) mask &= 0x3D;
+                        if(j == 6 || j == 7) mask = 0;
                         if(j == 18) mask &= 0x0F;
                     }
                     if(ad2Stream && (j == 9 || j == 20)) mask = 0;

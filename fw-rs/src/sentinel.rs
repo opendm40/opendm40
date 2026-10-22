@@ -22,8 +22,13 @@
 //! is something only an external source produces (a positive one cannot be
 //! told from "open": section 4.3).
 //!
-//! Never switches the shunt MOSFETs (section 4.3: a voltage source on A-COM
-//! would then see 10 mohm instead of 48 ohm); it only warns.
+//! A-jack protection (doc 4.8, owner 2026-10-22): in the comparator modes a
+//! hit also starts the probe (OP2 x1 on PB2, the 10 mohm element that every
+//! A-jack current passes, AD2 peak hold: `probe_row`, `probe_amps`); a
+//! current that would overheat the 47.5 ohm resistor (`aprot_trips`)
+//! switches the A jack to the 10 mohm shunt (PE0 = 1) and latches the red
+//! A-PROT alert until the user acts and the current is gone (`dmm.rs`).
+//! Below that it only warns (A-JACK).
 
 use crate::hy3131::CFG_LEN;
 
@@ -41,6 +46,10 @@ pub enum Alert {
     Overload,
     /// Current in the A jack while not in a current mode (red).
     AJack,
+    /// A-jack protection (doc 4.8): a current that would overheat the 47.5
+    /// ohm resistor switched the A jack to the 10 mohm shunt; latched in
+    /// `dmm.rs`; red, not maskable.
+    AProt,
     /// Voltage on V/ohm, no current, in a current mode (amber).
     VJack,
     /// A source on the circuit in ohm / continuity / diode (amber).
@@ -60,6 +69,7 @@ impl Alert {
             Alert::None => "NONE",
             Alert::Overload => "OVERLOAD",
             Alert::AJack => "AJACK",
+            Alert::AProt => "APROT",
             Alert::VJack => "VJACK",
             Alert::Live => "LIVE",
             Alert::Dc => "DC",
@@ -74,6 +84,7 @@ impl Alert {
             // "OVERLOAD" does not fit the 83 px slot in TEXT22.
             Alert::Overload => "OVLD",
             Alert::AJack => "A-JACK",
+            Alert::AProt => "A-PROT",
             Alert::VJack => "V-JACK?",
             Alert::Live => "LIVE?",
             Alert::Dc => "DC?",
@@ -93,7 +104,7 @@ impl Alert {
     /// hints.
     pub fn color(self) -> u16 {
         match self {
-            Alert::AJack | Alert::Overload => 0xF800,
+            Alert::AJack | Alert::AProt | Alert::Overload => 0xF800,
             // The hints: the status bar's dim grey.
             Alert::Dc | Alert::Ac | Alert::Fuse => 0xAD55,
             _ => 0xFC40,
@@ -102,7 +113,7 @@ impl Alert {
     /// A red (safety) alert: white on red in the status slot, alternates
     /// with HOLD (decision #5), STAT:QUES bit 9.
     pub fn red(self) -> bool {
-        matches!(self, Alert::AJack | Alert::Overload)
+        matches!(self, Alert::AJack | Alert::AProt | Alert::Overload)
     }
     /// Toast shown once per assertion.
     pub fn toast(self) -> &'static str {
@@ -110,6 +121,7 @@ impl Alert {
             Alert::None => "",
             Alert::Overload => "Overload: 10 A shunt selected",
             Alert::AJack => "Current in A jack: check leads",
+            Alert::AProt => "A jack current: 10 A shunt on",
             Alert::VJack => "Voltage on V jack, no current",
             Alert::Live => "Voltage on circuit - power off",
             Alert::Dc => "DC voltage here: use DC V?",
@@ -185,6 +197,8 @@ pub const R26_AD2_256: u8 = 0x83;
 pub const R27_OP2O_PB3: u8 = 0x6D;
 /// R32 high nibble: ENOP2, SOP2P = PB1 (101).
 pub const R32_OP2_PB1: u8 = 0xD0;
+/// R32 high nibble: ENOP2, SOP2P = PB2 (110): the A-jack probe.
+pub const R32_OP2_PB2: u8 = 0xE0;
 /// R25 AD1IG = 11 (3.6).
 pub const R25_AD1IG_36: u8 = 0x30;
 /// R29: ENPKH, PKHSEL = 01 (AD1<23:5>).
@@ -353,6 +367,60 @@ pub const VJACK_CLEAR_MS: u64 = 500;
 pub const LIVE_ASSERT_MS: u64 = 300;
 pub const LIVE_CLEAR_MS: u64 = 1000;
 
+// --------------------------------------------------- A-jack protection
+//
+// Doc 4.8. At rest (PE0 = PE1 = 0) an A-jack current runs through the
+// fuse, 47.5 ohm, 0.5 ohm and the 10 mohm element to COM. The 47.5 ohm part
+// (owner: a ~2512 package, assume 1 W, derate to 0.5 W) takes I^2 x 47.5:
+// 5 V across A-COM 104 mA = 0.52 W, 12 V 250 mA = 3 W, 24 V 0.5 A = 12 W.
+// PB1 (the resistor's top) is far outside the converter range at those
+// currents; PB2 (the 10 mohm element, in series in every PE state -
+// INFERRED from the shunt chain) gives I x 10 mohm: 0.25 A = 2.5 mV.
+
+/// The probe: OP2 (x1) on PB2, AD2 = OP2O - PB3 at IG 2.0, OSR 256, the
+/// peak hold on AD2 (PKHSEL 00), over a comparator row (`row_for`'s CmpA
+/// rows: DC V 6 V, DC mV, ohm, temperature: OP2 and AD2 unused there). AD1
+/// stays on: the caller writes it last (`ad1_last`'s rule, note 7).
+pub fn probe_row(row: &[u8; CFG_LEN]) -> [u8; CFG_LEN] {
+    let mut c = *row;
+    ad2_sentinel(&mut c);
+    c[18] = R32_OP2_PB2 | (c[18] & 0x0F);
+    c
+}
+
+/// Amps from the probe's 19-bit AD2 peak pair: 2.0 x 10 mohm / 1.25 V x
+/// 2^18 = 4 194 codes per A; the larger of |max|, |min| (DC either sign,
+/// AC peak: >= its RMS, so conservative). An empty hold (max < min) = 0.
+pub fn probe_amps(pkmin: i32, pkmax: i32) -> f32 {
+    if pkmax < pkmin {
+        return 0.0;
+    }
+    pkmax.unsigned_abs().max(pkmin.unsigned_abs()) as f32 / PROBE_CODES_PER_A
+}
+pub const PROBE_CODES_PER_A: f32 = 2.0 * 0.01 / 1.25 * 262_144.0;
+
+/// Sustained limit (A): above it for APROT_HOT_MS (from the first hit
+/// window, which itself lags the onset by up to one 100 ms window: ~0.5 s
+/// from the onset in all) -> the 10 mohm shunt.
+/// 125 mA = 0.74 W in 47.5 ohm: above the owner's 0.5 W derating, below
+/// the assumed 1 W rating, and clear of 5 V across A-COM (104 mA, which the
+/// owner wants as a warning only) and of 12 V (250 mA).
+pub const APROT_HOT_A: f32 = 0.125;
+pub const APROT_HOT_MS: u64 = 400;
+/// At once (A): 300 mA = 4.3 W.
+pub const APROT_NOW_A: f32 = 0.3;
+/// Latched: the current counts as gone below this (on the 10 mohm path;
+/// the probe's peak-hold noise floor is ~30 mA in the model) for
+/// APROT_GONE_MS. Any real source across A-COM drives amps into 10 mohm.
+pub const APROT_GONE_A: f32 = 0.05;
+pub const APROT_GONE_MS: u64 = 1000;
+
+/// The protection rule: `amps` from the probe, `hot_ms` since the first
+/// hit window of the current run (the comparator saw the current start).
+pub fn aprot_trips(amps: f32, hot_ms: u64) -> bool {
+    amps >= APROT_NOW_A || (amps >= APROT_HOT_A && hot_ms >= APROT_HOT_MS)
+}
+
 // ------------------------------------------------------------- OVERLOAD
 //
 // Doc 4.3 / 4.7 and the manual (one 10 A ceramic fuse in front of all
@@ -360,8 +428,8 @@ pub const LIVE_CLEAR_MS: u64 = 1000;
 // their own). `dmm.rs` applies the rule; the pure parts are here.
 
 /// Shunt of a current mode: 0 = A (10 mohm), 1 = mA (0.5 ohm), 2 = uA
-/// (47.5 ohm chain); None outside the current modes (V / ohm / ... never
-/// switch the shunt MOSFETs, doc 4.3).
+/// (47.5 ohm chain); None outside the current modes (V / ohm / ... switch
+/// the shunt MOSFETs only for the A-jack protection, doc 4.8).
 pub fn shunt_of(mode: u8) -> Option<u8> {
     match mode {
         4 | 7 => Some(0),
@@ -530,6 +598,12 @@ pub struct Sentinel {
     pub samples: u32,
     /// OVERLOAD latch in force (set by `dmm.rs`, `set_overload`).
     pub ovl: bool,
+    /// A-jack protection latch in force (`dmm.rs`, `set_aprot`); the last
+    /// probe value (A) and the trip latency (ms from the first hit window
+    /// to the switch) for DBG:SENT?.
+    pub aprot: bool,
+    pub probe_a: f32,
+    pub aprot_ms: u32,
     /// Hints: DC? / AC? / FUSE? conditions.
     dc: Held,
     ac: Held,
@@ -564,6 +638,9 @@ impl Sentinel {
             hits: 0,
             samples: 0,
             ovl: false,
+            aprot: false,
+            probe_a: 0.0,
+            aprot_ms: 0,
             dc: Held::NEW,
             ac: Held::NEW,
             fuse: Held::NEW,
@@ -592,7 +669,7 @@ impl Sentinel {
             self.dc = Held::NEW;
             self.ac = Held::NEW;
             self.fuse = Held::NEW;
-            if !matches!(self.alert, Alert::None | Alert::Overload) {
+            if !matches!(self.alert, Alert::None | Alert::Overload | Alert::AProt) {
                 self.alert = Alert::None;
             }
         }
@@ -608,6 +685,18 @@ impl Sentinel {
         self.decide(now);
     }
 
+    /// A-jack protection latch on / off (`dmm.rs`; not maskable).
+    pub fn set_aprot(&mut self, now: u64, on: bool) {
+        self.aprot = on;
+        self.decide(now);
+    }
+
+    /// The comparator / peak run in progress: since when hit windows came in
+    /// a row (None: the last window had no hit).
+    pub fn run_since(&self) -> Option<u64> {
+        (self.streak > 0).then_some(self.run_t0)
+    }
+
     /// Alerts masked off by the user are dropped at once.
     pub fn set_mask(&mut self, mask: u8) {
         self.mask = mask & M_ALL;
@@ -616,7 +705,7 @@ impl Sentinel {
             Alert::VJack => M_VJACK,
             Alert::Live => M_LIVE,
             Alert::Dc | Alert::Ac | Alert::Fuse => M_HINTS,
-            Alert::None | Alert::Overload => 0,
+            Alert::None | Alert::Overload | Alert::AProt => 0,
         };
         if bit != 0 && self.mask & bit == 0 {
             self.alert = Alert::None;
@@ -767,6 +856,8 @@ impl Sentinel {
         let fuse = hints && self.fuse.asserted(now, self.alert == Alert::Fuse, FUSE_HINT_MS, 500);
         let a = if self.ovl {
             Alert::Overload
+        } else if self.aprot {
+            Alert::AProt
         } else if ajack {
             Alert::AJack
         } else if vjack {
@@ -803,7 +894,9 @@ impl Sentinel {
         put(self.kind.name().as_bytes());
         put(b",");
         put(self.alert.name().as_bytes());
-        for v in [self.mask as i32, self.ctsta as i32, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32] {
+        // ..., probe mA, the A-PROT trip latency (ms).
+        let pa = (self.probe_a * 1000.0) as i32;
+        for v in [self.mask as i32, self.ctsta as i32, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32] {
             put(b",");
             put(itoa(&mut nb, v));
         }
@@ -958,6 +1051,47 @@ mod tests {
         }
         assert_eq!(row_for(1, 0, true, M_ALL, VAR_NEW_OFF, &CFG_F1[0]), (CFG_F1[0], Kind::Off));
         assert_eq!(row_for(1, 0, false, M_ALL, VAR_NEW_OFF, &CFG_F1[0]).1, Kind::CmpA);
+    }
+
+    #[test]
+    fn aprot_probe_and_rule() {
+        // The probe: only AD2IG, R26, R27, R29 ENPKH and OP2 (on PB2) differ
+        // from the comparator row; OP1's nibble kept.
+        for (m, r, row) in [(1u8, 0u8, &CFG_F1[0]), (1, 2, &CFG_F1[2]), (3, 0, &CFG_F3[0]), (10, 3, &CFG_F10_P8CLR[3]), (15, 0, &CFG_F15[0])] {
+            let (c, _) = row_for(m, r, false, M_ALL, 0, row);
+            let p = probe_row(&c);
+            let d: Vec<usize> = diff(&c, &p).iter().map(|x| x.0).collect();
+            assert!(d.iter().all(|i| [5, 6, 7, 9, 18].contains(i)), "mode {m} r{r}: {d:?}");
+            assert_eq!(p[18] >> 4, R32_OP2_PB2 >> 4);
+            assert_eq!(p[18] & 0x0F, c[18] & 0x0F);
+            assert_eq!(p[6], R26_AD2_256);
+            assert_eq!(p[9] & 0x07, R29_ENPKH);
+        }
+        // 4 194 codes per A; either sign; an empty hold reads 0.
+        assert!((probe_amps(-10, 1049) - 0.25).abs() < 0.001);
+        assert!((probe_amps(-2097, 5) - 0.5).abs() < 0.001);
+        assert_eq!(probe_amps(10, -10), 0.0);
+        // 5 V across A-COM (104 mA): never; 12 V (250 mA): after 0.5 s;
+        // 24 V (0.5 A): at once.
+        assert!(!aprot_trips(0.104, 60_000));
+        assert!(!aprot_trips(0.25, 399));
+        assert!(aprot_trips(0.25, 400));
+        assert!(aprot_trips(0.5, 0));
+        // The alert: red, above A-JACK, below OVERLOAD, not maskable.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.set_aprot(10, true);
+        assert_eq!(s.alert, Alert::AProt);
+        assert!(Alert::AProt.red());
+        s.set_mask(0);
+        assert_eq!(s.alert, Alert::AProt);
+        s.configured(Kind::Off, 20, true);
+        assert_eq!(s.alert, Alert::AProt);
+        s.set_overload(30, true);
+        assert_eq!(s.alert, Alert::Overload);
+        s.set_overload(40, false);
+        s.set_aprot(50, false);
+        assert_eq!(s.alert, Alert::None);
     }
 
     #[test]
@@ -1473,6 +1607,6 @@ mod tests {
         s.sample_peak(100, -5, 7);
         let mut b = [0u8; 96];
         let n = s.diag_text(&mut b);
-        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,7,0,-5,7,0,0,1");
+        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,7,0,-5,7,0,0,1,0,0");
     }
 }

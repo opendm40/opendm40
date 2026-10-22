@@ -348,7 +348,8 @@ pub enum Log {
 ///                           position / pan, 3 offset, 4/5 X/Y cursor a, 14/15 b;
 ///                           axis H|V)
 ///   DBG:SENTinel?           misconnect sentinel (sentinel.rs): kind,alert,mask,
-///                           ctsta,pkhmin,pkhmax,streak,hit_windows,samples
+///                           ctsta,pkhmin,pkhmax,streak,hit_windows,samples,
+///                           probe_mA,aprot_ms (A-jack protection, doc 4.8)
 ///   DBG:SENTinel:VARiant <0..31> / ?
 ///                           device-check row variants, RAM only (sentinel.rs
 ///                           VAR_*): +1 AC V keeps OP1's chopper (9dd1222 row),

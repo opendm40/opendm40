@@ -402,9 +402,10 @@ fn ol(dec: u8, unit: &'static str) -> Val {
 }
 
 /// Wrong-connection alerts (sentinel.rs) cycled through the page / strip matrices.
-const ALERTS: [sentinel::Alert; 8] = [
+const ALERTS: [sentinel::Alert; 9] = [
     sentinel::Alert::None,
     sentinel::Alert::AJack,
+    sentinel::Alert::AProt,
     sentinel::Alert::VJack,
     sentinel::Alert::Live,
     sentinel::Alert::Overload,
@@ -2085,6 +2086,7 @@ fn main() {
         // DC V (red), V-JACK? in DC mA, LIVE? in ohm; the combined strip badge.
         for (case, file, b, a) in [
             ("dcv", "d12-dmm-ajack", Button::Volt, sentinel::Alert::AJack),
+            ("dcv", "d20-dmm-aprot", Button::Volt, sentinel::Alert::AProt),
             ("dcma_420lo", "d13-dmm-vjack", Button::Amp, sentinel::Alert::VJack),
             ("ohm_k", "d14-dmm-live", Button::Ohm, sentinel::Alert::Live),
             ("dca10", "d17-dmm-overload", Button::Amp, sentinel::Alert::Overload),

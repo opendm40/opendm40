@@ -126,6 +126,24 @@ SC = {
                                     (16, 'pow:230,i=3,f=50', {'NONE'}, (680, 700))]),
     'ovl-pow-auto-dc': ('POW', 30, [(0, 'open;vsrc:12;isrc:0.01', {'NONE'}, (0.118, 0.122)),
                                     (12, 'vsrc:12;isrc:3', {'NONE'}, (35.6, 36.4))], ['POW:COUP DC']),
+    # A-jack protection (doc 4.8): a source across A-COM in DC V / ohm / temperature. 5 V (104 mA
+    # in the 47.5 ohm chain) is a warning only; 12 V (250 mA) moves the A jack to the 10 mohm
+    # shunt 0.5 s after the current started, 24 V (0.5 A) at the first probe window. The latch
+    # (APROT) holds until the user acts (CONF:... at `acts`) and the current is gone.
+    # 'aprot_ms': the trip latency window (DBG:SENT? field 11, ms from the first hit window).
+    'aprot-dcv-5': ('VOLT:DC', 24, [(0, 'open', {'NONE'}), (8, 'avsrc:5', {'AJACK'})]),
+    'aprot-dcv-12': ('VOLT:DC', 32, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (16, 'open', {'APROT'}),
+                                     (22, 'open', {'NONE'})], [], {'acts': {19.5: 'CONF:RES'}, 'aprot_ms': (400, 560)}),
+    'aprot-dcv-24': ('VOLT:DC', 22, [(0, 'open', {'NONE'}), (8, 'avsrc:24', {'APROT'})], [], {'aprot_ms': (100, 450)}),
+    'aprot-ohm-12': ('RES', 24, [(0, 'open;r:4700', {'NONE'}), (10, 'avsrc:12', {'APROT'})], [], {'aprot_ms': (400, 560)}),
+    'aprot-temp-12': ('TEMP', 26, [(0, 'open;tc:100;cj:25', {'NONE'}), (12, 'avsrc:12', {'APROT'})], [], {'aprot_ms': (400, 560)}),
+    # The user acts (another function) while the source is still there: the latch stays; the current goes later and
+    # the latch ends 1 s after that (the act counts).
+    'aprot-ack-early': ('VOLT:DC', 34, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (16, 'avsrc:12', {'APROT'}),
+                                        (22, 'open', {'APROT', 'NONE'}), (26, 'open', {'NONE'})], [], {'acts': {14: 'CONF:RES'}}),
+    # A current function ends the latch (its own shunt switching takes over).
+    'aprot-to-dca': ('VOLT:DC', 30, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (18, 'avsrc:12', {'NONE', 'OVERLOAD'})],
+                     [], {'acts': {16: 'CONF:CURR:DC'}}),
 }
 
 
@@ -168,6 +186,7 @@ def run(name):
             for c in setup:
                 time.sleep(1.0)
                 tm.write(c)
+            acts = dict(xtra.get('acts', {}))
             while p.poll() is None:
                 row = {}
                 for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:SENT?', 'STAT:QUES:COND?', 'READ?'] + xtra.get('queries', []):
@@ -175,6 +194,9 @@ def run(name):
                     row[q] = tm.read(timeout=60).decode(errors='replace').strip()
                 row['t'] = int(row['DBG:PING?'].split(',')[0]) / 1000.0
                 rows.append(row)
+                for ta in sorted(acts):
+                    if row['t'] >= ta:
+                        tm.write(acts.pop(ta))
                 print('%s %6.2f %-6s %-40s %s %s' % (name, row['t'], row['SYST:ALER?'], row['DBG:SENT?'], row['READ?'],
                                                    ' '.join(row[q] for q in xtra.get('queries', []))), flush=True)
         except Exception as e:
@@ -192,7 +214,7 @@ def run(name):
                 ok = False
                 bad.append('%.2f %s not in %s' % (r['t'], r['SYST:ALER?'], sorted(allowed)))
             # STAT:QUES:COND? bit 9 = a red alert, bit 1 = OVERLOAD
-            want = (512 if r['SYST:ALER?'] in ('AJACK', 'OVERLOAD') else 0) | (2 if r['SYST:ALER?'] == 'OVERLOAD' else 0)
+            want = (512 if r['SYST:ALER?'] in ('AJACK', 'OVERLOAD', 'APROT') else 0) | (2 if r['SYST:ALER?'] == 'OVERLOAD' else 0)
             if len(allowed) == 1 and r.get('STAT:QUES:COND?') != str(want):
                 ok = False
                 bad.append('%.2f QUES %s for %s' % (r['t'], r.get('STAT:QUES:COND?'), r['SYST:ALER?']))
@@ -212,6 +234,15 @@ def run(name):
             if name == 'dcv-step' and 7.0 < v < 1e6 and not r['DBG:SENT?'].startswith('OFF'):
                 ok = False
                 bad.append('%.2f %g V: sentinel %s on the 60 V range' % (r['t'], v, r['DBG:SENT?'].split(',')[0]))
+    if 'aprot_ms' in xtra:
+        # the trip latency the firmware recorded (DBG:SENT? field 11)
+        ms = [int(r['DBG:SENT?'].split(',')[10]) for r in rows if r['SYST:ALER?'] == 'APROT' and len(r['DBG:SENT?'].split(',')) > 10]
+        lo, hi = xtra['aprot_ms']
+        if not ms or not (lo <= ms[-1] <= hi):
+            ok = False
+            bad.append('A-PROT latency %s ms, want %d..%d' % (ms[-1:] or None, lo, hi))
+        else:
+            print('  A-PROT latency %d ms' % ms[-1], flush=True)
     if 'fuse' in xtra:
         # the verdict came, the function came back (CURR), the ohm value in its window
         fz = [r['SYST:FUSE?'] for r in rows if 'SYST:FUSE?' in r]
