@@ -263,9 +263,9 @@ SHUNT = {4: 0.01, 5: 0.5, 6: 47.5}        # ohm: A, mA, uA
 def ad2_scale(mode, rng):
     """(SI per code, unit) of an AD2 code in DMM mode / range; calibration
     gain / offset not applied (the stock LPF cal would be the DC scale)."""
-    if mode == 0:
+    if mode in (0, 1):  # AC V; DC V = the DC-coupled V row (E7), same taps
         return AD2_V * K_ACV[min(rng, 3)], 'V'
-    if mode == 2:
+    if mode in (2, 3):  # AC mV; DC mV streams the AC mV row
         return AD2_V / MV_DIV[min(rng, 1)], 'V'
     if mode in SHUNT:
         return AD2_V / (SHUNT[mode] * MV_DIV[min(rng, 1)]), 'A'
@@ -303,12 +303,23 @@ def do_stream(link, args):
         link.query('LOG:OSR %d' % args.osr)
     check_err(link, 'LOG settings')
     link.query('LOG:STAT ON')
-    check_err(link, 'LOG:STAT ON (AD2: AC mV / AC A / AC V; AD1: DC V / mV / A)')
+    check_err(link, 'LOG:STAT ON (AD2: V / mV / AC A; AD1: DC V / mV / A)')
     pre = [int(x) for x in link.query('LOG:PRE?').split(',')]
     mode, rng, osr, nom_us, _, chop = pre[:6]
     req, nom_mhz, r26, coupling = (pre[7], pre[8], pre[9], pre[10]) if len(pre) > 10 else (0, 0, 0, 0)
     period_us = 1e9 / nom_mhz if nom_mhz else float(nom_us)
     scale, unit = ad2_scale(mode, rng) if ad2 else (None, '')
+    # The meter's own scale (LOG:SCALe?, fw-rs E7): the stock calibration or,
+    # in DC V, the entry self-cal; older firmware: an error, nominal scale.
+    off, cal = 0.0, False
+    if ad2:
+        try:
+            a, b = [float(x) for x in (link.query('LOG:SCAL?') or '').split(',')]
+            if b != 0:
+                off, scale, cal = a, b, True
+        except ValueError:
+            pass
+        link.query('*CLS')
     rows, last_seq, last_ts, wrap = 0, None, None, 0
     t_start = time.monotonic()
     with open(args.out, 'w', newline='') as f:
@@ -316,7 +327,11 @@ def do_stream(link, args):
         if ad2:
             f.write('# requested_sps,%d\n# nominal_sps,%.3f\n# r26,0x%02X\n# coupling,%s\n'
                     % (req, nom_mhz / 1000.0, r26, 'AC' if coupling else 'DC'))
-            f.write('# scale,%.9g %s/code (IG 1.0, VR 1.25 V, stock range factor; calibration NOT applied)\n' % (scale or 0, unit))
+            if cal:
+                f.write('# scale,%.9g %s/code, offset %.9g %s (the meter\'s, LOG:SCALe?: value = offset + scale * raw)\n'
+                        % (scale, unit, off, unit))
+            else:
+                f.write('# scale,%.9g %s/code (IG 1.0, VR 1.25 V, stock range factor; calibration NOT applied)\n' % (scale or 0, unit))
         else:
             f.write('# osr,%d\n# nominal_period_us,%d\n# scale,raw AD1 counts (1.389 V / 8388607 * range decade, uncalibrated)\n' % (osr, nom_us))
         f.write('# start,%s\n' % iso_now())
@@ -336,7 +351,7 @@ def do_stream(link, args):
                         # conversions between two kept rows: from the time (stalls) or the seq (ring overflow)
                         lost = max(round((ts + wrap - last_t_us[0]) / period_us) - 1, seq - last_seq - 1, 0)
                     last_t_us[0] = ts + wrap
-                    f.write('%d,%.6f,%d,%s,%d\n' % (seq, t, code, '%.7g' % (code * scale) if scale else '', lost))
+                    f.write('%d,%.6f,%d,%s,%d\n' % (seq, t, code, '%.7g' % (off + code * scale) if scale else '', lost))
                     last_seq, last_ts = seq, ts
                     rows += 1
                 got += len(recs)
@@ -456,7 +471,7 @@ def do_fast(link, args):
     check_err(link, 'LOG settings')
     t0 = time.monotonic()
     link.query('LOG:STAT ON')
-    check_err(link, 'LOG:STAT ON (AD2: AC mV / AC A / AC V; AD1: DC V / mV / A; no CSV recording / disk job running)')
+    check_err(link, 'LOG:STAT ON (AD2: V / mV / AC A; AD1: DC V / mV / A; no CSV recording / disk job running)')
     names = ['idle', 'preparing', 'ready', 'running', 'stopping', 'done', 'full', 'no disk', 'error']
     st = []
     try:

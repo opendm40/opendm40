@@ -19,6 +19,10 @@ mod meter;
 // The data logger's ring / gap accounting and the AD2 rate ladder (hy3131.rs).
 #[path = "../../src/logger.rs"]
 mod logger;
+// logger.rs `start` / `dc_prepare` (the DC rows' AD2 row): chip access only.
+mod ad2exp {
+    pub fn dc_enter(_mode: u8, _r: u8, _r26: u8, _measure: bool) {}
+}
 // The wave view's streaming trigger (logger.rs `wave`).
 #[path = "../../src/trigsoft.rs"]
 mod trigsoft;

@@ -1185,12 +1185,8 @@ impl App {
         let ad2 = crate::hy3131::ad2_rate_mhz(crate::hy3131::ad2_r26_for(req, chop)) / 1000;
         if matches!(self.dmm.func(), 16 | 17 | dmm::FUNC_V_AUTO | dmm::FUNC_A_AUTO) || self.dmm.pw.on {
             None
-        } else if crate::logger::Logger::mode_ok(true, m) {
-            Some((ad2, true))
-        } else if crate::logger::Logger::mode_ok(false, m) {
-            Some((ad1, false))
         } else {
-            None
+            crate::logger::Logger::ad1_first(m).map(|a| if a { (ad2, true) } else { (ad1, false) })
         }
     }
 

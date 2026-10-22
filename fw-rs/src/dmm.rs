@@ -3611,11 +3611,59 @@ pub fn dcv_volts(code: f32, k: usize) -> f32 {
     code * K_ACV[k] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * k as u32, 1.0) - cal(0x14 + 4 * k as u32, 0.0)
 }
 
-/// `Ad2Scale` of stock AC mode `m` (0 AC V, 2 AC mV, 4..6 AC A / mA / uA)
-/// at range `r`; None for every other mode.
+/// AD2 gain of the DC-coupled V row per DC V range (ad2exp.rs `dcv_row`,
+/// feasibility E7) relative to the nominal K * 1.25 / 2^18: device test 6.5
+/// (4ff95f7, the fit of the READ? reference against the AD2 mean, AGND,
+/// OP1's chopper held): r0 +0.84 % (the /100 tap with OP1 x10), r1 +1.79 %,
+/// r2 +0.53 %, r3 +0.27 % (r2 / r3 up to 24 V only: +-0.2 / 0.5 %). The
+/// fallback of the self-cal's gain (an input below ~5 % of AD2's span).
+pub const DCV_AD2_GAIN: [f32; 4] = [1.0084, 1.0179, 1.0053, 1.0027];
+
+/// The DC-coupled V row's one-shot self-cal (ad2exp.rs `dc_enter`):
+/// range | 0x100 (valid), per_code and offset (f32 bits) of `Ad2Scale`.
+static DC_CAL: [core::sync::atomic::AtomicU32; 3] = [const { core::sync::atomic::AtomicU32::new(0) }; 3];
+
+/// Store (`Some((per_code, offset))`) / clear the self-cal of DC V range `r`.
+pub fn set_dc_cal(r: u8, cal: Option<(f32, f32)>) {
+    use core::sync::atomic::Ordering::Relaxed;
+    let (p, o) = cal.unwrap_or((0.0, 0.0));
+    DC_CAL[1].store(p.to_bits(), Relaxed);
+    DC_CAL[2].store(o.to_bits(), Relaxed);
+    DC_CAL[0].store(if cal.is_some() { 0x100 | r as u32 } else { 0 }, Relaxed);
+}
+
+/// The self-cal (per_code, offset) of DC V range `r`, if there is one.
+pub fn dc_cal(r: i8) -> Option<(f32, f32)> {
+    use core::sync::atomic::Ordering::Relaxed;
+    if DC_CAL[0].load(Relaxed) != 0x100 | r.clamp(0, 3) as u32 {
+        return None;
+    }
+    Some((f32::from_bits(DC_CAL[1].load(Relaxed)), f32::from_bits(DC_CAL[2].load(Relaxed))))
+}
+
+/// `Ad2Scale` of DMM mode `m` at range `r`: the stock AC rows (0 AC V, 2 AC
+/// mV, 4..6 AC A / mA / uA), DC V (1: the DC-coupled V row, nominal gain x
+/// DCV_AD2_GAIN, no offset: `Dmm::ad2_scale` takes the self-cal's) and DC mV
+/// (3: streamed in the AC mV row, DC-coupled, its LPF calibration); None
+/// for every other mode.
 pub fn ad2_scale_of(m: u8, r: i8) -> Option<Ad2Scale> {
     let ri = r.max(0) as usize;
     let (s, ci, g, o, si, amps, full, item) = match m {
+        1 => {
+            let r = ri.min(3);
+            return Some(Ad2Scale {
+                per_code: K_ACV[r] * 1.25 / 262_144.0 * DCV_AD2_GAIN[r],
+                offset: 0.0,
+                amps: false,
+                ac: false,
+                full: [6.0, 60.0, 600.0, 1000.0][r],
+                item: r as u8 + 1,
+            });
+        }
+        3 => {
+            let r = ri.min(1);
+            (1.25 / MV_DIV[r] / 262.144, r, 0x84, 0x8C, 1e-3, false, [0.06, 0.6][r], 0)
+        }
         0 => {
             let r = ri.min(3);
             (K_ACV[r] * 1.25 / 262_144.0, r, 0x64, 0x74, 1.0, false, [6.0, 60.0, 600.0, 1000.0][r], r as u8 + 1)
@@ -3650,7 +3698,13 @@ impl Dmm {
         if self.acdc || self.pw.on {
             return None;
         }
-        ad2_scale_of(self.mode, self.range)
+        let mut a = ad2_scale_of(self.mode, self.range)?;
+        if self.mode == 1 {
+            if let Some((p, o)) = dc_cal(self.range) {
+                (a.per_code, a.offset) = (p, o);
+            }
+        }
+        Some(a)
     }
 }
 

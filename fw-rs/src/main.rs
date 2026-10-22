@@ -860,6 +860,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         log_draw = level;
                         false
                     }
+                    scpi::Dbg::Ad2(6, state, n, item) => {
+                        dbg_n7(app, &mut clk, logger, &mut scpi, port, item, state, n);
+                        false
+                    }
                     scpi::Dbg::Ad2(5, r26, nr, flags) => {
                         dbg_dcv(app, &mut clk, logger, &mut scpi, port, r26, nr, flags);
                         false
@@ -867,7 +871,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     scpi::Dbg::Ad2(kind, r26, n, b) => {
                         // Synchronous AD2 experiment in the current stock AC
                         // row; the row is rewritten afterwards.
-                        if logger.active() || !logger::Logger::mode_ok(true, app.dmm.mode()) {
+                        if logger.active() || !matches!(app.dmm.mode(), 0 | 2 | 4..=6) {
                             scpi.set_err("Settings conflict");
                             false
                         } else {
@@ -1115,6 +1119,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         true
                     }
+                    scpi::Log::Scale => {
+                        log_scale(&mut scpi, logger, app.dmm.ad2_scale());
+                        true
+                    }
                     scpi::Log::Preamble => {
                         scpi.len = 0;
                         let ad2 = logger.ad2();
@@ -1237,6 +1245,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 }
                 if let app::WaveReq::Range(item) = r {
                     app.dmm.set_range(&mut clk, Some(item));
+                }
+                if let app::WaveReq::Coupling(item) = r {
+                    app.wave_coupling(&mut clk, item);
                 }
                 if r != app::WaveReq::Stop {
                     if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
@@ -1596,6 +1607,27 @@ fn dbg_dcv(app: &mut app::App, clk: &mut Clock, logger: &logger::Logger, scpi: &
     app.last_raw = None;
 }
 
+/// DBG:AD2:N7? item,state,n (datasheet note 7 in the stock DC rows,
+/// src/ad2exp.rs `n7_test`): in DC V / DC mV, not while logging; sets the
+/// MF range item (0 = 600 mV DC, 1..4 = 6 .. 1000 V; it stays manual), runs
+/// the test, restores the DMM row.
+#[inline(never)] // .cold (link-native.x)
+#[allow(clippy::too_many_arguments)]
+fn dbg_n7(app: &mut app::App, clk: &mut Clock, logger: &logger::Logger, scpi: &mut scpi::Scpi, port: &mut dyn bt::ScpiPort, item: u8, state: u8, n: u16) {
+    if logger.active() || !matches!(app.dmm.func(), 1 | 3) {
+        scpi.set_err("Settings conflict");
+        return;
+    }
+    app.dmm_power(clk);
+    app.dmm.set_range(clk, Some(item));
+    let (m, r) = (app.dmm.mode(), app.dmm.range().max(0) as u8);
+    let n = ad2exp::n7_test(item, m, r, state, n as u32, port.rsp_buf());
+    port.respond_len(n);
+    app.dmm.start(clk);
+    app.meter.reset();
+    app.last_raw = None;
+}
+
 /// A ScpiPort that notes whether a reply was queued from its buffer.
 struct SentPort<'a> {
     inner: &'a mut dyn bt::ScpiPort,
@@ -1646,6 +1678,16 @@ fn fast_next_hz(l: &logger::Logger, ad2: bool) -> u32 {
     } else {
         1_000_000 / hy3131::ad1_period_us(l.osr(), l.chop()).max(1)
     }
+}
+
+/// LOG:SCALe? a,b (scpi.rs): the AD2 session's scale (value = a + b raw).
+#[inline(never)] // .cold (link-native.x)
+fn log_scale(scpi: &mut scpi::Scpi, l: &logger::Logger, sc: Option<dmm::Ad2Scale>) {
+    scpi.len = 0;
+    let sc = sc.filter(|_| l.ad2() && logger::Logger::mode_ok(true, l.mode()));
+    scpi.put_f32(sc.map_or(0.0, |s| -s.offset));
+    scpi.put_bytes(b",");
+    scpi.put_f32(sc.map_or(0.0, |s| s.per_code));
 }
 
 /// The fast logger's rare events of this pass: Ev::Start (the logger
@@ -1705,9 +1747,15 @@ fn fast_start(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger) 
         logger.set_req_hz(FAST_DISK_SAFE_HZ);
     }
     let _ = logger.plan(m, app.dmm.range());
+    // AD2 in DC V: the self-cal now, for the header's scale (the session's
+    // `start` keeps it), then the DMM row back for the disk preparation.
+    logger.dc_prepare();
     let mut txt = [0u8; 512];
     let (n, par, unit) = fast_head(logger, app.dmm.ad2_scale(), &mut txt);
     fastlog::run(&fastlog::Head { par, unit, text: &txt[..n] });
+    if logger.ad2() && matches!(m, 1 | 3) {
+        app.dmm.start(clk);
+    }
     true
 }
 
@@ -1722,8 +1770,9 @@ fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, no
         }
         app::FastReq::Start(dur) => {
             // The source follows the function (AD2 in the AC rows, AD1 in
-            // DC V / mV / A); it stays the logger's LOG:SOURce afterwards.
-            let ad2 = logger::Logger::mode_ok(true, app.dmm.mode());
+            // DC V / mV / A, which AD2 streams too: logger.rs `ad1_first`);
+            // it stays the logger's LOG:SOURce afterwards.
+            let ad2 = logger::Logger::ad1_first(app.dmm.mode()) == Some(true);
             if logger.active() {
                 app.fast_ended(now, fastlog::State::Error, None);
                 return;

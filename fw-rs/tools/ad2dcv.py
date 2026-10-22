@@ -119,7 +119,16 @@ def main():
     ap.add_argument('-n', type=int, default=8, help='AD1 conversions per phase (1..16)')
     ap.add_argument('--settle', type=float, default=2.0, help='seconds after a calibrator step')
     ap.add_argument('-o', '--out', default='ad2dcv.csv')
+    ap.add_argument('--analyze', metavar='CSV', help='only print the analysis of an earlier run\'s CSV')
     args = ap.parse_args()
+    if args.analyze:
+        with open(args.analyze) as fh:
+            rows = [{k: float(v) for k, v in d.items()} for d in csv.DictReader(fh)]
+        for d in rows:
+            for k in ('range', 'flags', 'c_n'):
+                d[k] = int(d[k])
+        analyze(rows, sorted({d['range'] for d in rows}), sorted({d['flags'] for d in rows}))
+        return 0
 
     import dm40scpi
     link = dm40scpi.UsbipLink(args.usbip) if args.usbip else dm40scpi.UsbLink()
@@ -176,12 +185,17 @@ def main():
                 w.writerows(rows)
             print('raw rows: %s' % args.out)
 
-    # Analysis per range and variant.
+    analyze(rows, ranges, variants)
+    return 0
+
+
+def analyze(rows, ranges, variants):
+    """Per range and variant (levels where READ? was over range dropped)."""
     print('\nrange variant          pts gain fit/nom-1  0 V at code  zero D code  maxres %FS  sd codes  sd @jack  ENOB  '
           'B-C codes  AD1 on-off cts  AD1-in-row - READ?')
     for r in ranges:
         for f in variants:
-            s = [d for d in rows if d['range'] == r and d['flags'] == f and d['c_n'] > 0]
+            s = [d for d in rows if d['range'] == r and d['flags'] == f and d['c_n'] > 0 and abs(d['ref']) < 1e30]
             if not s:
                 continue
             nomf = (K[0] if (f & 8 and r == 0) else K[r]) * 1.25 / 262144.0
@@ -200,7 +214,6 @@ def main():
             print('r%d    %-18s %3d  %+8.4f %%   %+10.1f   %+10.1f   %8.4f   %7.2f  %8.5f  %5.1f  %+8.1f  %+12.1f  %+10.5f V' % (
                 r, flags_name(f), len(s), (b / nomf - 1) * 100, -a / b, zero, max(abs(x) for x in res) / FULL[r] * 100,
                 sd, sd * b, enob, bc, ab, rowref))
-    return 0
 
 
 if __name__ == '__main__':
