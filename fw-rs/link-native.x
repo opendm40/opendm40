@@ -89,6 +89,15 @@ SECTIONS
         *(.text.*7dm40_fw9scope_csv*);
         *(.text.*7dm40_fw4boot*);
         *(.text.*7dm40_fw3app9app_press*);
+        /* Inrush current: open / arm / close / results / save glue and the
+         * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
+         * live parts stay in region B: they run while the AD2 stream does). */
+        *(.text.*7dm40_fw3app10app_inrush*);
+        *(.text.*7dm40_fw2ui3inr4page*);
+        *(.text.*7dm40_fw2ui3inr5trace*);
+        *(.text.*7dm40_fw6inrush*3Cap7results*);
+        *(.text.*7dm40_fw6inrush*3Cap9linearize*);
+        *(.text.*7dm40_fw6inrush*3Cap7records*);
         /* dlog's per-reading row coder is `.text.dlog_row` (src/dlog.rs),
          * not matched here: region B. So is `.text.vdisk_rd`: the USB
          * volume's per-sector read path (VDisk::read_block, the FAT / data

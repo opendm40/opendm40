@@ -15,6 +15,7 @@ emu/hy3131/powtest.py     fw-rs power meter end to end over USB/IP (fw-rs/docs/p
 emu/hy3131/ad2streamtest.py fw-rs AD2 stream ISR (feature ad2-isr: TIM7 -> IRQ 55 -> SPI2 reads) end to end (fw-rs/docs/dmm-input-scope-feasibility.md 9)
 emu/hy3131/wavetest.py    fw-rs DMM wave view (scope page, source DMM; feature ad2-isr) driven by DBG:KEY / TAP, checked over SCPI, --case current, --shots DIR (feasibility 10)
 emu/hy3131/burdentest.py  fw-rs burden voltage readout: FETC:BURD? = READ? x R_path per shunt / AC / POW:BURD, DISP:BURD, screenshots (fw-rs/docs/power-meter-and-misconnect.md 3.15)
+emu/hy3131/inrushtest.py  fw-rs inrush current (A jack, 10 A AC row on the AD2 stream): timed isrc steps (DC lamp-like, AC load), MF -> Inrush, INR:* SCPI, the saved FAST CSV; private disk copy + log per process, --shots DIR (fw-rs/docs/inrush-current.md)
 emu/hy3131/btwaketest.py  fw-rs DMM rail (PE2) wake: BT link on the Scope page, link cycles, a chip POR (device check 2026-10-21 Bluetooth 1g / 1h)
 emu/hy3131/runemu.py      emu/run.py with this directory's HY3131.cs compiled in (development)
 emu/hy3131/RESEARCH.md    sources, facts, open points

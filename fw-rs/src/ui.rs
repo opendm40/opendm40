@@ -11,6 +11,9 @@ use crate::meter;
 /// Power-meter screens (DMM page slots, entry dialog, settings page).
 #[path = "ui_power.rs"]
 pub mod pw;
+/// The Inrush Current page (View::Inrush, app_inrush.rs).
+#[path = "ui_inrush.rs"]
+pub mod inr;
 
 /// RGB565 of the stock colours (panel reads back RGB666).
 pub const BG: Color = 0x0883; // (8, 16, 24)
@@ -64,6 +67,8 @@ pub enum View {
     Gallery,
     /// On-device help (UF-29), Settings 2/3 -> Help: HELP pages.
     Help,
+    /// Inrush current capture (Current Settings -> Inrush; app_inrush.rs).
+    Inrush,
 }
 
 impl View {
@@ -990,6 +995,22 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
         sf::rbox(r, 6, 0x2966, BG);
         sf::glyphs(sf::TEXT22, r, "Fuse check", STATUS_FG, 0x2966, 8, 0);
     }
+}
+
+/// "Inrush" on the Current Settings page (the inrush capture, app_inrush.rs;
+/// builds with the AD2 stream ISR only): the note row, right column (the
+/// AC+DC column of the stock grid), beside Fuse check.
+pub const INRUSH_BTN: sf::Rect = rect(319, 141, 150, 36);
+
+pub fn inrush_button() {
+    sf::rbox(INRUSH_BTN, 6, 0x2966, BG);
+    sf::glyphs(sf::TEXT22, INRUSH_BTN, "Inrush", STATUS_FG, 0x2966, 8, 0);
+}
+
+/// The Inrush button was hit (the gaps to its neighbours split as theirs).
+pub fn inrush_hit(x: u16, y: u16) -> bool {
+    let (x, y) = (x as i16, y as i16);
+    (139..180).contains(&y) && (316..472).contains(&x)
 }
 
 /// The fuse-check dialog (dialog::fuse_check) of `stage` (0 instructions, 1 measuring, 2 the
@@ -2310,6 +2331,7 @@ pub fn view_name(v: View) -> &'static str {
         View::Record => "Record",
         View::Gallery => "Gallery",
         View::Help => "Help",
+        View::Inrush => "Inrush",
     }
 }
 

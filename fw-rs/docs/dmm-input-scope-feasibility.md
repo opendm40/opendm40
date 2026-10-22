@@ -1497,3 +1497,10 @@ default stays flipped (a239aa6), and the BT run is a TODO.
 - The static worst path is 21.8 KB, and the emulator walk gave 21.4 KB.
 - The screenshot holds the FFT spectrum (read back with MMEM:DATA?), and
   the spectrum keeps updating after the shot.
+
+## 12. Inrush current on the stream (2026-10-22)
+
+The AC A row of the 10 A range (1.3: OP1 x1 on the 10 mohm shunt,
+DC-coupled, +-125 A) streamed at 9600 S/s by the section 11 ISR feeds a
+step detector and a 2 s trace in the scope's BUF: Irms over the first
+100 ms, the peak, a FASTnnn.DLG of the trace. docs/inrush-current.md.

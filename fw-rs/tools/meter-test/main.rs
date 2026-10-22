@@ -23,6 +23,9 @@ mod logger;
 #[path = "../../src/trigsoft.rs"]
 mod trigsoft;
 // The AD2 stream ISR's phase lock (pure; its model-chip tests).
+// The inrush capture's detector / results (src/inrush.rs, pure).
+#[path = "../../src/inrush.rs"]
+mod inrush;
 #[path = "../../src/ad2pll.rs"]
 mod ad2pll;
 

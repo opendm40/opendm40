@@ -210,6 +210,36 @@ pub enum Out {
     Log(Log),
     /// USB-disk file command (MMEMory:...), handled by the main loop (csvlog.rs).
     Mmem(Mmem),
+    /// Inrush current (INRush:...), handled by the main loop with the app.
+    Inr(Inr),
+}
+
+/// Inrush current (src/inrush.rs, src/app_inrush.rs; docs/inrush-current.md):
+///   INRush[:STATe] ON|OFF / ?    open the Inrush Current page (the A
+///                                function, AC row, 10 A range) and arm /
+///                                close it (the A function's settings back)
+///   INRush:ARM                   (re)arm: a new capture (opens the page)
+///   INRush:THReshold <A> / ?     the trigger step, 0.1 .. 50 A (default 1)
+///   INRush:CONDition?            OFF | IDLE | ARMING | ARMED | TRIGGERED |
+///                                SAVING | DONE
+///   INRush:FETCh?                Irms(100 ms),Ipeak,Iidle,lost: A (peak
+///                                signed, +9.9E37 = OL), lost samples;
+///                                all +9.9E37 + "Data stale" without a capture
+///   INRush:FILE?                 "LOGS/FASTnnn.DLG" of the capture, or ""
+///   INRush:PREamble?             rate_hz,samples,trigger_index,a,b (A = a + b
+///                                * code; samples 0 without a capture)
+///   INRush:DATA? [<start>[,<count>]]  #4nnnn block of the trace's codes,
+///                                little-endian i16, count <= 3000 (default)
+#[derive(Clone, Copy, PartialEq)]
+pub enum Inr {
+    State(Option<bool>),
+    Arm,
+    Thr(Option<f32>),
+    Cond,
+    Fetch,
+    File,
+    Pre,
+    Data(u32, u32),
 }
 
 /// File commands on the USB disk's root (csvlog.rs gallery backend):
@@ -1447,6 +1477,42 @@ impl Scpi {
                 _ if kw(p0, "DIAG") && query => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     out = Out::Instr(if kw(sub, "PWM") { Cmd::DiagPwm } else { Cmd::DiagDac });
+                }
+                _ if kw(p0, "INRush") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let a = trim(arg);
+                    let c = if sub.is_empty() || kw(sub, "STATe") {
+                        if query { Some(Inr::State(None)) } else { on_off(a).map(|b| Inr::State(Some(b))) }
+                    } else if kw(sub, "ARM") && !query {
+                        Some(Inr::Arm)
+                    } else if kw(sub, "THReshold") {
+                        if query { Some(Inr::Thr(None)) } else { parse_num(a).map(|v| Inr::Thr(Some(v))) }
+                    } else if kw(sub, "CONDition") && query {
+                        Some(Inr::Cond)
+                    } else if kw(sub, "FETCh") && query {
+                        Some(Inr::Fetch)
+                    } else if kw(sub, "FILE") && query {
+                        Some(Inr::File)
+                    } else if kw(sub, "PREamble") && query {
+                        Some(Inr::Pre)
+                    } else if kw(sub, "DATA") && query {
+                        let mut v = [0u32, 3000];
+                        for (i, part) in a.split(|&b| b == b',').take(2).enumerate() {
+                            if let Some(x) = parse_num(part) {
+                                v[i] = x.max(0.0) as u32;
+                            }
+                        }
+                        Some(Inr::Data(v[0], v[1]))
+                    } else {
+                        None
+                    };
+                    match c {
+                        Some(c) => out = Out::Inr(c),
+                        None => {
+                            self.err = Some(if sub.is_empty() || kw(sub, "STATe") || kw(sub, "THReshold") { "Illegal parameter value" } else { "Undefined header" });
+                            continue;
+                        }
+                    }
                 }
                 _ if kw(p0, "LOG") => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
