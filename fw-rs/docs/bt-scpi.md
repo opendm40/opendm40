@@ -136,7 +136,7 @@ host's TransferSize needs; the main loop polls USB for it within the
 disk-READ budget per pass (2 ms, 0.5 ms while logging), so the screen and
 the DMM keep running, and the scope stays stopped (front-panel RUN waits)
 until the last packet left or the host gave the read up (a new command,
-a clear). No `\n` follows a block on USBTMC (as every reply there).
+a clear, or 2 s without the host reading on: a host that died mid-read). No `\n` follows a block on USBTMC (as every reply there).
 Over Bluetooth the reply has to fit the 6 KiB reply buffer: a longer one
 is refused with `#10` and "Too much data"; `WAV:POIN 2000` with WORD
 (3.8 kB, 0.33 s on the UART) is the practical full-width record there.
