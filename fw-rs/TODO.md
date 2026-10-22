@@ -1001,6 +1001,18 @@ Firmware:
       the volume = the installed file), then the logger panel / DMM view / Wave view text (ASCII26 / F14 from
       A2) drawn correctly and DBG:ISR? max_lat at AD2 38400 with the logger panel no worse than before; taps on
       the inrush page while armed (App::tap now in B).
+- [x] Region C audit #1 2026-10-22 (docs/native-boot.md "Region C audit #1"): on 0fd0379 region C 17.4 ->
+      23.8 KB free (from 9.9 KB on e054fc8: +13.9 KB with upstream's A2 move). Shrunk 2.7 KB: three statics
+      .data -> .bss (gallery G, scope_csv SNAP, csvlog JOB), App::with_temp_page without a closure parameter
+      (4 copies -> 1), gallery Tb::c out of line; moved: the .data load image (1 KB) and ad2exp + dbg_dcv
+      (5.2 KB, DBG:AD2:*) to region B (B 78.2 -> 72.0 KB free). No core::fmt in the image, no duplicated
+      decoder in the gallery (single-copy dense code). 23 of 24 dead-code warnings fixed (0 bytes: LTO).
+      New emu/gallerytest.py (open / swipe pages / viewer = BMP bytes / Delete Cancel + Delete / back).
+      Left as candidates there (more DBG-only code to B ~6.8 KB, gating the AD2 experiments 2.6 KB, one
+      shared fat_get ~0.2 KB).
+- [ ] Device check of region C audit #1: boot and settings restore (the .data image now in B), the gallery
+      (open, page swipe, view, delete), a CSV recording start / stop and a scope Save CSV (csvlog JOB,
+      scope_csv SNAP now zero-initialised), the temperature page keys, DBG:AD2:NOISE? / DCV? still answer.
 - [x] Font storage 2026-10-22 (docs/fonts.md): the stock fonts were 104 KB of data in region B (90.9 KB
       bitmaps + 13.2 KB tables). CJK / full-width glyphs dropped (232, never drawn), 4 bpp glyphs as row-major
       nibble runs (RLE4, decoded straight into the LCD writes), 1 bpp glyphs cropped to their ink rows,

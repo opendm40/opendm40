@@ -458,8 +458,9 @@ date for its layout and traps.
             0xFF padding (objcopy --gap-fill=0xff) up to the marker
 0x08008000  12-byte loader/ROM marker, 0xFF in our image             GAP
 0x0800800C  4 bytes 0xFF padding
-0x08008010  .text + .rodata (XIP): everything hot                   region B (zero-wait)
-0x08080000  .cold (rarely run code) + the .data load image          region C (NOT zero-wait)
+0x08008010  .text + .rodata (XIP): everything hot, then the .data   region B (zero-wait)
+            load image (read once by the reset copy)
+0x08080000  .cold (rarely run code)                                 region C (NOT zero-wait)
             end of image below 0x080A0000 (FS-loader above)
 RAM: TCM  0x10000000 .data/.bss, then the stack down from 0x10010000;
      SRAM 0x20000000 .dmabuf (DMA buffers, the scope record, the disk
@@ -706,6 +707,87 @@ whole 128-byte blocks), and the emulator's full chain (`emu/run.py chain
 the real FS-loader installs the file, the flash at `0x08004000` equals
 the body, the marker holds the update header, and fw-rs boots from it.
 
+### Region C audit #1 (2026-10-22)
+
+Asked for: at least 12 KB more free in region C without losing a
+feature, the gallery (17.6 KB of C) the first suspect. Measured with nm
+sizes per symbol in `0x08080000..0x080A0000`, a DWARF walk of every
+inlined copy in C (per abstract origin: copies, bytes, and whether an
+out-of-line copy exists too) and inline trees of the largest functions.
+
+What the image does NOT have (the usual suspects):
+- **no `core::fmt` machinery** in the image (no `Formatter`, `write_str`,
+  `pad_integral`; only `panic_fmt` (8 B) and two `Debug::fmt` stubs of 22
+  / 40 B, all in B; panics are `panic=abort`, C calls the
+  `panic_bounds_check` / `slice_index_fail` / `div_by_zero` stubs in B);
+- **no duplicated BMP decode**: one `Bmp::parse` (692 B, inlined once),
+  one `Bmp::color` (208 B), one `Job::pix_block` (992 B). The gallery is
+  dense single-copy code: `Gallery::poll` 6.6 KB = `poll_on` -> `work` ->
+  `step` (4.4 KB: BMP head / pixel blocks, and `step_dlg` 1.9 KB = the
+  DLG / FAST decoders) + catalog / page scan / delete; `begin_b` 1.5 KB
+  (the log viewer's texts); its formats (16 / 24 / 32 / 4 / 1 bpp, RLE4,
+  DLG and FAST logs) are features;
+- **no costly inlining**: inlined copies in C next to an out-of-line copy
+  total < 1 KB (mostly 10-40 B leaves: `mmio::*`, `stockfont::rect`,
+  `copy_from_slice`, clamps, where a call costs as much as the body);
+- **one monomorphization**: `App::with_temp_page(impl FnOnce)`, four
+  copies of ~330 B (fixed below).
+
+Done (e054fc8 9 936 B free; ec22925 7 984 B after E7 grew C):
+| change | region C | commit |
+|---|---|---|
+| `gallery::G` (672 B .data image) -> `.bss`, set on the first `get` | +592 | 53f7be2 |
+| `scope_csv::SNAP` (548 B): `rec: Option<&[u16]>`, all zero -> `.bss` | +580 | 53f7be2 |
+| `csvlog::JOB` (512 B): zero sentinels until `start` sets JOB0, `dlog::ENC_ZERO` -> `.bss` | +512 | 53f7be2 |
+| `App::with_temp_page`: a key argument instead of a closure (4 copies -> 1) | +944 | 53f7be2 |
+| `gallery::Tb::c` `#[inline(never)]` (9 inlined copies next to its symbol) | +76 | 36e038a |
+| 23 of 24 dead-code warnings (LTO had dropped it all) | 0 (noise) | c663746 |
+| the `.data` load image (1 056 B) -> region B after `.text` | +1 056 | d8eaa7e |
+| relocation: `ad2exp` (DBG:AD2:TORN? / NOISE? / DCV? / N7?, E7's `dc_enter`) and `dbg_dcv` -> region B | +5 208 | 263fcab |
+
+Meanwhile upstream: region A2 / `App::tap` / `key` / `show` /
+`vdisk::describe` back to B (6a0eb31, +7.7 KB of C) and the font rework
+(d0ed7e4: B 26.4 -> 82.2 KB free). On 0fd0379 (ad2-isr / without):
+region C 17 420 / 19 484 -> 23 804 / 25 800 B free, B 78 192 / 85 016 ->
+71 980 / 78 900 B, A2 7 920 B, stack headroom 21 228 / 21 656 -> 21 236 /
+21 664 B, SRAM unchanged. From the task's start (e054fc8, 9 936 B): +13.9
+KB, of which this audit's shrinking 2.7 KB (53f7be2 + Tb::c), its
+relocation (the .data image and the DBG experiments, B had room) 6.3 KB,
+the rest upstream (A2 move +7.7 KB, net of E7 and later growth). The relocated code is on-demand DBG / experiment
+code (zero-wait flash only makes it cheaper); `git revert 263fcab` puts
+it back in C if B gets tight.
+
+Checks: ui-render and gallery-test renders pixel-identical to the base, 0
+violations; tools/font-matrix identical; every `tools/*/run.sh`;
+`emu/gallerytest.py` (new: open, page swipes, the viewer = the BMP bytes,
+Delete -> Cancel / Delete, back out) PASS on base and change, screenshots
+identical; wavetest (hooks every function of C while the stream owns the
+bus: none called), ad2streamtest, inrushtest, dcvtest, couptest, powtest,
+senttest, leadstest, burdentest, btwaketest, the HY3131 model unit tests.
+Two wall-clock checks failed once under a load average of ~60 and passed
+on a rerun (ad2streamtest "every captured record drained": 861 < 1000
+records at 1200 S/s; powtest acdc-floor); modetest's fw-rs scenarios get
+no BT reply on the base image as well (0 readings, pre-existing).
+
+Candidates left (measured or estimated, not done):
+- DBG-only code still in C, if B keeps its room: `hyspi` (DBG:HYSPI:SELF?
+  / WR?, 2.3 KB; ad2streamtest uses both), `boot::put_info` (DBG:BOOT?,
+  1.2 KB), `prof::report` (DBG:PROF?, 1.0 KB; usbtmc_stress, device
+  checks), `touch_diag` (DBG:DIAG?, 0.9 KB), `Dmm::acdc_diag_text`
+  (DBG:ACDC?, 0.7 KB), `HwTrig::calibrate` (0.7 KB): ~6.8 KB by relocation.
+- Gating the AD2 experiments behind a non-default feature: 2 580 B on
+  ec22925 (trial build), but the open TODO (B) device session still uses
+  `ad2 noise` (DBG:AD2:NOISE?), so not done.
+- One `fatren::fat_get` for fatdir / fastlog prep / csvlog / gallery
+  (four inlined one-block-cache copies, ~0.2 KB; csvlog's runs during a
+  recording, so the shared one must live in B); screenshot.rs and
+  calbackup.rs have two more (the RAM-overlay change owns those files).
+- `.data` statics of hot modules (scope_ui SHOWN 308 B, scope WAVE 224 B,
+  inrush SES 200 B, STRIP_SHOWN 128 B): now B, not C, since d8eaa7e.
+- The four text builders (`gallery::Tb`, `dlog::Txt`, `csvlog::W`,
+  `vdisk::W`): different rules (Tb maps non-ASCII to '?', Txt has u64 /
+  ms / Val), ~0.3 KB at most; panic sites in C (64 calls, ~0.5 KB with their checks).
+
 **Link-time asserts** (`link-native.x`):
 - region A ends at or below `0x08008000`;
 - region A2 starts right after region A and ends at or below `0x08008000`
@@ -724,7 +806,7 @@ AD2 ISR and its exception frame), and prints region B / region C / SRAM
 free.
 
 Region C thresholds: C grows by whole functions moved out of B (0.3..5 KB
-each, audit #3) and with `.data`; 4 KiB still takes one more small move
+each, audit #3); 4 KiB still takes one more small move
 after the 8 KiB warning. Relief for C is a cut, or `.cold` code moved back
 to B while B's own budget allows: nothing above `0x080A0000` is reachable
 (next section).
