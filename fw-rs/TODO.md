@@ -1136,6 +1136,23 @@ Firmware:
       5. Wave view 1 ms/div and 2 ms/div on the square: the trace, Vpp, no "Wave stopped", DBG:ISR? lost 0,
          overwritten (ring) 0 for 30 s; 5 ms/div and slower as before.
       6. After the streams: DC V 1 V within 0.05 %, `DBG:HYSPI:SELF? 2000` all 0.
+      Device 7409b92 (2026-10-23, docs/device-check-2026-10-21.md "7409b92" 2): 1-3, 5, 6 PASS (div 1008, dma 1,
+      lost / late / slips / overruns / timeouts / bad 0, locked, max_lat 300 ns; codes in range CHOP ON / OFF;
+      DIV 8,1 at 4800 / 38400 lost 0; Wave view 1 / 2 ms/div overwritten 0 in 30 s; DC V 1 V -0.005 %, SELF? 0).
+      **4 FAIL**: disk at 76800 kept 2 095 713 of 4 599 040 conversions (lost_before 2 505 919), see below.
+- [ ] 76800 to the disk loses 54 % (device 7409b92): rung 76800 chosen (tpp 382 / 389 us), fifo_hw 525 B,
+      336 pages/s, a hole of ~27-38 conversions after every 32 rows: one BATCH per Run pass, RUN_BUDGET_CYC
+      (300 us of cycles, the ISR's share counted) used up by it with the ISR at cpu_permille 544 (estimate
+      ~430, emulator 295). Main loop 1272 passes/s, `usb` (Run) avg 718 us. The host drain also tops out
+      at ~35 k rows/s. Choose: a CPU / ring-fill gate in Prep -> 38400, more batches per pass while the
+      ring is half full, and / or cheaper hybrid frames. 38400 to the disk: lost 0.
+- [ ] 76800 rate: rate_mhz 76 723.6 (ppm_x10 ~+9950) while 4800 / 38400 lock at -1.6 ppm; the record
+      stamps say 76 574.5 S/s (LOG:RATE? 76 576), 1.9 permille below rate_mhz (at 38400 they agree).
+      Which is right, and is the 76800 rung's nominal (76 799.016) the chip's real rate?
+- [ ] 76800 CHOP ON: one isolated mid-level glitch per ~2 M samples (seq 752877: -65616 between -98272s;
+      seq 133301: 82960 between ~98300s), bad 0; none in 2.1 M with CHOP OFF or at 4800 / 38400.
+- [ ] dm40scpi.py `log --source ad2 -d N`: drain() returns only on a block < 500 records, so above the
+      host's ~35 k/s the duration is never checked (ran 150 s until killed).
 - [x] (B) DC-coupled V on AD2 (E7, feasibility 1.3 last row / section 13): device test 6.5 (4ff95f7,
       DBG:AD2:DCV?, tools/ad2dcv.py): the AC V row with SAD2IP = OP1O is linear to 0.003 % of the
       range, 3..10 codes sd, gain +0.84 / +1.79 / +0.53 / +0.27 % vs nominal; AD1 reads 0.3..0.9 k
@@ -1671,6 +1688,8 @@ Emulator (emu/):
       "Disk busy" at the gesture; a shot waits 1 s after a full repaint). Verify on device: the swipe
       during `LOG:DEST DISK` + `LOG:STAT ON` shows "Disk busy" at once and no S*.BMP appears after; during
       a host LOG:STAT session, the shot after LOG:STAT OFF holds the reading and the chart.
+      Device 7409b92 (2026-10-23): PASS. "Disk busy" in the first panel read (0-0.14 s), no BMP; after a
+      host session S012 / S013 hold the reading and the chart, the shot 1.07 s after LOG:STAT OFF.
 - [ ] Wave view: `LOG:CSV ON` is accepted but records no rows (READ? 9.9E37); ram-budget.md says csvlog is
       refused there. Refuse it (Settings conflict) or fix the doc.
 - [ ] AUTO OVERLOAD on AC 1 A (1bffde2, couptest iac repro): blocked, the A jack is not wired.

@@ -1456,3 +1456,81 @@ Steps: `LOG:DEST DISK`, `LOG:DUR 20`, `LOG:STAT ON` (AD1, 38 S/s, FAST013). Once
   - `MMEM:CAT?` used / free = 10 829 824 / 5 910 528, the same as at the start.
   - The file list under SHOTS / SCOPE / LOGS on the volume is the same as at the start.
 - **Calibrator:** 1 V DC, enabled.
+
+## 7409b92: the shot fix re-check, 76.8 kS/s, AC+DC methods (2026-10-23 00:36 - ~02:30)
+
+The owner had installed 7409b92 (it contains rust-fw-poc up to a4dadc7). `DBG:BOOT?` showed marker 0xC3AA3C55 / 0x000962F4 / 0x000120BD, VALID, crash count 0, HEALTHY. No reset during the session: the boot block stayed the same.
+- **Wiring:** the calibrator (`/dev/ttyACM1`) on V/COM: 1 V DC, 3 / 5 / 30 V DC and the 40 Hz square (`set_output('frequency', 40.0)`). The A jack and the MCX probe were not wired.
+- **Input:** DBG:TAP / DBG:KEY / DBG:SWIPE D,3. Panel reads are DBG:LCD? reads (`devlib.grab`).
+- **Files:** scripts, PNGs, BMPs, `.npy` sample dumps and JSON results are in the session scratchpad `devchk-7409/` (not in git).
+- **USB:** the scripts pinned `DM40_USBTMC=real`. One run (2.1 below) was killed by a host `timeout` in the middle of a `LOG:DATA?` read. After that every read returned 0 bytes until `USBTMC_IOCTL_CLEAR`. The device did not reset.
+
+### Summary
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1a | Swipe during `LOG:DEST DISK` + `LOG:STAT ON` | **PASS**: "Disk busy" (red toast) in the first panel read, 0.00-0.14 s after the gesture, and in the next three reads to 0.6 s. No new S*.BMP after the session | `p1a.py`, `p1a-toast0.png` |
+| 1b | Swipe during a host `LOG:STAT` session, then `LOG:STAT OFF` | **PASS** (2 runs): S012 / S013 hold the reading, the bar graph, the chart with its scale, statistics and the status bar. The shot started 1.07 s after `LOG:STAT OFF` (the 1 s settle) | `p1b.py`, `p1b-S012.BMP.png`, `p1b2-S013.BMP.png` |
+| 2.1 | 76 800 S/s, AC V, 40 Hz square, raw host drain 60 s | **PASS by the listed criteria**, three findings below: div 1008, dma 1, lost 0, late / slips / overruns / timeouts / bad 0, locked, max_lat 300 ns. **cpu_permille 544** (estimate ~430). Host drain **34.4-35.0 k rows/s**, so ~55 % of the samples were overwritten in the ring | `p2.py`, `a768b.json` |
+| 2.2 | The same with `LOG:CHOP OFF` and `ON` | **PASS**: codes in the levels +99.3 k / -99.0 k; no stuck samples (longest run of equal codes 7-8). Only the sample right after a falling edge goes past -107 k (overshoot, to -117.8 k). One mid-level glitch per 2 M samples with CHOP ON, see below | `a768off.json`, `a768on.json` |
+| 2.3 | `DBG:AD2:DIV 8,1` at 4800 and 38 400 | **PASS**: lost 0, bad 0, overwritten 0 (host kept up), locked at -1.6 ppm; cpu_permille 28 / 228 | `h4800.json`, `h38400.json` |
+| 2.4 | Disk at 76 800, `LOG:DUR 60` | **FAIL**: the rung was 76 800 (tpp 382 / 389 us passed the gate), but the file holds 2 095 713 rows of 4 599 040 conversions. **lost_before sum 2 505 919 (54 %)**. fifo_hw 525 of 8192, 336 pages/s. The coder was CPU-starved; the flash was not the limit | `p4.py`, `disk768.json`, `prof768disk.txt` |
+| 2.5 | Wave view 1 ms/div (76 800) and 2 ms/div (38 400), 30 s each | **PASS**: trace and Vp-p 9.94 / 10.0 V right (`wave-1e-3.png`, `wave-2e-3.png`); ISR `dropped` +0 in each 30 s window (22 at the switch to 1 ms/div, before the window), bad / overruns / slips 0, max_lat 280 / 260 ns; cpu_permille 560 / 154 | `p5.py`, `p5.json` |
+| 2.6 | After the streams: DC V 1 V, `DBG:HYSPI:SELF? 2000` | **PASS**: 0.999951 V mean of 10 READ? (-0.005 %, range 0.999812-1.000066); SELF? 2000 frames, all error counts 0 | - |
+| 3 | AC+DC methods (acdcmeth.py e6 e1 e7 e2 e5, then AUTO with C by hand) | see "3." below | `acdcmeth.jsonl` |
+
+### 1. The shot fix (7409b92)
+
+- **1a:** the session was AD1, 38 S/s, `LOG:DUR 20`. `DBG:SWIPE D,3` went in once `LOG:DISK?` showed state 3. Panel rows 128-192 (the toast rectangle is y 132-188) were read four times in 0.6 s. Each read had 20 837 red pixels and the text "Disk busy". After the session `MMEM:CAT?` listed one new file, FAST013 (and FAST014 in the second run); the S*.BMP list was unchanged. The first run's script failed in its panel read after the swipe, so it gives only the "no BMP" half. At the end of Part 1, after deleting S012 / S013 / FAST013 / FAST014, `MMEM:CAT?` used / free was back to 10 829 824 / 5 910 528, the same as at the start: no BMP was written.
+- **1b:** `LOG:DEST HOST`, `LOG:STAT ON` (AD1) on DC V 1 V; `DBG:SWIPE D,3` 2 s later; `LOG:STAT OFF` 3 s after the swipe. Mass storage was busy from 4.07 to ~10 s after the swipe, so the shot started 1.07 s after `LOG:STAT OFF`. The chart in both BMPs has only a few points (the statistics restart after the session: T 00:00:00). This is the page as it is drawn, not a bare page. **The 1 s settle is enough on DC V**; the "a reading drawn since the repaint" variant is not needed for this case.
+
+### 2. 76.8 kS/s (c58ae48, TODO "76.8 kS/s")
+
+Setup: `CONF:VOLT:AC` (6 V range, AD2 r26 0x20, AC-coupled), the 40 Hz square of the calibrator (READ? 4.768 V), `LOG:SOUR AD2`, `LOG:SRAT 76800`. `p2.py` drains `LOG:DATA?` (500 records per block) into numpy for 60 s, then reads `DBG:ISR?`, `LOG:COUN?`, `LOG:GAP?`, `LOG:RATE?`.
+
+**2.1-2.3, the host drain runs**
+
+| run | rows got | drain rows/s | captured | overwritten | lost | cpu_permille | max_lat ns | rate_mhz | ppm_x10 | div |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 76 800 CHOP default (ON) | 2 062 907 | 34 378 | 4 596 477 | 2 531 522 | 0 | 544 | 300 | 76 723 645 | +9951 | 1008 |
+| 76 800 CHOP OFF | 2 098 166 | 34 962 | 4 596 976 | 2 496 762 | 0 | 544 | 300 | 76 723 683 | +9946 | 1008 |
+| 76 800 CHOP ON | 2 096 633 | 34 939 | 4 596 698 | 2 498 017 | 0 | 544 | 300 | 76 723 803 | +9931 | 1008 |
+| 4800, DIV 8,1 | 191 865 | 4 797 | 191 882 | 0 | 0 | 28 | 240 | 4 800 008 | -16 | 1008 |
+| 38 400, DIV 8,1 | 1 536 158 | 38 397 | 1 536 658 | 0 | 0 | 228 | 240 | 38 400 062 | -16 | 1008 |
+
+late, bad, timeouts, overruns and slips were 0 in every run, locked 1, dma 1. `LOG:GAP?` bad 0.
+
+- **Host drain.** The host gets ~35 k rows/s at 76 800 and the full rate at 38 400. The limit is on the meter's side (see 2.4): the main loop gets ~46 % of the CPU and moves ~35 k records/s, by USB or to the disk.
+- **CPU.** cpu_permille is 544 at 76 800, not ~430 as estimated. The emulator had 29.5 %. Hybrid frames at 38 400 cost 228 against 148-154 for the /16 DMA frames at the same rate.
+- **Codes.** The levels are +99.3 k / -99.0 k with a ~1 k droop over a half period (AC coupling), the same with CHOP ON and OFF. The only codes past the square's +-107 k are the 1-2 samples right after a falling edge (down to -117.8 k, overshoot). They show at 76 800 only: 4800 and 38 400 stay within -106.3 k / +107.5 k. The longest run of equal codes is 7-8 samples (codes are multiples of 8), so nothing is stuck. Half periods are 956-959 samples in the contiguous stretches between ring overwrites (960 expected at 76 800).
+- **Finding 1: mid-level glitches.** One isolated sample far from both neighbours, away from any edge, per CHOP ON run: seq 752 877 (-65 616 between -98 272 / -98 272) and seq 133 301 (82 960 between 98 288 / 98 320). There were none with CHOP OFF (2.1 M samples) and none at 4800 / 38 400. `bad` stayed 0. The XOR against the neighbour is not one bit (0x7F90, 0x3BE0), so this is not a torn read of two adjacent samples. It is about one per 2 M samples, too few to tell whether CHOP is the cause.
+- **Finding 2: the rate at 76 800.** `rate_mhz` is 76 723.6 S/s, so ppm_x10 is about +9950 (period +995 ppm against the nominal 76 799.016). At 4800 / 38 400 the same chip locks at -1.6 ppm. The record stamps give a third rate: the mean step inside contiguous stretches is 13.0592 us = **76 574.5 S/s**. `LOG:RATE?` gives 76 576 and captured / 60 s 76 600. At 38 400 the stamps give 38 400.07 S/s, matching `rate_mhz`. So at 76 800 the PLL's rate and the stamps disagree by ~1.9 ‰, and both are off the nominal rung. The CSV header's `nominal_sps` is off by 0.3 % against the stamps. Not investigated.
+- **Finding 3: the killed run.** The first 76 800 attempt used `dm40scpi.py log ... -d 60`. Its `drain()` returns only when a block has < 500 records, which never happens when the meter produces faster than the host drains. So `-d` was never checked and the run went on until my `timeout` killed it (~150 s). That session's counters show **overruns 1, max_lat 1160 ns**, lat_pc 0x08094a7e. They belong to the end of that session (a killed host mid-read, then `USBTMC_IOCTL_CLEAR`); the three clean runs show 0 / 300 ns. dm40scpi.py needs the duration check inside `drain()` for rates above ~35 k/s (not changed here).
+
+**2.4, disk at 76 800: FAIL**
+
+`LOG:SOUR AD2`, `LOG:SRAT 76800`, `LOG:DEST DISK`, `LOG:DUR 60`, `LOG:STAT ON`. Free space was 5 910 528 B (the whole free space is allocated).
+- **Prep:** 21 s (prep_pct 20 / 42 / 64 / 87 % at 5 / 10 / 15 / 20 s).
+- **Rung:** `LOG:PRE?` `0,0,0,13,76374,1,1,76800,76799016,32,1` = 76 800. `LOG:DISK?` tpp **382 / 389 us** (mean / max), within the 0.4-0.7 ms expected and under the 800 / 1500 us gate.
+- **End:** `5,13,5910528,4827914,2095713,100,525,20155,382,389`: done, FAST013, 4 827 914 B, **2 095 713 rows**, **fifo_hw 525** of 8192, **20 155 programs = 336 pages/s**.
+- **DBG:ISR?:** captured 4 599 040, **dropped 2 501 279**, lost 0, late / bad / overruns / slips 0, max_lat 320 ns, cpu_permille 544.
+- **The file:** `dlog.py` decodes it: 2 095 713 rows over 60.000 s, **lost_before sum 2 505 919** in 65 385 holes. The holes come **exactly every 32 rows** (`BATCH` = 32), 27 conversions each (median; mean 38, max 544).
+- **38 400 for comparison (`LOG:DUR 20`):** rung 38 400, div 16, cpu_permille 148, 768 003 rows, lost_before 0, dropped 0.
+- **Profile (`DBG:PROF:RESET` at state 3, `DBG:PROF?` after a 20 s session):** 1272 main-loop passes/s, the `usb` section (the fast-log Run pass runs in it) avg 718 us per pass, 91 % of the loop time. The hole every 32 rows means each Run pass drained one batch only. `RUN_BUDGET_CYC` (300 us of cycles, counted with the ISR's share in it) is used up by one 32-record batch while the ISR takes 54 % of the CPU. Between passes ~70 conversions arrive, so the 2048-record ring overflows.
+- **Diagnosis:** the coder is CPU-starved; the flash is not the limit (fifo_hw 525 B, tpp 0.38 ms, 336 of ~767 pages/s needed). The emulator passed because its ISR cost was 29.5 %. Directions (owner's choice, not built):
+  - (a) a CPU gate next to the tpp probe: measure cpu_permille (or the ring fill) during Prep's probe and run at 38 400 above a limit;
+  - (b) more coder work per pass while the ring is over half full (several batches, budget by records not wall cycles), if the CPU left (~46 %) is enough. The host drain's ~35 k/s suggests the main loop as a whole cannot move 76.8 k records/s, so (b) alone may not be enough;
+  - (c) cheaper hybrid frames (the ISR at 544 ‰ against the ~430 estimate).
+- **Not run:** the noisy-input repeat (sine + generator noise) of the TODO step: the clean case already fails.
+
+**2.5, Wave view**
+
+From AC V: MF key 3, tap (210, 260) opens the Wave view (10 ms/div, 4800 S/s, 40 Hz square, Freq 40.0 Hz, Vp-p 9.96 V). Then `TIM:SCAL 1e-3` / `2e-3`, 3 s settle, 30 s with `DBG:ISR?` and `LOG:COUN?` every 10 s.
+- **1 ms/div:** rate_mhz 76 723 541, div 1008, cpu_permille 560. The ring was overwritten 22 times at the switch to 1 ms/div, then **+0** in 30 s. Vp-p 9.94 V; the edge with its overshoot, Vrms 4.81 V.
+- **2 ms/div:** 38 400, div 16, cpu_permille 154, overwritten 0, Vp-p 10.0 V.
+- **Both:** bad / overruns / slips / late 0. `LOG:COUN?`'s lost field read 2 in two of the 1 ms/div snapshots and 0 in the others (counts per record, not a ring overflow).
+- **Exit (MENU at 10 ms/div):** the 4800 session ended with max_lat 18.6 us (lat_pc 0x0808bdd4). This is the known "Wave view exit: App::show runs before the stream stops" item.
+
+**2.6:** DC V 1 V: 0.999951 V (10 READ?, -0.005 %). `DBG:HYSPI:SELF? 2000`: `16,2000,0,0,0,0,7.92,21.61,69.14,9.89,23,...`: all error counts 0.
+
+Part 2's FAST files were deleted. `MMEM:CAT?` was back to 10 829 824 / 5 910 528.
