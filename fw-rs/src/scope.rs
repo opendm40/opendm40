@@ -338,17 +338,21 @@ pub trait WaveSource {
     fn first(&self, gen: u32) -> Option<u32>;
 }
 
-/// The DMM wave view's timebases: 5 ms/div (index 17) .. 50 s/div, roll
+/// The DMM wave view's timebases: 1 ms/div (index 15) .. 50 s/div, roll
 /// from 200 ms/div as the MCX scope (docs/dmm-input-scope-feasibility.md
-/// 3.1: the AD2 band is ~0.25 x the rate, nothing faster to show).
-pub const WAVE_TB_MIN: usize = 17;
+/// 3.1: the AD2 band is ~0.25 x the rate, nothing faster to show; 1 ms/div
+/// needs the chip's top rate, 76.8 kS/s, 11.12).
+pub const WAVE_TB_MIN: usize = 15;
 
 /// AD2 rate (a hy3131::ad2_r26_for rung) for a wave timebase: >= 400
-/// samples per screen up to 20 ms/div, 9600 S/s (~22 % CPU, decision #3's
-/// opt-in rate) only at 5 ms/div.
+/// samples per screen up to 20 ms/div: 76800 S/s at 1 ms/div and 38400 at
+/// 2 ms/div (768 samples on the 10 divisions; the hybrid / plain DMA
+/// frames, feasibility 11.12 / 11.11), 9600 S/s at 5 ms/div.
 pub const fn wave_fs_for(tb: usize) -> u32 {
     match tb {
-        0..=17 => 9600,
+        0..=15 => 76800,
+        16 => 38400,
+        17 => 9600,
         18 | 19 => 4800,
         20 | 21 => 2400,
         _ => 1200,

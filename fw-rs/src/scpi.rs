@@ -297,9 +297,12 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///                           ("Settings conflict" while a session runs)
 ///   LOG:SOURce?             AD1 / AD2
 ///   LOG:SRATe <S/s>         requested AD2 rate; the nearest rung of 1200,
-///                           2400, 4800, 9600, 19200, 38400 is used (chop on or off: the
+///                           2400, 4800, 9600, 19200, 38400, 76800 is used (chop on or off: the
 ///                           chopper does not slow AD2) (default 2400, 4800
-///                           with the ad2-isr stream ISR); takes effect at START
+///                           with the ad2-isr stream ISR); 76800 needs the DMA
+///                           frames (the default; DBG:AD2:DMA 0 or a forced /16
+///                           / /32 divider cap it at 38400 / 19200, the rung
+///                           used is in LOG:PREamble?); takes effect at START
 ///   LOG:SRATe?              the requested rate
 ///   LOG:RATE?               measured mean sample rate, Hz (0 until 2 samples)
 ///   LOG:COUNt?              buffered,captured,overwritten,missed,lost (lost =
@@ -352,10 +355,16 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///   LOG:DEST?               DISK / HOST
 ///   LOG:DURation <s> / ?    length of a DISK session in device time, 0 =
 ///                           until stopped / the disk is full (default 60)
-///   LOG:DISK?               state,file,alloc,bytes,rows,prep_pct (state 0 idle,
-///                           1 preparing, 2 ready, 3 running, 4 stopping, 5
-///                           done, 6 full, 7 no disk, 8 error; file -1 until
-///                           the entry exists; bytes = file bytes written)
+///   LOG:DISK?               state,file,alloc,bytes,rows,prep_pct,fifo_hw,programs,
+///                           tpp_us,tpp_max_us (state 0 idle, 1 preparing, 2
+///                           ready, 3 running, 4 stopping, 5 done, 6 full, 7 no
+///                           disk, 8 error; file -1 until the entry exists;
+///                           bytes = file bytes written; fifo_hw = the most
+///                           bytes coded but not yet programmed, of 8192: the
+///                           flash's margin; programs = page / header / partial
+///                           programs started; tpp = the page-program probe of
+///                           a session above 38400 S/s, mean / max us, 0 = none:
+///                           over 800 / 1500 us the session runs at 38400)
 /// Bluetooth (an untrusted ~11.5 kB/s link): LOG:STATe ON is refused above
 /// BT_MAX_HZ ("Rate too high for Bluetooth", every AD2 rate; AD1 up to
 /// 640 S/s works) and with LOG:DEST DISK ("Command protected"); LOG:DATA?

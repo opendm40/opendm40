@@ -130,6 +130,9 @@ enum Ph {
     Scan,
     Alloc,
     Erase,
+    /// The page-program probe (`set_probe`): a few pages programmed and timed
+    /// in the last cluster of the allocation, which is then erased again.
+    Probe,
     Chain,
     Entry,
     Wait,
@@ -174,6 +177,8 @@ pub struct Job {
     erasing: bool,
     t_op: u32,
     pct: u8,
+    /// Time the chip's page program (`set_probe`).
+    probe: bool,
     // chain / trim
     fat_k: u32,
     fat_fb: u32,
@@ -213,6 +218,7 @@ const JOB0: Job = Job {
     erasing: false,
     t_op: 0,
     pct: 0,
+    probe: false,
     fat_k: 0,
     fat_fb: 0,
     used: 0,
@@ -337,6 +343,47 @@ pub fn begin(bytes: u32, dur_s: u32) -> Result<(), &'static str> {
     j.dur_us = dur_s as u64 * 1_000_000;
     j.need = bytes.div_ceil(BLK as u32);
     Ok(())
+}
+
+/// The session just begun (Prep) measures the chip's page program time at
+/// the end of Prep (`tpp_us`): main.rs asks for it when the session's rate
+/// needs more than the datasheet's worst case allows (76.8 kS/s,
+/// decision 2026-10-22 #9), and caps the rate when the chip is too slow.
+pub fn set_probe() {
+    let j = job();
+    if j.state == State::Prep {
+        j.probe = true;
+        TPP.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The last probe's page program times: (mean, max) in us, (0, 0) = none
+/// measured (no probe, or it failed). Programs of 256 zero bytes into an
+/// erased page, timed from the end of the clock-out to BUSY clear (polled).
+pub fn tpp_us() -> (u32, u32) {
+    let v = TPP.load(core::sync::atomic::Ordering::Relaxed);
+    (v & 0xFFFF, v >> 16)
+}
+
+static TPP: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Pages timed by the probe.
+const PROBE_PAGES: u32 = 4;
+
+/// Mean / max page program (us) under which 76.8 kS/s goes to the disk: at
+/// the coder's worst case (2.93 B/sample, 225 KB/s = 880 pages/s) a page
+/// may take 1.14 ms in all, ~0.2 ms of it clocking out and ~0.1 ms of the
+/// pass: 0.8 ms of tPP on average; a single slow page is absorbed by the
+/// 8 KiB FIFO (32 pages), so the max only has to stay under 1.5 ms. The
+/// W25Q128JV: 0.4 ms typ / 3 ms max (docs/compact-log-format.md "Rate
+/// limits").
+pub const TPP_OK_MEAN_US: u32 = 800;
+pub const TPP_OK_MAX_US: u32 = 1500;
+
+/// The probe's verdict: the chip is fast enough for 76.8 kS/s.
+pub fn tpp_ok() -> bool {
+    let (mean, max) = tpp_us();
+    mean != 0 && mean <= TPP_OK_MEAN_US && max <= TPP_OK_MAX_US
 }
 
 /// Ask the session to end (LOG:STATe OFF, a tap, the Record page): in Prep
@@ -583,7 +630,7 @@ mod prep {
         if j.stop_req && matches!(j.ph, Ph::Bpb | Ph::Scan | Ph::Alloc) {
             return end(j, State::Done);
         }
-        if j.stop_req && j.ph == Ph::Erase {
+        if j.stop_req && matches!(j.ph, Ph::Erase | Ph::Probe) {
             if j.erasing && d.nor().busy() {
                 return Ev::None;
             }
@@ -599,6 +646,7 @@ mod prep {
             Ph::Scan => scan(j, d.bd()),
             Ph::Alloc => alloc(j, d.bd()),
             Ph::Erase => erase(j, d),
+            Ph::Probe => probe(j, d),
             Ph::Chain => chain(j, d.bd(), false),
             Ph::Entry => entry(j, d.bd()),
             Ph::Wait => {
@@ -823,6 +871,53 @@ mod prep {
         0
     }
 
+    /// The page-program probe (`set_probe`): PROBE_PAGES programs of zeros at
+    /// the start of the allocation's last cluster (erased by now, not yet
+    /// linked: a power cut leaves a dirty free cluster, the next Prep's
+    /// blank check erases it), each timed to BUSY clear by polling (Prep
+    /// may block a pass for a few ms), then that cluster erased again (one
+    /// SE4K, waited for like the others). TPP = (mean, max) us.
+    fn probe(j: &mut Job, d: &mut dyn Disk) -> Result<(), State> {
+        let v = vol(j);
+        let cb = BLK as u32;
+        let a = v.data_start * cb + (cl_of(j, j.ncl - 1) - 2) * cb;
+        if j.i == 0 {
+            let zeros = [0u8; 256];
+            let (mut sum, mut max) = (0u32, 0u32);
+            for k in 0..PROBE_PAGES {
+                d.nor().program(a + k * 256, &zeros);
+                let t0 = cyc();
+                let mut n = 0u32;
+                while d.nor().busy() {
+                    n += 1;
+                    if cyc().wrapping_sub(t0) > crate::clock::HCLK_HZ / 100 || n > 1_000_000 {
+                        return Err(State::Error); // 10 ms: tPP max is 3 ms
+                    }
+                }
+                let us = cyc().wrapping_sub(t0) / (crate::clock::HCLK_HZ / 1_000_000);
+                sum += us;
+                max = max.max(us);
+            }
+            let mean = (sum / PROBE_PAGES).clamp(1, 0xFFFF);
+            TPP.store(mean | max.min(0xFFFF) << 16, core::sync::atomic::Ordering::Relaxed);
+            d.nor().erase(a, false);
+            j.wrote = true;
+            j.erasing = true;
+            j.t_op = cyc();
+            j.i = 1;
+            return Ok(());
+        }
+        if d.nor().busy() {
+            if cyc().wrapping_sub(j.t_op) > OP_TIMEOUT_CYC {
+                return Err(State::Error);
+            }
+            return Ok(());
+        }
+        j.erasing = false;
+        j.ph = Ph::Chain;
+        Ok(())
+    }
+
     /// Clusters `i..` that are consecutive in the chain (in one extent).
     fn run_left(j: &Job, mut i: u32) -> u32 {
         for &(_, n) in &j.ext[..j.next] {
@@ -855,7 +950,8 @@ mod prep {
             j.pct = 100;
             j.fat_k = 0;
             j.fat_fb = 0;
-            j.ph = Ph::Chain;
+            j.ph = if j.probe && j.ncl > 0 { Ph::Probe } else { Ph::Chain };
+            j.i = 0;
             return Ok(());
         }
         j.pct = (j.ei as u64 * 100 / j.ncl as u64) as u8;

@@ -1,4 +1,4 @@
-# Decisions 2026-10-22 (eight open product / engineering questions)
+# Decisions 2026-10-22 (nine open product / engineering questions)
 
 Taken on the owner's behalf, as delegated. Sources: TODO.md, docs/compact-log-format.md,
 docs/log-format-standards.md (section 3, 7), docs/dmm-input-scope-feasibility.md (2.3, 4, 5,
@@ -576,6 +576,59 @@ CKPH = 1 at /16, not /8.
 
 ---
 
+## #9 76.8 kS/s: frame, probes, limits, where it is offered (implemented, emulator)
+
+**Question.** TODO "76.8 kS/s": /8 + CKPH works for CPU frames, but the 13.02 us period has
+no room for a CPU INTF probe (5.8 us at /8) next to a data frame. How to read the chip's top
+AD2 rate with 0 lost, what it costs, and where to offer it (LOG:SRATe, the fast logger, the
+Wave view) given the SPI flash's write rate. Taken by the implementing agent on the owner's
+delegation (the task listed the planned approach); the details below are its choices.
+
+**Decisions.**
+1. **Hybrid data frame**: CPU command byte in mode 0 at /8 (waited for, 1.28 us), the
+   read-period pulse, CKPH = 1, then DMA for the 3 data bytes. Not: plain /8 DMA shift frames
+   (mode 0 data, 61 / 100 sign errors per ~2 M on 4b98128), a CPU frame (no room for the
+   probe), a second timer interrupt to avoid the command-byte wait (saves ~0.5 us per sample
+   for a second entry type and a tighter schedule: not worth it at ~43 %).
+2. **Probe frames at /8 mode 0** (2-byte DMA, shift framing), every 16th period: a marginal
+   DO bit reads AD2F as 0, i.e. one wrong-sign probe, which a bang-bang loop with a 20 ns
+   phase step averages out (emulator: 50x the default error rate, still locked and lost 0).
+   Not CKPH probes (a CPU wait per probe and a longer frame in the tightest window).
+3. **Geometry** `Pll::hybrid`: beta = (P + c_off - delta) / 2 from device estimates (A frame
+   7.3 us, probe latch 3.2 us); a late C drops its probe (new `c_late`), a late A still reads
+   up to 2.3 us. The /16 sessions keep their geometry and behaviour exactly (c_late = MAX).
+4. **Emulator honesty first**: SPI bytes timed on both SPI buses, DMA in time, the chip's
+   state per byte in R03 frames (TornAd2), the /8 mode-0 DO margin, CKPH 1, CPU-synced virtual
+   time, ns timer interrupts; the old firmware re-verified under it before any change. The
+   emulator's ISR still runs ~0.57x the device's CPU (no wait states): CPU figures for the
+   device are estimated from the device's /16 numbers, not taken from the emulator.
+5. **Offered**: LOG:SRATe 76800 (DMA frames only; CPU frames / a forced /16 or /32 divider cap
+   the rung, LOG:PREamble? says which); Wave view 1 ms/div = 76800 and 2 ms/div = 38400 (5
+   ms/div unchanged), closing with "Wave: rate needs DMA frames" if the rung got capped;
+   the **fast logger only after a page-program probe**: a disk session above 38.4 kS/s
+   programs and times 4 pages (zeros, the allocation's last cluster, erased again) at the end
+   of Prep; mean <= 800 us and max <= 1.5 ms -> 76800, else 38400. Measured (emulator): a
+   typical chip (tPP 0.4 ms) keeps up to 196 KB/s with a FIFO high water of 460 of 8192 B; a
+   worst-case one (3 ms) loses 28-54 %. Not "always" (silent-ish loss on a slow chip: only
+   lost_before rows) and not "never" (a typical part has 2-4x headroom).
+6. **Limits accepted, not fixed**: the 2048-sample ring is 26.7 ms at 76.8 kS/s; a full DMM
+   repaint (DBG:AD2:DRAW 2) overflows it (7.8-9.3 % overwritten, lost 0); SRAM (10.9 KB free,
+   8 KB floor) cannot double it. A USB host drain needs 921 KB/s (12 B per record): above what
+   the device's Python drain did (~37 kS/s); `overwritten` shows it.
+7. The logger default stays chopped (ENCHOPAD2) at every rung, 76800 included; the chopper at
+   OSR 32 is a device-check item, not assumed.
+
+**Consequences.** hy3131.rs (`hybrid_kick`, `choose_div(dma, hz)`, ladder), logger.rs (`isr`
+hybrid path, the two-half RXB, the reorder, push without a 64-bit division), ad2pll.rs
+(`hybrid`, `lead`, `c_late`, host model), fastlog.rs (Probe phase, `tpp_us`), main.rs (the gate,
+the wave guard, LOG:DISK? fields), scope.rs (bands). CPU estimate ~43 % (40..46) at 76.8 kS/s.
+
+**Revisit.** After the device check (TODO item): the CPU share, the chip's measured tPP (if most
+units probe fast, the gate stays; if the probe itself misleads, i.e. fast probe and lost_before
+rows anyway, lower the thresholds), the chopper at OSR 32, the host drain rate.
+
+---
+
 ## Summary
 
 1. Record page (not "Logger"): one row on Hold & Limits; interval every reading / 1 s / 10 s /
@@ -597,3 +650,6 @@ CKPH = 1 at /16, not /8.
 8. The DMM bus stays at /16 mode 0: the gain is microseconds, the DMM path has no integrity
    check, region B is full; acceptance check defined for the revisit (decision #3's request
    queue).
+9. 76.8 kS/s with hybrid frames (CPU command + CKPH, DMA data; /8 mode-0 DMA probes), ~43 %
+   CPU estimated; LOG:SRATe and the Wave view (1 ms/div) offer it, the fast logger only after a
+   page-program probe of the chip (else 38400).

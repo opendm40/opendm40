@@ -1184,7 +1184,15 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 if r != app::WaveReq::Stop {
                     if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
                         logger.start_wave(app.dmm.mode(), app.dmm.range(), app.scope.wave_fs());
-                        app.wave_live();
+                        if hy3131::ad2_rate_mhz(logger.r26()) / 1000 != app.scope.wave_fs() {
+                            // The rung was capped (76.8 kS/s with CPU frames,
+                            // DBG:AD2:DMA 0, or a forced divider): the record's
+                            // time base would be wrong.
+                            logger.stop();
+                            app.wave_lost(&mut clk, "Wave: rate needs DMA frames");
+                        } else {
+                            app.wave_live();
+                        }
                     } else {
                         app.wave_lost(&mut clk, "Wave: no AD2 row here");
                     }
@@ -1617,6 +1625,12 @@ fn fast_start(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger) 
     }
     app.dmm_power(clk);
     app.dmm.start(clk);
+    if logger.ad2() && fast_next_hz(logger, true) > FAST_DISK_SAFE_HZ && !fastlog::tpp_ok() {
+        // The probe found the flash too slow for the rung (or did not run):
+        // the session runs at 38400, LOG:SRATe? / LOG:PREamble? say so,
+        // LOG:DISK? has the measured tPP.
+        logger.set_req_hz(FAST_DISK_SAFE_HZ);
+    }
     let _ = logger.plan(m, app.dmm.range());
     let mut txt = [0u8; 512];
     let (n, par, unit) = fast_head(logger, app.dmm.ad2_scale(), &mut txt);
@@ -1642,9 +1656,12 @@ fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, no
                 return;
             }
             logger.set_ad2(ad2);
-            let b = fastlog::plan_bytes(dur, fast_next_hz(logger, ad2), ad2);
+            let hz = fast_next_hz(logger, ad2);
+            let b = fastlog::plan_bytes(dur, hz, ad2);
             if fastlog::begin(b, dur).is_err() {
                 app.fast_ended(now, fastlog::State::Error, None);
+            } else {
+                fast_probe_if(ad2, hz);
             }
         }
     }
@@ -1675,10 +1692,29 @@ fn log_on_check(app: &mut app::App, logger: &mut logger::Logger, disk: bool, dur
         return Some("Settings conflict");
     }
     Some(match fastlog::begin(fastlog::plan_bytes(dur_s, hz, logger.ad2()), dur_s) {
-        Ok(()) => "",
+        Ok(()) => {
+            fast_probe_if(logger.ad2(), hz);
+            ""
+        }
         Err(e) => e,
     })
 }
+
+/// A disk session above 38.4 kS/s (76.8: up to 225 KB/s into the flash,
+/// over the W25Q128's worst-case page rate) times the chip's page program
+/// at the end of Prep; `fast_start` caps the rung at 38400 when it is too
+/// slow (decision 2026-10-22 #9).
+fn fast_probe_if(ad2: bool, hz: u32) {
+    if ad2 && hz > FAST_DISK_SAFE_HZ {
+        fastlog::set_probe();
+    }
+}
+
+/// The fastest AD2 rung a disk session takes without the probe: the rate
+/// the flash keeps up with at the datasheet's tPP max with the measured
+/// coder (docs/compact-log-format.md "Rate limits": 38400 at / over it with
+/// the coder's worst case, as before).
+const FAST_DISK_SAFE_HZ: u32 = 38_400;
 
 /// LOG:DEST / LOG:DURation / LOG:DISK? (true: a reply).
 #[inline(never)] // .cold (link-native.x)
@@ -1712,7 +1748,8 @@ fn fast_scpi(scpi: &mut scpi::Scpi, l: scpi::Log, disk: &mut bool, dur: &mut u32
     }
 }
 
-/// LOG:DISK? reply: state,file,alloc,bytes,rows,prep_pct. Region B: a
+/// LOG:DISK? reply: state,file,alloc,bytes,rows,prep_pct,fifo_hw,programs,
+/// tpp_us,tpp_max_us. Region B: a
 /// host polls it while the session runs (emu/fastlogtest.py).
 #[inline(never)]
 fn fast_status(scpi: &mut scpi::Scpi) {
@@ -1735,7 +1772,12 @@ fn fast_status(scpi: &mut scpi::Scpi) {
         Some(n) => put_u32(scpi, n as u32),
         None => scpi.put_bytes(b"-1"),
     }
-    for v in [st.alloc, st.bytes, st.rows, st.pct as u32] {
+    // + the FIFO's high water (bytes of the 8 KiB not yet programmed: how
+    // close the flash came to falling behind), the programs started (pages
+    // + header pieces + partial pages; per second = the page rate) and the
+    // last page-program probe (mean / max us, 0 = none; set_probe).
+    let (tpp, tpp_max) = fastlog::tpp_us();
+    for v in [st.alloc, st.bytes, st.rows, st.pct as u32, st.hw, st.programs, tpp, tpp_max] {
         scpi.put_bytes(b",");
         put_u32(scpi, v);
     }
