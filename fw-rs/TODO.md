@@ -1617,19 +1617,40 @@ Emulator (emu/):
 - [x] Status bar kept "MANU" after a reading released the range hold (REL ended by an AUTO coupling switch):
       DmmView's status key (auto && !auto_plus, .., auto_plus) was equal for MANU (v_auto 1 under a manual
       range) and AUTO+. Key = r.auto now (ui.rs). Verify on device: AUTO + REL on the square -> 1 V DC: AUTO+.
-- [ ] Combined view strip: the unit box (ST_UNIT, 40 px, SC_DIGITS) clips power units: "-0.0001 mW" shows
-      "mV" plus a sliver (device g7-combined.png; ui-render c12-strip-power has it too: st_text clips
-      silently, no rule checks the value / unit). Widths: "mW" 59 px, "kWh" 63, "mWh" 75; values up to 103 px
-      ("-3.7799"); value 88..206 + unit 210..250 cannot hold 103 + 75 px. Needs a layout decision (unit in
-      SC_F12 / LETTERS when it does not fit, or the sub column moved right), then a ui-render rule for the
-      value / unit boxes (a draft rule found 5 cases: mw, main-wh, main-mwh x2, main-zero).
-- [ ] Power page coupling switch: the old layout and values stay up to ~4 s (until the first reading of
-      the new coupling): DC -> AC+DC keeps the DC layout and DC glyph by the value while the W button already
-      shows AC+DC; AC+DC -> DC briefly shows the AC+DC totals without sub-lines. Cosmetic.
-- [ ] Help 5/7 title "Help 5/7: Record + alerts" runs into "< Back" (one space); Help 2/7 "Power key held
-      1.5 s" touches its value column. Layout, not fonts (pixel-identical to ui-render). Shorten the texts.
-- [ ] DMM chart axis labels keep the previous function's unit while a function reads OL / no value (cap
-      "0.050MOhm", diode "MOhm", temperature "Hz"). Cosmetic, pre-existing.
+- [x] Combined view strip: the unit box (ST_UNIT, 40 px, SC_DIGITS) clipped power units ("-0.0001 mW"
+      read "mV" plus a sliver; device g7-combined.png, ui-render c12-strip-power). Fixed (scope_ui.rs,
+      ui-fix-5e52761): value box 84..191 (108 px: "-444.44" / "1562.00" ink), the unit from 196 as wide as
+      its text, SC_DIGITS up to 59 px ("mW", "MHz", "VAh" stay large), else SC_F20 on the digits'
+      baseline ("mWh", "kWh", "mVA", "kVAh"); the sub rows start 4 px after the unit, with GEN 15 px before
+      its column (64 px now: "10.00MHz" was cut too), too wide -> no spaces -> spacing 0. Renders
+      c12b-strip-mw / c12c-strip-mwh / c12d-strip-mhz / c12e-strip-acdc-gen.
+- [x] ui-render clip rule (stockfont probe_fit, cfg(test)): every text's ink inside its layout box. It
+      found more than the strip: the DMM page unit ("MHz", "mW", "mWh" cut at the left: LETTERS / TEXT22
+      fallback), the chart side MIN/MAX/AVG ("-444.44": minus cut; a decimal fewer when too wide), the
+      axis labels ("-100.049kWh": a decimal fewer), the power side AVG (fewer significant digits), "REC
+      99:59:59" (the time alone, orange), the extra digit with a 5-digit value ("1562.00" F: no extra
+      digit), the BT status icon (16 px glyph in a 15 px box), the Ohm "ON" tag box, the wave view's trigger
+      badge ("-1.23mA" -> "-1.2mA"), the range page note ("AUTO+ recommended: never steps to mV"). The
+      stock brackets of the replica top bar (4 px boxes, stock-diff exact) are exempt (sf::fit_exempt).
+- [x] Power page coupling switch: the old layout and values stayed up to ~4 s. Fixed (app_power.rs
+      pw_tick / pw_coup_changed, powermeter.rs pw_pending): any coupling change (W button, Power
+      Settings, POW:COUP) drops the old reading (meter reset, as a function change), redraws the page in
+      the new coupling's layout and shows "--" for every measured value (energy, time, settings kept)
+      until the new coupling's first reading. Emulator: DC -> AC, AC -> AC+DC, AC+DC -> DC (W taps) and
+      POW:COUP AC all show the pending page at once (scratchpad uifix/emu-pow). Verify on device.
+- [x] Help 5/7 title ran into "< Back"; Help 2/7 "Power key held 1.5 s" touched its value column (and
+      three more rows were as close: help 1 "Scope: drag sideways", help 3 "Tap value, rate chip", "Tap a
+      function again"). Fixed (ui.rs): page_title starts a title 28 px after "< Back" when centring would
+      come closer; the topic box ends HELP_GAP (19 px) before the value column; the four topics shortened.
+      Why the check missed them: its only spacing rule is >= 3 px between ink boxes; both were 8-11 px
+      apart, under one TEXT22 word space (~13 px), so they read as one phrase. New ui-render rule
+      `line_gap`: two texts of one size on one line need >= 1.5 word spaces (the smaller word gap of the
+      two) unless both are single words (value + unit, tags); the power sub-lines' pieces are one text
+      (probe::group).
+- [x] DMM chart axis labels kept the previous function's unit while a function reads OL / no value (cap
+      "0.050MOhm", diode "MOhm", temperature "Hz"). Fixed (app.rs): a function change clears the chart
+      unit; an empty chart takes the reading's unit / digits even while it reads OL. Emulator: FREQ ->
+      DIOD (OL) labels "0.0050V" (uifix/emu-chart). Verify on device.
 - [ ] Wave view entry from DC V: DBG:ISR? `dropped` +7087 (~185 ms, the DC V self-cal at entry) before
       the view drains; AC V entry 0. Harmless (the view starts after), note in feasibility 13 or skip the count.
 

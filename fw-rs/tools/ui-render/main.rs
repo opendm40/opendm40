@@ -13,6 +13,12 @@
 //!     panel, measurement bar, band) keeps >= 3 px to its edges, >= 4 px to
 //!     the screen edges;
 //!   * inside one text, consecutive glyphs do not touch;
+//!   * every text's ink lies inside the box it was laid out in (stockfont
+//!     probe_fit: `label` / `paint` cut the rest silently, `glyphs` spills
+//!     over; device check 5e52761: "mW" cut to "mV");
+//!   * two texts of one size on one line are >= 1.5 word spaces apart,
+//!     unless both are single words (`line_gap`; device check 5e52761:
+//!     "< Back Help 5/7..." and a help row passed the 3 px rule);
 //!   * an update of the meter strip leaves no stale pixels (equal to a fresh
 //!     draw of the new state).
 //! over a matrix of worst cases, and writes PNG renders of named scenes.
@@ -85,6 +91,15 @@ pub mod probe {
     pub const TEXT: u8 = 0;
     pub const SHAPE: u8 = 1;
     pub const ICON: u8 = 2;
+    /// A text's ink box vs the box it was laid out in (stockfont
+    /// probe_fit): outside = clipped (`label`, `paint`) or spilling over
+    /// a neighbour (`glyphs`); `Checker::clips` turns it into a violation.
+    pub fn fit(r: (i32, i32, i32, i32), ink: (i32, i32, i32, i32), text: &str) {
+        if ink.0 < r.0 || ink.1 < r.1 || ink.2 > r.2 || ink.3 > r.3 {
+            let m = format!("text {text:?} ink x {}..{} y {}..{} outside its box x {}..{} y {}..{}", ink.0, ink.2, ink.1, ink.3, r.0, r.2, r.1, r.3);
+            unsafe { (*core::ptr::addr_of_mut!(crate::CLIPS)).push(m) };
+        }
+    }
     pub fn begin(kind: u8, bg: u16) {
         crate::host::begin(kind, bg)
     }
@@ -148,6 +163,44 @@ struct Item {
     color: u16,
 }
 
+/// Narrowest word gap (between glyphs with an ink-less glyph, a space,
+/// between them) of a text item: its font's space; None for one word.
+fn word_gap(i: &Item) -> Option<i32> {
+    if i.kind != probe::TEXT {
+        return None;
+    }
+    let mut g = i.glyphs.clone();
+    g.sort_by_key(|(k, _)| *k);
+    g.windows(2).filter(|w| w[1].0 > w[0].0 + 1).map(|w| w[1].1.x0 - w[0].1.x1 - 1).min()
+}
+
+/// Two texts of one size side by side on one line closer than 1.5 word
+/// spaces read as one phrase ("< Back Help 5/7: ...", "Power key held
+/// 1.5 s Power off": device check 5e52761; the >= 3 px gap rule passed
+/// both). One line: their ink rows overlap by half the lower one; one
+/// size: ink heights within 1.5x (a small sub row next to a large unit
+/// reads as its own column). The space is the narrowest word gap of
+/// either text; two single words (a value and its unit, a tag) are
+/// exempt, they are meant to join. Pieces of one phrase drawn by
+/// separate calls (the power page's sub-lines) are one item
+/// (probe::group).
+fn line_gap(a: &Item, b: &Item) -> Option<String> {
+    if a.kind != probe::TEXT || b.kind != probe::TEXT {
+        return None;
+    }
+    let (ha, hb) = (a.b.y1 - a.b.y0 + 1, b.b.y1 - b.b.y0 + 1);
+    let ov = a.b.y1.min(b.b.y1) - a.b.y0.max(b.b.y0) + 1;
+    if 2 * ov < ha.min(hb) || 2 * ha.max(hb) > 3 * ha.min(hb) {
+        return None;
+    }
+    let g = (b.b.x0 - a.b.x1 - 1).max(a.b.x0 - b.b.x1 - 1);
+    let wg = match (word_gap(a), word_gap(b)) {
+        (Some(x), Some(y)) => x.min(y),
+        (x, y) => x.or(y)?,
+    };
+    (g >= 0 && 2 * g < 3 * wg).then(|| format!("text #{} {:?} and text #{} {:?} on one line only {} px apart (< 1.5 x word space {})", a.id, a.b, b.id, b.b, g, wg))
+}
+
 fn kind_name(k: u8) -> &'static str {
     ["text", "shape", "icon"][k as usize]
 }
@@ -176,6 +229,9 @@ fn items() -> Vec<Item> {
     }
     m.into_values().collect()
 }
+
+/// Clip-rule hits since the last check (probe::fit).
+static mut CLIPS: Vec<String> = Vec::new();
 
 struct Checker {
     cases: usize,
@@ -211,6 +267,16 @@ impl Checker {
         }
     }
 
+    /// Texts clipped by (or spilling out of) their layout box since the
+    /// last check: one violation each (device check 5e52761: the strip's
+    /// unit box cut "mW" to "mV" and no rule saw it).
+    fn clips(&mut self, scene: &str) {
+        let v: Vec<String> = unsafe { core::mem::take(&mut *core::ptr::addr_of_mut!(CLIPS)) };
+        for m in v {
+            self.fail(scene, format!("clipped: {m}"));
+        }
+    }
+
     fn check(&mut self, scene: &str, regions: &[(&str, Bx)]) {
         self.check_opts(scene, regions, true)
     }
@@ -227,6 +293,7 @@ impl Checker {
     fn check_area(&mut self, scene: &str, regions: &[(&str, Bx)], glyph_rule: bool, area: Option<Bx>) {
         self.cases += 1;
         self.hash(scene);
+        self.clips(scene);
         let its: Vec<Item> = items().into_iter().filter(|i| area.map_or(true, |a| a.contains(&i.b))).collect();
         let screen = Bx::new(0, 0, W as i32, H as i32);
         let desc = |i: &Item| format!("{} #{} {:?}", kind_name(i.kind), i.id, i.b);
@@ -309,6 +376,8 @@ impl Checker {
                 let g = ia.b.gap(&ib.b);
                 if g < 3 {
                     self.fail(scene, format!("{} and {} {} by {} px", desc(ia), desc(ib), if g < 0 { "overlap" } else { "too close" }, g));
+                } else if let Some(m) = line_gap(ia, ib) {
+                    self.fail(scene, m);
                 }
             }
         }
@@ -323,6 +392,7 @@ impl Checker {
     fn check_replica(&mut self, scene: &str) {
         self.cases += 1;
         self.hash(scene);
+        self.clips(scene);
         let its = items();
         let texts: Vec<&Item> = its.iter().filter(|i| i.kind == probe::TEXT).collect();
         for a in 0..texts.len() {
@@ -349,6 +419,7 @@ impl Checker {
     fn check_add(&mut self, scene: &str, regions: &[(&str, Bx)], add: &[Bx], against: Bx) {
         self.cases += 1;
         self.hash(scene);
+        self.clips(scene);
         let its: Vec<Item> = items().into_iter().filter(|i| against.contains(&i.b) || add.iter().any(|a| a.contains(&i.b))).collect();
         let is_add: Vec<bool> = its.iter().map(|i| add.iter().any(|a| a.contains(&i.b))).collect();
         let desc = |i: &Item| format!("{} #{} {:?}", kind_name(i.kind), i.id, i.b);
@@ -406,6 +477,8 @@ impl Checker {
                 let g = its[a].b.gap(&its[b].b);
                 if g < 3 {
                     self.fail(scene, format!("{} and {} {} by {} px", desc(&its[a]), desc(&its[b]), if g < 0 { "overlap" } else { "too close" }, g));
+                } else if let Some(m) = line_gap(&its[a], &its[b]) {
+                    self.fail(scene, m);
                 }
             }
         }
@@ -661,7 +734,20 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
         // AC coupling, pure DC in (doc 3.16): V / I below their floors read
         // 0, PF / S / Q / f "--" (NaN).
         ("ac-floor", P { p: 0.0, s: f32::NAN, q: f32::NAN, pf: f32::NAN, v: 0.0, i: 0.0, vdc: f32::NAN, idc: f32::NAN, f_hz: f32::NAN, vr: 0, ik: 5, coup: dmm::pw::COUP_AC, comp: false, ..z }),
+        // After a coupling change, before the new coupling's first reading
+        // (Dmm::pw_pending, device check 5e52761): every measured value
+        // NaN ("--"), the energy / time / settings kept.
+        ("pending-dc", pending(P { coup: dmm::pw::COUP_DC, dc: true, ..base })),
+        ("pending-ac", pending(P { coup: dmm::pw::COUP_AC, ..base })),
+        ("pending-acdc", pending(base)),
+        ("pending-wh", pending(P { main: dmm::pw::MAIN_WH, ..base })),
     ]
+}
+
+/// `pv` as Dmm::pw_pending shows it.
+fn pending(pv: dmm::pw::PowerVals) -> dmm::pw::PowerVals {
+    let n = f32::NAN;
+    dmm::pw::PowerVals { p: n, s: n, q: n, pf: n, v: n, i: n, vdc: n, idc: n, f_hz: n, burden_v: n, v_ol: false, i_ol: false, over: 0, over_left: 0, hint: 0, vp: [n; 2], ip: [n; 2], pp: [n; 2], ..pv }
 }
 
 /// The DMM page in the power meter with `pv` (status, rows, chart, side).
@@ -715,7 +801,9 @@ fn power_page_lim(pv: dmm::pw::PowerVals, hold: u8, alert: sentinel::Alert, rc: 
     ui::pw::side_clear(&mut pc);
     dv.reading(&r, hold, lim);
     ui::status_right(&status(0));
-    let v = if r.main.ol { 1.0 } else { r.main.v };
+    // (The pending page has no chart points: the app adds none without a
+    // reading; a NaN value here stands for the previous trace.)
+    let v = if r.main.ol || r.main.v.is_nan() { 1.0 } else { r.main.v };
     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
     ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, None, r.main.unit, rc);
     ui::pw::side(&mut pc, &pv);
@@ -1172,7 +1260,7 @@ fn main() {
         for i in 0..2 {
             ck.cases += 1;
             let w = stockfont::text_width(stockfont::SC_F12, d.sub[i].as_str(), 1);
-            let bw = scope_ui::st_sub(i, false).w;
+            let bw = scope_ui::st_sub(i, false, scope_ui::st_sub_x(scope_ui::st_unit(d.unit.as_str(), d.unit_letters).1)).w;
             if w > bw {
                 ck.fail(&format!("combined/{name}/strip-sub{i}"), format!("strip sub text {:?} {} px > its {} px box", d.sub[i].as_str(), w, bw));
             }
@@ -1590,6 +1678,11 @@ fn main() {
                 }
             }
         }
+        for (name, pv) in pcs.iter().filter(|c| c.0.starts_with("pending")) {
+            host::reset(0);
+            power_page(*pv, 0, sentinel::Alert::None, rc);
+            save(&out, &format!("p30-{name}"));
+        }
         for (na, a) in &pcs {
             for (nb, b) in &pcs {
                 // A layout change (AC+DC parts <-> not) redraws the page in
@@ -1795,7 +1888,7 @@ fn main() {
         }
     }
     for b in [Button::Volt, Button::Amp, Button::Ohm] {
-        for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: it never steps to mV", false))] {
+        for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: never steps to mV", false))] {
             for sub in 0..4u8 {
                 host::reset(0);
                 let n = ui::range_items(b).len();
@@ -1865,7 +1958,7 @@ fn main() {
         for (a, b) in ui::HELP[page].1.iter() {
             ck.cases += 1;
             let (wa, wb) = (stockfont::text_width(stockfont::TEXT22, a, 0), stockfont::text_width(stockfont::TEXT22, b, 0));
-            if wa > ui::HELP_COL - 4 || wb > 464 - 15 - ui::HELP_COL {
+            if wa > ui::HELP_COL - ui::HELP_GAP || wb > 464 - 15 - ui::HELP_COL {
                 ck.fail(&format!("help/{page}"), format!("too wide: {a:?} {wa} / {b:?} {wb}"));
             }
         }
@@ -2234,7 +2327,7 @@ fn main() {
         save(&out, "m03b-range-a-wave");
         // AUTO coupling selected (the fourth coupling button, "AC/DC").
         host::reset(0);
-        ui::range_page(Button::Volt, Some(5), 3, Some(("AUTO+ recommended: it never steps to mV", false)));
+        ui::range_page(Button::Volt, Some(5), 3, Some(("AUTO+ recommended: never steps to mV", false)));
         ui::wave_button();
         save(&out, "m03c-range-v-auto");
         // Second ohm mode ("ON" low current): Resistor Settings with it
@@ -2411,6 +2504,14 @@ fn main() {
         save(&out, "p08-range-a-power");
         combined(&pw_rd(pcs[0].1), None, 0, 0, false, false, false, "");
         save(&out, "c12-strip-power");
+        // The strip's wide units (device check 5e52761: "mW" read as "mV"),
+        // the narrow sub rows next to the GEN column.
+        let by = |n: &str| cases.iter().find(|c| c.0 == n).unwrap().clone();
+        for (n, scene, gen) in [("mw", "c12b-strip-mw", ""), ("main-mwh", "c12c-strip-mwh", ""), ("hz_mhz", "c12d-strip-mhz", ""), ("acdc_mv", "c12e-strip-acdc-gen", "10.00MHz")] {
+            let (_, r, l) = by(n);
+            combined(&r, l, 0, 0, false, false, false, gen);
+            save(&out, scene);
+        }
     }
 
     for (msg, (n, scene)) in &ck.seen {
@@ -2477,6 +2578,11 @@ fn main() {
         }
     }
 
+    // Clipped texts of draws after the last check (saved scenes only).
+    for m in unsafe { core::mem::take(&mut *core::ptr::addr_of_mut!(CLIPS)) } {
+        ck.violations += 1;
+        println!("     1 x  clipped (after the last check): {m}");
+    }
     println!("cases {}, violations {}", ck.cases, ck.violations);
     std::process::exit(if ck.violations == 0 { 0 } else { 1 });
 }

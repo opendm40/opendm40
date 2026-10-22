@@ -162,13 +162,22 @@ fn mode_glyph(mode: u8, acdc: bool) -> &'static str {
 /// decimals and split: the 7-character main part plus the last digit, which
 /// is drawn small after it (so the main digits are never rounded up past it).
 fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val, ext: bool) -> (&'a str, usize, Option<u8>) {
-    if v.ol {
-        buf[..7].copy_from_slice(b"   0L  ");
+    if v.ol || v.v.is_nan() {
+        // NaN: no value yet ("--" where "0L" goes: the power meter's
+        // pending reading).
+        buf[..7].copy_from_slice(if v.ol { b"   0L  " } else { b"   --  " });
         return (core::str::from_utf8(&buf[..7]).unwrap_or(""), 4, None);
     }
-    let ext = ext && v.ext && v.dec >= 1;
+    let mut ext = ext && v.ext && v.dec >= 1;
     let mut t = [0u8; 16];
-    let full = crate::dmm::format(&mut t, v.v, v.dec + ext as u8);
+    let mut full = crate::dmm::format(&mut t, v.v, v.dec + ext as u8);
+    // The extra digit's layout has a 30 px sign cell (CELLS_X): a value
+    // that needs it for a digit ("1562.00" F, the 1 is 33 px) or more
+    // than 7 cells goes without the extra digit.
+    if ext && (full.len() > 8 || (full.len() == 8 && !full.starts_with('-'))) {
+        ext = false;
+        full = crate::dmm::format(&mut t, v.v, v.dec);
+    }
     let (s, x) = if ext {
         let l = full.len();
         (&full[..l - 1], Some(full.as_bytes()[l - 1]))
@@ -358,7 +367,7 @@ fn dmm_button(i: usize, x: i16, y: i16, h: i16, outside: Color, selected: bool, 
                 let w = sf::text_width(sf::BTN_GLYPH, "\u{3a9}", 0);
                 let x0 = x + (BTN_W - (w + 3 + 20)) / 2;
                 sf::glyphs(sf::BTN_GLYPH, rect(x0, y - 1, w + 1, h), "\u{3a9}", STATUS_FG, c, 1, 0);
-                sf::glyphs(sf::ON_TAG, rect(x0 + w + 3, y + h / 2 - 3, 20, 12), " ", STATUS_FG, c, 1, 0);
+                sf::glyphs(sf::ON_TAG, rect(x0 + w + 3, y + h / 2 - 3, 21, 12), " ", STATUS_FG, c, 1, 0);
             } else {
                 sf::glyphs(sf::BTN_GLYPH, rect(x, y - 1, BTN_W, h), "\u{3a9}", STATUS_FG, c, 8, 0);
             }
@@ -633,8 +642,8 @@ impl DmmView {
             // Power meter fallback "VA": its V and A touch at the stock -1.
             // The UNIT face has no 'h' (power meter energy: Wh / VAh):
             // LETTERS, 1 px apart when that fits the box (W and h touch).
-            let uf = if sf::has_all(sf::UNIT, unit) { sf::UNIT } else { sf::LETTERS };
-            let sp = if r.main.unit.ends_with("VA") {
+            let mut uf = if sf::has_all(sf::UNIT, unit) { sf::UNIT } else { sf::LETTERS };
+            let mut sp = if r.main.unit.ends_with("VA") {
                 1
             } else if uf.0 != sf::UNIT.0 {
                 // V / A of the stock overhang by 1: 2 px spacing for "VAh".
@@ -642,6 +651,17 @@ impl DmmView {
             } else {
                 -1
             };
+            // Wider than the 72 px box ("MHz", "mW" in UNIT, "mWh"): the
+            // narrower LETTERS, else TEXT22 (device check 5e52761: no unit
+            // is cut).
+            for (f, s) in [(sf::LETTERS, 0), (sf::TEXT22, 1)] {
+                if sf::text_width(uf, unit, sp) <= 72 {
+                    break;
+                }
+                if sf::has_all(f, unit) {
+                    (uf, sp) = (f, s);
+                }
+            }
             sf::label(uf, rect(404, 114 + md, 72, 32), unit, VALUE, BG, 4, sp);
             // Stock box (437,76,32,32) align 7, widened 3 px right so the
             // 35 px AC glyph is not clipped (ends at 471, 3 px after the
@@ -1428,7 +1448,7 @@ pub fn status_right(st: &Status) {
     // Between the lock (ink ..357) and the BT icon (390..).
     sf::label(sf::F14, rect(361, 10, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, BAR, 8, 1);
     sf::label(sf::LOCK, rect(335, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
-    sf::label(sf::SAVE_BT, rect(390, 0, 15, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
+    sf::label(sf::SAVE_BT, rect(390, 0, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 9, 40, 16), battery_glyph(&mut b, st.bars), bc, BAR, 8, 0);
 }
 
@@ -1630,7 +1650,13 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         // Axis labels right-aligned to x 76 (3 px left of the frame), caps on
         // the frame's top row, its middle and its bottom row; 1 px spacing.
         for (y, v) in [(g.axis[0], hi), (g.axis[1], (hi + lo) / 2.0), (g.axis[2], lo)] {
-            sf::label(sf::F14, rect(4, y, 73, 14), num_unit(&mut b, v, dec, unit), STATUS_FG, BG, 4, 1);
+            // Fewer decimals when the label is wider than its box (power:
+            // "-100.049kWh" is 75 px).
+            let mut d = dec;
+            while d > 0 && sf::text_width(sf::F14, num_unit(&mut b, v, d, unit), 1) > 73 {
+                d -= 1;
+            }
+            sf::label(sf::F14, rect(4, y, 73, 14), num_unit(&mut b, v, d, unit), STATUS_FG, BG, 4, 1);
         }
     }
     // Column templates: plain / dotted column / vertical grid line / frame.
@@ -1756,8 +1782,15 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         let k = q(*v);
         if c.rows[i] != k {
             c.rows[i] = k;
-            let s = v.map(|v| crate::dmm::format(&mut t, v, dec)).unwrap_or("");
-            sf::label(sf::F14, rect(SIDE_X + 25, SIDE_Y[i], SIDE_R - SIDE_X - 25, 14), s, STATUS_FG, BG, 3, 1);
+            // One decimal less when the value is wider than its box
+            // ("-444.44" is 50 px of 46: its minus was cut).
+            let bw = SIDE_R - SIDE_X - 25;
+            let mut d = dec;
+            while d > 0 && v.is_some_and(|v| sf::text_width(sf::F14, crate::dmm::format(&mut t, v, d), 1) > bw) {
+                d -= 1;
+            }
+            let s = v.map(|v| crate::dmm::format(&mut t, v, d)).unwrap_or("");
+            sf::label(sf::F14, rect(SIDE_X + 25, SIDE_Y[i], bw, 14), s, STATUS_FG, BG, 3, 1);
         }
     }
     let k = q(side.rel.or(Some(0.0)));
@@ -1781,6 +1814,16 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         let txt = match side.secs {
             Some(sec) => join(&mut b, &[if side.rec { "REC " } else { "T " }, hms(&mut tb, sec)]),
             None => "",
+        };
+        // "REC 99:59:59" is 75 px of 71: the time alone (orange = REC).
+        let mut b2 = [0u8; 24];
+        let txt = if sf::text_width(sf::F14, txt, 1) > SIDE_R - SIDE_X {
+            let k = txt.len() - txt.trim_start_matches(|c: char| c != ' ').len();
+            let t = &txt[(k + 1).min(txt.len())..];
+            b2[..t.len()].copy_from_slice(t.as_bytes());
+            core::str::from_utf8(&b2[..t.len()]).unwrap_or("")
+        } else {
+            txt
         };
         let fg = if side.rec { 0xFC40 } else { DIM };
         sf::label(sf::F14, rect(SIDE_X, SIDE_Y[3], SIDE_R - SIDE_X, 14), txt, fg, BG, 3, 1);
@@ -1912,7 +1955,7 @@ pub fn gen_status(st: &Status) {
     sf::label(sf::F21, rect(186, 6, 120, 24), hms(&mut t, st.uptime_s), STATUS_FG, G_BAR, 1, -1);
     sf::label(sf::F14, rect(361, 11, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, G_BAR, 8, 1);
     sf::label(sf::LOCK, rect(335, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
-    sf::label(sf::SAVE_BT, rect(390, 2, 15, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, G_BAR, 1, 0);
+    sf::label(sf::SAVE_BT, rect(390, 2, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, G_BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);
 }
 
@@ -2286,7 +2329,16 @@ fn set_row(i: usize) -> sf::Rect {
 /// whole bar is the back target (`title_back_hit`).
 fn page_title(title: &str) {
     lcd::fill_rect(0, 0, lcd::W, PAGE_BAR_H as u16, 0x2966);
-    sf::glyphs(sf::TEXT22, rect(0, 0, 480, PAGE_BAR_H), title, STATUS_FG, 0x2966, 8, 0);
+    // Centred on the screen; a title that would come closer than 28 px
+    // (two word spaces) to "< Back" starts that far after it instead ("Help
+    // 5/7: Record + alerts" ran into it: device check 5e52761).
+    let w = sf::text_width(sf::TEXT22, title, 0);
+    let back = BAR_X + 3 + sf::text_width(sf::TEXT22, "< Back", 0) + 28;
+    if (480 - w) / 2 >= back {
+        sf::glyphs(sf::TEXT22, rect(0, 0, 480, PAGE_BAR_H), title, STATUS_FG, 0x2966, 8, 0);
+    } else {
+        sf::glyphs(sf::TEXT22, rect(back, 0, 476 - back, PAGE_BAR_H), title, STATUS_FG, 0x2966, 1, 0);
+    }
     sf::logo(4, 10, 0x2966);
     sf::glyphs(sf::TEXT22, rect(BAR_X + 3, 0, 110, PAGE_BAR_H), "< Back", STATUS_FG, 0x2966, 1, 0);
 }
@@ -2499,7 +2551,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
             ("2 fingers down", "Power off (confirm)"),
             ("Scope: drag up/down", "Move the trace"),
             ("Scope: right edge", "Drag trigger level"),
-            ("Scope: drag sideways", "Trigger position"),
+            ("Scope: side drag", "Trigger position"),
             ("Scope drag setting", "Direct or hold first"),
         ],
     ),
@@ -2511,7 +2563,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
             ("RUN held 1 s (DMM)", "AutoHold on / off"),
             ("AUTO", "Autorange / auto-set"),
             ("MF", "Range / scope menu"),
-            ("Power key held 1.5 s", "Power off"),
+            ("Power key 1.5 s", "Power off"),
             ("Power key twice", "Touch lock on / off"),
             ("Power key, locked", "Next DMM sub-mode"),
         ],
@@ -2524,8 +2576,8 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
             ("Tap MIN/MAX column", "Session on / off"),
             ("Hold MIN/MAX column", "Reset MIN/MAX/AVG"),
             ("Tap REL", "Zero on / off"),
-            ("Tap value, rate chip", "Digits / rate"),
-            ("Tap a function again", "Next sub-mode"),
+            ("Tap value / chip", "Digits / rate"),
+            ("Tap function again", "Next sub-mode"),
             ("Hold meter strip", "Full DMM page"),
         ],
     ),
@@ -2586,7 +2638,12 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
 /// Help page `page` (0..HELP.len()): title "Help n/N: topic", the rows as
 /// the settings list (wider topic column: HELP_COL), the last row says
 /// what a tap does.
+/// The topic's box ends HELP_GAP before the value column: with the glyphs'
+/// blank edge column >= 1.5 TEXT22 word spaces of ink between them
+/// (closer, "Power key held 1.5 s Power off" read as one line; device
+/// check 5e52761; ui-render's line rule).
 pub const HELP_COL: i16 = 228;
+pub const HELP_GAP: i16 = 19;
 #[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn help_page(page: usize) {
     let (topic, rows) = &HELP[page % HELP.len()];
@@ -2618,7 +2675,7 @@ pub fn help_page(page: usize) {
         let r = set_row(i);
         sf::rbox(r, 6, M_TILE, M_BG);
         let fg = if i + 1 == SET_ROWS { M_ACCENT } else { STATUS_FG };
-        sf::glyphs(sf::TEXT22, rect(r.x + 12, r.y, HELP_COL, r.h), name, fg, M_TILE, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(r.x + 12, r.y, HELP_COL - HELP_GAP, r.h), name, fg, M_TILE, 1, 0);
         sf::glyphs(sf::TEXT22, rect(r.x + 12 + HELP_COL, r.y, r.w - 15 - HELP_COL, r.h), val, M_ACCENT, M_TILE, 1, 0);
     }
 }

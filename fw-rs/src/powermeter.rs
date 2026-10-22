@@ -1265,6 +1265,38 @@ impl Dmm {
         })
     }
 
+    /// What the DMM page shows after a coupling change until the new
+    /// coupling's first reading (device check 5e52761: the old layout and
+    /// values stayed up to ~4 s): the new coupling's layout and units,
+    /// every measured value NaN ("--"); the energy, the time and the
+    /// settings as they are.
+    #[inline(never)] // .cold (link-native.x): once per coupling change
+    pub fn pw_pending(&self) -> (Reading, PowerVals) {
+        let n = f32::NAN;
+        let pv = PowerVals {
+            p: n,
+            s: n,
+            q: n,
+            pf: n,
+            v: n,
+            i: n,
+            vdc: n,
+            idc: n,
+            f_hz: n,
+            burden_v: n,
+            v_ol: false,
+            i_ol: false,
+            over: 0,
+            over_left: 0,
+            hint: 0,
+            vp: [n; 2],
+            ip: [n; 2],
+            pp: [n; 2],
+            ..self.pw_state()
+        };
+        (self.pw_reading(&pv), pv)
+    }
+
     /// The reading of the power meter (`reading_vals`).
     fn pw_reading(&self, pv: &PowerVals) -> Reading {
         let (main, v, i, si) = reading_vals(pv);

@@ -489,7 +489,50 @@ fn layout(font: Font, r: Rect, text: &str, align: u8, spacing: i8, out: &mut [Op
             cur: Cur::default(),
         });
     }
+    #[cfg(test)]
+    probe_fit(r, text, out[..n].iter().flatten().map(|p| (&p.g, p.twin, p.x, p.y)), 4);
     n
+}
+
+/// ui-render's clip rule (cfg(test)): the ink (pixels of coverage >= `thr`
+/// of 15) of a text laid out in `r` must lie inside `r` (`label` / `paint`
+/// cut what is outside; `glyphs` would draw over its neighbour). The glyph
+/// boxes are not enough: a bitmap has blank columns / rows.
+#[cfg(test)]
+static mut FIT_EXEMPT: bool = false;
+
+/// Stock-replica texts whose stock box cuts them (scope_ui brackets): not
+/// reported by `probe_fit` while on.
+#[cfg(test)]
+pub fn fit_exempt(on: bool) {
+    unsafe { FIT_EXEMPT = on };
+}
+
+#[cfg(test)]
+fn probe_fit<'a>(r: Rect, text: &str, gs: impl Iterator<Item = (&'a Glyph, i16, i16, i16)>, thr: u8) {
+    if unsafe { FIT_EXEMPT } {
+        return;
+    }
+    let (rx0, ry0, rx1, ry1) = (r.x as i32, r.y as i32, r.x as i32 + r.w as i32 - 1, r.y as i32 + r.h as i32 - 1);
+    let mut b = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for (g, twin, x, y) in gs {
+        let (gw, gh) = (g.w as i32 + twin as i32, g.h as i32);
+        // Only glyph boxes that cross the box edge can have ink outside.
+        if x as i32 >= rx0 && y as i32 >= ry0 && x as i32 + gw - 1 <= rx1 && y as i32 + gh - 1 <= ry1 {
+            continue;
+        }
+        for gy in 0..g.h as u32 {
+            for gx in 0..(g.w as i16 + twin).max(0) as u32 {
+                if twin_alpha(g, twin, gx, gy) >= thr {
+                    let (px, py) = (x as i32 + gx as i32, y as i32 + gy as i32);
+                    b = (b.0.min(px), b.1.min(py), b.2.max(px), b.3.max(py));
+                }
+            }
+        }
+    }
+    if b.0 <= b.2 && (b.0 < rx0 || b.1 < ry0 || b.2 > rx1 || b.3 > ry1) {
+        crate::probe::fit((rx0, ry0, rx1, ry1), b, text);
+    }
 }
 
 /// 16-step colour ramp bg..fg for one label (avoids per-pixel arithmetic).
@@ -1031,6 +1074,8 @@ impl Ink {
         }
         if k.n > 0 {
             k.bx = rect(x0, y0, x1 - x0, y1 - y0);
+            #[cfg(test)]
+            probe_fit(r, text, k.g[..k.n as usize].iter().zip(k.tw.iter()).map(|((g, x, y), t)| (g, *t, *x, *y)), 8);
         }
         k
     }

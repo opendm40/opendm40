@@ -144,20 +144,36 @@ impl App {
     /// the energy integrates (`App::tick`).
     pub(super) fn pw_tick(&mut self, now: u64) {
         if !self.dmm.pw.on {
+            self.pw_coup_seen = 255;
+            self.pw_pending = 0;
             return;
         }
         self.pw_settings_status();
+        // A coupling change (the W button, Power Settings, SCPI POW:COUP):
+        // the last reading is of the old coupling. Drop it (as a function
+        // change does: `func_changed`) and show the new coupling's page
+        // with "--" until its first reading (device check 5e52761: the old
+        // layout and values stayed up to ~4 s).
+        let coup = self.dmm.pw.coup;
+        if self.pw_coup_seen != coup {
+            if self.pw_coup_seen != 255 {
+                self.pw_coup_changed();
+            }
+            self.pw_coup_seen = coup;
+        }
         // The coupling changed (SCPI, the W button): its glyph and the page
         // layout (AC+DC parts, doc 3.17; also the fallback method) redraw.
         if (self.dmm.pw.coup != self.pw_btn_coup || self.pw_parts_want() != ui::pw_parts()) && matches!(self.view, View::Dmm) {
             self.redraw = true;
         }
+        if self.meter.shown().is_some() {
+            self.pw_pending = 0;
+        }
         // DMM page before the first full reading: V and "I ranging..."
-        // (the I channel walks down from 10 A, ~0.9 s per range).
+        // (the I channel walks down from 10 A, ~0.9 s per range); after a
+        // coupling change the pending page instead (no job running).
         if self.view == View::Dmm && !self.redraw && self.meter.shown().is_none() {
-            if let Some((v, txt)) = self.dmm.pw_partial() {
-                self.pw_rng_key = ui::pw::ranging(v, txt, self.pw_rng_key);
-            }
+            self.pw_no_reading();
         }
         if self.dmm.pw_over_expired() {
             self.toast(now, "Current too high: reduce it", false);
@@ -166,6 +182,42 @@ impl App {
         if self.alert_beep_t0.is_some() && self.dmm.pw_state().over != 2 && self.dmm.sent.alert == crate::sentinel::Alert::None {
             self.alert_beep_t0 = None;
         }
+    }
+
+    /// `pw_tick`, the DMM page without a reading: the pending page once,
+    /// else the partial V / state text (region B: every pass while the
+    /// page waits).
+    #[inline(never)]
+    fn pw_no_reading(&mut self) {
+        if self.pw_pending != 0 && self.dmm.pw.job == 0 {
+            if self.pw_pending == 1 {
+                self.pw_pending = 2;
+                self.pw_pending_draw();
+            }
+        } else if let Some((v, txt)) = self.dmm.pw_partial() {
+            self.pw_rng_key = ui::pw::ranging(v, txt, self.pw_rng_key);
+        }
+    }
+
+    /// `pw_tick`: the coupling changed (any path).
+    #[inline(never)] // .cold (link-native.x): once per coupling change
+    fn pw_coup_changed(&mut self) {
+        self.meter.reset();
+        self.last_raw = None;
+        self.chart_n = 0;
+        self.chart_dirty = true;
+        self.pw_pending = 1;
+        self.redraw |= self.view == View::Dmm;
+    }
+
+    /// The pending page's values (`Dmm::pw_pending`) over the page that
+    /// `draw_static` drew for the new coupling.
+    #[inline(never)] // .cold (link-native.x): once per coupling change
+    fn pw_pending_draw(&mut self) {
+        let (r, pv) = self.dmm.pw_pending();
+        self.dmm_view.alt = self.strip_alt;
+        self.dmm_view.reading(&r, 0, crate::meter::V_NONE);
+        ui::pw::side(&mut self.dmm_view.pwc, &pv);
     }
 
     /// The AC+DC parts layout applies (doc 3.17): the power meter in AC+DC
