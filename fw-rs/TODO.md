@@ -526,8 +526,8 @@ Code work (in this order):
       commit (branch alientek-dm40-upstream). Done in fw-rs (809000a): CONF? (Agilent-style reply),
       INIT/ABORT no-ops, SYST:IDN:EMUL OFF|34401A (persisted, default OFF) for unpatched
       libsigrok >= 0.5.2 / SmuView (verified with the distro libsigrok 0.5.2 in the emulator).
-      Remaining: device retest over USBTMC (sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<addr>, SmuView),
-      send upstream (owner's approval).
+      Remaining: SmuView on the device (needs a SmuView built against libsigrok-dm40/install; the
+      stock AppImage only with SYST:IDN:EMUL 34401A), send upstream (owner's approval).
       2026-10-22 function change on the meter mid-acquisition (was open): the 1 s stop itself was
       already gone with a87f4de (READ? capped at 0.85 s after a change not made by this host); left
       were the samples around it. Chosen fix = both sides, since libsigrok's USBTMC Bulk-IN timeout
@@ -551,6 +551,15 @@ Code work (in this order):
       wiring dialog, V) ran 1583 samples with no stop and no sample under the wrong function (29 NaN
       skipped, max READ? 0.851 s); a change injected between FUNC? and READ? (DC V -> AC V, Ohm -> DC
       V, DC V -> temp) gives NaN, then the new function.
+      Device (a0985e4 = cdaec48 + later commits, USBTMC usbtmc/3.29, libsigrok 48aecd35, 2026-10-22;
+      calibrator 1 V DC on V/COM, A jack open): --show lists voltage / current without coupling flag
+      (AUTO) and no power; each of the 14 selectable functions --samples 10 exit 0, no "Timed out" /
+      "transfer error" (READ? max 0.40 s DC V / ohm, 0.85 s cap / temp in OL); AUTO flagged DC on
+      1 V DC, AC on the near-0 input; UNIT:TEMP F -> samples in degF (TC open: OL). One --time 175 s
+      acquisition while BT changed the function 16 times (RES, CAP, DIOD, CONT, FREQ, TEMP, V DC /
+      AC / ACDC / AUTO, A DC / AC / ACDC / AUTO, POW, V DC; BT = "the other transport", like a tap):
+      911 READ?, 880 samples, 31 NaN skipped, max READ? 0.853 s, no error, every change followed
+      (POW read as W).
 - [x] Scope touch: pinch = scale (timebase / V/div, 1-2-5 snap, value bubble), one-finger drag =
       offset, draggable trigger level, no clash with view swipes.  (c470be7, 419fd96, ebff9b4, 81c9dd8;
       verify on device, two-finger report rate first)

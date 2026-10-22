@@ -177,4 +177,11 @@ A function changed on the meter during an acquisition does not end it: the
 `READ?` waiting at that moment, and every `READ?` until the new function has
 a reading, answers within 0.85 s with `+9.91E37` (SCPI NaN, "Data stale";
 `+9.9E37` stays the overload). The DM40 profile skips those samples and
-labels the next ones from `FUNC?`; other hosts see +inf for them.
+labels the next ones from `FUNC?`; other hosts see +inf for them. A function
+changed over Bluetooth while sigrok reads over USBTMC counts as a change on
+the meter (device check 2026-10-22: 16 changes, 880 samples, no stop). `FUNC?`
+names of the fw-rs extras: `"VOLT:AUTO"` / `"CURR:AUTO"` (the profile's
+`voltage` / `current` without a coupling flag; each sample flagged DC or AC as
+`VOLT:COUP?` / `CURR:COUP?` say) and `"POW"` (read as W, entered on the meter
+or with `CONF:POW`; not selectable from sigrok: its range hunt takes up to
+15 s). Temperatures follow `UNIT:TEMP` (C or F).
