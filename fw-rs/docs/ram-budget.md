@@ -95,7 +95,7 @@ renderer, so a strip could not be reproduced deterministically. Strips
 captured one at a time without the freeze would be consistent within a
 strip but not across the frame.
 
-## The screenshot freeze: next shot's clusters erased in idle time (8f1d887)
+## The screenshot freeze: next shot's clusters erased in idle time (shot-preerase)
 
 The owner's option 3. Design (screenshot.rs "idle-time preparation"):
 
@@ -149,10 +149,11 @@ the firmware's own figures, DBG:FLASH? fields 4-7):
 | 87f2c20 + instrumentation (before) | DMM HOLD | 5 001 ms | 76 / 76 | 2 406 |
 | 87f2c20 + instrumentation (before) | menu | 5 001 ms | 76 / 76 | 2 406 |
 | 87f2c20 + instrumentation (before) | combined view | 4 374 ms | 61 / 76 | 2 098 |
-| 8f1d887 (after, prepared) | DMM HOLD | 1 403 ms | 0 | 681 |
+| 8f1d887 = 90bfeab before the rebase (after, prepared) | DMM HOLD | 1 403 ms | 0 | 681 |
 | 8f1d887 | menu | 1 403 ms | 0 | 681 |
 | 8f1d887 | combined view | 1 403 ms | 0 | 681 |
 | 8f1d887 | the same view again, ~10 s after the last shot | 1 403 ms | 0 | 681 |
+| rebased onto 3028923 (the GD32_SPI stall model, 166237c) | DMM / menu / combined / again | 1 408-1 409 ms | 0 | 681 |
 
 (The "again" shot found the preparation done: the test's verify wait and
 panel read-back took longer than the 2 s quiet + ~76 erases. A shot taken
@@ -166,6 +167,10 @@ Without the compare-skip (an earlier build of this round) it was 1 638 ms.
 With the datasheet's typical tPP 0.4 ms it would be ~1.1 s. The rest of
 the shot (FAT, directory entry, verify) runs after the screen unfreezes.
 
+Every shot's BMP equals the panel read before the gesture (0 px differ).
+(`SYST:ERR? -100,"Mass storage busy"` at the end of shottest is its own
+MMEM:CAT? polls answered while a shot holds the disk, as before.)
+
 Host tests (tools/fatren-test 12c): preparation on a disk whose free
 clusters need erasing (76 erases; FAT / root / directories / every
 allocated cluster unchanged), again after a reboot (0 erases), the shot
@@ -178,13 +183,13 @@ every one of the 1 161 steps of a preparation (its data intact, with and
 without the counter: the FAT re-read before each erase), 20 free clusters
 (all prepared, the shot still refused "Disk full").
 
-Memory (native build, 87f2c20 -> 8f1d887): TCM statics +~100 B
-(`screenshot::PREP` 56 B, `STATS` 16 B, `PREP_ERASES`, `msc::FLASH_WRITES`):
-stack 45 512 -> 45 416 B, static worst path 24 284 -> 24 292 B, headroom
-21 228 -> 21 124 B (>= 20 KiB). SRAM free 60 648 -> 60 632 B (`JOB`, .dmabuf,
-+16 B). Region B free 82 472 -> 81 824 B (the inlined `prep_poll`, the
-DBG:FLASH? fields). Region C free 18 804 -> 17 868 B (`prep_step`,
-`prep_stats`, the retry).
+Memory (native build, rust-fw-poc 3028923 -> this change): TCM statics
++~100 B (`screenshot::PREP` 56 B, `STATS` 16 B, `PREP_ERASES`,
+`msc::FLASH_WRITES`): stack 45 520 -> 45 424 B, static worst path
+24 284 -> 24 292 B, headroom 21 236 -> 21 132 B (>= 20 KiB). SRAM free
+60 544 -> 60 528 B (`JOB`, .dmabuf, +16 B). Region B free 71 980 ->
+71 332 B (the inlined `prep_poll`, the DBG:FLASH? fields). Region C free
+23 820 -> 22 888 B (`prep_step` 644 B, `prep_stats`, the retry).
 
 Gallery (screenshot viewer): it needs no big buffer. `Gallery` is 0.7 KiB
 of TCM, and it decodes a BMP row by row from `scratch()[0]` (data) and

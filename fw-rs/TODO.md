@@ -526,8 +526,8 @@ Code work (in this order):
 - [x] Screen frozen ~4-5 s on every shot since the shot streams from the panel (CAP dropped, f06f046):
       the next shot's first-fit free clusters erased in idle time, nothing reserved / linked
       (screenshot.rs "idle-time preparation", docs/ram-budget.md). Emulator (W25Q128 timing):
-      frozen 5.0 s -> 1.4 s, 0 data blocks erased. (8f1d887; device check below)
-- [ ] Device: screenshot preparation (8f1d887). DBG:FLASH? fields 4.. = frozen_ms, total_ms,
+      frozen 5.0 s -> 1.4 s, 0 data blocks erased. (90bfeab; device check below)
+- [ ] Device: screenshot preparation (90bfeab). DBG:FLASH? fields 4.. = frozen_ms, total_ms,
       slices_frozen, blocks_erased, prep state (2 ready), clusters ready, prep erases.
       1. Boot, wait ~15 s: prep state 2, 76 ready. A shot of the DMM page and of AC+DC: frozen_ms
          (expect ~1.1-1.6 s), blocks_erased 0; BMP equals `dm40dbg.py shot`; ~5-10 s later state 2 again.
