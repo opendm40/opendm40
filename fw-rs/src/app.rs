@@ -652,6 +652,7 @@ impl App {
                 let mut b = [0u8; 16];
                 let vals = [
                     alert_mask_name(&mut b, self.dmm.alert_mask()),
+                    ui::usb_disk_name(crate::vwrite::read_only(), crate::vwrite::read_only_pending()),
                     "", // Device row: opens the About page, no inline value
                 ];
                 ui::settings(2, &vals);
@@ -2917,6 +2918,16 @@ impl App {
                         self.dmm.set_alert_mask(clk, m);
                     }
                     Some(1) => {
+                        // USB disk (decision 2026-10-22 #6): Files live <->
+                        // PC can edit, volatile; in force at the next bus
+                        // reset (the host reads the WP bit when it mounts).
+                        let ro = !crate::vwrite::read_only_pending();
+                        crate::vwrite::set_read_only(ro);
+                        if ro != crate::vwrite::read_only() {
+                            self.toast(clk.now_ms(), "Re-plug USB to apply", true);
+                        }
+                    }
+                    Some(2) => {
                         self.show(View::Device, clk);
                         return;
                     }

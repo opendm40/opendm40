@@ -428,7 +428,7 @@ vdisk() {
     local fl=$1 img=$2; shift 2
     "$W/t" $img vdisk $fl $W/src/UID.BIN $W/src/OTP.BIN $W/src/OPTBYTES.BIN "$@" | tee $W/vd.out
     grep -q "present_before_init=false" $W/vd.out && grep -q "media_changed_after_init=false" $W/vd.out || { echo "FAIL: init"; exit 1; }
-    grep -q "read_only=false write_block=false read_past_end=false" $W/vd.out && echo "ok: writable, a zeroed boot sector refused, nothing past the end" || { echo "FAIL: write_block"; exit 1; }
+    grep -q "read_only=true write_ro=false rw=true write_block=false read_past_end=false" $W/vd.out && echo "ok: read-only by default (a write refused); writable: a zeroed boot sector refused; nothing past the end" || { echo "FAIL: write_block"; exit 1; }
 }
 # vdok <img> <flash1m>: fsck clean, label, geometry, every region file equal
 # to its source, BACKUP.TXT CRC-32s, read-only attributes.

@@ -11,13 +11,17 @@ W_OK, W_IO, W_REFUSED, W_BUSY = 0, 1, 2, 3
 
 
 class VServe:
-    def __init__(self, t, spi, flash, src, cut=None):
+    def __init__(self, t, spi, flash, src, cut=None, ro=False):
+        """`ro`: the starting volume mode (the firmware's default is
+        read-only, "Files live"; the write scenarios run writable, "PC can
+        edit")."""
         args = [t, spi, 'vserve', flash, src + '/UID.BIN', src + '/OTP.BIN', src + '/OPTBYTES.BIN']
         if cut is not None:
             args += ['cut', str(cut)]
         self.spi = spi
         self.p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         self.now = 0
+        self.mode(ro, now=True)
 
     def _op(self, c, arg=0, data=b''):
         self.p.stdin.write(c + struct.pack('<I', arg & 0xFFFFFFFF) + data)
@@ -62,6 +66,12 @@ class VServe:
 
     def bus_reset(self):
         self._op(b'B')
+        self._1()
+
+    def mode(self, ro, now=False):
+        """Ask for the read-only / writable volume (Settings "USB disk"):
+        in force at the next bus_reset, or at once with `now`."""
+        self._op(b'M', (1 if ro else 0) | (2 if now else 0))
         self._1()
 
     def ua(self):

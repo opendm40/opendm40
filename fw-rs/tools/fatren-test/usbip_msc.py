@@ -33,6 +33,7 @@ ap.add_argument('--port', type=int, default=3240)
 ap.add_argument('--capture')
 ap.add_argument('--fw')
 ap.add_argument('--log', default=None)
+ap.add_argument('--ro', action='store_true', help='the read-only volume (the firmware default, "Files live"); default: writable ("PC can edit", the write captures)')
 args = ap.parse_args()
 
 BUSID = b'1-1'
@@ -46,7 +47,7 @@ STRINGS = {1: 'ALIENTEK', 2: 'DM40 vtest', 3: 'VTEST0001'}
 EPIPE, ECONNRESET = -32, -104
 
 lock = threading.RLock()
-vs = VServe(args.t, args.spi, args.flash, args.src)
+vs = VServe(args.t, args.spi, args.flash, args.src, ro=args.ro)
 T0 = time.time()
 logf = open(args.log, 'a') if args.log else None
 

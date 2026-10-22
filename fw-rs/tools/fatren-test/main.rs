@@ -273,8 +273,14 @@ fn vdisk_dump(a: &[String]) {
     println!("media_changed_after_init={}", d.take_media_changed());
     let mut b = vec![0u8; 512];
     let past = d.read_block(d.block_count(), &mut b);
+    // Read-only by default (decision 2026-10-22 #6): the write refused;
+    // then the writable volume ("PC can edit"): a zeroed boot sector refused.
+    let ro = d.read_only();
+    let wr_ro = d.write_block(0, &b);
+    vwrite::set_read_only(false);
+    vwrite::on_bus_reset();
     let wr = d.write_block(0, &b);
-    println!("vdisk sectors={} bs={} read_only={} write_block={} read_past_end={}", d.block_count(), d.block_size(), d.read_only(), wr, past);
+    println!("vdisk sectors={} bs={} read_only={} write_ro={} rw={} write_block={} read_past_end={}", d.block_count(), d.block_size(), ro, wr_ro, !d.read_only(), wr, past);
     vdisk_write(&mut d, &a[1]);
     let (mut k, mut step) = (7, 0);
     while k < a.len() {
@@ -368,6 +374,10 @@ impl msc::BlockDevice for SpiDev {
 ///   B            USB bus reset (vdisk::on_bus_reset)
 ///   U            -> 1 if a UNIT ATTENTION is due (one-shot)
 ///   P            -> 1 if the volume is write-protected (MODE SENSE WP)
+///   M m          ask for the volume mode (Settings "USB disk"): bit 0 =
+///                read-only (vwrite::set_read_only), in force at the next B;
+///                bit 1 = in force now (the tests' starting mode, no bus
+///                reset: the captured layouts stay as they are)
 ///   D            -> the meter's dialog: 0 none, 1 "install?", 2 "not an
 ///                update file" (vwrite::take_dialog)
 ///   A 0|1        answer the dialog (No / Yes)
@@ -443,6 +453,12 @@ fn vserve(a: &[String]) {
             }
             b'U' => reply[0] = d.take_media_changed() as u8,
             b'P' => reply[0] = d.read_only() as u8,
+            b'M' => {
+                vwrite::set_read_only(arg & 1 != 0);
+                if arg & 2 != 0 {
+                    vwrite::on_bus_reset();
+                }
+            }
             b'D' => reply[0] = match vwrite::take_dialog() {
                 None => 0,
                 Some(true) => 1,

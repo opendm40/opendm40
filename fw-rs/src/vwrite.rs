@@ -1,6 +1,19 @@
 //! Host writes on the generated USB volume (vdisk.rs): delete from the PC
-//! and the drag-and-drop firmware update. The volume is writable (no WP
-//! bit), but nothing the host writes is stored as sectors: every 512-byte
+//! and the drag-and-drop firmware update.
+//!
+//! Mode (decisions-2026-10-22 #6): the volume is READ-ONLY by default
+//! ("Files live": the WP bit set, every WRITE fails 07/27/00, a new
+//! recording / screenshot raises the UNIT ATTENTION at once, also while
+//! mounted). Settings 3/3 "USB disk" = "PC can edit" (or DBG:VDISK:RO 0)
+//! asks for the writable volume described below. Volatile (read-only again
+//! at every boot) and applied at the next USB bus reset (`on_bus_reset`: a
+//! re-plug), never under a host that has the volume: a host reads the WP bit
+//! when it mounts, and a writable session must not lose its frozen layout
+//! (nor a read-only mount meet writes it cannot do). `read_only` is the mode
+//! in force, `read_only_pending` the one asked for.
+//!
+//! The writable volume (no WP bit): nothing the host writes is stored as
+//! sectors: every 512-byte
 //! WRITE is compared with the sector the volume generates and accepted only
 //! when its difference is one of the changes below, which then live as
 //! small records (SRAM ~0.9 KiB) and regenerate exactly what the host
@@ -159,9 +172,13 @@ pub struct Stats {
 }
 
 struct W {
-    /// DBG:VDISK:RO 1: write-protected as before (live updates while
-    /// mounted; no delete / update from the PC).
-    ro: bool,
+    /// The writable volume is in force (false = read-only, the WP bit:
+    /// live updates while mounted, no delete / update from the PC). Zero =
+    /// read-only: W0 lives in .sram_bss, zeroed at start-up.
+    rw: bool,
+    /// Asked for (Settings 3/3 "USB disk", DBG:VDISK:RO); copied to `rw` at
+    /// the next bus reset.
+    want_rw: bool,
     boot: u8,
     /// FAT[1] as written (bit 16 = set).
     fat1: u32,
@@ -197,7 +214,8 @@ struct W {
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut W0: W = W {
-    ro: false,
+    rw: false,
+    want_rw: false,
     boot: 0,
     fat1: 0,
     rec: [REC0; NREC],
@@ -260,13 +278,28 @@ fn le32o(b: &[u8], o: usize) -> u32 {
 
 // --- queries (vdisk.rs, msc.rs, main.rs) -------------------------------------
 
+/// The mode in force (MODE SENSE WP bit, WRITE refused).
 pub fn read_only() -> bool {
-    w().ro
+    !w().rw
 }
 
-/// DBG:VDISK:RO: a host reads the WP bit when it mounts.
+/// The mode asked for (applies at the next bus reset).
+pub fn read_only_pending() -> bool {
+    !w().want_rw
+}
+
+/// Settings 3/3 "USB disk", DBG:VDISK:RO: ask for the read-only (true) or
+/// the writable volume. A host reads the WP bit when it mounts, so the mode
+/// changes only at the next bus reset (`on_bus_reset`, a re-plug).
 pub fn set_read_only(on: bool) {
-    w().ro = on;
+    w().want_rw = !on;
+}
+
+/// USB bus reset (msc.rs via vdisk::on_bus_reset), after `release_all`:
+/// the mode asked for is now in force. Host tests call it to apply a mode.
+pub fn on_bus_reset() {
+    let w = w();
+    w.rw = w.want_rw;
 }
 
 pub fn last_error() -> u8 {
@@ -293,7 +326,7 @@ pub fn state() -> (usize, usize, usize, bool, bool, u8) {
 /// The layout must not change under the host (module text).
 pub fn frozen() -> bool {
     let w = w();
-    !w.ro && (crate::msc::host_mounted() || (!w.locks && (w.session || (w.last != 0 && w.now.saturating_sub(w.last) < QUIET_MS))))
+    w.rw && (crate::msc::host_mounted() || (!w.locks && (w.session || (w.last != 0 && w.now.saturating_sub(w.last) < QUIET_MS))))
 }
 
 /// A staging owns the SPI free space (upload::busy).
@@ -352,7 +385,7 @@ pub fn staged_read(c: u32, s: u32, b: &mut [u8]) -> bool {
 /// `last_error` says why.
 pub fn write(lba: u32, d: &[u8]) -> bool {
     let w = w();
-    let r = if w.ro { Err(E_REFUSED) } else { classify(lba, d) };
+    let r = if !w.rw { Err(E_REFUSED) } else { classify(lba, d) };
     match r {
         Ok(changed) => {
             w.last = w.now.max(1);

@@ -58,8 +58,11 @@
 //! files, a file manager after a refresh; holding it back while locked hid
 //! them until the unmount).
 //!
-//! Host writes (vwrite.rs): the volume is writable (no WP bit; DBG:VDISK:RO
-//! 1 sets it), but a write is only accepted as a delete of a LOGS / SCOPE /
+//! Host writes (vwrite.rs): read-only by default ("Files live": the WP bit,
+//! the UNIT ATTENTION above at once). Settings 3/3 "USB disk" = "PC can
+//! edit" (DBG:VDISK:RO 0) makes it writable from the next bus reset (a
+//! re-plug; volatile, read-only again at boot). Writable, a write is only
+//! accepted as a delete of a LOGS / SCOPE /
 //! SHOTS file, a firmware file DM40*.BIN in the root, the hosts' own
 //! housekeeping (trash, indexer: kept for the session) or metadata noise
 //! (dirty flags, dates); everything else fails with DATA PROTECT. While a
@@ -591,13 +594,15 @@ pub(crate) fn gen_sector(lba: u32, buf: &mut [u8]) -> bool {
     VDisk.read_block(lba, buf)
 }
 
-/// USB bus reset (msc.rs): a new session, compact at the next refresh.
+/// USB bus reset (msc.rs): a new session, compact at the next refresh; the
+/// volume mode asked for (read-only / writable, vwrite.rs) takes effect.
 pub fn on_bus_reset() {
     if state().is_some() {
         crate::vwrite::release_all(true);
         tab().want_compact = true;
         dlog::set_stale();
     }
+    crate::vwrite::on_bus_reset();
 }
 
 /// (files, next free cluster, files left out) for DBG / tests.
@@ -952,18 +957,25 @@ fn readme(base: usize, out: &mut [u8]) -> u32 {
     w.s(b"DEBUG\\   SPIFLASH.BIN: raw image of the 16 MiB SPI flash (the\r\n");
     w.s(b"         meter's internal FAT16 storage).\r\n\r\n");
     w.s(b"The files are stored on the meter in a compact form and converted\r\n");
-    w.s(b"when read. Files saved while the disk is mounted appear after an\r\n");
-    w.s(b"eject / re-plug.\r\n\r\n");
-    w.s(b"Delete: delete a file in LOGS, SCOPE or SHOTS here and it is\r\n");
-    w.s(b"deleted on the meter (moved to the trash: at the eject). Or on the\r\n");
-    w.s(b"meter (Gallery), or over USB/SCPI: MMEM:DEL.\r\n");
+    w.s(b"when read.\r\n\r\n");
+    w.s(b"Mode (meter: Settings 3/3, \"USB disk\"):\r\n");
+    w.s(b"Files live (default, read-only): recordings and screenshots saved\r\n");
+    w.s(b"while the disk is mounted appear at once (refresh the folder, F5).\r\n");
+    w.s(b"PC can edit: delete files and copy a firmware file from the PC (see\r\n");
+    w.s(b"below); new files then appear after an eject / re-plug. A change\r\n");
+    w.s(b"applies at the next USB plug (unplug, plug in again); power-on\r\n");
+    w.s(b"starts in Files live.\r\n\r\n");
+    w.s(b"Delete (PC can edit): delete a file in LOGS, SCOPE or SHOTS here and\r\n");
+    w.s(b"it is deleted on the meter (moved to the trash: at the eject). In any\r\n");
+    w.s(b"mode: on the meter (Gallery), or over USB/SCPI: MMEM:DEL.\r\n");
     w.s(b"Nothing else can be changed: other files copied here are not kept\r\n");
     w.s(b"(gone at the next eject / re-plug), INFO and DEBUG are read-only.\r\n\r\n");
-    w.s(b"Firmware update: copy the update file (dm40*.bin, e.g. dm40fw.bin)\r\n");
-    w.s(b"here, next to this README. The meter checks it and asks \"Install it\r\n");
-    w.s(b"now?\": Yes installs it (the meter restarts into the vendor loader,\r\n");
-    w.s(b"then into the new firmware), No discards it. Or tools/reload.sh\r\n");
-    w.s(b"(fw-rs repository: DBG:UPLOAD + DBG:UPDATE over USBTMC).\r\n");
+    w.s(b"Firmware update (PC can edit): copy the update file (dm40*.bin, e.g.\r\n");
+    w.s(b"dm40fw.bin) here, next to this README. The meter checks it and asks\r\n");
+    w.s(b"\"Install it now?\": Yes installs it (the meter restarts into the\r\n");
+    w.s(b"vendor loader, then into the new firmware), No discards it. In any\r\n");
+    w.s(b"mode: tools/reload.sh (fw-rs repository: DBG:UPLOAD + DBG:UPDATE\r\n");
+    w.s(b"over USBTMC).\r\n");
     w.s(b"Without the tools (also when the meter does not start): from off,\r\n");
     w.s(b"hold the power key ~4 s until the beep and 0.5 s more. The vendor\r\n");
     w.s(b"loader's update screen shows its own USB disk: copy the update file\r\n");
