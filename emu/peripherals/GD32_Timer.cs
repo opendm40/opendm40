@@ -22,6 +22,7 @@ using System.Collections.Generic;
 using Antmicro.Renode.Core;
 using Antmicro.Renode.Logging;
 using Antmicro.Renode.Peripherals.Bus;
+using Antmicro.Renode.Peripherals.CPU;
 using Antmicro.Renode.Time;
 
 namespace Antmicro.Renode.Peripherals.Timers
@@ -265,7 +266,13 @@ namespace Antmicro.Renode.Peripherals.Timers
         }
 
         // ---- counting model ----
-        private double Now() => machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds;
+        /// The machine's time, the CPU's progress inside its quantum included
+        /// (a CNT read mid-quantum: the AD2 stream ISR's latency and interval).
+        private double Now()
+        {
+            if(machine.SystemBus.TryGetCurrentCPU(out var cpu)) cpu.SyncTime();
+            return machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds;
+        }
         private ulong Period => (ulong)arr + 1;
         private double SecondsPerCount => (psc + 1.0) / frequency;
 
@@ -479,7 +486,10 @@ namespace Antmicro.Renode.Peripherals.Timers
             var dt = (next.Value - a) * SecondsPerCount;
             var gen = ++generation;
             if(dt < 1e-7) dt = 1e-7;
-            machine.ScheduleAction(TimeInterval.FromMicroseconds((ulong)Math.Max(1, Math.Round(dt * 1e6))), _ =>
+            // Nanoseconds (was microseconds: every timer interrupt came up to
+            // 0.5 us off its update, a ~1 us "entry latency" of the AD2 stream
+            // ISR that the device does not have; fw-rs TODO "76.8 kS/s").
+            machine.ScheduleAction(TimeInterval.FromNanoseconds((ulong)Math.Max(1, Math.Round(dt * 1e9))), _ =>
             {
                 if(gen != generation) return;
                 var t = Now();

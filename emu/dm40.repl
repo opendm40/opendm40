@@ -235,9 +235,11 @@ spi1: SPI.STM32SPI @ sysbus 0x40013000
     series: STM32Series.F4
     IRQ -> nvic@35
 
-spi2: SPI.STM32SPI @ sysbus 0x40003800
-    series: STM32Series.F4
-    IRQ -> nvic@36
+// GD32 SPI1 = the W25Q128 disk: GD32_SPI (no DMA) for its byte time (12.5
+// MHz at fw-rs's /4: ~0.2 ms of polled CPU per 256-byte page, part of the
+// fast logger's disk rate; Renode's STM32SPI exchanged bytes instantly).
+// No IRQ: neither firmware uses one (STM32SPI's line was never enabled).
+spi2: SPI.GD32_SPI @ sysbus 0x40003800
 
 // GD32 SPI2 = the HY3131 bus (fw-rs): GD32_SPI with DMA requests on DMA0
 // (dma1 here) stream 0 (RX) / stream 7 (TX), the AD2 stream's DMA frames.

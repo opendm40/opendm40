@@ -29,6 +29,7 @@ namespace Antmicro.Renode.Core
 
     public class SystemBusStub
     {
+        public bool TryGetCurrentCPU(out Antmicro.Renode.Peripherals.CPU.ICPU cpu) { cpu = null; return false; }
         public byte[] Flash = new byte[0];
         public ulong FlashBase = 0x08000000;
         public byte[] ReadBytes(ulong address, int count)
@@ -88,4 +89,9 @@ namespace Antmicro.Renode.Peripherals.Bus
 namespace Antmicro.Renode.Peripherals.SPI
 {
     public interface ISPIPeripheral { byte Transmit(byte data); void FinishTransmission(); void Reset(); }
+}
+
+namespace Antmicro.Renode.Peripherals.CPU
+{
+    public interface ICPU { void SyncTime(); }
 }

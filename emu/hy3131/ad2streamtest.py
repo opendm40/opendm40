@@ -20,8 +20,13 @@ rate, so DBG:AD2:DRAW 2 costs the main loop what it does on the meter):
   * a function change mid-stream (CONF:VOLT:DC): the stream stops first
     (DBG:ISR? forced + 1, LOG:STATe? 0, "Settings conflict"), DC V reads ~0,
     AC V 0.5 V again, DBG:HYSPI:SELF? 200 clean.
-Exit status 0 = all passed. The emulator's SPI is instantaneous: the ISR
-times and the CPU share are the device's job (fw-rs TODO device check).
+Exit status 0 = all passed. The emulator's SPI2 has the byte timing of the
+device (GD32_SPI: /8 1.28 us, /16 2.56 us per byte, a transmit buffer, DMA
+in time) and the HY3131 takes each byte at its own time: a data frame across
+a conversion edge is torn (checked: TornAd2 = 0), a mode-0 /8 bit may be
+sampled at its old level (MisoErrRate), CKPH 1 samples a full period late.
+The ISR's CPU share runs ~0.6x the device's (no APB wait states): the
+device's DBG:ISR? numbers are the real ones.
 """
 import argparse
 import os
@@ -40,6 +45,8 @@ ap.add_argument('--secs', type=float, default=1.0, help='scale of the session le
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
 ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (fw-rs region C audit)')
 ap.add_argument('--race-us', type=float, default=None, help='INTF read-clears-flag race window, us (model default 0.7)')
+ap.add_argument('--miso-err', type=float, default=None, help='probability that a marginal mode-0 /8 bit is read at its old '
+                'level (model MisoErrRate, default 1e-3): the 76.8 kS/s probe frames run /8 mode 0')
 ap.add_argument('--sessions', default='4800:2:20,9600:1:15,1200:2:10',
                 help='rate:draw:secs[:dma],... (secs scaled by --secs; dma = DBG:AD2:DMA 0 / 1 sent before the '
                      'session; without it nothing is sent: the firmware default (DMA frames) or the last one sent)')
@@ -47,10 +54,12 @@ A = ap.parse_args()
 SCRIPT = os.path.join(EMU, 'out', 'ad2stream-%d.script' % A.port)
 with open(SCRIPT, 'w') as f:
     f.write('0 monitor sysbus.hy3131 ClockPpm %g\n' % A.ppm)
-    for k in range(1, 40):
+    for k in range(1, 400):
         f.write('%d monitor sysbus.hy3131 IntfPhaseHist\n' % (k * 3))
     if A.race_us is not None:
         f.write('0 monitor sysbus.hy3131 IntfRaceUs %g\n' % A.race_us)
+    if A.miso_err is not None:
+        f.write('0 monitor sysbus.hy3131 MisoErrRate %g\n' % A.miso_err)
     if A.extra_script:
         f.write(open(A.extra_script).read())
 os.environ['USBIP_PORT'] = str(A.port)
@@ -67,7 +76,7 @@ def check(ok, what):
 
 
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', '200', '--app', A.app,
-       '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', 'ad2stream',
+       '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', 'ad2stream-%d' % A.port,
        '--dmm', 'vsrc:0,ac=0.5,f=50', '--script', SCRIPT]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
 try:
@@ -175,8 +184,13 @@ try:
         else:
             check(isr[5] > isr[3] / 8 and 0 <= bents - isr[5] <= 2 + isr[5] // 20,
                   'probes ~ 1 in 4 periods, entries = A + B (%d probes, %d B entries)' % (isr[5], bents))
-        check(isr[22] == (1 if dma == 1 else 0) and isr[19] == (16 if dma == 1 else 1008),
+        # DMA frames: /16 up to 38400, the hybrid frame (/8 + CKPH data phase,
+        # div 1008) at 76800; CPU frames /8 + CKPH (and capped at 38400).
+        want_div = 16 if dma == 1 and rate <= 38400 else 1008
+        check(isr[22] == (1 if dma == 1 else 0) and isr[19] == want_div,
               'DMA frames %d (DBG:AD2:DMA %d), div %d (1008 = /8 + CKPH data phase)' % (isr[22], dma, isr[19]))
+        check(abs(int(pre[8]) / 1000 - min(rate, 76800 if dma == 1 else 38400)) < 2,
+              'rung %d S/s (LOG:PREamble? nominal_mhz %s)' % (int(pre[8]) // 1000, pre[8]))
         check(abs(isr[15] + 10 * A.ppm) <= 250, 'locked period vs nominal %+.1f ppm (chip %+g ppm)' % (isr[15] / 10, A.ppm))
         check(isr[12] > 0 and abs(isr[12] / 1000 / rate - 1 - A.ppm * 1e-6) < 2.5e-5, 'locked rate %.3f S/s' % (isr[12] / 1000))
         check(max(idn or [9]) < 0.5, '*IDN? answered while streaming (max %.3f s)' % max(idn or [9]))
@@ -211,6 +225,16 @@ try:
 finally:
     os.killpg(emu.pid, 15)
     emu.wait()
+
+# The SPI timing model (emu/peripherals/GD32_SPI.cs, HY3131.SpiByteTimed):
+# no stream data frame (a read from R03) across an AD2 conversion edge
+# (`torn`, IntfPhaseHist lines of the Renode log, cumulative).
+import re  # noqa: E402
+try:
+    torn = [int(x) for x in re.findall(r' torn (\d+)', open(os.path.join(EMU, 'out', 'ad2stream-%d.log' % A.port)).read())]
+except OSError:
+    torn = []
+check(bool(torn) and max(torn) == 0, 'no data frame across an AD2 edge (model TornAd2 %s)' % (max(torn) if torn else 'n/a'))
 
 print('ad2streamtest: %s' % ('PASS' if not FAIL else 'FAIL: ' + '; '.join(FAIL)))
 sys.exit(1 if FAIL else 0)
