@@ -311,7 +311,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double LastAd1Time => ad1Last;
 
         /// One-line description of the front end and the chip configuration (key=value tokens).
-        public string FrontendState()
+        public string FrontendState(string extra = "")
         {
             var ci = CultureInfo.InvariantCulture;
             var sb = new System.Text.StringBuilder();
@@ -346,9 +346,81 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 sb.AppendFormat(ci, " vsrc={0:G4} rref={1:G5} vx={2:G5}", vs, rref, vx);
             }
             if(role == Role.Diode) sb.AppendFormat(ci, " vx={0:G5}", Fe.DiodeNode(DiodeTestCurrent, DiodeCompliance));
+            // converter / statistics settings and results for the GTK signal-flow diagram
+            sb.AppendFormat(ci, " svxi={0} sdo23={1} osr2={2} osr4={3} ad1ig={4:G3} ad2ig={5:G3} ad3ig={6:G3} pkh={7} pkhsel={8} sphacal={9}",
+                Svxi ? 1 : 0, Sdo23 ? 1 : 0, Osr2, Osr4, Ad1Ig, Ad2Ig, Ad3Ig, EnPkh ? 1 : 0, regs[0x29] & 3, regs[0x36]);
+            sb.AppendFormat(ci, " ad2rate={0:G5} lpfper={1:G4} ad2code={2} pkmax={3} pkmin={4} ctb={5} ctc={6} ctf={7:G6}",
+                1.0 / Ad2Period, LpfPeriod, ad2Code, pkhMax, pkhMin, ctB, ctC, CounterHz());
+            sb.Append(Readout());
+            sb.Append(extra);
             sb.AppendFormat(ci, " ad1code={0} lpf={1} rms={2} period={3:G4} cj={4:G4} die={5:G4} conn=\"{6}\"",
                 ad1Code, lpfCode, rmsVal, Ad1Period, Fe.CjTemp, Fe.Die, Fe.Connection());
             return sb.ToString();
+        }
+
+        /// Frequency of the last completed counter gate (CTB cycles over the gate), 0 before one.
+        private double CounterHz()
+        {
+            if(!ctEnabled || double.IsNaN(ctStop) || ctB <= 0) return 0;
+            var ticks = (0x1000000 - ctInit) + (double)ctA;
+            return ticks > 0 ? ctB * SysClk / ticks : 0;
+        }
+
+        /// What the chip's results mean at the jacks, with the nominal (uncalibrated) stock / fw-rs
+        /// scale factors of the current row: tokens rd_<quantity>=<value> (V, A, W, ohm) for the GTK
+        /// signal-flow diagram (power: the selected statistic of the RMS block, the LPF mean).
+        private string Readout()
+        {
+            var ci = CultureInfo.InvariantCulture;
+            var o = new System.Text.StringBuilder();
+            var r = roleRange;
+            var sqrtRms = Math.Sqrt(Math.Max(0, (double)rmsVal));
+            var opg = (regs[0x25] & 1) != 0 ? 10.0 : 1.0;
+            switch(role)
+            {
+            case Role.DcV:
+                if(EnAd1) o.AppendFormat(ci, " rd_vdc={0:G6}", ad1Code * AcvK[r] * 1.38889 / 8388606.0);
+                break;
+            case Role.DcMv:
+                if(EnAd1) o.AppendFormat(ci, " rd_vdc={0:G6}", ad1Code * 1.38889 / MvDiv[r] / 8388606.0);
+                break;
+            case Role.DcA:
+                if(EnAd1) o.AppendFormat(ci, " rd_idc={0:G6}", ad1Code * 1.25 / 0.9 / 8388606.0 / (Fe.ShuntR * MvDiv[r]));
+                break;
+            case Role.AcV:
+                // the row's AD2 gain cancels: the node is V / (k * IG) (NodeRatioAc), the code IG * node / VR
+                if(EnRms) o.AppendFormat(ci, " rd_vrms={0:G6}", sqrtRms * 1.25 / 262144.0 * AcvK[r]);
+                break;
+            case Role.AcA:
+                if(EnRms) o.AppendFormat(ci, " rd_irms={0:G6}", sqrtRms * 1.25 / 262144.0 / Ad2Ig / (Fe.ShuntR * opg));
+                break;
+            case Role.Ohm: case Role.Cont:
+            {
+                double vs, rref;
+                OhmSource(out vs, out rref);
+                if(EnAd1 && rref > 0) o.AppendFormat(ci, " rd_r={0:G6}", Math.Abs(ad1Code) * rref / 0.9 / 8388606.0);
+                break;
+            }
+            case Role.Power:
+            {
+                // X = AD2 = I (codes per A: shunt x OP1 gain at AD2), Y = AD3 = V (codes per V: the tap)
+                var xs = Fe.ShuntR * opg * Ad2Ig / (Ad2Rg * Vref) * 262144.0;
+                var ys = ((regs[0x25] & 2) != 0 ? 10 : 1) / AcvK[PowVr] * Ad3Ig / (Ad3Rg * Vref) * 262144.0;
+                o.AppendFormat(ci, " powxs={0:G6} powys={1:G6}", xs, ys);
+                if(EnRms)
+                {
+                    var st = PowerStat(regs[0x34]);
+                    if(st == 0) o.AppendFormat(ci, " rd_irms={0:G6}", sqrtRms / xs);
+                    else if(st == 2) o.AppendFormat(ci, " rd_vrms={0:G6}", sqrtRms / ys);
+                    else o.AppendFormat(ci, " rd_p={0:G6}", rmsVal / (xs * ys));
+                }
+                if(EnLpf) o.AppendFormat(ci, Sdo23 ? " rd_vdc={0:G6}" : " rd_idc={0:G6}", lpfCode / (Sdo23 ? ys : xs));
+                if(EnAd1 && (regs[0x24] >> 4) == 3)
+                    o.AppendFormat(ci, " rd_ad1idc={0:G6}", ad1Code * 1.25 / 0.9 / 8388606.0 / (Fe.ShuntR * MvDiv[PowIr]));
+                break;
+            }
+            }
+            return o.ToString();
         }
 
         /// Closed PA<n> switches (R2A..R2E: PS power bus, DS OP3 output, FS FB node, SS SENSE node),
@@ -1819,7 +1891,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// One-line front-end state (relays, HY3131 configuration, what the chip sees), for
         /// scripts and the GTK panel. Also written to StateFile when it changes.
-        public string Frontend => Core.FrontendState();
+        public string Frontend => Core.FrontendState(StateExtra());
+
+        /// The HY3131 supply (PE2 rail model) as a state token.
+        private string StateExtra() => string.Format(" powered={0}", Powered ? 1 : 0);
 
         /// Write the front-end state line to `path` (atomically, on change, at most ~10 Hz).
         public void StateFile(string path) { statePath = path; stateLast = ""; MaybeWriteState(); }
@@ -1829,7 +1904,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(statePath == null || Core == null) return;
             var now = Now;
             if(now - stateTime < 0.1 && stateLast.Length > 0) return;
-            var line = Core.FrontendState();
+            var line = Core.FrontendState(StateExtra());
             if(line == stateLast) return;
             stateLast = line; stateTime = now;
             try
