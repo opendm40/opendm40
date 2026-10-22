@@ -449,6 +449,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var n = (long)Math.Floor((now - ad2Start) / p);
             if(n <= ad2Done) return;
             Ad2Conversions += n - ad2Done;
+            if(EnPkh && (regs[0x29] & 3) == 0 && ForcedAd2 == int.MinValue)
+            {
+                // the peak hold sees every AD2 result, also those between two bus accesses
+                // (the last 256 of them)
+                for(var k = Math.Max(ad2Done + 1, n - 255); k < n; k++)
+                    PeakHold(Clamp19(Ad2Sample(ad2Start + k * p) + (int)Math.Round(Gauss() * Ad2NoiseCodes)));
+            }
             ad2Done = n;
             var t = ad2Start + n * p;
             intf |= 0x02;
@@ -687,6 +694,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private int Ad2Sample(double t)
         {
             if(role == Role.Power) return (int)Math.Round(PowerSample(t));
+            if(Ad2OnPb1Sentinel)
+            {
+                // fw-rs sentinel (continuity / diode / capacitance r0..4): OP2 (x1) on PB1, AD2 =
+                // OP2O - PB3 = the A-jack shunt drop, instantaneous
+                return (int)Math.Round(Pb1Volts(t) * Ad2Scale());
+            }
             double dc, ac;
             NodeDcAc(t, out dc, out ac);
             var w = 2 * Math.PI * sigHz * t;
@@ -712,6 +725,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             acCode = Math.Sqrt(ac * ac * scale * scale + floor * floor);
             if(ac > 0 && NoiseScale > 0) acCode += Gauss() * 1.0 * NoiseScale;
         }
+
+        /// The fw-rs AD2 sentinel configuration: ENOP2 with SOP2P = PB1, SAD2IP = OP2O,
+        /// SAD2IN = PB3, in a role whose own measurement leaves AD2 / OP2 unused.
+        private bool Ad2OnPb1Sentinel =>
+            (role == Role.Cont || role == Role.Diode || role == Role.CapOsc)
+            && (regs[0x32] & 0xF0) == 0xD0 && (regs[0x27] >> 6) == 1 && ((regs[0x27] >> 4) & 3) == 2;
 
         /// Codes per volt at the AD2 input: IG / (RG * VR) * 2^18.
         private double Ad2Scale() => Ad2Ig / (Ad2Rg * Vref) * 262144.0;
@@ -815,11 +834,28 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var fs = 8388608.0;
             double jdc, jac, hz, duty; string shape;
             var fp = regs[0x24] >> 4; var fn_ = regs[0x24] & 7;
-            if((role == Role.AcV || role == Role.AcMv) && fp == 9 && fn_ == 5)
+            if((role == Role.AcV || role == Role.AcMv || role == Role.Freq) && fp == 9 && fn_ == 5)
             {
                 // fw-rs sentinel: AD1 on PB1 - PB3 (the A-jack shunt drop, PB3 = its return),
                 // reference PB6 - AGND: code = IG * V / (RG * VR) * 2^23, instantaneous (OSR 256)
                 code = ig * Pb1Volts(t) / (rg * Vref) * fs;
+                if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
+                return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
+            }
+            if(role == Role.AcV && fp == 0 && fn_ == 7)
+            {
+                // fw-rs DC? hint (AC V): AD1 on SENSE - PB5, SENSE = the V jack through the AC V
+                // range's divider tap (r0 / r1: DC V r1's /100, r2 /1000, r3 /10000; INFERRED from
+                // the R2C / R2D taps), instantaneous
+                code = ig * VTapVolts(t, AcvK[Math.Max(roleRange, 1)]) / (rg * Vref) * fs;
+                if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
+                return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
+            }
+            if(role == Role.AcA && fp == 0 && fn_ == 7)
+            {
+                // fw-rs sentinel (AC A V-JACK?): AD1 on SENSE - PB5, SENSE = the V jack through
+                // the /1000 tap with SS5 closed (open otherwise), instantaneous
+                code = ig * SenseTapVolts(t) / (rg * Vref) * fs;
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
             }
@@ -1089,6 +1125,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             switch(role)
             {
             case Role.DcV: case Role.DcMv: case Role.Ohm: case Role.Temp: case Role.None:
+                if(role == Role.DcV && roleRange == 0 && scmpi == 0)
+                {
+                    // fw-rs AC? hint (DC V 6 V): the comparator on SENSE, the V jack / 10
+                    v = VTapVolts(t, AcvK[0]);
+                    return true;
+                }
                 if(scmpi != 4) return false;
                 v = Pb1Volts(t);
                 return true;
@@ -1107,6 +1149,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             double dc, ac, hz, duty; string shape;
             Fe.ACurrent(out dc, out ac, out hz, out shape, out duty);
             return Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR;
+        }
+
+        /// SENSE in the V rows: the V jack (path 0) through a divider of ratio k, instantaneous.
+        private double VTapVolts(double t, double k)
+        {
+            double dc, ac, hz, duty; string shape;
+            Fe.VJack(0, out dc, out ac, out hz, out shape, out duty);
+            return Wave(t, dc, ac, hz, shape, duty) / k;
         }
 
         /// SENSE in the A rows: the /1000 divider tap through SS5 (PA5), else open (0).
@@ -1344,6 +1394,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     }
                     if(j == 9) mask = 0xF8;
                     if(j == 12 && (row.Role == Role.DcA || row.Role == Role.AcA)) mask = 0xEF;
+                    // fw-rs sentinel fields, later ones: the frequency row's AD1 (a zero reading
+                    // nobody reads) may take another input / gain; continuity / diode / capacitance
+                    // leave AD2 and OP2 unused, so AD2IG, the AD2 inputs and OP2 are free there.
+                    if(row.Role == Role.Freq && j == 4) mask = 0;
+                    if(row.Role == Role.Freq && j == 5) mask = 0xCF;
+                    if(row.Role == Role.Cont || row.Role == Role.Diode || row.Role == Role.CapOsc)
+                    {
+                        if(j == 5) mask &= 0x3D;
+                        if(j == 7) mask = 0;
+                        if(j == 18) mask &= 0x0F;
+                    }
                     if(ad2Stream && (j == 9 || j == 20)) mask = 0;
                     // fw-rs power rows: R34 statistic select (SVXI / SDO23) and R35 AD3IN / AD3IG are
                     // run-time choices; the I row's power-bus bytes R2E / R2F = 08 81 are accepted too
