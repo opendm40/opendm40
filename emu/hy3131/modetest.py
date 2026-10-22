@@ -266,7 +266,7 @@ def scenario_script(fw, sc, path):
 
 def run_one(fw, sc, port, fast):
     name, spec, mode_byte, scpi, want, rtol, atol, run_for, extra = sc
-    tag = 'hy-%s-%s' % (fw, name)
+    tag = 'hy-%s-%s-%d' % (fw, name, os.getpid())  # parallel invocations share no file
     script = os.path.join(OUT, tag + '.script')
     scenario_script(fw, sc, script)
     col = Client(port, fw, mode_byte, scpi)
@@ -281,6 +281,9 @@ def run_one(fw, sc, port, fast):
         col.connected.wait(90)  # Renode is listening: run.py's preparation is over
     out, _ = p.communicate()
     wall = time.time() - t0
+    for x in (script, os.path.join(OUT, 'flash-%s.bin' % tag), os.path.join(OUT, tag + '.resc')):
+        if os.path.exists(x):
+            os.remove(x)
     time.sleep(0.5)
     col.stop = True
     col.join(2)
@@ -373,10 +376,14 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     if 'fwrs' in fws:
         # build fw-rs once up front: parallel first runs would race in the shared worktree
-        pre = subprocess.run([sys.executable, RUNNER, 'fwrs', '--name', 'hy-prebuild', '--dry'], cwd=ROOT,
+        pre_tag = 'hy-prebuild-%d' % os.getpid()
+        pre = subprocess.run([sys.executable, RUNNER, 'fwrs', '--name', pre_tag, '--dry'], cwd=ROOT,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        if not os.path.exists(os.path.join(OUT, 'hy-prebuild.resc')):  # --dry exits 1 with the .resc path
+        if not os.path.exists(os.path.join(OUT, pre_tag + '.resc')):  # --dry exits 1 with the .resc path
             sys.exit('fw-rs build failed:\n' + pre.stdout[-2000:])
+        for x in (pre_tag + '.resc', 'flash-%s.bin' % pre_tag):
+            if os.path.exists(os.path.join(OUT, x)):
+                os.remove(os.path.join(OUT, x))
     results = []
     with ThreadPoolExecutor(max_workers=a.jobs) as ex:
         ports = free_ports(a.port_base, len(jobs))

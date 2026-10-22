@@ -193,8 +193,12 @@ def merge_models():
     out = os.path.join(OUT, 'dm40-models.cs')
     text = '\n'.join(usings) + '\n' + '\n'.join(bodies) + '\n'
     if not os.path.exists(out) or read(out).decode() != text:
-        with open(out, 'w') as f:
+        # Write, then rename: a parallel run's Renode never compiles a
+        # truncated file.
+        tmp = '%s.%d.tmp' % (out, os.getpid())
+        with open(tmp, 'w') as f:
             f.write(text)
+        os.replace(tmp, out)
     return out
 
 
@@ -329,7 +333,10 @@ def main(argv=None):
     # ---- SPI disk ----
     disk = a.disk or os.path.join(OUT, 'disk.bin')
     if not a.disk and not os.path.exists(disk):
-        shutil.copy(DISK_SRC, disk)
+        # Copy, then rename: a parallel run never loads a half-copied image.
+        tmp = '%s.%d.tmp' % (disk, os.getpid())
+        shutil.copy(DISK_SRC, tmp)
+        os.replace(tmp, disk)
     if a.disk_add:
         # Work on a private copy so the shared working image is not changed.
         priv = os.path.join(OUT, 'disk-%s.bin' % (a.name or a.mode))

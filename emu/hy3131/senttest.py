@@ -8,8 +8,10 @@ loop); each phase of the script must show only its expected alerts.
   emu/hy3131/senttest.py --app fw-rs/dm40-fw-native.bin --port 3377 dcv-adc acv
   emu/hy3131/senttest.py --list
 
-Results: emu/out/sent-<name>.json (+ .png of the end). One emulator at a
-time per port; run several invocations on different ports in parallel.
+Results: emu/out/sent-<name>.json (+ .png of the end; Renode log
+emu/out/sent-<name>-<port>-<pid>.log). One emulator at a time per port (a
+busy port is refused); run several invocations on different ports in
+parallel.
 """
 import argparse
 import json
@@ -166,9 +168,15 @@ def run(name):
         t = ph[0]
         t1 = phases[i + 1][0] - 1.5 if i + 1 < len(phases) else run_for
         expect.append((t + 2.0 if t > 0 else 5.0, t1, ph[2], ph[3] if len(ph) > 3 else None))
+    if uc.port_busy(A.port):
+        print('RESULT %s FAIL port %d in use (another emulator?): pass a free --port' % (name, A.port), flush=True)
+        return False
     tag = 'sent-' + name
+    # The run's own files (event script, Renode log, flash image, .resc) per
+    # process: parallel runs (distinct --port) share none; results under tag.
+    rtag = '%s-%d-%d' % (tag, A.port, os.getpid())
     os.makedirs(OUT, exist_ok=True)
-    sp = os.path.join(OUT, tag + '.script')
+    sp = os.path.join(OUT, rtag + '.script')
     with open(sp, 'w') as f:
         for m in xtra.get('monitor', []):
             f.write('0 monitor %s\n' % m)
@@ -176,7 +184,7 @@ def run(name):
             f.write('%g dmm %s\n' % (t, spec))
     # USB/IP from 3 s: an attach before fw-rs enumerated can leave the server stuck
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
-           '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', tag,
+           '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', rtag,
            '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     rows = []
@@ -213,6 +221,9 @@ def run(name):
         except Exception as e:
             print(name, 'link ended:', e, flush=True)
     out, _ = p.communicate()
+    for x in (sp, os.path.join(OUT, 'flash-%s.bin' % rtag), os.path.join(OUT, rtag + '.resc')):
+        if os.path.exists(x):
+            os.remove(x)
     ok = True
     bad = []
     for t0, t1, allowed, win in expect:

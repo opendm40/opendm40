@@ -20,8 +20,10 @@ rate, so DBG:AD2:DRAW 2 costs the main loop what it does on the meter):
   * a function change mid-stream (CONF:VOLT:DC): the stream stops first
     (DBG:ISR? forced + 1, LOG:STATe? 0, "Settings conflict"), DC V reads ~0,
     AC V 0.5 V again, DBG:HYSPI:SELF? 200 clean.
-Exit status 0 = all passed. The emulator's SPI2 has the byte timing of the
-device (GD32_SPI: /8 1.28 us, /16 2.56 us per byte, a transmit buffer, DMA
+Exit status 0 = all passed. Parallel runs: a distinct --port each (a busy
+port is refused); every file of a run (event script, Renode log, flash
+image, .resc) is named ad2stream-<port>-<pid> in emu/out/ (the log is kept,
+the rest removed). The emulator's SPI2 has the byte timing of the device (GD32_SPI: /8 1.28 us, /16 2.56 us per byte, a transmit buffer, DMA
 in time) and the HY3131 takes each byte at its own time: a data frame across
 a conversion edge is torn (checked: TornAd2 = 0), a mode-0 /8 bit may be
 sampled at its old level (MisoErrRate), CKPH 1 samples a full period late.
@@ -51,7 +53,11 @@ ap.add_argument('--sessions', default='4800:2:20,9600:1:15,1200:2:10',
                 help='rate:draw:secs[:dma],... (secs scaled by --secs; dma = DBG:AD2:DMA 0 / 1 sent before the '
                      'session; without it nothing is sent: the firmware default (DMA frames) or the last one sent)')
 A = ap.parse_args()
-SCRIPT = os.path.join(EMU, 'out', 'ad2stream-%d.script' % A.port)
+OUT = os.path.join(EMU, 'out')
+os.makedirs(OUT, exist_ok=True)
+TAG = 'ad2stream-%d-%d' % (A.port, os.getpid())
+SCRIPT = os.path.join(OUT, TAG + '.script')
+LOG = os.path.join(OUT, TAG + '.log')
 with open(SCRIPT, 'w') as f:
     f.write('0 monitor sysbus.hy3131 ClockPpm %g\n' % A.ppm)
     for k in range(1, 400):
@@ -66,6 +72,10 @@ os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
 
+if uc.port_busy(A.port):
+    os.remove(SCRIPT)
+    sys.exit('ad2streamtest: port %d is in use (another emulator?): pass a free --port' % A.port)
+
 FAIL = []
 
 
@@ -76,7 +86,7 @@ def check(ok, what):
 
 
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', '200', '--app', A.app,
-       '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', 'ad2stream-%d' % A.port,
+       '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', TAG, '--log', LOG,
        '--dmm', 'vsrc:0,ac=0.5,f=50', '--script', SCRIPT]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
 try:
@@ -225,16 +235,20 @@ try:
 finally:
     os.killpg(emu.pid, 15)
     emu.wait()
+    for p in (SCRIPT, os.path.join(OUT, 'flash-%s.bin' % TAG), os.path.join(OUT, TAG + '.resc')):
+        if os.path.exists(p):
+            os.remove(p)
 
 # The SPI timing model (emu/peripherals/GD32_SPI.cs, HY3131.SpiByteTimed):
 # no stream data frame (a read from R03) across an AD2 conversion edge
 # (`torn`, IntfPhaseHist lines of the Renode log, cumulative).
 import re  # noqa: E402
 try:
-    torn = [int(x) for x in re.findall(r' torn (\d+)', open(os.path.join(EMU, 'out', 'ad2stream-%d.log' % A.port)).read())]
+    torn = [int(x) for x in re.findall(r' torn (\d+)', open(LOG).read())]
 except OSError:
     torn = []
 check(bool(torn) and max(torn) == 0, 'no data frame across an AD2 edge (model TornAd2 %s)' % (max(torn) if torn else 'n/a'))
 
+print('log:', os.path.relpath(LOG, ROOT))
 print('ad2streamtest: %s' % ('PASS' if not FAIL else 'FAIL: ' + '; '.join(FAIL)))
 sys.exit(1 if FAIL else 0)
