@@ -45,6 +45,12 @@ pub enum Alert {
     VJack,
     /// A source on the circuit in ohm / continuity / diode (amber).
     Live,
+    /// Hint (grey): AC V, a DC voltage on V/ohm and (almost) no AC.
+    Dc,
+    /// Hint (grey): DC V 6 V range, the V tap swings both ways (AC).
+    Ac,
+    /// Hint (grey): an A function read exactly zero for 60 s.
+    Fuse,
 }
 
 impl Alert {
@@ -56,6 +62,9 @@ impl Alert {
             Alert::AJack => "AJACK",
             Alert::VJack => "VJACK",
             Alert::Live => "LIVE",
+            Alert::Dc => "DC",
+            Alert::Ac => "AC",
+            Alert::Fuse => "FUSE",
         }
     }
     /// Badge text (DMM status slot, combined-view strip).
@@ -67,6 +76,9 @@ impl Alert {
             Alert::AJack => "A-JACK",
             Alert::VJack => "V-JACK?",
             Alert::Live => "LIVE?",
+            Alert::Dc => "DC?",
+            Alert::Ac => "AC?",
+            Alert::Fuse => "FUSE?",
         }
     }
     /// Combined-view strip badge (its pill holds 6 characters).
@@ -82,6 +94,8 @@ impl Alert {
     pub fn color(self) -> u16 {
         match self {
             Alert::AJack | Alert::Overload => 0xF800,
+            // The hints: the status bar's dim grey.
+            Alert::Dc | Alert::Ac | Alert::Fuse => 0xAD55,
             _ => 0xFC40,
         }
     }
@@ -98,6 +112,9 @@ impl Alert {
             Alert::AJack => "Current in A jack: check leads",
             Alert::VJack => "Voltage on V jack, no current",
             Alert::Live => "Voltage on circuit - power off",
+            Alert::Dc => "DC voltage here: use DC V?",
+            Alert::Ac => "AC voltage here: use AC V?",
+            Alert::Fuse => "0 A for 60 s: check the fuse?",
         }
     }
 }
@@ -122,6 +139,11 @@ pub enum Kind {
     PeakA,
     /// Comparator on SENSE via the /1000 tap (V-JACK?).
     CmpV,
+    /// AD1 peak hold on SENSE - PB5 via the /1000 tap (V-JACK?, AC A).
+    PeakV,
+    /// AD2 peak hold on OP2 (x1) <- PB1, AD2 = OP2O - PB3 (A-JACK;
+    /// continuity, diode, capacitance r0..4).
+    Ad2A,
 }
 
 impl Kind {
@@ -129,8 +151,8 @@ impl Kind {
     pub fn family(self) -> u8 {
         match self {
             Kind::Off => 0,
-            Kind::CmpA | Kind::PeakA => 1,
-            Kind::CmpV => 2,
+            Kind::CmpA | Kind::PeakA | Kind::Ad2A => 1,
+            Kind::CmpV | Kind::PeakV => 2,
         }
     }
     pub fn name(self) -> &'static str {
@@ -139,6 +161,8 @@ impl Kind {
             Kind::CmpA => "CMP_PB1",
             Kind::PeakA => "AD1PK_PB1",
             Kind::CmpV => "CMP_SENSE",
+            Kind::PeakV => "AD1PK_SENSE",
+            Kind::Ad2A => "AD2PK_PB1",
         }
     }
 }
@@ -151,6 +175,16 @@ pub const R20_SENSE: u8 = 0x10;
 pub const R2C_SS5: u8 = 0x10;
 /// AD1 sentinel input: SAD1FP = PB1 (1001), SAD1FN = PB3 (101).
 pub const R24_PB1_PB3: u8 = 0x95;
+/// AD1 V-JACK? input (AC A): SAD1FP = SENSE (0000), SAD1FN = PB5 (111).
+pub const R24_SENSE_PB5: u8 = 0x07;
+/// R25 AD2IG = 11 (2.0).
+pub const R25_AD2IG_20: u8 = 0xC0;
+/// R26: ENAD2, AD2OSR 011 (256), no chopper, AD2RG 0.
+pub const R26_AD2_256: u8 = 0x83;
+/// R27: SAD2IP = OP2O, SAD2IN = PB3, SAD2RH = PB6, SAD2RL = AGND.
+pub const R27_OP2O_PB3: u8 = 0x6D;
+/// R32 high nibble: ENOP2, SOP2P = PB1 (101).
+pub const R32_OP2_PB1: u8 = 0xD0;
 /// R25 AD1IG = 11 (3.6).
 pub const R25_AD1IG_36: u8 = 0x30;
 /// R29: ENPKH, PKHSEL = 01 (AD1<23:5>).
@@ -170,10 +204,16 @@ pub const R33_OP1CHOP: u8 = 0xC0;
 pub const VAR_ACV_CHOP: u8 = 1;
 pub const VAR_ACV_OFF: u8 = 2;
 pub const VAR_DCV_HI: u8 = 4;
+/// bit 3: none of the sentinels added after 9dd1222's device check (AC+DC,
+/// AC A, continuity, diode, capacitance r0..4, frequency: their stock rows).
+pub const VAR_NEW_OFF: u8 = 8;
+/// bit 4: no input alternation for the DC? / AC? hints (AC V's AD1 stays on
+/// PB1 - PB3, DC V r0's comparator on PB1).
+pub const VAR_HINTS_OFF: u8 = 16;
 static VARIANT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
 pub fn set_variant(v: u8) {
-    VARIANT.store(v & 7, core::sync::atomic::Ordering::Relaxed);
+    VARIANT.store(v & 31, core::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn variant() -> u8 {
@@ -206,7 +246,9 @@ pub fn sentinel_row(mode: u8, range: u8, acdc: bool, mask: u8, row: &[u8; CFG_LE
 /// `sentinel_row` with an explicit variant (host tests).
 pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CFG_LEN]) -> ([u8; CFG_LEN], Kind) {
     let mut c = *row;
-    if acdc {
+    // AC+DC: both phases carry their mode's sentinel (the DC phases' R20
+    // also goes through `acdc_src`: freq_secondary rewrites it every 350 ms).
+    if var & VAR_NEW_OFF != 0 && (acdc || matches!(mode, 4..=6 | 11..=14)) {
         return (c, Kind::Off);
     }
     let kind = match mode {
@@ -232,14 +274,66 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
             c[12] |= R2C_SS5;
             Kind::CmpV
         }
+        // Frequency: AD1 runs a zero reading (PB5 - PB5) nobody reads; it
+        // takes PB1 - PB3 with the AC rows' peak-hold settings instead.
+        14 if mask & M_AJACK != 0 => {
+            c[2] = 0x00;
+            c[3] |= 0x80;
+            c[4] = R24_PB1_PB3;
+            c[5] |= R25_AD1IG_36;
+            c[9] = (c[9] & 0xF8) | R29_PKH_AD1;
+            Kind::PeakA
+        }
+        // AC A: AD1 (off in the row) on SENSE - PB5 with the /1000 tap
+        // (SS5 only, as DC A), IG 3.6, the peak hold; OP1's chopper held off
+        // as in the AC V sentinel row (AD1 on would start it: 9dd1222).
+        4..=6 if mask & M_VJACK != 0 => {
+            c[2] = 0x00;
+            c[3] |= 0x80;
+            c[4] = R24_SENSE_PB5;
+            c[5] |= R25_AD1IG_36;
+            c[9] = (c[9] & 0xF8) | R29_PKH_AD1;
+            c[12] |= R2C_SS5;
+            c[19] &= !R33_OP1CHOP;
+            Kind::PeakV
+        }
+        // Continuity, diode, capacitance r0..4: AD2 and OP2 are free. OP2
+        // (x1, OPS2 = 0) on PB1, AD2 = OP2O - PB3 (refs PB6 / AGND) at IG
+        // 2.0, OSR 256, the peak hold on AD2 (PKHSEL 00). AD1 (on in
+        // continuity / diode) is written last (`ad1_last`, note 7).
+        11 | 12 if mask & M_AJACK != 0 => ad2_sentinel(&mut c),
+        13 if range <= 4 && mask & M_AJACK != 0 => ad2_sentinel(&mut c),
         _ => Kind::Off,
     };
     (c, kind)
 }
 
+/// The AD2 / OP2 A-JACK overrides (`row_for`).
+fn ad2_sentinel(c: &mut [u8; CFG_LEN]) -> Kind {
+    c[5] = (c[5] & 0x3D) | R25_AD2IG_20;
+    c[6] = R26_AD2_256;
+    c[7] = R27_OP2O_PB3;
+    c[9] = (c[9] & 0xF8) | R29_ENPKH;
+    c[18] = R32_OP2_PB1 | (c[18] & 0x0F);
+    Kind::Ad2A
+}
+
+/// The row has AD1 and AD2 both on: write it with AD1 off and switch AD1
+/// on last, so AD2 never starts while AD1 converts (datasheet 13.1 note 7;
+/// `powermeter::configure_dc` does the same).
+pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
+    kind == Kind::Ad2A && row[3] & 0x80 != 0
+}
+
 /// A-JACK on the AD1 peak: |PKH| above 0.5 mA on 47.5 ohm (23.75 mV at
 /// PB1): IG 3.6 * 23.75 mV / 1.25 V * 2^23 / 2^5 = 17 932.
 pub const PK_THR: i32 = 17_900;
+/// A-JACK on the AD2 peak (19-bit AD2 codes, IG 2.0, OP2 x1): 0.5 mA on
+/// 47.5 ohm = 23.75 mV: 2.0 * 23.75 mV / 1.25 V * 2^18 = 9 961.
+pub const PK2_THR: i32 = 9_900;
+/// V-JACK? on the AD1 peak in AC A: 2 V on V/ohm through the /1000 tap =
+/// 2 mV at SENSE: 3.6 * 2 mV / 1.25 V * 2^18 = 1 510 (doc 4.2: ~2 V).
+pub const PKV_THR: i32 = 1_510;
 /// Window length (ms) of the comparator samples; a window with any trip is
 /// a "hit".
 pub const WIN_MS: u64 = 100;
@@ -322,6 +416,89 @@ pub fn overload_release_thr(barred: u8, back: Option<(u8, u8)>) -> f32 {
     t.max(OVL_ZERO_A)
 }
 
+/// Hints (doc 4.4, grey, silent, toast once): enabled with V-JACK? (Settings
+/// "Jack alerts" ON = all; "A-JACK only" / OFF drop them).
+pub const M_HINTS: u8 = M_VJACK;
+/// DC?: |DC| on the V tap above this (V) and the AC reading below
+/// DC_HINT_AC x |DC|, for HINT_ASSERT_MS; AC?: the V tap above +20.8 mV and
+/// below -20.8 mV in one comparator window (DC V r0: +-0.21 V at the jack).
+pub const DC_HINT_V: f32 = 0.5;
+pub const DC_HINT_AC: f32 = 0.1;
+pub const HINT_ASSERT_MS: u64 = 2000;
+pub const HINT_CLEAR_MS: u64 = 1000;
+/// FUSE?: an A function "at zero" this long: |I| below FUSE_FRAC of the
+/// range (0.1 %: 60 counts of 60000; a blown fuse leaves the amplifier
+/// offset and noise) in DC, below AC_FLOOR_FRAC in AC / AC+DC (the RMS floor
+/// of the uA path is ~1.5 % of 600 uA, acdc doc 6b).
+pub const FUSE_HINT_MS: u64 = 60_000;
+pub const FUSE_FRAC: f32 = 0.001;
+pub const AC_FLOOR_FRAC: f32 = 0.05;
+
+/// A condition that asserts after being seen for `assert_ms` and clears
+/// `clear_ms` after it was last seen (LIVE?'s rule, for the hints).
+#[derive(Clone, Copy)]
+struct Held {
+    t0: Option<u64>,
+    last: u64,
+}
+
+impl Held {
+    const NEW: Held = Held { t0: None, last: 0 };
+    fn feed(&mut self, now: u64, on: bool, clear_ms: u64) {
+        if on {
+            if self.t0.is_none() {
+                self.t0 = Some(now);
+            }
+            self.last = now;
+        } else if now.saturating_sub(self.last) >= clear_ms {
+            self.t0 = None;
+        }
+    }
+    fn asserted(&self, now: u64, was: bool, assert_ms: u64, clear_ms: u64) -> bool {
+        match self.t0 {
+            Some(_) if was => now.saturating_sub(self.last) < clear_ms,
+            Some(t0) => self.last.saturating_sub(t0) >= assert_ms,
+            None => false,
+        }
+    }
+}
+
+// ----------------------------------------------------------- fuse check
+//
+// Doc 4.3: a blown fuse is invisible to the meter (the A side of the fuse
+// has no path into the chip); the user checks it with a lead from V/ohm to
+// A in ohm mode. The shunt MOSFETs rest off in ohm (PE = 2), so the path is
+// fuse + 10 mohm + 0.5 + 47.5 ohm ~ 48 ohm to COM (+ the lead).
+
+/// The fuse check's result (SYST:FUSE?, the dialog).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum FuseRes {
+    Idle,
+    Busy,
+    /// ~48 ohm: the fuse and the shunt chain conduct.
+    Ok(f32),
+    /// OL: no path from V/ohm through A (the fuse, or the lead).
+    Open,
+    /// Another resistance (ohm): a lead elsewhere, a short V-COM, ...
+    Odd(f32),
+    /// No ohm reading came within the time.
+    NoReading,
+}
+
+/// Accepted window for "fuse OK" (ohm): 47.5 + 0.5 + 0.06 ohm -10 % / +10 %
+/// plus 1 ohm of lead and contact.
+pub const FUSE_OHM: (f32, f32) = (44.0, 54.0);
+
+pub fn fuse_verdict(ohm: f32, ol: bool) -> FuseRes {
+    if ol || !ohm.is_finite() {
+        FuseRes::Open
+    } else if (FUSE_OHM.0..=FUSE_OHM.1).contains(&ohm) {
+        FuseRes::Ok(ohm)
+    } else {
+        FuseRes::Odd(ohm)
+    }
+}
+
 pub struct Sentinel {
     pub kind: Kind,
     pub mask: u8,
@@ -330,6 +507,8 @@ pub struct Sentinel {
     pub seq: u32,
     win_t0: u64,
     win_hit: bool,
+    /// CTSTA bits ORed over the window (AC?).
+    win_both: u8,
     streak: u8,
     /// Time of the last hit window (comparator / peak) and of its first one
     /// in the current run of hits.
@@ -347,6 +526,17 @@ pub struct Sentinel {
     pub samples: u32,
     /// OVERLOAD latch in force (set by `dmm.rs`, `set_overload`).
     pub ovl: bool,
+    /// Hints: DC? / AC? / FUSE? conditions.
+    dc: Held,
+    ac: Held,
+    fuse: Held,
+    /// The row alternates its sentinel input every window (AC V: AD1 PB1
+    /// <-> the V tap for DC?; DC V r0: the comparator PB1 <-> SENSE for
+    /// AC?); `alt_v`: the window in progress watches the V tap.
+    pub alt: bool,
+    pub alt_v: bool,
+    /// The last V-tap window's peak pair (DC?), for `dmm.rs`.
+    pub pk_v: Option<(i32, i32)>,
 }
 
 impl Sentinel {
@@ -358,6 +548,7 @@ impl Sentinel {
             seq: 0,
             win_t0: 0,
             win_hit: false,
+            win_both: 0,
             streak: 0,
             last_hit: 0,
             run_t0: 0,
@@ -369,6 +560,12 @@ impl Sentinel {
             hits: 0,
             samples: 0,
             ovl: false,
+            dc: Held::NEW,
+            ac: Held::NEW,
+            fuse: Held::NEW,
+            alt: false,
+            alt_v: false,
+            pk_v: None,
         }
     }
 
@@ -381,10 +578,16 @@ impl Sentinel {
     /// latch's (`set_overload`) and survives a row change (the latch steps
     /// through ranges of its own).
     pub fn configured(&mut self, kind: Kind, now: u64, reset: bool) {
+        self.alt = false;
+        self.alt_v = false;
+        self.pk_v = None;
         if kind.family() != self.kind.family() || reset {
             self.streak = 0;
             self.low_since = None;
             self.live_t0 = None;
+            self.dc = Held::NEW;
+            self.ac = Held::NEW;
+            self.fuse = Held::NEW;
             if !matches!(self.alert, Alert::None | Alert::Overload) {
                 self.alert = Alert::None;
             }
@@ -408,6 +611,7 @@ impl Sentinel {
             Alert::AJack => M_AJACK,
             Alert::VJack => M_VJACK,
             Alert::Live => M_LIVE,
+            Alert::Dc | Alert::Ac | Alert::Fuse => M_HINTS,
             Alert::None | Alert::Overload => 0,
         };
         if bit != 0 && self.mask & bit == 0 {
@@ -416,17 +620,36 @@ impl Sentinel {
     }
 
     /// One CTSTA sample (comparator kinds), taken on every poll.
-    pub fn sample_cmp(&mut self, now: u64, ctsta: u8) {
+    /// True = a window closed: with `alt` the caller points the comparator
+    /// at the next window's node (`alt_v`: SENSE, else PB1).
+    pub fn sample_cmp(&mut self, now: u64, ctsta: u8) -> bool {
         self.ctsta = ctsta;
         self.samples = self.samples.wrapping_add(1);
-        self.win_hit |= ctsta & CTSTA_CMP != 0;
-        if now.saturating_sub(self.win_t0) >= WIN_MS {
+        if self.alt && self.alt_v {
+            // V-tap window (AC?): both bits = the tap swings both ways.
+            self.win_hit |= ctsta & CTSTA_CMP != 0;
+            self.win_both |= ctsta & CTSTA_CMP;
+        } else {
+            self.win_hit |= ctsta & CTSTA_CMP != 0;
+        }
+        let closed = now.saturating_sub(self.win_t0) >= WIN_MS;
+        if closed {
             let hit = self.win_hit;
+            let both = self.win_both == CTSTA_CMP;
             self.win_t0 = now;
             self.win_hit = false;
-            self.window(now, hit);
+            self.win_both = 0;
+            if self.alt && self.alt_v {
+                self.ac.feed(now, both, HINT_CLEAR_MS);
+            } else {
+                self.window(now, hit);
+            }
+            if self.alt {
+                self.alt_v = !self.alt_v;
+            }
         }
         self.decide(now);
+        closed
     }
 
     /// One peak-hold harvest (AD1 kind; every AC result, ~107 ms apart).
@@ -435,8 +658,33 @@ impl Sentinel {
     pub fn sample_peak(&mut self, now: u64, pkmin: i32, pkmax: i32) {
         self.pk = (pkmin, pkmax);
         self.samples = self.samples.wrapping_add(1);
-        let hit = pkmax >= pkmin && (pkmax > PK_THR || pkmin < -PK_THR);
-        self.window(now, hit);
+        let thr = match self.kind {
+            Kind::PeakV => PKV_THR,
+            Kind::Ad2A => PK2_THR,
+            _ => PK_THR,
+        };
+        let hit = pkmax >= pkmin && (pkmax > thr || pkmin < -thr);
+        if self.alt && self.alt_v {
+            // V-tap window (DC?): `dmm.rs` turns the pair into volts.
+            self.pk_v = (pkmax >= pkmin).then_some((pkmin, pkmax));
+        } else {
+            self.window(now, hit);
+        }
+        if self.alt {
+            self.alt_v = !self.alt_v;
+        }
+        self.decide(now);
+    }
+
+    /// DC? condition from the last V-tap window (`dmm.rs`).
+    pub fn dc_hint(&mut self, now: u64, on: bool) {
+        self.dc.feed(now, on, HINT_CLEAR_MS);
+        self.decide(now);
+    }
+
+    /// FUSE? condition: an A-function reading at zero (`on`) or not.
+    pub fn fuse_reading(&mut self, now: u64, zero: bool) {
+        self.fuse.feed(now, zero, 500);
         self.decide(now);
     }
 
@@ -482,7 +730,7 @@ impl Sentinel {
     /// > LIVE?).
     fn decide(&mut self, now: u64) {
         let ajack = match self.kind {
-            Kind::CmpA | Kind::PeakA => {
+            Kind::CmpA | Kind::PeakA | Kind::Ad2A => {
                 let on = matches!(self.alert, Alert::AJack);
                 if on {
                     now.saturating_sub(self.last_hit) < AJACK_CLEAR_MS
@@ -492,7 +740,7 @@ impl Sentinel {
             }
             _ => false,
         } && self.mask & M_AJACK != 0;
-        let vjack = self.kind == Kind::CmpV && self.mask & M_VJACK != 0 && {
+        let vjack = self.kind.family() == 2 && self.mask & M_VJACK != 0 && {
             let on = matches!(self.alert, Alert::VJack);
             let low = self.low_since.map_or(false, |t| now.saturating_sub(t) >= VJACK_ASSERT_MS);
             if on {
@@ -509,6 +757,10 @@ impl Sentinel {
                 None => false,
             }
         };
+        let hints = self.mask & M_HINTS != 0;
+        let dc = hints && self.dc.asserted(now, self.alert == Alert::Dc, HINT_ASSERT_MS, HINT_CLEAR_MS);
+        let ac = hints && self.ac.asserted(now, self.alert == Alert::Ac, HINT_ASSERT_MS, HINT_CLEAR_MS);
+        let fuse = hints && self.fuse.asserted(now, self.alert == Alert::Fuse, FUSE_HINT_MS, 500);
         let a = if self.ovl {
             Alert::Overload
         } else if ajack {
@@ -517,6 +769,12 @@ impl Sentinel {
             Alert::VJack
         } else if live {
             Alert::Live
+        } else if dc {
+            Alert::Dc
+        } else if ac {
+            Alert::Ac
+        } else if fuse {
+            Alert::Fuse
         } else {
             Alert::None
         };
@@ -674,16 +932,143 @@ mod tests {
     }
 
     #[test]
-    fn other_rows_masks_and_acdc_untouched() {
-        let all: Vec<(u8, &[u8; CFG_LEN])> = vec![(4, &CFG_F4[0]), (5, &CFG_F5_6[1]), (11, &CFG_F11[0]), (12, &CFG_F12[0]), (13, &CFG_F13[0]), (13, &CFG_F13[6]), (14, &CFG_F14[0])];
-        for (m, r) in all {
-            assert_eq!(row_for(m, 0, false, M_ALL, 0, r), (*r, Kind::Off));
+    fn masks_and_ramp_rows_untouched() {
+        // Capacitance r5..7 (the ramp: both op amps on PB0, AD1 and the
+        // comparator busy) and r8: no free block (doc 4.2) - the stock rows.
+        for r in 5..7u8 {
+            let row = &CFG_F13[r as usize];
+            assert_eq!(row_for(13, r, false, M_ALL, 0, row), (*row, Kind::Off), "cap r{r}");
+            assert_eq!(row_for(13, r + 2, false, M_ALL, 0, row).1, Kind::Off);
         }
-        assert_eq!(row_for(1, 0, true, M_ALL, 0, &CFG_F1[0]), (CFG_F1[0], Kind::Off));
-        assert_eq!(row_for(0, 0, true, M_ALL, 0, &CFG_F0[1]), (CFG_F0[1], Kind::Off));
         assert_eq!(row_for(1, 0, false, M_VJACK | M_LIVE, 0, &CFG_F1[0]), (CFG_F1[0], Kind::Off));
         assert_eq!(row_for(0, 0, false, 0, 0, &CFG_F0[0]), (CFG_F0[0], Kind::Off));
         assert_eq!(row_for(7, 0, false, M_AJACK, 0, &CFG_F7[0]), (CFG_F7[0], Kind::Off));
+        assert_eq!(row_for(4, 0, false, M_AJACK, 0, &CFG_F4[0]), (CFG_F4[0], Kind::Off));
+        for (m, r) in [(11u8, &CFG_F11[0]), (12, &CFG_F12[0]), (13, &CFG_F13[0]), (14, &CFG_F14[0])] {
+            assert_eq!(row_for(m, 0, false, M_VJACK | M_LIVE, 0, r), (*r, Kind::Off), "mode {m}");
+        }
+        // VAR_NEW_OFF: the later sentinels (and AC+DC) back to the stock rows;
+        // the 9dd1222 ones stay.
+        for (m, r) in [(4u8, &CFG_F4[0]), (5, &CFG_F5_6[1]), (11, &CFG_F11[0]), (12, &CFG_F12[0]), (13, &CFG_F13[0]), (14, &CFG_F14[0])] {
+            assert_eq!(row_for(m, 0, false, M_ALL, VAR_NEW_OFF, r), (*r, Kind::Off), "mode {m}");
+        }
+        assert_eq!(row_for(1, 0, true, M_ALL, VAR_NEW_OFF, &CFG_F1[0]), (CFG_F1[0], Kind::Off));
+        assert_eq!(row_for(1, 0, false, M_ALL, VAR_NEW_OFF, &CFG_F1[0]).1, Kind::CmpA);
+    }
+
+    #[test]
+    fn acdc_phases_carry_their_modes_sentinel() {
+        // AC+DC: the DC phases as plain DC (comparator), the AC phases as
+        // plain AC (AD1 peak); DC V 60 V+ still none.
+        for (m, r, row, k) in [
+            (1u8, 0u8, &CFG_F1[0], Kind::CmpA),
+            (3, 1, &CFG_F3[1], Kind::CmpA),
+            (0, 1, &CFG_F0[1], Kind::PeakA),
+            (2, 0, &CFG_F2[0], Kind::PeakA),
+            (7, 1, &CFG_F7[1], Kind::CmpV),
+            (8, 0, &CFG_F8_9[0], Kind::CmpV),
+            (4, 1, &CFG_F4[1], Kind::PeakV),
+            (5, 0, &CFG_F5_6[0], Kind::PeakV),
+            (1, 2, &CFG_F1[2], Kind::Off),
+        ] {
+            assert_eq!(row_for(m, r, true, M_ALL, 0, row), row_for(m, r, false, M_ALL, 0, row), "mode {m}");
+            assert_eq!(row_for(m, r, true, M_ALL, 0, row).1, k, "mode {m}");
+        }
+        assert_eq!(Kind::CmpA.family(), Kind::PeakA.family());
+        assert_eq!(Kind::CmpV.family(), Kind::PeakV.family());
+    }
+
+    #[test]
+    fn aca_rows_ad1_on_sense_with_ss5() {
+        for (m, rows) in [(4u8, &CFG_F4[..]), (5, &CFG_F5_6[..]), (6, &CFG_F5_6[..])] {
+            for (i, r) in rows.iter().enumerate() {
+                let (c, k) = row_for(m, i as u8, false, M_ALL, 0, r);
+                assert_eq!(k, Kind::PeakV);
+                let idx: Vec<usize> = diff(r, &c).iter().map(|x| x.0).collect();
+                // R22 OSR, R23 ENAD1, R24 inputs, R25 AD1IG, R29 PKH, R2C
+                // SS5, R33 OP1CHOP held off.
+                assert_eq!(idx, vec![2, 3, 4, 5, 9, 12, 19], "mode {m} r{i}");
+                assert_eq!(r[3] & 0x80, 0, "AD1 off in the stock AC A row");
+                assert_eq!((c[2], c[3], c[4]), (0x00, r[3] | 0x80, 0x07));
+                assert_eq!(c[5], r[5] | 0x30);
+                assert_eq!(c[9], (r[9] & 0xF8) | 5);
+                assert_eq!((r[12], c[12]), (0, 0x10), "SS5 only, never PS5");
+                assert_eq!((r[19] & 0xC0, c[19]), (0x80, r[19] & 0x3F));
+                // The A rows run the power bus as SGND (R2F 0x81); refs PB6 / AGND.
+                assert_eq!((r[15], c[8]), (0x81, 0x31));
+            }
+        }
+    }
+
+    #[test]
+    fn freq_row_ad1_peak_on_pb1() {
+        let r = &CFG_F14[0];
+        let (c, k) = row_for(14, 0, false, M_ALL, 0, r);
+        assert_eq!(k, Kind::PeakA);
+        let idx: Vec<usize> = diff(r, &c).iter().map(|x| x.0).collect();
+        // R22 OSR 256 unchopped, R24 PB1 - PB3 (was PB5 - PB5), R25 AD1IG,
+        // R29 PKH; AD1 already on, OP1's chopper already off.
+        assert_eq!(idx, vec![2, 4, 5, 9]);
+        assert_eq!((r[3] & 0x80, r[4], r[19] & 0xC0), (0x80, 0xDF, 0));
+        assert_eq!((c[2], c[4], c[5] & 0x30, c[9] & 7), (0, 0x95, 0x30, 5));
+        assert_eq!(c[9] & 0xF8, r[9] & 0xF8, "RMS / LPF kept");
+    }
+
+    #[test]
+    fn ad2_rows_cont_diode_cap() {
+        let mut rows: Vec<(u8, u8, &[u8; CFG_LEN])> = vec![(11, 0, &CFG_F11[0]), (12, 0, &CFG_F12[0])];
+        rows.extend(CFG_F13[..5].iter().enumerate().map(|(i, r)| (13u8, i as u8, r)));
+        for (m, i, r) in rows {
+            let (c, k) = row_for(m, i, false, M_ALL, 0, r);
+            assert_eq!(k, Kind::Ad2A, "mode {m} r{i}");
+            let idx: Vec<usize> = diff(r, &c).iter().map(|x| x.0).collect();
+            // R25 AD2IG (OPS2 x1), R26 ENAD2, R27 AD2 inputs, R29 ENPKH, R32 OP2.
+            for j in &idx {
+                assert!([5usize, 6, 7, 9, 18].contains(j), "mode {m} r{i}: byte {j}");
+            }
+            // The stock rows: AD2, OP2, RMS / LPF off; nothing else uses them.
+            assert_eq!((r[6] & 0x80, r[18] & 0x80, r[9] & 0xC7, r[20] & 0x80), (0, 0, 0, 0), "mode {m} r{i}");
+            assert_eq!(c[5] & 0x3F, r[5] & 0x3D, "AD1IG / SACM / OPS1 kept, OPS2 = 0");
+            assert_eq!((c[5] >> 6, c[6], c[7], c[9], c[18] >> 4), (3, 0x83, 0x6D, r[9] | 4, 0xD));
+            assert_eq!(c[18] & 0x0F, r[18] & 0x0F, "OP1 kept");
+            // AD1 on (continuity, diode): written last; off (cap r0..4): as is.
+            assert_eq!(ad1_last(k, &c), r[3] & 0x80 != 0);
+        }
+        assert_eq!(CFG_F13[0][3] & 0x80, 0);
+        assert!(ad1_last(Kind::Ad2A, &CFG_F12[0]));
+        assert!(!ad1_last(Kind::PeakA, &CFG_F12[0]));
+    }
+
+    #[test]
+    fn peak_thresholds_per_kind() {
+        let mut s = Sentinel::new();
+        // AD2 kind: 0.5 mA on 47.5 ohm at IG 2.0 ~ 9 961 codes.
+        s.configured(Kind::Ad2A, 0, true);
+        s.sample_peak(100, -5_000, 9_000);
+        s.sample_peak(200, -5_000, 9_000);
+        assert_eq!(s.alert, Alert::None);
+        s.sample_peak(300, -12_000, 0);
+        s.sample_peak(400, -12_000, 0);
+        assert_eq!(s.alert, Alert::AJack);
+        // V-JACK? on the AD1 SENSE peak: needs the current small for 1 s.
+        let mut s = Sentinel::new();
+        s.configured(Kind::PeakV, 0, true);
+        let mut t = 0;
+        while t < 2000 {
+            s.sample_peak(t, -1_000, 1_000);
+            s.current_small(t, true);
+            t += 107;
+        }
+        assert_eq!(s.alert, Alert::None);
+        while t < 4000 {
+            s.sample_peak(t, -3_000, 3_000);
+            s.current_small(t, true);
+            t += 107;
+        }
+        assert_eq!(s.alert, Alert::VJack);
+        // 230 V and 12 mA flowing: none.
+        s.current_small(t, false);
+        assert_eq!(s.alert, Alert::None);
     }
 
     #[test]
@@ -921,6 +1306,136 @@ mod tests {
         // Another family: dropped.
         s.configured(Kind::CmpV, 500, false);
         assert_eq!(s.alert, Alert::None);
+    }
+
+    #[test]
+    fn alternating_comparator_ajack_and_ac_hint() {
+        // DC V r0 with the AC? alternation: PB1 and SENSE windows take turns.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.alt = true;
+        let mut t = 0;
+        // Nothing anywhere: quiet.
+        while t < 3000 {
+            s.sample_cmp(t, 0);
+            t += 10;
+        }
+        assert_eq!(s.alert, Alert::None);
+        // AC on the V tap (both bits within SENSE windows), A jack quiet:
+        // AC? after ~2 s, never A-JACK.
+        let t0 = t;
+        while s.alert == Alert::None {
+            let v = s.alt_v;
+            s.sample_cmp(t, if v { if (t / 10) % 2 == 0 { 0x20 } else { 0x10 } } else { 0 });
+            t += 10;
+            assert!(t - t0 < 4000);
+        }
+        assert_eq!(s.alert, Alert::Ac);
+        assert!(t - t0 >= 2000, "{}", t - t0);
+        // DC on the V tap (one bit only): AC? clears; no A-JACK either.
+        let t1 = t;
+        while s.alert == Alert::Ac {
+            let v = s.alt_v;
+            s.sample_cmp(t, if v { 0x20 } else { 0 });
+            t += 10;
+            assert!(t - t1 < 3000);
+        }
+        assert_eq!(s.alert, Alert::None);
+        // Current in the A jack (PB1 windows): A-JACK within ~0.4 s.
+        let t2 = t;
+        while s.alert != Alert::AJack {
+            let v = s.alt_v;
+            s.sample_cmp(t, if v { 0 } else { 0x20 });
+            t += 10;
+            assert!(t - t2 < 500, "{}", t - t2);
+        }
+        // Hints off with "A-JACK only".
+        s.set_mask(M_AJACK);
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.set_mask(M_AJACK | M_LIVE);
+        s.alt = true;
+        for t in (0..5000).step_by(10) {
+            let v = s.alt_v;
+            s.sample_cmp(t, if v { if (t / 10) % 2 == 0 { 0x20 } else { 0x10 } } else { 0 });
+        }
+        assert_eq!(s.alert, Alert::None);
+    }
+
+    #[test]
+    fn alternating_peak_dc_window() {
+        let mut s = Sentinel::new();
+        s.configured(Kind::PeakA, 0, true);
+        s.alt = true;
+        // PB1 window, then the V-tap window: its pair is handed out, not
+        // taken as an A-JACK hit even when large.
+        s.sample_peak(107, -10, 10);
+        assert!(s.alt_v && s.pk_v.is_none());
+        s.sample_peak(214, 40_000, 41_000);
+        assert_eq!(s.pk_v, Some((40_000, 41_000)));
+        assert!(!s.alt_v);
+        s.sample_peak(321, -10, 10);
+        s.sample_peak(428, 40_000, 41_000);
+        assert_eq!(s.alert, Alert::None);
+        // DC? after 2 s of the condition.
+        let mut t = 500;
+        while t < 2400 {
+            s.dc_hint(t, true);
+            t += 214;
+        }
+        assert_eq!(s.alert, Alert::None);
+        s.dc_hint(2600, true);
+        assert_eq!(s.alert, Alert::Dc);
+        s.dc_hint(3000, false);
+        assert_eq!(s.alert, Alert::Dc);
+        s.dc_hint(3700, false);
+        assert_eq!(s.alert, Alert::None);
+        // A-JACK (two PB1 windows in a row, the V window between) wins.
+        s.sample_peak(3800, -50_000, 50_000);
+        s.sample_peak(3907, 0, 0);
+        s.sample_peak(4014, -50_000, 50_000);
+        assert_eq!(s.alert, Alert::AJack);
+    }
+
+    #[test]
+    fn fuse_hint_after_60s_of_zero() {
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpV, 0, true);
+        let mut t = 0;
+        while t < 59_000 {
+            s.fuse_reading(t, true);
+            t += 400;
+        }
+        assert_eq!(s.alert, Alert::None);
+        while t < 61_000 {
+            s.fuse_reading(t, true);
+            t += 400;
+        }
+        assert_eq!(s.alert, Alert::Fuse);
+        assert_eq!(s.alert.name(), "FUSE");
+        assert!(!s.alert.red() && ques_bits(s.alert) == 0);
+        // Any current: gone at once; the minute starts again.
+        s.fuse_reading(t, false);
+        s.fuse_reading(t + 600, false);
+        assert_eq!(s.alert, Alert::None);
+        s.fuse_reading(t + 1000, true);
+        s.fuse_reading(t + 30_000, true);
+        assert_eq!(s.alert, Alert::None);
+        // A function change resets it.
+        s.configured(Kind::Off, t + 30_100, true);
+        s.fuse_reading(t + 60_000, true);
+        assert_eq!(s.alert, Alert::None);
+    }
+
+    #[test]
+    fn fuse_verdicts() {
+        assert_eq!(fuse_verdict(48.1, false), FuseRes::Ok(48.1));
+        assert_eq!(fuse_verdict(53.9, false), FuseRes::Ok(53.9));
+        assert_eq!(fuse_verdict(600.0, true), FuseRes::Open);
+        assert_eq!(fuse_verdict(f32::NAN, false), FuseRes::Open);
+        // A short V-COM, the lead in COM instead of A, a leaky path.
+        assert_eq!(fuse_verdict(0.2, false), FuseRes::Odd(0.2));
+        assert_eq!(fuse_verdict(120.0, false), FuseRes::Odd(120.0));
     }
 
     #[test]

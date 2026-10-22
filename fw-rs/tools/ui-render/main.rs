@@ -402,7 +402,16 @@ fn ol(dec: u8, unit: &'static str) -> Val {
 }
 
 /// Wrong-connection alerts (sentinel.rs) cycled through the page / strip matrices.
-const ALERTS: [sentinel::Alert; 5] = [sentinel::Alert::None, sentinel::Alert::AJack, sentinel::Alert::VJack, sentinel::Alert::Live, sentinel::Alert::Overload];
+const ALERTS: [sentinel::Alert; 8] = [
+    sentinel::Alert::None,
+    sentinel::Alert::AJack,
+    sentinel::Alert::VJack,
+    sentinel::Alert::Live,
+    sentinel::Alert::Overload,
+    sentinel::Alert::Dc,
+    sentinel::Alert::Ac,
+    sentinel::Alert::Fuse,
+];
 
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
@@ -1676,6 +1685,9 @@ fn main() {
         // Firmware file on the USB disk (vwrite.rs, app.rs).
         (dialog::FW_BAD, false),
         ("Installing firmware...", true),
+        (sentinel::Alert::Dc.toast(), false),
+        (sentinel::Alert::Ac.toast(), false),
+        (sentinel::Alert::Fuse.toast(), false),
     ]
     .iter()
     .enumerate()
@@ -1692,6 +1704,38 @@ fn main() {
         }
         if k == 8 {
             save(&out, "t02-toast-resolution");
+        }
+    }
+
+    // 6c'. Fuse-check dialog (dialog::fuse_screen): every stage and verdict,
+    //      the widest resistance texts; each line fits the box.
+    {
+        use sentinel::FuseRes as F;
+        for (k, (stage, res)) in [
+            (0u8, F::Idle),
+            (1, F::Busy),
+            (2, F::Ok(48.12)),
+            (2, F::Open),
+            (2, F::Odd(0.25)),
+            (2, F::Odd(599.9)),
+            (2, F::NoReading),
+        ]
+        .iter()
+        .enumerate()
+        {
+            host::reset(0);
+            let mut b = [0u8; 32];
+            dialog::fuse_screen(*stage, *res, &mut b);
+            let (x, y, w2, h2) = dialog::FBOX;
+            ck.check(&format!("fuse/{k}"), &[("screen", Bx::new(0, 0, 480, 320)), ("box", Bx::new(x as i32, y as i32, w2 as i32, h2 as i32))]);
+            save(&out, &format!("f0{k}-fuse-check"));
+        }
+        for t in ["Lead from V/ohm jack to A", "nothing else connected", "OL: no path from V to A", "Replace: 10 A ceramic fuse", "One lead V/ohm to A only", "599.9 ohm, expect ~48"] {
+            ck.cases += 1;
+            let w = stockfont::text_width(stockfont::ASCII26, t, 2);
+            if w > dialog::FBOX.2 as i16 - 16 {
+                ck.fail("fuse/width", format!("{t:?} {w} px"));
+            }
         }
     }
 
@@ -1872,6 +1916,8 @@ fn main() {
             ("dcma_420lo", "d13-dmm-vjack", Button::Amp, sentinel::Alert::VJack),
             ("ohm_k", "d14-dmm-live", Button::Ohm, sentinel::Alert::Live),
             ("dca10", "d17-dmm-overload", Button::Amp, sentinel::Alert::Overload),
+            ("dcv", "d18-dmm-achint", Button::Volt, sentinel::Alert::Ac),
+            ("dcma_420lo", "d19-dmm-fusehint", Button::Amp, sentinel::Alert::Fuse),
         ] {
             host::reset(0);
             let (mut r, _) = find(case);

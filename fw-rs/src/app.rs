@@ -220,6 +220,8 @@ pub struct App {
     alert_seq: u32,
     alert_beep_t0: Option<u64>,
     alert_buzz: bool,
+    /// A fuse check was running at the last tick (`fuse_tick`).
+    fuse_busy: bool,
     pub meas: [f32; 4],
     beep_until: u64,
     pub last_raw: Option<Reading>,
@@ -429,6 +431,7 @@ impl App {
             alert_seq: 0,
             alert_beep_t0: None,
             alert_buzz: false,
+            fuse_busy: false,
             meas: [0.0; 4],
             pd6_armed: false,
             pd6_off: false,
@@ -1192,10 +1195,15 @@ impl App {
                 None => {}
             }
         }
+        self.fuse_tick(clk, now);
         if self.overlay.is_some_and(|o| now >= o.until()) {
             #[cfg(feature = "vdisk")]
             if matches!(self.overlay, Some(crate::dialog::Overlay::FwInstall { .. })) {
                 crate::vwrite::answer(false);
+            }
+            if matches!(self.overlay, Some(crate::dialog::Overlay::FuseCheck { stage: 1, .. })) {
+                self.dmm.fuse_cancel(clk);
+                self.func_changed();
             }
             self.overlay = None; // power-off confirm auto-cancel / toast end
             self.redraw = true;
@@ -1994,6 +2002,25 @@ impl App {
                     Some(false) => self.overlay_close(),
                     None => {}
                 },
+                (crate::dialog::Overlay::FuseCheck { stage, .. }, Gesture::Tap(p)) => match (stage, crate::dialog::fuse_hit(p.x, p.y)) {
+                    // Start / Again.
+                    (0, Some(true)) | (2, Some(false)) => {
+                        self.dmm.fuse_start(clk);
+                        self.fuse_dialog(now, 1);
+                    }
+                    (1, Some(false)) => {
+                        self.dmm.fuse_cancel(clk);
+                        self.func_changed();
+                        self.overlay_close();
+                    }
+                    (0, Some(false)) | (2, Some(true)) => self.overlay_close(),
+                    _ => {}
+                },
+                (crate::dialog::Overlay::FuseCheck { .. }, Gesture::KeyDown(_)) => {
+                    self.dmm.fuse_cancel(clk);
+                    self.func_changed();
+                    self.overlay_close();
+                }
                 (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. }, Gesture::KeyDown(_))
                 | (crate::dialog::Overlay::Toast { .. }, Gesture::Tap(_) | Gesture::KeyDown(_)) => {
                     self.overlay_close()
@@ -2219,6 +2246,35 @@ impl App {
             self.alert_buzz = on;
             buzzer(on, self.volume);
         }
+    }
+
+    /// Fuse-check dialog (doc 4.3 / 4.7) at `stage` (0 instructions, 1
+    /// measuring, 2 the verdict of `Dmm::fuse_state`).
+    fn fuse_dialog(&mut self, now: u64, stage: u8) {
+        use crate::dialog as d;
+        let until = now + if stage == 1 { 20_000 } else { 60_000 };
+        self.overlay = Some(d::Overlay::FuseCheck { until, stage });
+        self.redraw = true;
+        self.last_input = now;
+        let mut b = [0u8; 32];
+        d::fuse_screen(stage, self.dmm.fuse_state(), &mut b);
+    }
+
+    /// Per tick: a fuse check that ended (dialog or SYST:FUSE:TEST) -> the
+    /// meter restarts on the function it went back to; the dialog shows
+    /// the verdict with a beep (100 ms OK, 300 ms otherwise).
+    fn fuse_tick(&mut self, _clk: &mut Clock, now: u64) {
+        let busy = self.dmm.fuse_state() == crate::sentinel::FuseRes::Busy;
+        if self.fuse_busy && !busy {
+            self.func_changed();
+            if let Some(crate::dialog::Overlay::FuseCheck { stage: 1, .. }) = self.overlay {
+                let ok = matches!(self.dmm.fuse_state(), crate::sentinel::FuseRes::Ok(_));
+                buzzer(true, self.volume);
+                self.beep_until = now + if ok { 100 } else { 300 };
+                self.fuse_dialog(now, 2);
+            }
+        }
+        self.fuse_busy = busy;
     }
 
     /// A toast over the view (dialog.rs); the view is redrawn when it goes.
@@ -2553,6 +2609,7 @@ impl App {
                         self.show(v, clk);
                     }
                     Some(Err(4)) => self.show(View::Limits, clk),
+                    Some(Err(5)) if b == Button::Amp => self.fuse_dialog(now, 0),
                     Some(Err(k @ 0..=1)) if b == Button::Ohm => {
                         if k != self.dmm.ohm_var() {
                             self.dmm.set_ohm_var(clk, k);
@@ -3291,6 +3348,28 @@ impl App {
                 scope_page::autoset_log(out);
                 true
             }
+            C::SysFuse(true) => {
+                self.dmm.fuse_start(clk);
+                self.func_changed();
+                false
+            }
+            C::SysFuse(false) => {
+                use crate::sentinel::FuseRes as F;
+                let mut b = [0u8; 16];
+                let (t, v) = match self.dmm.fuse_state() {
+                    F::Idle => ("IDLE", None),
+                    F::Busy => ("BUSY", None),
+                    F::Ok(r) => ("OK,", Some(r)),
+                    F::Open => ("OPEN", None),
+                    F::Odd(r) => ("FAIL,", Some(r)),
+                    F::NoReading => ("FAIL,NONE", None),
+                };
+                out.put_bytes(t.as_bytes());
+                if let Some(r) = v {
+                    out.put_bytes(crate::dmm::format(&mut b, r, 2).as_bytes());
+                }
+                true
+            }
             C::StatQuesCond => {
                 out.put_u32(crate::sentinel::ques_bits(self.dmm.sent.alert) as u32);
                 true
@@ -3312,7 +3391,7 @@ impl App {
                 false
             }
             C::DbgSentVar(None) => {
-                out.put_bytes(&[b'0' + crate::sentinel::variant()]);
+                out.put_u32(crate::sentinel::variant() as u32);
                 true
             }
             C::DbgSent => {

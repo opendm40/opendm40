@@ -81,13 +81,22 @@
 //!   SYSTem:RAIL AUTO|BOTH / ?   analog rail policy (default AUTO, persisted)
 //!   SYSTem:RAIL:STATe?   dmm_rail,scope_rail (1/0)
 //!   SYSTem:ALERt?   wrong-connection alert in force (sentinel.rs, docs/
-//!     power-meter-and-misconnect.md 4): NONE | AJACK (current in the A jack
+//!     power-meter-and-misconnect.md 4): NONE | OVERLOAD (the uA / mA shunt
+//!     over range: moved to 10 A, latched) | AJACK (current in the A jack
 //!     outside the current functions) | VJACK (voltage on V/ohm, no current,
-//!     in DC A) | LIVE (a source on the circuit in ohm / continuity / diode)
+//!     in DC / AC / AC+DC A) | LIVE (a source on the circuit in ohm /
+//!     continuity / diode) | DC (hint: DC on V/ohm in AC V) | AC (hint: AC in
+//!     DC V 6 V) | FUSE (hint: an A function at zero for 60 s)
 //!   SYSTem:ALERt:ENABle <mask> | ON | OFF / ?   alerts enabled, bit 0 AJACK,
-//!     1 VJACK, 2 LIVE (default 7 = ON; Settings 3/3 "Jack alerts", persisted)
+//!     1 VJACK and the DC / AC / FUSE hints, 2 LIVE (default 7 = ON; Settings
+//!     3/3 "Jack alerts", persisted)
 //!     OVERLOAD (the uA / mA shunt over range: the meter moved to the 10 A
 //!     shunt, latched; doc 4.7) is not maskable
+//!   SYSTem:FUSE:TEST   start the fuse check (doc 4.3: one lead from V/ohm to
+//!     A, nothing else): ohm 600 ohm for 3 readings, then the function before
+//!     (the power meter restarts its energy); non-blocking
+//!   SYSTem:FUSE?   IDLE | BUSY | OK,<ohm> (~48 ohm) | OPEN (OL: fuse or lead)
+//!     | FAIL,<ohm> (another resistance) | FAIL,NONE (no reading)
 //!   STATus:QUEStionable:CONDition?   bit 9 while a red alert (AJACK,
 //!     OVERLOAD) is on, bit 1 while OVERLOAD is (SCPI CURRent)
 //!   STATus:QUEStionable[:EVENt]?   the same bits latched since the last
@@ -293,10 +302,13 @@ pub enum Log {
 ///                           axis H|V)
 ///   DBG:SENTinel?           misconnect sentinel (sentinel.rs): kind,alert,mask,
 ///                           ctsta,pkhmin,pkhmax,streak,hit_windows,samples
-///   DBG:SENTinel:VARiant <0..7> / ?
+///   DBG:SENTinel:VARiant <0..31> / ?
 ///                           device-check row variants, RAM only (sentinel.rs
 ///                           VAR_*): +1 AC V keeps OP1's chopper (9dd1222 row),
-///                           +2 no AC V sentinel, +4 comparator on DC V 60 V+
+///                           +2 no AC V sentinel, +4 comparator on DC V 60 V+,
+///                           +8 none of the later sentinels (AC+DC, AC A,
+///                           continuity, diode, cap r0..4, frequency), +16 no
+///                           DC? / AC? input alternation
 ///   DBG:ACDC?               AC+DC phase diagnostic (Dmm::acdc_diag_text): phases
 ///                           started, then per recent AC phase (oldest first)
 ///                           ";late_ms:sq/lpf/dcp,..."; read-only
@@ -459,12 +471,14 @@ pub enum Cmd {
     SysAlert,
     /// STATus:QUEStionable:CONDition? (sentinel::ques_bits of the alert).
     StatQuesCond,
+    /// SYSTem:FUSE:TEST (true) / SYSTem:FUSE? (false).
+    SysFuse(bool),
     /// SYSTem:ALERt:ENABle <mask> | ON | OFF / ?: alerts enabled (bit 0
     /// A-JACK, 1 V-JACK?, 2 LIVE?).
     SysAlertEnable(Option<u8>),
     /// DBG:SENTinel?: sentinel raw state (Sentinel::diag_text).
     DbgSent,
-    /// DBG:SENTinel:VARiant <0..7> / ?: device-check row variants
+    /// DBG:SENTinel:VARiant <0..31> / ?: device-check row variants
     /// (sentinel::VAR_*, RAM only).
     DbgSentVar(Option<u8>),
     /// DBG:HWTRIG...: 0 query, 1 ENABLE (bool), 2 CAL?, 3 STAT?, 4 STAT:RESET.
@@ -992,6 +1006,16 @@ impl Scpi {
                         continue;
                     });
                 }
+                _ if kw(p0, "SYSTem") && parts.len() > 1 && kw(parts[1], "FUSE") => {
+                    out = Out::Instr(match (parts.len(), query) {
+                        (2, true) => Cmd::SysFuse(false),
+                        (3, false) if kw(parts[2], "TEST") => Cmd::SysFuse(true),
+                        _ => {
+                            self.err = Some("Undefined header");
+                            continue;
+                        }
+                    });
+                }
                 _ if kw(p0, "SYSTem") && parts.len() > 1 && kw(parts[1], "ALERt") => {
                     let a = trim(arg);
                     out = Out::Instr(if parts.len() == 2 && query {
@@ -1149,7 +1173,7 @@ impl Scpi {
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
-                        Some(v) if (0.0..=7.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
+                        Some(v) if (0.0..=31.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
                         _ => self.err = Some("Illegal parameter value"),
                     }
                 }
