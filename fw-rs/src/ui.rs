@@ -1265,9 +1265,11 @@ pub const CHART_W: u16 = 321;
 const CHART_Y: u16 = 176;
 const CHART_H: u16 = 97;
 
+/// "value unit" of the chart axis labels and the history boxes; a value
+/// that rounds to zero at `dec` is +0 (no "-0.000mW", pw::no_neg_zero).
 fn num_unit<'a>(b: &'a mut [u8; 32], v: f32, dec: u8, unit: &str) -> &'a str {
     let mut t = [0u8; 16];
-    let s = crate::dmm::format(&mut t, v, dec);
+    let s = crate::dmm::format(&mut t, crate::dmm::pw::no_neg_zero(v, dec), dec);
     let mut u = [0u8; 16];
     let u = sf::unit_text(unit, &mut u);
     let n = s.len().min(16);
@@ -1615,6 +1617,11 @@ pub const GEN_BOX_Y: [i16; 4] = [40, 110, 180, 250];
 const GEN_BOX_H: i16 = 66;
 const GEN_NAMES: [&str; 4] = ["Frequency", "Vpp", "Offset", "Duty"];
 
+/// The wave drop-down box (4, 40, 239, 42) under a tap.
+pub fn gen_wave_hit(x: u16, y: u16) -> bool {
+    x < 243 && (40..82).contains(&y)
+}
+
 /// Generator box (0..3) under a tap.
 pub fn gen_box_hit(x: u16, y: u16) -> Option<usize> {
     let y = y as i16;
@@ -1626,31 +1633,56 @@ pub fn gen_box_hit(x: u16, y: u16) -> Option<usize> {
 
 /// Value / unit row of generator box `k` (the frequency keypad types into
 /// box 0's). `letters`: the value in LETTERS (digits), else TEXT22 ("auto").
-fn gen_box_value(k: usize, v: &str, letters: bool, unit: &str, fg: Color) {
-    gen_box_value_bg(k, v, letters, unit, fg, G_BOX);
+/// `bg`: the box's colour (G_BOX; K_SEL pressed).
+fn gen_box_value(k: usize, v: &str, letters: bool, unit: &str, fg: Color, bg: Color) {
+    gen_box_value_bg(k, v, letters, unit, fg, bg, bg);
 }
 
-/// `gen_box_value` with the value field's background (the keypad's
+/// `gen_box_value` with the value field's background `vbg` (the keypad's
 /// selected prefill: K_SEL).
-fn gen_box_value_bg(k: usize, v: &str, letters: bool, unit: &str, fg: Color, bg: Color) {
+fn gen_box_value_bg(k: usize, v: &str, letters: bool, unit: &str, fg: Color, vbg: Color, bg: Color) {
     let y = GEN_BOX_Y[k];
-    sf::label(if letters { sf::LETTERS } else { sf::TEXT22 }, rect(262, y + 33, 150, 30), v, fg, bg, 4, 0);
-    sf::label(sf::TEXT22, rect(421, y + 36, 50, 26), unit, fg, G_BOX, 1, 0);
+    sf::label(if letters { sf::LETTERS } else { sf::TEXT22 }, rect(262, y + 33, 150, 30), v, fg, vbg, 4, 0);
+    sf::label(sf::TEXT22, rect(421, y + 36, 50, 26), unit, fg, bg, 1, 0);
 }
 
 /// Note at the right of box `k`'s name row ("" clears it).
-fn gen_box_note(k: usize, note: &str, fg: Color) {
-    sf::label(sf::F14, rect(360, GEN_BOX_Y[k] + 3, 112, 26), note, fg, G_BOX, 4, 1);
+fn gen_box_note(k: usize, note: &str, fg: Color, bg: Color) {
+    sf::label(sf::F14, rect(360, GEN_BOX_Y[k] + 3, 112, 26), note, fg, bg, 4, 1);
+}
+
+/// Box `k` (0..3; 4 = the wave drop-down) normal or pressed (K_SEL, the
+/// keypads' pressed colour; ui-review #11: feedback from touch-down).
+pub fn gen_press(g: &gen::Gen, k: usize, pressed: bool) {
+    let bg = if pressed { K_SEL } else { G_BOX };
+    if k >= 4 {
+        gen_wave_box(g.s.wave, bg);
+        return;
+    }
+    gen_box_frame(k, bg);
+    gen_box(g, k, bg);
+}
+
+/// Box `k`'s fill and name.
+fn gen_box_frame(k: usize, bg: Color) {
+    let y = GEN_BOX_Y[k];
+    sf::rbox(rect(246, y, 230, GEN_BOX_H), 3, bg, G_BG);
+    sf::glyphs(sf::TEXT22, rect(257, y + 2, 100, 26), GEN_NAMES[k], STATUS_FG, bg, 1, 0);
+}
+
+/// The wave drop-down: name and the stock arrow.
+fn gen_wave_box(w: gen::Wave, bg: Color) {
+    sf::rbox(rect(4, 40, 239, 42), 3, bg, G_BG);
+    sf::glyphs(sf::TEXT22, rect(14, 40, 180, 42), w.name(), STATUS_FG, bg, 1, 0);
+    sf::glyphs(sf::Font(0x0805_9428), rect(197, 40, 42, 42), " ", STATUS_FG, bg, 8, 0);
 }
 
 pub fn gen_static(g: &gen::Gen) {
     lcd::fill_rect(0, 0, lcd::W, 36, G_BAR);
     lcd::fill_rect(0, 36, lcd::W, lcd::H - 36, G_BG);
     sf::logo(4, 8, G_BAR);
-    for (k, name) in GEN_NAMES.iter().enumerate() {
-        let y = GEN_BOX_Y[k];
-        sf::rbox(rect(246, y, 230, GEN_BOX_H), 3, G_BOX, G_BG);
-        sf::glyphs(sf::TEXT22, rect(257, y + 2, 100, 26), name, STATUS_FG, G_BOX, 1, 0);
+    for k in 0..4 {
+        gen_box_frame(k, G_BOX);
     }
     gen_values(g);
 }
@@ -1732,42 +1764,54 @@ fn libsin(x: f32) -> f32 {
 
 pub fn gen_values(g: &gen::Gen) {
     let s = &g.s;
-    let out = &g.out;
     // Top bar: RUN/STOP (output state).
     sf::label(sf::F21, rect(BAR_X, 0, 80, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 8, 0);
-    // Wave drop-down.
-    sf::rbox(rect(4, 40, 239, 42), 3, G_BOX, G_BG);
-    sf::glyphs(sf::TEXT22, rect(14, 40, 180, 42), s.wave.name(), STATUS_FG, G_BOX, 1, 0);
-    sf::glyphs(sf::Font(0x0805_9428), rect(197, 40, 42, 42), " ", STATUS_FG, G_BOX, 8, 0);
+    gen_wave_box(s.wave, G_BOX);
     gen_preview(s.wave);
+    for k in 0..4 {
+        gen_box(g, k, G_BOX);
+    }
+}
+
+/// Value, unit and note of generator box `k` on `bg`.
+fn gen_box(g: &gen::Gen, k: usize, bg: Color) {
+    let s = &g.s;
+    let out = &g.out;
     let mut t = [0u8; 16];
-    // Frequency: the actual (quantised) output in full digits, "32768.08",
-    // 3 decimals below 1 kHz (UF-15). Above the wave's limit (UF-14): the
-    // set value grey and the limit ("max 50 kHz") as the note.
-    let clamped = g.freq_clamped();
-    let f = if clamped { s.freq_hz as f32 } else { g.actual_hz_f64() as f32 };
-    let dec = if f < 1e3 { 3 } else if f < 1e5 { 2 } else if f < 1e6 { 1 } else { 0 };
-    gen_box_value(0, crate::dmm::format(&mut t, f, dec), true, "Hz", if clamped { G_DIM } else { STATUS_FG });
-    let note = s.wave.max_note();
-    gen_box_note(0, if clamped { note.split(": ").nth(1).unwrap_or(note) } else { "" }, VALUE);
     // Vpp / Offset: the set values; "auto" = the stock 0..Vpp (centre
     // Vpp/2). On the PWM path (square above 50 kHz) both are fixed by the
     // logic output: grey, note "logic level".
     let fixed = out.fixed_level();
     let lv = if fixed { G_DIM } else { STATUS_FG };
-    gen_box_value(1, crate::dmm::format(&mut t, s.amp_v, 2), true, "V", lv);
-    match s.offset_v {
-        Some(o) => gen_box_value(2, crate::dmm::format(&mut t, o, 2), true, "V", lv),
-        None => gen_box_value(2, "auto", false, "", lv),
+    match k {
+        0 => {
+            // Frequency: the actual (quantised) output in full digits,
+            // "32768.08", 3 decimals below 1 kHz (UF-15). Above the wave's
+            // limit (UF-14): the set value grey and the limit ("max 50 kHz")
+            // as the note.
+            let clamped = g.freq_clamped();
+            let f = if clamped { s.freq_hz as f32 } else { g.actual_hz_f64() as f32 };
+            let dec = if f < 1e3 { 3 } else if f < 1e5 { 2 } else if f < 1e6 { 1 } else { 0 };
+            gen_box_value(0, crate::dmm::format(&mut t, f, dec), true, "Hz", if clamped { G_DIM } else { STATUS_FG }, bg);
+            let note = s.wave.max_note();
+            gen_box_note(0, if clamped { note.split(": ").nth(1).unwrap_or(note) } else { "" }, VALUE, bg);
+        }
+        1 | 2 => {
+            match (k, s.offset_v) {
+                (1, _) => gen_box_value(1, crate::dmm::format(&mut t, s.amp_v, 2), true, "V", lv, bg),
+                (_, Some(o)) => gen_box_value(2, crate::dmm::format(&mut t, o, 2), true, "V", lv, bg),
+                (_, None) => gen_box_value(2, "auto", false, "", lv, bg),
+            }
+            gen_box_note(k, if fixed { "logic level" } else { "" }, G_DIM, bg);
+        }
+        _ => {
+            // Duty: square only (DAC table or PWM counter, any frequency);
+            // the effective, quantised value.
+            let sq = s.wave == gen::Wave::Square;
+            let d = if sq { out.duty_pct() } else { s.duty as f32 / 100.0 };
+            gen_box_value(3, crate::dmm::format(&mut t, d, 1), true, "%", if sq { STATUS_FG } else { G_DIM }, bg);
+        }
     }
-    for k in [1, 2] {
-        gen_box_note(k, if fixed { "logic level" } else { "" }, G_DIM);
-    }
-    // Duty: square only (DAC table or PWM counter, any frequency); the
-    // effective, quantised value.
-    let sq = s.wave == gen::Wave::Square;
-    let d = if sq { out.duty_pct() } else { s.duty as f32 / 100.0 };
-    gen_box_value(3, crate::dmm::format(&mut t, d, 1), true, "%", if sq { STATUS_FG } else { G_DIM });
 }
 
 // --------------------------------------------------------------- keypads
@@ -1858,11 +1902,11 @@ const K_SEL: Color = 0x04FC;
 pub fn keypad_input(freq: bool, input: &str, unit: &str, sel: bool) {
     if freq {
         if sel {
-            gen_box_value_bg(0, input, true, unit, STATUS_FG, K_SEL);
+            gen_box_value_bg(0, input, true, unit, STATUS_FG, K_SEL, G_BOX);
         } else {
-            gen_box_value(0, input, true, unit, K_SEL);
+            gen_box_value(0, input, true, unit, K_SEL, G_BOX);
         }
-        gen_box_note(0, "", G_DIM);
+        gen_box_note(0, "", G_DIM, G_BOX);
     } else {
         // 300..439: room for "-12.345" (112 px); titles end before 300.
         let (fg, bg) = if sel { (STATUS_FG, K_SEL) } else { (0x0000, K_PANEL) };
@@ -1901,25 +1945,41 @@ pub const TILES: [(i16, i16, &str, u32); 4] = [
     (244, 166, "Settings", 0x23),
 ];
 
+/// Pressed menu tile / row: the stock tile style's second colour
+/// (gui_v2_6.h, style 0x0806c754: bg 0x2146, pressed 0x4419; its role is
+/// the RE note's guess).
+const M_PRESSED: Color = 0x4419;
+
 pub fn main_menu(combo: &str) {
     lcd::fill_rect(0, 0, lcd::W, lcd::H, M_BG);
-    for (x, y, name, icon) in TILES {
-        sf::rbox(rect(x, y, 190, 106), 8, M_TILE, M_BG);
+    for i in 0..6 {
+        menu_item(i, combo, false);
+    }
+}
+
+/// Menu item `i` (as `main_menu_hit`: tiles 0..3, the combined-view row 4,
+/// the gallery row 5), normal or pressed (ui-review #11: from touch-down).
+pub fn menu_item(i: usize, combo: &str, pressed: bool) {
+    let bg = if pressed { M_PRESSED } else { M_TILE };
+    if let Some(&(x, y, name, icon)) = TILES.get(i) {
+        sf::rbox(rect(x, y, 190, 106), 8, bg, M_BG);
         let g = char::from_u32(icon).unwrap_or(' ');
         let mut b = [0u8; 4];
-        sf::glyphs(ICONS, rect(x + 79, y + 25, 30, 30), g.encode_utf8(&mut b), STATUS_FG, M_TILE, 8, 0);
-        sf::glyphs(sf::TEXT22, rect(x, y + 58, 190, 27), name, STATUS_FG, M_TILE, 8, 0);
+        sf::glyphs(ICONS, rect(x + 79, y + 25, 30, 30), g.encode_utf8(&mut b), STATUS_FG, bg, 8, 0);
+        sf::glyphs(sf::TEXT22, rect(x, y + 58, 190, 27), name, STATUS_FG, bg, 8, 0);
+    } else if i == 5 {
+        // Gallery row above the tiles (FR-16).
+        sf::rbox(rect(46, 10, 388, 34), 8, bg, M_BG);
+        sf::glyphs(sf::TEXT22, rect(46, 10, 388, 34), "Gallery: screenshots and logs", STATUS_FG, bg, 8, 0);
+    } else {
+        sf::rbox(rect(46, 280, 388, 34), 8, bg, M_BG);
+        let mut t = [0u8; 48];
+        let pre = b"Combined view: ";
+        t[..pre.len()].copy_from_slice(pre);
+        let k = combo.len().min(48 - pre.len());
+        t[pre.len()..pre.len() + k].copy_from_slice(&combo.as_bytes()[..k]);
+        sf::glyphs(sf::TEXT22, rect(46, 280, 388, 34), core::str::from_utf8(&t[..pre.len() + k]).unwrap_or(""), STATUS_FG, bg, 8, 0);
     }
-    // Gallery row above the tiles (FR-16).
-    sf::rbox(rect(46, 10, 388, 34), 8, M_TILE, M_BG);
-    sf::glyphs(sf::TEXT22, rect(46, 10, 388, 34), "Gallery: screenshots and logs", STATUS_FG, M_TILE, 8, 0);
-    sf::rbox(rect(46, 280, 388, 34), 8, M_TILE, M_BG);
-    let mut t = [0u8; 48];
-    let pre = b"Combined view: ";
-    t[..pre.len()].copy_from_slice(pre);
-    let k = combo.len().min(48 - pre.len());
-    t[pre.len()..pre.len() + k].copy_from_slice(&combo.as_bytes()[..k]);
-    sf::glyphs(sf::TEXT22, rect(46, 280, 388, 34), core::str::from_utf8(&t[..pre.len() + k]).unwrap_or(""), STATUS_FG, M_TILE, 8, 0);
 }
 
 /// Which tile (0..3) or the combined-view row (4) a touch hits.
@@ -1956,6 +2016,35 @@ pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit
 /// Page 3: the wrong-connection alerts (sentinel.rs; ON = all, A-JACK only,
 /// OFF) and the Device / About page.
 pub const SETTINGS3: [&str; 2] = ["Jack alerts", "Device"];
+
+/// Pressed feedback on the list pages (ui-review #11): `row`, `part` (0 the
+/// row, -1 / +1 its stepper's "-" / "+" key), `on` (pressed / released).
+#[derive(Clone, Copy, PartialEq)]
+pub struct RowPress {
+    pub row: u8,
+    pub part: i8,
+    pub on: bool,
+}
+
+/// While set, the list pages (`list_page`, `settings`, `record_page`)
+/// repaint only that row or key (app.rs: the page's own draw call with its
+/// texts, no full repaint). 0 = off; else on << 17 | 1 << 16 | (part + 1)
+/// << 8 | row.
+static ROW_ONLY: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+pub fn set_row_only(p: Option<RowPress>) {
+    let v = p.map_or(0, |p| 1 << 16 | (p.on as u32) << 17 | (((p.part + 1) as u8 as u32) << 8) | p.row as u32);
+    ROW_ONLY.store(v, core::sync::atomic::Ordering::Relaxed);
+}
+
+fn row_only() -> Option<RowPress> {
+    let v = ROW_ONLY.load(core::sync::atomic::Ordering::Relaxed);
+    (v != 0).then(|| RowPress { row: v as u8, part: ((v >> 8) & 0xFF) as i8 - 1, on: v & (1 << 17) != 0 })
+}
+
+/// Pressed stepper key / Start button (already the accent colour): the
+/// stock popups' pressed colour (tools/stock-ui/notes/popups.md).
+const KEY_PRESSED: Color = 0x7BEF;
 
 /// Settings/menu-page title bar: 40 px, bg 0x2966 (stock gui_v2_6.h:101).
 pub const PAGE_BAR_H: i16 = 40;
@@ -2021,25 +2110,47 @@ pub fn list_page(title: &str, names: &[&str], vals: &[&str]) {
     if cfg!(not(target_os = "none")) {
         assert_eq!(vals.len(), names.len(), "list_page {title}: values vs rows");
     }
-    page_title(title);
-    lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
+    let only = row_only();
+    if only.is_none() {
+        page_title(title);
+        lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
+    }
     for (i, name) in names.iter().enumerate().take(SET_ROWS) {
+        // Pressed: the keypads' pressed colour, the value white on it.
+        let (bg, vfg) = match only {
+            None => (M_TILE, M_ACCENT),
+            Some(p) if p.row as usize == i && p.part == 0 => if p.on { (K_SEL, STATUS_FG) } else { (M_TILE, M_ACCENT) },
+            Some(_) => continue,
+        };
         let r = set_row(i);
-        sf::rbox(r, 6, M_TILE, M_BG);
+        sf::rbox(r, 6, bg, M_BG);
         // Label then value kept close together (value left-aligned just past a
         // 190 px label column) instead of flung to the far right edge.
-        sf::glyphs(sf::TEXT22, rect(r.x + 12, r.y, 190, r.h), name, STATUS_FG, M_TILE, 1, 0);
-        sf::glyphs(sf::TEXT22, rect(r.x + 202, r.y, 250, r.h), vals[i], M_ACCENT, M_TILE, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(r.x + 12, r.y, 190, r.h), name, STATUS_FG, bg, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(r.x + 202, r.y, 250, r.h), vals[i], vfg, bg, 1, 0);
     }
 }
 
 /// "-" key at `minus_x`, value, "+" key (STEP_PLUS_X) in settings row `i`.
+/// In `set_row_only` mode only the pressed / released key.
 fn set_stepper(i: usize, val: &str, minus_x: i16) {
+    let only = row_only();
+    if only.is_some_and(|p| p.row as usize != i) {
+        return;
+    }
     let r = set_row(i);
-    for (x, t) in [(minus_x, "-"), (STEP_PLUS_X, "+")] {
+    for (d, x, t) in [(-1, minus_x, "-"), (1, STEP_PLUS_X, "+")] {
+        let bg = match only {
+            None => M_ACCENT,
+            Some(p) if p.part == d => if p.on { KEY_PRESSED } else { M_ACCENT },
+            Some(_) => continue,
+        };
         let k = rect(x, r.y + 3, STEP_KEY_W, r.h - 6);
-        sf::rbox(k, 4, M_ACCENT, M_TILE);
-        sf::glyphs(sf::TEXT22, k, t, STATUS_FG, M_ACCENT, 8, 0);
+        sf::rbox(k, 4, bg, M_TILE);
+        sf::glyphs(sf::TEXT22, k, t, STATUS_FG, bg, 8, 0);
+    }
+    if only.is_some() {
+        return;
     }
     let vx = minus_x + STEP_KEY_W + 6;
     sf::glyphs(sf::TEXT22, rect(vx, r.y, step_value_w(minus_x), r.h), val, M_ACCENT, M_TILE, 8, 0);
@@ -2116,8 +2227,13 @@ pub fn record_page(vals: [&str; 2], free: &str, recording: bool) {
     for (i, v) in REC_STEP_ROWS.iter().zip(vals) {
         set_stepper(*i, v, REC_STEP_MINUS_X);
     }
+    let only = row_only();
+    if only.is_some_and(|p| p.row as usize != REC_START_ROW) {
+        return;
+    }
     let r = set_row(REC_START_ROW);
     let (t, bg) = if recording { ("Stop recording", 0xF800) } else { ("Start recording", M_ACCENT) };
+    let bg = if only.is_some_and(|p| p.on) { KEY_PRESSED } else { bg };
     sf::rbox(r, 6, bg, M_BG);
     sf::glyphs(sf::TEXT22, r, t, STATUS_FG, bg, 8, 0);
 }

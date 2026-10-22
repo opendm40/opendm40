@@ -169,9 +169,13 @@ Code work (in this order):
       - #10 generator keypad prefill (579f951): current value + unit, drawn selected; the first
         digit / '.' / backspace replaces it; OK on an untouched prefill keeps the setting.
       - #9 generator bar status + tappable RUN/STOP (22e7dd6).
-      - #11 pressed-key feedback on the keypads (7dad1b9); menu tiles / settings rows / gen boxes
-        still have none (the scope page has its own press_fx). Left open (M: a pressed style per
-        widget + the release redraw, each against the stock look).
+      - #11 pressed-key feedback on the keypads (7dad1b9); since 2026-10-22 also the menu tiles /
+        rows (stock tile style's pressed 0x4419, an RE guess), the list-page rows of Settings 1-3,
+        Hold & Limits, Record (0x04FC, value white), their -/+ stepper keys and the Start / Stop row
+        (0x7BEF, the stock popups' pressed colour) and the generator boxes + wave drop-down (0x04FC):
+        drawn from touch-down until release / roll-off, one item redrawn (app_press.rs, in .cold;
+        ui::set_row_only = the page's own draw call limited to one row). ui-render: every item
+        pressed, then released = the page as drawn. (verify on device)
       - #12 backlight / volume -/+ steppers, clamped (1f19f05 drawing, 7e2abce logic).
       - #13 already in: DMM lightning >= 100 V (stock), combined strip HV badge >= 30 V and red
         ring >= 100 V. DMM page >= 30 V: done 2026-10-21 as the stock cue itself (value 0xC9A0 red in V
@@ -558,8 +562,10 @@ Firmware:
         after the long press resets; FAILs on 06d6f62). Negative zero: every power readout (main, E box,
         PF / S / Q, AVG, V / I) shows +0 for a value that rounds to zero (pw::no_neg_zero; ui-render
         p15 / p16, meter-test). Generic DMM readouts unchanged (dmm::format). Unit case: the E box already
-        says "kWh" (F14 has k); the main readout / aux row keep "KWh": LETTERS has no 'k' (its set:
-        %+-.0-9 A H K L M V g h i m u z ohm C F); a 'k' would need a rasterised glyph as stockfont_w.rs.
+        says "kWh" (F14 has k); the main readout / aux row now too: our LETTERS 'k' (tools/mkwglyph.py,
+        FreeSans Bold k scaled by the stock h ink box, stockfont_w.rs OWN_GLYPHS); unit_text keeps 'k'
+        only in the energy units (KΩ / KHz stay as the stock writes them). The chart axis labels and
+        history boxes (ui::num_unit, all charts) show +0 too ("-0.000mW" on the power chart).
   - [ ] Not done: RESistive phase cal (flat optimum), BT protocol slot (BT reports the AC A byte), limits (W) in
         Hold & Limits, tap on P to cycle the main readout (P / S / PF / E).
 - [x] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.

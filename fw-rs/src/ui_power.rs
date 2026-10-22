@@ -8,7 +8,8 @@
 //!               stock LETTERS rows; long press = reset (confirm)
 //!   main        P (fallback: S), or Wh / VAh (a tap on it cycles), in the F78
 //!               cells; unit in the stock UNIT face (our W of that face,
-//!               stockfont_w.rs), LETTERS for the energy units (UNIT has no h)
+//!               stockfont_w.rs), LETTERS for the energy units (UNIT has no h;
+//!               our k of that face: "kWh")
 //!   chip        the coupling above the unit: AC / DC / AUTO over the method
 //!               in use; tap = AC -> DC -> AUTO (`coupling`)
 //!   history row the five 88 x 19 boxes: I, PF, S, Q, f (F14 tag + HIST

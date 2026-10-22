@@ -176,25 +176,26 @@ struct Placed {
     twin: i16,
 }
 
-/// Every character of `s` has a glyph in `font` (W: ours where missing).
+/// Every character of `s` has a glyph in `font` (W, k: ours where missing).
 pub fn has_all(font: Font, s: &str) -> bool {
     s.chars().all(|c| glyph_or_twin(font, c).is_some())
 }
 
-// Real W glyphs for the stock DMM fonts without one (tools/mkwglyph.py).
+// Glyphs of our own for the stock DMM fonts without them (tools/mkwglyph.py).
 include!("stockfont_w.rs");
 
 /// Glyph of `ch`. The stock DMM fonts have only the units they need: no W in
-/// UNIT / LETTERS / SC_DIGITS / HIST (power meter, dmm::pw); those take our W
-/// of the same face (stockfont_w.rs), any other font without one two of its
-/// 'V' overlapped, the second `twin` px to the right. Returns (glyph, twin).
+/// UNIT / LETTERS / SC_DIGITS / HIST (power meter, dmm::pw), no k in LETTERS
+/// ("kWh"); those take ours of the same face (stockfont_w.rs), any other font
+/// without a W two of its 'V' overlapped, the second `twin` px to the right.
+/// Returns (glyph, twin).
 fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
-    match font.glyph(ch as u32) {
-        Some(g) => Some((g, 0)),
-        None if ch == 'W' => match W_GLYPHS.iter().find(|w| w.0 == font.0) {
-            Some(&(_, four, w, h, adv, yoff, b)) => Some((Glyph::own(b, four, w, h, adv, yoff), 0)),
-            None => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
-        },
+    if let Some(g) = font.glyph(ch as u32) {
+        return Some((g, 0));
+    }
+    match OWN_GLYPHS.iter().find(|o| o.0 == font.0 && o.1 == ch) {
+        Some(&(_, _, four, w, h, adv, yoff, b)) => Some((Glyph::own(b, four, w, h, adv, yoff), 0)),
+        None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
         None => None,
     }
 }
@@ -548,11 +549,14 @@ pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
 }
 
 /// Map our unit text to the stock font's code points (no 'k' / 'µ' glyphs:
-/// the stock writes "K" and "u").
+/// the stock writes "K" and "u", e.g. "KΩ"). The energy units keep 'k'
+/// ("kWh", "kVAh": our LETTERS k, stockfont_w.rs; F14 / TEXT22 have one).
 pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
     let mut n = 0;
+    let energy = u.ends_with("Wh") || u.ends_with("VAh");
     for c in u.chars() {
         let c = match c {
+            'k' if energy => 'k',
             'k' => 'K',
             '\u{b5}' => 'u',
             '\u{b0}' => continue,
