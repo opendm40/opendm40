@@ -18,8 +18,9 @@
 //!
 //! Incremental: `start` only takes the request; `poll` (every main-loop pass,
 //! from App::tick) does one bounded slice of the job, so USB (SCPI and the
-//! disk), the DMM, the scope and the watchdog keep running during the ~5 s
-//! write. One shot at a time (`start` refuses while `busy`). Slices:
+//! disk), the DMM, the scope and the watchdog keep running during the write
+//! (~1.4 s with the clusters prepared, ~5 s without; see below). One shot at
+//! a time (`start` refuses while `busy`). Slices:
 //!   Start    wait for a host WRITE(10) in progress to finish (msc.rs;
 //!            at most 2 s, then "failed"); a shot is refused ("Disk busy")
 //!            while a fast-log session or an upload holds the disk;
@@ -34,7 +35,10 @@
 //!            lcd::read_span, ~1.3 ms per block; CRC),
 //!            then `BlockDevice::write_step` (spiflash.rs: compare, erase,
 //!            16 page programs, read back; <= ~2 ms of CPU per pass, the
-//!            erase and the programs run in the chip between passes);
+//!            erase and the programs run in the chip between passes); a
+//!            cluster the idle-time preparation proved blank skips the
+//!            compare (and needs no erase); a block whose read back fails is
+//!            written once more with a forced erase;
 //!   Fat      the chain in every FAT copy (FAT 1 first; read, link, then
 //!            `write_block` from the next pass);
 //!   Dir      the directory entry (read, check the slot is still free, then
@@ -63,8 +67,13 @@
 //! draw over the panel until the last row is read: `frozen()` is true from
 //! `start` until the last data block is filled (main.rs then passes
 //! can_draw = false; App::gesture drops input), i.e. for the Start .. Data
-//! phases, ~4-5 s on the device (76 blocks, each a 4 KiB erase + 16 page
-//! programs; less when the free clusters are already erased). The main loop
+//! phases. Frozen time per block ~18.5 ms (fill 1.3, 16 page programs ~14 at
+//! tPP 0.7 ms, read back 2.7, compare 2.7 when not proven blank) plus a
+//! ~45 ms sector erase when the cluster is not blank: ~1.4 s for 76 prepared
+//! blocks, ~5 s unprepared (emulator with W25Q128 timing, emu/shottest.py;
+//! the device took ~4-5 s before the preparation). The "idle-time
+//! preparation" at the end of this file keeps the next shot's clusters
+//! blank. The main loop
 //! runs meanwhile (DMM, USB, the watchdog); only drawing and touch input
 //! wait. The verify pass compares CRCs, so it does not need the panel again.
 //! (Until 2026-10-22 the rows were first run-length coded into a 48 KiB

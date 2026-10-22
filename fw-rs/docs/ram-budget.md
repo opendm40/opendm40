@@ -54,10 +54,10 @@ and it is now the only path:
   while `frozen()` (a toast is dropped, the dialog comes after the shot).
   The power-off / reset paths (`finish_disk_writes`) draw nothing before
   they finish the shot.
-- Cost: the screen stays frozen for the write, ~4-5 s on the device. That
-  is 76 blocks, each a 4 KiB sector erase (~45 ms typ.) plus 16 page
-  programs. It is shorter when the free clusters are already erased (the
-  compare skips the erase). Before, it was ~0.1 s for the 91 % of screens
+- Cost: the screen stays frozen for the write, ~4-5 s on the device
+  (emulator with W25Q128 timing: 5.0 s). That is 76 blocks, each a 4 KiB
+  sector erase (~45 ms typ.) plus 16 page programs. Now ~1.5 s: the next
+  shot's clusters are erased in idle time (next section). Before, it was ~0.1 s for the 91 % of screens
   whose RLE fitted, and the same 4-5 s for the AC+DC and power views and
   noisy scope traces, which did not fit.
 - Disk held: a fast-log session or an upload holds the disk for an
@@ -95,9 +95,96 @@ renderer, so a strip could not be reproduced deterministically. Strips
 captured one at a time without the freeze would be consistent within a
 strip but not across the frame.
 
-Possible follow-up (not done): keep the next shot's clusters pre-erased in
-idle time (as fastlog's Prep does for its session). The frozen time would
-then be the page programs only, ~1-1.5 s.
+## The screenshot freeze: next shot's clusters erased in idle time (8f1d887)
+
+The owner's option 3. Design (screenshot.rs "idle-time preparation"):
+
+- **Nothing reserved.** A shot allocates first fit from FAT 1, so the
+  preparation keeps the *first 76 free clusters* blank (0xFF). They stay
+  ordinary free clusters: no FAT entry, no directory entry, no hidden file.
+  So a power cut mid-prepare cannot leave lost clusters or a FAT
+  inconsistency (at worst a half-erased free sector; nothing for fatren or
+  fsck to do), the USB volume (vdisk.rs) shows nothing new (free clusters
+  are not files; only the raw DEBUG/SPIFLASH.BIN shows them, as 0xFF), and
+  any other writer (csvlog commit, fast-log Prep, a firmware file copied in
+  "PC can edit" mode) may take them and is just faster for it. Flash wear
+  is unchanged: each cluster is still erased once per reuse, only earlier.
+- **Steps** (main loop, `prep_poll`, inline in region B; the step itself,
+  `prep_step` 644 B, is region C): boot sector; FAT 1 entries 64 per read
+  up to the next free cluster; that cluster's block checked blank 1 KiB per
+  step (~0.7 ms); a dirty block erased (SE4K start, the cluster's FAT entry
+  re-read in the same step first), checked again once the chip is idle (a
+  block that stays dirty is skipped). Never waits for BUSY (one RDSR, then
+  the next pass). Ready after 76 blank clusters, or all free ones on a
+  nearly full disk.
+- **Restart.** `msc::FLASH_WRITES` counts every program / erase command
+  (spiflash.rs `write_enable`). When it moved since the preparation's last
+  step, another writer touched the disk: it starts over once the disk has
+  been quiet for 2 s (a full re-check is ~76 x 4 KiB of reads, ~0.2 s of
+  SPI in ~1 ms steps; after a 60 s CSV commit, after a shot). `Off` (no
+  disk, a read error, an erase timeout) retries after 60 s.
+- **When it runs** (main.rs): vdisk builds only (a host that writes the
+  raw SPI disk could be filling a free cluster); not during a shot (checked
+  inside), a csvlog commit, a fast-log session, an upload or a PC staging
+  (those keep data in free clusters until they link it), a logger session
+  (constant interval; the AD2 stream ISR, as region C code must not run
+  then), nor within 0.5 s of host USB disk I/O (a READ data phase or a
+  WRITE). SCPI MMEM:DATA? / the on-device gallery read through an erase in
+  flight wait for it (<= 45 ms typ., once).
+- **The shot.** At the end of Alloc, if the preparation is Ready and
+  nothing has written since (`prep_blank`), the shot's first clusters are
+  exactly the proven-blank ones: their blocks go straight to the page
+  programs (write_step phase 1, no compare, no erase). Every other block is
+  compared / erased as before. Any data block whose read back fails is
+  written once more with a forced erase (an erase cut short by a power cut
+  that still reads blank, or a stale assumption), once per block.
+- Power-off / reset (`finish_disk_writes`): an erase in flight is waited
+  for (`prep_finish`, <= 0.4 s).
+
+Freeze, emulator (emu/shottest.py, W25Q128 timing tPP 0.7 ms, tSE 45 ms;
+the firmware's own figures, DBG:FLASH? fields 4-7):
+
+| build | screen | frozen | data blocks erased | slices while frozen |
+|---|---|---|---|---|
+| 87f2c20 + instrumentation (before) | DMM HOLD | 5 001 ms | 76 / 76 | 2 406 |
+| 87f2c20 + instrumentation (before) | menu | 5 001 ms | 76 / 76 | 2 406 |
+| 87f2c20 + instrumentation (before) | combined view | 4 374 ms | 61 / 76 | 2 098 |
+| 8f1d887 (after, prepared) | DMM HOLD | 1 403 ms | 0 | 681 |
+| 8f1d887 | menu | 1 403 ms | 0 | 681 |
+| 8f1d887 | combined view | 1 403 ms | 0 | 681 |
+| 8f1d887 | the same view again, ~10 s after the last shot | 1 403 ms | 0 | 681 |
+
+(The "again" shot found the preparation done: the test's verify wait and
+panel read-back took longer than the 2 s quiet + ~76 erases. A shot taken
+before the preparation is done costs the old ~5 s minus 45 ms per block
+already blank.) The before build's combined-view shot found 15 clusters
+blank from the earlier shots' erases.
+
+Per prepared block ~18.5 ms: the panel read 1.3 ms, 16 page programs
+~14 ms (0.7 ms each + 0.2 ms to clock the page out), the read back 2.7 ms.
+Without the compare-skip (an earlier build of this round) it was 1 638 ms.
+With the datasheet's typical tPP 0.4 ms it would be ~1.1 s. The rest of
+the shot (FAT, directory entry, verify) runs after the screen unfreezes.
+
+Host tests (tools/fatren-test 12c): preparation on a disk whose free
+clusters need erasing (76 erases; FAT / root / directories / every
+allocated cluster unchanged), again after a reboot (0 erases), the shot
+after it (no data block erased, 76 programmed without the compare; the
+next 76 prepared afterwards), power cuts before erase 0 / 1 / 2 / 38 / 75
+(fsck clean, the next boot completes), a blank-reading sector that does
+not program (the retry), a prepared cluster overwritten behind the write
+counter (the retry), another writer linking the first free cluster after
+every one of the 1 161 steps of a preparation (its data intact, with and
+without the counter: the FAT re-read before each erase), 20 free clusters
+(all prepared, the shot still refused "Disk full").
+
+Memory (native build, 87f2c20 -> 8f1d887): TCM statics +~100 B
+(`screenshot::PREP` 56 B, `STATS` 16 B, `PREP_ERASES`, `msc::FLASH_WRITES`):
+stack 45 512 -> 45 416 B, static worst path 24 284 -> 24 292 B, headroom
+21 228 -> 21 124 B (>= 20 KiB). SRAM free 60 648 -> 60 632 B (`JOB`, .dmabuf,
++16 B). Region B free 82 472 -> 81 824 B (the inlined `prep_poll`, the
+DBG:FLASH? fields). Region C free 18 804 -> 17 868 B (`prep_step`,
+`prep_stats`, the retry).
 
 Gallery (screenshot viewer): it needs no big buffer. `Gallery` is 0.7 KiB
 of TCM, and it decodes a BMP row by row from `scratch()[0]` (data) and
