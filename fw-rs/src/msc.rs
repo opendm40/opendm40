@@ -285,7 +285,7 @@ impl<'a, B: UsbBus> Msc<'a, B> {
     /// pass (usbd-storage moves one 64-byte packet per poll, ~2 per main-loop
     /// pass otherwise: ~0.1 MB/s at a 1 ms pass).
     pub fn reading(&self) -> bool {
-        matches!(self.xfer, Xfer::Read { .. })
+        matches!(self.xfer, Xfer::Read { .. }) || self.scsi.sending()
     }
 
     /// Block (true) or allow host writes; a write already in progress finishes.
@@ -296,23 +296,32 @@ impl<'a, B: UsbBus> Msc<'a, B> {
 
 type Cmd<'c, 'a, B> = Command<'c, ScsiCommand, Scsi<BulkOnly<'a, B, IoBuf>>>;
 
+/// A short reply (INQUIRY, REQUEST SENSE, MODE SENSE, READ CAPACITY, READ
+/// FORMAT CAPACITIES), passed with the count sent: at most what the host
+/// asked for (`write_data` stops at the CBW's length; the whole reply went
+/// out before, more than a short allocation length), nothing with no data
+/// phase (a 0 length: `write_data` fails there, and the command used to
+/// stay without status: no CSW ever).
+fn reply<B: UsbBus>(mut cmd: Cmd<'_, '_, B>, d: &[u8]) {
+    let n = cmd.write_data(d).unwrap_or(0);
+    cmd.pass(n as u32);
+}
+
 /// A LUN above GET MAX LUN (a host should never address one): INQUIRY says
 /// "no device here" (peripheral qualifier 3), REQUEST SENSE "LUN not
 /// supported", anything else fails.
-fn bad_lun<B: UsbBus>(mut cmd: Cmd<'_, '_, B>) -> Res {
+fn bad_lun<B: UsbBus>(cmd: Cmd<'_, '_, B>) -> Res {
     match cmd.kind {
         ScsiCommand::Inquiry { .. } => {
             let mut d = [0u8; 36];
             d[0] = 0x7F;
             d[4] = 31;
-            cmd.try_write_data_all(&d)?;
-            cmd.pass(36);
+            reply(cmd, &d);
         }
         ScsiCommand::RequestSense { .. } => {
             let s = SENSE_BAD_LUN;
             let d = [0x70, 0, s.0, 0, 0, 0, 0, 10, 0, 0, 0, 0, s.1, s.2, 0, 0, 0, 0];
-            cmd.try_write_data_all(&d)?;
-            cmd.pass(d.len() as u32);
+            reply(cmd, &d);
         }
         _ => cmd.fail(0),
     }
@@ -376,8 +385,7 @@ fn handle<B: UsbBus>(
             d[8..16].copy_from_slice(b"ALIENTEK");
             d[16..32].copy_from_slice(dev.product());
             d[32..36].copy_from_slice(b"0.2 ");
-            cmd.try_write_data_all(&d)?;
-            cmd.pass(36);
+            reply(cmd, &d);
         }
         ScsiCommand::TestUnitReady => {
             if dev.present() {
@@ -391,23 +399,20 @@ fn handle<B: UsbBus>(
         ScsiCommand::RequestSense { .. } => {
             let s = *sense;
             let d = [0x70, 0, s.0, 0, 0, 0, 0, 10, 0, 0, 0, 0, s.1, s.2, 0, 0, 0, 0];
-            cmd.try_write_data_all(&d)?;
             *sense = SENSE_OK;
-            cmd.pass(d.len() as u32);
+            reply(cmd, &d);
         }
         ScsiCommand::ModeSense6 { .. } => {
             // Mode parameter header only (no block descriptors, no pages);
             // device-specific parameter bit 7 = write protected.
             let wp = if dev.read_only() { 0x80 } else { 0 };
             let d = [3u8, 0, wp, 0];
-            cmd.try_write_data_all(&d)?;
-            cmd.pass(4);
+            reply(cmd, &d);
         }
         ScsiCommand::ModeSense10 { .. } => {
             let wp = if dev.read_only() { 0x80 } else { 0 };
             let d = [0u8, 6, 0, wp, 0, 0, 0, 0];
-            cmd.try_write_data_all(&d)?;
-            cmd.pass(8);
+            reply(cmd, &d);
         }
         ScsiCommand::ReadCapacity10 => {
             if !dev.present() {
@@ -417,8 +422,7 @@ fn handle<B: UsbBus>(
                 let mut d = [0u8; 8];
                 d[..4].copy_from_slice(&(dev.block_count() - 1).to_be_bytes());
                 d[4..].copy_from_slice(&bs.to_be_bytes());
-                cmd.try_write_data_all(&d)?;
-                cmd.pass(8);
+                reply(cmd, &d);
             }
         }
         ScsiCommand::ReadFormatCapacities { .. } => {
@@ -428,8 +432,7 @@ fn handle<B: UsbBus>(
             d[4..8].copy_from_slice(&n.to_be_bytes());
             d[8] = kind; // 2 formatted media, 3 no media
             d[9..12].copy_from_slice(&bs.to_be_bytes()[1..]);
-            cmd.try_write_data_all(&d)?;
-            cmd.pass(12);
+            reply(cmd, &d);
         }
         ScsiCommand::Read { lba, len } => {
             if !dev.present() {
@@ -453,7 +456,15 @@ fn handle<B: UsbBus>(
                     cmd.fail(done);
                     return Ok(());
                 }
-                let n = cmd.write_data(&blk[off..bs as usize])?;
+                // Err: the host's data phase is over (its length is shorter
+                // than the READ's, or 0): a phase error (BOT 6.7.2), never
+                // a command left without status (the host would wait for
+                // its CSW until its timeout).
+                let Ok(n) = cmd.write_data(&blk[off..bs as usize]) else {
+                    *xfer = Xfer::None;
+                    cmd.fail_phase();
+                    return Ok(());
+                };
                 off += n;
                 let done = done + n as u32;
                 if off >= bs as usize {
@@ -495,7 +506,16 @@ fn handle<B: UsbBus>(
                 };
             }
             if let Xfer::Discard { left } = *xfer {
-                let n = if left == 0 { 0 } else { cmd.read_data(&mut blk[..(left as usize).min(MAX_BLOCK)])? as u32 };
+                let n = if left == 0 {
+                    0
+                } else {
+                    let Ok(n) = cmd.read_data(&mut blk[..(left as usize).min(MAX_BLOCK)]) else {
+                        *xfer = Xfer::None;
+                        cmd.fail_phase();
+                        return Ok(());
+                    };
+                    n as u32
+                };
                 if n >= left {
                     *xfer = Xfer::None;
                     cmd.fail(0);
@@ -505,7 +525,11 @@ fn handle<B: UsbBus>(
                 return Ok(());
             }
             if let Xfer::Write { lba, left, off, done } = *xfer {
-                let n = cmd.read_data(&mut blk[off..bs as usize])?;
+                let Ok(n) = cmd.read_data(&mut blk[off..bs as usize]) else {
+                    *xfer = Xfer::None;
+                    cmd.fail_phase();
+                    return Ok(());
+                };
                 let off = off + n;
                 let done = done + n as u32;
                 if off >= bs as usize {
@@ -567,6 +591,10 @@ impl<B: UsbBus> UsbClass<B> for Msc<'_, B> {
     }
     fn reset(&mut self) {
         self.xfer = Xfer::None;
+        // A packet of the interrupted data phase may still sit in the IN
+        // endpoint (enabled, its FIFO flushed by the driver): drop it, or the
+        // endpoint never sends again.
+        crate::usb::abort_in(u8::from(self.scsi.in_address()));
         HOST_WRITING.store(false, core::sync::atomic::Ordering::Relaxed);
         // A bus reset starts a fresh session: a pending one-shot UNIT
         // ATTENTION from a screenshot taken while unplugged is moot (review
@@ -582,6 +610,18 @@ impl<B: UsbBus> UsbClass<B> for Msc<'_, B> {
         self.scsi.control_in(xfer)
     }
     fn control_out(&mut self, xfer: ControlOut<B>) {
+        // Bulk-Only Mass Storage Reset (the vendored usbd-storage resets
+        // its transport on it): the command in progress is gone here too.
+        let r = xfer.request();
+        if r.request_type == usb_device::control::RequestType::Class
+            && r.recipient == usb_device::control::Recipient::Interface
+            && r.request == 0xFF
+        {
+            self.xfer = Xfer::None;
+            // The packet of the data phase the host gave up (6.6.1: the
+            // reset readies the device for the next CBW).
+            crate::usb::abort_in(u8::from(self.scsi.in_address()));
+        }
         self.scsi.control_out(xfer)
     }
     fn endpoint_out(&mut self, addr: EndpointAddress) {

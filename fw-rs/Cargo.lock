@@ -239,8 +239,6 @@ dependencies = [
 [[package]]
 name = "usbd-storage"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9596ded13538d5407d0cef1c2879d6e5d9038d6ba601aa9e90a7d08a21ba5215"
 dependencies = [
  "num_enum",
  "usb-device",
