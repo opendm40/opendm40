@@ -255,6 +255,7 @@ impl HwTrig {
     }
 
     /// Hand the scope to the software trigger until `resume`.
+    #[cfg_attr(not(test), allow(dead_code))] // tools/touch-test
     pub fn suspend(&mut self) {
         self.suspended = true;
     }
@@ -266,6 +267,7 @@ impl HwTrig {
         self.misses = 0;
     }
 
+    #[cfg_attr(not(test), allow(dead_code))] // tools/touch-test
     pub fn suspended(&self) -> bool {
         self.suspended
     }

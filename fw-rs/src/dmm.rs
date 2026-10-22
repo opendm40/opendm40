@@ -429,9 +429,6 @@ impl Reading {
     pub fn parts(&self) -> bool {
         self.acdc || self.cpl_auto
     }
-    pub fn button(&self) -> Button {
-        if self.power.is_some() { Button::Power } else { button_of(self.mode) }
-    }
     pub fn is_ac(&self) -> bool {
         matches!(self.mode, 0 | 2 | 4 | 5 | 6)
     }
@@ -1120,18 +1117,6 @@ impl Dmm {
         self.period_ms as u32
     }
 
-    /// Converter time behind the latest reading (ms): the code window length
-    /// times the measured AD1 conversion interval for the AD1 functions,
-    /// else the reading period (the readings of AC / cap / Hz / temperature
-    /// are not windowed here). The display smoothing (meter.rs) comes on top.
-    pub fn integration_ms(&self) -> u32 {
-        if self.rate_applies() && self.conv_ms > 0.0 {
-            (self.rd_avg_n.max(1) as f32 * self.conv_ms) as u32
-        } else {
-            self.period_ms as u32
-        }
-    }
-
     /// Steady AD1OSR of the rate (in range, not moving).
     fn steady_osr(&self) -> u8 {
         if self.rate == Rate::Fast { OSR_FAST } else { OSR_SLOW }
@@ -1786,11 +1771,6 @@ impl Dmm {
     }
 
     // ------------------------------------------------------------ OVERLOAD
-
-    /// The OVERLOAD latch is in force (`Ovl`).
-    pub fn overloaded(&self) -> bool {
-        self.ovl.is_some()
-    }
 
     /// The latch lets the autorange use shunt `unit` (sentinel::shunt_of).
     fn ovl_allows(&self, unit: u8) -> bool {

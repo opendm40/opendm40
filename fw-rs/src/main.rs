@@ -164,7 +164,7 @@ const ST_CORE: u16 = 1;
 fn main() -> ! {
     wdt::kick();
     screenshot::init(); // JOB and LOGGER are in NOLOAD .dmabuf
-    logger::Logger::init_in_place(unsafe { core::ptr::addr_of_mut!(LOGGER) }, &logger::RING);
+    logger::Logger::init_in_place(core::ptr::addr_of_mut!(LOGGER), &logger::RING);
     let mut clk = Clock::new();
     lcd::set_madctl(lcd::MADCTL_LANDSCAPE);
     if !cfg!(feature = "keep-screen") {

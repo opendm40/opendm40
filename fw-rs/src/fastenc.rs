@@ -507,9 +507,4 @@ impl FastEnc {
     pub fn is_open(&self) -> bool {
         self.open
     }
-
-    /// Rows in the open chunk.
-    pub fn chunk_rows(&self) -> u32 {
-        if self.open { self.nrows } else { 0 }
-    }
 }

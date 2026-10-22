@@ -5,7 +5,7 @@
 //! app_inrush.rs.
 
 use super::*;
-use crate::inrush::{self as inr, Phase, Req, Save, Stop};
+use crate::inrush::{self as inr, Phase, Req, Save};
 use crate::scpi::Inr;
 
 /// Append `parts` to `b` (a state line).

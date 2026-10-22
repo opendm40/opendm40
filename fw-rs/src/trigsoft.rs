@@ -24,6 +24,7 @@ pub const TYPE_NAMES: [&str; 3] = ["Edge", "Pulse", "Runt"];
 /// Pulse-width conditions (Settings::pcond).
 pub const GT: u8 = 0;
 pub const LT: u8 = 1;
+#[cfg_attr(not(test), allow(dead_code))] // tools/trig-test (Settings::pcond is set from the UI / SCPI as 0..2)
 pub const EQ: u8 = 2;
 pub const COND_NAMES: [&str; 3] = [">", "<", "="];
 /// Hysteresis around a level, codes (as the edge search).

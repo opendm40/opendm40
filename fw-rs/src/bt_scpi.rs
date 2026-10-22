@@ -41,6 +41,7 @@ pub struct Frame {
     pub len: usize,
     pub data: [u8; MAX_DATA],
     /// Request used the broadcast id FF FF.
+    #[cfg_attr(not(test), allow(dead_code))] // tools/bt-scpi-test
     pub broadcast: bool,
 }
 

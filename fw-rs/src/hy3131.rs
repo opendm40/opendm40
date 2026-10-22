@@ -61,7 +61,6 @@ pub const INTF_AD1: u8 = 1 << 2;
 pub const INTF_AD2: u8 = 1 << 1;
 pub const INTF_LPF: u8 = 1 << 3;
 pub const INTF_RMS: u8 = 1 << 4;
-pub const INTF_CT: u8 = 1 << 0;
 
 /// R26 bit 7 / R34 bit 7: enable AD2 / AD3.
 const ENAD2: u8 = 0x80;
@@ -525,7 +524,6 @@ mod spi {
     const AF_MASK: u32 = (0xF << (4 * (SCK - 8))) | (0xF << (4 * (MISO - 8))) | (0xF << (4 * (MOSI - 8)));
     const AF6: u32 = (6 << (4 * (SCK - 8))) | (6 << (4 * (MISO - 8))) | (6 << (4 * (MOSI - 8)));
     const MODER_AF: u32 = (2 << (2 * SCK)) | (2 << (2 * MISO)) | (2 << (2 * MOSI));
-    const MODER_GPIO: u32 = (1 << (2 * SCK)) | (1 << (2 * MOSI));
     /// OSPEED 01 = 25 MHz for SCK / MOSI (2 .. 200 MHz made no difference on
     /// the device).
     const OSPEED_PINS: u32 = (3 << (2 * SCK)) | (3 << (2 * MOSI));
