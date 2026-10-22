@@ -55,6 +55,22 @@ macro_rules! println {
     }};
 }
 
+/// Writes a disk image sparse (only its non-zero 4 KiB blocks), as
+/// mkimg's `truncate` makes them: /tmp is a tmpfs with a per-user quota
+/// shared with everything else of the user, and ~40 dense 16 MiB images
+/// per run made parallel runs fail with EDQUOT at random points.
+fn save(path: &str, d: &[u8]) {
+    use std::io::{Seek, SeekFrom, Write};
+    let mut f = fs::File::create(path).unwrap();
+    for (i, b) in d.chunks(4096).enumerate() {
+        if b.iter().any(|&x| x != 0) {
+            f.seek(SeekFrom::Start(i as u64 * 4096)).unwrap();
+            f.write_all(b).unwrap();
+        }
+    }
+    f.set_len(d.len() as u64).unwrap();
+}
+
 #[allow(dead_code)]
 mod msc {
     /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 8 methods,
@@ -491,7 +507,7 @@ fn vserve(a: &[String]) {
             },
             b'A' => vwrite::answer(arg != 0),
             b'I' => reply[0] = vwrite::take_install() as u8,
-            b'S' => fs::write(format!("{}.out", a[1]), &*SPI.lock().unwrap()).unwrap(),
+            b'S' => save(&format!("{}.out", a[1]), &SPI.lock().unwrap()),
             b'V' => {
                 vdisk_write_quiet(&mut d, &format!("{}.vol{arg}", a[1]));
             }
@@ -906,28 +922,28 @@ fn main() {
     let mut img = Img::new(fs::read(&a[1]).unwrap());
     if a[2] == "csv" {
         csv(&a, &mut img);
-        fs::write(&a[1], &img.d).unwrap();
+        save(&a[1], &img.d);
         return;
     }
     if a[2] == "fast" {
         fast(&a, &mut img);
-        fs::write(&a[1], &img.d).unwrap();
+        save(&a[1], &img.d);
         return;
     }
     if a[2] == "upload" {
         upload_cmd(&a, &mut img);
-        fs::write(&a[1], &img.d).unwrap();
+        save(&a[1], &img.d);
         return;
     }
     if a[2] == "fatdir" {
         fatdir_cmd(&a, &mut img);
-        fs::write(&a[1], &img.d).unwrap();
+        save(&a[1], &img.d);
         return;
     }
     if a[2] == "trigger" {
         let t = fatren::make_trigger(&mut img);
         println!("trigger={:?}\n  changed blocks: {:?}", t, img.writes);
-        fs::write(&a[1], &img.d).unwrap();
+        save(&a[1], &img.d);
         return;
     }
     if a[2] == "backup" {
@@ -960,12 +976,12 @@ fn main() {
         let data_reads: Vec<u32> = img.reads.iter().copied().filter(|&l| l >= data_start).collect();
         println!("  changed blocks: {:?}", img.writes);
         println!("  reads={} data_reads={:?}", img.reads.len(), data_reads);
-        fs::write(&a[1], &img.d).unwrap();
+        save(&a[1], &img.d);
         return;
     }
     if a[2] == "shotcut" {
         shotcut(&a, &mut img);
-        fs::write(&a[1], &img.d).unwrap();
+        save(&a[1], &img.d);
         return;
     }
     if a[2] == "scopecsv" {
@@ -991,7 +1007,7 @@ fn main() {
             }
         };
         println!("csv={:?} len={} slices={} shot_refused={} shot_result={:?}", r, scope_csv::len(), slices, refused, screenshot::take_result());
-        fs::write(&a[1], &img.d).unwrap();
+        save(&a[1], &img.d);
         return;
     }
     if a[2] == "shot" {
@@ -999,7 +1015,7 @@ fn main() {
         let mc = screenshot::MEDIUM_CHANGED.load(std::sync::atomic::Ordering::Relaxed);
         println!("shot={:?} medium_changed={}", r, mc);
         println!("  changed blocks: {:?}", img.writes);
-        fs::write(&a[1], &img.d).unwrap();
+        save(&a[1], &img.d);
         return;
     }
     let dry = a[2] == "dry";
@@ -1023,7 +1039,7 @@ fn main() {
     );
     println!("  changed blocks: {:?}", img.writes);
     if !dry {
-        fs::write(&a[1], &img.d).unwrap();
+        save(&a[1], &img.d);
     }
 }
 

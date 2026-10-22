@@ -120,7 +120,7 @@ trap '[ -n "$KEEP" ] && rm -rf "$KEEP" && cp -r "$W" "$KEEP"; rm -rf "$W"' EXIT
 rustc --edition 2021 -O --cfg 'feature="recovery-file"' --cfg 'feature="vdisk"' main.rs -o "$W/t"
 export MTOOLS_SKIP_CHECK=1
 mkimg() {
-    dd if=/dev/zero of=$1 bs=1M count=16 status=none
+    rm -f $1; truncate -s 16M $1                       # sparse (/tmp quota, see save() in main.rs)
     mkfs.fat -F 16 -S 4096 -s 1 -f 2 -r 512 -R 1 -n "ATK-DM40" $1 >/dev/null
 }
 FW=../../../firmware/dm40fw.py
@@ -1265,6 +1265,7 @@ t = open(sys.argv[1]).read()
 amp = float(re.search(r'\(([0-9.]+) B per CSV byte', t).group(1))
 assert amp < 0.08, amp
 PY
+rm -f $W/vl.csv $W/vlh.csv $IMGL.ref.csv              # 3 x 49 MB (/tmp quota, see save() in main.rs)
 "$W/t" $IMGQ fast 5000 4800 abandon | tee $W/q3
 grep -qE "^fast=Done file=None .* started=false" $W/q3 && ! mdir -i $IMGQ ::LOGS | grep -q FAST002 && echo "ok: stopped while preparing: no file, nothing linked" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGQ
