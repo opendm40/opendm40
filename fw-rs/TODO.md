@@ -387,7 +387,9 @@ Code work (in this order):
       AC+DC that picks DC or AC by itself from the signal (DC part vs AC RMS) and shows which one it chose,
       as the power meter's AUTO does (7c431e5, powermeter.rs). Open: the decision rule and its
       hysteresis, the switch time (AC+DC alternates phases), what goes in the aux row, SCPI
-      (e.g. VOLT:COUP / CURR:COUP AUTO), persisted per function.
+      (e.g. VOLT:COUP / CURR:COUP AUTO), persisted per function. Note: on the UT197 this is "Auto-V LoZ",
+      the auto selection comes with a ~2 kohm input load (no LoZ hardware here, feature-request HW-6), so
+      ours is the 10 Mohm variant: ghost voltages still read.
 
 ## Found in the screenshot session 2026-10-13 (native db679a3)
 - [x] READ?/MEAS? take ~8 s (wait for a full averaging window that never fills -> 20 conversions).
@@ -564,6 +566,27 @@ Firmware:
       Host tests + senttest dcv-step. (verify on device: re-check list of that section)
   - [ ] Not done: sentinels in AC+DC / diode / continuity / cap / Hz / AC A, DC? / AC? / FUSE? hints, OVERLOAD
         shunt rule, fuse-check dialog, STAT:QUES bit 9 (doc §4.6).
+  Compared with UNI-T UT197 (2026-10-22, its manual §16.2 + the A / mA fuse notes): the UT197 senses a PLUG in
+  the mA/uA or A jack (no signal needed) and flashes "InErr" + beeps in any non-current position, i.e. before
+  the probe touches a circuit; the sense path runs through the fuse, so "InErr shows" doubles as the fuse
+  check. Ours sees only a current already flowing (mains on A-COM in V mode blows the fuse first, §4.3), and an
+  unconnected plug is electrically invisible. Follow-ups, in order:
+  - [ ] Device T9 / T10 with the A jack wired (never run), plus the 9dd1222 re-check list (AC V floor with
+        alerts ON, DC V 1 <-> 10 V soak without A-JACK). Gate for everything below.
+  - [ ] "Leads in A?" reminder (closest firmware stand-in for InErr): on a change from a current function to
+        a non-current one, toast "Leads in the A jack? Move to V" + a beep, at the moment the UT197 would warn.
+        Fires also when the lead was already moved: own option in Settings 3/3 "Jack alerts" (and in the
+        SYST:ALER:ENAB mask); decide whether it repeats or needs a tap to dismiss.
+  - [ ] Fuse check (UT197's procedure, our doc §4.3 design): guided dialog in ohm mode, lead V/ohm -> A,
+        expect ~48 ohm (PE = 2) or ~0.05 ohm (PE0 = 1), OL = blown; plus the FUSE? hint (exactly 0 A for 60 s
+        in an A mode -> "check the fuse").
+  - [ ] Sentinel coverage: UT197 warns in every non-current position; ours has none in AC+DC, diode,
+        continuity, capacitance, Hz, DC V 60 V+. First continuity and diode (probed on live boards most):
+        AD2 + OP2 on PB1, needs T8 (DC zero unchanged with AD2 on) first; then AC+DC (fold SCMPI PB1 into
+        freq_secondary's R20).
+  - [ ] OVERLOAD shunt rule (§4.3): uA / mA shunt and OL on the first conversion -> A shunt at once.
+  - [ ] Hardware note (HW-1, for a board revision / mod): a sense contact in the A jack wired to a spare
+        HY3131 input through a high-value resistor would give a real InErr and the fuse check with it.
 - [x] (B) AD2 fast data logger, main-loop (E1, no ISR): LOG:SOURce AD1|AD2, LOG:SRATe 600..9600 (R26 ladder,
       hy3131::ad2_r26_for), AD2F-gated 19-bit reads with a sign-copy torn-read check, AD3/RMS/LPF off, burst
       polling (500 us), LOG:COUNt? lost (span-based), LOG:GAPs?, LOG:PREamble? source/req/nominal/r26/coupling,
