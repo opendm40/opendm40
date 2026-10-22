@@ -20,7 +20,8 @@
 //! UF-30 needs AD1 at OSR 0x13 (the logger's ~38/s): open.
 //!
 //! Scale: the range's full scale (`full_scale`: the 60000-count format of
-//! `Val::dec`, 1000 V / 10 A on the ranges the hardware limits).
+//! `Val::dec`, 1000 V / 10 A on the ranges the hardware limits; 1000 ohm /
+//! 3 V in continuity / diode, `mode_full_scale`).
 //!
 //! Drawing: `draw_static` once (every segment unlit), then `update` repaints
 //! only the segments whose state changed (one fill_rect each).
@@ -48,6 +49,18 @@ pub fn full_scale(dec: u8, unit: &str) -> f32 {
         ("V", 1) => 1000.0,
         ("A", 3) => 10.0,
         _ => s,
+    }
+}
+
+/// Full scale of DMM `mode`: continuity (11) and diode (12) read up to
+/// their OL ceilings (dmm.rs poll_cont: > 1000 ohm; poll_diode: > 3.12 V,
+/// the 3 V scale), not the 60000-count scale of their format (600 ohm /
+/// 6 V); else `full_scale`.
+pub fn mode_full_scale(mode: u8, dec: u8, unit: &str) -> f32 {
+    match mode {
+        11 => 1000.0,
+        12 => 3.0,
+        _ => full_scale(dec, unit),
     }
 }
 

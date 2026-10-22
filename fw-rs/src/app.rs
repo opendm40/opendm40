@@ -58,6 +58,9 @@ const BUZZER_ARR: u32 = 11200;
 const RUN_LONG_MS: u64 = 1000;
 /// The combined view's function band closes this long after the last tap.
 const BAND_MS: u64 = 4000;
+/// Combined view: the scope band paints at most one frame per this many ms
+/// (25 fps; `App::sp_throttled`).
+const COMBO_FRAME_MS: u64 = 40;
 /// Scope drags kept for DBG:GEST?.
 const GEST_N: usize = 32;
 
@@ -1803,6 +1806,7 @@ impl App {
         // only the page diff repaint.
         let page = self.sp_on() && can_draw && !self.redraw && self.overlay.is_none();
         let covered = self.sp.covered();
+        crate::scope_ui::set_flush_short(self.view == View::DmmScope);
         if self.sp.frozen_or_pinch() {
             if page {
                 // The drag redraw (DBG:PROF? "s.frame"; touch->frame latency
@@ -1856,6 +1860,15 @@ impl App {
                 self.sp_tick(now);
                 return;
             }
+            if page && self.sp_throttled(now) {
+                // Combined view, frame not drawn: the last one's paint goes
+                // on; fresh results still reach the cells.
+                if fresh {
+                    self.sp.cells_due = true;
+                }
+                self.sp_paint_pass(now, covered);
+                return;
+            }
             if page {
                 let t2 = cyc();
                 crate::prof::enter(crate::prof::FRAME);
@@ -1883,16 +1896,43 @@ impl App {
                 return;
             }
         } else if page {
-            crate::prof::enter(crate::prof::PAINT);
-            self.sp_tick(now);
-            self.sp.paint_due = false;
-            crate::prof::exit(crate::prof::PAINT);
-            if self.sp.cells_due && !covered {
-                crate::prof::enter(crate::prof::MTXT);
-                self.sp_cells_step();
-                crate::prof::exit(crate::prof::MTXT);
-            }
+            self.sp_paint_pass(now, covered);
         }
+    }
+
+    /// A scope pass without a new frame to build: the paint of the last one
+    /// (a slice, scope_ui FLUSH_BUDGET), then one changed measurement cell.
+    fn sp_paint_pass(&mut self, now: u64, covered: bool) {
+        crate::prof::enter(crate::prof::PAINT);
+        self.sp_tick(now);
+        self.sp.paint_due = false;
+        crate::prof::exit(crate::prof::PAINT);
+        if self.sp.cells_due && !covered {
+            crate::prof::enter(crate::prof::MTXT);
+            self.sp_cells_step();
+            crate::prof::exit(crate::prof::MTXT);
+        }
+    }
+
+    /// Combined view: a new frame within COMBO_FRAME_MS of the last painted
+    /// one is not drawn (true). Device check 5f14d38, open input, 1 ms/div:
+    /// a noise-triggered trace at 56.6 fps kept the loop painting in
+    /// ~1.3 ms slices on almost every pass (s.paint 63 % CPU, ~11 ms of paint
+    /// per frame), DBG:PING? p50 3.3 ms against the <= 2 ms target. The meter
+    /// is the main thing there; 25 fps of the scope band is plenty. A
+    /// running Auto / Normal record only: Single, STOP (frames on a change),
+    /// roll (partial frames), the wave view and the Scope page are never
+    /// throttled.
+    fn sp_throttled(&mut self, now: u64) -> bool {
+        let s = &self.scope.s;
+        if self.view != View::DmmScope || !s.run || s.mode == scope::TrigMode::Single || self.scope.rolling() || self.scope.wave_on() {
+            return false;
+        }
+        if now < self.sp.frame_next {
+            return true;
+        }
+        self.sp.frame_next = now + COMBO_FRAME_MS;
+        false
     }
 
     /// A stopped scope emits no frames on its own: ask it for one re-render

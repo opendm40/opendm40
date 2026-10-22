@@ -618,7 +618,7 @@ fn hit_tests(ck: &mut Ck) {
     let vals = ["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto", "Hold 300 ms", "", "", ""];
     for p in 0..3u8 {
         host::reset(0);
-        ui::settings(p, &vals[..[11, 11, 2][p as usize]]);
+        ui::settings(p, &vals[..[9, 9, 2][p as usize]]);
         let n = [ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize];
         let want: Vec<u32> = (0..n as u32).collect();
         page(ck, &format!("settings {}", p + 1), &|_, y| o(ui::settings_hit(p, y)), &|b| b.y0 >= 40, &want);
@@ -918,6 +918,18 @@ fn tap_step_tests(ck: &mut Ck) {
     let sc = |c: u8, a: i32| su::tb_scroll(c, a);
     ck.t("tb scroll: < 30 px no row, 30 px one row (down = faster)", sc(13, 29) == (13, 29) && sc(13, 30) == (12, 0) && sc(13, -65) == (15, -5));
     ck.t("tb scroll: clamped at both ends, remainder dropped", sc(4, 90) == (3, 0) && sc(28, -90) == (29, 0) && sc(3, 45) == (3, 0));
+    // DMM wave view: the list starts at WAVE_TB_MIN (5 ms/div), no entry
+    // below it to pick or scroll to; back to TB_MIN on exit.
+    {
+        let w = crate::scope::WAVE_TB_MIN as u8;
+        su::set_tb_lo(w as usize);
+        let ok = su::tb_hit(w, 140, 60) == su::TbHit::Inside && su::tb_hit(w, 140, 90) == su::TbHit::Inside && su::tb_hit(w, 140, 120) == su::TbHit::Row(w) && su::tb_hit(w, 140, 150) == su::TbHit::Row(w + 1);
+        let ok2 = sc(w + 1, 90) == (w, 0) && sc(w, 30) == (w, 0) && sc(w, -30) == (w + 1, 0);
+        su::set_tb_lo(crate::scope::TB_MIN);
+        ck.t("tb list (wave view): nothing below 5 ms/div to pick", ok);
+        ck.t("tb scroll (wave view): clamped at 5 ms/div", ok2);
+        ck.t("tb list: TB_MIN again after the wave view", su::tb_hit(3, 140, 120) == su::TbHit::Row(3) && sc(4, 90) == (3, 0));
+    }
     // A drag of 3 px reports up 137 px: 4 rows, applied once on release.
     let (mut cur, mut acc) = (13u8, 0);
     let mut shown = vec![];

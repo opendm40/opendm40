@@ -170,7 +170,8 @@ Code work (in this order):
         digit / '.' / backspace replaces it; OK on an untouched prefill keeps the setting.
       - #9 generator bar status + tappable RUN/STOP (22e7dd6).
       - #11 pressed-key feedback on the keypads (7dad1b9); menu tiles / settings rows / gen boxes
-        still have none (the scope page has its own press_fx).
+        still have none (the scope page has its own press_fx). Left open (M: a pressed style per
+        widget + the release redraw, each against the stock look).
       - #12 backlight / volume -/+ steppers, clamped (1f19f05 drawing, 7e2abce logic).
       - #13 already in: DMM lightning >= 100 V (stock), combined strip HV badge >= 30 V and red
         ring >= 100 V. DMM page >= 30 V: done 2026-10-21 as the stock cue itself (value 0xC9A0 red in V
@@ -551,6 +552,14 @@ Firmware:
         cycle + glyphs, POW:ZERO (Y 1072, X ~890 / ~160), V vs DC V <= 0.063 % on 6 / 60 V in DC and AC+DC, f 40.0018
         Hz on the square (R21 0xBF), P / Wh / VAh tap, "Reset energy?" (1st Yes did not reset, 2nd did), reboot in W.
         Open: POW:VOLT:CAL, T2-T4 with current through A.
+        Fixed after 5f14d38: the 1st Yes came ~13 s after the long press (screenshot 38 -> 39: 12.9 s; the
+        2nd try 2.4 s) and the confirm auto-cancelled at 10 s, so the tap hit the bare page: now 60 s
+        (dialog::ENERGY_MS, as the wiring / firmware questions). Emulator: powtest.py ereset (Yes 13 s
+        after the long press resets; FAILs on 06d6f62). Negative zero: every power readout (main, E box,
+        PF / S / Q, AVG, V / I) shows +0 for a value that rounds to zero (pw::no_neg_zero; ui-render
+        p15 / p16, meter-test). Generic DMM readouts unchanged (dmm::format). Unit case: the E box already
+        says "kWh" (F14 has k); the main readout / aux row keep "KWh": LETTERS has no 'k' (its set:
+        %+-.0-9 A H K L M V g h i m u z ohm C F); a 'k' would need a rasterised glyph as stockfont_w.rs.
   - [ ] Not done: RESistive phase cal (flat optimum), BT protocol slot (BT reports the AC A byte), limits (W) in
         Hold & Limits, tap on P to cycle the main readout (P / S / PF / E).
 - [x] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
@@ -687,7 +696,8 @@ Firmware:
       roll, range steps, exit, conflicts) PASS; ui-render wave scenes 0 violations; stock pixel diff unchanged.
 - [ ] (A) device test of the Wave view (feasibility 10.6, 15 min) - after the ISR loss fix (E3/E4 device item:
       its holes restart the wave record, 10.4). Follow-ups: 16-bit record, DMM reading alongside (request
-      queue), DC-coupled V row (E7), the timebase list without the < 5 ms/div entries in the Wave view.
+      queue), DC-coupled V row (E7). Done: the timebase list starts at 5 ms/div in the wave view
+      (scope_ui::set_tb_lo from app_wave; touch-test + ui-render s01-tb-list-wave).
 - [x] Device 2026-10-21 (docs/device-check-2026-10-21.md "Fixes"): stack 37468/46048 B (81 %) on 16b3eb9.
       d957027: no USBTMC tx copy, 8-byte logger records, .sram_bss (EP_MEMORY, MSC_IO, MSC block, touch
       log, dlog TAB); build.sh native checks the static worst path (tools/stack-depth) >= 16 KiB headroom,
@@ -707,6 +717,13 @@ Firmware:
       that frame rate at 1 ms/div). (verify on device: combined view, open input, 1 ms/div: ping p50 <= 2 ms)
       Device 5f14d38: 56.6 fps, s.paint max 1.68 ms, loop max 12.3 ms, ping p50 3.3 / p99 18.1 ms (was 11.8 /
       16.5): better, p50 still above 2 ms.
+      Fix after 5f14d38: the combined view paints at most 25 fps (app.rs COMBO_FRAME_MS 40; Auto / Normal
+      running records; Single, STOP, roll, the wave view and the Scope page uncapped; a frame not drawn
+      still measures and its paint pass goes on) and its flush slice is 0.8 ms (scope_ui
+      set_flush_short; Scope page 1.5 ms as before). Expected: paint ~11 ms x 25 = ~28 % CPU instead of
+      63 %, most passes short. Emulator (~9 fps there, cap not reached): with the cap at 200 ms the
+      combined view drops to 4.7 fps and the Scope page stays at 9.5. (verify on device: combined view,
+      open input, 1 ms/div, 400 x DBG:PING? p50 <= 2 ms, DBG:PROF? ~25 fps, s.paint max <= 0.9 ms)
 - [x] Scope ~9 fps at 1 ms/div after AUTO: three comparator misses (AUTO's fast-timebase sweep) disabled
       the hardware trigger for good; 53bdb9d suspends it until the next range / timebase / coupling /
       edge / mode / type change. The emulator's comparator model barely fires (ScopeFeeder TIM2 gate
@@ -871,7 +888,7 @@ Emulator (emu/):
       Cause of the missed edges (input path settling after the AC+DC relay pulses?) still open: retest on
       the device; if the wrong readings persist, compare the stock's AC+DC -> Hz entry (R20 / relay order).
       (verified on device 9dd1222: AC+DC -> Hz 2 x 43 reads all 40.002 Hz, duty 50 %, MIN/MAX clean)
-- [ ] DMM batch polish (open): bargraph full-scale labels in diode / continuity say the 60000-count scale
-      (6 V / 600 ohm), not their real ceilings (3 V / 1000 ohm); Help "Tap history row" applies only with
-      Settings 2/2 DMM row = History; a debug_assert in ui::list_page (vals.len() == names.len()) would have
-      caught the 1a3efbd row mis-mapping.
+- [x] DMM batch polish: bargraph full scale in continuity / diode = their OL ceilings 1000 ohm / 3 V
+      (bargraph::mode_full_scale; ui-render d18 / d19, bargraph-test); Help 3/5 rows "Tap / hold history:
+      Store / clear" + "History row shown: Settings: DMM row"; ui::list_page asserts one value per row on
+      the host (ui-render / touch-test; touch-test passed 11 values to the 9-row pages, fixed).
