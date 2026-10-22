@@ -980,6 +980,13 @@ Firmware:
       while latched (AD1/AD2 on PB2) to know when it is safe to return. >30 V on A-COM (mains) cannot be protected by
       switching (MOSFET breakdown first); document. Doc: power-meter-and-misconnect.md section 4 (update the old
       "do not auto-switch MOSFETs in V modes" note).
+- [ ] Burden voltage in the A / mA / uA modes (as the EEVblog 121GW, owner 2026-10-22): show I * R_path of the
+      shunt in use (10 A / mA / uA) in the aux row, so the user sees how much the meter drops in the circuit
+      (uA range: 48 ohm, 0.19 V at 4 mA; mA: 0.24..0.6 V at 400 mA). Reuse the power meter's per-shunt R_path
+      (powermeter.rs `r_path`, default SHUNT_OHM; POW:BURDen sets it) instead of a second setting; DC and AC
+      (sign / RMS as the reading). Open: which aux slot it replaces, a toggle (121GW: setup item), SCPI
+      (e.g. a FETC:BURD? query), the guided "measure R_path with the ohm function" step from doc §3.6 (fuse +
+      MOSFET + traces are UNKNOWN until measured), device check against a second meter across A-COM.
 Emulator (emu/):
 - [ ] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
       use per function (from the rows / mux selections: e.g. which PA tap, SENSE, PB0..PB7, FB/RLU), not "the
