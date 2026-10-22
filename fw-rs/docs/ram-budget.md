@@ -48,7 +48,12 @@ and it is now the only path:
   block has been filled. main.rs passes `can_draw = false` and App::gesture
   drops input in that time, so nothing draws over rows that are not read
   yet. The main loop keeps running: DMM, USB, BT and the watchdog. The
-  verify pass compares CRCs and does not need the panel.
+  verify pass compares CRCs and does not need the panel. Three draws
+  bypassed `can_draw` (App::toast, the auto power-off warning, the USB
+  firmware-file dialog); with the freeze now always ~5 s they are held off
+  while `frozen()` (a toast is dropped, the dialog comes after the shot).
+  The power-off / reset paths (`finish_disk_writes`) draw nothing before
+  they finish the shot.
 - Cost: the screen stays frozen for the write, ~4-5 s on the device. That
   is 76 blocks, each a 4 KiB sector erase (~45 ms typ.) plus 16 page
   programs. It is shorter when the free clusters are already erased (the
