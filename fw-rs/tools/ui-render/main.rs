@@ -1897,6 +1897,66 @@ fn main() {
         host::reset(0);
         ui::settings(2, &["A-JACK only", ""]);
         save(&out, "m10-settings3");
+        // Pressed feedback (ui-review #11): the item drawn pressed from
+        // touch-down (one item redrawn), then released = the page as drawn.
+        {
+            let combo = ui::view_name(ui::View::DmmScope);
+            let s0 = ["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""];
+            let lim = ["ON", "ON", "1.000 V", "--", "", "", "", "OFF", "1 s"];
+            let row = |r: u8, part: i8, on: bool, f: &dyn Fn()| {
+                ui::set_row_only(Some(ui::RowPress { row: r, part, on }));
+                f();
+                ui::set_row_only(None);
+            };
+            let d_menu = || ui::main_menu(combo);
+            let d_set = || ui::settings(0, &s0);
+            let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
+            let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
+            let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
+            let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);
+            let g = &w.gen;
+            let d_gen = || ui::gen_static(g);
+            let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
+                .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
+                .chain((0..9u8).map(|r| {
+                    let part = if ui::SET_STEP_ROWS.contains(&(r as usize)) { 1 } else { 0 };
+                    (format!("settings{r}/{part}"), &d_set as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_set)) as Box<dyn Fn(bool)>)
+                }))
+                .chain([(2u8, -1i8), (3, -1)].into_iter().map(|(r, part)| {
+                    (format!("settings{r}/{part}"), &d_set as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_set)) as Box<dyn Fn(bool)>)
+                }))
+                .chain((0..9u8).map(|r| (format!("settings2-{r}"), &d_set2 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set2)) as Box<dyn Fn(bool)>)))
+                .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>)))
+                .chain([(0u8, -1i8), (0, 1), (1, -1), (1, 1), (3, 0)].into_iter().flat_map(|(r, part)| {
+                    [
+                        (format!("record{r}/{part}"), &d_rec as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_rec)) as Box<dyn Fn(bool)>),
+                        (format!("record-on{r}/{part}"), &d_recon as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_recon)) as Box<dyn Fn(bool)>),
+                    ]
+                }))
+                .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>)))
+                .collect();
+            for (name, draw, press) in cases.iter() {
+                host::reset(0);
+                draw();
+                let want = emu().fb.clone();
+                press(true);
+                ck.check_opts(&format!("pressed/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
+                let file = match name.as_str() {
+                    "menu1" => "m04b-menu-pressed",
+                    "settings4/0" => "m01b-settings-row-pressed",
+                    "settings2/1" => "m01c-settings-step-pressed",
+                    "record3/0" => "m12b-record-start-pressed",
+                    "gen1" => "g01b-gen-box-pressed",
+                    "gen4" => "g01c-gen-wave-pressed",
+                    _ => "",
+                };
+                if !file.is_empty() {
+                    save(&out, file);
+                }
+                press(false);
+                ck.same_as(&format!("pressed-release/{name}"), &want);
+            }
+        }
         host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));
         save(&out, "m03-range-v-warn");

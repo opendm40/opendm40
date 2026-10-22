@@ -29,6 +29,8 @@ mod app_power;
 /// The DMM wave view (scope page, source DMM: the AD2 stream).
 #[path = "app_wave.rs"]
 mod app_wave;
+#[path = "app_press.rs"]
+mod app_press;
 pub use app_wave::WaveReq;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
@@ -171,6 +173,9 @@ pub struct App {
     kp_edit: bool,
     /// Keypad key drawn pressed since its touch-down (ui-review #11).
     kp_pressed: Option<u8>,
+    /// Menu tile / list-page row or stepper key / generator box drawn
+    /// pressed since its touch-down, on that view (ui-review #11).
+    pressed: Option<(View, ui::RowPress)>,
     cur: ui::Cursors,
     /// Analog rail policy: false = Auto (default, stock-like: the rails the
     /// shown view needs, see update_rails), true = both rails always on.
@@ -407,6 +412,7 @@ impl App {
             kp_sel: false,
             kp_edit: false,
             kp_pressed: None,
+            pressed: None,
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             rails_both: false,
             host_dmm: false,
@@ -1217,6 +1223,8 @@ impl App {
         // ---- drawing only below this point.
         if self.redraw {
             self.redraw = false;
+            // The full repaint drew any pressed item released.
+            self.pressed = None;
             self.scope_invalidate();
             self.chart_cache.invalidate();
             self.draw_static();
@@ -2122,6 +2130,9 @@ impl App {
                 }
             }
         }
+        // The same rule on the menu tiles, list-page rows / stepper keys and
+        // the generator boxes (app_press.rs).
+        self.press_gesture(&g);
         match g {
             // Global gestures (UF-17 / UF-18), any view.
             Gesture::MultiSwipeDown(3) => {
@@ -2711,7 +2722,7 @@ impl App {
                 if ui::gen_run_hit(x, y) {
                     // RUN/STOP label: output on / off, as the RUN key.
                     st.on = !st.on;
-                } else if x < 243 && (40..82).contains(&y) {
+                } else if ui::gen_wave_hit(x, y) {
                     let k = Wave::ALL.iter().position(|&w| w == st.wave).unwrap_or(0);
                     st.wave = Wave::ALL[(k + 1) % 4];
                 } else if let Some(b) = ui::gen_box_hit(x, y) {

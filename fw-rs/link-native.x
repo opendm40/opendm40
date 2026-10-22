@@ -90,6 +90,7 @@ SECTIONS
         *(.text.*7dm40_fw9scope_csv*);
         *(.text.*7dm40_fw4boot*);
         *(.text.*7dm40_fw7persist*);
+        *(.text.*7dm40_fw3app9app_press*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C
