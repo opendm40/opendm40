@@ -987,6 +987,16 @@ Firmware:
       (sign / RMS as the reading). Open: which aux slot it replaces, a toggle (121GW: setup item), SCPI
       (e.g. a FETC:BURD? query), the guided "measure R_path with the ohm function" step from doc §3.6 (fuse +
       MOSFET + traces are UNKNOWN until measured), device check against a second meter across A-COM.
+- [ ] Inrush current (as the Fluke 376 / 323 clamps, owner 2026-10-22): arm in the 10 A range (autorange
+      off), wait for the current to step up from ~0 past a threshold, then show the RMS over the first 100 ms
+      after the trigger (Fluke's window) plus the peak, and keep the captured trace (a short chart / scope-like
+      view, saved like the FAST*.DLG records). Data path: AD2 on the 10 mohm shunt at x1 (+-125 A window,
+      dmm-input-scope-feasibility.md 1.3) at the fast logger's 9.6 kS/s (src/fastlog.rs; ~960 samples in
+      100 ms), with a pre-trigger ring. Open: the trigger rule (absolute A vs a step from the idle level), AC
+      and DC loads (RMS of the raw samples covers both), what the 10 A fuse tolerates (rating / type UNKNOWN:
+      a motor start can be 5-10x the run current), AD2 bandwidth and offset at x1 vs the DMM reading, UI entry
+      (A mode sub-function vs Record page), SCPI (arm / fetch RMS, peak, trace), emulator scenario (a stepped
+      current into A), device check with a lamp / motor and a second meter or the scope + shunt.
 Emulator (emu/):
 - [ ] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
       use per function (from the rows / mux selections: e.g. which PA tap, SENSE, PB0..PB7, FB/RLU), not "the
