@@ -39,7 +39,7 @@ RUSTFLAGS="-C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR
 ELF=$TDIR/thumbv7em-none-eabihf/release/dm40-fw
 
 # Static worst-case stack path vs the TCM stack (>= 20 KiB headroom; the
-# SRAM-free and region-B checks are link-native.x asserts).
+# SRAM-free, region-B and region-C checks are link-native.x asserts).
 if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 20480 --top 0 > target/native/stackdepth.txt; then
     cat target/native/stackdepth.txt >&2
     exit 1
@@ -47,7 +47,7 @@ fi
 head -1 target/native/stackdepth.txt
 
 BODY=target/native/dm40-fw-native.body.bin
-rm -f target/native/regionb.warn
+rm -f target/native/regionb.warn target/native/regionc.warn
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
 python3 ../firmware/dm40fw.py pack --pad "$BODY" dm40-fw-native.bin
 python3 - "$BODY" "$ELF" <<'PY'
@@ -72,6 +72,12 @@ print("  region B free    = %d bytes (zero-wait flash below 0x08080000; link fai
 if bfree < 16384:
     # Repeated as a banner at the very end of build.sh (target/native/regionb.warn).
     open('target/native/regionb.warn', 'w').write('%d\n' % bfree)
+# Region C (.cold + the .data load image, slow flash) ends at the FS-loader:
+# the update file cannot reach above 0x080A0000 (docs/native-boot.md "Memory budget").
+cfree = END - syms['__image_end']
+print("  region C free    = %d bytes (.cold + .data image below 0x080A0000; link fails below 4 KiB)" % cfree)
+if cfree < 8192:
+    open('target/native/regionc.warn', 'w').write('%d\n' % cfree)
 print("  SRAM free        = %d bytes (above .sram_bss; >= 8 KiB)" % (0x20030000 - syms['__sram_bss_end']))
 print("  word0 initial SP = 0x%08x (loader only; reset sets 0x10010000)" % sp)
 print("  word1 reset      = 0x%08x" % entry)
@@ -113,6 +119,23 @@ if [ -f target/native/regionb.warn ]; then
         echo "## The link fails below 8 KiB. Move rarely run code (start / stop, taps, pages,"
         echo "## debug replies) to .cold (link-native.x; #[inline(never)] where it is inlined"
         echo "## into a hot caller), never per-pass or ISR / stream code (docs/native-boot.md)."
+        echo "################################################################################"
+        echo
+    } >&2
+fi
+# Region C (.cold, 0x08080000..0x080A0000) below 8 KiB free: the same kind of
+# banner (the link fails below 4 KiB). The FS-loader writes the update body
+# only to 0x08004000..0x080A0000; above are the FS-loader, boot data and
+# calibration (docs/native-boot.md "Flash outside the image").
+if [ -f target/native/regionc.warn ]; then
+    c=$(cat target/native/regionc.warn)
+    {
+        echo
+        echo "################################################################################"
+        echo "## build.sh: WARNING: region C (.cold, slow flash) has only $c bytes free (< 8 KiB)"
+        echo "## The link fails below 4 KiB. The image may not reach 0x080A0000 (FS-loader)."
+        echo "## Cut code, or move .cold code back to region B while B has room (only what"
+        echo "## B's budget allows); see docs/native-boot.md \"Memory budget\"."
         echo "################################################################################"
         echo
     } >&2
