@@ -1477,7 +1477,7 @@ The owner had installed 7409b92 (it contains rust-fw-poc up to a4dadc7). `DBG:BO
 | 2.4 | Disk at 76 800, `LOG:DUR 60` | **FAIL**: the rung was 76 800 (tpp 382 / 389 us passed the gate), but the file holds 2 095 713 rows of 4 599 040 conversions. **lost_before sum 2 505 919 (54 %)**. fifo_hw 525 of 8192, 336 pages/s. The coder was CPU-starved; the flash was not the limit | `p4.py`, `disk768.json`, `prof768disk.txt` |
 | 2.5 | Wave view 1 ms/div (76 800) and 2 ms/div (38 400), 30 s each | **PASS**: trace and Vp-p 9.94 / 10.0 V right (`wave-1e-3.png`, `wave-2e-3.png`); ISR `dropped` +0 in each 30 s window (22 at the switch to 1 ms/div, before the window), bad / overruns / slips 0, max_lat 280 / 260 ns; cpu_permille 560 / 154 | `p5.py`, `p5.json` |
 | 2.6 | After the streams: DC V 1 V, `DBG:HYSPI:SELF? 2000` | **PASS**: 0.999951 V mean of 10 READ? (-0.005 %, range 0.999812-1.000066); SELF? 2000 frames, all error counts 0 | - |
-| 3 | AC+DC methods (acdcmeth.py e6 e1 e7 e2 e5, then AUTO with C by hand) | see "3." below | `acdcmeth.jsonl` |
+| 3 | AC+DC methods (acdcmeth.py e6 e1 e7 e2 e5, then AUTO with C by hand) | e6 PASS (C fastest) / e1 **B FAIL** (bimodal zero) / e7 (ii) better / e2 AC PASS (C +0.13 / +0.23 % vs A), C 60 V DC +0.28 % / e5 6 V PASS, **60 V FAIL** (+0.09..0.10 %) / AUTO with C: square PASS, **>= 5 V DC FAIL** (range hunting, bogus AC part). The rule for C as default is not met; see "3." | `acdcmeth.jsonl`, `p3.py`, `p3b.py` |
 
 ### 1. The shot fix (7409b92)
 
