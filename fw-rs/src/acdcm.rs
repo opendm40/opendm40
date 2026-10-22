@@ -25,8 +25,9 @@
 //!   gain, not the factory AC V calibration (which belongs to the AC-coupled
 //!   PB4 node). A: the stock AC A row as it is (AD2 on the shunt node is
 //!   DC-coupled): AC part = RMS with the factory AC A gain, DC part = the LPF
-//!   with the same gain and an offset taken against the stock DC A row at
-//!   entry (one point: an offset only).
+//!   with the same gain, corrected against the stock DC A row at entry (one
+//!   point: a gain factor when the current is >= 10 % of the range, else
+//!   an offset; the factory LPF gains are 1.0, "never calibrated").
 //!
 //! The 6 V range of B: the AC V 6 V row sits on the /100 tap with OP1 x10
 //! (PB4), DC V 6 V on the /10 tap with OP1 x1, so no merged row is the
@@ -66,6 +67,9 @@ const B_AVG_THR: i32 = 0x206;
 /// 1.414 x sqrt(RMS) exceeds it (the DC-coupled node has one window for
 /// DC and AC; acdc-approaches.md 7 item 5).
 const C_PEAK: f32 = 0.9 * 262_144.0;
+/// C A: the entry reference sets a gain (else an offset) from this
+/// fraction of the range's full scale.
+const C_A_GAIN: f32 = 0.1;
 /// Slots: V ranges 0..3, A 4 + (unit * 2 + range).
 const SLOTS: usize = 10;
 
@@ -80,6 +84,8 @@ pub struct Am {
     /// Per slot: B zero (DC units of the range), C A offset; valid / fixed
     /// (DBG:ACDC:ZERO) bits.
     corr: [f32; SLOTS],
+    /// C A: the LPF gain factor per A slot (1.0: offset only).
+    cgain: [f32; SLOTS - 4],
     ok: u16,
     fixed: u16,
     /// Reference (stock DC row) taken this session, per slot.
@@ -109,6 +115,7 @@ pub fn am_static() -> &'static mut Am {
             acc: 0.0,
             ref_v: 0.0,
             corr: [0.0; SLOTS],
+            cgain: [1.0; SLOTS - 4],
             ok: 0,
             fixed: 0,
             refd: 0,
@@ -398,8 +405,10 @@ impl Dmm {
         self.am.sq = sq;
         if meth == METH_C {
             // C: the DC part from the LPF (V: E7's self-cal; A: the AC A
-            // gain and the entry offset).
+            // gain with the entry correction: a gain factor when the
+            // reference was >= C_A_GAIN of the range, else an offset).
             let x = if cv { lpf * pc - off } else { lpf * gain };
+            let fs = self.factor() * DEC4[((m - 4) as usize + r).min(3)];
             if self.am.st == ST_MEAS {
                 let a = &mut *self.am;
                 a.n += 1;
@@ -407,13 +416,19 @@ impl Dmm {
                     a.acc += x;
                 }
                 if a.n > MEAS_N {
-                    a.corr[s] = a.acc / (a.n - 1) as f32 - a.ref_v;
+                    let mean = a.acc / (a.n - 1) as f32;
+                    a.corr[s] = mean - a.ref_v;
+                    a.cgain[s - 4] = 1.0;
+                    if a.ref_v.abs() >= C_A_GAIN * fs && (a.ref_v / mean - 1.0).abs() < 0.05 {
+                        a.cgain[s - 4] = a.ref_v / mean;
+                        a.corr[s] = 0.0;
+                    }
                     a.ok |= 1 << s;
                     a.st = ST_RUN;
                 }
                 return None;
             }
-            self.dc_val = if cv { x } else { x - self.am.corr[s] };
+            self.dc_val = if cv { x } else { x * self.am.cgain[s - 4] - self.am.corr[s] };
             self.acdc_seen |= 2;
             self.am.fresh |= 2;
             self.am.n_dc += 1;
