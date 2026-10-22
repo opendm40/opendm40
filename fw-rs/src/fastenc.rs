@@ -321,7 +321,8 @@ impl FastEnc {
         self.acc &= (1u64 << self.nb) - 1;
     }
 
-    #[inline(always)]
+    /// Not inlined: two calls per row, ~1 KB of B each when inlined.
+    #[inline(never)]
     fn rice(&mut self, fifo: &mut [u8], x: u32, k: u32) {
         let q = x >> k;
         if q < QMAX {

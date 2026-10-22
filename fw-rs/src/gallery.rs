@@ -758,6 +758,8 @@ struct Csv {
     clast: i32,
     lcol: i32,
     ly: i32,
+    /// A fast-logger file (dlog kind 3, FASTnnn.DLG): its parameters.
+    fast: Option<dlog::FPar>,
 }
 
 const CSV0: Csv = Csv {
@@ -786,6 +788,7 @@ const CSV0: Csv = Csv {
     clast: 0,
     lcol: -1,
     ly: 0,
+    fast: None,
 };
 
 fn find(h: &[u8], n: &[u8]) -> Option<usize> {
@@ -1962,7 +1965,7 @@ impl Gallery {
                 return self.begin_b();
             }
             j.csv = CSV0;
-            let Some((_, hl, ul, unit)) = dlog::parse_file(&mut src, e.size) else {
+            let Some((kind, hl, ul, unit)) = dlog::parse_file(&mut src, e.size) else {
                 return self.fail("Unsupported format", 0, 0);
             };
             // The header text's first line: function, range.
@@ -1976,6 +1979,16 @@ impl Gallery {
             j.csv.unit[..k].copy_from_slice(&unit[..k]);
             j.csv.ul = k as u8;
             j.csv.hdr = dlog::FHDR as u32 + hl;
+            if kind == dlog::KIND_FAST {
+                // Its parameters follow the header text; values in SI (AD2)
+                // or raw counts (AD1), rows at device time.
+                let mut p = [0u8; dlog::FAST_PAR];
+                let Some(fp) = src.read(j.csv.hdr, &mut p).then(|| dlog::FPar::parse(&p)).flatten() else {
+                    return self.fail("Unsupported format", 0, 0);
+                };
+                j.csv.fast = Some(fp);
+                j.csv.hdr += dlog::FAST_PAR as u32;
+            }
             j.i = j.csv.hdr;
             j.ph = Ph::A;
             return;
@@ -1984,6 +1997,28 @@ impl Gallery {
             j.i = j.csv.hdr; // pass B starts at the first chunk
         }
         let mut w = dlog::Win::new();
+        if let Some(fp) = j.csv.fast {
+            let c = dlog::fchunk_at(&mut src, &mut w, j.i, e.size, true);
+            let ok = c.is_some_and(|c| {
+                let csv = &mut j.csv;
+                dlog::fast_rows(&mut src, &mut w, &c, &fp, &mut |t, raw, _| {
+                    let v = if fp.flags & dlog::FP_SCALED != 0 { fp.a + fp.b * raw as f32 } else { raw as f32 };
+                    csv.sample((t / 1000).min(u32::MAX as u64) as u32, Some(v))
+                })
+            });
+            match c {
+                Some(c) if ok => j.i = c.end(),
+                _ => {
+                    if ph == Ph::A {
+                        self.end_a();
+                    } else {
+                        self.job.csv.flush();
+                        self.finish();
+                    }
+                }
+            }
+            return;
+        }
         let c = dlog::chunk_at(&mut src, &mut w, j.i, e.size, true);
         let ok = c.is_some_and(|c| {
             let csv = &mut j.csv;
