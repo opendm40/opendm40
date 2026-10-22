@@ -269,7 +269,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         ///   vsrc:none, isrc:none, r:none ... remove one element
         /// Aliases of the older per-function form: dcv:V, acv:RMS@Hz[,dc=,shape=,duty=], hz:F[,duty=,amp=],
         ///   dca:A, aca:RMS@Hz[,dc=], ohm:OHM, cap:F, temp:C[,cj=], tcmv:MV, tcopen, chip:C.
-        /// Model options (returned to the caller): noise:, cal:, beat:, powmix:, powvg:, powz:.
+        /// Model options (returned to the caller): noise:, cal:, beat:, powmix:, powvg:, powz:, op1vos:, ad2dcg:.
         public List<KeyValuePair<string, double>> Apply(string spec)
         {
             var options = new List<KeyValuePair<string, double>>();
@@ -396,7 +396,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     if(none) { DieFollowsCj = true; break; }
                     DieTemp = v; DieFollowsCj = false;
                     break;
-                case "noise": case "cal": case "beat": case "powmix": case "powvg": case "powz":
+                case "noise": case "cal": case "beat": case "powmix": case "powvg": case "powz": case "op1vos": case "ad2dcg":
                     options.Add(new KeyValuePair<string, double>(key, v));
                     break;
                 default:

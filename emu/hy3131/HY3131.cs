@@ -292,6 +292,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public bool PowMix = true;             // power role: an R34 statistic switch mid-block mixes that block
         public double PowVGain = 1.0;          // power role: extra Y gain deviation ("powvg:", for the V self-cal)
         public bool PowZeros = false;          // power role: the device's LPF zeros ("powz:1", doc 3.11 T1)
+        /// OP1 input offset, V (fw-rs DC-coupled V row, feasibility E7: AD2 = OP1O in an AC V row). Device
+        /// hint: the AC V sentinel row's 37 mV RMS floor at 6 V (OP1 x10, /100 tap) = a 2 kHz square of
+        /// +-0.37 mV x 10 at OP1O (sentinel.rs). "op1vos:V".
+        public double Op1Vos = 0.37e-3;
+        /// AD2 gain deviation in that row ("ad2dcg:", 1 = nominal): the one-shot self-cal fixes the offset only.
+        public double Ad2DcGain = 1.0;
         public bool CntPin;                    // CNT pin level (ENCNTI source); set by the board model
         public int ForcedAd1 = int.MinValue;   // SetAd1: raw code override
         public int ForcedAd2 = int.MinValue;
@@ -531,6 +537,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "powvg": PowVGain = o.Value; break;
                 case "powz": PowZeros = o.Value != 0; break;
                 case "vnoise": vNoise = o.Value; break;
+                case "op1vos": Op1Vos = o.Value; break;
+                case "ad2dcg": Ad2DcGain = o.Value; break;
                 }
             }
         }
@@ -882,6 +890,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             (role == Role.DcV || role == Role.DcMv || role == Role.Ohm || role == Role.Temp)
             && (regs[0x32] & 0xF0) == 0xE0 && (regs[0x27] >> 6) == 1 && ((regs[0x27] >> 4) & 3) == 2;
 
+        /// The fw-rs DC-coupled V row (ad2exp.rs dcv_row): an AC V row with OP1 on and SAD2IP = OP1O.
+        private bool Ad2OnOp1Dc => role == Role.AcV && EnOp1 && (regs[0x27] >> 6) == 0;
+
+        /// OP1 chopper polarity at t: OP1CHOP 1 / 2 = 1 / 2 kHz, running only while AD1 converts
+        /// (device, sentinel.rs); held (+1) otherwise and for 0 / 3.
+        private double Op1ChopSign(double t)
+        {
+            var c = regs[0x33] >> 6;
+            if(!EnAd1 || c == 0 || c == 3) return 1;
+            return ((t * 1000.0 * c) % 1.0) < 0.5 ? 1 : -1;
+        }
+
         /// Codes per volt at the AD2 input: IG / (RG * VR) * 2^18.
         private double Ad2Scale() => Ad2Ig / (Ad2Rg * Vref) * 262144.0;
 
@@ -898,6 +918,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var r = roleRange;
                 Fe.VJack(0, out jdc, out jac, out hz, out shape, out duty);
                 sigHz = hz; sigShape = shape; sigDuty = duty;
+                if(Ad2OnOp1Dc)
+                {
+                    // fw-rs DC-coupled V row: OP1O = g x (SENSE + Vos), SENSE = the jack through the row's
+                    // tap (r0: /100 with OP1 x10, OPS1; r1..r3 /100 .. /10000), DC-coupled; OP1+ on AGND
+                    // (SOP1P 011) = the offset alone; OP1's chopper flips Vos while AD1 converts
+                    var g = (regs[0x25] & 1) != 0 ? 10.0 : 1.0;
+                    var k = AcvK[Math.Max(r, 1)];
+                    var sense = (regs[0x32] & 7) == 0;
+                    dc = ((sense ? jdc / k : 0) + Op1Vos * Op1ChopSign(t)) * g * Ad2DcGain;
+                    ac = (sense ? jac / k : 0) * g * Ad2DcGain;
+                    break;
+                }
                 // display = sqrt(RMS) * VR / 2^18 * k and sqrt(RMS) = IG * Vnode / VR * 2^18
                 // -> Vnode = display / (k * IG)
                 ac = AcQ(jac, 0x34 + 4 * r, 0x44 + 4 * r) / (AcvK[r] * Ad2IgRow());
@@ -1573,6 +1605,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                         if(j == 18) mask &= 0x0F;
                     }
                     if(ad2Stream && (j == 9 || j == 20)) mask = 0;
+                    // fw-rs DC-coupled V row (ad2exp.rs dcv_row, feasibility E7): the AC V row with SAD2IP =
+                    // OP1O, AD2IN AGND / RLU, OP1+ SENSE or AGND (the zero), AD3 / RMS / LPF off, also with
+                    // ENAD2 off (the AD1-alone phase of DBG:AD2:DCV?).
+                    if(row.Role == Role.AcV && (regs[0x27] >> 6) == 0)
+                    {
+                        if(j == 7) mask = 0x0F;
+                        if(j == 18) mask &= 0xF0;
+                        if(j == 9 || j == 20) mask = 0;
+                    }
                     // fw-rs power rows: R34 statistic select (SVXI / SDO23) and R35 AD3IN / AD3IG are
                     // run-time choices; the I row's power-bus bytes R2E / R2F = 08 81 are accepted too
                     if(row.Role == Role.Power)

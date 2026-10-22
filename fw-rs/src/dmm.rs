@@ -3588,6 +3588,15 @@ pub struct Ad2Scale {
     pub item: u8,
 }
 
+/// DC V volts of a raw AD1 code read at DC V tap `k` (0..3 = /10 ..
+/// /10000) with the DC V calibration of range k: `poll_dcv`'s formula
+/// without the averaging and the small negative-side / r0 corrections
+/// (device test 6.5, the DC-coupled V row's self-cal).
+pub fn dcv_volts(code: f32, k: usize) -> f32 {
+    let k = k.min(3);
+    code * K_ACV[k] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * k as u32, 1.0) - cal(0x14 + 4 * k as u32, 0.0)
+}
+
 /// `Ad2Scale` of stock AC mode `m` (0 AC V, 2 AC mV, 4..6 AC A / mA / uA)
 /// at range `r`; None for every other mode.
 pub fn ad2_scale_of(m: u8, r: i8) -> Option<Ad2Scale> {
