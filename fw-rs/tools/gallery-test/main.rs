@@ -155,6 +155,12 @@ mod scope_csv;
 mod dlog;
 #[path = "../../src/csvlog.rs"]
 mod csvlog;
+#[path = "../../src/fastenc.rs"]
+#[allow(dead_code)]
+mod fastenc;
+#[path = "../../src/fastlog.rs"]
+#[allow(dead_code)]
+mod fastlog;
 #[path = "../../src/gallery.rs"]
 mod gallery;
 

@@ -174,6 +174,12 @@ mod dlog;
 #[path = "../../src/csvlog.rs"]
 #[allow(dead_code)]
 mod csvlog;
+#[path = "../../src/fastenc.rs"]
+#[allow(dead_code)]
+mod fastenc;
+#[path = "../../src/fastlog.rs"]
+#[allow(dead_code)]
+mod fastlog;
 
 #[path = "../../src/fatdir.rs"]
 mod fatdir;
@@ -536,11 +542,83 @@ struct Img {
     /// 0xFF on the "chip" from then on); each further call programs 4 pages
     /// (old & new); the last one reads back. Off: `write_step` = `write_block`.
     nor_step: bool,
+    /// Fast logger (`fast`): every changing write_block, page program and
+    /// erase is one operation; power cut before operation `fcut`.
+    fops: usize,
+    fcut: Option<usize>,
+    /// Polls the "chip" stays busy after a program / erase.
+    fbusy: u32,
+    nor_progs: u32,
+    nor_erases: u32,
 }
 
 impl Img {
     fn new(d: Vec<u8>) -> Self {
-        Img { d, writes: vec![], reads: vec![], erases: Default::default(), programs: 0, cut: None, half: false, dead: false, cut_kind: "none", nor_step: false }
+        Img {
+            d,
+            writes: vec![],
+            reads: vec![],
+            erases: Default::default(),
+            programs: 0,
+            cut: None,
+            half: false,
+            dead: false,
+            cut_kind: "none",
+            nor_step: false,
+            fops: 0,
+            fcut: None,
+            fbusy: 0,
+            nor_progs: 0,
+            nor_erases: 0,
+        }
+    }
+    /// One fast-logger operation: false = the power is gone.
+    fn fop(&mut self) -> bool {
+        if self.dead {
+            return false;
+        }
+        if self.fcut == Some(self.fops) {
+            self.dead = true;
+            return false;
+        }
+        self.fops += 1;
+        true
+    }
+}
+
+impl fastenc::Nor for Img {
+    fn busy(&mut self) -> bool {
+        if self.fbusy > 0 {
+            self.fbusy -= 1;
+            return true;
+        }
+        false
+    }
+    fn program(&mut self, addr: u32, d: &[u8]) {
+        assert_eq!(self.fbusy, 0, "program while busy");
+        assert_eq!(addr / 256, (addr + d.len() as u32 - 1) / 256, "program crosses a page");
+        if !self.fop() {
+            return;
+        }
+        for (i, &b) in d.iter().enumerate() {
+            self.d[addr as usize + i] &= b;
+        }
+        self.nor_progs += 1;
+        self.fbusy = 1;
+    }
+    fn erase(&mut self, addr: u32, big: bool) {
+        if !self.fop() {
+            return;
+        }
+        let n = if big { 0x1_0000 } else { 0x1000 };
+        let a = addr as usize & !(n - 1);
+        self.d[a..a + n].fill(0xFF);
+        self.nor_erases += 1;
+        self.fbusy = 3;
+    }
+    fn read(&mut self, addr: u32, b: &mut [u8]) -> bool {
+        b.copy_from_slice(&self.d[addr as usize..addr as usize + b.len()]);
+        true
     }
 }
 
@@ -566,6 +644,9 @@ impl msc::BlockDevice for Img {
             return false;
         }
         if self.d[o..o + 4096] != buf[..4096] {
+            if self.fcut.is_some() && !self.fop() {
+                return false;
+            }
             let erase = self.d[o..o + 4096].iter().zip(&buf[..4096]).any(|(&a, &b)| a & b != b);
             if self.cut == Some(self.writes.len()) {
                 self.dead = true;
@@ -690,6 +771,11 @@ fn main() {
     let mut img = Img::new(fs::read(&a[1]).unwrap());
     if a[2] == "csv" {
         csv(&a, &mut img);
+        fs::write(&a[1], &img.d).unwrap();
+        return;
+    }
+    if a[2] == "fast" {
+        fast(&a, &mut img);
         fs::write(&a[1], &img.d).unwrap();
         return;
     }
@@ -1247,4 +1333,131 @@ fn csv(a: &[String], img: &mut Img) {
         img.cut,
         img.cut_kind
     );
+}
+
+/// `main <img> fast <samples> <rate> [cut <k>] [dur <s>] [abandon] [ringdrop]`:
+/// a fast-logger session (src/fastlog.rs) as main.rs drives it: begin, the
+/// Prep slices, Ev::Start -> run(header), then <samples> synthetic AD2
+/// records at <rate> S/s fed through a 2048-record ring (a few per pass;
+/// `ringdrop`: bursts the ring cannot hold, dropped newest as logger.rs
+/// does), then a stop request and the Stop slices. `cut`: power cut before
+/// operation k (block write, page program, erase); `abandon`: stopped while
+/// preparing. Prints the outcome; writes the CSV of the records the session
+/// drained (the reference) to <img>.ref.csv.
+fn fast(a: &[String], img: &mut Img) {
+    use std::collections::VecDeque;
+    let n: u32 = a[3].parse().unwrap();
+    let rate: u32 = a[4].parse().unwrap();
+    let mut dur = n / rate + 2;
+    let mut abandon = false;
+    let mut ringdrop = false;
+    let mut k = 5;
+    while k < a.len() {
+        match a[k].as_str() {
+            "cut" => {
+                img.fcut = Some(a[k + 1].parse().unwrap());
+                k += 1;
+            }
+            "dur" => {
+                dur = a[k + 1].parse().unwrap();
+                k += 1;
+            }
+            "abandon" => abandon = true,
+            "ringdrop" => ringdrop = true,
+            x => panic!("fast: {x}?"),
+        }
+        k += 1;
+    }
+    let par = dlog::FPar { a: -0.0012, b: 4.76837e-6, rate_mhz: rate * 1000, flags: dlog::FP_SCALED, src: 2, mode: 2, range: 0 };
+    let text = b"# fatren-test fast log\r\nt_s,raw,value_V,lost_before\r\n";
+    let bytes = fastlog::plan_bytes(dur, rate, true);
+    fastlog::begin(bytes, dur).expect("begin");
+    let mut ring: VecDeque<(u32, i32)> = VecDeque::new();
+    let mut drained: Vec<(u32, i32)> = Vec::new();
+    let (mut i, mut ring_drops, mut polls) = (0u32, 0u32, 0u64);
+    let (mut started, mut logger_on, mut stop_sent) = (false, false, false);
+    let p = 1e6 / rate as f64;
+    loop {
+        polls += 1;
+        assert!(polls < 50_000_000, "fast: no end");
+        if abandon && fastlog::preparing() && polls > 3 {
+            fastlog::request_stop();
+        }
+        if logger_on {
+            // a few conversions per pass; ringdrop: a 3000-sample burst
+            // every 10000 (a stall longer than the ring)
+            let burst = if ringdrop && i % 10_000 == 5_000 { 3000 } else { 4 };
+            for _ in 0..burst {
+                if i >= n {
+                    break;
+                }
+                let t = (i as f64 + 1.0) * p + ((i * 7919) % 5) as f64 - 2.0;
+                let raw = (90_000.0 * (i as f64 * 0.013).sin()) as i32 + ((i * 2654435761u32) >> 28) as i32;
+                if ring.len() < 2048 {
+                    ring.push_back((t as u64 as u32, raw));
+                } else {
+                    ring_drops += 1;
+                }
+                i += 1;
+            }
+            if i >= n && !stop_sent {
+                stop_sent = true;
+                fastlog::request_stop();
+            }
+        }
+        let mut drain = |b: &mut [u8]| {
+            let mut o = 0;
+            while o + 12 <= b.len() {
+                let Some((ts, raw)) = ring.pop_front() else { break };
+                drained.push((ts, raw));
+                b[o..o + 4].copy_from_slice(&(drained.len() as u32).to_le_bytes());
+                b[o + 4..o + 8].copy_from_slice(&ts.to_le_bytes());
+                b[o + 8..o + 12].copy_from_slice(&raw.to_le_bytes());
+                o += 12;
+            }
+            o
+        };
+        match fastlog::poll_on(img, logger_on, &mut drain) {
+            fastlog::Ev::Start => {
+                started = true;
+                logger_on = true;
+                fastlog::run(&fastlog::Head { par, unit: b"V", text });
+            }
+            fastlog::Ev::Stop => logger_on = false,
+            fastlog::Ev::None => {}
+        }
+        if img.dead || fastlog::ended().is_some() || (!fastlog::active() && !started && polls > 3) {
+            break;
+        }
+    }
+    let st = fastlog::status();
+    println!(
+        "fast={:?} file={:?} alloc={} bytes={} rows={} drained={} ring_drops={} ops={} programs={} erases={} chunks={} started={}",
+        st.state,
+        st.file,
+        st.alloc,
+        st.bytes,
+        st.rows,
+        drained.len(),
+        ring_drops,
+        img.fops,
+        img.nor_progs,
+        img.nor_erases,
+        st.chunks,
+        started
+    );
+    // The reference CSV of what was drained (rows the file should hold).
+    let mut out = text.to_vec();
+    let mut tprev = 0u64;
+    let mut last = 0u32;
+    for (j, &(ts, raw)) in drained.iter().enumerate() {
+        let dt = if j == 0 { 0 } else { ts.wrapping_sub(last) };
+        let t = if j == 0 { ts as u64 } else { tprev + dt as u64 };
+        tprev = t;
+        last = ts;
+        let mut r = [0u8; 96];
+        let k = dlog::fast_row(t, raw, dlog::fast_lost(dt, par.rate_mhz), &par, &mut r);
+        out.extend_from_slice(&r[..k]);
+    }
+    fs::write(format!("{}.ref.csv", a[1]), &out).unwrap();
 }
