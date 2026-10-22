@@ -5,6 +5,8 @@
 # the worst-case matrix and the layout rules, writes PNG renders (2x) and a
 # contact sheet to <out dir> (default: a temp dir, kept and printed).
 #   tools/ui-render/run.sh [out dir]
+#   tools/ui-render/run.sh <out dir> --readme   the README screens only (1x,
+#                                               readme.rs; for ../../docs/img/)
 # Exit status 1 when any rule is violated. Needs no hardware.
 set -e
 cd "$(dirname "$0")"
@@ -16,7 +18,7 @@ trap 'rm -rf "$B"' EXIT
 CARGO_PKG_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' ../../Cargo.toml | head -1) \
     rustc --edition 2021 -O --cfg test -A warnings main.rs -o "$B/r"
 set +e
-"$B/r" "$OUT" | tee "$OUT/check.txt"
+"$B/r" "$OUT" "${@:2}" | tee "$OUT/check.txt"
 RC=${PIPESTATUS[0]}
 set -e
 /usr/bin/python3 -I - "$OUT" <<'PY'
