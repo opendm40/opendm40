@@ -142,7 +142,8 @@ dma2: DMA.GD32_DMA @ sysbus 0x40026400
 // from PA15, fw-rs TIM2 OC2REF gating TIM1) are GD32_Timer with slave/trigger
 // modes; ITRx inputs are GPIO 16..19 wired per the GD32F4 interconnect table
 // (TIM1: ITR0=TIM5 ITR1=TIM2; TIM2: ITR0=TIM1 ITR1=TIM8; TIM8: ITR0=TIM1
-// ITR3=TIM5). TIM4/7/9..11 (interrupt tick timers) stay Renode's STM32_Timer,
+// ITR3=TIM5). TIM7 is a GD32_Timer too (fw-rs's AD2 stream ISR tick, below).
+// TIM4/9..11 (interrupt tick timers) stay Renode's STM32_Timer,
 // the PWM/trigger-only ones (TIM3/6/12/13/14) are the event-free PwmTimer.
 timer1: Timers.GD32_Timer @ sysbus 0x40010000
     advanced: true
@@ -171,10 +172,11 @@ timer5: Timers.GD32_Timer @ sysbus 0x40000C00
 
 timer6: Timers.PwmTimer @ sysbus 0x40001000
 
-timer7: Timers.STM32_Timer @ sysbus 0x40001400
-    -> nvic@55
-    frequency: 200000000
-    initialLimit: 0xFFFF
+// TIM7 (GD32 TIMER6): fw-rs's AD2 stream tick (feature ad2-isr, the one
+// interrupt fw-rs enables; UIE -> IRQ 55). GD32_Timer: URS / UG / rc_w0 SR /
+// CNT as the firmware programs them (Renode's STM32_Timer differs).
+timer7: Timers.GD32_Timer @ sysbus 0x40001400
+    IRQ -> nvic@55
 
 timer8: Timers.GD32_Timer @ sysbus 0x40010400
     advanced: true
