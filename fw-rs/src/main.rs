@@ -1300,6 +1300,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             } else if wave_paused && !screenshot::busy() {
                 wave_paused = false;
                 if !logger.active() && app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                    csvlog::catalog_warm(); // the job changed the disk: MMEM:CAT? from a cache while streaming
                     logger.start_wave(app.dmm.mode(), app.dmm.range(), app.scope.wave_fs());
                     app.wave_live();
                 }
@@ -1327,8 +1328,18 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 if let app::WaveReq::Coupling(item) = r {
                     app.wave_coupling(&mut clk, item);
                 }
+                if matches!(r, app::WaveReq::Range(_) | app::WaveReq::Coupling(_)) {
+                    // The new scale's full repaint before the stream starts
+                    // again (app_wave.rs `wave_rescale`).
+                    let usb_up = dev.state() == UsbDeviceState::Configured || now > 3000;
+                    app.wave_rescale(usb_up && now >= draw_hold_until && !screenshot::frozen());
+                }
                 if r != app::WaveReq::Stop {
                     if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                        // MMEM:CAT? while the view streams: from the cache
+                        // (device b6909d6: a scan in one pass at 76800
+                        // dropped ~90 ms of the view's ring).
+                        csvlog::catalog_warm();
                         logger.start_wave(app.dmm.mode(), app.dmm.range(), app.scope.wave_fs());
                         if hy3131::ad2_rate_mhz(logger.r26()) / 1000 != app.scope.wave_fs() {
                             // The rung was capped (76.8 kS/s with CPU frames,
@@ -1366,6 +1377,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         app.dmm.start(&mut clk);
                     }
                     if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                        csvlog::catalog_warm(); // MMEM:CAT? while armed: from the cache
                         logger.start_wave(app.dmm.mode(), app.dmm.range(), inrush::RATE_HZ);
                         app.inrush_live(logger.nominal_mhz());
                     } else {
@@ -1409,6 +1421,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             app.invalidate();
         }
         logging_prev = busy;
+        app.logger_busy = busy;
 
         // No drawing until USB has enumerated (or 3 s passed): a long first
         // draw must not starve the enumeration; nor right after a GRAM
@@ -1648,6 +1661,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         }
     }
 }
+
+// The MMEM:CAT? cache holds a whole reply (csvlog.rs `Cat`).
+const _: () = assert!(csvlog::CAT_MAX == usbtmc::RSP_MAX);
 
 /// A command whose reply is built in the transport's own buffer (block
 /// data; not joinable with other replies of a message, scpi_msg.rs).

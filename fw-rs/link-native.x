@@ -309,9 +309,10 @@ SECTIONS
          * drawn or hit-tested only on the Menu, Settings, Record, Limits,
          * Keypad, Help and Device pages, where no stream runs (leaving the
          * Wave view or the inrush page stops theirs; touch is off while
-         * the logger runs). */
+         * the logger runs). NOT ui::main_menu_hit: a DBG:TAP on the menu
+         * during a fast-log session reached it (fastlogtest --ui-nav;
+         * region B since 2026-10-23, ~0.2 KB). */
         *(.text.*7dm40_fw2ui9menu_item*);
-        *(.text.*7dm40_fw2ui13main_menu_hit*);
         *(.text.*7dm40_fw2ui9list_page*);
         *(.text.*7dm40_fw2ui10page_title*);
         *(.text.*7dm40_fw2ui11set_stepper*);

@@ -1371,11 +1371,78 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
     Ok(hn + body)
 }
 
+/// The last MMEM:CAT? reply, valid while no program / erase reached the SPI
+/// flash since it was built (`msc::FLASH_WRITES`, bumped by every one: a
+/// recording's commit, a screenshot, a host write, the shot pre-erase).
+/// Device b6909d6: MMEM:CAT? in the Wave view at 76800 S/s took 123 ms in
+/// one main-loop pass (the BPB, the root and the three directories, FAT 1:
+/// ~10 polled 4 KiB reads with the stream ISR at ~50 % CPU), the view's ring
+/// (2048 samples, 27 ms) dropped +6813 per query. From the cache a reply is
+/// one copy; `catalog_warm` fills it before a stream starts (main.rs: the
+/// Wave view, the inrush page), so a host listing the files while the
+/// stream runs finds it valid (nothing writes the disk then: a disk job
+/// pauses the Wave view's stream and the restart warms it again).
+struct Cat {
+    ok: bool,
+    stamp: u32,
+    len: usize,
+    buf: [u8; CAT_MAX],
+}
+
+/// The reply buffers' size (usbtmc::RSP_MAX, the BT block: main.rs asserts).
+pub const CAT_MAX: usize = 6144;
+
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut CAT: Cat = Cat { ok: false, stamp: 0, len: 0, buf: [0; CAT_MAX] };
+
+#[inline(always)]
+fn cat() -> &'static mut Cat {
+    unsafe { &mut *core::ptr::addr_of_mut!(CAT) }
+}
+
+fn flash_writes() -> u32 {
+    crate::msc::FLASH_WRITES.load(Ordering::Relaxed)
+}
+
 /// Region B (not .cold): a host may list the files while the Wave view's
-/// stream ISR runs (emu/hy3131/wavetest.py, region C hooks).
+/// stream ISR runs (emu/hy3131/wavetest.py, region C hooks). Busy as
+/// before while a writer holds the disk; else the cached reply when the
+/// flash has not changed since it was built (`Cat`).
 #[inline(never)] // not inlined into the hot caller
 pub fn catalog_scpi(out: &mut [u8]) -> Result<usize, GErr> {
-    catalog_scpi_on(disk(), out)
+    if !gallery_free() {
+        return Err(GErr::Busy);
+    }
+    let c = cat();
+    let w = flash_writes();
+    if c.ok && c.stamp == w && c.len <= out.len() {
+        out[..c.len].copy_from_slice(&c.buf[..c.len]);
+        return Ok(c.len);
+    }
+    let n = catalog_scpi_on(disk(), out)?;
+    if n <= c.buf.len() && flash_writes() == w {
+        c.buf[..n].copy_from_slice(&out[..n]);
+        (c.ok, c.stamp, c.len) = (true, w, n);
+    }
+    Ok(n)
+}
+
+/// Build the MMEM:CAT? cache now if it is stale (main.rs, before a stream
+/// starts: one scan, ~10 block reads, while the stream ISR is not running).
+/// Nothing when the disk is busy.
+#[inline(never)]
+pub fn catalog_warm() {
+    let c = cat();
+    let w = flash_writes();
+    if (c.ok && c.stamp == w) || !gallery_free() {
+        return;
+    }
+    c.ok = false;
+    if let Ok(n) = catalog_scpi_on(disk(), &mut c.buf) {
+        if flash_writes() == w {
+            (c.ok, c.stamp, c.len) = (true, w, n);
+        }
+    }
 }
 
 /// `status()` as the SCPI LOG:CSV? reply: `<state>,<file>,<rows>,<bytes>,<committed>,<dropped>`

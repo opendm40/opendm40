@@ -1404,7 +1404,12 @@ impl App {
                 if app_wave::WAVE_BUILD && self.view == View::Scope && su::src_hit(p.x, p.y) {
                     self.beep(now, 30);
                     if self.scope.wave_on() {
-                        self.wave_close(clk, true);
+                        self.wave_badge_close(clk);
+                    } else if crate::hy3131::streaming() {
+                        // A logger session (or the inrush capture) owns
+                        // the HY3131: no Wave view (wave_open, region C,
+                        // would also step the DMM range under the stream).
+                        self.toast(now, "Wave: data logger running", false);
                     } else {
                         self.wave_open(clk);
                     }

@@ -11,9 +11,15 @@ impl App {
     /// The guard is inlined into App::gesture (region B): every touch
     /// report of a drag on an instrument view (scope trigger / cursor drags
     /// while a stream runs) passes here and must not fetch from region C.
+    /// Not while a stream ISR owns the HY3131 bus (a fast-log session:
+    /// the screen is frozen, a DBG:TAP is the only input that reaches the
+    /// pages; fastlogtest --ui-nav): this code is region C.
     #[inline(always)]
     pub(super) fn press_gesture(&mut self, g: &Gesture) {
-        if self.pressed.is_some() || matches!(self.view, View::Menu | View::Gen | View::Settings | View::Limits | View::Record | View::Range) {
+        if self.pressed.is_some()
+            || (matches!(self.view, View::Menu | View::Gen | View::Settings | View::Limits | View::Record | View::Range)
+                && !crate::hy3131::streaming())
+        {
             self.press_track(g);
         }
     }
