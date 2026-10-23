@@ -2934,7 +2934,7 @@ pub fn meter_strip(d: &StripData) {
         st_text(ST_GEN_T, sf::SC_F12, d.gen.as_str(), C_GREEN, 8, 1);
     }
     for i in 0..2 {
-        if changed(ol.sub[i] == d.sub[i]) || moved {
+        if changed(ol.sub[i] == d.sub[i] && ol.dim == d.dim) || moved {
             let r = st_sub(i, gen_on, sx);
             let t = d.sub[i].as_str();
             // Narrow (GEN shown): the text without its spaces if it is too
@@ -2954,7 +2954,7 @@ pub fn meter_strip(d: &StripData) {
                 t
             };
             let sp = if wide && sf::text_width(sf::SC_F12, t, 1) > r.w { 0 } else { 1 };
-            st_text(r, sf::SC_F12, t, C_WHITE, 1, sp);
+            st_text(r, sf::SC_F12, t, if d.dim { C_DIS } else { C_WHITE }, 1, sp);
         }
     }
     *shown = Some(*d);

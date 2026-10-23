@@ -2368,7 +2368,7 @@ fn main() {
             ui::status_right(&status(0));
             save(&out, file);
         }
-        for (file, case) in [("sw13-strip-placeholder", "ph_dcv"), ("s14-strip-prov-acdc", "pv_acdc_mv")] {
+        for (file, case) in [("sw13-strip-placeholder", "ph_dcv"), ("sw14-strip-prov-acdc", "pv_acdc_mv")] {
             let (r, l) = find(case);
             combined(&r, l, 0, 0, false, false, false, "");
             save(&out, file);
