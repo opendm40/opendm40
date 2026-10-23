@@ -754,6 +754,11 @@ pub struct Sentinel {
     /// (`v_side`, V_GATE below); `vside_t` = when the last one came,
     /// `vdrv` = it said driven.
     pub vgate: bool,
+    /// AC+DC / AUTO A (set by `dmm.rs` with the row): an AC-phase V-JACK?
+    /// peak window without swing neither hits nor ends the run the DC
+    /// phase's comparator started (a DC source on V shows no swing; before
+    /// the swing rule the AC phase's level kept the run going).
+    pub bridge: bool,
     vside_t: Option<u64>,
     vdrv: bool,
     /// Assertion log (DBG:SENTinel:LOG?, the switch regression test
@@ -802,6 +807,7 @@ impl Sentinel {
             ac_dc_ok: false,
             pk_v: None,
             vgate: false,
+            bridge: false,
             vside_t: None,
             vdrv: false,
             log: [(Alert::None, Kind::Off, 0); LOG_N],
@@ -1034,8 +1040,12 @@ impl Sentinel {
         if self.alt && self.alt_v {
             // V-tap window (DC?): `dmm.rs` turns the pair into volts.
             self.pk_v = (pkmax >= pkmin).then_some((pkmin, pkmax));
-        } else {
+        } else if hit || !(self.kind == Kind::PeakV && self.bridge) {
             self.window(now, hit);
+        } else if self.streak > 0 {
+            // AC+DC: the DC phase's verdict holds through the AC phase (its
+            // next DC phase confirms or ends it).
+            self.last_hit = now;
         }
         if self.alt {
             self.alt_v = !self.alt_v;
@@ -1788,6 +1798,28 @@ mod tests {
             t += 107;
         }
         assert_eq!((s.alert, s.hits), (Alert::None, 0));
+        // AC+DC A (bridge): the DC phase's comparator run survives the AC
+        // phase's swing-less windows, V-JACK? at 1 s from the run's start.
+        let mut b = Sentinel::new();
+        b.configured(Kind::CmpV, 0, true);
+        b.bridge = true;
+        let mut tb = 0;
+        while tb < 600 {
+            b.sample_cmp(tb, 0x70 & 0x20 | 0x10);
+            b.current_small(tb, true);
+            tb += 10;
+        }
+        b.configured(Kind::PeakV, tb, false);
+        while tb < 1300 {
+            b.sample_peak(tb, 18_090, 18_150);
+            b.current_small(tb, true);
+            tb += 107;
+        }
+        assert_eq!(b.alert, Alert::VJack);
+        b.bridge = false;
+        b.configured(Kind::PeakV, tb, true);
+        b.sample_peak(tb + 107, 18_090, 18_150);
+        assert_eq!(b.streak, 0);
         // 2.5 V rms 50 Hz on V: +-3.5 mV at SENSE = +-2 670 codes.
         while t < 9000 {
             s.sample_peak(t, -2_670, 2_670);
