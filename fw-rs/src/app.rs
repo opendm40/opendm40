@@ -109,6 +109,20 @@ fn usb_ro() -> (bool, bool) {
 }
 
 /// Menu-like pages (not instrument views): no view swipe, MENU steps back.
+/// The FR-05 rate after `r` for every rate control (the DMM page chip, a tap
+/// on the value, Settings 2/3 "Rate"): resolution order FAST -> MED -> SLOW
+/// -> FAST, from the stock's own behaviour (FAST: its 10/s moving reading,
+/// 60000 counts, no extra digit) to the most digits. The chip and Settings
+/// used to go FAST -> SLOW -> MED (the enum order; device check 8087c7d).
+fn next_rate(r: dmm::Rate) -> dmm::Rate {
+    use dmm::Rate;
+    match r {
+        Rate::Fast => Rate::Medium,
+        Rate::Medium => Rate::Slow,
+        Rate::Slow => Rate::Fast,
+    }
+}
+
 fn is_page(v: View) -> bool {
     matches!(v, View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush)
 }
@@ -944,7 +958,8 @@ impl App {
         self.draw_reading();
     }
 
-    /// DMM page rate chip tap: next FR-05 conversion rate (SLOW -> MED ->
+    /// DMM page rate chip tap: the next FR-05 conversion rate, in the same
+    /// order as a tap on the value (`next_rate`: FAST -> MED -> SLOW ->
     /// FAST). Where the rate changes nothing (AC, Hz, capacitance, ...) a
     /// low beep and no change: the chip shows "n/a" there.
     fn rate_cycle(&mut self, now: u64) {
@@ -952,8 +967,7 @@ impl App {
             self.beep(now, 300);
             return;
         }
-        let r = dmm::Rate::from_u8((self.dmm.rate() as u8 + 1) % 3).unwrap_or(crate::meter::RATE_DEFAULT);
-        self.dmm.set_rate(r);
+        self.dmm.set_rate(next_rate(self.dmm.rate()));
         self.chart_dirty = true;
     }
 
@@ -972,12 +986,7 @@ impl App {
             self.toast(now, "Fixed rate in this function", false);
             return;
         }
-        use dmm::Rate;
-        let r = match self.dmm.rate() {
-            Rate::Fast => Rate::Medium,
-            Rate::Medium => Rate::Slow,
-            Rate::Slow => Rate::Fast,
-        };
+        let r = next_rate(self.dmm.rate());
         self.dmm.set_rate(r);
         self.chart_dirty = true;
         let (n, ext) = self.dmm.rate_info(r);
@@ -991,7 +1000,7 @@ impl App {
         put(dmm::RATE_NAMES[r as usize]);
         put(if ext { " 600000 counts" } else { " 60000 counts" });
         let mut t = [0u8; 16];
-        if r == Rate::Fast {
+        if r == dmm::Rate::Fast {
             put(" / 10/s");
         } else if n > 1 {
             // Averaging window (s).
@@ -3277,8 +3286,7 @@ impl App {
                 }
                 match ui::settings_hit(1, y) {
                     Some(0) => {
-                        let r = dmm::Rate::from_u8((self.dmm.rate() as u8 + 1) % 3).unwrap_or(crate::meter::RATE_DEFAULT);
-                        self.dmm.set_rate(r);
+                        self.dmm.set_rate(next_rate(self.dmm.rate()));
                     }
                     Some(1) => {
                         let s = Smooth::from_u8((self.meter.smoothing() as u8 + 1) % 3).unwrap_or(Smooth::Off);
