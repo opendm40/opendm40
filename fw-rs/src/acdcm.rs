@@ -146,9 +146,22 @@ const GAIN_MOVE: f32 = 12.0;
 /// window's slope may leave (|slope| x CREEP_TAU s: the time constant of
 /// the c6f9670 trace's tail, fitted as two lags of 2.5 s), at least BIAS_MIN
 /// codes.
+/// The LPF's creep lags the input step: the new point sits toward the level
+/// before it, which moves the two-point gain one way only (the "lag side":
+/// a larger gain when the farther reference point lies beyond the level
+/// before, as on every step down / up of e8). On the lag side the two lines
+/// must differ by CREEP_K x the step into this level (codes) more. Device
+/// f42a09e (acdc-approaches.md 10.14): 6 V's internal zero (accurate) was
+/// judged against two-point gains 0.7..13 codes above it at the new point,
+/// all 16 on the lag side (5 -> 3 V, 41.6 k codes: +3.9..+13.0), 60 V's
+/// biased zero -2.5..-10 codes, all 13 on the other side.
 const BIAS_K: f32 = 3.0;
 const CREEP_TAU: f32 = 2.5;
 const BIAS_MIN: f32 = 2.0;
+const CREEP_K: f32 = 4.0e-4;
+/// A window this many results steady before it restarts: its newest result
+/// is the level before the step (`prevl`).
+const PREV_N: u8 = 10;
 /// C A: the entry reference sets a gain (else an offset) from this
 /// fraction of the range's full scale.
 const C_A_GAIN: f32 = 0.1;
@@ -216,6 +229,14 @@ pub struct Am {
     /// to the gain in use over its span (codes); the last window's slope
     /// (codes / s) (STAT?).
     gsrc: [u8; 4],
+    /// C V: the LPF level (codes) before the last input step and its range
+    /// (0xFF none); the step into the level of the pending second reference
+    /// (new point - prevl, codes, 0 unknown) and the last bias threshold
+    /// (codes, STAT?).
+    prevl: f32,
+    prevr: u8,
+    pstep: f32,
+    bthr: f32,
     /// C V: the range of the last row write (-1 none this session).
     lr: i8,
     dis: f32,
@@ -290,6 +311,10 @@ pub fn am_static() -> &'static mut Am {
             phi: [(0.0, 0.0); 4],
             pts: 0,
             gsrc: [0; 4],
+            prevl: 0.0,
+            prevr: 0xFF,
+            pstep: 0.0,
+            bthr: 0.0,
             lr: -1,
             dis: 0.0,
             slope: 0.0,
@@ -383,6 +408,7 @@ impl Dmm {
         a.pend = false;
         a.pts = 0;
         a.lr = -1;
+        a.prevr = 0xFF;
     }
 
     /// DBG:ACDC:METH: switch and restart the session (AC+DC / AUTO).
@@ -423,10 +449,13 @@ impl Dmm {
     /// RMS, 1 the peak bound, 2 none), the gain's span in codes (0: the
     /// table), where the gain is from (`gsrc`), the last two-point gain's
     /// difference to the gain in use over its span (codes), the last steady
-    /// window's slope (codes / s) (app.rs formats the first four, n_*, the
-    /// source and gsrc as integers).
+    /// window's slope (codes / s), and of the last second-reference attempt:
+    /// the window's residual rms (codes), the bias threshold gdis was held
+    /// to (codes), the window's slope, the step into the level (codes, 0
+    /// unknown) (app.rs formats the first four, n_*, the source and gsrc as
+    /// integers).
     #[inline(never)] // .cold (link-native.x): entry / range change / SCPI only
-    pub fn am_stat(&self) -> [f32; 21] {
+    pub fn am_stat(&self) -> [f32; 25] {
         let a = &*self.am;
         let r = self.range.clamp(0, 3) as usize;
         let cal = self.mode <= 1 && a.meth == METH_C && a.ok & (1 << r) != 0;
@@ -453,6 +482,10 @@ impl Dmm {
             a.gsrc[r] as f32,
             a.dis,
             a.slope,
+            a.psig,
+            a.bthr,
+            a.pslope,
+            a.pstep,
         ]
     }
 
@@ -474,6 +507,9 @@ impl Dmm {
             if a.lr != r as i8 && a.gsrc[r] == 0 && a.fixed & (1 << s) == 0 && !a.pend {
                 a.ok &= !(1 << s);
                 a.refd &= !(1 << s);
+            }
+            if a.lr != r as i8 {
+                a.prevr = 0xFF;
             }
             a.lr = r as i8;
         }
@@ -908,8 +944,14 @@ impl Dmm {
                     // noise and a creep's rest).
                     let cur = a.cgsp[r];
                     a.dis = if cur > 0.0 { (g / a.cg[r] - 1.0) * span } else { 0.0 };
-                    let noise = BIAS_K * a.psig + a.pslope.abs() * CREEP_TAU;
-                    let take = cur == 0.0 || span >= cur || (a.gsrc[r] == 1 && a.dis.abs() > noise.max(BIAS_MIN));
+                    // On the creep's lag side (the new point moved toward
+                    // the level before: dis > 0 when the farther point p
+                    // lies on that level's side) the step's creep allowance
+                    // on top.
+                    let lag = a.pstep * (m - a.pm);
+                    let creep = if a.dis * lag > 0.0 { CREEP_K * a.pstep.abs() } else { 0.0 };
+                    a.bthr = (BIAS_K * a.psig + a.pslope.abs() * CREEP_TAU).max(BIAS_MIN) + creep;
+                    let take = cur == 0.0 || span >= cur || (a.gsrc[r] == 1 && a.dis.abs() > a.bthr);
                     if take {
                         a.gsrc[r] = if cur > 0.0 && span < cur { 3 } else { 2 };
                         a.cg[r] = g;
@@ -966,6 +1008,10 @@ impl Dmm {
             hi = hi.max(y);
         }
         if hi - lo > 60f32.max(0.01 * lpf.abs()) {
+            if a.wst >= PREV_N && n > 0 {
+                a.prevl = a.ring[(a.wi as usize + SLOPE_N - 1) % SLOPE_N];
+                a.prevr = r as u8;
+            }
             a.wn = 0;
             a.wi = 0;
             a.wst = 0;
@@ -1017,6 +1063,7 @@ impl Dmm {
         a.pm2 = end;
         a.psig = sqrt(ss / (nf - 2.0));
         a.pslope = a.slope;
+        a.pstep = if a.prevr == r as u8 { end - a.prevl } else { 0.0 };
         a.ok &= !(1 << r);
         a.refd &= !(1 << r);
         self.switch_phase(clk, 1, r as i8, 450);
