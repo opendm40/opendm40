@@ -343,7 +343,7 @@ def e8(R, order='down', settle=1.0):
             err = p['dc'] - refs[v]
             R.log(exp=exp, item=item, level=v, ref=refs[v], c_dc=p['dc'], err=err, digits=err / digits(item),
                   ok=abs(err) <= rule(item, refs[v]), pc=p['pc'], off=p['off'], gspan=s.get('gspan', 0), ac=p['ac'],
-                  gsrc=s.get('gsrc', -1), gdis=s.get('gdis', 0), slope=s.get('slope', 0))
+                  gsrc=s.get('gsrc', -1), gdis=s.get('gdis', 0), slope=s.get('slope', 0), pp=s.get('pp', -1))
     if order == 'up':
         return
     # the gain kept over sessions: re-entered at 5 V on 60 V (a span < 10 k codes)
@@ -372,9 +372,9 @@ def tc6(R, lo=3.0, secs=15.0):
     tc = []
     while time.time() - t0 < secs:
         s = R.stat()
-        tc.append([round(time.time() - t0, 2)] + [s.get(k) for k in ('step', 'lpf', 'pc', 'off', 'gspan', 'gsrc', 'gdis', 'slope', 'dc')])
+        tc.append([round(time.time() - t0, 2)] + [s.get(k) for k in ('step', 'lpf', 'pc', 'off', 'gspan', 'gsrc', 'gdis', 'slope', 'pp', 'dc')])
         time.sleep(0.08)
-    R.log(exp='tc6trace', lo=lo, cols='t step lpf pc off gspan gsrc gdis slope dc', trace=tc)
+    R.log(exp='tc6trace', lo=lo, cols='t step lpf pc off gspan gsrc gdis slope pp dc', trace=tc)
     for v in (lo, 1.0, 0.0):
         if v != lo:
             R.src_dc(v)
@@ -383,7 +383,7 @@ def tc6(R, lo=3.0, secs=15.0):
         s = R.stat()
         ref = R.dcv_ref(1, n=5)
         R.log(exp='tc6', level=v, c_dc=p['dc'], ref_after=ref, err=p['dc'] - ref, ok=abs(p['dc'] - ref) <= rule(1, ref),
-              pc=s['pc'], off=s['off'], gspan=s.get('gspan'), gsrc=s.get('gsrc'), gdis=s.get('gdis'))
+              pc=s['pc'], off=s['off'], gspan=s.get('gspan'), gsrc=s.get('gsrc'), gdis=s.get('gdis'), pp=s.get('pp'))
         if v != 0.0:
             R.enter('C', 1)  # back in C after the READ? (the gain kept)
 
