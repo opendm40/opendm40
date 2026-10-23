@@ -934,7 +934,10 @@ impl Dmm {
         pw.restarts = pw.restarts.wrapping_add(1);
         self.write_config(clk);
         self.deadline = clk.now_ms() + settle;
-        self.freq.next = 0;
+        // The gate running now spans the row write and the settle: the
+        // first counter access past the settle restarts it, its result
+        // comes 350 ms later (`freq_restart_fresh`).
+        self.freq.fresh = true;
     }
 
     /// `write_config` in the power meter: quiesce, PA relay state 0, the
@@ -1776,9 +1779,10 @@ impl Dmm {
                 self.pw.row[1] = r21;
             }
             self.pw.row[0] = r20 | 0x02;
-            // Restart the counter on the new source now.
-            self.freq.next = 0;
-            self.freq.f_khz = 0.0;
+            // Restart the counter on the new source now; the gate that ran
+            // was the old source's: no value until the new one's ("--").
+            self.freq.fresh = true;
+            self.freq.f_khz = f32::NAN;
             self.freq_secondary(now, r20);
         }
     }

@@ -589,6 +589,14 @@ fn pc7(high: bool) {
 struct Freq {
     next: u64,
     src_alt: bool,
+    /// A row with the counter on went out (`write_config`): the gate running
+    /// now started at the row write, through the relay / input path settle;
+    /// the first counter access after the settle only restarts it
+    /// (`freq_restart_fresh`). Device 2026-10-24: DC V -> Hz read 0.00 /
+    /// 0.99 / 17.04 / 19.94 Hz on the first READ? of a 40 Hz square.
+    fresh: bool,
+    /// The source has a clean result since the restart (`freq_best`).
+    seen: [bool; 2],
     last: [f32; 2],
     change: [f32; 2],
     f_khz: f32,
@@ -620,6 +628,35 @@ pub(crate) fn freq_glitch(f_khz: f32, duty: f32) -> bool {
 /// (`freq_glitch`) or no signal counts as a change of 1e6.
 pub(crate) fn freq_change(f_khz: f32, duty: f32, last: f32) -> f32 {
     if f_khz == 0.0 || freq_glitch(f_khz, duty) { 1e6 } else { (f_khz - last).abs() }
+}
+
+/// The source to show (`poll_freq_mode`) among those with a clean result
+/// (`seen`): None without one, the one alone, else the smaller change -
+/// except that a source at 1/2, 1/3 or 2/3 of the other (+-0.5 %) loses:
+/// missed edges (the device's 13.3 / 26.7 Hz of 40 Hz, one or two of the
+/// gate's three edges missed). Both sources count the same node, so such a
+/// ratio between them is not the signal.
+pub(crate) fn freq_best(seen: [bool; 2], last: [f32; 2], change: [f32; 2]) -> Option<usize> {
+    match seen {
+        [false, false] => return None,
+        [true, false] => return Some(0),
+        [false, true] => return Some(1),
+        _ => {}
+    }
+    let hi = (last[1] > last[0]) as usize;
+    let (lo, hv) = (last[1 - hi], last[hi]);
+    if lo > 0.0 && [0.5f32, 1.0 / 3.0, 2.0 / 3.0].iter().any(|&k| (lo - k * hv).abs() <= 0.005 * k * hv) {
+        return Some(hi);
+    }
+    Some((change[1] < change[0]) as usize)
+}
+
+/// Restart the HY3131 counter on source `src` (R20 without ENCTR): ENCTR
+/// off, the gate preset CTA = 0xfc0000 (0x40000 SYSCLK = 53.3 ms), ENCTR on.
+fn ctr_restart(src: u8) {
+    hy::write(0x20, &[src & !2]);
+    hy::write(0x1B, &[0x00, 0x00, 0xFC]);
+    hy::write(0x20, &[src | 2]);
 }
 
 /// Frequency auto range for `f` kHz; x = factor * over (6.18 kHz at 60000
@@ -1226,7 +1263,7 @@ impl Dmm {
             t_phase: 0,
             t_code_a: 0,
             t_cj: 0.0,
-            freq: Freq { next: 0, src_alt: false, last: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0 },
+            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], last: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0 },
             seq: 0,
             pa_now: None,
             suspended: false,
@@ -1487,6 +1524,15 @@ impl Dmm {
         } else {
             hy::configure(&row);
         }
+        // A row with the counter on (R20 ENCTR): preset the gate. ENCTR
+        // 0 -> 1 alone starts it from CTA<23:8> as the last gate left it
+        // (~0 after its overflow; 0 after a POR): a ~3.4 s gate. AC+DC is
+        // left alone (its phases keep the stock's 350 ms restarts).
+        let ctr = row[0] & 0x02 != 0 && !self.acdc;
+        if ctr {
+            ctr_restart(row[0]);
+        }
+        self.freq.fresh = ctr;
         self.r22 = row[2];
         self.r29 = row[9];
         self.chk.copy_from_slice(&row[CHK_AT..CHK_AT + 8]);
@@ -1863,14 +1909,17 @@ impl Dmm {
         self.beep_class = 4;
         self.t_phase = 0;
         self.t_votes = 0;
-        self.freq.f_khz = 0.0;
-        self.freq.duty = 0.0;
+        // No value before a counter result past the settle: NaN, drawn "--"
+        // (the AC V / A secondary line, the power meter's F).
+        self.freq.f_khz = f32::NAN;
+        self.freq.duty = f32::NAN;
         self.freq.range = 0;
         // No source history from another function (AC+DC's secondary
         // counter, an earlier frequency session): the first two results
         // of each source decide afresh.
         self.freq.last = [0.0; 2];
         self.freq.change = [1e6; 2];
+        self.freq.seen = [false; 2];
         self.freq.src_alt = false;
         self.ramp.first = true;
     }
@@ -3867,10 +3916,22 @@ impl Dmm {
         let mut b = [0u8; 9];
         hy::read(0x15, &mut b);
         self.diag_ctr = self.diag_ctr.saturating_add(1);
-        hy::write(0x20, &[src]);
-        hy::write(0x1B, &[0x00, 0x00, 0xFC]);
-        hy::write(0x20, &[src | 2]);
+        ctr_restart(src);
         counter_vals(u24(&b[0..3]), u24(&b[3..6]), u24(&b[6..9]))
+    }
+
+    /// The first counter access after a row write (`Freq::fresh`): the gate
+    /// so far spans the switch and the settle, so it is only restarted
+    /// (with `src`); the first result is the gate from now, 350 ms later.
+    /// True = it did (no result this time).
+    fn freq_restart_fresh(&mut self, now: u64, src: u8) -> bool {
+        if !self.freq.fresh {
+            return false;
+        }
+        self.freq.fresh = false;
+        ctr_restart(src);
+        self.freq.next = now + 350;
+        true
     }
 
     fn freq_range(&mut self) {
@@ -4032,7 +4093,7 @@ impl Dmm {
 
     /// FUN_08013450 as the secondary readout in V/A modes, every 350 ms.
     fn freq_secondary(&mut self, now: u64, src: u8) {
-        if now < self.freq.next {
+        if self.freq_restart_fresh(now, src) || now < self.freq.next {
             return;
         }
         self.freq.next = now + 350;
@@ -4048,6 +4109,13 @@ impl Dmm {
     }
 
     fn poll_freq_mode(&mut self, now: u64) -> Option<Reading> {
+        if self.freq_restart_fresh(now, 0xF0) {
+            // The next gate is source 0's (0xf0); the sources start over.
+            self.freq.src_alt = false;
+            self.freq.seen = [false; 2];
+            self.freq.change = [1e6; 2];
+            return None;
+        }
         if now < self.freq.next {
             return None;
         }
@@ -4058,13 +4126,16 @@ impl Dmm {
         let next_src = if self.freq.src_alt { 0xF0 } else { 0x08 };
         let (f, d) = self.read_counters(next_src);
         let glitch = freq_glitch(f, d);
-        self.freq.change[i] = freq_change(f, d, self.freq.last[i]);
+        // A source's first clean result has no change to rank it by (1e6:
+        // shown only while it is the one source with a result).
+        self.freq.change[i] = if self.freq.seen[i] { freq_change(f, d, self.freq.last[i]) } else { 1e6 };
         // A glitch result is not kept as the source's last value either.
         if !glitch {
             self.freq.last[i] = f;
+            self.freq.seen[i] = true;
         }
         self.freq.src_alt = !self.freq.src_alt;
-        let best = if self.freq.change[0] <= self.freq.change[1] { 0 } else { 1 };
+        let best = freq_best(self.freq.seen, self.freq.last, self.freq.change)?;
         if glitch && best == i {
             // Neither source has a clean result: no reading this gate.
             return None;
@@ -4568,6 +4639,28 @@ mod tests {
         // No history after a function change: a clean first result (change
         // from 0) still beats a glitch.
         assert!(freq_change(f, 50.0, 0.0) < freq_change(0.013334, 100.0, 0.013334));
+    }
+
+    #[test]
+    fn freq_best_source() {
+        let c = [1e6f32; 2];
+        // No clean result yet: nothing; one source alone: that one.
+        assert_eq!(freq_best([false, false], [0.0; 2], c), None);
+        assert_eq!(freq_best([true, false], [0.04, 0.0], c), Some(0));
+        assert_eq!(freq_best([false, true], [0.0, 0.04], c), Some(1));
+        // Both: the smaller change (ties: source 0).
+        assert_eq!(freq_best([true; 2], [0.04, 0.0401], [1e-5, 1e-4]), Some(0));
+        assert_eq!(freq_best([true; 2], [0.04, 0.0401], [1e-4, 1e-5]), Some(1));
+        assert_eq!(freq_best([true; 2], [0.04, 0.04], c), Some(0));
+        // A source at 1/2, 1/3, 2/3 of the other loses, however steady.
+        for lo in [0.02f32, 0.013334, 0.026668] {
+            assert_eq!(freq_best([true; 2], [lo, 0.040002], [0.0, 1e-3]), Some(1), "{lo}");
+            assert_eq!(freq_best([true; 2], [0.040002, lo], [1e-3, 0.0]), Some(0), "{lo}");
+        }
+        // Not near a ratio, or no signal on one: by the change.
+        assert_eq!(freq_best([true; 2], [0.03, 0.04], [0.0, 1e-3]), Some(0));
+        assert_eq!(freq_best([true; 2], [0.0, 0.04], [1e6, 1e-3]), Some(1));
+        assert_eq!(freq_best([true; 2], [0.0, 0.0], c), Some(0));
     }
 
     #[test]
