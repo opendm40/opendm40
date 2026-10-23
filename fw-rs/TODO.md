@@ -560,6 +560,24 @@ Code work (in this order):
       rule that unbinds the usbtmc kernel driver from 1209:0001 and grants access (Chrome cannot claim a
       kernel-bound interface); Windows needs WinUSB (Zadig). Option: Web Bluetooth over the BLE "DM40A" link
       (stock app protocol, no SCPI) for cable-free use. A claude.ai artifact sandbox likely blocks WebUSB.
+- [ ] Protocol decoders (owner 2026-10-23): UART, Modbus RTU, etc. The usual problem with scope decoders is that
+      they only decode what fits in one short record (here ~53 KB). Make long traffic convenient instead: decode
+      **while streaming**, keep only the decoded frames and let the raw samples go.
+      - Source: the scope's continuous circular-DMA stream mode (up to 1.25 MS/s, the roll / software-stream path),
+        which gives UART up to ~115200 baud at >= 10 samples/bit. Faster links use one 50 MS/s record with the
+        trigger on a start bit. Single channel, so only one-wire or differential protocols: UART / RS-232 (inverted),
+        RS-485 (probe across A-B), Modbus RTU and ASCII on top of UART, then maybe 1-Wire, LIN, DMX, CAN (CANH-CANL),
+        IR NEC/RC5. No I2C / SPI (they need two channels).
+      - Decoder: threshold with hysteresis (auto from the signal's min/max), bit timing from the edges (auto-baud
+        from the shortest pulse plus a list of standard rates), 8N1 / 8E1 / 7E1 etc. Modbus: frames split on the
+        3.5-character gap, CRC-16 check, address / function / registers decoded, request <-> reply paired.
+      - UI: a frame list (time, direction or address, hex + ASCII or Modbus fields, CRC OK/BAD), scrollable over the
+        whole session; tap a frame to show its waveform when that piece is still in the record. Error counters
+        (framing, parity, CRC, gaps). Trigger / filter on a decoded value (address, function, a byte pattern).
+      - Logging: decoded frames to the disk (LOGS/UARTnnn.CSV, plus a raw byte .BIN), unlimited length like the
+        fast logger. SCPI: DEC:UART:... config and a frame-FIFO read, so a host can tail the bus live.
+      - Constraints: the decoder runs per DMA half-buffer in the main loop, so it must keep up at 1.25 MS/s and stay
+        in region B (no region-C code while streaming). DMM / generator keep running alongside.
 - [ ] Scope in ngscopeclient (owner-approved 2026-10-22: a libscopehal driver + a full-record readout).
       Done in the emulator (branch scope-full-record): fw-rs WAV:POINts SCReen|MAXimum|<n>, WAV:FORMat BYTE|WORD,
       WAV:SOURce CHAN1, 10-field Keysight/Rigol WAV:PREamble? (was 4 fields), DIGitize, TRIGger:STATus?,
