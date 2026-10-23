@@ -27,6 +27,14 @@
 //!   and averaged AD2 with AD3 off, and read the 60 V DC part +11 mV +
 //!   0.05 % off); the gain from an internal zero (OP1+ on AGND) when the
 //!   span is >= 10 k codes, kept per range over sessions, else the table.
+//!   The internal zero is not a real 0 V input (device 2563fe1: ~15 codes
+//!   off on 60 V, the gain 0.030 % high, -8 mV at 0 V), so once the input
+//!   has settled >= 10 k codes away from the anchor C takes the stock row's
+//!   reading there too (`am_refine`, ~1 s of DC V readings) and the gain
+//!   from the two READ? points: measured against the very reading the DC
+//!   part is meant to equal, nothing assumed of the hardware; it replaces
+//!   the internal zero's gain for the range (until power-off) and a later
+//!   one only over a 1.5 x larger span.
 //!   AC part: sqrt(RMS) x the factory AC V calibration (gain and offset, as
 //!   A: device e2 put it within 0.014 % of A, the DC gain 0.13 / 0.23 %
 //!   high), used only when AD2's peak hold over the last two results allows
@@ -102,6 +110,9 @@ const PK_MARGIN: f32 = 24.0;
 const RMS_BAD_MS: u64 = 2500;
 /// How long the last AC part from the RMS stands in for a peak bound (ms).
 const AC_OK_MS: u64 = 2000;
+/// C V refinement (`am_refine`): LPF results in a row within the anchor's
+/// spread rule = a settled input.
+const STEADY_N: u8 = 12;
 /// C A: the entry reference sets a gain (else an offset) from this
 /// fraction of the range's full scale.
 const C_A_GAIN: f32 = 0.1;
@@ -142,6 +153,23 @@ pub struct Am {
     coff: [f32; 4],
     cg: [f32; 4],
     cgsp: [f32; 4],
+    /// C V per range: the anchor's reference (V, this session), the gain
+    /// is from two references (bit per range), the span (codes) of the last
+    /// two-point attempt (the next one needs 1.5 x more; kept as `cg`).
+    cav: [f32; 4],
+    c2p: u8,
+    ctry: [f32; 4],
+    /// C V: a second reference is being taken (`am_refine`): its range and
+    /// the first point (anchor LPF codes, reference V).
+    pend: bool,
+    pr: u8,
+    pm: f32,
+    pv: f32,
+    /// C V in ST_RUN: LPF results in the steady window, their sum, min, max.
+    wn: u8,
+    wacc: f32,
+    wlo: f32,
+    whi: f32,
     /// C V anchor in progress: the zero (LPF codes), the min / max of the
     /// results averaged (in `acc`), zero taken, retries.
     cz: f32,
@@ -193,6 +221,17 @@ pub fn am_static() -> &'static mut Am {
             coff: [0.0; 4],
             cg: [0.0; 4],
             cgsp: [0.0; 4],
+            cav: [0.0; 4],
+            c2p: 0,
+            ctry: [0.0; 4],
+            pend: false,
+            pr: 0,
+            pm: 0.0,
+            pv: 0.0,
+            wn: 0,
+            wacc: 0.0,
+            wlo: 0.0,
+            whi: 0.0,
             cz: 0.0,
             c1: 0.0,
             c2: 0.0,
@@ -276,6 +315,7 @@ impl Dmm {
         a.fresh = 0;
         a.cfault = [0.0; 4];
         a.bad_t = 0;
+        a.pend = false;
     }
 
     /// DBG:ACDC:METH: switch and restart the session (AC+DC / AUTO).
@@ -363,14 +403,19 @@ impl Dmm {
         a.pk_prev = (i32::MAX, i32::MIN);
         a.bad_t = 0;
         a.ac_ok_t = 0;
+        a.wn = 0;
+        if a.pend && (!cv || a.pr as usize != r) {
+            a.pend = false; // the range changed during a refinement
+        }
         // C V: the zero only when this anchor can measure a gain (a span of
-        // >= CAL_GAIN_CODES, half again the one measured before).
+        // >= CAL_GAIN_CODES, half again the one measured before) and the
+        // range has no gain from two references; none in a refinement.
         let span = a.ref_v.abs() / c_tab(r);
         a.st = if need_ref {
             ST_REF
         } else if a.ok & (1 << s) != 0 {
             ST_RUN
-        } else if cv && span >= CAL_GAIN_CODES && span > 1.5 * a.cgsp[r] {
+        } else if cv && !a.pend && a.c2p & (1 << r) == 0 && span >= CAL_GAIN_CODES && span > 1.5 * a.cgsp[r] {
             ST_ZERO
         } else {
             ST_MEAS
@@ -586,7 +631,7 @@ impl Dmm {
             return None;
         }
         if self.cpl_auto && self.am.fresh == 3 {
-            self.auto_eval(lim);
+            self.auto_eval(lim, now);
             self.am.fresh = 0;
         }
         if !v {
@@ -608,6 +653,9 @@ impl Dmm {
         hy::write(0x29, &[self.r29]);
         if self.am.st != ST_RUN {
             return self.am_cal_step(clk, r, lpf);
+        }
+        if self.am_refine(clk, r, lpf) {
+            return None;
         }
         let now = clk.now_ms();
         let lim = (self.factor() * DEC4[r]).min(1000.0);
@@ -699,7 +747,7 @@ impl Dmm {
             return None;
         }
         if self.cpl_auto && self.am.fresh == 3 {
-            self.auto_eval(lim);
+            self.auto_eval(lim, now);
             self.am.fresh = 0;
         }
         Some(self.acdc_reading(lim, 4 - r as u8, "V", 1.0))
@@ -756,7 +804,17 @@ impl Dmm {
             self.switch_phase(clk, 1, r as i8, 450);
             return None;
         }
-        if a.zdone {
+        if a.pend {
+            // The second reference (`am_refine`): the gain between the two.
+            a.pend = false;
+            let span = (m - a.pm).abs();
+            let g = (v - a.pv) / (m - a.pm);
+            if span >= CAL_GAIN_CODES && (g / tab - 1.0).abs() <= CAL_GAIN_TOL {
+                a.cg[r] = g;
+                a.cgsp[r] = span;
+                a.c2p |= 1 << r;
+            }
+        } else if a.zdone {
             let span = (m - a.cz).abs();
             let g = v / (m - a.cz);
             if span >= CAL_GAIN_CODES && (g / tab - 1.0).abs() <= CAL_GAIN_TOL {
@@ -767,11 +825,55 @@ impl Dmm {
         let pc = if a.cgsp[r] > 0.0 { a.cg[r] } else { tab };
         a.cpc[r] = pc;
         a.coff[r] = m * pc - v;
+        a.cav[r] = v;
         a.ok |= 1 << r;
         a.st = ST_RUN;
         a.pk_prev = (i32::MAX, i32::MIN);
         a.bad_t = 0;
         None
+    }
+
+    /// Method C, V, in ST_RUN: one LPF result into the steady window; when
+    /// the input has settled >= CAL_GAIN_CODES away from the range's anchor
+    /// (and 1.5 x further than the last two-point attempt there), with an AC
+    /// part (RMS or the peak bound: a steady node), the stock DC V row's
+    /// reading is taken again: the anchor
+    /// moves here and `am_cal_step` takes the gain from the two references
+    /// (module header). Returns whether the reference was started.
+    #[inline(never)] // per result (region B, as poll_am)
+    fn am_refine(&mut self, clk: &mut Clock, r: usize, lpf: f32) -> bool {
+        let a = &mut *self.am;
+        if a.wn > 0 && (lpf.max(a.whi) - lpf.min(a.wlo)) > 60f32.max(0.01 * lpf.abs()) {
+            a.wn = 0;
+        }
+        if a.wn == 0 {
+            a.wacc = 0.0;
+            a.wlo = lpf;
+            a.whi = lpf;
+        }
+        a.wn += 1;
+        a.wacc += lpf;
+        a.wlo = a.wlo.min(lpf);
+        a.whi = a.whi.max(lpf);
+        if a.wn < STEADY_N {
+            return false;
+        }
+        let mean = a.wacc / a.wn as f32;
+        a.wn = 0;
+        let m1 = (a.cav[r] + a.coff[r]) / a.cpc[r];
+        let d = (mean - m1).abs();
+        if a.acsrc == 2 || a.cpc[r] == 0.0 || d < CAL_GAIN_CODES || d <= 1.5 * a.ctry[r] {
+            return false;
+        }
+        a.ctry[r] = d;
+        a.pend = true;
+        a.pr = r as u8;
+        a.pm = m1;
+        a.pv = a.cav[r];
+        a.ok &= !(1 << r);
+        a.refd &= !(1 << r);
+        self.switch_phase(clk, 1, r as i8, 450);
+        true
     }
 
     /// B's DC part of an AD1 code in the merged row of AC mode `m`.
