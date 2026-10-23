@@ -25,6 +25,9 @@ Checks:
   * INR:STATe ON again (SCPI entry) after T2: the running 2 A AC load does
     not trigger a 1 A step (still ARMED just before T3); T3 triggers:
     Irms 5 A (+-3 %), idle 2 A (+-3 %), |peak| 7.07 A (+-3 %);
+  * INR:ARM, then a host LOG:CSV ON: refused ("Settings conflict: inrush
+    page"), LOG:CSV? off, still ARMED; no region C code and no slow-bank
+    data read while it is handled (emu/regionc.py; --no-region-c: skipped);
   * INR:ARM then a host CONF:VOLT:DC: the capture stops (INR:COND? IDLE,
     DBG:ISR? active 0), DC V reads; INR:STATe OFF keeps the host's DC V;
     INR:STATe ON from DC V selects AC A, OFF puts DC V back.
@@ -48,6 +51,9 @@ ap.add_argument('--port', type=int, default=3597, help='USB/IP port (default 359
 ap.add_argument('--shots', help='directory for PNG screenshots')
 ap.add_argument('--mips', default='200')
 ap.add_argument('--t1', type=float, default=16.0, help='virtual s of the DC step')
+ap.add_argument('--no-region-c', action='store_true', help='without the region C hooks (emu/regionc.py): by default a '
+                'host LOG:CSV ON on the armed page (refused: "Settings conflict: inrush page") must run no region C '
+                'code and read nothing from the slow flash bank')
 A = ap.parse_args()
 T1 = A.t1
 T2 = T1 + 14.0
@@ -71,7 +77,14 @@ tag = 'inrush-%d-%d' % (A.port, os.getpid())
 disk = os.path.join(OUT, '%s.disk.bin' % tag)
 shutil.copy(os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
 script = os.path.join(OUT, '%s.script' % tag)
+sys.path.insert(0, EMU)
+import regionc  # noqa: E402
+# Not hooked: the save's Prep / FAT writer (hot while not streaming: a
+# Python hook per call stretches it; as fastlogtest --region-c).
+RC = None if A.no_region_c else regionc.Hooks(A.app, OUT, tag, exclude=('fastlog::prep::', 'dm40_fw::fatren::'))
 with open(script, 'w') as f:
+    if RC:
+        f.write(RC.lines())
     for t, spec in [(T1, 'isrc:12'), (T1 + 0.020, 'isrc:6'), (T1 + 0.100, 'isrc:3'),
                     (T2, 'isrc:0,ac=2,f=50'), (T3, 'isrc:0,ac=5,f=50')]:
         f.write('%.4f dmm %s\n' % (t, spec))
@@ -267,6 +280,22 @@ try:
     q('INR:ARM')
     c = wait_cond(('ARMED',), 3000)
     check(c == 'ARMED', 'INR:ARM re-arms (%s)' % c)
+    # A CSV recording is refused on the inrush page (the DMM poll is paused
+    # while the capture streams: it would record no rows).
+    if RC:
+        RC.reset()
+    q('*CLS')
+    q('LOG:CSV ON')
+    err = q('SYST:ERR?')
+    st = q('LOG:CSV?').split(',')
+    c = cond()
+    check('inrush page' in err and st[0] != '1' and c == 'ARMED' and isr_active() == 1,
+          'LOG:CSV ON on the armed inrush page refused (%s; LOG:CSV? %s; %s)' % (err, ','.join(st), c))
+    if RC:
+        got = RC.calls()
+        print('  region C functions / slow-bank reads while streaming: %s' % (', '.join(sorted(got)) or 'none'), flush=True)
+        check(not got, 'LOG:CSV ON on the armed page: no region C code / slow-bank read while streaming%s'
+              % ('' if not got else ' (%s)' % ', '.join(sorted(got))))
     q('CONF:VOLT:DC')
     wait_ms(1500)
     c = cond()
@@ -300,6 +329,8 @@ finally:
             os.remove(p)
         except OSError:
             pass
+    if RC:
+        RC.cleanup()
 
 print('inrushtest: %s' % ('PASS' if not FAIL else 'FAIL (%d)' % len(FAIL)))
 sys.exit(1 if FAIL else 0)

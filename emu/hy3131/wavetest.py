@@ -38,6 +38,12 @@ path is AC-coupled in AC V like the meter). Checks:
     at 2 ms/div (no late / overrun, the view changes after the stop); at
     the end the whole run (emu/regionc.py). --no-region-c: without the hooks.
   * LOG:CSV ON in the wave view: refused ("Settings conflict: Wave view").
+  * per step at 2 and 1 ms/div (region C hooks + the ring / late / overrun
+    counters of DBG:ISR?): MMEM:CAT? x3 (device b6909d6: dropped +6813 per
+    query at 76800; csvlog.rs catalog cache), V/div + and - (the range
+    step's full repaint before the stream restarts, app_wave.rs
+    wave_rescale); the source badge exit DMM -> MCX at 2 ms/div (the close
+    held for the stream's stop, wave_badge_close; DBG:VIEW?).
 --shots DIR: PNG screenshots (DBG:LCD?) of each stage for a look.
 Exit status 0 = all passed.
 """
@@ -415,6 +421,35 @@ try:
         else:
             check(0.5 < vpp < 2.95, '%s/div: half a period on screen, VPP %.3f V <= 2.83' % (name, vpp))
         shot('w03-wave-%s' % name)
+        # MMEM:CAT? while the stream runs (device b6909d6: 123 ms in one
+        # pass at 76800, the view's ring dropped +6813 per query).
+        c_reset()
+        ia = ints(q('DBG:ISR?'))
+        for _ in range(3):
+            q('MMEM:CAT?')
+        wait_ms(300)
+        ib = ints(q('DBG:ISR?'))
+        print('  %s/div: MMEM:CAT? x3: overwritten %d -> %d, late %d -> %d, overruns %d -> %d'
+              % (name, ia[6], ib[6], ia[4], ib[4], ia[9], ib[9]))
+        check(ib[6] == ia[6] and ib[4] == ia[4] and ib[9] == ia[9],
+              '%s/div: MMEM:CAT? x3 while streaming: the view drained the ring in time (overwritten %d -> %d)'
+              % (name, ia[6], ib[6]))
+        c_check('%s/div: MMEM:CAT?' % name)
+        # A V/div step with the stream on (the next DMM range: the stream
+        # stops, the range changes, it starts again; the scale's full
+        # repaint must not overflow the ring of the new stream).
+        for tap, what in (('447,122', 'V/div +'), ('447,40', 'V/div -')):
+            c_reset()
+            ia = ints(q('DBG:ISR?'))
+            q('DBG:TAP %s' % tap)
+            wait_ms(2500)
+            ib = ints(q('DBG:ISR?'))
+            print('  %s/div %s: CHAN1:SCAL? %s, DBG:ISR? %s' % (name, what, q('CHAN1:SCAL?'), ib[:14]))
+            check(ib[1] == 1 and ib[6] in (0, ia[6]) and ib[4] in (0, ia[4]) and ib[9] in (0, ia[9])
+                  and ib[8] == ia[8] and ib[13] == ia[13],
+                  '%s/div %s: the stream runs again, no ring overflow, late entry, overrun, timeout or forced stop '
+                  '(overwritten %d -> %d, late %d -> %d)' % (name, what, ia[6], ib[6], ia[4], ib[4]))
+            c_check('%s/div %s' % (name, what))
 
     print('trigger')
     q('TIM:SCAL 0.01')
@@ -612,6 +647,25 @@ try:
              sorted(read_ok), other or 'none'))
     check(ints(q('DBG:ISR?'))[1] == 1, 'the stream runs during the INFO/ reads')
     c_check('a host reading INFO/')
+    # The source badge out of the Wave view (DMM -> MCX) at 2 ms/div: the
+    # stream stops before the MCX page runs (rails, acquisition, repaint).
+    q('TIM:SCAL 0.002')
+    wait_ms(2500)
+    c_reset()
+    ia = ints(q('DBG:ISR?'))
+    q('DBG:TAP 177,10')
+    wait_ms(2500)
+    ib = ints(q('DBG:ISR?'))
+    v = q('DBG:VIEW?')
+    print('  badge exit at 2 ms/div: DBG:VIEW? %s, DBG:ISR? %s' % (v, ib[:14]))
+    check(ib[1] == 0 and v.startswith('Oscilloscope') and v.endswith(',0'), 'source badge DMM -> MCX: the Wave view closed (%s)' % v)
+    check(ib[13] == ia[13] and ib[4] == ia[4] and ib[9] == ia[9] and ib[8] == ia[8],
+          'badge exit at 38400: no forced stop, late entry, overrun or frame timeout (forced %d -> %d, late %d -> %d)'
+          % (ia[13], ib[13], ia[4], ib[4]))
+    c_check('source badge exit (DMM -> MCX)')
+    q('DBG:TAP 177,10')  # and in again, for the host CONF below
+    wait_ms(2500)
+    check(ints(q('DBG:ISR?'))[1] == 1, 'the source badge opens the wave view again')
     f0 = ints(q('DBG:ISR?'))[13]
     q('CONF:VOLT:DC')
     wait_ms(1500)
