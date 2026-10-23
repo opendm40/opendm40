@@ -283,11 +283,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double Ad2Period => Osr2 * ((regs[0x26] & 0x08) != 0 ? 4.0 : 2.0) / SysClk
             / ((regs[0x26] & 0x0F) == 0 ? 1.0 + Ad2Osr32Ppm * 1e-6 : 1.0);
         /// The /2, OSR 32 setting's rate offset from FAD2CLK / OSR2, ppm (the
-        /// stock AC rows' 0x80 and fw-rs' 76.8 kS/s rung): the device converts
-        /// at 76 574.6 S/s there (7409b92 / 4c4b489 record stamps, fw-rs
-        /// hy3131.rs AD2_OSR32_REAL_MHZ), the other settings as the datasheet.
-        /// 0 = the datasheet (monitor: hy3131 Ad2Osr32Ppm 0).
-        public double Ad2Osr32Ppm { get; set; } = -2935;
+        /// stock AC rows' 0x80 and fw-rs' 76.8 kS/s rung). 0 = the datasheet,
+        /// as the device converts (fw-rs device check of e7ec2cc; the 76 574.6
+        /// S/s of the 7409b92 / 4c4b489 streams came from fw-rs' old Pll);
+        /// -2935 = the rate e7ec2cc assumed (monitor: hy3131 Ad2Osr32Ppm).
+        public double Ad2Osr32Ppm { get; set; } = 0;
         public double LpfPeriod => Ad2Period * Osr4 * LpfRateDivisor;
 
         /// Comparator thresholds (V relative to AGND) from R21.
@@ -2117,8 +2117,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double ClockPpm { get; set; }
 
         /// The 76.8 kS/s setting's own rate offset, ppm (Hy3131Core.Ad2Osr32Ppm,
-        /// default the device's -2935; monitor: hy3131 Ad2Osr32Ppm 0 = the
-        /// datasheet's 76 800).
+        /// default 0 = the datasheet's 76 800, as the device (fw-rs device check
+        /// of e7ec2cc); monitor: hy3131 Ad2Osr32Ppm).
         public double Ad2Osr32Ppm { get => Core.Ad2Osr32Ppm; set => Core.Ad2Osr32Ppm = value; }
 
         /// INTF read-clears-flag race window, us (Hy3131Core.IntfRaceWindow). Default

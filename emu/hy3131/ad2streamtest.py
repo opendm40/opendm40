@@ -46,7 +46,7 @@ ap.add_argument('--port', type=int, default=3378, help='USB/IP port (default 337
 ap.add_argument('--secs', type=float, default=1.0, help='scale of the session lengths (wall clock)')
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
 ap.add_argument('--osr32-ppm', type=float, default=None, help='the 76.8 kS/s setting\'s own rate offset, ppm (model Ad2Osr32Ppm; '
-                'default the device\'s -2935, fw-rs hy3131.rs AD2_OSR32_REAL_MHZ; 0 = the datasheet\'s 76 800)')
+                'default 0 = the datasheet\'s 76 800, as the device (fw-rs device check of e7ec2cc))')
 ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (fw-rs region C audit)')
 ap.add_argument('--race-us', type=float, default=None, help='INTF read-clears-flag race window, us (model default 0.7)')
 ap.add_argument('--miso-err', type=float, default=None, help='probability that a marginal mode-0 /8 bit is read at its old '
@@ -216,14 +216,12 @@ try:
         want_div = 16 if dma == 1 and rate <= 38400 and not hyb else 1008
         check(isr[22] == (1 if dma == 1 else 0) and isr[19] == want_div,
               'DMA frames %d (DBG:AD2:DMA %d), div %d (1008 = /8 + CKPH data phase)' % (isr[22], dma, isr[19]))
-        # The rung's nominal (LOG:PREamble? nominal_mhz) is the chip's real
-        # rate: 76 574.6 at 76800 (fw-rs hy3131.rs AD2_OSR32_REAL_MHZ), the
-        # datasheet's elsewhere. The model's 76800 runs --osr32-ppm off it
-        # (default the device's -2935 = the nominal).
+        # The rung's nominal (LOG:PREamble? nominal_mhz) is the datasheet's
+        # rate at every rung (fw-rs hy3131.rs AD2_OSR32_REAL_MHZ, device
+        # e7ec2cc). The model's 76800 runs --osr32-ppm off it (default 0).
         rung = min(rate, 76800 if dma == 1 else 38400)
-        nom = 76574.6 if rung == 76800 else rung
-        off = A.ppm + (((1 + (A.osr32_ppm if A.osr32_ppm is not None else -2935.0) * 1e-6) / (76574.6 / 76800) - 1) * 1e6
-                       if rung == 76800 else 0.0)
+        nom = rung
+        off = A.ppm + ((A.osr32_ppm or 0.0) if rung == 76800 else 0.0)
         check(abs(int(pre[8]) / 1000 - nom) < 2,
               'rung %d S/s (LOG:PREamble? nominal_mhz %s)' % (rung, pre[8]))
         check(abs(isr[15] + 10 * off) <= 250, 'locked period vs nominal %+.1f ppm (chip %+.1f ppm)' % (isr[15] / 10, off))

@@ -53,7 +53,7 @@ ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.
 ap.add_argument('--no-bt', action='store_true')
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
 ap.add_argument('--osr32-ppm', type=float, default=None, help='the 76.8 kS/s setting\'s own rate offset, ppm (model Ad2Osr32Ppm; '
-                'default the device\'s -2935, fw-rs hy3131.rs AD2_OSR32_REAL_MHZ; 0 = the datasheet\'s 76 800)')
+                'default 0 = the datasheet\'s 76 800, as the device (fw-rs device check of e7ec2cc))')
 ap.add_argument('--vol-read', action='store_true', help='after each session read LOGS/FASTnnn.CSV off the USB volume (MSC READ(10), 64 sectors each): == tools/dlog.py of the DLG; the virtual-time rate')
 ap.add_argument('--no-ad1-race', action='store_true', help='AD1F without the INTF read-clears race (model IntfRaceAd1)')
 ap.add_argument('--noise', type=float, default=None, help='HY3131 model noise scale (SetNoise; AD2: 30 codes rms x scale at OSR 32): a '
@@ -278,8 +278,8 @@ def session(q, src, rate, profile):
         fast = 0 < tpp <= 800 and tpp_max <= 1500
         want = rate if fast and gate == 1 else 38400
         print('  writer trial: %s, ISR %d permille, ring high water %d' % ({0: 'none', 1: 'kept', 2: 'fell back'}.get(gate, gate), g_pm, g_fill), flush=True)
-        # nominal = the chip's real rate (76 574.6 at the 76800 rung, fw-rs
-        # hy3131.rs AD2_OSR32_REAL_MHZ): which rung ran, to 0.4 %.
+        # nominal = the rung's rate (fw-rs hy3131.rs AD2_OSR32_REAL_MHZ at
+        # 76800): which rung ran, to 0.4 %.
         check(abs(nominal / want - 1) < 0.004 and (gate in (1, 2) if fast else gate == 0),
               '%s %s %d: probe tPP %d / %d us, trial %d -> rung %.0f S/s' % (profile, src, rate, tpp, tpp_max, gate, nominal))
         srate = q('LOG:SRATe?')
