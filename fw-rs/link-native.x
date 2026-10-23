@@ -41,6 +41,11 @@
  *   0x08080000; 4.6 us without the panel; docs/dmm-input-scope-feasibility.md
  *   10.3). Code in C costs that per call: only what never runs while a
  *   stream does (or seldom, outside the main loop's every-pass path).
+ *   DATA loads too, from anywhere >= 0x08080000 (region C's rodata, the
+ *   calibration record, the loader data): device b6909d6, the USB volume's
+ *   INFO/ files, 21.8 us per load. None while a stream runs (RAM copies,
+ *   the volume answers NOT READY; docs/native-boot.md "The slow flash bank
+ *   while an AD2 stream runs"; emu/regionc.py watches the loads).
  *
  * RAM:
  *   TCM     0x10000000  64 KiB  .data, .bss, stack (top 0x10010000)

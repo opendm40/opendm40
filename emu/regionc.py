@@ -33,7 +33,7 @@ started, e.g. the tail of logger::Logger::start after stream::start, which
 the entry hooks above miss). `calls` reports them as "data <function>+0x..
 <- 0x0808xxxx" / "code <function>+0x.. (interrupted by the ISR)" next to
 the region C functions, so every test that checks `calls` checks all. `data=False`: without the watch (it makes every load
-and store a callout, ~2x slower).
+and store a callout: slower).
 """
 import glob
 import os

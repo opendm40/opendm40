@@ -11,7 +11,7 @@
 // non-zero is recorded as "pc addr" in `path` (appended, once per pc; the
 // count per pc in Dump). Also "pc code": the stream ISR interrupted code
 // running in [lo, hi) (sampled at each handler entry). Off until Arm (the hook makes every load and store
-// call out of the translated code: ~2x slower).
+// call out of the translated code: slower).
 //   sysbus.flashwatch Arm 0x08080000 0x08100000 0x1000xxxx "/path/hits"
 //   sysbus.flashwatch Dump          (pc count first-addr, logged)
 //
