@@ -1395,10 +1395,14 @@ Firmware:
       returned empty (new processes too) until a USBTMC INITIATE_CLEAR (ioctl USBTMC_IOCTL_CLEAR); the
       logger itself had stopped (LOG:STAT? 0). A pending bulk-IN reply left half read; the tool could catch
       SIGINT and clear, and dm40dbg.Link could clear on an empty read.
-- [ ] emu/hy3131/dcvtest.py fails on 4c4b489 and later (found 2026-10-23, not caused by the 76.8 kS/s Pll
+- [x] emu/hy3131/dcvtest.py fails on 4c4b489 and later (found 2026-10-23, not caused by the 76.8 kS/s Pll
       change: the same with the old model): LOG:SCALe? per-code 4.767e-05 / 4.812e-04 against the model's
       4.721e-05 / 4.721e-04 (+0.97 / +1.9 %, the check allows 0.3 %). modetest's stock cap-big (100 uF reads
       104 uF) fails the same way with either model.
+      The test, not the firmware or the model: +0.97 / +1.9 % are exactly the model's per-range per_code factor
+      of the DC-coupled row (HY3131.cs Ad2DcGainR 1.0096 / 1.0188, the device's, since 70c33ad, not d32af6c),
+      which dcvtest did not expect. dcvtest now expects nominal x that factor / ad2dcg: PASS (acdc-approaches.md
+      10.9 item 3). The stock cap-big case is unrelated (it fails on 5f9b5a0 already).
 - [ ] 76800 CHOP ON: one isolated mid-level glitch per ~2 M samples (seq 752877: -65616 between -98272s;
       seq 133301: 82960 between ~98300s), bad 0; none in 2.1 M with CHOP OFF or at 4800 / 38400.
 - [ ] dm40scpi.py `log --source ad2 -d N`: drain() returns only on a block < 500 records, so above the
