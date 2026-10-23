@@ -1815,8 +1815,8 @@ every alert, never alternating with HOLD):**
   CTSTA after each switch is dropped. Since 2026-10-23 (false AC? after
   switches and on 5 V DC, TODO "False AC? / A-JACK / A-PROT after switches"):
   a window counts only while the row's DC V reading is below 2 V
-  (AC_HINT_DC_MAX) and none before its first reading; every hint (DC?, AC?,
-  the power meter's) needs the condition in every window for the 2 s. All
+  (AC_HINT_DC_MAX) and none before its first reading; DC? and AC? (not the
+  power meter's) need the condition in every window for the 2 s. All
   sentinels: no sample for 150 ms after a row write and 100 ms after its
   settle, the peak hold cleared at the settle's end (sentinel.rs BLANK_*).
   V-JACK? after leaving ohm (device ad74e93: CTSTA 0x70 ~3.5 s, then 0x50):

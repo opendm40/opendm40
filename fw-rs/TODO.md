@@ -2634,7 +2634,9 @@ Emulator (emu/):
         so A-JACK / V-JACK? bridge the phases. An empty hold is no window.
       - Dmm::set restarts the hit run (an alert in force stays). dmm.start starts the history over.
         The A-jack probe's in / out rewrites skip the blank.
-      - Hints (AC?, DC?, the power meter's) need the condition in every window for the 2 s. AC? counts
+      - The DMM hints AC? and DC? need the condition in every window for the 2 s. The power meter's
+        hints keep the old rule: with the every-window rule their DC? toast landed on powtest ereset's
+        long press. AC? counts
         a V-tap window only with |DC V| < 2 V (AC_HINT_DC_MAX), after the row's first reading, and never
         a read with both bits.
       A-PROT's rule (aprot_trips, the probe, the latch) is unchanged.

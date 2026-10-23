@@ -1021,8 +1021,11 @@ impl Sentinel {
     /// on V in DC (AC? "AC present: use AC+DC"); the DC? / AC? timing and
     /// the hints mask.
     pub fn pw_hints(&mut self, now: u64, dc: bool, ac: bool) {
-        self.dc.feed(now, dc, HINT_ASSERT_MS, HINT_CLEAR_MS);
-        self.ac.feed(now, ac, HINT_ASSERT_MS, HINT_CLEAR_MS);
+        // (assert_ms 0: per reading of settled parts, the old rule - a gap under
+        // HINT_CLEAR_MS keeps the count; the every-window rule moved the DC? toast
+        // onto powtest ereset's long press)
+        self.dc.feed(now, dc, 0, HINT_CLEAR_MS);
+        self.ac.feed(now, ac, 0, HINT_CLEAR_MS);
         self.decide(now);
     }
 
