@@ -2321,10 +2321,41 @@ Firmware:
             AC V at 24 V did not come back (5 entries). VOLT:RANG:AUTO? in AC V / CURR:RANG:AUTO? in AC A: still
             +9.91E37 + "Settings conflict"; VOLT:AC:RANG:AUTO? / CURR:AC:RANG:AUTO? answer (owner: is the DC-only
             plain form wanted?).
-      - [ ] Switch latency (owner: "several seconds, stock was instant"; device ad74e93, settle.py at 1 / 5 V,
+      - [x] Switch latency (owner: "several seconds, stock was instant"; device ad74e93, settle.py at 1 / 5 V,
             RATE FAST): first valid FETCh? DC V <-> AC V 0.46 s, RES -> DC V 0.52-0.56 s, DC V -> mA 0.56 s,
             DC V -> A 0.75-0.76 s, 6 V -> 60 V 0.55-0.56 s, AC V -> AC+DC 1.32-1.37 s, **DC V -> RES 2.67 s**; the
             screen is blank until then. AC V of a DC input settles into 0.1 % in 2.5-2.9 s. Stock not measured.
+            **Done on branch fastswitch (docs/switch-latency.md 6, owner-approved proposals 1-6; 7-8 wait):**
+            the new function's frame at once (unit + grey dashes, never 0.0000); ohm entry 150 ms (no 2.5 s
+            deadline; the stock's single-step window works again); V / A entry 300 ms; manual V range 250 ms;
+            no held first conversion where a function change restarted AD1 (R22 changed); provisional values
+            (vet hold, AC+DC before both parts / AC settling, AUTO deciding) drawn grey, never to the meter,
+            autorange, BT or SCPI (READ? in AUTO now waits for the first decision). Emulator (switchlat, MED):
+            DC V -> ohm 3.08 -> 1.19 s (FAST 2.83 -> 0.93), DC V -> A 0.72 -> 0.33, ohm / A -> DC V 0.53 ->
+            0.33, DC V -> AC V 0.48 -> 0.32, manual 6 <-> 60 V 0.5 -> 0.3, AC+DC 60 -> 6 V 1.69 -> 1.50;
+            AC+DC -> AUTO first FETCh? 1.29 -> 3.56 (by design). Suites: switchtest, senttest (aprot-to-dca
+            flaky under load, passes alone; base too), autorangetest (ad1mix 1), couptest, powtest (all but:
+            acdc-floor flaky under load, base too; bt fails on the window's last sample at 38.48 s, whose
+            `BT POW:VOLT:RANG?` reply the emulator's run end cut off: a harness edge that depends on where the
+            samples fall; every BT value before it in the window right, -24 W / 0x28 / "POW"), leadstest,
+            acdcmethtest, dcvtest, flowtest, meter-test, touch-test, ui-render 0 violations.
+            **Device retest** (RATE FAST and MED, 1 V / 4.7 kohm / 50 mA as in ad74e93, settle.py):
+            1. DC V -> RES on 4.7 kohm: screen shows "- - Mohm" within ~0.2 s, the number by ~1.0-1.3 s (was
+               3.0 s), no range stuck on 60 Mohm; an open input reads 0L, a 10 Mohm / 100 ohm resistor settles
+               on its range (single steps for 2.5 s, then the stock's multi-range steps).
+            2. DC V <-> DC A / mA on 50 mA, RES -> DC V, AC V -> DC V: first FETCh? ~0.35 s (was 0.5-0.75 s);
+               the first A reading against the calibrator within spec (the A-jack relays now get 300 ms, not
+               650: watch the first reading after DC V -> A for a relay transient).
+            3. MF / SCPI VOLT:RANG 6 <-> 60 at 1 V: first FETCh? ~0.3 s; no 25-51 % or 0.78 V reading in 30
+               switches (the vet still holds a disagreeing first conversion).
+            4. VOLT:RANG:AUTO ON from 600 V and the 600 -> 60 -> 6 V two-step autorange (bab5dd4): never
+               0.767-0.790 V (vet unchanged on autorange steps).
+            5. AC+DC entry (1 V AC + 0.5 V DC): grey |DC| with "AC --" first, then 1.118 V orange; an AC+DC
+               range step 60 -> 6 V: grey values while the AC part settles, READ? +9.91E37 until settled.
+            6. AUTO coupling on 1 V AC + 0.5 V DC: grey DC part until the decision, then the AC part orange;
+               READ? +9.91E37 until then. HOLD / REL during these: the frozen value stays, no grey over it.
+            7. No false V-JACK? / A-JACK / AC? after RES -> A / mA and scope -> DMM (device check E): the
+               sentinel blanks count from the switch, the readings now come ~0.2 s earlier.
 - [x] Burden voltage in the A / mA / uA modes (as the EEVblog 121GW, owner 2026-10-22): I * R_path of the
       shunt in use in the aux row, "Burden" caption: DC A aux1 (signed), AC A aux2 instead of the duty
       (RMS); none in AC+DC (both rows hold the parts) and in the power meter (its own At-load line). R_path

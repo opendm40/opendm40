@@ -181,3 +181,87 @@ fw-rs uptime is virtual time minus 0.906 s (the DWT CYCCNT reset at fw-rs
 start; `BOOT_OFS`). Each stock monitor sample is one Renode pause (~1-3 s of
 wall time), so the stock sampling is 50 ms only for the first 3.2 s after a
 switch and 250 ms after that.
+
+## 6. Implemented (branch fastswitch, 2026-10-24)
+
+Proposals 1-6 as approved by the owner (2026-10-23); 7 and 8 (ACS_MAX_MS,
+ACDC_DOWN_MS, AUTO_TIE_MS) wait for a device sweep and are unchanged.
+
+1. **Frame at once** (`Dmm::placeholder`, App `prov`): on a function /
+   coupling change the readout shows the new function's unit, glyph, range
+   label and (AC+DC / AUTO) its part rows, the value as dashes in
+   VALUE_PROV (the stock grid grey 0x94D3), never 0.0000. The first settled
+   reading replaces it at once (`Meter::show_now`). Emulator (DC V -> ohm
+   tap, LCD screenshots every 50 ms): the new page with "- - Mohm" is up
+   0.15-0.20 s after the tap event (touch scan and gesture included).
+2. **Ohm entry** `OHM_ENTRY_MS` 150 instead of the 2500 ms deadline;
+   `OHM_SINGLE_MS` 2500 is the stock's one-range-at-a-time window again.
+3. **V / A entry** `ENTRY_MS` 300 (buttons, `select`, the plain DC / AC
+   coupling of `set_sub`); the AC+DC / AUTO entry's DC phase, autorange,
+   unit changes, manual A ranges and the power meter -> A path keep theirs.
+4. **Manual V range** `RANGE_MS` 250 (AC+DC: 450 as before).
+5. **vet_fresh**: no held first conversion on a function / coupling change
+   into plain DC V / A when the R22 read from the chip before the row write
+   differs from the new one (AD1 restarts). Range and V <-> mV / A unit
+   steps, same-R22 changes (V <-> A at FAST) and AC+DC keep the full vet.
+   (The task text said "hold only when R22 changed"; its own example and
+   proposal 5 say the opposite, which is what is built.)
+6. **Provisional readings** (`Reading::prov`): G2 (a held DC conversion,
+   raw), G4 (AC+DC before both parts: the missing part's row shows
+   dashes), G5 (AC+DC while the AC part settles: its latest result) and G7
+   (AUTO before its first decision with an AC part above the floor) are
+   drawn in VALUE_PROV on the DMM page (strip: C_DIS). `Dmm::poll` returns
+   them before every consumer; main.rs hands them to `App::provisional`,
+   which only draws: no meter (statistics, REL, limits, AutoHold, trend,
+   CSV, beeps), no `last_raw` (BT), no SCPI (`reading_pending` stays,
+   READ? / FETCh? +9.91E37), no autorange. G7 readings are measured values
+   that the sentinel / OVERLOAD release / watchdog saw before, so they still
+   do (without that couptest iacfill / sqtie failed). HOLD, an AutoHold
+   capture and REL keep their readout. Consequence: in AUTO, READ? now
+   waits for the first decision (AC+DC -> AUTO below: 1.3 -> 3.6 s), as
+   asked (a provisional value never reaches SCPI).
+
+Dim colour: VALUE_PROV = DIM (144, 152, 152), chosen over a darkened amber
+(0x8220: 128, 68, 0): the grey reads as "not final" and cannot be taken
+for the >= 30 V red (VALUE_HV) or a dim screen. Renders: `tools/ui-render`
+sw01..sw14 (sw01 = the old blank readout, sw02..sw06 placeholders, sw07 /
+sw09 / sw10 / sw12 provisional, sw08 / sw11 settled, sw13 / sw14 the
+combined view's strip); ui-render matrix with ph_* / pv_* cases: 0
+violations.
+
+### 6.1 Emulator, first settled FETCh? (s; first / within 0.1 %)
+
+switchlat.py, model C; before = falsehint 93d8033 (the same DMM code as
+rust-fw-poc f0d21eb), after = fastswitch on f0d21eb.
+
+| switch | MED before | MED after | SLOW before | SLOW after | FAST before | FAST after |
+|---|---|---|---|---|---|---|
+| DC V -> AC V | 0.48 / 0.55 | 0.32 / 0.43 | | | | |
+| AC V -> AC+DC | 1.30 / 1.45 | 1.30 / 1.44 | | | | |
+| AC+DC -> AUTO coupling | 1.29 (DC part) / 3.44 | 3.56 / 3.56 (G7) | | | | |
+| AUTO -> DC V | 0.48 | 0.32 | | | | |
+| DC V -> ohm (4.7 kohm) | **3.08** | **1.19** | **3.08** | **1.19** | **2.83** | **0.93** |
+| ohm -> DC V | 0.53 | 0.34 | 0.54 | 0.33 | 0.53 | 0.33 |
+| DC V -> DC A (50 mA) | 0.72 | 0.33 | 0.74 | 0.33 | 0.69 | 0.35 |
+| DC A -> DC V | 0.52 | 0.32 | 0.53 | 0.32 | 0.48 | 0.34 |
+| DC V 6 -> 60 V manual | 0.51 / 0.91 | 0.31 | 0.52 | 0.31 | 0.48 / 6.58 * | 0.36 / 6.64 * |
+| DC V 60 -> 6 V manual | 0.53 | 0.30 | 0.51 | 0.31 | 0.47 | 0.33 |
+| DC V AUTO up 1 -> 30 V | 0.41 | 0.59 ** | 0.41 | 0.60 ** | 0.35 | 0.31 |
+| DC V AUTO down 30 -> 1 V | 0.41 | 0.20 ** | 0.39 | 0.19 ** | 0.06 | 0.01 / 0.32 |
+| AC V AUTO up 1 -> 30 V | 0.48 / 0.58 | 0.50 / 0.59 | | | | |
+| AC V AUTO down 30 -> 1 V | 0.01 / 0.55 | 0.03 / 0.56 | | | | |
+| AC+DC AUTO down 7 -> 4 V | 0.11 | 0.04 | | | | |
+| AC+DC 60 -> 6 V manual | 1.69 | 1.50 | | | | |
+| AC+DC -> DC V | 0.49 | 0.33 | | | | |
+
+\* 1 V on the 60 V range at FAST: the noise is above 0.1 %.
+\*\* No code on this path changed (autorange settles and the vet are as
+before): at MED / SLOW the steady OSR is 32768 (400 ms per conversion), and
+the input step lands at another point of the conversion running then,
+because the earlier windows' shorter settles moved the conversion phase.
+Up and down moved by ~0.2 s in opposite directions; FAST (100 ms
+conversions) shows no such shift. The same 0.59 / 0.20 appear with
+proposals 1-4 alone (bisect build).
+
+Device: not measured yet (the coordinator's settle.py at 1 V on f0d21eb is
+the baseline); retest steps in TODO.md "Switch latency".
