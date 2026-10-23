@@ -2330,8 +2330,26 @@ impl App {
             }
             self.wake_gate = None;
         }
+        // A toast is not modal (owner's decision after device check ceb5ca5:
+        // the "AC voltage here: use AC V?" hint took the first V tap): a touch
+        // on its box is for the toast (a tap there dismisses it); any other
+        // touch, swipe or side key dismisses it and goes on to the page.
+        if matches!(self.overlay, Some(crate::dialog::Overlay::Toast { .. })) {
+            let at = match g {
+                Gesture::Down(p) | Gesture::Tap(p) | Gesture::LongPress(p) | Gesture::Grab(p) | Gesture::Up(p) => Some(p),
+                Gesture::Drag(s, _, _) | Gesture::Move(s, _) => Some(s),
+                _ => None,
+            };
+            if at.is_some_and(|p| crate::dialog::toast_hit(p.x, p.y)) {
+                if matches!(g, Gesture::Tap(_)) {
+                    self.overlay_close();
+                }
+                return false;
+            }
+            self.overlay_close();
+        }
         // A modal overlay takes every gesture: the confirm's buttons, any side
-        // key cancels it; a toast just goes.
+        // key cancels it.
         if let Some(o) = self.overlay {
             match (o, g) {
                 (crate::dialog::Overlay::PowerOff { .. }, Gesture::Tap(p)) => match crate::dialog::power_off_hit(p.x, p.y) {
@@ -2404,8 +2422,7 @@ impl App {
                     self.func_changed();
                     self.overlay_close();
                 }
-                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. } | crate::dialog::Overlay::PowJob { .. }, Gesture::KeyDown(_))
-                | (crate::dialog::Overlay::Toast { .. }, Gesture::Tap(_) | Gesture::KeyDown(_)) => {
+                (crate::dialog::Overlay::PowerOff { .. } | crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. } | crate::dialog::Overlay::PowJob { .. }, Gesture::KeyDown(_)) => {
                     self.overlay_close()
                 }
                 _ => {}
