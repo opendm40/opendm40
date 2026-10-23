@@ -78,7 +78,7 @@ pub const CONFIRM_MS: u32 = 500;
 /// reset / clock failure without 60 s of healthy main loop in between).
 pub const CRASH_MAX: u32 = 2;
 /// Main-loop time after which `mark_healthy` clears the crash counter.
-#[allow(dead_code)] // until main.rs calls mark_healthy
+// (60 s of RUNNING main loop since this boot, not 60 s between two resets)
 pub const HEALTHY_MS: u64 = 60_000;
 /// A release shorter than this is contact bounce, not a release.
 const RELEASE_DEBOUNCE_MS: u32 = 30;
@@ -566,7 +566,7 @@ static mut HEALTHY: bool = false;
 /// Call from the main loop every iteration with the uptime in ms: after
 /// HEALTHY_MS of running it clears the crash counter once, so a later single
 /// hang counts as a first crash again (one reboot, not recovery).
-#[allow(dead_code)] // call site: main.rs main loop, see docs/native-boot.md
+// Call site: main.rs main loop (`now` = ms since main started, after pre_main).
 pub fn mark_healthy(now_ms: u64) {
     if now_ms >= HEALTHY_MS && !unsafe { HEALTHY } {
         unsafe { HEALTHY = true };

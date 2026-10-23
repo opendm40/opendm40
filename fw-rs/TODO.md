@@ -25,7 +25,8 @@ Device needed (in this order):
    same row, only SYST:RAIL AUTO <-> BOTH: +9.3 mV (+0.195 %) at 40 Hz, +14.1 mV at 400 Hz, DC 0 / 5 V +-0.03 mV;
    needs edges, grows with the edge rate: the powered scope front end loads / couples into V / COM. No firmware
    fix; AUTO (default) keeps the scope rail off on the DMM page.
-3. T3 recovery triggers on the native image (power-key hold, DBG:RELEASE x2), scope stack high-water.
+3. T3 recovery triggers on the native image (power-key hold, DBG:RELEASE x2; emulator-checked, owner steps in
+   docs/native-boot.md "T3 recovery triggers: owner steps"), scope stack high-water.
 4. DBG:PROF? numbers: scope drag freeze (touch -> frame), DMM redraw time.
 5. Pinch on the device, two-finger report rate / stability first (DBG:TOUCH?).
 6. UF-02 cold-junction self-heating vs stock; UF-19 battery draw vs stock.
@@ -190,8 +191,17 @@ Code work (in this order):
         disk + DBG:UPDATE -> loader installed patched stock (marker = its header, memrw answers).
         The loader (not the stock app) deletes the installed dm40*.bin (340faca) -> the running
         firmware's update file is regenerated from flash as a backup on the disk (db679a3).
-  - [ ] T3 remaining: recovery triggers on native (power-key 4 s hold + beep + 0.5 s confirm; DBG:RELEASE
-        twice within 60 s -> recovery); scope view stack high-water; first-boot timing.
+  - [x] T3 recovery triggers in the emulator (emu/recoverytest.py, ROM -> FS-loader -> fw-rs with the real
+        loader; FWDGT + sticky RCU_RSTSCK flags modelled in emu/peripherals/FWDGT.cs): normal boot, short
+        power-on press, key held to the beep and released in the 0.5 s window (normal), key held from off
+        7 s (marker zeroed -> loader "open file error / Update" screen at shim + 4.8 s), one hang (reboot,
+        crash word 0x43520001), a second hang 10 s / 50 s of main loop after the reboot (recovery, the
+        second one = resets 70 s apart), a second hang after > 60 s of main loop (reboot only), and
+        DBG:RELEASE twice over USB (WDT_RETRY, then recovery). All PASS on 1372e957 (= fb6be06's image); no
+        shim bug found. The 60 s window is 60 s of RUNNING main loop since the last boot, not 60 s between
+        resets (README wording fixed).
+  - [ ] T3 remaining on the device: the same triggers by hand (owner steps in docs/native-boot.md
+        "T3 recovery triggers: owner steps"); scope view stack high-water; first-boot timing.
   - [x] Native bugs seen: boots into AC+DC mV (persisted-mode mapping after the persist v3 change?);
         trend chart plots the separate AC/DC phases; AC part 40 mV on a DC calibrator input (AC zero?).
         (f4dc59d; verify on device)

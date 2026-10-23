@@ -995,8 +995,14 @@ H3, M1, M4, M5, L1, L3, L6).*
   ```rust
   #[cfg(feature = "native")] boot::mark_healthy(now);
   ```
-  Until it is added, the counter is cleared only on recovery entry. Two hangs
-  in a row, at any distance, then take recovery.
+  It is in place (`main.rs`, `boot::mark_healthy(now)` at the top of the
+  loop). `now` counts from the start of `main` (after `pre_main`), so the
+  window is **60 s of running main loop since the last boot**, not 60 s
+  between two resets: a watchdog reset comes ~20 s after the hang, so two
+  resets up to ~80 s apart (minus the boot time) still take recovery, and
+  with DBG:RELEASE (the loop keeps running, unfed) the clear can also land
+  inside the 20 s. Emulator-checked by `emu/recoverytest.py` (wdt-two,
+  wdt-two-70, wdt-healthy).
 - **Clock failure:** handled the same way. The first one retries the boot with
   a SYSRESETREQ, which redoes the ROM/loader clock set-up. Only a repeat takes
   recovery.
@@ -2018,7 +2024,7 @@ else /16 for this boot because `DIFF1`/`DIFF2` (a /4 read differed),
   - **B1** (stack overflow in `native::normal`) and **H1** (fatren premise)
     are in `native.rs`/`fatren.rs`.
   - The `scpi.rs` DBG help text is in `scpi.rs`.
-  - The `mark_healthy` call site goes in `main.rs` (see "Crash counter").
+  - The `mark_healthy` call site is in `main.rs` (see "Crash counter").
 - **Not done:**
   - **L2** (FWDGT: wait for PUD/RUD after the PSC/RLD writes, in `wdt.rs`) is
     not in this change set. It is harmless: the first period may be up to
@@ -2166,7 +2172,7 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
      `DBG:BOOT?` shows `WDT_RETRY` and crash word `0x43520001`.
    - `DBG:RELEASE` again within 60 s of that boot: the WDT reset now goes to
      recovery, and the loader screen appears. Reinstall as in step 4.
-   - With the `mark_healthy` call in place: 60 s after a boot, `DBG:BOOT?`
+   - `mark_healthy`: 60 s after a boot, `DBG:BOOT?`
      shows `HEALTHY` and crash word `0x43520000`.
 6. **`DBG:RECOVER`:** the loader screen appears immediately. Reinstall.
 7. **Back to patched stock from recovery:** on the loader's disk, copy
@@ -2177,6 +2183,55 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
    1. Under stock, cause an FWDGT reset without a power cycle.
    2. Reinstall fw-rs through the loader.
    3. Expect a normal boot: `WDT_STALE`, or `NONE`, never recovery.
+
+### T3 recovery triggers: owner steps (2026-10-24)
+
+What the shim does, checked in the emulator with the real ROM and FS-loader
+(`emu/recoverytest.py`, all PASS on image sha256 `1372e957…`, built from
+fb6be06; the docs-only changes since build the same bytes):
+
+- **Key:** fw-rs is entered ~0.7 s after power-on (emulator; ROM + loader).
+  The shim lights the backlight at once, waits up to 4 s with the key held,
+  then blinks the backlight + beeps (~0.3 s), then needs 0.5 s more. Full
+  gesture ≈ 5.5 s from power-on. Released earlier, or within the 0.5 s after
+  the beep: normal boot.
+- **Watchdog:** one hang (or DBG:RELEASE) = a reboot ~20 s later
+  (`WDT_RETRY`, crash word `0x43520001`). A second one before fw-rs has run
+  60 s (main loop) since that reboot = recovery. After 60 s of running the
+  count is cleared (`HEALTHY`, `0x43520000`), so a later hang only reboots.
+- **Recovery** = the 12 marker bytes at `0x08008000` zeroed, then a SW reset:
+  the loader's "open file error / Update" screen with its USB disk (the SPI
+  disk), on every power-on until a good file is installed.
+- Stored in backup SRAM (`0x40024FF0` crash count, `FF4` last trigger, `FFC`
+  previous mode). It survives resets, not necessarily a power-off without
+  battery.
+
+Before: fw-rs running, USB connected; on the PC a copy of the installed image
+(`fw-rs/dm40-fw-native.bin` of the installed build, or `INFO/FIRMWARE.BIN`
+from the fw-rs USB drive) to reinstall after each recovery. Reinstall: copy
+it onto the loader's USB disk as `dm40_fwrs.bin` (the only `dm40*.bin`),
+`sync`, eject, press "Update".
+
+1. **Short press (normal start).** Power off. Press the power key ~0.5 s.
+   Expect the backlight at once, fw-rs normally.
+   `tools/dm40dbg.py boot`: `NORMAL`, reason `NONE`, `hold_ms` < 1000.
+2. **Abort.** Power off. Hold the key; ~4.7 s after power-on the backlight blinks and it
+   beeps; let go right at the beep (within 0.5 s). Expect fw-rs normally;
+   `boot`: `KEY_HOLD_ABORTED`, `hold_ms` 4000..4500.
+3. **Key recovery.** Power off. Hold the key ~7 s (until well after the
+   beep), let go. Expect the loader's "open file error / Update" screen and
+   its USB disk. Reinstall fw-rs. `boot`: `last` = `0x52564352` (RCVR),
+   `last_trigger` `0x54520010`, marker `VALID`.
+4. **One hang.** `tools/dm40dbg.py release`. ~20 s later fw-rs reboots.
+   `boot`: `WDT_RETRY`, crash word `0x43520001`, `-` (not yet healthy).
+5. **Healthy clear.** Wait 70 s, then `boot`: `HEALTHY`, `0x43520000`.
+   `release` again: reboot, `WDT_RETRY`, `0x43520001` (no recovery).
+6. **Two hangs.** Right after step 5's reboot (within ~30 s of it),
+   `release` once more. ~20 s later: the loader's update screen. Reinstall.
+   `boot`: `last` = RCVR, `last_trigger` `0x54520010`, crash `0x43520000`.
+7. Note anything that differs, especially the time from power-on to the
+   beep in step 2/3 (emulator ≈ 4.7 s) and whether the loader screen in step
+   3 comes up while the key is still held.
 
 ## Developer workflow
 
