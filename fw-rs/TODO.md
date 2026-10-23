@@ -2118,9 +2118,24 @@ Emulator (emu/):
       an internal zero's only when it shows that zero biased beyond the noise (60 V yes, 6 V no); pairing with the
       session's farthest reference point. Model "lpfcreep:" (two 2.5 s lags, 2.4e-4 of a step) + LPF noise;
       acdcmethtest --e8 tc6: 27b1a68 -0.75 mV at 0.1 V (+177 ppm), e905ef5 +0.07 mV. **Device retest: §10.13.**
-- [ ] Device retest of §10.12 (§10.13): e8up first after the install, e8s x 4 after `dm40dbg.py reset` (6 V 0 V
+- [x] Device retest of §10.12 (§10.13): e8up first after the install, e8s x 4 after `dm40dbg.py reset` (6 V 0 V
       within 0.5 mV in all four; gsrc 1 on 6 V), e8, e5; optionally tc6 (is the device's tail the model's?), e8l,
       e11 / e10 / e9. Then the owner decides on C as the default.
+      f42a09e: 3 of 4 (one false "biased" judgement of 6 V's internal zero). Data (§10.14, device-check doc
+      "acdc-bias"): every 6 V gdis beyond 1 code positive (the LPF creep's lag; 3 V level +3.9..+13.0, 10 of 10),
+      every 60 V one negative (12 of 12). The suggested options (same sign over 2 references, repeat, noise
+      scaling) fail on that data. Fixed (d0baca5, b94bfb8): a creep allowance of 4e-4 x the step on the
+      lag side only. Emulator: three cascaded lags reproduce the false judgement on 6d488dc (7c0de2d).
+      **Device d0baca5 full set + b94bfb8 confirmation (§10.15): PASS**: 6 V 0 V -0.34..+0.09 mV in 9 of 9
+      e8s, gsrc 1 throughout on 6 V, 60 V gsrc 3 every session; e8up, e8, e5, e11, e10, e9 pass. C meets the
+      decision rule; A stays the default (owner, next item).
+- [ ] Make method C the AC+DC default, after a device check of C on the A / mA / µA ranges with real current
+      (owner, 2026-10-23). Plan: acdc-approaches.md §10.16 (i8 / i8up e8-style levels per range, imix DC + 50 Hz
+      AC, iauto CURR:COUP AUTO, ie5 drift; bench supply + load, a second meter in series as the reference; an
+      acdcmeth.py variant driving the supply and the second meter).
+- [ ] C's lag-side creep allowance (CREEP_K 4e-4): the largest lag-side gdis on the device is +16.2 codes
+      against a threshold of 24.6 (b94bfb8). Watch it in later e8s logs (STAT? gdis / bthr); and why the 1 V
+      level's lag is ~1/3 of the 3 V level's at the same step is open (§10.14).
 - [ ] C's second reference now comes ~5-8 s after a level change (was ~1.5 s): e8s's 4 s levels may end before
       it. If the device tail is shorter than the model's, lower SLOPE_MIN (48 results) after the tc6 trace.
 - [x] The first V tap after `CONF:VOLT:DC` on the 40 Hz square is sometimes lost (C 5 of 6, A 1 of 3; not at 1 V
