@@ -75,6 +75,15 @@ pub trait BlockDevice {
     fn write_error(&self) -> u8 {
         0
     }
+    /// Blocks `lba .. lba + n` cannot be read now, but can later: the READ
+    /// fails with NOT READY, BECOMING READY (02/04/01) before its data phase
+    /// (or at the first such block of a transfer in progress) and the host
+    /// retries it (vdisk.rs: the sectors served from the slow flash bank
+    /// while the AD2 stream ISR runs).
+    fn read_busy(&self, lba: u32, n: u32) -> bool {
+        let _ = (lba, n);
+        false
+    }
     /// `write_block` spread over several calls, for a caller that must not
     /// stall the main loop (screenshot.rs). Call again with the same `lba`,
     /// `buf` and `st` (starting from `Step::default()`) until it returns
@@ -137,10 +146,10 @@ const SENSE_MEDIUM_ERROR: Sense = Sense(0x03, 0x11, 0x00);
 /// MEDIUM ERROR, WRITE ERROR (a failed block write).
 const SENSE_WRITE_ERROR: Sense = Sense(0x03, 0x0C, 0x00);
 /// NOT READY, LOGICAL UNIT IS IN PROCESS OF BECOMING READY (writes
-/// inhibited). ASCQ 01, not 00 ("cause not reportable"): Linux
-/// (scsi_io_completion_action) delays and retries 04/01 but fails 04/00 at
-/// once, i.e. a host write during a screenshot would get EIO (review 258c833
-/// M1).
+/// inhibited; READs of `BlockDevice::read_busy` blocks). ASCQ 01, not 00
+/// ("cause not reportable"): Linux (scsi_io_completion_action) delays and
+/// retries 04/01 but fails 04/00 at once, i.e. a host write during a
+/// screenshot would get EIO (review 258c833 M1).
 const SENSE_BECOMING_READY: Sense = Sense(0x02, 0x04, 0x01);
 /// UNIT ATTENTION, NOT READY TO READY CHANGE, MEDIUM MAY HAVE CHANGED: the
 /// firmware itself wrote the disk (screenshot.rs), the host must re-read it.
@@ -450,10 +459,23 @@ fn handle<B: UsbBus>(
                     cmd.fail(0);
                     return Ok(());
                 }
+                if dev.read_busy(lba, len as u32) {
+                    *sense = SENSE_BECOMING_READY;
+                    cmd.fail(0);
+                    return Ok(());
+                }
                 *xfer = Xfer::Read { lba, left: len as u32, off: 0, done: 0 };
             }
             if let Xfer::Read { lba, left, off, done } = *xfer {
                 let mut off = off;
+                // Became busy during the transfer (a stream started): the
+                // command fails here, the host retries all of it.
+                if off == 0 && dev.read_busy(lba, 1) {
+                    *xfer = Xfer::None;
+                    *sense = SENSE_BECOMING_READY;
+                    cmd.fail(done);
+                    return Ok(());
+                }
                 if off == 0 && !dev.read_block(lba, &mut blk[..bs as usize]) {
                     *xfer = Xfer::None;
                     *sense = SENSE_MEDIUM_ERROR;

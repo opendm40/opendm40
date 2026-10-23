@@ -175,7 +175,27 @@ struct State {
     /// DEBUG/SPIFLASH.BIN's first cluster, and the first dynamic cluster.
     spi_start: u32,
     dyn0: u32,
+    /// LBA ranges [lo, hi) of the INFO/ sectors served from the slow flash
+    /// bank (`SLOW_LO`..): refused while the AD2 stream runs (`read_busy`).
+    slow: [(u32, u32); NF],
 }
+
+/// Internal flash from here to the end of its 1 MiB is NOT zero-wait
+/// (link-native.x region C, the FS-loader, its UID data, the calibration
+/// record): one CPU load from it stalls the bus ~21.8 us, and the AD2
+/// stream ISR's entry with it, whatever code does the load (device b6909d6:
+/// INFO/CALIB.BIN, BOOTDATA.BIN, LOADER.BIN and the FIRMWARE.BIN tail copied
+/// by a host during a 38400 disk session: 10 k samples lost, at 76800 289 k).
+/// The volume therefore never reads it while the stream ISR owns the bus
+/// (hy3131::streaming: fast-log session, Wave view, inrush page, the AD1
+/// stream): a READ(10) touching those sectors gets NOT READY, BECOMING READY
+/// (02/04/01, msc.rs) and the host retries until the stream ends. Linux
+/// (sd / scsi_lib: delayed retries up to (retries + 1) x timeout = 6 x 30 s
+/// after the request was made) gives the reader an I/O error only when the
+/// stream outlasts that; the emulator's data watch (emu/regionc.py,
+/// peripherals/FlashWatch.cs) checks that nothing else reads it either.
+pub(crate) const SLOW_LO: u32 = 0x0808_0000;
+const SLOW_HI: u32 = 0x0810_0000;
 
 /// One generated file of LOGS / SCOPE / SHOTS. `id` = flags | kind << 10 |
 /// number (kind + number = the name, `ID`; flags `T_*`: a host delete in
@@ -299,7 +319,7 @@ pub fn init(mem: fn(u32, &mut [u8]), flash: &'static [u8]) {
     }
     let mut uid = [0u8; 12];
     mem(UID_ADDR, &mut uid);
-    let mut st = State { files, n, fw, mem, uid, spi_start: 0, dyn0: 0 };
+    let mut st = State { files, n, fw, mem, uid, spi_start: 0, dyn0: 0, slow: [(0, 0); NF] };
     // The text's length does not depend on the CRC values (fixed width).
     st.files[txt].size = describe(&st, 0, &mut []) as u32;
     let mut c = C_FILES;
@@ -310,6 +330,20 @@ pub fn init(mem: fn(u32, &mut [u8]), flash: &'static [u8]) {
     }
     st.spi_start = c;
     st.dyn0 = c + SPI_BYTES / CB;
+    // The slow sectors: from the one holding the first byte at SLOW_LO (the
+    // update file is encoded per 128-byte block, inside one 512-byte
+    // sector) to the file's end.
+    for (f, sl) in st.files.iter().take(n).zip(st.slow.iter_mut()) {
+        let off = match f.kind {
+            Kind::Mem if f.addr < SLOW_HI && f.addr + f.size > SLOW_LO => SLOW_LO.saturating_sub(f.addr),
+            Kind::Fw if f.size > 12 + (SLOW_LO - f.addr) => 12 + (SLOW_LO - f.addr),
+            _ => continue,
+        };
+        if f.start != 0 {
+            let lba0 = DATA_START + (f.start - 2) * SPC;
+            *sl = (lba0 + off / BS as u32, lba0 + f.size.div_ceil(BS as u32));
+        }
+    }
     unsafe {
         (*core::ptr::addr_of_mut!(STATE)).write(st);
         (*core::ptr::addr_of_mut!(TAB)).write(Tab { e: [VF0; MAX_VF], n: 0, hw: 0, slot_hw: [2; 3], want_compact: false, left_out: 0 });
@@ -756,6 +790,19 @@ fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
 
 // --- the block device --------------------------------------------------------------
 
+/// Sectors `lba .. lba + n` include one served from the slow flash bank
+/// (`SLOW_LO`).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+fn slow_overlap(st: &State, lba: u32, n: u32) -> bool {
+    st.slow.iter().any(|&(lo, hi)| lba < hi && lba.saturating_add(n) > lo)
+}
+
+/// The LBA ranges `read_busy` refuses while the stream runs (host test).
+#[allow(dead_code)]
+pub(crate) fn slow_ranges() -> [(u32, u32); NF] {
+    state().map_or([(0, 0); NF], |st| st.slow)
+}
+
 /// The USB block device (a handle; the volume itself is `STATE` / `TAB`).
 pub struct VDisk;
 
@@ -809,6 +856,10 @@ impl BlockDevice for VDisk {
             return false;
         }
         crate::vwrite::write(lba, &buf[..BS])
+    }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+    fn read_busy(&self, lba: u32, n: u32) -> bool {
+        crate::hy3131::streaming() && state().is_some_and(|st| slow_overlap(st, lba, n))
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn take_media_changed(&mut self) -> bool {
@@ -1191,7 +1242,10 @@ fn describe(st: &State, base: usize, out: &mut [u8]) -> usize {
     w.s(b" from the\r\nMCU memory, read-only. Raw copies of internal flash / chip data;\r\n");
     w.s(b"CRC-32 as zlib, 7-Zip, crc32.\r\n\r\n");
     w.s(b"file         address     bytes  crc32");
-    for f in &st.files[..st.n] {
+    // `fixed`, not a slice index: the outlined <[VFile; 9] as Index>::index
+    // landed in region C (`.text.*vdisk*`) and ran on this read path while
+    // a stream ran (emu/regionc.py, 2026-10-23).
+    for f in fixed(st) {
         w.s(b"\r\n");
         w.name(&f.name);
         if f.kind == Kind::Txt {

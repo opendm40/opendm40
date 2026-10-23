@@ -73,7 +73,7 @@ fn save(path: &str, d: &[u8]) {
 
 #[allow(dead_code)]
 mod msc {
-    /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 8 methods,
+    /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 9 methods,
     /// write_step with its default = the whole write at once).
     pub trait BlockDevice {
         fn present(&self) -> bool;
@@ -98,6 +98,10 @@ mod msc {
         }
         fn write_error(&self) -> u8 {
             0
+        }
+        fn read_busy(&self, lba: u32, n: u32) -> bool {
+            let _ = (lba, n);
+            false
         }
         fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
             let _ = st;
@@ -126,6 +130,15 @@ mod msc {
     pub static HOST_MOUNTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     pub fn host_mounted() -> bool {
         HOST_MOUNTED.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// The AD2 stream ISR owns the bus (fw-rs hy3131::streaming, the HANDED
+/// flag): vdisk.rs `read_busy` refuses the slow-bank sectors then.
+mod hy3131 {
+    pub static STREAMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    pub fn streaming() -> bool {
+        STREAMING.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -328,6 +341,21 @@ fn vdisk_dump(a: &[String]) {
     vwrite::on_bus_reset();
     let wr = d.write_block(0, &b);
     println!("vdisk sectors={} bs={} read_only={} write_ro={} rw={} write_block={} read_past_end={}", d.block_count(), d.block_size(), ro, wr_ro, !d.read_only(), wr, past);
+    // read_busy: nothing while no stream runs; with one, exactly the
+    // slow-bank ranges (each edge, and a 64-sector READ across the start).
+    let ranges: Vec<(u32, u32)> = vdisk::slow_ranges().into_iter().filter(|r| r.1 > r.0).collect();
+    let idle = ranges.iter().all(|&(lo, hi)| !d.read_busy(lo, hi - lo)) && !d.read_busy(0, d.block_count());
+    hy3131::STREAMING.store(true, Relaxed);
+    let inside = |x: u32| ranges.iter().any(|&(lo, hi)| x >= lo && x < hi);
+    let edges = ranges.iter().all(|&(lo, hi)| {
+        [lo - 1, lo, hi - 1, hi].iter().all(|&x| d.read_busy(x, 1) == inside(x))
+            && d.read_busy(lo - 1, 2)
+            && d.read_busy(lo - 63, 64)
+            && d.read_busy(lo - 64, 64) == (lo - 64..lo).any(inside)
+    });
+    let s: Vec<String> = ranges.iter().map(|r| format!("{}-{}", r.0, r.1)).collect();
+    println!("slow={} idle_none={} streaming_edges={}", s.join(","), idle, edges);
+    hy3131::STREAMING.store(false, Relaxed);
     vdisk_write(&mut d, &a[1]);
     let (mut k, mut step) = (7, 0);
     while k < a.len() {

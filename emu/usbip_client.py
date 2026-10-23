@@ -444,7 +444,14 @@ class Msc:
             out = out.ljust(data_len, b'\0')
             for o in range(0, data_len, 64):
                 self.d.bulk_out(self.ep_out, out[o:o + 64])
-        csw = self.d.bulk_in(self.ep_in, 13)
+        if direction == DIR_IN and len(data) == 13 and data[:4] == b'USBS' and struct.unpack_from('<I', data, 4)[0] == self.tag:
+            # The device failed the command before its data phase and sent
+            # the CSW at once (usbd-storage `fail(0)`, e.g. NOT READY):
+            # Linux usb-storage takes it the same way ("Device skipped data
+            # phase").
+            csw, data = data, b''
+        else:
+            csw = self.d.bulk_in(self.ep_in, 13)
         sig, rtag, residue, status = struct.unpack('<4sIIB', csw)
         if sig != b'USBS' or rtag != self.tag:
             raise IOError('bad CSW %s for %s' % (csw.hex(), cb.hex()))

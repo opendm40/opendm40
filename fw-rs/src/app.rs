@@ -855,14 +855,15 @@ impl App {
                 // in internal flash (same source as the BT cmd-02 version reply,
                 // bt.rs): +0x10 HW major, +0x11/+0x12 bootloader major/minor.
                 // The byte->field mapping is inferred from bt.rs + README, not a
-                // traced read of the stock Device page.
-                const BOOT_DATA: u32 = 0x080A_4000;
-                let bd = |o: u32| unsafe { core::ptr::read_volatile((BOOT_DATA + o) as *const u8) };
+                // traced read of the stock Device page. The copy made at
+                // start-up (bt::boot_ver): 0x080A4000 is in the slow flash
+                // bank, and a fast-log session may stream meanwhile.
+                let bd = crate::bt::boot_ver();
                 let mut hwb = [0u8; 16];
                 // The boot data has only a HW major: no invented ".0" minor.
-                let hw = fmt_ver(&mut hwb, bd(0x10), None);
+                let hw = fmt_ver(&mut hwb, bd[0], None);
                 let mut blb = [0u8; 16];
-                let bl = fmt_ver(&mut blb, bd(0x11), Some(bd(0x12)));
+                let bl = fmt_ver(&mut blb, bd[1], Some(bd[2]));
                 // fw-rs firmware version (NOT the stock "Software V2.6").
                 let mut fwb = [0u8; 32];
                 let pre = b"fw-rs ";

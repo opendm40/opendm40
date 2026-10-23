@@ -436,6 +436,43 @@ vdisk() {
     grep -q "present_before_init=false" $W/vd.out && grep -q "media_changed_after_init=false" $W/vd.out || { echo "FAIL: init"; exit 1; }
     grep -q "read_only=true write_ro=false rw=true write_block=false read_past_end=false" $W/vd.out && echo "ok: read-only by default (a write refused); writable: a zeroed boot sector refused; nothing past the end" || { echo "FAIL: write_block"; exit 1; }
 }
+# vdslow <img>: vdisk.rs `read_busy` (main.rs vdisk_dump "slow=" line of the
+# last vdisk run) refuses, while a stream runs, exactly the sectors of the
+# INFO/ files served from flash >= 0x08080000: CALIB, BOOTDATA, LOADER whole,
+# FIRMWARE.BIN from the sector holding file offset 12 + 0x7C000 (body
+# 0x08080000); nothing while no stream runs.
+vdslow() {
+    python3 -I - $1 $W/vd.out <<'PY' || { echo "FAIL: read_busy ranges"; exit 1; }
+import re, subprocess, sys
+img, out = sys.argv[1:]
+line = [l for l in open(out) if l.startswith('slow=')][-1]
+m = re.match(r'slow=(\S*) idle_none=(\w+) streaming_edges=(\w+)', line)
+got = sorted(tuple(map(int, r.split('-'))) for r in m.group(1).split(',') if r)
+assert m.group(2) == 'true' and m.group(3) == 'true', line
+d = open(img, 'rb').read(512)
+spc, rsvd, nf, rootn = d[13], int.from_bytes(d[14:16], 'little'), d[16], int.from_bytes(d[17:19], 'little')
+fsz = int.from_bytes(d[22:24], 'little')
+data = rsvd + nf * fsz + rootn * 32 // 512
+want = []
+ls = subprocess.run(['mdir', '-a', '-i', img, '::INFO'], capture_output=True, text=True).stdout
+for name, off in (('CALIB', 0), ('BOOTDATA', 0), ('LOADER', 0), ('FIRMWARE', 12 + 0x7C000)):
+    if not re.search(r'^%s +BIN' % name, ls, re.M):
+        continue
+    f = open(img, 'rb')
+    # The directory entry: start cluster + size (INFO/ = cluster 2).
+    f.seek(data * 512)
+    blk = f.read(spc * 512)
+    for k in range(0, len(blk), 32):
+        e = blk[k:k + 32]
+        if e[:11] == name.ljust(8).encode() + b'BIN':
+            c, size = int.from_bytes(e[26:28], 'little'), int.from_bytes(e[28:32], 'little')
+            lba0 = data + (c - 2) * spc
+            if size > off:
+                want.append((lba0 + off // 512, lba0 + (size + 511) // 512))
+assert got == sorted(want), (got, sorted(want))
+print('ok: read_busy: none without a stream; with one exactly %s (CALIB / BOOTDATA / LOADER whole, the FIRMWARE.BIN tail)' % got)
+PY
+}
 # vdok <img> <flash1m>: fsck clean, label, geometry, every region file equal
 # to its source, BACKUP.TXT CRC-32s, read-only attributes.
 vdok() {
@@ -486,11 +523,13 @@ for k in stock native t; do mkflash1m $W/flash_$k $W/f1m_$k; done
 VD=$W/vd.img
 vdisk $W/f1m_native $VD
 vdok $VD $W/f1m_native
+vdslow $VD
 mcopy -n -i $VD ::INFO/FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $NATIVE
 mtype -i $VD ::INFO/BACKUP.TXT
 [ $(grep -c " BIN\| TXT" $W/vdir) = 9 ] && echo "ok: INFO/: 9 files" || { echo "FAIL at line $LINENO"; exit 1; }
 vdisk $W/f1m_stock $VD
 vdok $VD $W/f1m_stock
+vdslow $VD
 mcopy -n -i $VD ::INFO/FIRMWARE.BIN $W/fw.bin && fwok $W/fw.bin $STOCK
 vdisk $W/f1m_t $VD
 vdok $VD $W/f1m_t
@@ -499,6 +538,7 @@ echo "--- no valid loader record: no FIRMWARE.BIN"
 mkflash1m none $W/f1m_none
 vdisk $W/f1m_none $VD
 vdok $VD $W/f1m_none
+vdslow $VD
 mdir -i $VD ::INFO/FIRMWARE.BIN >/dev/null 2>&1 && { echo "FAIL at line $LINENO: FIRMWARE.BIN"; exit 1; }
 mtype -i $VD ::INFO/BACKUP.TXT | grep -q "no FIRMWARE.BIN (no valid loader record" && echo "ok: none, BACKUP.TXT says why" || { echo "FAIL at line $LINENO"; exit 1; }
 echo "--- short last 128-byte block: padded images give whole blocks; a hazardous one gives no FIRMWARE.BIN"
