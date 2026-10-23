@@ -1664,11 +1664,22 @@ impl Scpi {
                     None => self.err = Some("Command error"),
                 },
                 // [SENSe:]<f>:RANGe / RANGe:AUTO / RESolution (fw-rs).
-                _ if parts.len() > 1 && range_cmd(parts, arg, query).is_some() => match range_cmd(parts, arg, query) {
-                    Some(Ok(c)) => out = Out::Instr(c),
-                    Some(Err(e)) => self.err = Some(e),
-                    None => {}
-                },
+                // range_cmd is .cold (region C): only for a header that names
+                // RANGe / RESolution. Every other header below (LOG:DATA?,
+                // LOG:DISK?, DBG:ISR?, MMEM...) reached it, and a fetch from C
+                // while the AD2 stream runs delays the ISR (device 4c4b489:
+                // max_lat 1.6-20 us at range_cmd's entry, overruns / slips,
+                // one 76800 writer trial fell back).
+                _ if parts.len() > 1
+                    && parts[1..].iter().any(|p| kw(p, "RANGe") || kw(p, "RESolution"))
+                    && range_cmd(parts, arg, query).is_some() =>
+                {
+                    match range_cmd(parts, arg, query) {
+                        Some(Ok(c)) => out = Out::Instr(c),
+                        Some(Err(e)) => self.err = Some(e),
+                        None => {}
+                    }
+                }
                 (b"READ", true) => out = Out::Measure(None),
                 _ if kw(p0, "SOURce") || kw(p0, "OUTPut") => {
                     let a = trim(arg);
