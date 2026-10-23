@@ -2200,6 +2200,10 @@ Emulator (emu/):
       overflows, the record restarts), the inrush page's LOG:CSV ON refusal (inrushtest).
 - [x] AUTO OVERLOAD on AC 1 A (1bffde2, couptest iac repro): blocked, the A jack is not wired.
       Fixed in 1152624 with the 2026-10-22 BUG (quiet hop in AUTO); the device check is in the list below.
+- [ ] powtest `ereset` FAILs on 0100788, 70572bb, 4a734d1 + dmm-bugs alike, also run alone (the Yes tap
+      at 310,204 at 21 s, 13 s after the long press, does not reset the energy: Wh keeps counting; it passed
+      at f42a09e per the device-check doc). Not from dmm-bugs; not investigated. (`acdc-floor` failed once in
+      the 20-emulator parallel run and passes alone, as noted at f42a09e.)
 - [ ] Device retest "dmm-bugs" (1152624; most need a current in the A jack: a current-limited bench
       supply + load or the calibrator's current output; the meter here has the A jack open):
       1. A AUTO coupling (CURR:COUP AUTO), AC 1 A @ 50 Hz: SYST:ALER? NONE throughout, CONF? 6 A range
