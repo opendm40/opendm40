@@ -357,6 +357,7 @@ impl<'a> FwFile<'a> {
     }
 
     /// Decoded (plain) file byte `p`.
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn plain(&self, p: usize) -> u8 {
         if p < 12 {
             self.hdr[p]
@@ -372,6 +373,11 @@ impl Source for FwFile<'_> {
     fn size(&self) -> u32 {
         12 + self.body.len() as u32
     }
+    /// The USB volume's per-sector read of INFO/FIRMWARE.BIN (vdisk.rs):
+    /// region B with the rest of that path (`.text.vdisk_rd`), as a host
+    /// may read it during a fast-log session or the Wave view (device
+    /// 4c4b489: max_lat 4.66 us here while it was region C).
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn fill(&self, off: u32, buf: &mut [u8]) {
         let size = self.size() as usize;
         let (start, end) = (off as usize, off as usize + buf.len());

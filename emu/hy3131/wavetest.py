@@ -33,7 +33,11 @@ path is AC-coupled in AC V like the meter). Checks:
     then a host reading SCOPE/SCOPnnn.CSV and LOGS/LOGnnn.CSV off the USB
     volume and MMEM:DATA? of their DLGs while the wave view streams: no C
     function but the Save CSV tap's own handler; the stream runs again
-    after the save. --no-region-c: without the hooks.
+    after the save. Also a host polling ACQ:SRAT? / SCOP:MEAS:*? / TRIG:
+    STAT? / WAV:* / CHAN1:* / DBG:PROF? at 2 and 1 ms/div, and the MENU exit
+    at 2 ms/div (no late / overrun, the view changes after the stop); at
+    the end the whole run (emu/regionc.py). --no-region-c: without the hooks.
+  * LOG:CSV ON in the wave view: refused ("Settings conflict: Wave view").
 --shots DIR: PNG screenshots (DBG:LCD?) of each stage for a look.
 Exit status 0 = all passed.
 """
@@ -58,7 +62,8 @@ ap.add_argument('--case', choices=['volt', 'current', 'dcv'], default='volt',
                      'DC-coupled: FREQ? 40 Hz, VAVG? = the DC part, values in A. dcv: 0.2 V DC + 1 V rms '
                      '50 Hz; MF -> Wave from DC V AUTO (DC mV, the AC mV row) clips and autoranges to 6 V '
                      '(the DC-coupled V row, feasibility E7): VAVG? = the DC part; the coupling key '
-                     'switches to AC V (VAVG? ~0) and back; MENU: DC V AUTO again')
+                     'switches to AC V (VAVG? ~0) and back; MENU: DC V AUTO again; the source badge enters '
+                     'again at 2 ms/div: the ring never overflows at a DC V entry')
 A = ap.parse_args()
 if A.case == 'current' and A.dmm == ap.get_default('dmm'):
     A.dmm = 'isrc:0.010,ac=0.02,f=40,shape=square'
@@ -81,47 +86,15 @@ def check(ok, what):
         FAIL.append(what)
 
 
-# Region C hooks (see the docstring): every function symbol in
-# 0x08080000..0x080A0000 of the ELF; a call while the ISR owns the bus
-# (hy3131::HANDED != 0) is counted, the count written at 1, 2, 4, ... to a
-# per-process file.
+# Region C hooks (see the docstring; emu/regionc.py): a call of a function
+# of 0x08080000..0x080A0000 while the ISR owns the bus (hy3131::HANDED != 0)
+# is logged.
 OUT = os.path.join(EMU, 'out')
 os.makedirs(OUT, exist_ok=True)
 TAG = 'wavetest-%d-%d' % (A.port, os.getpid())
-CHITS = os.path.join(OUT, TAG + '.chits')
-CSYMS = {}
-
-
-def c_hooks():
-    import glob
-    nm = sorted(glob.glob(os.path.join(ROOT, 'toolchain/rustup/toolchains/*/lib/rustlib/*/bin/llvm-nm')))
-    if not nm:
-        return None
-    r = subprocess.run([nm[0], '-C', A.app], capture_output=True, text=True)
-    handed = None
-    for l in r.stdout.splitlines():
-        p = l.split(None, 2)
-        if len(p) < 3:
-            continue
-        a = int(p[0], 16)
-        if p[1] in 'tT' and 0x08080000 <= a < 0x080A0000:
-            CSYMS[a & ~1] = p[2]
-        elif p[2].startswith('dm40_fw::hy3131::HANDED'):
-            handed = a
-    if handed is None or not CSYMS:
-        return None
-    # The first call while handed is logged and the hook removed (a Python
-    # hook per call of a busy function slows the emulator to a crawl).
-    code = ("(machine.SystemBus.ReadByte(0x%x)!=0) and (open('%s','a').write('%%x 1'%%pc+chr(10)), self.RemoveHooksAt(pc))"
-            % (handed, CHITS))
-    path = os.path.join(OUT, TAG + '.script')
-    with open(path, 'w') as f:
-        for a in sorted(CSYMS):
-            f.write('1 monitor sysbus.cpu AddHook 0x%08x "%s"\n' % (a, code))
-    return path
-
-
-HOOKS = None if A.no_region_c else c_hooks()
+import regionc  # noqa: E402
+RC = None if A.no_region_c else regionc.Hooks(A.app, OUT, TAG)
+HOOKS = RC and RC.script
 # A private copy of the SPI disk (the test records a CSV and saves a scope
 # record): parallel runs share nothing (port + pid in every name).
 DISK = os.path.join(OUT, TAG + '.disk.bin')
@@ -197,18 +170,8 @@ try:
         return abs(v - want) <= tol * abs(want)
 
     def c_reset():
-        open(CHITS, 'w').close()
-
-    def c_calls():
-        """{function of region C: calls (at least)} while the ISR owned the bus."""
-        got = {}
-        if os.path.exists(CHITS):
-            for l in open(CHITS):
-                p = l.strip('\0').split()
-                if len(p) == 2:
-                    n = CSYMS.get(int(p[0], 16), p[0])
-                    got[n] = max(got.get(n, 0), int(p[1]))
-        return got
+        if HOOKS:
+            RC.reset()
 
     def cat_names():
         return [x.strip('"').split(',')[0] for x in q('MMEM:CAT?').split(',"')[1:]]
@@ -269,10 +232,10 @@ try:
             got += m.read(0, lba(start) + len(got) // 512, k, 512, retries=2)
         return got[:size], want
 
-    def c_check(what, allowed=()):
+    def c_check(what, allowed=(), every=False):
         if not HOOKS:
             return
-        got = c_calls()
+        got = RC.calls(every)
         bad = {k: v for k, v in got.items() if not any(a in k for a in allowed)}
         print('  region C functions called while streaming: %s' % (', '.join(sorted(got)) or 'none'))
         check(not bad, '%s: no region C code while the stream ISR owns the bus%s'
@@ -313,7 +276,11 @@ try:
         q('DBG:TAP 237,259')
         wait_ms(6000)  # entry, the clip, the range step (a self-cal each)
         shot('d01-wave-dcv')
-        check(ints(q('DBG:ISR?'))[1] == 1, 'the stream runs (DC V)')
+        e = ints(q('DBG:ISR?'))
+        check(e[1] == 1, 'the stream runs (DC V)')
+        # Device: `overwritten` +7087 (~185 ms) at a DC V entry (AC V 0).
+        print('  DC V entry: DBG:ISR? overwritten %d, late %d, overruns %d' % (e[6], e[4], e[9]))
+        check(e[6] == 0, 'DC V entry: the view drained the ring from the start (overwritten %d)' % e[6])
         check(q('FUNC?').strip('"').upper() == 'VOLT', 'the DMM stays in DC V (%s)' % q('FUNC?'))
         vd = f('CHAN1:SCAL?')
         check(vd == 2.0, 'autorange on the clip: the 6 V range, 2 V/div (%g)' % vd)
@@ -336,6 +303,8 @@ try:
         avg = f('SCOP:MEAS:VAVG?')
         check(q('FUNC?').strip('"').upper() == 'VOLT' and abs(avg - 0.2) < 0.02,
               'coupling key again: DC V, the mean 0.2 V (%s, %.4f)' % (q('FUNC?'), avg))
+        q('TIM:SCAL 0.002')  # the next entry at 38400 S/s (the ring holds ~50 ms)
+        wait_ms(2000)
         q('DBG:KEY 0')
         wait_ms(3000)
         check(ints(q('DBG:ISR?'))[1] == 0, 'MENU: the stream stopped')
@@ -343,6 +312,20 @@ try:
         conf = q('CONF?')
         print('  after: READ? %.4f CONF? %s' % (v, conf))
         check(abs(v - 0.2) < 0.01, 'DMM resumed in DC V: READ? %.4f' % v)
+        # Entry again from DC V at 2 ms/div (device 5e52761: `overwritten`
+        # +7087, ~185 ms, at a DC V entry; 0 from AC V): MENU steps back to
+        # the MCX scope page, its source badge opens the Wave view.
+        q('DBG:KEY 0')
+        wait_ms(1000)
+        q('DBG:TAP 177,10')
+        wait_ms(6000)
+        e = ints(q('DBG:ISR?'))
+        print('  DC V entry at 2 ms/div: TIM:SCAL? %s, DBG:ISR? rate %d, overwritten %d, late %d, overruns %d'
+              % (q('TIM:SCAL?'), e[12], e[6], e[4], e[9]))
+        check(e[1] == 1 and e[6] == 0, 'DC V entry at 38400: the view drained the ring from the start (overwritten %d)' % e[6])
+        q('DBG:KEY 0')
+        wait_ms(3000)
+        check(ints(q('DBG:ISR?'))[1] == 0, 'MENU: the stream stopped')
 
     print('*IDN?', q('*IDN?'))
     isr0 = ints(q('DBG:ISR?'))
@@ -388,13 +371,25 @@ try:
         if tb in (0.005, 0.05):
             shot('w03-wave-%s' % name)
 
+    POLL = ['ACQ:SRAT?', 'SCOP:MEAS:FREQ?', 'SCOP:MEAS:VPP?', 'TRIG:STAT?', 'WAV:POIN?', 'WAV:FORM?',
+            'CHAN1:OFFS?', 'CHAN1:SCAL?', 'TIM:SCAL?', 'WAV:PRE?', 'WAV:DATA?', 'DBG:PROF?']
     print('fast bands: 2 ms/div = 38400 S/s (DMA /16), 1 ms/div = 76800 S/s (hybrid frames, feasibility 11.12)')
     for tb, name, rate in [(0.002, '2ms', 38400), (0.001, '1ms', 76800)]:
         q('TIM:SCAL %g' % tb)
         wait_ms(2500)
+        c_reset()
         i0 = ints(q('DBG:ISR?'))
-        wait_ms(4000)
+        # A host polling the scope / acquisition state and the profiler
+        # while the stream runs (device e7ec2cc: ACQ:SRAT? / SCOP:MEAS:*?
+        # every 5 s, max_lat 6.16 us at scope_wav::query, region C).
+        t0 = up()
+        polls = 0
+        while up() - t0 < 4000:
+            for c in POLL:
+                q(c)
+            polls += 1
         i1 = ints(q('DBG:ISR?'))
+        c_check('%s/div: a host polling %s (%d rounds)' % (name, ' / '.join(POLL), polls))
         fr, rms, vpp = meas()
         w1 = wave()
         wait_ms(300)
@@ -547,10 +542,18 @@ try:
     wait_ms(1500)
 
     print('exit (MENU)')
+    q('TIM:SCAL 0.002')  # 38400 S/s (device: 1 overrun at the exit)
+    wait_ms(2500)
+    c_reset()
+    ix = ints(q('DBG:ISR?'))
     q('DBG:KEY 0')
     wait_ms(2500)
     isr = ints(q('DBG:ISR?'))
     check(isr[1] == 0, 'the ISR stopped with the view (%s)' % isr[:4])
+    check(isr[4] == ix[4] and isr[9] == ix[9] and isr[8] == ix[8],
+          'exit at 38400: no late entry, overrun or frame timeout (late %d -> %d, overruns %d -> %d)'
+          % (ix[4], isr[4], ix[9], isr[9]))
+    c_check('exit (MENU)')
     check(isr[13] == isr0[13], 'no forced stop (%d)' % isr[13])
     v = [f('READ?') for _ in range(2)][-1]
     check(near(v, 1.0, 0.01), 'DMM resumed: READ? %.4f V AC' % v)
@@ -570,6 +573,14 @@ try:
     print('  after the badge: FREQ %.3f VRMS %.4f VPP %.4f' % (fr, rms, vpp))
     check(near(fr, 50.0, 0.03) and near(rms, 1.0, 0.03), 'the badge path shows the signal (50 Hz, 1 V rms)')
     shot('w09b-badge-wave')
+    # A CSV recording is refused in the Wave view (the DMM poll is paused:
+    # it would record no rows; docs/ram-budget.md).
+    q('*CLS')
+    q('LOG:CSV ON')
+    err = q('SYST:ERR?')
+    st = q('LOG:CSV?').split(',')
+    check('Wave view' in err and st[0] != '1', 'LOG:CSV ON in the Wave view refused (%s; LOG:CSV? %s)' % (err, ','.join(st)))
+    check(ints(q('DBG:ISR?'))[1] == 1, 'the stream runs on after the refused LOG:CSV ON')
     print('host reads CSVs off the USB volume while the wave view streams')
     for dirname, dlg in [('SCOPE', new[-1] if new else None), ('LOGS', logs[-1] if logs else None)]:
         if not dlg:
@@ -593,11 +604,19 @@ try:
 except Done:
     pass
 finally:
+    if HOOKS and 'c_check' in globals():
+        # The whole run: a function is reported once (its hook goes at its
+        # first hit), so a hit in a step without its own check shows here.
+        # Allowed: the Save CSV tap (its handler runs, the DLG write waits
+        # for the paused stream) and a host CONF mid-wave (its parser runs,
+        # the bus guard stops the stream before the HY3131 is touched).
+        c_check('the whole run', ('sp_save_csv', 'scope_csv::', 'press_track', 'sp_popup', 'scpi::conf_cmd'), True)
     os.killpg(emu.pid, 15)
     emu.wait()
-    for p in (DISK, HOOKS, CHITS):
-        if p and os.path.exists(p):
-            os.remove(p)
+    if RC:
+        RC.cleanup()
+    if os.path.exists(DISK):
+        os.remove(DISK)
 
 print('wavetest: %s' % ('PASS' if not FAIL else 'FAIL: ' + '; '.join(FAIL)))
 sys.exit(1 if FAIL else 0)

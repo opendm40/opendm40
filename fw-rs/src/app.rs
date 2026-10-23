@@ -243,6 +243,9 @@ pub struct App {
     /// the DMM autorange to restore on exit (v_auto / a_auto code).
     wave_req: Option<WaveReq>,
     wave_auto: Option<u8>,
+    /// A view change out of the live wave view, held until main.rs has
+    /// stopped the stream (`show`, app_wave.rs `wave_exit_done`).
+    wave_exit_to: Option<View>,
     pub locked: bool,
     /// PD6 click timer (stock DMM key widget timer +0x48, 500 ms one-shot):
     /// a second release before it expires toggles the lock; on expiry the
@@ -520,6 +523,7 @@ impl App {
             sp: scope_page::Sp::new(),
             wave_req: None,
             wave_auto: None,
+            wave_exit_to: None,
             locked: false,
             pd6_click: None,
             hist: [(0.0, 0, ""); 5],
@@ -606,8 +610,18 @@ impl App {
         }
     }
 
-    #[inline(never)] // .cold (link-native.x): on a view change
+    #[inline(never)] // not inlined into its many callers (region B)
     fn show(&mut self, v: View, clk: &mut Clock) {
+        if v != self.view && self.view == View::Scope && self.scope.wave_on() && crate::hy3131::streaming() {
+            // Leaving the live wave view: the stream stops first (main.rs,
+            // WaveReq::Stop, then `wave_exit_done` shows `v`). Until then
+            // the view stays, so no page code (the menu's pressed feedback,
+            // region C) runs while the stream ISR owns the bus (device
+            // 5e52761: 1 late / overrun at 38400 at a MENU exit).
+            self.wave_req = Some(WaveReq::Stop);
+            self.wave_exit_to = Some(v);
+            return;
+        }
         if v != self.view {
             self.band_until = 0;
             self.sp_leave(clk.now_ms());
@@ -1205,9 +1219,14 @@ impl App {
                 if s >= 7200 {
                     num((s / 3600) as u32, &mut put);
                     put(b" h left");
-                } else {
+                } else if s >= 120 {
                     num((s / 60) as u32, &mut put);
                     put(b" min left");
+                } else {
+                    // Under 2 min: seconds, not "0 min" / "1 min" (76800
+                    // S/s on a 5.9 MB disk: ~25 s at 3 B/sample).
+                    num(s as u32, &mut put);
+                    put(b" s left");
                 }
                 core::str::from_utf8(&b[..n]).unwrap_or("")
             }
@@ -2771,6 +2790,21 @@ impl App {
         true
     }
 
+    /// Why a CSV recording cannot start now (SCPI LOG:CSV ON; the pages
+    /// that start one are not reachable then): the Wave view and the inrush
+    /// page stream AD2 and pause the DMM poll, so it would record no rows
+    /// (device ffa16ef: accepted, READ? 9.9E37; docs/ram-budget.md, the
+    /// logger::RING row). Their own entries refuse a running recording.
+    pub fn rec_conflict(&self) -> Option<&'static str> {
+        if self.scope.wave_on() {
+            Some("Settings conflict: Wave view")
+        } else if self.view == View::Inrush {
+            Some("Settings conflict: inrush page")
+        } else {
+            None
+        }
+    }
+
     /// DMM page swipe down: stop a running recording (its result toast
     /// follows when the last rows are on the disk), or start one.
     fn rec_toggle(&mut self, now: u64) {
@@ -3566,7 +3600,8 @@ impl App {
 /// SCPI ranges / resolution (scpi.rs Rng, Cmd::Range / Conf).
 impl App {
     /// The present DMM range in SI (scpi::range_si); None outside V / A /
-    /// ohm / capacitance / frequency and in the power meter.
+    /// ohm / capacitance / frequency and in the power meter. Region B (not
+    /// .cold): CONF? asks it, also while the Wave view streams.
     pub fn range_si(&self) -> Option<f32> {
         if self.dmm.pw.on {
             return None;

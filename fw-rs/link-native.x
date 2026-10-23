@@ -114,10 +114,11 @@ SECTIONS
          * region B since region C audit #1 (relocated, 3.8 KB, while B had
          * ~80 KB free; on-demand DBG replies, zero-wait is no cost). */
         *(.text.*7dm40_fw9scope_csv*);
-        /* Scope WAVeform:* replies (src/scope_wav.rs; its per-packet
-         * `fill` is `.text.scope_wav_fill`, region B). */
-        *(.text.*7dm40_fw9scope_wav*);
-        *(.text.*7dm40_fw4scpi7wav_cmd*);
+        /* NOT the scope WAVeform:* / ACQ:SRAT? / TRIG:STAT? / CHAN1:OFFS?
+         * replies (src/scope_wav.rs) nor their parser scpi::wav_cmd: a host
+         * polls them while the Wave view's stream runs (device e7ec2cc:
+         * max_lat 6.16 us at scope_wav::query; emu/hy3131/wavetest.py
+         * polls them under the region C hooks). Region B, ~2 KB. */
         *(.text.*7dm40_fw4boot*);
         *(.text.*7dm40_fw3app9app_press*);
         /* Inrush current: open / arm / close / results / save glue and the
@@ -184,7 +185,6 @@ SECTIONS
         *(.rodata.*7dm40_fw6upload*);
         *(.rodata.*7dm40_fw5hyspi*);
         *(.rodata.*7dm40_fw9scope_csv*);
-        *(.rodata.*7dm40_fw9scope_wav*);
         *(.rodata.*7dm40_fw4boot*);
         *(.rodata.*7dm40_fw3app9app_press*);
         *(.rodata.*7dm40_fw7fastlog4prep*);
@@ -218,17 +218,21 @@ SECTIONS
         *(.text.*7dm40_fw2ui14auto_cpl_label*);
         *(.text.*7dm40_fw2ui10range_page*);
         /* Debug / file replies, `#[inline(never)]` so they do not land in
-         * main.rs `run` (hot): DBG:PROF?, DBG:TOUCH?, DBG:DIAG?, MMEM:CAT?,
-         * MMEM:DEL (and the modules above: DBG:HYSPI, DBG:UPLOAD,
-         * MMEM:DATA?, DBG:GENUINE?). */
-        *(.text.*7dm40_fw4prof6report*);
+         * main.rs `run` (hot): DBG:TOUCH?, DBG:DIAG?, MMEM:DEL (and the
+         * modules above: DBG:HYSPI, DBG:UPLOAD, MMEM:DATA?, DBG:GENUINE?).
+         * Not DBG:PROF? (prof::report, ~1 KB) nor MMEM:CAT? (csvlog::
+         * catalog_scpi with fatren's / fatdir's `.text.fat_rd` helpers)
+         * nor CONF?'s
+         * App::range_si: region B, asked during fast sessions / the Wave
+         * view (device a0985e4: DBG:PROF? 12 us, a sample lost at 38400;
+         * emu/fastlogtest.py --region-c --host-read, emu/hy3131/
+         * wavetest.py's whole-run region C check). */
         *(.text.*7dm40_fw9log_scale*);
         *(.text.*7dm40_fw4scpi7dcv_arg*);
         /* SCPI ranges / resolution: one command each. */
         *(.text.*7dm40_fw4scpi9range_cmd*);
         *(.text.*7dm40_fw4scpi8conf_cmd*);
         *(.text.*7dm40_fw3app*3App10scpi_range*);
-        *(.text.*7dm40_fw3app*3App8range_si*);
         *(.text.*7dm40_fw4scpi8range_si*);
         *(.text.*7dm40_fw4scpi9range_arg*);
         *(.text.*7dm40_fw4scpi7res_arg*);
@@ -239,10 +243,8 @@ SECTIONS
         *(.text.*7dm40_fw5touch8log_text*);
         *(.text.*7dm40_fw10touch_diag*);
         *(.text.*7dm40_fw6csvlog6delete*);
-        *(.text.*7dm40_fw6csvlog12catalog_scpi*);
         /* ... their disk bodies (the `_on` variants and their closures). */
         *(.text.*7dm40_fw6csvlog9delete_on*);
-        *(.text.*7dm40_fw6csvlog15catalog_scpi_on*);
         /* Tap / page-only code that sat inlined in hot callers (region B
          * audit 2026-10-22 #2): the temperature page's draw / key helper
          * (App::with_temp_page), the scope's Save CSV

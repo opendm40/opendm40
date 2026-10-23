@@ -73,6 +73,7 @@ pub enum Err {
 /// The directory of one of our files, from its 8.3 name: S*.BMP -> SHOTS,
 /// LOG*.DLG / FAST*.DLG -> LOGS, SCOP*.DLG -> SCOPE (case-insensitive).
 /// None: not ours.
+#[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 pub fn dir_of(n: &[u8]) -> Option<&'static [u8; 11]> {
     let up = |c: u8| c.to_ascii_uppercase();
     let ext = [up(n[8]), up(n[9]), up(n[10])];
@@ -112,6 +113,7 @@ pub fn seq(d: &Vol, i: u32) -> (u32, bool, u32, u32) {
 
 /// The root entry named `name` (live, not a long-name entry) and the first
 /// free root slot: (Some((slot, attribute, start cluster)), free slot).
+#[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 fn find_root(dev: &mut dyn BlockDevice, v: &Vol, name: &[u8; 11], buf: &mut [u8; BLK]) -> Result<(Option<(u32, u8, u32)>, Option<u32>), Err> {
     let mut free = None;
     for b in 0..v.root_blocks {
@@ -143,6 +145,7 @@ fn find_root(dev: &mut dyn BlockDevice, v: &Vol, name: &[u8; 11], buf: &mut [u8;
 }
 
 /// FAT 1 entry `c` through a one-block cache (`cur` = cached block).
+#[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 fn fat_get(dev: &mut dyn BlockDevice, v: &Vol, c: u32, fat: &mut [u8; BLK], cur: &mut u32) -> Option<u32> {
     let fb = c / FPER;
     if fb >= v.fat_blocks {
@@ -159,6 +162,7 @@ fn fat_get(dev: &mut dyn BlockDevice, v: &Vol, c: u32, fat: &mut [u8; BLK], cur:
 }
 
 /// The directory view of the chain starting at `start`.
+#[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 fn chain(dev: &mut dyn BlockDevice, v: &Vol, start: u32, buf: &mut [u8; BLK]) -> Result<Vol, Err> {
     let max = v.clusters + 1;
     let mut d = v.root();
@@ -178,7 +182,9 @@ fn chain(dev: &mut dyn BlockDevice, v: &Vol, start: u32, buf: &mut [u8; BLK]) ->
     }
 }
 
-/// Subdirectory `name` of the root: Ok(None) = there is none.
+/// Subdirectory `name` of the root: Ok(None) = there is none. Region B
+/// (`.text.fat_rd`, see `for_each`).
+#[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 pub fn open(dev: &mut dyn BlockDevice, v: &Vol, name: &[u8; 11], buf: &mut [u8; BLK]) -> Result<Option<Vol>, Err> {
     match find_root(dev, v, name, buf)?.0 {
         None => Ok(None),
@@ -428,6 +434,12 @@ pub fn boot(dev: &mut dyn BlockDevice) -> Boot {
 /// the root and then of the subdirectories `dirs` that exist, in directory
 /// order: `f(view, slot, entry)` (view = the directory holding it, slot its
 /// index there); `f` returns false to stop. Reads with `buf`.
+///
+/// This, `open`, `find_root`, `chain`, `fat_get` and `dir_of` are region B (`.text.fat_rd`, not
+/// this module's .cold): MMEM:CAT? (csvlog catalog_scpi) runs them, and a
+/// host may list the files while the Wave view's stream ISR runs
+/// (emu/hy3131/wavetest.py, region C hooks).
+#[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 pub fn for_each(dev: &mut dyn BlockDevice, v: &Vol, dirs: &[&[u8; 11]], buf: &mut [u8; BLK], f: &mut dyn FnMut(&Vol, u32, &[u8]) -> bool) -> Result<(), Err> {
     let mut views = [v.root(); 4];
     let mut n = 1;

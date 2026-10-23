@@ -393,7 +393,9 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///                           USB only: refused over Bluetooth ("Command
 ///                           protected", main.rs; OFF and LOG:CSV? work). ON fails:
 ///                           "Mass storage busy" while a PC has the disk mounted,
-///                           else "Settings conflict" (no reading yet, already on)
+///                           "Settings conflict: Wave view" / ": inrush page"
+///                           (their AD2 stream pauses the DMM: no rows), else
+///                           "Settings conflict" (no reading yet, already on)
 ///   LOG:CSV?                state,file,rows,bytes,committed,dropped (state 0 idle,
 ///                           1 recording, 2 stopping, 3 done, 4 full, 5 no disk,
 ///                           6 error; file -1 until the first commit)
@@ -629,7 +631,7 @@ fn dcv_arg(a: &[u8]) -> Dbg {
 
 /// WAVeform:<sub> (scope_wav.rs): Ok(None) = WAV:SOURce (CHANnel1 only;
 /// the query's reply is put by the caller).
-#[inline(never)] // .cold (link-native.x)
+#[inline(never)] // region B: polled while the Wave view streams
 fn wav_cmd(sub: &[u8], a: &[u8], query: bool) -> Result<Option<Cmd>, &'static str> {
     const BAD: &str = "Illegal parameter value";
     if kw(sub, "PREamble") && query {

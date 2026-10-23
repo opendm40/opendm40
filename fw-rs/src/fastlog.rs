@@ -447,6 +447,9 @@ pub fn begin(bytes: u32, dur_s: u32) -> Result<(), &'static str> {
     }
     let j = job();
     *j = JOB0;
+    // LOG:DISK? tpp: this session's probe, 0 / 0 = none (`set_probe`), not
+    // a previous session's.
+    TPP.store(0, core::sync::atomic::Ordering::Relaxed);
     j.state = State::Prep;
     j.ph = Ph::Bpb;
     j.dur_us = dur_s as u64 * 1_000_000;
@@ -473,7 +476,7 @@ pub fn gate_fell() -> bool {
     job().gate == Gate::Fell
 }
 
-/// The last probe's page program times: (mean, max) in us, (0, 0) = none
+/// The page program times of this session's probe: (mean, max) in us, (0, 0) = none
 /// measured (no probe, or it failed). Programs of 256 zero bytes into an
 /// erased page, timed from the end of the clock-out to BUSY clear (polled).
 pub fn tpp_us() -> (u32, u32) {
@@ -1403,6 +1406,8 @@ mod prep {
                 return Err(State::Error);
             }
         }
+        // The file is gone: LOG:DISK? / the panel name none (-1).
+        j.has_file = false;
         let s = j.end_state;
         Err(s) // ends the session with that state
     }
