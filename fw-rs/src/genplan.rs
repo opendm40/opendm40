@@ -499,7 +499,7 @@ impl Out {
         (!self.fixed_level()).then(|| (Self::v(self.hi_code) + Self::v(self.lo_code)) / 2.0)
     }
     /// Effective duty, percent (inline: SOUR:FUNC:SQU:DCYC? may come while
-    /// an AD2 stream runs, and gen::plan is region C).
+    /// an AD2 stream runs; gen::plan was region C until it moved to B).
     #[inline(always)]
     pub fn duty_pct(&self) -> f32 {
         self.duty as f32 / 100.0

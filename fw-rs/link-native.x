@@ -199,15 +199,15 @@ SECTIONS
         /* Single functions (and their closures) that run only at start-up or
          * on a user's settings / page action, never per pass nor in the ISR:
          * the App construction (main.rs new_app, App::new and the sub-struct
-         * constructors inlined there), the generator's plan (gen::plan, on a
-         * setting change) and Gen::apply, the settings / keypad / limits /
+         * constructors inlined there), the settings / keypad / limits /
          * temperature / help pages, the generator page's static parts (not its
          * 1 s status), the fuse-check dialog, the power page's entry. A
          * pattern that stops matching (a rename) leaves the function in B,
-         * the safe side. */
+         * the safe side. NOT the generator's plan (gen::plan) and Gen::apply
+         * (~3.7 KB): a SOUR:* / OUTP setting from a host may come during an
+         * AD2 stream (fastlogtest --region-c --host-read --poll 'SOUR:FREQ
+         * 1000;...'), so they stay in B. */
         *(.text.*7dm40_fw7new_app*);
-        *(.text.*7dm40_fw3gen4plan*);
-        *(.text.*7dm40_fw3gen*3Gen5apply*);
         *(.text.*7dm40_fw3app*3App11fuse_dialog*);
         *(.text.*7dm40_fw3app*3App11limits_page*);
         *(.text.*7dm40_fw3app*3App7kp_open*);
