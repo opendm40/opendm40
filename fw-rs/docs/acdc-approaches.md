@@ -1014,12 +1014,114 @@ manual 60 V range. AUTO range puts such levels on 6 V, which has no such error (
 failing case is a manual 60 V range or a large AC part on a small DC part. Candidate fixes (not made): a
 per-range correction of the internal zero (needs its repeatability over entries and power cycles), the gain
 from two READ? anchors when a session sees two levels, or a device-measured table per_code for 60 V.
+**Fixed in 10.9** (the gain from two references).
 
 **AUTO on the square changed to DC.** On the 40 Hz square (AC 4.760, DC 4.764 V) C's AUTO stays on DC and A's
 goes to AC after ~3.5 s, deterministic over two entries each. dmm.rs's first evaluation shows AC only when
 AC > |DC|, and a later switch to AC needs AC > 1.5 x |DC|, so the first evaluation decides. A's first AC part
 overshoots (4.91 V); C's first AC part is taken as it is. On 7409b92 C's AC part was 0.13 % high and it picked
-AC. This is a tie of the rule, not an error of C.
+AC. This is a tie of the rule, not an error of C. **Rule changed in 10.9** (a tie is DC, the decision waits for a
+settled AC part).
 
 **Decision rule: not met** (e8 60 V at 0 / 1 V). Everything else passes, and e5's 60 V failure of 7409b92 is
 gone. The default stays A; the owner decides.
+
+### 10.9 After the 2563fe1 retest: C's 60 V gain and the AUTO tie (2026-10-23, branch acdc-c-fix; device: 10.10)
+
+Method A stays the default.
+
+**1. C's 60 V gain: from a second stock DC V reference.** The three candidates of 10.8:
+
+| candidate | what it assumes | verdict |
+|---|---|---|
+| a per-range constant for the internal zero (~15 codes on 60 V, "derived from the factory DC V calibration") | that the AGND zero's offset against SENSE at 0 V is a fixed property of the unit and range. One device, one session, its sign inferred from a fit; nothing in the factory record measures the AD2 path's AGND-vs-SENSE difference (the factory DC V offsets are AD1's, on SENSE - PB5). Its repeatability over entries / power cycles is not measured (TODO). | not taken: unverifiable here, and wrong by its own error on any other unit |
+| a device-measured table per_code for 60 V | the same, for the gain (the table is already 0.043 % high on this unit) | not taken |
+| **the gain between two READ? references the session sees** | nothing of the hardware: the rule judges C against the meter's own DC V reading, so a gain measured between two such readings is measured against the reference that judges it | **taken** |
+
+How (`acdcm.rs` `am_refine`, in ST_RUN, every LPF result): a steady window of STEADY_N = 12 LPF results (~1.3 s)
+within the anchor's spread rule (max(60 codes, 1 %)); when its mean is >= CAL_GAIN_CODES (10 k codes: 4.9 V on 60 V,
+0.49 V on 6 V) from the range's anchor and more than 1.5 x the span of the last two-point attempt there, and the AC
+part has a source (RMS or the peak bound: acsrc != 2), C takes the stock DC V row's reading again (REF_N = 3 DC V
+results: the DC part shown meanwhile is that reading, the AC part held; ~1 s), then 4 LPF results of the run row
+(ST_MEAS), and per_code = (v2 - v1) / (m2 - m1) between the old anchor and the new point, if within 3 % of the table.
+The anchor moves to the new point (offset = m2 x per_code - v2). That gain is kept for the range until power-off (as
+the internal zero's) and replaces it; a later internal zero does not overwrite it, a later two-point gain only over a
+1.5 x larger span (the attempts' spans grow geometrically: at most ~8 per range per power-on, and a failed attempt
+counts). The internal zero stays the first estimate of a session entered at a level >= 10 k codes from 0. Cost: one
+~1.5 s of DC V readings (no AC update) after the first level change of >= 10 k codes on a range; e9 (entered per
+level) does not trigger it, e10's 5 -> 5.5 V (10.3 k codes on 6 V) may.
+
+Emulator model (HY3131.cs, both copies): `AgndZeroCodes` = {0, 15, 0, 0} ("agndz:" scales): with OP1+ on AGND the
+DC-coupled row reads 15 codes above SENSE at 0 V on 60 V, INFERRED from 10.8 (6 V: no such error on the device,
+600 / 1000 V not measured). `acdcmethtest.py --e8 down|up` is the device's e8 (manual 60 V levels, then manual 6 V;
+the DC part against the source in the device script's window, 1..4 s after the step, and a late one, 4..8.5 s).
+
+| e8 (emulator), DC part - source, mV | 24 | 12 | 5 | 1 | 0 V (60 V) | rule |
+|---|---|---|---|---|---|---|
+| 7fffcdf, down (as the device: -0.5 / -4.3 / -6.1 / **-7.2 / -8.0**) | -0.44 | -3.62 | -6.00 | **-6.74** | **-7.29** | 17 / 11 / 7.5 / 5.5 / 5.0 |
+| the fix, down (late window; device window the same except 12 V: -0.81) | -0.39 | +0.14 | -0.08 | +0.42 | +0.18 | |
+| 7fffcdf, up (entered at 0 V: the table's gain) | **-20.5** | -9.73 | -3.94 | -0.02 | +0.80 | |
+| the fix, up | +0.41 | +0.06 | -0.64 | -1.33 | -0.71 | |
+
+6 V in the same runs: within 0.25 mV (rule 0.5..3 mV) before and after in `down`; in `up` 7fffcdf read -6.0 / -3.6 /
+-1.3 mV at 5 / 3 / 1 V (anchored at 0 V in AUTO with the table's gain, which the model puts 0.12 % off), the fix
+-0.02 / -0.04 / -0.05 mV after the first step. "up" is the case the device has not run: a C session entered at 0 V on
+60 V with the table gain (0.043 % high on the device) would read ~+10 mV at 24 V (rule 17 mV).
+
+**2. AUTO on a tie (the 40 Hz square).** The first evaluation decided at once, and the 1.5 x / 0.75 x hysteresis
+kept it, so the first AC part's transient decided a tie: A's first AC part overshoots (+3 % on the device's square,
++7 % on a0985e4, up to +52 % in the emulator after the 6 -> 60 V up-range), C's is ~0.5 % high in the emulator.
+Reproduced: couptest `sqtie` (three fresh AUTO entries on the square, the part shown from the first AUTO reading on)
+on 7fffcdf: A and C both DC -> AC within the first 1..2 s, then AC (the emulator's square is an exact tie, so the side
+is noise; on the device the 0.08 % margin went to C's DC and A's overshoot). New rule (`dmm.rs` auto_eval /
+auto_shows_ac, AUTO_SETTLE_K / AUTO_TIE / AUTO_TIE_MS):
+* before the first decision the reading shows DC; AC only when there is no DC part (|DC| below the off floor);
+* the first decision waits until the AC part has settled on one side: K = 4 x its change since the evaluation before
+  (an EMA's remaining drift) is less than its distance to |DC|; then the larger part (as before). A clear case
+  decides at the second evaluation (A ~2 s, C ~0.1 s after the first); an AC part below the floor: DC at once;
+* a tie (|AC - |DC|| <= 1 % of |DC|) or no settling within 4 s: DC. 1 % covers the parts' noise (A ~0.03 % phase to
+  phase; C's LPF ripple of the square +-0.3 % in the emulator, ~0.006 % on the device).
+Either part is fair at a tie; DC is the stock's default coupling and needs no further rule. After the fix couptest
+`sqtie`: DC in all three entries with A and with C, no change of the part shown. `band` unchanged (the larger part at
+1.2 / 0.8 / 1.05 / 0.95: outside the 1 % tie). Cost: a mixed signal entering AUTO shows DC ~2 s (A) / ~0.2 s (C)
+before it shows AC.
+
+**3. dcvtest** (`LOG:SCALe?` 1 % off since 70c33ad): the model is right, the test was not: 70c33ad gave the
+DC-coupled row the device's per-range per_code factor (`Ad2DcGainR`, 6 V 1.0096, 60 V 1.0188, from test 6.5 / e5)
+and dcvtest still expected nominal / ad2dcg. Now it expects nominal x that factor / ad2dcg (6 V and the 25 V session
+on 60 V): PASS.
+
+Final runs: see the report of the branch head (filled in below).
+
+### 10.10 Device retest of 10.9 (`tools/acdcmeth.py`, calibrator on V / COM, `DM40_USBTMC=real`)
+
+Image: the build of the branch head named in the report. The two-point gain is kept per range until power-off, so
+`e8up` must run first after the install's reboot (or a power cycle), before anything enters method C:
+
+    /usr/bin/python3 tools/acdcmeth.py e8up -o acdc29.jsonl          # first after power-on (~4 min)
+    /usr/bin/python3 tools/acdcmeth.py e8s e8 e11 e10 e9 -o acdc29.jsonl
+    /usr/bin/python3 tools/acdcmeth.py e5 --minutes 3 -o acdc29.jsonl
+
+1. **e8up** (60 V manual, entered at 0 V, then 1 / 5 / 12 / 24 V, 4 s per level + a 3 s mean): the session starts on
+   the table's gain (0.043 % high on this unit: expect ~+10 mV at 24 V without the fix); the 5 V step (10.3 k
+   codes) takes the first two-point gain, the 24 V step (39 k) a better one. Pass: every level within 0.05 % + 5
+   digits of READ? (5.0 / 5.5 / 7.5 / 11 / 17 mV); STAT? gspan ~10 k at 5 / 12 V, ~39 k at 24 V.
+2. **e8s** (the 2563fe1 e8 with 4 s per level): entered at 24 V on 60 V, then 12 / 5 / 1 / 0 V; 6 V at 5 / 3 / 1 / 0 V.
+   Pass: 1 V and 0 V within 5.5 / 5.0 mV (2563fe1: -7.2 / -8.0 mV), gspan ~24.7 k from 12 V on; 6 V as before
+   (+0.07..+0.44 mV). The 60 V gain is kept from e8up (gspan 39 k) unless a larger span comes up, so for the
+   2563fe1 failure case as it was, power-cycle before e8s too (then gspan 49 k from the internal zero at 24 V,
+   24.7 k two-point from 12 V). **e8** (1 s per level, as 2563fe1) for comparison: the 12 V level may still read
+   the internal zero's gain during its window (-4 mV, inside the rule), 5 / 1 / 0 V the two-point one.
+   `e8kept` (part of e8 / e8s): 5 V on 60 V re-entered, the kept gain: within the rule.
+3. **e11** (AUTO on the 40 Hz square, A and C, 3 entries each, 15 s): pass = DC from the first AUTO reading (at most
+   one change: the decision), the same part in every entry; expected DC with both methods (AC 4.760 / DC 4.764 V is
+   within the 1 % tie). Also by hand: three taps on V with A, then with C, on the square: DC, no AC flash.
+4. **e10** (AUTO, square -> 5.0 / 5.5 / 4.5 V) and **e9** (4.0..5.5 V on 6 V): as 10.8 (PASS there). e10's 5 -> 5.5 V
+   step may take the second reference on 6 V (~1.5 s of DC V readings): one range, AUTO,DC within the rule.
+5. **e5** (`--minutes 3`): C re-entered every 60 s at 24 V on 60 V and 3 V on 6 V: as 10.8 (+0.5 / -1.3 / +0.5 mV;
+   -0.04..+0.37 mV), now with the two-point gain of e8 (no level change inside e5: no new reference). Pass 17 /
+   2.0 mV.
+
+Decision rule (10.4 / 10.7) unchanged: C becomes the default when e8s / e8up and e5 pass with e2 / e9 / e10 as in
+10.8; the owner decides.
+
