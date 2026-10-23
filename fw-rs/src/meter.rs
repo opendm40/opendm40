@@ -375,6 +375,8 @@ const SHOW_MIN_MS: u64 = 80;
 //              stock aux row), EXT_BURDEN
 //   bit 15     the "Leads in A?" reminder switched OFF (sentinel::M_LEADS;
 //              0 = on), EXT_LEADS_OFF
+//   bits 16..17 the danger alarm (danger.rs: 0 Loud, 1 Volume, 2 Off; 0 =
+//              Loud, the default), EXT_DANGER_SHIFT
 // (bits 9.. are set / read by app.rs next to ext_word / ext_settings.)
 
 /// p[38] bit 9: temperature unit deg F.
@@ -389,6 +391,9 @@ pub const EXT_BURDEN: u32 = 1 << 14;
 /// p[38] bit 15: the "Leads in A?" reminder DISABLED (0 = on, the default
 /// of every older record).
 pub const EXT_LEADS_OFF: u32 = 1 << 15;
+/// p[38] bits 16..17: the danger alarm setting (danger::LOUD = 0, the
+/// default of every older record; VOLUME 1, OFF 2).
+pub const EXT_DANGER_SHIFT: u32 = 16;
 
 /// Settings decoded from p[38].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

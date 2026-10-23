@@ -5,6 +5,7 @@ mod app;
 mod bargraph;
 mod bt;
 mod clock;
+mod danger;
 mod dmm;
 mod gen;
 mod gesture;

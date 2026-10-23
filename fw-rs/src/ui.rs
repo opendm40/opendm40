@@ -2303,11 +2303,12 @@ pub const SETTINGS: [&str; 9] = [
 pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit", "Scope swipe", "Scope press", "Scope tap step", "Help", "More"];
 /// Page 3: the wrong-connection alerts (sentinel.rs; ON = all, A-JACK only,
 /// OFF), the "Leads in A?" reminder on leaving a current function (sentinel::
-/// Leads, doc 4.9; ON / OFF, persisted), the USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
+/// Leads, doc 4.9; ON / OFF, persisted), the danger alarm (danger.rs, doc
+/// 4.10: Loud / Volume / Off, persisted), the USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
 /// applies at the next USB plug), the burden voltage readout of the A
 /// functions (doc 3.15; persisted, default OFF = the stock aux row) and the
 /// Device / About page.
-pub const SETTINGS3: [&str; 5] = ["Jack alerts", "A-lead reminder", "USB disk", "Burden voltage", "Device"];
+pub const SETTINGS3: [&str; 6] = ["Jack alerts", "A-lead reminder", "Danger alarm", "USB disk", "Burden voltage", "Device"];
 
 /// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).

@@ -179,7 +179,7 @@ impl App {
             self.toast(now, "Current too high: reduce it", false);
             self.alert_beep_t0 = Some(now);
         }
-        if self.alert_beep_t0.is_some() && self.dmm.pw_state().over != 2 && self.dmm.sent.alert == crate::sentinel::Alert::None {
+        if self.alert_beep_t0.is_some() && self.dmm.pw_state().over != 2 {
             self.alert_beep_t0 = None;
         }
     }

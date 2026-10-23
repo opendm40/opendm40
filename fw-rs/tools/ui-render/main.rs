@@ -1837,11 +1837,12 @@ fn main() {
         (1, vec!["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]),
         (1, vec!["FAST  37/s", "LOW", "History", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]),
         (1, vec!["MED  --/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Off", "", ""]),
-        // Page 3 with each "USB disk" value (decision 2026-10-22 #6).
-        (2, vec!["A-JACK only", "OFF", ui::usb_disk_name(true, false), "OFF (stock)", ""]),
-        (2, vec!["ON", "ON", ui::usb_disk_name(false, true), "ON (A, mA, uA)", ""]),
-        (2, vec!["Mask 5", "ON", ui::usb_disk_name(false, false), "ON (A, mA, uA)", ""]),
-        (2, vec!["OFF", "OFF", ui::usb_disk_name(true, true), "OFF (stock)", ""]),
+        // Page 3 with each "USB disk" value (decision 2026-10-22 #6) and
+        // each "Danger alarm" value (danger.rs, doc 4.10).
+        (2, vec!["A-JACK only", "OFF", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", ""]),
+        (2, vec!["ON", "ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", ""]),
+        (2, vec!["Mask 5", "ON", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", ""]),
+        (2, vec!["OFF", "OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", ""]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -2344,7 +2345,7 @@ fn main() {
         ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
-        ui::settings(2, &["A-JACK only", "ON", ui::usb_disk_name(true, false), "ON (A, mA, uA)", ""]);
+        ui::settings(2, &["A-JACK only", "ON", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", ""]);
         save(&out, "m10-settings3");
         // Pressed feedback (ui-review #11): the item drawn pressed from
         // touch-down (one item redrawn), then released = the page as drawn.
@@ -2360,7 +2361,7 @@ fn main() {
             let d_menu = || ui::main_menu(combo);
             let d_set = || ui::settings(0, &s0);
             let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
-            let d_set3 = || ui::settings(2, &["A-JACK only", "OFF", ui::usb_disk_name(false, false), "OFF (stock)", ""]);
+            let d_set3 = || ui::settings(2, &["A-JACK only", "OFF", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", ""]);
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
             let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
             let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);
@@ -2409,7 +2410,7 @@ fn main() {
                     (format!("settings{r}/{part}"), &d_set as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_set)) as Box<dyn Fn(bool)>)
                 }))
                 .chain((0..9u8).map(|r| (format!("settings2-{r}"), &d_set2 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set2)) as Box<dyn Fn(bool)>)))
-                .chain((0..4u8).map(|r| (format!("settings3-{r}"), &d_set3 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set3)) as Box<dyn Fn(bool)>)))
+                .chain((0..6u8).map(|r| (format!("settings3-{r}"), &d_set3 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set3)) as Box<dyn Fn(bool)>)))
                 .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>)))
                 .chain([(0u8, -1i8), (0, 1), (1, -1), (1, 1), (3, 0)].into_iter().flat_map(|(r, part)| {
                     [

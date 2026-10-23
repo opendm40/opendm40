@@ -12,6 +12,9 @@ mod hy3131_tables;
 mod clock;
 #[path = "../../src/sentinel.rs"]
 mod sentinel;
+// The danger alarm's pattern / event rules (pure).
+#[path = "../../src/danger.rs"]
+mod danger;
 #[path = "../../src/dmm.rs"]
 mod dmm;
 #[path = "../../src/meter.rs"]
