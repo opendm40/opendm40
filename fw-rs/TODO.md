@@ -1627,7 +1627,12 @@ Firmware:
       WRITTEN, a calibration-sector byte changed WRITTEN, then PRESENT; each time the file == the flash window.
       kvmtest (Linux usb-storage): a 25 s session, `cat` of the four files (and an O_DIRECT CALIB.BIN) while it
       streams, 10.7 s, exit 0, identical; with `dm40wait=240` (copied 240 s wall into the stream, past the old
-      180 s limit): 7.4 s, exit 0, identical, no kernel I/O error. wavetest: see below.
+      180 s limit): 7.4 s, exit 0, identical, no kernel I/O error. wavetest (Wave view at 1 ms/div): every INFO/
+      file read whole while the view streams, the bytes equal to a read after the view closed, region C clean
+      (the allowed Save CSV handler aside), PASS. Boot cost: +0.22 s every boot (the compare); the first boot
+      of a new image ~1.0 s, 4.3 s typ / 8.8 s at the datasheet's max erase / program times (fastlogtest
+      `--profiles max`). If that is too slow: a header with the loader marker + the CRCs vdisk::init already
+      computes, compared before the full walk. A failed SPI read turns the mirror off until the next boot.
       **Device retest:** (1) first boot of the new image: DBG:VDISK:MIR? `1,4,1,<ms>` (note the boot time),
       second boot `1,3,0,<ms>`; DBG:BOOT? as before. (2) 76800 and 38400 disk sessions of >= 5 min with `cp
       INFO/*.BIN` (FIRMWARE.BIN first) during state 3: the cp returns at once, files byte-equal to copies made
