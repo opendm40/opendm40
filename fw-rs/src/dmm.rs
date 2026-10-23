@@ -896,8 +896,10 @@ const ACS_MAX_MS: u64 = 6000;
 // the AC part has settled on one side: its change since the evaluation
 // before, x AUTO_SETTLE_K (an EMA's remaining drift), is less than its
 // distance to |DC| (a clear case: the second evaluation, A ~2 s, C ~0.1 s
-// later; an AC part below the floor: DC at once). One that does not settle
-// within AUTO_TIE_MS (AC = DC within the noise) is DC. Until then the
+// later; an AC part below the floor: DC at once). A tie (AC within AUTO_TIE
+// of |DC|, where the parts' noise could pick either side: ~0.03 % phase to
+// phase in A, C's LPF ripple of a 40 Hz square +-0.3 % in the emulator) and
+// one that does not settle within AUTO_TIE_MS are DC. Until then the
 // reading shows DC, AC only with no DC part (|DC| below the off floor).
 // Either part is fair at a tie; it no longer depends on the transient.
 const AUTO_TO_AC: f32 = 1.5;
@@ -906,6 +908,7 @@ const AUTO_FLOOR_V: [f32; 2] = [0.01, 0.005];
 const AUTO_FLOOR_A: [f32; 2] = [0.03, 0.02];
 const AUTO_VOTES: u8 = 2;
 const AUTO_SETTLE_K: f32 = 4.0;
+const AUTO_TIE: f32 = 0.01;
 const AUTO_TIE_MS: u64 = 4000;
 
 /// SCPI / persisted function codes of the AUTO coupling (`Dmm::func`), next
@@ -2796,7 +2799,9 @@ impl Dmm {
             // Wait for the AC part to settle on one side (AUTO_SETTLE_K);
             // DC when it does not within AUTO_TIE_MS.
             if a > fl[0] * lim {
-                let settled = self.auto_t0 != 0 && AUTO_SETTLE_K * (a - self.auto_prev).abs() < (a - d).abs();
+                let settled = self.auto_t0 != 0
+                    && AUTO_SETTLE_K * (a - self.auto_prev).abs() < (a - d).abs()
+                    && (a - d).abs() > AUTO_TIE * d;
                 self.auto_prev = a;
                 if self.auto_t0 == 0 {
                     self.auto_t0 = now.max(1);
