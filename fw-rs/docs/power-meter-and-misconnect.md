@@ -1821,8 +1821,9 @@ every alert, never alternating with HOLD):**
   settle, the peak hold cleared at the settle's end (sentinel.rs BLANK_*).
   V-JACK? after leaving ohm or a chip restart (device ad74e93: CTSTA 0x70 to
   ~4.4 s / 5.2 s, then 0x50):
-  a both-bit read never counts, CMPLO alone not within 2.5 s of the exit /
-  the last 0x70 read, for 7 s (OHM_EXIT_*); CMPHO alone counts at once.
+  within 7 s a both-bit read is no hit, nor CMPLO alone within 2.5 s of the exit /
+  the last 0x70 read (OHM_EXIT_*); CMPHO alone counts at once. AC?'s V-tap
+  window never counts a both-bit read.
 * **FUSE?** (DC / AC / AC+DC A, not the power meter): 60 s with |I| below 0.1
   % of the range (DC; 60 of 60000 counts) or 5 % (AC, AC+DC: their RMS
   floor), not OL; any reading above clears it at once. It is a question:

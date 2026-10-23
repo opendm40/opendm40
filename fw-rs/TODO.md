@@ -2660,9 +2660,18 @@ Emulator (emu/):
       | AC? | 2.56 s | 2.76-2.98 s |
       | DC? | 2.67 / 3.32 s | 2.88 / 3.32 s |
       | V-JACK? | 1.75-2.17 s | 1.96-2.32 s |
-      | V-JACK? after RES, with the model's 0x70 replay (a 24 V source reads 0x70 there) | n/a | 5.6 s (cap 6 s; ~6.6 s with the final 7 s) |
+      | A-PROT, 24 V across A-COM, RES -> DC V | 0.62 s | 0.82 s |
+      | V-JACK? after RES, with the model's 0x70 replay (a 24 V source also reads 0x70 while it lasts) | n/a | 5.6-5.7 s |
 
-      A fault that starts after the switch is detected exactly as before.
+      A fault that starts after the switch is detected exactly as before. AC? came ~2.8-3.0 s after a
+      switch in and still does: HINT_ASSERT_MS is 2 s by design, not retuned (the task said ~1 s).
+      What the device confirmed (check E): the V-JACK? (E1 / E2) and AC? (E3) false alerts. No false
+      A-JACK / A-PROT after a switch was seen there (A jack open). The peak-hold / first-window / AC+DC
+      blanks fix code-level flaws (shown only with the hypothetical swtr knob) and are preventive
+      against the owner's A-JACK / A-PROT report; they cost the ~0.2 s above. AC? no longer comes for an
+      AC on more than 2 V DC, or one that overdrives the tap in every read. The device read 0x10 (CMPLO)
+      for +1 V in DC V's V-tap window, which does not fit the model's V / 10: worth a look (retest 2).
+      Not run: switchtest --full (every ordered pair).
       Tests on the final tree: switchtest (all scenarios), senttest 61/61, autorangetest, couptest,
       powtest, acdcmethtest, flowtest, meter-test (switch_blank_rules), the model's unit tests.
       Not changed (owner decision pending): RES with 5 V on V-COM reads OL, not negative, so V_GATE says
