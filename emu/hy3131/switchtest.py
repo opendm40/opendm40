@@ -131,6 +131,13 @@ SC = {
     # after every row change, until device numbers come): 300 mV, tau 50 ms, 25 Hz
     'open-swtr': ('open;swtr:300;swtau:50', 'open', [], None, {}),
     'dc5-swtr': ('open;vsrc:5;swtr:300;swtau:50', 'dc5', [], None, {}),
+    # device ad74e93 (nothing connected): RES -> A / mA, CMP_SENSE CTSTA 0x70 for ~3.5 s then 0x50
+    # to ~5 s -> a false V-JACK? from 1.5-1.95 s; the model's ohmexit: replays that CTSTA
+    'ohmexit': ('open;ohmexit:3.5;ohmexitlo:1.2', 'open', [],
+                ['res', 'dca', 'res', 'dcma', 'res', 'dcua', 'res', 'aauto', 'res', 'aacdc', 'res', 'aca', 'cont', 'dca',
+                 'temp', 'dcma', 'diod', 'dca', 'cap', 'dcma', 'res', 'dcv', 'res', 'dca'], {}),
+    'real-vjack-ohmexit': ('open;vsrc:24;ohmexit:3.5;ohmexitlo:1.2', 'v24', [], ['dcv', 'dca', 'res', 'dca', 'res', 'dcma'],
+                           {'dca': ('VJACK', 6.5), 'dcma': ('VJACK', 6.5)}),
     'real-ajack-swtr': ('open;isrc:0.001;swtr:300;swtau:50', 'ajack', [],
                         ['acv', 'dcv', 'res', 'dcv', 'temp', 'dcv', 'vacdc', 'dcv', 'acv', 'cont', 'acv'],
                         {'dcv': ('AJACK', 1.0), 'acv': ('AJACK', 1.6), 'cont': ('AJACK', 1.0), 'vacdc': ('AJACK', 2.5)}),

@@ -814,6 +814,9 @@ pub struct Dmm {
     /// A row went out (`write_config`) and the sentinel has not been
     /// re-armed since (`sent_rearm`, the first poll past the settle).
     sent_arm: bool,
+    /// When the relay last left the ohm network for the V/A path (ms;
+    /// sentinel::OHM_EXIT_*), None before.
+    ohm_exit_t: Option<u64>,
     live: bool,
     /// OVERLOAD latch (doc 4.3 / 4.7, sentinel::overload_trips): None = not
     /// in force.
@@ -1220,6 +1223,7 @@ impl Dmm {
             pk_t: 0,
             pkh_due: 0,
             sent_arm: false,
+            ohm_exit_t: None,
             live: false,
             ovl: None,
             probe: false,
@@ -1400,6 +1404,9 @@ impl Dmm {
         self.t_conv = None;
         hy::quiesce();
         let pa = if matches!(m, 0 | 1 | 4..=9) { 0 } else { 1 };
+        if self.pa_now == Some(1) && pa == 0 {
+            self.ohm_exit_t = Some(clk.now_ms());
+        }
         // AC+DC: the stock pulses the relay on every FUN_08012c30 call, so
         // every phase switch has this 10 ms pause (AD1 / AD2 off) between the
         // quiesce and the new row (ACDC_RELAY_PULSE).
@@ -1456,6 +1463,11 @@ impl Dmm {
         self.probe_settle = self.probe;
         self.sent.configured(kind, clk.now_ms(), fresh);
         self.sent.blank(clk.now_ms(), sentinel::BLANK_ROW_MS);
+        // Leaving the ohm network into a V-JACK? comparator row (sentinel::OHM_EXIT_*).
+        // Every row within OHM_EXIT_CAP_MS of it (DC A, its range steps, the
+        // AC+DC / AUTO phases): the windows count from the exit.
+        let now = clk.now_ms();
+        self.sent.ohm_exit(self.ohm_exit_t.filter(|&t| kind == Kind::CmpV && now < t + sentinel::OHM_EXIT_CAP_MS));
         // Ohm / temperature: A-JACK needs the V side's word (sentinel V_GATE).
         self.sent.vgate = matches!(self.mode, 10 | 15);
         // DC? / AC? hints (doc 4.4): AC V alternates AD1 between PB1 - PB3
