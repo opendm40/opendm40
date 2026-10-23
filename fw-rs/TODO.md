@@ -1609,9 +1609,31 @@ Firmware:
       **Device f0d21eb: PASS** (doc "f0d21eb" 4a / 4b): SOUR:FREQ 1000; SOUR:FUNC SQU; SOUR:VOLT 1.5; SOUR:FREQ 2345
       during AD2 disk sessions with the 6 queries polled: late 0, overruns 0, max_lat 280 ns, 576 002 / 1 152 003
       rows, lost 0; OUTP? 0 throughout. Open: the generator-ON check (owner only).
-- [ ] A copy of a slow-bank INFO/ file while the meter streams for more than ~3 min (an open Wave view, a long
+- [x] A copy of a slow-bank INFO/ file while the meter streams for more than ~3 min (an open Wave view, a long
       fast-log session) can fail on Linux (EIO after 180 s; buffered reads usually recover) and maybe sooner on
-      Windows. Documented (README.TXT could say so; native-boot.md does).
+      Windows. **Fixed (branch info-mirror, 12a1d9c; docs/native-boot.md "The slow flash bank while an AD2 stream
+      runs", "USB volume, the mirror"):** flash 0x08080000..0x080C1000 (every slow-bank INFO/ byte: the
+      FIRMWARE.BIN tail, LOADER with BOOTDATA, CALIB; 260 KiB) is mirrored as `_INFOMIR.BIN` on the SPI disk and
+      served from there while `streaming()`; compared byte for byte with the flash at every boot
+      (calbackup::write_file, rewritten copy-on-write only on a difference: a new image / calibration), served only
+      after this boot's PRESENT / WRITTEN. NOT READY stays as the fallback (no / full SPI disk, a failed read).
+      Cost: 65 of the SPI disk's 4 KiB clusters, 144 B SRAM, region B +~0.5 KB; boot: a compare ~0.22 s
+      (emulator), a rewrite ~1.0 s (4.3 s with the chip's typ erase / program times). DBG:VDISK:MIR? = served,
+      status (3 PRESENT / 4 WRITTEN), rewritten, ms.
+      Emulator: fastlogtest `--region-c --host-read --dur 20` at 38400 / 76800 (typ chip timing): every
+      slow-bank sector of the four files read during the session (37 / 24 MB of INFO/ in all), no NOT READY,
+      the same bytes after, no region C call / slow-bank load, lost 0 at both rates (76800 kept its rung).
+      mirrortest.py (new): fresh disk WRITTEN, same image PRESENT with the SPI image unchanged, image B
+      WRITTEN, a calibration-sector byte changed WRITTEN, then PRESENT; each time the file == the flash window.
+      kvmtest (Linux usb-storage): a 25 s session, `cat` of the four files (and an O_DIRECT CALIB.BIN) while it
+      streams, 10.7 s, exit 0, identical; with `dm40wait=240` (copied 240 s wall into the stream, past the old
+      180 s limit): 7.4 s, exit 0, identical, no kernel I/O error. wavetest: see below.
+      **Device retest:** (1) first boot of the new image: DBG:VDISK:MIR? `1,4,1,<ms>` (note the boot time),
+      second boot `1,3,0,<ms>`; DBG:BOOT? as before. (2) 76800 and 38400 disk sessions of >= 5 min with `cp
+      INFO/*.BIN` (FIRMWARE.BIN first) during state 3: the cp returns at once, files byte-equal to copies made
+      before, DBG:ISR? max_lat 280 ns / late 0, LOG:COUNt? lost 0, LOG:DISK? fields unchanged vs a session
+      without the copy (the SPI reads share the chip with the logger's page programs). (3) The same in the
+      Wave view at 1 ms/div for > 3 min. (4) Windows Explorer copy of INFO/ during a session.
 - [x] UI navigation during a fast-log session (menu pages / the scope page with the scope source open while the
       session streams). **Done in 3f32bc3 / 7225b36** (`fastlogtest --ui-nav`, DBG:VIEW? checks each landing).
       Note: on the device only DBG:KEY / DBG:TAP can do this; real touch and the side keys stop a disk session
