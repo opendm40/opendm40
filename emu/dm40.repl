@@ -68,10 +68,10 @@ crc: CRC.STM32_CRC @ sysbus 0x40023000
 rtc: Timers.STM32F4_RTC @ sysbus 0x40002800
     AlarmIRQ -> nvic@41
 
-iwdg: Timers.STM32_IndependentWatchdog @ sysbus 0x40003000
+// Free watchdog + the sticky RCU_RSTSCK reset flags (peripherals/FWDGT.cs;
+// run.py routes RSTSCK reads / RSTFC and SYSRESETREQ to it with bus hooks).
+fwdgt: Timers.DM40_FWDGT @ sysbus 0x40003000
     frequency: 32000
-    windowOption: false
-    defaultPrescaler: 0x4
 
 exti: IRQControllers.STM32F4_EXTI @ sysbus 0x40013C00
     numberOfOutputLines: 24
