@@ -1952,6 +1952,14 @@ Emulator (emu/):
       Checked on 24 fw-rs emulator states + all 47 table rows at 700 / 1000 / 1400 px. Visible change for the
       owner to confirm: an enabled comparator nothing reads (stock R20 0xf0, SCMPI = PB4) now shows PB4 into
       CMP in the DC rows, and AC V r0 says divider /100 (PA6 tap; the old range table said /10))
+- [x] Signal-flow diagram jumped every 100 ms in DC V 6 V (owner: "скачет, некрасиво"): the comparator's
+      PB1 / SENSE time-share added / removed the A-jack PB1 row and re-routed the CMP wire. The layout is now
+      held per function / range: every pin / input any state of the row can use is reserved (fw-rs's switches
+      predicted from their register signature, the rest learnt from the state history), an alternation seen in
+      the last 8 updates is drawn steadily (both wires dashed, "CMP PB1 ⇄ SENSE", "alternates every 100 ms
+      (A-jack / AC? hint)"). Same for AC V's AD1 PB1 - PB3 / SENSE - PB5, the A-PROT probe (OP2 on PB2, AD2),
+      the frequency counter's CMP / CNT source, the cap comparator's PB0 -> OP1O, the TC phases (SAD1I), the
+      ENPKH restarts and AC+DC (the AC V / DC V rows held together). emu/flowtest.py checks it (0 moves).
 - [x] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
       at the same time); the firmware's mux/relay choices route it through a modelled DM40 front-end (dividers, shunts, relays,
       switches) — no per-mode magic inputs. (0b464bd DM40 front-end model + connection editor, 213fc83 cross table)

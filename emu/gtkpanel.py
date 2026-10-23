@@ -698,10 +698,13 @@ class FrontendView(Gtk.DrawingArea):
         self.ink = None               # list -> layout() records label boxes (overlap check)
         self.segs = None              # list -> layout() records wire segments (wiring check)
         self.inside_h = 0
+        self.hist = {}                # remember(): what the firmware switches within a function (stable layout)
+        self._ctx = None
         self.set_content_height(120)
         self.set_draw_func(self.draw)
 
     def update(self, st):
+        self.remember(st)
         self.st = st
         self.queue_draw()
 
@@ -773,7 +776,7 @@ class FrontendView(Gtk.DrawingArea):
             sm = 0
         closed = [self.pa_label(n, sw) for n, sw in sorted(self.pa_switches(st).items(), reverse=True)]
         # the pins that read the node (the V Ω jack's network pins the enabled blocks select)
-        vg = self.jack_pins(st)
+        vg = self.context(st)['pins']             # every pin the function's states read (no jumping text)
         node_pins = [p for p in vg[0] + vg[1] if not p.startswith('PA') and p != 'FB/RLU']
         # the power bus (SMODE): with CMPO in the selection the comparator flips it between two sets (own line)
         bus_a, _, bus_b = self.SMODE.get(sm & 15, '?').partition(' / ')
@@ -925,7 +928,8 @@ class FrontendView(Gtk.DrawingArea):
         if st.get('ad1') == '1':
             ad1c = 'AD1: ' + self.chain(st, st.get('sad1fp', '')) + ' − ' + st.get('sad1fn', '') + \
                    ', reference ' + st.get('sad1rh', '') + ' − ' + st.get('sad1rl', '')
-        cmpc = ('comparator on ' + self.chain(st, st.get('scmpi', ''))) if st.get('cmp') == '1' else ''
+        cmp_in = self.context(st)['srcs']['CMP']     # every input of the range's states: steady text
+        cmpc = ('comparator on ' + ' / '.join(self.chain(st, p) for p in cmp_in)) if st.get('cmp') == '1' else ''
         how = {'Ohm': 'ratiometric (R = Rref × code / (0.9 × 2²³)); ' + ad1c,
                'Cont': 'ratiometric as Ω with Rref 1 kΩ (reference order swapped: negative codes); ' + ad1c +
                        ('; the %s drives the CMP pin (beeper) below ~67 Ω' % cmpc if cmpc else ''),
@@ -1053,6 +1057,219 @@ class FrontendView(Gtk.DrawingArea):
         g['v'] += [cls.pa_label(n, sw) for n, sw in sorted(cls.pa_switches(st).items(), reverse=True)]
         return (g['v'], [], g['c'], g['a']) if va else ([], g['v'], g['c'], g['a'])
 
+    # ---------- inputs the firmware switches inside one function / range ----------
+    # The drawing holds its geometry per function / range: every pin, wire and line any of these states
+    # can need is reserved, so a toggle never adds or removes a row (the owner: "скачет, некрасиво").
+    # fw-rs time-shares inputs (fw-rs/src/dmm.rs, sentinel.rs; power-meter-and-misconnect.md 4.4):
+    #  - DC V 6 V: the comparator alternates PB1 (A-jack sentinel) / SENSE (AC? hint), one 100 ms window each;
+    #  - AC V: AD1 (peak hold) alternates PB1 - PB3 (A-jack) / SENSE - PB5 (DC? hint), 100 ms windows;
+    #  - DC V 6 V / DC mV: after a comparator hit the A-PROT probe (OP2 on PB2, AD2 = OP2O - PB3, peak hold
+    #    on AD2) joins the row, and leaves again (sentinel::probe_row);
+    #  - frequency: the counter source alternates every 350 ms between the comparator (PB4) and the CNT pin;
+    #  - power meter: the RMS statistic cycles (SVXI / SDO23, method B), the counter's comparator moves
+    #    between the V tap (SENSE) and the current (PB4) by level;
+    #  - capacitance: the first counter read moves the comparator from PB0 (the row) to OP1O (R20 0x50);
+    #  - thermocouple: AD1 cycles TS1N / TS2P, TS1P / TS2N and its input (SAD1I 3 / 2 / 0), ~0.75 s each;
+    #  - AC+DC: whole AC V / DC V rows alternate (~1 s each);
+    #  - ENPKH off for a few ms at each peak-hold restart (continuity, diode, the probe).
+    # Known ones are predicted from their register signature (model_variants: the stock rows never show
+    # it), the rest are learnt (remember: every state seen since the function / range was entered).
+    HIST_N = 8           # state updates looked back for an alternation (the line changes <= ~10 times / s)
+    PHASE_N = 40         # updates of one AC+DC phase at most (two rows alternating = one drawing)
+    ALT_GROUPS = {'cmp': ('cmp', 'scmpi'), 'ad1': ('ad1', 'sad1i', 'sad1fp', 'sad1fn')}
+    TRACK = ('cmp', 'scmpi', 'ad1', 'sad1i', 'sad1fp', 'sad1fn', 'sdio', 'op1', 'sop1p', 'ops1', 'op2', 'sop2p',
+             'ops2', 'ad2', 'sad2ip', 'sad2in', 'sad2rh', 'sad2rl', 'ad3', 'sad3ip', 'sad3in', 'pkh', 'pkhsel',
+             'pasw', 'sad1rh', 'sad1rl', 'svxi', 'sdo23')
+    PROBE = {'op2': '1', 'sop2p': 'PB2', 'ops2': '0', 'ad2': '1', 'sad2ip': 'OP2O', 'sad2in': 'PB3',
+             'sad2rh': 'PB6', 'sad2rl': 'AGND', 'pkh': '1', 'pkhsel': '0'}
+    CONSUMERS = ('AD1', 'OP1', 'AD2', 'OP2', 'AD3', 'CMP')
+    EN = {'AD1': 'ad1', 'AD2': 'ad2', 'AD3': 'ad3', 'CMP': 'cmp', 'OP1': 'op1', 'OP2': 'op2'}
+
+    @staticmethod
+    def fkey(st):
+        """the function / range the layout is held for"""
+        return tuple(st.get(k, '') for k in ('role', 'mode', 'range', 'pa', 'shunt', 'powered'))
+
+    @staticmethod
+    def src_of(st, name):
+        """the input a block reads in state st (AD1 by SAD1I: TS / FB / its mux)"""
+        if name == 'AD1':
+            si_ = st.get('sad1i', '0')
+            return 'TS' if si_ in ('2', '3') else 'FB' if si_ == '1' else st.get('sad1fp', '')
+        return st.get({'AD2': 'sad2ip', 'AD3': 'sad3ip', 'CMP': 'scmpi', 'OP1': 'sop1p', 'OP2': 'sop2p'}[name], '')
+
+    @classmethod
+    def gval(cls, st, g):
+        """an alternation group's value: its fields, or ('0',) with the block off"""
+        f = cls.ALT_GROUPS[g]
+        return tuple(st.get(k, '') for k in f) if st.get(f[0]) == '1' else ('0',)
+
+    @classmethod
+    def gapply(cls, st, g, val):
+        f = cls.ALT_GROUPS[g]
+        return dict(st, **dict(zip(f, val))) if val[0] == '1' else dict(st, **{f[0]: '0'})
+
+    @classmethod
+    def gtext(cls, st, g, val):
+        """how a group value reads in the drawing: 'PB1', 'off', 'PB1 − PB3', 'TS'"""
+        if val[0] != '1':
+            return 'off'
+        s = cls.gapply(st, g, val)
+        if g == 'cmp':
+            return s.get('scmpi', '')
+        a = cls.src_of(s, 'AD1')
+        return a + ((' − ' + s.get('sad1fn', '')) if a not in ('TS', 'FB') else '')
+
+    PIN_ORDER = ('AGND', 'SENSE', 'PB0', 'PB8', 'RLU', 'RLD', 'FB', 'FB/RLU', 'PB4', 'PB5', 'PB3', 'PB2', 'PB1')
+
+    @classmethod
+    def pin_rank(cls, p):
+        """a fixed order of pins / inputs (jack pin lists, a block's inputs): nothing swaps between states"""
+        if p in cls.PIN_ORDER:
+            return (cls.PIN_ORDER.index(p), p)
+        if p.startswith('PA') and p[2:3].isdigit():
+            return (50 - int(p.split()[0][2:]), p)
+        return (99, p)
+
+    @classmethod
+    def alt_sort(cls, st, g, vals):
+        """distinct group values in a fixed order (blocks on first, the A-jack sentinel first): steady text"""
+        return sorted(dict.fromkeys(vals), key=lambda v: (v[0] != '1', cls.gtext(st, g, v) not in ('PB1', 'PB1 − PB3'),
+                                                          cls.gtext(st, g, v)))
+
+    @classmethod
+    def model_variants(cls, st):
+        """the states fw-rs switches this row between, from its register signature (header comment)"""
+        out = []
+        role, rng = st.get('role'), st.get('range')
+        cmp_s = st.get('scmpi') if st.get('cmp') == '1' else None
+        if role in ('DcV', 'DcMv') and cmp_s in ('PB1', 'SENSE'):          # the CmpA sentinel row
+            if role == 'DcV' and rng == '0':
+                out.append(dict(st, scmpi='SENSE' if cmp_s == 'PB1' else 'PB1'))
+            probe = all(st.get(k) == v for k, v in cls.PROBE.items() if k not in ('pkh', 'ops2'))
+            if probe:
+                out.append(dict(st, op2='0', ad2='0', pkh='0'))
+            elif st.get('op2') != '1' and st.get('ad2') != '1':
+                out.append(dict(st, **cls.PROBE))
+        a1 = (st.get('sad1fp'), st.get('sad1fn'))
+        if role == 'AcV' and st.get('ad1') == '1' and st.get('pkhsel') == '1' and a1 in (('PB1', 'PB3'), ('SENSE', 'PB5')):
+            o = ('SENSE', 'PB5') if a1 == ('PB1', 'PB3') else ('PB1', 'PB3')
+            out.append(dict(st, sad1fp=o[0], sad1fn=o[1]))
+        if role == 'Freq' and (cmp_s == 'PB4' or st.get('cmp') != '1'):     # counter: CMP (0xF0) / CNT (0x08)
+            out.append(dict(st, cmp='0', scmpi='SENSE') if cmp_s == 'PB4' else dict(st, cmp='1', scmpi='PB4'))
+        if role == 'Power' and cmp_s in ('SENSE', 'PB4'):          # pw_cmp_select: V tap / current by level
+            out.append(dict(st, scmpi='PB4' if cmp_s == 'SENSE' else 'SENSE'))
+        if role == 'CapOsc' and cmp_s in ('PB0', 'OP1O'):        # the first counter read moves it (0x50)
+            out.append(dict(st, scmpi='OP1O' if cmp_s == 'PB0' else 'PB0'))
+        if role == 'Temp' and st.get('ad1') == '1':
+            out += [dict(st, sad1i=s) for s in '023' if st.get('sad1i', '0') != s]
+        return out
+
+    def remember(self, st):
+        """state history: the last few function / range segments (AC+DC alternates two), per segment
+        the recent states (alternations) and every distinct register selection seen (reserved)"""
+        h = self.hist
+        k = self.fkey(st)
+        segs = h.setdefault('segs', [])
+        if segs and segs[-1][0] == k:
+            segs[-1][1] += 1
+            segs[-1][2] = st
+        else:
+            segs.append([k, 1, st])
+            del segs[:-4]
+        keep = {s[0] for s in segs}
+        for d in ('recent', 'seen'):
+            h[d] = {k_: v for k_, v in h.get(d, {}).items() if k_ in keep}
+        sig = tuple(st.get(t, '') for t in self.TRACK)
+        rec = h['recent'].setdefault(k, [])
+        rec.append(sig)
+        del rec[:-self.HIST_N]
+        seen = h['seen'].setdefault(k, {})
+        if len(seen) < 24:
+            seen.setdefault(sig, None)
+        self._ctx = None
+
+    def context(self, st):
+        """-> dict: variants (the states the geometry holds), alt {group: values} (alternating now),
+        pins (union jack pin lists), pin_st {pin: on / shared / off}, srcs {block: [inputs]},
+        src_st {(block, input): status}, act {block: drawn active}, phases (AC+DC: the other row's role)"""
+        if self._ctx is not None and self._ctx[0] is st:
+            return self._ctx[1]
+        k = self.fkey(st)
+        h = self.hist
+        segs = h.get('segs', [])
+        known = bool(segs) and segs[-1][0] == k and segs[-1][2] is st
+        seen = h.get('seen', {}) if known else {}
+        recent = h.get('recent', {}).get(k, []) if known else []
+
+        def expand(s, key):
+            vs = [s] + self.model_variants(s)
+            for sig in seen.get(key, {}):
+                v = dict(s, **dict(zip(self.TRACK, sig)))
+                vs += [v] + self.model_variants(v)
+            return vs
+        variants = expand(st, k)
+        # AC+DC: the row alternates with another function's (A B A): the drawing holds both
+        other = None
+        if known and len(segs) >= 3 and segs[-3][0] == k and segs[-2][1] <= self.PHASE_N:
+            other = segs[-2][2]
+            variants += expand(other, segs[-2][0])
+        # alternations within this function / range: >= 2 values and >= 2 switches in the last updates
+        alt = {}
+        for g, f in self.ALT_GROUPS.items():
+            idx = [self.TRACK.index(x) for x in f]
+            seq = [tuple(s_[i] for i in idx) if s_[idx[0]] == '1' else ('0',) for s_ in recent]
+            vals = list(dict.fromkeys(seq))
+            if len(vals) >= 2 and sum(1 for a, b in zip(seq, seq[1:]) if a != b) >= 2:
+                alt[g] = self.alt_sort(st, g, vals)
+        alt_states = [st] + [self.gapply(st, g, v) for g, vs in alt.items() for v in vs]
+        # jack pins: union over the variants, status from the alternation states
+        pins = [[], [], [], []]
+        for v in variants:
+            for i, lst in enumerate(self.jack_pins(v)):
+                for p in lst:
+                    if p not in pins[i]:
+                        pins[i].append(p)
+        sets = [set(p for lst in self.jack_pins(a) for p in lst) for a in alt_states]
+        on_p, any_p = set.intersection(*sets), set.union(*sets)
+        pin_st = {p: 'on' if p in on_p else 'shared' if p in any_p else 'off' for lst in pins for p in lst}
+        # block inputs: every input a variant reads with the block on (else the current, inactive)
+        srcs, src_st, act = {}, {}, {}
+        for n in self.CONSUMERS:
+            lst = []
+            for v in variants:
+                if v.get(self.EN[n]) == '1':
+                    s_ = self.src_of(v, n)
+                    if s_ and s_ not in lst:
+                        lst.append(s_)
+            srcs[n] = sorted(lst, key=self.pin_rank) or [self.src_of(st, n)]
+            now = [self.src_of(a, n) if a.get(self.EN[n]) == '1' else None for a in alt_states]
+            act[n] = any(x is not None for x in now)
+            for s_ in srcs[n]:
+                src_st[(n, s_)] = ('on' if all(x == s_ for x in now) else 'shared') if s_ in now else 'off'
+        ip = self.TRACK.index('pkh')
+        r = dict(variants=variants, alt=alt, pins=pins, pin_st=pin_st, srcs=srcs, src_st=src_st, act=act,
+                 other=other, pkh_recent=any(s_[ip] == '1' for s_ in recent[-3:]))
+        self._ctx = (st, r)
+        return r
+
+    # notes for the alternations (group, the values as drawn) -> text; the first match wins
+    ALT_NOTES = (
+        ('cmp', {'PB1', 'SENSE'}, 'alternates every 100 ms (A-jack / AC? hint)'),
+        ('cmp', {'PB4', 'off'}, 'on / off every 350 ms (counter: comparator ⇄ CNT pin)'),
+        ('ad1', {'PB1 − PB3', 'SENSE − PB5'},
+         'AD1 alternates every 100 ms: PB1 − PB3 (A-jack peak hold) ⇄ SENSE − PB5 (DC? hint)'),
+    )
+
+    def alt_note(self, st, g, vals):
+        txt = [self.gtext(st, g, v) for v in vals]
+        for g_, s_, note in self.ALT_NOTES:
+            if g_ == g and set(txt) == s_:
+                return note
+        if g == 'ad1' and 'TS' in txt:
+            return 'AD1 cycles with the thermocouple phases (~0.75 s each): %s' % ' ⇄ '.join(dict.fromkeys(txt))
+        return '%s switched by the firmware: %s' % ({'cmp': 'comparator', 'ad1': 'AD1'}[g], ' ⇄ '.join(dict.fromkeys(txt)))
+
     def layout(self, cr, w):
         """Signal-flow block diagram, drawn (cr) or only measured (cr None) at width w; returns the height.
 
@@ -1074,11 +1291,14 @@ class FrontendView(Gtk.DrawingArea):
             pl.set_text(s, -1)
             return pl.get_pixel_size()[0]
 
-        def label(x, y, s, color=txt, width=None, mark=True):
+        def label(x, y, s, color=txt, width=None, mark=True, draw=True):
             pl.set_text(s, -1)
             pl.set_width(int(width * Pango.SCALE) if width else -1)
             pl.set_wrap(Pango.WrapMode.WORD_CHAR)
             w_, h_ = pl.get_pixel_size()
+            if not draw:                            # measure only (a line held for text that may come)
+                pl.set_width(-1)
+                return h_
             if cr:
                 cr.set_source_rgb(*color)
                 cr.move_to(x, y)
@@ -1091,8 +1311,9 @@ class FrontendView(Gtk.DrawingArea):
         segs = self.segs if cr is not None and self.segs is not None else None
         wire_n = [0]
 
-        def wire(pts, active, width=None, net=None, record=True):
-            """orthogonal polyline; segments recorded (net id) for the wiring check"""
+        def wire(pts, active, width=None, net=None, record=True, dash=False):
+            """orthogonal polyline; segments recorded (net id) for the wiring check; dash: an input the
+            firmware time-shares (drawn the same in either phase: nothing blinks)"""
             q = [pts[0]]
             for p_ in pts[1:]:
                 if abs(p_[0] - q[-1][0]) > 0.01 or abs(p_[1] - q[-1][1]) > 0.01:
@@ -1106,10 +1327,13 @@ class FrontendView(Gtk.DrawingArea):
             if cr:
                 cr.set_source_rgb(*(on if active else off))
                 cr.set_line_width(width or lw)
+                if dash:
+                    cr.set_dash([lw * 2.5, lw * 1.8])
                 cr.move_to(*q[0])
                 for p_ in q[1:]:
                     cr.line_to(*p_)
                 cr.stroke()
+                cr.set_dash([])
 
         def dot(x_, y_, active):
             if cr:
@@ -1152,12 +1376,13 @@ class FrontendView(Gtk.DrawingArea):
         def box_w(lines, minw=0):
             return max([tw(s) for s in lines] + [minw]) + pad * 2
 
-        def opamp(x, yc, active, name, gain):
+        def opamp(x, yc, active, name, gain, hold=False):
             """triangle opamp symbol (width ~2.2 L), name inside, gain under it; -> (x_in, x_out)"""
             h_ = L * 2.0
             if gain:
                 name = name + ' ' + gain
-            w_ = max(L * 2.4, tw(name) + L * 1.4)
+            # hold: as wide as the widest name (a gain that appears when the probe switches OP2 on moves nothing)
+            w_ = max(L * 2.4, tw(name) + L * 1.4, tw('OP1 ×10') + L * 1.4 if hold else 0)
             if cr:
                 cr.set_source_rgb(*bg)
                 cr.move_to(x, yc - h_ / 2)
@@ -1206,7 +1431,10 @@ class FrontendView(Gtk.DrawingArea):
         # The layout depends on the configuration only (function, range, relays, muxes, switches), never on
         # readings or on the counter's ENCTR toggling: the comparator counts as used by ENCMP alone.
         shunts = {'A': '10 mΩ', 'mA': '0.5 Ω', 'uA': '47.5 Ω'}
-        pin_v, pin_n, pin_c, pin_a = self.jack_pins(st)
+        # what the firmware switches inside this function / range: the geometry holds all of it (context)
+        ctx = self.context(st)
+        pin_v, pin_n, pin_c, pin_a = ctx['pins']   # every pin a state of this function / range can use
+        pin_st = ctx['pin_st']
 
         def split(lines):
             return [p.strip() for s in lines for p in s.split(',') if p.strip()]
@@ -1222,34 +1450,36 @@ class FrontendView(Gtk.DrawingArea):
         stat = 2 if flag('sdo23') else 1 if flag('svxi') else 0          # RMS: X·X, X·Y, Y·Y
         mstat = ['X·X', 'X·Y', 'Y·Y'][stat]
         lpf_y = flag('sdo23')
-        stream = flag('ad2') and not flag('rms') and not flag('lpf')
-        ad1, ad2, ad3 = flag('ad1'), flag('ad2'), flag('ad3')
-        op1, op2 = flag('op1'), flag('op2')
-        cmp_used = flag('cmp')
-
-        # consumers: (name, source, active)
-        src = {'AD1': st.get('sad1fp', ''), 'AD2': st.get('sad2ip', ''), 'AD3': st.get('sad3ip', ''),
-               'CMP': st.get('scmpi', ''), 'OP1': st.get('sop1p', ''), 'OP2': st.get('sop2p', '')}
-        if st.get('sad1i', '0') == '2' or st.get('sad1i', '0') == '3':
-            src['AD1'] = 'TS'
-        elif st.get('sad1i', '0') == '1':
-            src['AD1'] = 'FB'
-        act = {'AD1': ad1, 'AD2': ad2, 'AD3': ad3, 'CMP': cmp_used, 'OP1': op1, 'OP2': op2}
+        alt = ctx['alt']
+        srcs, src_st = ctx['srcs'], ctx['src_st']
+        act = ctx['act']                           # a time-shared block counts as on in either phase
+        ad1, ad2, ad3, op1, op2 = act['AD1'], act['AD2'], act['AD3'], act['OP1'], act['OP2']
+        cmp_used = act['CMP']
+        # the AD2 stream (Wave view): not the A-PROT probe (its row signature, not ENPKH: that blinks)
+        probe = all(st.get(k) == v for k, v in self.PROBE.items() if k not in ('pkh', 'ops2'))
+        stream = flag('ad2') and not flag('rms') and not flag('lpf') and not probe
+        cmp_s = ' ⇄ '.join(self.gtext(st, 'cmp', v) for v in alt['cmp']) if 'cmp' in alt else st.get('scmpi', '')
+        ad1_n, ad1_sp = st.get('sad1fn', ''), '  '
+        if 'ad1' in alt:                            # AC V: '− PB3⇄5 ref …' (fits the reserved converter width)
+            ns = list(dict.fromkeys(self.gapply(st, 'ad1', v).get('sad1fn', '') for v in alt['ad1'] if v[0] == '1'))
+            ad1_n = ('PB' + '⇄'.join(n_[2:] for n_ in ns)) if all(n_.startswith('PB') for n_ in ns) else '⇄'.join(ns)
+            ad1_sp = ' ' if len(ns) > 1 else '  '
 
         # text of the converter boxes
         b_ad1 = ['AD1  24-bit ΣΔ', 'OSR %s%s  IG %s' % (st.get('osr1', ''), ' chop' if flag('chop') else '',
                                                       st.get('ad1ig', '')),
-                 '− %s  ref %s/%s' % (st.get('sad1fn', ''), st.get('sad1rh', ''), st.get('sad1rl', ''))]
+                 '− %s%sref %s/%s' % (ad1_n, ad1_sp, st.get('sad1rh', ''), st.get('sad1rl', ''))]
         b_ad2 = ['AD2  fast', 'OSR %s  IG %s' % (st.get('osr2', ''), st.get('ad2ig', '')),
                  '− %s  %s S/s' % (st.get('sad2in', ''), si(num('ad2rate'), '').strip())]
         b_ad3 = ['AD3  fast', 'OSR %s  IG %s' % (st.get('osr2', ''), st.get('ad3ig', '')),
                  '− %s' % st.get('sad3in', '')]
-        b_cmp = ['CMP', st.get('scmpi', '')]
+        b_cmp = ['CMP', cmp_s]
+        cmp_w = box_w(['PB1 ⇄ SENSE', 'PB4 ⇄ off'])      # reserved: the counter right of it never moves
         # column widths are reserved for the widest text any row can produce: no column moves between
         # functions / ranges (the owner: nothing jumps horizontally between frames)
         # (the widest texts of the stock / fw-rs rows; an unusual row may widen them, never the usual ones)
         conv_w = max([box_w(b) for b in (b_ad1, b_ad2, b_ad3)] + [box_w([
-            'OSR 32768 chop  IG 0.9', '− VSSA  ref REFO/AGND', '− AGND  76.8 k S/s'])])
+            'OSR 32768 chop  IG 0.9', '− VSSA  ref REFO/AGND', '− AGND  76.8 k S/s', '− PB3⇄5 ref PB6/AGND'])])
 
         # results
         res1 = []
@@ -1294,10 +1524,10 @@ class FrontendView(Gtk.DrawingArea):
         # reserved, not measured: the layout must not move when the readings change
         res_w = max(tw('V rms -999.9 mV'), tw('code -8388608'), tw('RMS 68719476735'), tw('stream → MCU 76.8 k S/s')) + pad
         step = max(9.0, pad * 1.4)                    # routing track pitch (>= 8 px between wires)
-        netsA_n = len({v for v in src.values() if v in pv + pn + pc + pa_})
+        netsA_n = len({v for k in srcs for v in srcs[k] if v in pv + pn + pc + pa_})
         laneA = (max(netsA_n, 4) + 1) * step + pad
         op_w = max(L * 2.4, tw('OP1 ×10') + L * 1.4)
-        stubs = [v for k, v in src.items() if v and v not in ('OP1O', 'OP2O') and v not in (pv + pn + pc + pa_)]
+        stubs = [v for k in srcs for v in srcs[k] if v and v not in ('OP1O', 'OP2O') and v not in (pv + pn + pc + pa_)]
         stub_names = set(self.MUX['sad1fp'] + self.MUX['sad2ip'] + self.MUX['scmpi'] + self.MUX['sop1p']) - {'OP1O', 'OP2O'}
         laneB = max(3 * step + pad, max([tw(v_) for v_ in stubs + list(stub_names) + ['TS']]) + pad * 3)
         chip_w = (pins_w + laneA + op_w + laneB + conv_w + pad * 4 + hpf_w + pad * 3 + mul_r * 2 + pad * 3 + rms_w
@@ -1318,8 +1548,10 @@ class FrontendView(Gtk.DrawingArea):
         row_of = {'AD1': 0, 'OP1': 1, 'AD2': 2, 'OP2': 3, 'AD3': 4, 'CMP': 6}
 
         def feeds(p):
-            return min([row_of[k] for k, v in src.items() if v == p] + [99])
-        pv, pn, pc, pa_ = (sorted(g_, key=feeds) for g_ in (pv, pn, pc, pa_))
+            return min([row_of[k] for k in srcs if p in srcs[k]] + [99])
+        def order(p):                               # by the block it feeds, then a fixed pin order (no swaps)
+            return (feeds(p), self.pin_rank(p))
+        pv, pn, pc, pa_ = (sorted(g_, key=order) for g_ in (pv, pn, pc, pa_))
 
         def pin_rows(y_top):
             """y of every pin, grouped by jack row: V pins, network pins, COM pins, A pins"""
@@ -1402,8 +1634,11 @@ class FrontendView(Gtk.DrawingArea):
             wire([(x_from, y_from), (xm, y_from)], active, net=net)
             lo, hi = min(ys_ + [y_from]), max(ys_ + [y_from])
             wire([(xm, lo), (xm, hi)], active, net=net)
-            for yq in ys_:
-                wire([(xm, yq), (x_pin - pad * 0.3, yq)], active, net=net)
+            for p, py in pins:                       # each branch as its pin: on, time-shared (dashed), reserved
+                if p != '–':
+                    ps = pin_st.get(p, 'on')
+                    wire([(xm, py + L / 2), (x_pin - pad * 0.3, py + L / 2)], active and ps != 'off', net=net,
+                         dash=ps == 'shared')
             for yq in set(ys_ + [y_from]):
                 deg = 1 + (yq > lo + 0.01) + (yq < hi - 0.01) + (1 if yq in ys_ and abs(yq - y_from) < 0.01 else 0)
                 if deg >= 3:
@@ -1411,9 +1646,10 @@ class FrontendView(Gtk.DrawingArea):
         # V row
         wire([(x + 2 * r + pad * 0.6 + name_w + pad * 0.5, jy['v']), (x_relay, jy['v'])], True)
         bx = box(x_relay, jy['v'], relay_lines, True)
-        # a jack net is live when a block reads one of its pins (the PA switch labels alone do not make it)
-        v_on = any(not p.startswith('PA') for p in pv)
-        n_on = any(not p.startswith('PA') for p in pn)
+        # a jack net is live when a block reads one of its pins (the PA switch labels alone do not make it);
+        # a pin only reserved for another state of the function (pin_st 'off') does not either
+        v_on = any(not p.startswith('PA') and pin_st[p] != 'off' for p in pv)
+        n_on = any(not p.startswith('PA') and pin_st[p] != 'off' for p in pn)
         if va:
             nb = box(x_net, jy['v'], net_v, v_on, minw=net_w - pad * 2)
             wire([(bx[2], jy['v']), (nb[0], jy['v'])], v_on)
@@ -1427,7 +1663,7 @@ class FrontendView(Gtk.DrawingArea):
         wire([(x + 2 * r + pad * 0.6 + name_w + pad * 0.5, jy['c']), (x_pin - pad * 1.5, jy['c'])], True, net='jc')
         fan(x_pin - pad * 1.5, jy['c'], pys['c'], True, 'jc')
         # A
-        a_on = bool(pa_)
+        a_on = any(pin_st[p] != 'off' for p in pa_)
         wire([(x + 2 * r + pad * 0.6 + name_w + pad * 0.5, jy['a']), (x_relay, jy['a'])], True)
         sb = box(x_relay, jy['a'], sh_lines, a_on, minw=sh_w - pad * 2)
         fan(sb[2], jy['a'], pys['a'], a_on, 'ja')
@@ -1435,8 +1671,8 @@ class FrontendView(Gtk.DrawingArea):
         pin_y = {}
         for g in ('v', 'n', 'c', 'a'):
             for p, py in pys[g]:
-                act_ = p != '–' and ((g == 'v' and va and v_on) or (g == 'n' and not va and n_on) or g == 'c'
-                                     or (g == 'a' and a_on))
+                act_ = p != '–' and pin_st.get(p) != 'off' and (
+                    (g == 'v' and va and v_on) or (g == 'n' and not va and n_on) or g == 'c' or (g == 'a' and a_on))
                 label(x_pin, py, p, txt if act_ else dim)
                 if p != '–':
                     pin_y[p] = py + L / 2
@@ -1444,12 +1680,13 @@ class FrontendView(Gtk.DrawingArea):
             # the chip's own pin column: the pins its consumers select, one per line
             used = []
             for k_ in ('AD1', 'OP1', 'AD2', 'OP2', 'AD3', 'CMP'):
-                if src[k_] in pin_y and src[k_] not in used:
-                    used.append(src[k_])
+                for s_ in srcs[k_]:
+                    if s_ in pin_y and s_ not in used:
+                        used.append(s_)
             pin_y = {}
             yy = y_op1 - L
             for p in used:
-                label(cx0, yy, p, txt)
+                label(cx0, yy, p, txt if pin_st.get(p) != 'off' else dim)
                 pin_y[p] = yy + L / 2
                 yy += L + pad * 0.8
             x_pin = cx0
@@ -1459,40 +1696,46 @@ class FrontendView(Gtk.DrawingArea):
         x_conv = xc + op_w + laneB                  # converters
         cons_y = {'AD1': y_ad1, 'OP1': y_op1, 'AD2': y_ad2, 'OP2': y_op2, 'AD3': y_ad3, 'CMP': y_cmp}
         # opamps
-        o1 = opamp(xc, y_op1, op1, 'OP1', ('×10' if flag('ops1') else '×1') if op1 else '')
-        o2 = opamp(xc, y_op2, op2, 'OP2', ('×10' if flag('ops2') else '×1') if op2 else '')
+        o1 = opamp(xc, y_op1, op1, 'OP1', ('×10' if flag('ops1') else '×1') if op1 else '', hold=True)
+        o2 = opamp(xc, y_op2, op2, 'OP2', ('×10' if flag('ops2') else '×1') if op2 else '', hold=True)
         op_out = {'OP1O': (o1[1], y_op1, op1), 'OP2O': (o2[1], y_op2, op2)}
         # converters
         c1 = box(x_conv, y_ad1, b_ad1, ad1, minw=conv_w - pad * 2)
         c2 = box(x_conv, y_ad2, b_ad2, ad2, minw=conv_w - pad * 2)
         c3 = box(x_conv, y_ad3, b_ad3, ad3, minw=conv_w - pad * 2)
-        cmpb = box(x_conv, y_cmp, b_cmp, cmp_used)
+        cmpb = box(x_conv, y_cmp, b_cmp, cmp_used, minw=cmp_w - pad * 2)
         cbox = {'AD1': c1, 'AD2': c2, 'AD3': c3, 'CMP': cmpb}
         # Channel routing: every net (a pin, or an op-amp output) gets its own vertical track; the
         # source runs horizontally into the track, each consumer leaves it horizontally at its input's
         # height; tracks ordered for the fewest crossings; a dot where a track branches.
         nets_a, nets_b, unrouted = {}, {}, []
         for name in ('OP1', 'OP2', 'AD1', 'AD2', 'AD3', 'CMP'):
-            s_ = src[name]
-            a_ = act[name]
             x_in = (o1 if name == 'OP1' else o2)[0] if name.startswith('OP') else cbox[name][0]
-            y_in = cons_y[name]
-            if s_ in op_out and not name.startswith('OP'):
-                xo, yo, oa = op_out[s_]
-                nets_b.setdefault(s_, {'src': (xo, yo), 'dst': [], 'on': oa})['dst'].append((x_in, y_in, a_ and oa))
-            elif s_ in pin_y:
-                nets_a.setdefault(s_, {'src': (x_pin + tw(s_) + pad * 0.4, pin_y[s_]), 'dst': [], 'on': True})[
-                    'dst'].append((x_in, y_in, a_))
-            elif s_:
-                # an internal node or a pin no jack net uses (PB6 ref, VDDA, TS): a stub label
-                sw = tw(s_)
-                lx0 = x_in - pad * 1.2 - sw
-                if lx0 > (cx0 + pins_w if name.startswith('OP') else xc + op_w):
-                    label(lx0 - pad * 0.3, y_in - L - pad * 0.2, s_, dim if a_ else off)
-                    wire([(lx0, y_in), (x_in, y_in)], a_)
-                    arrow(x_in, y_in, a_)
-                else:
-                    unrouted.append(s_)
+            # every input the function's states read, each at its own height (stubs on top, then op-amp
+            # outputs, then pins in board order: no crossings); the drawn set never changes inside a function
+            ins = sorted(srcs[name], key=lambda s_: (s_ in pin_y, s_ in op_out, pin_y.get(s_, 0), s_))
+            nin = len(ins)
+            for i_, s_ in enumerate(ins):
+                stt = src_st.get((name, s_), 'off')
+                a_, dsh = stt != 'off', stt == 'shared'
+                y_in = cons_y[name] + (i_ - (nin - 1) / 2) * L * 0.6
+                if s_ in op_out and not name.startswith('OP'):
+                    xo, yo, oa = op_out[s_]
+                    nets_b.setdefault(s_, {'src': (xo, yo), 'dst': [], 'on': oa})['dst'].append(
+                        (x_in, y_in, a_ and oa, dsh, nin == 1))
+                elif s_ in pin_y:
+                    nets_a.setdefault(s_, {'src': (x_pin + tw(s_) + pad * 0.4, pin_y[s_]), 'dst': [], 'on': True})[
+                        'dst'].append((x_in, y_in, a_, dsh, nin == 1))
+                elif s_:
+                    # an internal node or a pin no jack net uses (PB6 ref, VDDA, TS): a stub label
+                    sw = tw(s_)
+                    lx0 = x_in - pad * 1.2 - sw
+                    if lx0 > (cx0 + pins_w if name.startswith('OP') else xc + op_w):
+                        label(lx0 - pad * 0.3, y_in - L - pad * 0.2, s_, dim if a_ else off)
+                        wire([(lx0, y_in), (x_in, y_in)], a_, dash=dsh)
+                        arrow(x_in, y_in, a_)
+                    else:
+                        unrouted.append(s_)
 
         def route(nets, x_first):
             names = list(nets)
@@ -1522,8 +1765,9 @@ class FrontendView(Gtk.DrawingArea):
                 xt = xs[n]
                 xs0, ys0 = d_['src']
                 # a consumer within a few px of the source's height takes the wire straight (an op-amp or
-                # a box accepts it anywhere along its input edge): no jog
-                d_['dst'] = [(x_in, ys0 if 0 < abs(y_in - ys0) < L * 0.7 else y_in, a_) for x_in, y_in, a_ in d_['dst']]
+                # a box accepts it anywhere along its input edge): no jog; not a block with several inputs
+                d_['dst'] = [(x_in, ys0 if one and 0 < abs(y_in - ys0) < L * 0.7 else y_in, a_, dsh, one)
+                             for x_in, y_in, a_, dsh, one in d_['dst']]
                 any_on = any(dd[2] for dd in d_['dst'])
                 wire([(xs0, ys0), (xt, ys0)], any_on, net=n)
                 ys_ = [dd[1] for dd in d_['dst']]
@@ -1534,8 +1778,8 @@ class FrontendView(Gtk.DrawingArea):
                 if act_ys:                          # the live part over it (same geometry, not re-recorded)
                     alo, ahi = min(act_ys + [ys0]), max(act_ys + [ys0])
                     wire([(xt, alo), (xt, ahi)], True, net=n, record=False)
-                for x_in, y_in, a_ in d_['dst']:
-                    wire([(xt, y_in), (x_in, y_in)], a_, net=n)
+                for x_in, y_in, a_, dsh, _one in d_['dst']:
+                    wire([(xt, y_in), (x_in, y_in)], a_, net=n, dash=dsh)
                     arrow(x_in, y_in, a_)
                 for yq in set(ys_ + [ys0]):
                     deg = 1 + (yq > lo + 0.01) + (yq < hi - 0.01) + sum(1 for v_ in ys_ + [ys0] if abs(v_ - yq) < 0.01) - 1
@@ -1591,8 +1835,9 @@ class FrontendView(Gtk.DrawingArea):
             cr.stroke()
         if ink is not None:
             ink.append(('mul', mx - mul_r - 1, my - mul_r - 1, mx + mul_r + 1, my + mul_r + 1))
-        label(mx - mul_r - pad * 0.8 - tw(mstat), my - L / 2, mstat, hot if rms_on else off)
-        rb = box(mx + mul_r + pad * 3, my, rms_lines, rms_on)
+        mst_w = max(tw(m_) for m_ in ('X·X', 'X·Y', 'Y·Y'))     # the power meter cycles it: a fixed place
+        label(mx - mul_r - pad * 0.8 - mst_w, my - L / 2, mstat, hot if rms_on else off)
+        rb = box(mx + mul_r + pad * 3, my, rms_lines, rms_on, minw=max(tw('Σ %s / N' % m_) for m_ in ('X·X', 'X·Y', 'Y·Y')))
         wire([(mx + mul_r, my), (rb[0], my)], rms_on)
         arrow(rb[0], my, rms_on)
         if rms_res and rms_on:
@@ -1604,16 +1849,20 @@ class FrontendView(Gtk.DrawingArea):
         # LPF (mean of X or Y)
         lpf_on = flag('lpf')
         tap2, tap3 = c2[2] + pad * 1.5, c3[2] + pad * 2.8
-        lb = box(xp, y_lpf, lpf_lines, lpf_on)
+        lb = box(xp, y_lpf, lpf_lines, lpf_on, minw=max(tw('X, OSR 16384'), tw('Y, OSR 16384')))     # OSR text: the box keeps its size
         wire([(tap2, y_ad2), (tap2, y_lpf - L * 0.3), (lb[0], y_lpf - L * 0.3)], lpf_on and not lpf_y, net='X')
         wire([(tap3, y_ad3), (tap3, y_lpf + L * 0.3), (lb[0], y_lpf + L * 0.3)], lpf_on and lpf_y, net='Y')
         dot(tap2, y_ad2, lpf_on and not lpf_y)       # the LPF taps branch off the converter outputs
         dot(tap3, y_ad3, lpf_on and lpf_y)
         wire([(lb[2], y_lpf), (x_res - pad, y_lpf)], lpf_on)
-        pk = flag('pkh')
-        label(x_res, y_lpf - (L + pad / 4 if pk else L / 2), lpf_res if lpf_on else 'LPF off', hot if lpf_on else off)
+        # peak hold: ENPKH drops for a few ms at each restart, the probe brings one: the slot is held
+        pk_slot = any(v.get('pkh') == '1' for v in ctx['variants'])
+        pk = flag('pkh') or ctx['pkh_recent']
+        label(x_res, y_lpf - (L + pad / 4 if pk_slot else L / 2), lpf_res if lpf_on else 'LPF off', hot if lpf_on else off)
         # peak hold (its source by PKHSEL)
-        if pk:
+        if pk_slot and not pk:
+            label(x_res, y_lpf + pad / 4, 'peak hold off', off)
+        elif pk:
             label(x_res, y_lpf + pad / 4, 'peak hold %s: %s … %s' % (
                 ['AD2', 'AD1', 'LPF', 'LPF'][int(num('pkhsel'))], st.get('pkmin', ''), st.get('pkmax', '')), dim)
         # comparator -> counter
@@ -1623,6 +1872,8 @@ class FrontendView(Gtk.DrawingArea):
         wire([(kb[2], y_cmp), (x_res - pad, y_cmp)], ctr_on)
         label(x_res, y_cmp - L / 2, ('f %s' % si(num('ctf'), 'Hz')) if ctr_on else
               ('CMP pin → beeper' if flag('cmppin') else 'counter off'), hot if ctr_on or flag('cmppin') else off)
+        if 'cmp' in alt:                            # under the CMP box: what the two inputs are for
+            label(x_conv, cmpb[3] + max(4.5, pad * 0.6), self.alt_note(st, 'cmp', alt['cmp']), dim)
         # power: what the MCU makes of it
         y_end = max(chip_bottom, board_bottom)
         y_end = self.source_band(st, y_end, w, pad, L, lw, tw, label, wire, arrow, box, opamp, dot, si, num, ink,
@@ -1637,6 +1888,19 @@ class FrontendView(Gtk.DrawingArea):
             y_end += label(pad, y_end, note, hot, w - 2 * pad)
         if unrouted:
             y_end += label(pad, y_end, 'other inputs: ' + ', '.join(unrouted), dim, w - 2 * pad)
+        # AD1's input alternation: its line is held while the function can switch it (empty until seen)
+        pred = self.alt_sort(st, 'ad1', [self.gval(v, 'ad1') for v in ctx['variants']])
+        if 'ad1' in alt or len(pred) > 1:
+            y_end += pad
+            hold = label(pad, y_end, self.alt_note(st, 'ad1', pred), dim, w - 2 * pad, draw=False)
+            if 'ad1' in alt:
+                hold = max(hold, label(pad, y_end, self.alt_note(st, 'ad1', alt['ad1']), dim, w - 2 * pad))
+            y_end += hold
+        if ctx['other'] is not None:
+            y_end += pad
+            y_end += label(pad, y_end, 'AC+DC: the firmware alternates the %s and %s rows (~1 s each); the drawing '
+                           'holds both, the other row\'s inputs grey' % (st.get('role'), ctx['other'].get('role')),
+                           dim, w - 2 * pad)
         if self.pa_switches(st):
             y_end += pad
             y_end += label(pad, y_end, 'PA<n> switches (R2A..R2E): P power bus (SMODE %s), D OP3 output, F FB, S SENSE'
