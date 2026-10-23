@@ -2276,6 +2276,39 @@ fn main() {
             let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);
             let g = &w.gen;
             let d_gen = || ui::gen_static(g);
+            // MF range pages (V with Wave, A with Wave / Inrush / Fuse check,
+            // ohm) and the Power Settings page: every button.
+            let d_rv = || {
+                ui::range_page(Button::Volt, Some(5), 3, Some(("AUTO+ recommended: never steps to mV", false)));
+                ui::wave_button();
+            };
+            let d_ra = || {
+                ui::range_page(Button::Amp, Some(7), 1, None);
+                ui::wave_button();
+                ui::inrush_button();
+            };
+            let d_ro = || ui::range_page(Button::Ohm, Some(7), 1, None);
+            let d_rc = || ui::range_page(Button::Cap, Some(0), 0, None);
+            let range_t = |b: Button| -> Vec<u8> {
+                let mut t: Vec<u8> = (0..ui::range_items(b).len() as u8).collect();
+                let errs: &[u8] = match b {
+                    Button::Volt => &[0, 1, 3, 6, 2, 4],
+                    Button::Amp => &[0, 1, 3, 6, 2, 4, 5],
+                    Button::Ohm => &[0, 1, 2, 4],
+                    _ => &[2, 4],
+                };
+                t.extend(errs.iter().map(|k| ui::RP_ERR + k));
+                if matches!(b, Button::Volt | Button::Amp) {
+                    t.push(ui::RP_WAVE);
+                }
+                if b == Button::Amp {
+                    t.push(ui::RP_INRUSH);
+                }
+                t
+            };
+            let ps_pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pw_cases()[0].1 };
+            let d_ps = || ui::pw::settings_page(&ps_pv);
+            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=31).filter(|&c| c != 21).collect();
             let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
                 .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
                 .chain((0..9u8).map(|r| {
@@ -2295,6 +2328,10 @@ fn main() {
                     ]
                 }))
                 .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>)))
+                .chain([(Button::Volt, &d_rv as &dyn Fn(), Some(5usize), 3u8), (Button::Amp, &d_ra, Some(7), 1), (Button::Ohm, &d_ro, Some(7), 1), (Button::Cap, &d_rc, Some(0), 0)].into_iter().flat_map(|(b, d, sel, sub)| {
+                    range_t(b).into_iter().map(move |t| (format!("range{}-{t}", b as u8), d, Box::new(move |on| ui::range_press(b, t, sel, sub, on)) as Box<dyn Fn(bool)>))
+                }))
+                .chain(ps_codes.iter().map(|&c| (format!("pwset{c}"), &d_ps as &dyn Fn(), Box::new(move |on| ui::pw::settings_press(&ps_pv, c, on)) as Box<dyn Fn(bool)>)))
                 .collect();
             for (name, draw, press) in cases.iter() {
                 host::reset(0);
@@ -2309,6 +2346,12 @@ fn main() {
                     "record3/0" => "m12b-record-start-pressed",
                     "gen1" => "g01b-gen-box-pressed",
                     "gen4" => "g01c-gen-wave-pressed",
+                    "range0-1" => "m03d-range-v-item-pressed",
+                    "range0-103" => "m03e-range-v-cpl-pressed",
+                    "range1-105" => "m03f-range-a-fuse-pressed",
+                    "range1-102" => "m03g-range-a-ok-pressed",
+                    "pwset2" => "p19-power-settings-pressed",
+                    "pwset28" => "p19b-power-settings-cpl-pressed",
                     _ => "",
                 };
                 if !file.is_empty() {

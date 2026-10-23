@@ -610,6 +610,36 @@ pub fn settings_page(pv: &PowerVals) {
     }
 }
 
+/// Pressed feedback on the Power Settings page (ui-review #11): button `c`
+/// (PS_* as `settings_hit`) drawn pressed (`on`: the list rows' pressed
+/// colour) or as `settings_page` draws it.
+#[inline(never)] // .cold (link-native.x): per touch on the page
+pub fn settings_press(pv: &PowerVals, c: u8, on: bool) {
+    let (r, t, sel) = match c {
+        0..=3 => (ps_cell(0, c as i16), pw::V_NAMES[c as usize], !pv.v_auto && pv.vr == c),
+        4 => (ps_cell(0, 4), "AUTO", pv.v_auto),
+        PS_I..=13 => {
+            let i = c - PS_I;
+            (ps_cell((1 + i / 5) as i16, (i % 5) as i16), pw::I_NAMES[i as usize], !pv.i_auto && pv.ik == i)
+        }
+        14 => (ps_cell(2, 1), "AUTO", pv.i_auto),
+        PS_BURDEN => (ps_cell(2, 2), "At load", pv.comp),
+        PS_ZERO => (ps_cell(2, 3), "Zero", false),
+        PS_VCAL => (ps_cell(2, 4), "V cal", false),
+        PS_COUP..=30 => {
+            let i = (c - PS_COUP) as usize;
+            (rect(PS_ROW4[i], 182, 150, 38), pw::coup_name(PS_COUPS[i]), pv.coup == PS_COUPS[i])
+        }
+        _ => match PS_ROW5.iter().position(|&(k, _)| k == c) {
+            Some(i) => (ps_row5(i), PS_ROW5[i].1, false),
+            None => return,
+        },
+    };
+    let bg = if on { super::K_SEL } else if sel { SEL } else { 0x2966 };
+    sf::rbox(r, 6, bg, BG);
+    sf::glyphs(sf::TEXT22, r, t, STATUS_FG, bg, 8, 0);
+}
+
 /// The Zero... / V cal... dialog (dialog.rs fuse-check box, Cancel / Start;
 /// lines of <= 30 characters).
 pub fn job_dialog(job: u8) {
