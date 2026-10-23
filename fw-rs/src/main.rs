@@ -1790,7 +1790,8 @@ fn fast_next_hz(l: &logger::Logger, ad2: bool) -> u32 {
 }
 
 /// LOG:SCALe? a,b (scpi.rs): the AD2 session's scale (value = a + b raw).
-#[inline(never)] // .cold (link-native.x)
+/// Region B: asked while the session streams.
+#[inline(never)]
 fn log_scale(scpi: &mut scpi::Scpi, l: &logger::Logger, sc: Option<dmm::Ad2Scale>) {
     scpi.len = 0;
     let sc = sc.filter(|_| l.ad2() && logger::Logger::mode_ok(true, l.mode()));
