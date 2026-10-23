@@ -273,8 +273,8 @@ fi
 
 # Device-side check: the SPI flash reports no block write error.
 FLASH=$("${DBG[@]}" scpi 'DBG:FLASH?')
-echo "DBG:FLASH? -> $FLASH (JEDEC id, blocks, write error)"
-[ "${FLASH##*,}" = 0 ] || die "the meter reports an SPI flash write error: the staged file may be
+echo "DBG:FLASH? -> $FLASH (JEDEC id, blocks, write error, then the screenshot prep fields)"
+[ "$(echo "$FLASH" | cut -d, -f3)" = 0 ] || die "the meter reports an SPI flash write error: the staged file may be
 corrupt. Do not update; reset the meter (tools/dm40dbg.py reset) and run again."
 
 if [ -n "$STOCK" ]; then
