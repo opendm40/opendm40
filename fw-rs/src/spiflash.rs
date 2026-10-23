@@ -445,6 +445,16 @@ impl crate::fastenc::Nor for SpiFlash {
             cs(false);
         }
     }
+    fn dry_page(&mut self, addr: u32, n: usize) {
+        // A READ command and `n` bytes back to back, as `program` clocks a
+        // page out (the chip only shifts data; nothing is written).
+        if !self.failed && addr < self.blocks * SECTOR as u32 {
+            cs(true);
+            cmd_addr(CMD_READ, addr);
+            tx_burst(&[0xFF; 256][..n.min(256)]);
+            cs(false);
+        }
+    }
     fn erase(&mut self, addr: u32, big: bool) {
         if self.failed || addr >= self.blocks * SECTOR as u32 {
             return;

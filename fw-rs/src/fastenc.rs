@@ -65,6 +65,13 @@ pub trait Nor {
     fn erase(&mut self, addr: u32, big: bool);
     /// Read (waits for a running erase / program first). False: failed.
     fn read(&mut self, addr: u32, b: &mut [u8]) -> bool;
+    /// The bus cost of programming `n` (<= 256) bytes at `addr` without
+    /// programming (fastlog's writer trial): spiflash clocks them out as a
+    /// read, back to back as `program` does.
+    fn dry_page(&mut self, addr: u32, n: usize) {
+        let mut b = [0u8; 256];
+        let _ = self.read(addr, &mut b[..n.min(256)]);
+    }
 }
 
 /// CRC-32 (zlib) (= dlog::crc32_upd, which is `.cold`). A byte table
@@ -450,6 +457,7 @@ impl FastEnc {
         // there, programmed or not (at most one wrap).
         let s = self.hpos + CHDR as u32;
         let len = (self.wr - s) as usize;
+        debug_assert!(len <= self.fl as usize, "chunk longer than the FIFO");
         let a0 = (s & (self.fl - 1)) as usize;
         let first = len.min(self.fl as usize - a0);
         let c = crc32_upd(!0, &fifo[a0..a0 + first]);
