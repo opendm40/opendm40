@@ -1592,6 +1592,7 @@ impl Dmm {
         self.sent.ohm_exit(self.ohm_exit_t.filter(|&t| kind == Kind::CmpV && now < t + sentinel::OHM_EXIT_CAP_MS));
         // Ohm / temperature: A-JACK needs the V side's word (sentinel V_GATE).
         self.sent.vgate = matches!(self.mode, 10 | 15);
+        self.sent.bridge = self.acdc;
         // DC? / AC? hints (doc 4.4): AC V alternates AD1 between PB1 - PB3
         // and the V tap, DC V 6 V alternates the comparator between PB1 and
         // SENSE, one 100 ms window each (`poll`, `poll_ac`).
