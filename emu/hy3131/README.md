@@ -13,6 +13,7 @@ emu/hy3131/tests/         host unit tests (dotnet 8): tests/run.sh
 emu/hy3131/modetest.py    stock + fw-rs through every DMM mode in the emulator, results below
 emu/hy3131/powtest.py     fw-rs power meter end to end over USB/IP (fw-rs/docs/power-meter-and-misconnect.md 3.11)
 emu/hy3131/couptest.py    fw-rs AUTO coupling of V / A: DC -> AC -> mixed signals through the hysteresis band, taps, SCPI (fw-rs/docs/acdc-stock-vs-fwrs.md 11)
+emu/hy3131/autorangetest.py fw-rs DC V AUTO from 600 / 1000 / 60 V with the model's AD1 filter memory (ad1mix:1), READ? +9.91E37 through an AC+DC range change (device bab5dd4; fw-rs/docs/acdc-stock-vs-fwrs.md 12)
 emu/hy3131/ad2streamtest.py fw-rs AD2 stream ISR (feature ad2-isr: TIM7 -> IRQ 55 -> SPI2 reads) end to end (fw-rs/docs/dmm-input-scope-feasibility.md 9)
 emu/hy3131/wavetest.py    fw-rs DMM wave view (scope page, source DMM; feature ad2-isr) driven by DBG:KEY / TAP, checked over SCPI, --case current, --shots DIR (feasibility 10)
 emu/hy3131/burdentest.py  fw-rs burden voltage readout: FETC:BURD? = READ? x R_path per shunt / AC / POW:BURD, DISP:BURD, screenshots (fw-rs/docs/power-meter-and-misconnect.md 3.15)
@@ -228,7 +229,7 @@ Connection spec (`emu/run.py --dmm SPEC[@T]`, script lines `T dmm SPEC` or
 | `cj:25`, `die:35` (`die:none` = follows cj) | cold junction (jacks) and HY3131 die temperature |
 | `avsrc:0.5[,rs=]`, `isrcv:0.001`, `aload:100` | wrong-jack cases: voltage source across A-COM, current source across V-COM, resistor across A-COM |
 | `dcv:`, `acv:V@Hz`, `hz:F,duty=,amp=`, `dca:`, `aca:`, `ohm:`, `cap:`, `temp:T,cj=`, `chip:` | the older per-function keys: each replaces the whole connection with the equivalent one |
-| `noise:0`, `cal:0`, `beat:1`, `powmix:0` | model options (`powmix:0`: an R34 switch in the power role does not mix the block in progress) |
+| `noise:0`, `cal:0`, `beat:1`, `powmix:0`, `ad1mix:1` | model options (`powmix:0`: an R34 switch in the power role does not mix the block in progress; `ad1mix:1`: a row write that does not restart AD1, same R22 and ENAD1 kept, leaves the next conversions a sinc^3 mix of the old and the new input over 3 periods, as the device's 2-step DC V autorange, bab5dd4; off by default) |
 
 State: `sysbus.hy3131 Frontend` returns one line of `key=value` tokens (relay
 and shunt state, role / mode / range, which converters and switches are on,

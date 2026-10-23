@@ -623,6 +623,13 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     app.scpi(&mut clk, c, &mut scpi)
                 }
                 scpi::Out::Fetch => match app.meter.shown().copied() {
+                    // A range change with no reading yet (READ?'s rule; not
+                    // while HOLD freezes the readout).
+                    Some(_) if app.dmm.reading_pending() && app.meter.hold_state() == 0 => {
+                        scpi.len = 0;
+                        scpi.put_bytes(scpi::NAN);
+                        true
+                    }
                     Some(r) => {
                         scpi.len = 0;
                         scpi.put_reading(&r);
@@ -1488,12 +1495,15 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             // current function if there is one.
             // A wait the function changed under (WAIT_ORPHAN) or no reading
             // of the current function: SCPI NaN, not the overload value, so
-            // that a host (libsigrok's DM40 profile) can skip it.
+            // that a host (libsigrok's DM40 profile) can skip it. The same
+            // while a range change has no reading yet (Dmm::reading_pending:
+            // the AC+DC settle, an autorange step): the latest reading is
+            // from before it.
             let orphan = scpi_wait[src].is_some_and(|w| w.3 == WAIT_ORPHAN);
             scpi_wait[src] = None;
             let scpi = &mut scpis[src];
             scpi.len = 0;
-            match app.meter.live().copied().filter(|_| !orphan) {
+            match app.meter.live().copied().filter(|_| !orphan && !app.dmm.reading_pending()) {
                 Some(r) => scpi.put_reading(&r),
                 None => {
                     scpi.put_bytes(scpi::NAN);

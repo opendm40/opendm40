@@ -627,6 +627,21 @@ pub struct Dmm {
     acs_t0: u64,
     acs_prev: f32,
     acs_flat: u8,
+    /// `acs_tp` = when `acs_prev` came, `acs_d` = how much it fell from
+    /// the one before in the same AC phase (< 0: unknown), `acs_dc` = the
+    /// last DC part used (NaN: none on this range; an input step, ACS_DC_STEP).
+    acs_tp: u64,
+    acs_d: f32,
+    acs_dc: f32,
+    /// DC conversions after a range change (`vet_ad1`, VET_*): results still
+    /// to vet, results held so far, the previous conversion on this range
+    /// (i32::MIN: none yet).
+    vet_left: u8,
+    vet_held: u8,
+    vet_prev: i32,
+    /// A range or function change since the last reading (READ? / FETCh?
+    /// answer +9.91E37 meanwhile, `reading_pending`).
+    rd_pending: bool,
     /// AUTO coupling (sub-mode 3; `acdc` is set too: the AC+DC alternation
     /// measures both parts): `auto_ac` the part shown (true = AC), `auto_n`
     /// cycles evaluated since the last reset (0: none yet, each reading then
@@ -868,10 +883,58 @@ const ACDC_DIAG_N: usize = 4;
 // Meanwhile AC+DC gives no reading (like the entry: no value before both
 // parts are measured); AUTO keeps showing its part with the AC part held
 // and does not re-decide.
-const ACS_STEP: f32 = 0.99;
+//
+// "Flat" (device bab5dd4: a 1 % step let the 600 -> 60 V tail of a 40 Hz
+// square through, +0.55 / +0.24 % for 1.7 s): a result that fell by at
+// most ACS_STEP (0.1 %) of itself since the previous one (rose: flat too),
+// and when the two falls before it in the same AC phase (results
+// ACS_NEAR_MS apart at most) shrink as a decay does (ratio q < 1), the
+// rest of that decay, d q / (1 - q), at most ACS_REM (0.05 %) of the
+// result. The device's tail fell 0.6 % per 100 ms result there (node time
+// constant ~0.27 s), so the first flat pair came on the next AC phase:
+// 4.7678 V for 4.768 V. ACS_MAX_MS ends it anyway, also in a DC phase
+// (`ac_settle_cap`: the last result held is the AC part), so the gap to
+// the first reading stays below 6 s.
+//
+// The same settle after an input step (device bab5dd4: a 0.5-0.8 V DC step
+// made the AC part read up to 3.4 V for ~1 s, AC+DC autorange went 6 -> 60
+// V and back after 6 s): a DC part that moved by more than ACS_DC_STEP of
+// the range between two DC results, or an AC result above ACS_JUMP x the
+// AC part + ACS_JUMP_FLOOR of the range. AC+DC keeps its readings then,
+// with the AC part held (the input changed, not the meter), and no range
+// moves on the discarded results.
+const ACS_STEP: f32 = 0.001;
+const ACS_REM: f32 = 5e-4;
+const ACS_NEAR_MS: u64 = 300;
 const ACS_FLAT_N: u8 = 2;
 const ACS_FLOOR: f32 = 5e-4;
-const ACS_MAX_MS: u64 = 6000;
+const ACS_MAX_MS: u64 = 5000;
+const ACS_DC_STEP: f32 = 0.005;
+const ACS_JUMP: f32 = 1.5;
+const ACS_JUMP_FLOOR: f32 = 0.005;
+
+// DC conversions after a range change (DC V / mV / A, the DC phase of
+// AC+DC method A; `vet_ad1`). Device bab5dd4: VOLT:RANG:AUTO ON from 600 V
+// steps down twice; the second row (6 V) goes out at the same R22 (OSR
+// 8192) as the first, so AD1 is not restarted and its decimation filter
+// still holds samples of the 60 V tap: one reading of 0.767-0.790 V for
+// 1 V in 5 of 35 tries (one step from 60 V: the row changes R22 from 0x17,
+// AD1 restarts, 0 of 10). An R22 change in the middle of a conversion
+// (the same range set again, device 8087c7d: 25-51 %) and the AC+DC DC
+// part of 53 % after a range-page change (bab5dd4) look the same. So the
+// first VET_N (AC+DC: VET_N_ACDC, through the second DC phase: the first one
+// after a set keeps the AC phase's count, up to 4) conversions on a new range
+// count only when each agrees with the one before it within VET_DIV (0.5 %)
+// of it or VET_FLOOR codes (~0.1 % of full scale); a conversion that does
+// not is held: no reading, no step down (an overload still steps up: a
+// mixed-in old tap can only read low on a step down), not in the averaging window,
+// not the AC+DC DC part. After VET_HELD_MAX held ones the next counts
+// anyway (a moving input). Costs one conversion (100 ms) per range step.
+const VET_N: u8 = 2;
+const VET_N_ACDC: u8 = 8;
+const VET_HELD_MAX: u8 = 4;
+const VET_DIV: i32 = 200;
+const VET_FLOOR: i32 = 4000;
 
 // AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-fwrs.md
 // section 11). The AC+DC alternation measures both parts; AUTO shows one of
@@ -910,6 +973,22 @@ const AUTO_VOTES: u8 = 2;
 const AUTO_SETTLE_K: f32 = 4.0;
 const AUTO_TIE: f32 = 0.01;
 const AUTO_TIE_MS: u64 = 4000;
+
+/// The AC settle's "flat" test (ACS_STEP) of result `ac` after `prev` (< 0:
+/// none), `d_prev` = the fall before (< 0: unknown), `near` = the two in the
+/// same AC phase.
+fn acs_flat(prev: f32, d_prev: f32, ac: f32, near: bool) -> bool {
+    let d = prev - ac;
+    if prev < 0.0 || d > ACS_STEP * ac {
+        return false;
+    }
+    if near && d > 0.0 && d_prev > 0.0 {
+        // still falling, as the result before: what is left of the decay
+        let q = d / d_prev;
+        return q < 1.0 && d * q <= ACS_REM * ac * (1.0 - q);
+    }
+    true
+}
 
 /// SCPI / persisted function codes of the AUTO coupling (`Dmm::func`), next
 /// to 16 / 17 (AC+DC) and pw::FUNC (18).
@@ -962,6 +1041,13 @@ impl Dmm {
             acs_t0: 0,
             acs_prev: -1.0,
             acs_flat: 0,
+            acs_tp: 0,
+            acs_d: -1.0,
+            acs_dc: f32::NAN,
+            vet_left: 0,
+            vet_held: 0,
+            vet_prev: i32::MIN,
+            rd_pending: false,
             cpl_auto: false,
             auto_ac: false,
             auto_n: 0,
@@ -1408,6 +1494,46 @@ impl Dmm {
             self.reset_values();
         }
         self.ac_settle_start(now, old);
+        self.vet_start(old);
+    }
+
+    /// A range or function change from `old` (mode, range; AC+DC: either
+    /// phase of it): vet the next DC conversions (VET_*), and READ? / FETCh?
+    /// have no reading until the first one of the new range.
+    fn vet_start(&mut self, old: (u8, i8)) {
+        if (dc_mode_of(old.0), old.1) != (dc_mode_of(self.mode), self.range) {
+            self.vet_left = if self.acdc { VET_N_ACDC } else { VET_N };
+            self.vet_held = 0;
+            self.vet_prev = i32::MIN;
+            self.rd_pending = true;
+        }
+    }
+
+    /// Vet one DC conversion (`vet_start`): true = use it.
+    fn vet_ad1(&mut self, ad1: i32) -> bool {
+        if self.vet_left == 0 || self.am_on() {
+            return true;
+        }
+        let p = self.vet_prev;
+        self.vet_prev = ad1;
+        if p != i32::MIN && (ad1 - p).abs() <= VET_FLOOR.max(p.abs() / VET_DIV) {
+            self.vet_left -= 1;
+            return true;
+        }
+        self.vet_held += 1;
+        if self.vet_held > VET_HELD_MAX {
+            self.vet_left = 0;
+            return true;
+        }
+        false
+    }
+
+    /// A range or function change happened and no reading of it came yet:
+    /// READ? / FETCh? answer +9.91E37 ("no reading") rather than the last
+    /// reading from before it (main.rs; device bab5dd4: READ? held a
+    /// transient of 3.39 V for 5 s through an AC+DC range step).
+    pub fn reading_pending(&self) -> bool {
+        self.rd_pending
     }
 
     /// AC+DC / AUTO: a range or unit change from `old` (mode, range) of the
@@ -1421,9 +1547,8 @@ impl Dmm {
         };
         let (om, nm) = (dc_mode_of(old.0), dc_mode_of(self.mode));
         if self.acdc && !self.pw.on && q(om) != 0 && q(om) == q(nm) && (om, old.1) != (nm, self.range) {
-            self.acs_t0 = now.max(1);
-            self.acs_prev = -1.0;
-            self.acs_flat = 0;
+            self.acs_begin(now);
+            self.acs_dc = f32::NAN;
             // AC+DC: no reading until the AC part is back, also in the DC
             // phase in between (the AC part held from the old range belongs
             // to a signal that may have moved: an autorange step).
@@ -1433,16 +1558,28 @@ impl Dmm {
         }
     }
 
+    /// Start (or restart) the AC part's settle (ACS_STEP).
+    fn acs_begin(&mut self, now: u64) {
+        self.acs_t0 = now.max(1);
+        self.acs_prev = -1.0;
+        self.acs_d = -1.0;
+        self.acs_flat = 0;
+    }
+
     /// One AC result `ac` of method A's AC phase while the AC part settles
-    /// after a range change (`acs_t0` != 0): true = discard it. On success
-    /// the settle ends and this result is used.
+    /// after a range change or an input step (`acs_t0` != 0): true =
+    /// discard it. On success the settle ends and this result is used.
     fn ac_settle_step(&mut self, now: u64, ac: f32, lim: f32) -> bool {
         if self.acs_t0 == 0 {
             return false;
         }
-        let flat = self.acs_prev >= 0.0 && ac >= ACS_STEP * self.acs_prev;
+        let prev = self.acs_prev;
+        let near = prev >= 0.0 && now.saturating_sub(self.acs_tp) <= ACS_NEAR_MS;
+        let flat = acs_flat(prev, self.acs_d, ac, near);
+        self.acs_d = if near { prev - ac } else { -1.0 };
         self.acs_flat = if flat { self.acs_flat.saturating_add(1) } else { 0 };
         self.acs_prev = ac;
+        self.acs_tp = now;
         let done = now.saturating_sub(self.acs_t0) >= ACS_MAX_MS || self.acs_flat >= ACS_FLAT_N || ac < ACS_FLOOR * lim;
         if done {
             self.acs_t0 = 0;
@@ -1450,9 +1587,21 @@ impl Dmm {
         !done
     }
 
+    /// AC+DC DC phase: the settle's time limit ran out with no AC result
+    /// since (the DC phase is ~1 s): the last AC result held is the AC part.
+    fn ac_settle_cap(&mut self, now: u64) {
+        if self.acs_t0 != 0 && now.saturating_sub(self.acs_t0) >= ACS_MAX_MS && self.acs_prev >= 0.0 {
+            self.acs_t0 = 0;
+            self.ac_raw = self.acs_prev;
+            self.f_ac = self.acs_prev;
+            self.acdc_seen |= 1;
+        }
+    }
+
     fn reset_values(&mut self) {
         self.acdc_seen = 0;
         self.acs_t0 = 0;
+        self.acs_dc = f32::NAN;
         self.auto_n = 0;
         self.auto_votes = 0;
         self.auto_t0 = 0;
@@ -1490,6 +1639,7 @@ impl Dmm {
         self.write_config(clk);
         self.deadline = clk.now_ms() + settle;
         self.ac_settle_start(clk.now_ms(), old);
+        self.vet_start(old);
     }
 
     /// SCPI function code: the stock mode, or 16 = V AC+DC, 17 = A AC+DC,
@@ -2486,6 +2636,7 @@ impl Dmm {
             self.fuse_step(clk, now, r.as_ref());
         }
         r.map(|mut r| {
+            self.rd_pending = false;
             self.seq = self.seq.wrapping_add(1);
             r.seq = self.seq;
             r.auto = !self.manual;
@@ -2587,13 +2738,17 @@ impl Dmm {
         // AC+DC: the stock's once-flag OSR rule (ACDC_STOCK_OSR), else the
         // OSR stays as write_config left it.
         let acdc = self.acdc;
+        let thr = if m == 1 { 0x206 } else { 0xE22 - 0x960 * r as i32 };
+        if !acdc {
+            self.osr(ad1, thr, 0x15, true);
+        } else if ACDC_STOCK_OSR {
+            self.acdc_osr(ad1, thr);
+        }
+        // After a range change: a conversion that does not agree with the
+        // one before is held (VET_*; AC+DC: dc_out keeps the phase count).
+        let vet = self.vet_ad1(ad1);
         let (x, lim, dec, unit, si_k, ext) = if m == 1 {
-            if !acdc {
-                self.osr(ad1, 0x206, 0x15, true);
-            } else if ACDC_STOCK_OSR {
-                self.acdc_osr(ad1, 0x206);
-            }
-            let (code, ext) = self.avg_code(ad1, slow);
+            let (code, ext) = if vet { self.avg_code(ad1, slow) } else { (ad1 as f32, false) };
             let mut v = code * K_ACV[r] * (1.25 / 0.9) / AD1_DIV * cal(0x04 + 4 * r as u32, 1.0)
                 - cal(0x14 + 4 * r as u32, 0.0);
             if v < 0.0 {
@@ -2604,24 +2759,21 @@ impl Dmm {
             }
             (v, (f * DEC4[r]).min(1000.0), 4 - r as u8, "V", 1.0, ext)
         } else {
-            if !acdc {
-                self.osr(ad1, 0xE22 - 0x960 * r as i32, 0x15, true);
-            } else if ACDC_STOCK_OSR {
-                self.acdc_osr(ad1, 0xE22 - 0x960 * r as i32);
-            }
-            let (code, ext) = self.avg_code(ad1, slow);
+            let (code, ext) = if vet { self.avg_code(ad1, slow) } else { (ad1 as f32, false) };
             let mv = code * (1.25 / 0.9) / MV_DIV[r] / (AD1_DIV / 1000.0) * cal(0x24 + 4 * r as u32, 1.0)
                 - cal(0x2C + 4 * r as u32, 0.0);
             (mv, f * [10.0, 100.0][r], 3 - r as u8, "mV", 1e-3, ext)
         };
-        // Autorange magnitude S+0x60: |DC|, AC+DC: hypot(AC raw, DC).
+        // Autorange magnitude S+0x60: |DC|, AC+DC: hypot(AC raw, DC). A held
+        // conversion steps up on an overload (a range too sensitive must not
+        // wait), never down.
         let mag = if self.acdc { hypot(self.ac_raw, x) } else { x.abs() };
         if !self.manual {
             let up = mag > ov * lim;
             if m == 1 {
                 if up && r < 3 {
                     self.set(clk, 1, r as i8 + 1, 250);
-                } else if mag < 0.1 * lim / ov && !self.am_on() {
+                } else if vet && mag < 0.1 * lim / ov && !self.am_on() {
                     // (not in an AC+DC method's reference step: it is taken at
                     // the method's range, acdcm.rs)
                     if r > 0 {
@@ -2638,7 +2790,10 @@ impl Dmm {
                 }
             }
         }
-        self.dc_out(clk, x, lim, dec, unit, si_k, before, ext)
+        if !vet && !acdc {
+            return None;
+        }
+        self.dc_out(clk, x, lim, dec, unit, si_k, before, ext, vet)
     }
 
     /// End of a DC reading (modes 1, 3, 7..9): plain DC, or the DC phase of
@@ -2648,6 +2803,9 @@ impl Dmm {
     /// or 2 (ACmV, ACA: 3 results). A range / unit
     /// change in AC+DC gives no value this time (stock: OL, m+0xd8 = 0).
     /// `ext`: the value is averaged and shows the extra digit (not in AC+DC).
+    /// `vet` false (AC+DC, `vet_ad1`): the result is held, it only counts
+    /// for the phase. A DC part that moved by more than ACS_DC_STEP starts
+    /// the AC part's settle (an input step).
     #[allow(clippy::too_many_arguments)]
     fn dc_out(
         &mut self,
@@ -2659,6 +2817,7 @@ impl Dmm {
         si_k: f32,
         before: (u8, i8),
         ext: bool,
+        vet: bool,
     ) -> Option<Reading> {
         let ov = self.over();
         if !self.acdc {
@@ -2672,10 +2831,21 @@ impl Dmm {
         if (self.mode, self.range) != before {
             return None;
         }
-        self.dc_val = x;
-        self.acdc_seen |= 2;
-        let rd = self.acdc_reading(lim, dec, unit, si_k);
-        if self.phase_n == 0 {
+        let now = clk.now_ms();
+        if vet {
+            if self.acs_t0 == 0 && (x - self.acs_dc).abs() > ACS_DC_STEP * lim {
+                self.acs_begin(now);
+            }
+            self.acs_dc = x;
+            self.dc_val = x;
+            self.acdc_seen |= 2;
+        }
+        self.ac_settle_cap(now);
+        let rd = vet.then(|| self.acdc_reading(lim, dec, unit, si_k));
+        // A held result leaves no DC part yet (entry, a set from the AC
+        // phase): one more DC result before the AC phase (at most
+        // VET_HELD_MAX), else that phase would autorange on hypot(AC, 0).
+        if self.phase_n == 0 && (vet || self.acdc_seen & 2 != 0) {
             let (to, settle, n) = match self.mode {
                 1 => (0, 800, 3),
                 3 => (2, 800, 2),
@@ -2684,10 +2854,10 @@ impl Dmm {
             let r = self.range;
             self.switch_phase(clk, to, r, settle);
             self.phase_n = n;
-        } else {
+        } else if self.phase_n > 0 {
             self.phase_n -= 1;
         }
-        (self.acdc_seen == 3).then_some(rd)
+        rd.filter(|_| self.acdc_seen == 3)
     }
 
     fn poll_dca(&mut self, clk: &mut Clock) -> Option<Reading> {
@@ -2700,8 +2870,11 @@ impl Dmm {
         } else if ACDC_STOCK_OSR {
             self.acdc_osr(ad1, 0x168);
         }
+        // After a range change (VET_*); the OVERLOAD check below still sees
+        // every conversion.
+        let vet = self.vet_ad1(ad1);
         // FR-05 SLOW only (MEDIUM: no window in A, as the stock).
-        let (code, _) = self.avg_code(ad1, slow);
+        let (code, _) = if vet { self.avg_code(ad1, slow) } else { (ad1 as f32, false) };
         let (m, r) = (self.mode, self.range as usize);
         let before = (m, self.range);
         let u = (m - 7) as usize; // 0 A, 1 mA, 2 uA
@@ -2709,7 +2882,7 @@ impl Dmm {
         let raw = code * 1.25 / (SHUNT[u] * MV_DIV[r] * 0.9) / AD1_DIV * cal(0x94 + 4 * i as u32, 1.0)
             - cal(0xAC + 4 * i as u32, 0.0);
         let mut a = raw;
-        if m == 7 && r == 1 {
+        if m == 7 && r == 1 && vet {
             ema(0.0007, 0.15, a, &mut self.f_dc);
             a = self.f_dc;
         }
@@ -2728,7 +2901,7 @@ impl Dmm {
                 } else if m > 7 && self.a_auto & 1 != 0 {
                     self.set(clk, m - 1, 1, 250);
                 }
-            } else if mag < 0.1 * lim / ov {
+            } else if vet && mag < 0.1 * lim / ov {
                 if r == 1 {
                     self.set(clk, m, 0, 250);
                 } else if m < lowest && self.ovl_allows(m + 1 - 7) {
@@ -2736,12 +2909,15 @@ impl Dmm {
                 }
             }
         }
+        if !vet && !self.acdc {
+            return None;
+        }
         let (unit, dec, si_k) = match u {
             0 => ("A", 4 - r as u8, 1.0),
             1 => ("mA", 3 - r as u8, 1e-3),
             _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
-        let mut rd = self.dc_out(clk, a, lim, dec, unit, si_k, before, false)?;
+        let mut rd = self.dc_out(clk, a, lim, dec, unit, si_k, before, false, vet)?;
         if self.burden_show && !self.acdc {
             // Burden voltage, signed (doc 3.15): aux1 is free in DC A.
             rd.aux1 = Some(self.burden_val(u, r, a * si_k, rd.main.ol));
@@ -2918,9 +3094,13 @@ impl Dmm {
             _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
         let acdc = self.acdc;
-        // AC+DC after a range change: the AC part settles first (ACS_STEP);
-        // its results are discarded until then (the first good one seeds
-        // the EMA), and they move no range.
+        // AC+DC after a range change or an input step: the AC part settles
+        // first (ACS_STEP); its results are discarded until then (the first
+        // good one seeds the EMA), and they move no range. A result far
+        // above the AC part (ACS_JUMP) is such a step seen in the AC phase.
+        if acdc && self.acs_t0 == 0 && self.acdc_seen & 1 != 0 && ac > ACS_JUMP * self.f_ac + ACS_JUMP_FLOOR * lim {
+            self.acs_begin(now);
+        }
         let was = self.acs_t0 != 0;
         let settling = acdc && self.ac_settle_step(now, ac, lim);
         let seed = acdc && was && !settling;
@@ -2950,7 +3130,8 @@ impl Dmm {
         }
         if !self.manual && !settling {
             let up = mag > ov * lim;
-            let down = mag < 0.1 * lim / ov;
+            // AC+DC: no step down before the DC part is known (hypot(AC, 0)).
+            let down = mag < 0.1 * lim / ov && (!acdc || self.acdc_seen & 2 != 0);
             match m {
                 // AC+DC: a V / mV range change is applied through the DC
                 // phase (600 ms, S+10 = 2); unit changes go to the DC mode.
@@ -3997,6 +4178,26 @@ mod tests {
         }
         assert_eq!(Rate::from_u8(3), None);
         assert_eq!(RATE_NAMES[Rate::Medium as usize], "MED");
+    }
+
+    /// The AC settle's flat test on the device's 40 Hz square tail (bab5dd4,
+    /// 600 -> 60 V: 4.821 / 4.790 V shown for 4.768 V; the 1 % step took
+    /// them) and on a steady AC part.
+    #[test]
+    fn acs_flat_tail_and_steady() {
+        // the old rule took a 0.64 % fall as flat; now it is not
+        assert!(!acs_flat(4.821, -1.0, 4.790, true));
+        // the next AC phase: a 0.46 % fall over the DC phase gap
+        assert!(!acs_flat(4.790, -1.0, 4.76784, false));
+        // steady within the phase: rose, then fell 0.001 %
+        assert!(acs_flat(4.76784, 0.022, 4.76786, true));
+        assert!(acs_flat(4.76786, -0.00002, 4.76781, true));
+        // a slow decay: falls of 0.04 % then 0.035 % (q 0.875): 0.25 % left
+        assert!(!acs_flat(4.80, 0.0019, 4.7983, true));
+        // a fast one: 0.04 % then 0.008 % (q 0.2): 0.002 % left
+        assert!(acs_flat(4.80, 0.0019, 4.79962, true));
+        // no previous result
+        assert!(!acs_flat(-1.0, -1.0, 4.8, true));
     }
 
     #[test]

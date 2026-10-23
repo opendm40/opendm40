@@ -65,7 +65,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         {
             Array.Clear(regs, 0, regs.Length);
             intf = 0; ctbov = false; acpo = false;
-            ad1Start = now; ad1Done = 0; ad1Code = 0; ad1Last = now;
+            ad1Start = now; ad1Done = 0; ad1Code = 0; ad1Last = now; ad1MixT = double.NegativeInfinity;
             ad2Start = now; ad2Done = 0; lpfStart = now; lpfDone = 0;
             ad2LastT = double.NegativeInfinity;
             lpfCode = 0; rmsVal = 0; ad2Code = 0;
@@ -186,6 +186,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(reg == 0x1F) { regs[reg] = (byte)(v & 0x1F); return; }
             if(reg >= 0x38) { regs[reg] = v; return; }
 
+            // Ad1Mix: the AD1 input as the configuration before this write burst (its first
+            // byte: a row of 22 bytes plus the quiesce takes well under Ad1MixBurst; none
+            // when AD1 restarted in it)
+            if(Ad1Mix && EnAd1 && reg <= 0x35 && now - ad1MixT > Ad1MixBurst && now - ad1RestartT > Ad1MixBurst
+               && ForcedAd1 == int.MinValue)
+            {
+                ad1MixOld = Clamp24(ComputeAd1(now));
+                ad1MixT = now;
+            }
             var old = regs[reg];
             var masked = (byte)(v & WriteMask[reg - 0x20]);
             regs[reg] = masked;
@@ -374,6 +383,16 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// A-jack probe's first peak-hold window tripped A-PROT with the A
         /// jack open). Monitor: hy3131 Ad2StartGlitch 3000.
         public int Ad2StartGlitch;
+        /// AD1 decimation memory (opt-in, "ad1mix:1"; device bab5dd4, DC V AUTO from 600 V: one
+        /// reading at 77-79 % on 6 V after two range steps). A configuration write that does not
+        /// restart AD1 (R22 unchanged, ENAD1 kept: one autorange step right after another, both
+        /// rows at OSR 8192) leaves the conversions of the next 3 periods a sinc^3-weighted mix
+        /// of the old and the new input. A restart (an R22 change, ENAD1 toggled) flushes it.
+        /// Off: every conversion is the input at its end, as before.
+        public bool Ad1Mix;
+        private const double Ad1MixBurst = 20e-3; // the bit-banged row (+ quiesce) takes a few ms
+        private double ad1MixT = double.NegativeInfinity, ad1RestartT = double.NegativeInfinity;
+        private int ad1MixOld;
         public const int Ad2StartResults = 4;
         private double ad2LastT = double.NegativeInfinity;
         public void ForceIntf(byte bits) { intf |= bits; }
@@ -585,6 +604,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "cal": CalConsistent = o.Value != 0; break;
                 case "beat": BeatModel = o.Value != 0; break;
                 case "powmix": PowMix = o.Value != 0; break;
+                case "ad1mix": Ad1Mix = o.Value != 0; break;
                 case "powvg": PowVGain = o.Value; break;
                 case "powz": PowZeros = o.Value != 0; break;
                 case "vnoise": vNoise = o.Value; break;
@@ -608,6 +628,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private void RestartAd1(double now)
         {
             ad1Start = now; ad1Done = 0;
+            ad1RestartT = now; ad1MixT = double.NegativeInfinity; // a restart flushes the filter
+        }
+
+        /// Ad1Mix: the share of a sinc^3 kernel (3 conversion periods) that falls on its first
+        /// `s` periods (the input before an unrestarted reconfiguration).
+        private static double Sinc3Head(double s)
+        {
+            if(s <= 0) return 0;
+            if(s >= 3) return 1;
+            if(s < 1) return s * s * s / 6;
+            if(s < 2) return -s * s * s / 3 + 1.5 * s * s - 1.5 * s + 0.5;
+            var u = 3 - s;
+            return 1 - u * u * u / 6;
         }
 
         private void RestartLpf(double now)
@@ -632,6 +665,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             ad1Last = ad1Start + n * p;
             UpdateRamp(ad1Last); // the ramp node as it was when the conversion ended
             ad1Code = Clamp24(ForcedAd1 != int.MinValue ? ForcedAd1 : ComputeAd1(ad1Last));
+            if(Ad1Mix && ForcedAd1 == int.MinValue && ad1MixT > double.NegativeInfinity)
+            {
+                // the decimation filter still holds samples of the input before a row write that
+                // did not restart AD1 (same R22, ENAD1 kept): a sinc^3 over the last 3 periods
+                var head = (ad1MixT - (ad1Last - 3 * p)) / p;
+                if(head <= 0) ad1MixT = double.NegativeInfinity;
+                else if(ad1MixT < ad1Last)
+                {
+                    var w = Sinc3Head(head);
+                    ad1Code = Clamp24((int)Math.Round(w * ad1MixOld + (1 - w) * ad1Code));
+                }
+            }
             intf |= 0x04;
             if(EnPkh && (regs[0x29] & 3) == 1) PeakHold(ad1Code >> 5);
         }
