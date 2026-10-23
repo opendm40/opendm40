@@ -1622,7 +1622,8 @@ Firmware:
       status (3 PRESENT / 4 WRITTEN), rewritten, ms.
       Emulator: fastlogtest `--region-c --host-read --dur 20` at 38400 / 76800 (typ chip timing): every
       slow-bank sector of the four files read during the session (37 / 24 MB of INFO/ in all), no NOT READY,
-      the same bytes after, no region C call / slow-bank load, lost 0 at both rates (76800 kept its rung).
+      the same bytes after, no region C call / slow-bank load, lost 0 at both rates (76800 kept its rung); the
+      same with `--profiles max` (tPP 3 ms: 76800 runs at the 38400 rung as before): PASS, lost 0.
       mirrortest.py (new): fresh disk WRITTEN, same image PRESENT with the SPI image unchanged, image B
       WRITTEN, a calibration-sector byte changed WRITTEN, then PRESENT; each time the file == the flash window.
       kvmtest (Linux usb-storage): a 25 s session, `cat` of the four files (and an O_DIRECT CALIB.BIN) while it
