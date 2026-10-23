@@ -3039,3 +3039,41 @@ Emulator (emu/):
       false OVERLOAD in AC A at 1 / 5 V on V-COM, `CONF:CURR:AC 0.06` after 10 A falls back to 10 A at 0.5 s
       (AD1PK_SENSE pk ~-210 000, the 2a drift); (d) [ ] new: A-JACK in continuity at 5 V DC (AD2PK_PB1, 0.41 s,
       stays; LIVE at 1 V), likely the RES 5 V V_GATE item.
+- [x] f0d21eb follow-up, emulator (branch sentinel2; doc power-meter-and-misconnect.md 4.11):
+      (b) V-JACK? in AC A: FIXED. AD1 was on SENSE - PB5, and PB5 is defined only by the DC V
+      60 V+ rows: in the A rows it drifted to the rail at any V. Now SENSE - AGND, and AC A counts
+      the hold's swing only (2 V rms AC on V); DC on V in plain AC A is no longer flagged (DC A's
+      comparator / AC+DC A's DC phase cover DC). VAR +32 = the old row. (c) false OVERLOAD 10 A ->
+      60 mA: FIXED by a hold: plain AC A ignores over-range results for 500 ms after the first
+      result of a row (AC_OVER_HOLD_MS; it is the RMS / LPF step of the shunt + OP1 input + gain
+      change, not the AD1 drift). (a) 24 V missed in DC A: NOT fixed. All of R20..R35 (+ R26 / R34 /
+      R36 zeroed) are written for every row; DBG:SENTinel:REG? (new) reads R20..R37 back and the
+      A row reads the same bytes after DC V 60 V / RES / TEMP / AC V in the emulator: the history
+      is board state, and 24 V is 24 mV at the tap against a 20.8 mV window (3 mV margin). The
+      device never read CTSTA 0x20 / 0x60 in ~233 000 reads: CMPLO = "above VRL" (a Schmitt
+      pair), so 0 = below the window and the open A row's SENSE sits > 21 mV low. Experiment,
+      default off: DBG:SENTinel:PRECond <ms> (the temperature row first). OHM_EXIT_* unchanged.
+      (d) continuity at 5 V: documented, not changed (AD2 peak -97 k..+123 k on PB1 = PB1 swinging
+      with V-COM, as the RES 5 V owner item). DBG:SENT? ctsta = -1 in non-comparator kinds (was
+      stale: "AC V 0x70 after TEMP" was TEMP's read).
+      Emulator knobs pb5drift / acastep / vjblind replay 2a, the OVERLOAD and the 24 V table;
+      switchtest aca-drift / aca-ovl / real-vjack-blind FAIL on 3eebbb4, aca-drift / aca-ovl pass
+      now, real-vjack-blind still FAILs (by design: the open item), real-vjack-blind-prec passes.
+- [ ] Device retest (sentinel2 image), A jack open, calibrator on V-COM:
+      1. AC A, V-COM open / 1 V / 24 V DC: CONF:CURR:AC 10 / 0.06 / 0.0006, 30 s each: no
+         V-JACK?; DBG:SENT? pkmin / pkmax stay near a constant (no ramp to -262 144). Then
+         DBG:SENT:VAR 32 (the old row): the ramp is back (confirms PB5). VAR 0 after.
+      2. AC A with an AC source on V (the calibrator's square, or >= 5 V rms AC): V-JACK? within
+         ~3 s; note pkmax - pkmin.
+      3. 1 V and 5 V on V-COM: CONF:CURR:AC 10, 2 s, CONF:CURR:AC 0.06 (x5): CONF? stays 60 mA,
+         no OVERLOAD. If it still trips, read FETC? / DBG:SENT? every 50 ms for 1.5 s after the
+         switch (how long the step lasts: AC_OVER_HOLD_MS).
+      4. Real overload still works where a wire is possible: manual 600 uA / 60 mA with > 1.03 x
+         FS through A: OVERLOAD ~0.5 s later than before.
+      5. 24 V on V-COM: DBG:SENT:REG? in DC A after DC V 60 V, RES, TEMP, AC V and Scope -> back
+         (expect the same 48 hex digits; a_blind 1 / 1 / 0 / per the previous one / 1). Log ctsta
+         per entry as before. Then DBG:SENT:PREC 300 (and 100, 1000): DC V 60 V -> DC A, RES -> DC
+         A, Scope -> back: does V-JACK? come (ctsta 0x70 / 0x50 after the precondition)? With V-COM
+         open after RES -> PREC -> DC A: any 0x70 tail (false V-JACK? risk: PREC skips the RES-exit
+         mask). PREC 0 after.
+      6. Continuity at 5 V DC (the owner's RES 5 V decision covers it): DBG:SENT? pkmin / pkmax.
