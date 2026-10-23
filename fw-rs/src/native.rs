@@ -209,6 +209,8 @@ fn pre_main(dry: bool) {
 /// Called by the shim (src/shim.rs) with the decision.
 pub unsafe fn start(info: BootInfo) -> ! {
     init_ram();
+    // The serial number (USB iSerial, SCSI VPD 0x80, *IDN?) for both modes.
+    crate::uid::init();
     boot::set_info(info);
     match info.mode {
         Mode::Recovery => crate::recovery::run(),

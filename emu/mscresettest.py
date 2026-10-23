@@ -30,7 +30,12 @@ README.TXT must give the right bytes, and *IDN? must answer):
                 02/3A/00, INQUIRY still answers,
                 DBG:VDISK:EJECT? = 1; a Bulk-Only reset keeps it ejected;
                 then LoEj=1 Start=1 (load): one UNIT ATTENTION 06/28/00;
-  eject-port    eject, then a USB port reset (a re-plug): the medium is back.
+  eject-port    eject, then a USB port reset (a re-plug): the medium is back;
+  serial        the unit serial number (fw-rs/src/uid.rs: the chip UID as 24
+                hex digits; run.py --uid gives the emulator its own): the USB
+                iSerial string, INQUIRY VPD page 0x80, the serial field of
+                *IDN?, all equal to it; VPD page 0x00 lists 00 and 80; another
+                page fails 05/24/00.
 Exit status 0 = PASS. Per-process names; the Renode log is capped by run.py.
 """
 import argparse
@@ -46,11 +51,15 @@ ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='fw-rs native ELF / image')
 ap.add_argument('--port', type=int, default=4851, help='USB/IP port (default 4851)')
-ap.add_argument('--cases', default='alloc-small,zero-alloc,invalid-cbw,read-bot,read-port,ua-port,stop-start,eject-load,eject-port')
+ap.add_argument('--cases', default='serial,alloc-small,zero-alloc,invalid-cbw,read-bot,read-port,ua-port,stop-start,eject-load,'
+                                   'eject-port')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, HERE)
 import usbip_client as uc  # noqa: E402
+import run  # noqa: E402  (emu/run.py: emu_uid)
+
+SERIAL = run.emu_uid(A.port).hex().upper()
 
 OUT = os.path.join(HERE, 'out')
 TAG = 'mscreset-%d-%d' % (A.port, os.getpid())
@@ -160,7 +169,7 @@ disk = os.path.join(OUT, TAG + '-disk.bin')
 src = os.path.join(OUT, 'disk.bin')
 shutil.copy(src if os.path.exists(src) else os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
 emu = subprocess.Popen([sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--app', A.app, '--usbip', '0.01',
-                        '--usbip-port', str(A.port), '--run-for', '3000', '--name', TAG, '--disk', disk],
+                        '--usbip-port', str(A.port), '--uid', SERIAL, '--run-for', '3000', '--name', TAG, '--disk', disk],
                        cwd=ROOT, stdout=open(os.path.join(OUT, TAG + '.out'), 'w'), stderr=subprocess.STDOUT,
                        start_new_session=True)
 try:
@@ -182,7 +191,27 @@ try:
     readme = (data + (c - 2) * spc, txt[:64])
     for case in A.cases.split(','):
         print(case, flush=True)
-        if case == 'alloc-small':
+        if case == 'serial':
+            dd = l.d.device_descriptor()
+            i = dd[16]
+            sd = l.d.control_in(0x80, 6, 0x0300 | i, 0x0409, 255) if i else b''
+            got = sd[2:sd[0]].decode('utf-16-le') if sd else ''
+            check(got == SERIAL, 'USB iSerial (string %d) %r, expected %s' % (i, got, SERIAL))
+            st, _, d = l.m.cmd(0, bytes([0x12, 1, 0x80, 0, 255, 0]), 255)
+            check(st == 0 and d[1] == 0x80 and d[3] == 24 and d[4:28] == SERIAL.encode(),
+                  'INQUIRY VPD 0x80: status %d, %r' % (st, bytes(d[:28])))
+            st, _, d = l.m.cmd(0, bytes([0x12, 1, 0x00, 0, 255, 0]), 255)
+            check(st == 0 and bytes(d[:6]) == bytes([0, 0, 0, 2, 0x00, 0x80]), 'INQUIRY VPD 0x00: status %d, %s'
+                  % (st, bytes(d[:6]).hex()))
+            st, _, d = l.m.cmd(0, bytes([0x12, 1, 0x83, 0, 255, 0]), 255)
+            s = l.m.sense(0) if st else '-'
+            check(st != 0 and s == '05/24/00', 'INQUIRY VPD 0x83: fails, sense %s' % s)
+            st, _, d = l.m.cmd(0, bytes([0x12, 0, 0, 0, 36, 0]), 36)
+            check(st == 0 and d[8:16] == b'ALIENTEK', 'standard INQUIRY still answers')
+            idn = l.q('*IDN?').split(',')
+            check(len(idn) == 4 and idn[2] == SERIAL, '*IDN? serial field %r' % (idn[2:3],))
+            healthy(l, boot, readme, case)
+        elif case == 'alloc-small':
             try:
                 st, res, d = l.m.cmd(0, bytes([0x12, 0, 0, 0, 5, 0]), 5)
                 check(st == 0 and len(d) == 5 and d[:1] == b'\0', 'INQUIRY, 5 bytes asked: %d bytes, status %d' % (len(d), st))

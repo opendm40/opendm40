@@ -57,6 +57,40 @@ def read(p):
         return f.read()
 
 
+def emu_uid(port, base=UID):
+    """The emulated chip's 96-bit UID (12 bytes, memory order) for USB/IP
+    port `port`: this unit's UID file (a fixed pattern without it) with bytes
+    4 and 9 = the port, big-endian. The stock genuine check (UID against the
+    dump's 0x080A4000 block) never reads bytes 4 and 9
+    (fw-rs/docs/genuine-check.md), so the stock still gets its 200 MHz PLL
+    and DBG:GENUINE? stays GENUINE, while fw-rs's USB / SCSI / *IDN? serial
+    number (the UID as hex, fw-rs/src/uid.rs) differs from the real meter's
+    and between instances on different ports: udisks merges disks with the
+    same vendor / model / serial into one drive."""
+    u = bytearray(read(base)) if os.path.exists(base) else bytearray(b'EMU-DM40-UID')
+    real = bytes(u)
+    u[4], u[9] = port >> 8 & 0xFF, port & 0xFF
+    if bytes(u) == real:
+        u[4] ^= 0x80
+    return bytes(u)
+
+
+def uid_arg(spec, port):
+    """--uid: none = emu_uid(port); 'unit' = the UID file as it is (this
+    unit's own serial: never next to the real meter on one PC); 24 hex
+    digits (memory order, as fw-rs's serial); or a 12-byte file."""
+    if not spec:
+        return emu_uid(port)
+    if spec == 'unit':
+        return read(UID)
+    if re.fullmatch(r'[0-9A-Fa-f]{24}', spec):
+        return bytes.fromhex(spec)
+    u = read(spec)[:12]
+    if len(u) != 12:
+        sys.exit('--uid %s: not 12 bytes' % spec)
+    return u
+
+
 def app_from_file(path):
     """-> (header12, body) from a .dec.bin, a packed update file, a raw body or an ELF."""
     d = read(path)
@@ -250,7 +284,10 @@ def main(argv=None):
                     help='zero the 12-byte loader marker at 0x08008000 (chain: the FS-loader then installs dm40*.bin)')
     ap.add_argument('--save-disk', help='write the SPI-flash image here at the end')
     ap.add_argument('--save-flash', help='write the internal flash here at the end')
-    ap.add_argument('--uid', default=UID, help='12-byte chip UID file (0x1FFF7A10)')
+    ap.add_argument('--uid', help='chip UID at 0x1FFF7A10: 24 hex digits (memory order), a 12-byte file, or "unit" '
+                                  '(the unit\'s own UID file as is); default: the unit\'s UID with bytes 4 / 9 = '
+                                  '--usbip-port (emu_uid: a USB serial of its own, the stock genuine check still '
+                                  'passes)')
     ap.add_argument('--otp', default=OTP, help='OTP dump (0x1FFF7800)')
     ap.add_argument('--run-for', type=float, default=3.0, help='virtual seconds to run (default 3)')
     ap.add_argument('--shot', action='append', default=[], metavar='PNG[@T]',
@@ -359,10 +396,12 @@ def main(argv=None):
     s.add('sysbus LoadBinary %s 0x08000000' % q(flash))
     if os.path.exists(a.otp):
         s.add('sysbus LoadBinary %s 0x1FFF7800' % q(a.otp))
-    if os.path.exists(a.uid):
-        s.add('sysbus LoadBinary %s 0x1FFF7A10' % q(a.uid))
-    else:
-        print('warning: no UID file (%s): the stock genuine check fails -> 16 MHz' % a.uid)
+    if not a.uid and not os.path.exists(UID):
+        print('warning: no UID file (%s): the stock genuine check fails -> 16 MHz' % UID)
+    uid = uid_arg(a.uid, a.usbip_port)
+    for i in range(3):
+        s.add('sysbus WriteDoubleWord 0x%08X 0x%08X' % (0x1FFF7A10 + 4 * i, struct.unpack_from('<I', uid, 4 * i)[0]))
+    print('chip UID:   ', uid.hex().upper(), '(fw-rs USB serial)')
     s.add('sysbus WriteWord 0x1FFF7A22 0x0400')
     s.add('sysbus.spi2.spiflash Load %s' % q(disk))
     s.add('sysbus.gpioPortD OnGPIO 6 false')  # power key released

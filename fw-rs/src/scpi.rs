@@ -112,6 +112,8 @@
 //!   off); refused while the data logger runs or the Wave view is open
 //!   ("Settings conflict"; CONF then only selects the function).
 //!
+//! *IDN? = "Alientek,DM40A|B|C,<24 hex digits of the chip UID>,dm40-fw 0.1"
+//! (the serial number = the USB one, src/uid.rs).
 //! *IDN? compatibility (SYSTem:IDN:EMULation, persisted, default OFF): with
 //! 34401A, *IDN? answers "HEWLETT-PACKARD,34401A,0,dm40-fw 0.1" so that hosts
 //! with a 34401A profile only (libsigrok >= 0.5.2 / SmuView without the DM40
@@ -222,9 +224,12 @@
 
 use crate::dmm::Reading;
 
-/// *IDN? (model letter at IDN_MODEL_AT = the calibration model byte, `model`).
-pub const IDN: &[u8] = b"Alientek,DM40A,0,dm40-fw 0.1";
-const IDN_MODEL_AT: usize = 13;
+/// *IDN?: "Alientek,DM40<m>,<serial>,dm40-fw 0.1", <m> = the calibration
+/// model letter (`model`), <serial> = the chip UID as 24 hex digits
+/// (src/uid.rs; the USB serial number too). libsigrok shows it as [S/N: ..],
+/// ngscopeclient as the serial; both take any comma-free field.
+const IDN_HEAD: &[u8] = b"Alientek,DM40";
+const IDN_TAIL: &[u8] = b",dm40-fw 0.1";
 
 /// Model index (0 DM40A, 1 DM40B, 2 DM40C) and the raw calibration byte
 /// (record 0x080C0000 + 0x168, docs/model-variants.md), set once by App::new
@@ -1531,10 +1536,10 @@ impl Scpi {
             match (p0, query) {
                 (b"*IDN", true) if idn_emul() == 1 => self.put(IDN_34401A),
                 (b"*IDN", true) => {
-                    let mut t = [0u8; IDN.len()];
-                    t.copy_from_slice(IDN);
-                    t[IDN_MODEL_AT] = b'A' + model().0;
-                    self.put(&t);
+                    self.put(IDN_HEAD);
+                    self.put(&[b'A' + model().0, b',']);
+                    self.put(crate::uid::bytes());
+                    self.put(IDN_TAIL);
                 }
                 // SYSTem:MODel?: "DM40A|B|C,<raw byte>,<counts>": the model the
                 // calibration record names (stock rule: record +0x168, a record

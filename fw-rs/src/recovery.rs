@@ -103,12 +103,17 @@ fn usb_disk(mut disk: spiflash::SpiFlash) -> ! {
     let _ = hw;
     boot::feed();
     let bus = synopsys_usb_otg::UsbBus::new(usb::UsbFs, unsafe { &mut *core::ptr::addr_of_mut!(crate::EP_MEMORY) });
-    let mut msc = msc::Msc::new(&bus, unsafe { &mut *core::ptr::addr_of_mut!(crate::MSC_IO) }, 1);
+    let mut msc = msc::Msc::new(
+        &bus,
+        unsafe { &mut *core::ptr::addr_of_mut!(crate::MSC_IO) },
+        unsafe { &mut *core::ptr::addr_of_mut!(crate::MSC_BLK) },
+        1,
+    );
     let mut dev = UsbDeviceBuilder::new(&bus, crate::USB_VID_PID)
         .strings(&[StringDescriptors::default()
             .manufacturer("dm40-fw")
             .product("DM40 recovery disk (dm40-fw)")
-            .serial_number("REC1")])
+            .serial_number(crate::uid::serial())])
         .unwrap()
         .build();
     usb::force_power_no_vbus();

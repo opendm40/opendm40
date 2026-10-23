@@ -106,6 +106,7 @@ SECTIONS
         *(.text.*7dm40_fw9calbackup*);
         *(.text.*7dm40_fw6fatren*);
         *(.text.*7dm40_fw6native*);
+        *(.text.*7dm40_fw3uid4init*);
         *(.text.*7dm40_fw8recovery*);
         *(.text.*7dm40_fw7genuine*);
         *(.text.*7dm40_fw7gallery*);

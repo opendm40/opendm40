@@ -1961,8 +1961,8 @@ Firmware:
             asks, medium ejected, re-plug -> back and still writable); fatren-test, all tools/*/run.sh PASS.
             Note: udisks merges two disks with the same vendor / model / serial ("ALIENTEK DM40 files" 0001) into
             one multipath drive, so two DM40s (or the emulator next to the real meter) share one udisks drive
-            and a drive-level Eject / PowerOff may act on the other one; ejecttest.py rewrites the emulator's
-            serial in its proxy. Open: a per-unit USB serial (from the chip UID)?
+            and a drive-level Eject / PowerOff may act on the other one; ejecttest.py rewrote the emulator's
+            serial in its proxy. Done: a per-unit USB serial from the chip UID (item below).
             Device retest pending: Linux (gio / Nautilus Eject -> stays ejected, re-plug -> back; PC can edit +
             cp + Eject at once -> Install? dialog); Windows 11 VM (Explorer Eject -> E: stays without medium,
             re-plug -> back).
@@ -1971,6 +1971,25 @@ Firmware:
             regardless. Document it in README / Help: for SCPI on Windows, use NI-VISA / Keysight IO Libraries
             (USBTMC), or WinUSB via Zadig + pyvisa-py. Done (9cac903): README "USB on a PC", docs/bt-scpi.md
             "USBTMC on Windows" (not tried on Windows yet; Help text not changed).
+      - [x] Per-unit serial number (2026-10-23; src/uid.rs, docs/native-boot.md "USB serial number"): the
+            GD32 96-bit UID (0x1FFF7A10) as 24 uppercase hex digits in memory order (= `xxd -p -u
+            INFO/UID.BIN`), read once in native::start (system memory, not the slow bank; a TCM copy), is the
+            USB iSerial (normal and recovery-usb; was "0001" / "REC1"), the SCSI unit serial (INQUIRY VPD 0x80;
+            new: VPD 0x00 lists 00 / 80, other pages 05/24/00; an EVPD request used to get the standard
+            INQUIRY data) and the *IDN? serial field (was "0"; SYST:IDN:EMUL 34401A keeps "0"). libsigrok
+            (scpi-dmm: 4 comma fields, serial only stored -> [S/N: ..]) and ngscopeclient (SCPIDevice
+            `%127[^,]`) take any comma-free serial. Privacy note in the doc: readable by any USB host / BT
+            SCPI peer; UID.BIN and the FAT volume ID already exposed it; a hash would be as trackable.
+            Emulator: run.py --uid (default emu_uid: the unit's UID with bytes 4 / 9 = the USB/IP port; the
+            stock genuine check never reads them), so each instance has its own serial; ejecttest.py no longer
+            rewrites the serial, its safety check requires the emulator's serial (not the unit's) in the
+            udisks drive and no other disk on it; mscresettest.py case `serial`; usbtmc_stress.py takes the
+            serial from the first *IDN?.
+      - [x] recovery-usb build broken (recovery.rs called the 3-argument Msc::new; then its 4 KiB MSC_BLK in
+            TCM failed the 42 KiB TCM stack assert): fixed (MSC_BLK in .sram_bss when the SPI disk is the
+            LUN). tools/build-variants/run.sh builds recovery-usb, recovery-file, no-ad2-isr, spi-disk (no
+            vdisk), fatren-dry-run and keep-screen with all build.sh checks into target/variants/ (build.sh
+            DM40_TDIR / DM40_OUT; dm40-fw-native.bin untouched), ~2 min; part of the tools/*/run.sh suite.
       - [x] Follow-ups (2026-10-22, src/vwrite.rs; docs/native-boot.md "Host writes"): the volume is
             writable (no WP bit; DBG:VDISK:RO 1 = the read-only volume as before). Every 512-byte WRITE is
             diffed against the generated sector: a LOGS / SCOPE / SHOTS delete (entry 0xE5 + chain freed ->
