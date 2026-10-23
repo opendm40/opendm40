@@ -54,7 +54,8 @@ pub struct Gen {
     /// Actual output frequency while on, Hz (0 when off).
     pub real_hz: f32,
     /// `out.hz()` as f32, kept by `new` / `apply`: SOUR:FREQ? may come
-    /// while an AD2 stream runs, and gen::plan is region C (slow flash).
+    /// while an AD2 stream runs (gen::plan, region B since the move out of
+    /// region C, need not run for it).
     out_hz: f32,
 }
 

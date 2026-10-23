@@ -1570,6 +1570,16 @@ Firmware:
       SOUR:VOLT:OFFS?, SOUR:FUNC:SQU:DCYC? every 0.25 s in AD2 disk sessions: 38400 (360 queries) and 76800
       (384): late 0, overruns 0, max_lat 280 ns, lost_before 0; OUTP? 0 throughout (OFF stays OFF). Open: the
       generator-ON glitch check (owner only) and the SETTING-during-a-stream remainder.
+      **SETTING remainder fixed (branch tmcstress):** Gen::apply and gen::plan (~3.7 KB) moved from region C to B
+      (link-native.x; B free 47.6 -> 43.8 KB, >= 16 KB): moving was cheaper and simpler than deferring a set to the
+      stream's end, which would also change what SOUR:*? answers meanwhile. The generator page (taps, ui::gen_*) stays in C:
+      touch is off / the page is not shown while an AD2 stream runs (re-check once stream-ui's UI nav during a
+      fast-log session merges). Emulator fastlogtest --region-c --host-read --sessions ad2:38400,ad2:76800 --poll
+      'OUTP ON;SOUR:FREQ 1000;SOUR:FUNC SQU;SOUR:FREQ 2345;SOUR:VOLT 1.5;SOUR:FUNC SIN;SOUR:VOLT:OFFS 0.2;OUTP
+      OFF;SOUR:FREQ 100000;SOUR:FUNC:SQU:DCYC 30;OUTP?' (generator ON in the emulator only): before FAIL at both
+      rates (Gen::apply, Settings::with_amp), after PASS (the 76800 session ran at the 38400 rung after its writer
+      trial in both runs, typ profile, lost 0). Device retest: the same settings with the output OFF
+      (no OUTP ON on the device): late 0 at 38400 / 76800.
 - [ ] A copy of a slow-bank INFO/ file while the meter streams for more than ~3 min (an open Wave view, a long
       fast-log session) can fail on Linux (EIO after 180 s; buffered reads usually recover) and maybe sooner on
       Windows. Documented (README.TXT could say so; native-boot.md does).
@@ -2567,6 +2577,19 @@ Emulator (emu/):
       Device (b94bfb8, 2026-10-23): a 30 V request printed the warning, wrote 24000 and the meter read 23.985 V.
       Device e6 not run (permission denied in that session); settle_time's NaN path checked offline (4 NaNs; the
       0100788 version 3, ValueError).
+
+## USBTMC stress / ports / build warning (branch tmcstress, 2026-10-23)
+
+- [x] emu/usbtmc_stress.py big / compound failed on WAV:DATA? sizes: the test was wrong (every USBTMC reply ends with
+      '\n' since 848047f, a block too); it now strips and requires the terminator (9d405d6).
+- [x] USBTMC: a 64-byte transfer's ZLP left in the endpoint after an abort (`*IDN?` is exactly 64 bytes since the
+      24-digit serial): Usbtmc::poll could write the ZLP before the data packet's XFRC came in, and that XFRC
+      ended the transfer; INITIATE_ABORT_BULK_IN / CHECK_*_STATUS then said done and the next query read the ZLP.
+      pump_in ends a transfer only once EPENA is clear (9d405d6). Emulator: usbtmc_stress 3000 iterations, all
+      cases, PASS. Device retest: tools/dm40scpi.py `*IDN?` x many + a Linux usbtmc clear / abort (ioctl) mid-read.
+- [x] mscresettest / ejecttest default ports 4851 / 40200 -> a free one (run.free_port, 61000-64999 or
+      DM40_EMU_PORTS=lo-hi; emu/README.md) (0a0c77c). mscresettest PASS; ejecttest not run (needs sudo usbip).
+- [x] Build warning `csv_busy is never used`: removed (never called on rust-fw-poc or stream-ui) (cdd3367).
 
 ## Device check 8087c7d: shot pre-erase, SCPI Range / Digits + sigrok, scope full record, UI fixes (2026-10-23; docs/device-check-2026-10-21.md "8087c7d")
 
