@@ -417,7 +417,12 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///                           flash's margin; programs = page / header / partial
 ///                           programs started; tpp = the page-program probe of
 ///                           a session above 38400 S/s, mean / max us, 0 = none:
-///                           over 800 / 1500 us the session runs at 38400)
+///                           over 800 / 1500 us the session runs at 38400),
+///                           gate,gate_isr_permille,gate_fill (the writer
+///                           trial of such a session, fastlog.rs `Gate`: 0
+///                           none, 1 kept the rung, 2 fell back to 38400; the
+///                           stream ISR's CPU share and the ring's high water,
+///                           of 2048, in its 1 s window)
 /// Bluetooth (an untrusted ~11.5 kB/s link): LOG:STATe ON is refused above
 /// BT_MAX_HZ ("Rate too high for Bluetooth", every AD2 rate; AD1 up to
 /// 640 S/s works) and with LOG:DEST DISK ("Command protected"); LOG:DATA?

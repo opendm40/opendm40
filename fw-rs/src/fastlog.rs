@@ -26,11 +26,15 @@
 //!     Entry  LOGS/FASTnnn.DLG: start cluster, size = the allocation.
 //!   Ready -> main.rs starts the logger session (`Ev::Start`), then `run`
 //!            puts the file header in.
-//!   Run   per pass (hot, fastenc.rs): drain the ring (Logger::drain, the
-//!         consumer side, as LOG:DATA? does) into the coder while the FIFO
-//!         and the file have room, at most RUN_BUDGET_CYC of CPU; one page
-//!         program when the chip is idle. No erase, no FAT / directory
-//!         write, no `.cold` code.
+//!   Run   per pass (hot, fastenc.rs): drain the ring (Logger::drain_recs,
+//!         the consumer side, as LOG:DATA? does) into the coder while the
+//!         FIFO and the file have room, at most RUN_BUDGET_CYC of the pass's
+//!         own CPU (the stream ISR's time not counted; twice that while the
+//!         ring is over half full; RUN_WALL_CYC of wall time at most); one
+//!         page program when the chip is idle. No erase, no FAT / directory
+//!         write, no `.cold` code. A session above 38.4 kS/s starts with the
+//!         writer trial (`Gate`): 1 s coded without programming, then the
+//!         logger session restarts, at 38400 if the writer fell behind.
 //!   Stop  (`Ev::Stop` -> main.rs stops the logger) the rest of the ring,
 //!         the last chunk, the last pages; then the entry's size = the bytes
 //!         written, then the unused clusters freed in every FAT copy (FAT 1
@@ -695,7 +699,12 @@ impl Job {
         self.dry_until = dry.until;
         if trial && (stop.is_some() || self.stop_req || !logger_on) {
             // Stopped (or failed) during the trial: nothing is in the file;
-            // abandoned as in Ready (the entry and its chain removed).
+            // abandoned as in Ready (the entry and its chain removed; the
+            // trial's counts dropped: LOG:DISK? rows / bytes 0).
+            let cap = self.enc.cap;
+            self.enc = FastEnc::EMPTY;
+            self.enc.cap = cap;
+            self.hw = 0;
             self.gate = Gate::None;
             self.ph = Ph::Unlink;
             self.state = State::Stop;

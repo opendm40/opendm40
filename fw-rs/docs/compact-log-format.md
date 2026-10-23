@@ -294,10 +294,13 @@ uses 3 B/sample (fastlog::BPS_*); a file that fills up first ends Full.
            ours: one BE64, else SE4K per dirty sector; blank ones are not
            erased); the chain in both FATs; the LOGS/ entry with size = the
            allocation;
-    Run    per pass <= 300 us: drain the ring (Logger::drain, as LOG:DATA?)
-           into the coder while the 8 KiB FIFO (csvlog's, lent) and the file
-           have room; one page program when RDSR says idle. No erase, no FAT
-           or directory write, no wait, no `.cold` code (region B);
+    Run    per pass <= 300 us of its own CPU (wall time minus the stream
+           ISR's busy time; 600 us while the ring is over half full; 2 ms
+           of wall time at most): drain the ring (Logger::drain_recs, as
+           LOG:DATA?) into the coder while the 8 KiB FIFO (csvlog's, lent)
+           and the file have room; one page program when RDSR says idle. No
+           erase, no FAT or directory write, no wait, no `.cold` code
+           (region B). Above 38.4 kS/s the writer trial first (below);
     Stop   the ring's rest, the last chunk and pages; the entry's size = the
            bytes written; the unused clusters freed in both FATs.
 
@@ -313,8 +316,9 @@ longer than the file (fsck truncates) at worst.
 #### Rate limits (the flash)
 
 The chip: W25Q128JV page program tPP 0.4 ms typ / 3 ms max (256 bytes);
-the 12.5 MHz SPI clocks a page out in ~0.2 ms of CPU (polled bytes); a
-chunk header costs one more short program per 4 KiB chunk.
+the 12.5 MHz SPI clocks a page out in ~0.17 ms of CPU (polled, back to back
+since 2026-10-23: `tx_burst`; ~0.25 ms before); a chunk header costs one
+more short program per 4 KiB chunk.
 
 | | per page | pages/s | bytes/s |
 |---|---|---|---|
@@ -339,6 +343,53 @@ with tPP 3 ms on every page. So a disk session above 38400 S/s first times
 4 page programs at the end of Prep (`fastlog::set_probe`, LOG:DISK? tpp
 fields) and runs at 76800 only when the mean is <= 800 us and the max <=
 1.5 ms, else at 38400.
+
+**The CPU (device 7409b92, 2026-10-23).** With a typical chip (tPP 0.38 ms)
+the 76800 rung lost 54 % on the device: the stream ISR took 54 % of the CPU
+(cpu_permille 544), the Run pass's budget counted wall cycles (the coder got
+~138 us of a 300 us pass) and the coder needed ~10 us of CPU per row (64-bit
+shifts in the bit buffer, a CRC call per byte, 12-byte record packing at
+opt-level z, 64-bit divisions for the log panel every pass). The emulator
+had not shown it: it runs one instruction per cycle (`--mips 200`); the
+device is ~1.8x slower (emu/peripherals/CpuCost.cs: `--mips 110` matches the
+device's idle pass and its 76.8 kS/s Run pass; `--isr-stall-ns 700` its ISR
+share). Under that model the old firmware lost 37-46 %. Now (PC samples of
+the main code at the ISR entries, `PcSampleStart`): the writer takes ~2.5 us
+per row for the coder and ~0.17 ms per page, ~60 % of the main loop's CPU at
+1.8 B/sample; 0 lost at 1.2-2.45 B/sample with the ISR at 52-62 %.
+
+**The writer trial** (fastlog.rs `Gate`, every disk session above 38.4
+kS/s whose tPP probe passed): the stream's first 1 s (after a 100 ms
+warm-up) is coded as in the run, its pages clocked out as reads with the
+probe's tPP as the busy time (nothing reaches the file); the rung stays
+when the ring dropped nothing and its low water (the fill at a pass's start)
+did not rise from the first half of the window to the second by more than
+128 records (a writer short by ~0.4 % of the rate); else the session runs at
+38400 (LOG:SRATe? / LOG:PREamble? say so, as for a slow tPP). Then the
+logger session restarts and the file begins with its header: the trial's
+samples are not in it. The high water is reported, not judged: a slow pass
+(a panel part, ~18 ms) lifts it to ~1400 of 2048 once in a while. LOG:DISK?
+fields 11..13: the verdict (0 none, 1 kept, 2 fell back), the window's ISR
+permille, the ring's high water. A stop during the trial abandons the
+session as one in Ready (the file is removed).
+
+Emulator, 76800 to the disk, flash typ (emu/fastlogtest.py --mips 110
+--isr-stall-ns 700, 2026-10-23):
+
+| firmware | input | rows | lost | B/sample | pages/s | ISR % | trial |
+|---|---|---|---|---|---|---|---|
+| 8087c7d (before), --mips 110 alone | 0.5 V 50 Hz | 96 520 of 153 602 | 57 081 (37 %) | 1.99 | 596 | 46 | - |
+| 8087c7d (before) | 0.5 V 50 Hz | 83 226 of 153 602 | 70 376 (46 %) | 2.10 | 631 | 52 | - |
+| this | 0.5 V 50 Hz | 153 602 | 0 | 1.22 | 366 | 52 | kept |
+| this | + noise 40 / 200 / 1000 | 768 002 / 307 201 / 306 422 | 0 | 1.81 / 2.09 / 2.45 | 544 / 628 / 734 | 52 / 52 / 62 | kept |
+| this, --isr-stall-ns 3000 | 0.5 V 50 Hz | 153 602 at 38400 | 0 | 1.34 | 202 | 31 (90 in the trial) | fell back |
+
+(The device's 76800 rate finding of 7409b92 shows in the emulator: a 76800
+session after any earlier stream session of the same boot (a 38400 one, a
+76800 one stopped in its trial), or with a heavy noise (--noise 1000), locks
+at rate_mhz 76 723.6 / ppm_x10 +9952 with 1.39 ISR entries per sample and
+the ISR at 61 % (the first one after boot: 76 800.0, 1.13, 52 %); still 0
+lost, trial kept, ring high water ~1800 of 2048. Not investigated: TODO.)
 
 So: up to 19200 S/s the disk keeps up even at the datasheet's worst page
 time; 38400 S/s keeps up with typical parts (~5x margin) but not with a

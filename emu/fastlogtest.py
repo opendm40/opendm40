@@ -63,6 +63,8 @@ ap.add_argument('--isr-stall-ns', type=int, default=0, help='a stall per stream 
                 'with --mips 110, 700 gives the device\'s cpu_permille ~520 at 76800)')
 ap.add_argument('--expect-rung', type=int, default=None, help='a session above 38400 must run at this rung (76800: the writer '
                 'trial kept it; 38400: it fell back), else either is accepted')
+ap.add_argument('--stop-in-trial', action='store_true', help='first an AD2 76800 session stopped (LOG:STATe OFF) as soon as it '
+                'runs, i.e. in the writer trial: it ends Done with no rows and no LOGS/FASTnnn left')
 ap.add_argument('--prof', action='store_true', help='DBG:PROF:RESET when the run starts, DBG:PROF? at its end (printed)')
 A = ap.parse_args()
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
@@ -283,6 +285,34 @@ def session(q, src, rate, profile):
     return lost
 
 
+def stop_in_trial(q, profile):
+    """A 76800 disk session stopped in its writer trial (fastlog.rs `Gate`):
+    abandoned as in Ready: Done, no rows, the file removed."""
+    q('LOG:STATe OFF')
+    q('CONF:VOLT:AC')
+    q('LOG:SOURce AD2')
+    q('LOG:SRATe 76800')
+    time.sleep(3)
+    cat0 = q('MMEM:CAT? "LOGS"').count('FAST')
+    q('LOG:DEST DISK')
+    q('LOG:DURation 10')
+    q('LOG:STATe ON')
+    st = []
+    stopped = None
+    for _ in range(4000):
+        st = [int(x) for x in q('LOG:DISK?').split(',')]
+        if st[0] == 3 and stopped is None:
+            q('LOG:STATe OFF')
+            stopped = st
+        if st[0] >= 5:
+            break
+        time.sleep(0.05)
+    cat1 = q('MMEM:CAT? "LOGS"').count('FAST')
+    print('  stop in the trial: stopped at %s, end %s' % (stopped, st), flush=True)
+    check(stopped is not None and st[0] == 5 and st[4] == 0 and (len(st) < 11 or st[10] == 0) and cat1 == cat0,
+          '%s: a 76800 session stopped in its writer trial ends Done, no rows, no file left (FAST files %d -> %d)' % (profile, cat0, cat1))
+
+
 def bt_checks():
     try:
         s = socket.create_connection(('127.0.0.1', A.bt_port), timeout=5)
@@ -369,6 +399,8 @@ for profile in A.profiles.split(','):
             return b if raw else b.decode(errors='replace').strip()
 
         print('*IDN?', q('*IDN?'), flush=True)
+        if A.stop_in_trial:
+            stop_in_trial(q, profile)
         for sv in A.sessions.split(','):
             src, rate = sv.split(':')
             lost = session(q, src, int(rate), profile)
