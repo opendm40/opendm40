@@ -2125,6 +2125,17 @@ impl App {
         if self.dmm.hy_mode() == 15 { Some(ui::T_LABELS[self.dmm.t_sensor() as usize]) } else { None }
     }
 
+    /// A provisional DMM reading (`Reading::prov`, switch-latency.md
+    /// proposal 6): shown dimmed in place of the readout until the next
+    /// settled reading; never reaches the meter (statistics, REL, limits,
+    /// trend, CSV, beeps), BT (`last_raw`) or SCPI.
+    pub fn provisional(&mut self, r: Reading, can_draw: bool) {
+        self.prov = Some(r);
+        if can_draw && !self.redraw && matches!(self.view, View::Dmm | View::DmmScope) {
+            self.draw_reading();
+        }
+    }
+
     /// New DMM reading (always measured, whatever the view). Returns the
     /// live reading (REL applied) for SCPI READ? / MEAS?, also while HOLD or
     /// AutoHold freeze the readout (before, a HOLD made READ? wait forever).
