@@ -10,6 +10,13 @@ peak-to-peak over the phase's 6th to 1.5th last second), the reading rate
 from which the total stays within 0.1 % + 2 digits of the truth; nan:
 never in the phase).
 
+Method C is held to the device's rules on top (C_CHECK, acdc-approaches.md
+10.4-10.6): the DC part within 0.05 % + 5 digits of the source, the AC part
+of a DC input below 0.5 % of the range and of a sine within 0.05 %, >= 6
+readings / s, no range change in the window. The 60 V phases (DC 24 V, the
+40 Hz square of the device check) and the 5 V DC ones (6 V range, after the
+square) are the device check of 7409b92's failures.
+
 The HY3131 model's note 7 (AD1 shifted while AD2 / AD3 convert, the device's
 per-range offsets, feasibility 13.2) is on in every run; `B~` adds a
 non-repeating AD1 gain shift of +-0.2 % per AD1 enable (n7g, the device's
@@ -52,7 +59,9 @@ SIG = [
     ('open;acv:1@50,dc=1', 1.0, 1.0, 'V', 'V AC 1 + DC 1'),
     ('open;acv:0.5@50,dc=12', 12.0, 0.5, 'V', 'V DC 12 + 0.5 @50'),
     ('open;acv:0.5@45,dc=12', 12.0, 0.5, 'V', 'V DC 12 + 0.5 @45'),
-    ('open;dcv:5', 5.0, 0.0, 'V', 'V DC 5 again (r1 -> r0)'),
+    ('open;dcv:24', 24.0, 0.0, 'V', 'V DC 24'),
+    ('open;acv:4.776@40,dc=4.776,shape=square', 4.776, 4.776, 'V', 'V square 0..9.55 @40'),
+    ('open;dcv:5', 5.0, 0.0, 'V', 'V DC 5 after sq (r1->r0)'),
     ('open;dca:0.3', 0.3, 0.0, 'A', 'A DC 0.3'),
     ('open;aca:0.2@50', 0.0, 0.2, 'A', 'A AC 0.2 @50'),
     ('open;aca:0.2@50,dc=0.2', 0.2, 0.2, 'A', 'A AC 0.2 + DC 0.2'),
@@ -63,10 +72,20 @@ SIG = [
 # 5 V -> 2 V AC step at 12 s came at uptime 10.66 / 10.68 s; the boot is
 # deterministic in virtual time).
 LAG = 1.34
-T_A = 6 * PH  # the A phases start here (CURR:COUP ACDC)
+T_A = sum(1 for x in SIG if x[3] == 'V') * PH  # the A phases start here (CURR:COUP ACDC)
 RUN_FOR = len(SIG) * PH + 2
 # Accuracy bound per phase (|mean error| %, p-p %) every method must meet.
 CHECK = (0.3, 1.0)
+# Method C on top (the device's rules, acdc-approaches.md 10.4 / 10.5): per V phase
+# (DC part bound in V = 0.05 % + 5 digits of the range or None, AC part: (truth, bound in V) or
+# None, the least readings / s, no range change in the window).
+C_CHECK = {
+    'V DC 5': (0.05e-2 * 5 + 5e-4, (0.0, 0.03), 6.0),
+    'V AC 2 @50': (None, (2.0, 2.0 * 0.05e-2), 6.0),
+    'V DC 24': (0.05e-2 * 24 + 5e-3, (0.0, 0.3), 6.0),
+    'V square 0..9.55 @40': (0.05e-2 * 4.776 + 5e-3, (4.776, 4.776 * 0.1e-2), 6.0),
+    'V DC 5 after sq (r1->r0)': (0.05e-2 * 5 + 5e-4, (0.0, 0.03), 6.0),
+}
 
 
 def num(s):
@@ -140,7 +159,7 @@ def analyse(meth, d):
         ph = [r for r in rows if t0 <= r['t'] + lag < t1]
         win = [r for r in ph if t1 - 6.0 <= r['t'] + lag <= t1 - 1.5 and not math.isnan(r['v'])]
         if not win:
-            out.append((label, float('nan'), float('nan'), float('nan'), float('nan'), 0))
+            out.append((label, float('nan'), float('nan'), float('nan'), float('nan'), 0, None))
             continue
         e = [(r['v'] - truth) / truth * 100 for r in win]
         mean = sum(e) / len(e)
@@ -154,8 +173,31 @@ def analyse(meth, d):
             if all(not math.isnan(x['v']) and abs(x['v'] - truth) <= tol for x in ph[k:]):
                 settle = r['t'] + lag - t0
                 break
-        out.append((label, mean, pp, rate, settle, len(win)))
+        # method C extras: DC / AC parts (DBG:ACDC:STAT? 5 / 4) against the source, range changes
+        dcp = [num(r['st'][5]) for r in win]
+        acp = [num(r['st'][4]) for r in win]
+        rng = set(r['st'][3] for r in win)
+        extra = (sum(dcp) / len(dcp) - dc, sum(acp) / len(acp), max(acp), len(rng))
+        out.append((label, mean, pp, rate, settle, len(win), extra))
     return out
+
+
+def c_check(label, rate, extra):
+    """Method C's device rules for phase `label`: '' or what failed."""
+    if label not in C_CHECK:
+        return ''
+    dcb, acb, rmin = C_CHECK[label]
+    dce, acm, acmax, nrng = extra
+    bad = []
+    if dcb is not None and abs(dce) > dcb:
+        bad.append('DC %+.4f' % dce)
+    if acb is not None and (abs(acm - acb[0]) > acb[1] or abs(acmax - acb[0]) > 3 * acb[1]):
+        bad.append('AC %.4f/%.4f' % (acm, acmax))
+    if rate < rmin:
+        bad.append('rate')
+    if nrng > 1:
+        bad.append('ranges %d' % nrng)
+    return ' '.join(bad)
 
 
 if __name__ == '__main__':
@@ -183,13 +225,20 @@ if __name__ == '__main__':
     for i in range(len(SIG)):
         line = '%-22s' % SIG[i][4]
         for m in meths:
-            lab, mean, pp, rate, settle, n = tabs[m][i]
+            lab, mean, pp, rate, settle, n, extra = tabs[m][i]
             line += '| %+7.3f %6.3f %5.1f %6.1f     ' % (mean, pp, rate, settle)
             if n == 0 or abs(mean) > CHECK[0] or pp > CHECK[1]:
                 if m != 'B~':
                     ok = False
                 line += '*'
         print(line)
+        for m in meths:
+            lab, mean, pp, rate, settle, n, extra = tabs[m][i]
+            if m == 'C' and n and lab in C_CHECK:
+                bad = c_check(lab, rate, extra)
+                print('%-22s   C: DC part %+.4f V, AC part %.4f (max %.4f) V, ranges %d%s' % ('', extra[0], extra[1], extra[2], extra[3], ('  * ' + bad) if bad else ''))
+                if bad:
+                    ok = False
     for m in meths:
         if res.get(m, {}).get('err') or res.get(m, {}).get('rc'):
             print(m, 'run problem:', res[m].get('err', ''), res[m].get('log', '')[-300:])

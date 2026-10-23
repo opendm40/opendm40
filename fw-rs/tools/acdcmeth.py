@@ -30,8 +30,25 @@ calibrator gives: DC up to 30 V and its small 40 Hz square (tools/mr9270.py,
       vs 2 (OP1O - RLU after x10) at 1 / 3 / 5 V: B's DC part (zero applied)
       vs the DC V function; the gain of (ii) from the slope; the 40 Hz square
       with each to see the AC part unchanged.
+  e8  C's DC part away from its anchor (the 7409b92 fix: the anchor is the
+      DC V row's READ?, the gain from the internal zero): DC V READ? at each
+      level first (manual range), then C entered once at the top level and
+      the calibrator stepped down without leaving: 60 V at 24 / 12 / 5 / 1 /
+      0 V, 6 V at 5 / 3 / 1 / 0 V; C's DC part vs READ? (rule 0.05 % + 5
+      digits). Then C re-entered at 5 V on 60 V (span < 10 k codes: the gain
+      kept from the 24 V anchor, STAT? gspan) against READ?.
+  e9  the >= 5 V DC fault of 7409b92 (6 V range, AUTO range): C in AC+DC at
+      4.0 / 4.5 / 5.0 / 5.5 V for 12 s each: range changes, readings / s,
+      the AC part (max) and its source (STAT? acsrc: 0 RMS, 1 the peak
+      bound, 2 none), the DC part vs READ?. Pass: no range change after the
+      entry, >= 6 readings / s, AC part < 30 mV, DC within 0.05 % + 5 dig.
+  e10 AUTO after the square (7409b92: C stayed on AC ~4.056 V): VOLT:COUP
+      AUTO with C on the 40 Hz square (12 s), then 5.0 / 5.5 / 4.5 V DC (15
+      s each): VOLT:COUP?, FETCh?, range; pass: AUTO,DC within 0.05 % +
+      5 digits of READ? and one range over each level's last 8 s.
 
     /usr/bin/python3 tools/acdcmeth.py e1 e2 e5 e6 e7 -o acdcmeth.jsonl
+    /usr/bin/python3 tools/acdcmeth.py e8 e9 e10 e2 -o acdcfix.jsonl  # retest
     /usr/bin/python3 tools/acdcmeth.py e6 --no-cal          # input left alone
     tools/acdcmeth.py e6 --usbip 1-0 --no-cal               # the emulator
 
@@ -92,7 +109,8 @@ class Run:
 
     def stat(self):
         f = self.q('DBG:ACDC:STAT?').split(',')
-        k = ['meth', 'step', 'mode', 'range', 'ac', 'dc', 'n_ac', 'n_dc', 'n_rd', 'hz', 'corr', 'pc', 'off', 'lpf', 'sq']
+        k = ['meth', 'step', 'mode', 'range', 'ac', 'dc', 'n_ac', 'n_dc', 'n_rd', 'hz', 'corr', 'pc', 'off', 'lpf', 'sq',
+             'pp', 'acsrc', 'gspan']
         return {n: (float(x) if '.' in x or 'E' in x else int(x)) for n, x in zip(k, f)}
 
     def fetch(self):
@@ -276,9 +294,99 @@ def e7(R):
     R.w('DBG:ACDC:R0 1')
 
 
+def digits(item):
+    return FULL[item] / 60000
+
+
+def rule(item, ref):
+    """0.05 % + 5 digits of DC V range item (the e5 rule)."""
+    return 0.0005 * abs(ref) + 5 * digits(item)
+
+
+def e8(R):
+    for item, levels in ((2, (24.0, 12.0, 5.0, 1.0, 0.0)), (1, (5.0, 3.0, 1.0, 0.0))):
+        refs = {}
+        for v in levels:
+            R.src_dc(v)
+            refs[v] = R.dcv_ref(item)
+        R.src_dc(levels[0])
+        R.enter('C', item)
+        for v in levels:
+            R.src_dc(v)
+            time.sleep(1.0)
+            p = R.mean_parts(3.0)
+            s = R.stat()
+            err = p['dc'] - refs[v]
+            R.log(exp='e8', item=item, level=v, ref=refs[v], c_dc=p['dc'], err=err, digits=err / digits(item),
+                  ok=abs(err) <= rule(item, refs[v]), pc=p['pc'], off=p['off'], gspan=s.get('gspan', 0), ac=p['ac'])
+    # the gain kept over sessions: re-entered at 5 V on 60 V (a span < 10 k codes)
+    R.src_dc(5.0)
+    ref = R.dcv_ref(2)
+    R.enter('C', 2)
+    p = R.mean_parts(3.0)
+    s = R.stat()
+    R.log(exp='e8kept', item=2, level=5.0, ref=ref, c_dc=p['dc'], err=p['dc'] - ref, ok=abs(p['dc'] - ref) <= rule(2, ref),
+          pc=p['pc'], gspan=s.get('gspan', 0))
+
+
+def watch(R, secs):
+    """Poll DBG:ACDC:STAT? for `secs`: ranges seen, readings / s, AC part
+    mean / max, AC sources, DC part mean."""
+    t0 = time.time()
+    s0 = R.stat()
+    rs, ac, dc, src = set(), [], [], {}
+    while time.time() - t0 < secs:
+        s = R.stat()
+        rs.add(s['range'])
+        ac.append(s['ac'])
+        dc.append(s['dc'])
+        src[s.get('acsrc', -1)] = src.get(s.get('acsrc', -1), 0) + 1
+        time.sleep(0.1)
+    s1 = R.stat()
+    return dict(ranges=sorted(rs), rate=(s1['n_rd'] - s0['n_rd']) / max(1e-3, time.time() - t0),
+                ac=sum(ac) / len(ac), ac_max=max(ac), dc=sum(dc) / len(dc), acsrc=src, gspan=s1.get('gspan', 0))
+
+
+def e9(R):
+    for v in (4.0, 4.5, 5.0, 5.5):
+        R.src_dc(v)
+        R.w('CONF:VOLT:DC')
+        time.sleep(1.0)
+        ref = sum(float(R.q('READ?')) for _ in range(3)) / 3
+        R.enter('C')
+        w = watch(R, 12.0)
+        err = w['dc'] - ref
+        ok = len(w['ranges']) == 1 and w['rate'] >= 6 and w['ac_max'] < 0.03 and abs(err) <= rule(1 if w['ranges'][0] == 0 else 2, ref)
+        R.log(exp='e9', level=v, ref=ref, err=err, ok=ok, **w)
+
+
+def e10(R):
+    refs = {}
+    for v in (5.0, 5.5, 4.5):
+        R.src_dc(v)
+        R.w('CONF:VOLT:DC')
+        time.sleep(1.0)
+        refs[v] = sum(float(R.q('READ?')) for _ in range(3)) / 3
+    R.src_sq(40)
+    R.w('DBG:ACDC:METH C')
+    R.w('CONF:VOLT:DC')
+    time.sleep(0.5)
+    R.w('VOLT:COUP AUTO')
+    time.sleep(12.0)
+    R.log(exp='e10', level='square', coup=R.q('VOLT:COUP?'), fetch=R.fetch(), **watch(R, 2.0))
+    for v in (5.0, 5.5, 4.5):
+        if R.cal:
+            R.cal.set_output('voltage', v, enable=True)
+        time.sleep(7.0)
+        w = watch(R, 8.0)
+        coup, f = R.q('VOLT:COUP?'), R.fetch()
+        ok = coup == 'AUTO,DC' and abs(f - refs[v]) <= rule(1, refs[v]) and len(w['ranges']) == 1
+        R.log(exp='e10', level=v, ref=refs[v], coup=coup, fetch=f, err=f - refs[v], ok=ok, **w)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0], formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
-    ap.add_argument('exps', nargs='+', help='e1 e2 e3 e4 e5 e6 e7')
+    ap.add_argument('exps', nargs='+', help='e1 e2 e3 e4 e5 e6 e7 e8 e9 e10')
     ap.add_argument('--usbip', metavar='BUSID', help="the emulator's USB/IP server")
     ap.add_argument('--cal', default='/dev/ttyACM1')
     ap.add_argument('--no-cal', action='store_true')
@@ -295,7 +403,7 @@ def main():
                 print('%s: needs a signal generator (the calibrator has DC and a 40 Hz square only; '
                       '40 Hz is an AD1 notch): skipped' % e, flush=True)
                 continue
-            {'e1': e1, 'e2': e2, 'e5': e5, 'e6': e6, 'e7': e7}[e](R)
+            {'e1': e1, 'e2': e2, 'e5': e5, 'e6': e6, 'e7': e7, 'e8': e8, 'e9': e9, 'e10': e10}[e](R)
     finally:
         R.close()
 

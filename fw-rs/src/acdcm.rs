@@ -16,14 +16,25 @@
 //!   range, or fixed with DBG:ACDC:ZERO. DC part = the mean of the last 5
 //!   AD1 results (0.5 s) minus the zero. Kept for the comparison only.
 //! * C - the primary candidate. V: the DC-coupled V row of E7 (ad2exp.rs
-//!   `dcv_row`: AD2 on OP1O, OP1's chopper held) with AD3 on the same node
-//!   and the RMS / LPF on: DC part = LPF, AC part = sqrt(RMS) (the HPF in
-//!   the RMS block takes the DC out), both through E7's entry self-cal
-//!   (`ad2exp::dc_enter`: AD1 alone, then the zero and the signal on AD2,
-//!   gain and offset; `dmm::dc_cal`), one fixed row, nothing switched, both
-//!   parts every LPF block (106.7 ms). The AC part rides the self-cal's DC
-//!   gain, not the factory AC V calibration (which belongs to the AC-coupled
-//!   PB4 node). A: the stock AC A row as it is (AD2 on the shunt node is
+//!   `dcv_row`: AD2 on OP1O, OP1's chopper held) with AD3 on the same node,
+//!   the RMS / LPF on and AD2's peak hold: DC part = LPF, AC part =
+//!   sqrt(RMS) (the HPF in the RMS block takes the DC out), one fixed row,
+//!   nothing switched, both parts every LPF block (106.7 ms). DC part: per
+//!   range and session an anchor (`am_cal_step`, 7409b92 device fix): the
+//!   stock DC V row's reading (AD1 alone, the DC V function's own row and
+//!   calibration = what READ? shows) against the LPF of this very row (AD3
+//!   and the RMS on: E7's self-cal anchored AD1 in the AC V row's switches
+//!   and averaged AD2 with AD3 off, and read the 60 V DC part +11 mV +
+//!   0.05 % off); the gain from an internal zero (OP1+ on AGND) when the
+//!   span is >= 10 k codes, kept per range over sessions, else the table.
+//!   AC part: sqrt(RMS) x the factory AC V calibration (gain and offset, as
+//!   A: device e2 put it within 0.014 % of A, the DC gain 0.13 / 0.23 %
+//!   high), used only when AD2's peak hold over the last two results allows
+//!   it (sqrt(RMS) <= p-p / 2: no waveform has more); otherwise the RMS
+//!   block is in its HPF transient or returned garbage (device: >= 5 V DC on
+//!   6 V) and, with a steady node, the AC part is that bound (an upper
+//!   limit), else none: no reading, and after RMS_BAD_MS up a range. A: the
+//!   stock AC A row as it is (AD2 on the shunt node is
 //!   DC-coupled): AC part = RMS with the factory AC A gain, DC part = the LPF
 //!   with the same gain, corrected against the stock DC A row at entry (one
 //!   point: a gain factor when the current is >= 10 % of the range, else
@@ -36,8 +47,8 @@
 //! input and calibration, 10x less signal; 2 = candidate (ii): AD1 on OP1O -
 //! RLU after the x10 network, DC V 6 V's calibration, the zero absorbs OP1's
 //! held offset; its gain is nominal (test 7 measures it). C 6 V: E7's row
-//! (the /100 tap, OP1 x10) and self-cal (AD1 on SENSE - PB5, DC V 60 V's
-//! calibration), i.e. candidate (i) for the reference.
+//! (the /100 tap, OP1 x10), anchored to the stock DC V 6 V row (the /10
+//! tap, its own calibration).
 //!
 //! DC mV / AC mV (modes 2 / 3) stay on A: no merged mV row is defined. No
 //! misconnect sentinel in the method rows (Kind::Off): the AC V one uses
@@ -60,13 +71,37 @@ const ST_RUN: u8 = 2;
 /// Results per step (the first one of the MEAS step dropped as well).
 const REF_N: u8 = 3;
 const MEAS_N: u8 = 3;
+/// C V: the internal zero step (the method row with OP1+ on AGND).
+const ST_ZERO: u8 = 3;
 /// B: AD1 results in the DC part's moving mean, restart threshold (codes).
 const B_AVG: usize = 5;
 const B_AVG_THR: i32 = 0x206;
-/// C V: AD2 / LPF headroom (codes of 2^18): up-range when |LPF| +
-/// 1.414 x sqrt(RMS) exceeds it (the DC-coupled node has one window for
-/// DC and AC; acdc-approaches.md 7 item 5).
-const C_PEAK: f32 = 0.9 * 262_144.0;
+/// C V: AD2's peak hold at 90 % of its span (2^18 codes) = the node's
+/// one window for DC and AC (acdc-approaches.md 7 item 5) full: up-range.
+const C_PK_UP: i32 = 235_930;
+/// C V anchor: LPF results dropped after a row write (its settle already
+/// waited) / after the zero's OP1+ switch (the LPF window is 2 blocks),
+/// then CAL_N_ZERO / CAL_N averaged whose spread is within max(60 codes,
+/// 1 %: an AC part's LPF ripple, <= 0.5 % at 40 Hz, passes; a moving input
+/// does not: taken again, CAL_TRIES times at most).
+const CAL_DROP_ROW: u8 = 1;
+const CAL_DROP_SW: u8 = 2;
+const CAL_N_ZERO: u8 = 2;
+const CAL_N: u8 = 4;
+const CAL_TRIES: u8 = 4;
+/// |signal - zero| (codes) from which the anchor takes the gain too, and
+/// how far from the table's it may be (as E7's self-cal).
+const CAL_GAIN_CODES: f32 = 10_000.0;
+const CAL_GAIN_TOL: f32 = 0.03;
+/// R32 with OP1+ on AGND (the zero), OP2 bits of the row kept.
+const R32_OP1_AGND: u8 = 0x0B;
+/// sqrt(RMS) may exceed half the peak hold's p-p by this (codes: noise,
+/// the RMS window reaching ~1 block further back than the two holds).
+const PK_MARGIN: f32 = 24.0;
+/// The RMS not usable with AC on the node this long: up a range (ms).
+const RMS_BAD_MS: u64 = 2500;
+/// How long the last AC part from the RMS stands in for a peak bound (ms).
+const AC_OK_MS: u64 = 2000;
 /// C A: the entry reference sets a gain (else an offset) from this
 /// fraction of the range's full scale.
 const C_A_GAIN: f32 = 0.1;
@@ -100,6 +135,34 @@ pub struct Am {
     /// Raw LPF / sqrt(RMS) codes of the last C result (window check, STAT?).
     lpf: f32,
     sq: f32,
+    /// C V per range: the session's anchor (per_code, offset; valid with
+    /// the slot's `ok` bit), the measured gain and the span (codes) it was
+    /// measured over (0: none, the table's; kept over sessions).
+    cpc: [f32; 4],
+    coff: [f32; 4],
+    cg: [f32; 4],
+    cgsp: [f32; 4],
+    /// C V anchor in progress: the zero (LPF codes), the min / max of the
+    /// results averaged (in `acc`), zero taken, retries.
+    cz: f32,
+    c1: f32,
+    c2: f32,
+    zdone: bool,
+    tries: u8,
+    /// AD2's peak hold of the previous result (min, max), the last p-p
+    /// (codes, -1 none) and the AC part's source (0 RMS, 1 the peak bound,
+    /// 2 none), since when (ms, 0 never) the RMS is not usable with AC on
+    /// the node, and per V range the |DC part| at which its RMS failed (a
+    /// down-range into it waits for |DC| < 0.9 x that; this session).
+    pk_prev: (i32, i32),
+    pp: f32,
+    acsrc: u8,
+    bad_t: u64,
+    cfault: [f32; 4],
+    /// The last AC part the RMS gave (V) and when (ms, 0 none): a bound
+    /// above it keeps it (the bound only says "at most").
+    ac_ok: f32,
+    ac_ok_t: u64,
 }
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -126,6 +189,22 @@ pub fn am_static() -> &'static mut Am {
             n_rd: 0,
             lpf: 0.0,
             sq: 0.0,
+            cpc: [0.0; 4],
+            coff: [0.0; 4],
+            cg: [0.0; 4],
+            cgsp: [0.0; 4],
+            cz: 0.0,
+            c1: 0.0,
+            c2: 0.0,
+            zdone: false,
+            tries: 0,
+            pk_prev: (i32::MAX, i32::MIN),
+            pp: -1.0,
+            acsrc: 2,
+            bad_t: 0,
+            cfault: [0.0; 4],
+            ac_ok: 0.0,
+            ac_ok_t: 0,
         })
     }
 }
@@ -171,6 +250,12 @@ pub(super) fn ac_scale(m: u8, r: usize) -> (f32, u32, u32, u32) {
     }
 }
 
+/// C V: the table's per_code of range `r` (dmm::DCV_AD2_GAIN: the anchor's
+/// gain until one is measured).
+fn c_tab(r: usize) -> f32 {
+    K_ACV[r.min(3)] * 1.25 / 262_144.0 * DCV_AD2_GAIN[r.min(3)]
+}
+
 impl Dmm {
     /// A method other than A runs this V / A AC+DC session (not mV, not
     /// the power meter).
@@ -189,6 +274,8 @@ impl Dmm {
         a.n = 0;
         a.acc = 0.0;
         a.fresh = 0;
+        a.cfault = [0.0; 4];
+        a.bad_t = 0;
     }
 
     /// DBG:ACDC:METH: switch and restart the session (AC+DC / AUTO).
@@ -225,11 +312,16 @@ impl Dmm {
 
     /// DBG:ACDC:STAT?: meth, step, mode, range, ac, dc, n_ac, n_dc, n_rd,
     /// Hz, the slot's correction, C V per_code, offset, LPF codes, sqrt(RMS)
-    /// codes (app.rs formats the first four and n_* as integers).
+    /// codes, C V: AD2 peak p-p codes (-1 none), the AC part's source (0
+    /// RMS, 1 the peak bound, 2 none), the gain's span in codes (0: the
+    /// table) (app.rs formats the first four, n_* and the source as
+    /// integers).
     #[inline(never)] // .cold (link-native.x): entry / range change / SCPI only
-    pub fn am_stat(&self) -> [f32; 15] {
+    pub fn am_stat(&self) -> [f32; 18] {
         let a = &*self.am;
-        let (pc, off) = dc_cal(self.range).unwrap_or((0.0, 0.0));
+        let r = self.range.clamp(0, 3) as usize;
+        let cal = self.mode <= 1 && a.meth == METH_C && a.ok & (1 << r) != 0;
+        let (pc, off) = if cal { (a.cpc[r], a.coff[r]) } else { (0.0, 0.0) };
         [
             a.meth as f32,
             a.st as f32,
@@ -246,6 +338,9 @@ impl Dmm {
             off,
             a.lpf,
             a.sq,
+            a.pp,
+            a.acsrc as f32,
+            a.cgsp[r],
         ]
     }
 
@@ -255,18 +350,28 @@ impl Dmm {
     #[inline(never)] // .cold (link-native.x): entry / range change / SCPI only
     pub(super) fn am_mode(&mut self) -> bool {
         let s = slot(self.mode, self.range);
-        let v = self.mode <= 1;
-        let cv = v && self.am.meth == METH_C;
-        let need_ref = (self.am.ok | self.am.refd) & (1 << s) == 0 && !cv;
+        let r = self.range.clamp(0, 3) as usize;
+        let cv = self.mode <= 1 && self.am.meth == METH_C;
+        let need_ref = (self.am.ok | self.am.refd) & (1 << s) == 0;
         let dm = dc_mode_of(self.mode);
         self.mode = if need_ref { dm } else { ac_mode_of(dm) };
         let a = &mut *self.am;
         a.n = 0;
         a.acc = 0.0;
+        a.zdone = false;
+        a.tries = 0;
+        a.pk_prev = (i32::MAX, i32::MIN);
+        a.bad_t = 0;
+        a.ac_ok_t = 0;
+        // C V: the zero only when this anchor can measure a gain (a span of
+        // >= CAL_GAIN_CODES, half again the one measured before).
+        let span = a.ref_v.abs() / c_tab(r);
         a.st = if need_ref {
             ST_REF
-        } else if cv || a.ok & (1 << s) != 0 {
+        } else if a.ok & (1 << s) != 0 {
             ST_RUN
+        } else if cv && span >= CAL_GAIN_CODES && span > 1.5 * a.cgsp[r] {
+            ST_ZERO
         } else {
             ST_MEAS
         };
@@ -282,25 +387,22 @@ impl Dmm {
         let (m, r) = (self.mode, self.range.max(0) as usize);
         let mut c = *cfg;
         if matches!(m, 1 | 7..=9) {
-            if m == 1 {
+            // B: OP1 kept on SENSE (PB4 charged, as the stock DC phase); C
+            // V: the DC V function's row as it is (its READ?).
+            if m == 1 && self.am.meth != METH_C {
                 c[18] = 0x38;
             }
             return c;
         }
         if self.am.meth == METH_C {
             if m == 0 {
-                let s = slot(m, self.range);
-                // E7's cal has one slot (dmm::dc_cal): a range visited
-                // before keeps its `ok` bit but lost the cal to another
-                // range, so it is measured again (~0.45 s).
-                if self.am.ok & (1 << s) == 0 || dc_cal(self.range).is_none() {
-                    crate::ad2exp::dc_enter(1, r as u8, 0, true);
-                    self.am.ok |= 1 << s;
-                }
                 c = crate::ad2exp::dcv_row(r as u8, 0, 0, 0, true);
-                c[9] = 0xF8; // RMS, LPF, LPFBW 111 (the AC V row's)
+                c[9] = 0xFC; // RMS, LPF, LPFBW 111 (the AC V row's), AD2's peak hold
                 c[20] = 0x88; // AD3 on, sum(X * Y)
                 c[21] = 0x14; // AD3 = OP1O - AGND, AD3IG 1.0
+                if self.am.st == ST_ZERO {
+                    c[18] = (c[18] & 0xF0) | R32_OP1_AGND;
+                }
             }
             return c;
         }
@@ -385,30 +487,28 @@ impl Dmm {
         if intf & hy::INTF_RMS == 0 {
             return None;
         }
-        let mut b = [0u8; 14];
-        hy::read(hy::R_AD1, &mut b);
+        let cv = meth == METH_C && v;
+        let mut b = [0u8; 20];
+        hy::read(hy::R_AD1, &mut b[..if cv { 20 } else { 14 }]);
         let rms = (b[9] as u64) | (b[10] as u64) << 8 | (b[11] as u64) << 16 | (b[12] as u64) << 24 | ((b[13] & 0x1F) as u64) << 32;
         let sq = sqrt(rms as f32);
+        let lpf = hy::lpf19(&b[6..9]) as f32;
+        self.am.lpf = lpf;
+        self.am.sq = sq;
+        if cv {
+            return self.poll_am_cv(clk, r, &b, sq, lpf);
+        }
         if sq > 262_144.0 {
             return None;
         }
-        let lpf = hy::lpf19(&b[6..9]) as f32;
         let (sc, ci, g_rms, o_rms) = ac_scale(m, r);
         let gain = sc * cal(g_rms + 4 * ci, 1.0);
-        let cv = meth == METH_C && v;
-        let (pc, off) = if cv {
-            dc_cal(self.range).unwrap_or_else(|| (ad2_scale_of(1, self.range).map_or(sc, |a| a.per_code), 0.0))
-        } else {
-            (0.0, 0.0)
-        };
-        let ac = if cv { sq * pc } else { (sq * gain - cal(o_rms + 4 * ci, 0.0)).max(0.0) };
-        self.am.lpf = lpf;
-        self.am.sq = sq;
+        let ac = (sq * gain - cal(o_rms + 4 * ci, 0.0)).max(0.0);
         if meth == METH_C {
-            // C: the DC part from the LPF (V: E7's self-cal; A: the AC A
-            // gain with the entry correction: a gain factor when the
-            // reference was >= C_A_GAIN of the range, else an offset).
-            let x = if cv { lpf * pc - off } else { lpf * gain };
+            // C A: the DC part from the LPF with the AC A gain and the
+            // entry correction (a gain factor when the reference was >=
+            // C_A_GAIN of the range, else an offset).
+            let x = lpf * gain;
             let fs = self.factor() * DEC4[((m - 4) as usize + r).min(3)];
             if self.am.st == ST_MEAS {
                 let a = &mut *self.am;
@@ -429,7 +529,7 @@ impl Dmm {
                 }
                 return None;
             }
-            self.dc_val = if cv { x } else { x * self.am.cgain[s - 4] - self.am.corr[s] };
+            self.dc_val = x * self.am.cgain[s - 4] - self.am.corr[s];
             self.acdc_seen |= 2;
             self.am.fresh |= 2;
             self.am.n_dc += 1;
@@ -462,7 +562,7 @@ impl Dmm {
         }
         let before = (m, self.range);
         if !self.manual {
-            let up = mag > ov * lim || (cv && lpf.abs() + 1.414 * sq > C_PEAK);
+            let up = mag > ov * lim;
             let down = mag < 0.1 * lim / ov;
             if v {
                 if up && r < 3 {
@@ -493,6 +593,173 @@ impl Dmm {
             self.freq_secondary(now, 0xF0);
         }
         Some(self.acdc_reading(lim, dec, unit, si_k))
+    }
+
+    /// Method C, V: one RMS / LPF result of the DC-coupled row (`b`: R00..
+    /// R13 with AD2's peak hold, `sq` sqrt(RMS), `lpf` the LPF codes). The
+    /// anchor steps (`am_cal_step`), then the DC part from the LPF and the
+    /// anchor, the AC part from the RMS with the factory AC V calibration
+    /// when AD2's peak hold says it can be (module header), the range.
+    fn poll_am_cv(&mut self, clk: &mut Clock, r: usize, b: &[u8; 20], sq: f32, lpf: f32) -> Option<Reading> {
+        let (pmin, pmax) = (hy::lpf19(&b[14..17]), hy::lpf19(&b[17..20]));
+        // Restart the hold for the next result (the R29 bits of the RMS /
+        // LPF unchanged: poll_ac's PKH_RESTART).
+        hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
+        hy::write(0x29, &[self.r29]);
+        if self.am.st != ST_RUN {
+            return self.am_cal_step(clk, r, lpf);
+        }
+        let now = clk.now_ms();
+        let lim = (self.factor() * DEC4[r]).min(1000.0);
+        let (sc, ci, g_rms, o_rms) = ac_scale(0, r);
+        let gain = sc * cal(g_rms + 4 * ci, 1.0);
+        let off_ac = cal(o_rms + 4 * ci, 0.0);
+        let a = &mut *self.am;
+        let x = lpf * a.cpc[r] - a.coff[r];
+        // AD2's extremes over this result and the one before (~2 blocks:
+        // the RMS window's length).
+        let (lo, hi) = (pmin.min(a.pk_prev.0), pmax.max(a.pk_prev.1));
+        a.pk_prev = (pmin, pmax);
+        let pp = if hi >= lo && pmax >= pmin { (hi - lo) as f32 } else { -1.0 };
+        a.pp = pp;
+        let clip = pmax >= pmin && pmax.max(-pmin) >= C_PK_UP;
+        a.fresh |= 2;
+        a.n_dc += 1;
+        // sqrt(RMS) <= p-p / 2 for any waveform (Popoviciu): more is the
+        // RMS block's HPF transient after a row write / an input step, or
+        // garbage. A steady node (the bound below the AUTO "off" floor):
+        // the AC part is the last one the RMS gave within AC_OK_MS if the
+        // bound allows it, else the bound (an upper limit, ~3 x the noise).
+        let bound = 0.5 * pp + PK_MARGIN;
+        let ac = if pp >= 0.0 && sq <= bound {
+            a.acsrc = 0;
+            let v = (sq * gain - off_ac).max(0.0);
+            a.ac_ok = v;
+            a.ac_ok_t = now.max(1);
+            Some(v)
+        } else if pp >= 0.0 && bound * gain <= AUTO_FLOOR_V[1] * lim {
+            a.acsrc = 1;
+            let fresh = a.ac_ok_t != 0 && now.saturating_sub(a.ac_ok_t) <= AC_OK_MS && a.ac_ok <= bound * gain;
+            Some(if fresh { a.ac_ok } else { bound * gain })
+        } else {
+            a.acsrc = 2;
+            None
+        };
+        if ac.is_some() {
+            a.bad_t = 0;
+        } else if a.bad_t == 0 {
+            a.bad_t = now.max(1);
+        }
+        let failed = a.bad_t != 0 && now.saturating_sub(a.bad_t) >= RMS_BAD_MS;
+        let fault = if r > 0 { a.cfault[r - 1] } else { 0.0 };
+        self.dc_val = x;
+        self.acdc_seen |= 2;
+        let ov = self.over();
+        let mag = hypot(ac.unwrap_or(0.0), x);
+        if let Some(ac) = ac {
+            self.ac_raw = ac;
+        }
+        if !self.manual {
+            let up = clip || x.abs() > ov * lim || mag > ov * lim || failed;
+            // Down only on a usable AC part, and not back into a range
+            // whose RMS failed at about this DC.
+            let down = ac.is_some() && mag < 0.1 * lim / ov && (fault == 0.0 || x.abs() < 0.9 * fault);
+            if up && r < 3 {
+                if failed && !clip {
+                    self.am.cfault[r] = x.abs();
+                }
+                self.set(clk, 0, r as i8 + 1, 450);
+                return None;
+            } else if down && r > 0 {
+                self.set(clk, 0, r as i8 - 1, 450);
+                return None;
+            } else if down && self.v_auto & 2 != 0 {
+                self.set(clk, 3, 1, 600);
+                return None;
+            }
+        }
+        let ac = ac?;
+        ema(ACV_WIN[r], 0.25, ac, &mut self.f_ac);
+        self.acdc_seen |= 1;
+        self.am.fresh |= 1;
+        self.am.n_ac += 1;
+        if self.acdc_seen != 3 {
+            return None;
+        }
+        if self.cpl_auto && self.am.fresh == 3 {
+            self.auto_eval(lim);
+            self.am.fresh = 0;
+        }
+        Some(self.acdc_reading(lim, 4 - r as u8, "V", 1.0))
+    }
+
+    /// Method C, V: a step of the range's anchor (module header; ST_ZERO /
+    /// ST_MEAS after the stock DC V row's REF_N readings in `ref_v`): the
+    /// LPF codes of the zero (OP1+ on AGND) and of the signal, then per_code
+    /// (the measured gain when the zero was taken and the span is large
+    /// enough, else the one kept for the range, else the table) and offset
+    /// = signal x per_code - ref_v. A signal away from what the reference
+    /// read (the input changed) takes the reference again.
+    #[inline(never)] // .cold (link-native.x): a few results per range visit
+    fn am_cal_step(&mut self, clk: &mut Clock, r: usize, lpf: f32) -> Option<Reading> {
+        let a = &mut *self.am;
+        a.n += 1;
+        let drop = if a.st == ST_MEAS && a.zdone { CAL_DROP_SW } else { CAL_DROP_ROW };
+        if a.n <= drop {
+            a.acc = 0.0;
+            a.c1 = f32::MAX;
+            a.c2 = f32::MIN;
+            return None;
+        }
+        a.acc += lpf;
+        a.c1 = a.c1.min(lpf);
+        a.c2 = a.c2.max(lpf);
+        let k = a.n - drop;
+        if k < if a.st == ST_ZERO { CAL_N_ZERO } else { CAL_N } {
+            return None;
+        }
+        let m = a.acc / k as f32;
+        if a.c2 - a.c1 > 60f32.max(0.01 * m.abs()) && a.tries < CAL_TRIES {
+            a.tries += 1;
+            a.n = drop; // the next CAL_N results again
+            a.acc = 0.0;
+            a.c1 = f32::MAX;
+            a.c2 = f32::MIN;
+            return None;
+        }
+        a.n = 0;
+        a.tries = 0;
+        if a.st == ST_ZERO {
+            a.cz = m;
+            a.zdone = true;
+            a.st = ST_MEAS;
+            hy::write(0x32, &[CFG_F0[r][18]]); // OP1+ back on SENSE
+            let _ = hy::read1(hy::R_INTF);
+            return None;
+        }
+        let (v, tab) = (a.ref_v, c_tab(r));
+        let z = if a.zdone { a.cz } else { 0.0 };
+        if ((m - z) * tab - v).abs() > 0.02 * v.abs() + 2500.0 * tab {
+            a.refd &= !(1 << r);
+            self.switch_phase(clk, 1, r as i8, 450);
+            return None;
+        }
+        if a.zdone {
+            let span = (m - a.cz).abs();
+            let g = v / (m - a.cz);
+            if span >= CAL_GAIN_CODES && (g / tab - 1.0).abs() <= CAL_GAIN_TOL {
+                a.cg[r] = g;
+                a.cgsp[r] = span;
+            }
+        }
+        let pc = if a.cgsp[r] > 0.0 { a.cg[r] } else { tab };
+        a.cpc[r] = pc;
+        a.coff[r] = m * pc - v;
+        a.ok |= 1 << r;
+        a.st = ST_RUN;
+        a.pk_prev = (i32::MAX, i32::MIN);
+        a.bad_t = 0;
+        None
     }
 
     /// B's DC part of an AD1 code in the merged row of AC mode `m`.
