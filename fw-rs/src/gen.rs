@@ -53,6 +53,9 @@ pub struct Gen {
     pub out: Out,
     /// Actual output frequency while on, Hz (0 when off).
     pub real_hz: f32,
+    /// `out.hz()` as f32, kept by `new` / `apply`: SOUR:FREQ? may come
+    /// while an AD2 stream runs, and gen::plan is region C (slow flash).
+    out_hz: f32,
 }
 
 fn stop_outputs() {
@@ -74,12 +77,13 @@ impl Gen {
     pub fn new() -> Self {
         unsafe { modify32(RCU_APB1EN, 0, (1 << 29) | (1 << 4) | (1 << 6)) }; // DAC, TIM6, TIM12
         stop_outputs();
-        Gen { s: Settings::DEFAULT, out: compute(&Settings::DEFAULT), real_hz: 0.0 }
+        let out = compute(&Settings::DEFAULT);
+        Gen { s: Settings::DEFAULT, out_hz: out.hz() as f32, out, real_hz: 0.0 }
     }
 
     /// Actual (quantised) output frequency, Hz, also while off (UF-15).
     pub fn actual_hz(&self) -> f32 {
-        self.out.hz() as f32
+        self.out_hz
     }
 
     /// Actual output frequency in full precision, Hz.
@@ -101,6 +105,7 @@ impl Gen {
         // compute() sees the raw set frequency, so a value above 10 MHz
         // still flags `freq_clamped`; the stored settings are normalised.
         self.out = compute(&s);
+        self.out_hz = self.out.hz() as f32;
         let s = s.normalised();
         self.s = s;
         stop_outputs();

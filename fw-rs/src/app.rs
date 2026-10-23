@@ -4504,7 +4504,12 @@ impl App {
             _ => None, // DMM / system commands: scpi_dmm
         };
         if matches!(cmd, C::DiagDac | C::DiagPwm) {
-        } else if !scope_cmd {
+        } else if !scope_cmd && reply.is_none() {
+            // Settings only: a query (OUTP?, SOUR:FREQ? ...) re-applied the
+            // generator (stop_outputs + restart: a glitch on a running output)
+            // and ran Gen::apply, region C code: device 35fce2a, OUTP? polled
+            // during a 38400 S/s disk session = late 25, max_lat 21.1 us at
+            // lat_pc Gen::apply, 29 samples lost in 10 s.
             self.gen_set(g);
         } else if !matches!(cmd, C::Meas(_) | C::WavData | C::WavPre | C::DbgHwTrig(..) | C::WavPoints(_) | C::WavFormat(_))
             && reply.is_none()
