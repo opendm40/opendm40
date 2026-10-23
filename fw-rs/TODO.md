@@ -1583,19 +1583,40 @@ Firmware:
 - [ ] A copy of a slow-bank INFO/ file while the meter streams for more than ~3 min (an open Wave view, a long
       fast-log session) can fail on Linux (EIO after 180 s; buffered reads usually recover) and maybe sooner on
       Windows. Documented (README.TXT could say so; native-boot.md does).
-- [ ] Not exercised by any test: UI navigation during a fast-log session (menu pages / the scope page with the
-      scope source open while the session streams). Page code in region C and any remaining slow-bank reads
-      there would stall the ISR; a fastlogtest scenario with DBG:KEY / DBG:TAP and the data watch would show.
-      Also unexercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow
-      block with the residue, sense 02/04/01; the host retries the whole command).
+- [x] UI navigation during a fast-log session (menu pages / the scope page with the scope source open while the
+      session streams). **Done in 3f32bc3 / 7225b36** (`fastlogtest --ui-nav`, DBG:VIEW? checks each landing).
+      Note: on the device only DBG:KEY / DBG:TAP can do this; real touch and the side keys stop a disk session
+      at the first press (main.rs `fast_touch`), a host session ignores them, BT serve is gated. Found and
+      fixed: (1) **a disk session started by a host while the meter showed the Scope page recorded 0 rows**
+      (the DMM rail was off: `fast_start` powered it and wrote the row at once, the chip ignored it; the same
+      path serves LOG:DEST HOST): `Dmm::start` now waits out the rail-wake settle (<= 50 ms), and a logger
+      session keeps the DMM rail on in every view (`App::logger_busy`; the Oscilloscope tile during a session
+      dropped it). fastlogtest now checks rows ~ rate x duration for every session (the 0-row session had
+      passed every other check). (2) Region C under the stream: `App::press_track` (pressed feedback, now
+      skipped while `hy3131::streaming()`) and `ui::main_menu_hit` + its literal pool (now region B). (3) The
+      source badge during a session ran `wave_open` (region C; it also steps the DMM range, which ends the
+      session with "Settings conflict"): refused with a toast "Wave: data logger running".
+      Emulator (typ, --dur 8, --region-c --ui-nav, 38400 and 76800): every landing right, no region C / slow-
+      bank read, rows 307 201 / 614 401, lost 0; `--ui-nav-steps 0` (start on the Scope page only): before
+      0 rows, after 153 601 at 38400 x 4 s. Device retest: on the Scope page (MCX), `LOG:DEST DISK`,
+      `LOG:DURation 10`, `LOG:STATe ON` at 38400 and 76800: the DLG has ~rate x 10 rows, lost 0; the same
+      with `LOG:DEST HOST` (LOG:DATA? drains records).
+- [ ] Not exercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
+      with the residue, sense 02/04/01; the host retries the whole command).
       Known and left: region C DBG commands (DBG:GENUINE? reads the loader data at 0x080A4000 in region C
       code, DBG:BOOT?, the AD2 experiments) still stall the ISR when sent during a stream (debug only).
 - [x] `fast_scpi` (LOG:DEST / LOG:DURation) in region C (device b6909d6: LOG:DEST? / DUR? in the Wave view,
       late 1, 2.8 / 5.8 us). Fixed in 0464566 (out of .cold; on rust-fw-poc). Emulator: fastlogtest
       `--host-read` and wavetest's 2 / 1 ms/div polls now send LOG:DEST? / LOG:DURation? while streaming
       (region C hooks: none). Device retest: LOG:DEST? / DUR? in the Wave view at 1 ms/div, late 0.
-- [ ] MMEM:CAT? in the Wave view at 76800: 123 ms in one pass, `dropped` +6813 per query (the view's ring; ISR
-      late 0). Device b6909d6 `wdrop.py`.
+- [x] MMEM:CAT? in the Wave view at 76800: 123 ms in one pass, `dropped` +6813 per query (the view's ring; ISR
+      late 0). Device b6909d6 `wdrop.py`. **Fixed in 3f32bc3:** the reply is cached (csvlog.rs `Cat`, 6 KiB
+      SRAM) and valid while `msc::FLASH_WRITES` (every program / erase) is unchanged; `catalog_warm` builds
+      it before the Wave view's / the inrush capture's stream starts (also after a Save CSV / screenshot
+      pause); "Mass storage busy" as before while a writer holds the disk. Emulator wavetest 1 ms/div,
+      MMEM:CAT? x3 while streaming: before overwritten +7904, after 0 (2 ms/div 0 both). Device retest:
+      `wdrop.py` in the Wave view at 1 ms/div: `dropped` +0 per MMEM:CAT?; after a Save CSV the new SCOPnnn
+      shows in MMEM:CAT?.
 - [ ] 76800 stream / rate (loop fix PASSED on device e7ec2cc; its nominal was wrong, fixed in ee28b71, device
       check open). **Device e7ec2cc (device-check-2026-10-21.md "e7ec2cc: the 76.8 kS/s PLL retest"):** the
       loop locks from a cold start within 5 s at rate_mhz 76 800 0xx = ppm_x10 -29 35x (-2935 ppm) against the 76 574.6
@@ -2402,10 +2423,23 @@ Emulator (emu/):
       **Fixed (5ca0557):** refused: SYST:ERR? -100,"Settings conflict: Wave view" (and ": inrush page" on the
       inrush page, the same paused DMM), LOG:CSV? stays off (App::rec_conflict). wavetest checks it.
       Device b6909d6: PASS (the Wave view and the inrush page: the error, LOG:CSV? off, no new file).
-- [ ] Wave view, not under wavetest's per-step region C / ring checks yet (the whole-run check covers what
+- [x] Wave view, not under wavetest's per-step region C / ring checks yet (the whole-run check covers what
       the test does): the source badge exit (DMM -> MCX: `wave_close` without `show`, so the MCX page runs one
       pass with the stream on), a V/div step at 2 / 1 ms/div (a full repaint with the stream on: the ring
       overflows, the record restarts), the inrush page's LOG:CSV ON refusal (inrushtest).
+      **Done in 7225b36 (tests) / 3f32bc3 (fixes).** V/div + / - at 2 / 1 ms/div: before overwritten +3164 /
+      +3877 per step, after 0 (`wave_rescale`: the repaint runs before the stream restarts). Badge exit at
+      2 ms/div: passed in the emulator before too (no forced stop, no region C); the close is now held for the
+      stream's stop anyway (`wave_badge_close`, as `show`), so the rail switch and the MCX page never run
+      under the stream. inrushtest (region C hooks now): LOG:CSV ON on the armed page refused, still ARMED, no
+      region C. wavetest volt / dcv, inrushtest: PASS. Device retest: Wave view at 1 ms/div, V/div + and -:
+      `wdrop.py` dropped +0, the trace back within ~1 s; the badge out at 2 ms/div: late 0, overruns 0.
+- [x] MENU on the Device page returned to Settings 3/3 (device 35fce2a, the "State at the end" note).
+      Stock: Device is a section of the one Settings screen; what MENU does there is not traced, the main
+      menu is the likely answer. **3f32bc3:** MENU on Device -> the main menu; a tap on Device still goes
+      to Settings 3/3; MENU on Settings 3/3 / 2/3 still steps back a page (fw-rs's own paging; Help -> Settings
+      unchanged). Emulator: fastlogtest --ui-nav page tree. Device retest: Settings > More > More > Device,
+      MENU: the main menu.
 - [x] AUTO OVERLOAD on AC 1 A (1bffde2, couptest iac repro): blocked, the A jack is not wired.
       Fixed in 1152624 with the 2026-10-22 BUG (quiet hop in AUTO); the device check is in the list below.
 - [x] powtest `ereset` FAILs on 0100788, 70572bb, 4a734d1 + dmm-bugs alike, also run alone (the Yes tap

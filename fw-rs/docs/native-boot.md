@@ -1657,6 +1657,16 @@ LOG:DURation? / *IDN? / SYST:MOD?), ad2streamtest, inrushtest: PASS, no
 region C call and no slow-bank load while streaming (the Save CSV tap's own
 handler, allowed as before, aside).
 
+UI and host paths added 2026-10-23 (3f32bc3, emulator): `fastlogtest
+--ui-nav` walks the menu, Settings 1..3, Device and the MCX scope page by
+DBG:KEY / DBG:TAP while a disk session streams (real touch stops a session
+at the first press; this audits the page code) and starts each session on
+the Scope page: no region C / slow-bank read after `ui::main_menu_hit` moved
+to B and `press_track` is skipped while streaming. wavetest checks MMEM:CAT?
+(now from a cache, csvlog.rs `Cat`: a scan in one pass at 76800 dropped
+~90 ms of the Wave view's ring), the V/div step (repaint before the restart)
+and the badge exit per step.
+
 ### Host writes (`src/vwrite.rs`): delete from the PC, drag-and-drop update
 
 The volume is writable but stores nothing a host writes as sectors: each
