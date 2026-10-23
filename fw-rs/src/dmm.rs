@@ -16,7 +16,6 @@
 use core::ptr::read_volatile;
 
 use crate::clock::Clock;
-use crate::acdctr::{self as tr, TrEnt};
 use crate::hy3131 as hy;
 use crate::hy3131_tables::*;
 use crate::mmio::{modify32, w32};
@@ -25,6 +24,9 @@ use crate::sentinel::{self, Alert, Kind, Sentinel};
 /// Power meter (function 18): docs/power-meter-and-misconnect.md section 3.
 #[path = "powermeter.rs"]
 pub mod pw;
+#[path = "acdctr.rs"]
+pub mod acdctr;
+use acdctr::{self as tr, TrEnt};
 #[path = "acdcm.rs"]
 pub mod am;
 use pw::Pw;
@@ -643,6 +645,9 @@ pub struct Dmm {
     vet_left: u8,
     vet_held: u8,
     vet_prev: i32,
+    /// AC+DC: the first DC result of the run asking for a step down (ms, 0
+    /// none; ACDC_DOWN_MS).
+    down_t: u64,
     /// A range or function change since the last reading (READ? / FETCh?
     /// answer +9.91E37 meanwhile, `reading_pending`).
     rd_pending: bool,
@@ -727,9 +732,6 @@ pub struct Dmm {
     avg_skip: bool,
     /// Conversions in the mean of the reading being produced (Reading::avg_n).
     avg_n: u8,
-    /// AC+DC DC phase: the stock's AD1-OSR once-flag (DAT_080141fc and the
-    /// mV / A ones): set when R22 = 0x17 was written, cleared by an AD1 step.
-    acdc_osr_once: bool,
     /// AC+DC diagnostic: the last ACDC_DIAG_N AC phases (ring), the number
     /// of AC phases seen, and whether the current AC phase is being logged.
     diag: [AcPhaseDiag; ACDC_DIAG_N],
@@ -843,10 +845,19 @@ fn ema_ms(acc: &mut f32, last: &mut Option<u64>, now: u64) {
 // (docs/acdc-stock-vs-fwrs.md sections 7 and 8.1), one switch per difference
 // so they can be bisected on the device (false = the fw-rs 9421fd5 way).
 //
-/// DC phase at the config row's OSR 8192 (R22 = 0x15). The stock's 0x17
-/// write is gated by a once-flag that stays set in AC+DC (it is only cleared
-/// by an AD1 step), so its DC phase stays at 8192. false: R22 = 0x17 right
-/// after every DC-phase row.
+/// DC phase at the config row's OSR 8192 (R22 = 0x15), and no R22 write
+/// while it runs. The stock's 0x17 write is gated by a once-flag that stays
+/// set in steady AC+DC, so its DC phase stays at 8192; but an AD1 step (a
+/// range change, which fw-rs vets) clears it and the next steady result
+/// writes 0x17 once. fw-rs did that too until device check ad97fd7
+/// (DBG:ACDC:TRACE): after a range change that lands in a DC phase, the next
+/// DC phase's first result is read at its settle deadline, up to a
+/// conversion late, so that 0x17 write lands in the middle of the running
+/// conversion; the next result came after ~155 ms (not 400) at 52 % of the
+/// input on 60 V (40 % on 6 V), the 0x15 write that this step caused gave a
+/// second result at the same 52 %, and the two agreed, so `vet_ad1` took it
+/// as the DC part (5 of 5 traced hits). No R22 write in AC+DC removes both.
+/// false: R22 = 0x17 right after every DC-phase row.
 const ACDC_STOCK_OSR: bool = true;
 
 /// Misconnect sentinel, AC V / AC mV: restart AD1's peak hold (ENPKH 0 -> 1
@@ -883,8 +894,8 @@ const ACDC_DIAG_N: usize = 4;
 // discards the AC results until the transient is over (`ac_settle_step`):
 // it only adds to the RMS and decays result by result (device: a few % per
 // 100 ms result), while a real AC part stays, so the AC part is settled
-// once ACS_FLAT_N results in a row fell by less than 1 - ACS_STEP each
-// (or rose), or one is below ACS_FLOOR of the range's full scale, or
+// once ACS_FLAT_N results in a row moved by less than ACS_STEP each
+// (`acs_flat`), or one is below ACS_FLOOR of the range's full scale, or
 // ACS_MAX_MS after the change at the latest.
 // Meanwhile AC+DC gives no reading (like the entry: no value before both
 // parts are measured); AUTO keeps showing its part with the AC part held
@@ -892,7 +903,8 @@ const ACDC_DIAG_N: usize = 4;
 //
 // "Flat" (device bab5dd4: a 1 % step let the 600 -> 60 V tail of a 40 Hz
 // square through, +0.55 / +0.24 % for 1.7 s): a result that fell by at
-// most ACS_STEP (0.1 %) of itself since the previous one (rose: flat too),
+// most ACS_STEP (0.1 %) of itself since the previous one (or rose by at most
+// that: `acs_flat`),
 // and when the two falls before it in the same AC phase (results
 // ACS_NEAR_MS apart at most) shrink as a decay does (ratio q < 1), the
 // rest of that decay, d q / (1 - q), at most ACS_REM (0.05 %) of the
@@ -918,6 +930,16 @@ const ACS_MAX_MS: u64 = 5000;
 const ACS_DC_STEP: f32 = 0.005;
 const ACS_JUMP: f32 = 1.5;
 const ACS_JUMP_FLOOR: f32 = 0.005;
+
+// AC+DC (method A) / AUTO step down: only in the DC phase, once its results
+// asked for it for ACDC_DOWN_MS in a row (`acdc_down`; the AC phase's
+// magnitude uses the last DC part, which may be one result of a transient).
+// Device check ceb5ca5 / ad97fd7: the calibrator's level change dips to
+// 2-4 V for ~0.2 s, and one DC result in the dip stepped 60 -> 6 V on a
+// 7.0 -> 6.3 V change (then back: 6.3 V is over range on 6 V, no reading
+// for ~4 s). A step down now waits for the next DC phase (~1 s later);
+// steps up are as before (at once).
+const ACDC_DOWN_MS: u64 = 400;
 
 // DC conversions after a range change (DC V / mV / A, the DC phase of
 // AC+DC method A; `vet_ad1`). Device bab5dd4: VOLT:RANG:AUTO ON from 600 V
@@ -982,10 +1004,15 @@ const AUTO_TIE_MS: u64 = 4000;
 
 /// The AC settle's "flat" test (ACS_STEP) of result `ac` after `prev` (< 0:
 /// none), `d_prev` = the fall before (< 0: unknown), `near` = the two in the
-/// same AC phase.
+/// same AC phase. A rise is flat only within ACS_STEP too: device check
+/// ad97fd7 (DBG:ACDC:TRACE, calibrator 4.0 -> 5.8 V, its level change dips
+/// to 2-4 V for ~0.2 s): the AC results of the step rose 0.080 -> 1.166 ->
+/// 2.384 V as the RMS window filled, the "rose: flat" rule ended the
+/// settle on them, and hypot(2.384, 5.8) moved AC+DC autorange 6 -> 60 V
+/// and back 5 s later.
 fn acs_flat(prev: f32, d_prev: f32, ac: f32, near: bool) -> bool {
     let d = prev - ac;
-    if prev < 0.0 || d > ACS_STEP * ac {
+    if prev < 0.0 || d.abs() > ACS_STEP * ac {
         return false;
     }
     if near && d > 0.0 && d_prev > 0.0 {
@@ -1054,6 +1081,7 @@ impl Dmm {
             vet_left: 0,
             vet_held: 0,
             vet_prev: i32::MIN,
+            down_t: 0,
             rd_pending: false,
             cpl_auto: false,
             auto_ac: false,
@@ -1123,7 +1151,6 @@ impl Dmm {
             avg: Avg::new(),
             avg_skip: false,
             avg_n: 0,
-            acdc_osr_once: true,
             diag: [AcPhaseDiag::EMPTY; ACDC_DIAG_N],
             diag_k: 0,
             diag_on: false,
@@ -1388,9 +1415,9 @@ impl Dmm {
             hy::write(0x22, &[0x17]);
             self.r22 = 0x17;
         }
-        // AC+DC DC phase: the stock stays at the row's OSR 8192 (see
-        // ACDC_STOCK_OSR and `acdc_osr`); every result after the settle
-        // deadline is used, none dropped (docs/acdc-stock-vs-fwrs.md 8.2).
+        // AC+DC DC phase: at the row's OSR 8192 (see ACDC_STOCK_OSR); every
+        // result after the settle deadline is used, none dropped
+        // (docs/acdc-stock-vs-fwrs.md 8.2).
         if !ACDC_STOCK_OSR && self.acdc && matches!(m, 1 | 3 | 7..=9) {
             hy::write(0x22, &[0x17]);
             self.r22 = 0x17;
@@ -1404,28 +1431,6 @@ impl Dmm {
             self.diag_t = clk.now_ms();
             self.diag_ctr = 0;
         }
-    }
-
-    /// AC+DC DC phase, ACDC_STOCK_OSR: the stock's OSR rule with its
-    /// once-flag (FUN_08013734 cases 1, 3, 7..9): |AD1 - previous| <= `thr`
-    /// -> R22 = 0x17 only if the flag is clear (then set); else R22 = 0x15 and
-    /// the flag cleared. FUN_08012c30 does not touch the flag, so in steady
-    /// AC+DC no 0x17 is written and every DC phase runs at the row's 0x15.
-    fn acdc_osr(&mut self, ad1: i32, thr: i32) {
-        if (ad1 - self.prev_ad1).abs() <= thr {
-            if !self.acdc_osr_once {
-                self.acdc_osr_once = true;
-                hy::write(0x22, &[OSR_SLOW]);
-                self.r22 = OSR_SLOW;
-                self.tr_ev(self.t_poll, tr::K_R22, ad1, self.prev_ad1 as f32, 0);
-            }
-        } else {
-            self.acdc_osr_once = false;
-            hy::write(0x22, &[OSR_FAST]);
-            self.r22 = OSR_FAST;
-            self.tr_ev(self.t_poll, tr::K_R22, ad1, self.prev_ad1 as f32, 0);
-        }
-        self.prev_ad1 = ad1;
     }
 
     /// AC+DC diagnostic: the last AC phases (oldest first) and the number of
@@ -1509,7 +1514,24 @@ impl Dmm {
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
+        self.down_t = 0;
         self.tr_ev(now, tr::K_SET, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
+    }
+
+    /// Step down on this DC result (`want`)? Plain DC: at once; AC+DC: once
+    /// the DC results asked for it for ACDC_DOWN_MS in a row.
+    fn acdc_down(&mut self, now: u64, want: bool) -> bool {
+        if !self.acdc {
+            return want;
+        }
+        if !want {
+            self.down_t = 0;
+            return false;
+        }
+        if self.down_t == 0 {
+            self.down_t = now.max(1);
+        }
+        now - self.down_t >= ACDC_DOWN_MS
     }
 
     /// AC+DC trace event (acdctr.rs) with the vetting / phase state; a DC
@@ -1783,9 +1805,6 @@ impl Dmm {
         self.acdc = sub >= 2;
         self.cpl_auto = sub == 3;
         self.phase_n = 0;
-        // The stock enters AC+DC from a steady DC reading with its OSR flag
-        // set (doc section 1), so its DC phase never writes 0x17.
-        self.acdc_osr_once = true;
         self.reset_values();
         self.am_enter();
         self.set(clk, if sub == 1 { ac } else { dc }, r, t);
@@ -2514,7 +2533,6 @@ impl Dmm {
         if (s == 2) != self.acdc {
             self.acdc = s == 2;
             self.phase_n = 0;
-            self.acdc_osr_once = true; // as set_sub
             self.reset_values();
         }
     }
@@ -2802,14 +2820,11 @@ impl Dmm {
         let (f, ov) = (self.factor(), self.over());
         let m = self.mode;
         let before = (m, self.range);
-        // AC+DC: the stock's once-flag OSR rule (ACDC_STOCK_OSR), else the
-        // OSR stays as write_config left it.
+        // AC+DC: the OSR stays as write_config left it (ACDC_STOCK_OSR).
         let acdc = self.acdc;
-        let thr = if m == 1 { 0x206 } else { 0xE22 - 0x960 * r as i32 };
         if !acdc {
+            let thr = if m == 1 { 0x206 } else { 0xE22 - 0x960 * r as i32 };
             self.osr(ad1, thr, 0x15, true);
-        } else if ACDC_STOCK_OSR {
-            self.acdc_osr(ad1, thr);
         }
         // After a range change: a conversion that does not agree with the
         // one before is held (VET_*; AC+DC: dc_out keeps the phase count).
@@ -2843,7 +2858,7 @@ impl Dmm {
             if m == 1 {
                 if up && r < 3 {
                     self.set(clk, 1, r as i8 + 1, 250);
-                } else if vet && !hold && mag < 0.1 * lim / ov && !self.am_on() {
+                } else if self.acdc_down(now, vet && !hold && mag < 0.1 * lim / ov && !self.am_on()) {
                     // (not in an AC+DC method's reference step: it is taken at
                     // the method's range, acdcm.rs)
                     if r > 0 {
@@ -2946,8 +2961,6 @@ impl Dmm {
         self.avg_skip = false;
         if !self.acdc {
             self.osr(ad1, 0x168, 0x15, true);
-        } else if ACDC_STOCK_OSR {
-            self.acdc_osr(ad1, 0x168);
         }
         // After a range change (VET_*); the OVERLOAD check below still sees
         // every conversion.
@@ -2982,7 +2995,7 @@ impl Dmm {
                 } else if m > 7 && self.a_auto & 1 != 0 {
                     self.set(clk, m - 1, 1, 250);
                 }
-            } else if vet && !hold && mag < 0.1 * lim / ov {
+            } else if self.acdc_down(clk.now_ms(), vet && !hold && mag < 0.1 * lim / ov) {
                 if r == 1 {
                     self.set(clk, m, 0, 250);
                 } else if m < lowest && self.ovl_allows(m + 1 - 7) {
@@ -3214,8 +3227,8 @@ impl Dmm {
         }
         if !self.manual && !settling {
             let up = mag > ov * lim;
-            // AC+DC: no step down before the DC part is known (hypot(AC, 0)).
-            let down = mag < 0.1 * lim / ov && (!acdc || self.acdc_seen & 2 != 0);
+            // AC+DC: no step down here, only in the DC phase (ACDC_DOWN_MS).
+            let down = mag < 0.1 * lim / ov && !acdc;
             match m {
                 // AC+DC: a V / mV range change is applied through the DC
                 // phase (600 ms, S+10 = 2); unit changes go to the DC mode.
@@ -4283,6 +4296,9 @@ mod tests {
         assert!(acs_flat(4.80, 0.0019, 4.79962, true));
         // no previous result
         assert!(!acs_flat(-1.0, -1.0, 4.8, true));
+        // the RMS window filling after an input step (device ad97fd7): rising is not flat
+        assert!(!acs_flat(1.16636, -1.0, 2.38393, true));
+        assert!(!acs_flat(0.07952, -1.0, 1.16636, true));
     }
 
     #[test]

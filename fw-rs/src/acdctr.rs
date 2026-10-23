@@ -2,7 +2,7 @@
 //!
 //! A ring of the last TR_N AC+DC events (`Dmm::tr`): every DC conversion
 //! of a DC phase, every AC result, a range / function set, a phase switch,
-//! a row write and an R22 write of the OSR rule. With readback on, a DC
+//! a row write and the R32 write of the AC -> DC switch. With readback on, a DC
 //! conversion also carries the chip's R22 / R24 / R32 and a hash of the
 //! whole row R20..R35 as the chip holds it. An accepted DC part that is
 //! more than TR_JUMP off the one before freezes the ring TR_POST events
@@ -23,7 +23,6 @@ pub const K_AC: u8 = b'A';
 pub const K_SET: u8 = b'S';
 pub const K_PHASE: u8 = b'P';
 pub const K_ROW: u8 = b'C';
-pub const K_R22: u8 = b'W';
 /// R32 = 0x38 after the AC -> DC switch (V).
 pub const K_R32: u8 = b'X';
 
