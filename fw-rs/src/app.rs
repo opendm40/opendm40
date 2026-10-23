@@ -2756,13 +2756,14 @@ impl App {
     fn alert(&mut self, now: u64, r: &Reading) {
         use crate::sentinel::Alert;
         let a = r.alert;
-        // A-PROT: dangerous while the current flows. DC V / mV keep the
-        // probe in the row while latched (doc 4.8): its reading below
-        // APROT_GONE_A = the source is gone and the latch only waits for the
-        // user (badge, no alarm); elsewhere the probe is not read, the latch
-        // counts (the alarm's own cap applies).
-        let probe_low = matches!(self.dmm.func(), 1 | 3) && self.dmm.sent.probe_a < crate::sentinel::APROT_GONE_A;
-        self.danger_rd = a == Alert::AJack || (a == Alert::AProt && !probe_low);
+        // A-PROT: dangerous while the current flows. It trips only in DC V /
+        // mV, which keep the probe in the row while latched (doc 4.8): its
+        // reading below APROT_GONE_A = the source is gone and the latch only
+        // waits for the user (badge, no alarm). In a function without the
+        // probe (the latch holds there too) its last value stands: a source
+        // removed before the change stays quiet (the user did the right
+        // thing: no new alarm), one still there keeps sounding (the cap).
+        self.danger_rd = a == Alert::AJack || (a == Alert::AProt && self.dmm.sent.probe_a >= crate::sentinel::APROT_GONE_A);
         let pw = r.power.map(|p| (p.ik, p.i_ol, p.i));
         if crate::danger::over_rating(r.mode, r.range, r.main.ol, r.si, pw) {
             self.i10_since.get_or_insert(now);

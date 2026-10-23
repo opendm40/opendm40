@@ -2131,7 +2131,7 @@ there is no cancel / mute key.
 
 | alert / cue | dangerous? | why |
 |---|---|---|
-| **A-PROT** (4.8) | **yes**, while its current flows | a source across A-COM pushed >= 125 mA (0.74 W in the 47.5 ohm resistor) for 0.4 s or >= 300 mA at once: the firmware moved the A jack to the 10 mohm shunt, so a stiff source now runs into the 10 A fuse, and above 30 V the MOSFETs themselves are at risk (4.8 "Limits"). Latched until the user acts and the current is gone; in DC V / mV the probe stays in the row and reads the current, so the alarm follows the probe (`probe_a` >= `APROT_GONE_A` = 50 mA); the latch without current is only waiting for the user (badge, no alarm). Outside DC V / mV the probe is not read and the latch itself counts (the cap below applies) |
+| **A-PROT** (4.8) | **yes**, while its current flows | a source across A-COM pushed >= 125 mA (0.74 W in the 47.5 ohm resistor) for 0.4 s or >= 300 mA at once: the firmware moved the A jack to the 10 mohm shunt, so a stiff source now runs into the 10 A fuse, and above 30 V the MOSFETs themselves are at risk (4.8 "Limits"). Latched until the user acts and the current is gone; it trips only in DC V / mV, which keep the probe in the row while latched, so the alarm follows the probe (`probe_a` >= `APROT_GONE_A` = 50 mA); the latch without current is only waiting for the user (badge, no alarm). In a function without the probe (the latch holds there too, 4.8) its last reading stands: the source removed first, then another function (the user doing the right thing) stays quiet; a function change with the source still there keeps the alarm (the cap below applies) |
 | **A-JACK** (4.6) | **yes** | the leads are in A / COM while a V / ohm / ... function is selected: the meter is a ~48 ohm path in series with whatever the probes touch. Probing a supply "for volts" is the classic way meters blow fuses and resistors; in AC V / mV, ohm, temperature, Hz, continuity, diode, cap and AC+DC there is **no probe** (4.8 "Limits"), so A-JACK is the only warning before a 12-24 V source cooks the 47.5 ohm resistor: A-PROT can never fire there. Also: a reading acted on is wrong (the meter shows the V function's idea of a circuit it is in series with), and a function / range change made to "fix" it can switch the A jack to a 10 mohm or 0.5 ohm shunt across a live source |
 | **current above the 10 A rating** | **yes** (new condition, no badge of its own) | the DMM's A functions reading > 10 A (or OL on the 10 A range itself: DC mode 7 / AC mode 4 range 1; AC+DC: the total), the power meter's I channel on its 10 A range (ik 5) reading > 10 A or OL, for >= 1 s (`I10_ASSERT_MS`: a motor / lamp / capacitor inrush is the fuse's normal life). The manual's limit is 10 A behind one 10 A ceramic fuse (4.7): above it the shunt and the fuse heat for as long as it lasts, and a fuse carries 110 % for a long time, so the meter overheats before anything opens. OL on a lower range (manual 6 A, the uA / mA shunts) says nothing about the amps and is not counted |
 | OVERLOAD / OVLD, amber 10A (4.7) | no | the meter protected itself (uA / mA shunt -> 10 A shunt) and measures fine: its one 300 ms beep at the key / alert volume stays |
@@ -2161,7 +2161,8 @@ a tone change lands whole at the next 0.3 ms period.
 * **re-arm**: the condition gone and back is a new event: it sounds again,
   also after a silenced one;
 * **stop**: the pass after the condition clears (A-JACK: its own 1 s
-  clear; A-PROT: the probe below 50 mA, ~100 ms windows; the 10 A rule:
+  clear; A-PROT: the probe below 50 mA, ~100 ms windows, in DC V / mV; the
+  10 A rule:
   the first reading at or below 10 A), and when the DMM stops measuring
   (the scope / generator views switch its rail off: no readings, no claim);
 * **cap**: the full pattern for 30 s (`FULL_MS`), then one burst every 10 s
@@ -2191,7 +2192,7 @@ SPI are unrelated pins and peripherals). The only new thing is how long it
 sounds (seconds instead of 50-300 ms) and the 2.86 kHz tone. Whether the
 buzzer's supply current couples into the HY3131 front end cannot be
 checked in the emulator (no analog supply model): device check 4 below.
-Code size: region B -1.5 KiB (39 732 B free), region C and SRAM free
+Code size: region B -1.5 KiB (39 772 B free), region C and SRAM free
 unchanged, stack headroom 21 152 B (stackdepth --check 20480 passes).
 
 **Emulator** (`emu/hy3131/loudtest.py`; `run.py --buzzer-log` makes the
@@ -2203,8 +2204,12 @@ ARR / CCR1 in virtual ms; key / alert volume 0 % via SCPI):
 | aprot | 10 s: 12 V across A-COM (DC V); 15.45 tap on the badge; 18 source off; 21 AUTO (the user acts); 25 12 V again; 31 off | quiet before; first tone 0.25 s after the source (at A-JACK, A-PROT follows), CCR1 5544 / 6930 only (ARR 11199 / 13999), steps 125 ms (one 95: a ~30 ms late pass), bursts 1.00 s apart; the tap mid-burst: off 0.15 s later (the tone in progress ends at its step), nothing until 25; the 2nd event loud 0.33 s after the source; source off at 31: off at 31.40 s **while A-PROT stays latched** (SCPI `APROT` with `DBG:ALARm?` 0,0,2,0); ARR 11199 / CCR1 0 after every stop |
 | ajack | 10 s: 1 mA into A (DC V); 15.45 RUN key; 18 off / 21 on; 26 off; 29 on; 29.5 tap on its toast | loud at 10.28 s, 125 / 1000 ms exact; RUN mid-burst: off at once, silent until 21; re-armed at 21.21; current off at 26: the last burst at 26.55 (A-JACK clears 1 s after the current), none from 27.2; 3rd event 29.15, toast tap 29.5: off at 29.65, silent to the end |
 | vjack-off | DC A, 24 V on V/ohm (V-JACK?) 10..19 s; then Off + DC V, 1 mA into A at 26; then Volume at 40 % | no alarm write in 6..33 s (V-JACK?, then A-JACK with Off: `DBG:ALARm?` 0,0,1,2); Volume: two-tone at CCR1 746 / 933 (40 %) from 33.2 s, nothing louder |
+| aprot-ohm | 10 s: 12 V across A-COM (DC V); 15 source off; then CONF:RES (the user acts in a function without the probe) | loud, quiet after 15 s, and no new alarm in ohm while A-PROT stays latched there (`APROT` with `DBG:ALARm?` 0,0,1,0). The first build (afb6304) took the latch in ohm as dangerous and sounded again: fixed |
 | i10 | DC A, 5 A, 12 A at 16 s (OL on the 10 A range), 5 A at 24 | quiet at 5 A; loud from 17.35 s (the range walk + 1 s); back to 5 A at 24: the burst due at 24.35 s never comes |
 
+Not run in the emulator: the 30 s -> one burst per 10 s cap (host test
+`pattern_two_tone_then_reminders` only), the combined view's strip-badge
+tap, the power meter's 10 A rule (host test `over_rating_rule`).
 senttest `aprot-dcv-12`, `dcv-adc`, `dca-v` unchanged (OK). Host tests
 `tools/meter-test/run.sh danger` (pattern, event rules, the 10 A rule);
 ui-render: Settings 3/3 with every value (m10-settings3, the matrix, the
