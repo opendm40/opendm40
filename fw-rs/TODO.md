@@ -1362,7 +1362,8 @@ Firmware:
       Branch settle-fix: the same settle on an input step: a DC part that moved by > 0.5 % of the range
       between two DC results (ACS_DC_STEP), or an AC result > 1.5 x the AC part + 0.5 % of the range
       (ACS_JUMP, a step seen in the AC phase first). Its AC results are discarded and move no range; AC+DC
-      keeps reading with the AC part held. Device check: ar6.py / ar6b.py (DC 4..7 V, AC+DC AUTO range):
+      keeps reading with the AC part held, and its DC phase steps no range down meanwhile (the
+      magnitude would use the stale AC part). Device check: ar6.py / ar6b.py (DC 4..7 V, AC+DC AUTO range):
       no 6 -> 60 -> 6 V excursion on the 5.8 -> 5.0 V or 6.3 -> 5.8 V steps, a step across 6.0 V still
       moves the range once; READ? follows the DC step within ~1 s with the AC part held.
 
