@@ -78,6 +78,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             Rewrites = 0;
             rng = new Random(12345);
             faultRng = new Random(777);
+            pkRng = new Random(4242);
             hpfM = 0;
         }
 
@@ -646,7 +647,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 // accesses still meets the waveform's extremes; the noise's a little less often)
                 var stride = Math.Max(1, (n - 256 - ad2Done) / 256);
                 for(var k = ad2Done + 1; k < n - 255; k += stride)
-                    PeakHold(Clamp19(Ad2Sample(ad2Start + k * p) + (int)Math.Round(Gauss() * Ad2NoiseCodes)));
+                    PeakHold(Clamp19(Ad2Sample(ad2Start + k * p) + (int)Math.Round(PkGauss() * Ad2NoiseCodes)));
                 for(var k = Math.Max(ad2Done + 1, n - 255); k < n; k++)
                     PeakHold(Clamp19(Ad2Sample(ad2Start + k * p) + (int)Math.Round(Gauss() * Ad2NoiseCodes) + (k <= Ad2StartResults ? Ad2StartGlitch : 0)));
             }
@@ -1369,6 +1370,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             else Fe.LeadOhm = 0;
         }
 
+        /// Noise of the peak hold's spread samples (own generator: the main sequence stays as it was).
+        private double PkGauss()
+        {
+            var u1 = 1.0 - pkRng.NextDouble();
+            var u2 = pkRng.NextDouble();
+            return Math.Sqrt(-2 * Math.Log(u1)) * Math.Cos(2 * Math.PI * u2);
+        }
+
         private double Gauss()
         {
             var u1 = 1.0 - rng.NextDouble();
@@ -1965,6 +1974,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         }
         private Random rng;
         private Random faultRng = new Random(777);
+        private Random pkRng = new Random(4242);
         /// The RMS block's HPF state in the DC-coupled V row (codes; HpfTau).
         private double hpfM;
     }
