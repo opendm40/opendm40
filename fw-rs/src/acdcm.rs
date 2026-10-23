@@ -611,6 +611,7 @@ impl Dmm {
         }
         let now = clk.now_ms();
         let lim = (self.factor() * DEC4[r]).min(1000.0);
+        let ov = self.over();
         let (sc, ci, g_rms, o_rms) = ac_scale(0, r);
         let gain = sc * cal(g_rms + 4 * ci, 1.0);
         let off_ac = cal(o_rms + 4 * ci, 0.0);
@@ -651,10 +652,15 @@ impl Dmm {
             a.bad_t = now.max(1);
         }
         let failed = a.bad_t != 0 && now.saturating_sub(a.bad_t) >= RMS_BAD_MS;
+        // The range below failed while the total was over it anyway (a
+        // large AC part, measured here): not an RMS fault, forget it.
+        let mag_ok = hypot(if a.acsrc == 0 { ac.unwrap_or(0.0) } else { 0.0 }, x);
+        if r > 0 && a.acsrc == 0 && mag_ok > ov * lim / 10.0 {
+            a.cfault[r - 1] = 0.0;
+        }
         let fault = if r > 0 { a.cfault[r - 1] } else { 0.0 };
         self.dc_val = x;
         self.acdc_seen |= 2;
-        let ov = self.over();
         let mag = hypot(ac.unwrap_or(0.0), x);
         if let Some(ac) = ac {
             self.ac_raw = ac;
