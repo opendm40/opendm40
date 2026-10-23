@@ -1998,7 +1998,9 @@ Firmware:
             `sigrok-cli -d scpi-dmm:conn=usbtmc/...  --scan` [S/N: ..]; ngscopeclient connects; recovery-usb is
             NOT flashed (test build only); Windows 11 VM: a new device instance (re-install, a Zadig WinUSB
             binding must be redone), Explorer mount + Eject still work, `Get-PhysicalDisk` SerialNumber (VPD 0x80);
-            reload.sh / DBG:UPDATE flow unchanged (by VID:PID).
+            reload.sh / DBG:UPDATE flow unchanged (by VID:PID); with the meter on this build attached, run
+            emu/ejecttest.py: check_drive passes, two distinct ALIENTEK_DM40_files_<hex> drives, the meter's
+            disk untouched (the emulator run above had the meter still on "0001").
       - [x] recovery-usb build broken (recovery.rs called the 3-argument Msc::new; then its 4 KiB MSC_BLK in
             TCM failed the 42 KiB TCM stack assert): fixed (MSC_BLK in .sram_bss when the SPI disk is the
             LUN). tools/build-variants/run.sh builds recovery-usb, recovery-file, no-ad2-isr, spi-disk (no

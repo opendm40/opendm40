@@ -1540,10 +1540,11 @@ INFO/UID.BIN` and of the UID field of `DBG:GENUINE?`. The same string is:
   serial `0`, as before.
 
 The UID is in system memory, not in the slow flash bank (`0x08080000..`),
-but no request path reads it: `uid::init` (region C, `.cold`) reads it once
-in `native::start`, before the recovery / normal decision is acted on, into
-a 24-byte TCM static; the USB descriptors, the VPD page and `*IDN?` use
-that copy. The VID:PID (1209:0001) is unchanged, so udev rules keyed on it
+and the serial paths do not read it at request time: `uid::init` (region C,
+`.cold`) reads it once in `native::start`, before the recovery / normal
+decision is acted on, into a 24-byte TCM static; the USB descriptors, the
+VPD page and `*IDN?` use that copy. (INFO/UID.BIN, `vdisk::mem_read`, and
+`DBG:GENUINE?` still read 0x1FFF7A10 directly, as before.) The VID:PID (1209:0001) is unchanged, so udev rules keyed on it
 still match; `/dev/disk/by-id/usb-ALIENTEK_DM40_files_...` names and the
 Windows device instance path change once (a new device instance: Windows
 installs it again, a WinUSB binding made with Zadig must be made again).
