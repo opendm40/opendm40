@@ -1183,8 +1183,41 @@ Firmware:
       336 pages/s, a hole of ~27-38 conversions after every 32 rows: one BATCH per Run pass, RUN_BUDGET_CYC
       (300 us of cycles, the ISR's share counted) used up by it with the ISR at cpu_permille 544 (estimate
       ~430, emulator 295). Main loop 1272 passes/s, `usb` (Run) avg 718 us. The host drain also tops out
-      at ~35 k rows/s. Choose: a CPU / ring-fill gate in Prep -> 38400, more batches per pass while the
-      ring is half full, and / or cheaper hybrid frames. 38400 to the disk: lost 0.
+      at ~35 k rows/s (not the CPU: the device's main loop idles at 11 k passes/s there, the host's
+      LOG:DATA? round trips are the limit). 38400 to the disk: lost 0.
+      **Fixed in the emulator (branch fastlog-768-drain, 2026-10-23; docs/compact-log-format.md "The CPU");
+      device check pending.** Emulator made honest first: emu/peripherals/CpuCost.cs, `--mips 110`
+      (the device's idle pass 22 vs 23 us and its 76.8 kS/s Run pass ~650 vs 718 us) + `--isr-stall-ns 700`
+      (cpu_permille ~520 vs 544): the old firmware loses 37-46 % at 76800 there. PC samples of the main
+      code at the ISR entries showed the coder at ~10 us / row (64-bit shifts, a CRC call per byte, 12-byte
+      records, the log panel's 64-bit divisions every pass) and the pages at ~0.25 ms each. Now: the Run
+      budget is the pass's own CPU (ISR time out; 2x while the ring is over half full; 2 ms wall cap), the
+      coder ~2.5 us / row (byte-identical stream), pages back to back (~0.17 ms), and the writer trial
+      (fastlog `Gate`): the first 1 s coded with dry pages; the ring's low water rising or a drop -> 38400
+      (LOG:SRATe? 38400, LOG:DISK? fields 11..13 gate / ISR permille / ring high water). Emulator: 0 lost at
+      76800 (1.2-2.45 B/sample, ISR 52-62 %), trial kept; `--isr-stall-ns 3000` (ISR 90 % in the trial) ->
+      38400, 0 lost.
+      Device retest (image and list in the hand-over):
+      1. AC V, the 40 Hz square, LOG:SOUR AD2, LOG:SRAT 76800, LOG:DEST DISK, LOG:DUR 60, LOG:STAT ON:
+         LOG:DISK? at the end: fields 11..13 (gate 1 expected: kept; ISR permille ~540; high water);
+         LOG:PRE? rung 76800, LOG:SRATe? 76800; dlog.py of the file: lost_before sum 0, rows ~4.6 M;
+         DBG:ISR? late / bad / overruns / slips 0, max_lat < 1 us; LOG:COUNt? overwritten 0; pages/s.
+      2. `DBG:PROF:RESET` at state 3, `DBG:PROF?` after a 20 s session: passes/s, `usb` avg (was 718 us).
+      3. The same with a noisy input (the calibrator's sine + the generator's noise, or V/COM open): lost 0,
+         or the trial fell back (gate 2, LOG:SRATe? 38400) and lost 0 at 38400.
+      4. A stop (LOG:STAT OFF) within the first second after state 3 (the trial): the session ends, no
+         FASTnnn left (MMEM:CAT?), the next session works.
+      5. 38400 and 4800 to the disk (no trial: gate 0): lost 0 as before; AD1 640 to the disk: lost 0.
+      6. The Wave view 1 / 2 ms/div and a host LOG:DATA? session at 76800 as in 7409b92 2.1 / 2.5 (unchanged
+         paths; the ring drain for the disk only is new).
+      7. The record page's fast-logger start (tap) at 76800, the inrush save: as before.
+- [ ] 76800 stream: the device's 1.48 ISR entries per sample (emulator 1.13) and the +995 ppm rate (below)
+      come together, and the emulator reproduces both: a 76800 session after ANY earlier stream session of
+      the same boot (fastlogtest --sessions ad2:38400,ad2:76800, or --stop-in-trial) locks at rate_mhz
+      76 723.6, ppm_x10 +9952 (the device: 76 723.6 / +9951), 1.39 entries per sample, ISR 61 % (first
+      session after boot: 76 800.0, ~0, 1.13, 52 %); also a heavy noise (--noise 1000). Something carried
+      from the previous session (Pll REL? the chip model's state?) - a repro for "76800 rate" below; fixing
+      it would also give the writer ~9 % of the CPU back (the ISR's 544 vs ~460 permille).
 - [ ] 76800 rate: rate_mhz 76 723.6 (ppm_x10 ~+9950) while 4800 / 38400 lock at -1.6 ppm; the record
       stamps say 76 574.5 S/s (LOG:RATE? 76 576), 1.9 permille below rate_mhz (at 38400 they agree).
       Which is right, and is the 76800 rung's nominal (76 799.016) the chip's real rate?
