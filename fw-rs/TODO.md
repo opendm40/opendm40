@@ -224,6 +224,18 @@ Code work (in this order):
         drawn from touch-down until release / roll-off, one item redrawn (app_press.rs, in .cold;
         ui::set_row_only = the page's own draw call limited to one row). ui-render: every item
         pressed, then released = the page as drawn. (verify on device)
+        2026-10-23 (125a423): also the MF range pages (Voltage / Current / Resistor / Capacitance
+        Settings: range grid, coupling row, ohm variants, Hold/Limits, OK, Fuse check, Wave, Inrush) and
+        every button of Power Settings, pressed 0x04FC (the list rows'), one button redrawn
+        (ui::range_press / ui::pw::settings_press, .cold). ui-render 0 violations (55704 cases; new
+        renders m03d..g, p31 / p31b); emulator: press on 600mV drawn pressed, a roll-off restores the
+        page byte-exact, press + release on AC/DC selects it. Device retest: MF on DC V, hold a finger on
+        a range button (lighter blue), slide off (normal again, nothing selected), tap AC/DC (selects);
+        the same on Power Settings (power meter, MF).
+        Not done (left for the owner): the confirm / fuse / wiring dialog buttons (the dialog closes on
+        the tap, its own feedback; the fuse / job labels vary per stage), the Inrush page (its keys run
+        while AD2 streams: a .cold redraw per touch there needs a device timing check first), Gallery /
+        Help navigation; #7's remainder (scope controls in the combined view) is the combined-view design's.
       - #12 backlight / volume -/+ steppers, clamped (1f19f05 drawing, 7e2abce logic).
       - #13 already in: DMM lightning >= 100 V (stock), combined strip HV badge >= 30 V and red
         ring >= 100 V. DMM page >= 30 V: done 2026-10-21 as the stock cue itself (value 0xC9A0 red in V
@@ -2355,10 +2367,35 @@ Emulator (emu/):
       overflows, the record restarts), the inrush page's LOG:CSV ON refusal (inrushtest).
 - [x] AUTO OVERLOAD on AC 1 A (1bffde2, couptest iac repro): blocked, the A jack is not wired.
       Fixed in 1152624 with the 2026-10-22 BUG (quiet hop in AUTO); the device check is in the list below.
-- [ ] powtest `ereset` FAILs on 0100788, 70572bb, 4a734d1 + dmm-bugs alike, also run alone (the Yes tap
+- [x] powtest `ereset` FAILs on 0100788, 70572bb, 4a734d1 + dmm-bugs alike, also run alone (the Yes tap
       at 310,204 at 21 s, 13 s after the long press, does not reset the energy: Wh keeps counting; it passed
-      at f42a09e per the device-check doc). Not from dmm-bugs; not investigated. (`acdc-floor` failed once in
-      the 20-emulator parallel run and passes alone, as noted at f42a09e.)
+      at f42a09e per the device-check doc). (`acdc-floor` failed once in the 20-emulator parallel run and
+      passes alone, as noted at f42a09e.)
+      Done (5301fb7): no regression to bisect. f42a09e..0100788 changes only acdcm.rs (method C) in fw-rs and
+      the emulator's LPF creep (7c0de2d); f42a09e itself FAILs on its own emulator and 72f011e passes there,
+      run to run. A race with two sides:
+      1. Test: pure DC on AC+DC raises the DC? hint ~2 s after the first reading (5..9 s in the emulator);
+         its toast (40,132 400x56, 1.5 s) covers the long press point 58,179, and a touch on a toast's box
+         is the toast's (77ae236), so the long press at 8 s never opened the confirm (failing run: SYST:ALER?
+         DC from 6.99 s). The long press now waits for the hint + 2 s (powtest GATE: 8..14 s), Yes 13 s
+         after it.
+      2. Firmware: `App::toast` and the auto power-off warning took the overlay slot unconditionally, so a
+         toast during a confirm replaced it without its No path (the reset's Yes hit the bare page; a fuse
+         check in stage 1 would keep measuring, the firmware question stay unanswered). Now a toast that
+         comes while a modal overlay is up (`Overlay::modal`) is kept (one slot, the latest wins) and shown
+         once the confirm has gone and the page is drawn again.
+      Emulator: new `ereset-hint` (AC part on V, long press at 8 s, pure DC from 12 s = the hint under the
+      confirm, Yes at 21 s): FAIL on 72f011e, OK on 5301fb7; `ereset` OK 2 of 2 alone (gate 6.85 / 7.07 s).
+      Full powtest on 935acd6 (one emulator): 29 of 30 OK incl. ereset / ereset-hint / entry; `zero` failed
+      once (one DC-row AD1 zero 158 vs 300 +- 130: the noise tolerance) and passes 2 of 2 alone on 935acd6
+      and on 72f011e (flaky, not from this change). leadstest OK. ejecttest (the firmware question) could
+      not run here: usbip attach needs vhci_hcd (not loaded on this host).
+      Device retest (power meter, AC+DC, V-COM on a DC source, nothing in A): (a) right after entering the
+      meter, wait for the "No AC: DC is more precise" toast, then long press E: the reset confirm; Yes resets
+      Wh and the time. (b) Long press E within 2 s of entering (before the hint): the confirm stays up when
+      the hint comes (DC? badge), Yes still resets, and the hint toast shows after the confirm closes.
+      Owner question (not changed): a long press on a toast's box does nothing (only a tap there acts, 77ae236),
+      so a long press on E while a hint toast covers it is lost; should a long press go through to the page?
 - [ ] Device retest "dmm-bugs" (1152624; most need a current in the A jack: a current-limited bench
       supply + load or the calibrator's current output; the meter here has the A jack open):
       1. A AUTO coupling (CURR:COUP AUTO), AC 1 A @ 50 Hz: SYST:ALER? NONE throughout, CONF? 6 A range
