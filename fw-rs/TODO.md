@@ -1487,10 +1487,39 @@ Firmware:
       fetches from C while the stream runs. Also: SCOP:MEAS:FREQ? answers 0 (screen "Freq: --") at 1 and
       2 ms/div on a 40 Hz signal (less than one period on the 10 / 20 ms screen), so the Wave view cannot
       show a 76800 frequency below ~100 Hz; the record (WAV:POIN MAX, 348 ms) would have the periods.
-- [ ] dm40scpi.py `log` stopped by SIGINT mid-drain (device e7ec2cc): afterwards every USBTMC query read
+- [x] dm40scpi.py `log` stopped by SIGINT mid-drain (device e7ec2cc): afterwards every USBTMC query read
       returned empty (new processes too) until a USBTMC INITIATE_CLEAR (ioctl USBTMC_IOCTL_CLEAR); the
       logger itself had stopped (LOG:STAT? 0). A pending bulk-IN reply left half read; the tool could catch
       SIGINT and clear, and dm40dbg.Link could clear on an empty read.
+      **Mechanism (emulator over vhci, 2026-10-23, reproduced exactly):** Linux usbtmc reads a reply in two
+      steps: the first 4 KiB with usb_bulk_msg_killable (only a fatal signal stops it), the rest in
+      usbtmc_generic_read (wait_event_interruptible: SIGINT kills its URBs). A LOG:DATA? block is 6006 B, so a
+      Ctrl-C there leaves the rest of the transfer on the meter. The next read gets those stale packets, the
+      driver logs "wrong MsgID" and returns 0 bytes (no -EPROTO; auto_abort is off by default); fw-rs then
+      starts the reply to that query, which nobody reads, and since a transfer already handed to the IN
+      endpoint survives a new DEV_DEP_MSG_OUT (usbtmc.rs on_out_bytes) every later read gets the previous
+      reply ("wrong bTag N != N+2" in dmesg, 0 bytes to the process): one reply late for ever, across
+      processes. Only replies over 4084 B can start it (LOG:DATA?, MMEM:DATA? pieces, WAV:DATA?, DBG:LCD?).
+      INITIATE_CLEAR recovers it (CHECK_CLEAR_STATUS pending while in flight, the driver reads the Bulk-IN to a
+      short packet): checked in the emulator, so **fw-rs unchanged**; a firmware-side fix would need a DWC2
+      Tx-FIFO flush on a new command (cutting the unsent rest alone keeps the one-behind offset).
+      Fixed host side (tools): dm40dbg.Link.read holds SIGINT during the read (Ctrl-C acts once the reply is
+      in, at most the driver's 5 s timeout later); Link.query takes an empty reply (fw-rs never sends one; a
+      missing reply times out instead) as the desync: USBTMC clear, ask again, a note on stderr; Link.clear().
+      dm40scpi's UsbLink goes through Link.query (every dm40scpi / acdcmeth / ad2dcv / ad2n7 query self-heals
+      after another program left the meter out of step). `log --source`: the first Ctrl-C ends the session
+      after the block in flight (LOG:STAT OFF, the rest drained, the trailer with `# stopped_by,ctrl-c`), a
+      second one abandons the drain; LOG:STAT OFF on every way out. Also `fast`: *CLS first (a "Data stale"
+      left by a READ? failed its LOG settings check), and a Ctrl-C before the first LOG:DISK? answer no longer
+      crashes the end.
+      Emulator: SIGINT sent while /proc/PID/wchan = usbtmc_generic_read during `log --source ad2 --rate
+      38400`: the old tool "LOG:DATA? answered b''" and *IDN? empty afterwards (= the device); the new one
+      10 / 10 clean exits with the trailer, *IDN? / LOG:STAT? 0 right after; a desync made on purpose
+      (repro: a read cut by SIGALRM) is repaired by the next dm40scpi query. Double Ctrl-C: exit 130, LOG:STAT? 0.
+      Device retest (host only, any fw-rs image): `dm40scpi.py log x.csv --source ad2 --rate 38400 -d 60`,
+      Ctrl-C after ~5 s, several times: clean end with the trailer, `dm40scpi.py info` answers at once, no
+      "empty USBTMC reply" note; then make the desync on purpose (kill -INT while `cat /proc/PID/wchan` reads
+      usbtmc_generic_read, with the old tool from 0100788) and check that `dm40scpi.py info` repairs it.
 - [x] emu/hy3131/dcvtest.py fails on 4c4b489 and later (found 2026-10-23, not caused by the 76.8 kS/s Pll
       change: the same with the old model): LOG:SCALe? per-code 4.767e-05 / 4.812e-04 against the model's
       4.721e-05 / 4.721e-04 (+0.97 / +1.9 %, the check allows 0.3 %). modetest's stock cap-big (100 uF reads
@@ -1501,8 +1530,13 @@ Firmware:
       10.9 item 3). The stock cap-big case is unrelated (it fails on 5f9b5a0 already).
 - [ ] 76800 CHOP ON: one isolated mid-level glitch per ~2 M samples (seq 752877: -65616 between -98272s;
       seq 133301: 82960 between ~98300s), bad 0; none in 2.1 M with CHOP OFF or at 4800 / 38400.
-- [ ] dm40scpi.py `log --source ad2 -d N`: drain() returns only on a block < 500 records, so above the
+- [x] dm40scpi.py `log --source ad2 -d N`: drain() returns only on a block < 500 records, so above the
       host's ~35 k/s the duration is never checked (ran 150 s until killed).
+      Fixed (tools): -d (seconds from LOG:STAT ON, host clock) and -n are checked after every LOG:DATA? block;
+      at the end LOG:STAT OFF and the ring drained (the samples captured until then); -n writes exactly N rows;
+      the trailer says `# stopped_by,duration|count|ctrl-c (after S s)`. Emulator over vhci (the emulator
+      drains slower than 38400 S/s, so it hung like the device): -d 5 at 38400 ran until killed before, ends
+      after 4.3 s now; -n 1234 = 1234 rows. Device retest: `-d 10` at 38400 ends after ~10 s.
 - [x] (B) DC-coupled V on AD2 (E7, feasibility 1.3 last row / section 13): device test 6.5 (4ff95f7,
       DBG:AD2:DCV?, tools/ad2dcv.py): the AC V row with SAD2IP = OP1O is linear to 0.003 % of the
       range, 3..10 codes sd, gain +0.84 / +1.79 / +0.53 / +0.27 % vs nominal; AD1 reads 0.3..0.9 k
@@ -2157,7 +2191,12 @@ Emulator (emu/):
       calibrator's 1 V: meter or calibrator?"): no fw-rs state in the DC V path, the factory record unchanged,
       the 6 V and 60 V ranges agree, a level pattern (1 / 2 / 3 / 5 / 10 / 20 V: -0.9 / -1.4 / -2.5 / -2.0 /
       -3.0 / -1.3 mV) that is neither gain nor offset, the same pattern on 2026-10-22 20:24 before 7409b92.
-- [ ] acdcmeth.py: the calibrator's "30 V" is 23.99 V (MR9270 limit?): the e1 / e5 / e6 30 V points are 24 V.
+- [x] acdcmeth.py: the calibrator's "30 V" is 23.99 V (MR9270 limit?): the e1 / e5 / e6 30 V points are 24 V.
+      Fixed (tools): mr9270.VOLTAGE_MAX = 24.0, set_value caps a larger voltage request with a warning on
+      stderr (the value register reads back the setpoint, so the tool cannot see the real output);
+      acdcmeth.py's levels, labels and docstring say 24 V (VMAX 24: e1's top level, e5 on 60 V, e6's step
+      "to 24V"), ad2dcv.py's 30 V points are 24 V (ad2n7.py already used 24). Older logs' "30 V" rows = 24 V.
+      Also: acdcmeth settle_time returned 3 NaNs where e6 unpacks 4 (a level without readings crashed e6).
 
 ## Device check 8087c7d: shot pre-erase, SCPI Range / Digits + sigrok, scope full record, UI fixes (2026-10-23; docs/device-check-2026-10-21.md "8087c7d")
 
