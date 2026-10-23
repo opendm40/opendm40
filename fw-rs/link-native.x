@@ -149,7 +149,9 @@ SECTIONS
         *(.text.*7dm40_fw8fast_req*);
         *(.text.*7dm40_fw12log_on_check*);
         *(.text.*7dm40_fw10stale_read*);
-        *(.text.*7dm40_fw9fast_scpi*);
+        /* NOT fast_scpi (LOG:DEST / LOG:DURation, set and query): region B.
+         * Device b6909d6: LOG:DEST? / LOG:DUR? in the Wave view at 76800
+         * gave late 1, max_lat 2.8 / 5.8 us at lat_pc fast_scpi. */
         *(.text.*7dm40_fw12fast_next_hz*);
         *(.text.*7dm40_fw7fastlog5begin*);
         *(.text.*7dm40_fw7fastlog10plan_bytes*);
