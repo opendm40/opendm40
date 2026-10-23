@@ -666,8 +666,20 @@ if A.region_c:
     # fatren it drives; link-native.x: before / after the logger session,
     # never while the ISR streams). Hot during Prep: a Python hook per call
     # stretched a 76800 Prep to many minutes.
+    # Nor the screenshot pre-erase (screenshot::prep_step and its disk(),
+    # main.rs `prep_poll`): from 2 s of disk quiet (PREP_QUIET_MS) it scans
+    # the FAT and erases free clusters on the busy-timed W25Q128 (45 ms / 4 KiB
+    # with --profiles typ) for minutes of device time, i.e. through the whole
+    # --ui-nav page tree. With a Python hook on those two functions the
+    # emulator crawled (the 300 ms steps after uptime 2.3 s took 1-3 min each;
+    # 2026-10-24: --ui-nav --region-c hung in nav_tree; the 277 other hooks
+    # alone: normal speed). Never during a session (`prep_poll`'s `ok`
+    # excludes a logger session); if that gate broke, the FlashWatch data
+    # watch would still report it (prep_step loads its literal pool from
+    # region C: "data screenshot::prep_step+0x.. <- 0x0808....").
     RC = regionc.Hooks(A.app, os.path.join(HERE, 'out'), 'fastlog-%d-%d' % (A.port, os.getpid()),
-                       exclude=('fastlog::prep::', 'dm40_fw::fatren::'))
+                       exclude=('fastlog::prep::', 'dm40_fw::fatren::',
+                                'dm40_fw::screenshot::prep_step', 'dm40_fw::screenshot::disk'))
     if not RC.script:
         sys.exit('fastlogtest: --region-c needs llvm-nm and the ELF symbols')
 for profile in A.profiles.split(','):

@@ -16,7 +16,12 @@ fastlogtest.py:
 
 `exclude`: name parts of functions left without a hook. Every call of a
 hooked function runs a Python hook, handed or not: code that is hot outside
-the stream (the fast logger's Prep) slows the emulator to a crawl.
+the stream (the fast logger's Prep; the screenshot pre-erase
+screenshot::prep_step / disk, which runs from 2 s of disk quiet and, with
+the W25Q128 busy timing on, for minutes: fastlogtest --ui-nav hung in its
+page tree, 2026-10-24) slows the emulator to a crawl. Code that runs on
+the main loop outside the sessions belongs here; the data watch below
+still sees its literal-pool loads if it ever ran in a session.
 
 A function is reported once per run (its hook is gone after the first hit):
 a scenario's check sees only functions no earlier step called while the
