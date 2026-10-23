@@ -841,6 +841,12 @@ impl Meter {
         }
     }
 
+    /// The next reading is drawn whatever the draw-rate limit (SHOW_MIN_MS):
+    /// it replaces a provisional value on screen (App `prov`).
+    pub fn show_now(&mut self) {
+        self.show_t = 0;
+    }
+
     pub fn set_hold(&mut self, on: bool) {
         self.hold = on;
     }
@@ -924,6 +930,7 @@ mod tests {
             avg_n: 0,
             alert: crate::sentinel::Alert::None,
             power: None,
+            prov: false,
         }
     }
 

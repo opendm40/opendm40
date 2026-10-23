@@ -2780,6 +2780,8 @@ pub struct StripData {
     pub hv: bool,
     /// Generator frequency text (empty: generator off).
     pub gen: Txt,
+    /// A provisional reading (`Reading::prov`): the value in C_DIS grey.
+    pub dim: bool,
 }
 
 impl StripData {
@@ -2793,6 +2795,7 @@ impl StripData {
         badge_col: C_POP_TAB,
         hv: false,
         gen: Txt::EMPTY,
+        dim: false,
     };
 }
 
@@ -2910,8 +2913,8 @@ pub fn meter_strip(d: &StripData) {
     if changed(ol.badge == d.badge && ol.badge_col == d.badge_col) {
         st_badge(ST_BADGE, d.badge, d.badge_col);
     }
-    if changed(ol.value == d.value) {
-        st_text(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), C_YELLOW, 4, 1);
+    if changed(ol.value == d.value && ol.dim == d.dim) {
+        st_text(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1);
     }
     // The unit's box follows its text and the sub rows follow the unit: on
     // a change of their x (or of the GEN column) clear from the unit to

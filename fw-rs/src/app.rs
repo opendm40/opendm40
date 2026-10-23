@@ -303,6 +303,10 @@ pub struct App {
     pub meas: [f32; 4],
     beep_until: u64,
     pub last_raw: Option<Reading>,
+    /// Drawn instead of the meter's shown reading (dimmed, `Reading::prov`):
+    /// the new function's placeholder after a switch, or a value a DMM gate
+    /// still holds (`provisional`). Cleared by the next settled reading.
+    prov: Option<Reading>,
     /// AUTO coupling: the mode (DC / AC part) the static view was drawn
     /// with (the bargraph's polarity; the V / A button shows the AUTO mark); 255 = not
     /// AUTO. A reading of the other part redraws it (`reading`).
@@ -606,6 +610,7 @@ impl App {
             tp_pressed: None,
             ntc_reenter: false,
             last_raw: None,
+            prov: None,
             auto_drawn: 255,
             redraw: true,
             meas_next: 0,
@@ -1730,7 +1735,13 @@ impl App {
     /// The reading to draw: the shown (possibly frozen) one, with the live
     /// alert while HOLD / AutoHold hold it (decision 2026-10-22 #5: A-JACK
     /// / LIVE? alternate with HOLD in the status slot and the strip badge).
+    /// A provisional reading / the placeholder (`prov`) instead, unless a
+    /// HOLD / AutoHold capture freezes the readout or REL is on (the
+    /// provisional value is not REL-corrected).
     pub(crate) fn shown_reading(&self) -> Option<Reading> {
+        if let Some(p) = self.prov.filter(|_| matches!(self.meter.hold_state(), 0 | 2) && !self.meter.rel_active()) {
+            return Some(p);
+        }
         let mut r = self.meter.shown().copied()?;
         if self.meter.hold_state() != 0 {
             r.alert = self.live_alert();
@@ -2119,6 +2130,12 @@ impl App {
     /// AutoHold freeze the readout (before, a HOLD made READ? wait forever).
     pub fn reading(&mut self, raw: Reading, can_draw: bool) -> Option<Reading> {
         self.last_raw = Some(raw);
+        // A placeholder / provisional value on screen: this settled reading
+        // replaces it now (not after the draw-rate limit).
+        let had_prov = self.prov.take().is_some();
+        if had_prov {
+            self.meter.show_now();
+        }
         if raw.cpl_auto && self.auto_drawn != 255 && matches!(self.auto_drawn, 0 | 2 | 4..=6) != raw.is_ac() && self.view == View::Dmm {
             // AUTO coupling switched the part shown: the bargraph's
             // polarity follows (static redraw of the DMM page; the V / A
@@ -2180,7 +2197,7 @@ impl App {
         self.hv_level = hv_level;
         // DMM page: the stock >= 30 V red value (ui-review #13).
         self.dmm_view.hv_red = hv_level >= 1;
-        if dmm_view && (u.show.is_some() || hv_changed) {
+        if dmm_view && (u.show.is_some() || hv_changed || had_prov) {
             if self.pw_rng_key != 0 && self.view == View::Dmm {
                 // The first power reading after the "I ranging" texts.
                 ui::pw::ranging_clear();
@@ -3680,6 +3697,9 @@ impl App {
 
     fn func_changed(&mut self) {
         self.meter.reset();
+        // The new function's frame at once (switch-latency.md proposal 1):
+        // its unit and dimmed dashes until the first reading.
+        self.prov = self.dmm.placeholder();
         self.chart_n = 0;
         // No unit until the new function's first reading (the labels are
         // numbers only, never the previous function's unit).
