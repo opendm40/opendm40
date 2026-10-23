@@ -1323,7 +1323,7 @@ Firmware:
       conversion at 0.31 s (that range read 0.984-1.021 V, as on bab5dd4); 600 V's read 0.9967-0.9997 V. First 6 V conversion read: from
       600 V 0.88-0.92 s (bab5dd4 0.81 s: +0.1 s), from 60 V 0.61 s (0.56-0.60 s), from 1000 V 1.22 s (1.06 s:
       +0.16 s); +0.05-0.16 s, inside the expected +0.1-0.3 s except from 60 V.
-- [ ] AC+DC / AUTO coupling, 1 V DC, a range change by the MF page 6 -> 60 V: the DC part read 0.526 /
+- [x] AC+DC / AUTO coupling, 1 V DC, a range change by the MF page 6 -> 60 V: the DC part read 0.526 /
       0.528 V (53 %) for one DC phase (~1 s, READ? 0.526 V; in AUTO shown as AUTO,DC 0.528 V) in 2 of 4
       such changes in the first run (one AC+DC, one AUTO), then 0 of 9 in two AC+DC repeats (READ? or
       DBG:ACDC:STAT? polling); 0 of 30 SCPI changes and 0 of 13 MF 60 -> 6 V. Same signature as the 25-51 % partial conversions of the 8087c7d same-range item.
@@ -1349,6 +1349,14 @@ Firmware:
       holds gets through; 0.521-0.528 V in all 5 hits since bab5dd4 (not the 25-51 % scatter of a single
       straddled write). Not fixed (cause unknown): needs vet_left / vet_held / the raw AD1 codes of the DC
       phase (a DBG ring; LOG:SOUR AD1 reprograms the converter and cannot watch the DMM's own conversions).
+      **Cause found and fixed (device-check doc "ad97fd7 / c8c2f02 / f42a09e"):** DBG:ACDC:TRACE (ad97fd7) caught 5
+      of 5 hits (40 SCPI changes aimed into DC phases; 4 of 7 at 0.75 s after the AC -> DC switch). The stock's
+      once-flag OSR rule (`acdc_osr`) wrote R22 = 0x17 after the first result of the DC phase after the change;
+      that result is read at the settle deadline, up to a conversion late, so the write landed mid-conversion:
+      the next result came ~155 ms later at 52 % (60 V; 40 % on 6 V), the rule's 0x15 write gave another at the
+      same 52 % 100 ms later, the two agreed and `vet_ad1` took it. Fix: no R22 write in the AC+DC DC phase
+      (c08b0d5). Device: 0 of 110 on c8c2f02 and 0 of 110 on f42a09e (80 SCPI + 30 MF each, aimed 0.55-1.05 s
+      into a DC phase, most at 0.75 s).
 - [x] AC+DC: READ? during the AC settle after a range change answers the reading from before the change
       (3-6 times, 0.85 s apart, until the first fresh one 3-6 s later), not +9.91E37 as the tmcnl-fix item
       expected ("READ? NaN after 0.85 s, as at entry"; scpi.rs: "the latest one if none comes within
@@ -1400,11 +1408,18 @@ Firmware:
       5.5 -> 4.0, 6.5 -> 5.0; bab5dd4: 6.737 / 5.679 / 5.957 V there for 2-5 s). The calibrator dips to
       2.2-3.9 V for ~0.2 s on every level change (calstep2.py, DC V FAST; the SLOW calstep.py missed it):
       the 2.3-5.3 V READ?s right after a step are that dip. Residual: next item.
-- [ ] AC+DC autorange on the calibrator's level change (a ~0.2 s dip to 2-4 V, then the new level): 4.0 ->
+- [x] AC+DC autorange on the calibrator's level change (a ~0.2 s dip to 2-4 V, then the new level): 4.0 ->
       5.8 V took AC results of 2.42 / 2.53 V as the AC part (STAT ac, readings published; ACS_JUMP did
       not hold them) and went 6 -> 60 -> 6 V (1.0 -> 6.4 s); 7.0 -> 6.3 V went 60 -> 6 -> 60 V (the dip's
       DC result stepped down). One excursion each, no hunting (device ceb5ca5, device-check doc "ceb5ca5" 5).
       Decide whether a dip shorter than one DC phase should move the range.
+      **Fixed (device-check doc "ad97fd7 / c8c2f02 / f42a09e" 3):** traced causes: the step's AC results rise
+      as the RMS window fills (0.08 -> 1.17 -> 2.38 V) and "rose: flat" ended the settle (now a rise is flat
+      only within ACS_STEP); a step ~4.6 s after an autorange step met the settle's 5 s limit, which took the
+      jump (now a jump at the limit restarts an input-step settle); a DC result in the dip stepped down (AC+DC
+      now steps down only in the DC phase after ACDC_DOWN_MS = 400 ms of results asking for it). Cost: an
+      AC+DC step down comes one DC phase later (60 -> 6 V 4.0-5.5 s after a 6.3 -> 4.0 / 5.8 V step on f42a09e,
+      was 1.8-3.7 s). Steps up unchanged. Device f42a09e: 27 steps, no excursion.
 
 - [ ] Fast logger cosmetics (device 4c4b489): LOG:DISK? keeps naming the file of a session stopped in its
       trial (the file is removed); its tpp fields keep the last probe's 381 / 387 in a 38400 / 4800 / AD1
@@ -2095,6 +2110,9 @@ Emulator (emu/):
       still creeps 5-12 codes for ~8 s (DC V settles in ~1 s). Fix candidates in §10.11: (b) take m2 only once the
       LPF stops drifting (removes the cause); (a) keep the larger-span gain (brings back 60 V's AGND bias);
       (c) a larger CAL_GAIN_CODES on 6 V. Then device: e8s 6 V and tc6 (rt29/tc6.py) over 3 power cycles.
+      Device f42a09e (contains 8844316; device-check doc "ad97fd7 / c8c2f02 / f42a09e" 5, 10.13's list): e8s 6 V at
+      0 V -0.25 / +0.18 / -0.59 / +0.21 mV (3 of 4 within 0.5 mV; the miss took a biased-judged second reference
+      at 3 V, gsrc 3 gdis +8.95, then gsrc 2 at 1 V); e8up, e8, e5 pass.
       Fixed in the emulator (§10.12, e905ef5): (b) as a ~3 s slope window (< 1 code / s, >= 5 s after the step,
       timeout ~13 s), the new point taken before the reference row write; a shorter-span two-point gain replaces
       an internal zero's only when it shows that zero biased beyond the noise (60 V yes, 6 V no); pairing with the
@@ -2105,7 +2123,7 @@ Emulator (emu/):
       e11 / e10 / e9. Then the owner decides on C as the default.
 - [ ] C's second reference now comes ~5-8 s after a level change (was ~1.5 s): e8s's 4 s levels may end before
       it. If the device tail is shorter than the model's, lower SLOPE_MIN (48 results) after the tc6 trace.
-- [ ] The first V tap after `CONF:VOLT:DC` on the 40 Hz square is sometimes lost (C 5 of 6, A 1 of 3; not at 1 V
+- [x] The first V tap after `CONF:VOLT:DC` on the 40 Hz square is sometimes lost (C 5 of 6, A 1 of 3; not at 1 V
       DC): device-check doc "c6f9670" 3. Not chased.
       **Cause found (device ceb5ca5, device-check doc "ceb5ca5" 6):** the tap lands on the grey hint toast "AC
       voltage here: use AC V?" (sentinel AC?, HINT_ASSERT_MS 2 s; shown from ~2.6 s after the CONF for
@@ -2113,6 +2131,10 @@ Emulator (emu/):
       with the tap 2.8-4.1 s after the CONF, 0 of 30 at 0.5-2.75 s, 0 of 6 at 5 s; the range stayed 6 V
       throughout (not an autorange). c6f9670's tap29.py tapped at 3 s, in the window. Decide: let a tap
       outside the toast's box reach the page (and dismiss the toast), or keep the stock-like swallow.
+      **Decided (owner): pass through.** 77ae236: a toast is not modal; a tap on its box dismisses it, any other
+      touch, swipe or side key dismisses it and goes on to the page; the confirmations stay modal. Device
+      c8c2f02 (device-check doc "ad97fd7 / c8c2f02 / f42a09e" 4): toast up, V tap outside it 10 of 10 advanced
+      the coupling (and the toast went); a tap on the toast 10 of 10 dismissed it, coupling unchanged.
 - [ ] Method C's internal zero on 60 V (the ~15 codes of 2563fe1): repeatability over entries / power cycles,
       and 600 / 1000 V (needs > 30 V), if C's first-entry gain is ever to be corrected by a constant.
 - [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
