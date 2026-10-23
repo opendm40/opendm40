@@ -171,6 +171,9 @@ fn main() -> ! {
         lcd::fill_rect(0, 0, lcd::W, lcd::H, ui::BG);
     }
 
+    // The settings / calibration record's RAM copy, before anything reads
+    // it (dmm.rs REC_COPY: the record is in the slow flash bank).
+    dmm::load_record();
     // Slow init (relays, touch reset ~220 ms) first: once USB is attached the
     // host expects answers within milliseconds, and a long pause here made it
     // give up on enumeration.

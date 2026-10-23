@@ -82,6 +82,8 @@ ap.add_argument('--region-c', action='store_true', help='Renode hooks on every f
 ap.add_argument('--host-read', action='store_true', help='while each session runs: a host reading the INFO/ files '
                 '(FIRMWARE.BIN first; device 4c4b489: calbackup::FwFile::fill, region C, max_lat 4.66 us) off the USB '
                 'volume (MSC READ(10), 64 sectors each) and DBG:PROF? (prof::report) between the polls')
+ap.add_argument('--poll', default='', help='with --host-read: more queries sent at each step, ";"-separated (e.g. '
+                '"SCOP:MEAS:VPP?;DBG:HWTRIG?": scope commands read the calibration record, slow bank)')
 A = ap.parse_args()
 RC = None
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
@@ -290,6 +292,8 @@ class HostRead:
             self.profs += 1
         self.q('LOG:DEST?')
         self.q('LOG:DURation?')
+        for c in filter(None, A.poll.split(';')):
+            self.q(c)
 
     def verify(self, tag):
         """After the stream: every file whole, no refusal, same bytes."""

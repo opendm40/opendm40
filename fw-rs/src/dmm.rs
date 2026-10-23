@@ -40,6 +40,36 @@ const GPIOE: u32 = 0x4002_1000;
 const SETTINGS: u32 = 0x080C_0000;
 const CAL: u32 = SETTINGS + 0x168;
 
+/// A RAM copy of the record's first REC_LEN bytes (the stock record is 800),
+/// made once at start-up (`load_record`, main.rs, before the App): the
+/// record is in the slow flash bank (not zero-wait: a load stalls the AD2
+/// stream ISR ~21.8 us, device b6909d6), and its readers run while a stream
+/// may (`ad2_scale` per Wave view frame / LOG:SCALe?, the scope's gain /
+/// offset pairs, hwtrig's map: emu/regionc.py data watch, 2026-10-23).
+/// fw-rs never writes the record. Before the copy (and in the host tests)
+/// the flash is read.
+const REC_LEN: usize = 0x400;
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static REC_COPY: [core::sync::atomic::AtomicU32; REC_LEN / 4] = [const { core::sync::atomic::AtomicU32::new(0) }; REC_LEN / 4];
+static REC_LOADED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Start-up: copy the record (see REC_COPY).
+#[cfg_attr(not(target_os = "none"), allow(dead_code))]
+pub fn load_record() {
+    for (i, w) in REC_COPY.iter().enumerate() {
+        w.store(unsafe { read_volatile((SETTINGS + 4 * i as u32) as *const u32) }, core::sync::atomic::Ordering::Relaxed);
+    }
+    REC_LOADED.store(true, core::sync::atomic::Ordering::Release);
+}
+
+/// The record's word at byte offset `off` (4-aligned), from the copy.
+pub fn rec_u32(off: u32) -> u32 {
+    match REC_COPY.get(off as usize / 4) {
+        Some(w) if REC_LOADED.load(core::sync::atomic::Ordering::Acquire) => w.load(core::sync::atomic::Ordering::Relaxed),
+        _ => unsafe { read_volatile((SETTINGS + off) as *const u32) },
+    }
+}
+
 /// Model index used for the counts-dependent limits: 0 = DM40A (40000 counts),
 /// 1 = DM40B (50000), 2 = DM40C (60000). The stock picks FACTOR/OVER by the
 /// calibration model byte (dmm_v2_6.h:297-299, hy3131_v2_6.h:147-155); the HY3131
@@ -449,12 +479,12 @@ pub fn button_of(mode: u8) -> Button {
 }
 
 fn cal_ok() -> bool {
-    (unsafe { read_volatile((SETTINGS + 4) as *const u32) }) == 1
+    rec_u32(4) == 1
 }
 
 /// Calibration float at struct offset `off`, `dflt` if missing or not sane.
 fn cal(off: u32, dflt: f32) -> f32 {
-    let v = unsafe { read_volatile((CAL + off) as *const f32) };
+    let v = f32::from_bits(rec_u32(CAL - SETTINGS + off));
     if cal_ok() && v.is_finite() && v.abs() < 1.0e6 { v } else { dflt }
 }
 
@@ -1208,7 +1238,7 @@ impl Dmm {
 
     /// The calibration model byte as stored (record 0x080C0000 + 0x168).
     pub fn model_raw() -> u8 {
-        unsafe { read_volatile(CAL as *const u8) }
+        rec_u32(CAL - SETTINGS) as u8
     }
     /// Function code as seen from outside (= `func()`): the stock mode, or
     /// 16 / 17 in AC+DC. main.rs gates the data logger on this, so LOG:STATe ON
