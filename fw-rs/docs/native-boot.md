@@ -1485,6 +1485,86 @@ back while locked). A bus reset or unconfigure clears the locks and asks the
 volume for a compaction at its next refresh. `MAX_BLOCK` = 512 in the native
 build (the volume's sector), 4096 where the SPI disk is exported.
 
+### The slow flash bank while an AD2 stream runs (2026-10-23)
+
+Internal flash from `0x08080000` to the end of the 1 MiB is not zero-wait
+(region C, the FS-loader, its UID data, the settings / calibration record).
+One CPU load from it stalls the bus ~21.8 us, and the stream ISR's entry
+with it, whether the load is an instruction fetch (region C code, the old
+rule) or a DATA read. Device b6909d6 (device-check-2026-10-21.md "b6909d6"
+item 3): a host copying INFO/CALIB.BIN, BOOTDATA.BIN, LOADER.BIN or the
+FIRMWARE.BIN tail during a disk session lost 10 k samples at 38400 S/s and
+289 k at 76800 (ROMBOOT.BIN and the FIRMWARE.BIN head, zero-wait: 280 ns).
+
+Rule: **nothing reads the slow bank while `hy3131::streaming()`** (the ISR
+owns the HY3131 bus: a fast-log session, the Wave view, the inrush page,
+the AD1 stream ISR).
+
+- **USB volume** (`vdisk.rs` `read_busy`, `msc.rs`): a READ(10) touching a
+  sector served from the slow bank fails CHECK CONDITION, NOT READY,
+  LOGICAL UNIT IS IN PROCESS OF BECOMING READY (02/04/01) before its data
+  phase (the CSW goes out at once; Linux takes it as "device skipped data
+  phase"); a transfer in progress fails at the first such block. The
+  sectors: CALIB.BIN, BOOTDATA.BIN and LOADER.BIN whole, FIRMWARE.BIN from
+  the sector holding file offset 12 + 0x7C000 (body 0x08080000; with the
+  12-byte header and the 128-byte encoding blocks: file offset 0x7C000).
+  Every other sector (directories, README, BACKUP.TXT, ROMBOOT, UID, OTP,
+  OPTBYTES, the FIRMWARE.BIN head, logs, shots) reads as before.
+- **The settings / calibration record** (`dmm.rs` `load_record` /
+  `rec_u32`): read once at start-up into a 1 KiB SRAM copy; `Dmm::ad2_scale`
+  (every Wave view frame, LOG:SCALe?), `dmm::cal`, the scope's gain /
+  offset pairs and hwtrig's trigger map read the copy. fw-rs never writes
+  the record.
+- **Boot-data version bytes** (0x080A4010..12, BT command 02, Device page):
+  copied by `Bt::new` (`bt::boot_ver`).
+- `Logger::start` / `logger::isr::start` are region B again (their tails
+  ran after `stream::start`).
+
+Why NOT READY (decision 2026-10-23, of three):
+- (a) NOT READY 02/04/01, the host retries: no RAM, every file, exact (only
+  the slow sectors), the precedent is the busy write (`write_error` 2).
+  Linux (drivers/scsi, v7.0): `scsi_check_sense` retries 04/01 at once
+  (NEEDS_RETRY), then `scsi_io_completion_action` ACTION_DELAYED_RETRY
+  (requeue, device busy, ~3 ms) until `scsi_cmd_runtime_exceeced`:
+  (retries + 1) x timeout from the request = (5 + 1) x 30 s = **180 s**
+  (`/sys/block/sdX/device/timeout` scales it). Chosen.
+- (b) a RAM cache filled before the stream: CALIB 4 KiB + BOOTDATA 16 KiB
+  would fit SRAM (52 KiB free) but LOADER (128 KiB) and the FIRMWARE.BIN
+  tail (~104 KiB) cannot, and the kernel's 240 KB readahead pulls the tail
+  in on any FIRMWARE.BIN read: a partial cache leaves the usual copy
+  stalling. Rejected.
+- (c) hold the reply until the stream stops: a SCSI command timeout (Linux
+  30 s, then abort + BOT reset) against sessions of minutes or an open-ended
+  Wave view. Rejected.
+
+Verified over the real Linux path (emu/kvmtest/run.sh: a KVM guest with the
+Ubuntu 7.0.0-38 kernel attaching the emulator over vhci-hcd, usb-storage,
+sd, vfat; the NOT READY change of 8013427, and the final image, below):
+- 6 s session (~67 s of wall time in the loaded emulator): `cat` of the
+  four files waited until the session ended, exit 0, byte-identical to
+  copies made before, no kernel message.
+- 20-25 s sessions (> 180 s wall): the kernel logs "timing out command,
+  waited 180s", "Not Ready / Logical unit is in process of becoming ready",
+  "I/O error, dev sda, sector 925" (CALIB.BIN); an O_DIRECT read (`dd
+  iflag=direct`) fails EIO; a buffered `cat` still completed with the
+  right bytes (the page cache re-reads a failed readahead with a new
+  request, a new 180 s). So: a copy made while the meter streams for more
+  than ~3 minutes (an open Wave view, a long fast-log session) can fail;
+  close the view / end the session and copy again.
+- Windows (classpnp) is expected to retry 02/04/01 too; how long it keeps
+  trying is not known here: not verified (device retest).
+
+Emulator check: `emu/regionc.py` arms `peripherals/FlashWatch.cs` (tlib's
+memory-access hook): every CPU data load from 0x08080000..0x08100000 while
+`hy3131::HANDED` is set, and every slow-bank PC the stream ISR interrupts,
+is reported next to the region C function hooks; fastlogtest
+`--region-c --host-read` (and wavetest, which reads INFO/ in the Wave view)
+fail on any. Before the fix (4a734d1): memcpy from 0x08080000.. (the
+FIRMWARE.BIN tail), `vdisk::mem_read` from 0x080C0000, `Logger::start`'s
+literal pool, `dmm::cal` (Wave view), `scope::cal_pair` /
+`hwtrig::rec_pair` (`--poll "SCOP:MEAS:VPP?;DBG:HWTRIG?"` in a disk
+session).
+
 ### Host writes (`src/vwrite.rs`): delete from the PC, drag-and-drop update
 
 The volume is writable but stores nothing a host writes as sectors: each

@@ -219,6 +219,16 @@ sigrok-cli -d scpi-dmm:conn=usbtmc/9.N --samples 3   # libsigrok's usbtmc is lib
 sudo usbip port; sudo usbip detach -p 0
 ```
 
+Without root (`sudo` / the vhci sysfs `attach` are root-only):
+`emu/kvmtest/run.sh <app.elf> <port> <LOG:DURation s> <log> [dm40direct=1]`
+boots a KVM guest (the host's Ubuntu -generic kernel from its .deb, the
+host's modules and usbip tool, busybox) that attaches the emulator over
+vhci-hcd with `usbip --tcp-port`, mounts the volume (usb-storage, sd, vfat)
+and drives SCPI over /dev/usbtmc0: a fast-log session, then INFO/ copies
+while it streams (2026-10-23: the NOT READY answer of fw-rs vdisk.rs
+`read_busy`; fw-rs/docs/native-boot.md "The slow flash bank while an AD2
+stream runs"). Ports in 39000-39999 for parallel runs.
+
 Verified 2026-10-22 (kernel 7.0): enumeration (device, BOS, strings,
 config; the device qualifier STALLs -> -EPIPE as on hardware), usbtmc binds
 and answers `*IDN?`, dm40scpi.py info / read, dm40dbg.py ping, usb-storage
