@@ -12,7 +12,7 @@ the entry self-cal must take out. Checks:
     the zero D within 20 codes of the model's offset);
   * a host session (LOG:SOURce AD2, 4800 S/s, DC V 6 V): LOG:PREamble?
     mode 1, coupling 0 (DC); LOG:SCALe? b = the model's per-code (nominal
-    / 1.01) within 0.3 %; the records' mean (a + b raw) = the DC V reading
+    x the per-range factor GR / 1.01) within 0.3 %; the records' mean (a + b raw) = the DC V reading
     within 3 mV, their peak-to-peak = 2 x 0.3 x sqrt 2 within 5 %, no loss;
     after LOG:STATe OFF the DMM reads 2 V again;
   * the same as a fast-logger disk session (LOG:DEST DISK, 2 s): the file's
@@ -37,6 +37,10 @@ ap.add_argument('--port', type=int, default=3611, help='USB/IP port (default 361
 A = ap.parse_args()
 NOM = 10 * 1.25 / 262144.0
 DCG = 1.01
+# The model's per-range per_code factor of this row (HY3131.cs Ad2DcGainR, 6 V / 60 V: the device's
+# self-cal per_code against nominal, test 6.5 / acdcmeth e5; 70c33ad): the node reads 1 / GR, on top
+# of DCG. Without it LOG:SCALe? reads ~1 % (6 V) / ~1.9 % (60 V) off the expectation.
+GR = (1.0096, 1.0188)
 T25 = 150  # virtual s: the input becomes 25 V DC
 SCRIPT = os.path.join(EMU, 'out', 'dcvtest-%d.script' % A.port)
 os.makedirs(os.path.dirname(SCRIPT), exist_ok=True)
@@ -131,14 +135,14 @@ try:
     print('  DBG:AD2:DCV? 0,36,4 ->', r)
     p = r.split(';')
     d = [int(x) for x in p[4].split(',')]
-    zero = 0.37e-3 * 10 * DCG / 1.25 * 262144
+    zero = 0.37e-3 * 10 * DCG / GR[0] / 1.25 * 262144
     check(len(p) == 7 and d[0] > 0 and abs(d[1] / 1000 - zero) < 20, 'DCV? phases answer, zero D %.1f ~ %.1f codes' % (d[1] / 1000, zero))
     q('CONF:VOLT:AC')  # DCV? left the range manual: AUTO again (CONF of the function in force is a no-op)
     q('CONF:VOLT:DC')
     wait_ms(3000)
     ref = read_v()
 
-    a, b, pp = host_session(ref, NOM / DCG, 0.003)
+    a, b, pp = host_session(ref, NOM * GR[0] / DCG, 0.003)
     check(abs(pp - 2 * 0.3 * 2 ** 0.5) < 0.05 * 0.85 + 0.01, 'p-p %.4f V = the 0.3 V rms sine (DC-coupled, both)' % pp)
     wait_ms(1500)
     v = read_v()
@@ -182,7 +186,7 @@ try:
     ref = read_v()
     print('  DC V READ? %.4f (25 V)' % ref)
     check(abs(ref - 25.0) < 0.02, 'DC V reads 25 V (%.4f)' % ref)
-    a, b, pp = host_session(ref, NOM * 10 / DCG, 0.03)
+    a, b, pp = host_session(ref, NOM * 10 * GR[1] / DCG, 0.03)
 except SystemExit:
     raise
 finally:
