@@ -1099,7 +1099,8 @@ AC settle of c4a0b09 / 803854d) and passed on ddd5c9e (settle 5.9 s) and b4fb7b9
 0.1 mV; up: within 1.9 mV after the first step); couptest `v` `i` `tap` `band` `sq5` `sqtie` OK with `--meth B` and
 `C`, with `--meth A` all but `i`; **couptest `i --meth A` fails on rust-fw-poc 848047f without these commits too**
 (twice; OK on 7fffcdf): after the DC 0.3 -> AC 0.2 A step no reading for ~10 s and the AUTO part flipping, in the same
-AC settle, not this change; senttest 57 OK; powtest 26 of 29 in the full run (`ereset`, `acdc-floor`, `bt`), all
+AC settle, not this change (fixed on branch settle-fix, 7e10110: no DC-phase step down while an input-step settle
+runs, acdc-stock-vs-fwrs.md 12); senttest 57 OK; powtest 26 of 29 in the full run (`ereset`, `acdc-floor`, `bt`), all
 three OK alone (e7ec2cc alone: `ereset` and `bt` FAIL, the same flakes); modetest `--fast -f fwrs` 18 of 18 (the stock
 side not run); every fw-rs/tools/*/run.sh OK (font-matrix identical to rust-fw-poc); emulator host tests 491;
 dcvtest PASS. Cost against b4fb7b9: region B 62 636 -> 61 892 B free, region C 17 868 -> 17 716 B, SRAM 58 716 ->
