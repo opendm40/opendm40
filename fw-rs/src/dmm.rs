@@ -633,6 +633,9 @@ pub struct Dmm {
     acs_tp: u64,
     acs_d: f32,
     acs_dc: f32,
+    /// The settle running is for an input step (not a range change): the
+    /// AC part held is stale, so the DC phase steps no range down on it.
+    acs_step: bool,
     /// DC conversions after a range change (`vet_ad1`, VET_*): results still
     /// to vet, results held so far, the previous conversion on this range
     /// (i32::MIN: none yet).
@@ -1044,6 +1047,7 @@ impl Dmm {
             acs_tp: 0,
             acs_d: -1.0,
             acs_dc: f32::NAN,
+            acs_step: false,
             vet_left: 0,
             vet_held: 0,
             vet_prev: i32::MIN,
@@ -1547,7 +1551,7 @@ impl Dmm {
         };
         let (om, nm) = (dc_mode_of(old.0), dc_mode_of(self.mode));
         if self.acdc && !self.pw.on && q(om) != 0 && q(om) == q(nm) && (om, old.1) != (nm, self.range) {
-            self.acs_begin(now);
+            self.acs_begin(now, false);
             self.acs_dc = f32::NAN;
             // AC+DC: no reading until the AC part is back, also in the DC
             // phase in between (the AC part held from the old range belongs
@@ -1559,11 +1563,27 @@ impl Dmm {
     }
 
     /// Start (or restart) the AC part's settle (ACS_STEP).
-    fn acs_begin(&mut self, now: u64) {
+    fn acs_begin(&mut self, now: u64, step: bool) {
+        self.acs_step = step;
         self.acs_t0 = now.max(1);
         self.acs_prev = -1.0;
         self.acs_d = -1.0;
         self.acs_flat = 0;
+    }
+
+    /// AC+DC (method A) DC result `x` (vetted), before its autorange: a DC
+    /// part that moved by more than ACS_DC_STEP of the range is an input
+    /// step (the AC part's settle starts). True while such a settle runs:
+    /// no step down then (the magnitude would use the stale AC part; device
+    /// bab5dd4 / emulator: a DC -> AC current step walked uA -> 10 A -> mA).
+    fn acs_dc_step(&mut self, now: u64, x: f32, lim: f32) -> bool {
+        if !self.acdc || self.am_on() {
+            return false;
+        }
+        if self.acs_t0 == 0 && (x - self.acs_dc).abs() > ACS_DC_STEP * lim {
+            self.acs_begin(now, true);
+        }
+        self.acs_t0 != 0 && self.acs_step
     }
 
     /// One AC result `ac` of method A's AC phase while the AC part settles
@@ -2768,12 +2788,14 @@ impl Dmm {
         // conversion steps up on an overload (a range too sensitive must not
         // wait), never down.
         let mag = if self.acdc { hypot(self.ac_raw, x) } else { x.abs() };
+        let now = clk.now_ms();
+        let hold = vet && self.acs_dc_step(now, x, lim);
         if !self.manual {
             let up = mag > ov * lim;
             if m == 1 {
                 if up && r < 3 {
                     self.set(clk, 1, r as i8 + 1, 250);
-                } else if vet && mag < 0.1 * lim / ov && !self.am_on() {
+                } else if vet && !hold && mag < 0.1 * lim / ov && !self.am_on() {
                     // (not in an AC+DC method's reference step: it is taken at
                     // the method's range, acdcm.rs)
                     if r > 0 {
@@ -2833,9 +2855,6 @@ impl Dmm {
         }
         let now = clk.now_ms();
         if vet {
-            if self.acs_t0 == 0 && (x - self.acs_dc).abs() > ACS_DC_STEP * lim {
-                self.acs_begin(now);
-            }
             self.acs_dc = x;
             self.dc_val = x;
             self.acdc_seen |= 2;
@@ -2893,6 +2912,7 @@ impl Dmm {
         if self.ovl_trip(clk, u as u8, mag > ov * lim) {
             return None;
         }
+        let hold = vet && self.acs_dc_step(clk.now_ms(), a, lim);
         if !self.manual {
             let lowest = if self.a_auto == 3 { 9 } else { 8 };
             if mag > ov * lim {
@@ -2901,7 +2921,7 @@ impl Dmm {
                 } else if m > 7 && self.a_auto & 1 != 0 {
                     self.set(clk, m - 1, 1, 250);
                 }
-            } else if vet && mag < 0.1 * lim / ov {
+            } else if vet && !hold && mag < 0.1 * lim / ov {
                 if r == 1 {
                     self.set(clk, m, 0, 250);
                 } else if m < lowest && self.ovl_allows(m + 1 - 7) {
@@ -3099,7 +3119,7 @@ impl Dmm {
         // good one seeds the EMA), and they move no range. A result far
         // above the AC part (ACS_JUMP) is such a step seen in the AC phase.
         if acdc && self.acs_t0 == 0 && self.acdc_seen & 1 != 0 && ac > ACS_JUMP * self.f_ac + ACS_JUMP_FLOOR * lim {
-            self.acs_begin(now);
+            self.acs_begin(now, true);
         }
         let was = self.acs_t0 != 0;
         let settling = acdc && self.ac_settle_step(now, ac, lim);
