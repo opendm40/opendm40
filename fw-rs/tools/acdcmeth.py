@@ -48,7 +48,8 @@ calibrator gives: DC up to 30 V and its small 40 Hz square (tools/mr9270.py,
       5 digits of READ? and one range over each level's last 8 s.
 
     /usr/bin/python3 tools/acdcmeth.py e1 e2 e5 e6 e7 -o acdcmeth.jsonl
-    /usr/bin/python3 tools/acdcmeth.py e8 e9 e10 e2 -o acdcfix.jsonl  # retest
+    /usr/bin/python3 tools/acdcmeth.py e8 e9 e10 e2 e6 -o acdcfix.jsonl  # retest
+    /usr/bin/python3 tools/acdcmeth.py e5 --minutes 3 -o acdcfix.jsonl      # + e5, short
     /usr/bin/python3 tools/acdcmeth.py e6 --no-cal          # input left alone
     tools/acdcmeth.py e6 --usbip 1-0 --no-cal               # the emulator
 
@@ -215,8 +216,10 @@ def e5(R):
             R.enter('C', item)
             p = R.mean_parts(3.0)
             first = first or p['pc']
+            # (since the 7409b92 fix the gain is kept per range, so pc_ppm stays 0 after the
+            # first entry; the anchor's offset is measured at every entry)
             R.log(exp='e5', item=item, level=v, ref=ref, c_dc=p['dc'], err=p['dc'] - ref, pc=p['pc'], off=p['off'],
-                  pc_ppm=(p['pc'] / first - 1) * 1e6 if first else 0.0)
+                  pc_ppm=(p['pc'] / first - 1) * 1e6 if first else 0.0, gspan=R.stat().get('gspan', 0))
             time.sleep(max(0.0, R.a.period - 12))
 
 

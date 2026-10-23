@@ -664,8 +664,7 @@ restarts AC+DC / AUTO), `DBG:ACDC:STAT?` (meth, step 0 ref / 1 meas / 2
 run, mode, range, AC, DC, n_ac, n_dc, n_rd, Hz, the slot's correction, C V
 per_code, offset, LPF codes, sqrt(RMS) codes), `DBG:ACDC:ZERO k,v|AUTO` /
 `?` (slots 0..3 V ranges, 4..9 A unit * 2 + range; B's zeros and C A's
-offsets: C V keeps E7's self-cal, which has one slot, so a range visited
-again is self-calibrated again), `DBG:ACDC:R0 1|2`,
+offsets; C V has its own per-range anchor since 10.6, kept for the session), `DBG:ACDC:R0 1|2`,
 `DBG:ACDC:RANG <MF item>|AUTO`.
 
 Cost (against 87f2c20, the commit below these): region B 82 472 -> 78 168
@@ -951,6 +950,7 @@ static stack unchanged (headroom 21 484 B).
 Calibrator on V / COM (DC <= 24 V and the 40 Hz square), `DM40_USBTMC=real`:
 
     /usr/bin/python3 tools/acdcmeth.py e8 e9 e10 e2 e6 -o acdcfix.jsonl
+    /usr/bin/python3 tools/acdcmeth.py e5 --minutes 3 -o acdcfix.jsonl
 
 1. **e8** (~6 min): DC V READ? at 24 / 12 / 5 / 1 / 0 V on 60 V and 5 / 3 / 1 / 0 V on 6 V (manual range), then
    C entered once at the top level and stepped down without leaving: C's DC part vs READ? at every level
@@ -965,7 +965,15 @@ Calibrator on V / COM (DC <= 24 V and the 40 Hz square), `DM40_USBTMC=real`:
 4. **e2** (~3 min): the square on 6 / 60 V: C's AC part against A's, now through the factory AC V cal: expect
    within 0.05 % (it was +0.13 / +0.23 %); C's DC part against DC V within the rule.
 5. **e6** (~3 min): entry / range change timing (expect C's first reading ~2.5 s, ~9 readings / s).
-6. By hand: AUTO with C on the square and then 5 V DC (the 7409b92 screenshot case), a screenshot.
+6. **e5** (`--minutes 3`, ~7 min): C re-entered every 60 s at 24 V on 60 V and 3 V on 6 V: the anchor's
+   repeatability against READ? (the 7409b92 failure: +20.9..+24.9 mV on 60 V; rule 17 mV). pc_ppm stays 0
+   after the first entry now (the gain is kept per range; `gspan` logged).
+7. By hand: AUTO with C on the square and then 5 V DC (the 7409b92 screenshot case), a screenshot.
+
+Device assumption the fix rests on: rewriting R29 to restart AD2's peak hold (ENPKH off / on, the RMS / LPF
+bits unchanged) does not restart the RMS / LPF block (the stock AC rows' sentinel does the same in `poll_ac`,
+PKH_RESTART, at ~9 results / s). If it did, C's result rate would drop or blocks would come back mixed: e9's
+>= 6 readings / s and the `acsrc` counts show it.
 
 Decision rule (unchanged, 10.4): C becomes the default when e2's AC part is within the AC V spec of A's and
 the DC part (e5 / now e8) within 0.05 % + 5 digits; plus e9 / e10 passing.

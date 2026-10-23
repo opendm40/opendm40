@@ -1766,7 +1766,8 @@ Emulator (emu/):
       ~+16 mV at 12 V reproduced, the fix within 1.3 mV. **Device retest: §10.7 e8.**
 - [x] C's AC part +0.13 / +0.23 % against A (e2): through the factory AC V gain / offset now (§10.6 item 3;
       e2 recomputed: +0.014 / -0.003 %). **Device retest: §10.7 e2.**
-- [ ] Device retest of method C (acdc-approaches.md §10.7: `tools/acdcmeth.py e8 e9 e10 e2 e6`); C becomes
+- [ ] Device retest of method C (acdc-approaches.md §10.7: `tools/acdcmeth.py e8 e9 e10 e2 e6`, then `e5
+      --minutes 3`); C becomes
       the default only if it passes (owner's decision); A stays the default until then.
 - [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
       3 V reference moved -160 ppm during e5). **Calibrator, not the meter** (device-check doc "DC V at the
