@@ -217,9 +217,12 @@ ACDC_DOWN_MS, AUTO_TIE_MS) wait for a device sweep and are unchanged.
    READ? / FETCh? +9.91E37), no autorange. G7 readings are measured values
    that the sentinel / OVERLOAD release / watchdog saw before, so they still
    do (without that couptest iacfill / sqtie failed). HOLD, an AutoHold
-   capture and REL keep their readout. Consequence: in AUTO, READ? now
-   waits for the first decision (AC+DC -> AUTO below: 1.3 -> 3.6 s), as
-   asked (a provisional value never reaches SCPI).
+   capture and REL keep their readout. Consequence: in AUTO, FETCh? is
+   +9.91E37 until the first decision (AC+DC -> AUTO below: 1.3 -> 3.6 s);
+   READ? / MEAS? after the host's change wait for it, at most 4.5 s after the
+   command (main.rs AUTO_WAIT_MS), then the part AUTO shows by then, never
+   "Data stale" (a tie of AC and DC can take ~10 s to decide).
+   emu/hy3131/autowaittest.py: DC 1.28 s, clear AC 3.46 s, tie 4.50 s.
 
 Dim colour: VALUE_PROV = DIM (144, 152, 152), chosen over a darkened amber
 (0x8220: 128, 68, 0): the grey reads as "not final" and cannot be taken

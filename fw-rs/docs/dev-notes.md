@@ -156,8 +156,9 @@ Reply timing of `READ?` / `MEAS:<f>?` / `FETC?`:
   keeps every reply inside libsigrok's hard 1000 ms USBTMC Bulk-IN timeout,
   also in slow capacitance / temperature ranges.
 - **Just switched** (`MEAS:<f>?` changing the function, or `CONF:<f>` then
-  `READ?`): the first reading after the converter's settle (0.45 s for DC V,
-  2.5 s for resistance, then the autorange); `MEAS:<f>?` prefers a
+  `READ?`): the first reading after the converter's settle (0.3 s for DC V,
+  0.15 s for resistance, then the autorange; the AUTO coupling: its first
+  DC / AC decision, at most 4.5 s after the command, docs/bt-scpi.md); `MEAS:<f>?` prefers a
   full-resolution average but waits for it at most 1.5 s after the command.
   The reply can take
   about 3 s for resistance, so give the host a timeout of 5 s or more

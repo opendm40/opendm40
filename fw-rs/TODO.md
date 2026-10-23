@@ -2330,18 +2330,18 @@ Firmware:
             deadline; the stock's single-step window works again); V / A entry 300 ms; manual V range 250 ms;
             no held first conversion where a function change restarted AD1 (R22 changed); provisional values
             (vet hold, AC+DC before both parts / AC settling, AUTO deciding) drawn grey, never to the meter,
-            autorange, BT or SCPI (READ? in AUTO now waits for the first decision: up to ~3.6 s in the
-            emulator; MEAS? gives up at the settle deadline + SCPI_WAIT_MS 1.9 s = ~2.4 s and answers no
-            reading: owner to decide whether AUTO should wait longer or show provisional values to SCPI). Emulator (switchlat, MED):
+            autorange, BT or SCPI. In AUTO, FETCh? is +9.91E37 until the first decision; READ? / MEAS?
+            after the host's change wait for it (main.rs AUTO_WAIT_MS: at most 4.5 s after the command, then
+            the part AUTO shows, never "Data stale"; emulator autowaittest: DC 1.28 s, clear AC 3.46 s, a tie
+            4.50 s; docs/bt-scpi.md). Emulator (switchlat, MED):
             DC V -> ohm 3.08 -> 1.19 s (FAST 2.83 -> 0.93), DC V -> A 0.72 -> 0.33, ohm / A -> DC V 0.53 ->
             0.33, DC V -> AC V 0.48 -> 0.32, manual 6 <-> 60 V 0.5 -> 0.3, AC+DC 60 -> 6 V 1.69 -> 1.50;
             AC+DC -> AUTO first FETCh? 1.29 -> 3.56 (by design). Suites: switchtest (15 / 15), senttest (all
-            in the final run; aprot-to-dca failed once in an earlier loaded run, passes alone), autorangetest (ad1mix 1), couptest, powtest (all but:
-            acdc-floor flaky under load, base too; **bt fails 5 / 5 with the plain script on this build,
-            also alone** (base 2 / 2 and an earlier fastswitch build pass; a copy of the script that only adds
-            a post-run print passed 4 / 4): the failing row is the window's last sample at 38.48 s, its
-            `BT POW:VOLT:RANG?` reply missing (the run ends at 40 s), every BT value before it right (-24 W,
-            0x28, "POW"). Not explained, nothing in the rows points at the firmware: follow-up), leadstest,
+            in the final run; aprot-to-dca failed once in an earlier loaded run, passes alone), autorangetest
+            (ad1mix 1), couptest, powtest (acdc-floor flaky under load, base too; bt: its last row was cut by
+            the run's end, a test race fixed in powtest.py 6ece0b8, then OK alone; under 4 parallel runs its
+            phase 1 fails on base 612c45c too: the fw uptime lag moves the next input into the window),
+            leadstest,
             acdcmethtest, dcvtest, flowtest, meter-test, touch-test, ui-render 0 violations.
             **Device retest** (RATE FAST and MED, 1 V / 4.7 kohm / 50 mA as in ad74e93, settle.py):
             1. DC V -> RES on 4.7 kohm: screen shows "- - Mohm" within ~0.2 s, the number by ~1.0-1.3 s (was
