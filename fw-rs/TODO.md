@@ -1566,6 +1566,10 @@ Firmware:
       PASS (also SOUR:VOLT:OFFS? / DCYC?), the 640 / 4800 / 38400 / 76800 region C run PASS. Device retest: OUTP? / SOUR:*? polled in a 38400 disk session: late 0; with
       the generator ON (owner only), OUTP? no longer glitches the output. Left: a generator SETTING during a
       stream still runs Gen::apply in region C.
+      **Device ad74e93 (device-check-2026-10-21.md "ad74e93"): PASS.** OUTP?, SOUR:FREQ?, SOUR:FUNC?, SOUR:VOLT?,
+      SOUR:VOLT:OFFS?, SOUR:FUNC:SQU:DCYC? every 0.25 s in AD2 disk sessions: 38400 (360 queries) and 76800
+      (384): late 0, overruns 0, max_lat 280 ns, lost_before 0; OUTP? 0 throughout (OFF stays OFF). Open: the
+      generator-ON glitch check (owner only) and the SETTING-during-a-stream remainder.
 - [ ] A copy of a slow-bank INFO/ file while the meter streams for more than ~3 min (an open Wave view, a long
       fast-log session) can fail on Linux (EIO after 180 s; buffered reads usually recover) and maybe sooner on
       Windows. Documented (README.TXT could say so; native-boot.md does).
@@ -1999,6 +2003,14 @@ Firmware:
             Device retest pending: Linux (gio / Nautilus Eject -> stays ejected, re-plug -> back; PC can edit +
             cp + Eject at once -> Install? dialog); Windows 11 VM (Explorer Eject -> E: stays without medium,
             re-plug -> back).
+            **Device ad74e93 (Linux, device-check "ad74e93" C):** udisks Drive.Eject (D-Bus) -> 02/3A/00:
+            EJECT? 1,2,2, size 0, MediaAvailable false, mount refused, still ejected after 60 s, USBTMC fine; a port
+            reset (USBDEVFS_RESET, the re-plug stand-in) -> back, auto-mounted ro, README equal. **`gio mount -e`
+            (= Files / Nautilus Eject) does NOT eject on this host:** it unmounts, then gvfs runs util-linux
+            `eject` as the user -> "cannot open /dev/sda: Permission denied" (root:disk 0660); the meter never sees
+            a 0x1B (EJECT? 0,0,0). Host side, not fw-rs (ejecttest.py passed through its Drive.Eject fallback).
+            Not run: PC can edit + cp + Eject (owner setting + disk write), host load (eject -t needs /dev/sda),
+            Windows.
       - [x] Windows: the USBTMC interface (MI_00, class FE/03/01) has no in-box driver. It shows as "DM40
             multimeter (dm40-fw)" under Other devices with code 28 (device b6909d6). The MSC interface works
             regardless. Document it in README / Help: for SCPI on Windows, use NI-VISA / Keysight IO Libraries
@@ -2028,6 +2040,9 @@ Firmware:
             (-148), stack headroom 21 344 (-24).
             Device retest pending: `lsusb -v -d 1209:0001` iSerial == `xxd -p -u INFO/UID.BIN` == *IDN? field
             (USBTMC and BT); udisks drive / by-id name carries it, Eject / Power Off still act on the meter;
+            [device ad74e93: iSerial = UID.BIN = *IDN? field 3 over USBTMC and BT, udisks drive / by-id
+            ALIENTEK_DM40_files_<UID>, Drive.Eject acts on the meter, sigrok-cli -d scpi-dmm:conn=usbtmc/3.10
+            --scan "[S/N: <UID>]", DBG:FLASH? OK: PASS. Power Off, ngscopeclient, Windows, ejecttest: not run]
             `sigrok-cli -d scpi-dmm:conn=usbtmc/...  --scan` [S/N: ..]; ngscopeclient connects; recovery-usb is
             NOT flashed (test build only); Windows 11 VM: a new device instance (re-install, a Zadig WinUSB
             binding must be redone), Explorer mount + Eject still work, `Get-PhysicalDisk` SerialNumber (VPD 0x80);
@@ -2124,6 +2139,22 @@ Firmware:
             Cause: the frequency row leaves its divider open, PB1 - PB3 stands at ~54 mV (+41 100 codes) with
             0..2 V or nothing on V-COM, ~3 100 at 5 V, -850 at 10 V. Fixed: no sentinel in Hz (doc 4.7 gap;
             senttest freq-gap). Open: the AC hint in DC V on 5 V DC.
+      - [ ] **False alerts after DMM function switches (owner, device ad74e93, device-check "ad74e93" E; raw log
+            in that check's scratchpad `chk/out/E_all_sent.txt`).** 397 switches (42-pair matrix, chain, AUTO, UI
+            taps, scope / Wave view -> DMM) with V-COM open, 1 V and 5 V DC; A jack open; A-PROT never.
+            (E1) **V-JACK? after RES -> A or RES -> mA**, 11 / 11 with V-COM open or 1 V (0 / 4 at 5 V): CMP_SENSE
+            ctsta 0x70 in every window from 0.46-0.73 s (after the frozen row change), V-JACK at streak 10-11
+            (1.47-1.97 s), 0x50 at ~4.3 s, 0 at ~4.5 s, off 4.9-5.5 s. Likely the V input still charged by the
+            ohm source. (E2) V-JACK? after scope page -> DMM in A at 5 V (on 1.42 s, off 6.0 s, ctsta 0x70 from
+            0.51 s); direct TEMP -> A at 5 V: none. (E3) **AC? in DC V on 5 V DC** (the item above), 26 / 26 entries,
+            on at 2.6 s, stays on: the V-tap window's CTSTA is 0x70 = CMPHO and CMPLO both set on a steady +5 V
+            (1 V: 0x10), and sample_cmp reads both bits as "swings both ways". (E4) A-JACK in RES at 5 V, 12 / 12,
+            vside 0: the known 35fce2a 7b, owner decision. DC? in AC V on 1 / 5 V DC is right. Fix pending
+            (another agent).
+      - [ ] Switch latency (owner: "several seconds, stock was instant"; device ad74e93, settle.py at 1 / 5 V,
+            RATE FAST): first valid FETCh? DC V <-> AC V 0.46 s, RES -> DC V 0.52-0.56 s, DC V -> mA 0.56 s,
+            DC V -> A 0.75-0.76 s, 6 V -> 60 V 0.55-0.56 s, AC V -> AC+DC 1.32-1.37 s, **DC V -> RES 2.67 s**; the
+            screen is blank until then. AC V of a DC input settles into 0.1 % in 2.5-2.9 s. Stock not measured.
 - [x] Burden voltage in the A / mA / uA modes (as the EEVblog 121GW, owner 2026-10-22): I * R_path of the
       shunt in use in the aux row, "Burden" caption: DC A aux1 (signed), AC A aux2 instead of the duty
       (RMS); none in AC+DC (both rows hold the parts) and in the power meter (its own At-load line). R_path
