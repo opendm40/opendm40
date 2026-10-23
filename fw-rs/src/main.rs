@@ -90,7 +90,9 @@ const KEEPALIVE_MAX_MS: u64 = 600_000;
 const SCPI_SETTLE_MS: u64 = 1500;
 /// READ? / MEASure? / FETCh? with no reading of the current function yet
 /// (after a function change): give up this long after the converter's settle
-/// deadline (`Dmm::deadline`, 2.5 s for ohms), not after the command, ms.
+/// deadline (`Dmm::deadline`), not after the command, ms. AUTO coupling: a
+/// provisional value (its first decision, up to ~3.6 s) is no reading, so a
+/// MEAS? there can run out and answer with none (switch-latency.md 6).
 const SCPI_WAIT_MS: u64 = 1900;
 /// READ? / MEASure:<f>? with a reading of the current function already
 /// flowing: the next fresh reading if it comes within this, else the latest
