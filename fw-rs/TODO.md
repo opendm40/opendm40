@@ -2039,6 +2039,7 @@ Emulator (emu/):
       power-off, replaces the internal zero's); no hardware constant. Model "agndz:" (15 codes on 60 V);
       acdcmethtest --e8 down: 7fffcdf -6.7 / -7.3 mV at 1 / 0 V, the fix +0.4 / +0.2 mV; --e8 up (entered at 0 V,
       the table's gain): 7fffcdf -20.5 mV at 24 V, the fix +0.4. **Device retest: §10.10 (e8s / e8up).**
+      Device c6f9670 (§10.11): 60 V PASS (e8s 1 / 0 V +1.8 / +1.9 mV, was -7.2 / -8.0; e8up 24 V +1.2 mV).
 - [x] AUTO coupling on a signal with AC ~= DC (the 40 Hz square): C stays DC, A goes AC (its first AC part
       overshoots); the first evaluation (AC > |DC|) decides and the 1.5 x hysteresis keeps it. Decide whether
       that tie needs a rule (e.g. prefer AC within a few % of DC) before C's default.
@@ -2046,8 +2047,19 @@ Emulator (emu/):
       decision waits until the AC part has settled on one side (4 x its last change < its distance to |DC|),
       then the larger part; a tie within 1 % or no settling in 4 s: DC. couptest sqtie (three entries on the
       square): 7fffcdf DC -> AC with A and C, the fix DC throughout with both. **Device retest: §10.10 e11.**
+      Device c6f9670 (§10.11): e11 DC in all 6 entries, 0 changes; by hand AUTO DC with A and C: PASS.
 - [x] dcvtest LOG:SCALe? 1 % off (since 70c33ad): the test did not expect the model's per-range per_code factor
       (Ad2DcGainR, the device's); fixed in the test (§10.9 item 3).
+- [x] Device retest of §10.9 (§10.10, results §10.11, device-check doc "c6f9670"): e8up, e8s 60 V, e8, e11, e10,
+      e9, e5 PASS. **Decision rule not met**: e8s 6 V at 0 V -0.86 mV (limit 0.5), tc6 2 of 3 power cycles. A stays
+      the default (owner's decision).
+- [ ] C's 6 V two-point gain over a short span (5 -> 3 V, 41.6 k codes) is +143..+195 ppm against the internal zero's
+      (104 k), so 0 V reads -0.25..-0.92 mV after it: m2 (ST_MEAS) is taken ~3.6 s after the step while the AD2 LPF
+      still creeps 5-12 codes for ~8 s (DC V settles in ~1 s). Fix candidates in §10.11: (b) take m2 only once the
+      LPF stops drifting (removes the cause); (a) keep the larger-span gain (brings back 60 V's AGND bias);
+      (c) a larger CAL_GAIN_CODES on 6 V. Then device: e8s 6 V and tc6 (rt29/tc6.py) over 3 power cycles.
+- [ ] The first V tap after `CONF:VOLT:DC` on the 40 Hz square is sometimes lost (C 5 of 6, A 1 of 3; not at 1 V
+      DC): device-check doc "c6f9670" 3. Not chased.
 - [ ] Method C's internal zero on 60 V (the ~15 codes of 2563fe1): repeatability over entries / power cycles,
       and 600 / 1000 V (needs > 30 V), if C's first-entry gain is ever to be corrected by a constant.
 - [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the

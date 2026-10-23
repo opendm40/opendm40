@@ -1106,7 +1106,7 @@ side not run); every fw-rs/tools/*/run.sh OK (font-matrix identical to rust-fw-p
 dcvtest PASS. Cost against b4fb7b9: region B 62 636 -> 61 892 B free, region C 17 868 -> 17 716 B, SRAM 58 716 ->
 58 660 B, static stack headroom 21 448 -> 21 440 B.
 
-### 10.10 Device retest of 10.9 (`tools/acdcmeth.py`, calibrator on V / COM, `DM40_USBTMC=real`)
+### 10.10 Device retest of 10.9 (`tools/acdcmeth.py`, calibrator on V / COM, `DM40_USBTMC=real`; run on c6f9670: 10.11)
 
 Image: the build of the branch head named in the report. The two-point gain is kept per range until power-off, so
 `e8up` must run first after the install's reboot (or a power cycle), before anything enters method C:
@@ -1140,3 +1140,43 @@ Image: the build of the branch head named in the report. The two-point gain is k
 Decision rule (10.4 / 10.7) unchanged: C becomes the default when e8s / e8up and e5 pass with e2 / e9 / e10 as in
 10.8; the owner decides.
 
+
+### 10.11 Device results of the 10.10 retest (c6f9670, 2026-10-23 08:59-09:40, docs/device-check-2026-10-21.md "c6f9670")
+
+Run as 10.10, with e8up first after the install's boot and a `dm40dbg.py reset` before e8s. Errors are C's DC part
+minus the meter's DC V READ? on the same manual range, taken before the C session and again right after it (they
+agree within 0.05-0.33 mV).
+
+| test | pass | result |
+|---|---|---|
+| e8up 60 V, 0 / 1 / 5 / 12 / 24 V | 5.0 / 5.5 / 7.5 / 11 / 17 mV | -2.2 / -1.3 / -0.1 / -2.8 / +1.2 mV, gspan 0 -> 10.3 k -> 39.1 k: PASS |
+| e8s 60 V, 24 / 12 / 5 / 1 / 0 V | 17 / 11 / 7.5 / 5.5 / 5.0 | +2.5 / +1.5 / +1.6 / **+1.8 / +1.9** (2563fe1 -7.2 / -8.0 at 1 / 0 V): PASS |
+| e8s 6 V, 5 / 3 / 1 / 0 V | 3.0 / 2.0 / 1.0 / 0.5 | -0.14 / -0.21 / -0.55 / **-0.86 mV: FAIL at 0 V** (2563fe1 +0.07..+0.44) |
+| tc6 (the e8s 6 V step, 3 power cycles) | 0 V 0.5 | 0 V -0.92 / -0.25 / -0.63: 2 of 3 FAIL; two-point pc +143..+195 ppm over the internal zero's |
+| e8 (1 s per level, gains kept) | as e8s | 60 V -0.8..+3.6, 6 V -0.02..+0.31 mV: PASS |
+| e11 AUTO on the square, A / C x 3 | DC, <= 1 change | DC in all 6, 0 changes; by hand (taps, screenshots) AUTO DC with A and C: PASS |
+| e10 / e9 | as 10.8 | AUTO,DC 0.0 / -0.3 / -0.6 mV; e9 -0.26..+0.07 mV, 6 V only, 9.2 rd/s, acsrc 0: PASS |
+| e5 24 V / 60 V; 3 V / 6 V | 17 / 2.0 mV | -1.9..+1.5; -0.24..+0.02 mV: PASS |
+
+**60 V: fixed.** The two-point gain (4.8515-4.8523e-4 over 24.7-39.1 k codes) replaces the internal zero's
++0.025 % (4.85281e-4; 2563fe1 +0.030 %). The table start of e8up also lands within the rule.
+
+**6 V: a regression of 10.9.** On 6 V the internal zero's gain was right (104 k codes). The first two-point attempt
+of >= 10 k codes replaces it, and over the 5 -> 3 V step (41.6 k codes) that gain came out 143-195 ppm high in all four
+power-on sessions. The 83 k span of e8 (5 -> 1 V) gave the internal zero's value to 2 ppm. The cause is in the
+STAT? trace: ST_MEAS ends ~3.6 s after the step, when the AD2 LPF code is still 5-12 codes above the value it reaches
+~8 s later. The DC V row on the same step settles within 0.1 mV in ~1 s, so the calibrator is not the cause. On a
+step down, a high m2 gives a per_code that is too large, and an anchor that reads low afterwards (-0.1..-0.3 mV at 3 V);
+both signs match. The 60 V anchor errors of 1-4 mV (inside the rule) are probably the same tail. Fix candidates
+(not made): (b) is the one that removes the cause:
+(a) keep the larger-span gain unless the new span is >= 1.5 x it (the internal zero's included). This brings back
+    60 V's AGND bias for 24 -> 12 V, unless it is made per range, which 10.9 rejected;
+(b) take m2 only after the LPF stops drifting (a slope test over the steady window / ST_MEAS, < ~1 code/s; up to
+    ~8 s more on the first level change of a range);
+(c) a larger CAL_GAIN_CODES on 6 V.
+
+**Decision rule: not met** (e8s 6 V at 0 V; tc6 2 of 3). Everything else passes, including the 2563fe1 failure
+case. The default stays A; the owner decides.
+
+Also seen: with C, the first V tap after `CONF:VOLT:DC` on the square was lost in 5 of 6 tries, and with A in 1 of 3.
+It did not happen at 1 V DC. It is not specific to C (device-check doc, "c6f9670" 3).

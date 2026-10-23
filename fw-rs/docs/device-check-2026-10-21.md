@@ -1979,3 +1979,54 @@ A cleanup helper in this session deleted every `LOGS/FAST*.DLG` on the meter ins
 - **Files:** every file this session made was deleted (FAST013, FAST000-FAST003). `MMEM:CAT?` used / free **3 534 848 / 13 205 504**, against 10 829 824 / 5 910 528 at the start: the 13 old FAST files are gone (above). No other file changed.
 - **Health:** crash count 0, HEALTHY, marker VALID. One `dm40dbg.py reset` (item 4), no crash.
 - **Calibrator:** 1 V DC, enabled.
+
+## c6f9670: AC+DC method C retest of §10.9 (acdc-approaches.md §10.10) (2026-10-23 08:59 - 09:40)
+
+The owner had installed c6f9670 and booted it (install OK, crash count 0). `DBG:BOOT?` showed NORMAL, crash count 0, VALID at the start and at the end.
+- **Wiring:** the calibrator (`/dev/ttyACM1`) on V/COM: DC 0..24 V and the 40 Hz square. The A jack, the MCX probe and the generator output were not wired.
+- **Runs** (`DM40_USBTMC=real /usr/bin/python3 tools/acdcmeth.py ... -o acdc29.jsonl`): e8up at 09:00 (1 min after power-on), then `dm40dbg.py reset` (09:02), e8s, e8, e11, e10 + e9, and `e5 --minutes 3` (09:20-09:31). Helper scripts: `refs.py` (DC V READ? at every level again right after each e8 run, to bracket the refs), `hand29.py` / `hand29b.py` / `tap29.py` (AUTO by touch with screenshots), `tc6.py` (the 6 V two-point step as a time course, 3 repeats, each after a `dm40dbg.py reset`: 09:33 / 09:34 / 09:35), `dctail.py` (DC V after the same step).
+- **Files:** in the session scratchpad `rt29/` (not in git): `acdc29.jsonl`, `run-*.log`, `refs.jsonl`, `tc6.jsonl`, `dctail-*.json`, `hand29*.log`, `h29-*.png`, `tap29-*.png`, `pre.png`, `end.png`, `cat0.txt` / `cat1.txt`.
+- **References:** each C reading is compared with the meter's own DC V READ? on the same manual range, taken before the C session (the script's `ref`) and again right after it (`refs.py` / `tc6.py`). The two agree within 0.05-0.33 mV, so no verdict below depends on the calibrator's wander.
+
+### Summary
+
+**Decision rule (§10.4 / §10.7): not met, for a new reason.** The 60 V failure of 2563fe1 is fixed, and e8up, e8, e11, e10, e9 and e5 pass. But e8s on the **6 V** range fails at 0 V. There the two-point gain of §10.9, taken over a 5 -> 3 V step (41.6 k codes), replaced the internal zero's gain (104 k codes) and was 143-195 ppm high in all 4 power-on sessions tried. The cause is a slow tail in the AD2 LPF after a step (section 2). The default stays A. The owner decides.
+
+| # | Check | Pass | Result (C's DC part - READ?, mV; pre / post ref where both) |
+|---|---|---|---|
+| e8up | 60 V, entered at 0 V, then 1 / 5 / 12 / 24 V (4 s per level) | 5.0 / 5.5 / 7.5 / 11 / 17 mV | **PASS**: -2.23 / -1.35 / -0.07 / -2.85 / +1.22 (post: -2.09 / -1.22 / +0.19 / -3.0 / +0.9). gspan 0 -> 10 305 (5 V) -> 39 138 (24 V), as §10.10 expected. 24 V +1.2 mV: the "~+10 mV without the fix" is gone |
+| e8s 60 V | after a power cycle: entered at 24 V, then 12 / 5 / 1 / 0 V | 17 / 11 / 7.5 / 5.5 / 5.0 | **PASS**: +2.51 / +1.49 / +1.56 / **+1.82 / +1.90** (post: +2.6 / +1.2 / +1.5 / +1.8 / +1.6). 2563fe1: -0.47 / -4.34 / -6.12 / **-7.23 / -8.01**. gspan 49 425 (internal zero) -> 24 709 (two-point at 12 V), as expected |
+| e8s 6 V | entered at 5 V, then 3 / 1 / 0 V | 3.0 / 2.0 / 1.0 / 0.5 | 5 / 3 / 1 V PASS: -0.14 / -0.21 / -0.55; **0 V FAIL: -0.86** (post: -0.23 / -0.37 / -0.81 / **-0.85**). pc 4.80824e-5 (internal zero, 103 937) -> **4.80915e-5** (two-point at 3 V, 41 584): +190 ppm. 2563fe1: +0.07..+0.44 |
+| e8kept (e8s) | 5 V on 60 V re-entered, kept gain | 7.5 | PASS +1.39 (gspan 24 709) |
+| e8 | 1 s per level, after e8s (gains kept) | as e8s | **PASS** everywhere. 60 V: +3.61 / -0.16 / -0.21 / -0.39 / -0.78 (new two-point at 5 V, 39 131). 6 V: +0.31 / -0.02 / +0.11 / +0.10 (post: +0.09 / -0.12 / +0.06 / +0.11); new two-point at 1 V over 83 158 codes: pc 4.80823e-5, 2 ppm from the internal zero's. e8kept +0.31 |
+| tc6 | the e8s 6 V step 5 -> 3 V after a power cycle, 3 repeats; READ? right after each C mean | 0 V within 0.5 | two-point pc **+195 / +146 / +143 ppm** over each session's internal zero (4.80873 / 4.80798 / 4.80851e-5: the internal zero itself scatters +-80 ppm over power cycles). 3 V anchor -0.21 / -0.26 / -0.12; 1 V -0.15 / -0.14 / -0.43; **0 V -0.92 / -0.25 / -0.63**: 2 of 3 FAIL |
+| e11 | AUTO on the 40 Hz square, A and C, 3 entries, 15 s | DC, <= 1 change, same part | **PASS**: DC in all 6 entries, 0 changes (A 33, C 38 samples each) |
+| hand | 3 taps on V on the square, A then C, screenshots | DC, no AC flash | **PASS**: A twice, C three times: AUTO DC 4.763-4.764 V with both parts shown (~4.760 / =4.763), no AC at any poll (0.3 s) nor in the 2 s / 15 s screenshots (`h29-A-15s.png`, `h29-C-2s.png`, `h29-C-15s.png`). See 3 for a lost first tap |
+| e10 | AUTO, square -> 5.0 / 5.5 / 4.5 V | AUTO,DC in rule, one range | **PASS**: square AUTO,DC 4.765 (60 V); then -0.00 / -0.29 / -0.59 mV, 6 V only, 9.2-9.3 rd/s, acsrc 0 in 80 of 80 |
+| e9 | 4.0 / 4.5 / 5.0 / 5.5 V, AUTO range | 1 range, >= 6 rd/s, AC < 30 mV, DC in rule | **PASS**: 6 V only, 9.23-9.25 rd/s, AC max 0.28-0.35 mV, DC -0.16 / -0.26 / +0.07 / -0.04, acsrc 0 in 119 of 119 |
+| e5 | C re-entered every 60 s, 3 min per level | 17 / 2.0 | **PASS**. 24 V on 60 V (gain from e8, gspan 39 131): +1.51 / -0.22 / -1.93 / -1.85. 3 V on 6 V (gain from e8, gspan 83 158): -0.01 / -0.07 / +0.02 / -0.24 |
+
+### 1. 60 V: fixed
+
+The two-point gain removes the 2563fe1 failure. e8s at 1 / 0 V reads +1.8 / +1.9 mV (was -7.2 / -8.0 mV), and e8up (entered at 0 V on the table's gain) reads +1.2 mV at 24 V. The two-point gains on 60 V over this session are 4.84943e-4 (10.3 k span, e8up 5 V), 4.85152e-4 (39.1 k), 4.85198e-4 (24.7 k), 4.85225e-4 (39.1 k). The 2563fe1 fit implied ~4.8516e-4. The internal zero after the power cycle gave 4.85281e-4 (+0.025 % against the fit; 2563fe1 +0.030 %). The anchor itself is 1-4 mV off READ? on 60 V here (e8s 24 V +2.5, e8 24 V +3.6, e8up 0 V -2.2 mV; 1-4 digits). That is inside the rule, and of the same family as section 2.
+
+### 2. 6 V: the two-point gain over a short span is worse than the internal zero's
+
+On 6 V the internal zero's gain was right (2563fe1: within 0.44 mV from 5 V to 0 V). §10.9 replaces it with the first two-point gain of >= 10 k codes, even when that span is smaller than the internal zero's. In e8s and in the three `tc6` repeats, the 5 -> 3 V step (41.6 k codes) gave a gain 143-195 ppm above that power-on's internal zero, and C then read 0 V 0.25-0.92 mV low (limit 0.5). The 83 k span of e8 (5 -> 1 V) gave the internal zero's gain to 2 ppm.
+
+Mechanism, from `tc6`'s STAT? trace at ~10 Hz: after the 5 -> 3 V step the steady window fills by 1.75 s (step 0: the DC V reference, 3 results), and the run row's ST_MEAS ends at ~3.6 s. At that moment the LPF code is still **+5..+12 codes** above the value it reaches 8 s later. It creeps down by 0.25-0.55 mV over ~8 s. On a step down, an m2 that is still high makes |m2 - m1| too small and per_code too large. The same m2 makes the new anchor's offset read low afterwards (the 3 V anchor reads -0.12..-0.26 mV right after). Both signs match. `dctail.py` runs the same step on DC V (AD1, FETCh? at 10 Hz): it settles within 0.1 mV in ~1 s, so the tail is in the AD2 / LPF path, not the calibrator. 10 codes over 41.6 k is 240 ppm, 10 codes over 83 k 120 ppm, and over 104 k (the internal zero) none, since the zero and the 5 V anchor are both measured at rest.
+
+Candidate fixes (none made; the owner decides): (a) keep a gain whose span is larger (the internal zero's included) unless the new span is >= 1.5 x it, so the 6 V internal zero stands and 60 V still takes the two-point gain. On 60 V a 1.5 x rule would refuse 24 -> 12 V (24.7 k < 74 k), so the AGND bias would come back for e8s. So the rule would need per-range knowledge, which §10.9 rejected; (b) take m2 only once the LPF has stopped drifting (a slope test over the steady window, e.g. < 1 code/s; costs up to ~8 s more per first level change); (c) a larger CAL_GAIN_CODES on 6 V. (b) is the one that removes the cause.
+
+### 3. Other observations
+
+- **The first V tap after `CONF:VOLT:DC` is sometimes lost** on the square: the first tap was lost in 5 of 6 tries with C and 1 of 3 with A (`tap29.py`: FUNC? still "VOLT" after it). It did not reproduce at 1 V DC with A (4 of 4 fine). It is not specific to C. A guess, not checked: the DC V autorange on the square 3 s after the CONF. Not chased.
+- `SYST:ERR?` had `-100,"Data stale"` once after `hand29.py` (a READ? right after CONF:VOLT:DC), and `-100,"Illegal parameter value"` from a `RATE F` of mine in `dctail.py` (not a valid parameter; RATE stayed SLOW). Both cleared; the queue was empty at the end.
+- The 60 V internal zero after power-on: 4.85281e-4 (2563fe1 4.85309e-4); the 6 V one over 4 power cycles 4.80798-4.80873e-5 (+-80 ppm).
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+ (`VOLT:RANG:AUTO?` 1), rate SLOW, `CONF?` "VOLT +6,+1E-05", `VOLT:COUP?` DC, **method A** (`DBG:ACDC:METH?` A), as found (`pre.png`, `end.png`). `SYST:ERR?` empty. Generator `OUTP?` 0 (never switched on). Settings not touched (volume 0, backlight 10 %, Dim / Shutdown Never).
+- **Files:** none created on the meter (screenshots were `DBG:LCD?` reads, so nothing was deleted). `MMEM:CAT?` file list identical to the start (3 534 848 / 13 205 504).
+- **Health:** `DBG:BOOT?` NORMAL, crash count 0, VALID, HEALTHY. Four deliberate `dm40dbg.py reset`s (09:02 before e8s; 09:33 / 09:34 / 09:35 before each `tc6` repeat), no crash.
+- **Calibrator:** 1 V DC, enabled.
