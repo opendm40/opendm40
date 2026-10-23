@@ -518,13 +518,23 @@ pub enum Log {
 ///   DBG:LEADs?              "Leads in A?" reminders since power-on: n,from,to
 ///                           (Dmm::func codes of the last change that fired;
 ///                           255 = none yet; doc 4.9)
-///   DBG:SENTinel:VARiant <0..31> / ?
+///   DBG:SENTinel:VARiant <0..63> / ?
 ///                           device-check row variants, RAM only (sentinel.rs
 ///                           VAR_*): +1 AC V keeps OP1's chopper (9dd1222 row),
 ///                           +2 no AC V sentinel, +4 comparator on DC V 60 V+,
 ///                           +8 none of the later sentinels (AC+DC, AC A,
 ///                           continuity, diode, cap r0..4, frequency), +16 no
-///                           DC? / AC? input alternation
+///                           DC? / AC? input alternation, +32 AC A's AD1 on
+///                           SENSE - PB5 (the f0d21eb row)
+///   DBG:SENTinel:REG?       HY3131 R20..R37 read back (48 hex digits), relay PA
+///                           (0 V/A, 1 ohm network, 255 unknown), mode, range,
+///                           a_blind (1 = no temperature row since DC V 60 V+ /
+///                           an ohm-network row / a chip restart)
+///   DBG:SENTinel:PRECond <ms> / ?  device experiment, RAM only, 0 = off (the
+///                           default): entering DC A / mA / uA while a_blind,
+///                           run the temperature row for <ms> (<= 2000, blocking)
+///                           first (device f0d21eb: 24 V on V-COM was seen in DC
+///                           A only after TEMP)
 ///   DBG:ACDC:METH A|B|C / ? AC+DC method (acdcm.rs; RAM only, default A =
 ///                           the stock alternation; a change restarts AC+DC)
 ///   DBG:ACDC:STAT?          meth,step,mode,range,ac,dc,n_ac,n_dc,n_rd,hz,corr,
@@ -842,9 +852,14 @@ pub enum Cmd {
     DbgSentLog,
     /// DBG:LEADs?: the "Leads in A?" reminder count and last change.
     DbgLeads,
-    /// DBG:SENTinel:VARiant <0..31> / ?: device-check row variants
+    /// DBG:SENTinel:VARiant <0..63> / ?: device-check row variants
     /// (sentinel::VAR_*, RAM only).
     DbgSentVar(Option<u8>),
+    /// DBG:SENTinel:REG?: R20..R37 read back + relay / mode (Dmm::reg_text).
+    DbgSentReg,
+    /// DBG:SENTinel:PRECond <ms> / ?: the DC A precondition experiment
+    /// (Dmm::precond_ms, RAM only, 0 = off).
+    DbgSentPrec(Option<u16>),
     /// DBG:HWTRIG...: 0 query, 1 ENABLE (bool), 2 CAL?, 3 STAT?, 4 STAT:RESET.
     DbgHwTrig(u8, bool),
     /// Power meter (dmm::pw): CONF:POW, FETC:POW:ALL?, [SENS:]POW:..., DBG:POW:...
@@ -1928,11 +1943,19 @@ impl Scpi {
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
-                        Some(v) if (0.0..=31.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
+                        Some(v) if (0.0..=63.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
                         _ => self.err = Some("Illegal parameter value"),
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "LOG")) => out = Out::Instr(Cmd::DbgSentLog),
+                _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "REG")) => out = Out::Instr(Cmd::DbgSentReg),
+                _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "PRECond")) => {
+                    match parse_num(arg) {
+                        _ if query => out = Out::Instr(Cmd::DbgSentPrec(None)),
+                        Some(v) if (0.0..=2000.0).contains(&v) => out = Out::Instr(Cmd::DbgSentPrec(Some(v as u16))),
+                        _ => self.err = Some("Illegal parameter value"),
+                    }
+                }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
                 _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "LEADs") => out = Out::Instr(Cmd::DbgLeads),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {
