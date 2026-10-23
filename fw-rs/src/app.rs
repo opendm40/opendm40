@@ -4119,9 +4119,15 @@ impl App {
                     }
                     5 => self.dmm.am.r0 = k,
                     7 => self.dmm.set_range(clk, Some(k)),
+                    8 => {
+                        let mut b = [0u8; 500];
+                        let n = self.dmm.tr.text(k as usize, &mut b, 500);
+                        out.put_bytes(&b[..n]);
+                    }
+                    9 => self.dmm.tr.arm(k),
                     _ => out.put_u32(self.dmm.am.r0 as u32),
                 }
-                matches!(op, 1 | 2 | 4 | 6)
+                matches!(op, 1 | 2 | 4 | 6 | 8)
             }
             C::DbgAcdc => {
                 let mut b = [0u8; 400];

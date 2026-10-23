@@ -513,6 +513,11 @@ pub enum Log {
 ///                           unit*2+range; B zero, C A offset) / measure again;
 ///                           ? = valid,fixed;c0..c9
 ///   DBG:ACDC:R0 1|2 / ?     B 6 V: (i) AD1 SENSE - PB5 / (ii) OP1O - RLU
+///   DBG:ACDC:TRACE 0|1|2    AC+DC event trace (acdctr.rs): off / on / on with
+///                           the row read back per DC conversion; re-arms
+///   DBG:ACDC:TRACE? [from]  n,held,trig,on then ";" + 56 hex digits per entry
+///                           (oldest = 0, from `from`); frozen 48 events after
+///                           an accepted DC part > 20 % off the one before
 ///   DBG:ACDC:RANG <item>|AUTO  the MF range item (V 0 = 600 mV, 1..4 = 6 ..
 ///                           1000 V; A 0..5 = 600 uA .. 10 A; manual) / AUTO+
 ///   DBG:ACDC?               AC+DC phase diagnostic (Dmm::acdc_diag_text): phases
@@ -781,7 +786,7 @@ pub enum Cmd {
     DbgAcdc,
     /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs): op 0 METH <m>, 1 METH?,
     /// 2 STAT?, 3 ZERO <slot>,<v> (NaN: measure again), 4 ZERO?, 5 R0 <1|2>,
-    /// 6 R0?, 7 RANG <item> (255 = AUTO+).
+    /// 6 R0?, 7 RANG <item> (255 = AUTO+), 8 TRACE? <from>, 9 TRACE <0|1|2>.
     DbgAm(u8, u8, f32),
     /// SYSTem:ALERt?: the wrong-connection alert in force (sentinel.rs).
     SysAlert,
@@ -1814,6 +1819,11 @@ impl Scpi {
                         (b"RANG", false) => match parse_num(a0) {
                             _ if kw(a0, "AUTO") => Some(Cmd::DbgAm(7, 255, 0.0)),
                             Some(v) if (0.0..=5.0).contains(&v) => Some(Cmd::DbgAm(7, v as u8, 0.0)),
+                            _ => None,
+                        },
+                        (b"TRACE", true) => Some(Cmd::DbgAm(8, parse_num(a0).unwrap_or(0.0).clamp(0.0, 255.0) as u8, 0.0)),
+                        (b"TRACE", false) => match parse_num(a0) {
+                            Some(v) if (0.0..=2.0).contains(&v) => Some(Cmd::DbgAm(9, v as u8, 0.0)),
                             _ => None,
                         },
                         (b"R0", true) => Some(Cmd::DbgAm(6, 0, 0.0)),

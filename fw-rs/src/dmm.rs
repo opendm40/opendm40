@@ -16,6 +16,7 @@
 use core::ptr::read_volatile;
 
 use crate::clock::Clock;
+use crate::acdctr::{self as tr, TrEnt};
 use crate::hy3131 as hy;
 use crate::hy3131_tables::*;
 use crate::mmio::{modify32, w32};
@@ -781,6 +782,8 @@ pub struct Dmm {
     pub pw: &'static mut Pw,
     /// AC+DC method (acdcm.rs; DBG:ACDC:METH, RAM only).
     pub am: &'static mut am::Am,
+    /// AC+DC event trace (acdctr.rs; DBG:ACDC:TRACE, RAM only, off at boot).
+    pub tr: &'static mut tr::Trace,
     /// Burden voltage readout in the A functions (Settings 3/3 "Burden
     /// voltage", SCPI DISP:BURD; `burden_val`): I x the shunt's R_path in
     /// aux1 (DC) / aux2 (AC, instead of the duty cycle).
@@ -1148,6 +1151,7 @@ impl Dmm {
             fuse_res: sentinel::FuseRes::Idle,
             pw: pw::pw_static(),
             am: am::am_static(),
+            tr: tr::tr_static(),
             burden_show: false,
         }
     }
@@ -1358,6 +1362,10 @@ impl Dmm {
         self.r22 = row[2];
         self.r29 = row[9];
         self.chk.copy_from_slice(&row[CHK_AT..CHK_AT + 8]);
+        if self.tr.on != 0 {
+            let h = tr::hash16(&row);
+            self.tr_ev(clk.now_ms(), tr::K_ROW, h as i32, self.dc_val, 0);
+        }
         // The sentinel's history belongs to the function (AC+DC: both
         // phases, `func`), so a phase switch or a range change keeps it.
         let key = self.func();
@@ -1409,11 +1417,13 @@ impl Dmm {
                 self.acdc_osr_once = true;
                 hy::write(0x22, &[OSR_SLOW]);
                 self.r22 = OSR_SLOW;
+                self.tr_ev(self.t_poll, tr::K_R22, ad1, self.prev_ad1 as f32, 0);
             }
         } else {
             self.acdc_osr_once = false;
             hy::write(0x22, &[OSR_FAST]);
             self.r22 = OSR_FAST;
+            self.tr_ev(self.t_poll, tr::K_R22, ad1, self.prev_ad1 as f32, 0);
         }
         self.prev_ad1 = ad1;
     }
@@ -1499,6 +1509,42 @@ impl Dmm {
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
+        self.tr_ev(now, tr::K_SET, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
+    }
+
+    /// AC+DC trace event (acdctr.rs) with the vetting / phase state; a DC
+    /// conversion (`K_DC`) also reads the row back when the trace asks.
+    fn tr_ev(&mut self, now: u64, k: u8, ad1: i32, val: f32, fl: u8) {
+        if !self.acdc || !self.tr.live() {
+            return;
+        }
+        let mut e = TrEnt {
+            t: now as u32,
+            k,
+            mode: self.mode,
+            range: self.range,
+            r22: self.r22,
+            r22c: 0,
+            r24c: 0,
+            r32c: 0,
+            vl: self.vet_left,
+            vh: self.vet_held,
+            pn: self.phase_n,
+            seen: self.acdc_seen,
+            fl,
+            hash: 0,
+            ad1,
+            val,
+        };
+        if self.tr.on == 2 && k == tr::K_DC {
+            let mut b = [0u8; hy::CFG_LEN];
+            hy::read(hy::R_CFG, &mut b);
+            e.r22c = b[2];
+            e.r24c = b[4];
+            e.r32c = b[18];
+            e.hash = tr::hash16(&b);
+        }
+        self.tr.push(e);
     }
 
     /// A range or function change from `old` (mode, range; AC+DC: either
@@ -1660,6 +1706,7 @@ impl Dmm {
         self.deadline = clk.now_ms() + settle;
         self.ac_settle_start(clk.now_ms(), old);
         self.vet_start(old);
+        self.tr_ev(clk.now_ms(), tr::K_PHASE, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
     }
 
     /// SCPI function code: the stock mode, or 16 = V AC+DC, 17 = A AC+DC,
@@ -2790,6 +2837,7 @@ impl Dmm {
         let mag = if self.acdc { hypot(self.ac_raw, x) } else { x.abs() };
         let now = clk.now_ms();
         let hold = vet && self.acs_dc_step(now, x, lim);
+        self.tr_dc(now, ad1, x, lim, vet, hold);
         if !self.manual {
             let up = mag > ov * lim;
             if m == 1 {
@@ -2816,6 +2864,18 @@ impl Dmm {
             return None;
         }
         self.dc_out(clk, x, lim, dec, unit, si_k, before, ext, vet)
+    }
+
+    /// Trace a DC conversion (acdctr.rs); the trigger is an accepted DC
+    /// part more than TR_JUMP off the DC part before it.
+    fn tr_dc(&mut self, now: u64, ad1: i32, x: f32, lim: f32, vet: bool, hold: bool) {
+        if self.tr.on == 0 {
+            return;
+        }
+        let d = self.dc_val;
+        let jump = vet && !self.am_on() && d.abs() > 0.01 * lim && (x - d).abs() > tr::TR_JUMP * d.abs();
+        let fl = vet as u8 * tr::F_VET | jump as u8 * tr::F_TRIG | hold as u8 * tr::F_HOLD;
+        self.tr_ev(now, tr::K_DC, ad1, x, fl);
     }
 
     /// End of a DC reading (modes 1, 3, 7..9): plain DC, or the DC phase of
@@ -2913,6 +2973,7 @@ impl Dmm {
             return None;
         }
         let hold = vet && self.acs_dc_step(clk.now_ms(), a, lim);
+        self.tr_dc(clk.now_ms(), ad1, raw, lim, vet, hold);
         if !self.manual {
             let lowest = if self.a_auto == 3 { 9 } else { 8 };
             if mag > ov * lim {
@@ -3123,6 +3184,9 @@ impl Dmm {
         }
         let was = self.acs_t0 != 0;
         let settling = acdc && self.ac_settle_step(now, ac, lim);
+        if self.tr.on != 0 {
+            self.tr_ev(now, tr::K_AC, sq as i32, ac, settling as u8 * tr::F_SETTLING);
+        }
         let seed = acdc && was && !settling;
         // AC+DC: every other result after the settle deadline goes through
         // the EMA (thr = the plain-AC window, a 0.25 V / 0.35 mV / 0.15 A),
@@ -3225,6 +3289,7 @@ impl Dmm {
                 });
                 if m == 0 {
                     hy::write(0x32, &[0x38]);
+                    self.tr_ev(now, tr::K_R32, 0, 0.0, 0);
                 }
                 self.phase_n = 2;
             } else {
