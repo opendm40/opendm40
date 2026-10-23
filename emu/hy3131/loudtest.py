@@ -97,7 +97,9 @@ SC = {
                       acts={16.5: ['CONF:RES']},
                       checks=[('quiet', 6, 10), ('starts', 10, 11.2, LOUD), ('loud', 10, 15, LOUD), ('stops', 15, 15.6),
                               ('quiet', 15.6, 26)],
-                      seen=[('APROT', '1,0,1,0'), ('APROT', '0,0,1,0')]),
+                      seen=[('APROT', '1,0,1,0'), ('APROT', '0,0,1,0')],
+                      # the latch held in ohm, quiet (FUNC? "RES")
+                      seen_func=[('APROT', '0,0,1,0', '"RES"')]),
     # V-JACK? (24 V on V/ohm in DC A, no current): an advisory, no alarm. Then Off: A-JACK
     # in DC V makes no sound; then Volume at 40 %: the alarm at the key volume.
     'vjack-off': dict(func='CURR:DC', run_for=40, setup=['SYST:BEEP:VOL 0'],
@@ -224,7 +226,7 @@ def run(name):
             acts = dict(sc.get('acts', {}))
             while p.poll() is None:
                 row = {}
-                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:ALARm?', 'SYST:ALER:ALARm?', 'SYST:BEEP:VOL?']:
+                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:ALARm?', 'SYST:ALER:ALARm?', 'SYST:BEEP:VOL?', 'FUNC?']:
                     tm.write(q)
                     row[q] = tm.read(timeout=60).decode(errors='replace').strip()
                 row['t'] = int(row['DBG:PING?'].split(',')[0]) / 1000.0
@@ -233,8 +235,8 @@ def run(name):
                     if row['t'] >= ta:
                         for c in acts.pop(ta):
                             tm.write(c)
-                print('%s %6.2f %-6s %-12s %s %s' % (name, row['t'], row['SYST:ALER?'], row['DBG:ALARm?'],
-                                                   row['SYST:ALER:ALARm?'], row['SYST:BEEP:VOL?']), flush=True)
+                print('%s %6.2f %-6s %-12s %s %s %s' % (name, row['t'], row['SYST:ALER?'], row['DBG:ALARm?'],
+                                                      row['SYST:ALER:ALARm?'], row['SYST:BEEP:VOL?'], row['FUNC?']), flush=True)
                 time.sleep(0.1)
         except Exception as e:
             print(name, 'link ended:', e, flush=True)
@@ -257,6 +259,10 @@ def run(name):
             ok = False
             bad.append('row %s %s never seen' % (a, pre))
     print('  rows seen: %s' % ' '.join('%s/%s' % x for x in seen), flush=True)
+    for a, pre, fn in sc.get('seen_func', []):
+        if not any(r['SYST:ALER?'] == a and r['DBG:ALARm?'].startswith(pre) and r.get('FUNC?') == fn for r in rows):
+            ok = False
+            bad.append('row %s %s in %s never seen' % (a, pre, fn))
     if not rows:
         ok = False
         bad.append('no SCPI rows')
