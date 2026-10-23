@@ -30,7 +30,7 @@ checked only in the emulator or in host tests.
 | Misconnect alerts | A-JACK (current in the A jack while measuring volts), A-PROT, "Leads in A jack?" reminder, fuse check. | reminder: device; A-JACK / A-PROT: emulator (no current through A on the device yet); fuse check: not yet |
 | Record page | Logs the DMM to the internal disk: every reading, or the mean per 1 s / 10 s / 1 min, until stopped or for 10 min .. 24 h. | device |
 | Fast logger | Raw ADC samples to the disk at up to 38.4 kS/s (76.8 kS/s if the SPI flash is fast enough). | device up to 38.4 kS/s; 76.8 kS/s: emulator |
-| USB disk | Read-only drive with `LOGS/`, `SCOPE/`, `SHOTS/` (CSV and BMP files) and `INFO/` (calibration copy, running firmware). New files appear while it is mounted. Optional "PC can edit" mode: delete files, drop in an update file. | device (Linux); Windows / macOS untested |
+| USB disk | Read-only drive with `LOGS/`, `SCOPE/`, `SHOTS/` (CSV and BMP files) and `INFO/` (calibration copy, running firmware). New files appear while it is mounted. Optional "PC can edit" mode: delete files, drop in an update file. | device (Linux); Windows 11 read-only (VM); macOS untested |
 | USBTMC / SCPI | 34401A-style `CONF` / `MEAS?` / `READ?`, plus the scope, the generator, the power meter and the loggers. | device |
 | sigrok | A libsigrok `scpi-dmm` profile for the DM40 (not upstream yet); a 34401A emulation for unpatched sigrok / SmuView. | profile: device (sigrok-cli, every selectable function); emulation: emulator |
 | Bluetooth | The stock phone-app protocol, plus SCPI over the same link. | device |
@@ -87,6 +87,12 @@ with an fw-rs image**. The stock app can also flash a `dm40*.bin` from its
 disk by itself when USB is unplugged; that is not checked for an fw-rs image
 either. If the meter stops on the loader's update screen, copy the file onto
 the loader's USB disk and press "update" (see Recovery).
+
+**USB on a PC.** The drive needs no driver. After Eject it stays ejected
+until the cable is re-plugged. SCPI is USBTMC: Linux has a driver, Windows
+has none (the interface sits under "Other devices", code 28). On Windows,
+install NI-VISA or Keysight IO Libraries, or bind WinUSB with Zadig and use
+pyvisa-py ([docs/bt-scpi.md](docs/bt-scpi.md#usbtmc-on-windows)).
 
 ## Recovery
 

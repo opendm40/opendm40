@@ -98,6 +98,9 @@ pub const PARK_MS: u64 = 5_000;
 /// A complete firmware file is checked once no data came for this long (a
 /// host writes a file back in one burst).
 const SETTLE_MS: u64 = 300;
+/// The session's end (the Allow) waits at most this long for the check of
+/// a firmware file not checked yet (`release`).
+const END_WAIT_MS: u64 = 1500;
 /// Temp files of a session at most.
 const MAX_PARKS: u8 = 100;
 const TMP_PRE: &[u8; 6] = b"_VHOST";
@@ -204,6 +207,9 @@ struct W {
     done: (u16, u16, u32, u32),
     /// Staged writes so far.
     ver: u32,
+    /// The host ended the session (the Allow) while a firmware file was
+    /// not checked yet: the time it did (0 = no end pending; `release`).
+    end_at: u64,
     /// Temp files made this session; the leftover ones were deleted (boot);
     /// a delete of the temp files is due (session end).
     parks: u8,
@@ -232,6 +238,7 @@ static mut W0: W = W {
     fw: Fw::None,
     done: (0, 0, 0, 0),
     ver: 0,
+    end_at: 0,
     parks: 0,
     purged: false,
     purge: false,
@@ -326,7 +333,7 @@ pub fn state() -> (usize, usize, usize, bool, bool, u8) {
 /// The layout must not change under the host (module text).
 pub fn frozen() -> bool {
     let w = w();
-    w.rw && (crate::msc::host_mounted() || (!w.locks && (w.session || (w.last != 0 && w.now.saturating_sub(w.last) < QUIET_MS))))
+    w.rw && (crate::msc::host_mounted() || w.end_at != 0 || (!w.locks && (w.session || (w.last != 0 && w.now.saturating_sub(w.last) < QUIET_MS))))
 }
 
 /// A staging owns the SPI free space (upload::busy).
@@ -896,6 +903,16 @@ pub fn poll(now: u64, blocked: bool) {
     BLOCKED.store(blocked, core::sync::atomic::Ordering::Relaxed);
     let mounted = crate::msc::host_mounted();
     w.locks |= mounted;
+    // A session end held back for a firmware check (`release`): once the
+    // file was decided (committed / bad) or after END_WAIT_MS. A host that
+    // mounted again meanwhile keeps the session (its next Allow ends it).
+    if w.end_at != 0 && (!fw_unchecked(w) || now.saturating_sub(w.end_at) >= END_WAIT_MS) {
+        w.end_at = 0;
+        if !mounted {
+            release_all(false);
+            dlog::set_stale();
+        }
+    }
     if w.session && !w.locks && !mounted && now.saturating_sub(w.last) >= QUIET_MS {
         release();
         dlog::set_stale();
@@ -1306,14 +1323,45 @@ pub fn release_all(reset: bool) -> bool {
     w.session = false;
     w.last = 0;
     w.done = (0, 0, 0, 0);
+    w.end_at = 0;
     if reset {
         w.locks = false;
     }
     had
 }
 
+/// The host ended the session (the Allow: umount, eject; a lockless host's
+/// quiet time). A firmware file whose check is still due (its last data
+/// came less than SETTLE_MS ago: Linux sends the Allow right after the
+/// write-back of `cp` + eject) holds the end back until `poll` has decided
+/// it, at most END_WAIT_MS (the layout stays frozen meanwhile): dropping
+/// the records first would drop the staged file and the install with it.
 pub fn release() -> bool {
+    let w = w();
+    if fw_unchecked(w) {
+        if w.end_at == 0 {
+            w.end_at = w.now.max(1);
+        }
+        return false;
+    }
     release_all(false)
+}
+
+/// A root record DM40*.BIN with data staged that `poll` has not decided
+/// yet (step 3: (slot, start, size, ver) != done).
+fn fw_unchecked(w: &W) -> bool {
+    w.st.iter().any(|x| x.c != 0)
+        && w.rec.iter().any(|r| {
+            let e = &r.e;
+            r.slot != 0
+                && e[0] != 0xE5
+                && e[11] & 0x3F != 0x0F
+                && e[11] & 0x18 == 0
+                && update_name(e)
+                && le16o(e, 0x1A) != 0
+                && le32o(e, 0x1C) >= 128
+                && (r.slot, le16o(e, 0x1A), le32o(e, 0x1C), w.ver) != w.done
+        })
 }
 
 // --- the meter's dialog (app.rs) ---------------------------------------------------

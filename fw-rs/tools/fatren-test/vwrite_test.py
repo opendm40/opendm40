@@ -467,6 +467,29 @@ for name, order in (('dm40fw.bin', 'asc'), ('DM40FW.BIN', 'data-first'), ('dm40_
     v.close()
     ok('firmware %s (%s): staged, checked, DM40FW.BIN == the file on the SPI disk, dialog; host view exact' % (name, order))
 
+print('--- firmware: the Allow right after the write-back (cp + eject at once): the check runs first')
+v, spi, base, host = fresh('fw-allow-at-once')
+v.lock(True)
+mtools(host, ('mcopy', FW1, '::dm40fw.bin'))
+apply(v, base, host, 'asc')
+v.lock(False)  # no main-loop pass since the last write
+if v.ua():
+    fail('allow-at-once: the volume changed before the firmware check')
+settle(v)
+st = v.stats()
+if st['fw_ok'] != '1' or v.dialog() != 1:
+    fail('allow-at-once: the file was dropped at the Allow: %s' % st)
+sp = v.save()
+fsck_clean(sp, 'allow-at-once')
+if run('mcopy', '-n', '-i', sp, '::DM40FW.BIN', '-') != open(FW1, 'rb').read():
+    fail('allow-at-once: DM40FW.BIN on the SPI disk differs')
+fsck_clean(v.dump(2), 'allow-at-once regenerated')
+v.answer(False)
+settle(v)
+same_tree(SPI0, v.save(), 'allow-at-once declined')
+v.close()
+ok('firmware copied and the Allow at once: checked and committed before the session ends, dialog; then regenerated')
+
 print('--- a delete, then a copy into the freed clusters (non-contiguous chain)')
 v, spi, base, host = fresh('fw-holes')
 v.lock(True)

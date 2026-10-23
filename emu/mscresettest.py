@@ -22,7 +22,15 @@ README.TXT must give the right bytes, and *IDN? must answer):
   alloc-small   INQUIRY with an allocation length of 5: 5 bytes and the CSW
                 (not the whole 36-byte reply: babble on the host);
   zero-alloc    REQUEST SENSE with no data phase: the CSW comes (it never
-                did: the command stayed without status).
+                did: the command stayed without status);
+  stop-start    START STOP UNIT without LoEj (a plain stop, then start):
+                the medium stays (TEST UNIT READY passes after each);
+  eject-load    START STOP UNIT LoEj=1 Start=0 (eject): TEST UNIT READY,
+                READ(10), READ CAPACITY, READ FORMAT CAPACITIES fail with
+                02/3A/00, INQUIRY still answers,
+                DBG:VDISK:EJECT? = 1; a Bulk-Only reset keeps it ejected;
+                then LoEj=1 Start=1 (load): one UNIT ATTENTION 06/28/00;
+  eject-port    eject, then a USB port reset (a re-plug): the medium is back.
 Exit status 0 = PASS. Per-process names; the Renode log is capped by run.py.
 """
 import argparse
@@ -38,7 +46,7 @@ ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='fw-rs native ELF / image')
 ap.add_argument('--port', type=int, default=4851, help='USB/IP port (default 4851)')
-ap.add_argument('--cases', default='alloc-small,zero-alloc,invalid-cbw,read-bot,read-port,ua-port')
+ap.add_argument('--cases', default='alloc-small,zero-alloc,invalid-cbw,read-bot,read-port,ua-port,stop-start,eject-load,eject-port')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, HERE)
@@ -96,6 +104,27 @@ class Link:
         self.d.close()
         time.sleep(0.5)
         self.__init__()
+
+    def ssu(self, b4):
+        """START STOP UNIT with CB[4] = b4: the status."""
+        st, _, _ = self.m.cmd(0, bytes([0x1B, 0, 0, 0, b4, 0]))
+        return st
+
+    def no_medium(self, what):
+        st = self.tur()
+        s = self.m.sense(0) if st else '-'
+        check(st != 0 and s == '02/3A/00', '%s: TEST UNIT READY fails, sense %s' % (what, s))
+        st, _ = self.read(0, 1)
+        s = self.m.sense(0) if st else '-'
+        check(st != 0 and s == '02/3A/00', '%s: READ(10) fails, sense %s' % (what, s))
+        st, _, _ = self.m.cmd(0, bytes([0x25]) + bytes(9), 8)
+        s = self.m.sense(0) if st else '-'
+        check(st != 0 and s == '02/3A/00', '%s: READ CAPACITY fails, sense %s' % (what, s))
+        st, _, d = self.m.cmd(0, bytes([0x23, 0, 0, 0, 0, 0, 0, 0, 12, 0]), 12)
+        s = self.m.sense(0) if st else '-'
+        check(s == '02/3A/00', '%s: READ FORMAT CAPACITIES fails, sense %s' % (what, s))
+        st, _, d = self.m.cmd(0, bytes([0x12, 0, 0, 0, 36, 0]), 36)
+        check(st == 0 and d[8:16] == b'ALIENTEK', '%s: INQUIRY answers' % what)
 
     def tur(self):
         st, _, _ = self.m.cmd(0, bytes(6))
@@ -191,6 +220,40 @@ try:
                 l.bot_reset()
             else:
                 l.port_reset()
+            healthy(l, boot, readme, case)
+        elif case == 'stop-start':
+            for b4, what in ((0x00, 'STOP'), (0x01, 'START')):
+                st = l.ssu(b4)
+                check(st == 0, '%s (1B, CB[4] %02X): status %d' % (what, b4, st))
+                st = l.tur()
+                check(st == 0, 'after %s: TEST UNIT READY passes (status %d)' % (what, st))
+                if st:
+                    l.m.sense(0)
+            check(l.q('DBG:VDISK:EJECT?').split(',')[0] == '0', 'DBG:VDISK:EJECT? not ejected')
+            healthy(l, boot, readme, case)
+        elif case in ('eject-load', 'eject-port'):
+            l.tur() or l.m.sense(0)
+            st = l.ssu(0x02)
+            check(st == 0, 'eject (1B, LoEj=1 Start=0): status %d' % st)
+            e = l.q('DBG:VDISK:EJECT?')
+            check(e.split(',')[0] == '1' and e.split(',')[2] == '2', 'DBG:VDISK:EJECT? %s' % e)
+            l.no_medium('after the eject')
+            if case == 'eject-load':
+                l.bot_reset()
+                l.no_medium('after a Bulk-Only reset')
+                st = l.ssu(0x03)
+                check(st == 0, 'load (1B, LoEj=1 Start=1): status %d' % st)
+                st = l.tur()
+                s = l.m.sense(0) if st else '-'
+                check(st != 0 and s == '06/28/00', 'after the load: one UNIT ATTENTION (status %d, sense %s)' % (st, s))
+                st = l.tur()
+                check(st == 0, 'then TEST UNIT READY passes (status %d)' % st)
+            else:
+                l.port_reset()
+                st = l.tur()
+                if st:
+                    l.m.sense(0)
+            check(l.q('DBG:VDISK:EJECT?').split(',')[0] == '0', 'DBG:VDISK:EJECT? not ejected')
             healthy(l, boot, readme, case)
         up = l.q('DBG:PING?')
         print('  DBG:PING? %s' % up, flush=True)

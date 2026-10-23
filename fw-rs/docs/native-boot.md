@@ -1116,7 +1116,8 @@ FWDGT start, recovery and vectors (`.text` 1544).
   - The `test-recovery` image is 9632 bytes.
 - **`recovery-usb`:** our own minimal USB-MSC disk on the W25Q128 (msc.rs path,
   no USBTMC, serial `REC1`).
-  - Any SCSI START STOP UNIT, or a key hold of 2 s or more, powers off.
+  - Any SCSI START STOP UNIT, or a key hold of 2 s or more, powers off
+    (an eject also makes the disk report no medium for that last second).
   - A short key press reboots.
   - The image is 25264 bytes.
 
@@ -1484,6 +1485,29 @@ writable SPI disk of the builds without `vdisk` keeps the old rule (held
 back while locked). A bus reset or unconfigure clears the locks and asks the
 volume for a compaction at its next refresh. `MAX_BLOCK` = 512 in the native
 build (the volume's sector), 4096 where the SPI disk is exported.
+
+**Eject.** START STOP UNIT with LoEj = 1, Start = 0 (Linux `eject` / `gio
+mount -e` / a file manager's Eject; Windows Explorer's Eject and "Safely
+remove") ejects the LUN: every command but INQUIRY, REQUEST SENSE, START
+STOP UNIT and PREVENT ALLOW then fails NOT READY, MEDIUM NOT PRESENT
+(02/3A/00) until a bus reset / unconfigure (a re-plug) or a host load (LoEj
+= 1, Start = 1, e.g. `eject -t`), which raises the one-shot UNIT ATTENTION
+06/28/00. Before this (up to b6909d6) the medium stayed present and Windows
+mounted E: again at the next access. A plain STOP / START (LoEj = 0: Linux
+sd around a suspend, `udisksctl power-off` before it removes the USB
+device) and a power-condition request change nothing. Pending media-change
+UNIT ATTENTIONs are kept while ejected. The CDB byte is read from the CBW
+in the transport buffer as for PREVENT (usbd-storage hides it); a CBW not
+found exactly once is ignored. Any 0x1B still sets `STOP_UNIT` (recovery-usb
+powers off on it). Nothing else changes for "PC can edit": the session ends
+at the Allow (Linux sends it before the eject) or after the quiet time
+(Windows), and the firmware file is committed by `vwrite::poll` once its
+data has settled, whether the medium is ejected or not. `DBG:VDISK:EJECT?` →
+`<LUN 0 ejected>,<START STOP UNITs since boot>,<CB[4] of the last, 256 =
+ignored>`. Tests: emu/mscresettest.py `stop-start`, `eject-load`,
+`eject-port` (raw SCSI over USB/IP), emu/ejecttest.py (the kernel's
+usb-storage + udisks: eject, power-off, a "PC can edit" install ejected at
+once, re-plug).
 
 ### The slow flash bank while an AD2 stream runs (2026-10-23)
 
