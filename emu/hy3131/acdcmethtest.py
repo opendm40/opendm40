@@ -24,6 +24,16 @@ non-repeating AD1 gain shift of +-0.2 % per AD1 enable (n7g, the device's
 
   emu/hy3131/acdcmethtest.py --app fw-rs/dm40-fw-native.bin             # A B C B~ in parallel
   emu/hy3131/acdcmethtest.py --app X --meths C --port 18120
+  emu/hy3131/acdcmethtest.py --app X --meths C --e8 down --port 29100   # device test e8
+
+`--e8 down` / `--e8 up` is the device's e8 (2563fe1: C's 60 V gain from the
+internal zero 0.030 % high): AC+DC entered on the manual 60 V range at 24 V
+(down: 24 / 12 / 5 / 1 / 0 V) or at 0 V (up: 0 / 1 / 5 / 12 / 24 V) and
+stepped without leaving, then the manual 6 V range (5 / 3 / 1 / 0 V); the
+DC part against the source with the device's rule (0.05 % + 5 digits) in
+two windows: the device script's (1..4 s after the step) and the late one
+(4..8.5 s). The model's internal zero sits 15 codes off on 60 V
+("agndz:", HY3131.cs AgndZeroCodes), as the device's.
 Results: emu/out/acdcmeth-<meth>.json, the table on stdout. Exit 1 when a
 method misses its accuracy bound (CHECK below) in a phase.
 """
@@ -45,6 +55,8 @@ ap.add_argument('--port', type=int, default=18110, help='first USB/IP port (one 
 ap.add_argument('--meths', default='A,B,C,B~')
 ap.add_argument('--child', action='store_true', help=argparse.SUPPRESS)
 ap.add_argument('--analyse', action='store_true', help='only the table of the last runs (emu/out/acdcmeth-*.json)')
+ap.add_argument('--e8', choices=['down', 'up'], help="the device's e8: manual 60 V levels, then manual 6 V")
+ap.add_argument('--model', default='', help="extra HY3131 model options for every phase (e.g. 'agndz:0;')")
 A = ap.parse_args()
 if A.child:
     os.environ['USBIP_PORT'] = str(A.port)
@@ -67,6 +79,18 @@ SIG = [
     ('open;aca:0.2@50,dc=0.2', 0.2, 0.2, 'A', 'A AC 0.2 + DC 0.2'),
     ('open;aca:0.05@45,dc=0.3', 0.3, 0.05, 'A', 'A DC 0.3 + 0.05 @45'),
 ]
+# --e8: (level V, MF range item) per phase; the range item is sent at the
+# first phase of each range (DBG:ACDC:RANG: 2 = 60 V, 1 = 6 V).
+E8_PH = 10.0
+E8 = {
+    'down': [(24.0, 2), (12.0, 2), (5.0, 2), (1.0, 2), (0.0, 2), (5.0, 1), (3.0, 1), (1.0, 1), (0.0, 1)],
+    'up': [(0.0, 2), (1.0, 2), (5.0, 2), (12.0, 2), (24.0, 2), (5.0, 1), (3.0, 1), (1.0, 1), (0.0, 1)],
+}
+# The device script's window (1 s after the step, 3 s) and the late one.
+E8_WIN = ((1.0, 4.0), (4.0, 8.5))
+if A.e8:
+    PH = E8_PH
+    SIG = [('open;dcv:%g' % v, v, 0.0, 'V', 'e8 %s V %g' % ('60' if it == 2 else '6', v)) for v, it in E8[A.e8]]
 # The firmware's uptime (DBG:PING?) lags the virtual time of the event
 # script by the boot: 1.34 s (B / C runs: their first reading after the
 # 5 V -> 2 V AC step at 12 s came at uptime 10.66 / 10.68 s; the boot is
@@ -97,14 +121,14 @@ def num(s):
 
 
 def run(meth, port, res):
-    tag = 'acdcmeth-' + meth.replace('~', 'g')
+    tag = 'acdcmeth-' + meth.replace('~', 'g') + ('-e8' + A.e8 if A.e8 else '')
     if uc.port_busy(port):
         res[meth] = {'err': 'port %d busy' % port}
         return
     rtag = '%s-%d-%d' % (tag, port, os.getpid())
     os.makedirs(OUT, exist_ok=True)
     sp = os.path.join(OUT, rtag + '.script')
-    extra = 'n7g:0.002;' if meth == 'B~' else ''
+    extra = ('n7g:0.002;' if meth == 'B~' else '') + A.model
     with open(sp, 'w') as f:
         for i, (spec, *_x) in enumerate(SIG):
             f.write('%g dmm %s%s\n' % (i * PH, extra, spec))
@@ -121,6 +145,14 @@ def run(meth, port, res):
             tm = None
             time.sleep(1)
     switched = False
+    # --e8: the range item at the first phase of each range
+    cmds = []
+    if A.e8:
+        last = None
+        for i, (_v, it) in enumerate(E8[A.e8]):
+            if it != last:
+                cmds.append((i * PH, 'DBG:ACDC:RANG %d' % it))
+                last = it
     if tm is not None:
         try:
             m = meth[0]
@@ -134,6 +166,10 @@ def run(meth, port, res):
                 t = int(row['DBG:PING?'].split(',')[0]) / 1000.0
                 st = row['DBG:ACDC:STAT?'].split(',')
                 rows.append({'t': t, 'v': num(row['FETC?']), 'st': st, 'f': row['FUNC?']})
+                while cmds and t + LAG >= cmds[0][0] + (0.3 if cmds[0][0] == 0 else 0.0):
+                    tm.write(cmds.pop(0)[1])
+                if A.e8:
+                    continue
                 if t + LAG >= T_A + 0.3 and not switched:
                     tm.write('CURR:COUP ACDC')
                     switched = True
@@ -148,20 +184,22 @@ def run(meth, port, res):
         json.dump(res[meth], f)
 
 
-def analyse(meth, d):
-    """Per phase: (label, mean err %, p-p %, rate /s, settle s, n samples)."""
+def analyse(meth, d, w=None):
+    """Per phase: (label, mean err %, p-p %, rate /s, settle s, n samples);
+    `w` (from, to) s after the phase start, else its 6th to 1.5th last s."""
     rows = d.get('rows', [])
     lag = LAG
     out = []
     for i, (_spec, dc, ac, unit, label) in enumerate(SIG):
         t0, t1 = i * PH, (i + 1) * PH
         truth = math.hypot(dc, ac)
+        w0, w1 = (t0 + w[0], t0 + w[1]) if w else (t1 - 6.0, t1 - 1.5)
         ph = [r for r in rows if t0 <= r['t'] + lag < t1]
-        win = [r for r in ph if t1 - 6.0 <= r['t'] + lag <= t1 - 1.5 and not math.isnan(r['v'])]
+        win = [r for r in ph if w0 <= r['t'] + lag <= w1 and not math.isnan(r['v'])]
         if not win:
             out.append((label, float('nan'), float('nan'), float('nan'), float('nan'), 0, None))
             continue
-        e = [(r['v'] - truth) / truth * 100 for r in win]
+        e = [(r['v'] - truth) / max(truth, 1e-3) * 100 for r in win]
         mean = sum(e) / len(e)
         pp = max(e) - min(e)
         # reading rate: DBG:ACDC:STAT? n_rd (AC+DC readings, every method)
@@ -180,6 +218,39 @@ def analyse(meth, d):
         extra = (sum(dcp) / len(dcp) - dc, sum(acp) / len(acp), max(acp), len(rng))
         out.append((label, mean, pp, rate, settle, len(win), extra))
     return out
+
+
+def e8_report(meths, res):
+    """--e8: C's DC part against the source per level and window, the
+    device's rule 0.05 % + 5 digits of the range."""
+    ok = True
+    for m in meths:
+        d = res.get(m, {})
+        tabs = [analyse(m, d, w) for w in E8_WIN]
+        print('\n%s e8 %s: DC part - source (mV) in the windows %s s, rule (mV), ranges, gspan' % (m, A.e8, E8_WIN))
+        for i, (_spec, dc, _ac, _u, label) in enumerate(SIG):
+            dig = 1e-3 if '60' in label.split()[1] else 1e-4
+            rule = 0.05e-2 * abs(dc) + 5 * dig
+            line = '%-14s' % label
+            for k, tab in enumerate(tabs):
+                lab, mean, pp, rate, settle, n, extra = tab[i]
+                if not n:
+                    line += '   (none) '
+                    ok = ok and i == 0  # the entry's first reading may come after the first window
+                    continue
+                bad = abs(extra[0]) > rule
+                line += ' %+8.3f%s' % (extra[0] * 1e3, '*' if bad else ' ')
+                ok = ok and not bad
+            rows = [r for r in d.get('rows', []) if i * PH <= r['t'] + LAG < (i + 1) * PH]
+            gs = rows[-1]['st'][17] if rows and len(rows[-1]['st']) > 17 else '?'
+            rg = sorted(set(r['st'][3] for r in rows if E8_WIN[0][0] <= r['t'] + LAG - i * PH))
+            line += '  %6.2f  %s  %s' % (rule * 1e3, ','.join(rg), gs)
+            print(line)
+        if d.get('err') or d.get('rc'):
+            print(m, 'run problem:', d.get('err', ''), d.get('log', '')[-300:])
+            ok = False
+    print('RESULT', 'OK' if ok else 'FAIL')
+    return ok
 
 
 def c_check(label, rate, extra):
@@ -208,16 +279,19 @@ if __name__ == '__main__':
         sys.exit(0)
     ps = None if A.analyse else []
     for i, m in enumerate(meths if ps is not None else []):
-        ps.append(subprocess.Popen([sys.executable, __file__, '--child', '--app', A.app, '--meths', m, '--port', str(A.port + i)]))
+        ps.append(subprocess.Popen([sys.executable, __file__, '--child', '--app', A.app, '--meths', m, '--port', str(A.port + i)]
+                                   + (['--e8', A.e8] if A.e8 else []) + (['--model', A.model] if A.model else [])))
         time.sleep(2)
     for p in ps or []:
         p.wait()
     for m in meths:
         try:
-            with open(os.path.join(OUT, 'acdcmeth-' + m.replace('~', 'g') + '.json')) as f:
+            with open(os.path.join(OUT, 'acdcmeth-' + m.replace('~', 'g') + ('-e8' + A.e8 if A.e8 else '') + '.json')) as f:
                 res[m] = json.load(f)
         except OSError as e:
             res[m] = {'err': str(e)}
+    if A.e8:
+        sys.exit(0 if e8_report(meths, res) else 1)
     ok = True
     print('\n%-22s' % 'phase' + ''.join('| %-34s' % ('method ' + m) for m in meths))
     print('%-22s' % '' + ''.join('| %-34s' % 'err% mean  p-p   rd/s settle_s' for _ in meths))
