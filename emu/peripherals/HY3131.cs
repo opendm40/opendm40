@@ -439,6 +439,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// SENSE tap carry swtr mV x exp(-dt / swtau) x cos(2 pi swhz dt) on top of the input,
         /// both signs (a relay / front-end ring). Default 60 ms, 25 Hz; off (0 mV) by default.
         public double SwTrMv, SwTrTau = 60, SwTrHz = 25;
+        /// Leaving ohm (device ad74e93, 2026-10-23: RES -> DC A / mA, nothing connected): the
+        /// relay back to the V/A path (PA10) while the chip runs an ohm row; the A rows'
+        /// comparator on SENSE then reads CMPHO | CMPLO together (CTSTA 0x70) for ohmexit s and
+        /// CMPLO alone (0x50) for ohmexitlo s more (the device: ~3.5 s, then 0x50 until ~5 s),
+        /// whatever the input ("ohmexit:3.5;ohmexitlo:1.2"; off by default).
+        public double OhmExitBoth, OhmExitLow;
+        private double ohmExitT = double.NegativeInfinity;
+        private int paExitsSeen;
         private double swT0 = double.NegativeInfinity;
         private double SwTr(double t)
         {
@@ -663,6 +671,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "powmix": PowMix = o.Value != 0; break;
                 case "ad1mix": Ad1Mix = o.Value != 0; break;
                 case "swtr": SwTrMv = o.Value; break;
+                case "ohmexit": OhmExitBoth = o.Value; break;
+                case "ohmexitlo": OhmExitLow = o.Value; break;
                 case "swtau": SwTrTau = o.Value; break;
                 case "swhz": SwTrHz = o.Value; break;
                 case "powvg": PowVGain = o.Value; break;
@@ -1608,6 +1618,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         private void UpdateComparatorStatic(double now)
         {
+            if(Fe.PaExits != paExitsSeen)
+            {
+                paExitsSeen = Fe.PaExits;
+                if(role == Role.Ohm) ohmExitT = now;
+            }
             if(!EnCmp) { acpo = false; cmpHigh = cmpLow = false; return; }
             // Sentinel nodes (fw-rs sentinel.rs): PB1 = the A-jack shunt node in every role that
             // leaves the comparator idle, SENSE with the /1000 tap (SS5) in the DC A rows.
@@ -1617,6 +1632,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 cmpHigh = node > CmpHighThreshold;
                 cmpLow = node < CmpLowThreshold;
+                var dx = now - ohmExitT;
+                if(role == Role.DcA && dx >= 0 && dx < OhmExitBoth) cmpHigh = cmpLow = true;
+                else if(role == Role.DcA && dx >= 0 && dx < OhmExitBoth + OhmExitLow) cmpLow = true;
                 return;
             }
             cmpHigh = cmpLow = false;

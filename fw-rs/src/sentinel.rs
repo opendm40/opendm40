@@ -220,6 +220,8 @@ pub const R29_PKH_AD1: u8 = 0x05;
 pub const R29_ENPKH: u8 = 0x04;
 /// CTSTA CMPHO | CMPLO.
 pub const CTSTA_CMP: u8 = 0x30;
+/// CTSTA CMPLO.
+pub const CTSTA_CMPLO: u8 = 0x10;
 
 /// R33 bits 7:6: OP1CHOP (00 = CHOP_CLK held at 0).
 pub const R33_OP1CHOP: u8 = 0xC0;
@@ -396,6 +398,18 @@ pub const WIN_MS: u64 = 100;
 /// BLANK_SETTLED_MS + up to one window more before its first hit window;
 /// nothing for one that starts later.
 pub const BLANK_ROW_MS: u64 = 150;
+/// Leaving the ohm network (relay PA back to the V/A path) into a current
+/// function (device ad74e93, nothing connected: RES -> A / mA showed V-JACK?
+/// from 1.5-1.95 s to ~5 s; CMP_SENSE CTSTA 0x70 for ~3.5 s, then 0x50, then
+/// 0). Both bits in one read cannot be a node (above VRH and below VRL), and
+/// a real source on V is positive (CMPHO), AC (CMPHO in some reads) or a
+/// negative DC (CMPLO alone, rare): for OHM_EXIT_CAP_MS after the exit a
+/// 0x70 read is no hit, nor is a CMPLO-only read within OHM_EXIT_TAIL_MS of
+/// the exit or of the last 0x70 read (`sample_cmp`). A positive or AC source
+/// keeps its V-JACK? timing (~2 s after the switch); only a negative DC one
+/// waits for the tail (up to ~6 s on the device's trace).
+pub const OHM_EXIT_TAIL_MS: u64 = 2500;
+pub const OHM_EXIT_CAP_MS: u64 = 8000;
 pub const BLANK_SETTLED_MS: u64 = 100;
 /// Hit windows in a row before A-JACK is asserted (2 polls >= 100 ms apart).
 pub const AJACK_WINDOWS: u8 = 2;
@@ -658,6 +672,11 @@ pub struct Sentinel {
     /// BLANK_ROW_MS) and the first moments past its settle (`rearm`:
     /// BLANK_SETTLED_MS).
     blank_until: u64,
+    /// The row left the ohm network for a V-JACK? comparator row (`dmm.rs`):
+    /// until this time (ms) a CMPHO | CMPLO read extends the blank.
+    pub ohm_exit_cap: u64,
+    /// ... and a CMPLO-only read counts only from this time on.
+    lo_mask_until: u64,
     win_hit: bool,
     /// CTSTA bits ORed over the window (AC?).
     win_both: u8,
@@ -727,6 +746,8 @@ impl Sentinel {
             seq: 0,
             win_t0: 0,
             blank_until: 0,
+            ohm_exit_cap: 0,
+            lo_mask_until: 0,
             win_hit: false,
             win_both: 0,
             streak: 0,
@@ -825,6 +846,22 @@ impl Sentinel {
         self.win_t0 = now;
     }
 
+    /// The relay left the ohm network at `t` (ms) and the row is a V-JACK?
+    /// comparator row (`dmm.rs`, every row write within OHM_EXIT_CAP_MS);
+    /// None: not.
+    pub fn ohm_exit(&mut self, t: Option<u64>) {
+        match t {
+            Some(t) => {
+                self.ohm_exit_cap = t + OHM_EXIT_CAP_MS;
+                self.lo_mask_until = self.lo_mask_until.max(t + OHM_EXIT_TAIL_MS);
+            }
+            None => {
+                self.ohm_exit_cap = 0;
+                self.lo_mask_until = 0;
+            }
+        }
+    }
+
     /// Samples are blanked now (`blank`, `rearm`).
     pub fn blanked(&self, now: u64) -> bool {
         now < self.blank_until
@@ -892,17 +929,36 @@ impl Sentinel {
     /// at the next window's node (`alt_v`: SENSE, else PB1).
     pub fn sample_cmp(&mut self, now: u64, ctsta: u8) -> bool {
         self.ctsta = ctsta;
+        // CMPHO and CMPLO in one read: the node cannot be above VRH and below
+        // VRL at once, the comparator is not settled / out of its range.
+        let both_now = ctsta & CTSTA_CMP == CTSTA_CMP;
+        let mut bits = ctsta & CTSTA_CMP;
+        if self.kind == Kind::CmpV && now < self.ohm_exit_cap {
+            // Leaving ohm (device ad74e93, OHM_EXIT_*): the decay reads 0x70,
+            // then CMPLO alone. Neither counts; CMPHO (a source above +21 V on
+            // V, or an AC one's positive half) counts at once.
+            if both_now {
+                self.lo_mask_until = self.lo_mask_until.max((now + OHM_EXIT_TAIL_MS).min(self.ohm_exit_cap));
+                bits = 0;
+            } else if bits == CTSTA_CMPLO && now < self.lo_mask_until {
+                bits = 0;
+            }
+        }
         if self.blanked(now) {
             self.win_t0 = self.blank_until;
             return false;
         }
         self.samples = self.samples.wrapping_add(1);
         if self.alt && self.alt_v {
-            // V-tap window (AC?): both bits = the tap swings both ways.
-            self.win_hit |= ctsta & CTSTA_CMP != 0;
-            self.win_both |= ctsta & CTSTA_CMP;
+            // V-tap window (AC?): both bits within the window = the tap swings
+            // both ways; both in one read is the comparator, not the tap (no
+            // count: the device's AC? on 5 V DC).
+            if !both_now {
+                self.win_hit |= ctsta & CTSTA_CMP != 0;
+                self.win_both |= ctsta & CTSTA_CMP;
+            }
         } else {
-            self.win_hit |= ctsta & CTSTA_CMP != 0;
+            self.win_hit |= bits != 0;
         }
         let closed = now.saturating_sub(self.win_t0) >= WIN_MS;
         if closed {
@@ -1378,44 +1434,77 @@ mod tests {
     /// range change restarts the hit run (`new_run`) but keeps an alert.
     #[test]
     fn switch_blank_rules() {
-        // AC?: "both" every other V-tap window (a settling node, pickup) for 4 s: never.
+        // One 100 ms window: reads every 25 ms; `v` = what a V-tap window reads (a swing:
+        // CMPHO and CMPLO in different reads; `one` = both bits in each read).
+        fn win(s: &mut Sentinel, t: &mut u64, swing: bool, one: bool) {
+            for i in 0..4u64 {
+                *t += 25;
+                let c = if !s.alt_v || !swing { 0 } else if one { CTSTA_CMP } else if i % 2 == 0 { 0x20 } else { 0x10 };
+                s.sample_cmp(*t, c);
+            }
+        }
+        // AC?: a swing in every other V-tap window (a settling node, pickup) for 4 s: never.
         let mut s = Sentinel::new();
         s.configured(Kind::CmpA, 0, true);
         s.alt = true;
         s.ac_dc_ok = true;
         let mut t = 0;
         for k in 0..40u64 {
-            t = 100 * (k + 1);
-            let both = s.alt_v && (k / 2) % 2 == 0;
-            s.sample_cmp(t, if both { CTSTA_CMP } else { 0 });
+            win(&mut s, &mut t, (k / 2) % 2 == 0, false);
         }
         assert_eq!(s.alert, Alert::None);
-        // a real AC: both in every V-tap window -> AC? after HINT_ASSERT_MS
+        // a real AC: a swing in every V-tap window -> AC? after HINT_ASSERT_MS
         let t0 = t;
         while s.alert != Alert::Ac {
-            t += 100;
-            let v = s.alt_v;
-            s.sample_cmp(t, if v { CTSTA_CMP } else { 0 });
+            win(&mut s, &mut t, true, false);
             assert!(t - t0 <= HINT_ASSERT_MS + 300, "AC? late");
         }
         // once on, a missed window does not drop it (HINT_CLEAR_MS)
-        t += 100;
-        s.sample_cmp(t, 0);
-        t += 100;
-        s.sample_cmp(t, 0);
+        win(&mut s, &mut t, false, false);
+        win(&mut s, &mut t, false, false);
         assert_eq!(s.alert, Alert::Ac);
-        // both bits on every V-tap window with a 5 V DC reading (the device's false AC?), or
-        // before the row's first DC reading: never
-        for dc_ok in [false] {
+        // a swing with a 5 V DC reading / before the row's first reading, or both bits in
+        // every single read (the device's AC? on 5 V DC): never
+        for (dc_ok, one) in [(false, false), (true, true)] {
             let mut s = Sentinel::new();
             s.configured(Kind::CmpA, 0, true);
             s.alt = true;
             s.ac_dc_ok = dc_ok;
-            for k in 1..=60u64 {
-                let v = s.alt_v;
-                s.sample_cmp(100 * k, if v { CTSTA_CMP } else { 0 });
+            let mut t = 0;
+            for _ in 0..60 {
+                win(&mut s, &mut t, true, one);
             }
-            assert_eq!(s.alert, Alert::None);
+            assert_eq!(s.alert, Alert::None, "dc_ok {dc_ok} one {one}");
+        }
+        // Leaving ohm into DC A (device ad74e93): CMP_SENSE 0x70 for 3.5 s, 0x50 to 5 s,
+        // nothing connected: no V-JACK?.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpV, 0, true);
+        s.ohm_exit(Some(0));
+        let mut t = 0;
+        while t < 9000 {
+            t += 10;
+            s.current_small(t, true);
+            let c = if t < 3500 { 0x70 } else if t < 5000 { 0x50 } else { 0 };
+            s.sample_cmp(t, c);
+            assert_eq!(s.alert, Alert::None, "t {t}");
+        }
+        // a real source on V after the exit: positive (CMPHO) or AC (CMPHO / CMPLO reads)
+        // as without the exit, even through the decay's 0x70 reads; a negative DC one
+        // (CMPLO alone) after the tail
+        for (src, lim) in [(0x60u8, VJACK_ASSERT_MS + 200), (0, VJACK_ASSERT_MS + 200), (0x50, OHM_EXIT_TAIL_MS + VJACK_ASSERT_MS + 200)] {
+            let mut s = Sentinel::new();
+            s.configured(Kind::CmpV, 0, true);
+            s.ohm_exit(Some(0));
+            let mut t = 0;
+            while s.alert != Alert::VJack {
+                t += 10;
+                s.current_small(t, true);
+                // src 0: AC, CMPHO and CMPLO in alternate reads, with a 0x70 read now and then
+                let c = if src != 0 { src } else if t % 70 == 0 { 0x70 } else if (t / 10) % 2 == 0 { 0x60 } else { 0x50 };
+                s.sample_cmp(t, c);
+                assert!(t <= lim, "V-JACK? late for {src:#x}: {t}");
+            }
         }
 
         // Comparator after a settle: one CTSTA sample right after it must not close a

@@ -49,6 +49,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // ---- MCU pin state ----
         /// Latching relay: 0 = V/A path (divider, shunts), 1 = ohm / mV / cap / diode / Hz / temperature network.
         public int RelayPa = 0;
+        /// Relay changes ohm network -> V/A path so far (the chip model's `ohmexit:`).
+        public int PaExits;
         /// Shunt select: 0 = A (10 mohm), 1 = mA (0.5 ohm), 2 = none (47.5 ohm uA chain).
         public int ShuntSel = 2;
         public bool Pc7;
@@ -59,7 +61,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             switch(pin)
             {
             case "PA9": if(level && !pa9) RelayPa = 1; pa9 = level; break;   // pulse -> ohm/mV network
-            case "PA10": if(level && !pa10) RelayPa = 0; pa10 = level; break; // pulse -> V/A path
+            case "PA10": if(level && !pa10) { if(RelayPa == 1) PaExits++; RelayPa = 0; } pa10 = level; break; // pulse -> V/A path
             case "PE0": pe0 = level; UpdateShunt(); break;
             case "PE1": pe1 = level; UpdateShunt(); break;
             case "PC7": Pc7 = level; break;
@@ -396,7 +398,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     if(none) { DieFollowsCj = true; break; }
                     DieTemp = v; DieFollowsCj = false;
                     break;
-                case "noise": case "cal": case "beat": case "powmix": case "ad1mix": case "swtr": case "swtau": case "swhz": case "powvg": case "powz": case "op1vos": case "ad2dcg":
+                case "noise": case "cal": case "beat": case "powmix": case "ad1mix": case "ohmexit": case "ohmexitlo": case "swtr": case "swtau": case "swhz": case "powvg": case "powz": case "op1vos": case "ad2dcg":
                 case "n7": case "n7g": case "n7a": case "ad1acg": case "ad3sh": case "hpftau": case "rmsfill": case "rmsbig": case "rmsbigp":
                 case "agndz": case "lpfcreep": case "creeptau": case "creepord": case "lpfn":
                     options.Add(new KeyValuePair<string, double>(key, v));
