@@ -430,8 +430,9 @@ namespace Hy3131Tests
             }
             {
                 // method C row, 6 V: the LPF's creep after an input step inside the session (lpfcreep, device
-                // c6f9670 tc6: 5..12 codes still to go 3.6 s after 5 -> 3 V), none without the option
-                foreach(var (opt, want) in new[] { ("lpfn:0;", 2.4e-4 * 41580 * 2.44 * Math.Exp(-1.44)), ("lpfn:0;lpfcreep:0;", 0.0) })
+                // c6f9670 tc6: 5..12 codes still to go 3.6 s after 5 -> 3 V; three cascaded lags of 2.5 s since 10.14), none
+                // without the option
+                foreach(var (opt, want) in new[] { ("lpfn:0;", 2.4e-4 * 41580 * ((1 + 1.44 + 1.44 * 1.44 / 2) * Math.Exp(-1.44) - (1 + 6.4 + 6.4 * 6.4 / 2) * Math.Exp(-6.4))), ("lpfn:0;lpfcreep:0;", 0.0) })
                 {
                     var c = (byte[])F0R0.Clone();
                     c[7] = 0x1d; c[21] = 0x14;

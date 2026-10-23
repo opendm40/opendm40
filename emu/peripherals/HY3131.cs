@@ -361,25 +361,32 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// (0 = off), "rmsbigp:".
         public double RmsBigDcCodes = 102500, RmsBigDcP = 0.85;
         /// The LPF's slow creep after an input step in the DC-coupled V row (method C; device c6f9670 tc6,
-        /// acdc-approaches.md 10.11): after 5 -> 3 V on 6 V (41.6 k codes) the LPF was still 5..12 codes above
+        /// acdc-approaches.md 10.11 / 10.14): after 5 -> 3 V on 6 V (41.6 k codes) the LPF was still 5..12 codes above
         /// the value it reached ~8 s later when C's second reference ended (3.6 s), while DC V (AD1) settled
         /// within 0.1 mV in ~1 s; the trace stayed ~+5 codes over the first ~4 s and fell from there (a
         /// delayed tail, not a first-order one). INFERRED, phenomenological: the LPF reads LpfCreep x (s - x)
-        /// codes extra, x the node's code of the jack's DC and s the same through two cascaded first-order
-        /// lags of LpfCreepTau (s; a step leaves (1 + t / tau) e^(-t / tau) of it; "creepord:1" one lag); keyed on the jack's DC only (an input step), not on row writes or the internal zero's OP1+
+        /// codes extra, x the node's code of the jack's DC and s the same through LpfCreepOrder cascaded
+        /// first-order lags of LpfCreepTau (s). Order 3 (10.14): a step leaves (1 + q + q^2 / 2) e^(-q) of it, q =
+        /// t / tau: flat for the first seconds, so a 3 s window's slope stays below 1 code / s while ~6 codes
+        /// are left at ~5.6 s, which is what the device's second references saw (f42a09e e8s: the two-point gain
+        /// over 5 -> 3 V +3.9..+13 codes above the accurate internal zero's at the new point; order 2 left
+        /// only ~3). Keyed on the jack's DC only (an input step), not on row writes or the internal zero's OP1+
         /// switch (the device's internal-zero gain was right). Only steps while this row runs on one range:
         /// the lag survives a gap of up to CreepGap s (C's DC V reference, ~1 s; it is advanced at this row's
         /// LPF results, so a step inside the gap counts from the last one) and starts again (no creep) after a
         /// longer one or a range change (the device's entries came seconds after the calibrator's step with an
-        /// accurate internal zero; c6f9670 saw the creep on a step inside a session). 2.4e-4 / 2.5 s over the
-        /// 41.6 k step: +10 codes at the step, +9.4 at 1 s, +5.8 at 3.6 s, +3.1 at 6 s, +1.7 at 8 s, +0.4 at
-        /// 12 s. "lpfcreep:" scales (0 = off), "creeptau:" s, "creepord:" 1 / 2.
+        /// accurate internal zero; c6f9670 saw the creep on a step inside a session). 2.4e-4 / 2.5 s / order 3
+        /// over the 41.6 k step: +10 codes at the step, +9.2 at 2.5 s, +6.0 at 5.6 s, +3.8 at 8 s, +1.4 at
+        /// 12 s. "lpfcreep:" scales (0 = off), "creeptau:" s, "creepord:" 1 / 2 / 3.
         public double LpfCreep = 2.4e-4, LpfCreepScale = 1.0, LpfCreepTau = 2.5;
-        public int LpfCreepOrder = 2;
+        public int LpfCreepOrder = 3;
         private const double CreepGap = 3.0;
         /// The LPF's noise in that row, codes rms per result (device c6f9670 tc6: 3 V on 6 V, +-2..3 codes
         /// p-p at rest, sd ~1.7); the model's LPF had none. "lpfn:" codes (0 = off).
         public double LpfDcNoise = 1.7;
+        /// ... times this per range (device f42a09e e8s, 10.14: the second reference's 3 s window, residual rms
+        /// after a line fit, 6 V ~1.9 codes, 60 V ~1.0; 600 mV / 600 V not measured).
+        public double[] LpfDcNoiseR = { 1.0, 1.0, 0.6, 0.6 };
         public bool CntPin;                    // CNT pin level (ENCNTI source); set by the board model
         public int ForcedAd1 = int.MinValue;   // SetAd1: raw code override
         public int ForcedAd2 = int.MinValue;
@@ -643,7 +650,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "rmsbigp": RmsBigDcP = o.Value; break;
                 case "lpfcreep": LpfCreepScale = o.Value; break;
                 case "creeptau": LpfCreepTau = o.Value; break;
-                case "creepord": LpfCreepOrder = o.Value >= 2 ? 2 : 1; break;
+                case "creepord": LpfCreepOrder = o.Value >= 3 ? 3 : o.Value >= 2 ? 2 : 1; break;
                 case "lpfn": LpfDcNoise = o.Value; break;
                 }
             }
@@ -1384,15 +1391,24 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             double jdc, jac, hz, duty; string shape;
             Fe.VJack(0, out jdc, out jac, out hz, out shape, out duty);
             var r = roleRange;
-            if(double.IsNaN(creepV) || LpfCreepTau <= 0 || r != creepR || t - creepT > CreepGap) { creepV = jdc; creepV1 = jdc; }
+            if(double.IsNaN(creepV) || LpfCreepTau <= 0 || r != creepR || t - creepT > CreepGap) { creepV = jdc; creepV1 = jdc; creepV2 = jdc; }
             else if(t > creepT)
             {
-                // the input constant since creepT: e1 relaxes, e2 relaxes and takes e1's share (the
-                // critically damped pair's exact step)
-                var dt = t - creepT; var a = Math.Exp(-dt / LpfCreepTau);
-                var e1 = creepV1 - jdc; var e2 = creepV - jdc;
-                creepV1 = jdc + e1 * a;
-                creepV = jdc + (LpfCreepOrder >= 2 ? e2 + e1 * dt / LpfCreepTau : e2) * a;
+                // the input constant since creepT: each stage relaxes and takes the earlier ones' share
+                // (the exact step of LpfCreepOrder cascaded equal lags; the output is the last stage)
+                var dt = t - creepT; var a = Math.Exp(-dt / LpfCreepTau); var q = dt / LpfCreepTau;
+                var e1 = creepV1 - jdc; var e2 = creepV2 - jdc; var e3 = creepV - jdc;
+                if(LpfCreepOrder >= 3)
+                {
+                    creepV1 = jdc + e1 * a;
+                    creepV2 = jdc + (e2 + e1 * q) * a;
+                    creepV = jdc + (e3 + e2 * q + e1 * q * q / 2) * a;
+                }
+                else
+                {
+                    creepV1 = jdc + e1 * a; creepV2 = creepV1;
+                    creepV = jdc + (LpfCreepOrder >= 2 ? e3 + e1 * q : e3) * a;
+                }
             }
             creepT = Math.Max(creepT, t); creepR = r;
             var sense = (regs[0x32] & 7) == 0;
@@ -1402,7 +1418,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(LpfDcNoise > 0 && NoiseScale > 0)
             {
                 var u1 = 1.0 - lpfNoiseRng.NextDouble(); var u2 = lpfNoiseRng.NextDouble();
-                x += LpfDcNoise * NoiseScale * Math.Sqrt(-2 * Math.Log(u1)) * Math.Cos(2 * Math.PI * u2);
+                x += LpfDcNoise * LpfDcNoiseR[Math.Max(0, Math.Min(r, 3))] * NoiseScale * Math.Sqrt(-2 * Math.Log(u1)) * Math.Cos(2 * Math.PI * u2);
             }
             return x;
         }
@@ -2095,7 +2111,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// The RMS block's HPF state in the DC-coupled V row (codes; HpfTau).
         private double hpfM;
         /// LpfCreep: the lagged jack DC (V, NaN: not yet seen), when it was advanced; LpfDcNoise's generator.
-        private double creepV = double.NaN, creepV1, creepT;
+        private double creepV = double.NaN, creepV1, creepV2, creepT;
         private int creepR;
         private Random lpfNoiseRng = new Random(9191);
     }
