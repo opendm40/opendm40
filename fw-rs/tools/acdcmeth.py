@@ -84,6 +84,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 VMAX = 30.0
+# DBG:ACDC:STAT? fields after `slope` (since 10.14: the last second-reference
+# attempt's residual rms, bias threshold, slope, step into the level)
+STAT_X = ('psig', 'bthr', 'pslope', 'pstep')
+# columns of the per-level trace (--trace: e8 / e8s / e8l / e8up)
+TR_COLS = ('step', 'lpf', 'pc', 'off', 'gspan', 'gsrc', 'gdis', 'slope', 'pp', 'dc') + STAT_X
 FULL = {1: 6.0, 2: 60.0, 3: 600.0, 4: 1000.0}
 E1_LEVELS = {1: [0.0, 3.0], 2: [0.0, 30.0], 3: [0.0, 30.0], 4: [0.0, 30.0]}
 
@@ -128,8 +133,21 @@ class Run:
     def stat(self):
         f = self.q('DBG:ACDC:STAT?').split(',')
         k = ['meth', 'step', 'mode', 'range', 'ac', 'dc', 'n_ac', 'n_dc', 'n_rd', 'hz', 'corr', 'pc', 'off', 'lpf', 'sq',
-             'pp', 'acsrc', 'gspan', 'gsrc', 'gdis', 'slope']
-        return {n: (float(x) if '.' in x or 'E' in x else int(x)) for n, x in zip(k, f)}
+             'pp', 'acsrc', 'gspan', 'gsrc', 'gdis', 'slope'] + list(STAT_X)
+        s = {n: (float(x) if '.' in x or 'E' in x else int(x)) for n, x in zip(k, f)}
+        if getattr(self, 'tr', None) is not None:
+            self.tr.append([round(time.time() - self.t_step, 2)] + [s.get(c) for c in TR_COLS])
+        return s
+
+    def sleep_tr(self, secs):
+        """sleep, or poll STAT? at ~10 Hz while a trace is on (--trace)."""
+        if getattr(self, 'tr', None) is None:
+            time.sleep(secs)
+            return
+        t_end = time.time() + secs
+        while time.time() < t_end:
+            self.stat()
+            time.sleep(0.07)
 
     def fetch(self):
         try:
@@ -336,14 +354,20 @@ def e8(R, order='down', settle=1.0):
         R.src_dc(levels[0])
         R.enter('C', item)
         for v in levels:
+            R.tr = [] if R.a.trace else None
+            R.t_step = time.time()
             R.src_dc(v)
-            time.sleep(settle)
+            R.sleep_tr(settle)
             p = R.mean_parts(3.0)
             s = R.stat()
             err = p['dc'] - refs[v]
             R.log(exp=exp, item=item, level=v, ref=refs[v], c_dc=p['dc'], err=err, digits=err / digits(item),
                   ok=abs(err) <= rule(item, refs[v]), pc=p['pc'], off=p['off'], gspan=s.get('gspan', 0), ac=p['ac'],
-                  gsrc=s.get('gsrc', -1), gdis=s.get('gdis', 0), slope=s.get('slope', 0), pp=s.get('pp', -1))
+                  gsrc=s.get('gsrc', -1), gdis=s.get('gdis', 0), slope=s.get('slope', 0), pp=s.get('pp', -1),
+                  **{k: s[k] for k in STAT_X if k in s})
+            if R.tr is not None:
+                R.log(exp=exp + 'trace', item=item, level=v, cols='t ' + ' '.join(TR_COLS), trace=R.tr)
+            R.tr = None
     if order == 'up':
         return
     # the gain kept over sessions: re-entered at 5 V on 60 V (a span < 10 k codes)
@@ -481,6 +505,7 @@ def main():
     ap.add_argument('--repeats', type=int, default=5, help='e1: B entries per level')
     ap.add_argument('--minutes', type=float, default=20.0, help='e5: per level')
     ap.add_argument('--period', type=float, default=60.0, help='e5: s between C entries')
+    ap.add_argument('--trace', action='store_true', help='e8*: log STAT? at ~10 Hz per level')
     ap.add_argument('-o', '--out', default='acdcmeth.jsonl')
     a = ap.parse_args()
     R = Run(a)
