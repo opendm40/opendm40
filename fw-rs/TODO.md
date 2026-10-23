@@ -1593,6 +1593,9 @@ Firmware:
       rates (Gen::apply, Settings::with_amp), after PASS (the 76800 session ran at the 38400 rung after its writer
       trial in both runs, typ profile, lost 0). Device retest: the same settings with the output OFF
       (no OUTP ON on the device): late 0 at 38400 / 76800.
+      **Device f0d21eb: PASS** (doc "f0d21eb" 4a / 4b): SOUR:FREQ 1000; SOUR:FUNC SQU; SOUR:VOLT 1.5; SOUR:FREQ 2345
+      during AD2 disk sessions with the 6 queries polled: late 0, overruns 0, max_lat 280 ns, 576 002 / 1 152 003
+      rows, lost 0; OUTP? 0 throughout. Open: the generator-ON check (owner only).
 - [ ] A copy of a slow-bank INFO/ file while the meter streams for more than ~3 min (an open Wave view, a long
       fast-log session) can fail on Linux (EIO after 180 s; buffered reads usually recover) and maybe sooner on
       Windows. Documented (README.TXT could say so; native-boot.md does).
@@ -2208,6 +2211,12 @@ Firmware:
             TEMP): the misconnect hint depends on the previous function. Never 0x20 / 0x10 in DC A.
             **New: V-JACK? in every AC A range with V-COM open** (AD1PK_SENSE, pk -262144, from 1.66 s, still on
             at 30 s). At 24 V DC in AC V a short A-JACK (3.1-4.1 s).
+            **Device f0d21eb (doc "f0d21eb"):** E1 / E2 / E3 gone. 2a V-JACK? in AC A unchanged (every range, all
+            levels, from 1.68-1.84 s; AD1 pk ramps -117 000 -> -262 144 over 0.7-2.0 s). DC A from DC V at 24 V:
+            still ctsta 0 (also through AC V; also after RES and after the Scope round trip). The short A-JACK in
+            AC V at 24 V did not come back (5 entries). VOLT:RANG:AUTO? in AC V / CURR:RANG:AUTO? in AC A: still
+            +9.91E37 + "Settings conflict"; VOLT:AC:RANG:AUTO? / CURR:AC:RANG:AUTO? answer (owner: is the DC-only
+            plain form wanted?).
       - [ ] Switch latency (owner: "several seconds, stock was instant"; device ad74e93, settle.py at 1 / 5 V,
             RATE FAST): first valid FETCh? DC V <-> AC V 0.46 s, RES -> DC V 0.52-0.56 s, DC V -> mA 0.56 s,
             DC V -> A 0.75-0.76 s, 6 V -> 60 V 0.55-0.56 s, AC V -> AC+DC 1.32-1.37 s, **DC V -> RES 2.67 s**; the
@@ -2653,6 +2662,10 @@ Emulator (emu/):
       ended the transfer; INITIATE_ABORT_BULK_IN / CHECK_*_STATUS then said done and the next query read the ZLP.
       pump_in ends a transfer only once EPENA is clear (9d405d6). Emulator: usbtmc_stress 3000 iterations, all
       cases, PASS. Device retest: tools/dm40scpi.py `*IDN?` x many + a Linux usbtmc clear / abort (ioctl) mid-read.
+      **Device f0d21eb: PASS** (doc "f0d21eb" 3a-3c): pyusb with exact 64-byte IN URBs (usbtmc detached from
+      interface 0 only, re-attached), c_abortin / stale / clear incl. the abort after `*IDN?`'s 64-byte packet
+      with its ZLP pending: 2000 / 2000 (SUCCESS, PENDING, the drain gets the ZLP, next `*IDN?` exact); through
+      the Linux usbtmc generic API 500 / 500; 2000 plain `*IDN?` / READ? / WAV:PRE? with no repair: 0 empty, 0 stale.
 - [x] mscresettest / ejecttest default ports 4851 / 40200 -> a free one (run.free_port, 61000-64999 or
       DM40_EMU_PORTS=lo-hi; emu/README.md) (0a0c77c). mscresettest PASS; ejecttest not run (needs sudo usbip).
 - [x] Build warning `csv_busy is never used`: removed (never called on rust-fw-poc or stream-ui) (cdd3367).
@@ -2784,3 +2797,15 @@ Emulator (emu/):
          replace the tail.
       6. Any remaining false alert: DBG:SENT? for the 2 s after that switch (kind, ctsta, pkmin / pkmax,
          streak, hits) and DBG:SENT:LOG?. These size BLANK_* / OHM_EXIT_*.
+      **Device f0d21eb (device-check-2026-10-21.md "f0d21eb", raw `chk3/out/E_*_raw.json`,
+      `ctsta_summary.txt` in the session scratchpad), 302 switches:** 1 PASS: no V-JACK? after RES (0 of 21
+      RES -> A / mA / AUTO A / A-tap entries, open, 1 V, 5 V, 8-10 s watches; ctsta still 0x70 to ~4.9 s,
+      masked), no AC? in DC V at 5 V (0 of 20), no V-JACK? after A / mA -> Scope -> back (0 of 8), no A-PROT.
+      2 PASS (5 V DC and the 40 Hz square). **3 FAIL**: at 24 V RES -> DC A ends in ctsta 0 after the 0x70 / 0x50
+      tail (no V-JACK?), and a real V-JACK? is lost after A -> Scope -> back (0x70 to 5.3 s, then 0). A real
+      source reads 0x70 for good (TEMP -> A, V-JACK? now at 8.0 s: the cap) or 0x50 for good (TEMP -> AC V -> A,
+      1.76 s); DC V 60 V, the RES exit and the Scope round trip leave the A row blind (0), TEMP makes it see. 4 not run (A jack not wired). 5: RES -> DC V 1 s / AC A 2 s -> A: ctsta 0.
+      Left: (a) [ ] the 24 V misses (3, and 2b below); (b) [ ] V-JACK? in AC A (2a, unchanged); (c) [ ] new:
+      false OVERLOAD in AC A at 1 / 5 V on V-COM, `CONF:CURR:AC 0.06` after 10 A falls back to 10 A at 0.5 s
+      (AD1PK_SENSE pk ~-210 000, the 2a drift); (d) [ ] new: A-JACK in continuity at 5 V DC (AD2PK_PB1, 0.41 s,
+      stays; LIVE at 1 V), likely the RES 5 V V_GATE item.
