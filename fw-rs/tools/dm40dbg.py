@@ -51,6 +51,7 @@ access to /dev/usbtmcN (udev rule). Native boot: fw-rs/docs/native-boot.md.
 import argparse
 import glob
 import os
+import signal
 import struct
 import sys
 import time
@@ -117,17 +118,63 @@ def find_dev(required=True):
     sys.exit('dm40-fw USBTMC device not found (is the firmware running and the cable in?)')
 
 
+# linux/usb/tmc.h: _IO(USBTMC_IOC_NR = 91, 2)
+USBTMC_IOCTL_CLEAR = 0x5B02
+
+
 class Link:
+    """USBTMC through the Linux usbtmc driver: one message per write, one
+    reply per read.
+
+    A reply longer than 4084 bytes (LOG:DATA?, MMEM:DATA? pieces, WAV:DATA?,
+    DBG:LCD?) is read by the driver in two steps, and only the second can be
+    interrupted by a signal; it then kills its URBs and leaves the rest of
+    the reply on the meter. Every later read gets that stale rest first, the
+    driver drops it ("wrong MsgID" / "wrong bTag" in dmesg) and returns 0
+    bytes, and the meter's reply to it is read by the next query: each reply
+    one query late, also for new processes, until a USBTMC device clear
+    (TODO "dm40scpi.py log stopped by SIGINT", device e7ec2cc). So `read`
+    holds SIGINT for the duration of the read (Ctrl-C acts once the reply is
+    in), and `query` takes an empty reply (fw-rs never sends one: every reply
+    ends with '\\n'; a missing reply times out instead) as that state: it
+    clears the device and asks once more."""
+
     def __init__(self, dev=None):
         self.fd = os.open(dev or find_dev(), os.O_RDWR)
+        self.cleared = 0  # device clears done by `query` (desync repairs)
 
     def write(self, cmd):
         os.write(self.fd, cmd.encode() + b'\n')
 
     def read(self, n=1 << 16):
-        return os.read(self.fd, n)
+        """One reply. SIGINT stays pending until the read returns (a timeout
+        ends it after the driver's 5 s), so Ctrl-C never cuts a reply."""
+        try:
+            old = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+        except (AttributeError, ValueError):  # not on this platform / thread
+            return os.read(self.fd, n)
+        try:
+            return os.read(self.fd, n)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, old)
+
+    def clear(self):
+        """USBTMC INITIATE_CLEAR (+ the driver's CHECK_CLEAR_STATUS loop,
+        reading the Bulk-IN until a short packet): the meter forgets any
+        command, pending query and reply in progress (src/usbtmc.rs clear)."""
+        import fcntl
+        fcntl.ioctl(self.fd, USBTMC_IOCTL_CLEAR)
 
     def query(self, cmd):
+        self.write(cmd)
+        r = self.read()
+        if r:
+            return r
+        # Out of step with the meter (see the class doc): clear and ask again.
+        self.clear()
+        self.cleared += 1
+        print('dm40: empty USBTMC reply to %s: device cleared, asked again' % cmd.split(None, 1)[0][:40],
+              file=sys.stderr)
         self.write(cmd)
         return self.read()
 
@@ -135,9 +182,8 @@ class Link:
         """(reply, None) or (None, error text). An unknown query gets no reply:
         the usbtmc read times out (~5 s); the error is then taken from
         SYST:ERR?."""
-        self.write(cmd)
         try:
-            r = self.read()
+            r = self.query(cmd)
         except OSError as e:
             r, why = b'', str(e)
         else:

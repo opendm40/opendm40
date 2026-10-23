@@ -28,7 +28,11 @@ transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:0001) or Bluetooth
                                               scaled value (AD2) and the
                                               conversions lost before each row;
                                               requested vs measured rate and the
-                                              loss statistics in the trailer
+                                              loss statistics in the trailer;
+                                              -d / -n end it after the block in
+                                              flight, Ctrl-C too (LOG:STAT OFF,
+                                              the rest drained, the trailer; a
+                                              second Ctrl-C abandons the drain)
     dm40scpi.py ad2 torn|noise [-n 2000] [--sync] [--rungs ...]
                                               AD2 device experiments (fw-rs
                                               DBG:AD2:TORN? / NOISE?, meter in an
@@ -63,6 +67,7 @@ first (one link at a time). SCPI reference: fw-rs/src/scpi.rs header.
 import argparse
 import datetime
 import os
+import signal
 import sys
 import time
 
@@ -89,14 +94,15 @@ class UsbLink:
         self.l = dm40dbg.Link()
 
     def query(self, line):
-        self.l.write(line)
         if not any(c.strip().split(None, 1)[0].endswith('?') for c in line.split(';') if c.strip()):
+            self.l.write(line)
             return None
-        return self.l.read().decode(errors='replace').strip()
+        # dm40dbg.Link.query: SIGINT held during the read, a desync (empty
+        # reply) repaired by a USBTMC clear
+        return self.l.query(line).decode(errors='replace').strip()
 
     def query_raw(self, line):
-        self.l.write(line)
-        return self.l.read()
+        return self.l.query(line)
 
     def close(self):
         os.close(self.l.fd)
@@ -305,7 +311,20 @@ def do_stream(link, args):
     elif args.osr is not None:
         link.query('LOG:OSR %d' % args.osr)
     check_err(link, 'LOG settings')
+    t_start = time.monotonic()
     link.query('LOG:STAT ON')
+    # From here on the logger runs: LOG:STAT OFF on every way out (Ctrl-C
+    # twice, an error), not only the normal end.
+    try:
+        return _stream_session(link, args, ad2, t_start)
+    finally:
+        try:
+            link.query('LOG:STAT OFF')
+        except (IOError, OSError, KeyboardInterrupt):
+            pass
+
+
+def _stream_session(link, args, ad2, t_start):
     check_err(link, 'LOG:STAT ON (AD2: V / mV / AC A; AD1: DC V / mV / A)')
     pre = [int(x) for x in link.query('LOG:PRE?').split(',')]
     mode, rng, osr, nom_us, _, chop = pre[:6]
@@ -324,7 +343,31 @@ def do_stream(link, args):
             pass
         link.query('*CLS')
     rows, last_seq, last_ts, wrap = 0, None, None, 0
-    t_start = time.monotonic()
+    # The session ends at -d seconds after LOG:STAT ON (host clock) or after
+    # -n rows, checked after every LOG:DATA? block (a drain that only ended
+    # on a short block ran on for ever above the host's drain rate), or on
+    # Ctrl-C: the first one lets the block in flight finish (dm40dbg.Link
+    # holds SIGINT during a read: a cut read leaves the rest of the reply on
+    # the meter and every later reply one query late), then LOG:STAT OFF,
+    # the rest drained and the trailer written; a second one abandons the
+    # drain (LOG:STAT OFF still sent, no trailer).
+    t_end = t_start + args.duration if args.duration else None
+    stop = []
+
+    def on_sigint(*_):
+        if stop and stop[0] == 'ctrl-c':
+            raise KeyboardInterrupt
+        stop[:] = ['ctrl-c']
+        print('\ndm40scpi: stopping (Ctrl-C again: abandon the drain)', file=sys.stderr, flush=True)
+
+    def done():
+        if not stop:
+            if args.n and rows >= args.n:
+                stop.append('count')
+            elif t_end is not None and time.monotonic() >= t_end:
+                stop.append('duration')
+        return bool(stop)
+
     with open(args.out, 'w', newline='') as f:
         f.write('# source,%s\n# mode,%d\n# range,%d\n# chop,%d\n' % (args.source.upper(), mode, rng, chop))
         if ad2:
@@ -340,11 +383,16 @@ def do_stream(link, args):
         f.write('# start,%s\n' % iso_now())
         f.write('seq,t_s,raw,%s,lost_before\n' % ('value_' + unit if ad2 else 'value'))
 
-        def drain():
+        def drain(final=False):
+            """LOG:DATA? blocks until a short one (the ring empty), or, unless
+            `final`, until the session is done."""
             nonlocal rows, last_seq, last_ts, wrap
             got = 0
             while True:
                 recs = log_records(link.query_raw('LOG:DATA?'))
+                short = len(recs) < 500
+                if args.n:
+                    recs = recs[:max(0, args.n - rows)]
                 for seq, ts, code in recs:
                     if last_ts is not None and ts < last_ts:
                         wrap += 1 << 32
@@ -358,29 +406,28 @@ def do_stream(link, args):
                     last_seq, last_ts = seq, ts
                     rows += 1
                 got += len(recs)
-                if len(recs) < 500:
+                if short or (args.n and rows >= args.n) or (not final and done()):
                     return got
 
         last_t_us = [0]
+        old_sigint = signal.signal(signal.SIGINT, on_sigint)
         try:
-            while True:
-                if args.duration and time.monotonic() - t_start >= args.duration:
-                    break
-                if args.n and rows >= args.n:
-                    break
+            while not done():
                 if drain() == 0:
                     time.sleep(0.005)
                 if not args.quiet:
                     print('\r%d samples   ' % rows, end='', flush=True)
-        except KeyboardInterrupt:
-            pass
-        link.query('LOG:STAT OFF')
-        drain()
+            link.query('LOG:STAT OFF')
+            if not (args.n and rows >= args.n):
+                drain(final=True)
+        finally:
+            signal.signal(signal.SIGINT, old_sigint)
         cnt = [int(x) for x in link.query('LOG:COUN?').split(',')]
         gaps = (link.query('LOG:GAP?') or '').strip()
         hz = int(link.query('LOG:RATE?') or 0)
-        f.write('# end,%s\n# measured_sps,%d\n# count,buffered %d captured %d overwritten %d missed %d lost %d\n'
-                % (iso_now(), hz, *(cnt + [0] * 5)[:5]))
+        f.write('# end,%s\n# stopped_by,%s (after %.3f s)\n# measured_sps,%d\n'
+                '# count,buffered %d captured %d overwritten %d missed %d lost %d\n'
+                % (iso_now(), stop[0], time.monotonic() - t_start, hz, *(cnt + [0] * 5)[:5]))
         f.write('# gaps,bad max_gap_us g2 g3_4 g5_16 g17_128 g129+: %s\n' % gaps.replace(',', ' '))
     if not args.quiet:
         print()
