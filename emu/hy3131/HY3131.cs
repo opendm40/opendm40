@@ -328,6 +328,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double[] Ad1AcRowGain = { 0, 4.7e-4, 0, 0 };
         public double[] Ad3ShiftCodes = { 0, 23, 0, 0 };
         public double Ad1AcRowScale = 1.0, Ad3ShiftScale = 1.0;
+        /// Method C's internal zero (the DC-coupled V row with OP1+ on AGND, SOP1P 011) against a real 0 V
+        /// input on SENSE, in AD2 / LPF codes (the AGND zero reads this many codes above). INFERRED from the
+        /// device (2563fe1, acdcmeth e8 / z60): C's 60 V gain from that zero was 0.030 % high, its errors
+        /// -7.77 mV + 0.302 mV/V x level with the anchor at 24 V = a zero ~14-16 codes off; 6 V showed
+        /// nothing similar (slope -0.007 %), 600 / 1000 V not measured. "agndz:" scales (0 = off).
+        public double[] AgndZeroCodes = { 0, 15, 0, 0 };
+        public double AgndZeroScale = 1.0;
         /// The RMS block's HPF in the DC-coupled V row (method C): first order, time constant HpfTau (s); its
         /// state starts at 0 when ENRMS or ENAD2 is switched on, so a row write puts the node's whole DC
         /// through it as a step (an input step: the change). INFERRED from the device (7409b92, by hand): the
@@ -588,6 +595,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "n7a": N7ACodes = o.Value; break;
                 case "ad1acg": Ad1AcRowScale = o.Value; break;
                 case "ad3sh": Ad3ShiftScale = o.Value; break;
+                case "agndz": AgndZeroScale = o.Value; break;
                 case "hpftau": HpfTau = o.Value; break;
                 case "rmsbig": RmsBigDcCodes = o.Value; break;
                 case "rmsbigp": RmsBigDcP = o.Value; break;
@@ -1008,6 +1016,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     var sense = (regs[0x32] & 7) == 0;
                     dc = ((sense ? jdc / k : 0) + Op1Vos * Op1ChopSign(t)) * g * Ad2DcGain / Ad2DcGainR[r];
                     if(EnAd3 && (regs[0x35] >> 6) == 0) dc += Ad3ShiftCodes[r] * Ad3ShiftScale / Ad2Scale();
+                    if(!sense) dc += AgndZeroCodes[r] * AgndZeroScale / Ad2Scale();
                     // the AC part as the AC V row's PB4 node: the factory AC V calibration applies
                     ac = sense && jac > 0 ? AcQ(jac, 0x34 + 4 * r, 0x44 + 4 * r) / (AcvK[r] * Ad2IgRow()) : 0;
                     break;
