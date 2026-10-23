@@ -29,12 +29,14 @@ non-repeating AD1 gain shift of +-0.2 % per AD1 enable (n7g, the device's
 `--e8 down` / `--e8 up` is the device's e8 (2563fe1: C's 60 V gain from the
 internal zero 0.030 % high): AC+DC entered on the manual 60 V range at 24 V
 (down: 24 / 12 / 5 / 1 / 0 V) or at 0 V (up: 0 / 1 / 5 / 12 / 24 V) and
-stepped without leaving, then the manual 6 V range (5 / 3 / 1 / 0 V); the
+stepped without leaving, then the manual 6 V range (5 / 3 / 1 / 0 V; `tc6`:
+this part alone, entered at 5 V, the last level 0.1 V: the c6f9670 6 V
+failure, its 0 V level the device's reading without a new reference); the
 DC part against the source with the device's rule (0.05 % + 5 digits) in
 two windows: the device script's (1..4 s after the step) and the late one
 (4..8.5 s). The model's internal zero sits 15 codes off on 60 V
 ("agndz:", HY3131.cs AgndZeroCodes), as the device's.
-Results: emu/out/acdcmeth-<meth>.json, the table on stdout. Exit 1 when a
+Results: emu/out/acdcmeth-<meth>[-e8<x>]-p<port>.json, the table on stdout. Exit 1 when a
 method misses its accuracy bound (CHECK below) in a phase.
 """
 import argparse
@@ -55,7 +57,7 @@ ap.add_argument('--port', type=int, default=18110, help='first USB/IP port (one 
 ap.add_argument('--meths', default='A,B,C,B~')
 ap.add_argument('--child', action='store_true', help=argparse.SUPPRESS)
 ap.add_argument('--analyse', action='store_true', help='only the table of the last runs (emu/out/acdcmeth-*.json)')
-ap.add_argument('--e8', choices=['down', 'up'], help="the device's e8: manual 60 V levels, then manual 6 V")
+ap.add_argument('--e8', choices=['down', 'up', 'tc6'], help="the device's e8: manual 60 V levels, then manual 6 V; tc6: 6 V only")
 ap.add_argument('--model', default='', help="extra HY3131 model options for every phase (e.g. 'agndz:0;')")
 A = ap.parse_args()
 if A.child:
@@ -85,6 +87,9 @@ E8_PH = 10.0
 E8 = {
     'down': [(24.0, 2), (12.0, 2), (5.0, 2), (1.0, 2), (0.0, 2), (5.0, 1), (3.0, 1), (1.0, 1), (0.0, 1)],
     'up': [(0.0, 2), (1.0, 2), (5.0, 2), (12.0, 2), (24.0, 2), (5.0, 1), (3.0, 1), (1.0, 1), (0.0, 1)],
+    # the device's 0 V step came 62.4 k codes from the 3 V anchor, at the edge of the 1.5 x rule
+    # (no new reference there on the device): 0.1 V keeps it below in the model
+    'tc6': [(5.0, 1), (3.0, 1), (1.0, 1), (0.1, 1)],
 }
 # The device script's window (1 s after the step, 3 s) and the late one.
 E8_WIN = ((1.0, 4.0), (4.0, 8.5))
@@ -180,7 +185,7 @@ def run(meth, port, res):
         if os.path.exists(x):
             os.remove(x)
     res[meth] = {'rows': rows, 'rc': p.returncode, 'log': out[-800:] if p.returncode else ''}
-    with open(os.path.join(OUT, tag + '.json'), 'w') as f:
+    with open(os.path.join(OUT, '%s-p%d.json' % (tag, port)), 'w') as f:
         json.dump(res[meth], f)
 
 
@@ -243,6 +248,8 @@ def e8_report(meths, res):
                 ok = ok and not bad
             rows = [r for r in d.get('rows', []) if i * PH <= r['t'] + LAG < (i + 1) * PH]
             gs = rows[-1]['st'][17] if rows and len(rows[-1]['st']) > 17 else '?'
+            if rows and len(rows[-1]['st']) > 20:
+                gs += ' src %s dis %s' % (rows[-1]['st'][18], rows[-1]['st'][19])
             rg = sorted(set(r['st'][3] for r in rows if E8_WIN[0][0] <= r['t'] + LAG - i * PH))
             line += '  %6.2f  %s  %s' % (rule * 1e3, ','.join(rg), gs)
             print(line)
@@ -286,7 +293,10 @@ if __name__ == '__main__':
         p.wait()
     for m in meths:
         try:
-            with open(os.path.join(OUT, 'acdcmeth-' + m.replace('~', 'g') + ('-e8' + A.e8 if A.e8 else '') + '.json')) as f:
+            # runs on other ports (other images) write their own files
+            name = 'acdcmeth-' + m.replace('~', 'g') + ('-e8' + A.e8 if A.e8 else '')
+            p = os.path.join(OUT, '%s-p%d.json' % (name, A.port + meths.index(m)))
+            with open(p if os.path.exists(p) or not A.analyse else os.path.join(OUT, name + '.json')) as f:
                 res[m] = json.load(f)
         except OSError as e:
             res[m] = {'err': str(e)}

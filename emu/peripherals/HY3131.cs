@@ -80,6 +80,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             faultRng = new Random(777);
             pkRng = new Random(4242);
             hpfM = 0;
+            lpfNoiseRng = new Random(9191);
+            creepV = double.NaN; creepT = 0;
         }
 
         /// Register read with the datasheet side effects (INTF cleared, CTBOV cleared).
@@ -358,6 +360,26 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// RMS register comes back as a random 38-bit pattern with probability RmsBigDcP. "rmsbig:codes"
         /// (0 = off), "rmsbigp:".
         public double RmsBigDcCodes = 102500, RmsBigDcP = 0.85;
+        /// The LPF's slow creep after an input step in the DC-coupled V row (method C; device c6f9670 tc6,
+        /// acdc-approaches.md 10.11): after 5 -> 3 V on 6 V (41.6 k codes) the LPF was still 5..12 codes above
+        /// the value it reached ~8 s later when C's second reference ended (3.6 s), while DC V (AD1) settled
+        /// within 0.1 mV in ~1 s; the trace stayed ~+5 codes over the first ~4 s and fell from there (a
+        /// delayed tail, not a first-order one). INFERRED, phenomenological: the LPF reads LpfCreep x (s - x)
+        /// codes extra, x the node's code of the jack's DC and s the same through two cascaded first-order
+        /// lags of LpfCreepTau (s; a step leaves (1 + t / tau) e^(-t / tau) of it; "creepord:1" one lag); keyed on the jack's DC only (an input step), not on row writes or the internal zero's OP1+
+        /// switch (the device's internal-zero gain was right). Only steps while this row runs on one range:
+        /// the lag survives a gap of up to CreepGap s (C's DC V reference, ~1 s; it is advanced at this row's
+        /// LPF results, so a step inside the gap counts from the last one) and starts again (no creep) after a
+        /// longer one or a range change (the device's entries came seconds after the calibrator's step with an
+        /// accurate internal zero; c6f9670 saw the creep on a step inside a session). 2.4e-4 / 2.5 s over the
+        /// 41.6 k step: +10 codes at the step, +9.4 at 1 s, +5.8 at 3.6 s, +3.1 at 6 s, +1.7 at 8 s, +0.4 at
+        /// 12 s. "lpfcreep:" scales (0 = off), "creeptau:" s, "creepord:" 1 / 2.
+        public double LpfCreep = 2.4e-4, LpfCreepScale = 1.0, LpfCreepTau = 2.5;
+        public int LpfCreepOrder = 2;
+        private const double CreepGap = 3.0;
+        /// The LPF's noise in that row, codes rms per result (device c6f9670 tc6: 3 V on 6 V, +-2..3 codes
+        /// p-p at rest, sd ~1.7); the model's LPF had none. "lpfn:" codes (0 = off).
+        public double LpfDcNoise = 1.7;
         public bool CntPin;                    // CNT pin level (ENCNTI source); set by the board model
         public int ForcedAd1 = int.MinValue;   // SetAd1: raw code override
         public int ForcedAd2 = int.MinValue;
@@ -619,6 +641,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "hpftau": HpfTau = o.Value; break;
                 case "rmsbig": RmsBigDcCodes = o.Value; break;
                 case "rmsbigp": RmsBigDcP = o.Value; break;
+                case "lpfcreep": LpfCreepScale = o.Value; break;
+                case "creeptau": LpfCreepTau = o.Value; break;
+                case "creepord": LpfCreepOrder = o.Value >= 2 ? 2 : 1; break;
+                case "lpfn": LpfDcNoise = o.Value; break;
                 }
             }
         }
@@ -755,6 +781,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 NodeDcAc(t, out ndc, out nac);
                 dc += LpfRipple(t, p, nac * Ad2Scale());
             }
+            if(cDc) dc += LpfCreepCodes(t);
             if(EnLpf)
             {
                 lpfCode = Clamp19((int)Math.Round(dc));
@@ -1349,6 +1376,35 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     ws += w;
                 }
             return s / ws;
+        }
+
+        /// LpfCreep: advance the lag to t and return the LPF's extra codes (plus its noise, LpfDcNoise).
+        private double LpfCreepCodes(double t)
+        {
+            double jdc, jac, hz, duty; string shape;
+            Fe.VJack(0, out jdc, out jac, out hz, out shape, out duty);
+            var r = roleRange;
+            if(double.IsNaN(creepV) || LpfCreepTau <= 0 || r != creepR || t - creepT > CreepGap) { creepV = jdc; creepV1 = jdc; }
+            else if(t > creepT)
+            {
+                // the input constant since creepT: e1 relaxes, e2 relaxes and takes e1's share (the
+                // critically damped pair's exact step)
+                var dt = t - creepT; var a = Math.Exp(-dt / LpfCreepTau);
+                var e1 = creepV1 - jdc; var e2 = creepV - jdc;
+                creepV1 = jdc + e1 * a;
+                creepV = jdc + (LpfCreepOrder >= 2 ? e2 + e1 * dt / LpfCreepTau : e2) * a;
+            }
+            creepT = Math.Max(creepT, t); creepR = r;
+            var sense = (regs[0x32] & 7) == 0;
+            var g = (regs[0x25] & 1) != 0 ? 10.0 : 1.0;
+            var perV = g * Ad2DcGain / Ad2DcGainR[r] / AcvK[Math.Max(r, 1)] * Ad2Scale();
+            var x = sense ? LpfCreep * LpfCreepScale * (creepV - jdc) * perV : 0;
+            if(LpfDcNoise > 0 && NoiseScale > 0)
+            {
+                var u1 = 1.0 - lpfNoiseRng.NextDouble(); var u2 = lpfNoiseRng.NextDouble();
+                x += LpfDcNoise * NoiseScale * Math.Sqrt(-2 * Math.Log(u1)) * Math.Cos(2 * Math.PI * u2);
+            }
+            return x;
         }
 
         /// The LPF's response to the AC part (`acCodes` RMS at the node) for the block ending at t:
@@ -2038,6 +2094,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private Random pkRng = new Random(4242);
         /// The RMS block's HPF state in the DC-coupled V row (codes; HpfTau).
         private double hpfM;
+        /// LpfCreep: the lagged jack DC (V, NaN: not yet seen), when it was advanced; LpfDcNoise's generator.
+        private double creepV = double.NaN, creepV1, creepT;
+        private int creepR;
+        private Random lpfNoiseRng = new Random(9191);
     }
 
     /// NIST ITS-90 type K thermocouple EMF (mV) from temperature (C).
