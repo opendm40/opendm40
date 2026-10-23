@@ -1091,18 +1091,18 @@ DC-coupled row the device's per-range per_code factor (`Ad2DcGainR`, 6 V 1.0096,
 and dcvtest still expected nominal / ad2dcg. Now it expects nominal x that factor / ad2dcg (6 V and the 25 V session
 on 60 V): PASS.
 
-Final runs (the branch head rebased on e7ec2cc; the same set also on the builds before the two rebases, ddd5c9e and
-848047f): acdcmethtest B / C / B~ OK (C as in 10.6; the square's C settle "nan" is the model's +-0.4 % LPF ripple of
-10.6); **A fails its square phase on e7ec2cc without these commits too** (+1.4 % / 255 % p-p: its first reading after
-the 24 V -> square step comes ~6 s late, at the window's start, with the AC settle of c4a0b09 / 803854d; A passed it on
-ddd5c9e with 5.9 s); `--e8 down` / `up` OK (down: 60 V within -1.3..+0.4 mV over three runs at every level, 6 V within
-0.1 mV; up: within 1.4 mV after the first step); couptest `v` `i` `tap` `band` `sq5` `sqtie` OK with `--meth B` and
+Final runs (the branch head rebased on b4fb7b9; the full set on the builds rebased on 848047f / ddd5c9e / e7ec2cc
+before): acdcmethtest A / B / C / B~ OK on b4fb7b9; B / C / B~ OK on every rebase (C as in 10.6; the square's C settle "nan" is the model's +-0.4 % LPF ripple of
+10.6); A's square phase is borderline: it failed once on the e7ec2cc rebase **and on e7ec2cc without these commits**
+(+1.4 % / 255 % p-p: its first reading after the 24 V -> square step comes ~6 s late, at the window's start, with the
+AC settle of c4a0b09 / 803854d) and passed on ddd5c9e (settle 5.9 s) and b4fb7b9; `--e8 down` / `up` OK (down: 60 V within -1.3..+1.4 mV over four runs at every level, 6 V within
+0.1 mV; up: within 1.9 mV after the first step); couptest `v` `i` `tap` `band` `sq5` `sqtie` OK with `--meth B` and
 `C`, with `--meth A` all but `i`; **couptest `i --meth A` fails on rust-fw-poc 848047f without these commits too**
 (twice; OK on 7fffcdf): after the DC 0.3 -> AC 0.2 A step no reading for ~10 s and the AUTO part flipping, in the same
 AC settle, not this change; senttest 57 OK; powtest 26 of 29 in the full run (`ereset`, `acdc-floor`, `bt`), all
 three OK alone (e7ec2cc alone: `ereset` and `bt` FAIL, the same flakes); modetest `--fast -f fwrs` 18 of 18 (the stock
 side not run); every fw-rs/tools/*/run.sh OK (font-matrix identical to rust-fw-poc); emulator host tests 491;
-dcvtest PASS. Cost against e7ec2cc: region B 62 580 -> 61 844 B free, region C 17 868 -> 17 716 B, SRAM 58 716 ->
+dcvtest PASS. Cost against b4fb7b9: region B 62 636 -> 61 892 B free, region C 17 868 -> 17 716 B, SRAM 58 716 ->
 58 660 B, static stack headroom 21 448 -> 21 440 B.
 
 ### 10.10 Device retest of 10.9 (`tools/acdcmeth.py`, calibrator on V / COM, `DM40_USBTMC=real`)
