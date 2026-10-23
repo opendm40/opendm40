@@ -68,10 +68,22 @@ use crate::msc::BlockDevice;
 const BLK: usize = 4096;
 const PER: u32 = (BLK / 32) as u32;
 const FPER: u32 = (BLK / 2) as u32;
-/// Records drained per batch (12 bytes each on the stack).
+/// Records drained per batch (8 bytes each on the stack).
 const BATCH: usize = 32;
-/// CPU per Run pass (cycles, 300 us at 200 MHz); a batch may run over.
+/// The Run pass's own CPU (cycles, 300 us at 200 MHz: wall time minus the
+/// stream ISR's busy time, `Src::isr_cyc`); a batch may run over. While
+/// the ring is over half full, twice that. (Device 7409b92: a budget of
+/// wall cycles left the coder 138 us of a 300 us pass with the ISR at 54 %
+/// of the CPU, and the ring overflowed at 76.8 kS/s.)
 const RUN_BUDGET_CYC: u32 = crate::clock::HCLK_HZ / 3333;
+/// A Run pass ends after this much wall time anyway (cycles, 2 ms): USB,
+/// the panel and the rest of the main loop run at least every ~2 ms.
+const RUN_WALL_CYC: u32 = crate::clock::HCLK_HZ / 500;
+/// The writer trial (`Gate`): warm-up, then the window's two halves (ms of
+/// wall time from the first record).
+const GATE_WARM_MS: u32 = 100;
+const GATE_MID_MS: u32 = 550;
+const GATE_END_MS: u32 = 1000;
 /// A chip operation that stays busy this long: the chip failed (cycles, 2 s;
 /// tBE64 max 2 s).
 const OP_TIMEOUT_CYC: u32 = crate::clock::HCLK_HZ * 2;
@@ -118,9 +130,65 @@ pub enum Ev {
     None,
     /// The file is ready: start the logger session, then `run`.
     Start,
+    /// The writer trial ended (`gate`): stop the logger session, start it
+    /// again (at 38400 when `gate_fell`), then `run` (the file starts then).
+    Restart,
     /// Stop the logger session (duration reached, file full, a stop
     /// request, an error); the rest is drained afterwards.
     Stop,
+}
+
+/// The writer trial of a session above 38.4 kS/s (decision 2026-10-23,
+/// device 7409b92: the ISR took 54 % of the CPU at 76.8 kS/s, the coder fell
+/// behind, 54 % lost). The run's first GATE_END_MS after the stream
+/// delivers: the ring drained and coded as in the run, the pages clocked
+/// out as reads (no program: nothing reaches the file) with the probe's tPP
+/// as the busy time. Kept when nothing was dropped and the ring's low water
+/// (its fill at the start of a pass) did not rise from the window's first
+/// half to its second by more than 1/16 of the ring (a writer short by
+/// ~0.4 % of the rate or more); else the session runs at 38400
+/// (`gate_fell`). Not the high water: a slow main-loop pass (a panel
+/// repaint, 10-17 ms) fills the ring by ~1000 records once in a while and
+/// the ring is there to absorb that. Either way the logger session
+/// restarts and the file begins then.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Gate {
+    None,
+    /// Asked for (`set_probe`); runs if the header's rate is above 40 kS/s.
+    Want,
+    Trial,
+    Kept,
+    Fell,
+}
+
+/// The source of a run: the logger's ring (main.rs), the inrush trace, a
+/// host test's model. `drain` pops up to `out.len()` records (stamp us,
+/// raw), oldest first.
+pub type Rec = (u32, i32);
+pub trait Src {
+    fn drain(&mut self, out: &mut [Rec]) -> usize;
+    /// Records waiting (the ring's fill).
+    fn waiting(&self) -> u32 {
+        0
+    }
+    /// Ring capacity, records.
+    fn cap(&self) -> u32 {
+        2048
+    }
+    /// Records the producer dropped so far (the ring was full).
+    fn dropped(&self) -> u32 {
+        0
+    }
+    /// The stream ISR's busy cycles so far (wrapping; 0: none runs).
+    fn isr_cyc(&self) -> u32 {
+        0
+    }
+}
+
+impl<F: FnMut(&mut [Rec]) -> usize> Src for F {
+    fn drain(&mut self, out: &mut [Rec]) -> usize {
+        self(out)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -195,6 +263,22 @@ pub struct Job {
     wrote: bool,
     /// The LOGS/ entry exists.
     has_file: bool,
+    // the writer trial (`Gate`)
+    gate: Gate,
+    /// 0 waiting for the first record, 1 warm-up, 2 / 3 the window's halves.
+    g_ph: u8,
+    g_t0: u32,
+    g_wall: u32,
+    g_busy: u32,
+    g_drop: u32,
+    g_min: [u32; 2],
+    g_max: u32,
+    /// The window's stream ISR share (permille) and highest ring fill.
+    g_permille: u32,
+    /// The dry pages' busy end (cycles).
+    dry_until: u32,
+    /// The Run pass's batch (here, not on the stack: no zeroing per pass).
+    buf: [Rec; BATCH],
 }
 
 const JOB0: Job = Job {
@@ -232,6 +316,17 @@ const JOB0: Job = Job {
     dropped_end: 0,
     wrote: false,
     has_file: false,
+    gate: Gate::None,
+    g_ph: 0,
+    g_t0: 0,
+    g_wall: 0,
+    g_busy: 0,
+    g_drop: 0,
+    g_min: [u32::MAX; 2],
+    g_max: 0,
+    g_permille: 0,
+    dry_until: 0,
+    buf: [(0, 0); BATCH],
 };
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -353,8 +448,15 @@ pub fn set_probe() {
     let j = job();
     if j.state == State::Prep {
         j.probe = true;
+        j.gate = Gate::Want;
         TPP.store(0, core::sync::atomic::Ordering::Relaxed);
     }
+}
+
+/// The writer trial found the CPU too short for the rung: main.rs runs the
+/// session at 38400 (as for a slow page program, `tpp_ok`).
+pub fn gate_fell() -> bool {
+    job().gate == Gate::Fell
 }
 
 /// The last probe's page program times: (mean, max) in us, (0, 0) = none
@@ -411,6 +513,11 @@ pub struct Status {
     /// FIFO high water, bytes; pages / partial programs; chunks.
     pub hw: u32,
     pub programs: u32,
+    /// The writer trial: 0 none, 1 kept the rung, 2 fell back to 38400;
+    /// its window's stream ISR share (permille) and highest ring fill.
+    pub gate: u32,
+    pub gate_permille: u32,
+    pub gate_fill: u32,
     #[allow(dead_code)] // not reported (LOG:DISK? has no chunk count)
     pub chunks: u32,
 }
@@ -438,6 +545,13 @@ pub fn status() -> Status {
         pct: j.pct,
         hw: j.hw,
         programs: j.enc.programs,
+        gate: match j.gate {
+            Gate::Kept => 1,
+            Gate::Fell => 2,
+            _ => 0,
+        },
+        gate_permille: j.g_permille,
+        gate_fill: j.g_max,
         chunks: j.enc.chunks,
     }
 }
@@ -453,23 +567,23 @@ fn disk() -> &'static mut crate::spiflash::SpiFlash {
 
 /// One slice (main loop, every pass). `logger_on`: the logger session
 /// runs (a session that ended behind the session's back, e.g. a function
-/// change, ends the run); `drain`: Logger::drain.
+/// change, ends the run); `src`: the logger's ring (`Src`).
 #[cfg(target_os = "none")]
 #[inline(always)]
-pub fn poll(logger_on: bool, drain: &mut dyn FnMut(&mut [u8]) -> usize) -> Ev {
+pub fn poll(logger_on: bool, src: &mut dyn Src) -> Ev {
     if !active() {
         return Ev::None;
     }
-    poll_on(disk(), logger_on, drain)
+    poll_on(disk(), logger_on, src)
 }
 
 /// `poll` on any disk (host tests).
-pub fn poll_on(d: &mut dyn Disk, logger_on: bool, drain: &mut dyn FnMut(&mut [u8]) -> usize) -> Ev {
+pub fn poll_on(d: &mut dyn Disk, logger_on: bool, src: &mut dyn Src) -> Ev {
     let j = job();
     match j.ph {
         Ph::None => Ev::None,
-        Ph::Run => j.run(d, logger_on, drain),
-        _ => prep::step(j, d, drain),
+        Ph::Run => j.run(d, logger_on, src),
+        _ => prep::step(j, d, src),
     }
 }
 
@@ -508,7 +622,7 @@ pub fn finish_blocking(max_ms: u32) {
     request_stop();
     let max = max_ms.min(20_000) * (crate::clock::HCLK_HZ / 1000);
     let t0 = cyc();
-    let mut nothing = |_: &mut [u8]| 0usize;
+    let mut nothing = |_: &mut [Rec]| 0usize;
     while active() && cyc().wrapping_sub(t0) < max {
         let _ = poll(false, &mut nothing);
         crate::wdt::kick_if_feeding();
@@ -519,13 +633,21 @@ pub fn finish_blocking(max_ms: u32) {
 
 impl Job {
     #[inline(never)]
-    fn run(&mut self, d: &mut dyn Disk, logger_on: bool, drain: &mut dyn FnMut(&mut [u8]) -> usize) -> Ev {
+    fn run(&mut self, d: &mut dyn Disk, logger_on: bool, src: &mut dyn Src) -> Ev {
         let fifo = &mut crate::csvlog::lend_fifo()[..];
         let t0 = cyc();
-        let mut buf = [0u8; BATCH * 12];
+        let b0 = src.isr_cyc();
+        let trial = self.gate == Gate::Trial;
+        if trial {
+            if let Some(ev) = self.trial_step(src, t0, logger_on) {
+                return ev;
+            }
+        }
+        let mut dry = Dry { nor: d.nor(), until: self.dry_until, tpp: tpp_us().0.max(1) * (crate::clock::HCLK_HZ / 1_000_000) };
         let mut stop = None;
         loop {
-            if !self.pump(d.nor(), fifo) {
+            let ok = if trial { self.pump(&mut dry, fifo) } else { self.pump(dry.nor, fifo) };
+            if !ok {
                 stop = Some(State::Error);
                 break;
             }
@@ -543,19 +665,14 @@ impl Job {
                 }
                 break; // else: the FIFO is full, the pages go out first
             };
-            let n = drain(&mut buf[..per * 12]) / 12;
-            if n == 0 {
-                break;
-            }
-            for r in buf[..n * 12].chunks_exact(12) {
-                let ts = u32::from_le_bytes([r[4], r[5], r[6], r[7]]);
-                let raw = i32::from_le_bytes([r[8], r[9], r[10], r[11]]);
+            let n = src.drain(&mut self.buf[..per]);
+            for &(ts, raw) in &self.buf[..n] {
                 if self.ended {
                     self.dropped_end += 1;
                     continue;
                 }
                 self.enc.add(fifo, ts, raw);
-                if self.dur_us > 0 && self.enc.t_last - self.enc.t_first >= self.dur_us {
+                if !trial && self.dur_us > 0 && self.enc.t_last - self.enc.t_first >= self.dur_us {
                     self.ended = true;
                 }
             }
@@ -563,9 +680,27 @@ impl Job {
             if used > self.hw {
                 self.hw = used;
             }
-            if cyc().wrapping_sub(t0) >= RUN_BUDGET_CYC {
+            if n < per {
+                break; // the ring is empty
+            }
+            // The pass's own CPU (the stream ISR's time taken out), more
+            // while the ring is over half full; a wall-time cap.
+            let wall = cyc().wrapping_sub(t0);
+            let own = wall.saturating_sub(src.isr_cyc().wrapping_sub(b0));
+            let lim = if src.waiting() > src.cap() / 2 { 2 * RUN_BUDGET_CYC } else { RUN_BUDGET_CYC };
+            if own >= lim || wall >= RUN_WALL_CYC {
                 break;
             }
+        }
+        self.dry_until = dry.until;
+        if trial && (stop.is_some() || self.stop_req || !logger_on) {
+            // Stopped (or failed) during the trial: nothing is in the file;
+            // abandoned as in Ready (the entry and its chain removed).
+            self.gate = Gate::None;
+            self.ph = Ph::Unlink;
+            self.state = State::Stop;
+            self.end_state = if stop == Some(State::Error) { State::Error } else { State::Done };
+            return Ev::Stop;
         }
         let st = stop.or(if self.stop_req || self.ended || !logger_on { Some(State::Done) } else { None });
         match st {
@@ -577,6 +712,49 @@ impl Job {
             }
             None => Ev::None,
         }
+    }
+
+    /// The writer trial's bookkeeping at the start of a Run pass (`Gate`);
+    /// Some(Restart) when its window ended.
+    #[inline(never)]
+    fn trial_step(&mut self, src: &dyn Src, now: u32, logger_on: bool) -> Option<Ev> {
+        let ms = crate::clock::HCLK_HZ / 1000;
+        let fill = src.waiting();
+        if self.g_ph == 0 {
+            if fill > 0 {
+                self.g_ph = 1;
+                self.g_t0 = now;
+            }
+            return None;
+        }
+        let el = now.wrapping_sub(self.g_t0) / ms;
+        if self.g_ph == 1 {
+            if el >= GATE_WARM_MS {
+                self.g_ph = 2;
+                self.g_wall = now;
+                self.g_busy = src.isr_cyc();
+                self.g_drop = src.dropped();
+            }
+            return None;
+        }
+        if el < GATE_END_MS || !logger_on || self.stop_req {
+            let h = (el >= GATE_MID_MS) as usize;
+            self.g_min[h] = self.g_min[h].min(fill);
+            self.g_max = self.g_max.max(fill);
+            return None;
+        }
+        let wall = now.wrapping_sub(self.g_wall);
+        let busy = src.isr_cyc().wrapping_sub(self.g_busy);
+        self.g_permille = (busy as u64 * 1000 / wall.max(1) as u64) as u32;
+        let cap = src.cap();
+        let ok = src.dropped() == self.g_drop && self.g_min[1] <= self.g_min[0].saturating_add(cap / 16);
+        self.gate = if ok { Gate::Kept } else { Gate::Fell };
+        // The trial's bytes are dropped: main.rs restarts the logger and
+        // `run` (prep::run_begin) starts the file from its header.
+        self.state = State::Ready;
+        self.ph = Ph::Wait;
+        self.ev_sent = true;
+        Some(Ev::Restart)
     }
 
     /// One chip operation if the chip is idle; false: the chip stayed busy
@@ -594,6 +772,32 @@ impl Job {
                 true
             }
         }
+    }
+}
+
+/// The trial's pager (`Gate`): a page program clocks the same bytes out as
+/// a read (the SPI cost of a program, nothing written), busy for the
+/// probe's tPP afterwards.
+struct Dry<'a> {
+    nor: &'a mut dyn Nor,
+    until: u32,
+    tpp: u32,
+}
+
+impl Nor for Dry<'_> {
+    fn busy(&mut self) -> bool {
+        let _ = self.nor.busy();
+        (cyc().wrapping_sub(self.until) as i32) < 0
+    }
+    fn program(&mut self, addr: u32, d: &[u8]) {
+        let mut b = [0u8; 256];
+        let n = d.len().min(256);
+        let _ = self.nor.read(addr, &mut b[..n]);
+        self.until = cyc().wrapping_add(self.tpp);
+    }
+    fn erase(&mut self, _addr: u32, _big: bool) {}
+    fn read(&mut self, addr: u32, b: &mut [u8]) -> bool {
+        self.nor.read(addr, b)
     }
 }
 
@@ -617,7 +821,7 @@ mod prep {
     }
 
     #[inline(never)]
-    pub(super) fn step(j: &mut Job, d: &mut dyn Disk, drain: &mut dyn FnMut(&mut [u8]) -> usize) -> Ev {
+    pub(super) fn step(j: &mut Job, d: &mut dyn Disk, src: &mut dyn Src) -> Ev {
         // Abandoned before the run: before Chain nothing is linked (erased
         // free clusters); Chain / Entry run to the end, then the file is
         // removed again (Unlink).
@@ -657,21 +861,19 @@ mod prep {
                 }
                 // The ring's rest (the logger is stopped: nothing new comes);
                 // a full FIFO waits for the pages to go out.
-                let mut buf = [0u8; BATCH * 12];
+                let mut buf = [(0u32, 0i32); BATCH];
                 let mut empty = false;
                 for _ in 0..64 {
                     let per = if j.enc.room(BATCH as u32) { BATCH } else { 1 };
                     if j.ended || j.enc.full() || !j.enc.room(1) {
                         break;
                     }
-                    let n = drain(&mut buf[..per * 12]) / 12;
+                    let n = src.drain(&mut buf[..per]);
                     if n == 0 {
                         empty = true;
                         break;
                     }
-                    for r in buf[..n * 12].chunks_exact(12) {
-                        let ts = u32::from_le_bytes([r[4], r[5], r[6], r[7]]);
-                        let raw = i32::from_le_bytes([r[8], r[9], r[10], r[11]]);
+                    for &(ts, raw) in &buf[..n] {
                         if j.ended {
                             j.dropped_end += 1;
                             continue;
@@ -1111,6 +1313,13 @@ mod prep {
         j.enc.put_raw(fifo, &h.par.bytes());
         j.ph = Ph::Run;
         j.state = State::Run;
+        j.hw = 0;
+        // The writer trial first when asked for and the rung is above
+        // 40 kS/s (not after a slow page probe capped it to 38400).
+        if j.gate == Gate::Want {
+            j.gate = if h.par.rate_mhz > 40_000_000 { Gate::Trial } else { Gate::None };
+            j.g_ph = 0;
+        }
     }
 
     /// Stop: the entry's size = the bytes written (checked: still ours).

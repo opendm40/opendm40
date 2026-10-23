@@ -1785,15 +1785,13 @@ fn fast(a: &[String], img: &mut Img) {
                 fastlog::request_stop();
             }
         }
-        let mut drain = |b: &mut [u8]| {
+        let mut drain = |b: &mut [fastlog::Rec]| {
             let mut o = 0;
-            while o + 12 <= b.len() {
+            while o < b.len() {
                 let Some((ts, raw)) = ring.pop_front() else { break };
                 drained.push((ts, raw));
-                b[o..o + 4].copy_from_slice(&(drained.len() as u32).to_le_bytes());
-                b[o + 4..o + 8].copy_from_slice(&ts.to_le_bytes());
-                b[o + 8..o + 12].copy_from_slice(&raw.to_le_bytes());
-                o += 12;
+                b[o] = (ts, raw);
+                o += 1;
             }
             o
         };
@@ -1804,7 +1802,7 @@ fn fast(a: &[String], img: &mut Img) {
                 fastlog::run(&fastlog::Head { par, unit: b"V", text });
             }
             fastlog::Ev::Stop => logger_on = false,
-            fastlog::Ev::None => {}
+            fastlog::Ev::Restart | fastlog::Ev::None => {}
         }
         if img.dead || fastlog::ended().is_some() || (!fastlog::active() && !started && polls > 3) {
             break;

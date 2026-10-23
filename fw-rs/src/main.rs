@@ -419,9 +419,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             // The inrush save (app_inrush.rs): a session whose records are
             // the captured trace, not the logger ring (no logger runs).
             let ev = if app.inrush_saving() {
-                fastlog::poll(false, &mut |b| app.inrush_drain(b))
+                fastlog::poll(false, &mut |b: &mut [fastlog::Rec]| app.inrush_drain(b))
             } else {
-                fastlog::poll(lon, &mut |b| logger.drain(b))
+                fastlog::poll(lon, &mut LogSrc(&mut *logger))
             };
             let fa = fastlog::active();
             // The rare part (a start / stop / end / Record page request)
@@ -431,7 +431,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 // its entry; device 036cc55: max_lat 12 us, 1 late sample at
                 // 38 400 S/s): the session's logger stops here, in B, before
                 // the cold call, and starts after it (`fast_events` prepares).
-                if ev == fastlog::Ev::Stop && logger.host_active() {
+                if matches!(ev, fastlog::Ev::Stop | fastlog::Ev::Restart) && logger.host_active() {
                     logger.stop();
                 }
                 let (conflict, go) = fast_events(app, &mut clk, logger, ev, fa, fast_prev, now);
@@ -1401,7 +1401,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             log_redraw_at = now + 100;
             app.invalidate(); // drawn by app.tick below; the panel after it
         }
-        if logging && log_draw >= 1 && usb_up && now >= draw_hold_until && !screenshot::frozen() {
+        if logging && log_draw >= 1 && usb_up && now >= draw_hold_until && !screenshot::frozen() && !dialog::log_panel_idle(now) {
             // The logger panel (dialog.rs; one part per pass, ~1 s refresh).
             dialog::log_panel(
                 now,
@@ -1790,7 +1790,9 @@ fn fast_events(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger,
         let mut txt = [0u8; 512];
         let (n, par) = app.inrush_head(&mut txt);
         fastlog::run(&fastlog::Head { par, unit: b"A", text: &txt[..n] });
-    } else if ev == fastlog::Ev::Start {
+    } else if matches!(ev, fastlog::Ev::Start | fastlog::Ev::Restart) {
+        // Restart: the writer trial ended (fastlog `Gate`); the session
+        // starts again, at 38400 when it fell back.
         go = fast_start(app, clk, logger);
         conflict = !go;
     }
@@ -1826,10 +1828,12 @@ fn fast_start(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger) 
     }
     app.dmm_power(clk);
     app.dmm.start(clk);
-    if logger.ad2() && fast_next_hz(logger, true) > FAST_DISK_SAFE_HZ && !fastlog::tpp_ok() {
-        // The probe found the flash too slow for the rung (or did not run):
-        // the session runs at 38400, LOG:SRATe? / LOG:PREamble? say so,
-        // LOG:DISK? has the measured tPP.
+    if logger.ad2() && fast_next_hz(logger, true) > FAST_DISK_SAFE_HZ && (!fastlog::tpp_ok() || fastlog::gate_fell()) {
+        // The probe found the flash too slow for the rung (or did not run),
+        // or the writer trial found the CPU short (the ring filled while
+        // the stream ISR ran): the session runs at 38400, LOG:SRATe? /
+        // LOG:PREamble? say so, LOG:DISK? has the measured tPP and the
+        // trial's verdict.
         logger.set_req_hz(FAST_DISK_SAFE_HZ);
     }
     let _ = logger.plan(m, app.dmm.range());
@@ -1843,6 +1847,28 @@ fn fast_start(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger) 
         app.dmm.start(clk);
     }
     true
+}
+
+/// The fast logger's source in a logger session (fastlog::Src): the ring.
+struct LogSrc<'a>(&'a mut logger::Logger);
+
+impl fastlog::Src for LogSrc<'_> {
+    #[inline(always)]
+    fn drain(&mut self, out: &mut [fastlog::Rec]) -> usize {
+        self.0.drain_recs(out)
+    }
+    fn waiting(&self) -> u32 {
+        self.0.waiting()
+    }
+    fn cap(&self) -> u32 {
+        logger::CAP as u32
+    }
+    fn dropped(&self) -> u32 {
+        self.0.overwritten()
+    }
+    fn isr_cyc(&self) -> u32 {
+        self.0.isr_busy_cyc()
+    }
 }
 
 /// The Record page's fast-logger request (app.rs `FastReq`).
@@ -1985,7 +2011,9 @@ fn fast_status(scpi: &mut scpi::Scpi) {
     // + header pieces + partial pages; per second = the page rate) and the
     // last page-program probe (mean / max us, 0 = none; set_probe).
     let (tpp, tpp_max) = fastlog::tpp_us();
-    for v in [st.alloc, st.bytes, st.rows, st.pct as u32, st.hw, st.programs, tpp, tpp_max] {
+    // + the writer trial (0 none, 1 kept the rung, 2 fell back to 38400),
+    // its window's stream ISR share (permille) and highest ring fill.
+    for v in [st.alloc, st.bytes, st.rows, st.pct as u32, st.hw, st.programs, tpp, tpp_max, st.gate, st.gate_permille, st.gate_fill] {
         scpi.put_bytes(b",");
         put_u32(scpi, v);
     }

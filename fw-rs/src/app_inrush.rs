@@ -420,7 +420,7 @@ impl App {
     /// The saved file's records (fastlog's drain closure): 12-byte logger
     /// records from the trace; 0 = all out.
     #[inline(never)]
-    pub fn inrush_drain(&mut self, out: &mut [u8]) -> usize {
+    pub fn inrush_drain(&mut self, out: &mut [(u32, i32)]) -> usize {
         let s = inr::ses();
         match self.scope.lent_buf() {
             Some(buf) => s.cap.records(buf, out),

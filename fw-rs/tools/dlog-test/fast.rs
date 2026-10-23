@@ -254,8 +254,41 @@ fn check_rows(csv: &[u8], hl: usize, w: usize, s: &Set, refr: &[(u64, i32, u32)]
     None
 }
 
+/// fastenc's closed-form Rice parameter == the loop dlog decodes with: every
+/// (n, a) with n in 1..32 and a < 2^22, then a sweep of larger a up to 2^31.
+fn rice_k() -> u32 {
+    use crate::fastenc::Ad;
+    let mut bad = 0u32;
+    let mut chk = |a: u32, n: u32| {
+        let d = Ad { a, n };
+        if d.k() != d.k_loop() {
+            if bad < 5 {
+                println!("FAIL rice k: a {a} n {n}: {} vs loop {}", d.k(), d.k_loop());
+            }
+            bad += 1;
+        }
+    };
+    for n in 1..32 {
+        for a in 0..1u32 << 22 {
+            chk(a, n);
+        }
+        let mut a = 1u32 << 22;
+        while a < 1 << 31 {
+            for da in [0, 1, 2, 3] {
+                chk(a.wrapping_sub(da), n);
+                chk(a + da, n);
+            }
+            a += (a >> 9) | 1;
+        }
+    }
+    if bad == 0 {
+        println!("ok: fastenc Rice k (closed form) == the loop for all n < 32, a < 2^22 and a sweep to 2^31");
+    }
+    bad.min(1)
+}
+
 pub fn tests(dir: Option<String>) -> u32 {
-    let mut fails = 0;
+    let mut fails = rice_k();
     println!("{:<32} {:>7} {:>8} {:>8} {:>7} {:>7} {:>6} {:>6}", "fast set (kind 3)", "rows", "DLG B/s", "CSV B/r", "pages", "partial", "hdr", "chunks");
     for (si, s) in sets().iter().enumerate() {
         let (file, chip, e, head) = run(s, 7 + si as u64);

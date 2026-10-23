@@ -377,6 +377,16 @@ pub fn log_panel(now: u64, info: LogInfo) {
     }
 }
 
+/// Between two refreshes: `log_panel` would draw nothing (main.rs skips
+/// building its `LogInfo`: the loss and rate need 64-bit divisions, ~10 %
+/// of the main loop's CPU at 76.8 kS/s on the device model when done every
+/// pass).
+#[inline(always)]
+pub fn log_panel_idle(now: u64) -> bool {
+    let st = log_state();
+    st.part >= 5 && now < st.next
+}
+
 /// The logger stopped: the next session draws the whole panel again (the
 /// caller repaints the view).
 pub fn log_panel_reset() {

@@ -67,15 +67,17 @@ pub trait Nor {
     fn read(&mut self, addr: u32, b: &mut [u8]) -> bool;
 }
 
-/// CRC-32 (zlib), nibble table (= dlog::crc32_upd, which is `.cold`).
+/// CRC-32 (zlib) (= dlog::crc32_upd, which is `.cold`). A byte table
+/// (1 KiB, region B): a chunk's payload is checked in one pass at its close
+/// (~5 instructions per byte).
 pub fn crc32_upd(mut c: u32, d: &[u8]) -> u32 {
-    const T: [u32; 16] = {
-        let mut t = [0u32; 16];
+    const T: [u32; 256] = {
+        let mut t = [0u32; 256];
         let mut i = 0;
-        while i < 16 {
+        while i < 256 {
             let mut c = i as u32;
             let mut k = 0;
-            while k < 4 {
+            while k < 8 {
                 c = (c >> 1) ^ (0xEDB8_8320 & (c & 1).wrapping_neg());
                 k += 1;
             }
@@ -85,26 +87,40 @@ pub fn crc32_upd(mut c: u32, d: &[u8]) -> u32 {
         t
     };
     for &b in d {
-        c ^= b as u32;
-        c = (c >> 4) ^ T[(c & 15) as usize];
-        c = (c >> 4) ^ T[(c & 15) as usize];
+        c = (c >> 8) ^ T[((c ^ b as u32) & 0xFF) as usize];
     }
     c
 }
 
 /// Adaptive Rice parameter (= dlog's `Ad`).
 #[derive(Clone, Copy)]
-struct Ad {
-    a: u32,
-    n: u32,
+pub(crate) struct Ad {
+    pub(crate) a: u32,
+    pub(crate) n: u32,
 }
 
 impl Ad {
-    const fn new(a: u32) -> Ad {
+    pub(crate) const fn new(a: u32) -> Ad {
         Ad { a, n: 1 }
     }
+    /// The smallest k <= 30 with n << k >= a (dlog's loop `while k < 30 &&
+    /// (n << k) < a { k += 1 }`; a < 2^30 always: `upd` adds <= 2^24 per
+    /// row and halves at n = 32), without the loop: n << d has a's bit
+    /// length, so k is d or d + 1 (tools/dlog-test checks it against the
+    /// loop).
     #[inline(always)]
-    fn k(&self) -> u32 {
+    pub(crate) fn k(&self) -> u32 {
+        let (n, a) = (self.n, self.a);
+        if n >= a {
+            return 0;
+        }
+        let d = n.leading_zeros() - a.leading_zeros();
+        (d + ((n << d) < a) as u32).min(30)
+    }
+
+    /// The loop form (the reference for the host test).
+    #[allow(dead_code)]
+    pub(crate) fn k_loop(&self) -> u32 {
         let mut k = 0;
         while k < 30 && (self.n << k) < self.a {
             k += 1;
@@ -112,7 +128,7 @@ impl Ad {
         k
     }
     #[inline(always)]
-    fn upd(&mut self, x: u32) {
+    pub(crate) fn upd(&mut self, x: u32) {
         self.a = self.a.saturating_add(x.min(1 << 24));
         self.n += 1;
         if self.n >= 32 {
@@ -169,7 +185,8 @@ pub struct FastEnc {
     qn: usize,
     flush_req: bool,
     // coder
-    acc: u64,
+    /// Bit buffer: `nb` (< 8 between calls) bits pending in `acc`.
+    acc: u32,
     nb: u32,
     at: Ad,
     av: Ad,
@@ -187,7 +204,6 @@ pub struct FastEnc {
     t0: u64,
     dt0: u32,
     v0: i32,
-    crc: u32,
     /// Rows coded, chunks closed, programs started (all; of them partial
     /// pages and header pieces).
     pub rows: u32,
@@ -231,7 +247,6 @@ impl FastEnc {
         t0: 0,
         dt0: 0,
         v0: 0,
-        crc: 0,
         rows: 0,
         chunks: 0,
         programs: 0,
@@ -288,47 +303,59 @@ impl FastEnc {
     }
 
     #[inline(always)]
-    fn byte(&mut self, fifo: &mut [u8], b: u8, crc: bool) {
+    fn byte(&mut self, fifo: &mut [u8], b: u8) {
         fifo[(self.wr & (self.fl - 1)) as usize] = b;
         self.wr += 1;
-        if crc {
-            self.crc = crc32_upd(self.crc, &[b]);
-        }
     }
 
     /// Raw bytes (the file header), outside any chunk; programmed at the
     /// next `pump`s (the partial page too).
     pub fn put_raw(&mut self, fifo: &mut [u8], d: &[u8]) {
         for &b in d {
-            self.byte(fifo, b, false);
+            self.byte(fifo, b);
         }
         self.flush_req = true;
     }
 
-    /// Not inlined (region B): ~4 calls per row.
+    /// The low `bits` (<= 24) bits of `v`, MSB first. 32-bit only: with
+    /// < 8 bits pending they fit (a u64 buffer cost library shift calls at
+    /// opt-level z, ~10 % of the coder's CPU on the device model).
+    #[inline(always)]
+    fn put24(&mut self, fifo: &mut [u8], v: u32, bits: u32) {
+        let acc = (self.acc << bits) | (v & ((1u32 << bits) - 1));
+        let mut nb = self.nb + bits;
+        while nb >= 8 {
+            nb -= 8;
+            self.byte(fifo, (acc >> nb) as u8);
+        }
+        self.acc = acc & ((1u32 << nb) - 1);
+        self.nb = nb;
+    }
+
+    /// The low `bits` (<= 32) bits of `v`.
     #[inline(never)]
     fn put(&mut self, fifo: &mut [u8], v: u32, bits: u32) {
-        if bits == 0 {
-            return;
+        if bits > 24 {
+            self.put24(fifo, v >> 16, bits - 16);
+            self.put24(fifo, v & 0xFFFF, 16);
+        } else {
+            self.put24(fifo, v, bits);
         }
-        let v = if bits >= 32 { v as u64 } else { (v & ((1u32 << bits) - 1)) as u64 };
-        self.acc = (self.acc << bits) | v;
-        self.nb += bits;
-        while self.nb >= 8 {
-            self.nb -= 8;
-            let b = (self.acc >> self.nb) as u8;
-            self.byte(fifo, b, true);
-        }
-        self.acc &= (1u64 << self.nb) - 1;
     }
 
     #[inline(always)]
     fn rice(&mut self, fifo: &mut [u8], x: u32, k: u32) {
         let q = x >> k;
         if q < QMAX {
-            // q ones and the stop zero (<= 24 bits), then k low bits
-            self.put(fifo, ((1u32 << q) - 1) << 1, q + 1);
-            self.put(fifo, x, k);
+            // q ones and the stop zero (<= 24 bits), then k low bits: one
+            // put when both fit 24 bits (the usual case)
+            let ones = ((1u32 << q) - 1) << 1;
+            if q + 1 + k <= 24 {
+                self.put24(fifo, ones << k | (x & ((1u32 << k) - 1)), q + 1 + k);
+            } else {
+                self.put(fifo, ones, q + 1);
+                self.put(fifo, x, k);
+            }
         } else {
             self.put(fifo, (1 << QMAX) - 1, QMAX);
             self.put(fifo, x, 32);
@@ -350,7 +377,7 @@ impl FastEnc {
         if !self.open {
             self.hpos = self.wr;
             for _ in 0..CHDR {
-                self.byte(fifo, 0xFF, false);
+                self.byte(fifo, 0xFF);
             }
             self.open = true;
             self.row0 = self.rows;
@@ -358,7 +385,6 @@ impl FastEnc {
             self.t0 = t;
             self.dt0 = dt;
             self.v0 = raw;
-            self.crc = !0;
             self.dt = self.p_us;
             self.at = Ad::new(AT0);
             self.av = Ad::new(AV0);
@@ -404,7 +430,7 @@ impl FastEnc {
         }
         if self.nb > 0 {
             let b = (self.acc << (8 - self.nb)) as u8;
-            self.byte(fifo, b, true);
+            self.byte(fifo, b);
         }
         self.acc = 0;
         self.nb = 0;
@@ -419,7 +445,16 @@ impl FastEnc {
         h[18..20].copy_from_slice(&(self.nrows as u16).to_le_bytes());
         h[20..24].copy_from_slice(&self.dt0.to_le_bytes());
         h[24..28].copy_from_slice(&self.v0.to_le_bytes());
-        let c = !crc32_upd(self.crc, &h[8..]);
+        // The payload's CRC from the FIFO: a chunk (<= CHUNK_BYTES + a row +
+        // CHDR) is shorter than the FIFO, so all of its bytes are still
+        // there, programmed or not (at most one wrap).
+        let s = self.hpos + CHDR as u32;
+        let len = (self.wr - s) as usize;
+        let a0 = (s & (self.fl - 1)) as usize;
+        let first = len.min(self.fl as usize - a0);
+        let c = crc32_upd(!0, &fifo[a0..a0 + first]);
+        let c = crc32_upd(c, &fifo[..len - first]);
+        let c = !crc32_upd(c, &h[8..]);
         h[4..8].copy_from_slice(&c.to_le_bytes());
         // Below `done`: direct pieces (split at page edges); the rest: FIFO.
         let mut i = 0usize;
