@@ -701,6 +701,8 @@ pub struct Dmm {
     vet_left: u8,
     vet_held: u8,
     vet_prev: i32,
+    /// The vetting's first conversion may count (`vet_fresh`).
+    vet_first: bool,
     /// AC+DC: the first DC result of the run asking for a step down (ms, 0
     /// none; ACDC_DOWN_MS).
     down_t: u64,
@@ -1171,6 +1173,7 @@ impl Dmm {
             vet_left: 0,
             vet_held: 0,
             vet_prev: i32::MIN,
+            vet_first: false,
             down_t: 0,
             rd_pending: false,
             cpl_auto: false,
@@ -1606,6 +1609,8 @@ impl Dmm {
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
         let changed_mode = mode != self.mode || self.pw.on;
         let old = (self.mode, self.range);
+        // The R22 (AD1 OSR) the chip runs now: poll_ohm writes it directly.
+        let r22_was = hy::read1(0x22);
         self.pw_leave();
         self.mode = mode;
         self.range = range;
@@ -1621,6 +1626,7 @@ impl Dmm {
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
+        self.vet_first = self.vet_fresh(old.0, r22_was);
         self.down_t = 0;
         self.tr_ev(now, tr::K_SET, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
     }
@@ -1695,6 +1701,24 @@ impl Dmm {
         }
     }
 
+    /// A function / coupling change (switch-latency.md proposal 5) into
+    /// plain DC V / A from `old` whose row write changed the R22 the chip
+    /// was running (`r22_was`): AD1 restarted with the new OSR, so its
+    /// first conversion holds no earlier tap and need not wait for a second
+    /// one. Not for a range or V <-> mV / A unit step (the 0.78 V case of
+    /// bab5dd4: a second row at the same R22), not at the same R22 (V <-> A
+    /// at FAST, 0x15 -> 0x15: the quiesce does not restart AD1), not in
+    /// AC+DC. The conversions after it are still vetted.
+    fn vet_fresh(&self, old: u8, r22_was: u8) -> bool {
+        let grp = |m: u8| match dc_mode_of(m) {
+            1 | 3 => 1,
+            7..=9 => 2,
+            x => 16 + x,
+        };
+        let coupling = matches!(old, 0 | 2 | 4..=6) && matches!(self.mode, 1 | 3 | 7..=9);
+        self.vet_left != 0 && !self.acdc && !self.pw.on && (grp(old) != grp(self.mode) || coupling) && r22_was != self.r22
+    }
+
     /// Vet one DC conversion (`vet_start`): true = use it.
     fn vet_ad1(&mut self, ad1: i32) -> bool {
         if self.vet_left == 0 || self.am_on() {
@@ -1702,6 +1726,10 @@ impl Dmm {
         }
         let p = self.vet_prev;
         self.vet_prev = ad1;
+        if core::mem::take(&mut self.vet_first) && p == i32::MIN {
+            // A fresh AD1 start (`vet_fresh`): counts; the next is compared.
+            return true;
+        }
         if p != i32::MIN && (ad1 - p).abs() <= VET_FLOOR.max(p.abs() / VET_DIV) {
             self.vet_left -= 1;
             return true;
@@ -1854,6 +1882,7 @@ impl Dmm {
         self.deadline = clk.now_ms() + settle;
         self.ac_settle_start(clk.now_ms(), old);
         self.vet_start(old);
+        self.vet_first = false;
         self.tr_ev(clk.now_ms(), tr::K_PHASE, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
     }
 
