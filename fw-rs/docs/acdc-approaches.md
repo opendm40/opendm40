@@ -930,15 +930,16 @@ Reproduction (emulator, the final model; acdcmethtest with method C held to the 
 | V DC 5 (6 V) | hunting 6 <-> 60 V, 0 readings / s, AC part 6.1 V (max 12.0) | 6 V only, 9.3 / s, DC part -0.0000 V, AC part 4.8 mV (max 7.3, the peak bound) |
 | V AC 2 @50 | AC part 2.0023 V (+0.115 %) | 2.0000 V |
 | V DC 12 + 0.5 @50 (60 V) | total +0.138 % (DC part ~+16 mV) | -0.005 % |
-| V DC 24 (60 V) | DC part -11.6 mV (anchored at 12 V, its gain) | -1.3 mV |
-| V square 0..9.55 @40 (60 V) | DC part +33 mV, AC part +0.08 % | DC part -0.1 mV, AC part 4.7760 V |
+| V DC 24 (60 V) | DC part -11.6 mV (anchored at 12 V, its gain) | -1.2 mV |
+| V square 0..9.55 @40 (60 V) | DC part +33 mV, AC part +0.08 % | DC part -0.8 mV, AC part 4.7760 V |
 | V DC 5 after the square (60 -> 6 V) | hunting, AC part 5.4 V | 6 V, 8.9 / s, DC part -0.0000 V, AC 0.7 mV |
 | couptest sq5 (AUTO) | 5.5 V: DC +0.24 %, the rest ok | all ok (5 V: AUTO,DC 5.0012) |
 
-Final runs of the fix (the image below): acdcmethtest A / B / C / B~ RESULT OK (the table above for C; A and B
-unchanged); couptest `v` `i` `tap` `band` `sq5` OK with `--meth A`, `B` and `C`; senttest (26) and powtest OK;
-modetest `--fast` 35 of 36 (stock `cap-big`, as before); every fw-rs/tools/*/run.sh OK (font-matrix identical
-to 8087c7d); emulator host tests 491. The emulator's LPF window (sinc^2 over 213 ms, INFERRED) leaves +-0.4 % of
+Final runs of the fix (the branch head's image): acdcmethtest A / B / C / B~ RESULT OK (the table above for
+C; A and B unchanged); couptest `v` `i` `tap` `band` `sq5` OK with `--meth A`, `B` and `C`; senttest 57 OK;
+powtest 27 of 29 in the full run under a load average of ~31 (`zero`, `bt`; both pass alone, as `ereset`); modetest `--fast` 35 of
+36 (stock `cap-big`, as before); every fw-rs/tools/*/run.sh OK (font-matrix identical to 8087c7d); emulator
+host tests 491. The emulator's LPF window (sinc^2 over 213 ms, INFERRED) leaves +-0.4 % of
 a 40 Hz square on the DC part (the C square phase's 0.39 % p-p); the device's C DC part on the square had an
 sd of 0.10 / 0.29 mV (6 / 60 V, e2): its LPF rejects 40 Hz far better than the model.
 
