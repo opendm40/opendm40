@@ -1318,7 +1318,12 @@ Firmware:
       sinc^3 over 3 periods; model unit test Ad1Mix) and emu/hy3131/autorangetest.py: the base build gives
       0.55-0.85 V readings from 600 / 1000 V (two 1 ms apart, the device signature), the fix none. Device check: dc781.py (600 V x20, 1000 V x10,
       60 V x10): no READ? / CALC:AVER:MIN? below 0.99 V on 6 V; time to the first 6 V reading +0.1-0.3 s.
-- [x] AC+DC / AUTO coupling, 1 V DC, a range change by the MF page 6 -> 60 V: the DC part read 0.526 /
+      Device ceb5ca5 (device-check doc "ceb5ca5" 1): PASS. No READ? below 0.99 V on 6 V in 40 tries (216 readings,
+      lowest 0.99890 V); CALC:AVER:MIN? >= 0.99670 V except 1000 V #0: 0.98396 V, the 1000 V range's own
+      conversion at 0.31 s (that range read 0.984-1.021 V, as on bab5dd4); 600 V's read 0.9967-0.9997 V. First 6 V conversion read: from
+      600 V 0.88-0.92 s (bab5dd4 0.81 s: +0.1 s), from 60 V 0.61 s (0.56-0.60 s), from 1000 V 1.22 s (1.06 s:
+      +0.16 s); +0.05-0.16 s, inside the expected +0.1-0.3 s except from 60 V.
+- [ ] AC+DC / AUTO coupling, 1 V DC, a range change by the MF page 6 -> 60 V: the DC part read 0.526 /
       0.528 V (53 %) for one DC phase (~1 s, READ? 0.526 V; in AUTO shown as AUTO,DC 0.528 V) in 2 of 4
       such changes in the first run (one AC+DC, one AUTO), then 0 of 9 in two AC+DC repeats (READ? or
       DBG:ACDC:STAT? polling); 0 of 30 SCPI changes and 0 of 13 MF 60 -> 6 V. Same signature as the 25-51 % partial conversions of the 8087c7d same-range item.
@@ -1331,6 +1336,19 @@ Firmware:
       part stays the previous one, the phase count goes on; a phase with no DC part yet gets one more
       result, and the AC phase does not step down before the DC part is known). Device check: dc5.py MF 6 -> 60 V x10 in
       AC+DC and AUTO with DBG:ACDC:STAT? at 25 Hz: no DC part below 0.99 V.
+      **Device ceb5ca5: FAIL, reopened** (device-check doc "ceb5ca5" 2). The DC part (STAT dc = dc_val, set
+      only by a vetted result) read 0.5212 / 0.5224 V and READ? published **0.5244 / 0.5243 / 0.5240 V** as
+      the first fresh readings after the NaN gap: 3 of 116 AC+DC changes 6 <-> 60 V, all 3 on 6 -> 60 V (MF
+      1 of 44, SCPI 2 of 24; 0 of 48 with the change put 0-0.6 s into a DC phase, dcph.py), 0 of 20 in AUTO. So the SCPI path has it too, and the NaN rule makes the bad value the
+      first one a host sees. Signature (both STAT-traced hits): the change lands in a DC phase (mode
+      unchanged: no reset_values, so acdc_seen keeps bit 2 and dc_val the old range's part), that DC phase
+      ends with no vetted result, one AC phase without readings, then the next DC phase gives one good
+      result (0.999 V) and ~0.3 s later the 0.52 V one, accepted, at the switch to AC; the DC part stays
+      0.52 V for that AC phase (~1.7 s, 4-5 readings). The vet passes a result that agrees with the
+      conversion before it, or any after VET_HELD_MAX holds, so a bad state lasting 2+ conversions or 5
+      holds gets through; 0.521-0.528 V in all 5 hits since bab5dd4 (not the 25-51 % scatter of a single
+      straddled write). Not fixed (cause unknown): needs vet_left / vet_held / the raw AD1 codes of the DC
+      phase (a DBG ring; LOG:SOUR AD1 reprograms the converter and cannot watch the DMM's own conversions).
 - [x] AC+DC: READ? during the AC settle after a range change answers the reading from before the change
       (3-6 times, 0.85 s apart, until the first fresh one 3-6 s later), not +9.91E37 as the tmcnl-fix item
       expected ("READ? NaN after 0.85 s, as at entry"; scpi.rs: "the latest one if none comes within
@@ -1344,6 +1362,10 @@ Firmware:
       Device check: tl.py after VOLT:ACDC:RANG 60 / 6 and the MF page: READ? +9.91E37 until the first
       fresh reading, SYST:ERR? "Data stale"; FETCh? +9.91E37 in the gap; libsigrok `-c range=60V
       --samples 5` in AC+DC still gets readings (it skips the NaN).
+      Device ceb5ca5 (device-check doc "ceb5ca5" 3): PASS. nan3.py, SCPI and MF 6 <-> 60 V x2: FETCh?
+      +9.91E37 and READ? +9.91E37 + -100,"Data stale" every 0.85 s until the first fresh reading (3.3-5.0 s
+      after SCPI, 3.4-4.2 s after the tap); none of the old reading. sigrok range=60V / 6V / 60V --samples
+      5: rc 0, 999.7-1000 mV, CONF? follows, /dev/usbtmc2 stays; it leaves -100,"Data stale" in the queue.
 - [x] AC+DC method A settle (ACS_STEP 1 %): on the 40 Hz square 600 -> 60 V the AC part came back as
       4.821 / 4.790 V (true 4.768) and READ? 6.783 / 6.762 V (+0.55 / +0.24 %) for 1.7 s: the HPF tail falls
       < 1 % per result and passes the "flat" test, as the TODO feared. 60 -> 600 and 6 -> 60 V were right
@@ -1355,6 +1377,10 @@ Firmware:
       phase's 4.7678 V is (host test meter-test acs_flat_tail_and_steady). Device check: sq5.py (40 Hz
       square, AC+DC, 60 <-> 600, 6 -> 60 V): every fresh READ? within 0.1 % of 6.746 V, gap <= 6 s; the
       1 V DC changes of dc5.py: gap 3-5 s (was 3.0-4.3 s).
+      Device ceb5ca5 (device-check doc "ceb5ca5" 4): PASS. Square 6.7328 V on 60 V (4.759 V AC; the
+      calibrator gave 6.746 V on bab5dd4): every fresh READ? within 0.012 % of the run's level after 600 ->
+      60 and 6 -> 60 V, 0.075 % on 600 V; gaps 4.2 / 4.3 / 5.4 s (600 -> 60, 6 -> 60, 60 -> 600). 1 V DC
+      (nan3.py, dcmf.py): gap 3.3-5.0 s.
 - [x] AC+DC autorange: a DC step of 0.5-0.8 V gives an AC part of up to 3.4 V for ~1 s (the AC path's HPF
       on the step; the calibrator's own step is clean within 0.3 s), hypot > 6 V, one up-range and back
       after the 6 s settle (5.8 -> 5.0 V: on 60 V from 0.25 to 5.98 s). One excursion, no hunting (device
@@ -1368,6 +1394,17 @@ Firmware:
       10 A -> mA on the stale AC part) passes again on 7e10110, as the full couptest. Device check: ar6.py / ar6b.py (DC 4..7 V, AC+DC AUTO range):
       no 6 -> 60 -> 6 V excursion on the 5.8 -> 5.0 V or 6.3 -> 5.8 V steps, a step across 6.0 V still
       moves the range once; READ? follows the DC step within ~1 s with the AC part held.
+      Device ceb5ca5 (device-check doc "ceb5ca5" 5): PASS on its checks. 6.3 -> 5.8 V: one range step (ar6,
+      ar6b); 5.8 -> 5.0 V: none (ar6b); every step across 6.0 V moved the range once (5.8 -> 6.3, 4.0 -> 6.5,
+      6.5 -> 5.0, 6.3 -> 5.8); READ? on the new level at 0.83 s on the same-range steps down (6.3 -> 5.8,
+      5.5 -> 4.0, 6.5 -> 5.0; bab5dd4: 6.737 / 5.679 / 5.957 V there for 2-5 s). The calibrator dips to
+      2.2-3.9 V for ~0.2 s on every level change (calstep2.py, DC V FAST; the SLOW calstep.py missed it):
+      the 2.3-5.3 V READ?s right after a step are that dip. Residual: next item.
+- [ ] AC+DC autorange on the calibrator's level change (a ~0.2 s dip to 2-4 V, then the new level): 4.0 ->
+      5.8 V took AC results of 2.42 / 2.53 V as the AC part (STAT ac, readings published; ACS_JUMP did
+      not hold them) and went 6 -> 60 -> 6 V (1.0 -> 6.4 s); 7.0 -> 6.3 V went 60 -> 6 -> 60 V (the dip's
+      DC result stepped down). One excursion each, no hunting (device ceb5ca5, device-check doc "ceb5ca5" 5).
+      Decide whether a dip shorter than one DC phase should move the range.
 
 - [ ] Fast logger cosmetics (device 4c4b489): LOG:DISK? keeps naming the file of a session stopped in its
       trial (the file is removed); its tpp fields keep the last probe's 381 / 387 in a 38400 / 4800 / AD1
@@ -2060,6 +2097,12 @@ Emulator (emu/):
       (c) a larger CAL_GAIN_CODES on 6 V. Then device: e8s 6 V and tc6 (rt29/tc6.py) over 3 power cycles.
 - [ ] The first V tap after `CONF:VOLT:DC` on the 40 Hz square is sometimes lost (C 5 of 6, A 1 of 3; not at 1 V
       DC): device-check doc "c6f9670" 3. Not chased.
+      **Cause found (device ceb5ca5, device-check doc "ceb5ca5" 6):** the tap lands on the grey hint toast "AC
+      voltage here: use AC V?" (sentinel AC?, HINT_ASSERT_MS 2 s; shown from ~2.6 s after the CONF for
+      TOAST_MS 1.5 s), and a toast takes the gesture (app.rs: "a toast just goes"). Method A: lost 14 of 30
+      with the tap 2.8-4.1 s after the CONF, 0 of 30 at 0.5-2.75 s, 0 of 6 at 5 s; the range stayed 6 V
+      throughout (not an autorange). c6f9670's tap29.py tapped at 3 s, in the window. Decide: let a tap
+      outside the toast's box reach the page (and dismiss the toast), or keep the stock-like swallow.
 - [ ] Method C's internal zero on 60 V (the ~15 codes of 2563fe1): repeatability over entries / power cycles,
       and 600 / 1000 V (needs > 30 V), if C's first-entry gain is ever to be corrected by a constant.
 - [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
