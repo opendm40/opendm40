@@ -437,6 +437,22 @@ def run(name):
                     for ta in sorted(bt_acts):
                         if t >= ta:
                             bt_xfer(bt_acts.pop(ta), lambda b: len(b) >= 7, 2.0)
+                    # The run ended inside this row (the last phase's window
+                    # reaches run end - 1.5 s of virtual time, but the fw
+                    # uptime lags it by ~1.8 s, so its last row can be the
+                    # run's very end): its BT replies never came. A sample
+                    # cut off by the emulator stopping, not a reply of the
+                    # firmware: dropped.
+                    # (A missing reply while the emulator keeps running stays
+                    # in: that is the firmware's.)
+                    if not all(row.get('BT ' + q) for q in ['FETC:POW:ALL?', 'POW:VOLT:RANG?']):
+                        try:
+                            p.wait(timeout=20)
+                        except subprocess.TimeoutExpired:
+                            pass
+                        if p.poll() is not None:
+                            print(name, 'row at %.2f cut by the run end: dropped' % t, flush=True)
+                            break
                 d = {'t': t, 'BT09': bt09, 'VR': row['POW:VOLT:RANG?'], 'IR': row['POW:CURR:RANG?'], 'PH': int(row['POW:PHAS?'] or 0),
                      'RAW': row.get('DBG:POW:RAW?', ''), 'ROW': row.get('DBG:POW:ROW?', ''), 'X': row}
                 try:
