@@ -2107,3 +2107,68 @@ One excursion each, no hunting. New TODO item.
 - **Files:** nothing created on the meter (screenshots were GRAM reads). `MMEM:CAT?` file list identical to the start (3 534 848 / 13 205 504).
 - **Health:** `DBG:BOOT?` NORMAL, crash count 0, VALID, CLEAN; no reset, no crash.
 - **Calibrator:** 1 V DC, enabled.
+
+## ad97fd7 / c8c2f02 / f42a09e: the AC+DC 0.52 V DC part traced and fixed, ar6 excursions, pass-through toasts (2026-10-23 11:05 - 12:40)
+
+Three images in a row (owner-installed, each md5 OK, crash count 0): ad97fd7 (the trace `DBG:ACDC:TRACE` only), c8c2f02 (fixes), f42a09e (one more autorange fix, rebased on 8844316). Owner settings untouched (volume 0, backlight 10 %, Dim / Shutdown Never). Calibrator on V / COM (`/dev/ttyACM1`), 1 V DC except in the ar6 / toast runs, back to 1 V DC after each. Generator output never on.
+- **Files** (session scratchpad `dcp52/`, not in git): `s/trdec.py` (the trace decoder), `dev/hunt.py` (an AC+DC 6 <-> 60 V change aimed a set delay after the AC -> DC switch, SCPI or MF; trace armed, dumped on a trigger), `dev/ar6t.py` (ar6b with the trace re-armed per level), `dev/toast.py`; results `hunt-<run>.json`, `hunt-s1-<i>.txt` (traces of the hits), `ar6t-<run>-<i>-<level>.txt`, `toast.json`, `fixed-trace.txt`.
+
+### Summary
+
+| # | Check | Image | Result |
+|---|---|---|---|
+| 1 | Trace of the 0.52 V DC part (`hunt.py s1` SCPI, 40 changes, 0.55-1.05 s into a DC phase) | ad97fd7 | **Cause found.** 5 hits (4 of 7 at 0.75 s on 6 -> 60 V: 0.5223 / 0.5162 / 0.5221 / 0.5194 V; once 60 -> 6 V at 0.65 s: 0.4025 V), all 5 traced, all one mechanism (below) |
+| 2 | The same aimed changes after the fix | c8c2f02 | **PASS**: 0 of 80 SCPI (40 of them 6 -> 60 V, 30 at 0.75 s) + 0 of 30 MF. DC part 0.99842..1.00036 V over 6168 STAT samples |
+| 2b | Again on the final image | f42a09e | **PASS**: 0 of 80 SCPI (48 at 0.75 s, both directions) + 0 of 30 MF (0.65 / 0.75 / 0.85 s). DC part 0.99850..1.00086 V |
+| 3 | ar6 (DC 4..7 V, AC+DC AUTO range) with the trace | ad97fd7, c8c2f02, f42a09e | ad97fd7: 4.0 -> 5.8 V 6 -> 60 -> 6 V again (traced); c8c2f02: one excursion in 29 steps (a second cause, traced on the rerun); **f42a09e: PASS**, 27 steps, every step across 6.0 V moved the range once, no excursion |
+| 4 | Toast pass-through (40 Hz square, method A, `CONF:VOLT:AC` -> `CONF:VOLT:DC`, the "AC voltage here: use AC V?" hint) | c8c2f02 | **PASS**: toast up (read from GRAM) at the tap: V tap outside it advanced the coupling 10 of 10 (the toast went); a tap on the toast dismissed it 10 of 10, coupling unchanged. Before (ceb5ca5): 13 of 27 taps lost in that window |
+
+### 1. The cause of the 0.52 V DC part
+
+`DBG:ACDC:TRACE 2` logs every DC conversion of the AC+DC DC phase with the row read back from the chip (R22 / R24 / R32 and a hash of R20..R35), the AC results, sets, phase switches, row writes and R22 writes. Hit `hunt-s1-8` (6 -> 60 V by SCPI 0.75 s into a DC phase; ms):
+
+```
+23302 SET  m1 r1 from m1 r0, vet_left 8, phase_n 0       the change lands at the end of a DC phase
+23752 DC   r22 0x15  ad1 59906  0.99912 V  held (no conversion before it on 60 V); acdc_osr writes 0x15
+23762 PH   -> AC (one held result is enough: acdc_seen still has the DC bit)
+24618..24938 AC  1.04 / 0.76 / 0.55 / 0.40 V, all discarded (the range-change settle)
+24948 PH   -> DC, settle 600 ms
+25548 DC   ad1 59916  0.99929 V  vetted; agrees with 59906 -> acdc_osr writes R22 = 0x17 (once-flag)
+25703 DC   ad1 31333  0.52245 V  155 ms later, not 400: held; disagrees -> acdc_osr writes R22 = 0x15
+25808 DC   ad1 31322  0.52227 V  105 ms later, the same 52 %: agrees with 31333 -> vetted -> DC part 0.522 V
+25818 PH   -> AC with dc_val 0.52227
+```
+
+All 5 hits are this sequence (the 60 -> 6 V one at 40 %: 0x17 write, 240321 / 240251 codes for 596385). The first result of the DC phase is read at the settle deadline; the converter ran through the 600 ms settle, so INTF was already set and the result is up to a conversion old. The R22 write right after it lands in the middle of the next conversion. That conversion and the one after the 0x15 write that the disagreement causes both read ~52 %, and they agree with each other, which `vet_ad1` accepts. Why only a change in a DC phase: there the phase ends after one held result, so the once-flag write comes with the first result of the *next* DC phase (read late); a change in the AC phase starts a DC phase that runs on until a vetted result, and the 0x17 write comes after a result read on time. In steady AC+DC the flag stays set and nothing is written (as the stock).
+
+**Fix (c08b0d5):** no R22 write in the AC+DC DC phase (the `acdc_osr` once-flag rule removed; the row's 0x15 stays, as the stock's steady AC+DC). `fixed-trace.txt` (f42a09e): no R22 write, chip R22 0x15 in every DC conversion after a 6 -> 60 V change, the DC part 0.9994..0.9998 V.
+
+### 3. ar6: autorange on the calibrator's level change
+
+ad97fd7, 4.0 -> 5.8 V landing in an AC phase: the AC results rose 0.0795 (a jump: input-step settle starts) -> 1.166 -> 2.384 V as the RMS window filled; the old "rose: flat" rule counted two rises as flat, the settle ended on 2.384 V, and the next DC result stepped up on hypot(2.384, 5.798) = 6.27 V (6 -> 60 V at 0.88 s, back at 5.9 s). Fixed in c08b0d5: a rise is flat only within ACS_STEP (0.1 %).
+
+The 7.0 -> 6.3 V excursion of ceb5ca5 (a DC result in the dip stepped 60 -> 6 V) did not recur in these runs; c08b0d5 also makes AC+DC step down only from the DC phase, once its results asked for it for ACDC_DOWN_MS (400 ms) in a row. Cost, measured: 60 -> 6 V after 6.3 -> 4.0 / 5.8 V and 6.5 -> 5.0 V came at 4.0-5.5 s on f42a09e (ceb5ca5 / ad97fd7: 1.8-3.7 s). Steps up unchanged (0.3-1.8 s).
+
+c8c2f02, one more excursion (4.0 -> 5.8 V, 6 -> 60 V at 1.12 s, back at 8.86 s, `ar6t-f1`); the rerun (`ar6t-f2-03`) traced its cause: the 5.8 V step came ~4.6 s after the 60 -> 6 V step of the 4.0 V level, so that step's range-change settle still ran, and ACS_MAX_MS (5 s) ended it on the step's rising result (0.84 V there; 2.4 V in the excursion). Fixed in f42a09e: a result above ACS_JUMP x the previous one when the limit runs out restarts the settle as an input step. f42a09e `ar6t-g1` (27 steps incl. four 6.3 -> 4.0 -> 5.8 V with the step-down 4.8-5.5 s before the 5.8 V step): the step's 2.40 / 2.00 / 1.05 / 0.79 V AC results discarded, no excursion.
+
+### 4. Toasts
+
+Owner's decision: a toast is not modal (77ae236). In `toast.py` the toast's red box was checked in GRAM right before and 0.3 s after the tap. Toast up at 2.95 / 3.25 s after `CONF:VOLT:DC`: tap on V (35, 297) -> coupling DC -> AC 10 of 10 and the toast gone; tap on the toast (240, 160) -> toast gone, coupling DC 10 of 10. At 2.65 s the toast was not up yet (it came after the tap): the V taps advanced, the taps at (240, 160) hit the page (no button there).
+
+### Emulator / host
+
+On f42a09e: couptest, acdcmethtest, autorangetest, senttest, modetest --fast (fw-rs 18 of 18; c8c2f02's both-firmware run: the stock's cap-big 5 % high, not fw-rs), all `tools/*/run.sh` (ui-render 0 violations, touch-test 892 cases, meter-test 90), emu/hy3131 tests (501) pass. powtest: 27 of 29 in the parallel run (ereset: Yes 13 s after the long press; acdc-floor: Q 5.99), both OK when rerun alone (five emulators plus modetest on the host: timing). Budgets f42a09e: region B 57.8 KB, C 17.0 KB free, stack headroom 21.4 KB, SRAM 53.1 KB free (the trace ring: 5.4 KB).
+
+### 5. Method C 6 V retest of acdc-approaches.md 10.13 (on f42a09e, which contains 8844316)
+
+As 10.13 lists it, `tools/acdcmeth.py` from the worktree, log `dcp52/dev/acdc-lw.jsonl` / `c613.log`: reset, e8up; 4 x (reset, e8s); e8; e5 --minutes 3.
+- **e8up** (60 V entered at 0 V): 0 / 1 / 5 / 12 / 24 V: +0.74 / -0.09 / +0.62 / +0.80 / +0.91 mV (gsrc 0, 0, 2, 2, 2). PASS.
+- **e8s x 4**, 6 V at 0 V: **-0.25 / +0.18 / -0.59 / +0.21 mV**: 3 of 4 within 0.5 mV. The third: on 6 V the 3 V level took a second reference judged biased (gsrc 3, gdis +8.95 codes), then the 1 V level another (gsrc 2, gdis -4.47), and 1 / 0 V read -0.46 / -0.59 mV. The other three kept the internal zero's gain (gsrc 1) at every 6 V level. 60 V all within 5.5 / 5.0 mV (0 V: +0.03 / +0.06 / +2.78 / -0.75 mV).
+- **e8**: 6 V 5 / 3 / 1 / 0 V +0.22 / +0.26 / +0.07 / +0.16 mV (gsrc 1); 60 V 24 V +3.19 mV, 0 V +0.88 mV. PASS.
+- **e5** (3 min): 60 V at 24 V -1.23..+1.70 mV, 6 V at 3 V -0.36..+0.24 mV. PASS.
+Decision rule of 10.13 (all four e8s) not met: 1 of 4 at -0.59 mV. Not chased here (the method-C agent's item).
+
+### State at the end
+
+- **Device:** f42a09e, DMM page, DC V AUTO, `CONF?` "VOLT +6,+1E-05", method A, `DBG:ACDC:TRACE?` off, READ? 0.99939 V, generator `OUTP?` 0, `SYST:ERR?` empty. `DBG:BOOT?` NORMAL, crash count 0, CLEAN, VALID. Five deliberate resets (`dm40dbg.py reset`, 10.13); no crash. Settings not touched; nothing written to the meter's disk.
+- **Calibrator:** 1 V DC, enabled.
