@@ -388,6 +388,8 @@ Suggested order to ship: 1, 3, 4, 2, 5, 11 (all quick, high-impact) → 9, 10, 1
 4 / 7 / 8 superseded by the stock scope port; 11 keypads only; 14 won't do (stock
 geometry); 15 duplicate arms gone, dead `ui::bar` / `button_row` / `DMM_BUTTONS` /
 fonts.rs deleted 2026-10-21 (with text.rs, mkfont.py, Roboto). The line numbers above are from the review date and stale.
+2026-10-23: 11 extended to the menu tiles, the list pages, the generator, the MF range pages and
+Power Settings (TODO.md has what is left: the dialogs, Inrush, Gallery / Help).
 
 ---
 
