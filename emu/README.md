@@ -290,11 +290,21 @@ URB longer than 64 bytes is split into packets (a USBTMC message over 52
 bytes used to be dropped). `usbtmc_stress.py` (thousands of command / query
 pairs, multi-packet messages and replies, small TransferSize rounds,
 pipelined URBs, stale REQUESTs, INITIATE_CLEAR, aborts; `--port`, `--seed`,
-`--cases`) exercises fw-rs's USBTMC over USB/IP: 1500 iterations pass on the
-model's server (54 s; MSC reads are no longer one main-loop turn per URB
-round trip). A Bulk-IN URB for which the device never sends data stays
+`--cases`) exercises fw-rs's USBTMC over USB/IP: 3000 iterations pass on the
+model's server (144 s, 2026-10-23; MSC reads are no longer one main-loop turn per URB
+round trip). Every reply must end with the `\n` terminator (848047f; a
+block reply too, after the block). A Bulk-IN URB for which the device never sends data stays
 pending on its own endpoint only (with Renode's server it blocked every
 later URB).
+
+Tests that start their own emulator take its USB/IP port from `--port`;
+without it `mscresettest.py` and `ejecttest.py` pick a free one
+(`run.free_port`: random in 61000-64999, above the kernel's ephemeral range
+32768-60999 and outside the ranges handed to parallel runs, e.g. an
+agent's 48000-48999; the port is printed). `DM40_EMU_PORTS=lo-hi` narrows
+the choice to a range of one's own, e.g. `DM40_EMU_PORTS=48000-48999
+emu/mscresettest.py --app ...`. (They defaulted to 4851 / 40200 before.)
+`ejecttest.py` still needs TCP 3240 for its `usbip attach` proxy.
 
 `gallerytest.py --app <ELF> [--port P] [--shots DIR]` drives the fw-rs
 gallery (src/gallery.rs) like a user over USB/IP (DBG:KEY / TAP / SWIPE) on

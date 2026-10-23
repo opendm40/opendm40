@@ -57,6 +57,38 @@ def read(p):
         return f.read()
 
 
+# Self-chosen ports (free_port): above the kernel's ephemeral range
+# (net.ipv4.ip_local_port_range 32768-60999), so no client socket holds one,
+# and outside the fixed ranges handed to parallel runs (3240, 39000-39999,
+# 4xxxx per agent). DM40_EMU_PORTS=lo-hi (environment) narrows it to a
+# range of one's own, e.g. DM40_EMU_PORTS=48000-48999.
+AUTO_PORTS = (61000, 64999)
+
+
+def free_port(lo=None, hi=None):
+    """A TCP port in lo..hi (default DM40_EMU_PORTS or AUTO_PORTS) nobody
+    listens on now (random order, so two tests started together rarely try
+    the same one): the default USB/IP port of the tests that start their
+    own emulator (mscresettest.py, ejecttest.py)."""
+    import random
+    import socket
+    if lo is None:
+        env = os.environ.get('DM40_EMU_PORTS')
+        lo, hi = (int(x) for x in env.split('-')) if env else AUTO_PORTS
+    ports = list(range(lo, hi + 1))
+    random.SystemRandom().shuffle(ports)
+    for p in ports:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind(('0.0.0.0', p))
+            return p
+        except OSError:
+            continue
+        finally:
+            s.close()
+    raise OSError('no free TCP port in %d..%d' % (lo, hi))
+
+
 def emu_uid(port, base=UID):
     """The emulated chip's 96-bit UID (12 bytes, memory order) for USB/IP
     port `port`: this unit's UID file (a fixed pattern without it) with bytes

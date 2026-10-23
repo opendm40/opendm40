@@ -6,7 +6,7 @@ attach`), mounted and ejected with udisks / gio as a desktop does.
 02/3A/00, until a re-plug; Windows used to mount it again at once.)
 
   cd fw-rs && ./build.sh
-  emu/ejecttest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw [--port 40200]
+  emu/ejecttest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw [--port P]
 
 Steps (exit status 0 = PASS):
   live       "Files live" (read-only) volume: mounted, README.TXT read,
@@ -52,14 +52,18 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument('--app', required=True, help='fw-rs native ELF')
 ap.add_argument('--image', default=os.path.join(ROOT, 'fw-rs/dm40-fw-native.bin'),
                 help='update file copied in the install step (default fw-rs/dm40-fw-native.bin)')
-ap.add_argument('--port', type=int, default=40200, help='emulator USB/IP port (default 40200)')
+ap.add_argument('--port', type=int, default=None,
+                help='emulator USB/IP port (default: a free one in 61000-64999, run.free_port)')
 ap.add_argument('--steps', default='live,poweroff,install')
 A = ap.parse_args()
 os.environ['DM40_USBTMC'] = 'emu'
 sys.path.insert(0, os.path.join(ROOT, 'fw-rs/tools'))
 import dm40dbg  # noqa: E402
 sys.path.insert(0, HERE)
-import run  # noqa: E402  (emu/run.py: emu_uid, UID)
+import run  # noqa: E402  (emu/run.py: emu_uid, UID, free_port)
+if A.port is None:
+    A.port = run.free_port()
+print('emulator USB/IP port %d' % A.port, flush=True)
 
 # The emulator's serial (fw-rs: the chip UID as 24 hex digits, memory order)
 # and the real unit's, which the emulator's udisks drive must never carry.

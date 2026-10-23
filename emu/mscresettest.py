@@ -50,14 +50,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='fw-rs native ELF / image')
-ap.add_argument('--port', type=int, default=4851, help='USB/IP port (default 4851)')
+ap.add_argument('--port', type=int, default=None,
+                help='USB/IP port of the emulator this test starts (default: a free one in 61000-64999, run.free_port)')
 ap.add_argument('--cases', default='serial,alloc-small,zero-alloc,invalid-cbw,read-bot,read-port,ua-port,stop-start,eject-load,'
                                    'eject-port')
 A = ap.parse_args()
-os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, HERE)
+import run  # noqa: E402  (emu/run.py: emu_uid, free_port)
+if A.port is None:
+    A.port = run.free_port()
+print('USB/IP port %d' % A.port, flush=True)
+os.environ['USBIP_PORT'] = str(A.port)
 import usbip_client as uc  # noqa: E402
-import run  # noqa: E402  (emu/run.py: emu_uid)
 
 SERIAL = run.emu_uid(A.port).hex().upper()
 
