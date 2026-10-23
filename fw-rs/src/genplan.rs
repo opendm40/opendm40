@@ -498,7 +498,9 @@ impl Out {
     pub fn offset_v(&self) -> Option<f32> {
         (!self.fixed_level()).then(|| (Self::v(self.hi_code) + Self::v(self.lo_code)) / 2.0)
     }
-    /// Effective duty, percent.
+    /// Effective duty, percent (inline: SOUR:FUNC:SQU:DCYC? may come while
+    /// an AD2 stream runs, and gen::plan is region C).
+    #[inline(always)]
     pub fn duty_pct(&self) -> f32 {
         self.duty as f32 / 100.0
     }

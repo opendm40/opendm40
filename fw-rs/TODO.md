@@ -1517,6 +1517,22 @@ Firmware:
       command 02 in the Wave view: late 0. (6) Device page / *IDN? / SYST:MOD? / BT 00 / 02 values unchanged (copies). (7) Windows: copy
       INFO/CALIB.BIN during a 60 s session: does Explorer wait or fail, and after how long? (The read-only
       volume itself passed on Windows 11, b6909d6, above.)
+      **Device 35fce2a (device-check-2026-10-21.md "35fce2a"): 1-4, 6 PASS, 5 PASS for the listed queries;
+      (7) Windows not run.** 38400 / 76800 disk sessions with `cp INFO/*.BIN` (FIRMWARE.BIN first): max_lat
+      280 ns, late / overruns / lost_before 0, the cp returns as the session ends, the copies are byte-equal, no
+      sda dmesg line. Wave view 1 ms/div: cp blocked 40 s, returned at MENU, late 0. O_DIRECT splits: slow ranges
+      wait the whole session, the head reads at once, 280 ns. UID / OTP / OPTBYTES at 76800: 867 reads, 280 ns.
+      BT 00 / 02 in the Wave view: late 0, but not answered (stock frames wait for the stream's end, UF-36).
+- [ ] **Generator queries re-apply the generator, in region C (device 35fce2a).** `OUTP?` polled during a 38400
+      disk session: late 25, max_lat 21.1 us at lat_pc `Gen::apply`, 29 samples lost in 10 s (an ngscopeclient
+      polling `OUTP?` did the same to three of the retest runs). `App::scpi` called `gen_set` after every
+      generator command, queries included (also a stop_outputs + restart glitch on a running output, any time).
+      Fixed on branch devchk-35fc: `gen_set` only for settings (`reply.is_none()`), SOUR:FREQ? from a cached
+      `Gen::out_hz` (gen::plan::Timing::hz is region C), `Out::duty_pct` inline. Emulator fastlogtest
+      `--region-c --host-read --poll 'OUTP?;SOUR:FREQ?;SOUR:FUNC?;SOUR:VOLT?'`: base FAIL (Gen::apply), fix
+      PASS (also SOUR:VOLT:OFFS? / DCYC?), the 640 / 4800 / 38400 / 76800 region C run PASS. Device retest: OUTP? / SOUR:*? polled in a 38400 disk session: late 0; with
+      the generator ON (owner only), OUTP? no longer glitches the output. Left: a generator SETTING during a
+      stream still runs Gen::apply in region C.
 - [ ] A copy of a slow-bank INFO/ file while the meter streams for more than ~3 min (an open Wave view, a long
       fast-log session) can fail on Linux (EIO after 180 s; buffered reads usually recover) and maybe sooner on
       Windows. Documented (README.TXT could say so; native-boot.md does).
@@ -2304,6 +2320,12 @@ Emulator (emu/):
          (replaces the inferred 10 mV / V of the model; k > ~17 mV / V would leave the 1.4 V gap of doc 4.8).
       6. Leads in A / COM, V-COM open, a few mA (2-5 mA) through A in RES and TEMP (K TC and an NTC type):
          A-JACK within ~1 s (RES) / ~2.5 s (TC), field 12 = 0.
+      **Device 35fce2a (device-check-2026-10-21.md "35fce2a" 7a-7d):** 5 TEMP PASS (NONE, field 12 = 1 at
+      5 / 10 V). **5 RES FAIL:** A-JACK at 1 / 5 / 10 V and the square, never LIVE?, field 12 = 0 (free); FETC?
+      is OL (positive), not negative, on every range 600 ohm..60 Mohm at 5 V: the ohm AD1 code does not go
+      negative for a positive source, so V_GATE's premise fails on the device (owner: what tells a driven V-COM
+      in RES then? a negative source not tried). Comparator hits: none at 1.0-3.0 V DC, hits at 5 V: the
+      pickup k ~5-8 mV / V. 1-4, 6 blocked (no current in A).
 
 ## Device check 7409b92: shot fix, 76.8 kS/s, AC+DC methods (2026-10-23; docs/device-check-2026-10-21.md "7409b92")
 

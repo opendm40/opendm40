@@ -2357,3 +2357,70 @@ came back without problems.
 - **Device:** b6909d6. The coordinator detached it from the VM, and it is back on the host as /dev/usbtmc2.
   Nothing was written to its disk, and its settings and mode (Files live) were not touched.
 - **VM:** win11 shut off. The guest keeps Desktop\dm40copy (the three copied files).
+
+## 35fce2a: the slow-bank retest (TODO "Region C DATA reads" device retest 1-6, dmm-bugs 5) (2026-10-23 18:36 - 19:00)
+
+The owner had installed 35fce2a (it contains 7dcf3d4, the dmm-bugs fixes 1152624). INFO/FIRMWARE.BIN read before any
+session is byte-equal to the 35fce2a build (sha256 6209c7f4…13a9). `dm40dbg.py boot`: marker VALID, crash count 0,
+HEALTHY at the start and the end (no reset). Before the sessions every INFO/*.BIN was copied as a reference. Before each
+test the page cache was dropped (`posix_fadvise DONTNEED`, `fincore` 0 pages). The source was AC V with the
+calibrator's 40 Hz square, AD2. Files are in the scratchpad's `devchk-35fc/`: `disk4.py` (a disk session; `--cp`
+runs a real `cp` of INFO/ files from state 3, `--direct` runs O_DIRECT reads of a range in a loop, `--rfiles` runs
+buffered reads, `--poll-q` polls queries; dmesg is diffed; the DLG is fetched, decoded and deleted by exact name),
+`wv2.py`, `dmm7.py`, `dmm7b.py`, `bt02.py`, the JSONs and PNGs.
+
+| # | check | result |
+|---|---|---|
+| 1a | 38400 disk session (20 s), `cp` FIRMWARE.BIN, CALIB, BOOTDATA, LOADER, ROMBOOT, UID, OTP, OPTBYTES from state 3 (`cp384`) | **PASS**: max_lat 280 ns (`spiflash::cmd_addr`), late 0, overruns 0, dropped 0; 768 002 rows / 20.000 s, lost_before 0. The FIRMWARE.BIN `cp` started at 4.06 s and returned at 24.43 s; the session left state 3 at 24.1 s. All 8 copies are byte-equal to the references. dmesg: nothing for sda |
+| 1b | The same at 76800 (`cp768`) | **PASS**: max_lat 280 ns, late 0, overruns 0, cpu 464 permille; 1 536 004 rows / 20.000 s, lost_before 0. `cp` ran from 8.67 s to 29.84 s; state 5 came at 29.74 s. All copies are equal. dmesg clean |
+| 2 | Wave view at 1 ms/div (ACQ:SRAT? 76 800), `cp` FIRMWARE.BIN + CALIB.BIN, MENU at 40 s (`wv2`) | **PASS**: `cp` blocked from 0 to 40.27 s and returned right after MENU (40.1 s). The copies are equal. While the view was open: late 0, overruns 0, max_lat 300 ns (`dm40_fw::run`); none after the exit either. dmesg: nothing for sda |
+| 3 | O_DIRECT splits at 38400, 12 s each (`fwdirect.py`) | **PASS** (after the rerun, below): FIRMWARE.BIN 0x7C000..0x82000 (`s7c`), 0x7C000..0x96000 (`stail`), CALIB (`scal`), LOADER (`sldrb`), BOOTDATA (`sbd`): the first read waits for the whole session (11.9-12.4 s) and returns at the end, then reads at once; max_lat 280 ns, late 0, lost_before 0. 0..0x70000 (`sh0b`): 21 reads of 448 KiB, 0.57 s each; 0x70000..0x7C000 (`s70b`): 160 reads, ~60 ms each; both 280 ns, late 0 |
+| 4 | UID / OTP / OPTBYTES.BIN, cache-dropped buffered reads in a loop during a 76800 session (15 s) (`r768`) | **PASS**: 867 reads, all byte-equal, each ≤ 175 ms (never refused); max_lat 280 ns, late 0, lost_before 0 |
+| 5 | SCOP:MEAS:VPP?, WAV:PRE?, DBG:HWTRIG?, LOG:SCALe?, LOG:DEST?, LOG:DURation?, DBG:ISR? polled in a 38400 disk session, 98 rounds in 20 s (`p5`) | **PASS**: late 0, max_lat 280 ns, lost_before 0. Worst reply times: VPP? 161 ms, WAV:PRE? 107 ms, the others < 1 ms. |
+| 5b | BT 00 / 02 (5 each, `bt02.py`) in the Wave view at 1 ms/div (76 800), after the end of the session runs | **PASS for the ISR**: late 0, max_lat 260 ns before and after (dropped 31 came from the view's entry, before BT). **No BT reply** to any of the 10 frames (2 s timeout each). This matches the BT check of 0667175 item 4 (stock frames are not served during a stream, UF-36). After MENU: 00 / 02 answered at once, with the same bytes as in 6 |
+| 5+ | **New:** `OUTP?` (the generator's queries) polled in a 38400 disk session (`outp`) | **FAIL**: late 25, overruns 8, **max_lat 21.1 us at lat_pc `Gen::apply`** (region C), lost_before 29 in 10 s. That is one late entry per query. Cause and fix below |
+| 6 | Device page, *IDN?, SYST:MOD?, BT 00 / 02 | **PASS**: Device page: Model DM40A, Bootloader V1.1, Software fw-rs 0.0.1, Hardware V4 (`dev-before.png`). *IDN? `Alientek,DM40A,0,dm40-fw 0.1`; SYST:MOD? `DM40A,0,60000`; BT 00 → `05 03 41` ('A'); BT 02 → `28 1a 0b` = 40 / 26 / 11, which is BOOTDATA +0x10..12 = 04 01 01 (genuine-check.md). At the end *IDN?, SYST:MOD? and BT 00 / 02 were queried again: same. The Device page was not reopened |
+| 7a | dmm-bugs 5: TEMP with 1 / 5 / 10 V DC and the square on V-COM, 10 s each (`dmm7`) | **PASS**: SYST:ALER? NONE throughout, DBG:SENT? field 12 = 1 (driven) at 5 / 10 V, 0/1 at 1 V and the square |
+| 7b | dmm-bugs 5: RES with 1 / 5 / 10 V DC and the square (AUTO, so the 60 MΩ range) | **FAIL**: **A-JACK** at every level (`res-5.png`: red A-JACK, "0L MΩ"); LIVE? never shows, field 12 stays **0 (free)**. FETC? reads OL (+9.9E37) at 5 / 10 V and 50.2 MΩ at 1 V, so it is never negative. `dmm7b`, 5 V on manual 600 Ω .. 60 MΩ: OL and A-JACK on every range, field 12 = 0. On this device the ohm AD1 code does **not** go negative for a positive source above the ~1.4 V open-circuit voltage, so the V_GATE premise (sentinel.rs, "ohm's AD1 code goes negative") fails here, and the gate takes V-COM as free. Not fixed; it needs the owner's call (an OL in ohm alone cannot tell a driven V-COM from the open leads of the A-JACK case). A negative source was not tried |
+| 7c | dmm-bugs 5: the comparator's lowest tripping level in RES, 1.0 / 1.5 / 2 / 2.5 / 3 V DC, 6 s each | **Inconclusive**: field 8 (hits) did not grow at 1.0-3.0 V (367 all through), while 5 V had added hits before. One A-JACK showed at the 1.0 V step, carried over from the square just before it. So the PB1 pickup trips between 3 and 5 V: k ≈ 23.75 mV / 3..5 V ≈ 5-8 mV / V, below the ~17 mV / V of doc 4.8's gap |
+| 7d | dmm-bugs 1-4 and 6 (AUTO overload, OVLD, a current in A) | **BLOCKED**: the A jack is not wired (no current source) |
+
+**Contaminated runs and the reruns.** The first `sh0`, `s70` and `sldr` runs had late 3 / 5 / 2 and max_lat 17-18 us,
+all at lat_pc `Gen::apply`. My scripts send no generator command. At the time an outside USBTMC client (the owner's
+ngscopeclient, whose DM40 driver polls `OUTP?`) was running, so these three runs were repeated after it closed:
+`sh0b`, `s70b`, `sldrb` all gave late 0 and 280 ns. `outp` then reproduced the stall on purpose.
+
+**Cause of 5+:** `App::scpi` ends every generator command with `gen_set(g)`, queries included. So `OUTP?`,
+`SOUR:FREQ?`, `SOUR:FUNC?`, `SOUR:VOLT?` and the others re-apply the generator: `stop_outputs()` and a restart, which
+also glitches a running output. `Gen::apply` and gen::plan are region C (link-native.x .cold), so each query during a
+stream stalls the ISR ~21 us. Emulator, base 35fce2a, `fastlogtest --sessions ad2:9600 --region-c --host-read
+--poll 'OUTP?;SOUR:FREQ?;SOUR:FUNC?;SOUR:VOLT?'`: FAIL, `Gen::apply` (code + interrupted PCs).
+
+**Fix (branch devchk-35fc, not on the device):**
+- `gen_set` only for a setting (`reply.is_none()`, as the scope branch does), so queries no longer re-apply.
+- `SOUR:FREQ?` reads a cached `out_hz` (set in `Gen::new` / `apply`) instead of `gen::plan::Timing::hz`. The first
+  fix alone still ran `Timing::hz` in region C (emulator).
+- `Out::duty_pct` is `#[inline(always)]`.
+
+Setting a generator value during a stream still runs `Gen::apply` in region C; that is left as it is (a rare user
+action). Emulator on the fix: the poll run above with SOUR:VOLT:OFFS?, SOUR:FUNC:SQU:DCYC? and *IDN? added: PASS,
+no region C code and no slow-bank load while streaming, lost 0; `fastlogtest --sessions
+ad1:640,ad2:4800,ad2:38400,ad2:76800 --region-c --host-read`: PASS, lost 0, no region C. Image:
+`devchk-35fc/dm40-fw-<commit>.bin` in the scratchpad (the commit that adds this section).
+
+### State at the end
+
+- **Device:** 35fce2a, DMM page, DC V AUTO+, RATE SLOW, `VOLT:COUP?` DC, READ? 0.99999 V (`end.png`). LOG: AD1 / 4800
+  / HOST / DUR 60 / CHOP 1 / OSR 3 / STAT 0. `OUTP?` 0 throughout. SYST:ALER? NONE, `SYST:ERR?` "No error". Crash count
+  0, no reset.
+- **Settings:** volume 0, backlight 10 %, Dim / Shutdown Never (seen on the Settings page). **Two settings were
+  changed by mistake and then restored.** After the Device page, MENU returned to Settings 3/3, not to the main menu.
+  The "Multimeter" tap (140,105) therefore landed on Settings 3/3's **USB disk** row ("PC can edit (re-plug)", asked
+  only, `DBG:VDISK:RO?` 1,0), and a later one landed on Settings 2/3's **DMM row** (Bargraph → History). Both were
+  set back: `DBG:VDISK:RO 1` (→ 1,1, "Files live" on the page) and one more tap on DMM row → Bargraph. No bus reset
+  came in between, so the volume stayed read-only all along.
+- **Disk:** MMEM:CAT? equals the start (3 534 848 / 13 205 504, same names). Each session's LOGS/FAST000/001.DLG was
+  deleted by exact name (`del1.py`).
+- **Calibrator:** 1 V DC, enabled.
+- Side note: another agent's emulator attached as sdb / usbtmc3 over vhci_hcd during this run. Its dmesg lines are
+  not the meter's.
