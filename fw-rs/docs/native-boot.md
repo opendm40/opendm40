@@ -1499,10 +1499,12 @@ device) and a power-condition request change nothing. Pending media-change
 UNIT ATTENTIONs are kept while ejected. The CDB byte is read from the CBW
 in the transport buffer as for PREVENT (usbd-storage hides it); a CBW not
 found exactly once is ignored. Any 0x1B still sets `STOP_UNIT` (recovery-usb
-powers off on it). Nothing else changes for "PC can edit": the session ends
-at the Allow (Linux sends it before the eject) or after the quiet time
-(Windows), and the firmware file is committed by `vwrite::poll` once its
-data has settled, whether the medium is ejected or not. `DBG:VDISK:EJECT?` →
+powers off on it). "PC can edit": the session ends at the Allow (Linux sends
+it before the eject) or after the quiet time (Windows); the firmware file
+is committed by `vwrite::poll` once its data has settled, whether the
+medium is ejected or not, and an Allow that comes before that check (`cp`
++ eject at once: the install used to be lost, also before the eject
+change) waits for it, at most 1.5 s (`END_WAIT_MS`, frozen meanwhile). `DBG:VDISK:EJECT?` →
 `<LUN 0 ejected>,<START STOP UNITs since boot>,<CB[4] of the last, 256 =
 ignored>`. Tests: emu/mscresettest.py `stop-start`, `eject-load`,
 `eject-port` (raw SCSI over USB/IP), emu/ejecttest.py (the kernel's
@@ -1681,7 +1683,10 @@ dropped as at any session end, tools/fatren-test vwrite "rw-ro"). A host that ne
 written in the last 60 s. The session ends at the Allow (umount / eject)
 or a bus reset: every record dropped, the flags cleared (except a delete in
 progress), `refresh` regenerates the volume and raises the UNIT ATTENTION.
-Staged data idle for 5 s is **parked**: its SPI clusters linked as a
+A DM40*.BIN whose check is still due at the Allow (its data came less than
+300 ms before: `cp` + eject at once) holds the end back until `poll` has
+decided it, at most 1.5 s (`END_WAIT_MS`; frozen meanwhile; fatren-test
+vwrite "Allow at once"). Staged data idle for 5 s is **parked**: its SPI clusters linked as a
 hidden system file `_VHOSTnn.TMP` in the SPI root (the SPI disk is free for
 the on-device writers again; a later write to a parked block copies it
 first; at most 100 temp files a session, then a later burst's data is
