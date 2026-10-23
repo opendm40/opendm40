@@ -1587,7 +1587,47 @@ Rule: **nothing reads the slow bank while `hy3131::streaming()`** (the ISR
 owns the HY3131 bus: a fast-log session, the Wave view, the inrush page,
 the AD1 stream ISR).
 
-- **USB volume** (`vdisk.rs` `read_busy`, `msc.rs`): a READ(10) touching a
+- **USB volume, the mirror** (`vdisk.rs` `mirror_boot` / `mir_read`,
+  2026-10-24): every INFO/ byte from the slow bank lies in one range,
+  `0x08080000..0x080C1000` (the FIRMWARE.BIN tail, LOADER.BIN with
+  BOOTDATA.BIN inside it, CALIB.BIN), 260 KiB. It is kept as the raw file
+  `_INFOMIR.BIN` in the SPI disk's root, and while `streaming()` the volume
+  reads those bytes from there (`mem_src`; FIRMWARE.BIN through
+  `FwFile::fill_with` + `fw_body`, which splits the one 128-byte block that
+  straddles 0x08080000 between the flash and the mirror). So a copy of any
+  INFO/ file runs at full speed during a session or in the Wave view, with
+  no wait and no host timeout. Outside a stream the volume reads the flash
+  as before.
+  - Consistency: at every boot (`native.rs pre_main`, before USB, no
+    stream) `calbackup::write_file` compares the file with the flash byte
+    for byte; equal = nothing written (PRESENT), different or missing = a
+    new chain written, read back, the entry switched, the old chain freed
+    (WRITTEN, copy-on-write: a cut leaves the old file or lost clusters).
+    The mirror is served only after this boot's PRESENT / WRITTEN (and its
+    chain resolved, `calbackup::chain_of`): a stale file left by a failed
+    rewrite is never used. Nothing else writes those clusters (on-device
+    deletes take numbered names only; the host staging and the fast logger
+    use free clusters). So it is the running image and calibration, byte
+    for byte; a new image or a calibration changed by the stock firmware
+    is picked up at the next boot.
+  - Cost: 260 KiB = 65 clusters of the 16 MiB SPI disk (1.6 %; 130 while a
+    rewrite holds both chains). Wear: only a changed mirror is written (65
+    erases + 2 FAT and 1 root block per new image); an unchanged boot
+    reads it (65 blocks). RAM: 144 bytes SRAM (the cluster list); region
+    B ~0.5 KB (`mir_read`, `fw_body`, `body_copy`). Boot time: DBG:VDISK:
+    MIR? field 4 (emulator: PRESENT 219 ms every boot; WRITTEN ~1.0 s, 4.3 s
+    with the W25Q128 model's typ erase / program times; device: retest).
+  - DBG:VDISK:MIR? = served (1/0), the writer's status (0 NOTRUN 1
+    NOMEDIUM 2 BADBPB 3 PRESENT 4 WRITTEN 5 NOSPACE 6 ERROR), rewritten at
+    this boot (1/0), ms.
+  - Privacy: CALIB / BOOTDATA bytes were already on the SPI disk (the
+    write-once safety copy, calbackup.rs) and leave the meter only through
+    the USB volume as before (INFO/, DEBUG/SPIFLASH.BIN). Nothing logs them.
+  - A failed SPI read of the mirror (`mir_read`) switches it off for the
+    rest of the boot; msc.rs then answers that READ NOT READY (read_busy)
+    instead of MEDIUM ERROR, and the fallback below applies.
+- **USB volume, fallback without a mirror** (no SPI disk, NOSPACE, ERROR;
+  `vdisk.rs` `read_busy`, `msc.rs`): a READ(10) touching a
   sector served from the slow bank fails CHECK CONDITION, NOT READY,
   LOGICAL UNIT IS IN PROCESS OF BECOMING READY (02/04/01) before its data
   phase (the CSW goes out at once; Linux takes it as "device skipped data
@@ -1627,6 +1667,11 @@ Why NOT READY (decision 2026-10-23, of three):
 - (c) hold the reply until the stream stops: a SCSI command timeout (Linux
   30 s, then abort + BOT reset) against sessions of minutes or an open-ended
   Wave view. Rejected.
+- (d, 2026-10-24) the SPI mirror above: answers at once for any stream
+  length, so (a) is now only the fallback. Not taken: a DMA copy of the
+  slow pages during the stream (its loads go through the same flash
+  interface the ISR's fetches need; whether that stalls the ISR is not
+  measured and the emulator cannot show it), and RAM stays too small (b).
 
 Verified over the real Linux path (emu/kvmtest/run.sh: a KVM guest with the
 Ubuntu 7.0.0-38 kernel attaching the emulator over vhci-hcd, usb-storage,
@@ -1644,6 +1689,20 @@ sd, vfat; the NOT READY change, then the final image cafab0a):
   close the view / end the session and copy again.
 - Windows (classpnp) is expected to retry 02/04/01 too; how long it keeps
   trying is not known here: not verified (device retest).
+
+Verified with the mirror (2026-10-24, 12a1d9c): fastlogtest
+`--region-c --host-read --dur 20` at 38400 / 76800 S/s (typ chip timing):
+every slow-bank sector of the four files read during the session (37 / 24
+MB of INFO/ READs in all), no NOT READY, the same bytes as after the
+session, no region C call or slow-bank load, lost 0 at both rates (76800
+kept its rung). `emu/mirrortest.py`: fresh disk WRITTEN; the same image
+PRESENT with the saved SPI image unchanged; another image WRITTEN; one
+byte of the calibration sector changed WRITTEN, then PRESENT; each time
+`_INFOMIR.BIN` equals flash 0x08080000..0x080C1000. kvmtest (Linux
+usb-storage): `cat` of the four files and an O_DIRECT CALIB.BIN during a
+38400 session finish while it streams (10.7 s), byte-identical; with
+`dm40wait=240` (started 240 s of wall time into the stream, past the old
+180 s limit) 7.4 s, exit 0, identical, no kernel I/O error.
 
 Emulator check: `emu/regionc.py` arms `peripherals/FlashWatch.cs` (tlib's
 memory-access hook): every CPU data load from 0x08080000..0x08100000 while

@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""fw-rs: the INFO/ slow-bank mirror on the SPI disk (src/vdisk.rs
+`mirror_boot`, docs/native-boot.md "The slow flash bank while an AD2 stream
+runs") across boots. Each boot runs the emulator for --run-for virtual
+seconds with --save-disk / --save-flash, asks DBG:VDISK:MIR? (served,
+status 3 PRESENT / 4 WRITTEN, rewritten, ms) and then checks the saved SPI
+image: the root file _INFOMIR.BIN, followed through FAT 1, is byte-identical
+to the internal flash 0x08080000..0x080C1000 of that boot.
+
+  1 fresh disk (no mirror), image A          -> WRITTEN
+  2 the disk of 1, image A                   -> PRESENT, the disk unchanged
+  3 the disk of 2, image B (--app2)          -> WRITTEN (a new image)
+  4 the disk of 3, image B, a byte of the calibration sector's unused tail
+    changed in the flash (--base copy)       -> WRITTEN (a calibration change)
+  5 the disk of 4, the same flash as 4       -> PRESENT
+
+  cd fw-rs && ./build.sh && DM40_TDIR=target/ks DM40_OUT=/tmp/ks.bin ./build.sh --features keep-screen
+  emu/mirrortest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw \\
+      --app2 fw-rs/target/ks/thumbv7em-none-eabihf/release/dm40-fw
+
+Never prints the mirrored bytes (calibration / loader data are per-unit
+private). Exit status 0 = PASS.
+"""
+import argparse
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument('--app', required=True, help='fw-rs native ELF (image A)')
+ap.add_argument('--app2', required=True, help='another fw-rs native ELF (image B, e.g. --features keep-screen)')
+ap.add_argument('--port', type=int, default=None, help='USB/IP port (default: run.free_port, DM40_EMU_PORTS)')
+ap.add_argument('--run-for', type=float, default=30, help='virtual seconds per boot (the disk is saved at the end)')
+A = ap.parse_args()
+sys.path.insert(0, HERE)
+import run  # noqa: E402
+if A.port is None:
+    A.port = run.free_port()
+os.environ['USBIP_PORT'] = str(A.port)
+import usbip_client as uc  # noqa: E402
+
+OUT = os.path.join(HERE, 'out')
+TAG = 'mirror-%d-%d' % (A.port, os.getpid())
+LO, HI = 0x08080000, 0x080C1000
+FAIL = []
+MADE = []
+
+
+def check(ok, what):
+    print('  %s %s' % ('ok  ' if ok else 'FAIL', what), flush=True)
+    if not ok:
+        FAIL.append(what)
+
+
+def mirror_file(disk):
+    """_INFOMIR.BIN of the SPI image (4 KiB-sector FAT16): bytes or None."""
+    b = disk
+    bps, spc, rsvd, nfat, nroot = struct.unpack_from('<HBHBH', b, 11)
+    fatsz = struct.unpack_from('<H', b, 22)[0]
+    root = (rsvd + nfat * fatsz) * bps
+    data = root + nroot * 32
+    cb = spc * bps
+    fat = rsvd * bps
+    for i in range(nroot):
+        e = b[root + 32 * i:root + 32 * i + 32]
+        if e[0] == 0:
+            break
+        if e[0] == 0xE5 or e[11] & 0x3F == 0x0F or e[11] & 0x18:
+            continue
+        if e[:11] == b'_INFOMIRBIN':
+            c, size = struct.unpack_from('<HI', e, 26)
+            out = b''
+            while len(out) < size:
+                if not 2 <= c < 0xFFF0:
+                    return None
+                out += b[data + (c - 2) * cb:data + (c - 1) * cb]
+                c = struct.unpack_from('<H', b, fat + 2 * c)[0]
+            return out[:size]
+    return None
+
+
+def boot(n, app, disk_in, base=None):
+    disk = os.path.join(OUT, '%s-disk%d.bin' % (TAG, n))
+    flash = os.path.join(OUT, '%s-flash%d.bin' % (TAG, n))
+    shutil.copy(disk_in, disk)
+    MADE.extend([disk, flash])
+    cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--app', app, '--usbip', '0.01',
+           '--usbip-port', str(A.port), '--run-for', str(A.run_for), '--name', '%s-%d' % (TAG, n),
+           '--disk', disk, '--save-disk', disk, '--save-flash', flash]
+    if base:
+        cmd += ['--base', base]
+    emu = subprocess.Popen(cmd, cwd=ROOT, stdout=open(os.path.join(OUT, '%s-%d.out' % (TAG, n)), 'w'),
+                           stderr=subprocess.STDOUT, start_new_session=True)
+    mir = None
+    try:
+        for _ in range(150):
+            try:
+                d = uc.Dev('1-0')
+                break
+            except Exception:
+                time.sleep(2)
+        else:
+            check(False, 'boot %d: no USB/IP device' % n)
+            return None, None, None
+        t = uc.Usbtmc(d)
+        t.write('DBG:VDISK:MIR?')
+        mir = [int(x) for x in t.read(timeout=60).decode().strip().split(',')]
+        d.close()
+        emu.wait(timeout=3600)
+    finally:
+        if emu.poll() is None:
+            os.killpg(emu.pid, 15)
+            emu.wait()
+    with open(disk, 'rb') as f:
+        dd = f.read()
+    with open(flash, 'rb') as f:
+        ff = f.read()
+    return mir, dd, ff[LO - 0x08000000:HI - 0x08000000]
+
+
+def verify(n, what, mir, dd, win, want_status):
+    print('boot %d (%s): DBG:VDISK:MIR? %s' % (n, what, mir), flush=True)
+    if mir is None:
+        check(False, 'boot %d: DBG:VDISK:MIR? answered' % n)
+        return
+    check(mir[0] == 1 and mir[1] == want_status and mir[2] == (want_status == 4),
+          'boot %d: served, status %d (want %d), rewritten %d, %d ms' % (n, mir[1], want_status, mir[2], mir[3]))
+    m = mirror_file(dd)
+    check(m is not None and len(m) == HI - LO and m == win,
+          'boot %d: _INFOMIR.BIN on the saved SPI disk == flash 0x%08X..0x%08X (%s bytes)'
+          % (n, LO, HI, len(m) if m is not None else None))
+
+
+src = os.path.join(OUT, 'disk.bin')
+fresh = src if os.path.exists(src) else os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin')
+check(mirror_file(open(fresh, 'rb').read()) is None, 'the starting SPI disk has no mirror')
+try:
+    m1, d1, w1 = boot(1, A.app, fresh)
+    verify(1, 'fresh disk, image A', m1, d1, w1, 4)
+    p1 = os.path.join(OUT, '%s-disk1.bin' % TAG)
+    m2, d2, w2 = boot(2, A.app, p1)
+    verify(2, 'image A again', m2, d2, w2, 3)
+    check(d2 == d1, 'boot 2: the SPI disk is unchanged (no write without a change)')
+    m3, d3, w3 = boot(3, A.app2, os.path.join(OUT, '%s-disk2.bin' % TAG))
+    verify(3, 'image B', m3, d3, w3, 4)
+    check(w3 != w2, 'boot 3: image B differs from A inside the mirrored range')
+    # A calibration-sector change: the base dump with one byte of the unused
+    # tail of 0x080C0000..0x080C1000 changed (never printed).
+    base = os.path.join(OUT, '%s-base.bin' % TAG)
+    MADE.append(base)
+    b = bytearray(open(run.DUMP, 'rb').read())
+    off = 0x080C0FF0 - 0x08000000
+    b[off] ^= 0x5A
+    open(base, 'wb').write(b)
+    m4, d4, w4 = boot(4, A.app2, os.path.join(OUT, '%s-disk3.bin' % TAG), base)
+    verify(4, 'image B, calibration sector changed', m4, d4, w4, 4)
+    check(w4 != w3, 'boot 4: the flash window changed')
+    m5, d5, w5 = boot(5, A.app2, os.path.join(OUT, '%s-disk4.bin' % TAG), base)
+    verify(5, 'the same again', m5, d5, w5, 3)
+    check(d5 == d4, 'boot 5: the SPI disk is unchanged')
+finally:
+    for p in MADE:
+        if os.path.exists(p):
+            os.remove(p)
+print('FAIL: %d checks' % len(FAIL) if FAIL else 'PASS')
+sys.exit(1 if FAIL else 0)

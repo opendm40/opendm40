@@ -6,6 +6,7 @@
 # Parameters from the kernel command line:
 #   dm40port=<usbip port on the host>  dm40dur=<LOG:DURation s>
 #   dm40direct=1: first an O_DIRECT read of CALIB.BIN (dd iflag=direct)
+#   dm40wait=<s>: start the copies only after the stream ran this long
 export PATH=/bin LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
 mount -t proc proc /proc; mount -t sysfs sys /sys; mount -t devtmpfs dev /dev
 mkdir -p /var/run/vhci_hcd /tmp
@@ -34,8 +35,14 @@ q 'LOG:DEST DISK'; q "LOG:DURation $dm40dur"; q 'LOG:STATe ON'; q 'SYST:ERR?'
 for i in $(seq 120); do s=$(q 'LOG:DISK?'); case "$s" in 3,*) break;; esac; sleep 0.5; done
 log "LOG:DISK? $s"
 q 'DBG:ISR?'
+if [ -n "$dm40wait" ]; then
+    # Copy only after the stream has run this long (s): past the 180 s a
+    # NOT READY answer could be retried for.
+    log "waiting $dm40wait s with the stream running"
+    sleep $dm40wait
+fi
 t0=$(cut -d' ' -f1 /proc/uptime)
-log "copy start (stream running)"
+log "copy start (stream running, LOG:DISK? $(q 'LOG:DISK?'))"
 if [ -n "$dm40direct" ]; then
     # O_DIRECT: no page-cache fallback, the reader sees the SCSI result.
     dd if=/mnt/INFO/CALIB.BIN of=/tmp/direct.bin bs=4096 iflag=direct; rc=$?
