@@ -1047,6 +1047,10 @@ const OHM_ENTRY_MS: u64 = 150;
 /// phase in `set_sub`; its plain DC / AC entry is a button entry too). The
 /// relays switch inside write_config (10 ms pulse).
 const ENTRY_MS: u64 = 300;
+
+/// Manual V range change (MF page, SCPI `<f>:RANGe`, `set_range`): the
+/// stock's range-write deadline (0xfa); the first conversion is still vetted.
+const RANGE_MS: u64 = 250;
 const OHM_SINGLE_MS: u64 = 2500;
 
 // AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-fwrs.md
@@ -2528,7 +2532,9 @@ impl Dmm {
                 self.manual = true;
                 let (m, r) = if i == 0 { (if ac { 2 } else { 3 }, 1) } else { (if ac { 0 } else { 1 }, i as i8 - 1) };
                 if !self.same_row(m, r) {
-                    self.set(clk, m, r, 450);
+                    // The stock's range write (S+7 != m+1: 0xfa, switch-
+                    // latency.md proposal 4); AC+DC keeps its DC phase's 450.
+                    self.set(clk, m, r, if self.acdc { 450 } else { RANGE_MS });
                 }
             }
             (Button::Amp, Some(i)) if i <= 5 => {
@@ -2560,7 +2566,7 @@ impl Dmm {
     /// it) on range `r`, so choosing that item again (the highlighted item
     /// tapped, SCPI `<f>:RANG` with the present range, sigrok `range=`, or
     /// AUTO -> manual on the range AUTO is on) only makes the range manual.
-    /// Rewriting the row then restarted the conversion behind a 450 ms
+    /// Rewriting the row then restarted the conversion behind a 450 ms (then)
     /// settle that reset nothing (`set` with the mode unchanged): 1-2
     /// readings of 25-51 % of the input on DC V (device check 8087c7d).
     fn same_row(&self, m: u8, r: i8) -> bool {
