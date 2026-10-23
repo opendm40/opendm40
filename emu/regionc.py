@@ -21,6 +21,19 @@ the stream (the fast logger's Prep) slows the emulator to a crawl.
 A function is reported once per run (its hook is gone after the first hit):
 a scenario's check sees only functions no earlier step called while the
 ISR owned the bus, so the tests also check the whole run at the end.
+
+DATA reads (2026-10-23, device b6909d6: the USB volume's INFO/ files copied
+out of flash >= 0x08080000 stalled the ISR 21.8 us per load, which the
+fetch hooks above cannot see): peripherals/FlashWatch.cs records every CPU
+data load from the slow bank 0x08080000..0x08100000 (region C, the
+FS-loader, the loader data, the calibration record) while HANDED is set,
+once per load instruction, and every PC of the slow bank the ISR interrupts
+(code running there while streaming: a function entered before the stream
+started, e.g. the tail of logger::Logger::start after stream::start, which
+the entry hooks above miss). `calls` reports them as "data <function>+0x..
+<- 0x0808xxxx" / "code <function>+0x.. (interrupted by the ISR)" next to
+the region C functions, so every test that checks `calls` checks all. `data=False`: without the watch (it makes every load
+and store a callout, ~2x slower).
 """
 import glob
 import os
@@ -28,14 +41,19 @@ import subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 C_LO, C_HI = 0x08080000, 0x080A0000
+# The slow (not zero-wait) flash: from 0x08080000 to the end of the 1 MiB.
+SLOW_LO, SLOW_HI = 0x08080000, 0x08100000
 
 
 class Hooks:
-    def __init__(self, app, out_dir, tag, exclude=()):
+    def __init__(self, app, out_dir, tag, exclude=(), data=True):
         self.syms = {}
+        self.funcs = []  # (address, name) of every function, sorted: data-read PCs
         self.hits = os.path.join(out_dir, tag + '.chits')
+        self.dhits = os.path.join(out_dir, tag + '.dhits')
         self.script = None
         open(self.hits, 'w').close()
+        open(self.dhits, 'w').close()
         nm = sorted(glob.glob(os.path.join(ROOT, 'toolchain/rustup/toolchains/*/lib/rustlib/*/bin/llvm-nm')))
         if not nm:
             return
@@ -46,6 +64,8 @@ class Hooks:
             if len(p) < 3:
                 continue
             a = int(p[0], 16)
+            if p[1] in 'tT':
+                self.funcs.append((a & ~1, p[2]))
             if p[1] in 'tT' and C_LO <= a < C_HI and not any(x in p[2] for x in exclude):
                 self.syms[a & ~1] = p[2]
             elif p[2].startswith('dm40_fw::hy3131::HANDED'):
@@ -55,19 +75,49 @@ class Hooks:
         code = ("(machine.SystemBus.ReadByte(0x%x)!=0) and (open('%s','a').write('%%x 1'%%pc+chr(10)), self.RemoveHooksAt(pc))"
                 % (handed, self.hits))
         self.script = os.path.join(out_dir, tag + '.cscript')
+        self.funcs.sort()
         with open(self.script, 'w') as f:
             for a in sorted(self.syms):
                 f.write('1 monitor sysbus.cpu AddHook 0x%08x "%s"\n' % (a, code))
+            if data:
+                f.write('1 monitor sysbus.flashwatch Arm 0x%08x 0x%08x 0x%08x "%s"\n'
+                        % (SLOW_LO, SLOW_HI, handed, self.dhits))
 
     def lines(self):
         """The event-script lines (run.py --script), '' without hooks."""
         return open(self.script).read() if self.script else ''
 
     mark = 0
+    dmark = 0
 
     def reset(self):
         """Start a scenario: `calls` reports the hits after this point."""
         self.mark = os.path.getsize(self.hits) if os.path.exists(self.hits) else 0
+        self.dmark = os.path.getsize(self.dhits) if os.path.exists(self.dhits) else 0
+
+    def func_of(self, pc):
+        """'function+0xoff' of a code address."""
+        import bisect
+        i = bisect.bisect_right(self.funcs, (pc, '\uffff')) - 1
+        if i < 0:
+            return '0x%x' % pc
+        a, n = self.funcs[i]
+        return '%s+0x%x' % (n, pc - a)
+
+    def data_reads(self, every=False):
+        """{"data <function>+0x.. <- 0xaddr": 1}: slow-bank data loads while
+        the ISR owned the bus (FlashWatch.cs), once per load instruction."""
+        got = {}
+        if os.path.exists(self.dhits):
+            with open(self.dhits, 'rb') as f:
+                f.seek(0 if every else self.dmark)
+                for l in f.read().decode(errors='replace').splitlines():
+                    p = l.strip('\0').split()
+                    if len(p) == 2 and p[1] == 'code':
+                        got['code %s (interrupted by the ISR)' % self.func_of(int(p[0], 16))] = 1
+                    elif len(p) == 2:
+                        got['data %s <- 0x%s' % (self.func_of(int(p[0], 16)), p[1])] = 1
+        return got
 
     def calls(self, every=False):
         """{region C function: 1} called while the ISR owned the bus since
@@ -81,9 +131,10 @@ class Hooks:
                     if len(p) == 2:
                         n = self.syms.get(int(p[0], 16), p[0])
                         got[n] = max(got.get(n, 0), int(p[1]))
+        got.update(self.data_reads(every))
         return got
 
     def cleanup(self):
-        for p in (self.script, self.hits):
+        for p in (self.script, self.hits, self.dhits):
             if p and os.path.exists(p):
                 os.remove(p)

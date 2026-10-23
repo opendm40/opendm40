@@ -235,6 +235,9 @@ fn wait_until(ms: u32, mut done: impl FnMut() -> bool) -> bool {
 impl Bt {
     #[inline(never)] // .cold (link-native.x): start-up
     pub fn new() -> Self {
+        for (i, b) in BOOT_VER.iter().enumerate() {
+            b.store(unsafe { core::ptr::read_volatile((BOOT_DATA + 0x10 + i as u32) as *const u8) }, Ordering::Relaxed);
+        }
         unsafe {
             modify32(RCU_APB1EN, 0, 1 << 19); // UART4
             // PA0 / PA1: AF8.
@@ -497,6 +500,18 @@ impl Bt {
 /// Bootloader data block in internal flash (read only): version bytes.
 const BOOT_DATA: u32 = 0x080A_4000;
 
+/// Its version bytes +0x10..+0x12 (HW major, loader major / minor), copied
+/// once by `Bt::new` at start-up: BT command 02 and the Device page read
+/// the copy. 0x080A4000 is in the slow flash bank (not zero-wait): a load
+/// there stalls the AD2 stream ISR ~21.8 us (device b6909d6), and either
+/// may be used while a stream runs.
+static BOOT_VER: [core::sync::atomic::AtomicU8; 3] = [const { core::sync::atomic::AtomicU8::new(0) }; 3];
+
+/// The boot data's version bytes (see BOOT_VER).
+pub fn boot_ver() -> [u8; 3] {
+    BOOT_VER.each_ref().map(|b| b.load(Ordering::Relaxed))
+}
+
 /// Unit prefix step (x1000) relative to the base unit of the mode group
 /// (V group: mV, A group: uA, ohm, nF, Hz; diode V, duty %, temperature C/F).
 fn prefix(mode: u8, unit: &str) -> u8 {
@@ -615,8 +630,8 @@ impl Bt {
             0x00 => self.reply(0, &[0x05, 0x03, b'A' + dmm.model()], true),
             0x01 => self.reply(1, &[st], false),
             0x02 => {
-                let b = |o: u32| unsafe { core::ptr::read_volatile((BOOT_DATA + o) as *const u8) };
-                self.reply(2, &[b(0x10).wrapping_mul(10), 26, b(0x11).wrapping_mul(10).wrapping_add(b(0x12))], false);
+                let [hw, bl_major, bl_minor] = boot_ver();
+                self.reply(2, &[hw.wrapping_mul(10), 26, bl_major.wrapping_mul(10).wrapping_add(bl_minor)], false);
             }
             0x03..=0x06 => {
                 self.reply(f.cmd, &[st], false);

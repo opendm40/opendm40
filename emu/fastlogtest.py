@@ -16,8 +16,13 @@ unchopped (the stream ISR: must lose nothing), 80 / 40 = OSR 2 / 3 chopped
   the ring was full: the disk did not keep up), the file over MMEM:DATA?
   decoded by tools/dlog.py: rows, sum of lost_before, bytes per second,
   pages per second. A session "keeps up" when no sample is lost.
---region-c --host-read: no region C function runs during a session while a
-host reads the INFO/ files (FIRMWARE.BIN first) off the USB volume and polls DBG:PROF?.
+--region-c --host-read: no region C function runs and no data is read from
+the slow flash bank (>= 0x08080000, emu/regionc.py data watch) during a
+session while a host reads the INFO/ files (FIRMWARE.BIN first) off the USB
+volume and polls DBG:PROF?, LOG:DEST?, LOG:DURation?; the files' slow-bank
+sectors answer NOT READY 02/04/01 (and only those, from FIRMWARE.BIN's
+sector 0x7C000), and after the session every file reads whole with the same
+bytes.
 Bluetooth (--bt-port passthrough): LOG:STATe ON refused for AD2 ("Rate too
 high for Bluetooth") and with LOG:DEST DISK ("Command protected"); an AD1
 40 S/s session drains over BT LOG:DATA?.
@@ -212,42 +217,20 @@ def vol_read(q, n, tag):
     print('  volume read %s: %d bytes in %.2f s device time (%.0f KB/s), %.1f s wall' % (name.decode(), size, (t1 - t0) / 1000, kbs, time.time() - w0), flush=True)
 
 
-def vol_dir(m, dirname):
-    """{NAME.EXT: (first LBA, size)} of the files in a root directory of the
-    generated volume (contiguous files, vdisk.rs)."""
-    m.cmd(0, bytes(6))  # TEST UNIT READY
-    b = m.read(0, 0, 1, 512)
-    spc, rsvd, nfat, nroot = struct.unpack_from('<BHBH', b, 13)
-    fatsz = struct.unpack_from('<H', b, 22)[0]
-    root = rsvd + nfat * fatsz
-    data = root + nroot * 32 // 512
-    lba = lambda c: data + (c - 2) * spc
-
-    def entries(secs):
-        for s_ in secs:
-            d = m.read(0, s_, 1, 512)
-            for k in range(16):
-                e = d[k * 32:k * 32 + 32]
-                if e[0] == 0:
-                    return
-                if e[0] != 0xE5 and e[11] != 0x0F:
-                    yield e
-    for e in entries(range(root, data)):
-        if e[:11] == dirname.ljust(11).encode():
-            c = struct.unpack_from('<H', e, 26)[0]
-            out = {}
-            for f in entries(range(lba(c), lba(c) + spc)):
-                if f[11] & 0x10 == 0 and f[0] != ord('.'):
-                    name = (f[:8].decode().strip() + '.' + f[8:11].decode().strip()).rstrip('.')
-                    out[name] = (lba(struct.unpack_from('<H', f, 26)[0]), struct.unpack_from('<I', f, 28)[0])
-            return out
-    return {}
+import infovol  # noqa: E402
+from infovol import SLOW_FILES, vol_dir  # noqa: E402
 
 
 class HostRead:
     """A host reading the INFO/ files (FIRMWARE.BIN first) in 64-sector
-    READ(10)s, round and round, plus DBG:PROF? (`step` between the
-    LOG:DISK? polls)."""
+    READ(10)s, round and round, plus DBG:PROF? and LOG:DEST? / LOG:DURation?
+    (fast_scpi, device b6909d6: region C) (`step` between the LOG:DISK?
+    polls). A READ refused with NOT READY, BECOMING READY (the slow-bank
+    sectors, vdisk.rs `read_busy`) is counted per file and the reader moves
+    on to the next file; the first refusal of each file is narrowed down
+    to its first refused sector. `verify` (after the session): every file
+    reads whole, without a refusal, and the bytes read during the session
+    are the same."""
 
     def __init__(self, q):
         self.q = q
@@ -258,6 +241,14 @@ class HostRead:
         self.bytes = 0
         self.profs = 0
         self.seen = set()
+        self.refused = {}   # name: NOT READY count
+        self.first = {}     # name: file offset of its first refused sector
+        self.other = []     # other errors
+        self.got = {}       # (name, offset): bytes read during the session
+
+    def _read(self, lba, n):
+        """bytes, or None when refused NOT READY (else raises)."""
+        return infovol.read(self.m, lba, n)
 
     def step(self):
         if self.m is None:
@@ -272,15 +263,58 @@ class HostRead:
         if self.files:
             name, (lba, size) = self.files[self.k]
             n = min(64, (size - self.off + 511) // 512)
+            ok = True
             if n > 0:
-                self.bytes += len(self.m.read(0, lba + self.off // 512, n, 512, retries=2))
-            self.off += n * 512
+                try:
+                    b = self._read(lba + self.off // 512, n)
+                except IOError as e:
+                    self.other.append('%s @%#x: %s' % (name, self.off, e))
+                    b = b''
+                if b is None:
+                    ok = False
+                    self.refused[name] = self.refused.get(name, 0) + 1
+                    if name not in self.first:
+                        for i in range(n):
+                            if self._read(lba + self.off // 512 + i, 1) is None:
+                                self.first[name] = self.off + i * 512
+                                break
+                else:
+                    self.bytes += len(b)
+                    self.got[(name, self.off)] = b
             self.seen.add(name)
-            if self.off >= size:
+            self.off += n * 512
+            if not ok or self.off >= size:
                 self.off = 0
                 self.k = (self.k + 1) % len(self.files)
         if 'PROF' in self.q('DBG:PROF?'):
             self.profs += 1
+        self.q('LOG:DEST?')
+        self.q('LOG:DURation?')
+
+    def verify(self, tag):
+        """After the stream: every file whole, no refusal, same bytes."""
+        whole = {}
+        bad = []
+        for name, (lba, size) in self.files:
+            d = b''
+            while len(d) < size:
+                n = min(64, (size - len(d) + 511) // 512)
+                b = self._read(lba + len(d) // 512, n)
+                if b is None:
+                    bad.append(name)
+                    break
+                d += b
+            whole[name] = d
+        check(not bad, '%s: after the session every INFO/ file reads without NOT READY (%s)' % (tag, ' '.join(bad) or 'all'))
+        diff = [('%s@%#x' % k) for k, b in self.got.items() if whole.get(k[0], b'')[k[1]:k[1] + len(b)] != b]
+        check(not diff, '%s: the INFO/ bytes read during the session == after it (%d reads%s)'
+              % (tag, len(self.got), (', differ: ' + ' '.join(diff[:5])) if diff else ''))
+        check(not self.other, '%s: no other READ error during the session (%s)' % (tag, '; '.join(self.other[:3]) or 'none'))
+        want = {n for n in SLOW_FILES if n in whole}
+        check(set(self.refused) == want and all(self.first.get(n) == SLOW_FILES[n] for n in want),
+              '%s: NOT READY for exactly the slow-bank sectors: refused %s, first refused offset %s (want %s)'
+              % (tag, sorted(self.refused.items()), sorted((n, hex(o)) for n, o in self.first.items()),
+                 sorted((n, hex(o)) for n, o in SLOW_FILES.items() if n in want)))
 
 
 def session(q, src, rate, profile):
@@ -331,9 +365,13 @@ def session(q, src, rate, profile):
               % (src, rate, hr.bytes, ' '.join(sorted(hr.seen)), hr.profs))
     if RC:
         got = RC.calls()
-        print('  region C functions called while streaming: %s' % (', '.join(sorted(got)) or 'none'), flush=True)
-        check(not got, '%s %d: no region C code while the stream ISR owns the bus%s'
+        print('  region C functions / slow-bank data reads while streaming: %s' % (', '.join(sorted(got)) or 'none'), flush=True)
+        check(not got, '%s %d: no region C code and no slow-bank data read while the stream ISR owns the bus%s'
               % (src, rate, '' if not got else ' (%s)' % ', '.join(sorted(got))))
+    if hr:
+        while int(q('LOG:DISK?').split(',')[0]) < 5:
+            time.sleep(0.5)
+        hr.verify('%s %d' % (src, rate))
     up1 = int(q('DBG:PING?').split(',')[0])
     if A.prof:
         print(q('DBG:PROF?'), flush=True)

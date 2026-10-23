@@ -259,10 +259,12 @@ SECTIONS
          * pw_tap / kp_apply / range hits, App::key and App::show were here
          * too; back in B since region A2 took the ASCII26 / F14 font blobs
          * out of B, 2026-10-22: App::tap meets a stream on the inrush
-         * page.) Start of a recording /
-         * logger session (App::rec_start with csvlog::start, Logger::start,
-         * logger::isr::start: before the ISR runs, or after it stopped on a
-         * retry). Page / dialog draws on a view change (power
+         * page.) Start of a recording session (App::rec_start with
+         * csvlog::start). NOT Logger::start / logger::isr::start: back in
+         * B (2026-10-23): their tails run after stream::start, with the ISR
+         * on (the slow-bank data watch, emu/regionc.py, caught
+         * Logger::start's literal load of DWT_CYCCNT's address).
+         * Page / dialog draws on a view change (power
          * settings page (not its per-tick settings_status), device page,
          * fuse dialog). DBG / calibration replies (DBG:ACDC?, DBG:SENT?,
          * SCOP:CAL with HwTrig::calibrate). Start-up only: Touch::new,
@@ -270,8 +272,6 @@ SECTIONS
          * usb::init_hw. */
         *(.text.*7dm40_fw3app*3App9wave_open*);
         *(.text.*7dm40_fw3app*3App9rec_start*);
-        *(.text.*7dm40_fw6logger*6Logger5start*);
-        *(.text.*7dm40_fw6logger3isr5start*);
         *(.text.*7dm40_fw2ui2pw13settings_page*);
         *(.text.*7dm40_fw2ui11device_page*);
         *(.text.*7dm40_fw6dialog10fuse_check*);

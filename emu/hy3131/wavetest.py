@@ -372,7 +372,11 @@ try:
             shot('w03-wave-%s' % name)
 
     POLL = ['ACQ:SRAT?', 'SCOP:MEAS:FREQ?', 'SCOP:MEAS:VPP?', 'TRIG:STAT?', 'WAV:POIN?', 'WAV:FORM?',
-            'CHAN1:OFFS?', 'CHAN1:SCAL?', 'TIM:SCAL?', 'WAV:PRE?', 'WAV:DATA?', 'DBG:PROF?']
+            'CHAN1:OFFS?', 'CHAN1:SCAL?', 'TIM:SCAL?', 'WAV:PRE?', 'WAV:DATA?', 'DBG:PROF?',
+            # fast_scpi (device b6909d6: region C, late 1 at 76800), and the
+            # model / identity (calibration record 0x080C0168, slow bank:
+            # cached at boot).
+            'LOG:DEST?', 'LOG:DURation?', '*IDN?', 'SYST:MOD?']
     print('fast bands: 2 ms/div = 38400 S/s (DMA /16), 1 ms/div = 76800 S/s (hybrid frames, feasibility 11.12)')
     for tb, name, rate in [(0.002, '2ms', 38400), (0.001, '1ms', 76800)]:
         q('TIM:SCAL %g' % tb)
@@ -592,6 +596,22 @@ try:
               % (dirname, stem, len(got) if got else None))
         check(ints(q('DBG:ISR?'))[1] == 1, 'the stream runs during the read')
         c_check('a host reading %s/%s.CSV' % (dirname, stem))
+    # INFO/ off the USB volume while the view streams: the files served
+    # from the slow flash bank (>= 0x08080000; device b6909d6: 21.8 us ISR
+    # stall per load) answer NOT READY 02/04/01 (fw-rs vdisk.rs read_busy),
+    # the others read; the data watch (emu/regionc.py) sees no slow-bank load.
+    print('host reads INFO/ off the USB volume while the wave view streams')
+    import infovol as fi  # noqa: E402
+    c_reset()
+    m = uc.Msc(t.d)
+    refused, read_ok, other = fi.read_info(m)
+    want = {n: o for n, o in fi.SLOW_FILES.items() if n in refused or n in read_ok}
+    check(refused == want and not other,
+          'INFO/ in the wave view: NOT READY from %s (want %s), read whole %s, other errors %s'
+          % (sorted((n, hex(o)) for n, o in refused.items()), sorted((n, hex(o)) for n, o in want.items()),
+             sorted(read_ok), other or 'none'))
+    check(ints(q('DBG:ISR?'))[1] == 1, 'the stream runs during the INFO/ reads')
+    c_check('a host reading INFO/')
     f0 = ints(q('DBG:ISR?'))[13]
     q('CONF:VOLT:DC')
     wait_ms(1500)
