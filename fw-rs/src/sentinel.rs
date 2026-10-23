@@ -386,6 +386,17 @@ pub const PKV_THR: i32 = 1_510;
 /// Window length (ms) of the comparator samples; a window with any trip is
 /// a "hit".
 pub const WIN_MS: u64 = 100;
+/// Switch blanking (owner 2026-10-23: AC? and A-JACK / A-PROT came on
+/// falsely after function / range / coupling switches). No comparator or
+/// peak sample counts for BLANK_ROW_MS after a row went out (the relays,
+/// the converters' first results; matters where samples run through the
+/// settle: the AC+DC phases), nor for BLANK_SETTLED_MS after the row's
+/// settle ended (`rearm`; the peak hold, on since the row went out, is
+/// cleared there by `dmm.rs`). Cost for a real fault present at a switch:
+/// BLANK_SETTLED_MS + up to one window more before its first hit window;
+/// nothing for one that starts later.
+pub const BLANK_ROW_MS: u64 = 150;
+pub const BLANK_SETTLED_MS: u64 = 100;
 /// Hit windows in a row before A-JACK is asserted (2 polls >= 100 ms apart).
 pub const AJACK_WINDOWS: u8 = 2;
 /// A-JACK clears this long after the last hit.
@@ -546,6 +557,15 @@ pub const M_HINTS: u8 = M_VJACK;
 pub const DC_HINT_V: f32 = 0.5;
 pub const DC_HINT_AC: f32 = 0.1;
 pub const HINT_ASSERT_MS: u64 = 2000;
+/// AC?: a V-tap window counts only while the DC V reading is below this
+/// (V). Both comparator bits mean the tap swings below -0.21 V and above
+/// +0.21 V, so the wave's mean (the DC reading) sits well inside its swing;
+/// a DC reading this far from zero with both bits is the comparator, not
+/// the input: the device showed AC? on 5 V DC and on the 0..9.5 V square
+/// (DC 4.77 V; device-check-2026-10-21 "False A-JACK in Hz", "6. The lost
+/// first V tap"), not on 1 V. Also: no count before the row's first DC
+/// reading (a switch in, owner 2026-10-23).
+pub const AC_HINT_DC_MAX: f32 = 2.0;
 pub const HINT_CLEAR_MS: u64 = 1000;
 /// FUSE?: an A function "at zero" this long: |I| below FUSE_FRAC of the
 /// range (0.1 %: 60 counts of 60000; a blown fuse leaves the amplifier
@@ -555,8 +575,13 @@ pub const FUSE_HINT_MS: u64 = 60_000;
 pub const FUSE_FRAC: f32 = 0.001;
 pub const AC_FLOOR_FRAC: f32 = 0.05;
 
-/// A condition that asserts after being seen for `assert_ms` and clears
-/// `clear_ms` after it was last seen (LIVE?'s rule, for the hints).
+/// A condition that asserts after being seen in every sample for
+/// `assert_ms` and clears `clear_ms` after it was last seen (for the
+/// hints). Before it asserted, one sample without it starts the count over
+/// (owner 2026-10-23: AC? came on falsely after switches; a sample now and
+/// then over 2 s - a settling front end, mains pickup on open leads - was
+/// enough while a gap under `clear_ms` kept the count). A real AC / DC
+/// shows in every window.
 #[derive(Clone, Copy)]
 struct Held {
     t0: Option<u64>,
@@ -565,13 +590,15 @@ struct Held {
 
 impl Held {
     const NEW: Held = Held { t0: None, last: 0 };
-    fn feed(&mut self, now: u64, on: bool, clear_ms: u64) {
+    fn feed(&mut self, now: u64, on: bool, assert_ms: u64, clear_ms: u64) {
         if on {
             if self.t0.is_none() {
                 self.t0 = Some(now);
             }
             self.last = now;
-        } else if now.saturating_sub(self.last) >= clear_ms {
+        } else if self.t0.is_some_and(|t0| self.last.saturating_sub(t0) < assert_ms)
+            || now.saturating_sub(self.last) >= clear_ms
+        {
             self.t0 = None;
         }
     }
@@ -627,6 +654,10 @@ pub struct Sentinel {
     /// Assertions so far (the app toasts on a change).
     pub seq: u32,
     win_t0: u64,
+    /// No sample counts before this (ms): a new row's switch (`blank`:
+    /// BLANK_ROW_MS) and the first moments past its settle (`rearm`:
+    /// BLANK_SETTLED_MS).
+    blank_until: u64,
     win_hit: bool,
     /// CTSTA bits ORed over the window (AC?).
     win_both: u8,
@@ -664,6 +695,10 @@ pub struct Sentinel {
     /// AC?); `alt_v`: the window in progress watches the V tap.
     pub alt: bool,
     pub alt_v: bool,
+    /// AC?: the row's own DC reading since the row went out is below
+    /// AC_HINT_DC_MAX (`dmm.rs` per DC V reading); V-tap windows count only
+    /// then.
+    pub ac_dc_ok: bool,
     /// The last V-tap window's peak pair (DC?), for `dmm.rs`.
     pub pk_v: Option<(i32, i32)>,
     /// Ohm / temperature (set by `dmm.rs` with the row): the comparator's
@@ -673,7 +708,15 @@ pub struct Sentinel {
     pub vgate: bool,
     vside_t: Option<u64>,
     vdrv: bool,
+    /// Assertion log (DBG:SENTinel:LOG?, the switch regression test
+    /// emu/hy3131/switchtest.py): the last LOG_N alerts that came on, as
+    /// (alert, kind, ms); `log_n` = assertions logged so far.
+    log: [(Alert, Kind, u32); LOG_N],
+    pub log_n: u32,
 }
+
+/// Entries of the assertion log.
+pub const LOG_N: usize = 8;
 
 impl Sentinel {
     pub const fn new() -> Self {
@@ -683,6 +726,7 @@ impl Sentinel {
             alert: Alert::None,
             seq: 0,
             win_t0: 0,
+            blank_until: 0,
             win_hit: false,
             win_both: 0,
             streak: 0,
@@ -705,11 +749,21 @@ impl Sentinel {
             fuse: Held::NEW,
             alt: false,
             alt_v: false,
+            ac_dc_ok: false,
             pk_v: None,
             vgate: false,
             vside_t: None,
             vdrv: false,
+            log: [(Alert::None, Kind::Off, 0); LOG_N],
+            log_n: 0,
         }
+    }
+
+    /// The assertion log, oldest first (DBG:SENTinel:LOG?).
+    pub fn log(&self) -> impl Iterator<Item = &(Alert, Kind, u32)> {
+        let n = (self.log_n as usize).min(LOG_N);
+        let i0 = self.log_n as usize + LOG_N - n;
+        (0..n).map(move |k| &self.log[(i0 + k) % LOG_N])
     }
 
     /// A new row was written (`write_config`). Another kind or a function
@@ -723,6 +777,7 @@ impl Sentinel {
     pub fn configured(&mut self, kind: Kind, now: u64, reset: bool) {
         self.alt = false;
         self.alt_v = false;
+        self.ac_dc_ok = false;
         self.pk_v = None;
         if kind.family() != self.kind.family() || reset {
             self.streak = 0;
@@ -738,8 +793,43 @@ impl Sentinel {
             }
         }
         self.kind = kind;
+        self.blank_until = now;
         self.win_t0 = now;
         self.win_hit = false;
+        self.win_both = 0;
+    }
+
+    /// No sample counts for `ms` from `now` (`dmm.rs` after a row write:
+    /// BLANK_ROW_MS); the first window starts after it.
+    pub fn blank(&mut self, now: u64, ms: u64) {
+        self.blank_until = self.blank_until.max(now + ms);
+        self.win_t0 = self.blank_until;
+        self.win_hit = false;
+        self.win_both = 0;
+    }
+
+    /// The row's settle is over (`dmm.rs` `sent_rearm`): samples count from
+    /// BLANK_SETTLED_MS on, and the first window is a whole one from there
+    /// (it closed on the one sample taken right after the settle).
+    pub fn rearm(&mut self, now: u64) {
+        self.blank_until = self.blank_until.max(now + BLANK_SETTLED_MS);
+        self.win_t0 = self.blank_until;
+        self.win_hit = false;
+        self.win_both = 0;
+    }
+
+    /// Samples are blanked now (`blank`, `rearm`).
+    pub fn blanked(&self, now: u64) -> bool {
+        now < self.blank_until
+    }
+
+    /// A function / range change (`dmm.rs` `set`): the run of hit windows
+    /// starts over (two windows of the new row before A-JACK / V-JACK?);
+    /// an alert in force keeps its own clear rule. Not for the A-jack
+    /// probe's row rewrites or the AC+DC phase switches (`write_config`
+    /// alone): those keep the run.
+    pub fn new_run(&mut self) {
+        self.streak = 0;
     }
 
     /// OVERLOAD latch on / off (`dmm.rs`; not maskable: it reports a
@@ -795,6 +885,10 @@ impl Sentinel {
     /// at the next window's node (`alt_v`: SENSE, else PB1).
     pub fn sample_cmp(&mut self, now: u64, ctsta: u8) -> bool {
         self.ctsta = ctsta;
+        if self.blanked(now) {
+            self.win_t0 = self.blank_until;
+            return false;
+        }
         self.samples = self.samples.wrapping_add(1);
         if self.alt && self.alt_v {
             // V-tap window (AC?): both bits = the tap swings both ways.
@@ -811,7 +905,7 @@ impl Sentinel {
             self.win_hit = false;
             self.win_both = 0;
             if self.alt && self.alt_v {
-                self.ac.feed(now, both, HINT_CLEAR_MS);
+                self.ac.feed(now, both && self.ac_dc_ok, HINT_ASSERT_MS, HINT_CLEAR_MS);
             } else {
                 self.window(now, hit);
             }
@@ -828,6 +922,10 @@ impl Sentinel {
     /// conversion since the restart: max < min) is no hit.
     pub fn sample_peak(&mut self, now: u64, pkmin: i32, pkmax: i32) {
         self.pk = (pkmin, pkmax);
+        if self.blanked(now) {
+            // (the caller restarts the hold; the alternation stays put)
+            return;
+        }
         self.samples = self.samples.wrapping_add(1);
         let thr = match self.kind {
             Kind::PeakV => PKV_THR,
@@ -849,7 +947,7 @@ impl Sentinel {
 
     /// DC? condition from the last V-tap window (`dmm.rs`).
     pub fn dc_hint(&mut self, now: u64, on: bool) {
-        self.dc.feed(now, on, HINT_CLEAR_MS);
+        self.dc.feed(now, on, HINT_ASSERT_MS, HINT_CLEAR_MS);
         self.decide(now);
     }
 
@@ -858,14 +956,15 @@ impl Sentinel {
     /// on V in DC (AC? "AC present: use AC+DC"); the DC? / AC? timing and
     /// the hints mask.
     pub fn pw_hints(&mut self, now: u64, dc: bool, ac: bool) {
-        self.dc.feed(now, dc, HINT_CLEAR_MS);
-        self.ac.feed(now, ac, HINT_CLEAR_MS);
+        self.dc.feed(now, dc, HINT_ASSERT_MS, HINT_CLEAR_MS);
+        self.ac.feed(now, ac, HINT_ASSERT_MS, HINT_CLEAR_MS);
         self.decide(now);
     }
 
     /// FUSE? condition: an A-function reading at zero (`on`) or not.
     pub fn fuse_reading(&mut self, now: u64, zero: bool) {
-        self.fuse.feed(now, zero, 500);
+        // (assert_ms 0: FUSE? keeps its 500 ms tolerance of a non-zero reading)
+        self.fuse.feed(now, zero, 0, 500);
         self.decide(now);
     }
 
@@ -974,6 +1073,8 @@ impl Sentinel {
         if a != self.alert {
             if !matches!(a, Alert::None) {
                 self.seq = self.seq.wrapping_add(1);
+                self.log[self.log_n as usize % LOG_N] = (a, self.kind, now as u32);
+                self.log_n = self.log_n.wrapping_add(1);
             }
             self.alert = a;
             QUES_EVENT.fetch_or(ques_bits(a), core::sync::atomic::Ordering::Relaxed);
@@ -1260,6 +1361,106 @@ mod tests {
         }
         assert_eq!(row_for(1, 0, true, M_ALL, VAR_NEW_OFF, &CFG_F1[0]), (CFG_F1[0], Kind::Off));
         assert_eq!(row_for(1, 0, false, M_ALL, VAR_NEW_OFF, &CFG_F1[0]).1, Kind::CmpA);
+    }
+
+    /// Owner 2026-10-23 (false alerts after switches): the hints assert
+    /// only on a condition seen in every window for HINT_ASSERT_MS; the
+    /// first window after a settle is a whole one (`rearm`); a function /
+    /// range change restarts the hit run (`new_run`) but keeps an alert.
+    #[test]
+    fn switch_blank_rules() {
+        // AC?: "both" every other V-tap window (a settling node, pickup) for 4 s: never.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.alt = true;
+        s.ac_dc_ok = true;
+        let mut t = 0;
+        for k in 0..40u64 {
+            t = 100 * (k + 1);
+            let both = s.alt_v && (k / 2) % 2 == 0;
+            s.sample_cmp(t, if both { CTSTA_CMP } else { 0 });
+        }
+        assert_eq!(s.alert, Alert::None);
+        // a real AC: both in every V-tap window -> AC? after HINT_ASSERT_MS
+        let t0 = t;
+        while s.alert != Alert::Ac {
+            t += 100;
+            let v = s.alt_v;
+            s.sample_cmp(t, if v { CTSTA_CMP } else { 0 });
+            assert!(t - t0 <= HINT_ASSERT_MS + 300, "AC? late");
+        }
+        // once on, a missed window does not drop it (HINT_CLEAR_MS)
+        t += 100;
+        s.sample_cmp(t, 0);
+        t += 100;
+        s.sample_cmp(t, 0);
+        assert_eq!(s.alert, Alert::Ac);
+        // both bits on every V-tap window with a 5 V DC reading (the device's false AC?), or
+        // before the row's first DC reading: never
+        for dc_ok in [false] {
+            let mut s = Sentinel::new();
+            s.configured(Kind::CmpA, 0, true);
+            s.alt = true;
+            s.ac_dc_ok = dc_ok;
+            for k in 1..=60u64 {
+                let v = s.alt_v;
+                s.sample_cmp(100 * k, if v { CTSTA_CMP } else { 0 });
+            }
+            assert_eq!(s.alert, Alert::None);
+        }
+
+        // Comparator after a settle: one CTSTA sample right after it must not close a
+        // window by itself, nor anything within BLANK_SETTLED_MS of it; then two whole
+        // hit windows -> A-JACK (a real fault present at the switch: settle + 300 ms).
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.blank(0, BLANK_ROW_MS);
+        assert!(!s.sample_cmp(140, CTSTA_CMP), "blanked after the row write");
+        s.rearm(450);
+        for t in [455, 500, 545] {
+            assert!(!s.sample_cmp(t, CTSTA_CMP), "blanked after the settle");
+        }
+        assert_eq!(s.run_since(), None);
+        s.sample_cmp(560, CTSTA_CMP);
+        s.sample_cmp(645, CTSTA_CMP);
+        assert_eq!(s.run_since(), None, "the first window is a whole one");
+        s.sample_cmp(655, CTSTA_CMP);
+        assert_eq!(s.run_since(), Some(655));
+        s.sample_cmp(760, CTSTA_CMP);
+        assert_eq!(s.alert, Alert::AJack);
+        // a range change keeps the alert, restarts the run
+        s.new_run();
+        assert_eq!(s.run_since(), None);
+        s.sample_cmp(870, 0);
+        assert_eq!(s.alert, Alert::AJack);
+        // one stale hit before a switch + one after: no A-JACK
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.sample_cmp(100, CTSTA_CMP);
+        s.configured(Kind::CmpA, 120, false);
+        s.blank(120, BLANK_ROW_MS);
+        s.new_run();
+        s.rearm(570);
+        s.sample_cmp(771, CTSTA_CMP);
+        assert_eq!(s.alert, Alert::None);
+        assert_eq!(s.log_n, 0);
+        // the peak hold: a harvest inside the blank is no window, the alternation stays
+        let mut s = Sentinel::new();
+        s.configured(Kind::PeakA, 0, true);
+        s.alt = true;
+        s.blank(0, BLANK_ROW_MS);
+        s.sample_peak(100, -PK_THR * 3, PK_THR * 3);
+        assert!(!s.alt_v && s.run_since().is_none());
+        s.sample_peak(200, -PK_THR * 3, PK_THR * 3);
+        assert!(s.alt_v && s.run_since() == Some(200));
+        // the assertion log
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        for k in 1..=3 {
+            s.sample_cmp(100 * k, CTSTA_CMP);
+        }
+        assert_eq!(s.log_n, 1);
+        assert_eq!(s.log().next(), Some(&(Alert::AJack, Kind::CmpA, 200)));
     }
 
     #[test]
@@ -1758,6 +1959,7 @@ mod tests {
         let mut s = Sentinel::new();
         s.configured(Kind::CmpA, 0, true);
         s.alt = true;
+        s.ac_dc_ok = true; // (the DC V reading ~0)
         let mut t = 0;
         // Nothing anywhere: quiet.
         while t < 3000 {

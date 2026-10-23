@@ -4191,6 +4191,19 @@ impl App {
                 }
                 true
             }
+            C::DbgSentLog => {
+                let s = &self.dmm.sent;
+                out.put_u32(s.log_n);
+                for (a, k, t) in s.log() {
+                    out.put_bytes(b";");
+                    out.put_bytes(a.name().as_bytes());
+                    out.put_bytes(b",");
+                    out.put_bytes(k.name().as_bytes());
+                    out.put_bytes(b",");
+                    out.put_u32(*t);
+                }
+                true
+            }
             C::DbgSent => {
                 let mut b = [0u8; 96];
                 let n = self.dmm.sent.diag_text(&mut b);

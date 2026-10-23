@@ -811,6 +811,9 @@ pub struct Dmm {
     /// none pending): the AD1 conversion in flight at an input switch must
     /// not reach the hold.
     pkh_due: u64,
+    /// A row went out (`write_config`) and the sentinel has not been
+    /// re-armed since (`sent_rearm`, the first poll past the settle).
+    sent_arm: bool,
     live: bool,
     /// OVERLOAD latch (doc 4.3 / 4.7, sentinel::overload_trips): None = not
     /// in force.
@@ -1216,6 +1219,7 @@ impl Dmm {
             r29: 0,
             pk_t: 0,
             pkh_due: 0,
+            sent_arm: false,
             live: false,
             ovl: None,
             probe: false,
@@ -1448,8 +1452,10 @@ impl Dmm {
         self.sent_mode = key;
         self.pk_t = clk.now_ms();
         self.pkh_due = 0;
+        self.sent_arm = true;
         self.probe_settle = self.probe;
         self.sent.configured(kind, clk.now_ms(), fresh);
+        self.sent.blank(clk.now_ms(), sentinel::BLANK_ROW_MS);
         // Ohm / temperature: A-JACK needs the V side's word (sentinel V_GATE).
         self.sent.vgate = matches!(self.mode, 10 | 15);
         // DC? / AC? hints (doc 4.4): AC V alternates AD1 between PB1 - PB3
@@ -1556,6 +1562,9 @@ impl Dmm {
         self.mode = mode;
         self.range = range;
         self.write_config(clk);
+        // A function / range change: hits before it say nothing about the
+        // new row (sentinel::Sentinel::new_run; an alert in force stays).
+        self.sent.new_run();
         let now = clk.now_ms();
         self.deadline = now + settle;
         if changed_mode {
@@ -2642,6 +2651,9 @@ impl Dmm {
         }
         let (m, r) = (self.mode, self.range);
         self.mode = 255;
+        // The chip was another's (Wave view, logger), asleep or lost: the
+        // sentinel's history starts over (`write_config` `fresh`).
+        self.sent_mode = 255;
         self.set(clk, m, r, 450);
     }
 
@@ -2718,10 +2730,14 @@ impl Dmm {
         if now < self.deadline {
             // AC+DC: the comparator watches through the phase settles too
             // (600..900 ms each; A-JACK clears 1 s after the last hit).
+            // (not before sentinel::BLANK_ROW_MS: the relay pulse, Sentinel::blank)
             if cmp && self.acdc && !self.suspended {
                 self.sent.sample_cmp(now, hy::read1(0x14));
             }
             return None;
+        }
+        if self.sent_arm {
+            self.sent_rearm(now);
         }
         self.t_poll = now;
         self.avg_n = 0;
@@ -3009,6 +3025,8 @@ impl Dmm {
         vet: bool,
     ) -> Option<Reading> {
         let ov = self.over();
+        // AC? counts V-tap windows only with a small DC part (sentinel::AC_HINT_DC_MAX).
+        self.sent.ac_dc_ok = x.abs() < sentinel::AC_HINT_DC_MAX;
         if !self.acdc {
             let ol = x.abs() / lim > ov;
             let v = if ol { Val::ol(dec, unit) } else { Val::new(x, dec, unit).with_ext(ext) };
@@ -3632,6 +3650,26 @@ impl Dmm {
         hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
         hy::write(0x24, &[if self.sent.alt_v { sentinel::R24_SENSE_PB5 } else { sentinel::R24_PB1_PB3 }]);
         self.pkh_due = now + 3;
+    }
+
+    /// The first poll past the settle of a new row: the sentinel counts
+    /// samples from sentinel::BLANK_SETTLED_MS on (Sentinel::rearm), and
+    /// the peak hold (on since the row went out, so it holds the switch:
+    /// relays, the converter's first results, the front end settling) is
+    /// cleared. AC+DC (comparator sampled through the phase settles from
+    /// sentinel::BLANK_ROW_MS on, so A-JACK does not lapse over them) only
+    /// restarts the peak hold.
+    fn sent_rearm(&mut self, now: u64) {
+        self.sent_arm = false;
+        if !self.acdc {
+            self.sent.rearm(now);
+        }
+        if matches!(self.sent.kind, Kind::PeakA | Kind::PeakV | Kind::Ad2A) && !self.pw.on {
+            self.pkh_due = 0;
+            self.pk_t = now;
+            hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
+            hy::write(0x29, &[self.r29]);
+        }
     }
 
     /// A-jack protection (doc 4.8, sentinel::aprot_trips), per poll in the
