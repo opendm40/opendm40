@@ -1196,8 +1196,8 @@ Firmware:
       (fastlog `Gate`): the first 1 s coded with dry pages, then the file starts in the same logger session
       (kept) or the session restarts at 38400 (the ring's low water rising or a drop)
       (LOG:SRATe? 38400, LOG:DISK? fields 11..13 gate / ISR permille / ring high water). Emulator: 0 lost at
-      76800 (1.2-2.45 B/sample, ISR 52-62 %), trial kept; `--isr-stall-ns 3000` (ISR 90 % in the trial) ->
-      38400, 0 lost.
+      76800 (1.2-2.45 B/sample, ISR 52-62 %), trial kept; a slower main loop (`--mips 80` / `70`) -> the trial
+      falls back, 38400, 0 lost.
       Device retest (image and list in the hand-over):
       1. AC V, the 40 Hz square, LOG:SOUR AD2, LOG:SRAT 76800, LOG:DEST DISK, LOG:DUR 60, LOG:STAT ON:
          LOG:DISK? at the end: fields 11..13 (gate 1 expected: kept; ISR permille ~540; high water: the

@@ -313,8 +313,14 @@ def stop_in_trial(q, profile):
         time.sleep(0.05)
     cat1 = q('MMEM:CAT? "LOGS"').count('FAST')
     print('  stop in the trial: stopped at %s, end %s' % (stopped, st), flush=True)
-    check(stopped is not None and st[0] == 5 and st[4] == 0 and (len(st) < 11 or st[10] == 0) and cat1 == cat0,
-          '%s: a 76800 session stopped in its writer trial ends Done, no rows, no file left (FAST files %d -> %d)' % (profile, cat0, cat1))
+    if 0 < st[8] <= 800 and st[9] <= 1500:
+        check(stopped is not None and st[0] == 5 and st[4] == 0 and (len(st) < 11 or st[10] == 0) and cat1 == cat0,
+              '%s: a 76800 session stopped in its writer trial ends Done, no rows, no file left (FAST files %d -> %d)' % (profile, cat0, cat1))
+    else:
+        # A slow chip: no trial (the session runs at 38400 at once), a stop
+        # is an ordinary one: the file stays.
+        check(stopped is not None and st[0] == 5 and st[10] == 0 and cat1 == cat0 + 1,
+              '%s: tPP %d us, no trial: the early stop keeps the file (%d rows, FAST files %d -> %d)' % (profile, st[8], st[4], cat0, cat1))
 
 
 def bt_checks():

@@ -381,10 +381,15 @@ Emulator, 76800 to the disk, flash typ (emu/fastlogtest.py --mips 110
 | firmware | input | rows | lost | B/sample | pages/s | ISR % | trial |
 |---|---|---|---|---|---|---|---|
 | 8087c7d (before), --mips 110 alone | 0.5 V 50 Hz | 96 520 of 153 602 | 57 081 (37 %) | 1.99 | 596 | 46 | - |
-| 8087c7d (before) | 0.5 V 50 Hz | 83 226 of 153 602 | 70 376 (46 %) | 2.10 | 631 | 52 | - |
+| 8087c7d (before) | 0.5 V 50 Hz | 82 977 of 153 639 | 70 662 (46 %) | 2.12 | 636 | 52 | - |
 | this | 0.5 V 50 Hz | 153 602 | 0 | 1.22 | 366 | 52 | kept |
 | this | + noise 40 / 200 / 1000 | 768 002 / 307 201 / 306 422 | 0 | 1.81 / 2.09 / 2.45 | 544 / 628 / 734 | 52 / 52 / 62 | kept |
-| this, --isr-stall-ns 3000 | 0.5 V 50 Hz | 153 602 at 38400 | 0 | 1.34 | 202 | 31 (90 in the trial) | fell back |
+| this, the trial at 12.7 s uptime (--start-at 11) | 0.5 V 50 Hz | 153 601 | 0 | 1.21 | 363 | 52 | kept |
+| this, --isr-stall-ns 1500 | 0.5 V 50 Hz | 307 201 | 0 | 1.24 | 372 | 59 | kept |
+| this, --mips 80 / 70 (a slower main loop) | 0.5 V 50 Hz | 153 602 / 76 802 at 38400 | 0 | 1.27 / 1.34 | 190 / 201 | 27 / 30 (63 / 69 in the trial) | fell back |
+
+(--isr-stall-ns 3000 makes the model's ISR itself late: thousands of late
+samples and overruns at any writer speed, a state the device never showed.)
 
 (The device's 76800 rate finding of 7409b92 shows in the emulator: a 76800
 session after any earlier stream session of the same boot (a 38400 one, a
