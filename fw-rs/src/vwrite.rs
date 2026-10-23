@@ -65,7 +65,8 @@
 //! Allow (unmount) or a bus reset (re-plug), when every record here is
 //! dropped (`release`) and the volume regenerated. A host that never locks
 //! the medium: frozen while it has written in the last QUIET_MS, then
-//! released.
+//! released. An end while a DM40*.BIN's check is still due (`cp` + eject at
+//! once) waits for that check, at most END_WAIT_MS.
 //!
 //! Host test: tools/fatren-test/run.sh "vwrite" (Linux sequences captured
 //! over USB/IP, mtools-made sector diffs, fsck after each scenario, power
