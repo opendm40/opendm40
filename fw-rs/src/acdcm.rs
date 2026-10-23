@@ -679,7 +679,13 @@ impl Dmm {
             }
         }
         let ac = ac?;
-        ema(ACV_WIN[r], 0.25, ac, &mut self.f_ac);
+        // The first AC part of the session / range as it is (the stock
+        // EMA's 0.99 jump from 0 would show it 1 % low).
+        if self.acdc_seen & 1 == 0 {
+            self.f_ac = ac;
+        } else {
+            ema(ACV_WIN[r], 0.25, ac, &mut self.f_ac);
+        }
         self.acdc_seen |= 1;
         self.am.fresh |= 1;
         self.am.n_ac += 1;
