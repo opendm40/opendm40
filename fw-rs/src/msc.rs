@@ -20,6 +20,16 @@
 //! once, also while locked (the 2026-10-21 experiment: Linux re-reads the
 //! mounted volume); the writable SPI disk's (screenshot::MEDIUM_CHANGED) is
 //! held back while locked, as before.
+//! Eject (START STOP UNIT with LoEj = 1, Start = 0: Linux `eject` / a file
+//! manager's Eject, Windows "Eject" / Safely remove): the LUN has no medium
+//! (every command but INQUIRY / REQUEST SENSE / START STOP / PREVENT fails
+//! 02/3A/00, READ FORMAT CAPACITIES included) until a bus reset (a re-plug,
+//! or the host re-enumerating) or a host load (LoEj = 1, Start = 1), which
+//! then raises the one-shot UNIT ATTENTION 06/28/00. Without it a host that
+//! polls the removable disk (Windows) mounts it again at once. A plain
+//! STOP / START (LoEj = 0: Linux sd around a suspend, udisks' power-off)
+//! changes nothing. Media-change UNIT ATTENTIONs are not consumed while
+//! ejected: they go out after the load / re-plug.
 
 use usb_device::class_prelude::*;
 use usb_device::prelude::UsbDeviceState;
@@ -187,6 +197,31 @@ fn unlock_all() {
 pub static DBG_EJECT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 static EJECT_UA: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+/// LUN i was ejected by the host (START STOP UNIT, LoEj = 1, Start = 0):
+/// "no medium" until a bus reset / unconfigure or a host load (module text).
+static EJECTED: [core::sync::atomic::AtomicBool; MAX_LUNS] = [const { core::sync::atomic::AtomicBool::new(false) }; MAX_LUNS];
+/// LUN i was loaded again by the host (LoEj = 1, Start = 1): its next
+/// command gets the UNIT ATTENTION 06/28/00.
+static LOADED_UA: [core::sync::atomic::AtomicBool; MAX_LUNS] = [const { core::sync::atomic::AtomicBool::new(false) }; MAX_LUNS];
+/// START STOP UNIT commands seen since boot, and CB[4] of the last one
+/// (0x100 = its CBW could not be told apart from host data: ignored), for
+/// DBG:VDISK:EJECT?.
+pub static SSU_COUNT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+pub static SSU_LAST: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// A bus reset / unconfigure: every LUN has its medium again (a re-plug).
+fn reload_all() {
+    for (e, u) in EJECTED.iter().zip(&LOADED_UA) {
+        e.store(false, core::sync::atomic::Ordering::Relaxed);
+        u.store(false, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// LUN `lun` ejected by the host (DBG:VDISK:EJECT?).
+pub fn ejected(lun: usize) -> bool {
+    EJECTED.get(lun).is_some_and(|e| e.load(core::sync::atomic::Ordering::Relaxed))
+}
+
 /// A host has LUN 0 locked (mounted on Linux; see LOCKED).
 pub fn host_mounted() -> bool {
     LOCKED[0].load(core::sync::atomic::Ordering::Relaxed)
@@ -213,29 +248,30 @@ impl core::borrow::BorrowMut<[u8]> for IoBuf {
     }
 }
 
-/// The Prevent bit of the PREVENT ALLOW MEDIUM REMOVAL command being handled,
-/// read from its CBW in the transport buffer. When the callback runs, the
-/// 31-byte CBW the crate has just parsed is still in `io` (it is read in
-/// place, the buffer is only written again for the data / status phase):
-/// "USBC", tag, data length 0, flags, LUN `lun`, CB length, CB[0] = 0x1E,
-/// CB[4] bit 0 = Prevent. Every match is then defaced (signature zeroed), so
-/// a stale CBW of an earlier 0x1E can never be found again; more than one
-/// match left (host data that happens to look like one) counts as Prevent.
-fn prevent_bit(io: &mut [u8], lun: u8) -> bool {
-    let (mut found, mut prevent) = (0u32, false);
+/// CB[4] of the no-data command `op` being handled (PREVENT ALLOW MEDIUM
+/// REMOVAL 0x1E: bit 0 = Prevent; START STOP UNIT 0x1B: bit 0 = Start, bit 1
+/// = LoEj), read from its CBW in the transport buffer. When the callback
+/// runs, the 31-byte CBW the crate has just parsed is still in `io` (it is
+/// read in place, the buffer is only written again for the data / status
+/// phase): "USBC", tag, data length 0, flags, LUN `lun`, CB length, CB[0] =
+/// `op`. Every match is then defaced (signature zeroed), so a stale CBW of
+/// an earlier one can never be found again; None when not exactly one match
+/// is left (host data that happens to look like one).
+fn cdb4(io: &mut [u8], lun: u8, op: u8) -> Option<u8> {
+    let (mut found, mut b4) = (0u32, 0u8);
     let mut o = 0usize;
     while o + 31 <= io.len() {
         let c = &io[o..o + 31];
-        if c[..4] == *b"USBC" && c[8..12] == [0; 4] && c[13] == lun && (6..=16).contains(&c[14]) && c[15] == 0x1E {
+        if c[..4] == *b"USBC" && c[8..12] == [0; 4] && c[13] == lun && (6..=16).contains(&c[14]) && c[15] == op {
             found += 1;
-            prevent = c[19] & 1 != 0;
+            b4 = c[19];
             io[o..o + 4].fill(0);
             o += 31;
         } else {
             o += 1;
         }
     }
-    found != 1 || prevent
+    (found == 1).then_some(b4)
 }
 
 pub struct Msc<'a, B: UsbBus> {
@@ -269,6 +305,7 @@ impl<'a, B: UsbBus> Msc<'a, B> {
     pub fn set_usb_state(&mut self, st: UsbDeviceState) {
         if matches!(st, UsbDeviceState::Default | UsbDeviceState::Addressed) {
             unlock_all();
+            reload_all();
         }
     }
 
@@ -355,6 +392,14 @@ fn handle<B: UsbBus>(
     let bs = dev.block_size();
     let o = core::sync::atomic::Ordering::Relaxed;
     let first = *xfer == Xfer::None && !matches!(kind, ScsiCommand::Inquiry { .. } | ScsiCommand::RequestSense { .. });
+    // Ejected by the host: no medium, for everything but the commands that
+    // load it again or lock / unlock it (and INQUIRY / REQUEST SENSE).
+    // Before the UNIT ATTENTIONs: those wait for the load / re-plug.
+    if first && ejected(lun as usize) && !matches!(kind, ScsiCommand::Unknown { cmd: 0x1B | 0x1E }) {
+        *sense = SENSE_NO_MEDIUM;
+        cmd.fail(0);
+        return Ok(());
+    }
     // DBG:VDISK:EJECT: "no medium" for n commands, then a UNIT ATTENTION.
     if first && dev.media_change_immediate() && DBG_EJECT.load(o) > 0 {
         if DBG_EJECT.fetch_sub(1, o) == 1 {
@@ -374,7 +419,9 @@ fn handle<B: UsbBus>(
     // vfat: its writes from a stale FAT would be worse, review 258c833 M2)
     // and goes out after the Allow (umount).
     if first {
-        let ua = if dev.media_change_immediate() {
+        // After a host load (one UNIT ATTENTION, whatever else is pending).
+        let loaded = LOADED_UA.get(lun as usize).is_some_and(|u| u.swap(false, o));
+        let ua = loaded | if dev.media_change_immediate() {
             dev.take_media_changed() | EJECT_UA.swap(false, o)
         } else if !LOCKED.get(lun as usize).is_some_and(|l| l.load(o)) {
             if dev.read_only() { dev.take_media_changed() } else { crate::screenshot::MEDIUM_CHANGED.swap(false, o) }
@@ -593,7 +640,8 @@ fn handle<B: UsbBus>(
         // LUN (LOCKED). An Allow on the generated volume lets a compaction
         // it was holding back run (vdisk.rs).
         ScsiCommand::Unknown { cmd: 0x1E } => {
-            let p = prevent_bit(core::borrow::BorrowMut::<[u8]>::borrow_mut(io), lun);
+            // Not exactly one CBW found: counts as Prevent (the safe side).
+            let p = cdb4(core::borrow::BorrowMut::<[u8]>::borrow_mut(io), lun, 0x1E).map_or(true, |b| b & 1 != 0);
             if let Some(l) = LOCKED.get(lun as usize) {
                 l.store(p, o);
             }
@@ -604,8 +652,29 @@ fn handle<B: UsbBus>(
             *sense = SENSE_OK;
             cmd.pass(0)
         }
-        // START STOP UNIT (eject / power-off by the host): noted for recovery.
-        ScsiCommand::Unknown { cmd: 0x1B } => { STOP_UNIT.store(true, core::sync::atomic::Ordering::Relaxed); cmd.pass(0) }
+        // START STOP UNIT. Any of them is noted for recovery.rs (it powers
+        // off). LoEj = 1: eject (Start = 0) / load (Start = 1) the medium
+        // (module text); LoEj = 0 (a plain stop / start), a power condition
+        // (CB[4] bits 7..4) or a CBW not found exactly once: nothing else.
+        ScsiCommand::Unknown { cmd: 0x1B } => {
+            STOP_UNIT.store(true, o);
+            let b4 = cdb4(core::borrow::BorrowMut::<[u8]>::borrow_mut(io), lun, 0x1B);
+            SSU_COUNT.fetch_add(1, o);
+            SSU_LAST.store(b4.map_or(0x100, u32::from), o);
+            if let (Some(b), Some(e), Some(u)) = (b4, EJECTED.get(lun as usize), LOADED_UA.get(lun as usize)) {
+                if b & 0xF2 == 0x02 {
+                    let load = b & 1 != 0;
+                    // A load of a medium that was ejected: the host has to
+                    // re-read it (06/28/00); a load of a present one: nothing.
+                    if load && e.load(o) {
+                        u.store(true, o);
+                    }
+                    e.store(!load, o);
+                }
+            }
+            *sense = SENSE_OK;
+            cmd.pass(0)
+        }
         _ => { *sense = SENSE_INVALID; cmd.fail(0); }
     }
     Ok(())
@@ -627,6 +696,8 @@ impl<B: UsbBus> UsbClass<B> for Msc<'_, B> {
         // 2026-10-13 L3).
         crate::screenshot::MEDIUM_CHANGED.store(false, core::sync::atomic::Ordering::Relaxed);
         unlock_all();
+        // A re-plug: an ejected medium is back.
+        reload_all();
         // The generated volume: a new session may get a compacted layout.
         #[cfg(feature = "vdisk")]
         crate::vdisk::on_bus_reset();

@@ -201,6 +201,32 @@ print(float(dmm.query('READ?')))
 wave = dmm.query_binary_values('WAV:DATA?', datatype='B', container=bytes)
 ```
 
+### USBTMC on Windows
+
+The same SCPI over the USB cable is a USBTMC interface. Windows has no
+in-box USBTMC driver: Device Manager lists it under "Other devices" with
+code 28. The USB drive (mass storage) works without any driver. Choose one:
+
+- Install NI-VISA or Keysight IO Libraries Suite. Both bring a USBTMC
+  driver. Then `pyvisa.ResourceManager()` (the VISA library) lists the
+  meter as `USB0::0x1209::0x0001::...::INSTR`.
+- Or bind WinUSB to the USBTMC interface with Zadig (Options > List All
+  Devices, pick the DM40's USBTMC interface, **not** the mass-storage one,
+  choose WinUSB, Install Driver). Then use pyvisa-py with pyusb and
+  libusb: `pip install pyvisa-py pyusb libusb-package`, and
+  `pyvisa.ResourceManager('@py')`.
+
+```python
+import pyvisa
+rm = pyvisa.ResourceManager('@py')    # or ResourceManager() with NI / Keysight VISA
+dmm = rm.open_resource(rm.list_resources('USB?*::0x1209::0x0001::?*')[0],
+                       read_termination='\n', write_termination='\n', timeout=5000)
+print(dmm.query('*IDN?'))
+```
+
+Not yet tried with the meter: only the code 28 state was seen (Windows 11,
+docs/device-check-2026-10-21.md "b6909d6: ... Windows 11", item 6).
+
 ### sigrok
 
 ```
