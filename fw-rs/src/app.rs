@@ -1506,10 +1506,12 @@ impl App {
             }
         }
         // A firmware file arrived on the USB disk (vwrite.rs): ask, unless
-        // another confirm is up (then at its end), or a screenshot is reading
-        // the panel (then after it).
+        // another confirm is up (then at its end), a screenshot is reading
+        // the panel (then after it) or the data-logger panel is up (then
+        // after the session: the confirm's box is taller than the panel and
+        // nothing repaints the view under it during a session).
         #[cfg(feature = "vdisk")]
-        if !crate::screenshot::frozen() && !matches!(self.overlay, Some(o) if !matches!(o, crate::dialog::Overlay::Toast { .. })) {
+        if !crate::screenshot::frozen() && !crate::dialog::log_panel_shown() && !matches!(self.overlay, Some(o) if !matches!(o, crate::dialog::Overlay::Toast { .. })) {
             match crate::vwrite::take_dialog() {
                 Some(true) => {
                     self.last_input = now;
@@ -1538,6 +1540,8 @@ impl App {
             }
             self.overlay = None; // power-off confirm auto-cancel / toast end
             self.redraw = true;
+            // A toast over the data-logger panel: the panel again.
+            crate::dialog::toast_gone();
         }
         if !can_draw || self.overlay.is_some() {
             return;
@@ -2602,6 +2606,7 @@ impl App {
     fn overlay_close(&mut self) {
         self.overlay = None;
         self.redraw = true;
+        crate::dialog::toast_gone();
     }
 
     /// A screenshot gesture (3-finger swipe, the scope's Print screen). A
@@ -3686,7 +3691,9 @@ impl App {
     /// state, the current function's: naming another function is "Settings
     /// conflict" (a query then answers +9.91E37). A set acts as the MF
     /// range page (Dmm::set_range, REL off); AUTO as the AUTO key (the
-    /// meter's own AUTO / AUTO+ choice is kept). Capacitance / frequency:
+    /// meter's own AUTO / AUTO+ choice is kept). A bare VOLTage / CURRent
+    /// (`scpi::ANY_CPL`) is that quantity in any coupling, in the power
+    /// meter its V / I channel (queries only). Capacitance / frequency:
     /// AUTO or a hold of the present range only. The resolution is the
     /// FR-05 rate: FAST = 60000 counts, MED / SLOW = the +1 digit where the
     /// range has it (Dmm::rate_info). True: a reply.
@@ -3695,11 +3702,25 @@ impl App {
         use crate::scpi::{self as s, Rng};
         let query = op.is_query();
         let cur = self.dmm.func();
+        // A bare VOLTage / CURRent: the quantity in any coupling.
+        let any = f & s::ANY_CPL != 0;
+        let f = f & !s::ANY_CPL;
         if matches!(f, 11 | 12 | 15) || f >= 32 {
             out.set_err("Undefined header");
             return false;
         }
-        let range = self.range_si().filter(|_| s::func_id(f) == s::func_id(cur));
+        if any && cur == dmm::pw::FUNC && matches!(op, Rng::Query | Rng::AutoQuery) {
+            // The power meter's V / I channel (POW:VOLT:RANG? / POW:CURR:RANG?).
+            let p = &self.dmm.pw;
+            let (auto, v) = if f == 1 { (p.v_auto, dmm::pw::V_LIM[p.vr as usize]) } else { (p.i_auto, dmm::pw::I_LIM[p.ik as usize]) };
+            match op {
+                Rng::AutoQuery => out.put_bytes(if auto { b"1" } else { b"0" }),
+                _ => out.put_f32(v),
+            }
+            return true;
+        }
+        let same = if any { s::quantity(f) == s::quantity(cur) } else { s::func_id(f) == s::func_id(cur) };
+        let range = self.range_si().filter(|_| same);
         let Some(v) = range else {
             out.set_err("Settings conflict");
             if query {

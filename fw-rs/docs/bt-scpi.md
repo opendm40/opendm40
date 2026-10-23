@@ -258,7 +258,14 @@ sigrok-cli -d scpi-dmm:conn=... -c digits=5 --samples 10     # RATE FAST
 | continuity, diode, temperature, power | none | |
 
 `Auto` returns to the autorange chosen on the meter (AUTO+ or AUTO; SCPI
-keeps that choice). The same ranges on DM40A / B / C (fw-rs uses the 60000
+keeps that choice). One range state per V / A button: a bare `VOLT` /
+`CURR` header (`VOLT:RANG:AUTO?`, `CURR:RANG?`, `VOLT:RES?`) names the
+quantity in whatever coupling is selected (DC, AC, AC+DC, AUTO), and in the
+power meter `VOLT:RANG?` / `CURR:RANG?` / `:RANG:AUTO?` answer its V / I
+channel (as `POW:VOLT:RANG?`; sets there: `POW:VOLT:RANG`). An explicit
+coupling (`VOLT:AC:RANG?`) must be the selected one; another function's
+header answers `+9.91E37` with "Settings conflict" (before 2026-10-24 the
+bare header meant DC only, so `VOLT:RANG:AUTO?` in AC V gave `+9.91E37`). The same ranges on DM40A / B / C (fw-rs uses the 60000
 counts limits on all models, docs/model-variants.md). Digits: `5` = RATE FAST
 (60000 counts, one conversion per reading), `6` = RATE MED (SLOW is kept):
 600000 counts once the moving average is full (~3.2 s after a change) in DC

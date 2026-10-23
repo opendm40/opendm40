@@ -106,11 +106,17 @@
 //!     kohm, not in AC+DC)
 //!   <f> as CONFigure's: VOLTage[:DC] | :AC | :ACDC | :AUTO, CURRent[...],
 //!   RESistance (FRESistance), CAPacitance, FREQuency. There is one range
-//!   state, the current function's: naming another one is "Settings
-//!   conflict" (a query answers +9.91E37); CONT / DIOD / TEMP have none
-//!   ("Undefined header"). A set acts as a tap on the MF range page (REL
-//!   off); refused while the data logger runs or the Wave view is open
-//!   ("Settings conflict"; CONF then only selects the function).
+//!   state, the current function's (the V / A button's, whatever the
+//!   coupling: the MF range page's). A bare VOLTage / CURRent names that
+//!   quantity in any coupling (VOLT:RANG:AUTO? in AC V, AC+DC or AUTO
+//!   coupling answers the present state; in the power meter RANG? /
+//!   RANG:AUTO? answer its V / I channel's, as POW:VOLT:RANG? /
+//!   POW:CURR:RANG?, a set there is "Settings conflict"); an explicit
+//!   coupling must be the present one. Naming another function is
+//!   "Settings conflict" (a query answers +9.91E37); CONT / DIOD / TEMP
+//!   have none ("Undefined header"). A set acts as a tap on the MF range
+//!   page (REL off); refused while the data logger runs or the Wave view
+//!   is open ("Settings conflict"; CONF then only selects the function).
 //!
 //! *IDN? = "Alientek,DM40A|B|C,<24 hex digits of the chip UID>,dm40-fw 0.1"
 //! (the serial number = the USB one, src/uid.rs).
@@ -982,7 +988,24 @@ fn range_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Option<Result<Cmd, &'s
         (false, false, false) => range_arg(a),
         (true, _, false) => res_arg(a).map(Rng::Res),
     };
+    // A bare VOLTage / CURRent: the quantity in any coupling (ANY_CPL).
+    let f = if k == 1 && matches!(f, 1 | 8) { f | ANY_CPL } else { f };
     Some(op.map(|o| Cmd::Range(f, o)).ok_or(BAD))
+}
+
+/// Cmd::Range's function flag: a bare VOLTage / CURRent header (no :DC /
+/// :AC / :ACDC / :AUTO), i.e. that quantity whatever the coupling (one
+/// range state per V / A button; App::scpi_range).
+pub const ANY_CPL: u8 = 0x80;
+
+/// The quantity of a `Dmm::func` code for ANY_CPL: V in any coupling 1, A
+/// 8, other functions as they are.
+pub fn quantity(f: u8) -> u8 {
+    match f {
+        0..=3 | 16 | crate::dmm::FUNC_V_AUTO => 1,
+        4..=9 | 17 | crate::dmm::FUNC_A_AUTO => 8,
+        m => m,
+    }
 }
 
 /// CONFigure:<f> <range>[,<res>] (`f` not temperature / power): Cmd::Conf.

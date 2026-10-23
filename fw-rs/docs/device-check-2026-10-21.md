@@ -2594,11 +2594,12 @@ full scale) once the row has settled, streak saturating at 255. The status bar s
 1. **V-JACK? in every AC A range with V-COM open** (above). The detector takes AD1's negative full scale on the AC A
    row as a voltage on V.
 2. **The "Wave: data logger running" toast is hidden by the DATA LOGGING panel** on the MCX page (1d): the refusal works,
-   the text cannot be read.
+   the text cannot be read. Fixed on branch smallbugs (TODO.md: the toast goes into the panel's body).
 3. **DC A does not see a real 10 / 24 V on V-COM when entered from DC V** (ctsta 0 for 10 s), while TEMP / AC V entries
    at 24 V see 0x70 (above). The misconnect hint depends on the previous function.
 4. Minor: `VOLT:RANG:AUTO?` in AC V and `CURR:RANG:AUTO?` in AC A answer +9.91E37 (the DC function's query outside
-   it); from `pf.py`, not investigated.
+   it); from `pf.py`, not investigated. Fixed on branch smallbugs (TODO.md: a bare VOLT / CURR header is the
+   quantity in any coupling).
 
 ### State at the end
 

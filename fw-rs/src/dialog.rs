@@ -11,7 +11,12 @@
 //!   Yes    (246, 180) 128 x 48   -> power off
 //! Toast: (40, 132) 400 x 56, centred text at glyph spacing 2 (ASCII26
 //! "f" touches its neighbour below 2; "Disk in use by PC - eject first" is
-//! 388 px).
+//! 388 px). While the data-logger panel is up (`LOG_BOX` (40, 64) 400 x
+//! 146, the toast's width; the GUI frozen: nothing repaints the view until
+//! the session ends) a toast takes the panel's body instead, (40, 102) 400
+//! x 108 under its title (`LOG_TOAST`); the panel's refresh waits while it
+//! is up and the whole panel is drawn again after it (`toast_gone`), which
+//! covers it exactly.
 
 use crate::lcd::{self, Color};
 use crate::stockfont::{self as sf, rect};
@@ -171,7 +176,7 @@ pub fn power_off_hit(x: u16, y: u16) -> Option<bool> {
 /// A touch at (x, y) is on the toast's box (`TOAST`): a tap there dismisses
 /// the toast; elsewhere a toast takes no touch (app.rs `gesture`).
 pub fn toast_hit(x: u16, y: u16) -> bool {
-    inside(TOAST, x, y)
+    inside(toast_rect(), x, y)
 }
 
 /// Fuse-check dialog box (wider than the confirm: two body lines of up to
@@ -214,12 +219,33 @@ pub fn fuse_hit(x: u16, y: u16) -> Option<bool> {
     }
 }
 
-/// Draw a toast (`ok` = green, else red).
+/// The toast's box: `TOAST`, or the logger panel's body while the panel is
+/// up (`LOG_TOAST`; see the module header).
+pub fn toast_rect() -> (u16, u16, u16, u16) {
+    if log_state().shown { LOG_TOAST } else { TOAST }
+}
+
+/// Draw a toast (`ok` = green, else red). Over the logger panel: in its
+/// body, the panel's refresh held until `toast_gone`.
 pub fn toast(s: &str, ok: bool) {
-    let r = TOAST;
+    let r = toast_rect();
+    let st = log_state();
+    st.hold |= st.shown;
     let bg = if ok { OK_BG } else { ERR_BG };
     centred_sp(r, s, FG, bg, 2);
     frame(r, FRAME);
+}
+
+/// The toast went (expired or dismissed; app.rs): over the logger panel,
+/// draw the whole panel again (it covers `LOG_TOAST`).
+pub fn toast_gone() {
+    let st = log_state();
+    if st.hold {
+        st.hold = false;
+        st.part = 0;
+        st.up = false;
+        st.next = 0;
+    }
 }
 
 // --- Data-logger panel (FR-38) ------------------------------------------------
@@ -227,22 +253,30 @@ pub fn toast(s: &str, ok: bool) {
 /// Logger panel over any view while LOG:STATe ON: the GUI is frozen then (the
 /// HY3131 belongs to the logger, the DMM reading is not updated), so the
 /// panel says so instead of leaving a stale reading up. Covers the main
-/// reading of the DMM view.
-const LOG_BOX: (u16, u16, u16, u16) = (70, 64, 340, 146);
+/// reading of the DMM view. As wide as `TOAST` (a toast during a session
+/// goes into its body, `LOG_TOAST`).
+const LOG_BOX: (u16, u16, u16, u16) = (TOAST.0, 64, TOAST.2, 146);
 const LOG_ROW: [u16; 3] = [102, 138, 174];
+/// A toast while the panel is up: the panel's body (its three rows, under
+/// the title), so the panel's next full draw covers it.
+pub const LOG_TOAST: (u16, u16, u16, u16) = (LOG_BOX.0, LOG_ROW[0], LOG_BOX.2, LOG_BOX.1 + LOG_BOX.3 - LOG_ROW[0]);
 /// Refresh of the rate / count rows, ms.
 const LOG_REFRESH_MS: u64 = 1000;
 
 /// Panel progress: `part` = next part to draw (0 title, 1 rate, 2 count,
 /// 3 hint, 4 frame, 5 = nothing pending); `up` = the whole panel has been
-/// drawn once (later passes redraw only 1 and 2); `next` = next refresh, ms.
+/// drawn once (later passes redraw only 1 and 2); `next` = next refresh, ms;
+/// `shown` = main.rs draws the panel (a host / disk session, `log_panel_on`);
+/// `hold` = a toast is over it (`toast`, `toast_gone`): nothing drawn.
 struct LogPanel {
     part: u8,
     up: bool,
     next: u64,
+    shown: bool,
+    hold: bool,
 }
 
-static mut LOG: LogPanel = LogPanel { part: 0, up: false, next: 0 };
+static mut LOG: LogPanel = LogPanel { part: 0, up: false, next: 0, shown: false, hold: false };
 
 fn log_state() -> &'static mut LogPanel {
     unsafe { &mut *core::ptr::addr_of_mut!(LOG) }
@@ -356,13 +390,16 @@ pub fn log_panel_text(i: &LogInfo, row: usize, t: &mut [u8; 32]) -> usize {
 }
 
 /// Call every main-loop pass while logging and drawing is otherwise
-/// allowed. Draws at most ONE part per call (one label, a ~340 x 36 fill +
+/// allowed. Draws at most ONE part per call (one label, a ~400 x 36 fill +
 /// glyphs, roughly 0.5 ms) so the logger's sampling loses at most a sample
 /// or two per part at AD1 rates (at AD2 rates a part costs several
 /// conversions: LOG:GAPs? shows it); the rate, sample count and loss rows
 /// are refreshed once per second (three passes).
 pub fn log_panel(now: u64, info: LogInfo) {
     let st = log_state();
+    if st.hold {
+        return;
+    }
     let b = LOG_BOX;
     let row = |i: usize| (b.0 + 1, LOG_ROW[i], b.2 - 2, 36);
     let mut t = [0u8; 32];
@@ -397,13 +434,27 @@ pub fn log_panel(now: u64, info: LogInfo) {
 #[inline(always)]
 pub fn log_panel_idle(now: u64) -> bool {
     let st = log_state();
-    st.part >= 5 && now < st.next
+    st.hold || (st.part >= 5 && now < st.next)
+}
+
+/// main.rs, every pass: the panel is drawn (a session freezes the GUI) or
+/// not. A toast then goes into the panel (`toast_rect`).
+#[inline(always)]
+pub fn log_panel_on(on: bool) {
+    log_state().shown = on;
+}
+
+/// The panel is up (`log_panel_on`).
+pub fn log_panel_shown() -> bool {
+    log_state().shown
 }
 
 /// The logger stopped: the next session draws the whole panel again (the
-/// caller repaints the view).
+/// caller repaints the view). A toast over a panel still shown keeps it
+/// held (DBG:AD2:DRAW 2's repaint resets the panel every 100 ms).
 pub fn log_panel_reset() {
-    *log_state() = LogPanel { part: 0, up: false, next: 0 };
+    let st = log_state();
+    *st = LogPanel { part: 0, up: false, next: 0, shown: st.shown, hold: st.hold && st.shown };
 }
 
 /// `v` in decimal at the start of `t`; returns the length.

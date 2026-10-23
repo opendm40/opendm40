@@ -24,6 +24,16 @@ Then AC+DC on the same 1 V: after `VOLT:ACDC:RANG 60` / `6` READ?
 answers +9.91E37 while the AC part settles, never the reading from before
 the change, and the first fresh reading is 1 V within 0.2 %, at most 6.5 s
 after the command (emulator time; poll granularity included).
+First, the range queries in every function and coupling (device d330877:
+`VOLT:RANG:AUTO?` in AC V answered +9.91E37): a bare VOLTage / CURRent
+names the quantity in any coupling (DC, AC, AC+DC, AUTO), so `<q>:RANG:AUTO?`
+answers 1 / 0 (0 after `<q>:RANG:AUTO OFF`), `<q>:RANG?` and `<q>:RES?` a
+number, with no error; the explicit present coupling the same; in the power
+meter `VOLT:RANG?` / `CURR:RANG?` / `:AUTO?` answer its V / I channel
+(as POW:VOLT:RANG?). Still +9.91E37 and "Settings conflict": another
+quantity, another explicit coupling, RES? / a set in the power meter, any
+range query in TEMP; TEMP:RANG? is "Undefined header" (no number).
+  --queries-only: that part only (~1 min).
 Exit status 0 = all passed.
 """
 import argparse
@@ -40,6 +50,7 @@ ap.add_argument('--app', required=True, help='fw-rs native ELF')
 ap.add_argument('--port', type=int, default=30410, help='USB/IP port (default 30410)')
 ap.add_argument('--trials', type=int, default=12, help='AUTO ON trials (default 12)')
 ap.add_argument('--mix', type=int, default=1, help='ad1mix model option (default 1)')
+ap.add_argument('--queries-only', action='store_true', help='only the range queries in every function / coupling')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
@@ -83,6 +94,86 @@ try:
         t0 = up()
         while up() - t0 < ms:
             time.sleep(0.2)
+
+    def num(r):
+        try:
+            return float(r)
+        except (TypeError, ValueError):
+            return None
+
+    def qerr(line):
+        """`line`'s reply and the error it left (SYST:ERR?)."""
+        q('*CLS')
+        r = q(line)
+        return r, q('SYST:ERR?')
+
+    def want_ok(fn, line, ok, what):
+        r, e = qerr(line)
+        check(ok(r) and e.startswith('0,'), '%s: %s -> %s (%s)%s' % (fn, line, r, e, ' ' + what if what else ''))
+
+    def is_bool(b):
+        return lambda r: r == b
+
+    def finite(r):
+        v = num(r)
+        return v is not None and 0 < v < NAN
+
+    def want_nan(fn, line, err='Settings conflict'):
+        r, e = qerr(line)
+        check(num(r) is not None and num(r) >= NAN and err in e, '%s: %s -> %s (%s), want +9.91E37 and "%s"' % (fn, line, r, e, err))
+
+    # Range queries in every function and coupling.
+    for conf, bare, expl, other in [('CONF:VOLT:DC', 'VOLT', 'VOLT:DC', 'CURR'), ('CONF:VOLT:AC', 'VOLT', 'VOLT:AC', 'CURR'),
+                                    ('CONF:VOLT:ACDC', 'VOLT', 'VOLT:ACDC', 'CURR'), ('CONF:VOLT:AUTO', 'VOLT', 'VOLT:AUTO', 'CURR'),
+                                    ('CONF:CURR:DC', 'CURR', 'CURR:DC', 'VOLT'), ('CONF:CURR:AC', 'CURR', 'CURR:AC', 'VOLT'),
+                                    ('CONF:CURR:ACDC', 'CURR', 'CURR:ACDC', 'VOLT'), ('CONF:CURR:AUTO', 'CURR', 'CURR:AUTO', 'VOLT'),
+                                    ('CONF:RES', 'RES', 'FRES', 'VOLT'), ('CONF:CAP', 'CAP', 'CAP', 'VOLT'),
+                                    ('CONF:FREQ', 'FREQ', 'FREQ', 'VOLT')]:
+        q(conf)
+        wait_ms(1500)
+        for h in dict.fromkeys([bare, expl, 'SENS:' + bare]):
+            want_ok(conf, h + ':RANG:AUTO?', is_bool('1'), '(want 1)')
+            want_ok(conf, h + ':RANG?', finite, '')
+        want_ok(conf, bare + ':RES?', finite, '')
+        q(bare + ':RANG:AUTO OFF')
+        want_ok(conf, bare + ':RANG:AUTO?', is_bool('0'), '(want 0 after RANG:AUTO OFF)')
+        want_ok(conf, expl + ':RANG:AUTO?', is_bool('0'), '(want 0 after RANG:AUTO OFF)')
+        q(bare + ':RANG:AUTO ON')
+        want_ok(conf, bare + ':RANG:AUTO?', is_bool('1'), '(want 1 after RANG:AUTO ON)')
+        want_nan(conf, other + ':RANG:AUTO?')
+        want_nan(conf, other + ':RANG?')
+        if bare in ('VOLT', 'CURR'):
+            # another explicit coupling stays strict
+            alt = bare + (':AC' if expl.endswith(':DC') else ':DC')
+            want_nan(conf, alt + ':RANG:AUTO?')
+            want_nan(conf, alt + ':RANG?')
+    q('CONF:TEMP')
+    wait_ms(1500)
+    for h in ['VOLT', 'CURR', 'RES']:
+        want_nan('CONF:TEMP', h + ':RANG:AUTO?')
+    r, e = qerr('TEMP:RANG?')
+    check(num(r) is None and 'Undefined header' in e, 'CONF:TEMP: TEMP:RANG? -> %r (%s), want no number and "Undefined header"' % (r, e))
+    # The power meter: the V / I channel's (POW:VOLT:RANG? / POW:CURR:RANG?).
+    q('CONF:POW')
+    wait_ms(2500)
+    want_ok('CONF:POW', 'VOLT:RANG:AUTO?', is_bool('1'), '(want 1)')
+    want_ok('CONF:POW', 'CURR:RANG:AUTO?', is_bool('1'), '(want 1)')
+    pv = q('POW:VOLT:RANG?')
+    want_ok('CONF:POW', 'VOLT:RANG?', lambda r: num(r) is not None and abs(num(r) - float(pv.split(',')[1])) < 1e-6, '(POW:VOLT:RANG? %s)' % pv)
+    pi = q('POW:CURR:RANG?')
+    want_ok('CONF:POW', 'CURR:RANG?', lambda r: num(r) is not None and abs(num(r) - float(pi.split(',')[1])) < 1e-9, '(POW:CURR:RANG? %s)' % pi)
+    q('POW:VOLT:RANG 60')
+    wait_ms(500)
+    want_ok('CONF:POW', 'VOLT:RANG:AUTO?', is_bool('0'), '(want 0 after POW:VOLT:RANG 60)')
+    want_ok('CONF:POW', 'VOLT:RANG?', lambda r: num(r) == 60.0, '(want 60)')
+    want_ok('CONF:POW', 'CURR:RANG:AUTO?', is_bool('1'), '(want 1)')
+    want_nan('CONF:POW', 'VOLT:RES?')
+    want_nan('CONF:POW', 'VOLT:AC:RANG:AUTO?')
+    r, e = qerr('VOLT:RANG 6')
+    check('Settings conflict' in e, 'CONF:POW: VOLT:RANG 6 refused (%s)' % e)
+    q('POW:VOLT:RANG AUTO')
+    if A.queries_only:
+        raise SystemExit(0)
 
     q('CONF:VOLT:DC')
     wait_ms(4000)
@@ -154,8 +245,9 @@ try:
         check(bool(first) and abs(first[0][1] - 1.0) < 0.002, 'AC+DC -> %d V: first fresh reading 1 V within 0.2 %% (%s)' % (rg, first))
         check(bool(first) and first[0][0] <= 6500, 'AC+DC -> %d V: first fresh reading within 6.5 s (%s)' % (rg, first))
         q('SYST:ERR?')
-except SystemExit:
-    raise
+except SystemExit as e:
+    if e.code not in (0, None):
+        raise
 finally:
     os.killpg(emu.pid, 15)
     emu.wait()
