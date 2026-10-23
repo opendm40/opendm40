@@ -302,6 +302,10 @@ Code work (in this order):
             calls set_stale since 4a484f7); LOG:CSV ON/OFF -> LOGS/LOG000.CSV likewise. Device re-check pending.
             Device 5f14d38 (Linux): SCOPE/SCOP000-002.CSV and LOGS/LOG000-001.CSV on the mounted volume right after
             the recordings, no remount, == MMEM:DATA?. Open: Windows, gallery .DLG tile, PROF csv lap, STACK.
+            Device b6909d6, Windows 11 VM (device-check-2026-10-21.md "b6909d6: ... Windows 11"): LOGS/LOG000-004.CSV
+            and SCOPE/SCOP000-009.CSV are listed and open in Notepad / PowerShell; the copied SCOP000.CSV is complete
+            (26 624 rows). Open: on Windows, a recording made while mounted (+ F5); spreadsheet; gallery .DLG tile;
+            PROF csv lap; STACK.
       - [x] Owner 2026-10-21: drop legacy text LOG*.CSV / SCOP*.CSV support on the SPI disk (gallery parser,
             numbering, list/delete): only .DLG is written and read; CSV exists only as the generated export.
             (4544d4e)
@@ -1873,6 +1877,21 @@ Firmware:
             Device f3aea2f (docs/device-check-2026-10-21.md "f3aea2f" 3a, Linux): PASS: udisks ro mount, a device screenshot listed ~9 s after the
             gesture, a recording at its stop (== MMEM:DATA?); fsck of SPIFLASH.BIN clean (dirty bit only).
             A host read in flight at the UA gets EIO (reopen works). Windows / macOS, reload.sh not run.
+            Device b6909d6, Windows 11 VM (device-check-2026-10-21.md "b6909d6: ... Windows 11", read-only checks):
+            PASS: AutoPlay -> E: "DM40", FAT16 (Get-Partition), 2 129 920 000 B, read-only, 41 files; CSV / INFO
+            open; copies exact (SPIFLASH.BIN ~348 KB/s, SCOP000.CSV ~78 KB/s, FIRMWARE.BIN ~834 KB/s); Eject ->
+            "Safe To Remove" (then remounted, item below). Still open: the UA while mounted on Windows (a new file
+            + F5), macOS, reload.sh.
+      - [ ] Windows Eject does not keep the volume ejected (device b6909d6): the shell's Eject sends START STOP
+            UNIT, and Windows shows "Safe To Remove". msc.rs then only records it (STOP_UNIT, msc.rs:585, used by
+            recovery), so the medium is still present and E: is mounted again at the next access. Harmless on the
+            read-only volume. Option: report NOT READY / 3A (as DBG:VDISK:EJECT does) until the next bus reset or
+            a new medium (refresh), so the drive stays ejected. Check first that a Linux `eject` / udisks
+            power-off and the "PC can edit" commit at the eject still work.
+      - [ ] Windows: the USBTMC interface (MI_00, class FE/03/01) has no in-box driver. It shows as "DM40
+            multimeter (dm40-fw)" under Other devices with code 28 (device b6909d6). The MSC interface works
+            regardless. Document it in README / Help: for SCPI on Windows, use NI-VISA / Keysight IO Libraries
+            (USBTMC), or WinUSB via Zadig + pyvisa-py.
       - [x] Follow-ups (2026-10-22, src/vwrite.rs; docs/native-boot.md "Host writes"): the volume is
             writable (no WP bit; DBG:VDISK:RO 1 = the read-only volume as before). Every 512-byte WRITE is
             diffed against the generated sector: a LOGS / SCOPE / SHOTS delete (entry 0xE5 + chain freed ->

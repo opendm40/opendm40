@@ -2323,3 +2323,37 @@ MMEM:CAT? takes 123 ms and adds +6813 `dropped` (~89 ms of samples) every time. 
 - **Disk:** MMEM:CAT? names and used / free (3 534 848 / 13 205 504) are the same as at the start. Each session's
   LOGS/FAST000.DLG was deleted by exact name (`del1.py`, which refuses pre-session names).
 - **Calibrator:** 1 V DC (a 40 Hz square during the Wave view checks).
+
+## b6909d6: the "DM40 files" volume on Windows 11 (read only) (2026-10-23 17:26 - 17:38)
+
+The meter ran b6909d6. INFO/BACKUP.TXT names the loader record 3259CDA6 / 00096774 / 00011644, the marker in the
+section above. The default "Files live" mode was in force (read-only). The host was a libvirt Windows 11 VM
+(`win11`). The meter (bus 3, device 127) was passed through with a USB hostdev; the coordinator attached it and
+detached it. The guest was driven only with `virsh send-key` and screenshots: HMP mouse clicks did not register.
+No SCPI was sent and nothing was written to the meter. Copies went to the guest's Desktop\dm40copy. The
+screenshots are in the scratchpad's `win/shots/` (`10`..`37`).
+
+| # | check | result |
+|---|---|---|
+| 1 | Drive, label, size | **PASS**: AutoPlay opened Explorer on **E: "DM40"** at the attach. It took the focus, so a PowerShell line typed then went to Explorer and moved it into DEBUG: browsing only, nothing opened. Get-Volume: FAT, Removable, Healthy, 2 129 920 000 B, 2 102 427 648 free, 32 KiB clusters. Get-Disk: ALIENTEK "DM40 files" rev 0.2, serial 0001, MBR, **IsReadOnly True**, 1 partition; the USBSTOR id is `VEN_ALIENTEK&PROD_DM40_FILES&REV_0.2`. fsutil: FAT, serial 0xe523e098, "Is ReadOnly" |
+| 2 | Folders | **PASS**: root DEBUG, INFO, LOGS, SCOPE, SHOTS, README.TXT (2048 B). `gci -r`: 41 files, all ReadOnly, all dated 13/10/2026 00:00. INFO: CALIB 4096, BOOTDATA 16384, UID 12, OPTBYTES 16, OTP 528, ROMBOOT 16384, LOADER 131072, BACKUP.TXT 1388, FIRMWARE 616320. DEBUG/SPIFLASH.BIN 16 777 216. LOGS/LOG000-004.CSV, SCOPE/SCOP000-009.CSV (384-693 KB), SHOTS/S000-011.BMP (17 KB and 307 266 B) |
+| 3 | Open a CSV and the INFO files | **PASS**: LOG000.CSV (PowerShell) and LOG001.CSV (Notepad: 1531 chars, CRLF, UTF-8): the 3 comment lines, header `time_s,value,unit,flags`, rows. SCOP000.CSV: 4 comment lines (2.50 MS/s, 26624 samples), `time_s,volts`. BACKUP.TXT and README.TXT read as text. Format-Hex of UID.BIN (12 B) and OPTBYTES.BIN (16 B) |
+| 4 | Copy to the Desktop (Measure-Command, Copy-Item) | **PASS**, sizes exact. DEBUG/SPIFLASH.BIN 16 777 216 B in **48.26 s (~348 KB/s)**. SCOPE/SCOP000.CSV 692 550 B in **8.92 s (~78 KB/s**, generated from the DLG). INFO/FIRMWARE.BIN 616 320 B in **0.74 s (~834 KB/s)**. The copied CSV has 26 629 lines (5 + 26 624 samples) and a complete last row. FIRMWARE.BIN sha256 C7EBD17C…D9AA |
+| 5 | FAT16 in the drive properties | **PASS**: Properties shows "File system: FAT" (Windows' name for FAT16), Type USB Drive, used 27 492 352 B, capacity 2 129 920 000 B. Get-Partition: **Type FAT16**, offset 0. Hardware tab: "ALIENTEK DM40 files USB Device", "This device is working properly". Closed with Cancel |
+| 6 | Device Manager: the USBTMC interface | **As expected (no in-box driver)**: "DM40 multimeter (dm40-fw)" under **Other devices** with the warning icon. Get-PnpDevice: MI_00 Status Error, **CM_PROB_FAILED_INSTALL (code 28)**, no service. The hardware ids are `USB\VID_1209&PID_0001&REV_0010&MI_00` and `...&MI_00`; compatible ids start `USB\Class_fe&SubClass_03&Prot_01` (USBTMC USB488). The composite device and MI_01 "USB Mass Storage Device" are OK |
+| 7 | Safely remove | **PASS with a note**: first the Explorer window on E:\ was closed. The shell's Eject verb then gave "Safe To Remove Hardware: The 'DM40 (E:)' device can now be safely removed". **Note:** the next queries (Get-PnpDevice, Get-Volume, Get-Disk) showed E: mounted again and the disk Online. In the normal app msc.rs only records START STOP UNIT for recovery mode (`STOP_UNIT`, msc.rs:585) and keeps the medium present, so Windows remounts the volume at the next access. Unplugging after the toast is still safe: the volume is read-only. Explorer users will just see the drive come back if anything touches it |
+
+**Not covered here:** a recording or screenshot made while the volume is mounted (does Explorer show the new file
+after F5, with the UA sent at once?), "PC can edit" on Windows (delete, copy dm40fw.bin, System Volume Information),
+and the AD2 ISR during the copies (no SCPI was sent; the DMM page was not watched). The INFO/FIRMWARE.BIN copy
+reads the region C tail; per the section above, that stalls only an AD2 stream that is running.
+
+**Side issue, not the meter:** at 17:12 the VM was found paused with an io-error ("sda: no space"): the host root
+filesystem was full. The VM was left paused until the owner freed space, then resumed with `virsh resume`. Windows
+came back without problems.
+
+### State at the end
+
+- **Device:** b6909d6. The coordinator detached it from the VM, and it is back on the host as /dev/usbtmc2.
+  Nothing was written to its disk, and its settings and mode (Files live) were not touched.
+- **VM:** win11 shut off. The guest keeps Desktop\dm40copy (the three copied files).
