@@ -2645,8 +2645,8 @@ Emulator (emu/):
       - Dmm::set restarts the hit run (an alert in force stays). dmm.start starts the history over.
         The A-jack probe's in / out rewrites skip the blank.
       - The DMM hints AC? and DC? need the condition in every window for the 2 s. The power meter's
-        hints keep the old rule: with the every-window rule their DC? toast landed on powtest ereset's
-        long press. AC? counts
+        hints keep the old rule (no report against them; scope kept narrow). powtest `ereset` is the
+        known flake (item above): 1 of 2 runs FAIL on ad74e93 and on this branch alike. AC? counts
         a V-tap window only with |DC V| < 2 V (AC_HINT_DC_MAX), after the row's first reading, and never
         a read with both bits.
       A-PROT's rule (aprot_trips, the probe, the latch) is unchanged.

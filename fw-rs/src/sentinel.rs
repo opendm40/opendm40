@@ -1029,8 +1029,7 @@ impl Sentinel {
     /// the hints mask.
     pub fn pw_hints(&mut self, now: u64, dc: bool, ac: bool) {
         // (assert_ms 0: per reading of settled parts, the old rule - a gap under
-        // HINT_CLEAR_MS keeps the count; the every-window rule moved the DC? toast
-        // onto powtest ereset's long press)
+        // HINT_CLEAR_MS keeps the count; no false-hint report against these)
         self.dc.feed(now, dc, 0, HINT_CLEAR_MS);
         self.ac.feed(now, ac, 0, HINT_CLEAR_MS);
         self.decide(now);
