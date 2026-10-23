@@ -231,6 +231,10 @@ pub struct App {
     /// Host requests (SCPI / logger) that need a rail, kept until the next
     /// instrument view is shown.
     host_dmm: bool,
+    /// A logger session owns the HY3131 (main.rs `busy`, set every pass):
+    /// the DMM rail stays on whatever view is shown (fastlogtest --ui-nav:
+    /// the Oscilloscope tile during a disk session dropped it, 0 rows).
+    pub logger_busy: bool,
     host_scope: bool,
     /// Anti-drop: re-assert the latching V/A relay periodically (stock
     /// setting; the relay can flip on a mechanical shock).
@@ -522,6 +526,7 @@ impl App {
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             rails_both: false,
             host_dmm: false,
+            logger_busy: false,
             host_scope: false,
             anti_drop: true,
             relay_next: 0,
@@ -690,7 +695,7 @@ impl App {
         };
         // A CSV recording (csvlog.rs) keeps the DMM measuring in every view.
         // So does the power meter (energy, the shunt state): every view.
-        d |= self.host_dmm || (self.bt_on && self.power.bt_connected()) || crate::csvlog::active() || self.dmm.pw.on;
+        d |= self.host_dmm || self.logger_busy || (self.bt_on && self.power.bt_connected()) || crate::csvlog::active() || self.dmm.pw.on;
         s |= self.host_scope || self.gen.s.on;
         if self.rails_both {
             (d, s) = (true, true);
@@ -1355,6 +1360,23 @@ impl App {
         self.redraw = true;
     }
 
+    /// The full repaint of the view (`tick` when `redraw` is set).
+    #[inline(never)] // its draw frames stay out of the callers' frames (run's)
+    fn repaint(&mut self, now: u64) {
+        self.redraw = false;
+        // The full repaint drew any pressed item released.
+        self.pressed = None;
+        self.scope_invalidate();
+        self.chart_cache.invalidate();
+        self.draw_static();
+        self.repaint_at = now;
+        self.status_next = 0;
+        self.chart_dirty = true;
+        // draw_static() repaints the DMM reading (shown value + HOLD/RUN
+        // label) from the meter, so the label now matches.
+        self.hold_shown = self.shown_state();
+    }
+
     /// Periodic work. `can_draw` is false before USB enumerated, while a
     /// screenshot is being read and for the whole of a data-logger session.
     /// Only drawing (and the 10 ms blocking relay re-assert) is skipped then:
@@ -1522,18 +1544,7 @@ impl App {
         }
         // ---- drawing only below this point.
         if self.redraw {
-            self.redraw = false;
-            // The full repaint drew any pressed item released.
-            self.pressed = None;
-            self.scope_invalidate();
-            self.chart_cache.invalidate();
-            self.draw_static();
-            self.repaint_at = now;
-            self.status_next = 0;
-            self.chart_dirty = true;
-            // draw_static() repaints the DMM reading (shown value + HOLD/RUN
-            // label) from the meter, so the label now matches.
-            self.hold_shown = self.shown_state();
+            self.repaint(now);
         }
         // A toast that came while a confirm was up, over the page again.
         if self.toast_later_n != 0 {
@@ -2926,13 +2937,17 @@ impl App {
             }
             0 => {
                 // Walk one step up the page tree, not straight to the
-                // instrument: Device -> Settings -> Menu -> instrument. The old
-                // code sent every menu page to back_view, so the back key in
-                // Settings/Device skipped their parent (regressed when Device
-                // was added). Range / Keypad still pop to the view
-                // they were opened from.
+                // instrument: Settings 3/3 -> 2/3 -> 1/3 -> Menu -> instrument.
+                // The old code sent every menu page to back_view, so the back
+                // key in Settings skipped their parent. Device -> the main
+                // menu: on the stock, Device is a section of the one Settings
+                // screen, and MENU there leaves Settings (device check 35fce2a:
+                // MENU on Device returned to Settings 3/3, where the next
+                // "menu" tap changed the USB disk row). Range / Keypad still
+                // pop to the view they were opened from.
                 let v = match self.view {
-                    View::Device | View::Help => View::Settings,
+                    View::Device => View::Menu,
+                    View::Help => View::Settings,
                     View::Settings if self.set_page >= 1 => {
                         self.set_page -= 1;
                         View::Settings
@@ -3028,8 +3043,8 @@ impl App {
             View::Gallery => {} // gestures go to gallery::touch (App::gesture)
             View::Inrush => self.inrush_tap(clk, x, y),
             View::Device => {
-                // Any tap dismisses back to Settings (its parent), the same
-                // step the MENU key takes from Device (see key()).
+                // Any tap dismisses back to Settings (its parent; MENU goes
+                // on to the main menu, see key()).
                 self.show(View::Settings, clk);
             }
             View::Help => {
@@ -4115,6 +4130,15 @@ impl App {
             }
             C::DbgGrab(None) => {
                 crate::put_u32(out, gesture::grab_ms() as u32);
+                true
+            }
+            C::DbgView => {
+                // <view>,<settings page 1..3>,<wave view on> (emulator
+                // tests: where a DBG:KEY / DBG:TAP landed).
+                out.put_bytes(ui::view_name(self.view).as_bytes());
+                out.put_bytes(b",");
+                crate::put_u32(out, self.set_page as u32 + 1);
+                out.put_bytes(if self.scope.wave_on() { b",1" } else { b",0" });
                 true
             }
             C::DbgGest => {

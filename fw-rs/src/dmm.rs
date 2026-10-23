@@ -2656,6 +2656,17 @@ impl Dmm {
 
     /// (Re)start measuring in the current mode.
     pub fn start(&mut self, clk: &mut Clock) {
+        if self.wake_at != 0 && !self.suspended {
+            // The rail came up < RAIL_SETTLE_MS ago and the chip ignores
+            // writes until its supply is up: a row written now is lost (a
+            // logger session started by a host on the Scope / Gen page,
+            // where the DMM rail is off, ran with no samples: fastlogtest
+            // --ui-nav). Wait out the rest of the settle (<= 50 ms).
+            let now = clk.now_ms();
+            if now < self.wake_at {
+                clk.delay_ms((self.wake_at - now) as u32);
+            }
+        }
         self.wake_at = 0;
         self.wd_t = clk.now_ms();
         if self.pw.on {

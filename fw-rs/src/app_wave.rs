@@ -110,8 +110,27 @@ impl App {
     /// change `show` held back (leaving the live wave view) now.
     pub fn wave_exit_done(&mut self, clk: &mut Clock) {
         if let Some(v) = self.wave_exit_to.take() {
-            self.show(v, clk);
+            if v == self.view {
+                // The source badge (`wave_badge_close`): MCX on this page.
+                self.wave_close(clk, true);
+            } else {
+                self.show(v, clk);
+            }
             self.wave_req = None; // wave_close's Stop: done
+        }
+    }
+
+    /// The source badge in the wave view (DMM -> MCX). With the stream on,
+    /// the close waits for its stop (as `show` does for a view change):
+    /// `wave_close` switches the rails to the scope side (the DMM rail off
+    /// under the stream) and the MCX page's acquisition and full repaint
+    /// would run for a pass while the stream ISR still owns the bus.
+    pub(super) fn wave_badge_close(&mut self, clk: &mut Clock) {
+        if crate::hy3131::streaming() {
+            self.wave_req = Some(WaveReq::Stop);
+            self.wave_exit_to = Some(self.view);
+        } else {
+            self.wave_close(clk, true);
         }
     }
 
@@ -220,6 +239,31 @@ impl App {
             self.update_rails(clk);
         }
         self.redraw = true;
+    }
+
+    /// main.rs, a range / coupling step with the stream stopped, before it
+    /// starts again: the new scale, and the full repaint it needs (V/div,
+    /// the unit, the coupling) now, while nothing streams (`draw_ok`: the
+    /// main loop may draw). At 76800 S/s the ring holds 27 ms, less than
+    /// the scope page's repaint: run with the new stream on, it overflowed
+    /// the ring and the record restarted (wavetest V/div at 2 / 1 ms/div).
+    /// `wave_live` then finds the scale unchanged.
+    #[inline(never)] // not inlined into run (stack depth)
+    pub fn wave_rescale(&mut self, draw_ok: bool) {
+        let Some(a) = self.dmm.ad2_scale() else { return };
+        let s = scale_of(a);
+        let now = self.scope.wave_scale_now();
+        if s == now {
+            return;
+        }
+        self.scope.wave_scale(s);
+        if (s.vdiv, s.amps, s.ac) != (now.vdiv, now.amps, now.ac) && self.view == View::Scope {
+            if draw_ok && self.overlay.is_none() {
+                self.repaint(self.now);
+            } else {
+                self.redraw = true;
+            }
+        }
     }
 
     /// main.rs: the stream runs at `scope.wave_fs()` on the current row.
