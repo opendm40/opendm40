@@ -1662,6 +1662,16 @@ impl Dmm {
             return false;
         }
         let prev = self.acs_prev;
+        if now.saturating_sub(self.acs_t0) >= ACS_MAX_MS && prev >= 0.0 && ac > ACS_JUMP * prev + ACS_JUMP_FLOOR * lim {
+            // The time limit ran out on a jump: an input step that came while
+            // the settle ran (device c8c2f02: 4.0 -> 5.8 V ~4.6 s after a 60 ->
+            // 6 V step; the limit took 0.84 / 2.4 V as the AC part, and 2.4 V
+            // stepped 6 -> 60 V). Its own settle starts here.
+            self.acs_begin(now, true);
+            self.acs_prev = ac;
+            self.acs_tp = now;
+            return true;
+        }
         let near = prev >= 0.0 && now.saturating_sub(self.acs_tp) <= ACS_NEAR_MS;
         let flat = acs_flat(prev, self.acs_d, ac, near);
         self.acs_d = if near { prev - ac } else { -1.0 };
