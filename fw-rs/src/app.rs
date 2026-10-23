@@ -73,6 +73,9 @@ const LEADS_TOAST_WAIT_MS: u64 = 1000;
 const TOAST_LATER_MAX: usize = 48;
 const TIM14: u32 = 0x4000_2000;
 const BUZZER_ARR: u32 = 11200;
+/// The danger alarm's low tone (danger.rs; doc 4.10): 200 MHz / 5 / 14000 =
+/// 2.86 kHz, a major third under the stock 3.57 kHz.
+const BUZZER_ARR_LO: u32 = 14000;
 /// RUN held this long in a DMM view toggles AutoHold (the short press keeps
 /// toggling HOLD at key-down, so HOLD has no added latency; the long press
 /// then undoes that HOLD).
@@ -278,8 +281,8 @@ pub struct App {
     /// Last limit-fail beep (rate limit for a reading that hovers at a limit).
     fail_beep_at: u64,
     /// Wrong-connection alert (sentinel.rs): the assertion last toasted,
-    /// the start of the A-JACK beep pattern (None: silent) and whether the
-    /// pattern has the buzzer on.
+    /// the start of the power meter's current-limit beep pattern (None:
+    /// silent) and whether the pattern has the buzzer on.
     alert_seq: u32,
     alert_beep_t0: Option<u64>,
     /// "Leads in A?" reminder (sentinel::Leads, `leads_tick`).
@@ -287,6 +290,14 @@ pub struct App {
     /// The reminder's toast is due (by this time at the latest).
     leads_toast_at: Option<u64>,
     alert_buzz: bool,
+    /// Danger alarm (danger.rs, doc 4.10): the event state, the setting
+    /// (danger::LOUD / VOLUME / OFF, persisted), the latest reading's
+    /// dangerous alert (A-JACK, A-PROT with current flowing) and since when
+    /// the readings are above the 10 A rating.
+    alarm: crate::danger::Alarm,
+    pub alarm_mode: u8,
+    danger_rd: bool,
+    i10_since: Option<u64>,
     /// A fuse check was running at the last tick (`fuse_tick`).
     fuse_busy: bool,
     pub meas: [f32; 4],
@@ -424,12 +435,37 @@ fn buzzer_init() {
     }
 }
 
-/// Buzzer on/off at `vol` 0..100 % (stock: duty = min(v/3, 0.99) * 0.5).
-fn buzzer(on: bool, vol: u8) {
+/// Buzzer duty (fraction of the period) at `vol` 0..100 % (stock: duty =
+/// min(v/3, 0.99) * 0.5; 100 % = 0.495, the loudest the stock drives).
+fn buzz_k(vol: u8) -> f32 {
     let v = vol as f32 / 100.0;
-    let k = if v < 0.9 { v / 3.0 } else { v.min(0.99) } * 0.5;
-    let duty = if on { (BUZZER_ARR as f32 * k) as u32 } else { 0 };
+    (if v < 0.9 { v / 3.0 } else { v.min(0.99) }) * 0.5
+}
+
+/// Buzzer on/off at `vol` 0..100 %.
+fn buzzer(on: bool, vol: u8) {
+    let duty = if on { (BUZZER_ARR as f32 * buzz_k(vol)) as u32 } else { 0 };
     unsafe { w32(TIM14 + 0x34, duty) };
+}
+
+/// The danger alarm's tone (danger::tone_at: 0 off, 1 high, 2 low) at `vol`
+/// (100 = Loud). Re-asserted every pass, written only when the registers
+/// differ (so the emulator's write log holds the edges): a key / tap beep
+/// in between cannot leave the alarm muted or at its own duty. ARR and
+/// CCR1 are preloaded (CR1 ARPE, CCMR1 OC1PE: `buzzer_init`), so a tone
+/// change lands whole at the next period. Tone 0 also restores the stock
+/// pitch (the end of the alarm: every other beep is at BUZZER_ARR).
+fn buzzer_tone(tone: u8, vol: u8) {
+    let arr = if tone == 2 { BUZZER_ARR_LO } else { BUZZER_ARR };
+    let ccr = if tone == 0 { 0 } else { (arr as f32 * buzz_k(vol)) as u32 };
+    unsafe {
+        if crate::mmio::r32(TIM14 + 0x2C) != arr - 1 {
+            w32(TIM14 + 0x2C, arr - 1);
+        }
+        if crate::mmio::r32(TIM14 + 0x34) != ccr {
+            w32(TIM14 + 0x34, ccr);
+        }
+    }
 }
 
 /// Finish the on-device disk writers before the power goes (power-off, the
@@ -554,6 +590,10 @@ impl App {
             leads: crate::sentinel::Leads::new(),
             leads_toast_at: None,
             alert_buzz: false,
+            alarm: crate::danger::Alarm::NEW,
+            alarm_mode: crate::danger::LOUD,
+            danger_rd: false,
+            i10_since: None,
             fuse_busy: false,
             meas: [0.0; 4],
             pd6_armed: false,
@@ -812,6 +852,7 @@ impl App {
                 let vals = [
                     alert_mask_name(&mut b, self.dmm.alert_mask()),
                     if self.dmm.alert_mask() & crate::sentinel::M_LEADS != 0 { "ON" } else { "OFF" },
+                    crate::danger::NAMES[self.alarm_mode.min(2) as usize],
                     ui::usb_disk_name(self.usb_ro_drawn.0, self.usb_ro_drawn.1),
                     if self.dmm.burden_show { "ON (A, mA, uA)" } else { "OFF (stock)" },
                     "", // Device row: opens the About page, no inline value
@@ -1471,6 +1512,8 @@ impl App {
             (true, None) => {
                 self.pd6_since = Some(now);
                 self.last_input = now;
+                // The power key silences the danger alarm too (doc 4.10).
+                self.alarm.silence();
                 if self.dimmed {
                     self.dimmed = false;
                     backlight(self.backlight);
@@ -1920,7 +1963,8 @@ impl App {
             | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 }
             | ((!self.dmm.alert_mask() & crate::sentinel::M_JACK) as u32) << crate::meter::EXT_ALERT_OFF_SHIFT
             | if self.dmm.alert_mask() & crate::sentinel::M_LEADS == 0 { crate::meter::EXT_LEADS_OFF } else { 0 }
-            | if self.dmm.burden_show { crate::meter::EXT_BURDEN } else { 0 };
+            | if self.dmm.burden_show { crate::meter::EXT_BURDEN } else { 0 }
+            | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT;
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
         p
@@ -1981,6 +2025,8 @@ impl App {
         }
         self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
         self.dmm.burden_show = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_BURDEN != 0;
+        // An unknown value (3) reads as Loud.
+        self.alarm_mode = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_DANGER_SHIFT & 3) as u8 % 3;
         self.pw_restore(&p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS]);
         self.pw_zd_restore(&p[crate::persist::W_POWER_ZD..crate::persist::W_POWER_ZD + app_power::PW_ZD_WORDS]);
         // v8: Record page interval / duration (0 = the defaults; csvlog
@@ -2162,7 +2208,7 @@ impl App {
                 self.dmm_view.pwc.coup_invalidate();
             }
         }
-        self.alert(now, raw.alert);
+        self.alert(now, &raw);
         // AutoHold capture: short beep; a capture that fails the limits (with
         // the fail beep on) gets the long fail beep instead. A live value
         // crossing out of the limits: long beep, at most once a second.
@@ -2345,6 +2391,17 @@ impl App {
     pub fn gesture(&mut self, clk: &mut Clock, g: Gesture) -> bool {
         let now = clk.now_ms();
         self.last_input = now;
+        // Danger alarm (doc 4.10): silenced for this event by a tap on the
+        // alert's badge (that tap is the alarm's: nothing else happens) or
+        // toast (which closes, as any toast tap), or by any side key (which
+        // still does its job: stock keys always act). Before the lock /
+        // dim / screenshot gates: silencing is always allowed.
+        if self.alarm.sounding() {
+            let k = self.alarm_hit(&g);
+            if k != 0 && self.alarm.silence() && k == 2 {
+                return false;
+            }
+        }
         // A scope-page drag / pinch whose end would be swallowed below (a
         // screenshot, the lock, an overlay): end it now, so the acquisition
         // is not left held and no stale pinch survives (review 7dc32ac B1).
@@ -2602,6 +2659,29 @@ impl App {
         captured
     }
 
+    /// A gesture that silences the danger alarm: 0 no, 1 yes and it goes on
+    /// (a side key, a tap on a toast), 2 yes and it ends here (a tap on the
+    /// alert badge: the DMM status slot ui::hold_label 119..202 x 1..33,
+    /// the combined view's strip badge, scope_ui ST_BADGE 19..81 x 46..63;
+    /// a few px around both).
+    fn alarm_hit(&self, g: &Gesture) -> u8 {
+        let p = match *g {
+            Gesture::KeyDown(_) => return 1,
+            Gesture::Tap(p) => p,
+            _ => return 0,
+        };
+        let (x, y) = (p.x, p.y);
+        if matches!(self.overlay, Some(crate::dialog::Overlay::Toast { .. })) && crate::dialog::toast_hit(x, y) {
+            return 1;
+        }
+        let badge = match self.view {
+            View::Dmm => (115..206).contains(&x) && y < 37,
+            View::DmmScope => (15..85).contains(&x) && (42..67).contains(&y),
+            _ => false,
+        };
+        if badge { 2 } else { 0 }
+    }
+
     /// Close the overlay; the view is redrawn on the next tick.
     fn overlay_close(&mut self) {
         self.overlay = None;
@@ -2668,11 +2748,27 @@ impl App {
     }
 
     /// Wrong-connection alert of the latest reading (sentinel.rs): a toast
-    /// once per assertion, in any view; A-JACK starts the beep pattern
-    /// (`alert_beep`), LIVE? beeps once 100 ms, V-JACK? is silent. The badge
-    /// comes with the reading (DMM status slot, combined-view strip).
-    fn alert(&mut self, now: u64, a: crate::sentinel::Alert) {
+    /// once per assertion, in any view; LIVE? beeps once 100 ms, V-JACK? is
+    /// silent. The badge comes with the reading (DMM status slot,
+    /// combined-view strip). The dangerous ones (doc 4.10: A-JACK, A-PROT
+    /// while its current flows, a current above the 10 A rating) are the
+    /// danger alarm's (`alert_beep`): noted here per reading.
+    fn alert(&mut self, now: u64, r: &Reading) {
         use crate::sentinel::Alert;
+        let a = r.alert;
+        // A-PROT: dangerous while the current flows. DC V / mV keep the
+        // probe in the row while latched (doc 4.8): its reading below
+        // APROT_GONE_A = the source is gone and the latch only waits for the
+        // user (badge, no alarm); elsewhere the probe is not read, the latch
+        // counts (the alarm's own cap applies).
+        let probe_low = matches!(self.dmm.func(), 1 | 3) && self.dmm.sent.probe_a < crate::sentinel::APROT_GONE_A;
+        self.danger_rd = a == Alert::AJack || (a == Alert::AProt && !probe_low);
+        let pw = r.power.map(|p| (p.ik, p.i_ol, p.i));
+        if crate::danger::over_rating(r.mode, r.range, r.main.ol, r.si, pw) {
+            self.i10_since.get_or_insert(now);
+        } else {
+            self.i10_since = None;
+        }
         let seq = self.dmm.sent.seq;
         if seq != self.alert_seq {
             self.alert_seq = seq;
@@ -2681,7 +2777,6 @@ impl App {
                     self.toast(now, crate::dmm::pw::hint_toast(a, self.dmm.pw.on), false);
                 }
                 match a {
-                    Alert::AJack | Alert::AProt => self.alert_beep_t0 = Some(now),
                     Alert::Live => self.beep(now, 100),
                     // OVERLOAD: one 300 ms beep (doc 4.4) at the key / alert
                     // volume also with the key beep off (a safety cue, as
@@ -2694,8 +2789,8 @@ impl App {
                 }
             }
         }
-        // (The power meter's expired current limit keeps the same pattern.)
-        if !matches!(a, Alert::AJack | Alert::AProt) && !(self.dmm.pw.on && self.dmm.pw_state().over == 2) {
+        // The power meter's expired current limit (its own pattern).
+        if !(self.dmm.pw.on && self.dmm.pw_state().over == 2) {
             self.alert_beep_t0 = None;
         }
     }
@@ -2746,10 +2841,29 @@ impl App {
         true
     }
 
-    /// A-JACK beep pattern: 3 x 50 ms (50 ms apart) every 2 s while the
-    /// alert is on, at the key / alert volume (0 % = silent); never over
-    /// another beep in progress.
+    /// Per pass: the danger alarm (danger.rs, doc 4.10) owns the buzzer
+    /// while it sounds (Loud: 100 % whatever the volume; Volume: the key /
+    /// alert volume). Only with the DMM running: no readings, no claim (the
+    /// scope / generator views switch its rail off). Otherwise the power
+    /// meter's current-limit pattern: 3 x 50 ms (50 ms apart) every 2 s at
+    /// the key / alert volume (0 % = silent); never over another beep in
+    /// progress.
     fn alert_beep(&mut self, now: u64) {
+        let i10 = self.i10_since.is_some_and(|t| now.saturating_sub(t) >= crate::danger::I10_ASSERT_MS);
+        let active = (self.danger_rd || i10) && self.scope.dmm_rail();
+        match self.alarm.feed(now, active, self.alarm_mode != crate::danger::OFF) {
+            crate::danger::Out::Tone(t) => {
+                buzzer_tone(t, if self.alarm_mode == crate::danger::LOUD { 100 } else { self.volume });
+                self.alert_buzz = false;
+                return;
+            }
+            crate::danger::Out::Stop => {
+                buzzer_tone(0, 0);
+                self.beep_until = 0;
+                self.alert_buzz = false;
+            }
+            crate::danger::Out::Idle => {}
+        }
         let on = match self.alert_beep_t0 {
             Some(t0) => {
                 let ph = now.saturating_sub(t0) % 2000;
@@ -3469,6 +3583,10 @@ impl App {
                         self.dmm.set_alert_mask(clk, m);
                     }
                     Some(2) => {
+                        // Danger alarm (doc 4.10): Loud -> Volume -> Off.
+                        self.alarm_mode = (self.alarm_mode + 1) % 3;
+                    }
+                    Some(3) => {
                         // USB disk (decision 2026-10-22 #6): Files live <->
                         // PC can edit, volatile; in force at the next bus
                         // reset (the host reads the WP bit when it mounts).
@@ -3482,12 +3600,12 @@ impl App {
                             self.toast(clk.now_ms(), "Re-plug USB to apply", true);
                         }
                     }
-                    Some(3) => {
+                    Some(4) => {
                         // Burden voltage in the A functions (doc 3.15):
                         // from the next reading on.
                         self.dmm.burden_show = !self.dmm.burden_show;
                     }
-                    Some(4) => {
+                    Some(5) => {
                         self.show(View::Device, clk);
                         return;
                     }
@@ -4231,6 +4349,34 @@ impl App {
             }
             C::DbgSentVar(None) => {
                 out.put_u32(crate::sentinel::variant() as u32);
+                true
+            }
+            C::SysAlarm(Some(m)) => {
+                self.alarm_mode = m.min(2);
+                self.redraw |= self.view == View::Settings && self.set_page == 2;
+                false
+            }
+            C::SysAlarm(None) => {
+                out.put_bytes(crate::danger::SCPI_NAMES[self.alarm_mode.min(2) as usize].as_bytes());
+                true
+            }
+            C::SysBeepVol(Some(v)) => {
+                self.volume = v.min(100);
+                self.redraw |= self.view == View::Settings && self.set_page == 0;
+                false
+            }
+            C::SysBeepVol(None) => {
+                out.put_u32(self.volume as u32);
+                true
+            }
+            C::DbgAlarm => {
+                let a = &self.alarm;
+                for (i, v) in [a.sounding() as u32, a.silenced() as u32, a.events, self.alarm_mode as u32].into_iter().enumerate() {
+                    if i > 0 {
+                        out.put_bytes(b",");
+                    }
+                    out.put_u32(v);
+                }
                 true
             }
             C::DbgLeads => {

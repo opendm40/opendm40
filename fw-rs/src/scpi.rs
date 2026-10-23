@@ -172,6 +172,14 @@
 //!     between A and V functions with leads in both jacks clears bit 3
 //!     OVERLOAD (the uA / mA shunt over range: the meter moved to the 10 A
 //!     shunt, latched; doc 4.7) is not maskable
+//!   SYSTem:ALERt:ALARm LOUD | VOLume | OFF / ?   the danger alarm (doc
+//!     4.10, Settings 3/3 "Danger alarm"): A-JACK, A-PROT while its current
+//!     flows and a current above the 10 A rating sound a two-tone pattern at
+//!     full duty (LOUD, default), at the key / alert volume (VOLUME) or not
+//!     at all (OFF); persisted. `?` -> LOUD | VOLUME | OFF
+//!   SYSTem:BEEPer:VOLume <0..100> / ?   the key / alert volume in % (Settings
+//!     "Key/alert volume"), persisted
+//!   DBG:ALARm?   <sounding 0|1>,<silenced 0|1>,<events>,<setting 0..2>
 //!   SYSTem:FUSE:TEST   start the fuse check (doc 4.3: one lead from V/ohm to
 //!     A, nothing else): ohm 600 ohm for 3 readings, then the function before
 //!     (the power meter restarts its energy); non-blocking
@@ -818,6 +826,13 @@ pub enum Cmd {
     /// SYSTem:ALERt:ENABle <mask> | ON | OFF / ?: alerts enabled (bit 0
     /// A-JACK, 1 V-JACK?, 2 LIVE?, 3 the "Leads in A?" reminder).
     SysAlertEnable(Option<u8>),
+    /// SYSTem:ALERt:ALARm LOUD | VOLume | OFF / ?: the danger alarm setting
+    /// (danger::LOUD / VOLUME / OFF).
+    SysAlarm(Option<u8>),
+    /// SYSTem:BEEPer:VOLume <0..100> / ?: the key / alert volume (%).
+    SysBeepVol(Option<u8>),
+    /// DBG:ALARm?: the danger alarm's state.
+    DbgAlarm,
     /// DBG:SENTinel?: sentinel raw state (Sentinel::diag_text).
     DbgSent,
     /// DBG:SENTinel:LOG?: the alert assertions (Sentinel::log).
@@ -1656,10 +1671,37 @@ impl Scpi {
                         }
                     });
                 }
+                _ if kw(p0, "SYSTem") && parts.len() == 3 && kw(parts[1], "BEEPer") && kw(parts[2], "VOLume") => {
+                    out = Out::Instr(if query {
+                        Cmd::SysBeepVol(None)
+                    } else {
+                        match parse_num(trim(arg)) {
+                            Some(v) if (0.0..=100.0).contains(&v) => Cmd::SysBeepVol(Some(v as u8)),
+                            _ => {
+                                self.err = Some("Illegal parameter value");
+                                continue;
+                            }
+                        }
+                    });
+                }
+                _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "ALARm") => out = Out::Instr(Cmd::DbgAlarm),
                 _ if kw(p0, "SYSTem") && parts.len() > 1 && kw(parts[1], "ALERt") => {
                     let a = trim(arg);
                     out = Out::Instr(if parts.len() == 2 && query {
                         Cmd::SysAlert
+                    } else if parts.len() == 3 && kw(parts[2], "ALARm") && query {
+                        Cmd::SysAlarm(None)
+                    } else if parts.len() == 3 && kw(parts[2], "ALARm") {
+                        if kw(a, "LOUD") {
+                            Cmd::SysAlarm(Some(crate::danger::LOUD))
+                        } else if kw(a, "VOLume") {
+                            Cmd::SysAlarm(Some(crate::danger::VOLUME))
+                        } else if kw(a, "OFF") {
+                            Cmd::SysAlarm(Some(crate::danger::OFF))
+                        } else {
+                            self.err = Some("Illegal parameter value");
+                            continue;
+                        }
                     } else if parts.len() == 3 && kw(parts[2], "ENABle") && query {
                         Cmd::SysAlertEnable(None)
                     } else if parts.len() == 3 && kw(parts[2], "ENABle") {
