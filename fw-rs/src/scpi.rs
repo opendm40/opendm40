@@ -492,6 +492,9 @@ pub enum Log {
 ///   DBG:SENTinel?           misconnect sentinel (sentinel.rs): kind,alert,mask,
 ///                           ctsta,pkhmin,pkhmax,streak,hit_windows,samples,
 ///                           probe_mA,aprot_ms (A-jack protection, doc 4.8)
+///   DBG:SENTinel:LOG?       the last 8 alert assertions since power-on:
+///                           n then per one ";ALERT,KIND,ms" (oldest first;
+///                           n counts all, emu/hy3131/switchtest.py)
 ///   DBG:LEADs?              "Leads in A?" reminders since power-on: n,from,to
 ///                           (Dmm::func codes of the last change that fired;
 ///                           255 = none yet; doc 4.9)
@@ -806,6 +809,8 @@ pub enum Cmd {
     SysAlertEnable(Option<u8>),
     /// DBG:SENTinel?: sentinel raw state (Sentinel::diag_text).
     DbgSent,
+    /// DBG:SENTinel:LOG?: the alert assertions (Sentinel::log).
+    DbgSentLog,
     /// DBG:LEADs?: the "Leads in A?" reminder count and last change.
     DbgLeads,
     /// DBG:SENTinel:VARiant <0..31> / ?: device-check row variants
@@ -1853,6 +1858,7 @@ impl Scpi {
                         _ => self.err = Some("Illegal parameter value"),
                     }
                 }
+                _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "LOG")) => out = Out::Instr(Cmd::DbgSentLog),
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
                 _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "LEADs") => out = Out::Instr(Cmd::DbgLeads),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {

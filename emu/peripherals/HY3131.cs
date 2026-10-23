@@ -433,6 +433,20 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// of the old and the new input. A restart (an R22 change, ENAD1 toggled) flushes it.
         /// Off: every conversion is the input at its end, as before.
         public bool Ad1Mix;
+        /// Switch transient on the sentinel nodes (opt-in, "swtr:mV", "swtau:ms", "swhz:Hz";
+        /// HYPOTHETICAL shape, no device numbers yet: owner 2026-10-23, false A-JACK / AC? after
+        /// switches): from every row change (role / mode / range) PB1, the V tap and the A rows'
+        /// SENSE tap carry swtr mV x exp(-dt / swtau) x cos(2 pi swhz dt) on top of the input,
+        /// both signs (a relay / front-end ring). Default 60 ms, 25 Hz; off (0 mV) by default.
+        public double SwTrMv, SwTrTau = 60, SwTrHz = 25;
+        private double swT0 = double.NegativeInfinity;
+        private double SwTr(double t)
+        {
+            if(SwTrMv == 0) return 0;
+            var dt = t - swT0;
+            if(dt < 0 || dt > 20 * SwTrTau * 1e-3) return 0;
+            return SwTrMv * 1e-3 * Math.Exp(-dt / (SwTrTau * 1e-3)) * Math.Cos(2 * Math.PI * SwTrHz * dt);
+        }
         private const double Ad1MixBurst = 20e-3; // the bit-banged row (+ quiesce) takes a few ms
         private double ad1MixT = double.NegativeInfinity, ad1RestartT = double.NegativeInfinity;
         private int ad1MixOld;
@@ -648,6 +662,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "beat": BeatModel = o.Value != 0; break;
                 case "powmix": PowMix = o.Value != 0; break;
                 case "ad1mix": Ad1Mix = o.Value != 0; break;
+                case "swtr": SwTrMv = o.Value; break;
+                case "swtau": SwTrTau = o.Value; break;
+                case "swhz": SwTrHz = o.Value; break;
                 case "powvg": PowVGain = o.Value; break;
                 case "powz": PowZeros = o.Value != 0; break;
                 case "vnoise": vNoise = o.Value; break;
@@ -1690,7 +1707,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         {
             double dc, ac, hz, duty; string shape;
             Fe.ACurrent(out dc, out ac, out hz, out shape, out duty);
-            return Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR;
+            return Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR + SwTr(t);
         }
 
         /// PB2: drop across the 10 mohm element, in series with the A jack in every shunt state
@@ -1707,7 +1724,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         {
             double dc, ac, hz, duty; string shape;
             Fe.VJack(0, out dc, out ac, out hz, out shape, out duty);
-            return Wave(t, dc, ac, hz, shape, duty) / k;
+            return Wave(t, dc, ac, hz, shape, duty) / k + SwTr(t);
         }
 
         /// SENSE in the A rows: the /1000 divider tap through SS5 (PA5), else open (0).
@@ -1716,7 +1733,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if((regs[0x2C] & 0x10) == 0) return 0;
             double dc, ac, hz, duty; string shape;
             Fe.VJack(0, out dc, out ac, out hz, out shape, out duty);
-            return Wave(t, dc, ac, hz, shape, duty) / 1000.0;
+            return Wave(t, dc, ac, hz, shape, duty) / 1000.0 + SwTr(t);
         }
 
         /// Instantaneous value of a DC + AC (RMS) waveform at time t.
@@ -2002,6 +2019,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 if(newRole == Role.CapRamp && role != Role.CapRamp) { rampUp = true; }
                 role = newRole; roleMode = newMode; roleRange = newRange;
+                swT0 = now;
             }
             // the AD2/AD3 enable-order phase: bad when ENAD2 was set before ENAD3 (empirical)
             beatBad = EnAd2 && EnAd3 && ad2Start <= ad3Start;
