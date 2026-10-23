@@ -731,7 +731,9 @@ impl Dmm {
         let before = (m, self.range);
         if !self.manual {
             let up = mag > ov * lim;
-            let down = mag < 0.1 * lim / ov;
+            // (a step down needs the DC part known since the reset: it
+            // reads 0 until then, dmm.rs acdc_down_ok)
+            let down = mag < 0.1 * lim / ov && acdc_down_ok(self.parts_known(), 2);
             if v {
                 if up && r < 3 {
                     self.set(clk, 0, r as i8 + 1, 450);

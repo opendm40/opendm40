@@ -62,6 +62,17 @@ SC = {
     'dca-v':    ('CURR:DC', 28, [(0, 'open;vsrc:5', {'NONE'}), (10, 'vsrc:24', {'VJACK'}), (19, 'vsrc:none', {'NONE'})]),
     'dca-vac':  ('CURR:DC', 20, [(0, 'open', {'NONE'}), (10, 'vsrc:0,ac=230,f=50', {'VJACK'})]),
     'dca-vi':   ('CURR:DC', 16, [(0, 'open;vsrc:24;isrc:0.0123', {'NONE'})]),
+    # Device 1eb4d7e / 973df07 (A jack open): 5 / 10 V DC or the 0..9.6 V 40 Hz square on V-COM
+    # tripped the comparator on PB1 in ohm / temperature (A-JACK), 1 V did not. The model's
+    # Pb1VjackMv puts the V jack on PB1 in those rows. The V side of the same rows says the jack is
+    # driven (ohm: the negative code of LIVE?; temperature: far beyond any thermocouple), so no
+    # A-JACK then (ohm: LIVE?); a current in A with V-COM open (the last phase) is A-JACK as before.
+    'ohm-v5':   ('RES', 42, [(0, 'open;r:4700', {'NONE'}), (8, 'vsrc:5', {'NONE', 'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
+                             (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'NONE', 'LIVE'}), (32, 'open;isrc:0.002', {'AJACK'})],
+                 [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10']}),
+    'temp-v5':  ('TEMP', 42, [(0, 'open;tc:100;cj:25', {'NONE'}), (8, 'vsrc:5', {'NONE'}), (16, 'vsrc:10', {'NONE'}),
+                              (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'NONE'}), (32, 'open;isrc:0.005', {'AJACK'})],
+                 [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10']}),
     'ohm-live': ('RES', 22, [(0, 'open;r:4700', {'NONE'}), (10, 'vsrc:-1.0,rs=100', {'LIVE'})]),
     'cont-live': ('CONT', 18, [(0, 'open;r:10', {'NONE'}), (8, 'open;vsrc:1.234', {'LIVE'})]),
     'diode-live': ('DIOD', 18, [(0, 'open;diode:0.65', {'NONE'}), (8, 'open;vsrc:-1.0,rs=100', {'LIVE'})]),
@@ -105,13 +116,22 @@ SC = {
                   {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OPEN'}),
     'fuse-odd':  ('CURR:DC', 20, [(0, 'open;r:0.5', {'NONE'})], ['SYST:FUSE:TEST'],
                   {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'FAIL', 'ohm': (0, 2)}),
-    # OVERLOAD (doc 4.7): the uA / mA shunt over range -> the 10 A shunt at once, latched; a
-    # phase may carry a READ? window (lo, hi) in A. AUTO: from mA r0 through r1 to 10 A, the
-    # floor keeps the mA shunt out until 50 mA < 0.3 A held 5 s, then back to mA.
+    # OVERLOAD (doc 4.7): a MANUAL uA / mA range over range -> the 10 A shunt at once, latched;
+    # a phase may carry a READ? window (lo, hi) in A. AUTO (owner 2026-10-22, as the power
+    # meter's 3.14): the shunt's top range over is a quiet hop to the A shunt (6 A), no alert in
+    # any sample, the walk down as usual (50 mA: back on the mA shunt).
     'ovl-dcma': ('CURR:DC', 40, [(0, 'open;isrc:0.01', {'NONE'}, (0.0099, 0.0101)),
-                                 (10, 'isrc:2', {'OVERLOAD'}, (1.98, 2.02)),
-                                 (20, 'isrc:0.05', {'OVERLOAD', 'NONE'}),
+                                 (10, 'isrc:2', {'NONE'}, (1.98, 2.02)),
+                                 (20, 'isrc:0.05', {'NONE'}),
                                  (32, 'isrc:0.05', {'NONE'}, (0.0499, 0.0501))]),
+    # Manual 60 mA: 2 A -> OVERLOAD on 10 A; then 40 mA (fits 60 mA: below 0.85 x 60 mA) for 5 s
+    # -> back on manual 60 mA with its resolution (owner 2026-10-22: the release at half the
+    # scale, 30 mA, kept the red OVLD for good).
+    'ovl-dcma-man': ('CURR:DC', 44, [(0, 'open;isrc:0.01', {'NONE'}, (0.0099, 0.0101)),
+                                     (10, 'isrc:2', {'OVERLOAD'}, (1.98, 2.02)),
+                                     (20, 'isrc:0.04', {'OVERLOAD', 'NONE'}),
+                                     (32, 'isrc:0.04', {'NONE'}, (0.03995, 0.04005))],
+                     ['CURR:DC:RANG 0.06'], {'queries': ['CURR:DC:RANG?']}),
     # Manual 600 uA (Current Settings page): 10 mA -> 10 A (manual); 0 A for 5 s -> back to
     # 600 uA manual (100 uA reads with uA resolution again); 1 mA within 30 s of that release
     # trips again and the latch is sticky (0 A no longer releases it).
@@ -123,8 +143,11 @@ SC = {
                                      (44, 'isrc:none', {'OVERLOAD'})],
                      ['DBG:KEY 3', 'DBG:TAP 64,70', 'DBG:KEY 3']),
     'ovl-acma': ('CURR:AC', 26, [(0, 'open;isrc:0,ac=0.01,f=50', {'NONE'}, (0.0098, 0.0102)),
-                                 (10, 'isrc:0,ac=2,f=50', {'OVERLOAD'}, (1.95, 2.05))]),
-    'ovl-acdc': ('CURR:ACDC', 30, [(0, 'open;isrc:0.01', {'NONE'}), (12, 'isrc:2', {'OVERLOAD'})]),
+                                 (10, 'isrc:0,ac=2,f=50', {'NONE'}, (1.95, 2.05))]),
+    'ovl-acdc': ('CURR:ACDC', 30, [(0, 'open;isrc:0.01', {'NONE'}), (12, 'isrc:2', {'NONE'}, (1.97, 2.03))]),
+    # Manual AC 600 mA: 2 A -> OVERLOAD (the latch is for manual ranges only now).
+    'ovl-acma-man': ('CURR:AC', 26, [(0, 'open;isrc:0,ac=0.1,f=50', {'NONE'}, (0.098, 0.102)),
+                                     (10, 'isrc:0,ac=2,f=50', {'OVERLOAD'}, (1.95, 2.05))], ['CURR:AC:RANG 0.6']),
     # Power meter, I fixed on 600 mA (CONF:POW AUTO,0.6): 2 A -> ik 5.
     'ovl-pow':  ('POW AUTO,0.6', 30, [(0, 'open;pow:230,i=0.1,f=50', {'NONE'}), (12, 'pow:230,i=2,f=50', {'OVERLOAD'})], ['POW:COUP ACDC']),
     # Power meter, I AUTO (owner: 3 A through A showed OVLD): an over range on the mA / uA
@@ -158,7 +181,8 @@ SC = {
     'aprot-glitch': ('VOLT:DC', 22, [(0, 'open', {'NONE'}), (8, 'avsrc:1', {'AJACK'})], [],
                      {'monitor': ['sysbus.hy3131 Ad2StartGlitch 3000']}),
     # A current function ends the latch (its own shunt switching takes over).
-    'aprot-to-dca': ('VOLT:DC', 30, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (18, 'avsrc:12', {'NONE', 'OVERLOAD'})],
+    # (DC A AUTO: the source's amps on the mA shunt are a quiet hop to the A shunt, no OVERLOAD)
+    'aprot-to-dca': ('VOLT:DC', 30, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (18, 'avsrc:12', {'NONE'})],
                      [], {'acts': {16: 'CONF:CURR:DC'}}),
 }
 

@@ -360,6 +360,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// RMS register comes back as a random 38-bit pattern with probability RmsBigDcP. "rmsbig:codes"
         /// (0 = off), "rmsbigp:".
         public double RmsBigDcCodes = 102500, RmsBigDcP = 0.85;
+        /// The stock AC rows' RMS block filling after a restart (opt-in; 0 = an instant RMS): the
+        /// AC amplitude it reports ramps linearly from 0 to the input's over RmsFill seconds after
+        /// the LPF / RMS start (a row write). Device ad97fd7 (DBG:ACDC:TRACE, a 4.0 -> 5.8 V step):
+        /// the AC results rose 0.080 -> 1.166 -> 2.384 V as the RMS window filled; the fill time per
+        /// row is INFERRED. Used by couptest `iacfill` (TODO "AC+DC / AUTO down-range on one
+        /// part": a settle that outlasts an AC phase). "rmsfill:s".
+        public double RmsFill = 0;
         /// The LPF's slow creep after an input step in the DC-coupled V row (method C; device c6f9670 tc6,
         /// acdc-approaches.md 10.11 / 10.14): after 5 -> 3 V on 6 V (41.6 k codes) the LPF was still 5..12 codes above
         /// the value it reached ~8 s later when C's second reference ended (3.6 s), while DC V (AD1) settled
@@ -412,6 +419,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// A-jack probe's first peak-hold window tripped A-PROT with the A
         /// jack open). Monitor: hy3131 Ad2StartGlitch 3000.
         public int Ad2StartGlitch;
+        /// PB1 picks up the V jack in the ohm / temperature rows (opt-in, mV per V; 0 = none).
+        /// Device 1eb4d7e / 973df07: with the A jack open, 5 / 10 V DC or the 0..9.6 V square
+        /// on V-COM tripped the comparator on PB1 there (A-JACK), 1 V did not; the same rows
+        /// put ~3.4 mV per volt on PB2 (the probe read 0.34 A / V). The ratio is INFERRED
+        /// (any k with 1 V below and 5 V above the comparator's 23.75 mV fits: 10 mV / V).
+        /// Monitor: hy3131 Pb1VjackMv 10.
+        public int Pb1VjackMv;
         /// AD1 decimation memory (opt-in, "ad1mix:1"; device bab5dd4, DC V AUTO from 600 V: one
         /// reading at 77-79 % on 6 V after two range steps). A configuration write that does not
         /// restart AD1 (R22 unchanged, ENAD1 kept: one autorange step right after another, both
@@ -646,6 +660,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "ad3sh": Ad3ShiftScale = o.Value; break;
                 case "agndz": AgndZeroScale = o.Value; break;
                 case "hpftau": HpfTau = o.Value; break;
+                case "rmsfill": RmsFill = o.Value; break;
                 case "rmsbig": RmsBigDcCodes = o.Value; break;
                 case "rmsbigp": RmsBigDcP = o.Value; break;
                 case "lpfcreep": LpfCreepScale = o.Value; break;
@@ -803,6 +818,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             else if(EnRms)
             {
                 var sq = acRms * acRms + hpfMs;
+                if(RmsFill > 0 && !cDc)
+                {
+                    var fill = Math.Min(1.0, (t - lpfStart) / RmsFill);
+                    sq *= fill * fill;
+                }
                 if(Svxi && !Sdo23 && EnAd3)
                 {
                     // sum(X*Y)/N with X and Y the same node: equal to sum(X^2)/N unless the
@@ -1649,6 +1669,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 }
                 if(scmpi != 4) return false;
                 v = Pb1Volts(t);
+                if(Pb1VjackMv != 0 && (role == Role.Ohm || role == Role.Temp || role == Role.None))
+                {
+                    double dc, ac, hz, duty; string shape;
+                    Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
+                    v += Pb1VjackMv * 1e-3 * Wave(t, dc, ac, hz, shape, duty);
+                }
                 return true;
             case Role.DcA:
                 if(scmpi != 0) return false;
@@ -2267,6 +2293,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// AD2 start-up error, codes on the first results after a (re)start
         /// (Hy3131Core.Ad2StartGlitch; default 0; monitor: hy3131 Ad2StartGlitch 3000).
         public int Ad2StartGlitch { get => Core.Ad2StartGlitch; set => Core.Ad2StartGlitch = value; }
+
+        /// PB1 picking up the V jack in the ohm / temperature rows, mV per V
+        /// (Hy3131Core.Pb1VjackMv; default 0; monitor: hy3131 Pb1VjackMv 10).
+        public int Pb1VjackMv { get => Core.Pb1VjackMv; set => Core.Pb1VjackMv = value; }
 
         /// INTF reads by phase after the last AD2 result (20 bins of 1/20
         /// period), then the swallowed count; cleared by the read.
