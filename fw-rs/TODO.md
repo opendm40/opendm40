@@ -1199,7 +1199,9 @@ Firmware:
       38400, 0 lost.
       Device retest (image and list in the hand-over):
       1. AC V, the 40 Hz square, LOG:SOUR AD2, LOG:SRAT 76800, LOG:DEST DISK, LOG:DUR 60, LOG:STAT ON:
-         LOG:DISK? at the end: fields 11..13 (gate 1 expected: kept; ISR permille ~540; high water);
+         LOG:DISK? at the end: fields 11..13 (gate 1 expected: kept; ISR permille ~540; high water: the
+         emulator 80-1840 of 2048, the log panel's refresh rows at 5-10 ms per pass; >= ~1900 on the
+         device: split the panel's row draw or hold the refresh while the ring is over half full);
          LOG:PRE? rung 76800, LOG:SRATe? 76800; dlog.py of the file: lost_before sum 0, rows ~4.6 M;
          DBG:ISR? late / bad / overruns / slips 0, max_lat < 1 us; LOG:COUNt? overwritten 0; pages/s.
       2. `DBG:PROF:RESET` at state 3, `DBG:PROF?` after a 20 s session: passes/s, `usb` avg (was 718 us).
@@ -1208,6 +1210,10 @@ Firmware:
       4. A stop (LOG:STAT OFF) within the first second after state 3 (the trial): the session ends, no
          FASTnnn left (MMEM:CAT?), the next session works.
       5. 38400 and 4800 to the disk (no trial: gate 0): lost 0 as before; AD1 640 to the disk: lost 0.
+      5a. DC V via AD2 at 76800 to the disk (LOG:SOUR AD2 in DC V): the trial's restart runs the AD2
+         self-cal (`dc_prepare`) again: note the gap between state 3 and the file's first row; lost 0.
+      5b. A 76800 session started 11-21 s after power-on (CYCCNT's upper half; the emulator's bug of
+         130d2e8's parent: the trial saw a busy chip there and fell back): gate 1.
       6. The Wave view 1 / 2 ms/div and a host LOG:DATA? session at 76800 as in 7409b92 2.1 / 2.5 (unchanged
          paths; the ring drain for the disk only is new).
       7. The record page's fast-logger start (tap) at 76800, the inrush save: as before.
