@@ -90,9 +90,8 @@ const KEEPALIVE_MAX_MS: u64 = 600_000;
 const SCPI_SETTLE_MS: u64 = 1500;
 /// READ? / MEASure? / FETCh? with no reading of the current function yet
 /// (after a function change): give up this long after the converter's settle
-/// deadline (`Dmm::deadline`), not after the command, ms. AUTO coupling: a
-/// provisional value (its first decision, up to ~3.6 s) is no reading, so a
-/// MEAS? there can run out and answer with none (switch-latency.md 6).
+/// deadline (`Dmm::deadline`), not after the command, ms. AUTO coupling:
+/// AUTO_WAIT_MS.
 const SCPI_WAIT_MS: u64 = 1900;
 /// READ? / MEASure:<f>? with a reading of the current function already
 /// flowing: the next fresh reading if it comes within this, else the latest
@@ -102,6 +101,13 @@ const SCPI_WAIT_MS: u64 = 1900;
 /// steady MEDIUM and SLOW reading, both one per conversion) with room for
 /// the poll.
 const SCPI_QUICK_MS: u64 = 850;
+/// READ? / MEASure? in the AUTO coupling after the host's change: wait this
+/// long after the command for the first decision (its values before it are
+/// provisional, switch-latency.md 6: ~3.6 s on a clear AC or DC signal); at
+/// the end, the part AUTO shows by then (the DC part of a tie, whose decision
+/// can take ~10 s behind the AC part's settle), not "Data stale". Inside a
+/// 5 s host timeout.
+const AUTO_WAIT_MS: u64 = 4500;
 // The next fresh steady reading: at most one conversion away + poll / loop.
 const _: () = assert!(SCPI_QUICK_MS >= hy3131::ad1_period_us_r22(0x17) as u64 / 1000 + 300);
 /// scpi_wait expiry of a READ? / MEAS? / FETCh? whose function changed under
@@ -602,6 +608,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         let fresh = app.meter.live().is_some() && !app.dmm.waking();
                         let expire = if fresh || scpi::idn_emul() != 0 || !host_settle {
                             now + SCPI_QUICK_MS
+                        } else if app.dmm.cpl_auto() {
+                            (now.max(app.dmm.deadline()) + SCPI_WAIT_MS).max(now + AUTO_WAIT_MS)
                         } else {
                             now.max(app.dmm.deadline()) + SCPI_WAIT_MS
                         };
@@ -1538,7 +1546,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             scpi_wait[src] = None;
             let scpi = &mut scpis[src];
             scpi.len = 0;
-            match app.meter.live().copied().filter(|_| !orphan && !app.dmm.reading_pending()) {
+            // AUTO coupling still deciding (AUTO_WAIT_MS): the part it shows.
+            let live = app.meter.live().copied().filter(|_| !orphan && !app.dmm.reading_pending());
+            match live.or_else(|| app.auto_prov().filter(|_| !orphan)) {
                 Some(r) => scpi.put_reading(&r),
                 None => {
                     scpi.put_bytes(scpi::NAN);
