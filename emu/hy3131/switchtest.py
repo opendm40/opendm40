@@ -144,7 +144,9 @@ SC = {
     # real conditions: how fast after a switch in (settle + the detector)
     'real-ajack': ('open;isrc:0.001', 'ajack', [], ['acv', 'dcv', 'res', 'dcv', 'temp', 'dcv', 'aca', 'dcv', 'acv', 'cont', 'acv'],
                    {'dcv': ('AJACK', 1.0), 'acv': ('AJACK', 1.6), 'cont': ('AJACK', 1.0)}),
-    'real-aprot': ('open;avsrc:24', 'aprot', [], ['res', 'dcv'], {'dcv': ('APROT', 1.2)}),
+    # 24 V across A-COM connected at virtual 9 s, during RES (A-JACK only there, no probe), then
+    # the switch into DC V: A-PROT after the switch (a source on from boot latches in DC V at once)
+    'real-aprot': ('open', 'aprot', [], ['res', 'dcv'], {'dcv': ('APROT', 1.5)}, [(9, 'avsrc:24')]),
     'real-achint': ('open;vsrc:0,ac=2,f=50', 'ac2', [], ['acv', 'dcv', 'res', 'dcv', 'temp', 'dcv'], {'dcv': ('AC', 4.0)}),
     'real-dchint': ('open;vsrc:5', 'dc5', [], ['dcv', 'acv', 'res', 'acv', 'temp', 'acv'], {'acv': ('DC', 6.0)}),
     'real-vjack': ('open;vsrc:24', 'v24', [], ['dcv', 'dca', 'res', 'dca', 'aca', 'dca'], {'dca': ('VJACK', 4.0)}),
@@ -156,7 +158,8 @@ def fmt(ents, ts):
 
 
 def run(name):
-    spec, inp, mon, seq, real = SC[name]
+    spec, inp, mon, seq, real = SC[name][:5]
+    later = SC[name][5] if len(SC[name]) > 5 else []
     seq = seq or (full_seq() if A.full else SEQ)
     if uc.port_busy(A.port):
         print('RESULT %s FAIL port %d in use (another emulator?): pass a free --port' % (name, A.port), flush=True)
@@ -169,6 +172,8 @@ def run(name):
         for m in mon:
             f.write('0 monitor %s\n' % m)
         f.write('0 dmm %s\n' % spec)
+        for t, sp2 in later:
+            f.write('%g dmm %s\n' % (t, sp2))
     run_for = 30 + len(seq) * (A.dwell + 4) + sum(5 for s in seq if s == 'WAVE')
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(int(run_for)), '--script', sp, '--name', rtag] \
