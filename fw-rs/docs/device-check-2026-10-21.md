@@ -2261,3 +2261,65 @@ Notes:
   LOG:DEST HOST (OSR 3, CHOP 1 as found), `OUTP?` 0, `SYST:ERR?` "No error". `DBG:BOOT?` NORMAL, crash count 0,
   CLEAN, VALID, HEALTHY. Settings not touched; nothing written to the meter's disk.
 - **Calibrator:** 1 V DC, enabled (24 V for about 3 s during check 4).
+
+## b6909d6: the region C / Wave view / fast logger retest (TODO b6909d6 items 1-7) (2026-10-23 16:02 - 17:15)
+
+The owner had installed b6909d6 (5ca0557's fixes). `dm40dbg.py boot --expect dm40-fw-b6909d6.bin`: marker
+0x3259CDA6 / 0x00096774 / 0x00011644 = the image header, VALID, crash count 0, HEALTHY, at the start and the end
+(no reset). The run was started by one agent (16:02-16:18) and finished by another. Files are in the scratchpad's
+`devchk-b690/`: `disk3.py` (a disk session; `--copy` reads an INFO/ file in a loop from state 3 on),
+`fwdirect.py` (O_DIRECT reads of [FW_LO, FW_HI) of FW_PATH), `fwcopy.py` (page-cache reads, the kernel's
+readahead is 240 KB), `wv1.py`, `inr6.py`, `rec7.py`, `stop.py`, `wdrop.py`, the JSONs and PNGs.
+
+| # | check | result |
+|---|---|---|
+| 1 | `DBG:PROF?` polled during a 38400 disk session (`p384`, 20 s, 39 polls in state 3) | **PASS**: max_lat 280 ns (`spiflash::cmd_addr`), late 0, overruns 0, dropped 0; the file has 768 003 rows / 20.000 s, lost_before 0 |
+| 2 | Wave view exit with MENU at 2 ms/div (38400), 3 runs (`we1..3`) | **PASS**: after the exit, max_lat 300 ns (`dm40_fw::run`), late 0, overruns 0, timeouts 0; the menu appears and the DMM resumes (`we*-menu.png`, `dmm1.png`). At 1 ms/div (76800, `wv1`): late and overruns did not change across the exit, the menu appeared and then the DMM |
+| 3 | Host copies INFO/FIRMWARE.BIN during disk sessions | **FAIL** (cause below). 4800 (`c48`, whole file, page cache): max_lat **21.78 us** at `compiler_builtins::memcpy`, late 0, overruns 70, lost_before 0. 76800 (`c768`): max_lat 8.74 us, late 3778, overruns 31 642, ISR dropped 268 500, the file lost_before 288 677 (8584 holes). At 38400: 21.7 us, late 450 (head 0..0x50000 + readahead) to 3727 (tail) |
+| 4 | Wave view at 1 ms/div (76800), ACQ:SRAT?, SCOP:MEAS:FREQ?, VPP?, CONF?, MMEM:CAT? every 5 s for 61 s (`wpoll`) | **PASS** for the ISR: max_lat 260 ns, late 0, overruns 0. FREQ? reads 0 on the 40 Hz square (the open FREQ? item). New: each MMEM:CAT? adds 6813 to `dropped` (below) |
+| 5 | Wave view entry from DC V at 2 ms/div, 3 runs (`dcv`) | **PASS**: field 6 is 0 in all 18 snapshots (1 s apart) and after the exit, late 0, max_lat 240-260 ns |
+| 6 | `LOG:CSV ON` in the Wave view (`wv1`) and on the inrush page (`inr6`, `INR ON`, ARMED) | **PASS**: -100,"Settings conflict: Wave view" / "... : inrush page", `LOG:CSV?` 0,-1,..., no new file in MMEM:CAT? |
+| 7a | 76800 session stopped in its trial (`stop.py`, OFF at state 3) | **PASS**: `LOG:DISK?` 5,**-1**,...; no FAST file, used / free unchanged |
+| 7b | tpp after a 76800 session | **PASS**: 4800 after 76800 (`c48` after `c768`; `t48` after the stop.py trial with tpp 388 / 393), AD1 after 76800 (`ad1` after `k768`), and the 38400 sessions: tpp 0,0 from the first poll on |
+| 7c | Record page, Interval Fast, AC V, LOG:SRAT 76800 | **PASS**: "76800/s, 57 s left" (`rac-fast.png`; 13.2 MB free / 76 800 / 3 B). In DC V, Fast reads "40/s, 30 h left" (`rec-fast.png`). Set back to "Every reading" (LOG:CSV:INT? 0) |
+
+**Item 3, the cause: data reads from region C flash, not code.** FwFile::fill is in region B now, but it copies
+the image bytes, and the image from 0x08080000 up lies in region C (not zero-wait). A load from there stalls the bus,
+and the ISR cannot preempt it. The emulator's region C hook watches only instruction fetches, so fastlogtest
+could not see this. A split test with O_DIRECT reads at 38400, 10 s each:
+
+| read during the session | max_lat | late | overruns | lat_pc |
+|---|---|---|---|---|
+| FIRMWARE.BIN 0..0x70000 (`hd384`) | 280 ns | 0 | 0 | spiflash |
+| FIRMWARE.BIN 0x70000..0x7C000 (`s70`, flash up to 0x0807FFF4) | 280 ns | 0 | 0 | spiflash |
+| FIRMWARE.BIN 0x7C000..0x82000 (`s7c`, flash 0x0807FFF4..) | **21.78 us** | 3651 | 12 859 | memcpy |
+| FIRMWARE.BIN 0x7C000..0x96000 (`dtail384`) | 21.78 us | 3727 | 12 941 | memcpy; the file lost_before 10 015 |
+| CALIB.BIN (0x080C0000) / LOADER.BIN (0x080A0000) / BOOTDATA.BIN (0x080A4000) | 21.76-21.78 us | 2365-2946 | 8.8-10.8 k | `vdisk::mem_read` |
+| ROMBOOT.BIN (0x08000000, zero-wait) (`srom`) | 280 ns | 0 | 0 | spiflash |
+
+So any INFO/ file whose source is internal flash at or above 0x08080000 stalls the AD2 ISR by ~21.8 us per read. This
+covers the FIRMWARE.BIN tail, LOADER, BOOTDATA and CALIB. In every stalled run the PLL's estimate is dragged to
+rate_mhz ~38 210 xxx (ppm_x10 +4995): this is a symptom of the late entries. No software chunking helps: a single
+load stalls. The fix is a design call: hold or refuse the host's reads of those sectors while the stream runs
+(fast-log session, Wave view, inrush), or document the limit.
+
+**New: `fast_scpi` (LOG:DEST / LOG:DURation, set and query) is region C.** At the start, the meter had sat in the
+Wave view at 1 ms/div with late 5, max_lat 5.78 us at lat_pc 0x0808f1f4 = `dm40_fw::fast_scpi`, from LOG:DEST? /
+LOG:DUR? queries. Reproduced in `wv1`: idle 60 s gave late 0 and 260 ns; then LOG:DISK?, LOG:DEST?, LOG:DUR? gave late 1 and
+2.8 us at fast_scpi. (LOG:DISK? itself goes through `fast_status`, region B.) Fixed in my worktree, commit
+0464566 on branch devchk-b690: fast_scpi left .cold. Region B is 51 420 B free. The image is
+`devchk-b690/dm40-fw-0464566.bin` (sha256 af0529b0…ed7e), not flashed and not emulator-tested.
+
+**New: MMEM:CAT? in the Wave view at 76800 overflows the view's ring.** `wdrop.py` at 1 ms/div, each query 3 times:
+MMEM:CAT? takes 123 ms and adds +6813 `dropped` (~89 ms of samples) every time. CONF?, SCOP:MEAS:VPP? and ACQ:SRAT? add +0, and
+1 s idle adds +0. late 0, max_lat 260 ns: the ISR loses nothing, but the view's record has a gap.
+
+### State at the end
+
+- **Device:** b6909d6, DMM page, DC V, AUTO+, RATE SLOW (it was FAST for a few minutes after the Record page
+  sequence: a MENU / tap that landed on the DMM value; set back with `RATE SLOW`), READ? 1.0005 V. LOG: AD1 /
+  4800 / HOST / DUR 60 / CHOP 1 / OSR 3 / STAT 0; LOG:CSV:INT 0 (Every reading). `OUTP?` 0 throughout.
+  `SYST:ERR?` "No error". Settings not touched (volume 0, backlight 10 %, Dim / Shutdown Never).
+- **Disk:** MMEM:CAT? names and used / free (3 534 848 / 13 205 504) are the same as at the start. Each session's
+  LOGS/FAST000.DLG was deleted by exact name (`del1.py`, which refuses pre-session names).
+- **Calibrator:** 1 V DC (a 40 Hz square during the Wave view checks).
