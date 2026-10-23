@@ -161,6 +161,12 @@ pub fn power_off_hit(x: u16, y: u16) -> Option<bool> {
     }
 }
 
+/// A touch at (x, y) is on the toast's box (`TOAST`): a tap there dismisses
+/// the toast; elsewhere a toast takes no touch (app.rs `gesture`).
+pub fn toast_hit(x: u16, y: u16) -> bool {
+    inside(TOAST, x, y)
+}
+
 /// Fuse-check dialog box (wider than the confirm: two body lines of up to
 /// ~30 characters): title bar 40, lines at +40 / +80, buttons at +130.
 pub const FBOX: (u16, u16, u16, u16) = (40, 56, 400, 192);
