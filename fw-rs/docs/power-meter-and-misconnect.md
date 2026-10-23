@@ -1761,13 +1761,13 @@ button), `scpi.rs`.
 
 | | |
 |---|---|
-| where | DC A / AC A / AC+DC A on the mA (0.5 ohm) or uA (47.5 ohm) shunt; the power meter's I channel on ik 0..3 with a MANUAL I range only (I AUTO: the normal one-hop up-range to 6 A, no alert, 3.14). Never in V / ohm / continuity / diode / cap / Hz / temperature (no shunt switching there: host test `overload_rule`) |
-| trigger | a reading over its range (\|I\| > 1.03 x the range, i.e. what shows OL; AC+DC: the total) when the range is manual (any of the shunt's two) or the shunt's top range in auto (6000 uA / 600 mA). In auto at r0 the stock step to r1 (same shunt, 10x) comes first, so a gross overload reaches 10 A two conversions after the A entry |
-| action | the 10 A range at once (DC: mode 7 r1, settle 250 ms; AC: mode 4 r1, 650 ms; AC+DC: its DC phase; power: ik 5, the V parts kept) whatever AUTO / AUTO+ / manual says; `relay_pe(0)` through the normal `write_config` |
-| latch | manual before: 10 A stays manual. Auto before: auto continues with the overloaded shunt (and the ones below it) barred, so 50 mA after a uA overload steps 10 A -> 6 A -> 600 mA and stops there |
-| release | any user range / function / AUTO choice (`press`, `set_range`, `auto_key`, `select`, `set_sub`, BT mode byte, `pw_set_ranges`, `pw_enter`), or \|I\| below `max(half the full scale it returns to, 2 mA)` for 5 s (OL readings never count): manual -> the range it left, auto -> the floor goes. 2 mA is what the 10 A range can tell from zero (1 mA digits; the model's noise ~0.5 mA). The one case where 2 mA exceeds the scale it returns to (manual 600 uA) could cycle trip / release every ~5.5 s with 0.6..2 mA flowing: a trip within 30 s of a timed release makes the new latch sticky (user choice only) |
-| timing | the first conversion after the settle: DC ~0.35 s after the overload (A entry: 650 ms settle first), AC ~0.75 s; one 300 ms beep (key / alert volume, also with the key beep off), toast "Overload: 10 A shunt selected", badge OVLD (TEXT22: "OVERLOAD" does not fit the 83 px slot) red, alternating with HOLD as A-JACK (decision #5), strip "OVLD" |
-| SCPI | `SYST:ALER?` OVERLOAD; `STAT:QUES:COND?` 514 (bit 9 + bit 1) |
+| where | DC A / AC A / AC+DC A (and the AUTO coupling) on the mA (0.5 ohm) or uA (47.5 ohm) shunt with a MANUAL range; the power meter's I channel on ik 0..3 with a MANUAL I range only. In AUTO (DMM since 2026-10-23, power meter since 3.14) the shunt's top range over is a normal up-range, no alert (below). Never in V / ohm / continuity / diode / cap / Hz / temperature (no shunt switching there: host test `overload_rule`) |
+| trigger | a reading over its range (\|I\| > 1.03 x the range, i.e. what shows OL; AC+DC: the total) when the range is manual (any of the shunt's two). AUTO: the shunt's top range (6000 uA / 600 mA) over is a **quiet hop** in one step to the A shunt's 6 A range (DC: mode 7 r0, 250 ms; AC: mode 4 r0, 650 ms; AC+DC / AUTO coupling: its DC phase), no latch, beep, toast or badge, and the walk down as usual (> 6.18 A: 10 A). Owner 2026-10-22: A AUTO coupling enters on DC mA r0 (stock), so AC 1 A raised the red OVERLOAD at once (couptest `iac`) |
+| action | manual: the 10 A range at once (DC: mode 7 r1, settle 250 ms; AC: mode 4 r1, 650 ms; AC+DC: its DC phase; power: ik 5, the V parts kept); `relay_pe(0)` through the normal `write_config` |
+| latch | manual before: 10 A stays manual (the DMM has no auto latch any more; the code path for `back` = None stays for the power meter) |
+| release | any user range / function / AUTO choice (`press`, `set_range`, `auto_key`, `select`, `set_sub`, BT mode byte, `pw_set_ranges`, `pw_enter`), or \|I\| below `max(0.85 x the full scale it returns to, 2 mA)` for 5 s (OL readings never count; `OVL_RELEASE_FRAC`, was 0.5 until 2026-10-23: manual 60 mA with 40 mA flowing never came back, senttest `ovl-dcma-man`): back to the manual range it left. The trip is at 1.03 x, so 0.85 x leaves a margin; a current flapping around the range re-trips within 30 s and the new latch is sticky (user choice only). 2 mA is what the 10 A range can tell from zero (1 mA digits; the model's noise ~0.5 mA); manual 600 uA is the case where 2 mA exceeds the scale it returns to (the 30 s sticky rule covers its trip / release cycle) |
+| timing | the first conversion after the settle: DC ~0.35 s after the overload, AC ~0.75 s; one 300 ms beep (key / alert volume, also with the key beep off), toast "Overload: 10 A shunt selected", badge OVLD (TEXT22: "OVERLOAD" does not fit the 83 px slot) red for `OVL_RED_MS` = 3 s, alternating with HOLD as A-JACK (decision #5), strip "OVLD"; then, while the latch holds, an amber "10A" badge / strip (`Alert::Ovl10A`, display only: `Sentinel::shown`; no new toast or beep): the meter measures fine on 10 A, the badge says the range is not the user's (owner 2026-10-22: the red OVLD stayed while the reading was fine) |
+| SCPI | `SYST:ALER?` OVERLOAD; `STAT:QUES:COND?` 514 (bit 9 + bit 1), for the whole latch (red and amber) |
 
 The protective value is thermal (the 47.5 ohm resistor and the 0.5 ohm shunt
 under amps for seconds), so detection after the settle is enough; reading AD1
@@ -1961,8 +1961,41 @@ and latched A-PROT within ~140 ms (the f3aea2f latch was most likely this:
 the run had the calibrator on while it went through ohm / temperature).
 The ohm and temperature rows connect the V input to the node the probe
 reads (the PB2 inference holds for DC V / mV only), so the probe is in DC V
-and DC mV only; ohm / temperature keep the comparator's A-JACK (which a
-voltage on V-COM also trips there: open, see the device-check doc).
+and DC mV only; ohm / temperature keep the comparator's A-JACK, gated by
+the row's own V side since 2026-10-23 (V_GATE below).
+
+**V_GATE: A-JACK in ohm / temperature (2026-10-23).** Devices 1eb4d7e /
+973df07, A jack open: 5 / 10 V DC or the 0..9.6 V square on V-COM raised
+A-JACK in RES and TEMP (comparator hits on PB1), 1 V did not. The
+comparator gives two bits per window (above VRH / below VRL): a PB1
+excursion that comes from V-COM and one from a current in A look the same,
+and the size cannot separate them either (the pickup grows with the
+voltage; the probe on PB2 read ~0.34 A per volt there), so no threshold or
+offset fixes it - the same finding as Hz, which has no sentinel at all. The
+difference from Hz: these rows measure the V jack themselves. Ohm: a
+passive Rx never gives a negative AD1 code; a source on V-COM above the ohm
+source's open-circuit voltage (~1.4 V) reverses the drop across Rref, and
+any negative source drives the node below COM: both give the negative code
+that LIVE? already uses (`LIVE_CODE`). Temperature: the thermocouple input
+reads |V| > 80 mV (`T_VDRV_MV`; type E is 76.4 mV at 1000 C, the readout is
+OL above 1000 C K = 41.3 mV; an open TC read ~212 C = ~7.6 mV on the
+device); the RTD / NTC sensors use the ohm path and its LIVE? sign. The case
+A-JACK is for there - the leads in A / COM, V-COM open - shows neither. So
+in modes 10 / 15 A-JACK asserts only when a V-side result since the hit run
+began said V-COM is free (ohm: the next conversion; TC: up to one ~2.2 s
+CJ / TC cycle later), and an asserted A-JACK drops when the V side turns
+driven; ohm then shows LIVE?. `DBG:SENT?` field 12: -1 not gated / no
+result yet, 0 free, 1 driven. Senttest `ohm-v5` / `temp-v5` with the
+model's `Pb1VjackMv 10` (PB1 picks up 10 mV per volt on V-COM in those rows:
+INFERRED, any k with 1 V below and 5 V above the 23.75 mV threshold fits
+the device): HEAD 70572bb A-JACK, the gate LIVE? / NONE, and A-JACK with a
+current in A and V-COM open.
+Residual gaps: a source between the pickup threshold (~1-2.4 V by the
+device) and ~1.4 V in ohm (no negative code yet) would still trip if the
+real k is near the top of the range; a current in A WITH a source on V-COM
+at the same time is not reported in ohm / temperature (LIVE? is); an open
+TC input that read > 80 mV would hide A-JACK in TC mode (not seen: 212 C).
+Device retest: TODO "False A-JACK in ohm / temperature".
 
 **Limits (not protectable by switching).**
 * **> 30 V on A-COM** (mains, a battery pack): the MOSFETs are 30 V parts

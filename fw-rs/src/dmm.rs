@@ -480,6 +480,17 @@ fn hypot(a: f32, b: f32) -> f32 {
     sqrt(a * a + b * b)
 }
 
+/// AC+DC / AUTO: a step down judged on hypot(AC, DC) needs the `other`
+/// part (bit 0 AC, bit 1 DC of `Dmm::acdc_known`) measured since the last
+/// reset (entry, every unit change): until then it reads 0 and the
+/// magnitude is one part alone. TODO "AC+DC / AUTO down-range on one part":
+/// a pure AC 1 A on the A shunt read hypot(0, ~0) in the DC phase and could
+/// walk down onto the mA / uA shunt (47.5 ohm) with 1 A flowing; 230 V AC
+/// into the 6 V / mV range the same way. Up-ranges never wait.
+fn acdc_down_ok(known: u8, other: u8) -> bool {
+    known & other != 0
+}
+
 /// AC+DC part readout: "0L" when |part / full scale| > 1.04 (dmm_v2_6.h:231).
 /// The DC mode of a V / A mode (AC+DC reports its readings with it).
 fn dc_mode_of(m: u8) -> u8 {
@@ -623,6 +634,12 @@ pub struct Dmm {
     /// reading until both are, so the first value (and a SCPI MEAS) is never
     /// |DC| or |AC| alone (the stock shows hypot(0, DC) at first).
     acdc_seen: u8,
+    /// AC+DC parts measured since the last `reset_values` (entry, every
+    /// unit change), bit 0 AC, bit 1 DC: `acdc_seen` without its range-change
+    /// clear (`ac_settle_start`); updated by `parts_known`. Until a part is
+    /// known it reads 0 (`reset_values`), so the magnitude is the other
+    /// part alone: no step down on it (`acdc_down`).
+    acdc_known: u8,
     /// AC+DC / AUTO: the AC part is settling after a range change since
     /// this time (0: not), `acs_prev` = the previous AC result in it (< 0:
     /// none yet), `acs_flat` = results in a row that did not fall. See
@@ -1071,6 +1088,7 @@ impl Dmm {
             dc_val: 0.0,
             ac_raw: 0.0,
             acdc_seen: 0,
+            acdc_known: 0,
             acs_t0: 0,
             acs_prev: -1.0,
             acs_flat: 0,
@@ -1402,6 +1420,8 @@ impl Dmm {
         self.pkh_due = 0;
         self.probe_settle = self.probe;
         self.sent.configured(kind, clk.now_ms(), fresh);
+        // Ohm / temperature: A-JACK needs the V side's word (sentinel V_GATE).
+        self.sent.vgate = matches!(self.mode, 10 | 15);
         // DC? / AC? hints (doc 4.4): AC V alternates AD1 between PB1 - PB3
         // and the V tap, DC V 6 V alternates the comparator between PB1 and
         // SENSE, one 100 ms window each (`poll`, `poll_ac`).
@@ -1518,13 +1538,20 @@ impl Dmm {
         self.tr_ev(now, tr::K_SET, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
     }
 
+    /// AC+DC parts known since the last reset (`acdc_known`).
+    pub(super) fn parts_known(&mut self) -> u8 {
+        self.acdc_known |= self.acdc_seen;
+        self.acdc_known
+    }
+
     /// Step down on this DC result (`want`)? Plain DC: at once; AC+DC: once
-    /// the DC results asked for it for ACDC_DOWN_MS in a row.
+    /// the DC results asked for it for ACDC_DOWN_MS in a row, and only with
+    /// the AC part known since the reset (`acdc_down_ok`).
     fn acdc_down(&mut self, now: u64, want: bool) -> bool {
         if !self.acdc {
             return want;
         }
-        if !want {
+        if !acdc_down_ok(self.parts_known(), 1) || !want {
             self.down_t = 0;
             return false;
         }
@@ -1625,6 +1652,7 @@ impl Dmm {
             // phase in between (the AC part held from the old range belongs
             // to a signal that may have moved: an autorange step).
             if !self.cpl_auto {
+                self.acdc_known |= self.acdc_seen;
                 self.acdc_seen &= !1;
             }
         }
@@ -1698,6 +1726,7 @@ impl Dmm {
 
     fn reset_values(&mut self) {
         self.acdc_seen = 0;
+        self.acdc_known = 0;
         self.acs_t0 = 0;
         self.acs_dc = f32::NAN;
         self.auto_n = 0;
@@ -2145,12 +2174,29 @@ impl Dmm {
     }
 
     /// The OVERLOAD rule (sentinel::overload_trips) after a reading on shunt
-    /// `unit` of the current DMM mode, `over` = above 1.03 x the range: the
-    /// 10 A range at once, whatever AUTO / AUTO+ / manual says. True = the
-    /// row was rewritten (the caller drops the reading).
+    /// `unit` of the current DMM mode, `over` = above 1.03 x the range:
+    /// manual range -> the 10 A range at once, latched with the alert; AUTO
+    /// / AUTO+ -> a quiet hop to the A shunt (below). True = the row was
+    /// rewritten (the caller drops the reading).
     fn ovl_trip(&mut self, clk: &mut Clock, unit: u8, over: bool) -> bool {
         if !sentinel::overload_trips(unit, self.range.max(0) as u8, self.manual, over) {
             return false;
+        }
+        if !self.manual {
+            // AUTO (owner 2026-10-22; the power meter's rule, doc 3.14): the
+            // uA / mA shunt's top range over is a normal up-range, in one
+            // hop to the A shunt's 6 A range (no stop on the mA shunt after
+            // uA: neither has a fuse of its own), no latch, alert or beep;
+            // the walk down follows as usual (> 6.18 A: one more step to
+            // 10 A). A AUTO coupling enters on DC mA r0 (stock), so AC 1 A
+            // there tripped the red OVERLOAD at once (couptest `iac`).
+            if matches!(self.mode, 4..=6) && !self.acdc {
+                self.set(clk, 4, 0, 650);
+            } else {
+                // DC, and AC+DC from either phase (its DC phase first).
+                self.set(clk, 7, 0, 250);
+            }
+            return true;
         }
         let back = match self.ovl {
             Some(o) => o.back,
@@ -2710,7 +2756,12 @@ impl Dmm {
                     let k = if self.mode <= 6 || self.acdc { sentinel::AC_FLOOR_FRAC } else { 0.005 };
                     self.sent.current_small(now, !rd.main.ol && si_abs < k * fs);
                 }
-                10..=12 if !self.acdc && self.fuse_job.is_none() => self.sent.live_reading(now, self.live),
+                10..=12 if !self.acdc && self.fuse_job.is_none() => {
+                    if self.mode == 10 {
+                        self.sent.v_side(now, self.live);
+                    }
+                    self.sent.live_reading(now, self.live)
+                }
                 _ => {}
             }
             if matches!(self.mode, 4..=9) && !self.pw.on {
@@ -2740,7 +2791,8 @@ impl Dmm {
             r.cpl_auto = self.cpl_auto && !self.pw.on;
             r.acdc = self.acdc && !r.cpl_auto;
             r.avg_n = self.avg_n;
-            r.alert = self.sent.alert;
+            // OVERLOAD: red for its first seconds, then amber "10A".
+            r.alert = self.sent.shown(clk.now_ms());
             r
         })
     }
@@ -3741,6 +3793,7 @@ impl Dmm {
                 }
                 let t_tc = (i as f32 - 2.0 + (vtc - TC_K_MV[i]) / (TC_K_MV[i + 1] - TC_K_MV[i])) * 100.0;
                 let t = self.t_cj - 26.0 + t_tc;
+                self.sent.v_side(now, vtc.abs() > sentinel::T_VDRV_MV);
                 hy::write(0x33, &[0xAF]);
                 self.t_phase = 0;
                 self.deadline = now + 700;
@@ -3762,6 +3815,8 @@ impl Dmm {
             - cal(0x144, 0.0))
             * 1e3;
         self.t_res = ohm;
+        // V_GATE (sentinel.rs): the ohm path's LIVE? sign says V-COM is driven.
+        self.sent.v_side(now, ad1 < -LIVE_CODE);
         let lim = self.factor() * OHM_DEC[r] * 1e3;
         let (r0, beta) = self.t_params();
         if self.t_sensor >= 3 {
@@ -4322,5 +4377,20 @@ mod tests {
             ema_ms(&mut acc, &mut last, 1000 + 107 * i);
         }
         assert!((acc - 107.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn acdc_down_needs_the_other_part() {
+        // After a reset nothing is known: no step down on one part (the DC
+        // phase's hypot(0, DC) of a pure AC signal).
+        assert!(!acdc_down_ok(0, 1));
+        assert!(!acdc_down_ok(0, 2));
+        // The DC part alone does not let the DC phase step down; the AC
+        // part does (bit 0), and vice versa for an AC-phase step (bit 1).
+        assert!(!acdc_down_ok(2, 1));
+        assert!(acdc_down_ok(1, 1));
+        assert!(acdc_down_ok(3, 1));
+        assert!(!acdc_down_ok(1, 2));
+        assert!(acdc_down_ok(3, 2));
     }
 }

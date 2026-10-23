@@ -65,6 +65,11 @@ pub enum Alert {
     Ac,
     /// Hint (grey): an A function read exactly zero for 60 s.
     Fuse,
+    /// The OVERLOAD latch after its first OVL_RED_MS (display only:
+    /// `Sentinel::shown`; SYST:ALER? / STAT:QUES keep OVERLOAD): the meter
+    /// measures fine on 10 A, so no red any more, an amber "10A" that says
+    /// the range is not the user's (owner 2026-10-22).
+    Ovl10A,
 }
 
 impl Alert {
@@ -72,7 +77,7 @@ impl Alert {
     pub fn name(self) -> &'static str {
         match self {
             Alert::None => "NONE",
-            Alert::Overload => "OVERLOAD",
+            Alert::Overload | Alert::Ovl10A => "OVERLOAD",
             Alert::AJack => "AJACK",
             Alert::AProt => "APROT",
             Alert::VJack => "VJACK",
@@ -95,6 +100,7 @@ impl Alert {
             Alert::Dc => "DC?",
             Alert::Ac => "AC?",
             Alert::Fuse => "FUSE?",
+            Alert::Ovl10A => "10A",
         }
     }
     /// Combined-view strip badge (its pill holds 6 characters).
@@ -132,6 +138,8 @@ impl Alert {
             Alert::Dc => "DC voltage here: use DC V?",
             Alert::Ac => "AC voltage here: use AC V?",
             Alert::Fuse => "0 A for 60 s: check the fuse?",
+            // (the latch's toast came with its red phase)
+            Alert::Ovl10A => "",
         }
     }
 }
@@ -345,6 +353,27 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
     kind == Kind::Ad2A && row[3] & 0x80 != 0
 }
 
+// V_GATE (TODO "False A-JACK in ohm / temperature", devices 1eb4d7e /
+// 973df07): in the ohm and temperature rows PB1 follows a voltage on V-COM
+// (5 / 10 V DC and the 0..9.6 V square tripped the comparator with the A
+// jack open; 1 V did not; the A-PROT probe on PB2 read ~0.34 A per volt
+// there). The comparator gives two bits per window, above VRH / below VRL,
+// so a PB1 excursion from V-COM and one from an A-jack current look the
+// same: no threshold or offset tells them apart (as in Hz, which has no
+// sentinel). The rows' own V side can: ohm's AD1 code goes negative for a
+// source above the ohm source's open-circuit voltage (LIVE?, `dmm.rs`
+// LIVE_CODE), and the thermocouple input reads far beyond any thermocouple
+// (T_VDRV_MV). The case A-JACK is for there - the leads in A / COM, V-COM
+// open - shows neither, so the gate keeps it: A-JACK asserts only after a
+// V-side result since the hit run began said V-COM is free (ohm: the next
+// conversion; temperature: up to one ~2.2 s CJ / TC cycle later), and an
+// asserted one drops when V-COM turns out driven (ohm: then LIVE?).
+
+/// Temperature: |the thermocouple input| above this (mV) = a source on
+/// V-COM, not a thermocouple (type E: 76.4 mV at 1000 C; K 54.9 mV at
+/// 1372 C; the readout is OL above 1000 C K = 41.3 mV anyway).
+pub const T_VDRV_MV: f32 = 80.0;
+
 /// A-JACK on the AD1 peak: |PKH| above 0.5 mA on 47.5 ohm (23.75 mV at
 /// PB1): IG 3.6 * 23.75 mV / 1.25 V * 2^23 / 2^5 = 17 932.
 pub const PK_THR: i32 = 17_900;
@@ -474,6 +503,17 @@ pub fn overload_trips(unit: u8, range: u8, manual: bool, over: bool) -> bool {
 /// for this long (on whatever range the latch left the meter on).
 pub const OVL_RELEASE_MS: u64 = 5000;
 
+/// The OVERLOAD badge is red (with the beep and the toast) this long after
+/// the trip, then amber "10A" while the latch holds (`Sentinel::shown`;
+/// owner 2026-10-22: a red OVLD while the meter measures fine on 10 A).
+pub const OVL_RED_MS: u64 = 3000;
+
+/// Release threshold as a fraction of the full scale the latch returns to:
+/// the reading fits that range with margin (the trip is at 1.03 x; a
+/// flapping current re-trips within OVL_RETRIP_MS: sticky). Was 0.5: manual
+/// 60 mA with 40 mA flowing never came back (owner 2026-10-22).
+pub const OVL_RELEASE_FRAC: f32 = 0.85;
+
 /// The 10 A range cannot tell less than this from zero (1 mA digits, a few
 /// counts of noise): the release threshold is never below it.
 pub const OVL_ZERO_A: f32 = 2e-3;
@@ -484,14 +524,15 @@ pub const OVL_ZERO_A: f32 = 2e-3;
 /// would otherwise cycle trip / release every ~5 s).
 pub const OVL_RETRIP_MS: u64 = 30_000;
 
-/// Release threshold (A): half the full scale the meter goes back to - the
-/// manual range it came from (`back`: unit, range), else (auto) the top
-/// range of the barred shunt - so the return does not overload again at
-/// once; at least OVL_ZERO_A.
+/// Release threshold (A): OVL_RELEASE_FRAC of the full scale the meter
+/// goes back to - the manual range it came from (`back`: unit, range),
+/// else (auto: no latch in the DMM since the quiet hop, the power meter's
+/// I AUTO neither) the top range of the barred shunt - so the return does
+/// not overload again at once; at least OVL_ZERO_A.
 pub fn overload_release_thr(barred: u8, back: Option<(u8, u8)>) -> f32 {
     let t = match back {
-        Some((u, r)) => 0.5 * current_fs(u, r),
-        None => 0.5 * current_fs(barred, 1),
+        Some((u, r)) => OVL_RELEASE_FRAC * current_fs(u, r),
+        None => OVL_RELEASE_FRAC * current_fs(barred, 1),
     };
     t.max(OVL_ZERO_A)
 }
@@ -604,8 +645,10 @@ pub struct Sentinel {
     pub pk: (i32, i32),
     pub hits: u32,
     pub samples: u32,
-    /// OVERLOAD latch in force (set by `dmm.rs`, `set_overload`).
+    /// OVERLOAD latch in force (set by `dmm.rs`, `set_overload`) and since
+    /// when (`shown`).
     pub ovl: bool,
+    ovl_t0: u64,
     /// A-jack protection latch in force (`dmm.rs`, `set_aprot`); the last
     /// probe value (A) and the trip latency (ms from the first hit window
     /// to the switch) for DBG:SENT?.
@@ -623,6 +666,13 @@ pub struct Sentinel {
     pub alt_v: bool,
     /// The last V-tap window's peak pair (DC?), for `dmm.rs`.
     pub pk_v: Option<(i32, i32)>,
+    /// Ohm / temperature (set by `dmm.rs` with the row): the comparator's
+    /// A-JACK needs the row's own V-side result to say V-COM is not driven
+    /// (`v_side`, V_GATE below); `vside_t` = when the last one came,
+    /// `vdrv` = it said driven.
+    pub vgate: bool,
+    vside_t: Option<u64>,
+    vdrv: bool,
 }
 
 impl Sentinel {
@@ -646,6 +696,7 @@ impl Sentinel {
             hits: 0,
             samples: 0,
             ovl: false,
+            ovl_t0: 0,
             aprot: false,
             probe_a: 0.0,
             aprot_ms: 0,
@@ -655,6 +706,9 @@ impl Sentinel {
             alt: false,
             alt_v: false,
             pk_v: None,
+            vgate: false,
+            vside_t: None,
+            vdrv: false,
         }
     }
 
@@ -677,6 +731,8 @@ impl Sentinel {
             self.dc = Held::NEW;
             self.ac = Held::NEW;
             self.fuse = Held::NEW;
+            self.vside_t = None;
+            self.vdrv = false;
             if !matches!(self.alert, Alert::None | Alert::Overload | Alert::AProt) {
                 self.alert = Alert::None;
             }
@@ -689,8 +745,22 @@ impl Sentinel {
     /// OVERLOAD latch on / off (`dmm.rs`; not maskable: it reports a
     /// protective range change, not a guess).
     pub fn set_overload(&mut self, now: u64, on: bool) {
+        if on && !self.ovl {
+            self.ovl_t0 = now;
+        }
         self.ovl = on;
         self.decide(now);
+    }
+
+    /// The alert to draw (badge, strip): `alert`, except OVERLOAD after its
+    /// first OVL_RED_MS, which is the amber `Alert::Ovl10A` (no new toast or
+    /// beep: `seq` is unchanged).
+    pub fn shown(&self, now: u64) -> Alert {
+        if self.alert == Alert::Overload && now.saturating_sub(self.ovl_t0) >= OVL_RED_MS {
+            Alert::Ovl10A
+        } else {
+            self.alert
+        }
     }
 
     /// A-jack protection latch on / off (`dmm.rs`; not maskable).
@@ -713,7 +783,7 @@ impl Sentinel {
             Alert::VJack => M_VJACK,
             Alert::Live => M_LIVE,
             Alert::Dc | Alert::Ac | Alert::Fuse => M_HINTS,
-            Alert::None | Alert::Overload | Alert::AProt => 0,
+            Alert::None | Alert::Overload | Alert::Ovl10A | Alert::AProt => 0,
         };
         if bit != 0 && self.mask & bit == 0 {
             self.alert = Alert::None;
@@ -812,6 +882,14 @@ impl Sentinel {
         }
     }
 
+    /// Ohm / temperature: a result of the row's own V input, `driven` =
+    /// it shows a source on V-COM (V_GATE).
+    pub fn v_side(&mut self, now: u64, driven: bool) {
+        self.vside_t = Some(now);
+        self.vdrv = driven;
+        self.decide(now);
+    }
+
     /// Current-mode reading: the current is below 0.5 % of the range (the
     /// V-JACK? precondition), or not.
     pub fn current_small(&mut self, now: u64, small: bool) {
@@ -844,9 +922,11 @@ impl Sentinel {
             Kind::CmpA | Kind::PeakA | Kind::Ad2A => {
                 let on = matches!(self.alert, Alert::AJack);
                 if on {
-                    now.saturating_sub(self.last_hit) < AJACK_CLEAR_MS
+                    now.saturating_sub(self.last_hit) < AJACK_CLEAR_MS && !(self.vgate && self.vdrv)
                 } else {
+                    // V_GATE: a V-side result since the run began said V-COM is free
                     self.streak >= AJACK_WINDOWS
+                        && (!self.vgate || (!self.vdrv && self.vside_t.is_some_and(|t| t >= self.run_t0)))
                 }
             }
             _ => false,
@@ -900,7 +980,8 @@ impl Sentinel {
         }
     }
 
-    /// DBG:SENT? text: kind,alert,mask,ctsta,pkmin,pkmax,streak,hits,samples.
+    /// DBG:SENT? text: kind,alert,mask,ctsta,pkmin,pkmax,streak,hits,samples,
+    /// probe mA, A-PROT ms, V side (V_GATE).
     #[inline(never)] // .cold (link-native.x): DBG reply
     pub fn diag_text(&self, buf: &mut [u8]) -> usize {
         let mut n = 0;
@@ -914,8 +995,11 @@ impl Sentinel {
         put(b",");
         put(self.alert.name().as_bytes());
         // ..., probe mA, the A-PROT trip latency (ms).
+        // ..., the V side of ohm / temperature (V_GATE: -1 none / not
+        // gated, 0 free, 1 driven).
         let pa = (self.probe_a * 1000.0) as i32;
-        for v in [self.mask as i32, self.ctsta as i32, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32] {
+        let vd = if self.vgate && self.vside_t.is_some() { self.vdrv as i32 } else { -1 };
+        for v in [self.mask as i32, self.ctsta as i32, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32, vd] {
             put(b",");
             put(itoa(&mut nb, v));
         }
@@ -1528,12 +1612,15 @@ mod tests {
             assert!(!overload_trips(u, 1, true, false));
         }
         assert!(!overload_trips(3, 1, true, true));
-        // Release below half the scale it returns to.
-        assert_eq!(overload_release_thr(2, None), 3e-3);
-        assert_eq!(overload_release_thr(1, None), 0.3);
+        // Release below 0.85 of the scale it returns to.
+        let near = |a: f32, b: f32| (a - b).abs() <= 1e-6 * b;
+        assert!(near(overload_release_thr(2, None), 5.1e-3));
+        assert!(near(overload_release_thr(1, None), 0.51));
         assert_eq!(overload_release_thr(1, Some((2, 0))), OVL_ZERO_A);
-        assert_eq!(overload_release_thr(2, Some((2, 1))), 3e-3);
-        assert_eq!(overload_release_thr(2, Some((1, 1))), 0.3);
+        assert!(near(overload_release_thr(2, Some((2, 1))), 5.1e-3));
+        assert!(near(overload_release_thr(2, Some((1, 1))), 0.51));
+        // Manual 60 mA with 40 mA flowing comes back (owner 2026-10-22).
+        assert!(0.040 < overload_release_thr(1, Some((1, 0))));
         // Below the range it returns to, except manual 600 uA (OVL_RETRIP_MS).
         for u in 0..3 {
             for r in 0..2 {
@@ -1569,6 +1656,81 @@ mod tests {
         s.set_overload(2000, false);
         assert_eq!((s.alert, s.seq), (Alert::VJack, 2));
         assert!(Alert::Overload.red() && Alert::AJack.red() && !Alert::VJack.red() && !Alert::Live.red());
+    }
+
+    #[test]
+    fn ajack_gated_by_the_v_side() {
+        // Ohm / temperature (V_GATE): comparator hits alone do not assert.
+        let hits = |s: &mut Sentinel, t0: u64, t1: u64| {
+            for t in (t0..t1).step_by(10) {
+                s.sample_cmp(t, 0x20);
+            }
+        };
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.vgate = true;
+        hits(&mut s, 0, 400);
+        assert_eq!(s.alert, Alert::None);
+        // V-COM driven (5 V on it): never A-JACK.
+        s.v_side(400, true);
+        hits(&mut s, 400, 3000);
+        assert_eq!(s.alert, Alert::None);
+        // V-COM free (leads in A / COM) during the run: A-JACK.
+        s.v_side(3000, false);
+        assert_eq!(s.alert, Alert::AJack);
+        hits(&mut s, 3000, 3500);
+        assert_eq!(s.alert, Alert::AJack);
+        // ... and it drops when V-COM turns out driven.
+        s.v_side(3500, true);
+        assert_eq!(s.alert, Alert::None);
+        // A V-side result from before the run does not count.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.vgate = true;
+        s.v_side(0, false);
+        hits(&mut s, 1000, 1500);
+        assert_eq!(s.alert, Alert::None);
+        s.v_side(1500, false);
+        assert_eq!(s.alert, Alert::AJack);
+        // Not gated (DC V): as before.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        hits(&mut s, 0, 300);
+        assert_eq!(s.alert, Alert::AJack);
+    }
+
+    #[test]
+    fn overload_badge_red_then_amber() {
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpV, 0, true);
+        s.set_overload(1000, true);
+        assert_eq!((s.alert, s.seq), (Alert::Overload, 1));
+        // Red for OVL_RED_MS (the toast and beep come with seq 1) ...
+        assert_eq!(s.shown(1000), Alert::Overload);
+        assert_eq!(s.shown(1000 + OVL_RED_MS - 1), Alert::Overload);
+        // ... then amber "10A": not red, no new toast (seq), SCPI unchanged.
+        let a = s.shown(1000 + OVL_RED_MS);
+        assert_eq!(a, Alert::Ovl10A);
+        assert!(!a.red() && a.badge() == "10A" && a.name() == "OVERLOAD" && a.toast().is_empty());
+        assert_eq!((s.alert, s.seq), (Alert::Overload, 1));
+        assert_eq!(ques_bits(s.alert), 1 << 9 | 1 << 1);
+        // A row change of the latch (10 A range steps) keeps the time.
+        s.configured(Kind::Off, 5000, true);
+        s.set_overload(5000, true);
+        assert_eq!(s.shown(5000), Alert::Ovl10A);
+        // Released, and a new trip: red again.
+        s.set_overload(6000, false);
+        assert_eq!(s.shown(6000), Alert::None);
+        s.set_overload(7000, true);
+        assert_eq!(s.shown(7000), Alert::Overload);
+        assert_eq!(s.seq, 2);
+        // Other alerts are drawn as they are.
+        let mut v = Sentinel::new();
+        v.configured(Kind::CmpA, 0, true);
+        for t in (0..300).step_by(10) {
+            v.sample_cmp(t, 0x20);
+        }
+        assert_eq!(v.shown(100_000), Alert::AJack);
     }
 
     #[test]
@@ -1727,6 +1889,6 @@ mod tests {
         s.sample_peak(100, -5, 7);
         let mut b = [0u8; 96];
         let n = s.diag_text(&mut b);
-        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,15,0,-5,7,0,0,1,0,0");
+        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,15,0,-5,7,0,0,1,0,0,-1");
     }
 }

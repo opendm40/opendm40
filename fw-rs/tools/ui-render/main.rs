@@ -507,7 +507,7 @@ fn ol(dec: u8, unit: &'static str) -> Val {
 }
 
 /// Wrong-connection alerts (sentinel.rs) cycled through the page / strip matrices.
-const ALERTS: [sentinel::Alert; 9] = [
+const ALERTS: [sentinel::Alert; 10] = [
     sentinel::Alert::None,
     sentinel::Alert::AJack,
     sentinel::Alert::AProt,
@@ -517,6 +517,7 @@ const ALERTS: [sentinel::Alert; 9] = [
     sentinel::Alert::Dc,
     sentinel::Alert::Ac,
     sentinel::Alert::Fuse,
+    sentinel::Alert::Ovl10A,
 ];
 
 /// AUTO coupling (V / A sub-mode 3): `r` with the part shown as main and
@@ -2361,6 +2362,8 @@ fn main() {
             ("dcma_420lo", "d13-dmm-vjack", Button::Amp, sentinel::Alert::VJack),
             ("ohm_k", "d14-dmm-live", Button::Ohm, sentinel::Alert::Live),
             ("dca10", "d17-dmm-overload", Button::Amp, sentinel::Alert::Overload),
+            // the latch after its red phase (sentinel::OVL_RED_MS)
+            ("dca10", "d25-dmm-ovl10a", Button::Amp, sentinel::Alert::Ovl10A),
             ("dcv", "d18-dmm-achint", Button::Volt, sentinel::Alert::Ac),
             ("dcma_420lo", "d19-dmm-fusehint", Button::Amp, sentinel::Alert::Fuse),
         ] {
@@ -2388,6 +2391,9 @@ fn main() {
             r.alert = sentinel::Alert::Overload;
             combined(&r, l, 0, 0, false, false, false, "");
             save(&out, "c15-strip-overload");
+            r.alert = sentinel::Alert::Ovl10A;
+            combined(&r, l, 0, 0, false, false, false, "");
+            save(&out, "c22-strip-ovl10a");
         }
         // DMM status slot: HOLD / A-HOLD with A-JACK / LIVE?, both phases.
         for (case, file, b, a, hold) in [

@@ -85,6 +85,47 @@ SC = {
         (24, 'open;aca:0.02@60,dc=0.2', shows('AUTO,DC', 0.2, ab=0.0005), 'mixed AC 20 + DC 200 mA: -> DC'),
         (37, 'open;aca:0.2@60,dc=-0.05', shows('AUTO,AC', 0.2, ab=0.0005), 'mixed AC 200 + DC -50 mA: -> AC'),
     ], {}),
+    # Entering AUTO with an AC current above the mA shunt's 600 mA (owner
+    # 2026-10-22: AC 1 A gave OVERLOAD at once; TODO "A AUTO coupling").
+    # A enters on DC mA r0 (stock); 1 A AC there is a normal up-range in
+    # AUTO, quiet (no latch / alert), and the DC phase must not walk down on
+    # hypot(0, ~0) before the AC part is known (dmm.rs acdc_down_ok). Every
+    # sample of the run is checked (ALWAYS below): SYST:ALER? NONE, never
+    # the uA shunt, so a trip or a wrong step anywhere fails it.
+    'iac': (['CURR:COUP AUTO'], 'CURR:COUP?', 40, [
+        (0, 'open;aca:1@60', shows('AUTO,AC', 1.0, ab=0.005), 'enter AUTO with AC 1 A: AC, no OVERLOAD'),
+        (14, 'open;aca:0.3@60', shows('AUTO,AC', 0.3, ab=0.001), 'AC 300 mA: AC (down to the mA shunt)'),
+        (27, 'open;dca:0.3', shows('AUTO,DC', 0.3, ab=0.001), 'DC 300 mA: -> DC'),
+    ], {}),
+    # Entering AUTO with DC 1 A (TODO "AC+DC / AUTO down-range on one part"): the quiet hop
+    # mA -> A is a unit change (reset_values: the DC part reads 0 until measured again); a
+    # method whose AC result comes first (B / C) saw hypot(~0, 0) and stepped back down onto
+    # the mA shunt with 1 A flowing. Every sample once on the A shunt: 6 A range or above.
+    'idc': (['CURR:COUP AUTO'], 'CURR:COUP?', 30, [
+        (0, 'open;dca:1', shows('AUTO,DC', 1.0, ab=0.005), 'enter AUTO with DC 1 A: DC, no OVERLOAD'),
+        (16, 'open;dca:0.3', shows('AUTO,DC', 0.3, ab=0.001), 'DC 300 mA: down to the mA shunt'),
+    ], {}),
+    # AC 1 A with the model's RMS fill (rmsfill: the AC results ramp up over 1.5 s after each
+    # AC row write, as the device's RMS window filling; the time is INFERRED and longer than
+    # an AC phase, so the shown value stays low: only the coupling and the ranges are
+    # checked). The AC part's settle (ACS_STEP) then outlasts the AC phase and the AC part
+    # stays 0 from the unit change's reset_values (the quiet hop mA -> A); the DC phase saw
+    # hypot(0, ~0) for ACDC_DOWN_MS and stepped down on it: 6 A -> 60 mA with 1 A flowing,
+    # twice (no guard: fw 10.96 and 19.87 s). A step down now needs the AC part measured
+    # since the reset (dmm.rs acdc_down_ok).
+    'iacfill': (['CURR:COUP AUTO'], 'CURR:COUP?', 40, [
+        (0, 'open;aca:1@60;rmsfill:1.5', lambda d: d['C'] == 'AUTO,AC', 'AC 1 A, slow RMS fill: AC, no OVERLOAD'),
+        (24, 'open;aca:0.3@60;rmsfill:1.5', lambda d: d['C'] == 'AUTO,AC' and conf_range(d) < 1, 'AC 300 mA: AC, down to the mA shunt'),
+    ], {}),
+    # Entering V AUTO on 230 V AC: A AUTO's twin (TODO "AC+DC / AUTO
+    # down-range on one part"). The entry is DC V 6 V; the DC phase reads
+    # ~0 V, and before the AC part was measured its hypot(0, DC) asked for
+    # a step down (6 V -> the mV range with AUTO). Every sample: CONF? on
+    # the 600 V or 1000 V range once the first up-range is done (ALWAYS).
+    'vac230': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 30, [
+        (0, 'open;acv:230@50', shows('AUTO,AC', 230.0, 0.005), 'enter AUTO on AC 230 V: AC, 600 V range'),
+        (14, 'open;acv:0.3@50', shows('AUTO,AC', 0.3, 0.01), 'AC 0.3 V: down to 6 V'),
+    ], {}),
     # Touch: three taps on the active V button (DC -> AC -> AC+DC -> AUTO;
     # from 5 s: a tap at 3 s fell into the boot), the fourth back to DC;
     # then VOLT:COUP ACDC and FUNC "VOLT:AUTO".
@@ -131,7 +172,36 @@ SC = {
         (32, None, lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 4.776, 0.01), 're-enter on the square'),
     ], {16: 'VOLT:COUP DC', 17: 'VOLT:COUP AUTO', 32: 'VOLT:COUP DC', 33: 'VOLT:COUP AUTO'}),
 }
-EXTRA = {'tap': ['CURR:COUP?'], 'sqtie': ['DBG:ACDC:STAT?']}
+EXTRA = {'tap': ['CURR:COUP?'], 'sqtie': ['DBG:ACDC:STAT?'], 'iac': ['SYST:ALER?', 'CONF?'], 'idc': ['SYST:ALER?', 'CONF?'], 'vac230': ['CONF?'], 'iacfill': ['SYST:ALER?', 'CONF?']}
+
+
+def conf_range(d):
+    """The range (full scale) from CONF? ("VOLT:AUTO +6.000000E+02,+1E-02")."""
+    try:
+        return float(d['X']['CONF?'].strip('"').split()[1].split(',')[0])
+    except (KeyError, IndexError, ValueError):
+        return float('nan')
+
+
+# Checked on every sample from t0 to t1 (fw uptime, s): (t0, t1, check, label).
+ALWAYS = {
+    'iac': [(0, 99, lambda d: d['X'].get('SYST:ALER?') == 'NONE', 'SYST:ALER? NONE (no OVERLOAD)'),
+            # 1 A / 300 mA never on the uA shunt (47.5 ohm; ranges 600 / 6000 uA)
+            (0, 99, lambda d: not conf_range(d) < 0.05, 'never on the uA shunt')],
+    'idc': [(0, 99, lambda d: d['X'].get('SYST:ALER?') == 'NONE', 'SYST:ALER? NONE (no OVERLOAD)'),
+            (0, 99, lambda d: not conf_range(d) < 0.05, 'never on the uA shunt'),
+            # 1 A: once up on the A shunt (fw ~2 s), never back on the mA shunt until 0.3 A
+            # (script 16 = fw ~14.5 s: the firmware's uptime trails the script by ~1.5 s)
+            (6, 13, lambda d: conf_range(d) >= 6, 'A shunt while 1 A')],
+    'iacfill': [(0, 99, lambda d: d['X'].get('SYST:ALER?') == 'NONE', 'SYST:ALER? NONE (no OVERLOAD)'),
+                (0, 99, lambda d: not conf_range(d) < 0.05, 'never on the uA shunt'),
+                # the hop comes at fw ~9 s (the fill delays the first AC result); the
+                # 0.3 A phase (script 24) reaches the firmware at fw ~22.5 s (boot ~1.5 s)
+                (10, 21, lambda d: conf_range(d) >= 6, 'A shunt while 1 A')],
+    # 230 V never on 6 V or the mV range once the first up-range is done (fw ~4 s)
+    'vac230': [(0, 99, lambda d: not conf_range(d) < 1, 'never the mV range'),
+               (5, 15, lambda d: conf_range(d) >= 600, '600 V range or above while 230 V')],
+}
 # Scenarios whose AUTO part inside a phase (from its first AUTO reading after the phase's last
 # command) is DC and then at most one change (the decision), the same part in every phase.
 STABLE = {'sqtie'}
@@ -179,7 +249,7 @@ def run(name):
                 t = int(row['DBG:PING?'].split(',')[0]) / 1000.0
                 d = {'t': t, 'C': row[cq], 'V': num(row['FETC?']), 'F': row['FUNC?'], 'X': row}
                 rows.append(d)
-                print('%s %6.2f %-8s %-14s %s' % (name, t, d['C'], row['FETC?'], d['F']), flush=True)
+                print('%s %6.2f %-8s %-14s %s %s' % (name, t, d['C'], row['FETC?'], d['F'], ' '.join(row[q] for q in EXTRA.get(name, []))), flush=True)
                 for ta in sorted(acts):
                     if t >= ta:
                         tm.write(acts.pop(ta))
@@ -207,6 +277,14 @@ def run(name):
         else:
             r = seen[-1]
             print('  ok  %-50s %s %g' % (label, r['C'], r['V']), flush=True)
+    for t0, t1, chk, label in ALWAYS.get(name, []):
+        fails = [r for r in rows if t0 <= r['t'] <= t1 and not chk(r)]
+        if fails:
+            ok = False
+            r = fails[0]
+            bad.append('%s: %d samples, first %.2f %s %s' % (label, len(fails), r['t'], r['C'], ' '.join(r['X'].get(q, '') for q in EXTRA.get(name, []))))
+        else:
+            print('  ok  %-50s every sample' % label, flush=True)
     if name in STABLE:
         parts = []
         for i, (t, _, _, label) in enumerate(phases):
