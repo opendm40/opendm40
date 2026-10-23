@@ -2734,6 +2734,11 @@ impl Dmm {
             if cmp && self.acdc && !self.suspended {
                 self.sent.sample_cmp(now, hy::read1(0x14));
             }
+            // AC+DC: the peak hold restarts at the blank's end, not the
+            // settle's (`sent_rearm`): it bridges the phase settle as before.
+            if self.sent_arm && self.acdc && !self.suspended && !self.sent.blanked(now) {
+                self.sent_rearm(now);
+            }
             return None;
         }
         if self.sent_arm {
@@ -3656,9 +3661,10 @@ impl Dmm {
     /// samples from sentinel::BLANK_SETTLED_MS on (Sentinel::rearm), and
     /// the peak hold (on since the row went out, so it holds the switch:
     /// relays, the converter's first results, the front end settling) is
-    /// cleared. AC+DC (comparator sampled through the phase settles from
-    /// sentinel::BLANK_ROW_MS on, so A-JACK does not lapse over them) only
-    /// restarts the peak hold.
+    /// cleared. AC+DC: called at sentinel::BLANK_ROW_MS instead (`poll`),
+    /// only the peak hold restarts; the comparator is sampled through the
+    /// phase settles and the hold spans them, so A-JACK / V-JACK? do not
+    /// lapse over a phase (their clear times are 1 s / 0.5 s).
     fn sent_rearm(&mut self, now: u64) {
         self.sent_arm = false;
         if !self.acdc {
@@ -3684,15 +3690,13 @@ impl Dmm {
         if !self.probe {
             if run.is_some() && self.sent.kind == Kind::CmpA && self.probe_ok() {
                 self.probe = true;
-                self.write_config(clk);
-                self.deadline = clk.now_ms() + 120;
+                self.probe_rewrite(clk, 120);
             }
             return;
         }
         if self.aprot.is_none() && run.is_none() && !matches!(self.sent.alert, Alert::AJack) {
             self.probe = false;
-            self.write_config(clk);
-            self.deadline = clk.now_ms() + 120;
+            self.probe_rewrite(clk, 120);
             return;
         }
         // The row was just written: AD2 restarts (its first results, and a
@@ -3727,8 +3731,7 @@ impl Dmm {
                     self.aprot = None;
                     self.sent.set_aprot(now, false);
                     self.probe = false;
-                    self.write_config(clk);
-                    self.deadline = clk.now_ms() + 250;
+                    self.probe_rewrite(clk, 250);
                 }
             }
             // Only while the comparator still sees the current: a real one
@@ -3745,6 +3748,18 @@ impl Dmm {
             }
             None => {}
         }
+    }
+
+    /// The probe goes in / out (`aprot_poll`): the same function, range and
+    /// comparator node (PB1), only OP2 / AD2 change, so the sentinel's
+    /// switch blank (sentinel::BLANK_ROW_MS / BLANK_SETTLED_MS) does not
+    /// apply: it would add ~0.2 s to A-JACK / A-PROT at every probe entry.
+    fn probe_rewrite(&mut self, clk: &mut Clock, settle: u64) {
+        self.write_config(clk);
+        let now = clk.now_ms();
+        self.deadline = now + settle;
+        self.sent.unblank(now);
+        self.sent_arm = false;
     }
 
     /// The function can carry the A-jack probe: DC V / mV, not AC+DC (its
