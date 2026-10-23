@@ -1563,3 +1563,105 @@ Part 2's FAST files were deleted. `MMEM:CAT?` was back to 10 829 824 / 5 910 528
 - **Health:** `DBG:BOOT?` unchanged: crash count 0, HEALTHY, no reset. `DBG:HYSPI:SELF? 2000` all 0 at the end too.
 - **Open: 1 V after Part 3.** DC V at the calibrator's 1 V read **0.99897-0.99949 V** after Part 3 (0.99919 V at the very end, -0.08 %). After Part 2 it read 0.999951 V. Over e5 the 3 V reference also moved 2.99796 -> 2.99749 V (-160 ppm). The calibrator had given ~24 V for 25 min before this. I did not find out whether the calibrator or the meter moved; there was no third reference.
 - **Calibrator:** 1 V DC, enabled.
+
+## 8087c7d: screenshot pre-erase, SCPI Range / Digits + sigrok, scope full record, the 9abe84f UI fixes (2026-10-23 02:20 - 03:10)
+
+The owner had installed 8087c7d (it contains 36d6952, de01f2f, ad5ad8e, 9abe84f). `DBG:BOOT?` showed marker 0xE29D2342 / 0x000976F4 / 0x00013510, VALID, crash count 0, HEALTHY. No reset during the session (the boot block stayed the same; stack high-water 20 608 -> 22 732 of 45 800 B).
+- **Checks:** TODO "Device: screenshot preparation" items 1, 2, 4, 5, 6; "Range and digits" device retest 1-8; "Scope full record" device retest 1-9; the 5e52761 UI fixes; the AC+DC + manual V range transient.
+- **Wiring:** the calibrator on V/COM at 1 V DC the whole session. The A jack, the MCX probe and the generator output were not wired. **Calibrator control over `/dev/ttyACM1` was denied by the agent's permission classifier**, so nothing ran on the 40 Hz square this time.
+- **Input:** DBG:TAP / DBG:KEY / DBG:SWIPE D,3; panel reads are DBG:LCD? reads decoded as `dm40dbg.py shot` does (`devlib.grab`).
+- **Files:** scripts, PNGs, BMPs and JSON are in the session scratchpad `devchk-8087/` (not in git).
+- **USB:** every libsigrok-dm40 run left the usbtmc kernel driver detached from interface 0 (`/dev/usbtmc2` gone). `reattach.py` (USBDEVFS_IOCTL + USBDEVFS_CONNECT on `/dev/bus/usb/BBB/DDD`, works as a plugdev user) brings it back; `sr.sh` runs it after each sigrok-cli call. The meter never reset or re-enumerated.
+
+### Summary
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1.1 | Prep after boot; shot of DMM (DC V) and AC+DC | **PASS**: `DBG:FLASH?` state 2 / 76 at the start. frozen_ms **1357** (DC V), **1372 / 1380** (AC+DC), blocks_erased **0**, slices 532. BMP = the panel at the gesture, **0 px** (DC V and AC+DC). Touch works again by **1.54 s** after the gesture (external tap probe), job end 2.1 s. Prep back to 2 / 76 ~8 s after the job | `shot.py`, `freeze3.py`, `s2dmm-*`, `s3acdc-*` |
+| 1.2 | A shot right after another | **PASS, erase path seen once**: S017 -> S018 at 4.6 s (prep state 0): frozen **2332 ms**, 0 erased (the clusters past the files were blank flash, compare only). A shot onto dirty clusters (S012 deleted, swipe 0.14 s later, prep had 17 ready): frozen **1954 ms**, **14 blocks erased** (~42 ms each; 76 would be ~4.8 s). Both Saved | `b2b.py` |
+| 1.4 | Disk full | **PASS**: two AD2 38 400 disk sessions filled the disk (free 0): prep state 2 with **0 ready**; the swipe shows **"Disk full"** (red toast at 0.5-1.2 s), no BMP; `DBG:FLASH?` frozen 78 ms, 0 erased | `full.py`, `full2.png` |
+| 1.5a | CSV commits | **PASS**: after each 60 s commit (at 60.4 / 120.4 s) prep 2 -> 0 -> 1 -> 2 within 2.3-2.8 s; after `LOG:CSV OFF` the same | `csvprep.py` |
+| 1.5b | Fast-log session | **PASS**: prep state 0 for the whole session (LOG:DISK? state 3), 1 at 2.0 s after the end, 2 / 76 at 2.5 s | `fastprep.py` |
+| 1.5c | "PC can edit" + a DM40*.BIN copied: prep pauses, the file installs | **not run** (installs firmware; owner) | - |
+| 1.6 | `DBG:DIAG?` loop max while preparing | **PASS (+~1-2 ms)**: a prep with 76 erases (after deleting S012): state-1 windows max **13.9 ms**, median 11.9; idle (AC+DC page, same polling) max 12.0, median 11.2; the state-2 windows after it reached 14.2. The 65 ms windows right after `MMEM:DEL` are the delete's FAT write (state 0) | `diagdel.py`, `diagprep.py` |
+| 1.3 | Battery-pull power cut during prep | **skipped** (owner) | - |
+| 2.1 | `--show` ranges per function | **PASS**: V (DC, AC+DC, AUTO) Auto, 600mV .. 1000V; A (DC, AC+DC) Auto, 600uA .. 10A; ohm Auto, 60R .. 60MR; cap / freq Auto only; continuity / temperature none (an empty "range:" line); digits 5, 6 | `show.txt` |
+| 2.2 | `-c range=` each, DC V / A / ohm | **PASS**: DC V 1 V in: 600mV inf (OL), 6V 999.1 mV, 60V 998 mV, 600V 1.00 V, 1000V 1.0 V, Auto 999.1 mV. A (open jack): every range answers with its CONF? (600 uA 1E-8 .. 10 A 1E-3), no "Leads in A?" alert. Ohm (the calibrator's output, ~50 MOhm): 60R .. 6MR inf, 60MR 50.16 MOhm, Auto 60MR | `rng-dcv.txt`, `rng-a-r.txt` |
+| 2.3 | Range page highlight, MANU | **PASS**: after `range=60V --set` the status bar shows MANU and the MF range page highlights 60V | `sr1-60V.png`, `sr2-rangepage.png` |
+| 2.4 | `range=Auto` keeps AUTO+ | **PASS**: AUTO+ in the bar and on the range page, `VOLT:RANG:AUTO?` 1 | `sr-auto2.png` |
+| 2.5 | digits=5 / 6 | **PASS**: 5 -> chip "FAST 10/s", 4 decimals, CONF? 1E-04, samples 999.1 mV; 6 -> "MED 2.5/s", the small extra digit, CONF? 1E-05, samples 999.12 mV. (SLOW, the owner's setting, reads as digits 6; restored by hand at the end) | `dg.png` |
+| 2.6 | SmuView Range / Digits combos | **skipped** (owner) | - |
+| 2.7 | AC+DC / AUTO with a manual V range | **transient confirmed** (open item), see 5 | `trans*.py` |
+| 2.8 | CONF? on 1000 V / 10 A | **PASS**: `"VOLT +1.000000E+03,+1.000000E-01"`, `"CURR +1.000000E+01,+1.000000E-03"` | - |
+| 3.1 | DIG, WAV:POIN MAX + WORD, one read | **PASS**: DIG -> STOP in 0.21-0.22 s; `#553248` + 53 248 B (26 624 points) in **one `read()` call, 66 ms**; loop max1s right after 7.4 ms | `wav1.py` |
+| 3.2 | WAV:DATA? while running / RUN during a long read | **PASS / not isolated**: running -> `#10` + `-100,"Settings conflict"`. RUN pressed during a read needs a hand on the key: a DBG:KEY over USB is a new command, which ends the stream | `wav1.py` |
+| 3.3 | DIG x100 with the comparator on, 1 kHz loopback | **blocked** (no generator loopback; the output must stay off) | - |
+| 3.4 | CHAN1:OFFS 0.5 / -0.5 then DIG | **PASS**: 1 V/div, open input: codes move +59 / -64 (0.5 V = 59.8 codes), the record's volts stay 0.918 / 0.901 / 0.891 / 0.889 V (the floating input drifts ~30 mV, < 4 codes) | `wav4.py` |
+| 3.5 | ngscopeclient-dm40 on /dev/usbtmc2 | **FAIL, host side**: the driver hangs at its 6th query. `OUTP?` answers 1 byte, "0" (no newline); `SCPITMCTransport::ReadRawData` asked for len 1, got 1, so `bytes_fetched == bytes_requested` loops into another `read()`: 5 s ETIMEDOUT, `i += -1`, forever. Stream Browser "STOPPED", generator fields 0, no trace; Run / Auto clicks do nothing | `ngs4-bc.png`, `ngs5.strace` |
+| 3.6 | Bluetooth | **PASS (dm40bt_scpi.py)**: after DIG, `WAV:POIN MAX` -> `WAV:DATA?` empty block + `-100,"Too much data"`; `WAV:POIN 1902` -> a 1902-byte record. The driver over rfcomm: not run (no rfcomm bind; needs sudo) | - |
+| 3.7 | Kill the host mid-read | **PASS (partly)**: a process read 4096 B of the record and exited; the next process's queries answered at once (no USBTMC_IOCTL_CLEAR needed) and RUN by DBG:KEY took effect at 0.01 s. The 2 s stall timeout without host traffic was not isolated (same reason as 3.2) | `kill1.py`, `after2.py` |
+| 3.8 | Wave view record (DMM source) | **PASS on 1 V DC only**: DC V Wave view, STOP: SCReen 400 and MAX 26 624 points, all code 554 = **1.0007 V**, the screen Vrms 1.00 V. Not run on an AC signal (calibrator control denied) | `wav8.py`, `wv0.png` |
+| 3.9 | 50 MS/s rates on the generator's 1 MHz square | **blocked** (loopback) | - |
+| 4a | Combined-view strip units | **PASS**: "0.0000mW" (SC_DIGITS, the W whole), "0.0000mWh" (F20 on the baseline). MHz: not reachable on the device (no source above the calibrator's range, generator off) | `u2z.png`, `u4-comb-wh.png` |
+| 4b | Help 2/7, 5/7 | **PASS**: "< Back" -> title ink gap 14 px on every page (was one space on 5/7); topic -> value gap >= 21 px on all seven pages (2/7: 36 px) | `hp1..hp7.png` |
+| 4c | Power page after a coupling change | **PASS**, cosmetic note: DC -> AC, AC -> AC+DC, AC+DC -> DC each show the "--" page in the new layout at once (first strip read 0.05-0.32 s after the tap), the new reading at ~1-2 s. AC -> AC+DC: bits of the AC layout's right column (the "VAh" / "AVG" rows) stay next to the new one for ~2.5 s; the pending page's chart labels have no unit | `pc1-sheet.png`, `pc23-sheet.png`, `pc4-strips.png`, `pc2-z.png` |
+| 4d | Chart axis after a function change | **PASS**: Hz "0.050Hz", diode (OL) "0.0050V", cap (OL) "5.0uF", ohm "50.206MOhm", temperature (OL) "5.0°C" | `c-sheet.png` |
+| 5 | AC+DC + manual V range transient | **confirmed** (open): a wrong AC part for ~2-4 s after each range change, then a tail; details in 5 | `trans.py`, `trans2.py` |
+| new | DC V: the present range set again | **FAIL (new, pre-existing)**: 1-2 readings at 25-51 % of the input, see "New findings" | `dcvsw2.py`, `mfsw2.py` |
+
+### 1. Screenshot preparation (36d6952)
+
+`DBG:FLASH?` fields 4-10 = frozen_ms, total_ms, slices_frozen, blocks_erased, prep state, clusters ready, prep erases since boot.
+
+- **1.1:** `shot.py` reads the panel, sends `DBG:SWIPE D,3` at once, polls `LOG:CSV:FREE?` every 0.25 s for the busy window, then reads `DBG:FLASH?` and pulls the BMP with `MMEM:DATA?`. The panel read just before the gesture is the reference: the 300 ms draw hold of DBG:LCD? delays the shot start (busy from 1.25 s when a read ran during 0-0.7 s), so the frozen page is the page at the gesture. Both BMPs are 307 266 B, BI_BITFIELDS 565, 0 px against that read. A first run with a 0.6 s pause before the gesture differed in 652 px (the clock, chart and statistics moved): the reference was just stale.
+- **frozen_ms:** 1357 / 1357 (DC V, two shots), 1372 / 1380 / 1370 / 1383 / 1362 (AC+DC); total_ms 1950-1981; slices 532. The emulator gave 1403-1409 ms. The external probe (`freeze3.py`, taps on "A" every 0.1 s from 0.9 s) saw the tap at 0.61 s ignored and the tap at 1.54 s take effect; job end 2.09 s, toast up by 2.44 s. The old freeze was 5.4 s (touch) / 6.1 s (toast).
+- **After a shot:** prep goes 0 (2 s quiet) -> 1 -> 2 / 76; the erase count rose by 76 per shot while the shots took the earlier-prepared clusters.
+- **1.2:** `b2b.py`: the second swipe is accepted only once the first shot's toast is gone (4.6 s). By then prep was still state 0, so the second shot had no prepared clusters, but its clusters were blank flash past the end of the files: compare only, frozen 2332 ms, 0 erased. To see the erase path, S012 was deleted (its 75 dirty clusters become the first free ones) and the swipe sent 0.14 s later; prep had already re-checked 17 clusters (the delete's quiet window had passed during the toast): frozen 1954 ms, 14 blocks erased. Each unprepared dirty block costs ~42 ms, so a fully unprepared shot would be ~4.8 s (TODO estimate 3-5 s).
+- **1.4:** free was 4 034 560 B. FAST014 (AD2 38 400, `LOG:DUR 60`) used 2.46 MB (kind 3 is ~1.07 B per sample, not 3 B, so 60 s did not fill it); FAST015 (`LOG:DUR 120`) ran into Full (LOG:DISK? state 6). Then `MMEM:CAT?` free 0, `DBG:FLASH?` state 2 / **0** ready. The swipe: "Disk full" (red), no new file, the shot's stats 78 / 78 ms, 6 slices.
+- **1.5:** `csvprep.py` polled `DBG:FLASH?` every 0.2 s for 135 s of `LOG:CSV ON` (DC V): each commit -> state 0 for ~2 s -> 1 for 0.2-0.8 s -> 2 / 76; no erases (the commit took a prepared cluster). `fastprep.py` (`LOG:DEST DISK`, `LOG:DUR 20`, AD1): prep stayed 0 during the session and resumed 2 s after it.
+- **1.6:** `diagdel.py`: 6 s of idle polling, `MMEM:DEL "S012.BMP"`, 20 s of polling (`DBG:FLASH?` + `DBG:DIAG?` loop max1s every 0.2 s). The prep erased 76 blocks (394 -> 470) in ~5.5 s. Loop max per state: idle 12.0 ms (median 11.2), state 0 (the delete) 65.5 ms saturated then 18.9, **state 1 13.9 ms (median 11.9)**, state 2 afterwards 14.2 (median 12.0). An earlier run (`diagprep.py`, right after a shot, no erases) had one 26.4 ms window in state 1 at 2.5 s after the job end, which overlaps the post-shot repaint / volume refresh. The baseline is the AC+DC page, which itself runs at ~11 ms.
+- **Not run:** the battery pull (owner), "PC can edit" + a DM40*.BIN (it installs firmware). A host read of the USB volume during prep (to see the 0.5 s pause) failed on the host side (`dd iflag=direct` on vfat: "Invalid input") and was dropped.
+
+### 2. SCPI Range / Digits + sigrok (de01f2f)
+
+sigrok-cli from `libsigrok-dm40/install`, always `-d scpi-dmm:conn=usbtmc/3.55`, no scan. After every call the usbtmc driver had to be re-attached (above).
+- **Same-range set:** see "New findings". It also shows in sigrok's own runs: after `range=60V --set` on 60 V the chart's MIN was 0.510 V (`sr1-60V.png`).
+- **Rate:** the owner's SLOW 2.5/s reads as digits 6 in `--show`; digits 5 / 6 switch FAST / MED. SLOW was restored with the rate chip on the DMM page. The chip cycles FAST -> SLOW -> MED (`rate_cycle`, the enum order); a tap on the value cycles FAST -> MED -> SLOW (`resolution_cycle`). Not wrong, but the two orders differ.
+- **A ranges with the A jack open:** readings 0-1 uA, `SYST:ALER?` NONE on every range. After `range=Auto` the 600 uA range read 2.30 uA for a moment.
+
+### 3. Scope full record (ad5ad8e)
+
+- **3.1 / 3.4:** `wav1.py`, `wav4.py`. The open MCX input floats at ~0.9 V; at 20 mV/div the record was all code 1023 (clipped), so 3.4 ran at 1 V/div. `WAV:PRE?` (MAX, WORD): `1,2,26624,1,8E-07,-0.0113,0,1.6706E-04,-0.0476,0` at 2 ms/div.
+- **3.5 in detail:** `strace -f` on ngscopeclient: `*IDN?`, `WAV:SOUR CHAN1`, `WAV:FORM WORD`, `WAV:POIN MAX`, `TRIG:SWE?`, `TRIG:LEV?`, `TRIG:SLOP?`, `CHAN1:OFFS?`, `CHAN1:SCAL?`, `CHAN1:OFFS?`, `ACQ:SRAT?`, `CHAN1:COUP?` (two threads interleave on the one transport), `OUTP?` -> "0", then only `read()` calls that time out every 5.1 s with the buffer pointer moving back one byte each time (`i += bytes_fetched` with -1). Every reply before it was 2+ bytes; fw-rs ends USBTMC replies without a newline (the Bluetooth path adds one), and `ReadReply` reads one byte at a time until '\n'. The emulator tests used `lan`, never this transport. The ngscopeclient `-L` log stays empty when it is killed. Options (owner): (a) fw-rs ends USBTMC replies with '\n' (IEEE 488.2 NL^END; check the host tools that compare raw bytes), (b) fix the loop in the scopehal fork (`bytes_fetched == bytes_requested` with `bytes_requested = len` while `read()` is given the whole staging buffer), (c) both. The meter itself stayed fine: after the hung process was killed, queries answered at once.
+- **After 3.5:** the launcher's `TRIG:LEV?` was -1.90 V: the trigger level follows the CH1 offset/scale changes of 3.4 (it was 0 at the start). Restored to 0 with the original offset.
+- **3.7:** the killed process had read 4096 of 53 255 bytes. The previous session's killed `LOG:DATA?` needed `USBTMC_IOCTL_CLEAR`; this one did not.
+
+### 4. UI fixes (9abe84f)
+
+- **4a:** power function, A jack open: the strip "0.0000mW" with the full W (`u2z.png`, 3x), and after a tap on the value (Wh) "0.0000mWh" in the smaller font on the digits' baseline. The DMM page shows "mWh" in the same smaller font.
+- **4c:** `powc.py` (full panel 0.3-1.0 s after the W tap, then at 2.5 and 8 s) and `powc2.py` (two strips every 0.33 s from 0.05 s). The pending page: "--V", "--uA", "- -" as the value, E / PF / S / Q / f "--", the AC glyph / AC+DC glyph on the W button at once. Leftovers on AC -> AC+DC (`pc2-z.png`, 4x): the top of an "AVG" row above "Vb" and the bottom of a row under the E box; gone by 3-8 s.
+- **4d:** `c-sheet.png`; the cap reads OL and the ohm 50.146 MOhm because the calibrator's 1 V output is on V/COM.
+
+### 5. AC+DC + manual V range (re-check)
+
+`trans2.py`: CONF:VOLT:ACDC (method A), 1 V DC, then `VOLT:ACDC:RANG 60`, `6`, `:AUTO ON`, polling `DBG:ACDC:STAT?` (range, ac, dc) and `READ?` back to back. (The first run used `VOLT:RANG 60` in AC+DC: "Settings conflict", as specified: the header must name the current function.)
+- **6 -> 60 V:** the first AC part after the change was **0.353 V**, then 0.262 / 0.193 / 0.142 V until ~4 s, then 18 -> 1 mV over ~10 s. READ? **1.0593 V (+6 %)** at 2.2 s, 1.0087-1.0091 to 3.3 s, then within 0.1 %.
+- **60 -> 6 V:** AC part **0.146 V** at 1.5 s, 0.080 / 0.058 / 0.042 V to 3.3 s, then 6-10 mV, ~2-6 mV after ~5 s. READ? 1.0098 at 1.3 s, normal from ~2.5 s.
+- **MF page path** (`DBG:ACDC:RANG 2` / `1`, `trans.py`): the same, AC part 1.058 V at 1.4 s and 0.577 V to 3 s after 6 -> 60 V; 51 / 27 mV after 60 -> 6 V.
+- **AUTO coupling** (`CONF:VOLT:AUTO`, `VOLT:AUTO:RANG 60` / `6`): the same AC-part transient in `DBG:ACDC:STAT?`, but AUTO stays DC (READ? = the DC part, `VOLT:COUP?` AUTO,DC at the end).
+- **Verdict:** the emulator's "2-5 s" transient is real on the device: a grossly wrong AC part for ~2-4 s, and on the 60 V range a tail of > 5 digits for ~10 s. In AC+DC it moves the total by up to +6 %.
+
+### New findings
+
+1. **DC V: setting the present range again gives 1-2 bogus readings** (`dcvsw2.py`, `mfsw2.py`; 1 V DC in). `VOLT:RANG 60` while on 60 V: READ? **0.257 / 0.257 V** at 0.46 / 0.66 s, the next time **0.509 V**; `VOLT:RANG 6` while on 6 V (manual or AUTO+): **0.375 V**, **0.403 V**. The MF range page tap on the highlighted item does the same (chart / statistics MIN 0.2506 V and 0.4033 V). It happens on about every other repeat. A real range change (6 <-> 60 <-> 600 V, AUTO ON) gave none in 8 tries; one `VOLT:RANG:AUTO ON` from 600 V gave 0.781 V in the first run. Pointer: `Dmm::set` rewrites the config (`write_config`) and sets a 450 ms deadline, but `changed_mode` is false, so nothing is reset; the first conversion after the deadline looks like a partial integration (25-51 % of the input). SmuView / sigrok users re-applying a range will hit it. Not fixed (pre-existing; owner's call).
+2. **libsigrok-dm40 leaves `/dev/usbtmcN` detached** after each sigrok-cli run (host side). Recipe: USBDEVFS_CONNECT on interface 0 (`devchk-8087/reattach.py`).
+3. **ngscopeclient over USBTMC hangs on a 1-byte reply** (3.5).
+4. **DC V reads -0.08..-0.13 % at the calibrator's 1 V all session** (0.9987-0.9993 V on the page, sigrok 998.9-999.6 mV). The calibrator had sat at 1 V for hours, so "warm after 24 V" (the 7409b92 open item) does not explain it.
+5. **Cosmetic:** the rate chip and the value tap cycle the rates in different orders; the power page leftovers on AC -> AC+DC (4c).
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+, rate SLOW (restored after the digits test; `--show` had found it there). Method A, `LOG:DEST HOST`, `LOG:STAT 0`, LOG source / rate / chop AD1 / 4800 / ON, `LOG:DUR` 60 (as found; it was 60 at the start, not the 20 of the 7409b92 section). `SYST:IDN:EMUL` OFF. Scope 2 ms/div, 20 mV/div, CH1 offset -38.0 mV, trigger level 0, sweep AUTO (as found); `WAV:FORM` BYTE, `WAV:POIN` SCR. Generator `OUTP?` 0 (never switched on). Settings not touched (volume 0 %, backlight 10 %, Dim / Shutdown Never: seen on Settings 1/3).
+- **Files:** S012-S019 (S012 twice), LOG005, FAST013-FAST015 deleted. `MMEM:CAT?` used / free 10 829 824 / 5 910 528, the same as at the start; prep 2 / 76.
+- **Health:** `DBG:BOOT?` unchanged: crash count 0, HEALTHY, no reset.
+- **Calibrator:** 1 V DC, enabled (never changed).

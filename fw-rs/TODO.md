@@ -540,6 +540,13 @@ Code work (in this order):
       5. CSV recording on: after each 60 s commit prep goes 1 -> 2; fast-log session: prep stays put
          during it; "PC can edit" + a DM40*.BIN copied: prep pauses, the file installs.
       6. DBG:DIAG? loop max while prep works (state 1): no worse than idle + ~1 ms.
+      Device 8087c7d (2026-10-23, device-check doc "8087c7d"): 1 PASS (frozen_ms 1357 DC V / 1362-1383 AC+DC,
+      0 erased, BMP = the panel at the gesture 0 px, touch back by 1.54 s, prep 2 / 76 again ~8 s later);
+      2 PASS (back-to-back on blank flash 2332 ms, 0 erased; onto dirty clusters 1954 ms with 14 erased, ~42 ms
+      each); 4 PASS (free 0: state 2 / 0 ready, "Disk full", no BMP); 5 CSV commits PASS (0 -> 1 -> 2 in
+      2.3-2.8 s), fast-log PASS (state 0 all session, resumes 2 s after); 6 PASS (state 1 with 76 erases: loop
+      max 13.9 ms vs idle 12.0 on the AC+DC page). Open for the owner: 3 (battery pull) and 5's "PC can edit"
+      + DM40*.BIN install half.
 - [x] Data logger (LOG:STAT ON) has no on-screen indicator: "DATA LOGGING" panel (dialog::log_panel,
       rate + sample count, 1 s refresh), view repainted on stop.  (5fd7871; verify on device)
 - [ ] Browser client (owner 2026-10-22: later, not now): one local HTML page (fw-rs/tools/web/dm40.html) over WebUSB
@@ -577,6 +584,22 @@ Code work (in this order):
       DMM, e.g. DC V on a 50 Hz signal): STOP, WAV:POIN MAX -> the record in V at the jacks (yinc / yorig
       from the DMM scale), compare with the screen; (9) the 50 MS/s rates (100 ns .. 50 us/div share the
       50 MS/s record) on the generator's 1 MHz square.
+      Device 8087c7d (2026-10-23, device-check doc "8087c7d"): (1) PASS: #553248 + 53 248 B in one read() call,
+      66 ms, DIG -> STOP 0.21 s; (2) PASS "#10" + Settings conflict; RUN during a read not isolated (needs a
+      hand on the key: DBG:KEY is a new command and ends the stream); (3) blocked, no loopback; (4) PASS
+      (codes +59 / -64 per 0.5 V, volts unchanged within the open input's drift); (5) **FAIL, host side**: the
+      driver hangs at OUTP? (1-byte reply "0", no newline: SCPITMCTransport::ReadRawData loops on
+      bytes_fetched == bytes_requested == 1, 5 s timeouts forever; lan / uart never hit it) -> item below;
+      (6) PASS with dm40bt_scpi.py ("Too much data"; 1902-point record), the driver over rfcomm not run;
+      (7) PASS partly: after a killed mid-read the next command answers at once, no USBTMC clear; the 2 s
+      stall timeout itself not isolated; (8) PASS on 1 V DC only (record 1.0007 V = screen; AC not run: the
+      calibrator could not be driven); (9) blocked.
+- [ ] ngscopeclient-dm40 over USBTMC hangs on any 1-byte reply (OUTP? "0"), device 8087c7d: fw-rs ends USBTMC
+      replies without '\n' (Bluetooth adds one); scopehal's SCPITMCTransport::ReadReply reads 1 byte at a time
+      until '\n' and ReadRawData's inner loop reads again when it got exactly len bytes. Choose: fw-rs ends
+      USBTMC replies with '\n' (IEEE 488.2 NL^END; check host tools that compare raw bytes, sigrok, pyvisa),
+      and / or fix the loop in the scopehal fork. Then redo retest (5). Also: the driver's two threads
+      interleave queries on one transport; the -L log is empty when ngscopeclient is killed.
 - [ ] sigrok/SmuView (merged from three items): libsigrok scpi-dmm DM40 profile exists as
       ../libsigrok-dm40/0001-scpi-dmm-add-support-for-Alientek-DM40A-B-C-dm40-fw-.patch (command set
       like the 34401A: CONF:<f>, READ?, FUNC?; 3 s delay after RES/CAP/TEMP/FREQ/CONT/DIOD). DC V works
@@ -637,6 +660,22 @@ Code work (in this order):
       the rate chip FAST / MED and the +1 digit; SmuView Range / Digits combos follow; AC+DC / AUTO
       coupling with a manual V range (emulator: an AC-part transient of ~2-5 s after the change, the
       MF page path too); CONF? on 1000 V / 10 A.
+      Device 8087c7d (2026-10-23, device-check doc "8087c7d"): --show PASS (V / A / ohm lists, cap / freq Auto,
+      cont / temp none); range= each in DC V / A / ohm PASS (6V 999.1 mV, 60V 998 mV, 600V 1.00 V, 1000V
+      1.0 V, 600mV OL); range page highlight + MANU PASS; Auto keeps AUTO+ PASS; digits 5 / 6 -> FAST 10/s /
+      MED 2.5/s + extra digit PASS (SLOW reads as 6); CONF? 1000 V / 10 A PASS; the AC+DC transient is real
+      (item below); SmuView combos left to the owner. libsigrok-dm40 leaves the usbtmc kernel driver
+      detached after every run (/dev/usbtmcN gone; re-attach with USBDEVFS_CONNECT, scratchpad reattach.py):
+      host side, fix in the profile / transport or document.
+- [ ] AC+DC (and AUTO) with a manual V range, device 8087c7d (1 V DC, method A): the AC part reads 0.35 V
+      (1.06 V via the MF page) for ~2-4 s after 6 -> 60 V, then a tail 18 -> 1 mV over ~10 s; 0.15 V for ~2 s
+      after 60 -> 6 V. AC+DC READ? +6 % at 2.2 s, +0.9 % to 3.3 s. AUTO stays DC. Drop the AC phases until the
+      AC path has settled after a range change (as at entry).
+- [ ] DC V: setting the present range again (SCPI <f>:RANG <same>, sigrok range=, or the MF page tap on the
+      highlighted item) gives 1-2 readings at 25-51 % of the input at 0.46 / 0.66 s, on about every other
+      repeat (device 8087c7d, 1 V DC: 0.257, 0.509, 0.375, 0.403 V); a real range change does not. The chart and
+      MIN record it. Dmm::set rewrites the config with a 450 ms deadline but resets nothing when the mode is
+      unchanged: skip the write when nothing changes, or drop the first reading after the deadline.
 - [x] Scope touch: pinch = scale (timebase / V/div, 1-2-5 snap, value bubble), one-finger drag =
       offset, draggable trigger level, no clash with view swipes.  (c470be7, 419fd96, ebff9b4, 81c9dd8;
       verify on device, two-finger report rate first)
@@ -1655,6 +1694,9 @@ Emulator (emu/):
       the new coupling's layout and shows "--" for every measured value (energy, time, settings kept)
       until the new coupling's first reading. Emulator: DC -> AC, AC -> AC+DC, AC+DC -> DC (W taps) and
       POW:COUP AC all show the pending page at once (scratchpad uifix/emu-pow). Verify on device.
+      Device 8087c7d: PASS (W taps DC -> AC -> AC+DC -> DC: "--" page in the new layout in the first read,
+      0.05 s). Cosmetic: on AC -> AC+DC bits of the AC layout's right column ("VAh" / "AVG" rows) stay ~2.5 s;
+      the pending page's chart labels have no unit.
 - [x] Help 5/7 title ran into "< Back"; Help 2/7 "Power key held 1.5 s" touched its value column (and
       three more rows were as close: help 1 "Scope: drag sideways", help 3 "Tap value, rate chip", "Tap a
       function again"). Fixed (ui.rs): page_title starts a title 28 px after "< Back" when centring would
@@ -1668,6 +1710,9 @@ Emulator (emu/):
       "0.050MOhm", diode "MOhm", temperature "Hz"). Fixed (app.rs): a function change clears the chart
       unit; an empty chart takes the reading's unit / digits even while it reads OL. Emulator: FREQ ->
       DIOD (OL) labels "0.0050V" (uifix/emu-chart). Verify on device.
+      Device 8087c7d: PASS (Hz, diode OL, cap OL, ohm, temperature OL each with its own unit). Strip units
+      "mW" / "mWh" PASS on the device ("MHz" not reachable there); Help 2/7 and 5/7 PASS (title 14 px after
+      "< Back", topic -> value >= 21 px on all pages).
 - [ ] Wave view entry from DC V: DBG:ISR? `dropped` +7087 (~185 ms, the DC V self-cal at entry) before
       the view drains; AC V entry 0. Harmless (the view starts after), note in feasibility 13 or skip the count.
 
@@ -1680,9 +1725,10 @@ Emulator (emu/):
       followed); data-phase passes <= 4.5 ms; 3 passes of 50-78 ms = the FAT x2 + dir block writes (since
       0d165e4). FFT in the arena: stops for a shot, resumes with the same peak; CSV commits pause it
       < 0.2 s; MMEM:CAT? bursts barely. calbackup SAFECOPY_PRESENT, CALIB / BOOTDATA / UID unchanged.
-- [ ] Freeze is ~5.4 s (touch back) and the toast ~6.1 s, not 4-5 s; with steady DBG:LCD? traffic the
+- [x] Freeze is ~5.4 s (touch back) and the toast ~6.1 s, not 4-5 s; with steady DBG:LCD? traffic the
       same job ends in 2.3-4 s (why?). Pre-erasing the next shot's clusters in idle (ram-budget.md
-      follow-up) would cut it to the page programs.
+      follow-up) would cut it to the page programs. Done (36d6952); device 8087c7d: frozen 1.36-1.38 s,
+      touch back by 1.54 s, toast ~2.4 s.
 - [x] A shot during a fast-log session wrote nothing at once but ran after the session, on a half-repainted
       page (S023); the same after a host LOG:STAT session (S027). Fixed in 7409b92 (App::shot_request:
       "Disk busy" at the gesture; a shot waits 1 s after a full repaint). Verify on device: the swipe
@@ -1712,3 +1758,20 @@ Emulator (emu/):
 - [ ] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
       3 V reference moved -160 ppm during e5). Calibrator or meter? Recheck with a cold calibrator.
 - [ ] acdcmeth.py: the calibrator's "30 V" is 23.99 V (MR9270 limit?): the e1 / e5 / e6 30 V points are 24 V.
+
+## Device check 8087c7d: shot pre-erase, SCPI Range / Digits + sigrok, scope full record, UI fixes (2026-10-23; docs/device-check-2026-10-21.md "8087c7d")
+
+- [x] Screenshot preparation: items 1, 2, 4, 5 (CSV, fast-log), 6 PASS (item above). Owner: the battery pull
+      during prep and the "PC can edit" + DM40*.BIN half.
+- [x] SCPI Range / Digits + sigrok: retest 1-5 and 8 PASS; 7 = the AC+DC transient (open item above); SmuView
+      to the owner.
+- [ ] Scope full record: (5) ngscopeclient over USBTMC FAIL (item above); (3) / (9) blocked until the
+      generator is looped back to the scope input; (2) RUN during a long read and (7)'s 2 s stall timeout
+      need a hand on the RUN key; (8) on an AC signal and (6) the driver over rfcomm not run.
+- [x] UI fixes 9abe84f: strip units, Help 2/7 + 5/7, power pending page, chart axis PASS (cosmetic notes in the
+      5e52761 items).
+- [ ] DC V at the calibrator's 1 V read 0.9987-0.9993 V all session (sigrok 998.9-999.6 mV) with the calibrator
+      at 1 V for hours: the 7409b92 "warm after 24 V" idea does not explain it. Recheck against another
+      reference.
+- [ ] Cosmetic: the rate chip cycles FAST -> SLOW -> MED (rate_cycle, enum order), a tap on the value FAST ->
+      MED -> SLOW (resolution_cycle). Same order for both?
