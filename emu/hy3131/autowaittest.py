@@ -2,9 +2,10 @@
 """READ? / MEASure? in the AUTO coupling (fw-rs main.rs AUTO_WAIT_MS,
 docs/switch-latency.md 6): AUTO's values before its first decision are
 provisional (never to SCPI), so a READ? / MEAS:VOLT:AUTO? right after the
-host's change waits for the decision, at most AUTO_WAIT_MS (4.5 s) after the
-command, and then answers the part AUTO shows: never +9.91E37 / "Data
-stale", always inside a 5 s host timeout. FETCh? stays non-blocking-ish
+host's change waits for the decision, at most until AUTO_WAIT_MS (3.9 s)
+after the coupling was entered (a later query: at most 0.85 s), and then
+answers the part AUTO shows: never +9.91E37 / "Data stale"; libsigrok's
+READ? 3 s after CONF inside its 1 s timeout. FETCh? stays non-blocking-ish
 (+9.91E37 until the decision). Each window: input at its start, VOLT:DC at
 +3 s, the query at +8 s (fw uptime), the reply time from DBG:PING? before
 and after.
@@ -27,11 +28,15 @@ W = 20.0
 
 # name, input, query, expected value, rel tolerance, max reply s
 SCEN = [
-    ('dc', 'dcv:5.0', 'MEAS:VOLT:AUTO?', 5.0, 0.01, 4.6),
-    ('ac', 'acv:1.0@50,dc=0.2', 'MEAS:VOLT:AUTO?', 1.0, 0.02, 4.6),
-    ('ac-read', 'acv:1.0@50,dc=0.2', 'CONF:VOLT:AUTO;:READ?', 1.0, 0.02, 4.6),
-    ('tie', 'acv:4.776@40,dc=4.776,shape=square', 'MEAS:VOLT:AUTO?', 4.776, 0.01, 4.6),
-    ('tie-read', 'acv:4.776@40,dc=4.776,shape=square', 'CONF:VOLT:AUTO;:READ?', 4.776, 0.01, 4.6),
+    ('dc', 'dcv:5.0', 'MEAS:VOLT:AUTO?', 5.0, 0.01, 4.0),
+    ('ac', 'acv:1.0@50,dc=0.2', 'MEAS:VOLT:AUTO?', 1.0, 0.02, 4.0),
+    ('ac-read', 'acv:1.0@50,dc=0.2', 'CONF:VOLT:AUTO;:READ?', 1.0, 0.02, 4.0),
+    ('tie', 'acv:4.776@40,dc=4.776,shape=square', 'MEAS:VOLT:AUTO?', 4.776, 0.01, 4.0),
+    ('tie-read', 'acv:4.776@40,dc=4.776,shape=square', 'CONF:VOLT:AUTO;:READ?', 4.776, 0.01, 4.0),
+    # libsigrok's DM40 profile: CONF, 3 s, READ? with a hard 1 s USBTMC timeout.
+    ('ac-sigrok', 'acv:1.0@50,dc=0.2', 'CONF:VOLT:AUTO|3|READ?', 1.0, 0.02, 0.95),
+    ('tie-sigrok', 'acv:4.776@40,dc=4.776,shape=square', 'CONF:VOLT:AUTO|3|READ?', 4.776, 0.01, 0.95),
+    ('tie-sigrok2', 'acv:4.776@40,dc=4.776,shape=square', 'CONF:VOLT:AUTO|5|READ?', 4.776, 0.01, 0.95),
 ]
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -80,8 +85,12 @@ try:
         wait_until(w0 + 3)
         q('CONF:VOLT:DC;:SYST:ERR?')
         wait_until(w0 + 8)
+        parts = query.split('|')
+        for i in range(0, len(parts) - 1, 2):
+            t.write(parts[i])
+            wait_until(up() + float(parts[i + 1]))
         t1 = up()
-        r = q(query)
+        r = q(parts[-1])
         t2 = up()
         err = q('SYST:ERR?')
         coup = q('VOLT:COUP?')

@@ -297,10 +297,11 @@ AUTO coupling (`CONF:VOLT:AUTO`, `MEAS:VOLT:AUTO?`, the CURR twins): its
 values before the first DC / AC decision are provisional (shown grey on the
 meter, docs/switch-latency.md 6) and never answered. `READ?` / `MEAS?` after
 the host's change wait for the decision: ~1.3 s on a DC signal, ~3.5 s on a
-clear AC one; at most 4.5 s after the command (`AUTO_WAIT_MS`), then the part
-AUTO shows by then (a tie of AC and DC, e.g. a unipolar square, can take ~10 s
-to decide: the DC part is answered at 4.5 s), never +9.91E37 / "Data stale".
-`FETCh?` answers +9.91E37 until the decision. A host timeout of 5 s covers
-it (libsigrok's hard 1 s USBTMC read: send `CONF` first and skip the
-+9.91E37 samples of `READ?` / `FETCh?`, as after a range change).
+clear AC one; at most until 3.9 s after the coupling was entered
+(`AUTO_WAIT_MS`; a query after that waits at most 0.85 s), then the part AUTO
+shows by then (a tie of AC and DC, e.g. a unipolar square, can take ~10 s to
+decide: its DC part is answered), never +9.91E37 / "Data stale". `FETCh?`
+answers +9.91E37 until the decision. A host timeout of 5 s covers
+`MEAS:VOLT:AUTO?`; libsigrok's DM40 profile (`READ?` 3 s after `CONF`, a hard
+1 s USBTMC read) gets its reply within 0.85 s.
 (emu/hy3131/autowaittest.py.)

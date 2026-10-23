@@ -1972,6 +1972,11 @@ impl Dmm {
         Some(rd)
     }
 
+    /// Time of the last function / unit change (`set`), ms (main.rs AUTO_WAIT_MS).
+    pub fn entry_ms(&self) -> u64 {
+        self.entry
+    }
+
     /// AUTO coupling (sub-mode 3) in force.
     pub fn cpl_auto(&self) -> bool {
         self.cpl_auto && !self.pw.on
@@ -2018,6 +2023,9 @@ impl Dmm {
         self.reset_values();
         self.am_enter();
         self.set(clk, if sub == 1 { ac } else { dc }, r, t);
+        // A coupling change starts the function afresh (`entry_ms`: the
+        // AUTO coupling's SCPI wait counts from it) even on the same mode.
+        self.entry = clk.now_ms();
     }
 
     /// Enter a stock mode directly (SCPI, BT command 06). Auto range.
