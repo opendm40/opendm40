@@ -40,7 +40,7 @@ protocol notes are for stock V2.6.
   bootloader and the vendor FS-loader (`0x080A0000`) stay. On the FS-loader's
   update screen (with fw-rs installed: `fw-rs/tools/dm40dbg.py update`, checked
   on the device; the power-key hold from off and the automatic entry after a
-  second watchdog reset within 60 s are not yet checked) copy one good update file onto its
+  second hang within 60 s of running are checked in the emulator only) copy one good update file onto its
   USB disk and press "update": the official `dm40_v_2_6.bin` returns to stock.
   Details:
   "Recovery" in [fw-rs/README.md](fw-rs/README.md),

@@ -108,10 +108,15 @@ disk on every boot until a good file is installed.
 To reach the update screen from fw-rs:
 
 - `python3 tools/dm40dbg.py update` while fw-rs answers on USB (device-checked);
-- from off, hold the power key ~4 s until the beep, then 0.5 s more
-  (not yet checked on the device);
-- automatically after a second watchdog reset within 60 s of the first (not
-  yet checked on the device).
+- from off, hold the power key ~5 s: the screen lights, ~4 s later the
+  backlight blinks and it beeps; keep holding at least 0.5 s after the beep.
+  Letting go during those 0.5 s cancels (normal start). Checked in the
+  emulator (`../emu/recoverytest.py`), not yet on the device;
+- automatically after a second hang (watchdog reset) before fw-rs has run
+  60 s since the first one: the first hang only reboots fw-rs, a second one
+  with less than 60 s of running in between opens the update screen. Each
+  watchdog reset comes ~20 s after the hang, so the two resets can be up to
+  ~80 s apart. Checked in the emulator, not yet on the device.
 
 Then copy a good image onto the loader's disk as `dm40_fwrs.bin` and press
 "update". `INFO/FIRMWARE.BIN` on the fw-rs USB drive is the running image as
