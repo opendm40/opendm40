@@ -52,6 +52,8 @@ ap.add_argument('--sessions', default='ad1:640,ad2:4800,ad2:9600,ad2:19200,ad2:3
 ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (fw-rs region C audit)')
 ap.add_argument('--no-bt', action='store_true')
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
+ap.add_argument('--osr32-ppm', type=float, default=None, help='the 76.8 kS/s setting\'s own rate offset, ppm (model Ad2Osr32Ppm; '
+                'default the device\'s -2935, fw-rs hy3131.rs AD2_OSR32_REAL_MHZ; 0 = the datasheet\'s 76 800)')
 ap.add_argument('--vol-read', action='store_true', help='after each session read LOGS/FASTnnn.CSV off the USB volume (MSC READ(10), 64 sectors each): == tools/dlog.py of the DLG; the virtual-time rate')
 ap.add_argument('--no-ad1-race', action='store_true', help='AD1F without the INTF read-clears race (model IntfRaceAd1)')
 ap.add_argument('--noise', type=float, default=None, help='HY3131 model noise scale (SetNoise; AD2: 30 codes rms x scale at OSR 32): a '
@@ -93,6 +95,8 @@ def run_emu(profile):
         f.write('0 monitor sysbus.spi2.spiflash Erase32kUs %d\n' % p[2])
         f.write('0 monitor sysbus.spi2.spiflash Erase64kUs %d\n' % p[3])
         f.write('0 monitor sysbus.hy3131 ClockPpm %g\n' % A.ppm)
+        if A.osr32_ppm is not None:
+            f.write('0 monitor sysbus.hy3131 Ad2Osr32Ppm %g\n' % A.osr32_ppm)
         if A.isr_stall_ns:
             f.write('0 monitor sysbus.cpucost IsrStallNs %d\n' % A.isr_stall_ns)
         if A.noise is not None:
@@ -274,12 +278,14 @@ def session(q, src, rate, profile):
         fast = 0 < tpp <= 800 and tpp_max <= 1500
         want = rate if fast and gate == 1 else 38400
         print('  writer trial: %s, ISR %d permille, ring high water %d' % ({0: 'none', 1: 'kept', 2: 'fell back'}.get(gate, gate), g_pm, g_fill), flush=True)
-        check(abs(nominal - want) < 2 and (gate in (1, 2) if fast else gate == 0),
+        # nominal = the chip's real rate (76 574.6 at the 76800 rung, fw-rs
+        # hy3131.rs AD2_OSR32_REAL_MHZ): which rung ran, to 0.4 %.
+        check(abs(nominal / want - 1) < 0.004 and (gate in (1, 2) if fast else gate == 0),
               '%s %s %d: probe tPP %d / %d us, trial %d -> rung %.0f S/s' % (profile, src, rate, tpp, tpp_max, gate, nominal))
         srate = q('LOG:SRATe?')
         check(srate.strip() == str(want), '%s %s %d: LOG:SRATe? %s (the rung run)' % (profile, src, rate, srate))
         if A.expect_rung:
-            check(abs(nominal - A.expect_rung) < 2, '%s %s %d: the expected rung %d' % (profile, src, rate, A.expect_rung))
+            check(abs(nominal / A.expect_rung - 1) < 0.004, '%s %s %d: the expected rung %d' % (profile, src, rate, A.expect_rung))
         check(cnt[2] == 0 and cnt[4] == 0, '%s %s %d: the disk kept up at the rung (ring overwritten %d, lost %d)'
               % (profile, src, rate, cnt[2], cnt[4]))
     TABLE.append((profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1), hw, int(isr[20]) / 10))

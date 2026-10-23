@@ -45,6 +45,8 @@ ap.add_argument('--app', required=True, help='fw-rs native ELF / image built wit
 ap.add_argument('--port', type=int, default=3378, help='USB/IP port (default 3378)')
 ap.add_argument('--secs', type=float, default=1.0, help='scale of the session lengths (wall clock)')
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
+ap.add_argument('--osr32-ppm', type=float, default=None, help='the 76.8 kS/s setting\'s own rate offset, ppm (model Ad2Osr32Ppm; '
+                'default the device\'s -2935, fw-rs hy3131.rs AD2_OSR32_REAL_MHZ; 0 = the datasheet\'s 76 800)')
 ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (fw-rs region C audit)')
 ap.add_argument('--race-us', type=float, default=None, help='INTF read-clears-flag race window, us (model default 0.7)')
 ap.add_argument('--miso-err', type=float, default=None, help='probability that a marginal mode-0 /8 bit is read at its old '
@@ -53,6 +55,10 @@ ap.add_argument('--sessions', default='4800:2:20,9600:1:15,1200:2:10,76800:1:10'
                 help='rate:draw:secs[:dma[:hyb]],... (secs scaled by --secs; dma = DBG:AD2:DMA 0 / 1 sent before the '
                      'session, -1 or none: nothing sent, the firmware default (DMA frames) or the last one sent; '
                      'hyb 1 = DBG:AD2:DIV 8,1: the 76.8 kS/s hybrid frames forced at this rung)')
+ap.add_argument('--mips', type=int, default=200, help='CPU PerformanceInMips (200 = one instruction per cycle; 110 = the '
+                'device\'s speed, peripherals/CpuCost.cs)')
+ap.add_argument('--isr-stall-ns', type=int, default=0, help='a stall per stream ISR entry, ns (peripherals/CpuCost.cs IsrStallNs; '
+                'with --mips 110, 700 gives the device\'s cpu_permille ~520 at 76800)')
 A = ap.parse_args()
 OUT = os.path.join(EMU, 'out')
 os.makedirs(OUT, exist_ok=True)
@@ -61,6 +67,10 @@ SCRIPT = os.path.join(OUT, TAG + '.script')
 LOG = os.path.join(OUT, TAG + '.log')
 with open(SCRIPT, 'w') as f:
     f.write('0 monitor sysbus.hy3131 ClockPpm %g\n' % A.ppm)
+    if A.osr32_ppm is not None:
+        f.write('0 monitor sysbus.hy3131 Ad2Osr32Ppm %g\n' % A.osr32_ppm)
+    if A.isr_stall_ns:
+        f.write('0 monitor sysbus.cpucost IsrStallNs %d\n' % A.isr_stall_ns)
     for k in range(1, 400):
         f.write('%d monitor sysbus.hy3131 IntfPhaseHist\n' % (k * 3))
     if A.race_us is not None:
@@ -86,7 +96,7 @@ def check(ok, what):
         FAIL.append(what)
 
 
-cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', '200', '--app', A.app,
+cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', str(A.mips), '--app', A.app,
        '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', TAG, '--log', LOG,
        '--dmm', 'vsrc:0,ac=0.5,f=50', '--script', SCRIPT]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
@@ -183,6 +193,8 @@ try:
         err = q('SYST:ERR?')
         print('  records %d, LOG:COUNt? %s, LOG:GAPs? %s, DBG:ISR? %s, *IDN? max %.3f s'
               % (recs, cnt, gaps, isr, max(idn or [0])))
+        print('  ISR entries per sample %.3f, cpu_permille %d, rate_mhz %d, ppm_x10 %+d'
+              % (isr[2] / max(isr[3], 1), isr[20], isr[12], isr[15]))
         check(recs == cnt[1] and recs > 1000, 'every captured record drained (%d)' % recs)
         check(seqgap == 0 and stampgap == 0, 'seqs consecutive, no stamp gap (%d / %d)' % (seqgap, stampgap))
         check(cnt[2:] == [0, 0, 0], 'overwritten / missed / lost = 0')
@@ -204,10 +216,18 @@ try:
         want_div = 16 if dma == 1 and rate <= 38400 and not hyb else 1008
         check(isr[22] == (1 if dma == 1 else 0) and isr[19] == want_div,
               'DMA frames %d (DBG:AD2:DMA %d), div %d (1008 = /8 + CKPH data phase)' % (isr[22], dma, isr[19]))
-        check(abs(int(pre[8]) / 1000 - min(rate, 76800 if dma == 1 else 38400)) < 2,
-              'rung %d S/s (LOG:PREamble? nominal_mhz %s)' % (int(pre[8]) // 1000, pre[8]))
-        check(abs(isr[15] + 10 * A.ppm) <= 250, 'locked period vs nominal %+.1f ppm (chip %+g ppm)' % (isr[15] / 10, A.ppm))
-        check(isr[12] > 0 and abs(isr[12] / 1000 / rate - 1 - A.ppm * 1e-6) < 2.5e-5, 'locked rate %.3f S/s' % (isr[12] / 1000))
+        # The rung's nominal (LOG:PREamble? nominal_mhz) is the chip's real
+        # rate: 76 574.6 at 76800 (fw-rs hy3131.rs AD2_OSR32_REAL_MHZ), the
+        # datasheet's elsewhere. The model's 76800 runs --osr32-ppm off it
+        # (default the device's -2935 = the nominal).
+        rung = min(rate, 76800 if dma == 1 else 38400)
+        nom = 76574.6 if rung == 76800 else rung
+        off = A.ppm + (((1 + (A.osr32_ppm if A.osr32_ppm is not None else -2935.0) * 1e-6) / (76574.6 / 76800) - 1) * 1e6
+                       if rung == 76800 else 0.0)
+        check(abs(int(pre[8]) / 1000 - nom) < 2,
+              'rung %d S/s (LOG:PREamble? nominal_mhz %s)' % (rung, pre[8]))
+        check(abs(isr[15] + 10 * off) <= 250, 'locked period vs nominal %+.1f ppm (chip %+.1f ppm)' % (isr[15] / 10, off))
+        check(isr[12] > 0 and abs(isr[12] / 1000 / nom - 1 - off * 1e-6) < 2.5e-5, 'locked rate %.3f S/s' % (isr[12] / 1000))
         check(max(idn or [9]) < 0.5, '*IDN? answered while streaming (max %.3f s)' % max(idn or [9]))
         check(err.startswith('0,'), 'SYST:ERR? empty (%s)' % err)
         time.sleep(1.5)
@@ -252,6 +272,9 @@ try:
     torn = [int(x) for x in re.findall(r' torn (\d+)', open(LOG).read())]
 except OSError:
     torn = []
+ds = re.findall(r' frames (\d+) dup (\d+) skip (\d+)', open(LOG).read()) if torn else []
+if ds:
+    print('model: R03 frames %s, a result read twice %s, a result not read %s' % ds[-1])
 check(bool(torn) and max(torn) == 0, 'no data frame across an AD2 edge (model TornAd2 %s)' % (max(torn) if torn else 'n/a'))
 
 print('log:', os.path.relpath(LOG, ROOT))

@@ -1331,21 +1331,48 @@ Firmware:
 - [ ] 4800 disk session on device 4c4b489: max_lat 4.66 us at calbackup::FwFile::fill (region C: the info
       volume's FIRMWARE.BIN read by a host during the session). No sample lost at
       4800; at 76800 a host reading INFO/FIRMWARE.BIN would likely stall the ISR as range_cmd did.
-- [ ] 76800 stream: the device's 1.48 ISR entries per sample (emulator 1.13) and its rate_mhz 76 723.6 /
-      ppm_x10 +9951 (below) are one thing: +995 ppm is the Pll's frequency clamp (ad2pll.rs MAX_PPM 1000).
-      The record stamps say the chip converts at 76 574.5 S/s, -2940 ppm from the rung's nominal
-      76 799.016, outside the Pll's range: the frequency word sits on its clamp, the phase is held by the
-      probes' kicks alone (more probes: B / C entries) and the ISR costs ~9 % more (544 vs ~460 permille).
-      The emulator's chip runs at the nominal, so it shows the railed state only when pushed (fastlogtest
-      --noise 1000, or --isr-stall-ns 700 with a 76800 session restarted right after another one: rate_mhz
-      76 723.6, ppm_x10 +9952, 1.39 entries per sample, ISR 61 %). Fix candidates: the 76800 rung's real
-      period (why 0.29 % slow: the hybrid timing? the rung's OSR / clock formula?) or a wider MAX_PPM;
-      then the device's ISR share should drop toward ~460 permille.
-      Device 4c4b489: unchanged: 1.478 entries per sample, ppm_x10 +9937..+9984, stamps 76 574.4-.9 S/s,
-      cpu_permille 546-548 in every 76800 session.
-- [ ] 76800 rate: rate_mhz 76 723.6 (ppm_x10 ~+9950) while 4800 / 38400 lock at -1.6 ppm; the record
-      stamps say 76 574.5 S/s (LOG:RATE? 76 576), 1.9 permille below rate_mhz (at 38400 they agree).
-      Which is right, and is the 76800 rung's nominal (76 799.016) the chip's real rate?
+- [ ] 76800 stream / rate (fix landed, device retest open). Device 7409b92 / 4c4b489: rate_mhz 76 723.4-.8 =
+      the Pll's +1000 ppm clamp in every 76800 session, 1.476 / 1.478 ISR entries per sample, cpu_permille
+      544-548; the record stamps 76 574.5 / 76 574.4-.9 S/s, LOG:PRE? measured_hz 76 574. Investigated
+      2026-10-23 (docs/dmm-input-scope-feasibility.md 11.12 "The 76.8 kS/s rung's rate and the lopsided
+      probe window"):
+      - The rung's real rate is 76 574.6 S/s, 0.29 % below the datasheet's FAD2CLK / OSR2 = 76 800: the
+        stamps agree to +-3 ppm over two builds, fresh boots, disk / host / Wave view sessions, CHOP on /
+        off; a 40 Hz calibrator square has 956..959 samples per half period (960 nominal); the same chip
+        and crystal lock at -1.6 ppm at 4800 / 38400, also with the same hybrid frames (DBG:AD2:DIV 8,1,
+        probes as often), so neither the crystal nor the read pattern. 64.188 SYSCLK per result (64 + 3/16
+        would be 76 574.85). Deterministic as far as one unit shows -> hy3131.rs AD2_OSR32_REAL_MHZ: the
+        stream's Pll nominal, LOG:PRE? nominal_mhz / the CSV nominal_sps / the DLG header and the Wave view's
+        measurements, FFT and CSV at 1 ms/div (scope.rs wave_real_fs; they read 0.29 % high) use it; the
+        rung keeps its name 76800 (LOG:SRATe, the bands). The emulator's chip does the same (HY3131
+        Ad2Osr32Ppm, default -2935; 0 = the datasheet).
+      - Why it railed and what that cost: the hybrid geometry's probe window is lopsided: B may be early by
+        up to ~590 counts (11.8 us) but late by only ~61 (1.2 us, P - (C - B)); a B later than that has its
+        read-back C after the NEXT edge and reads "edge after B", so the kicks walk the phase forward a whole
+        period to that next edge (one conversion slips, frames tear on the way), and the old loop stepped
+        the word on every result of the walk, all "lengthen". With the chip 2935 ppm off the clamp's 1000,
+        the phase was held by kicks with such walks over and over: in the 7409b92 square dumps a transition
+        sample's value against its stamp's phase scatters over the whole edge ramp (~+-6 us, 3 us rms; 0.5
+        us at 38400): conversions doubled / skipped / torn unseen (bad / lost / slips 0: nothing counts a
+        slip, the sign-copy check cannot see a torn frame). The emulator at the device's rate and the old
+        build: railed at 76 723.4, 1.69 entries per sample, 98 doubled / 98 skipped conversions in 10 s.
+      - Fix, both (the nominal alone would leave a unit at the datasheet's rate +2935 ppm out, and the
+        walks' integration made any big offset rail): the nominal above; MAX_PPM 1000 -> 5000; and the loop
+        (ad2pll.rs, hybrid geometry only): the word does not follow a run of one sign longer than 8 (a
+        walk); the probes stay dense, with a 4x frequency step, for 256 results after the start and after a
+        run longer than 16 (a word off the chip's rate is pulled in before a sparse 16-period interval can
+        drift the phase out of the window). The 76.8 kS/s rung carries its own lock to its next session
+        (logger.rs REL_HYB); the shared REL takes a lock only within 1000 ppm. Host model: chips -3000 ..
+        +3000 ppm from starts at -1000 / 0 / +1000 ppm lock on the chip's rate, no bad sample after
+        acquisition (the old loop: railed from a start ~600 ppm long or a chip that fast).
+      - Emulator (--mips 110 --isr-stall-ns 700): see the feasibility doc's table; start-of-session walks
+        (the edge search's error, max run ~45, a slip or two) remain as in the old build but no longer
+        drag the word.
+      Device retest: the hand-over list.
+- [ ] emu/hy3131/dcvtest.py fails on 4c4b489 and later (found 2026-10-23, not caused by the 76.8 kS/s Pll
+      change: the same with the old model): LOG:SCALe? per-code 4.767e-05 / 4.812e-04 against the model's
+      4.721e-05 / 4.721e-04 (+0.97 / +1.9 %, the check allows 0.3 %). modetest's stock cap-big (100 uF reads
+      104 uF) fails the same way with either model.
 - [ ] 76800 CHOP ON: one isolated mid-level glitch per ~2 M samples (seq 752877: -65616 between -98272s;
       seq 133301: 82960 between ~98300s), bad 0; none in 2.1 M with CHOP OFF or at 4800 / 38400.
 - [ ] dm40scpi.py `log --source ad2 -d N`: drain() returns only on a block < 500 records, so above the

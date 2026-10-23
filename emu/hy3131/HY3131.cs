@@ -280,7 +280,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// AD1 conversion period in seconds (datasheet 13.1 + the chopper halving).
         public double Ad1Period => Osr1 * 30.0 / SysClk * (Ad1Chop ? 2 : 1);
         // ENCHOPAD2 does not slow AD2 down on the device (fw-rs device check of 9dd1222), whatever the datasheet says
-        public double Ad2Period => Osr2 * ((regs[0x26] & 0x08) != 0 ? 4.0 : 2.0) / SysClk;
+        public double Ad2Period => Osr2 * ((regs[0x26] & 0x08) != 0 ? 4.0 : 2.0) / SysClk
+            / ((regs[0x26] & 0x0F) == 0 ? 1.0 + Ad2Osr32Ppm * 1e-6 : 1.0);
+        /// The /2, OSR 32 setting's rate offset from FAD2CLK / OSR2, ppm (the
+        /// stock AC rows' 0x80 and fw-rs' 76.8 kS/s rung): the device converts
+        /// at 76 574.6 S/s there (7409b92 / 4c4b489 record stamps, fw-rs
+        /// hy3131.rs AD2_OSR32_REAL_MHZ), the other settings as the datasheet.
+        /// 0 = the datasheet (monitor: hy3131 Ad2Osr32Ppm 0).
+        public double Ad2Osr32Ppm { get; set; } = -2935;
         public double LpfPeriod => Ad2Period * Osr4 * LpfRateDivisor;
 
         /// Comparator thresholds (V relative to AGND) from R21.
@@ -2109,6 +2116,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// HY3131 crystal offset vs the MCU, ppm (monitor: hy3131 ClockPpm -63).
         public double ClockPpm { get; set; }
 
+        /// The 76.8 kS/s setting's own rate offset, ppm (Hy3131Core.Ad2Osr32Ppm,
+        /// default the device's -2935; monitor: hy3131 Ad2Osr32Ppm 0 = the
+        /// datasheet's 76 800).
+        public double Ad2Osr32Ppm { get => Core.Ad2Osr32Ppm; set => Core.Ad2Osr32Ppm = value; }
+
         /// INTF read-clears-flag race window, us (Hy3131Core.IntfRaceWindow). Default
         /// 0.7 us: what the device's loss bursts imply (5f14d38 check: ~11.5 ms per
         /// burst at a 63 ppm tick / chip walk = 0.72 us). 0 = an ideal flag.
@@ -2130,7 +2142,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// period), then the swallowed count; cleared by the read.
         public string IntfPhaseHist()
         {
-            var r = string.Join(",", Core.IntfPhase) + " swallowed " + Core.Swallowed + " torn " + TornAd2 + " misoerr " + MisoErrors;
+            var r = string.Join(",", Core.IntfPhase) + " swallowed " + Core.Swallowed + " torn " + TornAd2 + " misoerr " + MisoErrors
+                + " frames " + Ad2Frames + " dup " + Ad2Dup + " skip " + Ad2Skip;
             Array.Clear(Core.IntfPhase, 0, Core.IntfPhase.Length);
             this.Log(LogLevel.Info, "INTF phase: {0}", r);
             return r;
@@ -2320,6 +2333,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                         // fw-rs places its reads between edges anyway.
                         Core.Update(Now);
                         var seq = Core.Ad2Conversions;
+                        if(byteIdx == 0)
+                        {
+                            // Which result each R03 frame starts on: the
+                            // same as the last frame's (Ad2Dup) or one or
+                            // more skipped (Ad2Skip; gaps > 64 = a restart).
+                            Ad2Frames++;
+                            var d = seq - ad2LastFrameSeq;
+                            if(ad2LastFrameSeq >= 0 && d == 0) Ad2Dup++;
+                            else if(ad2LastFrameSeq >= 0 && d > 1 && d <= 64) Ad2Skip += d - 1;
+                            ad2LastFrameSeq = seq;
+                        }
                         if(ad2FrameSeq >= 0 && seq != ad2FrameSeq && !ad2FrameTorn)
                         {
                             ad2FrameTorn = true;
@@ -2456,7 +2480,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         private readonly Random spiRng = new Random(4242);
         private bool doPrev, ad2FrameTorn;
-        private long ad2FrameSeq = -1;
+        private long ad2FrameSeq = -1, ad2LastFrameSeq = -1;
+        /// R03 read frames, those that read the previous frame's result again,
+        /// and results no frame read (gaps up to 64; IntfPhaseHist).
+        public long Ad2Frames { get; private set; }
+        public long Ad2Dup { get; private set; }
+        public long Ad2Skip { get; private set; }
 
         /// The meter's calibration record in flash (0x080C0000: crc, ~crc, version 1, data;
         /// DMM calibration at +0x168) is loaded once, on the first SPI transfer.

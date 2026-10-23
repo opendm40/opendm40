@@ -50,6 +50,16 @@ pub const LAT0: u32 = 50;
 /// Probes after which a phase step of kp_max / 4 counts as locked (`result`).
 const LOCK_PROBES: u32 = 64;
 
+/// Hybrid: probe results after the start (or after a run of more than
+/// 2 x RUN_GEAR_UP) before the probing goes sparse (every NP-th period,
+/// `Pll::np`): ~500 periods of dense probes, 7 ms at 76.8 kS/s, so a word
+/// that starts off the chip's rate is pulled in before a sparse probe
+/// interval's drift can carry the phase out of the window (`result`).
+const CALM: u32 = 256;
+
+/// Hybrid: the frequency step while the probes are dense (CALM), x ki.
+const KI_DENSE: u32 = 4;
+
 /// Consecutive probe results of one sign after which the phase step doubles
 /// again (a large frequency error, or a phase jump: re-acquisition).
 const RUN_GEAR_UP: u32 = 8;
@@ -62,8 +72,25 @@ const RUN_GEAR_UP: u32 = 8;
 const KI_SHIFT: u32 = 18;
 
 /// The frequency word may move at most this far from the nominal (ppm): a
-/// runaway loop cannot detune the timer beyond any real crystal pair.
-const MAX_PPM: u64 = 1000;
+/// runaway loop cannot detune the timer by more than 0.5 %. Was 1000 (any
+/// real crystal pair) until the device's 76.8 kS/s rung turned out 2940 ppm
+/// slower than the datasheet (hy3131.rs `AD2_OSR32_REAL_MHZ`, device
+/// 7409b92): the word sat on the clamp and the probes' phase kicks alone
+/// held the grid (1.48 ISR entries per sample, ~9 % more ISR CPU). The
+/// nominal is now the measured rate; 5000 still locks a chip that runs at
+/// the datasheet's 76 800 (+2940 ppm from it) or anything in between, with
+/// 2000 ppm to spare. Nothing else depends on it: the beta / late geometry
+/// is the nominal's (a 0.5 % period change moves the frame's margins by
+/// 0.5 % of a period), and the clamp only bounds the word, not the kicks.
+const MAX_PPM: u64 = 5000;
+
+/// A lock carried into the next session at another rung (`carry`) is at
+/// most this far (ppm) from its nominal: the crystal pair's offset, which
+/// every rung shares (+-100 ppm crystals). The 76.8 kS/s hybrid rung keeps
+/// its own carried word (logger.rs `REL_HYB`): its offset may be the rung's
+/// own (the device's 7409b92 numbers, see MAX_PPM).
+const CARRY_PPM: i64 = 1000;
+const CARRY_Q24: i32 = ((CARRY_PPM << 24) / 1_000_000) as i32;
 
 #[derive(Clone, Copy)]
 pub struct Pll {
@@ -114,6 +141,12 @@ pub struct Pll {
     probing: bool,
     last_s: i8,
     run: u32,
+    /// Hybrid: consecutive results of one sign (not reset by a gear-up;
+    /// above RUN_GEAR_UP the frequency word holds) and the results since the
+    /// start or the last run of more than 2 x RUN_GEAR_UP (below CALM the
+    /// probes stay dense), `result`.
+    streak: u32,
+    calm: u32,
     // statistics (DBG:ISR?)
     /// A entries = conversion periods since the start (LOG:COUNt? lost).
     pub periods: u32,
@@ -152,6 +185,8 @@ impl Pll {
             probing: false,
             last_s: 0,
             run: 0,
+            streak: 0,
+            calm: 0,
             periods: 0,
             probes: 0,
             late_edges: 0,
@@ -199,6 +234,14 @@ impl Pll {
         (((self.f_avg as i64 - ((self.f_nom as i64) << 8)) << 16) / self.f_nom as i64) as i32
     }
 
+    /// The lock to carry into the next session (`new`'s `rel_q24`), if
+    /// locked: any for the same rung (`same_rung`), else only within
+    /// CARRY_PPM of the nominal (a crystal-sized offset).
+    pub fn carry(&self, same_rung: bool) -> Option<i32> {
+        let r = self.rel_q24();
+        (self.locked && (same_rung || r.abs() <= CARRY_Q24)).then_some(r)
+    }
+
     /// The averaged period, Q16.
     pub fn f_mean(&self) -> u32 {
         (self.f_avg >> 8) as u32
@@ -232,7 +275,8 @@ impl Pll {
             return (self.c_off, false);
         }
         if self.left == 0 && len > self.beta + 4 {
-            self.left = if self.kp > self.kp_min { 0 } else { self.np - 1 };
+            let calm = self.c_late == u32::MAX || self.calm >= CALM;
+            self.left = if self.kp > self.kp_min || !calm { 0 } else { self.np - 1 };
             self.rest = len - self.beta;
             self.next_b = true;
             (self.beta, probe)
@@ -269,11 +313,20 @@ impl Pll {
         if edge_after_b {
             self.late_edges = self.late_edges.wrapping_add(1);
         }
+        self.calm = self.calm.saturating_add(1);
         if s == self.last_s {
             self.run += 1;
-            if self.run >= RUN_GEAR_UP && self.kp < self.kp_max {
-                self.kp = (self.kp * 2).min(self.kp_max);
-                self.run = 0;
+            self.streak += 1;
+            if self.streak > 2 * RUN_GEAR_UP {
+                // A walk (see the frequency step below) or a word off the
+                // chip's rate: dense probes again for CALM results.
+                self.calm = 0;
+            }
+            if self.run >= RUN_GEAR_UP {
+                if self.kp < self.kp_max {
+                    self.kp = (self.kp * 2).min(self.kp_max);
+                    self.run = 0;
+                }
             }
         } else {
             if self.last_s != 0 {
@@ -291,13 +344,37 @@ impl Pll {
                 }
             }
             self.run = 1;
+            self.streak = 1;
         }
         self.max_run = self.max_run.max(self.run);
         self.last_s = s;
         // Edge after B: B (and A) are early: a longer period.
         self.kick += s as i32 * self.kp as i32;
-        let f = if edge_after_b { self.f + self.ki } else { self.f - self.ki };
-        self.f = self.clamp(f);
+        // Hybrid: the frequency word does not follow a long run of one sign
+        // (more than RUN_GEAR_UP). The hybrid window is lopsided (`hybrid`):
+        // a B more than P - (C - B) late (~1.2 us at 76.8 kS/s) has its
+        // read-back C after the NEXT edge and reads "edge after B": the
+        // phase then walks forward to that next edge (one conversion slips)
+        // with the step geared up and every result "lengthen". Integrating
+        // that walk lengthened the word, which put the next B later still:
+        // the loop ran onto the MAX_PPM clamp and stayed there, the phase
+        // held by kicks only and slipping over and over (the emulator
+        // reproduces the device's 7409b92 state so with a chip at the
+        // nominal rate: rate_mhz 76 723.6, ~86 % of the probes "after B",
+        // ~0.3 probes per sample). A real frequency offset still integrates:
+        // the kicks hold the phase with runs of a few results broken by the
+        // other sign, biased to the offset's side; and the probes stay dense
+        // (every period the C allows, `on_a`) for CALM results after the
+        // start or a long run, with KI_DENSE x the step, so the drift of a
+        // word still off cannot carry the phase out of the window between
+        // two sparse probes.
+        let hyb = self.c_late != u32::MAX;
+        if !hyb || self.streak <= RUN_GEAR_UP {
+            // Dense (acquisition): KI_DENSE x the step, both signs alike.
+            let ki = if hyb && self.calm < CALM { self.ki * KI_DENSE } else { self.ki };
+            let f = if edge_after_b { self.f + ki } else { self.f - ki };
+            self.f = self.clamp(f);
+        }
         let fa = (self.f as u64) << 8;
         self.f_avg = if fa >= self.f_avg { self.f_avg + ((fa - self.f_avg) >> 6) } else { self.f_avg - ((self.f_avg - fa) >> 6) };
     }
@@ -513,7 +590,15 @@ mod tests {
     /// last bit, or not exactly the next conversion; c_wrong = a probe read
     /// back after the edge that follows the probed one.
     fn run_hyb(rate_mhz: u32, ppm: f64, periods: u32, pa: f64, fa: f64, pb: f64, lat: &dyn Fn(u64) -> f64) -> (u32, u32, u32, u32, Pll) {
-        let mut pll = Pll::new(rate_mhz, 0, 370);
+        let (r, _) = run_hyb_rel(rate_mhz, ppm, periods, pa, fa, pb, lat, 0);
+        r
+    }
+
+    /// `run_hyb` from a preset `rel` (the carried word, `Pll::new`); also
+    /// returns the bad samples after the first quarter (the steady state).
+    #[allow(clippy::too_many_arguments)]
+    fn run_hyb_rel(rate_mhz: u32, ppm: f64, periods: u32, pa: f64, fa: f64, pb: f64, lat: &dyn Fn(u64) -> f64, rel: i32) -> ((u32, u32, u32, u32, Pll), u32) {
+        let mut pll = Pll::new(rate_mhz, rel, 370);
         pll.late_read = true;
         pll.c_off = 370;
         pll.np = 16;
@@ -527,6 +612,7 @@ mod tests {
         let edge_index = |t: f64| ((t - phase0) / p_chip).floor() as i64;
         let (mut t, mut bus_free) = (0.0f64, 0.0f64);
         let (mut samples, mut bad, mut skipped, mut c_wrong) = (0u32, 0u32, 0u32, 0u32);
+        let mut bad_late = 0u32;
         let mut last_k: Option<i64> = None;
         let mut b_latch = f64::NAN;
         let mut n = 0u64;
@@ -564,10 +650,12 @@ mod tests {
                         let k = edge_index(start);
                         if edge_index(end) != k || edge(k + 1) - end < 0.0 {
                             bad += 1;
+                            bad_late += (samples > periods / 4) as u32;
                         }
                         if let Some(k0) = last_k {
                             if k != k0 + 1 {
                                 bad += 1;
+                                bad_late += (samples > periods / 4) as u32;
                             }
                         }
                         last_k = Some(k);
@@ -577,7 +665,7 @@ mod tests {
                 t += iv as f64;
             }
         }
-        (samples, bad, skipped, c_wrong, pll)
+        ((samples, bad, skipped, c_wrong, pll), bad_late)
     }
 
     #[test]
@@ -609,8 +697,55 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_76k8_far_from_the_nominal() {
+        // The device's 7409b92 state: rate_mhz on the 1000 ppm clamp, 86 %
+        // of the probes "edge after B", ~0.25 probes per sample. Before the
+        // run hold / dense probing in `result` this model got there from a
+        // chip at the nominal with the word started 1000 ppm long (the
+        // carried lock of a railed session), and from any chip >= ~600 ppm
+        // fast: the B-late side of the hybrid window is ~1.2 us (`hybrid`),
+        // beyond it the read-back C reads the next edge and the loop ran the
+        // wrong way. Now every chip within -3000 .. +3000 ppm of the nominal
+        // from a start at -1000 / 0 / +1000 ppm (period) up to a start 3000
+        // ppm slower than the chip: the word on the chip's rate, no bad
+        // sample after the first quarter (some while it acquires a large
+        // error), probes ~1 in 16 periods.
+        let jit = |n: u64| ((n.wrapping_mul(2654435761) >> 7) % 40) as f64 + 10.0;
+        for &ppm in &[-3000.0, -2000.0, -900.0, -300.0, 0.0, 300.0, 900.0, 2000.0, 3000.0] {
+            for &pre in &[-1000.0f64, 0.0, 1000.0] {
+                if ppm + pre > 3000.0 {
+                    continue;
+                }
+                let rel = (pre * 1e-6 * 16_777_216.0) as i32;
+                let ((s, bad, skipped, c_wrong, pll), late) = run_hyb_rel(76_800_000, ppm, 200_000, 50.0, 300.0, 76.0, &jit, rel);
+                let what = format!("chip {ppm:+} ppm, start {pre:+} ppm (period): bad {bad} ({late} late), of {s}");
+                assert_eq!((late, skipped, c_wrong), (0, 0, 0), "{what}");
+                assert!(bad < s / 40, "{what}");
+                assert!(pll.locked, "{what}");
+                let got = (pll.rate_mhz() as f64 / 76_800_000.0 - 1.0) * 1e6;
+                assert!((got - ppm).abs() < 10.0, "{what}: rate {got:.1} ppm");
+                assert!(pll.probes < s / 10, "{what}: {} probes", pll.probes);
+            }
+        }
+    }
+
+    #[test]
+    fn only_a_crystal_sized_lock_is_carried_to_another_rung() {
+        let mut p = Pll::new(38_400_000, 0, 370);
+        p.locked = true;
+        for &(ppm, other) in &[(-1.6, true), (900.0, true), (-1100.0, false), (2943.0, false)] {
+            let f = (p.f_nom as f64 * (1.0 + ppm * 1e-6)) as u64;
+            p.f_avg = f << 8;
+            assert_eq!(p.carry(false).is_some(), other, "{ppm} ppm");
+            assert!(p.carry(true).is_some(), "{ppm} ppm, same rung");
+        }
+        p.locked = false;
+        assert_eq!(p.carry(true), None);
+    }
+
+    #[test]
     fn the_model_sees_a_bad_lock() {
-        // 3 % off (beyond the 1000 ppm clamp and what P/64 phase steps per
+        // 3 % off (beyond the 5000 ppm clamp and what P/64 phase steps per
         // period can follow): the grid walks through the reads, which the
         // check must see.
         let (_, bad, _) = run(9_600_000, 30_000.0, 20_000, 700.0, &|_| 20.0, 35.0);

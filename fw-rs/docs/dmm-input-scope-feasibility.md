@@ -1118,7 +1118,8 @@ model (11.5) section 9's image loses 0.6 %.
     results.
   - It also moves the period word `f` by `ki` = f / 2^18 (3.8 ppm). `f` is
     in Q16 timer counts and the fraction is carried, so the mean period is
-    exact to 2^-16 counts. `f` is clamped to +-1000 ppm. The reported rate
+    exact to 2^-16 counts. `f` is clamped to +-5000 ppm (+-1000 until
+    2026-10-23, 11.12). The reported rate
     is `f` averaged over ~64 probes.
 - **beta = (P + frame + 1 us) / 2**: the data frame sits in the middle of the
   edge-free time, with a margin of (P - frame - 1 us) / 2 on each side:
@@ -1587,6 +1588,66 @@ Host model `ad2pll::tests::hybrid_frames_at_76k8`: 200 000 periods at -100
 skipped or doubled, no probe read back after the following edge; 2 us
 latency spikes every 500 entries are absorbed (the A still reads); a 9.6 us
 frame is caught by the model.
+
+**The 76.8 kS/s rung's rate and the lopsided probe window (2026-10-23).**
+Every 76800 session on the device (7409b92, 4c4b489) ran with `f` on its
++1000 ppm clamp (rate_mhz 76 723.4-.8), 1.48 ISR entries per sample, ~0.24
+probes per sample, 86 % of them "edge after B", max run 57; the record
+stamps give 76 574.4-.9 S/s in every session (fresh boots, disk / host /
+Wave view, CHOP on / off), LOG:PRE? measured_hz 76 574, and a 40 Hz
+calibrator square has 956..959 samples per half period. The same chip and
+crystal lock at -1.6 ppm at 4800 / 38400, also with these hybrid frames
+(DBG:AD2:DIV 8,1), so this rung converts 0.29 % slower than FAD2CLK / OSR2
+(64.188 SYSCLK per result): hy3131.rs `AD2_OSR32_REAL_MHZ` = 76 574.6 is now
+the stream's nominal (the Pll, LOG:PRE? nominal_mhz, CSV / DLG headers, the
+Wave view's measurements at 1 ms/div), the emulator's chip the same
+(`Ad2Osr32Ppm` -2935).
+
+Why it railed, and what that cost: this geometry's window is lopsided. B
+may be early by up to P - beta + c_off (~590 counts) and still be read
+right, but late by only P minus that (~61 counts, 1.2 us). A B later than
+that has its read-back C after the NEXT edge and reads "edge after B": the
+kicks then walk the phase forward a whole period to that next edge (a slip;
+frames tear on the way). The old loop also stepped `f` by ki on every result
+of the walk, all "lengthen". With the chip 1935 ppm beyond the clamp the
+phase was held by kicks and such walks: in the 7409b92 square dumps a
+transition sample's value against its stamp's phase scatters over the whole
+edge ramp (~+-6 us; 0.5 us at 38400), i.e. conversions doubled / skipped /
+torn without any counter seeing it. In the host model the old loop also
+railed from a word started ~600 ppm long or a chip that much fast.
+
+Since then (`Pll::result` / `on_a`, hybrid geometry only): `f` holds during
+a run of one sign longer than RUN_GEAR_UP (a walk), the probes stay dense
+(every period C allows) for CALM = 256 results after the start and after a
+run longer than 2 x RUN_GEAR_UP, with KI_DENSE = 4 x the frequency step, so
+a word still off the chip's rate is pulled in before a sparse 16-period
+interval can drift the phase out of the window; MAX_PPM is 5000 (a unit at
+the datasheet's 76 800 is +2935 ppm from the new nominal). The 76.8 kS/s
+rung carries its own lock to its next session (logger.rs `REL_HYB`); the
+shared `REL` takes a lock only within 1000 ppm. Host model
+(`hybrid_76k8_far_from_the_nominal`): chips -3000 .. +3000 ppm, starts -1000
+/ 0 / +1000 ppm: the word on the chip's rate, no bad sample after
+acquisition, ~1 probe in 16 periods. A walk at a session start (the edge
+search's error, ~3 us) still shows in about every second emulator session,
+as with the old build (max run ~45, TornAd2 ~28, a slip or two), but no
+longer drags `f`.
+
+Emulator, --mips 110 --isr-stall-ns 700 (the device's speed), AC V 0.5 V
+50 Hz; ISR entries per sample = DBG:ISR? ticks / captured:
+
+| build | chip at 76800 (model) | session | rate_mhz | entries / sample | ISR | doubled / skipped (model) |
+|---|---|---|---|---|---|---|
+| old (4c4b489) | 76 800 (datasheet) | ad2streamtest 3 x 10 s | 76 800.0 | 1.126-1.128 | 52 % | 4-6 / 5-8 (start walks) |
+| old | 76 574.2 (the device's) | ad2streamtest 10 s | 76 723.4 (clamp) | 1.69 | 69 % | 98 / 98, 11 955 overruns |
+| old | 76 574.2 | fastlogtest 76800 to disk, 2 s | 76 723.4 (clamp) | 1.63 | 67 % | lost 1133 |
+| this | 76 574.6 (= nominal) | ad2streamtest 3 x 10 s | 76 574.6 | 1.133-1.135 | 52 % | 2 / 3 (start walks) |
+| this | 76 800 (datasheet, +2935 ppm) | ad2streamtest 2 x 10 s | 76 800.0 | 1.135-1.151 | 52-53 % | 4 / 6 (start walks) |
+| this | 76 574.6 | fastlogtest 38400 -> 76800 -> 76800 | 76 574.6 | 1.127-1.128 | 52 % | lost 0, trial kept |
+| this | 76 800 | fastlogtest 76800 x 2 | 76 800.0 | 1.128-1.131 | 52 % | lost 0, trial kept |
+
+(ad2streamtest's own drain / stamp-gap checks fail at --mips 110: the
+main loop at the device's speed drains ~35 k rows/s over USB, as the
+device does; its default 200 MIPS run passes.)
 
 **Emulator honesty** (this change, emu/peripherals/GD32_SPI.cs, HY3131.cs):
 before, SPI bytes were instantaneous, the chip latched at CS low, and the
