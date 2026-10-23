@@ -369,7 +369,8 @@ Check 5 (see "Use" below): `emu/out/stock-scope.png` and `emu/out/fwrs-scope.png
 | UART4 + BT module | Renode `STM32_UART` + `BtModule.cs` | AT+SBN/CBN/SLED0/RESET answered, PC14 "connected" while a TCP host is attached (`--bt-port`), `SendHex`/`SendText` from scripts |
 | ADC0 | `SimpleADC.cs` | SW-started single conversions, GD32 calibration bits self-clear; channel 15 = 4.0 V battery by default (`SetVolts ch v`) |
 | DAC | RAM | DHR12R2 is read by the scope feeder for the trigger level; no analog output |
-| IWDG, RTC, CRC, RNG | Renode models | the stock feeds the IWDG from its 1 kHz timer ISR |
+| FWDGT (free watchdog) + RCU_RSTSCK reset flags | `FWDGT.cs` (sysbus.fwdgt) | own model (Renode 1.17.0's `STM32_IndependentWatchdog` never reset the machine here, and its RCC returned a constant RSTSCK): 0xCCCC / 0xAAAA / 0x5555, PSC / RLD at 32 kHz (stock PSC 6, RLD 2500 = 20 s); a timeout resets the machine like SYSRESETREQ (flash, backup SRAM, RAM keep their content). RSTSCK flags: BOR\|PIN\|POR after power-on, + FWDGT\|PIN after a timeout, + SW\|PIN after a SYSRESETREQ, cleared by RSTFC (run.py routes RSTSCK and AIRCR to the model with bus hooks). `Flags`, `Timeouts`, `PowerOn` from the monitor. A firmware that stops feeding now really reboots (the ROM already starts it; the stock feeds it from its 1 kHz timer ISR). Tested by `emu/recoverytest.py` |
+| RTC, CRC, RNG | Renode models | |
 | USB OTG FS (DWC2) | `DWC2_OTG*.cs` | Renode 1.17.0's `STM_USB` (the Synopsys OTG device model, renamed `DesignWare_USB_OTG` upstream) with the fixes the GD32 drivers need: DTXFSTS = programmed FIFO depth minus queued words (the stock driver only writes while free > needed), EP0's 2-bit MPSIZ code decoded (0 = 64 bytes), OUT data held while an endpoint NAKs. Exported to Renode's USB/IP server (see "USB over USB/IP"); IRQ 67 |
 | buzzer (TIM14 PWM), backlight (TIM13 PWM), relays (PA9/PA10, PE0/PE1, PC13...), rails (PE2/PC4) | GPIO/timer registers only | nothing observes them yet |
 
@@ -460,6 +461,14 @@ Other useful checks: `--vin 1.234` shows 1.2488 V on the stock (the dump's
 calibration gain applied) and the raw-scaled value on fw-rs; the loader
 install path (`chain --pa2 -1 --zero-marker --disk-add <dm40 update>`) exercises
 the flash controller, the SPI disk and the reset path end to end.
+
+Recovery triggers (fw-rs shim, `fw-rs/src/boot.rs`): `emu/recoverytest.py
+--app <fw-rs ELF>` runs the chain ROM -> FS-loader -> fw-rs and checks the
+power-key hold from off (short press, abort in the confirm window, the full
+hold -> FS-loader update screen), the watchdog crash counter (one hang = a
+reboot, a second hang within 60 s of running main loop = the update screen,
+a second one after 60 s = a reboot) and, with `--cases release`, DBG:RELEASE
+over USB. About 6 min wall for the default 8 cases at `--jobs 8`.
 
 ## Files the emulator reads (never writes)
 
