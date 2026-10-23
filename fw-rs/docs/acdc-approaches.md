@@ -1091,7 +1091,16 @@ DC-coupled row the device's per-range per_code factor (`Ad2DcGainR`, 6 V 1.0096,
 and dcvtest still expected nominal / ad2dcg. Now it expects nominal x that factor / ad2dcg (6 V and the 25 V session
 on 60 V): PASS.
 
-Final runs: see the report of the branch head (filled in below).
+Final runs (the image of 9188f50, rebased on ddd5c9e; the full set also on its parent build before that rebase):
+acdcmethtest A / B / C / B~ RESULT OK (C as in 10.6; the square's C settle "nan" is the model's +-0.4 % LPF ripple
+of 10.6); `--e8 down` / `up` OK (down: 60 V within -1.3..+0.4 mV over two runs at every level, 6 V within 0.04 mV;
+up: within 1.1 mV after the first step); couptest `v` `i` `tap` `band` `sq5` `sqtie` OK with `--meth B` and `C`,
+with `--meth A` all but `i`; **couptest `i --meth A` fails on rust-fw-poc 848047f without these commits too** (twice;
+OK on 7fffcdf): after the DC 0.3 -> AC 0.2 A step no reading for ~10 s and the AUTO part flipping, in the
+tmcnl-fix AC settle (c4a0b09 / 803854d), not this change; senttest 57 OK; powtest 27 of 29 under load (`ereset`,
+`bt`), both OK alone; modetest `--fast -f fwrs` 18 of 18; every fw-rs/tools/*/run.sh OK (font-matrix identical to
+rust-fw-poc); emulator host tests 491; dcvtest PASS. Cost against ddd5c9e: region B 62 796 -> 62 060 B free, region
+C 17 888 -> 17 736 B, SRAM 58 728 -> 58 672 B, static stack headroom 21 460 -> 21 452 B.
 
 ### 10.10 Device retest of 10.9 (`tools/acdcmeth.py`, calibrator on V / COM, `DM40_USBTMC=real`)
 
@@ -1113,6 +1122,8 @@ Image: the build of the branch head named in the report. The two-point gain is k
    24.7 k two-point from 12 V). **e8** (1 s per level, as 2563fe1) for comparison: the 12 V level may still read
    the internal zero's gain during its window (-4 mV, inside the rule), 5 / 1 / 0 V the two-point one.
    `e8kept` (part of e8 / e8s): 5 V on 60 V re-entered, the kept gain: within the rule.
+   While C takes a second reference (STAT? step 0) STAT? pc / off read 0 (the range's anchor is being replaced)
+   and the DC part is the DC V reading itself: a logged pc = 0 at 12 V is expected, its DC value is still READ?'s.
 3. **e11** (AUTO on the 40 Hz square, A and C, 3 entries each, 15 s): pass = DC from the first AUTO reading (at most
    one change: the decision), the same part in every entry; expected DC with both methods (AC 4.760 / DC 4.764 V is
    within the 1 % tie). Also by hand: three taps on V with A, then with C, on the square: DC, no AC flash.

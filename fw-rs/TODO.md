@@ -479,7 +479,8 @@ Code work (in this order):
       - switch time: 2 evaluations in a row (a probe moved between two DC-dominant sources must not flash
         AC for the one cycle that mixes old and new parts): the switch shows 2..6 s after the change
         (emulator: 2.2..4.5 s); the first evaluation after entry decides at once (~2 s, as AC+DC's first
-        reading).
+        reading). Changed after the device check of 2563fe1 (acdc-approaches.md 10.9 item 2): DC until the
+        first decision (AC only with no DC part), which waits for a settled AC part; a tie within 1 % is DC.
       - display: the V / A button = the setting: the AC/DC mark `~/⎓` (our BTN_GLYPH 0x09; with the
         part's glyph a tap into AUTO looked like no switch, owner 2026-10-22); the glyph above the unit =
         the part shown, "AUTO" in the limit badge's slot (a verdict wins); aux row = AC part / DC part tagged, as AC+DC (it does not move on a
