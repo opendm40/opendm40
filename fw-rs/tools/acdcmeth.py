@@ -37,6 +37,11 @@ calibrator gives: DC up to 30 V and its small 40 Hz square (tools/mr9270.py,
       0 V, 6 V at 5 / 3 / 1 / 0 V; C's DC part vs READ? (rule 0.05 % + 5
       digits). Then C re-entered at 5 V on 60 V (span < 10 k codes: the gain
       kept from the 24 V anchor, STAT? gspan) against READ?.
+      e8s: the same with 4 s per level before the 3 s mean (C's second
+      reference after a level change, 6bf38f4: ~3 s). e8up: 60 V only,
+      entered at 0 V and stepped up 0 / 1 / 5 / 12 / 24 V, 4 s per level
+      (the gain from two references from the first step >= 10 k codes on);
+      run it first after a power-on (the gain is kept per range until then).
   e9  the >= 5 V DC fault of 7409b92 (6 V range, AUTO range): C in AC+DC at
       4.0 / 4.5 / 5.0 / 5.5 V for 12 s each: range changes, readings / s,
       the AC part (max) and its source (STAT? acsrc: 0 RMS, 1 the peak
@@ -46,6 +51,10 @@ calibrator gives: DC up to 30 V and its small 40 Hz square (tools/mr9270.py,
       AUTO with C on the 40 Hz square (12 s), then 5.0 / 5.5 / 4.5 V DC (15
       s each): VOLT:COUP?, FETCh?, range; pass: AUTO,DC within 0.05 % +
       5 digits of READ? and one range over each level's last 8 s.
+  e11 AUTO on the 40 Hz square (2563fe1: A went to AC on its first AC
+      part's overshoot, C stayed DC), A and C entered 3 times each,
+      VOLT:COUP? for 15 s: pass = DC, then at most one change, the same part
+      in every entry (dmm.rs AUTO_TIE: a tie within 1 % is DC).
 
     /usr/bin/python3 tools/acdcmeth.py e1 e2 e5 e6 e7 -o acdcmeth.jsonl
     /usr/bin/python3 tools/acdcmeth.py e8 e9 e10 e2 e6 -o acdcfix.jsonl  # retest
@@ -306,8 +315,12 @@ def rule(item, ref):
     return 0.0005 * abs(ref) + 5 * digits(item)
 
 
-def e8(R):
-    for item, levels in ((2, (24.0, 12.0, 5.0, 1.0, 0.0)), (1, (5.0, 3.0, 1.0, 0.0))):
+def e8(R, order='down', settle=1.0):
+    ranges = ((2, (24.0, 12.0, 5.0, 1.0, 0.0)), (1, (5.0, 3.0, 1.0, 0.0)))
+    if order == 'up':
+        ranges = ((2, (0.0, 1.0, 5.0, 12.0, 24.0)),)
+    exp = 'e8' if order == 'down' else 'e8up'
+    for item, levels in ranges:
         refs = {}
         for v in levels:
             R.src_dc(v)
@@ -316,12 +329,14 @@ def e8(R):
         R.enter('C', item)
         for v in levels:
             R.src_dc(v)
-            time.sleep(1.0)
+            time.sleep(settle)
             p = R.mean_parts(3.0)
             s = R.stat()
             err = p['dc'] - refs[v]
-            R.log(exp='e8', item=item, level=v, ref=refs[v], c_dc=p['dc'], err=err, digits=err / digits(item),
+            R.log(exp=exp, item=item, level=v, ref=refs[v], c_dc=p['dc'], err=err, digits=err / digits(item),
                   ok=abs(err) <= rule(item, refs[v]), pc=p['pc'], off=p['off'], gspan=s.get('gspan', 0), ac=p['ac'])
+    if order == 'up':
+        return
     # the gain kept over sessions: re-entered at 5 V on 60 V (a span < 10 k codes)
     R.src_dc(5.0)
     ref = R.dcv_ref(2)
@@ -387,9 +402,37 @@ def e10(R):
         R.log(exp='e10', level=v, ref=refs[v], coup=coup, fetch=f, err=f - refs[v], ok=ok, **w)
 
 
+def e11(R, entries=3, secs=15.0):
+    """AUTO entered on the 40 Hz square (AC ~= DC, a tie), A and C, `entries`
+    times each: VOLT:COUP? every ~0.3 s for `secs`. Pass (dmm.rs AUTO_TIE):
+    DC from the first AUTO reading, then at most one change (the decision),
+    and the same part in every entry of a method."""
+    R.src_sq(40)
+    for meth in ('A', 'C'):
+        parts = []
+        for k in range(entries):
+            R.w('DBG:ACDC:METH %s' % meth)
+            R.w('CONF:VOLT:DC')
+            time.sleep(1.0)
+            R.w('VOLT:COUP AUTO')
+            t0, seq = time.time(), []
+            while time.time() - t0 < secs:
+                c = R.q('VOLT:COUP?')
+                if c.startswith('AUTO,') and not math.isnan(R.fetch()):
+                    seq.append(c[5:])
+                time.sleep(0.3)
+            flips = sum(1 for a, b in zip(seq, seq[1:]) if a != b)
+            ok = bool(seq) and (flips == 0 or (flips == 1 and seq[0] == 'DC'))
+            parts.append(seq[-1] if seq else '-')
+            R.log(exp='e11', meth=meth, entry=k, part=parts[-1], flips=flips, first=seq[0] if seq else '-',
+                  seq=''.join(x[0] for x in seq), ok=ok)
+        R.log(exp='e11', meth=meth, parts=parts, ok=len(set(parts)) == 1)
+    R.w('DBG:ACDC:METH A')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0], formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
-    ap.add_argument('exps', nargs='+', help='e1 e2 e3 e4 e5 e6 e7 e8 e9 e10')
+    ap.add_argument('exps', nargs='+', help='e1 e2 e3 e4 e5 e6 e7 e8 e8s e8up e9 e10 e11')
     ap.add_argument('--usbip', metavar='BUSID', help="the emulator's USB/IP server")
     ap.add_argument('--cal', default='/dev/ttyACM1')
     ap.add_argument('--no-cal', action='store_true')
@@ -406,7 +449,8 @@ def main():
                 print('%s: needs a signal generator (the calibrator has DC and a 40 Hz square only; '
                       '40 Hz is an AD1 notch): skipped' % e, flush=True)
                 continue
-            {'e1': e1, 'e2': e2, 'e5': e5, 'e6': e6, 'e7': e7, 'e8': e8, 'e9': e9, 'e10': e10}[e](R)
+            {'e1': e1, 'e2': e2, 'e5': e5, 'e6': e6, 'e7': e7, 'e8': e8, 'e8up': lambda R: e8(R, 'up', 4.0),
+             'e8s': lambda R: e8(R, 'down', 4.0), 'e9': e9, 'e10': e10, 'e11': e11}[e](R)
     finally:
         R.close()
 

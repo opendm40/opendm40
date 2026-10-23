@@ -1981,13 +1981,26 @@ Emulator (emu/):
       +0.012 / -0.004 %; e5 60 V +0.5 / -1.3 / +0.5 mV, was +21..25); the R29 peak-hold restart leaves the RMS /
       LPF alone (9.2 rd/s, acsrc 0 throughout). **Decision rule not met**: e8 60 V at 1 / 0 V -7.2 / -8.0 mV
       (limit 5.5 / 5.0; same-moment READ? -6.4..-7.1 mV). A stays the default (owner's decision).
-- [ ] C's 60 V gain from the internal zero is +0.030 % (per_code 4.85309e-4 vs ~4.8516e-4 implied; the
+- [x] C's 60 V gain from the internal zero is +0.030 % (per_code 4.85309e-4 vs ~4.8516e-4 implied; the
       internal zero ~15-16 codes / ~7.5 mV off a real 0 V input): DC part -7..-8 mV at 0 V on a manual 60 V
       range. 6 V is fine. Options in §10.8 (zero correction per range, two-anchor gain, a device table
       per_code); measure the offset's repeatability over entries / power cycles first.
-- [ ] AUTO coupling on a signal with AC ~= DC (the 40 Hz square): C stays DC, A goes AC (its first AC part
+      Fixed in the emulator (acdc-approaches.md §10.9 item 1): once the input settles >= 10 k codes from the
+      anchor C takes the stock DC V reading again and the gain between the two references (kept per range until
+      power-off, replaces the internal zero's); no hardware constant. Model "agndz:" (15 codes on 60 V);
+      acdcmethtest --e8 down: 7fffcdf -6.7 / -7.3 mV at 1 / 0 V, the fix +0.4 / +0.2 mV; --e8 up (entered at 0 V,
+      the table's gain): 7fffcdf -20.5 mV at 24 V, the fix +0.4. **Device retest: §10.10 (e8s / e8up).**
+- [x] AUTO coupling on a signal with AC ~= DC (the 40 Hz square): C stays DC, A goes AC (its first AC part
       overshoots); the first evaluation (AC > |DC|) decides and the 1.5 x hysteresis keeps it. Decide whether
       that tie needs a rule (e.g. prefer AC within a few % of DC) before C's default.
+      Rule (§10.9 item 2, dmm.rs AUTO_TIE): DC until the first decision (AC only with no DC part); the first
+      decision waits until the AC part has settled on one side (4 x its last change < its distance to |DC|),
+      then the larger part; a tie within 1 % or no settling in 4 s: DC. couptest sqtie (three entries on the
+      square): 7fffcdf DC -> AC with A and C, the fix DC throughout with both. **Device retest: §10.10 e11.**
+- [x] dcvtest LOG:SCALe? 1 % off (since 70c33ad): the test did not expect the model's per-range per_code factor
+      (Ad2DcGainR, the device's); fixed in the test (§10.9 item 3).
+- [ ] Method C's internal zero on 60 V (the ~15 codes of 2563fe1): repeatability over entries / power cycles,
+      and 600 / 1000 V (needs > 30 V), if C's first-entry gain is ever to be corrected by a constant.
 - [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
       3 V reference moved -160 ppm during e5). **Calibrator, not the meter** (device-check doc "DC V at the
       calibrator's 1 V: meter or calibrator?"): no fw-rs state in the DC V path, the factory record unchanged,
