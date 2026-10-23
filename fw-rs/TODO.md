@@ -113,6 +113,16 @@ Code work (in this order):
   - [ ] Confirm simultaneous DMM+scope accuracy (both-rails crosstalk). Fold in: combined-view FREQ
         read 13.3 Hz on a 40 Hz input (= 40/3; with/without the scope probe on the node), and AC V
         of a 0.5 V DC source reading 23-56 mV and decaying slowly (compare with stock first).
+        Device f0d21eb (device-check doc "Crosstalk and cold-junction self-heating (f0d21eb)"): DC V reads
+        -0.05 / -0.24 / -0.39 mV at 0 / 1 / 5 V in the combined view vs the DMM page (pairwise, sem 0.06 mV,
+        noise unchanged 0.12-0.14 mV). Mostly the scope rail: RAIL BOTH on the DMM page gives -0.24 mV at 5 V.
+        Analog, < 0.01 %. AC V of 0.5 V DC: 33 mV first reading, < 1 mV by 1.4 s, floor 0.34 mV, the same in
+        both views (the slow decay is gone). FREQ: 40.0017 Hz steady in both views (~440 combined readings,
+        AC+DC -> Hz, Scope -> combined), 13.3 Hz not seen. The remaining bug is not caused by the combination:
+        DC V -> Hz soon after a view change gives 1-2 wrong first READ? (0 / 0.94 / 0.99 / 17.0 / 19.9 Hz) on
+        both pages. Proposed fix (not done): restart the counter (R20 0xF0, CTA 0xFC0000, R20 0xF2) on the Hz row
+        write, freq.next = deadline + 350, src_alt = false, drop each source's first result / no "last = 0"
+        win. Close this item after that fix.
   - [x] Device/About page: Menu->Settings->Device (Vendor/Web/Model/Bootloader/Software/Hardware);
         HW+bootloader ver read from the stock boot-data block 0x080A4000 (survives app updates).
         SN + BT name omitted (not sourceable without inventing a value / a blocking AT round-trip).
@@ -378,6 +388,12 @@ Code work (in this order):
 - [x] UF-15 (P1) Generator: show the actual quantised output frequency (and in SOUR:FREQ?); later a DDS for finer steps. §7  (300e530; verify on device)
 - [x] UF-03 (P1) AC+DC sub-mode on DM40A (owners proved the A hardware does it when the app commands it). §10  (verify on device)
 - [ ] UF-02 (P1) Cold-junction self-heating with both rails/concurrent instruments: measure vs stock, correct or power down. §3
+      Device f0d21eb (device-check doc "Crosstalk and cold-junction self-heating (f0d21eb)"): CJ 25.62 °C on the
+      DMM page (25 min), 25.58 °C in the combined view (25 min, no step, +-0.1 °C), 25.43 °C back on the DMM page
+      (10.5 min). The MCU die meanwhile +1.0..1.6 °C with the scope on (tau ~2 min). No CJ self-heating from the
+      scope rail: below the 0.5 °C threshold, no correction needed. Stock not measured (no stock number in
+      user-feedback §3, only "~1 h idle"). Open: a stock run for the comparison, and the CJ vs a room thermometer
+      (FR-26).
 - [ ] UF-19 (P1) Measure fw-rs battery draw vs stock (10-15 h baseline); decide on a scope-on-demand power policy. §8
 - [x] UF-17 (P1) 3-finger swipe-down screenshot to the USB disk (stock gesture, missing in fw-rs; shares the FAT writer). §2, §10  (a20a52d; verify on device)
 - [x] UF-18 (P1) 2-finger swipe-down power-off (stock gesture; touch point count is available). §8  (a20a52d; verify on device)
@@ -2749,6 +2765,8 @@ Emulator (emu/):
       on V/COM); the MR9270's DC V output is only good to ~0.1 % and wanders, so it cannot check DC V to the
       0.05 % class. Until then, 1 V readings of 0.9987..1.0006 V are the calibrator.
 - [ ] Minor: the 60 V range reads 0.2-0.36 mV below the 6 V range at 1 / 3 / 5 V (within spec; not chased).
+      Not run on f0d21eb (meter needed for a flash). Use alternated blocks with pairwise differencing (chk4 xt.py):
+      the calibrator wanders by the same 0.2-0.5 mV over minutes.
 - [x] Cosmetic: the rate chip cycles FAST -> SLOW -> MED (rate_cycle, enum order), a tap on the value FAST ->
       MED -> SLOW (resolution_cycle). Done (tmcnl-fix, app::next_rate): the chip, the value tap and Settings
       2/3 "Rate" all go FAST -> MED -> SLOW -> FAST (resolution order; the stock has no rate control, FAST is

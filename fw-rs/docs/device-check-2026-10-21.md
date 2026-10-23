@@ -2712,3 +2712,131 @@ anyway.
 - **Calibrator:** back on the 10 Hz square, enabled; registers 0x00..0x2F equal the start dump except 0x2C (live).
   Right after the last frequency set 0x0C read 0x2711 and 0x23 0x31C9; a minute later both matched, with nothing
   written. During the check: off, 1 V, 5 V, the 0..9.5 V 40 Hz square, 10 V, 24 V DC.
+
+## Crosstalk and cold-junction self-heating (f0d21eb) (2026-10-24 01:03 - 02:31)
+
+The meter was still running f0d21eb, which is the same as rust-fw-poc 3eebbb4 for the DMM and the scope. Nothing was
+flashed and the firmware was not changed. The files are in the session scratchpad's `chk4/`:
+- `xt.py`: alternated blocks of DMM page / combined view / DMM page with `SYST:RAIL BOTH`, N `READ?` each, with
+  pairwise differencing (`ana.py`);
+- `fentry.py`: the first `READ?` values after `CONF:FREQ`;
+- `sc2combo.py`: Scope page -> combined view;
+- `cjlog.py`, `cjana.py`: the cold-junction log;
+- `nav.py`: view changes, each checked with `DBG:VIEW?`;
+- `out/`: `xt_*.json`, `fentry_*.json`, `f40_scope2combo.json`, `cj_run.csv`, and the PNGs.
+
+**Wiring (observed):** the calibrator drives the DMM V / COM jacks and the scope probe in parallel. In the combined
+view, 1 V on the calibrator moved `SCOP:MEAS:VAVG?` from -0.16 V to +0.87 V while the DMM read 1.0004 V. The probe is
+always on the node, so a "without the probe" case cannot be run on this bench; only the scope's power and
+acquisition differ between the views.
+
+The generator stayed as the owner keeps it: settings untouched, `OUTP?` 0 throughout. The scope stayed as found:
+10 us/div, 2 V/div, DC, AUTO. Rails AUTO: on the DMM page `SYST:RAIL:STAT?` reads 1,0, in the combined view 1,1. The
+DMM rail stays on, so entering the combined view does not restart the chip.
+
+### 1. Crosstalk: DMM page vs combined view
+
+The calibrator's DC output wanders by several 0.1 mV over minutes (1 V: 1.0002 -> 1.0007 V across the blocks). Each
+combined-view block is therefore compared with the mean of the DMM-page blocks before and after it. Rate FAST, 6 V
+range (AUTO+).
+
+| signal | readings (DMM / test) | combined - DMM (mean of pairs, sem) | noise sd DMM / test | present DMM-only? |
+|---|---|---|---|---|
+| calibrator off (input at ~0 V via the source) | 200 / 150 | **-0.052 mV** (0.006), 3 pairs | 0.030 / 0.039 mV | no: follows the scope rail |
+| 1 V DC (`dc1`, `dc1b`) | 660 / 520 | **-0.24 mV** (0.06), 6 pairs, all negative (-0.04 .. -0.43); -24 ppm | 0.13 / 0.11 mV | no |
+| 5 V DC (`dc5`) | 420 / 360 | **-0.39 mV** (0.06), 6 pairs, all negative (-0.12 .. -0.51); -77 ppm | 0.12 / 0.14 mV | no |
+| 5 V DC, DMM page with `SYST:RAIL BOTH` instead of the combined view (`dc5both`) | 420 / 360 | **-0.24 mV** (0.07), 5 of 6 pairs negative | 0.12 / 0.14 mV | (this is the rail alone) |
+
+- **DC V shift:** with the scope powered, DC V reads 0.05 mV (0 V) to 0.4 mV (5 V) lower; the noise does not change.
+  Most of the shift comes back on the DMM page with only the scope rail forced on, so it is analog (rail / front end),
+  not the view. It is within spec (< 0.01 %). It is larger than the "DC 0 / 5 V +-0.03 mV" of the f3aea2f follow-up
+  (a shorter A/B without pairwise differencing). Not a firmware matter. Whether the meter or the node moves cannot
+  be told without a second meter.
+- **AC V of the 0.5 V DC source (`ac05`):** `CONF:VOLT:DC`, 3 s, `CONF:VOLT:AC`, then 200 `READ?` (~10/s), five
+  blocks alternated. The first reading is 33-35 mV, then 13, 13, 10, 7, 5 mV. It is below 1 mV at 1.35-1.46 s and
+  below 0.5 mV at 1.86-2.00 s. The floor after 5 s is 0.333-0.353 mV (sd 0.014 mV). **The DMM page and the combined
+  view are the same:** DMM 0.335 / 0.336 / 0.349 mV, combined 0.333 / 0.353 mV. Changing the view while in AC V
+  (`ac05v`) gives no transient (0.30-0.42 mV from the first reading). So the old "23-56 mV, decaying slowly" is
+  gone. What is left is a 2 s settling tail after the DC V -> AC V function change, on the DMM page as well.
+  `SYST:ALER?` DC (the hint), correct.
+- **FREQ on the 40 Hz square (calibrator 40 000 mHz):**
+  - Steady state, both views: 40.00173-40.00184 Hz (sd < 0.0004 Hz). This covers about 440 combined-view readings:
+    `f40dc`, `f40acdc` (AC+DC -> Hz, the old trigger), `f40view` (view change while in Hz), and `f40_scope2combo`
+    (Scope page -> combined, 3 times: the DMM rail wake, `SYST:RAIL:STAT?` wakes 14 -> 17). Wrong steady values:
+    **0. 13.3 Hz was not seen.** The scope's own "Freq:" cell reads "--" at 10 us/div (`SCOP:MEAS:FREQ?` 0), so it
+    is not the value in the strip either (`combo_freq.png`: strip 40.002Hz 50.0 %).
+  - **Wrong first readings after `CONF:FREQ` from DC V, in both views:**
+    - DMM page: 19.94 (x2), 0.00, 0.99 (x2) Hz;
+    - combined view: 0.94 (x2), 0.00, 17.04 (x2) Hz;
+    - 1-2 `READ?` (<= 0.7 s), then clean.
+    - DC V -> Hz entries made within ~5 s of a view change: 6 of 6 had them (`f40dc` x5, plus the first `fentry`
+      combined rep: 17.04 Hz). Entries made while staying on one page: 0 of 11 (`fentry_*`). AC+DC -> Hz entries
+      right after a view change: 0 of 5 (`f40acdc`).
+    - In the timed case, the wrong reading was returned 1.04 s after `CONF:FREQ`; every clean first reading came at
+      1.37-1.41 s.
+    - So this is not caused by the combination: it is the first counter result after the row write.
+  - **Cause (from the code, `dmm.rs`):**
+    - The Hz row is written by `hy::configure` (R20 = 0xF2 from `CFG_F14`). CTA is never preset (0xFC0000) and the
+      counter is not restarted at the row write; only `read_counters` does that, after each read.
+    - `freq.next` keeps the old schedule, so the first `poll_freq_mode` after the settle can read a gate that started
+      before or across the row change.
+    - In `freq_change`, `last` = 0 after `reset_values`, so a source's first result wins when it is lower.
+    - A source that is stable but wrong wins as long as its duty stays below 99.95 % (`freq_glitch`).
+    - The 13.33 / 26.67 Hz (k/3 of 40 Hz) of the 16b3eb9 bug fit the reciprocal gate (minimum 53.3 ms = 3 periods
+      of 40 Hz) with 1 or 2 of 3 edges missed.
+  - **Proposed fix (not implemented):**
+    1. On every mode-14 row write (`set` / `start` / `write_config`), restart the counter: R20 = 0xF0, CTA = 0xFC0000,
+       R20 = 0xF2. Also set `src_alt = false` and `freq.next = deadline + 350`, and drop the first result of each
+       source.
+    2. Treat a source's first result as unknown (change = 1e6 while `last == 0`). Show nothing until a source has two
+       results that agree within ~0.1 %.
+    3. Optional hardening: reject a result whose ratio to the other clean source is near k/2 or k/3.
+
+### 2. UF-02: cold-junction self-heating
+
+TEMP (thermocouple K, `TEMP:OFFS` 0), calibrator at 0 V DC enabled on V-COM. The TC readout was ~190-204 °C, but the
+CJ comes from the HY3131's internal sensor and is independent of it. Logged every 3 s: `MEAS:TEMP:CJ?` (age <= 2.2 s
+on every row used), `SYST:TEMP?` (the MCU die). One continuous run (`cj_run.csv`, 1 206 rows):
+
+| state | duration | CJ: first 2 min -> last 10 min (range) | CJ fit (exp) | MCU die: first 2 min -> last 10 min | MCU fit |
+|---|---|---|---|---|---|
+| a. DMM page (scope rail off) | 25 min | 26.12 -> **25.62 °C** (25.47-26.59), sd 0.07 | -0.76 °C, tau 150 s (cooling from the crosstalk runs before, half of them with the scope on) | 36.16 -> 35.96 °C | -0.4 °C, tau 250 s |
+| b. combined view (scope running, rails 1,1) | 25 min | 25.47 -> **25.58 °C** (25.43-25.65), sd 0.06 | **no step** (flat within +-0.1 °C) | 36.89 -> **37.59 °C** (max 38.7) | **+1.0 °C, tau ~2 min** |
+| c. back to the DMM page | 10.5 min (cut short: meter needed for a flash) | 25.57 -> **25.43 °C** (25.33-25.61) | -0.2 °C, tau ~6 min (ambient drift?) | 36.35 -> 36.01 °C | back to the state-a level |
+
+- **The CJ does not self-heat from the scope on f0d21eb:** within +-0.1-0.2 °C across a -> b -> c. The ~0.2 °C fall
+  through b and c is the size of the room drift. The MCU die warms by 1.0-1.6 °C with the scope running
+  (tau ~2 min) and cools back. The CJ sensor sits in the HY3131, away from the scope's power, and does not follow.
+- The UF-02 step 2 threshold (> 0.5 °C bias -> correct or power down) is not reached. There is no need for a
+  rail-dependent CJ correction. The steady CJ of 25.4-25.6 °C has not been checked against a room thermometer
+  (FR-26 / the "3.6-6 °C low" units are a separate offset question).
+- **Stock:** `docs/user-feedback.md` §3 has no number for the stock firmware, only U1's report: the CJ is wrong
+  after AC+DC V and needs "~1 h idle" to match a weather station. The fw-rs time constants here are minutes, and
+  there is no step to recover from. The stock-firmware side was not measured (not flashed).
+- Side note: `MEAS:TEMP:CJ?` outside TEMP returns the last CJ with its age (34.41 °C, age 454 s at the start; 2 122 s
+  at the start of the log). That value was taken in an earlier session's TEMP step and is 8.8 °C above the live
+  25.6 °C. The age is reported and `SYST:ERR?` says "Data stale", as documented. A host that ignores the age gets a
+  stale number. The cause of the 34.4 °C (taken on a warmer meter, or a first-phase value right after a switch) was
+  not chased.
+
+### 3. Other TODO items
+
+Not run: the coordinator needed the meter for a flash. "60 V reads 0.2-0.36 mV below 6 V" stays open. The
+`xt.py` alternation with pairwise differencing is the method to use for it, because the calibrator's wander is of
+the same size.
+
+### State at the end
+
+- **Device:** f0d21eb, DMM page, DC V AUTO+ (`VOLT:RANG:AUTO?` 1, `CONF?` VOLT), RATE FAST, the bargraph row
+  (`e_dmm.png`), `SYST:RAIL?` AUTO, `TEMP:TRAN?` TCK, `UNIT:TEMP?` C. `OUTP?` 0 throughout (never switched on).
+  `SYST:ERR?` "No error", `SYST:ALER?` NONE. `dm40dbg.py boot`: crash count 0, HEALTHY, marker VALID.
+- **Settings:** Settings 1/3 and 3/3 at the end are byte-equal to the start screenshots (`s_set1..3.png` vs
+  `e_set1..3.png`); 2/3 differs only in the live rate digits (x 277-329, y 48-67). Dim / Shutdown Never, backlight
+  10 %, volume 0 %, Start page Multimeter, DMM row Bargraph, USB disk "Files live" (`DBG:VDISK:RO?` 1,1).
+- **Disk:** `MMEM:CAT?` equals the start string exactly. No files were created.
+- **Calibrator:** back on the 10 Hz square, enabled. Registers 0x00..0x2F equal the start dump except:
+  - 0x2C (live);
+  - **0x0E and 0x2E: 0x1B -> 0x1A.** Both changed together while the calibrator was at 0 V DC and did not come back
+    with 1 V or with the square. A write of 0x1B to 0x0E was ignored (it still read 0x1A), so these look like a
+    read-only live value (perhaps a temperature: 27 -> 26). Nothing else was written.
+  - During the check the calibrator was at 1 V, 5 V, off, 0.5 V, 40 Hz square, 0 V DC.
