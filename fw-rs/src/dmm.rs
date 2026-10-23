@@ -1999,10 +1999,9 @@ impl Dmm {
             (Button::Volt, Some(i)) if i <= 4 => {
                 let ac = self.sub() == 1;
                 self.manual = true;
-                if i == 0 {
-                    self.set(clk, if ac { 2 } else { 3 }, 1, 450);
-                } else {
-                    self.set(clk, if ac { 0 } else { 1 }, i as i8 - 1, 450);
+                let (m, r) = if i == 0 { (if ac { 2 } else { 3 }, 1) } else { (if ac { 0 } else { 1 }, i as i8 - 1) };
+                if !self.same_row(m, r) {
+                    self.set(clk, m, r, 450);
                 }
             }
             (Button::Amp, Some(i)) if i <= 5 => {
@@ -2010,7 +2009,9 @@ impl Dmm {
                 let unit = 2 - (i / 2); // 0 A, 1 mA, 2 uA
                 let m = if ac { 4 } else { 7 } + unit;
                 self.manual = true;
-                self.set(clk, m, (i % 2) as i8, 650);
+                if !self.same_row(m, (i % 2) as i8) {
+                    self.set(clk, m, (i % 2) as i8, 650);
+                }
             }
             (Button::Ohm, None) => {
                 self.manual = false;
@@ -2020,10 +2021,28 @@ impl Dmm {
             }
             (Button::Ohm, Some(i)) if i <= 6 => {
                 self.manual = true;
-                self.set(clk, 10, i as i8, 150);
+                if !self.same_row(10, i as i8) {
+                    self.set(clk, 10, i as i8, 150);
+                }
             }
             _ => {}
         }
+    }
+
+    /// `set_range`: the chip already runs mode `m` (AC+DC: either phase of
+    /// it) on range `r`, so choosing that item again (the highlighted item
+    /// tapped, SCPI `<f>:RANG` with the present range, sigrok `range=`, or
+    /// AUTO -> manual on the range AUTO is on) only makes the range manual.
+    /// Rewriting the row then restarted the conversion behind a 450 ms
+    /// settle that reset nothing (`set` with the mode unchanged): 1-2
+    /// readings of 25-51 % of the input on DC V (device check 8087c7d).
+    fn same_row(&self, m: u8, r: i8) -> bool {
+        let other = match m {
+            1 | 3 => m - 1,
+            7..=9 => m - 3,
+            _ => m,
+        };
+        !self.pw.on && self.range == r && (self.mode == m || (self.acdc && self.mode == other))
     }
 
     /// BT mode byte (bt_meas_v2_6.h section 2, forward FUN_0803c842):
