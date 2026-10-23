@@ -1631,7 +1631,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             prof::enter(prof::DMM);
             if !busy {
                 if let Some(raw) = app.dmm.poll(&mut clk) {
-                    if let Some(r) = app.reading(raw, can_draw) {
+                    if raw.prov {
+                        // A value a gate still holds: drawn dimmed only.
+                        app.provisional(raw, can_draw);
+                    } else if let Some(r) = app.reading(raw, can_draw) {
                         // A function change this pass (touch, phone app) is
                         // seen at the next loop top: no reading for a wait it
                         // overtook until then (WAIT_ORPHAN).

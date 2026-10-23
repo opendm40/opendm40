@@ -2936,6 +2936,11 @@ impl Dmm {
             _ if self.t_sensor != 0 => self.poll_rtd(clk, now),
             _ => self.poll_temp(now),
         } };
+        if let Some(p) = r.filter(|p| p.prov) {
+            // Provisional (`Reading::prov`): drawn only; no sentinel, no
+            // watchdog, no seq, READ? / FETCh? keep waiting (rd_pending).
+            return Some(self.prov_out(p, now));
+        }
         if let Some(rd) = &r {
             // AUTO coupling: the checks below look at the whole signal (the
             // shown part may be the small one of the two).
@@ -2991,6 +2996,17 @@ impl Dmm {
             r.alert = self.sent.shown(clk.now_ms());
             r
         })
+    }
+
+    /// A provisional reading (`Reading::prov`) as `poll` hands it out: the
+    /// range / coupling labels and the alert of a settled one.
+    fn prov_out(&self, mut r: Reading, now: u64) -> Reading {
+        r.auto = !self.manual;
+        r.auto_plus = (self.button() == Button::Volt && self.v_auto == 1) || (self.button() == Button::Amp && self.a_auto == 1);
+        r.cpl_auto = self.cpl_auto;
+        r.acdc = self.acdc && !self.cpl_auto;
+        r.alert = self.sent.shown(now);
+        r
     }
 
     fn reading(&self, main: Val, si: f32) -> Reading {
@@ -3134,10 +3150,14 @@ impl Dmm {
                 }
             }
         }
-        if !vet && !acdc {
+        if !vet && !acdc && (self.mode, self.range) != before {
             return None;
         }
-        self.dc_out(clk, x, lim, dec, unit, si_k, before, ext, vet)
+        // A held conversion (G2): provisional (dc_out: AC+DC its own way).
+        self.dc_out(clk, x, lim, dec, unit, si_k, before, ext, vet).map(|mut rd| {
+            rd.prov |= !vet;
+            rd
+        })
     }
 
     /// Trace a DC conversion (acdctr.rs); the trigger is an accepted DC
@@ -3196,7 +3216,20 @@ impl Dmm {
             self.acdc_seen |= 2;
         }
         self.ac_settle_cap(now);
-        let rd = vet.then(|| self.acdc_reading(lim, dec, unit, si_k));
+        let rd = if vet && self.acdc_seen == 3 {
+            Some(self.acdc_reading(lim, dec, unit, si_k))
+        } else {
+            // G2 (a held DC result) / G4 (no AC part yet) / G5 (the AC part
+            // settling: its latest result): provisional.
+            let ac = if self.acdc_seen & 1 != 0 {
+                self.f_ac
+            } else if self.acs_t0 != 0 && self.acs_prev >= 0.0 {
+                self.acs_prev
+            } else {
+                f32::NAN
+            };
+            Some(self.acdc_prov(ac, x, lim, dec, unit, si_k))
+        };
         // A held result leaves no DC part yet (entry, a set from the AC
         // phase): one more DC result before the AC phase (at most
         // VET_HELD_MAX), else that phase would autorange on hypot(AC, 0).
@@ -3212,7 +3245,7 @@ impl Dmm {
         } else if self.phase_n > 0 {
             self.phase_n -= 1;
         }
-        rd.filter(|_| self.acdc_seen == 3)
+        rd
     }
 
     fn poll_dca(&mut self, clk: &mut Clock) -> Option<Reading> {
@@ -3264,7 +3297,7 @@ impl Dmm {
                 }
             }
         }
-        if !vet && !self.acdc {
+        if !vet && !self.acdc && (self.mode, self.range) != before {
             return None;
         }
         let (unit, dec, si_k) = match u {
@@ -3273,6 +3306,8 @@ impl Dmm {
             _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
         let mut rd = self.dc_out(clk, a, lim, dec, unit, si_k, before, false, vet)?;
+        // A held conversion (G2): provisional.
+        rd.prov |= !vet;
         if self.burden_show && !self.acdc {
             // Burden voltage, signed (doc 3.15): aux1 is free in DC A.
             rd.aux1 = Some(self.burden_val(u, r, a * si_k, rd.main.ol));
@@ -3305,6 +3340,31 @@ impl Dmm {
         rd.mode = mode;
         rd.aux1 = Some(part(self.f_ac, lim, dec, unit));
         rd.aux2 = Some(part(self.dc_val, lim, dec, unit));
+        // G7: AUTO before its first decision with an AC part above the
+        // floor (auto_eval waits for it to settle on one side): provisional.
+        let fl = if self.mode <= 3 { AUTO_FLOOR_V } else { AUTO_FLOOR_A };
+        rd.prov = self.cpl_auto && self.auto_n == 0 && self.f_ac > fl[0] * lim;
+        rd
+    }
+
+    /// A provisional AC+DC / AUTO reading (`Reading::prov`) from this AC
+    /// result / DC part (`ac` NaN: not measured yet, dashes in its row);
+    /// changes no state. AUTO shows the DC part until it has decided.
+    fn acdc_prov(&self, ac: f32, dc: f32, lim: f32, dec: u8, unit: &'static str, si_k: f32) -> Reading {
+        let dm = dc_mode_of(self.mode);
+        let (v, mode) = if !self.cpl_auto {
+            (hypot(if ac.is_nan() { 0.0 } else { ac }, dc), dm)
+        } else if self.auto_n != 0 && self.auto_ac && !ac.is_nan() {
+            (ac, ac_mode_of(dm))
+        } else {
+            (dc, dm)
+        };
+        let ol = v.abs() / lim > self.over();
+        let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, v * si_k);
+        rd.mode = mode;
+        rd.aux1 = Some(part(ac, lim, dec, unit));
+        rd.aux2 = Some(part(dc, lim, dec, unit));
+        rd.prov = true;
         rd
     }
 
@@ -3550,7 +3610,14 @@ impl Dmm {
             } else if self.cpl_auto && self.phase_n == 0 {
                 self.auto_eval(lim, now);
             }
-            let rd = (self.acdc_seen == 3).then(|| self.acdc_reading(lim, dec, unit, si_k));
+            let rd = if self.acdc_seen == 3 {
+                Some(self.acdc_reading(lim, dec, unit, si_k))
+            } else if self.acdc_seen & 2 != 0 {
+                // G5: the AC part settling (its latest result), provisional.
+                Some(self.acdc_prov(ac, self.dc_val, lim, dec, unit, si_k))
+            } else {
+                None
+            };
             if ACDC_FREQ_RESTART && m >= 4 {
                 self.freq_secondary(now, 0xF0);
             }
