@@ -620,6 +620,11 @@ pub struct Dmm {
     /// reading until both are, so the first value (and a SCPI MEAS) is never
     /// |DC| or |AC| alone (the stock shows hypot(0, DC) at first).
     acdc_seen: u8,
+    /// AC+DC / AUTO: the AC part is settling after a range change since
+    /// this time (0: not), `acs_prev` = the last AC result of the previous
+    /// AC phase in it (< 0: none yet). See ACS_RATIO.
+    acs_t0: u64,
+    acs_prev: f32,
     /// AUTO coupling (sub-mode 3; `acdc` is set too: the AC+DC alternation
     /// measures both parts): `auto_ac` the part shown (true = AC), `auto_n`
     /// cycles evaluated since the last reset (0: none yet, each reading then
@@ -840,6 +845,26 @@ const ACDC_FREQ_RESTART: bool = true;
 /// AC+DC diagnostic ring: AC phases kept (`acdc_diag`).
 const ACDC_DIAG_N: usize = 4;
 
+// AC+DC (method A) and AUTO coupling after a range or unit change (manual or
+// autorange): the AC-coupled AD2 node has to recharge to the new divider
+// tap's DC level, and while it does its step reads as AC. Device check
+// 8087c7d (1 V DC): 6 -> 60 V gave an AC part of 0.35 V (1.06 V from the
+// range page) for ~2-4 s, then a tail 18 -> 1 mV over ~10 s, READ? up to
+// +6 %; 60 -> 6 V 0.15 V for ~2 s. The emulator's node (tau 0.3 s, charged
+// in the AC phases only) shows 5.3 V for the first AC phase. The stock does
+// nothing about it (OL + 600 ms, docs/acdc-stock-vs-fwrs.md 2). fw-rs
+// discards the AC results until the transient is over (`ac_settle_step`):
+// it decays phase to phase while a real AC part stays, so the AC part is
+// settled once the last result of an AC phase is at least ACS_RATIO of the
+// previous phase's (one AC+DC cycle, ~2 s, later), or below ACS_FLOOR of
+// the range's full scale, or ACS_MAX_MS after the change at the latest.
+// Meanwhile AC+DC gives no reading (like the entry: no value before both
+// parts are measured); AUTO keeps showing its part with the AC part held
+// and does not re-decide.
+const ACS_RATIO: f32 = 0.9;
+const ACS_FLOOR: f32 = 5e-4;
+const ACS_MAX_MS: u64 = 6000;
+
 // AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-fwrs.md
 // section 11). The AC+DC alternation measures both parts; AUTO shows one of
 // them: the AC part's RMS when it dominates the DC part, else the DC part.
@@ -910,6 +935,8 @@ impl Dmm {
             dc_val: 0.0,
             ac_raw: 0.0,
             acdc_seen: 0,
+            acs_t0: 0,
+            acs_prev: -1.0,
             cpl_auto: false,
             auto_ac: false,
             auto_n: 0,
@@ -1342,6 +1369,7 @@ impl Dmm {
 
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
         let changed_mode = mode != self.mode || self.pw.on;
+        let old = (self.mode, self.range);
         self.pw_leave();
         self.mode = mode;
         self.range = range;
@@ -1352,10 +1380,52 @@ impl Dmm {
             self.entry = now;
             self.reset_values();
         }
+        self.ac_settle_start(now, old);
+    }
+
+    /// AC+DC / AUTO: a range or unit change from `old` (mode, range) of the
+    /// same quantity (V or A; not the entry from another function, nor an
+    /// AC <-> DC phase switch) starts the AC part's settle (ACS_RATIO).
+    fn ac_settle_start(&mut self, now: u64, old: (u8, i8)) {
+        let q = |m: u8| match m {
+            0..=3 => 1,
+            4..=9 => 2,
+            _ => 0,
+        };
+        let (om, nm) = (dc_mode_of(old.0), dc_mode_of(self.mode));
+        if self.acdc && !self.pw.on && q(om) != 0 && q(om) == q(nm) && (om, old.1) != (nm, self.range) {
+            self.acs_t0 = now.max(1);
+            self.acs_prev = -1.0;
+            // AC+DC: no reading until the AC part is back, also in the DC
+            // phase in between (the AC part held from the old range belongs
+            // to a signal that may have moved: an autorange step).
+            if !self.cpl_auto {
+                self.acdc_seen &= !1;
+            }
+        }
+    }
+
+    /// One AC result `ac` of method A's AC phase while the AC part settles
+    /// after a range change (`acs_t0` != 0): true = discard it. `end`: the
+    /// last result of the phase, where the phase-to-phase test runs; on
+    /// success the settle ends and this result is used.
+    fn ac_settle_step(&mut self, now: u64, ac: f32, lim: f32, end: bool) -> bool {
+        if self.acs_t0 == 0 {
+            return false;
+        }
+        let done = now.saturating_sub(self.acs_t0) >= ACS_MAX_MS
+            || (end && ((self.acs_prev >= 0.0 && ac >= ACS_RATIO * self.acs_prev) || ac < ACS_FLOOR * lim));
+        if done {
+            self.acs_t0 = 0;
+        } else if end {
+            self.acs_prev = ac;
+        }
+        !done
     }
 
     fn reset_values(&mut self) {
         self.acdc_seen = 0;
+        self.acs_t0 = 0;
         self.auto_n = 0;
         self.auto_votes = 0;
         self.auto_ac = false;
@@ -1386,10 +1456,12 @@ impl Dmm {
     /// AC+DC phase switch: the other HY3131 mode of the same quantity, values
     /// kept (stock FUN_08012c30 without the m+5 change).
     fn switch_phase(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
+        let old = (self.mode, self.range);
         self.mode = mode;
         self.range = range;
         self.write_config(clk);
         self.deadline = clk.now_ms() + settle;
+        self.ac_settle_start(clk.now_ms(), old);
     }
 
     /// SCPI function code: the stock mode, or 16 = V AC+DC, 17 = A AC+DC,
@@ -2798,11 +2870,22 @@ impl Dmm {
             _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
         let acdc = self.acdc;
-        // AC+DC: every result after the settle deadline goes through the EMA
-        // (thr = the plain-AC window, a 0.25 V / 0.35 mV / 0.15 A), as the
-        // stock; nothing dropped or gated (docs/acdc-stock-vs-fwrs.md 8.2).
-        self.ac_raw = ac;
-        ema(thr, a_rms, ac, &mut self.f_ac);
+        // AC+DC after a range change: the AC part settles first (ACS_RATIO);
+        // its results are discarded until then (the first good one seeds
+        // the EMA), and they move no range.
+        let was = self.acs_t0 != 0;
+        let settling = acdc && self.ac_settle_step(now, ac, lim, self.phase_n == 0);
+        let seed = acdc && was && !settling;
+        // AC+DC: every other result after the settle deadline goes through
+        // the EMA (thr = the plain-AC window, a 0.25 V / 0.35 mV / 0.15 A),
+        // as the stock (docs/acdc-stock-vs-fwrs.md 8.2).
+        if seed {
+            self.ac_raw = ac;
+            self.f_ac = ac;
+        } else if !settling {
+            self.ac_raw = ac;
+            ema(thr, a_rms, ac, &mut self.f_ac);
+        }
 
         // AC+DC: hypot(AC, last DC part) for every quantity.
         let mag = if acdc {
@@ -2814,10 +2897,10 @@ impl Dmm {
         };
         let before = (m, self.range);
         // OVERLOAD (doc 4.3): the uA / mA shunt over range -> 10 A at once.
-        if m >= 4 && self.ovl_trip(clk, m - 4, mag > ov * lim) {
+        if m >= 4 && !settling && self.ovl_trip(clk, m - 4, mag > ov * lim) {
             return None;
         }
-        if !self.manual {
+        if !self.manual && !settling {
             let up = mag > ov * lim;
             let down = mag < 0.1 * lim / ov;
             match m {
@@ -2870,8 +2953,12 @@ impl Dmm {
             if (self.mode, self.range) != before {
                 return None;
             }
-            self.acdc_seen |= 1;
-            if self.acdc_seen != 3 {
+            // Settling: AC+DC has no reading (`ac_settle_start`); AUTO
+            // shows its part with the AC part held.
+            if !settling {
+                self.acdc_seen |= 1;
+            }
+            if self.acdc_seen != 3 || settling {
                 // No reading before both parts were measured.
             } else if self.cpl_auto && self.phase_n == 0 {
                 self.auto_eval(lim);
