@@ -30,9 +30,11 @@ names the quantity in any coupling (DC, AC, AC+DC, AUTO), so `<q>:RANG:AUTO?`
 answers 1 / 0 (0 after `<q>:RANG:AUTO OFF`), `<q>:RANG?` and `<q>:RES?` a
 number, with no error; the explicit present coupling the same; in the power
 meter `VOLT:RANG?` / `CURR:RANG?` / `:AUTO?` answer its V / I channel
-(as POW:VOLT:RANG?). Still +9.91E37 and "Settings conflict": another
-quantity, another explicit coupling, RES? / a set in the power meter, any
-range query in TEMP; TEMP:RANG? is "Undefined header" (no number).
+(as POW:VOLT:RANG?). A query never raises "Settings conflict": another
+function's (another quantity, another explicit coupling, any in TEMP)
+`:RANG:AUTO?` answers 1, its `:RANG?` / `:RES?` +9.91E37, no error; a set
+naming it is "Settings conflict"; TEMP:RANG? is "Undefined header" (no
+number).
   --queries-only: that part only (~1 min).
 Exit status 0 = all passed.
 """
@@ -118,9 +120,13 @@ try:
         v = num(r)
         return v is not None and 0 < v < NAN
 
-    def want_nan(fn, line, err='Settings conflict'):
+    def want_nan(fn, line):
+        """Another function's query: AUTO? 1, else +9.91E37; no error."""
         r, e = qerr(line)
-        check(num(r) is not None and num(r) >= NAN and err in e, '%s: %s -> %s (%s), want +9.91E37 and "%s"' % (fn, line, r, e, err))
+        if line.endswith(':AUTO?'):
+            check(r == '1' and e.startswith('0,'), '%s: %s -> %s (%s), want 1 and no error' % (fn, line, r, e))
+        else:
+            check(num(r) is not None and num(r) >= NAN and e.startswith('0,'), '%s: %s -> %s (%s), want +9.91E37 and no error' % (fn, line, r, e))
 
     # Range queries in every function and coupling.
     for conf, bare, expl, other in [('CONF:VOLT:DC', 'VOLT', 'VOLT:DC', 'CURR'), ('CONF:VOLT:AC', 'VOLT', 'VOLT:AC', 'CURR'),
@@ -142,6 +148,8 @@ try:
         want_ok(conf, bare + ':RANG:AUTO?', is_bool('1'), '(want 1 after RANG:AUTO ON)')
         want_nan(conf, other + ':RANG:AUTO?')
         want_nan(conf, other + ':RANG?')
+        r, e = qerr(other + ':RANG:AUTO OFF')
+        check('Settings conflict' in e, '%s: %s:RANG:AUTO OFF refused (%s)' % (conf, other, e))
         if bare in ('VOLT', 'CURR'):
             # another explicit coupling stays strict
             alt = bare + (':AC' if expl.endswith(':DC') else ':DC')

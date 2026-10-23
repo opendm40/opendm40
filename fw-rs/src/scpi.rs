@@ -112,9 +112,12 @@
 //!   coupling answers the present state; in the power meter RANG? /
 //!   RANG:AUTO? answer its V / I channel's, as POW:VOLT:RANG? /
 //!   POW:CURR:RANG?, a set there is "Settings conflict"); an explicit
-//!   coupling must be the present one. Naming another function is
-//!   "Settings conflict" (a query answers +9.91E37); CONT / DIOD / TEMP
-//!   have none ("Undefined header"). A set acts as a tap on the MF range
+//!   coupling names that coupling's function. A set naming another
+//!   function is "Settings conflict"; a query of another function is no
+//!   error (as a 34401A answers any function's): RANG:AUTO? 1 (selecting
+//!   a function or a coupling starts it in autorange), RANG? / RES?
+//!   +9.91E37 (no range until it is selected). CONT / DIOD / TEMP have
+//!   none ("Undefined header"). A set acts as a tap on the MF range
 //!   page (REL off); refused while the data logger runs or the Wave view
 //!   is open ("Settings conflict"; CONF then only selects the function).
 //!
