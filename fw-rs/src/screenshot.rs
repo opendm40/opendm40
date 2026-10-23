@@ -345,13 +345,6 @@ pub fn start_csv() -> bool {
     true
 }
 
-/// A scope CSV is being written.
-#[inline(always)]
-pub fn csv_busy() -> bool {
-    let j = job();
-    j.phase != Phase::Idle && j.kind == K_CSV
-}
-
 /// The result of the last finished CSV, once.
 pub fn take_csv_result() -> Option<Shot> {
     unsafe { (*core::ptr::addr_of_mut!(CSV_RESULT)).take() }
