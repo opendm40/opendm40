@@ -97,11 +97,12 @@ def word(path, off):
 SYMS = nm(A.app)
 HANG = SYMS['dm40_fw::wait_for_watchdog']
 RECOVERY = SYMS['dm40_fw::recovery::run']
+HELD_FOR = SYMS['dm40_fw::boot::held_for']  # the shim's key-hold windows (4 s, then 0.5 s)
 with open(A.app, 'rb') as f:
     ELF_ENTRY = struct.unpack_from('<I', f.read(0x40), 0x18)[0] & ~1
 ROM_RESET = word(run.DUMP, 4) & ~1
 LOADER_RESET = word(run.DUMP, 0xA0004) & ~1
-HOOKS = [('rom', ROM_RESET), ('loader', LOADER_RESET), ('app', ELF_ENTRY), ('recovery', RECOVERY)]
+HOOKS = [('rom', ROM_RESET), ('loader', LOADER_RESET), ('app', ELF_ENTRY), ('recovery', RECOVERY), ('held_for', HELD_FOR)]
 PRINT_LOCK = threading.Lock()
 
 
@@ -265,6 +266,7 @@ def case_key_short():
     c.end_reads(6.0)
     c.run(6.2)
     c.expect_normal(1, (0, CRASH0))
+    c.check(len(c.times('held_for')) == 1, 'released before 4 s: the shim never reached the cue')
     return c
 
 
@@ -277,6 +279,9 @@ def case_key_abort():
     c.end_reads(9.0)
     c.run(9.2)
     c.expect_normal(1, (0, CRASH0))
+    h = c.times('held_for')
+    c.check(len(h) == 2 and h[1] < 5.2, 'held to the cue, released in the 0.5 s confirm window (key windows at %s)'
+            % ['%.2f' % t for t in h])
     return c
 
 
@@ -289,6 +294,7 @@ def case_key_hold():
     a = app_time(c, 0) or 0.69
     # 4 s hold + ~0.3 s beep + 0.5 s confirm after the shim started.
     c.expect_recovery(a + 4.7, a + 5.2)
+    c.check(len(c.times('held_for')) == 2, 'both key windows (4 s, then the 0.5 s confirm) ran')
     return c
 
 

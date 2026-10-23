@@ -2218,16 +2218,22 @@ it onto the loader's USB disk as `dm40_fwrs.bin` (the only `dm40*.bin`),
 2. **Abort.** Power off. Hold the key; ~4.7 s after power-on the backlight blinks and it
    beeps; let go right at the beep (within 0.5 s). Expect fw-rs normally;
    `boot`: `KEY_HOLD_ABORTED`, `hold_ms` 4000..4500.
-3. **Key recovery.** Power off. Hold the key ~7 s (until well after the
-   beep), let go. Expect the loader's "open file error / Update" screen and
-   its USB disk. Reinstall fw-rs. `boot`: `last` = `0x52564352` (RCVR),
+3. **Key recovery.** Power off. Hold the key through the beep and keep
+   holding until the loader's "open file error / Update" screen appears
+   (emulator: ~5.5 s after power-on; on the device the shim's 4 s start only
+   after the ROM / loader hand-off, so it may be later). Holding longer is
+   harmless: once the 0.5 s after the beep have passed, recovery runs whether
+   the key is still down or not. Expect that screen and its USB disk. Reinstall fw-rs. `boot`: `last` = `0x52564352` (RCVR),
    `last_trigger` `0x54520010`, marker `VALID`.
 4. **One hang.** `tools/dm40dbg.py release`. ~20 s later fw-rs reboots.
    `boot`: `WDT_RETRY`, crash word `0x43520001`, `-` (not yet healthy).
 5. **Healthy clear.** Wait 70 s, then `boot`: `HEALTHY`, `0x43520000`.
    `release` again: reboot, `WDT_RETRY`, `0x43520001` (no recovery).
 6. **Two hangs.** Right after step 5's reboot (within ~30 s of it),
-   `release` once more. ~20 s later: the loader's update screen. Reinstall.
+   `release` once more. ~20 s later: the loader's update screen. The budget:
+   uptime at the `release` + 20 s must stay under 60 s; sent later,
+   `mark_healthy` clears the count during the unfed 20 s and the result is a
+   plain `WDT_RETRY` reboot, which is correct behaviour, not a failure. Reinstall.
    `boot`: `last` = RCVR, `last_trigger` `0x54520010`, crash `0x43520000`.
 7. Note anything that differs, especially the time from power-on to the
    beep in step 2/3 (emulator ≈ 4.7 s) and whether the loader screen in step
