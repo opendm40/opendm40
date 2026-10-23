@@ -621,10 +621,12 @@ pub struct Dmm {
     /// |DC| or |AC| alone (the stock shows hypot(0, DC) at first).
     acdc_seen: u8,
     /// AC+DC / AUTO: the AC part is settling after a range change since
-    /// this time (0: not), `acs_prev` = the last AC result of the previous
-    /// AC phase in it (< 0: none yet). See ACS_RATIO.
+    /// this time (0: not), `acs_prev` = the previous AC result in it (< 0:
+    /// none yet), `acs_flat` = results in a row that did not fall. See
+    /// ACS_STEP.
     acs_t0: u64,
     acs_prev: f32,
+    acs_flat: u8,
     /// AUTO coupling (sub-mode 3; `acdc` is set too: the AC+DC alternation
     /// measures both parts): `auto_ac` the part shown (true = AC), `auto_n`
     /// cycles evaluated since the last reset (0: none yet, each reading then
@@ -854,14 +856,16 @@ const ACDC_DIAG_N: usize = 4;
 // in the AC phases only) shows 5.3 V for the first AC phase. The stock does
 // nothing about it (OL + 600 ms, docs/acdc-stock-vs-fwrs.md 2). fw-rs
 // discards the AC results until the transient is over (`ac_settle_step`):
-// it decays phase to phase while a real AC part stays, so the AC part is
-// settled once the last result of an AC phase is at least ACS_RATIO of the
-// previous phase's (one AC+DC cycle, ~2 s, later), or below ACS_FLOOR of
-// the range's full scale, or ACS_MAX_MS after the change at the latest.
+// it only adds to the RMS and decays result by result (device: a few % per
+// 100 ms result), while a real AC part stays, so the AC part is settled
+// once ACS_FLAT_N results in a row fell by less than 1 - ACS_STEP each
+// (or rose), or one is below ACS_FLOOR of the range's full scale, or
+// ACS_MAX_MS after the change at the latest.
 // Meanwhile AC+DC gives no reading (like the entry: no value before both
 // parts are measured); AUTO keeps showing its part with the AC part held
 // and does not re-decide.
-const ACS_RATIO: f32 = 0.9;
+const ACS_STEP: f32 = 0.99;
+const ACS_FLAT_N: u8 = 2;
 const ACS_FLOOR: f32 = 5e-4;
 const ACS_MAX_MS: u64 = 6000;
 
@@ -937,6 +941,7 @@ impl Dmm {
             acdc_seen: 0,
             acs_t0: 0,
             acs_prev: -1.0,
+            acs_flat: 0,
             cpl_auto: false,
             auto_ac: false,
             auto_n: 0,
@@ -1385,7 +1390,7 @@ impl Dmm {
 
     /// AC+DC / AUTO: a range or unit change from `old` (mode, range) of the
     /// same quantity (V or A; not the entry from another function, nor an
-    /// AC <-> DC phase switch) starts the AC part's settle (ACS_RATIO).
+    /// AC <-> DC phase switch) starts the AC part's settle (ACS_STEP).
     fn ac_settle_start(&mut self, now: u64, old: (u8, i8)) {
         let q = |m: u8| match m {
             0..=3 => 1,
@@ -1396,6 +1401,7 @@ impl Dmm {
         if self.acdc && !self.pw.on && q(om) != 0 && q(om) == q(nm) && (om, old.1) != (nm, self.range) {
             self.acs_t0 = now.max(1);
             self.acs_prev = -1.0;
+            self.acs_flat = 0;
             // AC+DC: no reading until the AC part is back, also in the DC
             // phase in between (the AC part held from the old range belongs
             // to a signal that may have moved: an autorange step).
@@ -1406,19 +1412,18 @@ impl Dmm {
     }
 
     /// One AC result `ac` of method A's AC phase while the AC part settles
-    /// after a range change (`acs_t0` != 0): true = discard it. `end`: the
-    /// last result of the phase, where the phase-to-phase test runs; on
-    /// success the settle ends and this result is used.
-    fn ac_settle_step(&mut self, now: u64, ac: f32, lim: f32, end: bool) -> bool {
+    /// after a range change (`acs_t0` != 0): true = discard it. On success
+    /// the settle ends and this result is used.
+    fn ac_settle_step(&mut self, now: u64, ac: f32, lim: f32) -> bool {
         if self.acs_t0 == 0 {
             return false;
         }
-        let done = now.saturating_sub(self.acs_t0) >= ACS_MAX_MS
-            || (end && ((self.acs_prev >= 0.0 && ac >= ACS_RATIO * self.acs_prev) || ac < ACS_FLOOR * lim));
+        let flat = self.acs_prev >= 0.0 && ac >= ACS_STEP * self.acs_prev;
+        self.acs_flat = if flat { self.acs_flat.saturating_add(1) } else { 0 };
+        self.acs_prev = ac;
+        let done = now.saturating_sub(self.acs_t0) >= ACS_MAX_MS || self.acs_flat >= ACS_FLAT_N || ac < ACS_FLOOR * lim;
         if done {
             self.acs_t0 = 0;
-        } else if end {
-            self.acs_prev = ac;
         }
         !done
     }
@@ -2870,11 +2875,11 @@ impl Dmm {
             _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
         let acdc = self.acdc;
-        // AC+DC after a range change: the AC part settles first (ACS_RATIO);
+        // AC+DC after a range change: the AC part settles first (ACS_STEP);
         // its results are discarded until then (the first good one seeds
         // the EMA), and they move no range.
         let was = self.acs_t0 != 0;
-        let settling = acdc && self.ac_settle_step(now, ac, lim, self.phase_n == 0);
+        let settling = acdc && self.ac_settle_step(now, ac, lim);
         let seed = acdc && was && !settling;
         // AC+DC: every other result after the settle deadline goes through
         // the EMA (thr = the plain-AC window, a 0.25 V / 0.35 mV / 0.15 A),
