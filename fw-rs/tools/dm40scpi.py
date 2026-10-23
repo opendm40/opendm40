@@ -509,6 +509,9 @@ def do_fast(link, args):
         switch(link, args.conf)
     ad2 = args.source == 'ad2'
     link.query('LOG:STAT OFF')
+    # An error another client left in the queue ("Data stale" of a READ?)
+    # would fail the check below (as in do_stream): clear it first.
+    link.query('*CLS')
     link.query('LOG:SOUR %s' % ('AD2' if ad2 else 'AD1'))
     if args.chop:
         link.query('LOG:CHOP %s' % args.chop.upper())
@@ -534,7 +537,9 @@ def do_fast(link, args):
             time.sleep(0.5)
     except KeyboardInterrupt:
         link.query('LOG:STAT OFF')
-        while st and st[0] < 5:
+        # (Ctrl-C before the first LOG:DISK? answer: st was still empty)
+        st = st or [int(x) for x in link.query('LOG:DISK?').split(',')]
+        while st[0] < 5:
             time.sleep(0.5)
             st = [int(x) for x in link.query('LOG:DISK?').split(',')]
     if not args.quiet:
