@@ -80,6 +80,13 @@ impl Overlay {
             | Overlay::PowJob { until, .. } => until,
         }
     }
+
+    /// A confirm / dialog (every overlay but a toast): it takes every
+    /// gesture, and a toast does not replace it (`App::toast` keeps the
+    /// toast for after it).
+    pub fn modal(&self) -> bool {
+        !matches!(self, Overlay::Toast { .. })
+    }
 }
 
 fn inside(r: (u16, u16, u16, u16), x: u16, y: u16) -> bool {

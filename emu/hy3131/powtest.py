@@ -111,9 +111,24 @@ SC = {
     # The reset confirm answered 13 s after the long press on the energy box
     # (device check 5f14d38: the 10 s auto-cancel ate that Yes). AC+DC: the
     # parts layout's lower row (170..188, doc 3.17): the long press at y 179.
+    # Pure DC on AC+DC raises the DC? hint ~2 s after the first reading (5..9 s,
+    # with the emulator's speed): its toast (40,132 400x56) covers the long
+    # press point for 1.5 s and takes that touch (77ae236, a toast is not
+    # modal but a touch on its box is the toast's). So the long press waits
+    # for the hint + 2 s (GATE; at 8 s at the earliest, 14 s at the latest)
+    # and Yes follows 13 s after it.
     'ereset': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF', 'POW:ENER:RES'], 40, [
         (0, 'open;vsrc:10;isrc:1', lambda d: d['secs'] > 8, 'energy runs, the confirm up from 8 s'),
-        (22, None, lambda d: d['secs'] < 20, 'Yes at 21 s (13 s after the long press) reset the energy'),
+        (22, None, lambda d: d['secs'] < 20, 'Yes 13 s after the long press reset the energy'),
+    ]),
+    # A toast while the confirm is up (the DC? hint when the AC part goes at
+    # 12 s, 4 s after the long press) must not replace the confirm: the Yes
+    # at 21 s still resets (it hit the bare page before: the toast took the
+    # overlay slot). The hint is shown after the confirm.
+    'ereset-hint': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF', 'POW:ENER:RES'], 40, [
+        (0, 'open;vsrc:10,ac=1,f=50;isrc:1', lambda d: d['secs'] > 0 and d['X']['SYST:ALER?'] == 'NONE', 'AC part on V: no DC? hint; the confirm up from 8 s'),
+        (12, 'open;vsrc:10;isrc:1', lambda d: d['X']['SYST:ALER?'] == 'DC', 'pure DC from 12 s: the DC? hint asserts under the confirm'),
+        (22, None, lambda d: d['secs'] < 20, 'Yes at 21 s reset the energy (the hint toast did not replace the confirm)'),
     ]),
 }
 
@@ -287,11 +302,17 @@ SC['bt'] = (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 40, [
 ])
 EXTRA = {'t1-yy': ['DBG:POW:RAW?', 'DBG:POW:ROW?'], 't3-cycle': ['DBG:POW:RAW?'],
          'zero': ['POW:ZERO?'], 'vcal': ['POW:VOLT:CAL?'], 'vcal-clip': ['POW:VOLT:CAL?'], 'dcad1': ['POW:COUP?'], 'auto': ['POW:COUP?'], 'ac': ['POW:COUP?'],
-         'istep': ['SYST:ALER?'], 'entry': ['POW:COUP?', 'POW:BURD:STAT?', 'SYST:ALER?'], 'ac-floor': ['SYST:ALER?'], 'acdc-floor': ['SYST:ALER?'], 'istep-ua': ['SYST:ALER?'], 'iman-ovl': ['SYST:ALER?'],
+         'istep': ['SYST:ALER?'], 'ereset': ['SYST:ALER?'], 'ereset-hint': ['SYST:ALER?'], 'entry': ['POW:COUP?', 'POW:BURD:STAT?', 'SYST:ALER?'], 'ac-floor': ['SYST:ALER?'], 'acdc-floor': ['SYST:ALER?'], 'istep-ua': ['SYST:ALER?'], 'iman-ovl': ['SYST:ALER?'],
          'scpi': ['MEAS:POW:PFAC?', 'READ?', 'CONF?', 'POW:LIM?', 'POW:CYC?', 'FUNC?'],
          'limits': ['CALC:LIM:FAIL?', 'CALC:LIM:STAT?', 'CALC:LIM:UPP?'],
          'phasecal-ref': ['POW:PHAS:CAL RES|SYST:ERR?', 'POW:PHAS:CAL?'], 'bt': ['FUNC?']}
-ACTIONS = {'ac': {46: 'POW:COUP ACDC'}, 'acdc-floor': {44: 'POW:BURD:STAT ON'}, 'ereset': {8: 'DBG:DRAG 58,179,58,179,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'},
+# Actions that wait for a condition: (predicate on a row, delay s, latest s):
+# the schedule moves so that its first action comes `delay` after the first
+# row where the predicate holds (never earlier than scheduled; at `latest`
+# without it), keeping the spacing.
+GATE = {'ereset': (lambda d: d['X'].get('SYST:ALER?') == 'DC', 2.0, 14.0)}
+ACTIONS = {'ac': {46: 'POW:COUP ACDC'}, 'acdc-floor': {44: 'POW:BURD:STAT ON'}, 'ereset': {8: 'DBG:DRAG 58,179,58,179,20,1500', 21: 'DBG:TAP 310,204'},
+           'ereset-hint': {8: 'DBG:DRAG 58,179,58,179,20,1500', 21: 'DBG:TAP 310,204'}, 'phasecal': {20: 'POW:PHAS:CAL REAC'}, 'phasecal-ref': {8: 'POW:PHAS:CAL', 32: 'POW:PHAS:CAL'}, 'zero': {16: 'POW:ZERO'}, 'vcal': {12: 'POW:VOLT:CAL', 36: 'POW:VOLT:CAL', 54: 'POW:VOLT:CAL'},
            'vcal-clip': {6: 'POW:VOLT:CAL'}}
 
 
@@ -366,6 +387,7 @@ def run(name):
             print('attach:', type(e).__name__, e, flush=True)
             time.sleep(1)
     acts = dict(ACTIONS.get(name, {}))
+    gate = GATE.get(name)
     bt = None
     if bt_port:
         import socket
@@ -423,8 +445,13 @@ def run(name):
                     pass
                 rows.append(d)
                 print('%s %6.2f %s %s %s ph %d' % (name, t, row['FETC:POW:ALL?'], d['VR'], d['IR'], d['PH']), flush=True)
+                if gate is not None and (gate[0](d) or t >= gate[2]):
+                    shift = max(0.0, (t + gate[1] if t < gate[2] else t) - min(acts))
+                    acts = {ta + shift: c for ta, c in acts.items()}
+                    print('%s %6.2f gate: actions %s' % (name, t, ' '.join('%.2f' % ta for ta in sorted(acts))), flush=True)
+                    gate = None
                 for ta in sorted(acts):
-                    if t >= ta:
+                    if t >= ta and gate is None:
                         tm.write(acts.pop(ta))
         except Exception as e:
             print(name, 'link ended:', e, flush=True)
