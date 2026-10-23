@@ -233,8 +233,10 @@ SECTIONS
          * App::range_si: region B, asked during fast sessions / the Wave
          * view (device a0985e4: DBG:PROF? 12 us, a sample lost at 38400;
          * emu/fastlogtest.py --region-c --host-read, emu/hy3131/
-         * wavetest.py's whole-run region C check). */
-        *(.text.*7dm40_fw9log_scale*);
+         * wavetest.py's whole-run region C check). Nor LOG:SCALe?
+         * (main.rs log_scale: a host scales the session's data with it;
+         * fastlogtest --poll, 2026-10-23: region C code and its literal
+         * loads while streaming). */
         *(.text.*7dm40_fw4scpi7dcv_arg*);
         /* SCPI ranges / resolution: one command each. */
         *(.text.*7dm40_fw4scpi9range_cmd*);
