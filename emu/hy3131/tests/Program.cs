@@ -98,6 +98,7 @@ namespace Hy3131Tests
             HwSpi();
             TimedSpi();
             Rail();
+            Ad1Mix();
             Console.WriteLine("{0} passed, {1} failed", passes, failures);
             return failures == 0 ? 0 : 1;
         }
@@ -1100,6 +1101,48 @@ namespace Hy3131Tests
                 across++;
             }
             Check(m.Chip.TornAd2 - tw > 150, "frames across an edge: counted torn (TornAd2)", (m.Chip.TornAd2 - tw) + " of " + across);
+        }
+
+        /// ad1mix:1 (HY3131.cs Ad1Mix): a DC row written at the same R22 mid-conversion (60 V -> 6 V,
+        /// both OSR 8192) leaves the next conversions a sinc^3 mix of the 60 V tap and the 6 V tap;
+        /// a row that changes R22 restarts AD1 and is clean; ad1mix:0 is clean either way.
+        private static void Ad1Mix()
+        {
+            foreach(var mix in new[] { true, false })
+            {
+                var m = NewChip();
+                m.Chip.SetInput("dcv:1.0" + (mix ? ";ad1mix:1" : ""));
+                m.Configure(F1R1, 1);                       // 60 V, R22 0 -> 0x15: restart at t0
+                var t0 = m.Now; var p = m.Chip.Core.Ad1Period;
+                m.Now = t0 + 5.01 * p; m.Read1(0x1E);
+                var c60 = m.ReadS24(0);
+                m.Now = t0 + 5.5 * p;
+                m.Configure(F1R0, 1);                       // 6 V at the same R22, half way through
+                var got = new double[4];
+                for(var k = 0; k < 4; k++)
+                {
+                    m.Now = t0 + (6.01 + k) * p; m.Read1(0x1E);
+                    got[k] = m.ReadS24(0);
+                }
+                var c6 = got[3];
+                Near(c6 / (double)c60, 10.0, 0.05, (mix ? "ad1mix:1" : "ad1mix:0") + ": 6 V tap code = 10 x the 60 V one (3rd period after)");
+                if(mix)
+                {
+                    // old share of a sinc^3: 2.5 / 1.5 / 0.5 periods -> 0.979 / 0.5 / 0.021
+                    Near((got[0] - c6) / (c60 - c6), 0.979, 0.01, "  1st conversion after: 98 % the old tap");
+                    Near((got[1] - c6) / (c60 - c6), 0.5, 0.01, "  2nd: half");
+                    Near((got[2] - c6) / (c60 - c6), 0.021, 0.005, "  3rd: 2 %");
+                }
+                else
+                    Near(got[0] / c6, 1.0, 0.001, "  1st conversion after: clean");
+                // an R22 change restarts AD1: clean from the first conversion
+                m.Configure(F1R1, 1);
+                m.Now += 4 * p;
+                m.Write(0x22, 0x17); m.Write(0x22, 0x15); var t1 = m.Now;
+                m.Configure(F1R0, 1);
+                m.Now = t1 + 1.01 * p; m.Read1(0x1E);
+                Near(m.ReadS24(0) / c6, 1.0, 0.001, "  after an R22 restart: clean");
+            }
         }
 
         private static void Rail()

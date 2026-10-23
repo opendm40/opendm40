@@ -1922,6 +1922,16 @@ Steps 5.0 / 5.8 / 6.3 / 7.0 / 6.3 / 5.8 / 5.5 / 4.0 / 6.5 / 5.0 V, 12 s each (`a
 
 A DC step itself gives the AC path a large AC part for about a second: up to 3.4 V for a 0.8 V step. The calibrator's own step is clean within 0.3 s (`calstep.py`, DC V on 60 V). hypot then exceeds 6 V, and on 5.8 -> 5.0 V the meter went 6 -> 60 V at 0.25 s and back to 6 V at 5.98 s. That is one excursion per step, not a hunt. During it READ? held old values (3).
 
+### Follow-up: branch settle-fix (not on the device yet)
+
+- **1 (0.781 V), cause:** in `dc781.json` the READ?s at 0.31 / 0.56 s are the 600 V and 60 V conversions that made the two steps (published as each step is taken); the bad one at 0.81 s is the first conversion read on 6 V, and in every bad try the next reading came 10 ms later (0.81 / 0.82 s, good tries 0.81 / 0.91 s). The 600 V row (R22 0x17) -> 60 V row (0x15) restarts AD1; the 6 V row 250 ms later is 0x15 again with ENAD1 kept, so AD1 is not restarted and its decimation filter still holds 60 V-tap samples; the 6 V deadline falls on a conversion end and the poll sometimes reads the older, mixed one. From 60 V (0x17 -> 0x15) AD1 restarts: 0 of 10. Fix: the first conversions on a new range must agree pairwise within 0.5 % (`vet_ad1`). Emulator repro: HY3131 model `ad1mix:1` + `emu/hy3131/autorangetest.py` (base build: 0.55 / 0.85 V readings with the device's 1 ms pair signature; fixed build: none).
+- **2 (DC part 53 %):** cause not proven (MF and SCPI call the same `set_range`; the MF path delays the DMM poll); the AC+DC DC phase vets its first 8 results on a new range, so such a result is held.
+- **3 (READ?):** decided NaN: READ? / FETCh? answer +9.91E37 from a range / function change to the first reading of the new range (`Dmm::reading_pending`).
+- **4 (tail):** flat = fell <= 0.1 % and, while still falling, <= 0.05 % of the decay left; cap 5 s, also in the DC phase.
+- **5 (DC step):** the same settle after an input step (DC part moved > 0.5 % of the range, or an AC result > 1.5 x the AC part + 0.5 %), with the AC part held and no range move on the discarded results.
+
+Retest list: TODO items of this section (each has its device check).
+
 ### State at the end
 
 - **Device:** DMM page, DC V, AUTO+ (`VOLT:RANG:AUTO?` 1), rate SLOW, `CONF?` "VOLT +6,+1E-05", `VOLT:COUP?` DC, method A (`end.png`), as found. LOG restored: AD1 / 4800 / HOST / `LOG:DUR` 60 / CHOP 1 / OSR 3 / `LOG:STAT` 0 (`disk.py` and `p2.py` had left LOG:SRAT 76800). Generator `OUTP?` 0 throughout; its settings were restored after dm40cli (Square 2 MHz, 3 V, 1.5 V offset, 50 %). The scope's timebase / trigger were left as ngscopeclient / dm40cli set them. The main menu showed for part of the session (MENU from the Wave view); one tap meant for the range page landed on its Multimeter tile, and the next on the DMM page's chart edge: nothing changed (REL off, settings as before). Settings not touched (volume 0, backlight 10 %, Dim / Shutdown Never). `SYST:ERR?` empty.

@@ -60,6 +60,15 @@
 //!     reading of the new function would be filed under the old one. An
 //!     autorange step (V <-> mV, the uA / mA / A shunts) is no function
 //!     change (func_id: FUNCtion? names the same function).
+//!   - a range change (manual, SCPI, the range page, an autorange step;
+//!     also a function change) with no reading of the new range yet
+//!     (Dmm::reading_pending: the AC+DC / AUTO settle of the AC part, 3-5 s;
+//!     the DC conversions vetted after a step, 0.1-0.4 s): READ? answers
+//!     the first reading of the new range if it comes within SCPI_QUICK_MS,
+//!     else +9.91E37 and "Data stale" as at the entry, never the latest
+//!     reading from before the change (device bab5dd4: READ? held a 3.39 V
+//!     transient for 5 s through an AC+DC autorange step); FETCh? answers
+//!     +9.91E37 at once (not while HOLD freezes the readout).
 //!   - no late reply to a query the host gave up on: USBTMC
 //!     INITIATE_ABORT_BULK_IN / INITIATE_CLEAR, or a new command ("Query
 //!     INTERRUPTED").

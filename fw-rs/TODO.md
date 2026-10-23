@@ -1298,32 +1298,73 @@ Firmware:
       p5.py Wave view 1 / 2 ms/div: max_lat 280 / 260 ns, dropped +0, 0 / 0 / 0. The range commands answer
       (VOLT:RANG? / 60 / SENS:VOLT:RANG:AUTO ON / VOLT:RES? / CURR:DC:RANG? = +9.91E37 + "Settings conflict"
       while in V, as documented).
-- [ ] DC V AUTO+ from 600 V or 1000 V (VOLT:RANG:AUTO ON = two steps down to 6 V), 1 V in: one reading of
+- [x] DC V AUTO+ from 600 V or 1000 V (VOLT:RANG:AUTO ON = two steps down to 6 V), 1 V in: one reading of
       0.767-0.790 V (77-79 %) in 5 of 35 tries (600 V: 3 of 20 + 1 of 5, 1000 V: 1 of 10; from 60 V, one
       step: 0 of 10). It is the second reading on 6 V, ~0.8 s after the command; the chart MIN records it
       (device bab5dd4, device-check doc "bab5dd4" B4). Not from the averaging window as such (write_config
       resets it on every step). Suspects, unchecked: a conversion that straddles a register write (the OSR
       write in `osr()` after the first 6 V conversion) or the 250 ms autorange settle being shorter than a
       SLOW conversion. Not fixed; needs a raw AD1 code trace around the second step.
-- [ ] AC+DC / AUTO coupling, 1 V DC, a range change by the MF page 6 -> 60 V: the DC part read 0.526 /
+      Cause (from dc781.json, branch settle-fix): the 600 / 1000 V row at R22 0x17 -> the 60 V row at 0x15
+      restarts AD1; the 6 V row 250 ms later is again 0x15 with ENAD1 kept, so AD1 is NOT restarted and
+      its decimation filter still holds 60 V-tap samples. The bad READ? (0.81 s) is the first conversion
+      read on 6 V (0.31 s = the 600 V conversion, 0.56 s = the 60 V one that made the second step), and in
+      the bad tries the next one came 10 ms later (0.81 / 0.82 s; good tries 0.81 / 0.91 s): the 6 V
+      deadline fell on a conversion end and the poll read the older of the two, still mixed. From 60 V
+      the row changes R22 (0x17 -> 0x15), AD1 restarts: clean. Fixed (dmm.rs `vet_ad1`, VET_*): the first
+      2 conversions on a new range (DC V / mV / A) count only when each agrees with the one before within
+      0.5 % (or 4000 codes); others are held (no reading, no step down, not averaged), at most 4.
+      Costs ~1 conversion per range step. Emulator: HY3131 model option ad1mix:1 (the filter memory, a
+      sinc^3 over 3 periods; model unit test Ad1Mix) and emu/hy3131/autorangetest.py: the base build gives
+      0.55-0.85 V readings from 600 / 1000 V (two 1 ms apart, the device signature), the fix none. Device check: dc781.py (600 V x20, 1000 V x10,
+      60 V x10): no READ? / CALC:AVER:MIN? below 0.99 V on 6 V; time to the first 6 V reading +0.1-0.3 s.
+- [x] AC+DC / AUTO coupling, 1 V DC, a range change by the MF page 6 -> 60 V: the DC part read 0.526 /
       0.528 V (53 %) for one DC phase (~1 s, READ? 0.526 V; in AUTO shown as AUTO,DC 0.528 V) in 2 of 4
       such changes in the first run (one AC+DC, one AUTO), then 0 of 9 in two AC+DC repeats (READ? or
       DBG:ACDC:STAT? polling); 0 of 30 SCPI changes and 0 of 13 MF 60 -> 6 V. Same signature as the 25-51 % partial conversions of the 8087c7d same-range item.
       Rare, cause open (device bab5dd4, device-check doc "bab5dd4" B5).
-- [ ] AC+DC: READ? during the AC settle after a range change answers the reading from before the change
+      Branch settle-fix: the MF and SCPI paths both call Dmm::set_range; the difference is timing (the
+      tap and the range page's redraw delay the DMM poll, so the writes after a result, a phase switch or
+      acdc_osr's one R22 = 0x17 in the first DC phases on a new range, land mid-conversion). Not proven.
+      Guarded whatever the cause: the AC+DC DC phase vets its first 8 results on a new range (`vet_ad1`,
+      through the second DC phase); a result that disagrees with the one before by > 0.5 % is held (the DC
+      part stays the previous one, the phase count goes on; a phase with no DC part yet gets one more
+      result, and the AC phase does not step down before the DC part is known). Device check: dc5.py MF 6 -> 60 V x10 in
+      AC+DC and AUTO with DBG:ACDC:STAT? at 25 Hz: no DC part below 0.99 V.
+- [x] AC+DC: READ? during the AC settle after a range change answers the reading from before the change
       (3-6 times, 0.85 s apart, until the first fresh one 3-6 s later), not +9.91E37 as the tmcnl-fix item
       expected ("READ? NaN after 0.85 s, as at entry"; scpi.rs: "the latest one if none comes within
       SCPI_QUICK_MS"). Harmless on a steady input; after an autorange step it held a transient value:
       AC+DC autorange, calibrator 5.8 -> 6.3 V, READ? 3.3885 V for 5 s (device bab5dd4, B5). Decide: drop the
       latest reading on a range change in AC+DC (NaN until the first fresh one) or keep the doc's rule.
-- [ ] AC+DC method A settle (ACS_STEP 1 %): on the 40 Hz square 600 -> 60 V the AC part came back as
+      Decided (owner): NaN. Branch settle-fix: Dmm::reading_pending from any range / function change
+      (manual, SCPI, range page, autorange step) to the first reading of the new range; READ? that
+      expires then answers +9.91E37 + "Data stale" (main.rs), FETCh? +9.91E37 at once (not under HOLD);
+      scpi.rs header. Emulator: autorangetest's AC+DC part (no READ? number before CALC:AVER:COUNt? > 0).
+      Device check: tl.py after VOLT:ACDC:RANG 60 / 6 and the MF page: READ? +9.91E37 until the first
+      fresh reading, SYST:ERR? "Data stale"; FETCh? +9.91E37 in the gap; libsigrok `-c range=60V
+      --samples 5` in AC+DC still gets readings (it skips the NaN).
+- [x] AC+DC method A settle (ACS_STEP 1 %): on the 40 Hz square 600 -> 60 V the AC part came back as
       4.821 / 4.790 V (true 4.768) and READ? 6.783 / 6.762 V (+0.55 / +0.24 %) for 1.7 s: the HPF tail falls
       < 1 % per result and passes the "flat" test, as the TODO feared. 60 -> 600 and 6 -> 60 V were right
       (device bab5dd4, B5). Options: a stricter step (0.2 %) or a minimum time after the change.
-- [ ] AC+DC autorange: a DC step of 0.5-0.8 V gives an AC part of up to 3.4 V for ~1 s (the AC path's HPF
+      Branch settle-fix (`acs_flat`, docs/acdc-stock-vs-fwrs.md 12): flat = fell by <= 0.1 % (ACS_STEP)
+      and, with two falls in a row in one AC phase, the rest of the decay d q / (1 - q) <= 0.05 %
+      (ACS_REM); ACS_MAX_MS 6 -> 5 s, and the cap also ends the settle in a DC phase with the last AC
+      result (`ac_settle_cap`): gap < 6 s. On the device's numbers 4.821 / 4.790 are not flat, the next
+      phase's 4.7678 V is (host test meter-test acs_flat_tail_and_steady). Device check: sq5.py (40 Hz
+      square, AC+DC, 60 <-> 600, 6 -> 60 V): every fresh READ? within 0.1 % of 6.746 V, gap <= 6 s; the
+      1 V DC changes of dc5.py: gap 3-5 s (was 3.0-4.3 s).
+- [x] AC+DC autorange: a DC step of 0.5-0.8 V gives an AC part of up to 3.4 V for ~1 s (the AC path's HPF
       on the step; the calibrator's own step is clean within 0.3 s), hypot > 6 V, one up-range and back
       after the 6 s settle (5.8 -> 5.0 V: on 60 V from 0.25 to 5.98 s). One excursion, no hunting (device
       bab5dd4, B5). Could hold the up-range while the AC part falls fast.
+      Branch settle-fix: the same settle on an input step: a DC part that moved by > 0.5 % of the range
+      between two DC results (ACS_DC_STEP), or an AC result > 1.5 x the AC part + 0.5 % of the range
+      (ACS_JUMP, a step seen in the AC phase first). Its AC results are discarded and move no range; AC+DC
+      keeps reading with the AC part held. Device check: ar6.py / ar6b.py (DC 4..7 V, AC+DC AUTO range):
+      no 6 -> 60 -> 6 V excursion on the 5.8 -> 5.0 V or 6.3 -> 5.8 V steps, a step across 6.0 V still
+      moves the range once; READ? follows the DC step within ~1 s with the AC part held.
 
 - [ ] Fast logger cosmetics (device 4c4b489): LOG:DISK? keeps naming the file of a session stopped in its
       trial (the file is removed); its tpp fields keep the last probe's 381 / 387 in a 38400 / 4800 / AD1
