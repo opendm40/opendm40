@@ -2350,8 +2350,8 @@ fn main() {
                     "range0-103" => "m03e-range-v-cpl-pressed",
                     "range1-105" => "m03f-range-a-fuse-pressed",
                     "range1-102" => "m03g-range-a-ok-pressed",
-                    "pwset2" => "p19-power-settings-pressed",
-                    "pwset28" => "p19b-power-settings-cpl-pressed",
+                    "pwset2" => "p31-power-settings-pressed",
+                    "pwset28" => "p31b-power-settings-cpl-pressed",
                     _ => "",
                 };
                 if !file.is_empty() {
