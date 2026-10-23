@@ -818,6 +818,13 @@ impl Sentinel {
         self.win_both = 0;
     }
 
+    /// End a blank now (`dmm.rs` `probe_rewrite`: a row rewrite that is
+    /// no switch).
+    pub fn unblank(&mut self, now: u64) {
+        self.blank_until = now;
+        self.win_t0 = now;
+    }
+
     /// Samples are blanked now (`blank`, `rearm`).
     pub fn blanked(&self, now: u64) -> bool {
         now < self.blank_until
@@ -922,8 +929,10 @@ impl Sentinel {
     /// conversion since the restart: max < min) is no hit.
     pub fn sample_peak(&mut self, now: u64, pkmin: i32, pkmax: i32) {
         self.pk = (pkmin, pkmax);
-        if self.blanked(now) {
-            // (the caller restarts the hold; the alternation stays put)
+        if self.blanked(now) || pkmax < pkmin {
+            // Blanked, or an empty hold (no conversion since a restart: a
+            // harvest right after `dmm.rs` cleared it) - no window: the
+            // caller restarts the hold, the alternation stays put.
             return;
         }
         self.samples = self.samples.wrapping_add(1);
