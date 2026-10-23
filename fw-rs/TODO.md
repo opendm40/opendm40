@@ -1923,16 +1923,38 @@ Firmware:
             open; copies exact (SPIFLASH.BIN ~348 KB/s, SCOP000.CSV ~78 KB/s, FIRMWARE.BIN ~834 KB/s); Eject ->
             "Safe To Remove" (then remounted, item below). Still open: the UA while mounted on Windows (a new file
             + F5), macOS, reload.sh.
-      - [ ] Windows Eject does not keep the volume ejected (device b6909d6): the shell's Eject sends START STOP
+      - [x] Windows Eject does not keep the volume ejected (device b6909d6): the shell's Eject sends START STOP
             UNIT, and Windows shows "Safe To Remove". msc.rs then only records it (STOP_UNIT, msc.rs:585, used by
             recovery), so the medium is still present and E: is mounted again at the next access. Harmless on the
             read-only volume. Option: report NOT READY / 3A (as DBG:VDISK:EJECT does) until the next bus reset or
             a new medium (refresh), so the drive stays ejected. Check first that a Linux `eject` / udisks
             power-off and the "PC can edit" commit at the eject still work.
-      - [ ] Windows: the USBTMC interface (MI_00, class FE/03/01) has no in-box driver. It shows as "DM40
+            Done (9cac903; native-boot.md "SCSI" Eject): LoEj=1 Start=0 -> 02/3A/00 for everything but INQUIRY /
+            REQUEST SENSE / START STOP / PREVENT until a bus reset / unconfigure or a host load (LoEj=1 Start=1:
+            one UA 06/28/00); plain STOP / START and power conditions ignored; any 0x1B still sets STOP_UNIT
+            (recovery-usb unchanged). DBG:VDISK:EJECT? = ejected, 0x1B count, last CB[4]. Found on the way and
+            fixed: `cp dm40fw.bin` + eject at once on Linux lost the install (the Allow's `release` dropped the
+            staged file before its SETTLE_MS check; emulator kernel path, WR? fw_ok 0); the session end now waits
+            for the check (END_WAIT_MS 1.5 s, frozen meanwhile; fatren-test vwrite "Allow at once").
+            Emulator (9cac903): mscresettest 9/9 cases PASS (stop-start, eject-load: TUR / READ / READ CAPACITY /
+            READ FORMAT CAPACITIES 02/3A/00, INQUIRY answers, kept over a Bulk-Only reset, load -> one UA;
+            eject-port: back after a port reset); emu/ejecttest.py PASS (Linux usb-storage + udisks over vhci_hcd:
+            `gio mount -e` -> ejected, size 0, MediaAvailable false, no re-mount, `udisksctl mount` fails;
+            re-plug -> back, README equal; `udisksctl power-off` sends 1B/00 = not an eject, the USB device
+            removed, re-plug -> back; PC can edit: cp of the image + `gio mount -e` at once -> committed, the meter
+            asks, medium ejected, re-plug -> back and still writable); fatren-test, all tools/*/run.sh PASS.
+            Note: udisks merges two disks with the same vendor / model / serial ("ALIENTEK DM40 files" 0001) into
+            one multipath drive, so two DM40s (or the emulator next to the real meter) share one udisks drive
+            and a drive-level Eject / PowerOff may act on the other one; ejecttest.py rewrites the emulator's
+            serial in its proxy. Open: a per-unit USB serial (from the chip UID)?
+            Device retest pending: Linux (gio / Nautilus Eject -> stays ejected, re-plug -> back; PC can edit +
+            cp + Eject at once -> Install? dialog); Windows 11 VM (Explorer Eject -> E: stays without medium,
+            re-plug -> back).
+      - [x] Windows: the USBTMC interface (MI_00, class FE/03/01) has no in-box driver. It shows as "DM40
             multimeter (dm40-fw)" under Other devices with code 28 (device b6909d6). The MSC interface works
             regardless. Document it in README / Help: for SCPI on Windows, use NI-VISA / Keysight IO Libraries
-            (USBTMC), or WinUSB via Zadig + pyvisa-py.
+            (USBTMC), or WinUSB via Zadig + pyvisa-py. Done (9cac903): README "USB on a PC", docs/bt-scpi.md
+            "USBTMC on Windows" (not tried on Windows yet; Help text not changed).
       - [x] Follow-ups (2026-10-22, src/vwrite.rs; docs/native-boot.md "Host writes"): the volume is
             writable (no WP bit; DBG:VDISK:RO 1 = the read-only volume as before). Every 512-byte WRITE is
             diffed against the generated sector: a LOGS / SCOPE / SHOTS delete (entry 0xE5 + chain freed ->
