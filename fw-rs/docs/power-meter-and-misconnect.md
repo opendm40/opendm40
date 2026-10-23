@@ -1611,7 +1611,7 @@ carried in `Reading.alert`:
 
 | alert | condition | hysteresis | UI | sound |
 |---|---|---|---|---|
-| **A-JACK** (red) | mode not a current mode and the A-jack sentinel sees > 0.44 mA (comparator) / > 0.5 mA DC or peak (AD1) | assert after 2 consecutive polls >= 100 ms apart; clear after 1.0 s below | badge "A-JACK" (red, above HV in `strip_data` priority, below HOLD), toast "Current in A jack - leads in A while measuring V?" once per assertion, the main readout keeps measuring | 3 x 50 ms every 2 s while asserted (stock key beep = 50 ms; `App::beep`), honours the alert volume floor (user-feedback UF-28) |
+| **A-JACK** (red) | mode not a current mode and the A-jack sentinel sees > 0.44 mA (comparator) / > 0.5 mA DC or peak (AD1) | assert after 2 consecutive polls >= 100 ms apart; clear after 1.0 s below | badge "A-JACK" (red, above HV in `strip_data` priority, below HOLD), toast "Current in A jack - leads in A while measuring V?" once per assertion, the main readout keeps measuring | 3 x 50 ms every 2 s while asserted (stock key beep = 50 ms; `App::beep`), honours the alert volume floor (user-feedback UF-28); **since 2026-10-24 the danger alarm of 4.10** (loud two-tone, whatever the volume) |
 | **OVERLOAD** (red) | current mode, uA/mA shunt, OL on the first conversion | immediate | OL + badge "OVERLOAD", PE -> A shunt (4.3, if adopted) | 1 x 300 ms |
 | **V-JACK?** (amber) | current mode, |I| < 0.5 % of range for > 1 s **and** the V sentinel sees >= 21 V (comparator) / >= 2 V (AD1 in AC A) | assert 1 s, clear 0.5 s | badge "V-JACK?", toast "Voltage on V/ohm, no current: leads in the V jack?" | none (informational) |
 | **LIVE?** (amber) | ohm / diode / cont: PB0 below -20.8 mV or toggling for > 0.3 s | 0.3 s / 1 s | badge "LIVE?", toast "Voltage on the circuit - power it off" | 1 x 100 ms |
@@ -2108,6 +2108,137 @@ pressed rows), Help 5/7 "Jack/A-lead alerts".
 7. With the lead really in A and a current flowing after A -> V (a 1 mA
    source): the reminder, then A-JACK (red badge, its toast, 3-beep
    pattern) within ~0.3 s: A-JACK wins.
+
+### 4.10 Danger alarm (fw-rs, 2026-10-24): loud, whatever the volume
+
+Owner request 2026-10-24: a wrong connection that is actually dangerous
+also beeps at **maximum** volume, overriding the key / alert volume (the
+owner keeps it at 0 %). Code: `src/danger.rs` (pattern, event rules, the
+10 A rule; host tests), `App::alert` / `App::alert_beep` / `App::alarm_hit`
+(`src/app.rs`). `sentinel.rs` is unchanged: the alarm reads the alert of
+each reading and the pub `Sentinel::probe_a`.
+
+**The stock has nothing to copy.** The V2.6 RE notes
+(`firmware/re/analysis/lcd_buzzer_v2_6.h`, `dmm_v2_6.h`) show no misconnect
+alarm at all (no jack sensing, 4.1); the buzzer is TIM14 CH1 (PA7) at
+3.57 kHz (PSC 4, ARR 11200), loudness = duty, `min(v/3, 0.99) x 0.5`, so
+the stock's loudest is 49.5 % duty at volume 100 %; it beeps from a 2-entry
+queue in the 1 kHz TIM7 ISR (50 ms per key, 150 / 300 ms in the DMM).
+Stock keys (MENU, RUN, AUTO, MF; the PD6 power key) always beep and act;
+there is no cancel / mute key.
+
+**Classification.**
+
+| alert / cue | dangerous? | why |
+|---|---|---|
+| **A-PROT** (4.8) | **yes**, while its current flows | a source across A-COM pushed >= 125 mA (0.74 W in the 47.5 ohm resistor) for 0.4 s or >= 300 mA at once: the firmware moved the A jack to the 10 mohm shunt, so a stiff source now runs into the 10 A fuse, and above 30 V the MOSFETs themselves are at risk (4.8 "Limits"). Latched until the user acts and the current is gone; in DC V / mV the probe stays in the row and reads the current, so the alarm follows the probe (`probe_a` >= `APROT_GONE_A` = 50 mA); the latch without current is only waiting for the user (badge, no alarm). Outside DC V / mV the probe is not read and the latch itself counts (the cap below applies) |
+| **A-JACK** (4.6) | **yes** | the leads are in A / COM while a V / ohm / ... function is selected: the meter is a ~48 ohm path in series with whatever the probes touch. Probing a supply "for volts" is the classic way meters blow fuses and resistors; in AC V / mV, ohm, temperature, Hz, continuity, diode, cap and AC+DC there is **no probe** (4.8 "Limits"), so A-JACK is the only warning before a 12-24 V source cooks the 47.5 ohm resistor: A-PROT can never fire there. Also: a reading acted on is wrong (the meter shows the V function's idea of a circuit it is in series with), and a function / range change made to "fix" it can switch the A jack to a 10 mohm or 0.5 ohm shunt across a live source |
+| **current above the 10 A rating** | **yes** (new condition, no badge of its own) | the DMM's A functions reading > 10 A (or OL on the 10 A range itself: DC mode 7 / AC mode 4 range 1; AC+DC: the total), the power meter's I channel on its 10 A range (ik 5) reading > 10 A or OL, for >= 1 s (`I10_ASSERT_MS`: a motor / lamp / capacitor inrush is the fuse's normal life). The manual's limit is 10 A behind one 10 A ceramic fuse (4.7): above it the shunt and the fuse heat for as long as it lasts, and a fuse carries 110 % for a long time, so the meter overheats before anything opens. OL on a lower range (manual 6 A, the uA / mA shunts) says nothing about the amps and is not counted |
+| OVERLOAD / OVLD, amber 10A (4.7) | no | the meter protected itself (uA / mA shunt -> 10 A shunt) and measures fine: its one 300 ms beep at the key / alert volume stays |
+| power meter current limit expired ("Current too high", 3.13) | no | a user-set thermal budget (default 6 A for 30 s), not a hardware limit: its 3 x 50 ms every 2 s at the key / alert volume stays (above 10 A the rule above sounds anyway) |
+| V-JACK? (amber), LIVE? (amber), DC? / AC? / FUSE? (grey) | no | advisories: no current flows through the meter (V-JACK?, hints) or the source is in the circuit under test, not in the meter (LIVE?: 100 ms beep as before) |
+| "Leads in A jack?" reminder (4.9), fuse check (4.7) | no | reminders / a guided test: their beeps are unchanged |
+
+**Pattern** (`danger::tone_at`): a burst of four 125 ms tones, high / low /
+high / low (3.57 kHz = the stock ARR 11200, and 2.86 kHz = ARR 14000, a
+major third under it), then 500 ms quiet: one burst per second, 50 % of the
+time sounding, unlike any other beep of the meter. Duty 49.5 % of each
+tone's period (CCR1 5544 / 6930) = the stock's 100 % volume, whatever the
+key / alert volume. ARR and CCR1 are preloaded (CR1 ARPE, CCMR1 OC1PE), so
+a tone change lands whole at the next 0.3 ms period.
+
+**Event rules** (`danger::Alarm`):
+
+* an event starts when the condition turns on (the first reading that
+  carries A-JACK / A-PROT with current, or the 10 A rule after 1 s) and
+  sounds at once;
+* **silence** for this event: a tap on the alert badge (the DMM status slot
+  119..202 x 1..33, the combined view's strip badge; that tap does nothing
+  else), a tap on the alert's toast (which closes, as any toast tap), or
+  any key (MENU / RUN / AUTO / MF, which still do their job, as stock keys
+  always do; the PD6 power key too). This works also with the touch lock
+  on, a dimmed screen or a screenshot running;
+* **re-arm**: the condition gone and back is a new event: it sounds again,
+  also after a silenced one;
+* **stop**: the pass after the condition clears (A-JACK: its own 1 s
+  clear; A-PROT: the probe below 50 mA, ~100 ms windows; the 10 A rule:
+  the first reading at or below 10 A), and when the DMM stops measuring
+  (the scope / generator views switch its rail off: no readings, no claim);
+* **cap**: the full pattern for 30 s (`FULL_MS`), then one burst every 10 s
+  (`REMIND_MS`, 5 % sounding) until the event ends or is silenced: a latch
+  that outlives its cause (A-PROT outside DC V / mV) cannot hold the
+  buzzer on for good, and a forgotten danger still reminds;
+* while it sounds the alarm owns the buzzer: it re-asserts its tone every
+  main-loop pass (written only when TIM14 differs: one MMIO read of ARR /
+  CCR1 per pass), so a key / tap beep in between cannot leave it muted;
+  at its end CCR1 = 0 and ARR = 11199 (the stock pitch for every other
+  beep).
+
+**Setting.** Settings 3/3 row "Danger alarm" (third row, after "A-lead
+reminder"): **Loud** (default) -> **Volume** (the same pattern at the key /
+alert volume; 0 % = silent) -> **Off** (no sound; badge and toast as
+before). Persisted in p[38] bits 16..17 (`meter::EXT_DANGER_SHIFT`, 0 =
+Loud: older records get Loud). SCPI `SYSTem:ALERt:ALARm LOUD | VOLume |
+OFF` / `?`, `SYSTem:BEEPer:VOLume <0..100>` / `?` (the key / alert volume,
+for the tests and host scripts), `DBG:ALARm?` -> `<sounding>,<silenced>,
+<events>,<setting>`. The "Jack alerts" mask still decides whether A-JACK
+exists at all (OFF / A-JACK only: no A-JACK, no A-PROT, so no alarm).
+
+**Measurements, ISR, memory.** The drive is the stock's own: TIM14 PWM on
+PA7, the same <= 49.5 % duty a stock key beep at volume 100 % uses, from
+the main loop only (no ISR touches TIM14; the AD2 stream ISR and the HY3131
+SPI are unrelated pins and peripherals). The only new thing is how long it
+sounds (seconds instead of 50-300 ms) and the 2.86 kHz tone. Whether the
+buzzer's supply current couples into the HY3131 front end cannot be
+checked in the emulator (no analog supply model): device check 4 below.
+Code size: region B -1.5 KiB (39 732 B free), region C and SRAM free
+unchanged, stack headroom 21 152 B (stackdepth --check 20480 passes).
+
+**Emulator** (`emu/hy3131/loudtest.py`; `run.py --buzzer-log` makes the
+TIM14 model, `emu/peripherals/PwmTimer.cs` `LogWrites`, log every change of
+ARR / CCR1 in virtual ms; key / alert volume 0 % via SCPI):
+
+| scenario | script (virtual s) | result |
+|---|---|---|
+| aprot | 10 s: 12 V across A-COM (DC V); 15.45 tap on the badge; 18 source off; 21 AUTO (the user acts); 25 12 V again; 31 off | quiet before; first tone 0.25 s after the source (at A-JACK, A-PROT follows), CCR1 5544 / 6930 only (ARR 11199 / 13999), steps 125 ms (one 95: a ~30 ms late pass), bursts 1.00 s apart; the tap mid-burst: off 0.15 s later (the tone in progress ends at its step), nothing until 25; the 2nd event loud 0.33 s after the source; source off at 31: off at 31.40 s **while A-PROT stays latched** (SCPI `APROT` with `DBG:ALARm?` 0,0,2,0); ARR 11199 / CCR1 0 after every stop |
+| ajack | 10 s: 1 mA into A (DC V); 15.45 RUN key; 18 off / 21 on; 26 off; 29 on; 29.5 tap on its toast | loud at 10.28 s, 125 / 1000 ms exact; RUN mid-burst: off at once, silent until 21; re-armed at 21.21; current off at 26: the last burst at 26.55 (A-JACK clears 1 s after the current), none from 27.2; 3rd event 29.15, toast tap 29.5: off at 29.65, silent to the end |
+| vjack-off | DC A, 24 V on V/ohm (V-JACK?) 10..19 s; then Off + DC V, 1 mA into A at 26; then Volume at 40 % | no alarm write in 6..33 s (V-JACK?, then A-JACK with Off: `DBG:ALARm?` 0,0,1,2); Volume: two-tone at CCR1 746 / 933 (40 %) from 33.2 s, nothing louder |
+| i10 | DC A, 5 A, 12 A at 16 s (OL on the 10 A range), 5 A at 24 | quiet at 5 A; loud from 17.35 s (the range walk + 1 s); back to 5 A at 24: the burst due at 24.35 s never comes |
+
+senttest `aprot-dcv-12`, `dcv-adc`, `dca-v` unchanged (OK). Host tests
+`tools/meter-test/run.sh danger` (pattern, event rules, the 10 A rule);
+ui-render: Settings 3/3 with every value (m10-settings3, the matrix, the
+pressed rows), 0 violations.
+
+#### Device check list (danger alarm)
+
+The sound of A-PROT / A-JACK needs a current in the A jack: only with a
+bench supply (current limit!) or a 1 mA source across A-COM. Key / alert
+volume 0 % (the owner's setting), Settings 3/3 "Danger alarm" Loud.
+
+1. DC V, 1 mA into A-COM (or the supply at 5 V with a 1 kohm resistor in
+   series): red A-JACK and at once the two-tone burst every second, loud.
+   Tap the A-JACK badge (top bar, middle): silent, the badge stays. Remove
+   the current, apply it again: loud again. Remove it: silent within ~1 s.
+2. Again, and press RUN instead of tapping: silent (and HOLD toggles, as
+   the key always does). The power key and the toast tap silence too.
+3. DC V, 12 V across A-COM through the supply's current limit (4.8 item
+   2): A-JACK -> A-PROT, loud; supply off: silent at once while A-PROT
+   stays latched (red badge); tap another function: the latch ends.
+4. Measurement coupling: DC V on a stable reference (e.g. 1.000 V), a 1 mA
+   source in A (A-JACK, loud), note READ? / the display for 20 s; silence
+   it (tap) and note 20 s more: the mean and the scatter should not change
+   by more than a count. If they do, the alarm needs a gap per reading.
+5. Is the low tone (2.86 kHz) about as loud as the high one? If it is
+   much weaker (off the buzzer's resonance), the pair moves to 3.57 /
+   4.17 kHz (`BUZZER_ARR_LO`).
+6. Settings 3/3 "Danger alarm" Volume with the volume at 0 %: no sound;
+   at 50 %: the same pattern, quieter. Off: no sound, badge and toast as
+   before. The setting survives a power cycle.
+7. V-JACK? (DC A, 24 V on V-COM, no current): no alarm. OVERLOAD on a
+   manual mA range: one 300 ms beep only (at the key volume: silent at 0 %).
+8. Above 10 A (if the bench allows it, briefly): > 10 A for 1 s in DC A ->
+   the alarm; back below 10 A -> silent.
 
 ## 5. Open points for the owner
 
