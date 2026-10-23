@@ -76,13 +76,14 @@ emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subproce
 
 
 def block(b):
-    """#<d><len><data> -> data (asserts the length)."""
+    """#<d><len><data>'\n' (USBTMC: the block, then the response terminator)
+    -> data (asserts the length and the newline)."""
     assert b[:1] == b'#', b[:16]
     d = int(b[1:2])
     n = int(b[2:2 + d]) if d else 0
     data = b[2 + d:]
-    assert len(data) == n, (len(data), n)
-    return data
+    assert len(data) == n + 1 and data[-1:] == b'\n', (len(data), n, data[-4:])
+    return data[:n]
 
 
 def pre(t):

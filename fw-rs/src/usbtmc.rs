@@ -5,6 +5,16 @@
 //! has a 12-byte header and is padded to a multiple of 4. The application side
 //! is two calls: `take_command` for a complete command (EOM seen) and
 //! `respond` to queue the response text.
+//!
+//! Every response ends with the IEEE 488.2 response message terminator, a
+//! newline ("NL^END": '\n' as the last byte of the EOM transfer), added
+//! here (`terminate`): text, joined compound replies, and definite-length
+//! blocks (`#N<len><data>` then '\n', as Keysight / Rigol send them). A host
+//! that reads until '\n' (libscopehal's SCPITMCTransport::ReadReply: a
+//! one-byte reply used to hang it) and one that reads until EOM (Linux
+//! usbtmc, libsigrok, pyvisa) both see a complete reply. Text that already
+//! ends with '\n' (the multi-line DBG reports) gets no second one. The
+//! Bluetooth transport ends its lines the same way (bt.rs, docs/bt-scpi.md).
 
 use usb_device::class_prelude::*;
 use usb_device::control::{Recipient, RequestType};
@@ -42,6 +52,8 @@ const STATUS_TRANSFER_NOT_IN_PROGRESS: u8 = 0x81;
 const MPS: usize = 64;
 pub const CMD_MAX: usize = 256;
 pub const RSP_MAX: usize = 6144;
+/// The response terminator (`terminate`).
+const NL: u8 = b'\n';
 
 const CAPABILITIES: [u8; 24] = [
     STATUS_SUCCESS, 0,
@@ -73,10 +85,12 @@ pub struct Usbtmc<'a, B: UsbBus> {
     // Bulk-IN side.
     req_tag: Option<u8>, // REQUEST_DEV_DEP_MSG_IN waiting
     req_max: u32,
-    rsp: [u8; RSP_MAX],
-    /// Length of the whole response: `rsp[..rsp_len]`, or with `ext` the
-    /// head `rsp[..head]` followed by `rsp_len - head` bytes from `ext`.
+    /// RSP_MAX bytes for the application (`rsp_buf`) + 1 for the '\n'.
+    rsp: [u8; RSP_MAX + 1],
+    /// Length of the whole response with its '\n': `rsp[..rsp_len]`, or
+    /// with `ext` the head `rsp[..head]`, `ext_len` bytes from `ext`, '\n'.
     rsp_len: usize,
+    ext_len: usize,
     /// A streamed block reply (`respond_stream`): the payload after the
     /// head is read from `ext` packet by packet as it goes out, so it can
     /// be longer than RSP_MAX (the scope record, WAV:DATA?).
@@ -123,8 +137,9 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
             cmd_ready: false,
             req_tag: None,
             req_max: 0,
-            rsp: [0; RSP_MAX],
+            rsp: [0; RSP_MAX + 1],
             rsp_len: 0,
+            ext_len: 0,
             ext: None,
             head: 0,
             rsp_off: 0,
@@ -166,9 +181,20 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
     }
 
     /// Response buffer to fill in place (then `respond_len`).
-    pub fn rsp_buf(&mut self) -> &mut [u8; RSP_MAX] {
+    pub fn rsp_buf(&mut self) -> &mut [u8] {
         self.cut_unsent();
-        &mut self.rsp
+        &mut self.rsp[..RSP_MAX]
+    }
+
+    /// `rsp[..n]` (n <= RSP_MAX) + the response terminator: the length to
+    /// send. Text already ending in '\n' keeps it as the terminator; a
+    /// block (`#...`) always gets its own, whatever its last data byte.
+    fn terminate(&mut self, n: usize) -> usize {
+        if n > 0 && self.rsp[n - 1] == NL && self.rsp[0] != b'#' {
+            return n;
+        }
+        self.rsp[n] = NL;
+        n + 1
     }
 
     /// A new response is about to overwrite `rsp` while the previous one
@@ -185,7 +211,7 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
     /// Queue the first `n` bytes of `rsp_buf()` as the response.
     pub fn respond_len(&mut self, n: usize) {
         self.ext = None;
-        self.rsp_len = n.min(RSP_MAX);
+        self.rsp_len = self.terminate(n.min(RSP_MAX));
         self.rsp_off = 0;
         self.rsp_ready = true;
         self.try_start_in();
@@ -197,7 +223,7 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         self.cut_unsent();
         self.rsp[..n].copy_from_slice(&data[..n]);
         self.ext = None;
-        self.rsp_len = n;
+        self.rsp_len = self.terminate(n);
         self.rsp_off = 0;
         self.rsp_ready = true;
         self.try_start_in();
@@ -205,6 +231,7 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
 
     /// Queue a response of `head` (at most RSP_MAX bytes) followed by `len`
     /// bytes that `fill(offset, out)` produces while the response goes out
+    /// and the terminating '\n'
     /// (`pump_in`, a packet at a time; any offset order the host's
     /// TransferSize rounds give). The source must stay unchanged until
     /// `streaming` is false.
@@ -214,7 +241,8 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         self.rsp[..h].copy_from_slice(&head[..h]);
         self.ext = Some(fill);
         self.head = h;
-        self.rsp_len = h + len;
+        self.ext_len = len;
+        self.rsp_len = h + len + 1;
         self.rsp_off = 0;
         self.rsp_ready = true;
         self.try_start_in();
@@ -246,15 +274,23 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
     }
 
     /// Response bytes `a..a + dst.len()` (the head from `rsp`, the rest of
-    /// a streamed response from its source).
+    /// a streamed response from its source, then its '\n').
     fn payload(&self, a: usize, dst: &mut [u8]) {
-        let h = if self.ext.is_some() { self.head } else { RSP_MAX };
+        let h = if self.ext.is_some() { self.head } else { RSP_MAX + 1 };
         let n1 = h.saturating_sub(a).min(dst.len());
         if n1 > 0 {
             dst[..n1].copy_from_slice(&self.rsp[a..a + n1]);
         }
         if let (Some(f), true) = (self.ext, n1 < dst.len()) {
-            f(a + n1 - h, &mut dst[n1..]);
+            // Source bytes from offset `o`, then the terminator.
+            let o = a + n1 - h;
+            let n2 = self.ext_len.saturating_sub(o).min(dst.len() - n1);
+            if n2 > 0 {
+                f(o, &mut dst[n1..n1 + n2]);
+            }
+            if n1 + n2 < dst.len() {
+                dst[n1 + n2] = NL;
+            }
         }
     }
 

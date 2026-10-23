@@ -397,7 +397,9 @@ def scpi_tcp_client(c, tmc, t_start):
                 dt = time.monotonic() - t0
                 if raw[:1] == b'#' and raw[1:2].isdigit():
                     print('         >> block, %d bytes (%.0f ms)' % (len(raw), dt * 1e3), flush=True)
-                    c.sendall(raw + b'\n')
+                    # fw-rs ends every USBTMC reply with '\n' (also a block,
+                    # after its data); an older image did not: add it then.
+                    c.sendall(raw if raw[-1:] == b'\n' else raw + b'\n')
                     continue
                 rep = raw.decode(errors='replace').strip()
                 print('         >> %s (%.0f ms)%s' % (rep, dt * 1e3, '  !! > 1 s' if dt > 1.0 else ''), flush=True)
