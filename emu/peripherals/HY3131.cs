@@ -675,6 +675,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "ohmexitlo": OhmExitLow = o.Value; break;
                 case "swtau": SwTrTau = o.Value; break;
                 case "swhz": SwTrHz = o.Value; break;
+                case "ctsettle": CtSettleMs = o.Value; break;
+                case "ctretain": CtRetain = o.Value != 0; break;
                 case "powvg": PowVGain = o.Value; break;
                 case "powz": PowZeros = o.Value != 0; break;
                 case "vnoise": vNoise = o.Value; break;
@@ -877,9 +879,22 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private void SetCounterEnable(bool on, double now)
         {
             if(on == ctEnabled) return;
-            ctEnabled = on;
+            if(on) ctEnabled = true;
             if(!on)
             {
+                // Datasheet 14: ENCTR = 0 clears CTA<7:0>, CTB, CTC and CTBOV; CTA<23:8> keeps
+                // its count (it is the writable gate preset). So a counter re-enabled without
+                // a preset (a row write with ENCTR = 1 after a row without it) starts from the
+                // last gate's final CTA: ~0x00xx00 after an overflow, i.e. a ~3.4 s gate
+                // (device 2026-10-24, DC V -> Hz: 0.00 / 0.99 / 19.94 Hz first readings).
+                // CtRetain = false: the old model (the last written preset is kept).
+                if(CtRetain)
+                {
+                    var live = CtaNow(now);
+                    regs[0x1C] = (byte)(live >> 8);
+                    regs[0x1D] = (byte)(live >> 16);
+                }
+                ctEnabled = false;
                 ctB = 0; ctC = 0; ctbov = false;
                 regs[0x1B] = 0;
                 ctStart = double.NaN; ctStop = double.NaN;
@@ -913,26 +928,66 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var period = 1.0 / f;
             if(!ctStartDecided)
             {
-                // first rising edge after enable opens the gate
+                // first (seen) rising edge after enable opens the gate
                 var k = Math.Ceiling((ctEnableTime - ctPhase) / period);
+                if(EdgeHidden((long)k, period)) k++;
                 ctStart = ctPhase + k * period;
                 ctStartDecided = true;
             }
             if(now < ctStart) return;
+            var k0 = (long)Math.Round((ctStart - ctPhase) / period);
             var gate = (0x1000000 - ctInit) / SysClk;
             var overflowAt = ctStart + gate;
             var cycles = Math.Ceiling((overflowAt - ctStart) / period - 1e-9);
+            if(EdgeHidden(k0 + (long)cycles, period)) cycles++;
             var stop = ctStart + cycles * period;
-            if(now < stop) return;
+            if(now < stop)
+            {
+                // The gate is open: CTB / CTC hold the counts so far (a read now gets them,
+                // with the live CTA).
+                var sofar = Math.Floor((now - ctStart) / period + 1e-9);
+                ctB = (int)Math.Min(0xFFFFFF, (long)sofar - EdgesHidden(k0, k0 + (long)sofar, period));
+                ctC = (int)Math.Min(0xFFFFFF, Math.Round((now - ctStart) * SysClk * CtDuty(duty)));
+                return;
+            }
             ctStop = stop;
             var total = (long)Math.Round((stop - ctStart) * SysClk);
             ctA = (int)((ctInit + total) & 0xFFFFFF);
-            var b = (long)cycles;
+            var b = (long)cycles - EdgesHidden(k0, k0 + (long)cycles, period);
             if(b > 0xFFFFFF) { ctbov = true; b &= 0xFFFFFF; }
             ctB = (int)b;
-            ctC = (int)Math.Min(0xFFFFFF, Math.Round(total * duty));
+            ctC = (int)Math.Min(0xFFFFFF, Math.Round(total * CtDuty(duty)));
             intf |= 0x01;
         }
+
+        /// Counter input settle (opt-in, "ctsettle:ms"; HYPOTHETICAL shape after the device's
+        /// sub-harmonic first results, 2026-10-21 / -24: 1/3, 2/3, 1/2 of a 40 Hz square right
+        /// after a row change): for ctsettle ms from every row change (role / mode / range,
+        /// as SwTr) the comparator misses every other input edge, so a gate in that window
+        /// counts about half the cycles. Off (0) by default.
+        public double CtSettleMs;
+        /// Datasheet CTA<23:8> retention across ENCTR = 0 (SetCounterEnable); "ctretain:0" = off.
+        public bool CtRetain = true;
+        private double CtSettleEnd => swT0 + CtSettleMs * 1e-3;
+        private bool EdgeHidden(long k, double period)
+        {
+            if(CtSettleMs <= 0 || (k & 1) == 0) return false;
+            var t = ctPhase + k * period;
+            return t >= swT0 && t < CtSettleEnd;
+        }
+        /// Hidden edges with index in (k0, k1].
+        private long EdgesHidden(long k0, long k1, double period)
+        {
+            if(CtSettleMs <= 0 || k1 <= k0) return 0;
+            var a = (long)Math.Ceiling((swT0 - ctPhase) / period);
+            var b = (long)Math.Ceiling((CtSettleEnd - ctPhase) / period) - 1;
+            var lo = Math.Max(k0 + 1, a); var hi = Math.Min(k1, b);
+            if(hi < lo || hi < 0) return 0;
+            lo = Math.Max(lo, 0);
+            return (hi + 1) / 2 - lo / 2; // odd k in [lo, hi]
+        }
+        /// The input as the counter sees it: high through the missed half-periods of the settle.
+        private double CtDuty(double duty) => CtSettleMs > 0 && lastUpdate < CtSettleEnd && lastUpdate >= swT0 ? 0.5 + duty / 2 : duty;
 
         /// The signal at the counter input: frequency (Hz) and high fraction.
         private void CounterSignal(out double f, out double duty)
