@@ -129,6 +129,13 @@ const SLOPE_MAX: f32 = 1.0;
 const LPF_T: f32 = 0.1067;
 const SLOPE_MIN: u8 = 48;
 const SLOPE_TMO: u8 = 120;
+/// ... and only on a node without a real AC part: AD2's peak hold p-p within
+/// REF_PP_K x |LPF| + REF_PP_MIN codes (noise ~240 codes p-p; a reference
+/// rewrites the row, and the RMS block's HPF transient after it passes the
+/// p-p / 2 bound when the node has a large AC part: a spike in the AC part,
+/// the emulator's 40 Hz square; the LPF's ripple also enters the window).
+const REF_PP_K: f32 = 0.02;
+const REF_PP_MIN: f32 = 1000.0;
 /// The run row's first results after the second reference within this of the
 /// window's end value (codes), else the input moved: no gain from it.
 const GAIN_MOVE: f32 = 12.0;
@@ -945,8 +952,8 @@ impl Dmm {
     /// longer creeping),
     /// if the fitted end value is >= CAL_GAIN_CODES from the session's
     /// reference point farthest from it (and 1.5 x further than the last
-    /// two-point attempt there), with an AC part (RMS or the peak bound: a
-    /// steady node), the stock DC V row's reading is taken again: the anchor
+    /// two-point attempt there), with an AC part (RMS or the peak bound) and
+    /// AD2's p-p small (no real AC on the node), the stock DC V row's reading is taken again: the anchor
     /// moves here and `am_cal_step` takes the gain from the two references
     /// (module header). Returns whether the reference was started.
     #[inline(never)] // per result (region B, as poll_am)
@@ -994,6 +1001,9 @@ impl Dmm {
             ss += e * e;
         }
         let end = lpf + mean + b * kb;
+        if a.pp < 0.0 || a.pp > REF_PP_K * end.abs() + REF_PP_MIN {
+            return false;
+        }
         let (lo, hi) = (a.plo[r], a.phi[r]);
         let (p, d) = if (end - lo.0).abs() >= (end - hi.0).abs() { (lo, (end - lo.0).abs()) } else { (hi, (end - hi.0).abs()) };
         if d < CAL_GAIN_CODES || d <= 1.5 * a.ctry[r] {
