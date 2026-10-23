@@ -2221,3 +2221,43 @@ e5, e11, e10, e9 pass on d0baca5.
   READ? 1.00052 V, generator `OUTP?` 0, `SYST:ERR?` "No error". `DBG:BOOT?` NORMAL, crash count 0, CLEAN, VALID,
   HEALTHY. Settings not touched; nothing written to the meter's disk.
 - **Calibrator:** 1 V DC, enabled.
+
+## d21b588 host tools on b94bfb8: Ctrl-C, -d / -n, the desync repair, the 24 V cap (2026-10-23 15:48 - 16:00)
+
+Host-only retest of ff27c69..d21b588 (TODO "dm40scpi.py `log` stopped by SIGINT", "`log --source ad2 -d N`",
+"acdcmeth.py: the calibrator's 30 V"). The meter ran b94bfb8; no flashing. Files: the scratchpad's `hdc/run/`.
+
+| # | check | result |
+|---|---|---|
+| 1 | `log x.csv --source ad2 --rate 38400 -d 60`, SIGINT (kill -INT) after 5 s, 5 runs | **PASS** 5 / 5: exit 0, `# stopped_by,ctrl-c (after 4.97 s)` and the full trailer, 167-173 k rows, lost 0; `info` right after answers, no "empty USBTMC reply" note, LOG:STAT? 0 |
+| 2 | `-d 10` at 38400 | **PASS**: `# stopped_by,duration (after 10.028 s)`, 360 637 rows, lost 0, wall 10.07 s |
+| 2 | `-n 5000` at 38400 | **PASS**: exactly 5000 rows, `# stopped_by,count (after 0.758 s)` |
+| 3 | desync made with the old tool (0100788), then the new `info` | **PASS** (by the DBG:LCD? route, below): `*IDN?` read b'' (raw os.read on /dev/usbtmc2, 3 queries all empty); new `dm40scpi.py info` printed `dm40: empty USBTMC reply to *IDN?: device cleared, asked again` and the right IDN / FUNC / CONF; afterwards raw `*IDN?`, LOG:STAT? 0, SYST:ERR? "No error", FUNC? all correct |
+| 3+ | the same cut against the new dm40dbg.Link | 3 / 3 in step (`*IDN?` and LOG:STAT? right after) |
+| 4 | mr9270 `set_output('voltage', 30)` | **PASS**: stderr `mr9270: 30 V requested, the calibrator gives at most 24 V: set 24 V`, 24000 written and read back, the meter read 23.985 V; then 1 V |
+| 4 | `acdcmeth.py e6 --no-cal` | **not run**: the session's permission check denied it. Offline instead: `settle_time` on a level without readings returns 4 NaNs (e6 unpacks them); the 0100788 version returns 3 (ValueError) |
+
+Notes:
+
+- **The TODO recipe for check 3 does not work on the real meter.** During `log --source ad2 --rate 38400` the
+  wchan never read `usbtmc_generic_read`: 15.7 M polls in 20 s (Python pread on /proc/PID/wchan), a 3 s sample
+  of 2.9 M: usb_start_wait_urb 2.2 M, running 0.44 M, usb_wait_anchor_empty_timeout 0.21 M, nothing else in the
+  driver. The meter sends the rest of a 6006 B LOG:DATA? block before the read starts waiting, so the
+  interruptible wait (the only SIGINT cut point) never sleeps. The old tool killed at usb_start_wait_urb (runs
+  above, new tool) or at usb_wait_anchor_empty_timeout (old tool, 3 runs) stayed in step. SIGINT 5 s into a
+  run also left the old tool's `log` clean (it caught KeyboardInterrupt).
+- **What made the desync:** the old 0100788 `dm40dbg.Link.lcdread(0, 0, 320, 48, 15361)` in a loop (a 6136 B
+  DBG:LCD? reply, read with a plain os.read), SIGINT the moment wchan = usbtmc_generic_read (hit after 832
+  polls). The process died with KeyboardInterrupt inside `os.read`, and every later `*IDN?` read empty, which
+  matches the e7ec2cc state. dmesg is not readable here, so the "wrong MsgID / bTag" lines were not checked.
+- Runs 6-10 (the kill held back until wchan = usbtmc_generic_read, which never came) ended by `-d 60`
+  (60.028 s) or by a SIGINT at 56-60 s: all clean, `info` and LOG:STAT? 0 right after.
+- CONF? reads `VOLT +6,+1E-04` after an AD2 log session and `+1E-05` before / after the repair (resolution of
+  the current state; nothing set).
+
+### State at the end
+
+- **Device:** b94bfb8, DC V, `VOLT:COUP?` DC, method A, READ? 0.99995 V, LOG:STAT? 0, LOG:SOUR AD1, LOG:SRAT 4800,
+  LOG:DEST HOST (OSR 3, CHOP 1 as found), `OUTP?` 0, `SYST:ERR?` "No error". `DBG:BOOT?` NORMAL, crash count 0,
+  CLEAN, VALID, HEALTHY. Settings not touched; nothing written to the meter's disk.
+- **Calibrator:** 1 V DC, enabled (24 V for about 3 s during check 4).

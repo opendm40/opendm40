@@ -1546,6 +1546,12 @@ Firmware:
       Ctrl-C after ~5 s, several times: clean end with the trailer, `dm40scpi.py info` answers at once, no
       "empty USBTMC reply" note; then make the desync on purpose (kill -INT while `cat /proc/PID/wchan` reads
       usbtmc_generic_read, with the old tool from 0100788) and check that `dm40scpi.py info` repairs it.
+      **Device retest done (b94bfb8, 2026-10-23, device-check doc "d21b588 host tools"):** 5 / 5 SIGINT runs clean
+      with the trailer, `info` at once, no note. The recipe's wchan does not happen on the real meter during
+      `log` (it sends the rest of the 6006 B block before the read waits; 15.7 M polls, no usbtmc_generic_read),
+      so the desync was made with the old Link reading 6136 B DBG:LCD? blocks (`lcdread(0,0,320,48,15361)` in a
+      loop, SIGINT at wchan = usbtmc_generic_read): *IDN? empty; the new `info` printed the note and repaired it.
+      The same cut against the new Link: 3 / 3 in step.
 - [x] emu/hy3131/dcvtest.py fails on 4c4b489 and later (found 2026-10-23, not caused by the 76.8 kS/s Pll
       change: the same with the old model): LOG:SCALe? per-code 4.767e-05 / 4.812e-04 against the model's
       4.721e-05 / 4.721e-04 (+0.97 / +1.9 %, the check allows 0.3 %). modetest's stock cap-big (100 uF reads
@@ -1563,6 +1569,8 @@ Firmware:
       the trailer says `# stopped_by,duration|count|ctrl-c (after S s)`. Emulator over vhci (the emulator
       drains slower than 38400 S/s, so it hung like the device): -d 5 at 38400 ran until killed before, ends
       after 4.3 s now; -n 1234 = 1234 rows. Device retest: `-d 10` at 38400 ends after ~10 s.
+      **Device retest done (b94bfb8, 2026-10-23):** `-d 10` at 38400: `stopped_by,duration (after 10.028 s)`,
+      360 637 rows; `-n 5000`: exactly 5000 rows, `stopped_by,count`.
 - [x] (B) DC-coupled V on AD2 (E7, feasibility 1.3 last row / section 13): device test 6.5 (4ff95f7,
       DBG:AD2:DCV?, tools/ad2dcv.py): the AC V row with SAD2IP = OP1O is linear to 0.003 % of the
       range, 3..10 codes sd, gain +0.84 / +1.79 / +0.53 / +0.27 % vs nominal; AD1 reads 0.3..0.9 k
@@ -2236,6 +2244,9 @@ Emulator (emu/):
       acdcmeth.py's levels, labels and docstring say 24 V (VMAX 24: e1's top level, e5 on 60 V, e6's step
       "to 24V"), ad2dcv.py's 30 V points are 24 V (ad2n7.py already used 24). Older logs' "30 V" rows = 24 V.
       Also: acdcmeth settle_time returned 3 NaNs where e6 unpacks 4 (a level without readings crashed e6).
+      Device (b94bfb8, 2026-10-23): a 30 V request printed the warning, wrote 24000 and the meter read 23.985 V.
+      Device e6 not run (permission denied in that session); settle_time's NaN path checked offline (4 NaNs; the
+      0100788 version 3, ValueError).
 
 ## Device check 8087c7d: shot pre-erase, SCPI Range / Digits + sigrok, scope full record, UI fixes (2026-10-23; docs/device-check-2026-10-21.md "8087c7d")
 
