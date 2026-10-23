@@ -1390,10 +1390,12 @@ Firmware:
       "d330877" new bug 4): a bare VOLT / CURR header meant the DC function. Branch smallbugs: a bare VOLTage /
       CURRent in [SENS:]<q>:RANG / :RANG:AUTO / :RES is the quantity in any coupling (scpi.rs `ANY_CPL`; DC, AC,
       AC+DC, AUTO: one range state per V / A button), in the power meter RANG? / RANG:AUTO? answer its V / I
-      channel (as POW:VOLT:RANG?; RES? and sets there stay "Settings conflict"). An explicit coupling stays
-      strict, another quantity / CONT / DIOD / TEMP still +9.91E37 + "Settings conflict" (CONF:VOLT stays DC,
-      34401A). Swept every function x the range / function queries in the emulator: no other +9.91E37 outside
-      those. emu/hy3131/autorangetest.py --queries-only (every function and coupling, the power meter, TEMP).
+      channel (as POW:VOLT:RANG?; sets there stay "Settings conflict"). A query never raises "Settings
+      conflict" now (coordinator 2026-10-24): another function's / coupling's RANG:AUTO? = 1 (selecting it
+      starts in autorange), its RANG? / RES? = +9.91E37 with no error; sets naming it stay "Settings conflict"
+      (CONF:VOLT stays DC, 34401A). The bab5dd4 note above ("CURR:DC:RANG? = +9.91E37 + Settings conflict in V")
+      is superseded: +9.91E37, no error. Swept every function x the range / function queries in the emulator:
+      no other +9.91E37 outside those. emu/hy3131/autorangetest.py --queries-only (every function and coupling, the power meter, TEMP).
       Device retest: CONF:VOLT:AC / :ACDC / :AUTO and CONF:CURR:AC / :ACDC / :AUTO: VOLT:RANG:AUTO? /
       CURR:RANG:AUTO? = 1 (0 after <q>:RANG:AUTO OFF), VOLT:RANG? / CURR:RANG? the range, SYST:ERR? 0; in
       CONF:POW VOLT:RANG? = POW:VOLT:RANG?'s value.

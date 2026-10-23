@@ -3688,8 +3688,9 @@ impl App {
 
     /// [SENSe:]<f>:RANGe / :RANGe:AUTO / :RESolution, and CONFigure:<f>'s
     /// range part (`f`: the function the header names). There is one range
-    /// state, the current function's: naming another function is "Settings
-    /// conflict" (a query then answers +9.91E37). A set acts as the MF
+    /// state, the current function's: a set naming another function is
+    /// "Settings conflict"; a query of another one is no error
+    /// (RANG:AUTO? 1, RANG? / RES? +9.91E37). A set acts as the MF
     /// range page (Dmm::set_range, REL off); AUTO as the AUTO key (the
     /// meter's own AUTO / AUTO+ choice is kept). A bare VOLTage / CURRent
     /// (`scpi::ANY_CPL`) is that quantity in any coupling, in the power
@@ -3722,9 +3723,14 @@ impl App {
         let same = if any { s::quantity(f) == s::quantity(cur) } else { s::func_id(f) == s::func_id(cur) };
         let range = self.range_si().filter(|_| same);
         let Some(v) = range else {
-            out.set_err("Settings conflict");
-            if query {
-                out.put_bytes(s::NAN);
+            // Another function: a query is no error (as a 34401A answers
+            // any function's): RANG:AUTO? 1 (selecting it starts in
+            // autorange, Dmm::select / set_sub), RANG? / RES? +9.91E37 (no
+            // range until it is selected). A set: "Settings conflict".
+            match op {
+                Rng::AutoQuery => out.put_bytes(b"1"),
+                _ if query => out.put_bytes(s::NAN),
+                _ => out.set_err("Settings conflict"),
             }
             return query;
         };

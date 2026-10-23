@@ -263,9 +263,13 @@ keeps that choice). One range state per V / A button: a bare `VOLT` /
 quantity in whatever coupling is selected (DC, AC, AC+DC, AUTO), and in the
 power meter `VOLT:RANG?` / `CURR:RANG?` / `:RANG:AUTO?` answer its V / I
 channel (as `POW:VOLT:RANG?`; sets there: `POW:VOLT:RANG`). An explicit
-coupling (`VOLT:AC:RANG?`) must be the selected one; another function's
-header answers `+9.91E37` with "Settings conflict" (before 2026-10-24 the
-bare header meant DC only, so `VOLT:RANG:AUTO?` in AC V gave `+9.91E37`). The same ranges on DM40A / B / C (fw-rs uses the 60000
+coupling (`VOLT:AC:RANG?`) names that coupling's function. A query of a
+function that is not selected is no error: `:RANG:AUTO?` answers 1
+(selecting a function or coupling starts it in autorange), `:RANG?` /
+`:RES?` `+9.91E37` (no range until it is selected); a set naming it is
+"Settings conflict". (Before 2026-10-24 the bare header meant DC only and
+any other function's query raised "Settings conflict": `VOLT:RANG:AUTO?` in
+AC V gave `+9.91E37`.) The same ranges on DM40A / B / C (fw-rs uses the 60000
 counts limits on all models, docs/model-variants.md). Digits: `5` = RATE FAST
 (60000 counts, one conversion per reading), `6` = RATE MED (SLOW is kept):
 600000 counts once the moving average is full (~3.2 s after a change) in DC
