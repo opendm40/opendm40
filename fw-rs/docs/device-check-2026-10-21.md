@@ -2030,3 +2030,80 @@ Candidate fixes (none made; the owner decides): (a) keep a gain whose span is la
 - **Files:** none created on the meter (screenshots were `DBG:LCD?` reads, so nothing was deleted). `MMEM:CAT?` file list identical to the start (3 534 848 / 13 205 504).
 - **Health:** `DBG:BOOT?` NORMAL, crash count 0, VALID, HEALTHY. Four deliberate `dm40dbg.py reset`s (09:02 before e8s; 09:33 / 09:34 / 09:35 before each `tc6` repeat), no crash.
 - **Calibrator:** 1 V DC, enabled.
+
+## ceb5ca5: the settle-fix retest (TODO items of "bab5dd4" B4 / B5, acdc-stock-vs-fwrs.md §12) (2026-10-23 09:44 - 10:35)
+
+The owner had installed ceb5ca5 (install OK, crash count 0). It carries the settle-fix branch (f4925f5 `vet_ad1` / `reading_pending` / `acs_flat` / input-step settle, 7e10110 no DC-phase step down during an input-step settle). `DBG:BOOT?` NORMAL, crash count 0, VALID, CLEAN at the start and the end; no reset.
+- **Wiring:** the calibrator (`/dev/ttyACM1`) on V/COM: 1 V DC (items 1-3), the 40 Hz square (4, 6), DC 4..7 V (5). The A jack, the MCX probe and the generator output were not wired.
+- **Files:** in the session scratchpad `rtsf/` (not in git). The bab5dd4 scripts (`dc781.py` with CALC:AVER:MIN? and the range as a number added, `sq5.py`, `ar6.py`, `ar6b.py`, `tl.py`, `sr.sh`) and new ones: `dcmf.py` (`dcpart.py` with the MF path only), `dcpart.py` (SCPI + MF), `dcph.py` (a range change at 0-0.6 s into a DC phase), `nan3.py` (FETCh? / READ? / SYST:ERR? through the gap), `calstep2.py` (the calibrator's level change on DC V FAST), `tap6.py` / `tap6z.py` / `tapshot.py` / `restl.py` (item 6). JSON / logs with the same names; `pre.png`, `end.png`, `ts-*.png`, `cat0.txt` / `cat1.txt`.
+
+### Summary
+
+**Four of five settle-fix checks pass; the DC part guard fails.** The 0.52 V DC part of bab5dd4 came back in 3 of 116 AC+DC range changes (all 6 -> 60 V). In one of them READ? gave 0.524 V three times as the first fresh readings after the NaN gap. The lost V tap of c6f9670 is the AC hint toast taking the gesture.
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1 | `dc781.py`: DC V, 1 V, AUTO ON from 600 V x20, 60 V x10, 1000 V x10 | **PASS**: no READ? below 0.99 V on 6 V (216 readings, lowest 0.99890 V). CALC:AVER:MIN? >= 0.99670 V, except 0.98396 V once (1000 V #0): the 1000 V range's own conversion at 0.31 s (it read 0.984-1.021 V, as on bab5dd4). First 6 V conversion read at 0.88-0.92 s from 600 V (bab5dd4 0.81 s), 0.61 s from 60 V (0.56), 1.22 s from 1000 V (1.06): +0.05..+0.16 s | `dc781.json` |
+| 2 | `dcmf.py` MF 6 <-> 60 V x10 in AC+DC and AUTO, `DBG:ACDC:STAT?` at 25 Hz; more AC+DC changes in `dcpart.py`, `dcph.py`, `nan3.py` | **FAIL**: DC part 0.5224 V (MF -> 60 #3) and 0.5212 V (`dcpart.py` SCPI -> 60 #1); READ? 0.5244 / 0.5243 / 0.5240 V (`nan3.py` SCPI -> 60, rep 2). AC+DC: 3 of 116 changes 6 <-> 60 V, all on 6 -> 60 V (MF 1 of 44, SCPI 2 of 24, `dcph.py` 0 of 48); AUTO 0 of 20 | `dcmf-*.json`, `dcpart-ACDC.json`, `dcph-*.json`, `nan3.json` |
+| 3 | READ? / FETCh? / SYST:ERR? after `VOLT:ACDC:RANG 60` / `6` and the MF page (`nan3.py`, x2 each); sigrok `-c range=60V` / `6V` / `60V --samples 5` in AC+DC (`sr.sh`) | **PASS**: FETCh? +9.91E37 and READ? +9.91E37 with -100,"Data stale" every 0.85 s until the first fresh reading; never the old reading. sigrok rc 0 each, 999.7-1000 mV, CONF? follows, `/dev/usbtmc2` stays. sigrok leaves "Data stale" in the queue | `nan3.log`, `sigrok.log` |
+| 4 | `sq5.py`: 40 Hz square, AC+DC, AUTO -> 60, 60 -> 600, 600 -> 60, 60 -> 6, 6 -> 60 V | **PASS**: the square read 6.7328 V on 60 V this time (AC 4.759 V; 6.746 V on bab5dd4: the calibrator). Every fresh READ? within 0.012 % of the run's level after 600 -> 60 and 6 -> 60 V. On 600 V the spread was 0.075 % (6.7219 V, one 10 mV digit low). Gaps 4.2 / 4.3 / 5.4 s (600 -> 60, 6 -> 60, 60 -> 600); 6 V: no reading in 10 s (OL, expected). The 1 V DC changes (`nan3.py`): gap 3.3-5.0 s after SCPI, 3.4-4.2 s after the tap | `sq5.json` |
+| 5 | `ar6.py` / `ar6b.py`: DC 4..7 V, AC+DC AUTO range | **PASS on its checks**: 6.3 -> 5.8 V one range step, 5.8 -> 5.0 V none. Every step across 6.0 V moved the range once (5.8 -> 6.3, 4.0 -> 6.5, 6.5 -> 5.0, 6.3 -> 5.8). On the same-range steps down READ? was on the new level at 0.83 s (6.3 -> 5.8, 5.5 -> 4.0, 6.5 -> 5.0; bab5dd4: 6.737 / 5.679 / 5.957 V there for 2-5 s). **Not clean:** 4.0 -> 5.8 V went 6 -> 60 -> 6 V and 7.0 -> 6.3 V went 60 -> 6 -> 60 V. The calibrator dips for ~0.2 s on every level change (below) | `ar6.json`, `ar6b.json`, `calstep2.json` |
+| 6 | First V tap after `CONF:VOLT:DC`, square, method A | **Cause found**: the tap lands on the "AC voltage here: use AC V?" hint toast, which takes it. Lost 14 of 30 with the tap 2.8-4.1 s after the CONF, 0 of 30 at 0.5-2.75 s, 0 of 6 at 5 s | `tap6-sq.json`, `tap6z-sq.json`, `ts-sheet.png` |
+
+### 1. DC V AUTO from 600 / 1000 V
+
+`VOLT:RANG?` read right after each READ? already shows the range the next conversion uses. So in each try the first READ? (0.27-0.31 s) is the start range's conversion that triggered the step, and the 6 V conversions start with the 3rd READ? from 600 V, the 2nd from 60 V and the 4th from 1000 V. The bab5dd4 `dc781.json` kept only 10 characters of `VOLT:RANG?`, which cannot tell 6, 60 and 600 V apart, so the comparison above uses reading times. That is why the TODO's "+0.1-0.3 s" is +0.05 s from 60 V. Nothing low on 6 V. The averaging restarts make the first 6 V readings 0.9990-0.9997 V, then 0.9991-0.9996 V.
+
+### 2. AC+DC: the DC part of 0.52 V after a range change, again
+
+`DBG:ACDC:STAT?` field 6 is `dc_val`, the DC part. `dc_out` sets it only for a vetted result (`vet_ad1` true), so 0.52 V there means a vetted result. Both STAT-traced hits have the same timeline (t from the command; MF: from the page key, the item tap at ~1.3 s):
+
+| | change landed | that DC phase | AC phase | next DC phase | 0.52 V | corrected |
+|---|---|---|---|---|---|---|
+| `dcpart` SCPI -> 60 #1 | in a DC phase (dc_val kept 0.99963) | ends at 0.48 s, no vetted result | 0.48-1.66 s, no readings | 2.27 s 0.99919 V | 2.57 s 0.52122 V, at the switch to AC; 5 readings on it (n_rd 5244-5248) | 4.32 s |
+| `dcmf` MF -> 60 #3 | in a DC phase (dc_val kept 0.99923) | ends at 1.70 s, no vetted result | 1.70-2.77 s | 3.39 s 0.99942 V | 3.63 s 0.52245 V; 4 readings | 5.33 s |
+
+A change that lands in the AC phase goes mode 0 -> 1 in `set()`, so `reset_values` clears `dc_val` to 0 (the `dc 0.0` rows: expected, until the first DC result). That case gave 0 hits in 68 changes (`dcmf` AC+DC and AUTO, `dcpart`). A change that lands in a DC phase leaves the mode alone: no reset, `acdc_seen` keeps bit 2 and `dc_val` keeps the old range's part. If that DC phase's next result is held, the phase ends at once ("a held result ... one more DC result" applies only without bit 2). All three such cases on record show it: the two hits and `dcpart` SCPI -> 60 #7, which then came out right. In `dcph.py`, 48 changes placed 0-0.6 s after an AC -> DC switch each got a vetted result ~0.5 s later and stayed right. So the trigger is narrower than "in a DC phase", probably near its end.
+
+Why the guard lets 0.52 V through: a conversion counts when it agrees with the one before it (0.5 % or 4000 codes), or once VET_HELD_MAX (4) are held. A good result 0.3 s before the bad one cannot agree with it. So either the conversion just before the 0.52 V one was also ~0.52 V (held), or the vetting had ended (5 holds, or 8 vetted). All five hits since bab5dd4 are 0.521-0.528 V (52-53 %). That is a repeatable state lasting at least two conversions, not the 25-51 % scatter of one straddled register write (8087c7d). The fast logger cannot watch it: `LOG:SOUR AD1` reprograms the converter. A DBG view of `vet_left` / `vet_held` / the last DC-phase AD1 codes and R22 would decide. Not fixed.
+
+In `nan3.py` the hit was the run right after an MF -> 6 V change, and READ? answered 0.5244 / 0.5243 / 0.5240 V at 3.28 / 3.38 / 3.50 s. With the NaN rule the bad DC part is now the first value a host gets after a change.
+
+### 3. READ? / FETCh? during the gap
+
+As the TODO item wants. The MF path's first query came 1.33 s after the page key (the script's sleeps), and was already NaN.
+
+### 4. The square
+
+The calibrator's square was 6.7328 V total this session (AUTO -> 60 V steady), against 6.746 V on bab5dd4. The 0.1 % check is against the run's own level.
+
+### 5. AC+DC autorange and the calibrator's level change
+
+`calstep2.py` (DC V, manual 60 V, RATE FAST, FETCh? polled) shows that **every MR9270 level change first dips to 2.2-3.9 V for ~0.2 s**. It is within 1 % of the new level by 0.29-0.36 s. Examples: 5.8 -> 6.3 V: 3.31, 3.44, 6.17, 6.29; 4.0 -> 5.8 V: 2.17, 2.95, 5.67, 5.79; 6.3 -> 5.8 V: 5.06, 3.84, 4.82, 5.79. The bab5dd4 `calstep.py` read at SLOW and missed it. The 2.3-5.3 V READ?s right after the ar6 steps (5.27 / 3.86 on 5.8 -> 6.3, 3.44 / 3.02 on 5.8 -> 5.5, 2.31 on 4.0 -> 6.5, 4.05 on 7.0 -> 6.3) are this real dip, not the meter. On bab5dd4 they were 3.3-3.4 V too.
+
+With the dip, the input step is "down ~2-3 V, then up to the new level". Two steps moved the range twice:
+- **4.0 -> 5.8 V (`ar6b`):** the AC phase took 2.4224 and then 2.5284 V as the AC part (STAT ac, n_rd rising: readings published). ACS_JUMP should have discarded them (> 1.5 x 0.006 V + 0.03 V) but did not. hypot(2.53, 5.8) > 6 V, so the range went to 60 V at 1.04 s and back at 6.35 s.
+- **7.0 -> 6.3 V (`ar6`):** 60 -> 6 V at ~0.9 s (a DC result in the dip, below the step-down threshold), then back to 60 V (6.3 V is OL on 6 V); first reading at 4.99 s.
+
+One excursion each, no hunting. New TODO item.
+
+### 6. The lost first V tap
+
+`tap6.py` / `tap6z.py`: `CONF:VOLT:DC` (from AC coupling, so the function restarts), wait 0.5-5 s, `DBG:TAP 35,297`, then `VOLT:COUP?` every 0.1 s for 1.5 s. When the tap worked, the coupling had already changed at the first poll. A lost tap never advanced later.
+
+| tap after the CONF | lost |
+|---|---|
+| 0.5 / 1.0 / 1.5 / 2.0 s | 0 of 6 each |
+| 2.5 / 2.7 s | 0 of 3 each |
+| 2.8-3.5 s (3 each, 3.0 s 6 more) | 13 of 27 |
+| 4.0 s | 1 of 3 |
+| 5.0 s | 0 of 6 |
+
+`VOLT:RANG?` was +6 before every tap, so no autorange step coincides. `tapshot.py` screenshots at 1.5 / 2.6 / 3.0 / 3.4 / 4.5 s after the CONF show the grey hint toast "AC voltage here: use AC V?" over the value at 2.6 s and 3.4 s, and not at 1.5 / 3.0 / 4.5 s (`ts-sheet.png`). That is the sentinel's AC? hint (HINT_ASSERT_MS 2 s) shown for TOAST_MS 1.5 s. app.rs gives an overlay every gesture ("a toast just goes"), so a tap during the toast only dismisses it. The window fits 2.6-4.1 s. The hint does not fire at 1 V DC, which is why the tap was never lost there. c6f9670's `tap29.py` tapped at 3 s, in the window, which explains its 5 of 6 (C) and 1 of 3 (A). The CONF? resolution was 1E-04 just before 10 of 11 lost taps (the value redraw without the extra digit while the hint shows), against mostly 1E-05 for taps that worked in the same window. Not fixed: it is a UX decision (stock-like swallow, or let a tap outside the toast reach the page).
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+ (`VOLT:RANG:AUTO?` 1), rate SLOW, `CONF?` "VOLT +6,+1E-05", `VOLT:COUP?` DC, **method A** (`DBG:ACDC:METH?` A), READ? 0.99953 V (`end.png`). LOG unchanged (AD1 / 4800 / HOST / STAT 0). Generator `OUTP?` 0 (never switched on). RATE was FAST only during `calstep2.py`, then set back to SLOW. Settings not touched (volume 0, backlight 10 %, Dim / Shutdown Never). `SYST:ERR?` empty.
+- **Files:** nothing created on the meter (screenshots were GRAM reads). `MMEM:CAT?` file list identical to the start (3 534 848 / 13 205 504).
+- **Health:** `DBG:BOOT?` NORMAL, crash count 0, VALID, CLEAN; no reset, no crash.
+- **Calibrator:** 1 V DC, enabled.
