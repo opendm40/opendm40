@@ -23,6 +23,15 @@ volume and polls DBG:PROF?, LOG:DEST?, LOG:DURation?; the files' slow-bank
 sectors answer NOT READY 02/04/01 (and only those, from FIRMWARE.BIN's
 sector 0x7C000), and after the session every file reads whole with the same
 bytes.
+--ui-nav: UI navigation by DBG:KEY / DBG:TAP while each session streams
+(the main menu, Settings 1..3, Device, MENU, the Oscilloscope tile, its
+source badge, MENU, the Multimeter tile; each landing checked with
+DBG:VIEW?), each session started on the MCX scope page; before the sessions
+the page tree with no stream (MENU on the Device page = the main menu). Real
+touch / side keys cannot do this (any press stops a disk session, main.rs
+`fast_touch`): it audits the page code a stream could meet. With
+--region-c: none of it may run region C code or read the slow bank.
+Every session must record ~rate x LOG:DURation rows.
 Bluetooth (--bt-port passthrough): LOG:STATe ON refused for AD2 ("Rate too
 high for Bluetooth") and with LOG:DEST DISK ("Command protected"); an AD1
 40 S/s session drains over BT LOG:DATA?.
@@ -84,6 +93,14 @@ ap.add_argument('--host-read', action='store_true', help='while each session run
                 'volume (MSC READ(10), 64 sectors each) and DBG:PROF? (prof::report) between the polls')
 ap.add_argument('--poll', default='', help='with --host-read: more queries sent at each step, ";"-separated (e.g. '
                 '"SCOP:MEAS:VPP?;DBG:HWTRIG?": scope commands read the calibration record, slow bank)')
+ap.add_argument('--ui-nav', action='store_true', help='UI navigation while each session streams (DBG:KEY / DBG:TAP, '
+                'each landing checked with DBG:VIEW?): MENU, the Settings tile, More, More, Device, MENU (the main menu), '
+                'the Oscilloscope tile (the MCX scope page), its source badge (the Wave view: refused while a session '
+                'streams), MENU, the Multimeter tile; the next session starts on the scope page. Before the sessions, the '
+                'same page tree with no stream (MENU on the Device page = the main menu). With --region-c: no region C '
+                'code / slow-bank read on those paths')
+ap.add_argument('--ui-nav-steps', type=int, default=None, help='with --ui-nav: at most this many NAV steps per session '
+                '(0: only start the session on the scope page)')
 A = ap.parse_args()
 RC = None
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
@@ -321,6 +338,71 @@ class HostRead:
                  sorted((n, hex(o)) for n, o in SLOW_FILES.items() if n in want)))
 
 
+# UI navigation (--ui-nav): (command, the DBG:VIEW? page it must land on).
+# Coordinates: ui.rs TILES (main menu), the settings rows (SET_Y0 44, pitch
+# 30: row 8 "More" y 297, Settings 3/3 row 4 "Device" y 177), scope_ui.rs
+# SRC_BADGE (the source badge, top bar).
+NAV = [('DBG:KEY 0', 'Main menu'), ('DBG:TAP 341,221', 'Settings,1'), ('DBG:TAP 240,297', 'Settings,2'),
+       ('DBG:TAP 240,297', 'Settings,3'), ('DBG:TAP 240,177', 'Device'), ('DBG:KEY 0', 'Main menu'),
+       ('DBG:TAP 341,107', 'Oscilloscope'), ('DBG:TAP 177,10', 'Oscilloscope'), ('DBG:KEY 0', 'Main menu'),
+       ('DBG:TAP 140,107', 'Multimeter')]
+
+
+def wait_dev(q, ms):
+    t0 = int(q('DBG:PING?').split(',')[0])
+    while int(q('DBG:PING?').split(',')[0]) - t0 < ms:
+        time.sleep(0.05)
+
+
+def nav_to(q, steps, what):
+    """Run `steps` (NAV entries) with ~300 ms (device) between them; every
+    DBG:VIEW? must start with the expected page."""
+    bad = []
+    for c, want in steps:
+        q(c)
+        wait_dev(q, 300)
+        v = q('DBG:VIEW?')
+        if not v.startswith(want):
+            bad.append('%s -> %s (want %s)' % (c, v, want))
+    check(not bad, '%s: every step landed (%s)' % (what, '; '.join(bad) or ' / '.join(w for _, w in steps)))
+
+
+def nav_tree(q):
+    """No stream: the page tree; MENU on the Device page = the main menu
+    (device check 35fce2a: it returned to Settings 3/3), a tap on Device =
+    Settings 3/3, MENU from the menu = back to the instrument (DMM)."""
+    nav_to(q, NAV[:6], 'page tree, MENU on Device -> the main menu')
+    nav_to(q, NAV[1:5] + [('DBG:TAP 240,177', 'Settings,3'), ('DBG:KEY 0', 'Settings,2'), ('DBG:KEY 0', 'Settings,1'),
+                          ('DBG:KEY 0', 'Main menu'), ('DBG:KEY 0', 'Multimeter')], 'a tap on Device -> Settings 3/3, MENU back up')
+
+
+class UiNav:
+    """--ui-nav while a session streams: one NAV step per LOG:DISK? poll
+    (round and round); the landings are checked (`done`)."""
+
+    def __init__(self, q):
+        self.q = q
+        self.k = 0
+        self.n = 0
+        self.bad = []
+
+    def step(self):
+        c, want = NAV[self.k]
+        self.q(c)
+        wait_dev(self.q, 300)
+        v = self.q('DBG:VIEW?')
+        # The source badge in a session: the Wave view is refused (no
+        # stream of its own while the logger owns the HY3131).
+        if not v.startswith(want) or (c == 'DBG:TAP 177,10' and not v.endswith(',0')):
+            self.bad.append('%s -> %s (want %s)' % (c, v, want))
+        self.k = (self.k + 1) % len(NAV)
+        self.n += 1
+
+    def done(self, tag):
+        check(self.n >= min(len(NAV), A.ui_nav_steps or len(NAV)) and not self.bad, '%s: UI navigation while streaming, %d steps landed (%s)'
+              % (tag, self.n, '; '.join(self.bad[:4]) or 'all'))
+
+
 def session(q, src, rate, profile):
     q('LOG:STATe OFF')
     q('*CLS')
@@ -338,6 +420,14 @@ def session(q, src, rate, profile):
         q('LOG:OSR %d' % osr)
         q('LOG:CHOP %s' % chop)
     time.sleep(3)
+    if A.ui_nav:
+        # The session starts on the MCX scope page (the scope source open).
+        for _ in range(5):
+            if q('DBG:VIEW?').startswith('Main menu'):
+                break
+            q('DBG:KEY 0')
+            wait_dev(q, 300)
+        nav_to(q, [('DBG:TAP 341,107', 'Oscilloscope')], '%s %d: the scope page before the session' % (src, rate))
     q('LOG:DEST DISK')
     q('LOG:DURation %d' % A.dur)
     while int(q('DBG:PING?').split(',')[0]) < A.start_at * 1000:
@@ -349,6 +439,7 @@ def session(q, src, rate, profile):
     t_run = None
     st = []
     hr = HostRead(q) if A.host_read else None
+    un = UiNav(q) if A.ui_nav else None
     if RC:
         RC.reset()
     for _ in range(2000):
@@ -359,14 +450,20 @@ def session(q, src, rate, profile):
                 q('DBG:PROF:RESET')
         if st[0] >= 5:
             break
-        if hr and st[0] == 3:
-            hr.step()
+        nav = un and (A.ui_nav_steps is None or un.n < A.ui_nav_steps)
+        if (hr or nav) and st[0] == 3:
+            if hr:
+                hr.step()
+            if nav:
+                un.step()
             continue
         time.sleep(0.5)
     if hr:
         check('FIRMWARE.BIN' in hr.seen and hr.bytes > 0 and hr.profs > 0,
               '%s %d: a host read %d bytes of INFO/ (%s) and DBG:PROF? %d times during the run'
               % (src, rate, hr.bytes, ' '.join(sorted(hr.seen)), hr.profs))
+    if un and A.ui_nav_steps != 0:
+        un.done('%s %d' % (src, rate))
     if RC:
         got = RC.calls()
         print('  region C functions / slow-bank data reads while streaming: %s' % (', '.join(sorted(got)) or 'none'), flush=True)
@@ -399,6 +496,9 @@ def session(q, src, rate, profile):
     if A.vol_read:
         vol_read(q, st[1], '%s-%s-%d' % (profile, src, rate))
     check(ok and rows == st[4] and len(dlg) == st[3], '%s %d: %s decodes: %d rows, %d bytes' % (src, rate, name, rows, len(dlg)))
+    # The whole session recorded (a session started on the Scope page, DMM
+    # rail off, ran with 0 rows and passed every other check).
+    check(rows >= 0.9 * nominal * A.dur, '%s %d: rows %d for %d s at %.0f S/s' % (src, rate, rows, A.dur, nominal))
     prep_s = ((t_run or up1) - up0) / 1000
     run_s = (up1 - (t_run or up1)) / 1000
     span = rows / nominal if nominal else 0
@@ -569,6 +669,8 @@ for profile in A.profiles.split(','):
             return b if raw else b.decode(errors='replace').strip()
 
         print('*IDN?', q('*IDN?'), flush=True)
+        if A.ui_nav:
+            nav_tree(q)
         if A.stop_in_trial:
             stop_in_trial(q, profile)
         for sv in A.sessions.split(','):
