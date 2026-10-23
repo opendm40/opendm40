@@ -33,8 +33,17 @@ const S4: u32 = DMA1 + 0x10 + 0x18 * 4;
 const LIFCR: u32 = DMA1 + 0x08;
 const HIFCR: u32 = DMA1 + 0x0C;
 
-/// Settings record (read only): scope calibration pairs.
-const REC: u32 = 0x080C_0000;
+/// Settings record (0x080C0000, read only): the scope calibration pairs at
+/// record offsets +0x08 (gain) / +0xA8 (offset), `cal_pair`.
+///
+/// Read through the record's RAM copy (dmm.rs `rec_u32`, `load_record`):
+/// the record is in the slow flash bank, and the scope code reads it per
+/// frame / measurement, also while an AD2 stream runs (a host's SCOP:MEAS? /
+/// WAV:PRE? / DBG:HWTRIG? during a fast-log session: emu/fastlogtest.py
+/// --poll, 2026-10-23).
+pub fn rec_f32(off: u32) -> f32 {
+    f32::from_bits(crate::dmm::rec_u32(off))
+}
 
 /// Screen = 400 columns, 10 divisions (graph height 280 rows, 8 x 35).
 pub const COLS: usize = 400;
@@ -218,9 +227,8 @@ pub struct Frame<'a> {
 }
 
 fn cal_pair(off: u32, i: usize, dflt: (f32, f32)) -> (f32, f32) {
-    let a = REC + off + 8 * i as u32;
-    let rd = |x: u32| unsafe { core::ptr::read_volatile(x as *const f32) };
-    let (p0, p1) = (rd(a), rd(a + 4));
+    let a = off + 8 * i as u32;
+    let (p0, p1) = (rec_f32(a), rec_f32(a + 4));
     let ok = |v: f32| v.is_finite() && v > 0.0 && v < 1024.0;
     if ok(p0) && ok(p1) && (p0 - p1).abs() > 10.0 { (p0, p1) } else { dflt }
 }

@@ -550,10 +550,12 @@ impl HwTrig {
 
 /// A {f0, f1} pair from the settings record if plausible (finite, within the
 /// 10-bit code range, at least 10 codes apart), as `scope.rs::cal_pair`.
+/// From the record's copy (scope.rs `rec_f32`): the record is in the slow
+/// flash bank, and `available` / `map` run per frame, also while an AD2
+/// stream runs.
 fn rec_pair(base: u32, i: usize) -> Option<(f32, f32)> {
-    let a = base + 8 * i as u32;
-    let rd = |x: u32| unsafe { core::ptr::read_volatile(x as *const f32) };
-    let (p0, p1) = (rd(a), rd(a + 4));
+    let a = base - 0x080C_0000 + 8 * i as u32;
+    let (p0, p1) = (crate::scope::rec_f32(a), crate::scope::rec_f32(a + 4));
     let ok = |v: f32| v.is_finite() && v > 0.0 && v < 1024.0;
     if ok(p0) && ok(p1) && (p0 - p1).abs() > 10.0 { Some((p0, p1)) } else { None }
 }
