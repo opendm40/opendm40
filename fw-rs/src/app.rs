@@ -4099,7 +4099,7 @@ impl App {
                             if i > 0 {
                                 out.put_bytes(b",");
                             }
-                            if matches!(i, 0..=3 | 6..=8 | 16) {
+                            if matches!(i, 0..=3 | 6..=8 | 16 | 18) {
                                 out.put_u32(*x as u32);
                             } else {
                                 out.put_f32(*x);

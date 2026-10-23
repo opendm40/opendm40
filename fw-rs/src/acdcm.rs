@@ -29,12 +29,18 @@
 //!   span is >= 10 k codes, kept per range over sessions, else the table.
 //!   The internal zero is not a real 0 V input (device 2563fe1: ~15 codes
 //!   off on 60 V, the gain 0.030 % high, -8 mV at 0 V), so once the input
-//!   has settled >= 10 k codes away from the anchor C takes the stock row's
-//!   reading there too (`am_refine`, ~1 s of DC V readings) and the gain
-//!   from the two READ? points: measured against the very reading the DC
-//!   part is meant to equal, nothing assumed of the hardware; it replaces
-//!   the internal zero's gain for the range (until power-off) and a later
-//!   one only over a 1.5 x larger span.
+//!   has settled >= 10 k codes away from a reference point of the session
+//!   C takes the stock row's reading there too (`am_refine`, ~1 s of DC V
+//!   readings) and the gain from the two READ? points: measured against the
+//!   very reading the DC part is meant to equal, nothing assumed of the
+//!   hardware. "Settled" = the LPF has stopped creeping (device c6f9670: 5..12
+//!   codes still going after 3.6 s, a 6 V gain 143..195 ppm off): its slope
+//!   over the last ~3 s below 1 code / s, the new point = the fitted line's
+//!   last value, taken before the reference row is written (acdc-approaches.md
+//!   10.12). A two-point gain over a shorter span than the gain in use does
+//!   not replace it, except an internal zero's that it shows biased (their
+//!   difference over its span beyond the window's noise: 60 V's AGND zero);
+//!   kept per range until power-off.
 //!   AC part: sqrt(RMS) x the factory AC V calibration (gain and offset, as
 //!   A: device e2 put it within 0.014 % of A, the DC gain 0.13 / 0.23 %
 //!   high), used only when AD2's peak hold over the last two results allows
@@ -110,9 +116,32 @@ const PK_MARGIN: f32 = 24.0;
 const RMS_BAD_MS: u64 = 2500;
 /// How long the last AC part from the RMS stands in for a peak bound (ms).
 const AC_OK_MS: u64 = 2000;
-/// C V refinement (`am_refine`): LPF results in a row within the anchor's
-/// spread rule = a settled input.
-const STEADY_N: u8 = 12;
+/// C V refinement (`am_refine`): the last SLOPE_N LPF results (~3 s) within
+/// the anchor's spread rule and their fitted slope below SLOPE_MAX codes / s
+/// (LPF_T s per result) = a settled input and LPF (device c6f9670: the LPF
+/// crept 5..12 codes for ~8 s after a step; noise ~1.7 codes, so ~3 s for a
+/// slope error of ~0.3 code / s), and not before SLOPE_MIN results at the
+/// level (~5 s: the device's tail stayed flat for ~4 s, then fell); not
+/// settled after SLOPE_TMO results at one level: no reference there until
+/// the input moves.
+const SLOPE_N: usize = 28;
+const SLOPE_MAX: f32 = 1.0;
+const LPF_T: f32 = 0.1067;
+const SLOPE_MIN: u8 = 48;
+const SLOPE_TMO: u8 = 120;
+/// The run row's first results after the second reference within this of the
+/// window's end value (codes), else the input moved: no gain from it.
+const GAIN_MOVE: f32 = 12.0;
+/// A shorter-span two-point gain replaces an internal zero's when the two
+/// differ at its far point by more than BIAS_K x the window's residual rms
+/// (the scale of each of the four inputs' noise: two LPF means, two READ?s,
+/// ~1 code each in the emulator) plus what a tail still creeping at the
+/// window's slope may leave (|slope| x CREEP_TAU s: the time constant of
+/// the c6f9670 trace's tail, fitted as two lags of 2.5 s), at least BIAS_MIN
+/// codes.
+const BIAS_K: f32 = 3.0;
+const CREEP_TAU: f32 = 2.5;
+const BIAS_MIN: f32 = 2.0;
 /// C A: the entry reference sets a gain (else an offset) from this
 /// fraction of the range's full scale.
 const C_A_GAIN: f32 = 0.1;
@@ -153,23 +182,43 @@ pub struct Am {
     coff: [f32; 4],
     cg: [f32; 4],
     cgsp: [f32; 4],
-    /// C V per range: the anchor's reference (V, this session), the gain
-    /// is from two references (bit per range), the span (codes) of the last
-    /// two-point attempt (the next one needs 1.5 x more; kept as `cg`).
-    cav: [f32; 4],
+    /// C V per range: the gain is from two references (bit per range), the
+    /// span (codes) of the last two-point attempt (the next one needs 1.5 x
+    /// more; kept as `cg`).
     c2p: u8,
     ctry: [f32; 4],
-    /// C V: a second reference is being taken (`am_refine`): its range and
-    /// the first point (anchor LPF codes, reference V).
+    /// C V: a second reference is being taken (`am_refine`): its range, the
+    /// first point (LPF codes, reference V), the new point's LPF codes (the
+    /// window's fitted end) and the window's residual rms (codes).
     pend: bool,
     pr: u8,
     pm: f32,
     pv: f32,
-    /// C V in ST_RUN: LPF results in the steady window, their sum, min, max.
+    pm2: f32,
+    psig: f32,
+    pslope: f32,
+    /// C V per range, this session: the reference points (LPF codes, V) with
+    /// the lowest / highest code (bit per range: any), paired with a new one
+    /// for the larger span.
+    plo: [(f32, f32); 4],
+    phi: [(f32, f32); 4],
+    pts: u8,
+    /// C V per range: where the gain in use is from (0 the table, 1 the
+    /// internal zero, 2 two references, 3 two references over a shorter span
+    /// than a biased internal zero's); the last two-point gain's difference
+    /// to the gain in use over its span (codes); the last window's slope
+    /// (codes / s) (STAT?).
+    gsrc: [u8; 4],
+    /// C V: the range of the last row write (-1 none this session).
+    lr: i8,
+    dis: f32,
+    slope: f32,
+    /// C V in ST_RUN: the last SLOPE_N LPF results (ring, `wi` the oldest
+    /// once full), how many, results since the window last restarted.
+    ring: [f32; SLOPE_N],
     wn: u8,
-    wacc: f32,
-    wlo: f32,
-    whi: f32,
+    wi: u8,
+    wst: u8,
     /// C V anchor in progress: the zero (LPF codes), the min / max of the
     /// results averaged (in `acc`), zero taken, retries.
     cz: f32,
@@ -221,17 +270,26 @@ pub fn am_static() -> &'static mut Am {
             coff: [0.0; 4],
             cg: [0.0; 4],
             cgsp: [0.0; 4],
-            cav: [0.0; 4],
             c2p: 0,
             ctry: [0.0; 4],
             pend: false,
             pr: 0,
             pm: 0.0,
             pv: 0.0,
+            pm2: 0.0,
+            psig: 0.0,
+            pslope: 0.0,
+            plo: [(0.0, 0.0); 4],
+            phi: [(0.0, 0.0); 4],
+            pts: 0,
+            gsrc: [0; 4],
+            lr: -1,
+            dis: 0.0,
+            slope: 0.0,
+            ring: [0.0; SLOPE_N],
             wn: 0,
-            wacc: 0.0,
-            wlo: 0.0,
-            whi: 0.0,
+            wi: 0,
+            wst: 0,
             cz: 0.0,
             c1: 0.0,
             c2: 0.0,
@@ -316,6 +374,8 @@ impl Dmm {
         a.cfault = [0.0; 4];
         a.bad_t = 0;
         a.pend = false;
+        a.pts = 0;
+        a.lr = -1;
     }
 
     /// DBG:ACDC:METH: switch and restart the session (AC+DC / AUTO).
@@ -354,10 +414,12 @@ impl Dmm {
     /// Hz, the slot's correction, C V per_code, offset, LPF codes, sqrt(RMS)
     /// codes, C V: AD2 peak p-p codes (-1 none), the AC part's source (0
     /// RMS, 1 the peak bound, 2 none), the gain's span in codes (0: the
-    /// table) (app.rs formats the first four, n_* and the source as
-    /// integers).
+    /// table), where the gain is from (`gsrc`), the last two-point gain's
+    /// difference to the gain in use over its span (codes), the last steady
+    /// window's slope (codes / s) (app.rs formats the first four, n_*, the
+    /// source and gsrc as integers).
     #[inline(never)] // .cold (link-native.x): entry / range change / SCPI only
-    pub fn am_stat(&self) -> [f32; 18] {
+    pub fn am_stat(&self) -> [f32; 21] {
         let a = &*self.am;
         let r = self.range.clamp(0, 3) as usize;
         let cal = self.mode <= 1 && a.meth == METH_C && a.ok & (1 << r) != 0;
@@ -381,6 +443,9 @@ impl Dmm {
             a.pp,
             a.acsrc as f32,
             a.cgsp[r],
+            a.gsrc[r] as f32,
+            a.dis,
+            a.slope,
         ]
     }
 
@@ -392,6 +457,19 @@ impl Dmm {
         let s = slot(self.mode, self.range);
         let r = self.range.clamp(0, 3) as usize;
         let cv = self.mode <= 1 && self.am.meth == METH_C;
+        if cv {
+            // C V back on a range whose gain is still the table's (no internal
+            // zero / two references yet: up to ~0.1 % off): its old anchor may
+            // be far from the input now, so anchor it again (and the internal
+            // zero with it if the span allows) rather than wait ~6 s for a
+            // settled second reference (`am_refine`).
+            let a = &mut *self.am;
+            if a.lr != r as i8 && a.gsrc[r] == 0 && a.fixed & (1 << s) == 0 && !a.pend {
+                a.ok &= !(1 << s);
+                a.refd &= !(1 << s);
+            }
+            a.lr = r as i8;
+        }
         let need_ref = (self.am.ok | self.am.refd) & (1 << s) == 0;
         let dm = dc_mode_of(self.mode);
         self.mode = if need_ref { dm } else { ac_mode_of(dm) };
@@ -404,6 +482,8 @@ impl Dmm {
         a.bad_t = 0;
         a.ac_ok_t = 0;
         a.wn = 0;
+        a.wi = 0;
+        a.wst = 0;
         if a.pend && (!cv || a.pr as usize != r) {
             a.pend = false; // the range changed during a refinement
         }
@@ -804,15 +884,32 @@ impl Dmm {
             self.switch_phase(clk, 1, r as i8, 450);
             return None;
         }
+        let mut m = m;
         if a.pend {
-            // The second reference (`am_refine`): the gain between the two.
+            // The second reference (`am_refine`): the gain between the first
+            // point and the settled window's end (taken before this row was
+            // written again), if these results still agree with it.
             a.pend = false;
-            let span = (m - a.pm).abs();
-            let g = (v - a.pv) / (m - a.pm);
-            if span >= CAL_GAIN_CODES && (g / tab - 1.0).abs() <= CAL_GAIN_TOL {
-                a.cg[r] = g;
-                a.cgsp[r] = span;
-                a.c2p |= 1 << r;
+            if (m - a.pm2).abs() <= GAIN_MOVE {
+                m = a.pm2;
+                let span = (m - a.pm).abs();
+                let g = (v - a.pv) / (m - a.pm);
+                if span >= CAL_GAIN_CODES && (g / tab - 1.0).abs() <= CAL_GAIN_TOL {
+                    // A shorter span than the gain in use: only over an
+                    // internal zero's that this one shows biased (the two
+                    // lines apart at the new point by more than the points'
+                    // noise and a creep's rest).
+                    let cur = a.cgsp[r];
+                    a.dis = if cur > 0.0 { (g / a.cg[r] - 1.0) * span } else { 0.0 };
+                    let noise = BIAS_K * a.psig + a.pslope.abs() * CREEP_TAU;
+                    let take = cur == 0.0 || span >= cur || (a.gsrc[r] == 1 && a.dis.abs() > noise.max(BIAS_MIN));
+                    if take {
+                        a.gsrc[r] = if cur > 0.0 && span < cur { 3 } else { 2 };
+                        a.cg[r] = g;
+                        a.cgsp[r] = span;
+                        a.c2p |= 1 << r;
+                    }
+                }
             }
         } else if a.zdone {
             let span = (m - a.cz).abs();
@@ -820,12 +917,21 @@ impl Dmm {
             if span >= CAL_GAIN_CODES && (g / tab - 1.0).abs() <= CAL_GAIN_TOL {
                 a.cg[r] = g;
                 a.cgsp[r] = span;
+                a.gsrc[r] = 1;
             }
         }
+        // The session's reference points with the lowest / highest code.
+        let b = 1u8 << r;
+        if a.pts & b == 0 || m < a.plo[r].0 {
+            a.plo[r] = (m, v);
+        }
+        if a.pts & b == 0 || m > a.phi[r].0 {
+            a.phi[r] = (m, v);
+        }
+        a.pts |= b;
         let pc = if a.cgsp[r] > 0.0 { a.cg[r] } else { tab };
         a.cpc[r] = pc;
         a.coff[r] = m * pc - v;
-        a.cav[r] = v;
         a.ok |= 1 << r;
         a.st = ST_RUN;
         a.pk_prev = (i32::MAX, i32::MIN);
@@ -833,43 +939,74 @@ impl Dmm {
         None
     }
 
-    /// Method C, V, in ST_RUN: one LPF result into the steady window; when
-    /// the input has settled >= CAL_GAIN_CODES away from the range's anchor
-    /// (and 1.5 x further than the last two-point attempt there), with an AC
-    /// part (RMS or the peak bound: a steady node), the stock DC V row's
-    /// reading is taken again: the anchor
+    /// Method C, V, in ST_RUN: one LPF result into the steady window (the
+    /// last SLOPE_N results within the anchor's spread rule); once it is full,
+    /// SLOPE_MIN results old and its fitted slope below SLOPE_MAX (the LPF no
+    /// longer creeping),
+    /// if the fitted end value is >= CAL_GAIN_CODES from the session's
+    /// reference point farthest from it (and 1.5 x further than the last
+    /// two-point attempt there), with an AC part (RMS or the peak bound: a
+    /// steady node), the stock DC V row's reading is taken again: the anchor
     /// moves here and `am_cal_step` takes the gain from the two references
     /// (module header). Returns whether the reference was started.
     #[inline(never)] // per result (region B, as poll_am)
     fn am_refine(&mut self, clk: &mut Clock, r: usize, lpf: f32) -> bool {
         let a = &mut *self.am;
-        if a.wn > 0 && (lpf.max(a.whi) - lpf.min(a.wlo)) > 60f32.max(0.01 * lpf.abs()) {
+        let n = a.wn as usize;
+        let (mut lo, mut hi) = (lpf, lpf);
+        for &y in &a.ring[..n] {
+            lo = lo.min(y);
+            hi = hi.max(y);
+        }
+        if hi - lo > 60f32.max(0.01 * lpf.abs()) {
             a.wn = 0;
+            a.wi = 0;
+            a.wst = 0;
         }
-        if a.wn == 0 {
-            a.wacc = 0.0;
-            a.wlo = lpf;
-            a.whi = lpf;
+        a.ring[a.wi as usize] = lpf;
+        a.wi = ((a.wi as usize + 1) % SLOPE_N) as u8;
+        if (a.wn as usize) < SLOPE_N {
+            a.wn += 1;
         }
-        a.wn += 1;
-        a.wacc += lpf;
-        a.wlo = a.wlo.min(lpf);
-        a.whi = a.whi.max(lpf);
-        if a.wn < STEADY_N {
+        a.wst = a.wst.saturating_add(1);
+        if (a.wn as usize) < SLOPE_N || a.wst < SLOPE_MIN || a.wst > SLOPE_TMO || a.acsrc == 2 || a.cpc[r] == 0.0 || a.pts & (1 << r) == 0 {
             return false;
         }
-        let mean = a.wacc / a.wn as f32;
-        a.wn = 0;
-        let m1 = (a.cav[r] + a.coff[r]) / a.cpc[r];
-        let d = (mean - m1).abs();
-        if a.acsrc == 2 || a.cpc[r] == 0.0 || d < CAL_GAIN_CODES || d <= 1.5 * a.ctry[r] {
+        // Least squares over the window (oldest at `wi`), relative to the
+        // newest result (f32: codes up to 2^18).
+        let nf = SLOPE_N as f32;
+        let kb = 0.5 * (nf - 1.0);
+        let (mut sy, mut sky) = (0.0f32, 0.0f32);
+        for k in 0..SLOPE_N {
+            let y = a.ring[(a.wi as usize + k) % SLOPE_N] - lpf;
+            sy += y;
+            sky += (k as f32 - kb) * y;
+        }
+        let mean = sy / nf;
+        let b = sky / (nf * (nf * nf - 1.0) / 12.0);
+        a.slope = b / LPF_T;
+        if a.slope.abs() > SLOPE_MAX {
+            return false;
+        }
+        let mut ss = 0.0f32;
+        for k in 0..SLOPE_N {
+            let e = a.ring[(a.wi as usize + k) % SLOPE_N] - lpf - mean - b * (k as f32 - kb);
+            ss += e * e;
+        }
+        let end = lpf + mean + b * kb;
+        let (lo, hi) = (a.plo[r], a.phi[r]);
+        let (p, d) = if (end - lo.0).abs() >= (end - hi.0).abs() { (lo, (end - lo.0).abs()) } else { (hi, (end - hi.0).abs()) };
+        if d < CAL_GAIN_CODES || d <= 1.5 * a.ctry[r] {
             return false;
         }
         a.ctry[r] = d;
         a.pend = true;
         a.pr = r as u8;
-        a.pm = m1;
-        a.pv = a.cav[r];
+        a.pm = p.0;
+        a.pv = p.1;
+        a.pm2 = end;
+        a.psig = sqrt(ss / (nf - 2.0));
+        a.pslope = a.slope;
         a.ok &= !(1 << r);
         a.refd &= !(1 << r);
         self.switch_phase(clk, 1, r as i8, 450);
