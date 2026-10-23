@@ -118,8 +118,23 @@ SC = {
         (30, 'open;dcv:5.5', shows('AUTO,DC', 5.5, 0.002), '5.5 V DC: DC'),
         (42, 'open;dcv:4.5', shows('AUTO,DC', 4.5, 0.002), '4.5 V DC: DC'),
     ], {}),
+    # The device check of 2563fe1 (par.py): AUTO entered on the 40 Hz square (AC 4.760 ~= DC
+    # 4.764 V: a tie) went to DC with C and, after ~3.5 s, to AC with A (A's first AC part
+    # overshot, 4.91 V, and the first evaluation decided). dmm.rs AUTO_TIE: a tie shows DC until
+    # the AC part has settled on one side, then the larger part (DC when it does not settle).
+    # Three fresh entries: either part, but no AC shown before the decision (DC, then at most
+    # one change, to the decided part) and the same part in every entry (STABLE below: not
+    # decided by a transient).
+    'sqtie': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 50, [
+        (0, 'open;acv:4.776@40,dc=4.776,shape=square', lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 4.776, 0.01), 'square: either part (a tie)'),
+        (16, None, lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 4.776, 0.01), 're-enter on the square'),
+        (32, None, lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 4.776, 0.01), 're-enter on the square'),
+    ], {16: 'VOLT:COUP DC', 17: 'VOLT:COUP AUTO', 32: 'VOLT:COUP DC', 33: 'VOLT:COUP AUTO'}),
 }
-EXTRA = {'tap': ['CURR:COUP?']}
+EXTRA = {'tap': ['CURR:COUP?'], 'sqtie': ['DBG:ACDC:STAT?']}
+# Scenarios whose AUTO part inside a phase (from its first AUTO reading after the phase's last
+# command) is DC and then at most one change (the decision), the same part in every phase.
+STABLE = {'sqtie'}
 
 
 def run(name):
@@ -192,6 +207,27 @@ def run(name):
         else:
             r = seen[-1]
             print('  ok  %-50s %s %g' % (label, r['C'], r['V']), flush=True)
+    if name in STABLE:
+        parts = []
+        for i, (t, _, _, label) in enumerate(phases):
+            t1 = phases[i + 1][0] if i + 1 < len(phases) else run_for
+            t0 = max([ta for ta in SC[name][4] if t <= ta < t1] + [t])
+            seq = [r['C'] for r in rows if t0 + 0.2 <= r['t'] <= t1 - 1.5 and r['C'].startswith('AUTO,')]
+            flips = sum(1 for a, b in zip(seq, seq[1:]) if a != b)
+            rle = []
+            for x in seq:
+                if rle and rle[-1][0] == x[5:]:
+                    rle[-1][1] += 1
+                else:
+                    rle.append([x[5:], 1])
+            print('  %s: %s, %d flips (%s)' % (label, seq[-1] if seq else '-', flips, ' '.join('%s x%d' % tuple(q) for q in rle)), flush=True)
+            if not seq or flips > 1 or (flips and seq[0] != 'AUTO,DC'):
+                ok = False
+                bad.append('%s: %d flips' % (label, flips))
+            parts.append(seq[-1] if seq else '-')
+        if len(set(parts)) > 1:
+            ok = False
+            bad.append('entries differ: %s' % ' '.join(parts))
     res = {'name': name, 'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-600:] if p.returncode else ''}
     with open(os.path.join(OUT, tag + '.json'), 'w') as f:
         json.dump(res, f, indent=1)
