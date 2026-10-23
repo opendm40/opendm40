@@ -1509,7 +1509,10 @@ the AD1 stream ISR).
   the sector holding file offset 12 + 0x7C000 (body 0x08080000; with the
   12-byte header and the 128-byte encoding blocks: file offset 0x7C000).
   Every other sector (directories, README, BACKUP.TXT, ROMBOOT, UID, OTP,
-  OPTBYTES, the FIRMWARE.BIN head, logs, shots) reads as before.
+  OPTBYTES, the FIRMWARE.BIN head, logs, shots) reads as before. The
+  answer is per command: a READ(10) is refused whole when any of its
+  sectors is slow, so a host request (readahead, a 120 KB bio) that spans
+  FIRMWARE.BIN offset 0x7C000 waits too.
 - **The settings / calibration record** (`dmm.rs` `load_record` /
   `rec_u32`): read once at start-up into a 1 KiB SRAM copy; `Dmm::ad2_scale`
   (every Wave view frame, LOG:SCALe?), `dmm::cal`, the scope's gain /
@@ -1518,7 +1521,8 @@ the AD1 stream ISR).
 - **Boot-data version bytes** (0x080A4010..12, BT command 02, Device page):
   copied by `Bt::new` (`bt::boot_ver`).
 - `Logger::start` / `logger::isr::start` are region B again (their tails
-  ran after `stream::start`).
+  ran after `stream::start`), and so is LOG:SCALe? (`main.rs log_scale`,
+  asked while a session streams).
 
 Why NOT READY (decision 2026-10-23, of three):
 - (a) NOT READY 02/04/01, the host retries: no RAM, every file, exact (only
@@ -1539,10 +1543,10 @@ Why NOT READY (decision 2026-10-23, of three):
 
 Verified over the real Linux path (emu/kvmtest/run.sh: a KVM guest with the
 Ubuntu 7.0.0-38 kernel attaching the emulator over vhci-hcd, usb-storage,
-sd, vfat; the NOT READY change of 8013427, and the final image, below):
-- 6 s session (~67 s of wall time in the loaded emulator): `cat` of the
+sd, vfat; the NOT READY change, then the final image cafab0a):
+- 6 s session (52-67 s of wall time in the loaded emulator): `cat` of the
   four files waited until the session ended, exit 0, byte-identical to
-  copies made before, no kernel message.
+  copies made before, no kernel message (cafab0a: 51.7 s).
 - 20-25 s sessions (> 180 s wall): the kernel logs "timing out command,
   waited 180s", "Not Ready / Logical unit is in process of becoming ready",
   "I/O error, dev sda, sector 925" (CALIB.BIN); an O_DIRECT read (`dd
@@ -1563,7 +1567,14 @@ fail on any. Before the fix (4a734d1): memcpy from 0x08080000.. (the
 FIRMWARE.BIN tail), `vdisk::mem_read` from 0x080C0000, `Logger::start`'s
 literal pool, `dmm::cal` (Wave view), `scope::cal_pair` /
 `hwtrig::rec_pair` (`--poll "SCOP:MEAS:VPP?;DBG:HWTRIG?"` in a disk
-session).
+session), `main.rs log_scale` (LOG:SCALe?, region C code). On cafab0a:
+fastlogtest `--region-c --host-read` at 640 (AD1) / 4800 / 38400 / 76800,
+the same at 9600 with `--poll` of SCOP:MEAS:VPP? / DBG:HWTRIG? / WAV:PRE?
+/ CHAN1:SCAL? / SYST:MOD? / *IDN? / LOG:SCALe? / LOG:SRATe? / LOG:SOURce? /
+CONF?, wavetest (INFO/ in the Wave view, the polls with LOG:DEST? /
+LOG:DURation? / *IDN? / SYST:MOD?), ad2streamtest, inrushtest: PASS, no
+region C call and no slow-bank load while streaming (the Save CSV tap's own
+handler, allowed as before, aside).
 
 ### Host writes (`src/vwrite.rs`): delete from the PC, drag-and-drop update
 

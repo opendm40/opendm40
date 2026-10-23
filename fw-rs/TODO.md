@@ -1484,39 +1484,47 @@ Firmware:
       BOOTDATA, CALIB) stalls the AD2 ISR 21.8 us per read (lat_pc memcpy / vdisk::mem_read). At 38400: late
       ~3.7 k, 10 k samples lost; at 76800: 289 k lost. FIRMWARE.BIN 0..0x7C000 and ROMBOOT.BIN: 280 ns. The
       emulator's region C hook sees fetches only.
-- [x] Region C DATA reads during a stream (above). **Fixed (8013427, 3282929; docs/native-boot.md "The slow
-      flash bank while an AD2 stream runs"):** nothing reads flash >= 0x08080000 while `hy3131::streaming()`.
+- [x] Region C DATA reads during a stream (above). **Fixed (0b05da6, 32d80b4, cafab0a; docs/native-boot.md "The
+      slow flash bank while an AD2 stream runs"):** nothing reads flash >= 0x08080000 while `hy3131::streaming()`.
       The USB volume answers a READ(10) of a slow-bank sector (CALIB / BOOTDATA / LOADER whole, FIRMWARE.BIN
       from offset 0x7C000) NOT READY 02/04/01, the host retries (option a; b cannot hold LOADER / the
       FIRMWARE.BIN tail, c meets the 30 s command timeout). The settings / calibration record is read through
       a 1 KiB SRAM copy made at start-up (dmm.rs `load_record`: `ad2_scale` per Wave view frame and
       LOG:SCALe?, `dmm::cal`, scope gain / offset pairs, hwtrig's map, all found reading it while streaming);
       the boot-data version bytes (BT 02, Device page) copied by `Bt::new`; Logger::start / isr::start back in
-      region B (their tails ran after stream::start). Emulator: peripherals/FlashWatch.cs + regionc.py watch
+      region B (their tails ran after stream::start), so is LOG:SCALe? (main.rs log_scale, region C code read
+      while streaming). Emulator: peripherals/FlashWatch.cs + regionc.py watch
       DATA loads from 0x08080000..0x08100000 (and slow-bank PCs the ISR interrupts) while HANDED; fastlogtest
       `--region-c --host-read` FAILs on 4a734d1 (memcpy <- 0x08080000, vdisk::mem_read <- 0x080C0000,
-      Logger::start) and PASSes now at 640 (AD1) / 4800 / 38400 / 76800, NOT READY exactly on those sectors,
-      the same bytes after the session; wavetest reads INFO/ in the Wave view. Linux over the real usb-storage
+      Logger::start) and PASSes on cafab0a at 640 (AD1) / 4800 / 38400 / 76800, NOT READY exactly on those
+      sectors, the same bytes after the session; `--poll` with the scope / LOG / identity queries at 9600:
+      PASS; wavetest (INFO/ in the Wave view), ad2streamtest, inrushtest, fatren-test, tools/*/run.sh,
+      emu/hy3131/tests: PASS. Linux over the real usb-storage
       path (emu/kvmtest/run.sh, KVM guest, vhci-hcd): a 6 s session = the copy waits ~65 s, exit 0, bytes
       equal, no kernel message; past 180 s (6 x the 30 s sd timeout, scsi_cmd_runtime_exceeced) the kernel
       logs an I/O error, O_DIRECT reads fail EIO (buffered cat survived via the page-cache re-read).
-      **Device retest** (b6909d6 item 3 again, on the image from 3282929+): (1) 38400 and 76800 disk sessions,
+      **Device retest** (b6909d6 item 3 again, on the image from cafab0a or later): (1) 38400 and 76800 disk sessions,
       host `cp INFO/*.BIN` (FIRMWARE.BIN first) during state 3: DBG:ISR? max_lat <= ~300 ns, late 0, overruns 0,
       the file lost_before 0; the cp finishes after the session ends, files byte-equal to copies made
       before (dmesg: no I/O error when the session is < 3 min). (2) The same in the Wave view at 1 ms/div
       (76800): cp blocks while the view is open, completes after MENU. (3) O_DIRECT split test of the b6909d6
       run (`fwdirect.py` 0x7C000..0x82000 and CALIB / LOADER / BOOTDATA) during 38400: each read waits, no
-      max_lat jump. (4) UID / OTP / OPTBYTES.BIN (system memory 0x1FFF7xxx / 0x1FFFC000, not refused: assumed
+      max_lat jump; `fwdirect.py` 0..0x70000 still reads at once (280 ns). A buffered `cp` of the FIRMWARE.BIN
+      head may also wait: a READ(10) is refused whole when any of its sectors is slow, and the kernel's
+      readahead near offset 0x7C000 spans the boundary. (4) UID / OTP / OPTBYTES.BIN (system memory 0x1FFF7xxx / 0x1FFFC000, not refused: assumed
       fast, not measured on b6909d6) read during a 76800 session: max_lat. (5) SCOP:MEAS:VPP? / WAV:PRE? /
-      DBG:HWTRIG? / LOG:SCALe? polled during a 38400 disk session, and BT command 02 in the Wave view:
-      late 0. (6) Device page / *IDN? / SYST:MOD? / BT 00 / 02 values unchanged (copies). (7) Windows: copy
-      INFO/CALIB.BIN during a 60 s session: does Explorer wait or fail, and after how long?
+      DBG:HWTRIG? / LOG:SCALe? / LOG:DEST? / LOG:DURation? polled during a 38400 disk session, and BT
+      command 02 in the Wave view: late 0. (6) Device page / *IDN? / SYST:MOD? / BT 00 / 02 values unchanged (copies). (7) Windows: copy
+      INFO/CALIB.BIN during a 60 s session: does Explorer wait or fail, and after how long? (The read-only
+      volume itself passed on Windows 11, b6909d6, above.)
 - [ ] A copy of a slow-bank INFO/ file while the meter streams for more than ~3 min (an open Wave view, a long
       fast-log session) can fail on Linux (EIO after 180 s; buffered reads usually recover) and maybe sooner on
       Windows. Documented (README.TXT could say so; native-boot.md does).
 - [ ] Not exercised by any test: UI navigation during a fast-log session (menu pages / the scope page with the
       scope source open while the session streams). Page code in region C and any remaining slow-bank reads
       there would stall the ISR; a fastlogtest scenario with DBG:KEY / DBG:TAP and the data watch would show.
+      Also unexercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow
+      block with the residue, sense 02/04/01; the host retries the whole command).
       Known and left: region C DBG commands (DBG:GENUINE? reads the loader data at 0x080A4000 in region C
       code, DBG:BOOT?, the AD2 experiments) still stall the ISR when sent during a stream (debug only).
 - [x] `fast_scpi` (LOG:DEST / LOG:DURation) in region C (device b6909d6: LOG:DEST? / DUR? in the Wave view,
