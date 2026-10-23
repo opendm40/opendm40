@@ -857,7 +857,7 @@ the jsonl): AUTO entered at 5 V: 6 V AC 2.114 / 2.109 / 2.108 / 2.117 / 2.115 V,
 2^18); 5.5 V: 6 V AC 0.635 V, 60 V AC 4.19 V; 4.0 / 4.5 V: AC 1.0..1.6 mV, 9 readings / s. The 6 V value repeats
 to 0.3 % over visits: a deterministic transient after the row write, not noise.
 
-### 10.6 Method C after the 7409b92 check (2026-10-23, branch acdc-c-fix; emulator only, not on the device yet)
+### 10.6 Method C after the 7409b92 check (2026-10-23, branch acdc-c-fix; on the device in 10.8)
 
 Method A stays the default until the retest (10.7) passes.
 
@@ -945,7 +945,7 @@ sd of 0.10 / 0.29 mV (6 / 60 V, e2): its LPF rejects 40 Hz far better than the m
 Cost against 8087c7d: region B 68 676 -> 67 156 B free, region C 18 764 -> 17 868 B, SRAM 59 712 -> 59 584 B,
 static stack unchanged (headroom 21 484 B).
 
-### 10.7 Device retest of method C (the image of the fix or later; `tools/acdcmeth.py`)
+### 10.7 Device retest of method C (the image of the fix or later; `tools/acdcmeth.py`; run on 2563fe1: 10.8)
 
 Calibrator on V / COM (DC <= 24 V and the 40 Hz square), `DM40_USBTMC=real`:
 
@@ -977,3 +977,49 @@ PKH_RESTART, at ~9 results / s). If it did, C's result rate would drop or blocks
 
 Decision rule (unchanged, 10.4): C becomes the default when e2's AC part is within the AC V spec of A's and
 the DC part (e5 / now e8) within 0.05 % + 5 digits; plus e9 / e10 passing.
+
+### 10.8 Device results of the retest (2563fe1, 2026-10-23 04:57-05:22, docs/device-check-2026-10-21.md "2563fe1")
+
+`DM40_USBTMC=real tools/acdcmeth.py e8 e9 e10 e2 e6`, then `e5 --minutes 3`; calibrator on V / COM. Two extra
+scripts: `z60.py` (C vs READ? at the same moment, 0 / 1 V on 60 V) and `par.py` (AUTO on the square, A vs C).
+Errors are against the meter's own DC V READ? (the calibrator wanders ~0.8 mV, device-check "DC V at the
+calibrator's 1 V").
+
+| test | pass | result |
+|---|---|---|
+| e8 6 V (anchor 5 V) | 0.05 % + 5 dig | 5 / 3 / 1 / 0 V: +0.07 / +0.10 / +0.44 / +0.33 mV: PASS |
+| e8 60 V (anchor 24 V) | 0.05 % + 5 dig | 24 / 12 / 5 V: -0.47 / -4.34 / -6.12 mV PASS; **1 V -7.23 (limit 5.5), 0 V -8.01 mV (5.0): FAIL** |
+| z60 (READ? right after C) | same | 0 V -6.89 / -7.06, 1 V -6.39 / -6.58 mV: **FAIL** (not the calibrator) |
+| e8kept (5 V on 60 V, gain kept) | same | -1.24 mV: PASS |
+| e9 4.0 / 4.5 / 5.0 / 5.5 V | 1 range, >= 6 rd/s, AC < 30 mV | 6 V only, 9.18-9.27 rd/s, AC max 0.27-0.31 mV, DC -0.15..+0.42 mV, acsrc 0 in all 479 samples: PASS |
+| e10 square -> 5.0 / 5.5 / 4.5 V | AUTO,DC in rule, 1 range | AUTO,DC, -0.21 / -0.28 / -0.28 mV, 6 V only: PASS |
+| e2 AC part C vs A | 0.05 % | 6 V +0.012 %, 60 V -0.004 % (was +0.127 / +0.225 %): PASS; DC part +0.32 / -0.33 mV |
+| e6 | ~2.5 s, ~9 rd/s | entry 1.71 s, 9.3 rd/s; 3 -> 24 V 0.59 s, back 1.01 s (A 1.27 s, 3.7 rd/s, 3.41 / 2.47 s) |
+| e5 24 V / 60 V, 3 entries | 17 mV | +0.53 / -1.29 / +0.53 mV (was +20.9..+24.9): PASS |
+| e5 3 V / 6 V, 3 entries | 2.0 mV | -0.04 / +0.37 / -0.09 mV: PASS |
+| by hand: AUTO, square -> 5 V | the 7409b92 case | AUTO DC 4.9981 V, 6 V range, AC 0.2 mV, 9.4 rd/s: PASS |
+
+**The R29 assumption holds.** Restarting AD2's peak hold (ENPKH off / on) leaves the RMS / LPF running: e9 / e10
+kept ~9.2 readings / s and the RMS usable in every sample (`acsrc` 0). At 5 / 5.5 V on 6 V no garbage RMS block
+was seen in steady state; the peak bound stood in once, in the transient after the square -> 5 V step (AUTO,
+acsrc 1, 12.7 mV at 2 s, RMS usable again by 5 s): the only device evidence of that path, and it behaved as designed.
+
+**What fails: C's 60 V gain.** The five e8 60 V points fit err = -7.77 mV + 0.302 mV/V x level (residuals
+<= 0.24 mV). per_code from the internal zero (4.85309e-4, span 49 422 codes) is 0.030 % high (the data say
+~4.8516e-4; the table's 4.853726e-4 is 0.043 % high, so the table fallback would be worse). Equivalently, the
+internal zero (the run row with OP1+ on AGND) is ~14-16 codes (~7-8 mV) away from a real 0 V input on 60 V
+(by the fit's sign, the AGND zero's code above SENSE at 0 V; inferred, to check before a zero correction).
+The anchor removes the error at the anchor level, so it grows toward 0 V: over the rule below ~2 V on the
+manual 60 V range. AUTO range puts such levels on 6 V, which has no such error (slope ~-0.007 %), so the
+failing case is a manual 60 V range or a large AC part on a small DC part. Candidate fixes (not made): a
+per-range correction of the internal zero (needs its repeatability over entries and power cycles), the gain
+from two READ? anchors when a session sees two levels, or a device-measured table per_code for 60 V.
+
+**AUTO on the square changed to DC.** On the 40 Hz square (AC 4.760, DC 4.764 V) C's AUTO stays on DC and A's
+goes to AC after ~3.5 s, deterministic over two entries each. dmm.rs's first evaluation shows AC only when
+AC > |DC|, and a later switch to AC needs AC > 1.5 x |DC|, so the first evaluation decides. A's first AC part
+overshoots (4.91 V); C's first AC part is taken as it is. On 7409b92 C's AC part was 0.13 % high and it picked
+AC. This is a tie of the rule, not an error of C.
+
+**Decision rule: not met** (e8 60 V at 0 / 1 V). Everything else passes, and e5's 60 V failure of 7409b92 is
+gone. The default stays A; the owner decides.

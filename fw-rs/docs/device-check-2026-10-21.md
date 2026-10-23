@@ -1752,3 +1752,67 @@ The readings go up and down; they do not step with the builds. 9dd1222 / 5f14d38
 - **Device:** **rebooted once on purpose** (`dm40dbg.py reset`, 03:25). `DBG:BOOT?` NORMAL / HEALTHY, crash count 0, stack high-water reset to 20 608 / 45 800 B. DMM page, DC V, AUTO+ (`VOLT:RANG:AUTO?` 1), rate SLOW, `CONF?` "VOLT +6,+1E-05", method A. `LOG:DEST HOST`, `LOG:DUR 60`, `LOG:OSR 3`, `LOG:CHOP 1`, source AD1, 4800 (as found). Generator `OUTP?` 0. Settings not touched (volume 0 %, backlight 10 %, Dim / Shutdown Never).
 - **Files:** the `fast` run's `LOGS/FAST013.DLG` was deleted. `MMEM:CAT?` 10 829 824 / 5 910 528, as at the start.
 - **Calibrator:** 1 V DC, enabled (func 1 mode 0 value 1000).
+
+## 2563fe1: AC+DC method C retest (acdc-approaches.md §10.7) (2026-10-23 04:57 - 05:22)
+
+The owner had installed 2563fe1 (install OK). `DBG:BOOT?` showed NORMAL, crash count 0, VALID at the start and at the end. There was no reset during the session.
+- **Wiring:** the calibrator (`/dev/ttyACM1`) on V/COM: DC 0..24 V (its "30 V" is 23.99 V) and the 40 Hz square 0..9.55 V. The A jack, the MCX probe and the generator output were not wired.
+- **Runs:** `DM40_USBTMC=real /usr/bin/python3 tools/acdcmeth.py e8 e9 e10 e2 e6 -o acdcfix.jsonl` (04:57-05:10), then `e5 --minutes 3` (05:10-05:13). After that three small scripts: `z60.py` (C against READ? at the same moment, 60 V), `hand.py` (AUTO by touch with screenshots) and `par.py` (AUTO on the square, A vs C).
+- **Files:** in the session scratchpad `rt/` (not in git): `acdcfix.jsonl`, `run1.log`, `run2.log`, `z60.jsonl`, `hand.log`, `hand-*.png`, `par-A-square.png`, `pre.png`, `end.png`.
+- **The calibrator's wander** (section "DC V at the calibrator's 1 V") is up to ~0.8 mV. Every DC check below therefore compares C with the meter's own DC V reading (READ?), not with the set value. In e8 each level's READ? was taken ~0.5-1 min before C's reading (all refs of a range first, then C stepped down, 6 s per level). `z60.py` repeats the two deciding points with READ? taken right after C's reading, and gives the same answer.
+
+### Summary
+
+**Decision rule (§10.4): not met.** Everything the §10.6 fix targeted now passes on the device. The rule still fails at the low end of the 60 V range: C's 60 V gain, taken from the internal zero, is +0.030 % off, so 0 V reads -7 to -8 mV against READ? (limit 5 mV). The default stays A. The owner decides.
+
+| # | Check | Pass criterion | Result |
+|---|---|---|---|
+| e8 | C's DC part vs READ?, entered at the top level and stepped down | 0.05 % + 5 digits | 6 V: **PASS** at 5 / 3 / 1 / 0 V (+0.07 / +0.10 / +0.44 / +0.33 mV). 60 V: 24 / 12 / 5 V PASS (-0.47 / -4.34 / -6.12 mV), **1 V FAIL (-7.23 mV, limit 5.5), 0 V FAIL (-8.01 mV, limit 5.0)**. e8kept (re-entered at 5 V on 60 V, the gain kept from 24 V, gspan 49 422): -1.24 mV, PASS |
+| z60 | as e8 at 0 / 1 V on 60 V, READ? right after C, 2 repeats | same | 0 V **-6.89 / -7.06 mV**, 1 V **-6.39 / -6.58 mV**: **FAIL**. Confirms e8: this is not the calibrator |
+| e9 | 4.0 / 4.5 / 5.0 / 5.5 V in AC+DC, AUTO range | one range, >= 6 readings/s, AC part < 30 mV, DC within the rule | **PASS** at all 4: the 6 V range only, 9.18-9.27 readings/s, AC part max 0.27-0.31 mV, DC -0.15..+0.42 mV. `acsrc` all 0: the RMS was usable in every sample (119-120 of 120); no garbage RMS at 5 / 5.5 V |
+| e10 | AUTO on the square, then 5.0 / 5.5 / 4.5 V DC | AUTO,DC within the rule, one range | **PASS**: AUTO,DC 4.9981 / 5.4978 / 4.4985 V, -0.21 / -0.28 / -0.28 mV against READ?, the 6 V range only, ~9.0-9.3 readings/s. On the square: AUTO,**DC** 4.766 V (see 3) |
+| e2 | the square, C's AC part vs A's | within 0.05 % | **PASS**: 6 V 4.76580 vs 4.76524 V (**+0.012 %**, was +0.127 %); 60 V 4.76049 vs 4.76067 V (**-0.004 %**, was +0.225 %). C's DC part vs DC V: +0.32 / -0.33 mV (was +0.88 / +13.6 mV) |
+| e6 | entry / range-change timing | C first reading ~2.5 s, ~9 readings/s | **PASS**: C entry 1.71 s, 9.3 readings/s; 3 -> 24 V settled in 0.59 s, back to 3 V in 1.01 s (A: 1.27 s, 3.7 readings/s, 3.41 / 2.47 s; B: 1.49 s, 9.3 readings/s, 2.56 / 2.24 s) |
+| e5 | C re-entered every 60 s, 3 min per level | 0.05 % + 5 digits | **PASS**. 24 V on 60 V: +0.53 / -1.29 / +0.53 mV (limit 17 mV; on 7409b92 it was +20.9..+24.9 mV). 3 V on 6 V: -0.04 / +0.37 / -0.09 mV (limit 2.0 mV). per_code is constant after the first entry (gain kept: gspan 49 422 / 103 946) |
+| hand | AUTO (3 taps on V) with C: the square, then 5 V DC | the 7409b92 failure case | **PASS**: 5 V reads AUTO DC **4.9981 V**, the 6 V range, AC part 0.2 mV, 9.4 readings/s, no hunting (`hand-C0-5V.png`). On 7409b92 this was "~4.056 V" AC with hunting |
+| R29 | restarting AD2's peak hold does not restart the RMS / LPF | e9 rate and acsrc | **Holds**: 9.2 readings/s (an RMS / LPF result every ~107 ms) and `acsrc` 0 in all 479 e9 samples and in 80 of 80 per e10 level |
+
+### 1. C's 60 V gain (e8, z60)
+
+The 60 V errors of e8 lie on a straight line: err = -7.77 mV + 0.302 mV/V x level. The residuals are -0.24..+0.23 mV, the size of the calibrator's wander. So:
+- C's 60 V per_code (4.85309e-4, from the internal zero, span 49 422 codes) is **0.030 % too high**. The data imply ~4.8516e-4. The table value (4.853726e-4) is 0.043 % high, so falling back to the table would be worse.
+- Equivalently, the internal zero (OP1+ on AGND) sits **~14-16 codes (~7-8 mV; z60 ~14, e8 ~16)** off the code that a real 0 V input gives on 60 V. The sign follows from the fit (C reads low below the anchor, so per_code is high): the AGND zero's LPF code would be *above* that of SENSE at 0 V. This is an inference from the fit, to check directly before a zero-correction fix. The gain anchored at 24 V inherits that.
+- At the anchor the error is ~0 by construction (e5, e8 24 V, e8kept).
+- The 6 V range shows nothing similar: across 0-5 V the error is within +0.07..+0.44 mV, a slope of about -0.007 %.
+
+### 2. The >= 5 V fault and the R29 assumption (e9, e10, hand)
+
+The 7409b92 failure did not recur. The 6 V range at 5.0 / 5.5 V gave usable RMS results throughout in steady state (`acsrc` 0), so the RMS-fault up-range was not needed. The peak bound did stand in once, in the transient after the square -> 5 V step (`hand.py`, at 2 s: `acsrc` 1, AC part 12.7 mV, an upper limit, as designed); the RMS was usable again by 5 s (0.27 mV). The garbage RMS of 7409b92 may have depended on its per-visit self-cal / row-write sequence, which the fix removed. This run cannot tell.
+
+The peak-hold restart by R29 does not disturb the RMS / LPF block. The rate stayed at ~9.2 readings/s, and the AC part on a pure DC input stayed at 0.2-0.3 mV.
+
+### 3. AUTO on the square: C picks DC, A picks AC (`hand.py`, `par.py`)
+
+`CONF:VOLT:AUTO` on the 40 Hz square, two entries per method, VOLT:COUP? every 0.5 s for 15 s:
+- **A:** DC for ~3.5 s, then AC to the end (both entries).
+- **C:** DC throughout (both entries; also in `hand.py`'s AUTO-by-touch run, `hand-C0-square.png`).
+
+The square has AC 4.760 V and DC 4.764 V, practically equal. The AUTO rule (dmm.rs `auto_shows_ac` / `auto_eval`) decides on the first evaluation (AC if AC > |DC|). After that, switching to AC needs AC > 1.5 x |DC|, which this square never gives. So the first evaluation decides:
+- A's first AC part overshoots (4.91 V at 2.8 s) and A lands on AC.
+- C takes its first AC part as it is (4.760 < 4.764) and lands on DC.
+- On 7409b92, C's AC part was 0.13 % high (4.782 > 4.777) and C picked AC.
+
+This is not a C fault: either part is a fair answer for AC ≈ DC. It is, however, a behaviour difference from A on exactly this test signal.
+
+### 4. Other observations
+
+- **e2's 6 V total:** FETCh? returned the overload value (NaN in the log) on the manual 6 V range for A, B and C. hypot(4.765, 4.764) = 6.74 V is over the 6 V range. On 60 V the total was 6.734-6.735 V.
+- **In AC+DC (not AUTO)** after the square -> 5 V step, the first C reading on the 6 V range had AC part 1.88 V (total 5.34 V at 1 s). The next one, by 4 s, had 0.35 mV. A in the same step: AC part 0.164 V at 3 s, 5-8 mV after 6 s. This is the RMS block's HPF transient after a large step, gone in < 4 s.
+- The calibrator's 24 V read 23.9845-23.9864 V (READ?) over the session.
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+ (`VOLT:RANG:AUTO?` 1), rate SLOW, `CONF?` "VOLT +6,+1E-05", `VOLT:COUP?` DC, **method A** (`DBG:ACDC:METH?` A), as found (`pre.png`, `end.png`). `SYST:ERR?` empty. Generator `OUTP?` 0 (never switched on). Settings not touched (volume 0, backlight 10 %, Dim / Shutdown Never).
+- **Files:** none created on the meter (`MMEM:CAT?` identical to the start: 10 829 824 / 5 910 528). Screenshots were `DBG:LCD?` reads.
+- **Health:** `DBG:BOOT?` NORMAL, crash count 0, VALID; no reset.
+- **Calibrator:** 1 V DC, enabled.

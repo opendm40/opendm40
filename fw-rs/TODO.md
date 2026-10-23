@@ -1809,9 +1809,18 @@ Emulator (emu/):
       ~+16 mV at 12 V reproduced, the fix within 1.3 mV. **Device retest: §10.7 e8.**
 - [x] C's AC part +0.13 / +0.23 % against A (e2): through the factory AC V gain / offset now (§10.6 item 3;
       e2 recomputed: +0.014 / -0.003 %). **Device retest: §10.7 e2.**
-- [ ] Device retest of method C (acdc-approaches.md §10.7: `tools/acdcmeth.py e8 e9 e10 e2 e6`, then `e5
-      --minutes 3`); C becomes
-      the default only if it passes (owner's decision); A stays the default until then.
+- [x] Device retest of method C (acdc-approaches.md §10.7, results §10.8, device-check doc "2563fe1"): e9 / e10 /
+      e2 / e6 / e5 and the by-hand AUTO 5 V case PASS (5 V: AUTO DC 4.9981 V on 6 V, 9.4 rd/s; AC part vs A
+      +0.012 / -0.004 %; e5 60 V +0.5 / -1.3 / +0.5 mV, was +21..25); the R29 peak-hold restart leaves the RMS /
+      LPF alone (9.2 rd/s, acsrc 0 throughout). **Decision rule not met**: e8 60 V at 1 / 0 V -7.2 / -8.0 mV
+      (limit 5.5 / 5.0; same-moment READ? -6.4..-7.1 mV). A stays the default (owner's decision).
+- [ ] C's 60 V gain from the internal zero is +0.030 % (per_code 4.85309e-4 vs ~4.8516e-4 implied; the
+      internal zero ~15-16 codes / ~7.5 mV off a real 0 V input): DC part -7..-8 mV at 0 V on a manual 60 V
+      range. 6 V is fine. Options in §10.8 (zero correction per range, two-anchor gain, a device table
+      per_code); measure the offset's repeatability over entries / power cycles first.
+- [ ] AUTO coupling on a signal with AC ~= DC (the 40 Hz square): C stays DC, A goes AC (its first AC part
+      overshoots); the first evaluation (AC > |DC|) decides and the 1.5 x hysteresis keeps it. Decide whether
+      that tie needs a rule (e.g. prefer AC within a few % of DC) before C's default.
 - [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
       3 V reference moved -160 ppm during e5). **Calibrator, not the meter** (device-check doc "DC V at the
       calibrator's 1 V: meter or calibrator?"): no fw-rs state in the DC V path, the factory record unchanged,
