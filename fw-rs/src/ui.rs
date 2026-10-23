@@ -31,6 +31,10 @@ pub const VALUE: Color = 0xFC40;
 /// Stock value colour in the V functions from 30 V (gui_v2_6.h:157/175,
 /// GUI_C_VALUE_HV); the lightning glyph comes on at 100 V.
 pub const VALUE_HV: Color = 0xC9A0;
+/// A provisional reading (`Reading::prov`: the new function's dashes, a
+/// value a DMM gate still holds): the digits and aux values in the stock
+/// grid / frame grey instead of VALUE, so they read as "not final".
+pub const VALUE_PROV: Color = DIM;
 
 pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items after the logo (4 + LOGO + 3).
@@ -238,7 +242,8 @@ pub struct DmmView {
     /// ui-review #13: draw the value in the stock >= 30 V red (set by the
     /// app before `reading`); as last drawn.
     pub hv_red: bool,
-    last_red: bool,
+    /// The main digits' colour as last drawn (VALUE / VALUE_HV / VALUE_PROV).
+    last_col: Color,
     /// Power meter shown (set by the app before `draw_static`): the
     /// history row holds the power boxes, never the bargraph.
     pub power: bool,
@@ -459,7 +464,7 @@ impl DmmView {
             bar_scale: None,
             bar_ol: None,
             hv_red: false,
-            last_red: false,
+            last_col: VALUE,
             power: false,
             pwc: pw::PwCache::new(),
         }
@@ -586,11 +591,12 @@ impl DmmView {
         let mut ub = [0u8; 16];
         let unit = sf::unit_text(r.main.unit, &mut ub);
         // ui-review #13: the stock >= 30 V cue, the value in VALUE_HV (V
-        // functions, set by the app from the live reading). A colour change
-        // repaints every digit.
-        let color = if self.hv_red { VALUE_HV } else { VALUE };
-        let recolor = self.last_red != self.hv_red;
-        self.last_red = self.hv_red;
+        // functions, set by the app from the live reading); a provisional
+        // value in VALUE_PROV. A colour change repaints every digit.
+        let color = if r.prov { VALUE_PROV } else if self.hv_red { VALUE_HV } else { VALUE };
+        let recolor = self.last_col != color;
+        self.last_col = color;
+        let vcol = if r.prov { VALUE_PROV } else { VALUE };
         // Only the changed digits are redrawn (cell layout unchanged).
         let same_layout = self.last_fmt == f && (self.last_ext != 0) == ext.is_some() && !recolor;
         let prev_txt = self.last_txt;
@@ -730,7 +736,7 @@ impl DmmView {
                     let mut key = [0u8; 16];
                     let kn = txt.len().min(16);
                     key[..kn].copy_from_slice(&txt.as_bytes()[..kn]);
-                    let vkey = Some((key, (i == 1 && lp) as u8 | (r.parts() as u8) << 1 | (bdi as u8) << 2));
+                    let vkey = Some((key, (i == 1 && lp) as u8 | (r.parts() as u8) << 1 | (bdi as u8) << 2 | (r.prov as u8) << 3));
                     if self.aux_val[i] == vkey {
                         // Value part unchanged.
                     } else if bdi {
@@ -740,7 +746,7 @@ impl DmmView {
                         // 8..175, the value's box ending where the plain
                         // one does), so no older text stays behind.
                         let (cx, vx0, vw) = if i == 0 { (8, 68, 107) } else { (256, 316, 81) };
-                        sf::label(sf::LETTERS, rect(vx0, 36, vw, 30), txt, VALUE, BG, 4, 0);
+                        sf::label(sf::LETTERS, rect(vx0, 36, vw, 30), txt, vcol, BG, 4, 0);
                         sf::label(sf::F14, rect(cx, 36, 60, 30), BURDEN_CAP, VALUE, BG, 4, 1);
                     } else if i == 1 && lp {
                         // UF-26: "-25.0".."125.0" (<= 78 px: ink from 319)
@@ -749,7 +755,7 @@ impl DmmView {
                         // aux1's unit box, which ends at 254; the None
                         // branch below clears it). The two boxes tile
                         // 256..396, so an older text leaves nothing behind.
-                        sf::label(sf::LETTERS, rect(316, 36, 81, 30), txt, VALUE, BG, 4, 0);
+                        sf::label(sf::LETTERS, rect(316, 36, 81, 30), txt, vcol, BG, 4, 0);
                         sf::label(sf::F14, rect(256, 36, 60, 30), LOOP_CAP, VALUE, BG, 4, 1);
                     } else if r.parts() {
                         // AC+DC / AUTO: the part's tag (AC for aux1, DC for aux2)
@@ -759,9 +765,9 @@ impl DmmView {
                         let end = vx - 30 + 137;
                         let te = (end - sf::text_width(sf::LETTERS, txt, 0) - 4).max(AUX_TAG_X[i] + 24);
                         sf::label(sf::AUX_TAG, rect(AUX_TAG_X[i], 36, te - AUX_TAG_X[i], 30), AUX_TAGS[i], VALUE, BG, 4, 0);
-                        sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, VALUE, BG, 4, 0);
+                        sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, vcol, BG, 4, 0);
                     } else {
-                        sf::label(sf::LETTERS, rect(vx - 30, 36, 137, 30), txt, VALUE, BG, 4, 0);
+                        sf::label(sf::LETTERS, rect(vx - 30, 36, 137, 30), txt, vcol, BG, 4, 0);
                     }
                     if self.aux_val[i] != vkey {
                         // The power meter's parts sub-line under it.
@@ -796,8 +802,9 @@ impl DmmView {
                 }
                 None if self.last_aux[i] => {
                     // aux1 from the burden caption's left edge (8; empty
-                    // otherwise outside AC+DC, which never clears aux1).
-                    let x0 = if i == 0 { AUX_TAG_X[0] } else { vx - 30 };
+                    // otherwise outside AC+DC); AC+DC / AUTO (a placeholder
+                    // without its parts): from the part's tag slot.
+                    let x0 = if i == 0 || r.parts() { AUX_TAG_X[i] } else { vx - 30 };
                     lcd::fill_rect(x0 as u16, 36, (ux + 76 - x0) as u16, 30, BG);
                     self.last_aux[i] = false;
                     self.aux_val[i] = None;
@@ -903,6 +910,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
     let mut buf = [0u8; 16];
     let (v, _, _) = fmt7(&mut buf, &r.main, false);
     d.value = Txt::new(v.trim());
+    d.dim = r.prov;
     let mut ub = [0u8; 16];
     let unit = sf::unit_text(r.main.unit, &mut ub);
     d.unit = Txt::new(unit);

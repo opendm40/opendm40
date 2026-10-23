@@ -527,9 +527,20 @@ fn cpl_auto(mut r: Reading) -> Reading {
     r
 }
 
+/// Not yet measured (the new function's placeholder: dashes).
+fn nan(dec: u8, unit: &'static str) -> Val {
+    Val { v: f32::NAN, dec, unit, ol: false, ext: false }
+}
+
+/// A provisional reading (dimmed: the placeholder, a value a gate holds).
+fn prov(mut r: Reading) -> Reading {
+    r.prov = true;
+    r
+}
+
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
-    Reading { mode, range: 0, main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None }
+    Reading { mode, range: 0, main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false }
 }
 
 /// Meter-strip worst cases: (name, reading, temperature label).
@@ -600,6 +611,25 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         // Global unit deg F (widest: -328.0 / 1562.00 F, CJ in F).
         ("temp_tc_f", rd(15, val(-328.0, 1, f), Some(val(-40.0, 1, f)), None, false), Some("TC K")),
         ("temp_pt_f", rd(15, val(1562.00, 2, f), Some(val(3904.8, 1, "\u{3a9}")), None, false), Some("PT100")),
+        // A function switch (switch-latency.md proposal 1): the new
+        // function's unit and dimmed dashes before its first reading.
+        ("ph_dcv", prov(rd(1, nan(4, "V"), None, None, false)), None),
+        ("ph_dcma", prov(rd(8, nan(3, "mA"), None, None, false)), None),
+        ("ph_ohm", prov(rd(10, nan(3, "M\u{3a9}"), None, None, false)), None),
+        ("ph_acdc", prov(rd(1, nan(4, "V"), Some(nan(4, "V")), Some(nan(4, "V")), true)), None),
+        ("ph_acdc_ua", prov(rd(7, nan(2, "\u{b5}A"), Some(nan(2, "\u{b5}A")), Some(nan(2, "\u{b5}A")), true)), None),
+        ("ph_acdc_noparts", prov(rd(3, nan(2, "mV"), None, None, true)), None),
+        ("ph_auto", prov(cpl_auto(rd(1, nan(4, "V"), Some(nan(4, "V")), Some(nan(4, "V")), false))), None),
+        ("ph_hz", prov(rd(14, nan(3, "Hz"), None, None, false)), None),
+        ("ph_cap", prov(rd(13, nan(3, "nF"), None, None, false)), None),
+        ("ph_temp", prov(rd(15, nan(1, c), None, None, false)), Some("NTC100k B3950")),
+        // Provisional values (proposal 6): a held DC conversion, AC+DC
+        // before its AC part (dashes there), AUTO deciding.
+        ("pv_dcv", prov(rd(1, val(-6.6497, 4, "V"), None, None, false)), None),
+        ("pv_dcua", prov(rd(9, val(-4444.4, 1, "\u{b5}A"), None, None, false)), None),
+        ("pv_acdc", prov(rd(1, val(-6.6666, 4, "V"), Some(nan(4, "V")), Some(val(-6.6666, 4, "V")), true)), None),
+        ("pv_acdc_mv", prov(rd(3, val(-444.44, 2, "mV"), Some(val(444.44, 2, "mV")), Some(val(-444.44, 2, "mV")), true)), None),
+        ("pv_auto", prov(cpl_auto(rd(1, val(-6.6666, 4, "V"), Some(val(0.4444, 4, "V")), Some(val(-6.6666, 4, "V")), false))), None),
     ];
     // AUTO+ / MANU variants of a few.
     let mut extra = vec![];
@@ -1392,7 +1422,7 @@ fn main() {
                     ui::set_cpl_auto(false);
                     // History / chart / statistics: the case's own value (an
                     // OL case: 1.0 in its unit and resolution).
-                    let v = if r.main.ol { 1.0 } else { r.main.v };
+                    let v = if r.main.ol || r.main.v.is_nan() { 1.0 } else { r.main.v };
                     let dec = r.main.dec;
                     let hist = [(v, dec, r.main.unit); 5];
                     if dv.bar_on {
@@ -2306,6 +2336,41 @@ fn main() {
             ui::history(&[(r.main.v, r.main.dec, r.main.unit); 5], 5, 4);
             dv.reading(&r, 0, lim);
             ui::status_right(&status(0));
+            save(&out, file);
+        }
+        // A function switch (switch-latency.md proposals 1 / 6): the page
+        // as it was before (blank readout until the first reading), the
+        // placeholder, provisional values, and the settled value after.
+        for (file, case, blank) in [
+            ("sw01-switch-ohm-before-blank", "ph_ohm", true),
+            ("sw02-switch-ohm-placeholder", "ph_ohm", false),
+            ("sw03-switch-dcma-placeholder", "ph_dcma", false),
+            ("sw04-switch-acdc-placeholder", "ph_acdc", false),
+            ("sw05-switch-auto-placeholder", "ph_auto", false),
+            ("sw06-switch-temp-placeholder", "ph_temp", false),
+            ("sw07-prov-dcv", "pv_dcv", false),
+            ("sw08-settled-dcv", "dcv_neg6", false),
+            ("sw09-prov-acdc-no-ac-part", "pv_acdc", false),
+            ("sw10-prov-acdc", "pv_acdc_mv", false),
+            ("sw11-settled-acdc", "acdc_mv", false),
+            ("sw12-prov-auto", "pv_auto", false),
+        ] {
+            host::reset(0);
+            let (r, l) = find(case);
+            dv.label = l;
+            ui::set_cpl_auto(r.cpl_auto);
+            dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, false);
+            ui::set_cpl_auto(false);
+            dv.bar_update(&rd(r.mode, val(0.0, r.main.dec, r.main.unit), None, None, r.acdc));
+            if !blank {
+                dv.reading(&r, 0, 0);
+            }
+            ui::status_right(&status(0));
+            save(&out, file);
+        }
+        for (file, case) in [("sw13-strip-placeholder", "ph_dcv"), ("s14-strip-prov-acdc", "pv_acdc_mv")] {
+            let (r, l) = find(case);
+            combined(&r, l, 0, 0, false, false, false, "");
             save(&out, file);
         }
         host::reset(0);

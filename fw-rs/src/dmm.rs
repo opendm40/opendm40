@@ -440,6 +440,15 @@ pub struct Reading {
     /// Power meter (`pw`): all its values; main = P (fallback: S), aux1 =
     /// V, aux2 = I, `mode` = the AC A mode of the current range.
     pub power: Option<pw::PowerVals>,
+    /// Provisional (docs/switch-latency.md proposals 1 / 6): a value a gate
+    /// still holds (the first DC conversions after a range / function
+    /// change, AC+DC before both parts, the AC part settling, the AUTO
+    /// coupling's first decision), or the new function's placeholder (`main`
+    /// NaN: dashes). Drawn dimmed on the DMM page only; never fed to the
+    /// meter (statistics, REL, limits, trend, CSV, beeps), autorange, the
+    /// sentinel, BT or SCPI (`Dmm::poll` returns it without clearing
+    /// `reading_pending` or counting `seq`).
+    pub prov: bool,
 }
 
 impl Reading {
@@ -1855,6 +1864,55 @@ impl Dmm {
         if self.auto_ac { ac_mode_of(dm) } else { dm }
     }
 
+    /// The new function's frame before its first reading (switch-latency.md
+    /// proposal 1): the unit, decimals and glyph the first reading will have
+    /// at the present range, the value NaN (drawn as dimmed dashes, never a
+    /// false 0.0000). None in the power meter (its own pending page).
+    pub fn placeholder(&self) -> Option<Reading> {
+        if self.pw.on {
+            return None;
+        }
+        let r = self.range.max(0) as u8;
+        let m = if self.acdc { dc_mode_of(self.mode) } else { self.shown_mode() };
+        let (dec, unit) = match m {
+            0 | 1 => (4 - r.min(3), "V"),
+            2 | 3 => (3 - r.min(1), "mV"),
+            4 | 7 => (4 - r.min(1), "A"),
+            5 | 8 => (3 - r.min(1), "mA"),
+            6 | 9 => (2 - r.min(1), "\u{b5}A"),
+            10 => match r {
+                0 | 1 => (3 - r, "\u{3a9}"),
+                2..=4 => (6 - r, "k\u{3a9}"),
+                _ => (9 - r.min(6), "M\u{3a9}"),
+            },
+            11 => (2, "\u{3a9}"),
+            12 => (4, "V"),
+            13 => match r {
+                0..=2 => (3 - r, "nF"),
+                3..=5 => ((6 - r).min(3), "\u{b5}F"),
+                _ => ((9 - r.min(7)).min(3), "mF"),
+            },
+            14 => {
+                let v = freq_val(0.0, self.freq.range, false);
+                (v.dec, v.unit)
+            }
+            _ => (1, self.t_disp(0.0).1),
+        };
+        let mut rd = self.reading(Val::new(f32::NAN, dec, unit), f32::NAN);
+        if self.acdc || self.cpl_auto {
+            // AC+DC / AUTO: the AC and DC part rows with their tags, dashes.
+            rd.aux1 = Some(Val::new(f32::NAN, dec, unit));
+            rd.aux2 = rd.aux1;
+        }
+        rd.mode = m;
+        rd.auto = !self.manual;
+        rd.auto_plus = (self.button() == Button::Volt && self.v_auto == 1) || (self.button() == Button::Amp && self.a_auto == 1);
+        rd.cpl_auto = self.cpl_auto;
+        rd.acdc = self.acdc && !self.cpl_auto;
+        rd.prov = true;
+        Some(rd)
+    }
+
     /// AUTO coupling (sub-mode 3) in force.
     pub fn cpl_auto(&self) -> bool {
         self.cpl_auto && !self.pw.on
@@ -2890,6 +2948,7 @@ impl Dmm {
             avg_n: 0,
             alert: Alert::None,
             power: None,
+            prov: false,
         }
     }
 
