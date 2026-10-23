@@ -68,6 +68,9 @@ const SHOT_SETTLE_MS: u64 = 1000;
 /// "Leads in A?" reminder: the toast waits for the new function's first
 /// reading at most this long (`leads_tick`).
 const LEADS_TOAST_WAIT_MS: u64 = 1000;
+/// A deferred toast's text, bytes (`App::toast_defer`; the toast box holds
+/// ~30 characters of ASCII26).
+const TOAST_LATER_MAX: usize = 48;
 const TIM14: u32 = 0x4000_2000;
 const BUZZER_ARR: u32 = 11200;
 /// RUN held this long in a DMM view toggles AutoHold (the short press keeps
@@ -305,6 +308,12 @@ pub struct App {
     /// Power-off confirm / toast over the view (dialog.rs); while set, the
     /// full redraw stays pending and nothing else draws.
     overlay: Option<crate::dialog::Overlay>,
+    /// A toast that came while a confirm was up (`toast_defer`): its text
+    /// (`toast_later_n` bytes, 0 = none) and colour, shown when the confirm
+    /// has gone. The latest one wins.
+    toast_later: [u8; TOAST_LATER_MAX],
+    toast_later_n: u8,
+    toast_later_ok: bool,
     /// 3-finger swipe seen: take the screenshot in tick() once the view is
     /// drawn.
     shot_req: bool,
@@ -566,6 +575,9 @@ impl App {
             chart_dirty: false,
             chart_cache: ui::ChartCache::new(),
             overlay: None,
+            toast_later: [0; TOAST_LATER_MAX],
+            toast_later_n: 0,
+            toast_later_ok: false,
             shot_req: false,
             repaint_at: 0,
             band_until: 0,
@@ -1522,6 +1534,11 @@ impl App {
             // draw_static() repaints the DMM reading (shown value + HOLD/RUN
             // label) from the meter, so the label now matches.
             self.hold_shown = self.shown_state();
+        }
+        // A toast that came while a confirm was up, over the page again.
+        if self.toast_later_n != 0 {
+            self.toast_later_show(now);
+            return;
         }
         // After the repaint: the new function's page is up under the toast.
         if self.leads_tick(now) {
@@ -2628,9 +2645,10 @@ impl App {
             b[n..n + part.len()].copy_from_slice(part.as_bytes());
             n += part.len();
         }
-        self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::TOAST_MS });
-        self.redraw = true;
-        crate::dialog::toast(core::str::from_utf8(&b[..n]).unwrap_or(""), false);
+        let txt = core::str::from_utf8(&b[..n]).unwrap_or("");
+        if !self.toast_defer(txt, false) {
+            self.toast_draw(now, txt, false);
+        }
     }
 
     /// Wrong-connection alert of the latest reading (sentinel.rs): a toast
@@ -2765,11 +2783,47 @@ impl App {
     /// A toast over the view (dialog.rs); the view is redrawn when it goes.
     /// Dropped while a screenshot reads the panel (it would land in the rows
     /// not read yet; screenshot.rs "Frozen image"); the caller's beep stays.
+    /// A confirm / dialog up (`Overlay::modal`): the toast waits for its end
+    /// (`toast_defer`) instead of replacing it. A toast used to take the
+    /// overlay slot: the confirm vanished without its No path (the energy
+    /// reset's Yes then hit the bare page: powtest ereset-hint; a fuse check
+    /// kept measuring, a firmware question stayed unanswered).
     fn toast(&mut self, now: u64, txt: &str, ok: bool) {
         self.last_input = now;
+        if crate::screenshot::frozen() || self.toast_defer(txt, ok) {
+            return;
+        }
+        self.toast_draw(now, txt, ok);
+    }
+
+    /// Keep `txt` for after the confirm that is up; false = none is up.
+    fn toast_defer(&mut self, txt: &str, ok: bool) -> bool {
+        if !self.overlay.is_some_and(|o| o.modal()) {
+            return false;
+        }
+        let mut n = txt.len().min(TOAST_LATER_MAX);
+        while !txt.is_char_boundary(n) {
+            n -= 1;
+        }
+        self.toast_later[..n].copy_from_slice(&txt.as_bytes()[..n]);
+        self.toast_later_n = n as u8;
+        self.toast_later_ok = ok;
+        true
+    }
+
+    /// The deferred toast, once the confirm has gone and the page under it
+    /// is drawn again (`tick`). Not an input: the idle timers go on.
+    #[inline(never)]
+    fn toast_later_show(&mut self, now: u64) {
+        let (b, n) = (self.toast_later, self.toast_later_n as usize);
+        self.toast_later_n = 0;
         if crate::screenshot::frozen() {
             return;
         }
+        self.toast_draw(now, core::str::from_utf8(&b[..n]).unwrap_or(""), self.toast_later_ok);
+    }
+
+    fn toast_draw(&mut self, now: u64, txt: &str, ok: bool) {
         self.sp_end_hold(now);
         self.overlay = Some(crate::dialog::Overlay::Toast { until: now + crate::dialog::TOAST_MS });
         self.redraw = true;
