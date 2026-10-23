@@ -4428,6 +4428,20 @@ impl App {
                 }
                 true
             }
+            C::DbgSentReg => {
+                let mut b = [0u8; 72];
+                let n = self.dmm.reg_text(&mut b);
+                out.put_bytes(&b[..n]);
+                true
+            }
+            C::DbgSentPrec(Some(ms)) => {
+                self.dmm.precond_ms = ms;
+                false
+            }
+            C::DbgSentPrec(None) => {
+                out.put_u32(self.dmm.precond_ms as u32);
+                true
+            }
             C::DbgLeads => {
                 let l = &self.leads;
                 out.put_u32(l.n);

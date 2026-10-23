@@ -200,8 +200,17 @@ pub const R20_SENSE: u8 = 0x10;
 pub const R2C_SS5: u8 = 0x10;
 /// AD1 sentinel input: SAD1FP = PB1 (1001), SAD1FN = PB3 (101).
 pub const R24_PB1_PB3: u8 = 0x95;
-/// AD1 V-JACK? input (AC A): SAD1FP = SENSE (0000), SAD1FN = PB5 (111).
+/// AD1 on SENSE - PB5 (0000 / 111): the AC V rows' V-tap window (DC?).
 pub const R24_SENSE_PB5: u8 = 0x07;
+/// AD1 V-JACK? input (AC A): SAD1FP = SENSE (0000), SAD1FN = AGND (011).
+/// Was SENSE - PB5 (f0d21eb and before): PB5 is a reference only the DC V
+/// 60 V+ rows define (their power bus / OP3, SMODE 0100); the A rows run the
+/// bus as SGND and leave PB5 to itself, and the device's AD1 peak there ran
+/// from ~-117 000 at 0.7 s to the negative rail (-262 144) by ~2 s with
+/// V-COM open, 1, 5, 10 or 24 V alike: a false V-JACK? in every AC A range
+/// (device-check f0d21eb 2a). AGND is what the DC A comparator's thresholds
+/// hang on (R21 AGNDP / AGNDN<1>).
+pub const R24_SENSE_AGND: u8 = 0x03;
 /// R25 AD2IG = 11 (2.0).
 pub const R25_AD2IG_20: u8 = 0xC0;
 /// R26: ENAD2, AD2OSR 011 (256), no chopper, AD2RG 0.
@@ -239,10 +248,13 @@ pub const VAR_NEW_OFF: u8 = 8;
 /// bit 4: no input alternation for the DC? / AC? hints (AC V's AD1 stays on
 /// PB1 - PB3, DC V r0's comparator on PB1).
 pub const VAR_HINTS_OFF: u8 = 16;
+/// bit 5: AC A's V-JACK? AD1 back on SENSE - PB5 (the f0d21eb row, device
+/// comparison of the 2a drift).
+pub const VAR_ACA_PB5: u8 = 32;
 static VARIANT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
 pub fn set_variant(v: u8) {
-    VARIANT.store(v & 31, core::sync::atomic::Ordering::Relaxed);
+    VARIANT.store(v & 63, core::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn variant() -> u8 {
@@ -320,7 +332,7 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
         4..=6 if mask & M_VJACK != 0 => {
             c[2] = 0x00;
             c[3] |= 0x80;
-            c[4] = R24_SENSE_PB5;
+            c[4] = if var & VAR_ACA_PB5 != 0 { R24_SENSE_PB5 } else { R24_SENSE_AGND };
             c[5] |= R25_AD1IG_36;
             c[9] = (c[9] & 0xF8) | R29_PKH_AD1;
             c[12] |= R2C_SS5;
@@ -383,8 +395,18 @@ pub const PK_THR: i32 = 17_900;
 /// 47.5 ohm = 23.75 mV: 2.0 * 23.75 mV / 1.25 V * 2^18 = 9 961.
 pub const PK2_THR: i32 = 9_900;
 /// V-JACK? on the AD1 peak in AC A: 2 V on V/ohm through the /1000 tap =
-/// 2 mV at SENSE: 3.6 * 2 mV / 1.25 V * 2^18 = 1 510 (doc 4.2: ~2 V).
+/// 2 mV at SENSE: 3.6 * 2 mV / 1.25 V * 2^18 = 1 510 codes (doc 4.2: ~2 V).
 pub const PKV_THR: i32 = 1_510;
+/// AC A counts the SWING of the hold (max - min) only, from 2 V rms on V
+/// (2 x 1.414 x PKV_THR = 4 270 codes peak to peak): a DC level on SENSE
+/// cannot be told from the A rows' own offset there. The DC A comparator
+/// (DBG:SENT? 0 with V-COM open, i.e. outside its +-20.8 mV window) and
+/// the device's AD1 (2a) put that offset at tens of mV, i.e. tens of volts
+/// on V, so a level threshold of 2 V is meaningless. AC on V is the hazard
+/// in an AC current function (mains on the V jack); DC on V is the DC A
+/// comparator's (and AC+DC / AUTO A's DC phase). A hold pinned at a rail
+/// with no swing is the drift of 2a, no hit either way.
+pub const PKV_SWING_THR: i32 = 4_270;
 /// Window length (ms) of the comparator samples; a window with any trip is
 /// a "hit".
 pub const WIN_MS: u64 = 100;
@@ -1004,7 +1026,11 @@ impl Sentinel {
             Kind::Ad2A => PK2_THR,
             _ => PK_THR,
         };
-        let hit = pkmax >= pkmin && (pkmax > thr || pkmin < -thr);
+        let hit = if self.kind == Kind::PeakV {
+            pkmax - pkmin > PKV_SWING_THR
+        } else {
+            pkmax >= pkmin && (pkmax > thr || pkmin < -thr)
+        };
         if self.alt && self.alt_v {
             // V-tap window (DC?): `dmm.rs` turns the pair into volts.
             self.pk_v = (pkmax >= pkmin).then_some((pkmin, pkmax));
@@ -1174,7 +1200,11 @@ impl Sentinel {
         // gated, 0 free, 1 driven).
         let pa = (self.probe_a * 1000.0) as i32;
         let vd = if self.vgate && self.vside_t.is_some() { self.vdrv as i32 } else { -1 };
-        for v in [self.mask as i32, self.ctsta as i32, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32, vd] {
+        // ctsta: -1 when the kind samples no comparator (the field would be
+        // the last comparator row's, stale: the f0d21eb check's "AC V reads
+        // 0x70 after TEMP" was TEMP's last read).
+        let ct = if matches!(self.kind, Kind::CmpA | Kind::CmpV) { self.ctsta as i32 } else { -1 };
+        for v in [self.mask as i32, ct, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32, vd] {
             put(b",");
             put(itoa(&mut nb, v));
         }
@@ -1668,7 +1698,9 @@ mod tests {
                 // SS5, R33 OP1CHOP held off.
                 assert_eq!(idx, vec![2, 3, 4, 5, 9, 12, 19], "mode {m} r{i}");
                 assert_eq!(r[3] & 0x80, 0, "AD1 off in the stock AC A row");
-                assert_eq!((c[2], c[3], c[4]), (0x00, r[3] | 0x80, 0x07));
+                // SENSE - AGND (was SENSE - PB5: the 2a drift; VAR_ACA_PB5 keeps it).
+                assert_eq!((c[2], c[3], c[4]), (0x00, r[3] | 0x80, 0x03));
+                assert_eq!(row_for(m, i as u8, false, M_ALL, VAR_ACA_PB5, r).0[4], 0x07);
                 assert_eq!(c[5], r[5] | 0x30);
                 assert_eq!(c[9], (r[9] & 0xF8) | 5);
                 assert_eq!((r[12], c[12]), (0, 0x10), "SS5 only, never PS5");
@@ -1743,6 +1775,26 @@ mod tests {
         // 230 V and 12 mA flowing: none.
         s.current_small(t, false);
         assert_eq!(s.alert, Alert::None);
+        // Device f0d21eb 2a: the hold drifting to the negative rail (no
+        // swing) is no hit; nor is a steady DC level of any size.
+        let mut s = Sentinel::new();
+        s.configured(Kind::PeakV, 0, true);
+        let mut t = 0;
+        let mut lvl = -117_000;
+        while t < 6000 {
+            s.sample_peak(t, (lvl - 1_400).max(-262_144), lvl);
+            s.current_small(t, true);
+            lvl = (lvl - 3_000).max(-262_144);
+            t += 107;
+        }
+        assert_eq!((s.alert, s.hits), (Alert::None, 0));
+        // 2.5 V rms 50 Hz on V: +-3.5 mV at SENSE = +-2 670 codes.
+        while t < 9000 {
+            s.sample_peak(t, -2_670, 2_670);
+            s.current_small(t, true);
+            t += 107;
+        }
+        assert_eq!(s.alert, Alert::VJack);
     }
 
     #[test]
@@ -2198,6 +2250,6 @@ mod tests {
         s.sample_peak(100, -5, 7);
         let mut b = [0u8; 96];
         let n = s.diag_text(&mut b);
-        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,15,0,-5,7,0,0,1,0,0,-1");
+        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,15,-1,-5,7,0,0,1,0,0,-1");
     }
 }

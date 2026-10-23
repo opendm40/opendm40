@@ -554,6 +554,12 @@ fn u24(b: &[u8]) -> u32 {
     b[0] as u32 | (b[1] as u32) << 8 | (b[2] as u32) << 16
 }
 
+/// `Dmm::ac_over_until`: how long after the first AC A result of a row an
+/// over-range result is taken for the switch step (~5 RMS blocks of
+/// 107 ms). The OVERLOAD rule protects against heat (seconds), so this is
+/// no exposure; AUTO's up-range after a switch is this much later too.
+const AC_OVER_HOLD_MS: u64 = 500;
+
 fn relay_pa(clk: &mut Clock, arg: u8) {
     // Latching relay pair: 10 ms pulse. 0: PA10=1 PA9=0, 1: PA10=0 PA9=1.
     let (set, clr) = if arg == 0 { (10, 9) } else { (9, 10) };
@@ -869,6 +875,22 @@ pub struct Dmm {
     /// When the relay last left the ohm network for the V/A path, or the
     /// chip restarted (`start`) (ms; sentinel::OHM_EXIT_*), None before.
     ohm_exit_t: Option<u64>,
+    /// Device experiment (DBG:SENTinel:PRECond <ms>, RAM only, 0 = off,
+    /// the default): before a DC A family row is entered while `a_blind`,
+    /// the temperature row runs for this long. Device f0d21eb: a real 24 V
+    /// on V-COM read CTSTA 0x70 / 0x50 in DC A only when TEMP came before
+    /// (DC V 60 V+, the ohm rows and a chip restart left the A row reading
+    /// 0); whether TEMP's network (OP3 on PA7 / the power bus) is what
+    /// makes the tap visible is a hypothesis this switch tests.
+    pub precond_ms: u16,
+    /// The last row that changes the V-tap network state seen in DC A was
+    /// not the temperature row (DC V 60 V+, ohm / continuity / diode / cap
+    /// / frequency rows, a chip restart): see `precond_ms`.
+    a_blind: bool,
+    /// Plain AC A: over-range results are held back until this time (ms;
+    /// 0 = set at the first result after the next row write: + AC_OVER_HOLD_MS),
+    /// `poll_ac`.
+    ac_over_until: u64,
     live: bool,
     /// OVERLOAD latch (doc 4.3 / 4.7, sentinel::overload_trips): None = not
     /// in force.
@@ -1303,6 +1325,9 @@ impl Dmm {
             pkh_due: 0,
             sent_arm: false,
             ohm_exit_t: None,
+            precond_ms: 0,
+            a_blind: true,
+            ac_over_until: 0,
             live: false,
             ovl: None,
             probe: false,
@@ -1481,9 +1506,18 @@ impl Dmm {
         self.avg.reset();
         self.t_rd = None;
         self.t_conv = None;
-        hy::quiesce();
+        self.ac_over_until = 0;
         let pa = if matches!(m, 0 | 1 | 4..=9) { 0 } else { 1 };
-        if self.pa_now == Some(1) && pa == 0 {
+        let pre = self.precond_ms != 0 && self.a_blind && matches!(m, 7..=9) && !am && self.func() != self.sent_mode;
+        if pre {
+            self.precondition(clk);
+        } else if m == 15 && self.t_sensor == 0 {
+            self.a_blind = false;
+        } else if pa == 1 || (m == 1 && r > 0) {
+            self.a_blind = true;
+        }
+        hy::quiesce();
+        if self.pa_now == Some(1) && pa == 0 && !pre {
             self.ohm_exit_t = Some(clk.now_ms());
         }
         // AC+DC: the stock pulses the relay on every FUN_08012c30 call, so
@@ -2833,6 +2867,58 @@ impl Dmm {
         }
     }
 
+    /// `precond_ms` (device experiment): the thermocouple row (relay PA 1,
+    /// the rest shunt) for that long, blocking, before the DC A row.
+    #[inline(never)] // .cold (link-native.x): opt-in experiment
+    fn precondition(&mut self, clk: &mut Clock) {
+        hy::quiesce();
+        if self.pa_now != Some(1) {
+            relay_pa(clk, 1);
+            self.pa_now = Some(1);
+        }
+        relay_pe(2);
+        hy::configure(&CFG_F15[0]);
+        clk.delay_ms(self.precond_ms.min(2000) as u32);
+        self.a_blind = false;
+    }
+
+    /// DBG:SENTinel:REG?: R20..R37 read back (48 hex digits), then the
+    /// relay PA state (0 V/A, 1 the ohm network, 255 unknown), the mode,
+    /// the range and `a_blind`.
+    #[inline(never)] // .cold (link-native.x): DBG reply
+    pub fn reg_text(&self, buf: &mut [u8; 72]) -> usize {
+        let mut b = [0u8; 24];
+        hy::read(0x20, &mut b);
+        const H: &[u8; 16] = b"0123456789ABCDEF";
+        let mut n = 0;
+        for x in b {
+            buf[n] = H[(x >> 4) as usize];
+            buf[n + 1] = H[(x & 15) as usize];
+            n += 2;
+        }
+        for v in [self.pa_now.unwrap_or(255), self.mode, self.range as u8, self.a_blind as u8] {
+            buf[n] = b',';
+            n += 1;
+            let mut d = [0u8; 3];
+            let mut k = 0;
+            let mut x = v;
+            loop {
+                d[k] = b'0' + x % 10;
+                k += 1;
+                x /= 10;
+                if x == 0 {
+                    break;
+                }
+            }
+            while k > 0 {
+                k -= 1;
+                buf[n] = d[k];
+                n += 1;
+            }
+        }
+        n
+    }
+
     /// (Re)start measuring in the current mode.
     pub fn start(&mut self, clk: &mut Clock) {
         if self.wake_at != 0 && !self.suspended {
@@ -2856,6 +2942,7 @@ impl Dmm {
         // The chip was another's (Wave view, logger), asleep or lost: the
         // sentinel's history starts over (`write_config` `fresh`).
         self.sent_mode = 255;
+        self.a_blind = true;
         // ... and the A rows' SENSE comparator reads 0x70 for seconds after
         // a restart too (device ad74e93 E2: A, Scope page, back).
         self.ohm_exit_t = Some(clk.now_ms());
@@ -3571,12 +3658,28 @@ impl Dmm {
             2 => (ACMV_WIN[r], 0.35, 0.35),
             _ => (ACA_WIN[(m - 4) as usize * 2 + r], 0.15, 0.35),
         };
-        ema(thr, a_lpf, dcp, &mut self.f_lpf);
         let lim = match m {
             0 => (f * DEC4[r]).min(1000.0),
             2 => f * [10.0, 100.0][r],
             _ => (f * DEC4[(m - 4) as usize + r]).min(if m == 4 { 10.0 } else { f32::MAX }),
         };
+        // Plain AC A: over-range results within AC_OVER_HOLD_MS of the
+        // first result after a row write are held back (no reading, no range
+        // move, no OVERLOAD / AUTO hop): device f0d21eb, CONF:CURR:AC 10 then
+        // 0.06 with the A jack empty read OL on the first 60 mA result(s)
+        // (the 10 mohm -> 0.5 ohm shunt, PB2 -> PB1 and x1 -> x10 step
+        // through the RMS / LPF blocks) and the OVERLOAD rule fell back to
+        // 10 A. A real over range still reads over after the hold and acts
+        // then; one that starts later acts at once.
+        if m >= 4 && !self.acdc {
+            if self.ac_over_until == 0 {
+                self.ac_over_until = now + AC_OVER_HOLD_MS;
+            }
+            if now < self.ac_over_until && sqrt(ac * ac + 0.25 * dcp * dcp) > ov * lim {
+                return None;
+            }
+        }
+        ema(thr, a_lpf, dcp, &mut self.f_lpf);
         let (unit, dec, si_k) = match m {
             0 => ("V", 4 - r as u8, 1.0),
             2 => ("mV", 3 - r as u8, 1e-3),

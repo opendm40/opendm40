@@ -287,6 +287,8 @@ SECTIONS
         *(.text.*7dm40_fw2ui11device_page*);
         *(.text.*7dm40_fw6dialog10fuse_check*);
         *(.text.*7dm40_fw3dmm*3Dmm14acdc_diag_text*);
+        *(.text.*7dm40_fw3dmm*3Dmm8reg_text*);
+        *(.text.*7dm40_fw3dmm*3Dmm12precondition*);
         /* acdcm.rs: the AC+DC methods' entry / range-change / SCPI steps
            (poll_am, the per-result path, stays in region B) */
         *(.text.*7dm40_fw3dmm2am*8am_enter*);
