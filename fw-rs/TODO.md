@@ -2331,9 +2331,10 @@ Firmware:
             no held first conversion where a function change restarted AD1 (R22 changed); provisional values
             (vet hold, AC+DC before both parts / AC settling, AUTO deciding) drawn grey, never to the meter,
             autorange, BT or SCPI. In AUTO, FETCh? is +9.91E37 until the first decision; READ? / MEAS?
-            after the host's change wait for it (main.rs AUTO_WAIT_MS: at most 4.5 s after the command, then
-            the part AUTO shows, never "Data stale"; emulator autowaittest: DC 1.28 s, clear AC 3.46 s, a tie
-            4.50 s; docs/bt-scpi.md). Emulator (switchlat, MED):
+            after the host's change wait for it (main.rs AUTO_WAIT_MS: until 3.9 s after the entry, a later
+            query 0.85 s; then the part AUTO shows, never "Data stale"; emulator autowaittest: MEAS? DC
+            1.28 s, clear AC 3.46 s, a tie 3.91 s; libsigrok's READ? 3 s after CONF 0.42 / 0.85 s;
+            docs/bt-scpi.md). Emulator (switchlat, MED):
             DC V -> ohm 3.08 -> 1.19 s (FAST 2.83 -> 0.93), DC V -> A 0.72 -> 0.33, ohm / A -> DC V 0.53 ->
             0.33, DC V -> AC V 0.48 -> 0.32, manual 6 <-> 60 V 0.5 -> 0.3, AC+DC 60 -> 6 V 1.69 -> 1.50;
             AC+DC -> AUTO first FETCh? 1.29 -> 3.56 (by design). Suites: switchtest (15 / 15), senttest (all

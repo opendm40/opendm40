@@ -158,10 +158,11 @@ Reply timing of `READ?` / `MEAS:<f>?` / `FETC?`:
 - **Just switched** (`MEAS:<f>?` changing the function, or `CONF:<f>` then
   `READ?`): the first reading after the converter's settle (0.3 s for DC V,
   0.15 s for resistance, then the autorange; the AUTO coupling: its first
-  DC / AC decision, at most 4.5 s after the command, docs/bt-scpi.md); `MEAS:<f>?` prefers a
-  full-resolution average but waits for it at most 1.5 s after the command.
-  The reply can take
-  about 3 s for resistance, so give the host a timeout of 5 s or more
+  DC / AC decision, at most 3.9 s after the entry, docs/bt-scpi.md);
+  `MEAS:<f>?` prefers a full-resolution average but waits for it at most
+  1.5 s after the command. The reply can take about 1.5 s for resistance
+  (the range hunt from 60 Mohm) and ~4 s in AUTO, so give the host a timeout
+  of 5 s or more
   (PyVISA defaults to 2 s; libsigrok's DM40 profile waits 3 s after switching
   to RES / CAP / TEMP / FREQ / CONT / DIOD / AC+DC). With `SYST:IDN:EMUL
   34401A` (for sigrok / SmuView builds without the DM40 profile: `*IDN?`

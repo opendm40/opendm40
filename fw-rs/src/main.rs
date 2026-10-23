@@ -101,13 +101,14 @@ const SCPI_WAIT_MS: u64 = 1900;
 /// steady MEDIUM and SLOW reading, both one per conversion) with room for
 /// the poll.
 const SCPI_QUICK_MS: u64 = 850;
-/// READ? / MEASure? in the AUTO coupling after the host's change: wait this
-/// long after the command for the first decision (its values before it are
-/// provisional, switch-latency.md 6: ~3.6 s on a clear AC or DC signal); at
-/// the end, the part AUTO shows by then (the DC part of a tie, whose decision
-/// can take ~10 s behind the AC part's settle), not "Data stale". Inside a
-/// 5 s host timeout.
-const AUTO_WAIT_MS: u64 = 4500;
+/// READ? / MEASure? in the AUTO coupling after the host's change: wait for
+/// the first decision until this long after the coupling was entered (its
+/// values before it are provisional, switch-latency.md 6: ~1.3 s on DC,
+/// ~3.5 s on a clear AC signal), later queries at most SCPI_QUICK_MS; then
+/// the part AUTO shows by then (the DC part of a tie, whose decision can take
+/// ~10 s behind the AC part's settle), not "Data stale". libsigrok's DM40
+/// profile reads 3 s after CONF with a hard 1 s USBTMC timeout: < 4 s.
+const AUTO_WAIT_MS: u64 = 3900;
 // The next fresh steady reading: at most one conversion away + poll / loop.
 const _: () = assert!(SCPI_QUICK_MS >= hy3131::ad1_period_us_r22(0x17) as u64 / 1000 + 300);
 /// scpi_wait expiry of a READ? / MEAS? / FETCh? whose function changed under
@@ -609,7 +610,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         let expire = if fresh || scpi::idn_emul() != 0 || !host_settle {
                             now + SCPI_QUICK_MS
                         } else if app.dmm.cpl_auto() {
-                            (now.max(app.dmm.deadline()) + SCPI_WAIT_MS).max(now + AUTO_WAIT_MS)
+                            (app.dmm.entry_ms() + AUTO_WAIT_MS).max(now + SCPI_QUICK_MS)
                         } else {
                             now.max(app.dmm.deadline()) + SCPI_WAIT_MS
                         };
