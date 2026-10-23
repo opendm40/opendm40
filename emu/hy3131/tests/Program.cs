@@ -188,11 +188,11 @@ namespace Hy3131Tests
             case 1: case 3: case 10: case 15: c[0] = 0x90; break;
             case 0: case 2: c[2] = 0; c[3] |= 0x80; c[4] = 0x95; c[5] |= 0x30; c[9] = (byte)((c[9] & 0xF8) | 5); break;
             case 7: case 8: case 9: c[0] = 0x10; c[12] |= 0x10; break;
-            // later ones: frequency (AD1 PB1 - PB3 peak), AC A (AD1 SENSE - PB5 peak with SS5,
+            // later ones: frequency (AD1 PB1 - PB3 peak), AC A (AD1 SENSE - AGND peak with SS5,
             // OP1 chopper off), continuity / diode / cap r0..4 (OP2 x1 on PB1, AD2 = OP2O - PB3
             // at IG 2.0, OSR 256, peak hold on AD2)
             case 14: c[2] = 0; c[3] |= 0x80; c[4] = 0x95; c[5] |= 0x30; c[9] = (byte)((c[9] & 0xF8) | 5); break;
-            case 4: case 5: case 6: c[2] = 0; c[3] |= 0x80; c[4] = 0x07; c[5] |= 0x30; c[9] = (byte)((c[9] & 0xF8) | 5); c[12] |= 0x10; c[19] &= 0x3F; break;
+            case 4: case 5: case 6: c[2] = 0; c[3] |= 0x80; c[4] = 0x03; c[5] |= 0x30; c[9] = (byte)((c[9] & 0xF8) | 5); c[12] |= 0x10; c[19] &= 0x3F; break;
             case 11: case 12: case 13:
                 c[5] = (byte)((c[5] & 0x3D) | 0xC0); c[6] = 0x83; c[7] = 0x6D; c[9] = (byte)((c[9] & 0xF8) | 4); c[18] = (byte)(0xD0 | (c[18] & 0x0F)); break;
             }
@@ -314,6 +314,72 @@ namespace Hy3131Tests
                 m.Chip.SetInput("fuseopen:none");
                 m.Read1(0x1E); m.WaitFlag(0x04, 1);
                 Near(Ma(m, 8, 0), 10, 0.01, "  fuse back: 10 mA");
+            }
+            {
+                // pb5drift (device f0d21eb 2a): AC A's AD1 on SENSE - PB5 runs to the negative rail
+                // within ~2 s, whatever is on V; SENSE - AGND (the fixed row) stays put
+                var m = NewChip(true);
+                m.Chip.SetInput("open;pb5drift:0.6;pb5tau:2.2");
+                var r = Sent(F5R0, 5);
+                r[4] = 0x07;
+                m.Configure(r, 5);
+                m.Advance(0.6);
+                var p = Peak(m, r[9], 0.1);
+                Check(p[1] < -90000 && p[1] > -160000, "pb5drift, AC mA on SENSE - PB5: ~-117 k at 0.7 s", p[0] + ".." + p[1]);
+                m.Advance(1.4);
+                p = Peak(m, r[9], 0.1);
+                Check(p[1] <= -262000, "  at the negative rail by ~2.1 s", p[0] + ".." + p[1]);
+                var m2 = NewChip(true);
+                m2.Chip.SetInput("open;pb5drift:0.6;pb5tau:2.2");
+                var r2 = Sent(F5R0, 5);
+                m2.Configure(r2, 5);
+                m2.Advance(2.0);
+                p = Peak(m2, r2[9], 0.1);
+                Check(p[1] < 300 && p[0] > -300, "  SENSE - AGND (fixed row): near 0 after 2 s", p[0] + ".." + p[1]);
+                m2.Chip.SetInput("vsrc:0,ac=5,f=50");
+                p = Peak(m2, r2[9], 0.1);
+                // 5 V rms = 7.07 mV peak at the tap: 3.6 * 0.00707 / 1.25 * 2^18 = 5 338
+                Near(p[1] - p[0], 10676, 300, "  5 V rms AC: swing ~10.7 k (fw-rs swing threshold 4.27 k)");
+            }
+            {
+                // acastep (device f0d21eb new bug 1): AC A 10 A -> mA, the first blocks carry the step
+                var m = NewChip(true);
+                m.Chip.SetInput("open;acastep:200000;acastepms:700");
+                m.Configure(Sent(F4R1, 4), 4);
+                m.Advance(1.0);
+                m.Configure(Sent(F5R0, 5), 5);
+                m.Advance(0.62);
+                var b = ReadAfter(m, 0x10, 0.3);
+                Check(SqrtRms(b) > 100000, "acastep: 10 A -> 60 mA, the first block after 0.6 s is over range", SqrtRms(b).ToString("F0"));
+                m.Advance(0.25);
+                b = ReadAfter(m, 0x10, 0.3);
+                Check(SqrtRms(b) < 1000, "  the blocks after the step: the floor", SqrtRms(b).ToString("F0"));
+                var m2 = NewChip(true);
+                m2.Chip.SetInput("open;acastep:200000;acastepms:700");
+                m2.Configure(Sent(F8R0, 8), 8);
+                m2.Configure(Sent(F5R0, 5), 5);
+                m2.Advance(0.62);
+                b = ReadAfter(m2, 0x10, 0.3);
+                Check(SqrtRms(b) < 1000, "  DC mA -> AC 60 mA: no step", SqrtRms(b).ToString("F0"));
+            }
+            {
+                // vjblind (device f0d21eb, 24 V on V-COM): DC A's SENSE comparator sees the source
+                // only after a temperature row; DC V 60 V / ohm / a reset make it blind again
+                var m = NewChip();
+                m.Chip.SetInput("vsrc:24;vjblind:1");
+                m.Configure(Sent(F1R1, 1), 1);
+                m.Configure(Sent(F8R0, 8), 8);
+                var q = CmpScan(m, 10, 0.01);
+                Check(q[2] == 0, "vjblind: DC V 60 V -> DC mA, 24 V: no bits", string.Join(",", q));
+                m.Configure(Sent(F15R0, 15), 15);
+                m.Configure(Sent(F0R1, 0), 0);
+                m.Configure(Sent(F8R0, 8), 8);
+                q = CmpScan(m, 10, 0.01);
+                Check(q[0] == 10, "  TEMP -> AC V -> DC mA: CMPHO", string.Join(",", q));
+                m.Configure(Sent(F10R1, 10), 10);
+                m.Configure(Sent(F8R0, 8), 8);
+                q = CmpScan(m, 10, 0.01);
+                Check(q[2] == 0, "  RES -> DC mA: blind again", string.Join(",", q));
             }
             {
                 // the diode reading with AD2 / OP2 running (the model has no note-7 offset: T8 decides)

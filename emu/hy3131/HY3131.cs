@@ -75,6 +75,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             rampV = 0; rampUp = true; rampLast = now;
             vc = Op1OffLevel; vcLast = now;
             role = Role.None; roleMode = -1; roleRange = 0;
+            vjSee = false; acaT0 = double.NegativeInfinity; acaStepT = double.NegativeInfinity; lastRole = Role.None; lastMode = -1;
             Rewrites = 0;
             rng = new Random(12345);
             faultRng = new Random(777);
@@ -446,6 +447,32 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// whatever the input ("ohmexit:3.5;ohmexitlo:1.2"; off by default).
         public double OhmExitBoth, OhmExitLow;
         private double ohmExitT = double.NegativeInfinity;
+        /// AC A rows, AD1 on SENSE - PB5 (the fw-rs f0d21eb V-JACK? sentinel): PB5 is not
+        /// defined by the A rows (only the DC V 60 V+ rows' power bus / OP3 drive it), and the
+        /// device's AD1 peak there ran from ~-117 000 at 0.7 s to the negative rail by ~2 s
+        /// whatever was on V-COM (device-check f0d21eb 2a). Replay: PB5 rises by
+        /// pb5drift V x (1 - exp(-t / pb5tau s)) from the first AC A row write (kept across AC A
+        /// range changes), so SENSE - PB5 falls ("pb5drift:0.6;pb5tau:2.2"; off by default).
+        /// SENSE - AGND (the fixed row) does not drift.
+        public double Pb5DriftV, Pb5DriftTau = 2.2;
+        private double acaT0 = double.NegativeInfinity;
+        /// AC A 10 A -> mA / uA (device f0d21eb: CONF:CURR:AC 10, then 0.06, the A jack empty:
+        /// the first 60 mA result read OL): the AD2 node (OP1O - PB3) carries a step of acastep
+        /// codes for acastepms ms from that row write, in the LPF and the RMS blocks it overlaps
+        /// ("acastep:200000;acastepms:600"; off by default). The shape is not measured: only
+        /// "the first result after the settle reads over range" is.
+        public double AcaStepCodes, AcaStepMs = 600;
+        private double acaStepT = double.NegativeInfinity;
+        private Role lastRole = Role.None;
+        private int lastMode = -1;
+        /// DC A rows' SENSE comparator blind to the V jack depending on the history (device
+        /// f0d21eb, 24 V on V-COM: CTSTA 0x70 / 0x50 in DC A only when the temperature row came
+        /// before; DC V 60 V+, an ohm-network row or a chip reset left it reading 0 for 10+ s;
+        /// AC V and the A rows keep either state). "vjblind:1": SENSE reads 0 in the DC A role
+        /// unless a temperature row ran since the last DC V r1+ / ohm / continuity / diode /
+        /// capacitance / frequency row or reset. A replay of the observation, not a mechanism.
+        public bool VjBlind;
+        private bool vjSee;
         private int paExitsSeen;
         private double swT0 = double.NegativeInfinity;
         private double SwTr(double t)
@@ -673,6 +700,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "swtr": SwTrMv = o.Value; break;
                 case "ohmexit": OhmExitBoth = o.Value; break;
                 case "ohmexitlo": OhmExitLow = o.Value; break;
+                case "pb5drift": Pb5DriftV = o.Value; break;
+                case "pb5tau": Pb5DriftTau = o.Value; break;
+                case "acastep": AcaStepCodes = o.Value; break;
+                case "acastepms": AcaStepMs = o.Value; break;
+                case "vjblind": VjBlind = o.Value != 0; break;
                 case "swtau": SwTrTau = o.Value; break;
                 case "swhz": SwTrHz = o.Value; break;
                 case "ctsettle": CtSettleMs = o.Value; break;
@@ -833,6 +865,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 dc += LpfRipple(t, p, nac * Ad2Scale());
             }
             if(cDc) dc += LpfCreepCodes(t);
+            double stepSq = 0;
+            if(role == Role.AcA && AcaStepCodes != 0)
+            {
+                // the block [t - p, t] overlapping the step [acaStepT, + AcaStepMs]
+                var ov = Math.Min(t, acaStepT + AcaStepMs * 1e-3) - Math.Max(t - p, acaStepT);
+                if(ov > 0)
+                {
+                    var st = AcaStepCodes * Math.Min(1.0, ov / p);
+                    dc += st;
+                    stepSq = st * st;
+                }
+            }
             if(EnLpf)
             {
                 lpfCode = Clamp19((int)Math.Round(dc));
@@ -846,7 +890,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             else if(EnRms)
             {
-                var sq = acRms * acRms + hpfMs;
+                var sq = acRms * acRms + hpfMs + stepSq;
                 if(RmsFill > 0 && !cDc)
                 {
                     var fill = Math.Min(1.0, (t - lpfStart) / RmsFill);
@@ -1342,11 +1386,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
             }
-            if(role == Role.AcA && fp == 0 && fn_ == 7)
+            if(role == Role.AcA && fp == 0 && (fn_ == 7 || fn_ == 3))
             {
-                // fw-rs sentinel (AC A V-JACK?): AD1 on SENSE - PB5, SENSE = the V jack through
-                // the /1000 tap with SS5 closed (open otherwise), instantaneous
-                code = ig * SenseTapVolts(t) / (rg * Vref) * fs;
+                // fw-rs sentinel (AC A V-JACK?): AD1 on SENSE - PB5 (f0d21eb) or SENSE - AGND,
+                // SENSE = the V jack through the /1000 tap with SS5 closed (open otherwise),
+                // instantaneous; PB5 drifts with pb5drift (above)
+                var vin = SenseTapVolts(t);
+                if(fn_ == 7 && Pb5DriftV != 0 && t >= acaT0) vin -= Pb5DriftV * (1 - Math.Exp(-(t - acaT0) / Pb5DriftTau));
+                code = ig * vin / (rg * Vref) * fs;
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
             }
@@ -1768,7 +1815,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 return true;
             case Role.DcA:
                 if(scmpi != 0) return false;
-                v = SenseTapVolts(t);
+                v = VjBlind && !vjSee ? 0 : SenseTapVolts(t);
                 return true;
             }
             return false;
@@ -2091,6 +2138,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(newRole != role || newMode != roleMode || newRange != roleRange)
             {
                 if(newRole == Role.CapRamp && role != Role.CapRamp) { rampUp = true; }
+                // (the quiesce writes pass through no-role states: the last real role counts)
+                if(newRole == Role.AcA && lastRole != Role.AcA) acaT0 = now;
+                if(newRole == Role.AcA && lastRole == Role.AcA && lastMode == 4 && newMode >= 5) acaStepT = now;
+                if(newRole != Role.None) { lastRole = newRole; lastMode = newMode; }
+                if(newRole == Role.Temp) vjSee = true;
+                else if(newRole == Role.Ohm || newRole == Role.Cont || newRole == Role.Diode || newRole == Role.CapOsc
+                        || newRole == Role.CapRamp || newRole == Role.CapDischarge || newRole == Role.Freq
+                        || (newRole == Role.DcV && newRange >= 1)) vjSee = false;
                 role = newRole; roleMode = newMode; roleRange = newRange;
                 swT0 = now;
             }
