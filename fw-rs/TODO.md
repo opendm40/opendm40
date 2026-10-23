@@ -613,6 +613,13 @@ Code work (in this order):
       --show / -c range=; pyvisa USB query('OUTP?'). Also open: the driver's two threads interleave
       queries on one transport; the -L log is empty when ngscopeclient is killed; DM40Oscilloscope.cpp's
       comment "nothing follows it on usbtmc" is now stale (the read takes the '\n' either way).
+      Device bab5dd4 (2026-10-23, device-check doc "bab5dd4" B1 / B2): PASS. ngscopeclient-dm40 --headless
+      on /dev/usbtmc2: TRIGGERED, flat trace (open input), generator fields filled (Square 2 MHz 50 % 3 V
+      1.5 V, GEN OFF); test/dm40cli usbtmc: all protocol checks ok, 5 records in 0.84 s, the 3 signal
+      checks FAIL as expected (no loopback: flat 0.8577 V); dm40cli sets the generator to sine 1 kHz 1 Vpp
+      (output stays off; restored by hand). dm40scpi info / read / log (readings, AD1, AD2 4800: 0 lost) /
+      get (17 kB and 307 kB BMP), dm40dbg shot, pyvisa-py USB query('OUTP?') -> '0\n' (1 ms) all fine;
+      pyvisa-py leaves the usbtmc driver detached (host side, reattach.py).
 - [ ] sigrok/SmuView (merged from three items): libsigrok scpi-dmm DM40 profile exists as
       ../libsigrok-dm40/0001-scpi-dmm-add-support-for-Alientek-DM40A-B-C-dm40-fw-.patch (command set
       like the 34401A: CONF:<f>, READ?, FUNC?; 3 s delay after RES/CAP/TEMP/FREQ/CONT/DIOD). DC V works
@@ -685,6 +692,8 @@ Code work (in this order):
       so --show / --get / --set never closed the device (the transport's close re-attaches usbtmc).
       Emulator on vhci: /dev/usbtmcN stays after --show / --get / --samples / --set (gone with the old
       build). Device retest: the node stays after each sigrok-cli run (no reattach.py).
+      Device bab5dd4 (device-check doc "bab5dd4" B3): PASS. --show and six -c range= runs (6V x3, 60V x2,
+      Auto) with -d scpi-dmm:conn=usbtmc/3.71: rc 0, /dev/usbtmc2 still there after every run.
 - [x] AC+DC (and AUTO) with a manual V range, device 8087c7d (1 V DC, method A): the AC part reads 0.35 V
       (1.06 V via the MF page) for ~2-4 s after 6 -> 60 V, then a tail 18 -> 1 mV over ~10 s; 0.15 V for ~2 s
       after 60 -> 6 V. AC+DC READ? +6 % at 2.2 s, +0.9 % to 3.3 s. AUTO stays DC. Done (tmcnl-fix, dmm.rs
@@ -700,6 +709,15 @@ Code work (in this order):
       capped at 6 s), the AC part in DBG:ACDC:STAT? after it (the 60 V tail: ACS_STEP / ACS_FLOOR may need
       tuning; a device transient falling < 1 % per result would be let through early); AUTO coupling the same with the DC part shown throughout; a 40 Hz square on AC+DC: a range
       change gives the right AC part after the gap; autorange in AC+DC across 6 V (no hunting).
+      Device bab5dd4 (device-check doc "bab5dd4" B5): 1 V DC, 30 AC+DC changes with READ? polling (SCPI /
+      MF page, 6 <-> 60 V) + 16 with DBG:ACDC:STAT? polling: no fresh reading off by > 0.1 %, except 1 (MF 6 -> 60 V: DC part 0.526 V, item below); gap to the
+      first fresh reading 3.0-4.3 s (5.7 s once); AC part 15-27 mV at the first 60 V reading, 1-2.5 mV
+      after 9-12 s; 2-7 mV on 6 V. AUTO coupling (8 changes): AUTO,DC throughout, readings on at once,
+      1 x DC part 0.528 V (MF 6 -> 60 V, item below). Square: 6 -> 60 V and 60 -> 600 V right after the gap
+      (AC part 4.768 V), but 600 -> 60 V let the HPF tail through: 6.783 / 6.762 V (+0.55 / +0.24 %) for
+      1.7 s (item below). AC+DC autorange across 6 V (DC 4..7 V): at most one range step per level, no
+      hunting; a 0.5-0.8 V step down can make one excursion 6 -> 60 -> 6 V (item below). During the gap
+      READ? returns the pre-change reading, not NaN (item below).
 - [x] DC V: setting the present range again (SCPI <f>:RANG <same>, sigrok range=, or the MF page tap on the
       highlighted item) gives 1-2 readings at 25-51 % of the input at 0.46 / 0.66 s, on about every other
       repeat (device 8087c7d, 1 V DC: 0.257, 0.509, 0.375, 0.403 V); a real range change does not. The chart and
@@ -710,6 +728,11 @@ Code work (in this order):
       VOLT:RANG 6 / 60 x10 each (manual and from AUTO+), sigrok range= the present one, the highlighted MF
       item tapped: no READ? / chart MIN below 0.99 V; a real change 6 <-> 60 <-> 600 still fine; the one
       0.781 V after VOLT:RANG:AUTO ON from 600 V (real change) not addressed: watch for it.
+      Device bab5dd4 (device-check doc "bab5dd4" B4): PASS for the same-range fix. VOLT:RANG 6 / 60 x10 each
+      from manual and from AUTO+ (40 sets), 13 MF taps on the highlighted item, sigrok range= the
+      present range: lowest READ? / CALC:AVER:MIN? 0.99869 V on 6 V, 0.99853 V on 60 V
+      (0.99789 V in the real 6 -> 60 V changes). The 0.781 V case is
+      real and reproducible: item below.
 - [x] Scope touch: pinch = scale (timebase / V/div, 1-2-5 snap, value bubble), one-finger drag =
       offset, draggable trigger level, no clash with view swipes.  (c470be7, 419fd96, ebff9b4, 81c9dd8;
       verify on device, two-finger report rate first)
@@ -1261,12 +1284,46 @@ Firmware:
       range_cmd, next item). Not done: a noisy input (no sine / noise
       source without the generator; the 100 Hz square instead: 0 lost), a DC V fallback (gate 2) restart,
       the Record stop by a finger (DBG:TAP does not reach `fast_touch`), the inrush save (no A-COM load).
-- [ ] SCPI range_cmd in region C ran for every SCPI command (de01f2f; found on device 4c4b489): max_lat
+- [x] SCPI range_cmd in region C ran for every SCPI command (de01f2f; found on device 4c4b489): max_lat
       1.6-20 us at range_cmd's entry with late / overruns 1-3 / slips 1 during 76800 streams (host drain,
       Wave view, disk polling), and a 20 Hz LOG:DISK? poll made one writer trial fall back to 38400 (ring
       2048). Fixed in bab5dd4 (branch fastlog-768-retest): the dispatcher calls it only for RANGe /
       RESolution headers. Device check: as in the device-check doc's "Re-check on bab5dd4" (max_lat < 1 us,
       late / overruns / slips 0 at 76800 with the polls, the range commands still answer).
+      Device bab5dd4 (2026-10-23, device-check doc "bab5dd4" A): fixed. 76800 AC V 40 Hz square to the disk
+      (60 s, ended Full at 56.5 s): 4 329 787 rows, lost_before 0, max_lat 320 ns (spiflash::xfer), late /
+      overruns / slips 0; lat.py 76800 10 poll x3 (327-335 LOG:DISK? polls): gate 1, max_lat 320 ns
+      (spiflash::xfer), 0 / 0 / 0 each; p2.py host drain 30 s: 38.3 k rows/s, max_lat 280 ns, seq gaps 0;
+      p5.py Wave view 1 / 2 ms/div: max_lat 280 / 260 ns, dropped +0, 0 / 0 / 0. The range commands answer
+      (VOLT:RANG? / 60 / SENS:VOLT:RANG:AUTO ON / VOLT:RES? / CURR:DC:RANG? = +9.91E37 + "Settings conflict"
+      while in V, as documented).
+- [ ] DC V AUTO+ from 600 V or 1000 V (VOLT:RANG:AUTO ON = two steps down to 6 V), 1 V in: one reading of
+      0.767-0.790 V (77-79 %) in 5 of 35 tries (600 V: 3 of 20 + 1 of 5, 1000 V: 1 of 10; from 60 V, one
+      step: 0 of 10). It is the second reading on 6 V, ~0.8 s after the command; the chart MIN records it
+      (device bab5dd4, device-check doc "bab5dd4" B4). Not from the averaging window as such (write_config
+      resets it on every step). Suspects, unchecked: a conversion that straddles a register write (the OSR
+      write in `osr()` after the first 6 V conversion) or the 250 ms autorange settle being shorter than a
+      SLOW conversion. Not fixed; needs a raw AD1 code trace around the second step.
+- [ ] AC+DC / AUTO coupling, 1 V DC, a range change by the MF page 6 -> 60 V: the DC part read 0.526 /
+      0.528 V (53 %) for one DC phase (~1 s, READ? 0.526 V; in AUTO shown as AUTO,DC 0.528 V) in 2 of 4
+      such changes in the first run (one AC+DC, one AUTO), then 0 of 9 in two AC+DC repeats (READ? or
+      DBG:ACDC:STAT? polling); 0 of 30 SCPI changes and 0 of 13 MF 60 -> 6 V. Same signature as the 25-51 % partial conversions of the 8087c7d same-range item.
+      Rare, cause open (device bab5dd4, device-check doc "bab5dd4" B5).
+- [ ] AC+DC: READ? during the AC settle after a range change answers the reading from before the change
+      (3-6 times, 0.85 s apart, until the first fresh one 3-6 s later), not +9.91E37 as the tmcnl-fix item
+      expected ("READ? NaN after 0.85 s, as at entry"; scpi.rs: "the latest one if none comes within
+      SCPI_QUICK_MS"). Harmless on a steady input; after an autorange step it held a transient value:
+      AC+DC autorange, calibrator 5.8 -> 6.3 V, READ? 3.3885 V for 5 s (device bab5dd4, B5). Decide: drop the
+      latest reading on a range change in AC+DC (NaN until the first fresh one) or keep the doc's rule.
+- [ ] AC+DC method A settle (ACS_STEP 1 %): on the 40 Hz square 600 -> 60 V the AC part came back as
+      4.821 / 4.790 V (true 4.768) and READ? 6.783 / 6.762 V (+0.55 / +0.24 %) for 1.7 s: the HPF tail falls
+      < 1 % per result and passes the "flat" test, as the TODO feared. 60 -> 600 and 6 -> 60 V were right
+      (device bab5dd4, B5). Options: a stricter step (0.2 %) or a minimum time after the change.
+- [ ] AC+DC autorange: a DC step of 0.5-0.8 V gives an AC part of up to 3.4 V for ~1 s (the AC path's HPF
+      on the step; the calibrator's own step is clean within 0.3 s), hypot > 6 V, one up-range and back
+      after the 6 s settle (5.8 -> 5.0 V: on 60 V from 0.25 to 5.98 s). One excursion, no hunting (device
+      bab5dd4, B5). Could hold the up-range while the AC part falls fast.
+
 - [ ] Fast logger cosmetics (device 4c4b489): LOG:DISK? keeps naming the file of a session stopped in its
       trial (the file is removed); its tpp fields keep the last probe's 381 / 387 in a 38400 / 4800 / AD1
       session (documented as 0 = none); the Record page's Fast estimate says "0 min left" under a minute
@@ -1908,3 +1965,7 @@ Emulator (emu/):
       MED -> SLOW (resolution_cycle). Done (tmcnl-fix, app::next_rate): the chip, the value tap and Settings
       2/3 "Rate" all go FAST -> MED -> SLOW -> FAST (resolution order; the stock has no rate control, FAST is
       its 10/s reading). Device retest: chip and value tap from each rate.
+      Device bab5dd4 (device-check doc "bab5dd4" B6): PASS. Chip SLOW -> FAST -> MED -> SLOW and
+      FAST -> MED -> SLOW -> FAST -> MED; value tap (2.5 s apart) MED -> SLOW -> FAST -> MED -> SLOW and
+      SLOW -> FAST -> MED -> SLOW -> FAST (RATE?). A second value tap 1 s after the first did nothing
+      (SLOW -> FAST -> FAST -> MED); the chip at 1 s did not skip. Cosmetic, not chased.
