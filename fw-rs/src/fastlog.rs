@@ -34,7 +34,7 @@
 //!         page program when the chip is idle. No erase, no FAT / directory
 //!         write, no `.cold` code. A session above 38.4 kS/s starts with the
 //!         writer trial (`Gate`): 1 s coded without programming, then the
-//!         logger session restarts, at 38400 if the writer fell behind.
+//!         file starts (or the logger session restarts at 38400).
 //!   Stop  (`Ev::Stop` -> main.rs stops the logger) the rest of the ring,
 //!         the last chunk, the last pages; then the entry's size = the bytes
 //!         written, then the unused clusters freed in every FAT copy (FAT 1
@@ -134,8 +134,8 @@ pub enum Ev {
     None,
     /// The file is ready: start the logger session, then `run`.
     Start,
-    /// The writer trial ended (`gate`): stop the logger session, start it
-    /// again (at 38400 when `gate_fell`), then `run` (the file starts then).
+    /// The writer trial fell back (`gate_fell`): stop the logger session,
+    /// start it again at 38400, then `run` (the file starts then).
     Restart,
     /// Stop the logger session (duration reached, file full, a stop
     /// request, an error); the rest is drained afterwards.
@@ -153,8 +153,10 @@ pub enum Ev {
 /// ~0.4 % of the rate or more); else the session runs at 38400
 /// (`gate_fell`). Not the high water: a slow main-loop pass (a panel
 /// repaint, 10-17 ms) fills the ring by ~1000 records once in a while and
-/// the ring is there to absorb that. Either way the logger session
-/// restarts and the file begins then.
+/// the ring is there to absorb that. Kept: the file begins at the window's
+/// end in the same logger session (the run keeps the trial's stream, its
+/// Pll and ISR load); fell back: the logger session restarts at 38400 and
+/// the file begins then.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Gate {
     None,
@@ -283,7 +285,13 @@ pub struct Job {
     dry_until: u32,
     /// The Run pass's batch (here, not on the stack: no zeroing per pass).
     buf: [Rec; BATCH],
+    /// The file header (text + parameters) of a trial's session: put in
+    /// again when the trial keeps the rung (hot: no `.cold` dlog call).
+    hdr: [u8; HDR_MAX],
+    hdr_n: u16,
 }
+
+const HDR_MAX: usize = crate::dlog::FHDR + 512 + crate::dlog::FAST_PAR;
 
 const JOB0: Job = Job {
     state: State::Idle,
@@ -331,6 +339,8 @@ const JOB0: Job = Job {
     g_permille: 0,
     dry_until: 0,
     buf: [(0, 0); BATCH],
+    hdr: [0; HDR_MAX],
+    hdr_n: 0,
 };
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -643,10 +653,11 @@ impl Job {
         let b0 = src.isr_cyc();
         let trial = self.gate == Gate::Trial;
         if trial {
-            if let Some(ev) = self.trial_step(src, t0, logger_on) {
+            if let Some(ev) = self.trial_step(src, fifo, t0, logger_on) {
                 return ev;
             }
         }
+        let trial = self.gate == Gate::Trial;
         let mut dry = Dry { nor: d.nor(), until: self.dry_until, tpp: tpp_us().0.max(1) * (crate::clock::HCLK_HZ / 1_000_000) };
         let mut stop = None;
         loop {
@@ -723,10 +734,13 @@ impl Job {
         }
     }
 
-    /// The writer trial's bookkeeping at the start of a Run pass (`Gate`);
-    /// Some(Restart) when its window ended.
+    /// The writer trial's bookkeeping at the start of a Run pass (`Gate`).
+    /// At the window's end: kept -> the file starts now (the coder from its
+    /// start, the header again; the same logger session runs on, so the run
+    /// has the trial's stream: its Pll, its ISR load); fell back ->
+    /// Some(Restart).
     #[inline(never)]
-    fn trial_step(&mut self, src: &dyn Src, now: u32, logger_on: bool) -> Option<Ev> {
+    fn trial_step(&mut self, src: &dyn Src, fifo: &mut [u8], now: u32, logger_on: bool) -> Option<Ev> {
         let ms = crate::clock::HCLK_HZ / 1000;
         let fill = src.waiting();
         if self.g_ph == 0 {
@@ -757,9 +771,16 @@ impl Job {
         self.g_permille = (busy as u64 * 1000 / wall.max(1) as u64) as u32;
         let cap = src.cap();
         let ok = src.dropped() == self.g_drop && self.g_min[1] <= self.g_min[0].saturating_add(cap / 16);
-        self.gate = if ok { Gate::Kept } else { Gate::Fell };
-        // The trial's bytes are dropped: main.rs restarts the logger and
-        // `run` (prep::run_begin) starts the file from its header.
+        if ok {
+            self.gate = Gate::Kept;
+            self.enc.restart();
+            self.enc.put_raw(fifo, &self.hdr[..self.hdr_n as usize]);
+            self.hw = 0;
+            return None;
+        }
+        // The trial's bytes are dropped: main.rs restarts the logger at
+        // 38400 and `run` (prep::run_begin) starts the file.
+        self.gate = Gate::Fell;
         self.state = State::Ready;
         self.ph = Ph::Wait;
         self.ev_sent = true;
@@ -1316,10 +1337,10 @@ mod prep {
         let v = vol(j);
         let fifo = &mut crate::csvlog::lend_fifo()[..];
         j.enc = FastEnc::new(&j.ext[..j.next], v.data_start * BLK as u32, BLK as u32, fifo.len(), h.par.p_us());
-        let mut f = [0u8; crate::dlog::FHDR + 512];
-        let n = crate::dlog::file_header(crate::dlog::KIND_FAST, h.unit, &h.text[..h.text.len().min(512)], &mut f);
-        j.enc.put_raw(fifo, &f[..n]);
-        j.enc.put_raw(fifo, &h.par.bytes());
+        let n = crate::dlog::file_header(crate::dlog::KIND_FAST, h.unit, &h.text[..h.text.len().min(512)], &mut j.hdr[..crate::dlog::FHDR + 512]);
+        j.hdr[n..n + crate::dlog::FAST_PAR].copy_from_slice(&h.par.bytes());
+        j.hdr_n = (n + crate::dlog::FAST_PAR) as u16;
+        j.enc.put_raw(fifo, &j.hdr[..j.hdr_n as usize]);
         j.ph = Ph::Run;
         j.state = State::Run;
         j.hw = 0;
