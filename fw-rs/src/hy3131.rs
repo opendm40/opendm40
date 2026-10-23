@@ -1110,23 +1110,20 @@ pub const fn ad2_rate_mhz(r26: u8) -> u32 {
     ((SYSCLK_HZ as u64 * 1000 + clocks / 2) / clocks) as u32
 }
 
-/// The 76.8 kS/s rung's real conversion rate, mHz of the MCU clock (R26 low
-/// bits 0: /2, OSR 32, with or without ENCHOPAD2). The datasheet's FAD2CLK /
-/// OSR2 gives 76 800 (`ad2_rate_mhz`, the rung's name), but the chip
-/// converts 0.29 % slower, the same in every session of two device checks:
-/// the record stamps' mean step 76 574.5 S/s (7409b92, 60 s, CHOP on / off /
-/// default), 76 574.4 .. 76 574.9 in every 76800 session of 4c4b489 (fresh
-/// boots, disk / host / Wave view), LOG:PRE? measured_hz 76 574; a 40 Hz
-/// calibrator square is 956..959 samples per half period (960 nominal). The
-/// same crystal locks at -1.6 ppm at 4800 / 38 400, also with the same
-/// hybrid frames (DBG:AD2:DIV 8,1): not the crystal, not the read pattern.
-/// It is 64.188 SYSCLK per result (64 + 3/16 would be 76 574.85). One unit
-/// measured: the Pll's range (ad2pll.rs MAX_PPM 5000) also locks a chip at
-/// the datasheet's 76 800 (+2935 ppm from this).
-pub const AD2_OSR32_REAL_MHZ: u32 = 76_574_600;
+/// The 76.8 kS/s rung's conversion rate, mHz of the MCU clock (R26 low bits
+/// 0: /2, OSR 32, with or without ENCHOPAD2): the datasheet's FAD2CLK / OSR2
+/// (`ad2_rate_mhz(0)`). e7ec2cc had 76 574.6 here, the rate the 7409b92 /
+/// 4c4b489 / bab5dd4 builds streamed at; device e7ec2cc (device-check
+/// 2026-10-21 "e7ec2cc: the 76.8 kS/s PLL retest") showed that rate came
+/// from the old loop, not the chip: with the fixed loop (ad2pll.rs) the
+/// stream locks at rate_mhz 76 800 0xx from a cold start (ppm_x10 -2935
+/// against 76 574.6), gap-free disk data has 1919.95 samples per 40 Hz
+/// calibrator period (bab5dd4: 1914.27) and the Wave view's record 960 per
+/// half period, so 76 574.6 made every 76800 time axis 0.29 % long.
+pub const AD2_OSR32_REAL_MHZ: u32 = ad2_rate_mhz(0);
 
 /// The AD2 conversion rate the chip really runs at, mHz: `ad2_rate_mhz`
-/// except at the 76.8 kS/s rung (`AD2_OSR32_REAL_MHZ`). For the stream's
+/// (the 76.8 kS/s rung through `AD2_OSR32_REAL_MHZ`, now the same). For the stream's
 /// Pll nominal and the session's nominal period (LOG:PREamble?
 /// nominal_mhz, the CSV / DLG headers, the gap accounting); the rung keeps
 /// its name (`ad2_rate_mhz`: LOG:SRATe, the Wave view's bands).
@@ -1134,7 +1131,7 @@ pub const fn ad2_real_rate_mhz(r26: u8) -> u32 {
     if r26 & 0x0F == 0 { AD2_OSR32_REAL_MHZ } else { ad2_rate_mhz(r26) }
 }
 
-/// `ad2_real_rate_mhz` as a period, ns (13 059 at the 76.8 kS/s rung).
+/// `ad2_real_rate_mhz` as a period, ns (13 021 at the 76.8 kS/s rung).
 pub const fn ad2_real_period_ns(r26: u8) -> u32 {
     if r26 & 0x0F == 0 {
         ((1_000_000_000_000u64 + AD2_OSR32_REAL_MHZ as u64 / 2) / AD2_OSR32_REAL_MHZ as u64) as u32
@@ -1252,11 +1249,11 @@ mod tests {
         assert_eq!(ad2_period_ns(ad2_r26_for(1200, true)), 833_333);
         // AD2OSR codes 5..7 are all 1024.
         assert_eq!(ad2_period_ns(7), ad2_period_ns(5));
-        // The real rates: the 76.8 kS/s rung as measured, the rest as the
-        // datasheet; R26_CHOP and AD2RG do not matter.
-        assert_eq!(ad2_real_rate_mhz(0x00), 76_574_600);
-        assert_eq!(ad2_real_rate_mhz(R26_CHOP | 0x10), 76_574_600);
-        assert_eq!(ad2_real_period_ns(R26_CHOP), 13_059);
+        // The real rates are the datasheet's at every rung (device e7ec2cc);
+        // R26_CHOP and AD2RG do not matter.
+        assert_eq!(ad2_real_rate_mhz(0x00), ad2_rate_mhz(0));
+        assert_eq!(ad2_real_rate_mhz(R26_CHOP | 0x10), ad2_rate_mhz(0));
+        assert_eq!(ad2_real_period_ns(R26_CHOP), 13_021);
         for r in [0x01u8, 0x21, 0x02, 0x03, 0x04, 0x05, 0x0D, 0x08] {
             assert_eq!(ad2_real_rate_mhz(r), ad2_rate_mhz(r), "r26 {r:#x}");
             assert_eq!(ad2_real_period_ns(r), ad2_period_ns(r), "r26 {r:#x}");

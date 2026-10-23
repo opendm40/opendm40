@@ -369,9 +369,9 @@ pub const fn wave_fs_for(tb: usize) -> u32 {
 }
 
 /// The sample rate a wave frame's measurements, FFT and CSV use for the
-/// stream rung `fs` (`wave_fs_for`): the chip's real rate, which differs at
-/// 76800 (hy3131.rs AD2_OSR32_REAL_MHZ: 76 575, the Wave view's 1 ms/div
-/// read frequencies 0.29 % high on 76 800).
+/// stream rung `fs` (`wave_fs_for`): the chip's real rate (hy3131.rs
+/// AD2_OSR32_REAL_MHZ, the datasheet's since device e7ec2cc: its 76 575 made
+/// the Wave view's 1 ms/div read a 40 Hz square as 39.88 Hz).
 pub const fn wave_real_fs(fs: u32) -> u32 {
     if fs == 76_800 { (crate::hy3131::ad2_real_rate_mhz(0) + 500) / 1000 } else { fs }
 }

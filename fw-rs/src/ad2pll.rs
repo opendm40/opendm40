@@ -73,13 +73,13 @@ const KI_SHIFT: u32 = 18;
 
 /// The frequency word may move at most this far from the nominal (ppm): a
 /// runaway loop cannot detune the timer by more than 0.5 %. Was 1000 (any
-/// real crystal pair) until the device's 76.8 kS/s rung turned out 2940 ppm
-/// slower than the datasheet (hy3131.rs `AD2_OSR32_REAL_MHZ`, device
+/// real crystal pair) while the 76.8 kS/s stream ran 2940 ppm slow (device
 /// 7409b92): the word sat on the clamp and the probes' phase kicks alone
-/// held the grid (1.48 ISR entries per sample, ~9 % more ISR CPU). The
-/// nominal is now the measured rate; 5000 still locks a chip that runs at
-/// the datasheet's 76 800 (+2940 ppm from it) or anything in between, with
-/// 2000 ppm to spare. Nothing else depends on it: the beta / late geometry
+/// held the grid (1.48 ISR entries per sample, ~9 % more ISR CPU). That
+/// rate came from the old loop's walks, not the chip (device e7ec2cc: with
+/// this loop and a 76 574.6 nominal it locked at the datasheet's 76 800,
+/// -2935 ppm, from a cold start); the nominal is the datasheet's again, and
+/// 5000 keeps the margin that showed. Nothing else depends on it: the beta / late geometry
 /// is the nominal's (a 0.5 % period change moves the frame's margins by
 /// 0.5 % of a period), and the clamp only bounds the word, not the kicks.
 const MAX_PPM: u64 = 5000;
