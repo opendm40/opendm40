@@ -1308,5 +1308,13 @@ matters; `tools/dm40dbg.py reset` between runs stands in for a power cycle (as c
    SLOPE_MIN / SLOPE_MAX are the knobs.
 6. **e8l** (optional): e8s with 10 s per level: every level change takes its reference inside the level.
 
+Reading the logs (gsrc / gdis / slope / pp per level):
+* gsrc never leaving 1 on 60 V (and gdis staying 0) means no second reference fired: compare pp (AD2's peak-hold
+  p-p, codes) with the AC gate, 2 % x |LPF| + 1000 codes (set from the emulator's ~240 codes p-p on DC; the device's
+  steady-node p-p is inferred, ~200 codes from the 6 mV peak bound of 10.6, not measured), and slope with 1 code / s.
+* gdis on 6 V with the same sign in all four e8s runs points at the entry anchor rather than the new point: the
+  entry anchor is still the mean of 4 results right after a row write, and c6f9670's trace read +4..+8 codes
+  higher right after the reference's row write than before it.
+
 Decision rule (10.4 / 10.7) unchanged: C becomes the default when e8s (all four) / e8up and e5 pass with e2 / e9 / e10
 as in 10.8; the owner decides.
