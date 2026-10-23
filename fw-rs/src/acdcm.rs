@@ -1064,6 +1064,10 @@ impl Dmm {
         a.psig = sqrt(ss / (nf - 2.0));
         a.pslope = a.slope;
         a.pstep = if a.prevr == r as u8 { end - a.prevl } else { 0.0 };
+        // This level is the one before the next step, even when the next
+        // step comes before the window after the reference is PREV_N steady.
+        a.prevl = end;
+        a.prevr = r as u8;
         a.ok &= !(1 << r);
         a.refd &= !(1 << r);
         self.switch_phase(clk, 1, r as i8, 450);
