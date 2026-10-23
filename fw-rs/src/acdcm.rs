@@ -151,10 +151,10 @@ const GAIN_MOVE: f32 = 12.0;
 /// a larger gain when the farther reference point lies beyond the level
 /// before, as on every step down / up of e8). On the lag side the two lines
 /// must differ by CREEP_K x the step into this level (codes) more. Device
-/// f42a09e (acdc-approaches.md 10.14): 6 V's internal zero (accurate) was
-/// judged against two-point gains 0.7..13 codes above it at the new point,
-/// all 16 on the lag side (5 -> 3 V, 41.6 k codes: +3.9..+13.0), 60 V's
-/// biased zero -2.5..-10 codes, all 13 on the other side.
+/// f42a09e (acdc-approaches.md 10.14): 6 V's accurate internal zero vs the
+/// two-point gains at the new point: -0.9..+13 codes, 16 of 18 on the lag
+/// side, all beyond 1 code (5 -> 3 V, 41.6 k: +3.9..+13.0, 10 of 10); 60 V's
+/// biased zero: -2.5..-10 codes, 12 of 12 on the other side.
 const BIAS_K: f32 = 3.0;
 const CREEP_TAU: f32 = 2.5;
 const BIAS_MIN: f32 = 2.0;

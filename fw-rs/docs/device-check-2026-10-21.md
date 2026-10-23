@@ -2172,3 +2172,52 @@ Decision rule of 10.13 (all four e8s) not met: 1 of 4 at -0.59 mV. Not chased he
 
 - **Device:** f42a09e, DMM page, DC V AUTO, `CONF?` "VOLT +6,+1E-05", method A, `DBG:ACDC:TRACE?` off, READ? 0.99939 V, generator `OUTP?` 0, `SYST:ERR?` empty. `DBG:BOOT?` NORMAL, crash count 0, CLEAN, VALID. Five deliberate resets (`dm40dbg.py reset`, 10.13); no crash. Settings not touched; nothing written to the meter's disk.
 - **Calibrator:** 1 V DC, enabled.
+
+
+## acdc-bias: method C's bias test from device data (f42a09e -> d0baca5 -> b94bfb8, 2026-10-23 12:35 - 13:50)
+
+Images: f42a09e (data before the fix), d0baca5 and b94bfb8 (owner-installed, md5 OK, crash count 0). Owner
+settings untouched (volume 0, backlight 10 %, Dim / Shutdown Never). Calibrator on V / COM (`/dev/ttyACM1`), at
+1 V DC after every run. Generator output never on. 17 deliberate resets (`dm40dbg.py reset`), no crash.
+- **Files** (session scratchpad `cbias/dev/`, not in git):
+  - `pre.jsonl` / `pre_e8s.log`: f42a09e, e8up + 6 x e8s, `--trace`
+  - `post.jsonl` / `post.log`: d0baca5, the full 10.13 set
+  - `conf.jsonl` / `conf.log`: b94bfb8, e8up + 3 x e8s
+  - `ana.py` / `ana2.py` / `ana3.py`: per-level tables from the traces
+- Analysis and rule: acdc-approaches.md 10.14; the result tables: 10.15.
+
+### 1. f42a09e: gdis and the LPF before / after the reference
+
+Per e8s session (reset before each), gdis in codes (the two-point gain against the gain in use, at the new
+point), the window's residual rms (`ana.py`'s offline line fit over the 3 s before the reference), and the 6 V
+0 V error:
+
+| run | 60 V 12 V | 60 V 5 V | 6 V 3 V | 6 V 1 V | 6 V 0 V (mV) |
+|---|---|---|---|---|---|
+| 1 | -2.5 (iz kept) | -2.5 (iz kept) | +7.6 (rms 2.4) | +2.8 | +0.13 |
+| 2 | -3.4 (iz kept) | -6.9 -> gsrc 3 | **+13.0 -> gsrc 3** (rms 2.0) | -19.4 vs that gain -> gsrc 2 | +0.04 |
+| 3 | -10.1 -> gsrc 3 | +8.2 vs that -> gsrc 2 | +7.6 | +0.7 | +0.02 |
+| 4 | -6.5 -> gsrc 3 | | +3.9 | +3.3 | +0.08 |
+| 5 | -9.0 -> gsrc 3 | | +5.1 | +3.6 | +0.21 |
+| 6 | -9.3 -> gsrc 3 | | +8.0 | +2.0 | +0.06 |
+
+e8up: 0 / 1 / 5 / 12 / 24 V -3.34 / -2.13 / +0.17 / +1.40 / +1.22 mV (rule 5.0 / 5.5 / 7.5 / 11 / 17). The window's
+residual rms: 60 V 0.7-1.6 codes, 6 V 1.4-2.9.
+
+`ana2.py`: the 6 V 3 V level's LPF against the code the level's own DC V READ? gives through the internal
+zero's line. It is +3..+12 codes for 2-5 s after the step (flat), then lower after the reference. The 1 V level
+mostly shows -3..+1 before its reference. The lag is in the 3 V point; why it is smaller at 1 V is open
+(acdc-approaches.md 10.14).
+
+### 2. d0baca5 and b94bfb8
+
+Tables in acdc-approaches.md 10.15. **PASS** on both images: 6 V 0 V within 0.5 mV in 9 of 9 e8s sessions
+(-0.34..+0.09 mV), gsrc 1 throughout on 6 V; 60 V's biased zero replaced in every session (gsrc 3); e8up, e8,
+e5, e11, e10, e9 pass on d0baca5.
+
+### State at the end
+
+- **Device:** b94bfb8, DMM page, DC V AUTO, `CONF?` "VOLT +6,+1E-04", method A (STAT? meth 0), `VOLT:COUP?` DC,
+  READ? 1.00052 V, generator `OUTP?` 0, `SYST:ERR?` "No error". `DBG:BOOT?` NORMAL, crash count 0, CLEAN, VALID,
+  HEALTHY. Settings not touched; nothing written to the meter's disk.
+- **Calibrator:** 1 V DC, enabled.

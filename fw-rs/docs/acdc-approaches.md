@@ -1318,3 +1318,158 @@ Reading the logs (gsrc / gdis / slope / pp per level):
 
 Decision rule (10.4 / 10.7) unchanged: C becomes the default when e8s (all four) / e8up and e5 pass with e2 / e9 / e10
 as in 10.8; the owner decides.
+
+
+### 10.14 After the f42a09e retest: the bias test and the LPF creep's lag (2026-10-23, branch acdc-bias; device: 10.15)
+
+Method A stays the default. Commits d0baca5, b94bfb8 (fw-rs), 7c0de2d (emulator).
+
+**1. The data (device f42a09e; `tools/acdcmeth.py --trace`: STAT? at ~10 Hz per level).** The 10.13 miss was
+a 6 V internal zero judged biased (gsrc 3, gdis +8.95 codes at 3 V). gdis is the two-point gain against the
+internal zero's, in codes at the new point. Collected: e8up and 6 x (`dm40dbg.py reset`, e8s) on 2026-10-23
+12:35-12:53, plus the four e8s of 10.13 (the log of device-check "ad97fd7 / c8c2f02 / f42a09e" 5):
+
+| gdis against the internal zero's gain | n | values (codes) | sign |
+|---|---|---|---|
+| 6 V, 3 V level (5 -> 3 V, 41.6 k step, span 41.6 k) | 10 | +4.0 +6.5 **+9.0** +5.6 / +7.6 **+13.0** +7.6 +3.9 +5.1 +8.0 | 10 of 10 positive |
+| 6 V, 1 V level (3 -> 1 V, span 83 k to the 5 V entry) | 8 | **+9.7** -0.9 -0.1 / +2.8 +0.7 +3.3 +3.6 +2.0 | 6 of 8; the 2 negative within 1 code |
+| 60 V, 12 V level (24 -> 12 V, span 24.7 k) and 5 V | 12 | -8.6 -5.2 -10.0 -9.3 / -2.5 -3.4 -10.1 -6.5 -9.0 -9.3; 5 V -2.5 -6.9 | 12 of 12 negative |
+
+Bold: judged biased (gsrc 3) by the 10.12 rule. The rule is 3 x the window's residual rms + |slope| x 2.5 s,
+at least 2 codes. Residual rms from the trace: 6 V 1.4-2.9 codes (median ~1.9), 60 V 0.7-1.6 (median ~1.0).
+6 V 0 V in today's six e8s: +0.13 / +0.04 / +0.02 / +0.08 / +0.21 / +0.06 mV. All six pass, including run 2,
+which took the false gsrc 3 (+13.0) and then a 5 -> 1 V two-point gain. 10.13's -0.59 mV is the same path
+landing worse.
+
+**It is not noise.** On 6 V, gdis is one-signed: every value beyond +-1 code is positive. The trace explains
+why. Before the reference, the 3 V level's LPF reads 3..12 codes above the line the 3 V DC V reading puts it on,
+and it is flat (window slope < 1 code / s). After the reference it is lower (device-check doc "acdc-bias" 1).
+This is the creep's lag toward the level before: the new point sits too close to the old level, so the two-point
+gain comes out too large. That happens on a step down or up alike, whenever the farther reference point lies
+beyond the level before, which is the case in every e8 variant. On 60 V the biased AGND zero (10.8) has the
+opposite sign on this unit, so its gdis is negative (the lag only makes it smaller).
+
+**The three options given, on this data.** All three fail:
+* "the same sign across 2 references": on 6 V the 3 V and 1 V references are both positive in every session
+  where both are beyond 1 code. It would have confirmed sessions 1 and 3 of 10.13 and run 2 here.
+* "require the biased judgement to repeat": the same problem. A systematic lag repeats.
+* "scale the threshold by the measured LPF noise": it already is (3 x the residual rms). A one-signed offset of
+  +4..+13 codes against an rms of ~1.9 is not a noise problem. A k large enough to pass +13 (k ~6) would also
+  miss most of the 60 V cases (|gdis| 2.5-10 against rms ~1).
+
+**2. The rule taken: a creep allowance on the lag side only (`acdcm.rs` am_cal_step, CREEP_K).**
+* The LPF level before the input step is `prevl`. It is the newest result of a window that was steady for
+  >= PREV_N = 10 results when the jump restarted it, or the new point of a second reference (b94bfb8). It is
+  invalid after a range change or an AC+DC entry.
+* At the reference, `pstep` = new point - prevl.
+* The lag side is where gdis x pstep x (new point - p) > 0, p being the paired reference point. There the
+  threshold is the 10.12 noise term + CREEP_K x |pstep|, with CREEP_K = 4e-4 codes per code of step: 16.6
+  codes at 6 V's 41.6 k step, and 9.9 at 60 V's 24.7 k.
+* On the other side, the noise term alone (unchanged).
+* CREEP_K: the largest lag-side gdis seen is +13.0 at 41.6 k (3.1e-4). 4e-4 carries it without the noise term.
+  The threshold on 6 V came out at 22.9-25.5 codes on the device (10.15), against lag-side gdis up to +12.8.
+* Why this and not "negative only": the lag's sign follows from the geometry of the step and the points, not
+  from this unit. A unit whose AGND zero is biased the other way still has its bias caught on the
+  non-lag side.
+* **The cost:** a zero biased in the lag's direction on a given step is caught only when it exceeds
+  noise + CREEP_K x step: ~25 codes on 6 V for 41.6 k, ~13 on 60 V for 24.7 k. Below that, C keeps the internal
+  zero's gain, as before 10.9. A two-point gain over a span >= the one in use replaces it unconditionally, as
+  before; the lag inflates it by ~gdis / span (e.g. 8 / 104 k on 6 V `up`: ~0.4 mV at 5 V, inside the rule).
+* Not explained: at the same 41.6 k step the 1 V level's gdis (~+2.5 median) is smaller than the 3 V level's
+  (~+7). A pure "lag proportional to the step" model predicts equal values. The allowance is an upper bound, so
+  the rule does not depend on this, but the mechanism is not pinned down.
+* STAT? appends four fields: psig (the window's residual rms), bthr (the threshold gdis was held to), pslope,
+  pstep. They describe the last attempt. `acdcmeth.py --trace` logs STAT? per level.
+
+**3. Emulator (HY3131.cs, both copies; 7c0de2d).** The creep is now three cascaded 2.5 s lags (`creepord:3`,
+the default). Two lags left only ~3 codes at the ~5.6 s reference with the slope below 1 code / s; three are
+flat for the first seconds and leave ~6 codes (+10 / +9.2 / +6.1 / +3.8 / +1.4 codes at 0 / 2.5 / 5.6 / 8 / 12 s
+after the 41.6 k step). The LPF noise is per range: 6 V 1.7, 60 V 1.0 codes rms (`LpfDcNoiseR`; "lpfn:" scales
+the 6 V value). The host test of the creep expects the order-3 value (7.8 codes; got 8). Reproduction on the
+new model, 6d488dc (= f42a09e's firmware):
+* `--e8 down`: 6 V 3 V gsrc 3 (gdis +6.1), then a 5 -> 1 V gain (gsrc 2, -7.8).
+* `--e8 tc6`: gsrc 3 at +8.2 (`creepord:3`) and +9.9 (`creeptau:3`) in the trial runs; +8.0 not taken in a later run.
+
+The 0 V error stays inside 0.5 mV in the model (-0.13 mV). The device's -0.59 mV is not reproduced in
+magnitude, only the false judgement.
+
+| emulator, C DC part - source (mV, late window) | 60 V 12 / 5 / 1 / 0 V | 6 V 3 / 1 / 0 V | 6 V gain |
+|---|---|---|---|
+| 6d488dc `down` | -0.71 / -1.22 / -1.73 / -2.44 | +0.04 / -0.17 / -0.13 | **gsrc 3 at 3 V** (+6.1), gsrc 2 at 1 V |
+| b94bfb8 `down` | -0.86 / -0.45 / +0.09 / -0.69 | +0.13 / -0.08 / -0.21 | iz kept (gdis +7.2, +6.8) |
+| b94bfb8 `tc6` | | +0.01 / +0.04 / -0.02 (0.1 V) | iz kept (+7.2) |
+| b94bfb8 `up` | +0.55 / -1.71 (5 V) / ... / +0.39 (24 V) | 6 V 0 V +0.31 | |
+
+60 V in `down` on b94bfb8: gsrc 3 at 5 V (gdis -7.4, the non-lag side), 0 V -0.69 mV. With the
+larger creep, the 12 V level's gdis is only -2.2..-4.4 in the model (device -5..-12), so the model often catches
+the bias one level later.
+
+Final runs on b94bfb8 with the 7c0de2d model (ports 34000-34999):
+* acdcmethtest A / B / C / B~ RESULT OK; `--e8 down` / `up` / `tc6` OK.
+* couptest `v` `i` `tap` `band` `sq5` `sqtie` OK with `--meth C`. With `A` and `B` they were OK on d0baca5,
+  whose A / B paths are the same code.
+* autorangetest PASS; dcvtest PASS; modetest `--fast -f fwrs` 18 / 18.
+* senttest 57 / 57 alone. The parallel run hit its 40 min timeout at 55 / 55 under load.
+* powtest 28 / 29 in the parallel run (`ereset`, the known flake of 10.9 / 10.12); `ereset` OK alone.
+* Emulator host tests 501; every fw-rs/tools/*/run.sh OK (font-matrix identical to 6d488dc, 178 360 cases).
+
+Cost against 6d488dc: region B 57 756 -> 57 668 B free, region C 16 976 -> 16 920 B, SRAM 53 092 -> 53 076 B,
+static stack headroom 21 400 B (unchanged).
+
+
+### 10.15 Device results of 10.14 (d0baca5 full set, b94bfb8 confirmation; 2026-10-23 13:05-13:50, device-check doc "acdc-bias")
+
+Run in the 10.13 order: reset, e8up; 6 x (reset, e8s), all with `--trace`; e8; e5 `--minutes 3`; e11 e10 e9. The
+b94bfb8 confirmation was reset, e8up, then 3 x (reset, e8s). Errors are C's DC part minus READ? of the DC V
+function on the same manual range. Rule: 0.05 % + 5 digits.
+
+| test | rule (mV) | d0baca5 | b94bfb8 |
+|---|---|---|---|
+| e8up 60 V 0 / 1 / 5 / 12 / 24 V | 5.0 / 5.5 / 7.5 / 11 / 17 | -0.63 / +1.83 / +2.95 / -1.13 / +1.35 | +0.90 / +1.66 / +0.55 / +0.02 / +1.19 |
+| e8s 60 V 1 / 0 V (x6; x3) | 5.5 / 5.0 | -0.25..+0.80 / +0.03..+1.78 | -0.29..+1.06 / +0.46..+1.00 |
+| e8s 60 V gain | | gsrc 3 at 12 V in 6 of 6 (gdis -5.2..-12.0, bthr 2.8-4.3), then gsrc 2 at 5 V | gsrc 3 at 12 V 2 of 3 (-9.4, -11.3); once at 5 V (12 V -3.3 < bthr 5.6; 5 V -11.8 > 7.3) |
+| e8s 6 V 5 / 3 / 1 / 0 V | 3.0 / 2.0 / 1.0 / 0.5 | 0 V **+0.07 / -0.09 / +0.02 / -0.01 / +0.06 / -0.34** | 0 V **-0.14 / +0.09 / +0.02**; 3 V -0.58..+0.08 |
+| e8s 6 V gain | | gsrc 1 at every level in 6 of 6; lag-side gdis +1.2..+12.8, bthr 22.9-40.3 | gsrc 1 in 3 of 3; gdis +3.0..**+16.2**, bthr 21.7-26.7 |
+| e8 (1 s per level, gains kept) | as e8s | 60 V -1.04..+2.71; 6 V +0.29..+0.80 (0 V +0.29) | not run |
+| e8kept 5 V on 60 V | 7.5 | +1.15 / -1.01 / -0.86 / -0.11 / +0.44 / +0.66 / +1.34 | +0.16 / +0.56 / +0.29 |
+| e5 24 V / 60 V; 3 V / 6 V | 17 / 2.0 | -0.05..+1.88; -0.49..+0.27 | not run |
+| e11 AUTO on the square, A / C x 3 | DC, <= 1 change | DC in all 6, 0 changes | not run |
+| e10 square / 5.0 / 5.5 / 4.5 V | | AUTO,DC; -0.19 / -0.01 / -0.38 mV, one range, 9.3-9.4 rd/s | not run |
+| e9 4.0 / 4.5 / 5.0 / 5.5 V | | +0.11 / +0.25 / -0.10 / -0.06 mV, one range, 9.3 rd/s, acsrc 0 | not run |
+
+* The 6 V internal zero's gain was kept in all 9 e8s sessions.
+* The largest lag-side gdis is now +16.2 codes (b94bfb8 run 2, 3 V), against bthr 24.6. CREEP_K x step alone is
+  16.6, so the margin over the largest value seen is ~8 codes, i.e. 3 sigma at 6 V. If later data shows lag-side
+  values above ~20, raise CREEP_K, not the noise term.
+* d0baca5's 83 k pstep (e8s run 2, 1 V: bthr 40.3) is the late-reference case that b94bfb8 fixes. In b94bfb8's
+  runs every 1 V pstep is 41.2-41.6 k.
+
+**Verdict: method C meets the decision rule (10.4 / 10.7 / 10.13) on this unit.**
+* DC within 0.05 % + 5 digits at every level and in every e8s run: 9 of 9 sessions, both images.
+* e8up, e8 and e5 pass.
+* The AC part is within spec: e9 / e10 AC part 0.24-0.35 mV on DC (bound 30 mV); e11 / e10 as 10.8 / 10.11.
+* Nothing in this change touches the A path or the AC part.
+
+**The owner's decision (2026-10-23): method A stays the AC+DC default** until C has been checked on the
+A / mA / µA ranges with real current (TODO, plan in 10.16).
+
+### 10.16 Plan: method C with real current (A / mA / µA)
+
+C's A path (`acdcm.rs`, the C A entry reference: an offset, and a gain from C_A_GAIN x full scale) has been run
+only in the emulator (acdcmethtest's A phases, couptest `i`). The calibrator has no current output, so this needs:
+* a bench supply in CC (or CV with a series resistor);
+* a load: a power resistor for A, a resistor decade for mA / µA;
+* a second meter in series as the reference.
+For a mixed signal, a transformer secondary or a function generator with a buffer, plus a DC bias through the
+load.
+
+| step | ranges | what | pass |
+|---|---|---|---|
+| i8 (e8-style) | 10 A / 600 mA / 60 mA / 6 mA / 600 µA (manual) | C entered at the top level, then 100 / 50 / 20 / 5 / 0 % of the range's full scale without leaving, 4 s + 3 s mean per level. Each level's DC A READ? from the meter itself first; the second meter logged throughout | DC part within the DC A spec of READ? at every level; the gain judgement (STAT? gsrc / gdis) logged as e8s; the shunt's self-heating on 10 A (> 5 A: record the drift over 60 s) |
+| i8up | the same | entered at 0, stepped up | as i8 |
+| imix | 600 mA, 60 mA | DC 50 % + 50 Hz AC 20 % of full scale (a transformer through a resistor, DC from the supply through the same load) | DC part as i8; AC part within the AC A spec of the second meter's AC reading; total = hypot |
+| iauto | each range | CURR:COUP AUTO on DC, AC and the mix | as e11 / e10: DC on DC, AC on AC, the larger part on the mix, at most one change |
+| ie5 | 600 mA at 50 % | C re-entered every 60 s for 5 min | DC part drift within the spec |
+
+Scripts: a `tools/acdcmeth.py` variant with the supply's and the second meter's SCPI in place of the calibrator
+(the MR9270 calls are the only source-specific code). Run i8 first after a power-on, as e8up.
