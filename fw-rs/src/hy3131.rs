@@ -1116,7 +1116,7 @@ pub const fn ad2_rate_mhz(r26: u8) -> u32 {
 /// 4c4b489 / bab5dd4 builds streamed at; device e7ec2cc (device-check
 /// 2026-10-21 "e7ec2cc: the 76.8 kS/s PLL retest") showed that rate came
 /// from the old loop, not the chip: with the fixed loop (ad2pll.rs) the
-/// stream locks at rate_mhz 76 800 0xx from a cold start (ppm_x10 -2935
+/// stream locks at rate_mhz 76 800 0xx from a cold start (-2935 ppm
 /// against 76 574.6), gap-free disk data has 1919.95 samples per 40 Hz
 /// calibrator period (bab5dd4: 1914.27) and the Wave view's record 960 per
 /// half period, so 76 574.6 made every 76800 time axis 0.29 % long.

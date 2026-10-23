@@ -1331,7 +1331,22 @@ Firmware:
 - [ ] 4800 disk session on device 4c4b489: max_lat 4.66 us at calbackup::FwFile::fill (region C: the info
       volume's FIRMWARE.BIN read by a host during the session). No sample lost at
       4800; at 76800 a host reading INFO/FIRMWARE.BIN would likely stall the ISR as range_cmd did.
-- [ ] 76800 stream / rate (fix landed, device retest open). Device 7409b92 / 4c4b489: rate_mhz 76 723.4-.8 =
+- [ ] 76800 stream / rate (loop fix PASSED on device e7ec2cc; its nominal was wrong, fixed in ee28b71, device
+      check open). **Device e7ec2cc (device-check-2026-10-21.md "e7ec2cc: the 76.8 kS/s PLL retest"):** the
+      loop locks from a cold start within 5 s at rate_mhz 76 800 0xx = ppm_x10 -29 35x (-2935 ppm) against the 76 574.6
+      nominal, 1.125 ISR entries per sample (was 1.478), cpu 455-457 permille, probes / captured 0.063,
+      edges_after_b / probes 0.50, late / bad / overruns / slips 0, the transition-sample scatter 0.41-0.62 us
+      rms (was 3.0-3.45), disk 76800 lost_before 0 with ring high water 52 (was ~1050). The rate is the
+      datasheet's: gap-free disk data 1919.95 samples per 40 Hz calibrator period (bab5dd4: 1914.27), the
+      Wave view's record 960 per half period. **So the "real rate 76 574.6" below was the old loop's doing,
+      not the chip's** (a slower chip under that read pattern or skipped conversions: not separated), and
+      e7ec2cc's nominal made LOG:PRE? / the DLG and CSV headers / the Wave view 0.29 % off (39.88 Hz for the
+      40 Hz square). ee28b71: AD2_OSR32_REAL_MHZ = ad2_rate_mhz(0), emulator Ad2Osr32Ppm default 0; the loop
+      and MAX_PPM 5000 stay (owner: keep 5000?). Device check of ee28b71: a fresh-boot 76800 host drain locks
+      near ppm_x10 0 (as 38400: -2..-16), entries ~1.125; LOG:PRE? nominal_mhz 76 799 016; ACQ:SRAT? 76799 and
+      the 1 ms/div record's 40 Hz square at 40.00 Hz from WAV:PRE? xinc; the DLG header nominal 76 799.016.
+      The history as investigated before the retest (its premise is wrong, see above):
+      Device 7409b92 / 4c4b489: rate_mhz 76 723.4-.8 =
       the Pll's +1000 ppm clamp in every 76800 session, 1.476 / 1.478 ISR entries per sample, cpu_permille
       544-548; the record stamps 76 574.5 / 76 574.4-.9 S/s, LOG:PRE? measured_hz 76 574. Investigated
       2026-10-23 (docs/dmm-input-scope-feasibility.md 11.12 "The 76.8 kS/s rung's rate and the lopsided
@@ -1368,7 +1383,17 @@ Firmware:
       - Emulator (--mips 110 --isr-stall-ns 700): see the feasibility doc's table; start-of-session walks
         (the edge search's error, max run ~45, a slip or two) remain as in the old build but no longer
         drag the word.
-      Device retest: the hand-over list.
+      Device retest: done on e7ec2cc (above).
+- [ ] Wave view at 76800, 1 ms/div (device e7ec2cc): late 1, DBG:ISR? max_lat 6.16 us at lat_pc
+      `scope_wav::query` (region C), with ACQ:SRAT? / SCOP:MEAS:FREQ? / VPP? polled every 5 s (bab5dd4's
+      p5.py polled only DBG:ISR? / LOG:COUNt?: 280 ns). The range_cmd pattern: the SCOPe / ACQuire query path
+      fetches from C while the stream runs. Also: SCOP:MEAS:FREQ? answers 0 (screen "Freq: --") at 1 and
+      2 ms/div on a 40 Hz signal (less than one period on the 10 / 20 ms screen), so the Wave view cannot
+      show a 76800 frequency below ~100 Hz; the record (WAV:POIN MAX, 348 ms) would have the periods.
+- [ ] dm40scpi.py `log` stopped by SIGINT mid-drain (device e7ec2cc): afterwards every USBTMC query read
+      returned empty (new processes too) until a USBTMC INITIATE_CLEAR (ioctl USBTMC_IOCTL_CLEAR); the
+      logger itself had stopped (LOG:STAT? 0). A pending bulk-IN reply left half read; the tool could catch
+      SIGINT and clear, and dm40dbg.Link could clear on an empty read.
 - [ ] emu/hy3131/dcvtest.py fails on 4c4b489 and later (found 2026-10-23, not caused by the 76.8 kS/s Pll
       change: the same with the old model): LOG:SCALe? per-code 4.767e-05 / 4.812e-04 against the model's
       4.721e-05 / 4.721e-04 (+0.97 / +1.9 %, the check allows 0.3 %). modetest's stock cap-big (100 uF reads
