@@ -42,6 +42,14 @@ calibrator gives: DC up to 30 V and its small 40 Hz square (tools/mr9270.py,
       entered at 0 V and stepped up 0 / 1 / 5 / 12 / 24 V, 4 s per level
       (the gain from two references from the first step >= 10 k codes on);
       run it first after a power-on (the gain is kept per range until then).
+      e8l / e8upl: e8s / e8up with 10 s per level (since 10.12 C waits for
+      the LPF to stop creeping before its second reference: ~4..8 s after a
+      step, so e8s's 4 s may end a level before it). STAT? gsrc (0 table, 1
+      internal zero, 2 two refs, 3 two refs over a biased zero), gdis (the
+      last two-ref gain vs the one in use over its span, codes), slope.
+  tc6 the c6f9670 6 V failure as a time course: entered at 5 V on 6 V, step
+      to 3 V, STAT? at ~10 Hz for 15 s, then C vs READ? at 3 / 1 / 0 V (10 s
+      per level). Run after a power cycle or `dm40dbg.py reset`.
   e9  the >= 5 V DC fault of 7409b92 (6 V range, AUTO range): C in AC+DC at
       4.0 / 4.5 / 5.0 / 5.5 V for 12 s each: range changes, readings / s,
       the AC part (max) and its source (STAT? acsrc: 0 RMS, 1 the peak
@@ -120,7 +128,7 @@ class Run:
     def stat(self):
         f = self.q('DBG:ACDC:STAT?').split(',')
         k = ['meth', 'step', 'mode', 'range', 'ac', 'dc', 'n_ac', 'n_dc', 'n_rd', 'hz', 'corr', 'pc', 'off', 'lpf', 'sq',
-             'pp', 'acsrc', 'gspan']
+             'pp', 'acsrc', 'gspan', 'gsrc', 'gdis', 'slope']
         return {n: (float(x) if '.' in x or 'E' in x else int(x)) for n, x in zip(k, f)}
 
     def fetch(self):
@@ -334,7 +342,8 @@ def e8(R, order='down', settle=1.0):
             s = R.stat()
             err = p['dc'] - refs[v]
             R.log(exp=exp, item=item, level=v, ref=refs[v], c_dc=p['dc'], err=err, digits=err / digits(item),
-                  ok=abs(err) <= rule(item, refs[v]), pc=p['pc'], off=p['off'], gspan=s.get('gspan', 0), ac=p['ac'])
+                  ok=abs(err) <= rule(item, refs[v]), pc=p['pc'], off=p['off'], gspan=s.get('gspan', 0), ac=p['ac'],
+                  gsrc=s.get('gsrc', -1), gdis=s.get('gdis', 0), slope=s.get('slope', 0))
     if order == 'up':
         return
     # the gain kept over sessions: re-entered at 5 V on 60 V (a span < 10 k codes)
@@ -345,6 +354,38 @@ def e8(R, order='down', settle=1.0):
     s = R.stat()
     R.log(exp='e8kept', item=2, level=5.0, ref=ref, c_dc=p['dc'], err=p['dc'] - ref, ok=abs(p['dc'] - ref) <= rule(2, ref),
           pc=p['pc'], gspan=s.get('gspan', 0))
+
+
+def tc6(R, lo=3.0, secs=15.0):
+    """c6f9670's 6 V failure as a time course: C entered on manual 6 V at
+    5 V, stepped to `lo`, STAT? at ~10 Hz for `secs` (step, LPF, gain, its
+    source, the window's slope), then C vs READ? at lo / 1 / 0 V (READ?
+    right after each C mean). Run after a power cycle / `dm40dbg.py reset`."""
+    R.src_dc(5.0)
+    ref5 = R.dcv_ref(1, n=5)
+    R.enter('C', 1)
+    s0 = R.stat()
+    R.log(exp='tc6', phase='entered', ref=ref5, **{k: s0.get(k) for k in ('step', 'lpf', 'pc', 'off', 'gspan', 'gsrc', 'dc')})
+    t0 = time.time()
+    if R.cal:
+        R.cal.set_output('voltage', lo, enable=True)
+    tc = []
+    while time.time() - t0 < secs:
+        s = R.stat()
+        tc.append([round(time.time() - t0, 2)] + [s.get(k) for k in ('step', 'lpf', 'pc', 'off', 'gspan', 'gsrc', 'gdis', 'slope', 'dc')])
+        time.sleep(0.08)
+    R.log(exp='tc6trace', lo=lo, cols='t step lpf pc off gspan gsrc gdis slope dc', trace=tc)
+    for v in (lo, 1.0, 0.0):
+        if v != lo:
+            R.src_dc(v)
+            time.sleep(10.0)
+        p = R.mean_parts(3.0)
+        s = R.stat()
+        ref = R.dcv_ref(1, n=5)
+        R.log(exp='tc6', level=v, c_dc=p['dc'], ref_after=ref, err=p['dc'] - ref, ok=abs(p['dc'] - ref) <= rule(1, ref),
+              pc=s['pc'], off=s['off'], gspan=s.get('gspan'), gsrc=s.get('gsrc'), gdis=s.get('gdis'))
+        if v != 0.0:
+            R.enter('C', 1)  # back in C after the READ? (the gain kept)
 
 
 def watch(R, secs):
@@ -432,7 +473,7 @@ def e11(R, entries=3, secs=15.0):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0], formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
-    ap.add_argument('exps', nargs='+', help='e1 e2 e3 e4 e5 e6 e7 e8 e8s e8up e9 e10 e11')
+    ap.add_argument('exps', nargs='+', help='e1 e2 e3 e4 e5 e6 e7 e8 e8s e8l e8up e8upl tc6 e9 e10 e11')
     ap.add_argument('--usbip', metavar='BUSID', help="the emulator's USB/IP server")
     ap.add_argument('--cal', default='/dev/ttyACM1')
     ap.add_argument('--no-cal', action='store_true')
@@ -450,7 +491,8 @@ def main():
                       '40 Hz is an AD1 notch): skipped' % e, flush=True)
                 continue
             {'e1': e1, 'e2': e2, 'e5': e5, 'e6': e6, 'e7': e7, 'e8': e8, 'e8up': lambda R: e8(R, 'up', 4.0),
-             'e8s': lambda R: e8(R, 'down', 4.0), 'e9': e9, 'e10': e10, 'e11': e11}[e](R)
+             'e8s': lambda R: e8(R, 'down', 4.0), 'e8l': lambda R: e8(R, 'down', 10.0),
+             'e8upl': lambda R: e8(R, 'up', 10.0), 'tc6': tc6, 'e9': e9, 'e10': e10, 'e11': e11}[e](R)
     finally:
         R.close()
 

@@ -499,11 +499,16 @@ pub enum Log {
 ///                           the stock alternation; a change restarts AC+DC)
 ///   DBG:ACDC:STAT?          meth,step,mode,range,ac,dc,n_ac,n_dc,n_rd,hz,corr,
 ///                           c_per_code,c_offset,lpf_codes,sqrt_rms_codes,
-///                           pk_pp_codes,ac_src,gain_span_codes (step 0 the
-///                           stock DC row, 1 meas, 2 run, 3 C V's zero; C V:
-///                           the anchor's per_code / offset, AD2's peak p-p,
-///                           the AC part from 0 the RMS / 1 the peak bound / 2
-///                           none, the gain's span, 0 = the table's)
+///                           pk_pp_codes,ac_src,gain_span_codes,gain_src,
+///                           gain_dis_codes,lpf_slope (step 0 the stock DC
+///                           row, 1 meas, 2 run, 3 C V's zero; C V: the
+///                           anchor's per_code / offset, AD2's peak p-p, the
+///                           AC part from 0 the RMS / 1 the peak bound / 2
+///                           none, the gain's span, 0 = the table's; its
+///                           source 0 table / 1 internal zero / 2 two refs /
+///                           3 two refs over a biased zero; the last two-ref
+///                           gain vs the one in use over its span, codes; the
+///                           steady window's LPF slope, codes / s)
 ///   DBG:ACDC:ZERO k,v|AUTO / ?  fix slot k's correction (0..3 V ranges, 4..9 A
 ///                           unit*2+range; B zero, C A offset) / measure again;
 ///                           ? = valid,fixed;c0..c9
