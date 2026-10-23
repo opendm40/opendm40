@@ -2594,3 +2594,82 @@ Emulator (emu/):
       FAST -> MED -> SLOW -> FAST -> MED; value tap (2.5 s apart) MED -> SLOW -> FAST -> MED -> SLOW and
       SLOW -> FAST -> MED -> SLOW -> FAST (RATE?). A second value tap 1 s after the first did nothing
       (SLOW -> FAST -> FAST -> MED); the chip at 1 s did not skip. Cosmetic, not chased.
+
+## False AC? / A-JACK / A-PROT / V-JACK? after switches (owner 2026-10-23, on ad74e93 / 35fce2a)
+
+- [x] Emulator, branch falsehint (0e8085c, bd6824a, 807ed14). Tool: emu/hy3131/switchtest.py (~60
+      switches per connection over SCPI and the MF -> Wave view; every assertion is checked through the new
+      DBG:SENTinel:LOG?, so short transients are caught too; real-* scenarios time real alerts after a
+      switch in). The plain model shows no false alert on the old code (no front-end transients).
+      Two opt-in model knobs reproduce the failures: `ohmexit:3.5;ohmexitlo:1.2`, which replays the
+      device trace below, and `swtr:300;swtau:50`, a HYPOTHETICAL ring of PB1 / the V taps after each row
+      change (shape not from the device).
+      **Device ad74e93 (nothing connected, all 42 SCPI pairs, AUTO, taps, Wave):** only RES -> A / mA
+      gives a false alert, V-JACK? from 1.5-1.95 s to ~5 s. CMP_SENSE CTSTA reads 0x70 (CMPHO + CMPLO
+      in one read) for ~3.5 s, then 0x50, then 0. Old code + ohmexit: 6 false V-JACK? in 24 steps,
+      including AUTO / AC+DC A. Old code + swtr: A-JACK on entries to V AC+DC / V AUTO and to diode.
+      Causes:
+      1. RES exit: the A rows' comparator on SENSE reads both bits at once for seconds. That cannot be
+         a node voltage (above VRH and below VRL together); the comparator or its references are still
+         settling. Why it lasts 3.5 s is not known (the netlist is unknown). The stock does nothing
+         special on the exit: R26 / R34 / R36 = 0, relays, the row (hy3131_v2_6.h). Device experiment
+         below.
+      2. The peak hold (AD1 in AC V / AC mV / AC A, AD2 in continuity / diode / cap) runs from the row
+         write. Its first harvest held the whole settle; diode (100 ms settle) took two such windows.
+      3. AC+DC / AUTO sample the comparator through the phase settles, from right after the PA relay
+         pulse of every phase.
+      4. The first comparator window after a settle closed on one sample. The hit run survived a range
+         change and dmm.start (Wave view exit, logger, wake).
+      5. Hints: one "both" window in every <1 s span kept the 2 s count going. The device also showed
+         AC? on 5 V DC and on the 0..9.5 V square (device-check "False A-JACK in Hz", "6. The lost first
+         V tap").
+      Fix (sentinel.rs, dmm.rs):
+      - V-JACK? after an ohm exit: for 8 s (OHM_EXIT_CAP_MS) a 0x70 read is no hit. A CMPLO-only read is
+        no hit within 2.5 s (OHM_EXIT_TAIL_MS) of the exit or of the last 0x70 read. A CMPHO read
+        (positive or AC source) counts at once, so a real source keeps its ~2 s timing unless the
+        comparator itself reads 0x70 meanwhile; a negative DC source waits for the tail.
+      - Row write: no comparator / peak sample for 150 ms (BLANK_ROW_MS).
+      - Settle end: the hold is cleared and samples wait 100 ms more (BLANK_SETTLED_MS); the first
+        window is a whole one. In AC+DC the hold restarts at 150 ms and the comparator keeps running,
+        so A-JACK / V-JACK? bridge the phases. An empty hold is no window.
+      - Dmm::set restarts the hit run (an alert in force stays). dmm.start starts the history over.
+        The A-jack probe's in / out rewrites skip the blank.
+      - Hints (AC?, DC?, the power meter's) need the condition in every window for the 2 s. AC? counts
+        a V-tap window only with |DC V| < 2 V (AC_HINT_DC_MAX), after the row's first reading, and never
+        a read with both bits.
+      A-PROT's rule (aprot_trips, the probe, the latch) is unchanged.
+      Latency after a switch into the function with the condition present (switchtest, old -> new):
+
+      | alert | old | new |
+      |---|---|---|
+      | A-JACK, DC V | 0.59 s | 0.79 s |
+      | A-JACK, AC V | 0.64 s | 0.86 s |
+      | A-JACK, continuity | 0.31 s | 0.41 s |
+      | AC? | 2.56 s | 2.76-2.98 s |
+      | DC? | 2.67 / 3.32 s | 2.88 / 3.32 s |
+      | V-JACK? | 1.75-2.17 s | 1.96-2.32 s |
+      | V-JACK? after RES, with the model's 0x70 replay | n/a | 5.6 s |
+
+      A fault that starts after the switch is detected exactly as before.
+      Tests on the final tree: switchtest (all scenarios), senttest 61/61, autorangetest, couptest,
+      powtest, acdcmethtest, flowtest, meter-test (switch_blank_rules), the model's unit tests.
+      Not changed (owner decision pending): RES with 5 V on V-COM reads OL, not negative, so V_GATE says
+      "free" and A-JACK shows (35fce2a item 5). That is a steady state, and the blanks do not touch it.
+- [ ] Device retest (falsehint image), alerts ON, A jack open unless stated:
+      1. Nothing connected, then the calibrator at 1 V and 5 V DC on V-COM: 20+ switches through DC V,
+         AC V, AC+DC, AUTO, A / mA / uA, ohm, diode, continuity, cap, Hz, temp, W, and MF -> Wave -> MENU,
+         with RES -> A / mA / AUTO A several times. Expect no A-JACK / A-PROT, no V-JACK? after RES, and
+         no AC? in DC V. Read DBG:SENT:LOG? after the run: it lists every assertion with its ms. Expected
+         and allowed: DC? in AC V and LIVE? where the source explains it; RES at 5 V is the open item
+         above.
+      2. DC V with 5 V DC and with the 0..9.5 V 40 Hz square: no AC? (before: AC? at 2.6 s). If a
+         symmetric AC source is at hand (>= 0.5 Vpk around 0): AC? within ~3 s.
+      3. 24 V DC on V-COM: RES -> DC A, V-JACK? within ~2.5 s, or after the 0x70 phase if the comparator
+         shows it (log DBG:SENT? ctsta for the first 6 s).
+      4. Leads in A / COM, 1-5 mA through A, switch into DC V / AC V / continuity / ohm: A-JACK within
+         ~1 s. Then 12 V across A-COM in DC V: A-PROT as before (~0.5 s from the onset).
+      5. RES-exit experiment (why 0x70 lasts 3.5 s): RES -> DC V for 1 s -> DC A, and RES -> AC A ->
+         DC A. Does DC A still read 0x70? If a pass through a V row clears it, a fast exit sequence can
+         replace the tail.
+      6. Any remaining false alert: DBG:SENT? for the 2 s after that switch (kind, ctsta, pkmin / pkmax,
+         streak, hits) and DBG:SENT:LOG?. These size BLANK_* / OHM_EXIT_*.

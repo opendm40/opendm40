@@ -1812,7 +1812,16 @@ every alert, never alternating with HOLD):**
   alternates per window between PB1 and SENSE (V / 10, the model's and the
   stock formula's ratio for r0); both CMPHO and CMPLO in one SENSE window =
   the input swings both ways by > 0.21 V around zero; 2 s / 1 s. The first
-  CTSTA after each switch is dropped.
+  CTSTA after each switch is dropped. Since 2026-10-23 (false AC? after
+  switches and on 5 V DC, TODO "False AC? / A-JACK / A-PROT after switches"):
+  a window counts only while the row's DC V reading is below 2 V
+  (AC_HINT_DC_MAX) and none before its first reading; every hint (DC?, AC?,
+  the power meter's) needs the condition in every window for the 2 s. All
+  sentinels: no sample for 150 ms after a row write and 100 ms after its
+  settle, the peak hold cleared at the settle's end (sentinel.rs BLANK_*).
+  V-JACK? after leaving ohm (device ad74e93: CTSTA 0x70 ~3.5 s, then 0x50):
+  a both-bit read never counts, CMPLO alone not within 2.5 s of the exit /
+  the last 0x70 read (OHM_EXIT_*); CMPHO counts at once.
 * **FUSE?** (DC / AC / AC+DC A, not the power meter): 60 s with |I| below 0.1
   % of the range (DC; 60 of 60000 counts) or 5 % (AC, AC+DC: their RMS
   floor), not OL; any reading above clears it at once. It is a question:
