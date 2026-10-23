@@ -1,11 +1,12 @@
 #!/usr/bin/python3
 """Device experiments of docs/acdc-approaches.md section 8 for the AC+DC
 methods A / B / C (src/acdcm.rs, DBG:ACDC:METH), with what the MR9270S+
-calibrator gives: DC up to 30 V and its small 40 Hz square (tools/mr9270.py,
+calibrator gives: DC up to 24 V (mr9270.VOLTAGE_MAX: a 30 V request puts out
+23.99 V) and its small 40 Hz square (tools/mr9270.py,
 'frequency' output). The meter on fw-rs over USB (USBTMC), leads on V / COM.
 
   e1  note 7 / B's zero: per V range (DBG:ACDC:RANG 1..4) at 0 V and the
-      highest level <= 30 V, B entered N times (each entry measures the zero:
+      calibrator's top level (24 V), B entered N times (each entry measures the zero:
       the stock DC V row vs the merged row's AD1): the zero, its spread over
       the repeats and against the level (offset vs gain), and B's DC part vs
       the DC V function (READ?).
@@ -18,13 +19,13 @@ calibrator gives: DC up to 30 V and its small 40 Hz square (tools/mr9270.py,
       40 Hz rows of e2 are the notch control point.
   e4  low-frequency AC part (20 .. 45 Hz): NEEDS A GENERATOR. Skipped.
   e5  C's self-cal over time: C re-entered every --period s for --minutes at
-      the e5 level (default 30 V, 60 V range, and 3 V, 6 V range): per_code,
+      the e5 level (default 24 V, 60 V range, and 3 V, 6 V range): per_code,
       offset (DBG:ACDC:STAT?) and C's DC part vs READ? of the DC V function;
       drift in ppm against the first entry (warm the meter meanwhile:
       backlight on, charger).
   e6  entry and range change: from DC V into AC+DC per method: time to the
       first reading and to within 0.1 % + 2 digits of the final value
-      (FETCh? polled); then 3 V -> 30 V (6 V -> 60 V autorange) and back:
+      (FETCh? polled); then 3 V -> 24 V (6 V -> 60 V autorange) and back:
       the settle times; the reading rate (n_rd / s).
   e7  B's 6 V row: DBG:ACDC:R0 1 (AD1 SENSE - PB5, the 60 V calibration)
       vs 2 (OP1O - RLU after x10) at 1 / 3 / 5 V: B's DC part (zero applied)
@@ -83,14 +84,17 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-VMAX = 30.0
+# The calibrator's top DC level (tools/mr9270.py VOLTAGE_MAX; not imported
+# from there: mr9270 needs pymodbus, --no-cal runs do not). Before
+# 2026-10-23 the levels said 30 V, but the calibrator put out 23.99 V.
+VMAX = 24.0
 # DBG:ACDC:STAT? fields after `slope` (since 10.14: the last second-reference
 # attempt's residual rms, bias threshold, slope, step into the level)
 STAT_X = ('psig', 'bthr', 'pslope', 'pstep')
 # columns of the per-level trace (--trace: e8 / e8s / e8l / e8up)
 TR_COLS = ('step', 'lpf', 'pc', 'off', 'gspan', 'gsrc', 'gdis', 'slope', 'pp', 'dc') + STAT_X
 FULL = {1: 6.0, 2: 60.0, 3: 600.0, 4: 1000.0}
-E1_LEVELS = {1: [0.0, 3.0], 2: [0.0, 30.0], 3: [0.0, 30.0], 4: [0.0, 30.0]}
+E1_LEVELS = {1: [0.0, 3.0], 2: [0.0, VMAX], 3: [0.0, VMAX], 4: [0.0, VMAX]}
 
 
 class Run:
@@ -242,7 +246,7 @@ def e2(R):
 
 
 def e5(R):
-    for item, v in ((2, 30.0), (1, 3.0)):
+    for item, v in ((2, VMAX), (1, 3.0)):
         R.src_dc(v)
         t_end = time.time() + R.a.minutes * 60
         first = None
@@ -274,7 +278,7 @@ def settle_time(R, final_tol, secs=12.0, t0=None, n0=None):
         xs.append((t, v))
     fin = [v for _, v in xs[-10:] if not math.isnan(v)]
     if not fin:
-        return float('nan'), float('nan'), float('nan')
+        return float('nan'), float('nan'), float('nan'), float('nan')
     f = sum(fin) / len(fin)
     tol = final_tol(f)
     st = float('nan')
@@ -304,7 +308,7 @@ def e6(R):
         s1 = R.stat()
         R.log(exp='e6', meth=meth, step='entry 3V', first_s=first, settle_s=st, value=f, fetch_changes=rate,
               n_rd_rate=(s1['n_rd'] - s0['n_rd']) / 3.0)
-        for v in (30.0, 3.0):
+        for v in (VMAX, 3.0):
             t0 = time.time()
             if R.cal:
                 R.cal.set_output('voltage', v, enable=True)

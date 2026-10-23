@@ -31,7 +31,8 @@ reference). Raw rows go to a CSV.
 
 The meter must be on fw-rs, USB connected (USBTMC), leads on V / COM. The
 range stays manual during the run; at the end CONF:VOLT:DC (AUTO) and the
-calibrator back to 1 V DC, output on. Levels are capped at 30 V.
+calibrator back to 1 V DC, output on. Levels are capped at 24 V (the
+calibrator's real top level, tools/mr9270.py VOLTAGE_MAX).
 """
 import argparse
 import csv
@@ -45,8 +46,8 @@ sys.path.insert(0, HERE)
 
 K = [10.0, 100.0, 1000.0, 10000.0]
 FULL = [6.0, 60.0, 600.0, 1000.0]
-VMAX = 30.0
-POINTS = {0: [0, 0.5, 1, 2, 5, 10], 1: [0, 1, 5, 10, 20, 30], 2: [0, 10, 20, 30], 3: [0, 10, 20, 30]}
+VMAX = 24.0  # the calibrator's top DC level (mr9270.VOLTAGE_MAX; a 30 V request gives 23.99 V)
+POINTS = {0: [0, 0.5, 1, 2, 5, 10], 1: [0, 1, 5, 10, 20, 24], 2: [0, 10, 20, 24], 3: [0, 10, 20, 24]}
 VARIANTS = [0, 1, 4, 8]  # AGND chop off, RLU chop off, AGND 2 kHz chopper, OP2
 
 

@@ -18,7 +18,15 @@ determined read-before-write (verify_dmm.py --probe) and are recorded here.
 
 Needs /usr/bin/python3 (pymodbus 3.8.6 lives there on this host).
 """
+import sys
+
 from pymodbus.client import ModbusSerialClient
+
+# The highest DC voltage the unit really puts out: a "30 V" request gave
+# 23.99 V on the DM40 (acdcmeth.py e1 / e5 / e6, 2026-10-23), and the value
+# register reads back the setpoint, not the output, so a tool cannot see it.
+# set_value caps "voltage" requests here (warning on stderr).
+VOLTAGE_MAX = 24.0
 
 # --- Holding-register map (protocol addresses) -----------------------------
 REG_OUT_FUNC = 0x08     # output function / type, u16
@@ -134,6 +142,11 @@ class MR9270:
         if self._cur is None:
             raise RuntimeError("call set_function() first")
         scale = SCALE[self._cur][2]
+        if self._cur == "voltage" and abs(value) > VOLTAGE_MAX:
+            capped = VOLTAGE_MAX if value > 0 else -VOLTAGE_MAX
+            print("mr9270: %g V requested, the calibrator gives at most %g V: set %g V"
+                  % (value, VOLTAGE_MAX, capped), file=sys.stderr)
+            value = capped
         iv = int(round(value * scale))
         self.write(REG_OUT_VALUE, _from_i32(iv))
         hi, lo = self.read(REG_OUT_VALUE, 2)
