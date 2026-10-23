@@ -703,6 +703,8 @@ pub struct Dmm {
     vet_prev: i32,
     /// The vetting's first conversion may count (`vet_fresh`).
     vet_first: bool,
+    /// The reading of this poll is provisional by G7 only (`acdc_reading`).
+    prov_side: bool,
     /// AC+DC: the first DC result of the run asking for a step down (ms, 0
     /// none; ACDC_DOWN_MS).
     down_t: u64,
@@ -1174,6 +1176,7 @@ impl Dmm {
             vet_held: 0,
             vet_prev: i32::MIN,
             vet_first: false,
+            prov_side: false,
             down_t: 0,
             rd_pending: false,
             cpl_auto: false,
@@ -2936,9 +2939,16 @@ impl Dmm {
             _ if self.t_sensor != 0 => self.poll_rtd(clk, now),
             _ => self.poll_temp(now),
         } };
-        if let Some(p) = r.filter(|p| p.prov) {
+        // G7 (AUTO deciding): a measured value as before, so the sentinel /
+        // OVERLOAD release / watchdog below still see it; only its output
+        // is provisional.
+        let g7 = core::mem::take(&mut self.prov_side);
+        if let Some(p) = r.filter(|p| p.prov && !g7) {
             // Provisional (`Reading::prov`): drawn only; no sentinel, no
             // watchdog, no seq, READ? / FETCh? keep waiting (rd_pending).
+            if self.fuse_job.is_some() {
+                self.fuse_step(clk, now, None);
+            }
             return Some(self.prov_out(p, now));
         }
         if let Some(rd) = &r {
@@ -2983,6 +2993,9 @@ impl Dmm {
             self.fuse_step(clk, now, r.as_ref());
         }
         r.map(|mut r| {
+            if r.prov {
+                return self.prov_out(r, now);
+            }
             self.rd_pending = false;
             self.seq = self.seq.wrapping_add(1);
             r.seq = self.seq;
@@ -3221,6 +3234,11 @@ impl Dmm {
         } else {
             // G2 (a held DC result) / G4 (no AC part yet) / G5 (the AC part
             // settling: its latest result): provisional.
+            if vet && self.cpl_auto {
+                // (as acdc_reading did for every vetted result: AUTO's
+                // part before its first decision, `auto_ac`)
+                self.auto_shows_ac(lim);
+            }
             let ac = if self.acdc_seen & 1 != 0 {
                 self.f_ac
             } else if self.acs_t0 != 0 && self.acs_prev >= 0.0 {
@@ -3344,17 +3362,18 @@ impl Dmm {
         // floor (auto_eval waits for it to settle on one side): provisional.
         let fl = if self.mode <= 3 { AUTO_FLOOR_V } else { AUTO_FLOOR_A };
         rd.prov = self.cpl_auto && self.auto_n == 0 && self.f_ac > fl[0] * lim;
+        self.prov_side = rd.prov;
         rd
     }
 
     /// A provisional AC+DC / AUTO reading (`Reading::prov`) from this AC
     /// result / DC part (`ac` NaN: not measured yet, dashes in its row);
-    /// changes no state. AUTO shows the DC part until it has decided.
+    /// changes no state. AUTO shows the part `auto_ac` names.
     fn acdc_prov(&self, ac: f32, dc: f32, lim: f32, dec: u8, unit: &'static str, si_k: f32) -> Reading {
         let dm = dc_mode_of(self.mode);
         let (v, mode) = if !self.cpl_auto {
             (hypot(if ac.is_nan() { 0.0 } else { ac }, dc), dm)
-        } else if self.auto_n != 0 && self.auto_ac && !ac.is_nan() {
+        } else if self.auto_ac && !ac.is_nan() {
             (ac, ac_mode_of(dm))
         } else {
             (dc, dm)
