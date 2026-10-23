@@ -1750,11 +1750,24 @@ Emulator (emu/):
       (e2): C's 60 V self-cal is ~+11 mV + ~0.05 % off. 6 V passes (max 1.38 of 2.0 mV). B fails e1: the zero
       is bimodal per entry (6 V +12.6 / -30.5 mV, 1000 V +1.9 / -1.5 V), residuals up to 7.5 digits (60 V) and
       16.6 (1000 V). Default left at A (owner's decision).
-- [ ] Method C at >= 5 V DC on the 6 V range (AC+DC and AUTO): the AC part reads 2.11 V (6 V range) / 3.83 V
+- [x] Method C at >= 5 V DC on the 6 V range (AC+DC and AUTO): the AC part reads 2.11 V (6 V range) / 3.83 V
       (60 V range) on a DC input and the range hunts 6 <-> 60 V every ~3 s (~0.7 readings / s; AUTO after the
       square stays on AC, "~4.056 V" for 5 V DC). Fine at 4.0 / 4.5 V. A in the same sequence: PASS.
-- [ ] C's 60 V DC part: +11 mV offset / +0.05 % gain against DC V (above): check the self-cal's 60 V path
+      Fixed in the emulator (acdc-approaches.md §10.6 item 2): not node clipping; the RMS block's HPF transient after each
+      row write plus garbage RMS blocks above ~100 k codes of DC. The AC part is used only when sqrt(RMS) <=
+      half of AD2's peak-hold p-p (else the last RMS value / the bound on a steady node; no usable RMS with AC
+      for 2.5 s: up a range, remembered); up-range on the peak hold at 90 %; no self-cal per range visit.
+      Emulator: reproduced on 8087c7d (model "hpftau:" / "rmsbig:"), fixed (couptest sq5). **Device retest: §10.7
+      e9 / e10.**
+- [x] C's 60 V DC part: +11 mV offset / +0.05 % gain against DC V (above): check the self-cal's 60 V path
       (AD1 on SENSE - PB5 vs the AD2 node) before C can be the default.
+      Fixed in the emulator (§10.6 item 1): the anchor is now the DC V row's READ? against the run row's own LPF
+      (AD3 + RMS on), per range and session; the gain from the internal zero, kept per range. Emulator: 8087c7d
+      ~+16 mV at 12 V reproduced, the fix within 1.3 mV. **Device retest: §10.7 e8.**
+- [x] C's AC part +0.13 / +0.23 % against A (e2): through the factory AC V gain / offset now (§10.6 item 3;
+      e2 recomputed: +0.014 / -0.003 %). **Device retest: §10.7 e2.**
+- [ ] Device retest of method C (acdc-approaches.md §10.7: `tools/acdcmeth.py e8 e9 e10 e2 e6`); C becomes
+      the default only if it passes (owner's decision); A stays the default until then.
 - [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
       3 V reference moved -160 ppm during e5). **Calibrator, not the meter** (device-check doc "DC V at the
       calibrator's 1 V: meter or calibrator?"): no fw-rs state in the DC V path, the factory record unchanged,
