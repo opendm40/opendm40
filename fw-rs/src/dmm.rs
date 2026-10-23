@@ -1037,6 +1037,16 @@ const VET_FLOOR: i32 = 4000;
 /// step window ended with it (3.1 s emulator, 2.7 s device). The entry
 /// now waits as a range write does.
 const OHM_ENTRY_MS: u64 = 150;
+
+/// V / A entry by a function button or SCPI / BT `select` (switch-latency.md
+/// proposal 3): the stock's button entry writes no deadline either; its DMM
+/// screen polls at the change and 300 ms later (FUN_0803cdd8), so its first
+/// value comes after ~300 ms plus one conversion. The 450 / 650 ms of its
+/// S+0x40 table are its in-function row writes (autorange unit changes,
+/// AC+DC phases: unchanged here, as is the AC+DC / AUTO entry's first DC
+/// phase in `set_sub`; its plain DC / AC entry is a button entry too). The
+/// relays switch inside write_config (10 ms pulse).
+const ENTRY_MS: u64 = 300;
 const OHM_SINGLE_MS: u64 = 2500;
 
 // AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-fwrs.md
@@ -1962,6 +1972,9 @@ impl Dmm {
             _ => return,
         };
         let ac = if dc <= 3 { dc - 1 } else { dc - 3 };
+        // Plain DC / AC: a button / SCPI entry (ENTRY_MS); AC+DC / AUTO
+        // start with their DC phase's own settle.
+        let t = if sub < 2 { ENTRY_MS } else { t };
         self.manual = false;
         self.acdc = sub >= 2;
         self.cpl_auto = sub == 3;
@@ -2008,7 +2021,7 @@ impl Dmm {
             13 => (0, 200),
             14 => (0, 1000),
             15 => (self.t_range0(), 500),
-            _ => (0, 450),
+            _ => (0, ENTRY_MS),
         };
         self.set(clk, mode.min(15), r, settle);
     }
@@ -2399,7 +2412,7 @@ impl Dmm {
         match b {
             Button::Volt => {
                 self.manual = false;
-                self.set(clk, 1, 0, 450);
+                self.set(clk, 1, 0, ENTRY_MS);
             }
             Button::Amp => {
                 self.manual = false;
@@ -2407,7 +2420,7 @@ impl Dmm {
                     Some((iu, ir)) => self.set(clk, 7 + iu, ir as i8, 650),
                     None => {
                         let r = self.range.max(0) % 2;
-                        self.set(clk, 8, r, 650);
+                        self.set(clk, 8, r, ENTRY_MS);
                     }
                 }
             }
