@@ -440,14 +440,16 @@ def main(argv=None):
     # Reset cause (peripherals/FWDGT.cs): RCU_RSTSCK's flag bits come from the
     # watchdog model (sticky across resets, cleared by RSTFC), and a
     # SYSRESETREQ (AIRCR VECTKEY + bit 2) marks the next reset as SW.
-    hooks = [('AfterPeripheralRead', 'rcc', 'if offset == 0x74:\n'
+    # Each hook only on its register (a subrange): no Python call for the
+    # other NVIC / RCC accesses (ISRs write ICPR / ICER).
+    hooks = [('AfterPeripheralRead', 'rcc', 0x74, 'if offset == 0x74:\n'
               '    value = (value & 0x00FFFFFF) | sysbus.ReadDoubleWord(0x400033F0)'),
-             ('BeforePeripheralWrite', 'rcc', 'if offset == 0x74 and value & 0x01000000:\n'
+             ('BeforePeripheralWrite', 'rcc', 0x74, 'if offset == 0x74 and value & 0x01000000:\n'
               '    sysbus.WriteDoubleWord(0x400033F0, 0)'),
-             ('BeforePeripheralWrite', 'nvic', 'if offset == 0xD0C and (value & 0xFFFF0004) == 0x05FA0004:\n'
+             ('BeforePeripheralWrite', 'nvic', 0xD0C, 'if offset == 0xD0C and (value & 0xFFFF0004) == 0x05FA0004:\n'
               '    sysbus.WriteDoubleWord(0x400033F4, 1)')]
-    for kind, per, code in hooks:
-        s.add('sysbus SetHook%s sysbus.%s """\n%s\n"""' % (kind, per, code))
+    for kind, per, off, code in hooks:
+        s.add('sysbus SetHook%s sysbus.%s """\n%s\n""" <0x%X +4>' % (kind, per, code, off))
     if a.mode == 'chain':
         # PA2 low while the power key is held at power-on: the ROM then runs the
         # FS-loader, which re-tests PA2 and launches the app once it is released.
