@@ -1199,8 +1199,17 @@ Firmware:
       Device 5e52761: the FPar fix holds: a host copying 17 CSVs (12 MB, 95 KB/s) during the Wave view at
       38400: max_lat 0.30 us, overruns 0 (was 21.4 us); `dropped` +831 once, near the end of the copy (the
       view's ring, not the ISR). Exit: 4.0 / 5.8 us, late 1 (the open item below).
-      - [ ] DBG:PROF? (`prof::report`, C) during a fast session loses samples: region B (~1 KB) or a note.
-      - [ ] Wave view exit: App::key / App::show (C) run before the stream stops (1 overrun at 38400).
+      - [x] DBG:PROF? (`prof::report`, C) during a fast session loses samples: region B (~1 KB) or a note.
+            **Fixed (5ca0557):** prof::report is region B. Emulator: emu/fastlogtest.py --region-c --host-read
+            (DBG:PROF? between the LOG:DISK? polls of every session) and wavetest's host polling at 2 / 1 ms/div:
+            no region C call (the old build: prof::report in both). Device retest open.
+      - [x] Wave view exit: App::key / App::show (C) run before the stream stops (1 overrun at 38400).
+            **Fixed (5ca0557):** App::key / show are region B since region A2, but the exit still ran the
+            menu's pressed feedback (`App::press_track`, app_press.rs, C) with the stream on (the emulator's
+            region C hooks, MENU at 2 ms/div). Now `show` leaving the live Wave view only asks for the stop
+            (WaveReq::Stop) and holds the view change; main.rs shows it right after the stream stopped
+            (`App::wave_exit_done`, before the DMM row is restored). wavetest: MENU exit at 38400, no region C
+            call, late / overruns / timeouts unchanged. Device retest open (max_lat at the exit, late 0).
       - [ ] SCOP006.CSV once saved the previous 4800 S/s record under a 2 ms/div header (not reproduced).
 - [x] 76.8 kS/s (emulator; device check below): hybrid frames (feasibility 11.12, decision 2026-10-22 #9): the CPU
       sends the command byte (mode 0, /8) and switches CKPH = 1 after the read-period pulse, DMA reads R03..R05;
@@ -1421,13 +1430,22 @@ Firmware:
       AC+DC step down comes one DC phase later (60 -> 6 V 4.0-5.5 s after a 6.3 -> 4.0 / 5.8 V step on f42a09e,
       was 1.8-3.7 s). Steps up unchanged. Device f42a09e: 27 steps, no excursion.
 
-- [ ] Fast logger cosmetics (device 4c4b489): LOG:DISK? keeps naming the file of a session stopped in its
+- [x] Fast logger cosmetics (device 4c4b489): LOG:DISK? keeps naming the file of a session stopped in its
       trial (the file is removed); its tpp fields keep the last probe's 381 / 387 in a 38400 / 4800 / AD1
       session (documented as 0 = none); the Record page's Fast estimate says "0 min left" under a minute
       (76800 on 5.9 MB = ~25 s at its 3 B/sample; the real 1.36 B/sample gave 56 s).
-- [ ] 4800 disk session on device 4c4b489: max_lat 4.66 us at calbackup::FwFile::fill (region C: the info
+      **Fixed (5ca0557):** the trial's unlink clears the file (LOG:DISK? file -1); `fastlog::begin` zeroes the
+      probe's numbers (a session without a probe reports 0 / 0); the Record page says "25 s left" under 2 min
+      (seconds; still the 3 B/sample worst case, so the real time is longer). fastlogtest checks the first
+      two (--stop-in-trial: file -1; tpp 0 / 0 in every session below 76800). Device retest: the Record page
+      text at 76800 (look only).
+- [x] 4800 disk session on device 4c4b489: max_lat 4.66 us at calbackup::FwFile::fill (region C: the info
       volume's FIRMWARE.BIN read by a host during the session). No sample lost at
       4800; at 76800 a host reading INFO/FIRMWARE.BIN would likely stall the ISR as range_cmd did.
+      **Fixed (5ca0557):** FwFile::fill / plain are `.text.vdisk_rd` (region B, with the rest of the volume's
+      read path). Emulator: fastlogtest --region-c --host-read reads every INFO/ file (FIRMWARE.BIN first)
+      during 4800 / 38400 / 76800 sessions: no region C call (the old build: FwFile::fill). Device retest:
+      copy INFO/FIRMWARE.BIN during a 76800 disk session, DBG:ISR? max_lat / late.
 - [ ] 76800 stream / rate (loop fix PASSED on device e7ec2cc; its nominal was wrong, fixed in ee28b71, device
       check open). **Device e7ec2cc (device-check-2026-10-21.md "e7ec2cc: the 76.8 kS/s PLL retest"):** the
       loop locks from a cold start within 5 s at rate_mhz 76 800 0xx = ppm_x10 -29 35x (-2935 ppm) against the 76 574.6
@@ -1481,10 +1499,18 @@ Firmware:
         (the edge search's error, max run ~45, a slip or two) remain as in the old build but no longer
         drag the word.
       Device retest: done on e7ec2cc (above).
-- [ ] Wave view at 76800, 1 ms/div (device e7ec2cc): late 1, DBG:ISR? max_lat 6.16 us at lat_pc
+- [x] Wave view at 76800, 1 ms/div (device e7ec2cc): late 1, DBG:ISR? max_lat 6.16 us at lat_pc
       `scope_wav::query` (region C), with ACQ:SRAT? / SCOP:MEAS:FREQ? / VPP? polled every 5 s (bab5dd4's
       p5.py polled only DBG:ISR? / LOG:COUNt?: 280 ns). The range_cmd pattern: the SCOPe / ACQuire query path
-      fetches from C while the stream runs. Also: SCOP:MEAS:FREQ? answers 0 (screen "Freq: --") at 1 and
+      fetches from C while the stream runs.
+      **Fixed (5ca0557):** scope_wav.rs and its parser scpi::wav_cmd are region B (~2 KB). wavetest polls
+      ACQ:SRAT? / SCOP:MEAS:FREQ? / VPP? / TRIG:STAT? / WAV:POIN? / FORM? / PRE? / DATA? / CHAN1:OFFS? /
+      SCAL? / TIM:SCAL? / DBG:PROF? at 2 and 1 ms/div for 4 s each under the region C hooks: none (the old
+      build: scope_wav::query, prof::report). Its new whole-run check found three more of the kind, now
+      region B too: CONF? (App::range_si) and MMEM:CAT? (csvlog::catalog_scpi with fatdir's for_each / open /
+      find_root / chain / fat_get / dir_of and fatren's le16 / le32 / sfn_is / parse_bpb / Vol helpers,
+      `.text.fat_rd`) in the Wave view. Region B 57.7 -> 51.5 KB free, C 16.9 -> 22.8 KB. Device retest: the e7ec2cc polling
+      at 1 ms/div, max_lat / late. The FREQ? item below stays open. Also: SCOP:MEAS:FREQ? answers 0 (screen "Freq: --") at 1 and
       2 ms/div on a 40 Hz signal (less than one period on the 10 / 20 ms screen), so the Wave view cannot
       show a 76800 frequency below ~100 Hz; the record (WAV:POIN MAX, 348 ms) would have the periods.
 - [x] dm40scpi.py `log` stopped by SIGINT mid-drain (device e7ec2cc): afterwards every USBTMC query read
@@ -2058,8 +2084,14 @@ Emulator (emu/):
       Device 8087c7d: PASS (Hz, diode OL, cap OL, ohm, temperature OL each with its own unit). Strip units
       "mW" / "mWh" PASS on the device ("MHz" not reachable there); Help 2/7 and 5/7 PASS (title 14 px after
       "< Back", topic -> value >= 21 px on all pages).
-- [ ] Wave view entry from DC V: DBG:ISR? `dropped` +7087 (~185 ms, the DC V self-cal at entry) before
+- [x] Wave view entry from DC V: DBG:ISR? `dropped` +7087 (~185 ms, the DC V self-cal at entry) before
       the view drains; AC V entry 0. Harmless (the view starts after), note in feasibility 13 or skip the count.
+      **Fixed (5ca0557):** not the self-cal (it runs before the ISR starts) but the full scope repaint after
+      it: the new cal moves the wave scale's a / b, `wave_live` took any scale change for a repaint, and the
+      repaint ran with the stream on (the ring holds ~50 ms at 38400). Now only a V/div / unit / coupling
+      change repaints. Emulator (wavetest --case dcv, a DC V entry at 2 ms/div): overwritten 3555 -> 0.
+      (A V/div step still repaints with the stream on: the record restarts after it anyway.) Device retest:
+      DC V entry at 2 ms/div, DBG:ISR? field 6.
 
 
 ## Device check ffa16ef, the RAM round (2026-10-23; docs/device-check-2026-10-21.md "ffa16ef")
@@ -2081,8 +2113,15 @@ Emulator (emu/):
       a host LOG:STAT session, the shot after LOG:STAT OFF holds the reading and the chart.
       Device 7409b92 (2026-10-23): PASS. "Disk busy" in the first panel read (0-0.14 s), no BMP; after a
       host session S012 / S013 hold the reading and the chart, the shot 1.07 s after LOG:STAT OFF.
-- [ ] Wave view: `LOG:CSV ON` is accepted but records no rows (READ? 9.9E37); ram-budget.md says csvlog is
+- [x] Wave view: `LOG:CSV ON` is accepted but records no rows (READ? 9.9E37); ram-budget.md says csvlog is
       refused there. Refuse it (Settings conflict) or fix the doc.
+      **Fixed (5ca0557):** refused: SYST:ERR? -100,"Settings conflict: Wave view" (and ": inrush page" on the
+      inrush page, the same paused DMM), LOG:CSV? stays off (App::rec_conflict). wavetest checks it.
+      Device retest: LOG:CSV ON in the Wave view -> the error, no LOGS/LOGnnn.DLG.
+- [ ] Wave view, not under wavetest's per-step region C / ring checks yet (the whole-run check covers what
+      the test does): the source badge exit (DMM -> MCX: `wave_close` without `show`, so the MCX page runs one
+      pass with the stream on), a V/div step at 2 / 1 ms/div (a full repaint with the stream on: the ring
+      overflows, the record restarts), the inrush page's LOG:CSV ON refusal (inrushtest).
 - [ ] AUTO OVERLOAD on AC 1 A (1bffde2, couptest iac repro): blocked, the A jack is not wired.
 
 ## Device check 7409b92: shot fix, 76.8 kS/s, AC+DC methods (2026-10-23; docs/device-check-2026-10-21.md "7409b92")
