@@ -300,25 +300,22 @@ impl Cap {
         }
     }
 
-    /// The saved file's records (logger wire format: seq, ts_us, raw; 12
-    /// bytes each) from the linear trace, from where the last call stopped:
-    /// stamps from the nominal rate (t = 0 at the first trace sample; the
-    /// ISR samples on the chip's conversion grid), a lost stretch as a
-    /// stamp gap at `hole_at`. Returns the bytes written (0 = all out).
+    /// The saved file's records (stamp us, raw: fastlog::Rec) from the
+    /// linear trace, from where the last call stopped: stamps from the
+    /// nominal rate (t = 0 at the first trace sample; the ISR samples on the
+    /// chip's conversion grid), a lost stretch as a stamp gap at `hole_at`.
+    /// Returns the records written (0 = all out).
     #[inline(never)]
-    pub fn records(&mut self, buf: &[u16], out: &mut [u8]) -> usize {
-        let n = (out.len() / 12).min(LEN - self.rd as usize);
-        for i in 0..n {
+    pub fn records(&mut self, buf: &[u16], out: &mut [(u32, i32)]) -> usize {
+        let n = out.len().min(LEN - self.rd as usize);
+        for (i, o) in out[..n].iter_mut().enumerate() {
             let k = self.rd as u64 + i as u64;
             let skip = if self.lost > 0 && k >= self.hole_at as u64 { self.lost as u64 } else { 0 };
             let ts = ((k + skip) * 1_000_000 / RATE_HZ as u64) as u32;
-            let o = i * 12;
-            out[o..o + 4].copy_from_slice(&(k as u32 + 1).to_le_bytes());
-            out[o + 4..o + 8].copy_from_slice(&ts.to_le_bytes());
-            out[o + 8..o + 12].copy_from_slice(&(buf[k as usize] as i16 as i32).to_le_bytes());
+            *o = (ts, buf[k as usize] as i16 as i32);
         }
         self.rd += n as u32;
-        n * 12
+        n
     }
 
     /// Records not yet handed out.
@@ -612,17 +609,15 @@ mod tests {
         }
         assert_eq!(cap.lost, 7);
         cap.linearize(&mut buf);
-        let mut out = vec![0u8; 12 * LEN];
+        let mut out = vec![(0u32, 0i32); LEN];
         let n = cap.records(&buf, &mut out);
-        assert_eq!(n, 12 * LEN);
+        assert_eq!(n, LEN);
         assert_eq!(cap.records_left(), 0);
-        let ts = |i: usize| u32::from_le_bytes(out[i * 12 + 4..i * 12 + 8].try_into().unwrap());
+        let ts = |i: usize| out[i].0;
         let h = cap.hole_at as usize;
         assert!(h > PRE);
         assert_eq!(ts(h) - ts(h - 1), ((h as u64 + 7) * 1_000_000 / 9600 - (h as u64 - 1) * 1_000_000 / 9600) as u32);
         assert_eq!(ts(1) - ts(0), 104);
-        let seq = |i: usize| u32::from_le_bytes(out[i * 12..i * 12 + 4].try_into().unwrap());
-        assert_eq!(seq(LEN - 1), LEN as u32);
     }
 
     #[test]

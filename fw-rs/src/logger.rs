@@ -871,7 +871,7 @@ impl Logger {
     /// AD2 19200 DMA stream never locked and the disk session never ended.)
     #[cfg(feature = "ad2-isr")]
     fn lock_watch(&mut self) -> bool {
-        if isr::lock_stats()[3] != 0 || self.captured() != 0 {
+        if isr::locked() || self.captured() != 0 {
             return false;
         }
         let now = unsafe { r32(DWT_CYCCNT) };
@@ -996,6 +996,40 @@ impl Logger {
         }
         ring.tail.store(t.wrapping_add(n as u32), Release);
         n * REC_BYTES
+    }
+
+    /// The fast logger's drain (fastlog::Src): (stamp us, raw) records,
+    /// oldest first, no seq and no byte packing (the 12-byte form costs
+    /// memcpy calls per field at opt-level z: ~15 % of the writer's CPU at
+    /// 76.8 kS/s on the device model). Returns the count.
+    #[inline(always)]
+    pub fn drain_recs(&mut self, out: &mut [(u32, i32)]) -> usize {
+        let ring = self.ring();
+        let t = ring.tail.load(Relaxed);
+        let n = (ring.head.load(Acquire).wrapping_sub(t) as usize).min(out.len());
+        let base = ring.buf.get() as *const Rec;
+        for (i, o) in out[..n].iter_mut().enumerate() {
+            // SAFETY: as `drain`.
+            let r = unsafe { base.add(t.wrapping_add(i as u32) as usize & (CAP - 1)).read_volatile() };
+            *o = (r.ts_us, r.raw);
+        }
+        ring.tail.store(t.wrapping_add(n as u32), Release);
+        n
+    }
+
+    /// Records in the ring.
+    #[inline(always)]
+    pub fn waiting(&self) -> u32 {
+        self.ring().len()
+    }
+
+    /// The stream ISR's busy cycles so far (wrapping; 0 without it).
+    #[inline(always)]
+    pub fn isr_busy_cyc(&self) -> u32 {
+        #[cfg(feature = "ad2-isr")]
+        return isr::busy_cyc();
+        #[cfg(not(feature = "ad2-isr"))]
+        return 0;
     }
 
     /// Fill `out` with a USBTMC definite-length `#4nnnn` block of drained
@@ -1308,6 +1342,18 @@ pub mod isr {
     /// handler's CPU share in 1/1000 of the session's periods - the
     /// exception entry and exit, ~30 cycles each, not included - and whether
     /// the session uses DMA frames).
+    /// The Pll is locked (`lock_stats()[3]` without the rest: per pass).
+    #[inline(always)]
+    pub fn locked() -> bool {
+        unsafe { (*core::ptr::addr_of!(PLL)).locked }
+    }
+
+    /// Cycles in the handler body so far (BUSY16 x 16, wrapping).
+    #[inline(always)]
+    pub fn busy_cyc() -> u32 {
+        BUSY16.load(Relaxed) << 4
+    }
+
     pub fn lock_stats() -> [u32; 11] {
         let p = unsafe { &*core::ptr::addr_of!(PLL) };
         let ksh = unsafe { *core::ptr::addr_of!(KSH) };

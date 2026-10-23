@@ -56,6 +56,8 @@ const DATA: u32 = SPI + 0x0C;
 const I2SCTL: u32 = SPI + 0x1C;
 const STAT_RBNE: u32 = 1 << 0;
 const STAT_TBE: u32 = 1 << 1;
+/// TRANS: a byte is shifting or waits in the buffer.
+const STAT_TRANS: u32 = 1 << 7;
 /// Mode 3, master, software NSS, 8 bit. PSC bits 5:3: 011 = /16 = 3.125 MHz
 /// (the stock value 0x031F), 001 = /4 = 12.5 MHz (see the module notes).
 const CTL0_SLOW: u32 = 0x031F;
@@ -241,6 +243,24 @@ fn xfer(b: u8) -> u8 {
     }
 }
 
+/// Transmit only, back to back (the next byte goes into the buffer while one
+/// shifts): 0.64 us per byte at 12.5 MHz against ~0.97 us for `xfer`'s
+/// write-wait-read per byte (the fast logger's page programs: ~1/3 of their
+/// CPU on the device model). The received bytes are dropped: at the end the
+/// last byte is waited out (TRANS), DATA read (RBNE) and STAT read (clears
+/// the receive overrun), so the next `xfer` starts clean.
+fn tx_burst(d: &[u8]) {
+    unsafe {
+        for &b in d {
+            while r32(STAT) & STAT_TBE == 0 {}
+            w16(DATA, b as u16);
+        }
+        while r32(STAT) & (STAT_TRANS | STAT_TBE) != STAT_TBE {}
+        let _ = r32(DATA);
+        let _ = r32(STAT);
+    }
+}
+
 fn cmd_addr(cmd: u8, addr: u32) {
     xfer(cmd);
     xfer((addr >> 16) as u8);
@@ -416,7 +436,13 @@ impl crate::fastenc::Nor for SpiFlash {
     }
     fn program(&mut self, addr: u32, d: &[u8]) {
         if !self.failed && (addr as u64 + d.len() as u64) <= self.blocks as u64 * SECTOR as u64 {
-            Self::start_program(addr, d);
+            // As `start_program`, the data bytes back to back (`tx_burst`);
+            // the chunk CRCs check them (no read-back here).
+            Self::write_enable();
+            cs(true);
+            cmd_addr(CMD_PP, addr);
+            tx_burst(d);
+            cs(false);
         }
     }
     fn erase(&mut self, addr: u32, big: bool) {

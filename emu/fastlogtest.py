@@ -61,6 +61,8 @@ ap.add_argument('--mips', type=int, default=200, help='CPU PerformanceInMips (al
                 '110 = the device\'s speed, peripherals/CpuCost.cs)')
 ap.add_argument('--isr-stall-ns', type=int, default=0, help='a stall per stream ISR entry, ns (peripherals/CpuCost.cs IsrStallNs; '
                 'with --mips 110, 700 gives the device\'s cpu_permille ~520 at 76800)')
+ap.add_argument('--expect-rung', type=int, default=None, help='a session above 38400 must run at this rung (76800: the writer '
+                'trial kept it; 38400: it fell back), else either is accepted')
 ap.add_argument('--prof', action='store_true', help='DBG:PROF:RESET when the run starts, DBG:PROF? at its end (printed)')
 A = ap.parse_args()
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
@@ -257,14 +259,25 @@ def session(q, src, rate, profile):
     if src == 'ad2' and rate > 38400:
         # The page-program probe (decision 2026-10-22 #9): 76800 to the disk
         # only when the chip programs a page in <= 800 us mean / 1.5 ms max,
-        # else the session runs at 38400; either way nothing is lost.
+        # else the session runs at 38400; then the writer trial (fastlog.rs
+        # `Gate`, LOG:DISK? fields 11..13: 1 kept / 2 fell back, the
+        # window's ISR permille, ring high water): 38400 when the CPU is
+        # short. Either way nothing is lost.
         tpp, tpp_max = (st[8], st[9]) if len(st) > 9 else (0, 0)
+        gate, g_pm, g_fill = (st[10], st[11], st[12]) if len(st) > 12 else (0, 0, 0)
         fast = 0 < tpp <= 800 and tpp_max <= 1500
-        check(abs(nominal - (rate if fast else 38400)) < 2,
-              '%s %s %d: probe tPP %d / %d us -> rung %.0f S/s' % (profile, src, rate, tpp, tpp_max, nominal))
+        want = rate if fast and gate == 1 else 38400
+        print('  writer trial: %s, ISR %d permille, ring high water %d' % ({0: 'none', 1: 'kept', 2: 'fell back'}.get(gate, gate), g_pm, g_fill), flush=True)
+        check(abs(nominal - want) < 2 and (gate in (1, 2) if fast else gate == 0),
+              '%s %s %d: probe tPP %d / %d us, trial %d -> rung %.0f S/s' % (profile, src, rate, tpp, tpp_max, gate, nominal))
+        srate = q('LOG:SRATe?')
+        check(srate.strip() == str(want), '%s %s %d: LOG:SRATe? %s (the rung run)' % (profile, src, rate, srate))
+        if A.expect_rung:
+            check(abs(nominal - A.expect_rung) < 2, '%s %s %d: the expected rung %d' % (profile, src, rate, A.expect_rung))
         check(cnt[2] == 0 and cnt[4] == 0, '%s %s %d: the disk kept up at the rung (ring overwritten %d, lost %d)'
               % (profile, src, rate, cnt[2], cnt[4]))
     TABLE.append((profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1), hw, int(isr[20]) / 10))
+    print('  (device uptime: LOG:STATe ON %.1f s, run %.1f s, end %.1f s)' % (up0 / 1000, (t_run or up1) / 1000, up1 / 1000))
     print('  %s %s %d: prep %.1f s, rows %d, lost %d (ring overwritten %d), %.0f B/s, %.0f pages/s, %.2f B/sample, FIFO high water %d B, ISR CPU %.1f %%'
           % (profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1), hw, int(isr[20]) / 10), flush=True)
     return lost
