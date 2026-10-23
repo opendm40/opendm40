@@ -401,7 +401,10 @@ try:
         w2 = wave()
         print('  %s/div: FREQ %.3f Hz, VRMS %.4f V, VPP %.4f V; DBG:ISR? %s' % (name, fr, rms, vpp, i1))
         check(abs(f('TIM:SCAL?') - tb) < tb * 0.01, 'TIM:SCAL? %s' % name)
-        check(i1[1] == 1 and i1[14] == 1 and abs(i1[12] / 1000 - rate) < 5 and i1[19] == (1008 if rate > 38400 else 16) and i1[22] == 1,
+        # 76800: the chip's real rate (the model's default Ad2Osr32Ppm,
+        # fw-rs hy3131.rs AD2_OSR32_REAL_MHZ), 76 574.6.
+        real = 76574.6 if rate == 76800 else rate
+        check(i1[1] == 1 and i1[14] == 1 and abs(i1[12] / 1000 - real) < 5 and i1[19] == (1008 if rate > 38400 else 16) and i1[22] == 1,
               '%s/div: the stream at %d S/s, locked, div %d (DMA %d)' % (name, rate, i1[19], i1[22]))
         check(i1[4] == i0[4] and i1[8] == i0[8] and i1[9] == i0[9] and i1[16] == i0[16] and i1[7] == i0[7],
               '%s/div: no late entry, frame timeout, overrun, slip or bad sample in 4 s' % name)

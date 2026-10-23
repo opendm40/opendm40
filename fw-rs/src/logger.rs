@@ -703,7 +703,7 @@ impl Logger {
             #[cfg(not(feature = "ad2-isr"))]
             let req = self.req_hz();
             self.r26 = hy::ad2_r26_for(req, self.chop());
-            hy::ad2_period_ns(self.r26)
+            hy::ad2_real_period_ns(self.r26)
         } else {
             self.r26 = 0;
             hy::ad1_period_us(self.osr, self.chop()) * 1000
@@ -721,7 +721,7 @@ impl Logger {
     /// 12.5 ms or more; no lock-in time before the first sample).
     /// Unchopped only: the chopped settings run ~5 % slower than their
     /// nominal (device 5394b21: 26.3 ms at OSR 2048 chopped, nominal 25),
-    /// beyond the Pll's +-1000 ppm, which locks to the nominal rate.
+    /// beyond the Pll's +-5000 ppm (ad2pll.rs MAX_PPM), which locks to the nominal rate.
     pub fn ad1_on_isr(&self) -> bool {
         cfg!(feature = "ad2-isr") && !self.ad2 && !self.chop() && hy::ad1_period_us(self.osr, false) <= AD1_ISR_MAX_US
     }
@@ -760,7 +760,7 @@ impl Logger {
         self.isr_sess = false;
         #[cfg(feature = "ad2-isr")]
         if on_isr {
-            let rate = if self.ad2 { hy::ad2_rate_mhz(self.r26) } else { hy::ad1_rate_mhz(self.osr, self.chop()) };
+            let rate = if self.ad2 { hy::ad2_real_rate_mhz(self.r26) } else { hy::ad1_rate_mhz(self.osr, self.chop()) };
             isr::start(&self.prod, self.ring, rate, !self.ad2);
             self.isr = true;
             self.isr_sess = true;
@@ -1110,6 +1110,11 @@ pub mod isr {
     /// rates derive from the chip's crystal).
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
     static mut REL: i32 = 0;
+    /// The same for the 76.8 kS/s hybrid rung alone (`Pll::carry`): its
+    /// lock may be off the crystal's by the rung's own offset (ad2pll.rs
+    /// MAX_PPM), which must not detune the other rungs' start.
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut REL_HYB: i32 = 0;
     /// Data frame (CS low .. CS high) + ISR entry, timer counts, per divider
     /// (device SELF? 8.6: us_r6 13.4 / 21.8 at /8 / 16, ~1.3 / 2.8 us per byte).
     const fn frame_counts(div: u8) -> u32 {
@@ -1258,7 +1263,8 @@ pub mod isr {
                 *core::ptr::addr_of_mut!(TXB) = [(hy::R_AD2 << 1) | 1, 0xFF, 0xFF, 0xFF, 0xFF];
                 *core::ptr::addr_of_mut!(TXI) = [(hy::R_INTF << 1) | 1, 0xFF];
                 let fc = if hyb { HYB_FRAME } else { dma_frame_counts(div) };
-                *pll = Pll::new(rate_mhz, *core::ptr::addr_of!(REL), fc);
+                let rel = if hyb { *core::ptr::addr_of!(REL_HYB) } else { *core::ptr::addr_of!(REL) };
+                *pll = Pll::new(rate_mhz, rel, fc);
                 pll.late_read = true;
                 pll.c_off = if hyb { fc } else { fc + 50 };
                 pll.np = if hyb { 16 } else { 8 };
@@ -1329,8 +1335,12 @@ pub mod isr {
     pub(super) fn stopped() {
         unsafe {
             let pll = &*core::ptr::addr_of!(PLL);
-            if pll.locked {
-                *core::ptr::addr_of_mut!(REL) = pll.rel_q24();
+            if (*core::ptr::addr_of!(DMA)).hyb {
+                if let Some(r) = pll.carry(true) {
+                    *core::ptr::addr_of_mut!(REL_HYB) = r;
+                }
+            } else if let Some(r) = pll.carry(false) {
+                *core::ptr::addr_of_mut!(REL) = r;
             }
         }
     }

@@ -391,12 +391,15 @@ Emulator, 76800 to the disk, flash typ (emu/fastlogtest.py --mips 110
 (--isr-stall-ns 3000 makes the model's ISR itself late: thousands of late
 samples and overruns at any writer speed, a state the device never showed.)
 
-(The device's 76800 rate finding of 7409b92 shows in the emulator: a 76800
+(The device's 76800 rate finding of 7409b92 showed in the emulator: a 76800
 session after any earlier stream session of the same boot (a 38400 one, a
-76800 one stopped in its trial), or with a heavy noise (--noise 1000), locks
+76800 one stopped in its trial), or with a heavy noise (--noise 1000), locked
 at rate_mhz 76 723.6 / ppm_x10 +9952 with 1.39 ISR entries per sample and
 the ISR at 61 % (the first one after boot: 76 800.0, 1.13, 52 %); still 0
-lost, trial kept, ring high water ~1800 of 2048. Not investigated: TODO.)
+lost, trial kept, ring high water ~1800 of 2048. The causes: the rung's
+real rate, 76 574.6 S/s (now the nominal), and the hybrid probe window's 1.2
+us late side with a loop that integrated the walk past it
+(docs/dmm-input-scope-feasibility.md 11.12, fixed 2026-10-23).)
 
 So: up to 19200 S/s the disk keeps up even at the datasheet's worst page
 time; 38400 S/s keeps up with typical parts (~5x margin) but not with a

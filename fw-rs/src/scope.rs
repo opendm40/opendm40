@@ -368,6 +368,14 @@ pub const fn wave_fs_for(tb: usize) -> u32 {
     }
 }
 
+/// The sample rate a wave frame's measurements, FFT and CSV use for the
+/// stream rung `fs` (`wave_fs_for`): the chip's real rate, which differs at
+/// 76800 (hy3131.rs AD2_OSR32_REAL_MHZ: 76 575, the Wave view's 1 ms/div
+/// read frequencies 0.29 % high on 76 800).
+pub const fn wave_real_fs(fs: u32) -> u32 {
+    if fs == 76_800 { (crate::hy3131::ad2_real_rate_mhz(0) + 500) / 1000 } else { fs }
+}
+
 /// Smallest 1-2-5 step with 4 divisions >= `full` (the DMM range full
 /// scale fills the half screen): 6 V -> 2 V/div, 600 mV -> 200 mV/div,
 /// 1000 V -> 500 V/div, 10 A -> 5 A/div, 600 uA -> 200 uA/div.
@@ -1219,7 +1227,7 @@ impl Scope {
     }
 
     pub fn sample_rate(&self) -> u32 {
-        if self.wave { wv().fs } else { TB[self.s.tb].0 }
+        if self.wave { wave_real_fs(wv().fs) } else { TB[self.s.tb].0 }
     }
 
     /// Zoom anchor of the stored record (sample index at the screen centre),
@@ -1964,7 +1972,7 @@ impl Scope {
         }
         let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
         self.seq = self.seq.wrapping_add(1);
-        Some(Frame { data, cols: None, trig, fs: wv().fs, seq: self.seq })
+        Some(Frame { data, cols: None, trig, fs: wave_real_fs(wv().fs), seq: self.seq })
     }
 
     fn wave_frame(&mut self, now: u64, src: &mut dyn WaveSource) -> Option<Frame<'static>> {
@@ -1999,7 +2007,7 @@ impl Scope {
             }
             self.roll_next = now + 100;
             self.seq = self.seq.wrapping_add(1);
-            return Some(Frame { data: &[], cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs: wv().fs, seq: self.seq });
+            return Some(Frame { data: &[], cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs: wave_real_fs(wv().fs), seq: self.seq });
         }
         let (pre, post) = self.hw_split();
         let (tot, oldest) = (wv().tot, self.wave_oldest());
