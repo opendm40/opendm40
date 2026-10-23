@@ -594,12 +594,25 @@ Code work (in this order):
       (7) PASS partly: after a killed mid-read the next command answers at once, no USBTMC clear; the 2 s
       stall timeout itself not isolated; (8) PASS on 1 V DC only (record 1.0007 V = screen; AC not run: the
       calibrator could not be driven); (9) blocked.
-- [ ] ngscopeclient-dm40 over USBTMC hangs on any 1-byte reply (OUTP? "0"), device 8087c7d: fw-rs ends USBTMC
+- [x] ngscopeclient-dm40 over USBTMC hangs on any 1-byte reply (OUTP? "0"), device 8087c7d: fw-rs ends USBTMC
       replies without '\n' (Bluetooth adds one); scopehal's SCPITMCTransport::ReadReply reads 1 byte at a time
-      until '\n' and ReadRawData's inner loop reads again when it got exactly len bytes. Choose: fw-rs ends
-      USBTMC replies with '\n' (IEEE 488.2 NL^END; check host tools that compare raw bytes, sigrok, pyvisa),
-      and / or fix the loop in the scopehal fork. Then redo retest (5). Also: the driver's two threads
-      interleave queries on one transport; the -L log is empty when ngscopeclient is killed.
+      until '\n' and ReadRawData's inner loop reads again when it got exactly len bytes. Done (tmcnl-fix,
+      "fw-rs USBTMC: every reply ends with '\n'"): usbtmc.rs `terminate` ends every reply with '\n' (text,
+      ';'-joined, DBG blocks, definite-length blocks after the data incl. the streamed WAV:DATA?; text that
+      already ends in '\n' keeps one). The scopehal loop is left as is (with the newline no reply has
+      exactly the asked length). Emulator on vhci_hcd (the real Linux usbtmc driver): OUTP? -> "0\n", a
+      52 000-byte WAV:DATA? in one read() ending in '\n'; ngscopeclient-dm40 test/dm40cli usbtmc PASS (3
+      records, 1 kHz, 0.90 Vpp) and the GUI shows the sine (TRIGGERED); the 8087c7d image there hangs as on
+      the device (STOPPED, generator 0 mHz). dm40scpi info / read / get (307 kB BMP over MMEM:DATA?) / log
+      (AD1, AD2 4800: 0 lost), dm40dbg ping / boot / genuine / shot, sigrok over tcp-raw and usbtmc, and
+      DM40_USBTMC=emu all fine; emu scpi-tcp sends a block's own '\n' (no second one), wavtest checks it.
+      Emulator only, also with 8087c7d: DBG:UPLOAD:END? takes ~7 s there (usbip_client upload: 45 s, OK),
+      over the kernel driver it hits the 5 s usbtmc timeout and the link then reads empty until re-attach.
+      Device retest: ngscopeclient-dm40 /dev/usbtmc2 Run (trace, generator fields), test/dm40cli usbtmc
+      /dev/usbtmc2; reload.sh --image (DBG:UPLOAD / BOOT? / UPDATE); dm40scpi read / get / log; sigrok
+      --show / -c range=; pyvisa USB query('OUTP?'). Also open: the driver's two threads interleave
+      queries on one transport; the -L log is empty when ngscopeclient is killed; DM40Oscilloscope.cpp's
+      comment "nothing follows it on usbtmc" is now stale (the read takes the '\n' either way).
 - [ ] sigrok/SmuView (merged from three items): libsigrok scpi-dmm DM40 profile exists as
       ../libsigrok-dm40/0001-scpi-dmm-add-support-for-Alientek-DM40A-B-C-dm40-fw-.patch (command set
       like the 34401A: CONF:<f>, READ?, FUNC?; 3 s delay after RES/CAP/TEMP/FREQ/CONT/DIOD). DC V works
@@ -666,16 +679,37 @@ Code work (in this order):
       MED 2.5/s + extra digit PASS (SLOW reads as 6); CONF? 1000 V / 10 A PASS; the AC+DC transient is real
       (item below); SmuView combos left to the owner. libsigrok-dm40 leaves the usbtmc kernel driver
       detached after every run (/dev/usbtmcN gone; re-attach with USBDEVFS_CONNECT, scratchpad reattach.py):
-      host side, fix in the profile / transport or document.
-- [ ] AC+DC (and AUTO) with a manual V range, device 8087c7d (1 V DC, method A): the AC part reads 0.35 V
+      host side. Fixed (libsigrok 32030b22, ../libsigrok-dm40/0002-scpi-dmm-close-the-SCPI-connection-in-
+      dev_close.patch, installed in libsigrok-dm40/install): an upstream bug, scpi-dmm's dev_close()
+      returned early on status <= INACTIVE, which sr_dev_close() sets before calling it (since f1ba6b4b),
+      so --show / --get / --set never closed the device (the transport's close re-attaches usbtmc).
+      Emulator on vhci: /dev/usbtmcN stays after --show / --get / --samples / --set (gone with the old
+      build). Device retest: the node stays after each sigrok-cli run (no reattach.py).
+- [x] AC+DC (and AUTO) with a manual V range, device 8087c7d (1 V DC, method A): the AC part reads 0.35 V
       (1.06 V via the MF page) for ~2-4 s after 6 -> 60 V, then a tail 18 -> 1 mV over ~10 s; 0.15 V for ~2 s
-      after 60 -> 6 V. AC+DC READ? +6 % at 2.2 s, +0.9 % to 3.3 s. AUTO stays DC. Drop the AC phases until the
-      AC path has settled after a range change (as at entry).
-- [ ] DC V: setting the present range again (SCPI <f>:RANG <same>, sigrok range=, or the MF page tap on the
+      after 60 -> 6 V. AC+DC READ? +6 % at 2.2 s, +0.9 % to 3.3 s. AUTO stays DC. Done (tmcnl-fix, dmm.rs
+      ACS_*): a range / unit change in AC+DC / AUTO (manual, MF page, SCPI, autorange; not the entry or a
+      phase switch) discards method A's AC results, and moves no range on them, until two results in a
+      row fell by < 1 % each (or rose), or one is < 0.05 % of full scale, or 6 s passed; the first good
+      one seeds the EMA. AC+DC gives no reading meanwhile (READ? NaN after 0.85 s, as at entry); AUTO
+      shows its part with the AC part held and does not re-decide. Emulator (1 V DC; its node gave a 5.3 V
+      AC part, readings up to 5.36 V, AUTO even flipped to AC): readings resume ~4 s after 6 -> 60 V and ~2 s
+      after 60 -> 6 V, all within 0.1 %, AUTO stays DC; acdcmethtest A: DC 12 V + 0.5 V (6 -> 60 V
+      autorange) settles in 4.2 s (8087c7d: 4.7 s). Device retest (1 V DC, method A): VOLT:ACDC:RANG 60 / 6 and the MF
+      page items 6 <-> 60 V: no READ? off by > 0.1 %, the gap until the first reading (expect ~4-6 s,
+      capped at 6 s), the AC part in DBG:ACDC:STAT? after it (the 60 V tail: ACS_STEP / ACS_FLOOR may need
+      tuning; a device transient falling < 1 % per result would be let through early); AUTO coupling the same with the DC part shown throughout; a 40 Hz square on AC+DC: a range
+      change gives the right AC part after the gap; autorange in AC+DC across 6 V (no hunting).
+- [x] DC V: setting the present range again (SCPI <f>:RANG <same>, sigrok range=, or the MF page tap on the
       highlighted item) gives 1-2 readings at 25-51 % of the input at 0.46 / 0.66 s, on about every other
       repeat (device 8087c7d, 1 V DC: 0.257, 0.509, 0.375, 0.403 V); a real range change does not. The chart and
       MIN record it. Dmm::set rewrites the config with a 450 ms deadline but resets nothing when the mode is
-      unchanged: skip the write when nothing changes, or drop the first reading after the deadline.
+      unchanged. Done (tmcnl-fix): set_range skips the rewrite when the chip already runs that mode (AC+DC:
+      either phase) on that range (Dmm::same_row), it only makes the range manual; also V / A / ohm. The
+      emulator has no partial conversion; there the re-set no longer costs a reading. Device retest (1 V DC):
+      VOLT:RANG 6 / 60 x10 each (manual and from AUTO+), sigrok range= the present one, the highlighted MF
+      item tapped: no READ? / chart MIN below 0.99 V; a real change 6 <-> 60 <-> 600 still fine; the one
+      0.781 V after VOLT:RANG:AUTO ON from 600 V (real change) not addressed: watch for it.
 - [x] Scope touch: pinch = scale (timebase / V/div, 1-2-5 snap, value bubble), one-finger drag =
       offset, draggable trigger level, no clash with view swipes.  (c470be7, 419fd96, ebff9b4, 81c9dd8;
       verify on device, two-finger report rate first)
@@ -1846,5 +1880,7 @@ Emulator (emu/):
       on V/COM); the MR9270's DC V output is only good to ~0.1 % and wanders, so it cannot check DC V to the
       0.05 % class. Until then, 1 V readings of 0.9987..1.0006 V are the calibrator.
 - [ ] Minor: the 60 V range reads 0.2-0.36 mV below the 6 V range at 1 / 3 / 5 V (within spec; not chased).
-- [ ] Cosmetic: the rate chip cycles FAST -> SLOW -> MED (rate_cycle, enum order), a tap on the value FAST ->
-      MED -> SLOW (resolution_cycle). Same order for both?
+- [x] Cosmetic: the rate chip cycles FAST -> SLOW -> MED (rate_cycle, enum order), a tap on the value FAST ->
+      MED -> SLOW (resolution_cycle). Done (tmcnl-fix, app::next_rate): the chip, the value tap and Settings
+      2/3 "Rate" all go FAST -> MED -> SLOW -> FAST (resolution order; the stock has no rate control, FAST is
+      its 10/s reading). Device retest: chip and value tap from each rate.
