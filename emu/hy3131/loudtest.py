@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""fw-rs danger alarm (fw-rs/src/danger.rs, fw-rs/docs/power-meter-and-misconnect.md
+4.10) in the emulator: fw-rs native + the HY3131 model, a timed connection /
+touch / key script per scenario, the buzzer timer's register writes logged
+by the model (run.py --buzzer-log: TIM14 ARR = pitch, CCR1 = duty, in virtual
+ms) and SCPI over USB/IP (SYST:ALER?, DBG:ALARm? in a loop).
+
+Checked (virtual time, the script's clock): the loud duty (CCR1 = 0.495 x
+the period: 5544 at ARR 11199, 6930 at ARR 13999) with the key / alert
+volume at 0 %, the two-tone burst pattern (125 ms steps, a burst per second),
+silencing by a tap on the alert badge / the alert toast / a side key, the
+re-arm when the condition comes back, the stop when it clears, the stock
+pitch (ARR 11199) and CCR1 0 after every stop, the setting Off (no alarm),
+Volume (the alarm at the key volume), V-JACK? (no alarm) and a current above
+the 10 A rating.
+
+  emu/hy3131/loudtest.py --app fw-rs/dm40-fw-native.bin --port 53101          # all
+  emu/hy3131/loudtest.py --app fw-rs/dm40-fw-native.bin --port 53101 aprot ajack
+  emu/hy3131/loudtest.py --list
+
+Results: emu/out/loud-<name>.json, emu/out/loud-<name>.buzz (the register
+log). One emulator per port; run scenarios in parallel on different ports.
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+EMU = os.path.dirname(HERE)
+ROOT = os.path.dirname(EMU)
+OUT = os.path.join(EMU, 'out')
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument('names', nargs='*')
+ap.add_argument('--app', help='fw-rs native image (default: run.py builds HEAD)')
+ap.add_argument('--port', type=int, default=53101, help='USB/IP port (default 53101)')
+ap.add_argument('--list', action='store_true')
+A = ap.parse_args()
+os.environ['USBIP_PORT'] = str(A.port)
+sys.path.insert(0, EMU)
+import usbip_client as uc  # noqa: E402
+
+ARR_HI, ARR_LO = 11199, 13999
+LOUD = {(ARR_HI, 5544), (ARR_LO, 6930)}
+# Volume 40 %: duty 0.4 / 3 x 0.5 of the period.
+VOL40 = {(ARR_HI, int(11200 * 0.4 / 3 * 0.5)), (ARR_LO, int(14000 * 0.4 / 3 * 0.5))}
+BADGE = 'tap 160 17'      # DMM status slot (ui::hold_label 119..202 x 1..33)
+TOAST = 'tap 240 160'     # dialog::TOAST centre
+
+# name: dict(func=SCPI CONF or None, run_for, setup=[SCPI after attach],
+#            script=[(virtual s, run.py script line)], acts={fw uptime s: SCPI},
+#            checks=[...], alerts=[(t0, t1 virtual-ish fw uptime, alert that must be seen)])
+# checks: ('quiet', t0, t1)                   no alarm duty written in t0..t1 (s)
+#         ('loud', t0, t1, set)               the alarm sounds in t0..t1: >= 2 bursts of
+#                                             (ARR, CCR1) pairs from `set`, both tones
+#         ('pattern', t0, t1)                 125 ms tone steps, bursts 1 s apart (+-35 ms: a
+#                                             main-loop pass can run ~30 ms late)
+#         ('starts', t0, t1, set)             the first alarm write after t0 is before t1
+#         ('stops', t, t1)                    CCR1 0 and ARR 11199 (stock pitch) at t1 (a
+#                                             'quiet' check from t1 follows each one)
+# seen: (SYST:ALER?, DBG:ALARm? prefix) pairs that must appear in some SCPI row
+#       (DBG:ALARm? = sounding,silenced,events,setting)
+SC = {
+    # A-PROT (12 V across A-COM in DC V): loud at A-JACK (~0.3 s), A-PROT 0.5 s later;
+    # badge tap at 15.45 (inside a burst: they start ~0.25-0.3 s after each whole second
+    # here) -> silent at once; the source removed at 18 (the latch holds, the probe reads
+    # no current: not dangerous); AUTO at 21 (the user acts: the latch ends); 12 V again
+    # at 25 -> a new event, loud; removed at 31 -> stops.
+    'aprot': dict(func=None, run_for=35, setup=['SYST:BEEP:VOL 0'],
+                  script=[(0, 'dmm open'), (10, 'dmm avsrc:12'), (15.45, BADGE), (18, 'dmm open'),
+                          (21, 'key auto'), (25, 'dmm avsrc:12'), (31, 'dmm open')],
+                  checks=[('quiet', 6, 10), ('starts', 10, 11.2, LOUD), ('loud', 10, 15, LOUD), ('pattern', 10.5, 15),
+                          ('stops', 15.45, 15.65), ('quiet', 15.65, 25), ('starts', 25, 26.2, LOUD), ('loud', 25, 31, LOUD),
+                          ('stops', 31, 32.0), ('quiet', 32.0, 35)],
+                  # sounding in the first event, silenced, then latched with no current: quiet
+                  seen=[('APROT', '1,0,1,0'), ('APROT', '0,1,1,0'), ('APROT', '1,0,2,0'), ('APROT', '0,0,2,0')]),
+    # A-JACK (1 mA into A in DC V): RUN key at 15.45 (inside a burst) silences (and toggles
+    # HOLD); the current off at 18 / on at 21: loud again; off at 26: stops within the 1 s
+    # A-JACK clear; on at 29, a tap on its toast at 29.5 (inside the first burst) silences.
+    'ajack': dict(func=None, run_for=34, setup=['SYST:BEEP:VOL 0'],
+                  script=[(0, 'dmm open;vsrc:1.234'), (10, 'dmm isrc:0.001'), (15.45, 'key run'), (18, 'dmm isrc:none'),
+                          (21, 'dmm isrc:0.001'), (26, 'dmm isrc:none'), (29, 'dmm isrc:0.001'), (29.5, TOAST)],
+                  checks=[('quiet', 6, 10), ('starts', 10, 11.0, LOUD), ('loud', 10, 15, LOUD), ('pattern', 10.5, 15),
+                          ('stops', 15.45, 15.65), ('quiet', 15.65, 21), ('starts', 21, 22.0, LOUD), ('loud', 21, 26, LOUD),
+                          ('stops', 26, 27.8), ('quiet', 27.8, 29), ('starts', 29, 29.45, LOUD), ('stops', 29.5, 29.7),
+                          ('quiet', 29.7, 34)],
+                  seen=[('AJACK', '1,0,1,0'), ('AJACK', '0,1,1,0'), ('AJACK', '1,0,2,0'), ('AJACK', '0,1,3,0')]),
+    # V-JACK? (24 V on V/ohm in DC A, no current): an advisory, no alarm. Then Off: A-JACK
+    # in DC V makes no sound; then Volume at 40 %: the alarm at the key volume.
+    'vjack-off': dict(func='CURR:DC', run_for=40, setup=['SYST:BEEP:VOL 0'],
+                      script=[(0, 'dmm open'), (10, 'dmm vsrc:24'), (19, 'dmm vsrc:none;vsrc:1.234'), (26, 'dmm isrc:0.001')],
+                      acts={20.5: ['SYST:ALER:ALARm OFF', 'CONF:VOLT:DC'], 31.5: ['SYST:BEEP:VOL 40', 'SYST:ALER:ALARm VOL']},
+                      checks=[('quiet', 6, 33), ('starts', 33, 34.5, VOL40), ('loud', 33, 40, VOL40)],
+                      seen=[('VJACK', '0,0,0,0'), ('AJACK', '0,0,1,2'), ('AJACK', '1,0,1,1')]),
+    # Above the 10 A rating in DC A: 12 A (OL on the 10 A range) for 1 s -> loud; 5 A -> stops.
+    'i10': dict(func='CURR:DC', run_for=30, setup=['SYST:BEEP:VOL 0'],
+                script=[(0, 'dmm open'), (10, 'dmm isrc:5'), (16, 'dmm isrc:12'), (24, 'dmm isrc:5')],
+                checks=[('quiet', 6, 16.9), ('starts', 16.9, 19, LOUD), ('loud', 17, 24, LOUD), ('stops', 24, 25.5),
+                        ('quiet', 25.5, 30)],
+                seen=[('NONE', '1,0,1,0')]),
+}
+
+
+def read_log(path):
+    ev = []
+    if os.path.exists(path):
+        for line in open(path):
+            p = line.split()
+            if len(p) == 3:
+                ev.append((float(p[0]) / 1000.0, p[1], int(p[2])))
+    return ev
+
+
+def states(ev):
+    """(t, ARR, CCR1) after every write."""
+    arr, ccr, out = 11199, 0, []
+    for t, reg, v in ev:
+        if reg == 'ARR':
+            arr = v
+        else:
+            ccr = v
+        # ARR and CCR1 of one tone change are written in the same pass (the
+        # same virtual ms): one state
+        if out and t - out[-1][0] < 0.001:
+            out[-1] = (out[-1][0], arr, ccr)
+        else:
+            out.append((t, arr, ccr))
+    return out
+
+
+def check(st, chk):
+    kind = chk[0]
+    alarm = lambda s: s[2] != 0 and (s[1] == ARR_LO or s[2] >= 5000 or (s[1], s[2]) in VOL40)
+    if kind == 'quiet':
+        bad = [s for s in st if chk[1] <= s[0] < chk[2] and alarm(s)]
+        return not bad, '%d alarm writes in %g..%g s%s' % (len(bad), chk[1], chk[2], ' (first %.3f)' % bad[0][0] if bad else '')
+    if kind == 'starts':
+        on = [s for s in st if s[0] >= chk[1] and s[2] != 0 and (s[1], s[2]) in chk[3]]
+        ok = bool(on) and on[0][0] < chk[2]
+        return ok, 'first alarm tone after %g s at %s (want < %g)' % (chk[1], '%.3f' % on[0][0] if on else None, chk[2])
+    if kind == 'loud':
+        w = [s for s in st if chk[1] <= s[0] < chk[2] and s[2] != 0]
+        good = [s for s in w if (s[1], s[2]) in chk[3]]
+        other = [s for s in w if (s[1], s[2]) not in chk[3]]
+        tones = {s[1] for s in good}
+        ok = len(good) >= 8 and tones == {ARR_HI, ARR_LO} and not other
+        return ok, '%d alarm tones in %g..%g s, pitches %s, %d other duty writes %s' % (
+            len(good), chk[1], chk[2], sorted(tones), len(other), sorted({(s[1], s[2]) for s in other})[:4])
+    if kind == 'pattern':
+        w = [s for s in st if chk[1] <= s[0] < chk[2]]
+        # tone changes (start of each sounding step) and burst starts (silence -> tone)
+        steps, bursts, prev = [], [], None
+        for s in w:
+            cur = (s[1], s[2]) if s[2] else None
+            if cur != prev:
+                if cur is not None:
+                    steps.append(s[0])
+                    if prev is None:
+                        bursts.append(s[0])
+                prev = cur
+        # from the first whole burst (t0 may fall inside one)
+        steps = [t for t in steps if bursts and t >= bursts[1]] if len(bursts) > 1 else []
+        dsteps = [b - a for a, b in zip(steps, steps[1:]) if b - a < 0.3]
+        dbursts = [b - a for a, b in zip(bursts[1:], bursts[2:])]
+        ok = (len(dsteps) >= 6 and all(abs(d - 0.125) < 0.035 for d in dsteps)
+              and len(dbursts) >= 2 and all(abs(d - 1.0) < 0.035 for d in dbursts))
+        return ok, 'steps %s ms, bursts %s ms' % ([round(d * 1000) for d in dsteps[:8]], [round(d * 1000) for d in dbursts[:5]])
+    if kind == 'stops':
+        on = [s[0] for s in st if chk[1] <= s[0] < chk[2] and alarm(s)]
+        at = [s for s in st if s[0] < chk[2]]
+        end = at[-1] if at else (0, 11199, 0)
+        ok = end[2] == 0 and end[1] == ARR_HI
+        return ok, 'last tone in %g..%g s %s, off at %.3f s (ARR %d CCR1 %d at %g s)' % (
+            chk[1], chk[2], '%.3f' % on[-1] if on else 'none', end[0], end[1], end[2], chk[2])
+    return False, 'unknown check ' + kind
+
+
+def run(name):
+    sc = SC[name]
+    if uc.port_busy(A.port):
+        print('RESULT %s FAIL port %d in use (another emulator?): pass a free --port' % (name, A.port), flush=True)
+        return False
+    tag = 'loud-' + name
+    rtag = '%s-%d-%d' % (tag, A.port, os.getpid())
+    os.makedirs(OUT, exist_ok=True)
+    sp = os.path.join(OUT, rtag + '.script')
+    buzz = os.path.join(OUT, tag + '.buzz')
+    if os.path.exists(buzz):
+        os.remove(buzz)
+    with open(sp, 'w') as f:
+        for t, line in sc['script']:
+            f.write('%g %s\n' % (t, line))
+    cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
+           '--usbip-port', str(A.port), '--run-for', str(sc['run_for']), '--script', sp, '--name', rtag,
+           '--buzzer-log', buzz, '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else [])
+    p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    rows = []
+    t_wall = time.time()
+    tm = None
+    while p.poll() is None and tm is None and time.time() - t_wall < 300:
+        try:
+            d = uc.Dev('1-0')
+            tm = uc.Usbtmc(d)
+        except Exception as e:
+            print('attach:', type(e).__name__, e, flush=True)
+            time.sleep(1)
+    if tm is not None:
+        try:
+            for c in sc['setup'] + (['CONF:' + sc['func']] if sc['func'] else []):
+                tm.write(c)
+            acts = dict(sc.get('acts', {}))
+            while p.poll() is None:
+                row = {}
+                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:ALARm?', 'SYST:ALER:ALARm?', 'SYST:BEEP:VOL?']:
+                    tm.write(q)
+                    row[q] = tm.read(timeout=60).decode(errors='replace').strip()
+                row['t'] = int(row['DBG:PING?'].split(',')[0]) / 1000.0
+                rows.append(row)
+                for ta in sorted(acts):
+                    if row['t'] >= ta:
+                        for c in acts.pop(ta):
+                            tm.write(c)
+                print('%s %6.2f %-6s %-12s %s %s' % (name, row['t'], row['SYST:ALER?'], row['DBG:ALARm?'],
+                                                   row['SYST:ALER:ALARm?'], row['SYST:BEEP:VOL?']), flush=True)
+                time.sleep(0.1)
+        except Exception as e:
+            print(name, 'link ended:', e, flush=True)
+    out, _ = p.communicate()
+    for x in (sp, os.path.join(OUT, 'flash-%s.bin' % rtag), os.path.join(OUT, rtag + '.resc')):
+        if os.path.exists(x):
+            os.remove(x)
+    st = states(read_log(buzz))
+    ok, bad, res = True, [], []
+    for chk in sc['checks']:
+        c_ok, msg = check(st, chk)
+        res.append((chk[:3], c_ok, msg))
+        print('  %s %-8s %s' % ('ok  ' if c_ok else 'FAIL', chk[0], msg), flush=True)
+        if not c_ok:
+            ok = False
+            bad.append('%s %s' % (chk[0], msg))
+    seen = sorted({(r['SYST:ALER?'], r['DBG:ALARm?']) for r in rows})
+    for a, pre in sc.get('seen', []):
+        if not any(x[0] == a and x[1].startswith(pre) for x in seen):
+            ok = False
+            bad.append('row %s %s never seen' % (a, pre))
+    print('  rows seen: %s' % ' '.join('%s/%s' % x for x in seen), flush=True)
+    if not rows:
+        ok = False
+        bad.append('no SCPI rows')
+    with open(os.path.join(OUT, tag + '.json'), 'w') as f:
+        json.dump({'name': name, 'ok': ok, 'bad': bad, 'checks': res, 'rows': rows, 'rc': p.returncode,
+                   'log': out[-600:] if p.returncode else ''}, f, indent=1)
+    print('RESULT %s %s %s' % (name, 'OK' if ok else 'FAIL', '; '.join(bad[:5])), flush=True)
+    return ok
+
+
+if __name__ == '__main__':
+    if A.list:
+        for n, v in SC.items():
+            print('%-10s %s' % (n, ' | '.join('%g %s' % x for x in v['script'])))
+        sys.exit(0)
+    allok = True
+    for n in A.names or list(SC):
+        allok &= run(n)
+    sys.exit(0 if allok else 1)

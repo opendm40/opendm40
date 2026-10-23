@@ -2758,6 +2758,19 @@ Emulator (emu/):
       SLOW -> FAST -> MED -> SLOW -> FAST (RATE?). A second value tap 1 s after the first did nothing
       (SLOW -> FAST -> FAST -> MED); the chip at 1 s did not skip. Cosmetic, not chased.
 
+## Loud danger alarm (owner 2026-10-24: dangerous misconnects beep at maximum volume; volume kept at 0)
+
+- [x] Emulator, branch loudalarm (docs/power-meter-and-misconnect.md 4.10): src/danger.rs. Dangerous =
+      A-PROT while its current flows, A-JACK, a current above the 10 A rating for 1 s; not V-JACK?, LIVE?,
+      hints, OVERLOAD (the meter protected itself), the power meter's user current limit, reminders.
+      Two-tone burst (3.57 / 2.86 kHz, 4 x 125 ms each second) at the stock's 100 % duty whatever the
+      volume; silenced per event by a tap on the badge / toast or any key; re-arms; stops when the
+      condition clears; 30 s full, then a burst per 10 s. Settings 3/3 "Danger alarm" Loud (default) /
+      Volume / Off, persisted; SCPI SYST:ALER:ALARm, SYST:BEEP:VOL, DBG:ALARm?. Test emu/hy3131/loudtest.py
+      (run.py --buzzer-log: TIM14 ARR / CCR1 writes).
+- [ ] Device: doc 4.10 "Device check list (danger alarm)" (needs a current in the A jack); the measurement
+      coupling check (item 4) and the low tone's loudness (item 5).
+
 ## False AC? / A-JACK / A-PROT / V-JACK? after switches (owner 2026-10-23, on ad74e93 / 35fce2a)
 
 - [x] Emulator, branch falsehint (0e8085c, bd6824a, 807ed14). Tool: emu/hy3131/switchtest.py (~60

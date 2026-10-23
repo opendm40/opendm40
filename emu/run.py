@@ -351,6 +351,8 @@ def main(argv=None):
                     help="use Renode's own USB/IP server instead of the model's (peripherals/DWC2_OTG_USBIP.cs); "
                          'the kernel (usbip attach) cannot enumerate through it')
     ap.add_argument('--log', help='Renode log file (default emu/out/<name>.log)')
+    ap.add_argument('--buzzer-log', metavar='FILE',
+                    help='log TIM14 ARR / CCR1 changes (the buzzer pitch / duty) as "<virtual ms> <reg> <value>"')
     ap.add_argument('--name', help='base name of the generated .resc/.log (default: the mode)')
     ap.add_argument('--pa2', type=float, default=None, metavar='T',
                     help='chain: release PA2 (power key) at T seconds; default 0.55 = ROM -> FS-loader -> app; '
@@ -478,6 +480,8 @@ def main(argv=None):
                 "    _boot_region = r\n"
                 "    self.Log(LogLevel.Info, 'boot: entered %s at 0x%08x, t=%s' % (r, pc, machine.ElapsedVirtualTime.TimeElapsed))\n")
         s.add('sysbus.cpu SetHookAtBlockBegin """\n%s"""' % hook)
+    if a.buzzer_log:
+        s.add('sysbus.timer14 LogWrites %s' % q(os.path.abspath(a.buzzer_log)))
     if a.live:
         s.add('sysbus.lcd LiveFile %s 30' % q(a.live))
     if a.autoshot:

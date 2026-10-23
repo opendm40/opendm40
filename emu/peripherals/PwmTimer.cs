@@ -8,6 +8,9 @@
 // virtual time while CEN is set (counting up, 200 MHz timer clock), UIF is set
 // on read when the counter wrapped since the last clear, EGR.UG resets CNT.
 // The scope feeder reads PSC/ARR/CR1/SMCR from here.
+// LogWrites(path): every write to ARR / CCR1 that changes the register goes to
+// `path` as "<virtual ms> <ARR|CCR1> <value>" (the buzzer tests: TIM14 duty =
+// loudness, ARR = pitch; emu/hy3131/loudtest.py).
 //
 using System;
 using Antmicro.Renode.Core;
@@ -22,6 +25,11 @@ namespace Antmicro.Renode.Peripherals.Timers
             this.machine = machine;
             this.frequency = frequency;
             Reset();
+        }
+
+        public void LogWrites(string path)
+        {
+            log = new System.IO.StreamWriter(path, false) { AutoFlush = true };
         }
 
         public void Reset()
@@ -77,6 +85,11 @@ namespace Antmicro.Renode.Peripherals.Timers
                 if((value & 1) != 0) Start(0); // UG
                 break;
             default:
+                if(log != null && (offset == ARR || offset == CCR1) && regs[offset / 4] != value)
+                {
+                    log.WriteLine("{0:F3} {1} {2}", machine.ElapsedVirtualTime.TimeElapsed.TotalMilliseconds,
+                                  offset == ARR ? "ARR" : "CCR1", value);
+                }
                 if(offset < Size) regs[offset / 4] = value;
                 break;
             }
@@ -105,7 +118,8 @@ namespace Antmicro.Renode.Peripherals.Timers
             return counts % period;
         }
 
-        private const long CR1 = 0x00, SR = 0x10, EGR = 0x14, CNT = 0x24, PSC = 0x28, ARR = 0x2C;
+        private const long CR1 = 0x00, SR = 0x10, EGR = 0x14, CNT = 0x24, PSC = 0x28, ARR = 0x2C, CCR1 = 0x34;
+        private System.IO.StreamWriter log;
         private readonly IMachine machine;
         private readonly ulong frequency;
         private readonly uint[] regs = new uint[0x100];
