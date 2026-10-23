@@ -5,7 +5,6 @@ mod app;
 mod bargraph;
 mod bt;
 mod clock;
-mod acdctr;
 mod dmm;
 mod gen;
 mod gesture;
