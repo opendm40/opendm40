@@ -2604,16 +2604,24 @@ Emulator (emu/):
       Two opt-in model knobs reproduce the failures: `ohmexit:3.5;ohmexitlo:1.2`, which replays the
       device trace below, and `swtr:300;swtau:50`, a HYPOTHETICAL ring of PB1 / the V taps after each row
       change (shape not from the device).
-      **Device ad74e93 (nothing connected, all 42 SCPI pairs, AUTO, taps, Wave):** only RES -> A / mA
-      gives a false alert, V-JACK? from 1.5-1.95 s to ~5 s. CMP_SENSE CTSTA reads 0x70 (CMPHO + CMPLO
-      in one read) for ~3.5 s, then 0x50, then 0. Old code + ohmexit: 6 false V-JACK? in 24 steps,
-      including AUTO / AC+DC A. Old code + swtr: A-JACK on entries to V AC+DC / V AUTO and to diode.
+      **Device ad74e93, check E (397 switches: V-COM open, 1 V, 5 V; the A jack open; raw log
+      chk/out/E_all_sent.txt in the session scratchpad):** no A-PROT, no false A-JACK after a switch.
+      - E1: RES -> A / mA, V-COM open or at 1 V, 11 of 11 (0 of 4 at 5 V): V-JACK? from 1.47-1.97 s to
+        ~5 s. CMP_SENSE CTSTA reads 0 for 0.5-0.7 s, then 0x70 (CMPHO + CMPLO in one read) in every
+        window; the last 0x70 comes at 4.2-4.4 s, the last 0x50 0.1-0.2 s later.
+      - E2: A at 5 V DC, the Scope page, MENU back, seen once: V-JACK? 1.4-6.0 s; 0x70 from 0.51 s to
+        5.24 s.
+      - E3: AC? in DC V on a steady 5 V DC, 26 of 26: the V-tap window reads 0x70 at 5 V and 0x10 at 1 V.
+      - E4: A-JACK in RES at 5 V (owner decision, below).
+      - Other switches into A read 0x70 for under 1 s (no alert).
+      So 0x70 is the comparator overdriven or unsettled, not a node level.
+      Old code + ohmexit (the E1 trace replayed): 6 false V-JACK? in 24 steps, including AUTO / AC+DC A.
+      Old code + swtr: A-JACK on entries to V AC+DC / V AUTO and to diode.
       Causes:
-      1. RES exit: the A rows' comparator on SENSE reads both bits at once for seconds. That cannot be
-         a node voltage (above VRH and below VRL together); the comparator or its references are still
-         settling. Why it lasts 3.5 s is not known (the netlist is unknown). The stock does nothing
-         special on the exit: R26 / R34 / R36 = 0, relays, the row (hy3131_v2_6.h). Device experiment
-         below.
+      1. RES exit and the chip restart (E1 / E2): the A rows' comparator on SENSE reads both bits at
+         once for seconds, and the old code counted that as a V-jack voltage. Why it lasts ~4 s is not
+         known (the netlist is unknown). The stock does nothing special on the exit: R26 / R34 / R36 = 0,
+         relays, the row (hy3131_v2_6.h). Device experiment below.
       2. The peak hold (AD1 in AC V / AC mV / AC A, AD2 in continuity / diode / cap) runs from the row
          write. Its first harvest held the whole settle; diode (100 ms settle) took two such windows.
       3. AC+DC / AUTO sample the comparator through the phase settles, from right after the PA relay
@@ -2624,10 +2632,12 @@ Emulator (emu/):
          AC? on 5 V DC and on the 0..9.5 V square (device-check "False A-JACK in Hz", "6. The lost first
          V tap").
       Fix (sentinel.rs, dmm.rs):
-      - V-JACK? after an ohm exit: for 8 s (OHM_EXIT_CAP_MS) a 0x70 read is no hit. A CMPLO-only read is
-        no hit within 2.5 s (OHM_EXIT_TAIL_MS) of the exit or of the last 0x70 read. A CMPHO read
-        (positive or AC source) counts at once, so a real source keeps its ~2 s timing unless the
-        comparator itself reads 0x70 meanwhile; a negative DC source waits for the tail.
+      - V-JACK? after an ohm exit or a chip restart (dmm.start): for 7 s (OHM_EXIT_CAP_MS) a 0x70 read
+        is no hit. A CMPLO-only read is no hit within 2.5 s (OHM_EXIT_TAIL_MS) of the event or of the last
+        0x70 read. A read with CMPHO alone counts at once, so such a source keeps its ~2 s timing. A
+        source that itself reads 0x70 or CMPLO alone gets V-JACK? at up to ~8 s; the device's 0x70 / 0x50
+        polarity for a real >= 21 V source is not measured yet. After 7 s, 0x70 counts as before.
+        V-JACK? is the amber advisory; A-JACK / A-PROT (PB1) are not touched by this rule.
       - Row write: no comparator / peak sample for 150 ms (BLANK_ROW_MS).
       - Settle end: the hold is cleared and samples wait 100 ms more (BLANK_SETTLED_MS); the first
         window is a whole one. In AC+DC the hold restarts at 150 ms and the comparator keeps running,
@@ -2650,7 +2660,7 @@ Emulator (emu/):
       | AC? | 2.56 s | 2.76-2.98 s |
       | DC? | 2.67 / 3.32 s | 2.88 / 3.32 s |
       | V-JACK? | 1.75-2.17 s | 1.96-2.32 s |
-      | V-JACK? after RES, with the model's 0x70 replay | n/a | 5.6 s |
+      | V-JACK? after RES, with the model's 0x70 replay (a 24 V source reads 0x70 there) | n/a | 5.6 s (cap 6 s; ~6.6 s with the final 7 s) |
 
       A fault that starts after the switch is detected exactly as before.
       Tests on the final tree: switchtest (all scenarios), senttest 61/61, autorangetest, couptest,
@@ -2666,8 +2676,9 @@ Emulator (emu/):
          above.
       2. DC V with 5 V DC and with the 0..9.5 V 40 Hz square: no AC? (before: AC? at 2.6 s). If a
          symmetric AC source is at hand (>= 0.5 Vpk around 0): AC? within ~3 s.
-      3. 24 V DC on V-COM: RES -> DC A, V-JACK? within ~2.5 s, or after the 0x70 phase if the comparator
-         shows it (log DBG:SENT? ctsta for the first 6 s).
+      3. 24 V DC on V-COM: RES -> DC A and DC A -> Scope -> back, V-JACK? within ~2.5 s, or by ~8 s if
+         the comparator reads 0x70 / 0x50 for it; log the ctsta values (they say what a real source reads
+         and whether OHM_EXIT_CAP_MS can shrink).
       4. Leads in A / COM, 1-5 mA through A, switch into DC V / AC V / continuity / ohm: A-JACK within
          ~1 s. Then 12 V across A-COM in DC V: A-PROT as before (~0.5 s from the onset).
       5. RES-exit experiment (why 0x70 lasts 3.5 s): RES -> DC V for 1 s -> DC A, and RES -> AC A ->

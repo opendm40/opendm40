@@ -398,18 +398,25 @@ pub const WIN_MS: u64 = 100;
 /// BLANK_SETTLED_MS + up to one window more before its first hit window;
 /// nothing for one that starts later.
 pub const BLANK_ROW_MS: u64 = 150;
-/// Leaving the ohm network (relay PA back to the V/A path) into a current
-/// function (device ad74e93, nothing connected: RES -> A / mA showed V-JACK?
-/// from 1.5-1.95 s to ~5 s; CMP_SENSE CTSTA 0x70 for ~3.5 s, then 0x50, then
-/// 0). Both bits in one read cannot be a node (above VRH and below VRL), and
-/// a real source on V is positive (CMPHO), AC (CMPHO in some reads) or a
-/// negative DC (CMPLO alone, rare): for OHM_EXIT_CAP_MS after the exit a
-/// 0x70 read is no hit, nor is a CMPLO-only read within OHM_EXIT_TAIL_MS of
-/// the exit or of the last 0x70 read (`sample_cmp`). A positive or AC source
-/// keeps its V-JACK? timing (~2 s after the switch); only a negative DC one
-/// waits for the tail (up to ~6 s on the device's trace).
+/// The A rows' comparator on SENSE after leaving the ohm network (relay PA
+/// back to the V/A path) or after a chip restart (`dmm.rs` `start`: the
+/// Scope page / Wave view / logger back to the DMM). Device ad74e93 check E
+/// (397 switches): RES -> A / mA with V-COM open or at 1 V, CTSTA reads 0
+/// for ~0.5-0.7 s, then 0x70 (CMPHO + CMPLO) in every window to ~4.3 s,
+/// 0x50 to ~4.5 s, then 0 -> V-JACK? from 1.5-1.97 s to ~5 s; A at 5 V DC,
+/// Scope page, back: 0x70 from 0.51 s, V-JACK? 1.4-6 s. 0x70 is the
+/// comparator overdriven or unsettled (the device also reads 0x70 in DC V's
+/// V-tap window on a steady 5 V), not a level V-JACK? can use while it
+/// lasts: for OHM_EXIT_CAP_MS after the event a 0x70 read is no hit, nor is
+/// a CMPLO-only read within OHM_EXIT_TAIL_MS of the event or of the last
+/// 0x70 read (`sample_cmp`). A source that reads CMPHO alone keeps its
+/// V-JACK? timing (~2 s); one that reads 0x70 (a voltage high enough to
+/// overdrive the tap, if it does) or CMPLO alone waits for the cap: V-JACK?
+/// ~8 s after the switch at worst. Outside the cap 0x70 counts as before.
+/// Check E: the last 0x70 read at 4.2-4.4 s (RES -> A, 6 runs) and 5.24 s
+/// (A at 5 V, Scope page, back), the last CMPLO-only one 0.1-0.2 s later.
 pub const OHM_EXIT_TAIL_MS: u64 = 2500;
-pub const OHM_EXIT_CAP_MS: u64 = 8000;
+pub const OHM_EXIT_CAP_MS: u64 = 7000;
 pub const BLANK_SETTLED_MS: u64 = 100;
 /// Hit windows in a row before A-JACK is asserted (2 polls >= 100 ms apart).
 pub const AJACK_WINDOWS: u8 = 2;

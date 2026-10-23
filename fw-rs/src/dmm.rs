@@ -814,8 +814,8 @@ pub struct Dmm {
     /// A row went out (`write_config`) and the sentinel has not been
     /// re-armed since (`sent_rearm`, the first poll past the settle).
     sent_arm: bool,
-    /// When the relay last left the ohm network for the V/A path (ms;
-    /// sentinel::OHM_EXIT_*), None before.
+    /// When the relay last left the ohm network for the V/A path, or the
+    /// chip restarted (`start`) (ms; sentinel::OHM_EXIT_*), None before.
     ohm_exit_t: Option<u64>,
     live: bool,
     /// OVERLOAD latch (doc 4.3 / 4.7, sentinel::overload_trips): None = not
@@ -2666,6 +2666,9 @@ impl Dmm {
         // The chip was another's (Wave view, logger), asleep or lost: the
         // sentinel's history starts over (`write_config` `fresh`).
         self.sent_mode = 255;
+        // ... and the A rows' SENSE comparator reads 0x70 for seconds after
+        // a restart too (device ad74e93 E2: A, Scope page, back).
+        self.ohm_exit_t = Some(clk.now_ms());
         self.set(clk, m, r, 450);
     }
 
