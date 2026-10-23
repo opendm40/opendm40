@@ -731,6 +731,8 @@ pub struct Dmm {
     ohm_var: u8,
     /// S+0x40: no reading accepted before this time.
     deadline: u64,
+    /// Time of the last function change (`set`): ohm steps down one range
+    /// at a time until OHM_SINGLE_MS after it (`poll_ohm`).
     entry: u64,
     prev_ad1: i32,
     r22: u8,
@@ -1025,6 +1027,17 @@ const VET_N_ACDC: u8 = 8;
 const VET_HELD_MAX: u8 = 4;
 const VET_DIV: i32 = 200;
 const VET_FLOOR: i32 = 4000;
+
+/// Ohm entry (switch-latency.md proposal 2): the stock's button entry writes
+/// no settle deadline; its `now + 2500` at case 10 (app_decompile.c:16135)
+/// is S+0x70, the end of the window in which the range steps down one at a
+/// time (OHM_SINGLE_MS, `poll_ohm`), so it hunts down from 60 Mohm one range
+/// per ~150 ms from the start (emulator: 4.7 kohm at 1.15 s). fw-rs entered
+/// with a 2500 ms deadline instead: no conversion for 2.5 s, and the single
+/// step window ended with it (3.1 s emulator, 2.7 s device). The entry
+/// now waits as a range write does.
+const OHM_ENTRY_MS: u64 = 150;
+const OHM_SINGLE_MS: u64 = 2500;
 
 // AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-fwrs.md
 // section 11). The AC+DC alternation measures both parts; AUTO shows one of
@@ -1989,7 +2002,7 @@ impl Dmm {
         self.cpl_auto = false;
         self.manual = false;
         let (r, settle) = match mode {
-            10 => (6, 2500),
+            10 => (6, OHM_ENTRY_MS),
             11 => (0, 200),
             12 => (0, 100),
             13 => (0, 200),
@@ -2403,7 +2416,7 @@ impl Dmm {
                     self.set_ohm_var(clk, self.ohm_var ^ 1);
                 } else {
                     self.manual = false;
-                    self.set(clk, 10, 6, 2500);
+                    self.set(clk, 10, 6, OHM_ENTRY_MS);
                 }
             }
             Button::Cap => {
@@ -3607,7 +3620,7 @@ impl Dmm {
                 // Down below 0.1 * lim / over, as V / A. The stock tests
                 // q > 10 (R < over * lim / 10), which is exactly the next lower
                 // range's up threshold: no hysteresis band at all.
-                let step = if now < self.entry + 2500 {
+                let step = if now < self.entry + OHM_SINGLE_MS {
                     1
                 } else if q > 1e5 {
                     5
