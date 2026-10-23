@@ -2618,3 +2618,96 @@ full scale) once the row has settled, streak saturating at 255. The status bar s
   0x1A, 0x1C / 0x1D and 0x23 still differed. 0x12 was written back (0x4120); one read later 0x0C read 0x2711, and a
   second dump a minute later matched the start everywhere but 0x2C, with nothing more written.
   During the check it was off / 1 V / 10 V / 24 V DC; the meter's generator was never switched on.
+
+## f0d21eb: false-hint fixes, USBTMC abort race, generator in region B (2026-10-24 00:04 - 00:57)
+
+The coordinator had installed f0d21eb (rust-fw-poc: the falsehint sentinel fixes b9fb78e..f403cf1, the usbtmc
+pump_in fix 9a230a3, Gen::apply / gen::plan in region B fb6be06). `*IDN?` = `Alientek,DM40A,<UID>,dm40-fw 0.1`,
+`DBG:FLASH?` `EF4018,4096,0,...`. INFO/FIRMWARE.BIN, read with the page cache dropped (posix_fadvise DONTNEED), is
+byte-equal to the f0d21eb build (sha256 0a2293c3…3bba). `dm40dbg.py boot`: marker VALID, crash count 0, HEALTHY at
+the start and the end; uptime says the meter booted at ~00:02 (the install), no reset during the check. No flashing.
+Files are in the session scratchpad's `chk3/`: `sentE.py` (now also logs `DBG:SENT:LOG?` and `CONF?` per step),
+`ctsum.py`, `summE.py`, `sessG.py` (generator settings during a disk session), `genrestore.py`, `tmcabort.py` (the
+Linux usbtmc driver's generic API), `tmcusb.py` (pyusb, exact 64-byte IN URBs), `settle.py`, `setshots.py`, `cal.py`,
+and `out/`: `E_<tag>.json` / `E_<tag>_raw.json` per run (every DBG:SENT? row), `ctsta_summary.txt` (the ctsta
+timeline per step of every run), `alerts_summary.txt`, `<tag>.txt` (one line per step with the new DBG:SENT:LOG?
+entries), `tmc*_*.json`, `g384.json` / `g768.json`, `settle_v1.json`. The calibrator was found on the 10 Hz square
+(func 2, 10 000 mHz), enabled; the meter on the DMM page, DC V AUTO+, RATE FAST, Settings as listed at the end.
+
+| # | check | result |
+|---|---|---|
+| 1 | Falsehint retest item 1: 48 switches per level (DC V, AC V, AC+DC, V AUTO, A / mA / uA, AUTO A, RES, diode, continuity, cap, Hz, temp, W, AC A / mA / uA, AC+DC A, MF -> Wave -> MENU -> Multimeter in DC V and AC V, A and mA -> Scope -> back), V-COM open / 1 V / 5 V (`m_open`, `m_v1`, `m_v5`) | **PASS for what the fix targets**: no V-JACK? after RES, no AC? in DC V, no A-PROT anywhere, no A-JACK except the known RES at 5 V. The rest of DBG:SENT:LOG? is explained by the source (DC? in AC V at 1 / 5 V, LIVE in continuity at 1 V) or is a known / new bug: V-JACK? in AC A (2a), **OVERLOAD in AC A** and **A-JACK in continuity at 5 V** (new, below) |
+| 1-E1 | RES -> DC A / mA / AUTO A / the A tap, each watched 10 s, plus RES -> DC V 1 s -> A and RES -> AC A 2 s -> A, open / 1 V / 5 V (`e1_open`, `e1_v1`, `e1_v5`; 15 steps each) | **PASS**: no V-JACK? in DC A after RES (0 of 21 RES -> A-family entries over the three levels, incl. the matrices). ctsta still reads 0x70 from 0.46-0.66 s to 4.8-4.9 s, then 0x50 for ~0.15 s, then 0 (as on d330877): the mask holds it off. RES -> DC V 1 s -> A and RES -> AC A 2 s -> A: ctsta 0 in DC A (item 5, as on d330877). The AC A step shows its own V-JACK (2a) |
+| 1-E3 | DC V at 5 V DC, 15 s watches: from DC A, from AC V, Wave view -> back, VOLT:COUP AUTO -> DC (`e2_v5`), plus every DC V entry of `m_v5` | **PASS**: no AC? (0 of 20 steps ending in DC V at 5 V). The V-tap window still alternates ctsta 0x70 / 0 at 5 V (the input is unchanged; the AC? rule ignores both-bit reads now) |
+| 1-E2 | DC A and DC mA -> MENU -> Oscilloscope -> MENU -> Multimeter at 5 V, 10 s watch (`e2_v5`), and the same in `m_open` / `m_v1` / `m_v5` | **PASS**: no V-JACK? (0 of 8). ctsta 0x70 0.51 -> 5.3-5.4 s, 0x50, then 0 |
+| 2 (TODO 2) | DC V on the 0..9.5 V 40 Hz square, 15 s, three entries incl. Wave view -> back (`sq40`) | **PASS**: no AC?. A symmetric AC source was not at hand (the calibrator's square is unipolar) |
+| 3 (TODO 3) | 24 V DC on V-COM: RES -> DC A, DC A -> Scope -> back; ctsta logged (`v24`, `v24b`, `v24sc`, `v24sc2`, `v24hist`) | **FAIL**: the real misconnect is missed in both cases. RES -> DC A (2 of 2): ctsta 0x70 0 -> 4.97 s, 0x50 to 5.18 s, then **0**, exactly the pattern of the open input: no V-JACK? in 10 s. DC A with V-JACK? on (entered TEMP -> AC V -> A), then Scope -> back (`v24sc2`): 0x70 0.51 -> 5.28 s, 0x50 to 5.43 s, then 0: **V-JACK? does not come back** (14 s). Details below |
+| 4 | A-JACK / A-PROT with current in the A jack | **Not run** (the A jack is not wired) |
+| 5 (TODO 5) | RES-exit: RES -> DC V 1 s -> DC A, RES -> AC A 2 s -> DC A | ctsta 0 in DC A at open / 1 V / 5 V (as d330877) |
+| 6 (TODO 6) | Remaining alerts: DBG:SENT? rows and DBG:SENT:LOG? | In `out/E_*_raw.json`, `ctsta_summary.txt`, `<tag>.txt` and below. The SENT:LOG count went 0 -> 62 assertions over 302 switches |
+| 2a | V-JACK? in AC A with V-COM open, 1, 5, 10, 24 V | **Unchanged (FAIL)**: every AC A entry, CONF:CURR:AC 10 / 0.06 / 600 uA, V-JACK? from 1.68-1.84 s (10 A from DC / AC V), at all levels. AD1PK_SENSE, ctsta 0. pkmin / pkmax run from ~-117 000 at 0.67 s down ~1 400 counts per 50 ms to -262 144 at 1.9-2.1 s; streak +1 per window from 0.78 s, V-JACK at streak 18-20. Rows in `E_m_open_raw.json` ACA@6 |
+| 2b | DC A entered from DC V (60 V autorange) with 10 / 24 V on V-COM | **Unchanged**: ctsta 0 for 10 s, no V-JACK? (24 V: 2 / 2 DC A, 2 / 2 mA). 10 V is never seen in DC A from any entry (0x70 only for 0.66 s after TEMP), so 10 V may be under the comparator's threshold. New: the DC V state also carries through AC V (below) |
+| 2c | A-JACK in AC V with 24 V DC on V-COM | **PASS (not reproduced)**: 5 AC V entries at 24 V (from DC A, AC A, DC V, TEMP), 5 s each: no A-JACK, also not in DBG:SENT:LOG?; DC? at 3.3 s where the entry came after AC A; ctsta 0x70 in AC V when entered after TEMP / a TEMP-entered DC A, 0 after DC V |
+| 2d | VOLT:RANG:AUTO? in AC V, CURR:RANG:AUTO? in AC A | **Unchanged**: +9.91000000E+37 and -100 "Settings conflict" queued (also VOLT:RANG? / CURR:RANG?). The function-specific forms answer: VOLT:AC:RANG:AUTO? 1 in AC V, CURR:AC:RANG:AUTO? 0 in AC A. So the plain forms mean the DC function; whether that is wanted is for the owner (34401A: VOLT:RANG = VOLT:DC:RANG) |
+| 3a | USBTMC abort-in race, exact URBs: pyusb on interface 0 (usbtmc detached, MSC untouched, re-attached in `finally`; `/dev/usbtmc2` back each time) with emu usbtmc_stress's c_abortin / c_stale / c_clear: `*IDN?` (52 + 12 = 64 bytes: one full packet + ZLP) aborted before any read, after its 64-byte packet (the ZLP still pending: the 9a230a3 race), DBG:LCD? (2007 bytes) after 1 / 3 packets, a REQUEST never read, INITIATE_CLEAR; each followed by a plain `*IDN?` (`tmcusb_abort2000.json`) | **PASS**: 2000 / 2000, 0 bad, 91 s. After the 64-byte packet: INITIATE 0x01 SUCCESS, CHECK `02 01 .. 34000000` (PENDING, read the IN FIFO, 52 bytes sent), the drain reads the ZLP (0 bytes), CHECK 0x01, the next `*IDN?` exact. DBG:LCD? after 3 packets: NBYTES 0xF4, drain 64 + ZLP. SYST:ERR? "No error" |
+| 3b | The same through the Linux usbtmc driver (generic API: USBTMC_IOCTL_WRITE / READ with our own headers, CTRL_REQUEST for INITIATE / CHECK_ABORT_BULK_IN) (`tmc_abort500.json`) | **PASS**: 500 / 500. Note: this driver's generic READ submits URBs of its buffer size, so a "read 64 bytes" takes the whole transfer (incl. the ZLP) and INITIATE then answers 0x80 FAILED (correct: nothing left), and a drain must be one large read; a first try that drained with 64-byte reads looked like a missing ZLP: a host artifact, cleared by 3a |
+| 3c | 2000 queries, random `*IDN?` / `READ?` / `WAV:PRE?`, plain write / read, no desync repair (`tmc_mix2000.json`) | **PASS**: 0 empty, 0 mismatched (`*IDN?` and `WAV:PRE?` byte-equal to their first reply, READ? a number every time). Worst reply 7.6 / 106.8 / 4.9 ms |
+| 4a | Generator settings during a 38400 AD2 disk session (15 s): SOUR:FREQ 1000; SOUR:FUNC SQU; SOUR:VOLT 1.5; SOUR:FREQ 2345 about 1 s apart, OUTP? checked before each, the 6 generator queries every 0.25 s (`g384`) | **PASS**: late 0, overruns 0, dropped 0, max_lat 280 ns (260 ns after each setting), 576 002 rows, lost_before 0. Each setting answered in 0.1 ms, SYST:ERR? "No error". OUTP? 0 before, after each setting, in all 60 polls and after. SOUR:FREQ? 2345 reads back +2.344996E+03, DCYC +5.003000E+01 (the timer's resolution) |
+| 4b | The same at 76800 (`g768`, generator first set back to the owner's values so every setting is a change) | **PASS**: late 0, overruns 0, max_lat 280 ns, 1 152 003 rows over 15.0 s (t 1.007 -> 16.007 s after the writer trial, gate 1 = kept the 76800 rung), no gap, lost_before 0. OUTP? 0 throughout |
+| 5 | Switch latency, settle.py at 1 V, 2 reps (`settle_v1.json`), the baseline for the fast-switch build | Same as ad74e93: first valid FETCh? DC V -> AC V 460-462 ms (0.1 % at 2.46-2.47 s), AC V -> DC V 457-460 ms, DC V -> RES 2672 ms, RES -> DC V 554-558 ms, DC V -> A 758 ms, DC V -> mA 557-559 ms, AC V -> AC+DC 1372-1377 ms, DC V 6 V -> 60 V 509-557 ms |
+
+### 24 V on V-COM in DC A: when the comparator sees it
+
+ctsta is DBG:SENT? field 4 in decimal (112 = 0x70, 80 = 0x50, 16 = 0x10). Per step, from `ctsta_summary.txt`:
+
+| entry into DC A (24 V on V-COM, A jack open) | ctsta in DC A | V-JACK? |
+|---|---|---|
+| DC V (60 V autorange) -> A / mA (`v24`, `v24b`) | 0 throughout (10 s) | none |
+| TEMP -> A (`v24`, `v24b`, `v24hist`) | 0x70 from the first poll to the end | **8.00-8.01 s** (d330877: 1.71 s; now the 7 s OHM_EXIT cap, as designed) |
+| AC V -> A, where AC V came after TEMP or after a TEMP-entered A (`v24`, `v24b`, `v24hist`, `v24sc2`) | 0x70 to 0.65 s, then **0x50 for good** | **1.76-1.77 s** |
+| AC V -> A, where AC V came straight from DC V (`v24sc` x2, `v24hist`) | 0 throughout | none |
+| RES -> A (`v24`, `v24b`) | 0x70 to 4.97 s, 0x50 to 5.18 s, then 0 | none |
+| A (V-JACK? on) -> MENU -> Oscilloscope -> MENU -> Multimeter (`v24sc2`) | 0x70 0.51 -> 5.28 s, 0x50 to 5.43 s, then 0 | lost (none in 14 s) |
+| A (no alert) -> Scope -> back (`v24`, `v24b`, `v24sc`) | the same pattern | none |
+
+So a real 24 V source reads either 0x70 for good (TEMP -> A: the source outlasts the ~5.3 s 0x70 tail of an ohm
+exit / chip restart) or 0x50 for good (AC V -> A after TEMP), and the row sees it only in those cases. The 0x70
+phase after an ohm exit or a chip restart looks the same with and without a source; after it the row reads 0,
+source or not. What decides it is the history: DC V on its 60 V range, the RES exit and the chip restart (the
+Scope round trip) leave the A row blind (a seeing A -> RES -> A ends in 0, as does A -> Scope -> back); TEMP makes
+it see again; AC V in between changes nothing either way. The guess of d330877 holds and is wider: some comparator /
+divider setting that DC V 60 V, the RES exit and dmm.start leave behind is not rewritten by the AC V / DC A rows,
+and the TEMP row rewrites it. In AC V, ctsta at 24 V is 0x70 after TEMP and 0 after DC V, the same split. With the
+7 s cap, OHM_EXIT_CAP_MS cannot shrink on these data alone: in the RES case the source is invisible after the cap
+anyway.
+
+### New bugs
+
+1. **False OVERLOAD (red) in AC A, and the 60 mA range falls back to 10 A.** With 1 V or 5 V on V-COM and the A
+   jack open: `CONF:CURR:AC 10`, then `CONF:CURR:AC 0.06`: CONF? reads 60 mA at +0.05 s, then OVERLOAD (AD1PK_SENSE)
+   at 0.5 s and CONF? is back to 10 A (`acarange2.txt`, twice: after 1 s and 6 s in 10 A; `m_v1` / `m_v5` step
+   ACmA). pkmin / pkmax there are -207 000..-218 000 (the AD1 drift of 2a). From DC mA, CONF:CURR:AC 0.06 stays in
+   60 mA (with the 2a V-JACK?), as does CURR:AC:RANG 0.06 after 600 uA (`acarange.txt`). Same detector input as 2a.
+2. **A real 24 V on V-COM is missed in DC A after RES and after the Scope round trip** (above; TODO falsehint
+   retest 3). A V-JACK? that was on goes away after Scope -> back.
+3. **A-JACK in continuity at 5 V DC on V-COM** (`m_v5` CONT from diode: A-JACK at 0.41 s, AD2PK_PB1, stays). At 1 V
+   the same step shows LIVE (right). Probably the V_GATE premise of the RES 5 V item (35fce2a 7b, owner decision),
+   seen in continuity for the first time.
+
+### State at the end
+
+- **Device:** f0d21eb, DMM page, DC V AUTO+ (`VOLT:RANG:AUTO?` 1, `VOLT:COUP?` DC), RATE FAST, the bargraph row
+  (`e_dmm.png`, the same layout as `s_dmm.png`). LOG: AD1 / 4800 / HOST / DUR 60 / CHOP 1 / OSR 3 / STAT 0, CSV:INT 0
+  (sessG had set AD2 / 76800 / 15: set back). Generator: OUTP? 0 throughout, never switched on; its settings (SQU,
+  2 MHz, 3 V, 1.5 V offset, 50 %) set back and read back equal after each session. POW:COUP DC. SYST:ERR? "No error",
+  SYST:ALER? NONE. Crash count 0, marker VALID.
+- **Settings:** Settings 1/3 and 3/3 at the end are byte-equal to the start screenshots (`s_set1..3.png` vs
+  `e_set1..3.png`); 2/3 differs only in the live rate digits (x 277-308, y 50-65). Dim / Shutdown Never, backlight
+  10 %, volume 0 %, Start page Multimeter, DMM row Bargraph, USB disk "Files live" (`DBG:VDISK:RO?` 1,1).
+- **Disk:** MMEM:CAT? equals the start string exactly (3 534 848 / 13 205 504, 27 names). The two LOGS/FAST000.DLG
+  (g384, g768) were deleted by exact name, each only after it was the one new name.
+- **USB:** the usbtmc driver was detached from interface 0 only during the 3a runs and re-attached (`/dev/usbtmc2`
+  each time); the volume stayed mounted read-only.
+- **Calibrator:** back on the 10 Hz square, enabled; registers 0x00..0x2F equal the start dump except 0x2C (live).
+  Right after the last frequency set 0x0C read 0x2711 and 0x23 0x31C9; a minute later both matched, with nothing
+  written. During the check: off, 1 V, 5 V, the 0..9.5 V 40 Hz square, 10 V, 24 V DC.
