@@ -565,9 +565,12 @@ Code work (in this order):
       **while streaming**, keep only the decoded frames and let the raw samples go.
       - Source: the scope's continuous circular-DMA stream mode (up to 1.25 MS/s, the roll / software-stream path),
         which gives UART up to ~115200 baud at >= 10 samples/bit. Faster links use one 50 MS/s record with the
-        trigger on a start bit. Single channel, so only one-wire or differential protocols: UART / RS-232 (inverted),
-        RS-485 (probe across A-B), Modbus RTU and ASCII on top of UART, then maybe 1-Wire, LIN, DMX, CAN (CANH-CANL),
-        IR NEC/RC5. No I2C / SPI (they need two channels).
+        trigger on a start bit. Single channel, so only one-wire or differential protocols. In scope (owner
+        2026-10-23): UART / RS-232 (inverted), RS-485 (probe across A-B), Modbus RTU and ASCII on top of UART,
+        1-Wire (reset / presence, ROM commands, CRC-8; standard and overdrive speed), DMX512 (break / MAB, 512
+        slots at 250 kbit/s: needs >= 1.25 MS/s, so check margin or use triggered records), CAN (CANH-CANL or
+        RX; bit stuffing, ID / DLC / data, CRC-15, ACK; 125-250 kbit/s fits the stream, 500 k / 1 M via
+        records). Maybe later: LIN, IR NEC/RC5. No I2C / SPI (they need two channels).
       - Decoder: threshold with hysteresis (auto from the signal's min/max), bit timing from the edges (auto-baud
         from the shortest pulse plus a list of standard rates), 8N1 / 8E1 / 7E1 etc. Modbus: frames split on the
         3.5-character gap, CRC-16 check, address / function / registers decoded, request <-> reply paired.
