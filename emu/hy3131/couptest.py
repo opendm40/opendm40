@@ -117,14 +117,14 @@ SC = {
         (0, 'open;aca:1@60;rmsfill:1.5', lambda d: d['C'] == 'AUTO,AC', 'AC 1 A, slow RMS fill: AC, no OVERLOAD'),
         (24, 'open;aca:0.3@60;rmsfill:1.5', lambda d: d['C'] == 'AUTO,AC' and conf_range(d) < 1, 'AC 300 mA: AC, down to the mA shunt'),
     ], {}),
-    # Entering V AUTO on 230 V AC: A AUTO's twin (TODO "AC+DC / AUTO
-    # down-range on one part"). The entry is DC V 6 V; the DC phase reads
-    # ~0 V, and before the AC part was measured its hypot(0, DC) asked for
-    # a step down (6 V -> the mV range with AUTO). Every sample: CONF? on
-    # the 600 V or 1000 V range once the first up-range is done (ALWAYS).
-    'vac230': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 30, [
+    # Entering V AUTO on 230 V AC: A AUTO's twin (TODO "AC+DC / AUTO down-range on one part";
+    # not a repro: the model's DC conversion of 230 V AC on 6 V is over range, so the entry
+    # steps up). A regression check: never the mV range, and on 600 V or above while 230 V once
+    # method C's range visits (an anchor step per range: 600 V at fw ~12 s) are done. The 0.3 V
+    # phase (script 26) reaches the firmware at fw ~24.5 s (its uptime trails by ~1.5 s).
+    'vac230': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 40, [
         (0, 'open;acv:230@50', shows('AUTO,AC', 230.0, 0.005), 'enter AUTO on AC 230 V: AC, 600 V range'),
-        (14, 'open;acv:0.3@50', shows('AUTO,AC', 0.3, 0.01), 'AC 0.3 V: down to 6 V'),
+        (26, 'open;acv:0.3@50', shows('AUTO,AC', 0.3, 0.01), 'AC 0.3 V: down to 6 V'),
     ], {}),
     # Touch: three taps on the active V button (DC -> AC -> AC+DC -> AUTO;
     # from 5 s: a tap at 3 s fell into the boot), the fourth back to DC;
@@ -200,8 +200,13 @@ ALWAYS = {
                 (10, 21, lambda d: conf_range(d) >= 6, 'A shunt while 1 A')],
     # 230 V never on 6 V or the mV range once the first up-range is done (fw ~4 s)
     'vac230': [(0, 99, lambda d: not conf_range(d) < 1, 'never the mV range'),
-               (5, 15, lambda d: conf_range(d) >= 600, '600 V range or above while 230 V')],
+               (14, 23, lambda d: conf_range(d) >= 600, '600 V range or above while 230 V')],
 }
+# Scenarios for some AC+DC methods only (default: all). iacfill: the RMS fill model is longer
+# than method A's AC phase on purpose; B / C keep one row and refill it at every range change
+# (1.2 s apart there), so under that model their AC part never reaches the input: no test of
+# them.
+METHS = {'iacfill': 'A'}
 # Scenarios whose AUTO part inside a phase (from its first AUTO reading after the phase's last
 # command) is DC and then at most one change (the decision), the same part in every phase.
 STABLE = {'sqtie'}
@@ -209,6 +214,9 @@ STABLE = {'sqtie'}
 
 def run(name):
     setup, cq, run_for, phases, acts = SC[name]
+    if (A.meth or 'A') not in METHS.get(name, 'ABC'):
+        print('RESULT %s SKIP (method %s: the scenario is for %s)' % (name, A.meth, METHS[name]), flush=True)
+        return True
     setup = (['DBG:ACDC:METH ' + A.meth] if A.meth else []) + setup
     acts = dict(acts)
     script = [(t, spec) for t, spec, _, _ in phases if spec]

@@ -961,7 +961,7 @@ Firmware:
         OVERLOAD). Emulator: model + 27 new senttest scenarios, 362 model checks; host tests; ui-render 0.
         (verify on device: doc §4.7 device test plan T8, T11..T16; DBG:SENTinel:VARiant +8 / +16 back out the
         new rows / the alternation if a reading moves)
-  - [ ] BUG (owner 2026-10-22): A AUTO coupling (and AC+DC A, plain AC / DC A AUTO), AC 1 A applied ->
+  - [x] BUG (owner 2026-10-22): A AUTO coupling (and AC+DC A, plain AC / DC A AUTO), AC 1 A applied ->
         OVERLOAD at once, though an AUTO up-range is normal operation. Emulator: couptest `iac` (enter
         CURR:COUP AUTO with aca:1@60) has SYST:ALER? OVERLOAD from fw uptime 2 s on HEAD 194caf6. Cause: A
         enters on DC mA r0 (stock, `select`: FUNC_A_AUTO -> 8); `overload_trips` treats the mA / uA shunt's
@@ -970,8 +970,16 @@ Firmware:
         r0, AC+DC its DC phase), no latch / alert; OVERLOAD only for a manual range. Update senttest
         `ovl-dcma` / `ovl-acma` / `ovl-acdc` (they expect OVERLOAD in AUTO), doc 4.7 table. Open: enter A on
         the A shunt instead (user-feedback §5.4 note), so 1 A never flows through 0.5 ohm for the ~1-2 s of
-        the walk up. WIP patch (not applied, both items; temporary): <scratchpad>
-  - [ ] BUG (code reading, same session): AC+DC / AUTO down-range on one part. After `reset_values`
+        the walk up.
+        **Fixed (1152624):** the proposal as written (`dmm.rs` ovl_trip): AUTO / AUTO+ over range on the
+        shunt's top range = one hop to 6 A (DC 7 r0, AC 4 r0, AC+DC / AUTO the DC phase), no latch / alert /
+        beep / toast; OVERLOAD only for a manual range (doc 4.7 table). Emulator on 70572bb vs fix:
+        couptest `iac` (enter AUTO, AC 1 A; every sample checked) OVERLOAD from fw 2.0-5.4 s in methods A / B
+        / C -> NONE in all three; new `idc` (DC 1 A) the same; senttest `ovl-dcma` / `ovl-acma` / `ovl-acdc`
+        OVERLOAD -> NONE with the reading in its window, new `ovl-dcma-man` / `ovl-acma-man` keep OVERLOAD
+        for a manual range, `aprot-to-dca` expects NONE. Still open (not this fix): enter A on the A shunt
+        (the ~1-2 s of 1 A through 0.5 ohm before the hop remain). Device retest: list "dmm-bugs" below.
+  - [x] BUG (code reading, same session): AC+DC / AUTO down-range on one part. After `reset_values`
         (entry, every unit change) `ac_raw` = 0, and the DC phase autoranges on hypot(ac_raw, DC): a pure
         AC signal reads ~0 there and walks down. A: mA -> uA (a_auto 3) with 1 A AC flowing (47.5 ohm!),
         then the AC phase trips; V: 230 V AC -> 6 V, with AUTO+ into mV (by the code, not run). The AC phase
@@ -979,13 +987,32 @@ Firmware:
         since the reset (`acdc_seen` bit: DC phase needs AC, AC phase needs DC); up-ranges never wait. The
         stock's S+0x60 hypot likely has the same gap (INFERRED). Test: couptest `iac` phase 2 (AC 300 mA ->
         mA shunt, NONE) and a V scenario entering AUTO on AC 230 V (range stays >= 600 V, no mV).
-  - [ ] OVERLOAD badge stays after the overload is gone (owner 2026-10-22): the latch shows red OVLD while
+        **Fixed (1152624):** `acdc_down_ok`: a step down needs the other part measured since the last reset
+        (`Dmm::acdc_known`, bit 0 AC / bit 1 DC: `acdc_seen` without its range-change clear); method A's DC
+        phase (`acdc_down`) waits for the AC part, B / C's AC result for the DC part; ups never wait.
+        Reproduced only with the model's new `rmsfill:` (the stock AC rows' RMS window filling, INFERRED
+        1.5 s): the AC part's settle (ACS_STEP) outlasts the AC phase, `ac_raw` stays 0 from the quiet hop's
+        reset, and the DC phase's hypot(0, ~0) asks for a step down for ACDC_DOWN_MS across phases. couptest
+        `iacfill` (method A; B / C skipped: their single row refills at every range change under that model):
+        without the guard 6 A -> 60 mA with 1 A AC flowing at fw 10.96 and 19.87 s, with it the A shunt
+        throughout. Without the fill (`iac`, `vac230`) the AC part settles within the first AC phase and the
+        gap does not show; `vac230` (V AUTO on 230 V, never the mV range, >= 600 V while 230 V) stays as a
+        regression check. In B / C both parts usually come from the same result, so the guard rarely acts
+        there. Whether the device's settle outlasts an AC phase is not known: retest list below.
+  - [x] OVERLOAD badge stays after the overload is gone (owner 2026-10-22): the latch shows red OVLD while
         the meter measures fine on 10 A. Release = 5 s below max(half the scale it returns to, 2 mA), so
         e.g. manual 60 mA with 40 mA now never returns; AUTO after a uA overload keeps the badge for any
         current > 3 mA; a re-trip within 30 s makes it sticky. Proposed: red only at the trip (beep, toast,
         a few s), then a grey / amber "10A^" info badge (tap = back); return when the reading fits the old
         range with margin (~0.8-0.9 x FS; re-trip is at 1.03 x, the 30 s sticky rule covers flapping).
         Mostly moot in AUTO if the quiet hop above lands.
+        **Fixed (1152624):** AUTO has no latch any more (above). Manual: red OVLD with the beep and toast for
+        `OVL_RED_MS` = 3 s, then an amber "10A" badge / strip (`Alert::Ovl10A`, display only via
+        `Sentinel::shown`; SYST:ALER? and STAT:QUES keep OVERLOAD for the whole latch, no new toast / beep);
+        release below 0.85 x the scale it returns to (`OVL_RELEASE_FRAC`, was 0.5) for 5 s, the 30 s sticky
+        rule unchanged. senttest `ovl-dcma-man` (manual 60 mA, 2 A then 40 mA: back on manual 60 mA with
+        40 mA; at 0.5 x it never returned), host tests `overload_badge_red_then_amber`, ui-render d25 / c22
+        (amber, 0 violations). "Tap = back" not done (the user's range keys do it already).
   - [x] 4-20 mA % hidden below 3.6 mA (NAMUR NE 43; 0 mA read -25 %): 194caf6.
   Compared with UNI-T UT197 (2026-10-22, its manual §16.2 + the A / mA fuse notes): the UT197 senses a PLUG in
   the mA/uA or A jack (no signal needed) and flashes "InErr" + beeps in any non-current position, i.e. before
@@ -1906,8 +1933,24 @@ Firmware:
             Device 1eb4d7e: A-PROT again in TEMP with the square on V-COM: in ohm / temperature the probe
             follows the V input (~0.34 A per volt; 5 V DC read 1.7 A). Fixed: the probe in DC V / mV only,
             ohm / temperature A-JACK only (doc 4.8).
-      - [ ] False A-JACK in ohm / temperature with a voltage on V-COM (5 / 10 V DC, the square; A jack open):
+      - [x] False A-JACK in ohm / temperature with a voltage on V-COM (5 / 10 V DC, the square; A jack open):
             the comparator on PB1 hits there; LIVE? is the right alert (device 1eb4d7e).
+            **Fixed by detection, not documented as a gap (1152624, doc 4.8 "V_GATE").** Why not a gap as in
+            Hz: the comparator alone cannot tell (two bits per window; the pickup grows with the voltage, so
+            no threshold separates it from a current), but unlike Hz these rows measure V-COM themselves:
+            ohm's AD1 code goes negative for any source above the ohm source's ~1.4 V or below COM (LIVE?'s
+            sign), the thermocouple input reads > 80 mV (`T_VDRV_MV`; type E 76.4 mV at 1000 C, an open TC
+            read ~212 C = ~7.6 mV on the device), RTD / NTC use the ohm sign. The case A-JACK is for (leads in
+            A / COM, V-COM open) shows neither. So in ohm / temperature A-JACK asserts only after a V-side
+            result since the hit run began said "free" (ohm: next conversion; TC: up to ~2.2 s), and drops
+            when it says "driven"; ohm then shows LIVE?. DBG:SENT? field 12: -1 / 0 free / 1 driven.
+            Emulator: the model's `Pb1VjackMv` (PB1 picks up the V jack in those rows, 10 mV / V INFERRED:
+            1 V under and 5 V over the 23.75 mV threshold, as the device); senttest `ohm-v5` / `temp-v5`
+            (5 V, 10 V, the square, then 2 / 5 mA in A with V-COM open): 70572bb A-JACK from fw 10 s, fix
+            NONE / LIVE? and A-JACK in the last phase. Residual gaps (doc): a source between the pickup
+            threshold and ~1.4 V in ohm if the real k is > ~17 mV / V; a current in A together with a source
+            on V-COM (LIVE? is shown, not A-JACK); an open TC input reading > 80 mV would hide A-JACK in TC.
+            Device retest: list below (item 5 also bounds the pickup k).
       - [x] **False A-JACK in Hz** (A jack open, reproducible): FREQ with 1 V DC or the 40 Hz square on V-COM
             -> SYST:ALER? AJACK (kind AD1PK_PB1), DMM page and combined view. Also an "AC" hint in DC V on
             the calibrator's 5 V DC (not at 1 / 10 V).
@@ -2155,7 +2198,26 @@ Emulator (emu/):
       the test does): the source badge exit (DMM -> MCX: `wave_close` without `show`, so the MCX page runs one
       pass with the stream on), a V/div step at 2 / 1 ms/div (a full repaint with the stream on: the ring
       overflows, the record restarts), the inrush page's LOG:CSV ON refusal (inrushtest).
-- [ ] AUTO OVERLOAD on AC 1 A (1bffde2, couptest iac repro): blocked, the A jack is not wired.
+- [x] AUTO OVERLOAD on AC 1 A (1bffde2, couptest iac repro): blocked, the A jack is not wired.
+      Fixed in 1152624 with the 2026-10-22 BUG (quiet hop in AUTO); the device check is in the list below.
+- [ ] Device retest "dmm-bugs" (1152624; most need a current in the A jack: a current-limited bench
+      supply + load or the calibrator's current output; the meter here has the A jack open):
+      1. A AUTO coupling (CURR:COUP AUTO), AC 1 A @ 50 Hz: SYST:ALER? NONE throughout, CONF? 6 A range
+         within ~2 s, the reading 1 A; then 300 mA: back on the mA shunt (CONF? 0.6), NONE. Same for CURR:AC,
+         CURR:DC with DC 1 A, CURR:ACDC with AC 1 A and with DC 1 A (AUTO everywhere).
+      2. The same with AC 1 A held 60 s and CONF? polled ~5 / s: never 0.06 / 0.6 / uA while 1 A flows
+         (the down-range guard: decides whether the device's RMS settle outlasts an AC phase, rmsfill).
+      3. Manual 600 mA (CURR:AC:RANG 0.6), 2 A: red OVLD + one 300 ms beep + toast, after ~3 s amber "10A"
+         (status slot and combined-view strip), SYST:ALER? OVERLOAD throughout; 2 A off: back on 600 mA
+         after ~5 s, NONE.
+      4. Manual 60 mA (CURR:DC:RANG 0.06), 2 A then 40 mA: back on manual 60 mA after ~5 s (was never).
+      5. A jack open, calibrator on V-COM: RES and TEMP with 1 V, 5 V, 10 V DC, -5 V and the 0..9.6 V
+         40 Hz square, 10 s each: no A-JACK; RES with >= 5 V shows LIVE?; DBG:SENT? field 12 = 1 (driven)
+         where LIVE? shows. The comparator still counts (field 8, hits, grows while gated): step RES through
+         1.0 / 1.5 / 2 / 2.5 / 3 V DC; the lowest level with hits bounds the PB1 pickup, k ~ 23.75 mV / V_trip
+         (replaces the inferred 10 mV / V of the model; k > ~17 mV / V would leave the 1.4 V gap of doc 4.8).
+      6. Leads in A / COM, V-COM open, a few mA (2-5 mA) through A in RES and TEMP (K TC and an NTC type):
+         A-JACK within ~1 s (RES) / ~2.5 s (TC), field 12 = 0.
 
 ## Device check 7409b92: shot fix, 76.8 kS/s, AC+DC methods (2026-10-23; docs/device-check-2026-10-21.md "7409b92")
 
