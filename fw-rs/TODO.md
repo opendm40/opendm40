@@ -1213,7 +1213,7 @@ Firmware:
       lost / late / slips / overruns / timeouts / bad 0, locked, max_lat 300 ns; codes in range CHOP ON / OFF;
       DIV 8,1 at 4800 / 38400 lost 0; Wave view 1 / 2 ms/div overwritten 0 in 30 s; DC V 1 V -0.005 %, SELF? 0).
       **4 FAIL**: disk at 76800 kept 2 095 713 of 4 599 040 conversions (lost_before 2 505 919), see below.
-- [ ] 76800 to the disk loses 54 % (device 7409b92): rung 76800 chosen (tpp 382 / 389 us), fifo_hw 525 B,
+- [x] 76800 to the disk loses 54 % (device 7409b92): rung 76800 chosen (tpp 382 / 389 us), fifo_hw 525 B,
       336 pages/s, a hole of ~27-38 conversions after every 32 rows: one BATCH per Run pass, RUN_BUDGET_CYC
       (300 us of cycles, the ISR's share counted) used up by it with the ISR at cpu_permille 544 (estimate
       ~430, emulator 295). Main loop 1272 passes/s, `usb` (Run) avg 718 us. The host drain also tops out
@@ -1252,6 +1252,28 @@ Firmware:
       6. The Wave view 1 / 2 ms/div and a host LOG:DATA? session at 76800 as in 7409b92 2.1 / 2.5 (unchanged
          paths; the ring drain for the disk only is new).
       7. The record page's fast-logger start (tap) at 76800, the inrush save: as before.
+      **Device 4c4b489 (device-check doc "4c4b489"): fixed.** 76800 AC V 40 Hz square: gate 1 (kept),
+      4 331 399 rows, lost_before 0 (ended Full at 56.6 s: the 5.9 MB free disk), ring high water 1017-1170 of
+      2048 in every kept 76800 session (never near ~1900), ISR permille 546 / 548, 1.478 entries per sample,
+      436 pages/s; DBG:PROF? 8987 passes/s, `usb` avg 83 us (was 1272 / 718). Stop in the trial, 38400 /
+      4800 / AD1 640, DC V via AD2, a start at 11.7 / 16.4 s uptime, the Record page's Fast start, the host
+      drain (40.5 k rows/s, was 35 k) and the Wave view: no sample lost (their max_lat / overruns:
+      range_cmd, next item). Not done: a noisy input (no sine / noise
+      source without the generator; the 100 Hz square instead: 0 lost), a DC V fallback (gate 2) restart,
+      the Record stop by a finger (DBG:TAP does not reach `fast_touch`), the inrush save (no A-COM load).
+- [ ] SCPI range_cmd in region C ran for every SCPI command (de01f2f; found on device 4c4b489): max_lat
+      1.6-20 us at range_cmd's entry with late / overruns 1-3 / slips 1 during 76800 streams (host drain,
+      Wave view, disk polling), and a 20 Hz LOG:DISK? poll made one writer trial fall back to 38400 (ring
+      2048). Fixed in bab5dd4 (branch fastlog-768-retest): the dispatcher calls it only for RANGe /
+      RESolution headers. Device check: as in the device-check doc's "Re-check on bab5dd4" (max_lat < 1 us,
+      late / overruns / slips 0 at 76800 with the polls, the range commands still answer).
+- [ ] Fast logger cosmetics (device 4c4b489): LOG:DISK? keeps naming the file of a session stopped in its
+      trial (the file is removed); its tpp fields keep the last probe's 381 / 387 in a 38400 / 4800 / AD1
+      session (documented as 0 = none); the Record page's Fast estimate says "0 min left" under a minute
+      (76800 on 5.9 MB = ~25 s at its 3 B/sample; the real 1.36 B/sample gave 56 s).
+- [ ] 4800 disk session on device 4c4b489: max_lat 4.66 us at calbackup::FwFile::fill (region C: the info
+      volume's FIRMWARE.BIN read by a host during the session). No sample lost at
+      4800; at 76800 a host reading INFO/FIRMWARE.BIN would likely stall the ISR as range_cmd did.
 - [ ] 76800 stream: the device's 1.48 ISR entries per sample (emulator 1.13) and its rate_mhz 76 723.6 /
       ppm_x10 +9951 (below) are one thing: +995 ppm is the Pll's frequency clamp (ad2pll.rs MAX_PPM 1000).
       The record stamps say the chip converts at 76 574.5 S/s, -2940 ppm from the rung's nominal
@@ -1262,6 +1284,8 @@ Firmware:
       76 723.6, ppm_x10 +9952, 1.39 entries per sample, ISR 61 %). Fix candidates: the 76800 rung's real
       period (why 0.29 % slow: the hybrid timing? the rung's OSR / clock formula?) or a wider MAX_PPM;
       then the device's ISR share should drop toward ~460 permille.
+      Device 4c4b489: unchanged: 1.478 entries per sample, ppm_x10 +9937..+9984, stamps 76 574.4-.9 S/s,
+      cpu_permille 546-548 in every 76800 session.
 - [ ] 76800 rate: rate_mhz 76 723.6 (ppm_x10 ~+9950) while 4800 / 38400 lock at -1.6 ppm; the record
       stamps say 76 574.5 S/s (LOG:RATE? 76 576), 1.9 permille below rate_mhz (at 38400 they agree).
       Which is right, and is the 76800 rung's nominal (76 799.016) the chip's real rate?

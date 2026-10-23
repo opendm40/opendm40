@@ -1816,3 +1816,57 @@ This is not a C fault: either part is a fair answer for AC ≈ DC. It is, howeve
 - **Files:** none created on the meter (`MMEM:CAT?` identical to the start: 10 829 824 / 5 910 528). Screenshots were `DBG:LCD?` reads.
 - **Health:** `DBG:BOOT?` NORMAL, crash count 0, VALID; no reset.
 - **Calibrator:** 1 V DC, enabled.
+
+## 4c4b489: the 76.8 kS/s disk retest (TODO "76800 to the disk loses 54 %" 1-7) (2026-10-23 05:30 - 06:00)
+
+The owner had installed 4c4b489 (install OK, crash count 0). It carries the emulator fix of the 7409b92 disk failure: the Run budget counts the pass's own CPU, a faster coder, and the writer trial (`Gate`, LOG:DISK? fields 11..13). `DBG:BOOT?` at the end: NORMAL, crash count 0, HEALTHY, marker VALID. Three deliberate resets (`DBG:RESET`, item 5b: one attempt lost its reconnect and was repeated), no crash.
+- **Wiring:** the calibrator (`/dev/ttyACM1`) on V/COM: the 40 Hz square (`set_output('frequency', 40.0)`, 0 / 9.5 V, READ? in AC V 4.764 V), the 100 Hz square, 1 V DC. The A jack was not wired.
+- **Files:** scripts, JSON, DLG / CSV and PNGs in the session scratchpad `devchk-4c4b/` (not in git). `disk.py` runs one disk session (LOG:DISK? every 0.5 s, LOG:PRE? / LOG:SRAT? at state 3 and 3 s later, DBG:ISR? / LOG:COUN? at the end, MMEM:DATA? of the file, `dlog.py`, `lost.py` = the sum of lost_before). `lat.py` runs a session with no polling or with a 20 Hz LOG:DISK? poll. `stop.py`, `early.py`, `recfast.py` are items 4, 5b and 7. `p2.py` / `p5.py` are the 7409b92 scripts.
+- **Symbols:** the lat_pc values were looked up in the ELF of the 4c4b489 build (`fl768/`, same timestamp as `dm40-fw-4c4b489.bin`).
+
+### Summary
+
+**The 7409b92 failure is fixed on the device.** 76 800 S/s to the disk keeps every sample: lost_before 0 in every file, the trial kept the rung in 8 of 9 sessions, and the ring's high water stayed at 1017-1170 of 2048 (the ~1900 limit was never reached). **New: a region C fetch on every SCPI command** (de01f2f's `range_cmd`, .cold). During a 76 800 stream it pushes DBG:ISR? max_lat to 1.6-20 us with late / overruns / slips, and under a 20 Hz LOG:DISK? poll one trial fell back to 38 400. On 7409b92 the same runs had 0.24-0.32 us. Fixed in bab5dd4 (below); a device check is pending.
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1 | AC V, 40 Hz square, AD2, 76 800, DISK, `LOG:DUR 60` | **PASS** (data): gate **1 (kept)**, LOG:PRE? rung 76 800, LOG:SRATe? 76 800. **4 331 399 rows, lost_before 0** (7409b92: 2 095 713 rows, 54 % lost). The session ended **Full** (state 6) after 56.6 s: 60 s at 1.36 B/sample needs ~6.3 MB, and the disk has 5.9 MB free. ISR permille 546 (gate) / 548 (end), **1.478 ISR entries per sample**, ring high water **1017**, fifo_hw 445, 436 pages/s, tpp 382 / 387 us. DBG:ISR? dropped / bad / overruns / slips 0, **late 1, max_lat 4.14 us at `range_cmd`** (criterion < 1 us: FAIL, see "range_cmd"). LOG:COUNt? overwritten 0 | `d768.json`, `d768.DLG` |
+| 2 | `DBG:PROF:RESET` at state 3, `DBG:PROF?` at the end (57.7 s window) | **PASS**: **8987 main-loop passes/s** (was 1272), `usb` (the Run pass) **avg 83 us** (was 718), 74.8 % of the loop. Loop max 94 ms / `usb` max 84.5 ms: one pass, also on 7409b92 (83.5 ms). The file has no hole, so that pass was outside the run (probably the Full end) | `d768.prof.txt` |
+| 3 | A noisier input | **Not available**: the generator stays off, the calibrator has no sine and stops at 100 Hz (99 999 mHz), and its disabled output is quiet (0.6 mV AC). Ran the **100 Hz square** instead (2.5x the edges, 1.46 B/sample against 1.36), `LOG:DUR 30`: gate 1, 2 297 248 rows = 30.000 s, **lost_before 0**, high water **1135**, 468 pages/s. **overruns 3, slips 1, max_lat 6.86 us at `range_cmd`**. The fallback path at 76 800 (gate 2) showed only in the polled run below | `d768sq100.json` |
+| 4 | `LOG:STAT OFF` on the first poll that shows state 3 (0.1 s polls, inside the trial) | **PASS**: state 5, bytes / rows 0, **no FAST013 in MMEM:CAT?**, used / free unchanged (10 829 824 / 5 910 528). The next sessions ran normally. Cosmetic: LOG:DISK? still names file 13 after the file is removed | `stop.py` |
+| 5 | 38 400 / 4800 to the disk (`LOG:DUR 20`, gate 0), AD1 640 (DC V, OSR 0, CHOP OFF) | **PASS**: 768 002 / 96 002 / 12 802 rows, **lost_before 0**, overwritten 0. 38 400: cpu 149, 1.251 entries per sample, ppm_x10 -4, **max_lat 0.76 us at `range_cmd`**. 4800: cpu 17, **max_lat 4.66 us at `calbackup::FwFile::fill`** (region C: the info volume serving FIRMWARE.BIN. Presumably something on the host read it during the session; this test did not). AD1 640: max_lat 0.24 us. Cosmetic: LOG:DISK? tpp says 381 / 387 in the sessions without a probe (the last probe's value; the doc says 0 = none) | `d38400.json`, `d4800.json`, `dad1.json` |
+| 5a | DC V (1 V) via AD2 at 76 800, `LOG:DUR 20`, and again at 10 s with LOG:DISK? at ~30 Hz | **PASS**: gate 1 both, 1 531 489 / 765 747 rows, **lost_before 0**, high water **109 / 116** (DC: 1.23 B/sample), Prep 11 / 8 s (with the self-cal). value_V 0.99912 against READ? 0.99975 (-0.06 %). max_lat 3.06 us (`range_cmd`) / 1.62 us. **A fallback (gate 2) in DC V was not provoked**, so the self-cal on the 38 400 restart is not checked | `ddc768.json`, `ddcpoll.json` |
+| 5b | 76 800 session after `DBG:RESET`, state 3 at uptime 11.68 s and 16.36 s (CYCCNT at 200 MHz wraps every 21.47 s: its upper half is 10.7-21.5 s) | **PASS**: gate **1** both (verdicts at 12.69 / 17.38 s uptime), high water 1082 / 1091, 229 725 / 229 724 rows = 3.000 s, lost_before 0. The second: overruns 3, max_lat 2.22 us (`range_cmd`) | `early.py` |
+| 6a | Host `LOG:DATA?` drain, 76 800, 30 s (`p2.py`) | **PASS** (as on 7409b92), faster: **40.5 k rows/s** (7409b92: 34.4-35.0 k), overwritten 1 083 265 (47 %: the host is still slower than 76.8 k), lost 0, bad 0, seq gaps 0, LOG:RATE? 76 576. **late 1, max_lat 5.40 us at `range_cmd`** (7409b92: 300 ns) | `h768.json` |
+| 6b | Wave view 1 / 2 ms/div, 30 s each (`p5.py`) | Trace and readout right (Vp-p 9.94 / 9.99 V, `wave-1e-3.png`, `wave-2e-3.png`); dropped +0 in each window (22 at the switch to 1 ms/div, as before); cpu_permille 557 / 155. **1 ms/div: overruns 1, late 1, max_lat 7.08 us; 2 ms/div: late 1, max_lat 15.08 us**, both at `range_cmd` (7409b92: 280 / 260 ns, 0) | `p5.json` |
+| 7a | Record page (Hold & Limits -> Record) Interval "Fast", Duration "Until stopped", Start by tap, AC V, LOG:SRAT 76 800 | **PASS**: the page offered "76800/s, 0 min left" (the estimate at ~3 B/sample; under a minute it says 0 min). Prep 8.2 s (the area was blank from the earlier sessions). Gate 1, panel "AD2 76574/76799 Sa/s", high water 1029. It ran to Full: **4 331 292 rows / 56.563 s, lost_before 0**, toast "Saved FAST013.DLG". The panel's "lost 2 (0.0%)" is LOG:COUNt?'s `missed` field (2), as in the 7409b92 Wave view. **The stop by tap could not be tested**: DBG:TAP 240,160 on the panel did not stop it. The fast session's stop reads the touch controller itself (main.rs `fast_touch`), and DBG:TAP injects past that. A finger is needed | `recfast.json`, `rec-fast.png`, `rec-run.png`, `rec-end.png` |
+| 7b | Inrush save | **Not run**: it needs a load current on A-COM; the calibrator is wired to V/COM only | - |
+
+**76 800 numbers (the PLL item, for the other agent):** rate_mhz 76 723 392-76 723 803 and ppm_x10 +9937..+9984 in every 76 800 session (the Pll on its +1000 ppm clamp). The record stamps give 76 574.4-76 574.9 rows/s, and LOG:PRE? measured_hz says 76 574. ISR entries per sample 1.478 (7409b92: 1.476). cpu_permille 546-548 (gate) / 548 (end), 557 in the Wave view. At 38 400: 1.251 entries per sample, cpu 149, ppm_x10 -4. At 4800: 1.251, cpu 17.
+
+### range_cmd: a region C fetch on every SCPI command (found here, fixed in bab5dd4)
+
+Every max_lat over 1 us at 76 800 / 38 400 in this session had lat_pc 0x080957d8 = the entry of `scpi::range_cmd`. The two exceptions are 1.6 us at an OUTLINED_FUNCTION in B and the 4800 vdisk read. de01f2f (SCPI ranges) put `range_cmd` in .cold, on the assumption that it runs once per range command. The dispatcher calls it, though, for every multi-part header that gets past the CONFigure arms: LOG:DATA?, LOG:DISK?, LOG:PRE?, DBG:ISR?, MMEM:... (the LOG / DBG / MMEM arms come after it). Region C is not zero-wait, and a fetch there stalls the AD2 stream ISR's entry (link-native.x: ~20 us).
+
+`lat.py` (76 800 / 38 400 to the disk, `LOG:DUR` 10 / 20, no polling during the session vs LOG:DISK? at 20 Hz):
+
+| rate | host during the session | gate | high water | max_lat | lat_pc | overruns / slips |
+|---|---|---|---|---|---|---|
+| 38 400 | nothing | 0 | - | 280 ns | spiflash::xfer | 0 / 0 |
+| 38 400 | 20 Hz LOG:DISK? (~400 polls) | 0 | - | 400 ns | scpi::kw | 0 / 0 |
+| 76 800 | nothing | 1 | 1170 | 320 ns | spiflash::xfer | 0 / 0 |
+| 76 800 | 20 Hz LOG:DISK? | **2 (fell back to 38 400)** | **2048** | **19.96 us** | **range_cmd** | 1 / 1 |
+| 76 800 | 20 Hz LOG:DISK? (repeat) | 1 | 1093 | 1.64 us | OUTLINED_FUNCTION_176 (B) | 0 / 0 |
+
+Without SCPI traffic the stream is as clean as on 7409b92. At 38 400 (div 16, few ISR entries) a stall rarely meets an ISR entry. At 76 800 (an ISR entry every ~9 us) it often does. The fallback run lost nothing to the file (it ran at 38 400, 384 002 rows), but the trial verdict was spoiled. This test does not separate whether the full ring (2048) came from the stalls or from the overrun / slip handling.
+
+**Fix (bab5dd4, branch `fastlog-768-retest`, on rust-fw-poc 848047f):** the dispatcher calls `range_cmd` only when a part of the header after the first is RANGe / RESolution (a `kw` check in region B). range_cmd stays in C. The other .cold SCPI helper on the dispatch path, `wav_cmd`, runs only under the WAVeform arm. Image: `dm40-fw-bab5dd4.bin` in the session scratchpad (621 184 B, `dm40dbg.py image` OK, built from this branch's tree; region B 62 796 B free, C 17 888 B). Not run in the emulator or on the device.
+
+**Re-check on bab5dd4:** item 1 (`disk.py AD2 76800 60`), `lat.py 76800 10 poll` x3, `p2.py h768 76800 30` and `p5.py`: max_lat < 1 us, late / overruns / slips 0, gate 1 under the poll. The range commands still work: `VOLT:RANG?`, `VOLT:RANG 60`, `SENS:VOLT:RANG:AUTO ON`, `VOLT:RES?`, `CURR:DC:RANG?`.
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+ (`VOLT:RANG:AUTO?` 1), rate SLOW, `VOLT:COUP?` DC, method A (`end.png`), as found. LOG restored: AD1 / 4800 / HOST / `LOG:DUR` 60 / CHOP 1 / OSR 3 / `LOG:STAT` 0. The Record page showed "Fast" until put back: Interval "Every reading" by four "-" taps ("+" stops at Fast), Duration "Until stopped" unchanged (`rec-fix2.png`). Generator `OUTP?` 0 throughout. The generator page was opened once by mistake (MF + a tap on the main menu's Signal tile) and left with MENU; nothing was changed on it. Settings not touched (volume 0, backlight 10 %, Dim / Shutdown Never). `SYST:ERR?` empty. `DBG:HYSPI:SELF? 2000`: all error counts 0.
+- **Files:** every FAST013 of this session was deleted. `MMEM:CAT?` used / free 10 829 824 / 5 910 528, the same as at the start.
+- **Health:** crash count 0, HEALTHY, marker VALID. Three `DBG:RESET`s (item 5b).
+- **Calibrator:** 1 V DC, enabled.
