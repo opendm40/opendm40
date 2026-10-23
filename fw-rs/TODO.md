@@ -1755,8 +1755,11 @@ Emulator (emu/):
       square stays on AC, "~4.056 V" for 5 V DC). Fine at 4.0 / 4.5 V. A in the same sequence: PASS.
 - [ ] C's 60 V DC part: +11 mV offset / +0.05 % gain against DC V (above): check the self-cal's 60 V path
       (AD1 on SENSE - PB5 vs the AD2 node) before C can be the default.
-- [ ] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
-      3 V reference moved -160 ppm during e5). Calibrator or meter? Recheck with a cold calibrator.
+- [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
+      3 V reference moved -160 ppm during e5). **Calibrator, not the meter** (device-check doc "DC V at the
+      calibrator's 1 V: meter or calibrator?"): no fw-rs state in the DC V path, the factory record unchanged,
+      the 6 V and 60 V ranges agree, a level pattern (1 / 2 / 3 / 5 / 10 / 20 V: -0.9 / -1.4 / -2.5 / -2.0 /
+      -3.0 / -1.3 mV) that is neither gain nor offset, the same pattern on 2026-10-22 20:24 before 7409b92.
 - [ ] acdcmeth.py: the calibrator's "30 V" is 23.99 V (MR9270 limit?): the e1 / e5 / e6 30 V points are 24 V.
 
 ## Device check 8087c7d: shot pre-erase, SCPI Range / Digits + sigrok, scope full record, UI fixes (2026-10-23; docs/device-check-2026-10-21.md "8087c7d")
@@ -1770,8 +1773,12 @@ Emulator (emu/):
       need a hand on the RUN key; (8) on an AC signal and (6) the driver over rfcomm not run.
 - [x] UI fixes 9abe84f: strip units, Help 2/7 + 5/7, power pending page, chart axis PASS (cosmetic notes in the
       5e52761 items).
-- [ ] DC V at the calibrator's 1 V read 0.9987-0.9993 V all session (sigrok 998.9-999.6 mV) with the calibrator
-      at 1 V for hours: the 7409b92 "warm after 24 V" idea does not explain it. Recheck against another
-      reference.
+- [x] DC V at the calibrator's 1 V read 0.9987-0.9993 V all session (sigrok 998.9-999.6 mV) with the calibrator
+      at 1 V for hours: the 7409b92 "warm after 24 V" idea does not explain it. Closed: the calibrator's
+      setpoint error + its +-0.4 mV wander over minutes (item above); not a regression.
+- [ ] Owner: confirm the DM40's DC V against a third reference (a 6.5-digit DMM or a 2.5 / 5 V reference IC
+      on V/COM); the MR9270's DC V output is only good to ~0.1 % and wanders, so it cannot check DC V to the
+      0.05 % class. Until then, 1 V readings of 0.9987..1.0006 V are the calibrator.
+- [ ] Minor: the 60 V range reads 0.2-0.36 mV below the 6 V range at 1 / 3 / 5 V (within spec; not chased).
 - [ ] Cosmetic: the rate chip cycles FAST -> SLOW -> MED (rate_cycle, enum order), a tap on the value FAST ->
       MED -> SLOW (resolution_cycle). Same order for both?
