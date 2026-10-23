@@ -365,9 +365,11 @@ probe's tPP as the busy time (nothing reaches the file); the rung stays
 when the ring dropped nothing and its low water (the fill at a pass's start)
 did not rise from the first half of the window to the second by more than
 128 records (a writer short by ~0.4 % of the rate); else the session runs at
-38400 (LOG:SRATe? / LOG:PREamble? say so, as for a slow tPP). Then the
-logger session restarts and the file begins with its header: the trial's
-samples are not in it. The high water is reported, not judged: a slow pass
+38400 (LOG:SRATe? / LOG:PREamble? say so, as for a slow tPP). Kept: the
+coder starts again with the header at the window's end and the same logger
+session runs on (the run has the trial's stream: its Pll, its ISR load);
+fell back: the logger session restarts at 38400 and the file begins then.
+Either way the trial's samples are not in the file. The high water is reported, not judged: a slow pass
 (a panel part, ~18 ms) lifts it to ~1400 of 2048 once in a while. LOG:DISK?
 fields 11..13: the verdict (0 none, 1 kept, 2 fell back), the window's ISR
 permille, the ring's high water. A stop during the trial abandons the

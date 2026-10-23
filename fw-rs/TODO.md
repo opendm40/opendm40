@@ -1193,7 +1193,8 @@ Firmware:
       records, the log panel's 64-bit divisions every pass) and the pages at ~0.25 ms each. Now: the Run
       budget is the pass's own CPU (ISR time out; 2x while the ring is over half full; 2 ms wall cap), the
       coder ~2.5 us / row (byte-identical stream), pages back to back (~0.17 ms), and the writer trial
-      (fastlog `Gate`): the first 1 s coded with dry pages; the ring's low water rising or a drop -> 38400
+      (fastlog `Gate`): the first 1 s coded with dry pages, then the file starts in the same logger session
+      (kept) or the session restarts at 38400 (the ring's low water rising or a drop)
       (LOG:SRATe? 38400, LOG:DISK? fields 11..13 gate / ISR permille / ring high water). Emulator: 0 lost at
       76800 (1.2-2.45 B/sample, ISR 52-62 %), trial kept; `--isr-stall-ns 3000` (ISR 90 % in the trial) ->
       38400, 0 lost.
@@ -1210,20 +1211,23 @@ Firmware:
       4. A stop (LOG:STAT OFF) within the first second after state 3 (the trial): the session ends, no
          FASTnnn left (MMEM:CAT?), the next session works.
       5. 38400 and 4800 to the disk (no trial: gate 0): lost 0 as before; AD1 640 to the disk: lost 0.
-      5a. DC V via AD2 at 76800 to the disk (LOG:SOUR AD2 in DC V): the trial's restart runs the AD2
-         self-cal (`dc_prepare`) again: note the gap between state 3 and the file's first row; lost 0.
+      5a. DC V via AD2 at 76800 to the disk (LOG:SOUR AD2 in DC V): lost 0; after a fallback (gate 2) the
+         restart runs the AD2 self-cal (`dc_prepare`) again: the 38400 file starts later.
       5b. A 76800 session started 11-21 s after power-on (CYCCNT's upper half; the emulator's bug of
          130d2e8's parent: the trial saw a busy chip there and fell back): gate 1.
       6. The Wave view 1 / 2 ms/div and a host LOG:DATA? session at 76800 as in 7409b92 2.1 / 2.5 (unchanged
          paths; the ring drain for the disk only is new).
       7. The record page's fast-logger start (tap) at 76800, the inrush save: as before.
-- [ ] 76800 stream: the device's 1.48 ISR entries per sample (emulator 1.13) and the +995 ppm rate (below)
-      come together, and the emulator reproduces both: a 76800 session after ANY earlier stream session of
-      the same boot (fastlogtest --sessions ad2:38400,ad2:76800, or --stop-in-trial) locks at rate_mhz
-      76 723.6, ppm_x10 +9952 (the device: 76 723.6 / +9951), 1.39 entries per sample, ISR 61 % (first
-      session after boot: 76 800.0, ~0, 1.13, 52 %); also a heavy noise (--noise 1000). Something carried
-      from the previous session (Pll REL? the chip model's state?) - a repro for "76800 rate" below; fixing
-      it would also give the writer ~9 % of the CPU back (the ISR's 544 vs ~460 permille).
+- [ ] 76800 stream: the device's 1.48 ISR entries per sample (emulator 1.13) and its rate_mhz 76 723.6 /
+      ppm_x10 +9951 (below) are one thing: +995 ppm is the Pll's frequency clamp (ad2pll.rs MAX_PPM 1000).
+      The record stamps say the chip converts at 76 574.5 S/s, -2940 ppm from the rung's nominal
+      76 799.016, outside the Pll's range: the frequency word sits on its clamp, the phase is held by the
+      probes' kicks alone (more probes: B / C entries) and the ISR costs ~9 % more (544 vs ~460 permille).
+      The emulator's chip runs at the nominal, so it shows the railed state only when pushed (fastlogtest
+      --noise 1000, or --isr-stall-ns 700 with a 76800 session restarted right after another one: rate_mhz
+      76 723.6, ppm_x10 +9952, 1.39 entries per sample, ISR 61 %). Fix candidates: the 76800 rung's real
+      period (why 0.29 % slow: the hybrid timing? the rung's OSR / clock formula?) or a wider MAX_PPM;
+      then the device's ISR share should drop toward ~460 permille.
 - [ ] 76800 rate: rate_mhz 76 723.6 (ppm_x10 ~+9950) while 4800 / 38400 lock at -1.6 ppm; the record
       stamps say 76 574.5 S/s (LOG:RATE? 76 576), 1.9 permille below rate_mhz (at 38400 they agree).
       Which is right, and is the 76800 rung's nominal (76 799.016) the chip's real rate?

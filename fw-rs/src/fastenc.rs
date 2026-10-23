@@ -279,6 +279,13 @@ impl FastEnc {
         e
     }
 
+    /// The same file and FIFO from its start again (fastlog's writer trial:
+    /// what it coded is dropped, nothing of it was programmed).
+    pub fn restart(&mut self) {
+        let n = self.next;
+        *self = FastEnc::new(&self.ext[..n], self.data, self.cb, self.fl as usize, self.p_us);
+    }
+
     /// Flash byte address of file offset `off`.
     pub fn addr(&self, off: u32) -> u32 {
         let mut ci = off / self.cb;
