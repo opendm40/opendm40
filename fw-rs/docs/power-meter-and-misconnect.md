@@ -1782,7 +1782,7 @@ comparison):
 | mode | block (free in the stock row) | row override | threshold |
 |---|---|---|---|
 | AC+DC V / A | the plain DC and AC phases' own sentinels (comparator PB1 / SENSE in the DC phase, AD1 peak in the AC phase); the DC phase's R20 goes through `acdc_src` because `freq_secondary` rewrites it every 350 ms (the counter then counts that node; AC+DC shows no frequency). The history belongs to the function and the sentinel family (A-JACK: comparator + AD1 / AD2 peak; V-JACK?: comparator + AD1 peak), so a phase switch keeps an alert; the comparator is also read during the phase settles | as the plain modes | as the plain modes; V-JACK?'s "no current" = < 5 % of the range (the total carries the AC floor) |
-| AC A (4..6), V-JACK? | AD1 (off in the row) on SENSE - PB5 with the /1000 tap (SS5 only, as DC A), IG 3.6, OSR 256 unchopped, peak hold; OP1's chopper held off (AD1 on starts it: the 9dd1222 AC V floor) | R22 00, R23 \|= ENAD1, R24 07, R25 \|= 30, R29 PKH AD1, R2C \|= 10, R33 OP1CHOP 00 | 1 510 codes = 2 V on V/ohm; "no current" = < 5 % of the range (the uA path's RMS floor is ~1.5 % of 600 uA, acdc doc 6b) |
+| AC A (4..6), V-JACK? | AD1 (off in the row) on SENSE - AGND (until f0d21eb: SENSE - PB5, see 4.11) with the /1000 tap (SS5 only, as DC A), IG 3.6, OSR 256 unchopped, peak hold; OP1's chopper held off (AD1 on starts it: the 9dd1222 AC V floor) | R22 00, R23 \|= ENAD1, R24 03 (was 07), R25 \|= 30, R29 PKH AD1, R2C \|= 10, R33 OP1CHOP 00 | since 4.11: the swing PKHMAX - PKHMIN > 4 270 codes = 2 V rms AC on V/ohm (was: \|peak\| > 1 510 codes = 2 V, DC included); "no current" = < 5 % of the range (the uA path's RMS floor is ~1.5 % of 600 uA, acdc doc 6b) |
 | frequency (14) | **none since the f3aea2f check** (was: AD1's zero reading PB5 - PB5 moved to PB1 - PB3 with the AC rows' peak settings). The frequency row leaves its input divider open (R2C / R2D 0) and PB1 - PB3 stands at +41 100 codes (~54 mV) with 0..2 V or nothing on V-COM, ~3 100 at 5 V, -850 at 10 V: a false A-JACK, and no fixed threshold or offset tells a current from it | stock row | - |
 | continuity (11), diode (12), cap r0..4 (13, RC oscillator) | AD2 + OP2 (unused there): OP2 x1 (OPS2 0) on PB1, AD2 = OP2O - PB3, refs PB6 / AGND, IG 2.0, OSR 256, peak hold on AD2 (PKHSEL 00); continuity / diode have AD1 on: the row goes out with AD1 off and ENAD1 last (note 7: AD2 never starts while AD1 converts) | R25 AD2IG 11 + OPS2 0, R26 83, R27 6D, R29 ENPKH, R32 D0 \| OP1 | 9 900 codes = 0.5 mA |
 
@@ -2244,6 +2244,96 @@ volume 0 % (the owner's setting), Settings 3/3 "Danger alarm" Loud.
    manual mA range: one 300 ms beep only (at the key volume: silent at 0 %).
 8. Above 10 A (if the bench allows it, briefly): > 10 A for 1 s in DC A ->
    the alarm; back below 10 A -> silent.
+
+### 4.11 Device f0d21eb follow-up (fw-rs branch sentinel2, 2026-10-24)
+
+Device check "f0d21eb" in `device-check-2026-10-21.md` (meter on f0d21eb, A jack
+not wired, the calibrator on V-COM only). Raw data: the session scratchpad's
+`chk3/out/` (`ctsta_summary.txt`, `E_*_raw.json`, `acarange*.txt`).
+
+**What CTSTA means (from the device, not the datasheet).** Over all `E_*_raw.json`
+rows of chk2 / chk3 (~233 000 DBG:SENT? reads in comparator and other kinds)
+CTSTA took 0x00, 0x10, 0x50 and 0x70 only, never 0x20 or 0x60. CMPHO never
+comes without CMPLO, so the two bits are not "above VRH" / "below VRL" (that
+pair would give 0x20 for a node above the window and never 0x70): the fit is
+CMPHO = node above VRH, CMPLO = node above VRL, ACPO (bit 6) the latch, set
+above VRH and reset below VRL (a Schmitt pair). Read that way 0x70 = above the
+window, 0x50 = inside it coming from above, 0x10 = inside it coming from
+below, 0x00 = below it. It fits DC V's V-tap window (+1 V: 0x10, +5 V: 0x70).
+INFERRED, and the emulator's model keeps the older reading (CMPLO = below
+VRL); the firmware rules were not changed on this basis (a reading with any
+bit set is a hit as before). Two consequences for the A rows: with V-COM open
+the DC A comparator reads 0 = **below** VRL, i.e. SENSE sits more than ~21 mV
+below the window; and the 24 V V-JACK? case is 24 mV through the /1000 tap
+against a 20.8 mV threshold, a 3 mV margin, so a history-dependent offset of
+tens of mV decides whether 24 V is seen at all.
+
+**1. False V-JACK? in every AC A range (2a). Fixed.** The AC A sentinel put AD1
+on SENSE - PB5. PB5 as an AD1 reference exists in the stock only in DC V
+60 V+ (their power bus driven by OP3, SMODE 0100, PA8 P); the A rows run the
+bus as SGND and never reference PB5, so in AC A it is an undefined node: the
+peak ran from ~-117 000 at 0.7 s to the negative rail (-262 144) by ~2 s with
+V-COM open, 1, 5, 10 or 24 V alike. Now AD1 = SENSE - AGND (R24 0x03): AGND is
+what the DC A comparator's window hangs on. Because the A rows' SENSE offset
+is tens of mV (above), a DC level threshold of 2 V (1 510 codes = 2 mV) is
+meaningless, so AC A counts the hold's swing only: PKHMAX - PKHMIN > 4 270
+codes = 2 V rms AC on V (`PKV_SWING_THR`). Mains on V in an AC current
+function is the hazard and is still caught; **DC on V in plain AC A is no
+longer flagged** (DC A's comparator and the DC phase of AC+DC A / AUTO A
+cover DC). A hold at a rail with no swing is no hit. In AC+DC / AUTO A the
+AC phase's swing-less windows carry the DC phase's comparator run instead of
+ending it (`Sentinel::bridge`; before, the AC phase's level kept it going), so
+a DC source there keeps its V-JACK? timing. `DBG:SENT:VAR +32` puts the old
+row back for a device comparison.
+
+**2. False OVERLOAD in AC A, 60 mA falling back to 10 A. Fixed (by a hold).**
+Not the AD1 drift: the OVERLOAD rule reads the AC A reading (RMS and LPF of
+AD2 on OP1O - PB3), and only 10 A -> 60 mA trips (600 uA -> 60 mA and DC mA ->
+AC 60 mA hold): the shunt (10 mohm -> 0.5 ohm), OP1's input (PB2 -> PB1) and
+gain (x1 -> x10) change at once, and the first block(s) carry that step. Plain
+AC A now holds over-range results back for 500 ms after the first result of a
+row (`AC_OVER_HOLD_MS`; no reading, range move, OVERLOAD or AUTO hop). A real
+over range still reads over after the hold and acts then (OVERLOAD / the AUTO
+hop ~0.5 s later after a switch; the protection is thermal, seconds). One that
+starts later acts at once. The step's length on the device is not known: if
+the retest still trips, `AC_OVER_HOLD_MS` is the knob.
+
+**3. A real 24 V on V-COM missed in DC A (after DC V 60 V, RES, a chip restart).
+Not fixed; cause outside the HY3131 registers.** `write_config` writes all 22
+bytes R20..R35 from the row every time, zeroes R26 / R34 / R36 before
+(`quiesce`), and nothing writes R37. `DBG:SENTinel:REG?` (new) reads R20..R37
+back: in the emulator DC A after DC V 60 V, RES, TEMP and AC V reads the same
+24 bytes (`10DD1783 35010055 31000000 10000881 80C73DA4 00500000`, mode 9 r0).
+So no register carries the history; what TEMP sets and DC V 60 V+ / the ohm
+rows / a power-up clear is board state (the divider and its capacitors, the
+power bus / PA8 node, the relay, which is pulsed only on a change). With the
+3 mV margin above, a history offset of tens of mV is enough. What the firmware
+can offer without the netlist is an experiment, default off:
+`DBG:SENTinel:PRECond <ms>` runs the thermocouple row (relay to the ohm side,
+OP3 on PA7) for that long before a DC A / mA / uA row is entered after DC V
+60 V+, an ohm-network row or a chip restart (`a_blind` in `DBG:SENT:REG?`).
+In the emulator (`vjblind:1`, a replay of the device table) it brings V-JACK?
+back at 2.2-2.3 s in every case; on the device it tests the hypothesis. It
+blocks the main loop for <ms> and pulses the relay twice. The RES-exit mask
+(OHM_EXIT_*) is unchanged: RES -> A at 24 V ends at 0 after the 0x70 tail, so
+a shorter cap buys nothing until the blindness is understood.
+DBG:SENT?'s ctsta field is now -1 in kinds that sample no comparator: it was
+the last comparator row's value, and the f0d21eb check's "AC V reads 0x70
+after TEMP" was TEMP's stale read.
+
+**4. A-JACK in continuity at 5 V DC. Not changed (documented).** The
+continuity row's AD2 peak on PB1 read -97 000..+123 000 at 5 V (~+-230 mV at
+PB1, an oscillation: both signs) and +-400 at 1 V (LIVE?, right). It is the
+same premise as the RES 5 V owner item (PB1 follows V-COM in the ohm-network
+rows): at 5 V the continuity reading shows no live source (no LIVE?), so no
+V-side gate could tell it from a current. Owner decision with the RES case.
+
+Emulator (opt-in knobs, `emu/hy3131/README.md`): `pb5drift:0.6;pb5tau:2.2`
+(AC A AD1 SENSE - PB5 to the rail), `acastep:200000;acastepms:600` (AC A 10 A
+-> mA: the first blocks over range; length chosen, not measured),
+`vjblind:1` (DC A SENSE comparator sees V only after a temperature row).
+switchtest: `aca-drift`, `aca-ovl`, `real-vjack-ac`, `real-vjack-blind`,
+`real-vjack-blind-prec`.
 
 ## 5. Open points for the owner
 
