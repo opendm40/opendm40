@@ -1665,3 +1665,90 @@ sigrok-cli from `libsigrok-dm40/install`, always `-d scpi-dmm:conn=usbtmc/3.55`,
 - **Files:** S012-S019 (S012 twice), LOG005, FAST013-FAST015 deleted. `MMEM:CAT?` used / free 10 829 824 / 5 910 528, the same as at the start; prep 2 / 76.
 - **Health:** `DBG:BOOT?` unchanged: crash count 0, HEALTHY, no reset.
 - **Calibrator:** 1 V DC, enabled (never changed).
+
+## DC V at the calibrator's 1 V: meter or calibrator? (8087c7d, 2026-10-23 03:15-03:42)
+
+This checks the open items "1 V after Part 3" (7409b92) and New finding 4 (8087c7d). DC V had read -0.08..-0.13 % at the calibrator's 1 V since Part 3 of the 7409b92 session; after Part 2 it read 0.999951 V.
+- **Build:** 8087c7d, as installed. No firmware was installed and no code was changed.
+- **Wiring:** the calibrator (`/dev/ttyACM1`, `mr9270.py`; access worked this time) on V/COM. The A jack, the MCX probe and the generator output were not wired.
+- **Files:** in the session scratchpad `dcv/now/` (not in git): `lv-pre.jsonl`, `lv-sweep1.jsonl`, `lv-post.jsonl` (levels x rates), `rng-r1.jsonl` (6 V vs 60 V), `reset.jsonl` (re-set test, 0 V, 5 min hold), `fast1.csv` (raw AD1), `CALIB.BIN`, `s0.png`, `s-end.png`.
+
+### Summary
+
+**Verdict: the calibrator, not the meter, and not a firmware regression.**
+- The error depends on the level, in a way that neither a gain nor an offset gives (table 2).
+- The 6 V and 60 V ranges read the same input within 0.2-0.4 mV.
+- The same per-level pattern was there on 2026-10-22 20:24 with a 4ff95f7-era build, before 7409b92.
+- On top of that, the 1 V reading wanders by +-0.4 mV over minutes while nothing is written to the calibrator.
+- No fw-rs state changes the DC V math.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Persistent state | **None found.** `CONF?` "VOLT +6,+1E-05", rate SLOW, `CALC:SMO?` 0, `CALC:AHOL?` 0, REL 0.0000 on the page (`s0.png`), `DBG:ACDC:METH?` A, `DBG:ACDC:ZERO?` 0,0 / all 0, `DBG:ACDC:R0?` 1, `POW:VOLT:GAIN?` factory. The DC V path (`poll_dcv`) uses only the raw AD1 code and the factory record. It does not use a REL, the AC+DC method, the E7 self-cal (`DC_CAL` is used only by AD2's `Ad2Scale` and AC+DC methods B / C in acdcm.rs) or the power-meter V gain. |
+| 2 | Calibration record | **Unchanged.** `CALIB.BIN` from the meter is byte-identical to the 2026-10-13 dump (`private/memrw-kit-test/quick.img/calibration_080C0000_32K.bin`). fw-rs programs internal flash only for the boot marker (`boot.rs`). 6 V range: gain 1.012064, offset 0.12534 mV. 60 V range: gain 1.007588, offset 0.25962 mV. |
+| 3 | Raw AD1 code -> volts | **Matches READ?.** `dm40scpi.py fast --source ad1` (OSR 3, chop on, 116 samples at 1 V): mean code 596 203 (sd 85). `code x 10 x (1.25/0.9) / 8388606 x 1.012064 - 0.000125` = 0.998908 V, + 0.05 mV (the r0 term in `poll_dcv`) = 0.998958 V. The READ?s right after gave 0.999033-0.999044 V. The 0.08 mV gap is the OSR 3 vs SLOW difference plus drift. |
+| 4 | Rate | **No effect.** 1 V: SLOW / MED / FAST 0.99918 / 0.99913 / 0.99906 V (`lv-pre`). At every level the three rates agree within 0.1-0.25 mV (table 2). |
+| 5 | Levels 0..20 V | **Neither gain nor offset** (table 2). |
+| 6 | 6 V vs 60 V range, same input | **Agree.** 1 V: -0.98 / -1.24 / -0.88 mV (6 / 60 / 6 V). 3 V: -2.31 / -2.50 / -2.12 mV. 5 V: -2.12 / -2.48 / -2.24 mV (`rng-r1`). The two ranges use different divider taps and calibration entries, and AD1 sees a 10x smaller signal on 60 V. The common error is therefore at the input. The 60 V range reads 0.2-0.36 mV below the 6 V range, which is a separate small offset within spec. |
+| 7 | `dm40dbg.py reset` | **Nothing reset-dependent.** After the reboot (uptime 13 s, `DBG:BOOT?` NORMAL, crash count 0) the errors were 1 V -0.29..-0.48 mV, 2 V -0.9, 3 V -2.1, 5 V -1.7 mV (`lv-post`). That is +0.3..0.5 mV against the pre-reboot sweep, the same shift at every level (not a gain), and within the wander in 9. |
+| 8 | Same 1 V written again (5 x, 50 s apart) | **No step.** Before / after the re-write: -0.01 / -0.04 / -0.02 / +0.00 / +0.03 mV. Writing the setpoint again does not move the output. |
+| 9 | 1 V held 5 min, no calibrator writes (30 windows of 25 READ?) | **Wanders.** Window means 0.998969-0.999747 V (span 0.78 mV, mean 0.999409); sd within a window 0.09 mV. |
+| 10 | 0 V | **Meter zero is good.** -0.037 mV (sd 2.6 uV) at 03:35, -0.12..-0.13 mV at 03:17. |
+
+**Table 2: levels** (`lv-sweep1`, before the reboot, SLOW; READ? mean of 15)
+
+| set | range | read | error | error % |
+|---|---|---|---|---|
+| 0 V | 6 V | -0.000118 | -0.12 mV | - |
+| 1 V | 6 V | 0.999100 | -0.90 mV | -0.090 |
+| 2 V | 6 V | 1.998599 | -1.40 mV | -0.070 |
+| 3 V | 6 V | 2.997531 | -2.47 mV | -0.082 |
+| 5 V | 6 V | 4.998050 | -1.95 mV | -0.039 |
+| 10 V | 60 V | 9.997050 | -2.95 mV | -0.030 |
+| 20 V | 60 V | 19.998745 | -1.26 mV | -0.006 |
+| 1 V again | 6 V | 0.999479 | -0.52 mV | -0.052 |
+
+- **Not a meter gain:** the % error is not constant (-0.09 at 1 V, -0.006 at 20 V).
+- **Not a meter offset:** the zero is -0.12 mV, and the mV error goes up and down with the level (3 V worse than 5 V).
+- **Consistent with the source:** a 24-bit ΣΔ AD1 is not this non-linear (0.05 % of the reading), and the 60 V path shows the same pattern. What is left is the calibrator's own DAC error at each setpoint.
+
+**The same pattern before 7409b92.** On 2026-10-22 ~20:24 a 4ff95f7-era build (device test 6.5, `DBG:AD2:DCV?`, the READ? reference column of `ad2dcv.py`) read the same calibrator as follows:
+
+| set | read | error % |
+|---|---|---|
+| 0 V | -0.06 mV | - |
+| 0.5 V | 0.49924 | -0.15 % |
+| 1 V | 0.99914 | -0.086 % |
+| 2 V | 1.99879 | -0.06 % |
+| 5 V | 4.99726 | -0.055 % |
+| 10 V | 9.99695 | -0.03 % |
+| 20 V | 19.99788 | -0.011 % |
+
+That is the same shape within ~0.02 %, 31 h and many builds earlier.
+
+**History.** At 1 V the meter has read from 0.9987 to 1.0006 V over two days:
+- 1.0005-1.0006 (9dd1222);
+- 1.0004 (5f14d38);
+- 0.9992-0.9998 (5f14d38 .. 973df07);
+- 0.99914 (the run above);
+- 0.99906 / 0.99971 (a0985e4);
+- 0.999951 (7409b92 Part 2);
+- 0.9987-0.9993 (8087c7d);
+- 0.9990-0.9997 (today).
+
+The readings go up and down; they do not step with the builds. 9dd1222 / 5f14d38 have no multi-level data, so the only claim is that the 1 V point moves by up to ~0.1 % on its own over hours and minutes. The 0.999951 after Part 2 was a high point of that wander, not the baseline.
+
+**Limits.**
+- There is still no third reference. "Calibrator" rests on the exclusions above: no firmware state, the same code -> volts, both ranges agree, a stable zero, and a level-dependent but repeatable signature.
+- A meter reference that drifts ~400 ppm in minutes is not ruled out. It would be unusual for the HY3131, and it would scale with the level, which the 0 V / 20 V points do not show.
+- The settled answer needs a 6.5-digit DMM or a voltage reference (e.g. a 2.5 / 5 V reference IC) on V/COM.
+
+**The open items are closed:**
+- 7409b92 "1 V after Part 3": not caused by the AC+DC session.
+- 8087c7d New finding 4: not a regression.
+
+### State at the end
+
+- **Device:** **rebooted once on purpose** (`dm40dbg.py reset`, 03:25). `DBG:BOOT?` NORMAL / HEALTHY, crash count 0, stack high-water reset to 20 608 / 45 800 B. DMM page, DC V, AUTO+ (`VOLT:RANG:AUTO?` 1), rate SLOW, `CONF?` "VOLT +6,+1E-05", method A. `LOG:DEST HOST`, `LOG:DUR 60`, `LOG:OSR 3`, `LOG:CHOP 1`, source AD1, 4800 (as found). Generator `OUTP?` 0. Settings not touched (volume 0 %, backlight 10 %, Dim / Shutdown Never).
+- **Files:** the `fast` run's `LOGS/FAST013.DLG` was deleted. `MMEM:CAT?` 10 829 824 / 5 910 528, as at the start.
+- **Calibrator:** 1 V DC, enabled (func 1 mode 0 value 1000).
