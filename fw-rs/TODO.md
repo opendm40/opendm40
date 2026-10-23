@@ -1386,6 +1386,17 @@ Firmware:
       p5.py Wave view 1 / 2 ms/div: max_lat 280 / 260 ns, dropped +0, 0 / 0 / 0. The range commands answer
       (VOLT:RANG? / 60 / SENS:VOLT:RANG:AUTO ON / VOLT:RES? / CURR:DC:RANG? = +9.91E37 + "Settings conflict"
       while in V, as documented).
+- [x] `VOLT:RANG:AUTO?` in AC V and `CURR:RANG:AUTO?` in AC A answered +9.91E37 (device d330877, device-check
+      "d330877" new bug 4): a bare VOLT / CURR header meant the DC function. Branch smallbugs: a bare VOLTage /
+      CURRent in [SENS:]<q>:RANG / :RANG:AUTO / :RES is the quantity in any coupling (scpi.rs `ANY_CPL`; DC, AC,
+      AC+DC, AUTO: one range state per V / A button), in the power meter RANG? / RANG:AUTO? answer its V / I
+      channel (as POW:VOLT:RANG?; RES? and sets there stay "Settings conflict"). An explicit coupling stays
+      strict, another quantity / CONT / DIOD / TEMP still +9.91E37 + "Settings conflict" (CONF:VOLT stays DC,
+      34401A). Swept every function x the range / function queries in the emulator: no other +9.91E37 outside
+      those. emu/hy3131/autorangetest.py --queries-only (every function and coupling, the power meter, TEMP).
+      Device retest: CONF:VOLT:AC / :ACDC / :AUTO and CONF:CURR:AC / :ACDC / :AUTO: VOLT:RANG:AUTO? /
+      CURR:RANG:AUTO? = 1 (0 after <q>:RANG:AUTO OFF), VOLT:RANG? / CURR:RANG? the range, SYST:ERR? 0; in
+      CONF:POW VOLT:RANG? = POW:VOLT:RANG?'s value.
 - [x] DC V AUTO+ from 600 V or 1000 V (VOLT:RANG:AUTO ON = two steps down to 6 V), 1 V in: one reading of
       0.767-0.790 V (77-79 %) in 5 of 35 tries (600 V: 3 of 20 + 1 of 5, 1000 V: 1 of 10; from 60 V, one
       step: 0 of 10). It is the second reading on 6 V, ~0.8 s after the command; the chart MIN records it
@@ -1620,6 +1631,22 @@ Firmware:
       **Device d330877 (device-check-2026-10-21.md "d330877" 1a): PASS**: MCX page, DISK 384 002 / 768 002 rows in 10 s, lost 0, late 0;
       HOST 38400 lost 0, 76800 lost 0 with the known host-side ring overwrite. The badge during a session is refused
       (1d), but the "Wave: data logger running" toast is hidden under the DATA LOGGING panel: open (cosmetic).
+- [x] A toast during a logger session (device d330877 1d: the badge's "Wave: data logger running" was drawn
+      under the DATA LOGGING panel, only its red ends showed, and they stayed: nothing repaints the view during a
+      session). Branch smallbugs: while the panel is up (main.rs `dialog::log_panel_on`) every toast goes into
+      the panel's body (dialog.rs `LOG_TOAST`, under the title), the panel's refresh is held while it is up, and
+      `toast_gone` (expiry / dismiss, app.rs) draws the whole panel again, which covers it exactly. The panel is
+      now as wide as a toast (40..440, was 70..410) so every toast text fits at spacing 2. The firmware-install
+      confirm (a file written to the USB disk) waits for the session's end (its box is taller than the panel).
+      All toasts reach this path (one draw function); the ones that can fire in a session: the source badge,
+      "Stopped: data logger running" (inrush page, host session), FW_BAD, DBG:TAP / DBG:KEY driven page toasts.
+      Confirms opened by DBG:TAP in a session (power entry) are not covered (no real touch reaches the UI in a
+      session: any press stops a disk session, a host session reads no touch). ui-render 6d' (every toast text
+      in the panel, refresh held, the panel byte-equal after); emulator (badge scenario, 38400 disk session on
+      the MCX page: toast in the panel body, nothing outside the panel box changed, the panel back after it);
+      fastlogtest --ui-nav --region-c (the badge tap and the toast's end while streaming: no region C).
+      Device retest: as d330877 1d (MCX page, AD2 38400 disk session, DBG:TAP 177,10): the toast reads in the
+      panel's body under "DATA LOGGING" for 1.5 s, then the panel's rows come back; no red left outside it.
 - [ ] Not exercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
       with the residue, sense 02/04/01; the host retries the whole command).
       Known and left: region C DBG commands (DBG:GENUINE? reads the loader data at 0x080A4000 in region C

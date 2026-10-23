@@ -1991,7 +1991,7 @@ fn main() {
     save(&out, "m04-main-menu");
 
     // 6c. Toasts (dialog.rs) over the DMM page: the longest texts.
-    for (k, (t, ok)) in [
+    let toasts = [
         ("Disk in use by PC - eject first", false),
         ("Saved LOG000.DLG", true),
         ("Disk full: log ended", false),
@@ -2028,10 +2028,12 @@ fn main() {
         ("Current too high: reduce it", false),
         // "Leads in A?" reminder (doc 4.9), on leaving a current function.
         (sentinel::LEADS_TOAST, false),
-    ]
-    .iter()
-    .enumerate()
-    {
+        // Refusals while a data-logger session runs (scope_page.rs source
+        // badge, main.rs inrush).
+        ("Wave: data logger running", false),
+        ("Stopped: data logger running", false),
+    ];
+    for (k, (t, ok)) in toasts.iter().enumerate() {
         host::reset(0);
         dialog::toast(t, *ok);
         let (x, y, w2, h2) = dialog::TOAST;
@@ -2108,6 +2110,94 @@ fn main() {
         }
     }
     dialog::log_panel_reset();
+
+    // 6d'. A toast while the logger panel is up (a session freezes the GUI:
+    //      nothing repaints the view until it ends): every toast text goes
+    //      into the panel's body (dialog::LOG_TOAST) and fits it; once the
+    //      toast has gone (dialog::toast_gone) the panel's own passes give
+    //      back exactly the panel without a toast (no toast pixel left), and
+    //      its 1 s refresh does not draw over the toast while it is up.
+    {
+        let info = dialog::LogInfo { hz: 38400, n: 77269, nominal_hz: 38400, ad2: true, lost: 0, disk: Some(dialog::LogDisk { prep: false, pct: 100, file: 0, kb: 79 }) };
+        // The scope page (MCX) under the panel, as on the device.
+        let page = || {
+            host::reset(0);
+            scope_ui::invalidate();
+            scope_ui::graph().clear();
+            scope_ui::update(&scope_ui::Model::DEFAULT);
+        };
+        dialog::log_panel_on(true);
+        dialog::log_panel_reset();
+        page();
+        for i in 0..5 {
+            dialog::log_panel(i, info);
+        }
+        let plain = host::emu().fb.clone();
+        save(&out, "t06-log-panel-scope");
+        let (x, y, w2, h2) = dialog::LOG_TOAST;
+        let tb = Bx::new(x as i32, y as i32, w2 as i32, h2 as i32);
+        ck.cases += 1;
+        if dialog::toast_rect() != dialog::LOG_TOAST {
+            ck.fail("log-toast/rect", format!("{:?} with the panel up", dialog::toast_rect()));
+        }
+        for (k, (t, ok)) in toasts.iter().enumerate() {
+            // Overlap / fit check: the panel, then the toast in it.
+            host::reset(0);
+            dialog::toast_gone(); // the last case's toast check's
+            dialog::log_panel_reset();
+            for i in 0..5 {
+                dialog::log_panel(i, info);
+            }
+            dialog::toast(t, *ok);
+            ck.check(&format!("log-toast/{t}"), &[("screen", Bx::new(0, 0, 480, 320)), ("toast", tb)]);
+            ck.cases += 1;
+            let w = stockfont::text_width(stockfont::ASCII26, t, 2);
+            if w > w2 as i16 - 8 {
+                ck.fail("log-toast/width", format!("{t:?} {w} px"));
+            }
+            // Over the scope page: the refresh held, then the panel back.
+            page();
+            dialog::toast_gone();
+            dialog::log_panel_reset();
+            for i in 0..5 {
+                dialog::log_panel(i, info);
+            }
+            dialog::toast(t, *ok);
+            let with_toast = host::emu().fb.clone();
+            for i in 0..8 {
+                dialog::log_panel(5000 + i, info); // past the 1 s refresh
+            }
+            ck.cases += 1;
+            if host::emu().fb != with_toast {
+                ck.fail(&format!("log-toast/held/{t}"), "the panel's refresh drew over the toast".into());
+            }
+            if *t == "Wave: data logger running" {
+                save(&out, "t07-log-panel-toast-wave");
+            }
+            if k == 0 {
+                save(&out, "t08-log-panel-toast-widest");
+            }
+            dialog::toast_gone();
+            for i in 0..5 {
+                dialog::log_panel(9000 + i, info);
+            }
+            ck.cases += 1;
+            let fb = &host::emu().fb;
+            let diff = fb.iter().zip(plain.iter()).filter(|(a, b)| a != b).count();
+            if diff != 0 {
+                ck.fail(&format!("log-toast/restore/{t}"), format!("{diff} px differ from the panel without the toast"));
+            }
+            if *t == "Wave: data logger running" {
+                save(&out, "t09-log-panel-after-toast");
+            }
+        }
+        dialog::log_panel_on(false);
+        dialog::log_panel_reset();
+        ck.cases += 1;
+        if dialog::toast_rect() != dialog::TOAST {
+            ck.fail("log-toast/rect-off", format!("{:?} with no panel", dialog::toast_rect()));
+        }
+    }
 
     // 7. Gestures: zone table, axis lock, hold-to-grab, Up on captured
     //    touches (gesture.rs through its DBG:DRAG hook).

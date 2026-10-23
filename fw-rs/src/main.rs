@@ -1412,6 +1412,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // last FAT write; tap to stop (below).
         // (Not the inrush save: no logger runs, the page stays live.)
         let logging = logger.host_active() || (fastlog::active() && !app.inrush_saving());
+        // A toast during a session goes into the logger panel (dialog.rs
+        // `toast_rect`): nothing repaints the view around it until the end.
+        dialog::log_panel_on(logging && log_draw >= 1);
         if logging_prev && !busy {
             app.dmm.start(&mut clk);
             app.meter.reset();
