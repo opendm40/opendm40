@@ -18,6 +18,9 @@ the 10 A rating.
   emu/hy3131/loudtest.py --app fw-rs/dm40-fw-native.bin --port 53101 aprot ajack
   emu/hy3131/loudtest.py --list
 
+The key / alert volume is set to 0 % (SYST:BEEP:VOL 0, the owner's setting):
+at 100 % a key beep (CCR1 5544) would look like the alarm's high tone.
+
 Results: emu/out/loud-<name>.json, emu/out/loud-<name>.buzz (the register
 log). One emulator per port; run scenarios in parallel on different ports.
 """
@@ -87,6 +90,14 @@ SC = {
                           ('stops', 26, 27.8), ('quiet', 27.8, 29), ('starts', 29, 29.45, LOUD), ('stops', 29.5, 29.7),
                           ('quiet', 29.7, 34)],
                   seen=[('AJACK', '1,0,1,0'), ('AJACK', '0,1,1,0'), ('AJACK', '1,0,2,0'), ('AJACK', '0,1,3,0')]),
+    # A-PROT, the source removed (15 s), then ohm (the user acts in a function without the
+    # probe; the latch holds there): no new alarm.
+    'aprot-ohm': dict(func=None, run_for=26, setup=['SYST:BEEP:VOL 0'],
+                      script=[(0, 'dmm open'), (10, 'dmm avsrc:12'), (15, 'dmm open')],
+                      acts={16.5: ['CONF:RES']},
+                      checks=[('quiet', 6, 10), ('starts', 10, 11.2, LOUD), ('loud', 10, 15, LOUD), ('stops', 15, 15.6),
+                              ('quiet', 15.6, 26)],
+                      seen=[('APROT', '1,0,1,0'), ('APROT', '0,0,1,0')]),
     # V-JACK? (24 V on V/ohm in DC A, no current): an advisory, no alarm. Then Off: A-JACK
     # in DC V makes no sound; then Volume at 40 %: the alarm at the key volume.
     'vjack-off': dict(func='CURR:DC', run_for=40, setup=['SYST:BEEP:VOL 0'],
