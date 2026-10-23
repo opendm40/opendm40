@@ -263,5 +263,9 @@ Up and down moved by ~0.2 s in opposite directions; FAST (100 ms
 conversions) shows no such shift. The same 0.59 / 0.20 appear with
 proposals 1-4 alone (bisect build).
 
-Device: not measured yet (the coordinator's settle.py at 1 V on f0d21eb is
-the baseline); retest steps in TODO.md "Switch latency".
+Device: the fastswitch build is not measured yet. Baseline (settle.py at
+1 V, RATE FAST, f0d21eb; device-check-2026-10-21.md "f0d21eb" item 5, the
+same as ad74e93): DC V -> AC V 460-462 ms, AC V -> DC V 457-460 ms, DC V ->
+RES 2672 ms, RES -> DC V 554-558 ms, DC V -> A 758 ms, DC V -> mA 557-559
+ms, AC V -> AC+DC 1372-1377 ms, DC V 6 -> 60 V 509-557 ms. Retest steps:
+TODO.md "Switch latency".
