@@ -632,11 +632,15 @@ pub struct Dmm {
     /// cycles evaluated since the last reset (0: none yet, each reading then
     /// takes the plain rule), `auto_votes` consecutive cycles that wanted the
     /// other part (`auto_eval`), `auto_total_si` |total| of the last reading
-    /// in SI (the sentinel / OVERLOAD checks look at the whole signal).
+    /// in SI (the sentinel / OVERLOAD checks look at the whole signal);
+    /// `auto_t0` since when (ms, 0 not) the first decision waits for a
+    /// settled AC part, `auto_prev` the AC part at the last evaluation.
     cpl_auto: bool,
     auto_ac: bool,
     auto_n: u8,
     auto_votes: u8,
+    auto_t0: u64,
+    auto_prev: f32,
     auto_total_si: f32,
     range: i8,
     manual: bool,
@@ -883,13 +887,26 @@ const ACS_MAX_MS: u64 = 6000;
 // Evaluated once per AC+DC cycle (~1.9 s, at the end of the AC phase, both
 // parts fresh); a change needs AUTO_VOTES cycles in a row (2: ~2..4 s after
 // the signal changed). The first cycle after a reset decides at once (no
-// votes), and before it the plain comparison AC > |DC| (above the floor)
-// picks the part of each reading.
+// votes): the larger part. It is not taken on a transient, because the
+// hysteresis keeps it: the first AC parts after an entry overshoot (A's AC
+// phase: +3 % on the 40 Hz square, device 2563fe1, which then showed AC
+// while C showed DC; +7 % on a0985e4; up to +52 % in the emulator after the
+// up-range; C's ~0.5 % high), and on a tie (that square: AC 4.760, DC
+// 4.764 V) the overshoot alone decided. So the first decision waits until
+// the AC part has settled on one side: its change since the evaluation
+// before, x AUTO_SETTLE_K (an EMA's remaining drift), is less than its
+// distance to |DC| (a clear case: the second evaluation, A ~2 s, C ~0.1 s
+// later; an AC part below the floor: DC at once). One that does not settle
+// within AUTO_TIE_MS (AC = DC within the noise) is DC. Until then the
+// reading shows DC, AC only with no DC part (|DC| below the off floor).
+// Either part is fair at a tie; it no longer depends on the transient.
 const AUTO_TO_AC: f32 = 1.5;
 const AUTO_TO_DC: f32 = 0.75;
 const AUTO_FLOOR_V: [f32; 2] = [0.01, 0.005];
 const AUTO_FLOOR_A: [f32; 2] = [0.03, 0.02];
 const AUTO_VOTES: u8 = 2;
+const AUTO_SETTLE_K: f32 = 4.0;
+const AUTO_TIE_MS: u64 = 4000;
 
 /// SCPI / persisted function codes of the AUTO coupling (`Dmm::func`), next
 /// to 16 / 17 (AC+DC) and pw::FUNC (18).
@@ -946,6 +963,8 @@ impl Dmm {
             auto_ac: false,
             auto_n: 0,
             auto_votes: 0,
+            auto_t0: 0,
+            auto_prev: 0.0,
             auto_total_si: 0.0,
             range: 0,
             manual: false,
@@ -1433,6 +1452,7 @@ impl Dmm {
         self.acs_t0 = 0;
         self.auto_n = 0;
         self.auto_votes = 0;
+        self.auto_t0 = 0;
         self.auto_ac = false;
         self.dc_val = 0.0;
         self.ac_raw = 0.0;
@@ -2756,11 +2776,12 @@ impl Dmm {
 
     /// AUTO: the part to show now (true = AC) for range full scale `lim`:
     /// the decided one, or before the first evaluation of this session the
-    /// plain comparison (AC > |DC| and above the floor). Sets `auto_ac`.
+    /// DC, AC only above the floor with no DC part (|DC| below the off
+    /// floor: no first AC part's overshoot shown). Sets `auto_ac`.
     fn auto_shows_ac(&mut self, lim: f32) -> bool {
         if self.auto_n == 0 {
-            let fl = if self.mode <= 3 { AUTO_FLOOR_V[0] } else { AUTO_FLOOR_A[0] };
-            self.auto_ac = self.f_ac > fl * lim && self.f_ac > self.dc_val.abs();
+            let fl = if self.mode <= 3 { AUTO_FLOOR_V } else { AUTO_FLOOR_A };
+            self.auto_ac = self.f_ac > fl[0] * lim && self.dc_val.abs() < fl[1] * lim;
         }
         self.auto_ac
     }
@@ -2768,11 +2789,28 @@ impl Dmm {
     /// AUTO: one evaluation per AC+DC cycle (end of the AC phase, both parts
     /// fresh; constants AUTO_*): the first decides, later ones switch the
     /// part after AUTO_VOTES cycles in a row wanted the other one.
-    fn auto_eval(&mut self, lim: f32) {
+    fn auto_eval(&mut self, lim: f32, now: u64) {
         let fl = if self.mode <= 3 { AUTO_FLOOR_V } else { AUTO_FLOOR_A };
         let (a, d) = (self.f_ac, self.dc_val.abs());
         if self.auto_n == 0 {
-            self.auto_shows_ac(lim);
+            // Wait for the AC part to settle on one side (AUTO_SETTLE_K);
+            // DC when it does not within AUTO_TIE_MS.
+            if a > fl[0] * lim {
+                let settled = self.auto_t0 != 0 && AUTO_SETTLE_K * (a - self.auto_prev).abs() < (a - d).abs();
+                self.auto_prev = a;
+                if self.auto_t0 == 0 {
+                    self.auto_t0 = now.max(1);
+                }
+                let late = now.saturating_sub(self.auto_t0) >= AUTO_TIE_MS;
+                if !settled && !late {
+                    self.auto_shows_ac(lim);
+                    return;
+                }
+                self.auto_ac = settled && a > d;
+            } else {
+                self.auto_ac = false;
+            }
+            self.auto_t0 = 0;
             self.auto_n = 1;
             self.auto_votes = 0;
             return;
@@ -2966,7 +3004,7 @@ impl Dmm {
             if self.acdc_seen != 3 || settling {
                 // No reading before both parts were measured.
             } else if self.cpl_auto && self.phase_n == 0 {
-                self.auto_eval(lim);
+                self.auto_eval(lim, now);
             }
             let rd = (self.acdc_seen == 3).then(|| self.acdc_reading(lim, dec, unit, si_k));
             if ACDC_FREQ_RESTART && m >= 4 {
