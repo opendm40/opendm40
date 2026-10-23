@@ -12,7 +12,8 @@ reply checked byte-exactly where it is deterministic:
   combo    several commands in one message (';'), incl. multi-packet
            Bulk-OUT messages up to the fw-rs 256-byte command buffer
   split    one command in two DEV_DEP_MSG_OUT transfers (EOM only on the second)
-  big      multi-packet replies: WAV:DATA? (417-byte transfer, 7 packets),
+  big      multi-packet replies: WAV:DATA? (#3400 block + '\n': a 420-byte
+           transfer, 7 packets),
            DBG:PROF?, DBG:LCD? (up to 3 KiB: ~50 packets, a ZLP when the
            transfer ends on a packet boundary)
   small    a reply fetched in several REQUEST_DEV_DEP_MSG_IN rounds
@@ -185,10 +186,20 @@ class Tmc:
         return self.read(what=text[:40], **kw)
 
 
+def nl(got, what):
+    """The reply without its '\\n' terminator: every fw-rs USBTMC reply ends
+    with one since 848047f (scpi.rs header), a block reply too (after the
+    block, as the last byte of the EOM transfer: docs/bt-scpi.md "Scope
+    waveform readout"). An empty reply (a failed block query) has none."""
+    if not got:
+        return got
+    if not got.endswith(b'\n'):
+        raise IOError('%s: reply without the final newline: %r' % (what, got[-40:]))
+    return got[:-1]
+
+
 def expect(got, want, what):
-    # Every fw-rs reply ends with '\n' since 848047f (scpi.rs header).
-    if got.endswith(b'\n'):
-        got = got[:-1]
+    got = nl(got, what)
     if got != want:
         raise IOError('%s: got %r, expected %r' % (what, got[:120], want[:120]))
 
@@ -240,22 +251,22 @@ class Stress:
     def c_big(self):
         k = self.r.randint(0, 2)
         if k == 0:
-            rep = self.t.query('WAV:DATA?', delay=self.d())
+            rep = nl(self.t.query('WAV:DATA?', delay=self.d()), 'WAV:DATA?')
             if len(rep) != 405 or not rep.startswith(b'#3400'):
                 raise IOError('WAV:DATA?: %d bytes %r' % (len(rep), rep[:8]))
         elif k == 1:
-            rep = self.t.query('DBG:PROF?', delay=self.d())
+            rep = nl(self.t.query('DBG:PROF?', delay=self.d()), 'DBG:PROF?')
             if len(rep) < 64:
                 raise IOError('DBG:PROF?: %d bytes' % len(rep))
         else:
-            # n words -> 6 + 2n bytes; pick n so that some transfers end on a
-            # 64-byte boundary (ZLP): 12 + 6 + 2n = 64 m.
+            # n words -> 6 + 2n bytes + '\n'; pick n so that some transfers
+            # end on a 64-byte boundary (ZLP): 12 + 7 + 2n + 1 (pad) = 64 m.
             if self.r.random() < 0.5:
                 m = self.r.randint(2, 48)
-                n = (64 * m - 18) // 2
+                n = 32 * m - 10
             else:
                 n = self.r.randint(1, 1500)
-            rep = self.t.query('DBG:LCD? 0,0,40,40,%d' % n, delay=self.d())
+            rep = nl(self.t.query('DBG:LCD? 0,0,40,40,%d' % n, delay=self.d()), 'DBG:LCD?')
             want_hdr = b'#4%04d' % (2 * n)
             if len(rep) != 6 + 2 * n or rep[:6] != want_hdr:
                 raise IOError('DBG:LCD? n=%d: %d bytes %r' % (n, len(rep), rep[:6]))
@@ -281,7 +292,7 @@ class Stress:
         while len(pkt) == 64:
             pkt = self.t.bulk_in(64, 'pipelined rest')
             buf += pkt
-        if buf[1] != tag or buf[12:12 + struct.unpack_from('<I', buf, 4)[0]] != self.idn():
+        if buf[1] != tag or nl(buf[12:12 + struct.unpack_from('<I', buf, 4)[0]], 'pipelined *IDN?') != self.idn():
             raise IOError('pipelined *IDN?: %r' % buf)
 
     def c_stale(self):
@@ -302,10 +313,14 @@ class Stress:
         if st[0] == 0x01:
             for _ in range(200):
                 cs = self.t.ctl_in(0xA2, 4, 0, self.t.ep_in, 8, 'CHECK_ABORT_BULK_IN_STATUS')
+                self.t.note('CHECK_ABORT_BULK_IN_STATUS -> %s' % cs.hex())
                 if cs[0] == 0x02:  # PENDING: read Bulk-IN up to a short packet
                     if cs[1] & 1:
-                        while len(self.t.bulk_in(64, 'abort-in drain')) == 64:
-                            pass
+                        while True:
+                            pkt = self.t.bulk_in(64, 'abort-in drain')
+                            self.t.note('IN drain %d bytes' % len(pkt))
+                            if len(pkt) < 64:
+                                break
                     continue
                 if cs[0] != 0x01:
                     raise IOError('CHECK_ABORT_BULK_IN_STATUS %s' % cs.hex())
@@ -349,10 +364,12 @@ class Stress:
     def c_abortin(self):
         self.t.write(self.r.choice(['*IDN?', 'WAV:DATA?', 'DBG:LCD? 0,0,40,40,1000']))
         tag, req = self.t.req_msg(4096)
+        self.t.note('REQ tag %d max 4096' % tag)
         self.t.bulk_out(req, 'REQUEST before abort')
         time.sleep(self.d())
         if self.r.random() < 0.5:
-            self.t.bulk_in(64, 'first packet before abort')  # a transfer in progress
+            pkt = self.t.bulk_in(64, 'first packet before abort')  # a transfer in progress
+            self.t.note('IN first packet %d bytes' % len(pkt))
         self.abort_in(tag)
         expect(self.t.query('*IDN?', delay=self.d()), self.idn(), '*IDN? after abort-in')
 
@@ -373,7 +390,7 @@ class Stress:
         expect(self.t.query('*IDN?', delay=self.d()), self.idn(), '*IDN? after abort-out')
 
     def c_read(self):
-        rep = self.t.query('READ?', delay=self.d())
+        rep = nl(self.t.query('READ?', delay=self.d()), 'READ?')
         float(rep)
 
     def c_compound(self):
@@ -390,14 +407,14 @@ class Stress:
             expect(rep, w + b';' + self.idn(), 'SOUR:FUNC;SOUR:FUNC?;*IDN?')
         elif k == 2:
             # The reading wait pauses the message; the rest runs after it.
-            rep = self.t.query('*IDN?;READ?;*OPC?;:SYST:ERR?', delay=self.d())
+            rep = nl(self.t.query('*IDN?;READ?;*OPC?;:SYST:ERR?', delay=self.d()), '*IDN?;READ?;*OPC?;SYST:ERR?')
             p = rep.split(b';')
             if len(p) != 4 or p[0] != self.idn() or p[2] != b'1' or not p[3].endswith(b'"'):
                 raise IOError('*IDN?;READ?;*OPC?;SYST:ERR?: %r' % rep)
             float(p[1])
         elif k == 3:
             # The reported hang: a command the app runs, then a query.
-            rep = self.t.query('*CLS;POW:PHAS:CAL RES;:SYST:ERR?;*OPC?', delay=self.d())
+            rep = nl(self.t.query('*CLS;POW:PHAS:CAL RES;:SYST:ERR?;*OPC?', delay=self.d()), 'POW:PHAS:CAL RES;SYST:ERR?')
             p = rep.rsplit(b';', 1)  # the error text may hold a ';'
             if len(p) != 2 or not (p[0].startswith(b'-') or p[0] == b'0,"No error"') or p[1] != b'1':
                 raise IOError('POW:PHAS:CAL RES;SYST:ERR?: %r' % rep)
@@ -409,7 +426,7 @@ class Stress:
             expect(self.t.query('*CLS;MMEM:DATA? "NOPE.DLG"', delay=self.d()), b'', 'MMEM:DATA? missing file')
             expect(self.t.query('SYST:ERR?'), b'-100,"File name not found"', 'SYST:ERR? after MMEM:DATA?')
         else:
-            rep = self.t.query('*OPC?;WAV:DATA?;*IDN?', delay=self.d())
+            rep = nl(self.t.query('*OPC?;WAV:DATA?;*IDN?', delay=self.d()), '*OPC?;WAV:DATA?;*IDN?')
             if len(rep) != 2 + 405 + 1 + len(self.idn()) or not rep.startswith(b'1;#3400') or not rep.endswith(b';' + self.idn()):
                 raise IOError('*OPC?;WAV:DATA?;*IDN?: %d bytes %r' % (len(rep), rep[:12]))
 

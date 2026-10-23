@@ -470,6 +470,16 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
                 if self.ep_in.write(&[]).is_ok() {
                     self.tx_zlp = false;
                 }
+            } else if crate::usb::in_busy(u8::from(self.ep_in.address())) {
+                // The last packet (or the ZLP) is still in the endpoint: this
+                // completion is the previous packet's. `poll` can write the
+                // next one when the host took a packet between the driver's
+                // XFRC check and `poll` (the host reads at any time); that
+                // packet's XFRC then arrives after the write, and taking it
+                // for the end of the transfer left the ZLP of a 64-byte
+                // transfer (`*IDN?` since the 24-digit serial) in the FIFO
+                // while CHECK_ABORT_BULK_IN_STATUS said done: the next query
+                // read it as its reply (emu/usbtmc_stress.py abortin).
             } else {
                 self.tx_len = 0;
                 self.tx_off = 0;
