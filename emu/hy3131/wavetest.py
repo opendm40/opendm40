@@ -422,11 +422,12 @@ try:
         q('TRIG:LEV %g' % lev)
         wait_ms(1500)
         pre = [float(x) for x in q('WAV:PRE?').split(',')]
-        k, z = pre[2], pre[3]
+        # the 10-field preamble: yincrement, yorigin, yreference = fields 7..9
+        k, z, r0 = pre[7], pre[8], pre[9]
         ok = True
         for _ in range(2):
             w = wave()
-            v = [c * k + z for c in w]
+            v = [(c - r0) * k + z for c in w]
             a, b = v[196], v[204]
             rise = b > a if slope == 'POS' else b < a
             hit = min(a, b) - 0.15 <= lev <= max(a, b) + 0.15

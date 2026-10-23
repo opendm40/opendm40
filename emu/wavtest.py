@@ -292,7 +292,7 @@ try:
     check(abs(f - A.hz) < A.hz * 0.03 and abs(vpp - A.vpp) < A.vpp * 0.2,
           'screen columns scaled: %.1f Hz, %.3f Vpp, mean %.3f V' % (f, vpp, mean))
     j = t.qraw('*OPC?;WAV:DATA?')
-    check(j[:7] == b'1;#3400' and len(j) == 407, 'default WAV:DATA? still joins (*OPC?;WAV:DATA?: %d bytes)' % len(j))
+    check(j[:7] == b'1;#3400' and len(j) == 408 and j[-1:] == b'\n', 'default WAV:DATA? still joins (*OPC?;WAV:DATA?: %d bytes)' % len(j))
     t.w('WAV:FORM WORD')
     pw = pre(t)
     dw = block(t.qraw('WAV:DATA?'))
@@ -309,7 +309,7 @@ try:
     t.w('WAV:POIN MAX')
     d = t.qraw('WAV:DATA?')
     e = t.err()
-    check(d == b'#10' and 'Settings conflict' in e, 'record while running: "#10" + %s' % e)
+    check(d == b'#10\n' and 'Settings conflict' in e, 'record while running: "#10" + %s' % e)
 
     # --- DIGitize: one acquisition, then STOP
     t.w('DIG')

@@ -1,5 +1,8 @@
 //! Minimal SCPI command layer for the USBTMC interface (DMM subset).
 //!
+//! Every reply ends with '\n' on both transports (usbtmc.rs `terminate`,
+//! bt.rs), definite-length blocks too (after the data).
+//!
 //! Commands are case-insensitive, long or short form (MEASure -> MEAS), several
 //! per message separated by ';' (main.rs runs them one at a time through
 //! scpi_msg.rs: replies in order, ';'-joined, one response). Supported:

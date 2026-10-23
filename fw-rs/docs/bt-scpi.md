@@ -32,7 +32,9 @@ on the first byte of each request:
 - A line over 256 bytes is discarded; `SYST:ERR?` then reports "Input buffer
   overrun".
 - Replies: the text plus `\n`. A definite-length block (`WAV:DATA?`,
-  `LOG:DATA?`) is `#<n><len><data>` plus `\n`.
+  `LOG:DATA?`) is `#<n><len><data>` plus `\n`. USBTMC ends its replies the
+  same way (IEEE 488.2 NL^END, since the 8087c7d follow-up: a host reading
+  until `\n`, libscopehal's usbtmc transport, hung on one-byte replies).
 - Messages run one at a time: the next line is read only after the reply to
   the previous query has gone out, as on a serial instrument. Pipelined
   queries are answered in order, and none is cut short ("Query INTERRUPTED"
@@ -136,7 +138,7 @@ host's TransferSize needs; the main loop polls USB for it within the
 disk-READ budget per pass (2 ms, 0.5 ms while logging), so the screen and
 the DMM keep running, and the scope stays stopped (front-panel RUN waits)
 until the last packet left or the host gave the read up (a new command,
-a clear, or 2 s without the host reading on: a host that died mid-read). No `\n` follows a block on USBTMC (as every reply there).
+a clear, or 2 s without the host reading on: a host that died mid-read). A `\n` follows the block on USBTMC too (as every reply there), as the last byte of the EOM transfer.
 Over Bluetooth the reply has to fit the 6 KiB reply buffer: a longer one
 is refused with `#10` and "Too much data"; `WAV:POIN 2000` with WORD
 (3.8 kB, 0.33 s on the UART) is the practical full-width record there.
