@@ -1985,11 +1985,26 @@ Firmware:
             rewrites the serial, its safety check requires the emulator's serial (not the unit's) in the
             udisks drive and no other disk on it; mscresettest.py case `serial`; usbtmc_stress.py takes the
             serial from the first *IDN?.
+            Emulator (2376145): mscresettest 10/10 cases PASS (serial: iSerial == VPD 0x80 == *IDN? field ==
+            emu_uid hex, VPD 0x00 = 00 80, VPD 0x83 -> 05/24/00); ejecttest PASS next to the real meter (meter
+            still "0001": udisks drives ALIENTEK_DM40_files_0001 = sda and ALIENTEK_DM40_files_<emu hex> = sdb,
+            /dev/disk/by-id/usb-ALIENTEK_DM40_files_<hex>-0:0; the meter's sda untouched and mounted); sigrok-cli
+            (patched libsigrok, tcp-raw): "Alientek DM40A dm40-fw 0.1 [S/N: <hex>]", samples read; usbtmc_stress
+            pair / combo / split PASS (its big / compound cases fail on WAV:DATA? sizes: stale since before this
+            change, not looked into); all tools/*/run.sh PASS. Budgets: region B 48 156 B free (-216), C 23 696
+            (-148), stack headroom 21 344 (-24).
+            Device retest pending: `lsusb -v -d 1209:0001` iSerial == `xxd -p -u INFO/UID.BIN` == *IDN? field
+            (USBTMC and BT); udisks drive / by-id name carries it, Eject / Power Off still act on the meter;
+            `sigrok-cli -d scpi-dmm:conn=usbtmc/...  --scan` [S/N: ..]; ngscopeclient connects; recovery-usb is
+            NOT flashed (test build only); Windows 11 VM: a new device instance (re-install, a Zadig WinUSB
+            binding must be redone), Explorer mount + Eject still work, `Get-PhysicalDisk` SerialNumber (VPD 0x80);
+            reload.sh / DBG:UPDATE flow unchanged (by VID:PID).
       - [x] recovery-usb build broken (recovery.rs called the 3-argument Msc::new; then its 4 KiB MSC_BLK in
             TCM failed the 42 KiB TCM stack assert): fixed (MSC_BLK in .sram_bss when the SPI disk is the
             LUN). tools/build-variants/run.sh builds recovery-usb, recovery-file, no-ad2-isr, spi-disk (no
             vdisk), fatren-dry-run and keep-screen with all build.sh checks into target/variants/ (build.sh
             DM40_TDIR / DM40_OUT; dm40-fw-native.bin untouched), ~2 min; part of the tools/*/run.sh suite.
+            (2376145: all six ok; recovery-usb stack headroom 21 856, B 46 780, C 23 004 free.)
       - [x] Follow-ups (2026-10-22, src/vwrite.rs; docs/native-boot.md "Host writes"): the volume is
             writable (no WP bit; DBG:VDISK:RO 1 = the read-only volume as before). Every 512-byte WRITE is
             diffed against the generated sector: a LOGS / SCOPE / SHOTS delete (entry 0xE5 + chain freed ->
