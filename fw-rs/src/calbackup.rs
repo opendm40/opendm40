@@ -379,6 +379,30 @@ impl Source for FwFile<'_> {
     /// 4c4b489: max_lat 4.66 us here while it was region C).
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn fill(&self, off: u32, buf: &mut [u8]) {
+        self.fill_with(off, buf, body_copy);
+    }
+}
+
+/// Reads body bytes `q .. q + dst.len()` of an update file into `dst`
+/// (`FwFile::fill_with`; `body` = the body as mapped). False: they cannot
+/// be read now.
+pub type BodyRead = fn(body: &[u8], q: usize, dst: &mut [u8]) -> bool;
+
+/// The plain `BodyRead`: the bytes of `body`.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+fn body_copy(body: &[u8], q: usize, dst: &mut [u8]) -> bool {
+    dst.copy_from_slice(&body[q..q + dst.len()]);
+    true
+}
+
+impl FwFile<'_> {
+    /// `Source::fill` with the body bytes from `rd` (vdisk.rs: the slow
+    /// bank's part from its SPI mirror while the AD2 stream runs). Only the
+    /// 128-byte blocks made of body bytes alone go through `rd`; the header
+    /// block and the marker's (both far below 0x08080000) read `body`.
+    /// False: `rd` failed (`buf` partly filled).
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+    pub fn fill_with(&self, off: u32, buf: &mut [u8], rd: BodyRead) -> bool {
         let size = self.size() as usize;
         let (start, end) = (off as usize, off as usize + buf.len());
         let mut p = start;
@@ -388,7 +412,9 @@ impl Source for FwFile<'_> {
             let mut blk = [0u8; 128];
             let q = b0.wrapping_sub(12); // body offset of the block start
             if b0 >= 12 && (q + blen <= FW_MARKER_OFF || q >= FW_MARKER_OFF + 12) {
-                blk[..blen].copy_from_slice(&self.body[q..q + blen]);
+                if !rd(self.body, q, &mut blk[..blen]) {
+                    return false;
+                }
             } else {
                 for (i, d) in blk[..blen].iter_mut().enumerate() {
                     *d = self.plain(b0 + i);
@@ -399,6 +425,7 @@ impl Source for FwFile<'_> {
             buf[p - start..b0 + e - start].copy_from_slice(&blk[p - b0..e]);
             p = b0 + e;
         }
+        true
     }
 }
 
@@ -456,6 +483,66 @@ struct F<'a> {
 /// freed, re-read and compared with `src`. Does not touch `result()`.
 pub fn write_file(dev: &mut dyn BlockDevice, name: [u8; 11], src: &dyn Source) -> Result {
     run_inner(dev, &[F { name, src }], false)
+}
+
+/// Where root file `name` (8.3, upper case; the first live non-directory
+/// entry, as `write_file` finds it) lies: (first data block, blocks per
+/// cluster, file size, clusters), its chain through FAT 1 into `out`.
+/// None: no medium / volume, no such file, a malformed chain (a bad link,
+/// no EOC where the size ends) or more clusters than `out` holds.
+pub fn chain_of(dev: &mut dyn BlockDevice, name: &[u8; 11], out: &mut [u16]) -> Option<(u32, u32, u32, usize)> {
+    if !dev.present() || dev.block_size() as usize != BLK {
+        return None;
+    }
+    let [buf, _, fat] = scratch();
+    if !dev.read_block(0, buf) {
+        return None;
+    }
+    let v = parse_bpb(&buf[..], dev.block_count())?;
+    let mut ent = None;
+    'scan: for blk in 0..v.root_blocks {
+        if !dev.read_block(v.root_start + blk, buf) {
+            return None;
+        }
+        for k in 0..PER {
+            if blk * PER + k >= v.root_entries {
+                break 'scan;
+            }
+            let e = &buf[(k * 32) as usize..(k * 32 + 32) as usize];
+            if e[0] == 0x00 {
+                break 'scan;
+            }
+            if e[0] == 0xE5 || e[11] & 0x3F == 0x0F || e[11] & 0x18 != 0 {
+                continue;
+            }
+            if sfn_is(e, name) {
+                ent = Some((le16(e, 0x1A), le32(e, 0x1C)));
+                break 'scan;
+            }
+        }
+    }
+    let (start, size) = ent?;
+    let n = nclusters(&v, size) as usize;
+    if n == 0 || n > out.len() {
+        return None;
+    }
+    let mut cur = u32::MAX;
+    let mut c = start;
+    for (i, o) in out[..n].iter_mut().enumerate() {
+        if c < 2 || c > v.clusters + 1 {
+            return None;
+        }
+        *o = c as u16;
+        let next = fat_get(dev, &v, c, fat, &mut cur)?;
+        if i + 1 == n {
+            if next < 0xFFF8 {
+                return None;
+            }
+        } else {
+            c = next;
+        }
+    }
+    Some((v.data_start, v.spc, size, n))
 }
 
 /// 8.3 name `<prefix>NNN.<ext>` (prefix 1..5 upper-case chars, NNN = `n` with

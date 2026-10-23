@@ -553,7 +553,9 @@ fn handle<B: UsbBus>(
                 }
                 if off == 0 && !dev.read_block(lba, &mut blk[..bs as usize]) {
                     *xfer = Xfer::None;
-                    *sense = SENSE_MEDIUM_ERROR;
+                    // Busy now (vdisk.rs: its slow-bank mirror failed a
+                    // read and is off): NOT READY, the host retries.
+                    *sense = if dev.read_busy(lba, 1) { SENSE_BECOMING_READY } else { SENSE_MEDIUM_ERROR };
                     cmd.fail(done);
                     return Ok(());
                 }
