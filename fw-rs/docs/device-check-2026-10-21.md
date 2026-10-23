@@ -2424,3 +2424,97 @@ ad1:640,ad2:4800,ad2:38400,ad2:76800 --region-c --host-read`: PASS, lost 0, no r
 - **Calibrator:** 1 V DC, enabled.
 - Side note: another agent's emulator attached as sdb / usbtmc3 over vhci_hcd during this run. Its dmesg lines are
   not the meter's.
+
+## ad74e93: generator queries, per-unit serial, eject (2026-10-23 20:58 - 22:40)
+
+The coordinator had installed ad74e93. `*IDN?` = `Alientek,DM40A,<UID>,dm40-fw 0.1`. `dm40dbg.py boot`: marker VALID,
+crash count 0, HEALTHY at the start and the end (no reset). No flashing, no reload.sh / DBG:UPDATE. The meter was found on
+the scope page (10 us/div, cursors), DMM DC V AUTO+, RATE FAST. The calibrator was found on a 10 Hz square (func 2,
+10 000 mHz), enabled. Files are in the session scratchpad's `chk/`: `sessA.py`, `sentE.py`, `summE.py`, `settle.py`,
+`shots.py`, `reattach.py`, `usbreset.py`, and `out/` (JSON, CSV, PNG; `out/E_all_sent.txt` is the raw check E log).
+
+| # | check | result |
+|---|---|---|
+| A1 | 72f011e: `OUTP?`, `SOUR:FREQ?`, `SOUR:FUNC?`, `SOUR:VOLT?`, `SOUR:VOLT:OFFS?`, `SOUR:FUNC:SQU:DCYC?` polled every 0.25 s in a 38400 AD2 disk session (15 s, 60 rounds = 360 queries, `a384`) | **PASS**: late 0, overruns 0, max_lat 280 ns (`DBG:ISR?` before 240 ns), 576 003 rows / 15.000 s, lost_before 0. Worst reply 4.8 ms (`OUTP?`). The replies did not change: `0`, `+2.000000E+06`, `SQU`, `+3.000000E+00`, `+1.500000E+00`, `+5.000000E+01` |
+| A2 | The same at 76800 (`a768`, 64 rounds) | **PASS**: late 0, overruns 0, max_lat 280 ns, 1 152 003 rows / 15.000 s, lost_before 0, worst reply 13.3 ms |
+| A3 | A generator that is OFF stays OFF | **PASS**: `OUTP?` 0 before, during (every round) and after both sessions, and at the end. Each session's LOGS/FAST000.DLG was deleted by exact name (only after checking that it was the one new name) |
+| A4 | `OUTP?` with the generator ON does not glitch the output | **Not run**: switching the generator on is forbidden for agents (owner only) |
+| B1 | `lsusb -v -d 1209:0001` iSerial == `xxd -p -u INFO/UID.BIN` == `*IDN?` field 3 | **PASS**: all three are the same 24 hex digits `<UID>`. iManufacturer "dm40-fw", iProduct "DM40 multimeter (dm40-fw)" |
+| B2 | The same over BT (`dm40scpi.py --bt --mac ... scpi '*IDN?'`) | **PASS**: the same `*IDN?` line. `SYST:MOD?` is `DM40A,0,60000` on both links (its second field is not the serial) |
+| B3 | udisks / by-id | **PASS**: udisks drive `/org/freedesktop/UDisks2/drives/ALIENTEK_DM40_files_<UID>`, Serial `<UID>`, Vendor ALIENTEK, Model "DM40 files". `/dev/disk/by-id/usb-ALIENTEK_DM40_files_<UID>-0:0` -> sda |
+| B4 | sigrok-cli (libsigrok-dm40/install) `-d scpi-dmm:conn=usbtmc/3.10 --scan` | **PASS**: `scpi-dmm:conn=usbtmc/3.10 - Alientek DM40A dm40-fw 0.1 [S/N: <UID>] with 1 channel: P1`. This time `/dev/usbtmc2` stayed attached (USBDEVFS_CONNECT answered EBUSY = driver bound) |
+| B5 | Reload-path query `DBG:FLASH?` | **PASS**: `EF4018,4096,0,0,0,0,0,2,76,179`. `SYST:ERR?` "No error" |
+| B6 | ngscopeclient connects; Windows 11 VM (new instance, Get-PhysicalDisk SerialNumber); emu/ejecttest.py next to the meter | **Not run** (ngscopeclient is the owner's tool; no virsh; no emulator in this check) |
+| C1 | Eject from Linux as a desktop does: `gio mount -e /run/media/$USER/DM40` (gvfs 1.60.0, udisks2 2.10.91, util-linux 2.42.3) | **FAIL (host side, twice)**: gio unmounts, then reports `eject: cannot open /dev/sda: Permission denied` (rc 2). The meter got no START STOP UNIT (`DBG:VDISK:EJECT?` 0,0,0), the medium stayed present. The error text is util-linux `eject` run as the user (not in group `disk`), not by root udisksd. Below |
+| C2 | `udisksctl unmount` + udisks `Drive.Eject` over D-Bus (`busctl --system call ... Drive Eject 'a{sv}' 0`) | **PASS**: kernel "sda: detected capacity change from 4160541 to 0"; `DBG:VDISK:EJECT?` 1,2,2 (ejected, two 0x1B commands, last CB[4] = 2 = LoEj, Start 0); lsblk 0B, udisks MediaAvailable false, Size 0; `udisksctl mount` "not a mountable filesystem". USBTMC answered throughout |
+| C3 | Stays ejected | **PASS**: sysfs size 0 and EJECT? 1,2,2 at +15 / 30 / 45 / 60 s, no kernel line for sda |
+| C4 | Back after a re-plug | **PASS** with a port reset (USBDEVFS_RESET on /dev/bus/usb/003/010, plugdev; no physical re-plug): "reset full-speed USB device", sda 4160541 blocks, auto-mounted read-only at /run/media/$USER/DM40, README.TXT sha256 equal to before, EJECT? 0,2,2, RO? 1,1, /dev/usbtmc2 the same. A host load (LoEj=1 Start=1, `eject -t`) could not be sent: /dev/sda is root:disk |
+| C5 | "PC can edit" + cp + Eject at once | **Not run**: it needs `DBG:VDISK:RO 0` (an owner setting), a bus reset and a write to the meter's disk. With the `gio` eject failing on this host, the "at once" desktop case would not even reach the meter |
+| D | RES / A-JACK behaviour | Not changed (pending the owner's decision); see E |
+
+**C1, why gio fails (not traced further).** The error is util-linux `eject`'s own text, and it is what an unprivileged
+user gets: /dev/sda is `root:disk` 0660, so gvfs evidently ran `eject` itself as the user (it does so for some
+mounts) instead of asking udisks. udisksd's own Drive.Eject (C2) runs as root and works.
+So on this host, Files / Nautilus "Eject" on the DM40 volume only unmounts it. The emulator's ejecttest.py passed because it
+falls back to udisks `Drive.Eject` over D-Bus when `gio mount -e` fails (emu/ejecttest.py `eject`). It is not a fw-rs
+bug: the same would happen with any USB stick that gvfs ejects this way. A user who wants the medium gone can use
+`udisksctl power-off` (not tried here: forbidden in this check) or unplug after the unmount. The kernel line
+"/dev/sda: Can't open blockdev" appears also at each re-mount, so it does not mark the failure.
+
+### E: false alerts after DMM function switches (owner report, 2026-10-23)
+
+Method: `sentE.py` switches with SCPI `CONF:*` (DC V, AC V, A = `CONF:CURR:DC 10`, mA = `CONF:CURR:DC 0.06`, RES,
+TEMP, POW), `VOLT:COUP AUTO`, taps on the DMM function bar (V / A (uA-first) / ohm / Hz / W), MENU -> Oscilloscope -> MENU ->
+Multimeter, and AC V / DC V -> MF -> Wave -> MENU -> Multimeter. After each switch it polls `DBG:SENT?` without a pause for 2.5 s
+(about 1 ms per poll), then every ~50 ms, and `FUNC?` every 8th poll. The watch lasts 5 s, or up to 14 s while an alert is on. "matrix" is an
+Eulerian circuit over every ordered pair of {DC V, AC V, A, mA, RES, TEMP, POW} (42 switches). Levels: calibrator output
+disabled (V-COM open), 1 V DC and 5 V DC on V-COM. The A jack is open. In all, 397 switches: off 175 (matrix twice,
+chain DC V -> AC V -> A -> mA -> RES -> TEMP -> W and back, AUTO, UI, scope, Wave view), 1 V 111, 5 V 111.
+DBG:SENT? fields: kind,alert,mask,ctsta,pkmin,pkmax,streak,hits,samples,probe_mA,aprot_ms,vside. CTSTA_CMP = 0x30
+(CMPHO | CMPLO).
+
+| # | finding | where | detector values |
+|---|---|---|---|
+| E1 | **False V-JACK? (amber) after RES -> A or RES -> mA**, V-COM open or 1 V. Every time (11 / 11: SCPI and the A tap). On 1.47-1.97 s after the switch, off at 4.9-5.5 s (shown 3.1-4.0 s) | off: matrix x2, chain, AUTO, UI; 1 V: matrix, AUTO, UI. Not at 5 V (RES -> A / mA there: 0 / 4) | kind CMP_SENSE from the first poll. ctsta 0 for 0.46-0.73 s (samples frozen: the row change), then **0x70** in every window (streak +1 per 100 ms window, hits +1). V-JACK at streak 10-11 (= first hit + ~1 s, VJACK_ASSERT_MS). From ~4.3 s ctsta 0x50, then 0 at ~4.5 s, streak 0; badge off ~0.5 s later. pkmin / pkmax are stale (the previous kind's). No V-JACK after DC V / AC V / TEMP / POW -> A, nor A <-> mA |
+| E2 | **False V-JACK? after scope page -> DMM in A** (MENU, Oscilloscope, MENU, Multimeter) at 5 V DC: on 1.42 s, off 6.0 s | 5 V, `v5_wave` (1 of 1); not at 0 / 1 V | CMP_SENSE, ctsta 0 until 0.51 s, then 0x70 in every window, streak 10 at onset. A direct TEMP -> A at 5 V gave nothing |
+| E3 | **False AC? hint (grey) in DC V on 5 V DC**: on in every DC V entry, 2.6 s after the switch (0-30 ms when the hint was already on: DC V -> DC V, MF / Wave / MENU / Multimeter within DC V), and it stays on (still on at 14 s). From VOLT:AUTO too. 26 / 26 steps that ended in DC V | 5 V only: every switch into DC V (SCPI, tap, Wave view / scope exit). 0 V / 1 V: never | kind CMP_PB1 with the alternating V-tap window: ctsta alternates **0x70** (V-tap window) and 0 (PB1 window) at 5 V; at 1 V it alternates 0x10 and 0 (one bit: no hint). So on a steady +5 V DC the comparator reports both CMPHO and CMPLO in the V-tap window, and `sample_cmp` takes `win_both == CTSTA_CMP` as "swings both ways". This is the open TODO item "the AC hint in DC V on 5 V DC" (Hz entry); the detector values are new |
+| E4 | A-JACK (red) in RES at 5 V on every entry (12 / 12, from DC V, AC V, A, mA, TEMP, POW, the tap): on 2.65-2.70 s, stays on | 5 V | CMP_PB1, ctsta 0x70 from ~2.55 s, streak 2 at onset, vside **0** (free). The known 35fce2a item 7b (V_GATE premise fails on this device), owner decision pending (D): not counted as new |
+| E5 | DC? hint (grey) in AC V on 1 V and 5 V DC: on 2.6-4.0 s after the switch (0.15 s inside Wave view / menu round trips), stays on | 1 V, 5 V | AD1PK_PB1, V-tap pk ~8 200-8 880 (1 V), ~38 100-38 800 (5 V). **Correct** (a DC voltage, no AC) |
+| E6 | No AC? / DC? / A-JACK / A-PROT / V-JACK? anywhere else: with V-COM open, 0 alerts in the other 168 switches (DC V, AC V, AC+DC via the V tap, Hz, W, TEMP, AUTO coupling both ways, scope page / Wave view -> DMM in DC V, AC V, TEMP, A). **A-PROT never showed** (aprot_ms 0 throughout) | all | |
+
+So the owner's "AC V hint" is E3 (5 V class DC in DC V, any entry), and the false current-jack alerts are E1 / E2 (the
+amber V-JACK?, not A-JACK) plus the known E4. Neither E1 nor E2 is the hint carried over from the old function:
+`configured()` resets streak / hints on a family change, and the alert comes from fresh 0x70 windows on the new
+row. In E1 the comparator on SENSE sees the V input charged by the ohm source: it decays in ~4 s with V-COM open
+and is held by a 1 V source, and a 5 V source swamps it. E2 needs the scope-rail round trip.
+
+**Switch latency** (`settle.py`, 2 reps each at 1 V and 5 V; DMM RATE FAST; first valid = first FETCh? that is not
++9.91E37, polled every ~10 ms; 0.1 % band = max(0.1 % of the final value (mean of 5.5-7 s), a floor of 0.2 mV /
+1 ohm / 2 mA / 20 nA); the screen columns are from the value strip read back at fixed delays, `shots.py`,
+`out/shots_v1/*.png`, `out/sheet_v1.png`):
+
+| switch | first valid FETCh? | within 0.1 % | screen |
+|---|---|---|---|
+| DC V -> AC V | 458-463 ms | 2.46-2.89 s (the AC RMS of a DC input decays from 15-38 mV to 0.3-0.7 mV) | blank at 0.2-0.5 s, a number at 0.5-0.8 s |
+| AC V -> DC V | 457-462 ms | at once | |
+| DC V -> RES | 2.67-2.68 s (1 V: 50.2 MOhm). 5 V: one 17.6 MOhm at 2.68 s, then OL | at once (1 V) | blank up to 2.0-2.3 s, a number at 3.0 s |
+| RES -> DC V | 516-556 ms | at once | blank at 0.5-0.8 s, a number at 1.0 s |
+| DC V -> A (10 A) | 752-762 ms | at once | blank at 0.5-0.8 s, 0.000 A at 1.0 s |
+| DC V -> mA | 556-561 ms | at once | |
+| AC V -> AC+DC | 1.32-1.37 s | at once | blank up to 1.0-1.3 s, a number at 1.5 s |
+| DC V 6 V -> 60 V (`VOLT:RANG 60`) | 552-561 ms | at once | the old reading stays on screen until the new one |
+
+The screen shows nothing (no dashes) while FETCh? is invalid. A reading then comes every ~100 ms (FAST). `READ?` right after a
+settled switch answers in 5-100 ms. DC V -> RES (2.7 s) and AC V -> AC+DC (1.3 s) are the slow ones; V and A
+switches take 0.45-0.76 s. A stock comparison was not made (no stock firmware on the meter).
+
+### State at the end
+
+- **Device:** ad74e93, back on the scope page as found (`end_scope.png` = the start screen), DMM DC V AUTO+
+  (`VOLT:RANG:AUTO?` 1), `VOLT:COUP?` DC, RATE FAST (as found). LOG: AD1 / 4800 / HOST / DUR 60 / CHOP 1 / OSR 3 / STAT 0
+  (sessA / settle had set AD2 / 76800 / 15: set back). `OUTP?` 0 throughout. `SYST:ERR?` "No error". `DBG:VDISK:RO?`
+  1,1 (Files live). Crash count 0, marker VALID. The Settings pages were not opened, so volume, backlight, Dim /
+  Shutdown and USB disk were not touched. The DMM page showed the bargraph row throughout.
+- **Disk:** MMEM:CAT? names and used / free (3 534 848 / 13 205 504) equal the start. The two FAST000.DLG files were
+  deleted by exact name. The volume is mounted read-only again after the eject test (port reset).
+- **Calibrator:** back on the 10 Hz square (func 2, 10 000 mHz), enabled, as found. In check E it was off / 1 V / 5 V DC.
