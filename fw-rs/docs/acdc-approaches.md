@@ -1168,7 +1168,7 @@ STAT? trace: ST_MEAS ends ~3.6 s after the step, when the AD2 LPF code is still 
 ~8 s later. The DC V row on the same step settles within 0.1 mV in ~1 s, so the calibrator is not the cause. On a
 step down, a high m2 gives a per_code that is too large, and an anchor that reads low afterwards (-0.1..-0.3 mV at 3 V);
 both signs match. The 60 V anchor errors of 1-4 mV (inside the rule) are probably the same tail. Fix candidates
-(not made): (b) is the one that removes the cause:
+(not made here; (b) made in 10.12, with a span rule close to (a)): (b) is the one that removes the cause:
 (a) keep the larger-span gain unless the new span is >= 1.5 x it (the internal zero's included). This brings back
     60 V's AGND bias for 24 -> 12 V, unless it is made per range, which 10.9 rejected;
 (b) take m2 only after the LPF stops drifting (a slope test over the steady window / ST_MEAS, < ~1 code/s; up to
@@ -1180,3 +1180,133 @@ case. The default stays A; the owner decides.
 
 Also seen: with C, the first V tap after `CONF:VOLT:DC` on the square was lost in 5 of 6 tries, and with A in 1 of 3.
 It did not happen at 1 V DC. It is not specific to C (device-check doc, "c6f9670" 3).
+
+
+### 10.12 After the c6f9670 retest: the second reference waits for the LPF (2026-10-23, branch acdc-c-lpfwait; device: 10.13)
+
+Method A stays the default. Commits 9425ae5 (emulator), a7d233c + e905ef5 (fw-rs).
+
+**1. Emulator: the LPF's creep (HY3131.cs, both copies; INFERRED, phenomenological).** The c6f9670 `tc6` trace
+(3 power cycles, 5 -> 3 V on 6 V, 10 Hz STAT?) relative to the value ~10 s after the step: +5 codes at 0.7-1.6 s,
++8..+10 right after the second reference's row write (3.6-4.3 s), +4 at 5-6 s, +3 at 8 s, 0 at 10-12 s; noise
+~1.7 codes rms. Not a first-order tail (that would fall fastest at the start). Model: the LPF of the DC-coupled
+row reads LpfCreep x (s - x) codes extra, x the node's code of the jack's DC and s the same through two cascaded
+2.5 s lags (a step leaves (1 + t / tau) e^(-t / tau) of LpfCreep x step): 2.4e-4 gives +10 / +9.4 / +5.8 / +3.1 / +1.7
+codes at 0 / 1 / 3.6 / 6 / 8 s after the 41.6 k step. Keyed on input steps while that row runs on one range (it
+survives the ~1 s DC V reference, restarts after a > 3 s gap or a range change): the device's sessions entered
+seconds after the calibrator's step had an accurate internal zero, and the e8 two-point gain over 5 -> 1 V
+(83 k) agreed with it to 2 ppm, which a creep proportional to every step would not give (the device data are
+not fully consistent with any one simple model; this one reproduces the failing case). Plus the LPF's own noise
+(1.7 codes rms; the model's LPF had none). Options "lpfcreep:" (scale, 0 = off), "creeptau:", "creepord:" 1 / 2,
+"lpfn:"; DM40Frontend now also accepts "agndz:" (it was missing from the option list). Host tests 501.
+
+**2. Reproduction.** `acdcmethtest.py --e8 tc6` (6 V alone: entered at 5 V, then 3 / 1 / 0.1 V, 10 s each; the
+last level 0.1 V because the device's 0 V step was 62.4 k codes from the 3 V anchor, just inside the 1.5 x rule,
+and 0 V in the model lands just outside it and takes a new reference). DC part - source, mV, late window
+(4..8.5 s), rule 0.05 % + 5 digits:
+
+| | 5 V | 3 V | 1 V | 0.1 V (rule 0.55) | the 6 V gain |
+|---|---|---|---|---|---|
+| 27b1a68 (as c6f9670) | -0.12 | -0.27 | -0.56 | **-0.75** | two-point over 5 -> 3 V (41.5 k), **+177 ppm** over the internal zero's (device +143..+195) |
+| e905ef5 | -0.12 | +0.05 | +0.07 | +0.07 | the internal zero's (104 k) kept: the 3 V two-point differs by +4.0 codes at 3 V, inside the noise rule |
+
+**3. The fix (`acdcm.rs`).**
+* `am_refine`: a sliding window of the last 28 LPF results (~3 s) within the spread rule. The second reference
+  starts only when the window is >= 48 results (~5 s) old, its least-squares slope is below 1 code / s, AD2's
+  peak-hold p-p is within 2 % of |LPF| + 1000 codes (no real AC on the node: the row rewrite's RMS HPF transient
+  passes the p-p / 2 bound when the node carries a large AC part, an AC spike of +0.7 % on the 40 Hz square in
+  acdcmethtest, and the LPF ripple enters the window), and the usual conditions hold (>= 10 k codes, 1.5 x the
+  last attempt, an AC source). Not settled after 120 results (~13 s) at one level: no reference until the input
+  moves; a timeout does not use up the span (`ctry` unchanged). The 5 s minimum: the device's tail stayed flat for
+  ~4 s and then fell, so a slope alone passes too early.
+* The new point is the fitted line's end, taken **before** the reference row is written; the run row's results
+  after the reference only have to agree within 12 codes (else the input moved: no gain, the anchor from those
+  results as before). The anchor moves to the new point.
+* The new point pairs with the session's reference point on the range (lowest / highest code: the entry anchor
+  and every refinement) that is farther from it, not only the last anchor: on 60 V 24 -> 12 -> 5 V gives a 39 k
+  span at 5 V instead of 12 -> 5 V's 14 k (below 1.5 x 24.7 k: no attempt).
+* Span rule (`am_cal_step`): a two-point gain replaces the gain in use when that is the table's or its span is >=
+  the one in use. Over a **shorter** span only when the gain in use is an internal zero's that this measurement
+  shows biased: the two lines differ at the new point by more than 3 x the window's residual rms (the scale of the
+  noise of each of the four inputs: two LPF means, two READ?s; ~1.7 codes) + |slope| x 2.5 s (what a tail still
+  creeping at the measured slope may leave; the trace's lag), at least 2 codes. A two-point gain over a shorter
+  span never replaces a two-point one. "Biased" is judged per attempt from the data, not from a per-range list:
+  60 V's AGND zero (15 codes in the model, ~15 on the device) shows as ~8 codes at the 5 V point (39 k), 6 V's
+  zero as noise (2..4.5 codes at 3 / 1 V).
+* A range revisited in the session whose gain is still the table's is anchored again (with the internal zero when
+  the span allows) instead of running on its old anchor: before, the wait made e8 `up` (6 V first visited at 0 V
+  in AUTO, back at 5 V) show the table gain's 0.12 % for ~6 s.
+* DBG:ACDC:STAT? appends gain_src (0 table, 1 internal zero, 2 two references, 3 two references over a biased
+  zero), gain_dis (the last two-point gain against the one in use at its new point, codes) and the window's slope
+  (codes / s); tools/acdcmeth.py logs them (gsrc, gdis, slope) and has `e8l` / `e8upl` (10 s per level) and
+  `tc6`.
+
+Cost: a first level change on a range costs ~5-8 s before the second reference (it was ~1.5 s), the reference itself
+unchanged (~1 s of DC V readings, the AC part held). Region B 60 868 -> 60 364 B free, region C 17 580 -> 17 036 B,
+SRAM 58 660 -> 58 484 B (the 28-result window, the reference points), static stack headroom 21 416 B (21 440).
+
+**4. Emulator runs of e905ef5** (the image of the commit; `--e8` DC part - source, mV, windows 1..4 / 4..8.5 s):
+
+| e8 down | 24 | 12 | 5 | 1 | 0 V (60 V) | 5 | 3 | 1 | 0 V (6 V) |
+|---|---|---|---|---|---|---|---|---|---|
+| e905ef5 | - / -1.16 | -1.21 / -1.15 | -0.99 / -0.53 | +0.49 / +0.17 | -0.00 / -0.13 | +0.05 / +0.04 | +0.41 / +0.10 | +0.23 / -0.01 | +0.21 / +0.08 |
+| gain | iz 49.4 k | iz (dis -3.9) | **two-point 39.1 k over the biased zero** (dis -8.3) | | | iz 104 k | iz (dis +4.5) | iz (dis +2.2) | iz |
+
+`up`: within the rule everywhere (60 V 5 V -5.7 mV in the first window, the table gain until the first second
+reference ~6 s after the 1 -> 5 V step; rule 7.5; 6 V, first visited at 0 V in AUTO with the table's gain,
+re-anchored at 5 V with its internal zero, then a two-point gain against the 0 V point (104 k, the same span):
+within 0.4 mV).
+The 6 V 3 V level's first window shows the creep itself (+0.41 mV = 8.5 codes, rule 2.0); the device's DC part
+creeps the same way, only the gain no longer takes it in.
+
+Full set on e905ef5 (ports 31100-31640): acdcmethtest A / B / C / B~ RESULT OK (C: 9.1-9.3 readings / s except
+V DC 24, 6.2 / s: its second reference falls inside the analysis window now; the square no longer takes one);
+`--e8 down` / `up` / `tc6` OK (two runs each); couptest `v` `i` `tap` `band` `sq5` `sqtie` OK with `--meth A`, `B`
+and `C` (`i --meth A` included); senttest 57 / 57; powtest 27 / 29 in the full run (`ereset`, `acdc-floor`), alone
+or repeated: `acdc-floor` OK 2 of 3, `ereset` OK 1 of 3, and 27b1a68 with the same model fails `ereset` alone too,
+a7d233c once (the flakes of 10.9; the power meter never runs acdcm.rs and its role has none of the new model
+terms); autorangetest PASS; dcvtest PASS; modetest `--fast -f fwrs` 18 / 18; emulator host tests 501; every
+fw-rs/tools/*/run.sh OK (font-matrix identical to 27b1a68; stock-ui needs the stock image link,
+dm40_v_2_6.dec.bin, in the worktree root). On a7d233c (before the AC gate) acdcmethtest failed C's square: the
+AC part 4.811 V (max) after the reference's row rewrite.
+
+
+### 10.13 Device retest of 10.12 (`tools/acdcmeth.py`, calibrator on V / COM, `DM40_USBTMC=real`)
+
+Image: the build of e905ef5 (the report names the file). Gains are kept per range until power-off, so the order
+matters; `tools/dm40dbg.py reset` between runs stands in for a power cycle (as c6f9670's tc6):
+
+    /usr/bin/python3 tools/acdcmeth.py e8up -o acdc-lw.jsonl                        # first after the install's boot
+    for i in 1 2 3 4; do /usr/bin/python3 tools/dm40dbg.py reset; sleep 8
+        /usr/bin/python3 tools/acdcmeth.py e8s -o acdc-lw.jsonl; done                # the 6 V failure, 4 power-ons
+    /usr/bin/python3 tools/acdcmeth.py e8 -o acdc-lw.jsonl
+    /usr/bin/python3 tools/acdcmeth.py e5 --minutes 3 -o acdc-lw.jsonl
+    # optional, if time allows: the time course and the longer levels
+    /usr/bin/python3 tools/dm40dbg.py reset; sleep 8; /usr/bin/python3 tools/acdcmeth.py tc6 -o acdc-lw.jsonl
+    /usr/bin/python3 tools/dm40dbg.py reset; sleep 8; /usr/bin/python3 tools/acdcmeth.py e8l -o acdc-lw.jsonl
+    /usr/bin/python3 tools/acdcmeth.py e11 e10 e9 -o acdc-lw.jsonl                   # regression, as 10.11
+
+1. **e8s x 4** (6 V 5 / 3 / 1 / 0 V after 60 V; each after a reset). Pass: 6 V 0 V within 0.5 mV in all four (c6f9670:
+   -0.86, tc6 -0.92 / -0.25 / -0.63). Expected: 6 V gsrc 1 (the internal zero's gain kept, gspan ~104 k) at every
+   level; gdis at 3 / 1 V a few codes (it was +143..+195 ppm x 41.6 k = 6..8 codes over the internal zero in
+   c6f9670: if the window still sees the tail it shows here, and gsrc must stay 1). 60 V: 1 / 0 V within 5.5 / 5.0 mV.
+   e8s gives 2 s + 4 s before its 3 s mean, so the second reference (~5-8 s after a step now) may fall inside the
+   mean or not happen within the level: the DC part shown during the reference is READ? itself, and an anchor that
+   did not move keeps the internal zero's error, distance x ~300 ppm on 60 V (5 V away: ~1.5 mV). Log gsrc / gdis /
+   slope per level: on 60 V gsrc 3 from the 5 V level on means the AGND zero was judged biased (gdis ~-8 codes
+   expected; c6f9670's numbers say ~-7..-12).
+2. **e8up** (60 V entered at 0 V: the table's gain, 0.043 % high on this unit; 1 / 5 / 12 / 24 V, 4 s per level).
+   Pass as 10.10 (5.0 / 5.5 / 7.5 / 11 / 17 mV). Expected a little worse at 5 V than c6f9670 (-0.1 mV): the
+   first two-point gain now comes ~6 s after the 1 -> 5 V step, so the 5 V mean (6-9 s after the step) may still
+   read the table gain over 4 V (~+2 mV) or READ? during the reference.
+3. **e8** (1 s per level, gains kept from e8s): pass as e8s; few references happen at 1 s per level (most levels end
+   before 5 s), so it mostly reads the kept gain with the entry anchor.
+4. **e5** (`--minutes 3`): pass 17 / 2.0 mV as 10.11 (no level change inside e5: unchanged code path).
+5. **tc6** (optional): the 6 V time course after a reset: slope (codes / s) at the reference, gsrc stays 1, gdis,
+   then 3 / 1 / 0 V with 10 s per level against READ? (0 V within 0.5 mV). The STAT? trace tells whether the device's
+   tail is what the model assumes (flat ~4 s, gone by ~10 s); if the reference fires before the tail has run out,
+   SLOPE_MIN / SLOPE_MAX are the knobs.
+6. **e8l** (optional): e8s with 10 s per level: every level change takes its reference inside the level.
+
+Decision rule (10.4 / 10.7) unchanged: C becomes the default when e8s (all four) / e8up and e5 pass with e2 / e9 / e10
+as in 10.8; the owner decides.

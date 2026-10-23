@@ -2090,11 +2090,21 @@ Emulator (emu/):
 - [x] Device retest of §10.9 (§10.10, results §10.11, device-check doc "c6f9670"): e8up, e8s 60 V, e8, e11, e10,
       e9, e5 PASS. **Decision rule not met**: e8s 6 V at 0 V -0.86 mV (limit 0.5), tc6 2 of 3 power cycles. A stays
       the default (owner's decision).
-- [ ] C's 6 V two-point gain over a short span (5 -> 3 V, 41.6 k codes) is +143..+195 ppm against the internal zero's
+- [x] C's 6 V two-point gain over a short span (5 -> 3 V, 41.6 k codes) is +143..+195 ppm against the internal zero's
       (104 k), so 0 V reads -0.25..-0.92 mV after it: m2 (ST_MEAS) is taken ~3.6 s after the step while the AD2 LPF
       still creeps 5-12 codes for ~8 s (DC V settles in ~1 s). Fix candidates in §10.11: (b) take m2 only once the
       LPF stops drifting (removes the cause); (a) keep the larger-span gain (brings back 60 V's AGND bias);
       (c) a larger CAL_GAIN_CODES on 6 V. Then device: e8s 6 V and tc6 (rt29/tc6.py) over 3 power cycles.
+      Fixed in the emulator (§10.12, e905ef5): (b) as a ~3 s slope window (< 1 code / s, >= 5 s after the step,
+      timeout ~13 s), the new point taken before the reference row write; a shorter-span two-point gain replaces
+      an internal zero's only when it shows that zero biased beyond the noise (60 V yes, 6 V no); pairing with the
+      session's farthest reference point. Model "lpfcreep:" (two 2.5 s lags, 2.4e-4 of a step) + LPF noise;
+      acdcmethtest --e8 tc6: 27b1a68 -0.75 mV at 0.1 V (+177 ppm), e905ef5 +0.07 mV. **Device retest: §10.13.**
+- [ ] Device retest of §10.12 (§10.13): e8up first after the install, e8s x 4 after `dm40dbg.py reset` (6 V 0 V
+      within 0.5 mV in all four; gsrc 1 on 6 V), e8, e5; optionally tc6 (is the device's tail the model's?), e8l,
+      e11 / e10 / e9. Then the owner decides on C as the default.
+- [ ] C's second reference now comes ~5-8 s after a level change (was ~1.5 s): e8s's 4 s levels may end before
+      it. If the device tail is shorter than the model's, lower SLOPE_MIN (48 results) after the tc6 trace.
 - [ ] The first V tap after `CONF:VOLT:DC` on the 40 Hz square is sometimes lost (C 5 of 6, A 1 of 3; not at 1 V
       DC): device-check doc "c6f9670" 3. Not chased.
       **Cause found (device ceb5ca5, device-check doc "ceb5ca5" 6):** the tap lands on the grey hint toast "AC
