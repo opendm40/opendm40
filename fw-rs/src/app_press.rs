@@ -13,7 +13,7 @@ impl App {
     /// while a stream runs) passes here and must not fetch from region C.
     #[inline(always)]
     pub(super) fn press_gesture(&mut self, g: &Gesture) {
-        if self.pressed.is_some() || matches!(self.view, View::Menu | View::Gen | View::Settings | View::Limits | View::Record) {
+        if self.pressed.is_some() || matches!(self.view, View::Menu | View::Gen | View::Settings | View::Limits | View::Record | View::Range) {
             self.press_track(g);
         }
     }
@@ -52,6 +52,23 @@ impl App {
                 r(k, if self.set_page == 0 && ui::SET_STEP_ROWS.contains(&k) { ui::settings_step(x) } else { 0 })
             }
             View::Limits => r(ui::list_hit(y, ui::LIMIT_ROWS.len())?, 0),
+            // The temperature page has its own (`tp_pressed`).
+            View::Range if self.dmm.hy_mode() == 15 => None,
+            View::Range if self.dmm.pw.on => r(ui::pw::settings_hit(x, y)? as usize, 0),
+            // MF range page: the tap handler's order (Wave, Inrush, the rest).
+            View::Range => {
+                let b = self.dmm.button();
+                if app_wave::WAVE_BUILD && matches!(b, Button::Volt | Button::Amp) && ui::wave_hit(x, y) {
+                    r(ui::RP_WAVE as usize, 0)
+                } else if app_wave::WAVE_BUILD && b == Button::Amp && ui::inrush_hit(x, y) {
+                    r(ui::RP_INRUSH as usize, 0)
+                } else {
+                    match ui::range_hit(b, x, y)? {
+                        Ok(i) => r(i, 0),
+                        Err(k) => r((ui::RP_ERR + k) as usize, 0),
+                    }
+                }
+            }
             View::Record => match ui::list_hit(y, ui::RECORD_ROWS.len())? {
                 k if ui::REC_STEP_ROWS.contains(&k) => r(k, ui::record_step(x)),
                 ui::REC_START_ROW => r(ui::REC_START_ROW, 0),
@@ -67,6 +84,12 @@ impl App {
         match self.view {
             View::Menu => ui::menu_item(t.row as usize, ui::view_name(self.combo), t.on),
             View::Gen => ui::gen_press(&self.gen, t.row as usize, t.on),
+            View::Range if self.dmm.pw.on => ui::pw::settings_press(&self.dmm.pw_state(), t.row, t.on),
+            View::Range => {
+                let b = self.dmm.button();
+                let sub = if b == Button::Ohm { self.dmm.ohm_var() } else { self.dmm.sub() };
+                ui::range_press(b, t.row, self.range_sel(), sub, t.on);
+            }
             _ => {
                 ui::set_row_only(Some(t));
                 self.draw_static();

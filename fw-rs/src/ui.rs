@@ -1212,6 +1212,44 @@ pub fn wave_hit(x: u16, y: u16) -> bool {
 /// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
 pub const OHM_VARS: [&str; 2] = ["Normal", "Low current ON"];
 
+/// `range_press` targets besides the range items (0..): RP_ERR + the Err
+/// code of `range_hit`, the Wave and Inrush buttons.
+pub const RP_ERR: u8 = 100;
+pub const RP_WAVE: u8 = 120;
+pub const RP_INRUSH: u8 = 121;
+
+/// Pressed feedback on the MF range page (ui-review #11): button `t` (a
+/// range item index, RP_*) drawn pressed (`on`: the list rows' pressed
+/// colour) or as `range_page` draws it (`sel` / `sub` as there).
+#[inline(never)] // .cold (link-native.x): per touch on the MF page
+pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
+    let items = range_items(b);
+    let (r, name, selected) = match t {
+        RP_WAVE => (WAVE_BTN, "Wave", false),
+        RP_INRUSH => (INRUSH_BTN, "Inrush", false),
+        i if (i as usize) < items.len() => (range_rect(i as usize), items[i as usize].0, sel == Some(i as usize)),
+        RP_ERR.. => match (t - RP_ERR, b) {
+            (k @ 0..=1, Button::Ohm) => (rect([8, 244][k as usize], 182, 228, 38), OHM_VARS[k as usize], k == sub),
+            (k @ (0 | 1 | 3 | 6), Button::Volt | Button::Amp) => {
+                let i = match k {
+                    3 => 2,
+                    6 => 3,
+                    k => k,
+                };
+                (cpl_rect(i as usize), CPL_NAMES[i as usize], i == sub)
+            }
+            (2, _) => (rect(319, 240, 150, 38), "OK", false),
+            (4, _) => (rect(8, 240, 150, 38), "Hold/Limits", false),
+            (5, Button::Amp) => (FUSE_BTN, "Fuse check", false),
+            _ => return,
+        },
+        _ => return,
+    };
+    let c = if on { K_SEL } else if selected { SEL } else { 0x2966 };
+    sf::rbox(r, 6, c, BG);
+    sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
+}
+
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
 /// Hold/Limits, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
 /// buttons.

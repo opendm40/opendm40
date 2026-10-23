@@ -225,6 +225,9 @@ SECTIONS
         *(.text.*7dm40_fw2ui10gen_static*);
         *(.text.*7dm40_fw2ui14auto_cpl_label*);
         *(.text.*7dm40_fw2ui10range_page*);
+        /* Pressed feedback of the MF range / Power Settings pages (per touch). */
+        *(.text.*7dm40_fw2ui11range_press*);
+        *(.text.*7dm40_fw2ui2pw14settings_press*);
         /* Debug / file replies, `#[inline(never)]` so they do not land in
          * main.rs `run` (hot): DBG:TOUCH?, DBG:DIAG?, MMEM:DEL (and the
          * modules above: DBG:HYSPI, DBG:UPLOAD, MMEM:DATA?, DBG:GENUINE?).
