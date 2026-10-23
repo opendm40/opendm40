@@ -429,6 +429,27 @@ namespace Hy3131Tests
                 }
             }
             {
+                // method C row, 6 V: the LPF's creep after an input step inside the session (lpfcreep, device
+                // c6f9670 tc6: 5..12 codes still to go 3.6 s after 5 -> 3 V), none without the option
+                foreach(var (opt, want) in new[] { ("lpfn:0;", 2.4e-4 * 41580 * 2.44 * Math.Exp(-1.44)), ("lpfn:0;lpfcreep:0;", 0.0) })
+                {
+                    var c = (byte[])F0R0.Clone();
+                    c[7] = 0x1d; c[21] = 0x14;
+                    var m = NewChip();
+                    m.Chip.SetInput(opt + "dcv:5");
+                    m.Configure(c, 0);
+                    m.Write(0x34, 0x88); m.Write(0x26, 0x80);
+                    // read every block, as the firmware does (the lag is advanced at each LPF result and
+                    // starts again after a gap of > 3 s)
+                    Func<double, byte[]> until = dt => { var t1 = m.Now + dt; while(m.Now < t1) { m.WaitFlag(0x18, 1); m.Read(0x00, 20); } m.WaitFlag(0x18, 1); return m.Read(0x00, 20); };
+                    until(4.0);
+                    m.Chip.SetInput(opt + "dcv:3");
+                    var early = Lpf(until(3.6));
+                    var late = Lpf(until(12.4));
+                    Near(early - late, want, 1.5, "  6 V row, 5 -> 3 V: the LPF 3.6 s after the step above its value 16 s after, codes (" + (want > 0 ? "lpfcreep" : "lpfcreep:0") + ")");
+                }
+            }
+            {
                 // the E7 / method C anchor: AD1 on SENSE - PB5 in the AC V row, 60 V: +0.047 % (ad1acg)
                 var c = (byte[])F0R1.Clone();
                 c[2] = 0x14; c[3] = 0x03; c[4] = 0x07; c[7] = 0x1d; c[6] = 0x00; c[9] = 0; c[20] = 0; c[19] = 0x2c;

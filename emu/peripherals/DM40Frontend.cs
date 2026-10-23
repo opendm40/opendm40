@@ -398,6 +398,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     break;
                 case "noise": case "cal": case "beat": case "powmix": case "ad1mix": case "powvg": case "powz": case "op1vos": case "ad2dcg":
                 case "n7": case "n7g": case "n7a": case "ad1acg": case "ad3sh": case "hpftau": case "rmsbig": case "rmsbigp":
+                case "agndz": case "lpfcreep": case "creeptau": case "creepord": case "lpfn":
                     options.Add(new KeyValuePair<string, double>(key, v));
                     break;
                 default:
