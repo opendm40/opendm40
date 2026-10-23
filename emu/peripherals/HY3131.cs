@@ -77,6 +77,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             role = Role.None; roleMode = -1; roleRange = 0;
             Rewrites = 0;
             rng = new Random(12345);
+            faultRng = new Random(777);
+            hpfM = 0;
         }
 
         /// Register read with the datasheet side effects (INTF cleared, CTBOV cleared).
@@ -207,6 +209,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 {
                     ad2Start = now; ad2Done = 0;
                     if((masked & 0x80) == 0) ad2Code = 0;
+                    else hpfM = 0;
                     RestartLpf(now);
                 }
                 else if(old != masked) { ad2Start = now; ad2Done = 0; RestartLpf(now); }
@@ -214,6 +217,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case 0x29:
                 if((masked & 0x40) == 0) lpfCode = 0;
                 if((masked & 0x80) == 0) rmsVal = 0;
+                else if((old & 0x80) == 0) hpfM = 0;
                 if((masked & 0x04) == 0) { pkhMax = -0x40000; pkhMin = 0x3FFFF; }
                 if(((old ^ masked) & 0xF8) != 0) RestartLpf(now);
                 break;
@@ -299,6 +303,37 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double Op1Vos = 0.37e-3;
         /// AD2 gain deviation in that row ("ad2dcg:", 1 = nominal): the one-shot self-cal fixes the offset only.
         public double Ad2DcGain = 1.0;
+        /// Per-range part of that gain, as the per_code factor (the node reads 1 / this; device test 6.5
+        /// and acdcmeth e5 of 7409b92: the self-cal's per_code against the nominal K x 1.25 / 2^18: 6 V
+        /// +0.96 %, 60 V +1.88 %, 600 V +0.53 %, 1000 V +0.27 %). The RMS (the AC part) of this node does not follow it: it reads like the stock
+        /// AC V row's PB4 node, through the factory AC V calibration (device e2 of 7409b92: method C's
+        /// sqrt(RMS) x the factory AC V gain - offset = A's AC part within +0.014 / -0.003 % on 6 / 60 V,
+        /// where the DC self-cal's gain read it 0.13 / 0.23 % high).
+        public double[] Ad2DcGainR = { 1.0096, 1.0188, 1.0053, 1.0027 };
+        /// Method C's 60 V DC error (device acdcmeth e2 / e5 of 7409b92: the E7 self-cal's DC part read
+        /// +13.6 mV at 4.78 V and +22.7 mV at 24 V, constant over 20 min), split INFERRED into two parts the
+        /// data cannot separate further: AD1 on SENSE - PB5 in the AC V row's switch configuration (R2A FS1,
+        /// R2E / R2F without DS9 / SMODE2; DC V has DS0 FS0 / DS9 / SMODE2) reads +0.047 % against the DC V
+        /// row ("ad1acg:" scales), and AD2 / the LPF read +23 codes while AD3 converts on the same OP1O node
+        /// ("ad3sh:" scales). 6 V: inside the device's scatter (+0.45 +- 0.5 mV at 3 V), 0; 600 / 1000 V not
+        /// measured, 0.
+        public double[] Ad1AcRowGain = { 0, 4.7e-4, 0, 0 };
+        public double[] Ad3ShiftCodes = { 0, 23, 0, 0 };
+        public double Ad1AcRowScale = 1.0, Ad3ShiftScale = 1.0;
+        /// The RMS block's HPF in the DC-coupled V row (method C): first order, time constant HpfTau (s); its
+        /// state starts at 0 when ENRMS or ENAD2 is switched on, so a row write puts the node's whole DC
+        /// through it as a step (an input step: the change). INFERRED from the device (7409b92, by hand): the
+        /// first method C reading after a 6 V row write with 5 V DC showed 2.11 V of AC = 0.42 x the DC, the
+        /// RMS of the 320..427 ms block for 0.43 s. "hpftau:" (0 = an ideal HPF).
+        public double HpfTau = 0.43;
+        /// Method C's RMS fault with a large DC on its X x Y node (device, 7409b92 by hand: 5 / 5.5 V DC on
+        /// 6 V = 105 / 116 k codes gave ~0.7 readings / s, the other RMS results dropped as garbage, and the
+        /// range hunted 6 <-> 60 V; 4.0 / 4.5 V = 85 / 95 k codes and the e2 square's 100.4 k mean were
+        /// fine). The mechanism is not known (the power meter's YY statistic with 104 k codes of DC was fine,
+        /// power doc 3.11 T1), so this is phenomenological: above RmsBigDcCodes of |DC| at the node a block's
+        /// RMS register comes back as a random 38-bit pattern with probability RmsBigDcP. "rmsbig:codes"
+        /// (0 = off), "rmsbigp:".
+        public double RmsBigDcCodes = 102500, RmsBigDcP = 0.85;
         public bool CntPin;                    // CNT pin level (ENCNTI source); set by the board model
         public int ForcedAd1 = int.MinValue;   // SetAd1: raw code override
         public int ForcedAd2 = int.MinValue;
@@ -543,6 +578,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "n7": N7Scale = o.Value; break;
                 case "n7g": N7Gain = o.Value; break;
                 case "n7a": N7ACodes = o.Value; break;
+                case "ad1acg": Ad1AcRowScale = o.Value; break;
+                case "ad3sh": Ad3ShiftScale = o.Value; break;
+                case "hpftau": HpfTau = o.Value; break;
+                case "rmsbig": RmsBigDcCodes = o.Value; break;
+                case "rmsbigp": RmsBigDcP = o.Value; break;
                 }
             }
         }
@@ -602,6 +642,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 // (the start-up results, Ad2StartGlitch, also when they are older than that)
                 for(var k = ad2Done + 1; Ad2StartGlitch != 0 && k <= Ad2StartResults && k < n - 255; k++)
                     PeakHold(Clamp19(Ad2Sample(ad2Start + k * p) + Ad2StartGlitch));
+                // older ones: up to 256 spread over the rest of the interval (a long gap between two
+                // accesses still meets the waveform's extremes; the noise's a little less often)
+                var stride = Math.Max(1, (n - 256 - ad2Done) / 256);
+                for(var k = ad2Done + 1; k < n - 255; k += stride)
+                    PeakHold(Clamp19(Ad2Sample(ad2Start + k * p) + (int)Math.Round(Gauss() * Ad2NoiseCodes)));
                 for(var k = Math.Max(ad2Done + 1, n - 255); k < n; k++)
                     PeakHold(Clamp19(Ad2Sample(ad2Start + k * p) + (int)Math.Round(Gauss() * Ad2NoiseCodes) + (k <= Ad2StartResults ? Ad2StartGlitch : 0)));
             }
@@ -626,11 +671,23 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var p = LpfPeriod;
             var n = (long)Math.Floor((now - lpfStart) / p);
             if(n <= lpfDone) return;
+            var blocks = n - lpfDone;
             lpfDone = n;
             var t = lpfStart + n * p;
             if(role == Role.Power) { PowerBlock(t, p, n); return; }
             double dc, acRms;
             Ad2Window(t, p, out dc, out acRms);
+            var cDc = role == Role.AcV && Ad2OnOp1Dc;
+            double hpfMs = 0;
+            if(cDc && EnRms && HpfTau > 0)
+            {
+                // the RMS block's HPF (HpfTau): its state relaxes toward the node's DC; the block's mean
+                // square of what is left (the DC taken as constant since the last update)
+                var a = Math.Exp(-p / HpfTau);
+                var e = (dc - hpfM) * Math.Pow(a, blocks - 1);
+                hpfMs = e * e * HpfTau / (2 * p) * (1 - a * a);
+                hpfM = dc - e * a;
+            }
             if(role == Role.AcA || (role == Role.AcV && Ad2OnOp1Dc))
             {
                 double ndc, nac;
@@ -643,9 +700,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 intf |= 0x08;
                 if(EnPkh && (regs[0x29] & 3) >= 2) PeakHold(lpfCode);
             }
-            if(EnRms)
+            if(EnRms && cDc && EnAd3 && RmsBigDcCodes > 0 && Math.Abs(dc) > RmsBigDcCodes && faultRng.NextDouble() < RmsBigDcP)
             {
-                var sq = acRms * acRms;
+                rmsVal = (long)(faultRng.NextDouble() * (1L << 38)); // RmsBigDcCodes: a garbage block
+                intf |= 0x10;
+            }
+            else if(EnRms)
+            {
+                var sq = acRms * acRms + hpfMs;
                 if(Svxi && !Sdo23 && EnAd3)
                 {
                     // sum(X*Y)/N with X and Y the same node: equal to sum(X^2)/N unless the
@@ -936,8 +998,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     var g = (regs[0x25] & 1) != 0 ? 10.0 : 1.0;
                     var k = AcvK[Math.Max(r, 1)];
                     var sense = (regs[0x32] & 7) == 0;
-                    dc = ((sense ? jdc / k : 0) + Op1Vos * Op1ChopSign(t)) * g * Ad2DcGain;
-                    ac = (sense ? jac / k : 0) * g * Ad2DcGain;
+                    dc = ((sense ? jdc / k : 0) + Op1Vos * Op1ChopSign(t)) * g * Ad2DcGain / Ad2DcGainR[r];
+                    if(EnAd3 && (regs[0x35] >> 6) == 0) dc += Ad3ShiftCodes[r] * Ad3ShiftScale / Ad2Scale();
+                    // the AC part as the AC V row's PB4 node: the factory AC V calibration applies
+                    ac = sense && jac > 0 ? AcQ(jac, 0x34 + 4 * r, 0x44 + 4 * r) / (AcvK[r] * Ad2IgRow()) : 0;
                     break;
                 }
                 // display = sqrt(RMS) * VR / 2^18 * k and sqrt(RMS) = IG * Vnode / VR * 2^18
@@ -1047,6 +1111,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 double vdc, vac, vhz, vduty; string vsh;
                 Fe.VJack(0, out vdc, out vac, out vhz, out vsh, out vduty);
                 var vt = Osr1 >= 2048 ? N7(vdc + Ad1Ripple(t, vac, vhz, vsh, vduty), roleRange) / AcvK[kt] : VTapVolts(t, AcvK[kt]);
+                vt *= 1 + Ad1AcRowGain[Math.Min(3, roleRange)] * Ad1AcRowScale;
                 code = ig * DcQ(vt * AcvK[kt], 0x04 + 4 * kt, 0x14 + 4 * kt) / AcvK[kt] / (rg * Vref) * fs;
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
@@ -1231,6 +1296,33 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private double LpfRipple(double t, double p, double acCodes)
         {
             if(acCodes <= 0 || sigHz <= 0) return 0;
+            // the triangle window over [t - 2p, t] (weight 1 - |tau / p - 1|, integral p), exactly: a
+            // sine through its transform sinc^2(f p); a square piece by piece between its edges (a sampled
+            // window aliases the edges into a DC bias of several % of the amplitude)
+            var pk = Peak(acCodes, sigShape);
+            if(sigShape == "square")
+            {
+                // the window's integral from tau = 0 to x (x in [0, 2p]; p / 2 at p, p at 2p)
+                Func<double, double> Wx = x => x <= p ? x * x / (2 * p) : p - (2 * p - x) * (2 * p - x) / (2 * p);
+                var per = 1.0 / sigHz;
+                var eps = 1e-9 * per;
+                double acc = 0, tau = 0;
+                while(tau < 2 * p - eps)
+                {
+                    var ph = (((t - tau - eps) * sigHz) % 1.0 + 1.0) % 1.0; // just before t - tau
+                    var lvl = ph < sigDuty ? pk : -pk;
+                    var tb = Math.Min(2 * p, tau + eps + (ph < sigDuty ? ph : ph - sigDuty) * per); // back to the edge
+                    acc += lvl * (Wx(tb) - Wx(tau));
+                    tau = tb;
+                }
+                return acc / p;
+            }
+            if(sigShape != "triangle")
+            {
+                var x = Math.PI * sigHz * p;
+                var sinc = Math.Abs(x) < 1e-9 ? 1.0 : Math.Sin(x) / x;
+                return pk * sinc * sinc * Math.Sin(2 * Math.PI * ((sigHz * (t - p)) % 1.0));
+            }
             const int N = 64;
             double s = 0, ws = 0;
             for(var i = 0; i < 2 * N; i++)
@@ -1872,6 +1964,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
         }
         private Random rng;
+        private Random faultRng = new Random(777);
+        /// The RMS block's HPF state in the DC-coupled V row (codes; HpfTau).
+        private double hpfM;
     }
 
     /// NIST ITS-90 type K thermocouple EMF (mV) from temperature (C).

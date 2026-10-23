@@ -109,6 +109,15 @@ SC = {
         (64, 'open;acv:0.95@50,dc=1', shows('AUTO,DC', 1.0), 're-enter, near tie AC 0.95 + DC 1: DC (larger)'),
     ], {15: 'VOLT:COUP DC', 16: 'VOLT:COUP AUTO', 29: 'VOLT:COUP DC', 30: 'VOLT:COUP AUTO', 41: 'VOLT:COUP DC', 42: 'VOLT:COUP AUTO',
         53: 'VOLT:COUP DC', 54: 'VOLT:COUP AUTO', 65: 'VOLT:COUP DC', 66: 'VOLT:COUP AUTO'}),
+    # The device check of 7409b92 (method C by hand): AUTO on the calibrator's 40 Hz square
+    # (0..9.55 V, AC = DC: a tie, either part), then 5 V DC: C stayed on the AC part
+    # (~4.056 V) and hunted 6 <-> 60 V; A showed DC 4.998 V. 5.5 V the same; 4.5 V was fine.
+    'sq5': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 54, [
+        (0, 'open;acv:4.776@40,dc=4.776,shape=square', lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 4.776, 0.01), 'square 0..9.55 V @40: either part (a tie)'),
+        (14, 'open;dcv:5', shows('AUTO,DC', 5.0, 0.002), '5 V DC after the square: -> DC'),
+        (30, 'open;dcv:5.5', shows('AUTO,DC', 5.5, 0.002), '5.5 V DC: DC'),
+        (42, 'open;dcv:4.5', shows('AUTO,DC', 4.5, 0.002), '4.5 V DC: DC'),
+    ], {}),
 }
 EXTRA = {'tap': ['CURR:COUP?']}
 

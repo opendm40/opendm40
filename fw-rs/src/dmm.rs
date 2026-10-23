@@ -2502,7 +2502,9 @@ impl Dmm {
             if m == 1 {
                 if up && r < 3 {
                     self.set(clk, 1, r as i8 + 1, 250);
-                } else if mag < 0.1 * lim / ov {
+                } else if mag < 0.1 * lim / ov && !self.am_on() {
+                    // (not in an AC+DC method's reference step: it is taken at
+                    // the method's range, acdcm.rs)
                     if r > 0 {
                         self.set(clk, 1, r as i8 - 1, 250);
                     } else if self.v_auto & 2 != 0 {

@@ -361,7 +361,8 @@ namespace Hy3131Tests
             // method B row: the AC V row with the DC V AD1 bytes, chopper held, AD1 last
             var b = (byte[])F0R1.Clone();
             b[2] = 0x15; b[3] = 0x03; b[4] = 0x07; b[19] = 0x2c;
-            foreach(var (opt, want) in new[] { ("", 10.017), ("n7:0;", 10.0) })
+            // (x 1.00047: AD1 on SENSE - PB5 in the AC V row's switches at 60 V, ad1acg)
+            foreach(var (opt, want) in new[] { ("", 10.017 * 1.00047), ("n7:0;", 10.0 * 1.00047) })
             {
                 var m = NewChip();
                 m.Chip.SetInput(opt + "dcv:10");
@@ -383,8 +384,62 @@ namespace Hy3131Tests
                 ReadAfter(m, 0x18, 1);
                 var r = ReadAfter(m, 0x18, 1);
                 var per = 1.25 / 262144.0 * 100;
-                Near(Lpf(r) * per, 10.0 + 0.37e-3 * 100, 0.01, "  LPF = the DC part (+ OP1's offset)");
-                Near(SqrtRms(r) * per, 1.0, 0.01, "  sqrt(RMS) = the AC part");
+                Check(SqrtRms(r) * per > 3.0, "  right after the enable the RMS block's HPF passes the DC step (hpftau)", (SqrtRms(r) * per).ToString("F3") + " V");
+                m.Advance(4.0);
+                ReadAfter(m, 0x18, 1);
+                r = ReadAfter(m, 0x18, 1);
+                // the DC: the device's per-range gain (60 V +1.88 %) and AD3's +23 codes on the node
+                Near(Lpf(r) * per, (10.0 + 0.37e-3 * 100) / 1.0188 + 23 * per, 0.01, "  LPF = the DC part (+ OP1's offset, / the 60 V per_code factor, + AD3's shift)");
+                Near(SqrtRms(r) * per, 1.0, 0.01, "  sqrt(RMS) = the AC part once the HPF settled");
+                // the AD2 peak hold (PKHSEL AD2) spans the node: DC +- the 1 V rms sine's peak
+                m.Write(0x29, 0xf8); m.Write(0x29, 0xfc);
+                r = ReadAfter(m, 0x18, 1);
+                var pp = (S24(r, 17) - S24(r, 14)) * per;
+                Near(pp, 2 * Math.Sqrt(2), 0.15, "  AD2 peak hold p-p = the sine's 2.83 V");
+            }
+            {
+                // method C row on the calibrator's 40 Hz square (0..9.55 V, 60 V): the LPF's mean is the DC
+                var c = (byte[])F0R1.Clone();
+                c[7] = 0x1d; c[21] = 0x14;
+                var m = NewChip();
+                m.Chip.SetInput("acv:4.776@40,dc=4.776,shape=square");
+                m.Configure(c, 0);
+                m.Write(0x34, 0x88); m.Write(0x26, 0x80);
+                m.Advance(3.0);
+                double sum = 0, lo = 1e9, hi = -1e9;
+                for(var i = 0; i < 45; i++) { var r = ReadAfter(m, 0x18, 1); sum += Lpf(r); lo = Math.Min(lo, Lpf(r)); hi = Math.Max(hi, Lpf(r)); }
+                var per = 1.25 / 262144.0 * 100;
+                Near(sum / 45 * per, (4.776 + 0.37e-3 * 100) / 1.0188 + 23 * per, 0.005, "  C row, 40 Hz square: the LPF's mean = the DC", string.Format("p-p {0:F0} codes", hi - lo));
+            }
+            {
+                // method C with a large DC on the node: RMS garbage (rmsbig), not below it
+                foreach(var (v, bad) in new[] { (4.5, false), (5.0, true) })
+                {
+                    var c = (byte[])F0R0.Clone();
+                    c[7] = 0x1d; c[21] = 0x14;
+                    var m = NewChip();
+                    m.Chip.SetInput("dcv:" + v);
+                    m.Configure(c, 0);
+                    m.Write(0x34, 0x88); m.Write(0x26, 0x80);
+                    m.Advance(4.0);
+                    var nbad = 0;
+                    for(var i = 0; i < 20; i++) { var r = ReadAfter(m, 0x18, 1); if(SqrtRms(r) > 2000) nbad++; }
+                    Check(bad ? nbad >= 10 : nbad == 0, string.Format("  6 V row, {0} V DC: {1} garbage RMS blocks of 20", v, nbad));
+                }
+            }
+            {
+                // the E7 / method C anchor: AD1 on SENSE - PB5 in the AC V row, 60 V: +0.047 % (ad1acg)
+                var c = (byte[])F0R1.Clone();
+                c[2] = 0x14; c[3] = 0x03; c[4] = 0x07; c[7] = 0x1d; c[6] = 0x00; c[9] = 0; c[20] = 0; c[19] = 0x2c;
+                foreach(var (opt, want) in new[] { ("", 24.0 * 1.00047), ("ad1acg:0;", 24.0) })
+                {
+                    var m = NewChip();
+                    m.Chip.SetInput(opt + "dcv:24");
+                    m.Configure(c, 0);
+                    m.Write(0x23, 0x83);
+                    m.Read1(0x1E); m.WaitFlag(0x04, 1); m.Read1(0x1E); m.WaitFlag(0x04, 1);
+                    Near(DcvDisplay(m.ReadS24(0), 1, cal), want, 2e-3, "  AD1 anchor in the AC V row at 24 V, " + (opt == "" ? "+0.047 %" : "ad1acg:0"));
+                }
             }
         }
 
