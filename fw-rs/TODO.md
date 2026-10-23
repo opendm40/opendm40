@@ -1645,8 +1645,12 @@ Firmware:
       Confirms opened by DBG:TAP in a session (power entry) are not covered (no real touch reaches the UI in a
       session: any press stops a disk session, a host session reads no touch). ui-render 6d' (every toast text
       in the panel, refresh held, the panel byte-equal after); emulator (badge scenario, 38400 disk session on
-      the MCX page: toast in the panel body, nothing outside the panel box changed, the panel back after it);
-      fastlogtest --ui-nav --region-c (the badge tap and the toast's end while streaming: no region C).
+      the MCX page: toast in the panel body, nothing outside the panel box changed, the panel back after it;
+      with emu/regionc.py hooks from the tap to 4 s after it, the toast's end and the panel's redraw included:
+      no region C code, no slow-bank read, the session runs on); fastlogtest --ui-nav (no --region-c) PASS.
+      Open (emulator harness): `fastlogtest --ui-nav --region-c` stalls without an error in nav_tree's second
+      sequence (after "page tree ... ok", >15 min, twice, also with --no-bt), while the same 15 steps with the
+      same hooks in a plain run.py emulator take ~4 s each; not chased.
       Device retest: as d330877 1d (MCX page, AD2 38400 disk session, DBG:TAP 177,10): the toast reads in the
       panel's body under "DATA LOGGING" for 1.5 s, then the panel's rows come back; no red left outside it.
 - [ ] Not exercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
