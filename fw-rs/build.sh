@@ -7,13 +7,18 @@
 # ../firmware/dm40fw.py pack --pad (0xFF-padded to whole 128-byte blocks,
 # checked below) into the stock update format (renamed to dm40*.bin only when
 # staged on the device). tools/reload.sh passes its arguments here.
+# DM40_TDIR / DM40_OUT (environment) build elsewhere than target/native /
+# dm40-fw-native.bin, with every check (tools/build-variants/run.sh builds
+# the recovery-usb / recovery-file / no-ad2-isr variants this way, so a test
+# build never replaces the image reload.sh installs).
 set -e
 cd "$(dirname "$0")"
 RUSTUP_HOME="$(cd ../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
 OBJCOPY=$(find ../toolchain/rustup -name llvm-objcopy | head -1)
 
 if [ "$1" = native ]; then shift; fi
-SCRIPT=link-native.x; TDIR=target/native
+SCRIPT=link-native.x; TDIR=${DM40_TDIR:-target/native}; OUT=${DM40_OUT:-dm40-fw-native.bin}
+mkdir -p "$TDIR"
 # Reproducible image (review L10): the same commit gives the same bytes in
 # any checkout / worktree. Absolute paths reach rodata through panic
 # locations of the dependencies (CARGO_HOME/registry/src/..., resolved
@@ -40,17 +45,17 @@ ELF=$TDIR/thumbv7em-none-eabihf/release/dm40-fw
 
 # Static worst-case stack path vs the TCM stack (>= 20 KiB headroom; the
 # SRAM-free, region-A2, region-B and region-C checks are link-native.x asserts).
-if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 20480 --top 0 > target/native/stackdepth.txt; then
-    cat target/native/stackdepth.txt >&2
+if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 20480 --top 0 > $TDIR/stackdepth.txt; then
+    cat $TDIR/stackdepth.txt >&2
     exit 1
 fi
-head -1 target/native/stackdepth.txt
+head -1 $TDIR/stackdepth.txt
 
-BODY=target/native/dm40-fw-native.body.bin
-rm -f target/native/regiona2.warn target/native/regionb.warn target/native/regionc.warn
+BODY=$TDIR/dm40-fw-native.body.bin
+rm -f $TDIR/regiona2.warn $TDIR/regionb.warn $TDIR/regionc.warn
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
-python3 ../firmware/dm40fw.py pack --pad "$BODY" dm40-fw-native.bin
-python3 - "$BODY" "$ELF" <<'PY'
+python3 ../firmware/dm40fw.py pack --pad "$BODY" "$OUT"
+python3 - "$BODY" "$ELF" "$TDIR" <<'PY'
 import struct, subprocess, sys
 body = open(sys.argv[1], 'rb').read()
 BASE, MARK, END = 0x08004000, 0x08008000, 0x080A0000
@@ -73,18 +78,18 @@ a2free = MARK - syms['__a2_end']
 print("  region A2 free   = %d bytes (0x%08x..0x%08x used, zero-wait below the marker; link fails below 0)"
       % (a2free, syms['__a2_start'], syms['__a2_end']))
 if a2free < 2048:
-    open('target/native/regiona2.warn', 'w').write('%d\n' % a2free)
+    open(sys.argv[3] + '/regiona2.warn', 'w').write('%d\n' % a2free)
 bfree = 0x08080000 - syms['__b_end']
 print("  region B free    = %d bytes (zero-wait flash below 0x08080000; link fails below 8 KiB)" % bfree)
 if bfree < 16384:
     # Repeated as a banner at the very end of build.sh (target/native/regionb.warn).
-    open('target/native/regionb.warn', 'w').write('%d\n' % bfree)
+    open(sys.argv[3] + '/regionb.warn', 'w').write('%d\n' % bfree)
 # Region C (.cold, slow flash; the .data load image is in B) ends at the FS-loader:
 # the update file cannot reach above 0x080A0000 (docs/native-boot.md "Memory budget").
 cfree = END - syms['__image_end']
 print("  region C free    = %d bytes (.cold below 0x080A0000; link fails below 4 KiB)" % cfree)
 if cfree < 8192:
-    open('target/native/regionc.warn', 'w').write('%d\n' % cfree)
+    open(sys.argv[3] + '/regionc.warn', 'w').write('%d\n' % cfree)
 print("  SRAM free        = %d bytes (above .sram_bss; >= 8 KiB)" % (0x20030000 - syms['__sram_bss_end']))
 print("  word0 initial SP = 0x%08x (loader only; reset sets 0x10010000)" % sp)
 print("  word1 reset      = 0x%08x" % entry)
@@ -101,25 +106,25 @@ assert pad == b'\xff' * len(pad), 'padding between region A2 and region B is not
 assert body[:4] == struct.pack('<I', 0x2002F7F8)
 assert BASE <= entry - 1 < MARK and entry & 1, 'reset vector not in region A (thumb)'
 PY
-python3 ../firmware/dm40fw.py info dm40-fw-native.bin
+python3 ../firmware/dm40fw.py info "$OUT"
 # The FS-loader mis-decodes a short last 128-byte block whose key position is
 # outside it (docs/native-boot.md "Update file format"); dm40fw.py pack --pad pads
 # the body so the file is whole blocks. Fail the build if it is not.
-n=$(wc -c < dm40-fw-native.bin)
+n=$(wc -c < "$OUT")
 if [ $((n % 128)) -ne 0 ]; then
-    echo "build.sh: dm40-fw-native.bin is $n bytes, not a multiple of 128 (short last block)" >&2
-    rm -f dm40-fw-native.bin
+    echo "build.sh: $OUT is $n bytes, not a multiple of 128 (short last block)" >&2
+    rm -f "$OUT"
     exit 1
 fi
 if [ $((0x08004000 + n - 12)) -gt $((0x080A0000)) ]; then
     echo "build.sh: the padded body ends past 0x080A0000 (FS-loader)" >&2
-    rm -f dm40-fw-native.bin
+    rm -f "$OUT"
     exit 1
 fi
 # Region A2 (zero-wait, 0x0800460c..0x08008000) below 2 KiB free: a banner
 # (the link fails when A2 reaches the loader marker at 0x08008000).
-if [ -f target/native/regiona2.warn ]; then
-    a=$(cat target/native/regiona2.warn)
+if [ -f $TDIR/regiona2.warn ]; then
+    a=$(cat $TDIR/regiona2.warn)
     {
         echo
         echo "################################################################################"
@@ -132,8 +137,8 @@ if [ -f target/native/regiona2.warn ]; then
 fi
 # Region B (zero-wait flash) below 16 KiB free: a loud banner as the last
 # thing printed (the link itself fails below 8 KiB, link-native.x).
-if [ -f target/native/regionb.warn ]; then
-    b=$(cat target/native/regionb.warn)
+if [ -f $TDIR/regionb.warn ]; then
+    b=$(cat $TDIR/regionb.warn)
     {
         echo
         echo "################################################################################"
@@ -149,8 +154,8 @@ fi
 # banner (the link fails below 4 KiB). The FS-loader writes the update body
 # only to 0x08004000..0x080A0000; above are the FS-loader, boot data and
 # calibration (docs/native-boot.md "Flash outside the image").
-if [ -f target/native/regionc.warn ]; then
-    c=$(cat target/native/regionc.warn)
+if [ -f $TDIR/regionc.warn ]; then
+    c=$(cat $TDIR/regionc.warn)
     {
         echo
         echo "################################################################################"

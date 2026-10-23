@@ -54,7 +54,12 @@ OTP (`otp_1FFF7800.bin`) and the chip UID
 (`private/memrw-kit-test/full/uid_1FFF7A10.bin`) are loaded into system
 memory at run time (the stock `SystemInit` only configures the 200 MHz PLL when
 its UID check against 0x080A4000 passes; without the UID file the stock runs at
-16 MHz). The SPI-flash FAT comes from
+16 MHz). By default the UID's bytes 4 and 9 are replaced with the USB/IP port
+(`run.py` `emu_uid`; the stock check never reads those two bytes), so each
+instance has a chip UID, and with it a fw-rs USB / SCSI / `*IDN?` serial
+number, of its own, never the real meter's: udisks merges disks with the same
+vendor / model / serial into one drive. `--uid HEX24|FILE|unit` sets it
+(`unit` = this unit's UID as is). The SPI-flash FAT comes from
 `firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin`, copied once to
 `emu/out/disk.bin` (the working copy; the dump is never written).
 None of these inputs are committed; generated images are git-ignored.
@@ -162,7 +167,7 @@ emu/run.py stock --app ../alientek-dm40-tools/patch/build/dm40_patched.bin --fas
 emu/usbip_client.py list                 # busid=1-0 1209:0001 interfaces fe/03/01 08/06/50
 emu/usbip_client.py desc   1-0           # device descriptor
 emu/usbip_client.py config 1-0           # interfaces + endpoints
-emu/usbip_client.py usbtmc 1-0 "*IDN?"   # -> Alientek,DM40A,0,dm40-fw 0.1
+emu/usbip_client.py usbtmc 1-0 "*IDN?"   # -> Alientek,DM40A,<chip UID hex = emu_uid>,dm40-fw 0.1
 emu/usbip_client.py scpi-tcp 1-0 5025    # SCPI lines on TCP 5025 <-> USBTMC, e.g. for
                                          # sigrok-cli -d scpi-dmm:conn=tcp-raw/127.0.0.1/5025
 emu/usbip_client.py msc    1-0 0         # INQUIRY, READ CAPACITY, READ(10) LBA 0 (FAT boot sector); fw-rs native:
@@ -449,7 +454,7 @@ the flash controller, the SPI disk and the reset path end to end.
 ## Files the emulator reads (never writes)
 
 * `firmware/re/dumps/full-20261013/flash_08000000_1MB.bin`, `otp_1FFF7800.bin`
-* `private/memrw-kit-test/full/uid_1FFF7A10.bin` (`--uid` to point elsewhere)
+* `private/memrw-kit-test/full/uid_1FFF7A10.bin` (bytes 4 / 9 = the USB/IP port; `--uid` to set it)
 * `firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin` (copied to `emu/out/disk.bin`)
 * `dm40_v_2_6.dec.bin` (stock body), `firmware/dm40fw.py` (header words)
 * fw-rs: `git worktree add --detach emu/out/fwrs-worktree HEAD` + `./build.sh native`

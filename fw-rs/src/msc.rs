@@ -10,7 +10,10 @@
 //!   without `vdisk`, and recovery-usb: the on-board
 //!     W25Q128 (spiflash.rs), the stock FAT16 volume with 4096-byte sectors
 //!     (firmware/re/analysis/spiflash_v2_6.h), writable.
-//! INQUIRY gives each device's product name (removable), READ CAPACITY /
+//! INQUIRY gives each device's product name (removable); with EVPD, page
+//! 0x00 (supported pages: 00, 80) and 0x80 (unit serial number = the chip
+//! UID, src/uid.rs, as the USB iSerial), any other page fails 05/24/00
+//! (Linux usb-storage never asks: skip_vpd_pages; Windows / macOS do). READ CAPACITY /
 //! READ FORMAT CAPACITIES its geometry, MODE SENSE the write-protect bit of
 //! a read-only device, and a WRITE to it fails with DATA PROTECT, WRITE
 //! PROTECTED (07/27/00) without touching anything. Sense data is per LUN.
@@ -166,6 +169,8 @@ const SENSE_BECOMING_READY: Sense = Sense(0x02, 0x04, 0x01);
 const SENSE_MEDIUM_CHANGED: Sense = Sense(0x06, 0x28, 0x00);
 /// DATA PROTECT, WRITE PROTECTED: a WRITE to a read-only LUN.
 const SENSE_WRITE_PROTECTED: Sense = Sense(0x07, 0x27, 0x00);
+/// ILLEGAL REQUEST, INVALID FIELD IN CDB (an INQUIRY VPD page we lack).
+const SENSE_INVALID_FIELD: Sense = Sense(0x05, 0x24, 0x00);
 /// ILLEGAL REQUEST, LOGICAL UNIT NOT SUPPORTED (a LUN above GET MAX LUN).
 const SENSE_BAD_LUN: Sense = Sense(0x05, 0x25, 0x00);
 
@@ -435,6 +440,29 @@ fn handle<B: UsbBus>(
         }
     }
     match kind {
+        ScsiCommand::Inquiry { evpd: true, page_code, .. } => {
+            // VPD: header (device type 0, page, length) + the page.
+            let mut d = [0u8; 4 + 24];
+            d[1] = page_code;
+            let n = match page_code {
+                0x00 => {
+                    d[4] = 0x00;
+                    d[5] = 0x80;
+                    2
+                }
+                0x80 => {
+                    d[4..].copy_from_slice(crate::uid::bytes());
+                    24
+                }
+                _ => {
+                    *sense = SENSE_INVALID_FIELD;
+                    cmd.fail(0);
+                    return Ok(());
+                }
+            };
+            d[3] = n as u8;
+            reply(cmd, &d[..4 + n]);
+        }
         ScsiCommand::Inquiry { .. } => {
             let mut d = [0u8; 36];
             d[0] = 0x00; // direct access block device

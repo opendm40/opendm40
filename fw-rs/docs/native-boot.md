@@ -433,7 +433,9 @@ This section supersedes §2–§10 where they differ. By user decision:
 | `tools/fatren-test/run.sh` | host test of fatren on mkfs.fat images (fsck.fat + mtools) |
 
 Cargo features (2026-10-22, after the RAM build was removed; the stock fonts
-are always embedded, the calibration backup always runs):
+are always embedded, the calibration backup always runs; every non-default
+set is built, with all of build.sh's checks, by `tools/build-variants/run.sh`
+into `target/variants/`, never over `dm40-fw-native.bin`):
 - `vdisk` (default: the generated read-only USB volume);
 - `fatren-dry-run`;
 - `recovery-file`, `recovery-usb`;
@@ -1115,7 +1117,7 @@ FWDGT start, recovery and vectors (`.text` 1544).
   - The update screen appears only on a cold boot with PA2 low long enough.
   - The `test-recovery` image is 9632 bytes.
 - **`recovery-usb`:** our own minimal USB-MSC disk on the W25Q128 (msc.rs path,
-  no USBTMC, serial `REC1`).
+  no USBTMC; serial = the chip UID as in normal mode, `REC1` until 2026-10-23).
   - Any SCSI START STOP UNIT, or a key hold of 2 s or more, powers off
     (an eject also makes the disk report no medium for that last second).
   - A short key press reboots.
@@ -1484,7 +1486,13 @@ LUN, `msc::host_mounted()` = LUN 0's lock). UNIT ATTENTION: a device with
 writable SPI disk of the builds without `vdisk` keeps the old rule (held
 back while locked). A bus reset or unconfigure clears the locks and asks the
 volume for a compaction at its next refresh. `MAX_BLOCK` = 512 in the native
-build (the volume's sector), 4096 where the SPI disk is exported.
+build (the volume's sector), 4096 where the SPI disk is exported (its
+buffer `MSC_BLK` then in SRAM `.sram_bss`, not TCM: the 4 KiB cost the TCM
+stack its 42 KiB). INQUIRY with EVPD: page 0x00 (supported: 00, 80) and
+0x80 (unit serial number = the USB serial, below); any other page fails
+ILLEGAL REQUEST, INVALID FIELD IN CDB (05/24/00). Until 2026-10-23 an EVPD
+request got the standard INQUIRY data. Linux usb-storage never asks for VPD
+pages (`skip_vpd_pages`); Windows and macOS do.
 
 **Eject.** START STOP UNIT with LoEj = 1, Start = 0 (Linux `eject` / `gio
 mount -e` / a file manager's Eject; Windows Explorer's Eject and "Safely
@@ -1510,6 +1518,52 @@ ignored>`. Tests: emu/mscresettest.py `stop-start`, `eject-load`,
 `eject-port` (raw SCSI over USB/IP), emu/ejecttest.py (the kernel's
 usb-storage + udisks: eject, power-off, a "PC can edit" install ejected at
 once, re-plug).
+
+### USB serial number (`src/uid.rs`)
+
+Every unit used to report the USB serial `0001` (and `0` in `*IDN?`).
+udisks merges disks with the same vendor / model / serial into one
+(multipath) drive, so two DM40s, or the emulator next to a real meter, on
+one Linux PC shared a udisks drive, and a drive-level Eject or Power Off
+could act on the other unit. Since 2026-10-23 the serial is the GD32's
+96-bit unique ID (`0x1FFF7A10`, 12 bytes) as 24 uppercase hex digits, bytes
+in memory order (word 0 low byte first): the digits of `xxd -p -u
+INFO/UID.BIN` and of the UID field of `DBG:GENUINE?`. The same string is:
+
+- the USB iSerial (normal mode and `recovery-usb`);
+- the SCSI unit serial number, INQUIRY VPD page 0x80 (msc.rs);
+- the third field of `*IDN?`: `Alientek,DM40A,<serial>,dm40-fw 0.1`.
+  libsigrok's scpi-dmm DM40 profile (`sr_scpi_get_hw_id`: four
+  comma-separated fields, the serial is only stored) shows it as
+  `[S/N: ...]`; ngscopeclient (`SCPIDevice`: `%127[^,]`) as the serial.
+  Neither compares it. `SYST:IDN:EMUL 34401A` keeps the HP identity with
+  serial `0`, as before.
+
+The UID is in system memory, not in the slow flash bank (`0x08080000..`),
+but no request path reads it: `uid::init` (region C, `.cold`) reads it once
+in `native::start`, before the recovery / normal decision is acted on, into
+a 24-byte TCM static; the USB descriptors, the VPD page and `*IDN?` use
+that copy. The VID:PID (1209:0001) is unchanged, so udev rules keyed on it
+still match; `/dev/disk/by-id/usb-ALIENTEK_DM40_files_...` names and the
+Windows device instance path change once (a new device instance: Windows
+installs it again, a WinUSB binding made with Zadig must be made again).
+
+Privacy. The serial identifies the unit (as most USB disks' serials do):
+any USB host reads it without mounting (`lsusb -v`), any Bluetooth peer
+that may send SCPI reads it with `*IDN?`. It was already readable over USB:
+`INFO/UID.BIN` on the volume and the FAT volume ID (CRC-32 of the UID). A
+hash of the UID would be just as stable a tracking identifier, so it would
+not hide more; the only thing the raw UID adds is the input of the stock
+genuine check (docs/genuine-check.md), whose stored block is on the volume
+too (`INFO/BOOTDATA.BIN`). There is no setting to hide it.
+
+Emulator: `emu/run.py --uid` (default `emu_uid`: this unit's UID with bytes
+4 and 9 = the USB/IP port, so every instance has its own serial and the
+stock genuine check, which never reads those two bytes, still passes).
+`emu/ejecttest.py` no longer rewrites the serial in its proxy; its safety
+check requires the emulator's udisks drive to carry the emulator's serial,
+not the unit's, and no other disk on it. Test: emu/mscresettest.py `serial`
+(USB iSerial, VPD 0x80 / 0x00 / a missing page, `*IDN?`).
 
 ### The slow flash bank while an AD2 stream runs (2026-10-23)
 

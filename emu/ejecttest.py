@@ -24,12 +24,16 @@ Steps (exit status 0 = PASS):
 The usbtmc of the emulator is used for SCPI (DM40_USBTMC=emu: the one
 under vhci_hcd; the real meter's is never opened), the block device is the
 one under vhci_hcd only. `usbip attach` only connects to TCP 3240: a proxy
-here listens there and forwards to the emulator on --port, and rewrites the
-USB serial "0001" to "EMU1": udisks takes two disks with the same vendor /
-model / serial for one multipath drive, so with a real DM40 plugged in a
-drive-level Eject / PowerOff could act on the real meter. Every attach
-checks that the emulator's disk has a udisks drive of its own (else the
-test stops before any eject). Needs passwordless `sudo -n usbip
+here listens there and forwards to the emulator on --port. The emulator gets
+a chip UID of its own (run.py --uid, emu_uid: the unit's UID with bytes 4 / 9
+= the port), so fw-rs's USB serial (the UID as hex, fw-rs/src/uid.rs)
+differs from the real meter's: udisks takes two disks with the same vendor /
+model / serial for one multipath drive, and with a real DM40 plugged in a
+drive-level Eject / PowerOff could then act on the real meter. (Until
+2026-10-23 every unit said "0001" and this proxy rewrote it to "EMU1".)
+Every attach checks that the emulator's disk has a udisks drive of its own,
+named with the emulator's serial and not the unit's (else the test stops
+before any eject). Needs passwordless `sudo -n usbip
 attach|detach|port`, udisks, gio; 3240 must be free.
 """
 import argparse
@@ -54,6 +58,14 @@ A = ap.parse_args()
 os.environ['DM40_USBTMC'] = 'emu'
 sys.path.insert(0, os.path.join(ROOT, 'fw-rs/tools'))
 import dm40dbg  # noqa: E402
+sys.path.insert(0, HERE)
+import run  # noqa: E402  (emu/run.py: emu_uid, UID)
+
+# The emulator's serial (fw-rs: the chip UID as 24 hex digits, memory order)
+# and the real unit's, which the emulator's udisks drive must never carry.
+EMU_SERIAL = run.emu_uid(A.port).hex().upper()
+UNIT_SERIAL = run.read(run.UID).hex().upper() if os.path.exists(run.UID) else None
+assert EMU_SERIAL != UNIT_SERIAL
 
 OUT = os.path.join(HERE, 'out')
 TAG = 'eject-%d-%d' % (A.port, os.getpid())
@@ -108,27 +120,21 @@ def unplug():
 
 
 def proxy_main(lport, uport, stop):
-    """TCP 127.0.0.1:lport -> 127.0.0.1:uport for `usbip attach`; the USB
-    serial string descriptor "0001" (bLength 10, type 3, UTF-16LE) in the
-    device's replies becomes "EMU1", so udisks does not merge the
-    emulator's disk with a real DM40's (same vendor / model / serial)."""
-    old = bytes([10, 3]) + '0001'.encode('utf-16-le')
-    new = bytes([10, 3]) + 'EMU1'.encode('utf-16-le')
+    """TCP 127.0.0.1:lport -> 127.0.0.1:uport for `usbip attach` (the
+    emulator's own serial needs no rewrite: run.py emu_uid)."""
     ls = socket.socket()
     ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     ls.bind(('127.0.0.1', lport))
     ls.listen(4)
     ls.settimeout(0.5)
 
-    def pump(a, b, rewrite):
-        # Per read (the 10-byte reply is in one RET_SUBMIT; a miss is caught
-        # by Meter.check_drive).
+    def pump(a, b):
         try:
             while True:
                 d = a.recv(65536)
                 if not d:
                     break
-                b.sendall(d.replace(old, new) if rewrite else d)
+                b.sendall(d)
         except OSError:
             pass
         try:
@@ -145,8 +151,8 @@ def proxy_main(lport, uport, stop):
         CONNS.extend((c, u))
         for s_ in (c, u):
             s_.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        threading.Thread(target=pump, args=(c, u, False), daemon=True).start()
-        threading.Thread(target=pump, args=(u, c, True), daemon=True).start()
+        threading.Thread(target=pump, args=(c, u), daemon=True).start()
+        threading.Thread(target=pump, args=(u, c), daemon=True).start()
     ls.close()
 
 
@@ -185,8 +191,9 @@ class Meter:
         """The udisks drive of the emulator's disk must be its own: udisks
         takes block devices with the same vendor / model / serial for one
         (multipath) drive, and a drive-level Eject / PowerOff could then act
-        on the real meter's disk. The proxy gives the emulator its own USB
-        serial (EMU1); refuse to go on unless that worked."""
+        on the real meter's disk. The emulator has a serial of its own
+        (EMU_SERIAL, run.py --uid); refuse to go on unless the drive is named
+        with it, not with the unit's, and no other disk shares it."""
         drive = None
         for _ in range(20):
             r = sh('udisksctl', 'info', '-b', '/dev/' + self.dev)
@@ -204,7 +211,8 @@ class Meter:
             r = sh('udisksctl', 'info', '-b', '/dev/' + n)
             if ("'%s'" % drive) in r.stdout:
                 others.append(n)
-        if not drive or drive == '/' or 'EMU1' not in drive or others:
+        if (not drive or drive == '/' or EMU_SERIAL not in drive or (UNIT_SERIAL and UNIT_SERIAL in drive)
+                or others):
             raise SafetyError('udisks drive of /dev/%s is %s, shared with %s: no drive-level eject / power-off'
                               % (self.dev, drive, others))
         self.drive = drive
@@ -213,7 +221,7 @@ class Meter:
         """As a file manager: `gio mount -e` (unmount, then udisks' drive
         Eject); when gio cannot, udisksctl unmount + Drive.Eject over D-Bus.
         Only after check_drive (the drive is the emulator's alone)."""
-        assert self.drive and 'EMU1' in self.drive
+        assert self.drive and EMU_SERIAL in self.drive
         r = sh('/usr/bin/gio', 'mount', '-e', mp)
         print('  gio mount -e %s: %d %s' % (mp, r.returncode, (r.stderr or r.stdout).strip()[:100]), flush=True)
         if r.returncode == 0:
@@ -321,7 +329,7 @@ disk = os.path.join(OUT, TAG + '-disk.bin')
 src = os.path.join(OUT, 'disk.bin')
 shutil.copy(src if os.path.exists(src) else os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
 emu = subprocess.Popen([sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--app', A.app, '--fast', '--usbip', '0.01',
-                        '--usbip-port', str(A.port), '--run-for', '3600', '--name', TAG, '--disk', disk],
+                        '--usbip-port', str(A.port), '--uid', EMU_SERIAL, '--run-for', '3600', '--name', TAG, '--disk', disk],
                        cwd=ROOT, stdout=open(os.path.join(OUT, TAG + '.out'), 'w'), stderr=subprocess.STDOUT,
                        start_new_session=True)
 proxy = None

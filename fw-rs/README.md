@@ -93,6 +93,10 @@ until the cable is re-plugged. SCPI is USBTMC: Linux has a driver, Windows
 has none (the interface sits under "Other devices", code 28). On Windows,
 install NI-VISA or Keysight IO Libraries, or bind WinUSB with Zadig and use
 pyvisa-py ([docs/bt-scpi.md](docs/bt-scpi.md#usbtmc-on-windows)).
+Each meter has its own serial number: the chip's unique ID as 24 hex
+digits (USB serial, the disk's SCSI serial, the third field of `*IDN?`; the
+same digits as `INFO/UID.BIN`). Two meters on one PC are two drives
+([docs/native-boot.md](docs/native-boot.md#usb-serial-number-srcuidrs)).
 
 ## Recovery
 

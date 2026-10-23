@@ -141,6 +141,9 @@ const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
 static mut EP_MEMORY: [u32; 64] = [0; 64];
 static mut MSC_IO: [u8; 512] = [0; 512];
 /// The MSC block buffer (was a 4 KiB field of `Msc` on the main stack).
+/// 512 bytes in TCM; the 4 KiB of the builds whose disk is the SPI flash
+/// (recovery-usb, no `vdisk`) go to SRAM (the TCM stack keeps its 42 KiB).
+#[cfg_attr(all(target_os = "none", any(feature = "recovery-usb", not(feature = "vdisk"))), link_section = ".sram_bss")]
 static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
 /// Data-logger state (FR-38; its 16 KiB ring is `logger::RING`, shared with
 /// the AD2 stream ISR). In SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in
@@ -227,7 +230,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         .strings(&[StringDescriptors::default()
             .manufacturer("dm40-fw")
             .product("DM40 multimeter (dm40-fw)")
-            .serial_number("0001")])
+            .serial_number(uid::serial())])
         .unwrap()
         .build();
     // build() enabled the core; now force the GD32 power/VBUS bits.
@@ -2212,6 +2215,7 @@ mod gallery;
 mod fatdir;
 mod upload;
 mod native;
+mod uid;
 // Stock device-authenticity check, informational only: DBG:GENUINE? reports
 // it; nothing changes device behaviour on its result (user decision).
 // (`check` / `verify` are for other callers / the host tests.)

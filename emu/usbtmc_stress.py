@@ -43,6 +43,7 @@ with --monitor PORT, the USBFS registers read through the Renode monitor).
 """
 import argparse
 import random
+import re
 import socket
 import struct
 import sys
@@ -53,7 +54,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import usbip_client as u  # noqa: E402
 
 DEV_DEP_MSG_OUT, REQUEST_DEV_DEP_MSG_IN = 1, 2
-IDN = b'Alientek,DM40A,0,dm40-fw 0.1'
+# The native identity; its serial field (the chip UID as 24 hex digits,
+# fw-rs/src/uid.rs, emu/run.py --uid) is taken from the first *IDN? (main).
+IDN = None
+IDN_RE = re.compile(rb'Alientek,DM40[ABC],[0-9A-F]{24},dm40-fw 0\.1')
 IDN_34401A = b'HEWLETT-PACKARD,34401A,0,dm40-fw 0.1'
 
 
@@ -182,6 +186,9 @@ class Tmc:
 
 
 def expect(got, want, what):
+    # Every fw-rs reply ends with '\n' since 848047f (scpi.rs header).
+    if got.endswith(b'\n'):
+        got = got[:-1]
     if got != want:
         raise IOError('%s: got %r, expected %r' % (what, got[:120], want[:120]))
 
@@ -460,6 +467,12 @@ def main():
     print('seed %d, cases %s' % (seed, ' '.join(names)), flush=True)
     st.set_emul(False)
     st.drain_errors()
+    global IDN
+    IDN = t.query('*IDN?').rstrip(b'\n')
+    if not IDN_RE.fullmatch(IDN):
+        print('FAIL: *IDN? %r (want Alientek,DM40A|B|C,<24 hex digits>,dm40-fw 0.1)' % IDN)
+        return 1
+    print('*IDN? %s' % IDN.decode(), flush=True)
     counts = {c: 0 for c in names}
     t0 = time.monotonic()
     i = 0

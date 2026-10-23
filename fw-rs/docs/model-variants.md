@@ -83,8 +83,10 @@ The model is in the calibration record and the hardware is the same, so the
   (set it to `self.model` in `factor()` / `over()` for the stock limits).
   The capacitance comparator follows the real model byte, as the stock does.
 * `ui.rs range_items`: DM40C labels (600mV / 6V / ...) on all models.
-* `*IDN?`: `Alientek,DM40<A|B|C>,0,dm40-fw 0.1` from the model (was a
-  constant DM40A until 2026-10-22). `SYST:IDN:EMUL 34401A` unchanged.
+* `*IDN?`: `Alientek,DM40<A|B|C>,<serial>,dm40-fw 0.1` from the model (was a
+  constant DM40A until 2026-10-22; serial `0` until 2026-10-23, now the chip
+  UID as 24 hex digits, docs/native-boot.md "USB serial number").
+  `SYST:IDN:EMUL 34401A` unchanged.
 * `SYSTem:MODel?` (USBTMC and BT SCPI; read-only): `DM40B,1,60000` =
   model name, raw calibration byte (decimal), counts fw-rs uses.
 * About page "Model", BT name `AT+SBNDM40x` and BT cmd 00 `'A'+model`: as the
