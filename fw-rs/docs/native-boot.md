@@ -1620,6 +1620,12 @@ the AD1 stream ISR).
   - DBG:VDISK:MIR? = served (1/0), the writer's status (0 NOTRUN 1
     NOMEDIUM 2 BADBPB 3 PRESENT 4 WRITTEN 5 NOSPACE 6 ERROR), rewritten at
     this boot (1/0), ms.
+  - MMEM:CAT? (csvlog `catalog_scpi`, its cache): lists gallery files only
+    (S*.BMP, LOG*.DLG, SCOP*.DLG), so never `_INFOMIR.BIN`; its <used>
+    count includes the mirror's 260 KiB. The cache keys on
+    `msc::FLASH_WRITES`; the mirror is written only at boot, before any
+    catalog, and its reads during a stream write nothing, so the cache
+    stays valid while a host copies INFO/.
   - Privacy: CALIB / BOOTDATA bytes were already on the SPI disk (the
     write-once safety copy, calbackup.rs) and leave the meter only through
     the USB volume as before (INFO/, DEBUG/SPIFLASH.BIN). Nothing logs them.
