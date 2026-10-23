@@ -232,6 +232,9 @@ Code work (in this order):
         page byte-exact, press + release on AC/DC selects it. Device retest: MF on DC V, hold a finger on
         a range button (lighter blue), slide off (normal again, nothing selected), tap AC/DC (selects);
         the same on Power Settings (power meter, MF).
+        **Device d330877 (device-check-2026-10-21.md "d330877", item 2): PASS** on V / A / Ohm / F and Power Settings: slide off = the page
+        byte-equal, nothing selected; a tap selects (AC, Low current ON, AC); set back. The held (lighter blue)
+        state cannot be screenshotted with DBG:DRAG / DBG:TAP (one loop pass): needs a real finger.
         Not done (left for the owner): the confirm / fuse / wiring dialog buttons (the dialog closes on
         the tap, its own feedback; the fuse / job labels vary per stage), the Inrush page (its keys run
         while AD2 streams: a .cold redraw per touch there needs a device timing check first), Gallery /
@@ -1601,6 +1604,9 @@ Firmware:
       0 rows, after 153 601 at 38400 x 4 s. Device retest: on the Scope page (MCX), `LOG:DEST DISK`,
       `LOG:DURation 10`, `LOG:STATe ON` at 38400 and 76800: the DLG has ~rate x 10 rows, lost 0; the same
       with `LOG:DEST HOST` (LOG:DATA? drains records).
+      **Device d330877 (device-check-2026-10-21.md "d330877" 1a): PASS**: MCX page, DISK 384 002 / 768 002 rows in 10 s, lost 0, late 0;
+      HOST 38400 lost 0, 76800 lost 0 with the known host-side ring overwrite. The badge during a session is refused
+      (1d), but the "Wave: data logger running" toast is hidden under the DATA LOGGING panel: open (cosmetic).
 - [ ] Not exercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
       with the residue, sense 02/04/01; the host retries the whole command).
       Known and left: region C DBG commands (DBG:GENUINE? reads the loader data at 0x080A4000 in region C
@@ -1617,6 +1623,8 @@ Firmware:
       MMEM:CAT? x3 while streaming: before overwritten +7904, after 0 (2 ms/div 0 both). Device retest:
       `wdrop.py` in the Wave view at 1 ms/div: `dropped` +0 per MMEM:CAT?; after a Save CSV the new SCOPnnn
       shows in MMEM:CAT?.
+      **Device d330877 (device-check-2026-10-21.md "d330877" 1b): PASS**: MMEM:CAT? 7-20 ms, dropped +0, late +0 (x3); Save CSV not
+      repeated.
 - [ ] 76800 stream / rate (loop fix PASSED on device e7ec2cc; its nominal was wrong, fixed in ee28b71, device
       check open). **Device e7ec2cc (device-check-2026-10-21.md "e7ec2cc: the 76.8 kS/s PLL retest"):** the
       loop locks from a cold start within 5 s at rate_mhz 76 800 0xx = ppm_x10 -29 35x (-2935 ppm) against the 76 574.6
@@ -2182,6 +2190,14 @@ Firmware:
             (1 V: 0x10), and sample_cmp reads both bits as "swings both ways". (E4) A-JACK in RES at 5 V, 12 / 12,
             vside 0: the known 35fce2a 7b, owner decision. DC? in AC V on 1 / 5 V DC is right. Fix pending
             (another agent).
+            **Device d330877 (device-check-2026-10-21.md "d330877" section 4, raw `chk2/out/E_e1_*`, `E_e4_*`, `ctsta_summary.txt`):** E1 still
+            there (RES -> A / mA: 0x70 0.47-0.67 -> 4.6 s open, -> 5.1 s at 1 V; V-JACK 1.5-1.8 -> 5.2-5.9 s).
+            RES -> DC V 1 s -> A: ctsta 0, no alert (open and 1 V, 3 / 3 each). RES -> AC A 2 s -> A: 0 (open),
+            0x70 only 0.65-1.0 s (1 V), no alert. A real 24 V on V-COM reads 0x70 in DC A entered from TEMP / AC V
+            (V-JACK at 1.7 s) but **0 for 10 s when entered from DC V** (10 V: 0 from DC V, 0x70 only 0.66 s from
+            TEMP): the misconnect hint depends on the previous function. Never 0x20 / 0x10 in DC A.
+            **New: V-JACK? in every AC A range with V-COM open** (AD1PK_SENSE, pk -262144, from 1.66 s, still on
+            at 30 s). At 24 V DC in AC V a short A-JACK (3.1-4.1 s).
       - [ ] Switch latency (owner: "several seconds, stock was instant"; device ad74e93, settle.py at 1 / 5 V,
             RATE FAST): first valid FETCh? DC V <-> AC V 0.46 s, RES -> DC V 0.52-0.56 s, DC V -> mA 0.56 s,
             DC V -> A 0.75-0.76 s, 6 V -> 60 V 0.55-0.56 s, AC V -> AC+DC 1.32-1.37 s, **DC V -> RES 2.67 s**; the
@@ -2434,12 +2450,15 @@ Emulator (emu/):
       under the stream. inrushtest (region C hooks now): LOG:CSV ON on the armed page refused, still ARMED, no
       region C. wavetest volt / dcv, inrushtest: PASS. Device retest: Wave view at 1 ms/div, V/div + and -:
       `wdrop.py` dropped +0, the trace back within ~1 s; the badge out at 2 ms/div: late 0, overruns 0.
+      **Device d330877 (device-check-2026-10-21.md "d330877" 1b): PASS**: V/div + / - at 1 ms/div dropped 0, late 0, overruns 0; badge exit
+      at 2 ms/div late 0, overruns 0, MCX page drawn.
 - [x] MENU on the Device page returned to Settings 3/3 (device 35fce2a, the "State at the end" note).
       Stock: Device is a section of the one Settings screen; what MENU does there is not traced, the main
       menu is the likely answer. **3f32bc3:** MENU on Device -> the main menu; a tap on Device still goes
       to Settings 3/3; MENU on Settings 3/3 / 2/3 still steps back a page (fw-rs's own paging; Help -> Settings
       unchanged). Emulator: fastlogtest --ui-nav page tree. Device retest: Settings > More > More > Device,
       MENU: the main menu.
+      **Device d330877 (device-check-2026-10-21.md "d330877" 1c): PASS.**
 - [x] AUTO OVERLOAD on AC 1 A (1bffde2, couptest iac repro): blocked, the A jack is not wired.
       Fixed in 1152624 with the 2026-10-22 BUG (quiet hop in AUTO); the device check is in the list below.
 - [x] powtest `ereset` FAILs on 0100788, 70572bb, 4a734d1 + dmm-bugs alike, also run alone (the Yes tap
@@ -2471,6 +2490,9 @@ Emulator (emu/):
       the hint comes (DC? badge), Yes still resets, and the hint toast shows after the confirm closes.
       Owner question (not changed): a long press on a toast's box does nothing (only a tap there acts, 77ae236),
       so a long press on E while a hint toast covers it is lost; should a long press go through to the page?
+      **Device d330877 (device-check-2026-10-21.md "d330877" item 3): PASS** (a) and (b): the confirm survives the DC hint, Yes resets Wh / time,
+      the hint toast shows 0.15 s after the confirm closes. In AC+DC the E row is at y 170..192 (the parts row).
+      Under the confirm the page is not redrawn (no DC? badge until it closes).
 - [ ] Device retest "dmm-bugs" (1152624; most need a current in the A jack: a current-limited bench
       supply + load or the calibrator's current output; the meter here has the A jack open):
       1. A AUTO coupling (CURR:COUP AUTO), AC 1 A @ 50 Hz: SYST:ALER? NONE throughout, CONF? 6 A range

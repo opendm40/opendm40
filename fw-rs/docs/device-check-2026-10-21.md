@@ -2518,3 +2518,103 @@ switches take 0.45-0.76 s. A stock comparison was not made (no stock firmware on
 - **Disk:** MMEM:CAT? names and used / free (3 534 848 / 13 205 504) equal the start. The two FAST000.DLG files were
   deleted by exact name. The volume is mounted read-only again after the eject test (port reset).
 - **Calibrator:** back on the 10 Hz square (func 2, 10 000 mHz), enabled, as found. In check E it was off / 1 V / 5 V DC.
+
+## d330877: stream-ui, pressed feedback, ereset dialog, V-JACK? exit experiments (2026-10-23 23:15 - 23:57)
+
+The coordinator had installed d330877 (branch stream-ui = dad5500's stream / UI fixes rebased on rust-fw-poc 02611a5,
+with the ereset / toast fix 5301fb7 and the pressed feedback 125a423). `*IDN?` = `Alientek,DM40A,<UID>,dm40-fw 0.1`,
+`DBG:FLASH?` `EF4018,4096,0,...`. INFO/FIRMWARE.BIN, read with the page cache dropped, is byte-equal to the d330877
+build (sha256 47dd11ad…4bcf). `dm40dbg.py boot`: marker 0x238DDC72 / 0x000968F4 / 0x0001563A VALID, crash count 0,
+HEALTHY at the start and the end (no reset). No flashing. Files are in the session scratchpad's `chk2/`: `sessB.py` (a
+disk session; `--cp` copies the 8 INFO/*.BIN with the cache dropped from state 3 on and compares them to references
+taken before; the DLG is fetched, decoded with tools/dlog.py and deleted by exact name), `sessA.py`, `wave.py`,
+`badge.py`, `pf.py` (pressed feedback), `ereset.py`, `sentE.py` (now with a fixed per-step watch, `STEP@seconds`),
+`ctsum.py` (the ctsta timeline per step), `cal.py`, and `out/` (JSON, PNG; `out/ctsta_summary.txt`, `out/E_e1_*`,
+`out/E_e4_*`). All tools ran with `DM40_USBTMC=real` (an emulator of another agent was attached over vhci).
+The calibrator was found on a 10 Hz square (func 2, 10 000 mHz), enabled; the meter on the DMM page, DC V AUTO+, RATE FAST.
+
+| # | check | result |
+|---|---|---|
+| 1a | Scope page (MCX), AD2 `LOG:DEST DISK`, `LOG:DUR 10`, `LOG:STAT ON` at 38400 (`mcx384`, generator queries polled too) and 76800 (`mcx768`) | **PASS**: 384 002 / 768 002 rows (= rate x 10 s), lost_before 0; late 0, overruns 0, max_lat 280 ns; the values follow the square (0..9.5 V). The 0-row bug is gone |
+| 1a' | The same with `LOG:DEST HOST` (`dm40scpi.py log --source ad2 -d 10`) | **PASS**: 38400: 364 572 samples in 9.5 s, lost 0, overwritten 0. 76800: 400 628 drained, lost 0, ring overwritten 324 943: the known host limit (~40 k rows/s over LOG:DATA?, as 4c4b489 / bab5dd4 A3). late 0 both |
+| 1b | Wave view (DC V, MF > Wave) at 1 ms/div (ACQ:SRAT? 76 800): MMEM:CAT? x3 (`wave.json`) | **PASS**: 7.4 / 20.0 / 7.5 ms per reply (was 123 ms), `dropped` +0 each, late / overruns +0; 1 s idle +0 |
+| 1b' | V/div + (20 -> 200 V/div) and - (back) at 1 ms/div | **PASS**: the stream restarts (active 1), dropped 0, late 0, overruns 0 after each step; CONF? follows the range (60 / 600 / 60 V) |
+| 1b'' | Source badge DMM -> MCX at 2 ms/div (38 400) | **PASS**: late 0 -> 0, overruns 0 -> 0, the stream stopped (active 0), DBG:VIEW? Oscilloscope, the MCX page drawn (`w_badge_exit.png`) |
+| 1c | Settings > More > More > Device, MENU | **PASS**: the main menu (`s_device_menu.png`). The next action was a key, not a tap |
+| 1d | The source badge tapped during a 38400 disk session on the MCX page (twice) | **Refusal PASS, toast FAIL (cosmetic)**: the view stays Oscilloscope, the session runs on (384 002 rows, lost 0, late 0). The toast "Wave: data logger running" is drawn under the DATA LOGGING panel: only its red ends ("W" … "g") show left and right of the panel (`badge_toast.png` at 0.4 s, `badge_toast2.png` at 0.02 s). New bug below |
+| 2 | Pressed feedback, MF range pages V / A / Ω / F and Power Settings (`pf.py`: `DBG:DRAG` from a button to an empty spot, then a zero-travel drag on another button, then back) | **PASS for what synthetic input can show**: slide off (6V / 6000uA / 600Ω / AUTO / 60V): the screen afterwards is byte-equal to before, nothing selected (CONF?, coupling, AUTO, POW:COUP? unchanged); `DBG:TOUCH?` D, M, release. Tap: AC selects (V, A; `VOLT:COUP?` / `CURR:COUP?` AC), Low current ON (Ω), AC (Power Settings, `POW:COUP?` AC); each set back with a tap (DC / Normal) and the page byte-equal to the start. **Held screenshot: not possible from the host**: `DBG:DRAG` runs down, hold, move and release in one loop pass (gesture.rs `synth_drag`) and `DBG:TAP` injects only the Tap, so the lighter-blue pressed state is never on screen between two USB commands. It needs a real finger (the same limit as "hold repeat" in this doc) |
+| 3a | Power meter, AC+DC, 1 V DC on V-COM: wait for the DC hint, then long press E (58,179), Yes (`er_a_*`) | **PASS**: SYST:ALER? DC at 3.7 s; the confirm "Reset energy?" opens (`er_a_2confirm.png`); Yes: the time 00:02:23 -> 00:00:00, FETC:POW:ALL? time 136 -> 1 s. Note: in AC+DC the E row is at y 170..192 (parts row); a long press at y 160 (the DC layout's row) lands in the swallowed band (no confirm, not a bug) |
+| 3b | Long press E 0.5 s after entering (W tap, then POW:COUP ACDC: the W tap enters in DC) (`er_b_*`) | **PASS**: the confirm opens; SYST:ALER? DC at 9.0 s while it is up, the confirm stays (`er_b_2confirm_hint.png`, 1.3 s and 3.8 s later); Yes resets (time 3 s at the end); the hint toast "No AC: DC is more precise" shows 0.15 s after the confirm closes (`er_b_4after.png`). Under the confirm the page is not redrawn (readings "-- V / -- A", status RUN, no DC? badge until it closes) |
+| 4 | E1 experiments (below) | data for the false-hint fix; **new bug**: V-JACK? in AC A with V-COM open |
+| 5a | 38400 / 76800 disk sessions (`LOG:DUR 20`, AC V, the square) with `cp` of the 8 INFO/*.BIN from state 3 (`cp384`, `cp768`) | **PASS**: 768 003 / 1 536 004 rows, lost_before 0; late 0, overruns 0, dropped 0, max_lat 280 ns. FIRMWARE.BIN's cp ran 3.4 -> 23.8 s / 8.0 -> 29.3 s (waits for the session's end, as 35fce2a), all 8 copies byte-equal. (dmesg was not readable this time: `dmesg_new` in the JSONs is empty for that reason) |
+| 5b | `*IDN?` serial, `lsusb` iSerial, `xxd -p -u INFO/UID.BIN`, /dev/disk/by-id | **PASS**: all `<UID>` |
+| 5c | `udisksctl unmount` + udisks `Drive.Eject` (busctl), 30 s, then `usbreset.py` | **PASS**: sysfs size 0, `DBG:VDISK:EJECT?` 1,2,2 at +0 / 15 / 30 s, USBTMC answered; after the port reset: 4 160 541 blocks, auto-mounted read-only, EJECT? 0,2,2, RO? 1,1, README.TXT sha256 as before, /dev/usbtmc2 the same |
+
+### 4. V-JACK? / ctsta after function switches (E1 follow-up)
+
+`sentE.py` steps with a fixed watch each (`RES@6,DCV@1,A@8` = 6 s in RES, 1 s in DC V, 8 s in DC A); DBG:SENT?
+polled every ~1-4 ms for 2.5 s, then every 50 ms. ctsta is printed in decimal by DBG:SENT? (112 = 0x70, 80 = 0x50,
+16 = 0x10). The A jack is open throughout; the voltage goes only to V-COM. A = `CONF:CURR:DC 10`, mA = `CONF:CURR:DC
+0.06`, ACA = `CONF:CURR:AC 10`. Per-step timelines: `out/ctsta_summary.txt`; raw rows: `out/E_<tag>_raw.json`.
+
+| V-COM | sequence (reps) | CMP_SENSE ctsta in DC A / mA | alert |
+|---|---|---|---|
+| open | RES -> DC A (2), RES -> mA (1) (`e1_open_ctl`) | **E1 reproduces on d330877**: 0 until 0.47-0.67 s, 0x70 to 4.6 s, 0x50 to 4.8 s, then 0 | V-JACK 1.54-1.76 s -> 5.2-5.4 s |
+| open | RES -> DC V 1 s -> DC A (3) (`e1_open_dcv`) | **0 throughout** (8 s) | none |
+| open | RES -> AC A 2 s -> DC A (3) (`e1_open_aca`) | 0 throughout | none in DC A; **V-JACK in AC A from 1.67-1.78 s** |
+| 1 V | RES -> DC A (2), RES -> mA (1) (`e1_v1_ctl`) | 0x70 0.66 -> 5.0-5.1 s, 0x50 to 5.3 s | V-JACK 1.57-1.72 -> 5.8-5.9 s |
+| 1 V | RES -> DC V 1 s -> DC A (3) (`e1_v1_dcv`) | 0 throughout | none |
+| 1 V | RES -> AC A 2 s -> DC A (2) (`e1_v1_aca`) | 0x70 0.65 -> 1.0 s, 0x50 to 1.16 s, then 0 | none in DC A; V-JACK in AC A from 1.67 s |
+| 10 V | DC V -> DC A, DC V -> mA (`e4_v10`) | **0 throughout** (10 s) | none: the real misconnect is not seen |
+| 10 V | TEMP -> DC A | 0x70 (from TEMP) to 0.66 s, then 0 | none |
+| 10 V | AC V -> DC A | 0 | none |
+| 24 V | DC V -> DC A, DC V -> mA (`e4_v24`) | **0 throughout** (10 s) | none: the real misconnect is not seen |
+| 24 V | TEMP -> DC A, AC V -> DC A | **0x70 from the first poll to the end (10 s)**, streak +1 per window | V-JACK 1.71-1.72 s, stays |
+
+So a 1 s stop in DC V (or 2 s in AC A at open) after RES clears E1 completely: the charge left by the ohm source is
+gone (or not picked up) before the A row's first window. A real source on V-COM reads ctsta **0x70** in DC A when DC A
+is entered from TEMP or AC V (24 V), but **0** when it is entered from DC V, where 10 / 24 V had autoranged DC V to 60
+V; at 10 V even the TEMP entry gives 0 after 0.66 s. So whether the "A mode with a voltage on V" misconnect is seen at
+all depends on the function before. A guess, not checked: DC V's 60 V range leaves the V input divider (or the
+comparator's input) in a state the A row does not reset, so SENSE does not see the jack. Never 0x20 or 0x10 in DC A in
+these runs.
+
+Side observations in the same runs: in DC V at 10 / 24 V the sentinel kind turns `OFF` after 0.45 s (60 V range); in
+AC V at 24 V DC: ctsta 0x70 and a short **A-JACK** (3.06 -> 4.07 s, kind AD1PK_PB1) where 10 V gave the DC? hint at
+3.56 s (`e4_v24` step ACV@5).
+
+**New bug: V-JACK? in AC A with V-COM open.** `CONF:CURR:AC 10`, `CURR:AC 0.06` and `CONF:CURR:AC` (600 uA), entered
+from DC V, DC A or RES, nothing on any jack (calibrator disabled), also with 1 / 10 / 24 V on V-COM: kind AD1PK_SENSE,
+ctsta 0, V-JACK from 1.66-1.92 s, still on after 30 s (`e1_open_acalong`), pkmin = pkmax = -262144 (AD1 at negative
+full scale) once the row has settled, streak saturating at 255. The status bar shows the amber "V-JACK?"
+(`aca_open.png`). The ad74e93 E matrix had no AC A step, so this is the first sighting.
+
+### New bugs
+
+1. **V-JACK? in every AC A range with V-COM open** (above). The detector takes AD1's negative full scale on the AC A
+   row as a voltage on V.
+2. **The "Wave: data logger running" toast is hidden by the DATA LOGGING panel** on the MCX page (1d): the refusal works,
+   the text cannot be read.
+3. **DC A does not see a real 10 / 24 V on V-COM when entered from DC V** (ctsta 0 for 10 s), while TEMP / AC V entries
+   at 24 V see 0x70 (above). The misconnect hint depends on the previous function.
+4. Minor: `VOLT:RANG:AUTO?` in AC V and `CURR:RANG:AUTO?` in AC A answer +9.91E37 (the DC function's query outside
+   it); from `pf.py`, not investigated.
+
+### State at the end
+
+- **Device:** d330877, DMM page, DC V AUTO+ (`VOLT:RANG:AUTO?` 1, `VOLT:COUP?` DC), RATE FAST, bargraph row
+  (`end_dmm2.png`; the AC? hint toast there is the 10 Hz square, correct). LOG: AD1 / 4800 / HOST / DUR 60 / CHOP 1 / OSR
+  3 / STAT 0, LOG:CSV:INT 0. POW:COUP DC. `OUTP?` 0 throughout. `SYST:ERR?` "No error". Scope page as found (10 us/div,
+  CH1 2 V/div, offset -4.709 V, DC, AUTO sweep, trigger 2.894 V rising: `end_scope.png`). Crash count 0, marker VALID.
+- **Settings:** Settings 1-3 at the end are byte-equal to the start screenshots (`s_set1..3.png` vs `end_set1..3.png`;
+  only the live "9.4/s" rate digits differ): Dim / Shutdown Never, backlight 10 %, volume 0 %, Start page Multimeter,
+  DMM row Bargraph, USB disk "Files live" (`DBG:VDISK:RO?` 1,1). Every MF-page selection made by the tap test was set
+  back with a tap (page byte-equal).
+- **Disk:** MMEM:CAT? equals the start string exactly (3 534 848 / 13 205 504, 27 names). Six LOGS/FAST000.DLG files
+  (one per disk session: mcx384, mcx768, badge x2, cp384, cp768; the HOST runs write none) were deleted by exact name, each only after it was the one new name. The 76800 MCX run's
+  CSV download was cut by a timeout; its DLG was then fetched, decoded and deleted by name in a second step.
+- **Calibrator:** back on the 10 Hz square, enabled; registers 0x00..0x2F equal the start dump except 0x2C (a live
+  value that changes between reads). Disabling it had set 0x12 to 0x3F80, and right after the frequency set 0x16,
+  0x1A, 0x1C / 0x1D and 0x23 still differed. 0x12 was written back (0x4120); one read later 0x0C read 0x2711, and a
+  second dump a minute later matched the start everywhere but 0x2C, with nothing more written.
+  During the check it was off / 1 V / 10 V / 24 V DC; the meter's generator was never switched on.
