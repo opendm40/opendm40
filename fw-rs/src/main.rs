@@ -1971,7 +1971,9 @@ fn fast_probe_if(ad2: bool, hz: u32) {
 const FAST_DISK_SAFE_HZ: u32 = 38_400;
 
 /// LOG:DEST / LOG:DURation / LOG:DISK? (true: a reply).
-#[inline(never)] // .cold (link-native.x)
+/// Region B (not .cold): a host may send these while the AD2 stream runs
+/// (device b6909d6: LOG:DEST? / LOG:DUR? in the Wave view, late 1).
+#[inline(never)]
 fn fast_scpi(scpi: &mut scpi::Scpi, l: scpi::Log, disk: &mut bool, dur: &mut u32, host_session: bool) -> bool {
     scpi.len = 0;
     match l {
