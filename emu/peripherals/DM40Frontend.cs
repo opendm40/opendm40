@@ -398,7 +398,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     if(none) { DieFollowsCj = true; break; }
                     DieTemp = v; DieFollowsCj = false;
                     break;
-                case "noise": case "cal": case "beat": case "powmix": case "ad1mix": case "ohmexit": case "ohmexitlo": case "swtr": case "swtau": case "swhz": case "powvg": case "powz": case "op1vos": case "ad2dcg":
+                case "noise": case "cal": case "beat": case "powmix": case "ad1mix": case "ohmexit": case "ohmexitlo": case "swtr": case "swtau": case "swhz": case "ctsettle": case "ctretain": case "powvg": case "powz": case "op1vos": case "ad2dcg":
                 case "n7": case "n7g": case "n7a": case "ad1acg": case "ad3sh": case "hpftau": case "rmsfill": case "rmsbig": case "rmsbigp":
                 case "agndz": case "lpfcreep": case "creeptau": case "creepord": case "lpfn":
                     options.Add(new KeyValuePair<string, double>(key, v));
