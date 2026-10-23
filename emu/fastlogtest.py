@@ -65,6 +65,8 @@ ap.add_argument('--expect-rung', type=int, default=None, help='a session above 3
                 'trial kept it; 38400: it fell back), else either is accepted')
 ap.add_argument('--stop-in-trial', action='store_true', help='first an AD2 76800 session stopped (LOG:STATe OFF) as soon as it '
                 'runs, i.e. in the writer trial: it ends Done with no rows and no LOGS/FASTnnn left')
+ap.add_argument('--start-at', type=float, default=0.0, help='LOG:STATe ON not before this device uptime, s (DBG:PING?): e.g. '
+                '11 puts a 76800 writer trial in CYCCNT\'s upper half (10.7..21.5 s), where a stale 0 deadline reads as busy')
 ap.add_argument('--prof', action='store_true', help='DBG:PROF:RESET when the run starts, DBG:PROF? at its end (printed)')
 A = ap.parse_args()
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
@@ -215,6 +217,8 @@ def session(q, src, rate, profile):
     time.sleep(3)
     q('LOG:DEST DISK')
     q('LOG:DURation %d' % A.dur)
+    while int(q('DBG:PING?').split(',')[0]) < A.start_at * 1000:
+        time.sleep(0.2)
     up0 = int(q('DBG:PING?').split(',')[0])
     q('LOG:STATe ON')
     err = q('SYST:ERR?')

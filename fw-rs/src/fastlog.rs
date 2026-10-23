@@ -784,9 +784,11 @@ impl Job {
     }
 }
 
-/// The trial's pager (`Gate`): a page program clocks the same bytes out as
-/// a read (the SPI cost of a program, nothing written), busy for the
-/// probe's tPP afterwards.
+/// The trial's pager (`Gate`): a page program clocks the same number of
+/// bytes out as a read (`Nor::dry_page`: the SPI cost of a program, nothing
+/// written), busy for the probe's tPP afterwards (`until`: from the trial's
+/// start, `run_begin`; a stale 0 read as busy for up to 10.7 s whenever
+/// CYCCNT was in its upper half).
 struct Dry<'a> {
     nor: &'a mut dyn Nor,
     until: u32,
@@ -799,9 +801,7 @@ impl Nor for Dry<'_> {
         (cyc().wrapping_sub(self.until) as i32) < 0
     }
     fn program(&mut self, addr: u32, d: &[u8]) {
-        let mut b = [0u8; 256];
-        let n = d.len().min(256);
-        let _ = self.nor.read(addr, &mut b[..n]);
+        self.nor.dry_page(addr, d.len());
         self.until = cyc().wrapping_add(self.tpp);
     }
     fn erase(&mut self, _addr: u32, _big: bool) {}
@@ -1328,6 +1328,7 @@ mod prep {
         if j.gate == Gate::Want {
             j.gate = if h.par.rate_mhz > 40_000_000 { Gate::Trial } else { Gate::None };
             j.g_ph = 0;
+            j.dry_until = cyc();
         }
     }
 
