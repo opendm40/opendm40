@@ -85,7 +85,10 @@ SC = {
     # AC+DC V above 6 V: both phases without a sentinel (the DC V 60 V+ gap), no flapping
     'acdc-v-hi-gap': ('VOLT:ACDC', 26, [(0, 'open;vsrc:30', {'NONE'}), (10, 'isrc:0.001', {'NONE'})]),
     'acdc-a':   ('CURR:ACDC', 30, [(0, 'open', {'NONE'}), (10, 'vsrc:24', {'VJACK'}), (21, 'vsrc:none', {'NONE'})]),
-    'aca-v':    ('CURR:AC', 28, [(0, 'open;vsrc:1', {'NONE'}), (10, 'vsrc:5', {'VJACK'}), (19, 'vsrc:none', {'NONE'})]),
+    # AC A counts the AD1 swing only (sentinel.rs PKV_SWING_THR, from ~2 V rms): a DC level on
+    # SENSE cannot be told from the A rows' own offset (device f0d21eb 2a); DC on V is DC A's
+    'aca-v':    ('CURR:AC', 28, [(0, 'open;vsrc:0,ac=1,f=50', {'NONE'}), (10, 'vsrc:0,ac=5,f=50', {'VJACK'}), (19, 'vsrc:none', {'NONE'})]),
+    'aca-vdc':  ('CURR:AC', 18, [(0, 'open;vsrc:24', {'NONE'})]),
     'aca-vac':  ('CURR:AC', 20, [(0, 'open', {'NONE'}), (10, 'vsrc:0,ac=230,f=50', {'VJACK'})]),
     'aca-vi':   ('CURR:AC', 18, [(0, 'open;vsrc:24;isrc:0,ac=0.01,f=50', {'NONE'})]),
     # Frequency carries no sentinel (device f3aea2f: PB1 - PB3 stands at ~54 mV in its row, a

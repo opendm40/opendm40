@@ -51,14 +51,14 @@ F = {
     'dcv': ['CONF:VOLT:DC'], 'dcmv': ['CONF:VOLT:DC 0.6'], 'dcv60': ['CONF:VOLT:DC 60'],
     'acv': ['CONF:VOLT:AC'], 'acmv': ['CONF:VOLT:AC 0.6'], 'vacdc': ['CONF:VOLT:ACDC'], 'vauto': ['CONF:VOLT:AUTO'],
     'dca': ['CONF:CURR:DC'], 'dcma': ['CONF:CURR:DC 0.06'], 'dcua': ['CONF:CURR:DC 0.0006'],
-    'aca': ['CONF:CURR:AC'], 'acma': ['CONF:CURR:AC 0.06'], 'acua': ['CONF:CURR:AC 0.0006'],
+    'aca': ['CONF:CURR:AC'], 'acma': ['CONF:CURR:AC 0.06'], 'acua': ['CONF:CURR:AC 0.0006'], 'aca10': ['CONF:CURR:AC 10'],
     'aacdc': ['CONF:CURR:ACDC'], 'aauto': ['CONF:CURR:AUTO'],
     'res': ['CONF:RES'], 'cont': ['CONF:CONT'], 'diod': ['CONF:DIOD'], 'cap': ['CONF:CAP'],
     'freq': ['CONF:FREQ'], 'temp': ['CONF:TEMP'], 'pow': ['CONF:POW'],
     'vdcac': ['VOLT:COUP AC'], 'vacdcc': ['VOLT:COUP DC'],
 }
 WAVE_OK = {'dcv', 'acv', 'acmv', 'dcmv', 'aca', 'acma', 'dca', 'dcma'}
-CUR = {'dca', 'dcma', 'dcua', 'aca', 'acma', 'acua', 'aacdc', 'aauto'}
+CUR = {'dca', 'dcma', 'dcua', 'aca', 'acma', 'acua', 'aca10', 'aacdc', 'aauto'}
 SLOW = {'res', 'temp', 'pow', 'vacdc', 'aacdc', 'vauto', 'aauto'}
 
 # The default sequence: every function entered from several others (V <-> A
@@ -150,7 +150,27 @@ SC = {
     'real-achint': ('open;vsrc:0,ac=2,f=50', 'ac2', [], ['acv', 'dcv', 'res', 'dcv', 'temp', 'dcv'], {'dcv': ('AC', 4.0)}),
     'real-dchint': ('open;vsrc:5', 'dc5', [], ['dcv', 'acv', 'res', 'acv', 'temp', 'acv'], {'acv': ('DC', 6.0)}),
     'real-vjack': ('open;vsrc:24', 'v24', [], ['dcv', 'dca', 'res', 'dca', 'aca', 'dca'], {'dca': ('VJACK', 4.0)}),
+    # device f0d21eb 2a: AC A's AD1 V-JACK? peak on SENSE - PB5 ran to the negative rail in ~2 s
+    # whatever was on V (pb5drift replays it): a false V-JACK? in every AC A range
+    'aca-drift': ('open;pb5drift:0.6;pb5tau:2.2', 'open', [],
+                  ['dcv', 'aca', 'dcv', 'acma', 'dca', 'acua', 'res', 'aca10', 'acma', 'aacdc', 'aauto', 'dcv'], {}),
+    # device f0d21eb new bug 1: CONF:CURR:AC 10, then 0.06, the A jack empty, 1 V on V: the first
+    # 60 mA result read OL -> OVERLOAD, back to 10 A (acastep replays the first-block step)
+    'aca-ovl': ('open;vsrc:1;acastep:200000;acastepms:600', 'dc5', [],
+                ['aca10', 'acma', 'aca10', 'acma', 'dcma', 'acma', 'acua', 'acma'], {}),
+    # a real AC source on V while in AC A (24 V rms): V-JACK? from the AD1 swing
+    'real-vjack-ac': ('open;vsrc:0,ac=24,f=50', 'ac2', [], ['dcv', 'aca', 'dcv', 'acma', 'res', 'aca10', 'dca', 'acua'],
+                      {'aca': ('VJACK', 3.0), 'acma': ('VJACK', 3.0), 'aca10': ('VJACK', 3.0), 'acua': ('VJACK', 3.0)}),
+    # device f0d21eb 3 / 2b: 24 V on V-COM read in DC A only after TEMP; DC V 60 V, RES and a chip
+    # restart left it blind (vjblind replays the observation). The firmware's mitigation is the
+    # opt-in experiment DBG:SENTinel:PRECond (SETUP below); without it this scenario fails.
+    'real-vjack-blind': ('open;vsrc:24;vjblind:1', 'v24', [], ['dcv60', 'dca', 'temp', 'dca', 'res', 'dcma', 'dcv', 'dca'],
+                         {'dca': ('VJACK', 4.0), 'dcma': ('VJACK', 4.0)}),
+    'real-vjack-blind-prec': ('open;vsrc:24;vjblind:1', 'v24', [], ['dcv60', 'dca', 'temp', 'dca', 'res', 'dcma', 'dcv', 'dca'],
+                              {'dca': ('VJACK', 4.0), 'dcma': ('VJACK', 4.0)}),
 }
+# Commands sent once after the boot, before the sequence (device experiments).
+SETUP = {'real-vjack-blind-prec': ['DBG:SENT:PREC 300']}
 
 
 def fmt(ents, ts):
@@ -206,6 +226,9 @@ def run(name):
             while up() < 6.0 and p.poll() is None:  # past the boot's own settle
                 time.sleep(0.3)
             prev = None
+            for c in SETUP.get(name, []):
+                tm.write(c)
+                print('%s setup %s -> %s' % (name, c, q('SYST:ERR?')), flush=True)
             seen_n, _ = log()
             for i, st in enumerate(seq):
                 if st == 'WAVE':

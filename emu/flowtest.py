@@ -55,7 +55,7 @@ STATES = {
              'sphacal=0 ad2rate=76800 lpfper=0.1067 ad2code=28682 pkmax=20 pkmin=-24 ctb=3 ctc=147456 ctf=50 '
              'rd_vrms=0.993181 powered=1 ad1code=322 lpf=0 rms=433827027 period=0.001563 cj=25 die=25'),
     'aca': ('pa=0 shunt=uA pc7=0 role=AcA mode=5 range=1 ad1=1 ad2=1 ad3=1 lpf=1 rms=1 ctr=1 cmp=1 cmppin=0 op1=1 '
-             'op2=0 osr1=256 chop=0 sop1p=PB1 sad1fp=SENSE sad1fn=PB5 sad1rh=PB6 sad1rl=AGND sad2ip=OP1O scmpi=PB4 '
+             'op2=0 osr1=256 chop=0 sop1p=PB1 sad1fp=SENSE sad1fn=AGND sad1rh=PB6 sad1rl=AGND sad2ip=OP1O scmpi=PB4 '
              'sdio=0 sad1i=0 smode=0x01 sfuvr=7 sop2p=AGND sad2in=PB3 sad2rh=PB6 sad2rl=AGND sad3ip=OP1O sad3in=PB3 '
              'ops1=0 ops2=0 sft1=3 srefo=1 sagnd=0 vrefsel=AGNDP0 pasw=8P,5S vjack=0 vjack_ac=0 vjack_hz=50 ijack=0 '
              'ijack_ac=0 vshunt=0 svxi=1 sdo23=0 osr2=32 osr4=16384 ad1ig=3.6 ad2ig=1 ad3ig=1 pkh=1 pkhsel=1 sphacal=0'
