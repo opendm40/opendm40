@@ -2125,6 +2125,13 @@ impl App {
         if self.dmm.hy_mode() == 15 { Some(ui::T_LABELS[self.dmm.t_sensor() as usize]) } else { None }
     }
 
+    /// The AUTO coupling's provisional reading (a measured part, before its
+    /// first decision): what READ? / MEAS? answer when AUTO_WAIT_MS runs out
+    /// (main.rs). None for the placeholder and outside AUTO.
+    pub fn auto_prov(&self) -> Option<Reading> {
+        self.prov.filter(|p| p.cpl_auto && self.dmm.cpl_auto() && !p.main.v.is_nan())
+    }
+
     /// A provisional DMM reading (`Reading::prov`, switch-latency.md
     /// proposal 6): shown dimmed in place of the readout until the next
     /// settled reading; never reaches the meter (statistics, REL, limits,
