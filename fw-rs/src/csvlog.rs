@@ -1371,7 +1371,9 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
     Ok(hn + body)
 }
 
-#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
+/// Region B (not .cold): a host may list the files while the Wave view's
+/// stream ISR runs (emu/hy3131/wavetest.py, region C hooks).
+#[inline(never)] // not inlined into the hot caller
 pub fn catalog_scpi(out: &mut [u8]) -> Result<usize, GErr> {
     catalog_scpi_on(disk(), out)
 }

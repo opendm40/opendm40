@@ -1017,10 +1017,16 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 scpi::Out::Log(l) => match l {
                     scpi::Log::Csv(Some(on)) => {
                         if on {
-                            // The DMM needs its analog side (as MEAS?).
-                            app.dmm_power(&mut clk);
-                            if !app.rec_start(now) {
-                                scpi.set_err("Settings conflict");
+                            if let Some(e) = app.rec_conflict() {
+                                // The Wave view / inrush page stream: the
+                                // DMM poll is paused, no rows would come.
+                                scpi.set_err(e);
+                            } else {
+                                // The DMM needs its analog side (as MEAS?).
+                                app.dmm_power(&mut clk);
+                                if !app.rec_start(now) {
+                                    scpi.set_err("Settings conflict");
+                                }
                             }
                         } else {
                             csvlog::stop();
@@ -1331,6 +1337,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         app.wave_lost(&mut clk, "Wave: no AD2 row here");
                     }
                 }
+            }
+            if r == app::WaveReq::Stop {
+                // A view change out of the wave view held for the stop.
+                app.wave_exit_done(&mut clk);
             }
         }
         // The inrush capture (app_inrush_live.rs): the ring into the

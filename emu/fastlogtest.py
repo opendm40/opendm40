@@ -16,6 +16,8 @@ unchopped (the stream ISR: must lose nothing), 80 / 40 = OSR 2 / 3 chopped
   the ring was full: the disk did not keep up), the file over MMEM:DATA?
   decoded by tools/dlog.py: rows, sum of lost_before, bytes per second,
   pages per second. A session "keeps up" when no sample is lost.
+--region-c --host-read: no region C function runs during a session while a
+host reads the INFO/ files (FIRMWARE.BIN first) off the USB volume and polls DBG:PROF?.
 Bluetooth (--bt-port passthrough): LOG:STATe ON refused for AD2 ("Rate too
 high for Bluetooth") and with LOG:DEST DISK ("Command protected"); an AD1
 40 S/s session drains over BT LOG:DATA?.
@@ -70,7 +72,13 @@ ap.add_argument('--stop-in-trial', action='store_true', help='first an AD2 76800
 ap.add_argument('--start-at', type=float, default=0.0, help='LOG:STATe ON not before this device uptime, s (DBG:PING?): e.g. '
                 '11 puts a 76800 writer trial in CYCCNT\'s upper half (10.7..21.5 s), where a stale 0 deadline reads as busy')
 ap.add_argument('--prof', action='store_true', help='DBG:PROF:RESET when the run starts, DBG:PROF? at its end (printed)')
+ap.add_argument('--region-c', action='store_true', help='Renode hooks on every function of region C (emu/regionc.py): none may '
+                'run while the stream ISR owns the bus (hy3131::HANDED), i.e. during a session; with --host-read')
+ap.add_argument('--host-read', action='store_true', help='while each session runs: a host reading the INFO/ files '
+                '(FIRMWARE.BIN first; device 4c4b489: calbackup::FwFile::fill, region C, max_lat 4.66 us) off the USB '
+                'volume (MSC READ(10), 64 sectors each) and DBG:PROF? (prof::report) between the polls')
 A = ap.parse_args()
+RC = None
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, HERE)
@@ -105,6 +113,8 @@ def run_emu(profile):
             f.write('0 monitor sysbus.hy3131 IntfRaceAd1 true\n')
         if A.extra_script:
             f.write(open(A.extra_script).read())
+        if RC:
+            f.write(RC.lines())
     cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--mips', str(A.mips), '--app', A.app,
            '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '5000', '--name', 'fastlog-%d' % A.port,
            '--dmm', 'vsrc:0.2,ac=0.5,f=50', '--script', script]
@@ -202,6 +212,77 @@ def vol_read(q, n, tag):
     print('  volume read %s: %d bytes in %.2f s device time (%.0f KB/s), %.1f s wall' % (name.decode(), size, (t1 - t0) / 1000, kbs, time.time() - w0), flush=True)
 
 
+def vol_dir(m, dirname):
+    """{NAME.EXT: (first LBA, size)} of the files in a root directory of the
+    generated volume (contiguous files, vdisk.rs)."""
+    m.cmd(0, bytes(6))  # TEST UNIT READY
+    b = m.read(0, 0, 1, 512)
+    spc, rsvd, nfat, nroot = struct.unpack_from('<BHBH', b, 13)
+    fatsz = struct.unpack_from('<H', b, 22)[0]
+    root = rsvd + nfat * fatsz
+    data = root + nroot * 32 // 512
+    lba = lambda c: data + (c - 2) * spc
+
+    def entries(secs):
+        for s_ in secs:
+            d = m.read(0, s_, 1, 512)
+            for k in range(16):
+                e = d[k * 32:k * 32 + 32]
+                if e[0] == 0:
+                    return
+                if e[0] != 0xE5 and e[11] != 0x0F:
+                    yield e
+    for e in entries(range(root, data)):
+        if e[:11] == dirname.ljust(11).encode():
+            c = struct.unpack_from('<H', e, 26)[0]
+            out = {}
+            for f in entries(range(lba(c), lba(c) + spc)):
+                if f[11] & 0x10 == 0 and f[0] != ord('.'):
+                    name = (f[:8].decode().strip() + '.' + f[8:11].decode().strip()).rstrip('.')
+                    out[name] = (lba(struct.unpack_from('<H', f, 26)[0]), struct.unpack_from('<I', f, 28)[0])
+            return out
+    return {}
+
+
+class HostRead:
+    """A host reading the INFO/ files (FIRMWARE.BIN first) in 64-sector
+    READ(10)s, round and round, plus DBG:PROF? (`step` between the
+    LOG:DISK? polls)."""
+
+    def __init__(self, q):
+        self.q = q
+        self.m = None
+        self.files = []
+        self.k = 0
+        self.off = 0
+        self.bytes = 0
+        self.profs = 0
+        self.seen = set()
+
+    def step(self):
+        if self.m is None:
+            self.m = uc.Msc(T[0].d)
+            for _ in range(3):
+                try:
+                    d = vol_dir(self.m, 'INFO')
+                    self.files = sorted(d.items(), key=lambda x: x[0] != 'FIRMWARE.BIN')
+                    break
+                except IOError:
+                    time.sleep(0.5)
+        if self.files:
+            name, (lba, size) = self.files[self.k]
+            n = min(64, (size - self.off + 511) // 512)
+            if n > 0:
+                self.bytes += len(self.m.read(0, lba + self.off // 512, n, 512, retries=2))
+            self.off += n * 512
+            self.seen.add(name)
+            if self.off >= size:
+                self.off = 0
+                self.k = (self.k + 1) % len(self.files)
+        if 'PROF' in self.q('DBG:PROF?'):
+            self.profs += 1
+
+
 def session(q, src, rate, profile):
     q('LOG:STATe OFF')
     q('*CLS')
@@ -229,6 +310,9 @@ def session(q, src, rate, profile):
     check(err.startswith('0,'), '%s %d: LOG:STATe ON accepted (%s)' % (src, rate, err))
     t_run = None
     st = []
+    hr = HostRead(q) if A.host_read else None
+    if RC:
+        RC.reset()
     for _ in range(2000):
         st = [int(x) for x in q('LOG:DISK?').split(',')]
         if st[0] == 3 and t_run is None:
@@ -237,7 +321,19 @@ def session(q, src, rate, profile):
                 q('DBG:PROF:RESET')
         if st[0] >= 5:
             break
+        if hr and st[0] == 3:
+            hr.step()
+            continue
         time.sleep(0.5)
+    if hr:
+        check('FIRMWARE.BIN' in hr.seen and hr.bytes > 0 and hr.profs > 0,
+              '%s %d: a host read %d bytes of INFO/ (%s) and DBG:PROF? %d times during the run'
+              % (src, rate, hr.bytes, ' '.join(sorted(hr.seen)), hr.profs))
+    if RC:
+        got = RC.calls()
+        print('  region C functions called while streaming: %s' % (', '.join(sorted(got)) or 'none'), flush=True)
+        check(not got, '%s %d: no region C code while the stream ISR owns the bus%s'
+              % (src, rate, '' if not got else ' (%s)' % ', '.join(sorted(got))))
     up1 = int(q('DBG:PING?').split(',')[0])
     if A.prof:
         print(q('DBG:PROF?'), flush=True)
@@ -288,6 +384,10 @@ def session(q, src, rate, profile):
             check(abs(nominal / A.expect_rung - 1) < 0.004, '%s %s %d: the expected rung %d' % (profile, src, rate, A.expect_rung))
         check(cnt[2] == 0 and cnt[4] == 0, '%s %s %d: the disk kept up at the rung (ring overwritten %d, lost %d)'
               % (profile, src, rate, cnt[2], cnt[4]))
+    elif len(st) > 9:
+        # No page-program probe below 76800: LOG:DISK? tpp 0 / 0 = none (it
+        # used to keep the last probe's numbers, device 4c4b489).
+        check(st[8] == 0 and st[9] == 0, '%s %s %d: no probe, LOG:DISK? tpp %d / %d = none' % (profile, src, rate, st[8], st[9]))
     TABLE.append((profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1), hw, int(isr[20]) / 10))
     print('  (device uptime: LOG:STATe ON %.1f s, run %.1f s, end %.1f s)' % (up0 / 1000, (t_run or up1) / 1000, up1 / 1000))
     print('  %s %s %d: prep %.1f s, rows %d, lost %d (ring overwritten %d), %.0f B/s, %.0f pages/s, %.2f B/sample, FIFO high water %d B, ISR CPU %.1f %%'
@@ -322,6 +422,7 @@ def stop_in_trial(q, profile):
     if 0 < st[8] <= 800 and st[9] <= 1500:
         check(stopped is not None and st[0] == 5 and st[4] == 0 and (len(st) < 11 or st[10] == 0) and cat1 == cat0,
               '%s: a 76800 session stopped in its writer trial ends Done, no rows, no file left (FAST files %d -> %d)' % (profile, cat0, cat1))
+        check(st[1] == -1, '%s: LOG:DISK? names no file after the trial removed it (file %d)' % (profile, st[1]))
     else:
         # A slow chip: no trial (the session runs at 38400 at once), a stop
         # is an ordinary one: the file stays.
@@ -400,6 +501,17 @@ def bt_checks():
         s.close()
 
 
+if A.region_c:
+    sys.path.insert(0, HERE)
+    import regionc  # noqa: E402
+    # Not hooked: the Prep / Stop code (fastlog::prep and the FAT writer
+    # fatren it drives; link-native.x: before / after the logger session,
+    # never while the ISR streams). Hot during Prep: a Python hook per call
+    # stretched a 76800 Prep to many minutes.
+    RC = regionc.Hooks(A.app, os.path.join(HERE, 'out'), 'fastlog-%d-%d' % (A.port, os.getpid()),
+                       exclude=('fastlog::prep::', 'dm40_fw::fatren::'))
+    if not RC.script:
+        sys.exit('fastlogtest: --region-c needs llvm-nm and the ELF symbols')
 for profile in A.profiles.split(','):
     print('profile %s: tPP %d us, tSE %d us, tBE64 %d us' % (profile, PROF[profile][0], PROF[profile][1], PROF[profile][3]), flush=True)
     emu = run_emu(profile)
@@ -439,5 +551,7 @@ for r in TABLE:
     print('%-7s %-4s %6d %7.1f %7d %6d %8d %7.0f %7.0f %8.2f %7d %7.1f' % r)
 for v in VOL:
     print('volume %-16s %9d bytes %6.2f s device %7.0f KB/s %6.1f s wall' % v)
+if RC:
+    RC.cleanup()
 print('FAIL: %d checks' % len(FAIL) if FAIL else 'PASS')
 sys.exit(1 if FAIL else 0)

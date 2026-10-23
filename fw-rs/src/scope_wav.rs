@@ -22,8 +22,10 @@
 //! and refused over Bluetooth ("Too much data": 11.5 kB/s, and the reply
 //! has to fit the TX ring at once); WAV:POIN <n> keeps it small enough.
 //!
-//! Everything here runs per command (.cold, link-native.x) except `fill`,
-//! which runs per USB packet of a streamed reply (region B).
+//! Region B (zero-wait flash), with its parser scpi::wav_cmd: a host polls
+//! these while the Wave view's stream ISR runs, and a fetch from region C
+//! then stalls the ISR's entry (device e7ec2cc: max_lat 6.16 us at
+//! `query`). `fill` runs per USB packet of a streamed reply.
 
 use crate::app::App;
 use crate::scope;
@@ -62,7 +64,7 @@ pub fn screen() -> &'static mut [u16; scope::COLS] {
 }
 
 /// Bytes `off..off + out.len()` of the block's data part. Per USB packet
-/// of a streamed reply: region B, not this module's .cold.
+/// of a streamed reply (its own section, as when this module was .cold).
 #[cfg_attr(target_os = "none", link_section = ".text.scope_wav_fill")]
 fn fill(off: usize, out: &mut [u8]) {
     let s = src();
@@ -115,7 +117,7 @@ fn points(app: &App) -> usize {
 
 /// CHAN1:OFFSet volts -> the position (rows; Scope::v_centre: the centre
 /// row is at pos * 4 V/div / 141 volts, the offset is its negative).
-#[inline(never)] // .cold (link-native.x)
+#[inline(never)] // region B: not inlined into the hot caller
 pub fn offset_pos(v: f32, vdiv: f32) -> i32 {
     let p = -v * 141.0 / (4.0 * vdiv);
     if p.is_finite() { (p + if p < 0.0 { -0.5 } else { 0.5 }) as i32 } else { 0 }.clamp(-392, 392)
@@ -123,7 +125,7 @@ pub fn offset_pos(v: f32, vdiv: f32) -> i32 {
 
 /// The queries that need no block: WAV:POIN?, WAV:FORM?, TRIG:STAT?,
 /// ACQ:SRAT?, CHAN1:OFFS?.
-#[inline(never)] // .cold (link-native.x)
+#[inline(never)] // region B: polled while the Wave view streams
 pub fn query(app: &App, cmd: Cmd, out: &mut Scpi) {
     let sc = &app.scope;
     match cmd {
@@ -145,7 +147,7 @@ pub fn query(app: &App, cmd: Cmd, out: &mut Scpi) {
 }
 
 /// WAV:PREamble? (module doc).
-#[inline(never)] // .cold (link-native.x)
+#[inline(never)] // region B: polled while the Wave view streams
 pub fn preamble(app: &App, out: &mut Scpi) {
     let sc = &app.scope;
     let word = app.wav_word;
@@ -196,7 +198,7 @@ pub fn reads_record() -> bool {
 /// WAV:DATA? as a block (`is_block`): #<d><len><data>. Streamed when it
 /// does not fit the in-place buffer (USBTMC); refused over a transport
 /// that cannot stream (Bluetooth) beyond that.
-#[inline(never)] // .cold (link-native.x)
+#[inline(never)] // region B: not inlined into the hot caller
 pub fn data(app: &mut App, port: &mut dyn crate::bt::ScpiPort, scpi: &mut Scpi) {
     let s = src();
     s.word = app.wav_word;

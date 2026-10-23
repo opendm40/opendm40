@@ -98,7 +98,21 @@ fn items(b: Button) -> u8 {
 
 impl App {
     pub fn take_wave_req(&mut self) -> Option<WaveReq> {
+        if self.wave_exit_to.is_some() {
+            // An exit is held for the stop (`show`): nothing overrides it.
+            self.wave_req = None;
+            return Some(WaveReq::Stop);
+        }
         self.wave_req.take()
+    }
+
+    /// main.rs after a WaveReq::Stop (the stream has stopped): the view
+    /// change `show` held back (leaving the live wave view) now.
+    pub fn wave_exit_done(&mut self, clk: &mut Clock) {
+        if let Some(v) = self.wave_exit_to.take() {
+            self.show(v, clk);
+            self.wave_req = None; // wave_close's Stop: done
+        }
     }
 
     /// Poll with the ring as the source (scope_poll).
@@ -213,9 +227,17 @@ impl App {
         CLIP.store(false, core::sync::atomic::Ordering::Relaxed);
         if let Some(a) = self.dmm.ad2_scale() {
             let s = scale_of(a);
-            if s != self.scope.wave_scale_now() {
+            let now = self.scope.wave_scale_now();
+            if s != now {
                 self.scope.wave_scale(s);
-                self.redraw = self.redraw || self.view == View::Scope;
+                // A full repaint only for what it shows (V/div, the unit,
+                // the coupling): it runs with the stream on, and at 38400
+                // S/s the ring holds ~50 ms. A DC V start's self-cal moves
+                // only a / b (device 5e52761: `overwritten` +7087 at every
+                // DC V entry, the repaint after the new cal).
+                if (s.vdiv, s.amps, s.ac) != (now.vdiv, now.amps, now.ac) {
+                    self.redraw = self.redraw || self.view == View::Scope;
+                }
             }
         }
         self.scope.wave_live();

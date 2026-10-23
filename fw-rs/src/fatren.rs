@@ -157,16 +157,20 @@ pub(crate) struct Vol {
 /// entries on this disk).
 pub(crate) const DIR_MAX_CL: usize = 16;
 
+/// Region B (`.text.fat_rd`): fatdir::for_each (MMEM:CAT?) uses these.
 impl Vol {
     /// Blocks of the directory this view addresses (the root or `dcl`).
+    #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
     pub fn dblocks(&self) -> u32 {
         if self.dn == 0 { self.root_blocks } else { self.dn as u32 * self.spc }
     }
     /// Entry slots of that directory.
+    #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
     pub fn dentries(&self) -> u32 {
         if self.dn == 0 { self.root_entries } else { self.dblocks() * (BLK / 32) as u32 }
     }
     /// LBA of directory block `b` (< `dblocks()`).
+    #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
     pub fn dlba(&self, b: u32) -> u32 {
         if self.dn == 0 {
             self.root_start + b
@@ -175,24 +179,34 @@ impl Vol {
         }
     }
     /// First LBA of cluster `c`.
+    #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
     pub fn clba(&self, c: u32) -> u32 {
         self.data_start + (c - 2) * self.spc
     }
     /// The root view of the same volume.
+    #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
     pub fn root(&self) -> Vol {
         Vol { dn: 0, ..*self }
     }
 }
 
+#[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 pub(crate) fn le16(b: &[u8], o: usize) -> u32 {
     b[o] as u32 | (b[o + 1] as u32) << 8
 }
 
+#[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 pub(crate) fn le32(b: &[u8], o: usize) -> u32 {
     le16(b, o) | le16(b, o + 2) << 16
 }
 
 /// Parse and sanity-check the boot sector; None = do not touch the volume.
+///
+/// This, `le16` / `le32`, `sfn_is` and `Vol::dlba` are region B
+/// (`.text.fat_rd`, not this module's .cold): MMEM:CAT? (csvlog
+/// catalog_scpi) runs them, and a host may list the files while the Wave
+/// view's stream ISR runs (emu/hy3131/wavetest.py, region C hooks).
+#[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 pub(crate) fn parse_bpb(b: &[u8], dev_blocks: u32) -> Option<Vol> {
     let bps = le16(b, 0x0B);
     let spc = b[0x0D] as u32;
@@ -248,6 +262,7 @@ fn sfn_matches(e: &[u8]) -> bool {
     up(e[0]) == b'D' && up(e[1]) == b'M' && e[2] == b'4' && e[3] == b'0' && up(e[8]) == b'B' && up(e[9]) == b'I' && up(e[10]) == b'N'
 }
 
+#[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 pub(crate) fn sfn_is(e: &[u8], name: &[u8; 11]) -> bool {
     e[..11].iter().zip(name.iter()).all(|(&a, &b)| up(a) == b)
 }
