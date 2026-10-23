@@ -1870,3 +1870,61 @@ Without SCPI traffic the stream is as clean as on 7409b92. At 38 400 (div 16, fe
 - **Files:** every FAST013 of this session was deleted. `MMEM:CAT?` used / free 10 829 824 / 5 910 528, the same as at the start.
 - **Health:** crash count 0, HEALTHY, marker VALID. Three `DBG:RESET`s (item 5b).
 - **Calibrator:** 1 V DC, enabled.
+
+## bab5dd4: range_cmd latency fix and the 8087c7d follow-up fixes (2026-10-23 06:07 - 06:52)
+
+The owner had installed bab5dd4 (install OK, crash count 0). It carries the code of rust-fw-poc fa5f603: the range_cmd fix (previous section) and the tmcnl-fix commits up to 848047f (USBTMC '\n', AC+DC range settle, same-range set, rate order, libsigrok close). `DBG:BOOT?` NORMAL / HEALTHY, crash count 0, marker VALID at the start and the end; no reset (uptime 0:59 -> 45:09).
+- **Wiring:** the calibrator (`/dev/ttyACM1`) on V/COM: the 40 Hz square (Part A, B5 square), DC 4..7 V (B5 autorange), 1 V DC (the rest). The A jack, the MCX probe and the generator output were not wired.
+- **Files:** scripts, JSON, PNGs in the session scratchpad `rt5/` (not in git). `disk.py`, `lat.py`, `p2.py`, `p5.py` are the 4c4b489 scripts; `rng.py` the range commands; `sq5.py`, `ar6.py`, `ar6b.py`, `dc5.py`, `dc5b.py`, `dcpart.py` (B5); `dc4.py`, `dc781.py`, `tap4.py` (B4); `rate6.py` (B6); `tl.py` logs READ? and `DBG:ACDC:STAT?` after a change.
+- **Symbols:** lat_pc looked up in the ELF of the bab5dd4 build (`rt768/`, same timestamp as `dm40-fw-bab5dd4.bin`).
+
+### Summary
+
+**Part A: the range_cmd fix works.** max_lat 260-320 ns everywhere, late / overruns / slips 0, the trial kept under the 20 Hz poll. **Part B: the five fixes pass their own checks.** The retest found four AC+DC / autorange issues around them and reproduced the 0.781 V case (TODO items).
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| A1 | `disk.py AD2 76800 60`, AC V, 40 Hz square | **PASS**: gate 1, 4 329 787 rows / 56.5 s (Full: 5.9 MB free), **lost_before 0**, high water 1066, ISR 548 / 550 permille, 1.480 entries per sample, LOG:COUNt? overwritten 0. **max_lat 320 ns** (`spiflash::xfer`), late / overruns / slips **0** (4c4b489: 4.14 us at range_cmd, late 1) | `d768.json` |
+| A2 | `lat.py 76800 10 poll` x3 (327 / 327 / 335 LOG:DISK? polls) | **PASS** x3: gate **1** each (kept), 765 728-765 730 rows, high water 75-120, **max_lat 320 ns** (`spiflash::xfer`), late / overruns / slips 0 / 0 / 0. 4c4b489: one fallback (gate 2, ring 2048, 19.96 us) and 1.64 us | console |
+| A3 | `p2.py h768 76800 30` (host LOG:DATA? drain) | **PASS**: 38.3 k rows/s (4c4b489 40.5 k), overwritten 1 148 478 (the host is slower than 76.8 k, as before), host seq gaps 0, LOG:RATE? 76 572. **max_lat 280 ns** (`dm40_fw::run`), late 0, overruns 0, slips 0 (4c4b489: 5.40 us at range_cmd) | `h768.json` |
+| A4 | `p5.py`, Wave view 1 / 2 ms/div, 30 s each | **PASS**: Vp-p 9.94 V, trace right (`wave0.png`, `wave-1e-3.png`, `wave-2e-3.png`); dropped +0 in each window (111 at the switch, before the window); **max_lat 280 / 260 ns** (`run` / `lcd::set_window_cmd`), late / overruns / slips 0; cpu 561 / 155 permille (4c4b489: 7.08 / 15.08 us at range_cmd) | `p5.json` |
+| A5 | Range commands (DC V, from AUTO+) | **PASS**: `VOLT:RANG?` +6, `VOLT:RANG 60` -> `VOLT:RANG?` +60, `VOLT:RANG:AUTO?` 0, CONF? "VOLT +60,+1E-03"; `SENS:VOLT:RANG:AUTO ON` -> AUTO? 1, +6; `VOLT:RES?` +1E-05; `CURR:DC:RANG?` +9.91E37 with "Settings conflict" (documented: one range state, the current function's). All answer in < 1 ms. The first CONF? right after AUTO ON said 1E-04, then 1E-05 (probably the extra digit waiting for 8 averaged conversions) | `rng.py` |
+| B1 | ngscopeclient-dm40 `--headless 15 ngs.png /dev/usbtmc2`; `test/dm40cli usbtmc /dev/usbtmc2` | **PASS**: TRIGGERED, a flat trace at 0 mV (open input), generator fields filled (Square, 2 MHz, 50 %, 3 V, 1.5 V, GEN OFF) (`ngs.png`). dm40cli: every protocol check ok (rates, trigger, generator set / read back), 5 records of 26 624 points in 0.84 s; the 3 signal checks FAIL as expected (no loopback: 0.8577 V flat). dm40cli sets the generator to sine 1 kHz 1 Vpp 0.5 V offset; the output stayed off (`OUTP?` 0); restored to Square 2 MHz 3 V 1.5 V by SCPI | `ngs.png` |
+| B2 | Host tools over the '\n' terminator | **PASS**: `dm40scpi info`, `read -n 5`, `log -n 6` (readings CSV), `log --source ad1 -d 5` (191 samples, 0 lost), `log --source ad2 --rate 4800 -d 4` (19 196 samples, 0 lost), `get S000.BMP` (17 279 B) and `get S004.BMP` (307 266 B, 0.8 s); `dm40dbg shot` (GRAM read, 0.8 s). pyvisa 1.14.1 / pyvisa-py `USB0::4617::1::0001::0::INSTR`: `query('OUTP?')` -> `'0\n'` in 1 ms, `*IDN?`, `READ?` (248 ms), `VOLT:RANG?`. pyvisa-py detaches the usbtmc driver (host side; `reattach.py`). The install path was proven by the owner's reload.sh | console |
+| B3 | sigrok (libsigrok-dm40 install, `-d scpi-dmm:conn=usbtmc/3.71`) | **PASS**: `--show` lists V / A / ohm / ... , range Auto / 600mV .. 1000V, digits 5 / 6; `-c range=6V` x3, `60V` x2, `Auto` with `--samples 5`: rc 0, readings 999.0-999.5 mV, CONF? / AUTO? follow (Auto -> AUTO? 1). **/dev/usbtmc2 still there after every run** | console |
+| B4 | DC V on 1 V: the same range set again | **PASS**: `VOLT:RANG 6` x10 and `60` x10 from manual, x10 each from AUTO+ (`dc4.py`); 13 MF-page taps on the highlighted item (6 V manual / from AUTO+, 60 V manual; `tap4.py`, `mf6b.png`); sigrok range= the present range (B3). Lowest READ? / `CALC:AVER:MIN?` 0.99869 V on 6 V, 0.99853 V on 60 V; 0.99789 V in the real 6 -> 60 V changes (60 V range). Nothing below 0.99 V. **0.781 V case: reproduced** (see 1) | `dc4.json` |
+| B5 | AC+DC method A on 1 V, AUTO coupling, the square, autorange across 6 V | **PASS with findings**: no fresh reading off by > 0.1 % in 29 of 30 AC+DC changes (SCPI and MF, 6 <-> 60 V); the one exception and one in AUTO coupling are a DC part of 0.53 V (2). Gap to the first fresh reading 3.0-4.3 s (5.7 s once). AC part at that reading: 15-27 mV after 6 -> 60 V, falling to 0.4-2.5 mV by 9-12 s; 2-3 mV (max 7 mV) on 6 V. AUTO coupling: AUTO,DC in every sample. The square: 3 of 4 changes right, 600 -> 60 V +0.55 % (4). Autorange across 6 V: one range step per level at most, no hunting; one excursion after a step down (5). During the gap READ? returns the pre-change reading (3) | `sq5.json`, `ar6.json`, `ar6b.json`, `dc5.json`, `dc5b-ACDC.json`, `dcpart-ACDC.json` |
+| B6 | Rate chip and value tap | **PASS**: chip SLOW -> FAST -> MED -> SLOW and FAST -> MED -> SLOW -> FAST -> MED (`RATE?`); value tap 2.5 s apart MED -> SLOW -> FAST -> MED -> SLOW, SLOW -> FAST -> MED -> SLOW -> FAST. A second value tap 1 s after the first changed nothing (SLOW -> FAST -> FAST -> MED); the chip at 1 s did not skip. Cosmetic | `rate6.py`, `chip*.png` |
+
+### 1. DC V: 0.77-0.79 V after AUTO from 600 / 1000 V (the 8087c7d 0.781 V)
+
+`VOLT:RANG:AUTO ON` from a manual 600 V or 1000 V range (1 V in) steps down twice, to 60 V and then 6 V. In 5 of 35 tries one READ? gave 0.767-0.790 V (0.767, 0.790, 0.788, 0.767, 0.786): 600 V 1 of 5 (`dc4.py`) and 3 of 20 (`dc781.py`), 1000 V 1 of 10. From 60 V (one step) it happened 0 of 10 times. The low value was the second reading on the 6 V range, ~0.8 s after the command (`VOLT:RANG?` already +6). The next reading was right (0.9987-0.9990 V). The chart MIN records it. The same-range fix does not cover this, since it is a real range change. The averaging window is not the cause by itself (write_config resets it on each step). The suspects are unchecked: a conversion that straddles a register write (the OSR write in `osr()` after the first 6 V conversion), or the 250 ms autorange settle being shorter than a SLOW conversion. A raw AD1 code trace around the second step would decide.
+
+### 2. AC+DC / AUTO: DC part 0.53 V once after an MF 6 -> 60 V change
+
+In `dc5.py` 2 of 4 MF-page changes 6 -> 60 V gave a DC part of 0.5258 V (AC+DC) and 0.5284 V (AUTO coupling, shown as AUTO,DC) for one DC phase (~1 s, 2.6 s after the tap). READ? answered 0.526 / 0.528 V four times, then 0.999 V. Two repeats gave 0 of 9 (`dc5b.py` with READ? polling, `dcpart.py` with `DBG:ACDC:STAT?` at 25 Hz). SCPI changes gave 0 of 30, and MF 60 -> 6 V gave 0 of 13. The 53 % value matches the 25-51 % partial conversions of the 8087c7d same-range case. The cause is open.
+
+### 3. AC+DC: READ? during the settle answers the pre-change reading
+
+After `VOLT:ACDC:RANG 60` / `6` (and the MF page) READ? did not answer +9.91E37 during the AC part's settle. It answered the last reading from before the change, every 0.85 s (`SCPI_QUICK_MS`), 3-6 times, until the first fresh one. The tmcnl-fix TODO item expected NaN ("READ? NaN after 0.85 s, as at entry"). The scpi.rs header says "the latest one if none comes within SCPI_QUICK_MS" and keeps the settle wait for CONF / MEAS / FUNC only. On a steady input the value is right. After an AC+DC autorange step it is not: with the calibrator going 5.8 -> 6.3 V, READ? held 3.3885 V (a transient reading) for 5 s while the meter settled on 60 V (`ar6.json`). This needs a decision: drop the latest reading on a range change in AC+DC, or keep the rule and fix the TODO's claim.
+
+### 4. AC+DC: the 1 % settle step lets the 600 -> 60 V tail through (40 Hz square)
+
+On the square (AC 4.768 V, DC 4.772 V, total 6.746 V; the 6 V range is OL there) the range changes on the manual range gave (`sq5.json`):
+- **AUTO -> 60 V:** right at once.
+- **60 -> 600 V:** first fresh reading at 3.9 s, 6.733 V (the 600 V range, -0.2 %, within its resolution).
+- **6 -> 60 V:** first fresh reading at 3.5 s, right.
+- **600 -> 60 V:** the AC part came back at 1.6 s as 4.821 V, then 4.790 V, and only at 3.3 s as 4.768 V. READ? gave 6.783 / 6.762 V (**+0.55 / +0.24 %**). Each result fell by < 1 %, so `ac_settle_step` took them as flat. This is the case the TODO item warned about. Options are a stricter step (e.g. 0.2 %) or a minimum time after the change.
+
+### 5. AC+DC autorange across 6 V (DC 4..7 V)
+
+Steps 5.0 / 5.8 / 6.3 / 7.0 / 6.3 / 5.8 / 5.5 / 4.0 / 6.5 / 5.0 V, 12 s each (`ar6.py`), then again with `DBG:ACDC:STAT?` at 25 Hz (`ar6b.py`). At most one range step per level, and no hunting. Above 6.0 V the meter moved to 60 V, and below 6.0 V back to 6 V. The settled readings were 3.9971 / 4.9976 / 5.4972 / 5.7979 / 6.2954 / 6.4961 / 6.9965 V.
+
+A DC step itself gives the AC path a large AC part for about a second: up to 3.4 V for a 0.8 V step. The calibrator's own step is clean within 0.3 s (`calstep.py`, DC V on 60 V). hypot then exceeds 6 V, and on 5.8 -> 5.0 V the meter went 6 -> 60 V at 0.25 s and back to 6 V at 5.98 s. That is one excursion per step, not a hunt. During it READ? held old values (3).
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+ (`VOLT:RANG:AUTO?` 1), rate SLOW, `CONF?` "VOLT +6,+1E-05", `VOLT:COUP?` DC, method A (`end.png`), as found. LOG restored: AD1 / 4800 / HOST / `LOG:DUR` 60 / CHOP 1 / OSR 3 / `LOG:STAT` 0 (`disk.py` and `p2.py` had left LOG:SRAT 76800). Generator `OUTP?` 0 throughout; its settings were restored after dm40cli (Square 2 MHz, 3 V, 1.5 V offset, 50 %). The scope's timebase / trigger were left as ngscopeclient / dm40cli set them. The main menu showed for part of the session (MENU from the Wave view); one tap meant for the range page landed on its Multimeter tile, and the next on the DMM page's chart edge: nothing changed (REL off, settings as before). Settings not touched (volume 0, backlight 10 %, Dim / Shutdown Never). `SYST:ERR?` empty.
+- **Files:** the four FAST013 files were deleted. `MMEM:CAT?` identical to the start (10 829 824 / 5 910 528). `dm40dbg shot` reads the GRAM and writes nothing on the meter.
+- **Health:** crash count 0, HEALTHY, marker VALID, no reset.
+- **Calibrator:** 1 V DC, enabled.
