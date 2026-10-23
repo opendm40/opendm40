@@ -110,6 +110,11 @@ import usbip_client as uc  # noqa: E402
 
 FAIL = []
 T = []
+# DBG:VDISK:MIR? at the start (fw-rs vdisk.rs `mirror_boot`): served,
+# writer status, rewritten at this boot, ms. With the mirror served, the
+# slow-bank sectors read during a session like any other (from the SPI
+# disk); without it they answer NOT READY.
+MIR = [0, 0, 0, 0]
 
 
 def check(ok, what):
@@ -331,6 +336,17 @@ class HostRead:
         check(not diff, '%s: the INFO/ bytes read during the session == after it (%d reads%s)'
               % (tag, len(self.got), (', differ: ' + ' '.join(diff[:5])) if diff else ''))
         check(not self.other, '%s: no other READ error during the session (%s)' % (tag, '; '.join(self.other[:3]) or 'none'))
+        if MIR[0]:
+            # The mirror is served: no refusal, and every slow-bank sector
+            # of each file was read during the session (from the SPI disk).
+            step = 64 * 512
+            cov = {n: all((n, o) in self.got for o in range(SLOW_FILES[n] // step * step, len(whole[n]), step))
+                   for n in SLOW_FILES if n in whole}
+            check(not self.refused and cov and all(cov.values()),
+                  '%s: mirror served (DBG:VDISK:MIR? %s): no NOT READY (%s), every slow-bank sector read during the '
+                  'session: %s' % (tag, ','.join(map(str, MIR)), sorted(self.refused.items()) or 'none',
+                                   ' '.join('%s=%s' % (n, 'yes' if c else 'NO') for n, c in sorted(cov.items()))))
+            return
         want = {n for n in SLOW_FILES if n in whole}
         check(set(self.refused) == want and all(self.first.get(n) == SLOW_FILES[n] for n in want),
               '%s: NOT READY for exactly the slow-bank sectors: refused %s, first refused offset %s (want %s)'
@@ -669,6 +685,10 @@ for profile in A.profiles.split(','):
             return b if raw else b.decode(errors='replace').strip()
 
         print('*IDN?', q('*IDN?'), flush=True)
+        MIR[:] = [int(x) for x in q('DBG:VDISK:MIR?').split(',')]
+        print('DBG:VDISK:MIR? %s (served, status, rewritten, ms)' % ','.join(map(str, MIR)), flush=True)
+        if A.host_read:
+            check(MIR[0] == 1 and MIR[1] in (3, 4), 'the slow-bank mirror is served (DBG:VDISK:MIR? %s)' % ','.join(map(str, MIR)))
         if A.ui_nav:
             nav_tree(q)
         if A.stop_in_trial:

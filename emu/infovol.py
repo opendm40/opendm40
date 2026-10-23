@@ -1,8 +1,10 @@
 """The USB volume's INFO/ files and the slow flash bank (fw-rs vdisk.rs
-`read_busy`, device b6909d6): while the AD2 stream ISR runs, a READ(10) of a
-sector served from internal flash >= 0x08080000 answers CHECK CONDITION, NOT
-READY, BECOMING READY (02/04/01) and the host retries. Used by
-fastlogtest.py and hy3131/wavetest.py.
+`read_busy`, device b6909d6): while the AD2 stream ISR runs, nothing may load
+from internal flash >= 0x08080000. Those sectors are served from the mirror
+on the SPI disk (vdisk.rs `mirror_boot`, DBG:VDISK:MIR? field 1 = 1); without
+a valid mirror a READ(10) of them answers CHECK CONDITION, NOT READY,
+BECOMING READY (02/04/01) and the host retries. Used by fastlogtest.py and
+hy3131/wavetest.py.
 """
 import struct
 
@@ -57,13 +59,21 @@ def read(m, lba, n):
         raise
 
 
-def read_info(m):
+def mirror(q):
+    """DBG:VDISK:MIR? as ints: served, writer status (3 PRESENT, 4 WRITTEN),
+    rewritten at this boot, ms."""
+    return [int(x) for x in q('DBG:VDISK:MIR?').split(',')]
+
+
+def read_info(m, data=None):
     """Every INFO/ file in 64-sector READs, up to its first refusal:
     ({name: file offset of the first refused sector}, [names read whole],
-    [other errors])."""
+    [other errors]). `data` (a dict): gets {name: bytes} of each file read
+    whole."""
     refused, whole, other = {}, [], []
     for name, (lba, size) in sorted(vol_dir(m, 'INFO').items()):
         off = 0
+        buf = b''
         while off < size:
             n = min(64, (size - off + 511) // 512)
             try:
@@ -78,6 +88,9 @@ def read_info(m):
                         break
                 break
             off += n * 512
+            buf += b
         else:
             whole.append(name)
+            if data is not None:
+                data[name] = buf[:size]
     return refused, whole, other

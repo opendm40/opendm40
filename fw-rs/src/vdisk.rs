@@ -188,14 +188,53 @@ struct State {
 /// by a host during a 38400 disk session: 10 k samples lost, at 76800 289 k).
 /// The volume therefore never reads it while the stream ISR owns the bus
 /// (hy3131::streaming: fast-log session, Wave view, inrush page, the AD1
-/// stream): a READ(10) touching those sectors gets NOT READY, BECOMING READY
-/// (02/04/01, msc.rs) and the host retries until the stream ends. Linux
-/// (sd / scsi_lib: delayed retries up to (retries + 1) x timeout = 6 x 30 s
-/// after the request was made) gives the reader an I/O error only when the
-/// stream outlasts that; the emulator's data watch (emu/regionc.py,
-/// peripherals/FlashWatch.cs) checks that nothing else reads it either.
+/// stream): those sectors are served from the mirror on the SPI disk
+/// (`mirror_boot`, `MIR_HI`), byte-equal to the flash as checked at this
+/// boot. Without a valid mirror (no SPI disk, full, a write error) a
+/// READ(10) touching them gets NOT READY, BECOMING READY (02/04/01, msc.rs)
+/// and the host retries until the stream ends (Linux, sd / scsi_lib:
+/// delayed retries up to (retries + 1) x timeout = 6 x 30 s after the
+/// request was made, then an I/O error). The emulator's data watch
+/// (emu/regionc.py, peripherals/FlashWatch.cs) checks that nothing reads
+/// the slow bank while streaming.
 pub(crate) const SLOW_LO: u32 = 0x0808_0000;
 const SLOW_HI: u32 = 0x0810_0000;
+
+/// The mirror: internal flash `SLOW_LO .. MIR_HI` (the FIRMWARE.BIN tail,
+/// the FS-loader sector with BOOTDATA, the calibration record's 4 KiB:
+/// every INFO/ byte from the slow bank, asserted below), 260 KiB, raw, as
+/// root file `MIR_NAME` of the SPI disk.
+pub(crate) const MIR_HI: u32 = 0x080C_1000;
+const MIR_NAME: [u8; 11] = *b"_INFOMIRBIN";
+/// Clusters of the mirror on a disk of 4 KiB clusters (the DM40's; larger
+/// clusters need fewer).
+const MIR_NCL: usize = ((MIR_HI - SLOW_LO) / 4096) as usize;
+/// Every slow-bank byte of an INFO/ file is inside the mirror.
+const _: () = {
+    let mut i = 0;
+    while i < FILES.len() {
+        let (_, a, n) = FILES[i];
+        assert!(a + n <= SLOW_LO || a >= SLOW_HI || (a >= SLOW_LO && a + n <= MIR_HI), "an INFO/ file's slow-bank bytes are not mirrored");
+        i += 1;
+    }
+    assert!(crate::calbackup::FW_BASE + crate::calbackup::FW_MAX_BODY as u32 <= MIR_HI);
+};
+
+/// Where the mirror is (`mirror_boot`): SPI byte address of cluster 2,
+/// bytes per cluster, its clusters; the boot's writer result. SRAM, zeroed.
+struct Mir {
+    data: u32,
+    cb: u32,
+    cl: [u16; MIR_NCL],
+    status: u8,
+    written: bool,
+    ms: u32,
+}
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut MIR: Mir = Mir { data: 0, cb: 0, cl: [0; MIR_NCL], status: 0, written: false, ms: 0 };
+/// The mirror equals the flash (checked or written at this boot) and is
+/// served; cleared for good by a failed SPI read.
+static MIR_OK: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// One generated file of LOGS / SCOPE / SHOTS. `id` = flags | kind << 10 |
 /// number (kind + number = the name, `ID`; flags `T_*`: a host delete in
@@ -803,6 +842,112 @@ pub(crate) fn slow_ranges() -> [(u32, u32); NF] {
     state().map_or([(0, 0); NF], |st| st.slow)
 }
 
+// --- the slow-bank mirror ------------------------------------------------------------
+
+/// Boot (native.rs pre_main, before USB; no stream yet): make the mirror
+/// equal to the flash and note where it is. calbackup::write_file compares
+/// the file with the flash first (every boot: 65 SPI blocks read, ~0.2 s)
+/// and writes only when it differs (the first boot of a new image or after
+/// a calibration change: a new chain, copy-on-write, read back; the old
+/// chain freed), so an unchanged mirror costs no erase. Valid only with
+/// this boot's PRESENT / WRITTEN: a stale file left by a failed rewrite
+/// (no space, a write error) is never served.
+#[cfg(target_os = "none")]
+#[inline(never)]
+pub fn mirror_boot() {
+    use crate::calbackup::Status;
+    let t0 = rd_cyc();
+    // Read-only view of the internal flash (no stream runs at boot).
+    let src: &[u8] = unsafe { core::slice::from_raw_parts(SLOW_LO as *const u8, (MIR_HI - SLOW_LO) as usize) };
+    let mut disk = crate::spiflash::SpiFlash::new();
+    let r = crate::calbackup::write_file(&mut disk, MIR_NAME, &src);
+    let m = unsafe { &mut *core::ptr::addr_of_mut!(MIR) };
+    m.status = r.status as u8;
+    m.written = r.status == Status::Written;
+    let mut ok = matches!(r.status, Status::Present | Status::Written) && r.conflict == 0;
+    if ok {
+        ok = match crate::calbackup::chain_of(&mut disk, &MIR_NAME, &mut m.cl) {
+            Some((data, spc, size, n)) if size == MIR_HI - SLOW_LO && n as u32 * spc * 4096 >= size => {
+                m.data = data * 4096;
+                m.cb = spc * 4096;
+                true
+            }
+            _ => false,
+        };
+    }
+    m.ms = rd_cyc().wrapping_sub(t0) / (crate::clock::HCLK_HZ / 1000);
+    MIR_OK.store(ok, core::sync::atomic::Ordering::Release);
+}
+
+/// DBG:VDISK:MIR?: (served, calbackup::Status of the boot's write_file as
+/// a number: 0 NOTRUN 1 NOMEDIUM 2 BADBPB 3 PRESENT 4 WRITTEN 5 NOSPACE
+/// 6 ERROR, rewritten at this boot, `mirror_boot`'s ms). Inlined into the
+/// SCPI parser (region B: a host may ask during a stream).
+#[inline(always)]
+pub fn mirror_info() -> (bool, u8, bool, u32) {
+    let m = unsafe { &*core::ptr::addr_of!(MIR) };
+    (MIR_OK.load(core::sync::atomic::Ordering::Relaxed), m.status, m.written, m.ms)
+}
+
+/// Flash bytes `addr ..` (inside `SLOW_LO .. MIR_HI`) from the mirror on
+/// the SPI disk. False: no valid mirror, outside it, or the SPI read failed
+/// (which ends the mirror for this boot: NOT READY from then on).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+fn mir_read(addr: u32, buf: &mut [u8]) -> bool {
+    use core::sync::atomic::Ordering;
+    if !MIR_OK.load(Ordering::Acquire) || addr < SLOW_LO || addr as u64 + buf.len() as u64 > MIR_HI as u64 {
+        return false;
+    }
+    let m = unsafe { &*core::ptr::addr_of!(MIR) };
+    let mut o = addr - SLOW_LO;
+    let mut p = 0usize;
+    while p < buf.len() {
+        let ci = (o / m.cb) as usize;
+        if ci >= MIR_NCL {
+            return false;
+        }
+        let w = o % m.cb;
+        let n = ((m.cb - w) as usize).min(buf.len() - p);
+        let at = m.data + (m.cl[ci] as u32 - 2) * m.cb + w;
+        if !dlog::disk().read_at(at, &mut buf[p..p + n]) {
+            MIR_OK.store(false, Ordering::Release);
+            return false;
+        }
+        p += n;
+        o += n as u32;
+    }
+    true
+}
+
+/// Source bytes of an INFO/ file of `Kind::Mem`: the slow-bank part from
+/// the mirror while the stream runs, the rest from memory.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+fn mem_src(st: &State, addr: u32, buf: &mut [u8]) -> bool {
+    let end = addr as u64 + buf.len() as u64;
+    if !crate::hy3131::streaming() || end <= SLOW_LO as u64 || addr >= SLOW_HI {
+        (st.mem)(addr, buf);
+        return true;
+    }
+    let k = (SLOW_LO.saturating_sub(addr) as usize).min(buf.len());
+    (st.mem)(addr, &mut buf[..k]);
+    mir_read(addr + k as u32, &mut buf[k..])
+}
+
+/// FIRMWARE.BIN's body bytes (calbackup::BodyRead; the body is the flash
+/// from FW_BASE): those from SLOW_LO from the mirror while the stream runs.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+fn fw_body(body: &[u8], q: usize, dst: &mut [u8]) -> bool {
+    let a = crate::calbackup::FW_BASE + q as u32;
+    let n = dst.len();
+    if !crate::hy3131::streaming() || a + n as u32 <= SLOW_LO {
+        dst.copy_from_slice(&body[q..q + n]);
+        return true;
+    }
+    let k = (SLOW_LO.saturating_sub(a) as usize).min(n);
+    dst[..k].copy_from_slice(&body[q..q + k]);
+    mir_read(a + k as u32, &mut dst[k..])
+}
+
 /// The USB block device (a handle; the volume itself is `STATE` / `TAB`).
 pub struct VDisk;
 
@@ -859,7 +1004,7 @@ impl BlockDevice for VDisk {
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn read_busy(&self, lba: u32, n: u32) -> bool {
-        crate::hy3131::streaming() && state().is_some_and(|st| slow_overlap(st, lba, n))
+        crate::hy3131::streaming() && !MIR_OK.load(core::sync::atomic::Ordering::Acquire) && state().is_some_and(|st| slow_overlap(st, lba, n))
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn take_media_changed(&mut self) -> bool {
@@ -886,7 +1031,7 @@ impl VDisk {
         } else if lba < DATA_START {
             root_sector(lba - ROOT_START, buf);
         } else {
-            data_sector(st, lba - DATA_START, buf);
+            return data_sector(st, lba - DATA_START, buf);
         }
         true
     }
@@ -1062,9 +1207,10 @@ fn dir_sector(st: &State, c: u32, s: u32, b: &mut [u8]) {
     }
 }
 
-/// Data sector `s` (0 = the first sector of cluster 2).
+/// Data sector `s` (0 = the first sector of cluster 2). False: the slow-bank
+/// mirror could not be read (`mir_read`).
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-fn data_sector(st: &State, s: u32, b: &mut [u8]) {
+fn data_sector(st: &State, s: u32, b: &mut [u8]) -> bool {
     let c = s / SPC + 2;
     let within = (s % SPC) * BS as u32;
     // (file start cluster, size): the bytes of this sector.
@@ -1080,17 +1226,17 @@ fn data_sector(st: &State, s: u32, b: &mut [u8]) {
             }
         }
         _ if c < st.spi_start => {
-            let Some(f) = fixed(st).iter().find(|f| f.start != 0 && c >= f.start && c < f.start + nclus(f.size)) else { return };
-            let Some((off, len)) = span(f.start, f.size) else { return };
+            let Some(f) = fixed(st).iter().find(|f| f.start != 0 && c >= f.start && c < f.start + nclus(f.size)) else { return true };
+            let Some((off, len)) = span(f.start, f.size) else { return true };
             let d = &mut b[..len];
             match f.kind {
-                Kind::Mem => (st.mem)(f.addr + off, d),
+                Kind::Mem => return mem_src(st, f.addr + off, d),
                 Kind::Txt => {
                     describe(st, off as usize, d);
                 }
                 Kind::Fw => {
                     if let Some(fw) = st.fw.as_ref() {
-                        fw.fill(off, d);
+                        return fw.fill_with(off, d, fw_body);
                     }
                 }
             }
@@ -1104,17 +1250,18 @@ fn data_sector(st: &State, s: u32, b: &mut [u8]) {
         }
         _ => {
             if crate::vwrite::staged_read(c, s % SPC, b) {
-                return; // a host file's data (vwrite.rs)
+                return true; // a host file's data (vwrite.rs)
             }
-            let Some(e) = at_cluster(tab(), c).copied() else { return };
+            let Some(e) = at_cluster(tab(), c).copied() else { return true };
             if e.id & (T_FAT | T_SRC) != 0 {
-                return; // freed by the host / gone: zeros
+                return true; // freed by the host / gone: zeros
             }
             if let Some((off, len)) = span(e.vstart as u32, e.vsize) {
                 file_read(&e, off, &mut b[..len]);
             }
         }
     }
+    true
 }
 
 // --- README.TXT -------------------------------------------------------------------

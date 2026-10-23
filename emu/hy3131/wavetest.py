@@ -631,16 +631,25 @@ try:
               % (dirname, stem, len(got) if got else None))
         check(ints(q('DBG:ISR?'))[1] == 1, 'the stream runs during the read')
         c_check('a host reading %s/%s.CSV' % (dirname, stem))
-    # INFO/ off the USB volume while the view streams: the files served
-    # from the slow flash bank (>= 0x08080000; device b6909d6: 21.8 us ISR
-    # stall per load) answer NOT READY 02/04/01 (fw-rs vdisk.rs read_busy),
-    # the others read; the data watch (emu/regionc.py) sees no slow-bank load.
+    # INFO/ off the USB volume while the view streams: the bytes from the
+    # slow flash bank (>= 0x08080000; device b6909d6: 21.8 us ISR stall per
+    # load) come from the mirror on the SPI disk (fw-rs vdisk.rs
+    # mirror_boot), every file reads whole; without a mirror they answer NOT
+    # READY 02/04/01 (read_busy). The data watch (emu/regionc.py) sees no
+    # slow-bank load either way.
     print('host reads INFO/ off the USB volume while the wave view streams')
     import infovol as fi  # noqa: E402
+    mir = fi.mirror(q)
     c_reset()
     m = uc.Msc(t.d)
-    refused, read_ok, other = fi.read_info(m)
-    want = {n: o for n, o in fi.SLOW_FILES.items() if n in refused or n in read_ok}
+    during = {}
+    refused, read_ok, other = fi.read_info(m, during)
+    if mir[0]:
+        want = {}
+        check(set(fi.SLOW_FILES) <= set(read_ok), 'INFO/ in the wave view, mirror served (DBG:VDISK:MIR? %s): '
+              'read whole %s' % (','.join(map(str, mir)), sorted(read_ok)))
+    else:
+        want = {n: o for n, o in fi.SLOW_FILES.items() if n in refused or n in read_ok}
     check(refused == want and not other,
           'INFO/ in the wave view: NOT READY from %s (want %s), read whole %s, other errors %s'
           % (sorted((n, hex(o)) for n, o in refused.items()), sorted((n, hex(o)) for n, o in want.items()),
@@ -671,6 +680,11 @@ try:
     wait_ms(1500)
     isr = ints(q('DBG:ISR?'))
     check(isr[1] == 0 and isr[13] == f0 + 1, 'CONF stopped the stream before its bus access (forced %d -> %d)' % (f0, isr[13]))
+    after = {}
+    fi.read_info(m, after)
+    diff = sorted(n for n in during if after.get(n) != during[n])
+    check(during and not diff, 'INFO/ read in the wave view == read after it (%s; differ: %s)'
+          % (' '.join(sorted(during)), ' '.join(diff) or 'none'))
     shot('w10-lost')
     wait_ms(1500)
     v = f('READ?')

@@ -192,6 +192,12 @@ fn pre_main(dry: bool) {
         crate::fatdir::boot(&mut disk);
     }
     boot::feed();
+    // The INFO/ files' slow-bank bytes mirrored on the SPI disk (vdisk.rs
+    // `mirror_boot`: compared every boot, rewritten only when they differ),
+    // served from there while an AD2 stream runs.
+    #[cfg(feature = "vdisk")]
+    crate::vdisk::mirror_boot();
+    boot::feed();
     // The generated USB volume (vdisk.rs): built-in tables + CRC-32s of the
     // INFO sources (~0.1 s), before USB.
     #[cfg(feature = "vdisk")]

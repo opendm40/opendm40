@@ -1,7 +1,9 @@
 #!/bin/sh
 # Guest init: attach the emulated DM40 over usbip (vhci-hcd, the real
 # usb-storage / sd / vfat path), start an AD2 stream, copy the slow-bank
-# INFO/ files while it runs. Parameters from the kernel command line:
+# INFO/ files while it runs (served from the SPI mirror: the copy finishes
+# while the stream runs; without a mirror it waits for the stream's end).
+# Parameters from the kernel command line:
 #   dm40port=<usbip port on the host>  dm40dur=<LOG:DURation s>
 #   dm40direct=1: first an O_DIRECT read of CALIB.BIN (dd iflag=direct)
 export PATH=/bin LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
@@ -21,6 +23,7 @@ q() { echo "$1" > /dev/usbtmc0; case "$1" in *\?*) dd if=/dev/usbtmc0 bs=4096 co
 mount -t vfat -o ro /dev/sda /mnt || log "mount failed"
 ls -l /mnt/INFO
 q '*IDN?'
+log "DBG:VDISK:MIR? $(q 'DBG:VDISK:MIR?') (served, status, rewritten, ms)"
 # Reference copies with no stream running.
 for f in CALIB.BIN BOOTDATA.BIN LOADER.BIN FIRMWARE.BIN; do cat /mnt/INFO/$f > /tmp/ref.$f; done
 md5sum /tmp/ref.*
@@ -42,7 +45,9 @@ for f in CALIB.BIN BOOTDATA.BIN LOADER.BIN FIRMWARE.BIN; do
     cat /mnt/INFO/$f > /tmp/got.$f; rc=$?
     log "cat $f: exit $rc, LOG:DISK? $(q 'LOG:DISK?')"
 done
-log "copy end, $(awk -v a=$t0 '{print $1 - a}' /proc/uptime) s"
+s=$(q 'LOG:DISK?')
+log "copy end, $(awk -v a=$t0 '{print $1 - a}' /proc/uptime) s, LOG:DISK? $s"
+case "$s" in 3,*) echo "COPIED DURING THE STREAM";; *) echo "the stream had ended";; esac
 q 'DBG:ISR?'
 for f in CALIB.BIN BOOTDATA.BIN LOADER.BIN FIRMWARE.BIN; do cmp /tmp/ref.$f /tmp/got.$f && echo "same: $f" || echo "DIFF: $f"; done
 dmesg | grep -iE "sense|not ready|i/o error|timing out|reset|sd 0" | tail -40
