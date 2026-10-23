@@ -13,6 +13,8 @@ to the internal flash 0x08080000..0x080C1000 of that boot.
   4 the disk of 3, image B, a byte of the calibration sector's unused tail
     changed in the flash (--base copy)       -> WRITTEN (a calibration change)
   5 the disk of 4, the same flash as 4       -> PRESENT
+  6 a blank SPI disk, image A: no mirror (BADBPB); an AD2 stream to the
+    host while INFO/ is read: NOT READY from exactly the slow-bank sectors
 
   cd fw-rs && ./build.sh && DM40_TDIR=target/ks DM40_OUT=/tmp/ks.bin ./build.sh --features keep-screen
   emu/mirrortest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw \\
@@ -36,6 +38,7 @@ ap.add_argument('--app', required=True, help='fw-rs native ELF (image A)')
 ap.add_argument('--app2', required=True, help='another fw-rs native ELF (image B, e.g. --features keep-screen)')
 ap.add_argument('--port', type=int, default=None, help='USB/IP port (default: run.free_port, DM40_EMU_PORTS)')
 ap.add_argument('--run-for', type=float, default=30, help='virtual seconds per boot (the disk is saved at the end)')
+ap.add_argument('--fallback-only', action='store_true', help='only boot 6 (a blank SPI disk: no mirror, NOT READY)')
 A = ap.parse_args()
 sys.path.insert(0, HERE)
 import run  # noqa: E402
@@ -84,7 +87,7 @@ def mirror_file(disk):
     return None
 
 
-def boot(n, app, disk_in, base=None):
+def boot(n, app, disk_in, base=None, during=None):
     disk = os.path.join(OUT, '%s-disk%d.bin' % (TAG, n))
     flash = os.path.join(OUT, '%s-flash%d.bin' % (TAG, n))
     shutil.copy(disk_in, disk)
@@ -110,6 +113,8 @@ def boot(n, app, disk_in, base=None):
         t = uc.Usbtmc(d)
         t.write('DBG:VDISK:MIR?')
         mir = [int(x) for x in t.read(timeout=60).decode().strip().split(',')]
+        if during:
+            during(d, t, mir)
         d.close()
         emu.wait(timeout=3600)
     finally:
@@ -140,29 +145,63 @@ src = os.path.join(OUT, 'disk.bin')
 fresh = src if os.path.exists(src) else os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin')
 check(mirror_file(open(fresh, 'rb').read()) is None, 'the starting SPI disk has no mirror')
 try:
-    m1, d1, w1 = boot(1, A.app, fresh)
-    verify(1, 'fresh disk, image A', m1, d1, w1, 4)
-    p1 = os.path.join(OUT, '%s-disk1.bin' % TAG)
-    m2, d2, w2 = boot(2, A.app, p1)
-    verify(2, 'image A again', m2, d2, w2, 3)
-    check(d2 == d1, 'boot 2: the SPI disk is unchanged (no write without a change)')
-    m3, d3, w3 = boot(3, A.app2, os.path.join(OUT, '%s-disk2.bin' % TAG))
-    verify(3, 'image B', m3, d3, w3, 4)
-    check(w3 != w2, 'boot 3: image B differs from A inside the mirrored range')
-    # A calibration-sector change: the base dump with one byte of the unused
-    # tail of 0x080C0000..0x080C1000 changed (never printed).
-    base = os.path.join(OUT, '%s-base.bin' % TAG)
-    MADE.append(base)
-    b = bytearray(open(run.DUMP, 'rb').read())
-    off = 0x080C0FF0 - 0x08000000
-    b[off] ^= 0x5A
-    open(base, 'wb').write(b)
-    m4, d4, w4 = boot(4, A.app2, os.path.join(OUT, '%s-disk3.bin' % TAG), base)
-    verify(4, 'image B, calibration sector changed', m4, d4, w4, 4)
-    check(w4 != w3, 'boot 4: the flash window changed')
-    m5, d5, w5 = boot(5, A.app2, os.path.join(OUT, '%s-disk4.bin' % TAG), base)
-    verify(5, 'the same again', m5, d5, w5, 3)
-    check(d5 == d4, 'boot 5: the SPI disk is unchanged')
+    if not A.fallback_only:
+        m1, d1, w1 = boot(1, A.app, fresh)
+        verify(1, 'fresh disk, image A', m1, d1, w1, 4)
+        p1 = os.path.join(OUT, '%s-disk1.bin' % TAG)
+        m2, d2, w2 = boot(2, A.app, p1)
+        verify(2, 'image A again', m2, d2, w2, 3)
+        check(d2 == d1, 'boot 2: the SPI disk is unchanged (no write without a change)')
+        m3, d3, w3 = boot(3, A.app2, os.path.join(OUT, '%s-disk2.bin' % TAG))
+        verify(3, 'image B', m3, d3, w3, 4)
+        check(w3 != w2, 'boot 3: image B differs from A inside the mirrored range')
+        # A calibration-sector change: the base dump with one byte of the unused
+        # tail of 0x080C0000..0x080C1000 changed (never printed).
+        base = os.path.join(OUT, '%s-base.bin' % TAG)
+        MADE.append(base)
+        b = bytearray(open(run.DUMP, 'rb').read())
+        off = 0x080C0FF0 - 0x08000000
+        b[off] ^= 0x5A
+        open(base, 'wb').write(b)
+        m4, d4, w4 = boot(4, A.app2, os.path.join(OUT, '%s-disk3.bin' % TAG), base)
+        verify(4, 'image B, calibration sector changed', m4, d4, w4, 4)
+        check(w4 != w3, 'boot 4: the flash window changed')
+        m5, d5, w5 = boot(5, A.app2, os.path.join(OUT, '%s-disk4.bin' % TAG), base)
+        verify(5, 'the same again', m5, d5, w5, 3)
+        check(d5 == d4, 'boot 5: the SPI disk is unchanged')
+
+    # The fallback: a blank SPI disk (no FAT, so no mirror): not served, and
+    # while an AD2 stream runs (LOG:DEST HOST, nothing on the disk) the
+    # slow-bank sectors answer NOT READY 02/04/01, exactly those.
+    import infovol  # noqa: E402
+
+    def stream_read(d, t, mir):
+        def q(s):
+            t.write(s)
+            return t.read(timeout=60).decode().strip() if '?' in s else None
+        q('CONF:VOLT:AC')
+        q('LOG:DEST HOST')
+        q('LOG:SOURce AD2')
+        q('LOG:SRATe 4800')
+        q('LOG:CHOP ON')
+        time.sleep(3)
+        q('LOG:STATe ON')
+        isr = q('DBG:ISR?').split(',')
+        m = uc.Msc(d)
+        refused, whole, other = infovol.read_info(m)
+        isr2 = q('DBG:ISR?').split(',')
+        q('LOG:STATe OFF')
+        check(isr[1] == '1' and isr2[1] == '1', 'boot 6: the AD2 stream ran during the reads (DBG:ISR? active %s / %s)'
+              % (isr[1], isr2[1]))
+        check(refused == infovol.SLOW_FILES and not other,
+              'boot 6: no mirror -> NOT READY from exactly the slow-bank sectors: %s'
+              % sorted((k, hex(v)) for k, v in refused.items()))
+    blank = os.path.join(OUT, '%s-blank.bin' % TAG)
+    MADE.append(blank)
+    open(blank, 'wb').write(bytes(16 << 20))
+    m6, _, _ = boot(6, A.app, blank, during=stream_read)
+    print('boot 6 (blank SPI disk): DBG:VDISK:MIR? %s' % m6, flush=True)
+    check(m6 is not None and m6[0] == 0 and m6[1] == 2, 'boot 6: blank disk -> mirror not served, status BADBPB (%s)' % m6)
 finally:
     for p in MADE:
         if os.path.exists(p):
