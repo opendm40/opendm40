@@ -1692,9 +1692,21 @@ Firmware:
       the MCX page: toast in the panel body, nothing outside the panel box changed, the panel back after it;
       with emu/regionc.py hooks from the tap to 4 s after it, the toast's end and the panel's redraw included:
       no region C code, no slow-bank read, the session runs on); fastlogtest --ui-nav (no --region-c) PASS.
-      Open (emulator harness): `fastlogtest --ui-nav --region-c` stalls without an error in nav_tree's second
-      sequence (after "page tree ... ok", >15 min, twice, also with --no-bt), while the same 15 steps with the
-      same hooks in a plain run.py emulator take ~4 s each; not chased.
+      ~~Open (emulator harness): `fastlogtest --ui-nav --region-c` stalls without an error in nav_tree's second
+      sequence~~ **Fixed (branch uinav-stall, harness only):** not a firmware hang and not a test wait. The
+      screenshot pre-erase (`screenshot::prep_step` / `screenshot::disk`, region C, main.rs `prep_poll`) starts
+      after 2 s of disk quiet (PREP_QUIET_MS, uptime ~2.3 s: the end of nav_tree's first sequence) and, with
+      fastlogtest's W25Q128 busy timing (45 ms per 4 KiB at typ), runs for minutes of device time. The Python
+      hooks of emu/regionc.py on those two functions slowed the emulator ~50x (each 300 ms step 1-3 min wall;
+      the virtual time crawled, so `wait_dev` never looked stuck). Bisected: hooks without FlashWatch hang,
+      FlashWatch alone passes, the 277 other hooks alone pass, those 2 hooks alone hang; a plain run.py without
+      the flash timing is fast even with them (the prep ends at once). Why Renode is that slow there (only ~0.5
+      hook calls per wall second) is not chased. Fix: fastlogtest excludes both from the hooks (as fastlog::prep
+      / fatren); `prep_poll` never runs in a session, and if it did, FlashWatch would still report prep_step's
+      literal-pool loads from region C. `fastlogtest --profiles typ --sessions ad2:38400,ad2:76800 --dur 8
+      --ui-nav --region-c`: before: hung after "page tree ... ok" (killed at 10 min; coordinator 40 min);
+      after: PASS in 11 min wall (659 s, host shared with other emulators), no region C / slow-bank read in
+      either session, rows 307 201 / 614 401, lost 0.
       Device retest: as d330877 1d (MCX page, AD2 38400 disk session, DBG:TAP 177,10): the toast reads in the
       panel's body under "DATA LOGGING" for 1.5 s, then the panel's rows come back; no red left outside it.
 - [ ] Not exercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
