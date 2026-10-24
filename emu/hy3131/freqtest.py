@@ -24,12 +24,17 @@ Scenarios (each its own emulator; input: a 40 Hz 1 V square on V-COM):
                SYST:RAIL:STAT? wakes), READ? x4;
                with ctsettle:400; REPS times
   acv          AC V (3 s) -> CONF:FREQ (0xF2 -> 0xF2: the counter is not
-               re-enabled at all), READ? x4; with ctsettle:400 (passes on 74aff99
-               too: the AC V gate is clean)
-Every READ? must be 40 Hz within TOL (default 0.05 %). The first READ?'s fw
+               re-enabled at all), READ? x4; with ctsettle:400 and ct0dead:2500
+  entry-dead   entry with ct0dead:2500: the Hz row's comparator source (0xf0)
+               counts nothing for 2.5 s after the row change (device 0774e70:
+               0.000 Hz / 0.0 % at 1.37 / 1.71 / 2.06 s, 40.00 from 2.42 s)
+  nosig        nothing connected (ct0dead:2500): READ? must answer 0.000 Hz
+wake also runs with ct0dead:2500. Every READ? must be 40 Hz (nosig: 0 Hz)
+within TOL (default 0.05 %). The first READ?'s fw
 uptime from the CONF (or the return to the DMM page) is printed. Results:
 emu/out/freq-<name>.json. Exit status 0 = passed. 74aff99 fails entry, entry-settle
-and wake (first READ? 34-45 / 19.9-30.2 / 18.1-19.6 Hz).
+and wake (first READ? 34-45 / 19.9-30.2 / 18.1-19.6 Hz); 7bd7f6f (freqfirst) fails
+entry-dead, wake and acv with the device's pattern (0.0 at +1.39 / 1.72 / 2.06 s).
 """
 import argparse
 import json
@@ -56,16 +61,21 @@ import usbip_client as uc  # noqa: E402
 F0 = 40.0
 SIG = 'hz:40,amp=1'
 # name: (connection spec, kind, the function before)
+DEAD = ';ct0dead:2500'  # source 0xf0 counts nothing for 2.5 s after the row change (device 0774e70)
+# name: (connection spec, kind, the function before, expected Hz)
 SC = {
-    'entry': (SIG, 'conf', 'CONF:VOLT:DC'),
-    'entry-settle': (SIG + ';ctsettle:400', 'conf', 'CONF:VOLT:DC'),
-    'wake': (SIG + ';ctsettle:400', 'wake', None),
-    'acv': (SIG + ';ctsettle:400', 'conf', 'CONF:VOLT:AC'),
+    'entry': (SIG, 'conf', 'CONF:VOLT:DC', F0),
+    'entry-settle': (SIG + ';ctsettle:400', 'conf', 'CONF:VOLT:DC', F0),
+    'entry-dead': (SIG + DEAD, 'conf', 'CONF:VOLT:DC', F0),
+    'wake': (SIG + ';ctsettle:400' + DEAD, 'wake', None, F0),
+    'acv': (SIG + ';ctsettle:400' + DEAD, 'conf', 'CONF:VOLT:AC', F0),
+    # nothing on V-COM: READ? answers 0.000 Hz (no signal), not "--" forever
+    'nosig': ('open' + DEAD, 'conf', 'CONF:VOLT:DC', 0.0),
 }
 
 
 def run(name):
-    spec, kind, before = SC[name]
+    spec, kind, before, want = SC[name]
     if uc.port_busy(A.port):
         print('RESULT %s FAIL port %d in use (another emulator?): pass a free --port' % (name, A.port), flush=True)
         return False
@@ -138,7 +148,7 @@ def run(name):
                     w1 = int(q('SYST:RAIL:STAT?').split(',')[2])
                     if w1 <= w0 or not off.startswith('0,'):
                         bad.append('rep %d: no rail wake (Scope page rails %s, wakes %d -> %d)' % (k, off, w0, w1))
-                wrong = [x for x in vals if x[0] is None or abs(x[0] - F0) > A.tol * F0]
+                wrong = [x for x in vals if x[0] is None or abs(x[0] - want) > A.tol * max(want, 1.0)]
                 reps.append({'k': k, 'ts': ts, 'vals': vals, 'rail': q('SYST:RAIL:STAT?')})
                 print('%s %d first %s at +%.2f s; then %s%s' % (
                     name, k, vals[0][0], vals[0][1], ' '.join('%s@+%.2f' % x for x in vals[1:]),
