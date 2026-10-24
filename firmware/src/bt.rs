@@ -83,6 +83,63 @@ const BLK_LEN: usize = crate::usbtmc::RSP_MAX;
 /// Lines that arrive this soon after an AT exchange are the module's late
 /// answer ("OK", "CBN+..."), not a host command.
 const AT_QUIET_MS: u64 = 500;
+/// Module start text (`StartText`): its last line, and how long after the
+/// start it may still come (device: done 180-195 ms after power-up).
+const START_LAST: &[u8] = b"CSSW:";
+const START_MAX_MS: u64 = 1000;
+
+/// The module's own text after each start (power-up, AT+RESET). Device
+/// 7b1b6d1 (docs/device-check-2026-10-21.md "cd1ec9a"): a 0x00, then 145-195
+/// ms after the start "BLE03:VER2.1-20240615\0", "CBN:<BLE name>",
+/// "CBMAC:<mac>", "CSN:<SPP name>", "CSMAC:<mac>", "CBSW:1", "CSSW:1" (CR LF
+/// each) = 7 SCPI errors -102 -113 -113 -102 -113 -113 -113 for the next
+/// client; PC14 reads high the first ~650 ms of a start, with no host, so a
+/// PC14 gate cannot tell this text from a host's. `Bt::poll` hands it all
+/// to this, not to `proto::Rx`, up to the CSSW line, or START_MAX_MS
+/// after the start if that never comes. A host can link 0.32 s after
+/// power-up (device), after the text.
+struct StartText {
+    /// Start time (own ms); None = no start text pending.
+    at: Option<u64>,
+    /// First bytes of the current line.
+    head: [u8; 5],
+    n: usize,
+}
+
+impl StartText {
+    const fn new() -> Self {
+        StartText { at: None, head: [0; 5], n: 0 }
+    }
+
+    fn start(&mut self, now: u64) {
+        self.at = Some(now);
+        self.n = 0;
+    }
+
+    /// Take the module's bytes from `src` while its start text runs. True:
+    /// still running (nothing for the parser yet).
+    fn consume(&mut self, now: u64, src: &mut dyn FnMut() -> Option<u8>) -> bool {
+        let Some(at) = self.at else { return false };
+        while let Some(b) = src() {
+            if b == b'\r' || b == b'\n' {
+                let last = self.n == START_LAST.len() && self.head == *START_LAST;
+                self.n = 0;
+                if last {
+                    self.at = None;
+                    return false;
+                }
+            } else if b != 0 && self.n < self.head.len() {
+                self.head[self.n] = b;
+                self.n += 1;
+            }
+        }
+        if now >= at + START_MAX_MS {
+            self.at = None;
+            return false;
+        }
+        true
+    }
+}
 
 #[link_section = ".dmabuf"]
 static mut RX: [u8; RX_LEN] = [0; RX_LEN];
@@ -215,6 +272,8 @@ pub struct Bt {
     on_at: u64,
     /// cmd 07 restart pulse: PC0 high from `.0` to `.1` (own ms).
     pulse: Option<(u64, u64)>,
+    /// The module's start text, consumed before the parser sees input.
+    start: StartText,
 }
 
 const CYC_PER_MS: u32 = HCLK_HZ / 1000;
@@ -289,6 +348,7 @@ impl Bt {
             powered: false,
             on_at: 0,
             pulse: None,
+            start: StartText::new(),
         }
     }
 
@@ -310,6 +370,7 @@ impl Bt {
         unsafe { w32(GPIOC_BOP, if on { 1 << 16 } else { 1 }) };
         if on {
             self.on_at = now;
+            self.start.start(now);
         }
     }
 
@@ -425,14 +486,26 @@ impl Bt {
     pub fn poll(&mut self) -> Option<Frame> {
         self.pump();
         let now = self.ms();
-        // PC14 means nothing while the module is off.
+        // PC14 means nothing while the module is off. It is no gate for
+        // input: a host's first bytes come ~0.34 s before it rises (device
+        // 7b1b6d1), and it is high, with no host, while the module starts
+        // (`StartText`).
         let up = self.powered && unsafe { r32(GPIOC_IDR) } & (1 << 14) != 0;
-        // New connection or a drop: no partial request survives it; with no
-        // link no SCPI line is taken (bt_scpi.rs `set_link`).
-        self.rx.set_link(up);
         if up != self.link {
             self.link = up;
-            self.line_ready = false;
+            if !up {
+                // The host left: no partial request or untaken line of it
+                // is run later.
+                self.rx.reset();
+                self.line_ready = false;
+            }
+        }
+        {
+            let rd = &mut self.rd;
+            let mut src = || rx_byte(rd);
+            if self.start.consume(now, &mut src) {
+                return None;
+            }
         }
         loop {
             if self.line_ready {
@@ -610,8 +683,9 @@ impl Bt {
             let mut _b = [0u8; 64];
             self.at_answer(clk, 100, &mut _b);
             self.at(b"AT+RESET\r\n");
-            // The module restarts; whatever it prints meanwhile is not SCPI.
-            self.quiet_until = self.ms() + 2000;
+            // The module restarts: its start text again (no "OK" first).
+            let now = self.ms();
+            self.start.start(now);
         }
     }
 

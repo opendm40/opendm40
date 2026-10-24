@@ -3587,3 +3587,15 @@ Emulator (emu/):
       window, INFERRED). New with the fix: a line sent before the meter sees PC14 high is dropped without
       a reply or an error (first query 0-0.3 s after the connect: no reply in 14 of 17 connects; at
       0.5 s 6 of 6 answered), so a client that sends at once loses its first query.
+      Cause (device trace, diagnostic image 7b1b6d1): on every module start (power-up, Settings BT on,
+      AT+RESET) PC14 reads high for ~650 ms with no host, and 145-195 ms in, the module prints 7 lines
+      (`BLE03:VER2.1-20240615`, `CBN:`, `CBMAC:`, `CSN:`, `CSMAC:`, `CBSW:1`, `CSSW:1`): the 7 errors in
+      that order. The PC14 gate let them through. The AT init's own answers are not the cause: it runs
+      once per boot, and its post-RESET banner fell in the 2 s quiet window. On a connect, the host's first
+      bytes come ~0.34 s before PC14 rises. A host can link 0.32 s after power-up, after the banner. Fix:
+      bt.rs `StartText` takes all input from each start up to the `CSSW:` line (1 s fallback), before the
+      parser sees any of it; PC14 gates nothing (a drop still resets a partial line). Emulator:
+      BtModule.cs models the banner, the PC14 pulse and the 400 ms PC14 lag; emu/btchattertest.py A (boot,
+      first command at once) and B (Settings OFF / ON, link in the pulse): base FAIL (no reply; 8 queued),
+      fix PASS. Device check pending: BT off / on x3, then a first SYST:ERR:COUN? = 0; a query sent at once
+      after the connect is answered.

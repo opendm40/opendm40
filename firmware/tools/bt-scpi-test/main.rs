@@ -212,23 +212,12 @@ fn dispatcher() {
     assert_eq!(run(&mut rx, &[(b"READ?\n".to_vec(), 1)]), vec![l("READ?")], "reset");
     println!("ok  timeouts / reset");
 
-    // 7b. No link (PC14 low): the module's own text (its AT answers: an echo
-    // with '+', "OK"; device 46370df: -113 / -102 / -113 queued for the
-    // first client) gives no line and no overrun; frames still pass. A line
-    // cut by the link coming up is dropped, the next one is taken.
+    // 7b. Rx has no link gate (device cd1ec9a: a host's first line came
+    // ~0.34 s before PC14 rose and was dropped): every line is reported,
+    // the module's start text is consumed by bt.rs before Rx sees it.
     let mut rx = Rx::new();
-    rx.set_link(false);
-    let mut chatter = b"AT+SBNDM40A\r\nOK\r\nOK\r\n".to_vec();
-    chatter.extend(vec![b'X'; LINE_MAX + 1]);
-    chatter.extend(b"\n");
-    chatter.extend(frame(0x09, &[]));
-    assert_eq!(run(&mut rx, &[(chatter, 0)]), vec![f(0x09, &[])], "no link: no lines, no overrun");
-    let _ = run(&mut rx, &[(b"O".to_vec(), 1)]);
-    rx.set_link(true);
-    assert_eq!(run(&mut rx, &[(b"K\r\n*IDN?\n".to_vec(), 2)]), vec![l("*IDN?")], "link up: the cut line dropped");
-    rx.set_link(true);
-    assert_eq!(run(&mut rx, &[(b"SYST:ERR?\n".to_vec(), 3)]), vec![l("SYST:ERR?")], "same state: nothing reset");
-    println!("ok  no link: module text dropped");
+    assert_eq!(run(&mut rx, &[(b"*IDN?\n".to_vec(), 0)]), vec![l("*IDN?")], "a line with no link state");
+    println!("ok  no link gate");
 
     // 8. Long pseudo-random session: N requests of both kinds, random
     //    chunking; every request comes out once, in order.

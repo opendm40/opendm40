@@ -2,8 +2,10 @@
 // Bluetooth SPP/BLE module on UART4 as the DM40 firmware expects it
 // (stock/re/analysis/bt_meas_v2_6.h, firmware/src/bt.rs): answers AT lines
 // ("AT+SBN<name>" -> OK, "AT+CBN" -> "CBN+<name>", "AT+SLED0"/"AT+RESET" ->
-// OK, anything else "AT..." -> OK). PC14 ("connected") is driven high while a
-// host is attached to the TCP port. With a port, a TCP server passes the
+// OK, "AT+RESET" -> a restart, anything else "AT..." -> OK). PC14 ("connected")
+// is driven high while a host is attached to the TCP port, LinkDelayMs after
+// it connects (its bytes pass at once), and for BootPinMs after each module
+// start, which also prints the start-up banner (BootModel). With a port, a TCP server passes the
 // firmware's UART bytes to the host and the host's bytes to the firmware, so
 // the stock measurement protocol (AF 05 03 ...) and opendm40's SCPI can be used
 // from the host; AT lines are still answered locally.
@@ -43,6 +45,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             uart.CharReceived += OnChar;
             Name = "DM40A";
             Reset();
+            machine.ScheduleAction(TimeInterval.FromMilliseconds(WatchMs), Watch);
         }
 
         public void Reset()
@@ -60,6 +63,29 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public bool PowerModel { get; set; } = true;
         /// Host connections refused or dropped because the module was off.
         public ulong Refused { get; private set; }
+
+        /// Model the module start (power-up, AT+RESET): PC14 high for
+        /// BootPinMs and the start-up banner at BootTextMs (device 7b1b6d1
+        /// trace, device-check doc "cd1ec9a"): "\0", then at ~150 ms
+        /// "BLE03:VER2.1-20240615\0", "CBN:<name>", "CBMAC:<12 hex>",
+        /// "CSN:<classic name>", "CSMAC:<12 hex>", "CBSW:1", "CSSW:1" (CR LF
+        /// each), PC14 low again at ~650 ms. The MAC digits are placeholders.
+        public bool BootModel { get; set; } = true;
+        public int BootTextMs { get; set; } = 150;
+        public int BootPinMs { get; set; } = 650;
+        /// A host link is accepted this long after a start, not sooner
+        /// (device: a client that kept retrying linked 0.32 s after power-up,
+        /// after the banner, inside the PC14 pulse).
+        public int BootLinkMs { get; set; } = 320;
+        /// Module starts seen (diagnostics).
+        public ulong Boots { get; private set; }
+
+        /// Virtual ms from a host connection to PC14 high. The host's bytes
+        /// pass from the connection on: device cd1ec9a (device-check doc
+        /// "cd1ec9a" note 4) dropped a line sent up to 0.3 s after the
+        /// RFCOMM connect returned while firmware gated lines on PC14, and
+        /// answered one sent at 0.5 s. 400 ms models that; 0 = PC14 at once.
+        public int LinkDelayMs { get; set; } = 400;
 
         /// Wall-clock wait of a host connection for module power.
         public int PageTimeoutMs { get; set; } = 30000;
@@ -174,6 +200,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 reply = "CBN+" + Name;
             }
+            else if(s.StartsWith("AT+RESET") && BootModel)
+            {
+                // No "OK" on the device: the module restarts (banner, PC14).
+                machine.ScheduleAction(TimeInterval.FromMilliseconds(17), _ => Boot());
+                return;
+            }
             else
             {
                 reply = "OK";
@@ -181,6 +213,40 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var r = Encoding.ASCII.GetBytes(reply + "\r\n");
             // Reply after a short module delay so the firmware sees a separate answer.
             machine.ScheduleAction(TimeInterval.FromMilliseconds(5), _ => SendToUart(r));
+        }
+
+        /// Power watch (PC0 is read, not signalled): a start on every power-up.
+        private void Watch(TimeInterval _)
+        {
+            var on = Powered;
+            if(on && !wasPowered)
+            {
+                Boot();
+            }
+            else if(!on && wasPowered)
+            {
+                bootGen++;
+                linkReady = false;
+                if(client == null) connPort?.OnGPIO(connPin, false);
+            }
+            wasPowered = on;
+            machine.ScheduleAction(TimeInterval.FromMilliseconds(WatchMs), Watch);
+        }
+
+        private void Boot()
+        {
+            if(!BootModel) return;
+            Boots++;
+            var gen = ++bootGen;
+            linkReady = false;
+            machine.ScheduleAction(TimeInterval.FromMilliseconds((ulong)BootLinkMs), _ => { if(gen == bootGen) linkReady = true; });
+            connPort?.OnGPIO(connPin, true);
+            SendToUart(new byte[] { 0 });
+            var text = "\0BLE03:VER2.1-20240615\0\r\nCBN:" + Name + "\r\nCBMAC:XXXXXXXXXXXX\r\nCSN:C-1-ATK-DM40-CALI\r\n"
+                + "CSMAC:XXXXXXXXXXXX\r\nCBSW:1\r\nCSSW:1\r\n";
+            var bytes = Encoding.ASCII.GetBytes(text);
+            machine.ScheduleAction(TimeInterval.FromMilliseconds((ulong)BootTextMs), _ => { if(gen == bootGen && Powered) SendToUart(bytes); });
+            machine.ScheduleAction(TimeInterval.FromMilliseconds((ulong)BootPinMs), _ => { if(gen == bootGen && client == null) connPort?.OnGPIO(connPin, false); });
         }
 
         /// The module lost power: the link drops (PC14 low).
@@ -215,7 +281,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 TcpClient c;
                 try { c = listener.AcceptTcpClient(); } catch(Exception) { return; }
                 var waited = 0;
-                while(!Powered && waited < PageTimeoutMs)
+                while(!(Powered && (linkReady || !BootModel)) && waited < PageTimeoutMs)
                 {
                     Thread.Sleep(10);
                     waited += 10;
@@ -229,7 +295,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 }
                 this.Log(LogLevel.Info, "BT host connected");
                 client = c;
-                connPort?.OnGPIO(connPin, true);
+                // The host's bytes pass at once; PC14 rises LinkDelayMs
+                // (virtual) later, as on the device.
+                var gen = ++linkGen;
+                if(LinkDelayMs <= 0)
+                {
+                    connPort?.OnGPIO(connPin, true);
+                }
+                else
+                {
+                    machine.ScheduleAction(TimeInterval.FromMilliseconds((ulong)LinkDelayMs), _ => { if(gen == linkGen && client == c) connPort?.OnGPIO(connPin, true); });
+                }
                 var buf = new byte[256];
                 try
                 {
@@ -250,6 +326,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 }
                 catch(Exception) { }
                 client = null;
+                linkGen++;
                 connPort?.OnGPIO(connPin, false);
                 this.Log(LogLevel.Info, "BT host disconnected");
             }
@@ -264,6 +341,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private readonly List<byte> txLine = new List<byte>();
         private bool inAt;
         private int idleGen;
+        private volatile int linkGen;
+        private int bootGen;
+        private volatile bool linkReady;
+        private bool wasPowered;
+        private const int WatchMs = 5;
         private TcpListener listener;
         private volatile TcpClient client;
     }
