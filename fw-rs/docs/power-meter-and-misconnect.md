@@ -1920,8 +1920,9 @@ instead of burning the resistor. This replaces the "never switch the
 MOSFETs in V modes" rule of 4.3 / 4.6: that rule assumed the current could
 not be quantified there; the probe below does it.
 
-**What it costs the resistor** (owner: a ~2512 package, assume 1 W, derate
-to 0.5 W): I^2 x 47.5 ohm. 5 V across A-COM = 104 mA = 0.52 W, 12 V = 250 mA
+**What it costs the resistor** (a MELF 0207, 0.4..1 W depending on the
+series, inferred from the photo in [hw/README.md](../../hw/README.md#dmm-front-end-hy3131);
+assume 1 W, derate to 0.5 W): I^2 x 47.5 ohm. 5 V across A-COM = 104 mA = 0.52 W, 12 V = 250 mA
 = 3 W, 24 V = 0.5 A = 12 W.
 
 **The probe** (`sentinel::probe_row`, `probe_amps`). PB1 (the resistor's
