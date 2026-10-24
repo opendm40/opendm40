@@ -107,6 +107,26 @@ SC = {
                       acts={20.5: ['SYST:ALER:ALARm OFF', 'CONF:VOLT:DC'], 31.5: ['SYST:BEEP:VOL 40', 'SYST:ALER:ALARm VOL']},
                       checks=[('quiet', 6, 33), ('starts', 33, 34.5, VOL40), ('loud', 33, 40, VOL40)],
                       seen=[('VJACK', '0,0,0,0'), ('AJACK', '0,0,1,2'), ('AJACK', '1,0,1,1')]),
+    # A-JACK where V-COM can fake it (doc 4.10 / 4.11; device 612c45c: the RES 5 V false A-JACK
+    # sounded the loud alarm): RES with 5 V on V-COM and PB1 picking it up (Pb1VjackMv 10, the
+    # device's ohm-row pickup), then the same row's evidence from a real 2 mA in A with V-COM
+    # open: the sensors read the same in both, so both are badge only (sentinel `soft`), no
+    # alarm. CONF:VOLT:DC at ~24 (virtual) with the current still in A: DC V's comparator (V-COM free) is
+    # evidence a driven V-COM cannot give -> loud; off at 30 -> stops.
+    'ajack-res': dict(func='RES', run_for=34, setup=['SYST:BEEP:VOL 0'],
+                      script=[(0, 'monitor sysbus.hy3131 Pb1VjackMv 10'), (0, 'dmm open;r:4700'), (8, 'dmm vsrc:5'),
+                              (14, 'dmm open;isrc:0.002'), (30, 'dmm isrc:none')],
+                      acts={21.0: ['CONF:VOLT:DC']},  # fw uptime (~3 s behind the script's virtual time)
+                      checks=[('quiet', 6, 24), ('starts', 24, 25.6, LOUD), ('loud', 24.5, 29.5, LOUD), ('stops', 30, 31.8),
+                              ('quiet', 31.8, 34)],
+                      seen=[('AJACK', '0,0,0,0'), ('AJACK', '1,0,1,0')],
+                      seen_func=[('AJACK', '0,0,0,0', '"RES"')]),
+    # Continuity (the AD2 peak on PB1), a real 2 mA in A: badge only, no alarm (f0d21eb item 4:
+    # 5 V on V-COM gives the same A-JACK there).
+    'ajack-cont': dict(func='CONT', run_for=22, setup=['SYST:BEEP:VOL 0'],
+                       script=[(0, 'dmm open;r:10'), (10, 'dmm open;isrc:0.002')],
+                       checks=[('quiet', 6, 22)],
+                       seen_func=[('AJACK', '0,0,0,0', '"CONT"')]),
     # Above the 10 A rating in DC A: 12 A (OL on the 10 A range) for 1 s -> loud; 5 A -> stops.
     'i10': dict(func='CURR:DC', run_for=30, setup=['SYST:BEEP:VOL 0'],
                 script=[(0, 'dmm open'), (10, 'dmm isrc:5'), (16, 'dmm isrc:12'), (24, 'dmm isrc:5')],
