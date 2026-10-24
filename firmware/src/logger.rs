@@ -84,6 +84,38 @@
 //! counted (`bad`); it shows up as a gap. Records: the same 12-byte wire
 //! format; `raw` = signed AD2 code (+-262143 = +-1.25 V / IG at the AD2 input,
 //! IG = 1.0 in every stock row; scaling on the host from LOG:PREamble?).
+//!
+//! Compact LOG:DATA? (LOG:FORMat PACKed | DLG; ROWS, the 12-byte records,
+//! stays the default). The reply is the same `#4nnnn` block; an empty ring
+//! is `#40000` in every format. Every reply decodes on its own; all fields
+//! little-endian:
+//!   reply header, 20 B: 'L' 'P' (PACKed) | 'L' 'D' (DLG), u8 version (1),
+//!     u8 source (0 AD1, 1 AD2), u32 rate (mHz: the stream ISR's rate, else
+//!     the nominal), f32 a, f32 b (LOG:SCALe?: value = a + b * raw; 0, 0 for
+//!     AD1), u32 records left in the ring after this reply;
+//!   block header, 16 B: u32 seq of the first sample, u32 its stamp t0 (us,
+//!     the wrapping device clock), u16 n, u8 width (3 | 4: PACKed samples;
+//!     0: DLG chunks follow), u8 flags (1: the first block of the session,
+//!     2: conversions were lost before it), u32 lost_before (conversions
+//!     between the last sample of the previous reply and this one:
+//!     round(dt * rate) - 1, 0 at the session's start).
+//! PACKed: blocks until the reply is full, each with n samples of `width`
+//! bytes (signed, two's complement; 3 for every AD1 / AD2 code, 4 for a
+//! value outside i24). Sample i of a block is at t0 + i / rate (rounded to
+//! us). A sample more than half a period off that grid starts a new block:
+//! after a gap (a stall, a late ISR entry, a torn read, the full ring;
+//! lost_before > 0, flag 2) or when the stamps drift from the nominal rate
+//! by half a period (AD1's real period differs from the nominal by up to
+//! ~5 %: a block every ~10 samples there; lost_before 0). The seqs of
+//! consecutive blocks continue: a gap is never inside a block.
+//! DLG: one block header (n = the rows of the reply, width 0), then
+//! kind-3 chunks of the disk fast stream (docs/compact-log-format.md "Fast
+//! stream (kind 3)", coded by fastenc.rs `FastEnc` into a 4 KiB FIFO of the
+//! reply buffer, so a reply carries at most ~4 KiB of chunks): chunk row0 =
+//! the seq of its first row - 1, every stamp and value exact, the first
+//! row's lost_before in the block header, the later rows' from their dt.
+//! Hosts: tools/dm40scpi.py `log_reply` (the DLG chunks: tools/dlog.py
+//! `fast_chunk`).
 
 use crate::fastenc::FastEnc;
 use crate::hy3131 as hy;
