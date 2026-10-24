@@ -31,7 +31,7 @@ on the first byte of each request:
 - `0xAF` (or any non-ASCII byte) inside a text line drops that line; `0xAF`
   then starts a frame.
 - A partial line is dropped after 2 s without a byte, a partial frame after
-  0.5 s, and both are dropped when the link goes up or down (PC14).
+  0.5 s, and both are dropped when the host leaves (PC14 falls).
 - A line over 256 bytes is discarded; `SYST:ERR?` then reports "Input buffer
   overrun".
 - Replies: the text plus `\n`. A definite-length block (`WAV:DATA?`,
@@ -43,19 +43,23 @@ on the first byte of each request:
   only happens on USBTMC).
 - USBTMC and Bluetooth have separate SCPI sessions (error queue, pending
   `READ?`), so one host does not see or consume the other's errors.
-- SCPI lines are taken only while a host is linked (PC14 high). With no link
-  the module's own text (AT answers and echoes, start-up output) is dropped:
-  no command runs and no error is queued. Device 46370df: the first client
-  found -113 / -102 / -113 queued; that they came from such text (an `OK`,
-  an echoed `AT+...`) is INFERRED. Emulator:
+- The module's start-up text is not parsed. On every module start (power-up,
+  Settings Bluetooth on, `AT+RESET`) it prints a 0x00, then, 145-195 ms
+  later, 7 lines: `BLE03:VER2.1-20240615`, `CBN:<BLE name>`, `CBMAC:<mac>`,
+  `CSN:<SPP name>`, `CSMAC:<mac>`, `CBSW:1`, `CSSW:1` (device trace, image
+  7b1b6d1, [device check "cd1ec9a"](device-check-2026-10-21.md)). Parsed,
+  they gave the next client -102 / -113 / -113 / -102 / -113 / -113 / -113.
+  `bt.rs` `StartText` takes all input from the start up to the `CSSW:` line
+  (or 1 s, if it never comes), before the parser sees any of it. Bytes
+  after that line are a host's: a client can link 0.32 s after power-up.
+- PC14 does not gate input. It reads high for ~650 ms of each module start
+  with no host, and on a connect a host's first bytes arrive ~0.34 s before
+  it rises, so a line is taken whatever PC14 says. Emulator:
   [`emu/btchattertest.py`](../../emu/btchattertest.py).
-  Stock frames are served either way. A line in progress when the link
-  comes up is dropped up to its terminator.
-- With a link, the BT module's own answers (`OK`, `CBN+...`) arriving up to
-  0.5 s after an AT exchange, or 2 s after `AT+RESET`, are dropped rather
-  than parsed. Anything else the module prints on its own while linked (a
-  connect message, if this module sends one) goes to the parser and only
-  adds an "Undefined header" to `SYST:ERR?`; it gets no reply.
+- The BT module's own answers (`OK`, `CBN+...`) arriving up to 0.5 s after
+  an AT exchange are dropped rather than parsed. Anything else the module
+  prints on its own goes to the parser and only adds an error to
+  `SYST:ERR?`; it gets no reply.
 - SCPI over Bluetooth works only while Bluetooth is enabled in the meter's
   settings (`app.bt_on`), like the phone-app protocol.
 

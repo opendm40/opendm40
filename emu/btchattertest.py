@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""opendm40: the Bluetooth module's own text is not SCPI (device 46370df,
-device-check doc "46370df" new bug 5: the first BT client of the session
-found -113, -102, -113 in its error queue).
+"""opendm40: the Bluetooth module's start-up text is not SCPI, and a host's
+first command is answered (device-check doc "cd1ec9a" item 6 and note 4).
 
   emu/btchattertest.py --app firmware/opendm40.bin --port 64530
 
-With no host linked (PC14 low) the model's BT module sends what a module
-prints on its own: AT answers and an echo ("OK", "AT+SBNDM40A" = -102 with
-its '+', "OK" = -113, the error sequence of the device), and a line over
-256 bytes (an overrun). Then a host links: SYST:ERR:COUN? must be 0 and
-SYST:ERR? "No error"; a command it sends then works (*IDN?), and a bad one
-of its own is queued (-113), so the queue itself is live.
+The BT model (emu/peripherals/BtModule.cs) does what the device's module
+does: on every start (power-up, AT+RESET) PC14 is high for 650 ms with no
+host, and at 150 ms it prints its 7-line banner (BLE03:VER.., CBN:.., CBMAC:..,
+CSN:.., CSMAC:.., CBSW:1, CSSW:1 = -102 -113 -113 -102 -113 -113 -113 for
+the next client, device cd1ec9a); a host links no sooner than 320 ms after
+a start, and its bytes pass 400 ms before PC14 rises.
+
+  A. boot (start at power-up, again after the AT init's AT+RESET): a host
+     links at 10 s and sends SYST:ERR:COUN? at once: the reply must come
+     (device cd1ec9a: dropped while PC14 was low) and be 0; *IDN? works and
+     a bad command of its own is queued (-113), so the queue is live.
+  B. Settings: Bluetooth OFF, a host waits, ON: it links inside the start's
+     PC14 pulse, right after the banner; its SYST:ERR:COUN? sent at once must
+     be answered with 0.
 Exit status 0 = passed.
 """
 import argparse
@@ -32,61 +39,77 @@ if uc.port_busy(A.port):
     sys.exit('btchattertest: port %d is in use: pass a free --port' % A.port)
 
 mk = tempfile.mkdtemp(prefix='btchat-')
-CHAT = os.environ.get('BTCHAT', '1') == '1'
 TAG = 'btchat-%d-%d' % (A.port, os.getpid())
-text = b'OK\r\nAT+SBNDM40A\r\nOK\r\n' + b'X' * 300 + b'\r\n'
-script = [] if not CHAT else ['9.0 monitor sysbus.btmodule SendHex "%s"' % text.hex(),
-          ]
-script.append('10.0 shot %s/A.png' % mk)
+B_OFF, B_ON = 40.0, 44.0
+script = ['10.0 shot %s/A.png' % mk,
+          # B: MENU -> Settings, the Bluetooth row OFF, then ON.
+          '%.1f key menu' % (B_OFF - 2), '%.1f tap 339 219' % (B_OFF - 1), '%.1f tap 240 178' % B_OFF,
+          '%.1f shot %s/B.png' % (B_OFF + 0.5, mk), '%.1f tap 240 178' % B_ON]
 sp = os.path.join(mk, 'script.txt')
 open(sp, 'w').write('\n'.join(script) + '\n')
-cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--app', A.app, '--script', sp, '--run-for', '60',
+cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--app', A.app, '--script', sp, '--run-for', '120',
        '--bt-port', str(A.port), '--name', TAG, '--log', os.path.join(mk, 'renode.log')]
 p = subprocess.Popen(cmd, stdout=open(os.path.join(mk, 'run.out'), 'w'), stderr=subprocess.STDOUT,
                      start_new_session=True)
 bad = []
-try:
-    while not os.path.exists(os.path.join(mk, 'A.png')):
-        if p.poll() is not None:
-            sys.exit('btchattertest: emulator ended before the marker (%s)' % os.path.join(mk, 'run.out'))
-        time.sleep(0.2)
-    s = None
-    for _ in range(100):
-        try:
-            s = socket.create_connection(('127.0.0.1', A.port), timeout=300)
-            break
-        except OSError:
-            time.sleep(0.2)
-    if s is None:
-        sys.exit('btchattertest: no BT link on port %d' % A.port)
-    buf = b''
 
-    def q(c):
-        global buf
-        s.sendall(c.encode() + b'\n')
-        while b'\n' not in buf:
-            d = s.recv(4096)
+
+def check(ok, what):
+    print('  %s %s' % ('ok  ' if ok else 'FAIL', what), flush=True)
+    if not ok:
+        bad.append(what)
+
+
+def marker(name):
+    while not os.path.exists(os.path.join(mk, name)):
+        if p.poll() is not None:
+            sys.exit('btchattertest: emulator ended before %s (%s)' % (name, os.path.join(mk, 'run.out')))
+        time.sleep(0.2)
+
+
+class Host:
+    def __init__(self):
+        self.s = socket.create_connection(('127.0.0.1', A.port), timeout=30)
+        self.buf = b''
+
+    def q(self, c):
+        """Send at once; the reply line, None if none within 30 s (wall)."""
+        self.s.sendall(c.encode() + b'\n')
+        while b'\n' not in self.buf:
+            try:
+                d = self.s.recv(4096)
+            except socket.timeout:
+                return None
             if not d:
                 return None
-            buf += d
-        line, _, buf = buf.partition(b'\n')
+            self.buf += d
+        line, _, self.buf = self.buf.partition(b'\n')
         return line.decode(errors='replace').strip()
 
-    def check(ok, what):
-        print('  %s %s' % ('ok  ' if ok else 'FAIL', what), flush=True)
-        if not ok:
-            bad.append(what)
 
-    n = q('SYST:ERR:COUN?')
-    check(n is not None and n.lstrip('+') == '0', 'SYST:ERR:COUN? after the module text with no link: %s (want 0)' % n)
-    e = q('SYST:ERR?')
-    check(e is not None and e.startswith('0'), 'SYST:ERR? %s (want 0,"No error")' % e)
-    i = q('*IDN?')
-    check(i is not None and 'opendm40' in i, '*IDN? %s' % i)
-    s.sendall(b'NOSUCH:CMD\n')
-    e = q('SYST:ERR?')
-    check(e is not None and e.startswith('-113'), 'the host\'s own bad command: SYST:ERR? %s (want -113)' % e)
-    s.close()
+try:
+    marker('A.png')
+    h = Host()
+    n = h.q('SYST:ERR:COUN?')
+    check(n is not None, 'A: the first command, sent at once, answered (%s)' % n)
+    check(n is not None and n.lstrip('+') == '0', 'A: SYST:ERR:COUN? after the boot start text: %s (want 0)' % n)
+    if n is not None and n.lstrip('+') not in ('', '0'):
+        errs = [h.q('SYST:ERR?') for _ in range(int(n.lstrip('+')))]
+        print('       queued: %s' % errs)
+    i = h.q('*IDN?')
+    check(i is not None and 'opendm40' in i, 'A: *IDN? %s' % i)
+    h.s.sendall(b'NOSUCH:CMD\n')
+    e = h.q('SYST:ERR?')
+    check(e is not None and e.startswith('-113'), 'A: the host\'s own bad command: SYST:ERR? %s (want -113)' % e)
+    h.s.close()
+    marker('B.png')
+    h = Host()   # linked by the model once the module is on again
+    n = h.q('SYST:ERR:COUN?')
+    check(n is not None, 'B: the first command after BT OFF / ON answered (%s)' % n)
+    check(n is not None and n.lstrip('+') == '0', 'B: SYST:ERR:COUN? after the start text: %s (want 0)' % n)
+    if n is not None and n.lstrip('+') not in ('', '0'):
+        print('       queued: %s' % [h.q('SYST:ERR?') for _ in range(int(n.lstrip('+')))])
+    h.s.close()
 finally:
     p.terminate()
     try:

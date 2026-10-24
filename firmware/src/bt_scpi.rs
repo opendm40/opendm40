@@ -78,11 +78,6 @@ pub struct Rx {
     rp_n: usize,
     /// Time of the last byte taken in Frame / Line / Skip.
     last_ms: u64,
-    /// A host is connected (PC14, `set_link`). Without one no SCPI line or
-    /// overrun is reported: the module's own text (AT answers, its start-up
-    /// output) is not a host's command (device 46370df: the first BT client
-    /// found -113 / -102 / -113 in its error queue).
-    link: bool,
 }
 
 fn line_start(b: u8) -> bool {
@@ -91,22 +86,7 @@ fn line_start(b: u8) -> bool {
 
 impl Rx {
     pub const fn new() -> Self {
-        Rx { st: St::Idle, fb: [0; FB], fnb: 0, lb: [0; LINE_MAX], ln: 0, rp: [0; 8], rp_i: 0, rp_n: 0, last_ms: 0, link: true }
-    }
-
-    /// The link state (bt.rs: PC14, every poll); a change drops any partial
-    /// frame / line, and the rest of a line in progress up to its terminator.
-    /// `new` starts with the link up.
-    #[inline(never)]
-    pub fn set_link(&mut self, up: bool) {
-        if up != self.link {
-            self.link = up;
-            let mid = matches!(self.st, St::Line | St::Skip);
-            self.reset();
-            if mid {
-                self.st = St::Skip;
-            }
-        }
+        Rx { st: St::Idle, fb: [0; FB], fnb: 0, lb: [0; LINE_MAX], ln: 0, rp: [0; 8], rp_i: 0, rp_n: 0, last_ms: 0 }
     }
 
     /// Forget any partial frame / line (e.g. on a new BT connection).
@@ -144,9 +124,8 @@ impl Rx {
             match self.step(b) {
                 Step::None => {}
                 Step::Frame(f) => return Some(Event::Frame(f)),
-                Step::Line(n) if self.link => return Some(Event::Line(&self.lb[..n])),
-                Step::Overrun if self.link => return Some(Event::Overrun),
-                Step::Line(_) | Step::Overrun => {}
+                Step::Line(n) => return Some(Event::Line(&self.lb[..n])),
+                Step::Overrun => return Some(Event::Overrun),
             }
         }
     }
