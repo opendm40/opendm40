@@ -868,6 +868,11 @@ pub struct Dmm {
     prev_ad1: i32,
     r22: u8,
     ohm_settled: bool,
+    /// Ohm vet (OHM_VET_*): the last conversion of this row (kohm, raw;
+    /// INFINITY = OL, NaN = none since the row write) and whether two in a
+    /// row agreed on it (its conversions are final from then on).
+    ohm_prev: f32,
+    ohm_ok: bool,
     f_ac: f32,
     f_lpf: f32,
     f_dc: f32,
@@ -1202,6 +1207,18 @@ const ENTRY_MS: u64 = 300;
 const RANGE_MS: u64 = 250;
 const OHM_SINGLE_MS: u64 = 2500;
 
+/// Ohm vet (device ab7184c new bug 1): after every ohm row write (the
+/// entry, each autorange step, a manual range) a conversion is final only
+/// when the one before it on the same row agrees with it within
+/// OHM_VET_REL plus OHM_VET_CNT counts of the range (60 000 counts; two OL
+/// agree); until then it is provisional (grey, `Reading::prov`: no SCPI,
+/// BT, statistics or limits). The device showed 8.8 / 7.1 / 12 Mohm on the
+/// high ranges and 219 / 126 / 57 / 30 ohm on the right one, in amber and
+/// to FETCh? / READ?, before 390 / 100 ohm (input / source settling after
+/// a range step). Once a row is vetted its conversions stay final.
+const OHM_VET_REL: f32 = 0.001;
+const OHM_VET_CNT: f32 = 8.0;
+
 // AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-fwrs.md
 // section 11). The AC+DC alternation measures both parts; AUTO shows one of
 // them: the AC part's RMS when it dominates the DC part, else the DC part.
@@ -1343,6 +1360,8 @@ impl Dmm {
             prev_ad1: 0,
             r22: 0,
             ohm_settled: false,
+            ohm_prev: f32::NAN,
+            ohm_ok: false,
             f_ac: 0.0,
             f_lpf: 0.0,
             f_dc: 0.0,
@@ -1678,10 +1697,10 @@ impl Dmm {
         self.sent.configured(kind, clk.now_ms(), fresh);
         self.sent.blank(clk.now_ms(), sentinel::BLANK_ROW_MS);
         // Leaving the ohm network into a V-JACK? comparator row (sentinel::OHM_EXIT_*).
-        // Every row within OHM_EXIT_CAP_MS of it (DC A, its range steps, the
+        // Every row within OHM_EXIT_MAX_MS of it (DC A, its range steps, the
         // AC+DC / AUTO phases): the windows count from the exit.
         let now = clk.now_ms();
-        self.sent.ohm_exit(self.ohm_exit_t.filter(|&t| kind == Kind::CmpV && now < t + sentinel::OHM_EXIT_CAP_MS));
+        self.sent.ohm_exit(self.ohm_exit_t.filter(|&t| kind == Kind::CmpV && now < t + sentinel::OHM_EXIT_MAX_MS));
         // Ohm / temperature: A-JACK needs the V side's word (sentinel V_GATE).
         self.sent.vgate = matches!(self.mode, 10 | 15);
         self.sent.bridge = self.acdc;
@@ -1814,6 +1833,8 @@ impl Dmm {
         self.ac_settle_start(now, old);
         self.vet_start(old);
         self.vet_first = self.vet_fresh(old.0, r22_was);
+        self.ohm_prev = f32::NAN;
+        self.ohm_ok = false;
         self.down_t = 0;
         self.tr_ev(now, tr::K_SET, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
     }
@@ -4001,13 +4022,30 @@ impl Dmm {
         // LIVE?: a passive Rx never gives a negative code; a source of the
         // other polarity does (0.24 % of full scale: far above the noise).
         self.live = ad1 < -LIVE_CODE;
-        let (code, ext) = self.avg_code(ad1.unsigned_abs() as i32, slow);
-        let mut kohm = code * cal(0x124 + 4 * r as u32, 1.0) * OHM_RREF[r] / 0.9 / AD1_DIV - cal(0x144, 0.0);
+        let g = cal(0x124 + 4 * r as u32, 1.0) * OHM_RREF[r] / 0.9 / AD1_DIV;
+        let k0 = cal(0x144, 0.0);
+        let lim = self.factor() * OHM_DEC[r];
+        let ov = self.over();
+        // Vet this conversion (OHM_VET_*) on its raw value, before the
+        // average: a provisional one starts the average over.
+        let raw = ad1.unsigned_abs() as i32;
+        let kraw = (raw as f32 * g - k0).max(0.0);
+        let x = if kraw / lim > ov { f32::INFINITY } else { kraw };
+        let p = core::mem::replace(&mut self.ohm_prev, x);
+        if (x.is_infinite() && p.is_infinite()) || (x - p).abs() <= OHM_VET_REL * p.abs() + OHM_VET_CNT * lim / 60000.0 {
+            self.ohm_ok = true;
+        }
+        let prov = !self.ohm_ok;
+        let (code, ext) = if prov {
+            self.avg.reset();
+            (raw as f32, false)
+        } else {
+            self.avg_code(raw, slow)
+        };
+        let mut kohm = code * g - k0;
         if kohm < 0.0 {
             kohm = 0.0;
         }
-        let lim = self.factor() * OHM_DEC[r];
-        let ov = self.over();
         let ol = kohm / lim > ov;
         if ol {
             if r22 != 0x13 {
@@ -4047,10 +4085,11 @@ impl Dmm {
                 self.ohm_settled = false;
                 self.set(clk, 10, (r as i8 - step).max(1), 150);
                 return None;
-            } else if !self.ohm_settled {
+            } else {
+                // In range. The first such conversion is the vet's
+                // reference (grey), no longer a 150 ms wait (the vet
+                // needs the next conversion anyway).
                 self.ohm_settled = true;
-                self.deadline = now + 150;
-                return None;
             }
         }
         // Stock formats (r < 2: x1000 ohm, fmt r + 1): r0 60.000 ohm.
@@ -4060,7 +4099,12 @@ impl Dmm {
             _ => (kohm * 1e-3, 9 - r as u8, "M\u{3a9}"),
         };
         let val = if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit).with_ext(ext) };
-        Some(self.reading(val, kohm * 1e3))
+        let mut rd = self.reading(val, kohm * 1e3);
+        // Provisional: drawn grey; the sentinel / watchdog still see it
+        // (`prov_side`, as AUTO's G7), only the output is provisional.
+        rd.prov = prov;
+        self.prov_side = prov;
+        Some(rd)
     }
 
     fn poll_cont(&mut self) -> Option<Reading> {

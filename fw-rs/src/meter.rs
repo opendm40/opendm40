@@ -738,13 +738,17 @@ impl Meter {
         let d = apply_rel(&f);
         self.live = Some(d);
         let mut u = Update { live: d, raw, show: None, captured: false, fail_edge: false };
-        if self.hold {
+        // HOLD pressed before the function's first settled reading (the
+        // placeholder, AUTO still deciding: device ab7184c) is armed: it
+        // holds the first one (no statistics), then freezes as usual.
+        let arm = self.hold && self.shown.is_none();
+        if self.hold && !arm {
             return u;
         }
-        if !raw.main.ol {
+        if !raw.main.ol && !arm {
             self.stats.add(raw.main.v * unit_scale(raw.main.unit), now);
         }
-        let show = if !self.ahold {
+        let show = if arm || !self.ahold {
             Some(d)
         } else if let Some(mean) = self.ah_step(r, now) {
             // Freeze the window mean (REL applied as for the live value).
@@ -847,6 +851,9 @@ impl Meter {
         self.show_t = 0;
     }
 
+    /// HOLD on / off. On with nothing shown yet (no settled reading of the
+    /// function: the placeholder, AUTO still deciding) it is armed and holds
+    /// the first settled reading (`update`).
     pub fn set_hold(&mut self, on: bool) {
         self.hold = on;
     }
@@ -982,6 +989,30 @@ mod tests {
         t += 500;
         m.update(&auto(3, 1.0, 2, "mV", 1e-3), t);
         assert!(m.hold);
+    }
+
+    /// HOLD pressed before the function's first settled reading (device
+    /// ab7184c: RUN while AUTO decides froze nothing and showed RUN): it holds
+    /// the first one when it comes, then nothing moves it; no statistics.
+    #[test]
+    fn hold_before_the_first_reading_holds_it() {
+        let mut m = Meter::new();
+        m.set_smoothing(Smooth::Off);
+        m.reset();
+        m.set_hold(true);
+        assert_eq!(m.hold_state(), 1);
+        assert!(m.shown().is_none());
+        let u = m.update(&rd(0, 6.855, 4, "V", 1.0), 1000);
+        assert!(u.show.is_some_and(|s| close(s.main.v, 6.855)), "the first reading is shown");
+        assert!(m.shown().is_some_and(|s| close(s.main.v, 6.855)));
+        let u = m.update(&rd(0, 7.2, 4, "V", 1.0), 2000);
+        assert!(u.show.is_none());
+        assert!(m.shown().is_some_and(|s| close(s.main.v, 6.855)), "held");
+        assert!(m.live().is_some_and(|l| close(l.main.v, 7.2)), "live keeps running");
+        assert_eq!(m.stats.n, 0);
+        m.set_hold(false);
+        let u = m.update(&rd(0, 7.3, 4, "V", 1.0), 3000);
+        assert!(u.show.is_some_and(|s| close(s.main.v, 7.3)));
     }
 
     #[test]

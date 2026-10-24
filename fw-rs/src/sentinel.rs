@@ -458,8 +458,22 @@ pub const BLANK_ROW_MS: u64 = 150;
 /// ~8 s after the switch at worst. Outside the cap 0x70 counts as before.
 /// Check E: the last 0x70 read at 4.2-4.4 s (RES -> A, 6 runs) and 5.24 s
 /// (A at 5 V, Scope page, back), the last CMPLO-only one 0.1-0.2 s later.
+///
+/// The cap slides (device ab7184c new bug 4: A / mA -> Scope -> DMM at 5 V,
+/// 0x70 to 7.75 s, 0x50 to 8.01 s, then 0; 612c45c: 0x70 to 6.34 s; the
+/// fixed 7 s cap let the tail's last 0.75 s count: V-JACK? for 0.5 s at
+/// 8.06 s): a 0x70 read inside the window moves its end to OHM_EXIT_QUIET_MS
+/// after it, at most OHM_EXIT_MAX_MS after the event. So the mask ends when
+/// 0x70 has stopped for OHM_EXIT_QUIET_MS (a CMPLO-only tail OHM_EXIT_TAIL_MS
+/// after the last 0x70, within the window), not at a fixed time. Why the
+/// tail is longer since the fast-switch builds is not known (the emulator
+/// replays it, `ohmexit`; device numbers only). Cost: a source that reads
+/// 0x70 steadily (a voltage that overdrives the tap, if any does) gets its
+/// V-JACK? ~13 s after the switch instead of ~8 s; CMPHO alone keeps ~2 s.
 pub const OHM_EXIT_TAIL_MS: u64 = 2500;
 pub const OHM_EXIT_CAP_MS: u64 = 7000;
+pub const OHM_EXIT_QUIET_MS: u64 = 1000;
+pub const OHM_EXIT_MAX_MS: u64 = 12000;
 pub const BLANK_SETTLED_MS: u64 = 100;
 /// Hit windows in a row before A-JACK is asserted (2 polls >= 100 ms apart).
 pub const AJACK_WINDOWS: u8 = 2;
@@ -725,6 +739,10 @@ pub struct Sentinel {
     /// The row left the ohm network for a V-JACK? comparator row (`dmm.rs`):
     /// until this time (ms) a CMPHO | CMPLO read extends the blank.
     pub ohm_exit_cap: u64,
+    /// The exit event (ms) and the latest end the window may slide to
+    /// (OHM_EXIT_MAX_MS after it; 0 = no window).
+    ohm_exit_t0: u64,
+    ohm_exit_max: u64,
     /// ... and a CMPLO-only read counts only from this time on.
     lo_mask_until: u64,
     win_hit: bool,
@@ -814,6 +832,8 @@ impl Sentinel {
             win_t0: 0,
             blank_until: 0,
             ohm_exit_cap: 0,
+            ohm_exit_t0: 0,
+            ohm_exit_max: 0,
             lo_mask_until: 0,
             win_hit: false,
             win_both: 0,
@@ -918,16 +938,24 @@ impl Sentinel {
     }
 
     /// The relay left the ohm network at `t` (ms) and the row is a V-JACK?
-    /// comparator row (`dmm.rs`, every row write within OHM_EXIT_CAP_MS);
-    /// None: not.
+    /// comparator row (`dmm.rs`, every row write within OHM_EXIT_MAX_MS);
+    /// None: not. A row write after the same event keeps the window's end
+    /// as far as a 0x70 read slid it (`sample_cmp`).
     pub fn ohm_exit(&mut self, t: Option<u64>) {
         match t {
             Some(t) => {
-                self.ohm_exit_cap = t + OHM_EXIT_CAP_MS;
+                if self.ohm_exit_max == 0 || t != self.ohm_exit_t0 {
+                    self.ohm_exit_t0 = t;
+                    self.ohm_exit_cap = t + OHM_EXIT_CAP_MS;
+                } else {
+                    self.ohm_exit_cap = self.ohm_exit_cap.max(t + OHM_EXIT_CAP_MS);
+                }
+                self.ohm_exit_max = t + OHM_EXIT_MAX_MS;
                 self.lo_mask_until = self.lo_mask_until.max(t + OHM_EXIT_TAIL_MS);
             }
             None => {
                 self.ohm_exit_cap = 0;
+                self.ohm_exit_max = 0;
                 self.lo_mask_until = 0;
             }
         }
@@ -1009,6 +1037,8 @@ impl Sentinel {
             // then CMPLO alone. Neither counts; CMPHO (a source above +21 V on
             // V, or an AC one's positive half) counts at once.
             if both_now {
+                // the tail goes on: the window ends OHM_EXIT_QUIET_MS after it
+                self.ohm_exit_cap = self.ohm_exit_cap.max(now + OHM_EXIT_QUIET_MS).min(self.ohm_exit_max);
                 self.lo_mask_until = self.lo_mask_until.max((now + OHM_EXIT_TAIL_MS).min(self.ohm_exit_cap));
                 bits = 0;
             } else if bits == CTSTA_CMPLO && now < self.lo_mask_until {
@@ -1594,6 +1624,34 @@ mod tests {
             let c = if t < 3500 { 0x70 } else if t < 5000 { 0x50 } else { 0 };
             s.sample_cmp(t, c);
             assert_eq!(s.alert, Alert::None, "t {t}");
+        }
+        // device ab7184c (A -> Scope -> DMM at 5 V): 0x70 to 7.75 s, 0x50 to 8.01 s, row
+        // rewrites on the way (each re-reports the same event): no V-JACK?; a 0x70 that
+        // never stops counts from OHM_EXIT_MAX_MS
+        for (end, steady) in [(7750u64, false), (u64::MAX, true)] {
+            let mut s = Sentinel::new();
+            s.configured(Kind::CmpV, 0, true);
+            s.ohm_exit(Some(0));
+            let mut t = 0;
+            let mut vj = None;
+            while t < 16000 {
+                t += 10;
+                if t % 2000 == 0 {
+                    s.ohm_exit(Some(0));
+                }
+                s.current_small(t, true);
+                let c = if t < end { 0x70 } else if t < 8010 { 0x50 } else { 0 };
+                s.sample_cmp(t, c);
+                if s.alert == Alert::VJack && vj.is_none() {
+                    vj = Some(t);
+                }
+            }
+            if steady {
+                let v = vj.expect("steady 0x70: V-JACK? after the max window");
+                assert!(v >= OHM_EXIT_MAX_MS && v <= OHM_EXIT_MAX_MS + VJACK_ASSERT_MS + 300, "steady 0x70: V-JACK? at {v}");
+            } else {
+                assert_eq!(vj, None, "the 7.75 s tail: V-JACK? at {vj:?}");
+            }
         }
         // a real source on V after the exit: positive (CMPHO) or AC (CMPHO / CMPLO reads)
         // as without the exit, even through the decay's 0x70 reads; a negative DC one

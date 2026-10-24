@@ -1594,6 +1594,7 @@ impl App {
             // A toast over the data-logger panel: the panel again.
             crate::dialog::toast_gone();
         }
+        self.prov_follow();
         if !can_draw || self.overlay.is_some() {
             return;
         }
@@ -1740,9 +1741,13 @@ impl App {
     /// / LIVE? alternate with HOLD in the status slot and the strip badge).
     /// A provisional reading / the placeholder (`prov`) instead, unless a
     /// HOLD / AutoHold capture freezes the readout or REL is on (the
-    /// provisional value is not REL-corrected).
+    /// provisional value is not REL-corrected). A HOLD armed before the
+    /// first settled reading (Meter::set_hold) shows `prov` with the HOLD
+    /// label until that reading comes.
     pub(crate) fn shown_reading(&self) -> Option<Reading> {
-        if let Some(p) = self.prov.filter(|_| matches!(self.meter.hold_state(), 0 | 2) && !self.meter.rel_active()) {
+        let hs = self.meter.hold_state();
+        let free = matches!(hs, 0 | 2) || (hs == 1 && self.meter.shown().is_none());
+        if let Some(p) = self.prov.filter(|_| free && !self.meter.rel_active()) {
             return Some(p);
         }
         let mut r = self.meter.shown().copied()?;
@@ -3725,6 +3730,20 @@ impl App {
         m == f || (m >= 32 && f == 15 && self.dmm.t_sensor() == m - 32)
     }
 
+    /// The placeholder (`prov` with no value) follows a range / unit change
+    /// made before the function's first reading: `CONF:CURR:DC 10` enters
+    /// mA (`select`), then the 10 A row (device ab7184c: "mA" for 0.8 s).
+    fn prov_follow(&mut self) {
+        let Some(p) = self.prov.filter(|p| p.main.v.is_nan() && !p.main.ol) else { return };
+        let Some(n) = self.dmm.placeholder() else { return };
+        if (n.mode, n.range, n.main.unit, n.main.dec) != (p.mode, p.range, p.main.unit, p.main.dec) {
+            self.prov = Some(n);
+            if matches!(self.view, View::Dmm | View::DmmScope) {
+                self.redraw = true;
+            }
+        }
+    }
+
     fn func_changed(&mut self) {
         self.meter.reset();
         // The new function's frame at once (switch-latency.md proposal 1):
@@ -4185,6 +4204,7 @@ impl App {
                 if let Some(v) = res {
                     self.scpi_range(clk, f, crate::scpi::Rng::Res(v), out);
                 }
+                self.prov_follow();
                 false
             }
             C::Pow(c) => self.pw_scpi(clk, c, out),
