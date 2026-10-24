@@ -2434,14 +2434,6 @@ environment variable `DM40_MAC`); `bluetoothctl devices` shows the address
 of **C-1-ATK-DM40-CALI**. It needs a Python with Bluetooth sockets: the
 system `/usr/bin/python3`.
 
-Two things to allow for in your own client:
-
-- Wait about 0.5 s after the connection opens before the first command. A
-  line sent in the first ~0.3 s can be dropped without a reply.
-- The first client after the Bluetooth module powers up (the meter switched
-  on, or Bluetooth turned OFF and ON) finds a few errors in `SYST:ERR?` that
-  it did not cause. Send `*CLS` first.
-
 For other programs, bind a serial device:
 
 ```
@@ -2640,8 +2632,4 @@ Known problems:
   about 0.2 % high. DC readings are not affected noticeably.
 - While a fast data stream runs, the meter does not answer the phone-app
   protocol.
-- Over Bluetooth, the first client after the module powers up finds a few
-  errors it did not cause in `SYST:ERR?`, and a command sent in the first
-  ~0.3 s after connecting can get no reply
-  ([Bluetooth from a computer](#bluetooth-from-a-computer)).
 - The usable frequency range of the power meter is *unknown*.
