@@ -107,6 +107,15 @@ one line each:
 
 ### History
 
-- [docs/history/README.md](../docs/history/README.md): finished plans, reviews, investigations and decision logs, one line each, among them
-  [decisions-2026-10-22.md](../docs/history/decisions-2026-10-22.md) (decisions `#N` cited by the code) and
-  [switch-latency.md](../docs/history/switch-latency.md) (proposals cited by the code)
+Finished plans, reviews, investigations and decision logs; not maintained.
+The full list is [docs/history/README.md](../docs/history/README.md). Archived from `docs/`:
+
+- [native-boot-plan.md](../docs/history/native-boot-plan.md): the 2026-10-13 native-image plan and its T1 / T2 / T3 tests
+- [stage0-test.md](../docs/history/stage0-test.md): Stage 0, the FS-loader re-installs a staged file
+- [decisions-2026-10-22.md](../docs/history/decisions-2026-10-22.md): nine product / engineering decisions, cited by the code as `#N`
+- [switch-latency.md](../docs/history/switch-latency.md): DMM switch latency and the proposals cited by the code
+- [acdc-stock-vs-opendm40.md](../docs/history/acdc-stock-vs-opendm40.md): AC+DC and AUTO coupling of the stock, measured live
+- [log-format-standards.md](../docs/history/log-format-standards.md): standard log formats against DLG
+- [ui-review.md](../docs/history/ui-review.md): UI/UX review
+- [hwtrig-integration.md](../docs/history/hwtrig-integration.md): the hooks that wired the comparator trigger
+- [integration-queue.md](../docs/history/integration-queue.md): the queue of hooks into shared files (empty)
