@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Ohm range hunt: no unvetted value as final (opendm40 dmm.rs poll_ohm,
-device check ab7184c new bug 1, ../docs/history/switch-latency.md 6.2). DC V -> RES on
+device check ab7184c new bug 1, docs/history/switch-latency.md 6.2). DC V -> RES on
 a resistor with the HY3131 model's ohm node lag (`ohmtau:ms`, opt-in: the
 node relaxes to its value after every ohm row change, so the first
 conversions after a range step read low, as the device's 219 / 57 ohm on

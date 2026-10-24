@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""opendm40 AUTO coupling of V / A (firmware/src/dmm.rs AUTO_*, ../docs/history/acdc-stock-vs-opendm40.md
+"""opendm40 AUTO coupling of V / A (firmware/src/dmm.rs AUTO_*, docs/history/acdc-stock-vs-opendm40.md
 section 11) in the emulator: opendm40 native + the HY3131 model, a timed
 connection script per scenario (DC -> AC -> mixed signals, both ways through
 the hysteresis band), SCPI over USB/IP (setup, then DBG:PING? uptime,
@@ -60,7 +60,7 @@ def shows(coup, value, rel=0.01, ab=0.002):
 def tie(want, rel):
     """A tie (AC = DC): either part, or +9.91E37 (num: NaN) while AUTO has not decided yet
     (a tie can take ~10 s; FETCh? answers +9.91E37 until the first decision,
-    opendm40 ../docs/history/switch-latency.md 6.2)."""
+    opendm40 docs/history/switch-latency.md 6.2)."""
     return lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and (near(d['V'], want, rel) or math.isnan(d['V']))
 
 
