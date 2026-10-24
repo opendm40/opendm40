@@ -1626,8 +1626,10 @@ The V and A inputs share **COM**, so the current flows through COM:
 
 *The wiring: the − wire broken through A and COM, V on the + wire.*
 
-The arrows show the current: through the load into **A**, inside the
-meter through the shunt to **COM**, and back to the source. The current
+The wiring picture draws the jacks as on the meter, **VΩ** at the top,
+**COM** in the middle, **A mA uA** at the bottom. Its arrows show the
+current: through the load into **A**, inside the meter through the shunt
+to **COM**, and back to the source. The current
 into the A jack counts as positive: a load reads positive power, a source
 negative.
 
