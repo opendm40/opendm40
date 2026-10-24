@@ -439,7 +439,7 @@ sub-mode:
 |---|---|
 | **V** | DC → AC → AC+DC → AUTO (AC/DC) → DC |
 | **A** | DC → AC → AC+DC → AUTO (AC/DC) → DC |
-| **Ω** | Normal → Low current → Normal |
+| **Ω** | Normal → Low current → Normal ([test currents](#resistance)) |
 | Capacitance | (none) |
 | Diode / continuity | Diode → Continuity → Diode |
 | **Hz / °C** | Frequency → Temperature → Frequency |
@@ -548,9 +548,13 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ.
 - The 60 Ω range (milliohm resolution) is manual only; AUTO never goes
   below 600 Ω.
-- **Low current** (second tap on Ω, or **Low current ON** on the range
-  page): a smaller test current, for measuring in a circuit. The Ω button
-  shows a small **ON** tag. The 60 Ω range always uses the normal current.
+- Two test currents (into a short, measured by owners on real meters):
+  - **Normal**: about 0.85 mA;
+  - **Low current**: about 0.27 mA, for measuring in a circuit. Second tap on
+    Ω, or **Low current ON** on the range page; the Ω button shows a small
+    **ON** tag.
+
+  The 60 Ω range always uses the normal current.
 - While the meter looks for the range, the values are grey.
 
 
@@ -561,6 +565,17 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 #### Continuity
 
 - Shows the resistance with two decimals; **0L** above 1000 Ω.
+- The beeper is driven by the measuring chip itself: its comparator watches
+  the probe voltage and switches the beeper directly, with no firmware in
+  between (the same chip setting as the stock firmware). It sounds while the
+  resistance is below about 67 Ω (*inferred* from the chip setting).
+- The firmware adds no latch and no minimum beep length: the beep starts and
+  stops with the contact.
+- The comparator itself is fast (a bandwidth of a few MHz in the chip's data
+  sheet). The time from a contact to the sound, and how short a contact is
+  still heard, are untested on the meter.
+- The reading updates every 50 ms while it changes, every 0.4 s once it is
+  steady.
 - A negative result means an external voltage on the circuit: the meter
   shows [**LIVE?**](#the-alerts).
 
@@ -1587,17 +1602,18 @@ ranging...** (a few seconds).
 
 ### The power meter screen
 
-- **Top**: the voltage (left) and the current (right).
-- **Main value**: the power P, with the coupling symbol. Tap it to step
-  **P → Wh → VAh → P**.
-- **Row of five boxes**: the energy **E** (or **P** while the main value
-  shows energy), the power factor **PF**, the apparent power **S** (VA),
-  the reactive power **Q** (var), the frequency **f**. **--** where there is
-  no value (for example PF in DC).
-- **Right column**: **Vb** (the voltage drop in the meter itself), **VAh**,
-  the energy timer (**RUN** / **PAUSE** and the elapsed time), **AVG** (the
-  mean power since the start), and the ranges.
-- **Trend chart** of the main value.
+![The power meter screen, AC on the mains](img/power-screen.png)
+
+*The power meter screen, AC on the mains.*
+
+1. The voltage.
+2. The current.
+3. The power P and the coupling symbol. Tap to step **P → Wh → VAh → P**.
+4. Energy **E** (or **P** while the main value shows energy), **PF**,
+   **S** (VA), **Q** (var), **f**; **--** where there is no value (PF in DC).
+5. **Vb** (the voltage drop in the meter itself), **VAh**, the energy timer
+   (**RUN** / **PAUSE** and the time), **AVG** (the mean power), the ranges.
+6. The trend chart of the main value.
 
 In AC+DC the page also shows the DC and AC parts: under V, under I and under
 P (`DC x W + AC y W`). The parts add up to the totals.
@@ -1628,6 +1644,38 @@ turn; a full set takes about 1.3 s.
 Hints (grey, with a short message): **DC?** in AC+DC when there is no AC
 part (**No AC: DC is more precise**); **AC?** in DC when the voltage has an
 AC part (**AC present: use AC+DC**).
+
+### How DC power is measured
+
+In DC the meter takes the voltage and the current at the same time, with one
+fixed setting of the measuring chip and no switching while it measures:
+
+- **Current**: the voltage across the shunt of the current range (47.5 Ω,
+  0.5 Ω or 10 mΩ) goes to the chip's 24-bit converter, as in the DC A
+  function and with its factory calibration. A new value about every 0.1 s.
+- **Voltage**: the V input's divider (÷10 to ÷10000 by range) feeds a buffer
+  and a second converter (19 bit, averaged).
+- **Ranges**: each channel autoranges on its own, as the multimeter does: up
+  above about 103 % of the range, down below about 10 %. The current walks
+  down from 10 A to the µA ranges (AUTO+ on current stops at mA); an over
+  range on the µA or mA shunt jumps straight to the 6 A range.
+- **At load** subtracts the shunt's drop: P(load) = P − I²R and
+  V(load) = V − I·R, with R the shunt of the range in use.
+- **Energy**: each new P times the time since the previous value, summed in
+  whole millijoules, so the total stays exact over days.
+
+Because both channels autorange and P = V × I takes both resolutions, the
+range of P is wide:
+
+| | Lowest range: resolution | Highest range: full scale, resolution |
+|---|---|---|
+| V | 6 V: 0.1 mV | 1000 V: 0.1 V |
+| I | 600 µA: 0.01 µA | 10 A: 1 mA |
+| P | 6 V × 600 µA: 0.1 µW | 1000 V × 10 A = 10 kW: 1 W |
+
+That is 0.1 µW to 10 kW. These are display resolutions; the accuracy at the
+ends of the range is untested on the meter. There is no mV range for the
+voltage: small voltages read on the 6 V range.
 
 ### Energy
 
