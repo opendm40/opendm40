@@ -79,6 +79,7 @@
 
 use crate::calbackup::{crc32_upd, FwFile, Source, FILES};
 use crate::dlog::{self, FatFile, FnRaw, Gen, Geo, Raw, Src as _};
+use crate::fastlog::{MIR_BEHIND, MIR_FREE};
 use crate::msc::BlockDevice;
 
 pub const BS: usize = 512;
@@ -919,6 +920,89 @@ fn mir_read(addr: u32, buf: &mut [u8]) -> bool {
     true
 }
 
+// --- pacing the mirror's reads against the fast logger --------------------------------
+//
+// A mirror sector costs the main loop its whole SPI read (512 bytes polled,
+// ~0.97 us each on the device, plus a wait for a page program in the chip),
+// ~1.1 ms of wall time with the stream ISR at ~54 % of the CPU at 76 800
+// S/s. A host copying LOADER.BIN (128 KiB, all mirrored) back to back took
+// that from the fast logger's coder pass by pass: 21 745 samples lost per
+// copy (device 612c45c M2c), and a copy inside the writer trial made it
+// fall back to 38 400. So while the stream runs a mirror sector is read
+// only when this pass grants it (`mirror_pass`, main.rs, once per pass
+// before the MSC poll; at most one sector per pass) and the chip is idle
+// (no page program of the logger's to wait for). Until then the READ just
+// waits in its data phase (msc.rs `read_wait`: the host's IN tokens are
+// NAKed; no NOT READY, nothing to retry). Bounded: a sector that has
+// waited MIR_WAIT_SOFT_MS goes ahead unless the logger is pressed (its
+// ring over half full, or the writer trial), and after MIR_WAIT_HARD_MS in
+// any case (a 240-sector READ, Linux's largest here, then takes at most
+// 240 x 50 ms = 12 s against its 30 s timeout).
+
+const MIR_WAIT_SOFT_MS: u32 = 10;
+const MIR_WAIT_HARD_MS: u32 = 50;
+/// This pass's level (`mirror_pass`); MIR_PASS_USED once a sector was read.
+static MIR_LEVEL: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(MIR_FREE);
+const MIR_PASS_USED: u8 = 0xFF;
+/// DWT cycles when the sector now due began to wait (0: none waits).
+static MIR_WAIT_T: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// DBG:VDISK:MIR? extras: sectors read from the mirror while streaming,
+/// times a sector was held back (one per poll), the longest hold (ms).
+pub static MIR_PACE: [core::sync::atomic::AtomicU32; 3] = [const { core::sync::atomic::AtomicU32::new(0) }; 3];
+
+/// main.rs, once per pass before the MSC poll: the fast logger's state
+/// (fastlog::mirror_level: MIR_FREE / MIR_BEHIND / MIR_PRESSED) for this
+/// pass's mirror sector.
+#[inline(always)]
+pub fn mirror_pass(level: u8) {
+    MIR_LEVEL.store(level, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// A READ's next sector `lba` must wait (msc.rs `read_wait`): it is served
+/// from the mirror while the stream runs and this pass does not grant it.
+/// Granting takes the pass's sector.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+fn mir_hold(lba: u32) -> bool {
+    use core::sync::atomic::Ordering::Relaxed;
+    if !crate::hy3131::streaming() || !MIR_OK.load(Relaxed) || !state().is_some_and(|st| slow_overlap(st, lba, 1)) {
+        // Not a paced sector: one that waited before was served or its
+        // READ ended (a stream end, a host reset); the next starts afresh.
+        MIR_WAIT_T.store(0, Relaxed);
+        return false;
+    }
+    let lv = MIR_LEVEL.load(Relaxed);
+    let now = rd_cyc() | 1;
+    let t0 = MIR_WAIT_T.load(Relaxed);
+    let waited_ms = if t0 == 0 { 0 } else { now.wrapping_sub(t0) / (crate::clock::HCLK_HZ / 1000) };
+    let go = match lv {
+        MIR_PASS_USED => false,
+        MIR_FREE => !flash_busy(),
+        MIR_BEHIND => waited_ms >= MIR_WAIT_SOFT_MS,
+        _ => waited_ms >= MIR_WAIT_HARD_MS,
+    } || waited_ms >= MIR_WAIT_HARD_MS;
+    if go {
+        MIR_LEVEL.store(MIR_PASS_USED, Relaxed);
+        MIR_WAIT_T.store(0, Relaxed);
+        MIR_PACE[0].fetch_add(1, Relaxed);
+        MIR_PACE[2].fetch_max(waited_ms, Relaxed);
+        return false;
+    }
+    if t0 == 0 {
+        MIR_WAIT_T.store(now, Relaxed);
+    }
+    MIR_PACE[1].fetch_add(1, Relaxed);
+    true
+}
+
+/// The SPI chip runs an erase / page program (one RDSR; no waiting).
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+fn flash_busy() -> bool {
+    #[cfg(target_os = "none")]
+    return crate::spiflash::chip_busy();
+    #[cfg(not(target_os = "none"))]
+    return false;
+}
+
 /// Source bytes of an INFO/ file of `Kind::Mem`: the slow-bank part from
 /// the mirror while the stream runs, the rest from memory.
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
@@ -1005,6 +1089,10 @@ impl BlockDevice for VDisk {
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn read_busy(&self, lba: u32, n: u32) -> bool {
         crate::hy3131::streaming() && !MIR_OK.load(core::sync::atomic::Ordering::Acquire) && state().is_some_and(|st| slow_overlap(st, lba, n))
+    }
+    #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+    fn read_wait(&mut self, lba: u32) -> bool {
+        mir_hold(lba)
     }
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn take_media_changed(&mut self) -> bool {

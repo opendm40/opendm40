@@ -360,6 +360,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // M4: no host disk writes while the logger needs a constant interval.
         msc.set_write_inhibit(logger.disk_writes_blocked());
         msc.set_usb_state(dev.state());
+        // The INFO/ mirror's sectors while the stream runs: at most one per
+        // pass, paced against the fast logger (vdisk.rs `mirror_pass`).
+        #[cfg(feature = "vdisk")]
+        vdisk::mirror_pass(fastlog::mirror_level(logger.waiting(), logger::CAP as u32));
         #[cfg(feature = "vdisk")]
         msc.poll(&mut [&mut info]);
         #[cfg(not(feature = "vdisk"))]
@@ -2078,7 +2082,8 @@ fn fast_status(scpi: &mut scpi::Scpi) {
     let (tpp, tpp_max) = fastlog::tpp_us();
     // + the writer trial (0 none, 1 kept the rung, 2 fell back to 38400),
     // its window's stream ISR share (permille) and highest ring fill.
-    for v in [st.alloc, st.bytes, st.rows, st.pct as u32, st.hw, st.programs, tpp, tpp_max, st.gate, st.gate_permille, st.gate_fill] {
+    // + the writer's share of the main loop's CPU (permille, the ISR out).
+    for v in [st.alloc, st.bytes, st.rows, st.pct as u32, st.hw, st.programs, tpp, tpp_max, st.gate, st.gate_permille, st.gate_fill, st.writer_permille] {
         scpi.put_bytes(b",");
         put_u32(scpi, v);
     }

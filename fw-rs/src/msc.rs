@@ -97,6 +97,16 @@ pub trait BlockDevice {
         let _ = (lba, n);
         false
     }
+    /// Block `lba` (the next of a READ in progress) is better read in a
+    /// later main-loop pass: the transfer waits in its data phase (nothing
+    /// sent, the host's IN tokens are NAKed) and the block is asked for
+    /// again at the next poll. Must turn false within a bounded time
+    /// (vdisk.rs: a mirror sector paced against the fast logger, at most
+    /// 50 ms per sector).
+    fn read_wait(&mut self, lba: u32) -> bool {
+        let _ = lba;
+        false
+    }
     /// `write_block` spread over several calls, for a caller that must not
     /// stall the main loop (screenshot.rs). Call again with the same `lba`,
     /// `buf` and `st` (starting from `Step::default()`) until it returns
@@ -290,6 +300,8 @@ pub struct Msc<'a, B: UsbBus> {
     /// Refuse host writes (NOT READY, becoming ready) while set (M4: the
     /// logger's constant sample interval cannot survive a 50..400 ms erase).
     write_inhibit: bool,
+    /// This poll's READ block waits (`BlockDevice::read_wait`).
+    waiting: bool,
 }
 
 type Res = Result<(), TransportError<BulkOnlyError>>;
@@ -301,7 +313,7 @@ impl<'a, B: UsbBus> Msc<'a, B> {
         let (p, n) = (io.as_mut_ptr(), io.len());
         let max_lun = luns.clamp(1, MAX_LUNS as u8) - 1;
         let scsi = Scsi::new(alloc, 64, max_lun, IoBuf { p, n }).unwrap_or_else(|_| panic!("msc"));
-        Msc { scsi, io: IoBuf { p, n }, xfer: Xfer::None, sense: [SENSE_OK; MAX_LUNS], blk, write_inhibit: false }
+        Msc { scsi, io: IoBuf { p, n }, xfer: Xfer::None, sense: [SENSE_OK; MAX_LUNS], blk, write_inhibit: false, waiting: false }
     }
 
     /// The USB device state (main loop, every pass). Default / Addressed
@@ -320,6 +332,8 @@ impl<'a, B: UsbBus> Msc<'a, B> {
         let sense = &mut self.sense;
         let blk = &mut *self.blk;
         let io = &mut self.io;
+        self.waiting = false;
+        let waiting = &mut self.waiting;
         // Also no host writes while a screenshot is being written (its FAT /
         // directory update spans many main-loop passes) or a CSV recording
         // session is active (csvlog.rs).
@@ -329,18 +343,19 @@ impl<'a, B: UsbBus> Msc<'a, B> {
         let _ = self.scsi.poll_command(|cmd| -> Res {
             let lun = cmd.lun as usize;
             match (devs.get_mut(lun), sense.get_mut(lun)) {
-                (Some(dev), Some(sense)) => handle(cmd, &mut **dev, xfer, sense, blk, io, inhibit),
+                (Some(dev), Some(sense)) => handle(cmd, &mut **dev, xfer, sense, blk, io, inhibit, waiting),
                 _ => bad_lun(cmd),
             }
         });
         HOST_WRITING.store(matches!(self.xfer, Xfer::Write { .. }), core::sync::atomic::Ordering::Relaxed);
     }
 
-    /// A host READ's data phase is under way: main.rs polls again within the
+    /// A host READ's data phase is under way (and its next block does not
+    /// wait for a later pass, `read_wait`): main.rs polls again within the
     /// pass (usbd-storage moves one 64-byte packet per poll, ~2 per main-loop
     /// pass otherwise: ~0.1 MB/s at a 1 ms pass).
     pub fn reading(&self) -> bool {
-        matches!(self.xfer, Xfer::Read { .. }) || self.scsi.sending()
+        (matches!(self.xfer, Xfer::Read { .. }) && !self.waiting) || self.scsi.sending()
     }
 
     /// Block (true) or allow host writes; a write already in progress finishes.
@@ -391,6 +406,7 @@ fn handle<B: UsbBus>(
     blk: &mut [u8; MAX_BLOCK],
     io: &mut IoBuf,
     write_inhibit: bool,
+    waiting: &mut bool,
 ) -> Res {
     let kind = cmd.kind;
     let lun = cmd.lun;
@@ -549,6 +565,12 @@ fn handle<B: UsbBus>(
                     *xfer = Xfer::None;
                     *sense = SENSE_BECOMING_READY;
                     cmd.fail(done);
+                    return Ok(());
+                }
+                if off == 0 && dev.read_wait(lba) {
+                    // Paced (`read_wait`): no data this poll; the pass's
+                    // pump loop stops polling for it (`reading`).
+                    *waiting = true;
                     return Ok(());
                 }
                 if off == 0 && !dev.read_block(lba, &mut blk[..bs as usize]) {
