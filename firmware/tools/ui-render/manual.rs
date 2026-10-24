@@ -655,7 +655,7 @@ pub fn run(out: &str) -> usize {
         ck.check_opts("manual/settings2-smooth", &page, false);
         save1(out, "settings2-smooth");
         host::reset(0);
-        ui::settings(2, &["ON", "ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", ""]);
+        ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", ""]);
         ck.check_opts("manual/settings3-edit", &page, false);
         save1(out, "settings3-edit");
     }
