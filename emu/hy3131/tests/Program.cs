@@ -84,6 +84,7 @@ namespace Hy3131Tests
             Ohm();
             Continuity();
             Diode();
+            DbgSrc();
             Capacitance();
             Frequency();
             Temperature();
@@ -1646,6 +1647,31 @@ namespace Hy3131Tests
             m.Read1(0x1E); m.WaitFlag(0x04, 1);
             Check(m.ReadS24(0) == -8388608, "open in continuity: negative clip -> stock -AD1 = +1114 ohm > 1000 = OL", m.ReadS24(0).ToString());
             Near(m.Chip.Core.CmpLowThreshold, -0.0417, 0.0005, "  threshold AGNDN<2>");
+        }
+
+        private static void DbgSrc()
+        {
+            // opendm40 DBG:SRC (src/dbgsrc.rs): the ohm r1 row with SFUVR 5 (AGNDP7), AD1 on nodes
+            Console.WriteLine("DBG:SRC");
+            var m = NewChip();
+            m.Chip.SetInput("open");
+            var row = (byte[])F10R1.Clone();
+            row[17] = (byte)((row[17] & 0xF0) | 5); row[3] &= 0xF3;
+            row[4] = 0x83; row[8] = 0x31; // PB0 - AGND, ref PB6 - AGND
+            m.Configure(row, 10);
+            m.WaitFlag(0x04, 1); m.WaitFlag(0x04, 1);
+            Near(m.ReadS24(0) * 1.25 / 0.9 / 8388608.0, 60.0 / 120 * 1.25, 1e-3, "open: jack = AGNDP7 = 0.625 V");
+            m.Write(0x24, 0x63); m.Write(0x28, 0x51); // REFO - AGND, ref VDDA - AGND
+            m.WaitFlag(0x04, 1); m.WaitFlag(0x04, 1);
+            Near(0.9 * 1.25 * 8388608.0 / m.ReadS24(0), 1.8, 1e-3, "VDDA - AGND from REFO / (VDDA - AGND)");
+            m.Chip.SetInput("ohm:0");
+            m.Write(0x24, 0x11); m.Write(0x28, 0x31); // FB - RLU
+            m.WaitFlag(0x04, 1); m.WaitFlag(0x04, 1);
+            Near(m.ReadS24(0) * 1.25 / 0.9 / 8388608.0, 0.625, 2e-3, "short: the whole source across Rref");
+            m.Write(0x24, 0x13); m.Write(0x28, 0x31); // FB - AGND, a VDS17 tap: saturates the narrow range
+            m.Write(0x31, (byte)(row[17] & 0xF0));
+            m.WaitFlag(0x04, 1); m.WaitFlag(0x04, 1);
+            Check(m.ReadS24(0) == 8388607, "VDS17 (35/36 VDDA - AGND = 1.7 V) on the 1.389 V range: clipped", m.ReadS24(0).ToString());
         }
 
         private static void Diode()

@@ -4495,6 +4495,17 @@ impl App {
                 }
                 true
             }
+            C::DbgSrc(Some(r)) => {
+                match self.dmm.src_req(clk, r) {
+                    Ok(()) => self.host_func_changed(),
+                    Err(e) => out.set_err(e),
+                }
+                false
+            }
+            C::DbgSrc(None) => {
+                self.dmm.src_text(out);
+                true
+            }
             C::DbgSentReg => {
                 let mut b = [0u8; 72];
                 let n = self.dmm.reg_text(&mut b);

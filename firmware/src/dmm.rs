@@ -29,6 +29,24 @@ pub mod acdctr;
 use acdctr::{self as tr, TrEnt};
 #[path = "acdcm.rs"]
 pub mod am;
+#[cfg(target_os = "none")]
+#[path = "dbgsrc_dmm.rs"]
+pub mod src;
+/// DBG:SRC is firmware only: the host tests that include dmm.rs get it off.
+#[cfg(not(target_os = "none"))]
+mod src {
+    pub fn active() -> bool {
+        false
+    }
+    pub fn row(_: u8, _: usize) -> Option<[u8; super::hy::CFG_LEN]> {
+        None
+    }
+    impl super::Dmm {
+        pub(super) fn poll_src(&mut self, _: u64) -> Option<super::Reading> {
+            None
+        }
+    }
+}
 use pw::Pw;
 
 const GPIOA: u32 = 0x4002_0000;
@@ -1627,6 +1645,9 @@ impl Dmm {
             _ if self.t_sensor != 0 => &CFG_F10_P8CLR[r.clamp(1, 6)],
             _ => &CFG_F15[0],
         };
+        // DBG:SRC (dbgsrc_dmm.rs): its row in place of the stock one.
+        let src_row = src::row(m, r);
+        let cfg = src_row.as_ref().unwrap_or(cfg);
         self.avg.reset();
         self.t_rd = None;
         self.t_conv = None;
@@ -1672,7 +1693,7 @@ impl Dmm {
         pc7(m == 14);
         // Misconnect sentinel: the stock row with the idle comparator / AD1
         // pointed at the A-jack shunt (or the V tap in DC A), sentinel.rs.
-        let mask = if self.fuse_job.is_some() { 0 } else { self.sent.mask };
+        let mask = if self.fuse_job.is_some() || src_row.is_some() { 0 } else { self.sent.mask };
         let (row, kind) = if am { (self.am_row(cfg), Kind::Off) } else { sentinel::sentinel_row(m, r as u8, self.acdc, mask, cfg) };
         // The probe (PB2) over the comparator rows after a hit, and while
         // latched in every DC V / mV / ohm / temperature row (OP2 / AD2 are
@@ -3237,6 +3258,7 @@ impl Dmm {
         }
         let r = if self.pw.on { self.poll_power(clk, now) } else { None };
         let r = if self.pw.on { r } else { match self.mode {
+            10 | 12 if src::active() => self.poll_src(now),
             0 | 4..=6 if self.am_on() => self.poll_am(clk, now),
             0 | 2 | 4..=6 => self.poll_ac(clk, now),
             1 | 3 => self.poll_dcv(clk),
@@ -4200,7 +4222,7 @@ impl Dmm {
 
     /// Diode beep patterns through the HY3131 CMP pin buffer (R20 0xb4 / 0xb0).
     fn diode_beep(&mut self, now: u64) {
-        if self.mode != 12 || now < self.beep_next {
+        if self.mode != 12 || now < self.beep_next || src::active() {
             return;
         }
         let (on, step, max_e) = match self.beep_class {
