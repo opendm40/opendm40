@@ -2258,7 +2258,7 @@ fn main() {
             let mut tr = gesture::Tracker::new();
             let mut v = vec![];
             let pt = |p: (u16, u16)| touch::Point { x: p.0, y: p.1 };
-            tr.synth_drag(pt(p0), pt(p1), 300, hold, 1000, |g| {
+            tr.synth_drag(pt(p0), pt(p1), 300, hold, 0, 1000, |g| {
                 v.push(g);
                 matches!(g, G::Down(_) | G::Drag(..))
             });
