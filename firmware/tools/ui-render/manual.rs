@@ -248,6 +248,7 @@ pub fn run(out: &str) -> usize {
         let rc = ui::RateChip { rate: 1, period_ms: 430, applies: false };
         host::reset(0);
         power_page(pcs[0].1, 0, sentinel::Alert::None, rc);
+        ui::status_right(&status_real());
         ui::pw::entry_dialog(6.0, 30);
         save1(out, "power-wiring");
         host::reset(0);
