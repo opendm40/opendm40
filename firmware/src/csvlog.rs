@@ -10,7 +10,7 @@
 //! (virtual LOGS/LOG%03u.CSV on the read-only USB volume, SCPI MMEM:DATA?,
 //! tools/dlog.py) and is byte for byte what this module wrote before DLG:
 //! CRLF line ends, '.' decimal point, ASCII only:
-//!   # Alientek DM40A, opendm40 0.1.0, function DC V, range AUTO, started uptime 12.345 s
+//!   # Alientek DM40A, opendm40 0.1, function DC V, range AUTO, started uptime 12.345 s
 //!   # time_s = seconds since the start of this recording (no real-time clock); empty value = overload
 //!   time_s,value,unit,flags
 //!   0.250,1.23456,V,
@@ -138,11 +138,7 @@ const NONE: u32 = u32::MAX;
 const STEP0: Step = Step { started: false, phase: 0, page: 0, dirty: 0, erase: false, t0: 0 };
 /// New rows are committed at least this often (ms).
 pub const COMMIT_MS: u64 = 60_000;
-const MODEL: &str = "DM40A";
-const FW: &str = match option_env!("CARGO_PKG_VERSION") {
-    Some(v) => v,
-    None => "dev",
-};
+const FW: &str = crate::ident::VERSION;
 
 /// Row FIFO (formatted text). The RAM test image has no SRAM to spare.
 const FIFO: usize = 8192;
@@ -414,7 +410,7 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     let mut h = [0u8; 384];
     let mut w = W { b: &mut h, n: 0 };
     w.s("# Alientek ");
-    w.s(MODEL);
+    w.s(crate::ident::model_name());
     w.s(", opendm40 ");
     w.s(FW);
     w.s(", function ");

@@ -32,7 +32,9 @@
 //! truncated files) show "Unsupported format".
 //!
 //! Logs are LOG*.DLG (compact binary, dlog.rs; their CSV exists only as the
-//! export on LUN 1 / MMEM:DATA?), read chunk by chunk, every row.
+//! export on LUN 1 / MMEM:DATA?), read chunk by chunk, every row. Scope
+//! records (SCOPE/SCOP*.DLG) and fast-logger files (FAST*.DLG) are not
+//! shown, and the count (title bar, pages) leaves them out.
 //! Log tiles: function and duration, a sparkline of value vs time, the row
 //! count. The file is read twice, one chunk per pass: pass A for count /
 //! min / max / average / time span, pass B to draw (x = time).
@@ -1640,14 +1642,26 @@ impl Gallery {
         let r = csvlog::list_on(disk, &mut []);
         let st = match r {
             Ok(c) => {
-                if c.total as u32 != self.total || c.free_bytes != self.free {
-                    self.paint |= P_INFO | P_NAV;
-                }
-                self.total = c.total as u32;
-                self.free = c.free_bytes;
                 let buf = &mut calbackup::scratch()[0];
                 self.v = if disk.read_block(0, &mut buf[..]) { parse_bpb(&buf[..], disk.block_count()) } else { None };
-                if self.v.is_some() { St::Ok } else { St::Error }
+                // The count of what the gallery shows (S*.BMP, LOG*.DLG: the
+                // directories `scan` reads): csvlog's catalog also counts
+                // the SCOPE/ and FAST*.DLG files, which have no tile here.
+                let mut total = 0u32;
+                let ok = match self.v {
+                    Some(v) => crate::fatdir::for_each(disk, &v, &[&crate::fatdir::LOGS, &crate::fatdir::SHOTS], buf, &mut |_, _, e| {
+                        total += kind_of(e).is_some() as u32;
+                        true
+                    })
+                    .is_ok(),
+                    None => false,
+                };
+                if total != self.total || c.free_bytes != self.free {
+                    self.paint |= P_INFO | P_NAV;
+                }
+                self.total = total;
+                self.free = c.free_bytes;
+                if ok { St::Ok } else { St::Error }
             }
             Err(GErr::Busy) => {
                 self.need |= N_LIST;

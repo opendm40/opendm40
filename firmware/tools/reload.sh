@@ -12,7 +12,10 @@
 # the file and deletes it), wait for opendm40 to come back and check with
 # DBG:BOOT? that the loader marker is the header of the new file ("installed
 # OK"). A running opendm40 without DBG:UPLOAD (older build): staged on its
-# writable USB disk as dm40_fwrs.bin instead (mount, copy, verify, eject).
+# writable USB disk as dm40_opendm40_v<version>.bin instead (mount, copy,
+# verify, eject). That is also the name staged on the stock / loader disk
+# (--from-stock); <version> as *IDN? shows it (tools/fw-version.sh). Any
+# dm40*.bin name installs: the loader takes the first one in the root.
 #
 # Options:
 #   --no-build      do not build, use the existing image
@@ -205,7 +208,7 @@ else
         die "build arguments given with --no-build/--image: ${ARGS[*]}"
     fi
     IMG=${IMAGE:-$FW/opendm40.bin}
-    NAME=dm40_fwrs.bin
+    NAME=dm40_opendm40_v$("$FW/tools/fw-version.sh").bin
 fi
 [ -f "$IMG" ] || die "$IMG not found"
 check_image "$IMG"

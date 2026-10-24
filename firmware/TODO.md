@@ -3266,3 +3266,29 @@ Emulator (emu/):
       5 V false A-JACK sounded the loud alarm at night): ohm / continuity / diode / cap / the
       resistive temperature sensors set Sentinel::soft; danger keys on ajack_alarm() (doc 4.10
       row). loudtest ajack-res / ajack-cont FAIL on e3e81d4, pass on sentinel2.
+
+## Owner decisions 2026-10-24 (batch, delegated)
+
+- [x] 1. Install file `dm40_opendm40_v<version>.bin` (build.sh writes it next to opendm40.bin,
+      reload.sh stages it, README.TXT / BACKUP.TXT / READMEs name it; a release asset
+      `dm40_opendm40_v<version>[-preN].bin`). Any dm40*.bin still installs: vwrite matches the 8.3
+      alias (a long name's alias, DM40_O~1.BIN, starts with DM40; fatren-test copies
+      dm40_opendm40_v0.1.bin), upload.rs always writes DM40FW.BIN, the FS-loader takes the first
+      dm40*.bin (dm40_fwrs.bin, also a long name, installed from the loader screen 2026-10-13).
+- [x] 2. One version: Cargo.toml 0.1.0 -> "0.1" (src/ident.rs, tools/fw-version.sh) for *IDN?, the
+      34401A emulation ("HEWLETT-PACKARD,34401A,0,opendm40 0.1"), Settings > Device, README.TXT,
+      BACKUP.TXT, the CSV headers (with the calibration record's model). sigrok 34401A path in the
+      emulator: `sigrok-cli -d scpi-dmm:conn=tcp-raw/...` read samples.
+- [x] 3. Power-meter limit 6 A / 30 s in the docs and the wiring render (the code's default).
+- [x] 4. FUSE? hint in AC A (0 A below 5 % of the range for 60 s): kept as it is.
+- [x] 5. SCPI: IEEE 488.2 suffixes (M milli, MA mega, MHZ / MOHM mega, units per parameter); a bad
+      set value leaves the setting and queues -224 / -109 / -222 (no query reply); error queue of 8
+      with standard codes, SYST:ERR:COUN?, *CLS clears it; -108 / -102; DIAG refused over
+      Bluetooth. tools/scpi-test (host), emu/usbtmc_stress.py (compound cases).
+- [x] 6. UI: CH1 "Type Vol/Cur" removed; AUTO does nothing on the generator page; scope CSV with
+      the real model, a Wave view current record has time_s,amperes; gallery count = what it shows.
+- [x] 7. 60 mV (DC / AC mV r0): on the range page ("60mV"), SCPI (VOLT:RANG 0.06 / MIN), and the
+      mV-first AUTO steps 600 mV -> 60 mV below 58.3 mV, back above 61.8 mV (the stock factors;
+      the stock has the row, no item and only up-steps in mV). emu/hy3131/mvrangetest.py.
+      AUTO+ never enters mV (unchanged). Untested: on the device; the Wave view opened on 60 mV
+      (its V/div steps start at 600 mV).

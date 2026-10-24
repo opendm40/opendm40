@@ -531,7 +531,7 @@ impl App {
     pub fn new(clk: &mut Clock) -> Self {
         scope_page::sp_init();
         let mut dmm = Dmm::new();
-        crate::scpi::set_model(dmm.model(), Dmm::model_raw());
+        crate::ident::set_model(dmm.model(), Dmm::model_raw());
         dmm.select(clk, 1);
         buzzer_init();
         let mut a = App {
@@ -2120,6 +2120,7 @@ impl App {
         } else {
             let (m, r) = (self.dmm.hy_mode(), self.dmm.range() as u8);
             Some(match m {
+                2 | 3 if r == 0 => 5,
                 2 | 3 => 0,
                 0 | 1 => r + 1,
                 4..=9 => (2 - (m - 4) % 3) * 2 + r,
@@ -3153,6 +3154,10 @@ impl App {
             },
             // The inrush page holds the 10 A range: no autorange.
             2 if self.view == View::Inrush => self.beep(now, 300),
+            // The generator's Signal page (and its keypad) has no AUTO
+            // function: the key does nothing there (it used to set the
+            // DMM's autorange).
+            2 if self.view == View::Gen || (self.view == View::Keypad && !self.kp_dmm()) => {}
             2 => {
                 self.meter.rel_off();
                 self.meter.set_hold(false);
@@ -3943,7 +3948,7 @@ impl App {
                 match i {
                     _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
                     Some(i) => {
-                        self.dmm.set_range(clk, Some(i as u8));
+                        self.dmm.set_range(clk, Some(s::range_item_code(cur, i)));
                         self.meter.rel_off();
                     }
                     None => out.set_err("Data out of range"),

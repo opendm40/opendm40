@@ -107,10 +107,7 @@ pub const NF: usize = FILES.len() + 2;
 /// Upper bound of BACKUP.TXT (asserted against the worst case below).
 const TXT_MAX: u32 = 4096;
 const UID_ADDR: u32 = 0x1FFF_7A10;
-const VERSION: &str = match option_env!("CARGO_PKG_VERSION") {
-    Some(v) => v,
-    None => "?",
-};
+const VERSION: &str = crate::ident::VERSION;
 
 /// Fixed clusters: the five subdirectories (one cluster each), README.TXT,
 /// then the INFO/ files from C_FILES.
@@ -1380,26 +1377,27 @@ fn readme(base: usize, out: &mut [u8]) -> u32 {
     w.s(b"Mode (meter: Settings 3/3, \"USB disk\"):\r\n");
     w.s(b"Files live (default, read-only): recordings and screenshots saved\r\n");
     w.s(b"while the disk is mounted appear at once (refresh the folder, F5).\r\n");
-    w.s(b"PC can edit: delete files and copy a firmware file from the PC (see\r\n");
-    w.s(b"below); new files then appear after an eject / re-plug. A change\r\n");
-    w.s(b"applies at the next USB plug (unplug, plug in again); power-on\r\n");
-    w.s(b"starts in Files live.\r\n\r\n");
-    w.s(b"Delete (PC can edit): delete a file in LOGS, SCOPE or SHOTS here and\r\n");
-    w.s(b"it is deleted on the meter (moved to the trash: at the eject). In any\r\n");
-    w.s(b"mode: on the meter (Gallery), or over USB/SCPI: MMEM:DEL.\r\n");
-    w.s(b"Nothing else can be changed: other files copied here are not kept\r\n");
-    w.s(b"(gone at the next eject / re-plug), INFO and DEBUG are read-only.\r\n\r\n");
-    w.s(b"Firmware update (PC can edit): copy the update file (dm40*.bin, e.g.\r\n");
-    w.s(b"dm40fw.bin) here, next to this README. The meter checks it and asks\r\n");
-    w.s(b"\"Install it now?\": Yes installs it (the meter restarts into the\r\n");
-    w.s(b"vendor loader, then into the new firmware), No discards it. In any\r\n");
-    w.s(b"mode: tools/reload.sh (opendm40 repository: DBG:UPLOAD + DBG:UPDATE\r\n");
-    w.s(b"over USBTMC).\r\n");
-    w.s(b"Without the tools (also when the meter does not start): from off,\r\n");
-    w.s(b"hold the power key ~4 s until the beep and 0.5 s more. The vendor\r\n");
-    w.s(b"loader's update screen shows its own USB disk: copy the update file\r\n");
-    w.s(b"there as dm40fw.bin (INFO\\FIRMWARE.BIN = the running firmware) and\r\n");
-    w.s(b"press \"update\".\r\n");
+    w.s(b"PC can edit: delete files and copy a firmware file (below); new files\r\n");
+    w.s(b"then appear after an eject / re-plug. A mode change applies at the\r\n");
+    w.s(b"next USB plug; power-on starts in Files live.\r\n");
+    w.s(b"\r\n");
+    w.s(b"Delete (PC can edit): a file deleted in LOGS, SCOPE or SHOTS here is\r\n");
+    w.s(b"deleted on the meter. One moved to the trash is deleted at the eject,\r\n");
+    w.s(b"unless taken out of the trash before (the trash itself is not kept).\r\n");
+    w.s(b"In any mode: on the meter (Gallery), or over USB/SCPI: MMEM:DEL.\r\n");
+    w.s(b"Other files copied here are not kept; INFO and DEBUG are read-only.\r\n");
+    w.s(b"\r\n");
+    w.s(b"Firmware update (PC can edit): copy the update file here under any\r\n");
+    w.s(b"dm40*.bin name, e.g. dm40_opendm40_v");
+    w.s(VERSION.as_bytes());
+    w.s(b".bin. The meter checks it and\r\n");
+    w.s(b"asks \"Install it now?\": Yes restarts into the vendor loader, which\r\n");
+    w.s(b"installs it; No discards it. In any mode: tools/reload.sh (opendm40\r\n");
+    w.s(b"repository: DBG:UPLOAD + DBG:UPDATE over USBTMC).\r\n");
+    w.s(b"If the meter does not start: from off, hold the power key ~4 s until\r\n");
+    w.s(b"the beep and 0.5 s more. The vendor loader's update screen shows its\r\n");
+    w.s(b"own USB disk: copy the update file there (any dm40*.bin name;\r\n");
+    w.s(b"INFO\\FIRMWARE.BIN = the running firmware) and press \"update\".\r\n");
     debug_assert!(w.n + 2 <= README_LEN);
     while w.n + 2 < README_LEN {
         w.c(b' ');
@@ -1509,7 +1507,9 @@ fn describe(st: &State, base: usize, out: &mut [u8]) -> usize {
             }
             w.s(b"\r\n\r\nFIRMWARE.BIN = the running firmware as its vendor update file. To\r\n");
             w.s(b"reinstall it: tools/reload.sh --image FIRMWARE.BIN, or copy it as\r\n");
-            w.s(b"dm40fw.bin to the vendor loader's own USB disk (see README.TXT).\r\n");
+            w.s(b"dm40_opendm40_v");
+            w.s(VERSION.as_bytes());
+            w.s(b".bin to the vendor loader's own USB disk (see README.TXT).\r\n");
         }
         None => w.s(b"; no FIRMWARE.BIN (no valid loader record at 08008000).\r\n"),
     }

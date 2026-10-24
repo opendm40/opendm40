@@ -249,7 +249,7 @@ pub fn run(out: &str) -> usize {
         host::reset(0);
         power_page(pcs[0].1, 0, sentinel::Alert::None, rc);
         ui::status_right(&status_real());
-        ui::pw::entry_dialog(6.0, 30);
+        ui::pw::entry_dialog(dmm::pw::I_CONT_DEFAULT, dmm::pw::T_LIM_DEFAULT);
         save1(out, "power-wiring");
         host::reset(0);
         let mut p = dmm::pw::Pw::new();

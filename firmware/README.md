@@ -7,7 +7,7 @@ are in the [root README](../README.md). Paths below are relative to
 ## Build
 
 ```
-./build.sh                    # -> opendm40.bin (needs ../toolchain)
+./build.sh                    # -> opendm40.bin + dm40_opendm40_v<version>.bin (needs ../toolchain)
 tools/reload.sh               # build, upload over USBTMC, install, check
 tools/ui-render/run.sh OUT    # render every screen to PNG + layout check
 tools/scpi-doc-check/run.sh   # SCPI parser vs docs/manual/scpi-reference.md
@@ -21,6 +21,15 @@ the flash / SRAM budgets, and packs the body into the stock update format with
 [`../stock/dm40fw.py`](../stock/dm40fw.py). The emulator
 ([emu/README.md](../emu/README.md)) needs a flash dump of your own meter (not
 in the repo).
+
+The version is the package version in [`Cargo.toml`](Cargo.toml) without a
+`.0` patch (0.1.0 -> `0.1`, [`src/ident.rs`](src/ident.rs),
+[`tools/fw-version.sh`](tools/fw-version.sh)): `*IDN?`, Settings > Device,
+the USB disk texts, the CSV headers and the install file name
+`dm40_opendm40_v<version>.bin` take it (a release asset:
+`dm40_opendm40_v<version>[-preN].bin`, from a version such as 0.1.0-pre1). Any `dm40*.bin` name installs: the
+FS-loader takes the first `dm40*.bin` in the root, and a long name's 8.3
+alias (`DM40_O~1.BIN`) starts with `DM40` too.
 
 ### Toolchain
 

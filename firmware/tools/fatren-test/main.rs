@@ -213,6 +213,8 @@ mod lcd {
     }
 }
 
+#[path = "../../src/ident.rs"]
+mod ident;
 #[path = "../../src/screenshot.rs"]
 #[allow(dead_code)]
 mod screenshot;
@@ -1248,15 +1250,17 @@ fn main() {
     if a[2] == "scopecsv" {
         // A synthetic scope record (sine, 10-bit codes) of n samples as
         // SCOPnnn.CSV, driven slice by slice; a screenshot request while it
-        // runs is refused.
+        // runs is refused. "amps" after n: a current record (the Wave view's
+        // A function): its column is "amperes".
         let n: usize = a.get(3).map_or(26 * 1024, |v| v.parse().unwrap());
+        let amps = a.get(4).is_some_and(|v| v == "amps");
         let rec: &'static mut [u16] = Box::leak(vec![0u16; n].into_boxed_slice());
         for (i, c) in rec.iter_mut().enumerate() {
             *c = (512.0 + 400.0 * (i as f32 * 0.01).sin()) as u16;
         }
         let mut h = scope_csv::Hdr::new();
         h.s("# test record\r\n");
-        scope_csv::set(rec, -5.0, 10.0 / 1023.0, 1.0e6, n / 2, &h);
+        scope_csv::set(rec, -5.0, 10.0 / 1023.0, 1.0e6, n / 2, &h, amps);
         assert!(screenshot::start_csv());
         let refused = !screenshot::start();
         let mut slices = 0;

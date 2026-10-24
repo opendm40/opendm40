@@ -48,7 +48,7 @@ on the first byte of each request:
 - SCPI over Bluetooth works only while Bluetooth is enabled in the meter's
   settings (`app.bt_on`), like the phone-app protocol.
 
-## Security: DBG:* is refused
+## Security: DBG:* and DIAG are refused
 
 Bluetooth is an unauthenticated radio link: anyone in range can connect. The
 Bluetooth transport is untrusted (`ScpiPort::trusted() == false`). Any message
@@ -58,8 +58,11 @@ covers `DBG:UPDATE` / `DBG:RECOVER` (they zero the loader marker inside
 `Scpi::handle` on native builds), `DBG:RESET`, `DBG:RELEASE`, input injection
 (`DBG:KEY`, `DBG:SWIPE D,2` = power off), the debug reads, and any `DBG:*`
 added later, including the ones the parser routes as `Out::Instr`
-(`DBG:GRAB`, `DBG:GEST?`). No part of the message runs and no reply is sent;
-`SYST:ERR?` then reports `-100,"Command protected"`. main.rs also refuses
+(`DBG:GRAB`, `DBG:GEST?`). `DIAG?` / `DIAG:DAC?` / `DIAG:PWM?` (bench
+diagnostics: the generator DAC sampled, a 2 ms busy loop on PB14) are
+refused the same way (`UNTRUSTED_DENY` = DBG, DIAG). No part of the message
+runs and no reply is sent; `SYST:ERR?` then reports
+`-203,"Command protected"`. main.rs also refuses
 `scpi::Out::Dbg` from an untrusted port, as a backstop.
 The binary protocol has no memory read/write command in opendm40 (`Bt::serve`
 handles cmd 00..09 only; the 0x0B memory command exists only in the patched
@@ -67,7 +70,7 @@ stock firmware of the memrw kit).
 
 No other SCPI root is dangerous today (the roots are `*`-commands, MEAS/CONF/
 READ/FETC/FUNC/SENS/RATE, the DMM function names, CALC, SYST, SOUR/OUTP, TIM/
-CHAN/TRIG/RUN/STOP/SING/SCOP/WAV, LOG, DIAG, MMEM). `MMEM:DELete` (deletes a
+CHAN/TRIG/RUN/STOP/SING/SCOP/WAV, LOG, MMEM). `MMEM:DELete` (deletes a
 screenshot / CSV file on the USB disk) is executed by main.rs, which refuses
 it from an untrusted port (`Command protected`); `MMEM:CAT?` and `LOG:CSV`
 work over Bluetooth. A new command that can write flash or reset the meter

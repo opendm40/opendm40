@@ -876,7 +876,7 @@ impl App {
         let b = self.scope.volts(1.0) - a;
         let mut h = crate::scope_csv::Hdr::new();
         let mut t = [0u8; 16];
-        h.s("# Alientek DM40A, opendm40 ").s(option_env!("CARGO_PKG_VERSION").unwrap_or("dev")).s(", scope record (no real-time clock)\r\n");
+        h.s("# Alientek ").s(crate::ident::model_name()).s(", opendm40 ").s(crate::ident::VERSION).s(", scope record (no real-time clock)\r\n");
         let wave = self.scope.wave_on();
         let amps = wave && self.scope.wave_scale_now().amps;
         let unit = if amps { "A" } else { "V" };
@@ -918,7 +918,7 @@ impl App {
         } else {
             "# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n"
         });
-        crate::scope_csv::set(rec, a, b, fs as f32, t0, &h);
+        crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
             self.toast(now, "Save CSV Error", false);
             return;
