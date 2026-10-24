@@ -125,6 +125,7 @@ Every key press also silences the [danger alarm](#the-danger-alarm).
 | Swipe down with three fingers | Anywhere, while the touch lock is off | [Screenshot](#screenshots) to the disk |
 | Swipe down with two fingers | Anywhere, while the touch lock is off | Asks **Power off?** Tap **Yes** to switch off. The question goes away by itself after 3 s. |
 
+
 ![Swipe down with two fingers: the power-off question](img/power-off.png)
 
 *Swipe down with two fingers: the power-off question.*
@@ -435,6 +436,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   shows a small **ON** tag. The 60 Ω range always uses the normal current.
 - While the meter looks for the range, the values are grey.
 
+
 | ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with Low current on](img/range-ohm.png) |
 |---|---|
 | 4.7 kΩ | The range page with Low current on |
@@ -444,6 +446,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Shows the resistance with two decimals; **0L** above 1000 Ω.
 - A negative result means an external voltage on the circuit: the meter
   shows [**LIVE?**](#the-alerts).
+
 
 ![Continuity: a short](img/dmm-cont.png)
 
@@ -457,6 +460,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
   readings only.
 
+
 ![A silicon diode](img/dmm-diode.png)
 
 *A silicon diode.*
@@ -467,6 +471,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Large capacitors take longer: from the 600 µF range up the meter first
   discharges, then measures.
 
+
 ![A 100 nF capacitor](img/dmm-cap.png)
 
 *A 100 nF capacitor.*
@@ -476,6 +481,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - The frequency, with the duty cycle in the small row.
 - A new value every 0.35 s. **--** until the first clean result.
 - MF opens the Hold & Limits page (there are no range choices).
+
 
 ![1 kHz, 50 % duty](img/dmm-hz.png)
 
@@ -550,6 +556,7 @@ to a high voltage applied while the meter sat on the mV range.
 - **0L** in the reading; the bargraph turns red with an **OL** mark.
 - An overload is never stored in MIN/MAX/AVG, the chart or the history.
 
+
 ![Overload](img/dmm-ol.png)
 
 *Overload.*
@@ -580,6 +587,7 @@ so a change shows at once.
   continuity, diode) the speed is fixed: the chip shows **n/a**; a tap on the
   reading shows **Fixed rate in this function**.
 - Also in **Settings > More > DMM rate**.
+
 
 ![A tap on the reading steps the rate](img/dmm-rate.png)
 
@@ -640,6 +648,7 @@ the box shows the REL value. Tap again to turn it off.
   AUTO coupling switches.
 - Turning REL on or off restarts MIN/MAX/AVG.
 
+
 ![REL: 4.8176 V is the zero](img/dmm-rel.png)
 
 *REL: 4.8176 V is the zero.*
@@ -654,6 +663,7 @@ since they were last reset, and a timer **T hh:mm:ss**.
   the meter does not [switch itself off](#power-battery-and-sleep) while the
   session runs. Tap again to stop.
 - **Long press the column**: reset MIN/MAX/AVG.
+
 
 ![A MIN/MAX/AVG session running for 5 min 12 s](img/dmm-minmax.png)
 
@@ -670,6 +680,7 @@ shows: **Bargraph** (default) or **History**.
   and keeps moving during HOLD.
 - **History**: five boxes. Tap the row to store the shown value (also a held
   value); the newest is orange. Long press the row to clear it.
+
 
 ![The history row: four values stored](img/dmm-history.png)
 
@@ -783,6 +794,7 @@ How they end:
 
 Sounds: A-JACK and A-PROT sound the [danger alarm](#the-danger-alarm).
 LIVE? beeps once. OVLD beeps once (300 ms). The others are silent.
+
 
 | ![LIVE? in Ω: a voltage on the circuit](img/alert-live.png) | ![OVLD: the meter moved to the 10 A shunt](img/alert-ovld.png) |
 |---|---|
@@ -925,6 +937,7 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   default; **MF > Display > Roll**). Without roll, the slowest timebase is
   1 s/div. Roll-only timebases are orange in the list.
 
+
 | ![A tap on the bottom-left corner: one step slower](img/scope-tb-corner.png) | ![The timebase list](img/scope-tb-list.png) |
 |---|---|
 | A tap on the bottom-left corner: one step slower | The timebase list |
@@ -946,6 +959,7 @@ in the left or right half of the graph steps), **Off**.
   - **Color** of the trace.
 - Bandwidth: owners report flat to about 3 MHz.
 
+
 | ![Zoomed in: 500 mV/div](img/scope-vdiv.png) | ![The channel popup: coupling AC](img/scope-ch1.png) |
 |---|---|
 | Zoomed in: 500 mV/div | The channel popup: coupling AC |
@@ -962,6 +976,7 @@ in the left or right half of the graph steps), **Off**.
 - **Double tap** where a tap does nothing: the trace to the centre and the
   trigger position to 50 %.
 
+
 | ![Dragging the trigger level: T on the right edge](img/scope-trig-level.png) | ![Dragging the trigger position: T on the top edge](img/scope-trig-pos.png) |
 |---|---|
 | Dragging the trigger level: T on the right edge | Dragging the trigger position: T on the top edge |
@@ -973,6 +988,7 @@ Open the Trigger tab: tap **TRIG**, or the trigger in the top bar.
 | **Edge** | Rising, Falling. |
 | **Mode** | **Auto** (shows the signal also without a trigger), **Normal** (waits for a trigger), **Single** (one frame, then STOP). Choosing a mode also starts the scope. |
 | **Type** | **Edge**, **Pulse**, **Runt**. |
+
 
 | ![The Trigger tab](img/scope-trig-tab.png) | ![Pulse: wider than 400 µs](img/scope-trig-pulse.png) |
 |---|---|
@@ -1034,6 +1050,7 @@ menu.
   and say **AUTO: DC (no AC signal)**.
 - Nothing found: **AUTO: no signal found**, the settings stay.
 
+
 | ![After auto-set on a 1 kHz square](img/scope-autoset.png) | ![Auto-set found nothing](img/scope-nosignal.png) |
 |---|---|
 | After auto-set on a 1 kHz square | Auto-set found nothing |
@@ -1043,6 +1060,7 @@ menu.
 Press **MF**: the **Measure** tab lists 20 measurements. Tap up to four;
 tap a selected one to remove it. **Clear** removes all, **Default**
 restores Freq, Vp-p, Cycl, Vrms.
+
 
 ![The Measure tab](img/scope-measure.png)
 
@@ -1075,6 +1093,7 @@ Tap **CUR** at the bottom of the graph: **CUR X** (two time cursors), **CUR
 Y** (two voltage cursors), off. The measurement row shows X2-1 and Xf, or
 Y2-1. Drag the **1** / **2** markers or the cursor lines.
 
+
 | ![X cursors: 800 µs apart](img/scope-cur-x.png) | ![Y cursors: 3.01 V apart](img/scope-cur-y.png) |
 |---|---|
 | X cursors: 800 µs apart | Y cursors: 3.01 V apart |
@@ -1095,6 +1114,7 @@ over the trace; tap the button again while its popup is open to turn it off.
   **FFT Unit** (dB or Vrms).
 - 2048 points. No FFT in roll mode.
 
+
 | ![FFT of a 1 kHz sine](img/scope.png) | ![The math popup, Other: window and unit](img/scope-math.png) |
 |---|---|
 | FFT of a 1 kHz sine | The math popup, Other: window and unit |
@@ -1109,6 +1129,7 @@ samples) stays in memory:
 - drag sideways to pan through it;
 - double tap to centre it on the trigger point.
 
+
 ![Stopped, zoomed in to 100 µs/div; the brackets show the part on screen](img/scope-stop.png)
 
 *Stopped, zoomed in to 100 µs/div; the brackets show the part on screen.*
@@ -1117,6 +1138,7 @@ samples) stays in memory:
 
 **MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
 **Brightness** and **Grid** intensity.
+
 
 | ![The Display tab](img/scope-display.png) | ![Roll mode at 500 ms/div](img/scope-roll.png) |
 |---|---|
@@ -1131,6 +1153,7 @@ samples) stays in memory:
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
+
 
 ![The Settings tab](img/scope-settings.png)
 
@@ -1175,6 +1198,7 @@ To open it:
 - Auto-set is not available (**AUTO: MCX scope only**).
 - The multimeter reading is not shown while the Wave view runs; the
   multimeter's alerts and the Bluetooth phone protocol pause.
+
 
 | ![2 ms/div: one period](img/wave-2ms.png) | ![A 1.5 A current, 2 A/div](img/wave-amps.png) |
 |---|---|
@@ -1235,6 +1259,7 @@ The graph, the right panel and the scope menus work as on the
 [oscilloscope page](#oscilloscope). Scope auto-set is not available here:
 AUTO belongs to the multimeter.
 
+
 ![The function band, opened by a tap on the strip](img/combined-band.png)
 
 *The function band, opened by a tap on the strip.*
@@ -1286,6 +1311,15 @@ To use it:
 The output is off after power-on. On the very first start the generator is
 set as on the stock firmware: square, 2 MHz, 3 Vpp.
 
+
+| ![Square, 1 kHz, 25 % duty](img/gen-square.png) | ![Triangle, 100 Hz, 2 Vpp around 1.5 V](img/gen-triangle.png) |
+|---|---|
+| Square, 1 kHz, 25 % duty | Triangle, 100 Hz, 2 Vpp around 1.5 V |
+
+![Ramp, 10 kHz](img/gen-ramp.png)
+
+*Ramp, 10 kHz.*
+
 ### Frequency and amplitude limits
 
 | Setting | Range |
@@ -1305,6 +1339,11 @@ set as on the stock firmware: square, 2 MHz, 3 Vpp.
   slightly from the typed one: 3 decimals below 1 kHz, 2 below 100 kHz, 1
   below 1 MHz.
 - The duty box shows the real duty cycle.
+
+
+![A sine set to 75 kHz runs at 50 kHz](img/gen-clamped.png)
+
+*A sine set to 75 kHz runs at 50 kHz.*
 
 ### Offset
 
@@ -1326,6 +1365,11 @@ Tap a value box. The keypad opens with the current value selected:
   **K** (kHz) or **M** (MHz). To get 32.768 kHz, type `32768` and **H**;
 - Vpp, offset and duty: digits and a decimal point;
 - **OK** applies; a tap outside the keypad cancels.
+
+
+| ![The frequency keypad](img/gen-keypad.png) | ![The Vpp keypad](img/gen-keypad-vpp.png) |
+|---|---|
+| The frequency keypad | The Vpp keypad |
 
 ## Power meter
 
@@ -1380,6 +1424,11 @@ ranging...** (a few seconds).
 
 In AC+DC the page also shows the DC and AC parts: under V, under I and under
 P (`DC x W + AC y W`). The parts add up to the totals.
+
+
+| ![DC: a 12 V supply into a 2 A load](img/power-dc.png) | ![The main value stepped to Wh](img/power-wh.png) |
+|---|---|
+| DC: a 12 V supply into a 2 A load | The main value stepped to Wh |
 
 ### Coupling: DC, AC, AC+DC
 
@@ -1441,6 +1490,11 @@ Above 6 A the right column shows a countdown (**I>LIM 23s**, amber). After
 beeps every 2 s until the current falls below 5.7 A. The limit and the time
 can be changed over SCPI (`POW:LIM`).
 
+
+![6.8 A: the countdown in the right column](img/power-limit.png)
+
+*6.8 A: the countdown in the right column.*
+
 Above 10 A for 1 s the [danger alarm](#the-danger-alarm) sounds.
 
 ## Inrush current
@@ -1449,6 +1503,10 @@ Captures the current of a load that is switched on: motors, lamps,
 capacitive power supplies.
 
 To open: **A** function, **MF**, **Inrush**.
+
+| ![Armed](img/inrush-armed.png) | ![A captured inrush: 7.9 A RMS, 11.8 A peak](img/inrush.png) |
+|---|---|
+| Armed | A captured inrush: 7.9 A RMS, 11.8 A peak |
 
 1. Connect the load through the **A** jack and **COM** (the 10 A range).
 2. Set the **Trigger** step with **-** / **+**: 0.2, 0.5, 1 (default), 2, 5
@@ -1497,6 +1555,11 @@ the meter shows **Saved LOG007.DLG** (with the file's number).
 The quick way uses the interval and duration last set on the Record page.
 If the interval there is **Fast**, the swipe still starts a normal recording
 with the last other interval.
+
+
+| ![A recording starts](img/rec-start.png) | ![REC in the status bar while it runs](img/dmm-rec.png) |
+|---|---|
+| A recording starts | REC in the status bar while it runs |
 
 ### The Record page
 
@@ -1569,11 +1632,21 @@ current functions.
    left** in AC V. In other functions it shows **-- (DC/AC V or A only)**.
 3. Set the **Duration**, then tap **Start recording**.
 
+
+![Interval Fast in AC V](img/record-fast.png)
+
+*Interval Fast in AC V.*
+
 The meter first prepares the disk (**Preparing disk**, a percentage; tap to
 cancel). Then the screen shows the **DATA LOGGING** panel: the sample rate,
 the sample count and the file's size. The rest of the screen is paused to
 leave the time to the recorder. Tap the panel to stop. The meter shows
 **Saved FAST003.DLG**.
+
+
+![The DATA LOGGING panel](img/fast-panel.png)
+
+*The DATA LOGGING panel.*
 
 The file appears on the USB disk as `LOGS/FAST003.CSV` with the columns
 `t_s,raw,value_<unit>,lost_before` (AC functions) or `t_s,raw,lost_before`
@@ -1670,6 +1743,11 @@ BMP, the same format as on the stock firmware.
 
 Messages: **Disk busy** (another recording or file job is running; try
 again), **Disk full**, **No disk**, **Screenshot failed**.
+
+
+![A screenshot saved](img/screenshot.png)
+
+*A screenshot saved.*
 
 Over USB, `python3 firmware/tools/dm40dbg.py shot out.png` reads the screen
 straight to the computer ([dm40dbg.py](../../firmware/tools/dm40dbg.py)).
