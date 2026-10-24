@@ -547,6 +547,8 @@ Code work (in this order):
       steps, drag / touch-down sets, -/+ end buttons step 0.1, "Offset 0" resets.  (5ba89b3; verify on device)
 
 ## Backlog (user ideas)
+- [ ] reload.sh --image: the first upload failed twice in a row on 2026-10-24 ("upload failed, nothing
+      installed"), the immediate retry worked both times (once with the Scope view open). Find the cause.
 - [ ] Wave view (scope on the DMM inputs): finer V/div steps (owner 2026-10-24). Today every V/div step
       is a range / divider change. Add intermediate steps that only rescale the screen (e.g. 1-2-5 within one
       range), switching the range / divider only where the next step needs it.
