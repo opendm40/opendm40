@@ -173,8 +173,8 @@ bit-bang loop. Realistic from the main loop: see 2.3.
   (VERIFIED table 6): TCKHI >= 20 ns, TCKLO >= 60 ns, DO ready 60 ns after
   the falling edge -> a symmetric clock may not exceed 6.25 MHz (80 ns low),
   and the 60 ns DO delay leaves 20 ns of margin at that speed *before* the
-  isolator: the SPI crosses a CA-IS3741 digital isolator (BOM, INFERRED in
-  `dm40-feature-request.md` 1.2; ~10-15 ns per direction) -> ~85-100 ns round
+  isolator: the SPI crosses a CA-IS3741 digital isolator (isolation verified
+  by the owner 2026-10-24, [hw/README.md](../../hw/README.md#isolation-boundary); ~10-15 ns per direction) -> ~85-100 ns round
   trip, so **3.125 MHz** (160 ns half period) is the safe setting and 6.25 MHz
   must be proven by read-back (test 6.1).
 * **The 9th clock.** A read is 8 command bits, one blank "read period" clock,
@@ -378,8 +378,9 @@ as the stock AC rows do, or subtract the zero), vs the scope channel's 10-bit
 
 * The DMM side is the isolated domain: HY3131, reference, divider, shunts and
   the banana jacks sit behind a CA-IS3741 digital isolator and VPS8504B
-  isolated supplies (BOM in `dm40-feature-request.md` 1.1/1.2, INFERRED there;
-  the MCU, USB, scope ADC and MCX share the battery ground). Hence a
+  isolated supplies (VERIFIED by the owner 2026-10-24, [hw/README.md Isolation
+  boundary](../../hw/README.md#isolation-boundary); the MCU, USB, scope ADC and MCX share the
+  battery ground, INFERRED). Hence a
   **floating, 1000 V / 10 A waveform channel**: mains-side voltage waveforms,
   current waveforms through the A shunt (half-wave rectifier draw, PWM motor
   current, inrush) with the USB cable connected - none of which the MCX scope
