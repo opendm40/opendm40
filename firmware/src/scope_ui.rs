@@ -87,10 +87,12 @@ pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
 pub const TAB_L: Rect = rect(23, 280, 52, 17);
 pub const TAB_R: Rect = rect(338, 280, 52, 17);
 /// "Corners" tap zones (80 x 73 px, about 13.6 x 12.4 mm); the left one
-/// starts after the strip markers' press zones (x <= 22), the right one
-/// ends before the right-edge trigger-level marker's zone (x >= 391).
+/// starts after the strip markers' press zones (x <= 22). The right one
+/// reaches the frame; the right-edge trigger-level marker's zone wins over
+/// it where they meet (marker priority), and its tab (`TAB_R`) ends before
+/// that marker's column (x 401..412).
 pub const ZONE_L: Rect = rect(23, 228, 80, 73);
-pub const ZONE_R: Rect = rect(311, 228, 80, 73);
+pub const ZONE_R: Rect = rect(333, 228, 80, 73);
 /// `Model::tabs` bits.
 pub const TAB_SHOW_L: u8 = 1;
 pub const TAB_SHOW_R: u8 = 2;
@@ -1798,7 +1800,7 @@ pub fn fft_peak_rect(m: &Model) -> Rect {
     rect(266, m.top() + 34, 144, 17)
 }
 /// Horizontal scale box: bottom row (both views share the frame bottom),
-/// outside the Corners tap zones (x 23..102 / 311..390) and the cursor tab.
+/// outside the Corners tap zones (x 23..102 / 333..412) and the cursor tab.
 pub const FFT_XDIV: Rect = rect(168, 280, 92, 17);
 
 /// The stock FFT label: no fill (the graph background shows through), 1 px

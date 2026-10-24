@@ -877,7 +877,10 @@ fn tap_step_tests(ck: &mut Ck) {
         m.pos = 300;
         m.trig_row = 300;
         ck.t(&format!("mode {mode}: CH1 / level markers clamped at the bottom keep their zone (x <= 22)"), matches!(gp(&m, mode, 15, 292), Press::Marker(true, _)));
-        ck.t(&format!("mode {mode}: trigger level marker zone"), gp(&d, mode, 6, 125) == Press::Marker(true, 1));
+        ck.t(&format!("mode {mode}: trigger level marker zone (right edge)"), gp(&d, mode, 406, 125) == Press::Marker(true, 1) && gp(&d, mode, 6, 125) != Press::Marker(true, 1));
+        let mut m = d;
+        m.trig_row = 300;
+        ck.t(&format!("mode {mode}: trigger level clamped at the bottom wins over the right corner"), gp(&m, mode, 405, 292) == Press::Marker(true, 1));
         ck.t(&format!("mode {mode}: T marker zone"), gp(&d, mode, 214, 30) == Press::Marker(false, 0));
         let mut m = d;
         m.trig_px = 40;
