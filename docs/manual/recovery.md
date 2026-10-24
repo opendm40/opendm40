@@ -91,8 +91,7 @@ before.
 
 ## Known limitations
 
-Not yet tried on a real meter: entering the update loader with the power
-key, the automatic entry after repeated hangs, installing opendm40 over the
-stock firmware's "USB Connect" disk, and the install from the "PC can edit"
-disk. Installing from the update loader's screen and from a running
-opendm40 over USB has been done on a DM40A.
+Untested on a real meter: entering the update loader with the power key,
+the automatic entry after repeated hangs, installing opendm40 over the stock
+firmware's **USB Connect** disk, and the install from the **PC can edit**
+disk.

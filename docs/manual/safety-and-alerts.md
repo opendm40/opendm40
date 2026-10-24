@@ -134,10 +134,8 @@ The check tests the path through the µA and mA shunts, not the 10 A shunt.
 
 ## Known limitations
 
-- None of the alerts with a current through the A jack (A-JACK, A-PROT,
-  OVLD), nor the danger alarm's sound, has been tried on a real meter yet;
-  they work in the emulator. LIVE?, V-JACK?, DC? and the reminder work on a
-  real meter.
+- Untested on a real meter: the alerts that need a current through the A
+  jack (A-JACK, A-PROT, OVLD) and the danger alarm's sound.
 - With 5 V or more on V-COM, Ω and continuity can show a false **A-JACK**
   (without the alarm).
 - The fuse check needs a re-check on a real meter.

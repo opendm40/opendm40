@@ -73,6 +73,5 @@ Tap a value box. The keypad opens with the current value selected:
 
 ## Known limitations
 
-The output has been checked inside the meter, not at the GEN jack: the
-real amplitude, the output impedance and the quality above 50 kHz have not
-been measured.
+Untested: the signal at the GEN jack (the real amplitude, the output
+impedance, the quality above 50 kHz).

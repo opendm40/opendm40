@@ -157,12 +157,9 @@ meter. Tap to turn the page.
 
 ## Known limitations
 
-Keeping the settings has been checked across a restart, not yet across a
-full power-off.
-
-Installing over the stock firmware's "USB Connect" disk (steps above) and the
-update from the "PC can edit" disk have not been tried on a real meter yet.
-Installing from the update loader's screen works.
+Untested on a real meter: keeping the settings across a full power-off (a
+restart keeps them); installing over the stock firmware's **USB Connect**
+disk; the update from the **PC can edit** disk.
 
 ## Next steps
 

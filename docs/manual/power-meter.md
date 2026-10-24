@@ -145,7 +145,6 @@ and restore the A function.
 
 ## Known limitations
 
-The power meter has been used on a real meter only without current; the
-current reading, the sign, PF, the current-limit countdown and the inrush
-capture have only run in the emulator. The usable frequency range of the
-power meter is not specified yet.
+- Untested on a real meter: everything with a current flowing (the current
+  reading, the sign, PF, the current-limit countdown, the inrush capture).
+- The usable frequency range of the power meter is *unknown*.
