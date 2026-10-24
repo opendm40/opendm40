@@ -307,8 +307,10 @@ FMT_HDR, FMT_BLK = 20, 16
 LOG_FORMATS = {'rows': 'ROWS', 'packed': 'PACK', 'dlg': 'DLG'}
 
 
-def log_reply(raw):
-    """(rows, info) of one LOG:DATA? reply in any LOG:FORMat. rows: (seq,
+def log_reply(raw, fmt):
+    """(rows, info) of one LOG:DATA? reply in LOG:FORMat `fmt` ('rows',
+    'packed', 'dlg': the host set it; a ROWS reply can start with the
+    compact formats' magic bytes, so it is not guessed). rows: (seq,
     ts_us, code, lost_before) with ts_us the low 32 bits of the device time
     (PACKed: t0 + round(i / rate), the grid) and lost_before None for ROWS
     (the caller derives it from the stamps); info: {'format', 'left',
@@ -320,9 +322,13 @@ def log_reply(raw):
     d = bytes(raw[6:6 + n])
     if len(d) != n:
         raise IOError('LOG:DATA? block short: %d of %d bytes' % (len(d), n))
-    magic = d[:2]
-    if n < FMT_HDR or magic not in (b'LP', b'LD'):
+    if fmt == 'rows':
         return [(s, t, c, None) for s, t, c in log_records(raw)], {'format': 'rows'}
+    magic = d[:2]
+    if n == 0:
+        return [], {'format': fmt, 'left': 0, 'blocks': 0}
+    if n < FMT_HDR or magic != {'packed': b'LP', 'dlg': b'LD'}[fmt]:
+        raise IOError('LOG:DATA? is not a %s reply: %r' % (fmt, d[:8]))
     ver, src, rate, a, b, left = struct.unpack_from('<BBIffI', d, 2)
     if ver != 1:
         raise IOError('LOG:DATA? reply version %d (this tool reads 1)' % ver)
@@ -462,7 +468,7 @@ def _stream_session(link, args, ad2, t_start):
             nonlocal rows, last_seq, last_ts, wrap
             got = 0
             while True:
-                recs, info = log_reply(link.query_raw('LOG:DATA?'))
+                recs, info = log_reply(link.query_raw('LOG:DATA?'), args.format)
                 # ROWS: 511 records fill a reply; the compact ones say how many are left
                 short = len(recs) < 500 if info['format'] == 'rows' else info['left'] == 0
                 if args.n:

@@ -26,7 +26,7 @@ for name in ('a768', 'wrap384', 'ad1'):
         rows, o, replies, nbytes = [], 0, 0, 0
         while o < len(b):
             n = struct.unpack_from('<I', b, o)[0]
-            r, info = dm40scpi.log_reply(b[o + 4:o + 4 + n])
+            r, info = dm40scpi.log_reply(b[o + 4:o + 4 + n], fmt)
             if r:
                 assert info['format'] == fmt and abs(info['a'] - 0.25) < 1e-7, info
                 replies += 1
