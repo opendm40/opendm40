@@ -118,11 +118,16 @@ To reach the update screen from fw-rs:
   watchdog reset comes ~20 s after the hang, so the two resets can be up to
   ~80 s apart. Checked in the emulator, not yet on the device.
 
+If fw-rs is too broken for any of these: open the case and short the debug
+header's TX pad (PA2) to GND at power-on, see
+[../hw/README.md](../hw/README.md) "Hardware recovery" (owner-checked on the
+device).
+
 Then copy a good image onto the loader's disk as `dm40_fwrs.bin` and press
 "update". `INFO/FIRMWARE.BIN` on the fw-rs USB drive is the running image as
 an update file; keep a copy.
 
-**Back to stock:** copy the official `dm40_v_2_6.bin` (not in this repo)
+**Back to stock:** copy the official `dm40_v_2_6.bin` (`../vendor/dm40_v_2_6.bin`)
 onto the loader's disk and press "update", or run
 `tools/reload.sh --stock FILE` while fw-rs runs (device-checked with patched
 stock). Details: [docs/native-boot.md](docs/native-boot.md).

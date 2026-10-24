@@ -28,8 +28,10 @@ before the application on every boot, so it is a permanent escape hatch.
   the next with `msr msp` + jump through the next stage's vector table. No A/B
   slot, no RAM execution, no jump to the GD32 system (DFU) bootloader. SWD is
   read-locked (option bytes dumped). (`ANALYSIS.md` §1)
-- The ROM bootloader polls **PA2** at boot — it gates a *re-verify*, not a
-  recovery button. (`ANALYSIS.md` §3)
+- The ROM bootloader polls **PA2** at boot: low for the whole poll sends the
+  boot to the FS-loader's install state. PA2 is the "TX" pad of the internal
+  debug header; shorting it to GND is the hardware recovery entry (owner,
+  2026-10-24; procedure in `hw/README.md` "Hardware recovery").
 - **FS-loader** (`0x080a0000`) has **its own USB mass-storage stack + FatFs**,
   runs **before the app on every boot**, calls
   `f_findfirst("/","dm40*.bin")` (`0x080a26c4`) and installs the **first**
@@ -270,12 +272,12 @@ only during its key-hold wait. The "never feed unconditionally" rule
 | Wrong-model update file | installs, but model byte mismatches | model is read from calibration (`0x080C0000` +0x168), labels/ranges only | cosmetic; not a brick |
 | Dead battery mid-update | reset | FS-loader resumes when powered + file present | charge first |
 
-**Hardware backstops (open questions for the user, not blockers):** are the SWD
-pads accessible for an emergency reflash despite read-protection (write may
-still work after a mass-erase)? Is `BOOT0` exposed to enter the GD32 system
-bootloader (USART/USB DFU)? The prior hardware fallback was **shorting the SPI
-flash** to force the FS-loader into a known state. Confirm at least one physical
-backstop exists before Stage 1.
+**Hardware backstops.** Found 2026-10-24 (owner, on the device): shorting the
+debug header's TX pad (PA2) to GND at power-on enters the FS-loader's install
+state with its own USB disk, whatever the app does. Procedure:
+`hw/README.md` "Hardware recovery". Still open: whether the SWD pads allow an
+emergency reflash despite read-protection (after a mass-erase), and whether
+`BOOT0` is exposed. The earlier fallback was **shorting the SPI flash**.
 
 ---
 
@@ -389,8 +391,8 @@ known starting point; the risky one is the clock/FMC, addressed in §3.
   we ever replace the stock app.
 
 ### Open questions for the user
-1. Physical backstop: are SWD pads reachable, is `BOOT0` exposed (GD32 system
-   DFU), or is SPI-flash shorting the only fallback? Confirm one before Stage 1.
+1. Physical backstop: answered 2026-10-24, the TX (PA2) to GND short on the
+   debug header (`hw/README.md` "Hardware recovery"). SWD / `BOOT0` still open.
 2. Is Option A worth chasing — i.e. finding the FS-loader's own USB-disk trigger
    so the shim needs no MSC at all — or is fw-rs's existing MSC in recovery mode
    (Option B) good enough? Option B is the safe default.
@@ -2136,10 +2138,9 @@ else /16 for this boot because `DIFF1`/`DIFF2` (a /4 read differed),
   only on purpose: the recovery decision, or `DBG:UPDATE`/`DBG:RECOVER`.
 - **FS-loader launch checks:** not traced. The stock SP value is used to be
   safe.
-- **PA2 at power-on:** a long key hold may already reach the loader's update
-  screen without any marker change. This is the vendor's own entry, still to be
-  tested (fsloader-install-trigger.md §6). If confirmed, it is the preferred,
-  non-destructive manual entry.
+- **PA2 at power-on:** not the power key (the key-hold test booted the app).
+  PA2 is the debug header's TX pad; a TX-GND short is the non-destructive
+  manual entry (owner, 2026-10-24; `hw/README.md` "Hardware recovery").
 
 ## Test plan (coordinator + user)
 
@@ -2259,10 +2260,8 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
      blinks), then release within 0.5 s. Expect a normal boot with
      `KEY_HOLD_ABORTED`.
    - **Confirm:** hold through the beep for at least 0.5 s more.
-     - If PA2 is the key, the loader screen may appear with the marker intact
-       (see the review).
-     - Otherwise the marker is zeroed, and the loader update screen and its
-       disk appear.
+     - The marker is zeroed, and the loader update screen and its disk
+       appear (PA2 is not the key; it is the debug header's TX pad).
    - Copy back `_DM40PRV.BIN` as `dm40_fwrs.bin`, then press "update". fw-rs
      returns.
    - `DBG:BOOT?` then shows `last` = `RCVR` and `last_trigger` = `0x54520010`.

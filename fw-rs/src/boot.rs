@@ -258,7 +258,8 @@ pub fn bkp_enable() {
 // half == ~high half == CRC16 of word1 || word2, and the body CRC matches. The
 // loader writes it last after a good install. Zeroing it (what the loader
 // itself does first when it finds any dm40*.bin, 0x080a1815) makes both
-// reject the app on ANY reset, cold or warm, independent of PA2, so the loader
+// reject the app on ANY reset, cold or warm, independent of PA2 (the debug
+// header's TX pad, the hardware boot strap: hw/README.md), so the loader
 // stays in its update screen with its own working USB disk until a valid
 // dm40*.bin is installed (docs/fsloader-install-trigger.md, full dump §4-§5).
 
