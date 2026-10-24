@@ -66,26 +66,13 @@ protocol notes are for stock V2.6.
 
 ### Enter the loader / return to stock
 
-1. Reach the vendor loader's update screen (it shows its own USB disk):
-   - **while fw-rs runs:** `python3 fw-rs/tools/dm40dbg.py update`
-     (`DBG:UPDATE`); or, with the drive in "PC can edit" mode (Settings 3/3,
-     "USB disk"), copy a `dm40*.bin` onto it and answer "Install it now?"
-     with Yes (installs that file through the loader directly); or
-     `fw-rs/tools/reload.sh --stock FILE` (the same for a stock file);
-   - **hardware, whatever the firmware does:** short the debug header's TX
-     pad (PA2) to GND at power-on, see
-     [hw/README.md, Hardware recovery](hw/README.md#hardware-recovery);
-   - fw-rs's own triggers (power-key hold from off, two watchdog resets):
-     [fw-rs/README.md, Recovery](fw-rs/README.md#recovery) (checked in the emulator,
-     the device check is pending).
-2. Copy the official stock firmware
-   [firmware/vendor/dm40_v_2_6.bin](firmware/vendor/dm40_v_2_6.bin) (back to stock) or a fw-rs
-   image onto the loader's USB disk as the only `dm40*.bin`, and press
-   "update". The loader deletes the file
-   after a successful install.
-
-The stock firmware installs any `dm40*.bin` it finds on its USB disk. Do not
-leave files with that name there by accident.
+The vendor loader's update screen (with its own USB disk) is reachable from a
+running fw-rs (`dm40dbg.py update`, "Install it now?", key hold, double hang)
+or, whatever the firmware does, by shorting the debug header's TX pad to GND
+at power-on. There, copy a fw-rs image or the official
+[stock file](firmware/vendor/dm40_v_2_6.bin) as the only `dm40*.bin` and press
+"update". Steps: [fw-rs/README.md, Recovery](fw-rs/README.md#recovery);
+the short: [hw/README.md, Hardware recovery](hw/README.md#hardware-recovery).
 
 ## Layout
 
