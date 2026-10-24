@@ -3015,6 +3015,11 @@ impl Dmm {
             self.freq_secondary(now, src);
         }
         let cmp = matches!(self.sent.kind, Kind::CmpA | Kind::CmpV);
+        if self.sent.bridge && self.sent.kind == Kind::PeakV {
+            // AC+DC A's AC phase: the DC phase's V-JACK? run asserts on time
+            // and holds (settle / blanks: no peak window), sentinel `tick`.
+            self.sent.tick(now);
+        }
         // A-jack protection (doc 4.8): also through the settles (the
         // temperature phases), so the probe windows keep their 100 ms.
         if !self.pw.on && (self.probe || self.sent.kind == Kind::CmpA) {

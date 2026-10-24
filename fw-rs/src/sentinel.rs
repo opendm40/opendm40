@@ -1053,6 +1053,17 @@ impl Sentinel {
         self.decide(now);
     }
 
+    /// Re-evaluate the alert without a sample (`dmm.rs`, every poll of
+    /// AC+DC A's AC phase, `bridge`): the DC phase's run asserts on time
+    /// and holds through the phase (its settle and blanks have no window).
+    pub fn tick(&mut self, now: u64) {
+        if self.bridge && self.kind == Kind::PeakV && self.streak > 0 {
+            // the DC phase's verdict holds through the AC phase
+            self.last_hit = now;
+        }
+        self.decide(now);
+    }
+
     /// DC? condition from the last V-tap window (`dmm.rs`).
     pub fn dc_hint(&mut self, now: u64, on: bool) {
         self.dc.feed(now, on, HINT_ASSERT_MS, HINT_CLEAR_MS);
