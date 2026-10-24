@@ -2169,7 +2169,7 @@ impl Scpi {
                     } else {
                         match crate::dbgsrc::parse(arg) {
                             Some(r) => out = Out::Instr(Cmd::DbgSrc(Some(r))),
-                            None => self.err = Some("Illegal parameter value"),
+                            None => self.set_err("Illegal parameter value"),
                         }
                     }
                 }

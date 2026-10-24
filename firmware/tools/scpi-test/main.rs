@@ -6,6 +6,13 @@
 mod ident;
 #[path = "../../src/scpi.rs"]
 mod scpi;
+mod hy3131 {
+    pub const CFG_LEN: usize = 22;
+}
+#[path = "../../src/hy3131_tables.rs"]
+mod hy3131_tables;
+#[path = "../../src/dbgsrc.rs"]
+mod dbgsrc;
 
 mod boot {
     pub fn put_info(_s: &mut crate::scpi::Scpi) {}
