@@ -35,8 +35,9 @@ The fields: maker, model (DM40A, DM40B or DM40C), the meter's serial number
 bindings below use it.
 
 Every reply ends with a newline. Allow **5 s** for a reply: a reading takes
-up to about 0.85 s, and the first reading after a function change up to
-about 4 s.
+up to about 0.85 s, and the first reading after a function change usually up
+to about 4 s (resistance can take up to 8 s; `MEAS:POW?` from another
+function up to 15 s).
 
 ## Linux
 
@@ -114,14 +115,17 @@ pip install pyvisa pyvisa-py pyusb
 ```python
 import pyvisa
 rm = pyvisa.ResourceManager('@py')
-dmm = rm.open_resource(rm.list_resources('USB?*::0x1209::0x0001::?*')[0],
-                       read_termination='\n', write_termination='\n', timeout=5000)
+# pyvisa-py lists the IDs in decimal (4617::1), NI-VISA in hex (0x1209::0x0001)
+names = [r for r in rm.list_resources() if '::4617::1::' in r or '::0x1209::0x0001::' in r]
+dmm = rm.open_resource(names[0], read_termination='\n', write_termination='\n',
+                       timeout=5000)
 print(dmm.query('*IDN?'))
 dmm.write('CONF:VOLT:DC')
 print(float(dmm.query('READ?')))
 ```
 
-The resource name is `USB0::0x1209::0x0001::<serial>::INSTR`. pyvisa-py
+pyvisa-py names the meter `USB0::4617::1::<serial>::0::INSTR`; NI-VISA
+`USB0::0x1209::0x0001::<serial>::INSTR`. pyvisa-py
 talks to the meter through libusb and takes the interface away from the
 kernel driver: `/dev/usbtmcN` disappears until you re-plug the meter. Use
 either PyVISA or the `/dev/usbtmcN` tools, not both at the same time.
@@ -154,7 +158,8 @@ pyusb and libusb (`brew install libusb`) is the likely path.
 
 ## Bluetooth
 
-Any system with a Bluetooth serial port (SPP) works. Connect to
+Linux is tested; other systems with a Bluetooth serial port (SPP) are
+untested. Connect to
 **C-1-ATK-DM40-CALI**, RFCOMM channel 1 (the other name, **DM40A**, is for
 the phone app; see [Remote control](remote-control.md#bluetooth)). Close the
 phone app first: the meter takes one connection at a time. Bluetooth must be
@@ -164,14 +169,15 @@ On Linux, the simplest client is
 [`firmware/tools/dm40bt_scpi.py`](../../firmware/tools/dm40bt_scpi.py):
 
 ```
-$ /usr/bin/python3 firmware/tools/dm40bt_scpi.py scpi '*IDN?'
+$ /usr/bin/python3 firmware/tools/dm40bt_scpi.py --mac AA:BB:CC:DD:EE:FF scpi '*IDN?'
 Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.1
-$ /usr/bin/python3 firmware/tools/dm40bt_scpi.py shell
+$ /usr/bin/python3 firmware/tools/dm40bt_scpi.py --mac AA:BB:CC:DD:EE:FF shell
 ```
 
-It finds the meter with `bluetoothctl`; `--mac AA:BB:CC:DD:EE:FF` sets the
-address. It needs a Python with Bluetooth sockets: the system
-`/usr/bin/python3`.
+Give it the meter's address with `--mac AA:BB:CC:DD:EE:FF` (or the
+environment variable `DM40_MAC`); `bluetoothctl devices` shows the address
+of **C-1-ATK-DM40-CALI**. It needs a Python with Bluetooth sockets: the
+system `/usr/bin/python3`.
 
 For other programs, bind a serial device:
 
@@ -184,13 +190,14 @@ and open `/dev/rfcomm0` (any baud rate), or in PyVISA
 `ASRL/dev/rfcomm0::INSTR` with the same terminations and timeout as above
 (untested).
 
-Over Bluetooth the debug commands and file deletion are refused, and the
-link is slower (about 11 kB/s); see
+Over Bluetooth the debug commands, file deletion and writing to the
+meter's disk are refused, and the link is slower (about 11 kB/s); see
 [SCPI reference, Bluetooth differences](scpi-reference.md#bluetooth-differences).
 
 ## sigrok (sigrok-cli, PulseView, SmuView)
 
-opendm40 can answer as an HP 34401A, a meter every sigrok version knows:
+opendm40 can answer as an HP 34401A, a meter libsigrok knows since version
+0.5.2:
 
 ```
 python3 firmware/tools/dm40scpi.py scpi 'SYST:IDN:EMUL 34401A'

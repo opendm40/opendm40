@@ -11,7 +11,7 @@ Bluetooth pairing, PyVISA, sigrok) is in
 | Link | What it is | Notes |
 |---|---|---|
 | USB | USBTMC (USB488) interface of the USB cable connection | All commands. |
-| Bluetooth | The meter's Bluetooth serial link (the one the phone app uses) | Works while Bluetooth is on in the meter's settings. Some commands are refused; see [Bluetooth differences](#bluetooth-differences). |
+| Bluetooth | The meter's classic Bluetooth serial port (SPP, **C-1-ATK-DM40-CALI**); the phone-app protocol shares it | Works while Bluetooth is on in the meter's settings. Some commands are refused; see [Bluetooth differences](#bluetooth-differences). |
 
 Each link has its own session: its own error queue and its own waiting
 `READ?`. The meter's settings are shared: a function set over Bluetooth is
@@ -99,8 +99,8 @@ change nothing; the touch screen and keys always stay active.
   a whole (nothing of it runs, no reply) and queues `Command protected`.
 - Also refused with `Command protected`: `MMEMory:DELete`, `LOG:CSV ON`,
   `LOG:STATe ON` with `LOG:DEST DISK`, and the firmware upload.
-- `LOG:STATe ON` is refused (`Rate too high for Bluetooth`) when the session
-  is faster than 800 samples/s or uses the AD2 converter. `LOG:DATA?` over
+- `LOG:STATe ON` is refused (`Rate too high for Bluetooth`) for AD2
+  sessions (AD1 sessions, at most 640 samples/s, work). `LOG:DATA?` over
   Bluetooth of such a session (started over USB) answers an empty block with
   the same error.
 - A block reply must fit 6144 bytes. A longer `WAVeform:DATA?` answers `#10`
@@ -155,9 +155,10 @@ probe tip. In Python with PyVISA:
 
 ```python
 import pyvisa
-rm = pyvisa.ResourceManager()
-m = rm.open_resource(rm.list_resources('USB?*::0x1209::0x0001::?*')[0],
-                     read_termination='\n', write_termination='\n', timeout=5000)
+rm = pyvisa.ResourceManager('@py')
+names = [r for r in rm.list_resources() if '::4617::1::' in r or '::0x1209::0x0001::' in r]
+m = rm.open_resource(names[0], read_termination='\n', write_termination='\n',
+                     timeout=5000)
 print(m.query('*IDN?'))
 m.write('CONF:VOLT:DC')
 print(float(m.query('READ?')))
@@ -171,7 +172,7 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
-| `*IDN?` | | `Alientek,DM40C,<serial>,opendm40 0.1` (see the example above); with `SYSTem:IDN:EMULation 34401A`: `HEWLETT-PACKARD,34401A,0,opendm40 0.1` | both |
+| `*IDN?` | | `Alientek,DM40C,<serial>,opendm40 0.1` (see the example above); with `SYSTem:IDN:EMULation 34401A`: `HEWLETT-PACKARD,34401A,0,dm40-fw 0.1` | both |
 | `*RST` | | Clears the error queue and the questionable event bits. Settings are not reset. | both |
 | `*CLS` | | Same as `*RST`. | both |
 | `*OPC?` | | `1` | both |
@@ -464,7 +465,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | `[SENSe:]POWer:BURDen[?]` | `<ohm>` (0 .. 1000) or `DEFault` | `+1.000000E-02` | both |
 | `[SENSe:]POWer:BURDen:STATe[?]` | `ON` or `OFF` (default) | `1` or `0` | both |
 | `[SENSe:]POWer:METHod[?]` | `SIMultaneous` or `ALTernate` | `SIM` or `ALT` | both |
-| `[SENSe:]POWer:LIMit[?]` | `<A>[,<s>]`: 0 .. 10 A, 0 .. 3600 s (default 30) | `+1.000000E+01,30` | both |
+| `[SENSe:]POWer:LIMit[?]` | `<A>[,<s>]`: 0.1 .. 10 A (smaller values are set to 0.1), 0 .. 3600 s (default 30) | `+1.000000E+01,30` | both |
 | `[SENSe:]POWer:PHASe[?]` | `-127` .. `127` | `0` | both |
 | `[SENSe:]POWer:PHASe:CALibrate[?]` | `[REACtive]` | `NONE`, `RUN`, `OK`, `FLAT`, `NOTREACTIVE` or `RANGE`, then the phase setting: `OK,-3` | both |
 | `[SENSe:]POWer:CYCle?` | | `<discarded>,<P period ms>,<full cycle ms>`: `2,642,1284` | both |
@@ -568,7 +569,8 @@ and `MEASure:POWer?` then give the real power P in W.
   `SOURce:FREQuency?` and `DCYCle?` report what the output really produces
   (limited and rounded to the generator's steps).
 - `SOURce:VOLTage:OFFSet` is the centre of the waveform. It is kept within
-  Vpp/2 .. 3 - Vpp/2; `AUTO` is the default 0 .. Vpp output (the query then
+  Vpp/2 .. 3 - Vpp/2 (with an offset set, a Vpp too large for it is
+  reduced to fit); `AUTO` is the default 0 .. Vpp output (the query then
   answers Vpp/2). With an offset and 0 Vpp the output is a DC level.
 - The generator keeps running on every page.
 
@@ -626,7 +628,7 @@ the disk.
 | `LOG:SOURce[?]` | `AD1` (default) or `AD2` | `AD1` or `AD2` | both |
 | `LOG:OSR[?]` | `0` .. `7` (default 3) | `3` | both |
 | `LOG:CHOP[?]` | `ON` (default) or `OFF` | `1` or `0` | both |
-| `LOG:SRATe[?]` | AD2 rate, S/s | the requested rate: `2400` | both |
+| `LOG:SRATe[?]` | AD2 rate, S/s (default 4800) | the requested rate: `4800` | both |
 | `LOG:DEST[?]` | `HOST` (default) or `DISK` | `HOST` or `DISK` | both |
 | `LOG:DURation[?]` | DISK session length, s (0 = until stopped or full; default 60) | `60` | both |
 | `LOG:DATA?` | | block of 12-byte records, oldest first | both |
@@ -659,8 +661,8 @@ the disk.
   `LOG:DATA?` answers an empty block meanwhile. `LOG:DISK?` state: 0 idle,
   1 preparing, 2 ready, 3 running, 4 stopping, 5 done, 6 full, 7 no disk,
   8 error; file is -1 until the file exists.
-- Over Bluetooth, sessions up to 800 S/s from AD1 to the host work; faster
-  ones and every AD2 or disk session are refused.
+- Over Bluetooth, AD1 sessions to the host work; AD2 and disk sessions are
+  refused.
 
 ## Files on the disk (MMEMory)
 
@@ -673,7 +675,8 @@ the disk.
 - `MMEMory:CATalog?` lists the screenshots, CSV recordings and scope records,
   each as `"<folder>/<name>,BIN,<size>"`: `"SHOTS/S000.BMP,BIN,<size>"`,
   `"LOGS/LOG000.DLG,BIN,<size>"`, `"SCOPE/SCOP000.DLG,BIN,<size>"`. The
-  sizes are in bytes.
+  sizes are in bytes. Entries that do not fit the 512-byte reply are left
+  out.
 - `MMEMory:DATA?` reads up to 6000 bytes; read a large file in pieces with
   rising offsets until the block is shorter than asked. The name may have
   its folder (`LOGS/`, `SHOTS/`, `SCOPE/`) or not. Asking for
