@@ -427,10 +427,11 @@ impl Bt {
         let now = self.ms();
         // PC14 means nothing while the module is off.
         let up = self.powered && unsafe { r32(GPIOC_IDR) } & (1 << 14) != 0;
+        // New connection or a drop: no partial request survives it; with no
+        // link no SCPI line is taken (bt_scpi.rs `set_link`).
+        self.rx.set_link(up);
         if up != self.link {
-            // New connection or a drop: no partial request survives it.
             self.link = up;
-            self.rx.reset();
             self.line_ready = false;
         }
         loop {

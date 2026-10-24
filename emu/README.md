@@ -354,6 +354,12 @@ pages and swipes, the viewer (the whole screen read back with DBG:LCD? must
 equal the BMP), Delete -> Cancel, Delete -> Delete (MMEM:CAT? 8 -> 7),
 MENU back out (~8 min).
 
+`btchattertest.py --app <image> [--port P]` sends the Bluetooth module's own
+text (`OK`, an echoed `AT+SBNDM40A`, a 300-byte line) with no host linked,
+then links a host: its SCPI error queue must be empty (opendm40
+src/bt_scpi.rs `set_link`; the base gives -113 / -102 / -113 / -363, the
+device 46370df sequence plus the overrun) (~3 min; BT 4834).
+
 `wavtest.py --app <ELF> [--port P] [--bt-port P]` checks the scope waveform
 readout (opendm40 src/scope_wav.rs) against the scope feeder's sine: the
 default WAV:DATA?, WAV:POIN / FORM / PRE?, DIGitize / SINGle / TRIG:STAT?,
