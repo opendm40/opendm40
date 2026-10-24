@@ -46,7 +46,7 @@ opendm40:
    **PC can edit (re-plug)**.
 2. Unplug the USB cable and plug it in again. The disk is now writable.
 3. Copy the update file onto the disk, into the top folder, as
-   `dm40_fwrs.bin`.
+   `dm40_fwrs.bin` (any `dm40*.bin` name works).
 4. The meter checks the file and asks **Firmware received. Install it
    now?** Tap **Yes**. The meter restarts into the update loader, installs
    the file and starts the new firmware.
@@ -74,10 +74,10 @@ Every key press also silences the danger alarm
 
 | Gesture | Where | What it does |
 |---|---|---|
-| Swipe left / right | Multimeter, DMM + Scope, Generator (Oscilloscope: see below) | Next / previous view |
+| Swipe left / right | Multimeter, DMM + Scope (start on the meter strip), Generator (Oscilloscope: see below) | Next / previous view |
 | Swipe down with one finger | Multimeter | Start / stop recording ([Logging](logging.md)) |
-| Swipe down with three fingers | Anywhere | Screenshot to the disk ([Screenshots and gallery](usb-disk.md#screenshots-and-the-gallery)) |
-| Swipe down with two fingers | Anywhere | Asks **Power off?** Tap **Yes** to switch off. The question goes away by itself after 3 s. |
+| Swipe down with three fingers | Anywhere, while the touch lock is off | Screenshot to the disk ([Screenshots and gallery](usb-disk.md#screenshots-and-the-gallery)) |
+| Swipe down with two fingers | Anywhere, while the touch lock is off | Asks **Power off?** Tap **Yes** to switch off. The question goes away by itself after 3 s. |
 
 The oscilloscope has its own drags and taps; see [Oscilloscope](scope.md).
 
@@ -87,7 +87,7 @@ The oscilloscope has its own drags and taps; see [Oscilloscope](scope.md).
 
 The main menu has six tiles:
 
-- **Gallery: screenshots and logs**: view the screenshots and recordings
+- **Gallery: screenshots and logs**: view the screenshots and Record-page recordings
   stored on the meter ([USB disk, Gallery](usb-disk.md#screenshots-and-the-gallery)).
 - **Multimeter** ([Multimeter](multimeter.md)).
 - **Oscilloscope** ([Oscilloscope](scope.md)).
@@ -109,7 +109,9 @@ then a swipe that starts on the top bar or the side panel changes the view.
 
 The top line of the multimeter page shows, from left to right:
 
-- the range mode (**AUTO** or the manual range) and the HOLD state;
+- the range mode: **AUTO**, **AUTO+** or **MANU** (a fixed range);
+- **RUN**, **HOLD** or **A-HOLD**, or in that place a wrong-connection alert
+  ([Safety and alerts](safety-and-alerts.md));
 - the time since the meter was switched on (hours:minutes:seconds);
 - a lock symbol: open, or closed while the touch lock is on;
 - **REC** in red while a recording to the disk runs;

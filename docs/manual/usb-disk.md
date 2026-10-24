@@ -39,8 +39,9 @@ A change of the mode takes effect at the next USB plug: unplug the cable
 and plug it in again. Until then the row shows **(re-plug)**. The meter
 always starts in **Files live**.
 
-A file deleted in a file manager usually goes to the trash first; the meter
-deletes it at the eject.
+A file manager usually moves a deleted file to the trash, and a file only
+moved to the trash comes back after the eject. Empty the trash (or use
+Shift+Delete) before you eject.
 
 ### Eject
 
@@ -79,7 +80,9 @@ To open it: main menu, **Gallery: screenshots and logs** (the top tile).
 ![Gallery](img/gallery.png)
 
 - The grid shows six files per page, newest first: screenshots, then
-  recordings. Each tile has a thumbnail (a small chart for a recording), the
+  recordings from the Record page (`LOGnnn`). Fast recordings, inrush
+  captures and scope captures are not shown; delete those from the computer
+  ([PC can edit](#two-modes-files-live-and-pc-can-edit)) or with `MMEM:DEL`. Each tile has a thumbnail (a small chart for a recording), the
   name and the size. The title bar shows the number of files and the free
   space.
 - **Prev** / **Next** or a swipe left / right turns the page.

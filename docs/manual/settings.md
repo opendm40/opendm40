@@ -1,8 +1,8 @@
 # Settings
 
-To open: main menu, **Settings**. There are three pages; the last row,
-**More**, opens the next page. **< Back** in the title bar or **MENU** goes
-one page back. Tap a row to step to its next value; rows with **-** / **+**
+To open: main menu, **Settings**. There are three pages; on pages 1 and 2
+the last row, **More**, opens the next page. **< Back** in the title bar or
+**MENU** goes one page back (from page 1: to the main menu). Tap a row to step to its next value; rows with **-** / **+**
 change in steps.
 
 All settings are kept when you switch off, except **USB disk**.
@@ -15,7 +15,7 @@ All settings are kept when you switch off, except **USB disk**.
 |---|---|---|---|
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input. |
 | **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | Switches the meter off after this time without input; it warns 30 s before. Not during a recording, a MIN/MAX/AVG session, or while the power meter counts energy. |
-| **Backlight** | 10 % to 100 %, steps of 10 | 55 % | Screen brightness. |
+| **Backlight** | 10 % to 100 %, steps of 10 from the default (15, 25 ... 95, and 10 and 100 at the ends) | 55 % | Screen brightness. |
 | **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. The auto power-off warning always sounds at least at 50 %; the danger alarm has its own setting (page 3). |
 | **Bluetooth** | ON, OFF | ON | The Bluetooth module ([Remote control](remote-control.md)). |
 | **Start page** | Multimeter, Oscilloscope, Signal, Main menu | Multimeter | The view after power-on. |
@@ -36,7 +36,7 @@ All settings are kept when you switch off, except **USB disk**.
 | **Scope swipe** | Off (stock), Top bar | Off | Top bar: a swipe that starts on the scope page's top bar or side panel changes the view. |
 | **Scope press** | ON, OFF (stock) | ON | The scope's side buttons light up briefly when pressed. |
 | **Scope tap step** | Corners, Halves (stock), Off | Corners | Which taps on the scope graph change the timebase ([Oscilloscope, Timebase](scope.md#timebase)). |
-| **Help** | | | The on-screen help: seven pages; tap to turn the page. |
+| **Help** | | | The [on-screen help](getting-started.md#on-screen-help). |
 | **More** | | | Page 3. |
 
 ## Page 3
