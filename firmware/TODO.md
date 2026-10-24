@@ -696,6 +696,11 @@ Code work (in this order):
       2.3-2.8 s), fast-log PASS (state 0 all session, resumes 2 s after); 6 PASS (state 1 with 76 erases: loop
       max 13.9 ms vs idle 12.0 on the AC+DC page). Open for the owner: 3 (battery pull) and 5's "PC can edit"
       + DM40*.BIN install half.
+      Device 46370df (2026-10-24, docs/device-check-2026-10-21.md "46370df: screenshot preparation, the 76.8 kS/s nominal"): 1 PASS (frozen_ms 1304 DC V /
+      1324 / 1314 AC+DC, 0 erased, BMP = the panel 0 px x3, prep 2 / 76 again 9 s after the job); 2 PASS (second
+      shot 4.9 s after the first, prep at 12 ready: frozen 5328 ms, 63 erased, saved); 4 PASS (free 0: 2 / 0 ready,
+      "Disk full", no BMP); 5 CSV commits and fast-log PASS; 6 PASS (state 1 max 15.1 ms = idle 15.1).
+      **Pending (owner): 3 (battery pull while prep state 1) and 5's "PC can edit" + DM40*.BIN install half.**
 - [x] Data logger (LOG:STAT ON) has no on-screen indicator: "DATA LOGGING" panel (dialog::log_panel,
       rate + sample count, 1 s refresh), view repainted on stop.  (5fd7871; verify on device)
 - [ ] Browser client (owner 2026-10-22: later, not now; 2026-10-24: the old stock-protocol web/ client was
@@ -1937,6 +1942,9 @@ Firmware:
       **Device 612c45c: PASS** (doc "612c45c" T1: toast in the panel body, panel back at 1.9 s, nothing outside).
 - [ ] Not exercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
       with the residue, sense 02/04/01; the host retries the whole command).
+      Device 46370df (docs/device-check-2026-10-21.md "46370df: screenshot preparation, the 76.8 kS/s nominal" item 4): not provoked. `read_busy` refuses only while
+      the slow-bank mirror is off (MIR_OK false after a failed SPI read); `DBG:VDISK:MIR?` 1 (OK), so a healthy
+      meter cannot reach the path from the host. It needs a debug switch that turns the mirror off (none exists).
       Known and left: region C DBG commands (DBG:GENUINE? reads the loader data at 0x080A4000 in region C
       code, DBG:BOOT?, the AD2 experiments) still stall the ISR when sent during a stream (debug only).
 - [x] `fast_scpi` (LOG:DEST / LOG:DURation) in region C (device b6909d6: LOG:DEST? / DUR? in the Wave view,
@@ -1953,8 +1961,8 @@ Firmware:
       shows in MMEM:CAT?.
       **Device d330877 (device-check-2026-10-21.md "d330877" 1b): PASS**: MMEM:CAT? 7-20 ms, dropped +0, late +0 (x3); Save CSV not
       repeated.
-- [ ] 76800 stream / rate (loop fix PASSED on device e7ec2cc; its nominal was wrong, fixed in ee28b71, device
-      check open). **Device e7ec2cc (device-check-2026-10-21.md "e7ec2cc: the 76.8 kS/s PLL retest"):** the
+- [x] 76800 stream / rate (loop fix PASSED on device e7ec2cc; its nominal was wrong, fixed in ee28b71, device
+      check PASSED on 46370df). **Device e7ec2cc (device-check-2026-10-21.md "e7ec2cc: the 76.8 kS/s PLL retest"):** the
       loop locks from a cold start within 5 s at rate_mhz 76 800 0xx = ppm_x10 -29 35x (-2935 ppm) against the 76 574.6
       nominal, 1.125 ISR entries per sample (was 1.478), cpu 455-457 permille, probes / captured 0.063,
       edges_after_b / probes 0.50, late / bad / overruns / slips 0, the transition-sample scatter 0.41-0.62 us
@@ -1967,6 +1975,12 @@ Firmware:
       and MAX_PPM 5000 stay (owner: keep 5000?). Device check of ee28b71: a fresh-boot 76800 host drain locks
       near ppm_x10 0 (as 38400: -2..-16), entries ~1.125; LOG:PRE? nominal_mhz 76 799 016; ACQ:SRAT? 76799 and
       the 1 ms/div record's 40 Hz square at 40.00 Hz from WAV:PRE? xinc; the DLG header nominal 76 799.016.
+      **Device 46370df (docs/device-check-2026-10-21.md "46370df: screenshot preparation, the 76.8 kS/s nominal") item 2: PASS**: first AD2 session after boot,
+      ppm_x10 -2..-4 from 5 s, entries 1.1252, cpu 461, error counters 0; LOG:PRE? 76 799 016; CSV / DLG headers
+      76799.016; record xinc 13.02084 us -> 40.0011 Hz; 1919.948 samples per calibrator period. ACQ:SRAT? is
+      76 800, not 76 799: `wave_real_fs` uses ad2_rate_mhz(0) = exactly 76 800 000 mHz, the logger's 76 799.016 is
+      1e12 / the rounded 13 021 ns period (12.8 ppm apart; the prediction above was wrong, not the firmware).
+      Open: owner's call on MAX_PPM 5000.
       The history as investigated before the retest (its premise is wrong, see above):
       Device 7409b92 / 4c4b489: rate_mhz 76 723.4-.8 =
       the Pll's +1000 ppm clamp in every 76800 session, 1.476 / 1.478 ISR entries per sample, cpu_permille
@@ -2343,6 +2357,21 @@ Firmware:
             open; copies exact (SPIFLASH.BIN ~348 KB/s, SCOP000.CSV ~78 KB/s, FIRMWARE.BIN ~834 KB/s); Eject ->
             "Safe To Remove" (then remounted, item below). Still open: the UA while mounted on Windows (a new file
             + F5), macOS, reload.sh.
+            Device 46370df (docs/device-check-2026-10-21.md "46370df: screenshot preparation, the 76.8 kS/s nominal" item 3, Linux): PASS: kernel attach (1.98 GiB, Write
+            Protect on), udisks ro mount, a screenshot listed 3.3-5.9 s after the gesture and a recording 2.8 s after
+            its stop (both == MMEM:DATA?), FATDIR 7,0,0, MMEM:CAT? / DATA? / DEL with LOGS/ SHOTS/ prefixes. fsck of
+            SPIFLASH.BIN: clean when read with the page cache dropped; a plain `cp` returned stale FAT pages (Linux
+            keeps the unchanged-size file's cache across the UA; new item below). Not run: FATDIR first boot
+            (created 0x7) and boot_refresh time (need an install), reload.sh, Windows UA + F5, macOS (untested).
+      - [ ] Linux: DEBUG/SPIFLASH.BIN read through the page cache can be stale after a refresh (device 46370df,
+            docs/device-check-2026-10-21.md "46370df: screenshot preparation, the 76.8 kS/s nominal" note 2): its size and entry never change, so the kernel keeps
+            its cached pages across the UNIT ATTENTION; a copy after a shot had the new BMP's directory entry but
+            not its FAT chain. Workaround: drop the file's pages (`posix_fadvise` DONTNEED / drop_caches) or remount
+            before copying. Document it in README.TXT / the user doc, or find something that makes the kernel drop
+            the pages (untested).
+      - [ ] MMEM names: the LOGS/ SHOTS/ SCOPE/ prefix is dropped, not checked (`MMEM:DATA? "SHOTS/LOG005.DLG"`
+            returned LOGS/LOG005.DLG; device 46370df). Harmless while names are unique; decide whether a wrong
+            directory should be -256.
       - [x] Windows Eject does not keep the volume ejected (device b6909d6): the shell's Eject sends START STOP
             UNIT, and Windows shows "Safe To Remove". msc.rs then only records it (STOP_UNIT, msc.rs:585, used by
             recovery), so the medium is still present and E: is mounted again at the next access. Harmless on the
