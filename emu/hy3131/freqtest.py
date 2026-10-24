@@ -20,13 +20,16 @@ Scenarios (each its own emulator; input: a 40 Hz 1 V square on V-COM):
   entry        DC V (3 s) -> CONF:FREQ, READ? x4; REPS times
   entry-settle the same with ctsettle:400
   wake         in Hz: MENU -> Oscilloscope (the DMM rail off) -> MENU ->
-               Multimeter (rail wake, chip POR, the row rewritten), READ? x4;
+               Multimeter (rail wake, chip POR, the row rewritten; checked with
+               SYST:RAIL:STAT? wakes), READ? x4;
                with ctsettle:400; REPS times
   acv          AC V (3 s) -> CONF:FREQ (0xF2 -> 0xF2: the counter is not
-               re-enabled at all), READ? x4; with ctsettle:400
+               re-enabled at all), READ? x4; with ctsettle:400 (passes on 74aff99
+               too: the AC V gate is clean)
 Every READ? must be 40 Hz within TOL (default 0.05 %). The first READ?'s fw
 uptime from the CONF (or the return to the DMM page) is printed. Results:
-emu/out/freq-<name>.json. Exit status 0 = passed.
+emu/out/freq-<name>.json. Exit status 0 = passed. 74aff99 fails entry, entry-settle
+and wake (first READ? 34-45 / 19.9-30.2 / 18.1-19.6 Hz).
 """
 import argparse
 import json
@@ -112,12 +115,14 @@ def run(name):
                     ts = up()
                     tm.write('CONF:FREQ')
                 else:
-                    tm.write('DBG:KEY 3')       # MENU
-                    time.sleep(0.6)
-                    tm.write('DBG:TAP 339,105')  # Oscilloscope: the DMM rail goes off
+                    w0 = int(q('SYST:RAIL:STAT?').split(',')[2])
+                    tm.write('DBG:KEY 0')        # MENU
+                    wait_up(up() + 0.6)
+                    tm.write('DBG:TAP 341,107')  # Oscilloscope: the DMM rail goes off
                     wait_up(up() + 2.5)
-                    tm.write('DBG:KEY 3')
-                    time.sleep(0.6)
+                    off = q('SYST:RAIL:STAT?')
+                    tm.write('DBG:KEY 0')
+                    wait_up(up() + 0.6)
                     ts = up()
                     tm.write('DBG:TAP 141,105')  # Multimeter: the rail wake
                 vals = []
@@ -129,6 +134,10 @@ def run(name):
                     except ValueError:
                         fv = None
                     vals.append((fv, round(t - ts, 3)))
+                if kind == 'wake':
+                    w1 = int(q('SYST:RAIL:STAT?').split(',')[2])
+                    if w1 <= w0 or not off.startswith('0,'):
+                        bad.append('rep %d: no rail wake (Scope page rails %s, wakes %d -> %d)' % (k, off, w0, w1))
                 wrong = [x for x in vals if x[0] is None or abs(x[0] - F0) > A.tol * F0]
                 reps.append({'k': k, 'ts': ts, 'vals': vals, 'rail': q('SYST:RAIL:STAT?')})
                 print('%s %d first %s at +%.2f s; then %s%s' % (

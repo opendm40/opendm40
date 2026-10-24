@@ -123,6 +123,23 @@ Code work (in this order):
         both pages. Proposed fix (not done): restart the counter (R20 0xF0, CTA 0xFC0000, R20 0xF2) on the Hz row
         write, freq.next = deadline + 350, src_alt = false, drop each source's first result / no "last = 0"
         win. Close this item after that fix.
+        **Fixed (branch freqfirst, emulator only):** every non-AC+DC row with ENCTR presets the gate at the row
+        write; the first counter access past the settle (Hz, the AC V / A secondary line, the power meter's F)
+        only restarts it, so the first result is a gate begun after the settle; a source's first result ranks
+        with change 1e6 (shown only while alone), no source = no reading (was 0.00 Hz), a source at 1/2, 1/3,
+        2/3 of the other loses; NaN ("--") before the first result. Not done: the proposed "two results agree"
+        (+0.35..0.7 s to the first reading). AC+DC / AUTO left alone (they show no frequency). The model now
+        keeps CTA<23:8> over ENCTR = 0 (datasheet) and has ctsettle: (every other edge missed after a row
+        change); `emu/hy3131/freqtest.py`: 74aff99 first READ? 34-45 Hz (19.9-30.2 Hz with ctsettle:400) at
+        +1.05 s, freqfirst 40.0007 Hz at +1.40 s (the device's clean first readings: 1.37-1.41 s).
+        **Device retest** (40 Hz square, calibrator; DMM page and combined view, as `chk4/fentry.py` / `f40dc`):
+        (1) 10x: CONF:VOLT:DC, 3 s, CONF:FREQ, 4 READ? with times: every value 40.00 Hz (no 0 / 0.99 / 17 /
+        19.9), the first at ~1.4 s; half the entries within 5 s of a view change (DMM <-> combined, Scope ->
+        combined). (2) CONF:FREQ, Scope page, back (rail wake): first READ? 40.00. (3) AC V -> Hz and AC+DC -> Hz
+        5x each: 40.00 from the first. (4) AC V on the 40 Hz square: the secondary line reads "--" then 40.00
+        Hz, never a wrong value. (5) CONF:POW on 230 V / 50 Hz (or the 40 Hz square): F "--" then 50.00, after
+        an entry and after a range change. (6) Capacitance 1 uF / 100 nF entries (the gate now preset at the
+        row write): readings as before.
   - [x] Device/About page: Menu->Settings->Device (Vendor/Web/Model/Bootloader/Software/Hardware);
         HW+bootloader ver read from the stock boot-data block 0x080A4000 (survives app updates).
         SN + BT name omitted (not sourceable without inventing a value / a blocking AT round-trip).
