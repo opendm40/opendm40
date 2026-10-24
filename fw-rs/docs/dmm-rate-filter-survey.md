@@ -720,9 +720,9 @@ streams on DC V 6 V; the calibrator's 0 / 9.59 V square (no sine available),
 | period, ms | 100.78 | 200.79 | 400.78 | 100.00 | 200.00 |
 | leaks 0.405 at (beats near DC) | 10 Hz | 5 Hz | 2.5 Hz | 5 Hz | 2.5 Hz |
 | 50 Hz / 60 Hz rejection | **36 dB** / >= 91 dB | >= 92 / >= 93 dB | >= 94 / >= 95 dB | >= 89 / >= 90 dB | >= 90 / >= 90 dB |
-| noise sd, output off, uV (counts of 100 uV) | 40 (0.40) | **20 (0.20)** | 17 (0.17) | 36 (0.36) | 33 (0.33) |
-| noise for equal time, uV x s^0.5 | 12.6 | **8.9** | 10.8 | 11.2 | 14.7 |
-| offset vs 0x17 | -2 uV | -2 uV | 0 | **+22.22 mV** | +22.23 mV |
+| noise sd, output off, uV (counts of 100 uV) | 40 (0.40) | **20 (0.20)** | 17 (0.17) | 35 (0.35) | 33 (0.33) |
+| noise for equal time, uV x s^0.5 | 12.6 | **8.9** | 10.9 | 11.2 | 14.8 |
+| offset vs 0x17 | -3 uV | -2 uV | 0 | **+22.22 mV** | +22.23 mV |
 | gain vs 0x17 | within ~50 ppm (the calibrator's drift limits it) | | | | |
 | first good conversion after a step or range change | 3rd: 0.2-0.3 s | 3rd: 0.4-0.6 s | 3rd: 0.8-1.2 s | 3rd: 0.2-0.3 s | 3rd: 0.4-0.6 s |
 
