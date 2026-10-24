@@ -4399,6 +4399,17 @@ impl App {
                     out.put_bytes(b",");
                     crate::put_u32(out, ms as u32);
                 }
+                // Positions now: trigger position (px), trigger row, CH1 pos.
+                out.put_bytes(b"|POS ");
+                for (k, v) in [self.scope.s.hpos, self.scope.s.trig_row, self.scope.s.pos].into_iter().enumerate() {
+                    if k > 0 {
+                        out.put_bytes(b",");
+                    }
+                    if v < 0 {
+                        out.put_bytes(b"-");
+                    }
+                    crate::put_u32(out, v.unsigned_abs());
+                }
                 // The last AUTO-set's decisions (scope_page.rs autoset_log).
                 out.put_bytes(b"|AUTO");
                 scope_page::autoset_log(out);
