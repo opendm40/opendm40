@@ -3168,3 +3168,68 @@ is the owner's call.
 backlight 10 %, volume 0 %, Start page Multimeter, DMM row Bargraph, USB disk "Files live", Danger alarm Off.
 `MMEM:CAT?` equal to the start string; no files made. Calibrator back on the 10 Hz square, enabled; registers equal
 to the start dump except 0x2C (live).
+
+## 10242c3: sentinel3 retest (2026-10-24 11:30 - 13:22)
+
+The coordinator had installed 10242c3 (sentinel3 rebased onto rust-fw-poc 92ef9f6, so with the FREQ fix): the DC A
+precondition on by default (100 ms), AC A V-JACK? needs a reversal, FETC? +9.91E37 when the shown reading is not
+from the current row (power-meter-and-misconnect.md 4.12 on that branch). `*IDN?` = `Alientek,DM40A,<UID>,dm40-fw
+0.1`, `DBG:FLASH?` `EF4018,4096,0,...`, INFO/FIRMWARE.BIN (read after `POSIX_FADV_DONTNEED`) byte-equal to the image
+(614 016 B, sha256 4619f403…2821), `DBG:VDISK:MIR?` `1,4,1,5287,0,0,0`, `DBG:SENT:PREC?` 100, `DBG:SENT:VAR?` 0. No
+flashing. Quiet rule kept: `SYST:ALER:ALARm?` OFF and `SYST:BEEP:VOL?` 0 checked at the start and the end of every
+script, no sound tests. Each blind DC A entry pulses the relay (by design, doc 4.12; not audible over the link). The session paused
+11:53 - 13:03 (an API limit on the agent side); the meter and its state were not touched in between except by the
+coordinator's status check.
+
+Files in the session scratchpad's `chk9/` (the chk7 scripts were gone, so these are new): `dev.py` (link,
+calibrator, MENU -> tile navigation, DBG:LCD? shots), `sentE.py` (item 1: previous function, then the timed DC A /
+mA entry, DBG:SENT? + SYST:ALER? every ~70 ms for 12-14 s, DBG:SENT:REG? before and at 0.6 s, the V-JACK? latency
+from DBG:SENT:LOG? against DBG:PING? uptime), `settle.py` (item 2: FETC? every ~10 ms), `acA.py` (items 3 / 4),
+`fetc5.py` and `fshot5.py` (item 5), `ma1st.py`, `ma2.py`, `rng06.py` (the DC mA findings), `start.py`,
+`setshots.py`, `endstate.py`, and `out/` (JSON per run, logs, PNGs). The calibrator was found on the 10 Hz square
+(func 2, 10 000 mHz), enabled; the meter on the DMM page, DC V AUTO+, **RATE SLOW**. The checks ran at **RATE FAST**
+(as every baseline) unless noted. A jack not wired. "Off" = the calibrator's output disabled.
+
+| # | check | result |
+|---|---|---|
+| 1 | 24 V on V-COM, DC A (`CONF:CURR:DC`) after DC V 60 V (manual), RES, AC V, DC V auto (60 V), AC V -> Scope 2 s -> back -> 3 s / 9 s -> DC A, and DC A -> Scope -> back; 2 reps; mA (`CONF:CURR:DC 0.06`) 1 rep (`sentE_v24A*.json`, `sentE_v24mA.json`) | **PASS**. a_blind 1 before every blind entry, 0 at 0.6 s (the precondition ran). V-JACK? (DBG:SENT:LOG? time - uptime at the command) in A: DC V 60 V **2.76 / 1.88 s**, RES 2.16 / 2.16, AC V 1.76 / 1.85 (not blind; the comparator history of the previous entry), DC V auto **2.78 / 2.80**, AC V -> Scope -> back, 9 s, DC A 1.88 / 1.88; mA: 1.41-1.53 s. Restart mask cases: entering DC A 3 s after Scope -> back gives 4.98 / 4.98 s (A) / 5.03 s (mA) = 8 s after the back; back into DC A from Scope 8.03 / 8.03 s (0774e70: 8.7 s). The 0774e70 misses after DC V 60 V / RES / AC V / DC V / Scope are gone. Observation: the DC V 60 V / auto entries at 2.8 s (3 of 4) show ctsta 0 in the first polls and 0x70 from 0.44 s: the first comparator read after the precondition sometimes still reads 0, which costs ~0.9 s |
+| 1' | 5 V and off: the same entries (DC V 60 V manual, RES, AC V -> Scope -> back + 9 s for the blind cases; AC V, DC V auto as controls), A and mA (`sentE_v5*.json`, `sentE_voff*.json`) | **PASS**: no alert in 14 of 14 (no V-JACK?, nothing else in DBG:SENT:LOG?); streak 0 throughout; ctsta 0 after <= 0.4 s |
+| 2 | First valid FETC? after the DC A / mA entry at 1 V: blind (after RES, PREC 100), the same with `DBG:SENT:PREC 0`, and non-blind (DC A once, then DC V 6 V); FAST x4, SLOW x2 (`settle_fast.json`, `settle_slow.json`) | **PASS**. FAST, A: blind **463 ms** (426-497) vs PREC 0 369 (331-397) vs non-blind 360 (331-392): **+94 ms**. mA (`0.06`, manual range): blind **540** (430-621) vs PREC 0 348 vs non-blind 362: **+192 ms**. SLOW: A blind 686 / 422 vs PREC 0 321 / 667 vs non-blind 312 / 307; mA 420 / 421 vs 320 / 320 vs 311 / 311. The cost is on blind entries only, as expected (~+0.1-0.2 s); non-blind is the ab7184c time (352-356 ms) |
+| 3 | AC A from DC V: 10 A / 60 mA / 600 uA, 30 s each, at 24 V, 1 V and off (`acA_v24/v1/voff.json`) | **PASS**: no V-JACK? and no other alert in 9 of 9 (0774e70: 1.5-3.5 s in 60 mA / 600 uA at 24 V). pkhmin / pkhmax after 1 s: at 1 V / off the rail -262 144 throughout; at 24 V the ramp from ~-103 000 to the rail, as before, now without the alert |
+| 3' | The square on V: 10 Hz (10 A / 60 mA / 600 uA) and 40 Hz (10 A / 60 mA), 15 s each (`acA_sq10.json`, `acA_sq40.json`) | **PASS**: V-JACK? at **1.80 / 1.86 / 1.94 s** (10 Hz) and 1.79 / 1.65 s (40 Hz), held to the end (185-189 of the ~212 polls). 0774e70: 1.87-2.12 s, so the reversal rule cost no time here |
+| 4 | `DBG:SENT:VAR 64` (AD1 at IG 0.9), AC A 10 A / 60 mA / 600 uA, 15 s each, 1 V / off / 24 V (`acA_var64_*.json`) | **SENSE sits at ~-86 500 codes (~-0.46 V with the 1.39 V full scale) in every A range, at 1 V and with the source off alike**: -80 000 at 0.5-1.5 s, creeping to -86 200..-86 800 by 10-15 s; pkhmax - pkhmin ~100 codes. At 24 V it starts at ~-32 000 (-0.17 V) and decays to the same -86 600 (-60 000 at 1.5-3 s, -80 800 at 3-6 s). So at IG 3.6 (full scale 0.347 V) the node is below the rail in every case; the 24 V input only adds a slow transient. One spike to -216 968 in 600 uA at 1 V. No alert. `DBG:SENT:VAR 0` after (VAR? 0) |
+| 5 | `CONF:CURR:AC 10`, 2 s, `CONF:CURR:AC 0.06`, FETC? every 50 ms, 5 reps at 1 V and 5 V (`fetc5_v1/v5.json`); screen strip at the first answer, 6 reps at 1 V (`fshot5.log`, `f5_sheet.png`) | **Carry-over PASS, +9.91E37 FAIL, first value FAIL**. The 10 A value no longer carries over. **+9.91E37 is never answered**: the first FETC? after the change **blocks 0.4-0.9 s** (as the AUTO case of ab7184c bug 2), then answers a 60 mA-row value. And that value is **9.3-43.6 mA on the open jack in 9 of 16 entries** (fetc5 5 of 10: 26.6 / 29.1 / 30.9 / 35.2 / 43.6 mA, fshot5 4 of 6: 9.27 / 26.64 / 26.64 / 32.15 mA; the 10 A row read 0.2-0.6 mA there). It is **shown in amber** ("26.636 mA", `f5_2.png`), held until ~0.8 s and gone by ~1.0 s through 1e-2, 1e-4 (an EMA decay), then ~1e-6 A. In the other 7 the first value is 0 .. 1.6e-7 A. The 0774e70 "1 % of the 10 A value" is gone; what is left looks like the restarted AC filter seeded by an unsettled first conversion after the range relay step |
+
+### New bugs
+
+1. **AC A 10 A -> 60 mA: a 9-44 mA first reading on the open jack** (item 5, 9 of 16), in amber and answered to
+   FETC?, for up to ~0.5 s. With the filters now restarting on a range step, the first AC conversion after the
+   step seeds them. The guard (no reading from the old row) works. Dropping the first conversion(s) after a range
+   step (or marking them provisional) would fix it; not checked in the emulator, which gives a fresh first reading.
+2. **DC mA entry at MED / SLOW: a first reading of +-33..56 mA on the open jack** (`ma1st_v1.json`: MED 3 of 12
+   entries from DC V 6 V, e.g. +43.8 / -56.5 / +54.3 mA at 0.31 s; `settle_slow.json`: SLOW 2 of 2 from DC V 6 V,
+   -32.6 / -37.8 mA), then ~1e-6 A from the next reading (0.2 s later). None in 36 FAST entries. Also seen once for
+   `CONF:CURR:DC` (auto) at MED: +9.9E37 (OVERLOAD) at 0.31 s in the 600 mA row, then 60 mA, then **+0.23 mA in
+   the 600 uA row** at 1.2 s (`ma2_v1.json`); at SLOW three auto entries read +-0.22..0.24 mA at 1.1-1.2 s (`ma1st`).
+3. **`CONF:CURR:DC 0.06` (manual 60 mA) ends on the 10 A row** at MED / SLOW: `ma2_v1.json` 3 of 6 (CONF?
+   `CURR +1.000000E+01` from 0.57-0.62 s and kept), `rng06.json` 1 of 5 at SLOW (0 of 5 at FAST), with OVERLOAD
+   (kind CMP_SENSE) in DBG:SENT:LOG? at those times: the bogus first mA reading of bug 2 most likely trips the mA
+   overload step to 10 A. The range the user asked for is lost.
+4. Minor: the restart mask (8 s after Scope -> back) also delays V-JACK? for a DC A entry made within those 8 s
+   (4.98 s when 3 s after the back), although the precondition has already run and ctsta reads 0x70 from the first
+   poll.
+
+### State at the end
+
+- **Device:** 10242c3, DMM page, DC V AUTO+ (status bar "AUTO+"; `VOLT:RANG:AUTO?` 1, `VOLT:COUP?` DC), **RATE
+  SLOW** (as found), the bargraph row (`e_dmm.png`). `OUTP?` 0 throughout (never switched on). `LOG:STAT?` 0.
+  `DBG:SENT:PREC?` 100, `DBG:SENT:VAR?` 0. `SYST:ERR?` "No error", `SYST:ALER?` NONE, `SYST:ALER:ALARm?` OFF,
+  `SYST:BEEP:VOL?` 0, `DBG:ALARm?` 0,0,0,2, `DBG:VDISK:MIR?` 1,4,1,5287,0,0,0, `DBG:VDISK:RO?` 1,1. `DBG:CRASH?` is
+  not a command in this build: it answers a bare newline and queues `-100 "Undefined header"` (rechecked at the
+  end; the error was read and the queue is clean).
+- **Settings:** 1/3 and 3/3 byte-equal to the start (`s_set*.png` vs `e_set*.png`); 2/3 differs only in the live
+  rate digits (x 299-308, y 50-65; 9.8/s vs 9.7/s): Dim / Shutdown Never, backlight 10 %, volume 0 %, Start page
+  Multimeter, DMM row Bargraph, USB disk "Files live", Danger alarm Off (`e_sheet.png`).
+- **Disk:** `MMEM:CAT?` equal to the start string; no files made (screens are DBG:LCD? reads).
+- **Calibrator:** back on the 10 Hz square, enabled; registers equal to the start dump except 0x2C, 0x0E and 0x2E
+  (live). During the check: 1 V, 5 V, 24 V DC, output off, the 10 / 40 Hz square.

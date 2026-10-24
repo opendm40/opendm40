@@ -3166,6 +3166,7 @@ Emulator (emu/):
       6 continuity 5 V pk -99 100 / +124 800. 7 soft 1 in RES / CONT, DBG:ALARm? events 0 (Off). 8 PASS
       (V-JACK? from 8.3 / 8.8 s, held across phases).
 - [ ] Device retest (sentinel3 image; doc power-meter-and-misconnect.md 4.12), A jack open:
+      (list from the sentinel3 branch, 10242c3; copied here with the device result)
       1. 24 V DC on V-COM, no DBG:SENT:PREC command (the default 100 ms): DC A / mA after DC V 60 V,
          RES, AC V, DC V auto (60 V) and Scope -> back: V-JACK? within ~2.5 s (Scope -> back: the
          restart mask, ~8 s). DBG:SENT:PREC? answers 100. Source off and 5 V: same entries, no alert.
@@ -3178,6 +3179,20 @@ Emulator (emu/):
          SENSE level in the A rows). VAR 0 after.
       5. CONF:CURR:AC 10, 2 s, CONF:CURR:AC 0.06, FETC? every 50 ms: +9.91E37 until the first 60 mA
          reading, which is not 1 % of the 10 A value.
+      **Device 10242c3 (device-check-2026-10-21.md "10242c3"; RATE FAST, alarm Off, no sound):** 1 PASS:
+      PREC? 100; 24 V V-JACK? in every entry: DC A after DC V 60 V 2.76 / 1.88 s, RES 2.16 / 2.16, AC V
+      1.76 / 1.85, DC V auto 2.78 / 2.80, AC V -> Scope -> back -> DC A 1.88 / 1.88 s (9 s after the
+      back; 3 s after it: 4.98 s = the restart mask), back into DC A 8.03 s (mask); mA 1.41-1.53 s
+      (5.03 s when 3 s after Scope -> back); 5 V / off quiet in all 14 entries. 2 PASS: blind DC A
+      +94 ms (FAST: 463 vs 369 ms with PREC 0), blind mA +192 ms (540 vs 348); non-blind unchanged
+      (360 / 362 ms). 3 PASS: 0 V-JACK? in 9 x 30 s (24 V / 1 V / off x 3 ranges); the square: 1.65-1.94 s, held. 4: SENSE at IG 0.9 sits at
+      ~-86 500 codes (~-0.46 V) in every A range at 1 V / off / 24 V (24 V starts at ~-32 000 and
+      decays there in ~6-10 s). 5 **FAIL**: no 10 A value carried and no +9.91E37 (the first FETC?
+      blocks 0.4-0.9 s), but the first 60 mA reading is **9-44 mA on the open jack in 9 of 16 entries**,
+      amber on the screen, decaying over ~0.2 s. New: DC mA entry at MED / SLOW gives a first reading
+      of +-33..56 mA (ma1st 3 of 24 MED / SLOW, settle SLOW 2 of 2 from DC V 6 V; none at FAST),
+      and `CONF:CURR:DC 0.06` ended on the 10 A row 4 of 11 times at MED / SLOW (OVERLOAD in
+      DBG:SENT:LOG?; 0 of 5 at FAST).
 - [x] Danger alarm only for confirmed A-JACK (coordinator 2026-10-24, device 612c45c: the RES
       5 V false A-JACK sounded the loud alarm at night): ohm / continuity / diode / cap / the
       resistive temperature sensors set Sentinel::soft; danger keys on ajack_alarm() (doc 4.10
