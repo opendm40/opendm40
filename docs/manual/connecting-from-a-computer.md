@@ -31,8 +31,8 @@ The fields: maker, model (DM40A, DM40B or DM40C), the meter's serial number
 | Interface 0 | USBTMC / USB488 (class FE, subclass 03, protocol 01) |
 | Interface 1 | USB mass storage, the disk **DM40** |
 
-`1209:0001` is a test ID of the pid.codes project; it will change to the
-meter's own ID before a release. Rules and driver bindings below use it.
+`1209:0001` is a test ID of the pid.codes project. The rules and driver
+bindings below use it.
 
 Every reply ends with a newline. Allow **5 s** for a reply: a reading takes
 up to about 0.85 s, and the first reading after a function change up to
