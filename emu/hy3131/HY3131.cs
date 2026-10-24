@@ -456,6 +456,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// OL on every range 600 ohm .. 60 Mohm, never the negative code of a source of the other
         /// sign). Default on; "ohmrevol:0" = the plain ratio (a negative code, LIVE?).
         public bool OhmRevOl = true;
+        /// Ohm: OP1O (the row's x1 buffer of the input, PB0) does not follow a source on the jack
+        /// above the open-circuit voltage: device a2e9766 (the jack check's AD2 = OP1O - PB3 peak)
+        /// read 2.25 V at 5 V DC (600 ohm; 2.14 V on 60 Mohm), 2.02-2.03 V at 10 V. The model clips
+        /// the node at OhmOp1V0 - OhmOp1K x the jack's volts (2.47 - 0.044 V: 2.25 V at 5 V, 2.03 V
+        /// at 10 V); the line and the range independence are INFERRED from those points. Default on;
+        /// "ohmop1k:0" = the old swing clip (+2.55 V), which made the jack check say "driven".
+        public double OhmOp1K = 0.044, OhmOp1V0 = 2.47;
+        /// Ohm: a source on the jack at or above this many volts overdrives the comparator: CMPHO
+        /// and CMPLO in one read (CTSTA 0x70) on PB1. Device a2e9766 / 2da1011 E4: RES at 5 / 10 V
+        /// DC and the 0 / 9.5 V square read CTSTA 0x70, 1 V and 3 V no hit at all; the level between
+        /// 3 and 5 V is INFERRED (4 V). Instantaneous (the square reads it in its high half).
+        /// Default 4; "ohmboth:0" = off (PB1 alone, Pb1VjackMv).
+        public double OhmBothV = 4.0;
         /// PB1 picking up the mV clamp's current in the AC mV rows (opt-in, "mvpb1:mV per V" of the jack
         /// beyond the clamp; device 46370df: the same square asserted AJACK,AD1PK_PB1 with the A jack
         /// empty; the ratio is INFERRED: 10 mV / V puts 83 mV peaks on PB1, over the 23.75 mV threshold).
@@ -788,6 +801,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "mvclamp": MvClampV = o.Value; break;
                 case "mvpb1": MvPb1Mv = o.Value; break;
                 case "ohmrevol": OhmRevOl = o.Value != 0; break;
+                case "ohmop1k": OhmOp1K = o.Value; break;
+                case "ohmboth": OhmBothV = o.Value; break;
                 case "ohmexit": OhmExitBoth = o.Value; break;
                 case "ohmexitlo": OhmExitLow = o.Value; break;
                 case "ohmexitrst": OhmExitRst = o.Value != 0; break;
@@ -1366,6 +1381,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             double dc, ac, hz, duty; string shape;
             Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
             if(Fe.RelayPa == 1 && ac > 0) vx += Wave(t, dc, ac, hz, shape, duty) - dc;
+            // ohm: the buffer stops below the source (OhmOp1K, device a2e9766)
+            if(role == Role.Ohm && OhmOp1K > 0) vx = Math.Min(vx, OhmOp1V0 - OhmOp1K * Math.Max(vx, 0));
             return Math.Max(-1.18, Math.Min(2.55, vx));
         }
 
@@ -1960,10 +1977,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             // leaves the comparator idle, SENSE with the /1000 tap (SS5) in the DC A rows.
             // CMPHO / CMPLO follow the instantaneous node against VRH / VRL.
             double node;
+            var scmpiPb1 = (regs[0x20] >> 5) == 4;
             if(SentinelNode(now, out node))
             {
                 cmpHigh = node > CmpHighThreshold;
                 cmpLow = node < CmpLowThreshold;
+                if(role == Role.Ohm && OhmBothV > 0 && scmpiPb1)
+                {
+                    // a source on V-COM overdrives the comparator (OhmBothV, device a2e9766)
+                    double dc, ac, hz, duty; string shape;
+                    Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
+                    if(Fe.RelayPa == 1 && Math.Abs(Wave(now, dc, ac, hz, shape, duty)) >= OhmBothV) cmpHigh = cmpLow = true;
+                }
                 var dx = now - ohmExitT;
                 if(role == Role.DcA && dx >= 0 && dx < OhmExitBoth) cmpHigh = cmpLow = true;
                 else if(role == Role.DcA && dx >= 0 && dx < OhmExitBoth + OhmExitLow) cmpLow = true;
