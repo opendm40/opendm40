@@ -104,7 +104,12 @@ the link; the 2048-record ring covers 3.2 s of host stalls). `LOG:DATA?`
 from Bluetooth while a faster session runs (started over USB) answers an
 empty block and the same error, so it never steals the USB host's
 records. `LOG:DEST DISK` sessions are USB only ("Command protected", as
-`LOG:CSV ON`). For AD2 rates use USBTMC or the disk (LOG:DEST DISK,
+`LOG:CSV ON`). `LOG:FORMat PACKed` / `DLG` work over Bluetooth with the same
+parser and reply builder (logger.rs "Compact LOG:DATA?"): a reply is at
+most 6145 B as with ROWS (DLG: ~4 KiB), built in the same stack buffer
+(`Bt::respond_with`) and queued whole in the 8 KiB TX ring; the refusals
+above do not depend on the format (BT_MAX_HZ is still the ROWS budget; a
+higher limit for the compact formats is not set). For AD2 rates use USBTMC or the disk (LOG:DEST DISK,
 [compact-log-format.md](compact-log-format.md) "Fast stream"). Host: `tools/dm40scpi.py --bt
 log --source ad1 --osr 0` (it warns about the ceiling). Emulator check:
 [emu/fastlogtest.py](../../emu/fastlogtest.py) (the refusals, an AD1 session drained over BT).

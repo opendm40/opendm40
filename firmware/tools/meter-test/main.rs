@@ -20,6 +20,9 @@ mod dmm;
 #[path = "../../src/meter.rs"]
 mod meter;
 // The data logger's ring / gap accounting and the AD2 rate ladder (hy3131.rs).
+// logger.rs: the DLG reply coder.
+#[path = "../../src/fastenc.rs"]
+mod fastenc;
 #[path = "../../src/logger.rs"]
 mod logger;
 // logger.rs `start` / `dc_prepare` (the DC rows' AD2 row), dmm.rs acdcm.rs

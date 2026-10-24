@@ -1262,9 +1262,23 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             port.respond(b"#40000");
                             scpi.set_err("Rate too high for Bluetooth");
                         } else {
-                            port.respond_with(&mut |buf| Some(logger.encode(buf)));
+                            let par = fmt_par(logger, app.dmm.ad2_scale());
+                            port.respond_with(&mut |buf| Some(logger.encode_fmt(buf, &par)));
                         }
                         false
+                    }
+                    scpi::Log::Format(Some(f)) => {
+                        logger.set_fmt(f);
+                        false
+                    }
+                    scpi::Log::Format(None) => {
+                        scpi.len = 0;
+                        scpi.put_bytes(match logger.fmt() {
+                            logger::FMT_PACKED => b"PACK",
+                            logger::FMT_DLG => b"DLG",
+                            _ => b"ROWS",
+                        });
+                        true
                     }
                 },
             };
@@ -1856,6 +1870,12 @@ fn log_scale(scpi: &mut scpi::Scpi, l: &logger::Logger, sc: Option<dmm::Ad2Scale
     scpi.put_f32(sc.map_or(0.0, |s| -s.offset));
     scpi.put_bytes(b",");
     scpi.put_f32(sc.map_or(0.0, |s| s.per_code));
+}
+
+/// LOG:DATA?'s compact formats: the rate and LOG:SCALe?'s a, b.
+fn fmt_par(l: &logger::Logger, sc: Option<dmm::Ad2Scale>) -> logger::FmtPar {
+    let sc = sc.filter(|_| l.ad2() && logger::Logger::mode_ok(true, l.mode()));
+    logger::FmtPar { rate_mhz: l.rate_mhz(), a: sc.map_or(0.0, |s| -s.offset), b: sc.map_or(0.0, |s| s.per_code) }
 }
 
 /// The fast logger's rare events of this pass: Ev::Start (the logger

@@ -84,7 +84,40 @@
 //! counted (`bad`); it shows up as a gap. Records: the same 12-byte wire
 //! format; `raw` = signed AD2 code (+-262143 = +-1.25 V / IG at the AD2 input,
 //! IG = 1.0 in every stock row; scaling on the host from LOG:PREamble?).
+//!
+//! Compact LOG:DATA? (LOG:FORMat PACKed | DLG; ROWS, the 12-byte records,
+//! stays the default). The reply is the same `#4nnnn` block; an empty ring
+//! is `#40000` in every format. Every reply decodes on its own; all fields
+//! little-endian:
+//!   reply header, 20 B: 'L' 'P' (PACKed) | 'L' 'D' (DLG), u8 version (1),
+//!     u8 source (0 AD1, 1 AD2), u32 rate (mHz: the stream ISR's rate, else
+//!     the nominal), f32 a, f32 b (LOG:SCALe?: value = a + b * raw; 0, 0 for
+//!     AD1), u32 records left in the ring after this reply;
+//!   block header, 16 B: u32 seq of the first sample, u32 its stamp t0 (us,
+//!     the wrapping device clock), u16 n, u8 width (3 | 4: PACKed samples;
+//!     0: DLG chunks follow), u8 flags (1: the first block of the session,
+//!     2: conversions were lost before it), u32 lost_before (conversions
+//!     between the last sample of the previous reply and this one:
+//!     round(dt * rate) - 1, 0 at the session's start).
+//! PACKed: blocks until the reply is full, each with n samples of `width`
+//! bytes (signed, two's complement; 3 for every AD1 / AD2 code, 4 for a
+//! value outside i24). Sample i of a block is at t0 + i / rate (rounded to
+//! us). A sample more than half a period off that grid starts a new block:
+//! after a gap (a stall, a late ISR entry, a torn read, the full ring;
+//! lost_before > 0, flag 2) or when the stamps drift from the nominal rate
+//! by half a period (AD1's real period differs from the nominal by up to
+//! ~5 %: a block every ~10 samples there; lost_before 0). The seqs of
+//! consecutive blocks continue: a gap is never inside a block.
+//! DLG: one block header (n = the rows of the reply, width 0), then
+//! kind-3 chunks of the disk fast stream (docs/compact-log-format.md "Fast
+//! stream (kind 3)", coded by fastenc.rs `FastEnc` into a 4 KiB FIFO of the
+//! reply buffer, so a reply carries at most ~4 KiB of chunks): chunk row0 =
+//! the seq of its first row - 1, every stamp and value exact, the first
+//! row's lost_before in the block header, the later rows' from their dt.
+//! Hosts: tools/dm40scpi.py `log_reply` (the DLG chunks: tools/dlog.py
+//! `fast_chunk`).
 
+use crate::fastenc::FastEnc;
 use crate::hy3131 as hy;
 use crate::mmio::r32;
 #[cfg_attr(not(feature = "ad2-isr"), allow(unused_imports))]
@@ -146,6 +179,32 @@ struct Rec {
 }
 
 const REC_BYTES: usize = 12;
+
+/// LOG:FORMat values (`Logger::set_fmt`).
+pub const FMT_ROWS: u8 = 0;
+pub const FMT_PACKED: u8 = 1;
+pub const FMT_DLG: u8 = 2;
+/// The compact replies' version byte.
+const FMT_VER: u8 = 1;
+/// `#4nnnn`; the compact reply header; a block header.
+const BLK_HDR: usize = 6;
+const FMT_HDR: usize = 20;
+const PK_BLK: usize = 16;
+/// DLG: the coder's FIFO in the reply buffer (a power of two).
+const DLG_FIFO: usize = 4096;
+/// Block flags: the first block after LOG:STATe ON; conversions were lost
+/// before this block (`lost_before` > 0).
+const FL_START: u8 = 1;
+const FL_GAP: u8 = 2;
+/// ps per sample = PS_PER_S_MHZ / rate_mhz.
+const PS_PER_S_MHZ: u64 = 1_000_000_000_000_000;
+
+/// The scale and rate a compact reply carries (main.rs: LOG:SCALe?'s a, b).
+pub struct FmtPar {
+    pub rate_mhz: u32,
+    pub a: f32,
+    pub b: f32,
+}
 
 /// Gap histogram buckets (in conversion periods between two kept samples):
 /// 2, 3..4, 5..16, 17..128, > 128.
@@ -466,6 +525,12 @@ pub struct Logger {
     /// `dc_prepare` ran for the planned session: the next `start` keeps
     /// its DC V self-cal (writes the row only).
     dc_keep: bool,
+    /// LOG:FORMat: FMT_ROWS (the all-zero default), FMT_PACKED, FMT_DLG.
+    fmt: u8,
+    /// The stamp of the last record drained this session, and whether
+    /// there is one (`lost_before` of the next reply's first block).
+    drained_ts: u32,
+    drained: bool,
 }
 
 /// Gap bucket of a gap of `k` periods (k >= 2).
@@ -515,6 +580,9 @@ impl Logger {
             saved_ad2: false,
             saved_hz: 0,
             dc_keep: false,
+            fmt: FMT_ROWS,
+            drained_ts: 0,
+            drained: false,
         }
     }
 
@@ -745,6 +813,7 @@ impl Logger {
             hy::stream::use_div(hy::DIV, false);
         }
         self.ring().reset();
+        self.drained = false;
         // The chip set-up is the last main-loop bus access of an ISR session.
         if self.ad2 {
             if matches!(mode, 1 | 3) {
@@ -983,6 +1052,7 @@ impl Logger {
         let t = ring.tail.load(Relaxed);
         let n = (ring.head.load(Acquire).wrapping_sub(t) as usize).min(out.len() / REC_BYTES);
         let base = ring.buf.get() as *const Rec;
+        let mut last = 0u32;
         for i in 0..n {
             let k = t.wrapping_add(i as u32);
             // SAFETY: k is below the Acquire-loaded head: published, and the
@@ -993,8 +1063,15 @@ impl Logger {
             out[o..o + 4].copy_from_slice(&seq.to_le_bytes());
             out[o + 4..o + 8].copy_from_slice(&r.ts_us.to_le_bytes());
             out[o + 8..o + 12].copy_from_slice(&r.raw.to_le_bytes());
+            last = r.ts_us;
         }
         ring.tail.store(t.wrapping_add(n as u32), Release);
+        if n > 0 {
+            // A compact reply after this one counts its lost_before from
+            // here (LOG:FORMat may change between replies).
+            self.drained_ts = last;
+            self.drained = true;
+        }
         n * REC_BYTES
     }
 
@@ -1051,6 +1128,189 @@ impl Logger {
         }
         self.drain(&mut out[HDR..HDR + bytes]);
         HDR + bytes
+    }
+
+    /// LOG:FORMat (FMT_*).
+    pub fn set_fmt(&mut self, f: u8) {
+        self.fmt = if f <= FMT_DLG { f } else { FMT_ROWS };
+    }
+    pub fn fmt(&self) -> u8 {
+        self.fmt
+    }
+
+    /// The rate the compact formats reconstruct the time with, mHz: the
+    /// stream ISR's (the chip's real rate, `hy::ad2_real_rate_mhz`), else
+    /// the nominal one.
+    pub fn rate_mhz(&self) -> u32 {
+        if self.isr_sess && self.isr_rate != 0 { self.isr_rate } else { self.nominal_mhz() }
+    }
+
+    /// Record `k` (session index) of the ring; the caller keeps it in
+    /// [tail, head).
+    #[inline(always)]
+    fn rec(&self, k: u32) -> Rec {
+        // SAFETY: as `drain`.
+        unsafe { (self.ring().buf.get() as *const Rec).add(k as usize & (CAP - 1)).read_volatile() }
+    }
+
+    /// The reply of LOG:DATA? in the current LOG:FORMat into `out` (the
+    /// transport's reply buffer); the byte count.
+    pub fn encode_fmt(&mut self, out: &mut [u8], p: &FmtPar) -> usize {
+        match self.fmt {
+            FMT_PACKED => self.encode_packed(out, p),
+            FMT_DLG => self.encode_dlg(out, p),
+            _ => self.encode(out),
+        }
+    }
+
+    /// Records to send now (0: the wave view's ring, or empty) and the
+    /// payload room of a `#4nnnn` block in `out`.
+    fn reply_room(&self, out: &[u8]) -> (u32, usize) {
+        let avail = if self.active && self.wave { 0 } else { self.ring().len() };
+        (avail, out.len().saturating_sub(BLK_HDR).min(9999))
+    }
+
+    /// `#4nnnn` for a payload of `n` bytes; the reply's length.
+    fn blk_head(out: &mut [u8], n: usize) -> usize {
+        out[0] = b'#';
+        out[1] = b'4';
+        for (i, d) in [1000usize, 100, 10, 1].iter().enumerate() {
+            out[2 + i] = b'0' + ((n / d) % 10) as u8;
+        }
+        BLK_HDR + n
+    }
+
+    /// The compact reply header (docs: logger.rs "Compact LOG:DATA?").
+    fn fmt_head(&self, o: &mut [u8], magic: &[u8; 2], p: &FmtPar) {
+        o[0..2].copy_from_slice(magic);
+        o[2] = FMT_VER;
+        o[3] = self.ad2 as u8;
+        o[4..8].copy_from_slice(&p.rate_mhz.to_le_bytes());
+        o[8..12].copy_from_slice(&p.a.to_le_bytes());
+        o[12..16].copy_from_slice(&p.b.to_le_bytes());
+        o[16..20].fill(0); // records left: at the end
+    }
+
+    /// A block header at `o`: first seq, its stamp, count (patched),
+    /// sample width, flags and the conversions lost before the first one.
+    fn blk_hdr(&self, o: &mut [u8], k: u32, ts: u32, width: u8, pps: u64) {
+        let (lost, flags) = if self.drained {
+            let d = ts.wrapping_sub(self.drained_ts) as u64 * 1_000_000;
+            let periods = (d + pps / 2) / pps.max(1);
+            let lost = periods.saturating_sub(1).min(u32::MAX as u64) as u32;
+            (lost, if lost > 0 { FL_GAP } else { 0 })
+        } else {
+            (0, FL_START)
+        };
+        o[0..4].copy_from_slice(&k.wrapping_add(1).to_le_bytes());
+        o[4..8].copy_from_slice(&ts.to_le_bytes());
+        o[8..10].fill(0);
+        o[10] = width;
+        o[11] = flags;
+        o[12..16].copy_from_slice(&lost.to_le_bytes());
+    }
+
+    /// LOG:FORMat PACKed: blocks of fixed-width samples on the time grid
+    /// t0 + i / rate. A sample more than half a period off that grid (a
+    /// gap: a stall, a late ISR entry, a torn read, the full ring; or the
+    /// clocks' drift adding up) starts a new block with its own seq and
+    /// stamp, and `lost_before` counts the conversions in the gap.
+    #[inline(never)]
+    pub fn encode_packed(&mut self, out: &mut [u8], p: &FmtPar) -> usize {
+        let (avail, cap) = self.reply_room(out);
+        if avail == 0 || cap < FMT_HDR + PK_BLK + 4 {
+            return Self::blk_head(out, 0);
+        }
+        let pps = PS_PER_S_MHZ / p.rate_mhz.max(1) as u64;
+        let half = (pps / 2) as i64;
+        let body = &mut out[BLK_HDR..BLK_HDR + cap];
+        self.fmt_head(body, b"LP", p);
+        let t = self.ring().tail.load(Relaxed);
+        let mut o = FMT_HDR;
+        let mut bh = 0usize; // the open block's header offset
+        let mut n = 0u32; // its samples
+        let mut width = 0u8;
+        let mut acc = 0i64; // stamp - grid, ps
+        let mut prev = 0u32;
+        let mut i = 0u32;
+        while i < avail {
+            let k = t.wrapping_add(i);
+            let r = self.rec(k);
+            let w = if r.raw == (r.raw << 8) >> 8 { 3u8 } else { 4 };
+            let cont = n > 0 && w == width && n < 0xFFFF && {
+                acc += r.ts_us.wrapping_sub(prev) as i32 as i64 * 1_000_000 - pps as i64;
+                acc.abs() <= half
+            };
+            if !cont {
+                if o + PK_BLK + w as usize > cap {
+                    break;
+                }
+                if n > 0 {
+                    body[bh + 8..bh + 10].copy_from_slice(&(n as u16).to_le_bytes());
+                }
+                self.blk_hdr(&mut body[o..o + PK_BLK], k, r.ts_us, w, pps);
+                bh = o;
+                o += PK_BLK;
+                n = 0;
+                width = w;
+                acc = 0;
+            } else if o + w as usize > cap {
+                break;
+            }
+            body[o..o + w as usize].copy_from_slice(&r.raw.to_le_bytes()[..w as usize]);
+            o += w as usize;
+            n += 1;
+            prev = r.ts_us;
+            self.drained_ts = r.ts_us;
+            self.drained = true;
+            i += 1;
+        }
+        if n > 0 {
+            body[bh + 8..bh + 10].copy_from_slice(&(n as u16).to_le_bytes());
+        }
+        self.ring().tail.store(t.wrapping_add(i), Release);
+        body[16..20].copy_from_slice(&self.ring().len().to_le_bytes());
+        Self::blk_head(out, o)
+    }
+
+    /// LOG:FORMat DLG: the records as kind-3 chunks of the disk fast stream
+    /// (fastenc.rs `FastEnc`, docs/compact-log-format.md "Fast stream
+    /// (kind 3)"), coded into the reply buffer: every stamp and value
+    /// exact. One block header (width 0, the count, the first seq / stamp,
+    /// `lost_before`), then the chunks (row0 = the first record's seq - 1).
+    #[inline(never)]
+    pub fn encode_dlg(&mut self, out: &mut [u8], p: &FmtPar) -> usize {
+        let (avail, cap) = self.reply_room(out);
+        let room = cap.saturating_sub(FMT_HDR + PK_BLK);
+        // The coder's FIFO is a power of two (`wr % len`): 4096 of 6144.
+        let fl = if room >= DLG_FIFO { DLG_FIFO } else { 0 };
+        if avail == 0 || fl == 0 {
+            return Self::blk_head(out, 0);
+        }
+        let pps = PS_PER_S_MHZ / p.rate_mhz.max(1) as u64;
+        let body = &mut out[BLK_HDR..BLK_HDR + cap];
+        self.fmt_head(body, b"LD", p);
+        let t = self.ring().tail.load(Relaxed);
+        let r0 = self.rec(t);
+        self.blk_hdr(&mut body[FMT_HDR..FMT_HDR + PK_BLK], t, r0.ts_us, 0, pps);
+        let p_us = ((pps + 500_000) / 1_000_000) as u32;
+        let fifo = &mut body[FMT_HDR + PK_BLK..FMT_HDR + PK_BLK + fl];
+        let mut e = FastEnc::new(&[(2, 1)], 0, fl as u32, fl, p_us);
+        e.rows = t; // chunk row0 = seq - 1
+        let mut i = 0u32;
+        while i < avail && e.room(1) {
+            let r = self.rec(t.wrapping_add(i));
+            e.add(fifo, r.ts_us, r.raw);
+            self.drained_ts = r.ts_us;
+            i += 1;
+        }
+        e.close(fifo, false);
+        self.drained = true;
+        let h = FMT_HDR;
+        body[h + 8..h + 10].copy_from_slice(&(i.min(0xFFFF) as u16).to_le_bytes());
+        self.ring().tail.store(t.wrapping_add(i), Release);
+        body[16..20].copy_from_slice(&self.ring().len().to_le_bytes());
+        Self::blk_head(out, FMT_HDR + PK_BLK + e.wr as usize)
     }
 }
 
@@ -1711,6 +1971,424 @@ mod tests {
         feed(&mut l, 0, 0);
         feed(&mut l, 5_000_000_000, 0);
         assert_eq!(l.ring().span_us(), 5_000_000_000);
+    }
+
+    // ------------------------------------------------ compact LOG:DATA?
+    use crate::fastenc;
+    // A decoder of both compact replies (as tools/dm40scpi.py's): rows of
+    // (seq, t_us reconstructed, raw, lost_before), the records left.
+
+    struct Bits<'a> {
+        d: &'a [u8],
+        pos: usize,
+        end: usize,
+    }
+    impl Bits<'_> {
+        fn get(&mut self, n: u32) -> u32 {
+            let mut v = 0u64;
+            for _ in 0..n {
+                assert!(self.pos < self.end * 8, "bit stream overrun");
+                v = v << 1 | ((self.d[self.pos >> 3] >> (7 - (self.pos & 7))) & 1) as u64;
+                self.pos += 1;
+            }
+            v as u32
+        }
+        fn rice(&mut self, k: u32) -> u32 {
+            let mut q = 0;
+            while q < 24 && self.get(1) == 1 {
+                q += 1;
+            }
+            if q == 24 { self.get(32) } else { q << k | self.get(k) }
+        }
+    }
+    fn unzz(u: u32) -> i32 {
+        (u >> 1) as i32 ^ -((u & 1) as i32)
+    }
+    fn le32(d: &[u8], o: usize) -> u32 {
+        u32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]])
+    }
+
+    type Row = (u32, u64, i32, u32);
+
+    /// Decode one reply; `rows` gets (seq, t_us (u64, of the u32 stamps;
+    /// PACKed: t0 + round(i / rate)), raw, lost_before). Returns the
+    /// records-left field and the block count.
+    fn decode(reply: &[u8], rows: &mut std::vec::Vec<Row>) -> (u32, usize) {
+        assert_eq!(&reply[..2], b"#4");
+        let n: usize = core::str::from_utf8(&reply[2..6]).unwrap().parse().unwrap();
+        assert_eq!(reply.len(), 6 + n);
+        if n == 0 {
+            return (0, 0);
+        }
+        let d = &reply[6..];
+        assert_eq!(d[2], FMT_VER);
+        let rate = le32(d, 4) as u64;
+        let left = le32(d, 16);
+        let mut o = FMT_HDR;
+        let mut blocks = 0;
+        if &d[..2] == b"LP" {
+            while o < d.len() {
+                let (seq, t0, cnt, w, lost) =
+                    (le32(d, o), le32(d, o + 4) as u64, u16::from_le_bytes([d[o + 8], d[o + 9]]) as usize, d[o + 10] as usize, le32(d, o + 12));
+                assert!(w == 3 || w == 4);
+                assert!(cnt > 0);
+                o += PK_BLK;
+                for i in 0..cnt {
+                    let mut b = [0u8; 4];
+                    b[..w].copy_from_slice(&d[o..o + w]);
+                    let raw = if w == 3 { (i32::from_le_bytes(b) << 8) >> 8 } else { i32::from_le_bytes(b) };
+                    let t = t0 + (i as u64 * 1_000_000_000 + rate * 500 / 1000) / rate; // us, rounded
+                    rows.push((seq + i as u32, t, raw, if i == 0 { lost } else { 0 }));
+                    o += w;
+                }
+                blocks += 1;
+            }
+            return (left, blocks);
+        }
+        assert_eq!(&d[..2], b"LD");
+        let (seq0, cnt, lost0) = (le32(d, o), u16::from_le_bytes([d[o + 8], d[o + 9]]) as usize, le32(d, o + 12));
+        assert_eq!(d[o + 10], 0);
+        o += PK_BLK;
+        let first = rows.len();
+        while o < d.len() {
+            assert_eq!(&d[o..o + 2], b"DC");
+            let pl = u16::from_le_bytes([d[o + 2], d[o + 3]]) as usize;
+            let row0 = le32(d, o + 8);
+            let mut t = le32(d, o + 12) as u64 | (u16::from_le_bytes([d[o + 16], d[o + 17]]) as u64) << 32;
+            let nr = u16::from_le_bytes([d[o + 18], d[o + 19]]) as usize;
+            let dt0 = le32(d, o + 20) as u64;
+            let mut v = le32(d, o + 24) as i32;
+            let crc = !fastenc::crc32_upd(fastenc::crc32_upd(!0, &d[o + CHDR..o + CHDR + pl]), &d[o + 8..o + CHDR]);
+            assert_eq!(crc, le32(d, o + 4), "chunk CRC");
+            let lost_of = |dt: u64| ((dt * rate + 500_000_000) / 1_000_000_000).saturating_sub(1) as u32;
+            let mut dt = ((1_000_000_000 + rate / 2) / rate) as u32;
+            let p_us = dt;
+            let _ = p_us;
+            rows.push((row0 + 1, t, v, if rows.len() == first { lost0 } else { lost_of(dt0) }));
+            let mut bits = Bits { d, pos: (o + CHDR) * 8, end: o + CHDR + pl };
+            let (mut at, mut av) = (fastenc::Ad::new(4), fastenc::Ad::new(16));
+            for j in 1..nr {
+                let x = bits.rice(at.k());
+                at.upd(x);
+                dt = dt.wrapping_add(unzz(x) as u32);
+                t += dt as u64;
+                let u = bits.rice(av.k());
+                av.upd(u);
+                v = v.wrapping_add(unzz(u));
+                rows.push((row0 + 1 + j as u32, t, v, lost_of(dt as u64)));
+            }
+            o += CHDR + pl;
+            blocks += 1;
+        }
+        assert_eq!(rows.len() - first, cnt);
+        assert_eq!(rows[first].0, seq0);
+        (left, blocks)
+    }
+    const CHDR: usize = fastenc::CHDR;
+
+    /// Drain `l` in format `fmt` with replies of `buf` bytes until empty;
+    /// the rows with their stamps unwrapped (u32 -> u64, as a host does).
+    fn drain_fmt(l: &mut Logger, fmt: u8, rate_mhz: u32, buf: usize) -> (std::vec::Vec<Row>, usize) {
+        l.set_fmt(fmt);
+        let par = FmtPar { rate_mhz, a: 0.5, b: 1e-6 };
+        let mut out = std::vec![0u8; buf];
+        let mut rows = std::vec::Vec::new();
+        let mut replies = 0;
+        loop {
+            let n = l.encode_fmt(&mut out, &par);
+            if n == 6 {
+                break;
+            }
+            let mut r = std::vec::Vec::new();
+            decode(&out[..n], &mut r);
+            replies += 1;
+            rows.extend(r);
+        }
+        (rows, replies)
+    }
+
+    /// Unwrap the stamps as a host does: each decoded t is a u32 t0 plus
+    /// an offset; a step back of more than 2^31 us is a wrap.
+    fn unwrap(rows: &mut [Row]) {
+        let (mut base, mut last) = (0u64, 0u64);
+        for r in rows.iter_mut() {
+            let mut t = r.1 + base;
+            if t + (1 << 31) < last {
+                base += 1 << 32;
+                t += 1 << 32;
+            }
+            last = t;
+            r.1 = t;
+        }
+    }
+
+    /// The stamps of a regular stream with a few holes; (stamps, values).
+    fn stream(n: u64, p_ns: u64, t0: u64, holes: &[(u64, u64)], vals: &dyn Fn(u64) -> i32) -> std::vec::Vec<(u64, i32, u32)> {
+        let mut out = std::vec::Vec::new();
+        let mut k = 0u64; // conversion index
+        let mut i = 0u64;
+        while (out.len() as u64) < n {
+            if let Some(&(_, len)) = holes.iter().find(|h| h.0 == i) {
+                k += len;
+                out.push(((t0 * 1000 + k * p_ns) / 1000, vals(i), len as u32));
+            } else {
+                out.push(((t0 * 1000 + k * p_ns) / 1000, vals(i), 0));
+            }
+            k += 1;
+            i += 1;
+        }
+        out
+    }
+
+    fn check_fmt(fmt: u8, p_ns: u32, s: &[(u64, i32, u32)], exact_t: bool) -> usize {
+        let mut l = session(true, p_ns);
+        let rate = (1_000_000_000_000u64 / p_ns as u64) as u32;
+        let (mut rows, mut replies) = (std::vec::Vec::new(), 0);
+        for part in s.chunks(1500) {
+            for &(t, v, _) in part {
+                feed(&mut l, t, v);
+            }
+            let (r, n) = drain_fmt(&mut l, fmt, rate, 6144);
+            rows.extend(r);
+            replies += n;
+        }
+        assert_eq!(l.overwritten(), 0);
+        unwrap(&mut rows);
+        assert_eq!(rows.len(), s.len());
+        let base = s[0].0 >> 32 << 32;
+        for (i, (r, x)) in rows.iter().zip(s).enumerate() {
+            assert_eq!(r.0, i as u32 + 1, "seq");
+            assert_eq!(r.2, x.1, "value of row {}", i);
+            let t = r.1 + base;
+            if exact_t {
+                assert_eq!(t, x.0, "stamp of row {}", i);
+            } else {
+                let half = (p_ns as u64 / 2 + 999) / 1000;
+                assert!(t.abs_diff(x.0) <= half + 1, "row {} t {} vs {}", i, t, x.0);
+            }
+            assert_eq!(r.3, x.2, "lost_before of row {}", i);
+        }
+        replies
+    }
+
+    #[test]
+    fn fmt_packed_and_dlg_round_trip() {
+        let p = 13_021; // 76.8 kS/s
+        let full = |i: u64| match i % 7 {
+            // AD2 full scale and jumps (the Rice escape), AD1's i24 limits
+            0 => 262_143,
+            1 => -262_144,
+            2 => 8_388_607,
+            3 => -8_388_608,
+            _ => (i as i32 * 37) % 1000 - 500,
+        };
+        let s = stream(5000, p, 1000, &[(10, 1), (777, 5), (2500, 300), (4999, 2)], &full);
+        for fmt in [FMT_PACKED, FMT_DLG] {
+            check_fmt(fmt, p as u32, &s, fmt == FMT_DLG);
+        }
+        // Regular, low-noise: DLG ~2 B / sample, PACKed 3.
+        let s = stream(2040, p, 5, &[], &|i| ((i * 7919) % 41) as i32 - 20);
+        let mut l = session(true, p as u32);
+        for &(t, v, _) in &s {
+            feed(&mut l, t, v);
+        }
+        let mut out = std::vec![0u8; 6144];
+        let par = FmtPar { rate_mhz: 76_800_000, a: 0.0, b: 0.0 };
+        l.set_fmt(FMT_PACKED);
+        let n = l.encode_fmt(&mut out, &par);
+        let mut r = std::vec::Vec::new();
+        let (left, blocks) = decode(&out[..n], &mut r);
+        // 6138 payload bytes: 2034 samples, 6 left for the next reply.
+        assert_eq!((r.len(), left, blocks), (2034, 6, 1));
+        assert_eq!(n, 6 + FMT_HDR + PK_BLK + 2034 * 3);
+        // DLG: the rest, then the size of a full ring.
+        l.set_fmt(FMT_DLG);
+        let n = l.encode_fmt(&mut out, &par);
+        let mut r = std::vec::Vec::new();
+        assert_eq!(decode(&out[..n], &mut r), (0, 1));
+        assert_eq!(r.len(), 6);
+        for &(t, v, _) in &s {
+            feed(&mut l, t + 1_000_000, v);
+        }
+        let n = l.encode_fmt(&mut out, &par);
+        let mut r = std::vec::Vec::new();
+        decode(&out[..n], &mut r);
+        assert_eq!(r.len(), 2040);
+        std::println!("DLG: {} B for 2040 samples ({:.2} B/sample)", n, n as f32 / 2040.0);
+        assert!(n < 2040 * 2);
+    }
+
+    #[test]
+    fn fmt_u32_stamp_wraps() {
+        // The stamps cross 2^32 us inside a reply (and a block).
+        let p = 26_042; // 38.4 kS/s
+        let t0 = (1u64 << 32) - 20_000;
+        let s = stream(3000, p, t0, &[(1500, 3)], &|i| i as i32);
+        for fmt in [FMT_PACKED, FMT_DLG] {
+            check_fmt(fmt, p as u32, &s, fmt == FMT_DLG);
+        }
+    }
+
+    #[test]
+    fn fmt_drift_and_ad1_realign_without_loss() {
+        // AD1 at 26.3 ms against the nominal 25 ms (5 %): PACKed starts a
+        // block every ~10 samples, lost 0 throughout.
+        let p = 25_000_000u32;
+        let mut l = session(false, p);
+        let mut s = std::vec::Vec::new();
+        for i in 0..200u64 {
+            s.push((i * 26_300, (i * 3) as i32 - 100, 0u32));
+            feed(&mut l, i * 26_300, (i * 3) as i32 - 100);
+        }
+        l.set_fmt(FMT_PACKED);
+        let par = FmtPar { rate_mhz: 40_000, a: 0.0, b: 0.0 };
+        let mut out = std::vec![0u8; 6144];
+        let n = l.encode_fmt(&mut out, &par);
+        let mut r = std::vec::Vec::new();
+        let (_, blocks) = decode(&out[..n], &mut r);
+        assert_eq!(r.len(), 200);
+        assert!(blocks >= 15 && blocks <= 25, "{} blocks", blocks);
+        for (x, y) in r.iter().zip(&s) {
+            assert_eq!((x.2, x.3), (y.1, 0));
+            assert!(x.1.abs_diff(y.0) <= 12_500);
+        }
+        // 76.8 kS/s with the chip 100 ppm slow: realigned, nothing lost.
+        let s: std::vec::Vec<_> = (0..4000u64).map(|i| (i * 13_022_302 / 1_000_000, 1, 0u32)).collect();
+        check_fmt(FMT_PACKED, 13_021, &s, false);
+    }
+
+    #[test]
+    fn fmt_replies_split_and_continue() {
+        // A full ring (2048) in small replies (BT-sized or smaller): each
+        // decodes on its own, the seqs continue, the reply after a gap
+        // carries lost_before; an i32 that does not fit 3 bytes: width 4.
+        let p = 104_167u32; // 9600/s
+        let mut s = stream(2048, p as u64, 0, &[(1000, 7)], &|i| i as i32 * 100);
+        s[1500].1 = 0x0123_4567; // width 4 for this sample
+        for fmt in [FMT_PACKED, FMT_DLG] {
+            for buf in [6144usize, 4200, 700] {
+                let mut l = session(true, p);
+                for &(t, v, _) in &s {
+                    feed(&mut l, t, v);
+                }
+                let (rows, replies) = drain_fmt(&mut l, fmt, 9_600_000, buf);
+                assert_eq!(l.overwritten(), 0);
+                if fmt == FMT_DLG && buf < 4200 {
+                    assert_eq!(rows.len(), 0, "DLG needs the 4 KiB FIFO");
+                    continue;
+                }
+                assert_eq!(rows.len(), 2048);
+                assert!(buf == 6144 || fmt == FMT_DLG || replies > 1);
+                for (i, (r, x)) in rows.iter().zip(&s).enumerate() {
+                    assert_eq!((r.0, r.2, r.3), (i as u32 + 1, x.1, x.2), "fmt {} buf {} row {}", fmt, buf, i);
+                }
+            }
+        }
+        // Empty ring: an empty block, as ROWS.
+        let mut l = session(true, p);
+        let mut out = [0u8; 64];
+        for fmt in [FMT_PACKED, FMT_DLG] {
+            l.set_fmt(fmt);
+            assert_eq!(l.encode_fmt(&mut out, &FmtPar { rate_mhz: 1, a: 0.0, b: 0.0 }), 6);
+            assert_eq!(&out[..6], b"#40000");
+        }
+        // The first block of a session is flagged.
+        feed(&mut l, 0, 1);
+        l.set_fmt(FMT_PACKED);
+        let mut out = [0u8; 256];
+        l.encode_fmt(&mut out, &FmtPar { rate_mhz: 9_600_000, a: 0.0, b: 0.0 });
+        assert_eq!(out[6 + FMT_HDR + 11], FL_START);
+    }
+
+    /// With LOGFMT_OUT=<dir> (tools/logfmt-test/run.sh): the replies of
+    /// streams with gaps, full-scale codes and a stamp wrap in both
+    /// compact formats, and the rows they must decode to, for the host
+    /// decoder (tools/dm40scpi.py `log_reply`).
+    #[test]
+    fn fmt_dump_for_the_host_decoder() {
+        let Ok(dir) = std::env::var("LOGFMT_OUT") else { return };
+        use std::io::Write;
+        let full = |i: u64| match (i % 1001, i % 11) {
+            (4, _) => 0x0123_4567, // width 4
+            (_, 0) => 262_143,
+            (_, 1) => -262_144,
+            (_, 2) => 8_388_607,
+            (_, 3) => -8_388_608,
+            _ => ((i * 7919) % 2001) as i32 - 1000,
+        };
+        let sets: [(&str, u32, u64, &[(u64, u64)]); 3] = [
+            ("a768", 13_021, 1000, &[(10, 1), (777, 5), (2500, 300), (4999, 2)]),
+            ("wrap384", 26_042, (1 << 32) - 20_000, &[(1500, 3)]),
+            ("ad1", 1_562_500, 0, &[(100, 1)]),
+        ];
+        for (name, p, t0, holes) in sets {
+            let s = stream(6000, p as u64, t0, holes, &full);
+            let rate = (1_000_000_000_000u64 / p as u64) as u32;
+            for (fmt, fname) in [(FMT_PACKED, "packed"), (FMT_DLG, "dlg")] {
+                let mut l = session(true, p);
+                let mut f = std::fs::File::create(std::format!("{}/{}-{}.bin", dir, name, fname)).unwrap();
+                l.set_fmt(fmt);
+                let par = FmtPar { rate_mhz: rate, a: 0.25, b: 2e-6 };
+                let mut out = std::vec![0u8; 6144];
+                for part in s.chunks(1700) {
+                    for &(t, v, _) in part {
+                        feed(&mut l, t, v);
+                    }
+                    loop {
+                        let n = l.encode_fmt(&mut out, &par);
+                        f.write_all(&(n as u32).to_le_bytes()).unwrap();
+                        f.write_all(&out[..n]).unwrap();
+                        if n == 6 {
+                            break;
+                        }
+                    }
+                }
+                assert_eq!(l.overwritten(), 0);
+            }
+            let mut f = std::fs::File::create(std::format!("{}/{}.txt", dir, name)).unwrap();
+            writeln!(f, "{}", p).unwrap();
+            for (i, x) in s.iter().enumerate() {
+                writeln!(f, "{} {} {} {}", i + 1, x.0 & 0xFFFF_FFFF, x.1, x.2).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn fmt_switch_between_replies() {
+        // ROWS -> PACKed -> ROWS -> DLG in one session: each compact reply's
+        // lost_before counts from the last record of the previous reply,
+        // whatever its format.
+        let p = 104_167u32;
+        let mut l = session(true, p);
+        let par = FmtPar { rate_mhz: 9_600_000, a: 0.0, b: 0.0 };
+        let mut out = std::vec![0u8; 6144];
+        let mut t = 0u64;
+        let mut fill = |l: &mut Logger, n: u64, hole: u64| {
+            t += hole * 104_167 / 1000;
+            for _ in 0..n {
+                feed(l, t, 5);
+                t += 104;
+            }
+        };
+        fill(&mut l, 100, 0);
+        l.set_fmt(FMT_ROWS);
+        assert_eq!(l.encode_fmt(&mut out, &par), 6 + 1200);
+        fill(&mut l, 100, 4);
+        l.set_fmt(FMT_PACKED);
+        let n = l.encode_fmt(&mut out, &par);
+        let mut r = std::vec::Vec::new();
+        decode(&out[..n], &mut r);
+        assert_eq!((r[0].0, r[0].3, out[6 + FMT_HDR + 11]), (101, 4, FL_GAP));
+        fill(&mut l, 100, 0);
+        l.set_fmt(FMT_ROWS);
+        l.encode_fmt(&mut out, &par);
+        fill(&mut l, 100, 7);
+        l.set_fmt(FMT_DLG);
+        let n = l.encode_fmt(&mut out, &par);
+        let mut r = std::vec::Vec::new();
+        decode(&out[..n], &mut r);
+        assert_eq!((r[0].0, r[0].3), (301, 7));
+        assert!(r[1..].iter().all(|x| x.3 == 0));
     }
 
     #[test]
