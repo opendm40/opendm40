@@ -3046,17 +3046,63 @@ pub const RANGE_MAX: usize = 9;
 /// end was lost must never carry its index into the other axis' table:
 /// pre-flash review 7dc32ac B1). The result is always inside the table of
 /// its own axis: tb `tb_min..=tb_max`, range `0..=RANGE_MAX`.
+/// Pinch modes (DBG:PINCH, owner 2026-10-24 "pinch needs a big stretch
+/// before anything changes"): PINCH_STOCK the first opendm40 rule (one
+/// table step per span ratio e^0.767 = 2.15, rounded: the first step at
+/// 1.47x); PINCH_STEP (default) one step per 1.25x of span, truncated (the
+/// first step at 1.25x, the next at 1.56x, ...: each step re-anchors);
+/// PINCH_LIVE the trace stretches continuously with the fingers (a
+/// screen-only scale of the shown frame), the release snaps to the nearest
+/// table step (`pinch_snap`).
+pub const PINCH_STOCK: u8 = 0;
+pub const PINCH_STEP: u8 = 1;
+pub const PINCH_LIVE: u8 = 2;
+/// ln(1.25): the PINCH_STEP ratio per step.
+const LN_STEP: f32 = 0.223_143_55;
+
 pub fn pinch_step(prev: Option<PinchState>, horizontal: bool, s0: u16, s: u16, tb: usize, range: usize, tb_min: usize, tb_max: usize) -> PinchState {
+    pinch_step_mode(PINCH_STOCK, prev, horizontal, s0, s, tb, range, tb_min, tb_max)
+}
+
+/// `pinch_step` in pinch mode `mode` (PINCH_LIVE: `i` is the step the
+/// release would snap to, see `pinch_snap`).
+pub fn pinch_step_mode(mode: u8, prev: Option<PinchState>, horizontal: bool, s0: u16, s: u16, tb: usize, range: usize, tb_min: usize, tb_max: usize) -> PinchState {
     let cur = if horizontal { tb } else { range };
     let p = match prev {
         Some(p) if p.horizontal == horizontal => p,
         _ => PinchState { horizontal, i0: cur, i: cur },
     };
     let r = s.max(1) as f32 / s0.max(1) as f32;
-    let k = round_i(ln_f(r) / 0.767);
     let (lo, hi) = if horizontal { (tb_min, tb_max) } else { (0, RANGE_MAX) };
+    if mode == PINCH_LIVE {
+        return PinchState { i: pinch_snap(horizontal, p.i0, r, lo, hi), ..p };
+    }
+    let k = if mode == PINCH_STEP {
+        let x = ln_f(r) / LN_STEP;
+        x as i32 // toward zero: a step only once its ratio is reached
+    } else {
+        round_i(ln_f(r) / 0.767)
+    };
     let i = (p.i0 as i32 - k).clamp(lo as i32, hi as i32) as usize;
     PinchState { i, ..p }
+}
+
+/// The table step nearest (in log scale) to the start step `i0` zoomed by
+/// span ratio `r` (fingers apart = zoom in = smaller per-div value), in
+/// lo..=hi. `div` gives the per-div value of a table index.
+pub fn pinch_snap(horizontal: bool, i0: usize, r: f32, lo: usize, hi: usize) -> usize {
+    let div = |i: usize| -> f32 { if horizontal { crate::scope::SDIV[i] } else { crate::scope::VDIV[i] } };
+    let want = ln_f(div(i0)) - ln_f(r.max(1e-3));
+    let mut best = i0.clamp(lo, hi);
+    let mut bd = f32::MAX;
+    for i in lo..=hi {
+        let d = (ln_f(div(i)) - want).abs();
+        if d < bd {
+            bd = d;
+            best = i;
+        }
+    }
+    best
 }
 
 /// ln(x) for x > 0 (no libm): exponent + a short series on the mantissa.

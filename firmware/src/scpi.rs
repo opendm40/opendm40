@@ -514,6 +514,9 @@ pub enum Log {
 ///                           grey provisional, F final, N none; value NAN for
 ///                           dashes, +9.9E37 OL; hold Meter::hold_state)
 ///   DBG:GRAB <ms> | ?       scope drag hold-to-grab time (0 = direct drag, default)
+///   DBG:PINCH 0|1|2 | ?     scope pinch mode (RAM only): 0 one step per 2.15x
+///                           of finger span, 1 one step per 1.25x (default), 2 live
+///                           stretch, snapped to the nearest step on release
 ///   DBG:GEST?               last scope drags, oldest first: n then per drag
 ///                           ";target,axis,delta_px,ms" (target 1 level, 2 trigger
 ///                           position / pan, 3 offset, 4/5 X/Y cursor a, 14/15 b;
@@ -833,6 +836,8 @@ pub enum Cmd {
     CalcSmoResp(Option<u8>),
     /// DBG:GRAB <ms> / ?: hold-to-grab time of scope drags (0 = direct).
     DbgGrab(Option<u16>),
+    /// DBG:PINCH 0|1|2 / ?: scope pinch mode (scope_page::set_pinch_mode).
+    DbgPinch(Option<u8>),
     /// DBG:GEST?: log of the last scope drags.
     DbgGest,
     /// DBG:VIEW?: the page shown (App::scpi).
@@ -1908,6 +1913,9 @@ impl Scpi {
                 }
                 // Scope drag A/B aids (App::scpi): DBG:GRAB <ms> (0 = direct
                 // drag) / DBG:GRAB?, DBG:GEST? (last drags).
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"PINCH"[..]) => {
+                    out = Out::Instr(Cmd::DbgPinch(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 2.0) as u8) }))
+                }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GRAB"[..]) => {
                     out = Out::Instr(Cmd::DbgGrab(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 5000.0) as u16) }))
                 }

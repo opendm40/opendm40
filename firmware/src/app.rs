@@ -4344,6 +4344,14 @@ impl App {
                 self.redraw |= self.view == View::Settings;
                 false
             }
+            C::DbgPinch(Some(m)) => {
+                scope_page::set_pinch_mode(m);
+                false
+            }
+            C::DbgPinch(None) => {
+                crate::put_u32(out, scope_page::pinch_mode() as u32);
+                true
+            }
             C::DbgGrab(None) => {
                 crate::put_u32(out, gesture::grab_ms() as u32);
                 true

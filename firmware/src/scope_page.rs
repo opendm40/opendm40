@@ -142,6 +142,19 @@ pub(super) struct Pinch {
     /// the table of `axis` (scope_ui::pinch_step).
     i0: usize,
     i: usize,
+    /// Span ratio (now / start): the live stretch of PINCH_LIVE.
+    r: f32,
+}
+
+/// Pinch mode (scope_ui::PINCH_*; DBG:PINCH, RAM only).
+static PINCH_MODE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(su::PINCH_STEP);
+
+pub fn pinch_mode() -> u8 {
+    PINCH_MODE.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_pinch_mode(m: u8) {
+    PINCH_MODE.store(m.min(su::PINCH_LIVE), core::sync::atomic::Ordering::Relaxed);
 }
 
 /// Column rows (280-row model) of the frame shown, per engine column, and
@@ -795,6 +808,11 @@ impl App {
         }
         let s = &self.scope.s;
         let (ky, kx) = match self.sp.pinch {
+            // PINCH_LIVE: the shown frame stretched with the fingers.
+            Some(p) if pinch_mode() == su::PINCH_LIVE => {
+                let (ky, kx) = (scope::VDIV[c.range] / scope::VDIV[s.range], scope::SDIV[c.tb] / scope::SDIV[s.tb]);
+                if p.axis == Axis::V { (ky * p.r, kx) } else { (ky, kx * p.r) }
+            }
             // (Indices clamped again: a safety net, pinch_step keeps them in
             // their tables.)
             Some(p) if p.axis == Axis::V => (scope::VDIV[c.range.min(9)] / scope::VDIV[p.i.min(9)], 1.0),
@@ -1916,9 +1934,12 @@ impl App {
         let prev = self.sp.pinch.map(|p| su::PinchState { horizontal: p.axis == Axis::H, i0: p.i0, i: p.i });
         let tb_max = if self.scope.roll { scope::TB_MAX } else { scope::TB_YT_MAX };
         let tb_min = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
-        let n = su::pinch_step(prev, h, s0, s, st.tb, st.range, tb_min, tb_max);
-        let p = Pinch { axis, i0: n.i0, i: n.i };
-        let changed = prev.map_or(true, |q| q != n);
+        let mode = pinch_mode();
+        let n = su::pinch_step_mode(mode, prev, h, s0, s, st.tb, st.range, tb_min, tb_max);
+        let r = s.max(1) as f32 / s0.max(1) as f32;
+        let p = Pinch { axis, i0: n.i0, i: n.i, r };
+        let live_moved = mode == su::PINCH_LIVE && self.sp.pinch.map_or(true, |q| q.r != r);
+        let changed = prev.map_or(true, |q| q != n) || live_moved;
         if changed || !self.sp.bubble {
             self.sp.pinch = Some(p);
             self.sp_render();
