@@ -47,7 +47,7 @@ top bar, and the combined view shows **GEN**.
 - A square above 50 kHz is a logic-level square: amplitude and offset
   cannot be set (grey, **logic level**).
 - The frequency box shows the real output frequency, which can differ
-  slightly from the typed one: 3 decimals below 1 kHz, 2 below 100 kHz.
+  slightly from the typed one: 3 decimals below 1 kHz, 2 below 100 kHz, 1 below 1 MHz.
 - The duty box shows the real duty cycle.
 
 ## Offset
@@ -64,8 +64,8 @@ top bar, and the combined view shows **GEN**.
 
 Tap a value box. The keypad opens with the current value selected:
 
-- the first digit replaces the whole value;
-- **<** deletes the last character;
+- the first digit replaces the whole value, the first **<** clears it;
+  after that **<** deletes the last character;
 - frequency: type whole numbers and choose the unit with **H** (Hz),
   **K** (kHz) or **M** (MHz). To get 32.768 kHz, type `32768` and **H**;
 - Vpp, offset and duty: digits and a decimal point;
