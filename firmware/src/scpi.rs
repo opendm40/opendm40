@@ -983,8 +983,17 @@ pub fn step_exp(v: f32, cap: bool) -> i32 {
     e
 }
 
-/// 10^e.
+/// 10^e, the f32 nearest it for e in -16..=8 (a table: VOLT:RES? prints
+/// it as nr3, and an f32 divided by 10 five times gave +9.999999E-06,
+/// device a2e9766). Outside the table: repeated steps (not used).
 pub fn pow10f(e: i32) -> f32 {
+    const T: [f32; 25] = [
+        1e-16, 1e-15, 1e-14, 1e-13, 1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0,
+        1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8,
+    ];
+    if let Some(&v) = usize::try_from(e + 16).ok().and_then(|i| T.get(i)) {
+        return v;
+    }
     let mut v = 1.0f32;
     for _ in 0..e.unsigned_abs() {
         v = if e < 0 { v / 10.0 } else { v * 10.0 };
