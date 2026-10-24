@@ -2392,9 +2392,11 @@ Firmware:
             scaling in f64; scpi-test `nr3_exact` (exact values, a 200 000-value sweep vs `{:.6E}`).
             Device a2e9766: ACQ:SRAT? in the Wave view +7.680000E+04 / +3.840000E+04 / +4.800000E+03, scope
             +1.250000E+07 (device-check doc "a2e9766: bug-fix recheck" 5).
-      - [ ] `pow10f` (scpi.rs) divides an f32 by 10 once per step, so VOLT:RES? on DC V 6 V MED answers
+      - [x] `pow10f` (scpi.rs) divides an f32 by 10 once per step, so VOLT:RES? on DC V 6 V MED answers
             `+9.999999E-06` (device a2e9766; the exact nr3 now prints the f32 it gets; CONF? on the same
-            range says +1.000000E-05). Cosmetic.
+            range says +1.000000E-05). Fixed: a table of the nearest f32 for 10^-16 .. 10^8 (its other user,
+            the RES set threshold, gets the same values). scpi-test `pow10f_exact` (fails before: 57 checks,
+            e.g. RES of 6 V fine +9.999999E-06). (verify on device: VOLT:RES? on DC V 6 V MED +1.000000E-05)
       - [x] MMEM names: the LOGS/ SHOTS/ SCOPE/ prefix was dropped, not checked (`MMEM:DATA? "SHOTS/LOG005.DLG"`
             returned LOGS/LOG005.DLG; device 46370df). Fixed: `csvlog::parse_path`; a prefix of another directory
             is -256 for MMEM:DATA? and MMEM:DELete (nothing deleted). fatren-test `names`, scpi-test
