@@ -10,7 +10,7 @@
 dist/
 stock/patch/build*/
 __pycache__/
-fw-rs/target/
+firmware/target/
 toolchain/
 
 # Personal device data: flash / OTP / option-byte dumps, calibration, chip UID,
