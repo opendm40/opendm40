@@ -2340,10 +2340,17 @@ Firmware:
             AC+DC -> AUTO first FETCh? 1.29 -> 3.56 (by design). Suites: switchtest (15 / 15), senttest (all
             in the final run; aprot-to-dca failed once in an earlier loaded run, passes alone), autorangetest
             (ad1mix 1), couptest, powtest (acdc-floor flaky under load, base too; bt: its last row was cut by
-            the run's end, a test race fixed in powtest.py 6ece0b8, then OK alone; under 4 parallel runs its
-            phase 1 fails on base 612c45c too: the fw uptime lag moves the next input into the window),
-            leadstest,
-            acdcmethtest, dcvtest, flowtest, meter-test, touch-test, ui-render 0 violations.
+            the run's end, a test race fixed in powtest.py (emu: drop a row the run's end cut off), then OK
+            alone), leadstest, acdcmethtest, dcvtest, flowtest, meter-test, touch-test, ui-render 0
+            violations, autowaittest. Region C (final image, emu/regionc.py hooks): fastlogtest
+            --region-c --host-read / --ui-nav at AD2 38400 and wavetest volt / current / dcv: no region C
+            code or slow-bank read while streaming.
+            **Harness timing under host load (not this branch):** the fw uptime's offset from the virtual
+            time is bimodal under load (couptest idc: the 0.3 A input at fw 13.2 or 14.8 s for the same
+            virtual 16 s), so a phase's check window can see the next phase's input: couptest idc / band /
+            iac / sq5 and powtest bt phase 1 fail that way on base a064df0 and on fastswitch alike (idc:
+            base 1 of 2, fastswitch 2 of 2 at 13.2 s; band fails on base too); they passed on fastswitch at
+            lower load. The tests' windows should key on an input marker, not on uptime: follow-up.
             **Device retest** (RATE FAST and MED, 1 V / 4.7 kohm / 50 mA as in ad74e93, settle.py):
             1. DC V -> RES on 4.7 kohm: screen shows "- - Mohm" within ~0.2 s, the number by ~1.0-1.3 s (was
                3.0 s), no range stuck on 60 Mohm; an open input reads 0L, a 10 Mohm / 100 ohm resistor settles
