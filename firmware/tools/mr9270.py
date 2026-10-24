@@ -33,8 +33,12 @@ REG_OUT_FUNC = 0x08     # output function / type, u16
 REG_OUT_MODE = 0x09     # output signal mode, u16
 REG_OUT_ENABLE = 0x0B   # output enable, u16 (1 = on)
 REG_OUT_VALUE = 0x10    # output value i32, 0x10 high word, 0x11 low word
-REG_MEAS_FUNC = 0x28    # measurement function, u16
-REG_MEAS_MODE = 0x29    # measurement mode, u16
+REG_MEAS_FUNC = 0x28    # input signal type, u16 (40041; vendor manual for units after Oct 2021)
+REG_MEAS_MODE = 0x29    # input signal pattern, u16 (40042): measurement patterns are >= 128
+# Input codes (type, pattern; value at REG_MEAS_VALUE): voltage 1, 128 (mV);
+# current 0, 128 (uA); mV 1, 130; resistance 3, 129; frequency group 2, 128..134.
+MEAS_VOLTAGE = (1, 128)
+MEAS_CURRENT = (0, 128)
 REG_MEAS_VALUE = 0x30   # measurement value i32, 0x30 high, 0x31 low
 
 # --- Function table: name -> (func_code, mode_code, scale, unit) ------------

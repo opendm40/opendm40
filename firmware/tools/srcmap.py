@@ -57,7 +57,7 @@ SENSES = ['PB0', 'OP1O', 'SENSE', 'RLU']
 NAN = float('nan')
 FIELDS = ['V_input', 'V_far', 'I', 'V_vref', 'V_drop', 'V_com', 'VDDA_AGND', 'AGND_VSS']
 # --ext defaults (INFERRED: mirror mr9270.SCALE's output codes): func, mode, i32 per unit
-EXT = {'v': (1, 0, 1000.0, 'V'), 'ma': (0, 0, 1000.0, 'mA')}
+EXT = {'v': (1, 128, 1000.0, 'V'), 'ma': (0, 128, 1000.0, 'mA')}  # MR9270S+ input codes (vendor manual, units after Oct 2021): mV / uA
 
 
 def names(arg, table):
