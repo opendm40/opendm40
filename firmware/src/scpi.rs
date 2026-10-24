@@ -93,12 +93,11 @@
 //!     the function already selected), then the resolution if given
 //!     (CONT / DIOD: no argument; CAP / FREQ: AUTO / DEF only)
 //!   [SENSe:]<f>:RANGe <v>|AUTO|MIN|MAX|DEF / ?   the smallest range that
-//!     holds <v>: V 600 mV, 6, 60, 600, 1000 V; A 600 uA, 6000 uA, 60 mA,
+//!     holds <v>: V 60 mV, 600 mV, 6, 60, 600, 1000 V; A 600 uA, 6000 uA, 60 mA,
 //!     600 mA, 6 A, 10 A; ohm 60 ohm .. 60 Mohm (the MF range page's
 //!     items; above the top one: "Data out of range"). The query gives the
-//!     present range also while autoranging (V also 60 mV, which only the
-//!     mV-first autorange reaches; CAP 6 nF .. 60 mF, FREQ 60 Hz .. 60 MHz,
-//!     not settable)
+//!     present range also while autoranging (CAP 6 nF .. 60 mF, FREQ 60 Hz
+//!     .. 60 MHz, not settable)
 //!   [SENSe:]<f>:RANGe:AUTO ON|OFF|ONCE / ?   ON = the AUTO key: back to
 //!     the autorange chosen on the meter (AUTO+ or the mV- / uA-first AUTO;
 //!     SCPI does not change that choice); OFF / ONCE keep the present range
@@ -932,7 +931,7 @@ impl Rng {
 
 /// Range value (SI) of a stock mode / range index, the full scale the
 /// meter labels it with (60000-count ranges 6 / 60 / 600..., 1000 V, 10 A,
-/// 60 mV = DC / AC mV r0, reached by the mV-first autorange only).
+/// 60 mV = DC / AC mV r0).
 /// `r` of frequency (14) is the counter range (Dmm::counter_range). None: no
 /// range (continuity, diode, temperature).
 pub fn range_si(mode: u8, r: i8) -> Option<f32> {
@@ -977,14 +976,25 @@ pub fn pow10f(e: i32) -> f32 {
     v
 }
 
-/// The settable ranges (the MF page's items in order, Dmm::set_range):
-/// V 600 mV .. 1000 V, A 600 uA .. 10 A, ohm 60 ohm .. 60 Mohm.
+/// The settable ranges, ascending (the MF page's items, Dmm::set_range
+/// through `range_item_code`): V 60 mV .. 1000 V, A 600 uA .. 10 A, ohm
+/// 60 ohm .. 60 Mohm.
 pub fn range_items(func: u8) -> &'static [f32] {
     match func {
-        0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.6, 6.0, 60.0, 600.0, 1000.0],
+        0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.06, 0.6, 6.0, 60.0, 600.0, 1000.0],
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
         10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6],
         _ => &[],
+    }
+}
+
+/// The Dmm::set_range item of `range_items(func)[i]`: V 60 mV is item 5
+/// (after 600 mV .. 1000 V = 0..4); the other lists are the items in order.
+pub fn range_item_code(func: u8, i: usize) -> u8 {
+    if quantity(func & !ANY_CPL) == 1 {
+        if i == 0 { 5 } else { i as u8 - 1 }
+    } else {
+        i as u8
     }
 }
 

@@ -238,6 +238,7 @@ different; the details are in the sections linked.
 | Temperature | K thermocouple, no offset | Also PT100, PT1000, three NTCs and a user NTC; offset per sensor; °F factor corrected |
 | 4-20 mA % | Always shown, also negative | Labelled, shown only in the useful range |
 | 60 Ω range | — | Manual range with milliohm resolution |
+| 60 mV range | Not on the range page, never chosen by AUTO | On the range page; AUTO steps into it |
 | Burden voltage | — | Optional |
 | Function change | The old value or 0.0000 under the new unit | Grey dashes at once, grey until the value is final |
 | History while HOLD | Cannot store the held value | Stores it |
@@ -357,11 +358,13 @@ Bluetooth.
 - DC V: the signed voltage.
 - AC V: the true RMS voltage, with the frequency and the duty cycle above
   it.
-- Ranges: 600 mV, 6 V, 60 V, 600 V, 1000 V.
+- Ranges: 60 mV, 600 mV, 6 V, 60 V, 600 V, 1000 V.
 - From 30 V the value turns red; from 100 V a lightning symbol appears.
 
-There is no separate mV button: choose the 600 mV range on the range page,
-or use AUTO (not AUTO+), which steps down into mV.
+There is no separate mV button: choose the 60 mV or 600 mV range on the
+range page, or use AUTO (not AUTO+), which steps down into mV. AUTO goes
+from 600 mV to 60 mV below 58.3 mV and back above 61.8 mV. The 60 mV range
+shows no extra digit.
 
 ![AC V on the mains: red from 30 V, the lightning from 100 V](img/dmm-acv.png)
 
@@ -546,7 +549,7 @@ Choosing a range turns REL off.
 | | Voltage | Current |
 |---|---|---|
 | **AUTO+** | Volt ranges only; never steps down to 600 mV. **Default.** | Steps down to the mA ranges, not to µA. |
-| **AUTO** | Also steps down into 600 mV (the stock behaviour). | Steps down to µA. **Default.** |
+| **AUTO** | Also steps down into 600 mV and 60 mV. | Steps down to µA. **Default.** |
 
 With AUTO on volts, the range page warns in orange: **AUTO starts on mV:
 AUTO+ is safer**.
@@ -566,7 +569,7 @@ to a high voltage applied while the meter sat on the mV range.
 
 ### Counts, rate and the extra digit
 
-opendm40 uses 60000 counts on every model (ranges 600 mV, 6 V, 60 V ...).
+opendm40 uses 60000 counts on every model (ranges 60 mV, 600 mV, 6 V ...).
 
 #### Rate: FAST, MED, SLOW
 

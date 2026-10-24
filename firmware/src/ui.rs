@@ -1049,9 +1049,11 @@ pub(crate) fn lim_badge(v: u8) {
 /// limits (dmm.rs COUNTS_MODEL).
 pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
     match b {
+        // 60 mV: the DC / AC mV r0 row (Dmm::set_range item 5; the stock
+        // has the row but no item for it).
         Button::Volt => &[
-            ("600mV", Some(0)), ("6V", Some(1)), ("60V", Some(2)), ("600V", Some(3)),
-            ("1000V", Some(4)), ("AUTO+", Some(255)), ("AUTO", None),
+            ("60mV", Some(5)), ("600mV", Some(0)), ("6V", Some(1)), ("60V", Some(2)),
+            ("600V", Some(3)), ("1000V", Some(4)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
         Button::Amp => &[
             ("600uA", Some(0)), ("6000uA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
