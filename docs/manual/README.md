@@ -578,6 +578,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   the probe voltage and switches the beeper directly, with no firmware in
   between (the same chip setting as the stock firmware). It sounds while the
   resistance is below about 67 Ω (*inferred* from the chip setting).
+- No test current is shown: continuity uses its own source setting, whose
+  current is not known yet.
 - The firmware adds no latch and no minimum beep length: the beep starts and
   stops with the contact.
 - The comparator itself is fast (a bandwidth of a few MHz in the chip's data
@@ -596,6 +598,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 #### Diode
 
 - Shows the forward voltage with four decimals; **0L** above 3.12 V.
+- Top left, small: the test current, **I 0.75 mA** (*inferred*: from
+  user reports, not measured on this firmware).
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
@@ -707,7 +711,12 @@ to a high voltage applied while the meter sat on the mV range.
 
 #### Overload
 
-- **0L** in the reading; the bargraph turns red with an **OL** mark.
+- **0L** in the reading with the word **Overload** next to it: the value
+  is above the range (or the function's limit). The bargraph turns red with
+  an **OL** mark. On the scope page's meter strip, **Overload** is in the
+  small text right of the reading.
+- A small value (for example the diode's Ω value) that is over its limit
+  shows **0L** with a small **Overload** before it.
 - An overload is never stored in MIN/MAX/AVG, the chart or the history.
 
 
