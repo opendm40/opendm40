@@ -554,7 +554,7 @@ input's marker, or at its script distance after the previous start when it
 starts with an action; actions at their distance from their phase's start;
 check windows from the next phase's start backwards). A run whose markers are
 missing, or whose fw clock restarted (a reset), fails. Keyed this way:
-couptest, powtest, senttest, burdentest, leadstest, acdcmethtest,
+couptest, powtest, senttest, burdentest, acdcmethtest,
 autowaittest, switchlat, inrushtest, dcvtest (the 25 V step), loudtest (its
 actions on the script's clock), switchtest (`later` inputs land inside the
 first step). Tests driven only by SCPI handshakes and uptime (autorangetest,

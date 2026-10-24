@@ -170,10 +170,8 @@
 //!     DC V 6 V) | FUSE (hint: an A function at zero for 60 s)
 //!   SYSTem:ALERt:ENABle <mask> | ON | OFF / ?   alerts enabled, bit 0 AJACK,
 //!     1 VJACK and the DC / AC / FUSE hints, 2 LIVE (Settings 3/3 "Jack
-//!     alerts"), 3 the "Leads in A?" reminder (a toast + beep on a change from
-//!     a current function to a non-current one, doc 4.9; Settings 3/3 "A-lead
-//!     reminder"); default 15 = ON, persisted. A host script that switches
-//!     between A and V functions with leads in both jacks clears bit 3
+//!     alerts"); default 7 = ON, persisted; bit 3 (the removed "Leads in
+//!     A?" reminder) is accepted and ignored;
 //!     OVERLOAD (the uA / mA shunt over range: the meter moved to the 10 A
 //!     shunt, latched; doc 4.7) is not maskable
 //!   SYSTem:ALERt:ALARm LOUD | VOLume | OFF / ?   the danger alarm (doc
@@ -528,9 +526,6 @@ pub enum Log {
 ///   DBG:SENTinel:LOG?       the last 8 alert assertions since power-on:
 ///                           n then per one ";ALERT,KIND,ms" (oldest first;
 ///                           n counts all, emu/hy3131/switchtest.py)
-///   DBG:LEADs?              "Leads in A?" reminders since power-on: n,from,to
-///                           (Dmm::func codes of the last change that fired;
-///                           255 = none yet; doc 4.9)
 ///   DBG:SENTinel:VARiant <0..127> / ?
 ///                           device-check row variants, RAM only (sentinel.rs
 ///                           VAR_*): +1 AC V keeps OP1's chopper (9dd1222 row),
@@ -866,7 +861,7 @@ pub enum Cmd {
     /// SYSTem:FUSE:TEST (true) / SYSTem:FUSE? (false).
     SysFuse(bool),
     /// SYSTem:ALERt:ENABle <mask> | ON | OFF / ?: alerts enabled (bit 0
-    /// A-JACK, 1 V-JACK?, 2 LIVE?, 3 the "Leads in A?" reminder).
+    /// A-JACK, 1 V-JACK?, 2 LIVE?; bit 3 ignored).
     SysAlertEnable(Option<u8>),
     /// SYSTem:ALERt:ALARm LOUD | VOLume | OFF / ?: the danger alarm setting
     /// (danger::LOUD / VOLUME / OFF).
@@ -879,8 +874,6 @@ pub enum Cmd {
     DbgSent,
     /// DBG:SENTinel:LOG?: the alert assertions (Sentinel::log).
     DbgSentLog,
-    /// DBG:LEADs?: the "Leads in A?" reminder count and last change.
-    DbgLeads,
     /// DBG:SENTinel:VARiant <0..127> / ?: device-check row variants
     /// (sentinel::VAR_*, RAM only).
     DbgSentVar(Option<u8>),
@@ -2181,7 +2174,6 @@ impl Scpi {
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
-                _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "LEADs") => out = Out::Instr(Cmd::DbgLeads),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {
                     let c = match (parts.get(2).copied(), parts.get(3).copied(), query) {
                         (None, _, true) => Some(Cmd::DbgHwTrig(0, false)),

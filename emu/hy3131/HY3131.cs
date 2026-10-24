@@ -66,6 +66,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             Array.Clear(regs, 0, regs.Length);
             intf = 0; ctbov = false; acpo = false;
             ad1Start = now; ad1Done = 0; ad1Code = 0; ad1Last = now; ad1MixT = double.NegativeInfinity;
+            r22PartT = double.NaN; r22PartLeft = 0;
             ad2Start = now; ad2Done = 0; lpfStart = now; lpfDone = 0;
             ad2LastT = double.NegativeInfinity;
             lpfCode = 0; rmsVal = 0; ad2Code = 0;
@@ -209,6 +210,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 SetCounterEnable((masked & 0x02) != 0, now);
                 break;
             case 0x22:
+                if(old != masked && R22PartFrac >= 0 && EnAd1 && !(r22PartT > now))
+                {
+                    // R22PartFrac: the conversion in progress ends on the old period's grid
+                    var pOld = (256 << (old & 7)) * 30.0 / SysClk * ((old & 0x10) != 0 ? 2 : 1);
+                    var t0 = Math.Max(ad1Start, ad1Last);
+                    r22PartT = t0 + (Math.Floor((now - t0) / pOld) + 1) * pOld;
+                    r22PartSign = -r22PartSign;
+                    r22PartLeft = (int)R22PartN - 1;
+                }
                 if(old != masked) RestartAd1(now);
                 break;
             case 0x23:
@@ -483,6 +493,31 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// ("acastep:200000;acastepms:600"; off by default). The shape is not measured: only
         /// "the first result after the settle reads over range" is.
         public double AcaStepCodes, AcaStepMs = 600;
+        /// ... and after it a tail that decays with this time constant, ms (opt-in, "acasteptau:ms";
+        /// 0 = none, the step ends at acastepms). Device v0.1-pre1 (2026-10-24, CONF:CURR:AC 10 then
+        /// 0.06, open jack): the first in-range 60 mA results read 28.7-59.5 mA up to ~0.85 s after the
+        /// command, then fell ~100x per result to ~1e-6 A. The shape is INFERRED from those results.
+        public double AcaStepTauMs;
+        /// AD1 after an R22 (OSR / chop) change (opt-in, "r22part:frac", "r22off:codes", "r22n:n";
+        /// INFERRED shape, device v0.1-pre1 2026-10-24): the conversion in progress is not restarted;
+        /// it ends on its old schedule as a partial result, frac x the input plus r22off codes with a
+        /// sign that alternates per event, the grid at the new period starts there, and its first
+        /// r22n - 1 results read the same way. A second change before that end keeps the pending
+        /// partial. Device: right after a function change, DC V at MED read 0.376-0.405 V for 1 V in
+        /// the two conversions after the firmware's 0x15 -> 0x17 write (from AC V / ohm), RES the same
+        /// after its in-range OSR write; the first DC mA conversion after an entry from DC V 6 V at
+        /// MED / SLOW read +-44..56 mA or over range on an open jack (none at FAST, where the
+        /// conversion in progress is 100 ms, not 400). The device showed none for the same R22 steps
+        /// later in a function; the model does not tell the two apart. Off (frac -1) by default.
+        public double R22PartFrac = -1, R22OffCodes, R22PartN = 1;
+        private int r22PartLeft;
+        /// Chopped AD1 restart (opt-in, "chophalf:1"; INFERRED from device 10242c3, osr/ fr_40_15:
+        /// the first record of an OSR 8192 chopped session after a 640/s one came 51.9 ms after the
+        /// session's first (stale) flag, the later ones 100.8 ms apart): after a restart with the
+        /// chopper on, the first result comes half a period later, then every period. Off by default.
+        public bool ChopHalf;
+        private double r22PartT = double.NaN;
+        private int r22PartSign = 1;
         private double acaStepT = double.NegativeInfinity;
         private Role lastRole = Role.None;
         private int lastMode = -1;
@@ -729,6 +764,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "sensetau": SenseNegTau = o.Value; break;
                 case "acastep": AcaStepCodes = o.Value; break;
                 case "acastepms": AcaStepMs = o.Value; break;
+                case "acasteptau": AcaStepTauMs = o.Value; break;
+                case "r22part": R22PartFrac = o.Value; break;
+                case "r22off": R22OffCodes = o.Value; break;
+                case "r22n": R22PartN = o.Value; break;
+                case "chophalf": ChopHalf = o.Value != 0; break;
                 case "vjblind": VjBlind = o.Value != 0; break;
                 case "swtau": SwTrTau = o.Value; break;
                 case "swhz": SwTrHz = o.Value; break;
@@ -762,7 +802,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // ============================================================ the chip
         private void RestartAd1(double now)
         {
-            ad1Start = now; ad1Done = 0;
+            ad1Start = r22PartT > now ? r22PartT : now; ad1Done = 0;
+            if(ChopHalf && Ad1Chop) ad1Start -= Ad1Period / 2; // the first result half a period after the start
             ad1RestartT = now; ad1MixT = double.NegativeInfinity; // a restart flushes the filter
         }
 
@@ -786,6 +827,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private void UpdateAd1(double now)
         {
             if(!EnAd1) return;
+            if(r22PartT <= now)
+            {
+                // R22PartFrac: the partial conversion across the R22 change
+                ad1Last = r22PartT;
+                ad1Code = Clamp24((int)Math.Round(R22PartFrac * ComputeAd1(r22PartT) + r22PartSign * R22OffCodes));
+                intf |= 0x04;
+                r22PartT = double.NaN;
+            }
             var p = Ad1Period;
             var n = (long)Math.Floor((now - ad1Start) / p);
             if(n <= ad1Done) return;
@@ -796,10 +845,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 for(var k = Math.Max(ad1Done + 1, n - 255); k < n; k++)
                     PeakHold(Clamp24(ComputeAd1(ad1Start + k * p)) >> 5);
             }
+            var newConv = (int)Math.Min(n - ad1Done, int.MaxValue);
             ad1Done = n;
             ad1Last = ad1Start + n * p;
             UpdateRamp(ad1Last); // the ramp node as it was when the conversion ended
             ad1Code = Clamp24(ForcedAd1 != int.MinValue ? ForcedAd1 : ComputeAd1(ad1Last));
+            var partNow = r22PartLeft > 0 && double.IsNaN(r22PartT) && newConv <= r22PartLeft;
+            if(r22PartLeft > 0) r22PartLeft = Math.Max(0, r22PartLeft - newConv);
+            if(partNow && ForcedAd1 == int.MinValue)
+            {
+                // R22PartN: the new grid's first results read as the partial one
+                ad1Code = Clamp24((int)Math.Round(R22PartFrac * ComputeAd1(ad1Last) + r22PartSign * R22OffCodes));
+            }
             if(Ad1Mix && ForcedAd1 == int.MinValue && ad1MixT > double.NegativeInfinity)
             {
                 // the decimation filter still holds samples of the input before a row write that
@@ -896,9 +953,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 // the block [t - p, t] overlapping the step [acaStepT, + AcaStepMs]
                 var ov = Math.Min(t, acaStepT + AcaStepMs * 1e-3) - Math.Max(t - p, acaStepT);
-                if(ov > 0)
+                var st = ov > 0 ? AcaStepCodes * Math.Min(1.0, ov / p) : 0.0;
+                var te = acaStepT + AcaStepMs * 1e-3;
+                if(AcaStepTauMs > 0 && t > te)
                 {
-                    var st = AcaStepCodes * Math.Min(1.0, ov / p);
+                    // AcaStepTauMs: the tail's mean over the block [max(t - p, te), t]
+                    var tau = AcaStepTauMs * 1e-3;
+                    var a0 = Math.Max(t - p, te) - te;
+                    st += AcaStepCodes * tau * (Math.Exp(-a0 / tau) - Math.Exp(-(t - te) / tau)) / p;
+                }
+                if(st != 0)
+                {
                     dc += st;
                     stepSq = st * st;
                 }
