@@ -710,6 +710,37 @@ safe AUTO; the stock's 0x15 ↔ 0x17 rule is not.
 5. **AD1 pre-filter.** Read the stock DC rows' R33 (SFT1) and check the board
    for an FTP-FTN capacitor (a possible Fluke-style analog filter, DS §12.4).
 
+**Results, tests 1-4 and option E (device, 10242c3, 2026-10-24;**
+`device-check-2026-10-21.md` "AD1 OSR characterization (10242c3)"**).** AD1
+streams on DC V 6 V; the calibrator's 0 / 9.59 V square (no sine available),
+0 / 1 / 5 V DC and its disabled output (no real short on the bench).
+
+| | 0x15 (FAST) | 0x16 (MED) | 0x17 (SLOW) | 0x06 (E) | 0x07 |
+|---|---|---|---|---|---|
+| period, ms | 100.78 | 200.79 | 400.78 | 100.00 | 200.00 |
+| leaks 0.405 at (beats near DC) | 10 Hz | 5 Hz | 2.5 Hz | 5 Hz | 2.5 Hz |
+| 50 Hz / 60 Hz rejection | **36 dB** / >= 91 dB | >= 92 / >= 93 dB | >= 94 / >= 95 dB | >= 89 / >= 90 dB | >= 90 / >= 90 dB |
+| noise sd, output off, uV (counts of 100 uV) | 40 (0.40) | **20 (0.20)** | 17 (0.17) | 36 (0.36) | 33 (0.33) |
+| noise for equal time, uV x s^0.5 | 12.6 | **8.9** | 10.8 | 11.2 | 14.7 |
+| offset vs 0x17 | -2 uV | -2 uV | 0 | **+22.22 mV** | +22.23 mV |
+| gain vs 0x17 | within ~50 ppm (the calibrator's drift limits it) | | | | |
+| first good conversion after a step or range change | 3rd: 0.2-0.3 s | 3rd: 0.4-0.6 s | 3rd: 0.8-1.2 s | 3rd: 0.2-0.3 s | 3rd: 0.4-0.6 s |
+
+- Test 1: the dc-aliasing.md kernel (chopped = two sinc^2 conversions one
+  period apart) predicts the p-p of all 45 streams (9 frequencies x 5 codes)
+  within 1 %. Nulled inputs read their mean within +-0.2 mV.
+- Test 2: 0x17 is barely quieter than 0x16 (not the white-noise 1/sqrt(2));
+  unchopped 0x07 is noisier than chopped 0x16 at the same 5/s (1/f).
+- Option E: the +22 mV that dcalias saw is an offset (the same at 0, 1 and 5 V),
+  not gain. Over 9.5 min it moved 39 uV (0.4 count); corrected by alternating
+  0x16 reference blocks it stays within 6 uV sd / 20 uV range. Untested: the
+  other ranges and temperature.
+- Verdict: **B** is supported on every count (0x16 as MED: mains and 10 Hz
+  nulled, the quietest per unit time, same scale as 0x15 / 0x17, 3
+  conversions to settle). **E** is feasible as FAST (0x15's noise, mains
+  rejected), but only with a per-range offset subtraction, best a periodic
+  0x16 zero.
+
 ## 9. Sources
 
 Local (repository `docs/`):
