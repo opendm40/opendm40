@@ -227,8 +227,10 @@ Code work (in this order):
         1712 B); DM40RCVR.BIN / own-USB variants kept behind recovery-file / recovery-usb.
         (device-verified by T2 and the T3 way back)
   - [x] Test: power-on holding the power key ~5 s with no dm40*.bin -> stock booted. No vendor
-        button entry; PA2 is not the power key (probably a power-on-delayed signal: low for a while
-        after a cold power-on, high on warm resets). So our marker-zero recovery is required; per code
+        button entry; PA2 is not the power key. 2026-10-24 (owner, device): PA2 = the debug
+        header's TX pad (pull-up); a TX-GND short enters the loader's install state = the hardware
+        recovery (hw/README.md "Hardware recovery"). Why some cold power-ons without a short read
+        PA2 low for a while remains unexplained. So our marker-zero recovery is required; per code
         an invalid marker sends the ROM to the loader regardless of PA2 (to be confirmed by T2).
   - [x] Full verified flash dump (1 MiB, OB, OTP) taken before Stage 1: firmware/re/dumps/full-20261013/.
         RDP is level 1 (SWD/DFU only via mass erase), so the software recovery path matters.

@@ -27,37 +27,76 @@ protocol notes are for stock V2.6.
 
 ## Safety
 
-- **Back up first.** Each meter has its own calibration record (flash
-  `0x080C0000`) and UID-bound boot data (`0x080A4000`). Neither is part of an
-  update file and neither can be rebuilt. Before you flash anything, make a
-  backup with the memrw kit
-  ([firmware/patch/kit/README.md](firmware/patch/kit/README.md),
-  `dm40_memrw.py dump --quick`, better also `--full`) and keep it off the meter.
-  fw-rs reads calibration in place, never rewrites it, and also writes a copy
-  to its USB disk.
-- **Recovery.** Updates only rewrite the application from `0x08004000`; the
-  bootloader and the vendor FS-loader (`0x080A0000`) stay. On the FS-loader's
-  update screen (with fw-rs installed: `fw-rs/tools/dm40dbg.py update`, checked
-  on the device; the power-key hold from off and the automatic entry after a
-  second hang within 60 s of running are checked in the emulator only) copy one good update file onto its
-  USB disk and press "update": the official `dm40_v_2_6.bin` returns to stock.
-  Details:
-  "Recovery" in [fw-rs/README.md](fw-rs/README.md),
-  [fw-rs/docs/native-boot.md](fw-rs/docs/native-boot.md).
-- The stock firmware installs any `dm40*.bin` it finds on its USB disk. Do not
-  leave files with that name there by accident.
-- Dumps contain personal data (calibration, chip UID, boot data). Keep them in
-  `private/` or `firmware/re/dumps/` (both ignored); never commit them.
+### Back up with fw-rs
+
+- **Installing fw-rs first is safe.** The vendor FS-loader rewrites only the
+  application area from `0x08004000`. The Alientek bootloader (`0x08000000`),
+  the FS-loader (`0x080A0000`), its UID-bound boot data (`0x080A4000`) and the
+  calibration record (`0x080C0000`) are not touched
+  ([fw-rs/docs/native-boot.md](fw-rs/docs/native-boot.md)). fw-rs reads the
+  calibration in place and never writes it.
+- **Then copy to the PC**, from the fw-rs USB drive:
+  - the whole `INFO/` folder (read-only, generated from the MCU memory):
+
+    | File | What |
+    |---|---|
+    | `CALIB.BIN` | settings + calibration record, `0x080C0000`, 4 KiB. **Unit-specific** |
+    | `BOOTDATA.BIN` | UID-bound FS-loader data, `0x080A4000`, 16 KiB. **Unit-specific** |
+    | `UID.BIN` | the chip's 96-bit unique ID; says which unit the boot data belongs to. **Unit-specific** |
+    | `ROMBOOT.BIN` | the Alientek bootloader, `0x08000000`, 16 KiB |
+    | `LOADER.BIN` | the FS-loader incl. the boot data, `0x080A0000`, 128 KiB |
+    | `OPTBYTES.BIN`, `OTP.BIN` | option bytes, OTP area |
+    | `FIRMWARE.BIN` | the running firmware as a vendor update file |
+    | `BACKUP.TXT` | addresses, sizes, CRC-32s and the restore notes |
+
+  - `DEBUG/SPIFLASH.BIN`: the raw 16 MiB SPI flash (the meter's own disk).
+
+  `CALIB.BIN`, `BOOTDATA.BIN` and `UID.BIN` cannot be rebuilt: no update
+  file contains them. fw-rs also keeps one write-once safety copy of these
+  three on the SPI flash (files `CALIB.BIN`, `BOOTDATA.BIN`, `UID.BIN` in the
+  root of its internal disk, never overwritten; [`fw-rs/src/calbackup.rs`](fw-rs/src/calbackup.rs)),
+  because the SPI flash survives an SWD mass erase of the MCU.
+- **Full restore after an SWD mass erase** (from `BACKUP.TXT`): write
+  `ROMBOOT.BIN` at `0x08000000`, then `LOADER.BIN` at `0x080A0000` and
+  `CALIB.BIN` at `0x080C0000`, then install a firmware. The loader data only
+  works on the unit whose `UID.BIN` it was made with.
+- Keep backups off the meter. Dumps contain personal data (calibration, chip
+  UID, boot data): keep them in `private/` or `firmware/re/dumps/` (both
+  ignored by git); never commit them.
+
+### Enter the loader / return to stock
+
+1. Reach the vendor loader's update screen (it shows its own USB disk):
+   - **while fw-rs runs:** `python3 fw-rs/tools/dm40dbg.py update`
+     (`DBG:UPDATE`); or, with the drive in "PC can edit" mode (Settings 3/3,
+     "USB disk"), copy a `dm40*.bin` onto it and answer "Install it now?"
+     with Yes (installs that file through the loader directly); or
+     `fw-rs/tools/reload.sh --stock FILE` (the same for a stock file);
+   - **hardware, whatever the firmware does:** short the debug header's TX
+     pad (PA2) to GND at power-on, see [hw/README.md](hw/README.md)
+     "Hardware recovery";
+   - fw-rs's own triggers (power-key hold from off, two watchdog resets):
+     [fw-rs/README.md](fw-rs/README.md) "Recovery" (checked in the emulator,
+     the device check is pending).
+2. Copy the official stock firmware
+   [firmware/vendor/dm40_v_2_6.bin](firmware/vendor/dm40_v_2_6.bin) (back to stock) or a fw-rs
+   image onto the loader's USB disk as the only `dm40*.bin`, and press
+   "update". The loader deletes the file
+   after a successful install.
+
+The stock firmware installs any `dm40*.bin` it finds on its USB disk. Do not
+leave files with that name there by accident.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| [fw-rs/](fw-rs/README.md) | Replacement firmware: build, install, reload, recovery, debug link (`tools/dm40dbg.py`), host tests, design docs in `fw-rs/docs/` |
+| [fw-rs/](fw-rs/README.md) | Replacement firmware: build, install, reload, recovery, debug link (`tools/dm40dbg.py`), host tests, design docs in [`fw-rs/docs/`](fw-rs/docs) |
 | [firmware/](firmware/README.md) | `dm40fw.py` (update file decode / encode / pack incl. header CRCs), `merge_boot.py` |
 | [firmware/patch/](firmware/patch/AGENTS.md) | Patch kit for the stock firmware (BT memory read/write, USB live stream) |
 | [firmware/patch/kit/](firmware/patch/kit/README.md) | memrw backup kit: `dm40_memrw.py`, tests, `mkkit.sh` (builds `dist/`) |
 | [firmware/re/](firmware/re/README.md) | Reverse-engineering notes ([ANALYSIS.md](firmware/re/ANALYSIS.md), `analysis/*.h`), capstone helpers, Ghidra scripts |
+| [hw/](hw/README.md) | Hardware: chips, pins, front ends, power; teardown photos ([`hw/photos/`](hw/photos)) and datasheets ([`hw/datasheets/`](hw/datasheets)) |
 | [docs/bt-protocol.md](docs/bt-protocol.md) | Bluetooth protocol of the stock DM40 |
 | [docs/dm40-feature-request.md](docs/dm40-feature-request.md) | DM40C feature request and UX gap analysis (Russian) |
 | [docs/history/](docs/history/README.md) | Archived plans, reviews and handover notes (done or superseded), kept for reference |
@@ -69,7 +108,7 @@ protocol notes are for stock V2.6.
 its README). It returns a meter to stock and feeds the emulator and the
 stock-firmware tools. Older versions live in `wirenboard/alientek-dm40-tools`
 (`vendor/`). The Android app and the manuals are not in this repo.
-`emu/run.py stock` and `fw-rs/tools/mkstockfont.py` need the decoded body at
+`emu/run.py stock` and [`fw-rs/tools/mkstockfont.py`](fw-rs/tools/mkstockfont.py) need the decoded body at
 the repo root (ignored by git):
 
 ```
@@ -79,7 +118,7 @@ python3 firmware/dm40fw.py decode firmware/vendor/dm40_v_2_6.bin dm40_v_2_6.dec.
 ## Toolchain
 
 - fw-rs: a pinned Rust toolchain in `toolchain/` at the repo root (ignored,
-  local). `fw-rs/build.sh` and the host tests use `../toolchain`. Create it
+  local). [`fw-rs/build.sh`](fw-rs/build.sh) and the host tests use `../toolchain`. Create it
   once (tested with stable 1.99):
 
   ```
@@ -91,13 +130,18 @@ python3 firmware/dm40fw.py decode firmware/vendor/dm40_v_2_6.bin dm40_v_2_6.dec.
   ```
 
 - Patch kit: `gcc-arm-none-eabi`, `make`, `zip`.
-- Host tests: `mtools` (`fw-rs/tools/fatren-test`).
+- Host tests: `mtools` ([`fw-rs/tools/fatren-test`](fw-rs/tools/fatren-test)).
 - Bluetooth tools need a Python with `AF_BLUETOOTH` sockets
   (`/usr/bin/python3` on Linux; the linuxbrew one has none).
 
 ## License
 
-MIT, see [LICENSE](LICENSE). `firmware/re/` and `firmware/patch/` contain
+MIT, see [LICENSE](LICENSE). [`firmware/re/`](firmware/re) and [`firmware/patch/`](firmware/patch) contain
 addresses, symbols and decompiled code of the vendor firmware; the vendor
-binaries themselves are not included. `fw-rs/fonts/` carries its own font
+binaries themselves are not included. [`fw-rs/fonts/`](fw-rs/fonts) carries its own font
 license.
+
+[`hw/photos/`](hw/photos) and [`hw/datasheets/`](hw/datasheets) are third-party material under their
+owners' copyright (the review author, the chip manufacturers), kept for
+reference and not covered by the MIT license; see [hw/photos/README.md](hw/photos/README.md),
+[hw/datasheets/README.md](hw/datasheets/README.md) and [firmware/vendor/README.md](firmware/vendor/README.md).
