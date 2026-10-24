@@ -2624,6 +2624,12 @@ Firmware:
                DBG:SENT? ctsta: note the end of the 0x70 tail (7.75 s on ab7184c). A real V-JACK? source (24 V on
                V in DC A after RES): V-JACK? within ~2 s if it reads CMPHO alone, else by ~13 s.
             5. `CONF:CURR:DC 10` from DC V: the placeholder shows "A" from the first frame (shots2.py).
+            **Device v0.1-pre1 / grab-power, 2026-10-24 (device-check-2026-10-21.md "v0.1-pre1"):** 1 **FAIL**
+            (6 of 12: the right value grey, then two agreeing ~32 % conversions after the in-range OSR
+            write, final in amber: 125.9 / 122.1 / 57.3 / 30.0 ohm, 134 kohm for 420 kohm), 2 PASS (+9.91E37
+            in <= 31 ms; the decision came at 5.76-5.85 s, once not within 6 s), 3 PASS, 4 PASS (no V-JACK?,
+            no 0x70 at all), 5 PASS, fuse check on open jacks **FAIL** (OPEN 1, FAIL,279-286 ohm 9 of 10:
+            the same ~32 % pair after the 0x13 write). Fixed in "First readings after a switch" below.
 - [x] Burden voltage in the A / mA / uA modes (as the EEVblog 121GW, owner 2026-10-22): I * R_path of the
       shunt in use in the aux row, "Burden" caption: DC A aux1 (signed), AC A aux2 instead of the duty
       (RMS); none in AC+DC (both rows hold the parts) and in the power meter (its own At-load line). R_path
@@ -3314,10 +3320,49 @@ Emulator (emu/):
       of +-33..56 mA (ma1st 3 of 24 MED / SLOW, settle SLOW 2 of 2 from DC V 6 V; none at FAST),
       and `CONF:CURR:DC 0.06` ended on the 10 A row 4 of 11 times at MED / SLOW (OVERLOAD in
       DBG:SENT:LOG?; 0 of 5 at FAST).
+      **Fixed in e1cec01 (devchk-pre1r2, "DMM first readings after a switch"); emulator only, device check
+      below ("First readings after a switch").** v0.1-pre1 reproduced both: AC A 10 A -> 60 mA 28.7-59.5 mA
+      first (6 of 6), CONF:CURR:DC 0.06 at MED / SLOW on the 10 A range 5 of 10.
 - [x] Danger alarm only for confirmed A-JACK (coordinator 2026-10-24, device 612c45c: the RES
       5 V false A-JACK sounded the loud alarm at night): ohm / continuity / diode / cap / the
       resistive temperature sensors set Sentinel::soft; danger keys on ajack_alarm() (doc 4.10
       row). loudtest ajack-res / ajack-cont FAIL on e3e81d4, pass on sentinel2.
+
+- [x] First readings after a switch (device v0.1-pre1, 2026-10-24, device-check-2026-10-21.md "v0.1-pre1";
+      e1cec01): the entry's first conversion is vetted at every rate (the switch-latency.md proposal 5
+      shortcut, which took it unvetted after an R22 change, is gone: DC A -> DC V read 0.90-2.13 V for 1 V,
+      DC mA +-44..56 mA / OL, OVERLOAD to 10 A); a held conversion steps up / trips OVERLOAD only as the
+      second over-range one in a row (OVER_TWICE); an R22 change within 2 s of the row write, or by the row
+      write itself, drops the next two conversions (R22_DROP: DC V 0.376-0.405 V for 1 V after `osr`'s
+      0x17, RES 125.9 / 57.3 / 30.0 ohm and 134 kohm after the in-range OSR, the fuse check FAIL,279-286
+      ohm on open jacks after the 0x13 write); plain AC A holds results after a row write until two agree
+      (ACA_VET). Emulator: firstrdtest (dcma-med / -slow, dcv-acv-med, dcv-res-slow, res-med, fuse-open,
+      aca-step: all fail on v0.1-pre1, pass on the fix), model knobs r22part / r22off / r22n / acasteptau
+      (shapes INFERRED from the device numbers). Cost: one to two conversions more after a switch at MED /
+      SLOW, one AC A result after a row write.
+      Device e1cec01 (device-check-2026-10-21.md "v0.1-pre1", "Fix on the device"): PASS. AC A 10 A ->
+      60 mA first final 1.05 s, max 1.1e-6 A (6 of 6); DC mA entries 0 of 20 on 10 A, max 1.2e-6 A; DC V
+      entries 0 wrong of 24; RES 0 wrong of 12; fuse check open OPEN 10 of 10, calibrator 48 ohm OK,47.04-
+      47.06 10 of 10. Costs: first value DC V from RES 1.65 s, RES FAST 1.72 s / MED 2.6 s, CONF -> READ?
+      DC V / A at MED 1.5-1.8 s (was 0.5-1.0 s with a wrong value possible).
+  - [ ] The MED / SLOW cost above: R22_DROP drops two conversions after every early R22 change, also
+        where the device may not need it (an in-function OSR step did not show the effect). A narrower
+        rule needs the mechanism (next item).
+  - [ ] Why the two conversions after an early R22 change read ~32-40 %: UNKNOWN. The same OSR steps later
+        in a function (DC V MED / SLOW, 1 <-> 2 V) did not. A stream at 640/s across a CONF change would
+        show where the bad conversions sit.
+  - [ ] AUTO coupling decided at 5.76-5.85 s on the 10 Hz square (3 of 4; one not within 6 s), grab-power
+        image; ab7184c's MEAS:VOLT:AUTO? took 1.28-3.91 s. Not looked into.
+- [x] AD1 logger copies (device 10242c3, AD1 OSR check: right after a 640/s session each conversion
+      recorded twice, 52 ms apart, 121 of 294 at 0x15, 149 of 289 at 0x16): logger.rs `sample` took the
+      session's first flag-to-flag interval (a stale flag to the first conversion, half a period) as p_meas
+      and, with `rescued != 0` at every later flag, never measured it again. Now the period is measured
+      between two real flags from the session's second on (e1cec01). Device e1cec01: still 16 copies in
+      232 records in 1 of 3 sessions: the flags came 78.4 / 123.2 ms apart in turn. Then (83650bc): a
+      rescue that reads the last code again pushes nothing, and a flag right after a rescue that took
+      its conversion is not pushed again. Emulator logduptest (model knobs chophalf, chopskew): v0.1-pre1
+      28-33 copies per session, e1cec01 7-17, 83650bc 0. Device 83650bc: 0 copies in 6 sessions (998
+      records; 640/s, then OSR 8192 / 16384 chopped, 20 s each).
 
 ## Owner decisions 2026-10-24 (batch, delegated)
 
