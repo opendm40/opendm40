@@ -2620,8 +2620,7 @@ Untested on a real meter:
   diode beeps, PT1000 and the 100 kΩ NTC (PT100 and the 10 kΩ NTC ran on a
   resistance calibrator only).
 - Alerts: the alerts that need a current through the A jack (A-JACK,
-  A-PROT, OVLD) and the danger alarm's sound. The fuse check needs a
-  re-check. LIVE? instead of a false A-JACK with 5 V or more on V/Ω in Ω
+  A-PROT, OVLD). LIVE? instead of a false A-JACK with 5 V or more on V/Ω in Ω
   (fixed in the emulator; continuity and AC mV are checked on a meter).
 - Oscilloscope: pulse and runt triggers, cursors, pinch, double tap,
   long-press centring, holding a corner to repeat, Axis lock and Hold drag,
@@ -2631,7 +2630,6 @@ Untested on a real meter:
   impedance, the quality above 50 kHz).
 - Power meter and inrush: everything with a current flowing (the current
   reading, the sign, PF, the current-limit countdown, the inrush capture).
-- Recording: the fast recorder at 76 800 samples/s.
 - USB disk: macOS; **PC can edit** mode on Windows.
 - Remote control: the Alientek phone app itself with opendm40.
 
