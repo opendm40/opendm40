@@ -1,0 +1,48 @@
+%%{init: {"flowchart": {"nodeSpacing": 16, "rankSpacing": 36}}}%%
+flowchart LR
+  subgraph REST["Rest of the meter (one ground)"]
+    USBC(["USB-C"])
+    subgraph PWR["Power"]
+      direction TB
+      TVS["TVS"]
+      CHG["TP4056"]
+      BAT["Li-po 1S"]
+      SUP["System supply"]
+      TVS --> CHG --> BAT
+      CHG --> SUP
+      BAT --> SUP
+    end
+    CHA(["CHA"])
+    GEN(["GEN"])
+    MCU["MCU, scope,<br>generator"]
+  end
+  subgraph BAR["Isolation barrier"]
+    ISO["CA-IS3741"]
+    OPTO["Optocouplers"]
+    ISUP["VPS8504B<br>+ LT61"]
+  end
+  subgraph DMMD["DMM (isolated)"]
+    HY["DMM<br>front end"]
+    JV(["V/Ω"])
+    JCOM(["COM"])
+    JA(["A/mA/µA"])
+  end
+
+  USBC -->|"VBUS"| PWR
+  PWR --> MCU
+  USBC <-->|"USBFS<br>PA11 / PA12"| MCU
+  CHA --- MCU
+  GEN --- MCU
+  MCU <-->|"SPI2"| ISO
+  MCU --> OPTO
+  MCU -->|"PE2 rail"| ISUP
+  ISO <--> HY
+  OPTO --> HY
+  ISUP --> HY
+  HY --- JV
+  HY --- JCOM
+  HY --- JA
+
+  classDef inferred stroke-dasharray: 6 4
+  class SUP,OPTO inferred
+  style BAR stroke-width:3px

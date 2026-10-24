@@ -66,139 +66,22 @@ is the [CA-IS3741](datasheets/chipanalog-ca-is374x-v1.08.pdf) digital isolator (
 [VPS8504B](datasheets/vpsc-vps8504b-cn.pdf) + LT61 isolated supplies (markings in [Main parts](#main-parts), photos in
 [Isolation boundary](#isolation-boundary)). Everything else shares one ground.
 
-In all three diagrams: dashed outline = inferred, rounded nodes are jacks,
-edge labels are MCU buses and pins, the thick box is the isolation barrier.
+In the two block diagrams: dashed outline = inferred, rounded nodes are jacks,
+edge labels are MCU buses and pins, the thick box is the isolation barrier. The
+DMM front end is a simplified schematic with its own legend. Sources and
+`render.sh`: [diagrams/](diagrams/).
 
 **Overview.**
 
-```mermaid
-flowchart TB
-  subgraph REST["Rest of the meter (one ground)"]
-    USBC(["USB-C"])
-    TVS["TVS"]
-    CHG["TP4056"]
-    BAT["Li-po 1S"]
-    SUP["System supply"]
-    CHA(["CHA"])
-    GEN(["GEN"])
-    MCU["MCU, scope, generator"]
-  end
-  subgraph BAR["Isolation barrier"]
-    ISO["CA-IS3741"]
-    OPTO["Optocouplers"]
-    ISUP["VPS8504B + LT61"]
-  end
-  subgraph DMMD["DMM (isolated)"]
-    HY["DMM front end"]
-    JV(["V/Ω"])
-    JCOM(["COM"])
-    JA(["A/mA/µA"])
-  end
-
-  USBC -->|"VBUS"| TVS --> CHG --> BAT
-  CHG --> SUP
-  BAT --> SUP
-  SUP --> MCU
-  USBC <-->|"USBFS PA11 / PA12"| MCU
-  CHA --- MCU
-  GEN --- MCU
-  MCU <-->|"SPI2"| ISO
-  MCU --> OPTO
-  MCU -->|"PE2 rail"| ISUP
-  ISO <--> HY
-  OPTO --> HY
-  ISUP --> HY
-  HY --- JV
-  HY --- JCOM
-  HY --- JA
-
-  classDef inferred stroke-dasharray: 6 4
-  class SUP,OPTO inferred
-  style BAR stroke-width:3px
-```
+<img src="diagrams/overview.svg" width="900" alt="Block diagram: USB-C, power, MCU with scope and generator, the isolation barrier (CA-IS3741, optocouplers, VPS8504B + LT61) and the isolated DMM with its jacks">
 
 **Rest of the meter: MCU, scope, generator.**
 
-```mermaid
-%%{init: {"flowchart": {"nodeSpacing": 30, "rankSpacing": 70}}}%%
-flowchart TB
-  CHA(["CHA"])
-  ATT["Relay /50 + AC/DC"]
-  GAIN["Gain: 4051 + op amp"]
-  SADC["3PA1030"]
-  TCH["Touch"]
-  UART["Debug UART"]
-  SWD["SWD"]
-  MCU["GD32F427VGT6"]
-  LCD["ILI9488"]
-  FLASH["W25Q128JV"]
-  BT["Jieli BT"]
-  BUZ["Buzzer"]
-  SW["SGM3157"]
-  OUTS["Output stage"]
-  GEN(["GEN"])
+<img src="diagrams/mcu.svg" width="900" alt="Block diagram: GD32F427VGT6 with the scope chain, generator chain, LCD, SPI flash, Bluetooth, touch, buzzer and debug header">
 
-  CHA --> ATT --> GAIN --> SADC
-  SADC <-->|"PB0..PB9, PC6 clock"| MCU
-  MCU -->|"PC4 rail"| GAIN
-  TCH -->|"I2C2"| MCU
-  UART <-->|"PA2 / PA3"| MCU
-  SWD <-->|"PA13 / PA14"| MCU
-  MCU -->|"FSMC"| LCD
-  MCU <-->|"SPI1"| FLASH
-  MCU <-->|"UART4"| BT
-  MCU -->|"TIM14 PA7"| BUZ
-  MCU -->|"DAC0 PA4, TIM12 PB14"| SW
-  SW --> OUTS --> GEN
+**DMM front end (isolated).**
 
-  classDef inferred stroke-dasharray: 6 4
-  class ATT,GAIN,SW,OUTS inferred
-```
-
-**DMM (isolated).**
-
-```mermaid
-%%{init: {"flowchart": {"nodeSpacing": 20}}}%%
-flowchart TB
-  MCU["Rest of the meter"]
-  subgraph BAR["Isolation barrier"]
-    ISUP["VPS8504B + LT61"]
-    ISO["CA-IS3741"]
-    OPTO["Optocouplers"]
-  end
-  JA(["A/mA/µA"])
-  JV(["V/Ω"])
-  FUSE["Fuse"]
-  NET["Input network"]
-  RLY["HFD4/3-LS"]
-  MOS["RUH30J51M"]
-  R1["10 mΩ"]
-  R2["0.5 Ω"]
-  R3["47.5 Ω"]
-  JCOM(["COM"])
-  DIV["TC1746B6 divider"]
-  REF["MAX6190"]
-  XTAL["4.9152 MHz crystal"]
-  HY["HY3131"]
-
-  MCU --> OPTO
-  MCU -->|"PE2 rail"| ISUP
-  MCU <-->|"SPI2 PC10..12, PD2"| ISO
-  OPTO -->|"PA9 / PA10"| RLY
-  OPTO -->|"PE0 / PE1"| MOS
-  ISUP --> HY
-  ISO <--> HY
-  JV --> NET --> RLY --> DIV --> HY
-  JA --> FUSE --> R1 --> R2 --> R3 --> JCOM
-  MOS -.- R1
-  R3 --> HY
-  HY --- REF
-  HY --- XTAL
-
-  classDef inferred stroke-dasharray: 6 4
-  class OPTO,REF,DIV,NET,R1,R2,R3,MOS inferred
-  style BAR stroke-width:3px
-```
+<img src="diagrams/dmm_frontend.svg" width="900" alt="Schematic: HY3131 with the V/ohm input (PTC, MOV, HFD4/3-LS relay, TC1746B6 divider taps), the shunt chain with the RUH30J51M MOSFETs and taps PB1 / PB2 / PB3, MAX6190 on PB6, the crystal, and the parts crossing the isolation barrier">
 
 The same as text:
 
