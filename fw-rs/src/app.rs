@@ -2808,7 +2808,9 @@ impl App {
         // probe (the latch holds there too) its last value stands: a source
         // removed before the change stays quiet (the user did the right
         // thing: no new alarm), one still there keeps sounding (the cap).
-        self.danger_rd = a == Alert::AJack || (a == Alert::AProt && self.dmm.sent.probe_a >= crate::sentinel::APROT_GONE_A);
+        // A-JACK only where V-COM cannot fake it (sentinel `ajack_alarm`:
+        // not in the ohm-network rows; doc 4.10): the badge stays.
+        self.danger_rd = (a == Alert::AJack && self.dmm.sent.ajack_alarm()) || (a == Alert::AProt && self.dmm.sent.probe_a >= crate::sentinel::APROT_GONE_A);
         let pw = r.power.map(|p| (p.ik, p.i_ol, p.i));
         if crate::danger::over_rating(r.mode, r.range, r.main.ol, r.si, pw) {
             self.i10_since.get_or_insert(now);

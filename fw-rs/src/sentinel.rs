@@ -759,6 +759,16 @@ pub struct Sentinel {
     /// phase's comparator started (a DC source on V shows no swing; before
     /// the swing rule the AC phase's level kept the run going).
     pub bridge: bool,
+    /// The row's A-JACK evidence can be faked by a voltage on V-COM (set by
+    /// `dmm.rs` with the row: ohm, continuity, diode, capacitance, the
+    /// resistive temperature sensors). PB1 (comparator / AD2 peak) follows
+    /// a driven V-COM in those rows (device 1eb4d7e / 973df07 / 35fce2a 7b
+    /// / f0d21eb: A-JACK in RES and continuity at 5 V, V-COM's source
+    /// reading OL, so V_GATE cannot tell), and the probe on PB2 does too
+    /// (~0.34 A per volt, doc 4.8: it is off there). Such an A-JACK keeps
+    /// its badge, toast and log entry but is not alarm-worthy
+    /// (`ajack_alarm`, the danger alarm, doc 4.10).
+    pub soft: bool,
     vside_t: Option<u64>,
     vdrv: bool,
     /// Assertion log (DBG:SENTinel:LOG?, the switch regression test
@@ -808,6 +818,7 @@ impl Sentinel {
             pk_v: None,
             vgate: false,
             bridge: false,
+            soft: false,
             vside_t: None,
             vdrv: false,
             log: [(Alert::None, Kind::Off, 0); LOG_N],
@@ -1053,6 +1064,14 @@ impl Sentinel {
         self.decide(now);
     }
 
+    /// A-JACK in force with evidence a driven V-COM cannot fake (`soft`
+    /// rows: never; A-PROT, which needs the DC V / mV probe, has its own
+    /// alarm rule in `app.rs`). The danger alarm keys on this, not on
+    /// `alert == AJack`.
+    pub fn ajack_alarm(&self) -> bool {
+        self.alert == Alert::AJack && !self.soft
+    }
+
     /// Re-evaluate the alert without a sample (`dmm.rs`, every poll of
     /// AC+DC A's AC phase, `bridge`): the DC phase's run asserts on time
     /// and holds through the phase (its settle and blanks have no window).
@@ -1203,7 +1222,7 @@ impl Sentinel {
     }
 
     /// DBG:SENT? text: kind,alert,mask,ctsta,pkmin,pkmax,streak,hits,samples,
-    /// probe mA, A-PROT ms, V side (V_GATE).
+    /// probe mA, A-PROT ms, V side (V_GATE), soft (badge-only A-JACK).
     #[inline(never)] // .cold (link-native.x): DBG reply
     pub fn diag_text(&self, buf: &mut [u8]) -> usize {
         let mut n = 0;
@@ -1225,7 +1244,7 @@ impl Sentinel {
         // the last comparator row's, stale: the f0d21eb check's "AC V reads
         // 0x70 after TEMP" was TEMP's last read).
         let ct = if matches!(self.kind, Kind::CmpA | Kind::CmpV) { self.ctsta as i32 } else { -1 };
-        for v in [self.mask as i32, ct, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32, vd] {
+        for v in [self.mask as i32, ct, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32, vd, self.soft as i32] {
             put(b",");
             put(itoa(&mut nb, v));
         }
@@ -2293,6 +2312,15 @@ mod tests {
         s.sample_peak(100, -5, 7);
         let mut b = [0u8; 96];
         let n = s.diag_text(&mut b);
-        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,15,-1,-5,7,0,0,1,0,0,-1");
+        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,15,-1,-5,7,0,0,1,0,0,-1,0");
+        // A soft row's A-JACK: the badge, no alarm.
+        let mut s = Sentinel::new();
+        s.configured(Kind::Ad2A, 0, true);
+        s.soft = true;
+        s.sample_peak(100, -12_000, 12_000);
+        s.sample_peak(200, -12_000, 12_000);
+        assert_eq!((s.alert, s.ajack_alarm()), (Alert::AJack, false));
+        s.soft = false;
+        assert!(s.ajack_alarm());
     }
 }
