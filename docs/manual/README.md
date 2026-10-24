@@ -803,15 +803,6 @@ LIVE? beeps once. OVLD beeps once (300 ms). The others are silent.
 |---|---|
 | LIVE? in Ω: a voltage on the circuit | OVLD: the meter moved to the 10 A shunt |
 
-When you change from a current function (A, or the power meter) to any
-other function, the meter reminds you once, with a beep: **Leads in A jack?
-Move to V**. **Settings > More > More > A-lead reminder** switches it off
-(default ON).
-
-![The A-lead reminder](img/leads.png)
-
-*The A-lead reminder.*
-
 **Settings > More > More > Jack alerts** chooses which alerts are on:
 **ON** (all of the above, default), **A-JACK only** (A-JACK and A-PROT),
 **OFF** (none of them, and no A-PROT protection). OVLD and the 10 A alarm
@@ -1836,7 +1827,6 @@ step to its next value; rows with **-** / **+** change in steps.
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **Jack alerts** | ON, A-JACK only, OFF | ON | Which [wrong-connection alerts](#the-alerts) are on. |
-| **A-lead reminder** | ON, OFF | ON | The [reminder](#the-alerts) after leaving a current function. |
 | **Danger alarm** | Loud, Volume, Off | Loud | The [danger alarm](#the-danger-alarm)'s volume. |
 | **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Back to Files live at every power-on. |
 | **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the [burden voltage](#burden-voltage). |
