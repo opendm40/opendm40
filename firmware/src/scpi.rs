@@ -497,6 +497,10 @@ pub enum Log {
 
 /// Debug commands over USBTMC (development aids, not SCPI standard):
 ///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive)
+///   DBG:IDLE <ms> | DBG:IDLE?  the idle shutdown after <ms> instead of the
+///                           Shutdown setting (0 = the setting; RAM only, for
+///                           tests) | ms since the last touch / key, ms since
+///                           the last input or host activity, shutdown ms
 ///   DBG:TAP x,y  DBG:SWIPE L|R  inject a touch tap / view swipe
 ///   DBG:KEY n[,ms]          side key n (0 MENU, 1 RUN, 2 AUTO, 3 MF): a full
 ///                           click (key-down, key-up); with ms > 0 the key-up
@@ -672,6 +676,9 @@ pub enum Dbg {
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
+    /// DBG:IDLE <ms> (Some: the idle shutdown time for a test, 0 = the
+    /// setting) / DBG:IDLE? (None: idle times, App::dbg_idle).
+    Idle(Option<u32>),
 }
 
 /// DBG:AD2:DCV? range,r26,n[,flags] -> Dbg::Ad2(5, r26, n | range << 8,
@@ -2284,6 +2291,7 @@ impl Scpi {
                                 continue;
                             }
                         }
+                        b"IDLE" => Dbg::Idle(if query { None } else { Some(nums::<1>(a)[0]) }),
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,

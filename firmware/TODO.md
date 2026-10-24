@@ -572,8 +572,26 @@ Code work (in this order):
       65 520. u16 per 10-bit sample makes 65 520 = 131 KB, too much next to the screenshot CAP (49 KB) and the
       logger rings. Packed 4 samples in 5 bytes: 65 520 = ~82 KB, +29 KB over today, within the free SRAM.
       DMA writes u16, so pack after the capture (or capture in chunks) and unpack for the render / zoom / CSV.
-- [ ] reload.sh --image: the first upload failed twice in a row on 2026-10-24 ("upload failed, nothing
-      installed"), the immediate retry worked both times (once with the Scope view open). Find the cause.
+- [x] reload.sh --image: the first upload failed twice in a row on 2026-10-24 ("upload failed, nothing
+      installed"), the immediate retry worked both times (once with the Scope view open). Cause: the SCPI
+      error queue is a FIFO that lives across USBTMC clients, and dm40dbg.py upload took the first
+      SYST:ERR? after DBG:UPLOAD:BEGIN as BEGIN's result: an error some earlier client left (here -113
+      "Undefined header" of an unknown command; before the error queue, the single error slot) failed the
+      upload although BEGIN had started it; that read popped it, so the retry passed. Fix: dm40dbg.py
+      Link.fresh (device clear + the stale errors read and reported + *CLS) before BEGIN and DBG:UPDATE;
+      the meter's SCPI error printed as such; reload.sh retries the upload once. Also a cut message of a
+      dead client (Linux usbtmc sends no clear on close) took the next client's header as its payload:
+      opendm40 drops a Bulk-OUT message left incomplete for 1 s (usbtmc::expire_partial, checked every
+      main-loop pass and when the next packet arrives).
+      emu/usbtmc_stress.py cases `session` (dm40dbg.py's own cmd_upload over USB/IP after a stale error
+      and a cut message; failed with the -113 before) and `partial` (hung before). Not run on the device.
+- [x] Auto power-off during a remote session (device 2026-10-24: the meter switched off during a firmware
+      flash over USB): the idle shutdown counts USBTMC messages, Bluetooth SCPI lines / phone-app frames and
+      now USB disk READ / WRITE commands (msc::HOST_IO) as activity; the idle dim counts touches and keys
+      only (a dimmed screen costs a remote session nothing). DBG:IDLE <ms> / DBG:IDLE? (test power-off
+      time, idle times); emu/idletest.py (usb, bt, msc keep it on for 40 s past a 20 s power-off time,
+      off with no traffic; msc failed without the hook). Manual "Power, battery and sleep". Not run on the
+      device.
 - [ ] Wave view (scope on the DMM inputs): finer V/div steps (owner 2026-10-24). Today every V/div step
       is a range / divider change. Add intermediate steps that only rescale the screen (e.g. 1-2-5 within one
       range), switching the range / divider only where the next step needs it.
