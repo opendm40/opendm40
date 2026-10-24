@@ -16,8 +16,10 @@ part); DBG:GEST?'s "|POS hpos,trig_row,pos" is read before and after.
     wobble to 0; the stock split would have moved it +j px per 3 points);
   * the CH1 marker (left strip, x 6), the same: CH1 moves, the trigger
     position does not (axis lock of a level marker);
-  * a sideways drag off the markers (plain pan of the selected time item,
-    the trigger position) still moves the trigger position.
+  * a sideways drag along CH1's guide line right after (a line zone: the
+    drag decides its axis) and one off the markers (plain pan of the
+    selected time item, the trigger position) still move the trigger
+    position.
 
 Exit status 0 = all passed.
 """
@@ -117,6 +119,16 @@ try:
     check(p2 != p1, 'CH1 drag moved CH1 (%d -> %d)' % (p1, p2))
     check(h2 == h1, 'CH1 drag with %d px sideways wobble kept the trigger position (%d -> %d)' % (j, h1, h2))
 
+    # Right after (the guide lines show): a sideways drag along CH1's
+    # zero line (a line zone: selects CH1, the drag decides its axis).
+    y = top + 140 + p2
+    q('DBG:DRAG 150,%d,210,%d,400,0,0' % (y + 4, y + 4))
+    wait_ms(300)
+    hl, rl, pl = pos()
+    print('  sideways drag along the CH1 guide line: hpos %d, trig_row %d, pos %d' % (hl, rl, pl), flush=True)
+    check(hl == h2 + 60 and pl == p2, 'a sideways drag along the shown CH1 guide line still pans (%d -> %d)' % (h2, hl))
+    h2 = hl
+    wait_ms(2500)  # the guide lines gone
     q('DBG:DRAG 150,160,210,160,400,0,0')
     wait_ms(800)
     h3, r3, p3 = pos()

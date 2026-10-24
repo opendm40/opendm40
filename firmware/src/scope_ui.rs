@@ -1030,6 +1030,10 @@ pub struct Zone {
 
 impl Zone {
     pub const NONE: Zone = Zone { level: false, id: 0, r: rect(0, 0, 0, 0), o: rect(0, 0, 0, 0) };
+    /// A line zone (cursor / guide line), not a marker glyph.
+    pub fn line(&self) -> bool {
+        self.o.w > 12 || self.o.h > 12
+    }
     /// Distance (px, Chebyshev) from (x, y) to the zone's object; None
     /// outside the zone.
     pub fn dist(&self, x: i16, y: i16) -> Option<i16> {
@@ -1190,6 +1194,13 @@ pub fn pick_near(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16)
         }
     }
     Some(bi)
+}
+
+/// The zone a press at (x, y) picks (`pick_near` over `all_zones`).
+pub fn graph_pick(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<Zone> {
+    let mut z = [Zone::NONE; NALL];
+    let n = all_zones(m, &mut z);
+    pick_near(&z[..n], sel_v, sel_h, last_h, x, y).map(|k| z[k])
 }
 
 /// A still tap on a marker that was already selected: the next zone under
@@ -2145,10 +2156,8 @@ pub enum Press {
 /// finger wins: the nearest marker / cursor line / shown guide line
 /// (`pick_near`), and only then the tap-step zone of `mode`.
 pub fn graph_press(m: &Model, mode: u8, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Press {
-    let mut z = [Zone::NONE; NALL];
-    let n = all_zones(m, &mut z);
-    if let Some(k) = pick_near(&z[..n], sel_v, sel_h, last_h, x, y) {
-        return Press::Marker(z[k].level, z[k].id);
+    if let Some(q) = graph_pick(m, sel_v, sel_h, last_h, x, y) {
+        return Press::Marker(q.level, q.id);
     }
     if m.cur_tab != 0 && rect(CUR_TAB.x - 3, CUR_TAB.y - 6, CUR_TAB.w + 6, CUR_TAB.h + 6).has(x, y) {
         return Press::Cur;

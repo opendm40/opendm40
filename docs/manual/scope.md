@@ -106,9 +106,18 @@ A drag moves the selected marker: a vertical drag moves the selected level
 (the trace, the trigger level, a Y cursor, the FFT), a horizontal drag the
 selected time item (the trigger position, an X cursor, the FFT centre).
 Press on a marker to select it; markers that overlap are selected in turn.
+A drag that starts on or near a marker (within about 12 pixels) moves that
+marker; no tap to select it first. When markers are close, the nearest one is
+taken; the selected one wins if it is about as near. While the guide lines
+show, a drag along one moves its item too. A tap on the selected marker
+selects the next one under the finger.
+
 A drag that starts on a marker moves only along that marker's axis until you
 lift the finger: up and down for the level markers, sideways for the time
-markers.
+markers. The **T** trigger-level marker of a running scope is the exception:
+it moves the trigger point both ways (level and position); the trace stays
+put until the next capture, which triggers at the new point. A drag along a
+guide line takes the axis it starts moving in.
 
 **Settings > Scope drag** sets how a drag starts:
 

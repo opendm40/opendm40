@@ -107,6 +107,9 @@ pub(super) struct Touch {
     /// "it should drag the vertical trigger line, not the waveform"). The
     /// next acquisition after the release re-triggers at the new point.
     both: bool,
+    /// A line-zone press: the axis is decided by the first motion (as the
+    /// Axis lock drag mode), not locked at the press.
+    decide: bool,
     /// Hold mode: grabbed.
     grabbed: bool,
     /// Combined view: sub-row remainder of vertical moves.
@@ -359,6 +362,8 @@ pub(super) struct Sp {
     /// The press picked the item that was already selected (a still tap
     /// then cycles to the next overlapping one, `sp_release`).
     presel: bool,
+    /// The press hit a line zone, not a marker glyph (`sp_select`).
+    line_press: bool,
     cur_saved: Option<([u8; 4], usize)>,
     last_tap: Option<(u64, Point)>,
     /// Math display settings; what the FFT additions show (from `sp_math`).
@@ -417,6 +422,7 @@ impl Sp {
             tb_drawn: (255, false),
             cur_press: false,
             presel: false,
+            line_press: false,
             cur_saved: None,
             last_tap: None,
             math: Math::DEFAULT,
@@ -1254,6 +1260,10 @@ impl App {
         self.sp.cur_press = false;
         self.sp.presel = false;
         let m = self.sp_model(self.now);
+        // A line zone (cursor / guide line) selects its item, but the drag
+        // decides its axis from the first motion (`Touch::decide`): a
+        // sideways pan along the CH1 zero line still pans.
+        self.sp.line_press = su::graph_pick(&m, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16).is_some_and(|q| q.line());
         match su::graph_press(&m, self.sp.tap_mode, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16) {
             su::Press::Marker(level, id) => {
                 // Already the selection: a still tap cycles on release.
@@ -1346,7 +1356,8 @@ impl App {
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
                 let (hit, side) = self.sp_select(p);
                 let s = self.scope.s;
-                let both = hit && !self.sp.last_h && self.sp.sel_v == 1 && s.run && !self.scope.rolling();
+                let decide = hit && self.sp.line_press;
+                let both = hit && !decide && !self.sp.last_h && self.sp.sel_v == 1 && s.run && !self.scope.rolling();
                 if both {
                     // The trigger position follows dx: select it (its T
                     // marker fills, its guide line shows).
@@ -1364,8 +1375,9 @@ impl App {
                     cur: self.cur,
                     anchor: self.scope.anchor(),
                     pan: 0,
-                    axis: (hit && !both).then_some(if self.sp.last_h { Axis::H } else { Axis::V }),
+                    axis: (hit && !both && !decide).then_some(if self.sp.last_h { Axis::H } else { Axis::V }),
                     both,
+                    decide,
                     grabbed: gesture::grab_ms() == 0,
                     acc: 0,
                     code: 0,
@@ -1530,7 +1542,7 @@ impl App {
             }
             return;
         }
-        if self.sp.drag_mode == DRAG_AXIS || t.axis.is_some() {
+        if self.sp.drag_mode == DRAG_AXIS || t.axis.is_some() || t.decide {
             if t.axis.is_none() {
                 let (ax, ay) = ((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs());
                 if 2 * ax >= 3 * ay && ax > LOCK_SLOP / 2 {
