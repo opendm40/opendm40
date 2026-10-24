@@ -394,6 +394,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if msc::HOST_WRITING.load(core::sync::atomic::Ordering::Relaxed) {
             host_io_t = now;
         }
+        // A USB disk READ / WRITE: activity for the idle shutdown.
+        if msc::HOST_IO.swap(false, core::sync::atomic::Ordering::Relaxed) {
+            app.note_host_activity(now);
+        }
         // A streamed USBTMC reply (WAV:DATA? of the scope record,
         // scope_wav.rs): its packets go out as the host takes them, polled
         // like a disk READ above, within the same budget per pass. The scope
@@ -717,6 +721,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                                 false
                             }
                         }
+                    }
+                    scpi::Dbg::Idle(set) => {
+                        app.dbg_idle(set, now, scpi);
+                        set.is_none()
                     }
                     scpi::Dbg::Ping(ms) => {
                         if ms > 0 {

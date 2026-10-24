@@ -134,6 +134,11 @@ pub struct Step {
 /// A host WRITE(10) is in progress (between its first and last block), so an
 /// on-device writer (screenshot.rs) waits before reading the FAT.
 pub static HOST_WRITING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// A host READ or WRITE command started since main.rs last looked (it
+/// takes it: the host's disk use counts as activity for the idle shutdown,
+/// App::note_host_activity). TEST UNIT READY and the other polls do not set
+/// it: a host that only polls the medium does not keep the meter on.
+pub static HOST_IO: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 /// Bumped by every program / erase command sent to the SPI flash
 /// (spiflash.rs `write_enable`): screenshot.rs `prep_poll` sees from it that
 /// another writer changed the disk since its last step and starts over.
@@ -556,6 +561,7 @@ fn handle<B: UsbBus>(
                     return Ok(());
                 }
                 *xfer = Xfer::Read { lba, left: len as u32, off: 0, done: 0 };
+                HOST_IO.store(true, core::sync::atomic::Ordering::Relaxed);
             }
             if let Xfer::Read { lba, left, off, done } = *xfer {
                 let mut off = off;
@@ -622,6 +628,7 @@ fn handle<B: UsbBus>(
                 } else {
                     None
                 };
+                HOST_IO.store(true, core::sync::atomic::Ordering::Relaxed);
                 *xfer = match refuse {
                     Some(s) => {
                         *sense = s;
