@@ -9,6 +9,14 @@ and exposes the machine over GDB.
 
 Everything lives under `emu/`. Nothing here touches the device.
 
+| stock firmware V2.6 | fw-rs |
+|---|---|
+| ![stock DMM page](img/stock-dmm.png) | ![fw-rs DMM page](img/fwrs-dmm.png) |
+
+*The emulated LCD with 3.3012 V DC on the V-COM jacks (`--dmm dcv:3.3012`):
+the vendor firmware (left, `emu/run.py stock`) and fw-rs (right) both read
+it through the HY3131 model.*
+
 ```
 emu/get-renode.sh      fetch the portable Renode build into emu/.renode/ (no sudo)
 emu/run.py             driver: compose images, generate the .resc, run, screenshot
@@ -108,11 +116,33 @@ Coordinates are the 480x320 landscape frame the user sees. The stock main menu
 tiles are at (46,52) Multimeter, (244,52) Oscilloscope, (46,166) Signal,
 (244,166) Settings (190x106 each; `firmware/re/analysis/gui_v2_6.h`).
 
+### fw-rs screens
+
+All screenshots below come from the emulator, with the model fed real input
+signals. `run.py --shot` saves the LCD through Renode
+(`sysbus.lcd Screenshot`). The fw-rs pages were opened over USB/IP with
+`DBG:KEY` / `DBG:TAP` / `DBG:SWIPE` and `CONF:*`, then read back with `DBG:LCD?`
+or a timed `shot` script line.
+fw-rs ran with a fixed `--uid`, so no shot carries this unit's UID.
+
+| | |
+|---|---|
+| ![fw-rs combined view](img/fwrs-combined.png) | ![fw-rs DMM wave view](img/fwrs-wave.png) |
+| *Combined DMM + scope view (`DBG:SWIPE L`): AC V 2.5 V at 50 Hz on the jacks (`--dmm acv:2.5@50@0`), a 1 kHz 2 Vpp sine on the scope input (`--scope sine,1000,2.0`).* | *DMM wave view (MF -> Wave, the scope page with source DMM): a 50 Hz square with 30 % duty and 2.5 V RMS on V-COM, drawn from the HY3131's AD2 stream.* |
+| ![fw-rs power meter](img/fwrs-power.png) | ![fw-rs generator page](img/fwrs-gen.png) |
+| *Power meter (`CONF:POW`): 230 V / 50 Hz on V-COM and 1.2 A with PF 0.8 into the A jack (`--dmm 'open;pow:230,f=50,i=1.2,pf=0.8@0'`): P, S, Q, PF, f and energy.* | *Signal generator page (MENU -> Signal), in its default state. The emulator does not model the analog output.* |
+
 ### Live window (`emu/live.py`)
 
 ```sh
 /usr/bin/python3 emu/live.py stock --fast        # or fwrs | chain, plus any run.py option
 ```
+
+![GTK live window](img/gtk-panel.png)
+
+*`emu/live.py fwrs --fast`: the device front panel with the live LCD, and the
+input cards (DMM jacks, scope input, generator / USB, Renode monitor). Under
+the device, the signal-flow card shows the route the firmware chose.*
 
 A GTK4/libadwaita window drawn like the device (user manual figure 2.1.1 and
 product photos): the display in its black glass with the MENU / RUN / AUTO /
@@ -153,6 +183,17 @@ Renode's monitor TCP port (`renode -P`), so the GUI never blocks the emulation.
 * Header bar: firmware (stock / fwrs / chain, restarts the machine), Fast
   (PerformanceInMips 50, roughly real time on this host), real-time cap, pause, restart,
   screenshot; the subtitle shows the virtual time and the speed ratio.
+* Signal flow (the card under the device; the expand button opens it in its
+  own window): the route from the jacks through the front end (the PA9 /
+  PA10 V/A relay, divider, shunts) to the HY3131 muxes, AD1 / AD2 / AD3, the
+  RMS block, LPF, comparator and counter. The header names the firmware's
+  HY3131 row (function, mode, range); the active route is drawn in blue,
+  unused blocks in grey, and the converters' results are shown next to them.
+
+  ![signal flow window](img/gtk-signal-flow.png)
+
+  *DC V (row: mode 1, range 0): V-ohm -> the V/A relay -> divider /10 -> SENSE -> OP1 -> AD1;
+  AD1's reading is shown on the right.*
 * Logs: `emu/out/live-renode.out` (Renode), `emu/out/live-monitor.log` (every
   monitor command and reply).
 
@@ -322,6 +363,21 @@ Bluetooth refusal (~5 min; USB/IP 24140, BT 24141). It turns the
 comparator trigger off: the comparator path sometimes never completes a
 frame after a restart in the emulator.
 
+A scenario test prints one line per case and a `RESULT` line per scenario,
+e.g. `emu/hy3131/freqtest.py` (fw-rs DMM frequency after a function change,
+40 Hz 1 V square on V-COM; 2026-10-24, a097299, two of its scenarios):
+
+```
+$ emu/hy3131/freqtest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw \
+      --port 61160 --reps 2 entry nosig
+entry 0 first 40.00065 at +1.39 s; then 40.00065@+1.72 40.00065@+2.07 40.00065@+2.42
+entry 1 first 40.00065 at +1.39 s; then 40.00065@+1.72 40.00065@+2.06 40.00065@+2.42
+RESULT entry OK first-reading +1.39/1.39 s
+nosig 0 first 0.0 at +2.44 s; then 0.0@+2.76 0.0@+3.11 0.0@+3.46
+nosig 1 first 0.0 at +2.44 s; then 0.0@+2.77 0.0@+3.12 0.0@+3.46
+RESULT nosig OK first-reading +2.44/2.44 s
+```
+
 ### GDB
 
 ```sh
@@ -443,6 +499,14 @@ would need per-firmware hooks and was not done.
   (release at 0.55 s gives the three-stage chain).
 
 ## Use
+
+| stock | fw-rs |
+|---|---|
+| ![stock scope page](img/stock-scope.png) | ![fw-rs scope page](img/fwrs-scope.png) |
+
+*Scope pages. Stock (left): its default 10 ms/div, so the 1 kHz 1 Vpp sine
+is a dense band; it measures Freq 1.00 kHz, Vp-p 902 mV, Vrms 342 mV. fw-rs
+(right): a 1 kHz 2 Vpp sine at 200 us/div.*
 
 Milestone 5: `emu/out/stock-scope.png` is the stock scope page in its default
 state with a 1 kHz 1 Vpp sine on the input (10 ms/div -> a dense band, Freq

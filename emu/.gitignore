@@ -3,6 +3,8 @@
 # generated flash/disk images, screenshots, logs, build worktrees
 out/
 *.png
+# README screenshots (emu/img/)
+!img/*.png
 *.bin
 *.img
 *.log
