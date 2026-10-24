@@ -452,33 +452,62 @@ pub fn entry_hit(x: u16, y: u16) -> Option<bool> {
     }
 }
 
-/// A jack of the meter: a ring with its name under it.
+/// A jack of the meter: a ring with its name left of it (the space under
+/// the jacks holds the meter's internal current path).
 fn jack(cx: i16, cy: i16, name: &str) {
     sf::rbox(rect(cx - 11, cy - 11, 22, 22), 11, DIM, DLG_BODY);
     sf::rbox(rect(cx - 6, cy - 6, 12, 12), 6, DLG_BODY, DIM);
-    sf::label(sf::F14, rect(cx - 20, cy + 15, 40, 14), name, STATUS_FG, DLG_BODY, 8, 1);
+    sf::label(sf::F14, rect(cx - 50, cy - 7, 36, 14), name, STATUS_FG, DLG_BODY, 4, 1);
+}
+
+/// Outline of `r`, `t` px thick (lines, not a filled shape: the jacks and
+/// the wires sit inside it).
+fn outline(r: sf::Rect, t: i16, c: Color) {
+    let (x, y, w, h) = (r.x as u16, r.y as u16, r.w as u16, r.h as u16);
+    let t = t as u16;
+    lcd::fill_rect(x, y, w, t, c);
+    lcd::fill_rect(x, y + h - t, w, t, c);
+    lcd::fill_rect(x, y + t, t, h - 2 * t, c);
+    lcd::fill_rect(x + w - t, y + t, t, h - 2 * t, c);
 }
 
 /// Wire segment (2 px).
-fn hwire(x0: i16, x1: i16, y: i16) {
-    lcd::fill_rect(x0 as u16, y as u16, (x1 - x0) as u16, 2, WIRE);
-}
 fn vwire(x: i16, y0: i16, y1: i16) {
     lcd::fill_rect(x as u16, y0 as u16, 2, (y1 - y0) as u16, WIRE);
 }
 
+/// Wiring picture geometry: source / load boxes (y, h), the + and - wires
+/// (y), the jacks' centre y, the meter's internal wire (y) and its shunt.
+const BOX_Y: i16 = 50;
+const BOX_H: i16 = 96;
+const WIRE_P: i16 = 61;
+const WIRE_N: i16 = 133;
+const JACK_Y: i16 = 162;
+const WIRE_INT: i16 = 189;
+const SHUNT: sf::Rect = rect(220, 184, 39, 12);
+
 /// The current path of the wiring dialog, in the direction of the current
-/// (the "< I" labels' convention: P > 0, the load current into A): wire
-/// runs (x, y, dx, dy, len) as drawn by `hwire` / `vwire` (2 px), x / y the
-/// first pixel, (dx, dy) the step. SOURCE + -> LOAD +; (the load) LOAD -
-/// -> A; (the meter) COM -> SOURCE -.
-const FLOW_PATH: [(i16, i16, i16, i16, i16); 5] = [
-    (108, 69, 1, 0, 264),
-    (371, 155, -1, 0, 73),
-    (299, 156, 0, 1, 19),
-    (179, 174, 0, -1, 20),
-    (180, 155, -1, 0, 73),
+/// (P > 0: the load current into A): wire runs (x, y, dx, dy, len) 2 px
+/// wide, x / y the first pixel, (dx, dy) the step. SOURCE + -> LOAD +;
+/// (the load) LOAD - -> A; inside the meter A -> shunt -> COM (the jacks
+/// and the shunt are gaps); COM -> SOURCE -.
+const FLOW_PATH: [(i16, i16, i16, i16, i16); 9] = [
+    (108, WIRE_P, 1, 0, 264),
+    (371, WIRE_N, -1, 0, 73),
+    (299, WIRE_N + 1, 0, 1, 17),
+    (299, JACK_Y + 11, 0, 1, 18),
+    (298, WIRE_INT, -1, 0, 40),
+    (219, WIRE_INT, -1, 0, 39),
+    (179, WIRE_INT + 1, 0, -1, 18),
+    (179, JACK_Y - 12, 0, -1, 17),
+    (180, WIRE_N, -1, 0, 73),
 ];
+/// Arrowheads on the path: the distance along FLOW_PATH of each one's base
+/// (the tip is ARROW_L - 1 px further, in the current's direction): two on
+/// the + wire, the - wire into A, down into A, both halves of the internal
+/// wire, up out of COM, the - wire to the source.
+const ARROWS: [i16; 8] = [50, 205, 294, 342, 386, 426, 472, 526];
+const ARROW_L: i16 = 10;
 /// Marching dashes on the path: on / period (px), colour; the dashes move
 /// FLOW_STEP px per frame (`entry_anim`, 10 fps: 30 px/s).
 const FLOW_ON: i16 = 6;
@@ -486,27 +515,64 @@ const FLOW_P: i16 = 14;
 const FLOW_STEP: u32 = 3;
 const FLOW: Color = 0xFFFF;
 
+/// Pixel `k` of path run `(x, y, dx, dy, _)`: its top-left corner.
+fn run_px(x: i16, y: i16, dx: i16, dy: i16, k: i16) -> (i16, i16) {
+    (x + k * dx, y + k * dy)
+}
+
+/// The arrowheads (FLOW colour, 2 x 5 px wider than the wire at the base),
+/// at the ARROWS distances along FLOW_PATH.
+fn arrows() {
+    let mut s = 0i16;
+    for &(x, y, dx, dy, len) in FLOW_PATH.iter() {
+        for &a in ARROWS.iter() {
+            if a >= s && a + ARROW_L <= s + len {
+                for k in 0..ARROW_L {
+                    let (px, py) = run_px(x, y, dx, dy, a - s + k);
+                    let hw = (ARROW_L - 1 - k) * 5 / (ARROW_L - 1);
+                    if dx != 0 {
+                        lcd::fill_rect(px as u16, (py - hw) as u16, 1, (2 + 2 * hw) as u16, FLOW);
+                    } else {
+                        lcd::fill_rect((px - hw) as u16, py as u16, (2 + 2 * hw) as u16, 1, FLOW);
+                    }
+                }
+            }
+        }
+        s += len;
+    }
+}
+
 /// Dash phase `ph` (frames) of the wiring dialog's current path: the wires
-/// of FLOW_PATH repainted as runs of WIRE and FLOW (about 450 px x 2).
+/// of FLOW_PATH repainted as runs of WIRE and FLOW (about 560 px x 2),
+/// leaving the arrowheads' spans alone.
 pub fn entry_anim(ph: u32) {
     let off = ((ph * FLOW_STEP) % FLOW_P as u32) as i16;
     let mut s = 0i16; // distance along the path at a run's first pixel
     for &(x, y, dx, dy, len) in FLOW_PATH.iter() {
+        // 0 WIRE, 1 FLOW, 2 an arrowhead (not painted).
+        let kind = |k: i16| {
+            if ARROWS.iter().any(|&a| (a..a + ARROW_L).contains(&(s + k))) {
+                2
+            } else {
+                ((s + k - off).rem_euclid(FLOW_P) < FLOW_ON) as u8
+            }
+        };
         let mut i = 0;
         while i < len {
-            // Run of equal colour from pixel i.
-            let on = |k: i16| (s + k - off).rem_euclid(FLOW_P) < FLOW_ON;
-            let c = on(i);
+            // Run of equal kind from pixel i.
+            let c = kind(i);
             let mut j = i + 1;
-            while j < len && on(j) == c {
+            while j < len && kind(j) == c {
                 j += 1;
             }
-            // Pixels i..j-1 along (dx, dy): a rect from the lower corner.
-            let (a, b) = (i.min(j - 1), i.max(j - 1));
-            let (x0, x1) = if dx < 0 { (x - b, x - a) } else { (x + a * dx, x + b * dx) };
-            let (y0, y1) = if dy < 0 { (y - b, y - a) } else { (y + a * dy, y + b * dy) };
-            let (w, h) = if dx != 0 { (x1 - x0 + 1, 2) } else { (2, y1 - y0 + 1) };
-            lcd::fill_rect(x0 as u16, y0 as u16, w as u16, h as u16, if c { FLOW } else { WIRE });
+            if c != 2 {
+                // Pixels i..j-1 along (dx, dy): a rect from the lower corner.
+                let (a, b) = (i.min(j - 1), i.max(j - 1));
+                let (x0, x1) = if dx < 0 { (x - b, x - a) } else { (x + a * dx, x + b * dx) };
+                let (y0, y1) = if dy < 0 { (y - b, y - a) } else { (y + a * dy, y + b * dy) };
+                let (w, h) = if dx != 0 { (x1 - x0 + 1, 2) } else { (2, y1 - y0 + 1) };
+                lcd::fill_rect(x0 as u16, y0 as u16, w as u16, h as u16, if c == 1 { FLOW } else { WIRE });
+            }
             i = j;
         }
         s += len;
@@ -515,7 +581,8 @@ pub fn entry_anim(ph: u32) {
 
 /// The power-meter entry dialog (a modal overlay, dialog.rs): the wiring of
 /// doc 3.6 (V/ohm on the source side, the return conductor broken through
-/// A and COM), the sign convention, the current rating, Cancel / OK.
+/// A and COM), the current path with arrowheads (through the meter's
+/// shunt), the sign convention, the current rating, Cancel / OK.
 /// `i_cont` / `t_lim`: the continuous-current limit setting.
 pub fn entry_dialog(i_cont: f32, t_lim: u16) {
     let (x, y, w, h) = DLG;
@@ -524,32 +591,31 @@ pub fn entry_dialog(i_cont: f32, t_lim: u16) {
     lcd::fill_rect(x as u16, (y + 34) as u16, w as u16, (h - 34) as u16, DLG_BODY);
     // Source (left) and load (right): rounded boxes with + / - terminals.
     for (bx, name) in [(28i16, "SOURCE"), (372, "LOAD")] {
-        sf::rbox(rect(bx, 56, 80, 112), 8, BTN, DLG_BODY);
-        sf::glyphs(sf::F14, rect(bx, 104, 80, 16), name, STATUS_FG, BTN, 8, 1);
-        sf::glyphs(sf::F14, rect(bx, 62, 80, 16), "+", STATUS_FG, BTN, 8, 1);
-        sf::glyphs(sf::F14, rect(bx, 146, 80, 16), "-", STATUS_FG, BTN, 8, 1);
+        sf::rbox(rect(bx, BOX_Y, 80, BOX_H), 8, BTN, DLG_BODY);
+        sf::glyphs(sf::F14, rect(bx, BOX_Y + BOX_H / 2 - 8, 80, 16), name, STATUS_FG, BTN, 8, 1);
+        sf::glyphs(sf::F14, rect(bx, WIRE_P - 7, 80, 16), "+", STATUS_FG, BTN, 8, 1);
+        sf::glyphs(sf::F14, rect(bx, WIRE_N - 7, 80, 16), "-", STATUS_FG, BTN, 8, 1);
     }
+    // The meter: an outline around its jacks and the internal path.
+    let m = rect(124, JACK_Y - 18, 232, 72);
+    outline(m, 1, DIM);
+    sf::label(sf::F14, rect(m.x + m.w - 52, m.y + m.h - 18, 46, 14), "DM40", DIM, DLG_BODY, 4, 1);
     // Jacks COM, V/ohm, A (left to right: no crossing wires).
-    let jy = 186;
-    jack(180, jy, "COM");
-    jack(240, jy, "V");
-    jack(300, jy, "A");
-    // + : source -> load, V taps it.
-    hwire(108, 372, 69);
-    vwire(239, 69, jy - 11);
-    // The return conductor broken through the meter: load - -> A, COM ->
-    // source - (the load current into A, out of COM: P > 0).
-    hwire(108, 181, 155);
-    vwire(179, 155, jy - 11);
-    hwire(299, 372, 155);
-    vwire(299, 155, jy - 11);
-    // Current direction marks on the two wires.
-    sf::label(sf::F14, rect(120, 137, 50, 14), "< I", STATUS_FG, DLG_BODY, 0, 1);
-    sf::label(sf::F14, rect(306, 137, 64, 14), "< I in A", STATUS_FG, DLG_BODY, 0, 1);
-    sf::label(sf::F14, rect(250, 80, 116, 14), "V: source side", DIM, DLG_BODY, 0, 1);
+    jack(180, JACK_Y, "COM");
+    jack(240, JACK_Y, "V");
+    jack(300, JACK_Y, "A");
+    // + : V taps it on the source side.
+    vwire(239, WIRE_P, JACK_Y - 11);
+    sf::label(sf::F14, rect(250, WIRE_P + 9, 116, 14), "V: source side", DIM, DLG_BODY, 0, 1);
+    // The shunt between A and COM (the internal wire's gap), named under it.
+    outline(SHUNT, 2, WIRE);
+    sf::label(sf::F14, rect(SHUNT.x - 10, SHUNT.y + SHUNT.h + 2, SHUNT.w + 20, 14), "shunt", DIM, DLG_BODY, 8, 1);
+    // The load current's name by the arrow on the - wire into A.
+    sf::label(sf::F14, rect(326, WIRE_N - 20, 14, 14), "I", STATUS_FG, DLG_BODY, 8, 1);
     // The current path: marching dashes (moved by `entry_anim` while the
-    // dialog is open).
+    // dialog is open) and the arrowheads.
     entry_anim(0);
+    arrows();
     // Notes: what COM carries, the sign, the rating.
     let mut t = T::new();
     let mut b = [0u8; 16];
