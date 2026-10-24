@@ -1,6 +1,6 @@
 # tools/stock-ui: reference renderer of the STOCK DM40 V2.6 scope UI
 
-Spec: `fw-rs/docs/stock-scope-ui.md`; plan: `fw-rs/docs/stock-scope-port-plan.md`;
+Spec: `fw-rs/docs/stock-scope-ui.md`; plan: `docs/history/stock-scope-port-plan.md`;
 per-function RE notes: `notes/`.
 
 * `run.sh [out] [scene..]` builds `main.rs` (+ `gfx.rs`, `scope.rs`, `check.rs`,

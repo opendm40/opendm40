@@ -1300,7 +1300,7 @@ impl Scope {
     /// Drag preview: take the position settings (CH1 position, trigger level
     /// row, trigger position) into `s` without touching the hardware or the
     /// acquisition in flight (same clamps as `apply`); the caller applies them
-    /// once when the drag ends (docs/scope-lag-fixes.md fix A). Labels and
+    /// once when the drag ends (../docs/history/scope-lag-fixes.md fix A). Labels and
     /// markers that read `s` follow at once.
     pub fn preview(&mut self, s: Settings) {
         self.s.trig_row = s.trig_row.clamp(-10, 290);

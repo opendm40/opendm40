@@ -63,7 +63,7 @@ protocol notes are for stock V2.6.
 | [tools/](tools/) | `dm40.py`, `el15.py`: minimal Python BT clients |
 | [web/](web/README.md) | Web Bluetooth / Web Serial client for the stock DM40 protocol |
 | [docs/dm40-feature-request.md](docs/dm40-feature-request.md) | DM40C feature request and UX gap analysis (Russian) |
-| `docs/history/` | Outdated handover notes, kept for reference |
+| [docs/history/](docs/history/README.md) | Archived plans, reviews and handover notes (done or superseded), kept for reference |
 
 ## Vendor files
 

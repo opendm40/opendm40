@@ -1,5 +1,5 @@
 //! Modal overlays drawn over any view: the power-off confirm (2-finger swipe
-//! down, docs/user-feedback.md UF-18, scope-ui-plan.md §2.6: never an instant
+//! down, docs/user-feedback.md UF-18, ../docs/history/scope-ui-plan.md §2.6: never an instant
 //! off) and short toasts (screenshot / CSV recording results). There is no frame buffer: while
 //! an overlay is up the app keeps its full redraw pending and draws nothing
 //! else, and when it goes the view is redrawn from scratch.

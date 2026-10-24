@@ -6,7 +6,7 @@ maybe embed the DMM data into the oscilloscope interface in this mode?" It also
 covers two follow-up questions from the owner: the scope gesture map (pinch,
 drag, trigger, one thing per drag) and "should we use a graphics library?".
 
-It amends `docs/scope-ui-plan.md` (§2.5, §2.6, §3.1, §3.2, step S8, see §5)
+It amends `../docs/history/scope-ui-plan.md` (§2.5, §2.6, §3.1, §3.2, step S8, see §5)
 and references `docs/ui-review.md` instead of repeating it.
 
 Mockups are in `docs/mockups/`, drawn at 480x320 with the real stock font data
