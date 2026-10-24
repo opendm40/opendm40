@@ -12,7 +12,7 @@ What is here:
 - **Stock firmware tooling**: decode / encode / pack the vendor update files
   (`dm40_v_X_Y.bin`), a patch kit that adds code to the stock firmware, and
   the memrw kit that backs up calibration and the whole flash over Bluetooth.
-- **Bluetooth protocol** of the stock DM40 firmware, with a Python client.
+- **Bluetooth protocol** of the stock DM40 firmware (fw-rs keeps it).
 - **Reverse-engineering notes** on the stock firmware V2.6, the bootloader and
   the update format, which fw-rs is based on.
 
@@ -59,7 +59,6 @@ protocol notes are for stock V2.6.
 | [firmware/patch/kit/](firmware/patch/kit/README.md) | memrw backup kit: `dm40_memrw.py`, tests, `mkkit.sh` (builds `dist/`) |
 | [firmware/re/](firmware/re/README.md) | Reverse-engineering notes ([ANALYSIS.md](firmware/re/ANALYSIS.md), `analysis/*.h`), capstone helpers, Ghidra scripts |
 | [docs/bt-protocol.md](docs/bt-protocol.md) | Bluetooth protocol of the stock DM40 |
-| [tools/](tools/) | `dm40.py`: minimal Python BT client |
 | [docs/dm40-feature-request.md](docs/dm40-feature-request.md) | DM40C feature request and UX gap analysis (Russian) |
 | [docs/history/](docs/history/README.md) | Archived plans, reviews and handover notes (done or superseded), kept for reference |
 
