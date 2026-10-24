@@ -1,6 +1,6 @@
 # AC+DC on the DM40: how other meters and DMM chips do it, and what fits the HY3131
 
-Date 2026-10-22. Research only: no device access, no firmware change. Evidence
+Date 2026-10-22. Evidence
 tags as in the sibling docs: **VERIFIED** = a datasheet / manual page, a stock
 row byte, fw-rs code or a device measurement already written up
 (`acdc-stock-vs-fwrs.md` = "acdc", `dmm-input-scope-feasibility.md` =

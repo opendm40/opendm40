@@ -19,7 +19,7 @@ Deviations from the text below:
   where the T marker's zone reaches into the bar; the tabs and corner zones
   never win over a marker or cursor-line zone.
 
-2026-10-14. Research only, no code changed. Question from the owner: the stock
+2026-10-14. Question from the owner: the stock
 tap-to-step timebase (tap off a marker: left half slower, right half faster,
 `stock-scope-ui.md` §10.3) is not obvious. Would "+/- zones in the corners" be
 better? How do other touch scopes and scope apps change the horizontal and

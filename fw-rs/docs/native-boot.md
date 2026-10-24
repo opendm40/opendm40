@@ -30,8 +30,8 @@ before the application on every boot, so it is a permanent escape hatch.
   read-locked (option bytes dumped). (`ANALYSIS.md` §1)
 - The ROM bootloader polls **PA2** at boot: low for the whole poll sends the
   boot to the FS-loader's install state. PA2 is the "TX" pad of the internal
-  debug header; shorting it to GND is the hardware recovery entry (owner,
-  2026-10-24; procedure in [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)).
+  debug header; shorting it to GND is the hardware recovery entry (procedure in
+  [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)).
 - **FS-loader** (`0x080a0000`) has **its own USB mass-storage stack + FatFs**,
   runs **before the app on every boot**, calls
   `f_findfirst("/","dm40*.bin")` (`0x080a26c4`) and installs the **first**
@@ -275,7 +275,7 @@ only during its key-hold wait. The "never feed unconditionally" rule
 | Wrong-model update file | installs, but model byte mismatches | model is read from calibration (`0x080C0000` +0x168), labels/ranges only | cosmetic; not a brick |
 | Dead battery mid-update | reset | FS-loader resumes when powered + file present | charge first |
 
-**Hardware backstops.** Found 2026-10-24 (owner, on the device): shorting the
+**Hardware backstops.** Verified on the device: shorting the
 debug header's TX pad (PA2) to GND at power-on enters the FS-loader's install
 state with its own USB disk, whatever the app does. Procedure:
 [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery). Still open: whether the SWD pads allow an
@@ -998,8 +998,7 @@ H3, M1, M4, M5, L1, L3, L6).*
 - **Second crash:** a second one without 60 s of healthy main loop in between
   takes recovery.
 - **Healthy clear:** `boot::mark_healthy(now_ms)` clears the counter once after
-  60 s of main loop. **One-line call site for `main.rs`** (owned by another
-  agent), inside the main loop right after `let now = clk.now_ms();`:
+  60 s of main loop. **One-line call site for `main.rs`**, inside the main loop right after `let now = clk.now_ms();`:
   ```rust
   #[cfg(feature = "native")] boot::mark_healthy(now);
   ```
@@ -1334,8 +1333,7 @@ the DM40 geometry: 4096 B sectors, 2 FATs, 512 root entries, 4087 clusters.
 
 ## Unit data: the USB volume (`src/vdisk.rs`), the SPI disk (`src/fatdir.rs`) and the calibration safety copy (`src/calbackup.rs`)
 
-USB storage redesign (owner 2026-10-21, replaces the two-LUN layout of the
-same day). The SPI flash is **internal storage only**; USB exports **one
+USB storage redesign (replaces the earlier two-LUN layout). The SPI flash is **internal storage only**; USB exports **one
 volume generated on the fly** (DAPLink-style virtual FAT; writable since
 2026-10-22 only for deletes and a firmware file, "Host writes" below): the
 unit's irreplaceable data (UF-20), the recordings / screenshots / scope
@@ -2121,7 +2119,7 @@ else /16 for this boot because `DIFF1`/`DIFF2` (a /4 read differed),
   this should be harmless. T3 still tests "back to stock" **first**.
 - **PD6 polarity:** pressed = 1 is confirmed in the stock code. The shim now
   sets the pull-down itself (review B2).
-- **Review items owned by other agents:**
+- **Review items handled elsewhere:**
   - **B1** (stack overflow in `native::normal`) and **H1** (fatren premise)
     are in `native.rs`/`fatren.rs`.
   - The `scpi.rs` DBG help text is in `scpi.rs`.
@@ -2140,7 +2138,7 @@ else /16 for this boot because `DIFF1`/`DIFF2` (a /4 read differed),
   safe.
 - **PA2 at power-on:** not the power key (the key-hold test booted the app).
   PA2 is the debug header's TX pad; a TX-GND short is the non-destructive
-  manual entry (owner, 2026-10-24; [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)).
+  manual entry ([hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)).
 
 ## Test plan (coordinator + user)
 

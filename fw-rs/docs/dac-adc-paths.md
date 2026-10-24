@@ -83,8 +83,8 @@ meaning from the datasheet field names, `hy3131_v2_6.h:56-68`):
 - These give zero / reference-ratio / supply / temperature self-checks of the
   meter chain **without the MCU DAC**. There is no HY3131 pin that could accept
   the generator signal: the meter is on an isolated domain (CA-IS3741 digital
-  isolator + VPS8504B supplies), so only SPI crosses the barrier. Isolation
-  VERIFIED (owner, 2026-10-24; [hw/README.md Isolation boundary](../../hw/README.md#isolation-boundary)).
+  isolator + VPS8504B supplies), so only SPI crosses the barrier
+  ([hw/README.md Isolation boundary](../../hw/README.md#isolation-boundary)).
 
 Connectors ([hw/README.md Main parts](../../hw/README.md#main-parts)): banana V / COM / A = DMM only
 (isolated domain); two coaxial jacks (MCX per BOM), CHA = scope input and GEN =

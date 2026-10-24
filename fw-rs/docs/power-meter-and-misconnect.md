@@ -294,7 +294,7 @@ machine is the stock's own pattern.
 ### 3.6 Wiring, burden and safety (COM is shared)
 
 The meter has V/ohm, COM and one A jack, isolated from the USB/MCU ground
-(CA-IS3741 isolator + VPS8504B supplies; VERIFIED by the owner 2026-10-24,
+(CA-IS3741 isolator + VPS8504B supplies,
 [hw/README.md Isolation boundary](../../hw/README.md#isolation-boundary)). The
 voltage is measured V-COM, the current A-COM: **the load current flows through
 COM**, and COM is at the potential of the conductor you break into.
@@ -362,8 +362,7 @@ Safety:
   current range is shown with the fuse rating.
 * Long sessions (energy): inhibit auto-dim / auto-off while the integrator
   runs and the current is above the floor; the stock's "do not measure while
-  charging" stays as a warning toast (the DMM isolation is verified, owner
-  2026-10-24; the toast is for the scope / generator, which share the USB
+  charging" stays as a warning toast (the DMM side is isolated; the toast is for the scope / generator, which share the USB
   ground).
 * Mains: the usual DMM rules (CAT rating of the leads, both leads rated,
   never break the neutral of a circuit you cannot de-energise). The entry
@@ -796,8 +795,8 @@ signal keeps 0xDD; the T1 square gets 0xBF (+62.5 / +20.8 mV). No window (pure D
 current AC at OP1O: the counter on PB4 = the current's frequency
 (INFERRED from the stock AC A rows' R20 0xF2). Else "--". A V range change
 returns to SENSE / 0xDD. The sentinel is off in the power meter
-(`sent.configured(Kind::Off)`), so R20 / R21 are the counter's alone; the
-fixes agent's sentinel.rs changes do not touch this path.
+(`sent.configured(Kind::Off)`), so R20 / R21 are the counter's alone;
+sentinel.rs changes do not touch this path.
 
 **Entry ranging.** `pw_apply` dropped every part on any range change, and a
 range change restarted the cycle at P: each I autorange step cost a whole
