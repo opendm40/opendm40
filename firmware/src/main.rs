@@ -52,6 +52,7 @@ mod trigsoft;
 mod scpi;
 mod scpi_msg;
 mod sentinel;
+mod dbgsrc;
 mod stockfont;
 mod touch;
 mod ui;
@@ -627,6 +628,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 // as before, a range / resolution change is refused.
                 scpi::Out::Instr(scpi::Cmd::Conf(f, ..)) if logger.active() => {
                     app.select_func(&mut clk, f);
+                    false
+                }
+                scpi::Out::Instr(scpi::Cmd::DbgSrc(Some(_))) if logger.active() => {
+                    scpi.set_err("Settings conflict");
                     false
                 }
                 scpi::Out::Instr(scpi::Cmd::Range(_, op)) if logger.active() && !op.is_query() => {
