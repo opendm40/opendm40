@@ -504,6 +504,10 @@ pub enum Log {
 ///                           follows ms later (long press: RUN >= 1000 ms in a
 ///                           DMM view = AutoHold on/off); max 60000
 ///   DBG:SWIPE D,n           synthetic n-finger swipe down (3 = screenshot, 2 = power off)
+///   DBG:READout?            the DMM readout as drawn (App::shown_reading):
+///                           kind,unit,value_si,hold (kind P placeholder, G
+///                           grey provisional, F final, N none; value NAN for
+///                           dashes, +9.9E37 OL; hold Meter::hold_state)
 ///   DBG:GRAB <ms> | ?       scope drag hold-to-grab time (0 = direct drag, default)
 ///   DBG:GEST?               last scope drags, oldest first: n then per drag
 ///                           ";target,axis,delta_px,ms" (target 1 level, 2 trigger
@@ -828,6 +832,8 @@ pub enum Cmd {
     DbgGest,
     /// DBG:VIEW?: the page shown (App::scpi).
     DbgView,
+    /// DBG:READout?: the DMM readout as drawn (App::scpi).
+    DbgReadout,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
     DbgAcdc,
     /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs): op 0 METH <m>, 1 METH?,
@@ -1902,6 +1908,7 @@ impl Scpi {
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
                 _ if p0 == b"DBG" && query && parts.get(1) == Some(&&b"VIEW"[..]) => out = Out::Instr(Cmd::DbgView),
+                _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "READout") => out = Out::Instr(Cmd::DbgReadout),
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" => {
                     let a = trim(arg);
                     let mut it = a.split(|&c| c == b',');

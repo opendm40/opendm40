@@ -101,10 +101,10 @@ def allowed_for(inp, step):
             a |= {'VJACK'}
         if step in ('acv', 'vdcac'):
             a |= {'DC'}
-    if inp in ('dc5', 'v24'):
+    if inp in ('dc5', 'v24', 'dc5a'):
         if step in ('acv', 'vdcac'):
             a |= {'DC'}
-        if step in CUR:
+        if step in CUR and not (inp == 'dc5a' and step in ('dca', 'dcma', 'dcua')):
             a |= {'VJACK'}  # AC A's peak (also an AC+DC / AUTO AC phase): 2 V threshold
         if step in ('res', 'cont', 'diod'):
             a |= {'LIVE'}
@@ -142,6 +142,13 @@ SC = {
     'ohmexit': ('open;ohmexit:3.5;ohmexitlo:1.2', 'open', [],
                 ['res', 'dca', 'res', 'dcma', 'res', 'dcua', 'res', 'aauto', 'res', 'aacdc', 'res', 'aca', 'cont', 'dca',
                  'temp', 'dcma', 'diod', 'dca', 'cap', 'dcma', 'res', 'dcv', 'res', 'dca'], {}),
+    # device ab7184c new bug 4: A / mA -> Scope -> DMM with 5 V on V-COM, CTSTA 0x70 to 7.75 s
+    # and 0x50 to 8.01 s after the switch, then 0 (ohmexitrst: the trace also from the chip
+    # reset when the DMM rail comes back); the 7 s cap let the 0x70 tail count: V-JACK? at
+    # 8.06 s. 5 V through the /1000 tap is below the comparator: no V-JACK? in DC A (dc5a).
+    # Dwell 11 s (DWELL) so the step outlasts the tail.
+    'ohmexit-long': ('open;vsrc:5;ohmexit:7.75;ohmexitlo:0.26;ohmexitrst:1', 'dc5a', [],
+                     ['dca', 'WAVE', 'dcma', 'WAVE', 'dca', 'res', 'dca', 'res', 'dcma'], {}),
     'real-vjack-ohmexit': ('open;vsrc:24;ohmexit:3.5;ohmexitlo:1.2', 'v24', [], ['dcv', 'dca', 'res', 'dca', 'res', 'dcma'],
                            {'dca': ('VJACK', 6.5), 'dcma': ('VJACK', 6.5)}),
     'real-ajack-swtr': ('open;isrc:0.001;swtr:300;swtau:50', 'ajack', [],
@@ -180,6 +187,8 @@ SC = {
     'real-vjack-blind-prec': ('open;vsrc:24;vjblind:1', 'v24', [], ['dcv60', 'dca', 'temp', 'dca', 'res', 'dcma', 'dcv', 'dca'],
                               {'dca': ('VJACK', 4.0), 'dcma': ('VJACK', 4.0)}),
 }
+# Seconds per step instead of --dwell.
+DWELL = {'ohmexit-long': 11.0}
 # Commands sent once after the boot, before the sequence (device experiments).
 SETUP = {'real-vjack-blind-prec': ['DBG:SENT:PREC 300']}
 
@@ -205,7 +214,7 @@ def run(name):
         f.write('0 dmm %s\n' % spec)
         for t, sp2 in later:
             f.write('%g dmm %s\n' % (t, sp2))
-    run_for = 30 + len(seq) * (A.dwell + 4) + sum(5 for s in seq if s == 'WAVE')
+    run_for = 30 + len(seq) * (DWELL.get(name, A.dwell) + 4) + sum(5 for s in seq if s == 'WAVE')
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(int(run_for)), '--script', sp, '--name', rtag] \
         + (['--app', os.path.abspath(A.app)] if A.app else [])
@@ -267,7 +276,8 @@ def run(name):
                         tm.write(c)
                     fn = st
                 rec = []
-                until = ts + max(A.dwell, real[fn][1] + 1.0 if fn in real else 0) + (2.5 if st in SLOW else 0)
+                dwell = DWELL.get(name, A.dwell)
+                until = ts + max(dwell, real[fn][1] + 1.0 if fn in real else 0) + (2.5 if st in SLOW else 0)
                 if i == 0 and pend:
                     if pend[0] <= ts:
                         bad.append('step 0 %s: a later input landed before it (fw %.2f s, step at %.2f s)' % (st, pend[0], ts))

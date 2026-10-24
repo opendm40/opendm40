@@ -75,6 +75,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             rampV = 0; rampUp = true; rampLast = now;
             vc = Op1OffLevel; vcLast = now;
             role = Role.None; roleMode = -1; roleRange = 0;
+            if(OhmExitRst) ohmExitT = now;
+            ohmLagV = 0; ohmLagT = now; ohmLagTarget = 0;
             vjSee = false; acaT0 = double.NegativeInfinity; acaStepT = double.NegativeInfinity; lastRole = Role.None; lastMode = -1;
             Rewrites = 0;
             rng = new Random(12345);
@@ -447,6 +449,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// whatever the input ("ohmexit:3.5;ohmexitlo:1.2"; off by default).
         public double OhmExitBoth, OhmExitLow;
         private double ohmExitT = double.NegativeInfinity;
+        /// The same CTSTA trace also from a chip reset (opt-in, "ohmexitrst:1"; device ab7184c:
+        /// A / mA -> Scope -> DMM with 5 V on V-COM, 0x70 to 7.75 s, 0x50 to 8.01 s after the
+        /// switch: the DMM rail comes back, the chip resets, the A row follows). Off by default.
+        public bool OhmExitRst;
+        /// Ohm node lag (opt-in, "ohmtau:ms"; CHOSEN, not measured): in the ohm rows the node
+        /// voltage across Rx (what AD1 sees against the reference drop) relaxes to its DC value
+        /// with this time constant after every row change (an ohm range step changes Rref, so
+        /// the target), starting from 0 V (the node outside the ohm rows with a passive Rx). It
+        /// stands for the input network's RC and a calibrator's resistance simulation catching
+        /// up (device ab7184c: DC V -> RES on 390 / 100 ohm read 8.8 Mohm, then 219 / 57 ohm on
+        /// the right range before the right value). Off (0) by default.
+        public double OhmTauMs;
+        private double ohmLagV, ohmLagT, ohmLagTarget;
         /// AC A rows, AD1 on SENSE - PB5 (the fw-rs f0d21eb V-JACK? sentinel): PB5 is not
         /// defined by the A rows (only the DC V 60 V+ rows' power bus / OP3 drive it), and the
         /// device's AD1 peak there ran from ~-117 000 at 0.7 s to the negative rail by ~2 s
@@ -706,6 +721,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "swtr": SwTrMv = o.Value; break;
                 case "ohmexit": OhmExitBoth = o.Value; break;
                 case "ohmexitlo": OhmExitLow = o.Value; break;
+                case "ohmexitrst": OhmExitRst = o.Value != 0; break;
+                case "ohmtau": OhmTauMs = o.Value; break;
                 case "pb5drift": Pb5DriftV = o.Value; break;
                 case "pb5tau": Pb5DriftTau = o.Value; break;
                 case "senseneg": SenseNegV = o.Value; break;
@@ -1479,6 +1496,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 OhmSource(out vs, out rref);
                 double vx, vref;
                 Fe.OhmNode(vs, rref, out vx, out vref);
+                if(OhmTauMs > 0 && role == Role.Ohm)
+                {
+                    OhmLagAdvance(t);
+                    ohmLagTarget = vx;
+                    vx = ohmLagV;
+                    vref = vs - vx;
+                }
                 var pol = ((regs[0x28] >> 4) & 7) == 4 && (regs[0x28] & 7) == 4 ? -1.0 : 1.0;
                 // open jack: vx -> vs, vref -> 0 with the same sign: the ratio goes to +infinity
                 if(Math.Abs(vref) < 1e-9) { code = pol * 1e12; break; }
@@ -1783,6 +1807,24 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 acpo = false;
                 break;
             }
+        }
+
+        /// OhmTauMs: move the lagged node from ohmLagT to t toward the target in force since then.
+        private void OhmLagAdvance(double t)
+        {
+            if(t <= ohmLagT) return;
+            ohmLagV = ohmLagTarget + (ohmLagV - ohmLagTarget) * Math.Exp(-(t - ohmLagT) / (OhmTauMs * 1e-3));
+            ohmLagT = t;
+        }
+
+        /// OhmTauMs: the node's DC value in the row now (0 V outside the ohm rows).
+        private double OhmLagTargetNow()
+        {
+            if(role != Role.Ohm) return 0;
+            double vs, rref, vx, vref;
+            OhmSource(out vs, out rref);
+            Fe.OhmNode(vs, rref, out vx, out vref);
+            return vx;
         }
 
         /// VREF of OP3 relative to AGND (signed; SFUVR, SMODE<3>, CMPO): the open-circuit test voltage.
@@ -2164,12 +2206,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 if(newRole == Role.AcA && lastRole != Role.AcA) acaT0 = now;
                 if(newRole == Role.AcA && lastRole == Role.AcA && lastMode == 4 && newMode >= 5) acaStepT = now;
                 if(newRole != Role.None) { lastRole = newRole; lastMode = newMode; }
+                if(OhmTauMs > 0) OhmLagAdvance(now); // the old row's target up to this write
                 if(newRole == Role.Temp) vjSee = true;
                 else if(newRole == Role.Ohm || newRole == Role.Cont || newRole == Role.Diode || newRole == Role.CapOsc
                         || newRole == Role.CapRamp || newRole == Role.CapDischarge || newRole == Role.Freq
                         || (newRole == Role.DcV && newRange >= 1)) vjSee = false;
                 role = newRole; roleMode = newMode; roleRange = newRange;
                 swT0 = now;
+                if(OhmTauMs > 0) ohmLagTarget = OhmLagTargetNow();
             }
             // the AD2/AD3 enable-order phase: bad when ENAD2 was set before ENAD3 (empirical)
             beatBad = EnAd2 && EnAd3 && ad2Start <= ad3Start;
