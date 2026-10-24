@@ -2840,3 +2840,59 @@ the same size.
     with 1 V or with the square. A write of 0x1B to 0x0E was ignored (it still read 0x1A), so these look like a
     read-only live value (perhaps a temperature: 27 -> 26). Nothing else was written.
   - During the check the calibrator was at 1 V, 5 V, off, 0.5 V, 40 Hz square, 0 V DC.
+
+## 612c45c: INFO/ mirror, panel toast, range queries, danger alarm (no current) (2026-10-24 02:37 - 03:35)
+
+The coordinator had installed 612c45c (rust-fw-poc: the INFO/ mirror f69222f..895b520, smallbugs b190073 / 4f560cd,
+the danger alarm 7faf91b..612c45c). `*IDN?` = `Alientek,DM40A,<UID>,dm40-fw 0.1`, `DBG:FLASH?` `EF4018,4096,0,...`.
+INFO/FIRMWARE.BIN, read with the page cache dropped, is byte-equal to the image (sha256 fb954da3…d389). Crash count
+0, marker VALID, HEALTHY at the start and the end. No flashing. Files are in the session scratchpad's `chk5/`:
+`sessM.py` (a long AD2 disk session with cp rounds of the 8 INFO/*.BIN every N s from state 3), `sessB.py` (now with
+`CPFILES` / `CPDELAY`), `wv.py` / `wvidle.py` (Wave view at 1 ms/div), `tst.py` / `tst2.py` (toast), `rng.py`
+(range queries), `alm.py` (alarm without current), `sentE.py`, `sessG.py`, `tmcabort.py`, and `out/` (JSON, PNG;
+`out/ref/` = the 8 INFO files read at the start with no stream). The calibrator was found on the 10 Hz square,
+enabled; the meter on the DMM page, DC V AUTO+, RATE FAST.
+
+| # | check | result |
+|---|---|---|
+| M1 | First boot of the mirror build: `DBG:VDISK:MIR?` | **PASS**: `1,4,1,5164` (WRITTEN, 5.16 s for the rewrite; the emulator's typ estimate was 4.3 s). The boot time as a whole cannot be told: the mirror runs in `native::pre_main`, before the uptime clock and USB |
+| M1' | Reboot (`DBG:RESET`; `*RST` is only a status clear here) | **PASS**: `1,3,0,302` (PRESENT, compare 0.30 s). USBTMC answered 3.2 s after the command at uptime 1.85 s; the host saw descriptor errors for ~1.3 s before the disconnect (the SW reset does not drop the pull-up first), then re-enumerated. Came back on the DMM page, DC V AUTO+ |
+| M2a | 38400 AD2 disk session `LOG:DUR 300`, cp of the 8 INFO/*.BIN (FIRMWARE.BIN first) at state 3 + 0 / 60 / 120 / 180 / 240 s (`m384`) | **PASS**: every cp returned at once (FIRMWARE.BIN 1.06 s, LOADER.BIN 0.51 s), all 40 copies byte-equal to `out/ref`. The session ended **full** (state 6) at 286.2 s: 10 988 839 rows (= 38400 x 286.17 s), lost_before 0; late 0, overruns 0, dropped 0, max_lat 280 ns. A 5 min session does not fit: the free 12.9 MB hold ~286 s here (the prep allocated all of it, 33 s). DLG deleted by name |
+| M2b | 76800, `LOG:DUR 0` (until full, ~130 s of samples), cp rounds every 30 s (`m768`) | **FAIL**: copies fast (FIRMWARE.BIN 2.0 s) and byte-equal, late 0, overruns 0, max_lat 280 ns, gate 1 (kept 76800), but **dropped / lost_before 234 147** (~46 000 per round, 2.4 % of 9.68 M rows) |
+| M2c | 20 s 76800 sessions to isolate it (`b768`, `c768*`) | no cp: lost 0. The 8 files at state 3: lost 45 562. Non-mirrored files only (OTP, UID, OPTBYTES, ROMBOOT): 0. CALIB.BIN (4 KiB, mirrored) 6 s after state 3: 0. **LOADER.BIN (128 KiB, mirrored) 6 s after state 3: 21 745 lost**. LOADER.BIN at state 3 (inside the writer trial, 3 runs): the trial falls back to 38400 (gate 2, fill 2048), then lost 0. So the mirror's SPI reads, once the 76800 rung is kept, starve the logger's page programs |
+| M3 | Wave view (DC V, MF > Wave) at 1 ms/div (ACQ:SRAT? 76 800) for 200 s, cp rounds every 40 s (`wv`) | **PASS for the copies**: 5 rounds, each file byte-equal, FIRMWARE.BIN 2.4-2.6 s; late 0, overruns 0; the stream stayed active. **Open**: DBG:ISR? `dropped` grew 295 -> 11 185 (~50/s, also between rounds); `wvidle.py`: a 30 s idle window +0, per-file reads (CALIB, ROMBOOT, LOADER, FIRMWARE) +0 each, the next 30 s idle +68. max_lat 300 ns (once). d330877 1b saw +0 in short windows. TIM:SCAL set back to 10 ms |
+| T1 | Toast in the DATA LOGGING panel: MCX page, 38400 disk session, `DBG:TAP 177,10` (`tst`, `tst2`) | **PASS**: "Wave: data logger running" in the panel body under the title (`t_toast03.png`), nothing outside the panel box; one shot at 1.9 s shows the panel's rows back (`t2_19.png`). (With three 1.1 s screenshots in a row the toast was still up at 2.6 s, back at 4.0 s: the shots hold the loop.) The view stays Oscilloscope, 460 802 rows, lost 0, late 0 |
+| R1 | Bare `VOLT` / `CURR` range queries (`rng.json`) | **PASS**: AC / AC+DC / AUTO V: VOLT:RANG:AUTO? 1 (0 after VOLT:RANG:AUTO OFF, 1 after ON), VOLT:RANG? the range (6 / 60 / 60 V); AC / AC+DC / AUTO A the same for CURR (600 uA / 60 mA / 60 mA). The other quantity: RANG:AUTO? 1, RANG? / RES? +9.91E37. RES: both +9.91E37. CONF:POW: VOLT:RANG? 6 = POW:VOLT:RANG? `AUTO,+6`, CURR:RANG? 0.06 = POW:CURR:RANG? `AUTO,+0.06`. SYST:ERR? "No error" after every row |
+| D1 | Settings 3/3 "Danger alarm", `SYST:ALER:ALARm?`, `DBG:ALARm?` | **PASS**: the row read Loud at the start (`s_set3.png`), LOUD, `0,0,0,0`. At the end it reads **Off** (`e_set3.png`): the coordinator set OFF for the night (owner asleep, no sound); left OFF on purpose |
+| D2 | V-JACK? (24 V DC on V-COM, CONF:TEMP 3 s -> CONF:CURR:DC 10, 15 s; `alm_vjack`) | **PASS**: V-JACK at 8.1 s after the A switch (the OHM_EXIT cap, as f0d21eb), `DBG:ALARm?` 0,0,0,0 in every poll |
+| D3 | OVERLOAD without current (5 V on V-COM, CONF:CURR:AC 10 -> CONF:CURR:AC 0.06, the f0d21eb false OVERLOAD; `alm_ovl`) | **PASS** (no alarm): OVERLOAD 0.95 s after the switch, `DBG:ALARm?` 0,0,0,0. The one 300 ms beep is at volume 0 (not heard / not measurable) |
+| D4 | Coupling check (doc 4.10 item 4) | **Not run**: no debug command makes the alarm sound without current (DBG:ALARm is a query only), and then the owner asked for no sound |
+| S1 | E subsets at 5 V on V-COM: `seqE1` (RES -> A family, 15 steps) and `seqE2` (DC V 15 s watches, A / mA -> Scope -> back, Wave, AUTO; 20 steps) | **PASS (no new false alert)**: the same as f0d21eb: A-JACK in RES at 5 V (6 of 6, 2.86-3.01 s, CMP_PB1; the 35fce2a 7b item), V-JACK? in AC A (known), DC? in AC V (correct). No V-JACK? in DC A after RES, no AC? in DC V, nothing after Scope -> back. **But with the alarm on Loud, each of the 6 false A-JACKs started a danger alarm event** (`DBG:ALARm?` events 0 -> 6; nothing silenced it, each ended with the RES step after ~3 s): new bug 2 |
+| S2 | USBTMC 500-query mix (`tmc_mix500.json`) | **PASS**: 0 empty, 0 mismatched; worst `*IDN?` / `WAV:PRE?` 2.4 ms, READ? 608 ms (one wait for a reading) |
+| S3 | Generator settings during a 38400 disk session (`g384`) | **PASS**: 576 002 rows, lost 0, late 0, max_lat 280 ns; OUTP? 0 before, after each setting and in all 60 polls; settings set back and equal |
+
+### New bugs
+
+1. **A 76800 disk session loses samples while the host reads a mirrored INFO/ file** (M2b / M2c): ~22 000 per
+   LOADER.BIN copy, ~46 000 per round of the 8 files; 0 at 38400, 0 for non-mirrored files and CALIB.BIN. A copy
+   inside the writer trial makes the session fall back to 38400 (no loss). The emulator's fastlogtest (typ / max
+   chip timing) showed lost 0, so its SPI model does not catch this.
+2. **The known false A-JACK in RES with 5 V on V-COM now sounds the loud danger alarm** (S1): 6 events in 6 RES
+   entries. A false A-JACK was a badge before; with the Loud default it is a full-volume two-tone for as long as it
+   lasts. Needs the A-JACK false-positive fixed (or RES excluded from the alarm until it is).
+3. Wave view at 1 ms/div: DBG:ISR? `dropped` grows ~50/s over minutes (M3). Not chased; cause unknown.
+
+### State at the end
+
+- **Device:** 612c45c, DMM page, DC V AUTO+ (`VOLT:RANG:AUTO?` 1), RATE FAST, the bargraph row (`e_dmm.png`).
+  LOG: AD1 / 4800 / HOST / DUR 60 / CHOP 1 / OSR 3 / STAT 0, CSV:INT 0. Generator SQU 2 MHz 3 V 1.5 V 50 %, OUTP? 0
+  throughout. Scope page as found (10 us/div, 2 V/div, offset -4.709 V, trigger 2.894 V, AUTO). POW:COUP DC.
+  SYST:ERR? "No error", SYST:ALER? NONE, `DBG:VDISK:MIR?` 1,3,0,302. Crash count 0, marker VALID, HEALTHY.
+- **Settings:** 1/3 byte-equal to the start; 2/3 only the live rate digits; 3/3 differs only in "Danger alarm"
+  (Loud -> **Off**, set by the coordinator for the night). Volume 0 %, backlight 10 %, Dim / Shutdown Never, Start
+  page Multimeter, DMM row Bargraph, USB disk "Files live" (`DBG:VDISK:RO?` 1,1).
+- **Disk:** `MMEM:CAT?` equals the start string exactly (3 801 088 used: +266 240 B vs f0d21eb = the mirror). 14
+  LOGS/FAST000.DLG files were made (one per disk session) and each deleted by exact name after it was the one new
+  name. Two of them had filled the disk for a short while (M2a, M2b).
+- **Calibrator:** back on the 10 Hz square, enabled; registers equal to the start dump except 0x2C (live) and
+  0x0E / 0x2E 0x1A -> 0x19 (the read-only live value of the f0d21eb note). During the check: 24 V and 5 V DC.
