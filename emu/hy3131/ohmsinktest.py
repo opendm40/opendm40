@@ -18,8 +18,9 @@ Each window: input at its start, CONF:VOLT:DC at +3 s, at +8 s (fw uptime):
          must settle: no range change in the last QUIET s, and a final
          (amber, kind F) readout in them.
   read   CONF:RES;:READ?: an answer within READ_MAX s (under 5 s).
-  leave  as poll; then the input becomes a 4.7 kohm resistor (at +HOLD s):
-         4.7 kohm final within 3.5 s (the hunt rule must let go of 6 Mohm).
+  leave  as poll; then the input becomes a 4.7 kohm resistor (at +HOLD + 3
+         s): 4.7 kohm final within 3.5 s of the first readout off the sink's
+         value (the hold of 6 Mohm must let go).
 
   emu/hy3131/ohmsinktest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --port 64810
 """
@@ -35,7 +36,7 @@ ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
 BOOT_OFS = 0.906  # virtual time - fw uptime (switchlat.py)
 T0 = 8.0
-W = 24.0
+W = 30.0
 HOLD = 9.0
 QUIET = 4.0
 FETCH_MAX = 2.5
@@ -45,6 +46,11 @@ SINK = 'isink:1.377e-7'
 # name, input, rate, how
 SCEN = [
     ('sink-fetch', SINK, 'MED', 'fetch'),
+    ('sink-med', SINK, 'MED', 'poll'),
+    ('sink-fast', SINK, 'FAST', 'poll'),
+    ('sink-near', 'isink:1.36e-7', 'MED', 'poll'),
+    ('sink-read', SINK, 'MED', 'read'),
+    ('sink-leave', SINK, 'MED', 'leave'),
 ]
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -66,7 +72,7 @@ with open(script, 'w') as f:
     for k, sc in enumerate(scen):
         f.write('%.3f dmm %s\n' % (T0 + k * W + BOOT_OFS, 'open;' + sc[1]))
         if sc[3] == 'leave':
-            f.write('%.3f dmm %s\n' % (T0 + k * W + 8 + HOLD + BOOT_OFS, 'open;ohm:4700'))
+            f.write('%.3f dmm %s\n' % (T0 + k * W + 8 + HOLD + 3 + BOOT_OFS, 'open;ohm:4700'))
 end = T0 + len(scen) * W + 2 + BOOT_OFS
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--app', A.app, '--usbip', '0.01', '--usbip-port', str(A.port),
        '--run-for', '%.1f' % end, '--name', tag, '--script', script]
@@ -154,16 +160,21 @@ try:
                 print('     %d polls, %d range changes, last range %g, last FETC? %g, max FETC? %.2f s' % (
                     len(rows), len(steps), ranges[-1], rows[-1][1], max(r[2] for r in rows)))
             if how == 'leave':
-                t2 = w0 + 8 + HOLD
-                wait_until(t2)
-                ok = None
-                while up() < t2 + 6:
+                # The swap's fw uptime is not exact (BOOT_OFS): time it from the first readout
+                # that is no longer the sink's value (the input change seen), to 4.7 kohm final.
+                k0 = rows[-1][1]
+                t_chg = ok = None
+                while up() < w0 + 8 + HOLD + 3 + 8:
                     ro = q('DBG:READ?').split(',')
-                    if ro[0] == 'F' and len(ro) > 2 and ro[1] == 'kΩ' and abs(num(ro[2]) - 4700) < 30:
-                        ok = up() - t2
+                    v = num(ro[2]) if len(ro) > 2 else float('nan')
+                    s_ = up()
+                    if t_chg is None and not (k0 / 2 <= v <= k0 * 2):
+                        t_chg = s_
+                    if ro[0] == 'F' and abs(v - 4700) < 30:
+                        ok = s_ - (t_chg if t_chg is not None else s_)
                         break
                     time.sleep(0.05)
-                print('     after the swap to 4.7 kohm: %s' % ('final at +%.2f s' % ok if ok is not None else 'not final in 6 s (%s)' % ','.join(ro)))
+                print('     after the swap to 4.7 kohm: %s' % ('final %.2f s after the change showed' % ok if ok is not None else 'not final (%s)' % ','.join(ro)))
                 if ok is None or ok > 3.5:
                     why.append('4.7 kohm after the sink: %s' % ('%.2f s' % ok if ok is not None else 'never'))
         print('  %s %-11s %s %s%s' % ('ok ' if not why else 'BAD', name, rate, how, '' if not why else ': ' + '; '.join(why)), flush=True)

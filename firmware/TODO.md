@@ -3545,11 +3545,35 @@ Emulator (emu/):
       `ohmboth`): senttest ohm-v5 / ohm-v5-600, switchtest dc5-pickup / sq-pickup, loudtest ajack-res fail
       on cd1ec9a and pass. INFERRED gap: a current in A large enough to push PB1 out of the comparator's
       range may read 0x70 too (LIVE? then, not the badge). Device: doc 4.13 check list items 4-5.
-- [ ] FETCh? does not answer within 5 s while RES AUTO hunts (device a2e9766, device-check doc "a2e9766:
+- [x] FETCh? does not answer within 5 s while RES AUTO hunts (device a2e9766, device-check doc "a2e9766:
       bug-fix recheck" note 1): on the calibrator's disabled output, RES AUTO stepped 6 MΩ <-> 600 kΩ (6 MΩ
       reads 0.104 MΩ, 600 kΩ reads OL), DBG:READout? `P,MΩ,NAN`, and 8 of 8 FETC? timed out at the
       driver's 5 s (then -410 Query INTERRUPTED). The scpi.rs timing notes say FETCh? answers +9.91E37 at
-      once after a range change. The hunt itself (a source that is not a resistor) not investigated.
+      once after a range change.
+      **The hunt.** Both readings fit an input that takes at most ~0.2 uA (INFERRED; e.g. a leakage / bias
+      current of the calibrator's output stage): 6 MΩ drives 0.215 uA (docs/data/short.csv), the input takes
+      nearly all of it, the node sits near 0 V: 0.104 MΩ; 600 kΩ drives 2.17 uA, the input takes a tenth: OL.
+      The 600 Ω reading (~24 Ω) does not fit any static element; not explained. AUTO on 6 MΩ stepped down
+      (0.104 MΩ is under 600 kΩ's tenth), 600 kΩ read OL and stepped back up, for good; every conversion was a
+      step, so no reading ever came (`P,MΩ,NAN`). Fixed (dmm.rs OHM_BAND): an OL on a row a step down reached,
+      before any in-range conversion, that the next conversion confirms, steps back to the range it came from,
+      which then stays while it reads within x2 of the value it stepped down on (a reading outside x2, OL, a
+      function / range / AUTO change end it). AUTO now stays on 6 MΩ and shows ~0.10 MΩ. Limit: a resistor
+      connected without an open in between that reads within x2 of the held value (e.g. 100 kΩ after the
+      0.104 MΩ) stays on 6 MΩ, one digit fewer, until the reading leaves the band or goes OL.
+      **FETCh?** With no reading since the entry it armed a wait, and the ohm hunt extension (meant for READ?
+      after CONF:RES) moved its expiry with every step, up to 8 s. Fixed (main.rs): +9.91E37 at once once a
+      range step came since the entry (`Dmm::range_moving`), and a FETCh? wait keeps its SCPI_WAIT_MS expiry.
+      READ? after CONF:RES followed the same 8 s cap through the endless hunt; with the hunt fixed it answers
+      ~0.10 MΩ (emulator 1.37 s).
+      Emulator: the model's `isink:<A>` (a current-limited path V-COM, DM40Frontend.cs); emu/hy3131/ohmsinktest.py
+      (`isink:1.377e-7`: the model's 6 MΩ test current is ~0.139 uA, so 6 MΩ reads ~0.10 MΩ, 600 kΩ OL as on the
+      device). Before: sink-fetch FETC? 8.00 s, sink-med 35 range changes in 9 s with no final readout, sink-read
+      READ? 8.00 s "Data stale"; after: FETC? max 1.34 s (the entry's first wait), no range change after the
+      hunt, READ? 1.37 s, the 4.7 kΩ swap final 0.3 s after the change shows (sink-leave).
+      (verify on device: the calibrator's disabled output, RES AUTO: settles on 6 MΩ at ~0.10 MΩ, `RES:RANG?`
+      steady; FETC? every 0.2 s for 20 s answers within 1 s each (+9.91E37 at most for the first ~2 s, no
+      -410); `CONF:RES;:READ?` < 5 s; then a 4.7 kΩ / 100 kΩ resistor: AUTO leaves 6 MΩ at once)
 - [x] LIVE flaps in RES 600 Ω after a 5 V source on V-COM is switched off (device a2e9766, same doc note 3):
       DBG:SENT:LOG? +24 entries, the last 8 `LIVE,CMP_PB1` 5-10 ms apart. Which step made them is inferred.
       Cause: once LIVE? cleared (the last live result 1 s old), the next poll re-asserted it from the old
