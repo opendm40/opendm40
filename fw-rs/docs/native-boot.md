@@ -319,15 +319,15 @@ Remove `stub/`, `tools/legacy/flash.py`, the BT RAM loader path and the sector-8
   both header words for our body length. The dead `like`/`check is None` branch
   and the stale docstring can be cleaned up but are not blocking.
 - **File naming for the FS-loader scan:** it installs the first `dm40*.bin` in
-  FAT order. Keep **exactly one** `dm40*.bin` on the FAT when flashing (two give
-  an order-dependent, possibly wrong install — `ANALYSIS.md` §3). Our file and
+  FAT order, so two files give an order-dependent, possibly wrong install
+  (`ANALYSIS.md` §3; user rule: [fw-rs/README.md, Recovery](../README.md#recovery)). Our file and
   the stock file must not coexist on the disk; the toggle procedure removes one
   before adding the other.
 - **`fw-rs/build.sh`** — in addition to `dm40-fw.bin` (now the raw body), emit
   `dm40-fw.update.bin` = `dm40fw.py pack dm40-fw.bin`. Name the *on-disk* copy
   `dm40*.bin` only at flash time (per the stock app's deletion caveat in
   `docs/history/custom-fw-handover.txt`: the stock app scans for `dm40*.bin` on USB unplug;
-  that is the intended path for installing us, but keep only one present).
+  that is the intended path for installing us).
 - **`tools/reload.sh` / `tools/legacy/flash.py`** — the BT RAM loader becomes obsolete
   after Stage 2. The new "load fw-rs" flow is: copy the update file to the FAT
   (host file copy over whichever MSC is up) + reboot.
@@ -1107,12 +1107,9 @@ but nothing can make that installed copy bootable again except a vendor install
 The complete `test-recovery` RAM image is **1712 bytes**: shim, `init_core`,
 FWDGT start, recovery and vectors (`.text` 1544).
 
-**User procedure:**
-1. The meter restarts by itself into the loader's update screen ("open file
-   error"), and a USB disk (28e9:028f) appears.
-2. Copy a firmware `dm40*.bin` onto it: the native fw-rs image as e.g.
-   `dm40_fwrs.bin`, or `dm40_v_2_6.bin`. Nothing has to be deleted.
-3. Press "update" on the screen, or power-cycle. The image is installed.
+**User procedure:** the meter restarts into the loader's update screen
+("open file error") with its USB disk (28e9:028f); what to copy and press is in
+[fw-rs/README.md, Recovery](../README.md#recovery).
 
 **Other entries** to the same state from a running native fw-rs:
 - `DBG:UPDATE`, or its alias `DBG:RECOVER`:
@@ -2204,7 +2201,7 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
    must come back each time, since the marker no longer depends on PA2.
 4. Copy `dm40_patched.bin` as `dm40_v_2_6.bin` onto the disk, then press
    "update". Patched stock is back. The stock should delete or ignore the
-   file; keep only one `dm40*.bin`.
+   file ([one file only](../README.md#recovery)).
 5. **Optional, non-destructive variants:**
    - `./build.sh test-recovery --features recovery-usb`: our own USB disk,
      plus the PD6 polarity check (a short press reboots to stock).
@@ -2220,7 +2217,7 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
    hold at power-on reaches the loader" otherwise, and do not use patched
    stock's own update path (unverified for a non-stock length). On the
    loader's USB disk, copy `fw-rs/dm40-fw-native.bin` as `dm40_fwrs.bin` (the
-   only `dm40*.bin`), `sync` and eject, then press "update". The loader
+   only `dm40*.bin`, [why](../README.md#recovery)), `sync` and eject, then press "update". The loader
    installs it and resets (warm, SW reset), or the next cold power-on (short
    press) launches it.
    - fw-rs comes up in normal mode. The reason is normally `NONE`; it is
@@ -2310,7 +2307,7 @@ fb6be06; the docs-only changes since build the same bytes):
 Before: fw-rs running, USB connected; on the PC a copy of the installed image
 (`fw-rs/dm40-fw-native.bin` of the installed build, or `INFO/FIRMWARE.BIN`
 from the fw-rs USB drive) to reinstall after each recovery. Reinstall: copy
-it onto the loader's USB disk as `dm40_fwrs.bin` (the only `dm40*.bin`),
+it onto the loader's USB disk as `dm40_fwrs.bin` ([the only `dm40*.bin`](../README.md#recovery)),
 `sync`, eject, press "Update".
 
 1. **Short press (normal start).** Power off. Press the power key ~0.5 s.
