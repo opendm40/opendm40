@@ -61,7 +61,7 @@ the recording; the header says how long after power-on it started.
 The CSV file looks like this:
 
 ```
-# Alientek DM40A, opendm40 0.1.0, function DC V, range AUTO, started uptime 12.345 s
+# Alientek DM40A, opendm40 0.0.1, function DC V, range AUTO, started uptime 12.345 s
 # time_s = seconds since the start of this recording (no real-time clock); empty value = overload
 time_s,value,unit,flags
 0.250,1.23456,V,
