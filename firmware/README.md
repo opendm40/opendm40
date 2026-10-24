@@ -10,6 +10,7 @@ are in the [root README](../README.md). Paths below are relative to
 ./build.sh                    # -> opendm40.bin (needs ../toolchain)
 tools/reload.sh               # build, upload over USBTMC, install, check
 tools/ui-render/run.sh OUT    # render every screen to PNG + layout check
+tools/scpi-doc-check/run.sh   # SCPI parser vs docs/manual/scpi-reference.md
 ../emu/run.py fwrs --run-for 4 --shot out.png   # run opendm40 in the emulator
 ```
 
