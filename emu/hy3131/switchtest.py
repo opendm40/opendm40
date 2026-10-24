@@ -96,6 +96,11 @@ def allowed_for(inp, step):
         a |= {'AJACK'}
     if inp == 'aprot':
         a |= {'AJACK', 'APROT'}
+    if inp == 'dc24aca':
+        if step in CUR - {'aca', 'acma', 'acua', 'aca10'}:
+            a |= {'VJACK'}
+        if step in ('acv', 'vdcac'):
+            a |= {'DC'}
     if inp in ('dc5', 'v24'):
         if step in ('acv', 'vdcac'):
             a |= {'DC'}
@@ -158,6 +163,10 @@ SC = {
                   ['dcv', 'aca', 'dcv', 'acma', 'dca', 'acua', 'res', 'aca10', 'acma', 'aacdc', 'aauto', 'dcv'], {}),
     # device f0d21eb new bug 1: CONF:CURR:AC 10, then 0.06, the A jack empty, 1 V on V: the first
     # 60 mA result read OL -> OVERLOAD, back to 10 A (acastep replays the first-block step)
+    # device 0774e70 new bug 2: 24 V DC on V, SENSE - AGND ramps to the rail in AC A (senseneg):
+    # the ramp's per-hold swing was a false V-JACK? at 1.5-3.5 s in 60 mA / 600 uA
+    'aca-ramp': ('open;vsrc:24;senseneg:0.75;sensetau:5', 'dc24aca', [],
+                 ['dcv', 'aca', 'dcv', 'acma', 'dcv', 'acua', 'dcv', 'aca10', 'dcv'], {}),
     'aca-ovl': ('open;vsrc:1;acastep:200000;acastepms:600', 'dc5', [],
                 ['aca10', 'acma', 'aca10', 'acma', 'dcma', 'acma', 'acua', 'acma'], {}),
     # a real AC source on V while in AC A (24 V rms): V-JACK? from the AD1 swing

@@ -342,6 +342,19 @@ namespace Hy3131Tests
                 Near(p[1] - p[0], 10676, 300, "  5 V rms AC: swing ~10.7 k (fw-rs swing threshold 4.27 k)");
             }
             {
+                // senseneg (device 0774e70): AC A's SENSE - AGND ramps to the rail at 24 V, ~10 k per hold
+                var m = NewChip(true);
+                m.Chip.SetInput("open;vsrc:24;senseneg:0.75;sensetau:5");
+                var r = Sent(F5R0, 5);
+                m.Configure(r, 5);
+                m.Advance(0.9);
+                var p = Peak(m, r[9], 0.107);
+                Check(p[1] - p[0] > 7000 && p[1] - p[0] < 14000 && p[1] < -60000, "senseneg 24 V: one hold at ~1 s spans ~10 k codes, below -60 k", p[0] + ".." + p[1]);
+                m.Advance(2.5);
+                p = Peak(m, r[9], 0.107);
+                Check(p[0] <= -262000, "  at the rail by ~3.5 s", p[0] + ".." + p[1]);
+            }
+            {
                 // acastep (device f0d21eb new bug 1): AC A 10 A -> mA, the first blocks carry the step
                 var m = NewChip(true);
                 m.Chip.SetInput("open;acastep:200000;acastepms:700");
