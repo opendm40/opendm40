@@ -344,7 +344,7 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 | Block | What | Rates on the DM40 |
 |---|---|---|
 | AD1 | 24-bit sigma-delta, IG 0.9..3.6, reference PB6 (1.25 V) or internal | AD1CLK = SYSCLK / 30; OSR 256..32768. Stock steady 32768, moving 8192 ([`firmware/src/dmm.rs`](../firmware/src/dmm.rs)) |
-| AD2 / AD3 | 19-bit fast converters, shared clock and OSR | 76.8 kS/s in the stock AC rows (SYSCLK / 2 / 32); ladder down to 600 S/s ([`dmm-input-scope-feasibility.md`](../firmware/docs/dmm-input-scope-feasibility.md) 1.1) |
+| AD2 / AD3 | 19-bit fast converters, shared clock and OSR | 76.8 kS/s in the stock AC rows (SYSCLK / 2 / 32); ladder down to 1200 S/s; chopping (ENCHOPAD2) does not change the rate (one unit, device 9dd1222; [`dmm-input-scope-feasibility.md`](../firmware/docs/dmm-input-scope-feasibility.md) 1.1) |
 | RMS / LPF | digital true RMS (sum X^2 or X*Y) and low-pass of AD2 | ~106.7 ms per result measured with LPFBW 111 (half the datasheet formula, [`RESEARCH.md`](../emu/hy3131/RESEARCH.md) 8) |
 | Peak hold | on AD2, AD1<23:5> or LPF | used by opendm40's A-jack probe ([`firmware/src/sentinel.rs`](../firmware/src/sentinel.rs)) |
 | Comparator | window comparator, thresholds from R21; output CMPO / CMP pin | continuity beeper, capacitance ramp, frequency, opendm40 sentinels |

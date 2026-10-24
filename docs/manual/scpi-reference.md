@@ -513,7 +513,7 @@ and `MEASure:POWer?` then give the real power P in W.
 - `PHASe` and `PHASe:CALibrate`: a phase correction between the V and I
   channels; calibrate with a reactive load (a capacitor or inductor, PF near
   0) in AC or AC+DC coupling. `RESistive` is refused.
-- `ZERO` (leads open, nothing in A, about 6 s) measures the zero offsets;
+- `ZERO` (leads open, nothing in A, about 12 s) measures the zero offsets;
   `ZERO CLEar` removes them. Results: `RUN`, `OK`, `SIGNAL`, `SMALL`, `BIG`,
   `UNSTABLE`, `RANGE`, `ABORT`, `METHOD`, `NONE`.
 - `VOLTage:CALibrate` (a steady AC or DC voltage of 10 .. 70 % of the range
