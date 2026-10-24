@@ -51,7 +51,7 @@ Hardware findings (measured on the device, not from the stock code):
 - GSNPSID reads 0 on this GD32; use GRSTCTL.AHBIDL to see the core is clocked.
 - Resetting USBFS does not make the host see a disconnect (the D+ pull-up stays),
   so `usb::init_hw` drives PA11/PA12 low for 100 ms first.
-- ILI9488 GRAM read-back (0x2E) with COLMOD 16 bpp: one dummy word, then
+- [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) GRAM read-back (0x2E) with COLMOD 16 bpp: one dummy word, then
   RGB666 as 3 bytes per pixel packed big-endian into the 16-bit words.
   ID (0xD3) = 00 94 88.
 
@@ -60,7 +60,7 @@ Hardware findings (measured on the device, not from the stock code):
 All instruments run continuously; only the view changes (swipe left/right:
 Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
 
-- **Multimeter**: all 16 HY3131 modes ported from the stock behaviour
+- **Multimeter**: all 16 [HY3131](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf) modes ported from the stock behaviour
   (V/mV DC+AC, A/mA/uA DC+AC with A->mA->uA autorange, ohm, continuity,
   diode with beeper patterns, capacitance RC + ramp, frequency/duty,
   K thermocouple), stock filters / settle times / autorange / formats.
@@ -179,9 +179,9 @@ Goal and remaining work: see [TODO.md](../TODO.md).
 1. **(done)** Prove load + run + display.
 1b. **(done)** Debug link: keepalive-gated watchdog, screenshots, LCD register
    access, reset/release to stock (`DBG:` SCPI over USBTMC).
-2. **(done)** Re-init clocks, FSMC and the ILI9488 from scratch; text/number
+2. **(done)** Re-init clocks, FSMC and the [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) from scratch; text/number
    rendering with the stock fonts.
-3. **(done)** HY3131 driver and measurement loop, calibration read from the
+3. **(done)** [HY3131](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf) driver and measurement loop, calibration read from the
    stock settings record at 0x080C0000.
 4. **(done)** Multimeter GUI matching `../firmware/re/analysis/` notes, main value
    in red; scope and generator pages, menus, touch.
