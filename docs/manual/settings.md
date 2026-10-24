@@ -68,11 +68,3 @@ All settings are kept when you switch off, except **USB disk**.
 | Board temp | The temperature of the main chip, as a rough indication |
 
 Tap anywhere to go back to Settings; **MENU** goes to the main menu.
-
-## Stock vs opendm40
-
-- The stock firmware has English and two Chinese languages; opendm40 is in
-  English only.
-- The stock settings live in a file on the meter's disk; opendm40 keeps its
-  own settings separately, so going back to stock does not mix them.
-- The pages 2 and 3 are new: they hold the opendm40 features.

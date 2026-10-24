@@ -1,9 +1,8 @@
 # Oscilloscope
 
-The oscilloscope uses the **CHA** jack. It keeps the look and the touch
-control of the stock firmware and adds pulse and runt triggers, one-tap
-cursors, an FFT with a scale and a peak readout, and the oscilloscope on the
-multimeter inputs (the Wave view).
+The oscilloscope uses the **CHA** jack. The Wave view shows the signal on
+the multimeter inputs instead
+([below](#wave-view-the-scope-on-the-multimeter-inputs)).
 
 To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 
@@ -71,14 +70,11 @@ in the left or right half of the graph steps), **Off**.
   - **Color** of the trace.
 - Bandwidth: owners report flat to about 3 MHz.
 
-**Stock vs opendm40:** on the stock firmware the top "+" button made the
-trace smaller. opendm40 uses magnifier icons: the top one zooms in.
-
 ## Trigger
 
 - **Drag** the **T** marker on the left edge to set the trigger level.
 - **Drag sideways** to move the trigger position (the **T** on the top
-  edge). The stock firmware always triggers in the centre.
+  edge).
 - **Long press** a marker to centre it: the trigger level goes to the middle
   of the signal, the trigger position to the centre, the trace to 0 V in the
   centre.
@@ -132,9 +128,6 @@ the old settings.
   and say **AUTO: DC (no AC signal)**.
 - Nothing found: **AUTO: no signal found**, the settings stay.
 
-**Stock vs opendm40:** the stock auto-set always switched AC coupling back
-to DC.
-
 ## Measurements
 
 Press **MF**: the **Measure** tab lists 20 measurements. Tap up to four;
@@ -168,9 +161,6 @@ Tap **CUR** at the bottom of the graph: **CUR X** (two time cursors), **CUR
 Y** (two voltage cursors), off. The measurement row shows X2-1 and Xf, or
 Y2-1. Drag the **1** / **2** markers or the cursor lines.
 
-**Stock vs opendm40:** on the stock firmware the cursors appear only when
-you pick their items in the Measure tab.
-
 ## FFT
 
 Tap the math button (**FFT**) on the right panel. The spectrum is drawn
@@ -186,9 +176,6 @@ over the trace; tap the button again while its popup is open to turn it off.
   Blackman, Hanning (default), Hamming, Triangular, Flat-top) and the
   **FFT Unit** (dB or Vrms).
 - 2048 points. No FFT in roll mode.
-
-**Stock vs opendm40:** the stock FFT has no numeric scale; you had to drag
-a marker to read a peak.
 
 ## Stop, zoom and pan
 
@@ -257,8 +244,6 @@ the view.
 
 The Wave view is not available in AC+DC, AUTO coupling and the power
 meter, nor while a recording or a fast recording runs; the meter says why.
-
-The stock firmware has no Wave view.
 
 ## What is kept
 

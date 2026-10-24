@@ -1,8 +1,7 @@
 # Power meter and inrush current
 
 The power meter measures the voltage and the current of a load at the same
-time and shows the power, the energy and, for AC, the power factor. The
-stock firmware has no power meter.
+time and shows the power, the energy and, for AC, the power factor.
 
 ![Power meter, AC+DC](img/power.png)
 
