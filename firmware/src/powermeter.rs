@@ -1790,7 +1790,7 @@ impl Dmm {
     /// POW:ZERO / the Power Settings "Zero" button: with the leads open
     /// (nothing on V-COM, nothing through A) the LPF zeros of the six
     /// current ranges (XX phase) and of the V channel (YY phase, the current
-    /// V range), ~6 s. Refused per step when a signal is present
+    /// V range), ~12 s. Refused per step when a signal is present
     /// (`JR_SIGNAL`: the old zeros stay).
     pub fn pw_zero_start(&mut self, clk: &mut Clock) -> bool {
         self.pw_job_start(clk, JOB_ZERO)

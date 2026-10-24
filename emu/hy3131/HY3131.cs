@@ -858,7 +858,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             ad1RestartT = now; ad1MixT = double.NegativeInfinity; // a restart flushes the filter
         }
 
-        /// Ad1Mix: the share of a sinc^3 kernel (3 conversion periods) that falls on its first
+        /// Ad1Mix: the share of a sinc^3 kernel (3 conversion periods; the shape is INFERRED) that falls on its first
         /// `s` periods (the input before an unrestarted reconfiguration).
         private static double Sinc3Head(double s)
         {
@@ -913,7 +913,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(Ad1Mix && ForcedAd1 == int.MinValue && ad1MixT > double.NegativeInfinity)
             {
                 // the decimation filter still holds samples of the input before a row write that
-                // did not restart AD1 (same R22, ENAD1 kept): a sinc^3 over the last 3 periods
+                // did not restart AD1 (same R22, ENAD1 kept): weighted by a sinc^3 over the last 3
+                // periods, a chosen shape (INFERRED; the datasheet's AD1 comb is a sinc^2 over 2 T,
+                // see the AD1 AC response below)
                 var head = (ad1MixT - (ad1Last - 3 * p)) / p;
                 if(head <= 0) ad1MixT = double.NegativeInfinity;
                 else if(ad1MixT < ad1Last)
