@@ -3656,5 +3656,7 @@ mV, current 0 / 128 in µA, from the vendor manual for units after October
 - The DM40's own jack voltage in the DBG:SRC rows is off by up to +0.24 V
   near 0 V and on negative taps: the calibrator's readings are the open-circuit
   voltages. The jack follows the VREF tap: −0.98 V to +2.41 V.
+- VDS1 through 1 k with the jacks open: the owner's own multimeter reads −0.97 V
+  (the calibrator −0.976 V, the DM40's own reading −0.51 V).
 - The calibrator's voltage input loads about 0.7 MΩ (VDS15 through 10 M read
   0.147 V), so the 1 M / 10 M paths were not compared.
