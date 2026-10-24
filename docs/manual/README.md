@@ -769,7 +769,7 @@ so a change shows at once.
 
 The extra digit appears smaller, after the main digits, on these ranges:
 DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ. It appears about
-3.2 s (MED) after the input settles.
+3.2 s (MED) after the input settles, about 5-6 s after a function change.
 
 #### Smoothing
 
@@ -2264,9 +2264,10 @@ the firmware and its version.
 bindings below use it.
 
 Every reply ends with a newline. Allow **5 s** for a reply: a reading takes
-up to about 0.85 s, and the first reading after a function change usually up
-to about 4 s (resistance can take up to 8 s; `MEAS:POW?` from another
-function up to 15 s).
+up to about 0.85 s. The first reading after a function change comes after
+about 0.5 s in DC V and DC A, about 2 s in Ω and up to about 4 s in the other
+functions (the high resistance ranges can take up to 8 s; `MEAS:POW?` from
+another function up to 15 s).
 
 ### Linux
 
@@ -2433,6 +2434,14 @@ environment variable `DM40_MAC`); `bluetoothctl devices` shows the address
 of **C-1-ATK-DM40-CALI**. It needs a Python with Bluetooth sockets: the
 system `/usr/bin/python3`.
 
+Two things to allow for in your own client:
+
+- Wait about 0.5 s after the connection opens before the first command. A
+  line sent in the first ~0.3 s can be dropped without a reply.
+- The first client after the Bluetooth module powers up (the meter switched
+  on, or Bluetooth turned OFF and ON) finds a few errors in `SYST:ERR?` that
+  it did not cause. Send `*CLS` first.
+
 For other programs, bind a serial device:
 
 ```
@@ -2465,7 +2474,7 @@ and cannot set ranges. Untested on a real meter.
 | `Permission denied` on `/dev/usbtmc0` | Add the [udev rule](#access-without-root), or run as root. |
 | No `/dev/usbtmc0`, but the disk is there | A libusb program (pyvisa-py, sigrok, PulseView) took the interface. Close it and re-plug the meter. |
 | `Device or resource busy` | Another program has the instrument open. Use one program at a time. |
-| A reply times out | Set the timeout to 5 s. After a function change the first reading takes up to 4 s. |
+| A reply times out | Set the timeout to 5 s. After a function change the first reading takes up to 4 s (DC V and DC A about 0.5 s). |
 | Replies seem to belong to the wrong command | Two programs share the instrument: their replies cross. Close one. Over USB, a new command while a `READ?` waits cancels that `READ?` (`SYST:ERR?` says `Query INTERRUPTED`). |
 | A command does nothing | Ask `SYST:ERR?`: it tells why. |
 | Windows: code 28 | Install a USBTMC driver ([Windows](#windows)). |
@@ -2603,15 +2612,15 @@ Untested on a real meter:
 - Getting started and recovery: keeping the settings across a full
   power-off (the copy in `_SETTING.BIN`; tested in the emulator only);
   installing over the stock firmware's
-  **USB Connect** disk; the update from the **PC can edit** disk; entering
+  **USB Connect** disk; entering
   the update loader with the power key; the automatic entry after repeated
   hangs.
 - Multimeter: currents through the A jack (overload handling, AUTO
   coupling on current, burden with current), the continuity beeper and the
-  diode beeps, the 0.28 mA Ω test current, PT100, PT1000 and the NTC sensors.
+  diode beeps, PT1000 and the 100 kΩ NTC (PT100 and the 10 kΩ NTC ran on a
+  resistance calibrator only).
 - Alerts: the alerts that need a current through the A jack (A-JACK,
-  A-PROT, OVLD) and the danger alarm's sound. The fuse check needs a
-  re-check. LIVE? instead of a false A-JACK with 5 V or more on V/Ω in Ω
+  A-PROT, OVLD). LIVE? instead of a false A-JACK with 5 V or more on V/Ω in Ω
   (fixed in the emulator; continuity and AC mV are checked on a meter).
 - Oscilloscope: pulse and runt triggers, cursors, pinch, double tap,
   long-press centring, holding a corner to repeat, Axis lock and Hold drag,
@@ -2621,9 +2630,7 @@ Untested on a real meter:
   impedance, the quality above 50 kHz).
 - Power meter and inrush: everything with a current flowing (the current
   reading, the sign, PF, the current-limit countdown, the inrush capture).
-- Recording: the fast recorder at 76 800 samples/s.
-- USB disk: macOS; **PC can edit** mode (deleting files, installing an
-  update).
+- USB disk: macOS; **PC can edit** mode on Windows.
 - Remote control: the Alientek phone app itself with opendm40.
 
 Known problems:
@@ -2633,4 +2640,8 @@ Known problems:
   about 0.2 % high. DC readings are not affected noticeably.
 - While a fast data stream runs, the meter does not answer the phone-app
   protocol.
+- Over Bluetooth, the first client after the module powers up finds a few
+  errors it did not cause in `SYST:ERR?`, and a command sent in the first
+  ~0.3 s after connecting can get no reply
+  ([Bluetooth from a computer](#bluetooth-from-a-computer)).
 - The usable frequency range of the power meter is *unknown*.

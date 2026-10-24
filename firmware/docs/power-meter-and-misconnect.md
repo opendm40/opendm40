@@ -76,7 +76,7 @@ in each section.
   results arrive together at the LPF rate (device: every 106.7 ms with
   LPFBW = 111, [`RESEARCH.md`](../../emu/hy3131/RESEARCH.md) 3 / 8.1). The
   result is 38-bit signed: `sum(X*Y)` can be negative. No register bit
-  bypasses the HPF (device probe, section 5).
+  bypasses the HPF (device probe, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)).
 * `SPHACAL<7:0>` (R36, HY3131 only): "This function is to measure Power,
   set AD2 and AD3 output in the same phase. Set SPHACAL first, then ENAD2
   and ENAD3 = 1". Bit 7 = AD2 leads (1) / lags (0); bits 6:0 = the delay in
@@ -95,8 +95,8 @@ in each section.
 * Comparator: input `SCMPI = SENSE, FB, OP1O, PB0, PB1, RLD, PB3, PB4`,
   thresholds from the AGNDP / AGNDN taps (with REFO = 1.25 V: AGNDP<1> =
   AGND + 20.8 mV, AGNDN<1> = -20.8 mV, <2> +-41.7 mV, <3> +-62.5 mV ...),
-  outputs readable in CTSTA (ACPO bit 6, CMPHO bit 5, CMPLO bit 4; what
-  they mean on the device: 4.11).
+  outputs readable in CTSTA (ACPO bit 6, CMPHO bit 5, CMPLO bit 4; the
+  values the device shows: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)).
 
 ## 2. What the stock does with these blocks (rows)
 
@@ -116,10 +116,8 @@ Row bytes are R20..R35 (index 0..21). The decoded facts used below:
   AD2** (PB4, OP2O or OP1O): a cross-correlation that cancels the
   uncorrelated ADC noise, never two different quantities. R36 (SPHACAL) is
   written 0x00 at every mode change. The stock has no power function. AD2
-  and AD3 on the same node differ by ~0.1 % in gain (device: sum X^2 =
-  9919, sum Y^2 = 9930,
-  [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md)
-  10.1).
+  and AD3 on the same node differ by ~0.1 % in gain
+  ([hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)).
 * **Relay and shunts** ([hw/README.md DMM front end](../../hw/README.md#dmm-front-end-hy3131)):
   the V and A functions use the same PA9 / PA10 relay state, and every V
   function leaves PE0 = PE1 = 0 (the 47.5 ohm chain). So **in every V mode
@@ -337,23 +335,12 @@ The test hooks: `DBG:POWer:ROW?` (the row bytes R20..R35 + R36), `:RAW?`
 overrides, `CLEar`), `:STAT XY|XX|YY|AUTO` (freeze R34), `:DISC <n>`. Each
 rewrites the row (550 ms settle).
 
-**T1 results** (7dce69f; the MR9270S+ calibrator on V-COM, the A jack not
-wired; the 40 Hz square of 0..9.6 V and DC 1 V / 5 V; `DBG:POW:STAT YY`):
-
-| range | source | V (AC part) vs stock AC V | V_dc vs DC V |
-|---|---|---|---|
-| 60 V | square / DC | -1.63 % | -1.62 % / slope -1.67 % |
-| 6 V | square / DC | -2.27 % (the square's 0.96 V peak at the tap clips) | slope -2.05 % |
-| 600 V | square | -0.33 % | -0.32 % |
-
-The AC part and the offset-corrected DC part agree to ~0.1 % on every range
-and at every frequency of the square: a constant per-range gain of the tap
-+ OP2 x1 + AD3, not a wrong node. Fixed by the factory-derived V gain
-(3.12). The LPF zero is ~1080 codes on Y (~5 mV at AD3, after the divider:
-a phantom V_dc of 0.05 / 0.5 / 5 V on 6 / 60 / 600 V) and ~888 codes on X
-(x10 ranges): fixed by `POW:ZERO` (3.12). Overrides: the I row's R2E / R2F
-kill the signal; AD3IN = RLU reads the same gain, PB5 0.58 % lower: the
-default row stays.
+**T1 results** (7dce69f; `DBG:POW:STAT YY`): GO. The V channel (tap + OP2
+x1 + AD3) has a constant per-range gain error (-2 % on 6 V, -1.6 % on 60 V,
+-0.3 % on 600 V) and an LPF zero on each channel, not a wrong node (the
+numbers: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). The gain is fixed by the factory-derived V gain (3.12),
+the zeros by `POW:ZERO` (3.12). Overrides: the I row's R2E / R2F kill the
+signal; AD3IN = RLU or PB5 is no better: the default row stays.
 
 Re-checks without current (5f14d38, f3aea2f): `POW:ZERO` Y 1072, X ~890 /
 ~160; V vs DC V within 0.063 % on 6 / 60 V in DC and AC+DC after the
@@ -799,8 +786,8 @@ where it is idle: it needs no converter, so no note-7 exposure.
 | function (mode) | sentinel (`Kind`) | row override | threshold |
 |---|---|---|---|
 | DC V 6 V (1 r0), DC mV (3), ohm (10), temperature (15, TC and resistive sensors) | A-JACK: comparator on PB1 (`CmpA`); CTSTA on every poll, ORed into 100 ms windows | R20 = 0x90 (SCMPI PB1, ENCMP) | the rows' R21 0xdd window: +-20.8 mV = 0.44 mA on 47.5 ohm |
-| DC V 60 / 600 / 1000 V (1 r1..3) | none (those rows drive the power bus from OP3: A-JACK tripped at 10 V with the A jack open, device 9dd1222) | stock row | - |
-| AC V (0), AC mV (2) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`); AD1 off in the stock rows | R22 0x00 (OSR 256 unchopped), R23 \|= ENAD1, R24 0x95, R25 AD1IG 3.6, R29 ENPKH + PKHSEL 01, R33 OP1CHOP 00 (with AD1 on, OP1's 2 kHz chopper put a ~37 mV RMS floor on AC V 6 V, device 9dd1222) | `PK_THR` 17 900 codes = 0.5 mA |
+| DC V 60 / 600 / 1000 V (1 r1..3) | none (PB1 picks up the input there: A-JACK tripped at 10 V with the A jack open, device 9dd1222; [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | stock row | - |
+| AC V (0), AC mV (2) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`); AD1 off in the stock rows | R22 0x00 (OSR 256 unchopped), R23 \|= ENAD1, R24 0x95, R25 AD1IG 3.6, R29 ENPKH + PKHSEL 01, R33 OP1CHOP 00 (with AD1 on, OP1's chopper puts a ~37 mV RMS floor on AC V 6 V: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | `PK_THR` 17 900 codes = 0.5 mA |
 | continuity (11), diode (12), capacitance r0..4 (13, RC oscillator) | A-JACK: AD2 peak hold on OP2 x1 <- PB1, AD2 = OP2O - PB3 (`Ad2A`) | R25 AD2IG 2.0 + OPS2 0, R26 0x83, R27 0x6D, R29 ENPKH, R32 0xD0 \| OP1; the row goes out with AD1 off and ENAD1 last (note 7) | `PK2_THR` 9 900 codes = 0.5 mA |
 | DC A / mA / uA (7..9) | V-JACK?: comparator on SENSE via the /1000 tap (`CmpV`; SS5 only: the A rows run the power bus as SGND, PS5 would ground the tap) | R20 0x10, R2C \|= 0x10 | ~21 V on V/ohm |
 | AC A / mA / uA (4..6) | V-JACK?: AD1 peak hold on SENSE - AGND via the /1000 tap (`PeakV`) | R22 00, R23 \|= ENAD1, R24 0x03, R25 \|= 0x30, R29 PKH AD1, R2C \|= 0x10, R33 OP1CHOP 00 | the swing rule of 4.11 / 4.12: 2 V rms AC on V |
@@ -812,10 +799,8 @@ where it is idle: it needs no converter, so no note-7 exposure.
 
 Gaps (no fake coverage):
 
-* **Frequency**: the row leaves its input divider open and PB1 - PB3 stands
-  at ~+41 100 codes (~54 mV) with 0..2 V or nothing on V-COM, ~3 100 at
-  5 V, -850 at 10 V (device f3aea2f): no fixed threshold tells a current
-  from it.
+* **Frequency**: PB1 - PB3 follows the input path there (device f3aea2f,
+  [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): no fixed threshold tells a current from it.
 * **Capacitance r5..7** (the ramp): both op amps on PB0, AD1 and the
   comparator busy.
 * **DC V 60 V+** (above) and so AC+DC V above 6 V in both phases (an
@@ -918,8 +903,8 @@ beep, Settings 3/3), [`src/scpi.rs`](../src/scpi.rs).
 * **V-JACK? in DC A**: hit windows for 1 s while |I| < 0.5 % of the range;
   clears 0.5 s after the last hit or when current flows. Entering DC A after
   a row that leaves SENSE "blind" runs the temperature row first (4.12).
-  After leaving ohm or a chip restart the comparator reads 0x70 for ~4.4 s,
-  then 0x50 (device ad74e93): within 7 s of the exit a both-bit read is no
+  After leaving ohm or a chip restart the comparator reads 0x70, then 0x50,
+  for seconds (device ad74e93, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): within 7 s of the exit a both-bit read is no
   hit, nor CMPLO alone within 2.5 s of the exit / the last 0x70 read
   (`OHM_EXIT_*`); CMPHO alone counts at once.
 * **V-JACK? in AC A**: 4.11 / 4.12.
@@ -1164,20 +1149,13 @@ From the device check "f0d21eb"
 ([device-check-2026-10-21.md](device-check-2026-10-21.md); the A jack not
 wired, the calibrator on V-COM only).
 
-**What CTSTA means on the device** (INFERRED). Over ~233 000 `DBG:SENT?`
-reads CTSTA took 0x00, 0x10, 0x50 and 0x70 only, never 0x20 or 0x60.
-CMPHO never comes without CMPLO, so the bits are not "above VRH" / "below
-VRL". The fit: CMPHO = node above VRH, CMPLO = node above VRL, ACPO (bit 6)
-a latch set above VRH and reset below VRL (a Schmitt pair): 0x70 = above
-the window, 0x50 = inside coming from above, 0x10 = inside coming from
-below, 0x00 = below. It fits DC V's V-tap window (+1 V: 0x10, +5 V: 0x70).
-The firmware rules do not depend on it (any bit set is a hit); the
-emulator keeps the older reading. Consequences: with V-COM open the DC A
-comparator reads 0 = below VRL (SENSE sits > ~21 mV low), and 24 V on V/ohm
-is 24 mV at the /1000 tap against a 20.8 mV threshold: a 3 mV margin.
+**CTSTA on the device**: four values only, and CMPHO never without CMPLO
+([hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). The firmware rules do not depend on how the bits are read (any
+bit set is a hit); the emulator keeps the older reading. DC A's V-JACK? has
+a 3 mV margin at 24 V on V/ohm (24 mV at the /1000 tap against 20.8 mV).
 
 **AC A V-JACK?: the swing.** AD1 on SENSE - PB5 drifted to the negative rail
-within ~2 s at any V (PB5 is defined only by the DC V 60 V+ rows). Now AD1
+within ~2 s at any V ([hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). Now AD1
 = SENSE - AGND (R24 0x03), and since the A rows' SENSE offset is tens of
 mV, a DC level means nothing: AC A counts the hold's swing only, PKHMAX -
 PKHMIN > `PKV_SWING_THR` 4 270 codes = 2 V rms AC on V, plus the reversal
@@ -1193,18 +1171,15 @@ false OVERLOAD. Plain AC A holds over-range results back for 500 ms after
 the first result of a row (`AC_OVER_HOLD_MS`); a real over range acts
 after the hold. Device 0774e70: 10 of 10 switches stay on 60 mA.
 
-**DC A after DC V 60 V+, ohm or a chip restart: 24 V missed.** No register
-carries this history: `write_config` writes all 22 bytes R20..R35 from the
-row every time and zeroes R26 / R34 / R36 before (`quiesce`);
-`DBG:SENTinel:REG?` reads R20..R37 back, the same 48 hex digits in every DC
-A entry on the device (0774e70). It is board state (INFERRED: the divider
-and its capacitors, the power bus / PA8 node, the relay). Only a
-temperature row before DC A made the comparator see 24 V. Fix: the
-precondition of 4.12.
+**DC A after DC V 60 V+, ohm or a chip restart: 24 V missed** (device
+0774e70, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). No register carries this history: `write_config`
+writes all 22 bytes R20..R35 from the row every time and zeroes R26 / R34 /
+R36 before (`quiesce`), and `DBG:SENTinel:REG?` read the same R20..R37 in
+every entry. Only a temperature row before DC A made the comparator see
+24 V. Fix: the precondition of 4.12.
 
-**Continuity at 5 V DC**: the row's AD2 peak on PB1 read -97 000..+123 000
-(~+-230 mV at PB1, both signs) and +-400 at 1 V (LIVE?): PB1 follows V-COM
-there, as in ohm. The badge stays; the danger alarm does not sound (4.10).
+**Continuity at 5 V DC**: PB1 follows V-COM there, as in ohm
+([hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). The badge stays; the danger alarm does not sound (4.10).
 
 Emulator knobs ([`emu/hy3131/README.md`](../../emu/hy3131/README.md)):
 `pb5drift`, `acastep`, `vjblind`; switchtest `aca-drift`, `aca-ovl`,
@@ -1229,12 +1204,10 @@ Device 10242c3: 24 V V-JACK? in every entry within 1.4..2.8 s (8 s within
 the restart mask after Scope -> back), 5 V and off quiet in all 14 entries;
 blind DC A +94 ms, blind mA +192 ms, non-blind entries unchanged.
 
-**AC A: SENSE itself is the drifting node.** With AD1 on SENSE - AGND the
-hold still sat at the negative rail (below -347 mV at IG 3.6) from ~0.9 s at
-1 V and with the source off, and at 24 V DC it ramped there over ~3 s: the
-/1000 tap through SS5 is not a driven node in the A rows (INFERRED: they run
-the power bus as SGND with PA8 P). A ramp gave 9 000-12 000 codes per 107 ms
-hold, above the swing threshold: a false V-JACK?. **The swing rule needs a
+**AC A: SENSE itself is the drifting node** (device 0774e70,
+[hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): with AD1 on SENSE - AGND the hold still ran to the negative
+rail, and a ramp gave more codes per hold than the swing threshold: a false
+V-JACK?. **The swing rule needs a
 reversal**: the hold's range must overlap the previous hold's range by more
 than `PKV_SWING_THR`. Consecutive holds of a ramp barely overlap; an AC
 signal fills the same span in every window, even one clipped at a rail.
@@ -1291,21 +1264,16 @@ HY3131 themselves, so never with the bus handed to a stream (not checked
 with the region C hooks).
 
 Device a2e9766 ([device check, "a2e9766: bug-fix recheck"](device-check-2026-10-21.md))
-showed that OP1O does not follow a source above the open-circuit voltage:
-it peaks at 2.14 V (5 V, 60 MΩ row), 2.25 V (5 V, 600 Ω), 2.02-2.03 V (10 V)
-and 2.13 V (the square, 60 MΩ), all "free", so RES still raised A-JACK there.
-Only the square on 600 Ω read 2.38 V (driven). The same 2.38-2.45 V showed in
-the first windows after the source was switched off, with the calibrator's
-disabled output (~24 Ω) on V-COM. Why OP1O sits there is not known
-(*inferred*: clipped or limited). On 600 Ω no fixed OP1O line separates
-these values from the row's own 2.17 V.
+showed that OP1O does not follow a source above the open-circuit voltage
+(2.02-2.25 V with 5 / 10 V on the jack, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): all "free", so RES still
+raised A-JACK there. Only the square on 600 Ω read 2.38 V (driven); the same
+2.38-2.45 V showed in the first windows after the source was switched off.
+On 600 Ω no fixed OP1O line separates these values from the row's own 2.17 V.
 
 **The comparator's both-bit reads (`v_both`, since the a2e9766 check).** In
-those RES runs the comparator on PB1 read CTSTA 0x70, i.e. CMPHO and CMPLO in
-one read (also the 2da1011 E4 entries at 5 V). At 1 V and 3 V there was no
-hit. A node cannot be above VRH and below VRL at once, so the comparator is
-overdriven; the same 0x70 shows in DC V's V-tap window on a steady 5 V and in
-DC A with 24 V on V-COM. *Inferred* (the A jack has not been wired): a
+those RES runs the comparator on PB1 read CTSTA 0x70, CMPHO and CMPLO in one
+read: an overdriven comparator, as on DC V's V tap at 5 V and in DC A at 24 V
+([hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). *Inferred* (the A jack has not been wired): a
 current in A puts I x 47.5 Ω on PB1 (0.5 mA to tens of mA = 24 mV to ~1 V),
 on one side of the window, so it gives one bit per read; an AC current sets
 CMPHO and CMPLO in different reads. So in the jack-check
@@ -1400,22 +1368,6 @@ From the DM40 user manual (EN v1.x, section 2.4 and Table 2.3.1):
 
 ### HPF bypass probe (device 7889e6c, 2026-10-22)
 
-Can the RMS block's high-pass filter be turned off so X·Y includes DC? The
-datasheet (13.2) defines X / Y as AD2 / AD3 "after the High Pass Filter"
-and documents no control bit. Probed on the device: the power meter in AC,
-6 V range, 1.000 V DC on V-COM, R34 frozen at YY (`DBG:POW:STAT YY`), each
-reserved bit set alone with `DBG:POW:POKE`, 2 results each. Baseline: RMS
-(ΣY²/N) ≈ 1830 codes (noise), LPF = 21592 codes (the DC). With the HPF
-bypassed RMS would be ≈ 21592² ≈ 4.7e8.
-
-| poke | register / bit | RMS | LPF |
-|---|---|---|---|
-| 20,204 | R34 bit 6 | 1820 / 1863 | 21595 |
-| 20,142 | R34 bit 1 | 1803 / 1825 | 21600 |
-| 20,141 | R34 bit 0 | 1830 / 1822 | 21593 |
-| 6,192 | R26 bit 6 | 1814 / 1826 | 21595 |
-| 21,85 | R35 bit 0 | 1816 / 1821 | 21596 |
-| 21,86 | R35 bit 1 | 1828 / 1831 | 21589 |
-
-No reserved bit bypasses the HPF: DC power stays a software product (the
-LPF means or AD1); the hardware multiplier covers the AC part only.
+No reserved bit of R26 / R34 / R35 bypasses the RMS block's high-pass
+filter (the probe: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): DC power stays a software product (the LPF
+means or AD1); the hardware multiplier covers the AC part only.

@@ -52,26 +52,26 @@
 //! unwrap it (add 2^32 whenever it steps backwards). `measured_hz` uses the
 //! full 64-bit clock.
 //!
-//! USB-disk writes void the interval: a host write to the mass-storage disk
-//! erases a 4 KiB SPI-flash sector (45..400 ms) inside the main loop, which
-//! shows up as a timestamp gap / `missed`. The MSC should refuse writes while
-//! `disk_writes_blocked()` (see that method); until it does, a log taken while
-//! the host writes to the disk has gaps.
+//! USB-disk writes would void the interval: a host write to the mass-storage
+//! disk erases a 4 KiB SPI-flash sector (45..400 ms) inside the main loop. The
+//! MSC refuses writes while `disk_writes_blocked()` (main.rs
+//! `set_write_inhibit`; the writable volume, vwrite.rs, gates its own), so a
+//! session sees no such gap; host reads stay allowed.
 //!
-//! Transport: the records are read over USBTMC (`LOG:DATA?`, priority per FR-38).
-//! BT hook: `drain(buf)` is transport-agnostic, so bt.rs can later push the same
-//! records to the phone app where the 115200-baud link has the bandwidth.
+//! Transport: `LOG:DATA?` over USBTMC (priority per FR-38) or Bluetooth SCPI
+//! (AD1 sessions only: docs/manual/scpi-reference.md); `drain(buf)` is
+//! transport-agnostic.
 //!
 //! AD2 source (FR-38 (B), LOG:SOURce AD2; docs/dmm-input-scope-feasibility.md
-//! sections 1, 2.3, 4): the HY3131's fast 19-bit converter in the stock AC
-//! rows, at 1200 .. 9600 S/s instead of the row's 76.8 kS/s (hy3131::
-//! ad2_r26_for: SAD2CLK, OSR2, ENCHOPAD2). The row's mux is kept, so the
+//! sections 1, 2.3, 4): the HY3131's fast 19-bit converter at 1200 ..
+//! 76 800 S/s (hy3131::ad2_r26_for: SAD2CLK, OSR2, ENCHOPAD2; the stream ISR's
+//! rungs are 19 200 .. 76 800). In the stock AC rows the mux is kept, so the
 //! source is DC-coupled in AC mV (OP2O - AGND) and AC A / mA / uA (OP1O -
 //! PB3, the shunt drop through OP1) and AC-coupled (~0.5 Hz) in AC V (PB4 fed
-//! through a capacitor from OP1O); the DC-coupled V row of the feasibility
-//! doc (1.3, last row) is NOT implemented (needs device test 6.5). Same
+//! through a capacitor from OP1O); DC V / DC mV stream from the DC-coupled V
+//! row and the AC mV row (ad2exp.rs `dc_enter`, feasibility E7; `mode_ok`). Same
 //! pacing as AD1 (INTF.AD2F, a P/2 gate), but since a bit-banged flag check
-//! + 3-byte read cost ~122 us and the period is 104 .. 1667 us, one main-loop
+//! + 3-byte read cost ~122 us and the period is 13 .. 833 us, one main-loop
 //! pass may take several samples: `poll` keeps sampling for up to
 //! `AD2_BURST_US` while the next result is due within that budget. Without the
 //! `ad2-isr` feature every main-loop stall longer than a period drops samples
@@ -612,8 +612,8 @@ impl Logger {
 
     /// True while USB-disk (MSC) writes must be refused: each one erases a
     /// SPI-flash sector and stalls the main loop for 45..400 ms, i.e. hundreds
-    /// of lost conversions. The MSC should answer WRITE with NOT READY
-    /// (sense 02/04/00) while this holds; reads stay allowed.
+    /// of lost conversions. The MSC answers WRITE with NOT READY
+    /// (sense 02/04/01) while this holds; reads stay allowed.
     pub fn disk_writes_blocked(&self) -> bool {
         self.active
     }

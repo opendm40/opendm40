@@ -318,7 +318,7 @@ Code work (in this order):
       - #15 the duplicate Keypad/ScopeMenu arms are gone (ScopeMenu removed by the scope port).
         Dead code removed (2026-10-21): ui::bar / button_row / DMM_BUTTONS / sub_label / val_line,
         src/fonts.rs + src/text.rs (only those used them), tools/mkfont.py + fonts/Roboto-*.
-      Open:
+      Remainder (2c47fa5):
       - [x] UF-08 cursor tab "CUR" at the graph bottom (108,280): off -> X -> Y -> off, as the
         stock cursor measurements (X2-1 + Xf / Y2-1) in the measurement row; "off" restores the
         selection. (2c47fa5; verify on device)
@@ -472,7 +472,7 @@ Code work (in this order):
       now takes probe-tip volts like TRIG:LEV? answers.
 - [x] UF-07 (P2) Scope corner-tap timebase + list picker: Corners (default) / Halves / Off, preview tabs,
       timebase list popup. §6.1  (e4bae33, docs/scope-scale-ux.md; verify on device)
-      UF-08 (one-tap cursors) and UF-10 (V/div +/- as zoom): open, in the UI punch-list remainder.
+      UF-08 (one-tap cursors) and UF-10 (V/div +/- as zoom): done in 2c47fa5 (the UI punch-list remainder).
 - [x] UF-13 (P2) Save scope record as CSV to disk; software pulse-width/runt trigger. §6.2  (c8db910, 6b392af; verify on device)
       MF Settings "Save CSV": stopped scope only (stock "Please stop sample"); the whole stored record
       (<= 26624 rows, ~690 KB, ~10 s) as SCOPnnn.CSV through the screenshot writer (fixed 26-byte rows,
@@ -678,7 +678,7 @@ Code work (in this order):
       the next shot's first-fit free clusters erased in idle time, nothing reserved / linked
       (screenshot.rs "idle-time preparation", docs/ram-budget.md). Emulator (W25Q128 timing):
       frozen 5.0 s -> 1.4 s, 0 data blocks erased. (e429dc9; device check below)
-- [ ] Device: screenshot preparation (e429dc9). DBG:FLASH? fields 4.. = frozen_ms, total_ms,
+- [x] Device: screenshot preparation (e429dc9). DBG:FLASH? fields 4.. = frozen_ms, total_ms,
       slices_frozen, blocks_erased, prep state (2 ready), clusters ready, prep erases.
       1. Boot, wait ~15 s: prep state 2, 76 ready. A shot of the DMM page and of AC+DC: frozen_ms
          (expect ~1.1-1.6 s), blocks_erased 0; BMP equals `dm40dbg.py shot`; ~5-10 s later state 2 again.
@@ -694,13 +694,20 @@ Code work (in this order):
       2 PASS (back-to-back on blank flash 2332 ms, 0 erased; onto dirty clusters 1954 ms with 14 erased, ~42 ms
       each); 4 PASS (free 0: state 2 / 0 ready, "Disk full", no BMP); 5 CSV commits PASS (0 -> 1 -> 2 in
       2.3-2.8 s), fast-log PASS (state 0 all session, resumes 2 s after); 6 PASS (state 1 with 76 erases: loop
-      max 13.9 ms vs idle 12.0 on the AC+DC page). Step 3 (battery pull) PASS on 46370df (device-check "Screenshot preparation: power cut"). 5's "PC can edit" + DM40*.BIN install PASS on a2e9766 (2026-10-24: file copied after a hub-port re-plug, OK on the meter, back in 62 s with a SW reset, the file deleted by the loader, settings kept, MMEM prefix check live). Was open for the owner: 5's "PC can edit"
-      + DM40*.BIN install half.
+      max 13.9 ms vs idle 12.0 on the AC+DC page). Step 3 (battery pull) PASS on 46370df (device-check "Screenshot preparation: power cut"). 5's "PC can edit" + DM40*.BIN install PASS on a2e9766 (2026-10-24: file copied after a hub-port re-plug, OK on the meter, back in 62 s with a SW reset, the file deleted by the loader, settings kept, MMEM prefix check live).
       Device 46370df (2026-10-24, docs/device-check-2026-10-21.md "46370df: screenshot preparation, the 76.8 kS/s nominal"): 1 PASS (frozen_ms 1304 DC V /
       1324 / 1314 AC+DC, 0 erased, BMP = the panel 0 px x3, prep 2 / 76 again 9 s after the job); 2 PASS (second
       shot 4.9 s after the first, prep at 12 ready: frozen 5328 ms, 63 erased, saved; above the 3-5 s estimate); 4 PASS (free 0: 2 / 0 ready,
       "Disk full", no BMP); 5 CSV commits and fast-log PASS; 6 PASS (state 1 max 15.1 ms = idle 15.1).
-      **Pending (owner): 3 (battery pull while prep state 1) and 5's "PC can edit" + DM40*.BIN install half.**
+- [ ] Device: the disk-scratch and preparation cases of docs/ram-budget.md that no run has covered.
+      1. Power off (hold the key) and DBG:RESET while the preparation erases (DBG:FLASH? prep state 1, right
+         after a shot): the off / reset waits for the erase (`prep_finish`, <= 0.4 s); the next boot lists
+         every file, prep reaches 2, the next shot Saved.
+      2. MMEM:DATA? of a screenshot and the on-device gallery while the preparation erases: the read waits
+         for the erase in flight (<= 45 ms typ., once) and returns the file's bytes (compare with a read in
+         prep state 2).
+      3. The scope FFT through a whole fast-log session (Record page fast logger or LOG:DEST DISK): the
+         spectrum holds, then resumes after the session; no garbage spectrum.
 - [x] Data logger (LOG:STAT ON) has no on-screen indicator: "DATA LOGGING" panel (dialog::log_panel,
       rate + sample count, 1 s refresh), view repainted on stop.  (5fd7871; verify on device)
 - [ ] Browser client (owner 2026-10-22: later, not now; 2026-10-24: the old stock-protocol web/ client was
@@ -3514,8 +3521,8 @@ Emulator (emu/):
       `mvclamp:1.212;mvpb1:10` (without the fix it reproduces 0.606 V and AJACK,AD1PK_PB1). Device a2e9766
       (device-check doc "a2e9766: bug-fix recheck" 1, 2): the square from 60 mV: 600 mV at 0.3 s, 6 V at 0.76 s, 4.835 V; no A-JACK, no
       alarm. AUTO -> AUTO+ on 60 mV: 6 V within 0.9-1.0 s (AC and DC).
-- [x] **False A-JACK with a voltage on V-COM in RES / continuity / AC mV** (**RES: still fails on the device,
-      a2e9766, see the jack-check item below**; A jack empty; 35fce2a 7b / E4,
+- [x] **False A-JACK with a voltage on V-COM in RES / continuity / AC mV** (**RES: failed on the device
+      a2e9766; the both-bit rule fixes it in the emulator, device check open: the jack-check item below**; A jack empty; 35fce2a 7b / E4,
       f0d21eb item 4, 46370df new bug 1; doc power-meter-and-misconnect.md 4.13). RES / RTD and continuity:
       the jack check (AD2 on OP1O - PB3, IG 0.5, while PB1 hits): the input above 2.35 V (ohm) / +0.3 V
       (continuity) or below -0.9 V = driven -> LIVE?, no A-JACK; at its own source (ohm 0.78-2.17 V open,
