@@ -846,8 +846,18 @@ pub struct Dmm {
     vet_left: u8,
     vet_held: u8,
     vet_prev: i32,
-    /// The vetting's first conversion may count (`vet_fresh`).
-    vet_first: bool,
+    /// Conversions still to drop after an R22 change soon after a row
+    /// write (R22_DROP_*; DC V / A `osr`, the ohm in-range OSR), and the
+    /// time of the last row write (`set`).
+    r22_drop: u8,
+    row_t: u64,
+    /// Plain DC V / A: the conversion before this one on the row was over
+    /// range (`over_ok`).
+    over_prev: bool,
+    /// Plain AC A: the row write whose results are still vetted (ms, 0 =
+    /// vetted; `aca_vet`) and the previous result on the row (NaN: none).
+    aca_vet_t: u64,
+    aca_prev: f32,
     /// The reading of this poll is provisional by G7 only (`acdc_reading`).
     prov_side: bool,
     /// AC+DC: the first DC result of the run asking for a step down (ms, 0
@@ -1210,6 +1220,45 @@ const VET_HELD_MAX: u8 = 4;
 const VET_DIV: i32 = 200;
 const VET_FLOOR: i32 = 4000;
 
+// Conversions right after a function change read wrong on the device
+// (v0.1-pre1 / trig-pinch, 2026-10-24, device-check-2026-10-21.md; the
+// mechanism is unknown):
+// - the entry's first conversion: DC A -> DC V 6 V at MED / SLOW read
+//   0.90-2.13 V for 1 V (5 of 8; the next one, 10 ms later, was right),
+//   the open DC mA jack from DC V 6 V read +-44..56 mA or over range, and
+//   OVERLOAD then moved CONF:CURR:DC 0.06 to the 10 A range (5 of 10). The
+//   switch-latency.md proposal 5 shortcut took that conversion unvetted; it
+//   is gone (every entry is vetted), and OVER_TWICE: a held conversion steps
+//   up / trips OVERLOAD only as the second over-range one in a row on the
+//   row (plain DC; one conversion later);
+// - the two conversions after an R22 change made within ~1 s of the row
+//   write read ~32-40 % of the input, and agree with each other: DC V
+//   entered from AC V / ohm at MED / SLOW (`osr`'s 0x17 at ~0.4 s: 0.376 /
+//   0.405 V for 1 V, 10 of 16), RES entered on 390 / 100 ohm / open (the
+//   in-range OSR: 125.9 / 30.0 / 57.3 ohm, 134 kohm for 420 kohm, final in
+//   amber, 6 of 12; the fuse check on an open input decided FAIL,279-286
+//   ohm on such a pair after its 0x13 write, 9 of 10). The same R22 steps later in a function (an input step
+//   at MED / SLOW) gave none. R22_DROP: such an R22 change within
+//   R22_DROP_WIN_MS of the row write, and a row write that changes the R22
+//   the chip ran (RES at SLOW -> DC V read OL, then 0.40 V twice), drop the
+//   next R22_DROP_N conversions.
+const OVER_TWICE: bool = true;
+const R22_DROP_N: u8 = 2;
+const R22_DROP_WIN_MS: u64 = 2000;
+
+// Plain AC A after a row write (entry, range or shunt step): the RMS block
+// carries the switch step for ~1 s on the device (v0.1-pre1: 10 A -> 60 mA,
+// open jack, 6 of 6 first readings 28.7-59.5 mA, in amber and to FETCh?,
+// then 1 / 100 per result down to ~1e-6 A). A result is used once it agrees
+// with the one before on the row within ACA_VET_REL of it plus ACA_VET_FS of
+// the range (a decaying step does not: it falls ~100x per result); until
+// then it is provisional (grey). ACA_VET_MAX_MS after the row write a result
+// is used anyway (a noisy real signal).
+const ACA_VET: bool = true;
+const ACA_VET_REL: f32 = 0.05;
+const ACA_VET_FS: f32 = 0.002;
+const ACA_VET_MAX_MS: u64 = 2000;
+
 /// Ohm entry (switch-latency.md proposal 2): the stock's button entry writes
 /// no settle deadline; its `now + 2500` at case 10 (app_decompile.c:16135)
 /// is S+0x70, the end of the window in which the range steps down one at a
@@ -1372,7 +1421,11 @@ impl Dmm {
             vet_left: 0,
             vet_held: 0,
             vet_prev: i32::MIN,
-            vet_first: false,
+            r22_drop: 0,
+            row_t: 0,
+            over_prev: false,
+            aca_vet_t: 0,
+            aca_prev: f32::NAN,
             prov_side: false,
             down_t: 0,
             rd_pending: false,
@@ -1848,7 +1901,7 @@ impl Dmm {
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
         let changed_mode = mode != self.mode || self.pw.on;
         let old = (self.mode, self.range);
-        // The R22 (AD1 OSR) the chip runs now: poll_ohm writes it directly.
+        // The R22 (AD1 OSR) the chip runs now (R22_DROP).
         let r22_was = hy::read1(0x22);
         self.pw_leave();
         self.mode = mode;
@@ -1872,7 +1925,11 @@ impl Dmm {
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
-        self.vet_first = self.vet_fresh(old.0, r22_was);
+        self.r22_drop = if r22_was != self.r22 { R22_DROP_N } else { 0 };
+        self.row_t = now;
+        self.over_prev = false;
+        self.aca_vet_t = now.max(1);
+        self.aca_prev = f32::NAN;
         self.ohm_prev = f32::NAN;
         self.ohm_ok = false;
         self.ohm_agreed = false;
@@ -1951,24 +2008,6 @@ impl Dmm {
         }
     }
 
-    /// A function / coupling change (switch-latency.md proposal 5) into
-    /// plain DC V / A from `old` whose row write changed the R22 the chip
-    /// was running (`r22_was`): AD1 restarted with the new OSR, so its
-    /// first conversion holds no earlier tap and need not wait for a second
-    /// one. Not for a range or V <-> mV / A unit step (the 0.78 V case of
-    /// bab5dd4: a second row at the same R22), not at the same R22 (V <-> A
-    /// at FAST, 0x15 -> 0x15: the quiesce does not restart AD1), not in
-    /// AC+DC. The conversions after it are still vetted.
-    fn vet_fresh(&self, old: u8, r22_was: u8) -> bool {
-        let grp = |m: u8| match dc_mode_of(m) {
-            1 | 3 => 1,
-            7..=9 => 2,
-            x => 16 + x,
-        };
-        let coupling = matches!(old, 0 | 2 | 4..=6) && matches!(self.mode, 1 | 3 | 7..=9);
-        self.vet_left != 0 && !self.acdc && !self.pw.on && (grp(old) != grp(self.mode) || coupling) && r22_was != self.r22
-    }
-
     /// Vet one DC conversion (`vet_start`): true = use it.
     fn vet_ad1(&mut self, ad1: i32) -> bool {
         if self.vet_left == 0 || self.am_on() {
@@ -1976,10 +2015,6 @@ impl Dmm {
         }
         let p = self.vet_prev;
         self.vet_prev = ad1;
-        if core::mem::take(&mut self.vet_first) && p == i32::MIN {
-            // A fresh AD1 start (`vet_fresh`): counts; the next is compared.
-            return true;
-        }
         if p != i32::MIN && (ad1 - p).abs() <= VET_FLOOR.max(p.abs() / VET_DIV) {
             self.vet_left -= 1;
             return true;
@@ -2143,7 +2178,6 @@ impl Dmm {
         self.deadline = clk.now_ms() + settle;
         self.ac_settle_start(clk.now_ms(), old);
         self.vet_start(old);
-        self.vet_first = false;
         self.tr_ev(clk.now_ms(), tr::K_PHASE, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
     }
 
@@ -3376,6 +3410,7 @@ impl Dmm {
     /// AD1 OSR switching: stable -> 0x17 (32768, written once), else `fast`.
     /// `rated` (DC V / A): the FR-05 rate applies; FAST then keeps OSR 8192.
     fn osr(&mut self, ad1: i32, thr: i32, fast: u8, rated: bool) {
+        let was = self.r22;
         if rated && self.rate == Rate::Fast {
             if self.r22 != OSR_FAST {
                 hy::write(0x22, &[OSR_FAST]);
@@ -3392,7 +3427,51 @@ impl Dmm {
             hy::write(0x22, &[fast]);
             self.r22 = fast;
         }
+        if self.r22 != was {
+            self.r22_dropping();
+        }
         self.prev_ad1 = ad1;
+    }
+
+    /// An R22 write of `osr` / `poll_ohm` that changed the OSR: within
+    /// R22_DROP_WIN_MS of the row write, drop the next R22_DROP_N
+    /// conversions.
+    fn r22_dropping(&mut self) {
+        if R22_DROP_N != 0 && self.t_poll < self.row_t + R22_DROP_WIN_MS {
+            self.r22_drop = R22_DROP_N;
+        }
+    }
+
+    /// A conversion to drop (`r22_dropping`): true = drop it.
+    fn r22_drop_one(&mut self) -> bool {
+        if self.r22_drop == 0 {
+            return false;
+        }
+        self.r22_drop -= 1;
+        true
+    }
+
+    /// An over-range DC conversion may step a range up / trip OVERLOAD:
+    /// a vetted one, or the second over-range one in a row on the row (a
+    /// held one alone can be the bad first conversion after a row write,
+    /// OVER_TWICE). AC+DC as before (every conversion).
+    fn over_ok(&mut self, over: bool, vet: bool) -> bool {
+        let ok = over && (vet || self.over_prev || self.acdc || !OVER_TWICE);
+        self.over_prev = over;
+        ok
+    }
+
+    /// Plain AC A after a row write (ACA_VET_*): true = use this result.
+    fn aca_vet(&mut self, now: u64, ac: f32, lim: f32) -> bool {
+        if self.aca_vet_t == 0 || !ACA_VET {
+            return true;
+        }
+        let p = core::mem::replace(&mut self.aca_prev, ac);
+        if (ac - p).abs() <= ACA_VET_REL * ac.max(p) + ACA_VET_FS * lim || now >= self.aca_vet_t + ACA_VET_MAX_MS {
+            self.aca_vet_t = 0;
+            return true;
+        }
+        false
     }
 
     /// Averaged ranges (see the +1 digit and FR-05 tables): (window,
@@ -3421,6 +3500,9 @@ impl Dmm {
 
     fn poll_dcv(&mut self, clk: &mut Clock) -> Option<Reading> {
         let ad1 = self.ad1()?;
+        if self.r22_drop_one() {
+            return None;
+        }
         // This conversion ran at the steady OSR of the rate (and not the first
         // one after the switch, which `osr` flags for the next reading).
         let slow = self.r22 == self.steady_osr() && !self.avg_skip;
@@ -3462,8 +3544,8 @@ impl Dmm {
         let now = clk.now_ms();
         let hold = vet && self.acs_dc_step(now, x, lim);
         self.tr_dc(now, ad1, x, lim, vet, hold);
+        let up = self.over_ok(mag > ov * lim, vet);
         if !self.manual {
-            let up = mag > ov * lim;
             if m == 1 {
                 if up && r < 3 {
                     self.set(clk, 1, r as i8 + 1, 250);
@@ -3595,6 +3677,9 @@ impl Dmm {
 
     fn poll_dca(&mut self, clk: &mut Clock) -> Option<Reading> {
         let ad1 = self.ad1()?;
+        if self.r22_drop_one() {
+            return None;
+        }
         // As in poll_dcv: a conversion at the steady OSR may join the window.
         let slow = self.r22 == self.steady_osr() && !self.avg_skip;
         self.avg_skip = false;
@@ -3620,16 +3705,21 @@ impl Dmm {
         let lim = (self.factor() * DEC4[u + r]).min(if m == 7 { 10.0 } else { f32::MAX });
         let ov = self.over();
         let mag = if self.acdc { hypot(self.ac_raw, raw) } else { a.abs() };
-        // OVERLOAD (doc 4.3): the uA / mA shunt over range -> 10 A at once.
-        if self.ovl_trip(clk, u as u8, mag > ov * lim) {
+        // OVERLOAD (doc 4.3): the uA / mA shunt over range -> 10 A at once
+        // (a held conversion only as the second over-range one, `over_ok`).
+        let over = mag > ov * lim;
+        let up = self.over_ok(over, vet);
+        if self.ovl_trip(clk, u as u8, up) {
             return None;
         }
         let hold = vet && self.acs_dc_step(clk.now_ms(), a, lim);
         self.tr_dc(clk.now_ms(), ad1, raw, lim, vet, hold);
         if !self.manual {
             let lowest = if self.a_auto == 3 { 9 } else { 8 };
-            if mag > ov * lim {
-                if r == 0 {
+            if over {
+                if !up {
+                    // held over-range conversion: no move either way
+                } else if r == 0 {
                     self.set(clk, m, 1, 250);
                 } else if m > 7 && self.a_auto & 1 != 0 {
                     self.set(clk, m - 1, 1, 250);
@@ -3862,7 +3952,12 @@ impl Dmm {
                 return None;
             }
         }
-        ema(thr, a_lpf, dcp, &mut self.f_lpf);
+        // Plain AC A after a row write: held (provisional) until two results
+        // in a row agree (ACA_VET_*).
+        let held = m >= 4 && !self.acdc && !self.aca_vet(now, ac, lim);
+        if !held {
+            ema(thr, a_lpf, dcp, &mut self.f_lpf);
+        }
         let (unit, dec, si_k) = match m {
             0 => ("V", 4 - r as u8, 1.0),
             2 => ("mV", 3 - r as u8, 1e-3),
@@ -3890,7 +3985,7 @@ impl Dmm {
         if seed {
             self.ac_raw = ac;
             self.f_ac = ac;
-        } else if !settling {
+        } else if !settling && !held {
             self.ac_raw = ac;
             ema(thr, a_rms, ac, &mut self.f_ac);
         }
@@ -3911,7 +4006,7 @@ impl Dmm {
         if !self.manual && !settling {
             let up = mag > ov * lim;
             // AC+DC: no step down here, only in the DC phase (ACDC_DOWN_MS).
-            let down = mag < 0.1 * lim / ov && !acdc;
+            let down = mag < 0.1 * lim / ov && !acdc && !held;
             match m {
                 // AC+DC: a V / mV range change is applied through the DC
                 // phase (600 ms, S+10 = 2); unit changes go to the DC mode.
@@ -4004,6 +4099,14 @@ impl Dmm {
             }
             return rd;
         }
+        if held {
+            if (self.mode, self.range) != before {
+                return None;
+            }
+            let mut rd = self.reading(if ac / lim > ov { Val::ol(dec, unit) } else { Val::new(ac, dec, unit) }, ac * si_k);
+            rd.prov = true;
+            return Some(rd);
+        }
         let ol = self.f_ac / lim > ov;
         let v = self.f_ac;
         let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, v * si_k);
@@ -4062,6 +4165,9 @@ impl Dmm {
 
     fn poll_ohm(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
         let ad1 = self.ad1()?;
+        if self.r22_drop_one() {
+            return None;
+        }
         // r0 (60 ohm) only by a manual choice (set_range); autorange r1..r6.
         let r = self.range.clamp(0, 6) as usize;
         let r22 = hy::read1(0x22);
@@ -4102,11 +4208,13 @@ impl Dmm {
         if ol {
             if r22 != 0x13 {
                 hy::write(0x22, &[0x13]);
+                self.r22_dropping();
             }
         } else if r22 != steady {
             hy::write(0x22, &[steady]);
             self.deadline = now + 150;
             self.avg_skip = true;
+            self.r22_dropping();
         }
         if !self.manual {
             let q = ov * lim / (kohm + 1e-5);
