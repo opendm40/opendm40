@@ -511,6 +511,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// later in a function; the model does not tell the two apart. Off (frac -1) by default.
         public double R22PartFrac = -1, R22OffCodes, R22PartN = 1;
         private int r22PartLeft;
+        /// Chopped AD1 restart (opt-in, "chophalf:1"; INFERRED from device 10242c3, osr/ fr_40_15:
+        /// the first record of an OSR 8192 chopped session after a 640/s one came 51.9 ms after the
+        /// session's first (stale) flag, the later ones 100.8 ms apart): after a restart with the
+        /// chopper on, the first result comes half a period later, then every period. Off by default.
+        public bool ChopHalf;
         private double r22PartT = double.NaN;
         private int r22PartSign = 1;
         private double acaStepT = double.NegativeInfinity;
@@ -763,6 +768,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "r22part": R22PartFrac = o.Value; break;
                 case "r22off": R22OffCodes = o.Value; break;
                 case "r22n": R22PartN = o.Value; break;
+                case "chophalf": ChopHalf = o.Value != 0; break;
                 case "vjblind": VjBlind = o.Value != 0; break;
                 case "swtau": SwTrTau = o.Value; break;
                 case "swhz": SwTrHz = o.Value; break;
@@ -797,6 +803,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private void RestartAd1(double now)
         {
             ad1Start = r22PartT > now ? r22PartT : now; ad1Done = 0;
+            if(ChopHalf && Ad1Chop) ad1Start -= Ad1Period / 2; // the first result half a period after the start
             ad1RestartT = now; ad1MixT = double.NegativeInfinity; // a restart flushes the filter
         }
 
