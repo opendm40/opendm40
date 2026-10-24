@@ -662,6 +662,14 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             scpi.len = 0;
                             scpi.put_bytes(b"+9.90000000E+37");
                             true
+                        } else if app.dmm.cpl_auto() {
+                            // AUTO coupling before its first decision (its
+                            // values are provisional, switch-latency.md 6):
+                            // +9.91E37 at once, not a wait that ends in the
+                            // provisional part (device ab7184c: 1-3 s blocks).
+                            scpi.len = 0;
+                            scpi.put_bytes(scpi::NAN);
+                            true
                         } else {
                             scpi_wait[src] = Some((0, false, now, now.max(app.dmm.deadline()) + SCPI_WAIT_MS));
                             false
@@ -1533,6 +1541,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             // hunt (each step restarts the P / V / I cycle, ~1.9 s).
             if let Some(w) = scpi_wait[src].as_mut().filter(|w| w.1 && app.dmm.pw.on) {
                 w.3 = w.3.max(app.dmm.deadline() + SCPI_WAIT_MS).min(w.2 + 15_000);
+            }
+            // Ohm: a host's settle wait (CONF:RES then READ?, MEAS:RES?)
+            // follows the range hunt (each step moves the deadline) and the
+            // vet of its last range (dmm.rs OHM_VET_*: one conversion more).
+            if let Some(w) = scpi_wait[src].as_mut().filter(|w| w.3 > w.2 + SCPI_QUICK_MS && app.dmm.hy_mode() == 10 && !app.dmm.pw.on) {
+                w.3 = w.3.max(app.dmm.deadline() + SCPI_WAIT_MS).min(w.2 + 8_000);
             }
             if !scpi_wait[src].is_some_and(|w| now >= w.3) {
                 continue;

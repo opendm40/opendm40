@@ -630,6 +630,9 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("pv_acdc", prov(rd(1, val(-6.6666, 4, "V"), Some(nan(4, "V")), Some(val(-6.6666, 4, "V")), true)), None),
         ("pv_acdc_mv", prov(rd(3, val(-444.44, 2, "mV"), Some(val(444.44, 2, "mV")), Some(val(-444.44, 2, "mV")), true)), None),
         ("pv_auto", prov(cpl_auto(rd(1, val(-6.6666, 4, "V"), Some(val(0.4444, 4, "V")), Some(val(-6.6666, 4, "V")), false))), None),
+        // An ohm conversion before the vet (dmm.rs OHM_VET_*: the range hunt).
+        ("pv_ohm", prov(rd(10, val(219.40, 2, "\u{3a9}"), None, None, false)), None),
+        ("pv_ohm_m", prov(rd(10, val(8.7800, 4, "M\u{3a9}"), None, None, false)), None),
     ];
     // AUTO+ / MANU variants of a few.
     let mut extra = vec![];
@@ -2341,19 +2344,24 @@ fn main() {
         // A function switch (switch-latency.md proposals 1 / 6): the page
         // as it was before (blank readout until the first reading), the
         // placeholder, provisional values, and the settled value after.
-        for (file, case, blank) in [
-            ("sw01-switch-ohm-before-blank", "ph_ohm", true),
-            ("sw02-switch-ohm-placeholder", "ph_ohm", false),
-            ("sw03-switch-dcma-placeholder", "ph_dcma", false),
-            ("sw04-switch-acdc-placeholder", "ph_acdc", false),
-            ("sw05-switch-auto-placeholder", "ph_auto", false),
-            ("sw06-switch-temp-placeholder", "ph_temp", false),
-            ("sw07-prov-dcv", "pv_dcv", false),
-            ("sw08-settled-dcv", "dcv_neg6", false),
-            ("sw09-prov-acdc-no-ac-part", "pv_acdc", false),
-            ("sw10-prov-acdc", "pv_acdc_mv", false),
-            ("sw11-settled-acdc", "acdc_mv", false),
-            ("sw12-prov-auto", "pv_auto", false),
+        for (file, case, blank, hold) in [
+            ("sw01-switch-ohm-before-blank", "ph_ohm", true, 0),
+            ("sw02-switch-ohm-placeholder", "ph_ohm", false, 0),
+            ("sw03-switch-dcma-placeholder", "ph_dcma", false, 0),
+            ("sw04-switch-acdc-placeholder", "ph_acdc", false, 0),
+            ("sw05-switch-auto-placeholder", "ph_auto", false, 0),
+            ("sw06-switch-temp-placeholder", "ph_temp", false, 0),
+            ("sw07-prov-dcv", "pv_dcv", false, 0),
+            ("sw08-settled-dcv", "dcv_neg6", false, 0),
+            ("sw09-prov-acdc-no-ac-part", "pv_acdc", false, 0),
+            ("sw10-prov-acdc", "pv_acdc_mv", false, 0),
+            ("sw11-settled-acdc", "acdc_mv", false, 0),
+            ("sw12-prov-auto", "pv_auto", false, 0),
+            // HOLD pressed while AUTO decides: armed, the grey value under HOLD
+            ("sw15-prov-auto-hold", "pv_auto", false, 1),
+            // the ohm range hunt: a conversion before the vet, grey
+            ("sw16-prov-ohm", "pv_ohm", false, 0),
+            ("sw17-prov-ohm-high", "pv_ohm_m", false, 0),
         ] {
             host::reset(0);
             let (r, l) = find(case);
@@ -2363,7 +2371,7 @@ fn main() {
             ui::set_cpl_auto(false);
             dv.bar_update(&rd(r.mode, val(0.0, r.main.dec, r.main.unit), None, None, r.acdc));
             if !blank {
-                dv.reading(&r, 0, 0);
+                dv.reading(&r, hold, 0);
             }
             ui::status_right(&status(0));
             save(&out, file);
