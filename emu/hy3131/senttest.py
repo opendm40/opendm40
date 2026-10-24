@@ -5,7 +5,7 @@ USB/IP (CONF:<f>, then DBG:PING? uptime, SYST:ALER?, DBG:SENT?, READ? in a
 loop); each phase of the script must show only its expected alerts.
 
   emu/hy3131/senttest.py                         # all scenarios, fw-rs built from HEAD
-  emu/hy3131/senttest.py --app firmware/dm40-fw-native.bin --port 3377 dcv-adc acv
+  emu/hy3131/senttest.py --app firmware/opendm40.bin --port 3377 dcv-adc acv
   emu/hy3131/senttest.py --list
 
 Results: emu/out/sent-<name>.json (+ .png of the end; Renode log

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build fw-rs: the native update file -> dm40-fw-native.bin.
+# Build fw-rs: the native update file -> opendm40.bin.
 #   ./build.sh [native] [cargo args]       e.g. ./build.sh --features keep-screen
 # (`native` is accepted as a no-op first argument for older callers, e.g.
 # emu/run.py.) Body = 0x08004000..end with the 12-byte loader marker at
@@ -8,7 +8,7 @@
 # checked below) into the stock update format (renamed to dm40*.bin only when
 # staged on the device). tools/reload.sh passes its arguments here.
 # DM40_TDIR / DM40_OUT (environment) build elsewhere than target/native /
-# dm40-fw-native.bin, with every check (tools/build-variants/run.sh builds
+# opendm40.bin, with every check (tools/build-variants/run.sh builds
 # the recovery-usb / recovery-file / no-ad2-isr variants this way, so a test
 # build never replaces the image reload.sh installs).
 set -e
@@ -17,7 +17,7 @@ RUSTUP_HOME="$(cd ../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../toolchain/ca
 OBJCOPY=$(find ../toolchain/rustup -name llvm-objcopy | head -1)
 
 if [ "$1" = native ]; then shift; fi
-SCRIPT=link-native.x; TDIR=${DM40_TDIR:-target/native}; OUT=${DM40_OUT:-dm40-fw-native.bin}
+SCRIPT=link-native.x; TDIR=${DM40_TDIR:-target/native}; OUT=${DM40_OUT:-opendm40.bin}
 mkdir -p "$TDIR"
 # Reproducible image (review L10): the same commit gives the same bytes in
 # any checkout / worktree. Absolute paths reach rodata through panic
@@ -41,7 +41,7 @@ for d in "$CARGO_HOME"/registry/src/*/; do
 done
 RUSTFLAGS="-C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
     cargo build --release "$@"
-ELF=$TDIR/thumbv7em-none-eabihf/release/dm40-fw
+ELF=$TDIR/thumbv7em-none-eabihf/release/opendm40
 
 # Static worst-case stack path vs the TCM stack (>= 20 KiB headroom; the
 # SRAM-free, region-A2, region-B and region-C checks are link-native.x asserts).
@@ -51,7 +51,7 @@ if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 20480 --top 0 > $TDI
 fi
 head -1 $TDIR/stackdepth.txt
 
-BODY=$TDIR/dm40-fw-native.body.bin
+BODY=$TDIR/opendm40.body.bin
 rm -f $TDIR/regiona2.warn $TDIR/regionb.warn $TDIR/regionc.warn
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
 python3 ../stock/dm40fw.py pack --pad "$BODY" "$OUT"
@@ -70,7 +70,7 @@ for line in subprocess.run([nm, sys.argv[2]], capture_output=True, text=True).st
         syms[p[2]] = int(p[0], 16)
 gap = body[MARK - BASE:MARK - BASE + 16]
 pad = body[syms['__a2_end'] - BASE:MARK + 16 - BASE]
-print("dm40-fw-native.bin: body %d bytes, 0x%08x..0x%08x (limit 0x%08x, %d bytes free)"
+print("opendm40.bin: body %d bytes, 0x%08x..0x%08x (limit 0x%08x, %d bytes free)"
       % (len(body), BASE, end, END, END - end))
 # Region A2 (zero-wait, after the shim, below the loader marker): the link
 # fails when it reaches the marker (0 bytes free); warn below 2 KiB.

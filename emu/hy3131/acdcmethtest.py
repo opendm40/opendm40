@@ -22,7 +22,7 @@ per-range offsets, feasibility 13.2) is on in every run; `B~` adds a
 non-repeating AD1 gain shift of +-0.2 % per AD1 enable (n7g, the device's
 60 V gain did not repeat), which B's entry zero cannot remove.
 
-  emu/hy3131/acdcmethtest.py --app firmware/dm40-fw-native.bin             # A B C B~ in parallel
+  emu/hy3131/acdcmethtest.py --app firmware/opendm40.bin             # A B C B~ in parallel
   emu/hy3131/acdcmethtest.py --app X --meths C --port 18120
   emu/hy3131/acdcmethtest.py --app X --meths C --e8 down --port 29100   # device test e8
 

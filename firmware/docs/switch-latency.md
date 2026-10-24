@@ -170,7 +170,7 @@ couptest); AUTO deciding a tie on the overshoot (G7, couptest).
 
 ```sh
 cd firmware && ./build.sh && cd ..
-emu/hy3131/switchlat.py fwrs --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw \
+emu/hy3131/switchlat.py fwrs --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 \
     --port 45010 --rate MED --json emu/out/swl-fwrs-med.json          # ~20 min wall
 emu/hy3131/switchlat.py fwrs --app ... --port 45011 --rate FAST --dc-only --json emu/out/swl-fwrs-fast.json
 emu/hy3131/switchlat.py stock --part 1 --json emu/out/swl-stock1.json  # ~12 min; part 2 in parallel

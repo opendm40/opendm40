@@ -113,7 +113,7 @@ python3 stock/dm40fw.py decode stock/vendor/dm40_v_2_6.bin dm40_v_2_6.dec.bin
   RUSTUP_HOME=$PWD/toolchain/rustup CARGO_HOME=$PWD/toolchain/cargo \
       sh /tmp/rustup-init.sh -y --no-modify-path --profile minimal \
       --default-toolchain stable --target thumbv7em-none-eabihf --component llvm-tools
-  cd firmware && ./build.sh             # -> dm40-fw-native.bin
+  cd firmware && ./build.sh             # -> opendm40.bin
   ```
 
 - Patch kit: `gcc-arm-none-eabi`, `make`, `zip`.

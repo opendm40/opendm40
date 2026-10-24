@@ -10,7 +10,7 @@ DC A page before the tap, the toast over the DC V page with its first
 reading, the page after the toast ended by itself.
 
   emu/hy3131/leadstest.py                        # fw-rs built from HEAD
-  emu/hy3131/leadstest.py --app firmware/dm40-fw-native.bin --port 3379
+  emu/hy3131/leadstest.py --app firmware/opendm40.bin --port 3379
 
 Results: emu/out/leads.json, emu/out/leads-*.png. One emulator at a time
 per port.

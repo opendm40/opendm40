@@ -11,7 +11,7 @@ of the step must hold only the alerts the connection allows in that
 function.
 
   emu/hy3131/switchtest.py                        # all scenarios, fw-rs built from HEAD
-  emu/hy3131/switchtest.py --app firmware/dm40-fw-native.bin --port 44101 open dc5
+  emu/hy3131/switchtest.py --app firmware/opendm40.bin --port 44101 open dc5
   emu/hy3131/switchtest.py --full open            # every ordered pair of the functions (long)
   emu/hy3131/switchtest.py --list
 

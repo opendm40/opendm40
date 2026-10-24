@@ -14,7 +14,7 @@ returns the counts so far for a read during an open gate, and with
 after a row change, as the device's half / third first results suggest.
 
   emu/hy3131/freqtest.py --port 55100                       # all scenarios, fw-rs built from HEAD
-  emu/hy3131/freqtest.py --app firmware/dm40-fw-native.bin --port 55100 entry wake
+  emu/hy3131/freqtest.py --app firmware/opendm40.bin --port 55100 entry wake
 
 Scenarios (each its own emulator; input: a 40 Hz 1 V square on V-COM):
   entry        DC V (3 s) -> CONF:FREQ, READ? x4; REPS times

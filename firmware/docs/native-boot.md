@@ -443,7 +443,7 @@ This section supersedes §2–§10 where they differ. By user decision:
 Cargo features (2026-10-22, after the RAM build was removed; the stock fonts
 are always embedded, the calibration backup always runs; every non-default
 set is built, with all of build.sh's checks, by `tools/build-variants/run.sh`
-into `target/variants/`, never over `dm40-fw-native.bin`):
+into `target/variants/`, never over `opendm40.bin`):
 - `vdisk` (default: the generated read-only USB volume);
 - `fatren-dry-run`;
 - `recovery-file`, `recovery-usb`;
@@ -713,7 +713,7 @@ A2 assert takes a font out of `A2_FONTS`.
 `unpack` (the unpacked body equals the objcopy body + 0xFF padding, the
 12 bytes at body offset 0x4000 are 0xFF), `tools/dm40dbg.py image` (OK,
 whole 128-byte blocks), and the emulator's full chain (`emu/run.py chain
---app dump --zero-marker --disk-add dm40-fw-native.bin::DM40_FW.BIN`):
+--app dump --zero-marker --disk-add opendm40.bin::DM40_FW.BIN`):
 the real FS-loader installs the file, the flash at `0x08004000` equals
 the body, the marker holds the update header, and fw-rs boots from it.
 
@@ -862,7 +862,7 @@ header words itself (no `--like`):
 - word2 = `0x10000 | CRC16(body without the 12 marker bytes)`;
 - word0 = CRC16 of words 1–2, with its complement in the high half.
 
-Finally it runs `dm40fw.py info`. Current `firmware/dm40-fw-native.bin`:
+Finally it runs `dm40fw.py info`. Current `firmware/opendm40.bin`:
 
 ```
 word0  0xa83657c9   length 0x000384c4 (end 0x0803c4c4)   word2  0x0001e49e
@@ -2214,7 +2214,7 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
    vendor key-hold entry only if T2b proved it; do **not** rely on "a long key
    hold at power-on reaches the loader" otherwise, and do not use patched
    stock's own update path (unverified for a non-stock length). On the
-   loader's USB disk, copy `firmware/dm40-fw-native.bin` as `dm40_fwrs.bin` (the
+   loader's USB disk, copy `firmware/opendm40.bin` as `dm40_fwrs.bin` (the
    only `dm40*.bin`, [why](../README.md#recovery)), `sync` and eject, then press "update". The loader
    installs it and resets (warm, SW reset), or the next cold power-on (short
    press) launches it.
@@ -2228,7 +2228,7 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
      not power-cycle during the first 10 s.** calbackup runs on hardware for
      the first time here (review R1); a fault there costs one `WDT_RETRY`
      reboot (~20 s), a second one recovery (loader screen): keep
-     `dm40-fw-native.bin` and `dm40_patched.bin` at hand.
+     `opendm40.bin` and `dm40_patched.bin` at hand.
    - `DBG:BOOT?` should show:
      - `NORMAL`, `HXTAL`;
      - marker `VALID` (words = the header of our file);
@@ -2303,7 +2303,7 @@ fb6be06; the docs-only changes since build the same bytes):
   battery.
 
 Before: fw-rs running, USB connected; on the PC a copy of the installed image
-(`firmware/dm40-fw-native.bin` of the installed build, or `INFO/FIRMWARE.BIN`
+(`firmware/opendm40.bin` of the installed build, or `INFO/FIRMWARE.BIN`
 from the fw-rs USB drive) to reinstall after each recovery. Reinstall: copy
 it onto the loader's USB disk as `dm40_fwrs.bin` ([the only `dm40*.bin`](../README.md#recovery)),
 `sync`, eject, press "Update".

@@ -5,7 +5,7 @@ open, page scroll, the full-screen viewer, file steps, the Delete dialog
 DBG:SWIPE) and checked over SCPI (MMEM:CAT?, DBG:LCD?).
 
   cd firmware && ./build.sh
-  emu/gallerytest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  emu/gallerytest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 The disk is a private copy (per process: port + pid) of the 2026-10-13 MSC
 dump (S000..S002.BMP, 480 x 320 16 bpp) with S003..S007.BMP added (copies

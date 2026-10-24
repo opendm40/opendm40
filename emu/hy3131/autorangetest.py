@@ -3,7 +3,7 @@
 range change (device bab5dd4, device-check doc "bab5dd4" 1 / 3).
 
   cd firmware && ./build.sh
-  emu/hy3131/autorangetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  emu/hy3131/autorangetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Input: 1 V DC on V/COM with the model's AD1 decimation memory on
 (`ad1mix:1`, HY3131.cs Ad1Mix): a row write that does not restart AD1 (the

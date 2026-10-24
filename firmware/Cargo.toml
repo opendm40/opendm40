@@ -1,11 +1,11 @@
 [package]
-name = "dm40-fw"
+name = "opendm40"
 version = "0.0.1"
 edition = "2021"
 description = "Replacement firmware for the Alientek DM40 (GD32F427)"
 
 [[bin]]
-name = "dm40-fw"
+name = "opendm40"
 path = "src/main.rs"
 
 [profile.release]

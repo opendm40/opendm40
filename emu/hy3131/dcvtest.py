@@ -3,7 +3,7 @@
 `dcv_row` / `dc_enter`) in the emulator: LOG:SOURce AD2 in DC V.
 
   cd firmware && ./build.sh
-  emu/hy3131/dcvtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  emu/hy3131/dcvtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Input: 2 V DC + 0.3 V rms 50 Hz on V/COM, the model's OP1 offset (op1vos,
 0.37 mV x 10 at OP1O in 6 V) and an AD2 gain deviation (ad2dcg 1.01) that

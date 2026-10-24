@@ -218,7 +218,7 @@ emu/usbip_client.py luns   1-0           # GET MAX LUN + per-LUN INQUIRY / TUR /
 emu/usbip_client.py mscdump 1-0 0 out.img  # FAT volume of a LUN (metadata + used clusters, incl. the 16 MiB
                                          # DEBUG/SPIFLASH.BIN: ~2 min) for fsck.fat / mtools; resumable
                                          # (exit 2: restart the emulator, rerun)
-emu/usbip_client.py upload 1-0 dm40-fw-native.bin  # fw-rs DBG:UPLOAD -> DM40FW.BIN in the SPI root (~8 s)
+emu/usbip_client.py upload 1-0 opendm40.bin  # fw-rs DBG:UPLOAD -> DM40FW.BIN in the SPI root (~8 s)
 USBIP_PORT=3251 emu/usbip_client.py ...  # a server on another port (--usbip-port 3251)
 emu/usbip_client.py read   1-0 0x1FFF7A10 12    # usbrw image: vendor EP0 read (the UID)
 emu/usbip_client.py write  1-0 0x20028FC0 02    # usbrw image: vendor EP0 write + read-back
@@ -365,7 +365,7 @@ e.g. [`emu/hy3131/freqtest.py`](hy3131/freqtest.py) (fw-rs DMM frequency after a
 40 Hz 1 V square on V-COM; two of its scenarios):
 
 ```
-$ emu/hy3131/freqtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw \
+$ emu/hy3131/freqtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 \
       --port 61160 --reps 2 entry nosig
 entry 0 first 40.00065 at +1.39 s; then 40.00065@+1.72 40.00065@+2.07 40.00065@+2.42
 entry 1 first 40.00065 at +1.39 s; then 40.00065@+1.72 40.00065@+2.06 40.00065@+2.42
@@ -380,7 +380,7 @@ RESULT nosig OK first-reading +2.44/2.44 s
 ```sh
 emu/run.py stock --gdb 3333 --pause --interactive
 # other terminal:
-arm-none-eabi-gdb emu/out/fwrs-worktree/firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw \
+arm-none-eabi-gdb emu/out/fwrs-worktree/firmware/target/native/thumbv7em-none-eabihf/release/opendm40 \
     -ex 'target remote :3333'
 ```
 

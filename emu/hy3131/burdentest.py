@@ -10,7 +10,7 @@ coupling on 200 mA DC + 100 mA AC: FETC:BURD? = the total RMS x R_path
 DMM page with the readout at the end of the DC / AC phases.
 
   emu/hy3131/burdentest.py                       # fw-rs built from HEAD
-  emu/hy3131/burdentest.py --app firmware/dm40-fw-native.bin --port 3378
+  emu/hy3131/burdentest.py --app firmware/opendm40.bin --port 3378
 
 Results: emu/out/burden.json, emu/out/burden-<phase>.png. One emulator at a
 time per port.

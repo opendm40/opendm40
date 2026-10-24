@@ -8,7 +8,7 @@ of device time: DBG:ISR? (dropped, late, overruns, max_lat) and DBG:PROF?
 --host-read: a host reads INFO/LOADER.BIN (all of it from the SPI-disk
 mirror) back to back meanwhile.
 
-  emu/wavedroptest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw --mips 110 --isr-stall-ns 700
+  emu/wavedroptest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --mips 110 --isr-stall-ns 700
 
 Exit status 0 = no sample dropped after the settle time (--settle s after
 TIM:SCAL), else 1.

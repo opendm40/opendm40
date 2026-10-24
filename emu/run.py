@@ -6,7 +6,7 @@
 Modes
   stock   pristine V2.6 application at 0x08004000 (from dm40_v_2_6.dec.bin),
           ROM/FS-loader/calibration from the flash dump, start at the app.
-  fwrs    fw-rs native image at 0x08004000 (--app <dm40-fw-native.bin|body.bin|ELF>,
+  fwrs    fw-rs native image at 0x08004000 (--app <opendm40.bin|body.bin|ELF>,
           default: build from a clean worktree of HEAD), start at the app.
   chain   start at the ROM bootloader (0x08000000): ROM -> FS-loader -> app.
           The app is the stock one unless --app is given; --app dump keeps the
@@ -315,7 +315,7 @@ def main(argv=None):
     ap.add_argument('--rev', default='HEAD', help='fwrs: build fw-rs from this commit of the main repo (default HEAD)')
     ap.add_argument('--disk', help='16 MiB SPI-flash image (default: working copy of the MSC dump in emu/out/)')
     ap.add_argument('--disk-add', action='append', default=[], metavar='FILE[::NAME]',
-                    help='copy FILE into the working disk image (mtools), e.g. dm40-fw-native.bin::DM40_FW.BIN')
+                    help='copy FILE into the working disk image (mtools), e.g. opendm40.bin::DM40_FW.BIN')
     ap.add_argument('--model', type=str.upper, choices=list(MODELS),
                     help='DM40 model A|B|C: patch the calibration model byte (default: the dump\'s own)')
     ap.add_argument('--zero-marker', action='store_true',

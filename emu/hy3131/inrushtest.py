@@ -6,7 +6,7 @@ virtual times), driven like a user (DBG:KEY / DBG:TAP) and over SCPI on one
 USB/IP connection.
 
   cd firmware && ./build.sh
-  emu/hy3131/inrushtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw [--shots DIR]
+  emu/hy3131/inrushtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--shots DIR]
 
 Timeline (virtual seconds; the scheduled input changes; the client waits on
 their fw uptimes, the input markers of emu/emusync.py, README "Input markers"):
@@ -83,7 +83,7 @@ sys.path.insert(0, EMU)
 import regionc  # noqa: E402
 # Not hooked: the save's Prep / FAT writer (hot while not streaming: a
 # Python hook per call stretches it; as fastlogtest --region-c).
-RC = None if A.no_region_c else regionc.Hooks(A.app, OUT, tag, exclude=('fastlog::prep::', 'dm40_fw::fatren::'))
+RC = None if A.no_region_c else regionc.Hooks(A.app, OUT, tag, exclude=('fastlog::prep::', 'opendm40::fatren::'))
 with open(script, 'w') as f:
     if RC:
         f.write(RC.lines())

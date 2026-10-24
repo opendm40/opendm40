@@ -16,7 +16,7 @@
 #
 # Options:
 #   --no-build      do not build, use the existing image
-#   --image FILE    install FILE instead of dm40-fw-native.bin (implies --no-build)
+#   --image FILE    install FILE instead of opendm40.bin (implies --no-build)
 #   --stock FILE    install a stock / patched stock update file the same way
 #                   (e.g. ../stock/patch/build-memrw/dm40_patched.bin, built
 #                   by stock/patch/kit/mkkit.sh); does not
@@ -204,7 +204,7 @@ else
     elif ((${#ARGS[@]})); then
         die "build arguments given with --no-build/--image: ${ARGS[*]}"
     fi
-    IMG=${IMAGE:-$FW/dm40-fw-native.bin}
+    IMG=${IMAGE:-$FW/opendm40.bin}
     NAME=dm40_fwrs.bin
 fi
 [ -f "$IMG" ] || die "$IMG not found"
