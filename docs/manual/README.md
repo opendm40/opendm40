@@ -2011,6 +2011,33 @@ A file manager usually moves a deleted file to the trash. A file moved to
 the trash is deleted on the meter at the eject, unless you take it out of
 the trash before; the trash itself is not kept on the meter.
 
+#### Copying DEBUG/SPIFLASH.BIN on Linux
+
+`DEBUG/SPIFLASH.BIN` changes inside while its name, size and place on the
+drive stay the same. Linux keeps the parts of the file it has read before
+and does not read them again when the meter announces the change, so a
+plain `cp` while the drive stays mounted can return an old copy, or a mix
+of old and new parts (device check
+[46370df](../../firmware/docs/device-check-2026-10-21.md#46370df-screenshot-preparation-the-768-kss-nominal-ee28b71-the-files-live-volume-on-linux-2026-10-24-2145---2214), note 2). New
+files in `LOGS/`, `SCOPE/` and `SHOTS/` are not affected: the meter gives
+each new or changed file its own new entry. The meter cannot make Linux drop
+the old parts: for a file it already knows, Linux does not read the
+directory entry again while the drive is mounted (inferred from the kernel
+sources: `fs/fat`, `block/disk-events.c`; not tested with a changed date or
+entry).
+
+To get a current copy, do one of these first:
+
+- drop the cached parts of that file: `python3 -c 'import os,sys; fd=os.open(sys.argv[1],os.O_RDONLY); os.posix_fadvise(fd,0,0,os.POSIX_FADV_DONTNEED)' /media/$USER/DM40/DEBUG/SPIFLASH.BIN`
+  (used in the device check), then `cp`;
+- or drop all cached files: `sync; echo 1 | sudo tee /proc/sys/vm/drop_caches`;
+- or unmount and mount the drive again (`udisksctl unmount -b /dev/sdX`,
+  then `udisksctl mount -b /dev/sdX`);
+- or read past the cache: `dd if=.../DEBUG/SPIFLASH.BIN of=spiflash.bin bs=1M iflag=direct`
+  (untested).
+
+Windows and macOS: not tested.
+
 #### Eject
 
 After you eject the drive on the computer, it stays ejected until you
