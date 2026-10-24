@@ -37,6 +37,7 @@ A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
 
 def num(s):
@@ -65,9 +66,13 @@ def func(name):
 
 
 # name: (setup SCPI, coupling query, run_for, [(t, spec, check, label)], {t: command});
-# a phase is checked on its samples from the next phase's start - 4.5 s to
-# that start - 2.5 s (the last phase: the run end - 4.5 .. - 1.5 s; the fw uptime lags the virtual time by the boot: ~1.8 s
-# since the disk's SPI bytes take their time, emu GD32_SPI 2026-10-22).
+# t: script (virtual) time of the input change (spec None: the phase starts with an
+# action at t, no input change). Timing is keyed on the input markers (emu/emusync.py,
+# README "Input markers"): a phase starts at its input's fw uptime as logged by the
+# model; an action at t runs at its distance from the start of the phase it falls in
+# (fw uptime); a phase is checked on its samples from 3.0 s to 0.5 s before the next
+# phase's start (the last phase: before the run's end). No boot-offset guess: the
+# offset (2.85 s on a fresh disk, was assumed 1.5-1.8 s) only shows in the markers.
 # AUTO rule (dmm.rs): to AC when AC > 1.5 |DC| (and above the floor), to DC
 # when AC < 0.75 |DC|; in between the part shown stays (AC = |DC| below).
 SC = {
@@ -120,8 +125,8 @@ SC = {
     # Entering V AUTO on 230 V AC: A AUTO's twin (TODO "AC+DC / AUTO down-range on one part";
     # not a repro: the model's DC conversion of 230 V AC on 6 V is over range, so the entry
     # steps up). A regression check: never the mV range, and on 600 V or above while 230 V once
-    # method C's range visits (an anchor step per range: 600 V at fw ~12 s) are done. The 0.3 V
-    # phase (script 26) reaches the firmware at fw ~24.5 s (its uptime trails by ~1.5 s).
+    # method C's range visits (an anchor step per range: 600 V at fw ~12 s) are done; until the
+    # 0.3 V phase's marker (script 26).
     'vac230': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 40, [
         (0, 'open;acv:230@50', shows('AUTO,AC', 230.0, 0.005), 'enter AUTO on AC 230 V: AC, 600 V range'),
         (26, 'open;acv:0.3@50', shows('AUTO,AC', 0.3, 0.01), 'AC 0.3 V: down to 6 V'),
@@ -183,24 +188,25 @@ def conf_range(d):
         return float('nan')
 
 
-# Checked on every sample from t0 to t1 (fw uptime, s): (t0, t1, check, label).
+# Checked on every sample from t0 to t1: (t0, t1, check, label); t0 / t1 in script time,
+# placed as the actions (emusync.Timeline.at: a phase's start time = its input's marker).
 ALWAYS = {
     'iac': [(0, 99, lambda d: d['X'].get('SYST:ALER?') == 'NONE', 'SYST:ALER? NONE (no OVERLOAD)'),
             # 1 A / 300 mA never on the uA shunt (47.5 ohm; ranges 600 / 6000 uA)
             (0, 99, lambda d: not conf_range(d) < 0.05, 'never on the uA shunt')],
     'idc': [(0, 99, lambda d: d['X'].get('SYST:ALER?') == 'NONE', 'SYST:ALER? NONE (no OVERLOAD)'),
             (0, 99, lambda d: not conf_range(d) < 0.05, 'never on the uA shunt'),
-            # 1 A: once up on the A shunt (fw ~2 s), never back on the mA shunt until 0.3 A
-            # (script 16 = fw ~14.5 s: the firmware's uptime trails the script by ~1.5 s)
-            (6, 13, lambda d: conf_range(d) >= 6, 'A shunt while 1 A')],
+            # 1 A: once up on the A shunt (fw ~2 s), never back on the mA shunt until
+            # the 0.3 A input (script 16: up to its marker)
+            (6, 16, lambda d: conf_range(d) >= 6, 'A shunt while 1 A')],
     'iacfill': [(0, 99, lambda d: d['X'].get('SYST:ALER?') == 'NONE', 'SYST:ALER? NONE (no OVERLOAD)'),
                 (0, 99, lambda d: not conf_range(d) < 0.05, 'never on the uA shunt'),
-                # the hop comes at fw ~9 s (the fill delays the first AC result); the
-                # 0.3 A phase (script 24) reaches the firmware at fw ~22.5 s (boot ~1.5 s)
-                (10, 21, lambda d: conf_range(d) >= 6, 'A shunt while 1 A')],
+                # the hop comes at fw ~9 s (the fill delays the first AC result); up
+                # to the 0.3 A phase's marker (script 24)
+                (10, 24, lambda d: conf_range(d) >= 6, 'A shunt while 1 A')],
     # 230 V never on 6 V or the mV range once the first up-range is done (fw ~4 s)
     'vac230': [(0, 99, lambda d: not conf_range(d) < 1, 'never the mV range'),
-               (14, 23, lambda d: conf_range(d) >= 600, '600 V range or above while 230 V')],
+               (14, 26, lambda d: conf_range(d) >= 600, '600 V range or above while 230 V')],
 }
 # Scenarios for some AC+DC methods only (default: all). iacfill: the RMS fill model is longer
 # than method A's AC phase on purpose; B / C keep one row and refill it at every range change
@@ -236,6 +242,8 @@ def run(name):
            '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', rtag,
            '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    mk = emusync.Markers(emusync.log_path(OUT, rtag))
+    tl = emusync.Timeline([(t, spec) for t, spec, _, _ in phases], run_for, mk)
     rows = []
     t_wall = time.time()
     tm = None
@@ -249,6 +257,11 @@ def run(name):
         try:
             for c in setup:
                 tm.write(c)
+            # The actions in fw uptime, at their distance from their phase's start
+            # (predicted by the clock marker; the same as the input marker will say).
+            if mk.wait_clock() is None:
+                print(name, 'no clock marker (dwt: CYCCNT write) in the log', flush=True)
+            acts = {tl.at(ta, predict=True) if mk.zero is not None else ta: c for ta, c in acts.items()}
             while p.poll() is None:
                 row = {}
                 for q in ['DBG:PING?', cq, 'FETC?', 'FUNC?'] + EXTRA.get(name, []):
@@ -267,12 +280,11 @@ def run(name):
     for x in (sp, os.path.join(OUT, 'flash-%s.bin' % rtag), os.path.join(OUT, rtag + '.resc')):
         if os.path.exists(x):
             os.remove(x)
-    ok = True
-    bad = []
+    bad = emusync.check_sync(mk, tl, name)
+    ok = not bad
     for i, (t, _, chk, label) in enumerate(phases):
-        t1 = phases[i + 1][0] if i + 1 < len(phases) else run_for
-        m = 2.5 if i + 1 < len(phases) else 1.5  # the run's end: no next step to keep clear of
-        seen = [r for r in rows if t1 - 4.5 <= r['t'] <= t1 - m]
+        w = tl.window(i)
+        seen = [r for r in rows if w and w[0] <= r['t'] <= w[1]]
         if not seen:
             ok = False
             bad.append('%s: no samples' % label)
@@ -286,7 +298,8 @@ def run(name):
             r = seen[-1]
             print('  ok  %-50s %s %g' % (label, r['C'], r['V']), flush=True)
     for t0, t1, chk, label in ALWAYS.get(name, []):
-        fails = [r for r in rows if t0 <= r['t'] <= t1 and not chk(r)]
+        f0, f1 = tl.at(t0), tl.at(t1)
+        fails = [r for r in rows if f0 is not None and f1 is not None and f0 <= r['t'] < f1 and not chk(r)]
         if fails:
             ok = False
             r = fails[0]
@@ -297,8 +310,9 @@ def run(name):
         parts = []
         for i, (t, _, _, label) in enumerate(phases):
             t1 = phases[i + 1][0] if i + 1 < len(phases) else run_for
-            t0 = max([ta for ta in SC[name][4] if t <= ta < t1] + [t])
-            seq = [r['C'] for r in rows if t0 + 0.2 <= r['t'] <= t1 - 1.5 and r['C'].startswith('AUTO,')]
+            t0 = tl.at(max([ta for ta in SC[name][4] if t <= ta < t1] + [t]))
+            e = tl.stop(i)
+            seq = [r['C'] for r in rows if t0 is not None and e is not None and t0 + 0.2 <= r['t'] <= e - 1.5 and r['C'].startswith('AUTO,')]
             flips = sum(1 for a, b in zip(seq, seq[1:]) if a != b)
             rle = []
             for x in seq:
@@ -314,7 +328,8 @@ def run(name):
         if len(set(parts)) > 1:
             ok = False
             bad.append('entries differ: %s' % ' '.join(parts))
-    res = {'name': name, 'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-600:] if p.returncode else ''}
+    res = {'name': name, 'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-600:] if p.returncode else '',
+           'sync': emusync.summary(mk, tl)}
     with open(os.path.join(OUT, tag + '.json'), 'w') as f:
         json.dump(res, f, indent=1)
     print('RESULT %s %s %s' % (name, 'OK' if ok else 'FAIL', '; '.join(bad[:5])), flush=True)

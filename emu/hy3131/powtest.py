@@ -35,6 +35,7 @@ A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
 F = ['P', 'S', 'Q', 'PF', 'V', 'I', 'F', 'Wh', 'secs', 'Vdc', 'Idc', 'VAh', 'Vb']
 
@@ -68,10 +69,13 @@ def both(*fs):
     return lambda d: all(f(d) for f in fs)
 
 
-# name: (setup SCPI, run_for, [(t, spec, check, label)]); a phase is checked on
-# its samples from the next phase's start - 4.5 s to that start - 2.5 s (the last phase: the run end - 4.5 .. - 1.5 s; the
-# fw uptime lags the virtual time by the boot: ~1.8 s since the disk's SPI
-# bytes take their time, emu GD32_SPI 2026-10-22).
+# name: (setup SCPI, run_for, [(t, spec, check, label)]); t: script (virtual) time of
+# the input change (spec None: the phase starts with an action at t). Timing is keyed
+# on the input markers (emu/emusync.py, README "Input markers"): a phase starts at its
+# input's fw uptime as logged by the model; ACTIONS / GATE / the BT actions run at
+# their distance from the start of the phase they fall in; a phase is checked on its
+# samples from 3.0 s to 0.5 s before the next phase's start (the last phase: before
+# the run's end). No boot-offset guess (2.85 s on a fresh disk; it was assumed ~1.8 s).
 SC = {
     'mains': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 58, [
         (0, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), ranges('6.000000E+02', '1.000000E+01')), 'resistive 230 V 1 A: PF 1, 50 Hz, 600 V / 10 A'),
@@ -377,6 +381,8 @@ def run(name):
            '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else []) \
         + (['--bt-port', str(bt_port)] if bt_port else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    mk = emusync.Markers(emusync.log_path(OUT, rtag))
+    tl = emusync.Timeline([(t, spec) for t, spec, _, _ in phases], run_for, mk)
     rows = []
     t_wall = time.time()
     tm = None
@@ -414,6 +420,16 @@ def run(name):
                 pass
         return buf
     bt_acts = {14: bt_frame(0x06, b'\x28')} if bt else {}
+    if tm is not None and mk.wait_clock() is None:
+        print(name, 'no clock marker (dwt: CYCCNT write) in the log', flush=True)
+
+    def fw(ta):
+        # script time -> fw uptime (predicted by the clock marker = the input marker's value)
+        return tl.at(ta, predict=True) if mk.zero is not None else ta
+    acts = {fw(ta): c for ta, c in acts.items()}
+    bt_acts = {fw(ta): c for ta, c in bt_acts.items()}
+    if gate is not None:
+        gate = (gate[0], gate[1], fw(gate[2]))
     if tm is not None:
         try:
             for c in setup:
@@ -437,9 +453,7 @@ def run(name):
                     for ta in sorted(bt_acts):
                         if t >= ta:
                             bt_xfer(bt_acts.pop(ta), lambda b: len(b) >= 7, 2.0)
-                    # The run ended inside this row (the last phase's window
-                    # reaches run end - 1.5 s of virtual time, but the fw
-                    # uptime lags it by ~1.8 s, so its last row can be the
+                    # The run ended inside this row (the rows go on to the
                     # run's very end): its BT replies never came. A sample
                     # cut off by the emulator stopping, not a reply of the
                     # firmware: dropped.
@@ -475,12 +489,11 @@ def run(name):
     for x in (sp, os.path.join(OUT, 'flash-%s.bin' % rtag), os.path.join(OUT, rtag + '.resc')):
         if os.path.exists(x):
             os.remove(x)
-    ok = True
-    bad = []
+    bad = emusync.check_sync(mk, tl, name)
+    ok = not bad
     for i, (t, _, chk, label) in enumerate(phases):
-        t1 = phases[i + 1][0] if i + 1 < len(phases) else run_for
-        m = 2.5 if i + 1 < len(phases) else 1.5  # the run's end: no next step to keep clear of
-        seen = [r for r in rows if t1 - 4.5 <= r['t'] <= t1 - m and ('P' in r or name.startswith('t1'))]
+        w = tl.window(i)
+        seen = [r for r in rows if w and w[0] <= r['t'] <= w[1] and ('P' in r or name.startswith('t1'))]
         if not seen:
             ok = False
             bad.append('%s: no samples' % label)
@@ -493,7 +506,8 @@ def run(name):
         else:
             r = seen[-1]
             print('  ok  %-50s %s' % (label, ' '.join('%s=%.6g' % (k, r[k]) for k in F[:8] if k in r) or r['RAW'][:100]), flush=True)
-    res = {'name': name, 'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-600:] if p.returncode else ''}
+    res = {'name': name, 'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-600:] if p.returncode else '',
+           'sync': emusync.summary(mk, tl)}
     with open(os.path.join(OUT, tag + '.json'), 'w') as f:
         json.dump(res, f, indent=1)
     print('RESULT %s %s %s' % (name, 'OK' if ok else 'FAIL', '; '.join(bad[:5])), flush=True)
