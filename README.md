@@ -78,10 +78,10 @@ the short: [hw/README.md, Hardware recovery](hw/README.md#hardware-recovery).
 
 | Path | What |
 |---|---|
-| [fw-rs/](fw-rs/README.md) | Replacement firmware: build, install, reload, recovery, debug link (`tools/dm40dbg.py`), host tests, design docs in [`fw-rs/docs/`](fw-rs/docs) |
-| [firmware/](firmware/README.md) | `dm40fw.py` (update file decode / encode / pack incl. header CRCs), `merge_boot.py` |
+| [fw-rs/](fw-rs/README.md) | Replacement firmware: build, install, reload, recovery, debug link ([`tools/dm40dbg.py`](fw-rs/tools/dm40dbg.py)), host tests, design docs in [`fw-rs/docs/`](fw-rs/docs) |
+| [firmware/](firmware/README.md) | [`dm40fw.py`](firmware/dm40fw.py) (update file decode / encode / pack incl. header CRCs), [`merge_boot.py`](firmware/merge_boot.py) |
 | [firmware/patch/](firmware/patch/AGENTS.md) | Patch kit for the stock firmware (BT memory read/write, USB live stream) |
-| [firmware/patch/kit/](firmware/patch/kit/README.md) | memrw backup kit: `dm40_memrw.py`, tests, `mkkit.sh` (builds `dist/`) |
+| [firmware/patch/kit/](firmware/patch/kit/README.md) | memrw backup kit: [`dm40_memrw.py`](firmware/patch/kit/tools/dm40_memrw.py), tests, [`mkkit.sh`](firmware/patch/kit/mkkit.sh) (builds `dist/`) |
 | [firmware/re/](firmware/re/README.md) | Reverse-engineering notes ([ANALYSIS.md](firmware/re/ANALYSIS.md), `analysis/*.h`), capstone helpers, Ghidra scripts |
 | [hw/](hw/README.md) | Hardware: chips, pins, front ends, power; teardown photos ([`hw/photos/`](hw/photos)) and datasheets ([`hw/datasheets/`](hw/datasheets)) |
 | [docs/bt-protocol.md](docs/bt-protocol.md) | Bluetooth protocol of the stock DM40 |
@@ -91,7 +91,7 @@ the short: [hw/README.md, Hardware recovery](hw/README.md#hardware-recovery).
 ## Vendor files
 
 [firmware/vendor/](firmware/vendor/README.md) holds the latest official stock firmware,
-`dm40_v_2_6.bin` (Alientek's, unmodified, not under the MIT licence; see
+[`dm40_v_2_6.bin`](firmware/vendor/dm40_v_2_6.bin) (Alientek's, unmodified, not under the MIT licence; see
 its README). It returns a meter to stock and feeds the emulator and the
 stock-firmware tools. Older versions live in `wirenboard/alientek-dm40-tools`
 (`vendor/`). The Android app and the manuals are not in this repo.
