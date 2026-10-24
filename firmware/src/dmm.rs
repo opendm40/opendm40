@@ -2886,6 +2886,14 @@ impl Dmm {
             (Button::Volt, Some(255)) => {
                 self.manual = false;
                 self.v_auto = 1;
+                // AUTO+ never steps to mV: leave it at once for the V
+                // autorange's 6 V (device check 46370df: AUTO -> AUTO+ on
+                // 60 mV stayed there until the function was entered again).
+                // AC+DC: into its DC phase, as poll_ac's mV -> V step.
+                if matches!(self.mode, 2 | 3) {
+                    let m = if self.acdc { 1 } else { self.mode - 2 };
+                    self.set(clk, m, 0, 350);
+                }
             }
             (Button::Amp, None) => {
                 self.manual = false;
