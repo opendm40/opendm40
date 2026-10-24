@@ -31,9 +31,9 @@ checked only in the emulator or in host tests.
 | AUTO AC/DC | Shows the DC or the AC part, whichever the signal is. | device on V; on A: emulator |
 | Inrush current | 10 A range: triggers on a current step, shows the RMS of the first 100 ms and the peak, saves the trace. | emulator |
 | Burden voltage | Voltage drop across the shunt in the A / mA / uA functions (off by default). | device without current |
-| Misconnect alerts | A-JACK (current in the A jack while measuring volts), A-PROT, fuse check. A-JACK, A-PROT and a current above 10 A sound a loud two-tone alarm, also at volume 0 (Settings: Danger alarm Loud / Volume / Off; tap the badge or press a key to silence it). | A-JACK / A-PROT and the alarm: emulator (no current through A on the device yet); fuse check: ran once on the device, the bug it found is fixed, re-check pending |
+| Misconnect alerts | A-JACK (current in the A jack while measuring volts), A-PROT, fuse check. A-JACK, A-PROT and a current above 10 A sound a loud two-tone alarm, also at volume 0 (Settings: Danger alarm Loud / Volume / Off; tap the badge or press a key to silence it). | A-JACK / A-PROT with a current through A: emulator (none on the device yet); the alarm's sound and the fuse check: device |
 | Record page | Logs the DMM to the internal disk: every reading, or the mean per 1 s / 10 s / 1 min, until stopped or for 10 min .. 24 h. | device |
-| Fast logger | Raw ADC samples to the disk at up to 38.4 kS/s (76.8 kS/s if the SPI flash is fast enough). | device up to 38.4 kS/s; 76.8 kS/s: emulator |
+| Fast logger | Raw ADC samples to the disk at up to 38.4 kS/s (76.8 kS/s if the SPI flash is fast enough). | device |
 | USB disk | Read-only drive with `LOGS/`, `SCOPE/`, `SHOTS/` (CSV and BMP files) and `INFO/` (calibration copy, running firmware). New files appear while it is mounted. Optional "PC can edit" mode: delete files, drop in an update file. | device (Linux); Windows 11 read-only (VM); macOS untested |
 | USBTMC / SCPI | 34401A-style `CONF` / `MEAS?` / `READ?`, plus the scope, the generator, the power meter and the loggers. | device |
 | sigrok | A libsigrok `scpi-dmm` profile for the DM40 (not upstream yet); a 34401A emulation for unpatched sigrok / SmuView. | profile: device (sigrok-cli, every selectable function); emulation: emulator |
