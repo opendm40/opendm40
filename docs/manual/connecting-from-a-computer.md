@@ -154,9 +154,9 @@ pyusb and libusb (`brew install libusb`) is the likely path.
 
 ## Bluetooth
 
-Bluetooth works the same from every system that has a Bluetooth serial port
-(SPP). The meter shows up twice in a scan; use **C-1-ATK-DM40-CALI**,
-RFCOMM channel 1 (the other one, **DM40A**, is for the phone app). Close the
+Any system with a Bluetooth serial port (SPP) works. Connect to
+**C-1-ATK-DM40-CALI**, RFCOMM channel 1 (the other name, **DM40A**, is for
+the phone app; see [Remote control](remote-control.md#bluetooth)). Close the
 phone app first: the meter takes one connection at a time. Bluetooth must be
 **ON** in the meter's settings.
 
@@ -187,10 +187,6 @@ and open `/dev/rfcomm0` (any baud rate), or in PyVISA
 Over Bluetooth the debug commands and file deletion are refused, and the
 link is slower (about 11 kB/s); see
 [SCPI reference, Bluetooth differences](scpi-reference.md#bluetooth-differences).
-
-The phone-app protocol of the stock firmware also works: see
-[Remote control](remote-control.md) and
-[docs/bt-protocol.md](../bt-protocol.md).
 
 ## sigrok (sigrok-cli, PulseView, SmuView)
 
