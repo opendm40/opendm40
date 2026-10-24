@@ -938,7 +938,7 @@ const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
 /// measured short-circuit current of range `range` in the variant `on`
 /// (none on 60 M: the box is cleared); diode, the source current (owners' reports). Two significant digits, DIM F14 (small: a
 /// property of the function, not a reading).
-#[inline(never)] // drawn on a function / range / variant change only
+#[inline(never)] // .cold (link-native.x): drawn on a function / range / variant change only
 fn test_current_label(mode: u8, range: i8, on: bool) {
     let Some(i) = crate::dmm::test_current(mode, range, on as u8) else {
         // No value (60 M): clear the box, a range change from 6 M left the
