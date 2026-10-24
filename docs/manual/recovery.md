@@ -52,8 +52,9 @@ gets you there:
 - **By itself after repeated hangs.** If the firmware hangs, it restarts
   after about 20 s. If it hangs again within its first 60 s of running, the
   next start opens the update loader.
-- **Through the board.** If nothing else works: open the case and connect
-  the debug header's TX pad to ground while switching on. See
+- **Through the board.** If nothing else works: open the case, connect
+  the debug header's TX pad to ground while switching on, and keep it until
+  the update screen appears; remove it after the update. See
   [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery).
 
 Once there, the loader shows its update screen on every start until a valid

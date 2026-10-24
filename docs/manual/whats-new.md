@@ -92,8 +92,6 @@ See [Signal generator](generator.md).
 
 ## Other
 
-- Touch lock, gestures (3-finger screenshot, 2-finger power-off) and the
-  uptime counter as on the stock firmware.
 - A warning 30 s before the automatic power-off.
 - On-screen help (**Settings > More > Help**).
 - The Device page shows the opendm40 version and the board temperature.

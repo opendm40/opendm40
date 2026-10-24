@@ -19,6 +19,8 @@ status bar. Swipe down again to stop. When the last rows are on the disk,
 the meter shows **Saved LOG007.DLG** (with the file's number).
 
 The quick way uses the interval and duration last set on the Record page.
+If the interval there is **Fast**, the swipe still starts a normal recording
+with the last other interval.
 
 ## The Record page
 
