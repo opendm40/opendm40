@@ -356,6 +356,9 @@ pub(super) struct Sp {
     /// UF-08: the press is on the cursor tab; the selection before the
     /// cursor tab turned the cursors on. UF-09: the last plain tap.
     cur_press: bool,
+    /// The press picked the item that was already selected (a still tap
+    /// then cycles to the next overlapping one, `sp_release`).
+    presel: bool,
     cur_saved: Option<([u8; 4], usize)>,
     last_tap: Option<(u64, Point)>,
     /// Math display settings; what the FFT additions show (from `sp_math`).
@@ -413,6 +416,7 @@ impl Sp {
             list: None,
             tb_drawn: (255, false),
             cur_press: false,
+            presel: false,
             cur_saved: None,
             last_tap: None,
             math: Math::DEFAULT,
@@ -1248,9 +1252,12 @@ impl App {
     /// hit, the tap-step side armed).
     fn sp_select(&mut self, p: Point) -> (bool, Option<bool>) {
         self.sp.cur_press = false;
+        self.sp.presel = false;
         let m = self.sp_model(self.now);
         match su::graph_press(&m, self.sp.tap_mode, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16) {
             su::Press::Marker(level, id) => {
+                // Already the selection: a still tap cycles on release.
+                self.sp.presel = level == !self.sp.last_h && id == if level { self.sp.sel_v } else { self.sp.sel_h };
                 if level {
                     self.sp.sel_v = id;
                     self.sp.last_h = false;
@@ -1422,6 +1429,7 @@ impl App {
                 // centre row.
                 if let Some(t) = self.sp.touch {
                     if t.hit && !t.moving {
+                        self.sp.presel = false; // no tap cycling on its release
                         self.sp_recentre(now);
                     }
                 }
@@ -1708,6 +1716,22 @@ impl App {
                 self.sp_settings_changed();
             } else {
                 self.scope.refresh();
+            }
+            return;
+        }
+        // A still tap on the marker that was already selected: the next
+        // overlapping one (the stock cycling; the press picked the nearest,
+        // preferring the selection).
+        if t.hit && t.still() && self.sp.presel {
+            self.sp.presel = false;
+            let m = self.sp_model(now);
+            if let Some((level, id)) = su::graph_cycle(&m, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, t.p0.x as i16, t.p0.y as i16) {
+                if level {
+                    self.sp.sel_v = id;
+                } else {
+                    self.sp.sel_h = id;
+                }
+                self.sp.last_h = !level;
             }
             return;
         }

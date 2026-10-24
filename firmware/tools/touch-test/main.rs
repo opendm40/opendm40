@@ -906,6 +906,31 @@ fn tap_step_tests(ck: &mut Ck) {
         m.trig_px = 40;
         ck.t(&format!("mode {mode}: still a step next to the cursor-free corner"), gp(&m, mode, 60, 280) == Press::Step(true));
     }
+    // opendm40 (owner 2026-10-24): a press near a marker grabs it; the
+    // nearest wins, the selected one within NEAR_TIE; guide lines are zones
+    // while shown; a still tap on the selection cycles (graph_cycle).
+    let off = su::TAP_OFF;
+    let gs = |m: &su::Model, sv: u8, sh: u8, lh: bool, x: i16, y: i16| su::graph_press(m, off, sv, sh, lh, x, y);
+    // T top marker glyph x 208..219, y 21..32 (trig_px 200).
+    ck.t("near grab: 12 px below the T marker glyph grabs it", gp(&d, off, 214, 44) == Press::Marker(false, 0) && gp(&d, off, 214, 46) == Press::None);
+    let mut m = d;
+    m.xcur = Some([205, 100]); // X1 top marker x 213..224
+    ck.t("near grab: the nearer marker wins (X1 2 px off, T 7 px off)", gs(&m, 0, 0, true, 226, 26) == Press::Marker(false, 2));
+    ck.t("near grab: the selected marker wins within the tie (T 3 px off, X1 on it)", gs(&m, 0, 0, true, 222, 26) == Press::Marker(false, 0));
+    ck.t("near grab: no tie preference for the unselected (X1 selected, 5 px off; T on it)", gs(&m, 0, 2, true, 208, 26) == Press::Marker(false, 0));
+    let mut m = d;
+    m.guide = true;
+    m.sel_v = 1;
+    ck.t("guide line zone: the trigger-level line, 10 px off, mid-graph", gs(&m, 1, 0, false, 200, 20 + 105 + 10) == Press::Marker(true, 1));
+    m.sel_h = 0;
+    ck.t("guide line zone: the trigger-position line, 10 px off", gs(&m, 1, 0, false, 214 + 10, 200) == Press::Marker(false, 0));
+    m.guide = false;
+    ck.t("guide line zones only while the guides show", gs(&m, 1, 0, false, 200, 20 + 105 + 10) == Press::None && gs(&m, 1, 0, false, 224, 200) == Press::None);
+    let mut m = d;
+    m.trig_row = 140; // trigger-level marker x 401..412 and CH1 at row 140
+    m.ycur = Some([140, 220]); // Y1 line on the same row
+    ck.t("near grab: CH1 marker over the Y1 line (equal distance: the marker)", gs(&m, 3, 0, false, 6, 160) == Press::Marker(true, 3) && gs(&m, 4, 0, false, 6, 160) == Press::Marker(true, 0));
+    ck.t("tap cycling: CH1 selected, a tap on it -> Y1", su::graph_cycle(&m, 0, 0, false, 6, 160) == Some((true, 3)));
     // Top-bar badges: hit map against the drawn badges, then the edges.
     host::reset(0);
     su::invalidate();

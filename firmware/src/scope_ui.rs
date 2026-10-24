@@ -1015,38 +1015,62 @@ fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
     }
 }
 
-/// A touch zone of a marker (sec. 10.2): the 12x12 glyph rect grown by 10
-/// px on every side; `level`: level group (CH1 0, trigger level 1, Y
-/// cursors 3 / 4), else time group (trigger position 0, X cursors 2 / 3).
+/// A touch zone of a marker (sec. 10.2; stock: the 12x12 glyph rect grown
+/// by 10 px, opendm40: by `GROW`) or of a line; `level`: level group (CH1 0,
+/// trigger level 1, Y cursors 3 / 4), else time group (trigger position 0,
+/// X cursors 2 / 3); `o`: the object itself (the glyph, the 1 px line),
+/// for the distance in `pick_near`.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Zone {
     pub level: bool,
     pub id: u8,
     pub r: Rect,
+    pub o: Rect,
 }
 
 impl Zone {
-    pub const NONE: Zone = Zone { level: false, id: 0, r: rect(0, 0, 0, 0) };
+    pub const NONE: Zone = Zone { level: false, id: 0, r: rect(0, 0, 0, 0), o: rect(0, 0, 0, 0) };
+    /// Distance (px, Chebyshev) from (x, y) to the zone's object; None
+    /// outside the zone.
+    pub fn dist(&self, x: i16, y: i16) -> Option<i16> {
+        if !self.r.has(x, y) {
+            return None;
+        }
+        let (x0, y0) = (self.o.x, self.o.y);
+        let (x1, y1) = (self.o.x + self.o.w - 1, self.o.y + self.o.h - 1);
+        let dx = (x0 - x).max(x - x1).max(0);
+        let dy = (y0 - y).max(y - y1).max(0);
+        Some(dx.max(dy))
+    }
 }
+
+/// Marker zones: the glyph grown by this much (owner 2026-10-24: a drag
+/// that starts near a marker grabs it; the stock 10 px).
+pub const GROW: i16 = 12;
+/// Line zones: +-this many px around a cursor / guide line.
+pub const LINE_GROW: i16 = 12;
+/// `pick_near`: a selected item this much farther than the nearest still
+/// wins (the marker last selected is preferred among close ones).
+const NEAR_TIE: i16 = 4;
 
 /// Most zones (strip markers + selectable graph markers).
 pub const NZONE: usize = NSTRIP + NGRAPH;
 
 /// The marker zones of the page in creation order (level group first).
 pub fn zones(m: &Model, out: &mut [Zone; NZONE]) -> usize {
-    let grow = |r: Rect| rect(r.x - 10, r.y - 10, r.w + 20, r.h + 20);
+    let grow = |r: Rect| rect(r.x - GROW, r.y - GROW, r.w + 2 * GROW, r.h + 2 * GROW);
     let mut n = 0;
     let mut items = [(0u8, Mark::NONE); NSTRIP];
     let k = strip_items(m, &mut items);
     for &(id, mk) in &items[..k] {
-        out[n] = Zone { level: true, id, r: grow(mk.rect()) };
+        out[n] = Zone { level: true, id, r: grow(mk.rect()), o: mk.rect() };
         n += 1;
     }
     let mut g = [Mark::NONE; NGRAPH];
     graph_marks(m, &mut g);
     for (k, mk) in g.iter().enumerate() {
         if mk.some() && GRAPH_IDS[k] != 255 {
-            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grow(mk.rect()) };
+            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grow(mk.rect()), o: mk.rect() };
             n += 1;
         }
     }
@@ -1061,17 +1085,120 @@ pub fn line_zones(m: &Model, out: &mut [Zone; 4]) -> usize {
     let mut n = 0;
     if let Some(xc) = m.xcur {
         for (k, c) in xc.iter().enumerate() {
-            out[n] = Zone { level: false, id: 2 + k as u8, r: rect(14 + c - 12, top, 25, h) };
+            out[n] = vline_zone(false, 2 + k as u8, *c, top, h);
             n += 1;
         }
     }
     if let Some(yc) = m.ycur {
         for (k, r) in yc.iter().enumerate() {
-            out[n] = Zone { level: true, id: 3 + k as u8, r: rect(13, top + trace_fy(h, *r as i32) - 12, 401, 25) };
+            out[n] = hline_zone(3 + k as u8, top + trace_fy(h, *r as i32));
             n += 1;
         }
     }
     n
+}
+
+/// Zone of a vertical line at graph column `c` (x 14 + c), the frame height.
+fn vline_zone(level: bool, id: u8, c: i16, top: i16, h: i16) -> Zone {
+    Zone { level, id, r: rect(14 + c - LINE_GROW, top, 2 * LINE_GROW + 1, h), o: rect(14 + c, top, 1, h) }
+}
+
+/// Zone of a horizontal level line at screen row `y`, the graph width.
+fn hline_zone(id: u8, y: i16) -> Zone {
+    Zone { level: true, id, r: rect(13, y - LINE_GROW, 401, 2 * LINE_GROW + 1), o: rect(13, y, 401, 1) }
+}
+
+/// opendm40 (owner 2026-10-24): while the guide lines show, they are zones
+/// too: the selected level item's line (CH1, trigger level, math offset,
+/// runt level; the Y cursors have `line_zones`) and the trigger position's
+/// line. Rows as the guide lines (`Deco`).
+pub fn guide_zones(m: &Model, out: &mut [Zone; 2]) -> usize {
+    if !m.guide {
+        return 0;
+    }
+    let (top, h) = (m.top(), m.frame_h());
+    let mut n = 0;
+    let row = match m.sel_v {
+        0 => Some(140 + m.pos as i32),
+        1 => Some(m.trig_row as i32),
+        2 if m.math_on => Some(140 + m.math_off as i32),
+        5 => m.runt_row.map(|r| r as i32),
+        _ => None,
+    };
+    if let Some(r) = row {
+        let fy = line_fy(h, r);
+        if (0..h).contains(&fy) {
+            out[n] = hline_zone(m.sel_v, top + fy);
+            n += 1;
+        }
+    }
+    if m.sel_h == 0 && (1..=399).contains(&m.trig_px) {
+        out[n] = vline_zone(false, 0, m.trig_px, top, h);
+        n += 1;
+    }
+    n
+}
+
+/// All press zones: markers (`zones`), cursor lines, guide lines.
+pub const NALL: usize = NZONE + 4 + 2;
+
+pub fn all_zones(m: &Model, out: &mut [Zone; NALL]) -> usize {
+    let mut z = [Zone::NONE; NZONE];
+    let mut n = 0;
+    let k = zones(m, &mut z);
+    for q in z[..k].iter() {
+        out[n] = *q;
+        n += 1;
+    }
+    let mut l = [Zone::NONE; 4];
+    let k = line_zones(m, &mut l);
+    for q in l[..k].iter() {
+        out[n] = *q;
+        n += 1;
+    }
+    let mut g = [Zone::NONE; 2];
+    let k = guide_zones(m, &mut g);
+    for q in g[..k].iter() {
+        out[n] = *q;
+        n += 1;
+    }
+    n
+}
+
+/// opendm40 press pick (owner 2026-10-24: "a drag that starts on or near a
+/// marker grabs it"): the zone whose object is nearest to (x, y); the
+/// selected item (of the last used group first, then of the other group)
+/// wins when it is at most NEAR_TIE px farther; equal distances keep the
+/// zone order (markers before lines). Repeated taps still cycle through
+/// overlapping zones: `pick_zone` on a still release (scope_page.rs).
+pub fn pick_near(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<usize> {
+    let mut best: Option<(usize, i16)> = None;
+    for (i, q) in z.iter().enumerate() {
+        if let Some(d) = q.dist(x, y) {
+            if best.map_or(true, |(_, bd)| d < bd) {
+                best = Some((i, d));
+            }
+        }
+    }
+    let (bi, bd) = best?;
+    for (level, id) in [(!last_h, if last_h { sel_h } else { sel_v }), (last_h, if last_h { sel_v } else { sel_h })] {
+        let pref = z.iter().enumerate().filter(|(_, q)| q.level == level && q.id == id).filter_map(|(i, q)| q.dist(x, y).map(|d| (i, d))).min_by_key(|&(_, d)| d);
+        if let Some((i, d)) = pref {
+            if d <= bd + NEAR_TIE {
+                return Some(i);
+            }
+        }
+    }
+    Some(bi)
+}
+
+/// A still tap on a marker that was already selected: the next zone under
+/// (x, y) in the stock search order (`pick_zone`: repeated taps cycle
+/// through overlapping markers), or None.
+pub fn graph_cycle(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<(bool, u8)> {
+    let mut z = [Zone::NONE; NALL];
+    let n = all_zones(m, &mut z);
+    pick_zone(&z[..n], sel_v, sel_h, last_h, x, y).map(|k| (z[k].level, z[k].id))
 }
 
 /// The stock zone search for a press at (x, y): the group other than the
@@ -1081,11 +1208,11 @@ pub fn line_zones(m: &Model, out: &mut [Zone; 4]) -> usize {
 /// other group from its first zone. Index into `z`.
 pub fn pick_zone(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<usize> {
     let same_level = !last_h;
-    let of = |level: bool| -> ([usize; NZONE], usize) {
-        let mut l = [0usize; NZONE];
+    let of = |level: bool| -> ([usize; NALL], usize) {
+        let mut l = [0usize; NALL];
         let mut k = 0;
         for (i, q) in z.iter().enumerate() {
-            if q.level == level && k < NZONE {
+            if q.level == level && k < NALL {
                 l[k] = i;
                 k += 1;
             }
@@ -2015,18 +2142,13 @@ pub enum Press {
 }
 
 /// The page's press decision at (x, y) inside INNER: the object under the
-/// finger wins: the stock marker zones (search order, `pick_zone`), then
-/// the cursor lines (opendm40), and only then the tap-step zone of `mode`.
+/// finger wins: the nearest marker / cursor line / shown guide line
+/// (`pick_near`), and only then the tap-step zone of `mode`.
 pub fn graph_press(m: &Model, mode: u8, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Press {
-    let mut z = [Zone::NONE; NZONE];
-    let n = zones(m, &mut z);
-    if let Some(k) = pick_zone(&z[..n], sel_v, sel_h, last_h, x, y) {
+    let mut z = [Zone::NONE; NALL];
+    let n = all_zones(m, &mut z);
+    if let Some(k) = pick_near(&z[..n], sel_v, sel_h, last_h, x, y) {
         return Press::Marker(z[k].level, z[k].id);
-    }
-    let mut lz = [Zone::NONE; 4];
-    let k = line_zones(m, &mut lz);
-    if let Some(i) = pick_zone(&lz[..k], sel_v, sel_h, last_h, x, y) {
-        return Press::Marker(lz[i].level, lz[i].id);
     }
     if m.cur_tab != 0 && rect(CUR_TAB.x - 3, CUR_TAB.y - 6, CUR_TAB.w + 6, CUR_TAB.h + 6).has(x, y) {
         return Press::Cur;
