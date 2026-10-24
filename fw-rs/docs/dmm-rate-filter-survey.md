@@ -68,7 +68,7 @@ This model explains the owner's three observations (§1.3):
 - **A 10 Hz square aliases into a slow ±2.4 V swing.** 10 Hz is not a notch of
   the 50 ms comb, and it equals the 10/s reading rate, so the leak folds to
   near DC and beats. A second-order comb (sinc², what the datasheet block
-  diagram seems to show) predicts exactly ±2.4 V for a 0..9.6 V square.
+  diagram seems to show) predicts exactly ±2.4 V for a 0..9.6 V square (assuming the owner used the calibrator's 0..9.6 V level from device-check-2026-10-21).
   At 0x16 or 0x17, 10 Hz is a notch.
 - **Small changes take 3.2-6.4 s.** That is the default 8 / 16-conversion
   window of MEDIUM / SLOW. User feedback P3 asks for no smoothing by default.
@@ -153,7 +153,7 @@ comb window is Tc = 50 ms and its notches are at 20, 40, 60 Hz. A 10 Hz input
 sits at the first sidelobe. For sinc², |H(10 Hz)| = sinc²(0.5) = 0.405. The
 square's 6.1 V fundamental (0..9.6 V, ±4.8 V) gives 0.405 × 6.1 ≈ 2.5 V. Worked
 in the time domain: the sinc² kernel is a 100 ms triangle, so the reading is
-¾·4.8 − ¼·4.8 = **±2.4 V** at the worst phase. One reading comes every 100 ms
+¾·4.8 − ¼·4.8 = **±2.4 V** at the worst phase (assuming the 0..9.6 V calibrator square). One reading comes every 100 ms
 (chopped), the same period as the signal, so the leak lands on a near-DC beat
 whose rate is the frequency mismatch. That is the "slow swing". The chop pair
 evidently does **not** form a contiguous 100 ms boxcar: a boxcar would null
