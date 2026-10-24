@@ -1769,7 +1769,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(Fe.PaExits != paExitsSeen)
             {
                 paExitsSeen = Fe.PaExits;
-                if(role == Role.Ohm) ohmExitT = now;
+                // (fw-rs quiesces the chip before the relay pulse: its writes pass through
+                // no-role states, the last real role counts)
+                if(role == Role.Ohm || (role == Role.None && lastRole == Role.Ohm)) ohmExitT = now;
             }
             if(!EnCmp) { acpo = false; cmpHigh = cmpLow = false; return; }
             // Sentinel nodes (fw-rs sentinel.rs): PB1 = the A-jack shunt node in every role that

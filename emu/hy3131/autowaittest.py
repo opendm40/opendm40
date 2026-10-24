@@ -60,7 +60,9 @@ SCEN = [
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='fw-rs native ELF')
 ap.add_argument('--port', type=int, default=47600, help='USB/IP port')
+ap.add_argument('names', nargs='*', help='scenarios (default all)')
 A = ap.parse_args()
+SCEN = [sc for sc in SCEN if not A.names or sc[0] in A.names]
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
