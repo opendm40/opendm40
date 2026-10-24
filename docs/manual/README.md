@@ -877,6 +877,10 @@ the multimeter inputs instead.
 
 To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 
+![The scope page: a 1 kHz sine, triggered](img/scope-run.png)
+
+*The scope page: a 1 kHz sine, triggered.*
+
 ### The scope page
 
 - **Top bar**, from the left: the run state, the timebase (**H 200us**),
@@ -921,6 +925,10 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   default; **MF > Display > Roll**). Without roll, the slowest timebase is
   1 s/div. Roll-only timebases are orange in the list.
 
+| ![A tap on the bottom-left corner: one step slower](img/scope-tb-corner.png) | ![The timebase list](img/scope-tb-list.png) |
+|---|---|
+| A tap on the bottom-left corner: one step slower | The timebase list |
+
 **Settings > More > Scope tap step** sets which taps step the timebase:
 **Corners** (default, only the two corners step), **Halves (stock)** (a tap
 in the left or right half of the graph steps), **Off**.
@@ -938,6 +946,10 @@ in the left or right half of the graph steps), **Off**.
   - **Color** of the trace.
 - Bandwidth: owners report flat to about 3 MHz.
 
+| ![Zoomed in: 500 mV/div](img/scope-vdiv.png) | ![The channel popup: coupling AC](img/scope-ch1.png) |
+|---|---|
+| Zoomed in: 500 mV/div | The channel popup: coupling AC |
+
 ### Trigger
 
 - **Drag** the **T** marker on the right edge up or down to set the
@@ -950,6 +962,10 @@ in the left or right half of the graph steps), **Off**.
 - **Double tap** where a tap does nothing: the trace to the centre and the
   trigger position to 50 %.
 
+| ![Dragging the trigger level: T on the right edge](img/scope-trig-level.png) | ![Dragging the trigger position: T on the top edge](img/scope-trig-pos.png) |
+|---|---|
+| Dragging the trigger level: T on the right edge | Dragging the trigger position: T on the top edge |
+
 Open the Trigger tab: tap **TRIG**, or the trigger in the top bar.
 
 | Item | Choices |
@@ -957,6 +973,10 @@ Open the Trigger tab: tap **TRIG**, or the trigger in the top bar.
 | **Edge** | Rising, Falling. |
 | **Mode** | **Auto** (shows the signal also without a trigger), **Normal** (waits for a trigger), **Single** (one frame, then STOP). Choosing a mode also starts the scope. |
 | **Type** | **Edge**, **Pulse**, **Runt**. |
+
+| ![The Trigger tab](img/scope-trig-tab.png) | ![Pulse: wider than 400 µs](img/scope-trig-pulse.png) |
+|---|---|
+| The Trigger tab | Pulse: wider than 400 µs |
 
 - **Pulse**: triggers on a pulse wider than (**>**), narrower than
   (**<**) or equal to (**=**, within 5 %) a width. Set the width with
@@ -968,6 +988,10 @@ Open the Trigger tab: tap **TRIG**, or the trigger in the top bar.
 
 The edge trigger uses the trigger hardware where it can, so it does not miss
 edges between captures.
+
+![Runt trigger: the second level, the orange T](img/scope-trig-runt.png)
+
+*Runt trigger: the second level, the orange T.*
 
 ### Moving things with a finger
 
@@ -1010,11 +1034,19 @@ menu.
   and say **AUTO: DC (no AC signal)**.
 - Nothing found: **AUTO: no signal found**, the settings stay.
 
+| ![After auto-set on a 1 kHz square](img/scope-autoset.png) | ![Auto-set found nothing](img/scope-nosignal.png) |
+|---|---|
+| After auto-set on a 1 kHz square | Auto-set found nothing |
+
 ### Measurements
 
 Press **MF**: the **Measure** tab lists 20 measurements. Tap up to four;
 tap a selected one to remove it. **Clear** removes all, **Default**
 restores Freq, Vp-p, Cycl, Vrms.
+
+![The Measure tab](img/scope-measure.png)
+
+*The Measure tab.*
 
 | Item | What it is |
 |---|---|
@@ -1043,6 +1075,10 @@ Tap **CUR** at the bottom of the graph: **CUR X** (two time cursors), **CUR
 Y** (two voltage cursors), off. The measurement row shows X2-1 and Xf, or
 Y2-1. Drag the **1** / **2** markers or the cursor lines.
 
+| ![X cursors: 800 µs apart](img/scope-cur-x.png) | ![Y cursors: 3.01 V apart](img/scope-cur-y.png) |
+|---|---|
+| X cursors: 800 µs apart | Y cursors: 3.01 V apart |
+
 ### FFT
 
 Tap the math button (**FFT**) on the right panel. The spectrum is drawn
@@ -1059,6 +1095,10 @@ over the trace; tap the button again while its popup is open to turn it off.
   **FFT Unit** (dB or Vrms).
 - 2048 points. No FFT in roll mode.
 
+| ![FFT of a 1 kHz sine](img/scope.png) | ![The math popup, Other: window and unit](img/scope-math.png) |
+|---|---|
+| FFT of a 1 kHz sine | The math popup, Other: window and unit |
+
 ### Stop, zoom and pan
 
 Press **RUN** (or tap the run state) to stop. The last capture (26 624
@@ -1069,10 +1109,18 @@ samples) stays in memory:
 - drag sideways to pan through it;
 - double tap to centre it on the trigger point.
 
+![Stopped, zoomed in to 100 µs/div; the brackets show the part on screen](img/scope-stop.png)
+
+*Stopped, zoomed in to 100 µs/div; the brackets show the part on screen.*
+
 ### Display settings
 
 **MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
 **Brightness** and **Grid** intensity.
+
+| ![The Display tab](img/scope-display.png) | ![Roll mode at 500 ms/div](img/scope-roll.png) |
+|---|---|
+| The Display tab | Roll mode at 500 ms/div |
 
 ### Save CSV
 
@@ -1083,6 +1131,10 @@ samples) stays in memory:
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
+
+![The Settings tab](img/scope-settings.png)
+
+*The Settings tab.*
 
 The CSV starts with comment lines (timebase, V/div, probe, coupling,
 sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
@@ -1099,6 +1151,10 @@ To open it:
 
 - in the multimeter, function V or A (DC or AC): **MF**, then **Wave**; or
 - on the scope page, tap the **MCX | DMM** badge.
+
+| ![Mains on the Wave view, 10 ms/div](img/wave.png) | ![The same at 50 ms/div](img/wave-50ms.png) |
+|---|---|
+| Mains on the Wave view, 10 ms/div | The same at 50 ms/div |
 
 - The badge shows **DMM** highlighted; the channel button names the
   function, for example **AC V**.
@@ -1119,6 +1175,10 @@ To open it:
 - Auto-set is not available (**AUTO: MCX scope only**).
 - The multimeter reading is not shown while the Wave view runs; the
   multimeter's alerts and the Bluetooth phone protocol pause.
+
+| ![2 ms/div: one period](img/wave-2ms.png) | ![A 1.5 A current, 2 A/div](img/wave-amps.png) |
+|---|---|
+| 2 ms/div: one period | A 1.5 A current, 2 A/div |
 
 To leave: tap the badge (back to the CHA input), press **MENU** or change
 the view.
@@ -1174,6 +1234,10 @@ From 100 V the strip gets a red frame.
 The graph, the right panel and the scope menus work as on the
 [oscilloscope page](#oscilloscope). Scope auto-set is not available here:
 AUTO belongs to the multimeter.
+
+![The function band, opened by a tap on the strip](img/combined-band.png)
+
+*The function band, opened by a tap on the strip.*
 
 ### Analog power
 
