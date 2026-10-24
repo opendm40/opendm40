@@ -1,6 +1,6 @@
 # Vendor firmware
 
-**Licence notice.** `dm40_v_2_6.bin` is Alientek's original firmware update
+**Licence notice.** [`dm40_v_2_6.bin`](dm40_v_2_6.bin) is Alientek's original firmware update
 file for the DM40 multimeter (V2.6, the latest release), as downloaded from
 the vendor's website. It is redistributed **unmodified**, for reference, to
 return a meter to the stock firmware, and to make the builds and the emulator
@@ -11,14 +11,14 @@ Alientek.
 
 | Version | File | Size (bytes) | sha256 |
 |---|---|---:|---|
-| V2.6 | `dm40_v_2_6.bin` | 495140 | `5c2efe345369238604b8001af99ab089f82ff405fa91d5b8368c0086484038ac` |
+| V2.6 | [`dm40_v_2_6.bin`](dm40_v_2_6.bin) | 495140 | `5c2efe345369238604b8001af99ab089f82ff405fa91d5b8368c0086484038ac` |
 
 Retrieved on 2026-10-13. Older versions (V1.6 .. V2.5) are kept in
 `wirenboard/alientek-dm40-tools` (`vendor/`).
 
 - **Back to stock:** copy this file onto the FS-loader's USB disk as the only
   `dm40*.bin` and press "update" (see [Safety](../../README.md#safety) in the root README).
-- **Decoded body** (needed by `emu/run.py stock`, `fw-rs/tools/mkstockfont.py`
+- **Decoded body** (needed by `emu/run.py stock`, [`fw-rs/tools/mkstockfont.py`](../../fw-rs/tools/mkstockfont.py)
   and the patch kit), written to the repo root, which git ignores:
 
   ```
