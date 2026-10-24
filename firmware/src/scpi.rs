@@ -527,7 +527,9 @@ pub enum Log {
 ///                           probe_mA,aprot_ms (A-jack protection, doc 4.8),
 ///                           vside (V_GATE: -1 / 0 free / 1 driven), soft (1 =
 ///                           A-JACK here is badge only, no danger alarm, doc
-///                           4.10; ctsta -1 in kinds without the comparator)
+///                           4.10; ctsta -1 in kinds without the comparator),
+///                           jack (the jack check, sentinel.rs JACK CHECK: -1
+///                           none, 0 free, 1 driven), jack_mV (its peak)
 ///   DBG:SENTinel:LOG?       the last 8 alert assertions since power-on:
 ///                           n then per one ";ALERT,KIND,ms" (oldest first;
 ///                           n counts all, emu/hy3131/switchtest.py)

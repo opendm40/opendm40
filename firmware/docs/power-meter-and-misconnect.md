@@ -905,14 +905,14 @@ beep, Settings 3/3), [`src/scpi.rs`](../src/scpi.rs).
   those rows, and no threshold separates that from a current. These rows
   measure the V jack themselves, so A-JACK asserts only when a V-side
   result since the hit run began said V-COM is free: ohm: no negative AD1
-  code (a source above the ohm source's ~1.4 V open-circuit voltage, or any
-  negative one, gives the negative code LIVE? uses); thermocouple: |V| <=
+  code (a negative source gives the negative code LIVE? uses; a positive one
+  above the open-circuit voltage reads OL on the device, 35fce2a 7b, so ohm
+  also needs the jack check of 4.13); thermocouple: |V| <=
   80 mV (`T_VDRV_MV`; type E is 76.4 mV at 1000 C; an open TC read ~7.6 mV
   on the device); the resistive sensors use the ohm sign. An asserted
   A-JACK drops when the V side turns driven. `DBG:SENT?` field 12: -1 not
-  gated / no result yet, 0 free, 1 driven. Residual gaps: a source between
-  the pickup threshold (~1-2.4 V on the device) and ~1.4 V in ohm; a current
-  in A together with a source on V-COM is not reported in ohm / temperature
+  gated / no result yet, 0 free, 1 driven. Residual gap: a current in A
+  together with a source on V-COM is not reported in ohm / temperature
   (LIVE? is). The ohm-network rows' A-JACK does not sound the danger alarm
   (4.10).
 * **V-JACK? in DC A**: hit windows for 1 s while |I| < 0.5 % of the range;
@@ -1109,7 +1109,7 @@ its loudest beep is 49.5 % duty at volume 100 % on the TIM14 buzzer
 |---|---|---|
 | **A-PROT** (4.8) | **yes**, while its current flows (`probe_a` >= `APROT_GONE_A` 50 mA) | a source across A-COM pushed >= 125 mA: a stiff one now runs into the 10 A fuse, and above 30 V the MOSFETs are at risk. The latch without current waits for the user: badge, no alarm. In a function without the probe the last reading stands: removing the source first, then changing function, stays quiet |
 | **A-JACK** (4.6) where V-COM cannot fake it (`Sentinel::ajack_alarm()`: DC V 6 V, DC mV, AC V / mV, the thermocouple with its V gate, AC+DC V) | **yes** | the meter is a ~48 ohm path in series with whatever the probes touch; outside DC V / mV there is no probe, so A-JACK is the only warning before a 12-24 V source cooks the 47 ohm resistor |
-| A-JACK in the ohm-network rows (ohm, continuity, diode, capacitance, the resistive temperature sensors; `Sentinel::soft`, `DBG:SENT?` last field 1) | no (badge, toast) | its evidence there is PB1, which follows a voltage on V-COM in those rows (false A-JACK at 5 V in ohm and continuity on the device), and the V side cannot tell (5 V reads OL as open leads do). A real current in A while in ohm shows the badge without the alarm; a switch to DC V sounds it within ~1 s |
+| A-JACK in the ohm-network rows (ohm, continuity, diode, capacitance, the resistive temperature sensors; `Sentinel::soft`, `DBG:SENT?` last field 1) | no (badge, toast) | its evidence there is PB1, which follows a voltage on V-COM in those rows (false A-JACK at 5 V in ohm and continuity on the device), so the badge stays silent there. A voltage on V-COM gives LIVE? there since the jack check (4.13); a real current in A while in ohm shows the A-JACK badge without the alarm; a switch to DC V sounds it within ~1 s |
 | **current above the 10 A rating** (no badge of its own) | **yes** | the DMM's A functions reading > 10 A or OL on the 10 A range itself (AC+DC: the total), the power meter's I channel on 10 A reading > 10 A or OL, for >= 1 s (`I10_ASSERT_MS`: an inrush is the fuse's normal life). OL on a lower range says nothing about the amps |
 | OVERLOAD / OVLD, amber 10A | no | the meter protected itself and measures fine: one 300 ms beep at the key / alert volume |
 | power meter current limit expired | no | a user-set budget (default 6 A for 30 s): 3 x 50 ms every 2 s at the key / alert volume |
@@ -1251,6 +1251,91 @@ filters (`f_ac`, `f_lpf`, `ac_raw`) restart on every range step. The
 emulator does not reproduce the stale `FETC?`.
 
 Emulator: `senseneg`, `sensetau`; switchtest `aca-ramp`.
+
+### 4.13 A voltage on V-COM: the jack check, the AC mV gate (2026-10-24)
+
+With the A jack empty, 5 / 10 V DC or the 0 / 9.5 V square on V/Ω-COM
+raised A-JACK in RES and continuity (35fce2a 7b / E4, f0d21eb item 4,
+0774e70 S6: the AD2 peak on PB1 -99 100 / +124 800 at 5 V) and in AC mV
+(46370df new bug 1: `AJACK,AD1PK_PB1` and the loud alarm, AC V AUTO on
+60 mV). In each case PB1 picks up a level from the V side (*inferred*: the
+source against OP3's forced VREF through the ~1.4 kΩ input protection in
+the ohm-network rows; the input clamp's current in AC mV, emulator `mvpb1`).
+The device shows only that PB1 trips from 3-5 V in RES (35fce2a 7c), not at
+1 V.
+
+**Ohm, continuity, the resistive temperature sensors (`Sentinel::jchk`).**
+With the leads in A / COM and V-COM open the input node sits at the row's
+own source: ohm 0.78-2.17 V open on the stock taps, 1.38 V on the 60 MΩ
+current-source row ([device check, "Ohm test current
+map"](device-check-2026-10-21.md)); continuity ~-0.48 V. A source on V-COM
+moves it. While PB1 hits, AD2 reads OP1O - PB3 (OP1 is the row's own x1
+buffer of the input, the numerator of the stock ratio) at IG 0.5 (±2.5 V)
+with the peak hold (`sentinel::jack_row`, `jack_driven`):
+
+| row | driven when the 100 ms peak is | at its own source |
+|---|---|---|
+| ohm, RTD / NTC | above 2.35 V or below -0.9 V | 0.78-2.17 V open, lower with an Rx |
+| continuity | above +0.3 V or below -0.9 V | ~-0.48 V open, ~0 V shorted |
+
+Ohm and the resistive sensors take the jack row through the A-PROT probe's
+row rewrite at the first hit window (AD2 is off in those rows; AD1 written
+last, note 7; no A-PROT there). In continuity AD2 is the sentinel itself, so
+`Dmm::cont_jack` points it at OP1O for one window (R25 / R27; settle 30 ms,
+100 ms window, back, settle 30 ms), every 300 ms while the hits last. A-JACK
+needs a "free" verdict since the hit run began; "driven" drops an A-JACK in
+force and counts as a live result, so LIVE? shows. `DBG:SENT?` fields 14 /
+15: the verdict (-1 / 0 / 1) and its peak (mV). `cont_jack` and
+`jack_result` are in `.cold`: they run only while PB1 hits and talk to the
+HY3131 themselves, so never with the bus handed to a stream (not checked
+with the region C hooks).
+
+*Inferred*: that OP1O follows a source above 2.35 V up to its swing (the
+source map read the PB0 node with AD1, not OP1O). If OP1 clipped lower, a
+source would read "free" and the false A-JACK would stay as before; an open
+jack cannot read "driven".
+
+**AC mV (`V_GATE` on the row's own result).** Plain AC mV takes |LPF| +
+1.414 x RMS of each result (the quantity of `MV_CLIP_K`): above 1.5 x the
+range = driven (`MV_DRV_K`; a full-scale sine is 1.41 x, the device's
+clipped square on 600 mV ~2.4 x). A-JACK needs a "free" result at least
+250 ms after the hit run began (`MV_VGATE_LAG_MS`, *inferred*: the RMS /
+LPF block lags the peak hold). A result over the converter range gives no
+verdict. No LIVE? here: the reading is over range. Cost: a real current in
+A asserts ~0.25 s later in AC mV.
+
+**Gaps.** A current in A together with a voltage on V-COM shows LIVE? (ohm,
+continuity) or nothing (AC mV). AC+DC V on its 600 mV range carries the
+same AD1 peak sentinel without the gate (`vgate` is plain AC mV only; AUTO
+lands on 6 V with these inputs). The diode row is unchanged (badge only).
+
+**Emulator.** The model reads OL for a positive source above the ohm OCV
+(`OhmRevOl`, default, as the device; `ohmrevol:0` = the old negative code),
+adds `Pb1VjackMv` to PB1 in the continuity row, and gives AD2 = OP1O - PB3
+(the node across Rx within -1.18 .. +2.55 V, *inferred* swing) in the ohm /
+continuity rows. Failing on 6dddfdf, passing now: senttest `ohm-v5` (now
+LIVE? at 5 / 10 V and the square), `ohm-v5-600`, `cont-v5`, `acmv-sq60`,
+`acmv-sq600`, `acmv-dc5` (no A-JACK in `DBG:SENT:LOG?` from the voltage on;
+A-JACK with a current in A afterwards); switchtest `dc5-pickup`,
+`sq-pickup`; loudtest `ajack-res`, `ajack-cont-v5`, `ajack-acmv` (quiet
+with the square, loud with a current). Passing on both (regression checks):
+switchtest `real-ajack-pickup`, loudtest `ajack-acv-auto` (AUTO mV-first:
+the clip step of 46370df's fix already leaves mV in the model).
+
+#### Device check list (jack check)
+
+A jack empty unless stated; alarm Off (quiet rule); read `DBG:SENT?` and
+`DBG:SENT:LOG?`:
+1. RES (AUTO and manual 600 Ω), continuity: V-COM open, then 1, 3, 5, 10 V
+   DC and the 0 / 9.5 V square, 10 s each. Expect no A-JACK; LIVE? from 5 V
+   (RES) / 1 V (continuity). Note fields 14 / 15 wherever field 8 (hits)
+   grows: they settle the OP1O point above.
+2. RES and continuity, V-COM open: fields 14 / 15 stay -1 / 0.
+3. AC V AUTO (mV-first) and manual 60 / 600 mV with the square: no A-JACK in
+   the log.
+4. With a current in A (not wired yet), V-COM open: RES, continuity, AC mV:
+   A-JACK within ~1 s; field 14 = 0, field 15 near 2.17 V (RES 600 Ω) /
+   -0.48 V (continuity).
 
 ## 5. Fuse, CAT and current limits (the DM40 manual)
 

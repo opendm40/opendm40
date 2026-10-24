@@ -963,7 +963,7 @@ detected](#what-cannot-be-detected)).
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large. The meter moves to the 10 A shunt at once. After 3 s the badge turns amber **10A**: the meter measures fine, but not on your range. | A functions and the power meter, fixed range. In autorange the meter just moves up to 6 A. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
-| **LIVE?** | Voltage on circuit - power off | A reading only an external voltage can cause (a negative resistance). | Ω, continuity, diode. |
+| **LIVE?** | Voltage on circuit - power off | A reading only an external voltage can cause (a negative resistance), or in Ω and continuity a voltage on the V/Ω jack that would otherwise look like a current in the A jack (Ω: from about 3-5 V). | Ω, continuity, diode. |
 | **DC?** | DC voltage here: use DC V? | AC V sees a DC voltage and almost no AC. | AC V. |
 | **AC?** | AC voltage here: use AC V? | DC V (6 V range) sees a voltage swinging both ways. | DC V. |
 | **FUSE?** | 0 A for 60 s: check the fuse? | A current function read zero for a minute. The fuse may be blown. | A functions. |
@@ -1069,8 +1069,12 @@ It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
   a current. Mains blows the fuse in under a millisecond.
 - A blown fuse: the meter reads 0 A. FUSE? appears after a minute; the fuse
   check confirms it.
-- A positive voltage on a circuit in Ω, continuity or diode: it looks like
-  an open circuit. LIVE? needs a negative or alternating voltage.
+- A positive voltage below about 3 V on a circuit in Ω, or any positive
+  voltage in diode: it looks like an open circuit. LIVE? needs a negative or
+  alternating voltage there, or (Ω) about 3-5 V and more.
+- A current in the A jack while a voltage is also on the V/Ω jack: Ω and
+  continuity show LIVE?, AC mV shows nothing (the reading is over range).
+  A-JACK shows only with the V/Ω jack free.
 
 ![Two cases no alert can see](img/cannot-detect.png)
 
@@ -2580,7 +2584,9 @@ Untested on a real meter:
   diode beeps, the 0.28 mA Ω test current, PT100, PT1000 and the NTC sensors.
 - Alerts: the alerts that need a current through the A jack (A-JACK,
   A-PROT, OVLD) and the danger alarm's sound. The fuse check needs a
-  re-check.
+  re-check. LIVE? instead of a false A-JACK with 5 V or more on V/Ω in Ω
+  and continuity, and no A-JACK from a large signal in AC mV (fixed in the
+  emulator).
 - Oscilloscope: pulse and runt triggers, cursors, pinch, double tap,
   long-press centring, holding a corner to repeat, Axis lock and Hold drag,
   the persistence modes, auto-set keeping AC coupling.
@@ -2596,8 +2602,6 @@ Untested on a real meter:
 
 Known problems:
 
-- With 5 V or more between the V and COM jacks, Ω and continuity can show a
-  false **A-JACK** (without the alarm).
 - While the scope side is powered (combined view, scope page, generator on,
   or **Both always**), a fast square wave on the multimeter input reads
   about 0.2 % high. DC readings are not affected noticeably.

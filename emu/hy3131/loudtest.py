@@ -69,6 +69,8 @@ TOAST = 'tap 240 160'     # dialog::TOAST centre
 #         ('starts', t0, t1, set)             the first alarm write after t0 is before t1
 #         ('stops', t, t1)                    CCR1 0 and ARR 11199 (stock pitch) at t1 (a
 #                                             'quiet' check from t1 follows each one)
+# never: (alert, t0, t1): no SCPI row with it in t0..t1 (virtual s) and no assertion of it there
+#        in DBG:SENTinel:LOG? (a transient between two rows)
 # seen: (SYST:ALER?, DBG:ALARm? prefix) pairs that must appear in some SCPI row
 #       (DBG:ALARm? = sounding,silenced,events,setting)
 SC = {
@@ -125,14 +127,39 @@ SC = {
                       acts={24.0: ['CONF:VOLT:DC']},  # virtual s (it was fw uptime 21.0, ~3 s behind)
                       checks=[('quiet', 6, 24), ('starts', 24, 25.6, LOUD), ('loud', 24.5, 29.5, LOUD), ('stops', 30, 31.8),
                               ('quiet', 31.8, 34)],
+                      # 5 V on V-COM: LIVE? (the jack check), the real current: A-JACK
                       seen=[('AJACK', '0,0,0,0'), ('AJACK', '1,0,1,0')],
-                      seen_func=[('AJACK', '0,0,0,0', '"RES"')]),
+                      seen_func=[('AJACK', '0,0,0,0', '"RES"'), ('LIVE', '0,0,0,0', '"RES"')]),
     # Continuity (the AD2 peak on PB1), a real 2 mA in A: badge only, no alarm (f0d21eb item 4:
     # 5 V on V-COM gives the same A-JACK there).
     'ajack-cont': dict(func='CONT', run_for=22, setup=['SYST:BEEP:VOL 0'],
                        script=[(0, 'dmm open;r:10'), (10, 'dmm open;isrc:0.002')],
                        checks=[('quiet', 6, 22)],
                        seen_func=[('AJACK', '0,0,0,0', '"CONT"')]),
+    # Continuity with 5 V on V-COM (device f0d21eb item 4): LIVE?, quiet; then a real 2 mA in A
+    # with V-COM open: A-JACK, badge only (soft).
+    'ajack-cont-v5': dict(func='CONT', run_for=26, setup=['SYST:BEEP:VOL 0'],
+                          script=[(0, 'monitor sysbus.hy3131 Pb1VjackMv 10'), (0, 'dmm open;r:10'), (8, 'dmm open;vsrc:5'),
+                                  (16, 'dmm open;isrc:0.002')],
+                          checks=[('quiet', 6, 26)],
+                          seen_func=[('LIVE', '0,0,0,0', '"CONT"'), ('AJACK', '0,0,0,0', '"CONT"')]),
+    # AC mV (manual 600 mV) with the 0 / 9.5 V 40 Hz square on V-COM, the A jack empty (device
+    # 46370df: AJACK,AD1PK_PB1 and the loud alarm; the model's mvclamp / mvpb1): quiet, no
+    # A-JACK row; then the square off and a real 5 mA AC in A: loud (AC mV is not a soft row);
+    # off at 26 -> stops.
+    'ajack-acmv': dict(func='VOLT:AC 0.6', run_for=30, setup=['SYST:BEEP:VOL 0'],
+                       script=[(0, 'dmm open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50'),
+                               (8, 'dmm vsrc:4.776,ac=4.776,f=40,shape=square'),
+                               (18, 'dmm vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60'), (26, 'dmm isrc:none')],
+                       checks=[('quiet', 6, 18), ('starts', 18, 20.5, LOUD), ('loud', 19, 25.5, LOUD), ('stops', 26, 27.8),
+                               ('quiet', 27.8, 30)],
+                       seen=[('AJACK', '1,0,1,0')], never=[('AJACK', 6, 18)]),
+    # The same square in AC V AUTO (mV-first, the device's case): the range walks up out of mV
+    # (~2 s); quiet and no A-JACK through it.
+    'ajack-acv-auto': dict(func='VOLT:AC', run_for=26, setup=['SYST:BEEP:VOL 0'],
+                           script=[(0, 'dmm open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50'),
+                                   (10, 'dmm vsrc:4.776,ac=4.776,f=40,shape=square')],
+                           checks=[('quiet', 6, 26)], never=[('AJACK', 6, 26)]),
     # Above the 10 A rating in DC A: 12 A (OL on the 10 A range) for 1 s -> loud; 5 A -> stops.
     'i10': dict(func='CURR:DC', run_for=30, setup=['SYST:BEEP:VOL 0'],
                 script=[(0, 'dmm open'), (10, 'dmm isrc:5'), (16, 'dmm isrc:12'), (24, 'dmm isrc:5')],
@@ -255,7 +282,8 @@ def run(name):
             acts = {mk.fw(ta) if mk.zero is not None else ta: c for ta, c in sc.get('acts', {}).items()}
             while p.poll() is None:
                 row = {}
-                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:ALARm?', 'SYST:ALER:ALARm?', 'SYST:BEEP:VOL?', 'FUNC?']:
+                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:ALARm?', 'SYST:ALER:ALARm?', 'SYST:BEEP:VOL?', 'FUNC?'] + \
+                        (['DBG:SENT:LOG?'] if sc.get('never') else []):
                     tm.write(q)
                     row[q] = tm.read(timeout=60).decode(errors='replace').strip()
                 row['t'] = int(row['DBG:PING?'].split(',')[0]) / 1000.0
@@ -292,6 +320,20 @@ def run(name):
         if not any(r['SYST:ALER?'] == a and r['DBG:ALARm?'].startswith(pre) and r.get('FUNC?') == fn for r in rows):
             ok = False
             bad.append('row %s %s in %s never seen' % (a, pre, fn))
+    for a, t0, t1 in sc.get('never', []):
+        # no row with this alert in t0..t1 (virtual s, as the checks; on the fw clock), nor an
+        # assertion in the firmware's log
+        if mk.zero is not None:
+            t0, t1 = mk.fw(t0), mk.fw(t1)
+        hit = [r['t'] for r in rows if t0 <= r['t'] < t1 and r['SYST:ALER?'] == a]
+        for r in rows:
+            for e in r.get('DBG:SENT:LOG?', '').split(';')[1:]:
+                f = e.split(',')
+                if len(f) == 3 and f[0] == a and t0 <= int(f[2]) / 1000.0 < t1:
+                    hit.append(int(f[2]) / 1000.0)
+        if hit:
+            ok = False
+            bad.append('%s at %s' % (a, ' '.join('%.2f' % x for x in sorted(set(hit))[:6])))
     if not rows:
         ok = False
         bad.append('no SCPI rows')

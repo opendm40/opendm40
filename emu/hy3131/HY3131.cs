@@ -445,6 +445,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// 0 / 9.5 V square = a node swing of 0 .. 1.21 V: "mvclamp:1.212". Where the clamp sits and its
         /// shape are INFERRED (a symmetric hard clip). AC mV rows only. 0 = none.
         public double MvClampV;
+        /// Ohm: a positive source on the jack above the ohm source's open-circuit voltage (the drop
+        /// across Rref reversed) reads +full scale, OL (device 35fce2a 7b: 5 / 10 V DC on V-COM read
+        /// OL on every range 600 ohm .. 60 Mohm, never the negative code of a source of the other
+        /// sign). Default on; "ohmrevol:0" = the plain ratio (a negative code, LIVE?).
+        public bool OhmRevOl = true;
         /// PB1 picking up the mV clamp's current in the AC mV rows (opt-in, "mvpb1:mV per V" of the jack
         /// beyond the clamp; device 46370df: the same square asserted AJACK,AD1PK_PB1 with the A jack
         /// empty; the ratio is INFERRED: 10 mV / V puts 83 mV peaks on PB1, over the 23.75 mV threshold).
@@ -770,6 +775,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "swtr": SwTrMv = o.Value; break;
                 case "mvclamp": MvClampV = o.Value; break;
                 case "mvpb1": MvPb1Mv = o.Value; break;
+                case "ohmrevol": OhmRevOl = o.Value != 0; break;
                 case "ohmexit": OhmExitBoth = o.Value; break;
                 case "ohmexitlo": OhmExitLow = o.Value; break;
                 case "ohmexitrst": OhmExitRst = o.Value != 0; break;
@@ -1281,6 +1287,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 // PB2, AD2 = OP2O - PB3 = the 10 mohm element's drop, instantaneous
                 return (int)Math.Round(Pb2Volts(t) * Ad2Scale());
             }
+            if(Ad2OnOp1Jack)
+            {
+                // opendm40 jack check: AD2 = OP1O - PB3 = the row's input node, instantaneous
+                return (int)Math.Round(JackOp1Volts(t) * Ad2Scale());
+            }
             if(Ad2OnPb1Sentinel)
             {
                 // opendm40 sentinel (continuity / diode / capacitance r0..4): OP2 (x1) on PB1, AD2 =
@@ -1324,6 +1335,26 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private bool Ad2OnPb2Probe =>
             (role == Role.DcV || role == Role.DcMv || role == Role.Ohm || role == Role.Temp)
             && (regs[0x32] & 0xF0) == 0xE0 && (regs[0x27] >> 6) == 1 && ((regs[0x27] >> 4) & 3) == 2;
+
+        /// The opendm40 jack check (sentinel.rs `jack_row` / continuity's jack window): AD2 = OP1O -
+        /// PB3 in the ohm / continuity rows, OP1 (x1) on the row's own input (PB0 / SENSE).
+        private bool Ad2OnOp1Jack =>
+            (role == Role.Ohm || role == Role.Cont) && EnOp1
+            && (regs[0x27] >> 6) == 0 && ((regs[0x27] >> 4) & 3) == 2;
+
+        /// OP1O in the ohm / continuity rows, instantaneous: the node across Rx (Fe.OhmNode, DC) plus
+        /// the AC part of a source on the jack, within OP1's output swing (AGND - 1.18 V .. VDDA =
+        /// AGND + 2.55 V, the source map's VSS / VDDA; the clip itself is INFERRED).
+        private double JackOp1Volts(double t)
+        {
+            double vs, rref, vx, vref;
+            OhmSource(out vs, out rref);
+            Fe.OhmNode(vs, rref, out vx, out vref);
+            double dc, ac, hz, duty; string shape;
+            Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
+            if(Fe.RelayPa == 1 && ac > 0) vx += Wave(t, dc, ac, hz, shape, duty) - dc;
+            return Math.Max(-1.18, Math.Min(2.55, vx));
+        }
 
         /// The opendm40 DC-coupled V row (ad2exp.rs dcv_row): an AC V row with OP1 on and SAD2IP = OP1O.
         private bool Ad2OnOp1Dc => role == Role.AcV && EnOp1 && (regs[0x27] >> 6) == 0;
@@ -1598,6 +1629,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var pol = ((regs[0x28] >> 4) & 7) == 4 && (regs[0x28] & 7) == 4 ? -1.0 : 1.0;
                 // open jack: vx -> vs, vref -> 0 with the same sign: the ratio goes to +infinity
                 if(Math.Abs(vref) < 1e-9) { code = pol * 1e12; break; }
+                // a source above the open-circuit voltage (vref reversed): OL on the device (OhmRevOl)
+                if(OhmRevOl && role == Role.Ohm && vref * vs < 0 && vx * vs > 0) { code = pol * 1e12; break; }
                 code = 0.9 * vx / vref * 8388606.0 * pol;
                 code *= ig / rowIg;
                 break;
@@ -2030,6 +2063,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             double dc, ac, hz, duty; string shape;
             Fe.ACurrent(out dc, out ac, out hz, out shape, out duty);
             var v = Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR + SwTr(t);
+            if(Pb1VjackMv != 0 && role == Role.Cont)
+            {
+                // the V jack on PB1 in the continuity row as in ohm (SentinelNode; device f0d21eb /
+                // 0774e70: the AD2 peak on PB1 read -99 100 / +124 800 at 5 V DC, +-400 at 1 V)
+                Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
+                v += Pb1VjackMv * 1e-3 * Wave(t, dc, ac, hz, shape, duty);
+            }
             if(MvPb1Mv != 0 && MvClampV > 0 && role == Role.AcMv)
             {
                 // the mV clamp's current (MvPb1Mv): the jack beyond the clamp, scaled

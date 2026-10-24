@@ -52,7 +52,7 @@ import emusync  # noqa: E402
 # the Multimeter tile (the rail back: a chip restart).
 F = {
     'dcv': ['CONF:VOLT:DC'], 'dcmv': ['CONF:VOLT:DC 0.6'], 'dcv60': ['CONF:VOLT:DC 60'],
-    'acv': ['CONF:VOLT:AC'], 'acmv': ['CONF:VOLT:AC 0.6'], 'vacdc': ['CONF:VOLT:ACDC'], 'vauto': ['CONF:VOLT:AUTO'],
+    'acv': ['CONF:VOLT:AC'], 'acmv': ['CONF:VOLT:AC 0.6'], 'acmv60': ['CONF:VOLT:AC 0.06'], 'vacdc': ['CONF:VOLT:ACDC'], 'vauto': ['CONF:VOLT:AUTO'],
     'dca': ['CONF:CURR:DC'], 'dcma': ['CONF:CURR:DC 0.06'], 'dcua': ['CONF:CURR:DC 0.0006'],
     'aca': ['CONF:CURR:AC'], 'acma': ['CONF:CURR:AC 0.06'], 'acua': ['CONF:CURR:AC 0.0006'], 'aca10': ['CONF:CURR:AC 10'],
     'aacdc': ['CONF:CURR:ACDC'], 'aauto': ['CONF:CURR:AUTO'],
@@ -112,6 +112,9 @@ def allowed_for(inp, step):
             a |= {'LIVE'}
         if step == 'pow':
             a |= {'DC', 'AC'}
+    if inp == 'sq':
+        # the 0 / 9.5 V 40 Hz square: what dc5 and ac2 allow
+        return allowed_for('dc5', step) | allowed_for('ac2', step)
     if inp == 'ac2':
         if step in ('dcv', 'vacdcc'):
             a |= {'AC'}
@@ -131,6 +134,21 @@ SC = {
     'open': ('open', 'open', [], None, {}),
     'dc5': ('open;vsrc:5', 'dc5', [], None, {}),
     'ac2': ('open;vsrc:0,ac=2,f=50', 'ac2', [], None, {}),
+    # A voltage on V-COM, the A jack empty, with the model's PB1 pickups (Pb1VjackMv: ohm /
+    # temperature / continuity, device 35fce2a 7b / f0d21eb item 4; mvclamp / mvpb1: the AC mV
+    # clamp, device 46370df): no A-JACK in any function, also through AC V AUTO's mV steps
+    # (acv: mV-first; CONF:VOLT:AC 0.06 / 0.6 manual) and ohm / continuity entries.
+    'dc5-pickup': ('open;vsrc:5;mvclamp:1.212;mvpb1:10', 'dc5', ['sysbus.hy3131 Pb1VjackMv 10'],
+                   ['dcv', 'res', 'dcv', 'cont', 'acv', 'res', 'acmv', 'cont', 'acmv60', 'dcv', 'acv', 'temp', 'res',
+                    'diod', 'cont', 'acv', 'dcv'], {}),
+    'sq-pickup': ('open;vsrc:4.776,ac=4.776,f=40,shape=square;mvclamp:1.212;mvpb1:10', 'sq',
+                  ['sysbus.hy3131 Pb1VjackMv 10'],
+                  ['dcv', 'res', 'dcv', 'cont', 'acv', 'res', 'acmv', 'cont', 'acmv60', 'dcv', 'acv', 'temp', 'res',
+                   'diod', 'cont', 'acv', 'dcv'], {}),
+    # ... and a real current in A (V-COM open) is still caught after every switch in
+    'real-ajack-pickup': ('open;isrc:0.001;mvclamp:1.212;mvpb1:10', 'ajack', ['sysbus.hy3131 Pb1VjackMv 10'],
+                          ['dcv', 'res', 'dcv', 'cont', 'dcv', 'acmv', 'dcv', 'acmv60', 'dcv', 'res'],
+                          {'res': ('AJACK', 2.0), 'cont': ('AJACK', 1.2), 'acmv': ('AJACK', 2.0), 'acmv60': ('AJACK', 2.0)}),
     # model knobs: the AD1 decimation memory (a mux switch without a restart mixes the old
     # input into the next 3 conversions) and AD2's start-up results 3000 codes off (f3aea2f)
     'open-mix': ('open;ad1mix:1', 'open', ['sysbus.hy3131 Ad2StartGlitch 3000'], None, {}),
