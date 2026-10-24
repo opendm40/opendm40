@@ -931,6 +931,11 @@ fn tap_step_tests(ck: &mut Ck) {
     m.ycur = Some([140, 220]); // Y1 line on the same row
     ck.t("near grab: CH1 marker over the Y1 line (equal distance: the marker)", gs(&m, 3, 0, false, 6, 160) == Press::Marker(true, 3) && gs(&m, 4, 0, false, 6, 160) == Press::Marker(true, 0));
     ck.t("tap cycling: CH1 selected, a tap on it -> Y1", su::graph_cycle(&m, 0, 0, false, 6, 160) == Some((true, 3)));
+    let mut m = d;
+    m.guide = true; // CH1 selected (sel_v 0), its zero line at y 160
+    let q = su::graph_pick(&m, 0, 0, false, 200, 165);
+    ck.t("guide line of CH1: a line zone (the drag decides its axis, a pan still pans)", q.is_some_and(|q| q.level && q.id == 0 && q.line()));
+    ck.t("marker glyph zones are not line zones", su::graph_pick(&d, 0, 0, false, 406, 125).is_some_and(|q| !q.line()));
     // Top-bar badges: hit map against the drawn badges, then the edges.
     host::reset(0);
     su::invalidate();
