@@ -1188,8 +1188,54 @@ fn vread(a: &[String]) {
     );
 }
 
+/// `t names`: csvlog::parse_path, the MMEM name argument (device 46370df:
+/// "SHOTS/LOG005.DLG" found LOGS/LOG005.DLG). A prefix must name the file's
+/// own directory; none = any (its directory, then the root).
+fn names() {
+    let mut fails = 0;
+    for (arg, want) in [
+        ("LOG005.DLG", Some(("LOG005  DLG", true))),
+        ("\"LOGS/LOG005.DLG\"", Some(("LOG005  DLG", true))),
+        ("logs\\log005.dlg", Some(("LOG005  DLG", true))),
+        ("/LOGS/LOG005.CSV", Some(("LOG005  CSV", true))),
+        ("LOGS/FAST001.DLG", Some(("FAST001 DLG", true))),
+        ("LOGS/FAST001.CSV", Some(("FAST001 CSV", true))),
+        ("SHOTS/S012.BMP", Some(("S012    BMP", true))),
+        ("SCOPE/SCOP000.DLG", Some(("SCOP000 DLG", true))),
+        ("SCOPE/SCOP000.CSV", Some(("SCOP000 CSV", true))),
+        ("SHOTS/LOG005.DLG", Some(("LOG005  DLG", false))),
+        ("SCOPE/LOG005.CSV", Some(("LOG005  CSV", false))),
+        ("LOGS/S012.BMP", Some(("S012    BMP", false))),
+        ("LOGS/SCOP000.DLG", Some(("SCOP000 DLG", false))),
+        ("SHOTS/FAST001.DLG", Some(("FAST001 DLG", false))),
+        ("LOGS/README.TXT", Some(("README  TXT", false))),
+        ("README.TXT", Some(("README  TXT", true))),
+        ("INFO/UID.BIN", None),
+        ("LOGS/", None),
+        ("TOOLONGNAME.DLG", None),
+    ] {
+        let got = csvlog::parse_path(arg.as_bytes());
+        let got = got.map(|(n, ok)| (String::from_utf8_lossy(&n).into_owned(), ok));
+        let want = want.map(|(n, ok)| (n.to_string(), ok));
+        if got == want {
+            println!("ok   names {arg} -> {got:?}");
+        } else {
+            println!("FAIL names {arg} -> {got:?}, want {want:?}");
+            fails += 1;
+        }
+    }
+    if fails > 0 {
+        std::process::exit(1);
+    }
+    println!("names PASS");
+}
+
 fn main() {
     let a: Vec<String> = env::args().collect();
+    if a.get(1).is_some_and(|x| x == "names") {
+        names();
+        return;
+    }
     if a[2] == "vread" {
         vread(&a);
         return;

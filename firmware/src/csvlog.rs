@@ -1590,9 +1590,20 @@ pub fn delete(name: &[u8; 11]) -> Result<(), GErr> {
 
 /// "log1.csv" / "LOG001.CSV" -> "LOG1    CSV" (8.3, upper case). A
 /// directory prefix "LOGS/", "SHOTS/" or "SCOPE/" (any case, '/' or '\\', a
-/// leading '/' too) is accepted and dropped: the names are unique across
-/// the directories (fatdir::dir_of). None: not an 8.3 name.
+/// leading '/' too) is accepted and dropped. None: not an 8.3 name.
+#[allow(dead_code)] // host tests (tools/fatren-test); MMEM uses parse_path
 pub fn parse_name(s: &[u8]) -> Option<[u8; 11]> {
+    parse_path(s).map(|(n, _)| n)
+}
+
+/// `parse_name`, and whether a directory prefix names the file's own
+/// directory (as MMEM:CAT? and the USB volume list it: S*.BMP in SHOTS/,
+/// LOG* / FAST* .DLG / .CSV in LOGS/, SCOP* in SCOPE/; fatdir::dir_of).
+/// False for a prefix of another directory, or for a file that is in none
+/// (device 46370df: "SHOTS/LOG005.DLG" found LOGS/LOG005.DLG): MMEM:DATA? /
+/// MMEM:DELete then answer "File name not found". True without a prefix.
+#[inline(never)] // .cold (link-native.x): one MMEM:DATA? / MMEM:DELete argument
+pub fn parse_path(s: &[u8]) -> Option<([u8; 11], bool)> {
     let s = match s {
         [b'"', m @ .., b'"'] => m,
         _ => s,
@@ -1601,9 +1612,15 @@ pub fn parse_name(s: &[u8]) -> Option<[u8; 11]> {
         [b'/' | b'\\', m @ ..] => m,
         _ => s,
     };
+    let mut dir = None;
     let s = match s.iter().position(|&c| c == b'/' || c == b'\\') {
-        Some(i) if fatdir::DIRS.iter().any(|d| d.len() >= i && d[..i].eq_ignore_ascii_case(&s[..i]) && d[i..].iter().all(|&c| c == b' ')) => &s[i + 1..],
-        Some(_) => return None,
+        Some(i) => match fatdir::DIRS.iter().find(|d| d.len() >= i && d[..i].eq_ignore_ascii_case(&s[..i]) && d[i..].iter().all(|&c| c == b' ')) {
+            Some(d) => {
+                dir = Some(d);
+                &s[i + 1..]
+            }
+            None => return None,
+        },
         None => s,
     };
     let dot = s.iter().position(|&c| c == b'.').unwrap_or(s.len());
@@ -1618,7 +1635,15 @@ pub fn parse_name(s: &[u8]) -> Option<[u8; 11]> {
     for (i, &c) in ext.iter().enumerate() {
         n[8 + i] = c.to_ascii_uppercase();
     }
-    n.iter().all(|&c| c.is_ascii_graphic() || c == b' ').then_some(n)
+    if !n.iter().all(|&c| c.is_ascii_graphic() || c == b' ') {
+        return None;
+    }
+    // A generated LOGnnn.CSV / SCOPnnn.CSV lives where its .DLG does.
+    let mut home = n;
+    if home[8..] == *b"CSV" {
+        home[8..].copy_from_slice(b"DLG");
+    }
+    Some((n, dir.map_or(true, |d| fatdir::dir_of(&home) == Some(d))))
 }
 
 /// "LOG001  CSV" -> "LOG001.CSV".

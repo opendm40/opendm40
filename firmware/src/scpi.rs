@@ -1604,6 +1604,7 @@ pub const ERRQ: usize = 8;
 const BAD: &str = "Illegal parameter value";
 const RANGE: &str = "Data out of range";
 const MISSING: &str = "Missing parameter";
+const NOT_FOUND: &str = "File name not found";
 const NOT_ALLOWED: &str = "Parameter not allowed";
 const SYNTAX: &str = "Syntax error";
 const QUEUE_OVERFLOW: &str = "Queue overflow";
@@ -2523,7 +2524,7 @@ impl Scpi {
                     } else if kw(sub, "DATA") && query {
                         // "<name>"[,<offset>[,<length>]]
                         let mut it = arg.split(|&c| c == b',');
-                        let name = it.next().and_then(|n| crate::csvlog::parse_name(trim(n)));
+                        let name = it.next().and_then(|n| crate::csvlog::parse_path(trim(n)));
                         let mut num = |d: u32| -> Option<u32> {
                             match it.next() {
                                 None => Some(d),
@@ -2531,15 +2532,25 @@ impl Scpi {
                             }
                         };
                         match (name, num(0), num(MMEM_DATA_MAX)) {
-                            (Some(n), Some(off), Some(len)) => Out::Mmem(Mmem::Data(n, off, len.min(MMEM_DATA_MAX))),
+                            // Another directory's prefix (csvlog::parse_path).
+                            (Some((_, false)), Some(_), Some(_)) => {
+                                self.set_err(NOT_FOUND);
+                                continue;
+                            }
+                            (Some((n, true)), Some(off), Some(len)) => Out::Mmem(Mmem::Data(n, off, len.min(MMEM_DATA_MAX))),
                             _ => {
                                 self.err_arg(no_arg, "Illegal parameter value");
                                 continue;
                             }
                         }
                     } else if kw(sub, "DELete") && !query {
-                        match crate::csvlog::parse_name(trim(arg)) {
-                            Some(n) => Out::Mmem(Mmem::Del(n)),
+                        match crate::csvlog::parse_path(trim(arg)) {
+                            Some((n, true)) => Out::Mmem(Mmem::Del(n)),
+                            // Not the file of the same name in another directory.
+                            Some((_, false)) => {
+                                self.set_err(NOT_FOUND);
+                                continue;
+                            }
                             None => {
                                 self.err_arg(no_arg, "Illegal parameter value");
                                 continue;
@@ -2921,7 +2932,8 @@ fn nr3(b: &mut [u8; 20], v: f32) -> usize {
 
 /// `x * 10^n` rounded to an integer, with one rounding: in f64, where
 /// 10^n by repeated multiplication is exact for |n| <= 22 (a negative `n`
-/// divides by 10^-n). For nr3's 7 digits.
+/// divides by 10^-n). For nr3's 7 digits. The rounding adds 2^52 and takes
+/// the low mantissa bits (no f64 compare / convert helpers: region B).
 fn nr3_scale(x: f32, n: i32) -> u32 {
     let mut p = 1.0f64;
     for _ in 0..n.unsigned_abs().min(60) {
@@ -2929,5 +2941,5 @@ fn nr3_scale(x: f32, n: i32) -> u32 {
     }
     let x = x as f64;
     let y = if n >= 0 { x * p } else { x / p };
-    (y + 0.5) as u32
+    (y + 4_503_599_627_370_496.0).to_bits() as u32
 }

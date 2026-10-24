@@ -26,8 +26,9 @@ mod clock {
 mod csvlog {
     pub const INTERVALS_S: [u32; 4] = [0, 1, 10, 60];
     pub const DURATIONS_S: [u32; 5] = [0, 600, 3600, 8 * 3600, 24 * 3600];
-    pub fn parse_name(s: &[u8]) -> Option<[u8; 11]> {
-        if s.is_empty() { None } else { Some([b' '; 11]) }
+    pub fn parse_path(s: &[u8]) -> Option<([u8; 11], bool)> {
+        // "WRONG/..." stands for a prefix of another directory.
+        if s.is_empty() { None } else { Some(([b' '; 11], !s.starts_with(b"\"WRONG/"))) }
     }
 }
 mod danger {
@@ -95,7 +96,7 @@ mod uid {
     }
 }
 
-use scpi::{parse_num, parse_num_u, Cmd, Log, Out, Rng, Scpi};
+use scpi::{parse_num, parse_num_u, Cmd, Log, Mmem, Out, Rng, Scpi};
 
 static mut FAILS: u32 = 0;
 
@@ -382,6 +383,23 @@ fn nr3_exact() {
     check(bad == 0, &format!("nr3 sweep: {bad} of 200000 off by more than one digit"));
 }
 
+/// MMEM:DATA? / MMEM:DELete with a prefix of another directory (the stub
+/// parse_path: "WRONG/..."): -256, nothing for the main loop to run (device
+/// 46370df: "SHOTS/LOG005.DLG" read LOGS/LOG005.DLG; a delete would have
+/// removed it).
+fn mmem_dirs() {
+    let mut s = Scpi::new();
+    check(matches!(s.handle(b"MMEM:DATA? \"LOGS/LOG005.DLG\",0", 1), Out::Mmem(Mmem::Data(_, 0, _))), "MMEM:DATA? own prefix runs");
+    check(matches!(s.handle(b"MMEM:DEL \"LOGS/LOG005.DLG\"", 1), Out::Mmem(Mmem::Del(_))), "MMEM:DEL own prefix runs");
+    check(err(&mut s) == "0,\"No error\"", "no error");
+    check(!matches!(s.handle(b"MMEM:DATA? \"WRONG/LOG005.DLG\",0", 1), Out::Mmem(_)), "MMEM:DATA? other prefix: not run");
+    let e = err(&mut s);
+    check(e.starts_with("-256,"), &format!("MMEM:DATA? other prefix: {e}"));
+    check(!matches!(s.handle(b"MMEM:DEL \"WRONG/LOG005.DLG\"", 1), Out::Mmem(_)), "MMEM:DEL other prefix: not run");
+    let e = err(&mut s);
+    check(e.starts_with("-256,"), &format!("MMEM:DEL other prefix: {e}"));
+}
+
 fn idn() {
     let mut s = Scpi::new();
     let r = reply(&mut s, "*IDN?");
@@ -400,6 +418,7 @@ fn main() {
     error_queue();
     idn();
     nr3_exact();
+    mmem_dirs();
     let f = unsafe { FAILS };
     if f > 0 {
         println!("{f} FAILED");
