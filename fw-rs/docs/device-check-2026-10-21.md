@@ -2896,3 +2896,130 @@ enabled; the meter on the DMM page, DC V AUTO+, RATE FAST.
   name. Two of them had filled the disk for a short while (M2a, M2b).
 - **Calibrator:** back on the 10 Hz square, enabled; registers equal to the start dump except 0x2C (live) and
   0x0E / 0x2E 0x1A -> 0x19 (the read-only live value of the f0d21eb note). During the check: 24 V and 5 V DC.
+
+## ab7184c: switch latency on the device (2026-10-24 04:15 - 05:35)
+
+The coordinator had installed ab7184c (rust-fw-poc: the fastswitch branch, docs/switch-latency.md 6: the new
+function's frame at once, provisional readings in grey, ohm entry 150 ms, V / A entry 300 ms, manual V range 250 ms,
+vet_fresh, the AUTO READ? / MEAS? wait). `*IDN?` = `Alientek,DM40A,<UID>,dm40-fw 0.1`, `DBG:FLASH?`
+`EF4018,4096,0,...`. INFO/FIRMWARE.BIN, read with the page cache dropped, is byte-equal to the image (sha256
+89eebc77…18cc). `DBG:VDISK:MIR?` `1,4,1,5297` (WRITTEN on this first boot, 5.30 s). Crash count 0, marker VALID,
+HEALTHY at the start and the end. No flashing. **Quiet rule (owner asleep):** `SYST:ALER:ALARm?` OFF and
+`SYST:BEEP:VOL?` 0 at the start and the end, no sound tests (the "Leads in A jack?" reminder's beep after every
+A -> V switch played at volume 0). Files are in the session scratchpad's `chk6/`: `settle.py` (the f0d21eb script,
+three cases appended, `ONLY=` filter), `shots2.py` (one value-strip grab per switch at a fixed delay, delays swept,
+pixels classed amber / grey / red), `extra.py` (frame time on the dash rows, READ? after CONF:RES, HOLD while AUTO
+decides), `coup.py`, `fetchtl.py`, `autofetch.py` (AC+DC / AUTO entry), `rng30.py` (items 3 / 4), `holdrel*.py`,
+`sentE.py`, and `out/` (`settle_<tag>.json`, `shots_<tag>/`, `coup_*.json`, `rng_*.json`, `E_*.json`, PNGs). The
+calibrator was found on the 10 Hz square (func 2, 10 000 mHz), enabled; the meter on the DMM page, DC V AUTO+, RATE
+FAST. A jack not wired (A reads ~0).
+
+### Latency: first valid FETCh? after the switch (ms), f0d21eb vs ab7184c
+
+settle.py unchanged (FETC? every ~10 ms after the timed command, 2 reps; in parentheses: within 0.1 % of the final,
+where it differs). The f0d21eb column is `chk3/out/settle_v1.json` (1 V, FAST). The DC V -> RES rows here are on
+the calibrator's **voltage** output, as in the baseline (a resistance of a source: the end value is ~50 Mohm).
+
+| switch | f0d21eb 1 V FAST | ab7184c 1 V FAST | 1 V MED | 5 V FAST | 5 V MED |
+|---|---|---|---|---|---|
+| DC V -> AC V | 460 / 462 (2468 / 2461) | 311 / 307 (2351 / 2464) | 307 / 311 (2464 / 2351) | 311 / 311 (2889 / 2674) | 307 / 307 (2674) |
+| AC V -> DC V | 457 / 460 | **305 / 305** | 305 / 305 (305 / 409) | 305 / 305 | 305 / 305 (968 / 408) |
+| DC V -> RES (V source) | **2672 / 2672** | **319 / 319** (28.2 Mohm first; 50.18 Mohm from 403) | 569 / 569 | OL at 168, one 17.99 Mohm at 518, then OL | OL throughout |
+| RES -> DC V | 558 / 554 | **349 / 354** | 319 / 319 | 319 / 319 | 319 / 319 |
+| DC V -> A, `CONF:CURR:DC 10` (manual 10 A range: 650 ms, unchanged by design) | 758 / 758 | 756 / 756 | 671 / 666 | 756 / 756 | 671 / 666 |
+| DC V -> A, A button tap (`DBG:TAP 103,297`) | - | **396 / 357** | 310 / 311 (554 / 311) | | |
+| DC V -> A, `CONF:CURR:DC` (no range) | - | 356 / 352 | 312 / 312 | | |
+| DC V -> mA (`CONF:CURR:DC 0.06`) | 557 / 559 | **355 / 349** | 306 / 310 | 355 / 349 | 311 / 306 |
+| AC V -> AC+DC | 1372 / 1377 | 1374 / 1374 | 1378 / 1379 | 1380 / 1373 | 1381 / 1379 |
+| DC V 6 -> 60 V manual | 509 / 557 | **358 / 363** | 375 / 374 | 318 / 358 | 376 / 374 |
+| DC V 60 -> 6 V manual | - | 353 / 356 | 369 / 374 | 354 / 353 | 369 / 369 |
+| DC A -> DC V | - | 355 / 350 | 310 / 310 (526) | 355 / 349 | 310 / 310 (516) |
+| DC mA -> DC V | - | 354 / 354 | 309 / 309 | 349 / 356 | 309 / 309 |
+
+- V / A / mA entries and exits: 0.55-0.76 s -> 0.31-0.40 s at FAST, 0.31 s at MED, as the emulator (0.32-0.35 s).
+  `CONF:CURR:DC 10` keeps 0.76 s: it selects the manual 10 A range after the entry (dmm.rs `bt`/SCPI A branch, 650
+  ms row write), as designed ("manual A ranges keep theirs"); the A button and `CONF:CURR:DC` take 0.36-0.40 s.
+- The AC V tail of a DC input is unchanged (2.35-2.89 s to 0.1 %); the first AC value comes 0.15 s earlier.
+- AC V -> AC+DC is unchanged (1.37-1.38 s), as the emulator.
+- The A jack is not wired: every A entry read 0.000 (|I| < 1e-4 A) with no OVERLOAD and no red pixels in the shots.
+
+### Ohm entry on a resistance (calibrator resistance output, 390 / 100 ohm; 3 reps)
+
+| input | rate | first valid FETC? (ms) and its value | correct (0.1 %) from (ms) |
+|---|---|---|---|
+| 390 ohm (reads 392.6) | FAST | 344 (**8.78 Mohm**, then +9.91E37), 1070 (**219.4**), 1072 (**219.6**) | 1383 / 1164 / 1165 |
+| 390 ohm | MED | 1110 (**126.0**), 1105 (**122.4**), 1105 (**125.8**), each held ~0.8 s | 1916 / 1908 / 1913 |
+| 100 ohm (reads 99.95) | FAST | 1070 (99.92), 1070 (**57.2**), 1070 (**57.2**) | 1070 / 1163 / 1162 |
+| 100 ohm | MED | 1315 (99.94), 1102 (**30.0**), 1105 (**33.5**) | 1315 / 1901 / 1917 |
+
+The screen (shots2.py, 390 ohm): "- - Mohm" in grey from the first grab, then **7.136 Mohm / 7.110 Mohm in amber at
+1.0-1.6 s** (FAST) and **12.065 Mohm at 1.3 s, 126.13 / 122.44 ohm at 1.6-2.0 s** (MED), 392.6 ohm from 1.6 s (FAST)
+/ 3.0 s (MED) (`shots_r390f/DCV-RES.png`, `shots_r390m/DCV-RES.png`). `CONF:RES` then `READ?` at once: FAST 221.95
+ohm at 1.07 s, 9.549 Mohm at 0.37 s; MED 12.19 Mohm at 0.37 s, 392.58 ohm at 1.31 s (`out/extra_read.log`). So the
+host gets the wrong values too. New bug 1 below.
+
+### Screen timing
+
+- **Frame:** a 4-row read of the dash rows (y 106-121) right after the command (DC V -> RES, RES -> DC V, DC V -> mA)
+  already holds the grey dashes at 0.00-0.06 s, every delay (`out/extra_frame3.log`): the frame is drawn in the
+  same loop pass as the switch. The f0d21eb screen was blank until 2.0-2.3 s (RES) / 0.5-1.0 s.
+- **First number** (one 0.28 s top-down strip grab per switch, 1 V FAST, `shots_v1f/`): DC V -> mA, A -> DC V, AC V
+  -> DC V, DC V -> AC V, RES -> DC V: dashes in the 0.3 s grab, the number in the 0.5 s grab; DC V -> A (10 A manual)
+  in the 0.8 s grab. DC V 6 -> 60 V: the old amber value to 0.2 s, a grey held "1.000" at 0.3 s (vet), amber 0.999
+  at 0.5 s.
+- **Placeholders, never 0.0000:** every switch showed two grey dashes (VALUE_PROV 144,152,152), never a zero. They
+  read well: mid-height, centred, clearly "no value". The grey provisional digits (AC+DC, AUTO, the 6 -> 60 V vet
+  hold) are the full digit size, legible, and cannot be taken for the amber value or the red >= 30 V colour.
+  Cosmetic: `CONF:CURR:DC 10` from DC V shows the placeholder with the **mA** unit for 0.8 s, then "A" with the
+  value (`shots_v1f/DCV-A.png`): `select(8)` enters mA, the 10 A row follows.
+
+### PASS / FAIL (TODO "Switch latency" device retest)
+
+| # | check | result |
+|---|---|---|
+| 1 | DC V -> RES: frame / first value / no range stuck | **Frame PASS** (dashes at <= 0.06 s). **Time PASS** (V source 2672 -> 319 ms FAST / 569 MED; 390 ohm correct at 1.16-1.38 s FAST, 1.91 s MED). **Values FAIL**: wrong values (8.8 / 7.1 / 12 Mohm, 219 / 126 / 57 / 30 ohm) shown in amber and answered to FETC? / READ? before the right one (new bug 1). An open input was not available (the calibrator disabled is no open) |
+| 2 | DC V <-> A / mA, RES -> DC V, AC V -> DC V vs f0d21eb | **PASS**: 0.31-0.40 s (was 0.46-0.76 s), except `CONF:CURR:DC 10` 0.76 s (manual range, by design). A first reading 0.000, no OVERLOAD |
+| 3 | Manual 6 <-> 60 V at 1 V, 30 switches, FAST and MED (`rng_man_f`, `rng_man_m`) | **PASS**: first FETC? 307-398 ms (FAST), 308-508 ms (MED); every value 0.9987-1.0003 V; no 25-51 % and no 0.767-0.790 V reading |
+| 4 | `VOLT:RANG 600` -> `VOLT:RANG:AUTO ON`, 8 times FAST and MED (`rng_auto_f`, `rng_auto_m`) | **PASS**: ends on 6 V every time; values 0.9916-1.0033 V; never 0.767-0.790 V |
+| 5 | AC+DC entry from DC V: 1 V DC, 10 Hz and 40 Hz square | **Display PASS** at 1 V DC: placeholder at 0.2 s, grey \|DC\| 0.9996 with "AC --" at 0.6 s, amber 0.9992 at 1.5 s (`shots_acdc_dc1/DCV-ACDC.png`). 40 Hz: grey through 3 s (AC part settling, 6.118 V grey); FETC? +9.91E37 until 4.72-4.77 s, then 6.79 V; READ? after CONF answers at 2.36 s +9.91E37 "Data stale" (the documented SCPI_QUICK rule). **Observation** 10 Hz: amber 5.355 V (AC 4.742 + DC 2.487) at 1.5 s and READ? 5.32 V at 1.28 s on the 6 V range for a 0 / 9.5 V square, then the range step (FETC? +9.91E37 at 2.27 s, grey 7.856 V at 3 s): an early "settled" AC+DC value before the overrange step, probably not new (the DC part of a 10 Hz square at FAST jumps 2.5-7 V) |
+| 6 | AUTO coupling | **MEAS:VOLT:AUTO? PASS**: from DC V 1279 ms (1 V DC, DC), 3452 ms (10 Hz, AC 4.784 V), 3910 ms (40 Hz, the tie cap: DC 4.806 V); a later MEAS? 640-849 ms; never "Data stale". **Grey PASS**: the DC part grey with "AC --" until the decision (10 / 40 Hz grey at 3 s). **FETCh? FAIL vs the doc**: it never answers +9.91E37 while AUTO decides: it blocks (sent 0.5-3.0 s after `VOLT:COUP AUTO`, answered at 3.17-4.90 s; the first query after the command blocks until the DC phase's first reading, 1.28 s) and returns the grey DC part (new bug 2). **HOLD after the decision PASS**: amber 0.9994 frozen for 4 s while the input went 1 V -> 10 Hz square, no grey. **HOLD while AUTO decides FAIL** (new bug 3). **REL**: cannot engage before the decision (`rel_on` needs `last_raw`; provisional readings never set it), by design; after the decision REL showed the relative value in amber, no grey (its range hold gives OL on the 9.5 V square, expected) |
+| 7 | No false V-JACK? / A-JACK / AC? after RES -> A / mA and Scope -> DMM: seqE1 + seqE2 at 1 V and 5 V, 70 switches (`E_e1_v1`, `E_e2_v1`, `E_e1_v5`, `E_e2_v5`) | **PASS for RES -> A / mA** (no V-JACK? in DC A, 12 entries) and DC V (no AC?). Known: V-JACK? in AC A (2a, 1.72 s), DC? in AC V (correct), A-JACK in RES at 5 V (6 of 6; now from **0.46-0.55 s**, was 2.86-3.01 s: the ohm entry is earlier; silent, alarm Off). **New (5 V only, 2 of 2): V-JACK? for 0.5 s at 8.06 s after A / mA -> Scope -> DMM** (new bug 4) |
+| 8 | Screenshots of placeholders and grey values | **PASS** (legibility above); cosmetic mA unit on `CONF:CURR:DC 10` |
+
+### New bugs
+
+1. **Wrong ohm values during the ohm range hunt are shown and sent as final.** DC V -> RES on the calibrator's 390 /
+   100 ohm: 8.8 / 7.1 / 12 Mohm on the high ranges, then 219 / 126 / 57 / 30 ohm on the right range, in amber and to
+   FETC? / READ?, for one conversion (FAST) or ~0.8 s (MED), before the right value (1.16-1.92 s). The same shape
+   on stiff sources: 1 V gives 28.2 Mohm then 50.18 Mohm; 5 V gives 17.99 Mohm between two OLs. f0d21eb hid all of
+   it behind its 2.5 s entry deadline. `poll_ohm` shows the first conversion whose q is in range (`ohm_settled`
+   after one 150 ms wait), with no vet of it after a range step. The calibrator simulates the resistance actively,
+   so part of it may be its own lag; the stiff-source cases point at the meter (input / AD1 settling after a
+   range step). Needs a real 4.7 kohm / 100 ohm / 10 Mohm to tell; a fix would vet the first in-range conversion
+   after each ohm range step (as VET_N for V), or show it grey.
+2. **FETCh? while AUTO decides is not +9.91E37.** switch-latency.md 6 and scpi.rs say FETCh? is +9.91E37 until the
+   first decision. On the device it blocks and then answers the provisional DC part: `meter.shown()` is None, so
+   main.rs parks it in `scpi_wait` (deadline + SCPI_WAIT_MS), and the wait expiry answers `auto_prov()`. A FETC?
+   poller sees 1-3 s blocks. Either the doc or the code is wrong.
+3. **RUN (HOLD) while AUTO decides** (10 Hz square, `VOLT:COUP AUTO`, RUN at 1 s; seen 2 of 2): the status bar stays
+   "AUTO+ RUN", the grey provisional DC value (7.033 / 7.187 V) and "AC --" freeze for 8+ s, the decision does not
+   come; the second RUN press gives the decided value at once (amber 6.855 V, AC 4.780 V) (`hold3_*.png`,
+   `hr_hold_during_*.png`). Expected: either HOLD shown (label) with what it froze, or the press ignored.
+4. **A 0.5 s V-JACK? at 8.06 s after A / mA -> Scope -> DMM with 5 V on V-COM** (2 of 2; not at 1 V; 612c45c S1 had
+   none). ctsta reads 0x70 from 0.52 s to **7.75 s** (612c45c: to 6.34 s), 0x50 to 8.01 s, then 0; the 0x70 tail now
+   outlasts the 7 s OHM_EXIT cap, the streak counts from 7.15 s and reaches 10 at 8.06 s; the alert clears at 8.5 s
+   with the 5 V still there. So it is the restart tail, not a steady detection of the source.
+5. Cosmetic: `CONF:CURR:DC 10` from DC V shows the placeholder with the mA unit for ~0.8 s.
+
+### State at the end
+
+- **Device:** ab7184c, DMM page, DC V AUTO+ (`VOLT:RANG:AUTO?` 1, `VOLT:COUP?` DC), RATE FAST, the bargraph row
+  (`e_dmm.png`). `OUTP?` 0 throughout (never switched on). `SYST:ERR?` "No error", `SYST:ALER?` NONE,
+  `SYST:ALER:ALARm?` OFF, `SYST:BEEP:VOL?` 0, `DBG:VDISK:MIR?` 1,4,1,5297. Crash count 0, marker VALID, HEALTHY.
+- **Settings:** 1/3 and 3/3 byte-equal to the start (`s_set*.png` vs `e_set*.png`); 2/3 differs only in the live rate
+  digits (x 277-329, y 48-67). Dim / Shutdown Never, backlight 10 %, volume 0 %, Start page Multimeter, DMM row
+  Bargraph, USB disk "Files live" (`DBG:VDISK:RO?` 1,1), Danger alarm Off.
+- **Disk:** `MMEM:CAT?` equals the start string exactly. No files were created.
+- **Calibrator:** back on the 10 Hz square, enabled. Registers equal to the start dump except 0x2C (live) and
+  0x0E / 0x2E 0x18 -> 0x17 (the read-only live value). Right after the restore 0x0C read 0x2711 and 0x23 0x31C9
+  (as on f0d21eb); 15 min later both matched. During the check: 1 V, 5 V DC, 390 / 100 ohm, the 10 / 40 Hz square.

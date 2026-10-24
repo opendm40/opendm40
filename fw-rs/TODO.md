@@ -2432,6 +2432,28 @@ Firmware:
                READ? +9.91E37 until then. HOLD / REL during these: the frozen value stays, no grey over it.
             7. No false V-JACK? / A-JACK / AC? after RES -> A / mA and scope -> DMM (device check E): the
                sentinel blanks count from the switch, the readings now come ~0.2 s earlier.
+            **Device ab7184c (2026-10-24, device-check-2026-10-21.md "ab7184c: switch latency on the device";
+            calibrator 1 / 5 V, 390 / 100 ohm, 10 / 40 Hz square; no 4.7 kohm, no current, no open input):**
+            1. frame PASS (dashes <= 0.06 s), time PASS (V source 2672 -> 319 ms; 390 ohm right at 1.16-1.38 s
+               FAST, 1.91 s MED), **values FAIL**: the ohm hunt shows / answers wrong values first (8.8 / 7.1 /
+               12 Mohm, then 219 / 126 / 57 / 30 ohm, amber, FETC? / READ?; MED holds one ~0.8 s). Needs a real
+               resistor to split meter vs simulator; fix idea: vet the first in-range conversion after an ohm
+               range step.
+            2. PASS: 0.31-0.40 s (f0d21eb 0.46-0.76 s); `CONF:CURR:DC 10` stays 0.76 s (manual 10 A row, 650 ms,
+               by design; its placeholder shows "mA" for 0.8 s: cosmetic). A reads 0.000, no OVERLOAD.
+            3. PASS (30 switches FAST and MED, 0.31-0.51 s, no 25-51 % / 0.767-0.790 V).
+            4. PASS (8 x FAST and MED).
+            5. PASS on 1 V DC (grey |DC| + "AC --" at 0.6 s, amber at 1.5 s); 40 Hz square grey through 3 s,
+               FETC? +9.91E37 to 4.7 s. Observation: on the 10 Hz square an amber 5.36 V (READ? 5.32 V) on the
+               6 V range before the overrange step.
+            6. MEAS:VOLT:AUTO? PASS (1.28 / 3.45 / 3.91 s, never "Data stale"); grey PASS; HOLD after the
+               decision PASS. **FAIL: FETCh? while AUTO decides blocks 1-3 s and answers the grey DC part, not
+               +9.91E37** (main.rs Fetch -> scpi_wait -> auto_prov). **FAIL: RUN while AUTO decides** leaves
+               "RUN" in the status bar and freezes the grey value and the decision until RUN again. REL cannot
+               engage before the decision (no last_raw), by design.
+            7. PASS for RES -> A / mA (70 switches, 1 / 5 V). A-JACK in RES at 5 V (known) now from 0.46 s.
+               **New: 0.5 s V-JACK? at 8.06 s after A / mA -> Scope -> DMM at 5 V** (ctsta 0x70 tail to 7.75 s,
+               past the 7 s cap; 612c45c 6.34 s).
 - [x] Burden voltage in the A / mA / uA modes (as the EEVblog 121GW, owner 2026-10-22): I * R_path of the
       shunt in use in the aux row, "Burden" caption: DC A aux1 (signed), AC A aux2 instead of the duty
       (RMS); none in AC+DC (both rows hold the parts) and in the power meter (its own At-load line). R_path
