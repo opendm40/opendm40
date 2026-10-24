@@ -261,7 +261,7 @@ pub fn bkp_enable() {
 // reject the app on ANY reset, cold or warm, independent of PA2 (the debug
 // header's TX pad, the hardware boot strap: hw/README.md), so the loader
 // stays in its update screen with its own working USB disk until a valid
-// dm40*.bin is installed (docs/fsloader-install-trigger.md, full dump §4-§5).
+// dm40*.bin is installed (docs/fsloader-install-trigger.md, "Entry without a file: zeroing the marker").
 
 pub const MARKER: u32 = 0x0800_8000;
 const FMC_KEY: u32 = 0x4002_3C04;
