@@ -35,8 +35,11 @@ before the application on every boot, so it is a permanent escape hatch.
   `f_findfirst("/","dm40*.bin")` (`0x080a26c4`) and installs the **first**
   match (directory order, not newest; one file per boot; no version compare).
   It verifies the header CRC and body CRC before accepting, writes the body to
-  `0x08004000`, and the writer is **bounded to `0x08004000`..`0x080a0000`**. It
-  does **not** delete the file; the stock app deletes it after a good boot.
+  `0x08004000`, and the writer is **bounded to `0x08004000`..`0x080a0000`**. On
+  success ("update ok") the FS-loader itself deletes the file (`f_unlink` at
+  `0x080a27ae`, then a FAT sync and reset); on any failure the file stays. The
+  stock app never deletes or renames it (code-verified 2026-10-13,
+  fsloader-install-trigger.md "Who deletes the installed dm40*.bin").
   (`ANALYSIS.md` §3). Verified here: the FS-loader feeds the free watchdog (it
   references `FWDGT` `0x40003000` at `0x080a7438`) and references the app base
   `0x08004000` at `0x080a18cc`.
@@ -261,7 +264,7 @@ only during its key-hold wait. The "never feed unconditionally" rule
 | Our packed image has a bad header/body CRC | FS-loader rejects it ("update error"), keeps the current app | FS-loader verifies before writing | none (never half-flashed) |
 | Our image hangs **before** the shim decision | WDT resets; next boot the shim sees `FWDGTRSTF` -> recovery | shim runs first, recovery brings up MSC | shim itself must be correct (keep it tiny) |
 | Shim bug (wrong decision / hang) | could loop | FS-loader is untouched; a stock `dm40*.bin` already on the FAT is installed on the next boot regardless of the shim | shim must not erase/FAT-corrupt; it only reads |
-| Power loss **during** FS-loader flashing | app region partly written, bad CRC | FS-loader re-runs next boot, re-installs the file (still on FAT, it does not delete) | needs the file still present + power |
+| Power loss **during** FS-loader flashing | app region partly written, bad CRC | FS-loader re-runs next boot, re-installs the file (still on FAT: the loader deletes it only after a successful install) | needs the file still present + power |
 | Corrupted SPI-disk / FAT | FS-loader may not mount | ROM bootloader + FS-loader still in flash; reflash SPI over the hardware fallback | hard case — see HW backstops |
 | Stock `dm40*.bin` missing from FAT when app is dead | FS-loader has nothing to install, app won't run | **recovery mode's own MSC** (Option B) lets the user copy one | depends on the shim's recovery MSC working |
 | Wrong-model update file | installs, but model byte mismatches | model is read from calibration (`0x080C0000` +0x168), labels/ranges only | cosmetic; not a brick |
@@ -327,7 +330,7 @@ Remove `stub/`, `tools/legacy/flash.py`, the BT RAM loader path and the sector-8
   `recover` (set magic + reset) and keep `shot`/`scpi`/`ping`.
 - **Switch to stock from the host:** copy `dm40_v_2_6.bin` onto the FAT over
   fw-rs's MSC, then `dm40dbg reset` (or power-cycle). The FS-loader flashes
-  stock; the now-stock app deletes the file after its first good boot.
+  stock and deletes the file itself after the successful install.
 
 ---
 
