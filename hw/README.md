@@ -252,7 +252,7 @@ barrier (photos show both next to the DMM area). See [Unknowns](#unknowns).
 | Charger | TP4056 (marked "TP4056 2413"), linear, 1 cell, not isolated (on VBUS) | verified marking: photo `charger-tp4056-and-power.jpg`; review |
 | Battery | LN425272 Li-ion polymer, 3.7 V, 2000 mAh, 7.4 Wh, 4.2 V charge limit, made 2025-02-10 by 东莞市立能电子科技有限公司, with protection PCB | verified: label in `battery-ln425272-label.jpg` |
 | Connectors | USB-C; two coaxial (MCX per BOM) jacks silkscreened CHA (scope) and GEN (generator); banana V/ohm, COM, A/mA/uA | photos; review ("coaxial, not BNC") |
-| Debug header | two rows of 4 holes: "VCC RX TX GND" (TX = PA2, the boot strap) and "V D C G" (SWD: D = PA13 SWDIO, C = PA14 SWCLK, verified; the BOM lists only this 4-pin service header) | see [Debug header and hardware recovery](#debug-header-and-hardware-recovery). SWD read-out is locked (read protection set, [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md) 1) |
+| Debug header | two rows of 4 holes: "VCC RX TX GND" (TX = PA2, the boot strap) and "V D C G" (SWD: D = PA13 SWDIO, C = PA14 SWCLK, verified; the BOM lists only this 4-pin service header) | see [Debug header and hardware recovery](#debug-header-and-hardware-recovery). Flash read protection is set (level 1 in the option bytes; [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md) 1) |
 
 Small SOT-23 / SOT-89 / MSOP parts in `charger-tp4056-and-power.jpg`
 ("A2SHB", "93N44", "XFHVB", "K14", "S1K", "NE.", inductor "2R2", tantalum
@@ -360,8 +360,9 @@ original is kept unchanged). The silkscreen is readable in both review photos.*
 | VCC | ~3.1 V while the meter is on; **not** wired directly to the MCU supply (some series element or a separate rail in between, not traced) | measured by the owner, 2026-10-24 |
 | V, D, C, G | SWD: V = VCC, D = **PA13** (SWDIO), C = **PA14** (SWCLK), G = GND | verified by the owner on the device, 2026-10-24 |
 
-SWD connects, but the flash is read-protected (level 1, [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md) 1).
-A debugger can neither read nor write it, and lifting the protection
+SWD itself has not been tried. The option bytes (dumped from the running
+firmware, [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md) 1) show read protection level 1:
+with it a debugger cannot read or write the flash, and lifting it
 mass-erases the whole MCU flash: the Alientek bootloader, the FS-loader, the
 calibration and the UID-bound boot data. Use SWD only as a last resort, after
 the fw-rs backup (root README, [Back up with fw-rs](../README.md#back-up-with-fw-rs)),
