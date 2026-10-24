@@ -413,8 +413,12 @@ pub const MMEM_DATA_MAX: u32 = 6000;
 ///                           (mV, A: LPF gain / offset) or, in DC V, the
 ///                           nominal gain and the entry self-cal's offset
 ///                           (feasibility E7); 0,0 for AD1 / no AD2 row
-///   LOG:DATA?               definite-length #4nnnn block of 12-byte LE records
-///                           {u32 seq, u32 ts_us, i32 raw}, oldest first
+///   LOG:DATA?               definite-length #4nnnn block, oldest first: ROWS =
+///                           12-byte LE records {u32 seq, u32 ts_us, i32 raw};
+///                           PACKed / DLG = a compact reply (logger.rs
+///                           "Compact LOG:DATA?"); an empty ring: #40000
+///   LOG:FORMat ROWS|PACKed|DLG / ?  the LOG:DATA? layout (default ROWS;
+///                           any time, each reply describes itself)
 ///   LOG:CSV ON|OFF          CSV recording of the DMM readings to the USB disk
 ///                           (csvlog.rs; as the DMM page swipe down). ON is
 ///                           USB only: refused over Bluetooth ("Command
@@ -487,6 +491,8 @@ pub enum Log {
     /// LOG:SCALe? (main.rs `log_scale`).
     Scale,
     Data,
+    /// LOG:FORMat: Some(logger::FMT_*) to set, None = query.
+    Format(Option<u8>),
     Csv(Option<bool>),
     /// LOG:CSV:INTerval / DURation: Some(index into csvlog::INTERVALS_S /
     /// DURATIONS_S) to set, None = query.
@@ -2211,6 +2217,22 @@ impl Scpi {
                         Out::Log(Log::Scale)
                     } else if kw(sub, "DATA") && query {
                         Out::Log(Log::Data)
+                    } else if kw(sub, "FORMat") {
+                        // Argument keywords in any case, short or long form.
+                        let am = |m: &str| {
+                            let n = m.bytes().take_while(|b| b.is_ascii_uppercase()).count();
+                            a.eq_ignore_ascii_case(&m.as_bytes()[..n]) || a.eq_ignore_ascii_case(m.as_bytes())
+                        };
+                        match query {
+                            true => Out::Log(Log::Format(None)),
+                            false if am("ROWS") => Out::Log(Log::Format(Some(crate::logger::FMT_ROWS))),
+                            false if am("PACKed") => Out::Log(Log::Format(Some(crate::logger::FMT_PACKED))),
+                            false if am("DLG") => Out::Log(Log::Format(Some(crate::logger::FMT_DLG))),
+                            _ => {
+                                self.err = Some("Illegal parameter value");
+                                continue;
+                            }
+                        }
                     } else if kw(sub, "CSV") && parts.len() > 2 {
                         let s2 = parts[2];
                         // Seconds -> index of the allowed value (exact).
