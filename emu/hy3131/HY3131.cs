@@ -2376,7 +2376,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// DC voltage on the V / COM input (kept for the older scripts).
         public void SetVin(double volts) { Core.ForcedAd1 = int.MinValue; Core.SetInput("vsrc:" + volts.ToString(CultureInfo.InvariantCulture)); }
         /// Input spec, see Hy3131Core.SetInput.
-        public void SetInput(string spec) { Core.ForcedAd1 = int.MinValue; Core.SetInput(spec); this.Log(LogLevel.Info, "input: {0}", spec); }
+        /// The log line is the harness's input marker (emu/README.md "Input
+        /// markers"): the virtual time and fw-rs's uptime at the change.
+        public void SetInput(string spec)
+        {
+            Core.ForcedAd1 = int.MinValue;
+            Core.SetInput(spec);
+            var dwt = Antmicro.Renode.Peripherals.Miscellaneous.DM40_DWT.Instance;
+            var inv = CultureInfo.InvariantCulture;
+            this.Log(LogLevel.Info, "input: {0} at {1} fw {2}", spec, MachineTime.ToString("F4", inv),
+                (dwt == null ? -1.0 : dwt.FwUptime).ToString("F4", inv));
+        }
         public void SetOption(string name, double value) { Core.SetInput(name + ":" + value.ToString(CultureInfo.InvariantCulture)); }
         public void SetCalConsistent(bool on) { Core.CalConsistent = on; }
         public void SetNoise(double scale) { Core.NoiseScale = scale; }
