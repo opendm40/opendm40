@@ -1294,6 +1294,10 @@ with the region C hooks).
 source map read the PB0 node with AD1, not OP1O). If OP1 clipped lower, a
 source would read "free" and the false A-JACK would stay as before; an open
 jack cannot read "driven".
+Device a2e9766 ([device check, "a2e9766: bug-fix recheck"](device-check-2026-10-21.md)):
+OP1O peaks at 2.14 V (5 V, 60 MΩ row), 2.25 V (5 V, 600 Ω), 2.02-2.03 V (10 V)
+and 2.13 V (the square, 60 MΩ): "free", so RES still raises A-JACK there. Only
+the square on 600 Ω read 2.38 V (driven).
 
 **AC mV (`V_GATE` on the row's own result).** Plain AC mV takes |LPF| +
 1.414 x RMS of each result (the quantity of `MV_CLIP_K`): above 1.5 x the
