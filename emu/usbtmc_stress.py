@@ -29,6 +29,8 @@ reply checked byte-exactly where it is deterministic:
            INITIATE_ABORT_BULK_OUT / CHECK_ABORT_BULK_OUT_STATUS / CLEAR_FEATURE
   read     READ? (a DMM reading; any number)
   compound one message mixing commands the main loop runs later (OUTP,
+           SOUR:FREQ with suffixes and with bad values (no reply, the
+           error queue in order),
            SOUR:FUNC, POW:PHAS:CAL, MMEM:DATA?) with text queries, a
            reading wait (READ?) and SYST:ERR?: every query answered in
            order, ';'-joined, in one response (opendm40 scpi_msg.rs); a block
@@ -394,10 +396,10 @@ class Stress:
         float(rep)
 
     def c_compound(self):
-        k = self.r.randint(0, 6)
+        k = self.r.randint(0, 8)
         if k == 0:
             on = self.r.random() < 0.5
-            rep = self.t.query('OUTP %s;:OUTP?;*OPC?;:SYST:ERR?' % ('ON' if on else 'OFF'), delay=self.d())
+            rep = self.t.query('*CLS;OUTP %s;:OUTP?;*OPC?;:SYST:ERR?' % ('ON' if on else 'OFF'), delay=self.d())
             expect(rep, b'%d;1;0,"No error"' % on, 'OUTP;OUTP?;*OPC?;SYST:ERR?')
             if on:
                 self.t.write('OUTP OFF')
@@ -420,11 +422,23 @@ class Stress:
                 raise IOError('POW:PHAS:CAL RES;SYST:ERR?: %r' % rep)
         elif k == 4:
             rep = self.t.query('*CLS;MMEM:DATA? "NOPE.DLG";:SYST:ERR?', delay=self.d())
-            expect(rep, b'-100,"Query error"', 'MMEM:DATA?;SYST:ERR?')
+            expect(rep, b'-400,"Query error"', 'MMEM:DATA?;SYST:ERR?')
         elif k == 5:
             # A failed block query alone: an empty response, the error queued.
             expect(self.t.query('*CLS;MMEM:DATA? "NOPE.DLG"', delay=self.d()), b'', 'MMEM:DATA? missing file')
-            expect(self.t.query('SYST:ERR?'), b'-100,"File name not found"', 'SYST:ERR? after MMEM:DATA?')
+            expect(self.t.query('SYST:ERR?'), b'-256,"File name not found"', 'SYST:ERR? after MMEM:DATA?')
+        elif k == 7:
+            # IEEE 488.2 suffixes: KHZ / MHZ / M (milli) / MA (mega); the
+            # generator answers the frequency it produces (1 kHz exact).
+            rep = self.t.query('*CLS;SOUR:FUNC SQU;:SOUR:FREQ 1KHZ;:SOUR:FREQ?;:SOUR:FREQ 0.001MA;:SOUR:FREQ?;:SYST:ERR?', delay=self.d())
+            expect(rep, b'+1.000000E+03;+1.000000E+03;0,"No error"', 'SOUR:FREQ 1KHZ / 0.001MA')
+        elif k == 8:
+            # A bad value on a set command: no reply, the setting kept, the
+            # error queued (FIFO: -224, then -109, then -222).
+            rep = self.t.query('*CLS;SOUR:FUNC SQU;:SOUR:FREQ 1000;:SOUR:FREQ abc;:SOUR:FREQ;:SOUR:FREQ -5;:SOUR:FREQ?;'
+                               ':SYST:ERR?;:SYST:ERR?;:SYST:ERR?;:SYST:ERR?', delay=self.d())
+            expect(rep, b'+1.000000E+03;-224,"Illegal parameter value";-109,"Missing parameter";-222,"Data out of range";0,"No error"',
+                   'bad SOUR:FREQ values')
         else:
             rep = nl(self.t.query('*OPC?;WAV:DATA?;*IDN?', delay=self.d()), '*OPC?;WAV:DATA?;*IDN?')
             if len(rep) != 2 + 405 + 1 + len(self.idn()) or not rep.startswith(b'1;#3400') or not rep.endswith(b';' + self.idn()):

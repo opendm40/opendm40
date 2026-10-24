@@ -265,6 +265,11 @@ fn filter() {
         "READ?\rdbg:reset",
         "DBG",
         "DBG:UPDATE;*IDN?",
+        "DIAG?",
+        "DIAG:DAC?",
+        "diag:pwm?",
+        ":DIAG:PWM?",
+        "*IDN?;DIAG:PWM?",
     ];
     for m in refused {
         assert_eq!(untrusted_refusal(m.as_bytes()), Some(REFUSED), "must refuse {m:?}");
@@ -275,7 +280,7 @@ fn filter() {
         "MEAS:VOLT:DC?",
         "CONF:VOLT;READ?",
         ":READ?",
-        "DIAG:DAC?",
+        "DIAGX?",
         "LOG:DATA?",
         "WAV:DATA?",
         "SOUR:FUNC SIN",
