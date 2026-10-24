@@ -124,8 +124,9 @@ python3 firmware/dm40fw.py decode firmware/vendor/dm40_v_2_6.bin dm40_v_2_6.dec.
 ## License
 
 MIT, see [LICENSE](LICENSE). [`firmware/re/`](firmware/re) and [`firmware/patch/`](firmware/patch) contain
-addresses, symbols and decompiled code of the vendor firmware; the vendor
-binaries themselves are not included. [`fw-rs/fonts/`](fw-rs/fonts) carries its own font
+addresses, symbols and decompiled code of the vendor firmware. The vendor
+update file in [`firmware/vendor/`](firmware/vendor/README.md) is unmodified
+and under its own notice. [`fw-rs/fonts/`](fw-rs/fonts) carries its own font
 license.
 
 [`hw/photos/`](hw/photos) and [`hw/datasheets/`](hw/datasheets) are third-party material under their
