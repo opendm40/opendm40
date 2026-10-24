@@ -369,8 +369,7 @@ it must be held. Mind the isolation: the header is on the MCU / USB ground,
 not on the DMM side; keep the probe leads disconnected while the case is open.
 
 Software ways to the same screen while fw-rs runs (`DBG:UPDATE`, the key-hold
-recovery, the double-hang rule) are in [fw-rs/README.md](../fw-rs/README.md)
-"Recovery".
+recovery, the double-hang rule) are in [fw-rs/README.md, Recovery](../fw-rs/README.md#recovery).
 
 ## USB
 

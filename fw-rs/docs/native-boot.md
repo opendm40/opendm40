@@ -31,7 +31,7 @@ before the application on every boot, so it is a permanent escape hatch.
 - The ROM bootloader polls **PA2** at boot: low for the whole poll sends the
   boot to the FS-loader's install state. PA2 is the "TX" pad of the internal
   debug header; shorting it to GND is the hardware recovery entry (owner,
-  2026-10-24; procedure in `hw/README.md` "Hardware recovery").
+  2026-10-24; procedure in [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)).
 - **FS-loader** (`0x080a0000`) has **its own USB mass-storage stack + FatFs**,
   runs **before the app on every boot**, calls
   `f_findfirst("/","dm40*.bin")` (`0x080a26c4`) and installs the **first**
@@ -113,7 +113,10 @@ CPU latch. The current RAM-loaded fw-rs runs fine without asserting any latch
 because stock already set the pin state. Treat the self-hold mechanism as
 **UNVERIFIED** and have the shim **leave GPIO as the FS-loader left it** and only
 *read* PD6. (If a self-hold pin is later found, the shim must assert it before
-its wait loop.)
+its wait loop.) Later state (PE2 used as the power hold by `src/boot.rs`, still
+open which rail holds the power):
+[hw/README.md, Power and battery](../../hw/README.md#power-and-battery) and
+[Unknowns](../../hw/README.md#unknowns) item 2.
 
 ---
 
@@ -275,7 +278,7 @@ only during its key-hold wait. The "never feed unconditionally" rule
 **Hardware backstops.** Found 2026-10-24 (owner, on the device): shorting the
 debug header's TX pad (PA2) to GND at power-on enters the FS-loader's install
 state with its own USB disk, whatever the app does. Procedure:
-`hw/README.md` "Hardware recovery". Still open: whether the SWD pads allow an
+[hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery). Still open: whether the SWD pads allow an
 emergency reflash despite read-protection (after a mass-erase), and whether
 `BOOT0` is exposed. The earlier fallback was **shorting the SPI flash**.
 
@@ -392,7 +395,7 @@ known starting point; the risky one is the clock/FMC, addressed in §3.
 
 ### Open questions for the user
 1. Physical backstop: answered 2026-10-24, the TX (PA2) to GND short on the
-   debug header (`hw/README.md` "Hardware recovery"). SWD / `BOOT0` still open.
+   debug header ([hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)). SWD / `BOOT0` still open.
 2. Is Option A worth chasing — i.e. finding the FS-loader's own USB-disk trigger
    so the shim needs no MSC at all — or is fw-rs's existing MSC in recovery mode
    (Option B) good enough? Option B is the safe default.
@@ -2140,7 +2143,7 @@ else /16 for this boot because `DIFF1`/`DIFF2` (a /4 read differed),
   safe.
 - **PA2 at power-on:** not the power key (the key-hold test booted the app).
   PA2 is the debug header's TX pad; a TX-GND short is the non-destructive
-  manual entry (owner, 2026-10-24; `hw/README.md` "Hardware recovery").
+  manual entry (owner, 2026-10-24; [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)).
 
 ## Test plan (coordinator + user)
 
