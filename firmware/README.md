@@ -8,7 +8,7 @@ the end of the original image, with branches from the original code into it.
 Requirements: Python 3, `gcc-arm-none-eabi`, `make`.
 
 The latest official update file is in [vendor/](vendor/README.md)
-(`dm40_v_2_6.bin`, Alientek's, not under the MIT licence); older versions are
+([`dm40_v_2_6.bin`](vendor/dm40_v_2_6.bin), Alientek's, not under the MIT licence); older versions are
 kept in `wirenboard/alientek-dm40-tools` (`vendor/`). Reverse-engineering notes on the stock firmware, bootloader and
 update format: [re/README.md](re/README.md), [re/ANALYSIS.md](re/ANALYSIS.md).
 
@@ -35,7 +35,7 @@ erased. `pack --pad` (`build(pad=True)`) pads the body with 0xFF so header +
 body is a multiple of 128 (word 1 and the body CRC include the padding);
 `pack` without `--pad` refuses such a body; `info` / `unpack` warn about such
 a file (`tail_hazard`). Vendor files are safe (V2.6: 36-byte last block, key
-position 8). fw-rs `build.sh` and `patch/patcher.py` always pad.
+position 8). fw-rs [`build.sh`](../fw-rs/build.sh) and [`patch/patcher.py`](patch/patcher.py) always pad.
 
 **Header checksum.** `pack` computes both header check words: word 0 is a
 CRC-16 of words 1 and 2 with its complement in the high half, word 2 is
@@ -51,12 +51,12 @@ make ORIG=../../dm40_v_2_6.bin          # -> build/dm40_patched.bin
 make SRCS="src/startup.c src/my.c"      # choose patch sources
 ```
 
-- `dm40.ld` places patch code at `0x0807d000` (after the V2.6 image, which
+- [`dm40.ld`](patch/dm40.ld) places patch code at `0x0807d000` (after the V2.6 image, which
   ends at `0x0807ce18`) and patch variables at `0x2002f800`. Flash above
   `0x080a0000` must not be used: `0x080a4000` holds bootloader data that the
   firmware checks against the chip UID, `0x080c0000` holds settings.
   The patch RAM area is a placeholder; it is not yet verified to be unused.
-- `fw_v2_6.S` / `fw_v2_6.h` declare functions of the original firmware that
+- [`fw_v2_6.S`](patch/fw_v2_6.S) / [`fw_v2_6.h`](patch/fw_v2_6.h) declare functions of the original firmware that
   patches can call. Addresses are valid for V2.6 only.
 - Hooks are declared in C next to the code:
 
@@ -68,20 +68,20 @@ make SRCS="src/startup.c src/my.c"      # choose patch sources
 
   `expect` is the original 32-bit word at `addr` (0 = do not check), so a patch
   built for a different firmware version fails instead of corrupting code.
-- `src/startup.c` is always needed: it redirects the call to the C++
+- [`src/startup.c`](patch/src/startup.c) is always needed: it redirects the call to the C++
   constructors in the reset handler (`0x080041b4`) to `patch_startup()`, which
   initializes patch `.data`/`.bss`, calls `patch_init()` if a patch defines it,
   and then continues with the original startup.
-- `src/demo_version.c` is a test patch: the About page and the Bluetooth
+- [`src/demo_version.c`](patch/src/demo_version.c) is a test patch: the About page and the Bluetooth
   version command (02) report firmware version 9.9.
-- `patcher.py` applies the linked patch to the original update file.
+- [`patcher.py`](patch/patcher.py) applies the linked patch to the original update file.
 
 Calling convention: patches are compiled with `-mfloat-abi=hard`. Calls into
 the firmware with float arguments are not verified to use the same ABI.
 
-The memrw patch (`src/memrw.c`, Bluetooth memory read/write) was flashed and
-used on a device; see [patch/AGENTS.md](patch/AGENTS.md) for what was verified
-there (including the 64-byte pad rule) and what is still broken.
+The memrw patch ([`src/memrw.c`](patch/src/memrw.c), Bluetooth memory read/write) has been used on
+a device; [patch/AGENTS.md](patch/AGENTS.md) lists what works (including the
+64-byte pad rule) and what is still broken.
 
 ## memrw backup kit (`patch/kit/`)
 
