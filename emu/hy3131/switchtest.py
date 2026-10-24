@@ -47,7 +47,9 @@ import usbip_client as uc  # noqa: E402
 import emusync  # noqa: E402
 
 # Steps: a name -> the SCPI commands that select it. 'WAVE' = MF -> Wave view
-# (V / A functions), 3 s there, MENU back to the DMM.
+# (V / A functions), 3 s there, MENU back to the DMM. 'SCOPE' = MENU -> the
+# Oscilloscope tile (the MCX scope page: the DMM rail off), 3 s there, MENU ->
+# the Multimeter tile (the rail back: a chip restart).
 F = {
     'dcv': ['CONF:VOLT:DC'], 'dcmv': ['CONF:VOLT:DC 0.6'], 'dcv60': ['CONF:VOLT:DC 60'],
     'acv': ['CONF:VOLT:AC'], 'acmv': ['CONF:VOLT:AC 0.6'], 'vacdc': ['CONF:VOLT:ACDC'], 'vauto': ['CONF:VOLT:AUTO'],
@@ -148,7 +150,7 @@ SC = {
     # 8.06 s. 5 V through the /1000 tap is below the comparator: no V-JACK? in DC A (dc5a).
     # Dwell 11 s (DWELL) so the step outlasts the tail.
     'ohmexit-long': ('open;vsrc:5;ohmexit:7.75;ohmexitlo:0.26;ohmexitrst:1', 'dc5a', [],
-                     ['dca', 'WAVE', 'dcma', 'WAVE', 'dca', 'res', 'dca', 'res', 'dcma'], {}),
+                     ['dca', 'SCOPE', 'dcma', 'SCOPE', 'dca', 'res', 'dca', 'res', 'dcma'], {}),
     'real-vjack-ohmexit': ('open;vsrc:24;ohmexit:3.5;ohmexitlo:1.2', 'v24', [], ['dcv', 'dca', 'res', 'dca', 'res', 'dcma'],
                            {'dca': ('VJACK', 6.5), 'dcma': ('VJACK', 6.5)}),
     'real-ajack-swtr': ('open;isrc:0.001;swtr:300;swtau:50', 'ajack', [],
@@ -214,7 +216,7 @@ def run(name):
         f.write('0 dmm %s\n' % spec)
         for t, sp2 in later:
             f.write('%g dmm %s\n' % (t, sp2))
-    run_for = 30 + len(seq) * (DWELL.get(name, A.dwell) + 4) + sum(5 for s in seq if s == 'WAVE')
+    run_for = 30 + len(seq) * (DWELL.get(name, A.dwell) + 4) + sum(5 for s in seq if s in ('WAVE', 'SCOPE'))
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(int(run_for)), '--script', sp, '--name', rtag] \
         + (['--app', os.path.abspath(A.app)] if A.app else [])
@@ -270,6 +272,22 @@ def run(name):
                     ts = up()
                     tm.write('DBG:KEY 0')
                     fn = prev
+                elif st == 'SCOPE':
+                    tm.write('DBG:KEY 0')
+                    w = up() + 0.4
+                    while up() < w and p.poll() is None:
+                        time.sleep(0.1)
+                    tm.write('DBG:TAP 341,107')
+                    w = up() + 3.0
+                    while up() < w and p.poll() is None:
+                        time.sleep(0.2)
+                    tm.write('DBG:KEY 0')
+                    w = up() + 0.4
+                    while up() < w and p.poll() is None:
+                        time.sleep(0.1)
+                    ts = up()
+                    tm.write('DBG:TAP 140,107')
+                    fn = prev
                 else:
                     ts = up()
                     for c in F[st]:
@@ -323,7 +341,7 @@ def run(name):
     for x in (sp, os.path.join(OUT, 'flash-%s.bin' % rtag), os.path.join(OUT, rtag + '.resc')):
         if os.path.exists(x):
             os.remove(x)
-    ok = not bad and len(steps) >= len([s for s in seq if s != 'WAVE'])
+    ok = not bad and len(steps) >= len([s for s in seq if s not in ('WAVE', 'SCOPE')])
     with open(os.path.join(OUT, tag + '.json'), 'w') as f:
         json.dump({'name': name, 'ok': ok, 'bad': bad, 'steps': steps}, f, indent=1)
     print('RESULT %s %s %s' % (name, 'OK' if ok else 'FAIL', '; '.join(bad[:6])), flush=True)

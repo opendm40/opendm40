@@ -40,7 +40,7 @@ SCEN = [
     ('r10M-med', 'ohm:10e6;' + LAG, 'MED', 'poll', 10e6, 3.5),
     ('r390-read-fast', 'ohm:390;' + LAG, 'FAST', 'read', 390.0, 3.9),
     ('r390-read-med', 'ohm:390;' + LAG, 'MED', 'read', 390.0, 3.9),
-    ('r4k7-nolag', 'ohm:4700', 'MED', 'poll', 4700.0, 2.5),
+    ('r4k7-nolag', 'ohm:4700;ohmtau:0', 'MED', 'poll', 4700.0, 2.5),  # (knobs persist: off again)
 ]
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -120,13 +120,19 @@ try:
         else:
             t.write('CONF:RES')
             t1 = up()
+            amber = False
             while True:
+                # (the time after the reply: a FETCh? before the first reading waits for it.
+                # With DBG:READout?: the readout alone until it turns amber, so the grey
+                # hunt is sampled; then FETCh? with it)
                 if A.fetch_only:
-                    s = up()
                     f, ro = q('FETC?'), 'N,,nan,0'
+                elif not amber:
+                    f, ro = 'nan', q('DBG:READ?')
+                    amber = ro.startswith('F,')
                 else:
-                    s = up()
                     f, ro = q('FETC?;:DBG:READ?').split(';', 1)
+                s = up()
                 ro = ro.split(',')
                 rows.append((s - t1, num(f), ro[0], num(ro[2]) if len(ro) > 2 else float('nan')))
                 if s - t1 > 5.0:
