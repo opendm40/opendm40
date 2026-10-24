@@ -3,7 +3,7 @@
 
 Input: the reference CSV + DLG files of tools/dlog-test (t0..t8 and the
 10 h run), written by a copy of tools/dlog-test/main.rs that also dumps the
-long run (see firmware/docs/log-format-standards.md, "Reproduce").
+long run (see docs/history/log-format-standards.md, "Reproduce").
 
     lab.py DATA_DIR            tables for the doc (prints markdown)
 

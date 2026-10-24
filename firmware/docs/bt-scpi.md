@@ -299,7 +299,7 @@ or with `CONF:POW`; not selectable from sigrok: its range hunt takes up to
 
 AUTO coupling (`CONF:VOLT:AUTO`, `MEAS:VOLT:AUTO?`, the CURR twins): its
 values before the first DC / AC decision are provisional (shown grey on the
-meter, [switch-latency.md](switch-latency.md) 6) and never answered. `READ?` / `MEAS?` after
+meter, [switch-latency.md](../../docs/history/switch-latency.md) 6) and never answered. `READ?` / `MEAS?` after
 the host's change wait for the decision: ~1.3 s on a DC signal, ~3.5 s on a
 clear AC one; at most until 3.9 s after the coupling was entered
 (`AUTO_WAIT_MS`; a query after that waits at most 0.85 s), then the part AUTO

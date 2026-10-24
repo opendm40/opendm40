@@ -2,7 +2,7 @@
 
 Analysis of a Russian-language Telegram owners' chat about the Alientek DM40
 (A/B/C), mined for firmware complaints, bugs, wishes and praise, and triaged
-against opendm40 (`TODO.md`, `docs/parity.md`, `docs/ui-review.md`,
+against opendm40 (`TODO.md`, `docs/parity.md`, `../docs/history/ui-review.md`,
 `../../docs/dm40-feature-request.md`). Analysis only; no source was changed.
 
 New actionable items carry an **UF-nn** id; they are mirrored as one-liners in

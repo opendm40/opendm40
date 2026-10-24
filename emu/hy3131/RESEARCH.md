@@ -30,7 +30,7 @@ In this repo: `stock/re/analysis/hy3131_v2_6.h` (bus protocol, the stock
 firmware's 60 configuration rows with a decoded reading of each, calibration
 layout), `dmm_v2_6.h` (per-mode formulas, filters, settle deadlines),
 `firmware/src/hy3131.rs` / `hy3131_tables.rs` (opendm40 driver, identical rows),
-`firmware/docs/acdc-stock-vs-opendm40.md` (device measurements: AC+DC cadence, AC
+`docs/history/acdc-stock-vs-opendm40.md` (device measurements: AC+DC cadence, AC
 coupling transient, AD2/AD3 enable-order beat).
 
 ## 2. Key facts from the datasheet (DS-HY3131-V10_EN)

@@ -85,7 +85,7 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   `LOADER.BIN` raw region copies, `BACKUP.TXT` with CRC-32s and restore notes,
   `FIRMWARE.BIN` = the running firmware as a vendor update file),
   `DEBUG/SPIFLASH.BIN` (raw 16 MiB SPI flash image) and `README.TXT`.
-  Read-only by default, "Files live" ([decisions-2026-10-22.md](decisions-2026-10-22.md) #6): new
+  Read-only by default, "Files live" ([decisions-2026-10-22.md](../../docs/history/decisions-2026-10-22.md) #6): new
   recordings / screenshots appear while the volume is mounted (UNIT
   ATTENTION at once; existing files keep their place). Settings 3/3 "USB
   disk" = "PC can edit" (volatile, in force from the next USB plug;

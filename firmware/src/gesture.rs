@@ -21,7 +21,7 @@
 //!   captured (`capture()`, called when it took the `Down`/`Drag`, e.g. a drag
 //!   that starts in the scope graph) is never a swipe or a tap: dragging a
 //!   cursor or the trigger quickly no longer switches the view on release
-//!   (docs/ui-review.md §2.3, the old classifier fired on any >= 60 px release).
+//!   (../docs/history/ui-review.md §2.3, the old classifier fired on any >= 60 px release).
 //! * Two or more fingers: never a one-finger gesture. When a second finger
 //!   lands during a one-finger touch the tracker emits `Cancel` once (the app
 //!   undoes whatever the first finger's Down/Drag changed) and nothing else

@@ -161,7 +161,7 @@ pub fn read(reg: u8, buf: &mut [u8]) {
 
 // ------------------------------------------------- bus hand-off (AD2 stream ISR)
 //
-// docs/decisions-2026-10-22.md #3: while an AD2 stream runs on the timer ISR
+// ../docs/history/decisions-2026-10-22.md #3: while an AD2 stream runs on the timer ISR
 // (feature `ad2-isr`, src/logger.rs `isr`), the ISR owns the HY3131 bus
 // EXCLUSIVELY: the session's chip set-up (set_ad2_stream) is the last
 // main-loop bus access before `stream::start` hands it over, `stream::stop`
@@ -942,7 +942,7 @@ pub fn configure(cfg: &[u8; CFG_LEN]) {
         // starts in a bad phase of the shared AD2/AD3 decimation (period
         // OSR2 / FAD2CLK = 13 us) sqrt(RMS) beats against the signal for as
         // long as the row stays: +-11 % on the 40 Hz PWM at AC V r1, both in
-        // plain AC and in AC+DC (docs/acdc-stock-vs-opendm40.md, "Read-path
+        // plain AC and in AC+DC (../docs/history/acdc-stock-vs-opendm40.md, "Read-path
         // investigation"). Enabling AD3 first and AD2 last was clean for
         // every skew tried (0..15 us), so the row goes out with both off
         // and they are switched on in that order.

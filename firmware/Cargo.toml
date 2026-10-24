@@ -26,7 +26,7 @@ default = ["vdisk", "ad2-isr"]
 keep-screen = []
 # AD2 logger stream on ONE timer interrupt (TIMER6 = STM32 TIM7, IRQ 55) with
 # the HY3131 bus handed to the ISR exclusively while an AD2 session runs
-# (docs/decisions-2026-10-22.md #3; src/hy3131.rs `stream`, src/logger.rs
+# (../docs/history/decisions-2026-10-22.md #3; src/hy3131.rs `stream`, src/logger.rs
 # `isr`, src/ad2pll.rs). DEFAULT since the device check of 4b98128 (lost 0 at
 # 4800 / 9600 / 19200 S/s, 60 s each; docs/dmm-input-scope-feasibility.md 11).
 # Without it (--no-default-features --features vdisk) the build has no

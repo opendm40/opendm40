@@ -348,7 +348,7 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 AD1 on a periodic input aliases (the "AD1 beat"): see `firmware/docs/dc-aliasing.md` (on branch `dcalias`, not merged yet).
 AC bandwidth is about 20 kHz (-3 dB, chat reports [#24765](https://t.me/S2084K/24765),
 [#16732](https://t.me/S2084K/16732)); the AC V path has an external coupling capacitor with a time constant
-of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), [`acdc-stock-vs-opendm40.md`](../firmware/docs/acdc-stock-vs-opendm40.md)).
+of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), [`acdc-stock-vs-opendm40.md`](../docs/history/acdc-stock-vs-opendm40.md)).
 
 **MCU GPIOs on the DMM side** (the complete list the stock drives,
 [`hy3131_v2_6.h`](../stock/re/analysis/hy3131_v2_6.h) lines 14-18, [`firmware/src/dmm.rs`](../firmware/src/dmm.rs) `relay_pa` / `relay_pe`):

@@ -12,7 +12,7 @@ Evidence tags:
   bytes (`stock/re/analysis/hy3131_v2_6.h`, byte-identical copies in
   `firmware/src/hy3131_tables.rs`), the stock formulas and relay table
   (`dmm_v2_6.h`, `hy3131_v2_6.h`) or a device measurement already in
-  `firmware/docs/acdc-stock-vs-opendm40.md`.
+  `docs/history/acdc-stock-vs-opendm40.md`.
 * **INFERRED** = what the row bytes + the stock scale constants imply about the
   board wiring (RESEARCH.md open point 5: the DM40 PA/PB netlist is not known),
   BOM-based conclusions ([hw/README.md](../../hw/README.md)), or chip behaviour

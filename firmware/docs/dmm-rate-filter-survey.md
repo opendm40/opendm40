@@ -102,7 +102,7 @@ MEDIUM / SLOW once the dmm.rs window holds 8 slow conversions.
 
 The stock DM40 has no user setting. It runs 0x17 when |ΔAD1| <= 518 codes
 (~8.6 counts) and 0x15 otherwise, shows every conversion, and does not average
-(`firmware/docs/acdc-stock-vs-opendm40.md` §4).
+(`docs/history/acdc-stock-vs-opendm40.md` §4).
 
 ### 1.2 HY3131 AD1: what the datasheet and app notes say
 
@@ -755,7 +755,7 @@ Local (repository `docs/`):
 - HYCON APN-HY3131001 (SPI timing; nothing on rate): `docs/APN-HY3131001_EN.pdf`.
 - `emu/hy3131/RESEARCH.md` §1 (OWON HY3131 OSR, after
   http://essentialscrap.com/owon_fix/) and §3 (stock R22 codes).
-- `firmware/docs/acdc-stock-vs-opendm40.md` §4, `firmware/docs/user-feedback.md` (P3,
+- `docs/history/acdc-stock-vs-opendm40.md` §4, `firmware/docs/user-feedback.md` (P3,
   UF-25, UF-30), `firmware/docs/device-check-2026-10-21.md` (40 Hz square in DC V).
 
 Bench / system:
