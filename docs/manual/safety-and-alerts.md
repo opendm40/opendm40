@@ -26,10 +26,10 @@ page).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity, diode, temperature, low capacitance ranges, AC+DC V (6 V). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity, diode, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large. The meter moves to the 10 A shunt at once. After 3 s the badge turns amber **10A**: the meter measures fine, but not on your range. | A functions and the power meter, fixed range. In autorange the meter just moves up to 6 A. |
-| **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | DC A, AC A. |
+| **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
 | **LIVE?** | Voltage on circuit - power off | A reading only an external voltage can cause (a negative resistance). | Ω, continuity, diode. |
 | **DC?** | DC voltage here: use DC V? | AC V sees a DC voltage and almost no AC. | AC V. |
 | **AC?** | AC voltage here: use AC V? | DC V (6 V range) sees a voltage swinging both ways. | DC V. |
@@ -37,7 +37,8 @@ page).
 
 How they end:
 
-- A-JACK, LIVE?, DC?, AC?: 1 s after the cause is gone.
+- A-JACK, LIVE?, DC?, AC?: 1 s after the cause is gone; V-JACK? and FUSE?
+  after 0.5 s.
 - A-PROT stays until you choose a function, a range or press AUTO, and the
   current is below 50 mA for 1 s. Choosing a current function ends it at
   once.
@@ -74,8 +75,7 @@ again.
 - **Volume**: at the key/alert volume.
 - **Off**: badge and message only.
 
-The alarm sounds only while the multimeter measures (multimeter page,
-combined view).
+The alarm sounds only while the multimeter is powered.
 
 ## Settings
 
@@ -105,7 +105,8 @@ Checks the fuse and the current path inside the meter without opening it.
 **Again** repeats, **OK** returns to the function you were in. Cancel or
 any key stops it.
 
-The check tests the path through the µA and mA shunts, not the 10 A shunt.
+It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
+48 Ω.
 
 ## What cannot be detected
 
@@ -124,6 +125,6 @@ The check tests the path through the µA and mA shunts, not the 10 A shunt.
 
 - Untested on a real meter: the alerts that need a current through the A
   jack (A-JACK, A-PROT, OVLD) and the danger alarm's sound.
-- With 5 V or more on V-COM, Ω and continuity can show a false **A-JACK**
+- With 5 V or more between the V and COM jacks, Ω and continuity can show a false **A-JACK**
   (without the alarm).
 - The fuse check needs a re-check on a real meter.

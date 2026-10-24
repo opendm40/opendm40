@@ -39,9 +39,9 @@ button starts on diode, the Hz / °C button on frequency.
 You can also choose the coupling on the range page (MF, below).
 
 Right after a change, the new unit appears at once and the value shows grey
-dashes. Values that are not final yet (the first reading, a range hunt) are
+dashes. Values that are not final yet (the first reading, while the range is being found) are
 grey. Only final (white or orange) values go into statistics, REL, limits,
-the chart, recordings and remote readings.
+the chart, recordings and readings over USB or Bluetooth.
 
 ## Functions
 
@@ -82,8 +82,8 @@ appears next to it. Both parts are always in the small rows.
 
 - AUTO switches to AC when the AC part is more than 1.5 times the DC part
   and above a floor (1 % of the range for volts, 3 % for amps). It switches
-  back to DC when the AC part falls below 0.75 times the DC part or below
-  half that floor.
+  back to DC when the AC part falls below 0.75 times the DC part or below a
+  lower floor (0.5 % for volts, 2 % for amps).
 - A switch takes 2 to 4 s (two cycles in a row must agree).
 - Open leads read DC. Mains hum picked up by open leads can read as AC.
 - When AUTO switches, REL and MIN/MAX/AVG restart.
@@ -110,18 +110,16 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 ### Resistance
 
 - Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ.
-- The 60 Ω range (milliohm resolution) is manual only; AUTO starts from
-  600 Ω.
+- The 60 Ω range (milliohm resolution) is manual only; AUTO never goes
+  below 600 Ω.
 - **Low current** (second tap on Ω, or **Low current ON** on the range
   page): a smaller test current, for measuring in a circuit. The Ω button
   shows a small **ON** tag. The 60 Ω range always uses the normal current.
-- While the meter hunts for the range, the values are grey.
+- While the meter looks for the range, the values are grey.
 
 ### Continuity
 
 - Shows the resistance with two decimals; **0L** above 1000 Ω.
-- The beeper is driven by the measuring chip itself, as on the stock
-  firmware.
 - A negative result means an external voltage on the circuit: the meter
   shows **LIVE?**.
 
@@ -136,9 +134,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 ### Capacitance
 
 - Ranges: 6 nF to 60 mF, autorange only.
-- Discharge the capacitor before you measure.
-- Large capacitors take longer: from 6 mF the meter first discharges, then
-  measures.
+- Large capacitors take longer: from the 600 µF range up the meter first
+  discharges, then measures.
 
 ### Frequency and duty cycle
 
@@ -156,7 +153,7 @@ Tap **Hz / °C** twice. Press **MF** to open the temperature page:
 |---|---|
 | **TC K** (type K thermocouple) | -40 to 1000 °C. The small row shows the cold-junction temperature (the meter's own sensor). About 2 s per reading. |
 | **PT100**, **PT1000** | -200 to 850 °C, 2-wire. |
-| **NTC 10k B3950**, **NTC 10k B3435**, **NTC 100k B3950** | -55 to 300 °C. |
+| **10k 3950**, **10k 3435**, **100k 3950** (NTC thermistors, B value 3950 or 3435) | -55 to 300 °C. |
 | **NTC user** | Set **R25** (100 Ω to 10 MΩ) and **Beta** (1000 to 10000) with the keypad. |
 
 - The small row shows the sensor's resistance (resistive sensors) or the
@@ -164,7 +161,7 @@ Tap **Hz / °C** twice. Press **MF** to open the temperature page:
 - **Offset**: -20 to +20 °C in 0.1 °C steps, one per sensor. Tap **-** /
   **+**, or tap the value to type it. For TC K the offset corrects the cold
   junction.
-- **Unit: C/F** switches between °C and °F for the whole meter (also in
+- **Unit: C** / **Unit: F** switches between °C and °F for the whole meter (also in
   **Settings > More > Temp unit**).
 - The 2-wire leads add their resistance: about 0.4 °C per 0.1 Ω on a PT100.
   Correct it with the offset or with REL.
@@ -222,9 +219,10 @@ The rate sets the speed and the resolution in DC V, DC mV, DC A and Ω:
 |---|---|
 | **FAST** | 10 readings/s, 60000 counts. |
 | **MED** (default) | 10 readings/s while the input changes, 2.5/s once it is steady. On suitable ranges, an average over 3.2 s gives an extra digit (600000 counts). |
-| **SLOW** | As MED, with a 6.4 s average. |
+| **SLOW** | As MED, with a 6.4 s average, on every DC V, DC A and Ω range (the extra digit only on the ranges listed below). |
 
-In Ω (600 Ω to 60 kΩ) the averages are twice as long. After a step of the
+In Ω from 60 Ω to 60 kΩ the averages are twice as long (MED 6.4 s, SLOW
+12.8 s). After a step of the
 input or a range change the average restarts, so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
@@ -232,8 +230,8 @@ input or a range change the average restarts, so a change shows at once.
 - **Tap the reading** to step the rate the same way; a message says what you
   get, for example **MED 600000 counts / 3.2 s**.
 - In the other functions (AC, AC+DC, capacitance, frequency, temperature,
-  continuity, diode) the speed is fixed: the chip shows **n/a**, and a tap
-  shows **Fixed rate in this function**.
+  continuity, diode) the speed is fixed: the chip shows **n/a**; a tap on the
+  reading shows **Fixed rate in this function**.
 - Also in **Settings > More > DMM rate**.
 
 The extra digit appears smaller, after the main digits, on these ranges:
@@ -245,7 +243,7 @@ DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ. It appears about
 **Settings > More > Smoothing**: **OFF** (default), **LOW**, **HIGH**. A
 moving average of the shown readings, for a calmer display. It restarts on a
 real step, so changes still show at once. Smoothing applies to the reading,
-the limits, the chart and remote readings; not to MIN/MAX/AVG, AutoHold,
+the limits, the chart and readings over USB or Bluetooth; not to MIN/MAX/AVG, AutoHold,
 recordings or the bargraph. Continuity is never smoothed.
 
 ## HOLD, AutoHold and REL
@@ -298,9 +296,10 @@ since they were last reset, and a timer **T hh:mm:ss**.
 **Settings > More > DMM row** chooses what the row under the reading
 shows: **Bargraph** (default) or **History**.
 
-- **Bargraph**: 50 segments, each 2 % of the range. Centre zero in DC V and
-  DC A, from zero elsewhere. It follows every conversion, not smoothed and
-  without REL, and keeps moving during HOLD.
+- **Bargraph**: 50 segments, each 2 % of the range; centre zero in DC V and
+  DC A (25 segments per side, 4 % each), from zero elsewhere, empty in
+  temperature. It updates with every measurement, without smoothing or REL,
+  and keeps moving during HOLD.
 - **History**: five boxes. Tap the row to store the shown value (also a held
   value); the newest is orange. Long press the row to clear it.
 
@@ -333,7 +332,8 @@ Limits: DC V**.
 | **Record** | Opens the [Record page](logging.md#the-record-page). |
 
 - Each quantity has its own limits: DC V, AC V, DC A, AC A, Ω, diode,
-  capacitance, Hz, temperature, power. AC+DC uses the AC limits.
+  capacitance, Hz, temperature, power. AC+DC uses the AC limits, continuity
+  the Ω limits.
 - The limits compare the shown value (after REL).
 - Next to the reading: **OK** in green, **HI** or **LO** in red.
 - The fail beep sounds when the reading crosses out of the limits, at most
@@ -350,8 +350,8 @@ More > More > Burden voltage: ON (A, mA, uA)**. Default OFF.
 - Not shown in AC+DC, AUTO coupling or the power meter.
 - It is computed from the shunt resistance alone (10 mΩ for A, 0.5 Ω for
   mA, 47.5 Ω for µA); the fuse and the wiring add a little more.
-- At full scale it reaches about 62 mV (6 A), 31 mV (60 mA), 309 mV
-  (600 mA), 29 mV (600 µA), 294 mV (6000 µA).
+- At full scale: 100 mV (10 A), 60 mV (6 A), 300 mV (600 mA), 30 mV
+  (60 mA), 285 mV (6000 µA), 28.5 mV (600 µA).
 
 ![Burden voltage](img/burden.png)
 
@@ -362,9 +362,10 @@ see [Recording](logging.md).
 
 ## What is kept
 
-The function, the autorange choices, the rate, smoothing, the DMM row, the
-temperature sensor, the offsets, AutoHold and the limits are kept when you
-switch off. HOLD, REL, MIN/MAX/AVG, the history and a fixed range are not:
+The function, the autorange choices, Low current Ω, the rate, smoothing,
+the DMM row, the temperature sensor and unit, the offsets, AutoHold, the
+limits and the fail beep are kept when you switch off. After the stock
+firmware has run, opendm40 starts on DC V. HOLD, REL, MIN/MAX/AVG, the history and a fixed range are not:
 the meter starts in autorange.
 
 ## Known limitations
