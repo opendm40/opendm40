@@ -373,6 +373,7 @@ the meter starts in autorange.
   handling, AUTO coupling on current, burden with current), the
   continuity beeper and the diode beeps, Low current Ω, PT100, PT1000 and the
   NTC sensors.
-- With 5 V or more on V-COM, Ω and continuity can show a false **A-JACK**.
-- While the scope is powered (combined view, scope page), a fast square
-  wave on the multimeter input reads about 0.2 % high.
+- A false **A-JACK** in Ω and continuity:
+  [Safety and alerts](safety-and-alerts.md#known-limitations).
+- A fast square wave reads about 0.2 % high while the scope is powered:
+  [Combined view](combined-view.md#known-limitations).
