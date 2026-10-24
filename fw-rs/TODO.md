@@ -3077,3 +3077,14 @@ Emulator (emu/):
          open after RES -> PREC -> DC A: any 0x70 tail (false V-JACK? risk: PREC skips the RES-exit
          mask). PREC 0 after.
       6. Continuity at 5 V DC (the owner's RES 5 V decision covers it): DBG:SENT? pkmin / pkmax.
+      7. Danger alarm (Loud, volume 0 %): RES and continuity with 5 V DC on V-COM, 30 s each, and
+         the E1 subset (RES -> A / mA at open / 1 V / 5 V): the A-JACK badge may show (owner item)
+         but DBG:ALARm? events must not grow and the buzzer stays silent; DBG:SENT? last field 1
+         (soft) there. With a current in A (if a wire becomes possible): RES / CONT badge only,
+         CONF:VOLT:DC -> the loud alarm within ~1 s.
+      8. AC+DC A / AUTO A with 24 V DC on V-COM after TEMP (the seeing state): V-JACK? holds
+         across the phases (no flapping each AC phase).
+- [x] Danger alarm only for confirmed A-JACK (coordinator 2026-10-24, device 612c45c: the RES
+      5 V false A-JACK sounded the loud alarm at night): ohm / continuity / diode / cap / the
+      resistive temperature sensors set Sentinel::soft; danger keys on ajack_alarm() (doc 4.10
+      row). loudtest ajack-res / ajack-cont FAIL on e3e81d4, pass on sentinel2.
