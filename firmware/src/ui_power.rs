@@ -452,12 +452,11 @@ pub fn entry_hit(x: u16, y: u16) -> Option<bool> {
     }
 }
 
-/// A jack of the meter: a ring with its name left of it (the space under
-/// the jacks holds the meter's internal current path).
+/// A jack of the meter: a ring with its name (the case legend) under it.
 fn jack(cx: i16, cy: i16, name: &str) {
     sf::rbox(rect(cx - 11, cy - 11, 22, 22), 11, DIM, DLG_BODY);
     sf::rbox(rect(cx - 6, cy - 6, 12, 12), 6, DLG_BODY, DIM);
-    sf::label(sf::F14, rect(cx - 50, cy - 7, 36, 14), name, STATUS_FG, DLG_BODY, 4, 1);
+    sf::label(sf::F14, rect(cx - 36, cy + 14, 72, 14), name, STATUS_FG, DLG_BODY, 8, 1);
 }
 
 /// Outline of `r`, `t` px thick (lines, not a filled shape: the jacks and
@@ -476,37 +475,50 @@ fn vwire(x: i16, y0: i16, y1: i16) {
     lcd::fill_rect(x as u16, y0 as u16, 2, (y1 - y0) as u16, WIRE);
 }
 
-/// Wiring picture geometry: source / load boxes (y, h), the + and - wires
-/// (y), the jacks' centre y, the meter's internal wire (y) and its shunt.
-const BOX_Y: i16 = 50;
-const BOX_H: i16 = 96;
-const WIRE_P: i16 = 61;
-const WIRE_N: i16 = 133;
-const JACK_Y: i16 = 162;
-const WIRE_INT: i16 = 189;
-const SHUNT: sf::Rect = rect(220, 184, 39, 12);
+/// Wiring picture geometry, as on the meter (emu/panel_draw.py, the
+/// manual's jacks.png): the meter on the left with its jacks stacked on
+/// its right side, V/ohm (top), COM, A (bottom), each with its case legend
+/// under it; source and load right of it. JACK_X: the jacks' centre x;
+/// JV / JC / JA their centre y; INT_X the meter's internal wire (x, left
+/// of the legends); SRC_X / LOAD_X the boxes' terminal x; BOX_Y / BOX_H the
+/// boxes; WIRE_P the + wire (y).
+const JACK_X: i16 = 170;
+const JV: i16 = 64;
+const JC: i16 = 124;
+const JA: i16 = 184;
+const INT_X: i16 = 60;
+const SRC_X: i16 = 289;
+const LOAD_X: i16 = 410;
+const BOX_Y: i16 = 60;
+const BOX_H: i16 = 53;
+const WIRE_P: i16 = 50;
+/// V tap: from the V jack right to TAP_X, up to the + wire.
+const TAP_X: i16 = 236;
+const SHUNT: sf::Rect = rect(INT_X - 5, 140, 12, 28);
 
 /// The current path of the wiring dialog, in the direction of the current
 /// (P > 0: the load current into A): wire runs (x, y, dx, dy, len) 2 px
 /// wide, x / y the first pixel, (dx, dy) the step. SOURCE + -> LOAD +;
 /// (the load) LOAD - -> A; inside the meter A -> shunt -> COM (the jacks
-/// and the shunt are gaps); COM -> SOURCE -.
-const FLOW_PATH: [(i16, i16, i16, i16, i16); 9] = [
-    (108, WIRE_P, 1, 0, 264),
-    (371, WIRE_N, -1, 0, 73),
-    (299, WIRE_N + 1, 0, 1, 17),
-    (299, JACK_Y + 11, 0, 1, 18),
-    (298, WIRE_INT, -1, 0, 40),
-    (219, WIRE_INT, -1, 0, 39),
-    (179, WIRE_INT + 1, 0, -1, 18),
-    (179, JACK_Y - 12, 0, -1, 17),
-    (180, WIRE_N, -1, 0, 73),
+/// and the shunt are gaps); COM -> SOURCE -. No wire crosses another.
+const FLOW_PATH: [(i16, i16, i16, i16, i16); 11] = [
+    (SRC_X, BOX_Y - 1, 0, -1, BOX_Y - 1 - WIRE_P - 1),
+    (SRC_X, WIRE_P, 1, 0, LOAD_X + 2 - SRC_X),
+    (LOAD_X, WIRE_P + 2, 0, 1, BOX_Y - WIRE_P - 2),
+    (LOAD_X, BOX_Y + BOX_H, 0, 1, JA - 1 - BOX_Y - BOX_H),
+    (LOAD_X + 1, JA - 1, -1, 0, LOAD_X + 2 - (JACK_X + 12)),
+    (JACK_X - 12, JA - 1, -1, 0, JACK_X - 12 - INT_X - 1),
+    (INT_X, JA, 0, -1, JA - (SHUNT.y + SHUNT.h) + 1),
+    (INT_X, SHUNT.y - 1, 0, -1, SHUNT.y - 1 - JC),
+    (INT_X, JC - 1, 1, 0, JACK_X - 12 - INT_X + 1),
+    (JACK_X + 12, JC - 1, 1, 0, SRC_X + 2 - (JACK_X + 12)),
+    (SRC_X, JC - 2, 0, -1, JC - 2 - (BOX_Y + BOX_H) + 1),
 ];
 /// Arrowheads on the path: the distance along FLOW_PATH of each one's base
 /// (the tip is ARROW_L - 1 px further, in the current's direction): two on
-/// the + wire, the - wire into A, down into A, both halves of the internal
-/// wire, up out of COM, the - wire to the source.
-const ARROWS: [i16; 8] = [50, 205, 294, 342, 386, 426, 472, 526];
+/// the + wire, down from the load, two on the wire into A, the internal
+/// wire left, up (after the shunt) and right into COM, out of COM.
+const ARROWS: [i16; 9] = [48, 98, 169, 269, 379, 479, 556, 608, 717];
 const ARROW_L: i16 = 10;
 /// Marching dashes on the path: on / period (px), colour; the dashes move
 /// FLOW_STEP px per frame (`entry_anim`, 10 fps: 30 px/s).
@@ -589,29 +601,31 @@ pub fn entry_dialog(i_cont: f32, t_lim: u16) {
     lcd::fill_rect(x as u16, y as u16, w as u16, 34, DLG_TITLE);
     sf::glyphs(sf::TEXT22, rect(x, y, w, 34), "Power meter: wiring", STATUS_FG, DLG_TITLE, 8, 0);
     lcd::fill_rect(x as u16, (y + 34) as u16, w as u16, (h - 34) as u16, DLG_BODY);
-    // Source (left) and load (right): rounded boxes with + / - terminals.
-    for (bx, name) in [(28i16, "SOURCE"), (372, "LOAD")] {
+    // Source and load: rounded boxes with + / - terminals (wires at the
+    // top / bottom edge centre).
+    for (bx, name) in [(SRC_X + 1 - 40, "SOURCE"), (LOAD_X + 1 - 40, "LOAD")] {
         sf::rbox(rect(bx, BOX_Y, 80, BOX_H), 8, BTN, DLG_BODY);
+        sf::glyphs(sf::F14, rect(bx, BOX_Y + 1, 80, 16), "+", STATUS_FG, BTN, 8, 1);
         sf::glyphs(sf::F14, rect(bx, BOX_Y + BOX_H / 2 - 8, 80, 16), name, STATUS_FG, BTN, 8, 1);
-        sf::glyphs(sf::F14, rect(bx, WIRE_P - 7, 80, 16), "+", STATUS_FG, BTN, 8, 1);
-        sf::glyphs(sf::F14, rect(bx, WIRE_N - 7, 80, 16), "-", STATUS_FG, BTN, 8, 1);
+        sf::glyphs(sf::F14, rect(bx, BOX_Y + BOX_H - 17, 80, 16), "-", STATUS_FG, BTN, 8, 1);
     }
     // The meter: an outline around its jacks and the internal path.
-    let m = rect(124, JACK_Y - 18, 232, 72);
+    let m = rect(28, 44, 180, 174);
     outline(m, 1, DIM);
-    sf::label(sf::F14, rect(m.x + m.w - 52, m.y + m.h - 18, 46, 14), "DM40", DIM, DLG_BODY, 4, 1);
-    // Jacks COM, V/ohm, A (left to right: no crossing wires).
-    jack(180, JACK_Y, "COM");
-    jack(240, JACK_Y, "V");
-    jack(300, JACK_Y, "A");
-    // + : V taps it on the source side.
-    vwire(239, WIRE_P, JACK_Y - 11);
-    sf::label(sf::F14, rect(250, WIRE_P + 9, 116, 14), "V: source side", DIM, DLG_BODY, 0, 1);
-    // The shunt between A and COM (the internal wire's gap), named under it.
+    sf::label(sf::F14, rect(m.x + 6, m.y + 4, 46, 14), "DM40", DIM, DLG_BODY, 0, 1);
+    // Jacks top to bottom with the case legends.
+    jack(JACK_X, JV, "V\u{3a9}");
+    jack(JACK_X, JC, "COM");
+    jack(JACK_X, JA, "A mA uA");
+    // V taps the + wire on the source side (left of SOURCE +).
+    lcd::fill_rect((JACK_X + 12) as u16, (JV - 1) as u16, (TAP_X + 2 - JACK_X - 12) as u16, 2, WIRE);
+    vwire(TAP_X, WIRE_P, JV + 1);
+    lcd::fill_rect(TAP_X as u16, WIRE_P as u16, (SRC_X - TAP_X) as u16, 2, WIRE);
+    // The shunt between A and COM (the internal wire's gap), named by it.
     outline(SHUNT, 2, WIRE);
-    sf::label(sf::F14, rect(SHUNT.x - 10, SHUNT.y + SHUNT.h + 2, SHUNT.w + 20, 14), "shunt", DIM, DLG_BODY, 8, 1);
-    // The load current's name by the arrow on the - wire into A.
-    sf::label(sf::F14, rect(326, WIRE_N - 20, 14, 14), "I", STATUS_FG, DLG_BODY, 8, 1);
+    sf::label(sf::F14, rect(SHUNT.x + SHUNT.w + 4, SHUNT.y + 7, 44, 14), "shunt", DIM, DLG_BODY, 0, 1);
+    // The load current's name by the arrow on the wire down from the load.
+    sf::label(sf::F14, rect(LOAD_X + 10, 140, 14, 14), "I", STATUS_FG, DLG_BODY, 8, 1);
     // The current path: marching dashes (moved by `entry_anim` while the
     // dialog is open) and the arrowheads.
     entry_anim(0);
