@@ -3153,6 +3153,10 @@ impl App {
             },
             // The inrush page holds the 10 A range: no autorange.
             2 if self.view == View::Inrush => self.beep(now, 300),
+            // The generator's Signal page (and its keypad) has no AUTO
+            // function: the key does nothing there (it used to set the
+            // DMM's autorange).
+            2 if self.view == View::Gen || (self.view == View::Keypad && !self.kp_dmm()) => {}
             2 => {
                 self.meter.rel_off();
                 self.meter.set_hold(false);

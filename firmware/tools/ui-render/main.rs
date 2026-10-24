@@ -2682,7 +2682,7 @@ fn main() {
         ui::set_pw_parts(false);
         host::reset(0);
         power_page(pcs[0].1, 0, sentinel::Alert::None, rc);
-        ui::pw::entry_dialog(5.0, 30);
+        ui::pw::entry_dialog(dmm::pw::I_CONT_DEFAULT, dmm::pw::T_LIM_DEFAULT);
         save(&out, "p06-power-entry");
         // A later frame of the current path's marching dashes (10 fps).
         ui::pw::entry_anim(2);
