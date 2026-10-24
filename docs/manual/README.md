@@ -703,7 +703,12 @@ to a high voltage applied while the meter sat on the mV range.
 
 #### Overload
 
-- **0L** in the reading; the bargraph turns red with an **OL** mark.
+- **0L** in the reading with the word **Overload** next to it: the value
+  is above the range (or the function's limit). The bargraph turns red with
+  an **OL** mark. On the scope page's meter strip, **Overload** is in the
+  small text right of the reading.
+- A small value (for example the diode's Ω value) that is over its limit
+  shows **0L** with a small **Overload** before it.
 - An overload is never stored in MIN/MAX/AVG, the chart or the history.
 
 
