@@ -24,7 +24,7 @@ by this repository's MIT license. Ask the author before any further use.
 | `charger-tp4056-and-power.jpg` | https://art.mysku-st.net/uploads/arts/01/56/73/2025/04/24/e44e68.jpg | Power section: TP4056 charger, VBAT connector, USB-C, small transistors / regulators (unidentified markings), 2R2 inductor, tantalum capacitors |
 | `input-jacks-shunts-fuse-relay.jpg` | https://art.mysku-st.net/uploads/arts/01/56/73/2025/04/24/6d0d95.jpg | DMM input area (under the shield plate): HFD4/3-LS relay, input resistors and varistors, 0.5 ohm "R500" shunt, wire shunt between the jacks, precision resistor, fuse in clips, COM and A/mA/uA jacks, HY3131 shield can |
 | `isolated-supply-vps8504b-lt61.jpg` | https://art.mysku-st.net/uploads/arts/01/56/73/2025/04/24/0bdf36.jpg | Close-up: two VPS8504B transformer drivers under the LT61-1xx transformers, silkscreen TOUCH |
-| `debug-header-annotated.jpg` | derived from 46e50d.jpg (crop, 1.5x, annotations added in this repo) | The debug header with TX = PA2 and GND marked (the recovery short), RX / VCC and the V D C G row marked unverified |
+| `debug-header-annotated.jpg` | derived from 46e50d.jpg (crop, 1.5x, annotations added in this repo) | The debug header: TX = PA2, RX = PA3, GND (verified by the owner, 2026-10-24), VCC ~3.1 V (measured); the V D C G row unverified |
 | `relay-hfd4-and-varistor-closeup.jpg` | https://art.mysku-st.net/uploads/arts/01/56/73/2025/04/24/e5b7e4.jpg | Close-up: HFD4/3-LS relay and a 07D681K varistor (680 V) in the input network |
 
 How these photos are used: [../README.md](../README.md).

@@ -355,9 +355,9 @@ original is kept unchanged). The silkscreen is readable in both review photos.*
 | Pad | Signal | Status |
 |---|---|---|
 | TX | **PA2** (pull-up enabled by the bootloader and the FS-loader) | verified by the owner on the device, 2026-10-24 |
-| GND | ground, next to TX | silkscreen; used for the short, so verified in practice |
-| RX | probably PA3 (USART1_RX on the GD32F4; PA3 is unused by the firmware) | unverified |
-| VCC | supply (3.3 V?) | unverified |
+| GND | MCU-domain ground, next to TX | verified by the owner on the device, 2026-10-24 |
+| RX | **PA3** (USART1_RX on the GD32F4; unused by the stock firmware and fw-rs) | verified by the owner on the device, 2026-10-24 |
+| VCC | ~3.1 V while the meter is on; **not** wired directly to the MCU supply (some series element or a separate rail in between, not traced) | measured by the owner, 2026-10-24 |
 | V, D, C, G | SWD: VCC, SWDIO (PA13), SWCLK (PA14), GND | inferred from the labels, unverified |
 
 PA2's alternate function on the GD32F4 is USART1_TX, so the pad is labelled
@@ -644,8 +644,8 @@ the stock code as stated; the board-level meaning may still be inferred.
 | PE7..PE15 | FSMC data (AF12) | io | verified, `board.rs` |
 | PH0 / PH1 | 25 MHz HXTAL | - | inferred (standard pins) |
 
-Not used by the stock firmware or fw-rs as far as traced: PA3 (maybe the
-header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
+Not used by the stock firmware or fw-rs as far as traced: PA3 (the debug
+header's RX pad, verified), PB13, PC1, PC15. Whether they are connected is unknown.
 
 ## Models DM40A / B / C
 
@@ -695,8 +695,9 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
    A / B / C; the exact gain resistors.
 9. The scope op amp ("8091") and the generator output stage after the SGM3157.
 10. The regulators and the power path parts in `charger-tp4056-and-power.jpg`.
-11. The debug header's RX, VCC and V / D / C / G pads (only TX = PA2 is
-    verified).
+11. The debug header's V / D / C / G pads (TX = PA2, RX = PA3 and GND are
+    verified; VCC reads ~3.1 V and is not the MCU supply directly; what sits
+    between them is not traced).
 12. LCD panel FPC pinout; touch panel vendor beyond the controller ID.
 13. Exact HY3131 wiring (ohm reference resistors, divider taps, shunt nodes):
     inferred from the stock scaling only ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 8.5).
