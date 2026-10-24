@@ -95,6 +95,16 @@ SC = {
     'acmv-dc5': ('VOLT:AC 0.6', 30, [(0, 'open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50', {'NONE'}),
                                      (10, 'vsrc:5', {'NONE'}),
                                      (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [], {'never': [('AJACK', 1, 2)]}),
+    # AC+DC V on manual 600 mV (doc 4.13 gap): its AC phase is the AC mV row with the same AD1
+    # peak sentinel; V_GATE takes the AC phase's result there too (both phases share the run).
+    'acdcmv-sq600': ('VOLT:ACDC 0.6', 34, [(0, 'open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50', {'NONE'}),
+                                           (10, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'NONE'}),
+                                           (22, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
+                     {'never': [('AJACK', 1, 2)]}),
+    'acdcmv-dc5': ('VOLT:ACDC 0.6', 34, [(0, 'open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50', {'NONE'}),
+                                         (10, 'vsrc:5', {'NONE'}),
+                                         (22, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
+                   {'never': [('AJACK', 1, 2)]}),
     'temp-v5':  ('TEMP', 42, [(0, 'open;tc:100;cj:25', {'NONE'}), (8, 'vsrc:5', {'NONE'}), (16, 'vsrc:10', {'NONE'}),
                               (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'NONE'}), (32, 'open;isrc:0.005', {'AJACK'})],
                  [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10']}),

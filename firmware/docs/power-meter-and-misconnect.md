@@ -1335,9 +1335,18 @@ verdict. No LIVE? here: the reading is over range. Cost: a real current in
 A asserts ~0.25 s later in AC mV.
 
 **Gaps.** A current in A together with a voltage on V-COM shows LIVE? (ohm,
-continuity) or nothing (AC mV). AC+DC V on its 600 mV range carries the
-same AD1 peak sentinel without the gate (`vgate` is plain AC mV only; AUTO
-lands on 6 V with these inputs). The diode row is unchanged (badge only).
+continuity) or nothing (AC mV, AC+DC mV). The diode row is unchanged
+(badge only).
+
+**AC+DC V on 600 / 60 mV.** Its AC phase is the AC mV row with the same AD1
+peak sentinel; until 5fdd812 it had no gate (`vgate` was plain AC mV only),
+so the square or 5 V DC on V-COM with manual 600 mV raised A-JACK in the
+emulator (`mvclamp` / `mvpb1`; not seen on the device: AUTO lands on 6 V
+with these inputs). Both phases now set `vgate` and share the run, so the
+AC phase's result is the verdict for the DC phase's hits too; a real
+current in A asserts after the next "free" AC result. Emulator senttest
+`acdcmv-sq600` / `acdcmv-dc5`: FAIL on 5fdd812 (A-JACK from ~1.5 s after
+the voltage on), pass with the gate.
 
 **Emulator.** Since the a2e9766 check the model reproduces the device's
 RES numbers: OP1O in the ohm rows stops at 2.47 - 0.044 x V for a source of
