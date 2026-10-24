@@ -201,7 +201,9 @@ updates.
   ([`firmware/src/board.rs`](../firmware/src/board.rs), [`firmware/src/lcd.rs`](../firmware/src/lcd.rs), [`lcd_buzzer_v2_6.h`](../stock/re/analysis/lcd_buzzer_v2_6.h)).
 - FSMC timing as the stock: BCR1 0x5091, BTR1 0x0F04, BWTR1 0x0FF00201
   (device read-back, [`firmware/TODO.md`](../firmware/TODO.md) T1).
-- Pixel format RGB565 on writes; reads return RGB666 ([`lcd.rs`](../firmware/src/lcd.rs)).
+- Pixel format RGB565 on writes. A GRAM read returns one dummy word, then
+  RGB666 at 3 bytes per pixel, packed big-endian into the 16-bit words
+  ([`lcd.rs`](../firmware/src/lcd.rs)). The ID register 0xD3 reads `00 94 88` on this unit.
 - Backlight: PA6 AF9 = TIM13_CH1, 20 kHz PWM ([`board.rs`](../firmware/src/board.rs)).
 - Panel: 3.5" IPS 480 x 320 (review). The panel's FPC pinout is unknown.
 
@@ -226,7 +228,7 @@ updates.
   the power path) is unknown.
 - **PA2**: the "TX" pad of the debug header. The Alientek primary bootloader and the FS-loader enable a
   pull-up on PA2 and poll it ~1000 times each at boot; low for the whole poll
-  sends the boot to the FS-loader's install state ([`firmware/docs/fsloader-install-trigger.md`](../firmware/docs/fsloader-install-trigger.md) 1). PA2 is not the power key.
+  sends the boot to the FS-loader's install state ([Boot decision chain](../firmware/docs/fsloader-install-trigger.md#boot-decision-chain)). PA2 is not the power key.
   See [Debug header and hardware recovery](#debug-header-and-hardware-recovery).
 - **Buzzer**: PA7 AF9 = TIM14_CH1 PWM,
   200 MHz / 5 / 11200 = 3.57 kHz, loudness = duty
@@ -302,7 +304,10 @@ recovery, the double-hang rule) are in [README.md, Recovery](../README.md#recove
 ## USB
 
 USB-C, USBFS only: DM PA11, DP PA12 (AF10). No VBUS sensing (PA9/PA10, the
-usual VBUS/ID pins, drive the relay) ([`firmware/src/usb.rs`](../firmware/src/usb.rs)). The USB port
+usual VBUS/ID pins, drive the relay) ([`firmware/src/usb.rs`](../firmware/src/usb.rs)).
+GSNPSID reads 0 on this GD32; GRSTCTL.AHBIDL shows that the USBFS core is
+clocked. A core reset keeps the D+ pull-up, so the host sees no disconnect:
+the firmware drives PA11 / PA12 low for 100 ms to force one. The USB port
 also charges the battery ([TP4056](datasheets/toppower-tp4056-cn.pdf)). USB data and the DMM are galvanically
 separate ([Isolation boundary](#isolation-boundary)); USB ground is the MCU,
 scope and generator ground (*inferred*).
@@ -587,8 +592,9 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
    BOM and the photos.
 2. Which rail(s) hold the power on: PE2, PC4 or both; how the power key turns
    the unit on from off. [`firmware/src/boot.rs`](../firmware/src/boot.rs) and [`native-boot.md`](../firmware/docs/native-boot.md) (shim
-   steps) treat PE2 as the power hold; [`native-boot.md`](../firmware/docs/native-boot.md) section 1 (older text)
-   says no self-hold GPIO is evident and calls it unverified.
+   steps) treat PE2 as the power hold. The ROM bootloader drives PE2 and PC4
+   high at every reset (`0x08000574`), and the loader's and the stock app's
+   power-off path drives both low; their role as the hold is *inferred*.
 3. Whether anything else on the board drives PA2.
 4. The MCU crystal: 25 MHz by the PLL read-back and the photo, 26 MHz in the
    community BOM (jebem, EEVblog thread, after mydigit.cn). The 25 MHz value
