@@ -565,7 +565,8 @@ Code work (in this order):
       refilled every 3 min, deferred while the disk is held / an AD1 session / the AD2 stream; flushed in
       power_off. Boot: backup SRAM unless the file is newer by seq (persist::seq), else the newest valid
       slot, else defaults. DBG:BOOT? SETTINGS / SETFILE / SAVE. fatren-test "setfile", emu/settingstest.py
-      (power cycle = two runs, the disk carried over). Device check pending. Open: after a power-off the
+      (power cycle = two runs, the disk carried over). Device e1cec01 (2026-10-24): first boot SETFILE CREATED seeded
+      from BKP; SYST:BEEP:VOL 40 -> SAVE OK seq 2; key power-off + on: POR+BOR, SETTINGS,FILE,1,2, volume 40. Open: after a power-off the
       DMM function starts on DC V (persist::same_session needs BKP_LAST, which is gone).
 - [ ] Longer scope record (owner 2026-10-24: "worth doing, not now"): 26 624 samples today vs the stock
       65 520. u16 per 10-bit sample makes 65 520 = 131 KB, too much next to the screenshot CAP (49 KB) and the
