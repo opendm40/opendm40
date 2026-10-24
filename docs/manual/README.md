@@ -155,6 +155,8 @@ the previous one:
 
 **Multimeter → DMM + Scope → Oscilloscope → Generator → Multimeter**
 
+![The four views in a ring: swipe left for the next, right for the previous](img/view-ring.png)
+
 On the oscilloscope page, a drag moves the trace, so swipes do not change
 the view there. Use **MENU**, or switch on **Settings > More > Scope swipe**:
 then a swipe that starts on the top bar or the side panel changes the view.
