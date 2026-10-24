@@ -873,6 +873,9 @@ pub struct Dmm {
     /// row agreed on it (its conversions are final from then on).
     ohm_prev: f32,
     ohm_ok: bool,
+    /// Two conversions of this row agreed (not the OHM_VET_MAX_MS escape):
+    /// what the fuse check decides on.
+    ohm_agreed: bool,
     /// Time of this row's write (ms; OHM_VET_MAX_MS).
     ohm_t0: u64,
     f_ac: f32,
@@ -1022,8 +1025,13 @@ struct FuseJob {
     n: u8,
 }
 
-/// Fuse check: ohm readings taken (the last one decides) and the time limit.
-const FUSE_READINGS: u8 = 3;
+/// Fuse check: the final ohm readings taken (the last one decides) and the
+/// time limit. Only a final reading of the 600 ohm row whose vet saw two
+/// conversions agree counts (OHM_VET_*), never the n-th raw conversion:
+/// designed when the ohm entry waited 2.5 s, the third conversion after the
+/// fast entry (150 ms, ab7184c) could still be charging the node (owner on
+/// 10242c3: 18 ohm instead of 48, "Check leads").
+const FUSE_READINGS: u8 = 1;
 const FUSE_TIMEOUT_MS: u64 = 8000;
 
 /// A-jack protection latch (`aprot_poll`): `ack` = the user chose a
@@ -1371,6 +1379,7 @@ impl Dmm {
             ohm_settled: false,
             ohm_prev: f32::NAN,
             ohm_ok: false,
+            ohm_agreed: false,
             ohm_t0: 0,
             f_ac: 0.0,
             f_lpf: 0.0,
@@ -1845,6 +1854,7 @@ impl Dmm {
         self.vet_first = self.vet_fresh(old.0, r22_was);
         self.ohm_prev = f32::NAN;
         self.ohm_ok = false;
+        self.ohm_agreed = false;
         self.ohm_t0 = now;
         self.down_t = 0;
         self.tr_ev(now, tr::K_SET, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
@@ -2533,12 +2543,13 @@ impl Dmm {
         }
     }
 
-    /// Per poll while the check runs: count the ohm readings, decide on the
-    /// last one, or give up after FUSE_TIMEOUT_MS.
+    /// Per poll while the check runs: count the final, vetted ohm readings
+    /// (FUSE_READINGS), decide on the last one, or give up after
+    /// FUSE_TIMEOUT_MS.
     fn fuse_step(&mut self, clk: &mut Clock, now: u64, rd: Option<&Reading>) {
         let Some(mut j) = self.fuse_job else { return };
         let res = match rd {
-            Some(r) if self.mode == 10 => {
+            Some(r) if self.mode == 10 && !r.prov && self.ohm_agreed => {
                 j.n += 1;
                 (j.n >= FUSE_READINGS).then(|| sentinel::fuse_verdict(r.si, r.main.ol))
             }
@@ -4045,6 +4056,7 @@ impl Dmm {
         let p = core::mem::replace(&mut self.ohm_prev, x);
         if (x.is_infinite() && p.is_infinite()) || (x - p).abs() <= OHM_VET_REL * p.abs() + OHM_VET_CNT * lim / 60000.0 {
             self.ohm_ok = true;
+            self.ohm_agreed = true;
         } else if now >= self.ohm_t0 + OHM_VET_MAX_MS {
             self.ohm_ok = true;
         }

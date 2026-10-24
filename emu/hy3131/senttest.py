@@ -119,6 +119,12 @@ SC = {
                   {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OK', 'ohm': (44, 54)}),
     'fuse-open': ('CURR:DC', 20, [(0, 'open;valead;fuseopen', {'NONE'})], ['SYST:FUSE:TEST'],
                   {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OPEN'}),
+    # owner on 10242c3: "the fuse check sometimes reads 18 ohm instead of 48" (the third raw
+    # conversion after the fast ohm entry, the node still charging): with the model's ohm node
+    # lag (800 ms, chosen so the old third conversion is ~13 % low) the verdict must come from a
+    # vetted final reading (dmm.rs FUSE_READINGS / OHM_VET_*)
+    'fuse-ok-lag': ('CURR:DC', 20, [(0, 'open;valead;ohmtau:800', {'NONE'})], ['SYST:FUSE:TEST'],
+                    {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OK', 'ohm': (44, 54)}),
     'fuse-odd':  ('CURR:DC', 20, [(0, 'open;r:0.5', {'NONE'})], ['SYST:FUSE:TEST'],
                   {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'FAIL', 'ohm': (0, 2)}),
     # OVERLOAD (doc 4.7): a MANUAL uA / mA range over range -> the 10 A shunt at once, latched;
@@ -223,7 +229,7 @@ def run(name):
     # Phase times as the fw uptimes the scenario was written for (the inputs at fw t - 0.5):
     # `acts` (fw uptime values) keep their distance from their phase's input.
     tl = emusync.Timeline([(t - 0.5 if t > 0 else t, spec) for t, spec in script], run_for + VLAG, mk, vt=vt)
-    rows = []
+    rows, early = [], []
     t_wall = time.time()
     tm = None
     while p.poll() is None and tm is None and time.time() - t_wall < 300:
@@ -238,11 +244,18 @@ def run(name):
             if name == 'masked':
                 tm.write('SYST:ALER:ENAB 6')
             tm.write('CONF:' + func)
+            if mk.wait_clock() is None:
+                print(name, 'no clock marker (dwt: CYCCNT write) in the log', flush=True)
+            # (the setup after the clock marker: under host load a fast act, the fuse check, could
+            # end before the first sample and its BUSY was never seen)
             for c in setup:
                 time.sleep(1.0)
                 tm.write(c)
-            if mk.wait_clock() is None:
-                print(name, 'no clock marker (dwt: CYCCNT write) in the log', flush=True)
+            if 'fuse' in xtra:
+                # the check's BUSY right after the start (it can end within ~1 s, before the
+                # first sample row)
+                tm.write('SYST:FUSE?')
+                early.append(tm.read(timeout=60).decode(errors='replace').strip())
             # fw uptime: the distance from the start of the act's phase (predicted by the
             # clock marker = the value of the phase's input marker)
             acts = {tl.at(ta, predict=True) if mk.zero is not None else ta: c for ta, c in xtra.get('acts', {}).items()}
@@ -313,7 +326,7 @@ def run(name):
             print('  A-PROT latency %d ms' % ms[-1], flush=True)
     if 'fuse' in xtra:
         # the verdict came, the function came back (CURR), the ohm value in its window
-        fz = [r['SYST:FUSE?'] for r in rows if 'SYST:FUSE?' in r]
+        fz = early + [r['SYST:FUSE?'] for r in rows if 'SYST:FUSE?' in r]
         done = [f for f in fz if f not in ('BUSY', 'IDLE')]
         if not done or not done[-1].startswith(xtra['fuse']):
             ok = False

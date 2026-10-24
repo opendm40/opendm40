@@ -1836,8 +1836,11 @@ middle column above DC / AC / AC+DC, where the V page has its note line;
 V/ohm jack to A, nothing else connected" -> Start -> ohm 600 ohm, manual,
 the stock row with every sentinel off (the check drives the ohm current
 through the A shunt on purpose), PE = 2 as every ohm row: V/ohm -> lead -> A
--> fuse -> 10 mohm + 0.5 + 47.5 ohm -> COM ~ 48 ohm. The third reading
-decides: 44..54 ohm FUSE OK (green), OL FUSE OPEN (red, "Replace: 10 A
+-> fuse -> 10 mohm + 0.5 + 47.5 ohm -> COM ~ 48 ohm. The first final
+reading of the 600 ohm row decides, one whose ohm vet saw two conversions
+agree (dmm.rs OHM_VET_*, fastswitch2; until then the third raw reading
+decided, which after the fast ohm entry could still be charging: owner on
+10242c3, 18 ohm instead of 48, "Check leads"; senttest fuse-ok-lag): 44..54 ohm FUSE OK (green), OL FUSE OPEN (red, "Replace: 10 A
 ceramic fuse"), anything else "Check leads" (amber; a short V-COM, the lead
 in COM); no reading in 8 s: "No ohm reading". Then the function before comes
 back (a manual DMM range too; from the power meter the energy restarts);
