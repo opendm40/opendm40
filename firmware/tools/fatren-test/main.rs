@@ -213,6 +213,8 @@ mod lcd {
     }
 }
 
+#[path = "../../src/ident.rs"]
+mod ident;
 #[path = "../../src/screenshot.rs"]
 #[allow(dead_code)]
 mod screenshot;

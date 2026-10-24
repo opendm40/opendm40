@@ -531,7 +531,7 @@ impl App {
     pub fn new(clk: &mut Clock) -> Self {
         scope_page::sp_init();
         let mut dmm = Dmm::new();
-        crate::scpi::set_model(dmm.model(), Dmm::model_raw());
+        crate::ident::set_model(dmm.model(), Dmm::model_raw());
         dmm.select(clk, 1);
         buzzer_init();
         let mut a = App {

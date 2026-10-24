@@ -430,7 +430,7 @@ v.close()
 ok('a delete on the meter while frozen: the entry stays (data zeros), no UA; the host deletes it too; regenerated at the Allow')
 
 print('--- firmware: mcopy of an update file, names and orders')
-for name, order in (('dm40fw.bin', 'asc'), ('DM40FW.BIN', 'data-first'), ('dm40_v_2_7.bin', 'meta-first'), ('dm40fw.bin', 'random'), ('Dm40-Update.BIN', 'desc')):
+for name, order in (('dm40fw.bin', 'asc'), ('DM40FW.BIN', 'data-first'), ('dm40_v_2_7.bin', 'meta-first'), ('dm40fw.bin', 'random'), ('Dm40-Update.BIN', 'desc'), ('dm40_opendm40_v0.1.bin', 'asc')):
     tag = 'fw-%s-%s' % (name.replace('.', '_'), order)
     v, spi, base, host = fresh(tag)
     v.lock(True)

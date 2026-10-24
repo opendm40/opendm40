@@ -2727,9 +2727,9 @@ pub fn help_page(page: usize) {
     }
 }
 
-/// opendm40 firmware version, from Cargo.toml at compile time. This is the
+/// opendm40 firmware version (ident.rs, the same as *IDN?). This is the
 /// replacement firmware's own version, NOT the stock "Software V2.6".
-pub const FW_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const FW_VERSION: &str = crate::ident::VERSION;
 
 /// Device / About page (stock gui_v2_6.h section 6: Vendor / Web / Model /
 /// versions, panel 0x08074a10 as left-aligned "label:value" lines). Rendered

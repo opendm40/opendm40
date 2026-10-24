@@ -33,9 +33,11 @@
 //!     (all of its entries in that FAT sector 0, `T_FAT`), in any order;
 //!     when both have been seen the SPI file is deleted (`poll`, from the
 //!     main loop, csvlog::delete_on; only if the SPI entry is still the same
-//!     file). A 0xE5 without the chain freed (a rename / move to a trash
-//!     directory) never deletes anything: at the session's end the file is
-//!     back;
+//!     file). A 0xE5 without the chain freed deletes nothing by itself: a
+//!     rename is refused (at the session's end the file is back); a move
+//!     into a host directory (a trash) whose entry is still there at the
+//!     session's end deletes the file then (`release_all`, T_MOVED), one
+//!     taken out of the trash again is kept;
 //!   * FAT entries of free clusters (the host allocates; `pair`), host
 //!     entries in free root slots: an 8.3 entry DM40*.BIN (a regular file,
 //!     start cluster free, at most upload::MAX bytes), long-name entries,

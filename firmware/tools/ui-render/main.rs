@@ -28,6 +28,8 @@
 mod host;
 pub use host::mmio;
 
+#[path = "../../src/ident.rs"]
+mod ident;
 #[path = "../../src/bargraph.rs"]
 mod bargraph;
 #[path = "../../src/clock.rs"]

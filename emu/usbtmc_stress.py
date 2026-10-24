@@ -59,7 +59,7 @@ DEV_DEP_MSG_OUT, REQUEST_DEV_DEP_MSG_IN = 1, 2
 # firmware/src/uid.rs, emu/run.py --uid) is taken from the first *IDN? (main).
 IDN = None
 IDN_RE = re.compile(rb'Alientek,DM40[ABC],[0-9A-F]{24},opendm40 0\.1')
-IDN_34401A = b'HEWLETT-PACKARD,34401A,0,dm40-fw 0.1'
+IDN_34401A = b'HEWLETT-PACKARD,34401A,0,opendm40 0.1'
 
 
 class Hang(Exception):

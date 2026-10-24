@@ -11,7 +11,7 @@
 //! 26624-sample record instead of the CSV's 692 KB. The CSV exists on read
 //! (SCOP%03u.CSV on the read-only LUN 1, MMEM:DATA?, tools/dlog.py), byte
 //! for byte what this module wrote as text before:
-//!   # Alientek DM40A, opendm40 0.0.1, scope record (no real-time clock)
+//!   # Alientek DM40A, opendm40 0.1, scope record (no real-time clock)
 //!   # timebase 200us/div, 1V/div, probe x1, coupling DC, sample rate 12.5MS/s, samples 26624
 //!   # trigger Edge rising 993mV, mode Auto, triggered
 //!   # time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip

@@ -128,6 +128,8 @@ mod spiflash {
     }
 }
 
+#[path = "../../src/ident.rs"]
+mod ident;
 #[path = "../../src/clock.rs"]
 mod clock;
 #[path = "../../src/lcd.rs"]

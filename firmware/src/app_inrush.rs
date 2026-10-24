@@ -381,11 +381,10 @@ impl App {
         };
         let mut w = crate::dlog::Txt { b: &mut out[..], n: 0 };
         let mut t = [0u8; 16];
-        w.s("# Alientek DM40A, opendm40 ");
-        w.s(match option_env!("CARGO_PKG_VERSION") {
-            Some(v) => v,
-            None => "dev",
-        });
+        w.s("# Alientek ");
+        w.s(crate::ident::model_name());
+        w.s(", opendm40 ");
+        w.s(crate::ident::VERSION);
         w.s(", inrush capture, AD2, AC A row 10 A (10 mohm, OP1 x1, DC-coupled), nominal ");
         w.u(s.rate_mhz as u64 / 1000);
         w.c(b'.');
