@@ -2553,7 +2553,7 @@ fn main() {
         ui::range_page(Button::Ohm, Some(7), 1, None);
         save(&out, "m07-range-ohm-on");
         // The test current label (top left) of every range in both
-        // variants; the saved one: 600 kohm, "ON" (I 0.27 uA).
+        // variants; the saved one: 600 kohm, "ON" (I 0.66 uA).
         for on in [false, true] {
             for rg in 0..7i8 {
                 host::reset(0);

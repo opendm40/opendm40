@@ -3742,7 +3742,7 @@ impl App {
         };
         let mut t = [0u8; 16];
         if let Some((_, _, i, _)) = self.dmm.t_excitation() {
-            // Estimated sensor current (dmm.rs T_VSRC, unverified).
+            // Estimated sensor current (dmm.rs t_excitation; inferred).
             put(b"Sensor current ~");
             put(dmm::format(&mut t, i * 1e3, 3).as_bytes());
             put(b" mA");
