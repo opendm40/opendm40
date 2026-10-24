@@ -12,8 +12,7 @@ What is here:
 - **Stock firmware tooling**: decode / encode / pack the vendor update files
   (`dm40_v_X_Y.bin`), a patch kit that adds code to the stock firmware, and
   the memrw kit that backs up calibration and the whole flash over Bluetooth.
-- **Bluetooth protocol** of the stock DM40 firmware, with a Python client and
-  a web client.
+- **Bluetooth protocol** of the stock DM40 firmware, with a Python client.
 - **Reverse-engineering notes** on the stock firmware V2.6, the bootloader and
   the update format, which fw-rs is based on.
 
@@ -61,7 +60,6 @@ protocol notes are for stock V2.6.
 | [firmware/re/](firmware/re/README.md) | Reverse-engineering notes ([ANALYSIS.md](firmware/re/ANALYSIS.md), `analysis/*.h`), capstone helpers, Ghidra scripts |
 | [docs/bt-protocol.md](docs/bt-protocol.md) | Bluetooth protocol of the stock DM40 |
 | [tools/](tools/) | `dm40.py`: minimal Python BT client |
-| [web/](web/README.md) | Web Bluetooth / Web Serial client for the stock DM40 protocol |
 | [docs/dm40-feature-request.md](docs/dm40-feature-request.md) | DM40C feature request and UX gap analysis (Russian) |
 | [docs/history/](docs/history/README.md) | Archived plans, reviews and handover notes (done or superseded), kept for reference |
 
@@ -94,7 +92,7 @@ python3 firmware/dm40fw.py decode vendor/dm40_v_2_6.bin dm40_v_2_6.dec.bin
   ```
 
 - Patch kit: `gcc-arm-none-eabi`, `make`, `zip`.
-- Host tests: `mtools` (`fw-rs/tools/fatren-test`), `node` (`web/`).
+- Host tests: `mtools` (`fw-rs/tools/fatren-test`).
 - Bluetooth tools need a Python with `AF_BLUETOOTH` sockets
   (`/usr/bin/python3` on Linux; the linuxbrew one has none).
 
