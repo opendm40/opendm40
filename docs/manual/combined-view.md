@@ -39,7 +39,7 @@ From 100 V the strip gets a red frame.
 | **MF** | The multimeter's range page (or Hold & Limits). |
 | Tap the run state in the top bar | Scope run / stop. |
 | **TRIG** or the trigger in the top bar | The scope menu. |
-| Swipes left / right | Change the view, also on the graph. |
+| Swipe left / right starting on the strip | Change the view. On the graph a drag works as on the scope page. |
 
 The graph, the right panel and the scope menus work as on the
 [oscilloscope page](scope.md). Scope auto-set is not available here: AUTO

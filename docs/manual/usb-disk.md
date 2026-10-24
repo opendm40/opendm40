@@ -70,8 +70,9 @@ BMP, the same format as on the stock firmware.
 Messages: **Disk busy** (another recording or file job is running; try
 again), **Disk full**, **No disk**, **Screenshot failed**.
 
-Over SCPI, a screenshot can also be read straight to the computer
-([SCPI reference](scpi-reference.md)).
+Over USB, `python3 firmware/tools/dm40dbg.py shot out.png` reads the screen
+straight to the computer (the tool is in
+[firmware/tools/](../../firmware/tools/dm40dbg.py)).
 
 ### The gallery
 
