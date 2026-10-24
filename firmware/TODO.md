@@ -1561,8 +1561,12 @@ Firmware:
       30 s; the only hole is one block of 113-275 samples overwritten right after the first 2048 (t 29-31
       ms, the logger panel's first draw; none with DBG:AD2:DRAW 0). Bluetooth AD1 640 S/s ROWS / PACKed /
       DLG lost 0, 15 / 33 / 31 replies/s.
-- [ ] 76.8 kS/s host stream: the logger panel's first draw overwrites 113-275 samples once at the start of
-      every session (device 46370df). Split that draw or hold the panel until the drain has run once.
+- [x] 76.8 kS/s host stream: the logger panel's first draw overwrote 113-275 samples once at the start of
+      every session (device 46370df). Fixed: a panel part is drawn only while the ring holds < 512 records
+      (a quarter of logger::CAP) or nothing drained it for 200 ms (dialog.rs `log_panel_room`). Emulator
+      (--mips 110 --isr-stall-ns 700, panel on): emu/logfmttest.py 76800 PACKed / DLG 10 s overwritten 0
+      (two runs; 455 in 3 s before), 38400 all formats lossless; emu/fastlogtest.py disk 38400 / 76800 lost 0.
+      Device: untested (the 46370df item 1a / 1b runs again: overwritten 0 expected).
 - [x] `VOLT:RANG:AUTO?` in AC V and `CURR:RANG:AUTO?` in AC A answered +9.91E37 (device d330877, device-check
       "d330877" new bug 4): a bare VOLT / CURR header meant the DC function. Branch smallbugs: a bare VOLTage /
       CURRent in [SENS:]<q>:RANG / :RANG:AUTO / :RES is the quantity in any coupling (scpi.rs `ANY_CPL`; DC, AC,
@@ -3422,10 +3426,24 @@ Emulator (emu/):
       VOLT:RANG 0.05 / MIN, AC 60 mV, DC AUTO 58.0 mV down, 60.4 / 59.0 mV stay, 62.1 mV up, AC AUTO down on
       the hum and up on a square: PASS. Untested: the Wave view opened on 60 mV (its V/div steps start at
       600 mV).
-- [ ] 60 mV follow-ups (device 46370df, device-check doc "46370df" new bugs 1, 2, 4): a 40 Hz 0 / 9.5 V
-      square on V-COM in AC V AUTO (mV-first, from 60 mV) tripped a false A-JACK (AD1PK_PB1, the danger
-      alarm sounded) and AUTO stayed on 600 mV reading 0.606 V for 12 s; AUTO -> AUTO+ on the range page
-      while on 60 mV stays on 60 mV until the function is entered again.
-- [ ] Ohm test-current label stays on 60 M after 6 M -> 60 M (test_current_label returns without clearing
-      its box; device 46370df, both variants). The labels on the other ranges, diode 0.75 mA and "Overload"
+- [x] 60 mV follow-ups (device 46370df, device-check doc "46370df" new bugs 2, 4):
+      AUTO -> AUTO+ on the range page while on 60 mV stayed on 60 mV until the function was entered again:
+      `set_range` AUTO+ now leaves mV for 6 V at once (also the Wave view / inrush restore of AUTO+).
+      AC V AUTO (mV-first) stayed on 600 mV reading 0.606 V for 12 s under a 40 Hz 0 / 9.5 V square: the mV
+      input clamps it (a ~0 .. 1.21 V node swing, INFERRED), its RMS stays under 1.03 x 600 mV. Plain AC mV
+      now steps up when |LPF| + 1.414 x RMS > 2.2 x the range (MV_CLIP_K; the row is DC-coupled), and AC V
+      6 V then holds off the step back into mV until its AC part changes (`mv_clip`). The A-JACK alert does
+      not hold the range (the range code does not read it). emu/hy3131/mvautotest.py with the model's
+      `mvclamp:1.212;mvpb1:10` (without the fix it reproduces 0.606 V and AJACK,AD1PK_PB1). Device: untested
+      (the 46370df item 2c square again: 6 V, ~4.7 V expected; then AUTO -> AUTO+ on 60 mV).
+- [ ] False A-JACK from a large AC signal on V-COM in AC mV (device 46370df new bug 1: AJACK,AD1PK_PB1 and
+      the danger alarm with the A jack empty, the 0 / 9.5 V square, AC V AUTO on 60 mV). The square drives
+      the mV input into its clamp; the clamp current shows on PB1, where the AD1 peak hold watches the A-jack
+      shunt (INFERRED: the emulator's `mvpb1` models it, ratio unknown). With the clip step (above) AC mV is
+      left within ~2 s of the square on the emulator and the alert does not assert there (without the fix it
+      did); whether it still would on the device is not known. Open: the alert's rule itself
+      (PeakA in the AC mV rows while the V input is over range), not changed.
+- [x] Ohm test-current label stays on 60 M after 6 M -> 60 M (test_current_label returns without clearing
+      its box; device 46370df, both variants). Fixed: the box is cleared when the range has no value;
+      tools/ui-render range pairs ending on 60 M against a fresh draw. Device: untested. The labels on the other ranges, diode 0.75 mA and "Overload"
       next to 0L: PASS on the device.
