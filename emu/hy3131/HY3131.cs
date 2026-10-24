@@ -1436,6 +1436,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
             }
+            if((role == Role.Ohm || role == Role.Diode) && SrcDirect())
+            {
+                // opendm40 DBG:SRC: a direct node read, saturating at full scale
+                code = SrcCode(ig, rg, fs);
+                if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
+                return (int)Math.Round(Math.Max(-(fs - 1), Math.Min(fs - 1, code + Dcos / rg * fs)));
+            }
             switch(role)
             {
             case Role.DcV:
@@ -1676,6 +1683,50 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// Diode test: constant current source (the stock's 0.765 mA constant) with ~3.3 V compliance.
         public const double DiodeTestCurrent = 0.765e-3, DiodeCompliance = 3.3;
+
+        // ------------------------------------------------------------ DBG:SRC
+        /// opendm40 DBG:SRC (src/dbgsrc.rs): an ohm / diode row whose AD1 mux (R24 SAD1FP / FN) or
+        /// reference (R28) is not the stock row's: AD1 reads a node directly.
+        private bool SrcDirect()
+        {
+            if(bestRow < 0) return false;
+            var b = Rows[bestRow].Bytes;
+            return ((b[4] ^ regs[0x24]) & 0xF7) != 0 || b[8] != regs[0x28];
+        }
+
+        /// Node volts relative to AGND (the model's AGND = VDDA / 2) for DBG:SRC: the ohm source
+        /// OP3 at VREF through Rref into the jack node (FB = OP3 side, RLU / PB0 / OP1O = jack
+        /// side; the diode row: the current source, PB0 / OP1O = jack / 10 by SDIO).
+        private double SrcNode(string n)
+        {
+            double vs = 0, rref = 0, vx = 0, dummy;
+            if(role == Role.Ohm)
+            {
+                OhmSource(out vs, out rref);
+                Fe.OhmNode(vs, rref, out vx, out dummy);
+            }
+            else vx = Fe.DiodeNode(DiodeTestCurrent, DiodeCompliance);
+            switch(n)
+            {
+            case "FB": return role == Role.Ohm ? vs : 0;
+            case "RLU": return vx;
+            case "PB0": case "OP1O": return role == Role.Diode ? vx / 10 : vx;
+            case "VREF": return OhmSourceVolts();
+            case "VDDA": return Vdda * 0.5;
+            case "VSSA": return -Vdda * 0.5;
+            case "REFO": case "PB6": return Vref;
+            default: return 0; // AGND, PB3 (COM), floating nodes
+            }
+        }
+
+        private double SrcCode(double ig, double rg, double fs)
+        {
+            var fp = Sad1fpNames[regs[0x24] >> 4]; var fnn = Sad1fnNames[regs[0x24] & 7];
+            var rh = Sad1rhNames[(regs[0x28] >> 4) & 7]; var rl = Sad1rlNames[regs[0x28] & 7];
+            var vr = SrcNode(rh) - SrcNode(rl);
+            if(Math.Abs(vr) < 1e-6) return fs;
+            return ig * (SrcNode(fp) - SrcNode(fnn)) / (rg * vr) * fs;
+        }
 
         /// The ohm source of the current row: OP3 at VREF (SFUVR) through the reference resistor
         /// (stock Rref table, scaled by the calibration gain); 0 / 0 outside the ohm rows. The
@@ -2168,6 +2219,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                         if(j == 18) mask &= 0x0F;
                     }
                     if(ad2Stream && (j == 9 || j == 20)) mask = 0;
+                    // opendm40 DBG:SRC (src/dbgsrc.rs): the ohm / diode rows with AD1 cycled through
+                    // other nodes: the AD1 reference buffers, SAD1FP / FN (not SDIO) and R28 are free.
+                    if(row.Role == Role.Ohm || row.Role == Role.Diode)
+                    {
+                        if(j == 3) mask &= 0xF3;
+                        if(j == 4) mask &= 0x08;
+                        if(j == 8) mask = 0;
+                    }
                     // opendm40 DC-coupled V row (ad2exp.rs dcv_row, feasibility E7): the AC V row with SAD2IP =
                     // OP1O, AD2IN AGND / RLU, OP1+ SENSE or AGND (the zero), AD3 / RMS / LPF off, also with
                     // ENAD2 off (the AD1-alone phase of DBG:AD2:DCV?).
