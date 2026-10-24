@@ -25,8 +25,13 @@ On this page they are always written "HY3131 PBn"; a bare "PBn" is an MCU pin.
 Sources used most: [`fw-rs/src/board.rs`](../fw-rs/src/board.rs) and the other drivers in [`fw-rs/src/`](../fw-rs/src),
 `firmware/re/analysis/*_v2_6.h`, [`fw-rs/docs/dac-adc-paths.md`](../fw-rs/docs/dac-adc-paths.md),
 [`fw-rs/docs/power-meter-and-misconnect.md`](../fw-rs/docs/power-meter-and-misconnect.md), [`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md),
-[`docs/dm40-feature-request.md`](../docs/dm40-feature-request.md) 1.1 (community BOM of board V1.1, after
-jebem in the [EEVblog DM40C thread](https://www.eevblog.com/forum/testgear/alientek-dm40c-multimeter-%28dm40a-dm40b-dm40c%29/), from the [mydigit.cn teardown](https://www.mydigit.cn/thread-486604-1-1.html), registration needed), [`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) (owner reports, cited by
+the community BOM of board V1.1 ("BOM" below: posted by jebem in the
+[EEVblog DM40C thread](https://www.eevblog.com/forum/testgear/alientek-dm40c-multimeter-%28dm40a-dm40b-dm40c%29/),
+retold from the [mydigit.cn teardown](https://www.mydigit.cn/thread-486604-1-1.html),
+registration needed; first collected in this repo in
+[docs/dm40-feature-request.md](../docs/dm40-feature-request.md)), the DM40
+manual V1.5 ([ManualsLib](https://www.manualslib.com/manual/3720530/Alientek-Dm40.html)),
+[`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) (owner reports, cited by
 forum post number).
 
 ## Contents
@@ -51,70 +56,184 @@ forum post number).
 
 ## Block diagram
 
-The isolation boundary is **inferred** (BOM + photos: the CA-IS3741 isolator
-and two VPS8504B / LT61 transformer supplies sit between the MCU area and the
-shielded DMM area; see [docs/dm40-feature-request.md](../docs/dm40-feature-request.md) 1.2).
+The DMM side is galvanically isolated from the MCU side: **verified (owner,
+2026-10-24)**. The barrier is the CA-IS3741 digital isolator (SPI), the
+optocouplers and the two VPS8504B + LT61 transformer supplies; each of those
+parts keeps its own marking in [Main parts](#main-parts). What sits on which
+side beyond the DMM itself is inferred, see
+[Isolation boundary](#isolation-boundary).
 
+```mermaid
+flowchart LR
+  USBC(["USB-C jack"])
+
+  subgraph MCUD["MCU domain (battery / USB ground)"]
+    direction TB
+    TVS["TVS on VBUS"]
+    CHG["TP4056 linear charger"]
+    BAT["Li-po 1S 2000 mAh LN425272, protection PCB"]
+    SUP["System supply (regulators not identified)"]
+    MCU["GD32F427VGT6, 200 MHz, 25 MHz crystal"]
+    LCD["ILI9488 3.5 inch IPS 480 x 320, backlight PWM PA6"]
+    TCH["Capacitive touch (Hynitron 0x5A) + 4 touch keys"]
+    FLASH["W25Q128JV 16 MiB SPI flash (USB disk)"]
+    BT["Jieli BP2A838 Bluetooth, 24 MHz crystal, PCB antenna"]
+    BUZ["Buzzer"]
+    SADC["3PA1030 10-bit 50 MS/s ADC"]
+    GAIN["Gain stage: 4051 + op amp 8091"]
+    ATT["Input relay /50 (PC13), AC/DC (PE3), offset PWM (PC8)"]
+    CHA(["CHA coaxial jack (MCX per BOM): scope input"])
+    SW["SGM3157 path switch (PB12)"]
+    OUTS["Generator output stage"]
+    GEN(["GEN coaxial jack (MCX per BOM): generator output"])
+  end
+
+  subgraph BAR["Isolation barrier: verified (owner, 2026-10-24)"]
+    direction TB
+    ISO["CA-IS3741 digital isolator (SPI)"]
+    OPTO["Optocouplers 2 x EL3H7, 2 x 174 F163H"]
+    ISUP["2 x VPS8504B + LT61-117 / LT61-113 isolated supplies"]
+  end
+
+  subgraph DMMD["Isolated DMM domain (shielded)"]
+    direction TB
+    HY["HY3131, 4.9152 MHz crystal"]
+    REF["MAX6190 1.25 V reference (BOM)"]
+    DIV["Divider 10 M + taps (TC1746B6 on B/C, discrete on A)"]
+    RLY["HFD4/3-LS latching relay"]
+    NET["V/Ω input network (PTC, MOVs)"]
+    SH["Shunt chain 10 mΩ + 0.5 Ω + 47.5 Ω, MOSFETs RUH30J51M"]
+    FUSE["Fuse"]
+    JV(["V/Ω jack"])
+    JCOM(["COM jack"])
+    JA(["A/mA/µA jack"])
+  end
+
+  USBC -->|"VBUS"| TVS --> CHG --> BAT
+  CHG --> SUP
+  BAT --> SUP
+  SUP --> MCU
+  USBC <-->|"USBFS PA11 / PA12"| MCU
+  MCU -->|"FSMC 16-bit"| LCD
+  TCH -->|"I2C2"| MCU
+  MCU <-->|"SPI1"| FLASH
+  MCU <-->|"UART4"| BT
+  MCU -->|"TIM14 PA7"| BUZ
+  CHA --> ATT --> GAIN --> SADC
+  SADC -->|"PB0..PB9"| MCU
+  MCU -->|"PC6 50 MHz clock"| SADC
+  MCU -->|"PC4 rail"| GAIN
+  MCU -->|"DAC0 PA4"| SW
+  MCU -->|"TIM12 PB14"| SW
+  SW --> OUTS --> GEN
+  MCU <-->|"SPI2 PC10..12 + PD2"| ISO
+  ISO <-->|"SPI"| HY
+  MCU -->|"PA9 / PA10, PE0 / PE1"| OPTO
+  OPTO --> RLY
+  OPTO --> SH
+  MCU -->|"PE2 rail"| ISUP
+  ISUP -->|"isolated supply"| HY
+  REF --> HY
+  JV --> NET --> RLY
+  RLY --> DIV --> HY
+  JA --> FUSE --> SH --> JCOM
+  SH --> HY
+
+  classDef inferred stroke-dasharray: 6 4
+  class SUP,GAIN,ATT,OUTS,OPTO,REF,DIV,NET,SH inferred
+  style BAR stroke-width:3px
 ```
- USB-C ──TVS──┬── TP4056 ── Li-po 1S 2000 mAh (LN425272, protection PCB)
-  D+/D- │     │                │
-        │     └────────────────┴── system supply (regulators not identified)
-        │                                   │
-        │   ┌───────────────── MCU domain (battery / USB ground) ──────────────────┐
-        └──►│ GD32F427VGT6  200 MHz ── 25 MHz crystal                              │
-            │   FSMC 16 bit ──► ILI9488 3.5" IPS 480x320 (backlight PWM PA6)      │
-            │   I2C2 ◄──────── capacitive touch (Hynitron 0x5A) + 4 touch keys    │
-            │   SPI1 ◄───────► W25Q128JV 16 MiB (USB disk)                        │
-            │   UART4 ◄──────► Jieli BT (BP2A838) ── 24 MHz, PCB antenna          │
-            │   TIM14 PA7 ───► buzzer                                             │
-            │   PB0..PB9 ◄──── 3PA1030 10 bit ADC ◄─ gain (4051 + op amp) ◄─┐     │
-            │   PC6 50 MHz ──► ADC clock                 /50 relay PC13 ◄───┤ CHA │
-            │   DAC0 PA4 ───┐                            AC/DC PE3, offset   │ MCX │
-            │   TIM12 PB14 ─┴─ SGM3157 (PB12) ─ output stage ─────────────► GEN MCX│
-            │   PE2 / PC4 rails;  PA9/PA10, PE0/PE1 drive; SPI2 PC10..12 + PD2 │   │
-            └─────────────┬──────────────────────────────────────────────────────┘
-                          │ CA-IS3741 digital isolator (SPI), optocouplers
-                          │ (EL3H7, "174 F163H"), VPS8504B + LT61-117 / LT61-113
-            ┌─────────────┴────────── isolated DMM domain (shielded) ──────────────┐
-            │ HY3131 ── 4.9152 MHz crystal ── 1.25 V reference (MAX6190, BOM)     │
-            │   divider 10 M + taps (TC1746B6 on B/C, discrete on A)              │
-            │   HFD4/3-LS latching relay ── V/ohm input network (PTC, MOVs)       │
-            │   shunt chain 10 mohm + 0.5 ohm + 47.5 ohm, MOSFETs RUH30J51M       │
-            │   fuse ── jacks  V/ohm   COM   A/mA/uA                              │
-            └──────────────────────────────────────────────────────────────────────┘
-```
+
+Legend: dashed outline = inferred (BOM, register settings, scaling or photos;
+not traced on the board); solid = verified (marking in a photo, code, or a
+device check); the thick box is the isolation boundary, verified by the owner
+on 2026-10-24. Edge labels are MCU buses and pins. Rounded nodes are jacks.
+
+The same as text:
+
+- MCU domain (battery / USB ground): USB-C with a TVS on VBUS; TP4056
+  charger and the LN425272 1S 2000 mAh cell; GD32F427VGT6 at 200 MHz from a
+  25 MHz crystal; ILI9488 LCD on FSMC 16-bit, backlight PWM on PA6; touch
+  (Hynitron 0x5A, plus 4 touch keys) on I2C2; W25Q128JV on SPI1; Jieli BT on
+  UART4; buzzer PWM on TIM14 PA7; scope: CHA jack -> /50 relay PC13, AC/DC
+  PE3, offset PC8 -> 4051 + op amp gain -> 3PA1030 on PB0..PB9, clocked by
+  PC6 at 50 MHz; generator: DAC0 PA4 or TIM12 PB14 -> SGM3157 (PB12) ->
+  output stage -> GEN jack; rails PE2 (DMM side) and PC4 (scope / generator).
+- Isolation barrier (verified, owner 2026-10-24): CA-IS3741 carries SPI2
+  (PC10..PC12 + CS PD2); optocouplers carry the drive of PA9 / PA10 (relay)
+  and PE0 / PE1 (shunt MOSFETs) (inferred); 2 x VPS8504B with LT61-117 /
+  LT61-113 transformers supply the DMM side.
+- Isolated DMM domain (shielded): HY3131 with 4.9152 MHz crystal, MAX6190
+  1.25 V reference, 10 M divider with taps (TC1746B6 on B / C, discrete on
+  A), HFD4/3-LS latching relay, V/Ω input network (PTC, MOVs), fuse and shunt
+  chain 10 mΩ + 0.5 Ω + 47.5 Ω with RUH30J51M MOSFETs; jacks V/Ω, COM,
+  A/mA/µA.
+
+### Isolation boundary
+
+Verified (owner, 2026-10-24): the DMM domain (HY3131, reference, divider,
+relay, shunts, banana jacks) is galvanically isolated from the MCU domain.
+The reasoning below predates that confirmation; it is kept because it is also
+the argument for what else is on the MCU / USB ground (inferred, from the BOM
+and the manual; first written in
+[docs/dm40-feature-request.md](../docs/dm40-feature-request.md)):
+
+1. The TP4056 runs from VBUS and charges the battery directly, so USB ground
+   = battery ground.
+2. MCU + backlight + 50 MS/s ADC + Bluetooth take about 1..1.5 W; micropower
+   isolated supplies (hundreds of mW) cannot carry that, so the MCU is on the
+   battery ground.
+3. The USB disk needs the MCU's USB device; the BOM has no USB isolator
+   (ADuM3160 class), so USB ground = MCU ground.
+4. The 3PA1030 bus (10 bit x 50 MS/s) cannot pass a 4-channel isolator, so
+   the scope (and the generator) are on the MCU ground.
+5. The HY3131 draws a few mA and its SPI is 4 lines = one CA-IS3741, so
+   exactly the DMM is isolated.
+6. The manual says "for safety, do not measure while charging"; with an
+   isolated USB that warning would be unnecessary (it matters for the scope
+   and generator, whose ground is the USB / PC ground).
+
+Quick check that tells the sides apart (meter off, USB-C breakout):
+continuity USB GND - CHA / GEN shield (expected ~0 ohm) and USB GND - COM
+(expected open, > 1 Mohm). Not recorded as done in this repo.
+
+Where the two isolated supplies go is not settled: the BOM-based diagram in
+the feature request puts VPS8504B #1 + LT61-117 on the DMM side and
+VPS8504B #2 + LT61-113 on the MCU side as a negative supply for the analog
+front end (inferred there); this page draws both as the barrier (photos show
+both next to the DMM area). See [Unknowns](#unknowns).
 
 ## Main parts
 
 | Function | Part | Status / source |
 |---|---|---|
-| MCU | GigaDevice GD32F427VGT6, Cortex-M4F, LQFP100 | verified: marking `GD32F427 VGT6` in photo `main-board-mcu-gd32f427.jpg`; review |
+| MCU | GigaDevice GD32F427VGT6, Cortex-M4F, LQFP100 | verified: marking `GD32F427 VGT6` in photo `main-board-mcu-gd32f427.jpg`; review; BOM |
 | MCU crystal | 25.000 MHz | verified: photo (`main-board-mcu-gd32f427.jpg`, crystal next to the SPI flash) and PLL read back on the device ([`fw-rs/src/clock.rs`](../fw-rs/src/clock.rs)). The community BOM says 26 MHz (contradiction, see [Unknowns](#unknowns)) |
-| SPI flash | Winbond W25Q128JV, 16 MiB | verified in code ([`fw-rs/src/spiflash.rs`](../fw-rs/src/spiflash.rs), JEDEC check at boot); BOM |
-| LCD controller | ILI9488 (ID read 0x9488) | verified on the device (ID 0x9488 read by `board::init`, [`fw-rs/TODO.md`](../fw-rs/TODO.md) T1); stock init sequence `lcd_buzzer_v2_6.h` |
+| SPI flash | Winbond W25Q128JV, 16 MiB | verified in code ([`fw-rs/src/spiflash.rs`](../fw-rs/src/spiflash.rs), JEDEC check at boot); BOM. The BOM calls it QSPI: the chip can do quad I/O, but the board wires it as a plain 4-wire SPI ([SPI flash](#spi-flash-usb-disk)) |
+| LCD controller | ILI9488 (ID read 0x9488) | verified on the device (ID 0x9488 read by `board::init`, [`fw-rs/TODO.md`](../fw-rs/TODO.md) T1); stock init sequence `lcd_buzzer_v2_6.h`. Not in the BOM |
 | LCD panel | 3.5" IPS, 480 x 320, active area 74 x 50 mm | review |
-| Touch | Hynitron CST-type controller at I2C 0x5A (chip type byte 0xA8) on this unit; the stock also supports a Goodix GT1158 at 0x14 | verified on the device ([`fw-rs/src/touch.rs`](../fw-rs/src/touch.rs)); GT1158 path from the stock code only |
-| Bluetooth | Jieli BP2A838-20A2, 24 MHz crystal, PCB meander antenna | BOM; antenna and 24.000 MHz crystal next to a chip with the Jieli logo in `main-board-mcu-gd32f427.jpg` (marking not readable) |
+| Touch | Hynitron CST-type controller at I2C 0x5A (chip type byte 0xA8) on this unit; the stock also supports a Goodix GT1158 at 0x14 | verified on the device ([`fw-rs/src/touch.rs`](../fw-rs/src/touch.rs)); GT1158 path from the stock code only. Not in the BOM (the touch controller sits on the panel FPC) |
+| Bluetooth | Jieli BP2A838-20A2, 24 MHz crystal, PCB meander antenna | BOM (custom Jieli chip, no public datasheet); antenna and 24.000 MHz crystal next to a chip with the Jieli logo in `main-board-mcu-gd32f427.jpg` (marking not readable) |
 | DMM front end | Hycon HY3131 | verified in code (register protocol, `hy3131_v2_6.h`); the chip itself is under the shield can (4.9152 MHz crystal and VDD/VSS silkscreen next to it in `dmm-isolation-hy3131-shield-area.jpg`) |
 | HY3131 crystal | 4.9152 MHz | verified: photo and stock constant 4915.2 (`hy3131_v2_6.h`) |
-| Voltage reference | MAX6190 (1.25 V) on HY3131 PB6 | BOM; 1.25 V reference voltage verified by the stock scaling ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 7) |
-| Divider network | TC1746B6 (B / C); discrete resistors on the A | BOM; owner reports #25087, #51830 ([`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) 12) |
+| Voltage reference | MAX6190 (1.25 V, 5 ppm/°C) on HY3131 PB6 | BOM (also: placed outside the shield can, see [Unknowns](#unknowns)); 1.25 V reference voltage verified by the stock scaling ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 7) |
+| Divider network | TC1746B6 (B / C), 0.1 %, 10 ppm/°C; discrete resistors on the A | BOM; owner reports #25087, #51830 ([`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) 12) |
 | Digital isolator | Chipanalog CA-IS3741HW | verified marking: photos `dmm-isolation-hy3131-shield-area.jpg`, `main-board-mcu-gd32f427.jpg` |
-| Isolated supplies | 2 x VPS8504B push-pull driver + transformers LT61-117 and LT61-113 | verified markings: photos `isolated-supply-vps8504b-lt61.jpg`, `dmm-isolation-hy3131-shield-area.jpg` |
-| Optocouplers | 2 x EL3H7, 2 x "174 F163H" | BOM; the "174 F163H" (4-pin) next to the relay and the EL3H7 (marked "D424 EL3H7") are in `dmm-isolation-hy3131-shield-area.jpg` |
-| DMM relay | Hongfa HFD4/3-LS (3 V, latching per BOM) | verified marking: photos `input-jacks-shunts-fuse-relay.jpg`, `relay-hfd4-and-varistor-closeup.jpg`; review |
+| Isolated supplies | 2 x VPS8504B push-pull driver + transformers LT61-117 and LT61-113; micropower (hundreds of mW, BOM) | verified markings: photos `isolated-supply-vps8504b-lt61.jpg`, `dmm-isolation-hy3131-shield-area.jpg` |
+| Optocouplers | 2 x EL3H7, 2 x "174 F163H" | what they carry is inferred: the BOM guesses the HY3131 INT plus the relay and MOSFET drive; see [Unknowns](#unknowns). BOM; the "174 F163H" (4-pin) next to the relay and the EL3H7 (marked "D424 EL3H7") are in `dmm-isolation-hy3131-shield-area.jpg` |
+| DMM relay | Hongfa HFD4/3-LS (DPDT, 3 V, latching per BOM) | the BOM post blames this latching relay for false switching when the meter is shaken (not checked here). verified marking: photos `input-jacks-shunts-fuse-relay.jpg`, `relay-hfd4-and-varistor-closeup.jpg`; review |
 | Input protection | varistors 07D681K (680 V), blue disc parts, 2 W wirewound/film resistors; FMMT619 pair (owner report #41820) | photos (`relay-hfd4-and-varistor-closeup.jpg`, `input-jacks-shunts-fuse-relay.jpg`); which disc is a PTC and which a MOV is inferred from the markings only |
 | Current shunts | 10 mohm (wire shunt), 0.5 ohm (SMD "R500"), 47.5 ohm | 0.5 ohm verified marking in `input-jacks-shunts-fuse-relay.jpg`; values from the stock scaling and fw-rs checks (below) |
-| Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V | BOM |
+| Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A; switch the current ranges inside the one A jack | BOM |
 | Fuse | ceramic cartridge in clips, next to the A jack | photo `input-jacks-shunts-fuse-relay.jpg` and `opened-case-overview.jpg`; rating not readable, unknown |
 | Scope ADC | 3PEAK 3PA1030, 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 verified in code ([`fw-rs/src/scope.rs`](../fw-rs/src/scope.rs)) |
 | Scope gain mux | HC4051 (header says "HCF4051") | BOM, `scope_gen_v2_6.h` |
-| Scope op amp | "8091" (Gainsil GS8091?) | BOM, unconfirmed |
+| Scope op amp | "8091" (Gainsil GS8091?) | BOM, after gadefox in the EEVblog thread; the scope path is not traced, unconfirmed |
 | Generator path switch | SGM3157 SPDT | owner report (#24902: killed by 12 V); [`fw-rs/docs/dac-adc-paths.md`](../fw-rs/docs/dac-adc-paths.md) 1 |
-| Charger | TP4056 (marked "TP4056 2413"), linear, 1 cell | verified marking: photo `charger-tp4056-and-power.jpg`; review |
+| Charger | TP4056 (marked "TP4056 2413"), linear, 1 cell, not isolated (on VBUS) | verified marking: photo `charger-tp4056-and-power.jpg`; review |
 | Battery | LN425272 Li-ion polymer, 3.7 V, 2000 mAh, 7.4 Wh, 4.2 V charge limit, made 2025-02-10 by 东莞市立能电子科技有限公司, with protection PCB | verified: label in `battery-ln425272-label.jpg` |
 | Connectors | USB-C; two coaxial (MCX per BOM) jacks silkscreened CHA (scope) and GEN (generator); banana V/ohm, COM, A/mA/uA | photos; review ("coaxial, not BNC") |
-| Debug header | two rows of 4 holes: "VCC RX TX GND" (TX = PA2, the boot strap) and "V D C G" (SWD, inferred) | see [Debug header and hardware recovery](#debug-header-and-hardware-recovery). SWD read-out is locked (read protection set, [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md) 1) |
+| Debug header | two rows of 4 holes: "VCC RX TX GND" (TX = PA2, the boot strap) and "V D C G" (SWD, inferred; the BOM lists only this 4-pin service header) | see [Debug header and hardware recovery](#debug-header-and-hardware-recovery). SWD read-out is locked (read protection set, [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md) 1) |
 
 Small SOT-23 / SOT-89 / MSOP parts in `charger-tp4056-and-power.jpg`
 ("A2SHB", "93N44", "XFHVB", "K14", "S1K", "NE.", inductor "2R2", tantalum
@@ -130,7 +249,10 @@ Small SOT-23 / SOT-89 / MSOP parts in `charger-tp4056-and-power.jpg`
   device ([`fw-rs/src/clock.rs`](../fw-rs/src/clock.rs), [`fw-rs/src/genplan.rs`](../fw-rs/src/genplan.rs)).
 - USB 48 MHz: the stock PLLQ gives 44.4 MHz; fw-rs runs PLLSAI (P=6 -> 48 MHz)
   for USBFS. verified ([`fw-rs/src/usb.rs`](../fw-rs/src/usb.rs)).
-- RTC / LSE: not traced here.
+- On-chip blocks the board uses: USBFS, two 12-bit DAC channels (both used,
+  [Generator](#generator) and [Oscilloscope](#oscilloscope)), DMA, ADC0.
+- RTC / LSE: not traced here. Whether the RTC domain stays powered from the
+  battery while the meter is off is unknown.
 
 ## SPI flash (USB disk)
 
@@ -255,8 +377,10 @@ recovery, the double-hang rule) are in [fw-rs/README.md](../fw-rs/README.md)
 USB-C, USBFS only: DM PA11, DP PA12 (AF10). No VBUS sensing (PA9/PA10, the
 usual VBUS/ID pins, drive the relay). verified ([`fw-rs/src/usb.rs`](../fw-rs/src/usb.rs)). The USB
 port also charges the battery (TP4056); a TVS on VBUS failed at 21 V in one
-owner report (#36290). USB-PD trigger chargers work (owner report). Data and
-the DMM are galvanically separate only if the inferred isolation holds.
+owner report (#36290). USB-PD trigger chargers work (owner report). USB data
+and the DMM are galvanically separate (isolation verified by the owner,
+2026-10-24, [Isolation boundary](#isolation-boundary)); USB ground is the MCU,
+scope and generator ground (inferred).
 
 ## Bluetooth
 
@@ -282,7 +406,8 @@ configuration rows (R20..R35 per mode and range) and their decoding are in
 **Bus.** SCK PC10, MISO PC11, MOSI PC12, CS PD2 (active low), mode 0. The stock
 bit-bangs it; fw-rs uses SPI2 (AF6) at 3.125 MHz. verified on the device
 ([`fw-rs/src/hy3131.rs`](../fw-rs/src/hy3131.rs), [`fw-rs/docs/dmm-input-scope-feasibility.md`](../fw-rs/docs/dmm-input-scope-feasibility.md) 8). The
-signals cross the CA-IS3741 isolator (inferred: it has 3 forward and 1
+signals cross the CA-IS3741 isolator (isolation verified by the owner,
+2026-10-24; the channel assignment is inferred: it has 3 forward and 1
 reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 `chipanalog-ca-is374x-v1.08.pdf`). The HY3131 IRQ output is not used.
 
@@ -504,8 +629,13 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 
 ## Unknowns
 
-1. No schematic. The isolation topology (what sits on which side) is inferred
-   from the BOM and the photos.
+1. No schematic. The DMM domain's isolation is verified (owner, 2026-10-24);
+   the rest of the topology (what else sits on which side, where each isolated
+   supply goes) is inferred from the BOM and the photos. The BOM-based
+   diagram in [docs/dm40-feature-request.md](../docs/dm40-feature-request.md)
+   put VPS8504B #2 + LT61-113 on the MCU side as a negative supply for the
+   analog front end; this page draws both supplies on the barrier, next to
+   the DMM area as in the photos. Not settled.
 2. Which rail(s) hold the power on: PE2, PC4 or both; how the power key turns
    the unit on from off. [`fw-rs/src/boot.rs`](../fw-rs/src/boot.rs) and `native-boot.md` (shim
    steps) treat PE2 as the power hold; `native-boot.md` section 1 (older text)
@@ -513,8 +643,8 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 3. Why some cold power-ons without a short reached the loader (PA2 low for a
    while); whether anything else on the board drives PA2.
 4. The MCU crystal: 25 MHz by the PLL read-back and the photo, 26 MHz in the
-   community BOM ([`docs/dm40-feature-request.md`](../docs/dm40-feature-request.md) 1.1). The 25 MHz value is the
-   one the running firmware depends on.
+   community BOM (jebem, EEVblog thread, after mydigit.cn). The 25 MHz value
+   is the one the running firmware depends on.
 5. Charge status pins: `dmm_v2_6.h` says the stock shows the charging icon
    when PB10 = 1 and PB11 = 0; `bt_meas_v2_6.h` and [`fw-rs/src/power.rs`](../fw-rs/src/power.rs) use
    PB10 = 1 and PB11 = 1 for "charging". Both are guesses about the meaning.
@@ -531,3 +661,14 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 12. LCD panel FPC pinout; touch panel vendor beyond the controller ID.
 13. Exact HY3131 wiring (ohm reference resistors, divider taps, shunt nodes):
     inferred from the stock scaling only ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 8.5).
+14. MAX6190 placement: the BOM post says the reference sits outside the
+    shielded zone; this page's diagram draws it in the (shielded) DMM domain,
+    which is about the isolated side, not the shield can. Not checked on the
+    photos.
+15. What the four optocouplers carry: the BOM post guesses the HY3131 INT plus
+    the relay and MOSFET drive; the stock firmware does not use the HY3131
+    IRQ ([DMM front end](#dmm-front-end-hy3131)), and the MCU drives four
+    DMM-side GPIOs (PA9 / PA10 relay, PE0 / PE1 MOSFETs) that must cross the
+    barrier somehow, so the relay and MOSFET drive is the likelier load.
+16. Shock sensitivity of the latching relay (BOM post: false switching when
+    shaken): not reproduced here.
