@@ -605,8 +605,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 #### Diode
 
 - Shows the forward voltage with four decimals; **0L** above 3.12 V.
-- Top left, small: the test current, **I 0.75 mA** (*inferred*: from
-  owners' reports, not measured yet).
+- Top left, small: the test current, **I 0.76 mA** (the short-circuit
+  current, measured on one unit; the open-circuit voltage is 3.2 V).
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few

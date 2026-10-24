@@ -358,9 +358,9 @@ pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
     [None, None],
 ];
 /// Diode test current (A): OP3 as a current source (SMODE 0110, SCP / SCN)
-/// through RLD, not an Rref; ~0.75 mA from owners' reports (hw/README.md),
-/// not measured yet.
-pub const DIODE_I: f32 = 0.75e-3;
+/// through RLD, not an Rref; 0.756 mA measured on one unit (VDS15 tap, the
+/// MR9270S+ mA input into the jacks; device-check "RLD current-source path").
+pub const DIODE_I: f32 = 0.756e-3;
 
 /// Ohm test current (A) of range `r` and variant `var` (Dmm::ohm_var):
 /// OHM_ISC, the most the range drives through the probes (with R between
