@@ -1,21 +1,21 @@
 # AC+DC on the DM40: how other meters and DMM chips do it, and what fits the HY3131
 
-Date 2026-10-22. Evidence
-tags as in the sibling docs: **VERIFIED** = a datasheet / manual page, a stock
-row byte, opendm40 code or a device measurement already written up
-(`acdc-stock-vs-opendm40.md` = "acdc", `dmm-input-scope-feasibility.md` =
-"feasibility", `power-meter-and-misconnect.md` = "power"); **INFERRED** = follows
-from those; **UNKNOWN** = needs the device. Nothing under `stock/re/history/`
-was used. Web sources are listed in section 9; the PDFs were read with
-`pdftotext` (the Fluke, Keysight, Hioki, Brymen and 121GW manuals) or are the
-HYCON documents in `docs/`.
+How other meters and DMM chips measure AC+DC (the true RMS of AC with its DC
+part), which approaches fit the HY3131, and the device record of the two
+that opendm40 built as alternatives to the stock alternation (section 10,
+[`src/acdcm.rs`](../src/acdcm.rs)). The stock method, which opendm40 runs by default
+(method A), alternates whole HY3131 rows: an AC phase (AD2 + RMS after the
+HPF on the AC-coupled PB4 node) and a DC phase (AD1), ~1.9 s per cycle,
+total = hypot(AC, DC) ([`src/dmm.rs`](../src/dmm.rs) `dc_out` / `poll_ac`).
 
-Question from the owner: AC+DC (true-RMS of the DC-coupled signal) today
-alternates whole HY3131 rows (AC phase: AD2 + RMS after the HPF on the
-AC-coupled PB4 node; DC phase: AD1), ~1.9 s per cycle, total = hypot(AC, DC).
-DC through AD1 (24-bit, factory-calibrated) and DC through AD2/AD3 (19-bit,
-LPF or a software mean) differ in accuracy. What do others do, and what is the
-best approach here?
+Tags: **INFERRED** = follows from the cited sources but is stated nowhere;
+**UNKNOWN** = not known. Untagged facts come from the cited datasheet or
+manual page, a stock row byte, the opendm40 source or a device measurement.
+Short names: "acdc" = [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md)
+(the stock's AC+DC measured live), "feasibility" =
+[dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md), "power" =
+[power-meter-and-misconnect.md](power-meter-and-misconnect.md), "device check" =
+[device-check-2026-10-21.md](device-check-2026-10-21.md). Sources: section 9.
 
 ## 0. Summary
 
@@ -60,7 +60,12 @@ best approach here?
   signal the DC path's 0.03 % vs 0.1 % is irrelevant; on the ripple-on-a-supply
   case (the reason AC+DC exists, Fluke's own example) the DC error dominates
   and a 0.1 % DC path costs ~0.07 % of the total against AD1.
-* **Recommendation (section 7).** V: one fixed row with AD1 for the DC part
+* **Outcome (section 10).** Methods B (option (b)) and C (option (c)) run
+  next to the stock alternation A, selected with `DBG:ACDC:METH`. B failed
+  its device rule (its zero is bimodal per entry, 10.5). C meets the rule on
+  V on this unit (10.15); A stays the default until C is checked on the
+  current ranges with real current (10.16, TODO). Option (d) is not built.
+* **Recommendation of 2026-10-22 (section 7).** V: one fixed row with AD1 for the DC part
   (factory DC V calibration kept) and AD2 + AD3 + RMS for the AC part, option
   (b), **conditional** on the note-7 measurement running now: the AD1 offset
   shift with AD2 on must be a stable per-range constant; then it is removed by
@@ -130,7 +135,7 @@ Reading of the table:
 
 | chip | AC method | AC+DC | source |
 |---|---|---|---|
-| HYCON HY3131 / HY3130 | digital: AD2 (19-bit, 76.8 kS/s) -> **HPF** -> RMS = sum(X^2)/N (or sum(X*Y)/N with AD3, HY3131 only), LPF = DC mean of the same stream; AD1 24-bit for DC | **none**. X and Y are "the data that passed High Pass Filter" (DS 13.2 RMS Converter (3)); no control bit for the HPF in the register map; the reserved bits of R26 / R34 / R35 were poked on the device and none bypasses it (power doc "HPF bypass probe", 7889e6c). APD-DMM003 has separate DCV (sec. 3) and ACV (sec. 4) configurations and nothing combined; APN-HY3131001 is about SPI timing only; the "DemoCode" zips in `docs/` contain only a "website under construction" readme. HYCON's ENOB tool (`docs/HY3131-ENOB.zip`, `Config/ACV/HYCONFIG-0.txt`) sets R23 = 0x03 (**ENAD1 = 0**), R26 = 0x80, R29 = 0xF8 for ACV, R22 = 0x14 / R23 = 0x8B / R26 = 0x00 for DCV: HYCON's own reference rows run one converter family at a time | DS-HY3131 p. 29-34; APD-DMM003 p. 11-17 |
+| HYCON HY3131 / HY3130 | digital: AD2 (19-bit, 76.8 kS/s) -> **HPF** -> RMS = sum(X^2)/N (or sum(X*Y)/N with AD3, HY3131 only), LPF = DC mean of the same stream; AD1 24-bit for DC | **none**. X and Y are "the data that passed High Pass Filter" (DS 13.2 RMS Converter (3)); no control bit for the HPF in the register map; the reserved bits of R26 / R34 / R35 were poked on the device and none bypasses it (power doc "HPF bypass probe", 7889e6c). APD-DMM003 has separate DCV (sec. 3) and ACV (sec. 4) configurations and nothing combined; APN-HY3131001 is about SPI timing only; HYCON's "DemoCode" zips contain only a "website under construction" readme. HYCON's ENOB tool (`HY3131-ENOB.zip`, `Config/ACV/HYCONFIG-0.txt`) sets R23 = 0x03 (**ENAD1 = 0**), R26 = 0x80, R29 = 0xF8 for ACV, R22 = 0x14 / R23 = 0x8B / R26 = 0x00 for DCV: HYCON's own reference rows run one converter family at a time | DS-HY3131 p. 29-34; APD-DMM003 p. 11-17 |
 | HYCON HY3132 | nothing found on the web (no datasheet, no mention) | UNKNOWN | - |
 | Dream Tech DTM0660 | "built-in DSP, it can measure true RMS up to 1 kHz without any additional components", "AC Rectification: built-in true RMS processor ... 1 kHz bandwidth, error < 0.5 %", 14-bit sigma-delta, 3 readings/s | not in the feature list; function table has DC/AC only | DTM0660 datasheet p. 1-2 (shaddack mirror) |
 | Fortune FS9922-DMM4 | "AC rectifier OPAMP" (average responding, no RMS) | none (DC/AC mode bit per function) | FS9922-DMM4 DS rev 1.3, sec. 12.10, function table |
@@ -144,7 +149,7 @@ So: a **true DC-coupled RMS** needs either an analog converter in front
 RMS from the raw AD2 stream (option (d)); its own RMS block is AC-only by
 construction. Everyone building on an HY3131 with its own blocks is in camp 1.
 
-## 3. HY3131 facts that bound the options (VERIFIED unless marked)
+## 3. HY3131 facts that bound the options
 
 * **AD1 rate.** AD1CLK = SYSCLK/30 = 4.9152 MHz / 30 = 163.84 kHz; output
   rate = AD1CLK / OSR1 (DS 13.1 (10), (11)). OSR 8192 -> 20 S/s; AD1CHOP = 1x
@@ -173,19 +178,19 @@ construction. Everyone building on an HY3131 with its own blocks is in camp 1.
   (0.1 mV on 6 V) at either OSR.
 * **AD1 offset with AD2/AD3 on (note 7).** "When AD1 and AD2/AD3 is on, users
   must not turn on/off AD to avoid different AD1 Offset problem" (DS 13.1
-  note 7, p. 29). Device: AD1 reads **0.3..0.9 k counts low while AD2
-  converts** (owner-reported 2026-10-22 from the test 6.5 runs; not yet in a
-  committed doc) = 0.5..1.5 mV on 6 V (5..15 digits), 5..15 mV on 60 V
-  (5..15 digits), 0.05..0.15 V on 600 V. Whether the shift is a constant of
-  the configuration (removable by a zero) or wanders is **being measured
-  now**; it decides between (b) and (c).
+  note 7, p. 29). Device (feasibility 13.1): AD1 reads **0.05..0.9 k counts
+  low while AD2 converts** in the AC V row, mostly a steady offset per range,
+  level-dependent on 60 V. With AD2 + AD3 + RMS on for the whole DC V row
+  (feasibility 13.2): offsets of -2.9 mV / +17 mV / +0.17 V / -1.6 V on 6 / 60
+  / 600 / 1000 V that repeat to ~1 %, and a gain shift up to -0.18 % on 60 V
+  that does not repeat. This decided against (b) (section 10).
 * **AD2 / AD3.** 19-bit, 76.8 kS/s at OSR2 = 32; full scale +-1.25 V / IG at
   the input node; 4.77 uV per code at IG 1.0; no noise / linearity /
   bandwidth figure in the datasheet; gain drift **10 typ / 30 max ppm/C
   against 2.5 ppm/C for AD1** (DS p. 11). Device floor in the stock AC V 4 V
   row: 31..33 sqrt(RMS) counts ~ 14 ENOB per sample (feasibility 1.2).
-* **AD2 as a DC converter (test 6.5, owner-reported results of
-  `firmware/tools/experiments/ad2dcv.py`, not yet written up in a doc).** The register-only
+* **AD2 as a DC converter** (test 6.5, feasibility 13.1,
+  [`tools/experiments/ad2dcv.py`](../tools/experiments/ad2dcv.py)). The register-only
   DC-coupled V row (feasibility 1.3 last row: the DC V tap, OP1 x1 on SENSE,
   SAD2IP = OP1O, IG 1.0) is **linear to <= 0.003 % of range**, noise **3..10
   codes** (over the ~100 ms of one AD1 conversion), gain vs the nominal
@@ -216,7 +221,7 @@ construction. Everyone building on an HY3131 with its own blocks is in camp 1.
   written "with all three converters off, then AD3, AD2 and AD1 last, so AD2 /
   AD3 never switch while AD1 converts" (power 3.12). Note 8 (AD2IN != AD3IN or
   both AGND) is met by the stock AC V row (both AGND).
-* **Row differences at r0 (6 V)** (`firmware/src/hy3131_tables.rs` CFG_F0 /
+* **Row differences at r0 (6 V)** ([`src/hy3131_tables.rs`](../src/hy3131_tables.rs) CFG_F0 /
   CFG_F1, switch bytes R2C..R2E decoded with `emu/hy3131/ref/registers.md`:
   R2D = PS7 DS7 FS7 SS7 | PS6 DS6 FS6 SS6). f0 AC V r0: R2D 0x09 = **tap PA6
   (/100)** with R25 0x43 = OPS1 = OPS2 = 1 (OP1 through the external x10
@@ -289,7 +294,7 @@ Notation: d = display digit (60 000 counts: 0.1 mV on 6 V, 1 mV on 60 V);
 expected contribution of the method, **not** a spec for the meter; the AC
 part's accuracy is the stock AC V path's in every option but (d).
 
-### (a) The stock alternation (what opendm40 does today, acdc 2-3, 8)
+### (a) The stock alternation (method A, the opendm40 default; acdc 2-3, 8)
 
 * Rows: AC phase = f0 AC V row (AD2 + AD3 sum(X*Y), RMS/LPF, AC-coupled PB4),
   800 ms settle + 4 RMS results; DC phase = f1 DC V row + R32 = 0x38, AD1 at
@@ -308,7 +313,9 @@ part's accuracy is the stock AC V path's in every option but (d).
 * Update: **~1.9 s** for a complete cycle; the shown total is recomputed on
   every result (acdc 2.6), so the display moves ~7 times per cycle but each
   part is ~1 s old. A step on the input needs up to two cycles (~4 s) to
-  settle both parts; the AUTO coupling (acdc 11) votes over 2 cycles (2-6 s).
+  settle both parts; the AUTO coupling's first decision waits until the AC
+  part has settled on one side of |DC| (dmm.rs `AUTO_SETTLE_K`, `AUTO_TIE`;
+  10.9 item 2), ~2 s with A.
 * Calibration: none beyond the factory record.
 * Costs: a relay pulse and a 22-byte row write every ~1 s (acdc 7 items 1-3),
   no frequency display, the fast logger / wave view refuse AC+DC (feasibility
@@ -334,7 +341,7 @@ part's accuracy is the stock AC V path's in every option but (d).
   enable them in the row's order and measure again; the difference is the
   zero. Two levels (0 V and ~half range) tell offset from gain. If it wanders
   with time / temperature / input level -> (b) is not better than (c) and
-  costs a conversion family more. **UNKNOWN, being measured.** Ripple leak:
+  costs a conversion family more. (Device: it wanders, 10.5 e1.) Ripple leak:
   the same H(f) as (a), but now the DC readings come at 10 S/s continuously,
   so they can be averaged (e.g. 5 results = 0.5 s, another sinc with notches
   at multiples of 2 Hz: -14 dB more at 25 Hz, -10 dB at 37 Hz, INFERRED) or
@@ -346,7 +353,7 @@ part's accuracy is the stock AC V path's in every option but (d).
   not change the AC readings (power 4.6-4.7 device checks); the power DC row
   reads AD1 and AD2 on **the same node** (power 3.12 device results). The
   reverse direction (AD2 on -> AD1 offset) is the note-7 effect above.
-  UNKNOWN only in the specific merged V row: section 8 test 2.
+  Measured in the merged V row: AD1 converting does not move the RMS (10.5 e2).
 * Low-frequency limit: the AC path's, unchanged.
 * Update: AC every ~107 ms (RMS/LPF cadence), DC every 100 ms (OSR 8192
   chopped) or 400 ms (OSR 32768); total recomputed on either -> **~10
@@ -361,6 +368,10 @@ part's accuracy is the stock AC V path's in every option but (d).
   total, the logger at the AC cadence, no relay pulses.
 * Industry match: Keysight U1282A-like (DC path's error simply added), at the
   Hioki update rate or better.
+* **Outcome:** built as method B (10.1). On the device its per-entry zero
+  takes one of two values (6 V +12.6 / -30.5 mV) and leaves up to 7.5 digits
+  on 60 V and 16.6 on 1000 V: it fails the 2-digit rule (10.5 e1), dropped;
+  the code stays for comparison. B's AD1 does not move the RMS (10.5 e2).
 
 ### (c) DC from the AD2/AD3 path instead of AD1
 
@@ -408,6 +419,14 @@ part's accuracy is the stock AC V path's in every option but (d).
 * Industry match: the 121GW / Brymen direction (DC through the AC
   converter's family) with a far better converter (19-bit sigma-delta vs an
   analog RMS chip), hence ~0.1 % instead of 0.7-1 %.
+* **Outcome:** built as method C (10.1), and the plumbing question resolved
+  without SDO23 switching: AD2 and AD3 both on the DC-coupled node, the LPF
+  gives the DC part and the RMS block's HPF takes the DC out of sum(X*Y), so
+  one fixed row gives both parts every LPF block (~9 readings / s). The DC
+  part is anchored per range on the stock DC V reading and its gain measured
+  between two such readings (10.6-10.14); the AC part goes through the
+  factory AC V calibration. On the device it meets the 0.05 % + 5 digit rule
+  on V (10.15).
 
 ### (d) DC-coupled RMS computed in the MCU from the AD2 stream (E7 row)
 
@@ -415,8 +434,9 @@ part's accuracy is the stock AC V path's in every option but (d).
   the stream ISR of feasibility 11 (DMA frames, phase-locked) feeding a
   running sum(x) and sum(x^2) in 64-bit: 19-bit codes squared over 76 800
   samples fit in 2^54. CPU: one multiply-accumulate per 13 us is small
-  against the ISR's own ~20 us entry latency (feasibility 11.4); the region-B
-  flash budget is the constraint to check (memory notes), not the arithmetic.
+  against the ISR's own ~6 us per sample at 76.8 kS/s (feasibility 11.12);
+  the zero-wait flash budget (region B, [native-boot.md](native-boot.md)
+  "Memory budget") is the constraint to check, not the arithmetic.
 * What it gives: the **true** AC+DC rms in one number (no hypot, no two
   paths) plus the mean (DC) and sqrt(ms - mean^2) (AC) from the same window;
   any waveform, crest factor limited only by the +-1.25 V / IG window at the
@@ -444,17 +464,20 @@ part's accuracy is the stock AC V path's in every option but (d).
   RMS block unused for V (the stock's AC V path stays for the plain AC
   function), and no stock reference to pixel-match. **Experiment first, main
   path later if the synced window proves out.**
+* **Outcome:** not built. The wave view's Vrms of the DC-coupled V row
+  (feasibility 10, 13) is a box RMS of the same stream, with the sinc^3
+  droop of the slower rungs (feasibility 3.2).
 
 ### Options table
 
 | | (a) stock alternation | (b) fixed row, AD1 + AD2/AD3 RMS | (c) DC from the AD2/AD3 path | (d) MCU RMS of the DC-coupled AD2 stream |
 |---|---|---|---|---|
-| DC part accuracy | DC V function (factory), 1 unfiltered 100 ms conversion | DC V function + note-7 zero (UNKNOWN stability), averaging possible | ~0.05-0.1 % + 2-5 d after self-cal; 10-30 ppm/C | as (c) |
+| DC part accuracy | DC V function (factory), 1 unfiltered 100 ms conversion | DC V function + note-7 zero (unstable on the device, 10.5 e1), averaging possible | ~0.05-0.1 % + 2-5 d after self-cal; 10-30 ppm/C | as (c) |
 | AC part accuracy | AC V function | AC V function (if AD1 does not disturb PB4: test 2) | AC V function (sum(X^2) instead of sum(X*Y) if AD3 moves) | hardware-class only with cycle-synced windows; else ~0.4 % |
 | 50/60 Hz ripple on the DC part | -75 dB (AD1 10 S/s, DS) | -75 dB, more with averaging / OSR 32768 | LPF: UNKNOWN (<= -46 dB at 40 Hz observed); 100 ms box: -26 dB | exact at sync; box sinc off-sync |
 | off-notch LF ripple on the DC part | up to -33..-45 dB (INFERRED), unfiltered | same, averaged (-10..-14 dB more) | as above | exact at sync |
 | low-frequency limit | AC path (~45 Hz spec-class, 20 Hz degraded) | same | same | lowest; set by the window length |
-| update | 1.9 s cycle; parts ~1 s old | ~10/s raw, 5/s display | 107 ms if the SDO23 plumbing allows, else ~1 s | per window 0.1-1 s |
+| update | 1.9 s cycle; parts ~1 s old | ~10/s raw, 5/s display | 107 ms (as built: no SDO23 switching needed, 10.1) | per window 0.1-1 s |
 | settle after entry / range change | 600-800 ms every phase | ~2 s once (PB4), then 0.55-0.8 s per range change | as (b) | as (b) |
 | calibration beyond the factory record | none | per-range note-7 zero | per-range gain + offset of the DC node | same + nothing for AC |
 | new unknowns | none | note-7 stability; r0 OP1 gain; AD1 -> PB4 crosstalk | SDO23 register plumbing; LPF window shape; drift | window sync; ISR budget |
@@ -471,13 +494,16 @@ separate-path method runs both paths **continuously** and halves the display
 rate at most; none re-settles its analog front end twice a second. The DM40
 does because the stock firmware had one AD2 node for AC (PB4, AC-coupled)
 and chose to switch rows rather than keep AD1 on next to it - plausibly
-because of note 7, which is exactly what the running measurement will
-quantify.
+because of note 7, whose effect is measured in feasibility 13.1-13.2.
 
 ## 7. Recommendation
 
-(Update 2026-10-22: B and C are prototyped behind `DBG:ACDC:METH`, and the
-device's note-7 result makes C the primary candidate - section 10.)
+The recommendation as written on 2026-10-22, with the status of each item:
+1 kept (A is the default); 2 built as method B and dropped by its device
+rule (10.5); 3 built as method C, passes on V (10.15), the default waits for
+the current check (10.16); 4 not built; 5 built into C (up-range on AD2's
+peak hold at 90 % of its span, 10.6 item 2). For A: C's A path is built
+(the cheaper (c)-A below), not yet device-checked (10.16).
 
 **V (6 V .. 1000 V).**
 
@@ -537,10 +563,11 @@ wanted. Hioki and the 121GW offer no AC+DC on mV either.
 ## 8. Device experiments that settle it (in order)
 
 All through DBG SCPI on opendm40, the MR9270S+ calibrator on V/COM (<= 30 V), the
-generator for AC; log with `dm40scpi.py`. Nothing here needs new firmware
-beyond DBG hooks of the kind `DBG:AD2:DCV?` already is.
+generator for AC; log with `dm40scpi.py` / `tools/acdcmeth.py`. Status: 1, 2,
+5, 6, 7 ran (feasibility 13.2; 10.5 e1 / e2 / e5 / e6 / e7); 3 and 4 need a
+generator and were not run.
 
-1. **Note-7 stability (running).** Per range r0..r3, input 0 V and ~half
+1. **Note-7 stability.** Per range r0..r3, input 0 V and ~half
    range: AD1 alone; AD1 with AD2 (and AD3) enabled in the row's order; 60 s
    each, then again after 10 min and after warming the meter (backlight on,
    charger): the shift in counts, its sd, its dependence on level (offset vs
@@ -578,12 +605,18 @@ beyond DBG hooks of the kind `DBG:AD2:DCV?` already is.
 
 ## 9. Sources
 
-Local (in `docs/`): `DS-HY3131_EN.pdf` (electrical table p. 11-12; 13.1 AD1
-p. 29-30 incl. note 7; 13.2 AD2/AD3, LPF, RMS p. 31-34), `APD-DMM003_EN.pdf`
+HYCON documents in [hw/datasheets/](../../hw/datasheets/README.md): the HY3131
+datasheet [`hycon-hy3131-datasheet-v10.pdf`](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf)
+(electrical table p. 11-12; 13.1 AD1 p. 29-30 incl. note 7; 13.2 AD2/AD3,
+LPF, RMS p. 31-34), APD-DMM003
+[`hycon-hy313x-configurations-apd-dmm003.pdf`](../../hw/datasheets/hycon-hy313x-configurations-apd-dmm003.pdf)
 (3. DCV p. 11, 4. ACV p. 17 and the ACV block diagrams: AD2 -> HPF -> LPF /
-RMS), `APD-DMM001_EN.pdf` (ENOB definition eq. 2-3; SETDMM calibration of
-ADC1 or RMS), `APN-HY3131001_EN.pdf` (SPI MOSI timing only), `HY3131-ENOB.zip`
-(`Config/ACV/HYCONFIG-0.txt`, `Config/DCV/HYCONFIG-0.txt`), the three
+RMS), APD-DMM001
+[`hycon-hy313x-eva-test-tool-manual-apd-dmm001.pdf`](../../hw/datasheets/hycon-hy313x-eva-test-tool-manual-apd-dmm001.pdf)
+(ENOB definition eq. 2-3; SETDMM calibration of ADC1 or RMS), APN-HY3131001
+[`hycon-hy313x-spi-appnote-apn-hy3131001.pdf`](../../hw/datasheets/hycon-hy313x-spi-appnote-apn-hy3131001.pdf)
+(SPI MOSI timing only). Not in the repo: HYCON's `HY3131-ENOB.zip`
+(`Config/ACV/HYCONFIG-0.txt`, `Config/DCV/HYCONFIG-0.txt`) and the three
 `*DemoCode.zip` (readme placeholders only). Sibling docs as cited.
 
 Web (retrieved 2026-10-22):
@@ -633,45 +666,39 @@ Web (retrieved 2026-10-22):
 
 ## 10. Prototype: methods B and C in opendm40 (2026-10-22, `src/acdcm.rs`)
 
-Behind a RAM-only switch, default A (the stock alternation, unchanged), so
-one device session compares them. Device input since section 8 was
-written (feasibility 13.2, E7 commits 744f46f / a0985e4): with AD2 + AD3 +
-RMS on for the whole DC V row AD1 shifts by 30..90 x its noise, offsets
--2.9 mV / +17 mV / +0.17 V / -1.6 V on 6 / 60 / 600 / 1000 V (0.03..0.16 %
-of the range, repeating to ~1 %), and a gain shift up to -0.18 % on 60 V
-that did **not** repeat. So **C is the primary candidate**; B stays for
-the comparison (its zero removes the repeating offset, not the gain).
+Behind a RAM-only switch (`DBG:ACDC:METH`), default A (the stock
+alternation, unchanged), so a device session compares them. Device input
+before the prototype (feasibility 13.2): with AD2 + AD3 + RMS on for the
+whole DC V row AD1 shifts by 30..90 x its noise, offsets -2.9 mV / +17 mV /
++0.17 V / -1.6 V on 6 / 60 / 600 / 1000 V (0.03..0.16 % of the range,
+repeating to ~1 %), and a gain shift up to -0.18 % on 60 V that did **not**
+repeat. So **C is the primary candidate**; B stays for the comparison (its
+zero removes the repeating offset, not the gain). 10.1 is what runs now;
+10.2-10.16 are the dated record of how C got there.
 
 ### 10.1 What runs
 
 | | V (6..1000 V) | A (600 uA..10 A) |
 |---|---|---|
-| A | stock alternation (dmm.rs, sections 2-3 of the stock doc) | same |
-| B | AC V row + the DC V row's AD1 bytes (R22 / R23 / R24 / R28, AD1IG), OP1's chopper held (AD1 converting starts its 2 kHz square at OP1O -> PB4 -> the RMS), written AD1 off, AD3, AD2, AD1 last; nothing toggled after. DC = mean of the last 5 AD1 results (0.5 s) through the DC V calibration, minus a per-range zero = (merged-row AD1) - (the stock DC V row's reading, AD1 alone, R32 0x38 as the stock DC phase), taken at the first visit of a range in the session or fixed with `DBG:ACDC:ZERO`. AC = the stock RMS (sum(X*Y) on PB4, factory AC V cal). 6 V: `DBG:ACDC:R0 1` = candidate (i) AD1 on SENSE - PB5 at the /100 tap (DC V 60 V's input and calibration), `2` = (ii) OP1O - RLU after the x10 network (DC V 6 V's calibration, gain nominal, offset in the zero) | AC A row + the DC A row's AD1 bytes (AD1 = OP1O - PB3), OP1's chopper held (AD2 sits on OP1O here), the AC row's pre-filter (R33) kept; zero against the stock DC A row as V |
-| C | E7's DC-coupled row (`ad2exp::dcv_row`: AD2 on OP1O, OP1's chopper held) with AD3 on the same node (R35 0x14), RMS / LPF on (R29 0xF8, R34 0x88): DC = LPF, AC = sqrt(RMS) (the RMS block's HPF takes the DC out), both x E7's self-cal per_code / offset (`ad2exp::dc_enter`, run at the first visit of a range: AD1 alone on SENSE - PB5, then the AD2 zero and signal over 100 ms, gain + offset). Both parts every LPF block (106.7 ms), no row switching, no AD1 while measuring. The AC part rides the self-cal's DC gain, not the factory AC V calibration (that belongs to the AC-coupled PB4 node): a difference the device session measures (test 2). Up-range also when \|LPF\| + 1.414 sqrt(RMS) > 90 % of AD2's span (one window for DC + AC, section 7 item 5). **Changed after the device check: section 10.6** (the anchor, the AC part's calibration, AD2's peak hold) | the stock AC A row unchanged (AD2 on the DC-coupled shunt node): AC = RMS (factory AC A gain), DC = LPF x the same gain, corrected against the stock DC A row at entry: a gain factor when the current is >= 10 % of the range (within 5 %), else an offset. One point only: a zero-current session gets the offset, a loaded one the gain |
+| A | stock alternation ([`dmm.rs`](../src/dmm.rs), acdc 2-3) | same |
+| B | AC V row + the DC V row's AD1 bytes (R22 / R23 / R24 / R28, AD1IG), OP1's chopper held (AD1 converting starts its 2 kHz square at OP1O -> PB4 -> the RMS), written AD1 off, AD3, AD2, AD1 last; nothing toggled after. DC = mean of the last 5 AD1 results (0.5 s) through the DC V calibration, minus a per-range zero = (merged-row AD1) - (the stock DC V row's reading, AD1 alone, R32 0x38 as the stock DC phase), taken at the first visit of a range in the session or fixed with `DBG:ACDC:ZERO`. AC = the stock RMS (sum(X*Y) on PB4, factory AC V cal). 6 V: `DBG:ACDC:R0 1` = candidate (i) AD1 on SENSE - PB5 at the /100 tap (DC V 60 V's input and calibration), `2` = (ii) OP1O - RLU after the x10 network (DC V 6 V's calibration, gain nominal, offset in the zero). Failed its device rule (10.5); kept for comparison | AC A row + the DC A row's AD1 bytes (AD1 = OP1O - PB3), OP1's chopper held (AD2 sits on OP1O here), the AC row's pre-filter (R33) kept; zero against the stock DC A row as V |
+| C | E7's DC-coupled row (`ad2exp::dcv_row`: AD2 on OP1O, OP1's chopper held) with AD3 on the same node (R35 0x14), RMS / LPF on (R29 0xF8, R34 0x88) and AD2's peak hold. **DC part** = LPF x per_code + offset. Anchor per range and session (`am_cal_step`): the stock DC V row's own reading (3 results, what READ? shows) against 4 LPF results of this very row. Gain: from the internal zero (OP1+ on AGND) when the span is >= 10 k codes and within 3 % of the table (dmm.rs `DCV_AD2_GAIN`), else the table; then, once the input has settled >= 10 k codes from a reference point of the session (`am_refine`: LPF slope < 1 code / s over ~3 s, >= ~5 s at the level, no real AC on the node), a second stock DC V reference and the gain between the two references, which replaces the internal zero's when its span is >= the one in use, or when it shows the internal zero biased beyond the noise plus a creep allowance on the lag side (CREEP_K, 10.14). Gains kept per range until power-off. **AC part** = sqrt(RMS) through the factory AC V gain and offset of the range, used only when sqrt(RMS) <= half of AD2's peak-hold p-p (else the RMS is in its HPF transient or garbage: on a steady node the last RMS value or the peak bound stands in; no usable RMS with AC on the node for 2.5 s: up a range). Up-range also when the peak hold reaches 90 % of AD2's span (one window for DC + AC, section 7 item 5), when \|DC\| alone is over the range, or on the total; down only with a usable AC part. Both parts every LPF block (106.7 ms), no row switching, no AD1 while measuring | the stock AC A row unchanged (AD2 on the DC-coupled shunt node): AC = RMS (factory AC A gain), DC = LPF x the same gain, corrected against the stock DC A row at entry: a gain factor when the current is >= 10 % of the range (within 5 %), else an offset. One point only: a zero-current session gets the offset, a loaded one the gain. Not device-checked (10.16) |
 
 Common: mV (modes 2 / 3) stays on A (no merged mV row); no misconnect
 sentinel in the method rows (the AC V one uses AD1, the DC V one takes R20
 which the frequency counter needs); one reading per RMS result (~9.3 / s);
 the frequency counter runs (Hz in `DBG:ACDC:STAT?`, not shown); a range
 change writes the new range's method row (B: and its reference first if
-the range has no zero yet; C V: the self-cal, ~0.45 s blocking); AUTO
-coupling (sub-mode 3) evaluates once both parts were refreshed since its
-last evaluation (~107 ms, AUTO_VOTES = 2 of them to switch).
+the range has no zero yet; C V: its anchor, or the kept one on a revisit);
+AUTO coupling (sub-mode 3) evaluates once both parts were refreshed since
+its last evaluation (~107 ms; the decision rule in 10.9 item 2).
 
-SCPI (`src/scpi.rs` DBG list): `DBG:ACDC:METH A|B|C` / `?` (a change
-restarts AC+DC / AUTO), `DBG:ACDC:STAT?` (meth, step 0 ref / 1 meas / 2
-run, mode, range, AC, DC, n_ac, n_dc, n_rd, Hz, the slot's correction, C V
-per_code, offset, LPF codes, sqrt(RMS) codes), `DBG:ACDC:ZERO k,v|AUTO` /
-`?` (slots 0..3 V ranges, 4..9 A unit * 2 + range; B's zeros and C A's
-offsets; C V has its own per-range anchor since 10.6, kept for the session), `DBG:ACDC:R0 1|2`,
-`DBG:ACDC:RANG <MF item>|AUTO`.
-
-Cost (against 87f2c20, the commit below these): region B 82 472 -> 78 168
-B free (poll_am in the poll path), region C 18 804 -> 17 428 B (entry /
-range / SCPI steps marked .cold in link-native.x: they run at a row write
-or a command, never per main-loop pass), SRAM 60 648 -> 60 544 B (the `Am`
-state, .sram_bss), static stack unchanged (headroom 21 228 B).
+SCPI: `DBG:ACDC:METH A|B|C` / `?` (a change restarts AC+DC / AUTO),
+`DBG:ACDC:STAT?`, `DBG:ACDC:ZERO k,v|AUTO` / `?`, `DBG:ACDC:R0 1|2`,
+`DBG:ACDC:RANG <MF item>|AUTO`, `DBG:ACDC:TRACE` / `TRACE?`; the fields are
+listed in the DBG block of [`src/scpi.rs`](../src/scpi.rs). Host:
+[`tools/acdcmeth.py`](../tools/acdcmeth.py) runs the device experiments (e1 .. e11, e8s,
+e8up, tc6, `--trace`).
 
 ### 10.2 Emulator model changes (HY3131.cs)
 
@@ -704,7 +731,7 @@ ripple, or a sample of the phase before inside the window). Note 7 on (the
 device's offsets); B~ = B with `n7g:0.002` (a random draw per AD1 enable:
 its errors are the draw's). The last V phase returns to the 6 V range
 after the 60 V one (a range visited again: C re-runs its self-cal there,
-E7's cal has one slot). Run of the commit after d6f5e96 (see the report):
+E7's cal has one slot). Run of the commit after d6f5e96:
 
 | phase | A err % / p-p % / rd/s / settle s | B | C | B~ |
 |---|---|---|---|---|
@@ -741,46 +768,21 @@ response are INFERRED, the note-7 numbers are the device's):
   better (0.016 / 0.062 %). Which one wins on the device is test 3 (needs
   a generator).
 * AUTO coupling: couptest `v`, `i`, `tap`, `band` pass with `--meth A`,
-  `B` and `C` (17dcff2, d6f5e96 and the commit after it). Also passing on
-  17dcff2 / 4539aea: senttest (26),
-  powtest (15; `ereset` failed once under a load average of ~45 and passed
-  alone), modetest `--fast` 35 of 36 (stock `cap-big` 0.105 mF fails the
-  same way on 5f9b5a0 without this change; without `--fast` every opendm40
-  scenario gets "BT host refused: module off" under load, also on
-  5f9b5a0), the emulator host tests (396), every firmware/tools/*/run.sh.
+  `B` and `C`.
 
 ### 10.4 Device session plan (`tools/acdcmeth.py`, calibrator on /dev/ttyACM1)
 
-Image: the build of the commit named in the report. The calibrator gives
-DC <= 30 V and a small 40 Hz square only; 40 Hz is an AD1 notch, so the
-ripple-leak and low-frequency tests (section 8 items 3, 4) need a
-generator and the script skips them.
-
-1. `tools/acdcmeth.py e6` (~3 min): entry from DC V into AC+DC per method
-   at 3 V, first reading and settle times, readings / s; 3 V -> 30 V -> 3 V
-   (range change). Expect A ~2 s / ~2 readings changes per s, B / C < 1 s
-   to the first reading after the reference and ~9 / s.
-2. `e1` (~15 min, `--repeats 5`): B's zero per range at 0 V and 3 / 30 V,
-   five entries each: zero spread in digits (section 8 test 1; pass for B
-   <= 2 digits), B's DC part vs DC V READ?. Expect the 13.2 offsets as
-   zeros; the 60 V gain jump as a level-dependent residual.
-3. `e7` (~5 min): B 6 V candidates (i) / (ii) at 1 / 3 / 5 V vs DC V, the
-   gain of each from the slope, the 40 Hz square with each (AC part).
-4. `e2` (~3 min): the 40 Hz square on 6 V and 60 V, AC / DC / total of A,
-   B and C: C's AC part (DC-coupled, self-cal gain) against A's (factory
-   AC V cal on PB4) is the open accuracy question of C; B's AC part
-   against A's shows whether AD1 converting moves the RMS.
-5. `e5` (~40 min, `--minutes 20`, warm the meter meanwhile): C's per_code
-   and offset re-measured every 60 s at 30 V / 60 V and 3 V / 6 V, C's DC
-   part vs READ?: drift in ppm, how often C needs its self-cal again
-   (section 8 test 5).
-6. By hand: AUTO coupling on the meter with `DBG:ACDC:METH C` (touch: three
-   taps on V), the 40 Hz square and 5 V DC; a screenshot of each.
+The calibrator gives DC <= 30 V and a small 40 Hz square only; 40 Hz is an
+AD1 notch, so the ripple-leak and low-frequency tests (section 8 items 3, 4)
+need a generator and were skipped. Experiments: `e6` entry and range-change
+timing, `e1` B's zero per range (5 entries per level), `e7` B's 6 V
+candidates, `e2` the 40 Hz square on 6 / 60 V (C's AC part against A's),
+`e5` C re-entered every 60 s for 20 min (drift), and AUTO with C by hand.
 
 Decision rule: C becomes the AC+DC default when e2 shows its AC part
 within the AC V spec of A's (0.5 % class) and e5 its DC part within
 0.05 % + 5 digits over the warm-up; B is dropped if e1's zero spread or the
-level dependence exceeds 2 digits on any range.
+level dependence exceeds 2 digits on any range. Run on 7409b92: 10.5.
 
 ### 10.5 Device results (7409b92, 2026-10-23 01:06-01:56, docs/device-check-2026-10-21.md "7409b92" 3)
 
@@ -848,8 +850,7 @@ No warm-up trend: the 60 V error is constant over the 20 min, a calibration erro
 6 <-> 60 V every ~3 s, ~0.7 readings / s; in AUTO after the square the page stays on AC ("~4.056 V" for 5 V
 DC). 4.0 and 4.5 V are fine (AC part ~1 mV). A in the same sequence settles on DC 4.998 V.
 
-**Decision rule: not met** (e5 60 V fails; the >= 5 V AC-part fault on top). The default stays A; the owner
-decides. B: drop, by the rule (e1).
+**Decision rule: not met** (e5 60 V fails; the >= 5 V AC-part fault on top). The default stays A. B: drop, by the rule (e1).
 
 Raw by-hand output of the >= 5 V case (`p3b.py`, DBG:ACDC:STAT? every 1.5 s, the session transcript; not in
 the jsonl): AUTO entered at 5 V: 6 V AC 2.114 / 2.109 / 2.108 / 2.117 / 2.115 V, 60 V AC 3.834 / 3.834 / 3.834 /
@@ -934,49 +935,23 @@ Reproduction (emulator, the final model; acdcmethtest with method C held to the 
 | V DC 5 after the square (60 -> 6 V) | hunting, AC part 5.4 V | 6 V, 8.9 / s, DC part -0.0000 V, AC 0.7 mV |
 | couptest sq5 (AUTO) | 5.5 V: DC +0.24 %, the rest ok | all ok (5 V: AUTO,DC 5.0012) |
 
-Final runs of the fix (the branch head's image): acdcmethtest A / B / C / B~ RESULT OK (the table above for
-C; A and B unchanged); couptest `v` `i` `tap` `band` `sq5` OK with `--meth A`, `B` and `C`; senttest 57 OK;
-powtest 27 of 29 in the full run under a load average of ~31 (`zero`, `bt`; both pass alone, as `ereset`); modetest `--fast` 35 of
-36 (stock `cap-big`, as before); every firmware/tools/*/run.sh OK (font-matrix identical to 8087c7d); emulator
-host tests 491. The emulator's LPF window (sinc^2 over 213 ms, INFERRED) leaves +-0.4 % of
-a 40 Hz square on the DC part (the C square phase's 0.39 % p-p); the device's C DC part on the square had an
-sd of 0.10 / 0.29 mV (6 / 60 V, e2): its LPF rejects 40 Hz far better than the model.
+The emulator's LPF window (sinc^2 over 213 ms, INFERRED) leaves +-0.4 % of
+a 40 Hz square on the DC part (the C square phase's 0.39 % p-p); the device's
+C DC part on the square had an sd of 0.10 / 0.29 mV (6 / 60 V, e2): its LPF
+rejects 40 Hz far better than the model.
 
-Cost against 8087c7d: region B 68 676 -> 67 156 B free, region C 18 764 -> 17 868 B, SRAM 59 712 -> 59 584 B,
-static stack unchanged (headroom 21 484 B).
+### 10.7 Device retest of method C (`tools/acdcmeth.py`; run on 2563fe1: 10.8)
 
-### 10.7 Device retest of method C (the image of the fix or later; `tools/acdcmeth.py`; run on 2563fe1: 10.8)
-
-Calibrator on V / COM (DC <= 24 V and the 40 Hz square), `DM40_USBTMC=real`:
-
-    /usr/bin/python3 tools/acdcmeth.py e8 e9 e10 e2 e6 -o acdcfix.jsonl
-    /usr/bin/python3 tools/acdcmeth.py e5 --minutes 3 -o acdcfix.jsonl
-
-1. **e8** (~6 min): DC V READ? at 24 / 12 / 5 / 1 / 0 V on 60 V and 5 / 3 / 1 / 0 V on 6 V (manual range), then
-   C entered once at the top level and stepped down without leaving: C's DC part vs READ? at every level
-   (rule 0.05 % + 5 digits: the 60 V e5 failure was at the anchor level; this also checks the gain away from
-   it). Then `e8kept`: C re-entered at 5 V on 60 V (span < 10 k codes) uses the gain kept from 24 V (STAT?
-   gspan > 0). Expect |err| <= 2 digits at the anchor, <= 5 digits elsewhere.
-2. **e9** (~2 min): 4.0 / 4.5 / 5.0 / 5.5 V in AC+DC, AUTO range: pass = one range (6 V) after the entry,
-   >= 6 readings / s, AC part < 30 mV, the DC part within the rule. STAT? acsrc counts show how often the
-   RMS was garbage on the device (1 = the peak bound stood in).
-3. **e10** (~1.5 min): AUTO on the square (12 s), then 5.0 / 5.5 / 4.5 V: pass = AUTO,DC within the rule of
-   READ?, one range per level.
-4. **e2** (~3 min): the square on 6 / 60 V: C's AC part against A's, now through the factory AC V cal: expect
-   within 0.05 % (it was +0.13 / +0.23 %); C's DC part against DC V within the rule.
-5. **e6** (~3 min): entry / range change timing (expect C's first reading ~2.5 s, ~9 readings / s).
-6. **e5** (`--minutes 3`, ~7 min): C re-entered every 60 s at 24 V on 60 V and 3 V on 6 V: the anchor's
-   repeatability against READ? (the 7409b92 failure: +20.9..+24.9 mV on 60 V; rule 17 mV). pc_ppm stays 0
-   after the first entry now (the gain is kept per range; `gspan` logged).
-7. By hand: AUTO with C on the square and then 5 V DC (the 7409b92 screenshot case), a screenshot.
-
-Device assumption the fix rests on: rewriting R29 to restart AD2's peak hold (ENPKH off / on, the RMS / LPF
-bits unchanged) does not restart the RMS / LPF block (the stock AC rows' sentinel does the same in `poll_ac`,
-PKH_RESTART, at ~9 results / s). If it did, C's result rate would drop or blocks would come back mixed: e9's
->= 6 readings / s and the `acsrc` counts show it.
-
-Decision rule (unchanged, 10.4): C becomes the default when e2's AC part is within the AC V spec of A's and
-the DC part (e5 / now e8) within 0.05 % + 5 digits; plus e9 / e10 passing.
+Calibrator on V / COM (DC <= 24 V and the 40 Hz square), `DM40_USBTMC=real`,
+`tools/acdcmeth.py e8 e9 e10 e2 e6`, then `e5 --minutes 3`. New experiments:
+`e8` (C entered at the top level of 60 V and 6 V, stepped down to 0 V
+without leaving: the gain away from the anchor), `e8kept` (re-entry with
+the gain kept), `e9` (4.0 .. 5.5 V on 6 V in AC+DC: one range, >= 6
+readings / s, AC part < 30 mV), `e10` (AUTO on the square, then 5.0 / 5.5 /
+4.5 V). Device assumption the fix rests on: rewriting R29 to restart AD2's
+peak hold (ENPKH off / on) does not restart the RMS / LPF block (the stock
+AC rows' sentinel does the same in `poll_ac`). Decision rule unchanged
+(10.4), plus e8 within 0.05 % + 5 digits and e9 / e10 passing.
 
 ### 10.8 Device results of the retest (2563fe1, 2026-10-23 04:57-05:22, docs/device-check-2026-10-21.md "2563fe1")
 
@@ -1024,7 +999,7 @@ AC. This is a tie of the rule, not an error of C. **Rule changed in 10.9** (a ti
 settled AC part).
 
 **Decision rule: not met** (e8 60 V at 0 / 1 V). Everything else passes, and e5's 60 V failure of 7409b92 is
-gone. The default stays A; the owner decides.
+gone. The default stays A.
 
 ### 10.9 After the 2563fe1 retest: C's 60 V gain and the AUTO tie (2026-10-23, branch acdc-c-fix; device: 10.10)
 
@@ -1091,55 +1066,21 @@ DC-coupled row the device's per-range per_code factor (`Ad2DcGainR`, 6 V 1.0096,
 and dcvtest still expected nominal / ad2dcg. Now it expects nominal x that factor / ad2dcg (6 V and the 25 V session
 on 60 V): PASS.
 
-Final runs (the branch head rebased on b4fb7b9; the full set on the builds rebased on 848047f / ddd5c9e / e7ec2cc
-before): acdcmethtest A / B / C / B~ OK on b4fb7b9; B / C / B~ OK on every rebase (C as in 10.6; the square's C settle "nan" is the model's +-0.4 % LPF ripple of
-10.6); A's square phase is borderline: it failed once on the e7ec2cc rebase **and on e7ec2cc without these commits**
-(+1.4 % / 255 % p-p: its first reading after the 24 V -> square step comes ~6 s late, at the window's start, with the
-AC settle of c4a0b09 / 803854d) and passed on ddd5c9e (settle 5.9 s) and b4fb7b9; `--e8 down` / `up` OK (down: 60 V within -1.3..+1.4 mV over four runs at every level, 6 V within
-0.1 mV; up: within 1.9 mV after the first step); couptest `v` `i` `tap` `band` `sq5` `sqtie` OK with `--meth B` and
-`C`, with `--meth A` all but `i`; **couptest `i --meth A` fails on rust-fw-poc 848047f without these commits too**
-(twice; OK on 7fffcdf): after the DC 0.3 -> AC 0.2 A step no reading for ~10 s and the AUTO part flipping, in the same
-AC settle, not this change (fixed on branch settle-fix, 7e10110: no DC-phase step down while an input-step settle
-runs, acdc-stock-vs-opendm40.md 12); senttest 57 OK; powtest 26 of 29 in the full run (`ereset`, `acdc-floor`, `bt`), all
-three OK alone (e7ec2cc alone: `ereset` and `bt` FAIL, the same flakes); modetest `--fast -f fwrs` 18 of 18 (the stock
-side not run); every firmware/tools/*/run.sh OK (font-matrix identical to rust-fw-poc); emulator host tests 491;
-dcvtest PASS. Cost against b4fb7b9: region B 62 636 -> 61 892 B free, region C 17 868 -> 17 716 B, SRAM 58 716 ->
-58 660 B, static stack headroom 21 448 -> 21 440 B.
+Emulator: acdcmethtest A / B / C / B~ and `--e8 down` / `up` pass (down: 60 V
+within -1.3..+1.4 mV over four runs at every level, 6 V within 0.1 mV; up:
+within 1.9 mV after the first step); couptest `sqtie` as above.
 
 ### 10.10 Device retest of 10.9 (`tools/acdcmeth.py`, calibrator on V / COM, `DM40_USBTMC=real`; run on c6f9670: 10.11)
 
-Image: the build of the branch head named in the report. The two-point gain is kept per range until power-off, so
-`e8up` must run first after the install's reboot (or a power cycle), before anything enters method C:
-
-    /usr/bin/python3 tools/acdcmeth.py e8up -o acdc29.jsonl          # first after power-on (~4 min)
-    /usr/bin/python3 tools/acdcmeth.py e8s e8 e11 e10 e9 -o acdc29.jsonl
-    /usr/bin/python3 tools/acdcmeth.py e5 --minutes 3 -o acdc29.jsonl
-
-1. **e8up** (60 V manual, entered at 0 V, then 1 / 5 / 12 / 24 V, 4 s per level + a 3 s mean): the session starts on
-   the table's gain (0.043 % high on this unit: expect ~+10 mV at 24 V without the fix); the 5 V step (10.3 k
-   codes) takes the first two-point gain, the 24 V step (39 k) a better one. Pass: every level within 0.05 % + 5
-   digits of READ? (5.0 / 5.5 / 7.5 / 11 / 17 mV); STAT? gspan ~10 k at 5 / 12 V, ~39 k at 24 V.
-2. **e8s** (the 2563fe1 e8 with 4 s per level): entered at 24 V on 60 V, then 12 / 5 / 1 / 0 V; 6 V at 5 / 3 / 1 / 0 V.
-   Pass: 1 V and 0 V within 5.5 / 5.0 mV (2563fe1: -7.2 / -8.0 mV), gspan ~24.7 k from 12 V on; 6 V as before
-   (+0.07..+0.44 mV). The 60 V gain is kept from e8up (gspan 39 k) unless a larger span comes up, so for the
-   2563fe1 failure case as it was, power-cycle before e8s too (then gspan 49 k from the internal zero at 24 V,
-   24.7 k two-point from 12 V). **e8** (1 s per level, as 2563fe1) for comparison: the 12 V level may still read
-   the internal zero's gain during its window (-4 mV, inside the rule), 5 / 1 / 0 V the two-point one.
-   `e8kept` (part of e8 / e8s): 5 V on 60 V re-entered, the kept gain: within the rule.
-   While C takes a second reference (STAT? step 0) STAT? pc / off read 0 (the range's anchor is being replaced)
-   and the DC part is the DC V reading itself: a logged pc = 0 at 12 V is expected, its DC value is still READ?'s.
-3. **e11** (AUTO on the 40 Hz square, A and C, 3 entries each, 15 s): pass = DC from the first AUTO reading (at most
-   one change: the decision), the same part in every entry; expected DC with both methods (AC 4.760 / DC 4.764 V is
-   within the 1 % tie). Also by hand: three taps on V with A, then with C, on the square: DC, no AC flash.
-4. **e10** (AUTO, square -> 5.0 / 5.5 / 4.5 V) and **e9** (4.0..5.5 V on 6 V): as 10.8 (PASS there). e10's 5 -> 5.5 V
-   step may take the second reference on 6 V (~1.5 s of DC V readings): one range, AUTO,DC within the rule.
-5. **e5** (`--minutes 3`): C re-entered every 60 s at 24 V on 60 V and 3 V on 6 V: as 10.8 (+0.5 / -1.3 / +0.5 mV;
-   -0.04..+0.37 mV), now with the two-point gain of e8 (no level change inside e5: no new reference). Pass 17 /
-   2.0 mV.
-
-Decision rule (10.4 / 10.7) unchanged: C becomes the default when e8s / e8up and e5 pass with e2 / e9 / e10 as in
-10.8; the owner decides.
-
+The two-point gain is kept per range until power-off, so `e8up` runs first
+after a power-on: `e8up`, then `e8s e8 e11 e10 e9`, then `e5 --minutes 3`.
+New experiments: `e8up` (60 V manual, entered at 0 V on the table's gain,
+then 1 / 5 / 12 / 24 V, 4 s per level + a 3 s mean: the two-point gain from
+the 5 V step on), `e8s` (2563fe1's e8 with 4 s per level), `e11` (AUTO on the
+40 Hz square, A and C, 3 entries each: DC from the first AUTO reading, at
+most one change). Pass: every level within 0.05 % + 5 digits of READ? (5.0 /
+5.5 / 7.5 / 11 / 17 mV on 60 V at 0 / 1 / 5 / 12 / 24 V). Decision rule
+unchanged (10.4 / 10.7).
 
 ### 10.11 Device results of the 10.10 retest (c6f9670, 2026-10-23 08:59-09:40, docs/device-check-2026-10-21.md "c6f9670")
 
@@ -1176,7 +1117,7 @@ both signs match. The 60 V anchor errors of 1-4 mV (inside the rule) are probabl
 (c) a larger CAL_GAIN_CODES on 6 V.
 
 **Decision rule: not met** (e8s 6 V at 0 V; tc6 2 of 3). Everything else passes, including the 2563fe1 failure
-case. The default stays A; the owner decides.
+case. The default stays A.
 
 Also seen: with C, the first V tap after `CONF:VOLT:DC` on the square was lost in 5 of 6 tries, and with A in 1 of 3.
 It did not happen at 1 V DC. It is not specific to C (device-check doc, "c6f9670" 3).
@@ -1241,9 +1182,9 @@ and 0 V in the model lands just outside it and takes a new reference). DC part -
   (codes / s); tools/acdcmeth.py logs them (gsrc, gdis, slope) and has `e8l` / `e8upl` (10 s per level) and
   `tc6`.
 
-Cost: a first level change on a range costs ~5-8 s before the second reference (it was ~1.5 s), the reference itself
-unchanged (~1 s of DC V readings, the AC part held). Region B 60 868 -> 60 364 B free, region C 17 580 -> 17 036 B,
-SRAM 58 660 -> 58 484 B (the 28-result window, the reference points), static stack headroom 21 416 B (21 440).
+Cost: a first level change on a range costs ~5-8 s before the second
+reference (it was ~1.5 s); the reference itself is unchanged (~1 s of DC V
+readings, the AC part held).
 
 **4. Emulator runs of e905ef5** (the image of the commit; `--e8` DC part - source, mV, windows 1..4 / 4..8.5 s):
 
@@ -1259,66 +1200,26 @@ within 0.4 mV).
 The 6 V 3 V level's first window shows the creep itself (+0.41 mV = 8.5 codes, rule 2.0); the device's DC part
 creeps the same way, only the gain no longer takes it in.
 
-Full set on e905ef5 (ports 31100-31640): acdcmethtest A / B / C / B~ RESULT OK (C: 9.1-9.3 readings / s except
-V DC 24, 6.2 / s: its second reference falls inside the analysis window now; the square no longer takes one);
-`--e8 down` / `up` / `tc6` OK (two runs each); couptest `v` `i` `tap` `band` `sq5` `sqtie` OK with `--meth A`, `B`
-and `C` (`i --meth A` included); senttest 57 / 57; powtest 27 / 29 in the full run (`ereset`, `acdc-floor`), alone
-or repeated: `acdc-floor` OK 2 of 3, `ereset` OK 1 of 3, and 27b1a68 with the same model fails `ereset` alone too,
-a7d233c once (the flakes of 10.9; the power meter never runs acdcm.rs and its role has none of the new model
-terms); autorangetest PASS; dcvtest PASS; modetest `--fast -f fwrs` 18 / 18; emulator host tests 501; every
-firmware/tools/*/run.sh OK (font-matrix identical to 27b1a68; stock-ui needs the stock image link,
-dm40_v_2_6.dec.bin, in the worktree root). On a7d233c (before the AC gate) acdcmethtest failed C's square: the
-AC part 4.811 V (max) after the reference's row rewrite.
-
+On a7d233c (before the AC gate) acdcmethtest failed C's square: the AC part
+4.811 V (max) after the reference's row rewrite; e905ef5 passes acdcmethtest
+A / B / C / B~, `--e8 down` / `up` / `tc6` and couptest with all three
+methods.
 
 ### 10.13 Device retest of 10.12 (`tools/acdcmeth.py`, calibrator on V / COM, `DM40_USBTMC=real`)
 
-Image: the build of e905ef5 (the report names the file). Gains are kept per range until power-off, so the order
-matters; `tools/dm40dbg.py reset` between runs stands in for a power cycle (as c6f9670's tc6):
+Order (gains are kept per range until power-off; `tools/dm40dbg.py reset`
+stands in for a power cycle): `e8up` first after the install's boot, then 4 x
+(reset, `e8s`), `e8`, `e5 --minutes 3`; optionally `tc6` (the 6 V time course
+after a reset) and `e8l` (e8s with 10 s per level), and `e11 e10 e9` as a
+regression. Pass: 6 V 0 V within 0.5 mV in all four e8s (c6f9670: -0.86 mV);
+6 V gsrc 1 (the internal zero's gain kept) at every level; 60 V 1 / 0 V within
+5.5 / 5.0 mV, gsrc 3 from the 5 V level on (the AGND zero judged biased, gdis
+~-8 codes). Decision rule (10.4 / 10.7) unchanged.
 
-    /usr/bin/python3 tools/acdcmeth.py e8up -o acdc-lw.jsonl                        # first after the install's boot
-    for i in 1 2 3 4; do /usr/bin/python3 tools/dm40dbg.py reset; sleep 8
-        /usr/bin/python3 tools/acdcmeth.py e8s -o acdc-lw.jsonl; done                # the 6 V failure, 4 power-ons
-    /usr/bin/python3 tools/acdcmeth.py e8 -o acdc-lw.jsonl
-    /usr/bin/python3 tools/acdcmeth.py e5 --minutes 3 -o acdc-lw.jsonl
-    # optional, if time allows: the time course and the longer levels
-    /usr/bin/python3 tools/dm40dbg.py reset; sleep 8; /usr/bin/python3 tools/acdcmeth.py tc6 -o acdc-lw.jsonl
-    /usr/bin/python3 tools/dm40dbg.py reset; sleep 8; /usr/bin/python3 tools/acdcmeth.py e8l -o acdc-lw.jsonl
-    /usr/bin/python3 tools/acdcmeth.py e11 e10 e9 -o acdc-lw.jsonl                   # regression, as 10.11
-
-1. **e8s x 4** (6 V 5 / 3 / 1 / 0 V after 60 V; each after a reset). Pass: 6 V 0 V within 0.5 mV in all four (c6f9670:
-   -0.86, tc6 -0.92 / -0.25 / -0.63). Expected: 6 V gsrc 1 (the internal zero's gain kept, gspan ~104 k) at every
-   level; gdis at 3 / 1 V a few codes (it was +143..+195 ppm x 41.6 k = 6..8 codes over the internal zero in
-   c6f9670: if the window still sees the tail it shows here, and gsrc must stay 1). 60 V: 1 / 0 V within 5.5 / 5.0 mV.
-   e8s gives 2 s + 4 s before its 3 s mean, so the second reference (~5-8 s after a step now) may fall inside the
-   mean or not happen within the level: the DC part shown during the reference is READ? itself, and an anchor that
-   did not move keeps the internal zero's error, distance x ~300 ppm on 60 V (5 V away: ~1.5 mV). Log gsrc / gdis /
-   slope per level: on 60 V gsrc 3 from the 5 V level on means the AGND zero was judged biased (gdis ~-8 codes
-   expected; c6f9670's numbers say ~-7..-12).
-2. **e8up** (60 V entered at 0 V: the table's gain, 0.043 % high on this unit; 1 / 5 / 12 / 24 V, 4 s per level).
-   Pass as 10.10 (5.0 / 5.5 / 7.5 / 11 / 17 mV). Expected a little worse at 5 V than c6f9670 (-0.1 mV): the
-   first two-point gain now comes ~6 s after the 1 -> 5 V step, so the 5 V mean (6-9 s after the step) may still
-   read the table gain over 4 V (~+2 mV) or READ? during the reference.
-3. **e8** (1 s per level, gains kept from e8s): pass as e8s; few references happen at 1 s per level (most levels end
-   before 5 s), so it mostly reads the kept gain with the entry anchor.
-4. **e5** (`--minutes 3`): pass 17 / 2.0 mV as 10.11 (no level change inside e5: unchanged code path).
-5. **tc6** (optional): the 6 V time course after a reset: slope (codes / s) at the reference, gsrc stays 1, gdis,
-   then 3 / 1 / 0 V with 10 s per level against READ? (0 V within 0.5 mV). The STAT? trace tells whether the device's
-   tail is what the model assumes (flat ~4 s, gone by ~10 s); if the reference fires before the tail has run out,
-   SLOPE_MIN / SLOPE_MAX are the knobs.
-6. **e8l** (optional): e8s with 10 s per level: every level change takes its reference inside the level.
-
-Reading the logs (gsrc / gdis / slope / pp per level):
-* gsrc never leaving 1 on 60 V (and gdis staying 0) means no second reference fired: compare pp (AD2's peak-hold
-  p-p, codes) with the AC gate, 2 % x |LPF| + 1000 codes (set from the emulator's ~240 codes p-p on DC; the device's
-  steady-node p-p is inferred, ~200 codes from the 6 mV peak bound of 10.6, not measured), and slope with 1 code / s.
-* gdis on 6 V with the same sign in all four e8s runs points at the entry anchor rather than the new point: the
-  entry anchor is still the mean of 4 results right after a row write, and c6f9670's trace read +4..+8 codes
-  higher right after the reference's row write than before it.
-
-Decision rule (10.4 / 10.7) unchanged: C becomes the default when e8s (all four) / e8up and e5 pass with e2 / e9 / e10
-as in 10.8; the owner decides.
-
+Run on f42a09e (device check "ad97fd7 / c8c2f02 / f42a09e" 5): e8s 6 V at 0 V
+-0.25 / +0.18 / -0.59 / +0.21 mV, 3 of 4 within 0.5 mV; the miss took a
+second reference at 3 V judged biased (gsrc 3, gdis +8.95), then a two-point
+gain at 1 V. e8up, e8 and e5 pass. Analysis: 10.14.
 
 ### 10.14 After the f42a09e retest: the bias test and the LPF creep's lag (2026-10-23, branch acdc-bias; device: 10.15)
 
@@ -1404,18 +1305,8 @@ magnitude, only the false judgement.
 larger creep, the 12 V level's gdis is only -2.2..-4.4 in the model (device -5..-12), so the model often catches
 the bias one level later.
 
-Final runs on b94bfb8 with the 7c0de2d model (ports 34000-34999):
-* acdcmethtest A / B / C / B~ RESULT OK; `--e8 down` / `up` / `tc6` OK.
-* couptest `v` `i` `tap` `band` `sq5` `sqtie` OK with `--meth C`. With `A` and `B` they were OK on d0baca5,
-  whose A / B paths are the same code.
-* autorangetest PASS; dcvtest PASS; modetest `--fast -f fwrs` 18 / 18.
-* senttest 57 / 57 alone. The parallel run hit its 40 min timeout at 55 / 55 under load.
-* powtest 28 / 29 in the parallel run (`ereset`, the known flake of 10.9 / 10.12); `ereset` OK alone.
-* Emulator host tests 501; every firmware/tools/*/run.sh OK (font-matrix identical to 6d488dc, 178 360 cases).
-
-Cost against 6d488dc: region B 57 756 -> 57 668 B free, region C 16 976 -> 16 920 B, SRAM 53 092 -> 53 076 B,
-static stack headroom 21 400 B (unchanged).
-
+Emulator on b94bfb8 with the 7c0de2d model: acdcmethtest A / B / C / B~,
+`--e8 down` / `up` / `tc6` and couptest pass.
 
 ### 10.15 Device results of 10.14 (d0baca5 full set, b94bfb8 confirmation; 2026-10-23 13:05-13:50, device-check doc "acdc-bias")
 
@@ -1450,7 +1341,7 @@ function on the same manual range. Rule: 0.05 % + 5 digits.
 * The AC part is within spec: e9 / e10 AC part 0.24-0.35 mV on DC (bound 30 mV); e11 / e10 as 10.8 / 10.11.
 * Nothing in this change touches the A path or the AC part.
 
-**The owner's decision (2026-10-23): method A stays the AC+DC default** until C has been checked on the
+**Decision (2026-10-23): method A stays the AC+DC default** until C has been checked on the
 A / mA / µA ranges with real current (TODO, plan in 10.16).
 
 ### 10.16 Plan: method C with real current (A / mA / µA)

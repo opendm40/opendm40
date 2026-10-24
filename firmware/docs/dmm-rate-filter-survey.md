@@ -754,16 +754,16 @@ streams on DC V 6 V; the calibrator's 0 / 9.59 V square (no sine available),
 
 ## 9. Sources
 
-Local copies in `docs/` (the HYCON PDFs are not committed):
+The HYCON documents are in [hw/datasheets/](../../hw/datasheets/README.md):
 
-- HYCON DS-HY3131 V10: `docs/DS-HY3131_EN.pdf`: p.4 features (5 Hz output
+- HYCON DS-HY3131 V10: [hycon-hy3131-datasheet-v10.pdf](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf): p.4 features (5 Hz output
   rate), p.13 NMR (5 / 10 sps), §12.4 p.27 pre-filter, §13.1 pp. 30-31 AD1
   (chop, AD1OSR, comb-filter diagram).
-- HYCON APD-DMM001 (EVA test tool): `docs/APD-DMM001_EN.pdf` §1 p.3 (RMS
+- HYCON APD-DMM001 (EVA test tool): [hycon-hy313x-eva-test-tool-manual-apd-dmm001.pdf](../../hw/datasheets/hycon-hy313x-eva-test-tool-manual-apd-dmm001.pdf) §1 p.3 (RMS
   noise / ENOB, ≥ 1024 samples), §4 p.17 (Avr. Times).
-- HYCON APD-DMM003 (configurations): `docs/APD-DMM003_EN.pdf` §1 p.6 (DCmV
+- HYCON APD-DMM003 (configurations): [hycon-hy313x-configurations-apd-dmm003.pdf](../../hw/datasheets/hycon-hy313x-configurations-apd-dmm003.pdf) §1 p.6 (DCmV
   50/60 Hz pickup, pre-filter advice).
-- HYCON APN-HY3131001 (SPI timing; nothing on rate): `docs/APN-HY3131001_EN.pdf`.
+- HYCON APN-HY3131001 (SPI timing; nothing on rate): [hycon-hy313x-spi-appnote-apn-hy3131001.pdf](../../hw/datasheets/hycon-hy313x-spi-appnote-apn-hy3131001.pdf).
 - [`emu/hy3131/RESEARCH.md`](../../emu/hy3131/RESEARCH.md) §1 (OWON HY3131 OSR, after
   http://essentialscrap.com/owon_fix/) and §3 (stock R22 codes).
 - [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md) §4,
