@@ -1290,14 +1290,40 @@ force and counts as a live result, so LIVE? shows. `DBG:SENT?` fields 14 /
 HY3131 themselves, so never with the bus handed to a stream (not checked
 with the region C hooks).
 
-*Inferred*: that OP1O follows a source above 2.35 V up to its swing (the
-source map read the PB0 node with AD1, not OP1O). If OP1 clipped lower, a
-source would read "free" and the false A-JACK would stay as before; an open
-jack cannot read "driven".
-Device a2e9766 ([device check, "a2e9766: bug-fix recheck"](device-check-2026-10-21.md)):
-OP1O peaks at 2.14 V (5 V, 60 MΩ row), 2.25 V (5 V, 600 Ω), 2.02-2.03 V (10 V)
-and 2.13 V (the square, 60 MΩ): "free", so RES still raises A-JACK there. Only
-the square on 600 Ω read 2.38 V (driven).
+Device a2e9766 ([device check, "a2e9766: bug-fix recheck"](device-check-2026-10-21.md))
+showed that OP1O does not follow a source above the open-circuit voltage:
+it peaks at 2.14 V (5 V, 60 MΩ row), 2.25 V (5 V, 600 Ω), 2.02-2.03 V (10 V)
+and 2.13 V (the square, 60 MΩ), all "free", so RES still raised A-JACK there.
+Only the square on 600 Ω read 2.38 V (driven). The same 2.38-2.45 V showed in
+the first windows after the source was switched off, with the calibrator's
+disabled output (~24 Ω) on V-COM. Why OP1O sits there is not known
+(*inferred*: clipped or limited). On 600 Ω no fixed OP1O line separates
+these values from the row's own 2.17 V.
+
+**The comparator's both-bit reads (`v_both`, since the a2e9766 check).** In
+those RES runs the comparator on PB1 read CTSTA 0x70, i.e. CMPHO and CMPLO in
+one read (also the 2da1011 E4 entries at 5 V). At 1 V and 3 V there was no
+hit. A node cannot be above VRH and below VRL at once, so the comparator is
+overdriven; the same 0x70 shows in DC V's V-tap window on a steady 5 V and in
+DC A with 24 V on V-COM. *Inferred* (the A jack has not been wired): a
+current in A puts I x 47.5 Ω on PB1 (0.5 mA to tens of mA = 24 mV to ~1 V),
+on one side of the window, so it gives one bit per read; an AC current sets
+CMPHO and CMPLO in different reads. So in the jack-check
+comparator rows (ohm, the resistive temperature sensors) a both-bit read
+within the last `AJACK_CLEAR_MS` (1 s) counts as "driven", as an OP1O peak
+above the line does: no A-JACK, LIVE?. It is not held for the whole hit
+run: a source taken off with a current in A at once keeps the run going, and
+A-JACK then comes ~1 s later. `DBG:SENT?` field 14 then reads
+**2**. Continuity (an AD2 peak sentinel, no CTSTA) is unchanged.
+*Inferred*: a current in A large enough to push PB1 out of the comparator's
+input range (tens of mA, PB1 above ~2.4 V) may also read 0x70. It would then
+show LIVE? instead of the A-JACK badge. This is not checked: the A jack has
+not been wired.
+
+**LIVE? after the source goes off.** Device a2e9766 note 3: in RES 600 Ω,
+LIVE? came on again at every poll (5-10 ms apart) once it had cleared, until
+the next ohm reading reset its run (+24 `DBG:SENT:LOG?` entries). A run of
+live results whose last one is `LIVE_CLEAR_MS` old no longer asserts.
 
 **AC mV (`V_GATE` on the row's own result).** Plain AC mV takes |LPF| +
 1.414 x RMS of each result (the quantity of `MV_CLIP_K`): above 1.5 x the
@@ -1313,7 +1339,16 @@ continuity) or nothing (AC mV). AC+DC V on its 600 mV range carries the
 same AD1 peak sentinel without the gate (`vgate` is plain AC mV only; AUTO
 lands on 6 V with these inputs). The diode row is unchanged (badge only).
 
-**Emulator.** The model reads OL for a positive source above the ohm OCV
+**Emulator.** Since the a2e9766 check the model reproduces the device's
+RES numbers: OP1O in the ohm rows stops at 2.47 - 0.044 x V for a source of
+V volts (`ohmop1k`, 2.25 V at 5 V, 2.03 V at 10 V; the line is *inferred*
+from those points), and a source at or above 4 V on the jack sets CMPHO and
+CMPLO together on PB1 (`ohmboth`, *inferred* between the device's 3 V and
+5 V). Failing on cd1ec9a (A-JACK at 5 V, verdict 0, field 15 2250 / 2030 mV,
+as the device), passing on the fix: senttest `ohm-v5`, `ohm-v5-600`,
+switchtest `dc5-pickup`, `sq-pickup`, loudtest `ajack-res`; a real current
+in A still asserts (their last phases, switchtest `real-ajack-pickup`).
+Before that, the model read OL for a positive source above the ohm OCV
 (`OhmRevOl`, default, as the device; `ohmrevol:0` = the old negative code),
 adds `Pb1VjackMv` to PB1 in the continuity row, and gives AD2 = OP1O - PB3
 (the node across Rx within -1.18 .. +2.55 V, *inferred* swing) in the ohm /
@@ -1339,7 +1374,11 @@ A jack empty unless stated; alarm Off (quiet rule); read `DBG:SENT?` and
    the log.
 4. With a current in A (not wired yet), V-COM open: RES, continuity, AC mV:
    A-JACK within ~1 s; field 14 = 0, field 15 near 2.17 V (RES 600 Ω) /
-   -0.48 V (continuity).
+   -0.48 V (continuity); in RES field 4 (CTSTA) 32 / 96 (one bit), never
+   112.
+5. RES (AUTO and 600 Ω) with 5 V, 10 V and the square: field 4 reads 112
+   (0x70) while field 8 grows, field 14 = 2, LIVE?, no A-JACK. Then switch the
+   source off: `DBG:SENT:LOG?` grows by at most one entry.
 
 ## 5. Fuse, CAT and current limits (the DM40 manual)
 

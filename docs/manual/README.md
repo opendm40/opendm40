@@ -2612,8 +2612,7 @@ Untested on a real meter:
 - Alerts: the alerts that need a current through the A jack (A-JACK,
   A-PROT, OVLD) and the danger alarm's sound. The fuse check needs a
   re-check. LIVE? instead of a false A-JACK with 5 V or more on V/Ω in Ω
-  and continuity, and no A-JACK from a large signal in AC mV (fixed in the
-  emulator).
+  (fixed in the emulator; continuity and AC mV are checked on a meter).
 - Oscilloscope: pulse and runt triggers, cursors, pinch, double tap,
   long-press centring, holding a corner to repeat, Axis lock and Hold drag,
   the persistence modes, auto-set keeping AC coupling.
