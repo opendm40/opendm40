@@ -729,6 +729,8 @@ unless shown otherwise.
 | `DBG:SENTinel:REG?` | | Measurement chip registers and relay state | USB |
 | `DBG:SENTinel:VARiant[?]` | `0` .. `127` | `0` | USB |
 | `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
+| `DBG:SRC` | `<vref>,<path>[,<sense>][,FORCE]` or `OFF`: OP3's reference tap on a stock ohm / diode row, for [`srcmap.py`](../../firmware/tools/srcmap.py) (experimental; refused in the A functions and the power meter) | | USB |
+| `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>` | USB |
 | `DBG:ACDC?` | | AC+DC phase diagnostic | USB |
 | `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |
 | `DBG:ACDC:STAT?` | | AC+DC method state (21 fields) | USB |
