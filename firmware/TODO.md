@@ -2367,19 +2367,27 @@ Firmware:
             SPIFLASH.BIN: clean when read with the page cache dropped; a plain `cp` returned stale FAT pages (Linux
             keeps the unchanged-size file's cache across the UA; new item below). Not run: FATDIR first boot
             (created 0x7) and boot_refresh time (need an install), reload.sh, Windows UA + F5, macOS (untested).
-      - [ ] Linux: DEBUG/SPIFLASH.BIN read through the page cache can be stale after a refresh (device 46370df,
+      - [x] Linux: DEBUG/SPIFLASH.BIN read through the page cache can be stale after a refresh (device 46370df,
             docs/device-check-2026-10-21.md "46370df: screenshot preparation, the 76.8 kS/s nominal" note 2): its size and entry never change, so the kernel keeps
             its cached pages across the UNIT ATTENTION; a copy after a shot had the new BMP's directory entry but
-            not its FAT chain. Workaround: drop the file's pages (`posix_fadvise` DONTNEED / drop_caches) or remount
-            before copying. Document it in README.TXT / the user doc, or find something that makes the kernel drop
-            the pages (untested).
-      - [ ] 76.8 kS/s: two nominals for one rung (device 46370df): LOG:PRE? / the CSV and DLG headers say
+            not its FAT chain. No firmware change: by the kernel sources (master, 2026-10-24; inferred, not tested)
+            `disk_check_media_change` only marks a partition rescan, a positive vfat dentry is always valid
+            (`vfat_revalidate`) and `fat_build_inode` returns the cached inode by its entry position, so a new
+            date, size or slot of the entry does not drop the pages while mounted. Workaround (fadvise DONTNEED,
+            drop_caches, remount; `dd iflag=direct` untested) in docs/manual/README.md "Copying
+            DEBUG/SPIFLASH.BIN on Linux". Device: not rechecked.
+      - [x] 76.8 kS/s: two nominals for one rung (device 46370df): LOG:PRE? / the CSV and DLG headers said
             76 799.016 (`Logger::nominal_mhz` = 1e12 / the rounded 13 021 ns period), ACQ:SRAT? / the Wave view
-            76 800 (`ad2_rate_mhz(0)`), 12.8 ppm apart. Option: compute the logger's from the mHz directly.
-      - [ ] `nr3` (scpi.rs) prints 76 800 as `+7.680001E+04` (repeated f32 division by 10); cosmetic.
-      - [ ] MMEM names: the LOGS/ SHOTS/ SCOPE/ prefix is dropped, not checked (`MMEM:DATA? "SHOTS/LOG005.DLG"`
-            returned LOGS/LOG005.DLG; device 46370df). Harmless while names are unique; decide whether a wrong
-            directory should be -256.
+            76 800 (`ad2_rate_mhz(0)`), 12.8 ppm apart. Fixed: `Logger::plan` keeps the chip rate
+            (`hy::ad2_real_rate_mhz` / `hy::ad1_rate_mhz`, the stream ISR's), so LOG:PRE? nominal_mhz is
+            76 800 000 and the headers 76800.000 (AD1 rungs likewise: 640.000, not 639.795 from 1563 us).
+            meter-test `nominal_is_the_chip_rate`. Device: not rechecked.
+      - [x] `nr3` (scpi.rs) printed 76 800 as `+7.680001E+04` (repeated f32 division by 10). Fixed: one
+            scaling in f64; scpi-test `nr3_exact` (exact values, a 200 000-value sweep vs `{:.6E}`).
+      - [x] MMEM names: the LOGS/ SHOTS/ SCOPE/ prefix was dropped, not checked (`MMEM:DATA? "SHOTS/LOG005.DLG"`
+            returned LOGS/LOG005.DLG; device 46370df). Fixed: `csvlog::parse_path`; a prefix of another directory
+            is -256 for MMEM:DATA? and MMEM:DELete (nothing deleted). fatren-test `names`, scpi-test
+            `mmem_dirs`, emu/shottest.py (LOGS/Snnn.BMP). Device: not rechecked.
       - [x] Windows Eject does not keep the volume ejected (device b6909d6): the shell's Eject sends START STOP
             UNIT, and Windows shows "Safe To Remove". msc.rs then only records it (STOP_UNIT, msc.rs:585, used by
             recovery), so the medium is still present and E: is mounted again at the next access. Harmless on the
