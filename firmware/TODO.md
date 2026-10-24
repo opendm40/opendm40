@@ -555,11 +555,18 @@ Code work (in this order):
           inferred, current path bandwidth ~20 kHz).
       (4) OP3 step through Rref 1 k on V/ohm (DBG:SRC): only L >= ~100 mH.
       A real LCR (two synchronous channels, V and I phase) is not possible with one scope channel.
-- [ ] **Settings are lost at power-off** (device 2026-10-24): the backup SRAM is not powered while the
+- [x] **Settings are lost at power-off** (device 2026-10-24): the backup SRAM is not powered while the
       meter is off (POR + BOR flags after a key power-off; a marker setting and the crash word were gone; a
       reset and a firmware update keep it). Keep a copy of the settings on the SPI disk (as the stock's
       config.bin): written a few seconds after a change and before a power-off, read at boot when the backup
       SRAM copy is invalid. Then update the manual's "What is kept when you switch off" and Known limitations.
+      Done (src/setfile.rs): `_SETTING.BIN` in the SPI root, 2 one-block slots (magic, persist version, seq,
+      words, CRC-32), made once at boot, saves rewrite one slot in place; 5 s debounce, a 20-save budget
+      refilled every 3 min, deferred while the disk is held / an AD1 session / the AD2 stream; flushed in
+      power_off. Boot: backup SRAM unless the file is newer by seq (persist::seq), else the newest valid
+      slot, else defaults. DBG:BOOT? SETTINGS / SETFILE / SAVE. fatren-test "setfile", emu/settingstest.py
+      (power cycle = two runs, the disk carried over). Device check pending. Open: after a power-off the
+      DMM function starts on DC V (persist::same_session needs BKP_LAST, which is gone).
 - [ ] Longer scope record (owner 2026-10-24: "worth doing, not now"): 26 624 samples today vs the stock
       65 520. u16 per 10-bit sample makes 65 520 = 131 KB, too much next to the screenshot CAP (49 KB) and the
       logger rings. Packed 4 samples in 5 bytes: 65 520 = ~82 KB, +29 KB over today, within the free SRAM.

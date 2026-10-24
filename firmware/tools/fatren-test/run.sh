@@ -1421,6 +1421,29 @@ CUTK=
 [ $nblank -le 1 ] || { echo "FAIL: $nblank cuts left an all-0xFF FAST000.DLG (expected: the one before the header page)"; exit 1; }
 echo "ok: $((NOPS + 1)) cut points: fsck only lost clusters / FAT 1 ahead / a chain longer than the file; FAST000.DLG ($nfile cuts) decodes to a prefix of the samples ($nblank: all 0xFF, the cut right after the entry)"
 
+echo "=== setfile: the settings' copy in _SETTING.BIN (setfile.rs, persist.rs)"
+# Fresh volume with the stock's CONFIG.BIN and a backup next to it: the file
+# made once (8 KiB, 2 one-block clusters), then saves rewrite only its two
+# blocks; boots after a power-off / with a valid backup SRAM / a newer file;
+# CRC failure, a torn and an erased slot, both bad, a v9 slot, an unknown
+# version (main.rs setfile_cmd). fsck clean, CONFIG.BIN untouched.
+mkimg $W/sf.img
+mcopy -i $W/sf.img $W/keep.bin ::CONFIG.BIN
+mcopy -i $W/sf.img $W/old.bin ::_DM40PRV.BIN
+"$W/t" $W/sf.img setfile all | tee $W/sfr
+grep -q FAIL $W/sfr && { echo "FAIL: setfile"; exit 1; }
+fsck.fat -n $W/sf.img >/dev/null || { echo "FAIL: setfile: fsck"; exit 1; }
+mdir -i $W/sf.img :: | grep -qE "^_SETTING BIN +8192" || { echo "FAIL: setfile: _SETTING.BIN not 8192 bytes"; mdir -i $W/sf.img ::; exit 1; }
+mcopy -n -i $W/sf.img ::CONFIG.BIN $W/o && cmp -s $W/o $W/keep.bin || { echo "FAIL: setfile: CONFIG.BIN changed"; exit 1; }
+mkimg $W/sf2.img
+head -c 100 /dev/urandom > $W/sf100.bin
+mcopy -i $W/sf2.img $W/sf100.bin ::_SETTING.BIN
+"$W/t" $W/sf2.img setfile wrongsize | tee $W/sfr
+grep -q FAIL $W/sfr && { echo "FAIL: setfile wrongsize"; exit 1; }
+fsck.fat -n $W/sf2.img >/dev/null || { echo "FAIL: setfile wrongsize: fsck"; exit 1; }
+mdir -i $W/sf2.img :: | grep -qE "^_SETTING BIN +8192" || { echo "FAIL: setfile wrongsize: size"; exit 1; }
+echo "ok: setfile"
+
 echo "=== vwrite: host writes on the USB volume (delete from the PC, drag-and-drop firmware update)"
 # vwrite_test.py: mtools-made sector diffs written through vserve (main.rs)
 # in several orders, fsck + file checks of the SPI disk after each scenario,

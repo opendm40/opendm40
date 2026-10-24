@@ -113,6 +113,9 @@ SECTIONS
         *(.text.*8opendm4010screenshot*);
         *(.text.*8opendm404dlog*);
         *(.text.*8opendm406fatdir*);
+        /* The settings file (boot, load, the writer); its per-pass check
+         * setfile::poll is inline(always) into main.rs `run`: region B. */
+        *(.text.*8opendm407setfile*);
         *(.text.*8opendm405vdisk*);
         *(.text.*8opendm406upload*);
         *(.text.*8opendm405hyspi*);
@@ -189,6 +192,7 @@ SECTIONS
         *(.rodata.*8opendm4010screenshot*);
         *(.rodata.*8opendm404dlog*);
         *(.rodata.*8opendm406fatdir*);
+        *(.rodata.*8opendm407setfile*);
         *(.rodata.*8opendm405vdisk*);
         *(.rodata.*8opendm406upload*);
         *(.rodata.*8opendm405hyspi*);

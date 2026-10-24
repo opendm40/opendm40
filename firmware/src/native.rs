@@ -87,7 +87,8 @@ pub fn stack_use() -> (u32, u32) {
 /// CALMS: duration of calbackup::boot in ms (200 MHz cycles; 12.5x low at
 /// 16 MHz); SPICLK:
 /// SPI-flash divider in use (4 / 16) and the boot self-check's verdict
-/// (spiflash::ClockCheck: OK FORCED NOCHIP NOSIG DIFF1 DIFF2 NOTRUN).
+/// (spiflash::ClockCheck: OK FORCED NOCHIP NOSIG DIFF1 DIFF2 NOTRUN);
+/// then FATDIR (fatdir.rs) and SETTINGS (`put_settings`).
 pub fn put_extra(s: &mut crate::scpi::Scpi) {
     use crate::calbackup::Status as C;
     let r = crate::calbackup::result();
@@ -144,6 +145,62 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
             s.put_bytes(b",");
         }
     }
+    put_settings(s);
+}
+
+/// `,SETTINGS,<from>,<slot>,<seq>,SETFILE,<state>,SAVE,<status>,<saves>,<seq>`
+/// (setfile.rs): where this boot's settings came from (BKP = the backup
+/// SRAM, FILE = `_SETTING.BIN` slot <slot>, DEFAULTS; <seq> its sequence
+/// number, BKP: the one the backup SRAM continues, 0 = none), the file at
+/// boot (PRESENT CREATED NOFILE ERROR NOTRUN), the last save (NONE OK
+/// DEFERRED BADRECORD ERROR NOFILE), saves this boot and the newest slot's
+/// sequence.
+fn put_settings(s: &mut crate::scpi::Scpi) {
+    use crate::setfile::{FileState as F, From, Save};
+    let (from, slot, seq, file, save, saves, top) = crate::setfile::info();
+    s.put_bytes(match from {
+        From::Bkp => b",SETTINGS,BKP,-," as &[u8],
+        From::File => b",SETTINGS,FILE,",
+        From::Defaults => b",SETTINGS,DEFAULTS,-,",
+        From::NotRun => b",SETTINGS,NOTRUN,-,",
+    });
+    if from == From::File {
+        put_dec(s, slot as u32);
+        s.put_bytes(b",");
+    }
+    put_dec(s, seq);
+    s.put_bytes(match file {
+        F::Present => b",SETFILE,PRESENT,SAVE," as &[u8],
+        F::Created => b",SETFILE,CREATED,SAVE,",
+        F::NoFile => b",SETFILE,NOFILE,SAVE,",
+        F::Error => b",SETFILE,ERROR,SAVE,",
+        F::NotRun => b",SETFILE,NOTRUN,SAVE,",
+    });
+    s.put_bytes(match save {
+        Save::None => b"NONE," as &[u8],
+        Save::Ok => b"OK,",
+        Save::Deferred => b"DEFERRED,",
+        Save::BadRecord => b"BADRECORD,",
+        Save::Error => b"ERROR,",
+        Save::NoFile => b"NOFILE,",
+    });
+    put_dec(s, saves);
+    s.put_bytes(b",");
+    put_dec(s, top);
+}
+
+fn put_dec(s: &mut crate::scpi::Scpi, mut v: u32) {
+    let mut t = [0u8; 10];
+    let mut n = t.len();
+    loop {
+        n -= 1;
+        t[n] = b'0' + (v % 10) as u8;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    s.put_bytes(&t[n..]);
 }
 
 /// Board bring-up + fatren + calibration backup, then opendm40 main (normal mode).
@@ -190,6 +247,13 @@ fn pre_main(dry: bool) {
     {
         let mut disk = crate::spiflash::SpiFlash::new();
         crate::fatdir::boot(&mut disk);
+    }
+    boot::feed();
+    // The settings' copy (setfile.rs `_SETTING.BIN`): made on the first
+    // boot (2 blocks), then only its slots are read here.
+    {
+        let mut disk = crate::spiflash::SpiFlash::new();
+        crate::setfile::boot(&mut disk);
     }
     boot::feed();
     // The INFO/ files' slow-bank bytes mirrored on the SPI disk (vdisk.rs
