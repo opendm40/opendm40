@@ -1,4 +1,4 @@
-# fw-rs developer notes (the former README)
+# fw-rs developer notes
 
 Paths in this file are relative to `fw-rs/`, and the commands run there.
 
@@ -12,21 +12,20 @@ of the calibration on the SPI flash).
 fw-rs is installed like a stock update: `dm40-fw-native.bin` is a vendor-format
 update file that the vendor FS-loader flashes to `0x08004000`; a small shim in
 front of it handles the power key, the watchdog and recovery
-([native-boot.md](native-boot.md)). This is the only build: the older RAM/sector-8 image
-loaded over Bluetooth into the stock firmware was removed (2026-10-22).
+([native-boot.md](native-boot.md)). This is the only build.
 
 ## USB debug link
 
 fw-rs enumerates as a composite USBTMC + mass storage device (`1209:0001`) on
-USBFS. Debug commands are SCPI `DBG:...` over USBTMC (`src/scpi.rs`); the host
-tool `tools/dm40dbg.py` (PIL for screenshots) needs read/write access to
+USBFS. Debug commands are SCPI `DBG:...` over USBTMC ([`src/scpi.rs`](../src/scpi.rs)); the host
+tool [`tools/dm40dbg.py`](../tools/dm40dbg.py) (PIL for screenshots) needs read/write access to
 `/dev/usbtmc*` (udev rule). Mass storage is ONE removable disk "DM40"
-generated on the fly (`src/vdisk.rs`): `LOGS/*.CSV`, `SCOPE/*.CSV`,
+generated on the fly ([`src/vdisk.rs`](../src/vdisk.rs)): `LOGS/*.CSV`, `SCOPE/*.CSV`,
 `SHOTS/*.BMP`, `INFO/` (calibration, boot data, firmware image),
 `DEBUG/SPIFLASH.BIN`, `README.TXT`. The SPI flash itself is internal storage.
 Deleting a LOGS / SCOPE / SHOTS file on the PC deletes it on the meter, and
 copying an update file (`dm40*.bin`) onto the disk offers to install it
-(`src/vwrite.rs`); nothing else written is kept.
+([`src/vwrite.rs`](../src/vwrite.rs)); nothing else written is kept.
 
 ```
 python3 tools/dm40dbg.py ping
@@ -80,7 +79,7 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
 - **USB**: USBTMC/USB488 interface + SCPI, debug commands as `DBG:` SCPI
   (tools/dm40dbg.py). Mass storage (native builds): ONE FAT16
   volume "DM40" (2 GiB, 32 KiB clusters) synthesized on the fly
-  (`src/vdisk.rs`): `LOGS/LOGnnn.CSV` and `SCOPE/SCOPnnn.CSV` (generated from
+  ([`src/vdisk.rs`](../src/vdisk.rs)): `LOGS/LOGnnn.CSV` and `SCOPE/SCOPnnn.CSV` (generated from
   the compact DLG logs), `SHOTS/Snnn.BMP`, `INFO/` (`CALIB.BIN`,
   `BOOTDATA.BIN`, `UID.BIN`, `OPTBYTES.BIN`, `OTP.BIN`, `ROMBOOT.BIN`,
   `LOADER.BIN` raw region copies, `BACKUP.TXT` with CRC-32s and restore notes,
@@ -91,14 +90,14 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
   ATTENTION at once; existing files keep their place). Settings 3/3 "USB
   disk" = "PC can edit" (volatile, in force from the next USB plug;
   `DBG:VDISK:RO 0|1`, `RO?` = in force, asked for) makes it writable for two
-  things only (`src/vwrite.rs`, [native-boot.md](native-boot.md) "Host writes"): a
+  things only ([`src/vwrite.rs`](../src/vwrite.rs), [native-boot.md](native-boot.md) "Host writes"): a
   delete of a LOGS / SCOPE / SHOTS file (also through the trash: at the
   eject) deletes the SPI file; a `dm40*.bin` copied into the root is checked
   as the loader does and the meter asks "Install it now?" (Yes =
   DBG:UPDATE). Other writes fail (the hosts' own trash / indexer files are
   kept for the session only); new files then appear at the eject / re-plug. The W25Q128 SPI flash (stock FAT16,
   4096-byte sectors) is internal storage: our files in `LOGS/`, `SHOTS/`,
-  `SCOPE/` (`src/fatdir.rs`; files of earlier builds stay in its root and are
+  `SCOPE/` ([`src/fatdir.rs`](../src/fatdir.rs); files of earlier builds stay in its root and are
   shown too), the vendor loader's `dm40*.bin` and a write-once safety copy of
   `CALIB.BIN` / `BOOTDATA.BIN` / `UID.BIN` in its root (made when missing,
   never overwritten: it survives an SWD mass erase of the MCU).
@@ -119,7 +118,7 @@ Multimeter -> DMM + Scope -> Scope -> Generator; MENU opens the main menu).
 Not implemented: config.bin (settings are in backup SRAM instead).
 Recordings (`LOGS/`), screenshots (3-finger swipe, stock `S%03u.BMP` files,
 `SHOTS/`), scope records (`SCOPE/`) and AC+DC on all models (stock: DM40B/C
-only) are implemented; their open items are in TODO.md.
+only) are implemented; their open items are in [TODO.md](../TODO.md).
 
 ## SCPI
 
@@ -146,7 +145,7 @@ before the first sample and an unset `CALC:LIM:LOW|UPP?` answer `+9.9E37`
 (the former also queues "Data stale"); setting a limit turns the check on;
 `CALC:LIM:CLE` clears both limits; `CALC:AVER:STAT ON` starts a recording
 session (statistics restarted, no idle power-off). Temperature, `SYST:RAIL`,
-`LOG:` and `DBG:` commands: see the header of `src/scpi.rs`.
+`LOG:` and `DBG:` commands: see the header of [`src/scpi.rs`](../src/scpi.rs).
 
 Reply timing of `READ?` / `MEAS:<f>?` / `FETC?`:
 
@@ -158,7 +157,7 @@ Reply timing of `READ?` / `MEAS:<f>?` / `FETC?`:
 - **Just switched** (`MEAS:<f>?` changing the function, or `CONF:<f>` then
   `READ?`): the first reading after the converter's settle (0.3 s for DC V,
   0.15 s for resistance, then the autorange; the AUTO coupling: its first
-  DC / AC decision, at most 3.9 s after the entry, docs/bt-scpi.md);
+  DC / AC decision, at most 3.9 s after the entry, [bt-scpi.md](bt-scpi.md));
   `MEAS:<f>?` prefers a full-resolution average but waits for it at most
   1.5 s after the command. The reply can take about 1.5 s for resistance
   (the range hunt from 60 Mohm) and ~4 s in AUTO, so give the host a timeout
@@ -179,7 +178,7 @@ Goal and remaining work: see [TODO.md](../TODO.md).
 
 1. **(done)** Prove load + run + display.
 1b. **(done)** Debug link: keepalive-gated watchdog, screenshots, LCD register
-   access, reset/release to stock (first USB CDC, now `DBG:` SCPI over USBTMC).
+   access, reset/release to stock (`DBG:` SCPI over USBTMC).
 2. **(done)** Re-init clocks, FSMC and the ILI9488 from scratch; text/number
    rendering with the stock fonts.
 3. **(done)** HY3131 driver and measurement loop, calibration read from the
