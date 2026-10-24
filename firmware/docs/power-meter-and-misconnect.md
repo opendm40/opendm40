@@ -1305,9 +1305,10 @@ those RES runs the comparator on PB1 read CTSTA 0x70, i.e. CMPHO and CMPLO in
 one read (also the 2da1011 E4 entries at 5 V). At 1 V and 3 V there was no
 hit. A node cannot be above VRH and below VRL at once, so the comparator is
 overdriven; the same 0x70 shows in DC V's V-tap window on a steady 5 V and in
-DC A with 24 V on V-COM. A current in A puts I x 47.5 Ω on PB1 (0.5 mA to tens
-of mA = 24 mV to ~1 V), on one side of the window: one bit per read, and an AC
-current sets CMPHO and CMPLO in different reads. So in the jack-check
+DC A with 24 V on V-COM. *Inferred* (the A jack has not been wired): a
+current in A puts I x 47.5 Ω on PB1 (0.5 mA to tens of mA = 24 mV to ~1 V),
+on one side of the window, so it gives one bit per read; an AC current sets
+CMPHO and CMPLO in different reads. So in the jack-check
 comparator rows (ohm, the resistive temperature sensors) a both-bit read
 within the last `AJACK_CLEAR_MS` (1 s) counts as "driven", as an OP1O peak
 above the line does: no A-JACK, LIVE?. It is not held for the whole hit
