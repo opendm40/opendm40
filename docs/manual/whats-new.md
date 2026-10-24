@@ -72,6 +72,7 @@ See [Oscilloscope](scope.md).
 | | Stock | opendm40 |
 |---|---|---|
 | Sine / triangle / ramp above 50 kHz | Output stops without a message | Runs at 50 kHz, with a note |
+| Square 50 to 100 kHz | Snapped down to 50 kHz | The nearest frequency the hardware can make |
 | Shown frequency | The typed value | The real output frequency |
 | Ramp | Falls, against its icon | Rises |
 | Amplitude, offset | 0.5 to 3 Vpp, fixed offset | 0 to 3 Vpp, adjustable offset, DC output |

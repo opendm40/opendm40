@@ -11,8 +11,6 @@ There are two recorders:
 - **Fast recording**: raw samples of the measuring chip, up to thousands
   per second, for seconds to hours. DC and AC volts and amps only.
 
-The stock firmware has no data logging.
-
 ## Start and stop a recording
 
 The quick way: on the multimeter page, **swipe down with one finger**. The

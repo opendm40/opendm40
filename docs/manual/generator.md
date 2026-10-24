@@ -71,18 +71,6 @@ Tap a value box. The keypad opens with the current value selected:
 - Vpp, offset and duty: digits and a decimal point;
 - **OK** applies; a tap outside the keypad cancels.
 
-## Stock vs opendm40
-
-| | Stock | opendm40 |
-|---|---|---|
-| Sine / triangle / ramp above 50 kHz | Output stops (0 Hz), without a message | Runs at 50 kHz, with **max 50 kHz** shown |
-| Square 50 to 100 kHz | Snapped down to 50 kHz | Runs at the nearest frequency the hardware can make |
-| Shown frequency | The typed value | The real output frequency |
-| Ramp | Falls, against its own icon | Rises, as the icon shows |
-| Amplitude | 0.5 to 3.0 Vpp | 0 to 3.0 Vpp |
-| Offset | Fixed (0 to Vpp) | Adjustable; DC output possible |
-| Runs with | The scope | Every page |
-
 ## Known limitations
 
 The output has been checked inside the meter, not at the GEN jack: the

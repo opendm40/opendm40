@@ -4,8 +4,6 @@ The combined view shows the multimeter reading in a strip above the live
 oscilloscope. Both measure at the same time: the multimeter on its V / A
 jacks, the scope on **CHA**. The generator can run too.
 
-The stock firmware shows one instrument at a time.
-
 To open it: main menu, **Combined view: DMM + Scope** (the bottom row), or
 swipe left from the multimeter page.
 

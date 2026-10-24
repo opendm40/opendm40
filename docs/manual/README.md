@@ -27,8 +27,7 @@ owners who want to use it.
 10. [Safety and alerts](safety-and-alerts.md): wrong-connection alerts, the
     danger alarm, the fuse check.
 11. [Settings](settings.md): every settings item, and the Device page.
-12. [Remote control](remote-control.md): Bluetooth, the phone app,
-    software for the computer.
+12. [Remote control](remote-control.md): Bluetooth and the phone app.
 13. [Connecting from a computer](connecting-from-a-computer.md): step by
     step for Linux, Windows and macOS.
 14. [SCPI reference](scpi-reference.md): every command.
