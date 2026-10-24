@@ -516,6 +516,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// session's first (stale) flag, the later ones 100.8 ms apart): after a restart with the
         /// chopper on, the first result comes half a period later, then every period. Off by default.
         public bool ChopHalf;
+        /// Chopped AD1: every other result that many ms early (opt-in, "chopskew:ms"; INFERRED from
+        /// device e1cec01, an OSR 8192 chopped session right after a 640/s one: flags 78.4 / 123.2 ms
+        /// apart in turn, 100.8 ms on average). Off (0) by default.
+        public double ChopSkewMs;
         private double r22PartT = double.NaN;
         private int r22PartSign = 1;
         private double acaStepT = double.NegativeInfinity;
@@ -769,6 +773,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "r22off": R22OffCodes = o.Value; break;
                 case "r22n": R22PartN = o.Value; break;
                 case "chophalf": ChopHalf = o.Value != 0; break;
+                case "chopskew": ChopSkewMs = o.Value; break;
                 case "vjblind": VjBlind = o.Value != 0; break;
                 case "swtau": SwTrTau = o.Value; break;
                 case "swhz": SwTrHz = o.Value; break;
@@ -837,6 +842,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             var p = Ad1Period;
             var n = (long)Math.Floor((now - ad1Start) / p);
+            var skew = Ad1Chop ? ChopSkewMs * 1e-3 : 0;
+            if(skew > 0 && ((n + 1) & 1) == 1 && now >= ad1Start + (n + 1) * p - skew) n++; // ChopSkewMs: an odd result early
             if(n <= ad1Done) return;
             if(EnPkh && (regs[0x29] & 3) == 1 && ForcedAd1 == int.MinValue)
             {
@@ -847,7 +854,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             var newConv = (int)Math.Min(n - ad1Done, int.MaxValue);
             ad1Done = n;
-            ad1Last = ad1Start + n * p;
+            ad1Last = ad1Start + n * p - ((n & 1) == 1 ? skew : 0);
             UpdateRamp(ad1Last); // the ramp node as it was when the conversion ended
             ad1Code = Clamp24(ForcedAd1 != int.MinValue ? ForcedAd1 : ComputeAd1(ad1Last));
             var partNow = r22PartLeft > 0 && double.IsNaN(r22PartT) && newConv <= r22PartLeft;
