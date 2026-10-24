@@ -1571,7 +1571,8 @@ Firmware:
       (a quarter of logger::CAP) or nothing drained it for 200 ms (dialog.rs `log_panel_room`). Emulator
       (--mips 110 --isr-stall-ns 700, panel on): emu/logfmttest.py 76800 PACKed / DLG 10 s overwritten 0
       (two runs; 455 in 3 s before), 38400 all formats lossless; emu/fastlogtest.py disk 38400 / 76800 lost 0.
-      Device: untested (the 46370df item 1a / 1b runs again: overwritten 0 expected).
+      Device a2e9766 (device-check doc "a2e9766: bug-fix recheck" 4): PACKed 76 800 x 30 s twice, lost 0, overwritten 0; the panel draws
+      during a session (screenshot). DLG format not rerun.
 - [x] `VOLT:RANG:AUTO?` in AC V and `CURR:RANG:AUTO?` in AC A answered +9.91E37 (device d330877, device-check
       "d330877" new bug 4): a bare VOLT / CURR header meant the DC function. Branch smallbugs: a bare VOLTage /
       CURRent in [SENS:]<q>:RANG / :RANG:AUTO / :RES is the quantity in any coupling (scpi.rs `ANY_CPL`; DC, AC,
@@ -2382,13 +2383,20 @@ Firmware:
             (`hy::ad2_real_rate_mhz` / `hy::ad1_rate_mhz`, the stream ISR's), so LOG:PRE? nominal_mhz is
             76 800 000, which the CSV / DLG headers print (no header generated in a test; dlog-test /
             logfmt-test fixtures keep their own period-derived rates). AD1 rungs likewise (640.000, not
-            639.795 from 1563 us). meter-test `nominal_is_the_chip_rate`. Device: not rechecked.
+            639.795 from 1563 us). meter-test `nominal_is_the_chip_rate`. Device a2e9766: LOG:PRE? nominal_mhz 76 800 000, CSV
+            `# nominal_sps,76800.000` (device-check doc "a2e9766: bug-fix recheck" 4). The DLG header on the disk not rechecked.
       - [x] `nr3` (scpi.rs) printed 76 800 as `+7.680001E+04` (repeated f32 division by 10). Fixed: one
             scaling in f64; scpi-test `nr3_exact` (exact values, a 200 000-value sweep vs `{:.6E}`).
+            Device a2e9766: ACQ:SRAT? in the Wave view +7.680000E+04 / +3.840000E+04 / +4.800000E+03, scope
+            +1.250000E+07 (device-check doc "a2e9766: bug-fix recheck" 5).
+      - [ ] `pow10f` (scpi.rs) divides an f32 by 10 once per step, so VOLT:RES? on DC V 6 V MED answers
+            `+9.999999E-06` (device a2e9766; the exact nr3 now prints the f32 it gets; CONF? on the same
+            range says +1.000000E-05). Cosmetic.
       - [x] MMEM names: the LOGS/ SHOTS/ SCOPE/ prefix was dropped, not checked (`MMEM:DATA? "SHOTS/LOG005.DLG"`
             returned LOGS/LOG005.DLG; device 46370df). Fixed: `csvlog::parse_path`; a prefix of another directory
             is -256 for MMEM:DATA? and MMEM:DELete (nothing deleted). fatren-test `names`, scpi-test
-            `mmem_dirs`, emu/shottest.py (LOGS/Snnn.BMP). Device: not rechecked.
+            `mmem_dirs`, emu/shottest.py (LOGS/Snnn.BMP). Device a2e9766: `"SHOTS/` / `"SCOPE/FAST000.DLG"`
+            -256 for DATA? and DEL, the file still listed; `LOGS/` and no prefix read it (device-check doc "a2e9766: bug-fix recheck" 5).
       - [x] Windows Eject does not keep the volume ejected (device b6909d6): the shell's Eject sends START STOP
             UNIT, and Windows shows "Safe To Remove". msc.rs then only records it (STOP_UNIT, msc.rs:585, used by
             recovery), so the medium is still present and E: is mounted again at the next access. Harmless on the
@@ -3476,8 +3484,9 @@ Emulator (emu/):
       now steps up when |LPF| + 1.414 x RMS > 2.2 x the range (MV_CLIP_K; the row is DC-coupled), and AC V
       6 V then holds off the step back into mV until its AC part changes (`mv_clip`). The A-JACK alert does
       not hold the range (the range code does not read it). emu/hy3131/mvautotest.py with the model's
-      `mvclamp:1.212;mvpb1:10` (without the fix it reproduces 0.606 V and AJACK,AD1PK_PB1). Device: untested
-      (the 46370df item 2c square again: 6 V, ~4.7 V expected; then AUTO -> AUTO+ on 60 mV).
+      `mvclamp:1.212;mvpb1:10` (without the fix it reproduces 0.606 V and AJACK,AD1PK_PB1). Device a2e9766
+      (device-check doc "a2e9766: bug-fix recheck" 1, 2): the square from 60 mV: 600 mV at 0.3 s, 6 V at 0.76 s, 4.835 V; no A-JACK, no
+      alarm. AUTO -> AUTO+ on 60 mV: 6 V within 0.9-1.0 s (AC and DC).
 - [x] **False A-JACK with a voltage on V-COM in RES / continuity / AC mV** (A jack empty; 35fce2a 7b / E4,
       f0d21eb item 4, 46370df new bug 1; doc power-meter-and-misconnect.md 4.13). RES / RTD and continuity:
       the jack check (AD2 on OP1O - PB3, IG 0.5, while PB1 hits): the input above 2.35 V (ohm) / +0.3 V
@@ -3488,7 +3497,21 @@ Emulator (emu/):
       sq-pickup / real-ajack-pickup, loudtest ajack-res / ajack-cont-v5 / ajack-acmv / ajack-acv-auto. Model:
       OhmRevOl (default: OL above the OCV, the device), Pb1VjackMv in continuity, AD2 on OP1O.
       Open (doc 4.13 gaps): AC+DC V on manual 600 mV has the same AD1 peak sentinel without the gate.
-- [ ] Device: doc 4.13 "Device check list (jack check)".
+- [ ] Device: doc 4.13 "Device check list (jack check)". **Device a2e9766 (device-check doc "a2e9766: bug-fix recheck" 1): RES still
+      raises A-JACK** (badge only, no sound) with 5 V, 10 V DC and the square on V-COM: the jack check reads
+      OP1O peaks of 2139-2140 mV (5 V, AUTO on 60 MΩ), 2249-2251 mV (5 V, 600 Ω), 2019-2030 mV (10 V),
+      2132-2133 mV (square, AUTO), all under the 2.35 V "driven" line, so the verdict is "free" and A-JACK
+      stays for the whole 10 s. Only the square on manual 600 Ω read 2381 mV (driven, LIVE?, no A-JACK).
+      So OP1O does not swing above ~2.35 V for a source on V-COM; it sits near the ohm row's own open level
+      (600 Ω open: 2.17 V, doc 4.13), and a fixed threshold cannot split them on 600 Ω (inferred). Continuity
+      (LIVE?, 974-1760 mV) and AC mV (V_GATE driven, no A-JACK) pass; RES at 1 / 3 V: no PB1 hits. Not run:
+      check list item 4 (a current in A); "V-COM open" was the calibrator's disabled output (RES reads
+      ~24 Ω on 600 Ω, 0.10 MΩ on 6 MΩ, OL on 600 kΩ), not an open input.
+- [ ] FETCh? does not answer within 5 s while RES AUTO hunts (device a2e9766, device-check doc "a2e9766:
+      bug-fix recheck" note 1): on the calibrator's disabled output, RES AUTO stepped 6 MΩ <-> 600 kΩ (6 MΩ
+      reads 0.104 MΩ, 600 kΩ reads OL), DBG:READout? `P,MΩ,NAN`, and 8 of 8 FETC? timed out at the
+      driver's 5 s (then -410 Query INTERRUPTED). The scpi.rs timing notes say FETCh? answers +9.91E37 at
+      once after a range change. The hunt itself (a source that is not a resistor) not investigated.
 - [x] False A-JACK from a large AC signal on V-COM in AC mV (device 46370df new bug 1: AJACK,AD1PK_PB1 and
       the danger alarm with the A jack empty, the 0 / 9.5 V square, AC V AUTO on 60 mV). The square drives
       the mV input into its clamp; the clamp current shows on PB1, where the AD1 peak hold watches the A-jack
@@ -3500,5 +3523,6 @@ Emulator (emu/):
       (the jack check). Device: doc 4.13 check list.
 - [x] Ohm test-current label stays on 60 M after 6 M -> 60 M (test_current_label returns without clearing
       its box; device 46370df, both variants). Fixed: the box is cleared when the range has no value;
-      tools/ui-render range pairs ending on 60 M against a fresh draw. Device: untested. The labels on the other ranges, diode 0.75 mA and "Overload"
+      tools/ui-render range pairs ending on 60 M against a fresh draw. Device a2e9766: 6 M -> 60 M clears
+      the label in both variants (device-check doc "a2e9766: bug-fix recheck" 3). The labels on the other ranges, diode 0.75 mA and "Overload"
       next to 0L: PASS on the device.
