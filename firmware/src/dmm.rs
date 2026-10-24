@@ -956,6 +956,10 @@ pub struct Dmm {
     /// part moves off the reference (the input changed) or on a function
     /// change (`mv_clip_holds`).
     mv_clip: f32,
+    /// Continuity's jack check phase (`cont_jack`: 0 none, 1 settle, 2
+    /// window, 3 back) and the row's R25 to restore.
+    jwin: u8,
+    r25: u8,
     prev_ad1: i32,
     r22: u8,
     ohm_settled: bool,
@@ -1509,6 +1513,8 @@ impl Dmm {
             deadline: 0,
             entry: 0,
             mv_clip: 0.0,
+            jwin: 0,
+            r25: 0,
             prev_ad1: 0,
             r22: 0,
             ohm_settled: false,
@@ -1815,9 +1821,19 @@ impl Dmm {
         // The probe (PB2) over the comparator rows after a hit, and while
         // latched in every DC V / mV / ohm / temperature row (OP2 / AD2 are
         // unused there; DC V 60 V+ has no comparator but the probe fits).
+        // Ohm / the resistive temperature sensors: the same entry carries the
+        // jack check's row instead (sentinel JACK CHECK), never for A-PROT.
         let probe_ok = self.probe_ok();
-        self.probe = probe_ok && ((self.probe && kind == Kind::CmpA) || self.aprot.is_some());
-        let row = if self.probe { sentinel::probe_row(&row) } else { row };
+        let jack = self.jack_mode();
+        self.probe = probe_ok && ((self.probe && kind == Kind::CmpA) || (self.aprot.is_some() && !jack));
+        let row = if !self.probe {
+            row
+        } else if jack {
+            sentinel::jack_row(&row)
+        } else {
+            sentinel::probe_row(&row)
+        };
+        self.jwin = 0;
         if sentinel::ad1_last(kind, &row) || ((self.probe || am) && row[3] & 0x80 != 0) {
             let mut c = row;
             c[3] &= !0x80;
@@ -1859,7 +1875,14 @@ impl Dmm {
         let now = clk.now_ms();
         self.sent.ohm_exit(self.ohm_exit_t.filter(|&t| kind == Kind::CmpV && now < t + sentinel::OHM_EXIT_MAX_MS));
         // Ohm / temperature: A-JACK needs the V side's word (sentinel V_GATE).
-        self.sent.vgate = matches!(self.mode, 10 | 15);
+        // AC mV (plain): its own result says how far beyond the range the
+        // input is (sentinel MV_DRV_K), a block late (MV_VGATE_LAG_MS).
+        let mv = self.mode == 2 && !self.acdc;
+        self.sent.vgate = matches!(self.mode, 10 | 15) || mv;
+        self.sent.vlag = if mv { sentinel::MV_VGATE_LAG_MS } else { 0 };
+        // The jack check (sentinel JACK CHECK): ohm, continuity, the
+        // resistive temperature sensors.
+        self.sent.jchk = !self.acdc && (matches!(self.mode, 10 | 11) || (self.mode == 15 && self.t_sensor != 0));
         self.sent.bridge = self.acdc;
         // A-JACK evidence a driven V-COM can fake (sentinel `soft`): the
         // ohm-network rows (ohm, continuity, diode, capacitance, the
@@ -3342,7 +3365,11 @@ impl Dmm {
             self.pkh_due = 0;
             hy::write(0x29, &[self.r29]);
         }
-        if self.peak_in_poll() && now.saturating_sub(self.pk_t) >= sentinel::WIN_MS {
+        let jw = self.sent.jchk
+            && self.sent.kind == Kind::Ad2A
+            && (self.jwin != 0 || self.sent.jack_due(now))
+            && self.cont_jack(now);
+        if !jw && self.peak_in_poll() && now.saturating_sub(self.pk_t) >= sentinel::WIN_MS {
             // Frequency / the AD2 kinds: no AC result to bring PKHMIN /
             // PKHMAX along; read them (6 bytes) every window and restart
             // the hold as poll_ac does.
@@ -3997,6 +4024,9 @@ impl Dmm {
         let ci = ci as u32;
         let mut ac = sq * s * cal(g_rms + 4 * ci, 1.0) - cal(o_rms + 4 * ci, 0.0);
         let dcp = lpf * s * cal(g_lpf + 4 * ci, 1.0) - cal(o_lpf + 4 * ci, 0.0);
+        if m == 2 && self.sent.vgate {
+            self.mv_vside(now, dcp.abs() + core::f32::consts::SQRT_2 * sq * s);
+        }
         if self.diag_on {
             if !self.acdc && self.diag[self.diag_k as usize % ACDC_DIAG_N].n >= 4 {
                 self.diag_k = self.diag_k.wrapping_add(1);
@@ -4558,6 +4588,11 @@ impl Dmm {
         hy::read(0x0E, &mut b);
         hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
         hy::write(0x29, &[self.r29]);
+        if self.jack_mode() {
+            // the jack check's row (ohm / resistive temperature): no A-PROT
+            self.sent.jack_result(now, true, hy::s24(&b[0..3]), hy::s24(&b[3..6]));
+            return;
+        }
         let amps = sentinel::probe_amps(hy::s24(&b[0..3]), hy::s24(&b[3..6]));
         self.sent.probe_a = amps;
         match &mut self.aprot {
@@ -4605,8 +4640,63 @@ impl Dmm {
     /// the V input, ~0.34 A per volt on V-COM (5 V DC read 1.7 A, 10 V 3.1 A,
     /// the 0..9.6 V square up to 37 A) and latched A-PROT; those rows keep
     /// the comparator's A-JACK only (doc 4.8).
+    /// Also the ohm / resistive temperature rows, which carry the jack
+    /// check's row in its place (`jack_mode`; never A-PROT there).
     fn probe_ok(&self) -> bool {
-        matches!(self.mode, 1 | 3) && !self.acdc && self.fuse_job.is_none()
+        (matches!(self.mode, 1 | 3) || self.jack_mode()) && !self.acdc && self.fuse_job.is_none()
+    }
+
+    /// V_GATE (AC mV), per result: `pk` = the node's peak estimate (mV,
+    /// |LPF| + sqrt(2) x RMS) far beyond the range = a source on V-COM, not
+    /// the open V jack of an A-jack current (sentinel MV_DRV_K).
+    #[inline(never)]
+    fn mv_vside(&mut self, now: u64, pk: f32) {
+        let lim = self.factor() * if self.range > 0 { 100.0 } else { 10.0 };
+        self.sent.v_side(now, pk > sentinel::MV_DRV_K * lim);
+    }
+
+    /// The probe's row is the jack check's (sentinel `jack_row`): ohm and
+    /// the resistive temperature sensors.
+    fn jack_mode(&self) -> bool {
+        self.mode == 10 || (self.mode == 15 && self.t_sensor != 0)
+    }
+
+    /// Continuity's jack check (sentinel JACK CHECK), per poll while the
+    /// AD2 sentinel's window is due: AD2 is switched to OP1O - PB3 at IG 0.5
+    /// (R25 / R27; AD2 stays on, AD1 untouched), the hold cleared
+    /// PROBE_SETTLE_MS later, read one WIN_MS after that, then AD2 goes back
+    /// to PB1 and its hold is cleared PROBE_SETTLE_MS later. True = the
+    /// window belongs to the check (no PB1 sample).
+    #[inline(never)] // .cold (link-native.x): only while PB1 hits (a fault)
+    fn cont_jack(&mut self, now: u64) -> bool {
+        if self.jwin == 0 {
+            self.r25 = hy::read1(0x25);
+            hy::write(0x25, &[self.r25 & sentinel::JACK_R25_MASK]);
+            hy::write(0x27, &[sentinel::R27_OP1O_PB3]);
+            self.jwin = 1;
+            self.pk_t = now;
+            return true;
+        }
+        let dt = now.saturating_sub(self.pk_t);
+        match self.jwin {
+            1 | 3 if dt >= sentinel::PROBE_SETTLE_MS => {
+                hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
+                hy::write(0x29, &[self.r29]);
+                self.pk_t = now;
+                self.jwin = if self.jwin == 1 { 2 } else { 0 };
+            }
+            2 if dt >= sentinel::WIN_MS => {
+                let mut b = [0u8; 6];
+                hy::read(0x0E, &mut b);
+                hy::write(0x25, &[self.r25]);
+                hy::write(0x27, &[sentinel::R27_OP2O_PB3]);
+                self.sent.jack_result(now, false, hy::s24(&b[0..3]), hy::s24(&b[3..6]));
+                self.pk_t = now;
+                self.jwin = 3;
+            }
+            _ => {}
+        }
+        true
     }
 
     /// The peak-hold sentinel is harvested in `poll` (no AC result carries

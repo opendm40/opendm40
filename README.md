@@ -46,8 +46,9 @@ checked only in the emulator or in host tests.
 | ![Power meter](firmware/docs/img/power.png) Power meter, AC+DC parts | ![AUTO AC/DC](firmware/docs/img/auto-acdc.png) AUTO AC/DC | ![Inrush](firmware/docs/img/inrush.png) Inrush current |
 | ![Burden voltage](firmware/docs/img/burden.png) Burden voltage | ![A-JACK alert](firmware/docs/img/ajack.png) A-JACK alert | ![Record page](firmware/docs/img/record.png) Record page |
 
-Known open issues ([firmware/TODO.md](firmware/TODO.md)): with 5-10 V on V-COM, the ohm and
-continuity functions can show a false A-JACK (fixed for the thermocouple). While the scope is powered
+Known open issues ([firmware/TODO.md](firmware/TODO.md)): the fix for the false A-JACK with
+5-10 V on V-COM in the ohm and continuity functions (now LIVE?) and with a large signal in AC mV is
+not yet checked on a meter. While the scope is powered
 (combined view, scope page), a fast square on the DMM input reads about
 0.2 % high.
 

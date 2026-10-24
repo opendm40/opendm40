@@ -380,14 +380,95 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
 // there). The comparator gives two bits per window, above VRH / below VRL,
 // so a PB1 excursion from V-COM and one from an A-jack current look the
 // same: no threshold or offset tells them apart (as in Hz, which has no
-// sentinel). The rows' own V side can: ohm's AD1 code goes negative for a
-// source above the ohm source's open-circuit voltage (LIVE?, `dmm.rs`
-// LIVE_CODE), and the thermocouple input reads far beyond any thermocouple
-// (T_VDRV_MV). The case A-JACK is for there - the leads in A / COM, V-COM
+// sentinel). The rows' own V side can in part: ohm's AD1 code goes negative
+// for a negative source (LIVE?, `dmm.rs` LIVE_CODE; a positive one above the
+// open-circuit voltage reads OL on the device, 35fce2a 7b: the JACK CHECK
+// below covers that), and the thermocouple input reads far beyond any
+// thermocouple (T_VDRV_MV). The case A-JACK is for there - the leads in A / COM, V-COM
 // open - shows neither, so the gate keeps it: A-JACK asserts only after a
 // V-side result since the hit run began said V-COM is free (ohm: the next
 // conversion; temperature: up to one ~2.2 s CJ / TC cycle later), and an
 // asserted one drops when V-COM turns out driven (ohm: then LIVE?).
+
+// JACK CHECK (device 35fce2a 7b / E4, f0d21eb item 4, 0774e70 S6, 46370df
+// new bug 1; TODO "False A-JACK in ohm"). V_GATE's ohm premise fails on the
+// device: a positive source above the ohm source's open-circuit voltage
+// reads OL there (5 / 10 V on every range 600 ohm .. 60 Mohm), as open leads
+// do, so the reading cannot say "V-COM driven". Continuity at 5 V: A-JACK
+// from the AD2 peak on PB1 (-99 100 / +124 800, ~+-0.25 V at PB1). What
+// differs between the two cases in those rows is the input node itself:
+// with the leads in A / COM and V-COM open it sits at the row's own source
+// (ohm: the open-circuit voltage, 0.78 .. 2.17 V on the stock taps, 1.38 V
+// on the 60 Mohm current-source row, device source map
+// docs/device-check-2026-10-21.md "Ohm test current map"; continuity: its
+// ~-0.48 V source), with a source on V-COM it follows the source. The PB1
+// pickup started between 3 and 5 V in RES (35fce2a 7c: no hits up to
+// 3.0 V). So when PB1 hits in those rows, AD2 reads OP1O - PB3 (OP1 is the
+// row's own x1 buffer of the input, the numerator of the stock ratio) at
+// IG 0.5 (+-2.5 V), and the peak pair says driven / free (`jack_driven`).
+// Ohm / the resistive temperature sensors: the whole row for as long as
+// the hits last (`jack_row`, through the probe's row rewrite: AD2 is off
+// in those rows, AD1 is written last, note 7). Continuity: AD2 is the
+// sentinel there, so its inputs are switched for one window
+// (`JACK_R25_MASK`, R27_OP1O_PB3) and back (dmm.rs `cont_jack`). Driven ->
+// no A-JACK, LIVE? instead; free -> A-JACK as before. INFERRED: that OP1O
+// follows a source above ~2.4 V up to its swing (the device read the PB0
+// node itself up to 2.47 V with AD1 in the source map, not OP1O); if OP1
+// clipped lower, a source would read "free" and the A-JACK would stay as
+// on the old code (the check never turns an open jack into "driven").
+
+/// AD2 codes per volt at IG 0.5 (19-bit codes, PB6 / AGND = 1.25 V).
+pub const JACK_CODES_PER_V: f32 = 0.5 / 1.25 * 262_144.0;
+/// R27 for the jack check: SAD2IP = OP1O, SAD2IN = PB3, the sentinel's refs.
+pub const R27_OP1O_PB3: u8 = R27_OP2O_PB3 & 0x3F;
+/// R25 AND mask for the jack check: AD2IG = 00 (0.5).
+pub const JACK_R25_MASK: u8 = 0x3D;
+/// Ohm: driven above this (V): over the highest stock open-circuit voltage
+/// (2.17 V, VDS15 / R1K) and below where the pickup starts (> 3.0 V).
+pub const JACK_OHM_HI: f32 = 2.35;
+/// Continuity: driven above this (V; its own source is ~-0.48 V, a short
+/// ~0 V; any positive source is "the other sign", as LIVE? reads it).
+pub const JACK_CONT_HI: f32 = 0.3;
+/// Driven below this (V), both rows (ohm never goes below COM by itself;
+/// continuity's source is ~-0.48 V).
+pub const JACK_LO: f32 = -0.9;
+/// Continuity: the jack check repeats this often while the hit run lasts
+/// (its windows are the sentinel's; ohm reads it every window).
+pub const JACK_RECHECK_MS: u64 = 300;
+
+/// The jack check's verdict from its AD2 peak pair (`ohm`: the ohm row's
+/// limits, else continuity's): Some(driven), None for an empty hold.
+pub fn jack_driven(ohm: bool, pkmin: i32, pkmax: i32) -> Option<bool> {
+    if pkmax < pkmin {
+        return None;
+    }
+    let hi = if ohm { JACK_OHM_HI } else { JACK_CONT_HI };
+    Some(pkmax as f32 > hi * JACK_CODES_PER_V || (pkmin as f32) < JACK_LO * JACK_CODES_PER_V)
+}
+
+/// The jack check's row (ohm / resistive temperature, over `row_for`'s
+/// comparator row): AD2 = OP1O - PB3 at IG 0.5, OSR 256, the peak hold on
+/// AD2; OP2 untouched (off). AD1 written last (`ad1_last`'s rule).
+pub fn jack_row(row: &[u8; CFG_LEN]) -> [u8; CFG_LEN] {
+    let mut c = *row;
+    ad2_sentinel(&mut c);
+    c[5] &= JACK_R25_MASK;
+    c[7] = R27_OP1O_PB3;
+    c[18] = row[18];
+    c
+}
+
+/// AC mV (V_GATE): the result's node peak estimate |LPF| + sqrt(2) x RMS
+/// above this many times the range = the V side is driven far beyond the
+/// range (device 46370df: the 0 / 9.5 V square, clipped by the mV input,
+/// read 0.606 V RMS on 600 mV: ~2.4 x; a full-scale sine is 1.41 x). The
+/// PB1 pickup there comes with the input clamp's current (emulator
+/// `mvpb1`, INFERRED), i.e. only with the input beyond the clamp.
+pub const MV_DRV_K: f32 = 1.5;
+/// AC mV: a "free" V-side result counts for A-JACK only from this long
+/// after the hit run began (the RMS / LPF results lag the input by a block;
+/// a peak hold sees the onset first).
+pub const MV_VGATE_LAG_MS: u16 = 250;
 
 /// Temperature: |the thermocouple input| above this (mV) = a source on
 /// V-COM, not a thermocouple (type E: 76.4 mV at 1000 C; K 54.9 mV at
@@ -809,6 +890,17 @@ pub struct Sentinel {
     pub soft: bool,
     vside_t: Option<u64>,
     vdrv: bool,
+    /// V_GATE: a V-side result counts only from `vlag` ms after the run
+    /// began (AC mV: MV_VGATE_LAG_MS; set by `dmm.rs` with the row).
+    pub vlag: u16,
+    /// The row's A-JACK needs the jack check to say V-COM is free (JACK
+    /// CHECK above; set by `dmm.rs` with the row: ohm, continuity, the
+    /// resistive temperature sensors); `jack_t` = when the last verdict
+    /// came (0 none), `jack_drv` = it said driven, `jack_mv` = its peak (mV).
+    pub jchk: bool,
+    jack_t: u64,
+    jack_drv: bool,
+    pub jack_mv: i32,
     /// Assertion log (DBG:SENTinel:LOG?, the switch regression test
     /// emu/hy3131/switchtest.py): the last LOG_N alerts that came on, as
     /// (alert, kind, ms); `log_n` = assertions logged so far.
@@ -862,6 +954,11 @@ impl Sentinel {
             soft: false,
             vside_t: None,
             vdrv: false,
+            vlag: 0,
+            jchk: false,
+            jack_t: 0,
+            jack_drv: false,
+            jack_mv: 0,
             log: [(Alert::None, Kind::Off, 0); LOG_N],
             log_n: 0,
         }
@@ -897,6 +994,8 @@ impl Sentinel {
             self.fuse = Held::NEW;
             self.vside_t = None;
             self.vdrv = false;
+            self.jack_t = 0;
+            self.jack_drv = false;
             if !matches!(self.alert, Alert::None | Alert::Overload | Alert::AProt) {
                 self.alert = Alert::None;
             }
@@ -1183,6 +1282,32 @@ impl Sentinel {
         self.decide(now);
     }
 
+    /// Jack check (JCHK): a verdict is due (the hit run has none yet, or
+    /// its last is JACK_RECHECK_MS old). Continuity's window (`dmm.rs`).
+    #[inline(never)]
+    pub fn jack_due(&self, now: u64) -> bool {
+        self.jchk
+            && (self.streak > 0 || self.alert == Alert::AJack)
+            && (self.jack_t < self.run_t0.max(1) || now.saturating_sub(self.jack_t) >= JACK_RECHECK_MS)
+    }
+
+    /// Jack check result (`ohm`: the ohm rows' limits): the AD2 peak pair of
+    /// OP1O - PB3. Driven also counts as a live result (LIVE? instead of
+    /// A-JACK: the row's own reading cannot show it, OL).
+    #[inline(never)] // .cold (link-native.x): only while PB1 hits
+    pub fn jack_result(&mut self, now: u64, ohm: bool, pkmin: i32, pkmax: i32) {
+        let Some(d) = jack_driven(ohm, pkmin, pkmax) else { return };
+        let m = if pkmax.unsigned_abs() >= pkmin.unsigned_abs() { pkmax } else { pkmin };
+        self.jack_mv = (m as f32 * 1000.0 / JACK_CODES_PER_V) as i32;
+        self.jack_t = now.max(1);
+        self.jack_drv = d;
+        if d {
+            self.live_reading(now, true);
+        } else {
+            self.decide(now);
+        }
+    }
+
     /// Current-mode reading: the current is below 0.5 % of the range (the
     /// V-JACK? precondition), or not.
     pub fn current_small(&mut self, now: u64, small: bool) {
@@ -1215,11 +1340,16 @@ impl Sentinel {
             Kind::CmpA | Kind::PeakA | Kind::Ad2A => {
                 let on = matches!(self.alert, Alert::AJack);
                 if on {
-                    now.saturating_sub(self.last_hit) < AJACK_CLEAR_MS && !(self.vgate && self.vdrv)
+                    now.saturating_sub(self.last_hit) < AJACK_CLEAR_MS
+                        && !(self.vgate && self.vdrv)
+                        && !(self.jchk && self.jack_drv)
                 } else {
-                    // V_GATE: a V-side result since the run began said V-COM is free
+                    // V_GATE: a V-side result since the run began (+ vlag) said
+                    // V-COM is free; JCHK: so did the jack check
+                    let t0 = self.run_t0 + self.vlag as u64;
                     self.streak >= AJACK_WINDOWS
-                        && (!self.vgate || (!self.vdrv && self.vside_t.is_some_and(|t| t >= self.run_t0)))
+                        && (!self.vgate || (!self.vdrv && self.vside_t.is_some_and(|t| t >= t0)))
+                        && (!self.jchk || (!self.jack_drv && self.jack_t != 0 && self.jack_t >= self.run_t0))
                 }
             }
             _ => false,
@@ -1276,7 +1406,8 @@ impl Sentinel {
     }
 
     /// DBG:SENT? text: kind,alert,mask,ctsta,pkmin,pkmax,streak,hits,samples,
-    /// probe mA, A-PROT ms, V side (V_GATE), soft (badge-only A-JACK).
+    /// probe mA, A-PROT ms, V side (V_GATE), soft (badge-only A-JACK), jack
+    /// check (-1 none, 0 free, 1 driven), its peak (mV).
     #[inline(never)] // .cold (link-native.x): DBG reply
     pub fn diag_text(&self, buf: &mut [u8]) -> usize {
         let mut n = 0;
@@ -1298,7 +1429,8 @@ impl Sentinel {
         // the last comparator row's, stale: the f0d21eb check's "AC V reads
         // 0x70 after TEMP" was TEMP's last read).
         let ct = if matches!(self.kind, Kind::CmpA | Kind::CmpV) { self.ctsta as i32 } else { -1 };
-        for v in [self.mask as i32, ct, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32, vd, self.soft as i32] {
+        let jd = if self.jchk && self.jack_t != 0 { self.jack_drv as i32 } else { -1 };
+        for v in [self.mask as i32, ct, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32, vd, self.soft as i32, jd, self.jack_mv] {
             put(b",");
             put(itoa(&mut nb, v));
         }
@@ -2123,6 +2255,86 @@ mod tests {
     }
 
     #[test]
+    fn ajack_gated_by_the_jack_check() {
+        // Ohm with 5 V on V-COM (device 35fce2a 7b): the reading is OL, V_GATE says free; the
+        // jack check (OP1O at the comparator's run) says driven -> LIVE?, never A-JACK.
+        let v = |x: f32| (x * JACK_CODES_PER_V) as i32;
+        let hits = |s: &mut Sentinel, t0: u64, t1: u64| {
+            for t in (t0..t1).step_by(10) {
+                s.sample_cmp(t, 0x20);
+            }
+        };
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.vgate = true;
+        s.jchk = true;
+        hits(&mut s, 0, 150);
+        assert!(s.jack_due(150));
+        s.v_side(150, false);
+        hits(&mut s, 150, 400);
+        assert_eq!(s.alert, Alert::None, "no verdict yet");
+        for t in (400..1500).step_by(100) {
+            s.jack_result(t, true, v(2.45), v(2.5));
+            s.v_side(t, false);
+            hits(&mut s, t, t + 100);
+            assert_ne!(s.alert, Alert::AJack);
+        }
+        assert_eq!(s.alert, Alert::Live);
+        assert_eq!(s.jack_mv, 2500);
+        // Leads in A / COM, V-COM open (the open-circuit 2.17 V): A-JACK.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.vgate = true;
+        s.jchk = true;
+        hits(&mut s, 0, 300);
+        s.v_side(300, false);
+        assert_eq!(s.alert, Alert::None);
+        s.jack_result(310, true, v(2.16), v(2.18));
+        assert_eq!(s.alert, Alert::AJack);
+        // ... and drops when the jack turns driven
+        hits(&mut s, 310, 600);
+        s.jack_result(600, true, v(-0.2), v(4.0));
+        assert_ne!(s.alert, Alert::AJack);
+        // Continuity: its -0.48 V source is free, a positive source driven.
+        assert_eq!(jack_driven(false, v(-0.49), v(-0.47)), Some(false));
+        assert_eq!(jack_driven(false, v(0.9), v(1.1)), Some(true));
+        assert_eq!(jack_driven(true, v(0.77), v(0.79)), Some(false));
+        assert_eq!(jack_driven(true, 10, 0), None);
+        // A verdict from before the run does not count; one is due again.
+        let mut s = Sentinel::new();
+        s.configured(Kind::Ad2A, 0, true);
+        s.jchk = true;
+        s.jack_result(100, false, v(-0.49), v(-0.47));
+        s.sample_peak(1000, 0, 20_000);
+        assert!(s.jack_due(1010));
+        s.sample_peak(1100, 0, 20_000);
+        s.sample_peak(1200, 0, 20_000);
+        assert_eq!(s.alert, Alert::None);
+        s.jack_result(1250, false, v(-0.49), v(-0.47));
+        assert_eq!(s.alert, Alert::AJack);
+        assert!(!s.jack_due(1300));
+        assert!(s.jack_due(1550));
+    }
+
+    #[test]
+    fn acmv_vside_lag() {
+        // AC mV (V_GATE with vlag): a "free" result within the lag of the run's start does not
+        // count (the RMS block lags the peak hold).
+        let mut s = Sentinel::new();
+        s.configured(Kind::PeakA, 0, true);
+        s.vgate = true;
+        s.vlag = MV_VGATE_LAG_MS;
+        for t in (1000..1200).step_by(100) {
+            s.sample_peak(t, 0, 20_000);
+            s.v_side(t, false);
+        }
+        assert_eq!(s.alert, Alert::None);
+        s.sample_peak(1300, 0, 20_000);
+        s.v_side(1300, false);
+        assert_eq!(s.alert, Alert::AJack);
+    }
+
+    #[test]
     fn overload_badge_red_then_amber() {
         let mut s = Sentinel::new();
         s.configured(Kind::CmpV, 0, true);
@@ -2313,7 +2525,7 @@ mod tests {
         s.sample_peak(100, -5, 7);
         let mut b = [0u8; 96];
         let n = s.diag_text(&mut b);
-        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,7,-1,-5,7,0,0,1,0,0,-1,0");
+        assert_eq!(core::str::from_utf8(&b[..n]).unwrap(), "AD1PK_PB1,NONE,7,-1,-5,7,0,0,1,0,0,-1,0,-1,0");
         // A soft row's A-JACK: the badge, no alarm.
         let mut s = Sentinel::new();
         s.configured(Kind::Ad2A, 0, true);

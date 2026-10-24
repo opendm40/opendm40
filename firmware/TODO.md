@@ -2553,8 +2553,8 @@ Firmware:
             0.51 s); direct TEMP -> A at 5 V: none. (E3) **AC? in DC V on 5 V DC** (the item above), 26 / 26 entries,
             on at 2.6 s, stays on: the V-tap window's CTSTA is 0x70 = CMPHO and CMPLO both set on a steady +5 V
             (1 V: 0x10), and sample_cmp reads both bits as "swings both ways". (E4) A-JACK in RES at 5 V, 12 / 12,
-            vside 0: the known 35fce2a 7b, owner decision. DC? in AC V on 1 / 5 V DC is right. Fix pending
-            (another agent).
+            vside 0: the known 35fce2a 7b, owner decision. DC? in AC V on 1 / 5 V DC is right. **Fixed by the
+            jack check (doc 4.13, branch fix/ajack-false): LIVE? instead; device retest pending.**
             **Device d330877 (device-check-2026-10-21.md "d330877" section 4, raw `chk2/out/E_e1_*`, `E_e4_*`, `ctsta_summary.txt`):** E1 still
             there (RES -> A / mA: 0x70 0.47-0.67 -> 4.6 s open, -> 5.1 s at 1 V; V-JACK 1.5-1.8 -> 5.2-5.9 s).
             RES -> DC V 1 s -> A: ctsta 0, no alert (open and 1 V, 3 / 3 each). RES -> AC A 2 s -> A: 0 (open),
@@ -3191,7 +3191,7 @@ Emulator (emu/):
       Device 612c45c (doc "612c45c" D1-D4), no current: Settings row and SYST:ALER:ALARm? read, V-JACK? and
       OVERLOAD leave DBG:ALARm? idle. Not run: the coupling check (no debug command makes it sound; and the
       owner asked for no sound at night). **New: the known false A-JACK in RES with 5 V on V-COM (35fce2a 7b)
-      now sounds the loud alarm** (6 events during the E1 subset). The setting is OFF for the night (owner).
+      now sounds the loud alarm** (badge only since a99488a; LIVE? instead since the jack check, doc 4.13) (6 events during the E1 subset). The setting is OFF for the night (owner).
 
 ## False AC? / A-JACK / A-PROT / V-JACK? after switches (owner 2026-10-23, on ad74e93 / 35fce2a)
 
@@ -3304,7 +3304,7 @@ Emulator (emu/):
       Left: (a) [ ] the 24 V misses (3, and 2b below); (b) [ ] V-JACK? in AC A (2a, unchanged); (c) [ ] new:
       false OVERLOAD in AC A at 1 / 5 V on V-COM, `CONF:CURR:AC 0.06` after 10 A falls back to 10 A at 0.5 s
       (AD1PK_SENSE pk ~-210 000, the 2a drift); (d) [ ] new: A-JACK in continuity at 5 V DC (AD2PK_PB1, 0.41 s,
-      stays; LIVE at 1 V), likely the RES 5 V V_GATE item.
+      stays; LIVE at 1 V), likely the RES 5 V V_GATE item. **(d) fixed by the jack check (doc 4.13): LIVE?.**
 - [x] f0d21eb follow-up, emulator (branch sentinel2; doc power-meter-and-misconnect.md 4.11):
       (b) V-JACK? in AC A: FIXED. AD1 was on SENSE - PB5, and PB5 is defined only by the DC V
       60 V+ rows: in the A rows it drifted to the rail at any V. Now SENSE - AGND, and AC A counts
@@ -3469,13 +3469,26 @@ Emulator (emu/):
       not hold the range (the range code does not read it). emu/hy3131/mvautotest.py with the model's
       `mvclamp:1.212;mvpb1:10` (without the fix it reproduces 0.606 V and AJACK,AD1PK_PB1). Device: untested
       (the 46370df item 2c square again: 6 V, ~4.7 V expected; then AUTO -> AUTO+ on 60 mV).
-- [ ] False A-JACK from a large AC signal on V-COM in AC mV (device 46370df new bug 1: AJACK,AD1PK_PB1 and
+- [x] **False A-JACK with a voltage on V-COM in RES / continuity / AC mV** (A jack empty; 35fce2a 7b / E4,
+      f0d21eb item 4, 46370df new bug 1; doc power-meter-and-misconnect.md 4.13). RES / RTD and continuity:
+      the jack check (AD2 on OP1O - PB3, IG 0.5, while PB1 hits): the input above 2.35 V (ohm) / +0.3 V
+      (continuity) or below -0.9 V = driven -> LIVE?, no A-JACK; at its own source (ohm 0.78-2.17 V open,
+      continuity -0.48 V) = free -> A-JACK as before. AC mV: V_GATE on the AC result (above). INFERRED: OP1O
+      above ~2.4 V on the device (DBG:SENT? fields 14 / 15 show it). Emulator (fail on 6dddfdf, pass now):
+      senttest ohm-v5 / ohm-v5-600 / cont-v5 / acmv-sq60 / acmv-sq600 / acmv-dc5, switchtest dc5-pickup /
+      sq-pickup / real-ajack-pickup, loudtest ajack-res / ajack-cont-v5 / ajack-acmv / ajack-acv-auto. Model:
+      OhmRevOl (default: OL above the OCV, the device), Pb1VjackMv in continuity, AD2 on OP1O.
+      Open (doc 4.13 gaps): AC+DC V on manual 600 mV has the same AD1 peak sentinel without the gate.
+- [ ] Device: doc 4.13 "Device check list (jack check)".
+- [x] False A-JACK from a large AC signal on V-COM in AC mV (device 46370df new bug 1: AJACK,AD1PK_PB1 and
       the danger alarm with the A jack empty, the 0 / 9.5 V square, AC V AUTO on 60 mV). The square drives
       the mV input into its clamp; the clamp current shows on PB1, where the AD1 peak hold watches the A-jack
       shunt (INFERRED: the emulator's `mvpb1` models it, ratio unknown). With the clip step (above) AC mV is
       left within ~2 s of the square on the emulator and the alert does not assert there (without the fix it
-      did); whether it still would on the device is not known. Open: the alert's rule itself
-      (PeakA in the AC mV rows while the V input is over range), not changed.
+      did); whether it still would on the device is not known. **Fixed (branch fix/ajack-false, doc 4.13):**
+      plain AC mV gates A-JACK by its own result (V_GATE: |LPF| + 1.414 x RMS > 1.5 x the range = driven,
+      a "free" result >= 250 ms into the hit run needed). With the false A-JACKs in RES / continuity below
+      (the jack check). Device: doc 4.13 check list.
 - [x] Ohm test-current label stays on 60 M after 6 M -> 60 M (test_current_label returns without clearing
       its box; device 46370df, both variants). Fixed: the box is cleared when the range has no value;
       tools/ui-render range pairs ending on 60 M against a fresh draw. Device: untested. The labels on the other ranges, diode 0.75 mA and "Overload"

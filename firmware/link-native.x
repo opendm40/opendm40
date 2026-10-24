@@ -308,6 +308,15 @@ SECTIONS
         *(.text.*8opendm403dmm2am*6am_ref*);
         *(.text.*8opendm403dmm2am*11am_cal_step*);
         *(.text.*8opendm408sentinel*8Sentinel9diag_text*);
+        /* The jack check (sentinel.rs JACK CHECK): only while PB1 hits in ohm /
+         * continuity / the resistive temperature sensors (a fault), never
+         * with the bus handed to a stream (it talks to the HY3131 itself). */
+        *(.text.*8opendm408sentinel*8Sentinel11jack_result*);
+        *(.text.*8opendm403dmm*3Dmm9cont_jack*);
+        /* DBG:SRC? and DBG:ACDC:TRACE? reply text (SCPI only; room in region B
+         * for the jack check above). */
+        *(.text.*8opendm40*8src_text*);
+        *(.text.*6acdctr*5Trace4text*);
         *(.text.*8opendm405scope*5Scope12hw_calibrate*);
         *(.text.*8opendm406hwtrig*6HwTrig9calibrate*);
         *(.text.*8opendm405touch*5Touch3new*);

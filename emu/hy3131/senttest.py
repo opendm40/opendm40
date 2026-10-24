@@ -66,12 +66,35 @@ SC = {
     'dca-vi':   ('CURR:DC', 16, [(0, 'open;vsrc:24;isrc:0.0123', {'NONE'})]),
     # Device 1eb4d7e / 973df07 (A jack open): 5 / 10 V DC or the 0..9.6 V 40 Hz square on V-COM
     # tripped the comparator on PB1 in ohm / temperature (A-JACK), 1 V did not. The model's
-    # Pb1VjackMv puts the V jack on PB1 in those rows. The V side of the same rows says the jack is
-    # driven (ohm: the negative code of LIVE?; temperature: far beyond any thermocouple), so no
-    # A-JACK then (ohm: LIVE?); a current in A with V-COM open (the last phase) is A-JACK as before.
-    'ohm-v5':   ('RES', 42, [(0, 'open;r:4700', {'NONE'}), (8, 'vsrc:5', {'NONE', 'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
-                             (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'NONE', 'LIVE'}), (32, 'open;isrc:0.002', {'AJACK'})],
-                 [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10']}),
+    # Pb1VjackMv puts the V jack on PB1 in those rows. Temperature: the thermocouple input reads
+    # far beyond any thermocouple (V_GATE), no A-JACK. Ohm: the device reads OL there, not the
+    # negative code of LIVE? (35fce2a 7b; the model's default `ohmrevol`), so the jack check
+    # (sentinel.rs JACK CHECK: AD2 on OP1O while PB1 hits) tells it: LIVE?, never A-JACK. A current
+    # in A with V-COM open (the last phase) is A-JACK as before. ohm-v5-600: manual 600 ohm.
+    'ohm-v5':   ('RES', 42, [(0, 'open;r:4700', {'NONE'}), (8, 'vsrc:5', {'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
+                             (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'LIVE'}), (32, 'open;isrc:0.002', {'AJACK'})],
+                 [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10'], 'never': [('AJACK', 1, 4)]}),
+    'ohm-v5-600': ('RES 600', 42, [(0, 'open;r:470', {'NONE'}), (8, 'vsrc:5', {'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
+                                   (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'LIVE'}), (32, 'open;isrc:0.002', {'AJACK'})],
+                   [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10'], 'never': [('AJACK', 1, 4)]}),
+    # Continuity, the same inputs (device f0d21eb item 4 / 0774e70 S6: A-JACK at 5 V from the AD2
+    # peak on PB1; LIVE? at 1 V): the jack check's window says driven -> LIVE?.
+    'cont-v5':  ('CONT', 42, [(0, 'open;r:10', {'NONE'}), (8, 'open;vsrc:5', {'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
+                              (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'LIVE'}), (32, 'open;isrc:0.002', {'AJACK'})],
+                 [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10'], 'never': [('AJACK', 1, 4)]}),
+    # AC mV with the 0 / 9.5 V 40 Hz square on V-COM (device 46370df: AJACK,AD1PK_PB1; the model's
+    # mvclamp / mvpb1): the row's own result is far beyond the range (V_GATE, MV_DRV_K): no
+    # A-JACK; then the source off and an AC current in A with V-COM open: A-JACK. Manual 60 mV /
+    # 600 mV (the range stays in the clip); acmv-dc5: 5 V DC (the clamp's DC).
+    'acmv-sq60': ('VOLT:AC 0.06', 30, [(0, 'open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50', {'NONE'}),
+                                       (10, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'NONE'}),
+                                       (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [], {'never': [('AJACK', 1, 2)]}),
+    'acmv-sq600': ('VOLT:AC 0.6', 30, [(0, 'open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50', {'NONE'}),
+                                       (10, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'NONE'}),
+                                       (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [], {'never': [('AJACK', 1, 2)]}),
+    'acmv-dc5': ('VOLT:AC 0.6', 30, [(0, 'open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50', {'NONE'}),
+                                     (10, 'vsrc:5', {'NONE'}),
+                                     (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [], {'never': [('AJACK', 1, 2)]}),
     'temp-v5':  ('TEMP', 42, [(0, 'open;tc:100;cj:25', {'NONE'}), (8, 'vsrc:5', {'NONE'}), (16, 'vsrc:10', {'NONE'}),
                               (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'NONE'}), (32, 'open;isrc:0.005', {'AJACK'})],
                  [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10']}),
@@ -261,7 +284,8 @@ def run(name):
             acts = {tl.at(ta, predict=True) if mk.zero is not None else ta: c for ta, c in xtra.get('acts', {}).items()}
             while p.poll() is None:
                 row = {}
-                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:SENT?', 'STAT:QUES:COND?', 'READ?'] + xtra.get('queries', []):
+                logq = ['DBG:SENT:LOG?'] if 'never' in xtra else []
+                for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:SENT?', 'STAT:QUES:COND?', 'READ?'] + xtra.get('queries', []) + logq:
                     tm.write(q)
                     row[q] = tm.read(timeout=60).decode(errors='replace').strip()
                 row['t'] = int(row['DBG:PING?'].split(',')[0]) / 1000.0
@@ -315,6 +339,25 @@ def run(name):
             if name == 'dcv-step' and 7.0 < v < 1e6 and not r['DBG:SENT?'].startswith('OFF'):
                 ok = False
                 bad.append('%.2f %g V: sentinel %s on the 60 V range' % (r['t'], v, r['DBG:SENT?'].split(',')[0]))
+    if 'never' in xtra:
+        # alerts that must never come on from phase i0's input to phase i1's (every assertion,
+        # from the firmware's log: also the transients between two samples and in the first
+        # 2.5 s of a phase that the windows above skip)
+        ents = set()
+        for r in rows:
+            for e in r.get('DBG:SENT:LOG?', '').split(';')[1:]:
+                f = e.split(',')
+                if len(f) == 3:
+                    ents.add((f[0], f[1], int(f[2]) / 1000.0))
+        for al, i0, i1 in xtra['never']:
+            b0 = tl.start(i0)
+            b1 = tl.start(i1) if i1 < len(phases) else 1e9
+            if b0 is None or b1 is None:
+                continue
+            hit = sorted(e for e in ents if e[0] == al and b0 <= e[2] < b1)
+            if hit:
+                ok = False
+                bad.append('%s logged at %s' % (al, ' '.join('%s@%.2f' % (e[1], e[2]) for e in hit)))
     if 'aprot_ms' in xtra:
         # the trip latency the firmware recorded (DBG:SENT? field 11)
         ms = [int(r['DBG:SENT?'].split(',')[10]) for r in rows if r['SYST:ALER?'] == 'APROT' and len(r['DBG:SENT?'].split(',')) > 10]
