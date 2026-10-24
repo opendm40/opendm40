@@ -3631,3 +3631,30 @@ the R1K values are the source's open-circuit voltage.
 
 The firmware's table is `dmm::OHM_ISC` ([`src/dmm.rs`](../src/dmm.rs)); the diode current (0.75 mA)
 is still from owners' reports.
+
+### Cross-check with the MR9270S+ calibrator (2026-10-24)
+
+The calibrator's measurement input on V/Ω–COM, set over Modbus (input type
+register 40041 / pattern 40042, value i32 at 40049–40050; voltage 1 / 128 in
+mV, current 0 / 128 in µA, from the vendor manual for units after October
+2021). The source as above, 1 k Rref unless noted.
+
+| Tap, path | DM40's own V_jack | Calibrator V | DM40's own I | Calibrator mA input |
+|---|---|---|---|---|
+| AGNDP0, 1 k | +0.329 V | +0.092 V | 38 µA | 37 µA |
+| AGNDP7, 1 k (ON) | +0.782 V | +0.668 V | 276 µA | 277 µA |
+| AGNDP9, 1 k | +1.084 V | +1.051 V | 435 µA | 438 µA |
+| VDS15, 1 k (default) | +2.097 V | +2.115 V | 892 µA | 868 µA |
+| VDS17, 1 k | +2.351 V | +2.414 V | 1161 µA | 877 µA |
+| VDS1, 1 k | −0.513 V | −0.976 V | −381 µA | −387 µA |
+| VDS15, 10 k | | | 195 µA | 185 µA |
+| VDS15, 100 k | +1.810 V | +1.842 V | 20.1 µA | 20 µA |
+
+- The currents agree within 3 % up to 0.9 mA. On VDS17 the source stops at
+  about 0.88 mA (the OP3 limit); the DM40's own reading (1.16 mA) is wrong
+  there.
+- The DM40's own jack voltage in the DBG:SRC rows is off by up to +0.24 V
+  near 0 V and on negative taps: the calibrator's readings are the open-circuit
+  voltages. The jack follows the VREF tap: −0.98 V to +2.41 V.
+- The calibrator's voltage input loads about 0.7 MΩ (VDS15 through 10 M read
+  0.147 V), so the 1 M / 10 M paths were not compared.

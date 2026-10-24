@@ -570,7 +570,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
   Short-circuit currents measured on one unit with `DBG:SRC`, jacks
   shorted ([device check](../../firmware/docs/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
-  The open-circuit voltage on 600 Ω is about 2.17 V (0.78 V with ON).
+  The open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
 - While the meter looks for the range, the values are grey.
 
 
