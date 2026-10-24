@@ -2139,6 +2139,14 @@ impl Dmm {
         self.rd_pending
     }
 
+    /// `reading_pending` after a range step since the function entry (an
+    /// autorange step, a manual range), not the entry itself: FETCh? then
+    /// answers +9.91E37 at once also before the function's first reading
+    /// (main.rs).
+    pub fn range_moving(&self) -> bool {
+        self.rd_pending && self.row_t > self.entry
+    }
+
     /// `r` was measured on the row the chip runs now (mode, AC+DC: either
     /// phase, and range): FETCh? never answers a reading from another
     /// range or function (device 0774e70: FETC? gave the 10 A value for

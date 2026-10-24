@@ -76,6 +76,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public CurrentSource ISrcV;       // current source between V and COM (wrong jack)
         public double R = double.PositiveInfinity; // resistor between V and COM (0 = short)
         public double C = 0;              // capacitor between V and COM (F)
+        /// A current-limited path between V and COM (A, 0 = none; "isink:2.1e-7"): it holds the node at
+        /// 0 V while that takes at most ISink, else it takes ISink. Device a2e9766 (the calibrator's
+        /// disabled output, INFERRED: such a path, e.g. a leakage / bias current of its output stage):
+        /// RES 6 Mohm read 0.104 Mohm (its ~0.215 uA test current nearly all taken), 600 kohm OL
+        /// (a tenth of its ~2.17 uA taken).
+        public double ISink = 0;
         public double DiodeVf = double.NaN; // diode between V and COM, anode at V unless DiodeRev
         public bool DiodeRev;
         public bool Tc;                   // thermocouple (type K) between V and COM
@@ -99,6 +105,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             Tc = false; TcOpen = false; TcMvOverride = double.NaN;
             ISrc = null; VSrcA = null; RLoadA = double.PositiveInfinity;
             LeadVA = false;
+            ISink = 0;
             vcap = 0;
         }
 
@@ -138,7 +145,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             double gth, ith;
             LinearNorton(out gth, out ith);
             var g = gth + 1 / RinV;
-            dc = ith / g;
+            dc = Sink(ith / g, g);
             // forward diode clamps the node
             if(!double.IsNaN(DiodeVf))
             {
@@ -204,12 +211,23 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var lim = DiodeRev ? -DiodeVf : DiodeVf;
                 if((!DiodeRev && v > lim) || (DiodeRev && v < lim)) v = lim;
             }
+            v = Sink(v, g);
             if(C > 0 && double.IsInfinity(R) && VSrc == null && ISrcV == null && !Tc && double.IsNaN(DiodeVf))
             {
                 v = vcap; // charging capacitor
             }
             vx = v;
             vref = vs - v;
+        }
+
+        /// The node with the current-limited path to COM (ISink): v0 is the node without it, g the
+        /// conductance it sees. The path holds the node at 0 V while that takes at most ISink, else it
+        /// takes ISink (toward 0 V, whatever the sign).
+        private double Sink(double v0, double g)
+        {
+            if(!(ISink > 0) || g <= 0) return v0;
+            var i0 = Math.Abs(v0) * g;
+            return i0 <= ISink ? 0 : v0 - Math.Sign(v0) * ISink / g;
         }
 
         /// Node voltage with a current source i (A) driven into the V jack (diode test), limited to vmax.
@@ -369,6 +387,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "aload":
                     RLoadA = none ? double.PositiveInfinity : v;
                     break;
+                case "isink":
+                    ISink = none ? 0 : v;
+                    break;
                 case "r": case "ohm":
                     R = none ? double.PositiveInfinity : v;
                     break;
@@ -425,6 +446,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(VSrc != null) sb.AppendFormat(ci, "vsrc:{0:G6},ac={1:G6},f={2:G6},shape={3},duty={4:G4},rs={5:G6};", VSrc.Dc, VSrc.Ac, VSrc.Hz, VSrc.Shape, VSrc.Duty, VSrc.Rs);
             if(ISrcV != null) sb.AppendFormat(ci, "isrcv:{0:G6},ac={1:G6};", ISrcV.Dc, ISrcV.Ac);
             if(!double.IsInfinity(R)) sb.AppendFormat(ci, "r:{0:G6};", R);
+            if(ISink > 0) sb.AppendFormat(ci, "isink:{0:G6};", ISink);
             if(C > 0) sb.AppendFormat(ci, "c:{0:G6};", C);
             if(!double.IsNaN(DiodeVf)) sb.AppendFormat(ci, "diode:{0:G6}{1};", DiodeVf, DiodeRev ? ",rev=1" : "");
             if(Tc) sb.AppendFormat(ci, TcOpen ? "tcopen;" : "tc:{0:G6};", TcTemp);

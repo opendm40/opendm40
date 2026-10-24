@@ -272,6 +272,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     // settle deadline, then +9.9E37 and "Data stale". A reply is never sent
     // after its query was given up (abort / clear / a new command): a late
     // reply would shift every later one.
+    // A FETCh? before any reading starts its wait SCPI_QUICK_MS before
+    // its expiry (SCPI_WAIT_MS after the deadline it was asked at), so the
+    // ohm hunt extension below (waits longer than that) leaves it alone.
     // Per transport ([USB], [BT]); a BT line is taken only while [BT] is None.
     let mut scpi_wait: [Option<(u32, bool, u64, u64)>; 2] = [None, None];
     // Who made the DMM's last function change, for the READ? cap: func_key =
@@ -674,16 +677,22 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             scpi.len = 0;
                             scpi.put_bytes(b"+9.90000000E+37");
                             true
-                        } else if app.dmm.cpl_auto() {
+                        } else if app.dmm.cpl_auto() || app.dmm.range_moving() {
                             // AUTO coupling before its first decision (its
                             // values are provisional, switch-latency.md 6):
                             // +9.91E37 at once, not a wait that ends in the
                             // provisional part (device ab7184c: 1-3 s blocks).
+                            // The same after a range step since the entry with
+                            // no reading of the new range yet (READ?'s rule, as
+                            // the Some arm), not a wait that a range hunt keeps
+                            // moving (device a2e9766: RES AUTO stepping 6 M <->
+                            // 600 k, 8 of 8 FETCh? silent for the driver's 5 s).
                             scpi.len = 0;
                             scpi.put_bytes(scpi::NAN);
                             true
                         } else {
-                            scpi_wait[src] = Some((0, false, now, now.max(app.dmm.deadline()) + SCPI_WAIT_MS));
+                            let expire = now.max(app.dmm.deadline()) + SCPI_WAIT_MS;
+                            scpi_wait[src] = Some((0, false, expire - SCPI_QUICK_MS, expire));
                             false
                         }
                     }
@@ -1581,6 +1590,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             // Ohm: a host's settle wait (CONF:RES then READ?, MEAS:RES?)
             // follows the range hunt (each step moves the deadline) and the
             // vet of its last range (dmm.rs OHM_VET_*: one conversion more).
+            // Not a FETCh? (its expiry stays SCPI_WAIT_MS after its deadline).
             if let Some(w) = scpi_wait[src].as_mut().filter(|w| w.3 > w.2 + SCPI_QUICK_MS && app.dmm.hy_mode() == 10 && !app.dmm.pw.on) {
                 w.3 = w.3.max(app.dmm.deadline() + SCPI_WAIT_MS).min(w.2 + 8_000);
             }
