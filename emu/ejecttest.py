@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Eject of the fw-rs USB volume through the real Linux usb-storage path:
+"""Eject of the opendm40 USB volume through the real Linux usb-storage path:
 the emulator's USB/IP device attached to the kernel (vhci_hcd, `sudo usbip
 attach`), mounted and ejected with udisks / gio as a desktop does.
 (src/msc.rs: after START STOP UNIT LoEj=1 Start=0 the medium stays absent,
@@ -26,7 +26,7 @@ under vhci_hcd; the real meter's is never opened), the block device is the
 one under vhci_hcd only. `usbip attach` only connects to TCP 3240: a proxy
 here listens there and forwards to the emulator on --port. The emulator gets
 a chip UID of its own (run.py --uid, emu_uid: the unit's UID with bytes 4 / 9
-= the port), so fw-rs's USB serial (the UID as hex, firmware/src/uid.rs)
+= the port), so opendm40's USB serial (the UID as hex, firmware/src/uid.rs)
 differs from the real meter's: udisks takes two disks with the same vendor /
 model / serial for one multipath drive, and with a real DM40 plugged in a
 drive-level Eject / PowerOff could then act on the real meter. (Until
@@ -49,7 +49,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF')
+ap.add_argument('--app', required=True, help='opendm40 native ELF')
 ap.add_argument('--image', default=os.path.join(ROOT, 'firmware/opendm40.bin'),
                 help='update file copied in the install step (default firmware/opendm40.bin)')
 ap.add_argument('--port', type=int, default=None,
@@ -65,7 +65,7 @@ if A.port is None:
     A.port = run.free_port()
 print('emulator USB/IP port %d' % A.port, flush=True)
 
-# The emulator's serial (fw-rs: the chip UID as 24 hex digits, memory order)
+# The emulator's serial (opendm40: the chip UID as 24 hex digits, memory order)
 # and the real unit's, which the emulator's udisks drive must never carry.
 EMU_SERIAL = run.emu_uid(A.port).hex().upper()
 UNIT_SERIAL = run.read(run.UID).hex().upper() if os.path.exists(run.UID) else None

@@ -52,13 +52,13 @@ only a search snippet or a secondary copy.
 * **The near-universal second path is "tap the scale readout".** It opens a
   list, a spinner, +/- buttons or a keypad. Micsig, Siglent, Tektronix,
   Keysight, Scoppy and Aeroscope all have it. DM40 stock has nothing tappable
-  in the top bar. fw-rs already made the run badge (RUN/STOP) and the trigger
+  in the top bar. opendm40 already made the run badge (RUN/STOP) and the trigger
   badge (Trigger tab) tappable. The timebase badge and the V/div badge are
   still free.
 * **Pinch is standard on bench scopes** (Siglent, Rigol, R&S, Tek, LeCroy,
   GW Instek) and in apps. On a handheld it has a problem: one hand holds the
   probe and the other holds the meter, so most operation is by one thumb.
-  fw-rs already has pinch. Keep it as the secondary path.
+  opendm40 already has pinch. Keep it as the secondary path.
 * **Recommendation** (§4): Design A as the default. It keeps the stock halves,
   which owners have learned, and adds three things:
   * value-preview tabs in the bottom corners, shown while a finger is down and
@@ -230,7 +230,7 @@ entry's label; the record bar already shows "ROLL" once roll is active.
 Shared element: the **badge flash**. On every timebase step (tap, picker,
 pinch end) the timebase badge (79,1,62,17) is drawn inverted for 150 ms: rbox
 r5 white, "H" and the text in 0xb833. One badge repaint, no graph redraw.
-(fw-rs already beeps 30 ms on the tap step; stock does not beep.)
+(opendm40 already beeps 30 ms on the tap step; stock does not beep.)
 
 Shared element: the **timebase spinner popup** (tap the timebase badge).
 * **Hit zone:** (79,0,62,20) only. Do not extend it into the graph: the T
@@ -349,10 +349,10 @@ Cons:
 | press | marker zone (32x32) | select (stock) |
 | tap | off a marker, in INNER | A: halves step + tabs/flash. B: corner zones step; elsewhere nothing |
 | hold | B corner zone | auto-repeat steps |
-| long-press | marker | recentre that item (fw-rs) |
+| long-press | marker | recentre that item (opendm40) |
 | drag | anywhere in INNER | stock per-event drag of the selected item |
-| pinch | graph | timebase / V/div with bubble (fw-rs), badge flash on release |
-| tap | run badge / trigger badge | RUN/STOP / Trigger tab (fw-rs) |
+| pinch | graph | timebase / V/div with bubble (opendm40), badge flash on release |
+| tap | run badge / trigger badge | RUN/STOP / Trigger tab (opendm40) |
 | tap | **timebase badge** | **timebase spinner popup** (new) |
 | tap | **V/div badge** | **CH1 popup** (new, = B2) |
 | tap | B1/B3, B4/B6, B2/B5, B7 | stock |

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""fw-rs burden voltage readout (firmware/docs/power-meter-and-misconnect.md
-3.15) in the emulator: fw-rs native + the HY3131 model, a current source in
+"""opendm40 burden voltage readout (firmware/docs/power-meter-and-misconnect.md
+3.15) in the emulator: opendm40 native + the HY3131 model, a current source in
 the A jack through the DC / AC current functions, SCPI over USB/IP. Each
 phase checks FETC:BURD? against READ? x the R_path of the shunt in use
 (default the bare shunt: 10 mohm / 0.5 ohm / 47.5 ohm; POW:BURD sets it),
@@ -9,7 +9,7 @@ coupling on 200 mA DC + 100 mA AC: FETC:BURD? = the total RMS x R_path
 (POW:BURD?) in both, although AUTO shows the DC part. Screenshots of the
 DMM page with the readout at the end of the DC / AC phases.
 
-  emu/hy3131/burdentest.py                       # fw-rs built from HEAD
+  emu/hy3131/burdentest.py                       # opendm40 built from HEAD
   emu/hy3131/burdentest.py --app firmware/opendm40.bin --port 3378
 
 Results: emu/out/burden.json, emu/out/burden-<phase>.png. One emulator at a
@@ -27,7 +27,7 @@ EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', help='fw-rs native image (default: run.py builds HEAD)')
+ap.add_argument('--app', help='opendm40 native image (default: run.py builds HEAD)')
 ap.add_argument('--port', type=int, default=3378, help='USB/IP port (default 3378)')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)

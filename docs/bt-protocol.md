@@ -2,10 +2,10 @@
 
 Bluetooth protocol of the Alientek DM40 multimeter as used by the stock
 firmware and its phone app. The meter communicates via Bluetooth RFCOMM. The replacement firmware
-[fw-rs](../firmware/README.md) keeps the DM40 commands below and adds SCPI
+[opendm40](../firmware/README.md) keeps the DM40 commands below and adds SCPI
 ([firmware/docs/bt-scpi.md](../firmware/docs/bt-scpi.md)).
 
-Host tools for a meter running fw-rs: `firmware/tools/dm40scpi.py --bt` (SCPI
+Host tools for a meter running opendm40: `firmware/tools/dm40scpi.py --bt` (SCPI
 over Bluetooth, and `btpoll` for these stock frames) and
 [`firmware/tools/dm40bt_scpi.py`](../firmware/tools/dm40bt_scpi.py). They need a Python with Bluetooth sockets
 (`/usr/bin/python3` on Linux; linuxbrew's has none).
@@ -95,7 +95,7 @@ The exact meaning of groups 3-5 (continuity, diode, capacitance, frequency)
 and of the range values was not verified on a device.
 
 The protocol has no unit field (the unit follows from the group and the
-format byte's prefix) and no group for a power function. fw-rs's power meter
+format byte's prefix) and no group for a power function. opendm40's power meter
 therefore reports the DC V byte (`0x28` auto, range field = the V channel's
 range) with P (W) as the main value in the V group's units: the app shows
 "230.02 V" for 230.02 W, mW as mV, a source negative; value 2 / 3 are

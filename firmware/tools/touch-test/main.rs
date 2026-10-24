@@ -821,7 +821,7 @@ fn hit_tests(ck: &mut Ck) {
 
 // ------------------------------------------------- 5. timebase tap step
 
-/// fw-rs timebase tap step on the replica scope page (docs/scope-scale-ux.md
+/// opendm40 timebase tap step on the replica scope page (docs/scope-scale-ux.md
 /// sec. 3; scope_ui `graph_press`, `top_badge`, `Arm`, `tb_hit`,
 /// `tb_scroll`, the functions scope_page.rs runs): corner / halves hits
 /// against the drawn tabs, marker priority, badge taps, the hold repeat,

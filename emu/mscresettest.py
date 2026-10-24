@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs USB mass storage (src/msc.rs over usbd-storage's Bulk-Only
+"""opendm40 USB mass storage (src/msc.rs over usbd-storage's Bulk-Only
 transport) when the host recovers from a stuck or broken command, as Linux
 usb-storage does after its 30 s command timeout: Bulk-Only Mass Storage
 Reset (class request 0xFF) + CLEAR_FEATURE(HALT) of both bulk endpoints,
@@ -49,7 +49,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF / image')
+ap.add_argument('--app', required=True, help='opendm40 native ELF / image')
 ap.add_argument('--port', type=int, default=None,
                 help='USB/IP port of the emulator this test starts (default: a free one in 61000-64999, run.free_port)')
 ap.add_argument('--cases', default='serial,alloc-small,zero-alloc,invalid-cbw,read-bot,read-port,ua-port,stop-start,eject-load,'

@@ -143,7 +143,7 @@ pub fn scenes() -> Vec<Scene> {
     m.trig_px = 5;
     add("st10-offscreen-markers", m, Some(Trace::sine(1.5, 2.0, 0.0).shifted(200)), None, 399, cells.clone());
     // Math on, FFT (tools/stock-ui st11-fft: noise at row 230, orange, the
-    // 20dB label, offset 0, "1.25kHz"); the stock look only (no fw-rs FFT
+    // 20dB label, offset 0, "1.25kHz"); the stock look only (no opendm40 FFT
     // additions).
     let mut m = d;
     m.math_on = true;

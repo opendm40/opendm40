@@ -15,7 +15,7 @@
 //!   time_s,value,unit,flags
 //!   0.250,1.23456,V,
 //!   0.750,,V,OL
-//! There is no RTC in fw-rs (the dates in calbackup / screenshot are a
+//! There is no RTC in opendm40 (the dates in calbackup / screenshot are a
 //! constant for the same reason), so "started" is the uptime and time_s counts
 //! from `start`. `value` is the caller's (SI) value with 6 significant digits,
 //! plain decimal for 1e-3 <= |v| < 1e6, else d.dddddE+xx; empty for overload

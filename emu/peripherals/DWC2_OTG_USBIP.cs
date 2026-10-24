@@ -183,7 +183,7 @@ public partial class DWC2_OTG
                     // (a usbip server exports a device its own host already
                     // addressed): address it here, as that host would. The
                     // stock's GD32 library STALLs SET_CONFIGURATION in the
-                    // Default state (usb-device in fw-rs accepts it).
+                    // Default state (usb-device in opendm40 accepts it).
                     if(ControlSync(new byte[] { 0x00, 5, 1, 0, 0, 0, 0, 0 }, null, 3000) == null)
                     {
                         dev.WarningLog("USB/IP: SET_ADDRESS after the bus reset failed");

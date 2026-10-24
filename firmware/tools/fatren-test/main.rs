@@ -73,7 +73,7 @@ fn save(path: &str, d: &[u8]) {
 
 #[allow(dead_code)]
 mod msc {
-    /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 10 methods,
+    /// Same trait as opendm40 src/msc.rs (kept in sync by hand; 10 methods,
     /// write_step with its default = the whole write at once).
     pub trait BlockDevice {
         fn present(&self) -> bool;
@@ -137,7 +137,7 @@ mod msc {
     }
 }
 
-/// The AD2 stream ISR owns the bus (fw-rs hy3131::streaming, the HANDED
+/// The AD2 stream ISR owns the bus (opendm40 hy3131::streaming, the HANDED
 /// flag): vdisk.rs `read_busy` refuses the slow-bank sectors then.
 mod hy3131 {
     pub static STREAMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -146,7 +146,7 @@ mod hy3131 {
     }
 }
 
-/// Stubs of the fw-rs modules calbackup.rs refers to.
+/// Stubs of the opendm40 modules calbackup.rs refers to.
 mod wdt {
     pub fn kick_if_feeding() {}
 }
@@ -187,7 +187,7 @@ mod spiflash {
     }
 }
 
-/// Stub of the fw-rs LCD: a synthetic 480x320 RGB565 screen (the same
+/// Stub of the opendm40 LCD: a synthetic 480x320 RGB565 screen (the same
 /// pattern run.sh checks the BMP against).
 #[allow(dead_code)]
 mod lcd {

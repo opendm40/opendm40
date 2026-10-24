@@ -1,4 +1,4 @@
-# Host-side mimic of fw-rs stockfont.rs label/glyphs/rbox for render checks.
+# Host-side mimic of opendm40 stockfont.rs label/glyphs/rbox for render checks.
 import re
 from PIL import Image
 import os; SRC=os.path.join(os.path.dirname(os.path.abspath(__file__)),'../../../src/stockfont_data.rs')

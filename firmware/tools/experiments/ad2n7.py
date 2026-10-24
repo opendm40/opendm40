@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Datasheet 13.1 note 7 in the stock DC V / DC mV rows (fw-rs DBG:AD2:N7?,
+"""Datasheet 13.1 note 7 in the stock DC V / DC mV rows (opendm40 DBG:AD2:N7?,
 src/ad2exp.rs `n7_test`): does AD2 (and AD3 + RMS) left on for the whole
 row, enabled once with it and never toggled, shift AD1's DC reading against
 the stock row (AD2 / AD3 off)? The question behind it: a DC V "AC?" hint

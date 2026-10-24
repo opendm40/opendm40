@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs DMM wave view (scope page, source DMM: the HY3131 AD2 stream,
+"""opendm40 DMM wave view (scope page, source DMM: the HY3131 AD2 stream,
 src/app_wave.rs, TODO (A)) in the emulator, driven like a user (DBG:KEY /
 DBG:TAP) and checked over SCPI on one USB/IP connection.
 
@@ -57,7 +57,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF built with --features ad2-isr')
+ap.add_argument('--app', required=True, help='opendm40 native ELF built with --features ad2-isr')
 ap.add_argument('--port', type=int, default=3591, help='USB/IP port (default 3591)')
 ap.add_argument('--dmm', default='vsrc:0,ac=1.0,f=50', help='DMM jack input (emu/run.py --dmm)')
 ap.add_argument('--shots', help='directory for PNG screenshots')
@@ -407,7 +407,7 @@ try:
         print('  %s/div: FREQ %.3f Hz, VRMS %.4f V, VPP %.4f V; DBG:ISR? %s' % (name, fr, rms, vpp, i1))
         check(abs(f('TIM:SCAL?') - tb) < tb * 0.01, 'TIM:SCAL? %s' % name)
         # The datasheet's rate at every rung (the model's default
-        # Ad2Osr32Ppm 0, fw-rs hy3131.rs AD2_OSR32_REAL_MHZ, device e7ec2cc).
+        # Ad2Osr32Ppm 0, opendm40 hy3131.rs AD2_OSR32_REAL_MHZ, device e7ec2cc).
         real = rate
         check(i1[1] == 1 and i1[14] == 1 and abs(i1[12] / 1000 - real) < 5 and i1[19] == (1008 if rate > 38400 else 16) and i1[22] == 1,
               '%s/div: the stream at %d S/s, locked, div %d (DMA %d)' % (name, rate, i1[19], i1[22]))
@@ -633,7 +633,7 @@ try:
         c_check('a host reading %s/%s.CSV' % (dirname, stem))
     # INFO/ off the USB volume while the view streams: the bytes from the
     # slow flash bank (>= 0x08080000; device b6909d6: 21.8 us ISR stall per
-    # load) come from the mirror on the SPI disk (fw-rs vdisk.rs
+    # load) come from the mirror on the SPI disk (opendm40 vdisk.rs
     # mirror_boot), every file reads whole; without a mirror they answer NOT
     # READY 02/04/01 (read_busy). The data watch (emu/regionc.py) sees no
     # slow-bank load either way.

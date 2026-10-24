@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""fw-rs AUTO coupling of V / A (firmware/src/dmm.rs AUTO_*, docs/acdc-stock-vs-fwrs.md
-section 11) in the emulator: fw-rs native + the HY3131 model, a timed
+"""opendm40 AUTO coupling of V / A (firmware/src/dmm.rs AUTO_*, docs/acdc-stock-vs-opendm40.md
+section 11) in the emulator: opendm40 native + the HY3131 model, a timed
 connection script per scenario (DC -> AC -> mixed signals, both ways through
 the hysteresis band), SCPI over USB/IP (setup, then DBG:PING? uptime,
 VOLT:COUP? / CURR:COUP?, FETCh?, FUNCtion? in a loop); the last samples of
 every phase must match its expectation.
 
-  emu/hy3131/couptest.py                          # all scenarios, fw-rs built from HEAD
+  emu/hy3131/couptest.py                          # all scenarios, opendm40 built from HEAD
   emu/hy3131/couptest.py --app firmware/opendm40.bin --port 3391 v
   emu/hy3131/couptest.py --list
   emu/hy3131/couptest.py --meth C v i        # on AC+DC method B / C (acdcm.rs)
@@ -29,10 +29,10 @@ ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('names', nargs='*')
-ap.add_argument('--app', help='fw-rs native image (default: run.py builds HEAD)')
+ap.add_argument('--app', help='opendm40 native image (default: run.py builds HEAD)')
 ap.add_argument('--port', type=int, default=3391, help='USB/IP port (default 3391)')
 ap.add_argument('--list', action='store_true')
-ap.add_argument('--meth', choices='ABC', help='AC+DC method first (DBG:ACDC:METH, fw-rs acdcm.rs; default: the firmware\'s, A)')
+ap.add_argument('--meth', choices='ABC', help='AC+DC method first (DBG:ACDC:METH, opendm40 acdcm.rs; default: the firmware\'s, A)')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
@@ -60,7 +60,7 @@ def shows(coup, value, rel=0.01, ab=0.002):
 def tie(want, rel):
     """A tie (AC = DC): either part, or +9.91E37 (num: NaN) while AUTO has not decided yet
     (a tie can take ~10 s; FETCh? answers +9.91E37 until the first decision,
-    fw-rs docs/switch-latency.md 6.2)."""
+    opendm40 docs/switch-latency.md 6.2)."""
     return lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and (near(d['V'], want, rel) or math.isnan(d['V']))
 
 

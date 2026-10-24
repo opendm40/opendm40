@@ -21,7 +21,7 @@
 // Frame: cmd = (reg << 1) | rd, MSB first; a read has one extra SCK pulse after
 // the command, then MISO is sampled with SCK low before each pulse; registers
 // auto-increment. With CS high, DO carries the IRQ (INTF & INTE).
-// Hardware SPI (fw-rs hy3131.rs: SPI2 is the bus): HY3131SpiPort, registered
+// Hardware SPI (opendm40 hy3131.rs: SPI2 is the bus): HY3131SpiPort, registered
 // on the GD32 SPI2 controller (emu/peripherals/GD32_SPI.cs "spi3" @
 // 0x40003C00), hands each byte to HY3131.SpiByteTimed when it has completed
 // on the bus (2026-10-22: the controller times its bytes, /8 = 1.28 us): the
@@ -29,7 +29,7 @@
 // conversions, INTF and its race at those times), with the master's sampling
 // per CKPH (mode 0 at /8: the marginal DO path, MisoErrRate; CKPH 1: a full
 // period late) and TornAd2 for a data frame across an AD2 edge. SpiByte (no
-// time) is the untimed path. CS stays the GPIO; the read-period pulse fw-rs
+// time) is the untimed path. CS stays the GPIO; the read-period pulse opendm40
 // makes on the PC10 GPIO between SPI bytes lands in the same engine (so would
 // the extra clocks of a shifted framing); before such a pin event the
 // controller delivers the bytes that completed before it (SpiCatchUp).
@@ -293,13 +293,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// AD1 conversion period in seconds (datasheet 13.1 + the chopper halving).
         public double Ad1Period => Osr1 * 30.0 / SysClk * (Ad1Chop ? 2 : 1);
-        // ENCHOPAD2 does not slow AD2 down on the device (fw-rs device check of 9dd1222), whatever the datasheet says
+        // ENCHOPAD2 does not slow AD2 down on the device (opendm40 device check of 9dd1222), whatever the datasheet says
         public double Ad2Period => Osr2 * ((regs[0x26] & 0x08) != 0 ? 4.0 : 2.0) / SysClk
             / ((regs[0x26] & 0x0F) == 0 ? 1.0 + Ad2Osr32Ppm * 1e-6 : 1.0);
         /// The /2, OSR 32 setting's rate offset from FAD2CLK / OSR2, ppm (the
-        /// stock AC rows' 0x80 and fw-rs' 76.8 kS/s rung). 0 = the datasheet,
-        /// as the device converts (fw-rs device check of e7ec2cc; the 76 574.6
-        /// S/s of the 7409b92 / 4c4b489 streams came from fw-rs' old Pll);
+        /// stock AC rows' 0x80 and opendm40' 76.8 kS/s rung). 0 = the datasheet,
+        /// as the device converts (opendm40 device check of e7ec2cc; the 76 574.6
+        /// S/s of the 7409b92 / 4c4b489 streams came from opendm40' old Pll);
         /// -2935 = the rate e7ec2cc assumed (monitor: hy3131 Ad2Osr32Ppm).
         public double Ad2Osr32Ppm { get; set; } = 0;
         public double LpfPeriod => Ad2Period * Osr4 * LpfRateDivisor;
@@ -319,7 +319,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public bool PowMix = true;             // power role: an R34 statistic switch mid-block mixes that block
         public double PowVGain = 1.0;          // power role: extra Y gain deviation ("powvg:", for the V self-cal)
         public bool PowZeros = false;          // power role: the device's LPF zeros ("powz:1", doc 3.11 T1)
-        /// OP1 input offset, V (fw-rs DC-coupled V row, feasibility E7: AD2 = OP1O in an AC V row). Device
+        /// OP1 input offset, V (opendm40 DC-coupled V row, feasibility E7: AD2 = OP1O in an AC V row). Device
         /// hint: the AC V sentinel row's 37 mV RMS floor at 6 V (OP1 x10, /100 tap) = a 2 kHz square of
         /// +-0.37 mV x 10 at OP1O (sentinel.rs). "op1vos:V".
         public double Op1Vos = 0.37e-3;
@@ -462,7 +462,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// the right range before the right value). Off (0) by default.
         public double OhmTauMs;
         private double ohmLagV, ohmLagT, ohmLagTarget;
-        /// AC A rows, AD1 on SENSE - PB5 (the fw-rs f0d21eb V-JACK? sentinel): PB5 is not
+        /// AC A rows, AD1 on SENSE - PB5 (the opendm40 f0d21eb V-JACK? sentinel): PB5 is not
         /// defined by the A rows (only the DC V 60 V+ rows' power bus / OP3 drive it), and the
         /// device's AD1 peak there ran from ~-117 000 at 0.7 s to the negative rail by ~2 s
         /// whatever was on V-COM (device-check f0d21eb 2a). Replay: PB5 rises by
@@ -586,7 +586,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             return ticks > 0 ? ctB * SysClk / ticks : 0;
         }
 
-        /// What the chip's results mean at the jacks, with the nominal (uncalibrated) stock / fw-rs
+        /// What the chip's results mean at the jacks, with the nominal (uncalibrated) stock / opendm40
         /// scale factors of the current row: tokens rd_<quantity>=<value> (V, A, W, ohm) for the GTK
         /// signal-flow diagram (power: the selected statistic of the RMS block, the LPF mean).
         private string Readout()
@@ -1193,13 +1193,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(role == Role.Power) return (int)Math.Round(PowerSample(t));
             if(Ad2OnPb2Probe)
             {
-                // fw-rs A-jack protection probe (DC V / mV / ohm / temperature): OP2 (x1) on
+                // opendm40 A-jack protection probe (DC V / mV / ohm / temperature): OP2 (x1) on
                 // PB2, AD2 = OP2O - PB3 = the 10 mohm element's drop, instantaneous
                 return (int)Math.Round(Pb2Volts(t) * Ad2Scale());
             }
             if(Ad2OnPb1Sentinel)
             {
-                // fw-rs sentinel (continuity / diode / capacitance r0..4): OP2 (x1) on PB1, AD2 =
+                // opendm40 sentinel (continuity / diode / capacitance r0..4): OP2 (x1) on PB1, AD2 =
                 // OP2O - PB3 = the A-jack shunt drop, instantaneous
                 return (int)Math.Round(Pb1Volts(t) * Ad2Scale());
             }
@@ -1229,19 +1229,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(ac > 0 && NoiseScale > 0) acCode += Gauss() * 1.0 * NoiseScale;
         }
 
-        /// The fw-rs AD2 sentinel configuration: ENOP2 with SOP2P = PB1, SAD2IP = OP2O,
+        /// The opendm40 AD2 sentinel configuration: ENOP2 with SOP2P = PB1, SAD2IP = OP2O,
         /// SAD2IN = PB3, in a role whose own measurement leaves AD2 / OP2 unused.
         private bool Ad2OnPb1Sentinel =>
             (role == Role.Cont || role == Role.Diode || role == Role.CapOsc)
             && (regs[0x32] & 0xF0) == 0xD0 && (regs[0x27] >> 6) == 1 && ((regs[0x27] >> 4) & 3) == 2;
 
-        /// The fw-rs A-jack protection probe (sentinel.rs `probe_row`): ENOP2 with SOP2P = PB2,
+        /// The opendm40 A-jack protection probe (sentinel.rs `probe_row`): ENOP2 with SOP2P = PB2,
         /// SAD2IP = OP2O, SAD2IN = PB3, over a comparator role (OP2 / AD2 unused there).
         private bool Ad2OnPb2Probe =>
             (role == Role.DcV || role == Role.DcMv || role == Role.Ohm || role == Role.Temp)
             && (regs[0x32] & 0xF0) == 0xE0 && (regs[0x27] >> 6) == 1 && ((regs[0x27] >> 4) & 3) == 2;
 
-        /// The fw-rs DC-coupled V row (ad2exp.rs dcv_row): an AC V row with OP1 on and SAD2IP = OP1O.
+        /// The opendm40 DC-coupled V row (ad2exp.rs dcv_row): an AC V row with OP1 on and SAD2IP = OP1O.
         private bool Ad2OnOp1Dc => role == Role.AcV && EnOp1 && (regs[0x27] >> 6) == 0;
 
         /// OP1 chopper polarity at t: OP1CHOP 1 / 2 = 1 / 2 kHz, running only while AD1 converts
@@ -1271,7 +1271,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 sigHz = hz; sigShape = shape; sigDuty = duty;
                 if(Ad2OnOp1Dc)
                 {
-                    // fw-rs DC-coupled V row: OP1O = g x (SENSE + Vos), SENSE = the jack through the row's
+                    // opendm40 DC-coupled V row: OP1O = g x (SENSE + Vos), SENSE = the jack through the row's
                     // tap (r0: /100 with OP1 x10, OPS1; r1..r3 /100 .. /10000), DC-coupled; OP1+ on AGND
                     // (SOP1P 011) = the offset alone; OP1's chopper flips Vos while AD1 converts
                     var g = (regs[0x25] & 1) != 0 ? 10.0 : 1.0;
@@ -1372,7 +1372,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var fp = regs[0x24] >> 4; var fn_ = regs[0x24] & 7;
             if((role == Role.AcV || role == Role.AcMv || role == Role.Freq) && fp == 9 && fn_ == 5)
             {
-                // fw-rs sentinel: AD1 on PB1 - PB3 (the A-jack shunt drop, PB3 = its return),
+                // opendm40 sentinel: AD1 on PB1 - PB3 (the A-jack shunt drop, PB3 = its return),
                 // reference PB6 - AGND: code = IG * V / (RG * VR) * 2^23, instantaneous (OSR 256)
                 code = ig * Pb1Volts(t) / (rg * Vref) * fs;
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
@@ -1380,10 +1380,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             if(role == Role.AcV && fp == 0 && fn_ == 7)
             {
-                // fw-rs DC? hint (AC V): AD1 on SENSE - PB5, SENSE = the V jack through the AC V
+                // opendm40 DC? hint (AC V): AD1 on SENSE - PB5, SENSE = the V jack through the AC V
                 // range's divider tap (r0 / r1: DC V r1's /100, r2 /1000, r3 /10000; INFERRED from
                 // the R2C / R2D taps), instantaneous
-                // (the DC V calibration of that tap folded in, as the DC V rows: the fw-rs DC-coupled
+                // (the DC V calibration of that tap folded in, as the DC V rows: the opendm40 DC-coupled
                 // V row's self-cal reads AD1 here and scales it with that calibration)
                 // instantaneous at the sentinel's OSR 256; a long conversion (OSR >= 2048, the self-cal's
                 // 4096) integrates: the DC part (no AC ripple sampled at 4 points)
@@ -1398,7 +1398,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             if(role == Role.AcV && fp == 3 && fn_ == 1)
             {
-                // fw-rs AC+DC method B, 6 V candidate (ii) (dmm.rs acdc_row): AD1 = OP1O - RLU in the
+                // opendm40 AC+DC method B, 6 V candidate (ii) (dmm.rs acdc_row): AD1 = OP1O - RLU in the
                 // AC V row, OP1O = (the /100 tap + Vos) x OP1's gain (x10 at r0), chopper held; the
                 // DC V 6 V calibration folded in (the same /10 overall ratio as DC V 6 V's PA7 tap)
                 double vdc, vac, vhz, vduty; string vsh;
@@ -1412,7 +1412,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             if(role == Role.AcA && fp == 3 && fn_ == 5)
             {
-                // fw-rs AC+DC method B (dmm.rs acdc_row): AD1 = OP1O - PB3 in the AC A row, as the DC A
+                // opendm40 AC+DC method B (dmm.rs acdc_row): AD1 = OP1O - PB3 in the AC A row, as the DC A
                 // row of the same shunt / OP1 gain (its calibration folded in), note 7 "n7a:" codes
                 var m = roleMode >= 5 ? (Fe.ShuntSel == 2 ? 6 : 5) : 4; var r = roleRange; var i = (m - 4) * 2 + r;
                 double adc, aac, ahz, aduty; string ash;
@@ -1426,7 +1426,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             if(role == Role.AcA && fp == 0 && (fn_ == 7 || fn_ == 3))
             {
-                // fw-rs sentinel (AC A V-JACK?): AD1 on SENSE - PB5 (f0d21eb) or SENSE - AGND,
+                // opendm40 sentinel (AC A V-JACK?): AD1 on SENSE - PB5 (f0d21eb) or SENSE - AGND,
                 // SENSE = the V jack through the /1000 tap with SS5 closed (open otherwise),
                 // instantaneous; PB5 drifts with pb5drift (above)
                 var vin = SenseTapVolts(t);
@@ -1462,7 +1462,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             case Role.Power:
             {
-                // fw-rs DC coupling (powermeter.rs dc_row): AD1 = OP1O - PB3 on the shunt, as the
+                // opendm40 DC coupling (powermeter.rs dc_row): AD1 = OP1O - PB3 on the shunt, as the
                 // stock DC A row (its calibration folded in); "powz:1" adds an AD1 zero of 300 codes
                 var iu = PowIu; var ir = PowIr; var i = iu * 2 + ir;
                 if((regs[0x24] >> 4) != 3) { code = 0; break; }
@@ -1769,12 +1769,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(Fe.PaExits != paExitsSeen)
             {
                 paExitsSeen = Fe.PaExits;
-                // (fw-rs quiesces the chip before the relay pulse: its writes pass through
+                // (opendm40 quiesces the chip before the relay pulse: its writes pass through
                 // no-role states, the last real role counts)
                 if(role == Role.Ohm || (role == Role.None && lastRole == Role.Ohm)) ohmExitT = now;
             }
             if(!EnCmp) { acpo = false; cmpHigh = cmpLow = false; return; }
-            // Sentinel nodes (fw-rs sentinel.rs): PB1 = the A-jack shunt node in every role that
+            // Sentinel nodes (opendm40 sentinel.rs): PB1 = the A-jack shunt node in every role that
             // leaves the comparator idle, SENSE with the /1000 tap (SS5) in the DC A rows.
             // CMPHO / CMPLO follow the instantaneous node against VRH / VRL.
             double node;
@@ -1866,7 +1866,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case Role.DcV: case Role.DcMv: case Role.Ohm: case Role.Temp: case Role.None:
                 if(role == Role.DcV && roleRange == 0 && scmpi == 0)
                 {
-                    // fw-rs AC? hint (DC V 6 V): the comparator on SENSE, the V jack / 10
+                    // opendm40 AC? hint (DC V 6 V): the comparator on SENSE, the V jack / 10
                     v = VTapVolts(t, AcvK[0]);
                     return true;
                 }
@@ -1936,7 +1936,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
         }
 
-        // ------------------------------------------------------------ power role (fw-rs power meter)
+        // ------------------------------------------------------------ power role (opendm40 power meter)
         // firmware/docs/power-meter-and-misconnect.md 3.1 "assignment B": X = AD2 = OP1O - PB3 (the A-jack
         // shunt through OP1, as the stock AC A rows), Y = AD3 = OP2O - AGND (OP2 x1 on SENSE = the V
         // divider tap of the row's switch bytes). Both DC coupled. The RMS block: SDO23 -> sum(Yac^2),
@@ -1944,7 +1944,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public const int PowerMode = 16;
         public const double Ad2Clk = 2457600.0;   // SPHACAL step: one AD2CLK period
 
-        /// The 16 distinct fw-rs power rows (iu 1 and 2 share the row; PE decides), the Python
+        /// The 16 distinct opendm40 power rows (iu 1 and 2 share the row; PE decides), the Python
         /// builder of the design: I row (AC A f4 / f5_6) + the V range's switch bytes R2A..R30.
         public static byte[] PowerRow(int vr, int iu, int ir) => PowerRow(Rows, vr, iu, ir);
 
@@ -1991,14 +1991,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var xs = Fe.ShuntR * ((regs[0x25] & 1) != 0 ? 10 : 1) * Ad2Scale();
             xac = xac / CalGain(0xc4 + 4 * ci) * xs;
             // one path (shunt, OP1, AD2) for both parts: the DC part carries the LPF gain when the
-            // record has one, else (1.0, never calibrated) the RMS gain as the AC part (fw-rs pw_take)
+            // record has one, else (1.0, never calibrated) the RMS gain as the AC part (opendm40 pw_take)
             var gl = CalGain(0xf4 + 4 * ci);
             xdc = xdc / (gl == 1f ? CalGain(0xc4 + 4 * ci) : gl) * xs;
             Fe.VJack(0, out ydc, out yac, out hz, out shape, out duty);
             vHz = hz; vShape = shape; vDuty = duty;
             var ys = EnAd3 ? ((regs[0x25] & 2) != 0 ? 10 : 1) / AcvK[PowVr] * Ad3Ig / (Ad3Rg * Vref) * 262144.0 : 0;
             // The divider tap's true ratio (doc 3.11 T1): what the factory calibration says of the
-            // same taps (fw-rs pw::v_gain_factory), times the "powvg:" deviation.
+            // same taps (opendm40 pw::v_gain_factory), times the "powvg:" deviation.
             ys *= PowVGain / PowerTapGain();
             ydc *= ys; yac *= ys;
             if(PowZeros)
@@ -2010,7 +2010,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
         }
 
-        /// fw-rs pw::v_gain_factory: 60 / 600 / 1000 V = the AC V r1..r3 gains, 6 V = DC V r0 x
+        /// opendm40 pw::v_gain_factory: 60 / 600 / 1000 V = the AC V r1..r3 gains, 6 V = DC V r0 x
         /// (AC V r1 / DC V r1); 1 without the calibration deviations.
         private double PowerTapGain()
         {
@@ -2122,7 +2122,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private void DeriveRole(double now)
         {
             var best = -1; var bestScore = int.MaxValue;
-            // fw-rs data logger, AD2 source (hy3131::set_ad2_stream): an AC row with AD3, RMS and
+            // opendm40 data logger, AD2 source (hy3131::set_ad2_stream): an AC row with AD3, RMS and
             // LPF switched off (R34 = 0, R29 = 0) and another AD2 rate in R26: still that row.
             var ad2Stream = EnAd2 && !EnAd3 && regs[0x29] == 0;
             for(var i = 0; i < Rows.Length; i++)
@@ -2136,7 +2136,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     // compared when the row uses OP1; ENOP1 itself is always masked (AC+DC
                     // writes R32 = 0x38 after the DC V rows, whose OP1 is off).
                     if(j == 18) mask = (row.Bytes[18] & 0x08) != 0 ? 0xF7 : 0xF0;
-                    // fw-rs sentinel fields (sentinel.rs): in the rows that leave AD1 off (the AC
+                    // opendm40 sentinel fields (sentinel.rs): in the rows that leave AD1 off (the AC
                     // rows) its input / gain / reference fields are free, and so is OP1CHOP (the
                     // AC V sentinel row holds OP1's chopper off); PKHSEL / ENPKH are free
                     // everywhere; SS5 (R2C bit 4) is free in the current rows.
@@ -2148,7 +2148,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     }
                     if(j == 9) mask = 0xF8;
                     if(j == 12 && (row.Role == Role.DcA || row.Role == Role.AcA)) mask = 0xEF;
-                    // fw-rs sentinel fields, later ones: the frequency row's AD1 (a zero reading
+                    // opendm40 sentinel fields, later ones: the frequency row's AD1 (a zero reading
                     // nobody reads) may take another input / gain; continuity / diode / capacitance
                     // leave AD2 and OP2 unused, so AD2IG, the AD2 inputs and OP2 are free there.
                     if(row.Role == Role.Freq && j == 4) mask = 0;
@@ -2159,7 +2159,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                         if(j == 7) mask = 0;
                         if(j == 18) mask &= 0x0F;
                     }
-                    // fw-rs A-jack protection probe (sentinel.rs probe_row): AD2 / OP2 are unused in
+                    // opendm40 A-jack protection probe (sentinel.rs probe_row): AD2 / OP2 are unused in
                     // the comparator rows (DC V, DC mV, ohm, temperature): AD2IG, R26, R27, OP2 free.
                     if(row.Role == Role.DcV || row.Role == Role.DcMv || row.Role == Role.Ohm || row.Role == Role.Temp)
                     {
@@ -2168,7 +2168,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                         if(j == 18) mask &= 0x0F;
                     }
                     if(ad2Stream && (j == 9 || j == 20)) mask = 0;
-                    // fw-rs DC-coupled V row (ad2exp.rs dcv_row, feasibility E7): the AC V row with SAD2IP =
+                    // opendm40 DC-coupled V row (ad2exp.rs dcv_row, feasibility E7): the AC V row with SAD2IP =
                     // OP1O, AD2IN AGND / RLU, OP1+ SENSE or AGND (the zero), AD3 / RMS / LPF off, also with
                     // ENAD2 off (the AD1-alone phase of DBG:AD2:DCV?).
                     if(row.Role == Role.AcV && (regs[0x27] >> 6) == 0)
@@ -2176,9 +2176,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                         if(j == 7) mask = 0x0F;
                         if(j == 18) mask &= 0xF0;
                         if(j == 9 || j == 20) mask = 0;
-                        if(j == 21) mask = 0x0C; // AD3 inputs (fw-rs AC+DC method C: AD3 on OP1O)
+                        if(j == 21) mask = 0x0C; // AD3 inputs (opendm40 AC+DC method C: AD3 on OP1O)
                     }
-                    // fw-rs power rows: R34 statistic select (SVXI / SDO23) and R35 AD3IN / AD3IG are
+                    // opendm40 power rows: R34 statistic select (SVXI / SDO23) and R35 AD3IN / AD3IG are
                     // run-time choices; the I row's power-bus bytes R2E / R2F = 08 81 are accepted too
                     if(row.Role == Role.Power)
                     {
@@ -2239,7 +2239,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         // Compare masks per configuration byte R20..R35 (0 = ignored): R20 ignored (the counter and
         // comparator source bits change at run time: Hz mode alternates 0xF2 / 0x0A),
-        // R21 / R22 / R36 ignored, R26 only AD2RG (the enable bit: fw-rs sets it after the row; the
+        // R21 / R22 / R36 ignored, R26 only AD2RG (the enable bit: opendm40 sets it after the row; the
         // rate bits: the data logger's AD2 rungs), R34 without the enable bit, R31 without SFUVR (ohm variants), R32 without ENOP1 / SOP1P (AC+DC writes 0x38
         // after the DC V row), R33 without SAD1I (temperature phases).
         private static readonly int[] RowMask = {
@@ -2445,7 +2445,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public void SetVin(double volts) { Core.ForcedAd1 = int.MinValue; Core.SetInput("vsrc:" + volts.ToString(CultureInfo.InvariantCulture)); }
         /// Input spec, see Hy3131Core.SetInput.
         /// The log line is the harness's input marker (emu/README.md "Input
-        /// markers"): the virtual time and fw-rs's uptime at the change.
+        /// markers"): the virtual time and opendm40's uptime at the change.
         public void SetInput(string spec)
         {
             Core.ForcedAd1 = int.MinValue;
@@ -2497,7 +2497,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double ClockPpm { get; set; }
 
         /// The 76.8 kS/s setting's own rate offset, ppm (Hy3131Core.Ad2Osr32Ppm,
-        /// default 0 = the datasheet's 76 800, as the device (fw-rs device check
+        /// default 0 = the datasheet's 76 800, as the device (opendm40 device check
         /// of e7ec2cc); monitor: hy3131 Ad2Osr32Ppm).
         public double Ad2Osr32Ppm { get => Core.Ad2Osr32Ppm; set => Core.Ad2Osr32Ppm = value; }
 
@@ -2714,7 +2714,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                         // bytes of two results (TornAd2). Pessimistic on
                         // purpose: whether the device latches R03..R05 during
                         // a read is untested (feasibility 1.4, test 6.2), and
-                        // fw-rs places its reads between edges anyway.
+                        // opendm40 places its reads between edges anyway.
                         Core.Update(Now);
                         var seq = Core.Ad2Conversions;
                         if(byteIdx == 0)
@@ -2791,7 +2791,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         ///   CKPH 1: the master samples at the falling edge, a full period after
         ///   the change (clean at /8), and changes MOSI at the rising edge,
         ///   where the chip samples DI: the chip sees the previous bit (a
-        ///   command or write byte in CKPH 1 is garbage; fw-rs sends them in
+        ///   command or write byte in CKPH 1 is garbage; opendm40 sends them in
         ///   mode 0 and switches only the data phase of a read).
         public byte SpiByteTimed(byte tx, double t0, double bit, bool ckph)
         {

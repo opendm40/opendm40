@@ -23,7 +23,7 @@
 
 ### 1.1 Где описано железо
 
-Состав платы, пины, фронтенды, питание и источники (BOM платы V1.1 от jebem в ветке EEVblog по разбору на mydigit.cn, фото, код стока и fw-rs) собраны в одном месте: [hw/README.md](../hw/README.md). Основное: [перечень компонентов](../hw/README.md#main-parts), [блок-схема](../hw/README.md#block-diagram), [таблица пинов](../hw/README.md#pin-table), [открытые вопросы и противоречия](../hw/README.md#unknowns). Здесь остаются только выводы для функций и UX.
+Состав платы, пины, фронтенды, питание и источники (BOM платы V1.1 от jebem в ветке EEVblog по разбору на mydigit.cn, фото, код стока и opendm40) собраны в одном месте: [hw/README.md](../hw/README.md). Основное: [перечень компонентов](../hw/README.md#main-parts), [блок-схема](../hw/README.md#block-diagram), [таблица пинов](../hw/README.md#pin-table), [открытые вопросы и противоречия](../hw/README.md#unknowns). Здесь остаются только выводы для функций и UX.
 
 ### 1.2 Гальваническая развязка [Факт, владелец 2026-10-24]
 
@@ -40,7 +40,7 @@
 | RTC в GD32F427 ([MCU](../hw/README.md#mcu-and-clocks)) | да; питается ли от батареи в выключенном состоянии — [?] | [?] таймер в статус-баре, но не часы | временны́е метки логов, имена файлов |
 | W25Q128, 16 МБ ([SPI flash](../hw/README.md#spi-flash-usb-disk)) | да | прошивка, лого, скриншоты | логирование: при записи 16 байт → ~500k записей на 8 МБ |
 | Быстрые 19-bit АЦП HY3131 ([DMM front end](../hw/README.md#dmm-front-end-hy3131)) | да | [?] AC-RMS, частота | Peak-детект, MIN/MAX на полной скорости, быстрая прозвонка |
-| 2 канала DAC ([Generator](../hw/README.md#generator), [Oscilloscope](../hw/README.md#oscilloscope)) | да | канал 1 — генератор, канал 2 — порог аппаратного триггера осциллографа | в fw-rs триггер программный, канал 2 свободен: DC-источник, offset |
+| 2 канала DAC ([Generator](../hw/README.md#generator), [Oscilloscope](../hw/README.md#oscilloscope)) | да | канал 1 — генератор, канал 2 — порог аппаратного триггера осциллографа | в opendm40 триггер программный, канал 2 свободен: DC-источник, offset |
 | USB OTG FS ([USB](../hw/README.md#usb)) | да | только MSC | composite MSC + CDC (SCPI/поток данных) |
 | Датчик температуры «machine temperature» | да | Aux в режиме T | холодный спай термопары, температурная коррекция |
 | BT BP2A838 ([Bluetooth](../hw/README.md#bluetooth)) | да | зеркало экрана | протокол реверснут (DM40GUI, Maj113) — можно расширить |

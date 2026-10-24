@@ -7,7 +7,7 @@ Talks the USB/IP protocol to Renode's server (emu/run.py ... --usbip T, TCP
     emu/usbip_client.py list
     emu/usbip_client.py desc   1-0              # device descriptor
     emu/usbip_client.py config 1-0              # interfaces and endpoints
-    emu/usbip_client.py usbtmc 1-0 "*IDN?"      # fw-rs: SCPI over USBTMC
+    emu/usbip_client.py usbtmc 1-0 "*IDN?"      # opendm40: SCPI over USBTMC
     emu/usbip_client.py msc    1-0 [LBA [LUN]]  # INQUIRY, READ CAPACITY, READ(10)
     emu/usbip_client.py luns   1-0              # GET MAX LUN + per-LUN checks (INQUIRY,
                                                 # TEST UNIT READY, READ CAPACITY, MODE
@@ -16,7 +16,7 @@ Talks the USB/IP protocol to Renode's server (emu/run.py ... --usbip T, TCP
     emu/usbip_client.py mscdump 1-0 LUN OUT     # FAT volume of LUN -> OUT: boot sector,
                                                 # FATs, root, allocated clusters (the rest
                                                 # zero), for fsck.fat / mtools
-    emu/usbip_client.py upload 1-0 FILE         # fw-rs DBG:UPLOAD: FILE -> DM40FW.BIN in the
+    emu/usbip_client.py upload 1-0 FILE         # opendm40 DBG:UPLOAD: FILE -> DM40FW.BIN in the
                                                 # SPI disk's root (as dm40dbg.py upload)
     emu/usbip_client.py read   1-0 0x1FFF7A10 12   # usbrw vendor EP0 read
     emu/usbip_client.py write  1-0 0x20028FC0 02   # usbrw vendor EP0 write
@@ -41,11 +41,11 @@ DIR_OUT, DIR_IN = 0, 1
 HANDSHAKE_S = float(os.environ.get('USBIP_TIMEOUT', 5))  # DEVLIST / IMPORT answer deadline, s
 # Renode's DEVLIST / IMPORT read the device descriptor over EP0 and wait for the firmware to answer.
 # A request that timed out does not wedge the server: once the firmware answers, the next one works
-# (checked with fw-rs paused / resumed). The stock firmware never answers in the emulator, not even after
-# Settings > Other > USB Connect (its USB does not enumerate here; fw-rs enables USB at boot).
+# (checked with opendm40 paused / resumed). The stock firmware never answers in the emulator, not even after
+# Settings > Other > USB Connect (its USB does not enumerate here; opendm40 enables USB at boot).
 NO_ANSWER = ('no answer from the USB/IP server on %s:%d within %g s: the firmware has not enabled USB yet - '
              'the stock firmware needs Settings > Other > USB Connect (and even then does not enumerate in the '
-             'emulator; fw-rs enables USB at boot); restart the emulator if the server stays stuck')
+             'emulator; opendm40 enables USB at boot); restart the emulator if the server stays stuck')
 
 
 class NoAnswer(IOError):
@@ -268,7 +268,7 @@ class Usbtmc:
         """One reply; OSError (socket.timeout) after `timeout` s without one.
         A reply longer than `maxlen` (the TransferSize of each
         REQUEST_DEV_DEP_MSG_IN) comes in several transfers, the last with
-        EOM set (fw-rs: a streamed WAV:DATA? block); they are joined.
+        EOM set (opendm40: a streamed WAV:DATA? block); they are joined.
         `rounds`: a list that gets each transfer's payload length."""
         maxlen &= ~3
         out = b''
@@ -304,7 +304,7 @@ class Usbtmc:
 
 
 def upload(d, path, chunk=232):
-    """fw-rs DBG:UPLOAD (as tools/dm40dbg.py upload): FILE -> DM40FW.BIN in
+    """opendm40 DBG:UPLOAD (as tools/dm40dbg.py upload): FILE -> DM40FW.BIN in
     the SPI disk's root."""
     import time
     import zlib
@@ -345,7 +345,7 @@ def scpi_tcp(busid, port):
     time; a reply later than 1 s (libsigrok's hard USBTMC Bulk-IN timeout) is
     flagged with '!!'. Virtual time runs at or below wall speed (0.7x with
     --fast on a loaded host, 0.9x with --mips 25), so the flag is
-    conservative; fw-rs DBG:PING? (uptime ms) around a query gives the
+    conservative; opendm40 DBG:PING? (uptime ms) around a query gives the
     virtual latency."""
     import time
     while True:  # the USB/IP server appears only at run.py --usbip T
@@ -397,7 +397,7 @@ def scpi_tcp_client(c, tmc, t_start):
                 dt = time.monotonic() - t0
                 if raw[:1] == b'#' and raw[1:2].isdigit():
                     print('         >> block, %d bytes (%.0f ms)' % (len(raw), dt * 1e3), flush=True)
-                    # fw-rs ends every USBTMC reply with '\n' (also a block,
+                    # opendm40 ends every USBTMC reply with '\n' (also a block,
                     # after its data); an older image did not: add it then.
                     c.sendall(raw if raw[-1:] == b'\n' else raw + b'\n')
                     continue

@@ -65,7 +65,7 @@ pub mod probe {
 #[allow(dead_code)]
 pub mod msc {
     use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-    /// Same trait as fw-rs src/msc.rs.
+    /// Same trait as opendm40 src/msc.rs.
     pub trait BlockDevice {
         fn present(&self) -> bool;
         fn block_size(&self) -> u32;

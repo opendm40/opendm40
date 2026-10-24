@@ -47,7 +47,7 @@ const DIM_TXT: [&str; 4] = ["5 min", "10 min", "30 min", "Never"];
 const OFF_TXT: [&str; 4] = ["10 min", "30 min", "1 hour", "Never"];
 /// Wake gate (stock FUN_08020248, tools/stock-ui/notes/interaction.md D.3):
 /// after an idle dim the first touch / side key only restores the backlight,
-/// and input is ignored for this long from it. fw-rs also drops the rest of
+/// and input is ignored for this long from it. opendm40 also drops the rest of
 /// that waking touch or key press (its release would otherwise still tap):
 /// the gate ends at the first touch-down / key-down after the window.
 const WAKE_GATE_MS: u64 = 500;
@@ -511,7 +511,7 @@ fn power_off() -> ! {
 /// same way. The mV modes (2, 3) restart as AC / DC V: AUTO steps down to mV
 /// again by itself, AUTO+ stays on V (UF-21). The AUTO coupling (19 / 20,
 /// dmm::FUNC_*_AUTO) restarts in AUTO: the setting is the function code, in
-/// the same byte, so no layout change (an older fw-rs build loads it as DC
+/// the same byte, so no layout change (an older opendm40 build loads it as DC
 /// V). V and A keep no coupling of their own beyond this: a tap on V / A
 /// from another function starts in DC, as the stock.
 fn restore_func(version: u32, code: u8) -> u8 {
@@ -908,7 +908,7 @@ impl App {
             View::Help => ui::help_page(self.help_page),
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
-                // / version lines. Only the fields fw-rs can actually source are
+                // / version lines. Only the fields opendm40 can actually source are
                 // shown; stock's SN ("%s:%.8X") and "Bluetooth Name:%s" are
                 // omitted (no traced derivation / no public getter).
                 let model_name = match self.dmm.model() {
@@ -930,7 +930,7 @@ impl App {
                 let hw = fmt_ver(&mut hwb, bd[0], None);
                 let mut blb = [0u8; 16];
                 let bl = fmt_ver(&mut blb, bd[1], Some(bd[2]));
-                // fw-rs firmware version (NOT the stock "Software V2.6").
+                // opendm40 firmware version (NOT the stock "Software V2.6").
                 let mut fwb = [0u8; 32];
                 let pre = b"fw-rs ";
                 fwb[..pre.len()].copy_from_slice(pre);
@@ -940,7 +940,7 @@ impl App {
                 let fw = core::str::from_utf8(&fwb[..pre.len() + k]).unwrap_or("fw-rs");
                 // Order and labels follow the stock §6 line order
                 // (gui_v2_6.h:99: Bootloader / Software / Hardware); "Software"
-                // carries the fw-rs version instead of the stock "V2.6".
+                // carries the opendm40 version instead of the stock "V2.6".
                 // MCU die temperature (power.rs, typical constants).
                 let mut tb = [0u8; 24];
                 let mut tn = 0;
@@ -1502,7 +1502,7 @@ impl App {
         // (FUN_0803e53a): a second release within 500 ms toggles the touch /
         // key lock, a single click (500 ms timer expired, FUN_0803e000) cycles
         // the DMM sub-mode only while locked (touch is off then). The stock
-        // handles the click only on the DMM screen; fw-rs toggles the lock in
+        // handles the click only on the DMM screen; opendm40 toggles the lock in
         // every view and cycles the DMM sub-mode only in Dmm / DmmScope.
         // Debounce: a level counts after 20 ms stable (stock: 2 consecutive
         // 1 ms samples in the TIM7 ISR).
@@ -1990,7 +1990,7 @@ impl App {
     }
 
     /// Backup SRAM words -> settings. `same_session`: the DMM function is
-    /// continued only after a normal fw-rs boot (persist::same_session);
+    /// continued only after a normal opendm40 boot (persist::same_session);
     /// otherwise, and for any code this build does not know, DC V as the
     /// stock's power-on default.
     fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {

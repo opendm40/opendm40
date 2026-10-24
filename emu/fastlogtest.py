@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs fast logger to the SPI disk (src/fastlog.rs, LOG:DEST DISK) in the
+"""opendm40 fast logger to the SPI disk (src/fastlog.rs, LOG:DEST DISK) in the
 emulator, with the W25Q128 model's busy timing on (page program / erase
 times, virtual time): the sustainable rate into the flash per rung.
 
@@ -59,17 +59,17 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF / image')
+ap.add_argument('--app', required=True, help='opendm40 native ELF / image')
 ap.add_argument('--port', type=int, default=4817, help='USB/IP port (default 4817)')
 ap.add_argument('--bt-port', type=int, default=4818, help='BT passthrough port (default 4818)')
 ap.add_argument('--dur', type=int, default=2, help='LOG:DURation per session, s (device time)')
 ap.add_argument('--profiles', default='typ,max')
 ap.add_argument('--sessions', default='ad1:640,ad2:4800,ad2:9600,ad2:19200,ad2:38400')
-ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (fw-rs region C audit)')
+ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (opendm40 region C audit)')
 ap.add_argument('--no-bt', action='store_true')
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
 ap.add_argument('--osr32-ppm', type=float, default=None, help='the 76.8 kS/s setting\'s own rate offset, ppm (model Ad2Osr32Ppm; '
-                'default 0 = the datasheet\'s 76 800, as the device (fw-rs device check of e7ec2cc))')
+                'default 0 = the datasheet\'s 76 800, as the device (opendm40 device check of e7ec2cc))')
 ap.add_argument('--vol-read', action='store_true', help='after each session read LOGS/FASTnnn.CSV off the USB volume (MSC READ(10), 64 sectors each): == tools/dlog.py of the DLG; the virtual-time rate')
 ap.add_argument('--no-ad1-race', action='store_true', help='AD1F without the INTF read-clears race (model IntfRaceAd1)')
 ap.add_argument('--noise', type=float, default=None, help='HY3131 model noise scale (SetNoise; AD2: 30 codes rms x scale at OSR 32): a '
@@ -118,7 +118,7 @@ import usbip_client as uc  # noqa: E402
 
 FAIL = []
 T = []
-# DBG:VDISK:MIR? at the start (fw-rs vdisk.rs `mirror_boot`): served,
+# DBG:VDISK:MIR? at the start (opendm40 vdisk.rs `mirror_boot`): served,
 # writer status, rewritten at this boot, ms. With the mirror served, the
 # slow-bank sectors read during a session like any other (from the SPI
 # disk); without it they answer NOT READY.
@@ -528,7 +528,7 @@ def session(q, src, rate, profile):
         if n < 6000:
             break
     if len(st) > 13:
-        # LOG:DISK? field 14 (fw-rs fastlog.rs `writer_permille`): the Run
+        # LOG:DISK? field 14 (opendm40 fastlog.rs `writer_permille`): the Run
         # passes' share of the main loop's CPU, the stream ISR out.
         print('  writer: %d permille of the main loop\'s CPU (headroom %d)' % (st[13], 1000 - st[13]), flush=True)
     rows, lost, ok = decode(dlg, '%s-%s-%d' % (profile, src, rate))
@@ -555,7 +555,7 @@ def session(q, src, rate, profile):
         fast = 0 < tpp <= 800 and tpp_max <= 1500
         want = rate if fast and gate == 1 else 38400
         print('  writer trial: %s, ISR %d permille, ring high water %d' % ({0: 'none', 1: 'kept', 2: 'fell back'}.get(gate, gate), g_pm, g_fill), flush=True)
-        # nominal = the rung's rate (fw-rs hy3131.rs AD2_OSR32_REAL_MHZ at
+        # nominal = the rung's rate (opendm40 hy3131.rs AD2_OSR32_REAL_MHZ at
         # 76800): which rung ran, to 0.4 %.
         check(abs(nominal / want - 1) < 0.004 and (gate in (1, 2) if fast else gate == 0),
               '%s %s %d: probe tPP %d / %d us, trial %d -> rung %.0f S/s' % (profile, src, rate, tpp, tpp_max, gate, nominal))

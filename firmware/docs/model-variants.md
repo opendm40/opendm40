@@ -60,25 +60,25 @@ Everything else (scope, generator, UI layout, calibration use) is the same.
 
 * Dump 2026-10-13 (`stock/re/dumps/full-20261013/flash_08000000_1MB.bin`):
   `0x080C0168` = `00`, record CRC valid -> **DM40A**.
-* Device, 2026-10-22, read-only: `CALIB.BIN` (the fw-rs safety copy of
+* Device, 2026-10-22, read-only: `CALIB.BIN` (the opendm40 safety copy of
   `0x080C0000`, `dm40scpi.py get CALIB.BIN`; DBG:BOOT? shows `CALBK` with no
   difference against the flash) is byte-identical to the dump's 800-byte
-  record: model byte `00`. fw-rs on the device answers
+  record: model byte `00`. opendm40 on the device answers
   `*IDN?` -> `Alientek,DM40A,0,dm40-fw 0.1`.
 * Manual and community: most owners have DM40C (docs/user-feedback.md); this
   repo's unit is one of the few DM40A.
 
-## 4. fw-rs
+## 4. opendm40
 
 User decisions 2026-10-13 (firmware/TODO.md, "User decisions"): **60000 counts
 (DM40C limits) on every model**, **AC+DC on every model** (the DM40A hardware
 measures it: same HY3131 rows), **IDN / Device page keep the real model**.
 The model is in the calibration record and the hardware is the same, so the
-40000 / 50000 limits would only cut the range. fw-rs keeps them:
+40000 / 50000 limits would only cut the range. opendm40 keeps them:
 
 * `dmm.rs`: `Dmm::model()` reads the stock byte the stock way (byte at
   `+0x168`, clamped to 2; a record without version 1 counts as DM40A, as the
-  stock defaults; fw-rs does not check the CRC). `Dmm::model_raw()` = the
+  stock defaults; opendm40 does not check the CRC). `Dmm::model_raw()` = the
   byte as stored. `COUNTS_MODEL = 2` keeps FACTOR / OVER at the DM40C values
   (set it to `self.model` in `factor()` / `over()` for the stock limits).
   The capacitance comparator follows the real model byte, as the stock does.
@@ -88,7 +88,7 @@ The model is in the calibration record and the hardware is the same, so the
   UID as 24 hex digits, docs/native-boot.md "USB serial number").
   `SYST:IDN:EMUL 34401A` unchanged.
 * `SYSTem:MODel?` (USBTMC and BT SCPI; read-only): `DM40B,1,60000` =
-  model name, raw calibration byte (decimal), counts fw-rs uses.
+  model name, raw calibration byte (decimal), counts opendm40 uses.
 * About page "Model", BT name `AT+SBNDM40x` and BT cmd 00 `'A'+model`: as the
   stock.
 

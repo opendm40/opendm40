@@ -636,7 +636,7 @@ the bus. Any option has to render in lines, columns or strips.
 | Flicker | none (each pixel written once) | overdraw where layers overlap unless drawn into a strip buffer | none | none |
 | Full graph redraw | ≈ 3.5–6 ms; dirty columns 1–3 ms; DMA mem→FSMC from a column buffer can overlap CPU | similar with `fill_contiguous`; ~10x slower through per-pixel `draw_iter` (a window set per pixel) | estimate 10–40 ms (path/polyline rasterisation of a 400-point trace) | estimate 10–30 ms (`lv_chart` antialiased lines) |
 | Flash | +3–6 KB | +8–20 KB (primitives, adapter to the stock 4 bpp fonts) | order of 200–400 KB with fonts, vs 371 KB free | order of 100–250 KB |
-| RAM | ~0.6 KB templates + ≤ 4 KB sprite | 0 (or a strip buffer) | needs `alloc` + heap (tens of KB); fw-rs has no allocator today | ≥ 15–30 KB draw buffer + 32–64 KB heap |
+| RAM | ~0.6 KB templates + ≤ 4 KB sprite | 0 (or a strip buffer) | needs `alloc` + heap (tens of KB); opendm40 has no allocator today | ≥ 15–30 KB draw buffer + 32–64 KB heap |
 | Other costs | none; keeps the stock fonts and the per-digit/per-column diffing (ui-review §0) | stock fonts need an adapter | all screens rewritten; fonts re-converted; embedded use under GPLv3 or a commercial licence | C toolchain + FFI; all screens rewritten; fonts re-converted |
 
 The (c) and (d) sizes are order-of-magnitude estimates from typical MCU

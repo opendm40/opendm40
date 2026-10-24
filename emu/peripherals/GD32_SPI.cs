@@ -1,6 +1,6 @@
 //
-// GD32F4 SPI (master, 8-bit, the parts fw-rs uses) with DMA requests and the
-// byte timing of the real peripheral (2026-10-22, fw-rs TODO "76.8 kS/s": the
+// GD32F4 SPI (master, 8-bit, the parts opendm40 uses) with DMA requests and the
+// byte timing of the real peripheral (2026-10-22, opendm40 TODO "76.8 kS/s": the
 // AD2 stream's frames must fit a 13 us period, so the model may not make
 // them instantaneous):
 //   * a byte takes 8 SCK periods, SCK = PCLK1 (ApbHz, 50 MHz) / 2^(PSC + 1)
@@ -20,11 +20,11 @@
 //     time, SCK period and CKPH (HY3131SpiPort -> HY3131.SpiByteTimed: the
 //     chip's state at each clock edge, the mode-0 DO margin at /8, CKPH 1
 //     sampling). A byte still shifting when CS goes high reaches the chip
-//     after CS high, i.e. not at all (fw-rs's cut dummy byte of a write).
+//     after CS high, i.e. not at all (opendm40's cut dummy byte of a write).
 // Timed = false gives the old instantaneous bytes (a byte completes at the
 // next DATA write / STAT read / DATA read).
 // Replaces Renode's STM32SPI for SPI2 (dm40.repl spi3), which has no DMA
-// requests: fw-rs's AD2 stream DMA frames (hy3131.rs `stream::dma`).
+// requests: opendm40's AD2 stream DMA frames (hy3131.rs `stream::dma`).
 //
 using System;
 using Antmicro.Renode.Core;
@@ -94,7 +94,7 @@ namespace Antmicro.Renode.Peripherals.SPI
                 CatchUp();
                 if((value & 0x40) == 0 && (shifting || bufFull))
                 {
-                    // SPIEN off mid-byte: the byte is abandoned (fw-rs switches
+                    // SPIEN off mid-byte: the byte is abandoned (opendm40 switches
                     // CKPH / the divider only when idle).
                     Aborted++;
                     shifting = false; bufFull = false;
@@ -142,7 +142,7 @@ namespace Antmicro.Renode.Peripherals.SPI
 
         /// A DATA write with the shifter idle starts shifting this much later
         /// (ns; 0 = at once). The device's write-wait-read byte exchange
-        /// (fw-rs spiflash.rs `xfer`, every read of the SPI disk) takes ~0.97
+        /// (opendm40 spiflash.rs `xfer`, every read of the SPI disk) takes ~0.97
         /// us per byte at 12.5 MHz against 0.64 us of SCK: APB1 register
         /// latency and the TBE -> shift start, which the model had at zero
         /// (dm40.repl sets 330 ns on the disk's bus). Back-to-back bytes (the

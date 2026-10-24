@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate src/stockfont_data.rs: the stock DM40 bitmap fonts embedded in our
 own image, so stockfont.rs no longer reads them from the stock app's absolute
-flash addresses (which disappear once fw-rs is flashed over 0x08004000).
+flash addresses (which disappear once opendm40 is flashed over 0x08004000).
 
     /usr/bin/python3 -I tools/mkstockfont.py [dm40_v_2_6.dec.bin]
 
@@ -70,7 +70,7 @@ FONTS = [
 A2_FONTS = ('ASCII26', 'F14')
 
 
-# Codes from here up (CJK, full-width punctuation) are dropped: fw-rs draws
+# Codes from here up (CJK, full-width punctuation) are dropped: opendm40 draws
 # English text only (no string in src/ has one; docs/fonts.md).
 CJK_FROM = 0x2E80
 # Widest glyph (F78 'O' = 64): the row buffer of stockfont.rs (MAXW there).

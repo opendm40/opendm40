@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""fw-rs danger alarm (firmware/src/danger.rs, firmware/docs/power-meter-and-misconnect.md
-4.10) in the emulator: fw-rs native + the HY3131 model, a timed connection /
+"""opendm40 danger alarm (firmware/src/danger.rs, firmware/docs/power-meter-and-misconnect.md
+4.10) in the emulator: opendm40 native + the HY3131 model, a timed connection /
 touch / key script per scenario, the buzzer timer's register writes logged
 by the model (run.py --buzzer-log: TIM14 ARR = pitch, CCR1 = duty, in virtual
 ms) and SCPI over USB/IP (SYST:ALER?, DBG:ALARm? in a loop).
@@ -37,7 +37,7 @@ ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('names', nargs='*')
-ap.add_argument('--app', help='fw-rs native image (default: run.py builds HEAD)')
+ap.add_argument('--app', help='opendm40 native image (default: run.py builds HEAD)')
 ap.add_argument('--port', type=int, default=53101, help='USB/IP port (default 53101)')
 ap.add_argument('--list', action='store_true')
 A = ap.parse_args()

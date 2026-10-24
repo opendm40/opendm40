@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""READ? / MEASure? in the AUTO coupling (fw-rs main.rs AUTO_WAIT_MS,
+"""READ? / MEASure? in the AUTO coupling (opendm40 main.rs AUTO_WAIT_MS,
 docs/switch-latency.md 6): AUTO's values before its first decision are
 provisional (never to SCPI), so a READ? / MEAS:VOLT:AUTO? right after the
 host's change waits for the decision, at most until AUTO_WAIT_MS (3.9 s)
@@ -58,7 +58,7 @@ SCEN = [
 ]
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF')
+ap.add_argument('--app', required=True, help='opendm40 native ELF')
 ap.add_argument('--port', type=int, default=47600, help='USB/IP port')
 ap.add_argument('names', nargs='*', help='scenarios (default all)')
 A = ap.parse_args()

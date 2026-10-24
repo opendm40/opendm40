@@ -1,6 +1,6 @@
 # SCPI over Bluetooth serial
 
-fw-rs answers SCPI on the meter's Bluetooth serial link, next to the stock
+opendm40 answers SCPI on the meter's Bluetooth serial link, next to the stock
 phone-app protocol, so PyVISA, sigrok and simple loggers can talk to the meter
 without a cable. The same parser as USBTMC handles the commands
 ([`src/scpi.rs`](../src/scpi.rs), `Scpi::handle`); only the transport is different.
@@ -61,7 +61,7 @@ added later, including the ones the parser routes as `Out::Instr`
 (`DBG:GRAB`, `DBG:GEST?`). No part of the message runs and no reply is sent;
 `SYST:ERR?` then reports `-100,"Command protected"`. main.rs also refuses
 `scpi::Out::Dbg` from an untrusted port, as a backstop.
-The binary protocol has no memory read/write command in fw-rs (`Bt::serve`
+The binary protocol has no memory read/write command in opendm40 (`Bt::serve`
 handles cmd 00..09 only; the 0x0B memory command exists only in the patched
 stock firmware of the memrw kit).
 
@@ -93,7 +93,7 @@ The data logger over Bluetooth (`LOG:STATe ON`, `LOG:DATA?`):
 12-byte records at 11.5 kB/s are 960 records/s with the link 100 % busy;
 each block also waits for the query's round trip (RFCOMM ~20-60 ms per
 511-record block of 0.53 s), so ~870 records/s is the realistic ceiling.
-fw-rs therefore refuses `LOG:STATe ON` from Bluetooth when the session's
+opendm40 therefore refuses `LOG:STATe ON` from Bluetooth when the session's
 nominal rate is above 800 S/s or the source is AD2 (whose slowest rung is
 1200 S/s): `SYST:ERR?` = "Rate too high for Bluetooth"; every AD1 setting
 (LOG:OSR / LOG:CHOP, 2.5 .. 640 S/s) works (640 S/s = 7.7 kB/s, 67 % of
@@ -265,7 +265,7 @@ coupling (`VOLT:AC:RANG?`) names that coupling's function. A query of a
 function that is not selected is no error: `:RANG:AUTO?` answers 1
 (selecting a function or coupling starts it in autorange), `:RANG?` /
 `:RES?` `+9.91E37` (no range until it is selected); a set naming it is
-"Settings conflict". The same ranges on DM40A / B / C (fw-rs uses the 60000
+"Settings conflict". The same ranges on DM40A / B / C (opendm40 uses the 60000
 counts limits on all models, [model-variants.md](model-variants.md)). Digits: `5` = RATE FAST
 (60000 counts, one conversion per reading), `6` = RATE MED (SLOW is kept):
 600000 counts once the moving average is full (~3.2 s after a change) in DC
@@ -283,7 +283,7 @@ labels the next ones from `CONF?` (older profile versions ask `FUNC?`; both
 name the function and arm the check); other hosts see +inf for them. A function
 changed over Bluetooth while sigrok reads over USBTMC counts as a change on
 the meter (device check 2026-10-22: 16 changes, 880 samples, no stop). `FUNC?`
-names of the fw-rs extras: `"VOLT:AUTO"` / `"CURR:AUTO"` (the profile's
+names of the opendm40 extras: `"VOLT:AUTO"` / `"CURR:AUTO"` (the profile's
 `voltage` / `current` without a coupling flag; each sample flagged DC or AC as
 `VOLT:COUP?` / `CURR:COUP?` say) and `"POW"` (read as W, entered on the meter
 or with `CONF:POW`; not selectable from sigrok: its range hunt takes up to

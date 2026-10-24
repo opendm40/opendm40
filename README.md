@@ -5,20 +5,20 @@ handheld multimeter + oscilloscope + signal generator (GD32F427, Cortex-M4F).
 
 What is here:
 
-- **fw-rs**: a replacement firmware written in Rust. Multimeter, scope and
+- **opendm40**: a replacement firmware written in Rust. Multimeter, scope and
   generator run at the same time; stock-like GUI, menus, touch, the stock
   Bluetooth app protocol and USBTMC/SCPI. It is installed like a stock update
   file and keeps the vendor bootloader, FS-loader and calibration.
 - **Stock firmware tooling**: decode / encode / pack the vendor update files
   (`dm40_v_X_Y.bin`), a patch kit that adds code to the stock firmware, and
   the memrw kit that backs up calibration and the whole flash over Bluetooth.
-- **Bluetooth protocol** of the stock DM40 firmware (fw-rs keeps it).
+- **Bluetooth protocol** of the stock DM40 firmware (opendm40 keeps it).
 - **Reverse-engineering notes** on the stock firmware V2.6, the bootloader and
-  the update format, which fw-rs is based on.
+  the update format, which opendm40 is based on.
 
 ## Status
 
-Work in progress, developed and tested on one DM40 unit. fw-rs runs natively
+Work in progress, developed and tested on one DM40 unit. opendm40 runs natively
 from flash, installed through the vendor FS-loader like a stock update; see
 [firmware/README.md](firmware/README.md) for the feature state and
 [firmware/docs/parity.md](firmware/docs/parity.md) for parity with the stock firmware.
@@ -27,15 +27,15 @@ protocol notes are for stock V2.6.
 
 ## Safety
 
-### Back up with fw-rs
+### Back up with opendm40
 
-- **Installing fw-rs first is safe.** The vendor FS-loader rewrites only the
+- **Installing opendm40 first is safe.** The vendor FS-loader rewrites only the
   application area from `0x08004000`. The Alientek bootloader (`0x08000000`),
   the FS-loader (`0x080A0000`), its UID-bound boot data (`0x080A4000`) and the
   calibration record (`0x080C0000`) are not touched
-  ([firmware/docs/native-boot.md](firmware/docs/native-boot.md)). fw-rs reads the
+  ([firmware/docs/native-boot.md](firmware/docs/native-boot.md)). opendm40 reads the
   calibration in place and never writes it.
-- **Then copy to the PC**, from the fw-rs USB drive:
+- **Then copy to the PC**, from the opendm40 USB drive:
   - the whole `INFO/` folder (read-only, generated from the MCU memory):
 
     | File | What |
@@ -52,7 +52,7 @@ protocol notes are for stock V2.6.
   - `DEBUG/SPIFLASH.BIN`: the raw 16 MiB SPI flash (the meter's own disk).
 
   `CALIB.BIN`, `BOOTDATA.BIN` and `UID.BIN` cannot be rebuilt: no update
-  file contains them. fw-rs also writes one copy of these three files, once
+  file contains them. opendm40 also writes one copy of these three files, once
   and never overwritten, to the root of its internal SPI-flash disk
   ([`firmware/src/calbackup.rs`](firmware/src/calbackup.rs)), because the SPI flash
   survives an SWD mass erase of the MCU.
@@ -67,9 +67,9 @@ protocol notes are for stock V2.6.
 ### Enter the loader / return to stock
 
 The vendor loader's update screen (with its own USB disk) is reachable from a
-running fw-rs (`dm40dbg.py update`, "Install it now?", key hold, double hang)
+running opendm40 (`dm40dbg.py update`, "Install it now?", key hold, double hang)
 or, whatever the firmware does, by shorting the debug header's TX pad to GND
-at power-on. There, copy a fw-rs image or the official
+at power-on. There, copy an opendm40 image or the official
 [stock file](stock/vendor/dm40_v_2_6.bin) as the only `dm40*.bin` and press
 "update". Steps: [firmware/README.md, Recovery](firmware/README.md#recovery);
 the short: [hw/README.md, Hardware recovery](hw/README.md#hardware-recovery).
@@ -104,7 +104,7 @@ python3 stock/dm40fw.py decode stock/vendor/dm40_v_2_6.bin dm40_v_2_6.dec.bin
 
 ## Toolchain
 
-- fw-rs: a pinned Rust toolchain in `toolchain/` at the repo root (ignored,
+- opendm40: a pinned Rust toolchain in `toolchain/` at the repo root (ignored,
   local). [`firmware/build.sh`](firmware/build.sh) and the host tests use `../toolchain`. Create it
   once (tested with stable 1.99):
 

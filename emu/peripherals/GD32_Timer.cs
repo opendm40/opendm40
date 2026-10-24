@@ -303,7 +303,7 @@ namespace Antmicro.Renode.Peripherals.Timers
             // A running counter keeps its count phase (an ARR write mid-count
             // does not restart the prescaler): the new segment starts at the
             // last count edge, not at `now` (else every write lost up to one
-            // count: the fw-rs AD2 stream ISR rewrites ARR every interval).
+            // count: the opendm40 AD2 stream ISR rewrites ARR every interval).
             var wasCounting = counting;
             var edge = wasCounting ? segStart + (Abs(now) - absAtSegStart) * SecondsPerCount : now;
             CloseSegment(now);
@@ -488,7 +488,7 @@ namespace Antmicro.Renode.Peripherals.Timers
             if(dt < 1e-7) dt = 1e-7;
             // Nanoseconds (was microseconds: every timer interrupt came up to
             // 0.5 us off its update, a ~1 us "entry latency" of the AD2 stream
-            // ISR that the device does not have; fw-rs TODO "76.8 kS/s").
+            // ISR that the device does not have; opendm40 TODO "76.8 kS/s").
             machine.ScheduleAction(TimeInterval.FromNanoseconds((ulong)Math.Max(1, Math.Round(dt * 1e9))), _ =>
             {
                 if(gen != generation) return;

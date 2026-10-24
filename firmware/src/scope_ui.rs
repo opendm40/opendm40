@@ -78,7 +78,7 @@ pub const TB_BADGE: Rect = rect(79, 1, 62, 17);
 pub const VDIV_BADGE: Rect = rect(286, 1, 62, 17);
 pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
 
-// fw-rs timebase tap step (docs/scope-scale-ux.md sec. 3). The rects are
+// opendm40 timebase tap step (docs/scope-scale-ux.md sec. 3). The rects are
 // absolute; both views share the frame's bottom edge (y 300), so they are
 // the same in the combined view.
 /// Value-preview tabs (left: the next slower timebase, right: the next
@@ -174,9 +174,9 @@ pub struct Model {
     /// Combined view geometry.
     pub combined: bool,
     /// Math mode of the math pill label (stock S+0xd4: 0 "--" .. 5 FFT, 6
-    /// ABS; shown even while math is off). fw-rs has no math engine: 0.
+    /// ABS; shown even while math is off). opendm40 has no math engine: 0.
     pub math_mode: u8,
-    /// fw-rs timebase tabs (docs/scope-scale-ux.md sec. 3): TAB_SHOW_L /
+    /// opendm40 timebase tabs (docs/scope-scale-ux.md sec. 3): TAB_SHOW_L /
     /// TAB_SHOW_R shown, TAB_PRESS_L / TAB_PRESS_R in pressed style
     /// (`tabs_of`); 0 = none (the stock page).
     pub tabs: u8,
@@ -196,15 +196,15 @@ pub struct Model {
     pub math_scale: Txt,
     /// FFT centre-frequency label text (stock, FFT mode).
     pub fft_hz: Txt,
-    /// fw-rs FFT additions (UF-11): axis scale boxes, the peak readout and
+    /// opendm40 FFT additions (UF-11): axis scale boxes, the peak readout and
     /// marker. None = the stock look only.
     pub fft: Option<FftAdd>,
     /// Runt trigger: the second level row (orange T strip marker, level
     /// item 5), None for the other trigger types.
     pub runt_row: Option<i16>,
-    /// fw-rs cursor tab (UF-08): 0 hidden, else CUR_OFF / CUR_X / CUR_Y.
+    /// opendm40 cursor tab (UF-08): 0 hidden, else CUR_OFF / CUR_X / CUR_Y.
     pub cur_tab: u8,
-    /// Source badge (fw-rs, the DMM wave view, src/app_wave.rs): SRC_NONE
+    /// Source badge (opendm40, the DMM wave view, src/app_wave.rs): SRC_NONE
     /// (the stock page: no badge, builds without the AD2 stream ISR),
     /// SRC_MCX or SRC_DMM (the active half filled).
     pub src: u8,
@@ -221,7 +221,7 @@ pub const SRC_NONE: u8 = 0;
 pub const SRC_MCX: u8 = 1;
 pub const SRC_DMM: u8 = 2;
 /// The source badge (left part of the record-bar slot when shown) and the
-/// record bar then (fw-rs: the stock bar is 145..282).
+/// record bar then (opendm40: the stock bar is 145..282).
 pub const SRC_BADGE: Rect = rect(145, 1, 64, 17);
 const REC_BAR: Rect = rect(145, 1, 137, 17);
 const REC_BAR_SRC: Rect = rect(212, 1, 70, 17);
@@ -234,7 +234,7 @@ pub const CUR_Y: u8 = 3;
 /// zone (x <= 102) and the FFT scale box (x >= 168).
 pub const CUR_TAB: Rect = rect(108, 280, 54, 17);
 
-/// fw-rs FFT additions (UF-11): the vertical scale ("10dB/div"), the
+/// opendm40 FFT additions (UF-11): the vertical scale ("10dB/div"), the
 /// horizontal scale ("50kHz/div"), the automatic peak readout and the peak
 /// position (graph column 0..398, 280-row model row) for its marker.
 #[derive(Clone, Copy, PartialEq)]
@@ -474,7 +474,7 @@ pub fn status_badge(m: &Model) {
 }
 
 /// 2.2 timebase badge; `tb_flash`: inverted (white box, magenta text), the
-/// fw-rs feedback of a timebase change.
+/// opendm40 feedback of a timebase change.
 pub fn tb_badge(m: &Model) {
     let h = Ink::new(sf::SC_C, rect(83, 1, 12, 17), "H", 1, 0);
     let t = Ink::new(sf::SC_F12, rect(95, 1, 46, 17), TB_LABELS[m.tb.min(29) as usize], 8, 0);
@@ -484,7 +484,7 @@ pub fn tb_badge(m: &Model) {
 
 /// 2.3 record-position bar; while running (record = screen) it shows the
 /// generator frequency instead of the constant full-record line when the
-/// generator is on (fw-rs addition, 12 px grey like "ROLL").
+/// generator is on (opendm40 addition, 12 px grey like "ROLL").
 /// The record bar's box (shorter beside the source badge).
 pub fn record_bar_rect(m: &Model) -> Rect {
     if m.src == SRC_NONE { REC_BAR } else { REC_BAR_SRC }
@@ -950,7 +950,7 @@ pub const NGRAPH: usize = 5;
 const GRAPH_IDS: [u8; NGRAPH] = [0, 2, 3, 1, 255];
 
 /// Graph markers in draw order: T, X cursor 1, X cursor 2, the FFT centre
-/// 'M' (stock, fixed at column 200, FFT mode), the FFT peak (fw-rs: a white
+/// 'M' (stock, fixed at column 200, FFT mode), the FFT peak (opendm40: a white
 /// filled 'M' pointing down at the peak, its tip on the peak row).
 pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
     let top = m.top();
@@ -1011,7 +1011,7 @@ pub fn zones(m: &Model, out: &mut [Zone; NZONE]) -> usize {
     n
 }
 
-/// fw-rs addition (port plan sec. 5.2): the cursor lines themselves are
+/// opendm40 addition (port plan sec. 5.2): the cursor lines themselves are
 /// zones too, +-12 px around each line over the graph (the stock zones are
 /// only around the small markers at the graph edge). After `zones`.
 pub fn line_zones(m: &Model, out: &mut [Zone; 4]) -> usize {
@@ -1160,7 +1160,7 @@ impl Deco {
             match m.sel_h {
                 0 if (1..=399).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: ctr }),
                 // FFT centre (stock: a line at x 0 that is never positioned;
-                // fw-rs: the centre column the 'M' marker stands on).
+                // opendm40: the centre column the 'M' marker stands on).
                 1 if m.math_on && m.math_mode == 5 => d.v[0] = Some(VLine { fx: 200, col: d.math }),
                 _ => {}
             }
@@ -1698,7 +1698,7 @@ pub fn update(m: &Model) {
     for (k, &(r, bits)) in tabs.iter().enumerate() {
         g.set_hole_at(H_TAB_L + k, (m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0).then_some(r));
     }
-    // FFT: the stock centre-frequency label and the fw-rs boxes, holes too.
+    // FFT: the stock centre-frequency label and the opendm40 boxes, holes too.
     let fft_on = m.math_on && m.math_mode == 5;
     let add = if fft_on { m.fft } else { None };
     g.set_hole_at(H_FFT_HZ, fft_on.then_some(fft_label_rect(m)));
@@ -1740,7 +1740,7 @@ pub fn update(m: &Model) {
 }
 
 // ------------------------------------------------------------------ FFT
-// Stock: the centre-frequency label (spec sec. 3.2). fw-rs additions
+// Stock: the centre-frequency label (spec sec. 3.2). opendm40 additions
 // (UF-11): the vertical scale box (top left), the horizontal scale box
 // (bottom, between the timebase tap zones), the peak readout (right, under
 // the label, white like the peak marker). All are graph holes painted over it.
@@ -1777,7 +1777,7 @@ pub fn fft_label(m: &Model) {
     });
 }
 
-/// An FFT box (fw-rs): ring r5 and text in `col` on the graph fill (letter
+/// An FFT box (opendm40): ring r5 and text in `col` on the graph fill (letter
 /// spacing 1: "B/", "z/" touch in this font otherwise).
 fn fft_box(r: Rect, text: &str, col: Color) {
     let t = Ink::new(sf::SC_F12, r, text, 8, 1);
@@ -1839,7 +1839,7 @@ pub fn cells_step(m: &Model, texts: &[&str]) -> bool {
 }
 
 // ------------------------------------------------------------------ tap step
-// fw-rs timebase tap step (docs/scope-scale-ux.md sec. 3): value-preview
+// opendm40 timebase tap step (docs/scope-scale-ux.md sec. 3): value-preview
 // tabs, tap zones, the press decision, the hold repeat. Pure functions of
 // the model and the touch so the host tests (tools/touch-test, ui-render)
 // run exactly what the page runs.
@@ -1974,7 +1974,7 @@ pub enum Press {
 
 /// The page's press decision at (x, y) inside INNER: the object under the
 /// finger wins: the stock marker zones (search order, `pick_zone`), then
-/// the cursor lines (fw-rs), and only then the tap-step zone of `mode`.
+/// the cursor lines (opendm40), and only then the tap-step zone of `mode`.
 pub fn graph_press(m: &Model, mode: u8, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Press {
     let mut z = [Zone::NONE; NZONE];
     let n = zones(m, &mut z);
@@ -2110,7 +2110,7 @@ pub enum Popup {
     Mf(u8),
     Ch1(u8),
     Math(u8),
-    /// fw-rs timebase list (tap on the timebase badge): the timebase index
+    /// opendm40 timebase list (tap on the timebase badge): the timebase index
     /// in the list's centre band.
     Tb(u8),
 }
@@ -2252,7 +2252,7 @@ pub fn slider_value(x: i16) -> f32 {
 }
 
 /// MF popup page height per tab (box h = 40 + page).
-/// (Trigger: stock 55; fw-rs 125 with the trigger-type rows, UF-13.)
+/// (Trigger: stock 55; opendm40 125 with the trigger-type rows, UF-13.)
 const MF_PAGE_H: [i16; 4] = [150, 100, 125, 55];
 
 /// MF settings popup (FUN_08037574), tab 0..3.
@@ -2309,7 +2309,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             fill_text(rect(214, 61, 189, 20), pc, C_POP_BG, sf::SC_F16, rect(214, 61, 189, 20), "Mode:", C_FILL, 1, 0);
             option_list(rect(24, 81, 120, 24), pc, &["Rising", "Falling"], 60, if v.rising { 0 } else { 1 });
             option_list(rect(214, 81, 180, 24), pc, &["Auto", "Normal", "Single"], 60, v.mode as usize);
-            // fw-rs (UF-13): trigger type and its parameters.
+            // opendm40 (UF-13): trigger type and its parameters.
             fill_c(rect(14, 116, 399, 70), pc, C_POP_BG);
             fill_text(TT_LABEL, pc, C_POP_BG, sf::SC_F16, TT_LABEL, "Type:", C_FILL, 1, 0);
             option_list(TT_LIST, pc, &crate::trigsoft::TYPE_NAMES, 60, v.ttype.min(2) as usize);
@@ -2342,7 +2342,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
 }
 
 /// Display tab: the two sliders and their values (repainted while dragged).
-// Trigger tab rows (fw-rs, UF-13).
+// Trigger tab rows (opendm40, UF-13).
 pub const TT_LABEL: Rect = rect(24, 116, 180, 20);
 pub const TT_LIST: Rect = rect(24, 136, 180, 24);
 pub const TP_LABEL: Rect = rect(214, 116, 189, 20);
@@ -2608,7 +2608,7 @@ pub fn draw_popup(p: Popup, v: &PopVals) {
     }
 }
 
-// fw-rs timebase list popup (docs/scope-scale-ux.md sec. 3): the stock
+// opendm40 timebase list popup (docs/scope-scale-ux.md sec. 3): the stock
 // popup box and header, the stock spinner widget over every timebase. The
 // box's top row is y 21: y 20 is the frame line in the same colour (the
 // stock popups start at y 20), and the box keeps 3 px from the badges.

@@ -141,7 +141,7 @@ const TB: [(u32, u32, u32, u32); 30] = [
 ];
 /// User timebase range. Stock `SCOPE_TB_USER_MIN`/`MAX` = 3..29 (100 ns/div ..
 /// 50 s/div, `scope_gen_ui_v2_6.h:522`/`523`; label list `scope_sdiv[30]`
-/// `:494`). fw-rs now matches the full range: 3..29. In YT (non-roll) mode the
+/// `:494`). opendm40 now matches the full range: 3..29. In YT (non-roll) mode the
 /// stock caps the index at 24 (1 s/div, `SCOPE_TB_YT_MAX`, `:524`); 22..29
 /// (200 ms .. 50 s/div) run in roll mode when Roll is on.
 pub const TB_MIN: usize = 3;
@@ -985,7 +985,7 @@ impl Scope {
     /// Roll record: linearise the circular buffer so the stored record runs
     /// oldest -> newest, anchored at the newest sample (the right edge the user
     /// was watching). Matches the stock 65520-sample roll record (§3), capped at
-    /// the fw-rs 26 K capacity.
+    /// the opendm40 26 K capacity.
     fn snapshot_roll(&mut self) {
         let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
         let d = (wr + CAP - self.roll_last_wr) % CAP;

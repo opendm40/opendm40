@@ -17,7 +17,7 @@ chain: see [firmware/docs/native-boot.md](../firmware/docs/native-boot.md) (and
 No schematic of the DM40 is public. Facts are verified unless marked
 *inferred* or listed under [Unknowns](#unknowns). The pointer after a fact
 says where to check it: stock code (RE headers in
-[`stock/re/analysis/`](../stock/re/analysis)), fw-rs code, a photo or a
+[`stock/re/analysis/`](../stock/re/analysis)), opendm40 code, a photo or a
 datasheet. *Inferred*: deduced from register settings, scaling constants, the
 community BOM or the photos. *BOM only*: the community BOM is the only
 source.
@@ -145,7 +145,7 @@ scope, generator) shares one ground.
 | Optocouplers | 2 x EL3H7, 2 x "174 F163H" | what they carry is *inferred*: the BOM guesses the HY3131 INT plus the relay and MOSFET drive; see [Unknowns](#unknowns). BOM; the "174 F163H" (4-pin) next to the relay and the EL3H7 (marked "D424 EL3H7") are in [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg) |
 | DMM relay | Hongfa [HFD4/3-LS](datasheets/hongfa-hfd4.pdf) (DPDT, 3 V, latching per BOM) | marking in photos [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg), [relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg); review |
 | Input protection | varistors 07D681K (680 V), blue disc parts, 2 W wirewound/film resistors; FMMT619 pair (*inferred*, chat report [#41820](https://t.me/S2084K/41820)) | photos ([relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg), [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg)); which disc is a PTC and which a MOV is *inferred* from the markings |
-| Current shunts | 10 mohm (wire shunt), 0.5 ohm (SMD 2512 "R500"), 47.5 ohm (MELF 0207, *inferred*) | 0.5 ohm: marking in [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg); values from the stock scaling and fw-rs checks (below) |
+| Current shunts | 10 mohm (wire shunt), 0.5 ohm (SMD 2512 "R500"), 47.5 ohm (MELF 0207, *inferred*) | 0.5 ohm: marking in [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg); values from the stock scaling and opendm40 checks (below) |
 | Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A; switch the current ranges inside the one A jack | BOM only |
 | Fuse | ceramic cartridge in clips, next to the A jack | photo [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg) and [opened-case-overview.jpg](photos/opened-case-overview.jpg); rating unknown |
 | Scope ADC | 3PEAK [3PA1030](datasheets/3peak-3pa1030-reva1.pdf), 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 in code ([`firmware/src/scope.rs`](../firmware/src/scope.rs)) |
@@ -173,7 +173,7 @@ Small SOT-23 / SOT-89 / MSOP parts in [charger-tp4056-and-power.jpg](photos/char
 - HXTAL 25 MHz, PLL M=25 N=400 P=2 -> 200 MHz SYSCLK / HCLK; APB1 50 MHz,
   timer kernel clocks 200 MHz (TIMPRE). RCU_PLL read back on the device
   ([`firmware/src/clock.rs`](../firmware/src/clock.rs), [`firmware/src/genplan.rs`](../firmware/src/genplan.rs)).
-- USB 48 MHz: the stock PLLQ gives 44.4 MHz; fw-rs runs PLLSAI (P=6 -> 48 MHz)
+- USB 48 MHz: the stock PLLQ gives 44.4 MHz; opendm40 runs PLLSAI (P=6 -> 48 MHz)
   for USBFS ([`firmware/src/usb.rs`](../firmware/src/usb.rs)).
 - On-chip blocks the board uses: USBFS, two 12-bit DAC channels (both used,
   [Generator](#generator) and [Oscilloscope](#oscilloscope)), DMA, ADC0.
@@ -184,7 +184,7 @@ Small SOT-23 / SOT-89 / MSOP parts in [charger-tp4056-and-power.jpg](photos/char
 
 [W25Q128JV](datasheets/winbond-w25q128jv-revI.pdf), 16 MiB, on SPI1 (GD32 naming; base 0x40003800): SCK PD3, MISO PC2,
 MOSI PC3 (AF5), CS PE4 (GPIO, active low), mode 3. The stock runs it at
-3.125 MHz, fw-rs at 12.5 MHz after a boot self-check. The whole chip is one
+3.125 MHz, opendm40 at 12.5 MHz after a boot self-check. The whole chip is one
 FAT16 volume with 4096-byte sectors: the USB disk of the meter
 ([`firmware/src/spiflash.rs`](../firmware/src/spiflash.rs), [`spiflash_v2_6.h`](../stock/re/analysis/spiflash_v2_6.h)). The FS-loader also uses it for
 updates.
@@ -212,7 +212,7 @@ updates.
 - The four touch keys below the screen (review: Menu, Start/Stop, Auto,
   manual range) are reported by the touch controller itself as key codes 0..3,
   not by GPIOs ([`touch.rs`](../firmware/src/touch.rs), measured X 372/628/884/1140).
-- Pull-up strength unknown; fw-rs measures the rise time before going to
+- Pull-up strength unknown; opendm40 measures the rise time before going to
   400 kHz.
 
 ## Power key, PA2, buzzer
@@ -227,7 +227,7 @@ updates.
   See [Debug header and hardware recovery](#debug-header-and-hardware-recovery).
 - **Buzzer**: PA7 AF9 = TIM14_CH1 PWM,
   200 MHz / 5 / 11200 = 3.57 kHz, loudness = duty
-  ([`lcd_buzzer_v2_6.h`](../stock/re/analysis/lcd_buzzer_v2_6.h), fw-rs [`app.rs`](../firmware/src/app.rs)). The continuity / diode beep is not
+  ([`lcd_buzzer_v2_6.h`](../stock/re/analysis/lcd_buzzer_v2_6.h), opendm40 [`app.rs`](../firmware/src/app.rs)). The continuity / diode beep is not
   made by the MCU: the stock only toggles the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CMP pin buffer (ENPCMPO),
   so the HY3131 comparator output drives the buzzer stage (*inferred*,
   [`firmware/docs/parity.md`](../firmware/docs/parity.md)). The only buzzer-like part in
@@ -256,7 +256,7 @@ unpopulated, silkscreened. Seen with the board as in
 |---|---|
 | TX | **PA2** (pull-up enabled by the bootloader and the FS-loader) |
 | GND | MCU-domain ground, next to TX |
-| RX | **PA3** (USART1_RX on the GD32F4; unused by the stock firmware and fw-rs) |
+| RX | **PA3** (USART1_RX on the GD32F4; unused by the stock firmware and opendm40) |
 | VCC | ~3.1 V while the meter is on (measured); **not** wired directly to the MCU supply; what sits in between is not traced |
 | V, D, C, G | SWD: V = VCC, D = **PA13** (SWDIO), C = **PA14** (SWCLK), G = GND |
 
@@ -265,12 +265,12 @@ firmware, [`stock/re/ANALYSIS.md`](../stock/re/ANALYSIS.md) 1) show read protect
 with it a debugger cannot read or write the flash, and lifting it
 mass-erases the whole MCU flash: the Alientek bootloader, the FS-loader, the
 calibration and the UID-bound boot data. Use SWD only as a last resort, after
-the fw-rs backup (root README, [Back up with fw-rs](../README.md#back-up-with-fw-rs)),
+the opendm40 backup (root README, [Back up with opendm40](../README.md#back-up-with-fw-rs)),
 and restore in the order given there.
 
 PA2's alternate function on the GD32F4 is USART1_TX, so the pad is labelled
 as a UART TX. The stock firmware never enables USART1 (per the RE notes), and
-neither does fw-rs: in practice the pad is only the boot strap.
+neither does opendm40: in practice the pad is only the boot strap.
 PA2 reads low only when it is shorted to GND, or when something connected to
 the header pulls it low.
 
@@ -285,7 +285,7 @@ bootloader and the FS-loader before the application runs.
 3. Keep the short until the update screen appears ("open file error" and the
    FS-loader's own USB disk on the PC).
 4. Copy an update file onto that disk under a `dm40*.bin` name: the official
-   [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) from [`stock/vendor/`](../stock/vendor) in this repo (back to stock) or a fw-rs image (e.g. `dm40_fwrs.bin`),
+   [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) from [`stock/vendor/`](../stock/vendor) in this repo (back to stock) or an opendm40 image (e.g. `dm40_fwrs.bin`),
    then press "update" on the screen.
 5. Remove the short.
 
@@ -293,7 +293,7 @@ Not verified yet: the exact timing, i.e. whether the short must be in place at p
 (as written above) or also works when applied during a reset, and how long
 it must be held.
 
-Software ways to the same screen while fw-rs runs (`DBG:UPDATE`, the key-hold
+Software ways to the same screen while opendm40 runs (`DBG:UPDATE`, the key-hold
 recovery, the double-hang rule) are in [firmware/README.md, Recovery](../firmware/README.md#recovery).
 
 ## USB
@@ -325,7 +325,7 @@ configuration rows (R20..R35 per mode and range) and their decoding are in
 [emu/hy3131/README.md](../emu/hy3131/README.md).
 
 **Bus.** SCK PC10, MISO PC11, MOSI PC12, CS PD2 (active low), mode 0. The stock
-bit-bangs it; fw-rs uses SPI2 (AF6) at 3.125 MHz
+bit-bangs it; opendm40 uses SPI2 (AF6) at 3.125 MHz
 ([`firmware/src/hy3131.rs`](../firmware/src/hy3131.rs), [`firmware/docs/dmm-input-scope-feasibility.md`](../firmware/docs/dmm-input-scope-feasibility.md) 8). The
 signals cross the [CA-IS3741](datasheets/chipanalog-ca-is374x-v1.08.pdf) isolator (the channel assignment is *inferred*: it has 3 forward and 1
 reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
@@ -338,15 +338,15 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 | AD1 | 24-bit sigma-delta, IG 0.9..3.6, reference PB6 (1.25 V) or internal | AD1CLK = SYSCLK / 30; OSR 256..32768. Stock steady 32768, moving 8192 ([`firmware/src/dmm.rs`](../firmware/src/dmm.rs)) |
 | AD2 / AD3 | 19-bit fast converters, shared clock and OSR | 76.8 kS/s in the stock AC rows (SYSCLK / 2 / 32); ladder down to 600 S/s ([`dmm-input-scope-feasibility.md`](../firmware/docs/dmm-input-scope-feasibility.md) 1.1) |
 | RMS / LPF | digital true RMS (sum X^2 or X*Y) and low-pass of AD2 | ~106.7 ms per result measured with LPFBW 111 (half the datasheet formula, [`RESEARCH.md`](../emu/hy3131/RESEARCH.md) 8) |
-| Peak hold | on AD2, AD1<23:5> or LPF | used by fw-rs's A-jack probe ([`firmware/src/sentinel.rs`](../firmware/src/sentinel.rs)) |
-| Comparator | window comparator, thresholds from R21; output CMPO / CMP pin | continuity beeper, capacitance ramp, frequency, fw-rs sentinels |
+| Peak hold | on AD2, AD1<23:5> or LPF | used by opendm40's A-jack probe ([`firmware/src/sentinel.rs`](../firmware/src/sentinel.rs)) |
+| Comparator | window comparator, thresholds from R21; output CMPO / CMP pin | continuity beeper, capacitance ramp, frequency, opendm40 sentinels |
 | Counter | CTA / CTB / CTC, gate preset 0xFC0000 = 0x40000 SYSCLK = 53.3 ms | frequency (reciprocal), capacitance (RC oscillator) |
 | Op amps | OP1, OP2 (2 MHz), OP3 (ohm / diode source) | x1 / x10 gain stages on the shunt and mV paths |
 
 AD1 on a periodic input aliases (the "AD1 beat"): see `firmware/docs/dc-aliasing.md` (on branch `dcalias`, not merged yet).
 AC bandwidth is about 20 kHz (-3 dB, chat reports [#24765](https://t.me/S2084K/24765),
 [#16732](https://t.me/S2084K/16732)); the AC V path has an external coupling capacitor with a time constant
-of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), [`acdc-stock-vs-fwrs.md`](../firmware/docs/acdc-stock-vs-fwrs.md)).
+of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), [`acdc-stock-vs-opendm40.md`](../firmware/docs/acdc-stock-vs-opendm40.md)).
 
 **MCU GPIOs on the DMM side** (the complete list the stock drives,
 [`hy3131_v2_6.h`](../stock/re/analysis/hy3131_v2_6.h) lines 14-18, [`firmware/src/dmm.rs`](../firmware/src/dmm.rs) `relay_pa` / `relay_pe`):
@@ -391,7 +391,7 @@ MOSFETs shorting the lower parts (*inferred* from the mode table;
 Measurement nodes: HY3131 PB2 = top of the 10 mohm element (every A-jack
 current passes it), PB1 = top of the 47.5 ohm resistor, PB3 = the low side
 (*inferred*). Shunt values: 0.5 ohm from the "R500" marking; 10 mohm and
-47.5 ohm *inferred* from the stock scaling and the fw-rs fuse check, which
+47.5 ohm *inferred* from the stock scaling and the opendm40 fuse check, which
 reads ~48 ohm A-COM through the whole chain on the device
 ([`sentinel.rs`](../firmware/src/sentinel.rs)). The 10 mohm element is the bent
 copper-coloured wire bridge between the jacks in
@@ -412,10 +412,10 @@ series (*inferred*). Its colour bands read yellow-violet-black-brown, i.e.
 nominal, and calibration absorbs the difference).
 
 **No jack sensing.** The DM40 has no jack sense switches or pins: the stock
-DMM GPIO list is the one above. fw-rs detects leads in the wrong jack only
+DMM GPIO list is the one above. opendm40 detects leads in the wrong jack only
 through the shunt node (HY3131 PB1 comparator) and the divider tap
 ([`sentinel.rs`](../firmware/src/sentinel.rs), [`power-meter-and-misconnect.md`](../firmware/docs/power-meter-and-misconnect.md) 4.1). A blown fuse cannot be
-seen by the meter (the A side of the fuse has no path into the chip); fw-rs's
+seen by the meter (the A side of the fuse has no path into the chip); opendm40's
 "Fuse check" measures A-COM in ohm mode instead.
 
 ## Oscilloscope
@@ -493,8 +493,8 @@ seen by the meter (the A side of the fuse has no path into the chip); fw-rs's
 ## Pin table
 
 GD32 peripheral names (UART4, SPI1, SPI2, I2C2, DMA0 / DMA1) follow the
-GD32F4xx user manual as the fw-rs sources do. The source column names the
-fw-rs or stock code that drives the pin.
+GD32F4xx user manual as the opendm40 sources do. The source column names the
+opendm40 or stock code that drives the pin.
 
 | Pin | Function | Dir | Source |
 |---|---|---|---|
@@ -550,7 +550,7 @@ fw-rs or stock code that drives the pin.
 | PE7..PE15 | FSMC data (AF12) | io | [`board.rs`](../firmware/src/board.rs) |
 | PH0 / PH1 | 25 MHz HXTAL | - | *inferred* (standard pins) |
 
-Not used by the stock firmware or fw-rs as far as traced: PA3 (the debug
+Not used by the stock firmware or opendm40 as far as traced: PA3 (the debug
 header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 
 ## Models DM40A / B / C

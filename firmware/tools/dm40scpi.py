@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DM40 (fw-rs) SCPI host client: readings, CSV logging, function switching
+"""DM40 (opendm40) SCPI host client: readings, CSV logging, function switching
 (UF-38, docs/user-feedback.md section 10). Over USBTMC (default; the
 transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:0001) or Bluetooth
 (--bt; the transport of dm40bt_scpi.py: RFCOMM channel 1, or --dev
@@ -34,7 +34,7 @@ transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:0001) or Bluetooth
                                               the rest drained, the trailer; a
                                               second Ctrl-C abandons the drain)
     dm40scpi.py ad2 torn|noise [-n 2000] [--sync] [--rungs ...]
-                                              AD2 device experiments (fw-rs
+                                              AD2 device experiments (opendm40
                                               DBG:AD2:TORN? / NOISE?, meter in an
                                               AC mV / A row): torn-read
                                               histogram / noise and ENOB per rung
@@ -45,7 +45,7 @@ transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:0001) or Bluetooth
                                               with tools/dlog.py)
     dm40scpi.py fast out.csv --source ad2 --rate 9600 --dur 30
                                               the fast logger to the meter's
-                                              disk (LOG:DEST DISK; fw-rs
+                                              disk (LOG:DEST DISK; opendm40
                                               fastlog.rs): LOGS/FASTnnn.DLG,
                                               then its generated CSV copied
                                               (t_s,raw,value,lost_before);
@@ -331,7 +331,7 @@ def _stream_session(link, args, ad2, t_start):
     req, nom_mhz, r26, coupling = (pre[7], pre[8], pre[9], pre[10]) if len(pre) > 10 else (0, 0, 0, 0)
     period_us = 1e9 / nom_mhz if nom_mhz else float(nom_us)
     scale, unit = ad2_scale(mode, rng) if ad2 else (None, '')
-    # The meter's own scale (LOG:SCALe?, fw-rs E7): the stock calibration or,
+    # The meter's own scale (LOG:SCALe?, opendm40 E7): the stock calibration or,
     # in DC V, the entry self-cal; older firmware: an error, nominal scale.
     off, cal = 0.0, False
     if ad2:
@@ -623,7 +623,7 @@ def do_btpoll(link, args):
 
 
 def main():
-    p = argparse.ArgumentParser(description='DM40 fw-rs SCPI client (USBTMC or Bluetooth).',
+    p = argparse.ArgumentParser(description='DM40 opendm40 SCPI client (USBTMC or Bluetooth).',
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     p.add_argument('--bt', action='store_true', help='use Bluetooth instead of USBTMC')
     p.add_argument('--mac', default=os.environ.get('DM40_MAC'), help='(--bt) meter MAC')

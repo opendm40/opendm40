@@ -6,7 +6,7 @@
 // are raised, circular streams reload. This replaces Renode's STM32DMA for the
 // DM40 because the stock firmware enables its I2C TX channel before the
 // address phase (STM32DMA would push the data at once), the stock scope and
-// fw-rs's BT UART use circular streams, and the scope feeder needs to drive
+// opendm40's BT UART use circular streams, and the scope feeder needs to drive
 // one sample per timer request.
 //
 using System;

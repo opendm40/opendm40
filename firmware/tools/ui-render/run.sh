@@ -1,5 +1,5 @@
 #!/bin/bash
-# Host render + layout check of the fw-rs screens (main.rs): builds the real
+# Host render + layout check of the opendm40 screens (main.rs): builds the real
 # drawing code (src/ui.rs, src/stockfont.rs, ...) for the host with
 # --cfg test (draw-call probes on) against the LCD emulator in host.rs, runs
 # the worst-case matrix and the layout rules, writes PNG renders (2x) and a

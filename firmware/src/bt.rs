@@ -67,7 +67,7 @@ const RX_PADDR: u32 = ch_reg(2, 0x18);
 const RX_M0ADDR: u32 = ch_reg(2, 0x1C);
 const DMA_INTC0: u32 = DMA0 + 0x08;
 /// TX: channel 4 (flags in INTF1/INTC1 at bit 0). gen.rs uses channel 5, the
-/// scope DMA1; nothing else in fw-rs uses DMA0.
+/// scope DMA1; nothing else in opendm40 uses DMA0.
 const TX_CTL: u32 = ch_reg(4, 0x10);
 const TX_CNT: u32 = ch_reg(4, 0x14);
 const TX_PADDR: u32 = ch_reg(4, 0x18);
@@ -294,8 +294,8 @@ impl Bt {
 
     /// Module power from the Bluetooth setting (call every main-loop pass;
     /// writes PC0 only on a change). The stock powers the module only while
-    /// BT is on (and only on its meter page; fw-rs serves BT on every view).
-    /// Native fw-rs left PC0 high from board::init: the module stayed off and
+    /// BT is on (and only on its meter page; opendm40 serves BT on every view).
+    /// Native opendm40 left PC0 high from board::init: the module stayed off and
     /// the meter was unreachable (Host is down, no inquiry / advertising).
     pub fn power(&mut self, on: bool) {
         let now = self.ms();
@@ -700,7 +700,7 @@ impl Bt {
                     | (power.bars & 0x07);
                 let shown = meter.shown();
                 // Temperature: the stock frame is main in C, value 2 the cold
-                // junction in C, value 3 deg F; fw-rs readings follow the
+                // junction in C, value 3 deg F; opendm40 readings follow the
                 // global unit (Settings / UNIT:TEMP) and carry no deg F
                 // second value, so rebuild the stock triple here.
                 let to_c = |v: crate::dmm::Val| if v.unit == "\u{b0}F" { crate::dmm::Val { v: (v.v - 32.0) / 1.8, unit: "\u{b0}C", ..v } } else { v };

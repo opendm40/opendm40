@@ -13,7 +13,7 @@
 //! bipolar scale) and the overload marker are text, drawn by ui.rs
 //! (DmmView) under / beside the bar.
 //!
-//! Rate (measured facts, dmm.rs FR-05 table): fw-rs has no separate fast
+//! Rate (measured facts, dmm.rs FR-05 table): opendm40 has no separate fast
 //! channel; a Reading arrives once per AD1 conversion: 10/s while moving and
 //! in FAST (OSR 8192), 2.5/s once a MEDIUM / SLOW reading is steady (OSR
 //! 32768); AC runs on the RMS converter's own rate. The >= 40/s asked for in

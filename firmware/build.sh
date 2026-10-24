@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build fw-rs: the native update file -> opendm40.bin.
+# Build opendm40: the native update file -> opendm40.bin.
 #   ./build.sh [native] [cargo args]       e.g. ./build.sh --features keep-screen
 # (`native` is accepted as a no-op first argument for older callers, e.g.
 # emu/run.py.) Body = 0x08004000..end with the 12-byte loader marker at

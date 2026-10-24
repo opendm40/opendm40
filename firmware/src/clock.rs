@@ -55,7 +55,7 @@ pub fn delay_us(us: u32) {
 // ===========================================================================
 // Core-clock bring-up for the native (XIP) image.
 //
-// fw-rs runs from flash at 0x08004000 after the FS-loader, which leaves the
+// opendm40 runs from flash at 0x08004000 after the FS-loader, which leaves the
 // clock tree in an unknown state, so the shim (src/shim.rs) calls `init_core`
 // before anything else that depends on HCLK.
 //

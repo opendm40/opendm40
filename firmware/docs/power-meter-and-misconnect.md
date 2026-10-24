@@ -12,7 +12,7 @@ Evidence tags:
   bytes (`stock/re/analysis/hy3131_v2_6.h`, byte-identical copies in
   `firmware/src/hy3131_tables.rs`), the stock formulas and relay table
   (`dmm_v2_6.h`, `hy3131_v2_6.h`) or a device measurement already in
-  `firmware/docs/acdc-stock-vs-fwrs.md`.
+  `firmware/docs/acdc-stock-vs-opendm40.md`.
 * **INFERRED** = what the row bytes + the stock scale constants imply about the
   board wiring (RESEARCH.md open point 5: the DM40 PA/PB netlist is not known),
   BOM-based conclusions ([hw/README.md](../../hw/README.md)), or chip behaviour
@@ -258,7 +258,7 @@ machine is the stock's own pattern.
   phi_err: at PF 0.5, 0.61 deg = 0.9 % of S = 1.8 % of P; at PF 0.1 it is 10 %
   of P.
 * SPHACAL covers it: 0.61 deg at 50 Hz = 34 us = 83 steps of 0.407 us (fits
-  127). Datasheet order: write R36 before enabling AD2/AD3. fw-rs's `configure`
+  127). Datasheet order: write R36 before enabling AD2/AD3. opendm40's `configure`
   enables AD3 then AD2 (the beat fix, acdc doc 10) - compatible: R36 is part of
   the 22-byte row, written before both enables. R36 is byte 22 of the row
   region (R20..R36 = 23 bytes): extend `configure` or write R36 separately
@@ -267,7 +267,7 @@ machine is the stock's own pattern.
   a transformer): maximise `RMSxy / sqrt(RMSxx * RMSyy)` (should reach 1.000
   at PF 1); the optimum is flat (cos), so use the zero-crossing method instead:
   swap to a capacitor/inductor load (PF ~0) and null P, or fit the three
-  statistics at two SPHACAL values. Store the result in fw-rs settings (not the
+  statistics at two SPHACAL values. Store the result in opendm40 settings (not the
   stock cal record).
 * The AD2/AD3 "beat" (acdc doc 10): sum(X*Y) exceeded the Cauchy-Schwarz bound
   when AD2 was enabled before AD3, i.e. the chip paired misaligned samples; for
@@ -311,7 +311,7 @@ COM**, and COM is at the potential of the conductor you break into.
 
 (Corrected 2026-10-22: an earlier version of this sketch had A and COM
 swapped, which contradicts the sign paragraph below; the load current must
-enter A and leave through COM to read positive. The fw-rs entry dialog draws
+enter A and leave through COM to read positive. The opendm40 entry dialog draws
 this version.)
 
 Wiring 1 (above, "V on the source side"): V-COM = V_load + I * R_path. The
@@ -494,7 +494,7 @@ Effort: 3.7 skeleton 1-2 days; B row + phase machine + SCPI 3-4 days; UI 2
 days; phase cal + tests 2 days; emulator role 2 days.
 
 
-### 3.11 Implemented (fw-rs, 2026-10-22; follow-ups in 3.12)
+### 3.11 Implemented (opendm40, 2026-10-22; follow-ups in 3.12)
 
 `firmware/src/powermeter.rs` (a child of dmm.rs: row builder, phase machine,
 scaling, energy, autorange, burden, limit; host tests), `src/ui_power.rs`
@@ -549,10 +549,10 @@ settings page at 18 states, 0 violations; renders p01..p08, c12):
   -> Power Settings: V ranges + AUTO, I ranges + AUTO, P + PF / VA only
   (the fallback), Burden ON / OFF, Reset Wh, Wiring (the dialog again), OK.
 
-Emulator results (`emu/hy3131/powtest.py`, fw-rs native over USB/IP, the
+Emulator results (`emu/hy3131/powtest.py`, opendm40 native over USB/IP, the
 model's Power role; burden compensation off unless stated; all 11 OK):
 
-| scenario | input | fw-rs (FETC:POW:ALL?) |
+| scenario | input | opendm40 (FETC:POW:ALL?) |
 |---|---|---|
 | resistive | `pow:230@50,i=1,pf=1` | P 230.02 W, S 229.95 VA, PF 1.000, 230.00 V, 0.9998 A, 50.001 Hz, 600 V / 10 A |
 | PF 0.5 | `pf=0.5` | P 115.00, S 230.02, Q 199.2, PF 0.49995 |
@@ -710,7 +710,7 @@ power, T5 ranges, T6 burden, the limit countdown, XY / XX switch cost.
 Follow-ups for the build: per-range V gain (or a user V cal), LPF zero on X
 and Y, f in power mode.
 
-### 3.12 Follow-ups (fw-rs, 2026-10-22): V gain, zeros, f, DC method, 7th button
+### 3.12 Follow-ups (opendm40, 2026-10-22): V gain, zeros, f, DC method, 7th button
 
 Built on 853f945 against the device results of 3.11. Parts of 3.11 this
 replaces: the entry (now the W button), "the function is not restored",
@@ -874,7 +874,7 @@ coupling), the 6 X zeros); a v6 record loads zero-extended (= factory gains,
 no zeros, dialog not seen, AC).
 
 **Emulator** (both HY3131.cs / DM40Frontend.cs copies identical): Y gain =
-the factory-derived tap gain (inverse, so fw-rs reads true) x `powvg:`;
+the factory-derived tap gain (inverse, so opendm40 reads true) x `powvg:`;
 `powz:1` = the device's LPF zeros (Y +1080, X +888 x10 / +155 x1); the
 power role's counter on SENSE (dc + AC against the window) and PB4 (the
 current); the DC row (round 3) has AD1 on the current; the f8_9 DC A rows fold the uA calibration when PE selects the
@@ -971,7 +971,7 @@ renders p07 (settings + status), p09 (I ranging), p10 (refused V cal), p11
    functions, XY / XX switch cost with a real current (DISC 2 kept), PB4 f
    with a current-only AC signal.
 
-### 3.13 The TODO remainder (fw-rs, 2026-10-22): BT, W limits, phase cal
+### 3.13 The TODO remainder (opendm40, 2026-10-22): BT, W limits, phase cal
 
 **Bluetooth: the stock phone protocol.** The protocol (docs/bt-protocol.md,
 `stock/re/analysis/bt_meas_v2_6.h`) has no unit field: the phone app
@@ -1088,7 +1088,7 @@ arms LLVM folded its ~10 KB into main.rs `run`), SRAM free 12.9 KB.
 4. Over BT SCPI (tools/dm40bt_scpi.py): `CONF:POW`, `FETC:POW:ALL?`,
    `CALC:LIM:UPP 100`, `CALC:LIM:FAIL?`.
 
-### 3.14 Owner round 4 (fw-rs, 2026-10-22): no false OVERLOAD, DC / AC / AC+DC, a readable settings page
+### 3.14 Owner round 4 (opendm40, 2026-10-22): no false OVERLOAD, DC / AC / AC+DC, a readable settings page
 
 **False OVERLOAD with ~3 A (owner).** The I channel autoranges across all
 three shunts (it enters on 10 A and walks down), but the doc 4.3 OVERLOAD
@@ -1187,7 +1187,7 @@ dialogs), p23 (help page); ui-render 0 violations.
 6. A reboot keeps the coupling (AC persists as 3; a unit last in AUTO comes
    back in AC+DC).
 
-### 3.15 Burden voltage in the A functions (fw-rs, 2026-10-22)
+### 3.15 Burden voltage in the A functions (opendm40, 2026-10-22)
 
 As the EEVblog 121GW: the DMM page shows how much the meter drops in the
 circuit it measures, `I x R_path` of the shunt in use (3.6), so the user
@@ -1279,7 +1279,7 @@ Bench supply with a series resistor into A (or mA / uA), a second meter
    duty cycle comes back in AC A, aux1 empty in DC A, no stale caption.
 7. Phone app in AC A with the readout on: value 3 empty, no mV shown as mA.
 
-### 3.16 Owner round 5 (fw-rs, 2026-10-22): "At load" opt-in and marked, DC at entry, AC floors, coupling hints
+### 3.16 Owner round 5 (opendm40, 2026-10-22): "At load" opt-in and marked, DC at entry, AC floors, coupling hints
 
 **"At load" was invisible (owner).** With 1.234 V on V-COM the top V read
 1.2240 V at 1 A and 1.2140 V at 2 A: the readout was V - I R_path (3.11,
@@ -1327,7 +1327,7 @@ resets it to DC, so set the coupling after `CONF:POW` (powtest does).
 
 **AC floors (owner: AC coupling on pure DC showed V 0.0015 V, I 0.014 A,
 PF -0.092, S 0.02 mVA, Q 0.02 mvar).** The stock AC V / AC A only clamp a
-negative RMS (after the offset calibration) to 0; fw-rs's existing "no AC
+negative RMS (after the offset calibration) to 0; opendm40's existing "no AC
 here" level is the AUTO coupling's "to DC" floor (dmm.rs AUTO_FLOOR_V / _A
 [1], acdc doc 9: V 0.5 %, A 2 % of the range; A's 2 % is sized for the uA
 path's ~1.5 % RMS residue). `pw::FLOOR_V` reuses V's 0.5 %. `FLOOR_I` is
@@ -1433,7 +1433,7 @@ hence 0.5 %.
    generator AC-coupled onto a DC): "AC?" badge, toast "AC present: use
    AC+DC", `SYST:ALER?` AC; Settings 3/3 hints off: none.
 
-### 3.17 AC+DC: the DC and AC parts on the page (fw-rs, 2026-10-22; owner's variant V2)
+### 3.17 AC+DC: the DC and AC parts on the page (opendm40, 2026-10-22; owner's variant V2)
 
 The owner picked V2 of the mockups (scratchpad pwmock: V1 a table in the
 chart's place, V2 sub-lines, V3 a tap cycle total / DC / AC): in **AC+DC
@@ -1547,7 +1547,7 @@ rows' own R21 = 0xdd (+-20.8 mV at the comparator input, VERIFIED): 0.44 mA on
 | AC A (f4 / f5_6) | AD2/AD3, OP1, comparator = frequency readout (R20 0xf2, SCMPI = PB4: in AC A the PB4 node carries the current signal coupled from OP1O, INFERRED) | - | **AD1 free** (R23 0x03): SENSE - PB5 with the /1000 tap (SS5), chopped OSR 2048 (25 ms) for DC, peak hold for AC: ~2 V detection |
 | frequency (f14) | counter, AD1 (PB5 - PB5 zero reading), AD2 | comparator busy -> AD1 (PB1 - PB3) replaces the zero-reading input | - |
 
-AC+DC caveat: in AC+DC the stock and fw-rs (`freq_secondary(now, 0xF0)`, acdc
+AC+DC caveat: in AC+DC the stock and opendm40 (`freq_secondary(now, 0xF0)`, acdc
 doc 7 item 1) rewrite R20 = 0xf0 / 0xf2 every 350 ms in **both** phases, which
 points the comparator back at PB4. The DC-phase A-jack sentinel must therefore
 fold its SCMPI = PB1 into the `src` byte that `freq_secondary` writes (and
@@ -1601,7 +1601,7 @@ fields differ from the stock row).
   circuit) limits the current, the clamp level is still visible. Partial, P3.
 * **Stock warnings**: none for connections. The analysis headers list only the
   V-mode colour (red from 30 V) and the HV glyph (from 100 V, dmm_v2_6.h 7)
-  plus "Low battery"; fw-rs has them (`ui.rs hv_warning`, `strip_data` badge).
+  plus "Low battery"; opendm40 has them (`ui.rs hv_warning`, `strip_data` badge).
 
 ### 4.4 Warning design
 
@@ -1659,7 +1659,7 @@ sentinel readings are also exposed for the emulator/device tests:
 Effort: rows + sentinel state + A-JACK alert 2 days; V-JACK / LIVE / hints 1
 day; fuse check dialog 0.5 day; tests 1 day.
 
-### 4.6 Implemented (fw-rs, 2026-10-21)
+### 4.6 Implemented (opendm40, 2026-10-21)
 
 `firmware/src/sentinel.rs` (row builder, alert state machine, host tests),
 hooks in `dmm.rs` (`write_config`, `poll`, `poll_ac`, ohm / continuity /
@@ -1704,7 +1704,7 @@ A current times the relay-selected shunt, instantaneous, in the DC V / mV /
 ohm / temperature roles; SENSE = V jack / 1000 with SS5 in DC A; AD1 on PB1 -
 PB3 in the AC roles with the peak hold over every elapsed conversion; row
 matching ignores the AD1 fields of rows with AD1 off, PKHSEL / ENPKH, and SS5
-in the current rows): 199 host checks. fw-rs end to end over USB/IP
+in the current rows): 199 host checks. opendm40 end to end over USB/IP
 (`emu/hy3131/senttest.py`, 18 scenarios, all as expected): 1 mA DC / -1 mA / 5 mA AC 50 Hz / 5 V across
 A-COM in DC V, 2 mA in DC mV, 2 mA in ohm, 5 mA with a thermocouple, 10 mA AC
 and 1 mA DC in AC V, 5 mA AC 60 Hz in AC mV -> AJACK, cleared ~1 s after the
@@ -1712,7 +1712,7 @@ source goes; 0.2 mA in DC V -> NONE; 24 V DC and 230 V AC on V-COM in DC A ->
 VJACK, 5 V or 24 V with 12.3 mA flowing -> NONE; -1 V in ohm and diode, 1.234
 V in continuity -> LIVE; ENAB 6 -> NONE. The readings stayed those of the
 stock rows (1.2340 V, 100.3 C, 1.0000 V AC, 4699.98 ohm), and the
-`modetest.py --cross` table of fw-rs (86 cells) is unchanged against the parent
+`modetest.py --cross` table of opendm40 (86 cells) is unchanged against the parent
 commit within the model noise (all ok; largest moves: the AC V floor 0.84 ->
 0.89 mV, diode on a thermocouple 10.79 -> 10.76 mV).
 
@@ -1746,7 +1746,7 @@ Device test plan (sentinel build; commit the tree before flashing):
   cleared 0.5 s after removal; DC mA reading with SS5 closed unchanged
   (12.3 mA reference); no alert while a current flows.
 
-### 4.7 Implemented (fw-rs, 2026-10-22): OVERLOAD, the other sentinels, hints, fuse check
+### 4.7 Implemented (opendm40, 2026-10-22): OVERLOAD, the other sentinels, hints, fuse check
 
 What the rest of 4.2-4.5 became, with the manual's answers of section 5 (ONE
 10 A ceramic fuse in front of all shunts: the 0.5 ohm mA shunt and the 47.5
@@ -1909,7 +1909,7 @@ the fuse check read 47.50 ohm.
 
 ---------------------------------------------------------------------------
 
-### 4.8 A-jack protection (fw-rs, 2026-10-22): the hybrid
+### 4.8 A-jack protection (opendm40, 2026-10-22): the hybrid
 
 Owner decision (TODO "A-jack protection hybrid"): keep the resting state of
 4.1 in every non-current function (PE0 = PE1 = 0, ~48 ohm A-COM: the
@@ -2059,7 +2059,7 @@ Bench supply with current limit, leads V-COM open, the supply across A-COM:
    compare the DC V offset of a known source (note 7).
 5. Do **not** test above 30 V across A-COM.
 
-### 4.9 "Leads in A?" reminder (fw-rs, 2026-10-22)
+### 4.9 "Leads in A?" reminder (opendm40, 2026-10-22)
 
 TODO "Leads in A?" (after the UNI-T UT197 comparison in TODO.md): the UT197
 senses a plug in its current jacks and flashes "InErr" in any non-current
@@ -2112,7 +2112,7 @@ pressed rows), Help 5/7 "Jack/A-lead alerts".
    source): the reminder, then A-JACK (red badge, its toast, 3-beep
    pattern) within ~0.3 s: A-JACK wins.
 
-### 4.10 Danger alarm (fw-rs, 2026-10-24): loud, whatever the volume
+### 4.10 Danger alarm (opendm40, 2026-10-24): loud, whatever the volume
 
 Owner request 2026-10-24: a wrong connection that is actually dangerous
 also beeps at **maximum** volume, overriding the key / alert volume (the
@@ -2249,7 +2249,7 @@ volume 0 % (the owner's setting), Settings 3/3 "Danger alarm" Loud.
 8. Above 10 A (if the bench allows it, briefly): > 10 A for 1 s in DC A ->
    the alarm; back below 10 A -> silent.
 
-### 4.11 Device f0d21eb follow-up (fw-rs branch sentinel2, 2026-10-24)
+### 4.11 Device f0d21eb follow-up (opendm40 branch sentinel2, 2026-10-24)
 
 Device check "f0d21eb" in `device-check-2026-10-21.md` (meter on f0d21eb, A jack
 not wired, the calibrator on V-COM only). Raw data: the session scratchpad's
@@ -2341,7 +2341,7 @@ Emulator (opt-in knobs, `emu/hy3131/README.md`): `pb5drift:0.6;pb5tau:2.2`
 switchtest: `aca-drift`, `aca-ovl`, `real-vjack-ac`, `real-vjack-blind`,
 `real-vjack-blind-prec`.
 
-### 4.12 Device 0774e70 follow-up (fw-rs branch sentinel3, 2026-10-24)
+### 4.12 Device 0774e70 follow-up (opendm40 branch sentinel3, 2026-10-24)
 
 Device check "0774e70" in `device-check-2026-10-21.md` (raw: the session
 scratchpad's `chk7/out/sp_s*.json`, `sent5_*.json`).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Developer reload of fw-rs (native image, docs/native-boot.md "Developer workflow").
+# Developer reload of opendm40 (native image, docs/native-boot.md "Developer workflow").
 #
 #   tools/reload.sh [options] [build args...]     e.g. --features keep-screen
 #
@@ -7,11 +7,11 @@
 # image: CRCs, size, no short last block the loader mis-decodes), upload it
 # over USBTMC into the SPI disk's root as DM40FW.BIN (tools/dm40dbg.py upload
 # = DBG:UPLOAD, src/upload.rs: any other dm40*.bin there is removed, the file
-# is re-read and its CRC-32 checked on the meter; the fw-rs USB disk is a
+# is re-read and its CRC-32 checked on the meter; the opendm40 USB disk is a
 # read-only generated volume), send DBG:UPDATE (the vendor loader installs
-# the file and deletes it), wait for fw-rs to come back and check with
+# the file and deletes it), wait for opendm40 to come back and check with
 # DBG:BOOT? that the loader marker is the header of the new file ("installed
-# OK"). A running fw-rs without DBG:UPLOAD (older build): staged on its
+# OK"). A running opendm40 without DBG:UPLOAD (older build): staged on its
 # writable USB disk as dm40_fwrs.bin instead (mount, copy, verify, eject).
 #
 # Options:
@@ -20,11 +20,11 @@
 #   --stock FILE    install a stock / patched stock update file the same way
 #                   (e.g. ../stock/patch/build-memrw/dm40_patched.bin, built
 #                   by stock/patch/kit/mkkit.sh); does not
-#                   wait for fw-rs afterwards
+#                   wait for opendm40 afterwards
 #   --from-stock    the meter runs stock or shows the loader update screen
 #                   (USB disk 28e9:028f): stage the image there, then you press
-#                   "update" / power-cycle; waits for fw-rs
-#   --wait S        seconds to wait for fw-rs after the update (default 90)
+#                   "update" / power-cycle; waits for opendm40
+#   --wait S        seconds to wait for opendm40 after the update (default 90)
 #   -h, --help      this text
 #
 # Environment: PYTHON (default /usr/bin/python3).
@@ -175,7 +175,7 @@ EOF
 # check_image FILE: the vendor format, CRCs, size, and no short last 128-byte
 # block that the FS-loader mis-decodes (key position outside it, dm40fw.py
 # tail_hazard) -- a bad file parks the meter on the loader screen with the app
-# erased. Staging is refused for all of these (fw-rs and --stock images).
+# erased. Staging is refused for all of these (opendm40 and --stock images).
 check_image() {
     "${DBG[@]}" image "$1" || die "$1 is not a valid update file (see BAD above); not staged"
     # Belt and braces for the last-block rule (independent of dm40dbg.py).
@@ -212,15 +212,15 @@ check_image "$IMG"
 
 if usb_present "$FWRS_ID"; then
     "${DBG[@]}" boot >/dev/null 2>&1 ||
-        die "the running fw-rs does not answer DBG:BOOT?: no DBG:UPDATE there."
-    ((FROM_STOCK)) && echo "(--from-stock ignored: fw-rs is running, using DBG:UPDATE)"
+        die "the running opendm40 does not answer DBG:BOOT?: no DBG:UPDATE there."
+    ((FROM_STOCK)) && echo "(--from-stock ignored: opendm40 is running, using DBG:UPDATE)"
     FROM_STOCK=0
     if R=$("${DBG[@]}" scpi 'DBG:UPLOAD?' 2>/dev/null) && [ -n "$R" ]; then
         UPLOAD=1
     else
-        echo "this fw-rs has no DBG:UPLOAD (older build): staging on its USB disk"
-        DISK=$(wait_disk "$FWRS_ID" 10) || die "fw-rs is running but its USB disk did not appear"
-        echo "fw-rs disk: $DISK ($FWRS_ID)"
+        echo "this opendm40 has no DBG:UPLOAD (older build): staging on its USB disk"
+        DISK=$(wait_disk "$FWRS_ID" 10) || die "opendm40 is running but its USB disk did not appear"
+        echo "opendm40 disk: $DISK ($FWRS_ID)"
     fi
 elif usb_present "$STOCK_ID"; then
     if [ -n "$STOCK" ]; then
@@ -230,7 +230,7 @@ dm40*.bin), eject, press \"update\" / power-cycle."
     fi
     if ((!FROM_STOCK)); then
         die "the attached DM40 is $STOCK_ID: the STOCK firmware's \"USB Connect\" disk or
-the vendor loader's update screen, not fw-rs. To get fw-rs running:
+the vendor loader's update screen, not opendm40. To get opendm40 running:
   tools/reload.sh --from-stock [--no-build]
 (stages $NAME on that disk; then press \"update\" on the loader screen, or
 power-cycle the meter running stock). Or copy $(basename "$IMG") as $NAME
@@ -239,7 +239,7 @@ onto that disk yourself, eject, press \"update\" / power-cycle."
     DISK=$(wait_disk "$STOCK_ID" 10) || die "$STOCK_ID is present but its USB disk did not appear"
     echo "stock/loader disk: $DISK ($STOCK_ID)"
 else
-    die "no DM40 on USB (neither fw-rs $FWRS_ID nor stock/loader $STOCK_ID).
+    die "no DM40 on USB (neither opendm40 $FWRS_ID nor stock/loader $STOCK_ID).
 Plug in the cable; on stock choose \"USB Connect\"."
 fi
 
@@ -260,13 +260,13 @@ Staged $NAME on the $STOCK_ID disk. Now on the meter:
   - loader update screen: press "update";
   - stock firmware: unplug USB, power the meter off and on (the stock update
     procedure); plug USB back in.
-Waiting up to 300 s for fw-rs ($FWRS_ID); Ctrl-C to stop (the file stays staged).
+Waiting up to 300 s for opendm40 ($FWRS_ID); Ctrl-C to stop (the file stays staged).
 EOF
     for ((i = 0; i < 600; i++)); do
         usb_present "$FWRS_ID" && ls /dev/usbtmc* >/dev/null 2>&1 && break
         sleep 0.5
     done
-    usb_present "$FWRS_ID" || die "fw-rs did not appear within 300 s"
+    usb_present "$FWRS_ID" || die "opendm40 did not appear within 300 s"
     sleep 2
     exec "${DBG[@]}" boot --expect "$IMG"
 fi
@@ -290,7 +290,7 @@ not enumerate $FWRS_ID, so there is nothing to wait for here. Verify:
     must show the loader marker = the update header (little-endian words):
 EOF
     "${DBG[@]}" image "$STOCK" | sed -n 's/^  header.*: /      /p'
-    echo "Back to fw-rs: tools/reload.sh --from-stock"
+    echo "Back to opendm40: tools/reload.sh --from-stock"
     exit 0
 fi
 

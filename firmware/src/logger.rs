@@ -1,7 +1,7 @@
 //! Data-logger fast-stream mode (FR-38).
 //!
 //! A main-loop-polled, conversion-paced sampler for the HY3131 AD1 (DC) channel.
-//! fw-rs runs with interrupts masked (`cpsid i`): this is a cooperative sampler
+//! opendm40 runs with interrupts masked (`cpsid i`): this is a cooperative sampler
 //! driven from the main loop, timestamped and paced by the DWT cycle counter
 //! (clock.rs enables CYCCNT; HCLK = 200 MHz). The exceptions, with the
 //! `ad2-isr` feature (module `isr` below, decisions-2026-10-22 #3): the AD2
@@ -1058,7 +1058,7 @@ impl Logger {
 /// R00..R02 / AD1F in place of R03..R05 / AD2F, CPU frames at /16, the
 /// timer at 20 ns << KSH per count; docs/decisions-2026-10-22.md #3,
 /// docs/dmm-input-scope-feasibility.md 10): TIMER6 (STM32 TIM7, IRQ 55, the
-/// only interrupt fw-rs ever enables), phase-locked to the HY3131's
+/// only interrupt opendm40 ever enables), phase-locked to the HY3131's
 /// conversion grid by src/ad2pll.rs. Entry A, once per conversion period,
 /// half way between two conversion edges: R03..R05 blind (one 3-byte SPI2
 /// frame, the flag is not needed: the register holds the result for a whole

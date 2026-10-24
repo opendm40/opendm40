@@ -139,10 +139,10 @@ dma2: DMA.GD32_DMA @ sysbus 0x40026400
 
 // Timers: TIMPRE=1 -> every timer clock is 200 MHz on the DM40.
 // TIM1/2/5/8 (the scope chains: TIM5 -> TIM1 -> TIM8 sample clocks, TIM2 trigger
-// from PA15, fw-rs TIM2 OC2REF gating TIM1) are GD32_Timer with slave/trigger
+// from PA15, opendm40 TIM2 OC2REF gating TIM1) are GD32_Timer with slave/trigger
 // modes; ITRx inputs are GPIO 16..19 wired per the GD32F4 interconnect table
 // (TIM1: ITR0=TIM5 ITR1=TIM2; TIM2: ITR0=TIM1 ITR1=TIM8; TIM8: ITR0=TIM1
-// ITR3=TIM5). TIM7 is a GD32_Timer too (fw-rs's AD2 stream ISR tick, below).
+// ITR3=TIM5). TIM7 is a GD32_Timer too (opendm40's AD2 stream ISR tick, below).
 // TIM4/9..11 (interrupt tick timers) stay Renode's STM32_Timer,
 // the PWM/trigger-only ones (TIM3/6/12/13/14) are the event-free PwmTimer.
 timer1: Timers.GD32_Timer @ sysbus 0x40010000
@@ -172,8 +172,8 @@ timer5: Timers.GD32_Timer @ sysbus 0x40000C00
 
 timer6: Timers.PwmTimer @ sysbus 0x40001000
 
-// TIM7 (GD32 TIMER6): fw-rs's AD2 stream tick (feature ad2-isr, the one
-// interrupt fw-rs enables; UIE -> IRQ 55). GD32_Timer: URS / UG / rc_w0 SR /
+// TIM7 (GD32 TIMER6): opendm40's AD2 stream tick (feature ad2-isr, the one
+// interrupt opendm40 enables; UIE -> IRQ 55). GD32_Timer: URS / UG / rc_w0 SR /
 // CNT as the firmware programs them (Renode's STM32_Timer differs).
 timer7: Timers.GD32_Timer @ sysbus 0x40001400
     IRQ -> nvic@55
@@ -236,12 +236,12 @@ spi1: SPI.STM32SPI @ sysbus 0x40013000
     IRQ -> nvic@35
 
 // GD32 SPI1 = the W25Q128 disk: GD32_SPI (no DMA) for its byte time (12.5
-// MHz at fw-rs's /4: ~0.2 ms of polled CPU per 256-byte page, part of the
+// MHz at opendm40's /4: ~0.2 ms of polled CPU per 256-byte page, part of the
 // fast logger's disk rate; Renode's STM32SPI exchanged bytes instantly).
 // No IRQ: neither firmware uses one (STM32SPI's line was never enabled).
 spi2: SPI.GD32_SPI @ sysbus 0x40003800
 
-// GD32 SPI2 = the HY3131 bus (fw-rs): GD32_SPI with DMA requests on DMA0
+// GD32 SPI2 = the HY3131 bus (opendm40): GD32_SPI with DMA requests on DMA0
 // (dma1 here) stream 0 (RX) / stream 7 (TX), the AD2 stream's DMA frames.
 spi3: SPI.GD32_SPI @ sysbus 0x40003C00
     dma: dma1
@@ -278,7 +278,7 @@ hy3131: Miscellaneous.HY3131 @ sysbus 0x7FFF1000
     portA: gpioPortA
     portE: gpioPortE
 
-// ... and on the same pins as GD32 SPI2 (spi3 here, PC10/11/12 AF6): fw-rs
+// ... and on the same pins as GD32 SPI2 (spi3 here, PC10/11/12 AF6): opendm40
 // hy3131.rs back end HW / HWS. Bytes only; CS PD2 stays with hy3131.
 hy3131spi: SPI.HY3131SpiPort @ spi3
     chip: hy3131

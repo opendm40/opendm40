@@ -22,7 +22,7 @@
 //!   (Corners: always; Halves: while a press is armed, 2 s after a step and
 //!   on the first 3 page entries after power-on); the timebase badge flashes
 //!   on every timebase change;
-//! * top bar (fw-rs, the stock one is not tappable): run badge = RUN/STOP,
+//! * top bar (opendm40, the stock one is not tappable): run badge = RUN/STOP,
 //!   timebase badge = timebase list popup, V/div badge = CH1 popup, trigger
 //!   badge = Trigger tab; the right panel: V/div + / -, CH1 popup, TRIG ->
 //!   Trigger tab;
@@ -1371,7 +1371,7 @@ impl App {
                 Some(false)
             }
             Gesture::LongPress(_) => {
-                // fw-rs: a still long press on a marker recentres its item:
+                // opendm40: a still long press on a marker recentres its item:
                 // trigger position -> screen centre, trigger level -> the
                 // middle of the signal (Vmax + Vmin) / 2, CH1 -> 0 V at the
                 // centre row.
@@ -1396,7 +1396,7 @@ impl App {
                     self.sp_panel(clk, k, now);
                     return Some(false);
                 }
-                // fw-rs additions (the stock top bar is not tappable): the
+                // opendm40 additions (the stock top bar is not tappable): the
                 // status badge = RUN/STOP, the timebase badge = timebase
                 // list, the V/div badge = CH1 popup (as B2), the trigger
                 // badge = Trigger tab; with the stream ISR the source badge
@@ -1908,7 +1908,7 @@ impl App {
         }
     }
 
-    /// The pinch value bubble (fw-rs addition, stock purple toast style).
+    /// The pinch value bubble (opendm40 addition, stock purple toast style).
     fn sp_bubble_draw(&self) {
         let Some(p) = self.sp.pinch else { return };
         let mut b = su::Buf::new();
@@ -2306,7 +2306,7 @@ impl App {
                 self.scope_set(st, now);
             }
             su::MfHit::PriScr => {
-                // Close first: the screenshot shows the page (fw-rs).
+                // Close first: the screenshot shows the page (opendm40).
                 self.sp_popup_close();
                 self.shot_request(now);
                 return;
@@ -2378,7 +2378,7 @@ impl App {
     /// user's coupling is kept (the stock forces DC); only when an AC search
     /// finds nothing, it is repeated in DC.
     ///
-    /// fw-rs fixes (device 2026-10-14, 100 Hz 0..9.6 V square ended at 5 us/div,
+    /// opendm40 fixes (device 2026-10-14, 100 Hz 0..9.6 V square ended at 5 us/div,
     /// 2 V/div, flat top): a 5 us/div record of a slow signal holds one edge
     /// or none, so phase 1 found a swing without a period (n < 2 crossings)
     /// and phase 2 took the timebase from Cycl of a one-edge / flat record

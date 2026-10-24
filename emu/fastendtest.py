@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs: the end of a fast-logger disk session (fastlog.rs, LOG:DEST DISK)
+"""opendm40: the end of a fast-logger disk session (fastlog.rs, LOG:DEST DISK)
 while a host reads the USB volume, then MMEM:DATA? of the new file
 (device check f3aea2f 6b: the meter hung there and the watchdog reset it).
 
@@ -38,7 +38,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF / image')
+ap.add_argument('--app', required=True, help='opendm40 native ELF / image')
 ap.add_argument('--port', type=int, default=4827, help='USB/IP port (default 4827)')
 ap.add_argument('--rate', type=int, default=19200, help='AD2 S/s (default 19200)')
 ap.add_argument('--dur1', type=int, default=3, help='first session, s (device time)')

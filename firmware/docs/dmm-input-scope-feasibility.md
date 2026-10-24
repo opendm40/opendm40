@@ -1,6 +1,6 @@
 # DMM inputs as a scope source (AD2 streaming): feasibility
 
-Date 2026-10-21. Sections 0-6: research (no fw-rs source changed then).
+Date 2026-10-21. Sections 0-6: research (no opendm40 source changed then).
 Section 7: (B) implemented on the main loop (E0 + E1), emulator results and
 the 30-minute device plan. Evaluates two owner ideas for the TODO:
 
@@ -12,9 +12,9 @@ the 30-minute device plan. Evaluates two owner ideas for the TODO:
 Evidence tags as in `power-meter-and-misconnect.md`: **VERIFIED** = datasheet
 text (`docs/DS-HY3131_EN.pdf`, transcribed in `emu/hy3131/ref/registers.md`,
 `RESEARCH.md`), the stock row bytes / formulas (`stock/re/analysis/
-hy3131_v2_6.h`, `dmm_v2_6.h`), fw-rs code, the GD32F4xx User Manual (DMA
+hy3131_v2_6.h`, `dmm_v2_6.h`), opendm40 code, the GD32F4xx User Manual (DMA
 request table, bus clocks), or a device measurement already in
-`acdc-stock-vs-fwrs.md` / a `DBG:PROF?` capture; **INFERRED** = follows from
+`acdc-stock-vs-opendm40.md` / a `DBG:PROF?` capture; **INFERRED** = follows from
 those but is not stated anywhere; **UNKNOWN** = needs the device. Nothing under
 `stock/re/history/` was used. The sibling doc `power-meter-and-misconnect.md`
 (sections 1-3) already establishes the AD2/AD3 mux, OP1/OP2 routing and the
@@ -24,7 +24,7 @@ row facts; they are cited, not re-derived.
 
 | idea | verdict | one line |
 |---|---|---|
-| (A) DMM-input scope | **GO, conditional**, as a *slow* scope: ~5-20 ms/div .. 50 s/div roll, 2.4-9.6 kS/s, bandwidth ~1-2.5 kHz | single AD2 conversions are readable (R03..R05, flag AD2F; ~14 ENOB), but there is no FIFO and fw-rs has no ISRs; the usable rate is set by the main-loop stalls (1-25 ms) and the bit-banged link (~122 us per sample), not by the chip (76.8 kS/s). Gap-free capture needs one small architectural change (section 5.2). Not "1 ms/div". |
+| (A) DMM-input scope | **GO, conditional**, as a *slow* scope: ~5-20 ms/div .. 50 s/div roll, 2.4-9.6 kS/s, bandwidth ~1-2.5 kHz | single AD2 conversions are readable (R03..R05, flag AD2F; ~14 ENOB), but there is no FIFO and opendm40 has no ISRs; the usable rate is set by the main-loop stalls (1-25 ms) and the bit-banged link (~122 us per sample), not by the chip (76.8 kS/s). Gap-free capture needs one small architectural change (section 5.2). Not "1 ms/div". |
 | (B) AD2 logger | **GO** (low effort) | adds the 600 .. 9600 S/s rungs above AD1's 640 S/s, ~14-16 bits, gaps marked by the existing seq/timestamp scheme; same readout machinery as (A). Do (B) first: it is the device experiment for (A). |
 
 The decisive UNKNOWN for both: whether the HY3131 latches the 3-byte AD2 data
@@ -119,7 +119,7 @@ Enable rules that matter for a streaming mode (VERIFIED datasheet notes):
   LPFF included) or by writing 0s; flags accumulate until read (datasheet 10).
   Optional **IRQ pin**: with INTE.AD2IE = 1, DO (= MISO, PC11) is high while CS
   is high and a flag is pending (datasheet 7.2 (4)) - a hardware data-ready
-  line on an existing pin, unused by the stock (INTE stays 0) and by fw-rs.
+  line on an existing pin, unused by the stock (INTE stays 0) and by opendm40.
 * **No FIFO, no buffer.** The datasheet lists one data register per converter
   and no depth; the emulator and the RE headers model one register. An unread
   conversion is overwritten by the next (INFERRED from the register set; no
@@ -205,7 +205,7 @@ bit-bang loop. Realistic from the main loop: see 2.3.
 
 ### 2.3 Who runs the read: the main loop vs an interrupt
 
-fw-rs runs with interrupts masked (`cpsid i`, shim.rs / startup.rs; logger.rs
+opendm40 runs with interrupts masked (`cpsid i`, shim.rs / startup.rs; logger.rs
 header: "there are NO ISRs"). Everything is polled from one main loop whose
 period is tiny most of the time but not always (two `DBG:PROF?` captures of the
 device, 104-120 s each, DMM page):
@@ -473,7 +473,7 @@ HY3131 ----SPI2 (PC10/11/12, 3.125 MHz) + CS PD2----> hy3131 bus owner (ISR or m
    shadow | live).
 2. **One ISR** (TIMER or EXTI11 on the HY3131 IRQ): flag check, 5-byte AD2
    read, push to the ring, run one queued DMM frame if the period allows.
-   Policy change for fw-rs ("no ISRs"): keep it the only one, document the
+   Policy change for opendm40 ("no ISRs"): keep it the only one, document the
    shared state (SPSC ring, shadow byte, queue), keep `cpsid` everywhere else.
 3. **Source abstraction for the scope**: `Frame.data: &[u16]` is what
    scope_ui renders; AD2 19-bit -> u16 (>> 3, offset binary) loses nothing
@@ -516,7 +516,7 @@ HY3131 ----SPI2 (PC10/11/12, 3.125 MHz) + CS PD2----> hy3131 bus owner (ISR or m
 1. Torn reads (1.4) unresolvable at the wanted OSR -> cap the rate at the OSR
    where the AD2F-synchronised read fits (probably 9.6 kS/s). Low risk for
    the scoped feature, fatal only for the "1 ms/div" ambition, already excluded.
-2. The ISR policy: fw-rs's single-threaded design is a deliberate simplicity
+2. The ISR policy: opendm40's single-threaded design is a deliberate simplicity
    and safety property (prof.rs, review docs). Mitigation: one ISR, one SPSC
    ring, no other shared state; the whole streaming path can be compiled out.
 3. SPI2 across the isolator at 3.125 MHz fails read-back -> 1.56 MHz
@@ -536,7 +536,7 @@ HY3131 ----SPI2 (PC10/11/12, 3.125 MHz) + CS PD2----> hy3131 bus owner (ISR or m
 
 ## 6. Device experiment plan (one session, before any UI work)
 
-All through `DBG:` SCPI on fw-rs; a calibrator / signal generator on the
+All through `DBG:` SCPI on opendm40; a calibrator / signal generator on the
 jacks; log with `dm40scpi.py`.
 
 1. **SPI2 pins and speed** (E2 prototype as a DBG command): configure
@@ -571,7 +571,7 @@ directly to the rate table of 2.3 and to the GO conditions of 5.1.
 ## 7. (B) implemented: main-loop AD2 logger + the E0 hooks (2026-10-21)
 
 Status: E0 (the DBG hooks of section 6, steps 2-4) and E1 (main-loop AD2
-logger, bit-banged, gaps marked) are in fw-rs. No ISR, no SPI2 (E2-E4 wait for
+logger, bit-banged, gaps marked) are in opendm40. No ISR, no SPI2 (E2-E4 wait for
 the owner's ISR decision and the device numbers below). Nothing of it has run
 on the device yet; every number in 7.2 is from the Renode emulator.
 
@@ -614,7 +614,7 @@ the emulator's, not the device's: at 200 MHz expect ~4x the readout speed
 
 ### 7.3 Device test plan (30 minutes)
 
-Meter on fw-rs with this build, USB to the PC (`tools/dm40scpi.py`, USBTMC);
+Meter on opendm40 with this build, USB to the PC (`tools/dm40scpi.py`, USBTMC);
 a DC source and a signal generator; write the outputs into a new section of
 this doc. Step 1 is the go/no-go for every higher rate.
 
@@ -633,7 +633,7 @@ that is not written yet. SPI2 (6.1, E2): section 8.
 ## 8. E2 implemented: the HY3131 on the hardware SPI2 (2026-10-22)
 
 Owner decision: no runtime switch between bit-bang and SPI2; if the hardware
-bus is reliable it is simply the bus. fw-rs now talks to the HY3131 over SPI2
+bus is reliable it is simply the bus. opendm40 now talks to the HY3131 over SPI2
 only; the bit-banged bus survived as a compile-time fallback (`--features
 hyspi-bitbang`) until the device check passed (8.6, 7889e6c); the feature and
 the bit-banged read path are gone since (bit-banged writes stay, 8.6).
@@ -862,7 +862,7 @@ saw it"). With a tick period T the stamp is late by d in [0, T).
   resets, an ISR hang (impossible with the capped waits) would too.
 - **What masks the ISR.** Only `critical_section::with` in synopsys-usb-otg
   (endpoint buffer copies, a 64-byte packet: ~1 us) and the ~20 instructions
-  of `stream::stop`. fw-rs has no other `cpsid`. Measured entry latency in
+  of `stream::stop`. opendm40 has no other `cpsid`. Measured entry latency in
   the emulator at 200 MIPS: max 3.5 us in most sessions, 10 .. 27 us in some
   4800 S/s DRAW 2 ones (most likely Renode's execution quantum: nothing in
   the firmware masks that long); the device number is DBG:ISR? max_lat_ns.
@@ -1223,7 +1223,7 @@ b81abf2 (hot end 0x0807fbd0).
 
 The remaining ~4.7 us latency (4b98128: lat_pc in
 `Endpoint<Out>::read`) came from critical_section::with in
-synopsys-usb-otg. fw-rs now implements critical-section with compiler
+synopsys-usb-otg. opendm40 now implements critical-section with compiler
 fences only (main.rs `NoMask`): the only ISR shares nothing those sections
 protect.
 
@@ -1816,7 +1816,7 @@ between the two runs (the AD2-only offset on 60 V did not: +158 vs -221,
 OP1's chopper running on SENSE with AD1 is the suspect), so a per-range
 correction is conceivable but would need its own calibration and a
 stability study (temperature, time); the DC reading is cleanest with
-AD2 / AD3 off, as the stock and fw-rs run it. **(b)** the 6.5 shift (AD1
+AD2 / AD3 off, as the stock and opendm40 run it. **(b)** the 6.5 shift (AD1
 with AD2 converting in the AC V row) is likewise mostly a steady offset;
 on 6 V it is constant across 0 .. 10 V (+-25 counts), on 60 V it grows
 with the level, on 1000 V it jumps. The supply current was not measured:

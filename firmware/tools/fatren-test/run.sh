@@ -177,7 +177,7 @@ fsck.fat -n $IMG | tail -1
 mcopy -n -i $IMG ::_DM40PRV.BIN $W/o && cmp $W/o $W/b.bin && echo "ok: backup is now the former DM40FW.BIN" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMG live $MB | tee $W/r3
 grep -q "status=Clean" $W/r3 && grep -q "changed blocks: \[\]" $W/r3 && echo "ok: third run clean, nothing written" || { echo "FAIL at line $LINENO"; exit 1; }
-echo "--- H1: cold boot with a staged stock file, fw-rs (MB) installed"
+echo "--- H1: cold boot with a staged stock file, opendm40 (MB) installed"
 mcopy -i $IMG $W/c.bin ::dm40_v_2_6.bin
 "$W/t" $IMG live $MB | tee $W/r3b
 grep -q "status=Clean" $W/r3b && grep -q "staged=1" $W/r3b && grep -q "changed blocks: \[\]" $W/r3b && echo "ok: staged file not renamed" || { echo "FAIL at line $LINENO"; exit 1; }

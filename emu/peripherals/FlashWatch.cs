@@ -1,6 +1,6 @@
 //
 // Data reads from the slow flash bank while the AD2 stream ISR owns the bus
-// (2026-10-23, fw-rs TODO "Region C DATA reads during a stream"). On the
+// (2026-10-23, opendm40 TODO "Region C DATA reads during a stream"). On the
 // GD32F427 flash from 0x08080000 up is not zero-wait: one CPU load from it
 // stalls the bus ~21.8 us and the stream ISR's entry with it (device
 // b6909d6: INFO/CALIB.BIN, LOADER.BIN, BOOTDATA.BIN and the FIRMWARE.BIN

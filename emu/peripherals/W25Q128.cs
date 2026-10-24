@@ -12,7 +12,7 @@
 // typ / 3 ms max, tSE 45 / 400 ms, tBE1 120 / 1600 ms, tBE2 150 / 2000 ms).
 // A command other than a status read while busy is counted (BusyViolations)
 // and ignored as on the chip (StrictBusy, default; a READ then returns 0xFF). The SPI byte time is the controller's (dm40.repl spi2 =
-// GD32_SPI: 0.64 us per byte at fw-rs's 12.5 MHz).
+// GD32_SPI: 0.64 us per byte at opendm40's 12.5 MHz).
 //
 using System;
 using System.IO;

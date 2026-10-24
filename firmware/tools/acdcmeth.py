@@ -3,7 +3,7 @@
 methods A / B / C (src/acdcm.rs, DBG:ACDC:METH), with what the MR9270S+
 calibrator gives: DC up to 24 V (mr9270.VOLTAGE_MAX: a 30 V request puts out
 23.99 V) and its small 40 Hz square (tools/mr9270.py,
-'frequency' output). The meter on fw-rs over USB (USBTMC), leads on V / COM.
+'frequency' output). The meter on opendm40 over USB (USBTMC), leads on V / COM.
 
   e1  note 7 / B's zero: per V range (DBG:ACDC:RANG 1..4) at 0 V and the
       calibrator's top level (24 V), B entered N times (each entry measures the zero:

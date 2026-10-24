@@ -81,7 +81,7 @@ pub fn init() -> Before {
     let mut clk = Clock::new();
     unsafe {
         // GPIOA..E (bits 0..4), DMA0 (bit 21, BT UART RX + generator DAC; was
-        // never enabled by fw-rs), DMA1 (bit 22, scope; scope enables it too).
+        // never enabled by opendm40), DMA1 (bit 22, scope; scope enables it too).
         modify32(RCU_AHB1EN, 0, 0x1F | (1 << 21) | (1 << 22));
     }
     crate::wdt::kick();

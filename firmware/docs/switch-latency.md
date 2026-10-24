@@ -1,4 +1,4 @@
-# DMM switch latency: fw-rs vs stock (2026-10-23)
+# DMM switch latency: opendm40 vs stock (2026-10-23)
 
 Owner: "Why is there a several-second stall on every mode switch now? The
 stock seemed to switch instantly." Analysis of rust-fw-poc 69cacb9, the
@@ -13,12 +13,12 @@ There are three different effects. They add up to what the owner sees:
    `Meter::reset`: `shown = None`, `draw_static` draws no value or unit). The
    stock clears its values and redraws within 50 ms. The new unit is shown at
    once, with `0.0000` or `0L` (emulator screenshots: Ω tapped, `0L MΩ`
-   0.05 s later, `0L kΩ` at 1.0 s, `4.7000 kΩ` at 2.0 s). On fw-rs the old
+   0.05 s later, `0L kΩ` at 1.0 s, `4.7000 kΩ` at 2.0 s). On opendm40 the old
    screen stays for one frame, then it is empty until the number comes (device:
    blank until 2.0-2.3 s, number at 3.0 s for Ω). Even when the first number
-   comes only ~0.15 s later than on the stock, fw-rs looks stalled and the
+   comes only ~0.15 s later than on the stock, opendm40 looks stalled and the
    stock looks instant.
-2. **Ω: a 2.5 s dead time that the stock does not have.** fw-rs enters Ω
+2. **Ω: a 2.5 s dead time that the stock does not have.** opendm40 enters Ω
    with `set(10, 6, 2500)`: a 2500 ms settle deadline, so there is no
    conversion and no range step for 2.5 s. The stock's 2500 at Ω entry is
    **not** a deadline. It is `S+0x70 = now + 2500`, the end of its
@@ -26,17 +26,17 @@ There are three different effects. They add up to what the owner sees:
    gets +300 when the ohm variant changes. The stock steps down from 60 MΩ one
    range per ~150 ms from the start (emulator: the deadline moves in 150 ms
    steps from +0.4 s, r6 -> r2 by 0.9 s) and shows 4.7 kΩ at **1.15 s**.
-   fw-rs takes **3.1 s** (emulator) / 2.67 s (device FAST). In fw-rs the
+   opendm40 takes **3.1 s** (emulator) / 2.67 s (device FAST). In opendm40 the
    `entry + 2500` single-step rule in `poll_ohm` is dead code: the deadline
    ends at the same moment.
-3. **A ~0.5 s floor on every function change** (the stock: ~0.35 s). fw-rs
+3. **A ~0.5 s floor on every function change** (the stock: ~0.35 s). opendm40
    `press` / `select` give each entry a settle: V and AC V 450 ms, A 650 ms.
    The stock uses these numbers only for its own row writes inside a function
    (autorange unit changes: DCV -> DCmV 450, ACA unit 650; AC+DC phases). Its
    button entry writes no deadline (emulator: S+0x40 does not change at
    DC V -> A or A -> DC V). The DMM screen polls once at the change and next
    300 ms later (`FUN_0803cdd8`). So the stock's first value comes at
-   **0.35-0.40 s** (300 ms plus one AD1 conversion at OSR 8192). fw-rs:
+   **0.35-0.40 s** (300 ms plus one AD1 conversion at OSR 8192). opendm40:
    450 / 650 ms, plus one more conversion when the vet holds the first one
    (any change of the DC mode or range: Ω -> V, A -> V, V -> A): DC V 0.47-0.54
    s, A 0.68-0.74 s (device: 0.46-0.56 s and 0.75 s).
@@ -52,8 +52,8 @@ input step in AC+DC / AUTO, not on a plain function switch.
 |---|---|---|---|---|---|
 | G1 | settle deadline `set(.., settle)` (`press`, `select`, `set_sub`, `set_range`, autorange) | every row write | time | entry: V / AC V 450, A 650, **Ω 2500**, cap 200, diode 100, cont 200, Hz 1000, temp 500; manual V range 450, manual A 650, Ω range 150; autorange DC 250 (V<->mV 350/450), AC 450, ACA 550/650 | Copied from the stock's S+0x40 table (dmm_v2_6.h "SETTLE DEADLINES"). The table mixes the in-function row writes with entry times: the stock's button entry has **no** deadline (only the 300 ms screen poll gap), Ω entry has none (2500 = S+0x70 single-step window), a manual range change is 250 (S+7 != m+1 path, 0xfa) |
 | G2 | `vet_ad1` (VET_N 2, AC+DC VET_N_ACDC 8, VET_HELD_MAX 4, VET_DIV 0.5 %, VET_FLOOR 4000) | DC V / mV / A and the AC+DC DC phase, after any change of (DC mode, range): range steps **and** function changes such as Ω -> V, A -> V | the first conversion is always held; then one that agrees with the one before | +1 conversion (100 ms at OSR 8192) normally; a moving input: up to 5 conversions (~0.5 s); AC+DC: 8 vetted results across two DC phases | f4925f5 (2026-10-23). Device bab5dd4: after a 2-step autorange (600 -> 60 -> 6 V, the second row at the same R22) AD1's filter still held the 60 V tap: 0.767-0.790 V for 1 V in 5 of 35 (the "0.78 V" bug); an R22 write in the middle of a conversion gave 25-51 % (8087c7d); the AC+DC DC part at 53 % ("0.52 V", root cause fixed separately in c8c2f02, ACDC_STOCK_OSR) |
-| G3 | readout blank (`Meter::reset`, `shown = None`) | every function / coupling change | the first reading | = G1 + G2 + the first conversion | fw-rs design: no value from the old function under the new unit. The stock shows its cleared values (0 / 0L) with the new unit at once |
-| G4 | AC+DC first reading needs both parts (`acdc_seen == 3`) | AC+DC entry | DC phase (450 + 2 vetted DC results), switch to AC (800), first RMS result | 1.3 s (emulator and device 1.32-1.37 s) | fw-rs: never show \|DC\| or \|AC\| alone (the stock shows hypot(0, DC) first). The stock emulator showed 1.1179 V (= hypot(1.0, 0.5), correct) at 0.15 s: its AC+DC went to the DC phase at 0.1 s and back to AC at 0.2 s, apparently on a result already pending from the AC row and the leftover phase state (S+10); not analysed further |
+| G3 | readout blank (`Meter::reset`, `shown = None`) | every function / coupling change | the first reading | = G1 + G2 + the first conversion | opendm40 design: no value from the old function under the new unit. The stock shows its cleared values (0 / 0L) with the new unit at once |
+| G4 | AC+DC first reading needs both parts (`acdc_seen == 3`) | AC+DC entry | DC phase (450 + 2 vetted DC results), switch to AC (800), first RMS result | 1.3 s (emulator and device 1.32-1.37 s) | opendm40: never show \|DC\| or \|AC\| alone (the stock shows hypot(0, DC) first). The stock emulator showed 1.1179 V (= hypot(1.0, 0.5), correct) at 0.15 s: its AC+DC went to the DC phase at 0.1 s and back to AC at 0.2 s, apparently on a result already pending from the AC row and the leftover phase state (S+10); not analysed further |
 | G5 | AC-part settle `ac_settle_start` / `ac_settle_step` (ACS_STEP 0.1 %, ACS_REM, ACS_FLAT_N 2, ACS_FLOOR, ACS_MAX_MS 5000) | AC+DC and AUTO, after a range or unit change of the same quantity, and after an input step (ACS_DC_STEP 0.5 %, ACS_JUMP 1.5x) | 2 "flat" AC results in a row | 5 s + one DC phase (< 6 s); 10 s when the limit runs out on a jump (ACS_JUMP restarts it, f42a09e) | c4a0b09 / f4925f5 / c8c2f02 / f42a09e (2026-10-23). The AC-coupled AD2 node recharges to the new tap's DC level, and the step reads as AC: device 8087c7d 0.35 V AC part for 2-4 s, READ? +6 %; AUTO switched to AC on it; an input step moved AC+DC autorange 6 -> 60 V and back after 6 s (bab5dd4) |
 | G6 | `acdc_down` ACDC_DOWN_MS 400 | AC+DC / AUTO step down | DC results asking for it for 400 ms, i.e. the next DC phase | +~1 s; together with G5 the legitimate 60 -> 6 V step-down took 4-5.5 s on the device | c08b0d5: the calibrator's level-change dip 7.0 -> 6.3 V stepped 60 -> 6 -> 60 V, ~4 s without a reading |
 | G7 | AUTO coupling's first decision (AUTO_SETTLE_K 4, AUTO_TIE 1 %, AUTO_TIE_MS 4000; AUTO_VOTES 2 later) | AUTO coupling entry | AC part settled on one side of \|DC\| | shows the DC part until then, up to 4 s (emulator: 0.5 V DC part at 1.3 s, the 1.0 V AC part at 3.4 s); a later change of the part needs 2 cycles (2-4 s) | 2481c4d: the first AC part overshoots (+3..7 %, 2563fe1 / a0985e4) and decided a 40 Hz square's tie |
@@ -71,7 +71,7 @@ full-resolution wait (host only).
 ### 3.1 Emulator (`emu/hy3131/switchlat.py`, model C, 2026-10-23)
 
 Seconds from the switch to the first reading / to the reading after which
-every reading stays within 0.1 % of the final value. fw-rs: function changes
+every reading stays within 0.1 % of the final value. opendm40: function changes
 are DBG:TAP on the function bar (the touch path), ranges are SCPI
 `<f>:RANG` (`Dmm::set_range`, as the MF page), input steps are
 `hy3131 SetInput` at a fixed virtual time. Stock: function-bar taps and
@@ -80,7 +80,7 @@ value was not yet within 0.1 %. n/m = not measured: the stock MF-page taps
 in the script did not change the range (the stock rows for 6>60, 60>6 and
 AC+DC 60>6 show no switch), so those stock cells are missing.
 
-| switch | stock | fw-rs MED | fw-rs SLOW | fw-rs FAST |
+| switch | stock | opendm40 MED | opendm40 SLOW | opendm40 FAST |
 |---|---|---|---|---|
 | DC V -> AC V (1 V 50 Hz) | 0.35 / 1.00 [0.99] | 0.48 / 0.55 [0.99] | | |
 | AC V -> AC+DC (1 V AC + 0.5 V DC) | 0.15 / 0.15 (see G4) | 1.30 / 1.44 [1.109] | | |
@@ -128,12 +128,12 @@ and a function change repaints the whole static page first.
   timers.
 - The AC-coupled AD2 node is a single tau 0.3 s RC, charged only in the AC
   phases. The device's tail is longer (2-4 s, then 18 -> 1 mV over ~10 s,
-  acdc-stock-vs-fwrs.md 12), so G5 / G6 end sooner in the emulator (AC+DC
+  acdc-stock-vs-opendm40.md 12), so G5 / G6 end sooner in the emulator (AC+DC
   60 -> 6 V 1.8 s; device 4-5.5 s for the autorange step-down).
 - No RMS of a DC step on plain AC V (the device's 2.5-2.9 s to 0.1 % on
   DC V -> AC V with a DC input).
 - Touch: a stock tap is a scripted touch-controller event (its latency is
-  included); fw-rs DBG:TAP enters at the gesture layer.
+  included); opendm40 DBG:TAP enters at the gesture layer.
 
 ## 4. Proposals
 
@@ -177,7 +177,7 @@ emu/hy3131/switchlat.py stock --part 1 --json emu/out/swl-stock1.json  # ~12 min
 emu/hy3131/switchlat.py report emu/out/swl-stock.json emu/out/swl-fwrs-*.json
 ```
 
-fw-rs uptime is virtual time minus 0.906 s (the DWT CYCCNT reset at fw-rs
+opendm40 uptime is virtual time minus 0.906 s (the DWT CYCCNT reset at opendm40
 start; `BOOT_OFS`). Each stock monitor sample is one Renode pause (~1-3 s of
 wall time), so the stock sampling is 50 ms only for the first 3.2 s after a
 switch and 250 ms after that.
@@ -339,7 +339,7 @@ DBG:READout? query where the test needs it) and passes after the fix.
    (`ohmexit:7.75;ohmexitlo:0.26`, 5 V on V, a new SCOPE step: MENU ->
    Oscilloscope -> MENU -> Multimeter): ab7184c logs V-JACK? at +7.90-8.05 s
    in all four A entries (two after the Scope page, two after RES), as the
-   device. The model's ohmexit trace had stopped firing on RES -> A (fw-rs
+   device. The model's ohmexit trace had stopped firing on RES -> A (opendm40
    quiesces before the relay pulse, so the row role was None at the pulse;
    the older `ohmexit` scenarios passed without seeing a tail): it now
    counts the last real role. meter-test: the 7.75 s tail with row

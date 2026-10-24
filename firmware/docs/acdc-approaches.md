@@ -2,8 +2,8 @@
 
 Date 2026-10-22. Evidence
 tags as in the sibling docs: **VERIFIED** = a datasheet / manual page, a stock
-row byte, fw-rs code or a device measurement already written up
-(`acdc-stock-vs-fwrs.md` = "acdc", `dmm-input-scope-feasibility.md` =
+row byte, opendm40 code or a device measurement already written up
+(`acdc-stock-vs-opendm40.md` = "acdc", `dmm-input-scope-feasibility.md` =
 "feasibility", `power-meter-and-misconnect.md` = "power"); **INFERRED** = follows
 from those; **UNKNOWN** = needs the device. Nothing under `stock/re/history/`
 was used. Web sources are listed in section 9; the PDFs were read with
@@ -289,7 +289,7 @@ Notation: d = display digit (60 000 counts: 0.1 mV on 6 V, 1 mV on 60 V);
 expected contribution of the method, **not** a spec for the meter; the AC
 part's accuracy is the stock AC V path's in every option but (d).
 
-### (a) The stock alternation (what fw-rs does today, acdc 2-3, 8)
+### (a) The stock alternation (what opendm40 does today, acdc 2-3, 8)
 
 * Rows: AC phase = f0 AC V row (AD2 + AD3 sum(X*Y), RMS/LPF, AC-coupled PB4),
   800 ms settle + 4 RMS results; DC phase = f1 DC V row + R32 = 0x38, AD1 at
@@ -536,7 +536,7 @@ wanted. Hioki and the 121GW offer no AC+DC on mV either.
 
 ## 8. Device experiments that settle it (in order)
 
-All through DBG SCPI on fw-rs, the MR9270S+ calibrator on V/COM (<= 30 V), the
+All through DBG SCPI on opendm40, the MR9270S+ calibrator on V/COM (<= 30 V), the
 generator for AC; log with `dm40scpi.py`. Nothing here needs new firmware
 beyond DBG hooks of the kind `DBG:AD2:DCV?` already is.
 
@@ -631,7 +631,7 @@ Web (retrieved 2026-10-22):
   220 MB RAR behind a JS button on en.alientek.com and was not fetched):
   https://www.eevblog.com/forum/testgear/alientek-dm40c-multimeter-(dm40a-dm40b-dm40c)
 
-## 10. Prototype: methods B and C in fw-rs (2026-10-22, `src/acdcm.rs`)
+## 10. Prototype: methods B and C in opendm40 (2026-10-22, `src/acdcm.rs`)
 
 Behind a RAM-only switch, default A (the stock alternation, unchanged), so
 one device session compares them. Device input since section 8 was
@@ -745,7 +745,7 @@ response are INFERRED, the note-7 numbers are the device's):
   17dcff2 / 4539aea: senttest (26),
   powtest (15; `ereset` failed once under a load average of ~45 and passed
   alone), modetest `--fast` 35 of 36 (stock `cap-big` 0.105 mF fails the
-  same way on 5f9b5a0 without this change; without `--fast` every fw-rs
+  same way on 5f9b5a0 without this change; without `--fast` every opendm40
   scenario gets "BT host refused: module off" under load, also on
   5f9b5a0), the emulator host tests (396), every firmware/tools/*/run.sh.
 
@@ -1100,7 +1100,7 @@ AC settle of c4a0b09 / 803854d) and passed on ddd5c9e (settle 5.9 s) and b4fb7b9
 `C`, with `--meth A` all but `i`; **couptest `i --meth A` fails on rust-fw-poc 848047f without these commits too**
 (twice; OK on 7fffcdf): after the DC 0.3 -> AC 0.2 A step no reading for ~10 s and the AUTO part flipping, in the same
 AC settle, not this change (fixed on branch settle-fix, 7e10110: no DC-phase step down while an input-step settle
-runs, acdc-stock-vs-fwrs.md 12); senttest 57 OK; powtest 26 of 29 in the full run (`ereset`, `acdc-floor`, `bt`), all
+runs, acdc-stock-vs-opendm40.md 12); senttest 57 OK; powtest 26 of 29 in the full run (`ereset`, `acdc-floor`, `bt`), all
 three OK alone (e7ec2cc alone: `ereset` and `bt` FAIL, the same flakes); modetest `--fast -f fwrs` 18 of 18 (the stock
 side not run); every firmware/tools/*/run.sh OK (font-matrix identical to rust-fw-poc); emulator host tests 491;
 dcvtest PASS. Cost against b4fb7b9: region B 62 636 -> 61 892 B free, region C 17 868 -> 17 716 B, SRAM 58 716 ->
@@ -1184,7 +1184,7 @@ It did not happen at 1 V DC. It is not specific to C (device-check doc, "c6f9670
 
 ### 10.12 After the c6f9670 retest: the second reference waits for the LPF (2026-10-23, branch acdc-c-lpfwait; device: 10.13)
 
-Method A stays the default. Commits 9425ae5 (emulator), a7d233c + e905ef5 (fw-rs).
+Method A stays the default. Commits 9425ae5 (emulator), a7d233c + e905ef5 (opendm40).
 
 **1. Emulator: the LPF's creep (HY3131.cs, both copies; INFERRED, phenomenological).** The c6f9670 `tc6` trace
 (3 power cycles, 5 -> 3 V on 6 V, 10 Hz STAT?) relative to the value ~10 s after the step: +5 codes at 0.7-1.6 s,
@@ -1322,7 +1322,7 @@ as in 10.8; the owner decides.
 
 ### 10.14 After the f42a09e retest: the bias test and the LPF creep's lag (2026-10-23, branch acdc-bias; device: 10.15)
 
-Method A stays the default. Commits d0baca5, b94bfb8 (fw-rs), 7c0de2d (emulator).
+Method A stays the default. Commits d0baca5, b94bfb8 (opendm40), 7c0de2d (emulator).
 
 **1. The data (device f42a09e; `tools/acdcmeth.py --trace`: STAT? at ~10 Hz per level).** The 10.13 miss was
 a 6 V internal zero judged biased (gsrc 3, gdis +8.95 codes at 3 V). gdis is the two-point gain against the

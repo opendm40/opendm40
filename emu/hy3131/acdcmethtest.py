@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs AC+DC methods A / B / C (firmware/src/acdcm.rs, DBG:ACDC:METH) in the
+"""opendm40 AC+DC methods A / B / C (firmware/src/acdcm.rs, DBG:ACDC:METH) in the
 emulator: one run per method, the same timed signals (V then A: DC, AC,
 mixed, DC with 50 Hz ripple, DC with off-notch 45 Hz ripple, V DC again
 on the 6 V range after the 60 V one: a range visited again), SCPI over
@@ -52,7 +52,7 @@ EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', help='fw-rs native image')
+ap.add_argument('--app', help='opendm40 native image')
 ap.add_argument('--port', type=int, default=18110, help='first USB/IP port (one per method)')
 ap.add_argument('--meths', default='A,B,C,B~')
 ap.add_argument('--child', action='store_true', help=argparse.SUPPRESS)

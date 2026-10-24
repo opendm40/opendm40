@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""fw-rs misconnect sentinel through function / range / coupling switches
+"""opendm40 misconnect sentinel through function / range / coupling switches
 (firmware/src/sentinel.rs, owner 2026-10-23: "the AC hint and A-JACK / A-PROT
-trip falsely when switching from other modes") in the emulator: fw-rs native
+trip falsely when switching from other modes") in the emulator: opendm40 native
 + the HY3131 model with a fixed connection, a sequence of switches over SCPI
 over USB/IP (CONF:<f> [range], VOLT:COUP, the MF -> Wave view and back),
 each held for DWELL s of fw uptime. After every step the firmware's
@@ -10,7 +10,7 @@ so a transient between two polls is not missed) and the SYST:ALER? samples
 of the step must hold only the alerts the connection allows in that
 function.
 
-  emu/hy3131/switchtest.py                        # all scenarios, fw-rs built from HEAD
+  emu/hy3131/switchtest.py                        # all scenarios, opendm40 built from HEAD
   emu/hy3131/switchtest.py --app firmware/opendm40.bin --port 44101 open dc5
   emu/hy3131/switchtest.py --full open            # every ordered pair of the functions (long)
   emu/hy3131/switchtest.py --list
@@ -35,7 +35,7 @@ ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('names', nargs='*')
-ap.add_argument('--app', help='fw-rs native image (default: run.py builds HEAD)')
+ap.add_argument('--app', help='opendm40 native image (default: run.py builds HEAD)')
 ap.add_argument('--port', type=int, default=44100, help='USB/IP port (default 44100)')
 ap.add_argument('--dwell', type=float, default=3.0, help='fw-uptime seconds per step (default 3)')
 ap.add_argument('--full', action='store_true', help='every ordered pair of the functions (long)')

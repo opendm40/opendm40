@@ -3,7 +3,7 @@
 // reset-cause flags of RCU_RSTSCK (0x40023874, bits 25..31) that survive a
 // reset. Renode 1.17.0's STM32_IndependentWatchdog never reset the machine
 // here, and its RCC returns a constant 0x0E000000 from RSTSCK (RSTFC
-// ignored), so fw-rs's shim (src/boot.rs) could never see a watchdog reset.
+// ignored), so opendm40's shim (src/boot.rs) could never see a watchdog reset.
 //
 //   CTL  +0x00  key: 0xCCCC start, 0xAAAA reload, 0x5555 unlock PSC / RLD
 //   PSC  +0x04  prescaler /4 << PSC (0..6), RLD +0x08 reload (12 bit),

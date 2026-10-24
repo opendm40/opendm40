@@ -1,6 +1,6 @@
-# DMM reading rate, integration time and filtering: survey and options for fw-rs
+# DMM reading rate, integration time and filtering: survey and options for opendm40
 
-Date: 2026-10-24. Research only: no firmware change, no device run. fw-rs
+Date: 2026-10-24. Research only: no firmware change, no device run. opendm40
 reference: `firmware/src/dmm.rs` "FR-05 conversion rate" (`Rate`, `avg_cfg`,
 `Avg`) and `firmware/src/meter.rs` (`Smooth`) at 92ef9f6. Sources are listed at
 the end (§9). "PDF p." means the page number in the PDF file where the printed
@@ -56,7 +56,7 @@ Only **0x16 and 0x17** reject both mains frequencies. The datasheet specifies
 NMR only for those two (120 dB at 5 sps, 75 dB at 10 sps: OSR 32768 / 16384
 unchopped, DS p.13). For a 50 Hz owner, 0x15 is the HY3131 equivalent of a
 sub-PLC setting. The stock rule ("0x15 while |ΔAD1| > 518 codes, else 0x17"),
-and fw-rs MEDIUM, which copies it, pick the code that does not reject 50 Hz
+and opendm40 MEDIUM, which copies it, pick the code that does not reject 50 Hz
 **exactly when the input has AC or periodic content**. Bench meters do the
 opposite: their default is 1 or 10 PLC, and sub-PLC rates are an opt-in.
 
@@ -85,9 +85,9 @@ Before committing, measure four things on the device: H(f) at 0x15 / 0x16 /
 0x17, noise per OSR, scale equality across OSR, and settling after a step
 (§8.3).
 
-## 1. fw-rs today, and the HY3131 facts behind it
+## 1. opendm40 today, and the HY3131 facts behind it
 
-### 1.1 What fw-rs does (dmm.rs FR-05, meter.rs)
+### 1.1 What opendm40 does (dmm.rs FR-05, meter.rs)
 
 | setting | AD1 OSR | averaging (dmm.rs `Avg`) | readings |
 |---|---|---|---|
@@ -102,7 +102,7 @@ MEDIUM / SLOW once the dmm.rs window holds 8 slow conversions.
 
 The stock DM40 has no user setting. It runs 0x17 when |ΔAD1| <= 518 codes
 (~8.6 counts) and 0x15 otherwise, shows every conversion, and does not average
-(`firmware/docs/acdc-stock-vs-fwrs.md` §4).
+(`firmware/docs/acdc-stock-vs-opendm40.md` §4).
 
 ### 1.2 HY3131 AD1: what the datasheet and app notes say
 
@@ -144,7 +144,7 @@ The stock DM40 has no user setting. It runs 0x17 when |ΔAD1| <= 518 codes
 ### 1.3 The owner's observations, explained
 
 **"The setting doesn't change the speed on a periodic input."** Any periodic
-input moves AD1 by more than 2 counts (fw-rs) or 518 codes (stock) between
+input moves AD1 by more than 2 counts (opendm40) or 518 codes (stock) between
 conversions. MEDIUM and SLOW therefore stay at 0x15 and keep resetting their
 windows, which makes them identical to FAST.
 
@@ -167,7 +167,7 @@ notch of every code from 0x14 up. At **0x16 (notches every 10 Hz) and 0x17
 change smaller than the reset threshold (2 counts) crawls through the 8- or
 16-conversion window at 0.4 s per conversion. That is the intended trade-off of
 a moving average with a step window (Keithley, DMM7510 and 34465A all do the
-same), but fw-rs applies it **by default** in MEDIUM. The users' P3 praise
+same), but opendm40 applies it **by default** in MEDIUM. The users' P3 praise
 ("settles instantly") and the decision to keep smoothing off by default
 (`user-feedback.md` P3, FR-05 row) argue against that.
 
@@ -223,7 +223,7 @@ user's job: choose an aperture that covers whole periods (3458A).
   variation keeps resetting it. It is not available in digitize, data logging,
   continuity, diode or probe hold [Truevolt help "Math - Smoothing"; the page
   returned 403 to the fetcher, so the text is from the search index].
-  fw-rs already uses this command name (`CALCulate:SMOothing:RESPonse`).
+  opendm40 already uses this command name (`CALCulate:SMOothing:RESPonse`).
 - **AC filter.** 3 / 20 / 200 Hz; ACV 0.4 / 1.6 / 40 readings/s [p.12 note
   6, p.23].
 
@@ -246,7 +246,7 @@ user's job: choose an aperture that covers whole periods (3458A).
   20 ms, 30 ms" [p.60].
 - **Long apertures are firmware averaging.** "If you specify 60 PLCs … the
   multimeter averages six 10 PLC readings"; APER integrates one reading for
-  up to 1 s [p.60]. This is the precedent for fw-rs building its +1 digit by
+  up to 1 s [p.60]. This is the precedent for opendm40 building its +1 digit by
   averaging 0x17 conversions.
 - **Autozero.** AZERO ON measures a zero after every reading and roughly
   halves the rate (table above); OFF / ONCE takes one zero [p.61].
@@ -441,9 +441,9 @@ Patterns:
 | BM869s | fast / stable | 5 / 1.25 (500k) | — | — | stable mode | — | — | — |
 | DT4282 | Slow key | ~5 | — | — | Slow = average | — | — | LPF |
 | **DM40 stock** | none (auto) | 10 moving / 2.5 steady | 0x15 does not notch 50 Hz | chop always | none | — | — | RMS EMA |
-| **fw-rs now** | RATE S / M / F | 10 / 10→2.5 / 10→2.5 | as stock | chop always | window 8-32 by default (M / S) + CALC:SMO | ~2 counts | +1 digit only | RMS EMA |
+| **opendm40 now** | RATE S / M / F | 10 / 10→2.5 / 10→2.5 | as stock | chop always | window 8-32 by default (M / S) + CALC:SMO | ~2 counts | +1 digit only | RMS EMA |
 
-## 6. Lessons for fw-rs
+## 6. Lessons for opendm40
 
 1. **The rate must not follow the input.** Every bench meter holds its
    integration time fixed; auto-switching exists only in the stock DM40.
@@ -457,7 +457,7 @@ Patterns:
 3. **Averaging is a separate, visible, optional layer.** Keithley-style
    type / count / window is the common SCPI vocabulary. The window is what
    keeps a filtered meter responsive to steps (DMM7510 default 0.1 % of
-   range = 60 counts on a 60000-count scale; fw-rs uses ~2 counts, so its
+   range = 60 counts on a 60000-count scale; opendm40 uses ~2 counts, so its
    window resets on almost any real signal).
 4. **Post-averaging cannot remove an alias that the converter window let
    through near the reading rate.** Averaging N contiguous conversions does
@@ -466,13 +466,13 @@ Patterns:
    noise and with ripple away from those frequencies.
 5. **One more digit costs speed and should say so.** The 3458A averages
    10-PLC readings for longer NPLC; BM869s shows 500k counts at 1.25/s; the 87V
-   HiRes is a mode. In fw-rs the +1 digit is a property of "filter on at a
+   HiRes is a mode. In opendm40 the +1 digit is a property of "filter on at a
    slow code", not of a default rate.
 6. **A fast bargraph is a separate path on handhelds.** On the HY3131 it can
    only come from a faster AD1 code, which conflicts with lesson 2 unless the
    readout is decimated in firmware (option D).
 
-## 7. Options for fw-rs
+## 7. Options for opendm40
 
 Common numbers: AD1 periods 100 / 200 / 400 ms at 0x15 / 0x16 / 0x17 (chopped).
 Noise per conversion is assumed white: σ(0x16) ≈ σ(0x15)/√2,
@@ -581,7 +581,7 @@ than it. Settling after a step is assumed to take 2 conversions (sinc² spans
   notch mains. It keeps "fast while moving" at half the stock's speed without
   the 50 Hz hole. Since 0x16 already updates at 5/s, the gain over a fixed
   0x16 is only the √2 lower noise of 0x17 when steady.
-- **UI / SCPI.** As B, plus `RATE AUTO` (fw-rs extension; no bench
+- **UI / SCPI.** As B, plus `RATE AUTO` (opendm40 extension; no bench
   equivalent).
 - **Effort.** S (the code exists). **Risk.** Low technically. It keeps the
   behaviour the owner is unhappy with, and the reading rate varies with the
@@ -622,7 +622,7 @@ than it. Settling after a step is assumed to take 2 conversions (sinc² spans
 
 ### Option E (variant of A / B): "autozero off" FAST
 
-The HY3131 chopper is fw-rs's autozero. Unchopped, 0x06 (OSR 16384) gives
+The HY3131 chopper is opendm40's autozero. Unchopped, 0x06 (OSR 16384) gives
 **10/s with a 100 ms comb that notches 50 and 60 Hz**, which is what the OWON
 HY3131 meter runs. A FAST preset at 0x06 would be the 3458A / Truevolt
 "autozero OFF doubles the rate" trade-off. Its offset is VOS instead of
@@ -755,7 +755,7 @@ Local (repository `docs/`):
 - HYCON APN-HY3131001 (SPI timing; nothing on rate): `docs/APN-HY3131001_EN.pdf`.
 - `emu/hy3131/RESEARCH.md` §1 (OWON HY3131 OSR, after
   http://essentialscrap.com/owon_fix/) and §3 (stock R22 codes).
-- `firmware/docs/acdc-stock-vs-fwrs.md` §4, `firmware/docs/user-feedback.md` (P3,
+- `firmware/docs/acdc-stock-vs-opendm40.md` §4, `firmware/docs/user-feedback.md` (P3,
   UF-25, UF-30), `firmware/docs/device-check-2026-10-21.md` (40 Hz square in DC V).
 
 Bench / system:

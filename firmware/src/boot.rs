@@ -521,7 +521,7 @@ pub fn shim() -> BootInfo {
             (Mode::Recovery, why)
         } else if failed {
             // Transient clock failure: retry the whole boot (the ROM sets the
-            // clock up again) instead of running fw-rs at 16 MHz.
+            // clock up again) instead of running opendm40 at 16 MHz.
             unsafe { w32(BKP_LAST, LAST_NORMAL) };
             sysreset()
         } else {

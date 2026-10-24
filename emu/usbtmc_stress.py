@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""USBTMC stress test of fw-rs in the emulator, over USB/IP (emu/usbip_client.py).
+"""USBTMC stress test of opendm40 in the emulator, over USB/IP (emu/usbip_client.py).
 
     emu/run.py fwrs --fast --usbip 4 --run-for 3000 &        # USB/IP on TCP 3240
     emu/usbtmc_stress.py [--port 3240] [--iters 5000] [--seed N] [--cases a,b,..]
@@ -10,7 +10,7 @@ reply checked byte-exactly where it is deterministic:
   pair     set command then its query (SYST:IDN:EMUL 34401A|OFF, then
            SYST:IDN:EMUL? and *IDN?), each its own DEV_DEP_MSG_OUT
   combo    several commands in one message (';'), incl. multi-packet
-           Bulk-OUT messages up to the fw-rs 256-byte command buffer
+           Bulk-OUT messages up to the opendm40 256-byte command buffer
   split    one command in two DEV_DEP_MSG_OUT transfers (EOM only on the second)
   big      multi-packet replies: WAV:DATA? (#3400 block + '\n': a 420-byte
            transfer, 7 packets),
@@ -31,7 +31,7 @@ reply checked byte-exactly where it is deterministic:
   compound one message mixing commands the main loop runs later (OUTP,
            SOUR:FUNC, POW:PHAS:CAL, MMEM:DATA?) with text queries, a
            reading wait (READ?) and SYST:ERR?: every query answered in
-           order, ';'-joined, in one response (fw-rs scpi_msg.rs); a block
+           order, ';'-joined, in one response (opendm40 scpi_msg.rs); a block
            query (MMEM:DATA?) beside other queries is refused ("Query
            error"), alone with a missing file it answers empty
 
@@ -187,7 +187,7 @@ class Tmc:
 
 
 def nl(got, what):
-    """The reply without its '\\n' terminator: every fw-rs USBTMC reply ends
+    """The reply without its '\\n' terminator: every opendm40 USBTMC reply ends
     with one since 848047f (scpi.rs header), a block reply too (after the
     block, as the last byte of the EOM transfer: docs/bt-scpi.md "Scope
     waveform readout"). An empty reply (a failed block query) has none."""

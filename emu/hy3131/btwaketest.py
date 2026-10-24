@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs DMM rail wake (PE2) in the emulator: device check 2026-10-21,
+"""opendm40 DMM rail wake (PE2) in the emulator: device check 2026-10-21,
 "Bluetooth (0667175)" 1g / 1h. Needs the HY3131 model's PE2 power gate
 (HY3131.RailModel, on by default: with PE2 low the chip is unpowered, a PE2
 rise is a power-on reset and the chip ignores the bus for PowerUpMs).
@@ -29,7 +29,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 EMU = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF')
+ap.add_argument('--app', required=True, help='opendm40 native ELF')
 ap.add_argument('--port', type=int, default=4833, help='BT passthrough TCP port (default 4833)')
 ap.add_argument('rest', nargs=argparse.REMAINDER, help='-- further emu/run.py arguments (--base, --disk, ...)')
 A = ap.parse_args()

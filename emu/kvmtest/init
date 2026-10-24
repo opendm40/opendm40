@@ -8,7 +8,7 @@
 #   dm40direct=1: first an O_DIRECT read of CALIB.BIN (dd iflag=direct)
 #   dm40wait=<s>: start the copies only after the stream ran this long
 #   dm40rate=<S/s>: LOG:SRATe (default 38400; 76800: the writer trial, then
-#     the copies dm40wait s into the run, fw-rs vdisk.rs mirror pacing)
+#     the copies dm40wait s into the run, opendm40 vdisk.rs mirror pacing)
 #   dm40rounds=<n>: copy the four files n times (default 1)
 export PATH=/bin LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
 mount -t proc proc /proc; mount -t sysfs sys /sys; mount -t devtmpfs dev /dev

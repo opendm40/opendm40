@@ -30,7 +30,7 @@ namespace Hy3131Tests
         public readonly MachineStub Machine = new MachineStub();
         public readonly PortStub PortC = new PortStub(), PortD = new PortStub(), PortA = new PortStub(), PortE = new PortStub();
         public readonly HY3131 Chip;
-        public double BitTime = 1e-6; // seconds per SCK phase (the stock is faster, fw-rs ~1 us)
+        public double BitTime = 1e-6; // seconds per SCK phase (the stock is faster, opendm40 ~1 us)
 
         public Master()
         {
@@ -106,7 +106,7 @@ namespace Hy3131Tests
 
         public byte Read1(int reg) => Read(reg, 1)[0];
 
-        // ---- hardware SPI (fw-rs hy3131.rs SPI2 bus; shift = an alternative
+        // ---- hardware SPI (opendm40 hy3131.rs SPI2 bus; shift = an alternative
         // framing, kept to document the model) ----
         // Bytes go through HY3131SpiPort as Renode's SPI controller hands them
         // over; CS and the read-period pulse are GPIO, as in the firmware.
@@ -122,7 +122,7 @@ namespace Hy3131Tests
             return Chip.SpiByteTimed(b, t0, bit, ckph);
         }
 
-        /// fw-rs's 76.8 kS/s data frame (hy3131.rs `spi::hybrid_start`): the
+        /// opendm40's 76.8 kS/s data frame (hy3131.rs `spi::hybrid_start`): the
         /// command byte in mode 0, the read-period pulse on the PC10 GPIO, the
         /// data bytes with CKPH `dataCkph`; `cmdCkph` sends the command in CKPH 1
         /// (wrong: the chip takes DI at the edge the master changes it).

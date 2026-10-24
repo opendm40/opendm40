@@ -11,17 +11,17 @@
 //!   [SENSe:]FUNCtion "<f>"   CONFigure?   INITiate  ABORt  SYSTem:LOCal|REMote
 //!   (no-ops)   SYSTem:IDN:EMULation OFF|34401A / ?   SYSTem:MODel?
 //! (*IDN? and SYSTem:MODel? name the model of the calibration record,
-//! docs/model-variants.md; fw-rs uses the DM40C count limits on all models.)
+//! docs/model-variants.md; opendm40 uses the DM40C count limits on all models.)
 //! where <f> = VOLTage[:DC] | VOLTage:AC | VOLTage:ACDC | CURRent[:DC] |
 //! CURRent:AC | CURRent:ACDC | RESistance | CONTinuity | DIODe | CAPacitance |
 //! FREQuency | TEMPerature. Functions are stock DMM mode numbers (see dmm.rs),
 //! 16 / 17 = V / A AC+DC (true RMS of AC+DC = sqrt(AC^2 + DC^2), the stock
 //! DM40B/C sub-mode; FUNCtion? answers "VOLT:ACDC" / "CURR:ACDC"),
-//! 19 / 20 = V / A with the AUTO coupling (fw-rs: VOLTage:AUTO /
+//! 19 / 20 = V / A with the AUTO coupling (opendm40: VOLTage:AUTO /
 //! CURRent:AUTO; the reading is the DC or the AC part, whichever AUTO picks,
 //! dmm.rs AUTO_*; FUNCtion? answers "VOLT:AUTO" / "CURR:AUTO").
 //!
-//! Coupling of V / A (fw-rs; the same switch as the V / A button):
+//! Coupling of V / A (opendm40; the same switch as the V / A button):
 //!   [SENSe:]VOLTage:COUPling DC|AC|ACDC|AUTO   select V with that coupling
 //!   [SENSe:]CURRent:COUPling DC|AC|ACDC|AUTO   (= CONF:VOLT[:AC|:ACDC|:AUTO])
 //!   [SENSe:]VOLTage:COUPling? / CURRent:COUPling?   DC / AC / ACDC, or
@@ -87,7 +87,7 @@
 //! 100...; temperature: 60000 counts of the readout). No reading of the
 //! current function yet: the range's 60000-count step as the resolution.
 //!
-//! Ranges and resolution (fw-rs, 34401A / 34465A style; App::scpi_range):
+//! Ranges and resolution (opendm40, 34401A / 34465A style; App::scpi_range):
 //!   CONFigure:<f> [<range>|AUTO|MIN|MAX|DEF[,<res>|MIN|MAX|DEF]]   select
 //!     the function, then the range (none / AUTO / DEF = autorange, also on
 //!     the function already selected), then the resolution if given
@@ -141,7 +141,7 @@
 //! from CONFigure?. PyVISA scripts written for a real 34401A get its
 //! command subset (CONF:<f> <range>,<res>, <f>:RANG, :RES work as above).
 //!
-//! Temperature / system (fw-rs extensions):
+//! Temperature / system (opendm40 extensions):
 //!   CONFigure:TEMPerature [<sensor>]   MEASure:TEMPerature? [<sensor>]
 //!     <sensor> = TCK | PT100 | PT1000 | NTC10K3950 | NTC10K3435 | NTC100K3950
 //!     | NTCUSER (dmm.rs T_NAMES; also TC / K for TCK); without it the current
@@ -226,7 +226,7 @@
 //!   CALCulate:LIMit:LOWer|UPPer <v> / ?   set a limit (turns the check on);
 //!     query: +9.9E37 when not set
 //!   CALCulate:LIMit:STATe ON|OFF / ?      limit check on / off
-//!   CALCulate:LIMit:CLEar                 clear both limits (fw-rs; not the
+//!   CALCulate:LIMit:CLEar                 clear both limits (opendm40; not the
 //!     Keysight meaning "clear the fail indicator")
 //!   CALCulate:LIMit:FAIL?                 1 = the value is outside the limits
 //!
@@ -628,9 +628,9 @@ pub enum Log {
 ///                           waiting, 1 working, 2 ready, 3 off),
 ///                           clusters_ready,erases_since_boot
 ///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
-///                           as a crash (1st: fw-rs reboots; 2nd without 60 s
+///                           as a crash (1st: opendm40 reboots; 2nd without 60 s
 ///                           healthy: recovery = marker zeroed, DESTRUCTIVE)
-///   DBG:RESET               reboot fw-rs (SW reset)
+///   DBG:RESET               reboot opendm40 (SW reset)
 ///   DBG:RECOVER, DBG:UPDATE DESTRUCTIVE: clear the previous-mode word, zero the 12-byte loader
 ///                           marker, reset -> vendor update screen + its USB disk until
 ///                           a dm40*.bin is installed. "Flash error" = marker did not
@@ -1625,7 +1625,7 @@ impl Scpi {
                 // SYSTem:MODel?: "DM40A|B|C,<raw byte>,<counts>": the model the
                 // calibration record names (stock rule: record +0x168, a record
                 // without version 1 counts as DM40A) and the count limits
-                // fw-rs uses on every model (60000, dmm.rs COUNTS_MODEL).
+                // opendm40 uses on every model (60000, dmm.rs COUNTS_MODEL).
                 _ if kw(p0, "SYSTem") && parts.len() == 2 && kw(parts[1], "MODel") && query => {
                     let (i, raw) = model();
                     self.put(b"DM40");
@@ -1797,7 +1797,7 @@ impl Scpi {
                     },
                     None => self.err = Some("Command error"),
                 },
-                // [SENSe:]<f>:RANGe / RANGe:AUTO / RESolution (fw-rs).
+                // [SENSe:]<f>:RANGe / RANGe:AUTO / RESolution (opendm40).
                 // range_cmd is .cold (region C): only for a header that names
                 // RANGe / RESolution. Every other header below (LOG:DATA?,
                 // LOG:DISK?, DBG:ISR?, MMEM...) reached it, and a fetch from C
@@ -2322,7 +2322,7 @@ impl Scpi {
                     }));
                 }
                 _ if kw(p0, "FETCh") && query => out = Out::Fetch,
-                // [SENSe:]VOLTage:COUPling / CURRent:COUPling (fw-rs).
+                // [SENSe:]VOLTage:COUPling / CURRent:COUPling (opendm40).
                 _ if coup_cmd(parts).is_some() => {
                     let amp = coup_cmd(parts) == Some(true);
                     if query {

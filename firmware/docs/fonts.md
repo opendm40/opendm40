@@ -2,11 +2,11 @@
 
 ## 1. Why `stockfont` at all
 
-Every text and icon on the fw-rs screens is drawn with the **stock DM40 V2.6
+Every text and icon on the opendm40 screens is drawn with the **stock DM40 V2.6
 bitmap fonts**: the "stock UI is the baseline" rule (replicate the stock look,
 pixel-diff against stock, tools/stock-ui and tools/ui-render/stock-diff.sh).
 They used to be read live from the stock app at 0x0805xxxx..0x0806xxxx;
-once fw-rs is flashed over 0x08004000 that app is gone, so
+once opendm40 is flashed over 0x08004000 that app is gone, so
 tools/mkstockfont.py copies them out of `dm40_v_2_6.dec.bin` (the decoded
 stock update file in the repo root) into src/stockfont_data.rs. An earlier
 own font (src/fonts.rs + Roboto) was dropped for this (TODO.md).

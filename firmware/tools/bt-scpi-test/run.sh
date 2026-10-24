@@ -5,7 +5,7 @@
 #      random chunking; timeouts; overrun; refusal cases; ring order);
 #   2. a thumbv7em-none-eabihf lib build of src/bt_scpi.rs, so the file that
 #      passed on the host is known to compile for the target too.
-# Does not touch hardware and does not modify any fw-rs source.
+# Does not touch hardware and does not modify any opendm40 source.
 # The main.rs integration (two SCPI sessions, bt.pump, ScpiPort routing, DBG
 # refusal) is in src/main.rs; the former main-hooks.patch was applied there.
 set -e

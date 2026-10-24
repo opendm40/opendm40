@@ -1,9 +1,9 @@
 //
 // Cortex-M DWT at 0xE0001000: CYCCNT derived from virtual time (HCLK 200 MHz),
-// writable (fw-rs zeroes it at start); CTRL is plain storage with CYCCNTENA.
+// writable (opendm40 zeroes it at start); CTRL is plain storage with CYCCNTENA.
 // Only CTRL/CYCCNT are modelled; the rest read 0.
 //
-// Harness sync (emu/README.md "Input markers"): fw-rs's uptime is the
+// Harness sync (emu/README.md "Input markers"): opendm40's uptime is the
 // virtual time since its last CYCCNT write (clock.rs Clock::new in main), so
 // `FwUptime` = virtual time - `ZeroedAt` is the firmware's DBG:PING? uptime
 // now, without the 21 s CYCCNT wrap. HY3131 SetInput logs it with every
@@ -35,7 +35,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// Virtual time (s) of the firmware's last CYCCNT write; -1 = none yet.
         public double ZeroedAt { get; private set; } = -1;
 
-        /// The firmware's uptime (s) as fw-rs's Clock counts it (CYCCNT since
+        /// The firmware's uptime (s) as opendm40's Clock counts it (CYCCNT since
         /// its last write, unwrapped); -1 before the first write.
         public double FwUptime => ZeroedAt < 0 ? -1 : Seconds() - ZeroedAt + (double)written / frequency;
 
@@ -57,7 +57,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var v = (uint)(Cycles() + offset);
                 // CpuCost.cs: a handler's modelled extra cost after its
                 // first read (realized by the next time sync: inside the
-                // busy window fw-rs measures, logger.rs BUSY16).
+                // busy window opendm40 measures, logger.rs BUSY16).
                 CpuCost.Instance?.OnCycRead();
                 return v;
             default: return 0;

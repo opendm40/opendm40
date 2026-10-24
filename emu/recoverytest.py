@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""fw-rs recovery triggers on the native image (src/boot.rs shim, src/recovery.rs)
-through the whole boot chain: ROM -> FS-loader -> fw-rs, the real vendor
+"""opendm40 recovery triggers on the native image (src/boot.rs shim, src/recovery.rs)
+through the whole boot chain: ROM -> FS-loader -> opendm40, the real vendor
 FS-loader included (run.py chain mode).
 
   cd firmware && ./build.sh
@@ -12,27 +12,27 @@ keeps BOR|PIN|POR after power-on, FWDGT|PIN after a watchdog reset, SW|PIN
 after a SYSRESETREQ, until RSTFC; the backup SRAM and the flash keep their
 content over a reset. The power key is PD6 (pressed = 1); "from off" = the
 key pressed at t = 0, when the emulated unit powers up. A hang is injected by
-setting the PC to fw-rs's `wait_for_watchdog` (what a panic or DBG:RELEASE
+setting the PC to opendm40's `wait_for_watchdog` (what a panic or DBG:RELEASE
 leaves: nothing feeds the watchdog any more; the shim sees the same FWDGT
 reset). Case `release` sends the real DBG:RELEASE over USBTMC (USB/IP).
 
-Cases (virtual times; fw-rs is entered ~0.69 s after power-on):
+Cases (virtual times; opendm40 is entered ~0.69 s after power-on):
   normal      no key: one boot, no recovery, marker valid
   key-short   key pressed at power-on, released at 0.9 s (a normal power-on)
   key-abort   key held to the beep (shim + 4 s), released in the 0.5 s
               confirm window: normal boot
   key-hold    key held from off for 7 s: recovery = loader marker zeroed,
-              SYSRESETREQ, ROM -> FS-loader update screen, fw-rs not entered
-  wdt-one     one hang: watchdog reset, fw-rs boots again (crash count 1)
+              SYSRESETREQ, ROM -> FS-loader update screen, opendm40 not entered
+  wdt-one     one hang: watchdog reset, opendm40 boots again (crash count 1)
   wdt-two     a second hang ~10 s after the first watchdog reboot: recovery
-  wdt-two-70  the second watchdog reset 70 s after the first, but fw-rs ran
+  wdt-two-70  the second watchdog reset 70 s after the first, but opendm40 ran
               only ~50 s in between: still recovery (the rule is 60 s of
               running main loop, not 60 s between the resets)
   wdt-healthy the second hang after > 60 s of main loop: the crash counter
               was cleared at 60 s, so only a reboot (crash count 1 again)
   release     DBG:RELEASE over USB twice in a row: WDT_RETRY, then recovery
 
-Checks per case: entries of the ROM / FS-loader / fw-rs reset handlers and of
+Checks per case: entries of the ROM / FS-loader / opendm40 reset handlers and of
 recovery::run (cheap per-address hooks), then at the end the loader marker
 (0x08008000), the backup-SRAM boot words (BKP_CRASH / BKP_TRIG / BKP_LAST)
 and where the CPU is. Exit status 0 = PASS. Per-process names, private disk
@@ -59,7 +59,7 @@ import run  # noqa: E402
 CASES = ['normal', 'key-short', 'key-abort', 'key-hold', 'wdt-one', 'wdt-two', 'wdt-two-70', 'wdt-healthy']
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF (symbols needed)')
+ap.add_argument('--app', required=True, help='opendm40 native ELF (symbols needed)')
 ap.add_argument('--cases', default=','.join(CASES), help='comma list (default: all but `release`); add release for '
                                                          'the USB DBG:RELEASE case')
 ap.add_argument('--jobs', type=int, default=3, help='emulators at the same time (default 3)')
@@ -195,24 +195,24 @@ class Case:
         return None not in m and m != [0, 0, 0] and m != [0xFFFFFFFF] * 3
 
     def expect_normal(self, boots, crash):
-        """fw-rs running after `boots` entries, no recovery."""
+        """opendm40 running after `boots` entries, no recovery."""
         if not self.v:
             return
-        self.check(len(self.times('app')) == boots, 'fw-rs entered %d time(s) (%s)' % (boots, self.fmt_ev()))
+        self.check(len(self.times('app')) == boots, 'opendm40 entered %d time(s) (%s)' % (boots, self.fmt_ev()))
         self.check(not self.times('recovery'), 'recovery::run not entered')
         self.check(self.marker_valid(), 'loader marker valid')
         self.check(self.v['last'] == NRML, 'BKP_LAST = NRML (0x%08X)' % self.v['last'])
         self.check(self.v['crash'] in crash, 'BKP_CRASH 0x%08X in %s' % (self.v['crash'], ['0x%08X' % c for c in crash]))
         pc = self.v['pc']
         self.check(APP_LO <= pc < LOADER_LO or 0x10000000 <= pc < 0x20030000,
-                   'CPU in fw-rs at the end (PC 0x%08X)' % pc)
+                   'CPU in opendm40 at the end (PC 0x%08X)' % pc)
         scr = self.update_screen()
         if scr is not None:
             self.check(not scr, 'no FS-loader update screen')
 
     def expect_recovery(self, t_lo, t_hi):
         """recovery::run in [t_lo, t_hi], then ROM -> FS-loader with the
-        marker zeroed, fw-rs not entered again."""
+        marker zeroed, opendm40 not entered again."""
         if not self.v:
             return
         rec = self.times('recovery')
@@ -271,7 +271,7 @@ def case_key_short():
 
 
 def case_key_abort():
-    # fw-rs at ~0.69 s; the shim's 4 s window ends ~4.7 s, the beep ~5.0 s,
+    # opendm40 at ~0.69 s; the shim's 4 s window ends ~4.7 s, the beep ~5.0 s,
     # the confirm window ~5.0..5.5 s: release at 5.2.
     c = Case('key-abort')
     c.key(0.0, True)
@@ -306,13 +306,13 @@ def case_wdt_one():
     c.expect_normal(2, (CRASH1,))
     t = c.times('app')
     if len(t) == 2:
-        c.check(25.5 <= t[1] <= 27.5, 'watchdog reboot ~20 s after the hang (fw-rs again at %.2f s)' % t[1])
+        c.check(25.5 <= t[1] <= 27.5, 'watchdog reboot ~20 s after the hang (opendm40 again at %.2f s)' % t[1])
     return c
 
 
 def case_wdt_two():
     c = Case('wdt-two')
-    c.hang(6.0)          # reset ~26 s, fw-rs ~26.2 s
+    c.hang(6.0)          # reset ~26 s, opendm40 ~26.2 s
     c.hang(36.0)         # ~10 s after the reboot -> reset ~56 s
     c.end_reads(62.0)
     c.run(62.2)

@@ -1,6 +1,6 @@
 # Native-boot Stage 0 — prove the recovery path
 
-> **Historical (2026-10-13).** Run with the RAM-loaded fw-rs build, which was
+> **Historical (2026-10-13).** Run with the RAM-loaded opendm40 build, which was
 > removed on 2026-10-22; `DBG:RECOVER` is now the destructive marker-zeroing
 > recovery (`tools/dm40dbg.py recover -h`), not a plain reset.
 
@@ -11,7 +11,7 @@ This is the first, zero-risk step of the plan in
 [`native-boot-review.md`](../../docs/history/native-boot-review.md)).
 
 **This test reflashes STOCK over the (still intact) stock app.** The current
-fw-rs is only RAM-loaded over Bluetooth, so nothing we rely on is at risk:
+opendm40 is only RAM-loaded over Bluetooth, so nothing we rely on is at risk:
 a battery pull alone already returns the device to stock. Honest framing (per
 the review): Stage 0 proves **auto-install of a file already on the FAT**, not
 dead-app recovery — that harder case is a Stage 1 concern.
@@ -33,7 +33,7 @@ dead-app recovery — that harder case is a Stage 1 concern.
   deletes it after its first successful boot. So in this test, once stock comes
   back up it removes `dm40_v_2_6.bin` itself and no reinstall loop forms. Still,
   verify it is gone (step 6) and delete it manually if it is not.
-- **fw-rs cannot write or delete FAT files.** `src/msc.rs` + `src/spiflash.rs`
+- **opendm40 cannot write or delete FAT files.** `src/msc.rs` + `src/spiflash.rs`
   only expose the W25Q128 as a USB **block device**; the host OS owns the FAT
   filesystem (there is no FAT driver in the firmware). So the **host** stages
   and removes the file; the firmware only triggers the reset.
@@ -48,14 +48,14 @@ the reflash on the way back up, independent of whatever is at `0x08004000`.
 
 It is kept as a distinct SCPI verb because once the native shim exists (Stage 1)
 `RECOVER` must additionally set the shim's recovery magic before resetting, while
-`RESET` becomes an ordinary fw-rs reboot. No presence check is built in: reading
+`RESET` becomes an ordinary opendm40 reboot. No presence check is built in: reading
 the FAT directory would need a BPB/root-dir parser the firmware does not have,
 and the host already *shows* the staged file in its file manager — a better
 confirmation than anything the firmware could report.
 
 ## Test procedure
 
-1. With fw-rs running (RAM-loaded via `firmware/tools/reload.sh`), it enumerates a
+1. With opendm40 running (RAM-loaded via `firmware/tools/reload.sh`), it enumerates a
    USB mass-storage disk. Mount it on the host.
 2. Copy the official stock update file to the disk root. It lives at the repo
    root:
@@ -82,11 +82,11 @@ confirmation than anything the firmware could report.
 6. Re-mount the disk and confirm `dm40_v_2_6.bin` is **gone** (the stock app
    deletes it after a good boot). If it is still present, delete it so the next
    boot does not reinstall it.
-7. Return to fw-rs: run
+7. Return to opendm40: run
 
        firmware/tools/reload.sh
 
-   which rebuilds and RAM-loads fw-rs over Bluetooth. It does not touch the FAT.
+   which rebuilds and RAM-loads opendm40 over Bluetooth. It does not touch the FAT.
 
 ## Pass criterion
 

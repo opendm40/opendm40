@@ -40,7 +40,7 @@ pub struct TrEnt {
     pub k: u8,
     pub mode: u8,
     pub range: i8,
-    /// R22 as fw-rs believes it (`Dmm::r22`).
+    /// R22 as opendm40 believes it (`Dmm::r22`).
     pub r22: u8,
     /// Readback (0 without it): R22, R24, R32.
     pub r22c: u8,

@@ -964,7 +964,7 @@ class FrontendView(Gtk.DrawingArea):
     NET_OHM = ('PB0', 'PB8', 'SENSE', 'RLU', 'RLD', 'FB')  # V jack via the Ω / mV network (PA relay Ω/mV)
     NET_COM = ('AGND', 'PB3')
     NET_A = ('PB2', 'PB1')
-    # divider taps with SS closed (the stock / fw-rs rows) -> the ratio at SENSE
+    # divider taps with SS closed (the stock / opendm40 rows) -> the ratio at SENSE
     TAPS = {(7,): '/10', (6,): '/100', (5,): '/1000', (4, 5): '/10000'}
 
     @staticmethod
@@ -1060,7 +1060,7 @@ class FrontendView(Gtk.DrawingArea):
     # ---------- inputs the firmware switches inside one function / range ----------
     # The drawing holds its geometry per function / range: every pin, wire and line any of these states
     # can need is reserved, so a toggle never adds or removes a row (the owner: "скачет, некрасиво").
-    # fw-rs time-shares inputs (firmware/src/dmm.rs, sentinel.rs; power-meter-and-misconnect.md 4.4):
+    # opendm40 time-shares inputs (firmware/src/dmm.rs, sentinel.rs; power-meter-and-misconnect.md 4.4):
     #  - DC V 6 V: the comparator alternates PB1 (A-jack sentinel) / SENSE (AC? hint), one 100 ms window each;
     #  - AC V: AD1 (peak hold) alternates PB1 - PB3 (A-jack) / SENSE - PB5 (DC? hint), 100 ms windows;
     #  - DC V 6 V / DC mV: after a comparator hit the A-PROT probe (OP2 on PB2, AD2 = OP2O - PB3, peak hold
@@ -1139,7 +1139,7 @@ class FrontendView(Gtk.DrawingArea):
 
     @classmethod
     def model_variants(cls, st):
-        """the states fw-rs switches this row between, from its register signature (header comment)"""
+        """the states opendm40 switches this row between, from its register signature (header comment)"""
         out = []
         role, rng = st.get('role'), st.get('range')
         cmp_s = st.get('scmpi') if st.get('cmp') == '1' else None
@@ -1477,7 +1477,7 @@ class FrontendView(Gtk.DrawingArea):
         cmp_w = box_w(['PB1 ⇄ SENSE', 'PB4 ⇄ off'])      # reserved: the counter right of it never moves
         # column widths are reserved for the widest text any row can produce: no column moves between
         # functions / ranges (the owner: nothing jumps horizontally between frames)
-        # (the widest texts of the stock / fw-rs rows; an unusual row may widen them, never the usual ones)
+        # (the widest texts of the stock / opendm40 rows; an unusual row may widen them, never the usual ones)
         conv_w = max([box_w(b) for b in (b_ad1, b_ad2, b_ad3)] + [box_w([
             'OSR 32768 chop  IG 0.9', '− VSSA  ref REFO/AGND', '− AGND  76.8 k S/s', '− PB3⇄5 ref PB6/AGND'])])
 

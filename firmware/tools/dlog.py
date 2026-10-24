@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decode a DM40 fw-rs binary log (LOGnnn.DLG / SCOPnnn.DLG / FASTnnn.DLG) to CSV.
+"""Decode a DM40 opendm40 binary log (LOGnnn.DLG / SCOPnnn.DLG / FASTnnn.DLG) to CSV.
 
 Standalone (stdlib only). The output is byte-identical to the CSV the device
 serves for the same file (virtual LOGnnn.CSV on the "DM40 info" USB volume,

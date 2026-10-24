@@ -3,7 +3,7 @@
 //!
 //! Why: the FS-loader (0x080a0000) installs ANY dm40*.bin it finds in the root
 //! on every boot it runs on, even an identical image, and never removes it;
-//! the stock app used to delete it. With fw-rs as the app nothing would, so
+//! the stock app used to delete it. With opendm40 as the app nothing would, so
 //! every such boot would re-flash ~480 KB. Renaming (not deleting) keeps the
 //! image: the user restores it by removing the leading underscore.
 //!

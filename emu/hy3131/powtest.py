@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""fw-rs power meter (firmware/src/powermeter.rs) in the emulator: fw-rs native +
+"""opendm40 power meter (firmware/src/powermeter.rs) in the emulator: opendm40 native +
 the HY3131 model's Power role, a timed connection script per scenario, SCPI
 over USB/IP (setup commands, then DBG:PING? uptime, FETCh:POWer:ALL?,
 POW:VOLT:RANG?, POW:CURR:RANG? in a loop); the last samples of every phase
 must match its expectation.
 
-  emu/hy3131/powtest.py                          # all scenarios, fw-rs built from HEAD
+  emu/hy3131/powtest.py                          # all scenarios, opendm40 built from HEAD
   emu/hy3131/powtest.py --app firmware/opendm40.bin --port 3381 mains
   emu/hy3131/powtest.py --list
 
@@ -27,7 +27,7 @@ ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('names', nargs='*')
-ap.add_argument('--app', help='fw-rs native image (default: run.py builds HEAD)')
+ap.add_argument('--app', help='opendm40 native image (default: run.py builds HEAD)')
 ap.add_argument('--port', type=int, default=3381, help='USB/IP port (default 3381)')
 ap.add_argument('--list', action='store_true')
 ap.add_argument('--bt-offset', type=int, default=1000, help='BT port = --port + this (default 1000)')

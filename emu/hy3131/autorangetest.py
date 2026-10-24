@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs DC V autorange after a multi-step range change, and READ? across a
+"""opendm40 DC V autorange after a multi-step range change, and READ? across a
 range change (device bab5dd4, device-check doc "bab5dd4" 1 / 3).
 
   cd firmware && ./build.sh
@@ -48,7 +48,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF')
+ap.add_argument('--app', required=True, help='opendm40 native ELF')
 ap.add_argument('--port', type=int, default=30410, help='USB/IP port (default 30410)')
 ap.add_argument('--trials', type=int, default=12, help='AUTO ON trials (default 12)')
 ap.add_argument('--mix', type=int, default=1, help='ad1mix model option (default 1)')
