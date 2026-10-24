@@ -382,7 +382,7 @@ of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches
   60 Ω and 60 MΩ (the current-source row) not measured; the firmware shows
   the 600 Ω default value on 60 Ω (*inferred*). *Inferred* from the drops:
   only 600 Ω is limited by OP3; above it the ~2 V source behind Rref sets
-  the current. Diode test 0.75 mA (owners' reports, not measured yet).
+  the current. Diode test 0.756 mA, open-circuit 3.23 V (measured on one unit, the RLD current-source path; device check).
 - Diode: OP3 source with the 900 k / 100 k divider on HY3131 PB0 / PB8.
 - Capacitance: RC relaxation (R = 1020 k .. 1.5 k) or constant-current ramp
   switched on HY3131 PA4..PA7.
