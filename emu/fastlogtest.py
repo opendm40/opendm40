@@ -91,6 +91,14 @@ ap.add_argument('--region-c', action='store_true', help='Renode hooks on every f
 ap.add_argument('--host-read', action='store_true', help='while each session runs: a host reading the INFO/ files '
                 '(FIRMWARE.BIN first; device 4c4b489: calbackup::FwFile::fill, region C, max_lat 4.66 us) off the USB '
                 'volume (MSC READ(10), 64 sectors each) and DBG:PROF? (prof::report) between the polls')
+ap.add_argument('--host-files', default='', help='with --host-read: only these INFO/ files, ","-separated, in this order '
+                '(e.g. LOADER.BIN: all of it from the SPI-disk mirror; device 612c45c M2c: ~22 000 lost per copy at 76800)')
+ap.add_argument('--host-sectors', type=int, default=64, help='with --host-read: sectors per READ(10) (Linux cp: up to 240)')
+ap.add_argument('--host-delay', type=float, default=0.0, help='with --host-read: start the READs this many device seconds after '
+                'the run began (LOG:DISK? state 3), e.g. 3: after a 76800 writer trial (device 612c45c M2c: LOADER.BIN 6 s '
+                'after state 3 lost 21 745; inside the trial the session fell back to 38400)')
+ap.add_argument('--host-only', action='store_true', help='with --host-read: no SCPI queries between the READs (back to back, '
+                'as a host cp; LOG:DISK? still polled every 8 READs)')
 ap.add_argument('--poll', default='', help='with --host-read: more queries sent at each step, ";"-separated (e.g. '
                 '"SCOP:MEAS:VPP?;DBG:HWTRIG?": scope commands read the calibration record, slow bank)')
 ap.add_argument('--ui-nav', action='store_true', help='UI navigation while each session streams (DBG:KEY / DBG:TAP, '
@@ -281,12 +289,14 @@ class HostRead:
                 try:
                     d = vol_dir(self.m, 'INFO')
                     self.files = sorted(d.items(), key=lambda x: x[0] != 'FIRMWARE.BIN')
+                    if A.host_files:
+                        self.files = [(n, d[n]) for n in A.host_files.split(',')]
                     break
                 except IOError:
                     time.sleep(0.5)
         if self.files:
             name, (lba, size) = self.files[self.k]
-            n = min(64, (size - self.off + 511) // 512)
+            n = min(A.host_sectors, (size - self.off + 511) // 512)
             ok = True
             if n > 0:
                 try:
@@ -310,6 +320,9 @@ class HostRead:
             if not ok or self.off >= size:
                 self.off = 0
                 self.k = (self.k + 1) % len(self.files)
+        if A.host_only:
+            self.profs += 1
+            return
         if 'PROF' in self.q('DBG:PROF?'):
             self.profs += 1
         self.q('LOG:DEST?')
@@ -339,10 +352,10 @@ class HostRead:
         if MIR[0]:
             # The mirror is served: no refusal, and every slow-bank sector
             # of each file was read during the session (from the SPI disk).
-            step = 64 * 512
+            step = A.host_sectors * 512
             cov = {n: all((n, o) in self.got for o in range(SLOW_FILES[n] // step * step, len(whole[n]), step))
                    for n in SLOW_FILES if n in whole}
-            check(not self.refused and cov and all(cov.values()),
+            check(not self.refused and (cov or A.host_files) and all(cov.values()),
                   '%s: mirror served (DBG:VDISK:MIR? %s): no NOT READY (%s), every slow-bank sector read during the '
                   'session: %s' % (tag, ','.join(map(str, MIR)), sorted(self.refused.items()) or 'none',
                                    ' '.join('%s=%s' % (n, 'yes' if c else 'NO') for n, c in sorted(cov.items()))))
@@ -467,15 +480,19 @@ def session(q, src, rate, profile):
         if st[0] >= 5:
             break
         nav = un and (A.ui_nav_steps is None or un.n < A.ui_nav_steps)
+        if hr and A.host_delay and st[0] == 3 and int(q('DBG:PING?').split(',')[0]) < t_run + A.host_delay * 1000:
+            time.sleep(0.2)
+            continue
         if (hr or nav) and st[0] == 3:
             if hr:
-                hr.step()
+                for _ in range(8 if A.host_only else 1):
+                    hr.step()
             if nav:
                 un.step()
             continue
         time.sleep(0.5)
     if hr:
-        check('FIRMWARE.BIN' in hr.seen and hr.bytes > 0 and hr.profs > 0,
+        check(('FIRMWARE.BIN' in hr.seen or A.host_files) and hr.bytes > 0 and hr.profs > 0,
               '%s %d: a host read %d bytes of INFO/ (%s) and DBG:PROF? %d times during the run'
               % (src, rate, hr.bytes, ' '.join(sorted(hr.seen)), hr.profs))
     if un and A.ui_nav_steps != 0:
@@ -489,6 +506,8 @@ def session(q, src, rate, profile):
         while int(q('LOG:DISK?').split(',')[0]) < 5:
             time.sleep(0.5)
         hr.verify('%s %d' % (src, rate))
+        print('  DBG:VDISK:MIR? %s (served, status, rewritten, ms; mirror sectors read while streaming, held, longest hold ms)'
+              % q('DBG:VDISK:MIR?'), flush=True)
     up1 = int(q('DBG:PING?').split(',')[0])
     if A.prof:
         print(q('DBG:PROF?'), flush=True)
@@ -508,6 +527,10 @@ def session(q, src, rate, profile):
         dlg += bytes(b[6:6 + n])
         if n < 6000:
             break
+    if len(st) > 13:
+        # LOG:DISK? field 14 (fw-rs fastlog.rs `writer_permille`): the Run
+        # passes' share of the main loop's CPU, the stream ISR out.
+        print('  writer: %d permille of the main loop\'s CPU (headroom %d)' % (st[13], 1000 - st[13]), flush=True)
     rows, lost, ok = decode(dlg, '%s-%s-%d' % (profile, src, rate))
     if A.vol_read:
         vol_read(q, st[1], '%s-%s-%d' % (profile, src, rate))
