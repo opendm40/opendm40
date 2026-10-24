@@ -163,6 +163,12 @@ Code work (in this order):
         (calibrator off), CONF:FREQ: READ? 0.000 Hz within ~3 s, no hang. (8) Calibrator 40 Hz -> off while in
         Hz: 0.000 Hz within ~1 s. (9) Optional, if a DBG counter readout is added: does source 0 (0xf0) ever
         read the signal on the Hz row?
+        **Device 213f9aa (device-check-2026-10-21.md "213f9aa"): (1)-(4) and (7)-(8) PASS.** 165 of 165 READ?
+        40.00 Hz (DC V / AC V / AC+DC -> Hz, Scope -> back, both pages, half after a view change), the first at
+        1.37-1.40 s (Scope -> back 0.86 s DMM / 1.04 s combined); screen "- -" at 0.5 / 1.0 s, 40.002 Hz with
+        MIN / MAX / AVG 40.002 at 1.5 s, never 0.000. No signal: 0.000 Hz at 2.42 s. 40 Hz -> off: 0.000 after
+        0.45-1.02 s; in 3 of 12 one partial-gate value (3.2 / 6.1 Hz) for ~0.7 s before it (open, owner's call).
+        (9) not done (no DBG counter readout).
   - [x] Device/About page: Menu->Settings->Device (Vendor/Web/Model/Bootloader/Software/Hardware);
         HW+bootloader ver read from the stock boot-data block 0x080A4000 (survives app updates).
         SN + BT name omitted (not sourceable without inventing a value / a blocking AT round-trip).

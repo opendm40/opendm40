@@ -3132,3 +3132,39 @@ the comparator.
 - **Calibrator:** back on the 10 Hz square, enabled. Registers equal to the start dump except 0x2C (live) and 0x01
   0x1057 -> 0x1056 (not written by the tools; read-only). During the check: 1 V, 5 V, 24 V DC, output off, the
   10 / 40 Hz square.
+
+## 213f9aa: FREQ first reading retest (2026-10-24 09:55 - 10:12)
+
+The coordinator had installed 213f9aa (rust-fw-poc, freqfirst2). `*IDN?` = `Alientek,DM40A,<UID>,dm40-fw 0.1`,
+`DBG:FLASH?` `EF4018,4096,0,...`, INFO/FIRMWARE.BIN (read after `POSIX_FADV_DONTNEED`) byte-equal to the image
+(614 016 B, sha256 8c1563ad…0544), `DBG:VDISK:MIR?` `1,4,1,5301,0,0,0`. No flashing. Quiet rule kept:
+`SYST:ALER:ALARm?` OFF, `SYST:BEEP:VOL?` 0 at the start and the end, no sound tests. Files in the session
+scratchpad's `chk8/` (`fq.py`: PREV -> 3 s -> CONF:FREQ, 5 READ? with times, then CALC:AVER MIN / MAX / AVG / COUN;
+odd reps change the view first, `back` mode = in Hz, Scope 2 s -> back; `nosig.py`, `offt.py`, `sback.py`,
+`powshot.py`, chk7's `fshot.py` / `powtl.py`) and `chk8/out/`. Signal: the calibrator's 40 Hz square on V-COM.
+
+| # | check | result |
+|---|---|---|
+| 1a | DC V -> Hz x10, odd reps 3.0 s after a DMM <-> combined view change (`fq_dcv.json`) | **PASS**: 50 of 50 READ? 40.0017-40.0018 Hz, the first at **1.37-1.40 s**; MIN / MAX / AVG 40.0017 / 40.0018 / 40.0018, COUN 5 |
+| 1b | DC V -> Hz x4, odd reps 3.0 s after Scope -> back (`fq_dcv_scope.json`) | **PASS**: 20 of 20 40.00 Hz, first at 1.37 s |
+| 1c | In Hz: Scope 2 s -> back, 3x on the DMM page, 6x on the combined view (`fq_back_dmm.json`, `fq_back_combo*.json`) | **PASS**: 45 of 45 40.00 Hz; first READ? at **0.86 s** (DMM) / 1.04-1.05 s (combined), counted from the tap; MIN stays 40.0017 |
+| 1d | AC V -> Hz x5 (odd reps after Scope -> back) and AC+DC -> Hz x5 (odd reps after a view change) (`fq_acv.json`, `fq_acdc.json`) | **PASS**: 50 of 50 40.00 Hz, first at 1.37-1.40 s, MIN / MAX / AVG 40.00 |
+| 1e | Screen at 0.5 / 1.0 / 1.5 s after DC V / AC V / AC+DC -> Hz (`sheet_entry.png`); Scope -> back (`sheet_back.png`) | **PASS**: "- -" placeholder (grey), no %, MIN / MAX / AVG empty at 0.5 and 1.0 s; "40.002 Hz", "50.0 %", MIN / MAX / AVG 40.002 at 1.5 s. Never "0.000 Hz" / "0.0 %". Scope -> back keeps the last 40.002 shown (bar greyed at 0.5 s) |
+| 2 | Calibrator output off, DC V -> Hz x3, AC V -> Hz x2 (`nosig_dcv.json`, `nosig_acv.json`, `nosig_01.5.png`, `nosig_02.6.png`) | **PASS**: first READ? **0.000 Hz at 2.42 s**, no hang, `SYST:ERR?` clean; screen "- -" at 1.5 s, "0.000 Hz" / "0.0 %" at 2.6 s |
+| 3 | In Hz on 40 Hz, calibrator off at t = 2 s, FETC? every 50 ms, 12 runs (`offt_a.json`, `offt_b.json`) | **PASS (0.000 Hz 0.45-1.02 s after the off, 12 of 12)**. Observation: in 3 of 12 one value of **3.19 / 6.07 / 6.03 Hz** at +0.30-0.36 s, held ~0.7 s before the 0.000 (the gate that straddled the off) |
+| 4a | AC V on the 40 Hz square, secondary line at 0.5 / 0.7 / 1.0 / 1.5 / 3.0 s (`acv2_*.png`, `sheet_reg.png`) | **PASS**: "--Hz --%" at 0.5 s, "40.00Hz 50.0%" from 0.7 s |
+| 4b | CONF:POW, POW:COUP AC (`powtl_a.json`, `powac_*.png`) | **PASS**: F +9.91E37 to 5.08 s, 40.0018 from 5.18 s (as 0774e70); screen F "--" at 1.0 / 4.5 s, "40.0 Hz" at 6.5 s |
+
+**Verdict:** the 0774e70 failure (three 0.000 Hz / 0.0 % readings after every Hz entry) is gone: 165 of 165
+READ? in steps 1a-1d are 40.00 Hz and the first comes at the f0d21eb time. The remaining item is the partial-gate
+value when the signal stops mid-gate (3 of 12, ~0.7 s): a real count of the edges before the off, not a
+`Freq::take` rule break; whether it should be dropped (e.g. a value < 1/2 of the last one followed by a dead gate)
+is the owner's call.
+
+**State at the end:** DMM page, DC V AUTO+ (`VOLT:RANG:AUTO?` 1, `VOLT:COUP?` DC), RATE FAST (`e_dmm.png`).
+`OUTP?` 0 throughout, `SYST:ERR?` "No error", `SYST:ALER?` NONE, `SYST:ALER:ALARm?` OFF, `SYST:BEEP:VOL?` 0,
+`DBG:ALARm?` 0,0,0,2, `DBG:VDISK:MIR?` 1,4,1,5301,0,0,0, `DBG:VDISK:RO?` 1,1, `DBG:CRASH?` empty. Settings 1/3 and
+3/3 byte-equal to the start; 2/3 differs only in the live rate digits (x 277-329, y 48-67): Dim / Shutdown Never,
+backlight 10 %, volume 0 %, Start page Multimeter, DMM row Bargraph, USB disk "Files live", Danger alarm Off.
+`MMEM:CAT?` equal to the start string; no files made. Calibrator back on the 10 Hz square, enabled; registers equal
+to the start dump except 0x2C (live).
