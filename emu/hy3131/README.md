@@ -1,11 +1,11 @@
 # HY3131 model for the DM40 emulator
 
-`emu/hy3131/HY3131.cs` is the detailed model of the Hycon HY3131 DMM front end
-(`emu/peripherals/HY3131.cs` and `emu/peripherals/DM40Frontend.cs` are relative
+[`emu/hy3131/HY3131.cs`](HY3131.cs) is the detailed model of the Hycon [HY3131](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf) DMM front end
+([`emu/peripherals/HY3131.cs`](../peripherals/HY3131.cs) and [`emu/peripherals/DM40Frontend.cs`](../peripherals/DM40Frontend.cs) are relative
 symlinks to the files here, so there is one copy to edit; emu/run.py reads them
-through the links). What it is based on: `RESEARCH.md` (datasheet, application note,
+through the links). What it is based on: [`RESEARCH.md`](RESEARCH.md) (datasheet, application note,
 Hycon tool data, open-source drivers) and the stock firmware analysis in
-`firmware/re/analysis/hy3131_v2_6.h` / `dmm_v2_6.h`.
+[`firmware/re/analysis/hy3131_v2_6.h`](../../firmware/re/analysis/hy3131_v2_6.h) / [`dmm_v2_6.h`](../../firmware/re/analysis/dmm_v2_6.h).
 
 ```
 emu/hy3131/HY3131.cs      the model: Hy3131Core (chip, no Renode types) + HY3131 (Renode peripheral)
@@ -15,7 +15,7 @@ emu/hy3131/modetest.py    stock + fw-rs through every DMM mode in the emulator, 
 emu/hy3131/powtest.py     fw-rs power meter end to end over USB/IP (fw-rs/docs/power-meter-and-misconnect.md 3.11)
 emu/hy3131/couptest.py    fw-rs AUTO coupling of V / A: DC -> AC -> mixed signals through the hysteresis band, taps, SCPI (fw-rs/docs/acdc-stock-vs-fwrs.md 11)
 emu/hy3131/autorangetest.py fw-rs DC V AUTO from 600 / 1000 / 60 V with the model's AD1 filter memory (ad1mix:1), READ? +9.91E37 through an AC+DC range change (device bab5dd4; fw-rs/docs/acdc-stock-vs-fwrs.md 12)
-emu/hy3131/switchtest.py  fw-rs misconnect sentinel through ~60 function / range / coupling switches (and the Wave view) per connection: every alert assertion (DBG:SENTinel:LOG?) must be one the connection explains; real-* scenarios time A-JACK / A-PROT / AC? / DC? / V-JACK? after a switch in; swtr: the model's switch transient (owner 2026-10-23)
+emu/hy3131/switchtest.py  fw-rs misconnect sentinel through ~60 function / range / coupling switches (and the Wave view) per connection: every alert assertion (DBG:SENTinel:LOG?) must be one the connection explains; real-* scenarios time A-JACK / A-PROT / AC? / DC? / V-JACK? after a switch in; swtr: the model's hypothetical switch transient
 emu/hy3131/ohmhunt.py      fw-rs ohm range hunt with the model's ohm node lag (ohmtau): no FETCh? / READ? / amber readout value off the final one (device ab7184c new bug 1; fw-rs/docs/switch-latency.md 6.2)
 emu/hy3131/autowaittest.py fw-rs READ? / MEAS? / FETCh? and HOLD while AUTO coupling decides, the placeholder unit after CONF (switch-latency.md 6, 6.2)
 emu/hy3131/ad2streamtest.py fw-rs AD2 stream ISR (feature ad2-isr: TIM7 -> IRQ 55 -> SPI2 reads) end to end (fw-rs/docs/dmm-input-scope-feasibility.md 9)
@@ -30,11 +30,11 @@ emu/hy3131/ref/           transcribed register map and mux tables
 
 ## Terminal-level model (DM40 front end)
 
-`DM40Frontend.cs` (`Dm40Frontend`) sits between the jacks and the chip. The
+[`DM40Frontend.cs`](DM40Frontend.cs) (`Dm40Frontend`) sits between the jacks and the chip. The
 user says what is **connected** to V-ohm / COM / A; the firmware's own relay
 pulses (PA9 / PA10 latching pair = V/A path or the ohm-mV network, PE0 / PE1 =
-A / mA / none shunt, PC7 = frequency mode; `fw-rs/src/dmm.rs` relay_pa /
-relay_pe / pc7, stock FUN_08012780 / FUN_080127be) and its HY3131 row decide
+A / mA / none shunt, PC7 = frequency mode; [`fw-rs/src/dmm.rs`](../../fw-rs/src/dmm.rs) relay_pa /
+relay_pe / pc7, stock FUN_08012780 / FUN_080127be) and its [HY3131](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf) row decide
 the route, so a fixed connection behaves like on the real meter when the
 function changes:
 
@@ -63,10 +63,10 @@ report) are separate; the die follows the cold junction unless set
 (`die:35`): a thermocouple at 100 C with cj 25 and die 35 reads ~110 C on both
 firmwares, because they take the die sensor as the cold junction.
 
-Unknowns stated once: the DM40 netlist (the per-row scale factors are the
+Unknowns: the DM40 netlist (the per-row scale factors are the
 stock's nominal constants), the ohm source open-circuit voltage (SFUVR table
 at VDDA 3.6 V: 1.4 V on the normal ohm rows, 0.625 V on the "ON" variant,
--0.625 V continuity; the community measured ~0.85 / 0.27 mA short-circuit on
+-0.625 V continuity; chat reports give ~0.85 / 0.27 mA short-circuit on
 the real meter) which only the cross cases depend on, and PE2 (DMM rail /
 power hold) which is not modelled as chip power.
 
@@ -113,7 +113,7 @@ Chip (datasheet DS-HY3131-V10):
   in the AC V / mV roles, with the AD1 peak hold over every elapsed conversion.
   Row matching ignores AD1's fields in rows that leave AD1 off, PKHSEL /
   ENPKH, and SS5 in the current rows.
-* fw-rs power meter rows (`fw-rs/docs/power-meter-and-misconnect.md` 3.1,
+* fw-rs power meter rows ([`fw-rs/docs/power-meter-and-misconnect.md`](../../fw-rs/docs/power-meter-and-misconnect.md) 3.1,
   assignment B; role `Power`, mode 16, `Power vr<V range> iu<I unit> ir<I
   range>`, Range = vr * 6 + iu * 2 + ir): the 16 distinct rows of the design's
   builder (`Hy3131Core.PowerRow`; iu 1 / 2 share the bytes, PE tells mA from
@@ -164,7 +164,7 @@ Chip (datasheet DS-HY3131-V10):
 * Noise: Gaussian, 25 AD1 counts at OSR 32768 scaled by 1/sqrt(OSR) (acdc doc
   6c), RMS floor 30 counts; `noise:0` turns it off (deterministic seed).
 * Empirical, optional: the AD2/AD3 enable-order beat of
-  `fw-rs/docs/acdc-stock-vs-fwrs.md` 10 (`beat:1`; off by default: the stock's
+  [`fw-rs/docs/acdc-stock-vs-fwrs.md`](../../fw-rs/docs/acdc-stock-vs-fwrs.md) 10 (`beat:1`; off by default: the stock's
   emulated SPI skew is not the real one).
 
 Board (DM40, from the stock rows and formulas): the input terminals are a
@@ -230,7 +230,7 @@ Connection spec (`emu/run.py --dmm SPEC[@T]`, script lines `T dmm SPEC` or
 | `pow:230@50,i=1[,pf=0.8\|ph=DEG,dc=VDC,idc=IDC,f=HZ,shape=]` | power meter shorthand: V source (AC rms 230 at 50 Hz + dc) on V-COM and current source (AC rms 1 A at the same frequency + idc) into A, the current lagging by `ph` or `acos(pf)` (`pf < 0` = energy flowing out, P < 0; `ph` wins over `pf`); negative `idc` = negative DC power. Replaces only the V and A sources (other elements stay; prefix `open;` for a clean connection). With `emu/run.py --dmm` the last `@` is the time: write `pow:230,f=50,i=1` or `pow:230@50,i=1@0` |
 | `r:4700`, `short` (= `r:0`), `c:100e-9`, `diode:0.65[,rev=1]` | resistor, short, capacitor, diode (anode at V unless `rev`) between V and COM |
 | `tc:100`, `tcmv:4.096`, `tcopen` | type K thermocouple: hot junction C, or its mV, or connected but open |
-| `cj:25`, `die:35` (`die:none` = follows cj) | cold junction (jacks) and HY3131 die temperature |
+| `cj:25`, `die:35` (`die:none` = follows cj) | cold junction (jacks) and [HY3131](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf) die temperature |
 | `avsrc:0.5[,rs=]`, `isrcv:0.001`, `aload:100` | wrong-jack cases: voltage source across A-COM, current source across V-COM, resistor across A-COM |
 | `dcv:`, `acv:V@Hz`, `hz:F,duty=,amp=`, `dca:`, `aca:`, `ohm:`, `cap:`, `temp:T,cj=`, `chip:` | the older per-function keys: each replaces the whole connection with the equivalent one |
 | `noise:0`, `cal:0`, `beat:1`, `powmix:0`, `ad1mix:1`, `swtr:300;swtau:50;swhz:25`, `ohmexit:3.5;ohmexitlo:1.2`, `ohmexitrst:1`, `ohmtau:150`, `pb5drift:0.6;pb5tau:2.2`, `acastep:200000;acastepms:600`, `vjblind:1` | model options (device f0d21eb replays, off by default: `pb5drift:V;pb5tau:s`: in the AC A rows AD1 on SENSE - PB5 sees PB5 rise by V x (1 - exp(-t / tau)) from the first AC A row (to the negative rail in ~2 s), SENSE - AGND does not; `acastep:codes;acastepms:ms`: AC A 10 A -> mA / uA, AD2's LPF / RMS blocks overlapping the first ms of the row carry a step of codes (the length is chosen, not measured); `vjblind:1`: the DC A rows' SENSE comparator reads 0 unless a temperature row ran since the last DC V r1+ / ohm / continuity / diode / capacitance / frequency row or reset; `ohmexit:s;ohmexitlo:s`: after the relay leaves the ohm network while an ohm row runs, the A rows' SENSE comparator reads CMPHO+CMPLO for ohmexit s, then CMPLO for ohmexitlo s more, the device ad74e93 trace, off by default; `ohmexitrst:1`: the same trace also from a chip reset (the DMM rail back after the Scope page: device ab7184c, 0x70 to 7.75 s), off by default; `ohmtau:ms`: in the ohm rows the node across Rx relaxes to its value with this time constant after every row change (an ohm range step), from 0 V outside them (the input RC / a calibrator's resistance simulation catching up; the constant is chosen, not measured: device ab7184c read 219 / 57 ohm on the right range before 390 / 100 ohm), off by default; `swtr:mV`: a HYPOTHETICAL switch transient, from every row change PB1, the V tap and the A rows' SENSE tap carry mV x exp(-t / swtau ms) x cos(2 pi swhz t), default tau 60 ms, 25 Hz, off by default; shape not yet from the device; `powmix:0`: an R34 switch in the power role does not mix the block in progress; `ad1mix:1`: a row write that does not restart AD1, same R22 and ENAD1 kept, leaves the next conversions a sinc^3 mix of the old and the new input over 3 periods, as the device's 2-step DC V autorange, bab5dd4; off by default) |
@@ -243,8 +243,8 @@ GTK panel's schematic reads it).
 
 ## Tests
 
-`emu/hy3131/tests/run.sh` (dotnet 8; `DOTNET=` to point at an SDK) compiles
-the real `HY3131.cs` with a 60-line Renode shim and drives it through the SPI
+[`emu/hy3131/tests/run.sh`](tests/run.sh) (dotnet 8; `DOTNET=` to point at an SDK) compiles
+the real [`HY3131.cs`](HY3131.cs) with a 60-line Renode shim and drives it through the SPI
 pins like the firmware: 297 checks of the register semantics, the frame,
 conversion timing, DC / AC / A / ohm / continuity / diode / capacitance /
 frequency / temperature physics, calibration consistency, the AC coupling
@@ -253,9 +253,9 @@ sentinel and the fw-rs power rows (recognition, PF 1 / 0.5 / 0 / -1, DC, the
 38-bit sign, SPHACAL, statistic-switch mixing, the counter, the stock AC V /
 AC A rows with both jacks driven).
 
-`emu/hy3131/modetest.py` runs the stock firmware and fw-rs in the emulator:
+[`emu/hy3131/modetest.py`](modetest.py) runs the stock firmware and fw-rs in the emulator:
 the input is scripted, the stock is switched with Bluetooth command 06 and
-polled with command 09 (the values the LCD shows, `bt_meas_v2_6.h`), fw-rs
+polled with command 09 (the values the LCD shows, [`bt_meas_v2_6.h`](../../firmware/re/analysis/bt_meas_v2_6.h)), fw-rs
 with `CONF:<f>` / `READ?` over the same link. Results (last reported value
 after settling; stock Bluetooth is enabled by patching settings byte 0x115 in
 the emulated flash with a recomputed CRC):
@@ -277,19 +277,18 @@ the emulated flash with a recomputed CRC):
 | cont | `ohm:10` | 10 ohm | 10.00 (beeper: CMP pin) | 10.005 |
 | diode | `diode:0.65` | 0.65 V | 0.6501 | 0.650016 |
 | cap | `cap:100e-9` | 100 nF (RC oscillator) | 100.0 nF | 100.002 nF |
-| cap-big | `cap:100e-6` | 100 uF (current ramp) | **104.0 uF** (+4 %, see below) | 102.03 uF (+2 %) |
+| cap-big | `cap:100e-6` | 100 uF (current ramp) | **104.0 uF** (+4 %) | 102.03 uF (+2 %) |
 | hz | `hz:1000,duty=0.25,amp=1.0` | 1000 Hz, 25 % | 1000.0 Hz, 25.0 % | 1000.02 |
 | temp | `temp:100,cj=25` | 100 C, CJ 25 C | 100.3 C, CJ 25.0 | 100.29 |
 
-(`modetest.py -j 6`, final run on commit d07fedc + the final model; the fw-rs
-ohm row was rerun alone after a port collision of the harness.) All within the
+(`modetest.py -j 6` at d07fedc.) All within the
 meter's specification except the capacitance ramp ranges: the
 stock computes C = I * dt / dV with dt taken from its own millisecond timer at
 the poll (every 255 ms + 10 ms granularity) while dV spans whole AD1
 conversions (50 ms at the ramp row's OSR 4096 with the chopper), so dt / dV is
 quantised to 250 / 300 ms steps and the trimmed mean lands ~4 % high; the
 factory calibration leaves the r5..r7 gains at 1.0. Whether the real meter
-shows the same bias is unknown (no device test). fw-rs's +2 % has the same
+shows the same bias is unknown. fw-rs's +2 % has the same
 origin with its own timing. Run time per scenario: 8..18 virtual seconds,
 25..80 s wall at `-j 6`.
 
