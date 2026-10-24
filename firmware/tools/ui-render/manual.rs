@@ -184,7 +184,7 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/range-a", &page, false);
     save1(out, "range-a");
 
-    // Resistance range page with the 0.27 mA ("ON") variant on.
+    // Resistance range page with the 0.28 mA ("ON") variant on.
     host::reset(0);
     ui::range_page(Button::Ohm, Some(7), 1, None);
     ck.check_opts("manual/range-ohm", &page, false);
@@ -298,7 +298,7 @@ pub fn run(out: &str) -> usize {
         ("dmm-acdc", Dp { rate: false, ..dp(rd(1, val(12.011, 3, "V"), Some(val(0.5021, 4, "V")), Some(val(12.001, 3, "V")), true)) }),
         // DC mA in a 4-20 mA loop.
         ("dmm-ma", dp(rd(8, val(12.000, 3, "mA"), None, Some(val(50.0, 1, "%")), false))),
-        // Resistance, 4.7 k (the 6 kohm range: test current 85 uA).
+        // Resistance, 4.7 k (the 6 kohm range: test current 197 uA).
         ("dmm-ohm", dp(Reading { range: 2, ..rd(10, val(4.7012, 4, "k\u{3a9}"), None, None, false) })),
         // Continuity: a short.
         ("dmm-cont", Dp { rate: false, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
