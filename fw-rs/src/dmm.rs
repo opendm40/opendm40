@@ -560,6 +560,9 @@ fn u24(b: &[u8]) -> u32 {
 /// no exposure; AUTO's up-range after a switch is this much later too.
 const AC_OVER_HOLD_MS: u64 = 500;
 
+/// `Dmm::precond_ms` default (device 0774e70: 100 ms was enough).
+const PRECOND_MS: u16 = 100;
+
 fn relay_pa(clk: &mut Clock, arg: u8) {
     // Latching relay pair: 10 ms pulse. 0: PA10=1 PA9=0, 1: PA10=0 PA9=1.
     let (set, clr) = if arg == 0 { (10, 9) } else { (9, 10) };
@@ -956,13 +959,15 @@ pub struct Dmm {
     /// When the relay last left the ohm network for the V/A path, or the
     /// chip restarted (`start`) (ms; sentinel::OHM_EXIT_*), None before.
     ohm_exit_t: Option<u64>,
-    /// Device experiment (DBG:SENTinel:PRECond <ms>, RAM only, 0 = off,
-    /// the default): before a DC A family row is entered while `a_blind`,
-    /// the temperature row runs for this long. Device f0d21eb: a real 24 V
-    /// on V-COM read CTSTA 0x70 / 0x50 in DC A only when TEMP came before
-    /// (DC V 60 V+, the ohm rows and a chip restart left the A row reading
-    /// 0); whether TEMP's network (OP3 on PA7 / the power bus) is what
-    /// makes the tap visible is a hypothesis this switch tests.
+    /// Before a DC A family row is entered while `a_blind` (and V-JACK?
+    /// is enabled), the temperature row runs for this long (ms; default
+    /// PRECOND_MS; DBG:SENTinel:PRECond <ms>, RAM only, 0 = off). Device
+    /// f0d21eb: a real 24 V on V-COM read CTSTA 0x70 / 0x50 in DC A only
+    /// when TEMP came before (DC V 60 V+, the ohm rows and a chip restart
+    /// left the A row reading 0). Device 0774e70: 100 / 300 / 1000 ms of
+    /// it brought V-JACK? back at 1.9 / 2.1 / 2.8 s after DC V 60 V and
+    /// after RES, with no false hit at 5 V or with the source off. Cost:
+    /// the relay pulse there and back (2 x 10 ms) and the blocked loop.
     pub precond_ms: u16,
     /// The last row that changes the V-tap network state seen in DC A was
     /// not the temperature row (DC V 60 V+, ohm / continuity / diode / cap
@@ -1406,7 +1411,7 @@ impl Dmm {
             pkh_due: 0,
             sent_arm: false,
             ohm_exit_t: None,
-            precond_ms: 0,
+            precond_ms: PRECOND_MS,
             a_blind: true,
             ac_over_until: 0,
             live: false,
@@ -1589,7 +1594,13 @@ impl Dmm {
         self.t_conv = None;
         self.ac_over_until = 0;
         let pa = if matches!(m, 0 | 1 | 4..=9) { 0 } else { 1 };
-        let pre = self.precond_ms != 0 && self.a_blind && matches!(m, 7..=9) && !am && self.func() != self.sent_mode;
+        let pre = self.precond_ms != 0
+            && self.a_blind
+            && matches!(m, 7..=9)
+            && !am
+            && self.func() != self.sent_mode
+            && self.sent.mask & sentinel::M_VJACK != 0
+            && self.fuse_job.is_none();
         if pre {
             self.precondition(clk);
         } else if m == 15 && self.t_sensor == 0 {
@@ -1792,6 +1803,13 @@ impl Dmm {
         if changed_mode {
             self.entry = now;
             self.reset_values();
+        } else if old != (mode, range) && !self.acdc && !self.cpl_auto {
+            // A plain range step: the AC filters must not carry the other
+            // range's value (device 0774e70: AC A 10 A -> 60 mA read 1 %
+            // of the 10 A value first, the EMA's 0.99 step).
+            self.f_ac = 0.0;
+            self.f_lpf = 0.0;
+            self.ac_raw = 0.0;
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
@@ -1917,6 +1935,15 @@ impl Dmm {
     /// transient of 3.39 V for 5 s through an AC+DC range step).
     pub fn reading_pending(&self) -> bool {
         self.rd_pending
+    }
+
+    /// `r` was measured on the row the chip runs now (mode, AC+DC: either
+    /// phase, and range): FETCh? never answers a reading from another
+    /// range or function (device 0774e70: FETC? gave the 10 A value for
+    /// 0.9 s after CONF:CURR:AC 0.06). The power meter and frequency (its
+    /// readings carry the counter's range, not the row's): always.
+    pub fn reading_current(&self, r: &Reading) -> bool {
+        self.pw.on || self.mode == 14 || (dc_mode_of(r.mode) == dc_mode_of(self.mode) && r.range == self.range)
     }
 
     /// AC+DC / AUTO: a range or unit change from `old` (mode, range) of the
