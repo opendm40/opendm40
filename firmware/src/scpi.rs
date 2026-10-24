@@ -2908,7 +2908,8 @@ fn nr3(b: &mut [u8; 20], v: f32) -> usize {
                 e -= 1;
             }
         }
-        // Not finite (no reading gives one): 9.999999E+40, not garbage.
+        // Not finite (no reading gives one; an overload is put_reading's
+        // 9.9E+37): digits within 0..9 whatever the bits.
         m = m.min(9_999_999);
     }
     let digits = [m / 1_000_000, m / 100_000 % 10, m / 10_000 % 10, m / 1000 % 10, m / 100 % 10, m / 10 % 10, m % 10];

@@ -266,8 +266,10 @@ SECTIONS
         /* ... their disk bodies (the `_on` variants and their closures). */
         *(.text.*8opendm406csvlog9delete_on*);
         /* MMEM:DATA? / MMEM:DELete's name argument (its directory prefix
-         * checked against the file's; device 46370df). Not run by anything
-         * a host polls during a stream. */
+         * checked against the file's; device 46370df): once per command,
+         * like MMEM:DEL's own body above (csvlog::delete); a host polling
+         * MMEM:DATA? during a stream would run it from region C (not
+         * tested under a stream). */
         *(.text.*8opendm406csvlog10parse_path*);
         /* Tap / page-only code that sat inlined in hot callers (region B
          * audit 2026-10-22 #2): the temperature page's draw / key helper
