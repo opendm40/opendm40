@@ -33,7 +33,7 @@ New actionable items carry an **UF-nn** id; they are mirrored as one-liners in
   merges several real people. Counts are therefore lower bounds, and a single
   `U1` can stand for 2+ people. Message ids (`#nnnnn`) are given so any claim
   can be re-checked in the export. No user names appear in this document.
-- **Excluded:** the last three messages ([#62809](https://t.me/S2084K/62809)/#62883/#62884), where another
+- **Excluded:** the last three messages ([#62809](https://t.me/S2084K/62809)/[#62883](https://t.me/S2084K/62883)/[#62884](https://t.me/S2084K/62884)), where another
   custom-firmware author asks "what's missing in the firmware?". They got no
   answers. They do show that "USB SCPI" is what that author wanted most.
 
