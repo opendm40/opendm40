@@ -4,7 +4,7 @@ opendm40 accepts SCPI commands from a computer, so a script can read the
 multimeter, set it up, read scope waveforms, drive the generator and fetch
 files. This page lists every command. How to connect (drivers, cable,
 Bluetooth pairing, PyVISA, sigrok) is in
-[Connecting from a computer](connecting-from-a-computer.md).
+[the user manual, Remote control and connecting from a computer](README.md#remote-control-and-connecting-from-a-computer).
 
 ## Links
 
