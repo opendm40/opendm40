@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """Apply the hwtrig hooks (docs/hwtrig-integration.md H1..H7) to scope.rs.
-Usage: python3 -I tools/hwtrig-check/patch_scope.py src/scope.rs src/scope.rs   (in place; or give a copy as the
+Usage: python3 -I tools/experiments/hwtrig-check/patch_scope.py src/scope.rs src/scope.rs   (in place; or give a copy as the
 second path for a dry run). Each `rep(old, new)` asserts its anchor text occurs exactly once, so a
 concurrent scope.rs edit that moved an anchor fails loudly instead of patching the wrong place."""
 import sys

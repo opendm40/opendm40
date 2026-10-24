@@ -130,7 +130,7 @@ UI then gets a "Mean / Min-Max / All" option. Not before.
 1.3..1.5x DLG cost. FR-38 stamps untouched.
 
 **Revisit.** After the device measurement planned in log-format-standards.md 7 (10 min of a
-stable DC input, `tools/logcodec-lab` on the CSV): if the stamps are "grid + loop latency" with
+stable DC input, `tools/experiments/logcodec-lab` on the CSV): if the stamps are "grid + loop latency" with
 a stable latency, reconsider B together with DLG2 (where the gain is 2x), still as a new chunk
 version, never a silent change of the existing one.
 

@@ -185,7 +185,7 @@ construction. Everyone building on an HY3131 with its own blocks is in camp 1.
   against 2.5 ppm/C for AD1** (DS p. 11). Device floor in the stock AC V 4 V
   row: 31..33 sqrt(RMS) counts ~ 14 ENOB per sample (feasibility 1.2).
 * **AD2 as a DC converter (test 6.5, owner-reported results of
-  `fw-rs/tools/ad2dcv.py`, not yet written up in a doc).** The register-only
+  `fw-rs/tools/experiments/ad2dcv.py`, not yet written up in a doc).** The register-only
   DC-coupled V row (feasibility 1.3 last row: the DC V tap, OP1 x1 on SENSE,
   SAD2IP = OP1O, IG 1.0) is **linear to <= 0.003 % of range**, noise **3..10
   codes** (over the ~100 ms of one AD1 conversion), gain vs the nominal

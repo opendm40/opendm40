@@ -33,7 +33,7 @@ read on the virtual LUN 1, by SCPI and by tools/dlog.py).
    FLAC-level compression. Packing the codes into 10 bits gives 1.6x with almost
    no risk.
 
-Everything below is measured by `tools/logcodec-lab/` on the tools/dlog-test
+Everything below is measured by `tools/experiments/logcodec-lab/` on the tools/dlog-test
 data sets (same generators, same chunk cuts). Every DLG2 number comes from a
 real encode that was decoded back and compared byte for byte with the reference
 CSV, chunk by chunk.
@@ -162,7 +162,7 @@ of the time column, so it is the owner's call.
 ## 4. Scope record
 
 26624 10-bit codes per record. Today the file holds u16 codes (2 B/sample,
-53 KB). Synthetic records (`tools/logcodec-lab/scope.py`), B/sample:
+53 KB). Synthetic records (`tools/experiments/logcodec-lab/scope.py`), B/sample:
 
 | record | u16 (today) | 10-bit packed | zlib 1 KiB window | fixed LPC + Rice | fixed LPC + RC | FLAC -8 |
 |---|---|---|---|---|---|---|
@@ -189,7 +189,7 @@ the coder and store its byte offset. Then random access stays O(1 block).
 
 ## 5. Standard formats (brief)
 
-Measured with the desktop writers (`tools/logcodec-lab/standards.py`).
+Measured with the desktop writers (`tools/experiments/logcodec-lab/standards.py`).
 Time u32 ms, value f32, flags u8. Whole files, B/reading:
 
 | set | CSV | DLG v1 | MDF4 plain | MDF4 DZ deflate | MDF4 DZ transposed | TDMS (600-row segments) | Parquet zstd | Parquet zstd, 600-row groups | HDF5 gzip+shuffle | CSV.gz -9 | CSV.xz -9 |
@@ -261,7 +261,7 @@ and the RAM.
 
 Do now: **F** (the scope record; the clear win, reusing the Rice coder) and the
 **E measurement**: record 10 min of a stable DC input on the device and run
-`tools/logcodec-lab` on its CSV to see the real stamp jitter. Then decide on E.
+`tools/experiments/logcodec-lab` on its CSV to see the real stamp jitter. Then decide on E.
 Defer **D**: alone it misses the 1.5x bar for the RAM it costs. Reconsider it
 together with E, where it doubles the gain. **B is rejected.** **C** is optional
 and only worth doing if someone asks for asammdf or MATLAB. The answer to "why
@@ -274,7 +274,7 @@ format, because LUN 1 serves CSV.
 # data: a copy of tools/dlog-test/main.rs that also writes long.{dlg,csv}
 #   (path of dlog.rs made absolute; after the long-run encode:
 #    std::fs::write(dir/long.dlg / long.csv)); run it with an output dir D
-python3 tools/logcodec-lab/lab.py D          # sections 1-3 (stdlib only, ~40 s)
-python3 tools/logcodec-lab/scope.py          # section 4 (soundfile optional, for FLAC)
-python3 tools/logcodec-lab/standards.py D OUT   # section 5: pip install asammdf nptdms pyarrow h5py
+python3 tools/experiments/logcodec-lab/lab.py D          # sections 1-3 (stdlib only, ~40 s)
+python3 tools/experiments/logcodec-lab/scope.py          # section 4 (soundfile optional, for FLAC)
+python3 tools/experiments/logcodec-lab/standards.py D OUT   # section 5: pip install asammdf nptdms pyarrow h5py
 ```

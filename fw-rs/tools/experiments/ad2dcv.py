@@ -24,10 +24,10 @@ AD2 mean with AD1 on (B) vs off (C), AD1 with AD2 on (B) vs off (A), and
 AD1-in-the-row volts vs READ? (is AD1 on SENSE - PB5 a usable self-cal
 reference). Raw rows go to a CSV.
 
-    /usr/bin/python3 tools/ad2dcv.py -o dcv.csv            # all ranges
-    /usr/bin/python3 tools/ad2dcv.py --ranges 0 --points 0,1,2,5,10
-    /usr/bin/python3 tools/ad2dcv.py --no-cal --points 1   # calibrator left alone
-    tools/ad2dcv.py --usbip 1-0 --no-cal --points 1        # the emulator
+    /usr/bin/python3 tools/experiments/ad2dcv.py -o dcv.csv            # all ranges
+    /usr/bin/python3 tools/experiments/ad2dcv.py --ranges 0 --points 0,1,2,5,10
+    /usr/bin/python3 tools/experiments/ad2dcv.py --no-cal --points 1   # calibrator left alone
+    tools/experiments/ad2dcv.py --usbip 1-0 --no-cal --points 1        # the emulator
 
 The meter must be on fw-rs, USB connected (USBTMC), leads on V / COM. The
 range stays manual during the run; at the end CONF:VOLT:DC (AUTO) and the
@@ -41,7 +41,7 @@ import os
 import sys
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # fw-rs/tools: dm40scpi, mr9270
 sys.path.insert(0, HERE)
 
 K = [10.0, 100.0, 1000.0, 10000.0]

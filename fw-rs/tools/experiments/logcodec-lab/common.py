@@ -9,7 +9,7 @@ import struct
 import sys
 from decimal import Decimal
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 import dlog  # noqa: E402  (tools/dlog.py: from_scale, row_txt, Ad)
 
 FLAGBIT = {'OL': 1, 'REL': 2, 'HOLD': 4, 'HI': 8, 'LO': 16, 'GAP': 32}
