@@ -3660,3 +3660,24 @@ mV, current 0 / 128 in µA, from the vendor manual for units after October
   (the calibrator −0.976 V, the DM40's own reading −0.51 V).
 - The calibrator's voltage input loads about 0.7 MΩ (VDS15 through 10 M read
   0.147 V), so the 1 M / 10 M paths were not compared.
+
+### The RLD current-source path (diode and 60 MΩ rows), with the calibrator
+
+SMODE 0110 (SVDD, SVSO2, SCP): OP3 regulates a MOS current source into RLD;
+no reference resistor on the PA pins is in series. Calibrator mA input on
+V/Ω–COM (data: [diode-force-ma.csv](data/diode-force-ma.csv),
+[cs-ma.csv](data/cs-ma.csv), [cs-force-ma.csv](data/cs-force-ma.csv)), then its
+voltage input with the jacks otherwise open ([cs-diode-v.csv](data/cs-diode-v.csv)).
+
+| Diode row, VREF tap | VDS17 | VDS16 | VDS15 (stock) | AGNDP9 and every lower tap |
+|---|---|---|---|---|
+| Short-circuit current | 0.187 mA | 0.375 mA | 0.756 mA | 1.567 mA (the limit) |
+
+- The diode row's open-circuit voltage is 3.228 V at every tap (the DM40's own
+  reading through the /10 diode divider: 3.003 V).
+- The 60 MΩ row (stock taps VDS15..17 and the others with FORCE) gives at most
+  1-2 µA, under the calibrator's resolution; its open-circuit voltage could
+  not be measured (the calibrator's voltage input, ~0.7 MΩ, pulls it to
+  0.02-0.17 V).
+- The capacitor array (R30 ACC<6:0>) is 0 in every stock row and opendm40
+  never sets it.
