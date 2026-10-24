@@ -439,6 +439,16 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// (any k with 1 V below and 5 V above the comparator's 23.75 mV fits: 10 mV / V).
         /// Monitor: hy3131 Pb1VjackMv 10.
         public int Pb1VjackMv;
+        /// mV input clamp (opt-in, "mvclamp:V"; device 46370df: AC V AUTO, mV-first, the 40 Hz 0 / 9.5 V
+        /// square on V-COM read 0.606 V on 600 mV for 12 s, under the 1.03 x 600 mV up-range threshold):
+        /// the V jack on the mV path (path 1) clipped to +-V before the AC mV node. 0.606 V AC RMS of a
+        /// 0 / 9.5 V square = a node swing of 0 .. 1.21 V: "mvclamp:1.212". Where the clamp sits and its
+        /// shape are INFERRED (a symmetric hard clip). AC mV rows only. 0 = none.
+        public double MvClampV;
+        /// PB1 picking up the mV clamp's current in the AC mV rows (opt-in, "mvpb1:mV per V" of the jack
+        /// beyond the clamp; device 46370df: the same square asserted AJACK,AD1PK_PB1 with the A jack
+        /// empty; the ratio is INFERRED: 10 mV / V puts 83 mV peaks on PB1, over the 23.75 mV threshold).
+        public double MvPb1Mv;
         /// AD1 decimation memory (opt-in, "ad1mix:1"; device bab5dd4, DC V AUTO from 600 V: one
         /// reading at 77-79 % on 6 V after two range steps). A configuration write that does not
         /// restart AD1 (R22 unchanged, ENAD1 kept: one autorange step right after another, both
@@ -758,6 +768,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "powmix": PowMix = o.Value != 0; break;
                 case "ad1mix": Ad1Mix = o.Value != 0; break;
                 case "swtr": SwTrMv = o.Value; break;
+                case "mvclamp": MvClampV = o.Value; break;
+                case "mvpb1": MvPb1Mv = o.Value; break;
                 case "ohmexit": OhmExitBoth = o.Value; break;
                 case "ohmexitlo": OhmExitLow = o.Value; break;
                 case "ohmexitrst": OhmExitRst = o.Value != 0; break;
@@ -1370,6 +1382,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var r = roleRange;
                 Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
                 sigHz = hz; sigShape = shape; sigDuty = duty;
+                if(MvClampV > 0) MvClamp(jdc, jac, hz, shape, duty, out jdc, out jac);
                 ac = AcQ(jac * 1000, 0x54 + 4 * r, 0x5c + 4 * r) / 1000 * MvDiv[r] / Ad2IgRow();
                 dc = DcQ(jdc * 1000, 0x84 + 4 * r, 0x8c + 4 * r) / 1000 * MvDiv[r] / Ad2IgRow();
                 break;
@@ -2016,7 +2029,32 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         {
             double dc, ac, hz, duty; string shape;
             Fe.ACurrent(out dc, out ac, out hz, out shape, out duty);
-            return Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR + SwTr(t);
+            var v = Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR + SwTr(t);
+            if(MvPb1Mv != 0 && MvClampV > 0 && role == Role.AcMv)
+            {
+                // the mV clamp's current (MvPb1Mv): the jack beyond the clamp, scaled
+                Fe.VJack(1, out dc, out ac, out hz, out shape, out duty);
+                var j = Wave(t, dc, ac, hz, shape, duty);
+                v += MvPb1Mv * 1e-3 * (j - Math.Max(-MvClampV, Math.Min(MvClampV, j)));
+            }
+            return v;
+        }
+
+        /// The mV clamp (MvClampV) on a DC + AC waveform: the clipped waveform's mean and AC RMS
+        /// (one period, 512 points). A square stays a square (exact); other shapes keep their shape
+        /// at the reduced RMS in the instantaneous samples (Ad2Sample, an approximation).
+        private void MvClamp(double dc, double ac, double hz, string shape, double duty, out double mdc, out double mac)
+        {
+            const int n = 512;
+            double s = 0, s2 = 0;
+            var f = hz > 0 ? hz : 50;
+            for(var k = 0; k < n; k++)
+            {
+                var v = Math.Max(-MvClampV, Math.Min(MvClampV, Wave((k + 0.5) / (n * f), dc, ac, f, shape, duty)));
+                s += v; s2 += v * v;
+            }
+            mdc = s / n;
+            mac = Math.Sqrt(Math.Max(0, s2 / n - mdc * mdc));
         }
 
         /// PB2: drop across the 10 mohm element, in series with the A jack in every shunt state

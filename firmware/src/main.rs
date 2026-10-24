@@ -119,6 +119,7 @@ const _: () = assert!(SCPI_QUICK_MS >= hy3131::ad1_period_us_r22(0x17) as u64 / 
 /// The host asked FUNCtion? before it and would file a reading of the new
 /// function under the old one; nothing of the old function will come.
 const WAIT_ORPHAN: u64 = 0;
+const _: () = assert!(dialog::LOG_PANEL_ROOM == logger::CAP as u32 / 4);
 
 /// READ? / FETCh?: true (the reply +9.91E37 and "Data stale" put) when the
 /// host's FUNCtion? / CONFigure? since its last READ? named another function
@@ -1493,7 +1494,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             log_redraw_at = now + 100;
             app.invalidate(); // drawn by app.tick below; the panel after it
         }
-        if logging && log_draw >= 1 && usb_up && now >= draw_hold_until && !screenshot::frozen() && !dialog::log_panel_idle(now) {
+        // A panel part only while the ring has room for it (dialog.rs
+        // `log_panel_room`: device 46370df, the first draw's hole at 76.8k).
+        let panel_room = dialog::log_panel_room(now, logging.then(|| logger.waiting()));
+        if logging && log_draw >= 1 && usb_up && now >= draw_hold_until && !screenshot::frozen() && panel_room && !dialog::log_panel_idle(now) {
             // The logger panel (dialog.rs; one part per pass, ~1 s refresh).
             dialog::log_panel(
                 now,
