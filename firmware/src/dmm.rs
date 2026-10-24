@@ -338,11 +338,19 @@ impl Avg {
 
 /// Short sensor names (SCPI CONF:TEMP <name>, SENS:TEMP:TRAN?).
 pub const T_NAMES: [&str; 7] = ["TCK", "PT100", "PT1000", "NTC10K3950", "NTC10K3435", "NTC100K3950", "NTCUSER"];
+// Test sources shown on the DMM page (`test_current`): the ohm source
+// voltages below over OHM_RREF, and the diode current. All three are
+// community figures, not from a datasheet; the DBG:SRC map with the jacks
+// shorted (tools/srcmap.py) replaces them here.
 /// Inferred open-circuit voltage of the ohm source (see above).
 pub const T_VSRC: f32 = 0.85;
 /// The same for the "ON" ohm variant (m+8, p8set rows): 0.27 mA
 /// short-circuit current on r1 (Rref 1 k), community measurement; inferred.
 pub const OHM_VSRC_ON: f32 = 0.27;
+/// Diode test current (A): OP3 as a current source (SMODE 0110, SCP / SCN)
+/// through RLD, not an Rref; ~0.75 mA from chat reports (hw/README.md);
+/// inferred.
+pub const DIODE_I: f32 = 0.75e-3;
 
 /// Ohm test current (A) of range `r` and variant `var` (Dmm::ohm_var): the
 /// short-circuit current of the inferred source (T_VSRC / OHM_VSRC_ON)
@@ -354,6 +362,18 @@ pub fn ohm_test_current(r: i8, var: u8) -> f32 {
     let r = r.clamp(0, 6) as usize;
     let v = if var == 1 && r != 0 { OHM_VSRC_ON } else { T_VSRC };
     v / (OHM_RREF[r.max(1)] * 1e3)
+}
+
+/// Test current (A) the DMM page shows for `mode` (10 ohm: per range and
+/// variant, `ohm_test_current`; 12 diode: DIODE_I), None elsewhere.
+/// Continuity (11) has none: its row's source tap (R31 0xcd) is neither
+/// ohm variant's and no current for it is known.
+pub fn test_current(mode: u8, r: i8, var: u8) -> Option<f32> {
+    match mode {
+        10 => Some(ohm_test_current(r, var)),
+        12 => Some(DIODE_I),
+        _ => None,
+    }
 }
 
 /// Natural log (no libm): exponent * ln2 + atanh series of the mantissa.

@@ -600,6 +600,8 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("cont", rd(11, val(444.4, 1, "\u{3a9}"), None, None, false), None),
         ("diode", rd(12, val(4.4444, 4, "V"), None, Some(val(1040.0, 1, "\u{3a9}")), false), None),
         ("diode_ol", rd(12, ol(4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
+        // A reading with an OL aux value only ("Overload" before its 0L).
+        ("diode_aux_ol", rd(12, val(1.2034, 4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
         ("cap_mf", rd(13, val(44.444, 3, "mF"), None, None, false), None),
         ("cap_nf", rd(13, val(4.444, 3, "nF"), None, None, false), None),
         ("cap_uf", rd(13, val(444.4, 1, "\u{b5}F"), None, None, false), None),
@@ -2644,7 +2646,7 @@ fn main() {
         }
         // UF-30 bargraph: bipolar DC V (negative), unipolar ohm, overload.
         // Continuity / diode: their OL ceilings as full scale (1000 ohm, 3 V).
-        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode)] {
+        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode), ("diode_ol", "d20-dmm-ol-diode", Button::ContDiode), ("diode_aux_ol", "d21-dmm-aux-ol-diode", Button::ContDiode), ("temp_ntcu", "d22-dmm-aux-ol-temp", Button::HzTemp), ("ohm_ol", "d23-dmm-ol-ohm", Button::Ohm)] {
             host::reset(0);
             let (r, _) = find(case);
             let mut dv = ui::DmmView::new();
@@ -2662,7 +2664,7 @@ fn main() {
     {
         let pcs = pw_cases();
         let rc = ui::RateChip { rate: 1, period_ms: 430, applies: false };
-        for (file, k, hold) in [("p01-power-mains", 0usize, 0u8), ("p02-power-worst", 1, 1), ("p03-power-mw-over", 2, 0), ("p04-power-alt", 4, 0), ("p05-power-dc-source", 5, 0), ("p11-power-dc-ad1", 6, 0), ("p12-power-main-wh", 7, 0), ("p13-power-main-vah", 8, 0), ("p15-power-zero", 10, 0), ("p16-power-main-zero", 11, 0)] {
+        for (file, k, hold) in [("p01-power-mains", 0usize, 0u8), ("p02-power-worst", 1, 1), ("p03-power-mw-over", 2, 0), ("p03b-power-ol", 3, 0), ("p04-power-alt", 4, 0), ("p05-power-dc-source", 5, 0), ("p11-power-dc-ad1", 6, 0), ("p12-power-main-wh", 7, 0), ("p13-power-main-vah", 8, 0), ("p15-power-zero", 10, 0), ("p16-power-main-zero", 11, 0)] {
             host::reset(0);
             power_page(pcs[k].1, hold, sentinel::Alert::None, rc);
             save(&out, file);
