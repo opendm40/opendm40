@@ -70,6 +70,11 @@ mod genuine {
         Inspection { uid: [0; 12], stored: [0; 12], expected: [0; 12], result: GenuineResult::Genuine }
     }
 }
+mod logger {
+    pub const FMT_ROWS: u8 = 0;
+    pub const FMT_PACKED: u8 = 1;
+    pub const FMT_DLG: u8 = 2;
+}
 mod hyspi {
     pub const N_MAX: u32 = 2000;
 }

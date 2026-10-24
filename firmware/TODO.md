@@ -1489,6 +1489,30 @@ Firmware:
       p5.py Wave view 1 / 2 ms/div: max_lat 280 / 260 ns, dropped +0, 0 / 0 / 0. The range commands answer
       (VOLT:RANG? / 60 / SENS:VOLT:RANG:AUTO ON / VOLT:RES? / CURR:DC:RANG? = +9.91E37 + "Settings conflict"
       while in V, as documented).
+- [ ] 76.8 kS/s to the host in real time: `LOG:FORMat ROWS|PACKed|DLG` (branch feat/log-format; logger.rs
+      "Compact LOG:DATA?"). PACKed = 3 B per sample on the grid t0 + i / rate, a new block (own seq, t0,
+      lost_before) at every sample more than half a period off the grid; DLG = the disk fast stream's kind-3
+      chunks (fastenc.rs `FastEnc`) in a 4 KiB FIFO of the reply buffer. Host: `dm40scpi.py log --format`,
+      dlog.py `fast_chunk`; tests tools/logfmt-test/run.sh, emu/logfmttest.py (--mips 110 --isr-stall-ns 700,
+      30 s of device time per session; the emulator's virtual time runs ~7x slower than the host's, so its
+      host-side numbers are not the meter's):
+      38400: ROWS / PACKed / DLG all lossless (12.7 / 8.0 / 8.2 B per sample: the host polls faster than the
+      ring fills, small replies). 76800: ROWS lost 18 301 (overwritten), PACKed 643, DLG 1 635 with the logger
+      panel on; with DBG:AD2:DRAW 0 (no panel) PACKed and DLG lossless (2 304 469 / 2 304 218 rows, 4.0 /
+      2.5 B per sample, 1891 / 1412 replies/s of device time). So in the emulator the logger panel's draws
+      stall the main loop longer than the ring's 26 ms at 76.8 kS/s (max LOG:DATA? round trip 343-419 ms of
+      host time with the panel, 43-66 ms without); not measured on the device (its disk sessions at 76800,
+      same panel: ring high water 1017-1170 of 2048, device 4c4b489). Over Bluetooth (emulator): AD1 640 S/s
+      lossless in all three formats, AD2 still refused.
+      Reply size kept at 6144 (usbtmc::RSP_MAX): the device's drain ran at ~79 replies/s with 511 ROWS records
+      (40.5 k rows/s, 4c4b489); a PACKed reply holds 2034 samples (6138 B), a DLG one ~2-4 k (4 KiB of chunks
+      at ~1-2 B per sample), so 76 800 S/s needs ~38 PACKed replies/s or fewer DLG ones: 2x margin if the
+      round-trip rate stays the device's (unmeasured with these formats). A larger reply would grow
+      usbtmc's `rsp`, Bt::respond_with's 6 KiB stack frame and csvlog::CAT_MAX (main.rs assert) together,
+      and `#4nnnn` caps it at 9999 B.
+      Device check (untested on the meter): AC V 40 Hz square, LOG:SRAT 76800, `dm40scpi.py log --source ad2
+      --rate 76800 --format packed -d 30` and `--format dlg`: lost 0 / overwritten 0 in the summary, the
+      replies/s; the first blocks' lost_before (the panel); the same over Bluetooth at AD1 640 S/s.
 - [x] `VOLT:RANG:AUTO?` in AC V and `CURR:RANG:AUTO?` in AC A answered +9.91E37 (device d330877, device-check
       "d330877" new bug 4): a bare VOLT / CURR header meant the DC function. Branch smallbugs: a bare VOLTage /
       CURRent in [SENS:]<q>:RANG / :RANG:AUTO / :RES is the quantity in any coupling (scpi.rs `ANY_CPL`; DC, AC,
