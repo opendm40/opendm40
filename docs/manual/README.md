@@ -64,12 +64,13 @@ Before you start:
 
 To install opendm40 on a meter that runs the stock firmware:
 
-1. Get the update file `opendm40.bin`. Today you build it from the source
+1. Get the update file `dm40_opendm40_v<version>.bin`, for example
+   `dm40_opendm40_v0.1.bin`. Today you build it from the source
    ([firmware/README.md, Build](../../firmware/README.md#build)).
 2. On the meter: **Settings > Other Settings > USB Connect**. Connect the
    meter to the computer with a USB cable. A USB disk appears.
-3. Copy the file onto that disk as `dm40_fwrs.bin`. Keep it the only
-   `dm40*.bin` file on the disk ([why](#install-a-file-from-the-update-loader)).
+3. Copy the file onto that disk (any `dm40*.bin` name works). Keep it the
+   only `dm40*.bin` file on the disk ([why](#install-a-file-from-the-update-loader)).
 4. Eject the disk on the computer.
 5. Switch the meter off and on again. The stock update procedure installs
    the file.
@@ -88,8 +89,8 @@ opendm40:
 1. **Settings > More > More > USB disk**: tap until it reads
    **PC can edit (re-plug)**.
 2. Unplug the USB cable and plug it in again. The disk is now writable.
-3. Copy the update file onto the disk, into the top folder, as
-   `dm40_fwrs.bin` (any `dm40*.bin` name works).
+3. Copy the update file onto the disk, into the top folder
+   (`dm40_opendm40_v<version>.bin`; any `dm40*.bin` name works).
 4. The meter checks the file and asks **Firmware received. Install it
    now?** Tap **Yes**. The meter restarts into the update loader, installs
    the file and starts the new firmware.
@@ -239,6 +240,7 @@ different; the details are in the sections linked.
 | Temperature | K thermocouple, no offset | Also PT100, PT1000, three NTCs and a user NTC; offset per sensor; °F factor corrected |
 | 4-20 mA % | Always shown, also negative | Labelled, shown only in the useful range |
 | 60 Ω range | — | Manual range with milliohm resolution |
+| 60 mV range | Not on the range page, never chosen by AUTO | On the range page; AUTO steps into it |
 | Burden voltage | — | Optional |
 | Function change | The old value or 0.0000 under the new unit | Grey dashes at once, grey until the value is final |
 | History while HOLD | Cannot store the held value | Stores it |
@@ -358,11 +360,13 @@ Bluetooth.
 - DC V: the signed voltage.
 - AC V: the true RMS voltage, with the frequency and the duty cycle above
   it.
-- Ranges: 600 mV, 6 V, 60 V, 600 V, 1000 V.
+- Ranges: 60 mV, 600 mV, 6 V, 60 V, 600 V, 1000 V.
 - From 30 V the value turns red; from 100 V a lightning symbol appears.
 
-There is no separate mV button: choose the 600 mV range on the range page,
-or use AUTO (not AUTO+), which steps down into mV.
+There is no separate mV button: choose the 60 mV or 600 mV range on the
+range page, or use AUTO (not AUTO+), which steps down into mV. AUTO goes
+from 600 mV to 60 mV below 58.3 mV and back above 61.8 mV. The 60 mV range
+shows no extra digit.
 
 ![AC V on the mains: red from 30 V, the lightning from 100 V](img/dmm-acv.png)
 
@@ -547,7 +551,7 @@ Choosing a range turns REL off.
 | | Voltage | Current |
 |---|---|---|
 | **AUTO+** | Volt ranges only; never steps down to 600 mV. **Default.** | Steps down to the mA ranges, not to µA. |
-| **AUTO** | Also steps down into 600 mV (the stock behaviour). | Steps down to µA. **Default.** |
+| **AUTO** | Also steps down into 600 mV and 60 mV. | Steps down to µA. **Default.** |
 
 With AUTO on volts, the range page warns in orange: **AUTO starts on mV:
 AUTO+ is safer**.
@@ -567,7 +571,7 @@ to a high voltage applied while the meter sat on the mV range.
 
 ### Counts, rate and the extra digit
 
-opendm40 uses 60000 counts on every model (ranges 600 mV, 6 V, 60 V ...).
+opendm40 uses 60000 counts on every model (ranges 60 mV, 600 mV, 6 V ...).
 
 #### Rate: FAST, MED, SLOW
 
@@ -1158,7 +1162,8 @@ samples) stays in memory:
 The CSV starts with comment lines (timebase, V/div, probe, coupling,
 sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 (the screen centre if the capture did not trigger); the values are volts at
-the probe tip.
+the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
+on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Wave view: the scope on the multimeter inputs
 
@@ -1303,6 +1308,8 @@ To use it:
 2. Tap a value box to type a new value ([The keypad](#the-keypad)).
 3. Tap **RUN / STOP** in the top bar, or press **RUN**, to switch the
    output on or off.
+
+The **AUTO** key does nothing on this page.
 
 The output is off after power-on. On the very first start the generator is
 set as on the stock firmware: square, 2 MHz, 3 Vpp.
@@ -1716,9 +1723,9 @@ A change of the mode takes effect at the next USB plug: unplug the cable
 and plug it in again. Until then the row shows **(re-plug)**. The meter
 always starts in **Files live**.
 
-A file manager usually moves a deleted file to the trash, and a file only
-moved to the trash comes back after the eject. Empty the trash (or use
-Shift+Delete) before you eject.
+A file manager usually moves a deleted file to the trash. A file moved to
+the trash is deleted on the meter at the eject, unless you take it out of
+the trash before; the trash itself is not kept on the meter.
 
 #### Eject
 
@@ -2173,8 +2180,9 @@ update file has been installed.
 
 1. Connect the meter to the computer. The loader's USB disk appears.
 2. Copy the update file onto it, as the only file named `dm40*.bin`:
-   - opendm40: `opendm40.bin`, copied as `dm40_fwrs.bin`, or the
-     `FIRMWARE.BIN` from your backup, copied as `dm40_fwrs.bin`;
+   - opendm40: `dm40_opendm40_v<version>.bin`, or the `FIRMWARE.BIN`
+     from your backup, copied under a `dm40*.bin` name (for example
+     `dm40_opendm40_v0.1.bin`);
    - stock firmware: `dm40_v_2_6.bin`.
 3. Press **update** on the meter's screen.
 

@@ -805,6 +805,12 @@ for i in (0, 1, 13311, 13312, 20000, 26623):
     assert abs(v - (-5.0 + code * 10.0 / 1023.0)) < 1e-3, (i, v)
 print("ok: SCOP000.CSV parses, time_s / volts exact to the printed digits")
 PY
+# A current record (the Wave view in A): the column says amperes.
+cp $IMG7 $W/scopa.img
+"$W/t" $W/scopa.img scopecsv 300 amps | grep -q "csv=Saved(2) " || { echo "FAIL at line $LINENO"; exit 1; }
+mcopy -n -i $W/scopa.img ::SCOPE/SCOP002.DLG $W/sa.dlg
+python3 -I ../dlog.py $W/sa.dlg -o $W/sa.csv
+[ "$(sed -n 2p $W/sa.csv | tr -d '\r')" = "time_s,amperes" ] && echo "ok: a current record's column is time_s,amperes" || { echo "FAIL at line $LINENO"; exit 1; }
 
 echo "--- screenshot: power cut / abort between every two slices (NOR model of write_step)"
 # Review 258c833 H1 / L4: the shot driven slice by slice (screenshot::poll_on)

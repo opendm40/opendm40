@@ -93,12 +93,11 @@
 //!     the function already selected), then the resolution if given
 //!     (CONT / DIOD: no argument; CAP / FREQ: AUTO / DEF only)
 //!   [SENSe:]<f>:RANGe <v>|AUTO|MIN|MAX|DEF / ?   the smallest range that
-//!     holds <v>: V 600 mV, 6, 60, 600, 1000 V; A 600 uA, 6000 uA, 60 mA,
+//!     holds <v>: V 60 mV, 600 mV, 6, 60, 600, 1000 V; A 600 uA, 6000 uA, 60 mA,
 //!     600 mA, 6 A, 10 A; ohm 60 ohm .. 60 Mohm (the MF range page's
 //!     items; above the top one: "Data out of range"). The query gives the
-//!     present range also while autoranging (V also 60 mV, which only the
-//!     mV-first autorange reaches; CAP 6 nF .. 60 mF, FREQ 60 Hz .. 60 MHz,
-//!     not settable)
+//!     present range also while autoranging (CAP 6 nF .. 60 mF, FREQ 60 Hz
+//!     .. 60 MHz, not settable)
 //!   [SENSe:]<f>:RANGe:AUTO ON|OFF|ONCE / ?   ON = the AUTO key: back to
 //!     the autorange chosen on the meter (AUTO+ or the mV- / uA-first AUTO;
 //!     SCPI does not change that choice); OFF / ONCE keep the present range
@@ -129,7 +128,7 @@
 //! *IDN? = "Alientek,DM40A|B|C,<24 hex digits of the chip UID>,opendm40 0.1"
 //! (the serial number = the USB one, src/uid.rs).
 //! *IDN? compatibility (SYSTem:IDN:EMULation, persisted, default OFF): with
-//! 34401A, *IDN? answers "HEWLETT-PACKARD,34401A,0,dm40-fw 0.1" so that hosts
+//! 34401A, *IDN? answers "HEWLETT-PACKARD,34401A,0,opendm40 0.1" so that hosts
 //! with a 34401A profile only (libsigrok >= 0.5.2 / SmuView without the DM40
 //! profile) take the meter; READ? then never waits longer than the quick
 //! budget (+9.91E37, read as +inf there, until the first reading after a
@@ -246,30 +245,21 @@
 
 use crate::dmm::Reading;
 
-/// *IDN?: "Alientek,DM40<m>,<serial>,opendm40 0.1", <m> = the calibration
-/// model letter (`model`), <serial> = the chip UID as 24 hex digits
-/// (src/uid.rs; the USB serial number too). libsigrok shows it as [S/N: ..],
-/// ngscopeclient as the serial; both take any comma-free field.
+/// *IDN?: "Alientek,DM40<m>,<serial>,opendm40 <version>", <m> = the
+/// calibration model letter (ident.rs), <serial> = the chip UID as 24 hex
+/// digits (src/uid.rs; the USB serial number too), <version> =
+/// `ident::VERSION`. libsigrok shows it as [S/N: ..], ngscopeclient as the
+/// serial; both take any comma-free field.
 const IDN_HEAD: &[u8] = b"Alientek,DM40";
-const IDN_TAIL: &[u8] = b",opendm40 0.1";
-
-/// Model index (0 DM40A, 1 DM40B, 2 DM40C) and the raw calibration byte
-/// (record 0x080C0000 + 0x168, docs/model-variants.md), set once by App::new
-/// from `Dmm::model()` / `Dmm::model_raw()`. *IDN? and SYSTem:MODel? report it.
-static MODEL: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
-
-pub fn set_model(index: u8, raw: u8) {
-    MODEL.store(index.min(2) as u16 | (raw as u16) << 8, core::sync::atomic::Ordering::Relaxed);
-}
+const IDN_TAIL: &[u8] = b",opendm40 ";
 
 fn model() -> (u8, u8) {
-    let v = MODEL.load(core::sync::atomic::Ordering::Relaxed);
-    (v as u8, (v >> 8) as u8)
+    crate::ident::model()
 }
 /// *IDN? while SYST:IDN:EMUL 34401A is on: the HP 34401A identity (vendor
 /// as the real meter's, libsigrok maps it to "HP"), our firmware in the
-/// version field.
-pub const IDN_34401A: &[u8] = b"HEWLETT-PACKARD,34401A,0,dm40-fw 0.1";
+/// version field: "HEWLETT-PACKARD,34401A,0,opendm40 <version>".
+pub const IDN_34401A: &[u8] = b"HEWLETT-PACKARD,34401A,0";
 
 /// *IDN? compatibility mode (SYSTem:IDN:EMULation OFF|34401A; persisted, app.rs
 /// persist_words p[0] bit 14): 0 = off (default), 1 = HP 34401A. For hosts
@@ -754,8 +744,8 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   SOURce:FUNCtion:SQUare:DCYCle <%>   OUTPut ON|OFF
 ///   Queries: FREQ? = the actual (clamped + quantised) frequency, DCYC? the
 ///   effective duty, VOLT? / OFFS? the set values (OFFS? with AUTO: Vpp/2)
-///   TIMebase:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
-///   TRIGger:LEVel <V>   TRIGger:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
+///   TIMebase[:MAIN]:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
+///   TRIGger[:EDGE]:LEVel <V>   TRIGger[:EDGE]:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
 ///   CHANnel1:OFFSet <V> (the vertical position as a voltage added to the
 ///   signal: positive moves the trace up)   ACQuire:SRATe? (S/s)
 ///   RUN  STOP  SINGle   DIGitize (one acquisition with the current sweep,
@@ -771,6 +761,11 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   Volts (CHAN1:SCAL, TRIG:LEV, measurements, WAV:PRE) are at the probe
 ///   tip: the probe factor of the scope settings window (x0.1..x1000) is
 ///   applied; there is no SCPI probe command.
+///   A set with no value is -109, with a value that is no number / keyword
+///   of the command -224, with a number outside its domain (FREQ, SCAL,
+///   VOLT, TIM below 0 or 0, DCYC outside 0..100) -222; the setting stays.
+///   Numbers take the suffixes of `parse_num_u` (e.g. FREQ 1KHZ, 2.5MHZ;
+///   TIM 100US; VOLT 500MV).
 #[derive(Clone, Copy)]
 pub enum Cmd {
     GenFunc(Option<u8>),
@@ -936,7 +931,7 @@ impl Rng {
 
 /// Range value (SI) of a stock mode / range index, the full scale the
 /// meter labels it with (60000-count ranges 6 / 60 / 600..., 1000 V, 10 A,
-/// 60 mV = DC / AC mV r0, reached by the mV-first autorange only).
+/// 60 mV = DC / AC mV r0).
 /// `r` of frequency (14) is the counter range (Dmm::counter_range). None: no
 /// range (continuity, diode, temperature).
 pub fn range_si(mode: u8, r: i8) -> Option<f32> {
@@ -981,19 +976,42 @@ pub fn pow10f(e: i32) -> f32 {
     v
 }
 
-/// The settable ranges (the MF page's items in order, Dmm::set_range):
-/// V 600 mV .. 1000 V, A 600 uA .. 10 A, ohm 60 ohm .. 60 Mohm.
+/// The settable ranges, ascending (the MF page's items, Dmm::set_range
+/// through `range_item_code`): V 60 mV .. 1000 V, A 600 uA .. 10 A, ohm
+/// 60 ohm .. 60 Mohm.
 pub fn range_items(func: u8) -> &'static [f32] {
     match func {
-        0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.6, 6.0, 60.0, 600.0, 1000.0],
+        0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.06, 0.6, 6.0, 60.0, 600.0, 1000.0],
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
         10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6],
         _ => &[],
     }
 }
 
-/// RANG / CONF range argument.
-fn range_arg(a: &[u8]) -> Option<Rng> {
+/// The Dmm::set_range item of `range_items(func)[i]`: V 60 mV is item 5
+/// (after 600 mV .. 1000 V = 0..4); the other lists are the items in order.
+pub fn range_item_code(func: u8, i: usize) -> u8 {
+    if quantity(func & !ANY_CPL) == 1 {
+        if i == 0 { 5 } else { i as u8 - 1 }
+    } else {
+        i as u8
+    }
+}
+
+/// The unit suffix a value of function `f` (a `Dmm::func` code) may carry.
+fn unit_of(f: u8) -> &'static [u8] {
+    match quantity(f & !ANY_CPL) {
+        1 => b"V",
+        8 => b"A",
+        10 => b"OHM",
+        13 => b"F",
+        14 => b"HZ",
+        _ => b"",
+    }
+}
+
+/// RANG / CONF range argument, a value in `unit`.
+fn range_arg(a: &[u8], unit: &[u8]) -> Option<Rng> {
     if kw(a, "AUTO") || kw(a, "DEFault") {
         Some(Rng::Auto)
     } else if kw(a, "MINimum") {
@@ -1001,12 +1019,12 @@ fn range_arg(a: &[u8]) -> Option<Rng> {
     } else if kw(a, "MAXimum") {
         Some(Rng::Value(f32::INFINITY))
     } else {
-        parse_num(a).filter(|v| *v >= 0.0).map(Rng::Value)
+        parse_num_u(a, unit).filter(|v| *v >= 0.0).map(Rng::Value)
     }
 }
 
-/// RES / CONF resolution argument (MIN 0, MAX inf, DEF NaN).
-fn res_arg(a: &[u8]) -> Option<f32> {
+/// RES / CONF resolution argument (MIN 0, MAX inf, DEF NaN), in `unit`.
+fn res_arg(a: &[u8], unit: &[u8]) -> Option<f32> {
     if kw(a, "DEFault") {
         Some(f32::NAN)
     } else if kw(a, "MINimum") {
@@ -1014,7 +1032,7 @@ fn res_arg(a: &[u8]) -> Option<f32> {
     } else if kw(a, "MAXimum") {
         Some(f32::INFINITY)
     } else {
-        parse_num(a).filter(|v| *v > 0.0)
+        parse_num_u(a, unit).filter(|v| *v > 0.0)
     }
 }
 
@@ -1045,8 +1063,8 @@ fn range_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Option<Result<Cmd, &'s
         (true, _, true) => Some(Rng::ResQuery),
         (false, true, false) if kw(a, "ONCE") => Some(Rng::Hold),
         (false, true, false) => on_off(a).map(|on| if on { Rng::Auto } else { Rng::Hold }),
-        (false, false, false) => range_arg(a),
-        (true, _, false) => res_arg(a).map(Rng::Res),
+        (false, false, false) => range_arg(a, unit_of(f)),
+        (true, _, false) => res_arg(a, unit_of(f)).map(Rng::Res),
     };
     // A bare VOLTage / CURRent: the quantity in any coupling (ANY_CPL).
     let f = if k == 1 && matches!(f, 1 | 8) { f | ANY_CPL } else { f };
@@ -1081,9 +1099,9 @@ fn conf_cmd(f: u8, arg: &[u8]) -> Result<Cmd, &'static str> {
     if matches!(f, 11 | 12) && !a.is_empty() {
         return Err(BAD);
     }
-    let rng = if ra.is_empty() { Rng::Auto } else { range_arg(ra).ok_or(BAD)? };
+    let rng = if ra.is_empty() { Rng::Auto } else { range_arg(ra, unit_of(f)).ok_or(BAD)? };
     let res = match rs {
-        Some(s) => Some(res_arg(s).ok_or(BAD)?),
+        Some(s) => Some(res_arg(s, unit_of(f)).ok_or(BAD)?),
         None => None,
     };
     if matches!(f, 13 | 14) && (rng != Rng::Auto || res.is_some_and(|v| !v.is_nan())) {
@@ -1150,7 +1168,7 @@ fn pow_vrange(a: &[u8]) -> Option<Option<u8>> {
     if kw(a, "AUTO") {
         return Some(None);
     }
-    let v = parse_num(a)?;
+    let v = parse_num_u(a, b"V")?;
     crate::dmm::pw::V_LIM.iter().position(|&l| v <= l * 1.0001).map(|k| Some(k as u8))
 }
 
@@ -1159,7 +1177,7 @@ fn pow_irange(a: &[u8]) -> Option<Option<u8>> {
     if kw(a, "AUTO") {
         return Some(None);
     }
-    let v = parse_num(a)?;
+    let v = parse_num_u(a, b"A")?;
     crate::dmm::pw::I_LIM.iter().position(|&l| v <= l * 1.0001).map(|k| Some(k as u8))
 }
 
@@ -1292,9 +1310,10 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
             Some(p) if kw(p, "STATe") => state(query).map(Pow::BurdenState),
             None if query => Ok(Pow::Burden(None)),
             None if kw(a, "DEFault") => Ok(Pow::Burden(Some(f32::NAN))),
-            None => match parse_num(a) {
+            None => match parse_num_u(a, b"OHM") {
                 Some(v) if (0.0..=1000.0).contains(&v) => Ok(Pow::Burden(Some(v))),
-                _ => Err(BAD),
+                Some(_) => Err(RANGE),
+                None => Err(BAD),
             },
             _ => Err(HDR),
         };
@@ -1337,11 +1356,104 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
         if query {
             return Ok(Pow::Limit(None));
         }
-        let i = args.next().and_then(parse_num).ok_or(BAD)?;
-        let t = args.next().map_or(Some(crate::dmm::pw::T_LIM_DEFAULT as f32), parse_num).ok_or(BAD)?;
-        return if (0.0..=10.0).contains(&i) && (0.0..=3600.0).contains(&t) { Ok(Pow::Limit(Some((i, t as u16)))) } else { Err(BAD) };
+        let i = args.next().and_then(|x| parse_num_u(x, b"A")).ok_or(BAD)?;
+        let t = args.next().map_or(Some(crate::dmm::pw::T_LIM_DEFAULT as f32), |x| parse_num_u(x, b"S")).ok_or(BAD)?;
+        return if (0.0..=10.0).contains(&i) && (0.0..=3600.0).contains(&t) { Ok(Pow::Limit(Some((i, t as u16)))) } else { Err(RANGE) };
     }
     Err(HDR)
+}
+
+/// SOURce / OUTPut / TIMebase / CHANnel1 / TRIGger (generator and scope).
+/// A query gives the query Cmd (None inside); a set gives Some(value) or an
+/// error (BAD: no such value, RANGE: outside the setting's domain); the
+/// App clamps a value in the domain to the nearest setting (the generator
+/// 1 Hz .. 10 MHz, the scope's timebase and V/div lists).
+#[inline(never)] // region B: the scope's commands are polled while it streams
+fn gen_scope_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Cmd, &'static str> {
+    let p0 = parts[0];
+    let sub = parts.get(1).copied().unwrap_or(&[]);
+    let a = trim(arg);
+    // A number in `unit` with `ok` its domain.
+    let num = |unit: &[u8], ok: fn(f32) -> bool| -> Result<Option<f32>, &'static str> {
+        if query {
+            return Ok(None);
+        }
+        match parse_num_u(a, unit) {
+            Some(v) if ok(v) => Ok(Some(v)),
+            Some(_) => Err(RANGE),
+            None => Err(BAD),
+        }
+    };
+    let any = |_: f32| true;
+    let pos = |v: f32| v > 0.0;
+    // A keyword from `set` (index), or the query.
+    let pick = |set: &[&str]| -> Result<Option<u8>, &'static str> {
+        if query {
+            return Ok(None);
+        }
+        set.iter().position(|m| kw(a, m)).map(|i| Some(i as u8)).ok_or(BAD)
+    };
+    if kw(p0, "OUTPut") {
+        return match (query, on_off(a)) {
+            (true, _) => Ok(Cmd::GenOut(None)),
+            (false, Some(b)) => Ok(Cmd::GenOut(Some(b))),
+            _ => Err(BAD),
+        };
+    }
+    if kw(p0, "SOURce") {
+        return if kw(sub, "FUNCtion") && parts.len() >= 4 {
+            // SOUR:FUNC:SQU:DCYC <percent>
+            Ok(Cmd::GenDuty(num(b"PCT", |v| (0.0..=100.0).contains(&v))?))
+        } else if kw(sub, "FUNCtion") {
+            Ok(Cmd::GenFunc(pick(&["SINusoid", "SQUare", "TRIangle", "RAMP"])?))
+        } else if kw(sub, "FREQuency") {
+            Ok(Cmd::GenFreq(num(b"HZ", pos)?))
+        } else if kw(sub, "VOLTage") && parts.len() >= 3 && kw(parts[2], "OFFSet") {
+            if !query && kw(a, "AUTO") {
+                Ok(Cmd::GenOffs(Some(f32::NAN)))
+            } else {
+                Ok(Cmd::GenOffs(num(b"V", any)?))
+            }
+        } else if kw(sub, "VOLTage") {
+            Ok(Cmd::GenVolt(num(b"V", |v| v >= 0.0)?))
+        } else {
+            Err("Undefined header")
+        };
+    }
+    if kw(p0, "TIMebase") {
+        // TIMebase[:MAIN][:SCALe]
+        return if parts[1..].iter().all(|p| kw(p, "MAIN") || kw(p, "SCALe")) {
+            Ok(Cmd::TimScale(num(b"S", pos)?))
+        } else {
+            Err("Undefined header")
+        };
+    }
+    if kw(p0, "TRIGger") {
+        // TRIGger:EDGE:LEVel / :SLOPe = TRIGger:LEVel / :SLOPe (Rigol's
+        // spelling; edge is the trigger type the scope page selects).
+        let sub = if kw(sub, "EDGE") { parts.get(2).copied().unwrap_or(&[]) } else { sub };
+        return if kw(sub, "STATus") && query {
+            Ok(Cmd::TrigStatus)
+        } else if kw(sub, "SLOPe") {
+            Ok(Cmd::TrigSlope(pick(&["POSitive", "NEGative"])?.map(|i| i == 0)))
+        } else if kw(sub, "SWEep") {
+            Ok(Cmd::TrigSweep(pick(&["AUTO", "NORMal", "SINGle"])?))
+        } else if sub.is_empty() || kw(sub, "LEVel") {
+            Ok(Cmd::TrigLevel(num(b"V", any)?))
+        } else {
+            Err("Undefined header")
+        };
+    }
+    // CHANnel[1]
+    if kw(sub, "COUPling") {
+        Ok(Cmd::ChCoup(pick(&["DC", "AC"])?.map(|i| i == 1)))
+    } else if kw(sub, "OFFSet") {
+        Ok(Cmd::ChOffs(num(b"V", any)?))
+    } else if sub.is_empty() || kw(sub, "SCALe") {
+        Ok(Cmd::ChScale(num(b"V", pos)?))
+    } else {
+        Err("Undefined header")
+    }
 }
 
 fn on_off(a: &[u8]) -> Option<bool> {
@@ -1352,28 +1464,61 @@ fn on_off(a: &[u8]) -> Option<bool> {
     }
 }
 
-/// Parse a number like "1.5", "-2e-3", "10k" / "5m" (suffixes k, M, m, u, n).
+/// Parse a number like "1.5", "-2e-3", "10k", "5m", "2.5 MHz" (no unit
+/// allowed: `parse_num_u` with an empty unit).
 pub fn parse_num(a: &[u8]) -> Option<f32> {
+    parse_num_u(a, b"")
+}
+
+/// IEEE 488.2 suffix multipliers (7.7.3, case-insensitive): MA = mega,
+/// M = milli.
+const MULT: [(&[u8], f32); 8] =
+    [(b"T", 1e12), (b"G", 1e9), (b"MA", 1e6), (b"K", 1e3), (b"M", 1e-3), (b"U", 1e-6), (b"N", 1e-9), (b"P", 1e-12)];
+
+/// The multiplier of suffix `s` (upper case) for a parameter in `unit`
+/// (upper case, e.g. b"HZ"; empty: none allowed): [<multiplier>][<unit>],
+/// IEEE 488.2 7.7.3 / SCPI-99 7.1.2. MHZ and MOHM are mega (the two
+/// exceptions where M is not milli). "MA" with the unit A is milliampere
+/// (M + A); mega-ampere is "MAA". None: not a valid suffix here.
+fn suffix_mult(s: &[u8], unit: &[u8]) -> Option<f32> {
+    if s.is_empty() {
+        return Some(1.0);
+    }
+    if !unit.is_empty() && s.len() == unit.len() + 1 && s[0] == b'M' && &s[1..] == unit && (unit == b"HZ" || unit == b"OHM") {
+        return Some(1e6);
+    }
+    let m = if !unit.is_empty() && s.ends_with(unit) { &s[..s.len() - unit.len()] } else { s };
+    if m.is_empty() {
+        return Some(1.0);
+    }
+    MULT.iter().find(|(k, _)| *k == m).map(|&(_, v)| v)
+}
+
+/// `parse_num` with an optional unit suffix `unit` (upper case: V, A,
+/// HZ, OHM, S, PCT): "1.5", "-2E-3", "10K", "5M" (milli), "1MA" (mega
+/// without a unit; with the unit A: milliampere), "2.5MHZ", "100 MV".
+/// Case-insensitive: the parser upper-cases the message first.
+pub fn parse_num_u(a: &[u8], unit: &[u8]) -> Option<f32> {
     let a = trim(a);
     if a.is_empty() {
         return None;
     }
+    // The suffix: the trailing letters, after an optional space (an
+    // exponent "E-3" ends in a digit, so it is never taken for one).
     let mut end = a.len();
-    let mut mult = 1.0f32;
-    let last = a[end - 1];
-    let suffix = match last {
-        b'K' | b'k' => Some(1e3),
-        b'M' => Some(1e6),
-        b'm' => Some(1e-3),
-        b'U' | b'u' => Some(1e-6),
-        b'N' | b'n' => Some(1e-9),
-        _ => None,
-    };
-    if let Some(m) = suffix {
-        mult = m;
+    while end > 0 && a[end - 1].is_ascii_alphabetic() {
         end -= 1;
     }
-    let t = &a[..end];
+    let mut sfx = [0u8; 8];
+    let sl = a.len() - end;
+    if sl > sfx.len() {
+        return None;
+    }
+    for (d, c) in sfx.iter_mut().zip(&a[end..]) {
+        *d = c.to_ascii_uppercase();
+    }
+    let mult = suffix_mult(&sfx[..sl], unit)?;
+    let t = trim(&a[..end]);
     let mut i = 0;
     let neg = t.first() == Some(&b'-');
     if neg || t.first() == Some(&b'+') {
@@ -1407,7 +1552,7 @@ pub fn parse_num(a: &[u8]) -> Option<f32> {
         }
         let mut e = 0i32;
         while i < t.len() && t[i].is_ascii_digit() {
-            e = e * 10 + (t[i] - b'0') as i32;
+            e = (e * 10 + (t[i] - b'0') as i32).min(99);
             i += 1;
         }
         for _ in 0..e {
@@ -1417,19 +1562,69 @@ pub fn parse_num(a: &[u8]) -> Option<f32> {
     if i != t.len() {
         return None;
     }
-    Some(if neg { -v } else { v } * mult)
+    Some(if neg { -v } else { v } * mult).filter(|v| v.is_finite())
 }
 
 pub struct Scpi {
     pub buf: [u8; 512],
     pub len: usize,
-    err: Option<&'static str>,
+    /// The error queue (SCPI-99 21.8): FIFO, `ERRQ` entries, the code from
+    /// the message (`err_code`). Full: the newest entry becomes "Queue
+    /// overflow" (-350). SYSTem:ERRor? pops, *CLS clears.
+    errq: [&'static str; ERRQ],
+    errn: u8,
     /// `func_id` of the function the last FUNCtion? / CONFigure? named, until
     /// the next READ? / FETCh? takes it (`take_asked`); NO_FUNC = none.
     asked: u8,
 }
 
 const NO_FUNC: u8 = 0xFF;
+
+/// Error queue depth (SCPI-99: at least 2; opendm40 keeps 8).
+pub const ERRQ: usize = 8;
+
+/// The parameter-check messages of the parser. "Missing parameter" is
+/// pushed instead of BAD when a set command had no argument.
+const BAD: &str = "Illegal parameter value";
+const RANGE: &str = "Data out of range";
+const MISSING: &str = "Missing parameter";
+const NOT_ALLOWED: &str = "Parameter not allowed";
+const SYNTAX: &str = "Syntax error";
+const QUEUE_OVERFLOW: &str = "Queue overflow";
+
+/// The SCPI error code of an error message (SCPI-99 21.8, IEEE 488.2):
+/// the standard message, or its text before "; " (a message may carry
+/// details). Anything else is an execution error (-200) with its own text.
+pub fn err_code(e: &str) -> i16 {
+    let head = match e.find(';') {
+        Some(i) => &e[..i],
+        None => e,
+    };
+    match head {
+        "Command error" => -100,
+        "Syntax error" => -102,
+        "Parameter not allowed" => -108,
+        "Missing parameter" => -109,
+        "Undefined header" => -113,
+        "Execution error" => -200,
+        "Command protected" => -203,
+        "Settings conflict" => -221,
+        "Data out of range" => -222,
+        "Too much data" => -223,
+        "Illegal parameter value" => -224,
+        "Out of memory" => -225,
+        "Data stale" => -230,
+        "Hardware error" | "Flash error" => -240,
+        "Mass storage error" | "Mass storage busy" => -250,
+        "Mass storage full" => -254,
+        "File name not found" => -256,
+        "Queue overflow" => -350,
+        "Input buffer overrun" => -363,
+        "Query error" => -400,
+        "Query INTERRUPTED" => -410,
+        _ => -200,
+    }
+}
 
 /// Match `tok` (upper case) against a mnemonic written as e.g. "MEASure":
 /// accepted are the short form (upper-case letters) and the full word.
@@ -1563,7 +1758,7 @@ fn func_name(mode: u8) -> &'static str {
 
 impl Scpi {
     pub const fn new() -> Self {
-        Scpi { buf: [0; 512], len: 0, err: None, asked: NO_FUNC }
+        Scpi { buf: [0; 512], len: 0, errq: [""; ERRQ], errn: 0, asked: NO_FUNC }
     }
 
     fn put(&mut self, s: &[u8]) {
@@ -1598,17 +1793,30 @@ impl Scpi {
                 continue;
             }
             let mut up = [0u8; 64];
-            let n = cmd.len().min(64);
+            if cmd.len() > up.len() {
+                // Cut off, it could read as another command.
+                self.set_err(SYNTAX);
+                continue;
+            }
+            let n = cmd.len();
             for (d, s) in up.iter_mut().zip(&cmd[..n]) {
                 *d = s.to_ascii_uppercase();
             }
             let cmd = &up[..n];
-            let (head, arg) = match cmd.iter().position(|&b| b == b' ') {
+            let (head, arg) = match cmd.iter().position(|&b| b == b' ' || b == b'\t') {
                 Some(i) => (&cmd[..i], trim(&cmd[i + 1..])),
                 None => (cmd, &cmd[..0]),
             };
             let query = head.last() == Some(&b'?');
             let head = if query { &head[..head.len() - 1] } else { head };
+            let no_arg = arg.is_empty() && !query;
+            // A header is letters, digits, '*' (common commands), ':' and
+            // '_' (none uses it; kept for hosts' spellings); a second '?' or
+            // any other character is a syntax error (-102).
+            if !head.iter().all(|&b| b.is_ascii_alphanumeric() || b == b':' || b == b'*' || b == b'_') {
+                self.set_err(SYNTAX);
+                continue;
+            }
             let mut parts_buf: [&[u8]; 6] = [&[]; 6];
             let mut np = 0;
             for p in head.split(|&b| b == b':').filter(|p| !p.is_empty()) {
@@ -1619,17 +1827,31 @@ impl Scpi {
             }
             let parts = &parts_buf[..np];
             let Some(&p0) = parts.first() else { continue };
+            // Commands without parameters given one (-108).
+            if !arg.is_empty()
+                && (p0.first() == Some(&b'*')
+                    || (parts.len() == 1 && ["READ", "FETCh", "RUN", "STOP", "SINGle", "DIGitize", "INITiate", "ABORt"].iter().any(|m| kw(p0, m)))
+                    || (parts.len() >= 2 && kw(p0, "SYSTem") && kw(parts[1], "ERRor")))
+            {
+                self.set_err(NOT_ALLOWED);
+                continue;
+            }
 
             if self.len > 0 && query {
                 self.put(b";");
             }
             match (p0, query) {
-                (b"*IDN", true) if idn_emul() == 1 => self.put(IDN_34401A),
+                (b"*IDN", true) if idn_emul() == 1 => {
+                    self.put(IDN_34401A);
+                    self.put(IDN_TAIL);
+                    self.put(crate::ident::VERSION.as_bytes());
+                }
                 (b"*IDN", true) => {
                     self.put(IDN_HEAD);
                     self.put(&[b'A' + model().0, b',']);
                     self.put(crate::uid::bytes());
                     self.put(IDN_TAIL);
+                    self.put(crate::ident::VERSION.as_bytes());
                 }
                 // SYSTem:MODel?: "DM40A|B|C,<raw byte>,<counts>": the model the
                 // calibration record names (stock rule: record +0x168, a record
@@ -1660,7 +1882,7 @@ impl Scpi {
                         match trim(arg) {
                             b"OFF" | b"0" => set_idn_emul(0),
                             b"34401A" | b"HP34401A" => set_idn_emul(1),
-                            _ => self.err = Some("Illegal parameter value"),
+                            _ => self.err_arg(no_arg, "Illegal parameter value"),
                         }
                     }
                 }
@@ -1669,10 +1891,14 @@ impl Scpi {
                 // meter measures continuously, READ? takes the next reading.
                 _ if (kw(p0, "INITiate") || kw(p0, "ABORt")) && !query => {}
                 _ if kw(p0, "SYSTem") && parts.len() == 2 && (kw(parts[1], "LOCal") || kw(parts[1], "REMote")) && !query => {}
-                (b"*RST", false) | (b"*CLS", false) => {
-                    self.err = None;
+                // *CLS: the error queue and the event register cleared
+                // (IEEE 488.2 10.3); *RST leaves both (10.32) and is
+                // accepted (no settings to reset through SCPI).
+                (b"*CLS", false) => {
+                    self.errn = 0;
                     crate::sentinel::QUES_EVENT.store(0, core::sync::atomic::Ordering::Relaxed);
                 }
+                (b"*RST", false) => {}
                 _ if kw(p0, "STATus") && parts.len() > 1 && kw(parts[1], "QUEStionable") && query => {
                     if parts.len() == 3 && kw(parts[2], "CONDition") {
                         out = Out::Instr(Cmd::StatQuesCond);
@@ -1680,7 +1906,7 @@ impl Scpi {
                         let v = crate::sentinel::QUES_EVENT.swap(0, core::sync::atomic::Ordering::Relaxed);
                         self.put_u32(v as u32);
                     } else {
-                        self.err = Some("Undefined header");
+                        self.err_arg(no_arg, "Undefined header");
                     }
                 }
                 (b"*OPC", true) => self.put(b"1"),
@@ -1699,7 +1925,7 @@ impl Scpi {
                     } else if kw(a, "AUTO") {
                         Cmd::SysRail(Some(false))
                     } else {
-                        self.err = Some("Illegal parameter value");
+                        self.err_arg(no_arg, "Illegal parameter value");
                         continue;
                     });
                 }
@@ -1708,7 +1934,7 @@ impl Scpi {
                         (2, true) => Cmd::SysFuse(false),
                         (3, false) if kw(parts[2], "TEST") => Cmd::SysFuse(true),
                         _ => {
-                            self.err = Some("Undefined header");
+                            self.err_arg(no_arg, "Undefined header");
                             continue;
                         }
                     });
@@ -1720,7 +1946,7 @@ impl Scpi {
                         match parse_num(trim(arg)) {
                             Some(v) if (0.0..=100.0).contains(&v) => Cmd::SysBeepVol(Some(v as u8)),
                             _ => {
-                                self.err = Some("Illegal parameter value");
+                                self.err_arg(no_arg, "Illegal parameter value");
                                 continue;
                             }
                         }
@@ -1741,7 +1967,7 @@ impl Scpi {
                         } else if kw(a, "OFF") {
                             Cmd::SysAlarm(Some(crate::danger::OFF))
                         } else {
-                            self.err = Some("Illegal parameter value");
+                            self.err_arg(no_arg, "Illegal parameter value");
                             continue;
                         }
                     } else if parts.len() == 3 && kw(parts[2], "ENABle") && query {
@@ -1752,13 +1978,13 @@ impl Scpi {
                             None => match parse_num(a) {
                                 Some(v) if (0.0..=15.0).contains(&v) && v == (v as u8) as f32 => Cmd::SysAlertEnable(Some(v as u8)),
                                 _ => {
-                                    self.err = Some("Illegal parameter value");
+                                    self.err_arg(no_arg, "Illegal parameter value");
                                     continue;
                                 }
                             },
                         }
                     } else {
-                        self.err = Some("Undefined header");
+                        self.err_arg(no_arg, "Undefined header");
                         continue;
                     });
                 }
@@ -1771,7 +1997,7 @@ impl Scpi {
                     } else if kw(a, "F") || kw(a, "FAR") {
                         Cmd::TempUnit(Some(true))
                     } else {
-                        self.err = Some("Illegal parameter value");
+                        self.err_arg(no_arg, "Illegal parameter value");
                         continue;
                     });
                 }
@@ -1779,9 +2005,16 @@ impl Scpi {
                     out = Out::Instr(Cmd::TempCj)
                 }
                 _ if kw(p0, "SYSTem") && parts.len() > 1 && kw(parts[1], "ERRor") && query => {
-                    match self.err.take() {
+                    if parts.len() > 2 && kw(parts[2], "COUNt") {
+                        self.put_u32(self.errn as u32);
+                        continue;
+                    }
+                    match self.pop_err() {
                         Some(e) => {
-                            self.put(b"-100,\"");
+                            let c = err_code(e);
+                            self.put(b"-");
+                            self.put_u32(c.unsigned_abs() as u32);
+                            self.put(b",\"");
                             self.put(e.as_bytes());
                             self.put(b"\"");
                         }
@@ -1790,11 +2023,11 @@ impl Scpi {
                 }
                 _ if is_pow(parts, query) => match parse_pow(parts, arg, query) {
                     Ok(c) => out = Out::Instr(Cmd::Pow(c)),
-                    Err(e) => self.err = Some(e),
+                    Err(e) => self.err_arg(no_arg, e),
                 },
                 _ if kw(p0, "MEASure") && query => match parse_func_arg(&parts[1..], arg) {
                     Some(f) => out = Out::Measure(Some(f)),
-                    None => self.err = Some("Command error"),
+                    None => self.err_arg(no_arg, "Command error"),
                 },
                 _ if kw(p0, "CONFigure") && query && parts.len() == 1 => out = Out::Instr(Cmd::ConfQuery),
                 _ if kw(p0, "CONFigure") && !query => match parse_func_arg(&parts[1..], arg) {
@@ -1802,9 +2035,9 @@ impl Scpi {
                     Some(f) if f == 15 || f >= 32 => out = Out::Configure(f),
                     Some(f) => match conf_cmd(f, arg) {
                         Ok(c) => out = Out::Instr(c),
-                        Err(e) => self.err = Some(e),
+                        Err(e) => self.err_arg(no_arg, e),
                     },
-                    None => self.err = Some("Command error"),
+                    None => self.err_arg(no_arg, "Command error"),
                 },
                 // [SENSe:]<f>:RANGe / RANGe:AUTO / RESolution (opendm40).
                 // range_cmd is .cold (region C): only for a header that names
@@ -1819,83 +2052,19 @@ impl Scpi {
                 {
                     match range_cmd(parts, arg, query) {
                         Some(Ok(c)) => out = Out::Instr(c),
-                        Some(Err(e)) => self.err = Some(e),
+                        Some(Err(e)) => self.err_arg(no_arg, e),
                         None => {}
                     }
                 }
                 (b"READ", true) => out = Out::Measure(None),
-                _ if kw(p0, "SOURce") || kw(p0, "OUTPut") => {
-                    let a = trim(arg);
-                    let sub = parts.get(1).copied().unwrap_or(&[]);
-                    let cmd = if kw(p0, "OUTPut") {
-                        Some(Cmd::GenOut(if query { None } else { Some(a == b"ON" || a == b"1") }))
-                    } else if kw(sub, "FUNCtion") && parts.len() >= 4 {
-                        Some(Cmd::GenDuty(if query { None } else { parse_num(a) }))
-                    } else if kw(sub, "FUNCtion") {
-                        let w = if kw(a, "SINusoid") {
-                            Some(0)
-                        } else if kw(a, "SQUare") {
-                            Some(1)
-                        } else if kw(a, "TRIangle") {
-                            Some(2)
-                        } else if kw(a, "RAMP") {
-                            Some(3)
-                        } else {
-                            None
-                        };
-                        Some(Cmd::GenFunc(if query { None } else { w }))
-                    } else if kw(sub, "FREQuency") {
-                        Some(Cmd::GenFreq(if query { None } else { parse_num(a) }))
-                    } else if kw(sub, "VOLTage") && parts.len() >= 3 && kw(parts[2], "OFFSet") {
-                        if query {
-                            Some(Cmd::GenOffs(None))
-                        } else if kw(a, "AUTO") {
-                            Some(Cmd::GenOffs(Some(f32::NAN)))
-                        } else {
-                            parse_num(a).map(|v| Cmd::GenOffs(Some(v)))
-                        }
-                    } else if kw(sub, "VOLTage") {
-                        Some(Cmd::GenVolt(if query { None } else { parse_num(a) }))
-                    } else {
-                        None
-                    };
-                    match cmd {
-                        Some(c) => out = Out::Instr(c),
-                        None => self.err = Some("Undefined header"),
+                // Generator and scope settings: a set with a value that does
+                // not parse is -224 (-109 without one), one outside the
+                // setting's domain -222; the setting is left as it was.
+                _ if kw(p0, "SOURce") || kw(p0, "OUTPut") || kw(p0, "TIMebase") || kw(p0.strip_suffix(b"1").unwrap_or(p0), "CHANnel") || kw(p0, "TRIGger") => {
+                    match gen_scope_cmd(parts, arg, query) {
+                        Ok(c) => out = Out::Instr(c),
+                        Err(e) => self.err_arg(no_arg, e),
                     }
-                }
-                _ if kw(p0, "TIMebase") => out = Out::Instr(Cmd::TimScale(if query { None } else { parse_num(arg) })),
-                _ if kw(p0.strip_suffix(b"1").unwrap_or(p0), "CHANnel") => {
-                    let sub = parts.get(1).copied().unwrap_or(&[]);
-                    let a = trim(arg);
-                    out = Out::Instr(if kw(sub, "COUPling") {
-                        Cmd::ChCoup(if query { None } else { Some(a == b"AC") })
-                    } else if kw(sub, "OFFSet") {
-                        Cmd::ChOffs(if query { None } else { parse_num(a) })
-                    } else {
-                        Cmd::ChScale(if query { None } else { parse_num(a) })
-                    });
-                }
-                _ if kw(p0, "TRIGger") => {
-                    let sub = parts.get(1).copied().unwrap_or(&[]);
-                    let a = trim(arg);
-                    out = Out::Instr(if kw(sub, "STATus") && query {
-                        Cmd::TrigStatus
-                    } else if kw(sub, "SLOPe") {
-                        Cmd::TrigSlope(if query { None } else { Some(!kw(a, "NEGative")) })
-                    } else if kw(sub, "SWEep") {
-                        Cmd::TrigSweep(if query {
-                            None
-                        } else if kw(a, "NORMal") {
-                            Some(1)
-                        } else if kw(a, "SINGle") {
-                            Some(2)
-                        } else {
-                            Some(0)
-                        })
-                    } else {
-                        Cmd::TrigLevel(if query { None } else { parse_num(a) })
-                    });
                 }
                 (b"RUN", false) => out = Out::Instr(Cmd::Run),
                 (b"STOP", false) => out = Out::Instr(Cmd::Stop),
@@ -1921,7 +2090,11 @@ impl Scpi {
                     out = Out::Instr(Cmd::DbgPinch(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 2.0) as u8) }))
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GRAB"[..]) => {
-                    out = Out::Instr(Cmd::DbgGrab(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 5000.0) as u16) }))
+                    match (query, parse_num(arg)) {
+                        (true, _) => out = Out::Instr(Cmd::DbgGrab(None)),
+                        (false, Some(v)) => out = Out::Instr(Cmd::DbgGrab(Some(v.clamp(0.0, 5000.0) as u16))),
+                        _ => self.err_arg(no_arg, BAD),
+                    }
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
                 _ if p0 == b"DBG" && query && parts.get(1) == Some(&&b"VIEW"[..]) => out = Out::Instr(Cmd::DbgView),
@@ -1964,7 +2137,7 @@ impl Scpi {
                     };
                     match c {
                         Some(c) => out = Out::Instr(c),
-                        None => self.err = Some("Illegal parameter value"),
+                        None => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"ACDC"[..]) => out = Out::Instr(Cmd::DbgAcdc),
@@ -1972,7 +2145,7 @@ impl Scpi {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
                         Some(v) if (0.0..=127.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
-                        _ => self.err = Some("Illegal parameter value"),
+                        _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "LOG")) => out = Out::Instr(Cmd::DbgSentLog),
@@ -1981,7 +2154,7 @@ impl Scpi {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentPrec(None)),
                         Some(v) if (0.0..=2000.0).contains(&v) => out = Out::Instr(Cmd::DbgSentPrec(Some(v as u16))),
-                        _ => self.err = Some("Illegal parameter value"),
+                        _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
@@ -1997,7 +2170,7 @@ impl Scpi {
                     };
                     match c {
                         Some(c) => out = Out::Instr(c),
-                        None => self.err = Some("Undefined header"),
+                        None => self.err_arg(no_arg, "Undefined header"),
                     }
                 }
                 // HY3131 bus self-test (src/hyspi.rs, main.rs).
@@ -2018,7 +2191,7 @@ impl Scpi {
                     };
                     match d {
                         Some(d) => out = Out::Dbg(d),
-                        None => self.err = Some("Undefined header"),
+                        None => self.err_arg(no_arg, "Undefined header"),
                     }
                 }
                 // AD2 device experiments (src/ad2exp.rs, main.rs).
@@ -2045,7 +2218,7 @@ impl Scpi {
                     };
                     match d {
                         Some(d) => out = Out::Dbg(d),
-                        None => self.err = Some("Undefined header"),
+                        None => self.err_arg(no_arg, "Undefined header"),
                     }
                 }
                 _ if p0 == b"DBG" => {
@@ -2092,7 +2265,7 @@ impl Scpi {
                             } else if kw(op, "ABORt") {
                                 Dbg::Upload(2, 0, 0)
                             } else {
-                                self.err = Some("Undefined header");
+                                self.err_arg(no_arg, "Undefined header");
                                 continue;
                             }
                         }
@@ -2136,10 +2309,10 @@ impl Scpi {
                         // records>,<FAT pairs>,<staged clusters>,<frozen>,<staging>,
                         // <firmware state 0 none 1 ask 2 asked 3 declined 4 install 5 bad>.
                         #[cfg(feature = "vdisk")]
-                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), r[3].load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err = Some("Undefined header") } continue; }
-                        b"RECOVER" | b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err = Some("Flash error"); continue; } Dbg::Reset }
+                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), r[3].load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err_arg(no_arg, "Undefined header") } continue; }
+                        b"RECOVER" | b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err_arg(no_arg, "Flash error"); continue; } Dbg::Reset }
                         _ => {
-                            self.err = Some("Undefined header");
+                            self.err_arg(no_arg, "Undefined header");
                             continue;
                         }
                     });
@@ -2156,7 +2329,7 @@ impl Scpi {
                     } else if kw(sub, "ARM") && !query {
                         Some(Inr::Arm)
                     } else if kw(sub, "THReshold") {
-                        if query { Some(Inr::Thr(None)) } else { parse_num(a).map(|v| Inr::Thr(Some(v))) }
+                        if query { Some(Inr::Thr(None)) } else { parse_num_u(a, b"A").map(|v| Inr::Thr(Some(v))) }
                     } else if kw(sub, "CONDition") && query {
                         Some(Inr::Cond)
                     } else if kw(sub, "FETCh") && query {
@@ -2179,7 +2352,7 @@ impl Scpi {
                     match c {
                         Some(c) => out = Out::Inr(c),
                         None => {
-                            self.err = Some(if sub.is_empty() || kw(sub, "STATe") || kw(sub, "THReshold") { "Illegal parameter value" } else { "Undefined header" });
+                            self.err_arg(no_arg, if sub.is_empty() || kw(sub, "STATe") || kw(sub, "THReshold") { "Illegal parameter value" } else { "Undefined header" });
                             continue;
                         }
                     }
@@ -2187,15 +2360,23 @@ impl Scpi {
                 _ if kw(p0, "LOG") => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     let a = trim(arg);
+                    // ON|OFF set or the query (Some(None)); None: a bad value.
+                    let state = if query { Some(None) } else { on_off(a).map(Some) };
                     out = if kw(sub, "STATe") {
-                        Out::Log(Log::State(if query { None } else { Some(a == b"ON" || a == b"1") }))
+                        match state {
+                            Some(v) => Out::Log(Log::State(v)),
+                            None => {
+                                self.err_arg(no_arg, BAD);
+                                continue;
+                            }
+                        }
                     } else if kw(sub, "SOURce") {
                         if query {
                             Out::Log(Log::Source(None))
                         } else if a == b"AD2" || a == b"AD1" {
                             Out::Log(Log::Source(Some(a == b"AD2")))
                         } else {
-                            self.err = Some("Illegal parameter value");
+                            self.err_arg(no_arg, "Illegal parameter value");
                             continue;
                         }
                     } else if kw(sub, "SRATe") {
@@ -2203,16 +2384,29 @@ impl Scpi {
                             (true, _) => Out::Log(Log::SRate(None)),
                             (false, Some(v)) if v >= 1.0 && v <= 1.0e6 => Out::Log(Log::SRate(Some(v as u32))),
                             _ => {
-                                self.err = Some("Illegal parameter value");
+                                self.err_arg(no_arg, "Illegal parameter value");
                                 continue;
                             }
                         }
                     } else if kw(sub, "GAPs") && query {
                         Out::Log(Log::Gaps)
                     } else if kw(sub, "OSR") {
-                        Out::Log(Log::Osr(if query { None } else { Some(parse_num(a).unwrap_or(0.0) as u8) }))
+                        match (query, parse_num(a)) {
+                            (true, _) => Out::Log(Log::Osr(None)),
+                            (false, Some(v)) if (0.0..=7.0).contains(&v) && v == (v as u8) as f32 => Out::Log(Log::Osr(Some(v as u8))),
+                            _ => {
+                                self.err_arg(no_arg, BAD);
+                                continue;
+                            }
+                        }
                     } else if kw(sub, "CHOP") {
-                        Out::Log(Log::Chop(if query { None } else { Some(a == b"ON" || a == b"1") }))
+                        match state {
+                            Some(v) => Out::Log(Log::Chop(v)),
+                            None => {
+                                self.err_arg(no_arg, BAD);
+                                continue;
+                            }
+                        }
                     } else if kw(sub, "RATE") && query {
                         Out::Log(Log::Rate)
                     } else if kw(sub, "COUNt") && query {
@@ -2234,7 +2428,7 @@ impl Scpi {
                                 match idx(set) {
                                     Some(i) => Some(i),
                                     None => {
-                                        self.err = Some("Illegal parameter value");
+                                        self.err_arg(no_arg, "Illegal parameter value");
                                         continue;
                                     }
                                 }
@@ -2243,18 +2437,24 @@ impl Scpi {
                         } else if kw(s2, "FREE") && query {
                             Out::Log(Log::CsvFree)
                         } else {
-                            self.err = Some("Undefined header");
+                            self.err_arg(no_arg, "Undefined header");
                             continue;
                         }
                     } else if kw(sub, "CSV") {
-                        Out::Log(Log::Csv(if query { None } else { Some(a == b"ON" || a == b"1") }))
+                        match state {
+                            Some(v) => Out::Log(Log::Csv(v)),
+                            None => {
+                                self.err_arg(no_arg, BAD);
+                                continue;
+                            }
+                        }
                     } else if kw(sub, "DEST") {
                         match (query, a) {
                             (true, _) => Out::Log(Log::Dest(None)),
                             (false, x) if x.eq_ignore_ascii_case(b"DISK") => Out::Log(Log::Dest(Some(true))),
                             (false, x) if x.eq_ignore_ascii_case(b"HOST") => Out::Log(Log::Dest(Some(false))),
                             _ => {
-                                self.err = Some("Illegal parameter value");
+                                self.err_arg(no_arg, "Illegal parameter value");
                                 continue;
                             }
                         }
@@ -2263,14 +2463,14 @@ impl Scpi {
                             (true, _) => Out::Log(Log::Dur(None)),
                             (false, Some(v)) if (0.0..=1.0e6).contains(&v) => Out::Log(Log::Dur(Some(v as u32))),
                             _ => {
-                                self.err = Some("Illegal parameter value");
+                                self.err_arg(no_arg, "Illegal parameter value");
                                 continue;
                             }
                         }
                     } else if kw(sub, "DISK") && query {
                         Out::Log(Log::Disk)
                     } else {
-                        self.err = Some("Undefined header");
+                        self.err_arg(no_arg, "Undefined header");
                         continue;
                     };
                 }
@@ -2291,7 +2491,7 @@ impl Scpi {
                         match (name, num(0), num(MMEM_DATA_MAX)) {
                             (Some(n), Some(off), Some(len)) => Out::Mmem(Mmem::Data(n, off, len.min(MMEM_DATA_MAX))),
                             _ => {
-                                self.err = Some("Illegal parameter value");
+                                self.err_arg(no_arg, "Illegal parameter value");
                                 continue;
                             }
                         }
@@ -2299,12 +2499,12 @@ impl Scpi {
                         match crate::csvlog::parse_name(trim(arg)) {
                             Some(n) => Out::Mmem(Mmem::Del(n)),
                             None => {
-                                self.err = Some("Illegal parameter value");
+                                self.err_arg(no_arg, "Illegal parameter value");
                                 continue;
                             }
                         }
                     } else {
-                        self.err = Some("Undefined header");
+                        self.err_arg(no_arg, "Undefined header");
                         continue;
                     };
                 }
@@ -2315,7 +2515,7 @@ impl Scpi {
                             self.put(b"CHAN1");
                         }
                     }
-                    Err(e) => self.err = Some(e),
+                    Err(e) => self.err_arg(no_arg, e),
                 },
                 _ if kw(p0, "FETCh") && query && parts.len() == 2 && kw(parts[1], "BURDen") => {
                     out = Out::Instr(Cmd::FetchBurden)
@@ -2327,7 +2527,7 @@ impl Scpi {
                         match on_off(trim(arg)) {
                             Some(b) => Some(b),
                             None => {
-                                self.err = Some("Illegal parameter value");
+                                self.err_arg(no_arg, "Illegal parameter value");
                                 continue;
                             }
                         }
@@ -2356,7 +2556,7 @@ impl Scpi {
                     };
                     match m {
                         Some(m) => out = Out::Configure(m),
-                        None => self.err = Some("Illegal parameter value"),
+                        None => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
                 _ if kw(p0, "SENSe") || kw(p0, "FUNCtion") || kw(p0, "TEMPerature") || kw(p0, "RATE") => {
@@ -2373,7 +2573,7 @@ impl Scpi {
                         };
                         match c {
                             Some(c) => out = Out::Instr(c),
-                            None => self.err = Some("Illegal parameter value"),
+                            None => self.err_arg(no_arg, "Illegal parameter value"),
                         }
                         continue;
                     }
@@ -2402,7 +2602,7 @@ impl Scpi {
                         };
                         match c {
                             Some(c) => out = Out::Instr(c),
-                            None => self.err = Some("Illegal parameter value"),
+                            None => self.err_arg(no_arg, "Illegal parameter value"),
                         }
                         continue;
                     }
@@ -2424,11 +2624,11 @@ impl Scpi {
                             }
                             match parse_func(&ap[..k]) {
                                 Some(f) => out = Out::Configure(f),
-                                None => self.err = Some("Illegal parameter value"),
+                                None => self.err_arg(no_arg, "Illegal parameter value"),
                             }
                         }
                     } else {
-                        self.err = Some("Undefined header");
+                        self.err_arg(no_arg, "Undefined header");
                     }
                 }
                 _ if kw(p0, "CALCulate") => {
@@ -2483,11 +2683,11 @@ impl Scpi {
                     };
                     match c {
                         Some(c) => out = Out::Instr(c),
-                        None if !query && !a.is_empty() => self.err = Some("Illegal parameter value"),
-                        None => self.err = Some("Undefined header"),
+                        None if !query && !a.is_empty() => self.err_arg(no_arg, "Illegal parameter value"),
+                        None => self.err_arg(no_arg, "Undefined header"),
                     }
                 }
-                _ => self.err = Some("Undefined header"),
+                _ => self.err_arg(no_arg, "Undefined header"),
             }
         }
         match out {
@@ -2501,10 +2701,35 @@ impl Scpi {
         self.put(b);
     }
 
-    /// Record an error for the next SYSTem:ERRor? query.
+    /// Queue an error for SYSTem:ERRor? (FIFO; a full queue keeps its
+    /// oldest entries and its newest becomes "Queue overflow").
     pub fn set_err(&mut self, e: &'static str) {
-        self.err = Some(e);
+        let n = self.errn as usize;
+        if n < ERRQ {
+            self.errq[n] = e;
+            self.errn += 1;
+        } else {
+            self.errq[ERRQ - 1] = QUEUE_OVERFLOW;
+        }
     }
+
+    /// `set_err` in the parser: a parameter error of a set command that had
+    /// no argument is "Missing parameter" (-109).
+    fn err_arg(&mut self, no_arg: bool, e: &'static str) {
+        self.set_err(if no_arg && (e == BAD || e == RANGE) { MISSING } else { e });
+    }
+
+    /// The oldest queued error, removed.
+    fn pop_err(&mut self) -> Option<&'static str> {
+        if self.errn == 0 {
+            return None;
+        }
+        let e = self.errq[0];
+        self.errq.copy_within(1.., 0);
+        self.errn -= 1;
+        Some(e)
+    }
+
 
     /// Append a number in NR3.
     pub fn put_f32(&mut self, v: f32) {

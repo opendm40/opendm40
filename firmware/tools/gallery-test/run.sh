@@ -116,6 +116,12 @@ if [ -f $W/img/stock.img ]; then
 fi
 echo "=== lock + delete"
 cp $W/img/e6.img $W/lock.img
+# A scope record and a fast-logger file, which the gallery does not show:
+# its count ("listed once free" = the S*.BMP / LOG*.DLG files) leaves them out.
+echo "not shown" > $W/hidden.dlg
+mmd -i $W/lock.img ::SCOPE
+mcopy -i $W/lock.img $W/hidden.dlg ::SCOPE/SCOP000.DLG
+mcopy -i $W/lock.img $W/hidden.dlg ::LOGS/FAST000.DLG
 "$W/t" lock $W/lock.img $W/d || RC=1
 fsck.fat -n $W/lock.img | tail -1
 fsck.fat -n $W/lock.img >/dev/null 2>&1 && echo "ok: fsck clean after the delete" || { echo "FAIL: fsck"; RC=1; }

@@ -81,7 +81,7 @@ DEF_DOC = os.path.join(REPO, 'docs', 'manual', 'scpi-reference.md')
 # parse_func, range_cmd, coup_cmd, is_pow, parse_pow, wav_cmd).
 HEADER_VARS = {'p0', 'p1', 'sub', 'p', 'l', 'l0', 'l1', 'leaf', 'parts', 's2', 'op', 'm', 'r', 'rest', 'head'}
 # Leading identifiers of argument expressions.
-ARG_VARS = {'a', 'a0', 'a1', 'v', 't', 'x', 'arg', 'ra', 'rs', 'tok', 'first', 'third', 'trim', 'name'}
+ARG_VARS = {'a', 'a0', 'a1', 'v', 't', 'x', 'arg', 'ra', 'rs', 'tok', 'first', 'third', 'trim', 'name', 'unit'}
 
 MNEM = r'\*?[A-Za-z][A-Za-z0-9]*'
 
@@ -89,7 +89,6 @@ MNEM = r'\*?[A-Za-z][A-Za-z0-9]*'
 # word (any word there is taken): key -> where. Keep this exact: an entry the
 # parser starts matching is reported as stale.
 DOC_ONLY = {
-    'LEVEL': 'TRIGger:LEVel: scpi.rs TRIGger arm, any part after TRIGger other than STATus / SLOPe / SWEep is the level',
     'SQUARE': 'SOURce:FUNCtion:SQUare:DCYCle: scpi.rs SOURce arm, FUNCtion with 4 or more parts is the duty cycle',
     'DCYCLE': 'SOURce:FUNCtion:SQUare:DCYCle: as SQUare',
 }

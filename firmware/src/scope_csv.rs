@@ -11,11 +11,11 @@
 //! 26624-sample record instead of the CSV's 692 KB. The CSV exists on read
 //! (SCOP%03u.CSV on the read-only LUN 1, MMEM:DATA?, tools/dlog.py), byte
 //! for byte what this module wrote as text before:
-//!   # Alientek DM40A, opendm40 0.0.1, scope record (no real-time clock)
+//!   # Alientek DM40A, opendm40 0.1, scope record (no real-time clock)
 //!   # timebase 200us/div, 1V/div, probe x1, coupling DC, sample rate 12.5MS/s, samples 26624
 //!   # trigger Edge rising 993mV, mode Auto, triggered
 //!   # time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip
-//!   time_s,volts
+//!   time_s,volts            (a current record of the Wave view: time_s,amperes)
 //!   -1.06496e-03,+1.2345e+00
 //! (fixed-width 26-byte rows, dlog::scope_row). The file length is known
 //! before the first block is written (screenshot.rs allocates the whole
@@ -108,14 +108,16 @@ impl Hdr {
     }
 }
 
-/// Take the record for writing: `rec` (codes), volts = a + b * code,
-/// sample rate `fs`, `t0` = sample index of time 0, the header lines
-/// (without the column line). The writer is started separately
+/// Take the record for writing: `rec` (codes), value = a + b * code (volts,
+/// or amperes for a current record of the Wave view), sample rate `fs`,
+/// `t0` = sample index of time 0, the header lines (without the column
+/// line), `amps`: the value column is "amperes" (else "volts"). The writer
+/// is started separately
 /// (screenshot::start_csv) and reads it through `fill`.
 /// Region B (not this module's .cold): it runs in the Save CSV tap, while
 /// the Wave view's stream may run (the stream pauses only for the write).
 #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
-pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr) {
+pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr, amps: bool) {
     let s = snap();
     s.rec = Some(rec);
     s.a = a;
@@ -127,7 +129,8 @@ pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr) {
         s.hdr[n] = c;
         n += 1;
     }
-    for &c in b"time_s,volts\r\n" {
+    let col: &[u8] = if amps { b"time_s,amperes\r\n" } else { b"time_s,volts\r\n" };
+    for &c in col {
         if n < HDR_MAX {
             s.hdr[n] = c;
             n += 1;

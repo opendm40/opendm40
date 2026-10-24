@@ -2782,10 +2782,12 @@ impl Dmm {
         self.manual = manual;
     }
 
-    /// Manual range from the MF popup: V items 600 mV, 6, 60, 600, 1000 V;
-    /// A items 600 uA, 6000 uA, 60 mA, 600 mA, 6 A, 10 A; ohm 1..6
-    /// (DM40C labels, COUNTS_MODEL), ohm 0 = the manual-only 60 ohm range.
-    /// `None` = AUTO, `Some(255)` = AUTO+ (V/A only).
+    /// Manual range from the MF popup: V items 600 mV, 6, 60, 600, 1000 V
+    /// (0..4), 5 = 60 mV (the DC / AC mV r0 row, OP1 x10; the stock tables
+    /// have it, its UI offers no 60 mV item); A items 600 uA, 6000 uA,
+    /// 60 mA, 600 mA, 6 A, 10 A; ohm 1..6 (DM40C labels, COUNTS_MODEL),
+    /// ohm 0 = the manual-only 60 ohm range. `None` = AUTO, `Some(255)` =
+    /// AUTO+ (V/A only).
     pub fn set_range(&mut self, clk: &mut Clock, item: Option<u8>) {
         self.ovl_clear(clk.now_ms());
         match (self.button(), item) {
@@ -2805,10 +2807,14 @@ impl Dmm {
                 self.manual = false;
                 self.a_auto = 1;
             }
-            (Button::Volt, Some(i)) if i <= 4 => {
+            (Button::Volt, Some(i)) if i <= 5 => {
                 let ac = self.sub() == 1;
                 self.manual = true;
-                let (m, r) = if i == 0 { (if ac { 2 } else { 3 }, 1) } else { (if ac { 0 } else { 1 }, i as i8 - 1) };
+                let (m, r) = match i {
+                    0 => (if ac { 2 } else { 3 }, 1),
+                    5 => (if ac { 2 } else { 3 }, 0),
+                    _ => (if ac { 0 } else { 1 }, i as i8 - 1),
+                };
                 if !self.same_row(m, r) {
                     // The stock's range write (S+7 != m+1: 0xfa, switch-
                     // latency.md proposal 4); AC+DC keeps its DC phase's 450.
@@ -3465,6 +3471,12 @@ impl Dmm {
                 } else if self.v_auto & 1 != 0 {
                     self.set(clk, 1, 0, 350);
                 }
+            } else if r == 1 && self.acdc_down(now, vet && !hold && mag < 0.1 * lim / ov && !self.am_on()) {
+                // 600 mV -> 60 mV (opendm40; the stock steps mV only up and
+                // leaves 60 mV to a manual choice): the stock's down rule of
+                // every other range, below 0.1 x the range / over (58.3 mV;
+                // back up above over x 60 mV = 61.8 mV).
+                self.set(clk, 3, 0, 250);
             }
         }
         if !vet && !acdc && (self.mode, self.range) != before {
@@ -3915,6 +3927,10 @@ impl Dmm {
                         }
                     } else if up && self.v_auto & 1 != 0 {
                         self.set(clk, acdc as u8, 0, 350);
+                    } else if down && r == 1 {
+                        // 600 mV -> 60 mV, as DC mV (poll_dcv); AC+DC steps
+                        // down in its DC phase only (`down` is false here).
+                        self.set(clk, 2, 0, 450);
                     }
                 }
                 _ => {

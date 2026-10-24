@@ -153,21 +153,26 @@ Stock: `touch_v2_6.h`. opendm40: `touch.rs`, `gesture.rs`.
 
 ## 7. USB
 
-Stock: mass-storage disk only (`spiflash_v2_6.h`) + the BT phone protocol. There
-is **no USBTMC/SCPI in stock** — it is an opendm40 addition, so "parity" here means
-the mass-storage disk must stay compatible and USBTMC is a superset.
+Stock: one mass-storage disk ("USB Connect": the SPI flash's FAT16 as it is,
+`spiflash_v2_6.h`) and no other USB function; the phone-app protocol is
+Bluetooth only. USBTMC / SCPI is an opendm40 addition.
 
-opendm40: `usb.rs`, `usbtmc.rs`, `scpi.rs`, `msc.rs`, `spiflash.rs`.
+opendm40 (native build): `usb.rs`, `usbtmc.rs`, `scpi.rs`, `scpi_msg.rs`,
+`msc.rs`, `vdisk.rs`, `vwrite.rs`. One composite device, always present:
+USBTMC (USB488) plus one mass-storage LUN.
 
 | Item | Status | Notes |
 |---|---|---|
-| Mass storage = stock FAT16 on W25Q128, 4096 B blocks | MATCH | `spiflash.rs` BlockDevice, `msc.rs`; `DBG:FLASH?` returns JEDEC EF4018 (README). LBA == sector == flash/4096 as stock. |
-| SPI access read-only vs read/write | UNKNOWN | opendm40 implements writes (erase+program); a block write stalls the loop ~50 ms (up to 400 ms). Mount/write/read round-trip **not logged on device** (TODO.md). |
-| Disk always attached (like stock disk mode) | MATCH | Composite always present. |
-| USBTMC/USB488 + SCPI (DMM) | NEW | `scpi.rs`: `*IDN? *RST *CLS *OPC? SYST:ERR?`, `CONF/MEAS/READ/FETC`, `FUNC`. Superset of stock. |
-| SCPI scope/generator | NEW | `SOUR:*`, `TIM/CHAN/TRIG`, `RUN/STOP/SING`, `SCOP:MEAS?`, `WAV:DATA?/PRE?`. |
-| Debug over USBTMC (`DBG:*`) | NEW | Ping/Tap/Key/Swipe/Lcd/Diag/Flash/Release/Reset. |
-| On-device USBTMC verification | UNKNOWN | `*IDN?`, screenshot, tap/swipe, disk mount all listed as untested in TODO.md. |
+| Mass storage | CHANGED | Not the raw SPI FAT16: a FAT16 volume generated on the fly (`vdisk.rs`): `LOGS/*.CSV` and `SCOPE/*.CSV` made from the DLG files, `SHOTS/*.BMP`, `INFO/` (calibration, boot data, UID, option bytes, OTP, loader images, `FIRMWARE.BIN`, `BACKUP.TXT`), `DEBUG/SPIFLASH.BIN` (the raw 16 MiB), `README.TXT`. |
+| Writes from the PC | CHANGED | "Files live" (default): read-only. "PC can edit" (Settings 3/3, at the next plug): deletes in LOGS / SCOPE / SHOTS and a copied `dm40*.bin` (checked, then "Install it now?") are taken (`vwrite.rs`); other files are not kept. The stock disk keeps whatever the PC writes. |
+| Firmware update from the disk | MATCH | Any `dm40*.bin` (stock app or the vendor loader's disk); opendm40 also stages one copied to its own disk, or sent with `DBG:UPLOAD` (`tools/reload.sh`). |
+| USBTMC/USB488 + SCPI (DMM) | NEW | IEEE 488.2 common commands, `SYST:ERR?` with an 8-entry error queue and standard codes, `CONF/MEAS/READ/FETC`, `FUNC`, ranges and resolution, `CALC`, temperature, the power meter (`POW`), inrush (`INR`), alerts (`SYST:ALER`, `STAT:QUES`). |
+| SCPI scope / generator | NEW | `SOUR:*`, `OUTP`, `TIM/CHAN/TRIG`, `RUN/STOP/SING/DIG`, `ACQ:SRAT?`, `SCOP:MEAS?`, `WAV:DATA?/PRE?/POIN/FORM`. |
+| SCPI files and logger | NEW | `MMEM:CAT?/DATA?/DEL`, `LOG:*` (section 9). |
+| Debug over USBTMC (`DBG:*`) | NEW | Ping, tap / key / swipe / drag, LCD read-back, boot info, upload / update, profiling, the HY3131 and AD2 experiments. Refused over Bluetooth, as `DIAG`. |
+| HP 34401A identity | NEW | `SYST:IDN:EMUL 34401A`: libsigrok / SmuView's 34401A profile drives the meter (emulator: `sigrok-cli -d scpi-dmm` reads). |
+
+The reference for hosts: [docs/manual/scpi-reference.md](../../docs/manual/scpi-reference.md).
 
 ---
 
@@ -176,38 +181,40 @@ opendm40: `usb.rs`, `usbtmc.rs`, `scpi.rs`, `msc.rs`, `spiflash.rs`.
 Stock switches instruments; opendm40 runs DMM + scope + generator at once and only
 switches the view. Constraints and how opendm40 handles them:
 
-- **Analog power rails PC4 (scope) / PE2 (DMM)**: stock powers one side per page
-  (`scope.rs:280` `power()`); opendm40 adds `power_both()` (`scope.rs:309`) to keep
-  both up. This is **off by default** and the stock never does it, so accuracy of
-  simultaneous DMM+scope is UNKNOWN (crosstalk between the two analog front ends
-  on the shared supply is untested). The view switcher calls one-side power for
-  DMM-only / scope-only views and both only for the combined view (`app.rs:244`).
-- **Generator independence**: DAC+DMA / PWM, no CPU involvement, so it genuinely
-  runs during any view (MATCH to the stock "generator keeps running while scope
-  shown" behaviour, extended to the DMM view).
+- **Analog power rails PC4 (scope) / PE2 (DMM)**: stock powers one side per page.
+  opendm40's policy is `SYST:RAIL AUTO|BOTH` (default AUTO, persisted): AUTO
+  powers the side the view needs (both in the combined view and with a host
+  scope command), BOTH keeps both up. Measured with both rails on (device check
+  f3aea2f, docs/device-check-2026-10-21.md): DC within 0.04 %; a 40 Hz 0..9.6 V
+  square reads +0.19 % more in V (edge-rate dependent coupling of the powered
+  scope front end), which is why AUTO keeps the scope rail off on the DMM page.
+- **Generator independence**: DAC+DMA / PWM, no CPU involvement, so it runs
+  during any view (the stock keeps it running with the scope; opendm40 also with
+  the DMM).
 - **Shared HY3131 vs scope ADC**: separate chips (HY3131 bit-banged SPI vs 3PA1030
   on GPIOB + TIM/DMA), no bus contention. SPI flash is a third SPI peripheral.
-- **Risk**: a block write to the SPI disk stalls the main loop up to ~400 ms, which
-  would pause DMM/scope polling and touch (bit-banged) during that window.
+- **SPI-flash writes**: done in bounded slices from the main loop (CSV commits,
+  screenshots, the fast logger's pre-erased clusters), so the DMM, USB and touch
+  keep running; a screenshot freezes the screen for ~1.5 s
+  ([ram-budget.md](ram-budget.md)).
 
 ---
 
 ## 9. Data logger (FR-38) — new feature, not a parity gap
 
-Stock has no logger mode. opendm40 has none yet (no module). Relevant HY3131 facts
-for FR-38, from `hy3131_v2_6.h`:
+Stock has no logger. opendm40 (`logger.rs`, `fastlog.rs`, `csvlog.rs`):
 
-- **Fastest conversion** is set by R22 `AD1OSR`, `OSR = 256 << (R22 & 7)`. The
-  stock already drops to `R22 = 0x13` (OSR 2048) for fast open-circuit ohm updates
-  and `0x14`/`0x15` (8192/… ) elsewhere; OSR 2048 is the lowest it uses.
-- **SYSCLK** to the chip is a 4.9152 MHz crystal, so sample interval ≈ OSR/SYSCLK
-  (OSR 2048 ≈ 0.42 ms raw, before SPI read overhead); trading bits for speed means
-  the low-OSR path. Exact achievable sample rate over the bit-banged SPI link is
-  UNKNOWN and must be measured, per the FR-38 note.
-- FR-38 wants per-sample device timestamps (µs/ms counter), a monotonic sequence
-  number, constant interval, and drop detection; none exist today. The DMM poll is
-  a 10 ms cooperative loop, which is not constant-interval — a logger would need a
-  timer-driven HY3131 read path independent of the GUI loop.
+- **Record page** (`csvlog.rs`): DMM readings at an interval (every reading,
+  1 s, 10 s, 60 s, mean per row) to `LOGS/LOGnnn.DLG`, shown as CSV on the USB
+  disk; `LOG:CSV`.
+- **Fast logger** (`logger.rs`): raw AD1 samples (40 .. 640 S/s, LOG:OSR /
+  LOG:CHOP) or the AD2 stream (1200 .. 76 800 S/s, `ad2-isr` builds), each
+  record with a sequence number and a device microsecond timestamp, so a gap
+  is visible; streamed to the host (`LOG:DATA?`) or to the SPI disk
+  (`LOG:DEST DISK`: `LOGS/FASTnnn.DLG`, `fastlog.rs`).
+- Over Bluetooth only AD1 sessions (`Rate too high for Bluetooth`).
+- Formats: [compact-log-format.md](compact-log-format.md),
+  [log-format-standards.md](log-format-standards.md).
 
 ---
 

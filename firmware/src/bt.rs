@@ -400,7 +400,7 @@ impl Bt {
         let ok = self.tx.push(buf, parts);
         if !ok {
             self.tx_dropped = self.tx_dropped.wrapping_add(parts.iter().map(|p| p.len() as u32).sum());
-            self.err = Some("Queue overflow");
+            self.err = Some("Output buffer overflow");
         }
         self.pump();
         ok

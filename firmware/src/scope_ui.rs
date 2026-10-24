@@ -2686,10 +2686,10 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
         1 => {
             let r = rect(293, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Scale", C_BAR, 8, 0);
+            // Stock also shows "Type Vol / Cur" here; it changes nothing
+            // (opendm40 reads the Wave view's current from the DMM), so it
+            // is left out.
             spinner(rect(298, 70, 110, 150), pc, &PROBE_NAMES, v.probe as usize, false);
-            let r = rect(293, 224, 120, 24);
-            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Type", C_BAR, 8, 0);
-            option_list(rect(308, 250, 90, 24), pc, &["Vol", "Cur"], 44, 0);
         }
         _ => spinner(rect(298, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
     }
