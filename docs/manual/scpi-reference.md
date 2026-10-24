@@ -296,7 +296,7 @@ Functions:
 
 | Function | Header | Ranges (`<range>` values) |
 |---|---|---|
-| DC voltage | `VOLTage[:DC]` | 0.6, 6, 60, 600, 1000 V |
+| DC voltage | `VOLTage[:DC]` | 0.06, 0.6, 6, 60, 600, 1000 V |
 | AC voltage (RMS) | `VOLTage:AC` | as DC voltage |
 | AC+DC voltage (RMS of both) | `VOLTage:ACDC` | as DC voltage |
 | Voltage, AC or DC chosen by the meter | `VOLTage:AUTO` | as DC voltage |
@@ -383,8 +383,7 @@ Functions:
 - `:RANGe:AUTO ON` returns to the autorange chosen on the meter (AUTO+ or
   AUTO); `OFF` and `ONCE` keep the present range. Setting a range turns REL
   off.
-- `:RANGe?` also reports the range while autoranging, including 60 mV,
-  which only the mV-first autorange reaches.
+- `:RANGe?` also reports the range while autoranging.
 - In the power meter, `VOLTage:RANGe?`, `CURRent:RANGe?` and their `:AUTO?`
   report the power meter's V and I channels; set them with
   `POWer:VOLTage:RANGe` / `POWer:CURRent:RANGe`.
