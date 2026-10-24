@@ -936,11 +936,17 @@ const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
 /// measured short-circuit current of range `range` in the variant `on`
-/// (none on 60 M); diode, the source current (owners' reports). Two significant digits, DIM F14 (small: a
+/// (none on 60 M: the box is cleared); diode, the source current (owners' reports). Two significant digits, DIM F14 (small: a
 /// property of the function, not a reading).
-#[inline(never)] // drawn on a function / range / variant change only
+#[inline(never)] // .cold (link-native.x): drawn on a function / range / variant change only
 fn test_current_label(mode: u8, range: i8, on: bool) {
-    let Some(i) = crate::dmm::test_current(mode, range, on as u8) else { return };
+    let Some(i) = crate::dmm::test_current(mode, range, on as u8) else {
+        // No value (60 M): clear the box, a range change from 6 M left the
+        // 6 M label (device check 46370df).
+        let b = OHM_I_RECT;
+        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+        return;
+    };
     let (v, u) = if i >= 0.2e-3 {
         (i * 1e3, " mA")
     } else if i >= 0.2e-6 {

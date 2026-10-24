@@ -271,7 +271,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         ///   vsrc:none, isrc:none, r:none ... remove one element
         /// Aliases of the older per-function form: dcv:V, acv:RMS@Hz[,dc=,shape=,duty=], hz:F[,duty=,amp=],
         ///   dca:A, aca:RMS@Hz[,dc=], ohm:OHM, cap:F, temp:C[,cj=], tcmv:MV, tcopen, chip:C.
-        /// Model options (returned to the caller): noise:, cal:, beat:, powmix:, ad1mix:, swtr:, swtau:, swhz:, powvg:, powz:, op1vos:, ad2dcg:.
+        /// Model options (returned to the caller): noise:, cal:, beat:, powmix:, ad1mix:, swtr:, swtau:, swhz:, powvg:, powz:, op1vos:, ad2dcg:, mvclamp:, mvpb1: ...
         public List<KeyValuePair<string, double>> Apply(string spec)
         {
             var options = new List<KeyValuePair<string, double>>();
@@ -402,6 +402,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "n7": case "n7g": case "n7a": case "ad1acg": case "ad3sh": case "hpftau": case "rmsfill": case "rmsbig": case "rmsbigp":
                 case "agndz": case "lpfcreep": case "creeptau": case "creepord": case "lpfn":
                 case "pb5drift": case "pb5tau": case "acastep": case "acastepms": case "acasteptau": case "r22part": case "r22off": case "r22n": case "chophalf": case "chopskew": case "vjblind": case "senseneg": case "sensetau":
+                case "mvclamp": case "mvpb1":
                     options.Add(new KeyValuePair<string, double>(key, v));
                     break;
                 default:

@@ -274,9 +274,45 @@ struct LogPanel {
     next: u64,
     shown: bool,
     hold: bool,
+    /// `log_panel_room`: the ring's fill last pass, when it last went down
+    /// (ms, low 16 bits: compared every pass, wrapping; keeps the static
+    /// at 16 bytes).
+    w: u16,
+    drain_t: u16,
 }
 
-static mut LOG: LogPanel = LogPanel { part: 0, up: false, next: 0, shown: false, hold: false };
+static mut LOG: LogPanel = LogPanel { part: 0, up: false, next: 0, shown: false, hold: false, w: 0, drain_t: 0 };
+
+/// A panel part draws only while the logger's ring holds fewer records
+/// than this: a quarter of logger::CAP (main.rs asserts it), so a part of
+/// up to ~20 ms at 76.8 kS/s (1536 samples) still fits before the next
+/// drain.
+pub const LOG_PANEL_ROOM: u32 = 512;
+/// ... or when the ring has not gone down for this long (no host drains
+/// it: the panel must still come up).
+const LOG_PANEL_STALE_MS: u16 = 200;
+
+/// main.rs, every pass: may a panel part be drawn now? `waiting` = the
+/// ring's fill during a session (None outside one). A part costs a few ms
+/// of LCD writes (a ~400 x 36 label); device 46370df: at 76.8 kS/s the
+/// first draw's parts, one per pass between the host's first queries, kept
+/// LOG:DATA? from the ring for ~29 ms and 113-275 samples were overwritten
+/// after the first 2048 of every session.
+#[inline(never)]
+pub fn log_panel_room(now: u64, waiting: Option<u32>) -> bool {
+    let st = log_state();
+    let t = now as u16;
+    let Some(w) = waiting else {
+        (st.w, st.drain_t) = (0, t);
+        return false;
+    };
+    let w = w.min(u16::MAX as u32) as u16;
+    if w < st.w {
+        st.drain_t = t;
+    }
+    st.w = w;
+    (w as u32) < LOG_PANEL_ROOM || t.wrapping_sub(st.drain_t) >= LOG_PANEL_STALE_MS
+}
 
 fn log_state() -> &'static mut LogPanel {
     unsafe { &mut *core::ptr::addr_of_mut!(LOG) }
@@ -454,7 +490,7 @@ pub fn log_panel_shown() -> bool {
 /// held (DBG:AD2:DRAW 2's repaint resets the panel every 100 ms).
 pub fn log_panel_reset() {
     let st = log_state();
-    *st = LogPanel { part: 0, up: false, next: 0, shown: st.shown, hold: st.hold && st.shown };
+    *st = LogPanel { part: 0, up: false, next: 0, shown: st.shown, hold: st.hold && st.shown, w: st.w, drain_t: st.drain_t };
 }
 
 /// `v` in decimal at the start of `t`; returns the length.

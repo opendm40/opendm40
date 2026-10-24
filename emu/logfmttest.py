@@ -17,8 +17,10 @@ captured, overwritten / missed 0. Printed: rows/s of device time and of
 host time, bytes per sample, replies per second. A compact format must be
 lossless (exit status 1 otherwise); ROWS is reported only (above ~38 k
 rows/s its 12 B records are past what the drain carries). At 76 800 the
-lossless check needs --draw 0: with the logger panel the main loop stalls
-past the ring's 26 ms in the emulator (TODO.md "76.8 kS/s to the host").
+compact formats are lossless with the logger panel on (the default
+--draw): a panel part is drawn only while the ring has room for it
+(dialog.rs `log_panel_room`; before it, the panel's first draw overwrote a
+block after the first 2048 samples, device 46370df).
 
 The device's speed: --mips 110 --isr-stall-ns 700 (the defaults here; as
 emu/fastlogtest.py: peripherals/CpuCost.cs). The emulator's USB/IP link is

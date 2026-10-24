@@ -618,6 +618,21 @@ fn u24(b: &[u8]) -> u32 {
 /// no exposure; AUTO's up-range after a switch is this much later too.
 const AC_OVER_HOLD_MS: u64 = 500;
 
+/// Plain AC mV: the node's peak estimate |LPF| + sqrt(2) x RMS above this
+/// many times the range steps up (as an over-range result), the input
+/// clipped. The row is DC-coupled (the LPF is the input's DC) and AD2 spans
+/// +-1.25 V there (2.08 x 600 mV; x10 on 60 mV). Device 46370df: the 40 Hz
+/// 0 / 9.5 V square on V-COM read 0.606 V on 600 mV for 12 s (AC V AUTO,
+/// mV-first), under the 1.03 x 600 mV up threshold: the mV input clamps it
+/// to a ~0 .. 1.21 V swing, so its RMS cannot reach the threshold; LPF ~0.6
+/// V + 1.414 x 0.606 V = ~1.46 V (2.4 x 600 mV; the LPF value is INFERRED
+/// from the DC-coupled row, not read on the device). A sine at 600 mV RMS
+/// with no DC is 1.41 x the range.
+const MV_CLIP_K: f32 = 2.2;
+/// After a clip step (MV_CLIP_K), AC V 6 V takes its reference AC part
+/// this long after its row write (the AC-coupled row settles first).
+const MV_CLIP_SETTLE_MS: u64 = 1500;
+
 /// `Dmm::precond_ms` default (device 0774e70: 100 ms was enough).
 const PRECOND_MS: u16 = 100;
 
@@ -933,6 +948,14 @@ pub struct Dmm {
     /// Time of the last function change (`set`): ohm steps down one range
     /// at a time until OHM_SINGLE_MS after it (`poll_ohm`).
     entry: u64,
+    /// Plain AC mV left on a clip (MV_CLIP_K): 0 = none, < 0 = AC V 6 V
+    /// settling (since `row_t`), > 0 = AC V 6 V's AC part then (V, the
+    /// reference). While set, AC V 6 V does not step down to mV (the AC V
+    /// row is AC-coupled: a DC that clipped mV is not seen there, so the
+    /// down rule would bring it back into the clip); cleared once the AC
+    /// part moves off the reference (the input changed) or on a function
+    /// change (`mv_clip_holds`).
+    mv_clip: f32,
     prev_ad1: i32,
     r22: u8,
     ohm_settled: bool,
@@ -1485,6 +1508,7 @@ impl Dmm {
             ohm_var: 0,
             deadline: 0,
             entry: 0,
+            mv_clip: 0.0,
             prev_ad1: 0,
             r22: 0,
             ohm_settled: false,
@@ -1955,6 +1979,9 @@ impl Dmm {
         if changed_mode {
             self.entry = now;
             self.reset_values();
+            if !matches!(mode, 0 | 2) {
+                self.mv_clip = 0.0;
+            }
         } else if old != (mode, range) && !self.acdc && !self.cpl_auto {
             // A plain range step: the AC filters must not carry the other
             // range's value (device 0774e70: AC A 10 A -> 60 mA read 1 %
@@ -2886,6 +2913,14 @@ impl Dmm {
             (Button::Volt, Some(255)) => {
                 self.manual = false;
                 self.v_auto = 1;
+                // AUTO+ never steps to mV: leave it at once for the V
+                // autorange's 6 V (device check 46370df: AUTO -> AUTO+ on
+                // 60 mV stayed there until the function was entered again).
+                // AC+DC: into its DC phase, as poll_ac's mV -> V step.
+                if matches!(self.mode, 2 | 3) {
+                    let m = if self.acdc { 1 } else { self.mode - 2 };
+                    self.set(clk, m, 0, 350);
+                }
             }
             (Button::Amp, None) => {
                 self.manual = false;
@@ -3505,6 +3540,23 @@ impl Dmm {
         ok
     }
 
+    /// AC V 6 V, every AC part `ac` (V): AC mV clipped on this input
+    /// (`mv_clip`), so no step down into it. The reference is the AC part
+    /// MV_CLIP_SETTLE_MS after the row write; a later one more than 10 % + 2 mV
+    /// off it releases the hold (the input changed: a square switched off,
+    /// another signal).
+    #[inline(never)]
+    fn mv_clip_holds(&mut self, now: u64, ac: f32) -> bool {
+        if self.mv_clip < 0.0 {
+            if now >= self.row_t + MV_CLIP_SETTLE_MS {
+                self.mv_clip = ac.max(1e-6);
+            }
+        } else if self.mv_clip > 0.0 && (ac - self.mv_clip).abs() > 0.1 * self.mv_clip + 0.002 {
+            self.mv_clip = 0.0;
+        }
+        self.mv_clip != 0.0
+    }
+
     /// Plain AC A after a row write (ACA_VET_*): true = use this result.
     fn aca_vet(&mut self, now: u64, ac: f32, lim: f32) -> bool {
         if self.aca_vet_t == 0 || !ACA_VET {
@@ -4051,6 +4103,7 @@ impl Dmm {
             let up = mag > ov * lim;
             // AC+DC: no step down here, only in the DC phase (ACDC_DOWN_MS).
             let down = mag < 0.1 * lim / ov && !acdc && !held;
+            let mv_hold = m == 0 && r == 0 && !acdc && self.mv_clip_holds(now, ac);
             match m {
                 // AC+DC: a V / mV range change is applied through the DC
                 // phase (600 ms, S+10 = 2); unit changes go to the DC mode.
@@ -4063,11 +4116,18 @@ impl Dmm {
                         } else {
                             self.set(clk, 0, to, 450);
                         }
-                    } else if down && self.v_auto & 2 != 0 {
+                    } else if down && self.v_auto & 2 != 0 && !mv_hold {
                         self.set(clk, if acdc { 3 } else { 2 }, 1, 600);
                     }
                 }
                 2 => {
+                    // The input clipped (MV_CLIP_K): over range whatever
+                    // the RMS says.
+                    let clip = !acdc && dcp.abs() + core::f32::consts::SQRT_2 * ac > MV_CLIP_K * lim;
+                    let up = up || clip;
+                    if clip && r == 1 {
+                        self.mv_clip = -1.0;
+                    }
                     if up && r == 0 {
                         if acdc {
                             self.switch_phase(clk, 3, 1, 600);
