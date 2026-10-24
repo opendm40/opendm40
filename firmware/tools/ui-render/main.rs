@@ -2565,6 +2565,25 @@ fn main() {
                 dv.reading(&r, 0, 0);
                 ck.check(&format!("dmm-ohm-i/{}/r{rg}", on as u8), &dmm_page_regions);
             }
+            // A range change 6 M -> 60 M (no test current): the label goes
+            // (device check 46370df: "I 0.22 uA" stayed on 60 M). Each range
+            // pair against the screen drawn fresh on the second range.
+            for (a, b) in [(5i8, 6i8), (4, 6), (6, 5), (2, 6)] {
+                let (r, _) = find("ohm_k");
+                host::reset(0);
+                let mut dv = ui::DmmView::new();
+                dv.label = None;
+                dv.draw_static(Button::Ohm, r.mode, false, on);
+                dv.reading(&Reading { range: b, ..r }, 0, 0);
+                let want = emu().fb.clone();
+                host::reset(0);
+                let mut dv = ui::DmmView::new();
+                dv.label = None;
+                dv.draw_static(Button::Ohm, r.mode, false, on);
+                dv.reading(&Reading { range: a, ..r }, 0, 0);
+                dv.reading(&Reading { range: b, ..r }, 0, 0);
+                ck.same_as(&format!("dmm-ohm-i/{}/r{a}->r{b}", on as u8), &want);
+            }
         }
         host::reset(0);
         let (r, _) = find("ohm_k");
