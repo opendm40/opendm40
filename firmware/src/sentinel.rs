@@ -5,22 +5,22 @@
 //! (PE0 = PE1 = 0, always in circuit), so a current in the A jack - the
 //! leads in A/COM while the meter measures V / ohm / temperature, or a
 //! source across A-COM - shows as a voltage on the shunt node PB1. Each mode
-//! watches it with a block of the HY3131 that its stock row leaves idle:
-//!
-//! | modes | sentinel | row override (`sentinel_row`) |
-//! |---|---|---|
-//! | DC V 1, DC mV 3, ohm 10, temperature 15 (TC and the resistive sensors) | comparator on PB1 against the rows' own R21 = 0xdd window (+-20.8 mV = 0.44 mA on 47.5 ohm); CTSTA CMPHO / CMPLO sampled on every poll | R20 = 0x90 (SCMPI = PB1, ENCMP; no counter, no CMP pin) |
-//! | AC V 0, AC mV 2 | AD1 (off in these rows) on PB1 - PB3, IG 3.6, OSR 256 unchopped (1.56 ms), peak hold of AD1<23:5>; PKHMAX / PKHMIN come with poll_ac's register read, ENPKH is toggled to restart the hold | R22 = 0x00, R23 \|= ENAD1, R24 = 0x95, R25 AD1IG = 11, R29 ENPKH + PKHSEL = 01 |
-//! | DC A 7..9 ("V-JACK?": voltage on V/ohm while measuring current) | comparator on SENSE with the /1000 divider tap (SS5 only: the A rows run the power bus as SGND, PS5 would ground the tap): trips from ~21 V | R20 = 0x10 (SCMPI = SENSE, ENCMP), R2C \|= 0x10 (SS5) |
-//!
-//! Nothing else in the rows changes (host tests: byte diff against the
-//! stock rows). AC+DC is left alone: `freq_secondary` rewrites R20 every
-//! 350 ms in both phases. Diode / continuity / capacitance / frequency / AC A
-//! keep the stock rows (their comparator / converters are busy).
-//! "LIVE?" (a source on the circuit in ohm / continuity / diode) needs no
-//! hardware: a negative ohm / continuity result or a negative diode voltage
-//! is something only an external source produces (a positive one cannot be
-//! told from "open": section 4.3).
+//! watches it with a block of the HY3131 that its stock row leaves idle
+//! (`row_for`; the per-function table with the row overrides and the
+//! thresholds is doc 4.2): the comparator on PB1 in DC V 6 V, DC mV, ohm and
+//! temperature (`CmpA`); the AD1 peak hold on PB1 - PB3 in AC V / AC mV
+//! (`PeakA`); the AD2 peak hold on OP2 <- PB1 in continuity, diode and
+//! capacitance r0..4 (`Ad2A`); V-JACK? (a voltage on V/ohm while measuring
+//! current) by the comparator on SENSE via the /1000 tap in DC A (`CmpV`)
+//! and the AD1 peak hold on SENSE - AGND in AC A (`PeakV`). AC+DC carries
+//! the sentinels of its two phases (the DC phase's R20 through dmm.rs `acdc_src`).
+//! No sentinel: DC V 60 V+ (and so AC+DC V above 6 V), frequency,
+//! capacitance r5..7, the power meter. Host tests: the byte diff against the
+//! stock rows is exactly the intended fields. In ohm, continuity and the
+//! resistive sensors a hit is checked for a source on V-COM (JACK CHECK, 4.13).
+//! "LIVE?" (a source on the circuit in ohm / continuity / diode): a negative
+//! result or a driven input node (the jack check) is something only an
+//! external source produces (a positive reading cannot be told from "open").
 //!
 //! A-jack protection (doc 4.8, owner 2026-10-22): in the comparator modes a
 //! hit also starts the probe (OP2 x1 on PB2, the 10 mohm element that every
@@ -161,7 +161,7 @@ pub enum Kind {
     PeakA,
     /// Comparator on SENSE via the /1000 tap (V-JACK?).
     CmpV,
-    /// AD1 peak hold on SENSE - PB5 via the /1000 tap (V-JACK?, AC A).
+    /// AD1 peak hold on SENSE - AGND via the /1000 tap (V-JACK?, AC A).
     PeakV,
     /// AD2 peak hold on OP2 (x1) <- PB1, AD2 = OP2O - PB3 (A-JACK;
     /// continuity, diode, capacitance r0..4).

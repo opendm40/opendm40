@@ -1,11 +1,11 @@
 //! Rename the INSTALLED `dm40*.bin` on the SPI-flash FAT16 volume to
 //! `_DM40PRV.BIN` so the FS-loader stops re-installing it.
 //!
-//! Why: the FS-loader (0x080a0000) installs ANY dm40*.bin it finds in the root
-//! on every boot it runs on, even an identical image, and never removes it;
-//! the stock app used to delete it. With opendm40 as the app nothing would, so
-//! every such boot would re-flash ~480 KB. Renaming (not deleting) keeps the
-//! image: the user restores it by removing the leading underscore.
+//! Why: in its install state the FS-loader (0x080a0000) installs the first
+//! dm40*.bin in the root, even an identical image, and deletes it only after
+//! a successful install (`f_unlink`, docs/fsloader-install-trigger.md). A copy
+//! left behind would be re-flashed (~480 KB) on its next install-state boot.
+//! Renaming (not deleting) keeps the image: remove the leading underscore.
 //!
 //! Which file (review 2026-10-13 H1): only a dm40*.bin whose decoded 12-byte
 //! update header equals the 12-byte record at 0x08008000 that the loader
@@ -22,8 +22,8 @@
 //!
 //! Observed on the device (T3): the FS-loader itself deletes the installed
 //! file, so normally there is nothing to rename. calbackup (runs after this)
-//! regenerates `_DM40PRV.BIN` from flash instead. Kept as is: it only ever
-//! replaces `_DM40PRV.BIN` with the installed image (= the same firmware), so
+//! regenerates `_DM40PRV.BIN` from flash. The rename stays a safety net: it
+//! only replaces `_DM40PRV.BIN` with the installed image (the same firmware):
 //! the two never fight (calbackup only re-stamps that entry once).
 //!
 //! What, in this order (an interruption between steps leaves at worst lost
