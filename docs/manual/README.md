@@ -98,6 +98,10 @@ If you do not answer within 60 seconds, the answer is No and the file is
 deleted. A file that is not a DM40 update file is refused with **Not a DM40
 update file**.
 
+![The question after an update file was copied](img/confirm-install.png)
+
+*The question after an update file was copied.*
+
 ### Keys
 
 The DM40 has four touch keys below the screen and one power key on the side.
@@ -121,12 +125,18 @@ Every key press also silences the [danger alarm](#the-danger-alarm).
 | Swipe down with three fingers | Anywhere, while the touch lock is off | [Screenshot](#screenshots) to the disk |
 | Swipe down with two fingers | Anywhere, while the touch lock is off | Asks **Power off?** Tap **Yes** to switch off. The question goes away by itself after 3 s. |
 
+![Swipe down with two fingers: the power-off question](img/power-off.png)
+
+*Swipe down with two fingers: the power-off question.*
+
 The oscilloscope has its own drags and taps; see
 [Moving things with a finger](#moving-things-with-a-finger).
 
 ### The main menu and the views
 
-![Main menu](img/main-menu.png)
+![The main menu](img/main-menu.png)
+
+*The main menu.*
 
 The main menu has six tiles:
 
@@ -192,6 +202,10 @@ the combined view switches to the next sub-mode of the current function
 **Settings > More > Help** opens seven short help pages: gestures, side
 keys, multimeter, limits, recording and alerts, the USB disk, and the power
 meter. Tap to turn the page.
+
+![The first help page: gestures](img/help.png)
+
+*The first help page: gestures.*
 
 ## What's new compared with the stock firmware
 
@@ -293,7 +307,9 @@ a fuse check.
 
 ### The multimeter page
 
-![Multimeter, DC V](img/dmm.png)
+![DC V with the bargraph](img/dmm-bar.png)
+
+*DC V with the bargraph.*
 
 From top to bottom:
 
@@ -344,6 +360,10 @@ Bluetooth.
 There is no separate mV button: choose the 600 mV range on the range page,
 or use AUTO (not AUTO+), which steps down into mV.
 
+![AC V on the mains: red from 30 V, the lightning from 100 V](img/dmm-acv.png)
+
+*AC V on the mains: red from 30 V, the lightning from 100 V.*
+
 #### AC+DC
 
 For signals with both a DC and an AC part, for example a ripple on a supply
@@ -358,6 +378,10 @@ Until both parts are measured, the parts are grey. After a range change the
 meter waits for the AC part to settle. There is no rate choice and no extra
 digit in AC+DC.
 
+![AC+DC: 12 V with 0.5 V ripple; the AC part and the DC part above](img/dmm-acdc.png)
+
+*AC+DC: 12 V with 0.5 V ripple; the AC part and the DC part above.*
+
 #### AUTO coupling (AC/DC)
 
 AUTO coupling shows the DC part or the AC part, whichever the signal is:
@@ -369,6 +393,8 @@ The coupling symbol next to the unit shows which part you see, and **AUTO**
 appears next to it. Both parts are always in the small rows.
 
 ![AUTO coupling on a DC source](img/auto-acdc.png)
+
+*AUTO coupling on a DC source.*
 
 - AUTO switches to AC when the AC part is more than 1.5 times the DC part
   and above a floor (1 % of the range for volts, 3 % for amps). It switches
@@ -395,6 +421,10 @@ large for the µA or mA ranges moves straight to the 6 A range. On a fixed µA
 or mA range, an overload moves the meter to the 10 A shunt and shows
 [**OVLD**](#the-alerts).
 
+![DC mA in a 4-20 mA loop: 12 mA is 50 %](img/dmm-ma.png)
+
+*DC mA in a 4-20 mA loop: 12 mA is 50 %.*
+
 #### Resistance
 
 - Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ.
@@ -405,11 +435,19 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   shows a small **ON** tag. The 60 Ω range always uses the normal current.
 - While the meter looks for the range, the values are grey.
 
+| ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with Low current on](img/range-ohm.png) |
+|---|---|
+| 4.7 kΩ | The range page with Low current on |
+
 #### Continuity
 
 - Shows the resistance with two decimals; **0L** above 1000 Ω.
 - A negative result means an external voltage on the circuit: the meter
   shows [**LIVE?**](#the-alerts).
+
+![Continuity: a short](img/dmm-cont.png)
+
+*Continuity: a short.*
 
 #### Diode
 
@@ -419,11 +457,19 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
   readings only.
 
+![A silicon diode](img/dmm-diode.png)
+
+*A silicon diode.*
+
 #### Capacitance
 
 - Ranges: 6 nF to 60 mF, autorange only.
 - Large capacitors take longer: from the 600 µF range up the meter first
   discharges, then measures.
+
+![A 100 nF capacitor](img/dmm-cap.png)
+
+*A 100 nF capacitor.*
 
 #### Frequency and duty cycle
 
@@ -431,11 +477,17 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - A new value every 0.35 s. **--** until the first clean result.
 - MF opens the Hold & Limits page (there are no range choices).
 
+![1 kHz, 50 % duty](img/dmm-hz.png)
+
+*1 kHz, 50 % duty.*
+
 #### Temperature
 
-Tap **Hz / °C** twice. Press **MF** to open the temperature page:
+Tap **Hz / °C** twice. Press **MF** to open the temperature page.
 
-![Temperature page](img/temp.png)
+| ![Thermocouple K; the cold junction above](img/dmm-temp.png) | ![The temperature page](img/temp.png) |
+|---|---|
+| Thermocouple K; the cold junction above | The temperature page |
 
 | Sensor | Notes |
 |---|---|
@@ -464,7 +516,9 @@ Press **MF** to open the range page of the current function (for
 continuity, diode and frequency, MF opens [Hold &
 Limits](#limits-and-autohold)).
 
-![Voltage range page](img/range-v.png)
+| ![The voltage range page](img/range-v.png) | ![The current range page](img/range-a.png) |
+|---|---|
+| The voltage range page | The current range page |
 
 - Tap a range to fix it (the status bar shows **MANU**). Tap **AUTO** or
   **AUTO+** to return to autorange, or press the **AUTO** key.
@@ -496,6 +550,10 @@ to a high voltage applied while the meter sat on the mV range.
 - **0L** in the reading; the bargraph turns red with an **OL** mark.
 - An overload is never stored in MIN/MAX/AVG, the chart or the history.
 
+![Overload](img/dmm-ol.png)
+
+*Overload.*
+
 ### Counts, rate and the extra digit
 
 opendm40 uses 60000 counts on every model (ranges 600 mV, 6 V, 60 V ...).
@@ -523,6 +581,10 @@ so a change shows at once.
   reading shows **Fixed rate in this function**.
 - Also in **Settings > More > DMM rate**.
 
+![A tap on the reading steps the rate](img/dmm-rate.png)
+
+*A tap on the reading steps the rate.*
+
 The extra digit appears smaller, after the main digits, on these ranges:
 DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ. It appears about
 3.2 s (MED) after the input settles.
@@ -547,6 +609,10 @@ and the chart freeze. The bargraph keeps moving with the live input. Press
 If you press RUN right after a function change, HOLD waits for the first
 final reading and holds that.
 
+![HOLD](img/dmm-hold.png)
+
+*HOLD.*
+
 #### AutoHold
 
 To switch AutoHold on or off: hold **RUN** for 1 s (or the first row of the
@@ -559,6 +625,10 @@ while you lift the probes. It captures again after the input went away (open
 leads, OL) or changed by more than about 0.5 %. The statistics and the chart
 keep running on the live value.
 
+![AutoHold with a captured value](img/dmm-ahold.png)
+
+*AutoHold with a captured value.*
+
 #### REL
 
 Tap the **REL** box on the right. The current reading becomes the zero;
@@ -570,16 +640,24 @@ the box shows the REL value. Tap again to turn it off.
   AUTO coupling switches.
 - Turning REL on or off restarts MIN/MAX/AVG.
 
+![REL: 4.8176 V is the zero](img/dmm-rel.png)
+
+*REL: 4.8176 V is the zero.*
+
 ### MIN, MAX, AVG
 
 The column on the right of the chart shows **MAX**, **AVG** and **MIN**
 since they were last reset, and a timer **T hh:mm:ss**.
 
 - **Tap the column** (outside the REL box): start a session. The
-  statistics are cleared, the timer shows **REC hh:mm:ss** in orange, and
+  statistics are cleared, the timer turns orange, and
   the meter does not [switch itself off](#power-battery-and-sleep) while the
   session runs. Tap again to stop.
 - **Long press the column**: reset MIN/MAX/AVG.
+
+![A MIN/MAX/AVG session running for 5 min 12 s](img/dmm-minmax.png)
+
+*A MIN/MAX/AVG session running for 5 min 12 s.*
 
 ### The bargraph and the history row
 
@@ -592,6 +670,10 @@ shows: **Bargraph** (default) or **History**.
   and keeps moving during HOLD.
 - **History**: five boxes. Tap the row to store the shown value (also a held
   value); the newest is orange. Long press the row to clear it.
+
+![The history row: four values stored](img/dmm-history.png)
+
+*The history row: four values stored.*
 
 ### The trend chart
 
@@ -609,7 +691,9 @@ To open: **MF**, then **Hold/Limits** (for continuity, diode and frequency,
 MF opens it directly). The title names the quantity, for example **Hold &
 Limits: DC V**.
 
-![Hold & Limits page](img/limits.png)
+| ![Hold & Limits, DC V: 4.8 to 5.2 V](img/limits.png) | ![The reading above the upper limit](img/dmm-limit-hi.png) |
+|---|---|
+| Hold & Limits, DC V: 4.8 to 5.2 V | The reading above the upper limit |
 
 | Row | What it does |
 |---|---|
@@ -643,7 +727,9 @@ More > More > Burden voltage: ON (A, mA, uA)**. Default OFF.
 - At full scale: 100 mV (10 A), 60 mV (6 A), 300 mV (600 mA), 30 mV
   (60 mA), 285 mV (6000 µA), 28.5 mV (600 µA).
 
-![Burden voltage](img/burden.png)
+![123.45 µA; the burden voltage, 5.9 mV, in the small row](img/burden.png)
+
+*123.45 µA; the burden voltage, 5.9 mV, in the small row.*
 
 ## Safety and alerts
 
@@ -667,7 +753,9 @@ detected](#what-cannot-be-detected)).
   second.
 - One alert at a time, the most serious one.
 
-![A-JACK alert](img/ajack.png)
+![A-JACK: current in the A jack while measuring DC V](img/ajack.png)
+
+*A-JACK: current in the A jack while measuring DC V.*
 
 ### The alerts
 
@@ -695,6 +783,19 @@ How they end:
 
 Sounds: A-JACK and A-PROT sound the [danger alarm](#the-danger-alarm).
 LIVE? beeps once. OVLD beeps once (300 ms). The others are silent.
+
+| ![LIVE? in Ω: a voltage on the circuit](img/alert-live.png) | ![OVLD: the meter moved to the 10 A shunt](img/alert-ovld.png) |
+|---|---|
+| LIVE? in Ω: a voltage on the circuit | OVLD: the meter moved to the 10 A shunt |
+
+When you change from a current function (A, or the power meter) to any
+other function, the meter reminds you once, with a beep: **Leads in A jack?
+Move to V**. **Settings > More > More > A-lead reminder** switches it off
+(default ON).
+
+![The A-lead reminder](img/leads.png)
+
+*The A-lead reminder.*
 
 **Settings > More > More > Jack alerts** chooses which alerts are on:
 **ON** (all of the above, default), **A-JACK only** (A-JACK and A-PROT),
@@ -739,7 +840,9 @@ Checks the fuse and the current path inside the meter without opening it.
 3. Tap **Start**. The meter measures the path (about 48 Ω through the fuse
    and the shunts).
 
-![Fuse check](img/fuse-check.png)
+![Fuse check passed](img/fuse-check.png)
+
+*Fuse check passed.*
 
 | Result | Meaning |
 |---|---|
@@ -773,8 +876,6 @@ view](#wave-view-the-scope-on-the-multimeter-inputs) shows the signal on
 the multimeter inputs instead.
 
 To open it: main menu, **Oscilloscope**, or swipe from the combined view.
-
-![Oscilloscope with FFT](img/scope.png)
 
 ### The scope page
 
@@ -999,8 +1100,6 @@ To open it:
 - in the multimeter, function V or A (DC or AC): **MF**, then **Wave**; or
 - on the scope page, tap the **MCX | DMM** badge.
 
-![Wave view](img/wave.png)
-
 - The badge shows **DMM** highlighted; the channel button names the
   function, for example **AC V**.
 - V/div follows the multimeter range: the range fills half the screen
@@ -1036,7 +1135,9 @@ jacks, the scope on **CHA**. The generator can run too.
 To open it: main menu, **Combined view: DMM + Scope** (the bottom row), or
 swipe left from the multimeter page.
 
-![Combined view](img/combined.png)
+![AC V in the meter strip, the scope below](img/combined.png)
+
+*AC V in the meter strip, the scope below.*
 
 ### The meter strip
 
@@ -1097,7 +1198,9 @@ and the frequency in its top bar, the combined view **GEN**).
 
 To open it: main menu, **Signal**, or swipe right from the multimeter page.
 
-![Generator](img/generator.png)
+![A 1 kHz sine, 2 Vpp, running](img/generator.png)
+
+*A 1 kHz sine, 2 Vpp, running.*
 
 **Never connect the GEN output to a voltage source.** It has no protection;
 an external voltage can destroy the output.
@@ -1165,11 +1268,15 @@ Tap a value box. The keypad opens with the current value selected:
 The power meter measures the voltage and the current of a load at the same
 time and shows the power, the energy and, for AC, the power factor.
 
-![Power meter, AC+DC](img/power.png)
+![AC+DC: the DC and AC parts under V, I and P](img/power.png)
+
+*AC+DC: the DC and AC parts under V, I and P.*
 
 ### Wiring
 
-![Power meter wiring](img/power-wiring.png)
+![The wiring picture](img/power-wiring.png)
+
+*The wiring picture.*
 
 The V and A inputs share **COM**, so the current flows through COM:
 
@@ -1241,6 +1348,8 @@ AC part (**AC present: use AC+DC**).
 
 ![Power Settings](img/power-settings.png)
 
+*Power Settings.*
+
 | Item | What it does |
 |---|---|
 | **V** ranges 6V, 60V, 600V, 1000V, AUTO | Fix the voltage range, or autorange. |
@@ -1276,8 +1385,6 @@ Captures the current of a load that is switched on: motors, lamps,
 capacitive power supplies.
 
 To open: **A** function, **MF**, **Inrush**.
-
-![Inrush current](img/inrush.png)
 
 1. Connect the load through the **A** jack and **COM** (the 10 A range).
 2. Set the **Trigger** step with **-** / **+**: 0.2, 0.5, 1 (default), 2, 5
@@ -1329,7 +1436,9 @@ with the last other interval.
 
 ### The Record page
 
-![Record page](img/record.png)
+![The Record page](img/record.png)
+
+*The Record page.*
 
 To open it: on the multimeter page press **MF**, tap **Hold/Limits**, then
 tap **Record** at the bottom (for continuity, diode and frequency, MF opens
@@ -1431,6 +1540,18 @@ measuring instrument ([Connecting from a
 computer](#remote-control-and-connecting-from-a-computer)); you do not have
 to switch between the two, as on the stock firmware ("USB Connect").
 
+A disk after some use:
+
+```
+DM40
+├── README.TXT
+├── LOGS/    LOG001.CSV  LOG002.CSV  FAST001.CSV
+├── SCOPE/   SCOP001.CSV
+├── SHOTS/   S001.BMP  S002.BMP  S003.BMP
+├── INFO/    CALIB.BIN  BOOTDATA.BIN  UID.BIN  ...  FIRMWARE.BIN  BACKUP.TXT
+└── DEBUG/   SPIFLASH.BIN
+```
+
 | Folder or file | What is in it |
 |---|---|
 | `README.TXT` | A short description of the disk. |
@@ -1493,7 +1614,9 @@ straight to the computer ([dm40dbg.py](../../firmware/tools/dm40dbg.py)).
 
 To open it: main menu, **Gallery: screenshots and logs** (the top tile).
 
-![Gallery](img/gallery.png)
+![The gallery](img/gallery.png)
+
+*The gallery.*
 
 - The grid shows six files per page, newest first: screenshots, then
   recordings from the Record page (`LOGnnn`). Fast recordings, inrush
@@ -1505,7 +1628,9 @@ To open it: main menu, **Gallery: screenshots and logs** (the top tile).
 - Tap a tile to open the file full screen. A recording shows its function,
   minimum, mean and maximum and a value-over-time chart.
 
-![Gallery viewer with the bar](img/gallery-view.png)
+![A screenshot in the viewer, with the bar](img/gallery-view.png)
+
+*A screenshot in the viewer, with the bar.*
 
 - In the viewer, tap to show the bar: **< Back**, the name and number, and
   **Delete**. Swipe left / right for the next or previous file.
@@ -1525,6 +1650,8 @@ step to its next value; rows with **-** / **+** change in steps.
 
 ![Settings, page 1](img/settings1.png)
 
+*Settings, page 1.*
+
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
@@ -1540,6 +1667,8 @@ step to its next value; rows with **-** / **+** change in steps.
 ### Settings page 2
 
 ![Settings, page 2](img/settings2.png)
+
+*Settings, page 2.*
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
@@ -1557,9 +1686,12 @@ step to its next value; rows with **-** / **+** change in steps.
 
 ![Settings, page 3](img/settings3.png)
 
+*Settings, page 3.*
+
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **Jack alerts** | ON, A-JACK only, OFF | ON | Which [wrong-connection alerts](#the-alerts) are on. |
+| **A-lead reminder** | ON, OFF | ON | The [reminder](#the-alerts) after leaving a current function. |
 | **Danger alarm** | Loud, Volume, Off | Loud | The [danger alarm](#the-danger-alarm)'s volume. |
 | **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Back to Files live at every power-on. |
 | **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the [burden voltage](#burden-voltage). |
@@ -1569,7 +1701,9 @@ step to its next value; rows with **-** / **+** change in steps.
 
 **Settings > More > More > Device** shows:
 
-![Device page](img/device.png)
+![The Device page](img/device.png)
+
+*The Device page.*
 
 | Line | Content |
 |---|---|
