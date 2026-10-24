@@ -1,6 +1,6 @@
 # DMM+Scope combined view: redesign, scope gesture map, rendering, UI review
 
-Design document only; no firmware source was changed. It answers the owner's
+It answers the owner's
 feedback on the combined view: "fonts of different sizes, everything overlaps;
 maybe embed the DMM data into the oscilloscope interface in this mode?" It also
 covers two follow-up questions from the owner: the scope gesture map (pinch,
@@ -453,7 +453,7 @@ Make hold-to-grab a **runtime** switch so it can be A/B tested on the device
 without reflashing:
 
 - **The switch.** `Settings → "Scope drag: Direct / Hold"` and
-  `DBG:GRAB <ms>` (0 = direct, e.g. 300 = hold). The parallel agent's const
+  `DBG:GRAB <ms>` (0 = direct, e.g. 300 = hold). The existing const
   flag becomes the default value of a `static` the app reads.
 - **Hold mode:**
   - the finger stays within 8 px for `GRAB_MS`;
