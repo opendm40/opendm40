@@ -95,11 +95,11 @@ def connect():
     sys.exit('logfmttest: no USB/IP device on port %d' % A.port)
 
 
-def count(raw):
+def count(raw, fmt):
     """Samples in a reply from its headers only (no bit decoding)."""
     n = int(raw[2:6])
     d = raw[6:6 + n]
-    if n < 20 or d[:2] not in (b'LP', b'LD'):
+    if fmt == 'rows' or n == 0:
         return n // 12, n < 500 * 12
     left = struct.unpack_from('<I', d, 16)[0]
     if d[:2] == b'LD':
@@ -137,7 +137,7 @@ def session(q, rate, fmt):
             ta = time.monotonic()
             r = q('LOG:DATA?', raw=True)
             replies.append(r)
-            got += count(r)[0]
+            got += count(r, fmt)[0]
             slow.append(time.monotonic() - ta)
         up = int(q('DBG:PING?').split(',')[0])
     w1 = time.monotonic()
@@ -151,7 +151,7 @@ def session(q, rate, fmt):
     while True:
         r = q('LOG:DATA?', raw=True)
         replies.append(r)
-        if count(r)[0] == 0:
+        if count(r, fmt)[0] == 0:
             break
     cnt = [int(x) for x in q('LOG:COUNt?').split(',')]
     isr = q('DBG:ISR?')
@@ -165,7 +165,7 @@ def session(q, rate, fmt):
     period_us = 1e6 / nominal
     n, lost, seq_ok, last_ts = 0, 0, True, None
     for r in replies:
-        for seq, ts, _code, dl in dm40scpi.log_reply(r)[0]:
+        for seq, ts, _code, dl in dm40scpi.log_reply(r, fmt)[0]:
             n += 1
             seq_ok &= seq == n
             if dl is not None:
@@ -256,7 +256,7 @@ def bt_session(q):
             cnt = [int(x) for x in q('LOG:COUNt?').split(',')]
             n, lost, seq_ok, last_ts = 0, 0, True, None
             for r in replies:
-                for seq, ts, _c, dl in dm40scpi.log_reply(r)[0]:
+                for seq, ts, _c, dl in dm40scpi.log_reply(r, fmt)[0]:
                     n += 1
                     seq_ok &= seq == n
                     if dl is not None:
