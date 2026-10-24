@@ -102,7 +102,7 @@ fn scope_base() -> stock::Scene {
 fn trig_sine(m: &scope_ui::Model, amp: f32, periods: f32) -> stock::Trace {
     let s = ((140 + m.pos as i32 - m.trig_row as i32) as f32 / (amp * 35.0)).clamp(-1.0, 1.0);
     let th = s.asin() / core::f32::consts::TAU;
-    let phase = th / periods - (m.trig_px as f32 - 14.0) / 400.0;
+    let phase = th / periods - m.trig_px as f32 / 400.0;
     stock::Trace::sine(amp, periods, phase).shifted(-(m.pos as i32))
 }
 
@@ -354,7 +354,7 @@ pub fn run(out: &str) -> usize {
 
     // Messages over the multimeter page: the rate step, the start of a
     // recording, the power-off question, the firmware install question.
-    for (name, msg, ok) in [("dmm-rate", "MED 600000 counts / 3.2 s", true), ("rec-start", "Recording CSV", true), ("leads", sentinel::LEADS_TOAST, false)] {
+    for (name, msg, ok) in [("dmm-rate", "MED 600000 counts / 3.2 s", true), ("rec-start", "Recording CSV", true)] {
         dmm_page(&Dp { csv: name == "rec-start", ..dp(dcv) });
         dialog::toast(msg, ok);
         ck.check(&format!("manual/{name}"), &DMM_REGIONS);
@@ -614,6 +614,97 @@ pub fn run(out: &str) -> usize {
         ui::func_band(Button::Volt, 0, false, false);
         ck.check_area("manual/combined-band", &screen, true, Some(Bx::new(13, 20, 401, 56)));
         save1(out, "combined-band");
+    }
+
+    // More multimeter states: the status bar with the lock closed and a
+    // Bluetooth host; the extra digit (MED, settled); the auto power-off
+    // warning; A-JACK with its message; AUTO on volts (the warning).
+    {
+        dmm_page(&Dp { csv: true, ..dp(dcv) });
+        ui::status_right(&ui::Status { bt: true, csv: true, ..status_real() });
+        ck.check("manual/status-all", &DMM_REGIONS);
+        save1(out, "status-all");
+        dmm_page(&dp(dcv));
+        ui::status_right(&ui::Status { locked: true, bt: true, ..status_real() });
+        ck.check("manual/status-locked", &DMM_REGIONS);
+        save1(out, "status-locked");
+        let mut r = dcv;
+        r.main = Val { v: 4.81762, dec: 4, unit: "V", ol: false, ext: true };
+        dmm_page(&dp(r));
+        ck.check("manual/dmm-extra", &DMM_REGIONS);
+        save1(out, "dmm-extra");
+        dmm_page(&dp(dcv));
+        dialog::toast("Auto power-off in 30 s", false);
+        ck.check("manual/auto-off", &DMM_REGIONS);
+        save1(out, "auto-off");
+        let mut r = dcv;
+        r.alert = sentinel::Alert::AJack;
+        dmm_page(&dp(r));
+        dialog::toast(sentinel::Alert::AJack.toast(), false);
+        ck.check("manual/danger", &DMM_REGIONS);
+        save1(out, "danger");
+        host::reset(0);
+        ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));
+        ui::wave_button();
+        ck.check_opts("manual/range-v-auto", &page, false);
+        save1(out, "range-v-auto");
+        // Settings 2 with smoothing LOW; Settings 3 with PC can edit asked
+        // for (re-plug pending).
+        host::reset(0);
+        ui::settings(1, &["MED  9.4/s", "LOW", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]);
+        ck.check_opts("manual/settings2-smooth", &page, false);
+        save1(out, "settings2-smooth");
+        host::reset(0);
+        ui::settings(2, &["ON", "ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", ""]);
+        ck.check_opts("manual/settings3-edit", &page, false);
+        save1(out, "settings3-edit");
+    }
+
+    // Every alert badge (A-JACK, LIVE?, OVLD are above).
+    {
+        let f = "\u{b0}F";
+        for (name, r, alert) in [
+            ("alert-aprot", rd(1, val(0.0213, 4, "V"), None, None, false), sentinel::Alert::AProt),
+            ("alert-vjack", rd(8, val(0.000, 3, "mA"), None, None, false), sentinel::Alert::VJack),
+            ("alert-dc", rd(0, val(0.0021, 4, "V"), None, None, false), sentinel::Alert::Dc),
+            ("alert-ac", rd(1, val(0.0123, 4, "V"), None, None, false), sentinel::Alert::Ac),
+            ("alert-fuse", rd(7, val(0.0000, 4, "A"), None, None, false), sentinel::Alert::Fuse),
+        ] {
+            let mut r = r;
+            r.alert = alert;
+            dmm_page(&Dp { rate: r.mode != 0, ..dp(r) });
+            ck.check(&format!("manual/{name}"), &DMM_REGIONS);
+            save1(out, name);
+        }
+        // 100.3 C in F (the stock shows 214.5 F).
+        dmm_page(&Dp { rate: false, label: Some("TC K"), ..dp(rd(15, val(212.5, 1, f), Some(val(77.0, 1, f)), None, false)) });
+        ck.check("manual/dmm-temp-f", &DMM_REGIONS);
+        save1(out, "dmm-temp-f");
+    }
+
+    // Power meter: the current range being found; AC on the mains; the
+    // energy reset question.
+    {
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.power = true;
+        ui::set_power_coup(dmm::pw::COUP_DC);
+        dv.draw_static(Button::Power, 4, true, false);
+        ui::pw::ranging(Some(dmm::Val { v: 12.006, dec: 3, unit: "V", ol: false, ext: false }), "I ranging...", 0);
+        ui::status_right(&status_real());
+        ck.check_opts("manual/power-ranging", &screen, false);
+        save1(out, "power-ranging");
+        let ac = pw_cases().into_iter().find(|c| c.0 == "ac").unwrap().1;
+        let ac = dmm::pw::PowerVals { comp: false, ..ac };
+        pw_page(ac);
+        ck.check("manual/power-ac", &pw_regions(&ac));
+        save1(out, "power-ac");
+        pw_page(ac);
+        dialog::energy_reset();
+        let (x, y, w2, h2) = dialog::BOX;
+        let bx = Bx::new(x as i32, y as i32, w2 as i32, h2 as i32);
+        ck.check_area("manual/energy-reset", &[("screen", Bx::new(0, 0, 480, 320)), ("dialog", bx)], false, Some(bx));
+        save1(out, "energy-reset");
     }
 
     for (k, (n, s)) in &ck.seen {
