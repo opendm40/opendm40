@@ -1889,9 +1889,11 @@ impl Dmm {
         let now = clk.now_ms();
         self.sent.ohm_exit(self.ohm_exit_t.filter(|&t| kind == Kind::CmpV && now < t + sentinel::OHM_EXIT_MAX_MS));
         // Ohm / temperature: A-JACK needs the V side's word (sentinel V_GATE).
-        // AC mV (plain): its own result says how far beyond the range the
-        // input is (sentinel MV_DRV_K), a block late (MV_VGATE_LAG_MS).
-        let mv = self.mode == 2 && !self.acdc;
+        // AC mV: its own result says how far beyond the range the input is
+        // (sentinel MV_DRV_K), a block late (MV_VGATE_LAG_MS). AC+DC mV: the
+        // AC phase is that row and its sentinel; both phases share the run
+        // and the AC phase's verdict (doc 4.13).
+        let mv = self.mode == 2 || (self.acdc && self.mode == 3);
         self.sent.vgate = matches!(self.mode, 10 | 15) || mv;
         self.sent.vlag = if mv { sentinel::MV_VGATE_LAG_MS } else { 0 };
         // The jack check (sentinel JACK CHECK): ohm, continuity, the
