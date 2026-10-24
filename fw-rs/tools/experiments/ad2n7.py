@@ -13,7 +13,7 @@ shift against state 0 in counts and ppm of the level's code, the offset
 shift (0 V) and the gain shift ((d_level - d_0) / code_level), and the
 noise (sd). The supply current is not measured (no readout on the meter).
 
-    /usr/bin/python3 tools/ad2n7.py [-n 20] [--items 0,1,2,3,4] [-o n7.csv]
+    /usr/bin/python3 tools/experiments/ad2n7.py [-n 20] [--items 0,1,2,3,4] [-o n7.csv]
 """
 import argparse
 import csv
@@ -21,7 +21,7 @@ import os
 import sys
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # fw-rs/tools: dm40scpi, mr9270
 sys.path.insert(0, HERE)
 LEVELS = {0: 0.3, 1: 3.0, 2: 24.0, 3: 24.0, 4: 24.0}
 NAMES = ['600 mV', '6 V', '60 V', '600 V', '1000 V']

@@ -1744,7 +1744,7 @@ step detector and a 2 s trace in the scope's BUF: Irms over the first
 
 ## 13. E7: DC-coupled V on AD2 (2026-10-22)
 
-### 13.1 Device test 6.5 (4ff95f7, tools/ad2dcv.py)
+### 13.1 Device test 6.5 (4ff95f7, tools/experiments/ad2dcv.py)
 
 `DBG:AD2:DCV? range,r26,n,flags` (src/ad2exp.rs `dcv_test`) writes the row
 of 1.3 last row: the stock AC V row of the range (CFG_F0: its tap, OP1 on
@@ -1784,7 +1784,7 @@ sd of a mean is ~9); 60 V -160 .. -240 at 0 V growing to -850 at 24 V
 calibrated per range, not on 60 V (level-dependent) or 1000 V (jumps).
 The self-cal does not need it: it reads AD1 alone first.
 
-### 13.2 Datasheet note 7 in the stock DC rows (1ad2943, tools/ad2n7.py)
+### 13.2 Datasheet note 7 in the stock DC rows (1ad2943, tools/experiments/ad2n7.py)
 
 The owner's question: could the DC V "AC?" hint run on AD2 + RMS, enabled
 once with the DC V row and left on, instead of the comparator alternating

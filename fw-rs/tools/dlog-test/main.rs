@@ -376,7 +376,7 @@ fn gen_all(f: &[u8]) -> Option<(Info, Vec<u8>)> {
 
 const SN: usize = 26624;
 
-/// Synthetic 10-bit records (as tools/logcodec-lab/scope.py).
+/// Synthetic 10-bit records (as tools/experiments/logcodec-lab/scope.py).
 fn scope_records() -> Vec<(&'static str, Vec<u16>)> {
     let mut r = Rng(7);
     let mut g = |s: f32| r.gauss() * s;

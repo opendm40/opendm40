@@ -10,10 +10,10 @@ aa51ae5; `DEFAULT_ENABLED = false`, so the device runs the software trigger
 until `DBG:HWTRIG:ENABLE 1`). The script refuses the patched file (its anchors
 are gone). The text below is the wiring as applied. The hooks were compile-checked
 (`-D warnings`, thumbv7em-none-eabihf) against the 847-line scope.rs with
-`hpos`; `tools/hwtrig-check/patch_scope.py` applies H1..H7 mechanically and
+`hpos`; `tools/experiments/hwtrig-check/patch_scope.py` applies H1..H7 mechanically and
 fails if an anchor has moved:
 
-    python3 -I tools/hwtrig-check/patch_scope.py src/scope.rs src/scope.rs
+    python3 -I tools/experiments/hwtrig-check/patch_scope.py src/scope.rs src/scope.rs
 
 Background (what the stock does, verified vs inferred, the DAC map, the
 wire-free calibration) is in the module header of `src/hwtrig.rs` and in

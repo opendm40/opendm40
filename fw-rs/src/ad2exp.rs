@@ -28,7 +28,7 @@
 //!       row); omitted = the row's.
 //!   DBG:AD2:DCV? range,r26,n[,flags]
 //!       Device test 6.5 (the DC-coupled V row, feasibility 1.3 last row /
-//!       E7; host: tools/ad2dcv.py). In DC V only; main.rs first sets the
+//!       E7; host: tools/experiments/ad2dcv.py). In DC V only; main.rs first sets the
 //!       DC V `range` (0..3 = 6 / 60 / 600 / 1000 V, manual), then this
 //!       writes `dcv_row` (the AC V row of the range with SAD2IP = OP1O)
 //!       and runs four phases, n = 1..16 AD1 conversions (R22 0x14, OSR
