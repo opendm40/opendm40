@@ -6,6 +6,10 @@ and the mysku.club review they come from (CTAHOK, 2025-04-25,
 https://mysku.club/blog/aliexpress/103047.html). Datasheets are in
 [datasheets/](datasheets/README.md).
 
+All photos on this page are © CTAHOK (mysku.club review, 2025-04-25), kept
+for reference only and not under this repo's license; sources and details in
+[photos/README.md](photos/README.md).
+
 This page is about hardware only: chips, pins, circuits. Flash layout and boot
 chain: see [fw-rs/docs/native-boot.md](../fw-rs/docs/native-boot.md) (and
 [`fsloader-install-trigger.md`](../fw-rs/docs/fsloader-install-trigger.md), [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md)).
@@ -173,6 +177,14 @@ The same as text:
 
 ### Isolation boundary
 
+![Isolation strip: CA-IS3741HW, LT61 transformers with VPS8504B drivers, optocouplers, relay, HY3131 shield can](photos/dmm-isolation-hy3131-shield-area.jpg)
+
+*The isolation strip: CA-IS3741HW, LT61-117 / LT61-113 with VPS8504B drivers, EL3H7 and "174 F163H" optocouplers, HFD4/3-LS relay, HY3131 shield can, CHA / GEN jacks.*
+
+![Two VPS8504B drivers under the LT61 transformers](photos/isolated-supply-vps8504b-lt61.jpg)
+
+*The two isolated supplies: VPS8504B drivers under the LT61-1xx transformers.*
+
 Verified (owner, 2026-10-24): the DMM domain (HY3131, reference, divider,
 relay, shunts, banana jacks) is galvanically isolated from the MCU domain.
 The reasoning below predates that confirmation; it is kept because it is also
@@ -207,6 +219,10 @@ supply for the scope / generator front end; this page draws both on the
 barrier (photos show both next to the DMM area). See [Unknowns](#unknowns).
 
 ## Main parts
+
+![The opened DM40: main board, shield plate over the DMM area, back cover with battery](photos/opened-case-overview.jpg)
+
+*The case opened: main board with the shield plate over the DMM area (fuse top left), MCU area below; back cover with foil lining and the battery.*
 
 | Function | Part | Status / source |
 |---|---|---|
@@ -243,6 +259,10 @@ Small SOT-23 / SOT-89 / MSOP parts in `charger-tp4056-and-power.jpg`
 "J227") are not identified; they make up the power path and regulators.
 
 ## MCU and clocks
+
+![MCU area of the main board: GD32F427VGT6, SPI flash, crystals, Bluetooth, CA-IS3741HW, USB-C, debug pads](photos/main-board-mcu-gd32f427.jpg)
+
+*MCU area: GD32F427VGT6, SPI flash, 25 MHz crystal, Bluetooth chip with 24 MHz crystal and antenna, CA-IS3741HW, LT61 transformers, USB-C, debug pads.*
 
 - GD32F427VGT6: Cortex-M4F, 1 MB internal flash, 256 KB SRAM as 64 KB TCM
   (0x10000000) + 128 KB SRAM0/1 (0x20000000) + 64 KB ADDSRAM (0x20020000).
@@ -439,6 +459,10 @@ of ~0.3 s ([`fw-rs/docs/acdc-approaches.md`](../fw-rs/docs/acdc-approaches.md), 
 | PE0 / PE1 | shunt MOSFETs: PE0 = 1 -> A (10 mohm), PE1 = 1 -> mA (0.5 ohm), both 0 -> uA (47.5 ohm chain) | the resting state in every non-current mode is both 0 (`power-meter-and-misconnect.md` 4.1) |
 | PC7 | 1 only in the frequency mode (mode 14) | what it switches is unknown |
 
+![HFD4/3-LS relay and a 07D681K varistor](photos/relay-hfd4-and-varistor-closeup.jpg)
+
+*Input network: HFD4/3-LS relay and a 07D681K (680 V) varistor.*
+
 **Input network (HY3131 pins, inferred from the stock rows and scaling):**
 
 - V/ohm input through a 10 M divider with taps: /10 on HY3131 PA7, /100 PA6,
@@ -454,6 +478,10 @@ of ~0.3 s ([`fw-rs/docs/acdc-approaches.md`](../fw-rs/docs/acdc-approaches.md), 
 - mV / thermocouple: HY3131 PB0 through OP1 x10. Cold junction = the HY3131
   die sensor.
 - AC V: OP1 output -> external coupling capacitor -> HY3131 PB4 -> AD2.
+
+![DMM input area: relay, varistors, R500 shunt, wire shunt, fuse, COM and A jacks](photos/input-jacks-shunts-fuse-relay.jpg)
+
+*DMM input area under the shield plate: relay, input resistors and varistors, 0.5 ohm "R500" shunt, wire shunt between the jacks, fuse in clips, COM and A/mA/uA jacks.*
 
 **Current path.** One A jack for A / mA / uA (silkscreen "A/mA/uA"); the
 MOSFETs switch the range, not the user (owner report #26977). Series chain
@@ -525,6 +553,14 @@ seen by the meter (the A side of the fuse has no path into the chip); fw-rs's
   0.5..3 V.
 
 ## Power and battery
+
+![Power section: TP4056 charger, VBAT connector, USB-C, regulators](photos/charger-tp4056-and-power.jpg)
+
+*Power section: TP4056 charger, VBAT connector, USB-C, unidentified regulators, 2R2 inductor.*
+
+![Battery label LN425272 3.7 V 2000 mAh](photos/battery-ln425272-label.jpg)
+
+*Battery label: LN425272, 3.7 V, 2000 mAh, 7.4 Wh, made 2025-02-10.*
 
 - Battery: 1-cell Li-ion polymer LN425272, 2000 mAh, with protection PCB,
   2-pin connector "VBAT" (photo). Runtime 10..15 h (owner reports; review:
